@@ -204,42 +204,48 @@ export default function Students() {
         // 更新
         if (USE_MOCK_DATA) {
           // 本地模式：更新 localStorage 和 store
-          const updatedStudents = students.map(s => 
+          const updatedStudents = students.map(s =>
             s.id === editingStudent.id ? { ...s, ...studentData, updated_at: new Date().toISOString() } : s
           )
           saveMockStudents(updatedStudents)
           setStudents(updatedStudents)
           updateStudentInStore(editingStudent.id, studentData)
-          
+
           if (currentStudent?.id === editingStudent.id) {
             setCurrentStudent({ ...currentStudent, ...studentData })
           }
         } else {
+          // Supabase 模式
           await updateStudent(editingStudent.id, studentData)
           if (currentStudent?.id === editingStudent.id) {
             setCurrentStudent({ ...currentStudent, ...studentData })
           }
+          // 重新加载学生列表
+          await loadStudents()
         }
         Toast.show({ icon: 'success', content: '更新成功' })
       } else {
         // 创建
-        const newStudent = {
-          ...studentData,
-          id: `student-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`,
-          created_at: new Date().toISOString()
-        }
-        
         if (USE_MOCK_DATA) {
           // 本地模式：保存到 localStorage 和 store
+          const newStudent = {
+            ...studentData,
+            id: `student-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`,
+            created_at: new Date().toISOString()
+          }
           const newStudents = [newStudent, ...students]
           saveMockStudents(newStudents)
           setStudents(newStudents)
           addStudentInStore(newStudent)
+          setCurrentStudent(newStudent)
         } else {
+          // Supabase 模式
           const created = await createStudent(studentData)
           addStudentInStore(created)
+          setCurrentStudent(created)
+          // 重新加载学生列表
+          await loadStudents()
         }
-        setCurrentStudent(newStudent)
         Toast.show({ icon: 'success', content: '添加成功' })
       }
       
@@ -275,11 +281,13 @@ export default function Students() {
               setCurrentStudent(null)
             }
           } else {
+            // Supabase 模式
             await deleteStudent(student.id)
             if (currentStudent?.id === student.id) {
               setCurrentStudent(null)
             }
-            loadStudents()
+            // 重新加载学生列表
+            await loadStudents()
           }
           Toast.show({ icon: 'success', content: '删除成功' })
         } catch (error) {
