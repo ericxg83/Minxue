@@ -96,7 +96,8 @@ export default function Students() {
       }
 
       const data = await getStudents()
-      setStudents(data)
+      console.log('从 Supabase 加载的学生数据:', data)
+      setStudents(data || [])
     } catch (error) {
       console.error('加载失败:', error)
       Toast.show({
@@ -240,9 +241,13 @@ export default function Students() {
           setCurrentStudent(newStudent)
         } else {
           // Supabase 模式
+          console.log('正在创建学生:', studentData)
           const created = await createStudent(studentData)
-          addStudentInStore(created)
-          setCurrentStudent(created)
+          console.log('Supabase 返回的创建结果:', created)
+          if (created) {
+            addStudentInStore(created)
+            setCurrentStudent(created)
+          }
           // 重新加载学生列表
           await loadStudents()
         }
