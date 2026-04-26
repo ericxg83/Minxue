@@ -150,23 +150,36 @@ export const recognizeQuestions = async (imageBase64, studentId, taskId, retryCo
 
     const result = JSON.parse(jsonStr)
 
-    // 为每个题目添加额外信息
-    const questions = result.questions?.map((q, index) => ({
-      id: `q-${taskId}-${index}`,
-      task_id: taskId,
-      student_id: studentId,
-      content: q.content || '',
-      options: q.options || [],
-      answer: q.answer || '',
-      student_answer: q.student_answer || '',
-      is_correct: q.is_correct || false,
-      question_type: q.question_type || 'answer',
-      subject: q.subject || '数学',
-      status: q.is_correct ? 'correct' : 'wrong',
-      confidence: q.confidence || 0,
-      analysis: q.analysis || '',
-      created_at: new Date().toISOString()
-    })) || []
+    // 为每个题目添加额外信息，并校验答案正确性
+    const questions = result.questions?.map((q, index) => {
+      // 后处理：校验 is_correct 的准确性
+      let isCorrect = q.is_correct || false
+      
+      // 如果是选择题，进行额外的答案比对校验
+      if (q.question_type === 'choice' && q.answer && q.student_answer) {
+        const normalizedAnswer = String(q.answer).trim().toUpperCase()
+        const normalizedStudentAnswer = String(q.student_answer).trim().toUpperCase()
+        // 重新计算 is_correct，确保准确性
+        isCorrect = normalizedAnswer === normalizedStudentAnswer
+      }
+      
+      return {
+        id: `q-${taskId}-${index}`,
+        task_id: taskId,
+        student_id: studentId,
+        content: q.content || '',
+        options: q.options || [],
+        answer: q.answer || '',
+        student_answer: q.student_answer || '',
+        is_correct: isCorrect,
+        question_type: q.question_type || 'answer',
+        subject: q.subject || '数学',
+        status: isCorrect ? 'correct' : 'wrong',
+        confidence: q.confidence || 0,
+        analysis: q.analysis || '',
+        created_at: new Date().toISOString()
+      }
+    }) || []
 
     // 记录成功日志
     logRecognition({

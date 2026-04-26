@@ -275,14 +275,14 @@ export default function Processing() {
 
   // 上传单个文件 - 只创建任务，不等待AI识别
   const uploadFile = async (file) => {
-    // 创建本地预览 URL
-    const imageUrl = URL.createObjectURL(file)
+    // 将图片转换为 base64 以便持久化存储
+    const imageBase64 = await fileToBase64(file)
 
     // 创建新任务
     const newTask = {
       id: `task-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`,
       student_id: currentStudent.id,
-      image_url: imageUrl,
+      image_url: imageBase64,  // 使用 base64 存储，确保刷新后图片不丢失
       original_name: file.name || `照片_${dayjs().format('YYYY-MM-DD_HH-mm-ss')}.jpg`,
       status: 'processing',
       result: { progress: 0 },
@@ -300,6 +300,16 @@ export default function Processing() {
 
     // 真实 AI 识别处理逻辑 - 在后台异步执行，不阻塞上传
     processImageAsync(newTask.id, file)
+  }
+
+  // 将文件转换为 base64
+  const fileToBase64 = (file) => {
+    return new Promise((resolve, reject) => {
+      const reader = new FileReader()
+      reader.readAsDataURL(file)
+      reader.onload = () => resolve(reader.result)
+      reader.onerror = (error) => reject(error)
+    })
   }
 
   // 后台异步处理图片识别

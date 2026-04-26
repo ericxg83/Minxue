@@ -6,7 +6,8 @@ import {
   Dialog,
   SpinLoading,
   Checkbox,
-  Badge
+  Badge,
+  SwipeAction
 } from 'antd-mobile'
 import { RightOutline } from 'antd-mobile-icons'
 import { useStudentStore, useTaskStore, useWrongQuestionStore, usePendingQuestionStore, useUIStore } from '../../store'
@@ -192,6 +193,59 @@ export default function Pending() {
     setSelectedIds(filteredQuestions.map(q => q.id))
   }
 
+  // 将单个题目加入错题本
+  const addSingleToWrongBook = async (question) => {
+    try {
+      if (USE_MOCK_DATA) {
+        // Mock 数据模式：直接添加到错题本 store
+        const wrongQuestion = {
+          id: `wq-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`,
+          student_id: currentStudent.id,
+          question_id: question.id,
+          question: question,
+          status: 'pending',
+          error_count: 1,
+          subject: question.subject || '数学',
+          category: '其他',
+          added_at: new Date().toISOString(),
+          last_wrong_at: new Date().toISOString(),
+          created_at: new Date().toISOString()
+        }
+
+        // 添加到错题本 store
+        addWrongQuestion(wrongQuestion)
+
+        // 记录已加入错题本的题目 ID 到 localStorage
+        const addedIds = getAddedToWrongBookIds()
+        addedIds.add(question.id)
+        saveAddedToWrongBookIds(addedIds)
+
+        // 从待确认列表中移除已添加的题目
+        setQuestions(questions.filter(q => q.id !== question.id))
+
+        // 同时更新 pendingQuestions store
+        setPendingQuestions(pendingQuestions.filter(q => q.id !== question.id))
+      } else {
+        // 真实 API 模式
+        await addWrongQuestions(currentStudent.id, [question.id])
+
+        // 添加到本地存储
+        addWrongQuestion(question)
+      }
+
+      Toast.show({
+        icon: 'success',
+        content: '已加入错题本'
+      })
+    } catch (error) {
+      console.error('添加失败:', error)
+      Toast.show({
+        icon: 'fail',
+        content: '添加失败'
+      })
+    }
+  }
+
   // 批量加入错题本
   const handleAddToWrongBook = async () => {
     if (selectedIds.length === 0) {
@@ -203,12 +257,12 @@ export default function Pending() {
       content: `确定将选中的 ${selectedIds.length} 道题加入错题本？`,
       onConfirm: async () => {
         setLoading(true)
-        
+
         try {
           if (USE_MOCK_DATA) {
             // Mock 数据模式：直接添加到错题本 store
             const selectedQuestions = questions.filter(q => selectedIds.includes(q.id))
-            
+
             // 转换为错题本格式
             const wrongQuestions = selectedQuestions.map(q => ({
               id: `wq-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`,
@@ -223,36 +277,36 @@ export default function Pending() {
               last_wrong_at: new Date().toISOString(),
               created_at: new Date().toISOString()
             }))
-            
+
             // 批量添加到错题本 store
             addMultipleToStore(wrongQuestions)
-            
+
             // 记录已加入错题本的题目 ID 到 localStorage
             const addedIds = getAddedToWrongBookIds()
             selectedIds.forEach(id => addedIds.add(id))
             saveAddedToWrongBookIds(addedIds)
-            
+
             // 从待确认列表中移除已添加的题目
             const remainingQuestions = questions.filter(q => !selectedIds.includes(q.id))
             setQuestions(remainingQuestions)
-            
+
             // 同时更新 pendingQuestions store
             const remainingPendingQuestions = pendingQuestions.filter(q => !selectedIds.includes(q.id))
             setPendingQuestions(remainingPendingQuestions)
           } else {
             // 真实 API 模式
             await addWrongQuestions(currentStudent.id, selectedIds)
-            
+
             // 添加到本地存储
             const selectedQuestions = questions.filter(q => selectedIds.includes(q.id))
             addMultipleToStore(selectedQuestions)
           }
-          
+
           Toast.show({
             icon: 'success',
             content: `成功添加 ${selectedIds.length} 道题到错题本`
           })
-          
+
           setSelectedIds([])
         } catch (error) {
           console.error('添加失败:', error)
@@ -538,8 +592,24 @@ export default function Pending() {
         ) : (
           <div style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
             {filteredQuestions.map((question, index) => (
-              <div
+              <SwipeAction
                 key={question.id}
+                rightActions={[
+                  {
+                    key: 'addToWrongBook',
+                    text: '加入错题本',
+                    color: APPLE_COLORS.primary,
+                    onClick: () => {
+                      Dialog.confirm({
+                        content: '确定将这道题加入错题本？',
+                        confirmText: '加入',
+                        onConfirm: () => addSingleToWrongBook(question)
+                      })
+                    }
+                  }
+                ]}
+              >
+              <div
                 style={{
                   background: APPLE_COLORS.card,
                   borderRadius: '12px',
@@ -654,6 +724,7 @@ export default function Pending() {
                   </Button>
                 </div>
               </div>
+              </SwipeAction>
             ))}
           </div>
         )}

@@ -11,12 +11,13 @@ import {
 import { useStudentStore, useUIStore } from '../../store'
 import { getStudents, createStudent, updateStudent, deleteStudent } from '../../services/supabaseService'
 import { uploadImage } from '../../services/supabaseService'
+import ImageCropper from '../../components/ImageCropper'
 
 // 年级选项
 const GRADE_OPTIONS = ['一年级', '二年级', '三年级', '四年级', '五年级', '六年级', '初一', '初二', '初三', '高一', '高二', '高三']
 
 // 使用本地模拟数据模式（因为 Supabase 连接可能不可用）
-const USE_MOCK_DATA = true
+const USE_MOCK_DATA = false
 
 // 本地存储 key
 const STORAGE_KEY = 'mock-students'
@@ -48,13 +49,14 @@ export default function Students() {
   const [searchKeyword, setSearchKeyword] = useState('')
   const [showAddPage, setShowAddPage] = useState(false)
   const [editingStudent, setEditingStudent] = useState(null)
-  const [formData, setFormData] = useState({ 
-    name: '', 
-    grade: '', 
-    class: '', 
+  const [formData, setFormData] = useState({
+    name: '',
+    grade: '',
+    class: '',
     remark: '',
-    avatar: '' 
+    avatar: ''
   })
+  const [cropperImage, setCropperImage] = useState(null)  // 裁剪器显示的图片
   const fileInputRef = useRef(null)
 
   // 加载学生列表
@@ -145,28 +147,36 @@ export default function Students() {
     setShowAddPage(true)
   }
 
-  // 处理头像上传
+  // 处理头像上传 - 先打开裁剪器
   const handleAvatarUpload = async (e) => {
     const file = e.target.files[0]
     if (!file) return
 
     try {
-      if (USE_MOCK_DATA) {
-        // 本地模式下，使用 FileReader 创建 base64 图片
-        const reader = new FileReader()
-        reader.onload = (event) => {
-          setFormData({ ...formData, avatar: event.target.result })
-          Toast.show({ icon: 'success', content: '头像上传成功' })
-        }
-        reader.readAsDataURL(file)
-        return
+      // 读取文件为 base64，用于裁剪器显示
+      const reader = new FileReader()
+      reader.onload = (event) => {
+        setCropperImage(event.target.result)
       }
-
-      const avatarUrl = await uploadImage(file, 'avatars')
-      setFormData({ ...formData, avatar: avatarUrl })
-      Toast.show({ icon: 'success', content: '头像上传成功' })
+      reader.readAsDataURL(file)
     } catch (error) {
-      Toast.show({ icon: 'fail', content: '头像上传失败' })
+      Toast.show({ icon: 'fail', content: '图片读取失败' })
+    }
+  }
+
+  // 裁剪完成后的处理
+  const handleCropComplete = async (croppedImage) => {
+    setCropperImage(null)
+    setFormData({ ...formData, avatar: croppedImage })
+    Toast.show({ icon: 'success', content: '头像设置成功' })
+  }
+
+  // 取消裁剪
+  const handleCropCancel = () => {
+    setCropperImage(null)
+    // 清空文件输入，允许再次选择同一文件
+    if (fileInputRef.current) {
+      fileInputRef.current.value = ''
     }
   }
 
@@ -615,9 +625,9 @@ export default function Students() {
       {/* 删除按钮（编辑模式） */}
       {editingStudent && (
         <div style={{ padding: '16px', marginTop: '24px' }}>
-          <Button 
-            block 
-            color="danger" 
+          <Button
+            block
+            color="danger"
             fill="outline"
             onClick={(e) => handleDelete(editingStudent, e)}
           >
@@ -625,8 +635,17 @@ export default function Students() {
           </Button>
         </div>
       )}
+
+      {/* 头像裁剪器 */}
+      {cropperImage && (
+        <ImageCropper
+          image={cropperImage}
+          onCropComplete={handleCropComplete}
+          onCancel={handleCropCancel}
+        />
+      )}
     </div>
-  )
+  )}
 
   return showAddPage ? renderAddPage() : renderStudentList()
 }

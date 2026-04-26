@@ -192,43 +192,51 @@ export const usePendingQuestionStore = create(
 )
 
 // 试卷状态管理
-export const useExamStore = create((set, get) => ({
-  // 试卷列表
-  exams: [],
-  
-  // 已初始化的学生ID集合
-  initializedStudents: new Set(),
-  
-  // 设置试卷列表
-  setExams: (exams) => set({ exams }),
-  
-  // 添加试卷
-  addExam: (exam) => set((state) => ({
-    exams: [exam, ...state.exams]
-  })),
-  
-  // 更新试卷状态
-  updateExamStatus: (examId, status, gradedAt = null) => set((state) => ({
-    exams: state.exams.map(e => 
-      e.id === examId ? { ...e, status, graded_at: gradedAt || new Date().toISOString() } : e
-    )
-  })),
-  
-  // 删除试卷
-  removeExam: (examId) => set((state) => ({
-    exams: state.exams.filter(e => e.id !== examId)
-  })),
-  
-  // 标记学生已初始化
-  markStudentInitialized: (studentId) => set((state) => ({
-    initializedStudents: new Set([...state.initializedStudents, studentId])
-  })),
-  
-  // 检查学生是否已初始化
-  isStudentInitialized: (studentId) => {
-    return get().initializedStudents.has(studentId)
-  }
-}))
+export const useExamStore = create(
+  persist(
+    (set, get) => ({
+      // 试卷列表
+      exams: [],
+      
+      // 已初始化的学生ID集合
+      initializedStudents: new Set(),
+      
+      // 设置试卷列表
+      setExams: (exams) => set({ exams }),
+      
+      // 添加试卷
+      addExam: (exam) => set((state) => ({
+        exams: [exam, ...state.exams]
+      })),
+      
+      // 更新试卷状态
+      updateExamStatus: (examId, status, gradedAt = null) => set((state) => ({
+        exams: state.exams.map(e => 
+          e.id === examId ? { ...e, status, graded_at: gradedAt || new Date().toISOString() } : e
+        )
+      })),
+      
+      // 删除试卷
+      removeExam: (examId) => set((state) => ({
+        exams: state.exams.filter(e => e.id !== examId)
+      })),
+      
+      // 标记学生已初始化
+      markStudentInitialized: (studentId) => set((state) => ({
+        initializedStudents: new Set([...state.initializedStudents, studentId])
+      })),
+      
+      // 检查学生是否已初始化
+      isStudentInitialized: (studentId) => {
+        return get().initializedStudents.has(studentId)
+      }
+    }),
+    {
+      name: 'exam-storage',
+      partialize: (state) => ({ exams: state.exams })
+    }
+  )
+)
 
 // 全局 UI 状态管理
 export const useUIStore = create((set) => ({

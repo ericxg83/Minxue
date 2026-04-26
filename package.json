@@ -10,16 +10,17 @@
     "preview": "vite preview --host --port $PORT"
   },
   "dependencies": {
-    "react": "^18.3.1",
-    "react-dom": "^18.3.1",
-    "react-router-dom": "^6.26.1",
-    "antd-mobile": "^5.37.1",
     "@supabase/supabase-js": "^2.45.2",
+    "antd-mobile": "^5.37.1",
     "axios": "^1.7.5",
     "dayjs": "^1.11.13",
-    "qrcode.react": "^4.0.1",
     "html2canvas": "^1.4.1",
     "jspdf": "^2.5.1",
+    "qrcode.react": "^4.0.1",
+    "react": "^18.3.1",
+    "react-dom": "^18.3.1",
+    "react-easy-crop": "^5.5.7",
+    "react-router-dom": "^6.26.1",
     "zustand": "^4.5.5"
   },
   "devDependencies": {
