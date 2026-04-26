@@ -4,13 +4,20 @@ import { supabase, TABLES } from '../config/supabase'
 
 // 获取所有学生
 export const getStudents = async () => {
+  console.log('正在从 Supabase 获取学生列表...')
+  
   const { data, error } = await supabase
     .from(TABLES.STUDENTS)
     .select('*')
     .order('created_at', { ascending: false })
   
-  if (error) throw error
-  return data
+  if (error) {
+    console.error('Supabase 获取学生列表错误:', error)
+    throw error
+  }
+  
+  console.log('Supabase 返回的学生数据:', data)
+  return data || []
 }
 
 // 根据ID获取学生
@@ -27,16 +34,34 @@ export const getStudentById = async (id) => {
 
 // 创建学生
 export const createStudent = async (studentData) => {
+  console.log('Supabase createStudent 接收到的数据:', studentData)
+  
+  // 清理数据，移除可能导致问题的字段
+  const cleanData = {
+    name: studentData.name,
+    grade: studentData.grade || null,
+    class: studentData.class || null,
+    remark: studentData.remark || null,
+    avatar: studentData.avatar || null
+  }
+  
+  console.log('清理后的数据:', cleanData)
+  
   const { data, error } = await supabase
     .from(TABLES.STUDENTS)
     .insert([{
-      ...studentData,
+      ...cleanData,
       created_at: new Date().toISOString()
     }])
     .select()
     .single()
   
-  if (error) throw error
+  if (error) {
+    console.error('Supabase 创建学生错误:', error)
+    throw error
+  }
+  
+  console.log('Supabase 创建学生成功:', data)
   return data
 }
 

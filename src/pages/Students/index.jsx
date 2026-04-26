@@ -257,7 +257,8 @@ export default function Students() {
       setShowAddPage(false)
     } catch (error) {
       console.error('保存失败:', error)
-      Toast.show({ icon: 'fail', content: '保存失败，请重试' })
+      const errorMessage = error?.message || error?.error?.message || '保存失败，请重试'
+      Toast.show({ icon: 'fail', content: errorMessage })
     } finally {
       setLoading(false)
     }
