@@ -645,7 +645,7 @@ export default function Students() {
         />
       )}
     </div>
-  )}
+  )
 
   return showAddPage ? renderAddPage() : renderStudentList()
 }
