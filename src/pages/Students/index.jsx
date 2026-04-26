@@ -228,6 +228,7 @@ export default function Students() {
         Toast.show({ icon: 'success', content: '更新成功' })
       } else {
         // 创建
+        console.log('USE_MOCK_DATA 值:', USE_MOCK_DATA, '准备创建学生')
         if (USE_MOCK_DATA) {
           // 本地模式：保存到 localStorage 和 store
           const newStudent = {
@@ -242,15 +243,21 @@ export default function Students() {
           setCurrentStudent(newStudent)
         } else {
           // Supabase 模式
+          console.log('进入 Supabase 创建学生流程')
           console.log('正在创建学生:', studentData)
-          const created = await createStudent(studentData)
-          console.log('Supabase 返回的创建结果:', created)
-          if (created) {
-            addStudentInStore(created)
-            setCurrentStudent(created)
+          try {
+            const created = await createStudent(studentData)
+            console.log('Supabase 返回的创建结果:', created)
+            if (created) {
+              addStudentInStore(created)
+              setCurrentStudent(created)
+            }
+            // 重新加载学生列表
+            await loadStudents()
+          } catch (err) {
+            console.error('创建学生时出错:', err)
+            throw err
           }
-          // 重新加载学生列表
-          await loadStudents()
         }
         Toast.show({ icon: 'success', content: '添加成功' })
       }

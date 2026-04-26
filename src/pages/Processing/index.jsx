@@ -152,7 +152,6 @@ export default function Processing() {
 
       // 从 Supabase 加载任务数据
       console.log('从 Supabase 加载任务数据...')
-      console.log('当前学生ID:', currentStudent.id, '类型:', typeof currentStudent.id)
       try {
         const tasksData = await getTasksByStudent(currentStudent.id)
         console.log('Supabase 返回的任务数据:', tasksData)
@@ -168,7 +167,7 @@ export default function Processing() {
         }
       } catch (error) {
         console.error('从 Supabase 加载任务失败:', error)
-        console.error('错误详情:', JSON.stringify(error, null, 2))
+        console.error('错误详情:', error?.message, error?.code, error?.details)
       }
       
       // 标记该学生已初始化
