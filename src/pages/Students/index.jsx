@@ -98,7 +98,13 @@ export default function Students() {
 
       const data = await getStudents()
       console.log('从 Supabase 加载的学生数据:', data)
-      setStudents(data || [])
+      console.log('Supabase 返回的学生数量:', data?.length || 0)
+      if (data && data.length > 0) {
+        setStudents(data)
+      } else {
+        console.warn('Supabase 中没有学生数据，使用本地 store 数据')
+        // 如果 Supabase 没有数据，保留当前 store 中的数据
+      }
     } catch (error) {
       console.error('加载失败:', error)
       Toast.show({
