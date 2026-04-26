@@ -17,7 +17,8 @@ import ImageCropper from '../../components/ImageCropper'
 const GRADE_OPTIONS = ['一年级', '二年级', '三年级', '四年级', '五年级', '六年级', '初一', '初二', '初三', '高一', '高二', '高三']
 
 // 使用本地模拟数据模式（因为 Supabase 连接可能不可用）
-const USE_MOCK_DATA = false
+// 优先级：环境变量 > 代码默认值
+const USE_MOCK_DATA = import.meta.env.VITE_USE_MOCK_DATA === 'true' || false
 
 // 本地存储 key
 const STORAGE_KEY = 'mock-students'
