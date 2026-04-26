@@ -1,0 +1,21 @@
+# Render 部署配置
+# 部署为 Static Site（纯前端）
+
+services:
+  - type: static
+    name: minxue-app-v3
+    runtime: static
+    buildCommand: npm install && npm run build
+    staticPublishPath: ./dist
+    # 环境变量会在 Render 控制台中设置
+    envVars:
+      - key: NODE_ENV
+        value: production
+    # 路由规则：支持前端路由（React Router）
+    routes:
+      - type: rewrite
+        source: /*
+        destination: /index.html
+    # 自定义域名（可选）
+    # domains:
+    #   - minxue.yourdomain.com

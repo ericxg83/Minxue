@@ -1,0 +1,309 @@
+import { supabase, TABLES } from '../config/supabase'
+
+// ==================== 学生相关操作 ====================
+
+// 获取所有学生
+export const getStudents = async () => {
+  const { data, error } = await supabase
+    .from(TABLES.STUDENTS)
+    .select('*')
+    .order('created_at', { ascending: false })
+  
+  if (error) throw error
+  return data
+}
+
+// 根据ID获取学生
+export const getStudentById = async (id) => {
+  const { data, error } = await supabase
+    .from(TABLES.STUDENTS)
+    .select('*')
+    .eq('id', id)
+    .single()
+  
+  if (error) throw error
+  return data
+}
+
+// 创建学生
+export const createStudent = async (studentData) => {
+  const { data, error } = await supabase
+    .from(TABLES.STUDENTS)
+    .insert([{
+      ...studentData,
+      created_at: new Date().toISOString()
+    }])
+    .select()
+    .single()
+  
+  if (error) throw error
+  return data
+}
+
+// 更新学生
+export const updateStudent = async (id, updates) => {
+  const { data, error } = await supabase
+    .from(TABLES.STUDENTS)
+    .update({
+      ...updates,
+      updated_at: new Date().toISOString()
+    })
+    .eq('id', id)
+    .select()
+    .single()
+  
+  if (error) throw error
+  return data
+}
+
+// 删除学生
+export const deleteStudent = async (id) => {
+  const { error } = await supabase
+    .from(TABLES.STUDENTS)
+    .delete()
+    .eq('id', id)
+  
+  if (error) throw error
+  return true
+}
+
+// ==================== 任务相关操作 ====================
+
+// 获取学生的所有任务
+export const getTasksByStudent = async (studentId) => {
+  const { data, error } = await supabase
+    .from(TABLES.TASKS)
+    .select('*')
+    .eq('student_id', studentId)
+    .order('created_at', { ascending: false })
+  
+  if (error) throw error
+  return data
+}
+
+// 创建任务
+export const createTask = async (taskData) => {
+  const { data, error } = await supabase
+    .from(TABLES.TASKS)
+    .insert([{
+      ...taskData,
+      status: 'pending',
+      created_at: new Date().toISOString()
+    }])
+    .select()
+    .single()
+  
+  if (error) throw error
+  return data
+}
+
+// 更新任务状态
+export const updateTaskStatus = async (taskId, status, result = null) => {
+  const updates = {
+    status,
+    updated_at: new Date().toISOString()
+  }
+  if (result) updates.result = result
+  
+  const { data, error } = await supabase
+    .from(TABLES.TASKS)
+    .update(updates)
+    .eq('id', taskId)
+    .select()
+    .single()
+  
+  if (error) throw error
+  return data
+}
+
+// ==================== 题目相关操作 ====================
+
+// 获取任务的所有题目
+export const getQuestionsByTask = async (taskId) => {
+  const { data, error } = await supabase
+    .from(TABLES.QUESTIONS)
+    .select('*')
+    .eq('task_id', taskId)
+    .order('created_at', { ascending: true })
+  
+  if (error) throw error
+  return data
+}
+
+// 批量创建题目
+export const createQuestions = async (questions) => {
+  const questionsWithTime = questions.map(q => ({
+    ...q,
+    created_at: new Date().toISOString()
+  }))
+  
+  const { data, error } = await supabase
+    .from(TABLES.QUESTIONS)
+    .insert(questionsWithTime)
+    .select()
+  
+  if (error) throw error
+  return data
+}
+
+// 更新题目
+export const updateQuestion = async (id, updates) => {
+  const { data, error } = await supabase
+    .from(TABLES.QUESTIONS)
+    .update({
+      ...updates,
+      updated_at: new Date().toISOString()
+    })
+    .eq('id', id)
+    .select()
+    .single()
+  
+  if (error) throw error
+  return data
+}
+
+// ==================== 错题本相关操作 ====================
+
+// 获取学生的所有错题
+export const getWrongQuestionsByStudent = async (studentId) => {
+  const { data, error } = await supabase
+    .from(TABLES.WRONG_QUESTIONS)
+    .select(`
+      *,
+      question:question_id (*)
+    `)
+    .eq('student_id', studentId)
+    .order('added_at', { ascending: false })
+  
+  if (error) throw error
+  return data
+}
+
+// 添加错题
+export const addWrongQuestion = async (studentId, questionId) => {
+  const { data, error } = await supabase
+    .from(TABLES.WRONG_QUESTIONS)
+    .insert([{
+      student_id: studentId,
+      question_id: questionId,
+      status: 'pending',
+      added_at: new Date().toISOString()
+    }])
+    .select()
+    .single()
+  
+  if (error) throw error
+  return data
+}
+
+// 批量添加错题
+export const addWrongQuestions = async (studentId, questionIds) => {
+  const entries = questionIds.map(questionId => ({
+    student_id: studentId,
+    question_id: questionId,
+    status: 'pending',
+    added_at: new Date().toISOString()
+  }))
+  
+  const { data, error } = await supabase
+    .from(TABLES.WRONG_QUESTIONS)
+    .insert(entries)
+    .select()
+  
+  if (error) throw error
+  return data
+}
+
+// 更新错题状态
+export const updateWrongQuestionStatus = async (id, status) => {
+  const { data, error } = await supabase
+    .from(TABLES.WRONG_QUESTIONS)
+    .update({
+      status,
+      updated_at: new Date().toISOString()
+    })
+    .eq('id', id)
+    .select()
+    .single()
+  
+  if (error) throw error
+  return data
+}
+
+// 删除错题
+export const deleteWrongQuestion = async (id) => {
+  const { error } = await supabase
+    .from(TABLES.WRONG_QUESTIONS)
+    .delete()
+    .eq('id', id)
+  
+  if (error) throw error
+  return true
+}
+
+// ==================== 练习记录相关操作 ====================
+
+// 创建练习记录
+export const createTrainingLog = async (studentId, questionId) => {
+  const { data, error } = await supabase
+    .from(TABLES.TRAINING_LOGS)
+    .insert([{
+      student_id: studentId,
+      question_id: questionId,
+      status: 'pending',
+      created_at: new Date().toISOString()
+    }])
+    .select()
+    .single()
+  
+  if (error) throw error
+  return data
+}
+
+// 更新练习结果
+export const updateTrainingResult = async (id, result) => {
+  const { data, error } = await supabase
+    .from(TABLES.TRAINING_LOGS)
+    .update({
+      result,
+      status: 'done',
+      updated_at: new Date().toISOString()
+    })
+    .eq('id', id)
+    .select()
+    .single()
+  
+  if (error) throw error
+  return data
+}
+
+// ==================== 文件上传相关操作 ====================
+
+// 上传图片到 Storage
+export const uploadImage = async (file, path) => {
+  const fileExt = file.name.split('.').pop()
+  const fileName = `${Math.random().toString(36).substring(2)}.${fileExt}`
+  const filePath = `${path}/${fileName}`
+  
+  const { error: uploadError } = await supabase.storage
+    .from('homework-images')
+    .upload(filePath, file)
+  
+  if (uploadError) throw uploadError
+  
+  const { data: { publicUrl } } = supabase.storage
+    .from('homework-images')
+    .getPublicUrl(filePath)
+  
+  return publicUrl
+}
+
+// 删除图片
+export const deleteImage = async (path) => {
+  const { error } = await supabase.storage
+    .from('homework-images')
+    .remove([path])
+  
+  if (error) throw error
+  return true
+}
