@@ -150,8 +150,24 @@ export default function Processing() {
         return
       }
 
-      // 不使用 Supabase，直接使用本地数据
-      console.log('使用本地数据，跳过 Supabase 加载')
+      // 从 Supabase 加载任务数据
+      console.log('从 Supabase 加载任务数据...')
+      try {
+        const tasksData = await getTasksByStudent(currentStudent.id)
+        console.log('Supabase 返回的任务数据:', tasksData)
+        
+        if (tasksData && tasksData.length > 0) {
+          // 合并现有任务和从 Supabase 加载的任务
+          const existingTaskIds = new Set(tasks.map(t => t.id))
+          const newTasks = tasksData.filter(t => !existingTaskIds.has(t.id))
+          
+          if (newTasks.length > 0) {
+            setTasks([...tasks, ...newTasks])
+          }
+        }
+      } catch (error) {
+        console.error('从 Supabase 加载任务失败:', error)
+      }
       
       // 标记该学生已初始化
       setInitializedStudents(prev => new Set([...prev, currentStudent.id]))
