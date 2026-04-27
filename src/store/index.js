@@ -35,7 +35,33 @@ export const useStudentStore = create(
       }))
     }),
     {
-      name: 'student-storage'
+      name: 'student-storage',
+      // 自定义存储逻辑，过滤掉无效的 mock 数据
+      partialize: (state) => ({
+        currentStudent: state.currentStudent,
+        students: state.students
+      }),
+      // 加载时过滤掉无效的 mock 数据（ID 不是 UUID 格式的）
+      onRehydrateStorage: () => (state) => {
+        if (state) {
+          // 过滤掉 ID 不是 UUID 格式的学生（mock 数据）
+          const validStudents = state.students.filter(s => {
+            const isValidUUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(s.id)
+            return isValidUUID
+          })
+          
+          // 如果当前选中的学生也是无效的，重置为 null
+          const isCurrentValid = state.currentStudent && 
+            /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(state.currentStudent.id)
+          
+          state.students = validStudents
+          if (!isCurrentValid) {
+            state.currentStudent = null
+          }
+          
+          console.log('Store 重新加载，过滤后的学生数量:', validStudents.length)
+        }
+      }
     }
   )
 )
