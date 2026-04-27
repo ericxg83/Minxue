@@ -12,7 +12,7 @@ import { useStudentStore, usePendingQuestionStore, useUIStore } from '../../stor
 import { mockQuestions } from '../../data/mockData'
 
 // 使用测试数据
-const USE_MOCK_DATA = true
+const USE_MOCK_DATA = false
 
 export default function QuestionEdit({ questionId, onClose, onSave }) {
   const { currentStudent } = useStudentStore()

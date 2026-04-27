@@ -13,7 +13,7 @@ import { Toast } from 'antd-mobile'
 import { mockStudents, mockTasks, mockQuestions, mockWrongQuestions } from './data/mockData'
 
 // 使用测试数据开关
-const USE_MOCK_DATA = true
+const USE_MOCK_DATA = false
 
 function App() {
   const { currentPage, toast, hideToast, setCurrentPage } = useUIStore()
@@ -28,11 +28,22 @@ function App() {
   useEffect(() => {
     const init = async () => {
       if (USE_MOCK_DATA) {
-        // 使用测试数据
-        setStudents(mockStudents)
-        setCurrentStudent(mockStudents[0])
-        setTasks(mockTasks)
-        setWrongQuestions(mockWrongQuestions)
+        // 清理旧的 mock-students 数据（避免数据不一致）
+        try {
+          localStorage.removeItem('mock-students')
+        } catch (e) {
+          console.error('清理 mock-students 失败', e)
+        }
+        
+        // 确保 Zustand store 有初始数据并选中第一个学生
+        const store = useStudentStore.getState()
+        if (!store.students || store.students.length === 0) {
+          setStudents(mockStudents)
+          setCurrentStudent(mockStudents[0])
+        } else if (!store.currentStudent) {
+          // 有学生列表但没有选中学生，默认选中第一个
+          setCurrentStudent(store.students[0])
+        }
         return
       }
 
@@ -54,6 +65,48 @@ function App() {
     }
     
     init()
+  }, [])
+
+  // 跨窗口数据同步：使用 BroadcastChannel 实现实时同步
+  useEffect(() => {
+    let channel = null
+    try {
+      channel = new BroadcastChannel('minxue-sync')
+    } catch (e) {
+      // BroadcastChannel not supported
+      return
+    }
+
+    const handleMessage = (e) => {
+      if (e.data && e.data.type === 'student-update') {
+        const { students, currentStudent } = e.data.payload
+        if (students) setStudents(students)
+        if (currentStudent) setCurrentStudent(currentStudent)
+      }
+    }
+
+    channel.addEventListener('message', handleMessage)
+
+    // 同时监听本窗口 store 变化，广播给其他窗口
+    const unsubscribe = useStudentStore.subscribe((state) => {
+      try {
+        channel.postMessage({
+          type: 'student-update',
+          payload: {
+            students: state.students,
+            currentStudent: state.currentStudent
+          }
+        })
+      } catch (e) {
+        // ignore
+      }
+    })
+
+    return () => {
+      unsubscribe()
+      channel.removeEventListener('message', handleMessage)
+      channel.close()
+    }
   }, [])
 
   // 显示全局提示

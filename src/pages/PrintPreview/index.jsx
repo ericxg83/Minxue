@@ -14,7 +14,7 @@ import { mockWrongQuestions } from '../../data/mockData'
 import dayjs from 'dayjs'
 
 // 使用测试数据
-const USE_MOCK_DATA = true
+const USE_MOCK_DATA = false
 
 // 生成唯一试卷ID
 const generatePaperId = () => {

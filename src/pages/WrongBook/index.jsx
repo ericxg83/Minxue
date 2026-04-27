@@ -21,7 +21,7 @@ import PrintPreview from '../PrintPreview'
 import dayjs from 'dayjs'
 
 // 使用测试数据
-const USE_MOCK_DATA = true
+const USE_MOCK_DATA = false
 
 // 苹果风格颜色
 const APPLE_COLORS = {

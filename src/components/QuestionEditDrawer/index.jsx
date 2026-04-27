@@ -13,7 +13,7 @@ import { mockQuestions } from '../../data/mockData'
 import ImageCropper from '../../components/ImageCropper'
 
 // 使用测试数据
-const USE_MOCK_DATA = true
+const USE_MOCK_DATA = false
 
 // 苹果风格颜色
 const APPLE_COLORS = {

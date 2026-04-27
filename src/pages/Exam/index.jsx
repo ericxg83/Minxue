@@ -12,7 +12,7 @@ import { mockExams, mockStudents, mockQuestions } from '../../data/mockData'
 import StudentSwitcher from '../../components/StudentSwitcher'
 import dayjs from 'dayjs'
 
-const USE_MOCK_DATA = true
+const USE_MOCK_DATA = false
 
 // 苹果风格颜色
 const APPLE_COLORS = {

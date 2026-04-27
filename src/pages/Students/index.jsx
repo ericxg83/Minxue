@@ -13,34 +13,9 @@ import { getStudents, createStudent, updateStudent, deleteStudent } from '../../
 import { uploadImage } from '../../services/supabaseService'
 import ImageCropper from '../../components/ImageCropper'
 
-// 年级选项
 const GRADE_OPTIONS = ['一年级', '二年级', '三年级', '四年级', '五年级', '六年级', '初一', '初二', '初三', '高一', '高二', '高三']
 
-// 使用本地模拟数据模式（开发环境使用，生产环境设为 false）
 const USE_MOCK_DATA = false
-console.log('Students 组件加载 - USE_MOCK_DATA:', USE_MOCK_DATA, '环境:', import.meta.env.VITE_APP_ENV)
-
-// 本地存储 key
-const STORAGE_KEY = 'mock-students'
-
-// 从 localStorage 加载学生数据
-const loadMockStudents = () => {
-  try {
-    const data = localStorage.getItem(STORAGE_KEY)
-    return data ? JSON.parse(data) : []
-  } catch {
-    return []
-  }
-}
-
-// 保存学生数据到 localStorage
-const saveMockStudents = (students) => {
-  try {
-    localStorage.setItem(STORAGE_KEY, JSON.stringify(students))
-  } catch (e) {
-    console.error('保存到 localStorage 失败:', e)
-  }
-}
 
 export default function Students() {
   const { students, setStudents, currentStudent, setCurrentStudent, updateStudent: updateStudentInStore, addStudent: addStudentInStore, removeStudent: removeStudentFromStore } = useStudentStore()
@@ -60,10 +35,11 @@ export default function Students() {
   const [cropperImage, setCropperImage] = useState(null)  // 裁剪器显示的图片
   const fileInputRef = useRef(null)
 
-  // 加载学生列表
   useEffect(() => {
-    console.log('Students 组件挂载，开始加载学生列表')
-    loadStudents()
+    console.log('Students 组件挂载')
+    if (!USE_MOCK_DATA) {
+      loadStudents()
+    }
   }, [])
 
   let loadCount = 0
@@ -74,40 +50,13 @@ export default function Students() {
     setLoading(true)
     
     try {
-      if (USE_MOCK_DATA) {
-        // 从 localStorage 加载模拟数据
-        const mockStudents = loadMockStudents()
-        if (mockStudents.length === 0) {
-          // 如果没有数据，使用初始默认数据
-          const initialStudents = [
-            {
-              id: 'student-1',
-              name: '张三',
-              grade: '五年级',
-              class: '1班',
-              remark: '',
-              avatar: '',
-              created_at: new Date().toISOString()
-            }
-          ]
-          saveMockStudents(initialStudents)
-          setStudents(initialStudents)
-        } else {
-          setStudents(mockStudents)
-        }
-        setLocalLoading(false)
-        setLoading(false)
-        return
-      }
-
       const data = await getStudents()
       console.log('从 Supabase 加载的学生数据:', data)
       console.log('Supabase 返回的学生数量:', data?.length || 0)
       if (data && data.length > 0) {
         setStudents(data)
       } else {
-        console.warn('Supabase 中没有学生数据，使用本地 store 数据')
-        // 如果 Supabase 没有数据，保留当前 store 中的数据
+        console.warn('Supabase 中没有学生数据')
       }
     } catch (error) {
       console.error('加载失败:', error)
@@ -213,46 +162,31 @@ export default function Students() {
       }
 
       if (editingStudent) {
-        // 更新
         if (USE_MOCK_DATA) {
-          // 本地模式：更新 localStorage 和 store
-          const updatedStudents = students.map(s =>
-            s.id === editingStudent.id ? { ...s, ...studentData, updated_at: new Date().toISOString() } : s
-          )
-          saveMockStudents(updatedStudents)
-          setStudents(updatedStudents)
+          const updatedStudent = { ...editingStudent, ...studentData, updated_at: new Date().toISOString() }
           updateStudentInStore(editingStudent.id, studentData)
-
           if (currentStudent?.id === editingStudent.id) {
-            setCurrentStudent({ ...currentStudent, ...studentData })
+            setCurrentStudent(updatedStudent)
           }
         } else {
-          // Supabase 模式
           await updateStudent(editingStudent.id, studentData)
           if (currentStudent?.id === editingStudent.id) {
             setCurrentStudent({ ...currentStudent, ...studentData })
           }
-          // 重新加载学生列表
           await loadStudents()
         }
         Toast.show({ icon: 'success', content: '更新成功' })
       } else {
-        // 创建
         console.log('USE_MOCK_DATA 值:', USE_MOCK_DATA, '准备创建学生')
         if (USE_MOCK_DATA) {
-          // 本地模式：保存到 localStorage 和 store
           const newStudent = {
             ...studentData,
             id: `student-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`,
             created_at: new Date().toISOString()
           }
-          const newStudents = [newStudent, ...students]
-          saveMockStudents(newStudents)
-          setStudents(newStudents)
           addStudentInStore(newStudent)
           setCurrentStudent(newStudent)
         } else {
-          // Supabase 模式
           console.log('进入 Supabase 创建学生流程')
           console.log('正在创建学生:', studentData)
           try {
@@ -262,7 +196,6 @@ export default function Students() {
               addStudentInStore(created)
               setCurrentStudent(created)
             }
-            // 重新加载学生列表
             await loadStudents()
           } catch (err) {
             console.error('创建学生时出错:', err)
@@ -294,17 +227,12 @@ export default function Students() {
       onConfirm: async () => {
         setLoading(true)
         try {
-          if (USE_MOCK_DATA) {
-            // 本地模式：从 localStorage 和 store 删除
-            const newStudents = students.filter(s => s.id !== student.id)
-            saveMockStudents(newStudents)
-            setStudents(newStudents)
-            removeStudentFromStore(student.id)
-            
-            if (currentStudent?.id === student.id) {
-              setCurrentStudent(null)
-            }
-          } else {
+        if (USE_MOCK_DATA) {
+          removeStudentFromStore(student.id)
+          if (currentStudent?.id === student.id) {
+            setCurrentStudent(null)
+          }
+        } else {
             // Supabase 模式
             await deleteStudent(student.id)
             if (currentStudent?.id === student.id) {

@@ -12,7 +12,7 @@ import { useWrongQuestionStore } from '../../store'
 import dayjs from 'dayjs'
 
 // 使用测试数据
-const USE_MOCK_DATA = true
+const USE_MOCK_DATA = false
 
 export default function Grading({ paperId, studentId, onClose, onComplete }) {
   const [currentQuestionIndex, setCurrentQuestionIndex] = useState(0)
