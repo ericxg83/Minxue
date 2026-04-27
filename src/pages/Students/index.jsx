@@ -62,10 +62,14 @@ export default function Students() {
 
   // 加载学生列表
   useEffect(() => {
+    console.log('Students 组件挂载，开始加载学生列表')
     loadStudents()
   }, [])
 
+  let loadCount = 0
   const loadStudents = async () => {
+    loadCount++
+    console.log(`loadStudents 被调用 (第 ${loadCount} 次)`)
     setLocalLoading(true)
     setLoading(true)
     
