@@ -157,10 +157,21 @@ export default function Pending() {
       setQuestions(allQuestions)
       setSelectedIds([])
     } catch (error) {
-      console.error('加载失败:', error)
+      console.error('从 Supabase 加载任务失败，使用 Mock 数据:', error)
+      // 加载失败时使用 Mock 数据
+      const studentQuestions = mockQuestions.filter(q => q.student_id === currentStudent.id)
+      const addedIds = getAddedToWrongBookIds()
+      const filteredQuestions = studentQuestions.filter(q => !addedIds.has(q.id))
+      const sortedQuestions = filteredQuestions.sort((a, b) => {
+        const timeA = new Date(a.created_at || 0).getTime()
+        const timeB = new Date(b.created_at || 0).getTime()
+        return timeB - timeA
+      })
+      setQuestions(sortedQuestions)
+      setSelectedIds([])
       Toast.show({
         icon: 'fail',
-        content: '加载失败'
+        content: '连接数据库失败，已使用本地测试数据'
       })
     } finally {
       setLocalLoading(false)

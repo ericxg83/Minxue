@@ -138,11 +138,27 @@ export default function WrongBook({ onScanQR }) {
         return [...prev, ...newData]
       })
     } catch (error) {
-      console.error('加载失败:', error)
-      Toast.show({
-        icon: 'fail',
-        content: '加载失败'
-      })
+      console.error('从 Supabase 加载错题失败，使用 Mock 数据:', error)
+      // 加载失败时使用 Mock 数据
+      const currentStudentMockQuestions = mockWrongQuestions.filter(
+        wq => wq.student_id === currentStudent.id
+      )
+      if (currentStudentMockQuestions.length > 0) {
+        setWrongQuestions(prev => {
+          const existingIds = new Set(prev.map(wq => wq.id))
+          const newData = currentStudentMockQuestions.filter(d => !existingIds.has(d.id))
+          return [...prev, ...newData]
+        })
+        Toast.show({
+          icon: 'fail',
+          content: '连接数据库失败，已使用本地测试数据'
+        })
+      } else {
+        Toast.show({
+          icon: 'fail',
+          content: '加载失败'
+        })
+      }
     } finally {
       setLocalLoading(false)
       setLoading(false)
