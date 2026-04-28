@@ -98,8 +98,10 @@ export const useWrongQuestionStore = create((set, get) => ({
   // 选中的错题（用于打印）
   selectedQuestions: [],
   
-  // 设置错题列表
-  setWrongQuestions: (questions) => set({ wrongQuestions: questions }),
+  // 设置错题列表（支持函数式更新）
+  setWrongQuestions: (questions) => set((state) => ({ 
+    wrongQuestions: typeof questions === 'function' ? questions(state.wrongQuestions) : questions 
+  })),
   
   // 添加错题
   addWrongQuestion: (question) => set((state) => ({
