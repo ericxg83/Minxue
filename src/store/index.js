@@ -29,7 +29,7 @@ export const useStudentStore = create(
     }),
     {
       name: 'student-storage',
-      version: 2,
+      version: 3,
       migrate: (persistedState, version) => {
         // Always reset to fresh mockStudents on version change
         return { students: mockStudents, currentStudent: null }
