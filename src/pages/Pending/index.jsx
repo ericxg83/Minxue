@@ -132,17 +132,26 @@ export default function Pending() {
 
       // 获取所有已完成的任务
       const taskList = await getTasksByStudent(currentStudent.id)
-      const doneTasks = taskList.filter(t => t.status === 'done')
-      setTasks(taskList)
+      // 确保 taskList 是数组
+      const safeTaskList = Array.isArray(taskList) ? taskList : []
+      const doneTasks = safeTaskList.filter(t => t.status === 'done')
+      setTasks(safeTaskList)
       
       // 获取所有题目
       const allQuestions = []
       for (const task of doneTasks) {
-        const taskQuestions = await getQuestionsByTask(task.id)
-        allQuestions.push(...taskQuestions.map(q => ({
-          ...q,
-          status: q.is_correct ? 'correct' : 'wrong'
-        })))
+        try {
+          const taskQuestions = await getQuestionsByTask(task.id)
+          // 确保 taskQuestions 是数组
+          const safeQuestions = Array.isArray(taskQuestions) ? taskQuestions : []
+          allQuestions.push(...safeQuestions.map(q => ({
+            ...q,
+            status: q.is_correct ? 'correct' : 'wrong'
+          })))
+        } catch (taskError) {
+          console.error(`获取任务 ${task.id} 的题目失败:`, taskError)
+          // 继续处理下一个任务
+        }
       }
       
       setQuestions(allQuestions)

@@ -129,10 +129,12 @@ export default function WrongBook({ onScanQR }) {
       }
 
       const data = await getWrongQuestionsByStudent(currentStudent.id)
+      // 确保 data 是数组
+      const safeData = Array.isArray(data) ? data : []
       setWrongQuestions(prev => {
         // 合并新数据，避免覆盖其他学生的数据
         const existingIds = new Set(prev.map(wq => wq.id))
-        const newData = data.filter(d => !existingIds.has(d.id))
+        const newData = safeData.filter(d => !existingIds.has(d.id))
         return [...prev, ...newData]
       })
     } catch (error) {
