@@ -266,53 +266,36 @@ export const updateQuestion = async (id, updates) => {
 // 获取学生的所有错题
 export const getWrongQuestionsByStudent = async (studentId) => {
   try {
-    // 首先尝试带关联查询的方式
-    const { data, error } = await supabase
+    // 使用简单查询（避免关联查询失败）
+    const { data: simpleData, error: simpleError } = await supabase
       .from(TABLES.WRONG_QUESTIONS)
-      .select(`
-        *,
-        question:question_id (*)
-      `)
+      .select('*')
       .eq('student_id', studentId)
       .order('added_at', { ascending: false })
     
-    if (error) {
-      console.error('Supabase 获取学生错题列表错误(关联查询):', error)
-      
-      // 如果关联查询失败，尝试简单查询
-      console.log('尝试简单查询...')
-      const { data: simpleData, error: simpleError } = await supabase
-        .from(TABLES.WRONG_QUESTIONS)
-        .select('*')
-        .eq('student_id', studentId)
-        .order('added_at', { ascending: false })
-      
-      if (simpleError) {
-        console.error('Supabase 简单查询也失败:', simpleError)
-        console.error('错误详情:', { code: simpleError.code, message: simpleError.message, details: simpleError.details })
-        throw simpleError
-      }
-      
-      // 简单查询成功，手动获取题目详情
-      const wrongQuestionsWithDetails = await Promise.all(
-        (simpleData || []).map(async (wq) => {
-          try {
-            const { data: questionData } = await supabase
-              .from(TABLES.QUESTIONS)
-              .select('*')
-              .eq('id', wq.question_id)
-              .single()
-            return { ...wq, question: questionData }
-          } catch (e) {
-            return { ...wq, question: null }
-          }
-        })
-      )
-      
-      return wrongQuestionsWithDetails
+    if (simpleError) {
+      console.error('Supabase 获取学生错题列表错误:', simpleError)
+      console.error('错误详情:', { code: simpleError.code, message: simpleError.message, details: simpleError.details })
+      throw simpleError
     }
     
-    return data || []
+    // 简单查询成功，手动获取题目详情
+    const wrongQuestionsWithDetails = await Promise.all(
+      (simpleData || []).map(async (wq) => {
+        try {
+          const { data: questionData } = await supabase
+            .from(TABLES.QUESTIONS)
+            .select('*')
+            .eq('id', wq.question_id)
+            .single()
+          return { ...wq, question: questionData }
+        } catch (e) {
+          return { ...wq, question: null }
+        }
+      })
+    )
+    
+    return wrongQuestionsWithDetails
   } catch (error) {
     console.error('Supabase 获取学生错题列表错误:', error)
     console.error('错误详情:', { code: error.code, message: error.message, details: error.details })
