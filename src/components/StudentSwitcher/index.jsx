@@ -1,9 +1,7 @@
 import { useState, useRef } from 'react'
 import { Popup, Badge, Button, Toast, Dialog, Mask, SwipeAction } from 'antd-mobile'
 import { useStudentStore, useTaskStore, useWrongQuestionStore, usePendingQuestionStore, useExamStore } from '../../store'
-import { mockStudents, mockTasks, mockQuestions, mockWrongQuestions } from '../../data/mockData'
-
-const USE_MOCK_DATA = false
+import { createStudent } from '../../services/supabaseService'
 
 // 苹果风格颜色
 const APPLE_COLORS = {
@@ -152,7 +150,7 @@ export default function StudentSwitcher({ visible, onClose, badgeType }) {
   }
 
   // 保存学生
-  const handleSave = () => {
+  const handleSave = async () => {
     if (!formData.name.trim()) {
       Toast.show({ icon: 'fail', content: '请输入学生姓名' })
       return
@@ -164,17 +162,25 @@ export default function StudentSwitcher({ visible, onClose, badgeType }) {
       : formData.grade || formData.class
 
     const newStudent = {
-      id: `student-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`,
       name: formData.name.trim(),
+      grade: formData.grade,
       class: classInfo,
       avatar: formData.avatar,
-      remark: formData.remark,
-      created_at: new Date().toISOString()
+      remark: formData.remark
     }
 
-    addStudent(newStudent)
-
-    Toast.show({ icon: 'success', content: '添加成功' })
+    try {
+      // 保存到 Supabase
+      const created = await createStudent(newStudent)
+      if (created) {
+        addStudent(created)
+        Toast.show({ icon: 'success', content: '添加成功' })
+      }
+    } catch (error) {
+      console.error('添加学生失败:', error)
+      Toast.show({ icon: 'fail', content: '添加失败，请重试' })
+      return
+    }
     
     // 重置表单并关闭弹窗
     setFormData({ name: '', grade: '', class: '', remark: '', avatar: '' })
