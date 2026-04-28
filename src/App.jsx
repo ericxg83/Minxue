@@ -49,17 +49,25 @@ function App() {
 
       try {
         const students = await getStudents()
-        setStudents(students)
         
-        // 如果有学生，默认选中第一个
-        if (students.length > 0) {
+        // 如果成功获取到学生数据，使用数据库数据
+        if (students && students.length > 0) {
+          setStudents(students)
           setCurrentStudent(students[0])
+        } else {
+          // 数据库没有数据，使用 Mock 数据
+          console.log('数据库没有学生数据，使用 Mock 数据')
+          setStudents(mockStudents)
+          setCurrentStudent(mockStudents[0])
         }
       } catch (error) {
-        console.error('初始化失败:', error)
+        console.error('从 Supabase 加载失败，使用 Mock 数据:', error)
+        // 加载失败时使用 Mock 数据
+        setStudents(mockStudents)
+        setCurrentStudent(mockStudents[0])
         Toast.show({
           icon: 'fail',
-          content: '连接数据库失败，请检查网络'
+          content: '连接数据库失败，已使用本地测试数据'
         })
       }
     }

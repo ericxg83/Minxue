@@ -32,10 +32,10 @@ export const useStudentStore = create(
       version: 3,
       migrate: (persistedState, version) => {
         // Always reset to fresh mockStudents on version change
+        // 保留 persistedState 中的 currentStudent，如果没有则保持 null
         return { 
           ...persistedState,
-          students: mockStudents, 
-          currentStudent: null 
+          students: mockStudents
         }
       },
       partialize: (state) => ({
