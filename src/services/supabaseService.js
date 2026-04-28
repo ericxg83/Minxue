@@ -28,7 +28,11 @@ export const getStudentById = async (id) => {
     .eq('id', id)
     .single()
   
-  if (error) throw error
+  if (error) {
+    console.error('Supabase 获取学生详情错误:', error)
+    console.error('错误详情:', { code: error.code, message: error.message, details: error.details })
+    throw error
+  }
   return data
 }
 
@@ -67,17 +71,29 @@ export const createStudent = async (studentData) => {
 
 // 更新学生
 export const updateStudent = async (id, updates) => {
+  const allowedFields = ['name', 'grade', 'class', 'remark', 'avatar']
+  const cleanUpdates = {}
+  
+  for (const field of allowedFields) {
+    if (updates[field] !== undefined) {
+      cleanUpdates[field] = updates[field]
+    }
+  }
+  
+  cleanUpdates.updated_at = new Date().toISOString()
+  
   const { data, error } = await supabase
     .from(TABLES.STUDENTS)
-    .update({
-      ...updates,
-      updated_at: new Date().toISOString()
-    })
+    .update(cleanUpdates)
     .eq('id', id)
     .select()
     .single()
   
-  if (error) throw error
+  if (error) {
+    console.error('Supabase 更新学生错误:', error)
+    console.error('错误详情:', { code: error.code, message: error.message, details: error.details })
+    throw error
+  }
   return data
 }
 
@@ -88,7 +104,11 @@ export const deleteStudent = async (id) => {
     .delete()
     .eq('id', id)
   
-  if (error) throw error
+  if (error) {
+    console.error('Supabase 删除学生错误:', error)
+    console.error('错误详情:', { code: error.code, message: error.message, details: error.details })
+    throw error
+  }
   return true
 }
 
@@ -102,42 +122,66 @@ export const getTasksByStudent = async (studentId) => {
     .eq('student_id', studentId)
     .order('created_at', { ascending: false })
   
-  if (error) throw error
+  if (error) {
+    console.error('Supabase 获取学生任务列表错误:', error)
+    console.error('错误详情:', { code: error.code, message: error.message, details: error.details })
+    throw error
+  }
   return data
 }
 
 // 创建任务
 export const createTask = async (taskData) => {
+  const cleanData = {
+    student_id: taskData.student_id,
+    image_url: taskData.image_url || null,
+    original_name: taskData.original_name || null,
+    status: taskData.status || 'pending',
+    result: taskData.result || null,
+    created_at: new Date().toISOString()
+  }
+  
   const { data, error } = await supabase
     .from(TABLES.TASKS)
-    .insert([{
-      ...taskData,
-      status: 'pending',
-      created_at: new Date().toISOString()
-    }])
+    .insert([cleanData])
     .select()
     .single()
   
-  if (error) throw error
+  if (error) {
+    console.error('Supabase 创建任务错误:', error)
+    console.error('错误详情:', { code: error.code, message: error.message, details: error.details })
+    throw error
+  }
+  
   return data
 }
 
 // 更新任务状态
 export const updateTaskStatus = async (taskId, status, result = null) => {
-  const updates = {
-    status,
-    updated_at: new Date().toISOString()
+  const allowedFields = ['status', 'result']
+  const cleanUpdates = {}
+  
+  if (allowedFields.includes('status')) {
+    cleanUpdates.status = status
   }
-  if (result) updates.result = result
+  if (result !== null && allowedFields.includes('result')) {
+    cleanUpdates.result = result
+  }
+  
+  cleanUpdates.updated_at = new Date().toISOString()
   
   const { data, error } = await supabase
     .from(TABLES.TASKS)
-    .update(updates)
+    .update(cleanUpdates)
     .eq('id', taskId)
     .select()
     .single()
   
-  if (error) throw error
+  if (error) {
+    console.error('Supabase 更新任务状态错误:', error)
+    console.error('错误详情:', { code: error.code, message: error.message, details: error.details })
+    throw error
+  }
   return data
 }
 
@@ -151,14 +195,28 @@ export const getQuestionsByTask = async (taskId) => {
     .eq('task_id', taskId)
     .order('created_at', { ascending: true })
   
-  if (error) throw error
+  if (error) {
+    console.error('Supabase 获取任务题目列表错误:', error)
+    console.error('错误详情:', { code: error.code, message: error.message, details: error.details })
+    throw error
+  }
   return data
 }
 
 // 批量创建题目
 export const createQuestions = async (questions) => {
   const questionsWithTime = questions.map(q => ({
-    ...q,
+    task_id: q.task_id,
+    student_id: q.student_id,
+    content: q.content || null,
+    options: q.options || [],
+    answer: q.answer || null,
+    analysis: q.analysis || null,
+    question_type: q.question_type || 'choice',
+    subject: q.subject || null,
+    is_correct: q.is_correct !== undefined ? q.is_correct : true,
+    status: q.status || 'pending',
+    image_url: q.image_url || null,
     created_at: new Date().toISOString()
   }))
   
@@ -167,23 +225,39 @@ export const createQuestions = async (questions) => {
     .insert(questionsWithTime)
     .select()
   
-  if (error) throw error
+  if (error) {
+    console.error('Supabase 批量创建题目错误:', error)
+    console.error('错误详情:', { code: error.code, message: error.message, details: error.details })
+    throw error
+  }
   return data
 }
 
 // 更新题目
 export const updateQuestion = async (id, updates) => {
+  const allowedFields = ['content', 'options', 'answer', 'analysis', 'question_type', 'subject', 'is_correct', 'status', 'image_url']
+  const cleanUpdates = {}
+  
+  for (const field of allowedFields) {
+    if (updates[field] !== undefined) {
+      cleanUpdates[field] = updates[field]
+    }
+  }
+  
+  cleanUpdates.updated_at = new Date().toISOString()
+  
   const { data, error } = await supabase
     .from(TABLES.QUESTIONS)
-    .update({
-      ...updates,
-      updated_at: new Date().toISOString()
-    })
+    .update(cleanUpdates)
     .eq('id', id)
     .select()
     .single()
   
-  if (error) throw error
+  if (error) {
+    console.error('Supabase 更新题目错误:', error)
+    console.error('错误详情:', { code: error.code, message: error.message, details: error.details })
+    throw error
+  }
   return data
 }
 
@@ -200,7 +274,11 @@ export const getWrongQuestionsByStudent = async (studentId) => {
     .eq('student_id', studentId)
     .order('added_at', { ascending: false })
   
-  if (error) throw error
+  if (error) {
+    console.error('Supabase 获取学生错题列表错误:', error)
+    console.error('错误详情:', { code: error.code, message: error.message, details: error.details })
+    throw error
+  }
   return data
 }
 
@@ -217,7 +295,11 @@ export const addWrongQuestion = async (studentId, questionId) => {
     .select()
     .single()
   
-  if (error) throw error
+  if (error) {
+    console.error('Supabase 添加错题错误:', error)
+    console.error('错误详情:', { code: error.code, message: error.message, details: error.details })
+    throw error
+  }
   return data
 }
 
@@ -235,7 +317,11 @@ export const addWrongQuestions = async (studentId, questionIds) => {
     .insert(entries)
     .select()
   
-  if (error) throw error
+  if (error) {
+    console.error('Supabase 批量添加错题错误:', error)
+    console.error('错误详情:', { code: error.code, message: error.message, details: error.details })
+    throw error
+  }
   return data
 }
 
@@ -251,7 +337,11 @@ export const updateWrongQuestionStatus = async (id, status) => {
     .select()
     .single()
   
-  if (error) throw error
+  if (error) {
+    console.error('Supabase 更新错题状态错误:', error)
+    console.error('错误详情:', { code: error.code, message: error.message, details: error.details })
+    throw error
+  }
   return data
 }
 
@@ -262,7 +352,11 @@ export const deleteWrongQuestion = async (id) => {
     .delete()
     .eq('id', id)
   
-  if (error) throw error
+  if (error) {
+    console.error('Supabase 删除错题错误:', error)
+    console.error('错误详情:', { code: error.code, message: error.message, details: error.details })
+    throw error
+  }
   return true
 }
 
@@ -281,7 +375,11 @@ export const createTrainingLog = async (studentId, questionId) => {
     .select()
     .single()
   
-  if (error) throw error
+  if (error) {
+    console.error('Supabase 创建练习记录错误:', error)
+    console.error('错误详情:', { code: error.code, message: error.message, details: error.details })
+    throw error
+  }
   return data
 }
 
@@ -298,7 +396,11 @@ export const updateTrainingResult = async (id, result) => {
     .select()
     .single()
   
-  if (error) throw error
+  if (error) {
+    console.error('Supabase 更新练习结果错误:', error)
+    console.error('错误详情:', { code: error.code, message: error.message, details: error.details })
+    throw error
+  }
   return data
 }
 

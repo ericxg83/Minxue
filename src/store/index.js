@@ -1,34 +1,27 @@
 import { create } from 'zustand'
 import { persist } from 'zustand/middleware'
+import { mockStudents } from '../data/mockData'
 
-// 学生状态管理
 export const useStudentStore = create(
   persist(
     (set, get) => ({
-      // 当前选中的学生
       currentStudent: null,
-      // 学生列表
-      students: [],
+      students: mockStudents,
       
-      // 设置当前学生
       setCurrentStudent: (student) => set({ currentStudent: student }),
       
-      // 设置学生列表
       setStudents: (students) => set({ students }),
       
-      // 添加学生
       addStudent: (student) => set((state) => ({
         students: [...state.students, student]
       })),
       
-      // 更新学生
       updateStudent: (id, updates) => set((state) => ({
         students: state.students.map(s => 
           s.id === id ? { ...s, ...updates } : s
         )
       })),
       
-      // 删除学生
       removeStudent: (id) => set((state) => ({
         students: state.students.filter(s => s.id !== id),
         currentStudent: state.currentStudent?.id === id ? null : state.currentStudent
@@ -36,32 +29,15 @@ export const useStudentStore = create(
     }),
     {
       name: 'student-storage',
-      // 自定义存储逻辑，过滤掉无效的 mock 数据
+      version: 2,
+      migrate: (persistedState, version) => {
+        // Always reset to fresh mockStudents on version change
+        return { students: mockStudents, currentStudent: null }
+      },
       partialize: (state) => ({
         currentStudent: state.currentStudent,
         students: state.students
       }),
-      // 加载时过滤掉无效的 mock 数据（ID 不是 UUID 格式的）
-      onRehydrateStorage: () => (state) => {
-        if (state) {
-          // 过滤掉 ID 不是 UUID 格式的学生（mock 数据）
-          const validStudents = state.students.filter(s => {
-            const isValidUUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(s.id)
-            return isValidUUID
-          })
-          
-          // 如果当前选中的学生也是无效的，重置为 null
-          const isCurrentValid = state.currentStudent && 
-            /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(state.currentStudent.id)
-          
-          state.students = validStudents
-          if (!isCurrentValid) {
-            state.currentStudent = null
-          }
-          
-          console.log('Store 重新加载，过滤后的学生数量:', validStudents.length)
-        }
-      }
     }
   )
 )
