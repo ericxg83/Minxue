@@ -36,12 +36,22 @@ export const getStudentById = async (id) => {
   return data
 }
 
+// 生成 UUID
+const generateUUID = () => {
+  return 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, function(c) {
+    const r = Math.random() * 16 | 0
+    const v = c === 'x' ? r : (r & 0x3 | 0x8)
+    return v.toString(16)
+  })
+}
+
 // 创建学生
 export const createStudent = async (studentData) => {
   console.log('Supabase createStudent 接收到的数据:', studentData)
   
   // 清理数据，移除可能导致问题的字段
   const cleanData = {
+    id: generateUUID(),
     name: studentData.name,
     grade: studentData.grade || null,
     class: studentData.class || null,
@@ -53,10 +63,7 @@ export const createStudent = async (studentData) => {
   
   const { data, error } = await supabase
     .from(TABLES.STUDENTS)
-    .insert([{
-      ...cleanData,
-      created_at: new Date().toISOString()
-    }])
+    .insert([cleanData])
     .select()
     .single()
   

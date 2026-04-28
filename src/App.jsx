@@ -10,10 +10,6 @@ import ScanQR from './pages/ScanQR'
 import { useUIStore, useStudentStore, useTaskStore, useWrongQuestionStore } from './store'
 import { getStudents } from './services/supabaseService'
 import { Toast } from 'antd-mobile'
-import { mockStudents, mockTasks, mockQuestions, mockWrongQuestions } from './data/mockData'
-
-// 使用测试数据开关
-const USE_MOCK_DATA = false
 
 function App() {
   const { currentPage, toast, hideToast, setCurrentPage } = useUIStore()
@@ -27,103 +23,29 @@ function App() {
   // 初始化加载学生列表
   useEffect(() => {
     const init = async () => {
-      if (USE_MOCK_DATA) {
-        // 清理旧的 mock-students 数据（避免数据不一致）
-        try {
-          localStorage.removeItem('mock-students')
-        } catch (e) {
-          console.error('清理 mock-students 失败', e)
-        }
-        
-        // 确保 Zustand store 有初始数据并选中第一个学生
-        const store = useStudentStore.getState()
-        if (!store.students || store.students.length === 0) {
-          setStudents(mockStudents)
-          setCurrentStudent(mockStudents[0])
-        } else if (!store.currentStudent) {
-          // 有学生列表但没有选中学生，默认选中第一个
-          setCurrentStudent(store.students[0])
-        }
-        return
-      }
-
       try {
         const students = await getStudents()
         
-        // 如果成功获取到学生数据，合并到现有数据
         if (students && students.length > 0) {
-          // 获取当前 store 中的学生
-          const currentStore = useStudentStore.getState()
-          const existingStudents = currentStore.students || []
-          
-          // 合并数据库学生和本地学生（以本地为主，避免覆盖用户添加的数据）
-          const existingIds = new Set(existingStudents.map(s => s.id))
-          const newStudentsFromDb = students.filter(s => !existingIds.has(s.id))
-          
-          if (newStudentsFromDb.length > 0) {
-            // 有新增的数据库学生，合并到本地
-            const mergedStudents = [...existingStudents, ...newStudentsFromDb]
-            setStudents(mergedStudents)
-          }
-          
-          // 如果没有选中学生，默认选中第一个
-          if (!currentStore.currentStudent && existingStudents.length > 0) {
-            setCurrentStudent(existingStudents[0])
-          }
+          setStudents(students)
+          setCurrentStudent(students[0])
+        } else {
+          // 数据库没有数据，显示空状态
+          setStudents([])
+          setCurrentStudent(null)
         }
       } catch (error) {
         console.error('从 Supabase 加载学生数据失败:', error)
-        // 只显示提示，不覆盖本地数据
-        const currentStore = useStudentStore.getState()
-        if (!currentStore.currentStudent && currentStore.students && currentStore.students.length > 0) {
-          setCurrentStudent(currentStore.students[0])
-        }
+        Toast.show({
+          icon: 'fail',
+          content: '连接数据库失败，请检查网络'
+        })
+        setStudents([])
+        setCurrentStudent(null)
       }
     }
     
     init()
-  }, [])
-
-  // 跨窗口数据同步：使用 BroadcastChannel 实现实时同步
-  useEffect(() => {
-    let channel = null
-    try {
-      channel = new BroadcastChannel('minxue-sync')
-    } catch (e) {
-      // BroadcastChannel not supported
-      return
-    }
-
-    const handleMessage = (e) => {
-      if (e.data && e.data.type === 'student-update') {
-        const { students, currentStudent } = e.data.payload
-        if (students) setStudents(students)
-        if (currentStudent) setCurrentStudent(currentStudent)
-      }
-    }
-
-    channel.addEventListener('message', handleMessage)
-
-    // 同时监听本窗口 store 变化，广播给其他窗口
-    const unsubscribe = useStudentStore.subscribe((state) => {
-      try {
-        channel.postMessage({
-          type: 'student-update',
-          payload: {
-            students: state.students,
-            currentStudent: state.currentStudent
-          }
-        })
-      } catch (e) {
-        // ignore
-      }
-    })
-
-    return () => {
-      unsubscribe()
-      channel.removeEventListener('message', handleMessage)
-      channel.close()
-    }
   }, [])
 
   // 显示全局提示
@@ -136,16 +58,6 @@ function App() {
       hideToast()
     }
   }, [toast])
-
-  // 监听 showGrading 变化
-  useEffect(() => {
-    console.log('App: showGrading 变化:', showGrading)
-  }, [showGrading])
-
-  // 监听 gradingParams 变化
-  useEffect(() => {
-    console.log('App: gradingParams 变化:', gradingParams)
-  }, [gradingParams])
 
   // 根据当前页面渲染对应组件
   const renderPage = () => {
@@ -167,21 +79,10 @@ function App() {
 
   // 处理扫码成功
   const handleScanSuccess = (params) => {
-    console.log('App: 扫码成功回调被调用，参数:', params)
-    
-    // 先设置参数
     setGradingParams(params)
-    
-    // 关闭扫码页面
-    console.log('App: 关闭扫码页面')
     setShowScanQR(false)
-    
-    // 立即显示批改页面（不使用 setTimeout）
-    console.log('App: 准备显示批改页面')
     setShowGrading(true)
   }
-
-  console.log('App: 渲染, showScanQR=', showScanQR, 'showGrading=', showGrading)
 
   return (
     <>
@@ -192,10 +93,7 @@ function App() {
       {/* 扫码页面 - 全屏覆盖 */}
       {showScanQR && (
         <ScanQR
-          onClose={() => {
-            console.log('App: 关闭扫码')
-            setShowScanQR(false)
-          }}
+          onClose={() => setShowScanQR(false)}
           onScanSuccess={handleScanSuccess}
         />
       )}
@@ -206,7 +104,6 @@ function App() {
           paperId={gradingParams?.paperId}
           studentId={gradingParams?.studentId}
           onClose={() => {
-            console.log('App: 关闭批改')
             setShowGrading(false)
             setGradingParams(null)
           }}
