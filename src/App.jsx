@@ -50,25 +50,34 @@ function App() {
       try {
         const students = await getStudents()
         
-        // 如果成功获取到学生数据，使用数据库数据
+        // 如果成功获取到学生数据，合并到现有数据
         if (students && students.length > 0) {
-          setStudents(students)
-          setCurrentStudent(students[0])
-        } else {
-          // 数据库没有数据，使用 Mock 数据
-          console.log('数据库没有学生数据，使用 Mock 数据')
-          setStudents(mockStudents)
-          setCurrentStudent(mockStudents[0])
+          // 获取当前 store 中的学生
+          const currentStore = useStudentStore.getState()
+          const existingStudents = currentStore.students || []
+          
+          // 合并数据库学生和本地学生（以本地为主，避免覆盖用户添加的数据）
+          const existingIds = new Set(existingStudents.map(s => s.id))
+          const newStudentsFromDb = students.filter(s => !existingIds.has(s.id))
+          
+          if (newStudentsFromDb.length > 0) {
+            // 有新增的数据库学生，合并到本地
+            const mergedStudents = [...existingStudents, ...newStudentsFromDb]
+            setStudents(mergedStudents)
+          }
+          
+          // 如果没有选中学生，默认选中第一个
+          if (!currentStore.currentStudent && existingStudents.length > 0) {
+            setCurrentStudent(existingStudents[0])
+          }
         }
       } catch (error) {
-        console.error('从 Supabase 加载失败，使用 Mock 数据:', error)
-        // 加载失败时使用 Mock 数据
-        setStudents(mockStudents)
-        setCurrentStudent(mockStudents[0])
-        Toast.show({
-          icon: 'fail',
-          content: '连接数据库失败，已使用本地测试数据'
-        })
+        console.error('从 Supabase 加载学生数据失败:', error)
+        // 只显示提示，不覆盖本地数据
+        const currentStore = useStudentStore.getState()
+        if (!currentStore.currentStudent && currentStore.students && currentStore.students.length > 0) {
+          setCurrentStudent(currentStore.students[0])
+        }
       }
     }
     
