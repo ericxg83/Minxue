@@ -13,7 +13,7 @@ import {
 } from 'antd-mobile'
 import { RightOutline } from 'antd-mobile-icons'
 import { useStudentStore, useTaskStore, usePendingQuestionStore, useUIStore } from '../../store'
-import { getTasksByStudent, updateTaskStatus, createTask } from '../../services/supabaseService'
+import { getTasksByStudent, updateTaskStatus, createTask, uploadImage } from '../../services/supabaseService'
 import { recognizeQuestions, compressImage, saveRecognitionResult } from '../../services/aiService'
 import { mockTasks, mockStudents } from '../../data/mockData'
 import StudentSwitcher from '../../components/StudentSwitcher'
@@ -272,24 +272,47 @@ export default function Processing() {
   const uploadFile = async (file) => {
     const imageBase64 = await fileToBase64(file)
 
-    const newTask = {
-      id: `task-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`,
+    let imageUrl = imageBase64
+
+    try {
+      const storageUrl = await uploadImage(file, `tasks/${currentStudent.id}`)
+      imageUrl = storageUrl
+    } catch (uploadError) {
+      console.warn('上传图片到存储失败，使用 base64:', uploadError)
+    }
+
+    const taskData = {
       student_id: currentStudent.id,
-      image_url: imageBase64,
+      image_url: imageUrl,
       original_name: file.name || `照片_${dayjs().format('YYYY-MM-DD_HH-mm-ss')}.jpg`,
       status: 'processing',
-      result: { progress: 0 },
-      created_at: new Date().toISOString()
+      result: { progress: 0 }
     }
 
-    addTask(newTask)
+    console.log('准备保存任务到 Supabase:', taskData.original_name)
+    
+    try {
+      const savedTask = await createTask(taskData)
+      console.log('任务已成功保存到数据库:', savedTask.id, savedTask.student_id, savedTask.status)
 
-    if (USE_MOCK_DATA) {
-      simulateProcessing(newTask.id)
-      return
+      const localTask = {
+        ...savedTask,
+        result: { progress: 0 }
+      }
+
+      addTask(localTask)
+
+      processImageAsync(localTask.id, file, savedTask.id)
+    } catch (error) {
+      console.error('创建任务失败:', error)
+      console.error('错误详情:', error?.message, error?.code, error?.details)
+      
+      Toast.show({
+        icon: 'fail',
+        content: '上传失败，请重试'
+      })
+      throw error
     }
-
-    processImageAsync(newTask.id, file)
   }
 
   // 将文件转换为 base64
@@ -303,9 +326,10 @@ export default function Processing() {
   }
 
   // 后台异步处理图片识别
-  const processImageAsync = async (taskId, file) => {
+  const processImageAsync = async (taskId, file, dbTaskId) => {
     try {
       updateTaskInStore(taskId, 'processing', { progress: 10 })
+      await updateTaskStatus(dbTaskId, 'processing', { progress: 10 })
       console.log('开始压缩图片:', file.name, file.size, 'bytes')
 
       let compressedBase64
@@ -315,11 +339,14 @@ export default function Processing() {
       } catch (compressError) {
         console.error('图片压缩失败:', compressError)
         updateTaskInStore(taskId, 'failed', { error: '图片压缩失败: ' + compressError.message })
+        await updateTaskStatus(dbTaskId, 'failed', { error: '图片压缩失败: ' + compressError.message })
         return
       }
       updateTaskInStore(taskId, 'processing', { progress: 30 })
+      await updateTaskStatus(dbTaskId, 'processing', { progress: 30 })
 
       updateTaskInStore(taskId, 'processing', { progress: 50 })
+      await updateTaskStatus(dbTaskId, 'processing', { progress: 50 })
       const result = await recognizeQuestions(compressedBase64, currentStudent.id, taskId)
 
       if (!result.success) {
@@ -327,10 +354,15 @@ export default function Processing() {
           error: result.error || '识别失败，请重新上传或重试',
           shouldRetry: result.shouldRetry
         })
+        await updateTaskStatus(dbTaskId, 'failed', {
+          error: result.error || '识别失败，请重新上传或重试',
+          shouldRetry: result.shouldRetry
+        })
         return
       }
 
       updateTaskInStore(taskId, 'processing', { progress: 80 })
+      await updateTaskStatus(dbTaskId, 'processing', { progress: 80 })
 
       const questions = result.questions || []
       const wrongCount = questions.filter(q => !q.is_correct).length
@@ -341,6 +373,11 @@ export default function Processing() {
       }
 
       updateTaskInStore(taskId, 'done', {
+        questionCount: questions.length,
+        wrongCount: wrongCount,
+        duration: result.duration
+      })
+      await updateTaskStatus(dbTaskId, 'done', {
         questionCount: questions.length,
         wrongCount: wrongCount,
         duration: result.duration
@@ -356,6 +393,9 @@ export default function Processing() {
     } catch (error) {
       console.error('处理失败:', error)
       updateTaskInStore(taskId, 'failed', {
+        error: error.message || '处理失败，请重新上传或重试'
+      })
+      await updateTaskStatus(dbTaskId, 'failed', {
         error: error.message || '处理失败，请重新上传或重试'
       })
 

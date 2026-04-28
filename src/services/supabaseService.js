@@ -17,7 +17,7 @@ export const getStudents = async () => {
   }
   
   console.log('Supabase 返回的学生数据:', data)
-  return data || []
+  return data ?? []
 }
 
 // 根据ID获取学生
@@ -135,6 +135,34 @@ export const getTasksByStudent = async (studentId) => {
     throw error
   }
   return data
+}
+
+// 获取学生的所有试卷（已完成的试卷）
+export const getExamsByStudent = async (studentId) => {
+  const { data, error } = await supabase
+    .from(TABLES.TASKS)
+    .select('*')
+    .eq('student_id', studentId)
+    .eq('status', 'done')
+    .order('created_at', { ascending: false })
+  
+  if (error) {
+    console.error('Supabase 获取学生试卷列表错误:', error)
+    console.error('错误详情:', { code: error.code, message: error.message, details: error.details })
+    throw error
+  }
+
+  return (data || []).map(task => ({
+    id: task.id,
+    student_id: task.student_id,
+    name: task.original_name || '未命名试卷',
+    exam_no: '',
+    thumbnail: task.image_url || '',
+    question_count: task.result?.questionCount || 0,
+    status: 'ungraded',
+    created_at: task.created_at,
+    graded_at: null
+  }))
 }
 
 // 创建任务

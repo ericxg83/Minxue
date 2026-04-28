@@ -9,6 +9,7 @@ import {
 import { RightOutline } from 'antd-mobile-icons'
 import { useStudentStore, useUIStore, useExamStore } from '../../store'
 import { mockExams, mockStudents, mockQuestions } from '../../data/mockData'
+import { getExamsByStudent } from '../../services/supabaseService'
 import StudentSwitcher from '../../components/StudentSwitcher'
 import dayjs from 'dayjs'
 
@@ -64,13 +65,11 @@ export default function Exam() {
     
     try {
       if (USE_MOCK_DATA) {
-        // 检查该学生的 mock 数据是否已经在 store 中
         const studentMockExams = mockExams.filter(e => e.student_id === currentStudent.id)
         const existingStudentExamIds = exams
           .filter(e => e.student_id === currentStudent.id)
           .map(e => e.id)
         
-        // 找出还没有加载的 mock 试卷
         const newMockExams = studentMockExams.filter(e => 
           !existingStudentExamIds.includes(e.id)
         )
@@ -84,9 +83,10 @@ export default function Exam() {
         return
       }
 
-      // 实际 API 调用
-      // const examList = await getExamsByStudent(currentStudent.id)
-      // setExams(examList)
+      const examList = await getExamsByStudent(currentStudent.id)
+      
+      const otherStudentExams = exams.filter(e => e.student_id !== currentStudent.id)
+      setExams([...otherStudentExams, ...examList])
     } catch (error) {
       console.error('加载失败:', error)
       Toast.show({
