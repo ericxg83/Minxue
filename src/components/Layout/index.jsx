@@ -1,46 +1,39 @@
-import { NavBar, TabBar } from 'antd-mobile'
+import { TabBar } from 'antd-mobile'
 import { useUIStore, useStudentStore } from '../../store'
 
-// 苹果风格颜色
-const APPLE_COLORS = {
-  primary: '#007AFF',
-  success: '#34C759',
-  danger: '#FF3B30',
-  warning: '#FF9500',
-  background: '#F2F2F7',
+const COLORS = {
+  primary: '#2B7DE9',
+  accent: '#4A9EFF',
+  background: '#F5F8FC',
   card: '#FFFFFF',
-  text: '#1C1C1E',
-  textSecondary: '#8E8E93',
-  border: '#E5E5EA'
+  text: '#1A3A5C',
+  textSecondary: '#8B9DB5',
+  inactiveIcon: '#A8B8CC'
 }
 
-// 自定义处理中图标
-const ProcessingOutline = ({ active }) => (
-  <svg viewBox="0 0 1024 1024" width="24" height="24" fill={active ? APPLE_COLORS.primary : APPLE_COLORS.textSecondary}>
-    <path d="M512 64C264.6 64 64 264.6 64 512s200.6 448 448 448 448-200.6 448-448S759.4 64 512 64zm0 832c-212 0-384-172-384-384s172-384 384-384 384 172 384 384-172 384-384 384z"/>
-    <path d="M704 480H544V320c0-17.6-14.4-32-32-32s-32 14.4-32 32v192c0 17.6 14.4 32 32 32h192c17.6 0 32-14.4 32-32s-14.4-32-32-32z"/>
+const CameraIcon = ({ active }) => (
+  <svg viewBox="0 0 24 24" width="24" height="24" fill={active ? COLORS.primary : COLORS.inactiveIcon}>
+    <path d="M12 15.2a3.2 3.2 0 1 0 0-6.4 3.2 3.2 0 0 0 0 6.4z"/>
+    <path d="M9 2L7.17 4H4c-1.1 0-2 .9-2 2v12c0 1.1.9 2 2 2h16c1.1 0 2-.9 2-2V6c0-1.1-.9-2-2-2h-3.17L15 2H9zm3 15c-2.76 0-5-2.24-5-5s2.24-5 5-5 5 2.24 5 5-2.24 5-5 5z" fillRule="evenodd"/>
   </svg>
 )
 
-// 自定义确认图标
-const ConfirmOutline = ({ active }) => (
-  <svg viewBox="0 0 1024 1024" width="24" height="24" fill={active ? APPLE_COLORS.primary : APPLE_COLORS.textSecondary}>
-    <path d="M512 64C264.6 64 64 264.6 64 512s200.6 448 448 448 448-200.6 448-448S759.4 64 512 64zm0 832c-212 0-384-172-384-384s172-384 384-384 384 172 384 384-172 384-384 384z"/>
-    <path d="M704 352L448 608 320 480l-45.3 45.3 173.3 173.3L749.3 397.3z"/>
+const BookIcon = ({ active }) => (
+  <svg viewBox="0 0 24 24" width="24" height="24" fill={active ? COLORS.primary : COLORS.inactiveIcon}>
+    <path d="M21 5c-1.11-.35-2.33-.5-3.5-.5-1.95 0-4.05.4-5.5 1.5-1.45-1.1-3.55-1.5-5.5-1.5S2.45 4.9 1 6v14.65c0 .25.25.5.5.5.1 0 .15-.05.25-.05C3.1 20.45 5.05 20 6.5 20c1.95 0 4.05.4 5.5 1.5 1.35-.85 3.8-1.5 5.5-1.5 1.65 0 3.35.3 4.75 1.05.1.05.15.05.25.05.25 0 .5-.25.5-.5V6c-.6-.45-1.25-.75-2-1zm0 13.5c-1.1-.35-2.3-.5-3.5-.5-1.7 0-4.15.65-5.5 1.5V8c1.35-.85 3.8-1.5 5.5-1.5 1.2 0 2.4.15 3.5.5v11.5z"/>
   </svg>
 )
 
-// 自定义书本图标
-const BookOutline = ({ active }) => (
-  <svg viewBox="0 0 1024 1024" width="24" height="24" fill={active ? APPLE_COLORS.primary : APPLE_COLORS.textSecondary}>
-    <path d="M832 128H320c-35.2 0-64 28.8-64 64v64H192c-35.2 0-64 28.8-64 64v512c0 35.2 28.8 64 64 64h640c35.2 0 64-28.8 64-64V192c0-35.2-28.8-64-64-64zM320 192h512v64H320V192zm512 576H192V320h128v384c0 35.2 28.8 64 64 64h448v64z"/>
+const ChartIcon = ({ active }) => (
+  <svg viewBox="0 0 24 24" width="24" height="24" fill={active ? COLORS.primary : COLORS.inactiveIcon}>
+    <path d="M19 3H5c-1.1 0-2 .9-2 2v14c0 1.1.9 2 2 2h14c1.1 0 2-.9 2-2V5c0-1.1-.9-2-2-2zM9 17H7v-7h2v7zm4 0h-2V7h2v10zm4 0h-2v-4h2v4z"/>
   </svg>
 )
 
-// 自定义试卷图标
-const ExamOutline = ({ active }) => (
-  <svg viewBox="0 0 1024 1024" width="24" height="24" fill={active ? APPLE_COLORS.primary : APPLE_COLORS.textSecondary}>
-    <path d="M832 128H192c-35.2 0-64 28.8-64 64v640c0 35.2 28.8 64 64 64h640c35.2 0 64-28.8 64-64V192c0-35.2-28.8-64-64-64zM320 256h384v64H320V256zm0 192h384v64H320V448zm0 192h256v64H320v-64z"/>
+const ExamIcon = ({ active }) => (
+  <svg viewBox="0 0 24 24" width="24" height="24" fill={active ? COLORS.primary : COLORS.inactiveIcon}>
+    <path d="M14 2H6c-1.1 0-2 .9-2 2v16c0 1.1.9 2 2 2h12c1.1 0 2-.9 2-2V8l-6-6zM6 20V4h7v5h5v11H6z"/>
+    <path d="M8 12h8v2H8zm0 4h5v2H8z"/>
   </svg>
 )
 
@@ -48,22 +41,22 @@ const tabs = [
   {
     key: 'processing',
     title: '处理',
-    icon: (active) => <ProcessingOutline active={active} />,
+    icon: (active) => <CameraIcon active={active} />,
   },
   {
     key: 'pending',
     title: '待确认',
-    icon: (active) => <ConfirmOutline active={active} />,
+    icon: (active) => <BookIcon active={active} />,
   },
   {
     key: 'wrongbook',
     title: '错题本',
-    icon: (active) => <BookOutline active={active} />,
+    icon: (active) => <ChartIcon active={active} />,
   },
   {
     key: 'exam',
     title: '试卷',
-    icon: (active) => <ExamOutline active={active} />,
+    icon: (active) => <ExamIcon active={active} />,
   },
 ]
 
@@ -72,21 +65,18 @@ export default function Layout({ children }) {
   const { currentStudent } = useStudentStore()
 
   return (
-    <div className="page-container">
-      <NavBar
-        back={null}
-        style={{
-          '--height': '48px',
-          background: APPLE_COLORS.card,
-          color: APPLE_COLORS.text,
-          borderBottom: '1px solid ' + APPLE_COLORS.border,
-          fontWeight: 600
-        }}
-      >
-        {currentStudent ? `${currentStudent.name} - 数学错题本` : '数学错题本'}
-      </NavBar>
-
-      <div className="page-content hide-scrollbar">
+    <div style={{
+      height: '100%',
+      display: 'flex',
+      flexDirection: 'column',
+      background: COLORS.background
+    }}>
+      <div style={{
+        flex: 1,
+        overflowY: 'auto',
+        overflowX: 'hidden',
+        paddingBottom: 'env(safe-area-inset-bottom, 80px)'
+      }}>
         {children}
       </div>
 
@@ -94,9 +84,10 @@ export default function Layout({ children }) {
         activeKey={currentPage}
         onChange={setCurrentPage}
         style={{
-          background: APPLE_COLORS.card,
-          borderTop: '1px solid ' + APPLE_COLORS.border,
-          paddingBottom: 'env(safe-area-inset-bottom)'
+          background: COLORS.card,
+          borderTop: '1px solid #F0F4F8',
+          paddingBottom: 'env(safe-area-inset-bottom)',
+          boxShadow: '0 -2px 12px rgba(0,0,0,0.03)'
         }}
       >
         {tabs.map(item => (
@@ -105,8 +96,8 @@ export default function Layout({ children }) {
             icon={item.icon(item.key === currentPage)} 
             title={item.title}
             style={{
-              '--color': APPLE_COLORS.textSecondary,
-              '--active-color': APPLE_COLORS.primary,
+              '--color': COLORS.textSecondary,
+              '--active-color': COLORS.primary,
               fontSize: '11px',
               fontWeight: item.key === currentPage ? 600 : 400
             }}

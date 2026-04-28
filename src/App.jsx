@@ -1,12 +1,13 @@
 import { useEffect, useState } from 'react'
 import Layout from './components/Layout'
-import Processing from './pages/Processing'
+import Home from './pages/Home'
 import Pending from './pages/Pending'
 import WrongBook from './pages/WrongBook'
 import Exam from './pages/Exam'
 import Students from './pages/Students'
 import Grading from './pages/Grading'
 import ScanQR from './pages/ScanQR'
+import Processing from './pages/Processing'
 import { useUIStore, useStudentStore, useTaskStore, useWrongQuestionStore } from './store'
 import { getStudents } from './services/supabaseService'
 import { Toast } from 'antd-mobile'
@@ -30,7 +31,6 @@ function App() {
           setStudents(students)
           setCurrentStudent(students[0])
         } else {
-          // 数据库没有数据，显示空状态
           setStudents([])
           setCurrentStudent(null)
         }
@@ -64,6 +64,8 @@ function App() {
     switch (currentPage) {
       case 'processing':
         return <Processing />
+      case 'home':
+        return <Home onNavigate={setCurrentPage} />
       case 'pending':
         return <Pending />
       case 'wrongbook':

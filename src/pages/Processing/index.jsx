@@ -30,25 +30,29 @@ const FILTER_TABS = [
   { key: 'failed', label: '失败' }
 ]
 
-// 状态配置 - 苹果风格
+// 状态配置 - 现代风格
 const STATUS_CONFIG = {
-  processing: { text: '处理中', color: '#007AFF', bgColor: '#E8F4FD', icon: 'processing' },
+  processing: { text: '处理中', color: '#4A9EFF', bgColor: '#EBF5FF', icon: 'processing' },
   done: { text: '已完成', color: '#34C759', bgColor: '#E8F5E9', icon: 'done' },
   failed: { text: '处理失败', color: '#FF3B30', bgColor: '#FFEBEE', icon: 'failed' },
   pending: { text: '等待处理', color: '#FF9500', bgColor: '#FFF3E0', icon: 'pending' }
 }
 
-// 苹果风格颜色
-const APPLE_COLORS = {
-  primary: '#007AFF',
+// 现代移动应用颜色
+const COLORS = {
+  primary: '#2B7DE9',
+  primaryLight: '#EBF5FF',
+  primaryDark: '#1A3A5C',
+  accent: '#4A9EFF',
   success: '#34C759',
   danger: '#FF3B30',
   warning: '#FF9500',
-  background: '#F2F2F7',
+  background: '#F5F8FC',
   card: '#FFFFFF',
-  text: '#1C1C1E',
-  textSecondary: '#8E8E93',
-  border: '#E5E5EA'
+  text: '#1A3A5C',
+  textSecondary: '#8B9DB5',
+  textTertiary: '#A8B8CC',
+  border: '#E5ECF5'
 }
 
 // 计算有失败任务的学生数量
@@ -78,12 +82,11 @@ export default function Processing() {
   // 加载任务 - 在组件挂载和切换学生时执行
   useEffect(() => {
     if (currentStudent) {
-      // 只在第一次切换到该学生时加载 mock 数据
       loadMockTasks()
     }
   }, [currentStudent?.id])
 
-  // 加载 mock 任务数据（只在第一次切换到该学生时加载 mock 数据）
+  // 加载 mock 任务数据（只在第一次切换到该学生时加载）
   const loadMockTasks = async () => {
     if (!currentStudent) return
     
@@ -92,18 +95,14 @@ export default function Processing() {
     
     try {
       if (USE_MOCK_DATA) {
-        // 检查该学生是否已经初始化过
         if (initializedStudents.has(currentStudent.id)) {
-          // 已初始化过，只更新 loading 状态
           setLocalLoading(false)
           setLoading(false)
           return
         }
         
-        // 获取当前学生的 mock 数据
         const filteredMockTasks = mockTasks.filter(t => t.student_id === currentStudent.id)
         
-        // 添加测试用的失败和处理中任务（如果不存在）
         const testTasks = [
           {
             id: `task-failed-${currentStudent.id}`,
@@ -125,15 +124,12 @@ export default function Processing() {
           }
         ]
         
-        // 获取当前 store 中该学生的任务
         const currentStudentExistingTasks = tasks.filter(t => t.student_id === currentStudent.id)
         const existingTaskIds = new Set(currentStudentExistingTasks.map(t => t.id))
         
-        // 只添加不存在的 mock 任务
         const newMockTasks = filteredMockTasks.filter(t => !existingTaskIds.has(t.id))
         const newTestTasks = testTasks.filter(t => !existingTaskIds.has(t.id))
         
-        // 合并所有任务
         const allTasks = [
           ...tasks,
           ...newMockTasks,
@@ -141,8 +137,6 @@ export default function Processing() {
         ]
         
         setTasks(allTasks)
-        
-        // 标记该学生已初始化
         setInitializedStudents(prev => new Set([...prev, currentStudent.id]))
         
         setLocalLoading(false)
@@ -150,14 +144,12 @@ export default function Processing() {
         return
       }
 
-      // 从 Supabase 加载任务数据
       console.log('从 Supabase 加载任务数据...')
       try {
         const tasksData = await getTasksByStudent(currentStudent.id)
         console.log('Supabase 返回的任务数据:', tasksData)
         
         if (tasksData && tasksData.length > 0) {
-          // 合并现有任务和从 Supabase 加载的任务
           const existingTaskIds = new Set(tasks.map(t => t.id))
           const newTasks = tasksData.filter(t => !existingTaskIds.has(t.id))
           
@@ -170,11 +162,9 @@ export default function Processing() {
         console.error('错误详情:', error?.message, error?.code, error?.details)
       }
       
-      // 标记该学生已初始化
       setInitializedStudents(prev => new Set([...prev, currentStudent.id]))
     } catch (error) {
       console.error('加载失败:', error)
-      // 静默处理错误，不显示 Toast
     } finally {
       setLocalLoading(false)
       setLoading(false)
@@ -183,23 +173,20 @@ export default function Processing() {
   
   // 刷新任务列表（供刷新按钮使用）
   const loadTasks = async () => {
-    // 刷新时只重新加载 mock 数据，保留用户上传的任务
     await loadMockTasks()
   }
 
   // 筛选并排序任务（只显示当前学生的任务，最新的在前）
   const filteredTasks = tasks
     .filter(task => {
-      // 先按学生过滤
       if (task.student_id !== currentStudent?.id) return false
-      // 再按状态过滤
       if (activeFilter === 'all') return true
       return task.status === activeFilter
     })
     .sort((a, b) => {
       const timeA = new Date(a.created_at || 0).getTime()
       const timeB = new Date(b.created_at || 0).getTime()
-      return timeB - timeA // 降序排列，最新的在前
+      return timeB - timeA
     })
 
   // 获取各状态数量（只统计当前学生的任务）
@@ -228,7 +215,6 @@ export default function Processing() {
 
   // 拍照上传
   const handleCameraUpload = () => {
-    // 触发文件选择，使用 camera 模式
     if (fileInputRef.current) {
       fileInputRef.current.setAttribute('capture', 'environment')
       fileInputRef.current.click()
@@ -237,7 +223,6 @@ export default function Processing() {
 
   // 相册上传
   const handleAlbumUpload = () => {
-    // 触发文件选择，不使用 capture
     if (fileInputRef.current) {
       fileInputRef.current.removeAttribute('capture')
       fileInputRef.current.click()
@@ -249,7 +234,6 @@ export default function Processing() {
     const files = Array.from(e.target.files)
     if (files.length === 0) return
 
-    // 立即清空 input，关闭文件选择器弹窗
     e.target.value = ''
 
     setUploading(true)
@@ -259,24 +243,18 @@ export default function Processing() {
       duration: 0
     })
 
-    // 使用 setTimeout 让弹窗先关闭，再处理上传
     setTimeout(async () => {
       try {
         for (const file of files) {
-          // 先完成上传（创建任务），不等待AI识别完成
           await uploadFile(file)
         }
         
-        // 立即关闭loading弹窗，显示成功
         Toast.clear()
         Toast.show({
           icon: 'success',
           content: `成功上传 ${files.length} 个文件，正在后台识别...`,
           duration: 2000
         })
-        
-        // 不需要调用 loadTasks，因为 addTask 已经更新了 store
-        // React 会自动重新渲染组件
       } catch (error) {
         console.error('上传失败:', error)
         Toast.clear()
@@ -292,30 +270,25 @@ export default function Processing() {
 
   // 上传单个文件 - 只创建任务，不等待AI识别
   const uploadFile = async (file) => {
-    // 将图片转换为 base64 以便持久化存储
     const imageBase64 = await fileToBase64(file)
 
-    // 创建新任务
     const newTask = {
       id: `task-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`,
       student_id: currentStudent.id,
-      image_url: imageBase64,  // 使用 base64 存储，确保刷新后图片不丢失
+      image_url: imageBase64,
       original_name: file.name || `照片_${dayjs().format('YYYY-MM-DD_HH-mm-ss')}.jpg`,
       status: 'processing',
       result: { progress: 0 },
       created_at: new Date().toISOString()
     }
 
-    // 添加到任务列表
     addTask(newTask)
 
     if (USE_MOCK_DATA) {
-      // 模拟处理过程
       simulateProcessing(newTask.id)
       return
     }
 
-    // 真实 AI 识别处理逻辑 - 在后台异步执行，不阻塞上传
     processImageAsync(newTask.id, file)
   }
 
@@ -332,11 +305,9 @@ export default function Processing() {
   // 后台异步处理图片识别
   const processImageAsync = async (taskId, file) => {
     try {
-      // 更新进度到10% - 开始压缩图片
       updateTaskInStore(taskId, 'processing', { progress: 10 })
       console.log('开始压缩图片:', file.name, file.size, 'bytes')
 
-      // 1. 压缩图片（限制在 2048x2048 以内）
       let compressedBase64
       try {
         compressedBase64 = await compressImage(file, 1920, 1920, 0.85)
@@ -348,12 +319,10 @@ export default function Processing() {
       }
       updateTaskInStore(taskId, 'processing', { progress: 30 })
 
-      // 2. 调用 AI 接口识别题目
       updateTaskInStore(taskId, 'processing', { progress: 50 })
       const result = await recognizeQuestions(compressedBase64, currentStudent.id, taskId)
 
       if (!result.success) {
-        // 识别失败
         updateTaskInStore(taskId, 'failed', {
           error: result.error || '识别失败，请重新上传或重试',
           shouldRetry: result.shouldRetry
@@ -361,38 +330,32 @@ export default function Processing() {
         return
       }
 
-      // 识别成功
       updateTaskInStore(taskId, 'processing', { progress: 80 })
 
       const questions = result.questions || []
       const wrongCount = questions.filter(q => !q.is_correct).length
 
-      // 3. 保存识别结果到本地数据库
       const saveResult = saveRecognitionResult(taskId, currentStudent.id, questions)
       if (!saveResult.success) {
         console.warn('保存识别结果到本地失败:', saveResult.error)
       }
 
-      // 4. 更新任务状态为完成
       updateTaskInStore(taskId, 'done', {
         questionCount: questions.length,
         wrongCount: wrongCount,
         duration: result.duration
       })
 
-      // 5. 将题目添加到待确认列表
       if (questions.length > 0) {
         addPendingQuestions(questions)
       }
 
       updateTaskInStore(taskId, 'processing', { progress: 100 })
-
-      // 静默显示识别完成提示（可选）
-      console.log(`识别完成，发现 ${questions.length} 道题，${wrongCount} 道疑似错题`)
+      console.log(`识别完成，发现 ${questions.length} 道题目，${wrongCount} 道疑似错题`)
 
     } catch (error) {
       console.error('处理失败:', error)
-      updateTaskInStore(newTask.id, 'failed', {
+      updateTaskInStore(taskId, 'failed', {
         error: error.message || '处理失败，请重新上传或重试'
       })
 
@@ -413,20 +376,16 @@ export default function Processing() {
         progress = 100
         clearInterval(interval)
         
-        // 模拟随机成功或失败
         const isSuccess = Math.random() > 0.2
         if (isSuccess) {
-          // 生成模拟识别的题目（6道题）
           const questionCount = 6
-          const wrongCount = Math.floor(Math.random() * 3) + 1 // 1-3道错题
+          const wrongCount = Math.floor(Math.random() * 3) + 1
           
-          // 更新任务状态
           updateTaskInStore(taskId, 'done', { 
             questionCount,
             wrongCount
           })
           
-          // 生成题目并同步到待确认列表
           const generatedQuestions = generateMockQuestions(taskId, questionCount, wrongCount)
           console.log('生成的题目:', generatedQuestions)
           addPendingQuestions(generatedQuestions)
@@ -434,7 +393,7 @@ export default function Processing() {
           
           Toast.show({
             icon: 'success',
-            content: `识别完成，发现 ${questionCount} 道题，${wrongCount} 道疑似错题`
+            content: `识别完成，发现 ${questionCount} 道题目，${wrongCount} 道疑似错题`
           })
         } else {
           updateTaskInStore(taskId, 'failed', { 
@@ -452,7 +411,6 @@ export default function Processing() {
     const questions = []
     const wrongIndices = new Set()
     
-    // 随机选择哪些题目是错题
     while (wrongIndices.size < wrongCount) {
       wrongIndices.add(Math.floor(Math.random() * count))
     }
@@ -492,24 +450,18 @@ export default function Processing() {
 
         try {
           if (USE_MOCK_DATA) {
-            // 更新为处理中状态
             updateTaskInStore(task.id, 'processing', { progress: 0 })
             Toast.clear()
-            // 重新模拟处理
             simulateProcessing(task.id)
             return
           }
 
-          // 真实重试逻辑：需要重新获取文件并识别
-          // 由于浏览器安全限制，无法直接重新获取已选择的文件
-          // 这里提示用户重新上传
           Toast.clear()
           Toast.show({
             icon: 'fail',
             content: '请重新上传图片进行识别'
           })
 
-          // 删除失败的任务
           setTasks(tasks.filter(t => t.id !== task.id))
         } catch (error) {
           Toast.clear()
@@ -570,7 +522,7 @@ export default function Processing() {
           <div style={{ color: config.color, fontSize: '14px', fontWeight: 500 }}>
             {config.text}
             {task.result?.questionCount && (
-              <span style={{ color: APPLE_COLORS.textSecondary, marginLeft: '8px', fontWeight: 400 }}>
+              <span style={{ color: COLORS.textSecondary, marginLeft: '8px', fontWeight: 400 }}>
                 {task.result.questionCount}题
               </span>
             )}
@@ -605,7 +557,7 @@ export default function Processing() {
             width: '24px',
             height: '24px',
             borderRadius: '50%',
-            background: APPLE_COLORS.success,
+            background: COLORS.success,
             display: 'flex',
             alignItems: 'center',
             justifyContent: 'center'
@@ -622,7 +574,7 @@ export default function Processing() {
               width: '24px',
               height: '24px',
               borderRadius: '50%',
-              background: APPLE_COLORS.danger,
+              background: COLORS.danger,
               display: 'flex',
               alignItems: 'center',
               justifyContent: 'center',
@@ -645,7 +597,7 @@ export default function Processing() {
             width: '24px',
             height: '24px',
             borderRadius: '50%',
-            border: '2px solid ' + APPLE_COLORS.primary,
+            border: '2px solid ' + COLORS.primary,
             borderTopColor: 'transparent',
             animation: 'spin 1s linear infinite'
           }} />
@@ -660,7 +612,7 @@ export default function Processing() {
     if (task.status === 'done' && task.result?.questionCount) {
       return (
         <div style={{ display: 'flex', alignItems: 'center', gap: '12px', marginTop: '4px' }}>
-          <span style={{ fontSize: '12px', color: APPLE_COLORS.textSecondary, display: 'flex', alignItems: 'center', gap: '4px' }}>
+          <span style={{ fontSize: '12px', color: COLORS.textSecondary, display: 'flex', alignItems: 'center', gap: '4px' }}>
             <svg width="12" height="12" viewBox="0 0 1024 1024" fill="currentColor">
               <path d="M512 64C264.6 64 64 264.6 64 512s200.6 448 448 448 448-200.6 448-448S759.4 64 512 64zm0 832c-212 0-384-172-384-384s172-384 384-384 384 172 384 384-172 384-384 384z"/>
               <path d="M704 480H544V320c0-17.6-14.4-32-32-32s-32 14.4-32 32v192c0 17.6 14.4 32 32 32h192c17.6 0 32-14.4 32-32s-14.4-32-32-32z"/>
@@ -673,10 +625,8 @@ export default function Processing() {
     return null
   }
 
-  // 所有学生失败任务的总数量（用于提醒还有其他学生待处理）
+  // 所有学生失败任务的总数量
   const getTotalFailedCount = () => {
-    // 只从 store 中的 tasks 统计所有学生的失败任务
-    // store 中的 tasks 是真实状态，已删除的任务不会在这里
     return tasks.filter(t => t.status === 'failed').length
   }
   
@@ -695,13 +645,13 @@ export default function Processing() {
     return (
       <div style={{ padding: '64px 0', textAlign: 'center' }}>
         <SpinLoading style={{ '--size': '48px' }} />
-        <div style={{ marginTop: '16px', color: APPLE_COLORS.textSecondary }}>加载中...</div>
+        <div style={{ marginTop: '16px', color: COLORS.textSecondary }}>加载中...</div>
       </div>
     )
   }
 
   return (
-    <div style={{ padding: '0', background: APPLE_COLORS.background, minHeight: '100%', paddingBottom: '80px' }}>
+    <div style={{ padding: '0', background: COLORS.background, minHeight: '100%', paddingBottom: '80px' }}>
       {/* 隐藏的文件输入 */}
       <input
         ref={fileInputRef}
@@ -712,24 +662,24 @@ export default function Processing() {
         onChange={handleFileSelect}
       />
 
-      {/* 顶部标题栏 - 苹果风格 */}
+      {/* 顶部标题栏 - 现代移动应用风格 */}
       <div style={{ 
-        background: APPLE_COLORS.card, 
-        padding: '16px',
+        background: 'transparent', 
+        padding: '12px 16px 0',
         display: 'flex',
         justifyContent: 'space-between',
         alignItems: 'center',
-        borderBottom: '1px solid ' + APPLE_COLORS.border
+        borderBottom: 'none'
       }}>
-        <h1 style={{ margin: 0, fontSize: '20px', fontWeight: 600, color: APPLE_COLORS.text }}>处理中</h1>
+        <h1 style={{ margin: 0, fontSize: '28px', fontWeight: 700, color: '#1A3A5C', letterSpacing: '-0.02em' }}>处理中</h1>
         <Button 
           fill="none" 
-          style={{ color: APPLE_COLORS.primary, fontSize: '15px' }}
+          style={{ color: '#4A9EFF', fontSize: '14px', fontWeight: 600 }}
           onClick={loadTasks}
           disabled={uploading}
         >
           <span style={{ display: 'flex', alignItems: 'center', gap: '4px' }}>
-            <svg width="18" height="18" viewBox="0 0 1024 1024" fill="currentColor">
+            <svg width="16" height="16" viewBox="0 0 1024 1024" fill="currentColor">
               <path d="M832 384c-12.8-12.8-32-12.8-44.8 0L704 467.2V320c0-105.6-86.4-192-192-192S320 214.4 320 320s86.4 192 192 192c48 0 92.8-17.6 128-48 12.8-12.8 12.8-32 0-44.8s-32-12.8-44.8 0C572.8 438.4 544 448 512 448c-70.4 0-128-57.6-128-128s57.6-128 128-128 128 57.6 128 128v147.2l-83.2-83.2c-12.8-12.8-32-12.8-44.8 0s-12.8 32 0 44.8l137.6 137.6c12.8 12.8 32 12.8 44.8 0l137.6-137.6c12.8-12.8 12.8-32 0-44.8z"/>
             </svg>
             刷新
@@ -737,8 +687,14 @@ export default function Processing() {
         </Button>
       </div>
 
-      {/* 学生信息卡片 - 苹果风格 */}
-      <div style={{ background: APPLE_COLORS.card, padding: '16px', borderBottom: '1px solid ' + APPLE_COLORS.border }}>
+      {/* 学生信息卡片 - 现代移动应用风格 */}
+      <div style={{ 
+        background: COLORS.card, 
+        padding: '16px',
+        margin: '12px 16px',
+        borderRadius: '16px',
+        boxShadow: '0 2px 8px rgba(0,0,0,0.04)'
+      }}>
         <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
           <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
             <div
@@ -746,43 +702,43 @@ export default function Processing() {
                 width: '48px',
                 height: '48px',
                 borderRadius: '50%',
-                background: 'linear-gradient(135deg, #E8F4FD 0%, #D6EBFA 100%)',
+                background: 'linear-gradient(135deg, #4A9EFF 0%, #2B7DE9 100%)',
                 display: 'flex',
                 alignItems: 'center',
                 justifyContent: 'center',
                 overflow: 'hidden',
-                boxShadow: '0 2px 8px rgba(0,122,255,0.15)'
+                boxShadow: '0 4px 12px rgba(43, 125, 233, 0.25)'
               }}
             >
               {currentStudent.avatar ? (
                 <img src={currentStudent.avatar} alt="" style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
               ) : (
-                <svg width="28" height="28" viewBox="0 0 1024 1024" fill={APPLE_COLORS.primary}>
-                  <path d="M512 512c88 0 160-72 160-160s-72-160-160-160-160 72-160 160 72 160 160 160zm0-256c52.8 0 96 43.2 96 96s-43.2 96-96 96-96-43.2-96-96 43.2-96 96-96zm448 544v64c0 35.2-28.8 64-64 64H128c-35.2 0-64-28.8-64-64v-64c0-88 72-160 160-160h32c17.6 0 34.4 3.2 50.4 9.6 33.6 12.8 70.4 20.8 108.8 23.2 9.6 0.8 19.2 1.2 28.8 1.2s19.2-0.4 28.8-1.2c38.4-2.4 75.2-10.4 108.8-23.2 16-6.4 32.8-9.6 50.4-9.6h32c88 0 160 72 160 160zM128 800h768c0-52.8-43.2-96-96-96h-32c-11.2 0-22.4 2.4-32.8 6.4-40 16-84.8 25.6-130.4 28.8-11.2 0.8-22.4 1.2-33.6 1.2s-22.4-0.4-33.6-1.2c-45.6-3.2-90.4-12.8-130.4-28.8-10.4-4-21.6-6.4-32.8-6.4h-32c-52.8 0-96 43.2-96 96z"/>
+                <svg width="24" height="24" viewBox="0 0 24 24" fill="#fff">
+                  <path d="M12 12c2.21 0 4-1.79 4-4s-1.79-4-4-4-4 1.79-4 4 1.79 4 4 4zm0 2c-2.67 0-8 1.34-8 4v2h16v-2c0-2.66-5.33-4-8-4z"/>
                 </svg>
               )}
             </div>
             <div>
-              <div style={{ fontSize: '17px', fontWeight: 600, color: APPLE_COLORS.text }}>
+              <div style={{ fontSize: '16px', fontWeight: 600, color: '#1A3A5C' }}>
                 {currentStudent.name}
               </div>
-              <div style={{ fontSize: '13px', color: APPLE_COLORS.textSecondary, marginTop: '2px' }}>
+              <div style={{ fontSize: '13px', color: '#8B9DB5', marginTop: '2px', fontWeight: 400 }}>
                 {currentStudent.class || '暂无班级'}
               </div>
             </div>
           </div>
           <Button 
             fill="none" 
-            style={{ color: APPLE_COLORS.primary, fontSize: '15px', display: 'flex', alignItems: 'center', gap: '4px' }}
+            style={{ color: '#4A9EFF', fontSize: '14px', fontWeight: 600, display: 'flex', alignItems: 'center', gap: '4px' }}
             onClick={() => setShowStudentSwitcher(true)}
           >
-            切换学生
+            切换
             <Badge 
               content={totalFailedCount > 0 ? (totalFailedCount > 9 ? '9+' : String(totalFailedCount)) : null}
               style={{ 
-                '--color': APPLE_COLORS.danger,
+                '--color': COLORS.danger,
                 '--background': '#fff',
-                '--border': APPLE_COLORS.danger,
+                '--border': COLORS.danger,
                 '--padding': '0 6px',
                 '--font-size': '12px',
                 '--top': '-4px'
@@ -794,61 +750,72 @@ export default function Processing() {
         </div>
       </div>
 
-      {/* 上传按钮区域 - 苹果风格 */}
-      <div style={{ padding: '16px', background: APPLE_COLORS.card, borderBottom: '1px solid ' + APPLE_COLORS.border }}>
+      {/* 上传按钮区域 - 现代移动应用风格 */}
+      <div style={{ padding: '16px', background: COLORS.background }}>
         <div
           onClick={showUploadOptions}
           style={{
-            border: '2px dashed ' + APPLE_COLORS.primary,
-            borderRadius: '12px',
-            padding: '32px 24px',
+            borderRadius: '24px',
+            padding: '48px 24px',
             display: 'flex',
             flexDirection: 'column',
             alignItems: 'center',
-            gap: '12px',
+            gap: '16px',
             cursor: uploading ? 'not-allowed' : 'pointer',
-            background: 'linear-gradient(135deg, #F0F7FF 0%, #E8F4FD 100%)',
+            background: 'linear-gradient(160deg, #EBF5FF 0%, #E0EEFB 50%, #D6E8F7 100%)',
             opacity: uploading ? 0.6 : 1,
-            transition: 'all 0.2s',
-            boxShadow: '0 2px 12px rgba(0,122,255,0.08)'
+            transition: 'all 0.25s cubic-bezier(0.4, 0, 0.2, 1)',
+            boxShadow: '0 8px 24px rgba(0, 102, 204, 0.1), 0 2px 8px rgba(0, 102, 204, 0.06)',
+            border: 'none'
           }}
         >
           <div style={{
-            width: '56px',
-            height: '56px',
+            width: '72px',
+            height: '72px',
             borderRadius: '50%',
-            background: 'linear-gradient(135deg, ' + APPLE_COLORS.primary + ' 0%, #0051D5 100%)',
+            background: 'linear-gradient(135deg, #4A9EFF 0%, #2B7DE9 100%)',
             display: 'flex',
             alignItems: 'center',
             justifyContent: 'center',
-            boxShadow: '0 4px 12px rgba(0,122,255,0.3)'
+            boxShadow: '0 8px 20px rgba(43, 125, 233, 0.35), inset 0 1px 0 rgba(255,255,255,0.2)',
+            transition: 'transform 0.25s ease'
           }}>
-            <svg width="28" height="28" viewBox="0 0 1024 1024" fill="#fff">
-              <path d="M832 256h-96l-32-64c-12.8-25.6-38.4-41.6-67.2-41.6H387.2c-28.8 0-54.4 16-67.2 41.6l-32 64H192c-70.4 0-128 57.6-128 128v384c0 70.4 57.6 128 128 128h640c70.4 0 128-57.6 128-128V384c0-70.4-57.6-128-128-128zM512 832c-88 0-160-72-160-160s72-160 160-160 160 72 160 160-72 160-160 160zm0-256c-52.8 0-96 43.2-96 96s43.2 96 96 96 96-43.2 96-96-43.2-96-96-96z"/>
+            <svg width="32" height="32" viewBox="0 0 24 24" fill="#fff">
+              <path d="M12 15.2a3.2 3.2 0 1 0 0-6.4 3.2 3.2 0 0 0 0 6.4z"/>
+              <path d="M9 2L7.17 4H4c-1.1 0-2 .9-2 2v12c0 1.1.9 2 2 2h16c1.1 0 2-.9 2-2V6c0-1.1-.9-2-2-2h-3.17L15 2H9zm3 15c-2.76 0-5-2.24-5-5s2.24-5 5-5 5 2.24 5 5-2.24 5-5 5z" fillRule="evenodd"/>
             </svg>
           </div>
           <div style={{ textAlign: 'center' }}>
-            <div style={{ fontSize: '17px', fontWeight: 600, color: APPLE_COLORS.primary, marginBottom: '4px' }}>
-              点击上传
+            <div style={{ 
+              fontSize: '22px', 
+              fontWeight: 700, 
+              color: '#1A3A5C', 
+              marginBottom: '6px',
+              letterSpacing: '-0.02em',
+              lineHeight: '1.3'
+            }}>
+              拍照上传
             </div>
-            <div style={{ fontSize: '14px', color: APPLE_COLORS.textSecondary }}>
-              支持拍照上传或从相册选择
-            </div>
-            <div style={{ fontSize: '12px', color: APPLE_COLORS.textSecondary, marginTop: '2px' }}>
-              可批量上传作业或试卷
+            <div style={{ 
+              fontSize: '14px', 
+              color: '#6B8AA8', 
+              lineHeight: '1.5',
+              fontWeight: 400
+            }}>
+              Qwen-VL 智能识别题目
             </div>
           </div>
         </div>
       </div>
 
-      {/* 状态筛选标签 - 苹果风格 */}
+      {/* 状态筛选标签 */}
       <div style={{ 
-        background: APPLE_COLORS.card, 
+        background: COLORS.card, 
         padding: '12px 16px',
         display: 'flex',
         gap: '8px',
         overflowX: 'auto',
-        borderBottom: '1px solid ' + APPLE_COLORS.border
+        borderBottom: '1px solid ' + COLORS.border
       }}>
         {FILTER_TABS.map(tab => {
           const count = getStatusCount(tab.key)
@@ -863,8 +830,8 @@ export default function Processing() {
                 fontSize: '14px',
                 whiteSpace: 'nowrap',
                 cursor: 'pointer',
-                background: isActive ? APPLE_COLORS.primary : APPLE_COLORS.background,
-                color: isActive ? '#fff' : APPLE_COLORS.textSecondary,
+                background: isActive ? COLORS.primary : COLORS.background,
+                color: isActive ? '#fff' : COLORS.textSecondary,
                 fontWeight: isActive ? 600 : 400,
                 transition: 'all 0.2s',
                 boxShadow: isActive ? '0 2px 8px rgba(0,122,255,0.3)' : 'none'
@@ -876,7 +843,7 @@ export default function Processing() {
         })}
       </div>
 
-      {/* 任务列表 - 苹果风格 */}
+      {/* 任务列表 */}
       <div style={{ padding: '12px' }}>
         {filteredTasks.length === 0 ? (
           <Empty
@@ -896,7 +863,7 @@ export default function Processing() {
                     onClick: () => {
                       Dialog.confirm({
                         title: '删除确认',
-                        content: `确定要删除"${task.original_name || '未命名作业'}"吗？删除后不可恢复。`,
+                        content: `确定要删除 "${task.original_name || '未命名作业'}" 吗？删除后不可恢复。`,
                         confirmText: '删除',
                         cancelText: '取消',
                         confirmButtonProps: { color: 'danger' },
@@ -914,7 +881,7 @@ export default function Processing() {
               >
                 <div
                   style={{
-                    background: APPLE_COLORS.card,
+                    background: COLORS.card,
                     borderRadius: '12px',
                     padding: '16px',
                     display: 'flex',
@@ -929,7 +896,7 @@ export default function Processing() {
                       width: '64px',
                       height: '64px',
                       borderRadius: '10px',
-                      background: APPLE_COLORS.background,
+                      background: COLORS.background,
                       overflow: 'hidden',
                       flexShrink: 0,
                       cursor: 'pointer'
@@ -953,7 +920,7 @@ export default function Processing() {
                     }}>
                       <div style={{ 
                         fontSize: '15px', 
-                        color: APPLE_COLORS.text,
+                        color: COLORS.text,
                         overflow: 'hidden',
                         textOverflow: 'ellipsis',
                         whiteSpace: 'nowrap',
@@ -963,7 +930,7 @@ export default function Processing() {
                       }}>
                         {task.original_name || '未命名作业'}
                       </div>
-                      <span style={{ fontSize: '13px', color: APPLE_COLORS.textSecondary, flexShrink: 0 }}>
+                      <span style={{ fontSize: '13px', color: COLORS.textSecondary, flexShrink: 0 }}>
                         {dayjs(task.created_at).format('HH:mm')}
                       </span>
                     </div>

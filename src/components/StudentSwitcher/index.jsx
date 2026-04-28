@@ -3,17 +3,21 @@ import { Popup, Badge, Button, Toast, Dialog, Mask, SwipeAction } from 'antd-mob
 import { useStudentStore, useTaskStore, useWrongQuestionStore, usePendingQuestionStore, useExamStore } from '../../store'
 import { createStudent } from '../../services/supabaseService'
 
-// 苹果风格颜色
-const APPLE_COLORS = {
-  primary: '#007AFF',
+// 现代移动应用颜色
+const COLORS = {
+  primary: '#2B7DE9',
+  primaryLight: '#EBF5FF',
+  primaryDark: '#1A3A5C',
+  accent: '#4A9EFF',
   success: '#34C759',
   danger: '#FF3B30',
   warning: '#FF9500',
-  background: '#F2F2F7',
+  background: '#F5F8FC',
   card: '#FFFFFF',
-  text: '#1C1C1E',
-  textSecondary: '#8E8E93',
-  border: '#E5E5EA'
+  text: '#1A3A5C',
+  textSecondary: '#8B9DB5',
+  textTertiary: '#A8B8CC',
+  border: '#E5ECF5'
 }
 
 // 年级选项
@@ -58,13 +62,9 @@ export default function StudentSwitcher({ visible, onClose, badgeType }) {
   const getStudentTaskCount = (studentId) => {
     switch (badgeType) {
       case 'failed': {
-        // 只从 store 中的 tasks 统计，因为 mock 数据可能已被删除
-        // store 中的 tasks 是真实状态，已删除的任务不会在这里
         return tasks.filter(t => t.student_id === studentId && t.status === 'failed').length
       }
       case 'pending': {
-        // 只从 store 中的 pendingQuestions 统计该学生的疑似错题
-        // 并过滤掉已加入错题本的题目，保持和列表一致
         const addedIds = getAddedToWrongBookIds(studentId)
         return pendingQuestions.filter(q => 
           q.student_id === studentId && 
@@ -73,11 +73,9 @@ export default function StudentSwitcher({ visible, onClose, badgeType }) {
         ).length
       }
       case 'grading': {
-        // 从 exams store 中统计该学生未批改的试卷数量
         return exams.filter(e => e.student_id === studentId && e.status === 'ungraded').length
       }
       case 'wrongbook': {
-        // 从 wrongQuestions store 中统计该学生未掌握的错题数量（status !== 'mastered'）
         return wrongQuestions.filter(wq => wq.student_id === studentId && wq.status !== 'mastered').length
       }
       default:
@@ -105,15 +103,15 @@ export default function StudentSwitcher({ visible, onClose, badgeType }) {
   const getBadgeColor = () => {
     switch (badgeType) {
       case 'failed':
-        return APPLE_COLORS.danger
+        return COLORS.danger
       case 'pending':
-        return APPLE_COLORS.primary
+        return COLORS.primary
       case 'grading':
-        return APPLE_COLORS.success
+        return COLORS.success
       case 'wrongbook':
-        return APPLE_COLORS.danger
+        return COLORS.danger
       default:
-        return APPLE_COLORS.primary
+        return COLORS.primary
     }
   }
 
@@ -170,7 +168,6 @@ export default function StudentSwitcher({ visible, onClose, badgeType }) {
     }
 
     try {
-      // 保存到 Supabase
       const created = await createStudent(newStudent)
       if (created) {
         addStudent(created)
@@ -207,7 +204,7 @@ export default function StudentSwitcher({ visible, onClose, badgeType }) {
 
   return (
     <>
-      {/* 学生切换弹窗 - 苹果风格 */}
+      {/* 学生切换弹窗 - 现代风格 */}
       <Popup
         visible={visible && !showAddStudent}
         onMaskClick={onClose}
@@ -217,7 +214,7 @@ export default function StudentSwitcher({ visible, onClose, badgeType }) {
           borderTopRightRadius: '20px',
           minHeight: '300px',
           maxHeight: '70vh',
-          background: APPLE_COLORS.card,
+          background: COLORS.card,
           padding: 0
         }}
       >
@@ -235,10 +232,10 @@ export default function StudentSwitcher({ visible, onClose, badgeType }) {
             alignItems: 'center',
             flexShrink: 0
           }}>
-            <span style={{ fontSize: '20px', fontWeight: 600, color: APPLE_COLORS.text }}>切换学生</span>
+            <span style={{ fontSize: '20px', fontWeight: 600, color: COLORS.text }}>切换学生</span>
             <span
               onClick={onClose}
-              style={{ fontSize: '28px', color: APPLE_COLORS.textSecondary, cursor: 'pointer', lineHeight: 1 }}
+              style={{ fontSize: '28px', color: COLORS.textSecondary, cursor: 'pointer', lineHeight: 1 }}
             >
               ×
             </span>
@@ -267,7 +264,7 @@ export default function StudentSwitcher({ visible, onClose, badgeType }) {
                       {
                         key: 'delete',
                         text: '删除',
-                        color: APPLE_COLORS.danger,
+                        color: COLORS.danger,
                         onClick: (e) => {
                           e.stopPropagation()
                           Dialog.confirm({
@@ -298,7 +295,7 @@ export default function StudentSwitcher({ visible, onClose, badgeType }) {
                         gap: '12px',
                         padding: '12px',
                         borderRadius: '12px',
-                        background: isCurrent ? '#E8F4FD' : APPLE_COLORS.background,
+                        background: isCurrent ? COLORS.primaryLight : COLORS.background,
                         cursor: 'pointer',
                         transition: 'all 0.2s'
                       }}
@@ -307,28 +304,28 @@ export default function StudentSwitcher({ visible, onClose, badgeType }) {
                         width: '44px',
                         height: '44px',
                         borderRadius: '50%',
-                        background: isCurrent ? 'linear-gradient(135deg, #E8F4FD 0%, #D6EBFA 100%)' : '#fff',
+                        background: isCurrent ? 'linear-gradient(135deg, #4A9EFF 0%, #2B7DE9 100%)' : '#fff',
                         display: 'flex',
                         alignItems: 'center',
                         justifyContent: 'center',
                         overflow: 'hidden',
                         flexShrink: 0,
-                        boxShadow: isCurrent ? '0 2px 8px rgba(0,122,255,0.15)' : 'none'
+                        boxShadow: isCurrent ? '0 4px 12px rgba(43, 125, 233, 0.25)' : 'none'
                       }}>
                         {student.avatar ? (
                           <img src={student.avatar} alt="" style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
                         ) : (
-                          <svg width="24" height="24" viewBox="0 0 1024 1024" fill={isCurrent ? APPLE_COLORS.primary : APPLE_COLORS.textSecondary}>
-                            <path d="M512 512c88 0 160-72 160-160s-72-160-160-160-160 72-160 160 72 160 160 160zm0-256c52.8 0 96 43.2 96 96s-43.2 96-96 96-96-43.2-96-96 43.2-96 96-96zm448 544v64c0 35.2-28.8 64-64 64H128c-35.2 0-64-28.8-64-64v-64c0-88 72-160 160-160h32c17.6 0 34.4 3.2 50.4 9.6 33.6 12.8 70.4 20.8 108.8 23.2 9.6 0.8 19.2 1.2 28.8 1.2s19.2-0.4 28.8-1.2c38.4-2.4 75.2-10.4 108.8-23.2 16-6.4 32.8-9.6 50.4-9.6h32c88 0 160 72 160 160zM128 800h768c0-52.8-43.2-96-96-96h-32c-11.2 0-22.4 2.4-32.8 6.4-40 16-84.8 25.6-130.4 28.8-11.2 0.8-22.4 1.2-33.6 1.2s-22.4-0.4-33.6-1.2c-45.6-3.2-90.4-12.8-130.4-28.8-10.4-4-21.6-6.4-32.8-6.4h-32c-52.8 0-96 43.2-96 96z"/>
+                          <svg width="24" height="24" viewBox="0 0 24 24" fill={isCurrent ? '#fff' : COLORS.textSecondary}>
+                            <path d="M12 12c2.21 0 4-1.79 4-4s-1.79-4-4-4-4 1.79-4 4 1.79 4 4 4zm0 2c-2.67 0-8 1.34-8 4v2h16v-2c0-2.66-5.33-4-8-4z"/>
                           </svg>
                         )}
                       </div>
 
                       <div style={{ flex: 1, minWidth: 0 }}>
-                        <div style={{ fontSize: '16px', fontWeight: isCurrent ? 600 : 500, color: APPLE_COLORS.text }}>
+                        <div style={{ fontSize: '16px', fontWeight: isCurrent ? 600 : 500, color: COLORS.text }}>
                           {student.name}
                         </div>
-                        <div style={{ fontSize: '13px', color: APPLE_COLORS.textSecondary, marginTop: '2px' }}>
+                        <div style={{ fontSize: '13px', color: COLORS.textSecondary, marginTop: '2px' }}>
                           {student.class || '暂无班级'}
                         </div>
                       </div>
@@ -356,8 +353,8 @@ export default function StudentSwitcher({ visible, onClose, badgeType }) {
                         </Badge>
                       )}
 
-                      <svg width="18" height="18" viewBox="0 0 1024 1024" fill={isCurrent ? APPLE_COLORS.primary : APPLE_COLORS.border} style={{ flexShrink: 0 }}>
-                        <path d="M384 128l384 384-384 384"/>
+                      <svg width="18" height="18" viewBox="0 0 24 24" fill={isCurrent ? COLORS.primary : COLORS.border} style={{ flexShrink: 0 }}>
+                        <path d="M10 6L8.59 7.41 13.17 12l-4.58 4.59L10 18l6-6z"/>
                       </svg>
                     </div>
                   </SwipeAction>
@@ -369,30 +366,29 @@ export default function StudentSwitcher({ visible, onClose, badgeType }) {
           {/* 底部按钮区域 - 固定底部 */}
           <div style={{
             padding: '16px',
-            borderTop: '1px solid ' + APPLE_COLORS.border,
-            background: APPLE_COLORS.card,
+            borderTop: '1px solid ' + COLORS.border,
+            background: COLORS.card,
             flexShrink: 0
           }}>
             <Button
               block
               fill="none"
               style={{
-                border: '2px dashed ' + APPLE_COLORS.primary,
+                border: '2px dashed ' + COLORS.primary,
                 borderRadius: '12px',
                 padding: '16px',
-                color: APPLE_COLORS.primary,
+                color: COLORS.primary,
                 fontSize: '16px',
                 display: 'flex',
                 alignItems: 'center',
                 justifyContent: 'center',
                 gap: '8px',
-                background: '#F0F7FF'
+                background: COLORS.primaryLight
               }}
               onClick={() => setShowAddStudent(true)}
             >
-              <svg width="22" height="22" viewBox="0 0 1024 1024" fill="currentColor">
-                <path d="M512 64C264.6 64 64 264.6 64 512s200.6 448 448 448 448-200.6 448-448S759.4 64 512 64zm0 832c-212 0-384-172-384-384s172-384 384-384 384 172 384 384-172 384-384 384z"/>
-                <path d="M544 320H480v160H320v64h160v160h64V544h160v-64H544z"/>
+              <svg width="22" height="22" viewBox="0 0 24 24" fill="currentColor">
+                <path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm5 11h-4v4h-2v-4H7v-2h4V7h2v4h4v2z"/>
               </svg>
               添加学生
             </Button>
@@ -420,7 +416,7 @@ export default function StudentSwitcher({ visible, onClose, badgeType }) {
               right: 0,
               bottom: 0,
               height: '75vh',
-              background: APPLE_COLORS.background,
+              background: COLORS.background,
               borderRadius: '20px 20px 0 0',
               zIndex: 1001,
               display: 'flex',
@@ -446,25 +442,25 @@ export default function StudentSwitcher({ visible, onClose, badgeType }) {
             </div>
 
             <div style={{
-              background: APPLE_COLORS.card,
+              background: COLORS.card,
               padding: '12px 16px',
               display: 'flex',
               justifyContent: 'space-between',
               alignItems: 'center',
-              borderBottom: '1px solid ' + APPLE_COLORS.border,
+              borderBottom: '1px solid ' + COLORS.border,
               flexShrink: 0
             }}>
               <Button
                 fill="none"
-                style={{ color: APPLE_COLORS.textSecondary, fontSize: '16px' }}
+                style={{ color: COLORS.textSecondary, fontSize: '16px' }}
                 onClick={handleCancel}
               >
                 取消
               </Button>
-              <span style={{ fontSize: '18px', fontWeight: 600, color: APPLE_COLORS.text }}>添加学生</span>
+              <span style={{ fontSize: '18px', fontWeight: 600, color: COLORS.text }}>添加学生</span>
               <Button
                 fill="none"
-                style={{ color: APPLE_COLORS.primary, fontSize: '16px', fontWeight: 600 }}
+                style={{ color: COLORS.primary, fontSize: '16px', fontWeight: 600 }}
                 onClick={handleSave}
               >
                 保存
@@ -496,8 +492,8 @@ export default function StudentSwitcher({ visible, onClose, badgeType }) {
                     width: '100px',
                     height: '100px',
                     borderRadius: '50%',
-                    border: '2px dashed ' + APPLE_COLORS.border,
-                    background: formData.avatar ? 'transparent' : APPLE_COLORS.background,
+                    border: '2px dashed ' + COLORS.border,
+                    background: formData.avatar ? 'transparent' : COLORS.background,
                     display: 'flex',
                     flexDirection: 'column',
                     alignItems: 'center',
@@ -514,23 +510,23 @@ export default function StudentSwitcher({ visible, onClose, badgeType }) {
                     />
                   ) : (
                     <>
-                      <svg width="36" height="36" viewBox="0 0 1024 1024" fill={APPLE_COLORS.textSecondary} style={{ marginBottom: '4px' }}>
-                        <path d="M832 256h-96l-32-64c-12.8-25.6-38.4-41.6-67.2-41.6H387.2c-28.8 0-54.4 16-67.2 41.6l-32 64H192c-70.4 0-128 57.6-128 128v384c0 70.4 57.6 128 128 128h640c70.4 0 128-57.6 128-128V384c0-70.4-57.6-128-128-128zM512 832c-88 0-160-72-160-160s72-160 160-160 160 72 160 160-72 160-160 160zm0-256c-52.8 0-96 43.2-96 96s43.2 96 96 96 96-43.2 96-96-43.2-96-96-96z"/>
+                      <svg width="36" height="36" viewBox="0 0 24 24" fill={COLORS.textSecondary} style={{ marginBottom: '4px' }}>
+                        <path d="M12 12c2.21 0 4-1.79 4-4s-1.79-4-4-4-4 1.79-4 4 1.79 4 4 4zm0 2c-2.67 0-8 1.34-8 4v2h16v-2c0-2.66-5.33-4-8-4z"/>
                       </svg>
-                      <span style={{ fontSize: '13px', color: APPLE_COLORS.textSecondary }}>点击上传头像</span>
+                      <span style={{ fontSize: '13px', color: COLORS.textSecondary }}>点击上传头像</span>
                     </>
                   )}
                 </div>
               </div>
 
-              <div style={{ background: APPLE_COLORS.card, borderRadius: '12px', overflow: 'hidden' }}>
+              <div style={{ background: COLORS.card, borderRadius: '12px', overflow: 'hidden' }}>
                 <div style={{
                   display: 'flex',
                   alignItems: 'center',
                   padding: '16px',
-                  borderBottom: '1px solid ' + APPLE_COLORS.border
+                  borderBottom: '1px solid ' + COLORS.border
                 }}>
-                  <span style={{ width: '70px', fontSize: '16px', color: APPLE_COLORS.text, fontWeight: 500 }}>姓名</span>
+                  <span style={{ width: '70px', fontSize: '16px', color: COLORS.text, fontWeight: 500 }}>姓名</span>
                   <input
                     type="text"
                     placeholder="请输入学生姓名"
@@ -541,7 +537,7 @@ export default function StudentSwitcher({ visible, onClose, badgeType }) {
                       border: 'none',
                       outline: 'none',
                       fontSize: '16px',
-                      color: APPLE_COLORS.text,
+                      color: COLORS.text,
                       background: 'transparent'
                     }}
                   />
@@ -551,9 +547,9 @@ export default function StudentSwitcher({ visible, onClose, badgeType }) {
                   display: 'flex',
                   alignItems: 'center',
                   padding: '16px',
-                  borderBottom: '1px solid ' + APPLE_COLORS.border
+                  borderBottom: '1px solid ' + COLORS.border
                 }}>
-                  <span style={{ width: '70px', fontSize: '16px', color: APPLE_COLORS.text, fontWeight: 500 }}>年级</span>
+                  <span style={{ width: '70px', fontSize: '16px', color: COLORS.text, fontWeight: 500 }}>年级</span>
                   <select
                     value={formData.grade}
                     onChange={(e) => setFormData({ ...formData, grade: e.target.value })}
@@ -562,7 +558,7 @@ export default function StudentSwitcher({ visible, onClose, badgeType }) {
                       border: 'none',
                       outline: 'none',
                       fontSize: '16px',
-                      color: formData.grade ? APPLE_COLORS.text : APPLE_COLORS.textSecondary,
+                      color: formData.grade ? COLORS.text : COLORS.textSecondary,
                       background: 'transparent',
                       appearance: 'none',
                       cursor: 'pointer'
@@ -573,8 +569,8 @@ export default function StudentSwitcher({ visible, onClose, badgeType }) {
                       <option key={grade} value={grade}>{grade}</option>
                     ))}
                   </select>
-                  <svg width="18" height="18" viewBox="0 0 1024 1024" fill={APPLE_COLORS.textSecondary}>
-                    <path d="M512 704l-256-256h512z"/>
+                  <svg width="18" height="18" viewBox="0 0 24 24" fill={COLORS.textSecondary}>
+                    <path d="M7 10l5 5 5-5z"/>
                   </svg>
                 </div>
 
@@ -582,9 +578,9 @@ export default function StudentSwitcher({ visible, onClose, badgeType }) {
                   display: 'flex',
                   alignItems: 'center',
                   padding: '16px',
-                  borderBottom: '1px solid ' + APPLE_COLORS.border
+                  borderBottom: '1px solid ' + COLORS.border
                 }}>
-                  <span style={{ width: '70px', fontSize: '16px', color: APPLE_COLORS.text, fontWeight: 500 }}>班级</span>
+                  <span style={{ width: '70px', fontSize: '16px', color: COLORS.text, fontWeight: 500 }}>班级</span>
                   <input
                     type="text"
                     placeholder="请输入班级"
@@ -595,7 +591,7 @@ export default function StudentSwitcher({ visible, onClose, badgeType }) {
                       border: 'none',
                       outline: 'none',
                       fontSize: '16px',
-                      color: APPLE_COLORS.text,
+                      color: COLORS.text,
                       background: 'transparent'
                     }}
                   />
@@ -606,7 +602,7 @@ export default function StudentSwitcher({ visible, onClose, badgeType }) {
                   alignItems: 'center',
                   padding: '16px'
                 }}>
-                  <span style={{ width: '70px', fontSize: '16px', color: APPLE_COLORS.text, fontWeight: 500 }}>备注</span>
+                  <span style={{ width: '70px', fontSize: '16px', color: COLORS.text, fontWeight: 500 }}>备注</span>
                   <input
                     type="text"
                     placeholder="请输入备注（选填）"
@@ -617,7 +613,7 @@ export default function StudentSwitcher({ visible, onClose, badgeType }) {
                       border: 'none',
                       outline: 'none',
                       fontSize: '16px',
-                      color: APPLE_COLORS.text,
+                      color: COLORS.text,
                       background: 'transparent'
                     }}
                   />
