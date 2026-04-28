@@ -32,7 +32,11 @@ export const useStudentStore = create(
       version: 3,
       migrate: (persistedState, version) => {
         // Always reset to fresh mockStudents on version change
-        return { students: mockStudents, currentStudent: null }
+        return { 
+          ...persistedState,
+          students: mockStudents, 
+          currentStudent: null 
+        }
       },
       partialize: (state) => ({
         currentStudent: state.currentStudent,
