@@ -10,8 +10,8 @@ export const AI_CONFIG = {
   // 模型名称 - Qwen3-VL-8B 支持多模态图片识别（魔搭社区支持，有免费额度）
   MODEL: import.meta.env.VITE_AI_MODEL || 'Qwen/Qwen3-VL-8B-Instruct',
 
-  // 请求超时时间（毫秒）- 60秒
-  TIMEOUT: 60000,
+  // 请求超时时间（毫秒）- 120秒，给AI服务器更多处理时间
+  TIMEOUT: 120000,
 
   // 最大重试次数
   MAX_RETRIES: 2

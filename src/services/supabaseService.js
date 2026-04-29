@@ -2,8 +2,31 @@ import { supabase, TABLES } from '../config/supabase'
 
 // ==================== 学生相关操作 ====================
 
-// 获取所有学生
-export const getStudents = async () => {
+// 获取所有学生（带本地缓存优化）
+const CACHE_KEY = 'students_cache'
+const CACHE_TIMESTAMP_KEY = 'students_cache_timestamp'
+const CACHE_MAX_AGE = 5 * 60 * 1000 // 5分钟缓存有效期
+
+export const getStudents = async (useCache = true) => {
+  // 尝试从缓存读取
+  if (useCache) {
+    try {
+      const cached = localStorage.getItem(CACHE_KEY)
+      const cachedTime = localStorage.getItem(CACHE_TIMESTAMP_KEY)
+      
+      if (cached && cachedTime) {
+        const age = Date.now() - parseInt(cachedTime)
+        if (age < CACHE_MAX_AGE) {
+          console.log('从本地缓存加载学生数据（瞬时响应）')
+          return JSON.parse(cached)
+        }
+      }
+    } catch (e) {
+      console.warn('读取缓存失败:', e)
+    }
+  }
+
+  // 从 Supabase 加载
   console.log('正在从 Supabase 获取学生列表...')
   
   const { data, error } = await supabase
@@ -13,10 +36,31 @@ export const getStudents = async () => {
   
   if (error) {
     console.error('Supabase 获取学生列表错误:', error)
+    // 如果网络请求失败，尝试返回缓存数据作为降级
+    if (useCache) {
+      try {
+        const cached = localStorage.getItem(CACHE_KEY)
+        if (cached) {
+          console.log('网络请求失败，使用缓存数据降级')
+          return JSON.parse(cached)
+        }
+      } catch (e) {}
+    }
     throw error
   }
   
   console.log('Supabase 返回的学生数据:', data)
+  
+  // 更新缓存
+  if (data) {
+    try {
+      localStorage.setItem(CACHE_KEY, JSON.stringify(data))
+      localStorage.setItem(CACHE_TIMESTAMP_KEY, String(Date.now()))
+    } catch (e) {
+      console.warn('更新缓存失败:', e)
+    }
+  }
+  
   return data ?? []
 }
 
@@ -121,8 +165,34 @@ export const deleteStudent = async (id) => {
 
 // ==================== 任务相关操作 ====================
 
-// 获取学生的所有任务
-export const getTasksByStudent = async (studentId) => {
+// 获取学生的所有任务（带本地缓存优化）
+const TASKS_CACHE_PREFIX = 'tasks_cache_'
+const TASKS_CACHE_TIMESTAMP_PREFIX = 'tasks_cache_ts_'
+const TASKS_CACHE_MAX_AGE = 3 * 60 * 1000 // 3分钟缓存有效期
+
+export const getTasksByStudent = async (studentId, useCache = true) => {
+  // 尝试从缓存读取
+  if (useCache) {
+    try {
+      const cacheKey = TASKS_CACHE_PREFIX + studentId
+      const timestampKey = TASKS_CACHE_TIMESTAMP_PREFIX + studentId
+      const cached = localStorage.getItem(cacheKey)
+      const cachedTime = localStorage.getItem(timestampKey)
+      
+      if (cached && cachedTime) {
+        const age = Date.now() - parseInt(cachedTime)
+        if (age < TASKS_CACHE_MAX_AGE) {
+          console.log(`从本地缓存加载任务数据（学生: ${studentId}）`)
+          return JSON.parse(cached)
+        }
+      }
+    } catch (e) {
+      console.warn('读取任务缓存失败:', e)
+    }
+  }
+
+  // 从 Supabase 加载
+  console.log('从 Supabase 加载任务数据...')
   const { data, error } = await supabase
     .from(TABLES.TASKS)
     .select('*')
@@ -132,13 +202,62 @@ export const getTasksByStudent = async (studentId) => {
   if (error) {
     console.error('Supabase 获取学生任务列表错误:', error)
     console.error('错误详情:', { code: error.code, message: error.message, details: error.details })
+    // 网络请求失败时尝试使用缓存
+    if (useCache) {
+      try {
+        const cacheKey = TASKS_CACHE_PREFIX + studentId
+        const cached = localStorage.getItem(cacheKey)
+        if (cached) {
+          console.log('网络请求失败，使用任务缓存数据降级')
+          return JSON.parse(cached)
+        }
+      } catch (e) {}
+    }
     throw error
   }
+  
+  // 更新缓存
+  if (data) {
+    try {
+      const cacheKey = TASKS_CACHE_PREFIX + studentId
+      const timestampKey = TASKS_CACHE_TIMESTAMP_PREFIX + studentId
+      localStorage.setItem(cacheKey, JSON.stringify(data))
+      localStorage.setItem(timestampKey, String(Date.now()))
+    } catch (e) {
+      console.warn('更新任务缓存失败:', e)
+    }
+  }
+  
   return data
 }
 
-// 获取学生的所有试卷（已完成的试卷）
-export const getExamsByStudent = async (studentId) => {
+// 获取学生的所有试卷（已完成的试卷）- 带本地缓存
+const EXAMS_CACHE_PREFIX = 'exams_cache_'
+const EXAMS_CACHE_TS_PREFIX = 'exams_cache_ts_'
+const EXAMS_CACHE_MAX_AGE = 3 * 60 * 1000
+
+export const getExamsByStudent = async (studentId, useCache = true) => {
+  // 尝试从缓存读取
+  if (useCache) {
+    try {
+      const cacheKey = EXAMS_CACHE_PREFIX + studentId
+      const tsKey = EXAMS_CACHE_TS_PREFIX + studentId
+      const cached = localStorage.getItem(cacheKey)
+      const cachedTime = localStorage.getItem(tsKey)
+      
+      if (cached && cachedTime) {
+        const age = Date.now() - parseInt(cachedTime)
+        if (age < EXAMS_CACHE_MAX_AGE) {
+          console.log(`从本地缓存加载试卷数据（学生: ${studentId}）`)
+          return JSON.parse(cached)
+        }
+      }
+    } catch (e) {
+      console.warn('读取试卷缓存失败:', e)
+    }
+  }
+
+  console.log('从 Supabase 加载试卷数据...')
   const { data, error } = await supabase
     .from(TABLES.TASKS)
     .select('*')
@@ -149,10 +268,21 @@ export const getExamsByStudent = async (studentId) => {
   if (error) {
     console.error('Supabase 获取学生试卷列表错误:', error)
     console.error('错误详情:', { code: error.code, message: error.message, details: error.details })
+    // 网络请求失败时尝试使用缓存
+    if (useCache) {
+      try {
+        const cacheKey = EXAMS_CACHE_PREFIX + studentId
+        const cached = localStorage.getItem(cacheKey)
+        if (cached) {
+          console.log('网络请求失败，使用试卷缓存数据降级')
+          return JSON.parse(cached)
+        }
+      } catch (e) {}
+    }
     throw error
   }
 
-  return (data || []).map(task => ({
+  const result = (data || []).map(task => ({
     id: task.id,
     student_id: task.student_id,
     name: task.original_name || '未命名试卷',
@@ -163,6 +293,20 @@ export const getExamsByStudent = async (studentId) => {
     created_at: task.created_at,
     graded_at: null
   }))
+
+  // 更新缓存
+  if (data) {
+    try {
+      const cacheKey = EXAMS_CACHE_PREFIX + studentId
+      const tsKey = EXAMS_CACHE_TS_PREFIX + studentId
+      localStorage.setItem(cacheKey, JSON.stringify(result))
+      localStorage.setItem(tsKey, String(Date.now()))
+    } catch (e) {
+      console.warn('更新试卷缓存失败:', e)
+    }
+  }
+
+  return result
 }
 
 // 创建任务
@@ -222,8 +366,33 @@ export const updateTaskStatus = async (taskId, status, result = null) => {
 
 // ==================== 题目相关操作 ====================
 
-// 获取任务的所有题目
-export const getQuestionsByTask = async (taskId) => {
+// 获取任务的所有题目 - 带本地缓存
+const QUESTIONS_CACHE_PREFIX = 'questions_cache_'
+const QUESTIONS_CACHE_TS_PREFIX = 'questions_cache_ts_'
+const QUESTIONS_CACHE_MAX_AGE = 3 * 60 * 1000
+
+export const getQuestionsByTask = async (taskId, useCache = true) => {
+  // 尝试从缓存读取
+  if (useCache) {
+    try {
+      const cacheKey = QUESTIONS_CACHE_PREFIX + taskId
+      const tsKey = QUESTIONS_CACHE_TS_PREFIX + taskId
+      const cached = localStorage.getItem(cacheKey)
+      const cachedTime = localStorage.getItem(tsKey)
+      
+      if (cached && cachedTime) {
+        const age = Date.now() - parseInt(cachedTime)
+        if (age < QUESTIONS_CACHE_MAX_AGE) {
+          console.log(`从本地缓存加载题目数据（任务: ${taskId}）`)
+          return JSON.parse(cached)
+        }
+      }
+    } catch (e) {
+      console.warn('读取题目缓存失败:', e)
+    }
+  }
+
+  console.log('从 Supabase 加载题目数据...')
   const { data, error } = await supabase
     .from(TABLES.QUESTIONS)
     .select('*')
@@ -233,27 +402,64 @@ export const getQuestionsByTask = async (taskId) => {
   if (error) {
     console.error('Supabase 获取任务题目列表错误:', error)
     console.error('错误详情:', { code: error.code, message: error.message, details: error.details })
+    // 网络请求失败时尝试使用缓存
+    if (useCache) {
+      try {
+        const cacheKey = QUESTIONS_CACHE_PREFIX + taskId
+        const cached = localStorage.getItem(cacheKey)
+        if (cached) {
+          console.log('网络请求失败，使用题目缓存数据降级')
+          return JSON.parse(cached)
+        }
+      } catch (e) {}
+    }
     throw error
   }
+
+  // 更新缓存
+  if (data) {
+    try {
+      const cacheKey = QUESTIONS_CACHE_PREFIX + taskId
+      const tsKey = QUESTIONS_CACHE_TS_PREFIX + taskId
+      localStorage.setItem(cacheKey, JSON.stringify(data))
+      localStorage.setItem(tsKey, String(Date.now()))
+    } catch (e) {
+      console.warn('更新题目缓存失败:', e)
+    }
+  }
+
   return data
 }
 
 // 批量创建题目
 export const createQuestions = async (questions) => {
-  const questionsWithTime = questions.map(q => ({
-    task_id: q.task_id,
-    student_id: q.student_id,
-    content: q.content || null,
-    options: q.options || [],
-    answer: q.answer || null,
-    analysis: q.analysis || null,
-    question_type: q.question_type || 'choice',
-    subject: q.subject || null,
-    is_correct: q.is_correct !== undefined ? q.is_correct : true,
-    status: q.status || 'pending',
-    image_url: q.image_url || null,
-    created_at: new Date().toISOString()
-  }))
+  const questionsWithTime = questions.map(q => {
+    // 映射 status 为合法值：'pending', 'wrong', 'mastered'
+    let statusValue = 'pending'
+    if (q.status === 'wrong' || !q.is_correct) {
+      statusValue = 'wrong'
+    } else if (q.status === 'mastered') {
+      statusValue = 'mastered'
+    }
+    
+    return {
+      task_id: q.task_id,
+      student_id: q.student_id,
+      content: q.content || null,
+      options: q.options || [],
+      answer: q.answer || null,
+      analysis: q.analysis || null,
+      question_type: q.question_type || 'choice',
+      subject: q.subject || null,
+      is_correct: q.is_correct !== undefined ? q.is_correct : true,
+      status: statusValue,
+      image_url: q.image_url || null,
+      created_at: new Date().toISOString()
+    }
+  })
+  
+  console.log('准备插入题目数据，数量:', questionsWithTime.length)
+  console.log('示例题目:', questionsWithTime[0])
   
   const { data, error } = await supabase
     .from(TABLES.QUESTIONS)
@@ -265,6 +471,8 @@ export const createQuestions = async (questions) => {
     console.error('错误详情:', { code: error.code, message: error.message, details: error.details })
     throw error
   }
+  
+  console.log('题目插入成功，返回数据:', data?.length || 0, '条')
   return data
 }
 
@@ -298,9 +506,32 @@ export const updateQuestion = async (id, updates) => {
 
 // ==================== 错题本相关操作 ====================
 
-// 获取学生的所有错题
-export const getWrongQuestionsByStudent = async (studentId) => {
+// 获取学生的所有错题 - 带本地缓存
+const WRONG_CACHE_KEY = 'wrong_questions_cache'
+const WRONG_CACHE_TS_KEY = 'wrong_questions_cache_ts'
+const WRONG_CACHE_MAX_AGE = 3 * 60 * 1000
+
+export const getWrongQuestionsByStudent = async (studentId, useCache = true) => {
+  // 尝试从缓存读取
+  if (useCache) {
+    try {
+      const cached = localStorage.getItem(WRONG_CACHE_KEY + studentId)
+      const cachedTime = localStorage.getItem(WRONG_CACHE_TS_KEY + studentId)
+      
+      if (cached && cachedTime) {
+        const age = Date.now() - parseInt(cachedTime)
+        if (age < WRONG_CACHE_MAX_AGE) {
+          console.log(`从本地缓存加载错题数据（学生: ${studentId}）`)
+          return JSON.parse(cached)
+        }
+      }
+    } catch (e) {
+      console.warn('读取错题缓存失败:', e)
+    }
+  }
+
   try {
+    console.log('从 Supabase 加载错题数据...')
     // 使用简单查询（避免关联查询失败）
     const { data: simpleData, error: simpleError } = await supabase
       .from(TABLES.WRONG_QUESTIONS)
@@ -311,6 +542,16 @@ export const getWrongQuestionsByStudent = async (studentId) => {
     if (simpleError) {
       console.error('Supabase 获取学生错题列表错误:', simpleError)
       console.error('错误详情:', { code: simpleError.code, message: simpleError.message, details: simpleError.details })
+      // 网络请求失败时尝试使用缓存
+      if (useCache) {
+        try {
+          const cached = localStorage.getItem(WRONG_CACHE_KEY + studentId)
+          if (cached) {
+            console.log('网络请求失败，使用错题缓存数据降级')
+            return JSON.parse(cached)
+          }
+        } catch (e) {}
+      }
       throw simpleError
     }
     
@@ -329,6 +570,16 @@ export const getWrongQuestionsByStudent = async (studentId) => {
         }
       })
     )
+    
+    // 更新缓存
+    if (simpleData) {
+      try {
+        localStorage.setItem(WRONG_CACHE_KEY + studentId, JSON.stringify(wrongQuestionsWithDetails))
+        localStorage.setItem(WRONG_CACHE_TS_KEY + studentId, String(Date.now()))
+      } catch (e) {
+        console.warn('更新错题缓存失败:', e)
+      }
+    }
     
     return wrongQuestionsWithDetails
   } catch (error) {
@@ -365,17 +616,51 @@ export const addWrongQuestions = async (studentId, questionIds) => {
     student_id: studentId,
     question_id: questionId,
     status: 'pending',
-    added_at: new Date().toISOString()
+    error_count: 1,
+    added_at: new Date().toISOString(),
+    last_wrong_at: new Date().toISOString(),
+    created_at: new Date().toISOString()
   }))
+  
+  console.log('准备添加错题:', entries.length, '条')
+  console.log('示例数据:', entries[0])
+  
+  // 先查询已存在的记录，避免重复插入
+  const { data: existing, error: checkError } = await supabase
+    .from(TABLES.WRONG_QUESTIONS)
+    .select('id, question_id')
+    .eq('student_id', studentId)
+    .in('question_id', questionIds)
+  
+  if (checkError) {
+    console.error('检查已有错题失败:', checkError)
+  }
+  
+  const existingIds = new Set((existing || []).map(e => e.question_id))
+  const newEntries = entries.filter(e => !existingIds.has(e.question_id))
+  
+  if (newEntries.length === 0) {
+    console.log('题目已在错题本中，跳过添加')
+    return []
+  }
+  
+  console.log('新增错题数量:', newEntries.length)
   
   const { data, error } = await supabase
     .from(TABLES.WRONG_QUESTIONS)
-    .insert(entries)
+    .insert(newEntries)
     .select()
   
   if (error) {
     console.error('Supabase 批量添加错题错误:', error)
     console.error('错误详情:', { code: error.code, message: error.message, details: error.details })
+    
+    // 如果是重复插入（唯一约束冲突），不抛错
+    if (error.code === '23505') {
+      console.warn('题目已在错题本中，跳过添加')
+      return []
+    }
+    
     throw error
   }
   return data

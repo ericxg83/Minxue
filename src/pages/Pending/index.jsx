@@ -11,7 +11,7 @@ import {
 } from 'antd-mobile'
 import { RightOutline } from 'antd-mobile-icons'
 import { useStudentStore, useTaskStore, useWrongQuestionStore, usePendingQuestionStore, useUIStore } from '../../store'
-import { getTasksByStudent, getQuestionsByTask, addWrongQuestions } from '../../services/supabaseService'
+import { getTasksByStudent, getQuestionsByTask, addWrongQuestions, getWrongQuestionsByStudent } from '../../services/supabaseService'
 import { mockQuestions, mockTasks } from '../../data/mockData'
 import { ImageViewer } from 'antd-mobile'
 import StudentSwitcher from '../../components/StudentSwitcher'
@@ -104,9 +104,6 @@ export default function Pending() {
   const loadData = async () => {
     if (!currentStudent) return
 
-    setLocalLoading(true)
-    setLoading(true)
-
     try {
       if (USE_MOCK_DATA) {
         console.log('当前学生ID:', currentStudent.id)
@@ -125,20 +122,26 @@ export default function Pending() {
         
         setQuestions(sortedQuestions)
         setSelectedIds([])
-        setLocalLoading(false)
-        setLoading(false)
         return
       }
 
-      const taskList = await getTasksByStudent(currentStudent.id)
+      // 使用缓存数据（秒开）
+      console.log('从缓存/数据库加载已完成的任务...')
+      const taskList = await getTasksByStudent(currentStudent.id, true)
       const safeTaskList = Array.isArray(taskList) ? taskList : []
+      console.log('获取到的任务列表:', safeTaskList.length, '条')
+      
       const doneTasks = safeTaskList.filter(t => t.status === 'done')
+      console.log('已完成的任务:', doneTasks.length, '条')
       setTasks(safeTaskList)
       
+      // 使用缓存加载题目
       const allQuestions = []
       for (const task of doneTasks) {
+        console.log('加载任务题目, task_id:', task.id)
         try {
-          const taskQuestions = await getQuestionsByTask(task.id)
+          const taskQuestions = await getQuestionsByTask(task.id, true)
+          console.log(`任务 ${task.id} 的题目数量:`, Array.isArray(taskQuestions) ? taskQuestions.length : 0)
           const safeQuestions = Array.isArray(taskQuestions) ? taskQuestions : []
           allQuestions.push(...safeQuestions.map(q => ({
             ...q,
@@ -149,27 +152,41 @@ export default function Pending() {
         }
       }
       
+      console.log('最终加载的题目总数:', allQuestions.length)
       setQuestions(allQuestions)
       setSelectedIds([])
+
+      // 后台静默刷新最新数据
+      const backgroundRefresh = async () => {
+        try {
+          const freshTaskList = await getTasksByStudent(currentStudent.id, false)
+          const safeFreshTaskList = Array.isArray(freshTaskList) ? freshTaskList : []
+          const freshDoneTasks = safeFreshTaskList.filter(t => t.status === 'done')
+          
+          const freshAllQuestions = []
+          for (const task of freshDoneTasks) {
+            try {
+              const taskQuestions = await getQuestionsByTask(task.id, false)
+              const safeQuestions = Array.isArray(taskQuestions) ? taskQuestions : []
+              freshAllQuestions.push(...safeQuestions.map(q => ({
+                ...q,
+                status: q.is_correct ? 'correct' : 'wrong'
+              })))
+            } catch (taskError) {
+              console.debug(`刷新任务 ${task.id} 的题目失败:`, taskError)
+            }
+          }
+          
+          setTasks(safeFreshTaskList)
+          setQuestions(freshAllQuestions)
+        } catch (error) {
+          console.debug('后台刷新任务数据失败:', error)
+        }
+      }
+      
+      backgroundRefresh()
     } catch (error) {
-      console.error('从 Supabase 加载任务失败，使用 Mock 数据:', error)
-      const studentQuestions = mockQuestions.filter(q => q.student_id === currentStudent.id)
-      const addedIds = getAddedToWrongBookIds()
-      const filteredQuestions = studentQuestions.filter(q => !addedIds.has(q.id))
-      const sortedQuestions = filteredQuestions.sort((a, b) => {
-        const timeA = new Date(a.created_at || 0).getTime()
-        const timeB = new Date(b.created_at || 0).getTime()
-        return timeB - timeA
-      })
-      setQuestions(sortedQuestions)
-      setSelectedIds([])
-      Toast.show({
-        icon: 'fail',
-        content: '连接数据库失败，已使用本地测试数据'
-      })
-    } finally {
-      setLocalLoading(false)
-      setLoading(false)
+      console.error('加载任务失败:', error)
     }
   }
 
@@ -211,6 +228,16 @@ export default function Pending() {
   const addSingleToWrongBook = async (question) => {
     try {
       if (USE_MOCK_DATA) {
+        // 检查是否已在错题本中
+        const addedIds = getAddedToWrongBookIds()
+        if (addedIds.has(question.id)) {
+          Toast.show({
+            icon: 'info',
+            content: '该题目已在错题本中'
+          })
+          return
+        }
+
         const wrongQuestion = {
           id: `wq-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`,
           student_id: currentStudent.id,
@@ -226,16 +253,27 @@ export default function Pending() {
         }
 
         addWrongQuestion(wrongQuestion)
-
-        const addedIds = getAddedToWrongBookIds()
         addedIds.add(question.id)
         saveAddedToWrongBookIds(addedIds)
 
         setQuestions(questions.filter(q => q.id !== question.id))
         setPendingQuestions(pendingQuestions.filter(q => q.id !== question.id))
       } else {
+        // 检查是否已在错题本中
+        const existingWrong = await getWrongQuestionsByStudent(currentStudent.id)
+        const existingIds = new Set((existingWrong || []).map(w => w.question_id))
+        
+        if (existingIds.has(question.id)) {
+          Toast.show({
+            icon: 'info',
+            content: '该题目已在错题本中'
+          })
+          return
+        }
+
         await addWrongQuestions(currentStudent.id, [question.id])
         addWrongQuestion(question)
+        setQuestions(questions.filter(q => q.id !== question.id))
       }
 
       Toast.show({
@@ -244,9 +282,10 @@ export default function Pending() {
       })
     } catch (error) {
       console.error('添加失败:', error)
+      console.error('错误详情:', error?.message, error?.code, error?.details)
       Toast.show({
         icon: 'fail',
-        content: '添加失败'
+        content: '添加失败: ' + (error?.message || '未知错误')
       })
     }
   }
@@ -258,63 +297,126 @@ export default function Pending() {
       return
     }
 
-    Dialog.confirm({
-      content: `确定将选中的 ${selectedIds.length} 道题加入错题本？`,
-      onConfirm: async () => {
-        setLoading(true)
-
-        try {
-          if (USE_MOCK_DATA) {
-            const selectedQuestions = questions.filter(q => selectedIds.includes(q.id))
-
-            const wrongQuestions = selectedQuestions.map(q => ({
-              id: `wq-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`,
-              student_id: currentStudent.id,
-              question_id: q.id,
-              question: q,
-              status: 'pending',
-              error_count: 1,
-              subject: q.subject || '数学',
-              category: '其他',
-              added_at: new Date().toISOString(),
-              last_wrong_at: new Date().toISOString(),
-              created_at: new Date().toISOString()
-            }))
-
-            addMultipleToStore(wrongQuestions)
-
-            const addedIds = getAddedToWrongBookIds()
-            selectedIds.forEach(id => addedIds.add(id))
-            saveAddedToWrongBookIds(addedIds)
-
-            const remainingQuestions = questions.filter(q => !selectedIds.includes(q.id))
-            setQuestions(remainingQuestions)
-
-            const remainingPendingQuestions = pendingQuestions.filter(q => !selectedIds.includes(q.id))
-            setPendingQuestions(remainingPendingQuestions)
-          } else {
-            await addWrongQuestions(currentStudent.id, selectedIds)
-            const selectedQuestions = questions.filter(q => selectedIds.includes(q.id))
-            addMultipleToStore(selectedQuestions)
-          }
-
-          Toast.show({
-            icon: 'success',
-            content: `成功添加 ${selectedIds.length} 道题到错题本`
-          })
-
-          setSelectedIds([])
-        } catch (error) {
-          console.error('添加失败:', error)
-          Toast.show({
-            icon: 'fail',
-            content: '添加失败'
-          })
-        } finally {
-          setLoading(false)
-        }
+    // 先检查重复
+    setLoading(true)
+    try {
+      let existingIds = new Set()
+      let duplicateCount = 0
+      
+      if (USE_MOCK_DATA) {
+        const addedIds = getAddedToWrongBookIds()
+        existingIds = addedIds
+      } else {
+        const existingWrong = await getWrongQuestionsByStudent(currentStudent.id)
+        existingIds = new Set((existingWrong || []).map(w => w.question_id))
       }
-    })
+      
+      const newIds = selectedIds.filter(id => !existingIds.has(id))
+      duplicateCount = selectedIds.length - newIds.length
+      
+      // 如果全部重复，直接提示
+      if (newIds.length === 0) {
+        setLoading(false)
+        Toast.show({
+          icon: 'info',
+          content: `选中的 ${selectedIds.length} 道题都已在错题本中`
+        })
+        return
+      }
+      
+      // 有重复的，提示用户
+      if (duplicateCount > 0) {
+        setLoading(false)
+        Dialog.confirm({
+          title: '部分题目已存在',
+          content: `选中的 ${selectedIds.length} 道题中，${duplicateCount} 道已在错题本中，${newIds.length} 道是新题目。是否只添加新题目？`,
+          confirmText: '只添加新题',
+          cancelText: '取消',
+          onConfirm: async () => {
+            await doAddToWrongBook(newIds, newIds.length, duplicateCount)
+          }
+        })
+        return
+      }
+      
+      // 没有重复，直接添加
+      setLoading(false)
+      Dialog.confirm({
+        content: `确定将选中的 ${newIds.length} 道题加入错题本？`,
+        onConfirm: async () => {
+          await doAddToWrongBook(newIds, newIds.length, 0)
+        }
+      })
+    } catch (error) {
+      console.error('检查重复失败:', error)
+      setLoading(false)
+      Toast.show({
+        icon: 'fail',
+        content: '检查失败，请重试'
+      })
+    }
+  }
+
+  // 实际执行添加到错题本
+  const doAddToWrongBook = async (idsToAdd, newCount, duplicateCount) => {
+    setLoading(true)
+    
+    try {
+      if (USE_MOCK_DATA) {
+        const selectedQuestions = questions.filter(q => idsToAdd.includes(q.id))
+
+        const wrongQuestions = selectedQuestions.map(q => ({
+          id: `wq-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`,
+          student_id: currentStudent.id,
+          question_id: q.id,
+          question: q,
+          status: 'pending',
+          error_count: 1,
+          subject: q.subject || '数学',
+          category: '其他',
+          added_at: new Date().toISOString(),
+          last_wrong_at: new Date().toISOString(),
+          created_at: new Date().toISOString()
+        }))
+
+        addMultipleToStore(wrongQuestions)
+
+        const addedIds = getAddedToWrongBookIds()
+        idsToAdd.forEach(id => addedIds.add(id))
+        saveAddedToWrongBookIds(addedIds)
+
+        const remainingQuestions = questions.filter(q => !idsToAdd.includes(q.id))
+        setQuestions(remainingQuestions)
+
+        const remainingPendingQuestions = pendingQuestions.filter(q => !idsToAdd.includes(q.id))
+        setPendingQuestions(remainingPendingQuestions)
+      } else {
+        await addWrongQuestions(currentStudent.id, idsToAdd)
+        const selectedQuestions = questions.filter(q => idsToAdd.includes(q.id))
+        addMultipleToStore(selectedQuestions)
+        setQuestions(questions.filter(q => !idsToAdd.includes(q.id)))
+      }
+
+      let msg = `成功添加 ${newCount} 道题到错题本`
+      if (duplicateCount > 0) {
+        msg += `（${duplicateCount} 道已存在，已跳过）`
+      }
+      Toast.show({
+        icon: 'success',
+        content: msg
+      })
+
+      setSelectedIds([])
+    } catch (error) {
+      console.error('添加失败:', error)
+      console.error('错误详情:', error?.message, error?.code, error?.details)
+      Toast.show({
+        icon: 'fail',
+        content: '添加失败: ' + (error?.message || '未知错误')
+      })
+    } finally {
+      setLoading(false)
+    }
   }
 
   // 标记为正确（剔除题目）

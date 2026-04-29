@@ -3,7 +3,6 @@ import {
   Button,
   Toast,
   Empty,
-  SpinLoading,
   Badge
 } from 'antd-mobile'
 import { RightOutline } from 'antd-mobile-icons'
@@ -43,10 +42,8 @@ const STATUS_CONFIG = {
 
 export default function Exam() {
   const { currentStudent } = useStudentStore()
-  const { setLoading } = useUIStore()
   const { exams, setExams, markStudentInitialized, isStudentInitialized } = useExamStore()
   
-  const [loading, setLocalLoading] = useState(false)
   const [activeFilter, setActiveFilter] = useState('all')
   const [showStudentSwitcher, setShowStudentSwitcher] = useState(false)
 
@@ -59,9 +56,6 @@ export default function Exam() {
 
   const loadExams = async () => {
     if (!currentStudent) return
-    
-    setLocalLoading(true)
-    setLoading(true)
     
     try {
       if (USE_MOCK_DATA) {
@@ -77,25 +71,29 @@ export default function Exam() {
         if (newMockExams.length > 0) {
           setExams([...exams, ...newMockExams])
         }
-        
-        setLocalLoading(false)
-        setLoading(false)
         return
       }
 
-      const examList = await getExamsByStudent(currentStudent.id)
+      // 使用缓存数据（秒开）
+      const examList = await getExamsByStudent(currentStudent.id, true)
       
       const otherStudentExams = exams.filter(e => e.student_id !== currentStudent.id)
       setExams([...otherStudentExams, ...examList])
+
+      // 后台静默刷新最新数据
+      const backgroundRefresh = async () => {
+        try {
+          const freshData = await getExamsByStudent(currentStudent.id, false)
+          const otherStudentExams = exams.filter(e => e.student_id !== currentStudent.id)
+          setExams([...otherStudentExams, ...freshData])
+        } catch (error) {
+          console.debug('后台刷新试卷失败:', error)
+        }
+      }
+      
+      backgroundRefresh()
     } catch (error) {
-      console.error('加载失败:', error)
-      Toast.show({
-        icon: 'fail',
-        content: '加载试卷失败'
-      })
-    } finally {
-      setLocalLoading(false)
-      setLoading(false)
+      console.error('加载试卷失败:', error)
     }
   }
 
@@ -414,15 +412,6 @@ export default function Exam() {
         description="请先选择学生"
         style={{ padding: '64px 0' }}
       />
-    )
-  }
-
-  if (loading) {
-    return (
-      <div style={{ padding: '64px 0', textAlign: 'center' }}>
-        <SpinLoading style={{ '--size': '48px' }} />
-        <div style={{ marginTop: '16px', color: APPLE_COLORS.textSecondary }}>加载中...</div>
-      </div>
     )
   }
 

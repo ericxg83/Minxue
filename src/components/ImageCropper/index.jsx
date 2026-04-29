@@ -1,8 +1,8 @@
 import { useState, useCallback } from 'react'
-import { Button, Mask, Toast } from 'antd-mobile'
+import { motion, AnimatePresence } from 'motion/react'
+import { X } from 'lucide-react'
 import Cropper from 'react-easy-crop'
 
-// 头像裁剪组件
 export default function ImageCropper({ image, onCropComplete, onCancel }) {
   const [crop, setCrop] = useState({ x: 0, y: 0 })
   const [zoom, setZoom] = useState(1)
@@ -26,43 +26,26 @@ export default function ImageCropper({ image, onCropComplete, onCancel }) {
       onCropComplete(croppedImage)
     } catch (error) {
       console.error('裁剪失败:', error)
-      Toast.show({ icon: 'fail', content: '裁剪失败' })
+      alert('裁剪失败')
     }
   }
 
   return (
-    <Mask visible={true} opacity={1}>
-      <div style={{
-        position: 'fixed',
-        top: 0,
-        left: 0,
-        right: 0,
-        bottom: 0,
-        background: '#000',
-        display: 'flex',
-        flexDirection: 'column'
-      }}>
-        {/* 顶部导航 */}
-        <div style={{
-          display: 'flex',
-          justifyContent: 'space-between',
-          alignItems: 'center',
-          padding: '12px 16px',
-          background: '#1a1a1a'
-        }}>
-          <Button fill="none" onClick={onCancel} style={{ color: '#fff' }}>
+    <AnimatePresence>
+      <div className="fixed inset-0 bg-black z-[10000] flex flex-col">
+        {/* Header */}
+        <div className="flex items-center justify-between px-5 pt-12 pb-4 bg-gray-900">
+          <button onClick={onCancel} className="text-[15px] font-medium text-white">
             取消
-          </Button>
-          <span style={{ color: '#fff', fontSize: '17px', fontWeight: 600 }}>
-            裁剪头像
-          </span>
-          <Button fill="none" onClick={handleConfirm} style={{ color: '#1677ff' }}>
+          </button>
+          <h2 className="text-[17px] font-bold text-white">裁剪头像</h2>
+          <button onClick={handleConfirm} className="text-[15px] font-medium text-blue-500">
             确定
-          </Button>
+          </button>
         </div>
 
-        {/* 裁剪区域 */}
-        <div style={{ flex: 1, position: 'relative' }}>
+        {/* Cropper Area */}
+        <div className="flex-1 relative">
           <Cropper
             image={image}
             crop={crop}
@@ -78,22 +61,15 @@ export default function ImageCropper({ image, onCropComplete, onCancel }) {
                 background: '#000'
               },
               cropAreaStyle: {
-                border: '2px solid #1677ff'
+                border: '2px solid #3b82f6'
               }
             }}
           />
         </div>
 
-        {/* 底部缩放控制 */}
-        <div style={{
-          padding: '20px 32px',
-          background: '#1a1a1a'
-        }}>
-          <div style={{
-            display: 'flex',
-            alignItems: 'center',
-            gap: '16px'
-          }}>
+        {/* Zoom Control */}
+        <div className="px-8 py-6 bg-gray-900">
+          <div className="flex items-center gap-4">
             <svg width="20" height="20" viewBox="0 0 1024 1024" fill="#999">
               <path d="M512 128c-211.2 0-384 172.8-384 384s172.8 384 384 384 384-172.8 384-384-172.8-384-384-384z m0 704c-176 0-320-144-320-320s144-320 320-320 320 144 320 320-144 320-320 320z"/>
               <path d="M512 320c-17.6 0-32 14.4-32 32v128H352c-17.6 0-32 14.4-32 32s14.4 32 32 32h128v128c0 17.6 14.4 32 32 32s32-14.4 32-32v-128h128c17.6 0 32-14.4 32-32s-14.4-32-32-32h-128v-128c0-17.6-14.4-32-32-32z"/>
@@ -105,14 +81,7 @@ export default function ImageCropper({ image, onCropComplete, onCancel }) {
               step={0.1}
               value={zoom}
               onChange={(e) => setZoom(Number(e.target.value))}
-              style={{
-                flex: 1,
-                height: '4px',
-                background: '#333',
-                borderRadius: '2px',
-                outline: 'none',
-                WebkitAppearance: 'none'
-              }}
+              className="flex-1 h-1 bg-gray-700 rounded-full outline-none appearance-none cursor-pointer"
             />
             <svg width="24" height="24" viewBox="0 0 1024 1024" fill="#999">
               <path d="M512 128c-211.2 0-384 172.8-384 384s172.8 384 384 384 384-172.8 384-384-172.8-384-384-384z m0 704c-176 0-320-144-320-320s144-320 320-320 320 144 320 320-144 320-320 320z"/>
@@ -121,11 +90,10 @@ export default function ImageCropper({ image, onCropComplete, onCancel }) {
           </div>
         </div>
       </div>
-    </Mask>
+    </AnimatePresence>
   )
 }
 
-// 裁剪图片的辅助函数
 async function getCroppedImg(imageSrc, pixelCrop) {
   const image = await createImage(imageSrc)
   const canvas = document.createElement('canvas')
@@ -135,12 +103,10 @@ async function getCroppedImg(imageSrc, pixelCrop) {
     throw new Error('无法创建 canvas 上下文')
   }
 
-  // 设置输出尺寸
   const size = Math.min(pixelCrop.width, pixelCrop.height)
   canvas.width = size
   canvas.height = size
 
-  // 绘制裁剪后的图片
   ctx.drawImage(
     image,
     pixelCrop.x,
@@ -153,11 +119,9 @@ async function getCroppedImg(imageSrc, pixelCrop) {
     size
   )
 
-  // 转换为 base64
   return canvas.toDataURL('image/jpeg', 0.9)
 }
 
-// 创建图片对象
 function createImage(url) {
   return new Promise((resolve, reject) => {
     const image = new Image()

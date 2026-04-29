@@ -13,7 +13,7 @@ import {
 } from 'antd-mobile'
 import { RightOutline } from 'antd-mobile-icons'
 import { useStudentStore, useTaskStore, usePendingQuestionStore, useUIStore } from '../../store'
-import { getTasksByStudent, updateTaskStatus, createTask, uploadImage } from '../../services/supabaseService'
+import { getTasksByStudent, updateTaskStatus, createTask, uploadImage, createQuestions } from '../../services/supabaseService'
 import { recognizeQuestions, compressImage, saveRecognitionResult } from '../../services/aiService'
 import { mockTasks, mockStudents } from '../../data/mockData'
 import StudentSwitcher from '../../components/StudentSwitcher'
@@ -86,18 +86,13 @@ export default function Processing() {
     }
   }, [currentStudent?.id])
 
-  // 加载 mock 任务数据（只在第一次切换到该学生时加载）
+  // 加载任务数据（优先使用缓存，后台刷新）
   const loadMockTasks = async () => {
     if (!currentStudent) return
-    
-    setLocalLoading(true)
-    setLoading(true)
     
     try {
       if (USE_MOCK_DATA) {
         if (initializedStudents.has(currentStudent.id)) {
-          setLocalLoading(false)
-          setLoading(false)
           return
         }
         
@@ -139,15 +134,15 @@ export default function Processing() {
         setTasks(allTasks)
         setInitializedStudents(prev => new Set([...prev, currentStudent.id]))
         
-        setLocalLoading(false)
-        setLoading(false)
         return
       }
 
-      console.log('从 Supabase 加载任务数据...')
+      // 使用缓存（秒开）
+      console.log('从缓存/数据库加载任务数据...')
       try {
-        const tasksData = await getTasksByStudent(currentStudent.id)
-        console.log('Supabase 返回的任务数据:', tasksData)
+        // 先尝试使用缓存数据
+        const tasksData = await getTasksByStudent(currentStudent.id, true)
+        console.log('返回的任务数据:', tasksData)
         
         if (tasksData && tasksData.length > 0) {
           const existingTaskIds = new Set(tasks.map(t => t.id))
@@ -158,16 +153,26 @@ export default function Processing() {
           }
         }
       } catch (error) {
-        console.error('从 Supabase 加载任务失败:', error)
-        console.error('错误详情:', error?.message, error?.code, error?.details)
+        console.error('加载任务失败:', error)
       }
+      
+      // 后台刷新最新数据
+      const backgroundRefresh = async () => {
+        try {
+          const freshData = await getTasksByStudent(currentStudent.id, false)
+          if (freshData && freshData.length > 0) {
+            setTasks(freshData)
+          }
+        } catch (error) {
+          console.debug('后台刷新任务失败:', error)
+        }
+      }
+      
+      backgroundRefresh()
       
       setInitializedStudents(prev => new Set([...prev, currentStudent.id]))
     } catch (error) {
       console.error('加载失败:', error)
-    } finally {
-      setLocalLoading(false)
-      setLoading(false)
     }
   }
   
@@ -270,6 +275,57 @@ export default function Processing() {
 
   // 上传单个文件 - 只创建任务，不等待AI识别
   const uploadFile = async (file) => {
+    // 检查是否重复上传（检查本地状态和数据库）
+    const localDuplicate = tasks.find(t => 
+      t.student_id === currentStudent.id && 
+      t.original_name === file.name
+    )
+    
+    if (localDuplicate) {
+      console.log('检测到重复试卷(本地):', file.name)
+      return handleDuplicateFile(file)
+    }
+    
+    // 检查数据库中是否已有同名试卷
+    try {
+      const allTasks = await getTasksByStudent(currentStudent.id)
+      const dbDuplicate = allTasks?.find(t => t.original_name === file.name)
+      if (dbDuplicate) {
+        console.log('检测到重复试卷(数据库):', file.name)
+        return handleDuplicateFile(file)
+      }
+    } catch (checkError) {
+      console.warn('检查重复试卷失败:', checkError)
+    }
+    
+    await doUploadFile(file)
+  }
+
+  // 处理重复文件上传
+  const handleDuplicateFile = (file) => {
+    return new Promise((resolve) => {
+      Dialog.confirm({
+        title: '重复试卷',
+        content: `试卷「${file.name}」已上传过，是否继续上传？`,
+        confirmText: '继续上传',
+        cancelText: '跳过',
+        onConfirm: async () => {
+          await doUploadFile(file)
+          resolve()
+        },
+        onCancel: () => {
+          Toast.show({
+            icon: 'info',
+            content: '已跳过重复试卷'
+          })
+          resolve()
+        }
+      })
+    })
+  }
+
+  // 实际执行上传
+  const doUploadFile = async (file) => {
     const imageBase64 = await fileToBase64(file)
 
     let imageUrl = imageBase64
@@ -372,12 +428,28 @@ export default function Processing() {
         console.warn('保存识别结果到本地失败:', saveResult.error)
       }
 
-      updateTaskInStore(taskId, 'done', {
+      // 保存题目到 Supabase
+      if (questions.length > 0) {
+        console.log('开始保存题目到 Supabase，数量:', questions.length)
+        console.log('题目示例 task_id:', questions[0]?.task_id)
+        try {
+          const savedQ = await createQuestions(questions)
+          console.log('题目已成功保存到 Supabase, 返回数量:', savedQ?.length || 0)
+          if (savedQ && savedQ.length > 0) {
+            console.log('已保存题目示例:', savedQ[0])
+          }
+        } catch (saveError) {
+          console.error('保存题目到 Supabase 失败:', saveError)
+          console.error('错误详情:', saveError?.message, saveError?.code, saveError?.details)
+        }
+      }
+
+      await updateTaskStatus(dbTaskId, 'done', {
         questionCount: questions.length,
         wrongCount: wrongCount,
         duration: result.duration
       })
-      await updateTaskStatus(dbTaskId, 'done', {
+      updateTaskInStore(taskId, 'done', {
         questionCount: questions.length,
         wrongCount: wrongCount,
         duration: result.duration
@@ -387,8 +459,11 @@ export default function Processing() {
         addPendingQuestions(questions)
       }
 
-      updateTaskInStore(taskId, 'processing', { progress: 100 })
       console.log(`识别完成，发现 ${questions.length} 道题目，${wrongCount} 道疑似错题`)
+      Toast.show({
+        icon: 'success',
+        content: `识别完成，发现 ${questions.length} 道题目，${wrongCount} 道疑似错题`
+      })
 
     } catch (error) {
       console.error('处理失败:', error)

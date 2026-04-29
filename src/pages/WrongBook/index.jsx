@@ -80,9 +80,7 @@ export default function WrongBook({ onScanQR }) {
     setSelectedQuestions,
     clearSelection 
   } = useWrongQuestionStore()
-  const { setLoading, setCurrentPage } = useUIStore()
   
-  const [loading, setLocalLoading] = useState(false)
   const [activeStatus, setActiveStatus] = useState('pending')
   const [activeSubject, setActiveSubject] = useState('all')
   const [activeTime, setActiveTime] = useState('all')
@@ -116,19 +114,15 @@ export default function WrongBook({ onScanQR }) {
   const loadData = async () => {
     if (!currentStudent) return
     
-    setLocalLoading(true)
-    setLoading(true)
-    
     try {
       if (USE_MOCK_DATA) {
         // mock 数据已经在组件挂载时加载到 store，这里不需要重复加载
         // 只需要确保当前学生的数据正确显示即可
-        setLocalLoading(false)
-        setLoading(false)
         return
       }
 
-      const data = await getWrongQuestionsByStudent(currentStudent.id)
+      // 使用缓存数据（秒开）
+      const data = await getWrongQuestionsByStudent(currentStudent.id, true)
       // 确保 data 是数组
       const safeData = Array.isArray(data) ? data : []
       setWrongQuestions(prev => {
@@ -137,31 +131,21 @@ export default function WrongBook({ onScanQR }) {
         const newData = safeData.filter(d => !existingIds.has(d.id))
         return [...prev, ...newData]
       })
-    } catch (error) {
-      console.error('从 Supabase 加载错题失败，使用 Mock 数据:', error)
-      // 加载失败时使用 Mock 数据
-      const currentStudentMockQuestions = mockWrongQuestions.filter(
-        wq => wq.student_id === currentStudent.id
-      )
-      if (currentStudentMockQuestions.length > 0) {
-        setWrongQuestions(prev => {
-          const existingIds = new Set(prev.map(wq => wq.id))
-          const newData = currentStudentMockQuestions.filter(d => !existingIds.has(d.id))
-          return [...prev, ...newData]
-        })
-        Toast.show({
-          icon: 'fail',
-          content: '连接数据库失败，已使用本地测试数据'
-        })
-      } else {
-        Toast.show({
-          icon: 'fail',
-          content: '加载失败'
-        })
+
+      // 后台静默刷新最新数据
+      const backgroundRefresh = async () => {
+        try {
+          const freshData = await getWrongQuestionsByStudent(currentStudent.id, false)
+          const safeFreshData = Array.isArray(freshData) ? freshData : []
+          setWrongQuestions(safeFreshData)
+        } catch (error) {
+          console.debug('后台刷新错题失败:', error)
+        }
       }
-    } finally {
-      setLocalLoading(false)
-      setLoading(false)
+      
+      backgroundRefresh()
+    } catch (error) {
+      console.error('加载错题失败:', error)
     }
   }
 
@@ -431,15 +415,6 @@ export default function WrongBook({ onScanQR }) {
         description="请先选择学生"
         style={{ padding: '64px 0' }}
       />
-    )
-  }
-
-  if (loading) {
-    return (
-      <div style={{ padding: '64px 0', textAlign: 'center' }}>
-        <SpinLoading style={{ '--size': '48px' }} />
-        <div style={{ marginTop: '16px', color: APPLE_COLORS.textSecondary }}>加载中...</div>
-      </div>
     )
   }
 

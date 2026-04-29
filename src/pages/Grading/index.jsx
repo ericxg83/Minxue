@@ -1,17 +1,10 @@
 import { useState, useEffect } from 'react'
-import {
-  Button,
-  Toast,
-  NavBar,
-  ProgressBar,
-  Card,
-  Dialog
-} from 'antd-mobile'
+import { motion, AnimatePresence } from 'motion/react'
+import { CheckCircle2, XCircle, ChevronLeft, ChevronRight, Loader2, QrCode, Image as ImageIcon, Clock, ArrowLeft, Trophy } from 'lucide-react'
 import { mockWrongQuestions, mockStudents } from '../../data/mockData'
 import { useWrongQuestionStore } from '../../store'
 import dayjs from 'dayjs'
 
-// 使用测试数据
 const USE_MOCK_DATA = false
 
 export default function Grading({ paperId, studentId, onClose, onComplete }) {
@@ -20,16 +13,13 @@ export default function Grading({ paperId, studentId, onClose, onComplete }) {
   const [gradingResults, setGradingResults] = useState({})
   const [studentInfo, setStudentInfo] = useState(null)
   const [showResult, setShowResult] = useState(false)
-  // 如果有 paperId，说明是从扫码进入，直接显示批改页面
   const [isScanning, setIsScanning] = useState(!paperId)
   
   const { wrongQuestions, updateWrongQuestionStatus } = useWrongQuestionStore()
 
-  // 初始化加载数据
   useEffect(() => {
     console.log('Grading: 初始化', { paperId, studentId })
     if (USE_MOCK_DATA) {
-      // 加载测试数据 - 获取该学生的错题
       const student = mockStudents.find(s => s.id === studentId) || mockStudents[0]
       const testQuestions = mockWrongQuestions
         .filter(wq => wq.student_id === student.id)
@@ -50,13 +40,10 @@ export default function Grading({ paperId, studentId, onClose, onComplete }) {
     }
   }, [paperId, studentId])
 
-  // 模拟扫描完成
   const handleScanComplete = () => {
     setIsScanning(false)
-    Toast.show({ icon: 'success', content: '扫描成功' })
   }
 
-  // 标记题目掌握状态
   const handleMarkStatus = (status) => {
     const currentQuestion = questions[currentQuestionIndex]
     const newResults = {
@@ -71,53 +58,40 @@ export default function Grading({ paperId, studentId, onClose, onComplete }) {
     }
     setGradingResults(newResults)
 
-    // 自动下一题
     if (currentQuestionIndex < questions.length - 1) {
       setTimeout(() => {
         setCurrentQuestionIndex(currentQuestionIndex + 1)
       }, 300)
     } else {
-      // 最后一题，显示结果
       setTimeout(() => {
         setShowResult(true)
       }, 300)
     }
   }
 
-  // 上一题
   const handlePrev = () => {
     if (currentQuestionIndex > 0) {
       setCurrentQuestionIndex(currentQuestionIndex - 1)
     }
   }
 
-  // 下一题
   const handleNext = () => {
     if (currentQuestionIndex < questions.length - 1) {
       setCurrentQuestionIndex(currentQuestionIndex + 1)
     }
   }
 
-  // 完成批改
   const handleComplete = async () => {
-    // 计算统计
     const masteredCount = Object.values(gradingResults).filter(r => r.status === 'mastered').length
     const notMasteredCount = Object.values(gradingResults).filter(r => r.status === 'not_mastered').length
     
-    // 更新错题本状态
     if (USE_MOCK_DATA) {
-      // 模拟更新错题本状态
       Object.values(gradingResults).forEach(result => {
         if (result.wrongQuestionId) {
           updateWrongQuestionStatus(result.wrongQuestionId, result.status)
         }
       })
     }
-    
-    Toast.show({ 
-      icon: 'success', 
-      content: `批改完成！已掌握 ${masteredCount} 题，未掌握 ${notMasteredCount} 题` 
-    })
     
     onComplete && onComplete({
       masteredCount,
@@ -127,485 +101,281 @@ export default function Grading({ paperId, studentId, onClose, onComplete }) {
     })
   }
 
-  // 渲染扫描页面
-  const renderScanPage = () => (
-    <div style={{ 
-      position: 'fixed',
-      top: 0,
-      left: 0,
-      right: 0,
-      bottom: 0,
-      display: 'flex',
-      flexDirection: 'column',
-      background: '#000',
-      zIndex: 2000
-    }}>
-      {/* 扫描区域 */}
-      <div style={{ 
-        flex: 1,
-        display: 'flex',
-        flexDirection: 'column',
-        alignItems: 'center',
-        justifyContent: 'center',
-        position: 'relative'
-      }}>
-        {/* 试卷预览卡片 */}
-        <div style={{
-          width: '280px',
-          background: '#fff',
-          borderRadius: '12px',
-          padding: '20px',
-          marginBottom: '40px'
-        }}>
-          <div style={{ 
-            textAlign: 'center', 
-            borderBottom: '2px solid #333',
-            paddingBottom: '10px',
-            marginBottom: '15px'
-          }}>
-            <div style={{ fontSize: '16px', fontWeight: 'bold' }}>数学错题重练卷</div>
-          </div>
-          
-          <div style={{ fontSize: '13px', color: '#333', marginBottom: '8px' }}>
-            学生姓名：{studentInfo?.name}
-          </div>
-          <div style={{ fontSize: '13px', color: '#333', marginBottom: '8px' }}>
-            重练次数：第{studentInfo?.retryCount}次
-          </div>
-          <div style={{ fontSize: '13px', color: '#333', marginBottom: '15px' }}>
-            日期：{studentInfo?.date}
-          </div>
-          
-          {/* 二维码占位 */}
-          <div style={{
-            width: '80px',
-            height: '80px',
-            background: '#f5f5f5',
-            margin: '0 auto',
-            display: 'flex',
-            alignItems: 'center',
-            justifyContent: 'center',
-            border: '1px solid #ddd'
-          }}>
-            <div style={{ fontSize: '10px', color: '#999' }}>二维码</div>
-          </div>
-        </div>
+  // Scan Page
+  if (isScanning) {
+    return (
+      <AnimatePresence>
+        <div className="fixed inset-0 bg-black z-[10000] flex flex-col">
+          <div className="flex-1 flex flex-col items-center justify-center relative">
+            <div className="w-[280px] bg-white rounded-[12px] p-5 mb-10">
+              <div className="text-center border-b-2 border-gray-800 pb-3 mb-4">
+                <div className="text-[16px] font-bold">数学错题重练卷</div>
+              </div>
+              <div className="text-[13px] text-gray-700 mb-2">学生姓名：{studentInfo?.name}</div>
+              <div className="text-[13px] text-gray-700 mb-2">重练次数：第{studentInfo?.retryCount}次</div>
+              <div className="text-[13px] text-gray-700 mb-4">日期：{studentInfo?.date}</div>
+              <div className="w-20 h-20 bg-gray-100 mx-auto flex items-center justify-center border border-gray-200 rounded-lg">
+                <QrCode size={32} className="text-gray-400" />
+              </div>
+            </div>
 
-        {/* 扫描提示 */}
-        <div style={{ color: '#fff', fontSize: '14px', textAlign: 'center' }}>
-          将二维码放入框内，自动识别
-        </div>
-      </div>
-
-      {/* 底部按钮 */}
-      <div style={{ 
-        padding: '20px',
-        display: 'flex',
-        justifyContent: 'center',
-        gap: '40px'
-      }}>
-        <div style={{ textAlign: 'center', color: '#fff' }}>
-          <div style={{ 
-            width: '48px', 
-            height: '48px', 
-            borderRadius: '50%',
-            background: 'rgba(255,255,255,0.2)',
-            display: 'flex',
-            alignItems: 'center',
-            justifyContent: 'center',
-            marginBottom: '8px'
-          }}>
-            <svg width="24" height="24" viewBox="0 0 1024 1024" fill="#fff">
-              <path d="M512 512m-512 0a512 512 0 1 0 1024 0 512 512 0 1 0-1024 0Z"/>
-            </svg>
+            <div className="text-white text-[14px] text-center">将二维码放入框内，自动识别</div>
           </div>
-          <div style={{ fontSize: '12px' }}>相册</div>
-        </div>
-        
-        <div 
-          onClick={handleScanComplete}
-          style={{ 
-            width: '64px', 
-            height: '64px', 
-            borderRadius: '50%',
-            border: '4px solid #fff',
-            display: 'flex',
-            alignItems: 'center',
-            justifyContent: 'center',
-            cursor: 'pointer'
-          }}
-        >
-          <div style={{ 
-            width: '52px', 
-            height: '52px', 
-            borderRadius: '50%',
-            background: '#fff'
-          }} />
-        </div>
-        
-        <div style={{ textAlign: 'center', color: '#fff' }}>
-          <div style={{ 
-            width: '48px', 
-            height: '48px', 
-            borderRadius: '50%',
-            background: 'rgba(255,255,255,0.2)',
-            display: 'flex',
-            alignItems: 'center',
-            justifyContent: 'center',
-            marginBottom: '8px'
-          }}>
-            <svg width="24" height="24" viewBox="0 0 1024 1024" fill="#fff">
-              <path d="M512 128c-211.2 0-384 172.8-384 384s172.8 384 384 384 384-172.8 384-384-172.8-384-384-384z m0 704c-176.8 0-320-143.2-320-320s143.2-320 320-320 320 143.2 320 320-143.2 320-320 320z"/>
-              <path d="M512 320c-17.6 0-32 14.4-32 32v160c0 17.6 14.4 32 32 32s32-14.4 32-32V352c0-17.6-14.4-32-32-32z"/>
-              <path d="M512 544c-17.6 0-32 14.4-32 32s14.4 32 32 32 32-14.4 32-32-14.4-32-32-32z"/>
-            </svg>
+
+          <div className="px-5 pb-8 flex justify-center gap-10">
+            <div className="text-center text-white cursor-pointer">
+              <div className="w-12 h-12 rounded-full bg-white/20 flex items-center justify-center mb-2 mx-auto">
+                <ImageIcon size={24} className="text-white" />
+              </div>
+              <div className="text-[12px]">相册</div>
+            </div>
+            
+            <div 
+              onClick={handleScanComplete}
+              className="w-16 h-16 rounded-full border-4 border-white flex items-center justify-center cursor-pointer"
+            >
+              <div className="w-[52px] h-[52px] rounded-full bg-white" />
+            </div>
+            
+            <div className="text-center text-white cursor-pointer">
+              <div className="w-12 h-12 rounded-full bg-white/20 flex items-center justify-center mb-2 mx-auto">
+                <Clock size={24} className="text-white" />
+              </div>
+              <div className="text-[12px]">扫码历史</div>
+            </div>
           </div>
-          <div style={{ fontSize: '12px' }}>扫码历史</div>
         </div>
-      </div>
-    </div>
-  )
+      </AnimatePresence>
+    )
+  }
 
-  // 渲染批改页面
-  const renderGradingPage = () => {
-    const currentQuestion = questions[currentQuestionIndex]
-    const currentResult = gradingResults[currentQuestion?.id]
-    const progress = ((currentQuestionIndex + 1) / questions.length) * 100
-
-    if (!currentQuestion) {
-      return (
-        <div style={{ 
-          position: 'fixed',
-          top: 0,
-          left: 0,
-          right: 0,
-          bottom: 0,
-          display: 'flex',
-          flexDirection: 'column',
-          alignItems: 'center',
-          justifyContent: 'center',
-          background: '#f5f5f5',
-          zIndex: 2000
-        }}>
-          <div style={{ fontSize: '16px', color: '#999' }}>加载中...</div>
-        </div>
-      )
-    }
-
-    const isShortOptions = currentQuestion.options && currentQuestion.options.every(opt => opt.length <= 10)
+  // Result Page
+  if (showResult) {
+    const masteredCount = Object.values(gradingResults).filter(r => r.status === 'mastered').length
+    const notMasteredCount = Object.values(gradingResults).filter(r => r.status === 'not_mastered').length
+    const total = questions.length
 
     return (
-      <div style={{ 
-        position: 'fixed',
-        top: 0,
-        left: 0,
-        right: 0,
-        bottom: 0,
-        display: 'flex',
-        flexDirection: 'column',
-        background: '#f5f5f5',
-        zIndex: 2000
-      }}>
-        {/* 顶部导航 */}
-        <NavBar
-          back={null}
-          left={<Button fill="none" onClick={onClose}>退出</Button>}
-          right={<span style={{ color: '#1677ff' }}>批改中</span>}
-        >
-          批改中
-        </NavBar>
+      <AnimatePresence>
+        <div className="fixed inset-0 bg-white z-[10000] flex flex-col overflow-auto">
+          <motion.div
+            initial={{ opacity: 0, y: 20 }}
+            animate={{ opacity: 1, y: 0 }}
+            className="flex-1 px-6 pt-16"
+          >
+            {/* Success Icon */}
+            <div className="text-center mb-8 mt-8">
+              <div className="w-[120px] h-[120px] rounded-full bg-gradient-to-br from-green-500 to-green-700 flex items-center justify-center mx-auto relative">
+                <CheckCircle2 size={60} className="text-white" strokeWidth={2.5} />
+                <div className="absolute top-[-10px] right-[-10px]">
+                  <Trophy size={30} className="text-yellow-500" />
+                </div>
+              </div>
+            </div>
 
-        {/* 进度条 */}
-        <div style={{ padding: '12px 16px', background: '#fff' }}>
-          <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '8px', fontSize: '13px' }}>
+            {/* Title */}
+            <div className="text-center mb-8">
+              <div className="text-[24px] font-bold text-gray-900 mb-2">恭喜您！</div>
+              <div className="text-[14px] text-gray-500">本次批改已完成</div>
+              <div className="text-[14px] text-gray-500">你消灭了 {masteredCount} 道错题！</div>
+            </div>
+
+            {/* Stats Card */}
+            <div className="bg-green-50 border border-green-100 rounded-2xl p-6 mb-6">
+              <div className="text-center mb-4">
+                <div className="w-20 h-20 rounded-full border-8 border-green-500 flex items-center justify-center mx-auto relative">
+                  <span className="text-[28px] font-bold text-green-600">{masteredCount}</span>
+                  <span className="text-[12px] text-gray-400 absolute bottom-2">已掌握</span>
+                </div>
+              </div>
+              
+              <div className="flex justify-around text-[13px]">
+                <div className="text-center">
+                  <div className="text-green-600 font-bold">{masteredCount} 题</div>
+                  <div className="text-gray-400">已掌握 ({Math.round(masteredCount/total*100)}%)</div>
+                </div>
+                <div className="text-center">
+                  <div className="text-red-500 font-bold">{notMasteredCount} 题</div>
+                  <div className="text-gray-400">未掌握 ({Math.round(notMasteredCount/total*100)}%)</div>
+                </div>
+              </div>
+            </div>
+
+            {/* Details */}
+            <div className="mb-8">
+              <div className="flex justify-between mb-3 text-[14px]">
+                <span className="text-gray-500">重练次数</span>
+                <span className="text-gray-900">+1（本次累计 {studentInfo?.retryCount} 次）</span>
+              </div>
+              <div className="flex justify-between text-[14px]">
+                <span className="text-gray-500">错题本状态</span>
+                <span className="text-green-600">已同步更新</span>
+              </div>
+            </div>
+
+            {/* Complete Button */}
+            <button 
+              onClick={handleComplete}
+              className="w-full py-4 rounded-2xl bg-blue-600 text-white text-[15px] font-bold hover:bg-blue-500 transition-all active:opacity-80"
+            >
+              完成
+            </button>
+          </motion.div>
+        </div>
+      </AnimatePresence>
+    )
+  }
+
+  // Grading Page
+  const currentQuestion = questions[currentQuestionIndex]
+  const currentResult = gradingResults[currentQuestion?.id]
+  const progress = ((currentQuestionIndex + 1) / questions.length) * 100
+
+  if (!currentQuestion) {
+    return (
+      <div className="fixed inset-0 bg-gray-50 z-[10000] flex items-center justify-center">
+        <Loader2 size={32} className="text-blue-500 animate-spin" />
+      </div>
+    )
+  }
+
+  const isShortOptions = currentQuestion.options && currentQuestion.options.every(opt => opt.length <= 10)
+
+  return (
+    <AnimatePresence>
+      <div className="fixed inset-0 bg-gray-50 z-[10000] flex flex-col">
+        {/* Header */}
+        <div className="flex items-center justify-between px-5 pt-12 pb-4 bg-white border-b border-gray-100">
+          <button onClick={onClose} className="text-[14px] font-medium text-gray-500 hover:text-gray-700">
+            退出
+          </button>
+          <h2 className="text-[17px] font-bold text-gray-900">批改中</h2>
+          <span className="text-[14px] font-medium text-blue-600">批改中</span>
+        </div>
+
+        {/* Progress */}
+        <div className="px-5 py-4 bg-white">
+          <div className="flex justify-between mb-3 text-[13px]">
             <span>{studentInfo?.name}</span>
-            <span style={{ color: '#999' }}>{studentInfo?.date}</span>
+            <span className="text-gray-400">{studentInfo?.date}</span>
             <span>第{studentInfo?.retryCount}次重练</span>
           </div>
-          <ProgressBar
-            percent={progress}
-            style={{
-              '--fill-color': '#1677ff',
-              '--track-color': '#e6f7ff'
-            }}
-          />
-          <div style={{ textAlign: 'center', marginTop: '4px', fontSize: '12px', color: '#999' }}>
+          <div className="w-full h-2 bg-blue-50 rounded-full overflow-hidden">
+            <motion.div 
+              className="h-full bg-blue-600 rounded-full"
+              initial={{ width: 0 }}
+              animate={{ width: `${progress}%` }}
+              transition={{ duration: 0.3 }}
+            />
+          </div>
+          <div className="text-center mt-2 text-[12px] text-gray-400">
             进度 {currentQuestionIndex + 1}/{questions.length}
           </div>
         </div>
 
-        {/* 题目内容 */}
-        <div style={{ flex: 1, overflow: 'auto', padding: '16px' }}>
-          <Card style={{ marginBottom: '12px' }}>
-            {/* 题号 */}
-            <div style={{ 
-              display: 'flex', 
-              justifyContent: 'space-between', 
-              alignItems: 'center',
-              marginBottom: '12px'
-            }}>
+        {/* Question Content */}
+        <div className="flex-1 overflow-auto px-5 py-4">
+          <div className="bg-white rounded-2xl p-5 mb-3 shadow-sm">
+            <div className="flex justify-between items-center mb-3">
               <div>
-                <span style={{ 
-                  color: '#1677ff', 
-                  fontSize: '14px', 
-                  fontWeight: 'bold',
-                  marginRight: '8px'
-                }}>
-                  第 {currentQuestionIndex + 1} 题
-                </span>
-                <span style={{ color: '#999', fontSize: '13px' }}>
+                <span className="text-[14px] font-bold text-blue-600 mr-2">第 {currentQuestionIndex + 1} 题</span>
+                <span className="text-[13px] text-gray-400">
                   {currentQuestion.question_type === 'choice' ? '选择题' : 
                    currentQuestion.question_type === 'fill' ? '填空题' : '解答题'}
                 </span>
               </div>
             </div>
 
-            {/* 题目 */}
-            <div style={{ fontSize: '15px', color: '#333', lineHeight: '1.6', marginBottom: '16px' }}>
+            <div className="text-[15px] text-gray-700 leading-relaxed mb-4">
               {currentQuestion.content}
             </div>
 
-            {/* 选项 */}
             {currentQuestion.options && currentQuestion.options.length > 0 && (
-              <div style={{ 
-                display: isShortOptions ? 'flex' : 'grid',
-                flexWrap: 'wrap',
-                gap: isShortOptions ? '24px' : '8px',
-                gridTemplateColumns: isShortOptions ? undefined : '1fr 1fr',
-                marginBottom: '16px'
-              }}>
+              <div className={`flex ${isShortOptions ? 'flex-wrap gap-6' : 'flex-wrap gap-2'} mb-4`}>
                 {currentQuestion.options.map((opt, i) => (
-                  <div key={i} style={{ fontSize: '14px', color: '#333' }}>
+                  <div key={i} className="text-[14px] text-gray-700">
                     {String.fromCharCode(65 + i)}. {opt}
                   </div>
                 ))}
               </div>
             )}
-          </Card>
+          </div>
 
-          {/* 参考答案 */}
-          <Card style={{ marginBottom: '12px', background: '#e6f7ff', border: '1px solid #91d5ff' }}>
-            <div style={{ fontSize: '14px', fontWeight: 'bold', color: '#1677ff', marginBottom: '8px' }}>
-              参考答案
-            </div>
-            <div style={{ fontSize: '14px', color: '#333', lineHeight: '1.6' }}>
+          {/* Answer */}
+          <div className="bg-blue-50 border border-blue-100 rounded-2xl p-5 mb-3">
+            <div className="text-[14px] font-bold text-blue-600 mb-2">参考答案</div>
+            <div className="text-[14px] text-gray-700 leading-relaxed">
               {currentQuestion.answer || '暂无答案'}
             </div>
-          </Card>
+          </div>
 
-          {/* 解析 */}
-          <Card style={{ background: '#f6ffed', border: '1px solid #b7eb8f' }}>
-            <div style={{ fontSize: '14px', fontWeight: 'bold', color: '#52c41a', marginBottom: '8px' }}>
-              解析
-            </div>
-            <div style={{ fontSize: '14px', color: '#333', lineHeight: '1.6' }}>
+          {/* Analysis */}
+          <div className="bg-green-50 border border-green-100 rounded-2xl p-5">
+            <div className="text-[14px] font-bold text-green-600 mb-2">解析</div>
+            <div className="text-[14px] text-gray-700 leading-relaxed">
               {currentQuestion.analysis || 
                 `本题考查${currentQuestion.question_type === 'choice' ? '基础概念' : '计算能力'}。` +
                 `正确答案是 ${currentQuestion.answer}。` +
                 `解题思路：根据题目条件，运用相关知识点进行推导计算。`
               }
             </div>
-          </Card>
+          </div>
         </div>
 
-        {/* 底部操作 */}
-        <div style={{ 
-          background: '#fff', 
-          padding: '16px',
-          borderTop: '1px solid #f0f0f0'
-        }}>
-          {/* 掌握状态按钮 */}
-          <div style={{ display: 'flex', gap: '12px', marginBottom: '16px' }}>
-            <Button
-              block
-              color={currentResult?.status === 'mastered' ? 'success' : 'default'}
+        {/* Bottom Controls */}
+        <div className="bg-white px-5 py-4 border-t border-gray-100">
+          <div className="flex gap-3 mb-4">
+            <button
               onClick={() => handleMarkStatus('mastered')}
-              style={{
-                background: currentResult?.status === 'mastered' ? '#52c41a' : '#f6ffed',
-                color: currentResult?.status === 'mastered' ? '#fff' : '#52c41a',
-                border: 'none'
-              }}
+              className={`flex-1 py-3 px-4 rounded-xl text-[14px] font-bold transition-all flex items-center justify-center gap-1.5 ${
+                currentResult?.status === 'mastered' 
+                  ? 'bg-green-600 text-white' 
+                  : 'bg-green-50 text-green-600'
+              }`}
             >
-              <span style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '4px' }}>
-                <svg width="16" height="16" viewBox="0 0 1024 1024" fill="currentColor">
-                  <path d="M912 224l-48-48-400 400-176-176-48 48 224 224z"/>
-                </svg>
-                已掌握
-              </span>
-            </Button>
-            <Button
-              block
-              color={currentResult?.status === 'not_mastered' ? 'danger' : 'default'}
+              <CheckCircle2 size={16} />
+              已掌握
+            </button>
+            <button
               onClick={() => handleMarkStatus('not_mastered')}
-              style={{
-                background: currentResult?.status === 'not_mastered' ? '#ff4d4f' : '#fff1f0',
-                color: currentResult?.status === 'not_mastered' ? '#fff' : '#ff4d4f',
-                border: 'none'
-              }}
+              className={`flex-1 py-3 px-4 rounded-xl text-[14px] font-bold transition-all flex items-center justify-center gap-1.5 ${
+                currentResult?.status === 'not_mastered' 
+                  ? 'bg-red-600 text-white' 
+                  : 'bg-red-50 text-red-600'
+              }`}
             >
-              <span style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '4px' }}>
-                <svg width="16" height="16" viewBox="0 0 1024 1024" fill="currentColor">
-                  <path d="M544 448H320c-17.6 0-32 14.4-32 32s14.4 32 32 32h224c17.6 0 32-14.4 32-32s-14.4-32-32-32z"/>
-                  <path d="M512 64C264.6 64 64 264.6 64 512s200.6 448 448 448 448-200.6 448-448S759.4 64 512 64zm0 832c-212 0-384-172-384-384s172-384 384-384 384 172 384 384-172 384-384 384z"/>
-                </svg>
-                未掌握
-              </span>
-            </Button>
+              <XCircle size={16} />
+              未掌握
+            </button>
           </div>
 
-          {/* 导航按钮 */}
-          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-            <Button 
-              size="small" 
-              fill="none"
-              disabled={currentQuestionIndex === 0}
+          <div className="flex justify-between items-center">
+            <button 
               onClick={handlePrev}
+              disabled={currentQuestionIndex === 0}
+              className="text-[14px] text-gray-500 disabled:opacity-30"
             >
-              上一题
-            </Button>
-            <span style={{ fontSize: '14px', color: '#666' }}>
+              <div className="flex items-center gap-1">
+                <ChevronLeft size={16} />
+                上一题
+              </div>
+            </button>
+            <span className="text-[14px] text-gray-500">
               {currentQuestionIndex + 1} / {questions.length}
             </span>
-            <Button 
-              size="small" 
-              fill="none"
-              disabled={currentQuestionIndex === questions.length - 1}
+            <button 
               onClick={handleNext}
+              disabled={currentQuestionIndex === questions.length - 1}
+              className="text-[14px] text-gray-500 disabled:opacity-30"
             >
-              下一题
-            </Button>
+              <div className="flex items-center gap-1">
+                下一题
+                <ChevronRight size={16} />
+              </div>
+            </button>
           </div>
         </div>
       </div>
-    )
-  }
-
-  // 渲染结果页面
-  const renderResultPage = () => {
-    const masteredCount = Object.values(gradingResults).filter(r => r.status === 'mastered').length
-    const notMasteredCount = Object.values(gradingResults).filter(r => r.status === 'not_mastered').length
-    const total = questions.length
-
-    return (
-      <div style={{ 
-        position: 'fixed',
-        top: 0,
-        left: 0,
-        right: 0,
-        bottom: 0,
-        display: 'flex',
-        flexDirection: 'column',
-        background: '#fff',
-        padding: '24px',
-        zIndex: 2000,
-        overflow: 'auto'
-      }}>
-        {/* 成功图标 */}
-        <div style={{ textAlign: 'center', marginTop: '40px', marginBottom: '24px' }}>
-          <div style={{
-            width: '120px',
-            height: '120px',
-            borderRadius: '50%',
-            background: 'linear-gradient(135deg, #52c41a 0%, #389e0d 100%)',
-            display: 'flex',
-            alignItems: 'center',
-            justifyContent: 'center',
-            margin: '0 auto',
-            position: 'relative'
-          }}>
-            <svg width="60" height="60" viewBox="0 0 1024 1024" fill="#fff">
-              <path d="M912 224l-48-48-400 400-176-176-48 48 224 224z"/>
-            </svg>
-            {/* 装饰星星 */}
-            <div style={{ position: 'absolute', top: '-10px', right: '-10px' }}>
-              <svg width="30" height="30" viewBox="0 0 1024 1024" fill="#faad14">
-                <path d="M512 64l128 320 352 32-272 224 96 352-304-208-304 208 96-352L32 416l352-32z"/>
-              </svg>
-            </div>
-          </div>
-        </div>
-
-        {/* 标题 */}
-        <div style={{ textAlign: 'center', marginBottom: '32px' }}>
-          <div style={{ fontSize: '24px', fontWeight: 'bold', color: '#333', marginBottom: '8px' }}>
-            恭喜您！
-          </div>
-          <div style={{ fontSize: '14px', color: '#666' }}>
-            本次批改已完成
-          </div>
-          <div style={{ fontSize: '14px', color: '#666' }}>
-            你消灭了 {masteredCount} 道错题！
-          </div>
-        </div>
-
-        {/* 统计卡片 */}
-        <Card style={{ marginBottom: '24px', background: '#f6ffed', border: '1px solid #b7eb8f' }}>
-          <div style={{ textAlign: 'center', marginBottom: '16px' }}>
-            <div style={{ 
-              width: '80px', 
-              height: '80px', 
-              borderRadius: '50%',
-              border: '8px solid #52c41a',
-              display: 'flex',
-              alignItems: 'center',
-              justifyContent: 'center',
-              margin: '0 auto',
-              position: 'relative'
-            }}>
-              <span style={{ fontSize: '28px', fontWeight: 'bold', color: '#52c41a' }}>
-                {masteredCount}
-              </span>
-              <span style={{ fontSize: '12px', color: '#999', position: 'absolute', bottom: '8px' }}>
-                已掌握
-              </span>
-            </div>
-          </div>
-          
-          <div style={{ display: 'flex', justifyContent: 'space-around', fontSize: '13px' }}>
-            <div style={{ textAlign: 'center' }}>
-              <div style={{ color: '#52c41a', fontWeight: 'bold' }}>{masteredCount} 题</div>
-              <div style={{ color: '#999' }}>已掌握 ({Math.round(masteredCount/total*100)}%)</div>
-            </div>
-            <div style={{ textAlign: 'center' }}>
-              <div style={{ color: '#ff4d4f', fontWeight: 'bold' }}>{notMasteredCount} 题</div>
-              <div style={{ color: '#999' }}>未掌握 ({Math.round(notMasteredCount/total*100)}%)</div>
-            </div>
-          </div>
-        </Card>
-
-        {/* 统计详情 */}
-        <div style={{ marginBottom: '24px' }}>
-          <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '12px', fontSize: '14px' }}>
-            <span style={{ color: '#666' }}>重练次数</span>
-            <span style={{ color: '#333' }}>+1（本次累计 {studentInfo?.retryCount} 次）</span>
-          </div>
-          <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '14px' }}>
-            <span style={{ color: '#666' }}>错题本状态</span>
-            <span style={{ color: '#52c41a' }}>已同步更新</span>
-          </div>
-        </div>
-
-        {/* 完成按钮 */}
-        <Button 
-          block 
-          color="primary" 
-          size="large"
-          onClick={handleComplete}
-        >
-          完成
-        </Button>
-      </div>
-    )
-  }
-
-  // 根据状态渲染不同页面
-  if (isScanning) {
-    return renderScanPage()
-  }
-
-  if (showResult) {
-    return renderResultPage()
-  }
-
-  return renderGradingPage()
+    </AnimatePresence>
+  )
 }

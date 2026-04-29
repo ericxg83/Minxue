@@ -69,7 +69,9 @@ export default function Layout({ children }) {
       height: '100%',
       display: 'flex',
       flexDirection: 'column',
-      background: COLORS.background
+      background: COLORS.background,
+      maxWidth: '480px',
+      margin: '0 auto'
     }}>
       <div style={{
         flex: 1,

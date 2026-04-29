@@ -1,628 +1,274 @@
-import { useState, useRef } from 'react'
-import { Popup, Badge, Button, Toast, Dialog, Mask, SwipeAction } from 'antd-mobile'
-import { useStudentStore, useTaskStore, useWrongQuestionStore, usePendingQuestionStore, useExamStore } from '../../store'
-import { createStudent } from '../../services/supabaseService'
+import { useState, useEffect, useRef } from 'react'
+import { motion, AnimatePresence } from 'motion/react'
+import { X, Plus, CheckCircle2, ChevronRight, UserPlus, User, Trash2 } from 'lucide-react'
+import { useStudentStore } from '../../store'
+import { createStudent, getStudents, deleteStudent } from '../../services/supabaseService'
+import { mockStudents } from '../../data/mockData'
 
-// 现代移动应用颜色
-const COLORS = {
-  primary: '#2B7DE9',
-  primaryLight: '#EBF5FF',
-  primaryDark: '#1A3A5C',
-  accent: '#4A9EFF',
-  success: '#34C759',
-  danger: '#FF3B30',
-  warning: '#FF9500',
-  background: '#F5F8FC',
-  card: '#FFFFFF',
-  text: '#1A3A5C',
-  textSecondary: '#8B9DB5',
-  textTertiary: '#A8B8CC',
-  border: '#E5ECF5'
-}
+const USE_MOCK_DATA = false
 
-// 年级选项
-const GRADE_OPTIONS = ['一年级', '二年级', '三年级', '四年级', '五年级', '六年级', '初一', '初二', '初三', '高一', '高二', '高三']
-
-// 格式化数字：超过99显示"99+"，0或负数返回null（不显示徽章）
-const formatCount = (count) => {
-  if (count <= 0) return null
-  if (count > 99) return '99+'
-  return String(count)
-}
-
-export default function StudentSwitcher({ visible, onClose, badgeType }) {
-  const { students, currentStudent, setCurrentStudent, addStudent, removeStudent: removeStudentFromStore } = useStudentStore()
-  const { tasks } = useTaskStore()
-  const { wrongQuestions } = useWrongQuestionStore()
-  const { pendingQuestions } = usePendingQuestionStore()
-  const { exams } = useExamStore()
-  
+export default function StudentSwitcher({ visible, onClose, onSelectStudent }) {
+  const { students, currentStudent, setCurrentStudent, setStudents } = useStudentStore()
   const [showAddStudent, setShowAddStudent] = useState(false)
-  const [formData, setFormData] = useState({ 
-    name: '', 
-    grade: '', 
-    class: '', 
-    remark: '',
-    avatar: '' 
-  })
-  const swipeRefs = useRef({})
-  const fileInputRef = useRef(null)
+  const [showDeleteConfirm, setShowDeleteConfirm] = useState(null)
+  const [newName, setNewName] = useState('')
+  const [newClass, setNewClass] = useState('')
+  const [submitting, setSubmitting] = useState(false)
+  const nameInputRef = useRef(null)
+  const classInputRef = useRef(null)
 
-  // 从 localStorage 获取已加入错题本的题目ID
-  const getAddedToWrongBookIds = (studentId) => {
+  useEffect(() => {
+    if (visible) {
+      loadStudents()
+      setNewName('')
+      setNewClass('')
+      setShowAddStudent(false)
+    }
+  }, [visible])
+
+  useEffect(() => {
+    if (showAddStudent && nameInputRef.current) {
+      nameInputRef.current.focus()
+    }
+  }, [showAddStudent])
+
+  const loadStudents = async () => {
     try {
-      const stored = localStorage.getItem(`addedToWrongBook_${studentId}`)
-      return stored ? new Set(JSON.parse(stored)) : new Set()
-    } catch {
-      return new Set()
+      const loadedStudents = await getStudents(true)
+      setStudents(loadedStudents)
+    } catch (error) {
+      console.error('加载学生列表失败:', error)
     }
   }
 
-  // 计算指定类型下每个学生的任务数量
-  const getStudentTaskCount = (studentId) => {
-    switch (badgeType) {
-      case 'failed': {
-        return tasks.filter(t => t.student_id === studentId && t.status === 'failed').length
-      }
-      case 'pending': {
-        const addedIds = getAddedToWrongBookIds(studentId)
-        return pendingQuestions.filter(q => 
-          q.student_id === studentId && 
-          (q.status === 'wrong' || !q.is_correct) &&
-          !addedIds.has(q.id)
-        ).length
-      }
-      case 'grading': {
-        return exams.filter(e => e.student_id === studentId && e.status === 'ungraded').length
-      }
-      case 'wrongbook': {
-        return wrongQuestions.filter(wq => wq.student_id === studentId && wq.status !== 'mastered').length
-      }
-      default:
-        return 0
-    }
-  }
-
-  // 获取提示文案
-  const getBadgeHint = () => {
-    switch (badgeType) {
-      case 'failed':
-        return '数字表示该学生失败的试卷数量'
-      case 'pending':
-        return '数字表示该学生待确认的题目数量'
-      case 'grading':
-        return '数字表示该学生待批改的题目数量'
-      case 'wrongbook':
-        return '数字表示该学生未掌握的错题数量'
-      default:
-        return ''
-    }
-  }
-
-  // 获取徽章颜色
-  const getBadgeColor = () => {
-    switch (badgeType) {
-      case 'failed':
-        return COLORS.danger
-      case 'pending':
-        return COLORS.primary
-      case 'grading':
-        return COLORS.success
-      case 'wrongbook':
-        return COLORS.danger
-      default:
-        return COLORS.primary
-    }
-  }
-
-  // 处理头像上传
-  const handleAvatarUpload = (e) => {
-    const file = e.target.files[0]
-    if (!file) return
-
-    const reader = new FileReader()
-    reader.onload = (event) => {
-      setFormData({ ...formData, avatar: event.target.result })
-      Toast.show({ icon: 'success', content: '头像上传成功' })
-    }
-    reader.readAsDataURL(file)
-  }
-
-  // 删除学生
-  const handleDeleteStudent = (student, e) => {
-    if (e) e.stopPropagation()
-    
-    Dialog.confirm({
-      title: '删除确认',
-      content: `确定要删除学生「${student.name}」吗？此操作不可恢复。`,
-      confirmText: '确定删除',
-      cancelText: '取消',
-      onConfirm: () => {
-        removeStudentFromStore(student.id)
-        if (currentStudent?.id === student.id) {
-          setCurrentStudent(null)
+  const handleAddStudent = async () => {
+    if (!newName.trim()) return
+    setSubmitting(true)
+    try {
+      if (USE_MOCK_DATA) {
+        const newStudent = {
+          id: mockStudents.length > 0 ? `student-${mockStudents.length + 1}` : 'student-1',
+          name: newName,
+          class: newClass,
         }
-        Toast.show({ icon: 'success', content: '删除成功' })
+        setStudents([...students, newStudent])
+        setCurrentStudent(newStudent)
+      } else {
+        const result = await createStudent({ name: newName, class: newClass })
+        setCurrentStudent(result)
       }
-    })
-  }
-
-  // 保存学生
-  const handleSave = async () => {
-    if (!formData.name.trim()) {
-      Toast.show({ icon: 'fail', content: '请输入学生姓名' })
-      return
-    }
-
-    // 组合班级信息
-    const classInfo = formData.grade && formData.class 
-      ? `${formData.grade}·${formData.class}`
-      : formData.grade || formData.class
-
-    const newStudent = {
-      name: formData.name.trim(),
-      grade: formData.grade,
-      class: classInfo,
-      avatar: formData.avatar,
-      remark: formData.remark
-    }
-
-    try {
-      const created = await createStudent(newStudent)
-      if (created) {
-        addStudent(created)
-        Toast.show({ icon: 'success', content: '添加成功' })
-      }
+      onClose()
     } catch (error) {
       console.error('添加学生失败:', error)
-      Toast.show({ icon: 'fail', content: '添加失败，请重试' })
-      return
+    } finally {
+      setSubmitting(false)
     }
-    
-    // 重置表单并关闭弹窗
-    setFormData({ name: '', grade: '', class: '', remark: '', avatar: '' })
-    setShowAddStudent(false)
   }
 
-  // 取消添加
-  const handleCancel = () => {
-    setFormData({ name: '', grade: '', class: '', remark: '', avatar: '' })
-    setShowAddStudent(false)
-  }
-
-  // 左滑互斥：打开一个新的 SwipeAction 时，关闭其他所有已打开的
-  const handleSwipeReveal = (studentId) => {
-    Object.keys(swipeRefs.current).forEach(id => {
-      if (id !== studentId && swipeRefs.current[id]) {
-        swipeRefs.current[id]?.close()
+  const handleDelete = async (student) => {
+    try {
+      if (!USE_MOCK_DATA) {
+        await deleteStudent(student.id)
       }
-    })
+      setStudents(students.filter(s => s.id !== student.id))
+      if (currentStudent?.id === student.id) {
+        const remaining = students.filter(s => s.id !== student.id)
+        setCurrentStudent(remaining.length > 0 ? remaining[0] : null)
+      }
+      setShowDeleteConfirm(null)
+    } catch (error) {
+      console.error('删除学生失败:', error)
+    }
   }
-
-  const studentList = students
-  const badgeColor = getBadgeColor()
 
   return (
-    <>
-      {/* 学生切换弹窗 - 现代风格 */}
-      <Popup
-        visible={visible && !showAddStudent}
-        onMaskClick={onClose}
-        position="bottom"
-        bodyStyle={{
-          borderTopLeftRadius: '20px',
-          borderTopRightRadius: '20px',
-          minHeight: '300px',
-          maxHeight: '70vh',
-          background: COLORS.card,
-          padding: 0
-        }}
-      >
-        <div style={{
-          display: 'flex',
-          flexDirection: 'column',
-          height: '100%',
-          maxHeight: '70vh'
-        }}>
-          {/* 标题 - 固定顶部 */}
-          <div style={{
-            padding: '16px',
-            display: 'flex',
-            justifyContent: 'space-between',
-            alignItems: 'center',
-            flexShrink: 0
-          }}>
-            <span style={{ fontSize: '20px', fontWeight: 600, color: COLORS.text }}>切换学生</span>
-            <span
-              onClick={onClose}
-              style={{ fontSize: '28px', color: COLORS.textSecondary, cursor: 'pointer', lineHeight: 1 }}
-            >
-              ×
-            </span>
-          </div>
-
-          {/* 学生列表 - 可滚动 */}
-          <div style={{
-            flex: 1,
-            overflow: 'auto',
-            padding: '0 16px 16px',
-            WebkitOverflowScrolling: 'touch'
-          }}>
-            <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
-              {studentList.map(student => {
-                const count = getStudentTaskCount(student.id)
-                const isCurrent = currentStudent?.id === student.id
-
-                return (
-                  <SwipeAction
-                    key={student.id}
-                    ref={ref => {
-                      swipeRefs.current[student.id] = ref
-                    }}
-                    onActionsReveal={() => handleSwipeReveal(student.id)}
-                    rightActions={[
-                      {
-                        key: 'delete',
-                        text: '删除',
-                        color: COLORS.danger,
-                        onClick: (e) => {
-                          e.stopPropagation()
-                          Dialog.confirm({
-                            title: '删除确认',
-                            content: `确定要删除学生「${student.name}」吗？此操作不可恢复。`,
-                            confirmText: '确定删除',
-                            cancelText: '取消',
-                            onConfirm: () => {
-                              removeStudentFromStore(student.id)
-                              if (currentStudent?.id === student.id) {
-                                setCurrentStudent(null)
-                              }
-                              Toast.show({ icon: 'success', content: '删除成功' })
-                            }
-                          })
-                        }
-                      }
-                    ]}
-                  >
-                    <div
-                      onClick={() => {
-                        setCurrentStudent(student)
-                        onClose()
-                      }}
-                      style={{
-                        display: 'flex',
-                        alignItems: 'center',
-                        gap: '12px',
-                        padding: '12px',
-                        borderRadius: '12px',
-                        background: isCurrent ? COLORS.primaryLight : COLORS.background,
-                        cursor: 'pointer',
-                        transition: 'all 0.2s'
-                      }}
-                    >
-                      <div style={{
-                        width: '44px',
-                        height: '44px',
-                        borderRadius: '50%',
-                        background: isCurrent ? 'linear-gradient(135deg, #4A9EFF 0%, #2B7DE9 100%)' : '#fff',
-                        display: 'flex',
-                        alignItems: 'center',
-                        justifyContent: 'center',
-                        overflow: 'hidden',
-                        flexShrink: 0,
-                        boxShadow: isCurrent ? '0 4px 12px rgba(43, 125, 233, 0.25)' : 'none'
-                      }}>
-                        {student.avatar ? (
-                          <img src={student.avatar} alt="" style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
-                        ) : (
-                          <svg width="24" height="24" viewBox="0 0 24 24" fill={isCurrent ? '#fff' : COLORS.textSecondary}>
-                            <path d="M12 12c2.21 0 4-1.79 4-4s-1.79-4-4-4-4 1.79-4 4 1.79 4 4 4zm0 2c-2.67 0-8 1.34-8 4v2h16v-2c0-2.66-5.33-4-8-4z"/>
-                          </svg>
-                        )}
-                      </div>
-
-                      <div style={{ flex: 1, minWidth: 0 }}>
-                        <div style={{ fontSize: '16px', fontWeight: isCurrent ? 600 : 500, color: COLORS.text }}>
-                          {student.name}
-                        </div>
-                        <div style={{ fontSize: '13px', color: COLORS.textSecondary, marginTop: '2px' }}>
-                          {student.class || '暂无班级'}
-                        </div>
-                      </div>
-
-                      {count > 0 && (
-                        <Badge
-                          content={formatCount(count)}
-                          style={{
-                            '--right': '0',
-                            '--top': '0',
-                            '--padding': '2px 8px',
-                            '--font-size': '13px',
-                            '--color': badgeColor,
-                            '--background': badgeColor + '15',
-                            borderRadius: '12px',
-                            minWidth: '24px'
-                          }}
-                        >
-                          <span style={{
-                            width: '8px',
-                            height: '8px',
-                            borderRadius: '50%',
-                            background: badgeColor
-                          }} />
-                        </Badge>
-                      )}
-
-                      <svg width="18" height="18" viewBox="0 0 24 24" fill={isCurrent ? COLORS.primary : COLORS.border} style={{ flexShrink: 0 }}>
-                        <path d="M10 6L8.59 7.41 13.17 12l-4.58 4.59L10 18l6-6z"/>
-                      </svg>
-                    </div>
-                  </SwipeAction>
-                )
-              })}
-            </div>
-          </div>
-
-          {/* 底部按钮区域 - 固定底部 */}
-          <div style={{
-            padding: '16px',
-            borderTop: '1px solid ' + COLORS.border,
-            background: COLORS.card,
-            flexShrink: 0
-          }}>
-            <Button
-              block
-              fill="none"
-              style={{
-                border: '2px dashed ' + COLORS.primary,
-                borderRadius: '12px',
-                padding: '16px',
-                color: COLORS.primary,
-                fontSize: '16px',
-                display: 'flex',
-                alignItems: 'center',
-                justifyContent: 'center',
-                gap: '8px',
-                background: COLORS.primaryLight
-              }}
-              onClick={() => setShowAddStudent(true)}
-            >
-              <svg width="22" height="22" viewBox="0 0 24 24" fill="currentColor">
-                <path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm5 11h-4v4h-2v-4H7v-2h4V7h2v4h4v2z"/>
-              </svg>
-              添加学生
-            </Button>
-          </div>
-        </div>
-      </Popup>
-
-      {/* 添加学生弹窗 - 半屏抽屉样式 */}
-      {showAddStudent && (
+    <AnimatePresence>
+      {visible && (
         <>
-          <div
-            onClick={handleCancel}
-            style={{
-              position: 'fixed',
-              inset: 0,
-              background: 'rgba(0,0,0,0.5)',
-              zIndex: 1000
-            }}
+          <motion.div
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            onClick={onClose}
+            className="fixed inset-0 bg-black/50 backdrop-blur-sm z-[10000]"
           />
-
-          <div
-            style={{
-              position: 'fixed',
-              left: 0,
-              right: 0,
-              bottom: 0,
-              height: '75vh',
-              background: COLORS.background,
-              borderRadius: '20px 20px 0 0',
-              zIndex: 1001,
-              display: 'flex',
-              flexDirection: 'column',
-              boxShadow: '0 -4px 20px rgba(0,0,0,0.1)',
-              animation: 'slide-up 0.3s ease-out'
-            }}
+          <motion.div
+            initial={{ y: '100%' }}
+            animate={{ y: 0 }}
+            exit={{ y: '100%' }}
+            transition={{ type: 'spring', damping: 25, stiffness: 200 }}
+            className="fixed bottom-0 left-0 right-0 max-w-md mx-auto bg-white rounded-t-3xl overflow-hidden z-[10001]"
           >
-            <div style={{
-              padding: '12px 0',
-              display: 'flex',
-              justifyContent: 'center',
-              alignItems: 'center',
-              userSelect: 'none',
-              flexShrink: 0
-            }}>
-              <div style={{
-                width: '40px',
-                height: '5px',
-                background: '#D1D1D6',
-                borderRadius: '3px'
-              }} />
-            </div>
-
-            <div style={{
-              background: COLORS.card,
-              padding: '12px 16px',
-              display: 'flex',
-              justifyContent: 'space-between',
-              alignItems: 'center',
-              borderBottom: '1px solid ' + COLORS.border,
-              flexShrink: 0
-            }}>
-              <Button
-                fill="none"
-                style={{ color: COLORS.textSecondary, fontSize: '16px' }}
-                onClick={handleCancel}
-              >
-                取消
-              </Button>
-              <span style={{ fontSize: '18px', fontWeight: 600, color: COLORS.text }}>添加学生</span>
-              <Button
-                fill="none"
-                style={{ color: COLORS.primary, fontSize: '16px', fontWeight: 600 }}
-                onClick={handleSave}
-              >
-                保存
-              </Button>
-            </div>
-
-            <div style={{
-              flex: 1,
-              overflow: 'auto',
-              padding: '16px',
-              WebkitOverflowScrolling: 'touch'
-            }}>
-              <input
-                ref={fileInputRef}
-                type="file"
-                accept="image/*"
-                style={{ display: 'none' }}
-                onChange={handleAvatarUpload}
-              />
-
-              <div style={{
-                display: 'flex',
-                justifyContent: 'center',
-                marginBottom: '24px'
-              }}>
-                <div
-                  onClick={() => fileInputRef.current?.click()}
-                  style={{
-                    width: '100px',
-                    height: '100px',
-                    borderRadius: '50%',
-                    border: '2px dashed ' + COLORS.border,
-                    background: formData.avatar ? 'transparent' : COLORS.background,
-                    display: 'flex',
-                    flexDirection: 'column',
-                    alignItems: 'center',
-                    justifyContent: 'center',
-                    cursor: 'pointer',
-                    overflow: 'hidden'
-                  }}
+            <div className="relative px-6 pt-6 pb-8">
+              {/* Header */}
+              <div className="flex items-center justify-between mb-6">
+                <h2 className="text-[18px] font-bold text-slate-900">
+                  {showAddStudent ? '添加学生' : '切换学生'}
+                </h2>
+                <button
+                  onClick={onClose}
+                  className="p-2 rounded-full hover:bg-gray-50 transition-colors"
                 >
-                  {formData.avatar ? (
-                    <img
-                      src={formData.avatar}
-                      alt="头像"
-                      style={{ width: '100%', height: '100%', objectFit: 'cover' }}
-                    />
-                  ) : (
-                    <>
-                      <svg width="36" height="36" viewBox="0 0 24 24" fill={COLORS.textSecondary} style={{ marginBottom: '4px' }}>
-                        <path d="M12 12c2.21 0 4-1.79 4-4s-1.79-4-4-4-4 1.79-4 4 1.79 4 4 4zm0 2c-2.67 0-8 1.34-8 4v2h16v-2c0-2.66-5.33-4-8-4z"/>
-                      </svg>
-                      <span style={{ fontSize: '13px', color: COLORS.textSecondary }}>点击上传头像</span>
-                    </>
-                  )}
-                </div>
+                  <X size={20} className="text-gray-400" />
+                </button>
               </div>
 
-              <div style={{ background: COLORS.card, borderRadius: '12px', overflow: 'hidden' }}>
-                <div style={{
-                  display: 'flex',
-                  alignItems: 'center',
-                  padding: '16px',
-                  borderBottom: '1px solid ' + COLORS.border
-                }}>
-                  <span style={{ width: '70px', fontSize: '16px', color: COLORS.text, fontWeight: 500 }}>姓名</span>
-                  <input
-                    type="text"
-                    placeholder="请输入学生姓名"
-                    value={formData.name}
-                    onChange={(e) => setFormData({ ...formData, name: e.target.value })}
-                    style={{
-                      flex: 1,
-                      border: 'none',
-                      outline: 'none',
-                      fontSize: '16px',
-                      color: COLORS.text,
-                      background: 'transparent'
-                    }}
-                  />
-                </div>
-
-                <div style={{
-                  display: 'flex',
-                  alignItems: 'center',
-                  padding: '16px',
-                  borderBottom: '1px solid ' + COLORS.border
-                }}>
-                  <span style={{ width: '70px', fontSize: '16px', color: COLORS.text, fontWeight: 500 }}>年级</span>
-                  <select
-                    value={formData.grade}
-                    onChange={(e) => setFormData({ ...formData, grade: e.target.value })}
-                    style={{
-                      flex: 1,
-                      border: 'none',
-                      outline: 'none',
-                      fontSize: '16px',
-                      color: formData.grade ? COLORS.text : COLORS.textSecondary,
-                      background: 'transparent',
-                      appearance: 'none',
-                      cursor: 'pointer'
-                    }}
-                  >
-                    <option value="">请选择年级</option>
-                    {GRADE_OPTIONS.map(grade => (
-                      <option key={grade} value={grade}>{grade}</option>
+              {!showAddStudent ? (
+                <>
+                  {/* Student List */}
+                  <div className="space-y-3 max-h-[60vh] overflow-y-auto no-scrollbar pb-4">
+                    {students.map((student) => (
+                      <div
+                        key={student.id}
+                        onClick={() => {
+                          setCurrentStudent(student)
+                          onSelectStudent && onSelectStudent(student)
+                          onClose()
+                        }}
+                        className={`flex items-center justify-between p-4 rounded-2xl border-2 transition-all cursor-pointer active:opacity-80 ${
+                          currentStudent?.id === student.id
+                            ? 'border-blue-500 bg-blue-50/50'
+                            : 'border-gray-100 bg-white'
+                        }`}
+                      >
+                        <div className="flex items-center gap-3">
+                          <div className={`w-12 h-12 rounded-full flex items-center justify-center text-white font-bold text-lg ${
+                            currentStudent?.id === student.id ? 'bg-blue-600' : 'bg-gray-300'
+                          }`}>
+                            {student.name?.charAt(0) || '学'}
+                          </div>
+                          <div>
+                            <div className="text-[15px] font-bold text-slate-900">{student.name}</div>
+                            {student.class && (
+                              <div className="text-[12px] text-gray-400 font-medium">{student.class}</div>
+                            )}
+                          </div>
+                        </div>
+                        <div className="flex items-center gap-2">
+                          {currentStudent?.id === student.id && (
+                            <CheckCircle2 size={20} className="text-blue-600" />
+                          )}
+                          <button
+                            onClick={(e) => {
+                              e.stopPropagation()
+                              setShowDeleteConfirm(student)
+                            }}
+                            className="p-1.5 rounded-full hover:bg-red-50 transition-colors"
+                          >
+                            <Trash2 size={16} className="text-gray-300 hover:text-red-500" />
+                          </button>
+                        </div>
+                      </div>
                     ))}
-                  </select>
-                  <svg width="18" height="18" viewBox="0 0 24 24" fill={COLORS.textSecondary}>
-                    <path d="M7 10l5 5 5-5z"/>
-                  </svg>
-                </div>
+                  </div>
 
-                <div style={{
-                  display: 'flex',
-                  alignItems: 'center',
-                  padding: '16px',
-                  borderBottom: '1px solid ' + COLORS.border
-                }}>
-                  <span style={{ width: '70px', fontSize: '16px', color: COLORS.text, fontWeight: 500 }}>班级</span>
-                  <input
-                    type="text"
-                    placeholder="请输入班级"
-                    value={formData.class}
-                    onChange={(e) => setFormData({ ...formData, class: e.target.value })}
-                    style={{
-                      flex: 1,
-                      border: 'none',
-                      outline: 'none',
-                      fontSize: '16px',
-                      color: COLORS.text,
-                      background: 'transparent'
-                    }}
-                  />
-                </div>
-
-                <div style={{
-                  display: 'flex',
-                  alignItems: 'center',
-                  padding: '16px'
-                }}>
-                  <span style={{ width: '70px', fontSize: '16px', color: COLORS.text, fontWeight: 500 }}>备注</span>
-                  <input
-                    type="text"
-                    placeholder="请输入备注（选填）"
-                    value={formData.remark}
-                    onChange={(e) => setFormData({ ...formData, remark: e.target.value })}
-                    style={{
-                      flex: 1,
-                      border: 'none',
-                      outline: 'none',
-                      fontSize: '16px',
-                      color: COLORS.text,
-                      background: 'transparent'
-                    }}
-                  />
-                </div>
-              </div>
+                  {/* Add Student Button */}
+                  <button
+                    onClick={() => setShowAddStudent(true)}
+                    className="w-full mt-4 p-4 rounded-2xl border-2 border-dashed border-gray-200 flex items-center justify-center gap-2 text-gray-400 hover:border-blue-300 hover:text-blue-500 transition-all active:opacity-60"
+                  >
+                    <Plus size={20} />
+                    <span className="text-[14px] font-bold">添加学生</span>
+                  </button>
+                </>
+              ) : (
+                <>
+                  {/* Add Student Form */}
+                  <div className="space-y-4">
+                    <div>
+                      <label className="block text-[13px] font-bold text-gray-500 mb-2">姓名</label>
+                      <input
+                        ref={nameInputRef}
+                        type="text"
+                        value={newName}
+                        onChange={(e) => setNewName(e.target.value)}
+                        placeholder="请输入学生姓名"
+                        className="w-full p-4 bg-gray-50 rounded-xl border border-gray-100 text-[14px] focus:outline-none focus:border-blue-300 focus:ring-2 focus:ring-blue-100 transition-all"
+                      />
+                    </div>
+                    <div>
+                      <label className="block text-[13px] font-bold text-gray-500 mb-2">班级</label>
+                      <input
+                        ref={classInputRef}
+                        type="text"
+                        value={newClass}
+                        onChange={(e) => setNewClass(e.target.value)}
+                        placeholder="请输入班级（选填）"
+                        className="w-full p-4 bg-gray-50 rounded-xl border border-gray-100 text-[14px] focus:outline-none focus:border-blue-300 focus:ring-2 focus:ring-blue-100 transition-all"
+                      />
+                    </div>
+                    <div className="flex gap-3 pt-4">
+                      <button
+                        onClick={() => setShowAddStudent(false)}
+                        className="flex-1 p-4 rounded-2xl border border-gray-200 text-[14px] font-bold text-gray-500 hover:bg-gray-50 transition-all"
+                      >
+                        取消
+                      </button>
+                      <button
+                        onClick={handleAddStudent}
+                        disabled={submitting || !newName.trim()}
+                        className="flex-1 p-4 rounded-2xl bg-blue-600 text-white text-[14px] font-bold hover:bg-blue-500 disabled:opacity-40 disabled:cursor-not-allowed transition-all active:opacity-80"
+                      >
+                        {submitting ? '添加中...' : '确定'}
+                      </button>
+                    </div>
+                  </div>
+                </>
+              )}
             </div>
-          </div>
+          </motion.div>
+
+          {/* Delete Confirmation Dialog */}
+          <AnimatePresence>
+            {showDeleteConfirm && (
+              <>
+                <motion.div
+                  initial={{ opacity: 0 }}
+                  animate={{ opacity: 1 }}
+                  exit={{ opacity: 0 }}
+                  onClick={() => setShowDeleteConfirm(null)}
+                  className="fixed inset-0 bg-black/60 backdrop-blur-sm z-[10002]"
+                />
+                <motion.div
+                  initial={{ opacity: 0, scale: 0.9, y: 20 }}
+                  animate={{ opacity: 1, scale: 1, y: 0 }}
+                  exit={{ opacity: 0, scale: 0.9, y: 20 }}
+                  className="fixed top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 z-[10003] bg-white rounded-3xl shadow-2xl max-w-[280px] w-[85%] overflow-hidden"
+                >
+                  <div className="px-6 pt-6 pb-3">
+                    <h3 className="text-[17px] font-bold text-slate-900 text-center">确认删除</h3>
+                  </div>
+                  <div className="px-6 pb-6">
+                    <p className="text-[14px] text-slate-600 leading-relaxed text-center">
+                      确定要删除学生 <span className="font-bold text-blue-600">{showDeleteConfirm.name}</span> 吗？
+                    </p>
+                  </div>
+                  <div className="flex border-t border-gray-100">
+                    <button
+                      onClick={() => setShowDeleteConfirm(null)}
+                      className="flex-1 py-4 text-[15px] font-medium text-slate-600 active:bg-gray-50 transition-colors"
+                    >
+                      取消
+                    </button>
+                    <div className="w-px bg-gray-100" />
+                    <button
+                      onClick={() => handleDelete(showDeleteConfirm)}
+                      className="flex-1 py-4 text-[15px] font-bold text-red-600 active:bg-red-50 transition-colors"
+                    >
+                      删除
+                    </button>
+                  </div>
+                </motion.div>
+              </>
+            )}
+          </AnimatePresence>
+
+          <style>{`
+            .no-scrollbar::-webkit-scrollbar { display: none; }
+            .no-scrollbar { -ms-overflow-style: none; scrollbar-width: none; }
+          `}</style>
         </>
       )}
-    </>
+    </AnimatePresence>
   )
 }
