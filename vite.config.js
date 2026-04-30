@@ -34,6 +34,13 @@ export default defineConfig({
   ],
   server: {
     port: 3000,
-    host: true
+    host: true,
+    proxy: {
+      '/supabase': {
+        target: 'https://wdwlxbtntuurjtlirwew.supabase.co',
+        changeOrigin: true,
+        rewrite: (path) => path.replace(/^\/supabase/, '')
+      }
+    }
   }
 })

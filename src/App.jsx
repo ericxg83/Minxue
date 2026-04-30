@@ -23,7 +23,8 @@ import {
 } from 'lucide-react'
 import { motion, AnimatePresence } from 'motion/react'
 import { useUIStore, useStudentStore, useTaskStore, useWrongQuestionStore, usePendingQuestionStore, useExamStore } from './store'
-import { getStudents, getTasksByStudent, getQuestionsByTask, addWrongQuestions, getWrongQuestionsByStudent, getExamsByStudent } from './services/supabaseService'
+import { getStudents, getTasksByStudent, getQuestionsByTask, addWrongQuestions, getWrongQuestionsByStudent, getExamsByStudent, createTask, updateTaskStatus, uploadImage, createQuestions } from './services/supabaseService'
+import { recognizeQuestions, compressImage, saveRecognitionResult } from './services/aiService'
 import { mockQuestions, mockTasks, mockWrongQuestions, mockExams, mockStudents } from './data/mockData'
 import StudentSwitcher from './components/StudentSwitcher'
 import QuestionEditDrawer from './components/QuestionEditDrawer'
@@ -212,7 +213,7 @@ export default function App() {
   const { students, currentStudent, setCurrentStudent, setStudents, addStudent } = useStudentStore()
   const { tasks, setTasks, addTask, updateTaskStatus: updateTaskInStore } = useTaskStore()
   const { wrongQuestions, setWrongQuestions, selectedQuestions, setSelectedQuestions, clearSelection, addWrongQuestion, addWrongQuestions: addMultipleToStore } = useWrongQuestionStore()
-  const { pendingQuestions, setPendingQuestions } = usePendingQuestionStore()
+  const { pendingQuestions, setPendingQuestions, addPendingQuestions } = usePendingQuestionStore()
   const { exams, setExams } = useExamStore()
 
   // Processing Page State
@@ -367,6 +368,10 @@ export default function App() {
           console.error(`获取任务 ${task.id} 的题目失败:`, taskError)
         }
       }
+      // 更新 pendingQuestions 状态
+      if (allQuestions.length > 0) {
+        setPendingQuestions(allQuestions)
+      }
     } catch (error) {
       console.error('加载任务失败:', error)
     }
@@ -443,15 +448,151 @@ export default function App() {
 
   const uploadFile = async (file) => {
     const imageBase64 = await fileToBase64(file)
+
+    let imageUrl = imageBase64
+
+    try {
+      const storageUrl = await uploadImage(file, `tasks/${currentStudent.id}`)
+      imageUrl = storageUrl
+    } catch (uploadError) {
+      console.warn('上传图片到存储失败，使用 base64:', uploadError)
+    }
+
     const taskData = {
       student_id: currentStudent.id,
-      image_url: imageBase64,
+      image_url: imageUrl,
       original_name: file.name || `照片_${dayjs().format('YYYY-MM-DD_HH-mm-ss')}.jpg`,
       status: 'processing',
       result: { progress: 0 }
     }
-    addTask(taskData)
-    simulateProcessing(taskData.id)
+
+    console.log('准备保存任务到 Supabase:', taskData.original_name)
+    
+    try {
+      const savedTask = await createTask(taskData)
+      console.log('任务已成功保存到数据库:', savedTask.id, savedTask.student_id, savedTask.status)
+
+      const localTask = {
+        ...savedTask,
+        result: { progress: 0 }
+      }
+
+      addTask(localTask)
+
+      processImageAsync(localTask.id, file, savedTask.id)
+    } catch (error) {
+      console.error('创建任务失败:', error)
+      console.error('错误详情:', error?.message, error?.code, error?.details)
+      
+      showToast({
+        icon: 'fail',
+        content: '上传失败，请重试'
+      })
+      throw error
+    }
+  }
+
+  const processImageAsync = async (taskId, file, dbTaskId) => {
+    try {
+      updateTaskInStore(taskId, 'processing', { progress: 10 })
+      await updateTaskStatus(dbTaskId, 'processing', { progress: 10 })
+      console.log('开始压缩图片:', file.name, file.size, 'bytes')
+
+      let compressedBase64
+      try {
+        compressedBase64 = await compressImage(file, 1920, 1920, 0.85)
+        console.log('图片压缩完成，大小:', compressedBase64.length, 'bytes')
+      } catch (compressError) {
+        console.error('图片压缩失败:', compressError)
+        updateTaskInStore(taskId, 'failed', { error: '图片压缩失败: ' + compressError.message })
+        await updateTaskStatus(dbTaskId, 'failed', { error: '图片压缩失败: ' + compressError.message })
+        return
+      }
+      updateTaskInStore(taskId, 'processing', { progress: 30 })
+      await updateTaskStatus(dbTaskId, 'processing', { progress: 30 })
+
+      updateTaskInStore(taskId, 'processing', { progress: 50 })
+      await updateTaskStatus(dbTaskId, 'processing', { progress: 50 })
+      const result = await recognizeQuestions(compressedBase64, currentStudent.id, taskId)
+
+      if (!result.success) {
+        updateTaskInStore(taskId, 'failed', {
+          error: result.error || '识别失败，请重新上传或重试',
+          shouldRetry: result.shouldRetry
+        })
+        await updateTaskStatus(dbTaskId, 'failed', {
+          error: result.error || '识别失败，请重新上传或重试',
+          shouldRetry: result.shouldRetry
+        })
+        return
+      }
+
+      updateTaskInStore(taskId, 'processing', { progress: 80 })
+      await updateTaskStatus(dbTaskId, 'processing', { progress: 80 })
+
+      const questions = result.questions || []
+      const wrongCount = questions.filter(q => !q.is_correct).length
+
+      const saveResult = saveRecognitionResult(taskId, currentStudent.id, questions)
+      if (!saveResult.success) {
+        console.warn('保存识别结果到本地失败:', saveResult.error)
+      }
+
+      if (questions.length > 0) {
+        console.log('开始保存题目到 Supabase，数量:', questions.length)
+        console.log('题目示例 task_id:', questions[0]?.task_id)
+        try {
+          const savedQ = await createQuestions(questions)
+          console.log('题目已成功保存到 Supabase, 返回数量:', savedQ?.length || 0)
+          if (savedQ && savedQ.length > 0) {
+            console.log('已保存题目示例:', savedQ[0])
+          }
+        } catch (saveError) {
+          console.error('保存题目到 Supabase 失败:', saveError)
+          console.error('错误详情:', saveError?.message, saveError?.code, saveError?.details)
+        }
+      }
+
+      await updateTaskStatus(dbTaskId, 'done', {
+        questionCount: questions.length,
+        wrongCount: wrongCount,
+        duration: result.duration
+      })
+      updateTaskInStore(taskId, 'done', {
+        questionCount: questions.length,
+        wrongCount: wrongCount,
+        duration: result.duration
+      })
+
+      if (questions.length > 0) {
+        addPendingQuestions(questions)
+      }
+
+      console.log(`识别完成，发现 ${questions.length} 道题目，${wrongCount} 道疑似错题`)
+      showToast({
+        icon: 'success',
+        content: `识别完成，发现 ${questions.length} 道题目，${wrongCount} 道疑似错题`
+      })
+
+      if (questions.filter(q => !q.is_correct).length > 0) {
+        setCurrentPage('pending')
+      }
+
+    } catch (error) {
+      console.error('处理失败:', error)
+      updateTaskInStore(taskId, 'failed', {
+        error: error.message || '处理失败，请重新上传或重试'
+      })
+      await updateTaskStatus(dbTaskId, 'failed', {
+        error: error.message || '处理失败，请重新上传或重试'
+      })
+
+      showToast({
+        icon: 'fail',
+        content: '处理失败，请重新上传或重试'
+      })
+      throw error
+    }
   }
 
   const fileToBase64 = (file) => {
