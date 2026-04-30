@@ -19,6 +19,7 @@ export default function QuestionEdit({ questionId, onClose, onSave }) {
   const [activeTab, setActiveTab] = useState('stem')
   const [question, setQuestion] = useState(null)
   const [isFromWrongBook, setIsFromWrongBook] = useState(false)
+  const [displayImageUrl, setDisplayImageUrl] = useState('')
   const [formData, setFormData] = useState({
     content: '',
     options: [],
@@ -27,6 +28,13 @@ export default function QuestionEdit({ questionId, onClose, onSave }) {
     analysis: '',
     question_type: 'choice'
   })
+
+  const cleanOptionPrefix = (options) => {
+    return (options || []).map(opt => {
+      const cleaned = String(opt).replace(/^[A-Da-d][、.\.\s]*/, '').trim()
+      return cleaned
+    })
+  }
 
   useEffect(() => {
     if (questionId) {
@@ -57,9 +65,10 @@ export default function QuestionEdit({ questionId, onClose, onSave }) {
       if (found) {
         setIsFromWrongBook(isWrongBook)
         setQuestion(found)
+        setDisplayImageUrl('')
         setFormData({
           content: found.content || '',
-          options: found.options || [],
+          options: cleanOptionPrefix(found.options || []),
           answer: found.answer || '',
           student_answer: found.student_answer || '',
           analysis: found.analysis || '',
@@ -73,6 +82,21 @@ export default function QuestionEdit({ questionId, onClose, onSave }) {
     } finally {
       setLoading(false)
     }
+  }
+
+  const getTypeLabel = () => {
+    const map = { choice: '选择题', fill: '填空题', answer: '解答题' }
+    return map[formData.question_type] || '选择题'
+  }
+
+  const handleImageUpload = (e) => {
+    const file = e.target.files?.[0]
+    if (!file) return
+    const reader = new FileReader()
+    reader.onload = (ev) => {
+      setDisplayImageUrl(ev.target.result)
+    }
+    reader.readAsDataURL(file)
   }
 
   const handleSave = async () => {
@@ -252,7 +276,7 @@ export default function QuestionEdit({ questionId, onClose, onSave }) {
                     padding: '2px 8px',
                     borderRadius: '4px'
                   }}>
-                    选择题
+                    {getTypeLabel()}
                   </span>
                 </div>
                 <div style={{ display: 'flex', gap: '12px' }}>
@@ -270,100 +294,118 @@ export default function QuestionEdit({ questionId, onClose, onSave }) {
                       }}
                     />
                   </div>
-                  {/* 图片显示 */}
-                  {question.image_url && (
-                    <div style={{
-                      width: '100px',
-                      height: '100px',
-                      borderRadius: '8px',
-                      background: '#F5F5F7',
-                      flexShrink: 0,
-                      overflow: 'hidden'
-                    }}>
-                      <img src={question.image_url} alt="" style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
-                    </div>
-                  )}
                 </div>
+                <div style={{ marginTop: '12px', textAlign: 'right' }}>
+                  <label style={{
+                    fontSize: '13px',
+                    color: '#007AFF',
+                    cursor: 'pointer',
+                    fontWeight: 500
+                  }}>
+                    {displayImageUrl ? '更换图片' : '上传图片'}
+                    <input
+                      type="file"
+                      accept="image/*"
+                      onChange={handleImageUpload}
+                      style={{ display: 'none' }}
+                    />
+                  </label>
+                </div>
+                {displayImageUrl && (
+                  <div style={{
+                    marginTop: '12px',
+                    width: '100px',
+                    height: '100px',
+                    borderRadius: '8px',
+                    background: '#F5F5F7',
+                    overflow: 'hidden'
+                  }}>
+                    <img src={displayImageUrl} alt="" style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
+                  </div>
+                )}
               </div>
 
               {/* 选项区域 */}
-              <div style={{
-                background: '#fff',
-                borderRadius: '12px',
-                padding: '16px'
-              }}>
+              {formData.question_type === 'choice' && (
                 <div style={{
-                  display: 'flex',
-                  justifyContent: 'space-between',
-                  alignItems: 'center',
-                  marginBottom: '16px'
+                  background: '#fff',
+                  borderRadius: '12px',
+                  padding: '16px',
+                  marginTop: '12px'
                 }}>
-                  <span style={{ fontSize: '14px', fontWeight: 600, color: '#1C1C1E' }}>选项 (单选)</span>
-                  <span
-                    onClick={addOption}
-                    style={{
-                      fontSize: '14px',
-                      color: '#007AFF',
-                      cursor: 'pointer',
-                      fontWeight: 500
-                    }}
-                  >
-                    + 添加选项
-                  </span>
-                </div>
-
-                <div style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
-                  {formData.options.map((option, index) => (
-                    <div
-                      key={index}
+                  <div style={{
+                    display: 'flex',
+                    justifyContent: 'space-between',
+                    alignItems: 'center',
+                    marginBottom: '16px'
+                  }}>
+                    <span style={{ fontSize: '14px', fontWeight: 600, color: '#1C1C1E' }}>选项 (单选)</span>
+                    <span
+                      onClick={addOption}
                       style={{
-                        display: 'flex',
-                        alignItems: 'center',
-                        gap: '12px'
+                        fontSize: '14px',
+                        color: '#007AFF',
+                        cursor: 'pointer',
+                        fontWeight: 500
                       }}
                     >
-                      <span style={{
-                        width: '28px',
-                        height: '28px',
-                        borderRadius: '50%',
-                        background: '#E8F4FD',
-                        color: '#007AFF',
-                        display: 'flex',
-                        alignItems: 'center',
-                        justifyContent: 'center',
-                        fontSize: '13px',
-                        fontWeight: 600,
-                        flexShrink: 0
-                      }}>
-                        {String.fromCharCode(65 + index)}
-                      </span>
-                      <Input
-                        value={option}
-                        onChange={val => updateOption(index, val)}
-                        placeholder={`选项 ${String.fromCharCode(65 + index)}`}
-                        style={{ flex: 1, '--font-size': '14px' }}
-                      />
+                      + 添加选项
+                    </span>
+                  </div>
+
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
+                    {formData.options.map((option, index) => (
                       <div
-                        onClick={() => deleteOption(index)}
+                        key={index}
                         style={{
+                          display: 'flex',
+                          alignItems: 'center',
+                          gap: '12px'
+                        }}
+                      >
+                        <span style={{
                           width: '28px',
                           height: '28px',
+                          borderRadius: '50%',
+                          background: '#E8F4FD',
+                          color: '#007AFF',
                           display: 'flex',
                           alignItems: 'center',
                           justifyContent: 'center',
-                          cursor: 'pointer',
+                          fontSize: '13px',
+                          fontWeight: 600,
                           flexShrink: 0
-                        }}
-                      >
-                        <svg width="18" height="18" viewBox="0 0 1024 1024" fill="#FF3B30">
-                          <path d="M864 256H736v-64c0-52.8-43.2-96-96-96H384c-52.8 0-96 43.2-96 96v64H160c-17.6 0-32 14.4-32 32s14.4 32 32 32h704c17.6 0 32-14.4 32-32s-14.4-32-32-32zM384 192h256v64H384V192z"/>
-                          <path d="M704 384c-17.6 0-32 14.4-32 32v384c0 17.6-14.4 32-32 32s-32-14.4-32-32V416c0-17.6-14.4-32-32-32s-32 14.4-32 32v384c0 17.6-14.4 32-32 32s-32-14.4-32-32V416c0-17.6-14.4-32-32-32s-32 14.4-32 32v384c0 17.6-14.4 32-32 32s-32-14.4-32-32V416c0-17.6-14.4-32-32-32s-32 14.4-32 32v448c0 52.8 43.2 96 96 96h320c52.8 0 96-43.2 96-96V416c0-17.6-14.4-32-32-32z"/>
-                        </svg>
+                        }}>
+                          {String.fromCharCode(65 + index)}
+                        </span>
+                        <Input
+                          value={option}
+                          onChange={val => updateOption(index, val)}
+                          placeholder={`选项 ${String.fromCharCode(65 + index)}`}
+                          style={{ flex: 1, '--font-size': '14px' }}
+                        />
+                        <div
+                          onClick={() => deleteOption(index)}
+                          style={{
+                            width: '28px',
+                            height: '28px',
+                            display: 'flex',
+                            alignItems: 'center',
+                            justifyContent: 'center',
+                            cursor: 'pointer',
+                            flexShrink: 0
+                          }}
+                        >
+                          <svg width="18" height="18" viewBox="0 0 1024 1024" fill="#FF3B30">
+                            <path d="M864 256H736v-64c0-52.8-43.2-96-96-96H384c-52.8 0-96 43.2-96 96v64H160c-17.6 0-32 14.4-32 32s14.4 32 32 32h704c17.6 0 32-14.4 32-32s-14.4-32-32-32zM384 192h256v64H384V192z"/>
+                            <path d="M704 384c-17.6 0-32 14.4-32 32v384c0 17.6-14.4 32-32 32s-32-14.4-32-32V416c0-17.6-14.4-32-32-32s-32 14.4-32 32v384c0 17.6-14.4 32-32 32s-32-14.4-32-32V416c0-17.6-14.4-32-32-32s-32 14.4-32 32v384c0 17.6-14.4 32-32 32s-32-14.4-32-32V416c0-17.6-14.4-32-32-32s-32 14.4-32 32v448c0 52.8 43.2 96 96 96h320c52.8 0 96-43.2 96-96V416c0-17.6-14.4-32-32-32z"/>
+                          </svg>
+                        </div>
                       </div>
-                    </div>
-                  ))}
+                    ))}
+                  </div>
                 </div>
-              </div>
+              )}
             </>
           )}
 

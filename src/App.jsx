@@ -249,11 +249,30 @@ export default function App() {
 
   // New UI State from reference
   const [showOriginalPaper, setShowOriginalPaper] = useState(null)
+  const [showFullPaper, setShowFullPaper] = useState(false)
   const [showDeleteConfirm, setShowDeleteConfirm] = useState(null)
   const [showCropTool, setShowCropTool] = useState(false)
   const [isAddStudentOpen, setIsAddStudentOpen] = useState(false)
   const [isEditing, setIsEditing] = useState(false)
   const [editTab, setEditTab] = useState('content')
+  const [displayEditImage, setDisplayEditImage] = useState('')
+
+  const getTypeLabel = (type) => {
+    const map = { choice: '选择题', fill: '填空题', answer: '解答题', CHOICE: '选择题', FILL: '填空题', ANSWER: '解答题' }
+    return map[type] || type || '选择题'
+  }
+
+  const cleanOptionPrefix = (options) => {
+    return (options || []).map(opt => {
+      const cleaned = String(opt).replace(/^[A-Da-d][、.\.\s]*/, '').trim()
+      return cleaned
+    })
+  }
+
+  const isChoiceQuestion = (type) => {
+    const t = String(type || '').toLowerCase()
+    return t === 'choice'
+  }
 
   // Expose Toast and Dialog to window
   useEffect(() => {
@@ -992,7 +1011,7 @@ export default function App() {
                             <button 
                               onClick={(e) => {
                                 e.stopPropagation();
-                                setShowOriginalPaper(q.id);
+                                setShowOriginalPaper(q);
                               }}
                               className="flex items-center gap-1.5 text-[11px] font-bold text-gray-400 hover:text-blue-600 transition-colors"
                             >
@@ -1623,111 +1642,68 @@ export default function App() {
             )}
           </AnimatePresence>
 
-          {/* Original Paper Viewer */}
+          {/* Original Paper Viewer - Question Crop */}
           <AnimatePresence>
-            {showOriginalPaper && (
-              <div className="fixed inset-0 z-[1000] bg-black overflow-hidden">
-                <motion.div 
-                  initial={{ opacity: 0, scale: 1.05 }}
-                  animate={{ opacity: 1, scale: 1 }}
-                  exit={{ opacity: 0, scale: 1.05 }}
-                  className="relative h-full w-full flex flex-col"
-                >
-                  {/* Visual Glass Header */}
-                  <div className="absolute top-0 left-0 right-0 h-24 bg-gradient-to-b from-black/80 via-black/40 to-transparent z-20 px-6 pt-12 flex items-center justify-between pointer-events-none">
-                    <div className="text-white pointer-events-auto">
-                      <h3 className="text-[17px] font-black tracking-tight">2024届下学期数学期中检测</h3>
-                      <p className="text-white/40 text-[10px] uppercase font-black tracking-widest mt-0.5">Scanned Paper · Page 1 of 4</p>
+            {showOriginalPaper && (() => {
+              const q = showOriginalPaper
+              const questionImage = q?.image_url || ''
+              const task = tasks.find(t => t.id === q?.task_id)
+              const fullPaperImage = task?.image_url || task?.result?.image_url || ''
+
+              if (!questionImage && !fullPaperImage) return null
+
+              const displayImage = questionImage || fullPaperImage
+              const title = questionImage ? (showFullPaper ? '原试卷' : '题目区域截图') : '原试卷'
+
+              return (
+                <div className="fixed inset-0 z-[1000] bg-black overflow-hidden" onClick={() => { setShowOriginalPaper(null); setShowFullPaper(false) }}>
+                  <motion.div 
+                    initial={{ opacity: 0, scale: 1.05 }}
+                    animate={{ opacity: 1, scale: 1 }}
+                    exit={{ opacity: 0, scale: 1.05 }}
+                    className="relative h-full w-full flex flex-col"
+                    onClick={(e) => e.stopPropagation()}
+                  >
+                    {/* Header */}
+                    <div className="absolute top-0 left-0 right-0 z-30 px-4 pt-12 pb-4 flex items-center justify-between">
+                      <div className="text-white">
+                        <h3 className="text-[15px] font-bold">{title}</h3>
+                        <p className="text-white/50 text-[10px]">{q?.content?.slice(0, 30) || ''}...</p>
+                      </div>
+                      <button 
+                        onClick={() => { setShowOriginalPaper(null); setShowFullPaper(false) }}
+                        className="w-9 h-9 bg-white/20 backdrop-blur-xl rounded-full flex items-center justify-center text-white active:scale-90 transition-transform"
+                      >
+                        <X size={18} />
+                      </button>
                     </div>
-                    <button 
-                      onClick={() => setShowOriginalPaper(null)}
-                      className="w-10 h-10 bg-white/10 backdrop-blur-xl rounded-full flex items-center justify-center text-white active:scale-90 transition-transform pointer-events-auto border border-white/10"
-                    >
-                      <X size={20} />
-                    </button>
-                  </div>
 
-                  {/* Scanned Paper Background */}
-                  <div className="flex-1 overflow-auto bg-[#1a1a1a] flex flex-col items-center pt-32 pb-40 px-4 no-scrollbar">
-                     <div className="relative w-full max-w-2xl aspect-[1/1.414] bg-white shadow-[0_40px_100px_rgba(0,0,0,0.5)] rounded-sm overflow-hidden transform transition-transform">
-                       <img 
-                         src="https://images.unsplash.com/photo-1588072432836-e10032774350?q=80&w=2000" 
-                         className="w-full h-full object-cover opacity-90 blur-[0.5px]"
-                         alt="Original Scanned Paper"
-                       />
-                       
-                       {/* Paper Texture Overlay */}
-                       <div className="absolute inset-0 bg-[#fdfaf5]/20 mix-blend-multiply pointer-events-none" />
-                       
-                       {/* Mocked Question Content on Paper */}
-                       <div className="absolute inset-0 p-12 flex flex-col">
-                          <div className="text-center mb-16 opacity-80">
-                            <h1 className="text-2xl font-serif font-black text-gray-800 tracking-tighter">绝密 ★ 启用前</h1>
-                            <p className="text-xl font-serif mt-4 font-bold text-gray-700">2024届数学测试卷</p>
-                          </div>
-                          
-                          <div className="space-y-16">
-                            {[1, 2, 3].map((num) => {
-                              const qId = `q${num}`
-                              const isSelected = showOriginalPaper === qId
-                              return (
-                                <div 
-                                  key={qId}
-                                  className={`relative p-6 rounded-2xl transition-all duration-700 ${isSelected ? 'bg-blue-500/5 border-2 border-blue-500/40 shadow-[0_0_40px_rgba(59,130,246,0.2)]' : 'opacity-20 grayscale'}`}
-                                >
-                                  <div className="flex gap-4">
-                                    <span className="font-serif font-black text-lg text-gray-800">{num}.</span>
-                                    <div className="flex-1 space-y-3">
-                                      <div className="h-4 bg-gray-900/10 rounded-full w-full" />
-                                      <div className="h-4 bg-gray-900/10 rounded-full w-[80%]" />
-                                      {num === 2 && (
-                                         <div className="grid grid-cols-2 gap-4 pt-4">
-                                            <div className="h-3 bg-gray-900/5 rounded-sm" />
-                                            <div className="h-3 bg-gray-900/5 rounded-sm" />
-                                         </div>
-                                      )}
-                                    </div>
-                                  </div>
-                                  {isSelected && (
-                                    <motion.div 
-                                      initial={{ scale: 0.8, opacity: 0 }}
-                                      animate={{ scale: 1, opacity: 1 }}
-                                      className="absolute -top-12 left-1/2 -translate-x-1/2 bg-blue-600 text-white text-[11px] font-black px-4 py-2 rounded-full shadow-2xl flex items-center gap-2"
-                                    >
-                                      <Sparkles size={12} />
-                                      第 {num} 题 · 当前定位
-                                    </motion.div>
-                                  )}
-                                </div>
-                              )
-                            })}
-                          </div>
+                    {/* Image Display */}
+                    <div className="flex-1 overflow-auto bg-[#1a1a1a] flex items-center justify-center p-4 pt-24 pb-20 no-scrollbar">
+                       <div className="relative bg-white shadow-[0_20px_60px_rgba(0,0,0,0.5)] rounded-lg overflow-hidden max-w-full">
+                         <img 
+                           src={displayImage}
+                           className="w-full h-auto object-contain max-h-[70vh]"
+                           alt={title}
+                         />
                        </div>
+                    </div>
 
-                       {/* Vignette effect for realism */}
-                       <div className="absolute inset-0 shadow-[inset_0_0_100px_rgba(0,0,0,0.1)] pointer-events-none" />
-                     </div>
-                  </div>
-
-                  {/* Footer Controls */}
-                  <div className="absolute bottom-12 left-0 right-0 px-8 flex justify-center pointer-events-none">
-                    <motion.div 
-                      initial={{ y: 20, opacity: 0 }}
-                      animate={{ y: 0, opacity: 1 }}
-                      className="bg-black/40 backdrop-blur-3xl border border-white/10 p-2 rounded-[2rem] flex items-center gap-2 pointer-events-auto"
-                    >
-                       <div className="px-6 py-2">
-                          <span className="text-white text-[13px] font-black tracking-tight">智能定位：当前题目</span>
-                       </div>
-                       <div className="w-px h-4 bg-white/20" />
-                       <button className="p-3 text-white/60 hover:text-white active:scale-90 transition-transform">
-                          <Maximize size={20} />
-                       </button>
-                    </motion.div>
-                  </div>
-                </motion.div>
-              </div>
-            )}
+                    {/* Bottom Toggle Button */}
+                    {questionImage && fullPaperImage && (
+                      <div className="absolute bottom-8 left-0 right-0 flex justify-center z-30">
+                        <button
+                          onClick={() => setShowFullPaper(!showFullPaper)}
+                          className="px-5 py-2.5 bg-white/20 backdrop-blur-xl border border-white/10 rounded-full text-white text-[12px] font-bold active:scale-95 transition-transform"
+                        >
+                          {showFullPaper ? '🔍 查看题目区域' : '📄 查看原试卷'}
+                        </button>
+                      </div>
+                    )}
+                  </motion.div>
+                </div>
+              )
+            })()}
           </AnimatePresence>
 
           {/* Edit Question Modal */}
@@ -1806,72 +1782,65 @@ export default function App() {
                             <div className="flex-1">
                               <div className="flex items-center gap-2 mb-3">
                                 <span className="text-[13px] font-bold text-gray-900">题目内容</span>
-                                <span className="px-1.5 py-0.5 bg-blue-50 text-blue-600 rounded text-[10px] font-black uppercase tracking-tight">{editingQuestion?.question_type || '选择题'}</span>
+                                <span className="px-1.5 py-0.5 bg-blue-50 text-blue-600 rounded text-[10px] font-black uppercase tracking-tight">{getTypeLabel(editingQuestion?.question_type)}</span>
                               </div>
                               <textarea 
                                 className="w-full text-[15px] text-gray-800 bg-transparent border-none focus:ring-0 resize-none leading-relaxed min-h-[120px] placeholder:text-gray-300"
                                 defaultValue={editingQuestion?.content || ''}
                               />
-                              <div className="flex justify-end mt-1">
+                              <div className="flex justify-between items-center mt-2">
                                 <span className="text-[10px] text-gray-300 font-bold tracking-tight uppercase">
                                   {editingQuestion?.content?.length || 0}/500
                                 </span>
+                                <button
+                                  onClick={() => setShowCropTool(true)}
+                                  className="text-[11px] text-blue-600 font-bold cursor-pointer uppercase tracking-tighter"
+                                >
+                                  {displayEditImage ? '更换插图' : '补充插图'}
+                                </button>
                               </div>
-                            </div>
-
-                            {/* Integrated Illustration - More compact */}
-                            <div className="w-[140px] shrink-0">
-                              <div 
-                                onClick={() => setShowCropTool(true)}
-                                className="group relative aspect-square rounded-2xl overflow-hidden bg-gray-50 border border-gray-100 flex items-center justify-center cursor-pointer active:scale-95 transition-transform"
-                              >
-                                <img 
-                                  src={editingQuestion?.image_url || 'https://images.unsplash.com/photo-1635070041078-e363dbe005cb?w=300&h=300&fit=crop'} 
-                                  className="w-full h-full object-contain p-2"
-                                  alt="Geometry illustration"
-                                />
-                                <div className="absolute inset-0 bg-blue-600/10 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center">
-                                  <div className="w-8 h-8 bg-white rounded-full flex items-center justify-center text-blue-600 shadow-lg">
-                                    <Camera size={14} />
-                                  </div>
+                              {displayEditImage && (
+                                <div className="mt-3 w-28 h-28 rounded-xl overflow-hidden mx-auto">
+                                  <img src={displayEditImage} alt="" className="w-full h-full object-cover" />
                                 </div>
-                              </div>
-                              <p className="text-center text-[10px] text-blue-600 font-black mt-2 uppercase tracking-tighter">更换图片</p>
+                              )}
                             </div>
                           </div>
 
                           {/* Multiple Choice Options List */}
-                          <div className="mt-8">
-                            <div className="flex items-center justify-between mb-4">
-                              <span className="text-[13px] font-bold text-gray-900">选项 (单选)</span>
-                              <button className="text-[11px] font-bold text-blue-600 flex items-center gap-1">
-                                <Plus size={12} /> 添加选项
-                              </button>
-                            </div>
-                            <div className="space-y-2">
-                              {(() => {
-                                const opts = editingQuestion?.options || []
-                                const labels = ['A', 'B', 'C', 'D']
-                                return (opts.length > 0 ? opts : ['A', 'B', 'C', 'D']).map((opt, idx) => {
-                                  const label = labels[idx]
-                                  const value = typeof opt === 'string' ? opt : opt?.value || opt?.content || ''
-                                  return (
-                                    <div key={idx} className="flex items-center gap-3">
-                                      <div className="w-8 h-8 rounded-full bg-gray-50 flex items-center justify-center text-[13px] font-bold text-gray-400 border border-gray-100">
-                                        {label}
+                          {isChoiceQuestion(editingQuestion?.question_type) && (
+                            <div className="mt-8">
+                              <div className="flex items-center justify-between mb-4">
+                                <span className="text-[13px] font-bold text-gray-900">选项 (单选)</span>
+                                <button className="text-[11px] font-bold text-blue-600 flex items-center gap-1">
+                                  <Plus size={12} /> 添加选项
+                                </button>
+                              </div>
+                              <div className="space-y-2">
+                                {(() => {
+                                  const opts = cleanOptionPrefix(editingQuestion?.options || [])
+                                  const labels = ['A', 'B', 'C', 'D']
+                                  return (opts.length > 0 ? opts : ['A', 'B', 'C', 'D']).map((opt, idx) => {
+                                    const label = labels[idx]
+                                    const value = typeof opt === 'string' ? opt : opt?.value || opt?.content || ''
+                                    return (
+                                      <div key={idx} className="flex items-center gap-3">
+                                        <div className="w-8 h-8 rounded-full bg-gray-50 flex items-center justify-center text-[13px] font-bold text-gray-400 border border-gray-100">
+                                          {label}
+                                        </div>
+                                        <div className="flex-1 px-4 py-3 bg-gray-50 rounded-xl text-[14px] text-gray-800 font-medium">
+                                          {value}
+                                        </div>
+                                        <button className="w-8 h-8 flex items-center justify-center text-gray-300 hover:text-red-400">
+                                          <Trash2 size={14} />
+                                        </button>
                                       </div>
-                                      <div className="flex-1 px-4 py-3 bg-gray-50 rounded-xl text-[14px] text-gray-800 font-medium">
-                                        {value}
-                                      </div>
-                                      <button className="w-8 h-8 flex items-center justify-center text-gray-300 hover:text-red-400">
-                                        <Trash2 size={14} />
-                                      </button>
-                                    </div>
-                                  )
-                                })
-                              })()}
+                                    )
+                                  })
+                                })()}
+                              </div>
                             </div>
-                          </div>
+                          )}
                         </div>
                       </motion.div>
                     )}
@@ -1901,7 +1870,7 @@ export default function App() {
                                 <span className="text-[10px] font-black text-blue-600 uppercase tracking-wider">标准答案</span>
                               </div>
                               <div className="px-3 py-2 bg-blue-50/30 rounded-xl text-[13px] text-gray-900 font-bold border border-blue-100/30">
-                                 {editingQuestion?.correctAnswer || editingQuestion?.correct_answer || '暂无答案'}
+                                 {editingQuestion?.answer || '暂无答案'}
                               </div>
                             </div>
                           </div>

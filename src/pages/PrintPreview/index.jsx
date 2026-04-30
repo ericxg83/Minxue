@@ -113,7 +113,7 @@ export default function PrintPreview({ onClose }) {
                 <div class="question-content">${content}</div>
                 ${q.options && q.options.length > 0 ? `
                   <div class="options ${isShortOptions ? 'options-inline' : 'options-grid'}">
-                    ${q.options.map((opt, i) => `<div class="option">${String.fromCharCode(65 + i)}. ${opt}</div>`).join('')}
+                    ${q.options.map((opt, i) => `<div class="option"><span style="display:inline-block;width:14px;height:14px;border:1px solid #999;border-radius:50%;margin-right:6px;vertical-align:middle;"></span>${String.fromCharCode(65 + i)}</div>`).join('')}
                   </div>
                 ` : ''}
                 ${q.question_type === 'answer' ? `<div class="answer-area">答：</div>` : ''}
@@ -230,8 +230,9 @@ export default function PrintPreview({ onClose }) {
                   {q.options && q.options.length > 0 && (
                     <div className={`ml-8 mt-2 ${isShortOptions ? 'flex flex-wrap gap-8' : 'grid grid-cols-2 gap-2'}`}>
                       {q.options.map((opt, i) => (
-                        <div key={i} className="text-[11pt] whitespace-nowrap">
-                          {String.fromCharCode(65 + i)}. {opt}
+                        <div key={i} className="text-[11pt] whitespace-nowrap flex items-center gap-2">
+                          <span className="inline-block w-3.5 h-3.5 border border-gray-400 rounded-full flex-shrink-0"></span>
+                          {String.fromCharCode(65 + i)}
                         </div>
                       ))}
                     </div>

@@ -13,7 +13,7 @@ export default function QuestionEditDrawer({ questionId, visible, onClose, onSav
   const [correctAnswer, setCorrectAnswer] = useState('')
   const [analysis, setAnalysis] = useState('')
   const [questionType, setQuestionType] = useState('选择题')
-  const [imageUrl, setImageUrl] = useState('')
+  const [displayImageUrl, setDisplayImageUrl] = useState('')
   const [loading, setLoading] = useState(false)
   const [submitting, setSubmitting] = useState(false)
 
@@ -30,17 +30,24 @@ export default function QuestionEditDrawer({ questionId, visible, onClose, onSav
       const questionData = pendingQuestions.find(q => q.id === questionId)
       if (questionData) {
         setContent(questionData.content || '')
-        setOptions(questionData.options || [])
-        setCorrectAnswer(questionData.correctAnswer || questionData.correct_answer || '')
+        setOptions(cleanOptionPrefix(questionData.options || []))
+        setCorrectAnswer(questionData.answer || questionData.correctAnswer || questionData.correct_answer || '')
         setAnalysis(questionData.analysis || '')
         setQuestionType(questionData.question_type || '选择题')
-        setImageUrl(questionData.image_url || '')
+        setDisplayImageUrl('')
       }
     } catch (error) {
       console.error('加载题目失败:', error)
     } finally {
       setLoading(false)
     }
+  }
+
+  const cleanOptionPrefix = (options) => {
+    return (options || []).map(opt => {
+      const cleaned = String(opt).replace(/^[A-Da-d][、.\.\s]*/, '').trim()
+      return cleaned
+    })
   }
 
   const updateOption = (index, value) => {
@@ -69,7 +76,7 @@ export default function QuestionEditDrawer({ questionId, visible, onClose, onSav
         correct_answer: correctAnswer || undefined,
         analysis: analysis || undefined,
         question_type: questionType,
-        image_url: imageUrl || undefined,
+        image_url: displayImageUrl || undefined,
         updated_at: new Date().toISOString()
       }
       await updateQuestion(questionId, updatedQuestion)
@@ -166,47 +173,66 @@ export default function QuestionEditDrawer({ questionId, visible, onClose, onSav
                               {content.length}/500
                             </div>
                           </div>
-                          {imageUrl && (
-                            <div className="w-24 h-24 rounded-lg flex-shrink-0 overflow-hidden">
-                              <img src={imageUrl} alt="" className="w-full h-full object-cover" />
-                            </div>
-                          )}
                         </div>
+                        <div className="mt-3 text-right">
+                          <label className="text-[#1677FF] text-[13px] font-medium cursor-pointer">
+                            {displayImageUrl ? '更换图片' : '上传图片'}
+                            <input
+                              type="file"
+                              accept="image/*"
+                              onChange={(e) => {
+                                const file = e.target.files?.[0]
+                                if (!file) return
+                                const reader = new FileReader()
+                                reader.onload = (ev) => setDisplayImageUrl(ev.target.result)
+                                reader.readAsDataURL(file)
+                              }}
+                              style={{ display: 'none' }}
+                            />
+                          </label>
+                        </div>
+                        {displayImageUrl && (
+                          <div className="mt-3 w-24 h-24 rounded-lg flex-shrink-0 overflow-hidden">
+                            <img src={displayImageUrl} alt="" className="w-full h-full object-cover" />
+                          </div>
+                        )}
                       </div>
 
                       {/* 选项区域 */}
-                      <div className="bg-white rounded-3xl p-4 shadow-sm">
-                        <div className="flex items-center justify-between mb-4">
-                          <span className="text-[14px] font-bold text-[#333]">选项 (单选)</span>
-                          <button
-                            onClick={addOption}
-                            className="text-[#1677FF] text-[13px] font-medium"
-                          >
-                            + 添加选项
-                          </button>
+                      {questionType === '选择题' && (
+                        <div className="bg-white rounded-3xl p-4 shadow-sm mt-3">
+                          <div className="flex items-center justify-between mb-4">
+                            <span className="text-[14px] font-bold text-[#333]">选项 (单选)</span>
+                            <button
+                              onClick={addOption}
+                              className="text-[#1677FF] text-[13px] font-medium"
+                            >
+                              + 添加选项
+                            </button>
+                          </div>
+                          <div className="space-y-3">
+                            {options.map((option, index) => (
+                              <div key={index} className="flex items-center gap-3">
+                                <span className="w-7 h-7 rounded-full bg-[#F5F5F7] text-[#CCC] flex items-center justify-center text-[13px] font-bold flex-shrink-0">
+                                  {String.fromCharCode(65 + index)}
+                                </span>
+                                <input
+                                  value={option}
+                                  onChange={(e) => updateOption(index, e.target.value)}
+                                  className="flex-1 h-11 px-4 bg-[#F5F5F7] rounded-xl text-[14px] text-[#333] focus:outline-none placeholder:text-[#CCC]"
+                                  placeholder={`选项 ${String.fromCharCode(65 + index)}`}
+                                />
+                                <button
+                                  onClick={() => deleteOption(index)}
+                                  className="p-2 text-[#CCC] hover:text-[#FF3B30] transition-colors flex-shrink-0"
+                                >
+                                  <Trash2 size={18} />
+                                </button>
+                              </div>
+                            ))}
+                          </div>
                         </div>
-                        <div className="space-y-3">
-                          {options.map((option, index) => (
-                            <div key={index} className="flex items-center gap-3">
-                              <span className="w-7 h-7 rounded-full bg-[#F5F5F7] text-[#CCC] flex items-center justify-center text-[13px] font-bold flex-shrink-0">
-                                {String.fromCharCode(65 + index)}
-                              </span>
-                              <input
-                                value={option}
-                                onChange={(e) => updateOption(index, e.target.value)}
-                                className="flex-1 h-11 px-4 bg-[#F5F5F7] rounded-xl text-[14px] text-[#333] focus:outline-none placeholder:text-[#CCC]"
-                                placeholder={`选项 ${String.fromCharCode(65 + index)}`}
-                              />
-                              <button
-                                onClick={() => deleteOption(index)}
-                                className="p-2 text-[#CCC] hover:text-[#FF3B30] transition-colors flex-shrink-0"
-                              >
-                                <Trash2 size={18} />
-                              </button>
-                            </div>
-                          ))}
-                        </div>
-                      </div>
+                      )}
                     </div>
                   )}
 
@@ -224,7 +250,7 @@ export default function QuestionEditDrawer({ questionId, visible, onClose, onSav
                           <div className="flex-1">
                             <div className="text-[13px] text-[#999] mb-1">学生答案</div>
                             <div className="text-[15px] text-[#333]">
-                              {formData.student_answer || '未作答'}
+                              未作答
                               <span className="text-[#999] text-[12px] ml-1">(错误记录)</span>
                             </div>
                           </div>
