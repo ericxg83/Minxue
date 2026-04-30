@@ -17,11 +17,13 @@ import {
   X,
   Trash2,
   ChevronDown,
-  Image,
-  Edit3,
+  User,
+  Image as ImageIcon,
+  Maximize,
   Eye
 } from 'lucide-react'
 import { motion, AnimatePresence } from 'motion/react'
+import { QRCodeSVG } from 'qrcode.react'
 import { useUIStore, useStudentStore, useTaskStore, useWrongQuestionStore, usePendingQuestionStore, useExamStore } from './store'
 import { getStudents, getTasksByStudent, getQuestionsByTask, addWrongQuestions, getWrongQuestionsByStudent, getExamsByStudent, createTask, updateTaskStatus, uploadImage, createQuestions } from './services/supabaseService'
 import { recognizeQuestions, compressImage, saveRecognitionResult } from './services/aiService'
@@ -30,7 +32,6 @@ import StudentSwitcher from './components/StudentSwitcher'
 import QuestionEditDrawer from './components/QuestionEditDrawer'
 import ScanQR from './pages/ScanQR'
 import Grading from './pages/Grading'
-import PrintPreview from './pages/PrintPreview'
 import dayjs from 'dayjs'
 
 // ==================== UI Tool Components ====================
@@ -245,6 +246,14 @@ export default function App() {
   const [gradingParams, setGradingParams] = useState(null)
   const [dialogState, setDialogState] = useState({ visible: false, title: '', content: '', confirmText: '确定', cancelText: '取消', onConfirm: null, onCancel: null })
   const fileInputRef = useRef(null)
+
+  // New UI State from reference
+  const [showOriginalPaper, setShowOriginalPaper] = useState(null)
+  const [showDeleteConfirm, setShowDeleteConfirm] = useState(null)
+  const [showCropTool, setShowCropTool] = useState(false)
+  const [isAddStudentOpen, setIsAddStudentOpen] = useState(false)
+  const [isEditing, setIsEditing] = useState(false)
+  const [editTab, setEditTab] = useState('content')
 
   // Expose Toast and Dialog to window
   useEffect(() => {
@@ -909,22 +918,29 @@ export default function App() {
                   exit={{ opacity: 0, x: -20 }}
                   className="w-full"
                 >
-                  {/* Filter Tabs */}
+                  {/* Segmented Filters */}
                   <section className="px-5 pt-4 mb-5 overflow-x-auto no-scrollbar">
                     <div className="flex gap-2 min-w-max">
                       {[
-                        { id: 'wrong', label: '疑似错题' },
-                        { id: 'all', label: '全部' },
-                        { id: 'correct', label: '识别正确' }
+                        { id: 'all', label: '全部待确认', count: pendingQuestions.filter(q => q.status === 'wrong' || q.status === 'correct' || q.isSuspicious).length },
+                        { id: 'wrong', label: '疑似错题', count: pendingQuestions.filter(q => q.status === 'wrong').length },
+                        { id: 'correct', label: '识别正确', count: pendingQuestions.filter(q => q.status === 'correct' && !q.isSuspicious).length }
                       ].map((filter) => (
                         <button
                           key={filter.id}
                           onClick={() => setConfirmFilter(filter.id)}
                           className={`px-5 py-2.5 rounded-full text-[13px] font-bold flex items-center gap-2 transition-all ${
-                            confirmFilter === filter.id ? 'bg-blue-600 text-white shadow-lg shadow-blue-100' : 'bg-gray-100/80 text-gray-400'
+                            confirmFilter === filter.id 
+                            ? 'bg-blue-600 text-white shadow-lg shadow-blue-100'
+                            : 'bg-gray-100/80 text-gray-400'
                           }`}
                         >
                           {filter.label}
+                          <span className={`text-[11px] font-medium ${
+                            confirmFilter === filter.id ? 'text-white/80' : 'text-gray-300'
+                          }`}>
+                            {filter.count}
+                          </span>
                         </button>
                       ))}
                     </div>
@@ -938,6 +954,8 @@ export default function App() {
                         <motion.div 
                           key={q.id}
                           layout
+                          initial={{ opacity: 0, y: 10 }}
+                          animate={{ opacity: 1, y: 0 }}
                           className={`bg-white rounded-[1.5rem] p-4 shadow-sm border-2 transition-all cursor-pointer relative ${
                             isSelected ? 'border-blue-500 shadow-blue-50' : 'border-transparent'
                           }`}
@@ -957,6 +975,7 @@ export default function App() {
                               }`}>
                                 {q.status === 'wrong' ? '疑似错题' : '识别正确'}
                               </span>
+                              <span className="text-[10px] text-gray-400 font-bold uppercase tracking-wider">{q.question_type || '解答题'}</span>
                             </div>
                             <div className={`w-5 h-5 rounded-full border-[1.5px] flex items-center justify-center transition-all ${
                               isSelected ? 'bg-blue-600 border-blue-600' : 'border-gray-100'
@@ -970,12 +989,22 @@ export default function App() {
                           </div>
 
                           <div className="flex items-center justify-between border-t border-gray-50 pt-3">
-                            <button className="flex items-center gap-1.5 text-[11px] font-bold text-gray-400 hover:text-blue-600 transition-colors">
-                              <Eye size={13} strokeWidth={2.5} /> 查看原图
+                            <button 
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                setShowOriginalPaper(q.id);
+                              }}
+                              className="flex items-center gap-1.5 text-[11px] font-bold text-gray-400 hover:text-blue-600 transition-colors"
+                            >
+                              <BookOpen size={13} strokeWidth={2.5} /> 查看原图
                             </button>
                             <div className="flex items-center gap-4">
                               <button 
-                                onClick={(e) => { e.stopPropagation(); setEditingQuestion(q) }}
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  setEditingQuestion(q);
+                                  setIsEditing(true);
+                                }}
                                 className="text-[11px] font-bold text-gray-400 hover:text-blue-500 active:opacity-60"
                               >
                                 编辑
@@ -983,11 +1012,11 @@ export default function App() {
                               <button 
                                 onClick={(e) => {
                                   e.stopPropagation();
-                                  addSingleToWrongBook(q)
+                                  setShowDeleteConfirm(q.id);
                                 }}
-                                className="text-[11px] font-bold text-blue-600 hover:text-blue-700 active:opacity-60"
+                                className="text-[11px] font-bold text-gray-400 hover:text-red-500 active:opacity-60"
                               >
-                                加入错题本
+                                删除
                               </button>
                             </div>
                           </div>
@@ -1013,31 +1042,38 @@ export default function App() {
                   exit={{ opacity: 0, y: -10 }}
                   className="w-full pb-32"
                 >
-                  {/* Status Tabs */}
+                  {/* Primary State Tabs */}
                   <div className="flex gap-2 px-5 pt-4 overflow-x-auto no-scrollbar">
                     {[
-                      { id: 'all', label: '全部' },
-                      { id: 'pending', label: '未掌握' },
-                      { id: 'mastered', label: '已掌握' }
+                      { id: 'all', label: '全部', count: wrongQuestions.filter(wq => wq.status === 'pending' || wq.status === 'mastered').length },
+                      { id: 'pending', label: '未掌握', count: wrongQuestions.filter(wq => wq.status === 'pending').length },
+                      { id: 'mastered', label: '已掌握', count: wrongQuestions.filter(wq => wq.status === 'mastered').length }
                     ].map((tab) => (
                       <button
                         key={tab.id}
                         onClick={() => setBankFilter(tab.id)}
                         className={`px-5 py-2.5 rounded-full text-[13px] font-bold transition-all whitespace-nowrap flex items-center gap-2 ${
-                          bankFilter === tab.id ? 'bg-blue-600 text-white shadow-lg shadow-blue-100' : 'bg-white text-gray-400 border border-gray-100'
+                          bankFilter === tab.id 
+                          ? 'bg-blue-600 text-white shadow-lg shadow-blue-100'
+                          : 'bg-white text-gray-400 border border-gray-100'
                         }`}
                       >
                         {tab.label}
+                        <span className={`text-[11px] font-medium ${
+                          bankFilter === tab.id ? 'text-white/80' : 'text-gray-300'
+                        }`}>
+                          {tab.count}
+                        </span>
                       </button>
                     ))}
                   </div>
 
-                  {/* Sub-Filters */}
+                  {/* Sub-Filters - Dropdown Style */}
                   <div className="px-5 mt-4 flex gap-2 overflow-x-auto no-scrollbar">
                     {[
                       { label: '科目', value: selectedSubject, options: ['all', '数学', '语文', '物理', '化学', '生物'], setter: setSelectedSubject },
-                      { label: '时间', value: selectedTimeRange, options: ['all', 'today', 'week', 'month'], setter: setSelectedTimeRange },
-                      { label: '次数', value: selectedErrorCount, options: ['all', '1', '2-3', '5+'], setter: setSelectedErrorCount },
+                      { id: 'time', label: '时间', value: selectedTimeRange, options: ['all', 'today', 'week', 'month', 'quarter'], setter: setSelectedTimeRange },
+                      { id: 'errors', label: '次数', value: selectedErrorCount, options: ['all', '1', '2-3', '4-5', '5+'], setter: setSelectedErrorCount },
                     ].map((filter, i) => (
                       <div key={i} className="relative shrink-0">
                         <select
@@ -1046,7 +1082,7 @@ export default function App() {
                           className="appearance-none bg-white border border-gray-100 rounded-full pl-3 pr-7 py-1.5 text-[11px] font-bold text-gray-500 shadow-sm focus:outline-none focus:border-blue-200 transition-all cursor-pointer"
                         >
                           {filter.options.map(opt => (
-                            <option key={opt} value={opt}>{filter.label}: {opt}</option>
+                            <option key={opt} value={opt}>{filter.label}: {opt === 'all' ? '全部' : opt}</option>
                           ))}
                         </select>
                         <ChevronDown size={12} className="absolute right-2.5 top-1/2 -translate-y-1/2 text-gray-400 pointer-events-none" />
@@ -1062,9 +1098,6 @@ export default function App() {
                       return (
                         <div 
                           key={wq.id}
-                          className={`bg-white rounded-2xl p-5 shadow-sm border-2 transition-all relative ${
-                            isSelected ? 'border-blue-500 shadow-blue-50' : 'border-transparent'
-                          }`}
                           onClick={() => {
                             const exists = selectedQuestions.find(sq => sq.id === wq.id)
                             if (exists) {
@@ -1073,6 +1106,9 @@ export default function App() {
                               setSelectedQuestions([...selectedQuestions, wq])
                             }
                           }}
+                          className={`bg-white rounded-2xl p-5 shadow-sm border-2 transition-all relative ${
+                            isSelected ? 'border-blue-500 shadow-blue-50' : 'border-transparent'
+                          }`}
                         >
                           <div className="flex items-center justify-between mb-4">
                             <div className="flex items-center gap-2">
@@ -1095,8 +1131,32 @@ export default function App() {
                           <div className="text-[14px] leading-relaxed text-gray-700 mb-4 px-1">
                             {question.content}
                           </div>
-                          <div className="text-[11px] text-gray-300 font-bold px-1 flex items-center gap-1.5 pt-3 border-t border-gray-50">
-                            <XCircle size={12} className="text-red-200" /> 错误次数: <span className="text-red-400 underline decoration-red-100 underline-offset-2">{wq.error_count || 1}次</span>
+                          <div className="flex items-center justify-between mt-4 pt-3 border-t border-gray-50">
+                            <div className="flex items-center gap-1.5 text-[11px] font-bold text-gray-400">
+                              <XCircle size={13} strokeWidth={2.5} className="text-red-200" /> 
+                              错误次数: <span className="text-red-400 underline decoration-red-100 underline-offset-2">{wq.error_count || 1}次</span>
+                            </div>
+                            <div className="flex items-center gap-4">
+                              <button 
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  setEditingQuestion(question);
+                                  setIsEditing(true);
+                                }}
+                                className="text-[11px] font-bold text-gray-400 hover:text-blue-500"
+                              >
+                                编辑
+                              </button>
+                              <button 
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  setShowDeleteConfirm(wq.id);
+                                }}
+                                className="text-[11px] font-bold text-gray-400 hover:text-red-500"
+                              >
+                                删除
+                              </button>
+                            </div>
                           </div>
                         </div>
                       )
@@ -1123,24 +1183,31 @@ export default function App() {
                   {/* Filter Tabs */}
                   <div className="flex gap-2 px-5 pt-4 overflow-x-auto no-scrollbar">
                     {[
-                      { id: 'all', label: '全部' },
-                      { id: 'ungraded', label: '未批改' },
-                      { id: 'graded', label: '已批改' }
+                      { id: 'all', label: '全部', count: studentExams.length },
+                      { id: 'ungraded', label: '未批改', count: studentExams.filter(e => e.status === 'ungraded').length },
+                      { id: 'graded', label: '已批改', count: studentExams.filter(e => e.status === 'graded').length }
                     ].map((tab) => (
                       <button
                         key={tab.id}
                         onClick={() => setExamFilter(tab.id)}
-                        className={`px-5 py-2.5 rounded-full text-[13px] font-bold transition-all whitespace-nowrap flex items-center gap-2 ${
-                          examFilter === tab.id ? 'bg-blue-600 text-white shadow-lg shadow-blue-100' : 'bg-gray-100/80 text-gray-400'
+                        className={`px-5 py-2.5 rounded-full text-[13px] font-bold transition-all whitespace-nowrap flex items-center gap-1.5 ${
+                          examFilter === tab.id 
+                          ? 'bg-blue-600 text-white shadow-lg shadow-blue-100'
+                          : 'bg-white text-gray-400 border border-gray-100'
                         }`}
                       >
                         {tab.label}
+                        <span className={`text-[11px] font-medium ${
+                          examFilter === tab.id ? 'text-white/80' : 'text-gray-300'
+                        }`}>
+                          {tab.count}
+                        </span>
                       </button>
                     ))}
                   </div>
 
                   {/* Exam List */}
-                  <div className="px-5 mt-6 space-y-4 pb-4">
+                  <div className="px-5 mt-6 space-y-6 pb-4">
                     {filteredExams.map((paper) => (
                       <div 
                         key={paper.id}
@@ -1150,48 +1217,63 @@ export default function App() {
                         }`}
                       >
                         <div className="flex gap-4">
+                          {/* Thumbnail */}
                           <div className="relative w-24 h-24 shrink-0 rounded-2xl overflow-hidden bg-gray-50 border border-gray-100">
                             <img src={paper.thumbnail} className="w-full h-full object-cover" alt="" />
                           </div>
+
+                          {/* Content */}
                           <div className="flex-1 min-w-0 flex flex-col justify-between py-1">
-                            <div>
-                              <div className="flex items-center justify-between mb-1.5">
-                                <h4 className="text-[14px] font-black text-gray-900 truncate pr-2 tracking-tight">
-                                  {paper.name}
-                                </h4>
-                                <div className={`w-5 h-5 rounded-full border-2 flex items-center justify-center transition-all ${
-                                   selectedPaperId === paper.id ? 'bg-blue-600 border-blue-600' : 'border-gray-200'
-                                }`}>
-                                  {selectedPaperId === paper.id && <div className="w-2 h-2 bg-white rounded-full" />}
-                                </div>
-                              </div>
-                              <div className="flex items-center gap-3 text-gray-400">
+                            <div className="pr-8">
+                              <h4 className="text-[14px] font-black text-gray-900 truncate tracking-tight mb-1">
+                                {paper.name}
+                              </h4>
+                              <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-gray-400">
                                 <div className="flex items-center gap-1">
                                   <Search size={12} className="opacity-50" />
                                   <span className="text-[11px] font-bold">{dayjs(paper.created_at).format('YYYY-MM-DD HH:mm')}</span>
                                 </div>
-                                <span className="text-[11px] font-bold tracking-tight">题目数: {paper.question_count}题</span>
+                                <span className="text-[11px] font-bold whitespace-nowrap">题目数: {paper.question_count}题</span>
                               </div>
                             </div>
-                            <div className="flex items-center justify-between">
+
+                            <div className="flex items-center justify-between mt-3">
                               <span className={`px-2.5 py-1 rounded-lg text-[10px] font-black tracking-tight ${
                                 paper.status === 'ungraded' ? 'bg-red-50 text-red-500' : 'bg-green-50 text-green-500'
                               }`}>
                                 {paper.status === 'ungraded' ? '未批改' : '已批改'}
                               </span>
-                              <button className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl border border-blue-100 bg-blue-50/50 text-blue-600 hover:bg-blue-50 transition-colors active:scale-95">
+                              
+                              <button 
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  setShowPrintPreview(true);
+                                }}
+                                className="flex items-center gap-1 px-3 py-1.5 rounded-xl border border-blue-100 bg-blue-50/50 text-blue-600 hover:bg-blue-50 transition-colors active:scale-95"
+                              >
                                 <Printer size={12} />
                                 <span className="text-[11px] font-black">重打印</span>
                               </button>
                             </div>
                           </div>
                         </div>
+
+                        {/* Selection Indicator */}
+                        <div className="absolute top-6 right-6">
+                           <div className={`w-5 h-5 rounded-full border-2 flex items-center justify-center transition-all ${
+                              selectedPaperId === paper.id ? 'bg-blue-600 border-blue-600' : 'border-gray-100'
+                           }`}>
+                             {selectedPaperId === paper.id && <div className="w-2 h-2 bg-white rounded-full" />}
+                           </div>
+                        </div>
                       </div>
                     ))}
+
+                    {/* Empty State */}
                     {filteredExams.length === 0 && (
                       <div className="flex flex-col items-center justify-center py-24 opacity-20">
                         <FileText size={48} strokeWidth={1} />
-                        <p className="mt-4 text-[13px] font-medium">暂无试卷</p>
+                        <p className="mt-4 text-[13px] font-medium">暂无此类试卷</p>
                       </div>
                     )}
                   </div>
@@ -1283,19 +1365,6 @@ export default function App() {
             onClose={() => setShowStudentSwitcher(false)}
           />
 
-          {/* Question Edit Modal */}
-          <QuestionEditDrawer
-            questionId={editingQuestion?.id}
-            visible={!!editingQuestion}
-            onClose={() => setEditingQuestion(null)}
-            onSave={(updatedQuestion) => {
-              setPendingQuestions(pendingQuestions.map(q =>
-                q.id === updatedQuestion.id ? updatedQuestion : q
-              ))
-              setEditingQuestion(null)
-            }}
-          />
-
           {/* ActionSheet */}
           <ActionSheet
             visible={showActionSheet}
@@ -1377,12 +1446,539 @@ export default function App() {
             />
           )}
 
-          {/* Print Preview */}
-          {showPrintPreview && (
-            <PrintPreview
-              onClose={() => setShowPrintPreview(false)}
-            />
-          )}
+          {/* Print Preview Overlay - Reference Design */}
+          <AnimatePresence>
+            {showPrintPreview && (
+              <motion.div
+                initial={{ opacity: 0, scale: 1.1 }}
+                animate={{ opacity: 1, scale: 1 }}
+                exit={{ opacity: 0, scale: 1.05 }}
+                className="fixed inset-0 bg-[#F2F2F7] z-[200] flex flex-col max-w-md mx-auto h-screen overflow-hidden"
+              >
+                <div className="flex-1 overflow-y-auto bg-white px-6 pt-10 pb-32 no-scrollbar">
+                  <button 
+                    onClick={() => setShowPrintPreview(false)}
+                    className="absolute top-10 left-4 w-8 h-8 bg-black/5 rounded-full flex items-center justify-center text-slate-900 active:scale-90 transition-transform z-10"
+                  >
+                    <ChevronRight size={18} className="rotate-180" />
+                  </button>
+
+                  {/* Compact Academic Header with QR */}
+                  <div className="relative flex items-center justify-between mb-10 pt-2 px-2">
+                    <div className="flex-1">
+                      <h2 className="text-[18px] font-serif font-black text-gray-900 tracking-tight leading-tight">
+                        {currentStudent?.name || '学生'} <br/> 错题强化训练卷
+                      </h2>
+                      <div className="flex items-center gap-3 mt-2.5">
+                        <div className="flex items-center gap-1.5">
+                          <span className="w-1 h-1 rounded-full bg-blue-500" />
+                          <p className="text-[9px] font-black text-gray-400 uppercase tracking-[0.2em] italic">SMART LEARNING SYSTEM</p>
+                        </div>
+                        <div className="w-px h-2.5 bg-gray-200" />
+                        <span className="text-[11px] font-black text-gray-400 tracking-tight">
+                          {dayjs().format('YYYY-M-D')}
+                        </span>
+                      </div>
+                    </div>
+                    <div className="w-20 h-20 bg-gray-100 rounded-xl flex flex-col items-center justify-center p-2 shrink-0">
+                      <QRCodeSVG 
+                        value={`https://scan.example.com/paper/${currentStudent?.id || 'student'}`}
+                        size={48}
+                        className="rounded-sm"
+                      />
+                      <span className="text-[7px] font-black text-gray-400 uppercase tracking-tighter mt-0.5">批改扫码</span>
+                    </div>
+                  </div>
+
+                  {/* Paper Content Area */}
+                  <div className="space-y-6">
+                    {(() => {
+                      const displayQuestions = selectedQuestions.length > 0
+                        ? selectedQuestions.map(wq => wq.question || wq)
+                        : pendingQuestions.slice(0, 1).map(q => q.question || q)
+                      
+                      return displayQuestions.map((q, i) => {
+                        const questionType = q.question_type || q.type || '选择题'
+                        const subject = q.subject || '数学'
+                        const content = q.content || '无内容'
+                        const options = q.options || []
+                        
+                        return (
+                          <div key={q.id || i} className="relative group">
+                            <div className="flex items-start gap-4 mb-4">
+                              <div className="w-6 h-6 flex items-center justify-center rounded-lg bg-slate-900 text-white text-[11px] font-black tracking-tighter shrink-0 mt-1">
+                                {i + 1}
+                              </div>
+                              <div className="flex-1">
+                                <div className="flex items-center gap-2 mb-1.5">
+                                  <span className="px-1.5 py-0.5 rounded-md bg-gray-100 text-[9px] font-black text-gray-400 uppercase tracking-widest underline decoration-gray-200 underline-offset-1">
+                                    {questionType}
+                                  </span>
+                                  <span className="px-1.5 py-0.5 rounded-md bg-blue-50 text-[9px] font-black text-blue-500 uppercase tracking-widest">
+                                    {subject}
+                                  </span>
+                                </div>
+                                <div className="text-[14px] leading-relaxed text-slate-800 font-medium font-serif">
+                                  {content}
+                                </div>
+                              </div>
+                            </div>
+
+                            {/* Contextual Answer Area - Paper Efficient */}
+                            {(questionType === '解答题' || questionType === '简答题' || questionType === 'answer') && (
+                              <div className="ml-10 h-32 border border-gray-100 rounded-xl bg-gray-50/10 flex flex-col items-center justify-start relative overflow-hidden group-hover:bg-blue-50/5 transition-colors">
+                                 <div className="absolute top-3 left-4 text-[10px] font-black text-gray-300 italic">Solution:</div>
+                                 <div className="w-full h-full border-t border-gray-50 mt-10 opacity-30" />
+                                 <div className="w-full h-full border-t border-gray-50 opacity-30" />
+                              </div>
+                            )}
+
+                            {questionType === '填空题' || questionType === 'fill' && (
+                              <div className="ml-10 h-10" />
+                            )}
+
+                            {questionType === '选择题' || questionType === 'choice' && (
+                              <div className="ml-10 flex gap-10 mt-2">
+                                 {['A','B','C','D'].map(opt => (
+                                   <div key={opt} className="flex items-center gap-2">
+                                     <div className="w-4 h-4 rounded-full border border-gray-200" />
+                                     <span className="text-[12px] font-bold text-gray-300">{opt}</span>
+                                   </div>
+                                 ))}
+                              </div>
+                            )}
+                          </div>
+                        )
+                      })
+                    })()}
+                  </div>
+
+                  <div className="mt-20 pt-8 border-t border-gray-100 flex items-center justify-between pb-12">
+                     <div className="flex items-center gap-2">
+                        <div className="w-1.5 h-1.5 rounded-full bg-blue-500" />
+                        <p className="text-[9px] text-gray-400 font-black uppercase tracking-[0.2em]">Personalized Exam Pack</p>
+                     </div>
+                     <p className="text-[10px] text-gray-300 font-mono tracking-tighter">PAGE 01 / 01</p>
+                  </div>
+                </div>
+
+                {/* iOS Style Floating Actions */}
+                <div className="absolute bottom-0 left-0 right-0 p-6 bg-white/80 backdrop-blur-3xl border-t border-gray-100 flex gap-4 z-[210]">
+                  <button className="flex-1 py-4 border-2 border-gray-50 px-4 rounded-2xl text-[14px] font-black text-gray-900 active:scale-95 transition-transform bg-white/50">PDF 导出</button>
+                  <button 
+                    onClick={() => {
+                      setShowPrintPreview(false)
+                    }}
+                    className="flex-[2] py-4 bg-blue-600 text-white rounded-2xl text-[14px] font-black shadow-[0_10px_30px_rgba(37,99,235,0.3)] active:scale-95 transition-transform"
+                  >
+                    直接打印
+                  </button>
+                </div>
+              </motion.div>
+            )}
+          </AnimatePresence>
+
+          {/* Delete Confirm Dialog */}
+          <AnimatePresence>
+            {showDeleteConfirm && (
+              <div className="fixed inset-0 z-[1000] flex items-center justify-center px-8">
+                <motion.div 
+                  initial={{ opacity: 0 }}
+                  animate={{ opacity: 1 }}
+                  exit={{ opacity: 0 }}
+                  onClick={() => setShowDeleteConfirm(null)}
+                  className="absolute inset-0 bg-black/60 backdrop-blur-md"
+                />
+                <motion.div 
+                  initial={{ scale: 0.9, opacity: 0 }}
+                  animate={{ scale: 1, opacity: 1 }}
+                  exit={{ scale: 0.9, opacity: 0 }}
+                  className="relative w-full max-w-[280px] bg-white/90 backdrop-blur-xl rounded-[2rem] p-6 shadow-2xl text-center"
+                >
+                  <div className="w-14 h-14 bg-red-50 text-red-500 rounded-2xl flex items-center justify-center mx-auto mb-4">
+                    <Trash2 size={28} />
+                  </div>
+                  <h3 className="text-[17px] font-black text-gray-900 mb-2">确认删除该题目？</h3>
+                  <p className="text-[13px] text-gray-500 mb-6 leading-relaxed">
+                    删除后将无法恢复，建议先确认为正确或自行修改。
+                  </p>
+                  <div className="space-y-2">
+                    <button 
+                      onClick={() => {
+                        setShowDeleteConfirm(null)
+                      }}
+                      className="w-full py-3.5 bg-red-500 text-white font-black rounded-2xl shadow-lg shadow-red-100 active:scale-95 transition-transform"
+                    >
+                      确定删除
+                    </button>
+                    <button 
+                      onClick={() => setShowDeleteConfirm(null)}
+                      className="w-full py-3.5 text-gray-400 font-bold active:scale-95 transition-transform"
+                    >
+                      取消
+                    </button>
+                  </div>
+                </motion.div>
+              </div>
+            )}
+          </AnimatePresence>
+
+          {/* Original Paper Viewer */}
+          <AnimatePresence>
+            {showOriginalPaper && (
+              <div className="fixed inset-0 z-[1000] bg-black overflow-hidden">
+                <motion.div 
+                  initial={{ opacity: 0, scale: 1.05 }}
+                  animate={{ opacity: 1, scale: 1 }}
+                  exit={{ opacity: 0, scale: 1.05 }}
+                  className="relative h-full w-full flex flex-col"
+                >
+                  {/* Visual Glass Header */}
+                  <div className="absolute top-0 left-0 right-0 h-24 bg-gradient-to-b from-black/80 via-black/40 to-transparent z-20 px-6 pt-12 flex items-center justify-between pointer-events-none">
+                    <div className="text-white pointer-events-auto">
+                      <h3 className="text-[17px] font-black tracking-tight">2024届下学期数学期中检测</h3>
+                      <p className="text-white/40 text-[10px] uppercase font-black tracking-widest mt-0.5">Scanned Paper · Page 1 of 4</p>
+                    </div>
+                    <button 
+                      onClick={() => setShowOriginalPaper(null)}
+                      className="w-10 h-10 bg-white/10 backdrop-blur-xl rounded-full flex items-center justify-center text-white active:scale-90 transition-transform pointer-events-auto border border-white/10"
+                    >
+                      <X size={20} />
+                    </button>
+                  </div>
+
+                  {/* Scanned Paper Background */}
+                  <div className="flex-1 overflow-auto bg-[#1a1a1a] flex flex-col items-center pt-32 pb-40 px-4 no-scrollbar">
+                     <div className="relative w-full max-w-2xl aspect-[1/1.414] bg-white shadow-[0_40px_100px_rgba(0,0,0,0.5)] rounded-sm overflow-hidden transform transition-transform">
+                       <img 
+                         src="https://images.unsplash.com/photo-1588072432836-e10032774350?q=80&w=2000" 
+                         className="w-full h-full object-cover opacity-90 blur-[0.5px]"
+                         alt="Original Scanned Paper"
+                       />
+                       
+                       {/* Paper Texture Overlay */}
+                       <div className="absolute inset-0 bg-[#fdfaf5]/20 mix-blend-multiply pointer-events-none" />
+                       
+                       {/* Mocked Question Content on Paper */}
+                       <div className="absolute inset-0 p-12 flex flex-col">
+                          <div className="text-center mb-16 opacity-80">
+                            <h1 className="text-2xl font-serif font-black text-gray-800 tracking-tighter">绝密 ★ 启用前</h1>
+                            <p className="text-xl font-serif mt-4 font-bold text-gray-700">2024届数学测试卷</p>
+                          </div>
+                          
+                          <div className="space-y-16">
+                            {[1, 2, 3].map((num) => {
+                              const qId = `q${num}`
+                              const isSelected = showOriginalPaper === qId
+                              return (
+                                <div 
+                                  key={qId}
+                                  className={`relative p-6 rounded-2xl transition-all duration-700 ${isSelected ? 'bg-blue-500/5 border-2 border-blue-500/40 shadow-[0_0_40px_rgba(59,130,246,0.2)]' : 'opacity-20 grayscale'}`}
+                                >
+                                  <div className="flex gap-4">
+                                    <span className="font-serif font-black text-lg text-gray-800">{num}.</span>
+                                    <div className="flex-1 space-y-3">
+                                      <div className="h-4 bg-gray-900/10 rounded-full w-full" />
+                                      <div className="h-4 bg-gray-900/10 rounded-full w-[80%]" />
+                                      {num === 2 && (
+                                         <div className="grid grid-cols-2 gap-4 pt-4">
+                                            <div className="h-3 bg-gray-900/5 rounded-sm" />
+                                            <div className="h-3 bg-gray-900/5 rounded-sm" />
+                                         </div>
+                                      )}
+                                    </div>
+                                  </div>
+                                  {isSelected && (
+                                    <motion.div 
+                                      initial={{ scale: 0.8, opacity: 0 }}
+                                      animate={{ scale: 1, opacity: 1 }}
+                                      className="absolute -top-12 left-1/2 -translate-x-1/2 bg-blue-600 text-white text-[11px] font-black px-4 py-2 rounded-full shadow-2xl flex items-center gap-2"
+                                    >
+                                      <Sparkles size={12} />
+                                      第 {num} 题 · 当前定位
+                                    </motion.div>
+                                  )}
+                                </div>
+                              )
+                            })}
+                          </div>
+                       </div>
+
+                       {/* Vignette effect for realism */}
+                       <div className="absolute inset-0 shadow-[inset_0_0_100px_rgba(0,0,0,0.1)] pointer-events-none" />
+                     </div>
+                  </div>
+
+                  {/* Footer Controls */}
+                  <div className="absolute bottom-12 left-0 right-0 px-8 flex justify-center pointer-events-none">
+                    <motion.div 
+                      initial={{ y: 20, opacity: 0 }}
+                      animate={{ y: 0, opacity: 1 }}
+                      className="bg-black/40 backdrop-blur-3xl border border-white/10 p-2 rounded-[2rem] flex items-center gap-2 pointer-events-auto"
+                    >
+                       <div className="px-6 py-2">
+                          <span className="text-white text-[13px] font-black tracking-tight">智能定位：当前题目</span>
+                       </div>
+                       <div className="w-px h-4 bg-white/20" />
+                       <button className="p-3 text-white/60 hover:text-white active:scale-90 transition-transform">
+                          <Maximize size={20} />
+                       </button>
+                    </motion.div>
+                  </div>
+                </motion.div>
+              </div>
+            )}
+          </AnimatePresence>
+
+          {/* Edit Question Modal */}
+          <AnimatePresence>
+            {isEditing && (
+              <>
+                <motion.div 
+                  initial={{ opacity: 0 }}
+                  animate={{ opacity: 1 }}
+                  exit={{ opacity: 0 }}
+                  onClick={() => setIsEditing(false)}
+                  className="absolute inset-0 bg-black/60 backdrop-blur-md z-[200]"
+                />
+                <motion.div 
+                  initial={{ y: '100%' }}
+                  animate={{ y: 0 }}
+                  exit={{ y: '100%' }}
+                  transition={{ type: 'spring', damping: 30, stiffness: 300, mass: 0.8 }}
+                  className="absolute bottom-0 left-0 right-0 bg-[#F2F2F7] rounded-t-[2.5rem] z-[201] flex flex-col max-h-[92vh] overflow-hidden"
+                >
+                  {/* Visual Handle */}
+                  <div className="w-10 h-1.5 bg-gray-300/30 rounded-full mx-auto mt-3 mb-2" />
+                  
+                  {/* Header */}
+                  <div className="px-6 py-4 flex items-center justify-between bg-white border-b border-gray-100/50 rounded-t-[2.5rem]">
+                    <button 
+                      onClick={() => setIsEditing(false)}
+                      className="text-[15px] font-medium text-gray-400 active:opacity-60 px-2"
+                    >
+                      取消
+                    </button>
+                    <h3 className="text-[17px] font-bold text-gray-900">编辑题目</h3>
+                    <button 
+                      onClick={() => setIsEditing(false)}
+                      className="text-[15px] font-bold text-blue-600 active:opacity-60 px-2"
+                    >
+                      保存
+                    </button>
+                  </div>
+
+                  {/* Tabs */}
+                  <div className="flex bg-white px-2 border-b border-gray-50">
+                    {[
+                      { id: 'content', label: '题干' },
+                      { id: 'answer', label: '答案' }
+                    ].map((tab) => (
+                      <button
+                        key={tab.id}
+                        onClick={() => setEditTab(tab.id)}
+                        className={`flex-1 py-4 text-[14px] font-bold relative transition-colors ${
+                          editTab === tab.id ? 'text-blue-600' : 'text-gray-400'
+                        }`}
+                      >
+                        {tab.label}
+                        {editTab === tab.id && (
+                          <motion.div 
+                            layoutId="edit-tab-underline"
+                            className="absolute bottom-0 left-0 right-0 h-[3px] bg-blue-600 rounded-full mx-auto w-12"
+                          />
+                        )}
+                      </button>
+                    ))}
+                  </div>
+
+                  {/* Content */}
+                  <div className="flex-1 overflow-y-auto p-4 space-y-4">
+                    {editTab === 'content' && (
+                      <motion.div 
+                        initial={{ opacity: 0, scale: 0.98 }}
+                        animate={{ opacity: 1, scale: 1 }}
+                        className="space-y-4"
+                      >
+                        <div className="bg-white rounded-3xl p-6 shadow-sm mb-4">
+                          <div className="flex gap-4">
+                            {/* Text Area - Larger portion */}
+                            <div className="flex-1">
+                              <div className="flex items-center gap-2 mb-3">
+                                <span className="text-[13px] font-bold text-gray-900">题目内容</span>
+                                <span className="px-1.5 py-0.5 bg-blue-50 text-blue-600 rounded text-[10px] font-black uppercase tracking-tight">{editingQuestion?.question_type || '选择题'}</span>
+                              </div>
+                              <textarea 
+                                className="w-full text-[15px] text-gray-800 bg-transparent border-none focus:ring-0 resize-none leading-relaxed min-h-[120px] placeholder:text-gray-300"
+                                defaultValue={editingQuestion?.content || ''}
+                              />
+                              <div className="flex justify-end mt-1">
+                                <span className="text-[10px] text-gray-300 font-bold tracking-tight uppercase">
+                                  {editingQuestion?.content?.length || 0}/500
+                                </span>
+                              </div>
+                            </div>
+
+                            {/* Integrated Illustration - More compact */}
+                            <div className="w-[140px] shrink-0">
+                              <div 
+                                onClick={() => setShowCropTool(true)}
+                                className="group relative aspect-square rounded-2xl overflow-hidden bg-gray-50 border border-gray-100 flex items-center justify-center cursor-pointer active:scale-95 transition-transform"
+                              >
+                                <img 
+                                  src={editingQuestion?.image_url || 'https://images.unsplash.com/photo-1635070041078-e363dbe005cb?w=300&h=300&fit=crop'} 
+                                  className="w-full h-full object-contain p-2"
+                                  alt="Geometry illustration"
+                                />
+                                <div className="absolute inset-0 bg-blue-600/10 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center">
+                                  <div className="w-8 h-8 bg-white rounded-full flex items-center justify-center text-blue-600 shadow-lg">
+                                    <Camera size={14} />
+                                  </div>
+                                </div>
+                              </div>
+                              <p className="text-center text-[10px] text-blue-600 font-black mt-2 uppercase tracking-tighter">更换图片</p>
+                            </div>
+                          </div>
+
+                          {/* Multiple Choice Options List */}
+                          <div className="mt-8">
+                            <div className="flex items-center justify-between mb-4">
+                              <span className="text-[13px] font-bold text-gray-900">选项 (单选)</span>
+                              <button className="text-[11px] font-bold text-blue-600 flex items-center gap-1">
+                                <Plus size={12} /> 添加选项
+                              </button>
+                            </div>
+                            <div className="space-y-2">
+                              {(() => {
+                                const opts = editingQuestion?.options || []
+                                const labels = ['A', 'B', 'C', 'D']
+                                return (opts.length > 0 ? opts : ['A', 'B', 'C', 'D']).map((opt, idx) => {
+                                  const label = labels[idx]
+                                  const value = typeof opt === 'string' ? opt : opt?.value || opt?.content || ''
+                                  return (
+                                    <div key={idx} className="flex items-center gap-3">
+                                      <div className="w-8 h-8 rounded-full bg-gray-50 flex items-center justify-center text-[13px] font-bold text-gray-400 border border-gray-100">
+                                        {label}
+                                      </div>
+                                      <div className="flex-1 px-4 py-3 bg-gray-50 rounded-xl text-[14px] text-gray-800 font-medium">
+                                        {value}
+                                      </div>
+                                      <button className="w-8 h-8 flex items-center justify-center text-gray-300 hover:text-red-400">
+                                        <Trash2 size={14} />
+                                      </button>
+                                    </div>
+                                  )
+                                })
+                              })()}
+                            </div>
+                          </div>
+                        </div>
+                      </motion.div>
+                    )}
+                    
+                    {editTab === 'answer' && (
+                      <motion.div 
+                        key="answer-tab"
+                        initial={{ opacity: 0, y: 10 }}
+                        animate={{ opacity: 1, y: 0 }}
+                        className="space-y-3"
+                      >
+                        <div className="bg-white rounded-2xl p-4 shadow-sm">
+                          <div className="flex gap-4">
+                            <div className="flex-1">
+                              <div className="flex items-center gap-1.5 mb-1.5">
+                                <span className="w-1 h-1 rounded-full bg-gray-300" />
+                                <span className="text-[10px] font-black text-gray-400 uppercase tracking-wider">学生内容</span>
+                              </div>
+                              <div className="px-3 py-2 bg-gray-50 rounded-xl text-[13px] text-gray-500 italic border border-gray-100/50">
+                                 {editingQuestion?.student_answer || '未作答'}
+                              </div>
+                            </div>
+
+                            <div className="flex-1">
+                              <div className="flex items-center gap-1.5 mb-1.5">
+                                <span className="w-1 h-1 rounded-full bg-blue-500" />
+                                <span className="text-[10px] font-black text-blue-600 uppercase tracking-wider">标准答案</span>
+                              </div>
+                              <div className="px-3 py-2 bg-blue-50/30 rounded-xl text-[13px] text-gray-900 font-bold border border-blue-100/30">
+                                 {editingQuestion?.correctAnswer || editingQuestion?.correct_answer || '暂无答案'}
+                              </div>
+                            </div>
+                          </div>
+                        </div>
+
+                        <div className="bg-white rounded-3xl p-6 shadow-sm mb-4">
+                          <h4 className="text-[14px] font-bold text-gray-900 mb-3 flex items-center gap-2">
+                            <Sparkles size={14} className="text-blue-500" />
+                            题目解析 (选填)
+                          </h4>
+                          <textarea 
+                            className="w-full text-[14px] text-gray-600 bg-transparent border-none focus:ring-0 resize-none leading-relaxed min-h-[220px] placeholder:text-gray-200"
+                            placeholder="请输入详细的 AI 解析内容或手动编辑解析内容..."
+                            defaultValue={editingQuestion?.analysis || ''}
+                          />
+                        </div>
+                      </motion.div>
+                    )}
+                  </div>
+
+                  {/* Footer Actions */}
+                  <div className="px-6 pt-4 pb-12 bg-white/80 backdrop-blur-xl border-t border-gray-100 flex gap-3">
+                    <button 
+                      onClick={() => setIsEditing(false)}
+                      className="flex-1 py-4 bg-gray-50 text-gray-500 font-bold rounded-2xl active:scale-95 transition-transform"
+                    >
+                      取消
+                    </button>
+                    <button 
+                      onClick={() => setIsEditing(false)}
+                      className="flex-[2] py-4 bg-blue-600 text-white font-bold rounded-2xl shadow-xl shadow-blue-100 active:scale-95 transition-transform"
+                    >
+                      保存
+                    </button>
+                  </div>
+
+                  {/* Crop/Upload Menu */}
+                  <AnimatePresence>
+                    {showCropTool && (
+                      <div className="fixed inset-0 z-[800] flex items-end">
+                        <motion.div 
+                          initial={{ opacity: 0 }}
+                          animate={{ opacity: 1 }}
+                          exit={{ opacity: 0 }}
+                          onClick={() => setShowCropTool(false)}
+                          className="absolute inset-0 bg-black/40 backdrop-blur-sm"
+                        />
+                        <motion.div 
+                          initial={{ y: '100%' }}
+                          animate={{ y: 0 }}
+                          exit={{ y: '100%' }}
+                          className="relative w-full max-w-sm mx-auto bg-white rounded-t-[2.5rem] p-6 pb-12 shadow-2xl"
+                        >
+                          <div className="w-10 h-1 bg-gray-200 rounded-full mx-auto mb-6" />
+                          <h3 className="text-center text-[14px] font-black text-gray-900 mb-5">更换题目插图</h3>
+                          <div className="grid grid-cols-2 gap-3 max-w-[320px] mx-auto">
+                            <button className="flex flex-col items-center gap-2 p-3.5 rounded-2xl bg-blue-50/50 border border-blue-100 active:scale-95 transition-transform">
+                              <div className="w-9 h-9 bg-white rounded-xl shadow-sm flex items-center justify-center text-blue-600">
+                                <Maximize size={18} />
+                              </div>
+                              <p className="text-[12px] font-bold text-gray-900">从原卷裁剪</p>
+                            </button>
+                            <button className="flex flex-col items-center gap-2 p-3.5 rounded-2xl bg-gray-50/50 border border-gray-100 active:scale-95 transition-transform">
+                              <div className="w-9 h-9 bg-white rounded-xl shadow-sm flex items-center justify-center text-gray-400">
+                                <Camera size={18} />
+                              </div>
+                              <p className="text-[12px] font-bold text-gray-900">拍照上传</p>
+                            </button>
+                          </div>
+                        </motion.div>
+                      </div>
+                    )}
+                  </AnimatePresence>
+                </motion.div>
+              </>
+            )}
+          </AnimatePresence>
 
           {/* Toast Container */}
           <ToastContainer toasts={toastList} />

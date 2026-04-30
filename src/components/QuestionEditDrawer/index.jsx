@@ -1,23 +1,21 @@
-import { useState, useEffect, useRef } from 'react'
+import { useState, useEffect } from 'react'
 import { motion, AnimatePresence } from 'motion/react'
-import { X, Save, Loader2 } from 'lucide-react'
+import { X, Loader2, Plus, Trash2 } from 'lucide-react'
 import { usePendingQuestionStore } from '../../store'
 import { updateQuestion } from '../../services/supabaseService'
 
-const SUBJECTS = ['语文', '数学', '英语', '物理', '化学', '生物', '历史', '地理', '政治']
-const CATEGORIES = ['计算错误', '概念不清', '审题失误', '公式记错', '其他']
-
 export default function QuestionEditDrawer({ questionId, visible, onClose, onSave }) {
   const { pendingQuestions, updatePendingQuestion } = usePendingQuestionStore()
+  
+  const [activeTab, setActiveTab] = useState('stem')
   const [content, setContent] = useState('')
+  const [options, setOptions] = useState([])
   const [correctAnswer, setCorrectAnswer] = useState('')
-  const [subject, setSubject] = useState('数学')
-  const [category, setCategory] = useState('其他')
-  const [isCorrect, setIsCorrect] = useState(false)
+  const [analysis, setAnalysis] = useState('')
+  const [questionType, setQuestionType] = useState('选择题')
+  const [imageUrl, setImageUrl] = useState('')
   const [loading, setLoading] = useState(false)
   const [submitting, setSubmitting] = useState(false)
-  const contentRef = useRef(null)
-  const textareaRef = useRef(null)
 
   useEffect(() => {
     if (visible && questionId) {
@@ -27,20 +25,36 @@ export default function QuestionEditDrawer({ questionId, visible, onClose, onSav
 
   const loadQuestion = async () => {
     setLoading(true)
+    setActiveTab('stem')
     try {
       const questionData = pendingQuestions.find(q => q.id === questionId)
       if (questionData) {
         setContent(questionData.content || '')
+        setOptions(questionData.options || [])
         setCorrectAnswer(questionData.correctAnswer || questionData.correct_answer || '')
-        setSubject(questionData.subject || '数学')
-        setCategory(questionData.category || '其他')
-        setIsCorrect(questionData.is_correct !== undefined ? questionData.is_correct : false)
+        setAnalysis(questionData.analysis || '')
+        setQuestionType(questionData.question_type || '选择题')
+        setImageUrl(questionData.image_url || '')
       }
     } catch (error) {
       console.error('加载题目失败:', error)
     } finally {
       setLoading(false)
     }
+  }
+
+  const updateOption = (index, value) => {
+    const newOptions = [...options]
+    newOptions[index] = value
+    setOptions(newOptions)
+  }
+
+  const addOption = () => {
+    setOptions([...options, ''])
+  }
+
+  const deleteOption = (index) => {
+    setOptions(options.filter((_, i) => i !== index))
   }
 
   const handleSubmit = async () => {
@@ -50,16 +64,18 @@ export default function QuestionEditDrawer({ questionId, visible, onClose, onSav
       const updatedQuestion = {
         id: questionId,
         content,
+        options: options.length > 0 ? options : undefined,
         correctAnswer: correctAnswer || undefined,
         correct_answer: correctAnswer || undefined,
-        subject,
-        category,
-        is_correct: isCorrect,
+        analysis: analysis || undefined,
+        question_type: questionType,
+        image_url: imageUrl || undefined,
         updated_at: new Date().toISOString()
       }
       await updateQuestion(questionId, updatedQuestion)
       updatePendingQuestion(questionId, updatedQuestion)
       onSave && onSave(updatedQuestion)
+      onClose && onClose()
     } catch (error) {
       console.error('更新题目失败:', error)
     } finally {
@@ -76,145 +92,203 @@ export default function QuestionEditDrawer({ questionId, visible, onClose, onSav
             animate={{ opacity: 1 }}
             exit={{ opacity: 0 }}
             onClick={onClose}
-            className="fixed inset-0 bg-black/50 backdrop-blur-sm z-[10000]"
+            className="fixed inset-0 bg-black/20 backdrop-blur-sm z-[10000]"
           />
           <motion.div
             initial={{ y: '100%' }}
             animate={{ y: 0 }}
             exit={{ y: '100%' }}
             transition={{ type: 'spring', damping: 25, stiffness: 200 }}
-            className="fixed bottom-0 left-0 right-0 max-w-md mx-auto bg-white rounded-t-3xl overflow-hidden z-[10001]"
+            className="fixed bottom-0 left-0 right-0 max-w-md mx-auto bg-[#F5F5F7] rounded-t-3xl overflow-hidden z-[10001] flex flex-col"
+            style={{ height: '90vh' }}
           >
-            {/* Header */}
-            <div className="flex items-center justify-between px-6 pt-6 pb-4 border-b border-gray-100">
-              <h2 className="text-[18px] font-bold text-slate-900">编辑题目</h2>
-              <button
-                onClick={onClose}
-                className="p-2 rounded-full hover:bg-gray-50 transition-colors"
-              >
-                <X size={20} className="text-gray-400" />
+            {/* 顶部标题栏 */}
+            <div className="bg-white px-4 py-4 flex items-center justify-center relative">
+              <button onClick={onClose} className="absolute left-4 text-[15px] text-[#999]">
+                <X size={20} />
               </button>
+              <h2 className="text-[17px] font-bold text-[#333]">编辑题目</h2>
             </div>
 
-            {/* Content */}
-            <div className="px-6 py-4 overflow-y-auto max-h-[70vh] no-scrollbar">
+            {/* Tab 切换 */}
+            <div className="bg-white flex border-b border-[#F0F0F0]">
+              {['stem', 'answer'].map(tab => (
+                <button
+                  key={tab}
+                  onClick={() => setActiveTab(tab)}
+                  className="flex-1 py-3 text-[15px] font-medium relative transition-colors"
+                  style={{
+                    color: activeTab === tab ? '#1677FF' : '#999',
+                    fontWeight: activeTab === tab ? 600 : 400
+                  }}
+                >
+                  {tab === 'stem' ? '题干' : '答案'}
+                  {activeTab === tab && (
+                    <motion.div
+                      layoutId="edit-tab-underline"
+                      className="absolute bottom-0 left-1/2 -translate-x-1/2 w-12 h-[3px] bg-[#1677FF] rounded-full"
+                    />
+                  )}
+                </button>
+              ))}
+            </div>
+
+            {/* 内容区域 */}
+            <div className="flex-1 overflow-y-auto px-4 py-4">
               {loading ? (
                 <div className="flex flex-col items-center justify-center py-12">
                   <Loader2 size={32} className="text-blue-500 animate-spin mb-3" />
                   <p className="text-[14px] text-gray-400">加载中...</p>
                 </div>
               ) : (
-                <div className="space-y-5">
-                  {/* Question Content */}
-                  <div>
-                    <label className="block text-[13px] font-bold text-gray-500 mb-2">题目内容</label>
-                    <textarea
-                      ref={textareaRef}
-                      value={content}
-                      onChange={(e) => setContent(e.target.value)}
-                      rows={4}
-                      className="w-full p-4 bg-gray-50 rounded-xl border border-gray-100 text-[14px] focus:outline-none focus:border-blue-300 focus:ring-2 focus:ring-blue-100 transition-all resize-none"
-                    />
-                  </div>
+                <>
+                  {/* 题干 Tab */}
+                  {activeTab === 'stem' && (
+                    <div className="space-y-3">
+                      {/* 题目内容 */}
+                      <div className="bg-white rounded-3xl p-4 shadow-sm">
+                        <div className="flex items-center mb-3">
+                          <span className="text-[14px] font-bold text-[#333]">题目内容</span>
+                          <span className="ml-2 text-[12px] text-[#1677FF]">
+                            {questionType}
+                          </span>
+                        </div>
+                        <div className="flex gap-3">
+                          <div className="flex-1">
+                            <textarea
+                              value={content}
+                              onChange={(e) => setContent(e.target.value)}
+                              rows={5}
+                              className="w-full text-[14px] text-[#333] focus:outline-none resize-none placeholder:text-[#CCC]"
+                              placeholder="请输入题目内容"
+                            />
+                            <div className="text-right text-[12px] text-[#CCC] mt-2">
+                              {content.length}/500
+                            </div>
+                          </div>
+                          {imageUrl && (
+                            <div className="w-24 h-24 rounded-lg flex-shrink-0 overflow-hidden">
+                              <img src={imageUrl} alt="" className="w-full h-full object-cover" />
+                            </div>
+                          )}
+                        </div>
+                      </div>
 
-                  {/* Correct Answer */}
-                  <div>
-                    <label className="block text-[13px] font-bold text-gray-500 mb-2">正确答案</label>
-                    <textarea
-                      value={correctAnswer}
-                      onChange={(e) => setCorrectAnswer(e.target.value)}
-                      rows={2}
-                      className="w-full p-4 bg-gray-50 rounded-xl border border-gray-100 text-[14px] focus:outline-none focus:border-blue-300 focus:ring-2 focus:ring-blue-100 transition-all resize-none"
-                      placeholder="请输入正确答案（选填）"
-                    />
-                  </div>
+                      {/* 选项区域 */}
+                      <div className="bg-white rounded-3xl p-4 shadow-sm">
+                        <div className="flex items-center justify-between mb-4">
+                          <span className="text-[14px] font-bold text-[#333]">选项 (单选)</span>
+                          <button
+                            onClick={addOption}
+                            className="text-[#1677FF] text-[13px] font-medium"
+                          >
+                            + 添加选项
+                          </button>
+                        </div>
+                        <div className="space-y-3">
+                          {options.map((option, index) => (
+                            <div key={index} className="flex items-center gap-3">
+                              <span className="w-7 h-7 rounded-full bg-[#F5F5F7] text-[#CCC] flex items-center justify-center text-[13px] font-bold flex-shrink-0">
+                                {String.fromCharCode(65 + index)}
+                              </span>
+                              <input
+                                value={option}
+                                onChange={(e) => updateOption(index, e.target.value)}
+                                className="flex-1 h-11 px-4 bg-[#F5F5F7] rounded-xl text-[14px] text-[#333] focus:outline-none placeholder:text-[#CCC]"
+                                placeholder={`选项 ${String.fromCharCode(65 + index)}`}
+                              />
+                              <button
+                                onClick={() => deleteOption(index)}
+                                className="p-2 text-[#CCC] hover:text-[#FF3B30] transition-colors flex-shrink-0"
+                              >
+                                <Trash2 size={18} />
+                              </button>
+                            </div>
+                          ))}
+                        </div>
+                      </div>
+                    </div>
+                  )}
 
-                  {/* Subject and Category */}
-                  <div className="grid grid-cols-2 gap-4">
-                    <div>
-                      <label className="block text-[13px] font-bold text-gray-500 mb-2">科目</label>
-                      <select
-                        value={subject}
-                        onChange={(e) => setSubject(e.target.value)}
-                        className="w-full p-4 bg-gray-50 rounded-xl border border-gray-100 text-[14px] focus:outline-none focus:border-blue-300 focus:ring-2 focus:ring-blue-100 transition-all"
-                      >
-                        {SUBJECTS.map(s => (
-                          <option key={s} value={s}>{s}</option>
-                        ))}
-                      </select>
-                    </div>
-                    <div>
-                      <label className="block text-[13px] font-bold text-gray-500 mb-2">分类</label>
-                      <select
-                        value={category}
-                        onChange={(e) => setCategory(e.target.value)}
-                        className="w-full p-4 bg-gray-50 rounded-xl border border-gray-100 text-[14px] focus:outline-none focus:border-blue-300 focus:ring-2 focus:ring-blue-100 transition-all"
-                      >
-                        {CATEGORIES.map(c => (
-                          <option key={c} value={c}>{c}</option>
-                        ))}
-                      </select>
-                    </div>
-                  </div>
+                  {/* 答案 Tab */}
+                  {activeTab === 'answer' && (
+                    <div className="space-y-3">
+                      {/* 学生答案 & 正确答案 */}
+                      <div className="bg-white rounded-3xl p-4 shadow-sm">
+                        <div className="flex items-start gap-3 pb-4 border-b border-[#F0F0F0]">
+                          <div className="w-9 h-9 rounded-full bg-[#F5F5F7] flex items-center justify-center flex-shrink-0">
+                            <svg width="18" height="18" viewBox="0 0 1024 1024" fill="#999">
+                              <path d="M512 512c88 0 160-72 160-160s-72-160-160-160-160 72-160 160 72 160 160 160zm0-256c52.8 0 96 43.2 96 96s-43.2 96-96 96-96-43.2-96-96 43.2-96 96-96zm448 544v64c0 35.2-28.8 64-64 64H128c-35.2 0-64-28.8-64-64v-64c0-88 72-160 160-160h32c17.6 0 34.4 3.2 50.4 9.6 33.6 12.8 70.4 20.8 108.8 23.2 9.6 0.8 19.2 1.2 28.8 1.2s19.2-0.4 28.8-1.2c38.4-2.4 75.2-10.4 108.8-23.2 16-6.4 32.8-9.6 50.4-9.6h32c88 0 160 72 160 160z"/>
+                            </svg>
+                          </div>
+                          <div className="flex-1">
+                            <div className="text-[13px] text-[#999] mb-1">学生答案</div>
+                            <div className="text-[15px] text-[#333]">
+                              {formData.student_answer || '未作答'}
+                              <span className="text-[#999] text-[12px] ml-1">(错误记录)</span>
+                            </div>
+                          </div>
+                        </div>
+                        <div className="flex items-start gap-3 pt-4">
+                          <div className="w-9 h-9 rounded-full bg-[#E6F4FF] flex items-center justify-center flex-shrink-0">
+                            <Plus size={18} className="text-[#1677FF]" />
+                          </div>
+                          <div className="flex-1">
+                            <div className="text-[13px] text-[#1677FF] font-medium mb-1">正确答案</div>
+                            <textarea
+                              value={correctAnswer}
+                              onChange={(e) => setCorrectAnswer(e.target.value)}
+                              rows={2}
+                              className="w-full text-[17px] font-bold text-[#333] focus:outline-none resize-none placeholder:text-[#CCC]"
+                              placeholder="请输入正确答案"
+                            />
+                          </div>
+                        </div>
+                      </div>
 
-                  {/* Status Toggle */}
-                  <div>
-                    <label className="block text-[13px] font-bold text-gray-500 mb-3">识别状态</label>
-                    <div className="flex gap-3">
-                      <button
-                        onClick={() => setIsCorrect(true)}
-                        className={`flex-1 py-3 px-4 rounded-xl border-2 text-[14px] font-bold transition-all ${
-                          isCorrect
-                            ? 'border-green-500 bg-green-50 text-green-600'
-                            : 'border-gray-100 text-gray-400 hover:border-gray-200'
-                        }`}
-                      >
-                        识别正确
-                      </button>
-                      <button
-                        onClick={() => setIsCorrect(false)}
-                        className={`flex-1 py-3 px-4 rounded-xl border-2 text-[14px] font-bold transition-all ${
-                          !isCorrect
-                            ? 'border-red-500 bg-red-50 text-red-600'
-                            : 'border-gray-100 text-gray-400 hover:border-gray-200'
-                        }`}
-                      >
-                        疑似错题
-                      </button>
+                      {/* 题目解析 */}
+                      <div className="bg-white rounded-3xl p-4 shadow-sm">
+                        <div className="text-[14px] font-bold text-[#333] mb-3">
+                          题目解析 (选填)
+                        </div>
+                        <textarea
+                          value={analysis}
+                          onChange={(e) => setAnalysis(e.target.value)}
+                          rows={5}
+                          className="w-full text-[14px] text-[#333] focus:outline-none resize-none placeholder:text-[#CCC]"
+                          placeholder="请输入详细的 AI 解析内容或手动编辑解析内容..."
+                        />
+                      </div>
                     </div>
-                  </div>
-                </div>
+                  )}
+                </>
               )}
             </div>
 
-            {/* Footer */}
-            {!loading && (
-              <div className="px-6 py-4 border-t border-gray-100">
+            {/* 底部按钮 */}
+            <div className="bg-white px-4 py-4 border-t border-[#F0F0F0] pb-8">
+              <div className="flex gap-3">
+                <button
+                  onClick={onClose}
+                  className="flex-1 h-12 rounded-xl bg-[#F5F5F7] text-[#999] text-[16px] font-medium"
+                >
+                  取消
+                </button>
                 <button
                   onClick={handleSubmit}
                   disabled={submitting || !content.trim()}
-                  className="w-full py-4 rounded-2xl bg-blue-600 text-white text-[15px] font-bold hover:bg-blue-500 disabled:opacity-40 disabled:cursor-not-allowed transition-all active:opacity-80 flex items-center justify-center gap-2"
+                  className="flex-1 h-12 rounded-xl bg-[#1677FF] text-white text-[16px] font-bold disabled:opacity-40 disabled:cursor-not-allowed shadow-lg shadow-blue-500/30"
                 >
                   {submitting ? (
-                    <>
+                    <span className="flex items-center justify-center gap-2">
                       <Loader2 size={18} className="animate-spin" />
                       保存中...
-                    </>
-                  ) : (
-                    <>
-                      <Save size={18} />
-                      保存
-                    </>
-                  )}
+                    </span>
+                  ) : '保存'}
                 </button>
               </div>
-            )}
+            </div>
           </motion.div>
-
-          <style>{`
-            .no-scrollbar::-webkit-scrollbar { display: none; }
-            .no-scrollbar { -ms-overflow-style: none; scrollbar-width: none; }
-          `}</style>
         </>
       )}
     </AnimatePresence>

@@ -18,6 +18,7 @@ import { generateQRCodeContent } from '../../services/aiService'
 import { mockWrongQuestions, mockStudents } from '../../data/mockData'
 import StudentSwitcher from '../../components/StudentSwitcher'
 import PrintPreview from '../PrintPreview'
+import QuestionEdit from '../QuestionEdit'
 import dayjs from 'dayjs'
 
 // 使用测试数据
@@ -88,6 +89,7 @@ export default function WrongBook({ onScanQR }) {
   const [showPrintPreview, setShowPrintPreview] = useState(false)
   const [showStudentSwitcher, setShowStudentSwitcher] = useState(false)
   const [showFilterPanel, setShowFilterPanel] = useState(false)
+  const [editingQuestion, setEditingQuestion] = useState(null)
 
   // 组件挂载时，初始化所有学生的 mock 数据到 store
   useEffect(() => {
@@ -299,6 +301,23 @@ export default function WrongBook({ onScanQR }) {
         content: '操作失败'
       })
     }
+  }
+
+  // 编辑题目
+  const handleEditQuestion = (wq) => {
+    setEditingQuestion(wq)
+  }
+
+  // 保存编辑
+  const handleSaveEdit = (updatedQuestion) => {
+    const updatedWrongQuestions = wrongQuestions.map(wq => {
+      if (wq.id === updatedQuestion.id || wq.question_id === updatedQuestion.id) {
+        return { ...wq, question: updatedQuestion }
+      }
+      return wq
+    })
+    setWrongQuestions(updatedWrongQuestions)
+    setEditingQuestion(null)
   }
 
   // 生成打印内容
@@ -675,8 +694,19 @@ export default function WrongBook({ onScanQR }) {
                   </div>
 
                   {/* 错误次数 */}
-                  <div style={{ fontSize: '13px', color: APPLE_COLORS.textSecondary }}>
-                    错误次数：{question.wrong_count || 1}次
+                  <div style={{ fontSize: '13px', color: APPLE_COLORS.textSecondary, display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                    <span>错误次数：{question.wrong_count || 1}次</span>
+                    <span 
+                      onClick={() => handleEditQuestion(wq)}
+                      style={{ 
+                        color: APPLE_COLORS.primary, 
+                        fontSize: '13px', 
+                        cursor: 'pointer',
+                        fontWeight: 500
+                      }}
+                    >
+                      编辑
+                    </span>
                   </div>
                 </div>
               )
@@ -747,6 +777,16 @@ export default function WrongBook({ onScanQR }) {
         onClose={() => setShowStudentSwitcher(false)}
         badgeType="wrongbook"
       />
+
+      {/* 题目编辑弹窗 */}
+      {editingQuestion && (
+        <QuestionEdit
+          questionId={editingQuestion.question?.id || editingQuestion.question_id}
+          visible={!!editingQuestion}
+          onClose={() => setEditingQuestion(null)}
+          onSave={handleSaveEdit}
+        />
+      )}
 
       {/* 筛选面板弹窗 - 苹果风格 */}
       <Mask
