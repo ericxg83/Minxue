@@ -1011,6 +1011,7 @@ export default function App() {
                             <button 
                               onClick={(e) => {
                                 e.stopPropagation();
+                                console.log('查看原图 - question:', q);
                                 setShowOriginalPaper(q);
                               }}
                               className="flex items-center gap-1.5 text-[11px] font-bold text-gray-400 hover:text-blue-600 transition-colors"
@@ -1642,18 +1643,16 @@ export default function App() {
             )}
           </AnimatePresence>
 
-          {/* Original Paper Viewer - Question Crop */}
+          {/* Original Paper Viewer - Question Image Only */}
           <AnimatePresence>
             {showOriginalPaper && (() => {
               const q = showOriginalPaper
               const questionImage = q?.image_url || ''
               const task = tasks.find(t => t.id === q?.task_id)
               const fullPaperImage = task?.image_url || task?.result?.image_url || ''
-
-              if (!questionImage && !fullPaperImage) return null
-
               const displayImage = questionImage || fullPaperImage
-              const title = questionImage ? (showFullPaper ? '原试卷' : '题目区域截图') : '原试卷'
+
+              if (!displayImage) return null
 
               return (
                 <div className="fixed inset-0 z-[1000] bg-black overflow-hidden" onClick={() => { setShowOriginalPaper(null); setShowFullPaper(false) }}>
@@ -1667,7 +1666,7 @@ export default function App() {
                     {/* Header */}
                     <div className="absolute top-0 left-0 right-0 z-30 px-4 pt-12 pb-4 flex items-center justify-between">
                       <div className="text-white">
-                        <h3 className="text-[15px] font-bold">{title}</h3>
+                        <h3 className="text-[15px] font-bold">{questionImage ? '题目截图' : '原试卷'}</h3>
                         <p className="text-white/50 text-[10px]">{q?.content?.slice(0, 30) || ''}...</p>
                       </div>
                       <button 
@@ -1683,23 +1682,11 @@ export default function App() {
                        <div className="relative bg-white shadow-[0_20px_60px_rgba(0,0,0,0.5)] rounded-lg overflow-hidden max-w-full">
                          <img 
                            src={displayImage}
-                           className="w-full h-auto object-contain max-h-[70vh]"
-                           alt={title}
+                           className="w-full h-auto object-contain max-h-[80vh]"
+                           alt={questionImage ? '题目截图' : '原试卷'}
                          />
                        </div>
                     </div>
-
-                    {/* Bottom Toggle Button */}
-                    {questionImage && fullPaperImage && (
-                      <div className="absolute bottom-8 left-0 right-0 flex justify-center z-30">
-                        <button
-                          onClick={() => setShowFullPaper(!showFullPaper)}
-                          className="px-5 py-2.5 bg-white/20 backdrop-blur-xl border border-white/10 rounded-full text-white text-[12px] font-bold active:scale-95 transition-transform"
-                        >
-                          {showFullPaper ? '🔍 查看题目区域' : '📄 查看原试卷'}
-                        </button>
-                      </div>
-                    )}
                   </motion.div>
                 </div>
               )

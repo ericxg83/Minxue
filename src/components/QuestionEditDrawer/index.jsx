@@ -11,6 +11,7 @@ export default function QuestionEditDrawer({ questionId, visible, onClose, onSav
   const [content, setContent] = useState('')
   const [options, setOptions] = useState([])
   const [correctAnswer, setCorrectAnswer] = useState('')
+  const [studentAnswer, setStudentAnswer] = useState('')
   const [analysis, setAnalysis] = useState('')
   const [questionType, setQuestionType] = useState('选择题')
   const [displayImageUrl, setDisplayImageUrl] = useState('')
@@ -32,6 +33,7 @@ export default function QuestionEditDrawer({ questionId, visible, onClose, onSav
         setContent(questionData.content || '')
         setOptions(cleanOptionPrefix(questionData.options || []))
         setCorrectAnswer(questionData.answer || questionData.correctAnswer || questionData.correct_answer || '')
+        setStudentAnswer(questionData.student_answer || '')
         setAnalysis(questionData.analysis || '')
         setQuestionType(questionData.question_type || '选择题')
         setDisplayImageUrl('')
@@ -250,8 +252,7 @@ export default function QuestionEditDrawer({ questionId, visible, onClose, onSav
                           <div className="flex-1">
                             <div className="text-[13px] text-[#999] mb-1">学生答案</div>
                             <div className="text-[15px] text-[#333]">
-                              未作答
-                              <span className="text-[#999] text-[12px] ml-1">(错误记录)</span>
+                              {studentAnswer || '未作答'}
                             </div>
                           </div>
                         </div>
