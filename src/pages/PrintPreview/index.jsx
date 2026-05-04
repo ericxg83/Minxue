@@ -132,7 +132,7 @@ export default function PrintPreview({ onClose }) {
     `
   }
 
-  const handlePrint = async () => {
+  const handlePrint = () => {
     const content = generatePrintContent()
 
     const iframe = document.createElement('iframe')
@@ -149,19 +149,12 @@ export default function PrintPreview({ onClose }) {
     doc.write(content)
     doc.close()
 
-    iframe.onload = () => {
-      setTimeout(() => {
-        try {
-          iframe.contentWindow.focus()
-          iframe.contentWindow.print()
-        } catch (e) {
-          console.error('打印失败:', e)
-        }
-        setTimeout(() => {
-          document.body.removeChild(iframe)
-        }, 1000)
-      }, 500)
-    }
+    iframe.contentWindow.focus()
+    iframe.contentWindow.print()
+
+    setTimeout(() => {
+      document.body.removeChild(iframe)
+    }, 3000)
 
     if (currentStudent && selectedQuestions.length > 0) {
       const questionIds = selectedQuestions.map(wq => {
@@ -170,16 +163,15 @@ export default function PrintPreview({ onClose }) {
       }).filter(Boolean)
       
       if (questionIds.length > 0) {
-        try {
-          const generatedExam = await createGeneratedExam({
-            student_id: currentStudent.id,
-            name: '错题重练卷',
-            question_ids: questionIds
-          })
-          console.log('试卷已保存:', generatedExam)
-        } catch (error) {
+        createGeneratedExam({
+          student_id: currentStudent.id,
+          name: '错题重练卷',
+          question_ids: questionIds
+        }).then(() => {
+          console.log('试卷已保存')
+        }).catch(error => {
           console.error('保存生成试卷失败:', error)
-        }
+        })
       }
       
       clearSelection()

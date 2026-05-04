@@ -400,19 +400,11 @@ export default function Exam() {
     doc.open()
     doc.write(printContent)
     doc.close()
-    iframe.onload = () => {
-      setTimeout(() => {
-        try {
-          iframe.contentWindow.focus()
-          iframe.contentWindow.print()
-        } catch (e) {
-          console.error('打印失败:', e)
-        }
-        setTimeout(() => {
-          document.body.removeChild(iframe)
-        }, 1000)
-      }, 500)
-    }
+    iframe.contentWindow.focus()
+    iframe.contentWindow.print()
+    setTimeout(() => {
+      document.body.removeChild(iframe)
+    }, 3000)
     
     Toast.show({
       icon: 'success',
