@@ -6,8 +6,11 @@ import { useStudentStore, useWrongQuestionStore, useUIStore, useExamStore } from
 import { mockWrongQuestions } from '../../data/mockData'
 import { createGeneratedExam } from '../../services/supabaseService'
 import dayjs from 'dayjs'
+import jsPDF from 'jspdf'
 
 const USE_MOCK_DATA = false
+
+const isMobile = /Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(navigator.userAgent)
 
 const generatePaperId = () => {
   return 'paper_' + Date.now() + '_' + Math.random().toString(36).substr(2, 9)
@@ -133,18 +136,6 @@ export default function PrintPreview({ onClose }) {
   }
 
   const handlePrint = () => {
-    const content = generatePrintContent()
-
-    const w = window.open('', '_blank')
-    if (!w) {
-      alert('请允许弹出窗口来打印试卷')
-      return
-    }
-    w.document.write(content)
-    w.document.close()
-    w.focus()
-    w.print()
-
     if (currentStudent && selectedQuestions.length > 0) {
       const questionIds = selectedQuestions.map(wq => {
         const q = wq.question || wq
@@ -166,7 +157,103 @@ export default function PrintPreview({ onClose }) {
       clearSelection()
     }
 
+    if (isMobile) {
+      generatePDF()
+    } else {
+      const content = generatePrintContent()
+      const w = window.open('', '_blank')
+      if (!w) {
+        alert('请允许弹出窗口来打印试卷')
+        return
+      }
+      w.document.write(content)
+      w.document.close()
+      w.focus()
+      w.print()
+    }
+
     onClose()
+  }
+
+  const generatePDF = () => {
+    const doc = new jsPDF('p', 'mm', 'a4')
+    const pageWidth = 210
+    const pageHeight = 297
+    const margin = 20
+    const contentWidth = pageWidth - margin * 2
+    let y = margin
+
+    doc.setFont('helvetica', 'bold')
+    doc.setFontSize(18)
+    doc.text(`${currentStudent?.name || 'Student'} - Cuoti Chonglian Juan`, pageWidth / 2, y, { align: 'center' })
+    y += 12
+
+    doc.setFont('helvetica', 'normal')
+    doc.setFontSize(10)
+    doc.text(`Total: ${previewQuestions.length} questions | Score: 100 | Time: 60min`, pageWidth / 2, y, { align: 'center' })
+    y += 8
+
+    doc.setDrawColor(200)
+    doc.line(margin, y, pageWidth - margin, y)
+    y += 8
+
+    doc.setFontSize(10)
+    doc.text(`Name: ______________    Date: ____/____/____`, margin, y)
+    y += 12
+
+    previewQuestions.forEach((q, index) => {
+      if (y > pageHeight - 40) {
+        doc.addPage()
+        y = margin
+      }
+
+      const questionType = q.question_type === 'choice' ? 'Choice' : q.question_type === 'fill' ? 'Fill' : 'Answer'
+      
+      doc.setFont('helvetica', 'bold')
+      doc.setFontSize(12)
+      doc.text(`${index + 1}. (${questionType})`, margin, y)
+      y += 7
+
+      doc.setFont('helvetica', 'normal')
+      doc.setFontSize(11)
+      const content = q.content || 'No content'
+      const lines = doc.splitTextToSize(content, contentWidth)
+      doc.text(lines, margin, y)
+      y += lines.length * 6
+
+      if (q.options && q.options.length > 0) {
+        y += 3
+        q.options.forEach((opt, i) => {
+          if (y > pageHeight - 20) {
+            doc.addPage()
+            y = margin
+          }
+          doc.text(`${String.fromCharCode(65 + i)}. ${opt}`, margin + 10, y)
+          y += 6
+        })
+      }
+
+      if (q.question_type === 'answer') {
+        y += 5
+        doc.setDrawColor(200)
+        doc.rect(margin, y, contentWidth, 30)
+        y += 35
+      }
+
+      y += 5
+    })
+
+    y += 10
+    if (y > pageHeight - 20) {
+      doc.addPage()
+      y = margin
+    }
+    doc.setFontSize(8)
+    doc.setTextColor(150)
+    doc.text('Minxue - Smart Learning System', pageWidth / 2, y, { align: 'center' })
+
+    const fileName = `${currentStudent?.name || 'student'}_cuoti_${dayjs().format('YYYYMMDD_HHmm')}.pdf`
+    doc.save(fileName)
   }
 
   const handleExportPDF = () => {
@@ -298,8 +385,8 @@ export default function PrintPreview({ onClose }) {
             onClick={handlePrint}
             className="px-8 py-3 rounded-xl bg-blue-600 text-white text-[14px] font-bold hover:bg-blue-500 transition-all flex items-center gap-2"
           >
-            <Printer size={16} />
-            直接打印
+            {isMobile ? <FileDown size={16} /> : <Printer size={16} />}
+            {isMobile ? '下载PDF' : '直接打印'}
           </button>
         </div>
       </div>

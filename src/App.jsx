@@ -33,6 +33,9 @@ import QuestionEditDrawer from './components/QuestionEditDrawer'
 import ScanQR from './pages/ScanQR'
 import Grading from './pages/Grading'
 import dayjs from 'dayjs'
+import jsPDF from 'jspdf'
+
+const isMobile = /Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(navigator.userAgent)
 
 // ==================== UI Tool Components ====================
 
@@ -1612,11 +1615,177 @@ export default function App() {
                   <button className="flex-1 py-4 border-2 border-gray-50 px-4 rounded-2xl text-[14px] font-black text-gray-900 active:scale-95 transition-transform bg-white/50">PDF 导出</button>
                   <button 
                     onClick={() => {
+                      const displayQuestions = selectedQuestions.length > 0
+                        ? selectedQuestions.map(wq => wq.question || wq)
+                        : pendingQuestions.slice(0, 1).map(q => q.question || q)
+                      
+                      if (displayQuestions.length === 0) {
+                        setShowPrintPreview(false)
+                        return
+                      }
+
+                      if (isMobile) {
+                        const doc = new jsPDF('p', 'mm', 'a4')
+                        const pageWidth = 210
+                        const pageHeight = 297
+                        const margin = 20
+                        const contentWidth = pageWidth - margin * 2
+                        let y = margin
+
+                        doc.setFont('helvetica', 'bold')
+                        doc.setFontSize(18)
+                        doc.text(`${currentStudent?.name || 'Student'} - Cuoti Chonglian Juan`, pageWidth / 2, y, { align: 'center' })
+                        y += 12
+
+                        doc.setFont('helvetica', 'normal')
+                        doc.setFontSize(10)
+                        doc.text(`Total: ${displayQuestions.length} questions | Score: 100 | Time: 60min`, pageWidth / 2, y, { align: 'center' })
+                        y += 8
+
+                        doc.setDrawColor(200)
+                        doc.line(margin, y, pageWidth - margin, y)
+                        y += 8
+
+                        doc.setFontSize(10)
+                        doc.text(`Name: ______________    Date: ____/____/____`, margin, y)
+                        y += 12
+
+                        displayQuestions.forEach((q, index) => {
+                          if (y > pageHeight - 40) {
+                            doc.addPage()
+                            y = margin
+                          }
+
+                          const questionType = q.question_type === 'choice' ? 'Choice' : q.question_type === 'fill' ? 'Fill' : 'Answer'
+                          
+                          doc.setFont('helvetica', 'bold')
+                          doc.setFontSize(12)
+                          doc.text(`${index + 1}. (${questionType})`, margin, y)
+                          y += 7
+
+                          doc.setFont('helvetica', 'normal')
+                          doc.setFontSize(11)
+                          const qContent = q.content || 'No content'
+                          const lines = doc.splitTextToSize(qContent, contentWidth)
+                          doc.text(lines, margin, y)
+                          y += lines.length * 6
+
+                          if (q.options && q.options.length > 0) {
+                            y += 3
+                            q.options.forEach((opt, i) => {
+                              if (y > pageHeight - 20) {
+                                doc.addPage()
+                                y = margin
+                              }
+                              doc.text(`${String.fromCharCode(65 + i)}. ${opt}`, margin + 10, y)
+                              y += 6
+                            })
+                          }
+
+                          if (q.question_type === 'answer') {
+                            y += 5
+                            doc.setDrawColor(200)
+                            doc.rect(margin, y, contentWidth, 30)
+                            y += 35
+                          }
+
+                          y += 5
+                        })
+
+                        y += 10
+                        if (y > pageHeight - 20) {
+                          doc.addPage()
+                          y = margin
+                        }
+                        doc.setFontSize(8)
+                        doc.setTextColor(150)
+                        doc.text('Minxue - Smart Learning System', pageWidth / 2, y, { align: 'center' })
+
+                        const fileName = `${currentStudent?.name || 'student'}_cuoti_${dayjs().format('YYYYMMDD_HHmm')}.pdf`
+                        doc.save(fileName)
+                      } else {
+                        const questionHtml = displayQuestions.map((q, i) => {
+                          const questionType = q.question_type || q.type || '选择题'
+                          const content = q.content || '无内容'
+                          const isShortOptions = q.options && q.options.every(opt => opt.length <= 10)
+                          let displayContent = content
+                          if (questionType === 'fill') {
+                            displayContent = content.replace(/_____/g, '<span style="display:inline-block;min-width:80px;border-bottom:1px solid #333;margin:0 4px;">&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;</span>')
+                          }
+                          return `
+                            <div style="margin-bottom:20px;page-break-inside:avoid;">
+                              <div style="display:flex;align-items:baseline;gap:8px;margin-bottom:8px;">
+                                <span style="font-weight:bold;">${i + 1}.</span>
+                                <span style="font-size:9pt;color:#999;">(${questionType === 'choice' ? '选择题' : questionType === 'fill' ? '填空题' : questionType === 'answer' ? '解答题' : questionType})</span>
+                              </div>
+                              <div style="margin-bottom:8px;line-height:1.6;">${displayContent}</div>
+                              ${q.options && q.options.length > 0 ? `
+                                <div style="margin-left:30px;margin-top:8px;${isShortOptions ? 'display:flex;flex-wrap:wrap;gap:32px;' : 'display:grid;grid-template-columns:1fr 1fr;gap:8px;'}">
+                                  ${q.options.map((opt, idx) => `<div style="font-size:11pt;white-space:nowrap;">${String.fromCharCode(65 + idx)}. ${opt}</div>`).join('')}
+                                </div>
+                              ` : ''}
+                              ${questionType === 'answer' ? '<div style="margin-top:15px;padding:12px;border:1px solid #ddd;border-radius:4px;min-height:40px;">答：</div>' : ''}
+                            </div>
+                          `
+                        }).join('')
+                        
+                        const html = `<!DOCTYPE html><html><head><meta charset="UTF-8"><title>${currentStudent?.name || '学生'} - 错题重练卷</title><style>
+                          @page{size:A4;margin:20mm}
+                          body{font-family:'Microsoft YaHei','SimSun',sans-serif;line-height:1.8;font-size:12pt}
+                          .paper{width:210mm;min-height:297mm;margin:0 auto;padding:20mm;box-sizing:border-box;background:white}
+                          .header{text-align:center;margin-bottom:20px;padding-bottom:15px;border-bottom:2px solid #333;position:relative}
+                          .title{font-size:18pt;font-weight:bold;margin-bottom:10px}
+                          .subtitle{font-size:10pt;color:#666;display:flex;justify-content:center;gap:30px}
+                          .info-bar{display:flex;justify-content:flex-start;align-items:center;margin-bottom:20px;font-size:10pt;border-bottom:1px solid #ddd;padding-bottom:10px;gap:40px}
+                          .footer{margin-top:40px;text-align:center;font-size:9pt;color:#999;border-top:1px solid #ddd;padding-top:15px}
+                        </style></head><body><div class="paper">
+                          <div class="header">
+                            <div class="title">${currentStudent?.name || '学生'} - 错题重练卷</div>
+                            <div class="subtitle"><span>总题数：${displayQuestions.length}题</span><span>满分：100分</span><span>限时：60分钟</span></div>
+                          </div>
+                          <div class="info-bar"><span>姓名：______________</span><span>日期：____年____月____日</span></div>
+                          ${questionHtml}
+                          <div class="footer">敏学错题本 - 智能学习助手</div>
+                        </div>
+                        </body></html>`
+                        
+                        const w = window.open('', '_blank')
+                        if (w) {
+                          w.document.write(html)
+                          w.document.close()
+                          w.focus()
+                          w.print()
+                        }
+                      }
+
+                      if (currentStudent && selectedQuestions.length > 0) {
+                        const questionIds = selectedQuestions.map(wq => {
+                          const q = wq.question || wq
+                          return q.id
+                        }).filter(Boolean)
+                        
+                        if (questionIds.length > 0) {
+                          import('./services/supabaseService').then(({ createGeneratedExam }) => {
+                            createGeneratedExam({
+                              student_id: currentStudent.id,
+                              name: '错题重练卷',
+                              question_ids: questionIds
+                            }).then(() => {
+                              console.log('试卷已保存')
+                            }).catch(error => {
+                              console.error('保存生成试卷失败:', error)
+                            })
+                          })
+                        }
+                        
+                        clearSelection()
+                      }
+
                       setShowPrintPreview(false)
                     }}
                     className="flex-[2] py-4 bg-blue-600 text-white rounded-2xl text-[14px] font-black shadow-[0_10px_30px_rgba(37,99,235,0.3)] active:scale-95 transition-transform"
                   >
-                    直接打印
+                    {isMobile ? '下载PDF' : '直接打印'}
                   </button>
                 </div>
               </motion.div>
@@ -1743,59 +1912,140 @@ export default function App() {
                   <button 
                     onClick={() => {
                       if (reprintQuestions.length > 0) {
-                        const questionHtml = reprintQuestions.map((q, i) => {
-                          const questionType = q.question_type || q.type || '选择题'
-                          const content = q.content || '无内容'
-                          const isShortOptions = q.options && q.options.every(opt => opt.length <= 10)
-                          let displayContent = content
-                          if (questionType === 'fill') {
-                            displayContent = content.replace(/_____/g, '<span style="display:inline-block;min-width:80px;border-bottom:1px solid #333;margin:0 4px;">&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;</span>')
+                        if (isMobile) {
+                          const doc = new jsPDF('p', 'mm', 'a4')
+                          const pageWidth = 210
+                          const pageHeight = 297
+                          const margin = 20
+                          const contentWidth = pageWidth - margin * 2
+                          let y = margin
+
+                          doc.setFont('helvetica', 'bold')
+                          doc.setFontSize(18)
+                          doc.text(`${currentStudent?.name || 'Student'} - ${reprintExam.name}`, pageWidth / 2, y, { align: 'center' })
+                          y += 12
+
+                          doc.setFont('helvetica', 'normal')
+                          doc.setFontSize(10)
+                          doc.text(`Total: ${reprintQuestions.length} questions | Score: 100 | Time: 60min`, pageWidth / 2, y, { align: 'center' })
+                          y += 8
+
+                          doc.setDrawColor(200)
+                          doc.line(margin, y, pageWidth - margin, y)
+                          y += 8
+
+                          doc.setFontSize(10)
+                          doc.text(`Name: ______________    Date: ____/____/____`, margin, y)
+                          y += 12
+
+                          reprintQuestions.forEach((q, index) => {
+                            if (y > pageHeight - 40) {
+                              doc.addPage()
+                              y = margin
+                            }
+
+                            const questionType = q.question_type === 'choice' ? 'Choice' : q.question_type === 'fill' ? 'Fill' : 'Answer'
+                            
+                            doc.setFont('helvetica', 'bold')
+                            doc.setFontSize(12)
+                            doc.text(`${index + 1}. (${questionType})`, margin, y)
+                            y += 7
+
+                            doc.setFont('helvetica', 'normal')
+                            doc.setFontSize(11)
+                            const qContent = q.content || 'No content'
+                            const lines = doc.splitTextToSize(qContent, contentWidth)
+                            doc.text(lines, margin, y)
+                            y += lines.length * 6
+
+                            if (q.options && q.options.length > 0) {
+                              y += 3
+                              q.options.forEach((opt, i) => {
+                                if (y > pageHeight - 20) {
+                                  doc.addPage()
+                                  y = margin
+                                }
+                                doc.text(`${String.fromCharCode(65 + i)}. ${opt}`, margin + 10, y)
+                                y += 6
+                              })
+                            }
+
+                            if (q.question_type === 'answer') {
+                              y += 5
+                              doc.setDrawColor(200)
+                              doc.rect(margin, y, contentWidth, 30)
+                              y += 35
+                            }
+
+                            y += 5
+                          })
+
+                          y += 10
+                          if (y > pageHeight - 20) {
+                            doc.addPage()
+                            y = margin
                           }
-                          return `
-                            <div style="margin-bottom:20px;page-break-inside:avoid;">
-                              <div style="display:flex;align-items:baseline;gap:8px;margin-bottom:8px;">
-                                <span style="font-weight:bold;">${i + 1}.</span>
-                                <span style="font-size:9pt;color:#999;">(${questionType === 'choice' ? '选择题' : questionType === 'fill' ? '填空题' : questionType === 'answer' ? '解答题' : questionType})</span>
-                              </div>
-                              <div style="margin-bottom:8px;line-height:1.6;">${displayContent}</div>
-                              ${q.options && q.options.length > 0 ? `
-                                <div style="margin-left:30px;margin-top:8px;${isShortOptions ? 'display:flex;flex-wrap:wrap;gap:32px;' : 'display:grid;grid-template-columns:1fr 1fr;gap:8px;'}">
-                                  ${q.options.map((opt, idx) => `<div style="font-size:11pt;white-space:nowrap;">${String.fromCharCode(65 + idx)}. ${opt}</div>`).join('')}
+                          doc.setFontSize(8)
+                          doc.setTextColor(150)
+                          doc.text('Minxue - Smart Learning System', pageWidth / 2, y, { align: 'center' })
+
+                          const fileName = `${currentStudent?.name || 'student'}_${reprintExam.name}_${dayjs().format('YYYYMMDD_HHmm')}.pdf`
+                          doc.save(fileName)
+                        } else {
+                          const questionHtml = reprintQuestions.map((q, i) => {
+                            const questionType = q.question_type || q.type || '选择题'
+                            const content = q.content || '无内容'
+                            const isShortOptions = q.options && q.options.every(opt => opt.length <= 10)
+                            let displayContent = content
+                            if (questionType === 'fill') {
+                              displayContent = content.replace(/_____/g, '<span style="display:inline-block;min-width:80px;border-bottom:1px solid #333;margin:0 4px;">&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;</span>')
+                            }
+                            return `
+                              <div style="margin-bottom:20px;page-break-inside:avoid;">
+                                <div style="display:flex;align-items:baseline;gap:8px;margin-bottom:8px;">
+                                  <span style="font-weight:bold;">${i + 1}.</span>
+                                  <span style="font-size:9pt;color:#999;">(${questionType === 'choice' ? '选择题' : questionType === 'fill' ? '填空题' : questionType === 'answer' ? '解答题' : questionType})</span>
                                 </div>
-                              ` : ''}
-                              ${questionType === 'answer' ? '<div style="margin-top:15px;padding:12px;border:1px solid #ddd;border-radius:4px;min-height:40px;">答：</div>' : ''}
+                                <div style="margin-bottom:8px;line-height:1.6;">${displayContent}</div>
+                                ${q.options && q.options.length > 0 ? `
+                                  <div style="margin-left:30px;margin-top:8px;${isShortOptions ? 'display:flex;flex-wrap:wrap;gap:32px;' : 'display:grid;grid-template-columns:1fr 1fr;gap:8px;'}">
+                                    ${q.options.map((opt, idx) => `<div style="font-size:11pt;white-space:nowrap;">${String.fromCharCode(65 + idx)}. ${opt}</div>`).join('')}
+                                  </div>
+                                ` : ''}
+                                ${questionType === 'answer' ? '<div style="margin-top:15px;padding:12px;border:1px solid #ddd;border-radius:4px;min-height:40px;">答：</div>' : ''}
+                              </div>
+                            `
+                          }).join('')
+                          
+                          const html = `<!DOCTYPE html><html><head><meta charset="UTF-8"><title>${reprintExam.name}</title><style>
+                            @page{size:A4;margin:20mm}
+                            body{font-family:'Microsoft YaHei','SimSun',sans-serif;line-height:1.8;font-size:12pt}
+                            .paper{width:210mm;min-height:297mm;margin:0 auto;padding:20mm;box-sizing:border-box;background:white}
+                            .header{text-align:center;margin-bottom:20px;padding-bottom:15px;border-bottom:2px solid #333;position:relative}
+                            .title{font-size:18pt;font-weight:bold;margin-bottom:10px}
+                            .subtitle{font-size:10pt;color:#666;display:flex;justify-content:center;gap:30px}
+                            .info-bar{display:flex;justify-content:flex-start;align-items:center;margin-bottom:20px;font-size:10pt;border-bottom:1px solid #ddd;padding-bottom:10px;gap:40px}
+                            .footer{margin-top:40px;text-align:center;font-size:9pt;color:#999;border-top:1px solid #ddd;padding-top:15px}
+                            .page-number{text-align:center;margin-top:20px;font-size:10pt;color:#666}
+                          </style></head><body><div class="paper">
+                            <div class="header">
+                              <div class="title">${currentStudent?.name || '学生'} - ${reprintExam.name}</div>
+                              <div class="subtitle"><span>总题数：${reprintQuestions.length}题</span><span>满分：100分</span><span>限时：60分钟</span></div>
                             </div>
-                          `
-                        }).join('')
-                        
-                        const html = `<!DOCTYPE html><html><head><meta charset="UTF-8"><title>${reprintExam.name}</title><style>
-                          @page{size:A4;margin:20mm}
-                          body{font-family:'Microsoft YaHei','SimSun',sans-serif;line-height:1.8;font-size:12pt}
-                          .paper{width:210mm;min-height:297mm;margin:0 auto;padding:20mm;box-sizing:border-box;background:white}
-                          .header{text-align:center;margin-bottom:20px;padding-bottom:15px;border-bottom:2px solid #333;position:relative}
-                          .title{font-size:18pt;font-weight:bold;margin-bottom:10px}
-                          .subtitle{font-size:10pt;color:#666;display:flex;justify-content:center;gap:30px}
-                          .info-bar{display:flex;justify-content:flex-start;align-items:center;margin-bottom:20px;font-size:10pt;border-bottom:1px solid #ddd;padding-bottom:10px;gap:40px}
-                          .footer{margin-top:40px;text-align:center;font-size:9pt;color:#999;border-top:1px solid #ddd;padding-top:15px}
-                          .page-number{text-align:center;margin-top:20px;font-size:10pt;color:#666}
-                        </style></head><body><div class="paper">
-                          <div class="header">
-                            <div class="title">${currentStudent?.name || '学生'} - ${reprintExam.name}</div>
-                            <div class="subtitle"><span>总题数：${reprintQuestions.length}题</span><span>满分：100分</span><span>限时：60分钟</span></div>
+                            <div class="info-bar"><span>姓名：______________</span><span>日期：____年____月____日</span></div>
+                            ${questionHtml}
+                            <div class="footer">敏学错题本 - 智能学习助手</div>
+                            <div class="page-number">第 1 页 / 共 1 页</div>
                           </div>
-                          <div class="info-bar"><span>姓名：______________</span><span>日期：____年____月____日</span></div>
-                          ${questionHtml}
-                          <div class="footer">敏学错题本 - 智能学习助手</div>
-                          <div class="page-number">第 1 页 / 共 1 页</div>
-                        </div>
-                        </body></html>`
-                        
-                        const w = window.open('', '_blank')
-                        if (w) {
-                          w.document.write(html)
-                          w.document.close()
-                          w.focus()
-                          w.print()
+                          </body></html>`
+                          
+                          const w = window.open('', '_blank')
+                          if (w) {
+                            w.document.write(html)
+                            w.document.close()
+                            w.focus()
+                            w.print()
+                          }
                         }
                       }
                       setReprintExam(null)
@@ -1803,7 +2053,7 @@ export default function App() {
                     }}
                     className="flex-[2] py-4 bg-blue-600 text-white rounded-2xl text-[14px] font-black shadow-[0_10px_30px_rgba(37,99,235,0.3)] active:scale-95 transition-transform"
                   >
-                    直接打印
+                    {isMobile ? '下载PDF' : '直接打印'}
                   </button>
                 </div>
               </motion.div>

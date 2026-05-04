@@ -10,8 +10,11 @@ import { useStudentStore, useExamStore } from '../../store'
 import { getGeneratedExamsByStudent, getQuestionsByIds } from '../../services/supabaseService'
 import StudentSwitcher from '../../components/StudentSwitcher'
 import dayjs from 'dayjs'
+import jsPDF from 'jspdf'
 
 const USE_MOCK_DATA = false
+
+const isMobile = /Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(navigator.userAgent)
 
 // 苹果风格颜色
 const APPLE_COLORS = {
@@ -213,195 +216,281 @@ export default function Exam() {
 
     const examTitle = exam.name
 
-    const printContent = `
-      <!DOCTYPE html>
-      <html>
-      <head>
-        <meta charset="UTF-8">
-        <title>${currentStudent?.name || '学生'} - ${examTitle}</title>
-        <style>
-          @page { 
-            size: A4; 
-            margin: 20mm;
-          }
-          body { 
-            font-family: 'Microsoft YaHei', 'SimSun', sans-serif; 
-            line-height: 1.8;
-            font-size: 12pt;
-          }
-          .paper {
-            width: 210mm;
-            min-height: 297mm;
-            margin: 0 auto;
-            padding: 20mm;
-            box-sizing: border-box;
-            background: white;
-          }
-          .header {
-            text-align: center;
-            margin-bottom: 20px;
-            padding-bottom: 15px;
-            border-bottom: 2px solid #333;
-            position: relative;
-          }
-          .title {
-            font-size: 18pt;
-            font-weight: bold;
-            margin-bottom: 10px;
-          }
-          .subtitle {
-            font-size: 10pt;
-            color: #666;
-            display: flex;
-            justify-content: center;
-            gap: 30px;
-          }
-          .info-bar {
-            display: flex;
-            justify-content: flex-start;
-            align-items: center;
-            margin-bottom: 20px;
-            font-size: 10pt;
-            border-bottom: 1px solid #ddd;
-            padding-bottom: 10px;
-            gap: 40px;
-          }
-          .question {
-            margin-bottom: 20px;
-            page-break-inside: avoid;
-          }
-          .question-header {
-            display: flex;
-            align-items: baseline;
-            gap: 8px;
-            margin-bottom: 8px;
-          }
-          .question-number {
-            font-weight: bold;
-            min-width: 30px;
-          }
-          .question-type {
-            font-size: 9pt;
-            color: #999;
-          }
-          .question-content {
-            margin-bottom: 8px;
-            line-height: 1.6;
-          }
-          .options {
-            margin-left: 30px;
-            margin-top: 8px;
-          }
-          .options-inline {
-            display: flex;
-            flex-wrap: wrap;
-            gap: 32px;
-          }
-          .options-grid {
-            display: grid;
-            grid-template-columns: 1fr 1fr;
-            gap: 8px;
-          }
-          .option {
-            font-size: 11pt;
-            white-space: nowrap;
-          }
-          .answer-area {
-            margin-top: 15px;
-            padding: 12px;
-            border: 1px solid #ddd;
-            border-radius: 4px;
-            min-height: 40px;
-          }
-          .footer {
-            margin-top: 40px;
-            text-align: center;
-            font-size: 9pt;
-            color: #999;
-            border-top: 1px solid #ddd;
-            padding-top: 15px;
-          }
-          .page-number {
-            text-align: center;
-            margin-top: 20px;
-            font-size: 10pt;
-            color: #666;
-          }
-          @media print {
-            body { background: white; }
-            .paper { box-shadow: none; margin: 0; }
-          }
-        </style>
-      </head>
-      <body>
-        <div class="paper">
-          <div class="header">
-            <div class="title">${currentStudent?.name || '学生'} - ${examTitle}</div>
-            <div class="subtitle">
-              <span>总题数：${examQuestions.length}题</span>
-              <span>满分：100分</span>
-              <span>限时：60分钟</span>
-            </div>
-          </div>
-          
-          <div class="info-bar">
-            <span>姓名：______________</span>
-            <span>日期：____年____月____日</span>
-          </div>
+    if (isMobile) {
+      const doc = new jsPDF('p', 'mm', 'a4')
+      const pageWidth = 210
+      const pageHeight = 297
+      const margin = 20
+      const contentWidth = pageWidth - margin * 2
+      let y = margin
 
-          ${examQuestions.map((q, index) => {
-            const isShortOptions = q.options && q.options.every(opt => opt.length <= 10)
-            let content = q.content || '无内容'
-            if (q.question_type === 'fill') {
-              content = content.replace(/_____/g, '<span style="display:inline-block;min-width:80px;border-bottom:1px solid #333;margin:0 4px;">&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;</span>')
+      doc.setFont('helvetica', 'bold')
+      doc.setFontSize(18)
+      doc.text(`${currentStudent?.name || 'Student'} - ${examTitle}`, pageWidth / 2, y, { align: 'center' })
+      y += 12
+
+      doc.setFont('helvetica', 'normal')
+      doc.setFontSize(10)
+      doc.text(`Total: ${examQuestions.length} questions | Score: 100 | Time: 60min`, pageWidth / 2, y, { align: 'center' })
+      y += 8
+
+      doc.setDrawColor(200)
+      doc.line(margin, y, pageWidth - margin, y)
+      y += 8
+
+      doc.setFontSize(10)
+      doc.text(`Name: ______________    Date: ____/____/____`, margin, y)
+      y += 12
+
+      examQuestions.forEach((q, index) => {
+        if (y > pageHeight - 40) {
+          doc.addPage()
+          y = margin
+        }
+
+        const questionType = q.question_type === 'choice' ? 'Choice' : q.question_type === 'fill' ? 'Fill' : 'Answer'
+        
+        doc.setFont('helvetica', 'bold')
+        doc.setFontSize(12)
+        doc.text(`${index + 1}. (${questionType})`, margin, y)
+        y += 7
+
+        doc.setFont('helvetica', 'normal')
+        doc.setFontSize(11)
+        const qContent = q.content || 'No content'
+        const lines = doc.splitTextToSize(qContent, contentWidth)
+        doc.text(lines, margin, y)
+        y += lines.length * 6
+
+        if (q.options && q.options.length > 0) {
+          y += 3
+          q.options.forEach((opt, i) => {
+            if (y > pageHeight - 20) {
+              doc.addPage()
+              y = margin
             }
-            return `
-              <div class="question">
-                <div class="question-header">
-                  <span class="question-number">${index + 1}.</span>
-                  <span class="question-type">(${q.question_type === 'choice' ? '选择题' : q.question_type === 'fill' ? '填空题' : '解答题'})</span>
-                </div>
-                <div class="question-content">${content}</div>
-                ${q.options && q.options.length > 0 ? `
-                  <div class="options ${isShortOptions ? 'options-inline' : 'options-grid'}">
-                    ${q.options.map((opt, i) => `
-                      <div class="option">${String.fromCharCode(65 + i)}. ${opt}</div>
-                    `).join('')}
-                  </div>
-                ` : ''}
-                ${q.question_type === 'answer' ? `
-                  <div class="answer-area">
-                    答：
-                  </div>
-                ` : ''}
+            doc.text(`${String.fromCharCode(65 + i)}. ${opt}`, margin + 10, y)
+            y += 6
+          })
+        }
+
+        if (q.question_type === 'answer') {
+          y += 5
+          doc.setDrawColor(200)
+          doc.rect(margin, y, contentWidth, 30)
+          y += 35
+        }
+
+        y += 5
+      })
+
+      y += 10
+      if (y > pageHeight - 20) {
+        doc.addPage()
+        y = margin
+      }
+      doc.setFontSize(8)
+      doc.setTextColor(150)
+      doc.text('Minxue - Smart Learning System', pageWidth / 2, y, { align: 'center' })
+
+      const fileName = `${currentStudent?.name || 'student'}_${examTitle}_${dayjs().format('YYYYMMDD_HHmm')}.pdf`
+      doc.save(fileName)
+
+      Toast.show({
+        icon: 'success',
+        content: 'PDF已生成，请查看下载'
+      })
+    } else {
+      const printContent = `
+        <!DOCTYPE html>
+        <html>
+        <head>
+          <meta charset="UTF-8">
+          <title>${currentStudent?.name || '学生'} - ${examTitle}</title>
+          <style>
+            @page { 
+              size: A4; 
+              margin: 20mm;
+            }
+            body { 
+              font-family: 'Microsoft YaHei', 'SimSun', sans-serif; 
+              line-height: 1.8;
+              font-size: 12pt;
+            }
+            .paper {
+              width: 210mm;
+              min-height: 297mm;
+              margin: 0 auto;
+              padding: 20mm;
+              box-sizing: border-box;
+              background: white;
+            }
+            .header {
+              text-align: center;
+              margin-bottom: 20px;
+              padding-bottom: 15px;
+              border-bottom: 2px solid #333;
+              position: relative;
+            }
+            .title {
+              font-size: 18pt;
+              font-weight: bold;
+              margin-bottom: 10px;
+            }
+            .subtitle {
+              font-size: 10pt;
+              color: #666;
+              display: flex;
+              justify-content: center;
+              gap: 30px;
+            }
+            .info-bar {
+              display: flex;
+              justify-content: flex-start;
+              align-items: center;
+              margin-bottom: 20px;
+              font-size: 10pt;
+              border-bottom: 1px solid #ddd;
+              padding-bottom: 10px;
+              gap: 40px;
+            }
+            .question {
+              margin-bottom: 20px;
+              page-break-inside: avoid;
+            }
+            .question-header {
+              display: flex;
+              align-items: baseline;
+              gap: 8px;
+              margin-bottom: 8px;
+            }
+            .question-number {
+              font-weight: bold;
+              min-width: 30px;
+            }
+            .question-type {
+              font-size: 9pt;
+              color: #999;
+            }
+            .question-content {
+              margin-bottom: 8px;
+              line-height: 1.6;
+            }
+            .options {
+              margin-left: 30px;
+              margin-top: 8px;
+            }
+            .options-inline {
+              display: flex;
+              flex-wrap: wrap;
+              gap: 32px;
+            }
+            .options-grid {
+              display: grid;
+              grid-template-columns: 1fr 1fr;
+              gap: 8px;
+            }
+            .option {
+              font-size: 11pt;
+              white-space: nowrap;
+            }
+            .answer-area {
+              margin-top: 15px;
+              padding: 12px;
+              border: 1px solid #ddd;
+              border-radius: 4px;
+              min-height: 40px;
+            }
+            .footer {
+              margin-top: 40px;
+              text-align: center;
+              font-size: 9pt;
+              color: #999;
+              border-top: 1px solid #ddd;
+              padding-top: 15px;
+            }
+            .page-number {
+              text-align: center;
+              margin-top: 20px;
+              font-size: 10pt;
+              color: #666;
+            }
+            @media print {
+              body { background: white; }
+              .paper { box-shadow: none; margin: 0; }
+            }
+          </style>
+        </head>
+        <body>
+          <div class="paper">
+            <div class="header">
+              <div class="title">${currentStudent?.name || '学生'} - ${examTitle}</div>
+              <div class="subtitle">
+                <span>总题数：${examQuestions.length}题</span>
+                <span>满分：100分</span>
+                <span>限时：60分钟</span>
               </div>
-            `
-          }).join('')}
+            </div>
+            
+            <div class="info-bar">
+              <span>姓名：______________</span>
+              <span>日期：____年____月____日</span>
+            </div>
 
-          <div class="footer">
-            敏学错题本 - 智能学习助手
+            ${examQuestions.map((q, index) => {
+              const isShortOptions = q.options && q.options.every(opt => opt.length <= 10)
+              let content = q.content || '无内容'
+              if (q.question_type === 'fill') {
+                content = content.replace(/_____/g, '<span style="display:inline-block;min-width:80px;border-bottom:1px solid #333;margin:0 4px;">&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;</span>')
+              }
+              return `
+                <div class="question">
+                  <div class="question-header">
+                    <span class="question-number">${index + 1}.</span>
+                    <span class="question-type">(${q.question_type === 'choice' ? '选择题' : q.question_type === 'fill' ? '填空题' : '解答题'})</span>
+                  </div>
+                  <div class="question-content">${content}</div>
+                  ${q.options && q.options.length > 0 ? `
+                    <div class="options ${isShortOptions ? 'options-inline' : 'options-grid'}">
+                      ${q.options.map((opt, i) => `
+                        <div class="option">${String.fromCharCode(65 + i)}. ${opt}</div>
+                      `).join('')}
+                    </div>
+                  ` : ''}
+                  ${q.question_type === 'answer' ? `
+                    <div class="answer-area">
+                      答：
+                    </div>
+                  ` : ''}
+                </div>
+              `
+            }).join('')}
+
+            <div class="footer">
+              敏学错题本 - 智能学习助手
+            </div>
+            
+            <div class="page-number">第 1 页 / 共 1 页</div>
           </div>
-          
-          <div class="page-number">第 1 页 / 共 1 页</div>
-        </div>
-      </body>
-      </html>
-    `
+        </body>
+        </html>
+      `
 
-    const w = window.open('', '_blank')
-    if (!w) {
-      Toast.show('请允许弹出窗口')
-      return
+      const w = window.open('', '_blank')
+      if (!w) {
+        Toast.show('请允许弹出窗口')
+        return
+      }
+      w.document.write(printContent)
+      w.document.close()
+      w.focus()
+      w.print()
+      
+      Toast.show({
+        icon: 'success',
+        content: '正在准备打印...'
+      })
     }
-    w.document.write(printContent)
-    w.document.close()
-    w.focus()
-    w.print()
-    
-    Toast.show({
-      icon: 'success',
-      content: '正在准备打印...'
-    })
   }
 
   if (!currentStudent) {
@@ -646,7 +735,7 @@ export default function Exam() {
                           <path d="M768 256H640v-64c0-35.2-28.8-64-64-64H448c-35.2 0-64 28.8-64 64v64H256c-52.8 0-96 43.2-96 96v320c0 52.8 43.2 96 96 96h512c52.8 0 96-43.2 96-96V352c0-52.8-43.2-96-96-96zM448 192h128v64H448V192zm320 512H256V352h512v352z"/>
                           <path d="M320 448h384v64H320zM320 544h256v64H320z"/>
                         </svg>
-                        重打印
+                        {isMobile ? '下载PDF' : '重打印'}
                       </span>
                     </Button>
                 </div>
