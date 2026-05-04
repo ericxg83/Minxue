@@ -775,3 +775,114 @@ export const deleteImage = async (path) => {
   if (error) throw error
   return true
 }
+
+// ==================== 生成试卷相关操作 ====================
+
+const GENERATED_EXAMS_CACHE_PREFIX = 'generated_exams_cache_'
+const GENERATED_EXAMS_TS_PREFIX = 'generated_exams_cache_ts_'
+const GENERATED_EXAMS_CACHE_MAX_AGE = 3 * 60 * 1000
+
+export const getGeneratedExamsByStudent = async (studentId, useCache = true) => {
+  if (useCache) {
+    try {
+      const cacheKey = GENERATED_EXAMS_CACHE_PREFIX + studentId
+      const tsKey = GENERATED_EXAMS_TS_PREFIX + studentId
+      const cached = localStorage.getItem(cacheKey)
+      const cachedTime = localStorage.getItem(tsKey)
+      
+      if (cached && cachedTime) {
+        const age = Date.now() - parseInt(cachedTime)
+        if (age < GENERATED_EXAMS_CACHE_MAX_AGE) {
+          console.log(`从本地缓存加载生成试卷数据（学生: ${studentId}）`)
+          return JSON.parse(cached)
+        }
+      }
+    } catch (e) {
+      console.warn('读取生成试卷缓存失败:', e)
+    }
+  }
+
+  console.log('从 Supabase 加载生成试卷数据...')
+  const { data, error } = await supabase
+    .from(TABLES.GENERATED_EXAMS)
+    .select('*')
+    .eq('student_id', studentId)
+    .order('created_at', { ascending: false })
+  
+  if (error) {
+    console.error('Supabase 获取学生生成试卷列表错误:', error)
+    if (useCache) {
+      try {
+        const cacheKey = GENERATED_EXAMS_CACHE_PREFIX + studentId
+        const cached = localStorage.getItem(cacheKey)
+        if (cached) {
+          console.log('网络请求失败，使用生成试卷缓存数据降级')
+          return JSON.parse(cached)
+        }
+      } catch (e) {}
+    }
+    throw error
+  }
+
+  const result = (data || []).map(exam => ({
+    id: exam.id,
+    student_id: exam.student_id,
+    name: exam.name || '错题重练卷',
+    question_ids: exam.question_ids || [],
+    status: 'ungraded',
+    created_at: exam.created_at,
+    graded_at: null,
+    source: 'generated'
+  }))
+
+  if (data) {
+    try {
+      const cacheKey = GENERATED_EXAMS_CACHE_PREFIX + studentId
+      const tsKey = GENERATED_EXAMS_TS_PREFIX + studentId
+      localStorage.setItem(cacheKey, JSON.stringify(result))
+      localStorage.setItem(tsKey, String(Date.now()))
+    } catch (e) {
+      console.warn('更新生成试卷缓存失败:', e)
+    }
+  }
+
+  return result
+}
+
+export const createGeneratedExam = async (examData) => {
+  const cleanData = {
+    student_id: examData.student_id,
+    name: examData.name || '错题重练卷',
+    question_ids: examData.question_ids || [],
+    created_at: new Date().toISOString()
+  }
+  
+  const { data, error } = await supabase
+    .from(TABLES.GENERATED_EXAMS)
+    .insert([cleanData])
+    .select()
+    .single()
+  
+  if (error) {
+    console.error('Supabase 创建生成试卷错误:', error)
+    throw error
+  }
+  
+  return data
+}
+
+export const getQuestionsByIds = async (questionIds) => {
+  if (!questionIds || questionIds.length === 0) return []
+  
+  const { data, error } = await supabase
+    .from(TABLES.QUESTIONS)
+    .select('*')
+    .in('id', questionIds)
+  
+  if (error) {
+    console.error('Supabase 根据ID获取题目错误:', error)
+    throw error
+  }
+  
+  return data || []
+}

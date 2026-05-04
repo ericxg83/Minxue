@@ -30,7 +30,8 @@ export const TABLES = {
   TASKS: 'tasks',
   QUESTIONS: 'questions',
   WRONG_QUESTIONS: 'wrong_questions',
-  TRAINING_LOGS: 'training_logs'
+  TRAINING_LOGS: 'training_logs',
+  GENERATED_EXAMS: 'generated_exams'
 }
 
 // 任务状态

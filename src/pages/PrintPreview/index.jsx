@@ -2,8 +2,9 @@ import { useState, useRef, useEffect } from 'react'
 import { motion, AnimatePresence } from 'motion/react'
 import { ArrowLeft, Printer, FileDown, QrCode, Eye, EyeOff } from 'lucide-react'
 import { QRCodeSVG } from 'qrcode.react'
-import { useStudentStore, useWrongQuestionStore, useUIStore } from '../../store'
+import { useStudentStore, useWrongQuestionStore, useUIStore, useExamStore } from '../../store'
 import { mockWrongQuestions } from '../../data/mockData'
+import { createGeneratedExam } from '../../services/supabaseService'
 import dayjs from 'dayjs'
 
 const USE_MOCK_DATA = false
@@ -14,8 +15,9 @@ const generatePaperId = () => {
 
 export default function PrintPreview({ onClose }) {
   const { currentStudent } = useStudentStore()
-  const { selectedQuestions } = useWrongQuestionStore()
+  const { selectedQuestions, clearSelection } = useWrongQuestionStore()
   const { setLoading } = useUIStore()
+  const { addGeneratedExam } = useExamStore()
   
   const [previewQuestions, setPreviewQuestions] = useState([])
   const [currentPage, setCurrentPage] = useState(1)
@@ -127,15 +129,50 @@ export default function PrintPreview({ onClose }) {
     `
   }
 
-  const handlePrint = () => {
+  const handlePrint = async () => {
     const printWindow = window.open('', '_blank')
     if (!printWindow) {
       alert('请允许弹出窗口')
       return
     }
+
+    if (currentStudent && selectedQuestions.length > 0) {
+      const questionIds = selectedQuestions.map(wq => {
+        const q = wq.question || wq
+        return q.id
+      }).filter(Boolean)
+      
+      if (questionIds.length > 0) {
+        try {
+          const generatedExam = await createGeneratedExam({
+            student_id: currentStudent.id,
+            name: '错题重练卷',
+            question_ids: questionIds
+          })
+          
+          if (generatedExam) {
+            addGeneratedExam({
+              id: generatedExam.id,
+              student_id: generatedExam.student_id,
+              name: generatedExam.name,
+              question_ids: generatedExam.question_ids,
+              status: 'ungraded',
+              created_at: generatedExam.created_at,
+              source: 'generated'
+            })
+          }
+        } catch (error) {
+          console.error('保存生成试卷失败:', error)
+        }
+      }
+      
+      clearSelection()
+    }
+
     const content = generatePrintContent()
     printWindow.document.write(content)
     printWindow.document.close()
+    onClose()
   }
 
   const handleExportPDF = () => {

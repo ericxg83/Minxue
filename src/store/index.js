@@ -140,12 +140,19 @@ export const usePendingQuestionStore = create((set, get) => ({
 // 试卷状态管理 - 纯内存，无本地存储
 export const useExamStore = create((set, get) => ({
   exams: [],
+  generatedExams: [],
   initializedStudents: new Set(),
   
   setExams: (exams) => set({ exams }),
   
+  setGeneratedExams: (generatedExams) => set({ generatedExams }),
+  
   addExam: (exam) => set((state) => ({
     exams: [exam, ...state.exams]
+  })),
+  
+  addGeneratedExam: (exam) => set((state) => ({
+    generatedExams: [exam, ...state.generatedExams]
   })),
   
   updateExamStatus: (examId, status, gradedAt = null) => set((state) => ({

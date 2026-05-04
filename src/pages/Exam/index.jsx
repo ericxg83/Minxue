@@ -8,7 +8,7 @@ import {
 import { RightOutline } from 'antd-mobile-icons'
 import { useStudentStore, useUIStore, useExamStore } from '../../store'
 import { mockExams, mockStudents, mockQuestions } from '../../data/mockData'
-import { getExamsByStudent } from '../../services/supabaseService'
+import { getExamsByStudent, getGeneratedExamsByStudent, getQuestionsByTask, getQuestionsByIds } from '../../services/supabaseService'
 import StudentSwitcher from '../../components/StudentSwitcher'
 import dayjs from 'dayjs'
 
@@ -42,15 +42,16 @@ const STATUS_CONFIG = {
 
 export default function Exam() {
   const { currentStudent } = useStudentStore()
-  const { exams, setExams, markStudentInitialized, isStudentInitialized } = useExamStore()
+  const { exams, setExams, setGeneratedExams, generatedExams, markStudentInitialized, isStudentInitialized } = useExamStore()
   
   const [activeFilter, setActiveFilter] = useState('all')
   const [showStudentSwitcher, setShowStudentSwitcher] = useState(false)
+  const [allExams, setAllExams] = useState([])
 
-  // 加载试卷数据 - 在组件挂载和切换学生时执行
   useEffect(() => {
     if (currentStudent) {
       loadExams()
+      loadGeneratedExams()
     }
   }, [currentStudent?.id])
 
@@ -74,13 +75,11 @@ export default function Exam() {
         return
       }
 
-      // 使用缓存数据（秒开）
       const examList = await getExamsByStudent(currentStudent.id, true)
       
       const otherStudentExams = exams.filter(e => e.student_id !== currentStudent.id)
       setExams([...otherStudentExams, ...examList])
 
-      // 后台静默刷新最新数据
       const backgroundRefresh = async () => {
         try {
           const freshData = await getExamsByStudent(currentStudent.id, false)
@@ -97,23 +96,60 @@ export default function Exam() {
     }
   }
 
-  // 只显示当前学生的试卷
-  const studentExams = exams.filter(e => e.student_id === currentStudent?.id)
-  
-  // 筛选试卷
-  const filteredExams = studentExams.filter(exam => {
+  const loadGeneratedExams = async () => {
+    if (!currentStudent) return
+    
+    try {
+      if (USE_MOCK_DATA) return
+
+      const generatedExamList = await getGeneratedExamsByStudent(currentStudent.id, true)
+      
+      const otherStudentGeneratedExams = generatedExams.filter(e => e.student_id !== currentStudent.id)
+      setGeneratedExams([...otherStudentGeneratedExams, ...generatedExamList])
+
+      const backgroundRefresh = async () => {
+        try {
+          const freshData = await getGeneratedExamsByStudent(currentStudent.id, false)
+          const otherStudentGeneratedExams = generatedExams.filter(e => e.student_id !== currentStudent.id)
+          setGeneratedExams([...otherStudentGeneratedExams, ...freshData])
+        } catch (error) {
+          console.debug('后台刷新生成试卷失败:', error)
+        }
+      }
+      
+      backgroundRefresh()
+    } catch (error) {
+      console.error('加载生成试卷失败:', error)
+    }
+  }
+
+  useEffect(() => {
+    const taskExams = exams
+      .filter(e => e.student_id === currentStudent?.id)
+      .map(e => ({ ...e, source: 'task' }))
+    
+    const generated = generatedExams
+      .filter(e => e.student_id === currentStudent?.id)
+      .map(e => ({ ...e, source: 'generated' }))
+    
+    const merged = [...taskExams, ...generated].sort((a, b) => 
+      new Date(b.created_at) - new Date(a.created_at)
+    )
+    
+    setAllExams(merged)
+  }, [exams, generatedExams, currentStudent?.id])
+
+  const filteredExams = allExams.filter(exam => {
     if (activeFilter === 'all') return true
     return exam.status === activeFilter
   })
 
-  // 获取各状态数量（只统计当前学生的试卷）
   const getStatusCount = (status) => {
-    if (status === 'all') return studentExams.length
-    return studentExams.filter(e => e.status === status).length
+    if (status === 'all') return allExams.length
+    return allExams.filter(e => e.status === status).length
   }
   
-  // 所有学生未批改试卷的总数量（用于提醒还有其他学生待处理）
-  const totalUngradedCount = exams.filter(e => e.status === 'ungraded').length
+  const totalUngradedCount = [...exams, ...generatedExams].filter(e => e.status === 'ungraded').length
   
   // 渲染状态标签 - 苹果风格
   const renderStatusTag = (status) => {
@@ -172,15 +208,34 @@ export default function Exam() {
     }
   }
 
-  // 重打印试卷 - 使用错题重练卷格式（与错题本打印格式一致）
-  const handleReprint = (exam) => {
-    // 获取该学生的题目（从 mockQuestions 中筛选该学生的题目）
-    const studentQuestions = mockQuestions.filter(q => q.student_id === exam.student_id)
+  // 重打印试卷 - 根据试卷来源获取正确的题目
+  const handleReprint = async (exam) => {
+    let examQuestions = []
     
-    // 如果没有找到题目，使用所有 mockQuestions 作为备选
-    const examQuestions = studentQuestions.length > 0 
-      ? studentQuestions.slice(0, exam.question_count || 10) 
-      : mockQuestions.slice(0, exam.question_count || 10)
+    if (exam.source === 'generated') {
+      const questionIds = exam.question_ids || []
+      if (questionIds.length === 0) {
+        Toast.show({
+          icon: 'fail',
+          content: '该试卷暂无题目可打印'
+        })
+        return
+      }
+      
+      try {
+        examQuestions = await getQuestionsByIds(questionIds)
+      } catch (error) {
+        console.error('获取题目失败:', error)
+        Toast.show({
+          icon: 'fail',
+          content: '获取题目失败'
+        })
+        return
+      }
+    } else {
+      const questions = await getQuestionsByTask(exam.id, true)
+      examQuestions = questions || []
+    }
     
     if (examQuestions.length === 0) {
       Toast.show({
@@ -196,12 +251,14 @@ export default function Exam() {
       return
     }
 
+    const examTitle = exam.source === 'generated' ? '错题重练卷' : exam.name
+
     const printContent = `
       <!DOCTYPE html>
       <html>
       <head>
         <meta charset="UTF-8">
-        <title>${currentStudent?.name || '学生'} - ${exam.name}</title>
+        <title>${currentStudent?.name || '学生'} - ${examTitle}</title>
         <style>
           @page { 
             size: A4; 
@@ -334,7 +391,7 @@ export default function Exam() {
       <body>
         <div class="paper">
           <div class="header">
-            <div class="title">${currentStudent?.name || '学生'} - ${exam.name}</div>
+            <div class="title">${currentStudent?.name || '学生'} - ${examTitle}</div>
             <div class="subtitle">
               <span>总题数：${examQuestions.length}题</span>
               <span>满分：100分</span>

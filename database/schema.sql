@@ -96,6 +96,25 @@ CREATE TRIGGER update_wrong_questions_updated_at BEFORE UPDATE ON wrong_question
 CREATE TRIGGER update_training_logs_updated_at BEFORE UPDATE ON training_logs
     FOR EACH ROW EXECUTE FUNCTION update_updated_at_column();
 
+-- 生成试卷表（从错题本组卷生成的试卷）
+CREATE TABLE generated_exams (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    student_id UUID NOT NULL REFERENCES students(id) ON DELETE CASCADE,
+    name VARCHAR(255) NOT NULL DEFAULT '错题重练卷',
+    question_ids JSONB NOT NULL DEFAULT '[]',
+    status VARCHAR(20) DEFAULT 'pending' CHECK (status IN ('pending', 'done')),
+    created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
+    updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
+);
+
+CREATE INDEX idx_generated_exams_student_id ON generated_exams(student_id);
+
+CREATE TRIGGER update_generated_exams_updated_at BEFORE UPDATE ON generated_exams
+    FOR EACH ROW EXECUTE FUNCTION update_updated_at_column();
+
+ALTER TABLE generated_exams ENABLE ROW LEVEL SECURITY;
+CREATE POLICY "Allow all" ON generated_exams FOR ALL USING (true) WITH CHECK (true);
+
 -- 启用 RLS (Row Level Security)
 ALTER TABLE students ENABLE ROW LEVEL SECURITY;
 ALTER TABLE tasks ENABLE ROW LEVEL SECURITY;
