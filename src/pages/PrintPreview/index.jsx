@@ -134,15 +134,34 @@ export default function PrintPreview({ onClose }) {
 
   const handlePrint = async () => {
     const content = generatePrintContent()
-    const printWindow = window.open('', '_blank')
-    if (!printWindow) {
-      alert('请允许弹出窗口')
-      return
-    }
 
-    printWindow.document.write(content)
-    printWindow.document.close()
-    printWindow.focus()
+    const iframe = document.createElement('iframe')
+    iframe.style.position = 'fixed'
+    iframe.style.right = '0'
+    iframe.style.bottom = '0'
+    iframe.style.width = '0'
+    iframe.style.height = '0'
+    iframe.style.border = '0'
+    document.body.appendChild(iframe)
+
+    const doc = iframe.contentWindow.document
+    doc.open()
+    doc.write(content)
+    doc.close()
+
+    iframe.onload = () => {
+      setTimeout(() => {
+        try {
+          iframe.contentWindow.focus()
+          iframe.contentWindow.print()
+        } catch (e) {
+          console.error('打印失败:', e)
+        }
+        setTimeout(() => {
+          document.body.removeChild(iframe)
+        }, 1000)
+      }, 500)
+    }
 
     if (currentStudent && selectedQuestions.length > 0) {
       const questionIds = selectedQuestions.map(wq => {

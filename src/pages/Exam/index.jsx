@@ -211,12 +211,6 @@ export default function Exam() {
       return
     }
 
-    const printWindow = window.open('', '_blank')
-    if (!printWindow) {
-      Toast.show('请允许弹出窗口')
-      return
-    }
-
     const examTitle = exam.name
 
     const printContent = `
@@ -261,21 +255,6 @@ export default function Exam() {
             display: flex;
             justify-content: center;
             gap: 30px;
-          }
-          .qr-code-print {
-            position: absolute;
-            top: 0;
-            right: 0;
-            text-align: center;
-          }
-          .qr-code-print img {
-            width: 60px;
-            height: 60px;
-          }
-          .qr-text {
-            font-size: 8pt;
-            color: #999;
-            margin-top: 4px;
           }
           .info-bar {
             display: flex;
@@ -363,10 +342,6 @@ export default function Exam() {
               <span>满分：100分</span>
               <span>限时：60分钟</span>
             </div>
-            <div class="qr-code-print">
-              <div style="width:60px;height:60px;background:#f5f5f5;display:flex;align-items:center;justify-content:center;font-size:8pt;">二维码</div>
-              <div class="qr-text">扫码批改</div>
-            </div>
           </div>
           
           <div class="info-bar">
@@ -409,24 +384,39 @@ export default function Exam() {
           
           <div class="page-number">第 1 页 / 共 1 页</div>
         </div>
-        <script>
-          window.onload = function() { 
-            setTimeout(function() {
-              window.print(); 
-            }, 300);
-          }
-        </script>
       </body>
       </html>
     `
 
-    printWindow.document.write(printContent)
-    printWindow.document.close()
-    printWindow.focus()
+    const iframe = document.createElement('iframe')
+    iframe.style.position = 'fixed'
+    iframe.style.right = '0'
+    iframe.style.bottom = '0'
+    iframe.style.width = '0'
+    iframe.style.height = '0'
+    iframe.style.border = '0'
+    document.body.appendChild(iframe)
+    const doc = iframe.contentWindow.document
+    doc.open()
+    doc.write(printContent)
+    doc.close()
+    iframe.onload = () => {
+      setTimeout(() => {
+        try {
+          iframe.contentWindow.focus()
+          iframe.contentWindow.print()
+        } catch (e) {
+          console.error('打印失败:', e)
+        }
+        setTimeout(() => {
+          document.body.removeChild(iframe)
+        }, 1000)
+      }, 500)
+    }
     
     Toast.show({
       icon: 'success',
-      content: '打印窗口已打开'
+      content: '正在准备打印...'
     })
   }
 
