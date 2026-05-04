@@ -2,7 +2,7 @@ import { useState, useRef, useEffect } from 'react'
 import { motion, AnimatePresence } from 'motion/react'
 import { ArrowLeft, Printer, FileDown, QrCode, Eye, EyeOff } from 'lucide-react'
 import { QRCodeSVG } from 'qrcode.react'
-import { useStudentStore, useWrongQuestionStore, useUIStore, useExamStore } from '../../store'
+import { useStudentStore, useWrongQuestionStore, useUIStore } from '../../store'
 import { mockWrongQuestions } from '../../data/mockData'
 import { createGeneratedExam } from '../../services/supabaseService'
 import dayjs from 'dayjs'
@@ -149,18 +149,7 @@ export default function PrintPreview({ onClose }) {
             name: '错题重练卷',
             question_ids: questionIds
           })
-          
-          if (generatedExam) {
-            addGeneratedExam({
-              id: generatedExam.id,
-              student_id: generatedExam.student_id,
-              name: generatedExam.name,
-              question_ids: generatedExam.question_ids,
-              status: 'ungraded',
-              created_at: generatedExam.created_at,
-              source: 'generated'
-            })
-          }
+          console.log('试卷已保存:', generatedExam)
         } catch (error) {
           console.error('保存生成试卷失败:', error)
         }

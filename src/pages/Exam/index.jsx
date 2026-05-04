@@ -96,16 +96,26 @@ export default function Exam() {
       if (USE_MOCK_DATA) return
 
       const generatedExamList = await getGeneratedExamsByStudent(currentStudent.id, !forceRefresh)
+      console.log('生成的试卷数据:', generatedExamList, '当前store数据:', generatedExams.length)
       
-      const otherStudentGeneratedExams = generatedExams.filter(e => e.student_id !== currentStudent.id)
-      setGeneratedExams([...otherStudentGeneratedExams, ...generatedExamList])
+      // Merge with existing, keeping locally added ones that aren't in DB yet
+      const existingIds = new Set(generatedExams.map(e => e.id))
+      const dbIds = new Set(generatedExamList.map(e => e.id))
+      
+      // Keep locally added exams not yet in DB + all DB exams for this student
+      const localOnly = generatedExams.filter(e => e.student_id === currentStudent.id && !dbIds.has(e.id))
+      const otherStudents = generatedExams.filter(e => e.student_id !== currentStudent.id)
+      
+      setGeneratedExams([...generatedExamList, ...localOnly, ...otherStudents])
 
       if (!forceRefresh) {
         const backgroundRefresh = async () => {
           try {
             const freshData = await getGeneratedExamsByStudent(currentStudent.id, false)
-            const otherStudentGeneratedExams = generatedExams.filter(e => e.student_id !== currentStudent.id)
-            setGeneratedExams([...otherStudentGeneratedExams, ...freshData])
+            const dbIds = new Set(freshData.map(e => e.id))
+            const localOnly = generatedExams.filter(e => e.student_id === currentStudent.id && !dbIds.has(e.id))
+            const otherStudents = generatedExams.filter(e => e.student_id !== currentStudent.id)
+            setGeneratedExams([...freshData, ...localOnly, ...otherStudents])
           } catch (error) {
             console.debug('后台刷新生成试卷失败:', error)
           }
@@ -127,8 +137,8 @@ export default function Exam() {
 
   useEffect(() => {
     const interval = setInterval(() => {
-      loadGeneratedExams(false)
-    }, 5000)
+      loadGeneratedExams(true)
+    }, 3000)
     return () => clearInterval(interval)
   }, [currentStudent?.id])
 
@@ -624,22 +634,31 @@ export default function Exam() {
                   boxShadow: '0 1px 3px rgba(0,0,0,0.04)'
                 }}
               >
-                {/* 缩略图 */}
+                {/* 缩略图 - 错题本生成的试卷显示文档图标 */}
                 <div 
                   style={{
                     width: '80px',
                     height: '60px',
                     borderRadius: '10px',
-                    background: APPLE_COLORS.background,
+                    background: exam.source === 'generated' ? '#E8F4FD' : APPLE_COLORS.background,
                     overflow: 'hidden',
-                    flexShrink: 0
+                    flexShrink: 0,
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'center'
                   }}
                 >
-                  <img 
-                    src={exam.thumbnail} 
-                    alt="" 
-                    style={{ width: '100%', height: '100%', objectFit: 'cover' }}
-                  />
+                  {exam.source === 'generated' ? (
+                    <svg width="32" height="32" viewBox="0 0 1024 1024" fill={APPLE_COLORS.primary}>
+                      <path d="M854.6 288.6L639.4 73.4c-6-6-14.1-9.4-22.6-9.4H192c-17.7 0-32 14.3-32 32v832c0 17.7 14.3 32 32 32h640c17.7 0 32-14.3 32-32V311.3c0-8.5-3.4-16.7-9.4-22.7zM790.2 326H602V137.8L790.2 326zM816 872H208V152h346v192c0 17.7 14.3 32 32 32h192v496z"/>
+                    </svg>
+                  ) : (
+                    <img 
+                      src={exam.thumbnail} 
+                      alt="" 
+                      style={{ width: '100%', height: '100%', objectFit: 'cover' }}
+                    />
+                  )}
                 </div>
 
                 {/* 内容 */}
@@ -660,7 +679,7 @@ export default function Exam() {
                       flex: 1,
                       marginRight: '8px'
                     }}>
-                      {exam.exam_no} {exam.name}
+                      {exam.source === 'generated' ? exam.name : `${exam.exam_no} ${exam.name}`}
                     </div>
                   </div>
                   
@@ -676,7 +695,7 @@ export default function Exam() {
                   </div>
                   
                   <div style={{ fontSize: '13px', color: APPLE_COLORS.textSecondary, marginBottom: '4px' }}>
-                    题目数：{exam.question_count}题
+                    题目数：{exam.source === 'generated' ? (exam.question_ids?.length || 0) : exam.question_count}题
                   </div>
 
                   {/* 批改时间（仅已批改显示） */}
