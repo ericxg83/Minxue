@@ -48,13 +48,6 @@ export default function Exam() {
   const [showStudentSwitcher, setShowStudentSwitcher] = useState(false)
   const [allExams, setAllExams] = useState([])
 
-  useEffect(() => {
-    if (currentStudent) {
-      loadExams()
-      loadGeneratedExams()
-    }
-  }, [currentStudent?.id])
-
   const loadExams = async () => {
     if (!currentStudent) return
     
@@ -96,32 +89,48 @@ export default function Exam() {
     }
   }
 
-  const loadGeneratedExams = async () => {
+  const loadGeneratedExams = async (forceRefresh = false) => {
     if (!currentStudent) return
     
     try {
       if (USE_MOCK_DATA) return
 
-      const generatedExamList = await getGeneratedExamsByStudent(currentStudent.id, true)
+      const generatedExamList = await getGeneratedExamsByStudent(currentStudent.id, !forceRefresh)
       
       const otherStudentGeneratedExams = generatedExams.filter(e => e.student_id !== currentStudent.id)
       setGeneratedExams([...otherStudentGeneratedExams, ...generatedExamList])
 
-      const backgroundRefresh = async () => {
-        try {
-          const freshData = await getGeneratedExamsByStudent(currentStudent.id, false)
-          const otherStudentGeneratedExams = generatedExams.filter(e => e.student_id !== currentStudent.id)
-          setGeneratedExams([...otherStudentGeneratedExams, ...freshData])
-        } catch (error) {
-          console.debug('后台刷新生成试卷失败:', error)
+      if (!forceRefresh) {
+        const backgroundRefresh = async () => {
+          try {
+            const freshData = await getGeneratedExamsByStudent(currentStudent.id, false)
+            const otherStudentGeneratedExams = generatedExams.filter(e => e.student_id !== currentStudent.id)
+            setGeneratedExams([...otherStudentGeneratedExams, ...freshData])
+          } catch (error) {
+            console.debug('后台刷新生成试卷失败:', error)
+          }
         }
+        
+        backgroundRefresh()
       }
-      
-      backgroundRefresh()
     } catch (error) {
       console.error('加载生成试卷失败:', error)
     }
   }
+
+  useEffect(() => {
+    if (currentStudent) {
+      loadExams()
+      loadGeneratedExams(true)
+    }
+  }, [currentStudent?.id])
+
+  useEffect(() => {
+    const interval = setInterval(() => {
+      loadGeneratedExams(false)
+    }, 5000)
+    return () => clearInterval(interval)
+  }, [currentStudent?.id])
 
   useEffect(() => {
     const taskExams = exams
