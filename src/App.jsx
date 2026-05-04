@@ -215,7 +215,7 @@ export default function App() {
   const { tasks, setTasks, addTask, updateTaskStatus: updateTaskInStore } = useTaskStore()
   const { wrongQuestions, setWrongQuestions, selectedQuestions, setSelectedQuestions, clearSelection, addWrongQuestion, addWrongQuestions: addMultipleToStore } = useWrongQuestionStore()
   const { pendingQuestions, setPendingQuestions, addPendingQuestions } = usePendingQuestionStore()
-  const { exams, setExams } = useExamStore()
+  const { exams, setExams, generatedExams, setGeneratedExams } = useExamStore()
 
   // Processing Page State
   const [processingFilter, setProcessingFilter] = useState('all')
@@ -237,6 +237,8 @@ export default function App() {
   // Exam Page State
   const [examFilter, setExamFilter] = useState('all')
   const [selectedPaperId, setSelectedPaperId] = useState(null)
+  const [reprintExam, setReprintExam] = useState(null)
+  const [reprintQuestions, setReprintQuestions] = useState([])
 
   // UI State
   const [showStudentSwitcher, setShowStudentSwitcher] = useState(false)
@@ -347,9 +349,42 @@ export default function App() {
   // Load exams
   useEffect(() => {
     if (currentStudent && currentPage === 'exam') {
-      loadExams()
+      loadGeneratedExams()
     }
   }, [currentStudent?.id, currentPage])
+
+  // Exam: Load generated exams
+  const loadGeneratedExams = async () => {
+    if (!currentStudent) return
+    try {
+      if (USE_MOCK_DATA) return
+      const { getGeneratedExamsByStudent } = await import('./services/supabaseService')
+      const examList = await getGeneratedExamsByStudent(currentStudent.id, true)
+      const otherStudentExams = generatedExams.filter(e => e.student_id !== currentStudent.id)
+      setGeneratedExams([...otherStudentExams, ...examList])
+    } catch (error) {
+      console.error('加载试卷失败:', error)
+    }
+  }
+
+  // Load questions for reprint
+  useEffect(() => {
+    if (reprintExam && reprintExam.question_ids?.length > 0) {
+      const loadReprintQuestions = async () => {
+        try {
+          const { getQuestionsByIds } = await import('./services/supabaseService')
+          const questions = await getQuestionsByIds(reprintExam.question_ids)
+          setReprintQuestions(questions || [])
+        } catch (error) {
+          console.error('加载题目失败:', error)
+          setReprintQuestions([])
+        }
+      }
+      loadReprintQuestions()
+    } else {
+      setReprintQuestions([])
+    }
+  }, [reprintExam])
 
   // Processing: Load tasks
   const loadTasks = async () => {
@@ -783,8 +818,8 @@ export default function App() {
     return true
   })
 
-  // Filter exams
-  const studentExams = exams.filter(e => e.student_id === currentStudent?.id)
+  // Filter generated exams
+  const studentExams = generatedExams.filter(e => e.student_id === currentStudent?.id)
   const filteredExams = studentExams.filter(exam => {
     if (examFilter === 'all') return true
     return exam.status === examFilter
@@ -1227,55 +1262,43 @@ export default function App() {
                   </div>
 
                   {/* Exam List */}
-                  <div className="px-5 mt-6 space-y-6 pb-4">
+                  <div className="px-5 mt-6 space-y-4 pb-4">
                     {filteredExams.map((paper) => (
                       <div 
                         key={paper.id}
-                        onClick={() => setSelectedPaperId(paper.id)}
-                        className={`bg-white rounded-[2rem] p-5 shadow-sm border-2 transition-all relative group ${
-                          selectedPaperId === paper.id ? 'border-blue-500 shadow-xl shadow-blue-100/50' : 'border-transparent'
+                        className={`bg-white rounded-[1.5rem] p-5 shadow-sm border-2 transition-all relative ${
+                          selectedPaperId === paper.id ? 'border-blue-500 shadow-lg shadow-blue-100/50' : 'border-transparent'
                         }`}
                       >
-                        <div className="flex gap-4">
-                          {/* Thumbnail */}
-                          <div className="relative w-24 h-24 shrink-0 rounded-2xl overflow-hidden bg-gray-50 border border-gray-100">
-                            <img src={paper.thumbnail} className="w-full h-full object-cover" alt="" />
-                          </div>
-
-                          {/* Content */}
-                          <div className="flex-1 min-w-0 flex flex-col justify-between py-1">
-                            <div className="pr-8">
-                              <h4 className="text-[14px] font-black text-gray-900 truncate tracking-tight mb-1">
-                                {paper.name}
-                              </h4>
-                              <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-gray-400">
-                                <div className="flex items-center gap-1">
-                                  <Search size={12} className="opacity-50" />
-                                  <span className="text-[11px] font-bold">{dayjs(paper.created_at).format('YYYY-MM-DD HH:mm')}</span>
-                                </div>
-                                <span className="text-[11px] font-bold whitespace-nowrap">题目数: {paper.question_count}题</span>
+                        {/* Content */}
+                        <div className="flex items-start justify-between">
+                          <div className="flex-1 min-w-0 pr-8">
+                            <h4 className="text-[15px] font-black text-gray-900 truncate tracking-tight mb-2">
+                              {paper.name}
+                            </h4>
+                            <div className="flex items-center gap-x-3 gap-y-1 text-gray-400 mb-3">
+                              <div className="flex items-center gap-1">
+                                <Search size={12} className="opacity-50" />
+                                <span className="text-[11px] font-bold">{dayjs(paper.created_at).format('YYYY-MM-DD HH:mm')}</span>
                               </div>
+                              <span className="text-[11px] font-bold whitespace-nowrap">题目数: {paper.question_ids?.length || 0}题</span>
                             </div>
-
-                            <div className="flex items-center justify-between mt-3">
-                              <span className={`px-2.5 py-1 rounded-lg text-[10px] font-black tracking-tight ${
-                                paper.status === 'ungraded' ? 'bg-red-50 text-red-500' : 'bg-green-50 text-green-500'
-                              }`}>
-                                {paper.status === 'ungraded' ? '未批改' : '已批改'}
-                              </span>
-                              
-                              <button 
-                                onClick={(e) => {
-                                  e.stopPropagation();
-                                  setShowPrintPreview(true);
-                                }}
-                                className="flex items-center gap-1 px-3 py-1.5 rounded-xl border border-blue-100 bg-blue-50/50 text-blue-600 hover:bg-blue-50 transition-colors active:scale-95"
-                              >
-                                <Printer size={12} />
-                                <span className="text-[11px] font-black">重打印</span>
-                              </button>
-                            </div>
+                            <span className={`px-2.5 py-1 rounded-lg text-[10px] font-black tracking-tight ${
+                              paper.status === 'ungraded' ? 'bg-red-50 text-red-500' : 'bg-green-50 text-green-500'
+                            }`}>
+                              {paper.status === 'ungraded' ? '未批改' : '已批改'}
+                            </span>
                           </div>
+                          <button 
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              setReprintExam(paper);
+                            }}
+                            className="flex items-center gap-1 px-3 py-1.5 rounded-xl border border-blue-100 bg-blue-50/50 text-blue-600 hover:bg-blue-50 transition-colors active:scale-95 shrink-0"
+                          >
+                            <Printer size={12} />
+                            <span className="text-[11px] font-black">重打印</span>
+                          </button>
                         </div>
 
                         {/* Selection Indicator */}
@@ -1588,6 +1611,137 @@ export default function App() {
                   <button 
                     onClick={() => {
                       setShowPrintPreview(false)
+                    }}
+                    className="flex-[2] py-4 bg-blue-600 text-white rounded-2xl text-[14px] font-black shadow-[0_10px_30px_rgba(37,99,235,0.3)] active:scale-95 transition-transform"
+                  >
+                    直接打印
+                  </button>
+                </div>
+              </motion.div>
+            )}
+          </AnimatePresence>
+
+          {/* Reprint Overlay */}
+          <AnimatePresence>
+            {reprintExam && (
+              <motion.div
+                initial={{ opacity: 0, scale: 1.1 }}
+                animate={{ opacity: 1, scale: 1 }}
+                exit={{ opacity: 0, scale: 1.05 }}
+                className="fixed inset-0 bg-[#F2F2F7] z-[200] flex flex-col max-w-md mx-auto h-screen overflow-hidden"
+              >
+                <div className="flex-1 overflow-y-auto bg-white px-6 pt-10 pb-32 no-scrollbar">
+                  <button 
+                    onClick={() => { setReprintExam(null); setReprintQuestions([]) }}
+                    className="absolute top-10 left-4 w-8 h-8 bg-black/5 rounded-full flex items-center justify-center text-slate-900 active:scale-90 transition-transform z-10"
+                  >
+                    <ChevronRight size={18} className="rotate-180" />
+                  </button>
+
+                  {/* Academic Header with QR */}
+                  <div className="relative flex items-center justify-between mb-10 pt-2 px-2">
+                    <div className="flex-1">
+                      <h2 className="text-[18px] font-serif font-black text-gray-900 tracking-tight leading-tight">
+                        {currentStudent?.name || '学生'} <br/> {reprintExam.name}
+                      </h2>
+                      <div className="flex items-center gap-3 mt-2.5">
+                        <div className="flex items-center gap-1.5">
+                          <span className="w-1 h-1 rounded-full bg-blue-500" />
+                          <p className="text-[9px] font-black text-gray-400 uppercase tracking-[0.2em] italic">SMART LEARNING SYSTEM</p>
+                        </div>
+                        <div className="w-px h-2.5 bg-gray-200" />
+                        <span className="text-[11px] font-black text-gray-400 tracking-tight">
+                          {dayjs(reprintExam.created_at).format('YYYY-M-D')}
+                        </span>
+                      </div>
+                    </div>
+                    <div className="w-20 h-20 bg-gray-100 rounded-xl flex flex-col items-center justify-center p-2 shrink-0">
+                      <QRCodeSVG 
+                        value={`https://scan.example.com/paper/${reprintExam.id}`}
+                        size={48}
+                        className="rounded-sm"
+                      />
+                      <span className="text-[7px] font-black text-gray-400 uppercase tracking-tighter mt-0.5">批改扫码</span>
+                    </div>
+                  </div>
+
+                  {/* Questions */}
+                  {reprintQuestions.length === 0 ? (
+                    <div className="flex flex-col items-center justify-center py-24 opacity-30">
+                      <FileText size={48} strokeWidth={1} />
+                      <p className="mt-4 text-[13px] font-medium">题目加载中...</p>
+                    </div>
+                  ) : (
+                    <div className="space-y-6">
+                      {reprintQuestions.map((q, i) => {
+                        const questionType = q.question_type || q.type || '选择题'
+                        const subject = q.subject || '数学'
+                        const content = q.content || '无内容'
+                        
+                        return (
+                          <div key={q.id || i} className="relative group">
+                            <div className="flex items-start gap-4 mb-4">
+                              <div className="w-6 h-6 flex items-center justify-center rounded-lg bg-slate-900 text-white text-[11px] font-black tracking-tighter shrink-0 mt-1">
+                                {i + 1}
+                              </div>
+                              <div className="flex-1">
+                                <div className="flex items-center gap-2 mb-1.5">
+                                  <span className="px-1.5 py-0.5 rounded-md bg-gray-100 text-[9px] font-black text-gray-400 uppercase tracking-widest underline decoration-gray-200 underline-offset-1">
+                                    {questionType}
+                                  </span>
+                                  <span className="px-1.5 py-0.5 rounded-md bg-blue-50 text-[9px] font-black text-blue-500 uppercase tracking-widest">
+                                    {subject}
+                                  </span>
+                                </div>
+                                <div className="text-[14px] leading-relaxed text-slate-800 font-medium font-serif">
+                                  {content}
+                                </div>
+                                {q.options && q.options.length > 0 && (
+                                  <div className="ml-10 flex gap-10 mt-2">
+                                    {q.options.map((opt, idx) => (
+                                      <div key={idx} className="flex items-center gap-2">
+                                        <div className="w-4 h-4 rounded-full border border-gray-200" />
+                                        <span className="text-[12px] font-bold text-gray-300">{String.fromCharCode(65 + idx)} {opt}</span>
+                                      </div>
+                                    ))}
+                                  </div>
+                                )}
+                              </div>
+                            </div>
+
+                            {(questionType === '解答题' || questionType === '简答题' || questionType === 'answer') && (
+                              <div className="ml-10 h-32 border border-gray-100 rounded-xl bg-gray-50/10 flex flex-col items-center justify-start relative overflow-hidden group-hover:bg-blue-50/5 transition-colors">
+                                 <div className="absolute top-3 left-4 text-[10px] font-black text-gray-300 italic">Solution:</div>
+                                 <div className="w-full h-full border-t border-gray-50 mt-10 opacity-30" />
+                                 <div className="w-full h-full border-t border-gray-50 opacity-30" />
+                              </div>
+                            )}
+
+                            {(questionType === '填空题' || questionType === 'fill') && (
+                              <div className="ml-10 h-10" />
+                            )}
+                          </div>
+                        )
+                      })}
+                    </div>
+                  )}
+
+                  <div className="mt-20 pt-8 border-t border-gray-100 flex items-center justify-between pb-12">
+                     <div className="flex items-center gap-2">
+                        <div className="w-1.5 h-1.5 rounded-full bg-blue-500" />
+                        <p className="text-[9px] text-gray-400 font-black uppercase tracking-[0.2em]">Personalized Exam Pack</p>
+                     </div>
+                     <p className="text-[10px] text-gray-300 font-mono tracking-tighter">PAGE 01 / 01</p>
+                  </div>
+                </div>
+
+                {/* iOS Style Floating Actions */}
+                <div className="absolute bottom-0 left-0 right-0 p-6 bg-white/80 backdrop-blur-3xl border-t border-gray-100 flex gap-4 z-[210]">
+                  <button className="flex-1 py-4 border-2 border-gray-50 px-4 rounded-2xl text-[14px] font-black text-gray-900 active:scale-95 transition-transform bg-white/50">PDF 导出</button>
+                  <button 
+                    onClick={() => {
+                      setReprintExam(null)
+                      setReprintQuestions([])
                     }}
                     className="flex-[2] py-4 bg-blue-600 text-white rounded-2xl text-[14px] font-black shadow-[0_10px_30px_rgba(37,99,235,0.3)] active:scale-95 transition-transform"
                   >
