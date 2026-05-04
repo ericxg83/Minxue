@@ -1790,23 +1790,13 @@ export default function App() {
                         </div>
                         </body></html>`
                         
-                        const iframe = document.createElement('iframe')
-                        iframe.style.position = 'fixed'
-                        iframe.style.right = '0'
-                        iframe.style.bottom = '0'
-                        iframe.style.width = '0'
-                        iframe.style.height = '0'
-                        iframe.style.border = '0'
-                        document.body.appendChild(iframe)
-                        const doc = iframe.contentWindow.document
-                        doc.open()
-                        doc.write(html)
-                        doc.close()
-                        iframe.contentWindow.focus()
-                        iframe.contentWindow.print()
-                        setTimeout(() => {
-                          document.body.removeChild(iframe)
-                        }, 3000)
+                        const w = window.open('', '_blank')
+                        if (w) {
+                          w.document.write(html)
+                          w.document.close()
+                          w.focus()
+                          w.print()
+                        }
                       }
                       setReprintExam(null)
                       setReprintQuestions([])

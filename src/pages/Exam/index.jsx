@@ -388,23 +388,15 @@ export default function Exam() {
       </html>
     `
 
-    const iframe = document.createElement('iframe')
-    iframe.style.position = 'fixed'
-    iframe.style.right = '0'
-    iframe.style.bottom = '0'
-    iframe.style.width = '0'
-    iframe.style.height = '0'
-    iframe.style.border = '0'
-    document.body.appendChild(iframe)
-    const doc = iframe.contentWindow.document
-    doc.open()
-    doc.write(printContent)
-    doc.close()
-    iframe.contentWindow.focus()
-    iframe.contentWindow.print()
-    setTimeout(() => {
-      document.body.removeChild(iframe)
-    }, 3000)
+    const w = window.open('', '_blank')
+    if (!w) {
+      Toast.show('请允许弹出窗口')
+      return
+    }
+    w.document.write(printContent)
+    w.document.close()
+    w.focus()
+    w.print()
     
     Toast.show({
       icon: 'success',

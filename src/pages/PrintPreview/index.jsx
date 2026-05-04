@@ -135,26 +135,15 @@ export default function PrintPreview({ onClose }) {
   const handlePrint = () => {
     const content = generatePrintContent()
 
-    const iframe = document.createElement('iframe')
-    iframe.style.position = 'fixed'
-    iframe.style.right = '0'
-    iframe.style.bottom = '0'
-    iframe.style.width = '0'
-    iframe.style.height = '0'
-    iframe.style.border = '0'
-    document.body.appendChild(iframe)
-
-    const doc = iframe.contentWindow.document
-    doc.open()
-    doc.write(content)
-    doc.close()
-
-    iframe.contentWindow.focus()
-    iframe.contentWindow.print()
-
-    setTimeout(() => {
-      document.body.removeChild(iframe)
-    }, 3000)
+    const w = window.open('', '_blank')
+    if (!w) {
+      alert('请允许弹出窗口来打印试卷')
+      return
+    }
+    w.document.write(content)
+    w.document.close()
+    w.focus()
+    w.print()
 
     if (currentStudent && selectedQuestions.length > 0) {
       const questionIds = selectedQuestions.map(wq => {
