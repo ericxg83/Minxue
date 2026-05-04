@@ -347,12 +347,12 @@ export default function App() {
   }, [currentStudent?.id, currentPage])
 
   // Exam: Load generated exams
-  const loadGeneratedExams = async () => {
+  const loadGeneratedExams = async (useCache = true) => {
     if (!currentStudent) return
     try {
       if (USE_MOCK_DATA) return
       const { getGeneratedExamsByStudent } = await import('./services/supabaseService')
-      const examList = await getGeneratedExamsByStudent(currentStudent.id, true)
+      const examList = await getGeneratedExamsByStudent(currentStudent.id, useCache)
       const otherStudentExams = generatedExams.filter(e => e.student_id !== currentStudent.id)
       setGeneratedExams([...otherStudentExams, ...examList])
     } catch (error) {
@@ -363,8 +363,8 @@ export default function App() {
   // Load exams
   useEffect(() => {
     if (currentStudent && currentPage === 'exam') {
-      loadGeneratedExams()
-      const interval = setInterval(() => loadGeneratedExams(), 3000)
+      loadGeneratedExams(false)
+      const interval = setInterval(() => loadGeneratedExams(false), 3000)
       return () => clearInterval(interval)
     }
   }, [currentStudent?.id, currentPage])

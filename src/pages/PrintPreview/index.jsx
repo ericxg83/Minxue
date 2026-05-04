@@ -2,7 +2,7 @@ import { useState, useRef, useEffect } from 'react'
 import { motion, AnimatePresence } from 'motion/react'
 import { ArrowLeft, Printer, FileDown, QrCode, Eye, EyeOff } from 'lucide-react'
 import { QRCodeSVG } from 'qrcode.react'
-import { useStudentStore, useWrongQuestionStore, useUIStore } from '../../store'
+import { useStudentStore, useWrongQuestionStore, useUIStore, useExamStore } from '../../store'
 import { mockWrongQuestions } from '../../data/mockData'
 import { createGeneratedExam } from '../../services/supabaseService'
 import dayjs from 'dayjs'
@@ -133,11 +133,16 @@ export default function PrintPreview({ onClose }) {
   }
 
   const handlePrint = async () => {
+    const content = generatePrintContent()
     const printWindow = window.open('', '_blank')
     if (!printWindow) {
       alert('请允许弹出窗口')
       return
     }
+
+    printWindow.document.write(content)
+    printWindow.document.close()
+    printWindow.focus()
 
     if (currentStudent && selectedQuestions.length > 0) {
       const questionIds = selectedQuestions.map(wq => {
@@ -161,10 +166,6 @@ export default function PrintPreview({ onClose }) {
       clearSelection()
     }
 
-    const content = generatePrintContent()
-    printWindow.document.write(content)
-    printWindow.document.close()
-    printWindow.focus()
     onClose()
   }
 
