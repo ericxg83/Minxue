@@ -346,13 +346,6 @@ export default function App() {
     }
   }, [currentStudent?.id, currentPage])
 
-  // Load exams
-  useEffect(() => {
-    if (currentStudent && currentPage === 'exam') {
-      loadGeneratedExams()
-    }
-  }, [currentStudent?.id, currentPage])
-
   // Exam: Load generated exams
   const loadGeneratedExams = async () => {
     if (!currentStudent) return
@@ -366,6 +359,15 @@ export default function App() {
       console.error('加载试卷失败:', error)
     }
   }
+
+  // Load exams
+  useEffect(() => {
+    if (currentStudent && currentPage === 'exam') {
+      loadGeneratedExams()
+      const interval = setInterval(() => loadGeneratedExams(), 3000)
+      return () => clearInterval(interval)
+    }
+  }, [currentStudent?.id, currentPage])
 
   // Load questions for reprint
   useEffect(() => {

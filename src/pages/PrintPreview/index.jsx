@@ -121,9 +121,12 @@ export default function PrintPreview({ onClose }) {
                 ${q.question_type === 'answer' ? `<div class="answer-area">答：</div>` : ''}
               </div>
             `
-          }).join('')}
+          }).join('')}</div>
           <div class="footer">敏学错题本 - 智能学习助手</div>
         </div>
+        <script>
+          setTimeout(function() { window.print(); }, 300);
+        </script>
       </body>
       </html>
     `
@@ -161,6 +164,7 @@ export default function PrintPreview({ onClose }) {
     const content = generatePrintContent()
     printWindow.document.write(content)
     printWindow.document.close()
+    printWindow.focus()
     onClose()
   }
 

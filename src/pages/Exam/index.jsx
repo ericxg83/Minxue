@@ -422,6 +422,7 @@ export default function Exam() {
 
     printWindow.document.write(printContent)
     printWindow.document.close()
+    printWindow.focus()
     
     Toast.show({
       icon: 'success',
