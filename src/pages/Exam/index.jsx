@@ -6,9 +6,8 @@ import {
   Badge
 } from 'antd-mobile'
 import { RightOutline } from 'antd-mobile-icons'
-import { useStudentStore, useUIStore, useExamStore } from '../../store'
-import { mockExams, mockStudents, mockQuestions } from '../../data/mockData'
-import { getExamsByStudent, getGeneratedExamsByStudent, getQuestionsByTask, getQuestionsByIds } from '../../services/supabaseService'
+import { useStudentStore, useExamStore } from '../../store'
+import { getGeneratedExamsByStudent, getQuestionsByIds } from '../../services/supabaseService'
 import StudentSwitcher from '../../components/StudentSwitcher'
 import dayjs from 'dayjs'
 
@@ -42,52 +41,11 @@ const STATUS_CONFIG = {
 
 export default function Exam() {
   const { currentStudent } = useStudentStore()
-  const { exams, setExams, setGeneratedExams, generatedExams, markStudentInitialized, isStudentInitialized } = useExamStore()
+  const { setGeneratedExams, generatedExams } = useExamStore()
   
   const [activeFilter, setActiveFilter] = useState('all')
   const [showStudentSwitcher, setShowStudentSwitcher] = useState(false)
   const [allExams, setAllExams] = useState([])
-
-  const loadExams = async () => {
-    if (!currentStudent) return
-    
-    try {
-      if (USE_MOCK_DATA) {
-        const studentMockExams = mockExams.filter(e => e.student_id === currentStudent.id)
-        const existingStudentExamIds = exams
-          .filter(e => e.student_id === currentStudent.id)
-          .map(e => e.id)
-        
-        const newMockExams = studentMockExams.filter(e => 
-          !existingStudentExamIds.includes(e.id)
-        )
-        
-        if (newMockExams.length > 0) {
-          setExams([...exams, ...newMockExams])
-        }
-        return
-      }
-
-      const examList = await getExamsByStudent(currentStudent.id, true)
-      
-      const otherStudentExams = exams.filter(e => e.student_id !== currentStudent.id)
-      setExams([...otherStudentExams, ...examList])
-
-      const backgroundRefresh = async () => {
-        try {
-          const freshData = await getExamsByStudent(currentStudent.id, false)
-          const otherStudentExams = exams.filter(e => e.student_id !== currentStudent.id)
-          setExams([...otherStudentExams, ...freshData])
-        } catch (error) {
-          console.debug('后台刷新试卷失败:', error)
-        }
-      }
-      
-      backgroundRefresh()
-    } catch (error) {
-      console.error('加载试卷失败:', error)
-    }
-  }
 
   const loadGeneratedExams = async (forceRefresh = false) => {
     if (!currentStudent) return
@@ -130,7 +88,6 @@ export default function Exam() {
 
   useEffect(() => {
     if (currentStudent) {
-      loadExams()
       loadGeneratedExams(true)
     }
   }, [currentStudent?.id])
@@ -143,20 +100,16 @@ export default function Exam() {
   }, [currentStudent?.id])
 
   useEffect(() => {
-    const taskExams = exams
-      .filter(e => e.student_id === currentStudent?.id)
-      .map(e => ({ ...e, source: 'task' }))
-    
     const generated = generatedExams
       .filter(e => e.student_id === currentStudent?.id)
       .map(e => ({ ...e, source: 'generated' }))
     
-    const merged = [...taskExams, ...generated].sort((a, b) => 
+    const sorted = generated.sort((a, b) => 
       new Date(b.created_at) - new Date(a.created_at)
     )
     
-    setAllExams(merged)
-  }, [exams, generatedExams, currentStudent?.id])
+    setAllExams(sorted)
+  }, [generatedExams, currentStudent?.id])
 
   const filteredExams = allExams.filter(exam => {
     if (activeFilter === 'all') return true
@@ -168,7 +121,7 @@ export default function Exam() {
     return allExams.filter(e => e.status === status).length
   }
   
-  const totalUngradedCount = [...exams, ...generatedExams].filter(e => e.status === 'ungraded').length
+  const totalUngradedCount = generatedExams.filter(e => e.status === 'ungraded').length
   
   // 渲染状态标签 - 苹果风格
   const renderStatusTag = (status) => {
@@ -227,33 +180,27 @@ export default function Exam() {
     }
   }
 
-  // 重打印试卷 - 根据试卷来源获取正确的题目
+  // 重打印试卷 - 获取错题本组卷的题目
   const handleReprint = async (exam) => {
-    let examQuestions = []
+    const questionIds = exam.question_ids || []
+    if (questionIds.length === 0) {
+      Toast.show({
+        icon: 'fail',
+        content: '该试卷暂无题目可打印'
+      })
+      return
+    }
     
-    if (exam.source === 'generated') {
-      const questionIds = exam.question_ids || []
-      if (questionIds.length === 0) {
-        Toast.show({
-          icon: 'fail',
-          content: '该试卷暂无题目可打印'
-        })
-        return
-      }
-      
-      try {
-        examQuestions = await getQuestionsByIds(questionIds)
-      } catch (error) {
-        console.error('获取题目失败:', error)
-        Toast.show({
-          icon: 'fail',
-          content: '获取题目失败'
-        })
-        return
-      }
-    } else {
-      const questions = await getQuestionsByTask(exam.id, true)
-      examQuestions = questions || []
+    let examQuestions = []
+    try {
+      examQuestions = await getQuestionsByIds(questionIds)
+    } catch (error) {
+      console.error('获取题目失败:', error)
+      Toast.show({
+        icon: 'fail',
+        content: '获取题目失败'
+      })
+      return
     }
     
     if (examQuestions.length === 0) {
@@ -270,7 +217,7 @@ export default function Exam() {
       return
     }
 
-    const examTitle = exam.source === 'generated' ? '错题重练卷' : exam.name
+    const examTitle = exam.name
 
     const printContent = `
       <!DOCTYPE html>
@@ -506,7 +453,7 @@ export default function Exam() {
         <Button 
           fill="none" 
           style={{ color: APPLE_COLORS.primary, fontSize: '15px' }}
-          onClick={loadExams}
+          onClick={() => loadGeneratedExams(true)}
         >
           <span style={{ display: 'flex', alignItems: 'center', gap: '4px' }}>
             <svg width="18" height="18" viewBox="0 0 1024 1024" fill="currentColor">
@@ -634,13 +581,13 @@ export default function Exam() {
                   boxShadow: '0 1px 3px rgba(0,0,0,0.04)'
                 }}
               >
-                {/* 缩略图 - 错题本生成的试卷显示文档图标 */}
+                {/* 缩略图 - 固定试卷图标 */}
                 <div 
                   style={{
                     width: '80px',
                     height: '60px',
                     borderRadius: '10px',
-                    background: exam.source === 'generated' ? '#E8F4FD' : APPLE_COLORS.background,
+                    background: '#E8F4FD',
                     overflow: 'hidden',
                     flexShrink: 0,
                     display: 'flex',
@@ -648,17 +595,9 @@ export default function Exam() {
                     justifyContent: 'center'
                   }}
                 >
-                  {exam.source === 'generated' ? (
-                    <svg width="32" height="32" viewBox="0 0 1024 1024" fill={APPLE_COLORS.primary}>
-                      <path d="M854.6 288.6L639.4 73.4c-6-6-14.1-9.4-22.6-9.4H192c-17.7 0-32 14.3-32 32v832c0 17.7 14.3 32 32 32h640c17.7 0 32-14.3 32-32V311.3c0-8.5-3.4-16.7-9.4-22.7zM790.2 326H602V137.8L790.2 326zM816 872H208V152h346v192c0 17.7 14.3 32 32 32h192v496z"/>
-                    </svg>
-                  ) : (
-                    <img 
-                      src={exam.thumbnail} 
-                      alt="" 
-                      style={{ width: '100%', height: '100%', objectFit: 'cover' }}
-                    />
-                  )}
+                  <svg width="32" height="32" viewBox="0 0 1024 1024" fill={APPLE_COLORS.primary}>
+                    <path d="M854.6 288.6L639.4 73.4c-6-6-14.1-9.4-22.6-9.4H192c-17.7 0-32 14.3-32 32v832c0 17.7 14.3 32 32 32h640c17.7 0 32-14.3 32-32V311.3c0-8.5-3.4-16.7-9.4-22.7zM790.2 326H602V137.8L790.2 326zM816 872H208V152h346v192c0 17.7 14.3 32 32 32h192v496z"/>
+                  </svg>
                 </div>
 
                 {/* 内容 */}
@@ -679,7 +618,7 @@ export default function Exam() {
                       flex: 1,
                       marginRight: '8px'
                     }}>
-                      {exam.source === 'generated' ? exam.name : `${exam.exam_no} ${exam.name}`}
+                      {exam.name}
                     </div>
                   </div>
                   
@@ -695,7 +634,7 @@ export default function Exam() {
                   </div>
                   
                   <div style={{ fontSize: '13px', color: APPLE_COLORS.textSecondary, marginBottom: '4px' }}>
-                    题目数：{exam.source === 'generated' ? (exam.question_ids?.length || 0) : exam.question_count}题
+                    题目数：{exam.question_ids?.length || 0}题
                   </div>
 
                   {/* 批改时间（仅已批改显示） */}
