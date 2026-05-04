@@ -1742,6 +1742,63 @@ export default function App() {
                   <button className="flex-1 py-4 border-2 border-gray-50 px-4 rounded-2xl text-[14px] font-black text-gray-900 active:scale-95 transition-transform bg-white/50">PDF 导出</button>
                   <button 
                     onClick={() => {
+                      if (reprintQuestions.length > 0) {
+                        const printWindow = window.open('', '_blank')
+                        if (printWindow) {
+                          const questionHtml = reprintQuestions.map((q, i) => {
+                            const questionType = q.question_type || q.type || '选择题'
+                            const subject = q.subject || '数学'
+                            const content = q.content || '无内容'
+                            const isShortOptions = q.options && q.options.every(opt => opt.length <= 10)
+                            let displayContent = content
+                            if (questionType === 'fill') {
+                              displayContent = content.replace(/_____/g, '<span style="display:inline-block;min-width:80px;border-bottom:1px solid #333;margin:0 4px;">&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;</span>')
+                            }
+                            return `
+                              <div style="margin-bottom:20px;page-break-inside:avoid;">
+                                <div style="display:flex;align-items:baseline;gap:8px;margin-bottom:8px;">
+                                  <span style="font-weight:bold;">${i + 1}.</span>
+                                  <span style="font-size:9pt;color:#999;">(${questionType === 'choice' ? '选择题' : questionType === 'fill' ? '填空题' : questionType === 'answer' ? '解答题' : questionType})</span>
+                                </div>
+                                <div style="margin-bottom:8px;line-height:1.6;">${displayContent}</div>
+                                ${q.options && q.options.length > 0 ? `
+                                  <div style="margin-left:30px;margin-top:8px;${isShortOptions ? 'display:flex;flex-wrap:wrap;gap:32px;' : 'display:grid;grid-template-columns:1fr 1fr;gap:8px;'}">
+                                    ${q.options.map((opt, idx) => `<div style="font-size:11pt;white-space:nowrap;">${String.fromCharCode(65 + idx)}. ${opt}</div>`).join('')}
+                                  </div>
+                                ` : ''}
+                                ${questionType === 'answer' ? '<div style="margin-top:15px;padding:12px;border:1px solid #ddd;border-radius:4px;min-height:40px;">答：</div>' : ''}
+                              </div>
+                            `
+                          }).join('')
+                          
+                          const html = `<!DOCTYPE html><html><head><meta charset="UTF-8"><title>${reprintExam.name}</title><style>
+                            @page{size:A4;margin:20mm}
+                            body{font-family:'Microsoft YaHei','SimSun',sans-serif;line-height:1.8;font-size:12pt}
+                            .paper{width:210mm;min-height:297mm;margin:0 auto;padding:20mm;box-sizing:border-box;background:white}
+                            .header{text-align:center;margin-bottom:20px;padding-bottom:15px;border-bottom:2px solid #333;position:relative}
+                            .title{font-size:18pt;font-weight:bold;margin-bottom:10px}
+                            .subtitle{font-size:10pt;color:#666;display:flex;justify-content:center;gap:30px}
+                            .info-bar{display:flex;justify-content:flex-start;align-items:center;margin-bottom:20px;font-size:10pt;border-bottom:1px solid #ddd;padding-bottom:10px;gap:40px}
+                            .footer{margin-top:40px;text-align:center;font-size:9pt;color:#999;border-top:1px solid #ddd;padding-top:15px}
+                            .page-number{text-align:center;margin-top:20px;font-size:10pt;color:#666}
+                          </style></head><body><div class="paper">
+                            <div class="header">
+                              <div class="title">${currentStudent?.name || '学生'} - ${reprintExam.name}</div>
+                              <div class="subtitle"><span>总题数：${reprintQuestions.length}题</span><span>满分：100分</span><span>限时：60分钟</span></div>
+                            </div>
+                            <div class="info-bar"><span>姓名：______________</span><span>日期：____年____月____日</span></div>
+                            ${questionHtml}
+                            <div class="footer">敏学错题本 - 智能学习助手</div>
+                            <div class="page-number">第 1 页 / 共 1 页</div>
+                          </div>
+                          <script>setTimeout(function(){window.print();},300);</script>
+                          </body></html>`
+                          
+                          printWindow.document.write(html)
+                          printWindow.document.close()
+                          printWindow.focus()
+                        }
+                      }
                       setReprintExam(null)
                       setReprintQuestions([])
                     }}
