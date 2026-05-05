@@ -833,8 +833,24 @@ export default function Pending() {
         alignItems: 'center',
         zIndex: 100
       }}>
-        <div style={{ fontSize: '14px', color: COLORS.textSecondary }}>
-          已选择 <strong style={{ color: COLORS.primary }}>{selectedIds.length}</strong> 道
+        <div style={{ fontSize: '14px', color: COLORS.textSecondary, display: 'flex', alignItems: 'center', gap: '8px' }}>
+          <span>已选择 <strong style={{ color: COLORS.primary }}>{selectedIds.length}</strong> 道</span>
+          <Button 
+            size="mini"
+            fill="none" 
+            style={{ color: COLORS.primary, fontSize: '13px', padding: '0 4px' }}
+            onClick={() => {
+              const allFilteredIds = filteredQuestions.map(q => q.id)
+              const allSelected = allFilteredIds.length > 0 && allFilteredIds.every(id => selectedIds.includes(id))
+              if (allSelected) {
+                clearSelection()
+              } else {
+                selectAll()
+              }
+            }}
+          >
+            {filteredQuestions.length > 0 && filteredQuestions.every(q => selectedIds.includes(q.id)) ? '取消全选' : '全选'}
+          </Button>
         </div>
         <div style={{ display: 'flex', gap: '8px' }}>
           <Button 

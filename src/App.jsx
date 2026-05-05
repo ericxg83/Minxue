@@ -436,10 +436,12 @@ export default function App() {
           console.error(`获取任务 ${task.id} 的题目失败:`, taskError)
         }
       }
-      // 更新 pendingQuestions 状态
-      if (allQuestions.length > 0) {
-        setPendingQuestions(allQuestions)
-      }
+
+      const existingWrong = await getWrongQuestionsByStudent(currentStudent.id, true)
+      const wrongQuestionIds = new Set((existingWrong || []).map(w => w.question_id))
+      const pendingOnly = allQuestions.filter(q => !wrongQuestionIds.has(q.id))
+
+      setPendingQuestions(pendingOnly)
     } catch (error) {
       console.error('加载任务失败:', error)
     }
@@ -459,13 +461,8 @@ export default function App() {
         }
         return
       }
-      const data = await getWrongQuestionsByStudent(currentStudent.id, true)
-      const safeData = Array.isArray(data) ? data : []
-      const existingIds = new Set(wrongQuestions.map(wq => wq.id))
-      const newData = safeData.filter(d => !existingIds.has(d.id))
-      if (newData.length > 0) {
-        setWrongQuestions(prev => [...prev, ...newData])
-      }
+      const data = await getWrongQuestionsByStudent(currentStudent.id, false)
+      setWrongQuestions(Array.isArray(data) ? data : [])
     } catch (error) {
       console.error('加载错题失败:', error)
     }
@@ -497,14 +494,72 @@ export default function App() {
     const files = Array.from(e.target.files)
     if (files.length === 0) return
     e.target.value = ''
+
+    const duplicateFiles = []
+    const newFiles = []
+
+    for (const file of files) {
+      const localDuplicate = tasks.find(t =>
+        t.student_id === currentStudent.id &&
+        t.original_name === file.name
+      )
+      if (localDuplicate) {
+        duplicateFiles.push(file)
+        continue
+      }
+
+      try {
+        const allTasks = await getTasksByStudent(currentStudent.id)
+        const dbDuplicate = allTasks?.find(t => t.original_name === file.name)
+        if (dbDuplicate) {
+          duplicateFiles.push(file)
+          continue
+        }
+      } catch (checkError) {
+        console.warn('检查重复试卷失败:', checkError)
+      }
+
+      newFiles.push(file)
+    }
+
+    let filesToUpload = [...newFiles]
+
+    if (duplicateFiles.length > 0) {
+      const duplicateNames = duplicateFiles.map(f => f.name).join('、')
+      await new Promise((resolve) => {
+        DialogAPI.confirm({
+          title: '检测到重复试卷',
+          content: `以下试卷已上传过：${duplicateNames}。是否跳过重复试卷？`,
+          confirmText: '跳过重复，上传新文件',
+          cancelText: '全部上传',
+          onConfirm: () => {
+            if (newFiles.length === 0) {
+              showToast({ icon: 'info', content: '所有试卷均已上传过，已跳过' })
+            }
+            resolve()
+          },
+          onCancel: () => {
+            filesToUpload = [...newFiles, ...duplicateFiles]
+            resolve()
+          }
+        })
+      })
+    }
+
+    if (filesToUpload.length === 0) return
+
     setUploading(true)
-    showToast({ icon: 'loading', content: `正在上传 ${files.length} 个文件...`, duration: 0 })
+    showToast({ icon: 'loading', content: `正在上传 ${filesToUpload.length} 个文件...`, duration: 0 })
     try {
-      for (const file of files) {
+      for (const file of filesToUpload) {
         await uploadFile(file)
       }
       clearToast()
-      showToast({ icon: 'success', content: `成功上传 ${files.length} 个文件`, duration: 2000 })
+      const skipped = files.length - filesToUpload.length
+      const msg = skipped > 0
+        ? `成功上传 ${filesToUpload.length} 个文件，跳过 ${skipped} 个重复`
+        : `成功上传 ${filesToUpload.length} 个文件`
+      showToast({ icon: 'success', content: msg, duration: 2000 })
     } catch (error) {
       console.error('上传失败:', error)
       clearToast()
@@ -753,6 +808,9 @@ export default function App() {
             setPendingQuestions(pendingQuestions.filter(q => !selectedConfirmIds.includes(q.id)))
           } else {
             await addWrongQuestions(currentStudent.id, selectedConfirmIds)
+            localStorage.removeItem('wrong_questions_cache' + currentStudent.id)
+            localStorage.removeItem('wrong_questions_cache_ts' + currentStudent.id)
+            setPendingQuestions(pendingQuestions.filter(q => !selectedConfirmIds.includes(q.id)))
           }
           showToast({ icon: 'success', content: `成功添加 ${selectedConfirmIds.length} 道题到错题本` })
           setSelectedConfirmIds([])
@@ -978,7 +1036,7 @@ export default function App() {
                   className="w-full"
                 >
                   {/* Segmented Filters */}
-                  <section className="px-5 pt-4 mb-5 overflow-x-auto no-scrollbar">
+                  <section className="px-5 pt-4 mb-3 overflow-x-auto no-scrollbar">
                     <div className="flex gap-2 min-w-max">
                       {[
                         { id: 'all', label: '全部待确认', count: pendingQuestions.filter(q => q.status === 'wrong' || q.status === 'correct' || q.isSuspicious).length },
@@ -1004,6 +1062,40 @@ export default function App() {
                       ))}
                     </div>
                   </section>
+
+                  {/* Select All Bar */}
+                  {filteredQuestions.length > 0 && (
+                    <section className="px-5 mb-4">
+                      <button
+                        onClick={() => {
+                          const allFilteredIds = filteredQuestions.map(q => q.id)
+                          const allSelected = allFilteredIds.every(id => selectedConfirmIds.includes(id))
+                          if (allSelected) {
+                            setSelectedConfirmIds([])
+                          } else {
+                            setSelectedConfirmIds(allFilteredIds)
+                          }
+                        }}
+                        className="flex items-center gap-2 text-[12px] font-bold text-gray-400 hover:text-blue-600 transition-colors"
+                      >
+                        {(() => {
+                          const allFilteredIds = filteredQuestions.map(q => q.id)
+                          const allSelected = allFilteredIds.length > 0 && allFilteredIds.every(id => selectedConfirmIds.includes(id))
+                          return (
+                            <>
+                              <div className={`w-4 h-4 rounded-md border-[1.5px] flex items-center justify-center transition-all ${
+                                allSelected ? 'bg-blue-600 border-blue-600' : 'border-gray-200'
+                              }`}>
+                                {allSelected && <CheckCircle2 size={10} className="text-white" strokeWidth={4} />}
+                              </div>
+                              <span>{filteredQuestions.every(q => selectedConfirmIds.includes(q.id)) ? '取消全选' : '全选'}</span>
+                              <span className="text-gray-300">({filteredQuestions.length}题)</span>
+                            </>
+                          )
+                        })()}
+                      </button>
+                    </section>
+                  )}
 
                   {/* Question List */}
                   <section className="px-5 space-y-4 pb-4">

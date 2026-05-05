@@ -234,30 +234,86 @@ export default function Processing() {
     }
   }
 
-  // 处理文件选择
-  const handleFileSelect = (e) => {
+  const handleFileSelect = async (e) => {
     const files = Array.from(e.target.files)
     if (files.length === 0) return
 
     e.target.value = ''
 
+    const duplicateFiles = []
+    const newFiles = []
+
+    for (const file of files) {
+      const localDuplicate = tasks.find(t =>
+        t.student_id === currentStudent.id &&
+        t.original_name === file.name
+      )
+      if (localDuplicate) {
+        duplicateFiles.push(file)
+        continue
+      }
+
+      try {
+        const allTasks = await getTasksByStudent(currentStudent.id)
+        const dbDuplicate = allTasks?.find(t => t.original_name === file.name)
+        if (dbDuplicate) {
+          duplicateFiles.push(file)
+          continue
+        }
+      } catch (checkError) {
+        console.warn('检查重复试卷失败:', checkError)
+      }
+
+      newFiles.push(file)
+    }
+
+    let filesToUpload = [...newFiles]
+
+    if (duplicateFiles.length > 0) {
+      const duplicateNames = duplicateFiles.map(f => f.name).join('、')
+      await new Promise((resolve) => {
+        Dialog.confirm({
+          title: '检测到重复试卷',
+          content: `以下试卷已上传过：${duplicateNames}。是否跳过重复试卷？`,
+          confirmText: '跳过重复，上传新文件',
+          cancelText: '全部上传',
+          onConfirm: () => {
+            if (newFiles.length === 0) {
+              Toast.show({ icon: 'info', content: '所有试卷均已上传过，已跳过' })
+            }
+            resolve()
+          },
+          onCancel: () => {
+            filesToUpload = [...newFiles, ...duplicateFiles]
+            resolve()
+          }
+        })
+      })
+    }
+
+    if (filesToUpload.length === 0) return
+
     setUploading(true)
     Toast.show({
       icon: 'loading',
-      content: `正在上传 ${files.length} 个文件...`,
+      content: `正在上传 ${filesToUpload.length} 个文件...`,
       duration: 0
     })
 
     setTimeout(async () => {
       try {
-        for (const file of files) {
-          await uploadFile(file)
+        for (const file of filesToUpload) {
+          await doUploadFile(file)
         }
         
         Toast.clear()
+        const skipped = files.length - filesToUpload.length
+        const msg = skipped > 0
+          ? `成功上传 ${filesToUpload.length} 个文件，跳过 ${skipped} 个重复，正在后台识别...`
+          : `成功上传 ${filesToUpload.length} 个文件，正在后台识别...`
         Toast.show({
           icon: 'success',
-          content: `成功上传 ${files.length} 个文件，正在后台识别...`,
+          content: msg,
           duration: 2000
         })
       } catch (error) {
@@ -273,55 +329,8 @@ export default function Processing() {
     }, 100)
   }
 
-  // 上传单个文件 - 只创建任务，不等待AI识别
   const uploadFile = async (file) => {
-    // 检查是否重复上传（检查本地状态和数据库）
-    const localDuplicate = tasks.find(t => 
-      t.student_id === currentStudent.id && 
-      t.original_name === file.name
-    )
-    
-    if (localDuplicate) {
-      console.log('检测到重复试卷(本地):', file.name)
-      return handleDuplicateFile(file)
-    }
-    
-    // 检查数据库中是否已有同名试卷
-    try {
-      const allTasks = await getTasksByStudent(currentStudent.id)
-      const dbDuplicate = allTasks?.find(t => t.original_name === file.name)
-      if (dbDuplicate) {
-        console.log('检测到重复试卷(数据库):', file.name)
-        return handleDuplicateFile(file)
-      }
-    } catch (checkError) {
-      console.warn('检查重复试卷失败:', checkError)
-    }
-    
     await doUploadFile(file)
-  }
-
-  // 处理重复文件上传
-  const handleDuplicateFile = (file) => {
-    return new Promise((resolve) => {
-      Dialog.confirm({
-        title: '重复试卷',
-        content: `试卷「${file.name}」已上传过，是否继续上传？`,
-        confirmText: '继续上传',
-        cancelText: '跳过',
-        onConfirm: async () => {
-          await doUploadFile(file)
-          resolve()
-        },
-        onCancel: () => {
-          Toast.show({
-            icon: 'info',
-            content: '已跳过重复试卷'
-          })
-          resolve()
-        }
-      })
-    })
   }
 
   // 实际执行上传
