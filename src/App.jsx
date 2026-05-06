@@ -26,7 +26,7 @@ import {
 import { motion, AnimatePresence } from 'motion/react'
 import { QRCodeSVG } from 'qrcode.react'
 import { useUIStore, useStudentStore, useTaskStore, useWrongQuestionStore, usePendingQuestionStore, useExamStore } from './store'
-import { getStudents, getTasksByStudent, getQuestionsByTask, addWrongQuestions, getWrongQuestionsByStudent, getExamsByStudent, createTask, updateTaskStatus, uploadImage, createQuestions, updateQuestion, updateQuestionTags } from './services/supabaseService'
+import { getStudents, getTasksByStudent, getQuestionsByTask, addWrongQuestions, getWrongQuestionsByStudent, getExamsByStudent, createTask, updateTaskStatus, uploadImage, createQuestions, updateQuestion, updateQuestionTags, checkSupabaseHealth } from './services/supabaseService'
 import { recognizeQuestions, compressImage, saveRecognitionResult } from './services/aiService'
 import { mockQuestions, mockTasks, mockWrongQuestions, mockExams, mockStudents } from './data/mockData'
 import StudentSwitcher from './components/StudentSwitcher'
@@ -319,6 +319,13 @@ export default function App() {
   // Initialize students
   useEffect(() => {
     const init = async () => {
+      const health = await checkSupabaseHealth()
+      if (!health.connected) {
+        console.error('Supabase 连接失败:', health.error)
+      } else if (!health.tasksReadable) {
+        console.error('Supabase 任务表不可读 (可能是 RLS 策略问题):', health.error)
+      }
+
       try {
         const loadedStudents = await getStudents(true)
         if (loadedStudents && loadedStudents.length > 0) {
@@ -369,8 +376,10 @@ export default function App() {
       if (USE_MOCK_DATA) return
       const { getGeneratedExamsByStudent } = await import('./services/supabaseService')
       const examList = await getGeneratedExamsByStudent(currentStudent.id, useCache)
-      const otherStudentExams = generatedExams.filter(e => e.student_id !== currentStudent.id)
-      setGeneratedExams([...otherStudentExams, ...examList])
+      if (examList && examList.length > 0) {
+        const otherStudentExams = generatedExams.filter(e => e.student_id !== currentStudent.id)
+        setGeneratedExams([...otherStudentExams, ...examList])
+      }
     } catch (error) {
       console.error('加载试卷失败:', error)
     }
@@ -420,7 +429,17 @@ export default function App() {
       const taskList = await getTasksByStudent(currentStudent.id, false)
       const safeTaskList = Array.isArray(taskList) ? taskList : []
       const otherStudentTasks = tasks.filter(t => t.student_id !== currentStudent.id)
-      setTasks([...otherStudentTasks, ...safeTaskList])
+      if (safeTaskList.length > 0) {
+        setTasks([...otherStudentTasks, ...safeTaskList])
+      } else {
+        const persistedCurrentStudentTasks = tasks.filter(t => t.student_id === currentStudent.id)
+        if (persistedCurrentStudentTasks.length > 0) {
+          console.warn('Supabase 返回空数据但本地有持久化任务，保留本地数据（可能是 RLS 策略问题）')
+          setTasks([...otherStudentTasks, ...persistedCurrentStudentTasks])
+        } else {
+          setTasks([...otherStudentTasks])
+        }
+      }
     } catch (error) {
       console.error('加载任务失败:', error)
       try {
@@ -444,6 +463,10 @@ export default function App() {
       }
       const taskList = await getTasksByStudent(currentStudent.id, false)
       const safeTaskList = Array.isArray(taskList) ? taskList : []
+      if (safeTaskList.length === 0) {
+        console.warn('Supabase 返回空任务列表，跳过待确认数据加载')
+        return
+      }
       const doneTasks = safeTaskList.filter(t => t.status === 'done')
       const allQuestions = []
       for (const task of doneTasks) {
@@ -481,7 +504,11 @@ export default function App() {
         return
       }
       const data = await getWrongQuestionsByStudent(currentStudent.id, false)
-      setWrongQuestions(Array.isArray(data) ? data : [])
+      if (data && data.length > 0) {
+        setWrongQuestions(data)
+      } else if (wrongQuestions.length > 0) {
+        console.warn('Supabase 返回空错题数据，保留本地持久化数据')
+      }
     } catch (error) {
       console.error('加载错题失败:', error)
     }
@@ -501,8 +528,10 @@ export default function App() {
         return
       }
       const examList = await getExamsByStudent(currentStudent.id, true)
-      const otherStudentExams = exams.filter(e => e.student_id !== currentStudent.id)
-      setExams([...otherStudentExams, ...examList])
+      if (examList && examList.length > 0) {
+        const otherStudentExams = exams.filter(e => e.student_id !== currentStudent.id)
+        setExams([...otherStudentExams, ...examList])
+      }
     } catch (error) {
       console.error('加载试卷失败:', error)
     }

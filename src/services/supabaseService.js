@@ -1,5 +1,42 @@
 import { supabase, TABLES } from '../config/supabase'
 
+let supabaseHealthStatus = null
+
+export const checkSupabaseHealth = async () => {
+  if (supabaseHealthStatus !== null) return supabaseHealthStatus
+  
+  try {
+    const { data, error } = await supabase
+      .from(TABLES.STUDENTS)
+      .select('id', { count: 'exact', head: true })
+    
+    if (error) {
+      console.error('Supabase 健康检查失败:', error)
+      supabaseHealthStatus = { connected: false, error: error.message }
+      return supabaseHealthStatus
+    }
+    
+    const { count, error: countError } = await supabase
+      .from(TABLES.TASKS)
+      .select('*', { count: 'exact', head: true })
+    
+    if (countError) {
+      console.warn('Supabase 任务表读取可能受限 (RLS):', countError.message)
+      supabaseHealthStatus = { connected: true, tasksReadable: false, error: countError.message }
+    } else {
+      supabaseHealthStatus = { connected: true, tasksReadable: true, taskCount: count }
+    }
+    
+    return supabaseHealthStatus
+  } catch (err) {
+    console.error('Supabase 连接异常:', err)
+    supabaseHealthStatus = { connected: false, error: err.message }
+    return supabaseHealthStatus
+  }
+}
+
+export const getSupabaseHealth = () => supabaseHealthStatus
+
 // ==================== 学生相关操作 ====================
 
 // 获取所有学生（带本地缓存优化）
@@ -216,8 +253,7 @@ export const getTasksByStudent = async (studentId, useCache = true) => {
     throw error
   }
   
-  // 更新缓存
-  if (data) {
+  if (data && data.length > 0) {
     try {
       const cacheKey = TASKS_CACHE_PREFIX + studentId
       const timestampKey = TASKS_CACHE_TIMESTAMP_PREFIX + studentId
@@ -226,6 +262,8 @@ export const getTasksByStudent = async (studentId, useCache = true) => {
     } catch (e) {
       console.warn('更新任务缓存失败:', e)
     }
+  } else if (data && data.length === 0) {
+    console.warn('Supabase 返回空任务列表，可能是 RLS 策略阻止了读取')
   }
   
   return data
