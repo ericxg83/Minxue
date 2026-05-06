@@ -1,22 +1,21 @@
 import { createClient } from '@supabase/supabase-js'
 
-// 从环境变量读取 Supabase 配置
 const supabaseUrl = import.meta.env.VITE_SUPABASE_URL
 const supabaseKey = import.meta.env.VITE_SUPABASE_KEY
 
-// 在开发环境下使用代理路径
 const isDevelopment = import.meta.env.VITE_APP_ENV === 'development'
 const effectiveUrl = isDevelopment && typeof window !== 'undefined' && window.location.hostname === 'localhost'
   ? window.location.origin + '/supabase'
   : supabaseUrl
 
-// 环境变量检查
 if (!supabaseUrl || !supabaseKey) {
   console.error('❌ 错误：缺少 Supabase 环境变量配置')
-  console.error('请检查 .env.development 或 .env.production 文件')
+  console.error('VITE_SUPABASE_URL:', supabaseUrl || '(未设置)')
+  console.error('VITE_SUPABASE_KEY:', supabaseKey ? '(已设置)' : '(未设置)')
+  console.error('请检查 .env.production 文件是否存在于项目根目录，并在构建时可用')
 }
 
-export const supabase = createClient(effectiveUrl, supabaseKey, {
+export const supabase = createClient(effectiveUrl || 'https://placeholder.supabase.co', supabaseKey || 'placeholder', {
   global: {
     headers: {
       'X-Client-Info': 'minxue-app-v3'

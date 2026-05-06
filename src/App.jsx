@@ -323,15 +323,19 @@ export default function App() {
         const loadedStudents = await getStudents(true)
         if (loadedStudents && loadedStudents.length > 0) {
           setStudents(loadedStudents)
-          setCurrentStudent(loadedStudents[0])
+          if (!currentStudent || !loadedStudents.find(s => s.id === currentStudent.id)) {
+            setCurrentStudent(loadedStudents[0])
+          }
         } else {
           setStudents([])
           setCurrentStudent(null)
         }
       } catch (error) {
         console.error('加载学生数据失败:', error)
-        setStudents([])
-        setCurrentStudent(null)
+        if (!currentStudent) {
+          setStudents([])
+          setCurrentStudent(null)
+        }
       }
     }
     init()
@@ -339,10 +343,10 @@ export default function App() {
 
   // Load tasks when student changes
   useEffect(() => {
-    if (currentStudent && currentPage === 'processing') {
+    if (currentStudent) {
       loadTasks()
     }
-  }, [currentStudent?.id, currentPage])
+  }, [currentStudent?.id])
 
   // Load pending questions
   useEffect(() => {
@@ -413,15 +417,21 @@ export default function App() {
         }
         return
       }
-      const taskList = await getTasksByStudent(currentStudent.id, true)
+      const taskList = await getTasksByStudent(currentStudent.id, false)
       const safeTaskList = Array.isArray(taskList) ? taskList : []
-      const existingIds = new Set(tasks.map(t => t.id))
-      const newTasks = safeTaskList.filter(t => !existingIds.has(t.id))
-      if (newTasks.length > 0) {
-        setTasks([...tasks, ...newTasks])
-      }
+      const otherStudentTasks = tasks.filter(t => t.student_id !== currentStudent.id)
+      setTasks([...otherStudentTasks, ...safeTaskList])
     } catch (error) {
       console.error('加载任务失败:', error)
+      try {
+        const cachedTaskList = await getTasksByStudent(currentStudent.id, true)
+        if (cachedTaskList && cachedTaskList.length > 0) {
+          const otherStudentTasks = tasks.filter(t => t.student_id !== currentStudent.id)
+          setTasks([...otherStudentTasks, ...cachedTaskList])
+        }
+      } catch (cacheError) {
+        console.error('缓存加载也失败:', cacheError)
+      }
     }
   }
 
@@ -432,13 +442,13 @@ export default function App() {
       if (USE_MOCK_DATA) {
         return
       }
-      const taskList = await getTasksByStudent(currentStudent.id, true)
+      const taskList = await getTasksByStudent(currentStudent.id, false)
       const safeTaskList = Array.isArray(taskList) ? taskList : []
       const doneTasks = safeTaskList.filter(t => t.status === 'done')
       const allQuestions = []
       for (const task of doneTasks) {
         try {
-          const taskQuestions = await getQuestionsByTask(task.id, true)
+          const taskQuestions = await getQuestionsByTask(task.id, false)
           const safeQuestions = Array.isArray(taskQuestions) ? taskQuestions : []
           allQuestions.push(...safeQuestions.map(q => ({ ...q, status: q.is_correct ? 'correct' : 'wrong' })))
         } catch (taskError) {
@@ -446,13 +456,13 @@ export default function App() {
         }
       }
 
-      const existingWrong = await getWrongQuestionsByStudent(currentStudent.id, true)
+      const existingWrong = await getWrongQuestionsByStudent(currentStudent.id, false)
       const wrongQuestionIds = new Set((existingWrong || []).map(w => w.question_id))
       const pendingOnly = allQuestions.filter(q => !wrongQuestionIds.has(q.id))
 
       setPendingQuestions(pendingOnly)
     } catch (error) {
-      console.error('加载任务失败:', error)
+      console.error('加载待确认数据失败:', error)
     }
   }
 

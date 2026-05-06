@@ -337,17 +337,14 @@ export const createTask = async (taskData) => {
 
 // 更新任务状态
 export const updateTaskStatus = async (taskId, status, result = null) => {
-  const allowedFields = ['status', 'result']
-  const cleanUpdates = {}
-  
-  if (allowedFields.includes('status')) {
-    cleanUpdates.status = status
+  const cleanUpdates = {
+    status,
+    updated_at: new Date().toISOString()
   }
-  if (result !== null && allowedFields.includes('result')) {
+  
+  if (result !== null) {
     cleanUpdates.result = result
   }
-  
-  cleanUpdates.updated_at = new Date().toISOString()
   
   const { data, error } = await supabase
     .from(TABLES.TASKS)

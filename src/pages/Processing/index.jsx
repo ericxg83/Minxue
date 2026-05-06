@@ -137,38 +137,27 @@ export default function Processing() {
         return
       }
 
-      // 使用缓存（秒开）
-      console.log('从缓存/数据库加载任务数据...')
+      console.log('从数据库加载任务数据...')
       try {
-        // 先尝试使用缓存数据
-        const tasksData = await getTasksByStudent(currentStudent.id, true)
+        const tasksData = await getTasksByStudent(currentStudent.id, false)
         console.log('返回的任务数据:', tasksData)
         
         if (tasksData && tasksData.length > 0) {
-          const existingTaskIds = new Set(tasks.map(t => t.id))
-          const newTasks = tasksData.filter(t => !existingTaskIds.has(t.id))
-          
-          if (newTasks.length > 0) {
-            setTasks([...tasks, ...newTasks])
-          }
+          const otherStudentTasks = tasks.filter(t => t.student_id !== currentStudent.id)
+          setTasks([...otherStudentTasks, ...tasksData])
         }
       } catch (error) {
         console.error('加载任务失败:', error)
-      }
-      
-      // 后台刷新最新数据
-      const backgroundRefresh = async () => {
         try {
-          const freshData = await getTasksByStudent(currentStudent.id, false)
-          if (freshData && freshData.length > 0) {
-            setTasks(freshData)
+          const cachedData = await getTasksByStudent(currentStudent.id, true)
+          if (cachedData && cachedData.length > 0) {
+            const otherStudentTasks = tasks.filter(t => t.student_id !== currentStudent.id)
+            setTasks([...otherStudentTasks, ...cachedData])
           }
-        } catch (error) {
-          console.debug('后台刷新任务失败:', error)
+        } catch (cacheError) {
+          console.error('缓存加载也失败:', cacheError)
         }
       }
-      
-      backgroundRefresh()
       
       setInitializedStudents(prev => new Set([...prev, currentStudent.id]))
     } catch (error) {
