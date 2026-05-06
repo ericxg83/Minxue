@@ -190,7 +190,7 @@ function ActionSheet({ visible, actions, onClose }) {
               {actions.map((action, index) => (
                 <button
                   key={action.key || index}
-                  onClick={() => { action.onClick && action.onClick(action); onClose() }}
+                  onClick={() => { action.onClick && action.onClick(action) }}
                   className="w-full py-4 px-4 text-center active:bg-gray-50 transition-colors border-b border-gray-50 last:border-0"
                 >
                   <div className="text-[16px] font-medium text-slate-900">{action.text}</div>
@@ -514,6 +514,11 @@ export default function App() {
     if (files.length === 0) return
     e.target.value = ''
 
+    if (!currentStudent) {
+      showToast({ icon: 'fail', content: '请先选择学生', duration: 2000 })
+      return
+    }
+
     const duplicateFiles = []
     const newFiles = []
 
@@ -589,7 +594,14 @@ export default function App() {
   }
 
   const uploadFile = async (file) => {
-    const imageBase64 = await fileToBase64(file)
+    let imageBase64
+    try {
+      imageBase64 = await fileToBase64(file)
+    } catch (err) {
+      console.error('读取文件失败:', err)
+      showToast({ icon: 'fail', content: '读取文件失败，请重试' })
+      throw err
+    }
 
     let imageUrl = imageBase64
 
@@ -626,9 +638,15 @@ export default function App() {
       console.error('创建任务失败:', error)
       console.error('错误详情:', error?.message, error?.code, error?.details)
       
+      const errorMsg = error?.message?.includes('Failed to fetch') || error?.message?.includes('NetworkError')
+        ? '网络连接失败，请检查网络后重试'
+        : error?.message?.includes('JWT') || error?.code === 'PGRST301'
+        ? '数据库连接失败，请检查配置'
+        : '上传失败，请重试'
+      
       showToast({
         icon: 'fail',
-        content: '上传失败，请重试'
+        content: errorMsg
       })
       throw error
     }
@@ -980,7 +998,13 @@ export default function App() {
                   <section className="p-5">
                     <motion.button 
                       whileTap={{ scale: 0.98 }}
-                      onClick={() => setShowActionSheet(true)}
+                      onClick={() => {
+                        if (!currentStudent) {
+                          showToast({ icon: 'info', content: '请先选择学生', duration: 2000 })
+                          return
+                        }
+                        setShowActionSheet(true)
+                      }}
                       className="w-full relative overflow-hidden rounded-[2.5rem] bg-gradient-to-br from-blue-600 to-indigo-700 p-8 text-white shadow-xl shadow-blue-200 disabled:opacity-60"
                       disabled={uploading}
                     >
@@ -1572,16 +1596,22 @@ export default function App() {
             onClose={() => setShowActionSheet(false)}
             actions={[
               { key: 'camera', text: '拍照上传', description: '拍摄试卷或作业', onClick: () => {
-                if (fileInputRef.current) {
-                  fileInputRef.current.setAttribute('capture', 'environment')
-                  fileInputRef.current.click()
-                }
+                setShowActionSheet(false)
+                setTimeout(() => {
+                  if (fileInputRef.current) {
+                    fileInputRef.current.setAttribute('capture', 'environment')
+                    fileInputRef.current.click()
+                  }
+                }, 300)
               }},
               { key: 'album', text: '从相册选择', description: '选择已有照片', onClick: () => {
-                if (fileInputRef.current) {
-                  fileInputRef.current.removeAttribute('capture')
-                  fileInputRef.current.click()
-                }
+                setShowActionSheet(false)
+                setTimeout(() => {
+                  if (fileInputRef.current) {
+                    fileInputRef.current.removeAttribute('capture')
+                    fileInputRef.current.click()
+                  }
+                }, 300)
               }}
             ]}
           />
