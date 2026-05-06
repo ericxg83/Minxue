@@ -1,13 +1,15 @@
 import { useState, useEffect } from 'react'
 import { Button, Toast, Input, TextArea, Dialog, Mask } from 'antd-mobile'
 import { useStudentStore, usePendingQuestionStore, useUIStore, useWrongQuestionStore } from '../../store'
+import { updateQuestion, updateQuestionTags } from '../../services/supabaseService'
 import { mockQuestions } from '../../data/mockData'
 
 const USE_MOCK_DATA = false
 
 const TABS = [
   { key: 'stem', label: '题干' },
-  { key: 'answer', label: '答案' }
+  { key: 'answer', label: '答案' },
+  { key: 'tags', label: '标签' }
 ]
 
 export default function QuestionEdit({ questionId, onClose, onSave }) {
@@ -20,6 +22,10 @@ export default function QuestionEdit({ questionId, onClose, onSave }) {
   const [question, setQuestion] = useState(null)
   const [isFromWrongBook, setIsFromWrongBook] = useState(false)
   const [displayImageUrl, setDisplayImageUrl] = useState('')
+  const [aiTags, setAiTags] = useState([])
+  const [manualTags, setManualTags] = useState([])
+  const [tagsSource, setTagsSource] = useState('ai')
+  const [newTagInput, setNewTagInput] = useState('')
   const [formData, setFormData] = useState({
     content: '',
     options: [],
@@ -66,6 +72,9 @@ export default function QuestionEdit({ questionId, onClose, onSave }) {
         setIsFromWrongBook(isWrongBook)
         setQuestion(found)
         setDisplayImageUrl('')
+        setAiTags(found.ai_tags || [])
+        setManualTags(found.manual_tags || [])
+        setTagsSource(found.tags_source || 'ai')
         setFormData({
           content: found.content || '',
           options: cleanOptionPrefix(found.options || []),
@@ -99,6 +108,32 @@ export default function QuestionEdit({ questionId, onClose, onSave }) {
     reader.readAsDataURL(file)
   }
 
+  const getEffectiveTags = () => {
+    return tagsSource === 'manual' ? manualTags : aiTags
+  }
+
+  const handleAddTag = () => {
+    const trimmed = newTagInput.trim()
+    if (!trimmed) return
+    if (!manualTags.some(t => t.toLowerCase() === trimmed.toLowerCase())) {
+      setManualTags([...manualTags, trimmed])
+      setTagsSource('manual')
+    }
+    setNewTagInput('')
+  }
+
+  const handleRemoveTag = (tagToRemove) => {
+    setManualTags(manualTags.filter(t => t !== tagToRemove))
+    setTagsSource('manual')
+  }
+
+  const handleTagInputKeyDown = (e) => {
+    if (e.key === 'Enter') {
+      e.preventDefault()
+      handleAddTag()
+    }
+  }
+
   const handleSave = async () => {
     if (!formData.content.trim()) {
       Toast.show('请输入题目内容')
@@ -107,14 +142,19 @@ export default function QuestionEdit({ questionId, onClose, onSave }) {
 
     setLoading(true)
     try {
+      const updatedData = {
+        ...formData,
+        ai_tags: aiTags,
+        manual_tags: manualTags,
+        tags_source: tagsSource,
+        updated_at: new Date().toISOString()
+      }
+
       if (USE_MOCK_DATA) {
         const isPendingQuestion = pendingQuestions.some(q => q.id === questionId)
         
         if (isPendingQuestion) {
-          updatePendingQuestion(questionId, {
-            ...formData,
-            updated_at: new Date().toISOString()
-          })
+          updatePendingQuestion(questionId, updatedData)
         } else if (isFromWrongBook) {
           // 错题本的更新通过 onSave 回调处理
         } else {
@@ -122,15 +162,28 @@ export default function QuestionEdit({ questionId, onClose, onSave }) {
           if (index !== -1) {
             mockQuestions[index] = {
               ...mockQuestions[index],
-              ...formData,
-              updated_at: new Date().toISOString()
+              ...updatedData
             }
           }
         }
       }
+
+      try {
+        await updateQuestion(questionId, updatedData)
+      } catch (dbError) {
+        console.error('更新数据库失败:', dbError)
+      }
+
+      if (tagsSource === 'manual' && manualTags.length > 0) {
+        try {
+          await updateQuestionTags(questionId, manualTags)
+        } catch (tagError) {
+          console.error('更新标签失败:', tagError)
+        }
+      }
       
       Toast.show({ icon: 'success', content: '保存成功' })
-      onSave && onSave({ ...question, ...formData })
+      onSave && onSave({ ...question, ...updatedData })
       onClose && onClose()
     } catch (error) {
       Toast.show({ icon: 'fail', content: '保存失败' })
@@ -161,6 +214,8 @@ export default function QuestionEdit({ questionId, onClose, onSave }) {
       }
     })
   }
+
+  const effectiveTags = getEffectiveTags()
 
   if (!question) {
     return (
@@ -203,7 +258,6 @@ export default function QuestionEdit({ questionId, onClose, onSave }) {
         flexDirection: 'column',
         overflow: 'hidden'
       }}>
-        {/* 顶部标题栏 */}
         <div style={{
           background: '#fff',
           padding: '16px',
@@ -216,7 +270,6 @@ export default function QuestionEdit({ questionId, onClose, onSave }) {
           编辑题目
         </div>
 
-        {/* Tab 切换 */}
         <div style={{
           background: '#fff',
           display: 'flex',
@@ -254,12 +307,9 @@ export default function QuestionEdit({ questionId, onClose, onSave }) {
           ))}
         </div>
 
-        {/* 内容区域 */}
         <div style={{ flex: 1, overflow: 'auto', padding: '16px' }}>
-          {/* 题干 Tab */}
           {activeTab === 'stem' && (
             <>
-              {/* 题目内容区域 */}
               <div style={{
                 background: '#fff',
                 borderRadius: '12px',
@@ -325,7 +375,6 @@ export default function QuestionEdit({ questionId, onClose, onSave }) {
                 )}
               </div>
 
-              {/* 选项区域 */}
               {formData.question_type === 'choice' && (
                 <div style={{
                   background: '#fff',
@@ -409,17 +458,14 @@ export default function QuestionEdit({ questionId, onClose, onSave }) {
             </>
           )}
 
-          {/* 答案 Tab */}
           {activeTab === 'answer' && (
             <>
-              {/* 学生答案 & 正确答案 */}
               <div style={{
                 background: '#fff',
                 borderRadius: '12px',
                 padding: '16px',
                 marginBottom: '12px'
               }}>
-                {/* 学生答案 */}
                 <div style={{
                   display: 'flex',
                   alignItems: 'flex-start',
@@ -450,7 +496,6 @@ export default function QuestionEdit({ questionId, onClose, onSave }) {
                   </div>
                 </div>
 
-                {/* 正确答案 */}
                 <div style={{
                   display: 'flex',
                   alignItems: 'flex-start',
@@ -481,7 +526,6 @@ export default function QuestionEdit({ questionId, onClose, onSave }) {
                 </div>
               </div>
 
-              {/* 题目解析 */}
               <div style={{
                 background: '#fff',
                 borderRadius: '12px',
@@ -503,9 +547,126 @@ export default function QuestionEdit({ questionId, onClose, onSave }) {
               </div>
             </>
           )}
+
+          {activeTab === 'tags' && (
+            <div style={{
+              background: '#fff',
+              borderRadius: '12px',
+              padding: '16px'
+            }}>
+              <div style={{
+                display: 'flex',
+                justifyContent: 'space-between',
+                alignItems: 'center',
+                marginBottom: '12px'
+              }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                  <svg width="16" height="16" viewBox="0 0 24 24" fill="#007AFF" stroke="#007AFF" strokeWidth="2">
+                    <path d="M20.59 13.41l-7.17 7.17a2 2 0 0 1-2.83 0L2 12V2h10l8.59 8.59a2 2 0 0 1 0 2.82z"/>
+                    <line x1="7" y1="7" x2="7.01" y2="7"/>
+                  </svg>
+                  <span style={{ fontSize: '14px', fontWeight: 600, color: '#1C1C1E' }}>知识点标签</span>
+                </div>
+                <span style={{
+                  fontSize: '12px',
+                  padding: '2px 8px',
+                  borderRadius: '10px',
+                  background: tagsSource === 'ai' ? '#E8F4FD' : '#FFF7E6',
+                  color: tagsSource === 'ai' ? '#007AFF' : '#FA8C16'
+                }}>
+                  {tagsSource === 'ai' ? 'AI 生成' : '人工修正'}
+                </span>
+              </div>
+
+              {aiTags.length > 0 && tagsSource === 'manual' && (
+                <div style={{
+                  marginBottom: '12px',
+                  paddingBottom: '12px',
+                  borderBottom: '1px solid #F0F0F0'
+                }}>
+                  <div style={{ fontSize: '12px', color: '#8E8E93', marginBottom: '8px' }}>AI 原始标签</div>
+                  <div style={{ display: 'flex', flexWrap: 'wrap', gap: '8px' }}>
+                    {aiTags.map((tag, index) => (
+                      <span
+                        key={index}
+                        style={{
+                          fontSize: '12px',
+                          padding: '4px 10px',
+                          borderRadius: '12px',
+                          background: '#F5F5F7',
+                          color: '#8E8E93'
+                        }}
+                      >
+                        {tag}
+                      </span>
+                    ))}
+                  </div>
+                </div>
+              )}
+
+              <div style={{ display: 'flex', flexWrap: 'wrap', gap: '8px', marginBottom: '12px' }}>
+                {effectiveTags.map((tag, index) => (
+                  <span
+                    key={index}
+                    style={{
+                      fontSize: '13px',
+                      padding: '6px 12px',
+                      borderRadius: '14px',
+                      display: 'inline-flex',
+                      alignItems: 'center',
+                      gap: '4px',
+                      background: tagsSource === 'ai' ? '#E8F4FD' : '#FFF7E6',
+                      color: tagsSource === 'ai' ? '#007AFF' : '#FA8C16'
+                    }}
+                  >
+                    {tag}
+                    {tagsSource === 'manual' && (
+                      <span
+                        onClick={() => handleRemoveTag(tag)}
+                        style={{
+                          cursor: 'pointer',
+                          display: 'inline-flex',
+                          alignItems: 'center',
+                          marginLeft: '2px'
+                        }}
+                      >
+                        <svg width="12" height="12" viewBox="0 0 1024 1024" fill="currentColor">
+                          <path d="M563.8 512l262.5-312.9c4.4-5.2.7-13.1-6.1-13.1h-79.8c-4.7 0-9.2 2.1-12.3 5.7L511.6 449.8 295.1 191.7c-3-3.6-7.5-5.7-12.3-5.7H203c-6.8 0-10.5 7.9-6.1 13.1L459.4 512 196.9 824.9c-4.4 5.2-.7 13.1 6.1 13.1h79.8c4.7 0 9.2-2.1 12.3-5.7l216.5-258.1 216.5 258.1c3 3.6 7.5 5.7 12.3 5.7h79.8c6.8 0 10.5-7.9 6.1-13.1L563.8 512z"/>
+                        </svg>
+                      </span>
+                    )}
+                  </span>
+                ))}
+                {effectiveTags.length === 0 && (
+                  <span style={{ fontSize: '13px', color: '#8E8E93' }}>暂无标签</span>
+                )}
+              </div>
+
+              <div style={{ display: 'flex', gap: '8px' }}>
+                <Input
+                  value={newTagInput}
+                  onChange={val => setNewTagInput(val)}
+                  onKeyDown={handleTagInputKeyDown}
+                  placeholder="输入标签后按回车添加"
+                  style={{ flex: 1, '--font-size': '14px' }}
+                />
+                <Button
+                  size="small"
+                  color="primary"
+                  onClick={handleAddTag}
+                  disabled={!newTagInput.trim()}
+                  style={{ borderRadius: '8px' }}
+                >
+                  添加
+                </Button>
+              </div>
+              <div style={{ fontSize: '12px', color: '#8E8E93', marginTop: '8px' }}>
+                添加或删除标签后将自动切换为"人工修正"模式
+              </div>
+            </div>
+          )}
         </div>
 
-        {/* 底部按钮 */}
         <div style={{
           background: '#fff',
           padding: '16px',

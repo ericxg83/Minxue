@@ -20,12 +20,13 @@ import {
   User,
   Image as ImageIcon,
   Maximize,
-  Eye
+  Eye,
+  Tag
 } from 'lucide-react'
 import { motion, AnimatePresence } from 'motion/react'
 import { QRCodeSVG } from 'qrcode.react'
 import { useUIStore, useStudentStore, useTaskStore, useWrongQuestionStore, usePendingQuestionStore, useExamStore } from './store'
-import { getStudents, getTasksByStudent, getQuestionsByTask, addWrongQuestions, getWrongQuestionsByStudent, getExamsByStudent, createTask, updateTaskStatus, uploadImage, createQuestions } from './services/supabaseService'
+import { getStudents, getTasksByStudent, getQuestionsByTask, addWrongQuestions, getWrongQuestionsByStudent, getExamsByStudent, createTask, updateTaskStatus, uploadImage, createQuestions, updateQuestion, updateQuestionTags } from './services/supabaseService'
 import { recognizeQuestions, compressImage, saveRecognitionResult } from './services/aiService'
 import { mockQuestions, mockTasks, mockWrongQuestions, mockExams, mockStudents } from './data/mockData'
 import StudentSwitcher from './components/StudentSwitcher'
@@ -235,6 +236,10 @@ export default function App() {
   const [selectedSubject, setSelectedSubject] = useState('all')
   const [selectedTimeRange, setSelectedTimeRange] = useState('all')
   const [selectedErrorCount, setSelectedErrorCount] = useState('all')
+  const [selectedTags, setSelectedTags] = useState([])
+  const [showTagPicker, setShowTagPicker] = useState(false)
+  const [tagSearchKeyword, setTagSearchKeyword] = useState('')
+  const [tempSelectedTags, setTempSelectedTags] = useState([])
   const [showPrintPreview, setShowPrintPreview] = useState(false)
 
   // Exam Page State
@@ -261,6 +266,10 @@ export default function App() {
   const [isEditing, setIsEditing] = useState(false)
   const [editTab, setEditTab] = useState('content')
   const [displayEditImage, setDisplayEditImage] = useState('')
+  const [editAiTags, setEditAiTags] = useState([])
+  const [editManualTags, setEditManualTags] = useState([])
+  const [editTagsSource, setEditTagsSource] = useState('ai')
+  const [editNewTag, setEditNewTag] = useState('')
 
   const getTypeLabel = (type) => {
     const map = { choice: '选择题', fill: '填空题', answer: '解答题', CHOICE: '选择题', FILL: '填空题', ANSWER: '解答题' }
@@ -872,12 +881,33 @@ export default function App() {
     }
   }
 
+  const allAvailableTags = (() => {
+    const tagSet = new Set()
+    wrongQuestions
+      .filter(wq => wq.student_id === currentStudent?.id)
+      .forEach(wq => {
+        const question = wq.question || wq
+        const tags = question.tags_source === 'manual'
+          ? (question.manual_tags || [])
+          : (question.ai_tags || [])
+        tags.forEach(tag => tagSet.add(tag))
+      })
+    return Array.from(tagSet).sort()
+  })()
+
   const filteredWrongQuestions = wrongQuestions.filter(wq => {
     if (wq.student_id !== currentStudent?.id) return false
     if (bankFilter !== 'all' && wq.status !== bankFilter) return false
     if (selectedSubject !== 'all' && wq.subject !== selectedSubject) return false
     if (selectedTimeRange !== 'all' && !isWithinTimeRange(wq.added_at || wq.created_at, selectedTimeRange)) return false
     if (selectedErrorCount !== 'all' && !matchErrorCount(wq.error_count || 1, selectedErrorCount)) return false
+    if (selectedTags.length > 0) {
+      const question = wq.question || wq
+      const qTags = question.tags_source === 'manual'
+        ? (question.manual_tags || [])
+        : (question.ai_tags || [])
+      if (!selectedTags.some(t => qTags.includes(t))) return false
+    }
     return true
   })
 
@@ -1155,6 +1185,10 @@ export default function App() {
                                 onClick={(e) => {
                                   e.stopPropagation();
                                   setEditingQuestion(q);
+                                  setEditAiTags(q.ai_tags || []);
+                                  setEditManualTags(q.manual_tags || []);
+                                  setEditTagsSource(q.tags_source || 'ai');
+                                  setEditNewTag('');
                                   setIsEditing(true);
                                 }}
                                 className="text-[11px] font-bold text-gray-400 hover:text-blue-500 active:opacity-60"
@@ -1240,9 +1274,22 @@ export default function App() {
                         <ChevronDown size={12} className="absolute right-2.5 top-1/2 -translate-y-1/2 text-gray-400 pointer-events-none" />
                       </div>
                     ))}
+                    <button
+                      onClick={() => {
+                        setTempSelectedTags([...selectedTags])
+                        setTagSearchKeyword('')
+                        setShowTagPicker(true)
+                      }}
+                      className={`shrink-0 appearance-none border rounded-full pl-3 pr-2 py-1.5 text-[11px] font-bold shadow-sm focus:outline-none transition-all cursor-pointer flex items-center gap-1 ${
+                        selectedTags.length > 0
+                          ? 'bg-amber-50 border-amber-200 text-amber-600'
+                          : 'bg-white border-gray-100 text-gray-500'
+                      }`}
+                    >
+                      <span>知识点{selectedTags.length > 0 ? `: ${selectedTags.length}个` : ': 全部'}</span>
+                      <ChevronDown size={12} className="text-current opacity-60" />
+                    </button>
                   </div>
-
-                  {/* Question List */}
                   <div className="px-5 mt-5 space-y-4 pb-4">
                     {filteredWrongQuestions.map((wq) => {
                       const question = wq.question || wq
@@ -1293,6 +1340,10 @@ export default function App() {
                                 onClick={(e) => {
                                   e.stopPropagation();
                                   setEditingQuestion(question);
+                                  setEditAiTags(question.ai_tags || []);
+                                  setEditManualTags(question.manual_tags || []);
+                                  setEditTagsSource(question.tags_source || 'ai');
+                                  setEditNewTag('');
                                   setIsEditing(true);
                                 }}
                                 className="text-[11px] font-bold text-gray-400 hover:text-blue-500"
@@ -2289,7 +2340,8 @@ export default function App() {
                   <div className="flex bg-white px-2 border-b border-gray-50">
                     {[
                       { id: 'content', label: '题干' },
-                      { id: 'answer', label: '答案' }
+                      { id: 'answer', label: '答案' },
+                      { id: 'tags', label: '标签' }
                     ].map((tab) => (
                       <button
                         key={tab.id}
@@ -2430,9 +2482,108 @@ export default function App() {
                         </div>
                       </motion.div>
                     )}
-                  </div>
 
-                  {/* Footer Actions */}
+                    {editTab === 'tags' && (
+                      <motion.div
+                        key="tags-tab"
+                        initial={{ opacity: 0, y: 10 }}
+                        animate={{ opacity: 1, y: 0 }}
+                        className="space-y-4"
+                      >
+                        <div className="bg-white rounded-3xl p-6 shadow-sm">
+                          <div className="flex items-center justify-between mb-4">
+                            <div className="flex items-center gap-2">
+                              <Tag size={16} className="text-blue-600" />
+                              <span className="text-[14px] font-bold text-gray-900">知识点标签</span>
+                            </div>
+                            <span className="text-[11px] px-2.5 py-1 rounded-full font-bold" style={{
+                              background: editTagsSource === 'ai' ? '#EFF6FF' : '#FFF7E6',
+                              color: editTagsSource === 'ai' ? '#2563EB' : '#D97706'
+                            }}>
+                              {editTagsSource === 'ai' ? 'AI 生成' : '人工修正'}
+                            </span>
+                          </div>
+
+                          {editAiTags.length > 0 && editTagsSource === 'manual' && (
+                            <div className="mb-4 pb-4 border-b border-gray-100">
+                              <div className="text-[11px] font-bold text-gray-400 mb-2 uppercase tracking-wider">AI 原始标签</div>
+                              <div className="flex flex-wrap gap-2">
+                                {editAiTags.map((tag, idx) => (
+                                  <span key={idx} className="text-[12px] px-3 py-1.5 rounded-full bg-gray-50 text-gray-400 font-medium">
+                                    {tag}
+                                  </span>
+                                ))}
+                              </div>
+                            </div>
+                          )}
+
+                          <div className="flex flex-wrap gap-2 mb-4">
+                            {(editTagsSource === 'manual' ? editManualTags : editAiTags).map((tag, idx) => (
+                              <span
+                                key={idx}
+                                className="text-[13px] px-3 py-1.5 rounded-full flex items-center gap-1.5 font-medium"
+                                style={{
+                                  background: editTagsSource === 'ai' ? '#EFF6FF' : '#FFF7E6',
+                                  color: editTagsSource === 'ai' ? '#2563EB' : '#D97706'
+                                }}
+                              >
+                                {tag}
+                                {editTagsSource === 'manual' && (
+                                  <button
+                                    onClick={() => {
+                                      setEditManualTags(editManualTags.filter(t => t !== tag))
+                                    }}
+                                    className="hover:text-red-500 transition-colors"
+                                  >
+                                    <X size={12} />
+                                  </button>
+                                )}
+                              </span>
+                            ))}
+                            {(editTagsSource === 'manual' ? editManualTags : editAiTags).length === 0 && (
+                              <span className="text-[13px] text-gray-400">暂无标签</span>
+                            )}
+                          </div>
+
+                          <div className="flex gap-2">
+                            <input
+                              value={editNewTag}
+                              onChange={(e) => setEditNewTag(e.target.value)}
+                              onKeyDown={(e) => {
+                                if (e.key === 'Enter') {
+                                  e.preventDefault()
+                                  const trimmed = editNewTag.trim()
+                                  if (trimmed && !editManualTags.some(t => t.toLowerCase() === trimmed.toLowerCase())) {
+                                    setEditManualTags([...editManualTags, trimmed])
+                                    setEditTagsSource('manual')
+                                  }
+                                  setEditNewTag('')
+                                }
+                              }}
+                              className="flex-1 h-10 px-4 bg-gray-50 rounded-xl text-[14px] text-gray-800 focus:outline-none focus:ring-2 focus:ring-blue-100 placeholder:text-gray-300"
+                              placeholder="输入标签后按回车添加"
+                            />
+                            <button
+                              onClick={() => {
+                                const trimmed = editNewTag.trim()
+                                if (trimmed && !editManualTags.some(t => t.toLowerCase() === trimmed.toLowerCase())) {
+                                  setEditManualTags([...editManualTags, trimmed])
+                                  setEditTagsSource('manual')
+                                }
+                                setEditNewTag('')
+                              }}
+                              className="h-10 px-4 rounded-xl bg-blue-600 text-white text-[13px] font-bold active:scale-95 transition-transform"
+                            >
+                              添加
+                            </button>
+                          </div>
+                          <div className="text-[11px] text-gray-400 mt-2">
+                            添加或删除标签后将自动切换为"人工修正"模式
+                          </div>
+                        </div>
+                      </motion.div>
+                    )}
+                  </div>
                   <div className="px-6 pt-4 pb-12 bg-white/80 backdrop-blur-xl border-t border-gray-100 flex gap-3">
                     <button 
                       onClick={() => setIsEditing(false)}
@@ -2441,7 +2592,33 @@ export default function App() {
                       取消
                     </button>
                     <button 
-                      onClick={() => setIsEditing(false)}
+                      onClick={async () => {
+                        if (editingQuestion?.id) {
+                          try {
+                            await updateQuestion(editingQuestion.id, {
+                              ai_tags: editAiTags,
+                              manual_tags: editManualTags,
+                              tags_source: editTagsSource,
+                              updated_at: new Date().toISOString()
+                            })
+                            if (editTagsSource === 'manual' && editManualTags.length > 0) {
+                              try {
+                                await updateQuestionTags(editingQuestion.id, editManualTags)
+                              } catch (e) {
+                                console.error('更新标签失败:', e)
+                              }
+                            }
+                            if (editingQuestion) {
+                              editingQuestion.ai_tags = editAiTags
+                              editingQuestion.manual_tags = editManualTags
+                              editingQuestion.tags_source = editTagsSource
+                            }
+                          } catch (e) {
+                            console.error('保存题目失败:', e)
+                          }
+                        }
+                        setIsEditing(false)
+                      }}
                       className="flex-[2] py-4 bg-blue-600 text-white font-bold rounded-2xl shadow-xl shadow-blue-100 active:scale-95 transition-transform"
                     >
                       保存
@@ -2485,6 +2662,143 @@ export default function App() {
                       </div>
                     )}
                   </AnimatePresence>
+                </motion.div>
+              </>
+            )}
+          </AnimatePresence>
+
+          {/* Tag Picker Popup */}
+          <AnimatePresence>
+            {showTagPicker && (
+              <>
+                <motion.div
+                  initial={{ opacity: 0 }}
+                  animate={{ opacity: 1 }}
+                  exit={{ opacity: 0 }}
+                  onClick={() => setShowTagPicker(false)}
+                  className="fixed inset-0 bg-black/30 backdrop-blur-sm z-[10000]"
+                />
+                <motion.div
+                  initial={{ y: '100%' }}
+                  animate={{ y: 0 }}
+                  exit={{ y: '100%' }}
+                  transition={{ type: 'spring', damping: 25, stiffness: 200 }}
+                  className="fixed bottom-0 left-0 right-0 max-w-md mx-auto bg-[#F5F5F7] rounded-t-3xl overflow-hidden z-[10001] flex flex-col"
+                  style={{ height: '70vh' }}
+                >
+                  <div className="bg-white px-5 py-4 flex items-center justify-between border-b border-gray-100">
+                    <button
+                      onClick={() => setShowTagPicker(false)}
+                      className="text-[15px] text-gray-400 font-medium"
+                    >
+                      取消
+                    </button>
+                    <h3 className="text-[17px] font-bold text-gray-900">选择知识点</h3>
+                    <button
+                      onClick={() => {
+                        setSelectedTags([...tempSelectedTags])
+                        setShowTagPicker(false)
+                      }}
+                      className="text-[15px] text-blue-600 font-bold"
+                    >
+                      确定{tempSelectedTags.length > 0 ? `(${tempSelectedTags.length})` : ''}
+                    </button>
+                  </div>
+
+                  <div className="px-5 py-3 bg-white border-b border-gray-50">
+                    <div className="relative">
+                      <Search size={16} className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-300" />
+                      <input
+                        value={tagSearchKeyword}
+                        onChange={(e) => setTagSearchKeyword(e.target.value)}
+                        className="w-full h-10 pl-9 pr-4 bg-gray-50 rounded-xl text-[14px] text-gray-800 focus:outline-none focus:ring-2 focus:ring-blue-100 placeholder:text-gray-300"
+                        placeholder="搜索知识点..."
+                        autoFocus
+                      />
+                      {tagSearchKeyword && (
+                        <button
+                          onClick={() => setTagSearchKeyword('')}
+                          className="absolute right-3 top-1/2 -translate-y-1/2"
+                        >
+                          <X size={14} className="text-gray-300" />
+                        </button>
+                      )}
+                    </div>
+                  </div>
+
+                  {tempSelectedTags.length > 0 && (
+                    <div className="px-5 py-3 bg-white border-b border-gray-50">
+                      <div className="text-[11px] font-bold text-gray-400 mb-2 uppercase tracking-wider">已选</div>
+                      <div className="flex flex-wrap gap-2">
+                        {tempSelectedTags.map(tag => (
+                          <span
+                            key={tag}
+                            onClick={() => setTempSelectedTags(tempSelectedTags.filter(t => t !== tag))}
+                            className="text-[12px] px-3 py-1.5 rounded-full bg-amber-50 text-amber-600 font-medium flex items-center gap-1 cursor-pointer active:scale-95 transition-transform border border-amber-100"
+                          >
+                            {tag}
+                            <X size={10} />
+                          </span>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+
+                  <div className="flex-1 overflow-y-auto px-5 py-3">
+                    {(() => {
+                      const keyword = tagSearchKeyword.toLowerCase()
+                      const filtered = allAvailableTags.filter(tag =>
+                        tag.toLowerCase().includes(keyword)
+                      )
+                      if (filtered.length === 0) {
+                        return (
+                          <div className="text-center py-12 text-gray-300 text-[14px]">
+                            {tagSearchKeyword ? '没有匹配的知识点' : '暂无知识点标签'}
+                          </div>
+                        )
+                      }
+                      return (
+                        <div className="flex flex-wrap gap-2">
+                          {filtered.map(tag => {
+                            const isSelected = tempSelectedTags.includes(tag)
+                            return (
+                              <button
+                                key={tag}
+                                onClick={() => {
+                                  if (isSelected) {
+                                    setTempSelectedTags(tempSelectedTags.filter(t => t !== tag))
+                                  } else {
+                                    setTempSelectedTags([...tempSelectedTags, tag])
+                                  }
+                                }}
+                                className={`text-[13px] px-3.5 py-2 rounded-full font-medium transition-all active:scale-95 ${
+                                  isSelected
+                                    ? 'bg-blue-600 text-white shadow-sm shadow-blue-100'
+                                    : 'bg-white text-gray-600 border border-gray-100'
+                                }`}
+                              >
+                                {isSelected && <span className="mr-1">✓</span>}
+                                {tag}
+                              </button>
+                            )
+                          })}
+                        </div>
+                      )
+                    })()}
+                  </div>
+
+                  {tempSelectedTags.length > 0 && (
+                    <div className="bg-white px-5 py-4 border-t border-gray-100 pb-8">
+                      <button
+                        onClick={() => {
+                          setTempSelectedTags([])
+                        }}
+                        className="w-full h-11 rounded-xl bg-gray-50 text-gray-500 text-[14px] font-bold active:scale-95 transition-transform"
+                      >
+                        清空选择
+                      </button>
+                    </div>
+                  )}
                 </motion.div>
               </>
             )}

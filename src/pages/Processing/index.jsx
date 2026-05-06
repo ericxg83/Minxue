@@ -14,7 +14,7 @@ import {
 import { RightOutline } from 'antd-mobile-icons'
 import { useStudentStore, useTaskStore, usePendingQuestionStore, useUIStore } from '../../store'
 import { getTasksByStudent, updateTaskStatus, createTask, uploadImage, createQuestions } from '../../services/supabaseService'
-import { recognizeQuestions, compressImage, saveRecognitionResult } from '../../services/aiService'
+import { recognizeQuestions, compressImage, saveRecognitionResult, generateTagsForQuestions } from '../../services/aiService'
 import { mockTasks, mockStudents } from '../../data/mockData'
 import StudentSwitcher from '../../components/StudentSwitcher'
 import dayjs from 'dayjs'
@@ -450,6 +450,40 @@ export default function Processing() {
         } catch (saveError) {
           console.error('保存题目到 Supabase 失败:', saveError)
           console.error('错误详情:', saveError?.message, saveError?.code, saveError?.details)
+        }
+
+        updateTaskInStore(taskId, 'processing', { progress: 90 })
+        await updateTaskStatus(dbTaskId, 'processing', { progress: 90 })
+
+        try {
+          console.log('开始为题目生成AI标签...')
+          const tagResults = await generateTagsForQuestions(questions)
+          console.log('AI标签生成结果:', tagResults)
+
+          const tagMap = {}
+          for (const tr of tagResults) {
+            tagMap[tr.questionId] = tr.tags
+          }
+
+          for (const q of questions) {
+            const tags = tagMap[q.id] || ['未分类']
+            q.ai_tags = tags
+            q.tags_source = 'ai'
+          }
+
+          const { batchUpdateQuestionTags } = await import('../../services/supabaseService')
+          const tagUpdates = questions.map(q => ({
+            id: q.id,
+            ai_tags: q.ai_tags
+          }))
+          await batchUpdateQuestionTags(tagUpdates)
+          console.log('AI标签已保存到数据库')
+        } catch (tagError) {
+          console.error('AI标签生成失败（不影响主流程）:', tagError)
+          for (const q of questions) {
+            q.ai_tags = ['未分类']
+            q.tags_source = 'ai'
+          }
         }
       }
 

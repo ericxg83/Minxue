@@ -454,6 +454,9 @@ export const createQuestions = async (questions) => {
       is_correct: q.is_correct !== undefined ? q.is_correct : true,
       status: statusValue,
       image_url: q.image_url || null,
+      ai_tags: q.ai_tags || [],
+      manual_tags: q.manual_tags || [],
+      tags_source: q.tags_source || 'ai',
       created_at: new Date().toISOString()
     }
   })
@@ -478,7 +481,7 @@ export const createQuestions = async (questions) => {
 
 // 更新题目
 export const updateQuestion = async (id, updates) => {
-  const allowedFields = ['content', 'options', 'answer', 'analysis', 'question_type', 'subject', 'is_correct', 'status', 'image_url']
+  const allowedFields = ['content', 'options', 'answer', 'analysis', 'question_type', 'subject', 'is_correct', 'status', 'image_url', 'ai_tags', 'manual_tags', 'tags_source']
   const cleanUpdates = {}
   
   for (const field of allowedFields) {
@@ -502,6 +505,40 @@ export const updateQuestion = async (id, updates) => {
     throw error
   }
   return data
+}
+
+export const updateQuestionTags = async (id, manualTags) => {
+  const cleanUpdates = {
+    manual_tags: manualTags,
+    tags_source: 'manual',
+    updated_at: new Date().toISOString()
+  }
+
+  const { data, error } = await supabase
+    .from(TABLES.QUESTIONS)
+    .update(cleanUpdates)
+    .eq('id', id)
+    .select()
+    .single()
+
+  if (error) {
+    console.error('Supabase 更新题目标签错误:', error)
+    throw error
+  }
+  return data
+}
+
+export const batchUpdateQuestionTags = async (tagUpdates) => {
+  const results = []
+  for (const update of tagUpdates) {
+    try {
+      const result = await updateQuestionTags(update.id, update.ai_tags)
+      results.push(result)
+    } catch (error) {
+      console.error(`批量更新标签失败，题目ID: ${update.id}`, error)
+    }
+  }
+  return results
 }
 
 // ==================== 错题本相关操作 ====================

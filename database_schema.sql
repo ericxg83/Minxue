@@ -40,6 +40,9 @@ CREATE TABLE IF NOT EXISTS questions (
     analysis TEXT,
     question_type TEXT CHECK (question_type IN ('choice', 'fill', 'answer')),
     status TEXT DEFAULT 'pending' CHECK (status IN ('pending', 'wrong', 'mastered')),
+    ai_tags JSONB DEFAULT '[]'::jsonb,
+    manual_tags JSONB DEFAULT '[]'::jsonb,
+    tags_source TEXT DEFAULT 'ai' CHECK (tags_source IN ('ai', 'manual')),
     created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
     updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
 );
@@ -86,3 +89,13 @@ CREATE POLICY "Allow public read access" ON storage.objects
 
 CREATE POLICY "Allow authenticated uploads" ON storage.objects
     FOR INSERT WITH CHECK (bucket_id = 'homework-images');
+
+-- ============================================
+-- 增量迁移：为 questions 表添加 AI 标签字段
+-- 如果是已有数据库，请在 Supabase SQL Editor 中单独执行以下语句
+-- ============================================
+-- ALTER TABLE questions ADD COLUMN IF NOT EXISTS ai_tags JSONB DEFAULT '[]'::jsonb;
+-- ALTER TABLE questions ADD COLUMN IF NOT EXISTS manual_tags JSONB DEFAULT '[]'::jsonb;
+-- ALTER TABLE questions ADD COLUMN IF NOT EXISTS tags_source TEXT DEFAULT 'ai' CHECK (tags_source IN ('ai', 'manual'));
+-- CREATE INDEX IF NOT EXISTS idx_questions_ai_tags ON questions USING gin(ai_tags);
+-- CREATE INDEX IF NOT EXISTS idx_questions_manual_tags ON questions USING gin(manual_tags);

@@ -1,8 +1,8 @@
 import { useState, useEffect } from 'react'
 import { motion, AnimatePresence } from 'motion/react'
-import { X, Loader2, Plus, Trash2 } from 'lucide-react'
+import { X, Loader2, Plus, Trash2, Tag } from 'lucide-react'
 import { usePendingQuestionStore } from '../../store'
-import { updateQuestion } from '../../services/supabaseService'
+import { updateQuestion, updateQuestionTags } from '../../services/supabaseService'
 
 export default function QuestionEditDrawer({ questionId, visible, onClose, onSave }) {
   const { pendingQuestions, updatePendingQuestion } = usePendingQuestionStore()
@@ -17,6 +17,10 @@ export default function QuestionEditDrawer({ questionId, visible, onClose, onSav
   const [displayImageUrl, setDisplayImageUrl] = useState('')
   const [loading, setLoading] = useState(false)
   const [submitting, setSubmitting] = useState(false)
+  const [aiTags, setAiTags] = useState([])
+  const [manualTags, setManualTags] = useState([])
+  const [tagsSource, setTagsSource] = useState('ai')
+  const [newTagInput, setNewTagInput] = useState('')
 
   useEffect(() => {
     if (visible && questionId) {
@@ -37,6 +41,9 @@ export default function QuestionEditDrawer({ questionId, visible, onClose, onSav
         setAnalysis(questionData.analysis || '')
         setQuestionType(questionData.question_type || '选择题')
         setDisplayImageUrl('')
+        setAiTags(questionData.ai_tags || [])
+        setManualTags(questionData.manual_tags || [])
+        setTagsSource(questionData.tags_source || 'ai')
       }
     } catch (error) {
       console.error('加载题目失败:', error)
@@ -66,6 +73,35 @@ export default function QuestionEditDrawer({ questionId, visible, onClose, onSav
     setOptions(options.filter((_, i) => i !== index))
   }
 
+  const getEffectiveTags = () => {
+    return tagsSource === 'manual' ? manualTags : aiTags
+  }
+
+  const handleAddTag = () => {
+    const trimmed = newTagInput.trim()
+    if (!trimmed) return
+    const currentTags = [...manualTags]
+    if (!currentTags.some(t => t.toLowerCase() === trimmed.toLowerCase())) {
+      const updatedTags = [...currentTags, trimmed]
+      setManualTags(updatedTags)
+      setTagsSource('manual')
+    }
+    setNewTagInput('')
+  }
+
+  const handleRemoveTag = (tagToRemove) => {
+    const updatedTags = manualTags.filter(t => t !== tagToRemove)
+    setManualTags(updatedTags)
+    setTagsSource('manual')
+  }
+
+  const handleTagInputKeyDown = (e) => {
+    if (e.key === 'Enter') {
+      e.preventDefault()
+      handleAddTag()
+    }
+  }
+
   const handleSubmit = async () => {
     if (!content.trim()) return
     setSubmitting(true)
@@ -79,9 +115,21 @@ export default function QuestionEditDrawer({ questionId, visible, onClose, onSav
         analysis: analysis || undefined,
         question_type: questionType,
         image_url: displayImageUrl || undefined,
+        ai_tags: aiTags,
+        manual_tags: manualTags,
+        tags_source: tagsSource,
         updated_at: new Date().toISOString()
       }
       await updateQuestion(questionId, updatedQuestion)
+
+      if (tagsSource === 'manual' && manualTags.length > 0) {
+        try {
+          await updateQuestionTags(questionId, manualTags)
+        } catch (tagError) {
+          console.error('更新标签失败:', tagError)
+        }
+      }
+
       updatePendingQuestion(questionId, updatedQuestion)
       onSave && onSave(updatedQuestion)
       onClose && onClose()
@@ -91,6 +139,8 @@ export default function QuestionEditDrawer({ questionId, visible, onClose, onSav
       setSubmitting(false)
     }
   }
+
+  const effectiveTags = getEffectiveTags()
 
   return (
     <AnimatePresence>
@@ -111,7 +161,6 @@ export default function QuestionEditDrawer({ questionId, visible, onClose, onSav
             className="fixed bottom-0 left-0 right-0 max-w-md mx-auto bg-[#F5F5F7] rounded-t-3xl overflow-hidden z-[10001] flex flex-col"
             style={{ height: '90vh' }}
           >
-            {/* 顶部标题栏 */}
             <div className="bg-white px-4 py-4 flex items-center justify-center relative">
               <button onClick={onClose} className="absolute left-4 text-[15px] text-[#999]">
                 <X size={20} />
@@ -119,9 +168,8 @@ export default function QuestionEditDrawer({ questionId, visible, onClose, onSav
               <h2 className="text-[17px] font-bold text-[#333]">编辑题目</h2>
             </div>
 
-            {/* Tab 切换 */}
             <div className="bg-white flex border-b border-[#F0F0F0]">
-              {['stem', 'answer'].map(tab => (
+              {['stem', 'answer', 'tags'].map(tab => (
                 <button
                   key={tab}
                   onClick={() => setActiveTab(tab)}
@@ -131,7 +179,7 @@ export default function QuestionEditDrawer({ questionId, visible, onClose, onSav
                     fontWeight: activeTab === tab ? 600 : 400
                   }}
                 >
-                  {tab === 'stem' ? '题干' : '答案'}
+                  {tab === 'stem' ? '题干' : tab === 'answer' ? '答案' : '标签'}
                   {activeTab === tab && (
                     <motion.div
                       layoutId="edit-tab-underline"
@@ -142,7 +190,6 @@ export default function QuestionEditDrawer({ questionId, visible, onClose, onSav
               ))}
             </div>
 
-            {/* 内容区域 */}
             <div className="flex-1 overflow-y-auto px-4 py-4">
               {loading ? (
                 <div className="flex flex-col items-center justify-center py-12">
@@ -151,10 +198,8 @@ export default function QuestionEditDrawer({ questionId, visible, onClose, onSav
                 </div>
               ) : (
                 <>
-                  {/* 题干 Tab */}
                   {activeTab === 'stem' && (
                     <div className="space-y-3">
-                      {/* 题目内容 */}
                       <div className="bg-white rounded-3xl p-4 shadow-sm">
                         <div className="flex items-center mb-3">
                           <span className="text-[14px] font-bold text-[#333]">题目内容</span>
@@ -200,7 +245,6 @@ export default function QuestionEditDrawer({ questionId, visible, onClose, onSav
                         )}
                       </div>
 
-                      {/* 选项区域 */}
                       {questionType === '选择题' && (
                         <div className="bg-white rounded-3xl p-4 shadow-sm mt-3">
                           <div className="flex items-center justify-between mb-4">
@@ -238,10 +282,8 @@ export default function QuestionEditDrawer({ questionId, visible, onClose, onSav
                     </div>
                   )}
 
-                  {/* 答案 Tab */}
                   {activeTab === 'answer' && (
                     <div className="space-y-3">
-                      {/* 学生答案 & 正确答案 */}
                       <div className="bg-white rounded-3xl p-4 shadow-sm">
                         <div className="flex items-start gap-3 pb-4 border-b border-[#F0F0F0]">
                           <div className="w-9 h-9 rounded-full bg-[#F5F5F7] flex items-center justify-center flex-shrink-0">
@@ -273,7 +315,6 @@ export default function QuestionEditDrawer({ questionId, visible, onClose, onSav
                         </div>
                       </div>
 
-                      {/* 题目解析 */}
                       <div className="bg-white rounded-3xl p-4 shadow-sm">
                         <div className="text-[14px] font-bold text-[#333] mb-3">
                           题目解析 (选填)
@@ -288,11 +329,91 @@ export default function QuestionEditDrawer({ questionId, visible, onClose, onSav
                       </div>
                     </div>
                   )}
+
+                  {activeTab === 'tags' && (
+                    <div className="space-y-3">
+                      <div className="bg-white rounded-3xl p-4 shadow-sm">
+                        <div className="flex items-center justify-between mb-3">
+                          <div className="flex items-center gap-2">
+                            <Tag size={16} className="text-[#1677FF]" />
+                            <span className="text-[14px] font-bold text-[#333]">知识点标签</span>
+                          </div>
+                          <span className="text-[12px] px-2 py-1 rounded-full" style={{
+                            background: tagsSource === 'ai' ? '#E6F4FF' : '#FFF7E6',
+                            color: tagsSource === 'ai' ? '#1677FF' : '#FA8C16'
+                          }}>
+                            {tagsSource === 'ai' ? 'AI 生成' : '人工修正'}
+                          </span>
+                        </div>
+
+                        {aiTags.length > 0 && tagsSource === 'manual' && (
+                          <div className="mb-3 pb-3 border-b border-[#F0F0F0]">
+                            <div className="text-[12px] text-[#999] mb-2">AI 原始标签</div>
+                            <div className="flex flex-wrap gap-2">
+                              {aiTags.map((tag, index) => (
+                                <span
+                                  key={index}
+                                  className="text-[12px] px-3 py-1 rounded-full bg-[#F5F5F7] text-[#999]"
+                                >
+                                  {tag}
+                                </span>
+                              ))}
+                            </div>
+                          </div>
+                        )}
+
+                        <div className="flex flex-wrap gap-2 mb-3">
+                          {effectiveTags.map((tag, index) => (
+                            <span
+                              key={index}
+                              className="text-[13px] px-3 py-1.5 rounded-full flex items-center gap-1"
+                              style={{
+                                background: tagsSource === 'ai' ? '#E6F4FF' : '#FFF7E6',
+                                color: tagsSource === 'ai' ? '#1677FF' : '#FA8C16'
+                              }}
+                            >
+                              {tag}
+                              {tagsSource === 'manual' && (
+                                <button
+                                  onClick={() => handleRemoveTag(tag)}
+                                  className="ml-1 hover:text-[#FF3B30] transition-colors"
+                                >
+                                  <X size={12} />
+                                </button>
+                              )}
+                            </span>
+                          ))}
+                          {effectiveTags.length === 0 && (
+                            <span className="text-[13px] text-[#999]">暂无标签</span>
+                          )}
+                        </div>
+
+                        <div className="flex gap-2">
+                          <input
+                            value={newTagInput}
+                            onChange={(e) => setNewTagInput(e.target.value)}
+                            onKeyDown={handleTagInputKeyDown}
+                            className="flex-1 h-10 px-4 bg-[#F5F5F7] rounded-xl text-[14px] text-[#333] focus:outline-none placeholder:text-[#CCC]"
+                            placeholder="输入标签后按回车添加"
+                          />
+                          <button
+                            onClick={handleAddTag}
+                            disabled={!newTagInput.trim()}
+                            className="h-10 px-4 rounded-xl bg-[#1677FF] text-white text-[14px] font-medium disabled:opacity-40 disabled:cursor-not-allowed"
+                          >
+                            添加
+                          </button>
+                        </div>
+                        <div className="text-[12px] text-[#999] mt-2">
+                          添加或删除标签后将自动切换为"人工修正"模式
+                        </div>
+                      </div>
+                    </div>
+                  )}
                 </>
               )}
             </div>
 
-            {/* 底部按钮 */}
             <div className="bg-white px-4 py-4 border-t border-[#F0F0F0] pb-8">
               <div className="flex gap-3">
                 <button

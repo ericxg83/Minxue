@@ -43,14 +43,14 @@ export default function Students() {
   }, [])
 
   let loadCount = 0
-  const loadStudents = async () => {
+  const loadStudents = async (useCache = true) => {
     loadCount++
     console.log(`loadStudents 被调用 (第 ${loadCount} 次)`)
     setLocalLoading(true)
     setLoading(true)
     
     try {
-      const data = await getStudents()
+      const data = await getStudents(useCache)
       console.log('从 Supabase 加载的学生数据:', data)
       console.log('Supabase 返回的学生数量:', data?.length || 0)
       if (data && data.length > 0) {
@@ -147,6 +147,10 @@ export default function Students() {
       Toast.show('请输入学生姓名')
       return
     }
+    if (!formData.grade) {
+      Toast.show('请选择年级')
+      return
+    }
 
     setLoading(true)
     
@@ -173,7 +177,7 @@ export default function Students() {
           if (currentStudent?.id === editingStudent.id) {
             setCurrentStudent({ ...currentStudent, ...studentData })
           }
-          await loadStudents()
+          await loadStudents(false)
         }
         Toast.show({ icon: 'success', content: '更新成功' })
       } else {
@@ -196,7 +200,7 @@ export default function Students() {
               addStudentInStore(created)
               setCurrentStudent(created)
             }
-            await loadStudents()
+            await loadStudents(false)
           } catch (err) {
             console.error('创建学生时出错:', err)
             throw err
@@ -239,7 +243,7 @@ export default function Students() {
               setCurrentStudent(null)
             }
             // 重新加载学生列表
-            await loadStudents()
+            await loadStudents(false)
           }
           Toast.show({ icon: 'success', content: '删除成功' })
         } catch (error) {
@@ -522,7 +526,7 @@ export default function Students() {
           padding: '16px',
           borderBottom: '1px solid #f5f5f5'
         }}>
-          <span style={{ width: '80px', fontSize: '15px', color: '#333' }}>年级</span>
+          <span style={{ width: '80px', fontSize: '15px', color: '#333' }}>年级<span style={{ color: '#ff4d4f' }}>*</span></span>
           <select
             value={formData.grade}
             onChange={e => setFormData({ ...formData, grade: e.target.value })}

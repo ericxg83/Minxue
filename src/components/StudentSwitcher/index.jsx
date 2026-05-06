@@ -1,65 +1,115 @@
 import { useState, useEffect, useRef } from 'react'
 import { motion, AnimatePresence } from 'motion/react'
-import { X, Plus, CheckCircle2, ChevronRight, UserPlus, User, Trash2 } from 'lucide-react'
+import { X, Plus, CheckCircle2, ChevronRight, UserPlus, User, Trash2, Pencil } from 'lucide-react'
 import { useStudentStore } from '../../store'
-import { createStudent, getStudents, deleteStudent } from '../../services/supabaseService'
+import { createStudent, getStudents, deleteStudent, updateStudent } from '../../services/supabaseService'
 import { mockStudents } from '../../data/mockData'
+
+const GRADE_OPTIONS = ['一年级', '二年级', '三年级', '四年级', '五年级', '六年级', '初一', '初二', '初三', '高一', '高二', '高三']
 
 const USE_MOCK_DATA = false
 
 export default function StudentSwitcher({ visible, onClose, onSelectStudent }) {
-  const { students, currentStudent, setCurrentStudent, setStudents } = useStudentStore()
-  const [showAddStudent, setShowAddStudent] = useState(false)
+  const { students, currentStudent, setCurrentStudent, setStudents, updateStudent: updateStudentInStore } = useStudentStore()
+  const [showForm, setShowForm] = useState(false)
   const [showDeleteConfirm, setShowDeleteConfirm] = useState(null)
-  const [newName, setNewName] = useState('')
-  const [newClass, setNewClass] = useState('')
+  const [editingStudent, setEditingStudent] = useState(null)
+  const [formData, setFormData] = useState({ name: '', grade: '', class: '' })
   const [submitting, setSubmitting] = useState(false)
   const nameInputRef = useRef(null)
-  const classInputRef = useRef(null)
 
   useEffect(() => {
     if (visible) {
       loadStudents()
-      setNewName('')
-      setNewClass('')
-      setShowAddStudent(false)
+      resetForm()
+      setShowForm(false)
     }
   }, [visible])
 
   useEffect(() => {
-    if (showAddStudent && nameInputRef.current) {
+    if (showForm && nameInputRef.current) {
       nameInputRef.current.focus()
     }
-  }, [showAddStudent])
+  }, [showForm])
 
-  const loadStudents = async () => {
+  const resetForm = () => {
+    setFormData({ name: '', grade: '', class: '' })
+    setEditingStudent(null)
+  }
+
+  const loadStudents = async (useCache = true) => {
     try {
-      const loadedStudents = await getStudents(true)
+      const loadedStudents = await getStudents(useCache)
       setStudents(loadedStudents)
     } catch (error) {
       console.error('加载学生列表失败:', error)
     }
   }
 
-  const handleAddStudent = async () => {
-    if (!newName.trim()) return
+  const openAddForm = () => {
+    resetForm()
+    setShowForm(true)
+  }
+
+  const openEditForm = (student, e) => {
+    e.stopPropagation()
+    setEditingStudent(student)
+    setFormData({
+      name: student.name || '',
+      grade: student.grade || '',
+      class: student.class || ''
+    })
+    setShowForm(true)
+  }
+
+  const handleSave = async () => {
+    if (!formData.name.trim()) return
+    if (!formData.grade) return
+
     setSubmitting(true)
     try {
-      if (USE_MOCK_DATA) {
-        const newStudent = {
-          id: mockStudents.length > 0 ? `student-${mockStudents.length + 1}` : 'student-1',
-          name: newName,
-          class: newClass,
-        }
-        setStudents([...students, newStudent])
-        setCurrentStudent(newStudent)
-      } else {
-        const result = await createStudent({ name: newName, class: newClass })
-        setCurrentStudent(result)
+      const classInfo = formData.grade && formData.class
+        ? `${formData.grade}·${formData.class}`
+        : formData.grade || formData.class
+
+      const studentData = {
+        name: formData.name,
+        grade: formData.grade,
+        class: classInfo
       }
-      onClose()
+
+      if (editingStudent) {
+        if (USE_MOCK_DATA) {
+          updateStudentInStore(editingStudent.id, studentData)
+          if (currentStudent?.id === editingStudent.id) {
+            setCurrentStudent({ ...currentStudent, ...studentData })
+          }
+        } else {
+          await updateStudent(editingStudent.id, studentData)
+          if (currentStudent?.id === editingStudent.id) {
+            setCurrentStudent({ ...currentStudent, ...studentData })
+          }
+          await loadStudents(false)
+        }
+      } else {
+        if (USE_MOCK_DATA) {
+          const newStudent = {
+            id: mockStudents.length > 0 ? `student-${mockStudents.length + 1}` : 'student-1',
+            ...studentData,
+          }
+          setStudents([...students, newStudent])
+          setCurrentStudent(newStudent)
+        } else {
+          const result = await createStudent(studentData)
+          setCurrentStudent(result)
+        }
+        onClose()
+      }
+
+      setShowForm(false)
+      resetForm()
     } catch (error) {
-      console.error('添加学生失败:', error)
+      console.error(editingStudent ? '更新学生失败:' : '添加学生失败:', error)
     } finally {
       setSubmitting(false)
     }
@@ -80,6 +130,8 @@ export default function StudentSwitcher({ visible, onClose, onSelectStudent }) {
       console.error('删除学生失败:', error)
     }
   }
+
+  const isFormValid = formData.name.trim() && formData.grade
 
   return (
     <AnimatePresence>
@@ -103,7 +155,7 @@ export default function StudentSwitcher({ visible, onClose, onSelectStudent }) {
               {/* Header */}
               <div className="flex items-center justify-between mb-6">
                 <h2 className="text-[18px] font-bold text-slate-900">
-                  {showAddStudent ? '添加学生' : '切换学生'}
+                  {showForm ? (editingStudent ? '编辑学生' : '添加学生') : '切换学生'}
                 </h2>
                 <button
                   onClick={onClose}
@@ -113,7 +165,7 @@ export default function StudentSwitcher({ visible, onClose, onSelectStudent }) {
                 </button>
               </div>
 
-              {!showAddStudent ? (
+              {!showForm ? (
                 <>
                   {/* Student List */}
                   <div className="space-y-3 max-h-[60vh] overflow-y-auto no-scrollbar pb-4">
@@ -149,6 +201,12 @@ export default function StudentSwitcher({ visible, onClose, onSelectStudent }) {
                             <CheckCircle2 size={20} className="text-blue-600" />
                           )}
                           <button
+                            onClick={(e) => openEditForm(student, e)}
+                            className="p-1.5 rounded-full hover:bg-blue-50 transition-colors"
+                          >
+                            <Pencil size={16} className="text-gray-300 hover:text-blue-500" />
+                          </button>
+                          <button
                             onClick={(e) => {
                               e.stopPropagation()
                               setShowDeleteConfirm(student)
@@ -164,7 +222,7 @@ export default function StudentSwitcher({ visible, onClose, onSelectStudent }) {
 
                   {/* Add Student Button */}
                   <button
-                    onClick={() => setShowAddStudent(true)}
+                    onClick={openAddForm}
                     className="w-full mt-4 p-4 rounded-2xl border-2 border-dashed border-gray-200 flex items-center justify-center gap-2 text-gray-400 hover:border-blue-300 hover:text-blue-500 transition-all active:opacity-60"
                   >
                     <Plus size={20} />
@@ -173,43 +231,56 @@ export default function StudentSwitcher({ visible, onClose, onSelectStudent }) {
                 </>
               ) : (
                 <>
-                  {/* Add Student Form */}
+                  {/* Add/Edit Student Form */}
                   <div className="space-y-4">
                     <div>
                       <label className="block text-[13px] font-bold text-gray-500 mb-2">姓名</label>
                       <input
                         ref={nameInputRef}
                         type="text"
-                        value={newName}
-                        onChange={(e) => setNewName(e.target.value)}
+                        value={formData.name}
+                        onChange={(e) => setFormData({ ...formData, name: e.target.value })}
                         placeholder="请输入学生姓名"
                         className="w-full p-4 bg-gray-50 rounded-xl border border-gray-100 text-[14px] focus:outline-none focus:border-blue-300 focus:ring-2 focus:ring-blue-100 transition-all"
                       />
                     </div>
                     <div>
+                      <label className="block text-[13px] font-bold text-gray-500 mb-2">年级 <span className="text-red-500">*</span></label>
+                      <select
+                        value={formData.grade}
+                        onChange={(e) => setFormData({ ...formData, grade: e.target.value })}
+                        className="w-full p-4 bg-gray-50 rounded-xl border border-gray-100 text-[14px] focus:outline-none focus:border-blue-300 focus:ring-2 focus:ring-blue-100 transition-all appearance-none"
+                        style={{ color: formData.grade ? '#1e293b' : '#9ca3af' }}
+                      >
+                        <option value="">请选择年级</option>
+                        {GRADE_OPTIONS.map(grade => (
+                          <option key={grade} value={grade}>{grade}</option>
+                        ))}
+                      </select>
+                    </div>
+                    <div>
                       <label className="block text-[13px] font-bold text-gray-500 mb-2">班级</label>
                       <input
-                        ref={classInputRef}
                         type="text"
-                        value={newClass}
-                        onChange={(e) => setNewClass(e.target.value)}
+                        value={formData.class}
+                        onChange={(e) => setFormData({ ...formData, class: e.target.value })}
                         placeholder="请输入班级（选填）"
                         className="w-full p-4 bg-gray-50 rounded-xl border border-gray-100 text-[14px] focus:outline-none focus:border-blue-300 focus:ring-2 focus:ring-blue-100 transition-all"
                       />
                     </div>
                     <div className="flex gap-3 pt-4">
                       <button
-                        onClick={() => setShowAddStudent(false)}
+                        onClick={() => { setShowForm(false); resetForm() }}
                         className="flex-1 p-4 rounded-2xl border border-gray-200 text-[14px] font-bold text-gray-500 hover:bg-gray-50 transition-all"
                       >
                         取消
                       </button>
                       <button
-                        onClick={handleAddStudent}
-                        disabled={submitting || !newName.trim()}
+                        onClick={handleSave}
+                        disabled={submitting || !isFormValid}
                         className="flex-1 p-4 rounded-2xl bg-blue-600 text-white text-[14px] font-bold hover:bg-blue-500 disabled:opacity-40 disabled:cursor-not-allowed transition-all active:opacity-80"
                       >
-                        {submitting ? '添加中...' : '确定'}
+                        {submitting ? (editingStudent ? '保存中...' : '添加中...') : (editingStudent ? '保存' : '确定')}
                       </button>
                     </div>
                   </div>

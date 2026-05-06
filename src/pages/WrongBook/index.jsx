@@ -86,6 +86,7 @@ export default function WrongBook({ onScanQR }) {
   const [activeSubject, setActiveSubject] = useState('all')
   const [activeTime, setActiveTime] = useState('all')
   const [activeErrorCount, setActiveErrorCount] = useState('all')
+  const [activeTag, setActiveTag] = useState('all')
   const [showPrintPreview, setShowPrintPreview] = useState(false)
   const [showStudentSwitcher, setShowStudentSwitcher] = useState(false)
   const [showFilterPanel, setShowFilterPanel] = useState(false)
@@ -203,6 +204,14 @@ export default function WrongBook({ onScanQR }) {
     
     // 错误次数筛选
     if (activeErrorCount !== 'all' && !matchErrorCount(wq.error_count || 1, activeErrorCount)) return false
+
+    if (activeTag !== 'all') {
+      const question = wq.question || wq
+      const tags = question.tags_source === 'manual'
+        ? (question.manual_tags || [])
+        : (question.ai_tags || [])
+      if (!tags.includes(activeTag)) return false
+    }
     
     return true
   })
@@ -230,14 +239,30 @@ export default function WrongBook({ onScanQR }) {
   }
 
   // 是否有激活的筛选条件
-  const hasActiveFilters = activeSubject !== 'all' || activeTime !== 'all' || activeErrorCount !== 'all'
+  const hasActiveFilters = activeSubject !== 'all' || activeTime !== 'all' || activeErrorCount !== 'all' || activeTag !== 'all'
 
-  // 重置所有筛选
   const resetFilters = () => {
     setActiveSubject('all')
     setActiveTime('all')
     setActiveErrorCount('all')
+    setActiveTag('all')
   }
+
+  const getAllTags = () => {
+    const tagSet = new Set()
+    wrongQuestions
+      .filter(wq => wq.student_id === currentStudent?.id)
+      .forEach(wq => {
+        const question = wq.question || wq
+        const tags = question.tags_source === 'manual'
+          ? (question.manual_tags || [])
+          : (question.ai_tags || [])
+        tags.forEach(tag => tagSet.add(tag))
+      })
+    return Array.from(tagSet).sort()
+  }
+
+  const allTags = getAllTags()
 
   // 获取统计数据（只统计当前学生的错题）
   const getStats = () => {
@@ -693,6 +718,33 @@ export default function WrongBook({ onScanQR }) {
                     {question.content}
                   </div>
 
+                  {/* 知识点标签 */}
+                  {(() => {
+                    const tags = question.tags_source === 'manual'
+                      ? (question.manual_tags || [])
+                      : (question.ai_tags || [])
+                    if (tags.length === 0) return null
+                    return (
+                      <div style={{ display: 'flex', flexWrap: 'wrap', gap: '6px', marginBottom: '8px' }}>
+                        {tags.map((tag, idx) => (
+                          <span
+                            key={idx}
+                            style={{
+                              fontSize: '11px',
+                              padding: '2px 8px',
+                              borderRadius: '10px',
+                              background: question.tags_source === 'manual' ? '#FFF7E6' : '#E8F4FD',
+                              color: question.tags_source === 'manual' ? '#FA8C16' : APPLE_COLORS.primary,
+                              fontWeight: 400
+                            }}
+                          >
+                            {tag}
+                          </span>
+                        ))}
+                      </div>
+                    )
+                  })()}
+
                   {/* 错误次数 */}
                   <div style={{ fontSize: '13px', color: APPLE_COLORS.textSecondary, display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
                     <span>错误次数：{question.wrong_count || 1}次</span>
@@ -899,6 +951,48 @@ export default function WrongBook({ onScanQR }) {
                 ))}
               </div>
             </div>
+
+            {/* 知识点标签筛选 */}
+            {allTags.length > 0 && (
+              <div style={{ marginBottom: '24px' }}>
+                <div style={{ fontSize: '15px', color: APPLE_COLORS.text, marginBottom: '12px', fontWeight: 500 }}>知识点标签</div>
+                <div style={{ display: 'flex', flexWrap: 'wrap', gap: '8px' }}>
+                  <div
+                    onClick={() => setActiveTag('all')}
+                    style={{
+                      padding: '10px 18px',
+                      borderRadius: '20px',
+                      fontSize: '14px',
+                      cursor: 'pointer',
+                      background: activeTag === 'all' ? APPLE_COLORS.primary : APPLE_COLORS.background,
+                      color: activeTag === 'all' ? '#fff' : APPLE_COLORS.textSecondary,
+                      fontWeight: activeTag === 'all' ? 500 : 400,
+                      transition: 'all 0.2s'
+                    }}
+                  >
+                    全部标签
+                  </div>
+                  {allTags.map(tag => (
+                    <div
+                      key={tag}
+                      onClick={() => setActiveTag(tag)}
+                      style={{
+                        padding: '10px 18px',
+                        borderRadius: '20px',
+                        fontSize: '14px',
+                        cursor: 'pointer',
+                        background: activeTag === tag ? '#FA8C16' : APPLE_COLORS.background,
+                        color: activeTag === tag ? '#fff' : APPLE_COLORS.textSecondary,
+                        fontWeight: activeTag === tag ? 500 : 400,
+                        transition: 'all 0.2s'
+                      }}
+                    >
+                      {tag}
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
           </div>
 
           {/* 底部按钮 */}
