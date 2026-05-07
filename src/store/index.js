@@ -1,6 +1,6 @@
 import { create } from 'zustand'
+import { subscribeToTaskUpdates, startTaskPolling } from '../services/taskService'
 
-// 学生状态管理 - 纯内存，无本地存储
 export const useStudentStore = create((set, get) => ({
   currentStudent: null,
   students: [],
@@ -25,11 +25,12 @@ export const useStudentStore = create((set, get) => ({
   }))
 }))
 
-// 任务状态管理 - 纯内存，无本地存储
 export const useTaskStore = create((set, get) => ({
   currentTask: null,
   tasks: [],
   processingTasks: [],
+  _unsubRealtime: null,
+  _unsubPolling: null,
   
   setCurrentTask: (task) => set({ currentTask: task }),
   
@@ -39,11 +40,42 @@ export const useTaskStore = create((set, get) => ({
     tasks: [task, ...state.tasks]
   })),
   
+  addTasks: (newTasks) => set((state) => ({
+    tasks: [...newTasks, ...state.tasks]
+  })),
+  
   updateTaskStatus: (taskId, status, result = null) => set((state) => ({
     tasks: state.tasks.map(t => 
-      t.id === taskId ? { ...t, status, result, updated_at: new Date().toISOString() } : t
+      t.id === taskId ? { ...t, status, result: result || t.result, updated_at: new Date().toISOString() } : t
     )
   })),
+  
+  updateTaskFromServer: (serverTask) => set((state) => {
+    const existing = state.tasks.find(t => t.id === serverTask.id)
+    if (existing) {
+      return {
+        tasks: state.tasks.map(t => 
+          t.id === serverTask.id ? { ...t, ...serverTask } : t
+        )
+      }
+    }
+    return {
+      tasks: [serverTask, ...state.tasks]
+    }
+  }),
+  
+  syncTasksFromServer: (serverTasks) => set((state) => {
+    const taskMap = new Map()
+    for (const st of serverTasks) {
+      taskMap.set(st.id, { ...st })
+    }
+    for (const t of state.tasks) {
+      if (!taskMap.has(t.id)) {
+        taskMap.set(t.id, t)
+      }
+    }
+    return { tasks: Array.from(taskMap.values()) }
+  }),
   
   addToProcessing: (task) => set((state) => ({
     processingTasks: [...state.processingTasks, task]
@@ -51,7 +83,52 @@ export const useTaskStore = create((set, get) => ({
   
   removeFromProcessing: (taskId) => set((state) => ({
     processingTasks: state.processingTasks.filter(t => t.id !== taskId)
-  }))
+  })),
+
+  startRealtimeSync: () => {
+    const state = get()
+    if (state._unsubRealtime) return
+
+    const unsub = subscribeToTaskUpdates((updatedTask) => {
+      get().updateTaskFromServer(updatedTask)
+    })
+
+    set({ _unsubRealtime: unsub })
+  },
+
+  stopRealtimeSync: () => {
+    const state = get()
+    if (state._unsubRealtime) {
+      state._unsubRealtime()
+      set({ _unsubRealtime: null })
+    }
+  },
+
+  startPolling: (studentId, intervalMs = 8000) => {
+    const state = get()
+    if (state._unsubPolling) return
+
+    const unsub = startTaskPolling(studentId, (serverTasks) => {
+      get().syncTasksFromServer(serverTasks)
+    }, intervalMs)
+
+    set({ _unsubPolling: unsub })
+  },
+
+  stopPolling: () => {
+    const state = get()
+    if (state._unsubPolling) {
+      state._unsubPolling()
+      set({ _unsubPolling: null })
+    }
+  },
+
+  cleanup: () => {
+    const state = get()
+    if (state._unsubRealtime) state._unsubRealtime()
+    if (state._unsubPolling) state._unsubPolling()
+    set({ _unsubRealtime: null, _unsubPolling: null })
+  }
 }))
 
 // 错题本状态管理 - 纯内存，无本地存储
