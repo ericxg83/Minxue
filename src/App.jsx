@@ -1,13 +1,13 @@
-import { useEffect, useState, useRef, createContext, useContext } from 'react'
-import { 
-  Camera, 
-  ChevronRight, 
-  CheckCircle2, 
-  XCircle, 
-  Loader2, 
-  BookOpen, 
-  LayoutGrid, 
-  FileText, 
+import { useEffect, useState, useRef, createContext, useContext, useCallback } from 'react'
+import {
+  Camera,
+  ChevronRight,
+  CheckCircle2,
+  XCircle,
+  Loader2,
+  BookOpen,
+  LayoutGrid,
+  FileText,
   Sparkles,
   Search,
   Bell,
@@ -32,6 +32,9 @@ import { recognizeQuestions, compressImage, saveRecognitionResult } from './serv
 import { mockQuestions, mockTasks, mockWrongQuestions, mockExams, mockStudents } from './data/mockData'
 import StudentSwitcher from './components/StudentSwitcher'
 import QuestionEditDrawer from './components/QuestionEditDrawer'
+import { ProcessingSkeleton, PendingSkeleton, WrongBookSkeleton, ExamSkeleton } from './components/Skeleton'
+import preloadEngine from './utils/preloadEngine'
+import apiService from './services/apiService'
 import ScanQR from './pages/ScanQR'
 import Grading from './pages/Grading'
 import dayjs from 'dayjs'
@@ -115,10 +118,10 @@ export default function App() {
   // Store hooks
   const { currentPage, setCurrentPage } = useUIStore()
   const { students, currentStudent, setCurrentStudent, setStudents, addStudent } = useStudentStore()
-  const { tasks, setTasks, addTask, updateTaskStatus: updateTaskInStore } = useTaskStore()
-  const { wrongQuestions, setWrongQuestions, selectedQuestions, setSelectedQuestions, clearSelection, addWrongQuestion, addWrongQuestions: addMultipleToStore } = useWrongQuestionStore()
-  const { pendingQuestions, setPendingQuestions, addPendingQuestions } = usePendingQuestionStore()
-  const { exams, setExams, generatedExams, setGeneratedExams } = useExamStore()
+  const { tasks, setTasks, addTask, updateTaskStatus: updateTaskInStore, loading: tasksLoading, initialized: tasksInitialized } = useTaskStore()
+  const { wrongQuestions, setWrongQuestions, selectedQuestions, setSelectedQuestions, clearSelection, addWrongQuestion, addWrongQuestions: addMultipleToStore, loading: wrongLoading, initialized: wrongInitialized } = useWrongQuestionStore()
+  const { pendingQuestions, setPendingQuestions, addPendingQuestions, loading: pendingLoading, initialized: pendingInitialized } = usePendingQuestionStore()
+  const { exams, setExams, generatedExams, setGeneratedExams, loading: examLoading, initialized: examInitialized } = useExamStore()
 
   // Processing Page State
   const [processingFilter, setProcessingFilter] = useState('all')
@@ -188,7 +191,9 @@ export default function App() {
   // Toast
   const Toast = useToast()
 
-  // Initialize students
+  // ==================== 优化的数据加载逻辑 ====================
+
+  // Initialize students - SWR模式
   useEffect(() => {
     const init = async () => {
       try {
@@ -199,10 +204,31 @@ export default function App() {
           }
           return
         }
-        const studentList = await getStudents()
-        const safeStudentList = Array.isArray(studentList) ? studentList : []
+
+        const result = await apiService.swrFetch(
+          'students',
+          () => getStudents(false),
+          {
+            maxAge: 15 * 60 * 1000,
+            onUpdate: (fresh) => {
+              setStudents(fresh)
+            }
+          }
+        )
+
+        const safeStudentList = Array.isArray(result.data) ? result.data : []
         setStudents(safeStudentList)
-        if (safeStudentList.length > 0 && !currentStudent) {
+
+        // 恢复上次选择的学生
+        const lastStudentId = cacheManager.session.get('current_student_id')
+        if (lastStudentId) {
+          const found = safeStudentList.find(s => s.id === lastStudentId)
+          if (found) {
+            setCurrentStudent(found)
+          } else if (safeStudentList.length > 0) {
+            setCurrentStudent(safeStudentList[0])
+          }
+        } else if (safeStudentList.length > 0) {
           setCurrentStudent(safeStudentList[0])
         }
       } catch (error) {
@@ -214,42 +240,166 @@ export default function App() {
     init()
   }, [])
 
-  // Clear data when student changes
+  // 页面数据加载 - 使用SWR模式
+  const loadTasks = useCallback(async (studentId, showLoading = true) => {
+    if (!studentId) return
+    if (showLoading) useTaskStore.getState().setLoading(true)
+
+    try {
+      const result = await apiService.swrFetch(
+        `tasks_${studentId}`,
+        () => getTasksByStudent(studentId, false),
+        {
+          maxAge: 10 * 60 * 1000,
+          onUpdate: (fresh) => {
+            setTasks(fresh)
+          }
+        }
+      )
+      setTasks(Array.isArray(result.data) ? result.data : [])
+    } catch (error) {
+      console.error('加载任务失败:', error)
+      setTasks([])
+    } finally {
+      if (showLoading) useTaskStore.getState().setLoading(false)
+    }
+  }, [])
+
+  const loadPendingData = useCallback(async (studentId, showLoading = true) => {
+    if (!studentId) return
+    if (showLoading) usePendingQuestionStore.getState().setLoading(true)
+
+    try {
+      // 并行获取任务和错题
+      const [tasksResult, wrongResult] = await Promise.all([
+        apiService.swrFetch(
+          `tasks_${studentId}`,
+          () => getTasksByStudent(studentId, false),
+          { maxAge: 10 * 60 * 1000 }
+        ),
+        apiService.swrFetch(
+          `wrong_questions_${studentId}`,
+          () => getWrongQuestionsByStudent(studentId, false),
+          { maxAge: 5 * 60 * 1000 }
+        )
+      ])
+
+      const taskList = Array.isArray(tasksResult.data) ? tasksResult.data : []
+      const doneTasks = taskList.filter(t => t.status === 'done')
+
+      // 并行获取所有题目的详情
+      const questionPromises = doneTasks.slice(0, 5).map(task =>
+        apiService.swrFetch(
+          `questions_${task.id}`,
+          () => getQuestionsByTask(task.id, false),
+          { maxAge: 5 * 60 * 1000 }
+        )
+      )
+
+      const questionResults = await Promise.all(questionPromises)
+      const allQuestions = []
+      for (const result of questionResults) {
+        const qs = Array.isArray(result.data) ? result.data : []
+        allQuestions.push(...qs.map(q => ({ ...q, status: q.is_correct ? 'correct' : 'wrong' })))
+      }
+
+      const wrongQuestionIds = new Set(
+        (Array.isArray(wrongResult.data) ? wrongResult.data : []).map(w => w.question_id)
+      )
+      const pendingOnly = allQuestions.filter(q => !wrongQuestionIds.has(q.id))
+
+      setPendingQuestions(pendingOnly)
+    } catch (error) {
+      console.error('加载待确认数据失败:', error)
+      setPendingQuestions([])
+    } finally {
+      if (showLoading) usePendingQuestionStore.getState().setLoading(false)
+    }
+  }, [])
+
+  const loadWrongBookData = useCallback(async (studentId, showLoading = true) => {
+    if (!studentId) return
+    if (showLoading) useWrongQuestionStore.getState().setLoading(true)
+
+    try {
+      const result = await apiService.swrFetch(
+        `wrong_questions_${studentId}`,
+        () => getWrongQuestionsByStudent(studentId, false),
+        {
+          maxAge: 5 * 60 * 1000,
+          onUpdate: (fresh) => {
+            setWrongQuestions(fresh)
+          }
+        }
+      )
+      setWrongQuestions(Array.isArray(result.data) ? result.data : [])
+    } catch (error) {
+      console.error('加载错题失败:', error)
+      setWrongQuestions([])
+    } finally {
+      if (showLoading) useWrongQuestionStore.getState().setLoading(false)
+    }
+  }, [])
+
+  const loadGeneratedExams = useCallback(async (studentId, showLoading = true) => {
+    if (!studentId) return
+    if (showLoading) useExamStore.getState().setLoading(true)
+
+    try {
+      const { getGeneratedExamsByStudent } = await import('./services/supabaseService')
+      const result = await apiService.swrFetch(
+        `generated_exams_${studentId}`,
+        () => getGeneratedExamsByStudent(studentId, false),
+        {
+          maxAge: 10 * 60 * 1000,
+          onUpdate: (fresh) => {
+            setGeneratedExams(fresh)
+          }
+        }
+      )
+      setGeneratedExams(Array.isArray(result.data) ? result.data : [])
+    } catch (error) {
+      console.error('加载试卷失败:', error)
+      setGeneratedExams([])
+    } finally {
+      if (showLoading) useExamStore.getState().setLoading(false)
+    }
+  }, [])
+
+  // 学生切换时清空数据
   useEffect(() => {
     setTasks([])
     setPendingQuestions([])
     setWrongQuestions([])
     setGeneratedExams([])
     setExams([])
+    preloadEngine.reset()
   }, [currentStudent?.id])
 
-  // Load tasks when student changes
+  // 页面切换时加载数据 + 预加载
   useEffect(() => {
-    if (currentStudent && currentPage === 'processing') {
-      loadTasks()
-    }
-  }, [currentStudent?.id, currentPage])
+    if (!currentStudent) return
 
-  // Load pending questions
-  useEffect(() => {
-    if (currentStudent && currentPage === 'pending') {
-      loadPendingData()
-    }
-  }, [currentStudent?.id, currentPage])
+    const studentId = currentStudent.id
 
-  // Load wrong questions
-  useEffect(() => {
-    if (currentStudent && currentPage === 'wrongbook') {
-      loadWrongBookData()
-    }
-  }, [currentStudent?.id, currentPage])
-
-  // Load exams
-  useEffect(() => {
-    if (currentStudent && currentPage === 'exam') {
-      loadGeneratedExams(false)
-      const interval = setInterval(() => loadGeneratedExams(false), 3000)
-      return () => clearInterval(interval)
+    switch (currentPage) {
+      case 'processing':
+        loadTasks(studentId)
+        preloadEngine.smartPreload('processing', studentId)
+        break
+      case 'pending':
+        loadPendingData(studentId)
+        break
+      case 'wrongbook':
+        loadWrongBookData(studentId)
+        preloadEngine.smartPreload('wrongbook', studentId)
+        break
+      case 'exam':
+        loadGeneratedExams(studentId)
+        const interval = setInterval(() => loadGeneratedExams(studentId, false), 3000)
+        return () => clearInterval(interval)
+      default:
+        break
     }
   }, [currentStudent?.id, currentPage])
 
@@ -271,90 +421,6 @@ export default function App() {
       setReprintQuestions([])
     }
   }, [reprintExam])
-
-  // Processing: Load tasks
-  const loadTasks = async () => {
-    if (!currentStudent) return
-    try {
-      if (USE_MOCK_DATA) {
-        const filteredMockTasks = mockTasks.filter(t => t.student_id === currentStudent.id)
-        setTasks(filteredMockTasks)
-        return
-      }
-      const taskList = await getTasksByStudent(currentStudent.id, false)
-      setTasks(Array.isArray(taskList) ? taskList : [])
-    } catch (error) {
-      console.error('加载任务失败:', error)
-      setTasks([])
-    }
-  }
-
-  // Pending: Load data
-  const loadPendingData = async () => {
-    if (!currentStudent) return
-    try {
-      if (USE_MOCK_DATA) {
-        return
-      }
-      const taskList = await getTasksByStudent(currentStudent.id, false)
-      const safeTaskList = Array.isArray(taskList) ? taskList : []
-      const doneTasks = safeTaskList.filter(t => t.status === 'done')
-      const allQuestions = []
-      for (const task of doneTasks) {
-        try {
-          const taskQuestions = await getQuestionsByTask(task.id, false)
-          const safeQuestions = Array.isArray(taskQuestions) ? taskQuestions : []
-          allQuestions.push(...safeQuestions.map(q => ({ ...q, status: q.is_correct ? 'correct' : 'wrong' })))
-        } catch (taskError) {
-          console.error(`获取任务 ${task.id} 的题目失败:`, taskError)
-        }
-      }
-
-      const existingWrong = await getWrongQuestionsByStudent(currentStudent.id, false)
-      const wrongQuestionIds = new Set((existingWrong || []).map(w => w.question_id))
-      const pendingOnly = allQuestions.filter(q => !wrongQuestionIds.has(q.id))
-
-      setPendingQuestions(pendingOnly)
-    } catch (error) {
-      console.error('加载待确认数据失败:', error)
-      setPendingQuestions([])
-    }
-  }
-
-  // WrongBook: Load data
-  const loadWrongBookData = async () => {
-    if (!currentStudent) return
-    try {
-      if (USE_MOCK_DATA) {
-        const filteredMock = mockWrongQuestions.filter(wq => wq.student_id === currentStudent.id)
-        setWrongQuestions(filteredMock)
-        return
-      }
-      const data = await getWrongQuestionsByStudent(currentStudent.id, false)
-      setWrongQuestions(Array.isArray(data) ? data : [])
-    } catch (error) {
-      console.error('加载错题失败:', error)
-      setWrongQuestions([])
-    }
-  }
-
-  // Exam: Load generated exams
-  const loadGeneratedExams = async (useCache = false) => {
-    if (!currentStudent) return
-    try {
-      if (USE_MOCK_DATA) {
-        const studentMockExams = mockExams.filter(e => e.student_id === currentStudent.id)
-        setGeneratedExams(studentMockExams)
-        return
-      }
-      const { getGeneratedExamsByStudent } = await import('./services/supabaseService')
-      const examList = await getGeneratedExamsByStudent(currentStudent.id, useCache)
-      setGeneratedExams(Array.isArray(examList) ? examList : [])
-    } catch (error) {
-      console.error('加载试卷失败:', error)
-      setGeneratedExams([])
-    }
-  }
 
   // Upload file handler
   const handleFileSelect = async (e) => {
@@ -965,9 +1031,11 @@ export default function App() {
                   </div>
                 </section>
 
-                {/* Task List */}
+                {/* Task List - 骨架屏/内容 */}
                 <section className="px-5 space-y-3">
-                  {searchFilteredTasks.length === 0 ? (
+                  {tasksLoading && !tasksInitialized ? (
+                    <ProcessingSkeleton />
+                  ) : searchFilteredTasks.length === 0 ? (
                     <div className="text-center py-20">
                       <Camera size={48} className="mx-auto text-gray-200 mb-4" />
                       <p className="text-gray-400 text-[15px]">暂无任务</p>
@@ -1118,7 +1186,9 @@ export default function App() {
 
                 {/* Question List */}
                 <section className="px-5 space-y-3">
-                  {filteredQuestions.length === 0 ? (
+                  {pendingLoading && !pendingInitialized ? (
+                    <PendingSkeleton />
+                  ) : filteredQuestions.length === 0 ? (
                     <div className="text-center py-20">
                       <BookOpen size={48} className="mx-auto text-gray-200 mb-4" />
                       <p className="text-gray-400 text-[15px]">暂无待确认题目</p>
@@ -1300,7 +1370,9 @@ export default function App() {
 
                 {/* Wrong Question List */}
                 <section className="px-5 space-y-3">
-                  {filteredWrongQuestions.length === 0 ? (
+                  {wrongLoading && !wrongInitialized ? (
+                    <WrongBookSkeleton />
+                  ) : filteredWrongQuestions.length === 0 ? (
                     <div className="text-center py-20">
                       <LayoutGrid size={48} className="mx-auto text-gray-200 mb-4" />
                       <p className="text-gray-400 text-[15px]">暂无错题</p>
@@ -1410,7 +1482,9 @@ export default function App() {
 
                 {/* Exam List */}
                 <section className="px-5 space-y-3">
-                  {filteredExams.length === 0 ? (
+                  {examLoading && !examInitialized ? (
+                    <ExamSkeleton />
+                  ) : filteredExams.length === 0 ? (
                     <div className="text-center py-20">
                       <FileText size={48} className="mx-auto text-gray-200 mb-4" />
                       <p className="text-gray-400 text-[15px]">暂无试卷</p>
@@ -1476,12 +1550,15 @@ export default function App() {
               <button
                 key={tab.id}
                 onClick={() => { setCurrentPage(tab.id); setSelectedConfirmIds([]); clearSelection() }}
+                onMouseEnter={() => preloadEngine.hoverPreload(tab.id, currentStudent?.id)}
+                onMouseLeave={() => preloadEngine.cancelHoverPreload()}
+                onTouchStart={() => preloadEngine.hoverPreload(tab.id, currentStudent?.id)}
                 className="flex flex-col items-center gap-1.5 transition-all group relative"
               >
-                <tab.icon 
-                  size={22} 
+                <tab.icon
+                  size={22}
                   strokeWidth={currentPage === tab.id ? 2.5 : 2}
-                  className={currentPage === tab.id ? 'text-blue-600' : 'text-gray-300'} 
+                  className={currentPage === tab.id ? 'text-blue-600' : 'text-gray-300'}
                 />
                 <span className={`text-[10px] font-bold tracking-[0.05em] uppercase ${currentPage === tab.id ? 'text-blue-600' : 'text-gray-400'}`}>
                   {tab.label}

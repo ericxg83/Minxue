@@ -1,0 +1,33 @@
+name = "minxue-app-v3"
+compatibility_date = "2025-01-01"
+
+[build]
+command = "npm run build"
+
+[build.upload]
+format = "service-worker"
+
+[[headers]]
+for = "/*"
+[headers.values]
+X-Frame-Options = "DENY"
+X-Content-Type-Options = "nosniff"
+Referrer-Policy = "strict-origin-when-cross-origin"
+
+# API 代理到 Render
+[[routes]]
+pattern = "/api/*"
+custom_domain = false
+
+# 静态资源缓存
+[[headers]]
+for = "/assets/*"
+[headers.values]
+Cache-Control = "public, max-age=31536000, immutable"
+
+# PWA 相关文件不缓存
+[[headers]]
+for = "/sw.js"
+[headers.values]
+Cache-Control = "no-cache"
+Service-Worker-Allowed = "/"

@@ -1,8 +1,7 @@
 import axios from 'axios'
 import sharp from 'sharp'
-import { supabase, TABLES, TASK_STATUS } from './config/supabase.js'
+import { query, TABLES, TASK_STATUS } from './config/neon.js'
 import { AI_CONFIG, getAIHeaders, buildOCRPrompt, buildTaggingPrompt } from './config/ai.js'
-import { updateTaskStatus, createQuestions, batchUpdateQuestionTags, addWrongQuestions } from './services/supabaseService.js'
 
 const TAG_SYNONYM_MAP = {
   '几何-三角形': '三角形',
@@ -69,6 +68,97 @@ const downloadImage = async (imageUrl) => {
     throw new Error('下载图片失败: ' + error.message)
   }
 }
+
+// ==================== Neon 数据操作 ====================
+
+const updateTaskStatus = async (taskId, status, result = null) => {
+  if (result !== null) {
+    const { rows: existing } = await query(
+      `SELECT result FROM ${TABLES.TASKS} WHERE id = $1`,
+      [taskId]
+    )
+    const mergedResult = {
+      ...(existing[0]?.result || {}),
+      ...result
+    }
+    await query(
+      `UPDATE ${TABLES.TASKS} SET status = $1, result = $2, updated_at = NOW() WHERE id = $3`,
+      [status, JSON.stringify(mergedResult), taskId]
+    )
+  } else {
+    await query(
+      `UPDATE ${TABLES.TASKS} SET status = $1, updated_at = NOW() WHERE id = $2`,
+      [status, taskId]
+    )
+  }
+}
+
+const createQuestions = async (questions) => {
+  const created = []
+  for (const q of questions) {
+    let statusValue = 'pending'
+    if (q.status === 'wrong' || !q.is_correct) {
+      statusValue = 'wrong'
+    } else if (q.status === 'mastered') {
+      statusValue = 'mastered'
+    }
+
+    const { rows } = await query(
+      `INSERT INTO ${TABLES.QUESTIONS}
+       (task_id, student_id, content, options, answer, analysis, question_type, subject, is_correct, status, image_url, ai_tags, manual_tags, tags_source)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14)
+       RETURNING *`,
+      [q.task_id, q.student_id, q.content || null, JSON.stringify(q.options || []),
+       q.answer || null, q.analysis || null, q.question_type || 'choice',
+       q.subject || null, q.is_correct !== undefined ? q.is_correct : true,
+       statusValue, q.image_url || null, JSON.stringify(q.ai_tags || []),
+       JSON.stringify(q.manual_tags || []), q.tags_source || 'ai']
+    )
+    created.push(rows[0])
+  }
+  return created
+}
+
+const batchUpdateQuestionTags = async (tagUpdates) => {
+  const results = []
+  for (const update of tagUpdates) {
+    try {
+      const { rows } = await query(
+        `UPDATE ${TABLES.QUESTIONS} SET ai_tags = $1, tags_source = 'ai', updated_at = NOW() WHERE id = $2 RETURNING *`,
+        [JSON.stringify(update.ai_tags || []), update.id]
+      )
+      if (rows.length > 0) results.push(rows[0])
+    } catch (error) {
+      console.error(`更新标签失败，题目ID: ${update.id}`, error)
+    }
+  }
+  return results
+}
+
+const addWrongQuestions = async (studentId, questionIds) => {
+  const { rows: existing } = await query(
+    `SELECT question_id FROM ${TABLES.WRONG_QUESTIONS} WHERE student_id = $1 AND question_id = ANY($2)`,
+    [studentId, questionIds]
+  )
+
+  const existingIds = new Set((existing || []).map(e => e.question_id))
+  const newIds = questionIds.filter(id => !existingIds.has(id))
+
+  if (newIds.length === 0) return []
+
+  const created = []
+  for (const questionId of newIds) {
+    const { rows } = await query(
+      `INSERT INTO ${TABLES.WRONG_QUESTIONS} (student_id, question_id, status, error_count, added_at, last_wrong_at)
+       VALUES ($1, $2, 'pending', 1, NOW(), NOW()) RETURNING *`,
+      [studentId, questionId]
+    )
+    created.push(rows[0])
+  }
+  return created
+}
+
+// ==================== AI 识别 ====================
 
 const recognizeQuestions = async (imageBase64, taskId, retryCount = 0) => {
   const prompt = buildOCRPrompt()
@@ -243,6 +333,8 @@ const generateTagsForQuestions = async (questions) => {
   return results
 }
 
+// ==================== 任务处理器 ====================
+
 export const processTask = async (job) => {
   const { taskId, studentId, imageUrl, originalName } = job.data
   const startTime = Date.now()
@@ -261,7 +353,7 @@ export const processTask = async (job) => {
     try {
       imageBuffer = await downloadImage(imageUrl)
     } catch (downloadError) {
-      console.warn('从URL下载失败，尝试从Supabase Storage获取:', downloadError.message)
+      console.warn('从URL下载失败:', downloadError.message)
       throw new Error('下载图片失败: ' + downloadError.message)
     }
 

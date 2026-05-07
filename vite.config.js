@@ -3,12 +3,39 @@ import react from '@vitejs/plugin-react'
 import { VitePWA } from 'vite-plugin-pwa'
 import tailwindcss from '@tailwindcss/vite'
 
-export default defineConfig({
+export default defineConfig(({ mode }) => ({
   plugins: [
     react(),
     tailwindcss(),
     VitePWA({
       registerType: 'autoUpdate',
+      workbox: {
+        globPatterns: ['**/*.{js,css,html,ico,png,svg,woff2}'],
+        runtimeCaching: [
+          {
+            urlPattern: /^https:\/\/cdn\./,
+            handler: 'CacheFirst',
+            options: {
+              cacheName: 'oss-cdn-cache',
+              expiration: {
+                maxEntries: 200,
+                maxAgeSeconds: 30 * 24 * 60 * 60 // 30天
+              }
+            }
+          },
+          {
+            urlPattern: /\.(?:png|jpg|jpeg|webp|svg)$/,
+            handler: 'CacheFirst',
+            options: {
+              cacheName: 'image-cache',
+              expiration: {
+                maxEntries: 100,
+                maxAgeSeconds: 7 * 24 * 60 * 60 // 7天
+              }
+            }
+          }
+        ]
+      },
       manifest: {
         name: '敏学错题本',
         short_name: '敏学',
@@ -32,19 +59,25 @@ export default defineConfig({
       }
     })
   ],
+  build: {
+    rollupOptions: {
+      output: {
+        manualChunks: {
+          vendor: ['react', 'react-dom', 'react-router-dom'],
+          ui: ['motion', 'lucide-react'],
+          pdf: ['jspdf', 'html2canvas']
+        }
+      }
+    }
+  },
   server: {
     port: 3000,
     host: true,
     proxy: {
-      '/supabase': {
-        target: 'https://wdwlxbtntuurjtlirwew.supabase.co',
-        changeOrigin: true,
-        rewrite: (path) => path.replace(/^\/supabase/, '')
-      },
       '/api': {
         target: 'http://localhost:3001',
         changeOrigin: true
       }
     }
   }
-})
+}))

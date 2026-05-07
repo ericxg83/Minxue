@@ -1,54 +1,33 @@
 import { supabase, TABLES } from '../config/supabase'
+import cacheManager from '../utils/cacheManager'
 
-// ==================== 缓存工具函数 ====================
+// ==================== 缓存工具函数 (兼容层，逐步迁移到 cacheManager) ====================
 
 const CACHE_MAX_AGE = {
-  STUDENTS: 15 * 60 * 1000,   // 15分钟
-  TASKS: 5 * 60 * 1000,       // 5分钟
-  EXAMS: 10 * 60 * 1000,      // 10分钟
-  QUESTIONS: 5 * 60 * 1000,   // 5分钟
-  WRONG: 5 * 60 * 1000,       // 5分钟
-  GENERATED: 10 * 60 * 1000   // 10分钟
+  STUDENTS: 15 * 60 * 1000,
+  TASKS: 10 * 60 * 1000,
+  EXAMS: 10 * 60 * 1000,
+  QUESTIONS: 5 * 60 * 1000,
+  WRONG: 5 * 60 * 1000,
+  GENERATED: 10 * 60 * 1000
 }
 
 const readCache = (key, maxAge) => {
-  try {
-    const cached = localStorage.getItem(key)
-    const cachedTime = localStorage.getItem(key + '_ts')
-    if (cached && cachedTime) {
-      const age = Date.now() - parseInt(cachedTime)
-      if (age < maxAge) {
-        return JSON.parse(cached)
-      }
-    }
-  } catch (e) {
-    console.warn('读取缓存失败:', e)
-  }
-  return null
+  const result = cacheManager.get(key, { maxAge, fallback: true })
+  return result.data
 }
 
 const writeCache = (key, data) => {
-  try {
-    localStorage.setItem(key, JSON.stringify(data))
-    localStorage.setItem(key + '_ts', String(Date.now()))
-  } catch (e) {
-    console.warn('写入缓存失败:', e)
-  }
+  cacheManager.set(key, data)
 }
 
 const readFallbackCache = (key) => {
-  try {
-    const cached = localStorage.getItem(key)
-    if (cached) return JSON.parse(cached)
-  } catch (e) {}
-  return null
+  const result = cacheManager.get(key, { fallback: true })
+  return result.data
 }
 
 const clearCache = (key) => {
-  try {
-    localStorage.removeItem(key)
-    localStorage.removeItem(key + '_ts')
-  } catch (e) {}
+  cacheManager.remove(key)
 }
 
 // ==================== 学生相关操作 ====================
@@ -658,17 +637,8 @@ export const getQuestionsByIds = async (questionIds) => {
 // ==================== 缓存清理工具 ====================
 
 export const clearAllCache = () => {
-  try {
-    const keys = Object.keys(localStorage)
-    for (const key of keys) {
-      if (key.includes('_cache') || key.includes('_ts')) {
-        localStorage.removeItem(key)
-      }
-    }
-    console.log('所有缓存已清除')
-  } catch (e) {
-    console.error('清除缓存失败:', e)
-  }
+  cacheManager.invalidateAll()
+  console.log('所有缓存已清除')
 }
 
 export const invalidateCache = (type, studentId) => {
