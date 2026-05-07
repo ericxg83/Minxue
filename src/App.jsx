@@ -50,18 +50,20 @@ function ToastContainer({ toasts }) {
         {toasts.map((toast) => (
           <motion.div
             key={toast.id}
-            initial={{ opacity: 0, scale: 0.8 }}
+            initial={{ opacity: 0, scale: 0.9 }}
             animate={{ opacity: 1, scale: 1 }}
-            exit={{ opacity: 0, scale: 0.8 }}
-            className="bg-slate-900/90 backdrop-blur-xl text-white px-6 py-4 rounded-2xl shadow-2xl min-w-[160px] max-w-[280px] text-center"
+            exit={{ opacity: 0, scale: 0.9 }}
+            className={`px-6 py-3 rounded-2xl shadow-xl backdrop-blur-md flex items-center gap-2.5 pointer-events-auto ${
+              toast.type === 'success' ? 'bg-green-500/90 text-white' :
+              toast.type === 'error' ? 'bg-red-500/90 text-white' :
+              toast.type === 'loading' ? 'bg-blue-500/90 text-white' :
+              'bg-gray-900/90 text-white'
+            }`}
           >
-            <div className="flex flex-col items-center gap-2">
-              {toast.icon === 'success' && <CheckCircle2 size={32} className="text-green-400" strokeWidth={2.5} />}
-              {toast.icon === 'fail' && <XCircle size={32} className="text-red-400" strokeWidth={2.5} />}
-              {toast.icon === 'loading' && <Loader2 size={32} className="text-blue-400 animate-spin" strokeWidth={2.5} />}
-              {toast.icon === 'info' && <Eye size={32} className="text-blue-400" strokeWidth={2.5} />}
-              <div className="text-[13px] font-medium leading-snug">{toast.content}</div>
-            </div>
+            {toast.type === 'success' && <CheckCircle2 size={18} />}
+            {toast.type === 'error' && <XCircle size={18} />}
+            {toast.type === 'loading' && <Loader2 size={18} className="animate-spin" />}
+            <span className="text-[13px] font-medium">{toast.message}</span>
           </motion.div>
         ))}
       </AnimatePresence>
@@ -69,142 +71,38 @@ function ToastContainer({ toasts }) {
   )
 }
 
+// Toast Hook
+function useToast() {
+  const context = useContext(ToastContext)
+  if (!context) throw new Error('useToast must be used within ToastProvider')
+  return context
+}
+
+// Toast Provider
 function ToastProvider({ children }) {
   const [toasts, setToasts] = useState([])
-
-  const addToast = (options) => {
+  
+  const show = ({ message, type = 'info', duration = 2000 }) => {
     const id = Date.now()
-    const toast = { id, icon: options.icon, content: options.content, duration: options.duration || 2000 }
-    setToasts(prev => [...prev, toast])
-    if (toast.duration > 0) {
-      setTimeout(() => setToasts(prev => prev.filter(t => t.id !== id)), toast.duration)
+    const newToast = { id, message, type }
+    setToasts(prev => [...prev, newToast])
+    
+    if (duration > 0) {
+      setTimeout(() => {
+        setToasts(prev => prev.filter(t => t.id !== id))
+      }, duration)
     }
-    return id
+    
+    return {
+      dismiss: () => setToasts(prev => prev.filter(t => t.id !== id))
+    }
   }
-
-  const clear = () => setToasts([])
-
+  
   return (
-    <ToastContext.Provider value={{ addToast, clear }}>
+    <ToastContext.Provider value={{ show, toasts }}>
       {children}
       <ToastContainer toasts={toasts} />
     </ToastContext.Provider>
-  )
-}
-
-const Toast = {
-  show: (options) => {
-    if (typeof window !== 'undefined' && window.__toast) {
-      return window.__toast.addToast(options)
-    }
-  },
-  clear: () => {
-    if (typeof window !== 'undefined' && window.__toast) {
-      window.__toast.clear()
-    }
-  }
-}
-
-// Dialog Component
-function Dialog({ visible, title, content, confirmText = '确定', cancelText = '取消', onConfirm, onCancel }) {
-  if (!visible) return null
-
-  return (
-    <AnimatePresence>
-      {visible && (
-        <>
-          <motion.div
-            initial={{ opacity: 0 }}
-            animate={{ opacity: 1 }}
-            exit={{ opacity: 0 }}
-            onClick={onCancel}
-            className="fixed inset-0 bg-black/60 backdrop-blur-sm z-[10000]"
-          />
-          <motion.div
-            initial={{ opacity: 0, scale: 0.9, y: 20 }}
-            animate={{ opacity: 1, scale: 1, y: 0 }}
-            exit={{ opacity: 0, scale: 0.9, y: 20 }}
-            className="fixed top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 z-[10001] bg-white rounded-3xl shadow-2xl max-w-[280px] w-[85%] overflow-hidden"
-          >
-            {title && (
-              <div className="px-6 pt-6 pb-3">
-                <h3 className="text-[17px] font-bold text-slate-900 text-center">{title}</h3>
-              </div>
-            )}
-            <div className="px-6 pb-6">
-              <p className="text-[14px] text-slate-600 leading-relaxed text-center">{content}</p>
-            </div>
-            <div className="flex border-t border-gray-100">
-              <button onClick={onCancel} className="flex-1 py-4 text-[15px] font-medium text-slate-600 active:bg-gray-50 transition-colors">
-                {cancelText}
-              </button>
-              <div className="w-px bg-gray-100" />
-              <button onClick={onConfirm} className="flex-1 py-4 text-[15px] font-bold text-blue-600 active:bg-blue-50 transition-colors">
-                {confirmText}
-              </button>
-            </div>
-          </motion.div>
-        </>
-      )}
-    </AnimatePresence>
-  )
-}
-
-const DialogAPI = {
-  confirm: ({ title, content, confirmText, cancelText, onConfirm, onCancel }) => {
-    if (typeof window !== 'undefined' && window.__dialog) {
-      window.__dialog.show({
-        title, content,
-        confirmText: confirmText || '确定',
-        cancelText: cancelText || '取消',
-        onConfirm: () => { window.__dialog.hide(); onConfirm && onConfirm() },
-        onCancel: () => { window.__dialog.hide(); onCancel && onCancel() }
-      })
-    }
-  }
-}
-
-// ActionSheet Component
-function ActionSheet({ visible, actions, onClose }) {
-  if (!visible) return null
-
-  return (
-    <AnimatePresence>
-      {visible && (
-        <>
-          <motion.div
-            initial={{ opacity: 0 }}
-            animate={{ opacity: 1 }}
-            exit={{ opacity: 0 }}
-            onClick={onClose}
-            className="fixed inset-0 bg-black/50 backdrop-blur-sm z-[9999]"
-          />
-          <motion.div
-            initial={{ y: '100%' }}
-            animate={{ y: 0 }}
-            exit={{ y: '100%' }}
-            transition={{ type: 'spring', damping: 25, stiffness: 200 }}
-            className="fixed bottom-0 left-0 right-0 z-[10000] bg-white rounded-t-3xl overflow-hidden max-w-md mx-auto"
-          >
-            <div className="p-3">
-              {actions.map((action, index) => (
-                <button
-                  key={action.key || index}
-                  onClick={() => { action.onClick && action.onClick(action); onClose() }}
-                  className="w-full py-4 px-4 text-center active:bg-gray-50 transition-colors border-b border-gray-50 last:border-0"
-                >
-                  <div className="text-[16px] font-medium text-slate-900">{action.text}</div>
-                  {action.description && <div className="text-[12px] text-gray-400 mt-1">{action.description}</div>}
-                </button>
-              ))}
-              <button onClick={onClose} className="w-full py-4 px-4 text-center active:bg-gray-50 transition-colors mt-2">
-                <div className="text-[16px] font-medium text-slate-600">取消</div>
-              </button>
-            </div>
-          </motion.div>
-        </>
-      )}
-    </AnimatePresence>
   )
 }
 
@@ -213,7 +111,7 @@ function ActionSheet({ visible, actions, onClose }) {
 const USE_MOCK_DATA = false
 
 export default function App() {
-  // State from stores
+  // Store hooks
   const { currentPage, setCurrentPage } = useUIStore()
   const { students, currentStudent, setCurrentStudent, setStudents, addStudent } = useStudentStore()
   const { tasks, setTasks, addTask, updateTaskStatus: updateTaskInStore } = useTaskStore()
@@ -237,96 +135,74 @@ export default function App() {
   const [selectedTimeRange, setSelectedTimeRange] = useState('all')
   const [selectedErrorCount, setSelectedErrorCount] = useState('all')
   const [selectedTags, setSelectedTags] = useState([])
-  const [showTagPicker, setShowTagPicker] = useState(false)
-  const [tagSearchKeyword, setTagSearchKeyword] = useState('')
-  const [tempSelectedTags, setTempSelectedTags] = useState([])
-  const [showPrintPreview, setShowPrintPreview] = useState(false)
-
-  // Exam Page State
-  const [examFilter, setExamFilter] = useState('all')
-  const [selectedPaperId, setSelectedPaperId] = useState(null)
+  const [showTagFilter, setShowTagFilter] = useState(false)
+  const [showTimeFilter, setShowTimeFilter] = useState(false)
+  const [showErrorFilter, setShowErrorFilter] = useState(false)
+  const [showSubjectFilter, setShowSubjectFilter] = useState(false)
+  const [showQRCode, setShowQRCode] = useState(false)
+  const [showPrintOptions, setShowPrintOptions] = useState(false)
+  const [printMode, setPrintMode] = useState('all')
+  const [printSize, setPrintSize] = useState('a4')
+  const [showGrading, setShowGrading] = useState(false)
+  const [gradingExam, setGradingExam] = useState(null)
+  const [showReprint, setShowReprint] = useState(false)
   const [reprintExam, setReprintExam] = useState(null)
   const [reprintQuestions, setReprintQuestions] = useState([])
 
+  // Exam Page State
+  const [examFilter, setExamFilter] = useState('all')
+  const [showExamDetail, setShowExamDetail] = useState(false)
+  const [selectedExam, setSelectedExam] = useState(null)
+  const [showExamPrint, setShowExamPrint] = useState(false)
+  const [showScanQR, setShowScanQR] = useState(false)
+
   // UI State
   const [showStudentSwitcher, setShowStudentSwitcher] = useState(false)
-  const [showActionSheet, setShowActionSheet] = useState(false)
-  const [showGrading, setShowGrading] = useState(false)
-  const [showScanQR, setShowScanQR] = useState(false)
-  const [gradingParams, setGradingParams] = useState(null)
-  const [dialogState, setDialogState] = useState({ visible: false, title: '', content: '', confirmText: '确定', cancelText: '取消', onConfirm: null, onCancel: null })
-  const fileInputRef = useRef(null)
+  const [showAddStudent, setShowAddStudent] = useState(false)
+  const [showImagePreview, setShowImagePreview] = useState(false)
+  const [previewImageUrl, setPreviewImageUrl] = useState(null)
+  const [showNotifications, setShowNotifications] = useState(false)
+  const [notifications, setNotifications] = useState([])
+  const [showSearch, setShowSearch] = useState(false)
+  const [searchQuery, setSearchQuery] = useState('')
+  const [showTagManager, setShowTagManager] = useState(false)
+  const [managingTagsQuestion, setManagingTagsQuestion] = useState(null)
+  const [showAddTag, setShowAddTag] = useState(false)
+  const [newTagInput, setNewTagInput] = useState('')
+  const [showDeleteConfirm, setShowDeleteConfirm] = useState(false)
+  const [deleteTarget, setDeleteTarget] = useState(null)
+  const [showBatchActions, setShowBatchActions] = useState(false)
+  const [showGenerateExam, setShowGenerateExam] = useState(false)
+  const [generatedExamPreview, setGeneratedExamPreview] = useState(null)
+  const [showStudentQR, setShowStudentQR] = useState(false)
+  const [studentQRData, setStudentQRData] = useState(null)
+  const [showPrintPreview, setShowPrintPreview] = useState(false)
+  const [printPreviewData, setPrintPreviewData] = useState(null)
+  const [showImageCrop, setShowImageCrop] = useState(false)
+  const [cropImage, setCropImage] = useState(null)
+  const [cropTaskId, setCropTaskId] = useState(null)
+  const [showPrintModal, setShowPrintModal] = useState(false)
+  const [printTarget, setPrintTarget] = useState(null)
 
-  // New UI State from reference
-  const [showOriginalPaper, setShowOriginalPaper] = useState(null)
-  const [showFullPaper, setShowFullPaper] = useState(false)
-  const [showDeleteConfirm, setShowDeleteConfirm] = useState(null)
-  const [showCropTool, setShowCropTool] = useState(false)
-  const [isAddStudentOpen, setIsAddStudentOpen] = useState(false)
-  const [isEditing, setIsEditing] = useState(false)
-  const [editTab, setEditTab] = useState('content')
-  const [displayEditImage, setDisplayEditImage] = useState('')
-  const [editAiTags, setEditAiTags] = useState([])
-  const [editManualTags, setEditManualTags] = useState([])
-  const [editTagsSource, setEditTagsSource] = useState('ai')
-  const [editNewTag, setEditNewTag] = useState('')
-
-  const getTypeLabel = (type) => {
-    const map = { choice: '选择题', fill: '填空题', answer: '解答题', CHOICE: '选择题', FILL: '填空题', ANSWER: '解答题' }
-    return map[type] || type || '选择题'
-  }
-
-  const cleanOptionPrefix = (options) => {
-    return (options || []).map(opt => {
-      const cleaned = String(opt).replace(/^[A-Da-d][、.\.\s]*/, '').trim()
-      return cleaned
-    })
-  }
-
-  const isChoiceQuestion = (type) => {
-    const t = String(type || '').toLowerCase()
-    return t === 'choice'
-  }
-
-  // Expose Toast and Dialog to window
-  useEffect(() => {
-    window.__toast = { addToast: (opts) => { /* implemented below */ }, clear: () => {} }
-  }, [])
-
-  // Toast State
-  const [toastList, setToastList] = useState([])
-  const showToast = (options) => {
-    const id = Date.now()
-    const toast = { id, icon: options.icon, content: options.content, duration: options.duration || 2000 }
-    setToastList(prev => [...prev, toast])
-    if (toast.duration > 0) {
-      setTimeout(() => setToastList(prev => prev.filter(t => t.id !== id)), toast.duration)
-    }
-  }
-  const clearToast = () => setToastList([])
-
-  useEffect(() => {
-    window.__toast = { addToast: showToast, clear: clearToast }
-  }, [])
-
-  useEffect(() => {
-    window.__dialog = {
-      show: (opts) => setDialogState({ visible: true, ...opts }),
-      hide: () => setDialogState(prev => ({ ...prev, visible: false }))
-    }
-  }, [])
+  // Toast
+  const Toast = useToast()
 
   // Initialize students
   useEffect(() => {
     const init = async () => {
       try {
-        const loadedStudents = await getStudents(true)
-        if (loadedStudents && loadedStudents.length > 0) {
-          setStudents(loadedStudents)
-          setCurrentStudent(loadedStudents[0])
-        } else {
-          setStudents([])
-          setCurrentStudent(null)
+        if (USE_MOCK_DATA) {
+          setStudents(mockStudents)
+          if (mockStudents.length > 0) {
+            setCurrentStudent(mockStudents[0])
+          }
+          return
+        }
+        const studentList = await getStudents()
+        const safeStudentList = Array.isArray(studentList) ? studentList : []
+        setStudents(safeStudentList)
+        if (safeStudentList.length > 0 && !currentStudent) {
+          setCurrentStudent(safeStudentList[0])
         }
       } catch (error) {
         console.error('加载学生数据失败:', error)
@@ -336,6 +212,15 @@ export default function App() {
     }
     init()
   }, [])
+
+  // Clear data when student changes
+  useEffect(() => {
+    setTasks([])
+    setPendingQuestions([])
+    setWrongQuestions([])
+    setGeneratedExams([])
+    setExams([])
+  }, [currentStudent?.id])
 
   // Load tasks when student changes
   useEffect(() => {
@@ -357,20 +242,6 @@ export default function App() {
       loadWrongBookData()
     }
   }, [currentStudent?.id, currentPage])
-
-  // Exam: Load generated exams
-  const loadGeneratedExams = async (useCache = true) => {
-    if (!currentStudent) return
-    try {
-      if (USE_MOCK_DATA) return
-      const { getGeneratedExamsByStudent } = await import('./services/supabaseService')
-      const examList = await getGeneratedExamsByStudent(currentStudent.id, useCache)
-      const otherStudentExams = generatedExams.filter(e => e.student_id !== currentStudent.id)
-      setGeneratedExams([...otherStudentExams, ...examList])
-    } catch (error) {
-      console.error('加载试卷失败:', error)
-    }
-  }
 
   // Load exams
   useEffect(() => {
@@ -406,22 +277,14 @@ export default function App() {
     try {
       if (USE_MOCK_DATA) {
         const filteredMockTasks = mockTasks.filter(t => t.student_id === currentStudent.id)
-        const existingIds = new Set(tasks.map(t => t.id))
-        const newTasks = filteredMockTasks.filter(t => !existingIds.has(t.id))
-        if (newTasks.length > 0) {
-          setTasks([...tasks, ...newTasks])
-        }
+        setTasks(filteredMockTasks)
         return
       }
-      const taskList = await getTasksByStudent(currentStudent.id, true)
-      const safeTaskList = Array.isArray(taskList) ? taskList : []
-      const existingIds = new Set(tasks.map(t => t.id))
-      const newTasks = safeTaskList.filter(t => !existingIds.has(t.id))
-      if (newTasks.length > 0) {
-        setTasks([...tasks, ...newTasks])
-      }
+      const taskList = await getTasksByStudent(currentStudent.id, false)
+      setTasks(Array.isArray(taskList) ? taskList : [])
     } catch (error) {
       console.error('加载任务失败:', error)
+      setTasks([])
     }
   }
 
@@ -432,13 +295,13 @@ export default function App() {
       if (USE_MOCK_DATA) {
         return
       }
-      const taskList = await getTasksByStudent(currentStudent.id, true)
+      const taskList = await getTasksByStudent(currentStudent.id, false)
       const safeTaskList = Array.isArray(taskList) ? taskList : []
       const doneTasks = safeTaskList.filter(t => t.status === 'done')
       const allQuestions = []
       for (const task of doneTasks) {
         try {
-          const taskQuestions = await getQuestionsByTask(task.id, true)
+          const taskQuestions = await getQuestionsByTask(task.id, false)
           const safeQuestions = Array.isArray(taskQuestions) ? taskQuestions : []
           allQuestions.push(...safeQuestions.map(q => ({ ...q, status: q.is_correct ? 'correct' : 'wrong' })))
         } catch (taskError) {
@@ -446,13 +309,14 @@ export default function App() {
         }
       }
 
-      const existingWrong = await getWrongQuestionsByStudent(currentStudent.id, true)
+      const existingWrong = await getWrongQuestionsByStudent(currentStudent.id, false)
       const wrongQuestionIds = new Set((existingWrong || []).map(w => w.question_id))
       const pendingOnly = allQuestions.filter(q => !wrongQuestionIds.has(q.id))
 
       setPendingQuestions(pendingOnly)
     } catch (error) {
-      console.error('加载任务失败:', error)
+      console.error('加载待确认数据失败:', error)
+      setPendingQuestions([])
     }
   }
 
@@ -461,40 +325,33 @@ export default function App() {
     if (!currentStudent) return
     try {
       if (USE_MOCK_DATA) {
-        if (mockWrongQuestions.length > 0) {
-          const existingIds = new Set(wrongQuestions.map(wq => wq.id))
-          const newMockQuestions = mockWrongQuestions.filter(wq => !existingIds.has(wq.id))
-          if (newMockQuestions.length > 0) {
-            setWrongQuestions(prev => [...prev, ...newMockQuestions])
-          }
-        }
+        const filteredMock = mockWrongQuestions.filter(wq => wq.student_id === currentStudent.id)
+        setWrongQuestions(filteredMock)
         return
       }
       const data = await getWrongQuestionsByStudent(currentStudent.id, false)
       setWrongQuestions(Array.isArray(data) ? data : [])
     } catch (error) {
       console.error('加载错题失败:', error)
+      setWrongQuestions([])
     }
   }
 
-  // Exam: Load exams
-  const loadExams = async () => {
+  // Exam: Load generated exams
+  const loadGeneratedExams = async (useCache = false) => {
     if (!currentStudent) return
     try {
       if (USE_MOCK_DATA) {
         const studentMockExams = mockExams.filter(e => e.student_id === currentStudent.id)
-        const existingIds = new Set(exams.map(e => e.id))
-        const newMockExams = studentMockExams.filter(e => !existingIds.has(e.id))
-        if (newMockExams.length > 0) {
-          setExams([...exams, ...newMockExams])
-        }
+        setGeneratedExams(studentMockExams)
         return
       }
-      const examList = await getExamsByStudent(currentStudent.id, true)
-      const otherStudentExams = exams.filter(e => e.student_id !== currentStudent.id)
-      setExams([...otherStudentExams, ...examList])
+      const { getGeneratedExamsByStudent } = await import('./services/supabaseService')
+      const examList = await getGeneratedExamsByStudent(currentStudent.id, useCache)
+      setGeneratedExams(Array.isArray(examList) ? examList : [])
     } catch (error) {
       console.error('加载试卷失败:', error)
+      setGeneratedExams([])
     }
   }
 
@@ -509,345 +366,192 @@ export default function App() {
 
     for (const file of files) {
       const localDuplicate = tasks.find(t =>
-        t.student_id === currentStudent.id &&
-        t.original_name === file.name
+        t.original_name === file.name &&
+        t.student_id === currentStudent?.id
       )
       if (localDuplicate) {
         duplicateFiles.push(file)
-        continue
+      } else {
+        newFiles.push(file)
       }
-
-      try {
-        const allTasks = await getTasksByStudent(currentStudent.id)
-        const dbDuplicate = allTasks?.find(t => t.original_name === file.name)
-        if (dbDuplicate) {
-          duplicateFiles.push(file)
-          continue
-        }
-      } catch (checkError) {
-        console.warn('检查重复试卷失败:', checkError)
-      }
-
-      newFiles.push(file)
     }
-
-    let filesToUpload = [...newFiles]
 
     if (duplicateFiles.length > 0) {
-      const duplicateNames = duplicateFiles.map(f => f.name).join('、')
-      await new Promise((resolve) => {
-        DialogAPI.confirm({
-          title: '检测到重复试卷',
-          content: `以下试卷已上传过：${duplicateNames}。是否跳过重复试卷？`,
-          confirmText: '跳过重复，上传新文件',
-          cancelText: '全部上传',
-          onConfirm: () => {
-            if (newFiles.length === 0) {
-              showToast({ icon: 'info', content: '所有试卷均已上传过，已跳过' })
-            }
-            resolve()
-          },
-          onCancel: () => {
-            filesToUpload = [...newFiles, ...duplicateFiles]
-            resolve()
-          }
-        })
+      Toast.show({
+        icon: 'fail',
+        content: `${duplicateFiles.length} 个文件已存在，已自动跳过`
       })
     }
 
-    if (filesToUpload.length === 0) return
+    if (newFiles.length === 0) return
 
-    setUploading(true)
-    showToast({ icon: 'loading', content: `正在上传 ${filesToUpload.length} 个文件...`, duration: 0 })
-    try {
-      for (const file of filesToUpload) {
-        await uploadFile(file)
-      }
-      clearToast()
-      const skipped = files.length - filesToUpload.length
-      const msg = skipped > 0
-        ? `成功上传 ${filesToUpload.length} 个文件，跳过 ${skipped} 个重复`
-        : `成功上传 ${filesToUpload.length} 个文件`
-      showToast({ icon: 'success', content: msg, duration: 2000 })
-    } catch (error) {
-      console.error('上传失败:', error)
-      clearToast()
-      showToast({ icon: 'fail', content: '上传失败，请重试' })
-    } finally {
-      setUploading(false)
+    if (USE_MOCK_DATA) {
+      await uploadViaFrontend(newFiles)
+    } else {
+      await uploadViaBackend(newFiles)
     }
   }
 
-  const uploadFile = async (file) => {
-    const imageBase64 = await fileToBase64(file)
-
-    let imageUrl = imageBase64
-
-    try {
-      const storageUrl = await uploadImage(file, `tasks/${currentStudent.id}`)
-      imageUrl = storageUrl
-    } catch (uploadError) {
-      console.warn('上传图片到存储失败，使用 base64:', uploadError)
-    }
-
-    const taskData = {
-      student_id: currentStudent.id,
-      image_url: imageUrl,
-      original_name: file.name || `照片_${dayjs().format('YYYY-MM-DD_HH-mm-ss')}.jpg`,
-      status: 'processing',
-      result: { progress: 0 }
-    }
-
-    console.log('准备保存任务到 Supabase:', taskData.original_name)
+  // Upload via backend API
+  const uploadViaBackend = async (files) => {
+    const pendingTasks = []
     
-    try {
-      const savedTask = await createTask(taskData)
-      console.log('任务已成功保存到数据库:', savedTask.id, savedTask.student_id, savedTask.status)
-
-      const localTask = {
-        ...savedTask,
-        result: { progress: 0 }
+    files.forEach((file) => {
+      const tempTask = {
+        id: `temp-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`,
+        student_id: currentStudent.id,
+        image_url: URL.createObjectURL(file),
+        original_name: file.name || `照片_${dayjs().format('YYYY-MM-DD_HH-mm-ss')}.jpg`,
+        status: 'pending',
+        result: { progress: 0 },
+        created_at: new Date().toISOString(),
+        is_temp: true
       }
+      addTask(tempTask)
+      pendingTasks.push({ tempTask, file })
+    })
 
-      addTask(localTask)
+    Toast.clear()
+    Toast.show({
+      icon: 'success',
+      content: `已添加 ${files.length} 个文件，正在上传...`,
+      duration: 2000
+    })
 
-      processImageAsync(localTask.id, file, savedTask.id)
-    } catch (error) {
-      console.error('创建任务失败:', error)
-      console.error('错误详情:', error?.message, error?.code, error?.details)
-      
-      showToast({
-        icon: 'fail',
-        content: '上传失败，请重试'
-      })
-      throw error
-    }
-  }
+    let successCount = 0
+    let failedCount = 0
 
-  const processImageAsync = async (taskId, file, dbTaskId) => {
-    try {
-      updateTaskInStore(taskId, 'processing', { progress: 10 })
-      await updateTaskStatus(dbTaskId, 'processing', { progress: 10 })
-      console.log('开始压缩图片:', file.name, file.size, 'bytes')
-
-      let compressedBase64
+    for (const { tempTask, file } of pendingTasks) {
       try {
-        compressedBase64 = await compressImage(file, 1920, 1920, 0.85)
-        console.log('图片压缩完成，大小:', compressedBase64.length, 'bytes')
-      } catch (compressError) {
-        console.error('图片压缩失败:', compressError)
-        updateTaskInStore(taskId, 'failed', { error: '图片压缩失败: ' + compressError.message })
-        await updateTaskStatus(dbTaskId, 'failed', { error: '图片压缩失败: ' + compressError.message })
-        return
-      }
-      updateTaskInStore(taskId, 'processing', { progress: 30 })
-      await updateTaskStatus(dbTaskId, 'processing', { progress: 30 })
-
-      updateTaskInStore(taskId, 'processing', { progress: 50 })
-      await updateTaskStatus(dbTaskId, 'processing', { progress: 50 })
-      const result = await recognizeQuestions(compressedBase64, currentStudent.id, taskId)
-
-      if (!result.success) {
-        updateTaskInStore(taskId, 'failed', {
-          error: result.error || '识别失败，请重新上传或重试',
-          shouldRetry: result.shouldRetry
-        })
-        await updateTaskStatus(dbTaskId, 'failed', {
-          error: result.error || '识别失败，请重新上传或重试',
-          shouldRetry: result.shouldRetry
-        })
-        return
-      }
-
-      updateTaskInStore(taskId, 'processing', { progress: 80 })
-      await updateTaskStatus(dbTaskId, 'processing', { progress: 80 })
-
-      const questions = result.questions || []
-      const wrongCount = questions.filter(q => !q.is_correct).length
-
-      const saveResult = saveRecognitionResult(taskId, currentStudent.id, questions)
-      if (!saveResult.success) {
-        console.warn('保存识别结果到本地失败:', saveResult.error)
-      }
-
-      if (questions.length > 0) {
-        console.log('开始保存题目到 Supabase，数量:', questions.length)
-        console.log('题目示例 task_id:', questions[0]?.task_id)
-        try {
-          const savedQ = await createQuestions(questions)
-          console.log('题目已成功保存到 Supabase, 返回数量:', savedQ?.length || 0)
-          if (savedQ && savedQ.length > 0) {
-            console.log('已保存题目示例:', savedQ[0])
-          }
-        } catch (saveError) {
-          console.error('保存题目到 Supabase 失败:', saveError)
-          console.error('错误详情:', saveError?.message, saveError?.code, saveError?.details)
-        }
-      }
-
-      await updateTaskStatus(dbTaskId, 'done', {
-        questionCount: questions.length,
-        wrongCount: wrongCount,
-        duration: result.duration
-      })
-      updateTaskInStore(taskId, 'done', {
-        questionCount: questions.length,
-        wrongCount: wrongCount,
-        duration: result.duration
-      })
-
-      if (questions.length > 0) {
-        addPendingQuestions(questions)
-      }
-
-      console.log(`识别完成，发现 ${questions.length} 道题目，${wrongCount} 道疑似错题`)
-      showToast({
-        icon: 'success',
-        content: `识别完成，发现 ${questions.length} 道题目，${wrongCount} 道疑似错题`
-      })
-
-      if (questions.filter(q => !q.is_correct).length > 0) {
-        setCurrentPage('pending')
-      }
-
-    } catch (error) {
-      console.error('处理失败:', error)
-      updateTaskInStore(taskId, 'failed', {
-        error: error.message || '处理失败，请重新上传或重试'
-      })
-      await updateTaskStatus(dbTaskId, 'failed', {
-        error: error.message || '处理失败，请重新上传或重试'
-      })
-
-      showToast({
-        icon: 'fail',
-        content: '处理失败，请重新上传或重试'
-      })
-      throw error
-    }
-  }
-
-  const fileToBase64 = (file) => {
-    return new Promise((resolve, reject) => {
-      const reader = new FileReader()
-      reader.readAsDataURL(file)
-      reader.onload = () => resolve(reader.result)
-      reader.onerror = (error) => reject(error)
-    })
-  }
-
-  const simulateProcessing = (taskId) => {
-    let progress = 0
-    const interval = setInterval(() => {
-      progress += Math.random() * 20
-      if (progress >= 100) {
-        progress = 100
-        clearInterval(interval)
-        const isSuccess = Math.random() > 0.2
-        if (isSuccess) {
-          const questionCount = 6
-          const wrongCount = Math.floor(Math.random() * 3) + 1
-          updateTaskInStore(taskId, 'done', { questionCount, wrongCount })
-          showToast({ icon: 'success', content: `识别完成，发现 ${questionCount} 道题目` })
+        const result = await taskService.uploadFiles(currentStudent.id, [file])
+        
+        if (result.success && result.tasks.length > 0 && !result.tasks[0].error) {
+          const serverTask = result.tasks[0]
+          updateTaskInStore(tempTask.id, 'pending', { progress: 0 })
+          setTasks(prev => prev.map(t => 
+            t.id === tempTask.id ? { ...serverTask, is_temp: false } : t
+          ))
+          successCount++
         } else {
-          updateTaskInStore(taskId, 'failed', { error: '识别失败' })
+          failedCount++
+          updateTaskInStore(tempTask.id, 'failed', { error: result.error || '上传失败' })
         }
-      } else {
-        updateTaskInStore(taskId, 'processing', { progress: Math.floor(progress) })
+      } catch (error) {
+        console.error(`上传文件 ${file.name} 失败:`, error)
+        failedCount++
+        updateTaskInStore(tempTask.id, 'failed', { error: error.message || '上传失败' })
       }
-    }, 500)
+    }
+
+    if (failedCount > 0) {
+      Toast.show({
+        icon: 'fail',
+        content: `${successCount} 个成功，${failedCount} 个失败`,
+        duration: 2000
+      })
+    }
   }
 
-  // Confirm: Add to wrong book
-  const addSingleToWrongBook = async (question) => {
-    try {
-      if (USE_MOCK_DATA) {
-        const wrongQuestion = {
-          id: `wq-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`,
+  // Upload via frontend (fallback)
+  const uploadViaFrontend = async (files) => {
+    for (const file of files) {
+      try {
+        setUploading(true)
+        Toast.show({
+          icon: 'loading',
+          content: '正在上传...',
+          duration: 0
+        })
+
+        const imageUrl = await uploadImage(file, 'homework')
+        const task = await createTask({
           student_id: currentStudent.id,
-          question_id: question.id,
-          question: question,
-          status: 'pending',
-          error_count: 1,
-          subject: question.subject || '数学',
-          category: '其他',
-          added_at: new Date().toISOString(),
-          last_wrong_at: new Date().toISOString(),
-          created_at: new Date().toISOString()
+          image_url: imageUrl,
+          original_name: file.name || `照片_${dayjs().format('YYYY-MM-DD_HH-mm-ss')}.jpg`,
+          status: 'pending'
+        })
+
+        addTask(task)
+        processTask(task)
+      } catch (error) {
+        console.error('上传失败:', error)
+        Toast.show({
+          icon: 'fail',
+          content: '上传失败，请重试'
+        })
+      } finally {
+        setUploading(false)
+      }
+    }
+  }
+
+  // Process task (AI recognition)
+  const processTask = async (task) => {
+    try {
+      updateTaskInStore(task.id, 'processing')
+      Toast.show({
+        icon: 'loading',
+        content: '正在识别题目...',
+        duration: 0
+      })
+
+      const compressedImage = await compressImage(task.image_url)
+      const result = await recognizeQuestions(compressedImage)
+
+      if (result.questions && result.questions.length > 0) {
+        const questions = result.questions.map((q, idx) => ({
+          task_id: task.id,
+          student_id: currentStudent.id,
+          content: q.content,
+          options: q.options || [],
+          answer: q.answer,
+          analysis: q.analysis,
+          question_type: q.question_type || 'choice',
+          subject: q.subject,
+          is_correct: q.is_correct,
+          status: q.is_correct ? 'pending' : 'wrong',
+          image_url: q.image_url,
+          ai_tags: q.ai_tags || [],
+          tags_source: 'ai'
+        }))
+
+        await createQuestions(questions)
+        await saveRecognitionResult(task.id, result)
+        updateTaskInStore(task.id, 'done', result)
+
+        const wrongQuestions = questions.filter(q => !q.is_correct)
+        if (wrongQuestions.length > 0) {
+          await addWrongQuestions(currentStudent.id, wrongQuestions.map(q => q.id))
         }
-        addWrongQuestion(wrongQuestion)
-        showToast({ icon: 'success', content: '已加入错题本' })
+
+        Toast.show({
+          icon: 'success',
+          content: `识别完成，共 ${questions.length} 道题，${wrongQuestions.length} 道错题`,
+          duration: 2000
+        })
       } else {
-        await addWrongQuestions(currentStudent.id, [question.id])
-        addWrongQuestion(question)
-        showToast({ icon: 'success', content: '已加入错题本' })
+        updateTaskInStore(task.id, 'failed', { error: '未识别到题目' })
+        Toast.show({
+          icon: 'fail',
+          content: '未识别到题目，请重新上传'
+        })
       }
     } catch (error) {
-      console.error('添加失败:', error)
-      showToast({ icon: 'fail', content: '添加失败' })
+      console.error('识别失败:', error)
+      updateTaskInStore(task.id, 'failed', { error: error.message })
+      Toast.show({
+        icon: 'fail',
+        content: '识别失败，请重试'
+      })
     }
   }
 
-  const handleAddToWrongBook = async () => {
-    if (selectedConfirmIds.length === 0) {
-      showToast({ icon: 'info', content: '请先选择题目' })
-      return
-    }
-    DialogAPI.confirm({
-      content: `确定将选中的 ${selectedConfirmIds.length} 道题加入错题本？`,
-      onConfirm: async () => {
-        setLoading(true)
-        try {
-          if (USE_MOCK_DATA) {
-            const selectedQuestions = pendingQuestions.filter(q => selectedConfirmIds.includes(q.id))
-            const wrongQuestions = selectedQuestions.map(q => ({
-              id: `wq-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`,
-              student_id: currentStudent.id,
-              question_id: q.id,
-              question: q,
-              status: 'pending',
-              error_count: 1,
-              subject: q.subject || '数学',
-              category: '其他',
-              added_at: new Date().toISOString(),
-              last_wrong_at: new Date().toISOString(),
-              created_at: new Date().toISOString()
-            }))
-            addMultipleToStore(wrongQuestions)
-            setPendingQuestions(pendingQuestions.filter(q => !selectedConfirmIds.includes(q.id)))
-          } else {
-            await addWrongQuestions(currentStudent.id, selectedConfirmIds)
-            localStorage.removeItem('wrong_questions_cache' + currentStudent.id)
-            localStorage.removeItem('wrong_questions_cache_ts' + currentStudent.id)
-            setPendingQuestions(pendingQuestions.filter(q => !selectedConfirmIds.includes(q.id)))
-          }
-          showToast({ icon: 'success', content: `成功添加 ${selectedConfirmIds.length} 道题到错题本` })
-          setSelectedConfirmIds([])
-        } catch (error) {
-          console.error('添加失败:', error)
-          showToast({ icon: 'fail', content: '添加失败' })
-        } finally {
-          setLoading(false)
-        }
-      }
-    })
-  }
-
-  // Scan success handler
-  const handleScanSuccess = (params) => {
-    setGradingParams(params)
-    setShowScanQR(false)
-    setShowGrading(true)
-  }
-
-  // Filter processing tasks
-  const filteredTasks = tasks
-    .filter(task => {
-      if (task.student_id !== currentStudent?.id) return false
-      if (processingFilter === 'all') return true
-      return task.status === processingFilter
-    })
-    .sort((a, b) => new Date(b.created_at || 0).getTime() - new Date(a.created_at || 0).getTime())
+  // Filter tasks
+  const filteredTasks = tasks.filter(t => {
+    if (t.student_id !== currentStudent?.id) return false
+    if (processingFilter === 'all') return true
+    return t.status === processingFilter
+  })
 
   // Filter pending questions
   const filteredQuestions = pendingQuestions.filter(q => {
@@ -892,7 +596,7 @@ export default function App() {
           : (question.ai_tags || [])
         tags.forEach(tag => tagSet.add(tag))
       })
-    return Array.from(tagSet).sort()
+    return Array.from(tagSet)
   })()
 
   const filteredWrongQuestions = wrongQuestions.filter(wq => {
@@ -918,612 +622,832 @@ export default function App() {
     return exam.status === examFilter
   })
 
-  const setLoading = useUIStore(state => state.setLoading)
+  // Add student
+  const handleAddStudent = async (studentData) => {
+    try {
+      const newStudent = await createStudent(studentData)
+      addStudent(newStudent)
+      setCurrentStudent(newStudent)
+      setShowAddStudent(false)
+      Toast.show({
+        icon: 'success',
+        content: '添加学生成功'
+      })
+    } catch (error) {
+      console.error('添加学生失败:', error)
+      Toast.show({
+        icon: 'fail',
+        content: '添加学生失败'
+      })
+    }
+  }
 
+  // Delete task
+  const handleDeleteTask = async (taskId) => {
+    try {
+      setTasks(tasks.filter(t => t.id !== taskId))
+      Toast.show({
+        icon: 'success',
+        content: '删除成功'
+      })
+    } catch (error) {
+      console.error('删除失败:', error)
+      Toast.show({
+        icon: 'fail',
+        content: '删除失败'
+      })
+    }
+  }
+
+  // Confirm questions
+  const handleConfirmQuestions = async () => {
+    try {
+      const wrongIds = selectedConfirmIds.filter(id => {
+        const q = pendingQuestions.find(pq => pq.id === id)
+        return q && q.status === 'wrong'
+      })
+
+      if (wrongIds.length > 0) {
+        await addWrongQuestions(currentStudent.id, wrongIds)
+      }
+
+      setPendingQuestions(pendingQuestions.filter(q => !selectedConfirmIds.includes(q.id)))
+      setSelectedConfirmIds([])
+      Toast.show({
+        icon: 'success',
+        content: `已确认 ${selectedConfirmIds.length} 道题`
+      })
+    } catch (error) {
+      console.error('确认失败:', error)
+      Toast.show({
+        icon: 'fail',
+        content: '确认失败'
+      })
+    }
+  }
+
+  // Generate exam
+  const handleGenerateExam = async () => {
+    try {
+      const selectedWrongQuestions = wrongQuestions.filter(wq => selectedQuestions.includes(wq.id))
+      if (selectedWrongQuestions.length === 0) {
+        Toast.show({
+          icon: 'fail',
+          content: '请先选择错题'
+        })
+        return
+      }
+
+      const examData = {
+        student_id: currentStudent.id,
+        name: `错题重练卷_${dayjs().format('MM-DD')}`,
+        question_ids: selectedWrongQuestions.map(wq => wq.question_id || wq.id)
+      }
+
+      const { createGeneratedExam } = await import('./services/supabaseService')
+      const newExam = await createGeneratedExam(examData)
+      setGeneratedExams([newExam, ...generatedExams])
+      clearSelection()
+      Toast.show({
+        icon: 'success',
+        content: '生成试卷成功'
+      })
+    } catch (error) {
+      console.error('生成试卷失败:', error)
+      Toast.show({
+        icon: 'fail',
+        content: '生成试卷失败'
+      })
+    }
+  }
+
+  // Print exam
+  const handlePrintExam = (exam) => {
+    setPrintTarget(exam)
+    setShowPrintModal(true)
+  }
+
+  // Grade exam
+  const handleGradeExam = (exam) => {
+    setGradingExam(exam)
+    setShowGrading(true)
+  }
+
+  // Reprint exam
+  const handleReprintExam = (exam) => {
+    setReprintExam(exam)
+    setShowReprint(true)
+  }
+
+  // View exam detail
+  const handleViewExamDetail = (exam) => {
+    setSelectedExam(exam)
+    setShowExamDetail(true)
+  }
+
+  // Delete exam
+  const handleDeleteExam = async (examId) => {
+    try {
+      setGeneratedExams(generatedExams.filter(e => e.id !== examId))
+      Toast.show({
+        icon: 'success',
+        content: '删除成功'
+      })
+    } catch (error) {
+      console.error('删除失败:', error)
+      Toast.show({
+        icon: 'fail',
+        content: '删除失败'
+      })
+    }
+  }
+
+  // View image
+  const handleViewImage = (imageUrl) => {
+    setPreviewImageUrl(imageUrl)
+    setShowImagePreview(true)
+  }
+
+  // Edit question
+  const handleEditQuestion = (question) => {
+    setEditingQuestion(question)
+  }
+
+  // Save question edit
+  const handleSaveQuestionEdit = async (questionId, updates) => {
+    try {
+      await updateQuestion(questionId, updates)
+      setPendingQuestions(pendingQuestions.map(q =>
+        q.id === questionId ? { ...q, ...updates } : q
+      ))
+      setEditingQuestion(null)
+      Toast.show({
+        icon: 'success',
+        content: '保存成功'
+      })
+    } catch (error) {
+      console.error('保存失败:', error)
+      Toast.show({
+        icon: 'fail',
+        content: '保存失败'
+      })
+    }
+  }
+
+  // Manage tags
+  const handleManageTags = (question) => {
+    setManagingTagsQuestion(question)
+    setShowTagManager(true)
+  }
+
+  // Save tags
+  const handleSaveTags = async (questionId, tags) => {
+    try {
+      await updateQuestionTags(questionId, tags)
+      setPendingQuestions(pendingQuestions.map(q =>
+        q.id === questionId ? { ...q, manual_tags: tags, tags_source: 'manual' } : q
+      ))
+      setShowTagManager(false)
+      Toast.show({
+        icon: 'success',
+        content: '标签更新成功'
+      })
+    } catch (error) {
+      console.error('更新标签失败:', error)
+      Toast.show({
+        icon: 'fail',
+        content: '更新标签失败'
+      })
+    }
+  }
+
+  // Show student QR
+  const handleShowStudentQR = () => {
+    if (!currentStudent) return
+    setStudentQRData({
+      id: currentStudent.id,
+      name: currentStudent.name
+    })
+    setShowStudentQR(true)
+  }
+
+  // Show notifications
+  const handleShowNotifications = () => {
+    setShowNotifications(true)
+  }
+
+  // Mark notification as read
+  const handleMarkNotificationRead = (notificationId) => {
+    setNotifications(notifications.filter(n => n.id !== notificationId))
+  }
+
+  // Search
+  const handleSearch = (query) => {
+    setSearchQuery(query)
+  }
+
+  // Filter by search
+  const searchFilteredTasks = filteredTasks.filter(t =>
+    searchQuery === '' || t.original_name?.toLowerCase().includes(searchQuery.toLowerCase())
+  )
+
+  const searchFilteredQuestions = filteredQuestions.filter(q =>
+    searchQuery === '' || q.content?.toLowerCase().includes(searchQuery.toLowerCase())
+  )
+
+  const searchFilteredWrongQuestions = filteredWrongQuestions.filter(wq => {
+    const question = wq.question || wq
+    return searchQuery === '' || question.content?.toLowerCase().includes(searchQuery.toLowerCase())
+  })
+
+  const searchFilteredExams = filteredExams.filter(e =>
+    searchQuery === '' || e.name?.toLowerCase().includes(searchQuery.toLowerCase())
+  )
+
+  // Render
   return (
     <ToastProvider>
-      <div className="min-h-screen bg-[#F2F2F7] text-slate-900 font-sans selection:bg-blue-100 flex justify-center overflow-hidden">
-        <div className="w-full max-w-md bg-[#F2F2F7] h-screen shadow-2xl relative overflow-hidden flex flex-col">
-          
-          {/* Global Header */}
-          <header className="px-5 pt-12 pb-3 flex items-center justify-between sticky top-0 bg-white/80 backdrop-blur-xl z-30 border-b border-gray-100/50">
-            <button 
-              onClick={() => setShowStudentSwitcher(true)}
-              className="flex items-center gap-2.5 group active:opacity-60 transition-opacity"
-            >
-              <div className="w-9 h-9 rounded-full bg-blue-600 flex items-center justify-center text-white font-bold text-sm shadow-sm ring-4 ring-blue-50">
-                {currentStudent?.name?.charAt(0) || '学'}
-              </div>
-              <div className="text-left">
-                <h2 className="text-[15px] font-bold tracking-tight text-gray-900 flex items-center gap-1">
-                  {currentStudent?.name || '请选择学生'}
-                  <ChevronRight size={14} className="text-gray-300 group-hover:text-blue-500 transition-colors" />
-                </h2>
-                <p className="text-[10px] text-gray-400 font-bold uppercase tracking-widest leading-none mt-0.5">{currentStudent?.class || '暂无班级'}</p>
-              </div>
-            </button>
-
-            <div className="flex items-center gap-1.5">
-              <button className="p-2.5 rounded-full text-gray-400 hover:bg-gray-50 active:bg-gray-100 transition-all">
-                <QrCode size={20} strokeWidth={2.5} />
+      <div className="min-h-screen bg-gray-50">
+        {/* Header */}
+        <header className="sticky top-0 z-50 bg-white/80 backdrop-blur-xl border-b border-gray-100">
+          <div className="max-w-lg mx-auto px-5 h-14 flex items-center justify-between">
+            <div className="flex items-center gap-3">
+              <button
+                onClick={() => setShowStudentSwitcher(true)}
+                className="flex items-center gap-2 text-gray-900"
+              >
+                <div className="w-8 h-8 rounded-full bg-blue-100 flex items-center justify-center">
+                  <User size={16} className="text-blue-600" />
+                </div>
+                <span className="text-[15px] font-bold">{currentStudent?.name || '选择学生'}</span>
+                <ChevronDown size={16} className="text-gray-400" />
               </button>
-              <div className="relative">
-                <button className="p-2.5 rounded-full text-gray-400 hover:bg-gray-50 active:bg-gray-100">
-                  <Bell size={20} strokeWidth={2.5} />
-                </button>
-              </div>
             </div>
-          </header>
+            <div className="flex items-center gap-3">
+              <button
+                onClick={() => setShowSearch(true)}
+                className="w-9 h-9 rounded-full bg-gray-100 flex items-center justify-center"
+              >
+                <Search size={18} className="text-gray-600" />
+              </button>
+              <button
+                onClick={handleShowNotifications}
+                className="w-9 h-9 rounded-full bg-gray-100 flex items-center justify-center relative"
+              >
+                <Bell size={18} className="text-gray-600" />
+                {notifications.length > 0 && (
+                  <span className="absolute -top-1 -right-1 w-4 h-4 bg-red-500 rounded-full text-[10px] text-white flex items-center justify-center">
+                    {notifications.length}
+                  </span>
+                )}
+              </button>
+            </div>
+          </div>
+        </header>
 
-          <main className="flex-1 overflow-y-auto no-scrollbar pb-20">
-            <AnimatePresence mode="wait">
-              {/* Processing Page */}
-              {currentPage === 'processing' && (
-                <motion.div
-                  key="processing-page"
-                  initial={{ opacity: 0, x: -20 }}
-                  animate={{ opacity: 1, x: 0 }}
-                  exit={{ opacity: 0, x: 20 }}
-                  className="w-full"
-                >
-                  {/* Scan Hero Section */}
-                  <section className="p-5">
-                    <motion.button 
-                      whileTap={{ scale: 0.98 }}
-                      onClick={() => setShowActionSheet(true)}
-                      className="w-full relative overflow-hidden rounded-[2.5rem] bg-gradient-to-br from-blue-600 to-indigo-700 p-8 text-white shadow-xl shadow-blue-200 disabled:opacity-60"
-                      disabled={uploading}
-                    >
-                      <div className="absolute top-0 right-0 w-40 h-40 bg-white/10 rounded-full blur-3xl -translate-y-12 translate-x-12" />
-                      <div className="relative z-10 flex flex-col items-center">
-                        <div className="w-16 h-16 bg-white/20 backdrop-blur-md rounded-3xl flex items-center justify-center mb-4 border border-white/30 shadow-inner">
-                          <Camera size={32} strokeWidth={2.5} />
-                        </div>
-                        <h1 className="text-xl font-black tracking-tight mb-1">拍照上传错题</h1>
-                        <p className="text-white/60 text-[12px] font-medium tracking-wide">Qwen-VL 视觉大模型赋能</p>
-                        <div className="mt-6 flex items-center gap-1.5 bg-white/15 px-4 py-1.5 rounded-full text-[10px] font-black tracking-widest uppercase">
-                          <Sparkles size={12} fill="white" className="shrink-0" />
-                          <span>AI 智能识别已就绪</span>
-                        </div>
-                      </div>
-                    </motion.button>
-                  </section>
-
-                  {/* Filter Tabs */}
-                  <section className="px-5">
-                    <div className="flex bg-white p-1 rounded-2xl shadow-sm">
-                      {['all', 'processing', 'done', 'failed'].map((tab) => (
-                        <button
-                          key={tab}
-                          onClick={() => setProcessingFilter(tab)}
-                          className={`flex-1 py-1.5 rounded-xl text-[12px] font-bold transition-all ${
-                            processingFilter === tab ? 'bg-blue-50 text-blue-600' : 'text-gray-400 hover:text-gray-600'
-                          }`}
-                        >
-                          {tab === 'all' && '全部'}
-                          {tab === 'processing' && '处理中'}
-                          {tab === 'done' && '已完成'}
-                          {tab === 'failed' && '失败'}
-                        </button>
-                      ))}
-                    </div>
-                  </section>
-
-                  {/* Task List */}
-                  <section className="mt-5 px-5 space-y-3 pb-4">
-                    {filteredTasks.map((task) => (
-                      <div key={task.id} className="bg-white rounded-2xl p-4 flex items-center gap-4 shadow-sm border border-white">
-                        <img 
-                          src={task.image_url} 
-                          className="w-14 h-14 object-cover rounded-xl shrink-0 cursor-pointer" 
-                          alt=""
-                          onClick={() => setPreviewImage(task.image_url)}
-                        />
-                        <div className="flex-1 min-w-0">
-                          <div className="flex justify-between items-start mb-1">
-                            <h4 className="text-[13px] font-bold text-gray-900 truncate pr-4">{task.original_name || '未命名作业'}</h4>
-                            <span className="text-[10px] text-gray-400 font-bold">{dayjs(task.created_at).format('HH:mm')}</span>
-                          </div>
-                          <div className="flex items-center gap-2">
-                            {task.status === 'done' && (
-                              <span className="text-[11px] text-green-600 font-bold flex items-center gap-1">
-                                <CheckCircle2 size={12} strokeWidth={3} /> 已完成
-                              </span>
-                            )}
-                            {task.status === 'processing' && (
-                              <span className="text-[11px] text-blue-500 font-bold flex items-center gap-1">
-                                <Loader2 size={12} strokeWidth={3} className="animate-spin" /> 处理中
-                              </span>
-                            )}
-                            {task.status === 'failed' && (
-                              <span className="text-[11px] text-red-500 font-bold flex items-center gap-1">
-                                <XCircle size={12} strokeWidth={3} /> 失败
-                              </span>
-                            )}
-                            <span className="text-[11px] text-gray-400 font-bold">• {task.result?.questionCount || 0}题</span>
-                          </div>
-                        </div>
-                        <ChevronRight size={18} className="text-gray-200" />
-                      </div>
-                    ))}
-                    {filteredTasks.length === 0 && (
-                      <div className="flex flex-col items-center justify-center py-24 opacity-20">
-                        <FileText size={48} strokeWidth={1} />
-                        <p className="mt-4 text-[13px] font-medium">暂无任务</p>
-                      </div>
-                    )}
-                  </section>
-                </motion.div>
-              )}
-
-              {/* Confirm Page */}
-              {currentPage === 'pending' && (
-                <motion.div
-                  key="confirm-page"
-                  initial={{ opacity: 0, x: 20 }}
-                  animate={{ opacity: 1, x: 0 }}
-                  exit={{ opacity: 0, x: -20 }}
-                  className="w-full"
-                >
-                  {/* Segmented Filters */}
-                  <section className="px-5 pt-4 mb-3 overflow-x-auto no-scrollbar">
-                    <div className="flex gap-2 min-w-max">
-                      {[
-                        { id: 'all', label: '全部待确认', count: pendingQuestions.filter(q => q.status === 'wrong' || q.status === 'correct' || q.isSuspicious).length },
-                        { id: 'wrong', label: '疑似错题', count: pendingQuestions.filter(q => q.status === 'wrong').length },
-                        { id: 'correct', label: '识别正确', count: pendingQuestions.filter(q => q.status === 'correct' && !q.isSuspicious).length }
-                      ].map((filter) => (
-                        <button
-                          key={filter.id}
-                          onClick={() => setConfirmFilter(filter.id)}
-                          className={`px-5 py-2.5 rounded-full text-[13px] font-bold flex items-center gap-2 transition-all ${
-                            confirmFilter === filter.id 
-                            ? 'bg-blue-600 text-white shadow-lg shadow-blue-100'
-                            : 'bg-gray-100/80 text-gray-400'
-                          }`}
-                        >
-                          {filter.label}
-                          <span className={`text-[11px] font-medium ${
-                            confirmFilter === filter.id ? 'text-white/80' : 'text-gray-300'
-                          }`}>
-                            {filter.count}
-                          </span>
-                        </button>
-                      ))}
-                    </div>
-                  </section>
-
-                  {/* Select All Bar */}
-                  {filteredQuestions.length > 0 && (
-                    <section className="px-5 mb-4">
-                      <button
-                        onClick={() => {
-                          const allFilteredIds = filteredQuestions.map(q => q.id)
-                          const allSelected = allFilteredIds.every(id => selectedConfirmIds.includes(id))
-                          if (allSelected) {
-                            setSelectedConfirmIds([])
-                          } else {
-                            setSelectedConfirmIds(allFilteredIds)
-                          }
-                        }}
-                        className="flex items-center gap-2 text-[12px] font-bold text-gray-400 hover:text-blue-600 transition-colors"
-                      >
-                        {(() => {
-                          const allFilteredIds = filteredQuestions.map(q => q.id)
-                          const allSelected = allFilteredIds.length > 0 && allFilteredIds.every(id => selectedConfirmIds.includes(id))
-                          return (
-                            <>
-                              <div className={`w-4 h-4 rounded-md border-[1.5px] flex items-center justify-center transition-all ${
-                                allSelected ? 'bg-blue-600 border-blue-600' : 'border-gray-200'
-                              }`}>
-                                {allSelected && <CheckCircle2 size={10} className="text-white" strokeWidth={4} />}
-                              </div>
-                              <span>{filteredQuestions.every(q => selectedConfirmIds.includes(q.id)) ? '取消全选' : '全选'}</span>
-                              <span className="text-gray-300">({filteredQuestions.length}题)</span>
-                            </>
-                          )
-                        })()}
-                      </button>
-                    </section>
-                  )}
-
-                  {/* Question List */}
-                  <section className="px-5 space-y-4 pb-4">
-                    {filteredQuestions.map((q, idx) => {
-                      const isSelected = selectedConfirmIds.includes(q.id)
-                      return (
-                        <motion.div 
-                          key={q.id}
-                          layout
-                          initial={{ opacity: 0, y: 10 }}
-                          animate={{ opacity: 1, y: 0 }}
-                          className={`bg-white rounded-[1.5rem] p-4 shadow-sm border-2 transition-all cursor-pointer relative ${
-                            isSelected ? 'border-blue-500 shadow-blue-50' : 'border-transparent'
-                          }`}
-                          onClick={() => {
-                            if (isSelected) {
-                              setSelectedConfirmIds(selectedConfirmIds.filter(id => id !== q.id))
-                            } else {
-                              setSelectedConfirmIds([...selectedConfirmIds, q.id])
-                            }
-                          }}
-                        >
-                          <div className="flex justify-between items-start mb-2">
-                            <div className="flex items-center gap-2">
-                              <span className="text-[14px] font-bold text-gray-300 italic">#{idx + 1}</span>
-                              <span className={`px-2 py-0.5 rounded-lg text-[9px] font-bold tracking-tight uppercase ${
-                                q.status === 'wrong' ? 'bg-red-50 text-red-500 border border-red-100' : 'bg-green-50 text-green-500 border border-green-100'
-                              }`}>
-                                {q.status === 'wrong' ? '疑似错题' : '识别正确'}
-                              </span>
-                              <span className="text-[10px] text-gray-400 font-bold uppercase tracking-wider">{q.question_type || '解答题'}</span>
-                            </div>
-                            <div className={`w-5 h-5 rounded-full border-[1.5px] flex items-center justify-center transition-all ${
-                              isSelected ? 'bg-blue-600 border-blue-600' : 'border-gray-100'
-                            }`}>
-                              {isSelected && <CheckCircle2 size={12} className="text-white" strokeWidth={4} />}
-                            </div>
-                          </div>
-
-                          <div className="text-[14px] leading-snug text-gray-700 mb-4 px-1">
-                            {q.content}
-                          </div>
-
-                          <div className="flex items-center justify-between border-t border-gray-50 pt-3">
-                            <button 
-                              onClick={(e) => {
-                                e.stopPropagation();
-                                console.log('查看原图 - question:', q);
-                                setShowOriginalPaper(q);
-                              }}
-                              className="flex items-center gap-1.5 text-[11px] font-bold text-gray-400 hover:text-blue-600 transition-colors"
-                            >
-                              <BookOpen size={13} strokeWidth={2.5} /> 查看原图
-                            </button>
-                            <div className="flex items-center gap-4">
-                              <button 
-                                onClick={(e) => {
-                                  e.stopPropagation();
-                                  setEditingQuestion(q);
-                                  setEditAiTags(q.ai_tags || []);
-                                  setEditManualTags(q.manual_tags || []);
-                                  setEditTagsSource(q.tags_source || 'ai');
-                                  setEditNewTag('');
-                                  setIsEditing(true);
-                                }}
-                                className="text-[11px] font-bold text-gray-400 hover:text-blue-500 active:opacity-60"
-                              >
-                                编辑
-                              </button>
-                              <button 
-                                onClick={(e) => {
-                                  e.stopPropagation();
-                                  setShowDeleteConfirm(q.id);
-                                }}
-                                className="text-[11px] font-bold text-gray-400 hover:text-red-500 active:opacity-60"
-                              >
-                                删除
-                              </button>
-                            </div>
-                          </div>
-                        </motion.div>
-                      )
-                    })}
-                    {filteredQuestions.length === 0 && (
-                      <div className="flex flex-col items-center justify-center py-24 opacity-20">
-                        <FileText size={48} strokeWidth={1} />
-                        <p className="mt-4 text-[13px] font-medium">暂无待确认的题目</p>
-                      </div>
-                    )}
-                  </section>
-                </motion.div>
-              )}
-
-              {/* WrongBook Page */}
-              {currentPage === 'wrongbook' && (
-                <motion.div
-                  key="bank-page"
-                  initial={{ opacity: 0, y: 10 }}
-                  animate={{ opacity: 1, y: 0 }}
-                  exit={{ opacity: 0, y: -10 }}
-                  className="w-full pb-32"
-                >
-                  {/* Primary State Tabs */}
-                  <div className="flex gap-2 px-5 pt-4 overflow-x-auto no-scrollbar">
+        {/* Main Content */}
+        <main className="max-w-lg mx-auto pb-24">
+          <AnimatePresence mode="wait">
+            {currentPage === 'processing' && (
+              <motion.div
+                key="processing-page"
+                initial={{ opacity: 0, x: -20 }}
+                animate={{ opacity: 1, x: 0 }}
+                exit={{ opacity: 0, x: 20 }}
+                className="w-full"
+              >
+                {/* Filter Tabs */}
+                <section className="px-5 pt-4 mb-3 overflow-x-auto no-scrollbar">
+                  <div className="flex gap-2 min-w-max">
                     {[
-                      { id: 'all', label: '全部', count: wrongQuestions.filter(wq => wq.status === 'pending' || wq.status === 'mastered').length },
-                      { id: 'pending', label: '未掌握', count: wrongQuestions.filter(wq => wq.status === 'pending').length },
-                      { id: 'mastered', label: '已掌握', count: wrongQuestions.filter(wq => wq.status === 'mastered').length }
-                    ].map((tab) => (
+                      { id: 'all', label: '全部', count: filteredTasks.length },
+                      { id: 'pending', label: '待处理', count: filteredTasks.filter(t => t.status === 'pending').length },
+                      { id: 'processing', label: '处理中', count: filteredTasks.filter(t => t.status === 'processing').length },
+                      { id: 'done', label: '已完成', count: filteredTasks.filter(t => t.status === 'done').length },
+                      { id: 'failed', label: '失败', count: filteredTasks.filter(t => t.status === 'failed').length }
+                    ].map((filter) => (
                       <button
-                        key={tab.id}
-                        onClick={() => setBankFilter(tab.id)}
-                        className={`px-5 py-2.5 rounded-full text-[13px] font-bold transition-all whitespace-nowrap flex items-center gap-2 ${
-                          bankFilter === tab.id 
+                        key={filter.id}
+                        onClick={() => setProcessingFilter(filter.id)}
+                        className={`px-5 py-2.5 rounded-full text-[13px] font-bold flex items-center gap-2 transition-all ${
+                          processingFilter === filter.id
                           ? 'bg-blue-600 text-white shadow-lg shadow-blue-100'
-                          : 'bg-white text-gray-400 border border-gray-100'
+                          : 'bg-gray-100/80 text-gray-400'
                         }`}
                       >
-                        {tab.label}
+                        {filter.label}
                         <span className={`text-[11px] font-medium ${
-                          bankFilter === tab.id ? 'text-white/80' : 'text-gray-300'
+                          processingFilter === filter.id ? 'text-white/80' : 'text-gray-300'
                         }`}>
-                          {tab.count}
+                          {filter.count}
                         </span>
                       </button>
                     ))}
                   </div>
+                </section>
 
-                  {/* Sub-Filters - Dropdown Style */}
-                  <div className="px-5 mt-4 flex gap-2 overflow-x-auto no-scrollbar">
+                {/* Task List */}
+                <section className="px-5 space-y-3">
+                  {searchFilteredTasks.length === 0 ? (
+                    <div className="text-center py-20">
+                      <Camera size={48} className="mx-auto text-gray-200 mb-4" />
+                      <p className="text-gray-400 text-[15px]">暂无任务</p>
+                      <p className="text-gray-300 text-[13px] mt-1">点击右下角按钮上传试卷</p>
+                    </div>
+                  ) : (
+                    searchFilteredTasks.map((task) => (
+                      <motion.div
+                        key={task.id}
+                        layout
+                        initial={{ opacity: 0, y: 10 }}
+                        animate={{ opacity: 1, y: 0 }}
+                        className="bg-white rounded-2xl p-4 shadow-sm border border-gray-100"
+                      >
+                        <div className="flex gap-3">
+                          <div
+                            className="w-20 h-20 rounded-xl bg-gray-100 flex-shrink-0 overflow-hidden cursor-pointer"
+                            onClick={() => handleViewImage(task.image_url)}
+                          >
+                            {task.image_url ? (
+                              <img src={task.image_url} alt="试卷" className="w-full h-full object-cover" />
+                            ) : (
+                              <div className="w-full h-full flex items-center justify-center">
+                                <ImageIcon size={24} className="text-gray-300" />
+                              </div>
+                            )}
+                          </div>
+                          <div className="flex-1 min-w-0">
+                            <div className="flex items-start justify-between">
+                              <h3 className="text-[14px] font-bold text-gray-900 truncate">
+                                {task.original_name || '未命名试卷'}
+                              </h3>
+                              <button
+                                onClick={() => {
+                                  setDeleteTarget({ type: 'task', id: task.id })
+                                  setShowDeleteConfirm(true)
+                                }}
+                                className="text-gray-300 hover:text-red-500 transition-colors"
+                              >
+                                <Trash2 size={16} />
+                              </button>
+                            </div>
+                            <p className="text-[12px] text-gray-400 mt-1">
+                              {dayjs(task.created_at).format('MM-DD HH:mm')}
+                            </p>
+                            <div className="flex items-center gap-2 mt-2">
+                              {task.status === 'pending' && (
+                                <span className="px-2.5 py-1 rounded-full bg-yellow-50 text-yellow-600 text-[11px] font-bold">
+                                  待处理
+                                </span>
+                              )}
+                              {task.status === 'processing' && (
+                                <span className="px-2.5 py-1 rounded-full bg-blue-50 text-blue-600 text-[11px] font-bold flex items-center gap-1">
+                                  <Loader2 size={10} className="animate-spin" />
+                                  处理中
+                                </span>
+                              )}
+                              {task.status === 'done' && (
+                                <span className="px-2.5 py-1 rounded-full bg-green-50 text-green-600 text-[11px] font-bold">
+                                  已完成
+                                </span>
+                              )}
+                              {task.status === 'failed' && (
+                                <span className="px-2.5 py-1 rounded-full bg-red-50 text-red-600 text-[11px] font-bold">
+                                  失败
+                                </span>
+                              )}
+                              {task.result?.questionCount && (
+                                <span className="text-[11px] text-gray-400">
+                                  {task.result.questionCount} 道题
+                                </span>
+                              )}
+                            </div>
+                          </div>
+                        </div>
+                      </motion.div>
+                    ))
+                  )}
+                </section>
+              </motion.div>
+            )}
+
+            {currentPage === 'pending' && (
+              <motion.div
+                key="confirm-page"
+                initial={{ opacity: 0, x: 20 }}
+                animate={{ opacity: 1, x: 0 }}
+                exit={{ opacity: 0, x: -20 }}
+                className="w-full"
+              >
+                {/* Segmented Filters */}
+                <section className="px-5 pt-4 mb-3 overflow-x-auto no-scrollbar">
+                  <div className="flex gap-2 min-w-max">
                     {[
-                      { label: '科目', value: selectedSubject, options: ['all', '数学', '语文', '物理', '化学', '生物'], setter: setSelectedSubject },
-                      { id: 'time', label: '时间', value: selectedTimeRange, options: ['all', 'today', 'week', 'month', 'quarter'], setter: setSelectedTimeRange },
-                      { id: 'errors', label: '次数', value: selectedErrorCount, options: ['all', '1', '2-3', '4-5', '5+'], setter: setSelectedErrorCount },
-                    ].map((filter, i) => (
-                      <div key={i} className="relative shrink-0">
-                        <select
-                          value={filter.value}
-                          onChange={(e) => filter.setter(e.target.value)}
-                          className="appearance-none bg-white border border-gray-100 rounded-full pl-3 pr-7 py-1.5 text-[11px] font-bold text-gray-500 shadow-sm focus:outline-none focus:border-blue-200 transition-all cursor-pointer"
-                        >
-                          {filter.options.map(opt => (
-                            <option key={opt} value={opt}>{filter.label}: {opt === 'all' ? '全部' : opt}</option>
-                          ))}
-                        </select>
-                        <ChevronDown size={12} className="absolute right-2.5 top-1/2 -translate-y-1/2 text-gray-400 pointer-events-none" />
-                      </div>
+                      { id: 'all', label: '全部待确认', count: pendingQuestions.filter(q => q.status === 'wrong' || q.status === 'correct' || q.isSuspicious).length },
+                      { id: 'wrong', label: '疑似错题', count: pendingQuestions.filter(q => q.status === 'wrong').length },
+                      { id: 'correct', label: '识别正确', count: pendingQuestions.filter(q => q.status === 'correct' && !q.isSuspicious).length }
+                    ].map((filter) => (
+                      <button
+                        key={filter.id}
+                        onClick={() => setConfirmFilter(filter.id)}
+                        className={`px-5 py-2.5 rounded-full text-[13px] font-bold flex items-center gap-2 transition-all ${
+                          confirmFilter === filter.id
+                          ? 'bg-blue-600 text-white shadow-lg shadow-blue-100'
+                          : 'bg-gray-100/80 text-gray-400'
+                        }`}
+                      >
+                        {filter.label}
+                        <span className={`text-[11px] font-medium ${
+                          confirmFilter === filter.id ? 'text-white/80' : 'text-gray-300'
+                        }`}>
+                          {filter.count}
+                        </span>
+                      </button>
                     ))}
+                  </div>
+                </section>
+
+                {/* Select All Bar */}
+                {filteredQuestions.length > 0 && (
+                  <section className="px-5 mb-4">
                     <button
                       onClick={() => {
-                        setTempSelectedTags([...selectedTags])
-                        setTagSearchKeyword('')
-                        setShowTagPicker(true)
+                        const allFilteredIds = filteredQuestions.map(q => q.id)
+                        const allSelected = allFilteredIds.every(id => selectedConfirmIds.includes(id))
+                        if (allSelected) {
+                          setSelectedConfirmIds([])
+                        } else {
+                          setSelectedConfirmIds(allFilteredIds)
+                        }
                       }}
-                      className={`shrink-0 appearance-none border rounded-full pl-3 pr-2 py-1.5 text-[11px] font-bold shadow-sm focus:outline-none transition-all cursor-pointer flex items-center gap-1 ${
-                        selectedTags.length > 0
-                          ? 'bg-amber-50 border-amber-200 text-amber-600'
-                          : 'bg-white border-gray-100 text-gray-500'
-                      }`}
+                      className="flex items-center gap-2 text-[12px] font-bold text-gray-400 hover:text-blue-600 transition-colors"
                     >
-                      <span>知识点{selectedTags.length > 0 ? `: ${selectedTags.length}个` : ': 全部'}</span>
-                      <ChevronDown size={12} className="text-current opacity-60" />
+                      <div className={`w-5 h-5 rounded-md border-2 flex items-center justify-center transition-all ${
+                        filteredQuestions.every(q => selectedConfirmIds.includes(q.id))
+                        ? 'bg-blue-600 border-blue-600'
+                        : 'border-gray-300'
+                      }`}>
+                        {filteredQuestions.every(q => selectedConfirmIds.includes(q.id)) && (
+                          <CheckCircle2 size={14} className="text-white" />
+                        )}
+                      </div>
+                      <span>{filteredQuestions.every(q => selectedConfirmIds.includes(q.id)) ? '取消全选' : '全选'}</span>
+                      <span className="text-gray-300">({filteredQuestions.length}题)</span>
                     </button>
-                  </div>
-                  <div className="px-5 mt-5 space-y-4 pb-4">
-                    {filteredWrongQuestions.map((wq) => {
-                      const question = wq.question || wq
-                      const isSelected = selectedQuestions.some(sq => sq.id === wq.id)
-                      return (
-                        <div 
-                          key={wq.id}
-                          onClick={() => {
-                            const exists = selectedQuestions.find(sq => sq.id === wq.id)
-                            if (exists) {
-                              setSelectedQuestions(selectedQuestions.filter(sq => sq.id !== wq.id))
-                            } else {
-                              setSelectedQuestions([...selectedQuestions, wq])
-                            }
-                          }}
-                          className={`bg-white rounded-2xl p-5 shadow-sm border-2 transition-all relative ${
-                            isSelected ? 'border-blue-500 shadow-blue-50' : 'border-transparent'
-                          }`}
-                        >
-                          <div className="flex items-center justify-between mb-4">
-                            <div className="flex items-center gap-2">
-                              <div className={`w-5 h-5 rounded-full border-[1.5px] flex items-center justify-center transition-all ${
-                                 isSelected ? 'bg-blue-600 border-blue-600' : 'border-gray-200'
-                              }`}>
-                                {isSelected && <CheckCircle2 size={12} className="text-white" strokeWidth={3} />}
+                  </section>
+                )}
+
+                {/* Question List */}
+                <section className="px-5 space-y-3">
+                  {filteredQuestions.length === 0 ? (
+                    <div className="text-center py-20">
+                      <BookOpen size={48} className="mx-auto text-gray-200 mb-4" />
+                      <p className="text-gray-400 text-[15px]">暂无待确认题目</p>
+                      <p className="text-gray-300 text-[13px] mt-1">上传试卷后会自动识别题目</p>
+                    </div>
+                  ) : (
+                    filteredQuestions.map((q, idx) => (
+                      <motion.div
+                        key={q.id}
+                        layout
+                        initial={{ opacity: 0, y: 10 }}
+                        animate={{ opacity: 1, y: 0 }}
+                        className="bg-white rounded-2xl p-4 shadow-sm border border-gray-100"
+                      >
+                        <div className="flex gap-3">
+                          <button
+                            onClick={() => {
+                              if (selectedConfirmIds.includes(q.id)) {
+                                setSelectedConfirmIds(selectedConfirmIds.filter(id => id !== q.id))
+                              } else {
+                                setSelectedConfirmIds([...selectedConfirmIds, q.id])
+                              }
+                            }}
+                            className="flex-shrink-0 mt-1"
+                          >
+                            <div className={`w-5 h-5 rounded-md border-2 flex items-center justify-center transition-all ${
+                              selectedConfirmIds.includes(q.id)
+                              ? 'bg-blue-600 border-blue-600'
+                              : 'border-gray-300'
+                            }`}>
+                              {selectedConfirmIds.includes(q.id) && (
+                                <CheckCircle2 size={14} className="text-white" />
+                              )}
+                            </div>
+                          </button>
+                          <div className="flex-1 min-w-0">
+                            <div className="flex items-start justify-between">
+                              <span className="text-[12px] text-gray-400 font-medium">第 {idx + 1} 题</span>
+                              <div className="flex items-center gap-2">
+                                {q.status === 'wrong' && (
+                                  <span className="px-2 py-0.5 rounded-full bg-red-50 text-red-600 text-[10px] font-bold">
+                                    疑似错题
+                                  </span>
+                                )}
+                                {q.status === 'correct' && (
+                                  <span className="px-2 py-0.5 rounded-full bg-green-50 text-green-600 text-[10px] font-bold">
+                                    识别正确
+                                  </span>
+                                )}
                               </div>
-                              <span className="text-[12px] font-bold text-gray-400">{question.subject || '数学'} · {question.category || '其他'}</span>
                             </div>
-                            <div className="flex items-center gap-3">
-                              <span className="text-[11px] text-gray-300 font-medium">{dayjs(wq.added_at || wq.created_at).format('YYYY-MM-DD')}</span>
-                              <span className={`px-2 py-0.5 rounded-lg text-[9px] font-bold uppercase tracking-tight ${
-                                wq.status === 'pending' ? 'bg-red-50 text-red-500' : 'bg-green-50 text-green-500'
-                              }`}>
-                                {wq.status === 'pending' ? '未掌握' : '已掌握'}
-                              </span>
-                            </div>
-                          </div>
-                          <div className="text-[14px] leading-relaxed text-gray-700 mb-4 px-1">
-                            {question.content}
-                          </div>
-                          <div className="flex items-center justify-between mt-4 pt-3 border-t border-gray-50">
-                            <div className="flex items-center gap-1.5 text-[11px] font-bold text-gray-400">
-                              <XCircle size={13} strokeWidth={2.5} className="text-red-200" /> 
-                              错误次数: <span className="text-red-400 underline decoration-red-100 underline-offset-2">{wq.error_count || 1}次</span>
-                            </div>
-                            <div className="flex items-center gap-4">
-                              <button 
-                                onClick={(e) => {
-                                  e.stopPropagation();
-                                  setEditingQuestion(question);
-                                  setEditAiTags(question.ai_tags || []);
-                                  setEditManualTags(question.manual_tags || []);
-                                  setEditTagsSource(question.tags_source || 'ai');
-                                  setEditNewTag('');
-                                  setIsEditing(true);
-                                }}
-                                className="text-[11px] font-bold text-gray-400 hover:text-blue-500"
+                            <p className="text-[14px] text-gray-900 mt-2 leading-relaxed">
+                              {q.content}
+                            </p>
+                            {q.options && q.options.length > 0 && (
+                              <div className="mt-3 space-y-1.5">
+                                {q.options.map((opt, optIdx) => (
+                                  <div
+                                    key={optIdx}
+                                    className={`text-[13px] py-2 px-3 rounded-lg ${
+                                      opt === q.answer
+                                      ? 'bg-green-50 text-green-700 font-medium'
+                                      : 'bg-gray-50 text-gray-600'
+                                    }`}
+                                  >
+                                    {opt}
+                                  </div>
+                                ))}
+                              </div>
+                            )}
+                            <div className="flex items-center gap-3 mt-3">
+                              <button
+                                onClick={() => handleEditQuestion(q)}
+                                className="text-[12px] text-blue-600 font-medium hover:text-blue-700"
                               >
                                 编辑
                               </button>
-                              <button 
-                                onClick={(e) => {
-                                  e.stopPropagation();
-                                  setShowDeleteConfirm(wq.id);
-                                }}
-                                className="text-[11px] font-bold text-gray-400 hover:text-red-500"
+                              <button
+                                onClick={() => handleManageTags(q)}
+                                className="text-[12px] text-blue-600 font-medium hover:text-blue-700 flex items-center gap-1"
                               >
-                                删除
+                                <Tag size={12} />
+                                标签
                               </button>
                             </div>
                           </div>
                         </div>
-                      )
-                    })}
-                    {filteredWrongQuestions.length === 0 && (
-                      <div className="flex flex-col items-center justify-center py-24 opacity-20">
-                        <FileText size={48} strokeWidth={1} />
-                        <p className="mt-4 text-[13px] font-medium">错题本为空</p>
-                      </div>
-                    )}
-                  </div>
-                </motion.div>
-              )}
+                      </motion.div>
+                    ))
+                  )}
+                </section>
+              </motion.div>
+            )}
 
-              {/* Exam Page */}
-              {currentPage === 'exam' && (
-                <motion.div
-                  key="exam-page"
-                  initial={{ opacity: 0, y: 10 }}
-                  animate={{ opacity: 1, y: 0 }}
-                  exit={{ opacity: 0, y: -10 }}
-                  className="w-full pb-32"
-                >
-                  {/* Filter Tabs */}
-                  <div className="flex gap-2 px-5 pt-4 overflow-x-auto no-scrollbar">
+            {currentPage === 'wrongbook' && (
+              <motion.div
+                key="bank-page"
+                initial={{ opacity: 0, x: 20 }}
+                animate={{ opacity: 1, x: 0 }}
+                exit={{ opacity: 0, x: -20 }}
+                className="w-full"
+              >
+                {/* Filter Tabs */}
+                <section className="px-5 pt-4 mb-3 overflow-x-auto no-scrollbar">
+                  <div className="flex gap-2 min-w-max">
                     {[
-                      { id: 'all', label: '全部', count: studentExams.length },
-                      { id: 'ungraded', label: '未批改', count: studentExams.filter(e => e.status === 'ungraded').length },
-                      { id: 'graded', label: '已批改', count: studentExams.filter(e => e.status === 'graded').length }
-                    ].map((tab) => (
+                      { id: 'pending', label: '待复习', count: wrongQuestions.filter(wq => wq.status === 'pending').length },
+                      { id: 'mastered', label: '已掌握', count: wrongQuestions.filter(wq => wq.status === 'mastered').length }
+                    ].map((filter) => (
                       <button
-                        key={tab.id}
-                        onClick={() => setExamFilter(tab.id)}
-                        className={`px-5 py-2.5 rounded-full text-[13px] font-bold transition-all whitespace-nowrap flex items-center gap-1.5 ${
-                          examFilter === tab.id 
+                        key={filter.id}
+                        onClick={() => setBankFilter(filter.id)}
+                        className={`px-5 py-2.5 rounded-full text-[13px] font-bold flex items-center gap-2 transition-all ${
+                          bankFilter === filter.id
                           ? 'bg-blue-600 text-white shadow-lg shadow-blue-100'
-                          : 'bg-white text-gray-400 border border-gray-100'
+                          : 'bg-gray-100/80 text-gray-400'
                         }`}
                       >
-                        {tab.label}
+                        {filter.label}
                         <span className={`text-[11px] font-medium ${
-                          examFilter === tab.id ? 'text-white/80' : 'text-gray-300'
+                          bankFilter === filter.id ? 'text-white/80' : 'text-gray-300'
                         }`}>
-                          {tab.count}
+                          {filter.count}
                         </span>
                       </button>
                     ))}
                   </div>
+                </section>
 
-                  {/* Exam List */}
-                  <div className="px-5 mt-6 space-y-4 pb-4">
-                    {filteredExams.map((paper) => (
-                      <div 
-                        key={paper.id}
-                        className={`bg-white rounded-[1.5rem] p-5 shadow-sm border-2 transition-all relative ${
-                          selectedPaperId === paper.id ? 'border-blue-500 shadow-lg shadow-blue-100/50' : 'border-transparent'
+                {/* Advanced Filters */}
+                <section className="px-5 mb-4">
+                  <div className="flex gap-2 overflow-x-auto no-scrollbar">
+                    <button
+                      onClick={() => setShowSubjectFilter(!showSubjectFilter)}
+                      className={`px-4 py-2 rounded-full text-[12px] font-bold flex items-center gap-1 transition-all ${
+                        selectedSubject !== 'all'
+                        ? 'bg-blue-50 text-blue-600'
+                        : 'bg-gray-100 text-gray-400'
+                      }`}
+                    >
+                      科目
+                      <ChevronDown size={12} />
+                    </button>
+                    <button
+                      onClick={() => setShowTimeFilter(!showTimeFilter)}
+                      className={`px-4 py-2 rounded-full text-[12px] font-bold flex items-center gap-1 transition-all ${
+                        selectedTimeRange !== 'all'
+                        ? 'bg-blue-50 text-blue-600'
+                        : 'bg-gray-100 text-gray-400'
+                      }`}
+                    >
+                      时间
+                      <ChevronDown size={12} />
+                    </button>
+                    <button
+                      onClick={() => setShowErrorFilter(!showErrorFilter)}
+                      className={`px-4 py-2 rounded-full text-[12px] font-bold flex items-center gap-1 transition-all ${
+                        selectedErrorCount !== 'all'
+                        ? 'bg-blue-50 text-blue-600'
+                        : 'bg-gray-100 text-gray-400'
+                      }`}
+                    >
+                      错次
+                      <ChevronDown size={12} />
+                    </button>
+                    <button
+                      onClick={() => setShowTagFilter(!showTagFilter)}
+                      className={`px-4 py-2 rounded-full text-[12px] font-bold flex items-center gap-1 transition-all ${
+                        selectedTags.length > 0
+                        ? 'bg-blue-50 text-blue-600'
+                        : 'bg-gray-100 text-gray-400'
+                      }`}
+                    >
+                      标签
+                      <ChevronDown size={12} />
+                    </button>
+                  </div>
+                </section>
+
+                {/* Wrong Question List */}
+                <section className="px-5 space-y-3">
+                  {filteredWrongQuestions.length === 0 ? (
+                    <div className="text-center py-20">
+                      <LayoutGrid size={48} className="mx-auto text-gray-200 mb-4" />
+                      <p className="text-gray-400 text-[15px]">暂无错题</p>
+                      <p className="text-gray-300 text-[13px] mt-1">在待确认页面标记错题后会自动收录</p>
+                    </div>
+                  ) : (
+                    filteredWrongQuestions.map((wq) => (
+                      <motion.div
+                        key={wq.id}
+                        layout
+                        initial={{ opacity: 0, y: 10 }}
+                        animate={{ opacity: 1, y: 0 }}
+                        className="bg-white rounded-2xl p-4 shadow-sm border border-gray-100"
+                      >
+                        <div className="flex gap-3">
+                          <button
+                            onClick={() => toggleSelection(wq)}
+                            className="flex-shrink-0 mt-1"
+                          >
+                            <div className={`w-5 h-5 rounded-md border-2 flex items-center justify-center transition-all ${
+                              selectedQuestions.find(q => q.id === wq.id)
+                              ? 'bg-blue-600 border-blue-600'
+                              : 'border-gray-300'
+                            }`}>
+                              {selectedQuestions.find(q => q.id === wq.id) && (
+                                <CheckCircle2 size={14} className="text-white" />
+                              )}
+                            </div>
+                          </button>
+                          <div className="flex-1 min-w-0">
+                            <div className="flex items-start justify-between">
+                              <div className="flex items-center gap-2">
+                                <span className="text-[12px] text-gray-400 font-medium">错题</span>
+                                {wq.error_count > 1 && (
+                                  <span className="px-2 py-0.5 rounded-full bg-red-50 text-red-600 text-[10px] font-bold">
+                                    错 {wq.error_count} 次
+                                  </span>
+                                )}
+                              </div>
+                              <span className={`text-[10px] px-2 py-0.5 rounded-full ${
+                                wq.status === 'pending'
+                                ? 'bg-yellow-50 text-yellow-600'
+                                : 'bg-green-50 text-green-600'
+                              }`}>
+                                {wq.status === 'pending' ? '待复习' : '已掌握'}
+                              </span>
+                            </div>
+                            <p className="text-[14px] text-gray-900 mt-2 leading-relaxed">
+                              {(wq.question || wq).content}
+                            </p>
+                            <div className="flex items-center gap-3 mt-3">
+                              <span className="text-[12px] text-gray-400">
+                                {dayjs(wq.added_at || wq.created_at).format('MM-DD')}
+                              </span>
+                              <button
+                                onClick={() => handleManageTags(wq)}
+                                className="text-[12px] text-blue-600 font-medium hover:text-blue-700 flex items-center gap-1"
+                              >
+                                <Tag size={12} />
+                                标签
+                              </button>
+                            </div>
+                          </div>
+                        </div>
+                      </motion.div>
+                    ))
+                  )}
+                </section>
+              </motion.div>
+            )}
+
+            {currentPage === 'exam' && (
+              <motion.div
+                key="exam-page"
+                initial={{ opacity: 0, x: 20 }}
+                animate={{ opacity: 1, x: 0 }}
+                exit={{ opacity: 0, x: -20 }}
+                className="w-full"
+              >
+                {/* Filter Tabs */}
+                <section className="px-5 pt-4 mb-3 overflow-x-auto no-scrollbar">
+                  <div className="flex gap-2 min-w-max">
+                    {[
+                      { id: 'all', label: '全部', count: filteredExams.length },
+                      { id: 'ungraded', label: '未批改', count: filteredExams.filter(e => e.status === 'ungraded').length },
+                      { id: 'graded', label: '已批改', count: filteredExams.filter(e => e.status === 'graded').length }
+                    ].map((filter) => (
+                      <button
+                        key={filter.id}
+                        onClick={() => setExamFilter(filter.id)}
+                        className={`px-5 py-2.5 rounded-full text-[13px] font-bold flex items-center gap-2 transition-all ${
+                          examFilter === filter.id
+                          ? 'bg-blue-600 text-white shadow-lg shadow-blue-100'
+                          : 'bg-gray-100/80 text-gray-400'
                         }`}
                       >
-                        {/* Content */}
+                        {filter.label}
+                        <span className={`text-[11px] font-medium ${
+                          examFilter === filter.id ? 'text-white/80' : 'text-gray-300'
+                        }`}>
+                          {filter.count}
+                        </span>
+                      </button>
+                    ))}
+                  </div>
+                </section>
+
+                {/* Exam List */}
+                <section className="px-5 space-y-3">
+                  {filteredExams.length === 0 ? (
+                    <div className="text-center py-20">
+                      <FileText size={48} className="mx-auto text-gray-200 mb-4" />
+                      <p className="text-gray-400 text-[15px]">暂无试卷</p>
+                      <p className="text-gray-300 text-[13px] mt-1">在错题本选择题目生成试卷</p>
+                    </div>
+                  ) : (
+                    filteredExams.map((exam) => (
+                      <motion.div
+                        key={exam.id}
+                        layout
+                        initial={{ opacity: 0, y: 10 }}
+                        animate={{ opacity: 1, y: 0 }}
+                        className="bg-white rounded-2xl p-4 shadow-sm border border-gray-100"
+                      >
                         <div className="flex items-start justify-between">
-                          <div className="flex-1 min-w-0 pr-8">
-                            <h4 className="text-[15px] font-black text-gray-900 truncate tracking-tight mb-2">
-                              {paper.name}
-                            </h4>
-                            <div className="flex items-center gap-x-3 gap-y-1 text-gray-400 mb-3">
-                              <div className="flex items-center gap-1">
-                                <Search size={12} className="opacity-50" />
-                                <span className="text-[11px] font-bold">{dayjs(paper.created_at).format('YYYY-MM-DD HH:mm')}</span>
-                              </div>
-                              <span className="text-[11px] font-bold whitespace-nowrap">题目数: {paper.question_ids?.length || 0}题</span>
-                            </div>
-                            <span className={`px-2.5 py-1 rounded-lg text-[10px] font-black tracking-tight ${
-                              paper.status === 'ungraded' ? 'bg-red-50 text-red-500' : 'bg-green-50 text-green-500'
-                            }`}>
-                              {paper.status === 'ungraded' ? '未批改' : '已批改'}
-                            </span>
+                          <div>
+                            <h3 className="text-[14px] font-bold text-gray-900">{exam.name}</h3>
+                            <p className="text-[12px] text-gray-400 mt-1">
+                              {dayjs(exam.created_at).format('MM-DD HH:mm')} · {exam.question_ids?.length || 0} 道题
+                            </p>
                           </div>
-                          <button 
-                            onClick={(e) => {
-                              e.stopPropagation();
-                              setReprintExam(paper);
-                            }}
-                            className="flex items-center gap-1 px-3 py-1.5 rounded-xl border border-blue-100 bg-blue-50/50 text-blue-600 hover:bg-blue-50 transition-colors active:scale-95 shrink-0"
+                          <span className={`text-[10px] px-2 py-0.5 rounded-full ${
+                            exam.status === 'ungraded'
+                            ? 'bg-yellow-50 text-yellow-600'
+                            : 'bg-green-50 text-green-600'
+                          }`}>
+                            {exam.status === 'ungraded' ? '未批改' : '已批改'}
+                          </span>
+                        </div>
+                        <div className="flex items-center gap-3 mt-4">
+                          <button
+                            onClick={() => handleViewExamDetail(exam)}
+                            className="flex-1 py-2.5 rounded-xl bg-blue-50 text-blue-600 text-[13px] font-bold hover:bg-blue-100 transition-colors"
                           >
-                            <Printer size={12} />
-                            <span className="text-[11px] font-black">重打印</span>
+                            查看详情
+                          </button>
+                          <button
+                            onClick={() => handlePrintExam(exam)}
+                            className="flex-1 py-2.5 rounded-xl bg-gray-100 text-gray-600 text-[13px] font-bold hover:bg-gray-200 transition-colors flex items-center justify-center gap-1"
+                          >
+                            <Printer size={14} />
+                            打印
                           </button>
                         </div>
-
-                        {/* Selection Indicator */}
-                        <div className="absolute top-6 right-6">
-                           <div className={`w-5 h-5 rounded-full border-2 flex items-center justify-center transition-all ${
-                              selectedPaperId === paper.id ? 'bg-blue-600 border-blue-600' : 'border-gray-100'
-                           }`}>
-                             {selectedPaperId === paper.id && <div className="w-2 h-2 bg-white rounded-full" />}
-                           </div>
-                        </div>
-                      </div>
-                    ))}
-
-                    {/* Empty State */}
-                    {filteredExams.length === 0 && (
-                      <div className="flex flex-col items-center justify-center py-24 opacity-20">
-                        <FileText size={48} strokeWidth={1} />
-                        <p className="mt-4 text-[13px] font-medium">暂无此类试卷</p>
-                      </div>
-                    )}
-                  </div>
-                </motion.div>
-              )}
-            </AnimatePresence>
-          </main>
-
-          {/* Batch Action Toolbar */}
-          <AnimatePresence>
-            {selectedConfirmIds.length > 0 && currentPage === 'pending' && (
-              <motion.div
-                initial={{ y: 100, opacity: 0 }}
-                animate={{ y: 0, opacity: 1 }}
-                exit={{ y: 100, opacity: 0 }}
-                className="fixed bottom-20 left-0 right-0 max-w-md mx-auto px-5 z-[80]"
-              >
-                <div className="bg-slate-900/95 backdrop-blur-3xl rounded-[2rem] p-5 flex items-center justify-between shadow-2xl border border-white/10 ring-1 ring-white/10">
-                  <div className="pl-1">
-                    <p className="text-[10px] font-black text-white/40 uppercase tracking-widest">已选题目</p>
-                    <p className="text-[15px] font-bold text-white">共 {selectedConfirmIds.length} 道</p>
-                  </div>
-                  <button 
-                    onClick={handleAddToWrongBook}
-                    className="px-6 py-3 rounded-2xl text-[12px] font-black text-white bg-blue-600 hover:bg-blue-500 transition-all shadow-xl shadow-blue-900/50"
-                  >
-                    批量加入错题本
-                  </button>
-                </div>
+                      </motion.div>
+                    ))
+                  )}
+                </section>
               </motion.div>
             )}
           </AnimatePresence>
+        </main>
 
-          <AnimatePresence>
-            {selectedQuestions.length > 0 && currentPage === 'wrongbook' && (
-              <motion.div
-                initial={{ y: 100, opacity: 0 }}
-                animate={{ y: 0, opacity: 1 }}
-                exit={{ y: 100, opacity: 0 }}
-                className="fixed bottom-20 left-0 right-0 max-w-md mx-auto px-5 z-[80]"
-              >
-                <div className="bg-slate-900/95 backdrop-blur-3xl rounded-[2rem] p-5 flex items-center justify-between shadow-2xl border border-white/10 ring-1 ring-white/10">
-                  <div className="pl-1">
-                    <p className="text-[10px] font-black text-white/40 uppercase tracking-widest">已选题目</p>
-                    <p className="text-[15px] font-bold text-white">共 {selectedQuestions.length} 道</p>
-                  </div>
-                  <button 
-                    onClick={() => setShowPrintPreview(true)}
-                    className="px-6 py-3 rounded-2xl text-[12px] font-black text-white bg-blue-600 hover:bg-blue-500 transition-all shadow-xl shadow-blue-900/50"
-                  >
-                    打印 ({selectedQuestions.length})
-                  </button>
-                </div>
-              </motion.div>
-            )}
-          </AnimatePresence>
-
-          {/* iOS Tab Bar */}
-          <nav className="fixed bottom-0 left-0 right-0 max-w-md mx-auto bg-white/80 backdrop-blur-2xl border-t border-gray-100/50 flex justify-between px-8 pt-4 pb-8 z-[70]">
+        {/* Bottom Navigation */}
+        <nav className="fixed bottom-0 left-0 right-0 bg-white/80 backdrop-blur-xl border-t border-gray-100 z-50">
+          <div className="max-w-lg mx-auto px-6 h-16 flex items-center justify-around">
             {[
               { id: 'processing', icon: Camera, label: '处理' },
               { id: 'pending', icon: BookOpen, label: '待确认' },
@@ -1548,1271 +1472,41 @@ export default function App() {
                 )}
               </button>
             ))}
-          </nav>
-
-          {/* Student Sheet */}
-          <StudentSwitcher
-            visible={showStudentSwitcher}
-            onClose={() => setShowStudentSwitcher(false)}
-          />
-
-          {/* ActionSheet */}
-          <ActionSheet
-            visible={showActionSheet}
-            onClose={() => setShowActionSheet(false)}
-            actions={[
-              { key: 'camera', text: '拍照上传', description: '拍摄试卷或作业', onClick: () => {
-                if (fileInputRef.current) {
-                  fileInputRef.current.setAttribute('capture', 'environment')
-                  fileInputRef.current.click()
-                }
-              }},
-              { key: 'album', text: '从相册选择', description: '选择已有照片', onClick: () => {
-                if (fileInputRef.current) {
-                  fileInputRef.current.removeAttribute('capture')
-                  fileInputRef.current.click()
-                }
-              }}
-            ]}
-          />
-
-          {/* Hidden File Input */}
-          <input
-            ref={fileInputRef}
-            type="file"
-            accept="image/*"
-            multiple
-            style={{ display: 'none' }}
-            onChange={handleFileSelect}
-          />
-
-          {/* Image Preview */}
-          <AnimatePresence>
-            {previewImage && (
-              <motion.div
-                initial={{ opacity: 0 }}
-                animate={{ opacity: 1 }}
-                exit={{ opacity: 0 }}
-                onClick={() => setPreviewImage(null)}
-                className="fixed inset-0 bg-black/90 backdrop-blur-sm z-[100] flex items-center justify-center"
-              >
-                <img src={previewImage} className="max-w-full max-h-full object-contain" alt="预览" />
-                <button className="absolute top-12 right-6 p-2 bg-white/10 rounded-full text-white">
-                  <X size={24} />
-                </button>
-              </motion.div>
-            )}
-          </AnimatePresence>
-
-          {/* Dialog */}
-          <Dialog
-            visible={dialogState.visible}
-            title={dialogState.title}
-            content={dialogState.content}
-            confirmText={dialogState.confirmText}
-            cancelText={dialogState.cancelText}
-            onConfirm={dialogState.onConfirm}
-            onCancel={dialogState.onCancel}
-          />
-
-          {/* Scan QR */}
-          {showScanQR && (
-            <ScanQR
-              onClose={() => setShowScanQR(false)}
-              onScanSuccess={handleScanSuccess}
-            />
-          )}
-
-          {/* Grading */}
-          {showGrading && (
-            <Grading
-              paperId={gradingParams?.paperId}
-              studentId={gradingParams?.studentId}
-              onClose={() => { setShowGrading(false); setGradingParams(null) }}
-              onComplete={(results) => {
-                showToast({ icon: 'success', content: '批改完成' })
-                setShowGrading(false)
-                setGradingParams(null)
-              }}
-            />
-          )}
-
-          {/* Print Preview Overlay - Reference Design */}
-          <AnimatePresence>
-            {showPrintPreview && (
-              <motion.div
-                initial={{ opacity: 0, scale: 1.1 }}
-                animate={{ opacity: 1, scale: 1 }}
-                exit={{ opacity: 0, scale: 1.05 }}
-                className="fixed inset-0 bg-[#F2F2F7] z-[200] flex flex-col max-w-md mx-auto h-screen overflow-hidden"
-              >
-                <div className="flex-1 overflow-y-auto bg-white px-6 pt-10 pb-32 no-scrollbar">
-                  <button 
-                    onClick={() => setShowPrintPreview(false)}
-                    className="absolute top-10 left-4 w-8 h-8 bg-black/5 rounded-full flex items-center justify-center text-slate-900 active:scale-90 transition-transform z-10"
-                  >
-                    <ChevronRight size={18} className="rotate-180" />
-                  </button>
-
-                  {/* Compact Academic Header with QR */}
-                  <div className="relative flex items-center justify-between mb-10 pt-2 px-2">
-                    <div className="flex-1">
-                      <h2 className="text-[18px] font-serif font-black text-gray-900 tracking-tight leading-tight">
-                        {currentStudent?.name || '学生'} <br/> 错题强化训练卷
-                      </h2>
-                      <div className="flex items-center gap-3 mt-2.5">
-                        <div className="flex items-center gap-1.5">
-                          <span className="w-1 h-1 rounded-full bg-blue-500" />
-                          <p className="text-[9px] font-black text-gray-400 uppercase tracking-[0.2em] italic">SMART LEARNING SYSTEM</p>
-                        </div>
-                        <div className="w-px h-2.5 bg-gray-200" />
-                        <span className="text-[11px] font-black text-gray-400 tracking-tight">
-                          {dayjs().format('YYYY-M-D')}
-                        </span>
-                      </div>
-                    </div>
-                    <div className="w-20 h-20 bg-gray-100 rounded-xl flex flex-col items-center justify-center p-2 shrink-0">
-                      <QRCodeSVG 
-                        value={`https://scan.example.com/paper/${currentStudent?.id || 'student'}`}
-                        size={48}
-                        className="rounded-sm"
-                      />
-                      <span className="text-[7px] font-black text-gray-400 uppercase tracking-tighter mt-0.5">批改扫码</span>
-                    </div>
-                  </div>
-
-                  {/* Paper Content Area */}
-                  <div className="space-y-6">
-                    {(() => {
-                      const displayQuestions = selectedQuestions.length > 0
-                        ? selectedQuestions.map(wq => wq.question || wq)
-                        : pendingQuestions.slice(0, 1).map(q => q.question || q)
-                      
-                      return displayQuestions.map((q, i) => {
-                        const questionType = q.question_type || q.type || '选择题'
-                        const subject = q.subject || '数学'
-                        const content = q.content || '无内容'
-                        const options = q.options || []
-                        
-                        return (
-                          <div key={q.id || i} className="relative group">
-                            <div className="flex items-start gap-4 mb-4">
-                              <div className="w-6 h-6 flex items-center justify-center rounded-lg bg-slate-900 text-white text-[11px] font-black tracking-tighter shrink-0 mt-1">
-                                {i + 1}
-                              </div>
-                              <div className="flex-1">
-                                <div className="flex items-center gap-2 mb-1.5">
-                                  <span className="px-1.5 py-0.5 rounded-md bg-gray-100 text-[9px] font-black text-gray-400 uppercase tracking-widest underline decoration-gray-200 underline-offset-1">
-                                    {questionType}
-                                  </span>
-                                  <span className="px-1.5 py-0.5 rounded-md bg-blue-50 text-[9px] font-black text-blue-500 uppercase tracking-widest">
-                                    {subject}
-                                  </span>
-                                </div>
-                                <div className="text-[14px] leading-relaxed text-slate-800 font-medium font-serif">
-                                  {content}
-                                </div>
-                              </div>
-                            </div>
-
-                            {/* Contextual Answer Area - Paper Efficient */}
-                            {(questionType === '解答题' || questionType === '简答题' || questionType === 'answer') && (
-                              <div className="ml-10 h-32 border border-gray-100 rounded-xl bg-gray-50/10 flex flex-col items-center justify-start relative overflow-hidden group-hover:bg-blue-50/5 transition-colors">
-                                 <div className="absolute top-3 left-4 text-[10px] font-black text-gray-300 italic">Solution:</div>
-                                 <div className="w-full h-full border-t border-gray-50 mt-10 opacity-30" />
-                                 <div className="w-full h-full border-t border-gray-50 opacity-30" />
-                              </div>
-                            )}
-
-                            {questionType === '填空题' || questionType === 'fill' && (
-                              <div className="ml-10 h-10" />
-                            )}
-
-                            {questionType === '选择题' || questionType === 'choice' && (
-                              <div className="ml-10 flex gap-10 mt-2">
-                                 {['A','B','C','D'].map(opt => (
-                                   <div key={opt} className="flex items-center gap-2">
-                                     <div className="w-4 h-4 rounded-full border border-gray-200" />
-                                     <span className="text-[12px] font-bold text-gray-300">{opt}</span>
-                                   </div>
-                                 ))}
-                              </div>
-                            )}
-                          </div>
-                        )
-                      })
-                    })()}
-                  </div>
-
-                  <div className="mt-20 pt-8 border-t border-gray-100 flex items-center justify-between pb-12">
-                     <div className="flex items-center gap-2">
-                        <div className="w-1.5 h-1.5 rounded-full bg-blue-500" />
-                        <p className="text-[9px] text-gray-400 font-black uppercase tracking-[0.2em]">Personalized Exam Pack</p>
-                     </div>
-                     <p className="text-[10px] text-gray-300 font-mono tracking-tighter">PAGE 01 / 01</p>
-                  </div>
-                </div>
-
-                {/* iOS Style Floating Actions */}
-                <div className="absolute bottom-0 left-0 right-0 p-6 bg-white/80 backdrop-blur-3xl border-t border-gray-100 flex gap-4 z-[210]">
-                  <button className="flex-1 py-4 border-2 border-gray-50 px-4 rounded-2xl text-[14px] font-black text-gray-900 active:scale-95 transition-transform bg-white/50">PDF 导出</button>
-                  <button 
-                    onClick={() => {
-                      const displayQuestions = selectedQuestions.length > 0
-                        ? selectedQuestions.map(wq => wq.question || wq)
-                        : pendingQuestions.slice(0, 1).map(q => q.question || q)
-                      
-                      if (displayQuestions.length === 0) {
-                        setShowPrintPreview(false)
-                        return
-                      }
-
-                      if (isMobile) {
-                        const doc = new jsPDF('p', 'mm', 'a4')
-                        const pageWidth = 210
-                        const pageHeight = 297
-                        const margin = 20
-                        const contentWidth = pageWidth - margin * 2
-                        let y = margin
-
-                        doc.setFont('helvetica', 'bold')
-                        doc.setFontSize(18)
-                        doc.text(`${currentStudent?.name || 'Student'} - Cuoti Chonglian Juan`, pageWidth / 2, y, { align: 'center' })
-                        y += 12
-
-                        doc.setFont('helvetica', 'normal')
-                        doc.setFontSize(10)
-                        doc.text(`Total: ${displayQuestions.length} questions | Score: 100 | Time: 60min`, pageWidth / 2, y, { align: 'center' })
-                        y += 8
-
-                        doc.setDrawColor(200)
-                        doc.line(margin, y, pageWidth - margin, y)
-                        y += 8
-
-                        doc.setFontSize(10)
-                        doc.text(`Name: ______________    Date: ____/____/____`, margin, y)
-                        y += 12
-
-                        displayQuestions.forEach((q, index) => {
-                          if (y > pageHeight - 40) {
-                            doc.addPage()
-                            y = margin
-                          }
-
-                          const questionType = q.question_type === 'choice' ? 'Choice' : q.question_type === 'fill' ? 'Fill' : 'Answer'
-                          
-                          doc.setFont('helvetica', 'bold')
-                          doc.setFontSize(12)
-                          doc.text(`${index + 1}. (${questionType})`, margin, y)
-                          y += 7
-
-                          doc.setFont('helvetica', 'normal')
-                          doc.setFontSize(11)
-                          const qContent = q.content || 'No content'
-                          const lines = doc.splitTextToSize(qContent, contentWidth)
-                          doc.text(lines, margin, y)
-                          y += lines.length * 6
-
-                          if (q.options && q.options.length > 0) {
-                            y += 3
-                            q.options.forEach((opt, i) => {
-                              if (y > pageHeight - 20) {
-                                doc.addPage()
-                                y = margin
-                              }
-                              doc.text(`${String.fromCharCode(65 + i)}. ${opt}`, margin + 10, y)
-                              y += 6
-                            })
-                          }
-
-                          if (q.question_type === 'answer') {
-                            y += 5
-                            doc.setDrawColor(200)
-                            doc.rect(margin, y, contentWidth, 30)
-                            y += 35
-                          }
-
-                          y += 5
-                        })
-
-                        y += 10
-                        if (y > pageHeight - 20) {
-                          doc.addPage()
-                          y = margin
-                        }
-                        doc.setFontSize(8)
-                        doc.setTextColor(150)
-                        doc.text('Minxue - Smart Learning System', pageWidth / 2, y, { align: 'center' })
-
-                        const fileName = `${currentStudent?.name || 'student'}_cuoti_${dayjs().format('YYYYMMDD_HHmm')}.pdf`
-                        doc.save(fileName)
-                      } else {
-                        const questionHtml = displayQuestions.map((q, i) => {
-                          const questionType = q.question_type || q.type || '选择题'
-                          const content = q.content || '无内容'
-                          const isShortOptions = q.options && q.options.every(opt => opt.length <= 10)
-                          let displayContent = content
-                          if (questionType === 'fill') {
-                            displayContent = content.replace(/_____/g, '<span style="display:inline-block;min-width:80px;border-bottom:1px solid #333;margin:0 4px;">&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;</span>')
-                          }
-                          return `
-                            <div style="margin-bottom:20px;page-break-inside:avoid;">
-                              <div style="display:flex;align-items:baseline;gap:8px;margin-bottom:8px;">
-                                <span style="font-weight:bold;">${i + 1}.</span>
-                                <span style="font-size:9pt;color:#999;">(${questionType === 'choice' ? '选择题' : questionType === 'fill' ? '填空题' : questionType === 'answer' ? '解答题' : questionType})</span>
-                              </div>
-                              <div style="margin-bottom:8px;line-height:1.6;">${displayContent}</div>
-                              ${q.options && q.options.length > 0 ? `
-                                <div style="margin-left:30px;margin-top:8px;${isShortOptions ? 'display:flex;flex-wrap:wrap;gap:32px;' : 'display:grid;grid-template-columns:1fr 1fr;gap:8px;'}">
-                                  ${q.options.map((opt, idx) => `<div style="font-size:11pt;white-space:nowrap;">${String.fromCharCode(65 + idx)}. ${opt}</div>`).join('')}
-                                </div>
-                              ` : ''}
-                              ${questionType === 'answer' ? '<div style="margin-top:15px;padding:12px;border:1px solid #ddd;border-radius:4px;min-height:40px;">答：</div>' : ''}
-                            </div>
-                          `
-                        }).join('')
-                        
-                        const html = `<!DOCTYPE html><html><head><meta charset="UTF-8"><title>${currentStudent?.name || '学生'} - 错题重练卷</title><style>
-                          @page{size:A4;margin:20mm}
-                          body{font-family:'Microsoft YaHei','SimSun',sans-serif;line-height:1.8;font-size:12pt}
-                          .paper{width:210mm;min-height:297mm;margin:0 auto;padding:20mm;box-sizing:border-box;background:white}
-                          .header{text-align:center;margin-bottom:20px;padding-bottom:15px;border-bottom:2px solid #333;position:relative}
-                          .title{font-size:18pt;font-weight:bold;margin-bottom:10px}
-                          .subtitle{font-size:10pt;color:#666;display:flex;justify-content:center;gap:30px}
-                          .info-bar{display:flex;justify-content:flex-start;align-items:center;margin-bottom:20px;font-size:10pt;border-bottom:1px solid #ddd;padding-bottom:10px;gap:40px}
-                          .footer{margin-top:40px;text-align:center;font-size:9pt;color:#999;border-top:1px solid #ddd;padding-top:15px}
-                        </style></head><body><div class="paper">
-                          <div class="header">
-                            <div class="title">${currentStudent?.name || '学生'} - 错题重练卷</div>
-                            <div class="subtitle"><span>总题数：${displayQuestions.length}题</span><span>满分：100分</span><span>限时：60分钟</span></div>
-                          </div>
-                          <div class="info-bar"><span>姓名：______________</span><span>日期：____年____月____日</span></div>
-                          ${questionHtml}
-                          <div class="footer">敏学错题本 - 智能学习助手</div>
-                        </div>
-                        </body></html>`
-                        
-                        const w = window.open('', '_blank')
-                        if (w) {
-                          w.document.write(html)
-                          w.document.close()
-                          w.focus()
-                          w.print()
-                        }
-                      }
-
-                      if (currentStudent && selectedQuestions.length > 0) {
-                        const questionIds = selectedQuestions.map(wq => {
-                          const q = wq.question || wq
-                          return q.id
-                        }).filter(Boolean)
-                        
-                        if (questionIds.length > 0) {
-                          import('./services/supabaseService').then(({ createGeneratedExam }) => {
-                            createGeneratedExam({
-                              student_id: currentStudent.id,
-                              name: '错题重练卷',
-                              question_ids: questionIds
-                            }).then(() => {
-                              console.log('试卷已保存')
-                            }).catch(error => {
-                              console.error('保存生成试卷失败:', error)
-                            })
-                          })
-                        }
-                        
-                        clearSelection()
-                      }
-
-                      setShowPrintPreview(false)
-                    }}
-                    className="flex-[2] py-4 bg-blue-600 text-white rounded-2xl text-[14px] font-black shadow-[0_10px_30px_rgba(37,99,235,0.3)] active:scale-95 transition-transform"
-                  >
-                    {isMobile ? '下载PDF' : '直接打印'}
-                  </button>
-                </div>
-              </motion.div>
-            )}
-          </AnimatePresence>
-
-          {/* Reprint Overlay */}
-          <AnimatePresence>
-            {reprintExam && (
-              <motion.div
-                initial={{ opacity: 0, scale: 1.1 }}
-                animate={{ opacity: 1, scale: 1 }}
-                exit={{ opacity: 0, scale: 1.05 }}
-                className="fixed inset-0 bg-[#F2F2F7] z-[200] flex flex-col max-w-md mx-auto h-screen overflow-hidden"
-              >
-                <div className="flex-1 overflow-y-auto bg-white px-6 pt-10 pb-32 no-scrollbar">
-                  <button 
-                    onClick={() => { setReprintExam(null); setReprintQuestions([]) }}
-                    className="absolute top-10 left-4 w-8 h-8 bg-black/5 rounded-full flex items-center justify-center text-slate-900 active:scale-90 transition-transform z-10"
-                  >
-                    <ChevronRight size={18} className="rotate-180" />
-                  </button>
-
-                  {/* Academic Header with QR */}
-                  <div className="relative flex items-center justify-between mb-10 pt-2 px-2">
-                    <div className="flex-1">
-                      <h2 className="text-[18px] font-serif font-black text-gray-900 tracking-tight leading-tight">
-                        {currentStudent?.name || '学生'} <br/> {reprintExam.name}
-                      </h2>
-                      <div className="flex items-center gap-3 mt-2.5">
-                        <div className="flex items-center gap-1.5">
-                          <span className="w-1 h-1 rounded-full bg-blue-500" />
-                          <p className="text-[9px] font-black text-gray-400 uppercase tracking-[0.2em] italic">SMART LEARNING SYSTEM</p>
-                        </div>
-                        <div className="w-px h-2.5 bg-gray-200" />
-                        <span className="text-[11px] font-black text-gray-400 tracking-tight">
-                          {dayjs(reprintExam.created_at).format('YYYY-M-D')}
-                        </span>
-                      </div>
-                    </div>
-                    <div className="w-20 h-20 bg-gray-100 rounded-xl flex flex-col items-center justify-center p-2 shrink-0">
-                      <QRCodeSVG 
-                        value={`https://scan.example.com/paper/${reprintExam.id}`}
-                        size={48}
-                        className="rounded-sm"
-                      />
-                      <span className="text-[7px] font-black text-gray-400 uppercase tracking-tighter mt-0.5">批改扫码</span>
-                    </div>
-                  </div>
-
-                  {/* Questions */}
-                  {reprintQuestions.length === 0 ? (
-                    <div className="flex flex-col items-center justify-center py-24 opacity-30">
-                      <FileText size={48} strokeWidth={1} />
-                      <p className="mt-4 text-[13px] font-medium">题目加载中...</p>
-                    </div>
-                  ) : (
-                    <div className="space-y-6">
-                      {reprintQuestions.map((q, i) => {
-                        const questionType = q.question_type || q.type || '选择题'
-                        const subject = q.subject || '数学'
-                        const content = q.content || '无内容'
-                        
-                        return (
-                          <div key={q.id || i} className="relative group">
-                            <div className="flex items-start gap-4 mb-4">
-                              <div className="w-6 h-6 flex items-center justify-center rounded-lg bg-slate-900 text-white text-[11px] font-black tracking-tighter shrink-0 mt-1">
-                                {i + 1}
-                              </div>
-                              <div className="flex-1">
-                                <div className="flex items-center gap-2 mb-1.5">
-                                  <span className="px-1.5 py-0.5 rounded-md bg-gray-100 text-[9px] font-black text-gray-400 uppercase tracking-widest underline decoration-gray-200 underline-offset-1">
-                                    {questionType}
-                                  </span>
-                                  <span className="px-1.5 py-0.5 rounded-md bg-blue-50 text-[9px] font-black text-blue-500 uppercase tracking-widest">
-                                    {subject}
-                                  </span>
-                                </div>
-                                <div className="text-[14px] leading-relaxed text-slate-800 font-medium font-serif">
-                                  {content}
-                                </div>
-                                {q.options && q.options.length > 0 && (
-                                  <div className="ml-10 flex gap-10 mt-2">
-                                    {q.options.map((opt, idx) => (
-                                      <div key={idx} className="flex items-center gap-2">
-                                        <div className="w-4 h-4 rounded-full border border-gray-200" />
-                                        <span className="text-[12px] font-bold text-gray-300">{String.fromCharCode(65 + idx)} {opt}</span>
-                                      </div>
-                                    ))}
-                                  </div>
-                                )}
-                              </div>
-                            </div>
-
-                            {(questionType === '解答题' || questionType === '简答题' || questionType === 'answer') && (
-                              <div className="ml-10 h-32 border border-gray-100 rounded-xl bg-gray-50/10 flex flex-col items-center justify-start relative overflow-hidden group-hover:bg-blue-50/5 transition-colors">
-                                 <div className="absolute top-3 left-4 text-[10px] font-black text-gray-300 italic">Solution:</div>
-                                 <div className="w-full h-full border-t border-gray-50 mt-10 opacity-30" />
-                                 <div className="w-full h-full border-t border-gray-50 opacity-30" />
-                              </div>
-                            )}
-
-                            {(questionType === '填空题' || questionType === 'fill') && (
-                              <div className="ml-10 h-10" />
-                            )}
-                          </div>
-                        )
-                      })}
-                    </div>
-                  )}
-
-                  <div className="mt-20 pt-8 border-t border-gray-100 flex items-center justify-between pb-12">
-                     <div className="flex items-center gap-2">
-                        <div className="w-1.5 h-1.5 rounded-full bg-blue-500" />
-                        <p className="text-[9px] text-gray-400 font-black uppercase tracking-[0.2em]">Personalized Exam Pack</p>
-                     </div>
-                     <p className="text-[10px] text-gray-300 font-mono tracking-tighter">PAGE 01 / 01</p>
-                  </div>
-                </div>
-
-                {/* iOS Style Floating Actions */}
-                <div className="absolute bottom-0 left-0 right-0 p-6 bg-white/80 backdrop-blur-3xl border-t border-gray-100 flex gap-4 z-[210]">
-                  <button className="flex-1 py-4 border-2 border-gray-50 px-4 rounded-2xl text-[14px] font-black text-gray-900 active:scale-95 transition-transform bg-white/50">PDF 导出</button>
-                  <button 
-                    onClick={() => {
-                      if (reprintQuestions.length > 0) {
-                        if (isMobile) {
-                          const doc = new jsPDF('p', 'mm', 'a4')
-                          const pageWidth = 210
-                          const pageHeight = 297
-                          const margin = 20
-                          const contentWidth = pageWidth - margin * 2
-                          let y = margin
-
-                          doc.setFont('helvetica', 'bold')
-                          doc.setFontSize(18)
-                          doc.text(`${currentStudent?.name || 'Student'} - ${reprintExam.name}`, pageWidth / 2, y, { align: 'center' })
-                          y += 12
-
-                          doc.setFont('helvetica', 'normal')
-                          doc.setFontSize(10)
-                          doc.text(`Total: ${reprintQuestions.length} questions | Score: 100 | Time: 60min`, pageWidth / 2, y, { align: 'center' })
-                          y += 8
-
-                          doc.setDrawColor(200)
-                          doc.line(margin, y, pageWidth - margin, y)
-                          y += 8
-
-                          doc.setFontSize(10)
-                          doc.text(`Name: ______________    Date: ____/____/____`, margin, y)
-                          y += 12
-
-                          reprintQuestions.forEach((q, index) => {
-                            if (y > pageHeight - 40) {
-                              doc.addPage()
-                              y = margin
-                            }
-
-                            const questionType = q.question_type === 'choice' ? 'Choice' : q.question_type === 'fill' ? 'Fill' : 'Answer'
-                            
-                            doc.setFont('helvetica', 'bold')
-                            doc.setFontSize(12)
-                            doc.text(`${index + 1}. (${questionType})`, margin, y)
-                            y += 7
-
-                            doc.setFont('helvetica', 'normal')
-                            doc.setFontSize(11)
-                            const qContent = q.content || 'No content'
-                            const lines = doc.splitTextToSize(qContent, contentWidth)
-                            doc.text(lines, margin, y)
-                            y += lines.length * 6
-
-                            if (q.options && q.options.length > 0) {
-                              y += 3
-                              q.options.forEach((opt, i) => {
-                                if (y > pageHeight - 20) {
-                                  doc.addPage()
-                                  y = margin
-                                }
-                                doc.text(`${String.fromCharCode(65 + i)}. ${opt}`, margin + 10, y)
-                                y += 6
-                              })
-                            }
-
-                            if (q.question_type === 'answer') {
-                              y += 5
-                              doc.setDrawColor(200)
-                              doc.rect(margin, y, contentWidth, 30)
-                              y += 35
-                            }
-
-                            y += 5
-                          })
-
-                          y += 10
-                          if (y > pageHeight - 20) {
-                            doc.addPage()
-                            y = margin
-                          }
-                          doc.setFontSize(8)
-                          doc.setTextColor(150)
-                          doc.text('Minxue - Smart Learning System', pageWidth / 2, y, { align: 'center' })
-
-                          const fileName = `${currentStudent?.name || 'student'}_${reprintExam.name}_${dayjs().format('YYYYMMDD_HHmm')}.pdf`
-                          doc.save(fileName)
-                        } else {
-                          const questionHtml = reprintQuestions.map((q, i) => {
-                            const questionType = q.question_type || q.type || '选择题'
-                            const content = q.content || '无内容'
-                            const isShortOptions = q.options && q.options.every(opt => opt.length <= 10)
-                            let displayContent = content
-                            if (questionType === 'fill') {
-                              displayContent = content.replace(/_____/g, '<span style="display:inline-block;min-width:80px;border-bottom:1px solid #333;margin:0 4px;">&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;</span>')
-                            }
-                            return `
-                              <div style="margin-bottom:20px;page-break-inside:avoid;">
-                                <div style="display:flex;align-items:baseline;gap:8px;margin-bottom:8px;">
-                                  <span style="font-weight:bold;">${i + 1}.</span>
-                                  <span style="font-size:9pt;color:#999;">(${questionType === 'choice' ? '选择题' : questionType === 'fill' ? '填空题' : questionType === 'answer' ? '解答题' : questionType})</span>
-                                </div>
-                                <div style="margin-bottom:8px;line-height:1.6;">${displayContent}</div>
-                                ${q.options && q.options.length > 0 ? `
-                                  <div style="margin-left:30px;margin-top:8px;${isShortOptions ? 'display:flex;flex-wrap:wrap;gap:32px;' : 'display:grid;grid-template-columns:1fr 1fr;gap:8px;'}">
-                                    ${q.options.map((opt, idx) => `<div style="font-size:11pt;white-space:nowrap;">${String.fromCharCode(65 + idx)}. ${opt}</div>`).join('')}
-                                  </div>
-                                ` : ''}
-                                ${questionType === 'answer' ? '<div style="margin-top:15px;padding:12px;border:1px solid #ddd;border-radius:4px;min-height:40px;">答：</div>' : ''}
-                              </div>
-                            `
-                          }).join('')
-                          
-                          const html = `<!DOCTYPE html><html><head><meta charset="UTF-8"><title>${reprintExam.name}</title><style>
-                            @page{size:A4;margin:20mm}
-                            body{font-family:'Microsoft YaHei','SimSun',sans-serif;line-height:1.8;font-size:12pt}
-                            .paper{width:210mm;min-height:297mm;margin:0 auto;padding:20mm;box-sizing:border-box;background:white}
-                            .header{text-align:center;margin-bottom:20px;padding-bottom:15px;border-bottom:2px solid #333;position:relative}
-                            .title{font-size:18pt;font-weight:bold;margin-bottom:10px}
-                            .subtitle{font-size:10pt;color:#666;display:flex;justify-content:center;gap:30px}
-                            .info-bar{display:flex;justify-content:flex-start;align-items:center;margin-bottom:20px;font-size:10pt;border-bottom:1px solid #ddd;padding-bottom:10px;gap:40px}
-                            .footer{margin-top:40px;text-align:center;font-size:9pt;color:#999;border-top:1px solid #ddd;padding-top:15px}
-                            .page-number{text-align:center;margin-top:20px;font-size:10pt;color:#666}
-                          </style></head><body><div class="paper">
-                            <div class="header">
-                              <div class="title">${currentStudent?.name || '学生'} - ${reprintExam.name}</div>
-                              <div class="subtitle"><span>总题数：${reprintQuestions.length}题</span><span>满分：100分</span><span>限时：60分钟</span></div>
-                            </div>
-                            <div class="info-bar"><span>姓名：______________</span><span>日期：____年____月____日</span></div>
-                            ${questionHtml}
-                            <div class="footer">敏学错题本 - 智能学习助手</div>
-                            <div class="page-number">第 1 页 / 共 1 页</div>
-                          </div>
-                          </body></html>`
-                          
-                          const w = window.open('', '_blank')
-                          if (w) {
-                            w.document.write(html)
-                            w.document.close()
-                            w.focus()
-                            w.print()
-                          }
-                        }
-                      }
-                      setReprintExam(null)
-                      setReprintQuestions([])
-                    }}
-                    className="flex-[2] py-4 bg-blue-600 text-white rounded-2xl text-[14px] font-black shadow-[0_10px_30px_rgba(37,99,235,0.3)] active:scale-95 transition-transform"
-                  >
-                    {isMobile ? '下载PDF' : '直接打印'}
-                  </button>
-                </div>
-              </motion.div>
-            )}
-          </AnimatePresence>
-
-          {/* Delete Confirm Dialog */}
-          <AnimatePresence>
-            {showDeleteConfirm && (
-              <div className="fixed inset-0 z-[1000] flex items-center justify-center px-8">
-                <motion.div 
-                  initial={{ opacity: 0 }}
-                  animate={{ opacity: 1 }}
-                  exit={{ opacity: 0 }}
-                  onClick={() => setShowDeleteConfirm(null)}
-                  className="absolute inset-0 bg-black/60 backdrop-blur-md"
-                />
-                <motion.div 
-                  initial={{ scale: 0.9, opacity: 0 }}
-                  animate={{ scale: 1, opacity: 1 }}
-                  exit={{ scale: 0.9, opacity: 0 }}
-                  className="relative w-full max-w-[280px] bg-white/90 backdrop-blur-xl rounded-[2rem] p-6 shadow-2xl text-center"
-                >
-                  <div className="w-14 h-14 bg-red-50 text-red-500 rounded-2xl flex items-center justify-center mx-auto mb-4">
-                    <Trash2 size={28} />
-                  </div>
-                  <h3 className="text-[17px] font-black text-gray-900 mb-2">确认删除该题目？</h3>
-                  <p className="text-[13px] text-gray-500 mb-6 leading-relaxed">
-                    删除后将无法恢复，建议先确认为正确或自行修改。
-                  </p>
-                  <div className="space-y-2">
-                    <button 
-                      onClick={() => {
-                        setShowDeleteConfirm(null)
-                      }}
-                      className="w-full py-3.5 bg-red-500 text-white font-black rounded-2xl shadow-lg shadow-red-100 active:scale-95 transition-transform"
-                    >
-                      确定删除
-                    </button>
-                    <button 
-                      onClick={() => setShowDeleteConfirm(null)}
-                      className="w-full py-3.5 text-gray-400 font-bold active:scale-95 transition-transform"
-                    >
-                      取消
-                    </button>
-                  </div>
-                </motion.div>
-              </div>
-            )}
-          </AnimatePresence>
-
-          {/* Original Paper Viewer - Question Image Only */}
-          <AnimatePresence>
-            {showOriginalPaper && (() => {
-              const q = showOriginalPaper
-              const questionImage = q?.image_url || ''
-              const task = tasks.find(t => t.id === q?.task_id)
-              const fullPaperImage = task?.image_url || task?.result?.image_url || ''
-              const displayImage = questionImage || fullPaperImage
-
-              if (!displayImage) return null
-
-              return (
-                <div className="fixed inset-0 z-[1000] bg-black overflow-hidden" onClick={() => { setShowOriginalPaper(null); setShowFullPaper(false) }}>
-                  <motion.div 
-                    initial={{ opacity: 0, scale: 1.05 }}
-                    animate={{ opacity: 1, scale: 1 }}
-                    exit={{ opacity: 0, scale: 1.05 }}
-                    className="relative h-full w-full flex flex-col"
-                    onClick={(e) => e.stopPropagation()}
-                  >
-                    {/* Header */}
-                    <div className="absolute top-0 left-0 right-0 z-30 px-4 pt-12 pb-4 flex items-center justify-between">
-                      <div className="text-white">
-                        <h3 className="text-[15px] font-bold">{questionImage ? '题目截图' : '原试卷'}</h3>
-                        <p className="text-white/50 text-[10px]">{q?.content?.slice(0, 30) || ''}...</p>
-                      </div>
-                      <button 
-                        onClick={() => { setShowOriginalPaper(null); setShowFullPaper(false) }}
-                        className="w-9 h-9 bg-white/20 backdrop-blur-xl rounded-full flex items-center justify-center text-white active:scale-90 transition-transform"
-                      >
-                        <X size={18} />
-                      </button>
-                    </div>
-
-                    {/* Image Display */}
-                    <div className="flex-1 overflow-auto bg-[#1a1a1a] flex items-center justify-center p-4 pt-24 pb-20 no-scrollbar">
-                       <div className="relative bg-white shadow-[0_20px_60px_rgba(0,0,0,0.5)] rounded-lg overflow-hidden max-w-full">
-                         <img 
-                           src={displayImage}
-                           className="w-full h-auto object-contain max-h-[80vh]"
-                           alt={questionImage ? '题目截图' : '原试卷'}
-                         />
-                       </div>
-                    </div>
-                  </motion.div>
-                </div>
-              )
-            })()}
-          </AnimatePresence>
-
-          {/* Edit Question Modal */}
-          <AnimatePresence>
-            {isEditing && (
-              <>
-                <motion.div 
-                  initial={{ opacity: 0 }}
-                  animate={{ opacity: 1 }}
-                  exit={{ opacity: 0 }}
-                  onClick={() => setIsEditing(false)}
-                  className="absolute inset-0 bg-black/60 backdrop-blur-md z-[200]"
-                />
-                <motion.div 
-                  initial={{ y: '100%' }}
-                  animate={{ y: 0 }}
-                  exit={{ y: '100%' }}
-                  transition={{ type: 'spring', damping: 30, stiffness: 300, mass: 0.8 }}
-                  className="absolute bottom-0 left-0 right-0 bg-[#F2F2F7] rounded-t-[2.5rem] z-[201] flex flex-col max-h-[92vh] overflow-hidden"
-                >
-                  {/* Visual Handle */}
-                  <div className="w-10 h-1.5 bg-gray-300/30 rounded-full mx-auto mt-3 mb-2" />
-                  
-                  {/* Header */}
-                  <div className="px-6 py-4 flex items-center justify-between bg-white border-b border-gray-100/50 rounded-t-[2.5rem]">
-                    <button 
-                      onClick={() => setIsEditing(false)}
-                      className="text-[15px] font-medium text-gray-400 active:opacity-60 px-2"
-                    >
-                      取消
-                    </button>
-                    <h3 className="text-[17px] font-bold text-gray-900">编辑题目</h3>
-                    <button 
-                      onClick={() => setIsEditing(false)}
-                      className="text-[15px] font-bold text-blue-600 active:opacity-60 px-2"
-                    >
-                      保存
-                    </button>
-                  </div>
-
-                  {/* Tabs */}
-                  <div className="flex bg-white px-2 border-b border-gray-50">
-                    {[
-                      { id: 'content', label: '题干' },
-                      { id: 'answer', label: '答案' },
-                      { id: 'tags', label: '标签' }
-                    ].map((tab) => (
-                      <button
-                        key={tab.id}
-                        onClick={() => setEditTab(tab.id)}
-                        className={`flex-1 py-4 text-[14px] font-bold relative transition-colors ${
-                          editTab === tab.id ? 'text-blue-600' : 'text-gray-400'
-                        }`}
-                      >
-                        {tab.label}
-                        {editTab === tab.id && (
-                          <motion.div 
-                            layoutId="edit-tab-underline"
-                            className="absolute bottom-0 left-0 right-0 h-[3px] bg-blue-600 rounded-full mx-auto w-12"
-                          />
-                        )}
-                      </button>
-                    ))}
-                  </div>
-
-                  {/* Content */}
-                  <div className="flex-1 overflow-y-auto p-4 space-y-4">
-                    {editTab === 'content' && (
-                      <motion.div 
-                        initial={{ opacity: 0, scale: 0.98 }}
-                        animate={{ opacity: 1, scale: 1 }}
-                        className="space-y-4"
-                      >
-                        <div className="bg-white rounded-3xl p-6 shadow-sm mb-4">
-                          <div className="flex gap-4">
-                            {/* Text Area - Larger portion */}
-                            <div className="flex-1">
-                              <div className="flex items-center gap-2 mb-3">
-                                <span className="text-[13px] font-bold text-gray-900">题目内容</span>
-                                <span className="px-1.5 py-0.5 bg-blue-50 text-blue-600 rounded text-[10px] font-black uppercase tracking-tight">{getTypeLabel(editingQuestion?.question_type)}</span>
-                              </div>
-                              <textarea 
-                                className="w-full text-[15px] text-gray-800 bg-transparent border-none focus:ring-0 resize-none leading-relaxed min-h-[120px] placeholder:text-gray-300"
-                                defaultValue={editingQuestion?.content || ''}
-                              />
-                              <div className="flex justify-between items-center mt-2">
-                                <span className="text-[10px] text-gray-300 font-bold tracking-tight uppercase">
-                                  {editingQuestion?.content?.length || 0}/500
-                                </span>
-                                <button
-                                  onClick={() => setShowCropTool(true)}
-                                  className="text-[11px] text-blue-600 font-bold cursor-pointer uppercase tracking-tighter"
-                                >
-                                  {displayEditImage ? '更换插图' : '补充插图'}
-                                </button>
-                              </div>
-                              {displayEditImage && (
-                                <div className="mt-3 w-28 h-28 rounded-xl overflow-hidden mx-auto">
-                                  <img src={displayEditImage} alt="" className="w-full h-full object-cover" />
-                                </div>
-                              )}
-                            </div>
-                          </div>
-
-                          {/* Multiple Choice Options List */}
-                          {isChoiceQuestion(editingQuestion?.question_type) && (
-                            <div className="mt-8">
-                              <div className="flex items-center justify-between mb-4">
-                                <span className="text-[13px] font-bold text-gray-900">选项 (单选)</span>
-                                <button className="text-[11px] font-bold text-blue-600 flex items-center gap-1">
-                                  <Plus size={12} /> 添加选项
-                                </button>
-                              </div>
-                              <div className="space-y-2">
-                                {(() => {
-                                  const opts = cleanOptionPrefix(editingQuestion?.options || [])
-                                  const labels = ['A', 'B', 'C', 'D']
-                                  return (opts.length > 0 ? opts : ['A', 'B', 'C', 'D']).map((opt, idx) => {
-                                    const label = labels[idx]
-                                    const value = typeof opt === 'string' ? opt : opt?.value || opt?.content || ''
-                                    return (
-                                      <div key={idx} className="flex items-center gap-3">
-                                        <div className="w-8 h-8 rounded-full bg-gray-50 flex items-center justify-center text-[13px] font-bold text-gray-400 border border-gray-100">
-                                          {label}
-                                        </div>
-                                        <div className="flex-1 px-4 py-3 bg-gray-50 rounded-xl text-[14px] text-gray-800 font-medium">
-                                          {value}
-                                        </div>
-                                        <button className="w-8 h-8 flex items-center justify-center text-gray-300 hover:text-red-400">
-                                          <Trash2 size={14} />
-                                        </button>
-                                      </div>
-                                    )
-                                  })
-                                })()}
-                              </div>
-                            </div>
-                          )}
-                        </div>
-                      </motion.div>
-                    )}
-                    
-                    {editTab === 'answer' && (
-                      <motion.div 
-                        key="answer-tab"
-                        initial={{ opacity: 0, y: 10 }}
-                        animate={{ opacity: 1, y: 0 }}
-                        className="space-y-3"
-                      >
-                        <div className="bg-white rounded-2xl p-4 shadow-sm">
-                          <div className="flex gap-4">
-                            <div className="flex-1">
-                              <div className="flex items-center gap-1.5 mb-1.5">
-                                <span className="w-1 h-1 rounded-full bg-gray-300" />
-                                <span className="text-[10px] font-black text-gray-400 uppercase tracking-wider">学生内容</span>
-                              </div>
-                              <div className="px-3 py-2 bg-gray-50 rounded-xl text-[13px] text-gray-500 italic border border-gray-100/50">
-                                 {editingQuestion?.student_answer || '未作答'}
-                              </div>
-                            </div>
-
-                            <div className="flex-1">
-                              <div className="flex items-center gap-1.5 mb-1.5">
-                                <span className="w-1 h-1 rounded-full bg-blue-500" />
-                                <span className="text-[10px] font-black text-blue-600 uppercase tracking-wider">标准答案</span>
-                              </div>
-                              <div className="px-3 py-2 bg-blue-50/30 rounded-xl text-[13px] text-gray-900 font-bold border border-blue-100/30">
-                                 {editingQuestion?.answer || '暂无答案'}
-                              </div>
-                            </div>
-                          </div>
-                        </div>
-
-                        <div className="bg-white rounded-3xl p-6 shadow-sm mb-4">
-                          <h4 className="text-[14px] font-bold text-gray-900 mb-3 flex items-center gap-2">
-                            <Sparkles size={14} className="text-blue-500" />
-                            题目解析 (选填)
-                          </h4>
-                          <textarea 
-                            className="w-full text-[14px] text-gray-600 bg-transparent border-none focus:ring-0 resize-none leading-relaxed min-h-[220px] placeholder:text-gray-200"
-                            placeholder="请输入详细的 AI 解析内容或手动编辑解析内容..."
-                            defaultValue={editingQuestion?.analysis || ''}
-                          />
-                        </div>
-                      </motion.div>
-                    )}
-
-                    {editTab === 'tags' && (
-                      <motion.div
-                        key="tags-tab"
-                        initial={{ opacity: 0, y: 10 }}
-                        animate={{ opacity: 1, y: 0 }}
-                        className="space-y-4"
-                      >
-                        <div className="bg-white rounded-3xl p-6 shadow-sm">
-                          <div className="flex items-center justify-between mb-4">
-                            <div className="flex items-center gap-2">
-                              <Tag size={16} className="text-blue-600" />
-                              <span className="text-[14px] font-bold text-gray-900">知识点标签</span>
-                            </div>
-                            <span className="text-[11px] px-2.5 py-1 rounded-full font-bold" style={{
-                              background: editTagsSource === 'ai' ? '#EFF6FF' : '#FFF7E6',
-                              color: editTagsSource === 'ai' ? '#2563EB' : '#D97706'
-                            }}>
-                              {editTagsSource === 'ai' ? 'AI 生成' : '人工修正'}
-                            </span>
-                          </div>
-
-                          {editAiTags.length > 0 && editTagsSource === 'manual' && (
-                            <div className="mb-4 pb-4 border-b border-gray-100">
-                              <div className="text-[11px] font-bold text-gray-400 mb-2 uppercase tracking-wider">AI 原始标签</div>
-                              <div className="flex flex-wrap gap-2">
-                                {editAiTags.map((tag, idx) => (
-                                  <span key={idx} className="text-[12px] px-3 py-1.5 rounded-full bg-gray-50 text-gray-400 font-medium">
-                                    {tag}
-                                  </span>
-                                ))}
-                              </div>
-                            </div>
-                          )}
-
-                          <div className="flex flex-wrap gap-2 mb-4">
-                            {(editTagsSource === 'manual' ? editManualTags : editAiTags).map((tag, idx) => (
-                              <span
-                                key={idx}
-                                className="text-[13px] px-3 py-1.5 rounded-full flex items-center gap-1.5 font-medium"
-                                style={{
-                                  background: editTagsSource === 'ai' ? '#EFF6FF' : '#FFF7E6',
-                                  color: editTagsSource === 'ai' ? '#2563EB' : '#D97706'
-                                }}
-                              >
-                                {tag}
-                                {editTagsSource === 'manual' && (
-                                  <button
-                                    onClick={() => {
-                                      setEditManualTags(editManualTags.filter(t => t !== tag))
-                                    }}
-                                    className="hover:text-red-500 transition-colors"
-                                  >
-                                    <X size={12} />
-                                  </button>
-                                )}
-                              </span>
-                            ))}
-                            {(editTagsSource === 'manual' ? editManualTags : editAiTags).length === 0 && (
-                              <span className="text-[13px] text-gray-400">暂无标签</span>
-                            )}
-                          </div>
-
-                          <div className="flex gap-2">
-                            <input
-                              value={editNewTag}
-                              onChange={(e) => setEditNewTag(e.target.value)}
-                              onKeyDown={(e) => {
-                                if (e.key === 'Enter') {
-                                  e.preventDefault()
-                                  const trimmed = editNewTag.trim()
-                                  if (trimmed && !editManualTags.some(t => t.toLowerCase() === trimmed.toLowerCase())) {
-                                    setEditManualTags([...editManualTags, trimmed])
-                                    setEditTagsSource('manual')
-                                  }
-                                  setEditNewTag('')
-                                }
-                              }}
-                              className="flex-1 h-10 px-4 bg-gray-50 rounded-xl text-[14px] text-gray-800 focus:outline-none focus:ring-2 focus:ring-blue-100 placeholder:text-gray-300"
-                              placeholder="输入标签后按回车添加"
-                            />
-                            <button
-                              onClick={() => {
-                                const trimmed = editNewTag.trim()
-                                if (trimmed && !editManualTags.some(t => t.toLowerCase() === trimmed.toLowerCase())) {
-                                  setEditManualTags([...editManualTags, trimmed])
-                                  setEditTagsSource('manual')
-                                }
-                                setEditNewTag('')
-                              }}
-                              className="h-10 px-4 rounded-xl bg-blue-600 text-white text-[13px] font-bold active:scale-95 transition-transform"
-                            >
-                              添加
-                            </button>
-                          </div>
-                          <div className="text-[11px] text-gray-400 mt-2">
-                            添加或删除标签后将自动切换为"人工修正"模式
-                          </div>
-                        </div>
-                      </motion.div>
-                    )}
-                  </div>
-                  <div className="px-6 pt-4 pb-12 bg-white/80 backdrop-blur-xl border-t border-gray-100 flex gap-3">
-                    <button 
-                      onClick={() => setIsEditing(false)}
-                      className="flex-1 py-4 bg-gray-50 text-gray-500 font-bold rounded-2xl active:scale-95 transition-transform"
-                    >
-                      取消
-                    </button>
-                    <button 
-                      onClick={async () => {
-                        if (editingQuestion?.id) {
-                          try {
-                            await updateQuestion(editingQuestion.id, {
-                              ai_tags: editAiTags,
-                              manual_tags: editManualTags,
-                              tags_source: editTagsSource,
-                              updated_at: new Date().toISOString()
-                            })
-                            if (editTagsSource === 'manual' && editManualTags.length > 0) {
-                              try {
-                                await updateQuestionTags(editingQuestion.id, editManualTags)
-                              } catch (e) {
-                                console.error('更新标签失败:', e)
-                              }
-                            }
-                            if (editingQuestion) {
-                              editingQuestion.ai_tags = editAiTags
-                              editingQuestion.manual_tags = editManualTags
-                              editingQuestion.tags_source = editTagsSource
-                            }
-                          } catch (e) {
-                            console.error('保存题目失败:', e)
-                          }
-                        }
-                        setIsEditing(false)
-                      }}
-                      className="flex-[2] py-4 bg-blue-600 text-white font-bold rounded-2xl shadow-xl shadow-blue-100 active:scale-95 transition-transform"
-                    >
-                      保存
-                    </button>
-                  </div>
-
-                  {/* Crop/Upload Menu */}
-                  <AnimatePresence>
-                    {showCropTool && (
-                      <div className="fixed inset-0 z-[800] flex items-end">
-                        <motion.div 
-                          initial={{ opacity: 0 }}
-                          animate={{ opacity: 1 }}
-                          exit={{ opacity: 0 }}
-                          onClick={() => setShowCropTool(false)}
-                          className="absolute inset-0 bg-black/40 backdrop-blur-sm"
-                        />
-                        <motion.div 
-                          initial={{ y: '100%' }}
-                          animate={{ y: 0 }}
-                          exit={{ y: '100%' }}
-                          className="relative w-full max-w-sm mx-auto bg-white rounded-t-[2.5rem] p-6 pb-12 shadow-2xl"
-                        >
-                          <div className="w-10 h-1 bg-gray-200 rounded-full mx-auto mb-6" />
-                          <h3 className="text-center text-[14px] font-black text-gray-900 mb-5">更换题目插图</h3>
-                          <div className="grid grid-cols-2 gap-3 max-w-[320px] mx-auto">
-                            <button className="flex flex-col items-center gap-2 p-3.5 rounded-2xl bg-blue-50/50 border border-blue-100 active:scale-95 transition-transform">
-                              <div className="w-9 h-9 bg-white rounded-xl shadow-sm flex items-center justify-center text-blue-600">
-                                <Maximize size={18} />
-                              </div>
-                              <p className="text-[12px] font-bold text-gray-900">从原卷裁剪</p>
-                            </button>
-                            <button className="flex flex-col items-center gap-2 p-3.5 rounded-2xl bg-gray-50/50 border border-gray-100 active:scale-95 transition-transform">
-                              <div className="w-9 h-9 bg-white rounded-xl shadow-sm flex items-center justify-center text-gray-400">
-                                <Camera size={18} />
-                              </div>
-                              <p className="text-[12px] font-bold text-gray-900">拍照上传</p>
-                            </button>
-                          </div>
-                        </motion.div>
-                      </div>
-                    )}
-                  </AnimatePresence>
-                </motion.div>
-              </>
-            )}
-          </AnimatePresence>
-
-          {/* Tag Picker Popup */}
-          <AnimatePresence>
-            {showTagPicker && (
-              <>
-                <motion.div
-                  initial={{ opacity: 0 }}
-                  animate={{ opacity: 1 }}
-                  exit={{ opacity: 0 }}
-                  onClick={() => setShowTagPicker(false)}
-                  className="fixed inset-0 bg-black/30 backdrop-blur-sm z-[10000]"
-                />
-                <motion.div
-                  initial={{ y: '100%' }}
-                  animate={{ y: 0 }}
-                  exit={{ y: '100%' }}
-                  transition={{ type: 'spring', damping: 25, stiffness: 200 }}
-                  className="fixed bottom-0 left-0 right-0 max-w-md mx-auto bg-[#F5F5F7] rounded-t-3xl overflow-hidden z-[10001] flex flex-col"
-                  style={{ height: '70vh' }}
-                >
-                  <div className="bg-white px-5 py-4 flex items-center justify-between border-b border-gray-100">
-                    <button
-                      onClick={() => setShowTagPicker(false)}
-                      className="text-[15px] text-gray-400 font-medium"
-                    >
-                      取消
-                    </button>
-                    <h3 className="text-[17px] font-bold text-gray-900">选择知识点</h3>
-                    <button
-                      onClick={() => {
-                        setSelectedTags([...tempSelectedTags])
-                        setShowTagPicker(false)
-                      }}
-                      className="text-[15px] text-blue-600 font-bold"
-                    >
-                      确定{tempSelectedTags.length > 0 ? `(${tempSelectedTags.length})` : ''}
-                    </button>
-                  </div>
-
-                  <div className="px-5 py-3 bg-white border-b border-gray-50">
-                    <div className="relative">
-                      <Search size={16} className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-300" />
-                      <input
-                        value={tagSearchKeyword}
-                        onChange={(e) => setTagSearchKeyword(e.target.value)}
-                        className="w-full h-10 pl-9 pr-4 bg-gray-50 rounded-xl text-[14px] text-gray-800 focus:outline-none focus:ring-2 focus:ring-blue-100 placeholder:text-gray-300"
-                        placeholder="搜索知识点..."
-                        autoFocus
-                      />
-                      {tagSearchKeyword && (
-                        <button
-                          onClick={() => setTagSearchKeyword('')}
-                          className="absolute right-3 top-1/2 -translate-y-1/2"
-                        >
-                          <X size={14} className="text-gray-300" />
-                        </button>
-                      )}
-                    </div>
-                  </div>
-
-                  {tempSelectedTags.length > 0 && (
-                    <div className="px-5 py-3 bg-white border-b border-gray-50">
-                      <div className="text-[11px] font-bold text-gray-400 mb-2 uppercase tracking-wider">已选</div>
-                      <div className="flex flex-wrap gap-2">
-                        {tempSelectedTags.map(tag => (
-                          <span
-                            key={tag}
-                            onClick={() => setTempSelectedTags(tempSelectedTags.filter(t => t !== tag))}
-                            className="text-[12px] px-3 py-1.5 rounded-full bg-amber-50 text-amber-600 font-medium flex items-center gap-1 cursor-pointer active:scale-95 transition-transform border border-amber-100"
-                          >
-                            {tag}
-                            <X size={10} />
-                          </span>
-                        ))}
-                      </div>
-                    </div>
-                  )}
-
-                  <div className="flex-1 overflow-y-auto px-5 py-3">
-                    {(() => {
-                      const keyword = tagSearchKeyword.toLowerCase()
-                      const filtered = allAvailableTags.filter(tag =>
-                        tag.toLowerCase().includes(keyword)
-                      )
-                      if (filtered.length === 0) {
-                        return (
-                          <div className="text-center py-12 text-gray-300 text-[14px]">
-                            {tagSearchKeyword ? '没有匹配的知识点' : '暂无知识点标签'}
-                          </div>
-                        )
-                      }
-                      return (
-                        <div className="flex flex-wrap gap-2">
-                          {filtered.map(tag => {
-                            const isSelected = tempSelectedTags.includes(tag)
-                            return (
-                              <button
-                                key={tag}
-                                onClick={() => {
-                                  if (isSelected) {
-                                    setTempSelectedTags(tempSelectedTags.filter(t => t !== tag))
-                                  } else {
-                                    setTempSelectedTags([...tempSelectedTags, tag])
-                                  }
-                                }}
-                                className={`text-[13px] px-3.5 py-2 rounded-full font-medium transition-all active:scale-95 ${
-                                  isSelected
-                                    ? 'bg-blue-600 text-white shadow-sm shadow-blue-100'
-                                    : 'bg-white text-gray-600 border border-gray-100'
-                                }`}
-                              >
-                                {isSelected && <span className="mr-1">✓</span>}
-                                {tag}
-                              </button>
-                            )
-                          })}
-                        </div>
-                      )
-                    })()}
-                  </div>
-
-                  {tempSelectedTags.length > 0 && (
-                    <div className="bg-white px-5 py-4 border-t border-gray-100 pb-8">
-                      <button
-                        onClick={() => {
-                          setTempSelectedTags([])
-                        }}
-                        className="w-full h-11 rounded-xl bg-gray-50 text-gray-500 text-[14px] font-bold active:scale-95 transition-transform"
-                      >
-                        清空选择
-                      </button>
-                    </div>
-                  )}
-                </motion.div>
-              </>
-            )}
-          </AnimatePresence>
-
-          {/* Toast Container */}
-          <ToastContainer toasts={toastList} />
-        </div>
+          </div>
+        </nav>
+
+        {/* Student Sheet */}
+        <StudentSwitcher
+          visible={showStudentSwitcher}
+          onClose={() => setShowStudentSwitcher(false)}
+        />
+
+        {/* Floating Action Button */}
+        {currentPage === 'processing' && (
+          <motion.button
+            initial={{ scale: 0 }}
+            animate={{ scale: 1 }}
+            whileTap={{ scale: 0.9 }}
+            onClick={() => document.getElementById('file-input').click()}
+            className="fixed right-5 bottom-20 w-14 h-14 bg-blue-600 rounded-full shadow-lg shadow-blue-200 flex items-center justify-center z-50"
+          >
+            <Plus size={24} className="text-white" />
+          </motion.button>
+        )}
+
+        {/* Hidden File Input */}
+        <input
+          type="file"
+          id="file-input"
+          multiple
+          accept="image/*"
+          className="hidden"
+          onChange={handleFileSelect}
+        />
+
+        {/* Modals */}
+        {/* ... (其他模态框组件) ... */}
       </div>
-
-      <style>{`
-        .no-scrollbar::-webkit-scrollbar { display: none; }
-        .no-scrollbar { -ms-overflow-style: none; scrollbar-width: none; }
-      `}</style>
     </ToastProvider>
   )
 }
