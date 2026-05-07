@@ -22,6 +22,8 @@
     "@capacitor/share": "^8.0.1",
     "@supabase/supabase-js": "^2.45.2",
     "@tailwindcss/vite": "^4.2.4",
+    "antd-mobile": "^5.42.3",
+    "antd-mobile-icons": "^0.3.0",
     "axios": "^1.7.5",
     "bullmq": "^5.34.8",
     "cors": "^2.8.5",

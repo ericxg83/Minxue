@@ -36,6 +36,7 @@ import { ProcessingSkeleton, PendingSkeleton, WrongBookSkeleton, ExamSkeleton } 
 import preloadEngine from './utils/preloadEngine'
 import apiService from './services/apiService'
 import { useToast } from './components/ToastProvider.jsx'
+import Home from './pages/Home'
 import ScanQR from './pages/ScanQR'
 import Grading from './pages/Grading'
 import dayjs from 'dayjs'
@@ -924,6 +925,18 @@ export default function App() {
         {/* Main Content */}
         <main className="max-w-lg mx-auto pb-24">
           <AnimatePresence mode="wait">
+            {currentPage === 'home' && (
+              <motion.div
+                key="home-page"
+                initial={{ opacity: 0, x: -20 }}
+                animate={{ opacity: 1, x: 0 }}
+                exit={{ opacity: 0, x: 20 }}
+                className="w-full"
+              >
+                <Home onNavigate={setCurrentPage} />
+              </motion.div>
+            )}
+
             {currentPage === 'processing' && (
               <motion.div
                 key="processing-page"
@@ -1473,6 +1486,7 @@ export default function App() {
         <nav className="fixed bottom-0 left-0 right-0 bg-white/80 backdrop-blur-xl border-t border-gray-100 z-50">
           <div className="max-w-lg mx-auto px-6 h-16 flex items-center justify-around">
             {[
+              { id: 'home', icon: Camera, label: '首页' },
               { id: 'processing', icon: Camera, label: '处理' },
               { id: 'pending', icon: BookOpen, label: '待确认' },
               { id: 'wrongbook', icon: LayoutGrid, label: '错题本' },

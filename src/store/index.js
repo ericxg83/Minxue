@@ -283,7 +283,7 @@ export const useExamStore = create((set, get) => ({
 }))
 
 export const useUIStore = create((set) => ({
-  currentPage: 'processing',
+  currentPage: 'home',
   loading: false,
   toast: null,
   pageLoading: {
