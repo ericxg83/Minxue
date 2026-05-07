@@ -1,21 +1,36 @@
-# Render 部署配置
-# 部署为 Static Site（纯前端）
-
 services:
-  - type: static
-    name: minxue-app-v3
-    runtime: static
-    buildCommand: npm install && npm run build
-    staticPublishPath: ./dist
-    # 环境变量会在 Render 控制台中设置
+  - type: web
+    name: minxue-api
+    runtime: node
+    rootDir: server
+    buildCommand: npm install
+    startCommand: node index.js
     envVars:
       - key: NODE_ENV
         value: production
-    # 路由规则：支持前端路由（React Router）
-    routes:
-      - type: rewrite
-        source: /*
-        destination: /index.html
-    # 自定义域名（可选）
-    # domains:
-    #   - minxue.yourdomain.com
+      - key: PORT
+        value: 3001
+      - key: SUPABASE_URL
+        sync: false
+      - key: SUPABASE_KEY
+        sync: false
+      - key: SUPABASE_SERVICE_ROLE_KEY
+        sync: false
+      - key: AI_API_KEY
+        sync: false
+      - key: AI_ENDPOINT
+        value: https://api-inference.modelscope.cn/v1/chat/completions
+      - key: AI_MODEL
+        value: Qwen/Qwen3-VL-8B-Instruct
+      - key: REDIS_HOST
+        sync: false
+      - key: REDIS_PASSWORD
+        sync: false
+      - key: MAX_RETRIES
+        value: 3
+      - key: TASK_TIMEOUT_MS
+        value: 1800000
+      - key: CONCURRENCY
+        value: 2
+      - key: ALLOWED_ORIGIN
+        sync: false
