@@ -362,13 +362,17 @@ export default function App() {
   const loadGeneratedExams = async (useCache = true) => {
     if (!currentStudent) return
     try {
-      if (USE_MOCK_DATA) return
+      if (USE_MOCK_DATA) {
+        const studentMockExams = mockExams.filter(e => e.student_id === currentStudent.id)
+        setGeneratedExams(studentMockExams)
+        return
+      }
       const { getGeneratedExamsByStudent } = await import('./services/supabaseService')
       const examList = await getGeneratedExamsByStudent(currentStudent.id, useCache)
-      const otherStudentExams = generatedExams.filter(e => e.student_id !== currentStudent.id)
-      setGeneratedExams([...otherStudentExams, ...examList])
+      setGeneratedExams(Array.isArray(examList) ? examList : [])
     } catch (error) {
       console.error('加载试卷失败:', error)
+      setGeneratedExams([])
     }
   }
 
@@ -406,39 +410,35 @@ export default function App() {
     try {
       if (USE_MOCK_DATA) {
         const filteredMockTasks = mockTasks.filter(t => t.student_id === currentStudent.id)
-        const existingIds = new Set(tasks.map(t => t.id))
-        const newTasks = filteredMockTasks.filter(t => !existingIds.has(t.id))
-        if (newTasks.length > 0) {
-          setTasks([...tasks, ...newTasks])
-        }
+        setTasks(filteredMockTasks)
         return
       }
-      const taskList = await getTasksByStudent(currentStudent.id, true)
-      const safeTaskList = Array.isArray(taskList) ? taskList : []
-      const existingIds = new Set(tasks.map(t => t.id))
-      const newTasks = safeTaskList.filter(t => !existingIds.has(t.id))
-      if (newTasks.length > 0) {
-        setTasks([...tasks, ...newTasks])
-      }
+      const taskList = await getTasksByStudent(currentStudent.id, false)
+      setTasks(Array.isArray(taskList) ? taskList : [])
     } catch (error) {
       console.error('加载任务失败:', error)
+      setTasks([])
     }
   }
 
   // Pending: Load data
   const loadPendingData = async () => {
-    if (!currentStudent) return
+    if (!currentStudent) {
+      setPendingQuestions([])
+      return
+    }
     try {
       if (USE_MOCK_DATA) {
         return
       }
-      const taskList = await getTasksByStudent(currentStudent.id, true)
+      setPendingQuestions([])
+      const taskList = await getTasksByStudent(currentStudent.id, false)
       const safeTaskList = Array.isArray(taskList) ? taskList : []
       const doneTasks = safeTaskList.filter(t => t.status === 'done')
       const allQuestions = []
       for (const task of doneTasks) {
         try {
-          const taskQuestions = await getQuestionsByTask(task.id, true)
+          const taskQuestions = await getQuestionsByTask(task.id, false)
           const safeQuestions = Array.isArray(taskQuestions) ? taskQuestions : []
           allQuestions.push(...safeQuestions.map(q => ({ ...q, status: q.is_correct ? 'correct' : 'wrong' })))
         } catch (taskError) {
@@ -446,13 +446,14 @@ export default function App() {
         }
       }
 
-      const existingWrong = await getWrongQuestionsByStudent(currentStudent.id, true)
+      const existingWrong = await getWrongQuestionsByStudent(currentStudent.id, false)
       const wrongQuestionIds = new Set((existingWrong || []).map(w => w.question_id))
       const pendingOnly = allQuestions.filter(q => !wrongQuestionIds.has(q.id))
 
       setPendingQuestions(pendingOnly)
     } catch (error) {
       console.error('加载任务失败:', error)
+      setPendingQuestions([])
     }
   }
 
@@ -461,19 +462,15 @@ export default function App() {
     if (!currentStudent) return
     try {
       if (USE_MOCK_DATA) {
-        if (mockWrongQuestions.length > 0) {
-          const existingIds = new Set(wrongQuestions.map(wq => wq.id))
-          const newMockQuestions = mockWrongQuestions.filter(wq => !existingIds.has(wq.id))
-          if (newMockQuestions.length > 0) {
-            setWrongQuestions(prev => [...prev, ...newMockQuestions])
-          }
-        }
+        const filteredMock = mockWrongQuestions.filter(wq => wq.student_id === currentStudent.id)
+        setWrongQuestions(filteredMock)
         return
       }
       const data = await getWrongQuestionsByStudent(currentStudent.id, false)
       setWrongQuestions(Array.isArray(data) ? data : [])
     } catch (error) {
       console.error('加载错题失败:', error)
+      setWrongQuestions([])
     }
   }
 
