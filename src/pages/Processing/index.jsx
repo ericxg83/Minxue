@@ -1,4 +1,4 @@
-import { useEffect, useState, useRef } from 'react'
+import { useEffect, useState, useRef, useCallback } from 'react'
 import {
   Button,
   Toast,
@@ -13,24 +13,25 @@ import {
 } from 'antd-mobile'
 import { RightOutline } from 'antd-mobile-icons'
 import { useStudentStore, useTaskStore, usePendingQuestionStore, useUIStore } from '../../store'
-import { getTasksByStudent, updateTaskStatus, createTask, uploadImage, createQuestions } from '../../services/supabaseService'
-import { recognizeQuestions, compressImage, saveRecognitionResult, generateTagsForQuestions } from '../../services/aiService'
+import { getTasksByStudent, updateTaskStatus, createTask, uploadImage } from '../../services/supabaseService'
+import { taskService } from '../../services/taskService'
+import { compressImage } from '../../services/aiService'
 import { mockTasks, mockStudents } from '../../data/mockData'
 import StudentSwitcher from '../../components/StudentSwitcher'
 import dayjs from 'dayjs'
 
-// 使用测试数据 - 设为 false 启用真实 AI 识别
 const USE_MOCK_DATA = false
 
-// 状态筛选标签
+const USE_BACKEND_API = true
+
 const FILTER_TABS = [
   { key: 'all', label: '全部' },
   { key: 'processing', label: '处理中' },
+  { key: 'pending', label: '等待中' },
   { key: 'done', label: '已完成' },
   { key: 'failed', label: '失败' }
 ]
 
-// 状态配置 - 现代风格
 const STATUS_CONFIG = {
   processing: { text: '处理中', color: '#4A9EFF', bgColor: '#EBF5FF', icon: 'processing' },
   done: { text: '已完成', color: '#34C759', bgColor: '#E8F5E9', icon: 'done' },
@@ -38,7 +39,6 @@ const STATUS_CONFIG = {
   pending: { text: '等待处理', color: '#FF9500', bgColor: '#FFF3E0', icon: 'pending' }
 }
 
-// 现代移动应用颜色
 const COLORS = {
   primary: '#2B7DE9',
   primaryLight: '#EBF5FF',
@@ -55,7 +55,6 @@ const COLORS = {
   border: '#E5ECF5'
 }
 
-// 计算有失败任务的学生数量
 const getFailedStudentsCount = (allTasks) => {
   const failedStudentIds = new Set(
     allTasks.filter(t => t.status === 'failed').map(t => t.student_id)
@@ -65,7 +64,7 @@ const getFailedStudentsCount = (allTasks) => {
 
 export default function Processing() {
   const { students, currentStudent } = useStudentStore()
-  const { tasks, setTasks, addTask, updateTaskStatus: updateTaskInStore } = useTaskStore()
+  const { tasks, setTasks, addTask, updateTaskStatus: updateTaskInStore, startRealtimeSync, stopRealtimeSync, startPolling, stopPolling, cleanup: cleanupSync } = useTaskStore()
   const { addPendingQuestions } = usePendingQuestionStore()
   const { setLoading, setCurrentPage } = useUIStore()
   
@@ -75,29 +74,33 @@ export default function Processing() {
   const [previewImage, setPreviewImage] = useState(null)
   const [showStudentSwitcher, setShowStudentSwitcher] = useState(false)
   const fileInputRef = useRef(null)
-
-  // 标记是否已经初始化过 mock 数据
   const [initializedStudents, setInitializedStudents] = useState(new Set())
 
-  // 加载任务 - 在组件挂载和切换学生时执行
+  useEffect(() => {
+    startRealtimeSync()
+    return () => {
+      cleanupSync()
+    }
+  }, [])
+
   useEffect(() => {
     if (currentStudent) {
-      loadMockTasks()
+      loadTasks()
+      stopPolling()
+      startPolling(currentStudent.id)
+    }
+    return () => {
+      stopPolling()
     }
   }, [currentStudent?.id])
 
-  // 加载任务数据（优先使用缓存，后台刷新）
-  const loadMockTasks = async () => {
+  const loadTasks = async () => {
     if (!currentStudent) return
     
     try {
       if (USE_MOCK_DATA) {
-        if (initializedStudents.has(currentStudent.id)) {
-          return
-        }
-        
+        if (initializedStudents.has(currentStudent.id)) return
         const filteredMockTasks = mockTasks.filter(t => t.student_id === currentStudent.id)
-        
         const testTasks = [
           {
             id: `task-failed-${currentStudent.id}`,
@@ -118,36 +121,21 @@ export default function Processing() {
             created_at: '2024-04-20T20:01:00Z'
           }
         ]
-        
         const currentStudentExistingTasks = tasks.filter(t => t.student_id === currentStudent.id)
         const existingTaskIds = new Set(currentStudentExistingTasks.map(t => t.id))
-        
         const newMockTasks = filteredMockTasks.filter(t => !existingTaskIds.has(t.id))
         const newTestTasks = testTasks.filter(t => !existingTaskIds.has(t.id))
-        
-        const allTasks = [
-          ...tasks,
-          ...newMockTasks,
-          ...newTestTasks
-        ]
-        
+        const allTasks = [...tasks, ...newMockTasks, ...newTestTasks]
         setTasks(allTasks)
         setInitializedStudents(prev => new Set([...prev, currentStudent.id]))
-        
         return
       }
 
-      // 使用缓存（秒开）
-      console.log('从缓存/数据库加载任务数据...')
       try {
-        // 先尝试使用缓存数据
         const tasksData = await getTasksByStudent(currentStudent.id, true)
-        console.log('返回的任务数据:', tasksData)
-        
         if (tasksData && tasksData.length > 0) {
           const existingTaskIds = new Set(tasks.map(t => t.id))
           const newTasks = tasksData.filter(t => !existingTaskIds.has(t.id))
-          
           if (newTasks.length > 0) {
             setTasks([...tasks, ...newTasks])
           }
@@ -155,8 +143,7 @@ export default function Processing() {
       } catch (error) {
         console.error('加载任务失败:', error)
       }
-      
-      // 后台刷新最新数据
+
       const backgroundRefresh = async () => {
         try {
           const freshData = await getTasksByStudent(currentStudent.id, false)
@@ -167,21 +154,13 @@ export default function Processing() {
           console.debug('后台刷新任务失败:', error)
         }
       }
-      
       backgroundRefresh()
-      
       setInitializedStudents(prev => new Set([...prev, currentStudent.id]))
     } catch (error) {
       console.error('加载失败:', error)
     }
   }
-  
-  // 刷新任务列表（供刷新按钮使用）
-  const loadTasks = async () => {
-    await loadMockTasks()
-  }
 
-  // 筛选并排序任务（只显示当前学生的任务，最新的在前）
   const filteredTasks = tasks
     .filter(task => {
       if (task.student_id !== currentStudent?.id) return false
@@ -194,14 +173,12 @@ export default function Processing() {
       return timeB - timeA
     })
 
-  // 获取各状态数量（只统计当前学生的任务）
   const getStatusCount = (status) => {
     const studentTasks = tasks.filter(t => t.student_id === currentStudent?.id)
     if (status === 'all') return studentTasks.length
     return studentTasks.filter(t => t.status === status).length
   }
 
-  // 显示上传选项
   const showUploadOptions = () => {
     ActionSheet.show({
       actions: [
@@ -218,7 +195,6 @@ export default function Processing() {
     })
   }
 
-  // 拍照上传
   const handleCameraUpload = () => {
     if (fileInputRef.current) {
       fileInputRef.current.setAttribute('capture', 'environment')
@@ -226,7 +202,6 @@ export default function Processing() {
     }
   }
 
-  // 相册上传
   const handleAlbumUpload = () => {
     if (fileInputRef.current) {
       fileInputRef.current.removeAttribute('capture')
@@ -237,7 +212,6 @@ export default function Processing() {
   const handleFileSelect = async (e) => {
     const files = Array.from(e.target.files)
     if (files.length === 0) return
-
     e.target.value = ''
 
     const duplicateFiles = []
@@ -252,7 +226,6 @@ export default function Processing() {
         duplicateFiles.push(file)
         continue
       }
-
       try {
         const allTasks = await getTasksByStudent(currentStudent.id)
         const dbDuplicate = allTasks?.find(t => t.original_name === file.name)
@@ -263,7 +236,6 @@ export default function Processing() {
       } catch (checkError) {
         console.warn('检查重复试卷失败:', checkError)
       }
-
       newFiles.push(file)
     }
 
@@ -300,339 +272,176 @@ export default function Processing() {
       duration: 0
     })
 
-    setTimeout(async () => {
-      try {
-        for (const file of filesToUpload) {
-          await doUploadFile(file)
-        }
-        
-        Toast.clear()
-        const skipped = files.length - filesToUpload.length
-        const msg = skipped > 0
-          ? `成功上传 ${filesToUpload.length} 个文件，跳过 ${skipped} 个重复，正在后台识别...`
-          : `成功上传 ${filesToUpload.length} 个文件，正在后台识别...`
-        Toast.show({
-          icon: 'success',
-          content: msg,
-          duration: 2000
-        })
-      } catch (error) {
-        console.error('上传失败:', error)
-        Toast.clear()
-        Toast.show({
-          icon: 'fail',
-          content: '上传失败，请重试'
-        })
-      } finally {
-        setUploading(false)
+    try {
+      if (USE_BACKEND_API) {
+        await uploadViaBackend(filesToUpload)
+      } else {
+        await uploadViaFrontend(filesToUpload)
       }
-    }, 100)
+    } catch (error) {
+      console.error('上传失败:', error)
+      Toast.clear()
+      Toast.show({
+        icon: 'fail',
+        content: '上传失败，请重试'
+      })
+    } finally {
+      setUploading(false)
+    }
   }
 
-  const uploadFile = async (file) => {
-    await doUploadFile(file)
+  const uploadViaBackend = async (files) => {
+    const pendingTasks = []
+    
+    files.forEach((file) => {
+      const tempTask = {
+        id: `temp-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`,
+        student_id: currentStudent.id,
+        image_url: URL.createObjectURL(file),
+        original_name: file.name || `照片_${dayjs().format('YYYY-MM-DD_HH-mm-ss')}.jpg`,
+        status: 'pending',
+        result: { progress: 0 },
+        created_at: new Date().toISOString(),
+        is_temp: true
+      }
+      addTask(tempTask)
+      pendingTasks.push({ tempTask, file })
+    })
+
+    Toast.clear()
+    Toast.show({
+      icon: 'success',
+      content: `已添加 ${files.length} 个文件，正在上传...`,
+      duration: 2000
+    })
+
+    let successCount = 0
+    let failedCount = 0
+
+    for (const { tempTask, file } of pendingTasks) {
+      try {
+        const result = await taskService.uploadFiles(currentStudent.id, [file])
+        
+        if (result.success && result.tasks.length > 0 && !result.tasks[0].error) {
+          const serverTask = result.tasks[0]
+          updateTaskInStore(tempTask.id, 'pending', { progress: 0 })
+          setTasks(prev => prev.map(t => 
+            t.id === tempTask.id ? { ...serverTask, is_temp: false } : t
+          ))
+          successCount++
+        } else {
+          failedCount++
+          updateTaskInStore(tempTask.id, 'failed', { error: result.error || '上传失败' })
+        }
+      } catch (error) {
+        console.error(`上传文件 ${file.name} 失败:`, error)
+        failedCount++
+        updateTaskInStore(tempTask.id, 'failed', { error: error.message || '上传失败' })
+      }
+    }
+
+    if (failedCount > 0) {
+      Toast.show({
+        icon: 'fail',
+        content: `${successCount} 个成功，${failedCount} 个失败`,
+        duration: 2000
+      })
+    }
   }
 
-  // 实际执行上传
-  const doUploadFile = async (file) => {
-    const imageBase64 = await fileToBase64(file)
+  const uploadViaFrontend = async (files) => {
+    for (const file of files) {
+      await doUploadFileFrontend(file)
+    }
+    Toast.clear()
+    Toast.show({
+      icon: 'success',
+      content: `成功上传 ${files.length} 个文件，后台识别中...`,
+      duration: 2000
+    })
+  }
 
-    let imageUrl = imageBase64
-
+  const doUploadFileFrontend = async (file) => {
+    let imageUrl = ''
     try {
       const storageUrl = await uploadImage(file, `tasks/${currentStudent.id}`)
       imageUrl = storageUrl
     } catch (uploadError) {
-      console.warn('上传图片到存储失败，使用 base64:', uploadError)
+      console.warn('上传图片到存储失败:', uploadError)
     }
 
     const taskData = {
       student_id: currentStudent.id,
       image_url: imageUrl,
       original_name: file.name || `照片_${dayjs().format('YYYY-MM-DD_HH-mm-ss')}.jpg`,
-      status: 'processing',
+      status: 'pending',
       result: { progress: 0 }
     }
 
-    console.log('准备保存任务到 Supabase:', taskData.original_name)
-    
     try {
       const savedTask = await createTask(taskData)
-      console.log('任务已成功保存到数据库:', savedTask.id, savedTask.student_id, savedTask.status)
+      addTask(savedTask)
 
-      const localTask = {
-        ...savedTask,
-        result: { progress: 0 }
+      try {
+        await taskService.createTaskByUrl(currentStudent.id, imageUrl, taskData.original_name)
+      } catch (backendError) {
+        console.warn('提交到后端队列失败，任务仅在前端记录:', backendError)
       }
-
-      addTask(localTask)
-
-      processImageAsync(localTask.id, file, savedTask.id)
     } catch (error) {
       console.error('创建任务失败:', error)
-      console.error('错误详情:', error?.message, error?.code, error?.details)
-      
-      Toast.show({
-        icon: 'fail',
-        content: '上传失败，请重试'
-      })
+      Toast.show({ icon: 'fail', content: '上传失败，请重试' })
       throw error
     }
   }
 
-  // 将文件转换为 base64
-  const fileToBase64 = (file) => {
-    return new Promise((resolve, reject) => {
-      const reader = new FileReader()
-      reader.readAsDataURL(file)
-      reader.onload = () => resolve(reader.result)
-      reader.onerror = (error) => reject(error)
-    })
-  }
-
-  // 后台异步处理图片识别
-  const processImageAsync = async (taskId, file, dbTaskId) => {
-    try {
-      updateTaskInStore(taskId, 'processing', { progress: 10 })
-      await updateTaskStatus(dbTaskId, 'processing', { progress: 10 })
-      console.log('开始压缩图片:', file.name, file.size, 'bytes')
-
-      let compressedBase64
-      try {
-        compressedBase64 = await compressImage(file, 1920, 1920, 0.85)
-        console.log('图片压缩完成，大小:', compressedBase64.length, 'bytes')
-      } catch (compressError) {
-        console.error('图片压缩失败:', compressError)
-        updateTaskInStore(taskId, 'failed', { error: '图片压缩失败: ' + compressError.message })
-        await updateTaskStatus(dbTaskId, 'failed', { error: '图片压缩失败: ' + compressError.message })
-        return
-      }
-      updateTaskInStore(taskId, 'processing', { progress: 30 })
-      await updateTaskStatus(dbTaskId, 'processing', { progress: 30 })
-
-      updateTaskInStore(taskId, 'processing', { progress: 50 })
-      await updateTaskStatus(dbTaskId, 'processing', { progress: 50 })
-      const result = await recognizeQuestions(compressedBase64, currentStudent.id, taskId)
-
-      if (!result.success) {
-        updateTaskInStore(taskId, 'failed', {
-          error: result.error || '识别失败，请重新上传或重试',
-          shouldRetry: result.shouldRetry
-        })
-        await updateTaskStatus(dbTaskId, 'failed', {
-          error: result.error || '识别失败，请重新上传或重试',
-          shouldRetry: result.shouldRetry
-        })
-        return
-      }
-
-      updateTaskInStore(taskId, 'processing', { progress: 80 })
-      await updateTaskStatus(dbTaskId, 'processing', { progress: 80 })
-
-      const questions = result.questions || []
-      const wrongCount = questions.filter(q => !q.is_correct).length
-
-      const saveResult = saveRecognitionResult(taskId, currentStudent.id, questions)
-      if (!saveResult.success) {
-        console.warn('保存识别结果到本地失败:', saveResult.error)
-      }
-
-      // 保存题目到 Supabase
-      if (questions.length > 0) {
-        console.log('开始保存题目到 Supabase，数量:', questions.length)
-        console.log('题目示例 task_id:', questions[0]?.task_id)
-        try {
-          const savedQ = await createQuestions(questions)
-          console.log('题目已成功保存到 Supabase, 返回数量:', savedQ?.length || 0)
-          if (savedQ && savedQ.length > 0) {
-            console.log('已保存题目示例:', savedQ[0])
-          }
-        } catch (saveError) {
-          console.error('保存题目到 Supabase 失败:', saveError)
-          console.error('错误详情:', saveError?.message, saveError?.code, saveError?.details)
-        }
-
-        updateTaskInStore(taskId, 'processing', { progress: 90 })
-        await updateTaskStatus(dbTaskId, 'processing', { progress: 90 })
-
-        try {
-          console.log('开始为题目生成AI标签...')
-          const tagResults = await generateTagsForQuestions(questions)
-          console.log('AI标签生成结果:', tagResults)
-
-          const tagMap = {}
-          for (const tr of tagResults) {
-            tagMap[tr.questionId] = tr.tags
-          }
-
-          for (const q of questions) {
-            const tags = tagMap[q.id] || ['未分类']
-            q.ai_tags = tags
-            q.tags_source = 'ai'
-          }
-
-          const { batchUpdateQuestionTags } = await import('../../services/supabaseService')
-          const tagUpdates = questions.map(q => ({
-            id: q.id,
-            ai_tags: q.ai_tags
-          }))
-          await batchUpdateQuestionTags(tagUpdates)
-          console.log('AI标签已保存到数据库')
-        } catch (tagError) {
-          console.error('AI标签生成失败（不影响主流程）:', tagError)
-          for (const q of questions) {
-            q.ai_tags = ['未分类']
-            q.tags_source = 'ai'
-          }
-        }
-      }
-
-      await updateTaskStatus(dbTaskId, 'done', {
-        questionCount: questions.length,
-        wrongCount: wrongCount,
-        duration: result.duration
-      })
-      updateTaskInStore(taskId, 'done', {
-        questionCount: questions.length,
-        wrongCount: wrongCount,
-        duration: result.duration
-      })
-
-      if (questions.length > 0) {
-        addPendingQuestions(questions)
-      }
-
-      console.log(`识别完成，发现 ${questions.length} 道题目，${wrongCount} 道疑似错题`)
-      Toast.show({
-        icon: 'success',
-        content: `识别完成，发现 ${questions.length} 道题目，${wrongCount} 道疑似错题`
-      })
-
-    } catch (error) {
-      console.error('处理失败:', error)
-      updateTaskInStore(taskId, 'failed', {
-        error: error.message || '处理失败，请重新上传或重试'
-      })
-      await updateTaskStatus(dbTaskId, 'failed', {
-        error: error.message || '处理失败，请重新上传或重试'
-      })
-
-      Toast.show({
-        icon: 'fail',
-        content: '处理失败，请重新上传或重试'
-      })
-      throw error
-    }
-  }
-
-  // 模拟处理过程
-  const simulateProcessing = (taskId) => {
-    let progress = 0
-    const interval = setInterval(() => {
-      progress += Math.random() * 20
-      if (progress >= 100) {
-        progress = 100
-        clearInterval(interval)
-        
-        const isSuccess = Math.random() > 0.2
-        if (isSuccess) {
-          const questionCount = 6
-          const wrongCount = Math.floor(Math.random() * 3) + 1
-          
-          updateTaskInStore(taskId, 'done', { 
-            questionCount,
-            wrongCount
-          })
-          
-          const generatedQuestions = generateMockQuestions(taskId, questionCount, wrongCount)
-          console.log('生成的题目:', generatedQuestions)
-          addPendingQuestions(generatedQuestions)
-          console.log('已添加到待确认列表，学生ID:', currentStudent.id)
-          
-          Toast.show({
-            icon: 'success',
-            content: `识别完成，发现 ${questionCount} 道题目，${wrongCount} 道疑似错题`
-          })
-        } else {
-          updateTaskInStore(taskId, 'failed', { 
-            error: '识别失败，请重新上传或重试' 
-          })
-        }
-      } else {
-        updateTaskInStore(taskId, 'processing', { progress: Math.floor(progress) })
-      }
-    }, 500)
-  }
-  
-  // 生成模拟识别的题目
-  const generateMockQuestions = (taskId, count, wrongCount) => {
-    const questions = []
-    const wrongIndices = new Set()
-    
-    while (wrongIndices.size < wrongCount) {
-      wrongIndices.add(Math.floor(Math.random() * count))
-    }
-    
-    for (let i = 0; i < count; i++) {
-      const isWrong = wrongIndices.has(i)
-      questions.push({
-        id: `q-${taskId}-${i}`,
-        task_id: taskId,
-        student_id: currentStudent.id,
-        content: `第 ${i + 1} 题：这是从上传的试卷中识别出的第 ${i + 1} 道题目内容...`,
-        options: ['A. 选项A', 'B. 选项B', 'C. 选项C', 'D. 选项D'],
-        answer: 'A',
-        student_answer: isWrong ? 'B' : 'A',
-        is_correct: !isWrong,
-        question_type: 'choice',
-        subject: '数学',
-        status: isWrong ? 'wrong' : 'correct',
-        created_at: new Date().toISOString()
-      })
-    }
-    
-    return questions
-  }
-
-  // 重试失败的任务
   const handleRetry = async (task) => {
     Dialog.confirm({
       title: '重新处理',
-      content: '确定要重新处理这个文件吗？',
+      content: '确定要重新处理这个文件吗？后端将重新进行AI识别。',
       onConfirm: async () => {
         Toast.show({
           icon: 'loading',
-          content: '重新处理中...',
+          content: '正在重新提交...',
           duration: 0
         })
 
         try {
-          if (USE_MOCK_DATA) {
+          if (USE_BACKEND_API) {
+            const result = await taskService.retryTask(task.id)
+            if (result.success) {
+              updateTaskInStore(task.id, 'pending', { progress: 0 })
+              Toast.clear()
+              Toast.show({
+                icon: 'success',
+                content: '已重新提交，后台处理中...'
+              })
+            } else {
+              Toast.clear()
+              Toast.show({
+                icon: 'fail',
+                content: result.error || '重试失败'
+              })
+            }
+          } else {
             updateTaskInStore(task.id, 'processing', { progress: 0 })
             Toast.clear()
-            simulateProcessing(task.id)
-            return
+            Toast.show({
+              icon: 'fail',
+              content: '请重新上传图片进行识别'
+            })
+            setTasks(tasks.filter(t => t.id !== task.id))
           }
-
-          Toast.clear()
-          Toast.show({
-            icon: 'fail',
-            content: '请重新上传图片进行识别'
-          })
-
-          setTasks(tasks.filter(t => t.id !== task.id))
         } catch (error) {
           Toast.clear()
           Toast.show({
             icon: 'fail',
-            content: '重试失败'
+            content: '重试失败，请稍后再试'
           })
         }
       }
     })
   }
 
-  // 删除任务
   const handleDelete = (task) => {
     Dialog.confirm({
       title: '删除任务',
@@ -641,15 +450,11 @@ export default function Processing() {
       confirmButtonProps: { color: 'danger' },
       onConfirm: () => {
         setTasks(tasks.filter(t => t.id !== task.id))
-        Toast.show({
-          icon: 'success',
-          content: '已删除'
-        })
+        Toast.show({ icon: 'success', content: '已删除' })
       }
     })
   }
 
-  // 渲染任务状态
   const renderTaskStatus = (task) => {
     const config = STATUS_CONFIG[task.status] || STATUS_CONFIG.pending
     
@@ -697,6 +502,15 @@ export default function Processing() {
             </div>
           </div>
         )
+      case 'pending':
+        return (
+          <div style={{ color: config.color, fontSize: '14px', fontWeight: 500 }}>
+            {config.text}
+            <span style={{ color: COLORS.textSecondary, marginLeft: '6px', fontSize: '12px', fontWeight: 400 }}>
+              排队中...
+            </span>
+          </div>
+        )
       default:
         return (
           <div style={{ color: config.color, fontSize: '14px', fontWeight: 500 }}>
@@ -706,7 +520,6 @@ export default function Processing() {
     }
   }
 
-  // 渲染右侧图标
   const renderRightIcon = (task) => {
     switch (task.status) {
       case 'done':
@@ -760,14 +573,31 @@ export default function Processing() {
             animation: 'spin 1s linear infinite'
           }} />
         )
+      case 'pending':
+        return (
+          <div style={{
+            width: '24px',
+            height: '24px',
+            borderRadius: '50%',
+            background: COLORS.warning,
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center'
+          }}>
+            <svg width="12" height="12" viewBox="0 0 1024 1024" fill="#fff">
+              <path d="M512 64C264.6 64 64 264.6 64 512s200.6 448 448 448 448-200.6 448-448S759.4 64 512 64zm0 832c-212 0-384-172-384-384s172-384 384-384 384 172 384 384-172 384-384 384z"/>
+              <path d="M704 480H544V320c0-17.6-14.4-32-32-32s-32 14.4-32 32v192c0 17.6 14.4 32 32 32h192c17.6 0 32-14.4 32-32s-14.4-32-32-32z"/>
+            </svg>
+          </div>
+        )
       default:
         return null
     }
   }
 
-  // 渲染耗时信息
   const renderTimeInfo = (task) => {
-    if (task.status === 'done' && task.result?.questionCount) {
+    if (task.status === 'done' && task.result?.duration) {
+      const durationSec = Math.round(task.result.duration / 1000)
       return (
         <div style={{ display: 'flex', alignItems: 'center', gap: '12px', marginTop: '4px' }}>
           <span style={{ fontSize: '12px', color: COLORS.textSecondary, display: 'flex', alignItems: 'center', gap: '4px' }}>
@@ -775,15 +605,31 @@ export default function Processing() {
               <path d="M512 64C264.6 64 64 264.6 64 512s200.6 448 448 448 448-200.6 448-448S759.4 64 512 64zm0 832c-212 0-384-172-384-384s172-384 384-384 384 172 384 384-172 384-384 384z"/>
               <path d="M704 480H544V320c0-17.6-14.4-32-32-32s-32 14.4-32 32v192c0 17.6 14.4 32 32 32h192c17.6 0 32-14.4 32-32s-14.4-32-32-32z"/>
             </svg>
-            耗时 {dayjs(task.created_at).format('mm:ss')}
+            耗时 {durationSec >= 60 ? `${Math.floor(durationSec / 60)}分${durationSec % 60}秒` : `${durationSec}秒`}
           </span>
+          {task.result?.retryCount > 0 && (
+            <span style={{ fontSize: '12px', color: COLORS.warning }}>
+              重试 {task.result.retryCount} 次
+            </span>
+          )}
         </div>
       )
+    }
+    if (task.status === 'processing') {
+      const elapsed = Math.round((Date.now() - new Date(task.updated_at || task.created_at).getTime()) / 1000)
+      if (elapsed > 0) {
+        return (
+          <div style={{ marginTop: '4px' }}>
+            <span style={{ fontSize: '12px', color: COLORS.textSecondary }}>
+              已处理 {elapsed >= 60 ? `${Math.floor(elapsed / 60)}分${elapsed % 60}秒` : `${elapsed}秒`}
+            </span>
+          </div>
+        )
+      }
     }
     return null
   }
 
-  // 所有学生失败任务的总数量
   const getTotalFailedCount = () => {
     return tasks.filter(t => t.status === 'failed').length
   }
@@ -810,7 +656,6 @@ export default function Processing() {
 
   return (
     <div style={{ padding: '0', background: COLORS.background, minHeight: '100%', paddingBottom: '80px' }}>
-      {/* 隐藏的文件输入 */}
       <input
         ref={fileInputRef}
         type="file"
@@ -820,7 +665,6 @@ export default function Processing() {
         onChange={handleFileSelect}
       />
 
-      {/* 顶部标题栏 - 现代移动应用风格 */}
       <div style={{ 
         background: 'transparent', 
         padding: '12px 16px 0',
@@ -845,7 +689,6 @@ export default function Processing() {
         </Button>
       </div>
 
-      {/* 学生信息卡片 - 现代移动应用风格 */}
       <div style={{ 
         background: COLORS.card, 
         padding: '16px',
@@ -908,7 +751,6 @@ export default function Processing() {
         </div>
       </div>
 
-      {/* 上传按钮区域 - 现代移动应用风格 */}
       <div style={{ padding: '16px', background: COLORS.background }}>
         <div
           onClick={showUploadOptions}
@@ -960,13 +802,12 @@ export default function Processing() {
               lineHeight: '1.5',
               fontWeight: 400
             }}>
-              Qwen-VL 智能识别题目
+              上传后后台自动识别，无需等待
             </div>
           </div>
         </div>
       </div>
 
-      {/* 状态筛选标签 */}
       <div style={{ 
         background: COLORS.card, 
         padding: '12px 16px',
@@ -1001,7 +842,6 @@ export default function Processing() {
         })}
       </div>
 
-      {/* 任务列表 */}
       <div style={{ padding: '12px' }}>
         {filteredTasks.length === 0 ? (
           <Empty
@@ -1027,10 +867,7 @@ export default function Processing() {
                         confirmButtonProps: { color: 'danger' },
                         onConfirm: () => {
                           setTasks(tasks.filter(t => t.id !== task.id))
-                          Toast.show({
-                            icon: 'success',
-                            content: '已删除'
-                          })
+                          Toast.show({ icon: 'success', content: '已删除' })
                         }
                       })
                     }
@@ -1048,7 +885,6 @@ export default function Processing() {
                     boxShadow: '0 1px 3px rgba(0,0,0,0.04)'
                   }}
                 >
-                  {/* 缩略图 */}
                   <div 
                     style={{
                       width: '64px',
@@ -1068,7 +904,6 @@ export default function Processing() {
                     />
                   </div>
 
-                  {/* 内容 */}
                   <div style={{ flex: 1, minWidth: 0 }}>
                     <div style={{ 
                       display: 'flex', 
@@ -1097,7 +932,6 @@ export default function Processing() {
                     {renderTimeInfo(task)}
                   </div>
 
-                  {/* 右侧图标 */}
                   <div style={{ flexShrink: 0, marginTop: '4px' }}>
                     {renderRightIcon(task)}
                   </div>
@@ -1108,21 +942,18 @@ export default function Processing() {
         )}
       </div>
 
-      {/* 图片预览 */}
       <ImageViewer
         image={previewImage}
         visible={!!previewImage}
         onClose={() => setPreviewImage(null)}
       />
 
-      {/* 学生切换弹窗 */}
       <StudentSwitcher
         visible={showStudentSwitcher}
         onClose={() => setShowStudentSwitcher(false)}
         badgeType="failed"
       />
 
-      {/* 添加旋转动画样式 */}
       <style>{`
         @keyframes spin {
           from { transform: rotate(0deg); }
