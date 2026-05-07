@@ -365,10 +365,10 @@ export default function App() {
       if (USE_MOCK_DATA) return
       const { getGeneratedExamsByStudent } = await import('./services/supabaseService')
       const examList = await getGeneratedExamsByStudent(currentStudent.id, useCache)
-      const otherStudentExams = generatedExams.filter(e => e.student_id !== currentStudent.id)
-      setGeneratedExams([...otherStudentExams, ...examList])
+      setGeneratedExams(Array.isArray(examList) ? examList : [])
     } catch (error) {
       console.error('加载试卷失败:', error)
+      setGeneratedExams([])
     }
   }
 
@@ -406,22 +406,15 @@ export default function App() {
     try {
       if (USE_MOCK_DATA) {
         const filteredMockTasks = mockTasks.filter(t => t.student_id === currentStudent.id)
-        const existingIds = new Set(tasks.map(t => t.id))
-        const newTasks = filteredMockTasks.filter(t => !existingIds.has(t.id))
-        if (newTasks.length > 0) {
-          setTasks([...tasks, ...newTasks])
-        }
+        setTasks(filteredMockTasks)
         return
       }
       const taskList = await getTasksByStudent(currentStudent.id, true)
       const safeTaskList = Array.isArray(taskList) ? taskList : []
-      const existingIds = new Set(tasks.map(t => t.id))
-      const newTasks = safeTaskList.filter(t => !existingIds.has(t.id))
-      if (newTasks.length > 0) {
-        setTasks([...tasks, ...newTasks])
-      }
+      setTasks(safeTaskList)
     } catch (error) {
       console.error('加载任务失败:', error)
+      setTasks([])
     }
   }
 
@@ -453,6 +446,7 @@ export default function App() {
       setPendingQuestions(pendingOnly)
     } catch (error) {
       console.error('加载任务失败:', error)
+      setPendingQuestions([])
     }
   }
 
@@ -474,6 +468,7 @@ export default function App() {
       setWrongQuestions(Array.isArray(data) ? data : [])
     } catch (error) {
       console.error('加载错题失败:', error)
+      setWrongQuestions([])
     }
   }
 
@@ -495,6 +490,7 @@ export default function App() {
       setExams([...otherStudentExams, ...examList])
     } catch (error) {
       console.error('加载试卷失败:', error)
+      setExams([])
     }
   }
 
