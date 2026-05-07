@@ -1,4 +1,4 @@
-import { useEffect, useState, useRef, createContext, useContext, useCallback } from 'react'
+import { useEffect, useState, useRef, useCallback } from 'react'
 import {
   Camera,
   ChevronRight,
@@ -35,80 +35,13 @@ import QuestionEditDrawer from './components/QuestionEditDrawer'
 import { ProcessingSkeleton, PendingSkeleton, WrongBookSkeleton, ExamSkeleton } from './components/Skeleton'
 import preloadEngine from './utils/preloadEngine'
 import apiService from './services/apiService'
+import { useToast } from './components/ToastProvider.jsx'
 import ScanQR from './pages/ScanQR'
 import Grading from './pages/Grading'
 import dayjs from 'dayjs'
 import jsPDF from 'jspdf'
 
 const isMobile = /Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(navigator.userAgent)
-
-// ==================== UI Tool Components ====================
-
-// Toast Component
-const ToastContext = createContext(null)
-
-function ToastContainer({ toasts }) {
-  return (
-    <div className="fixed top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 z-[9999] flex flex-col items-center gap-3 pointer-events-none">
-      <AnimatePresence>
-        {toasts.map((toast) => (
-          <motion.div
-            key={toast.id}
-            initial={{ opacity: 0, scale: 0.9 }}
-            animate={{ opacity: 1, scale: 1 }}
-            exit={{ opacity: 0, scale: 0.9 }}
-            className={`px-6 py-3 rounded-2xl shadow-xl backdrop-blur-md flex items-center gap-2.5 pointer-events-auto ${
-              toast.type === 'success' ? 'bg-green-500/90 text-white' :
-              toast.type === 'error' ? 'bg-red-500/90 text-white' :
-              toast.type === 'loading' ? 'bg-blue-500/90 text-white' :
-              'bg-gray-900/90 text-white'
-            }`}
-          >
-            {toast.type === 'success' && <CheckCircle2 size={18} />}
-            {toast.type === 'error' && <XCircle size={18} />}
-            {toast.type === 'loading' && <Loader2 size={18} className="animate-spin" />}
-            <span className="text-[13px] font-medium">{toast.message}</span>
-          </motion.div>
-        ))}
-      </AnimatePresence>
-    </div>
-  )
-}
-
-// Toast Hook
-function useToast() {
-  const context = useContext(ToastContext)
-  if (!context) throw new Error('useToast must be used within ToastProvider')
-  return context
-}
-
-// Toast Provider
-function ToastProvider({ children }) {
-  const [toasts, setToasts] = useState([])
-  
-  const show = ({ message, type = 'info', duration = 2000 }) => {
-    const id = Date.now()
-    const newToast = { id, message, type }
-    setToasts(prev => [...prev, newToast])
-    
-    if (duration > 0) {
-      setTimeout(() => {
-        setToasts(prev => prev.filter(t => t.id !== id))
-      }, duration)
-    }
-    
-    return {
-      dismiss: () => setToasts(prev => prev.filter(t => t.id !== id))
-    }
-  }
-  
-  return (
-    <ToastContext.Provider value={{ show, toasts }}>
-      {children}
-      <ToastContainer toasts={toasts} />
-    </ToastContext.Provider>
-  )
-}
 
 // ==================== Main App ====================
 
@@ -188,8 +121,7 @@ export default function App() {
   const [showPrintModal, setShowPrintModal] = useState(false)
   const [printTarget, setPrintTarget] = useState(null)
 
-  // Toast
-  const Toast = useToast()
+  // Toast (将在组件渲染后使用)
 
   // ==================== 优化的数据加载逻辑 ====================
 
@@ -951,8 +883,7 @@ export default function App() {
 
   // Render
   return (
-    <ToastProvider>
-      <div className="min-h-screen bg-gray-50">
+    <div className="min-h-screen bg-gray-50">
         {/* Header */}
         <header className="sticky top-0 z-50 bg-white/80 backdrop-blur-xl border-b border-gray-100">
           <div className="max-w-lg mx-auto px-5 h-14 flex items-center justify-between">
@@ -1601,8 +1532,6 @@ export default function App() {
         />
 
         {/* Modals */}
-        {/* ... (其他模态框组件) ... */}
       </div>
-    </ToastProvider>
   )
 }
