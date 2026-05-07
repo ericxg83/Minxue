@@ -38,22 +38,24 @@ export const getStudents = async (useCache = true) => {
     if (cached) return cached
   }
 
-  const { data, error } = await supabase
-    .from(TABLES.STUDENTS)
-    .select('*')
-    .order('created_at', { ascending: false })
-
-  if (error) {
-    console.error('Supabase 获取学生列表错误:', error)
+  try {
+    const response = await fetch(`${API_BASE}/students`)
+    if (!response.ok) {
+      const error = await response.json()
+      throw new Error(error.error || '获取学生列表失败')
+    }
+    const result = await response.json()
+    const data = result.students || []
+    if (data) writeCache('students_cache', data)
+    return data
+  } catch (error) {
+    console.error('获取学生列表错误:', error)
     if (useCache) {
       const fallback = readFallbackCache('students_cache')
       if (fallback) return fallback
     }
     throw error
   }
-
-  if (data) writeCache('students_cache', data)
-  return data ?? []
 }
 
 export const getStudentById = async (id) => {
@@ -75,25 +77,31 @@ const generateUUID = () => {
   })
 }
 
+const API_BASE = import.meta.env.VITE_API_URL || '/api'
+
 export const createStudent = async (studentData) => {
-  const cleanData = {
-    id: generateUUID(),
-    name: studentData.name,
-    grade: studentData.grade || null,
-    class: studentData.class || null,
-    remark: studentData.remark || null,
-    avatar: studentData.avatar || null
+  const response = await fetch(`${API_BASE}/students`, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json'
+    },
+    body: JSON.stringify({
+      name: studentData.name,
+      grade: studentData.grade || null,
+      class: studentData.class || null,
+      remark: studentData.remark || null,
+      avatar: studentData.avatar || null
+    })
+  })
+
+  if (!response.ok) {
+    const error = await response.json()
+    throw new Error(error.error || '创建学生失败')
   }
 
-  const { data, error } = await supabase
-    .from(TABLES.STUDENTS)
-    .insert([cleanData])
-    .select()
-    .single()
-
-  if (error) throw error
+  const result = await response.json()
   clearCache('students_cache')
-  return data
+  return result.student
 }
 
 export const updateStudent = async (id, updates) => {
