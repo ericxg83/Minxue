@@ -40,6 +40,10 @@ export default defineConfig({
         target: 'https://wdwlxbtntuurjtlirwew.supabase.co',
         changeOrigin: true,
         rewrite: (path) => path.replace(/^\/supabase/, '')
+      },
+      '/api': {
+        target: 'http://localhost:3001',
+        changeOrigin: true
       }
     }
   }

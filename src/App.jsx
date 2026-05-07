@@ -26,7 +26,8 @@ import {
 import { motion, AnimatePresence } from 'motion/react'
 import { QRCodeSVG } from 'qrcode.react'
 import { useUIStore, useStudentStore, useTaskStore, useWrongQuestionStore, usePendingQuestionStore, useExamStore } from './store'
-import { getStudents, getTasksByStudent, getQuestionsByTask, addWrongQuestions, getWrongQuestionsByStudent, getExamsByStudent, createTask, updateTaskStatus, uploadImage, createQuestions, updateQuestion, updateQuestionTags } from './services/supabaseService'
+import { getStudents, getTasksByStudent, getQuestionsByTask, addWrongQuestions, getWrongQuestionsByStudent, getExamsByStudent, createTask, updateTaskStatus, uploadImage, createQuestions, updateQuestion, updateQuestionTags, invalidateCache } from './services/supabaseService'
+import { taskService } from './services/taskService'
 import { recognizeQuestions, compressImage, saveRecognitionResult } from './services/aiService'
 import { mockQuestions, mockTasks, mockWrongQuestions, mockExams, mockStudents } from './data/mockData'
 import StudentSwitcher from './components/StudentSwitcher'
@@ -443,6 +444,12 @@ export default function App() {
       }
     }
 
+    // 上传完成后刷新缓存并重新加载列表
+    if (successCount > 0) {
+      invalidateCache('tasks', currentStudent.id)
+      loadTasks()
+    }
+
     if (failedCount > 0) {
       Toast.show({
         icon: 'fail',
@@ -673,6 +680,13 @@ export default function App() {
 
       setPendingQuestions(pendingQuestions.filter(q => !selectedConfirmIds.includes(q.id)))
       setSelectedConfirmIds([])
+
+      // 确认后刷新缓存并重新加载数据
+      invalidateCache('wrong', currentStudent.id)
+      invalidateCache('tasks', currentStudent.id)
+      loadPendingData()
+      loadWrongBookData()
+
       Toast.show({
         icon: 'success',
         content: `已确认 ${selectedConfirmIds.length} 道题`
@@ -708,6 +722,11 @@ export default function App() {
       const newExam = await createGeneratedExam(examData)
       setGeneratedExams([newExam, ...generatedExams])
       clearSelection()
+
+      // 生成试卷后刷新缓存并重新加载数据
+      invalidateCache('generated', currentStudent.id)
+      loadGeneratedExams(false)
+
       Toast.show({
         icon: 'success',
         content: '生成试卷成功'

@@ -3,12 +3,12 @@ import { supabase, TABLES } from '../config/supabase'
 // ==================== 缓存工具函数 ====================
 
 const CACHE_MAX_AGE = {
-  STUDENTS: 5 * 60 * 1000,    // 5分钟
-  TASKS: 3 * 60 * 1000,       // 3分钟
-  EXAMS: 3 * 60 * 1000,       // 3分钟
-  QUESTIONS: 3 * 60 * 1000,   // 3分钟
-  WRONG: 3 * 60 * 1000,       // 3分钟
-  GENERATED: 3 * 60 * 1000    // 3分钟
+  STUDENTS: 15 * 60 * 1000,   // 15分钟
+  TASKS: 5 * 60 * 1000,       // 5分钟
+  EXAMS: 10 * 60 * 1000,      // 10分钟
+  QUESTIONS: 5 * 60 * 1000,   // 5分钟
+  WRONG: 5 * 60 * 1000,       // 5分钟
+  GENERATED: 10 * 60 * 1000   // 10分钟
 }
 
 const readCache = (key, maxAge) => {
@@ -639,6 +639,7 @@ export const createGeneratedExam = async (examData) => {
     .single()
 
   if (error) throw error
+  clearCache(`generated_exams_cache_${examData.student_id}`)
   return data
 }
 
