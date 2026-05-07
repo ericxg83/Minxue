@@ -124,6 +124,20 @@ export default function App() {
 
   // Toast (将在组件渲染后使用)
 
+  // ==================== 保持 Render 实例活跃 ====================
+  useEffect(() => {
+    const API_BASE = import.meta.env.VITE_API_URL || '/api'
+    // 每 4 分钟 ping 一次后端，防止休眠
+    const pingInterval = setInterval(() => {
+      fetch(`${API_BASE}/health`).catch(() => {})
+    }, 4 * 60 * 1000)
+    
+    // 立即 ping 一次
+    fetch(`${API_BASE}/health`).catch(() => {})
+    
+    return () => clearInterval(pingInterval)
+  }, [])
+
   // ==================== 优化的数据加载逻辑 ====================
 
   // Initialize students - SWR模式
