@@ -8,7 +8,8 @@ const getRedisConfig = () => {
     return {
       url: process.env.REDIS_URL.trim(),
       maxRetriesPerRequest: null,
-      enableReadyCheck: false
+      enableReadyCheck: false,
+      tls: process.env.REDIS_URL.includes('rediss://') ? {} : undefined
     }
   }
   
@@ -18,11 +19,20 @@ const getRedisConfig = () => {
     port: parseInt(process.env.REDIS_PORT) || 6379,
     password: process.env.REDIS_PASSWORD || undefined,
     maxRetriesPerRequest: null,
-    enableReadyCheck: false
+    enableReadyCheck: false,
+    tls: {}
   }
 }
 
 const redisConfig = getRedisConfig()
+
+console.log('Redis 配置:', {
+  url: redisConfig.url ? '已设置' : '未设置',
+  host: redisConfig.host,
+  port: redisConfig.port,
+  hasPassword: !!redisConfig.password,
+  tls: !!redisConfig.tls
+})
 
 export const taskQueue = new Queue('task-processing', {
   connection: redisConfig,
