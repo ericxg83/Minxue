@@ -40,6 +40,18 @@ app.get('/api/health', async (req, res) => {
   }
 })
 
+// ==================== Redis 连接测试 ====================
+app.get('/api/redis-test', async (req, res) => {
+  try {
+    const { taskQueue } = await import('./queue.js')
+    const waiting = await taskQueue.getWaitingCount()
+    res.json({ status: 'ok', redis: 'connected', waitingJobs: waiting })
+  } catch (error) {
+    console.error('Redis 连接测试失败:', error)
+    res.status(500).json({ status: 'error', redis: 'disconnected', message: error.message })
+  }
+})
+
 // ==================== 学生相关 API ====================
 
 app.get('/api/students', async (req, res) => {
