@@ -1,12 +1,15 @@
 import { Queue, Worker } from 'bullmq'
 import { processTask } from './worker.js'
 
-const redisConfig = {
-  host: process.env.REDIS_HOST || 'localhost',
-  port: parseInt(process.env.REDIS_PORT) || 6379,
-  password: process.env.REDIS_PASSWORD || undefined,
-  maxRetriesPerRequest: null
-}
+const redisConfig = process.env.REDIS_URL 
+  ? { url: process.env.REDIS_URL, maxRetriesPerRequest: null }
+  : {
+      host: process.env.REDIS_HOST || 'localhost',
+      port: parseInt(process.env.REDIS_PORT) || 6379,
+      password: process.env.REDIS_PASSWORD || undefined,
+      maxRetriesPerRequest: null,
+      enableReadyCheck: true
+    }
 
 export const taskQueue = new Queue('task-processing', {
   connection: redisConfig,
