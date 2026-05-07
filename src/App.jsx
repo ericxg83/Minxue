@@ -26,7 +26,7 @@ import {
 import { motion, AnimatePresence } from 'motion/react'
 import { QRCodeSVG } from 'qrcode.react'
 import { useUIStore, useStudentStore, useTaskStore, useWrongQuestionStore, usePendingQuestionStore, useExamStore } from './store'
-import { getStudents, getTasksByStudent, getQuestionsByTask, addWrongQuestions, getWrongQuestionsByStudent, getExamsByStudent, createTask, updateTaskStatus, uploadImage, createQuestions, updateQuestion, updateQuestionTags, checkSupabaseHealth } from './services/supabaseService'
+import { getStudents, getTasksByStudent, getQuestionsByTask, addWrongQuestions, getWrongQuestionsByStudent, getExamsByStudent, createTask, updateTaskStatus, uploadImage, createQuestions, updateQuestion, updateQuestionTags } from './services/supabaseService'
 import { recognizeQuestions, compressImage, saveRecognitionResult } from './services/aiService'
 import { mockQuestions, mockTasks, mockWrongQuestions, mockExams, mockStudents } from './data/mockData'
 import StudentSwitcher from './components/StudentSwitcher'
@@ -190,7 +190,7 @@ function ActionSheet({ visible, actions, onClose }) {
               {actions.map((action, index) => (
                 <button
                   key={action.key || index}
-                  onClick={() => { action.onClick && action.onClick(action) }}
+                  onClick={() => { action.onClick && action.onClick(action); onClose() }}
                   className="w-full py-4 px-4 text-center active:bg-gray-50 transition-colors border-b border-gray-50 last:border-0"
                 >
                   <div className="text-[16px] font-medium text-slate-900">{action.text}</div>
@@ -319,30 +319,19 @@ export default function App() {
   // Initialize students
   useEffect(() => {
     const init = async () => {
-      const health = await checkSupabaseHealth()
-      if (!health.connected) {
-        console.error('Supabase 连接失败:', health.error)
-      } else if (!health.tasksReadable) {
-        console.error('Supabase 任务表不可读 (可能是 RLS 策略问题):', health.error)
-      }
-
       try {
         const loadedStudents = await getStudents(true)
         if (loadedStudents && loadedStudents.length > 0) {
           setStudents(loadedStudents)
-          if (!currentStudent || !loadedStudents.find(s => s.id === currentStudent.id)) {
-            setCurrentStudent(loadedStudents[0])
-          }
+          setCurrentStudent(loadedStudents[0])
         } else {
           setStudents([])
           setCurrentStudent(null)
         }
       } catch (error) {
         console.error('加载学生数据失败:', error)
-        if (!currentStudent) {
-          setStudents([])
-          setCurrentStudent(null)
-        }
+        setStudents([])
+        setCurrentStudent(null)
       }
     }
     init()
@@ -350,10 +339,10 @@ export default function App() {
 
   // Load tasks when student changes
   useEffect(() => {
-    if (currentStudent) {
+    if (currentStudent && currentPage === 'processing') {
       loadTasks()
     }
-  }, [currentStudent?.id])
+  }, [currentStudent?.id, currentPage])
 
   // Load pending questions
   useEffect(() => {
@@ -376,10 +365,8 @@ export default function App() {
       if (USE_MOCK_DATA) return
       const { getGeneratedExamsByStudent } = await import('./services/supabaseService')
       const examList = await getGeneratedExamsByStudent(currentStudent.id, useCache)
-      if (examList && examList.length > 0) {
-        const otherStudentExams = generatedExams.filter(e => e.student_id !== currentStudent.id)
-        setGeneratedExams([...otherStudentExams, ...examList])
-      }
+      const otherStudentExams = generatedExams.filter(e => e.student_id !== currentStudent.id)
+      setGeneratedExams([...otherStudentExams, ...examList])
     } catch (error) {
       console.error('加载试卷失败:', error)
     }
@@ -426,31 +413,15 @@ export default function App() {
         }
         return
       }
-      const taskList = await getTasksByStudent(currentStudent.id, false)
+      const taskList = await getTasksByStudent(currentStudent.id, true)
       const safeTaskList = Array.isArray(taskList) ? taskList : []
-      const otherStudentTasks = tasks.filter(t => t.student_id !== currentStudent.id)
-      if (safeTaskList.length > 0) {
-        setTasks([...otherStudentTasks, ...safeTaskList])
-      } else {
-        const persistedCurrentStudentTasks = tasks.filter(t => t.student_id === currentStudent.id)
-        if (persistedCurrentStudentTasks.length > 0) {
-          console.warn('Supabase 返回空数据但本地有持久化任务，保留本地数据（可能是 RLS 策略问题）')
-          setTasks([...otherStudentTasks, ...persistedCurrentStudentTasks])
-        } else {
-          setTasks([...otherStudentTasks])
-        }
+      const existingIds = new Set(tasks.map(t => t.id))
+      const newTasks = safeTaskList.filter(t => !existingIds.has(t.id))
+      if (newTasks.length > 0) {
+        setTasks([...tasks, ...newTasks])
       }
     } catch (error) {
       console.error('加载任务失败:', error)
-      try {
-        const cachedTaskList = await getTasksByStudent(currentStudent.id, true)
-        if (cachedTaskList && cachedTaskList.length > 0) {
-          const otherStudentTasks = tasks.filter(t => t.student_id !== currentStudent.id)
-          setTasks([...otherStudentTasks, ...cachedTaskList])
-        }
-      } catch (cacheError) {
-        console.error('缓存加载也失败:', cacheError)
-      }
     }
   }
 
@@ -461,17 +432,13 @@ export default function App() {
       if (USE_MOCK_DATA) {
         return
       }
-      const taskList = await getTasksByStudent(currentStudent.id, false)
+      const taskList = await getTasksByStudent(currentStudent.id, true)
       const safeTaskList = Array.isArray(taskList) ? taskList : []
-      if (safeTaskList.length === 0) {
-        console.warn('Supabase 返回空任务列表，跳过待确认数据加载')
-        return
-      }
       const doneTasks = safeTaskList.filter(t => t.status === 'done')
       const allQuestions = []
       for (const task of doneTasks) {
         try {
-          const taskQuestions = await getQuestionsByTask(task.id, false)
+          const taskQuestions = await getQuestionsByTask(task.id, true)
           const safeQuestions = Array.isArray(taskQuestions) ? taskQuestions : []
           allQuestions.push(...safeQuestions.map(q => ({ ...q, status: q.is_correct ? 'correct' : 'wrong' })))
         } catch (taskError) {
@@ -479,13 +446,13 @@ export default function App() {
         }
       }
 
-      const existingWrong = await getWrongQuestionsByStudent(currentStudent.id, false)
+      const existingWrong = await getWrongQuestionsByStudent(currentStudent.id, true)
       const wrongQuestionIds = new Set((existingWrong || []).map(w => w.question_id))
       const pendingOnly = allQuestions.filter(q => !wrongQuestionIds.has(q.id))
 
       setPendingQuestions(pendingOnly)
     } catch (error) {
-      console.error('加载待确认数据失败:', error)
+      console.error('加载任务失败:', error)
     }
   }
 
@@ -504,11 +471,7 @@ export default function App() {
         return
       }
       const data = await getWrongQuestionsByStudent(currentStudent.id, false)
-      if (data && data.length > 0) {
-        setWrongQuestions(data)
-      } else if (wrongQuestions.length > 0) {
-        console.warn('Supabase 返回空错题数据，保留本地持久化数据')
-      }
+      setWrongQuestions(Array.isArray(data) ? data : [])
     } catch (error) {
       console.error('加载错题失败:', error)
     }
@@ -528,10 +491,8 @@ export default function App() {
         return
       }
       const examList = await getExamsByStudent(currentStudent.id, true)
-      if (examList && examList.length > 0) {
-        const otherStudentExams = exams.filter(e => e.student_id !== currentStudent.id)
-        setExams([...otherStudentExams, ...examList])
-      }
+      const otherStudentExams = exams.filter(e => e.student_id !== currentStudent.id)
+      setExams([...otherStudentExams, ...examList])
     } catch (error) {
       console.error('加载试卷失败:', error)
     }
@@ -542,11 +503,6 @@ export default function App() {
     const files = Array.from(e.target.files)
     if (files.length === 0) return
     e.target.value = ''
-
-    if (!currentStudent) {
-      showToast({ icon: 'fail', content: '请先选择学生', duration: 2000 })
-      return
-    }
 
     const duplicateFiles = []
     const newFiles = []
@@ -623,14 +579,7 @@ export default function App() {
   }
 
   const uploadFile = async (file) => {
-    let imageBase64
-    try {
-      imageBase64 = await fileToBase64(file)
-    } catch (err) {
-      console.error('读取文件失败:', err)
-      showToast({ icon: 'fail', content: '读取文件失败，请重试' })
-      throw err
-    }
+    const imageBase64 = await fileToBase64(file)
 
     let imageUrl = imageBase64
 
@@ -667,15 +616,9 @@ export default function App() {
       console.error('创建任务失败:', error)
       console.error('错误详情:', error?.message, error?.code, error?.details)
       
-      const errorMsg = error?.message?.includes('Failed to fetch') || error?.message?.includes('NetworkError')
-        ? '网络连接失败，请检查网络后重试'
-        : error?.message?.includes('JWT') || error?.code === 'PGRST301'
-        ? '数据库连接失败，请检查配置'
-        : '上传失败，请重试'
-      
       showToast({
         icon: 'fail',
-        content: errorMsg
+        content: '上传失败，请重试'
       })
       throw error
     }
@@ -1027,13 +970,7 @@ export default function App() {
                   <section className="p-5">
                     <motion.button 
                       whileTap={{ scale: 0.98 }}
-                      onClick={() => {
-                        if (!currentStudent) {
-                          showToast({ icon: 'info', content: '请先选择学生', duration: 2000 })
-                          return
-                        }
-                        setShowActionSheet(true)
-                      }}
+                      onClick={() => setShowActionSheet(true)}
                       className="w-full relative overflow-hidden rounded-[2.5rem] bg-gradient-to-br from-blue-600 to-indigo-700 p-8 text-white shadow-xl shadow-blue-200 disabled:opacity-60"
                       disabled={uploading}
                     >
@@ -1625,22 +1562,16 @@ export default function App() {
             onClose={() => setShowActionSheet(false)}
             actions={[
               { key: 'camera', text: '拍照上传', description: '拍摄试卷或作业', onClick: () => {
-                setShowActionSheet(false)
-                setTimeout(() => {
-                  if (fileInputRef.current) {
-                    fileInputRef.current.setAttribute('capture', 'environment')
-                    fileInputRef.current.click()
-                  }
-                }, 300)
+                if (fileInputRef.current) {
+                  fileInputRef.current.setAttribute('capture', 'environment')
+                  fileInputRef.current.click()
+                }
               }},
               { key: 'album', text: '从相册选择', description: '选择已有照片', onClick: () => {
-                setShowActionSheet(false)
-                setTimeout(() => {
-                  if (fileInputRef.current) {
-                    fileInputRef.current.removeAttribute('capture')
-                    fileInputRef.current.click()
-                  }
-                }, 300)
+                if (fileInputRef.current) {
+                  fileInputRef.current.removeAttribute('capture')
+                  fileInputRef.current.click()
+                }
               }}
             ]}
           />

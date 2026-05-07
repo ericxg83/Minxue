@@ -1,79 +1,60 @@
 import { create } from 'zustand'
-import { persist } from 'zustand/middleware'
 
-export const useStudentStore = create(
-  persist(
-    (set, get) => ({
-      currentStudent: null,
-      students: [],
-      
-      setCurrentStudent: (student) => set({ currentStudent: student }),
-      
-      setStudents: (students) => set({ students }),
-      
-      addStudent: (student) => set((state) => ({
-        students: [...state.students, student]
-      })),
-      
-      updateStudent: (id, updates) => set((state) => ({
-        students: state.students.map(s => 
-          s.id === id ? { ...s, ...updates } : s
-        )
-      })),
-      
-      removeStudent: (id) => set((state) => ({
-        students: state.students.filter(s => s.id !== id),
-        currentStudent: state.currentStudent?.id === id ? null : state.currentStudent
-      }))
-    }),
-    {
-      name: 'minxue-student-store',
-      partialize: (state) => ({
-        currentStudent: state.currentStudent,
-        students: state.students
-      })
-    }
-  )
-)
+// 学生状态管理 - 纯内存，无本地存储
+export const useStudentStore = create((set, get) => ({
+  currentStudent: null,
+  students: [],
+  
+  setCurrentStudent: (student) => set({ currentStudent: student }),
+  
+  setStudents: (students) => set({ students }),
+  
+  addStudent: (student) => set((state) => ({
+    students: [...state.students, student]
+  })),
+  
+  updateStudent: (id, updates) => set((state) => ({
+    students: state.students.map(s => 
+      s.id === id ? { ...s, ...updates } : s
+    )
+  })),
+  
+  removeStudent: (id) => set((state) => ({
+    students: state.students.filter(s => s.id !== id),
+    currentStudent: state.currentStudent?.id === id ? null : state.currentStudent
+  }))
+}))
 
-export const useTaskStore = create(
-  persist(
-    (set, get) => ({
-      currentTask: null,
-      tasks: [],
-      processingTasks: [],
-      
-      setCurrentTask: (task) => set({ currentTask: task }),
-      
-      setTasks: (tasks) => set({ tasks }),
-      
-      addTask: (task) => set((state) => ({
-        tasks: [task, ...state.tasks]
-      })),
-      
-      updateTaskStatus: (taskId, status, result = null) => set((state) => ({
-        tasks: state.tasks.map(t => 
-          t.id === taskId ? { ...t, status, result, updated_at: new Date().toISOString() } : t
-        )
-      })),
-      
-      addToProcessing: (task) => set((state) => ({
-        processingTasks: [...state.processingTasks, task]
-      })),
-      
-      removeFromProcessing: (taskId) => set((state) => ({
-        processingTasks: state.processingTasks.filter(t => t.id !== taskId)
-      }))
-    }),
-    {
-      name: 'minxue-task-store',
-      partialize: (state) => ({
-        tasks: state.tasks
-      })
-    }
-  )
-)
+// 任务状态管理 - 纯内存，无本地存储
+export const useTaskStore = create((set, get) => ({
+  currentTask: null,
+  tasks: [],
+  processingTasks: [],
+  
+  setCurrentTask: (task) => set({ currentTask: task }),
+  
+  setTasks: (tasks) => set({ tasks }),
+  
+  addTask: (task) => set((state) => ({
+    tasks: [task, ...state.tasks]
+  })),
+  
+  updateTaskStatus: (taskId, status, result = null) => set((state) => ({
+    tasks: state.tasks.map(t => 
+      t.id === taskId ? { ...t, status, result, updated_at: new Date().toISOString() } : t
+    )
+  })),
+  
+  addToProcessing: (task) => set((state) => ({
+    processingTasks: [...state.processingTasks, task]
+  })),
+  
+  removeFromProcessing: (taskId) => set((state) => ({
+    processingTasks: state.processingTasks.filter(t => t.id !== taskId)
+  }))
+}))
 
+// 错题本状态管理 - 纯内存，无本地存储
 export const useWrongQuestionStore = create((set, get) => ({
   wrongQuestions: [],
   selectedQuestions: [],
@@ -129,6 +110,7 @@ export const useWrongQuestionStore = create((set, get) => ({
   clearSelection: () => set({ selectedQuestions: [] })
 }))
 
+// 待确认题目状态管理 - 纯内存，无本地存储
 export const usePendingQuestionStore = create((set, get) => ({
   pendingQuestions: [],
   
@@ -155,6 +137,7 @@ export const usePendingQuestionStore = create((set, get) => ({
   clearPendingQuestions: () => set({ pendingQuestions: [] })
 }))
 
+// 试卷状态管理 - 纯内存，无本地存储
 export const useExamStore = create((set, get) => ({
   exams: [],
   generatedExams: [],
@@ -191,26 +174,17 @@ export const useExamStore = create((set, get) => ({
   }
 }))
 
-export const useUIStore = create(
-  persist(
-    (set) => ({
-      currentPage: 'processing',
-      loading: false,
-      toast: null,
+// 全局 UI 状态管理
+export const useUIStore = create((set) => ({
+  currentPage: 'processing',
+  loading: false,
+  toast: null,
 
-      setCurrentPage: (page) => set({ currentPage: page }),
+  setCurrentPage: (page) => set({ currentPage: page }),
 
-      setLoading: (loading) => set({ loading }),
+  setLoading: (loading) => set({ loading }),
 
-      showToast: (message, type = 'info') => set({ toast: { message, type } }),
+  showToast: (message, type = 'info') => set({ toast: { message, type } }),
 
-      hideToast: () => set({ toast: null })
-    }),
-    {
-      name: 'minxue-ui-store',
-      partialize: (state) => ({
-        currentPage: state.currentPage
-      })
-    }
-  )
-)
+  hideToast: () => set({ toast: null })
+}))
