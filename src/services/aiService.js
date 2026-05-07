@@ -153,14 +153,30 @@ export const recognizeQuestions = async (imageBase64, studentId, taskId, retryCo
     // 为每个题目添加额外信息，并校验答案正确性
     const questions = result.questions?.map((q, index) => {
       // 后处理：校验 is_correct 的准确性
-      let isCorrect = q.is_correct || false
+      let isCorrect = false
+      const studentAnswerStr = String(q.student_answer || '').trim()
+      const hasStudentAnswer = studentAnswerStr !== '' && studentAnswerStr !== '未作答'
       
-      // 如果是选择题，进行额外的答案比对校验
-      if (q.question_type === 'choice' && q.answer && q.student_answer) {
+      // 如果学生未作答，直接判定为错误
+      if (!hasStudentAnswer) {
+        isCorrect = false
+      }
+      // 如果是选择题，进行答案比对校验
+      else if (q.question_type === 'choice' && q.answer && q.student_answer) {
         const normalizedAnswer = String(q.answer).trim().toUpperCase()
         const normalizedStudentAnswer = String(q.student_answer).trim().toUpperCase()
         // 重新计算 is_correct，确保准确性
         isCorrect = normalizedAnswer === normalizedStudentAnswer
+      }
+      // 如果是填空题，进行答案比对校验
+      else if (q.question_type === 'fill' && q.answer && q.student_answer) {
+        const normalizedAnswer = String(q.answer).trim()
+        const normalizedStudentAnswer = String(q.student_answer).trim()
+        isCorrect = normalizedAnswer === normalizedStudentAnswer
+      }
+      // 解答题：如果有作答且AI认为正确，信任AI判断；否则以AI返回的为准
+      else {
+        isCorrect = q.is_correct || false
       }
       
       return {
