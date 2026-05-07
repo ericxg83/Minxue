@@ -1,78 +1,63 @@
 import { supabase, TABLES } from '../config/supabase'
 
-const CACHE_MAX_AGE = {
-  STUDENTS: 15 * 60 * 1000,
-  TASKS: 15 * 60 * 1000,
-  EXAMS: 15 * 60 * 1000,
-  QUESTIONS: 15 * 60 * 1000,
-  WRONG: 15 * 60 * 1000,
-  GENERATED: 15 * 60 * 1000
-}
+const CACHE_MAX_AGE = 15 * 60 * 1000
 
-const readCache = (key, maxAge) => {
+const getCache = (key) => {
   try {
     const cached = localStorage.getItem(key)
     const cachedTime = localStorage.getItem(key + '_ts')
     if (cached && cachedTime) {
       const age = Date.now() - parseInt(cachedTime)
-      if (age < maxAge) {
+      if (age < CACHE_MAX_AGE) {
         return JSON.parse(cached)
       }
-      return { stale: true, data: JSON.parse(cached) }
     }
   } catch (e) {}
   return null
 }
 
-const writeCache = (key, data) => {
+const getFallbackCache = (key) => {
+  try {
+    const cached = localStorage.getItem(key)
+    return cached ? JSON.parse(cached) : null
+  } catch (e) {}
+  return null
+}
+
+const setCache = (key, data) => {
   try {
     localStorage.setItem(key, JSON.stringify(data))
     localStorage.setItem(key + '_ts', String(Date.now()))
   } catch (e) {}
 }
 
-const readCacheFallback = (key) => {
+const clearCache = (key) => {
   try {
-    const cached = localStorage.getItem(key)
-    if (cached) return JSON.parse(cached)
+    localStorage.removeItem(key)
+    localStorage.removeItem(key + '_ts')
   } catch (e) {}
-  return null
 }
-
-// ==================== 学生相关操作 ====================
 
 export const getStudents = async (useCache = true) => {
   if (useCache) {
-    const cached = readCache('students_cache', CACHE_MAX_AGE.STUDENTS)
-    if (cached && !cached.stale) return cached
-    if (cached?.stale) {
-      fetchStudentsInBackground()
-      return cached.data
-    }
+    const cached = getCache('students_cache')
+    if (cached) return cached
   }
-  return fetchStudentsFromServer()
-}
 
-const fetchStudentsInBackground = async () => {
-  try {
-    const data = await fetchStudentsFromServer()
-    return data
-  } catch (e) {}
-}
-
-const fetchStudentsFromServer = async () => {
   const { data, error } = await supabase
     .from(TABLES.STUDENTS)
     .select('*')
     .order('created_at', { ascending: false })
-  
+
   if (error) {
-    const cached = readCacheFallback('students_cache')
-    if (cached) return cached
+    if (useCache) {
+      const fallback = getFallbackCache('students_cache')
+      if (fallback) return fallback
+    }
     throw error
   }
-  
-  if (data) writeCache('students_cache', data)
+
+  if (data) setCache('students_cache', data)
   return data ?? []
 }
 
@@ -82,7 +67,7 @@ export const getStudentById = async (id) => {
     .select('*')
     .eq('id', id)
     .single()
-  
+
   if (error) throw error
   return data
 }
@@ -104,43 +89,40 @@ export const createStudent = async (studentData) => {
     remark: studentData.remark || null,
     avatar: studentData.avatar || null
   }
-  
+
   const { data, error } = await supabase
     .from(TABLES.STUDENTS)
     .insert([cleanData])
     .select()
     .single()
-  
+
   if (error) throw error
 
-  const cached = readCacheFallback('students_cache')
-  if (cached) {
-    writeCache('students_cache', [data, ...cached])
-  }
-  
+  clearCache('students_cache')
   return data
 }
 
 export const updateStudent = async (id, updates) => {
   const allowedFields = ['name', 'grade', 'class', 'remark', 'avatar']
   const cleanUpdates = {}
-  
+
   for (const field of allowedFields) {
     if (updates[field] !== undefined) {
       cleanUpdates[field] = updates[field]
     }
   }
-  
+
   cleanUpdates.updated_at = new Date().toISOString()
-  
+
   const { data, error } = await supabase
     .from(TABLES.STUDENTS)
     .update(cleanUpdates)
     .eq('id', id)
     .select()
     .single()
-  
+
   if (error) throw error
+  clearCache('students_cache')
   return data
 }
 
@@ -149,8 +131,9 @@ export const deleteStudent = async (id) => {
     .from(TABLES.STUDENTS)
     .delete()
     .eq('id', id)
-  
+
   if (error) throw error
+  clearCache('students_cache')
   return true
 }
 
@@ -158,74 +141,50 @@ export const deleteStudent = async (id) => {
 
 export const getTasksByStudent = async (studentId, useCache = true) => {
   const cacheKey = `tasks_cache_${studentId}`
-  
+
   if (useCache) {
-    const cached = readCache(cacheKey, CACHE_MAX_AGE.TASKS)
-    if (cached && !cached.stale) return cached
-    if (cached?.stale) {
-      fetchTasksInBackground(studentId, cacheKey)
-      return cached.data
-    }
+    const cached = getCache(cacheKey)
+    if (cached) return cached
   }
-  return fetchTasksFromServer(studentId, cacheKey)
-}
 
-const fetchTasksInBackground = async (studentId, cacheKey) => {
-  try {
-    return await fetchTasksFromServer(studentId, cacheKey)
-  } catch (e) {}
-}
-
-const fetchTasksFromServer = async (studentId, cacheKey) => {
   const { data, error } = await supabase
     .from(TABLES.TASKS)
     .select('*')
     .eq('student_id', studentId)
     .order('created_at', { ascending: false })
-  
+
   if (error) {
-    const cached = readCacheFallback(cacheKey)
-    if (cached) return cached
+    if (useCache) {
+      const fallback = getFallbackCache(cacheKey)
+      if (fallback) return fallback
+    }
     throw error
   }
-  
-  if (data) writeCache(cacheKey, data)
+
+  if (data) setCache(cacheKey, data)
   return data
 }
 
-const EXAMS_CACHE_PREFIX = 'exams_cache_'
-
 export const getExamsByStudent = async (studentId, useCache = true) => {
-  const cacheKey = EXAMS_CACHE_PREFIX + studentId
-  
+  const cacheKey = `exams_cache_${studentId}`
+
   if (useCache) {
-    const cached = readCache(cacheKey, CACHE_MAX_AGE.EXAMS)
-    if (cached && !cached.stale) return cached
-    if (cached?.stale) {
-      fetchExamsInBackground(studentId, cacheKey)
-      return cached.data
-    }
+    const cached = getCache(cacheKey)
+    if (cached) return cached
   }
-  return fetchExamsFromServer(studentId, cacheKey)
-}
 
-const fetchExamsInBackground = async (studentId, cacheKey) => {
-  try {
-    return await fetchExamsFromServer(studentId, cacheKey)
-  } catch (e) {}
-}
-
-const fetchExamsFromServer = async (studentId, cacheKey) => {
   const { data, error } = await supabase
     .from(TABLES.TASKS)
     .select('*')
     .eq('student_id', studentId)
     .eq('status', 'done')
     .order('created_at', { ascending: false })
-  
+
   if (error) {
-    const cached = readCacheFallback(cacheKey)
-    if (cached) return cached
+    if (useCache) {
+      const fallback = getFallbackCache(cacheKey)
+      if (fallback) return fallback
+    }
     throw error
   }
 
@@ -241,7 +200,7 @@ const fetchExamsFromServer = async (studentId, cacheKey) => {
     graded_at: null
   }))
 
-  if (data) writeCache(cacheKey, result)
+  if (data) setCache(cacheKey, result)
   return result
 }
 
@@ -254,14 +213,15 @@ export const createTask = async (taskData) => {
     result: taskData.result || null,
     created_at: new Date().toISOString()
   }
-  
+
   const { data, error } = await supabase
     .from(TABLES.TASKS)
     .insert([cleanData])
     .select()
     .single()
-  
+
   if (error) throw error
+  clearCache(`tasks_cache_${taskData.student_id}`)
   return data
 }
 
@@ -273,14 +233,14 @@ export const updateTaskStatus = async (taskId, status, result = null) => {
   if (result !== null) {
     cleanUpdates.result = result
   }
-  
+
   const { data, error } = await supabase
     .from(TABLES.TASKS)
     .update(cleanUpdates)
     .eq('id', taskId)
     .select()
     .single()
-  
+
   if (error) throw error
   return data
 }
@@ -289,38 +249,27 @@ export const updateTaskStatus = async (taskId, status, result = null) => {
 
 export const getQuestionsByTask = async (taskId, useCache = true) => {
   const cacheKey = `questions_cache_${taskId}`
-  
+
   if (useCache) {
-    const cached = readCache(cacheKey, CACHE_MAX_AGE.QUESTIONS)
-    if (cached && !cached.stale) return cached
-    if (cached?.stale) {
-      fetchQuestionsInBackground(taskId, cacheKey)
-      return cached.data
-    }
+    const cached = getCache(cacheKey)
+    if (cached) return cached
   }
-  return fetchQuestionsFromServer(taskId, cacheKey)
-}
 
-const fetchQuestionsInBackground = async (taskId, cacheKey) => {
-  try {
-    return await fetchQuestionsFromServer(taskId, cacheKey)
-  } catch (e) {}
-}
-
-const fetchQuestionsFromServer = async (taskId, cacheKey) => {
   const { data, error } = await supabase
     .from(TABLES.QUESTIONS)
     .select('*')
     .eq('task_id', taskId)
     .order('created_at', { ascending: true })
-  
+
   if (error) {
-    const cached = readCacheFallback(cacheKey)
-    if (cached) return cached
+    if (useCache) {
+      const fallback = getFallbackCache(cacheKey)
+      if (fallback) return fallback
+    }
     throw error
   }
 
-  if (data) writeCache(cacheKey, data)
+  if (data) setCache(cacheKey, data)
   return data
 }
 
@@ -332,7 +281,7 @@ export const createQuestions = async (questions) => {
     } else if (q.status === 'mastered') {
       statusValue = 'mastered'
     }
-    
+
     return {
       task_id: q.task_id,
       student_id: q.student_id,
@@ -351,12 +300,12 @@ export const createQuestions = async (questions) => {
       created_at: new Date().toISOString()
     }
   })
-  
+
   const { data, error } = await supabase
     .from(TABLES.QUESTIONS)
     .insert(questionsWithTime)
     .select()
-  
+
   if (error) throw error
   return data
 }
@@ -364,22 +313,22 @@ export const createQuestions = async (questions) => {
 export const updateQuestion = async (id, updates) => {
   const allowedFields = ['content', 'options', 'answer', 'analysis', 'question_type', 'subject', 'is_correct', 'status', 'image_url', 'ai_tags', 'manual_tags', 'tags_source']
   const cleanUpdates = {}
-  
+
   for (const field of allowedFields) {
     if (updates[field] !== undefined) {
       cleanUpdates[field] = updates[field]
     }
   }
-  
+
   cleanUpdates.updated_at = new Date().toISOString()
-  
+
   const { data, error } = await supabase
     .from(TABLES.QUESTIONS)
     .update(cleanUpdates)
     .eq('id', id)
     .select()
     .single()
-  
+
   if (error) throw error
   return data
 }
@@ -417,69 +366,60 @@ export const batchUpdateQuestionTags = async (tagUpdates) => {
 
 export const getWrongQuestionsByStudent = async (studentId, useCache = true) => {
   const cacheKey = `wrong_questions_cache_${studentId}`
-  
+
   if (useCache) {
-    const cached = readCache(cacheKey, CACHE_MAX_AGE.WRONG)
-    if (cached && !cached.stale) return cached
-    if (cached?.stale) {
-      fetchWrongQuestionsInBackground(studentId, cacheKey)
-      return cached.data
-    }
+    const cached = getCache(cacheKey)
+    if (cached) return cached
   }
-  return fetchWrongQuestionsFromServer(studentId, cacheKey)
-}
 
-const fetchWrongQuestionsInBackground = async (studentId, cacheKey) => {
-  try {
-    return await fetchWrongQuestionsFromServer(studentId, cacheKey)
-  } catch (e) {}
-}
-
-const fetchWrongQuestionsFromServer = async (studentId, cacheKey) => {
   try {
     const { data: wrongData, error: wrongError } = await supabase
       .from(TABLES.WRONG_QUESTIONS)
       .select('*')
       .eq('student_id', studentId)
       .order('added_at', { ascending: false })
-    
+
     if (wrongError) {
-      const cached = readCacheFallback(cacheKey)
-      if (cached) return cached
+      if (useCache) {
+        const fallback = getFallbackCache(cacheKey)
+        if (fallback) return fallback
+      }
       throw wrongError
     }
 
     if (!wrongData || wrongData.length === 0) {
-      writeCache(cacheKey, [])
+      setCache(cacheKey, [])
       return []
     }
-    
+
     const questionIds = wrongData.map(wq => wq.question_id).filter(Boolean)
-    
+
     let questionsMap = {}
     if (questionIds.length > 0) {
       const { data: questionsData } = await supabase
         .from(TABLES.QUESTIONS)
         .select('*')
         .in('id', questionIds)
-      
+
       if (questionsData) {
         for (const q of questionsData) {
           questionsMap[q.id] = q
         }
       }
     }
-    
+
     const result = wrongData.map(wq => ({
       ...wq,
       question: questionsMap[wq.question_id] || null
     }))
-    
-    writeCache(cacheKey, result)
+
+    setCache(cacheKey, result)
     return result
   } catch (error) {
-    const cached = readCacheFallback(cacheKey)
-    if (cached) return cached
+    if (useCache) {
+      const fallback = getFallbackCache(cacheKey)
+      if (fallback) return fallback
+    }
     throw error
   }
 }
@@ -495,8 +435,9 @@ export const addWrongQuestion = async (studentId, questionId) => {
     }])
     .select()
     .single()
-  
+
   if (error) throw error
+  clearCache(`wrong_questions_cache_${studentId}`)
   return data
 }
 
@@ -510,27 +451,28 @@ export const addWrongQuestions = async (studentId, questionIds) => {
     last_wrong_at: new Date().toISOString(),
     created_at: new Date().toISOString()
   }))
-  
+
   const { data: existing, error: checkError } = await supabase
     .from(TABLES.WRONG_QUESTIONS)
     .select('id, question_id')
     .eq('student_id', studentId)
     .in('question_id', questionIds)
-  
+
   const existingIds = new Set((existing || []).map(e => e.question_id))
   const newEntries = entries.filter(e => !existingIds.has(e.question_id))
-  
+
   if (newEntries.length === 0) return []
-  
+
   const { data, error } = await supabase
     .from(TABLES.WRONG_QUESTIONS)
     .insert(newEntries)
     .select()
-  
+
   if (error) {
     if (error.code === '23505') return []
     throw error
   }
+  clearCache(`wrong_questions_cache_${studentId}`)
   return data
 }
 
@@ -544,7 +486,7 @@ export const updateWrongQuestionStatus = async (id, status) => {
     .eq('id', id)
     .select()
     .single()
-  
+
   if (error) throw error
   return data
 }
@@ -554,7 +496,7 @@ export const deleteWrongQuestion = async (id) => {
     .from(TABLES.WRONG_QUESTIONS)
     .delete()
     .eq('id', id)
-  
+
   if (error) throw error
   return true
 }
@@ -572,7 +514,7 @@ export const createTrainingLog = async (studentId, questionId) => {
     }])
     .select()
     .single()
-  
+
   if (error) throw error
   return data
 }
@@ -588,7 +530,7 @@ export const updateTrainingResult = async (id, result) => {
     .eq('id', id)
     .select()
     .single()
-  
+
   if (error) throw error
   return data
 }
@@ -599,17 +541,17 @@ export const uploadImage = async (file, path) => {
   const fileExt = file.name.split('.').pop()
   const fileName = `${Math.random().toString(36).substring(2)}.${fileExt}`
   const filePath = `${path}/${fileName}`
-  
+
   const { error: uploadError } = await supabase.storage
     .from('homework-images')
     .upload(filePath, file)
-  
+
   if (uploadError) throw uploadError
-  
+
   const { data: { publicUrl } } = supabase.storage
     .from('homework-images')
     .getPublicUrl(filePath)
-  
+
   return publicUrl
 }
 
@@ -617,7 +559,7 @@ export const deleteImage = async (path) => {
   const { error } = await supabase.storage
     .from('homework-images')
     .remove([path])
-  
+
   if (error) throw error
   return true
 }
@@ -626,34 +568,23 @@ export const deleteImage = async (path) => {
 
 export const getGeneratedExamsByStudent = async (studentId, useCache = true) => {
   const cacheKey = `generated_exams_cache_${studentId}`
-  
+
   if (useCache) {
-    const cached = readCache(cacheKey, CACHE_MAX_AGE.GENERATED)
-    if (cached && !cached.stale) return cached
-    if (cached?.stale) {
-      fetchGeneratedExamsInBackground(studentId, cacheKey)
-      return cached.data
-    }
+    const cached = getCache(cacheKey)
+    if (cached) return cached
   }
-  return fetchGeneratedExamsFromServer(studentId, cacheKey)
-}
 
-const fetchGeneratedExamsInBackground = async (studentId, cacheKey) => {
-  try {
-    return await fetchGeneratedExamsFromServer(studentId, cacheKey)
-  } catch (e) {}
-}
-
-const fetchGeneratedExamsFromServer = async (studentId, cacheKey) => {
   const { data, error } = await supabase
     .from(TABLES.GENERATED_EXAMS)
     .select('*')
     .eq('student_id', studentId)
     .order('created_at', { ascending: false })
-  
+
   if (error) {
-    const cached = readCacheFallback(cacheKey)
-    if (cached) return cached
+    if (useCache) {
+      const fallback = getFallbackCache(cacheKey)
+      if (fallback) return fallback
+    }
     throw error
   }
 
@@ -668,7 +599,7 @@ const fetchGeneratedExamsFromServer = async (studentId, cacheKey) => {
     source: 'generated'
   }))
 
-  if (data) writeCache(cacheKey, result)
+  if (data) setCache(cacheKey, result)
   return result
 }
 
@@ -679,44 +610,25 @@ export const createGeneratedExam = async (examData) => {
     question_ids: examData.question_ids || [],
     created_at: new Date().toISOString()
   }
-  
+
   const { data, error } = await supabase
     .from(TABLES.GENERATED_EXAMS)
     .insert([cleanData])
     .select()
     .single()
-  
+
   if (error) throw error
   return data
 }
 
 export const getQuestionsByIds = async (questionIds) => {
   if (!questionIds || questionIds.length === 0) return []
-  
+
   const { data, error } = await supabase
     .from(TABLES.QUESTIONS)
     .select('*')
     .in('id', questionIds)
-  
+
   if (error) throw error
   return data || []
-}
-
-export const invalidateCache = (type, studentId) => {
-  const keyMap = {
-    students: 'students_cache',
-    tasks: `tasks_cache_${studentId}`,
-    exams: `exams_cache_${studentId}`,
-    wrong: `wrong_questions_cache_${studentId}`,
-    questions: null,
-    generated: `generated_exams_cache_${studentId}`
-  }
-  
-  const key = keyMap[type]
-  if (key) {
-    try {
-      localStorage.removeItem(key)
-      localStorage.removeItem(key + '_ts')
-    } catch (e) {}
-  }
 }
