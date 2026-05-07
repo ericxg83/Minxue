@@ -1,20 +1,28 @@
 import { Queue, Worker } from 'bullmq'
 import { processTask } from './worker.js'
 
-const redisConfig = process.env.REDIS_URL 
-  ? { 
-      url: process.env.REDIS_URL.trim(), 
+// 解析 Redis URL 或配置
+const getRedisConfig = () => {
+  if (process.env.REDIS_URL) {
+    // 使用完整的 Redis URL
+    return {
+      url: process.env.REDIS_URL.trim(),
       maxRetriesPerRequest: null,
-      tls: {}
+      enableReadyCheck: false
     }
-  : {
-      host: process.env.REDIS_HOST || 'localhost',
-      port: parseInt(process.env.REDIS_PORT) || 6379,
-      password: process.env.REDIS_PASSWORD || undefined,
-      maxRetriesPerRequest: null,
-      enableReadyCheck: true,
-      tls: {}
-    }
+  }
+  
+  // 使用单独的配置
+  return {
+    host: process.env.REDIS_HOST || 'localhost',
+    port: parseInt(process.env.REDIS_PORT) || 6379,
+    password: process.env.REDIS_PASSWORD || undefined,
+    maxRetriesPerRequest: null,
+    enableReadyCheck: false
+  }
+}
+
+const redisConfig = getRedisConfig()
 
 export const taskQueue = new Queue('task-processing', {
   connection: redisConfig,
