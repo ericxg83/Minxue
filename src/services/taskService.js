@@ -2,6 +2,7 @@ const API_BASE = import.meta.env.VITE_API_URL || '/api'
 
 const apiRequest = async (path, options = {}) => {
   const url = `${API_BASE}${path}`
+  console.log(`[API Request] ${options.method || 'GET'} ${url}`)
   const response = await fetch(url, {
     ...options,
     headers: {
@@ -10,7 +11,14 @@ const apiRequest = async (path, options = {}) => {
   })
 
   if (!response.ok) {
-    const error = await response.json().catch(() => ({ error: response.statusText }))
+    const errorText = await response.text().catch(() => response.statusText)
+    let error
+    try {
+      error = JSON.parse(errorText)
+    } catch {
+      error = { error: errorText || response.statusText }
+    }
+    console.error(`[API Error] ${url}:`, error)
     throw new Error(error.error || `请求失败: ${response.status}`)
   }
 

@@ -302,7 +302,7 @@ export default function Processing() {
 
   const uploadViaBackend = async (files) => {
     const pendingTasks = []
-    
+
     files.forEach((file) => {
       const tempTask = {
         id: `temp-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`,
@@ -332,13 +332,21 @@ export default function Processing() {
       try {
         const result = await taskService.uploadFiles(currentStudent.id, [file])
 
-        if (result.success && result.tasks.length > 0 && !result.tasks[0].error) {
+        if (result.success && result.tasks && result.tasks.length > 0) {
           const serverTask = result.tasks[0]
-          // 用服务器返回的任务替换临时任务
-          setTasks(prev => prev.map(t =>
-            t.id === tempTask.id ? { ...serverTask, is_temp: false } : t
-          ))
-          successCount++
+          if (!serverTask.error) {
+            setTasks(prev => prev.map(t =>
+              t.id === tempTask.id ? { ...serverTask, is_temp: false } : t
+            ))
+            successCount++
+          } else {
+            failedCount++
+            setTasks(prev => prev.map(t =>
+              t.id === tempTask.id
+                ? { ...t, status: 'failed', result: { error: serverTask.message || '上传失败' } }
+                : t
+            ))
+          }
         } else {
           failedCount++
           setTasks(prev => prev.map(t =>

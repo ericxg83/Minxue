@@ -1,6 +1,7 @@
 import cacheManager from '../utils/cacheManager'
 
 const API_BASE = import.meta.env.VITE_API_URL || '/api'
+console.log('[API_BASE] 当前API地址:', API_BASE)
 
 const CACHE_MAX_AGE = {
   STUDENTS: 15 * 60 * 1000,
@@ -437,6 +438,10 @@ export const uploadImage = async (file, folder = 'tasks') => {
     }
 
     const result = await response.json()
+    if (result.success && result.tasks && result.tasks.length > 0) {
+      const task = result.tasks[0]
+      return task.image_url || task.imageUrl || task.url
+    }
     return result.imageUrls?.[0] || result.url || result.imageUrl
   } catch (error) {
     console.error('上传图片失败:', error)

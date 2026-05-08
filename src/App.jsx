@@ -450,7 +450,7 @@ export default function App() {
   // Upload via backend API
   const uploadViaBackend = async (files) => {
     const pendingTasks = []
-    
+
     files.forEach((file) => {
       const tempTask = {
         id: `temp-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`,
@@ -479,14 +479,19 @@ export default function App() {
     for (const { tempTask, file } of pendingTasks) {
       try {
         const result = await taskService.uploadFiles(currentStudent.id, [file])
-        
-        if (result.success && result.tasks.length > 0 && !result.tasks[0].error) {
+
+        if (result.success && result.tasks && result.tasks.length > 0) {
           const serverTask = result.tasks[0]
-          updateTaskInStore(tempTask.id, 'pending', { progress: 0 })
-          setTasks(prev => prev.map(t => 
-            t.id === tempTask.id ? { ...serverTask, is_temp: false } : t
-          ))
-          successCount++
+          if (!serverTask.error) {
+            updateTaskInStore(tempTask.id, serverTask.status || 'pending', serverTask.result || { progress: 0 })
+            setTasks(prev => prev.map(t =>
+              t.id === tempTask.id ? { ...serverTask, is_temp: false } : t
+            ))
+            successCount++
+          } else {
+            failedCount++
+            updateTaskInStore(tempTask.id, 'failed', { error: serverTask.message || '上传失败' })
+          }
         } else {
           failedCount++
           updateTaskInStore(tempTask.id, 'failed', { error: result.error || '上传失败' })
