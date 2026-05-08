@@ -134,11 +134,14 @@ export default function Processing() {
       try {
         const tasksData = await getTasksByStudent(currentStudent.id, true)
         if (tasksData && tasksData.length > 0) {
-          const existingTaskIds = new Set(tasks.map(t => t.id))
-          const newTasks = tasksData.filter(t => !existingTaskIds.has(t.id))
-          if (newTasks.length > 0) {
-            setTasks([...tasks, ...newTasks])
-          }
+          // 合并数据：用服务器数据更新当前学生的任务，保留其他学生的任务
+          const otherStudentTasks = tasks.filter(t => t.student_id !== currentStudent.id)
+          const currentStudentTaskIds = new Set(tasksData.map(t => t.id))
+          // 保留当前学生的临时任务（正在上传中的）
+          const currentStudentTempTasks = tasks.filter(
+            t => t.student_id === currentStudent.id && t.is_temp && !currentStudentTaskIds.has(t.id)
+          )
+          setTasks([...otherStudentTasks, ...tasksData, ...currentStudentTempTasks])
         }
       } catch (error) {
         console.error('加载任务失败:', error)
@@ -148,7 +151,14 @@ export default function Processing() {
         try {
           const freshData = await getTasksByStudent(currentStudent.id, false)
           if (freshData && freshData.length > 0) {
-            setTasks(freshData)
+            // 合并数据：用服务器数据更新当前学生的任务，保留其他学生的任务
+            const otherStudentTasks = tasks.filter(t => t.student_id !== currentStudent.id)
+            const currentStudentTaskIds = new Set(freshData.map(t => t.id))
+            // 保留当前学生的临时任务（正在上传中的）
+            const currentStudentTempTasks = tasks.filter(
+              t => t.student_id === currentStudent.id && t.is_temp && !currentStudentTaskIds.has(t.id)
+            )
+            setTasks([...otherStudentTasks, ...freshData, ...currentStudentTempTasks])
           }
         } catch (error) {
           console.debug('后台刷新任务失败:', error)
@@ -321,25 +331,29 @@ export default function Processing() {
     for (const { tempTask, file } of pendingTasks) {
       try {
         const result = await taskService.uploadFiles(currentStudent.id, [file])
-        
+
         if (result.success && result.tasks.length > 0 && !result.tasks[0].error) {
           const serverTask = result.tasks[0]
-          setTasks(prev => {
-            const filtered = prev.filter(t => t.id !== tempTask.id)
-            return [{ ...serverTask, is_temp: false }, ...filtered]
-          })
+          // 用服务器返回的任务替换临时任务
+          setTasks(prev => prev.map(t =>
+            t.id === tempTask.id ? { ...serverTask, is_temp: false } : t
+          ))
           successCount++
         } else {
           failedCount++
-          setTasks(prev => prev.map(t => 
-            t.id === tempTask.id ? { ...t, status: 'failed', result: { error: result.error || '上传失败' } } : t
+          setTasks(prev => prev.map(t =>
+            t.id === tempTask.id
+              ? { ...t, status: 'failed', result: { error: result.error || '上传失败' } }
+              : t
           ))
         }
       } catch (error) {
         console.error(`上传文件 ${file.name} 失败:`, error)
         failedCount++
-        setTasks(prev => prev.map(t => 
-          t.id === tempTask.id ? { ...t, status: 'failed', result: { error: error.message || '上传失败' } } : t
+        setTasks(prev => prev.map(t =>
+          t.id === tempTask.id
+            ? { ...t, status: 'failed', result: { error: error.message || '上传失败' } }
+            : t
         ))
       }
     }

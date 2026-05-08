@@ -76,12 +76,19 @@ export const useTaskStore = create((set, get) => ({
 
   syncTasksFromServer: (serverTasks) => set((state) => {
     const taskMap = new Map()
-    for (const st of serverTasks) {
-      taskMap.set(st.id, { ...st })
-    }
+    // 先添加本地任务
     for (const t of state.tasks) {
-      if (!taskMap.has(t.id)) {
-        taskMap.set(t.id, t)
+      taskMap.set(t.id, { ...t })
+    }
+    // 用服务器数据更新，但保留本地临时任务的特殊状态
+    for (const st of serverTasks) {
+      const existing = taskMap.get(st.id)
+      if (existing && existing.is_temp) {
+        // 如果本地是临时任务且服务器没有对应任务，保留本地版本
+        // 如果服务器有对应任务，用服务器数据替换（上传已完成）
+        taskMap.set(st.id, { ...st })
+      } else {
+        taskMap.set(st.id, { ...st })
       }
     }
     return { tasks: Array.from(taskMap.values()) }

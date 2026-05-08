@@ -77,8 +77,19 @@ const updateTaskStatus = async (taskId, status, result = null) => {
       `SELECT result FROM ${TABLES.TASKS} WHERE id = $1`,
       [taskId]
     )
+    // 解析已存储的 JSON 字符串
+    let existingResult = {}
+    if (existing[0]?.result) {
+      try {
+        existingResult = typeof existing[0].result === 'string'
+          ? JSON.parse(existing[0].result)
+          : existing[0].result
+      } catch {
+        existingResult = {}
+      }
+    }
     const mergedResult = {
-      ...(existing[0]?.result || {}),
+      ...existingResult,
       ...result
     }
     await query(

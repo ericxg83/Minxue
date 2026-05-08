@@ -149,23 +149,24 @@ export const getTasksByStudent = async (studentId, useCache = true) => {
     if (cached) return cached
   }
 
-  const { data, error } = await supabase
-    .from(TABLES.TASKS)
-    .select('*')
-    .eq('student_id', studentId)
-    .order('created_at', { ascending: false })
-
-  if (error) {
-    console.error('Supabase 获取学生任务列表错误:', error)
+  try {
+    const response = await fetch(`${API_BASE}/tasks/student/${studentId}`)
+    if (!response.ok) {
+      const error = await response.json()
+      throw new Error(error.error || '获取任务列表失败')
+    }
+    const result = await response.json()
+    const data = result.tasks || []
+    if (data) writeCache(cacheKey, data)
+    return data
+  } catch (error) {
+    console.error('获取学生任务列表错误:', error)
     if (useCache) {
       const fallback = readFallbackCache(cacheKey)
       if (fallback) return fallback
     }
     throw error
   }
-
-  if (data) writeCache(cacheKey, data)
-  return data
 }
 
 export const getExamsByStudent = async (studentId, useCache = true) => {
@@ -176,77 +177,74 @@ export const getExamsByStudent = async (studentId, useCache = true) => {
     if (cached) return cached
   }
 
-  const { data, error } = await supabase
-    .from(TABLES.TASKS)
-    .select('*')
-    .eq('student_id', studentId)
-    .eq('status', 'done')
-    .order('created_at', { ascending: false })
-
-  if (error) {
-    console.error('Supabase 获取学生试卷列表错误:', error)
+  try {
+    const response = await fetch(`${API_BASE}/exams/student/${studentId}`)
+    if (!response.ok) {
+      const error = await response.json()
+      throw new Error(error.error || '获取试卷列表失败')
+    }
+    const result = await response.json()
+    const data = result.exams || []
+    if (data) writeCache(cacheKey, data)
+    return data
+  } catch (error) {
+    console.error('获取试卷列表错误:', error)
     if (useCache) {
       const fallback = readFallbackCache(cacheKey)
       if (fallback) return fallback
     }
     throw error
   }
-
-  const result = (data || []).map(task => ({
-    id: task.id,
-    student_id: task.student_id,
-    name: task.original_name || '未命名试卷',
-    exam_no: '',
-    thumbnail: task.image_url || '',
-    question_count: task.result?.questionCount || 0,
-    status: 'ungraded',
-    created_at: task.created_at,
-    graded_at: null
-  }))
-
-  if (data) writeCache(cacheKey, result)
-  return result
 }
 
 export const createTask = async (taskData) => {
-  const cleanData = {
-    student_id: taskData.student_id,
-    image_url: taskData.image_url || null,
-    original_name: taskData.original_name || null,
-    status: taskData.status || 'pending',
-    result: taskData.result || null,
-    created_at: new Date().toISOString()
+  try {
+    const response = await fetch(`${API_BASE}/tasks/create-by-url`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json'
+      },
+      body: JSON.stringify({
+        studentId: taskData.student_id,
+        imageUrl: taskData.image_url,
+        originalName: taskData.original_name
+      })
+    })
+
+    if (!response.ok) {
+      const error = await response.json()
+      throw new Error(error.error || '创建任务失败')
+    }
+
+    const result = await response.json()
+    clearCache(`tasks_cache_${taskData.student_id}`)
+    return result.task
+  } catch (error) {
+    console.error('创建任务错误:', error)
+    throw error
   }
-
-  const { data, error } = await supabase
-    .from(TABLES.TASKS)
-    .insert([cleanData])
-    .select()
-    .single()
-
-  if (error) throw error
-  clearCache(`tasks_cache_${taskData.student_id}`)
-  return data
 }
 
 export const updateTaskStatus = async (taskId, status, result = null) => {
-  const cleanUpdates = {
-    status,
-    updated_at: new Date().toISOString()
-  }
-  if (result !== null) {
-    cleanUpdates.result = result
-  }
+  try {
+    const response = await fetch(`${API_BASE}/tasks/${taskId}/retry`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json'
+      }
+    })
 
-  const { data, error } = await supabase
-    .from(TABLES.TASKS)
-    .update(cleanUpdates)
-    .eq('id', taskId)
-    .select()
-    .single()
+    if (!response.ok) {
+      const error = await response.json()
+      throw new Error(error.error || '更新任务状态失败')
+    }
 
-  if (error) throw error
-  return data
+    const data = await response.json()
+    return data
+  } catch (error) {
+    console.error('更新任务状态错误:', error)
+    throw error
+  }
 }
 
 // ==================== 题目相关操作 ====================
@@ -259,23 +257,24 @@ export const getQuestionsByTask = async (taskId, useCache = true) => {
     if (cached) return cached
   }
 
-  const { data, error } = await supabase
-    .from(TABLES.QUESTIONS)
-    .select('*')
-    .eq('task_id', taskId)
-    .order('created_at', { ascending: true })
-
-  if (error) {
-    console.error('Supabase 获取题目列表错误:', error)
+  try {
+    const response = await fetch(`${API_BASE}/questions/task/${taskId}`)
+    if (!response.ok) {
+      const error = await response.json()
+      throw new Error(error.error || '获取题目列表失败')
+    }
+    const result = await response.json()
+    const data = result.questions || []
+    if (data) writeCache(cacheKey, data)
+    return data
+  } catch (error) {
+    console.error('获取题目列表错误:', error)
     if (useCache) {
       const fallback = readFallbackCache(cacheKey)
       if (fallback) return fallback
     }
     throw error
   }
-
-  if (data) writeCache(cacheKey, data)
-  return data
 }
 
 export const createQuestions = async (questions) => {
@@ -378,49 +377,15 @@ export const getWrongQuestionsByStudent = async (studentId, useCache = true) => 
   }
 
   try {
-    const { data: wrongData, error: wrongError } = await supabase
-      .from(TABLES.WRONG_QUESTIONS)
-      .select('*')
-      .eq('student_id', studentId)
-      .order('added_at', { ascending: false })
-
-    if (wrongError) {
-      console.error('Supabase 获取错题列表错误:', wrongError)
-      if (useCache) {
-        const fallback = readFallbackCache(cacheKey)
-        if (fallback) return fallback
-      }
-      throw wrongError
+    const response = await fetch(`${API_BASE}/wrong-questions/student/${studentId}`)
+    if (!response.ok) {
+      const error = await response.json()
+      throw new Error(error.error || '获取错题列表失败')
     }
-
-    if (!wrongData || wrongData.length === 0) {
-      writeCache(cacheKey, [])
-      return []
-    }
-
-    const questionIds = wrongData.map(wq => wq.question_id).filter(Boolean)
-
-    let questionsMap = {}
-    if (questionIds.length > 0) {
-      const { data: questionsData } = await supabase
-        .from(TABLES.QUESTIONS)
-        .select('*')
-        .in('id', questionIds)
-
-      if (questionsData) {
-        for (const q of questionsData) {
-          questionsMap[q.id] = q
-        }
-      }
-    }
-
-    const result = wrongData.map(wq => ({
-      ...wq,
-      question: questionsMap[wq.question_id] || null
-    }))
-
-    writeCache(cacheKey, result)
-    return result
+    const result = await response.json()
+    const data = result.wrongQuestions || []
+    writeCache(cacheKey, data)
+    return data
   } catch (error) {
     console.error('获取错题本数据失败:', error)
     if (useCache) {
@@ -449,38 +414,27 @@ export const addWrongQuestion = async (studentId, questionId) => {
 }
 
 export const addWrongQuestions = async (studentId, questionIds) => {
-  const entries = questionIds.map(questionId => ({
-    student_id: studentId,
-    question_id: questionId,
-    status: 'pending',
-    error_count: 1,
-    added_at: new Date().toISOString(),
-    last_wrong_at: new Date().toISOString(),
-    created_at: new Date().toISOString()
-  }))
+  try {
+    const response = await fetch(`${API_BASE}/wrong-questions`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json'
+      },
+      body: JSON.stringify({ studentId, questionIds })
+    })
 
-  const { data: existing, error: checkError } = await supabase
-    .from(TABLES.WRONG_QUESTIONS)
-    .select('id, question_id')
-    .eq('student_id', studentId)
-    .in('question_id', questionIds)
+    if (!response.ok) {
+      const error = await response.json()
+      throw new Error(error.error || '添加错题失败')
+    }
 
-  const existingIds = new Set((existing || []).map(e => e.question_id))
-  const newEntries = entries.filter(e => !existingIds.has(e.question_id))
-
-  if (newEntries.length === 0) return []
-
-  const { data, error } = await supabase
-    .from(TABLES.WRONG_QUESTIONS)
-    .insert(newEntries)
-    .select()
-
-  if (error) {
-    if (error.code === '23505') return []
+    const result = await response.json()
+    clearCache(`wrong_questions_cache_${studentId}`)
+    return result.added || []
+  } catch (error) {
+    console.error('添加错题错误:', error)
     throw error
   }
-  clearCache(`wrong_questions_cache_${studentId}`)
-  return data
 }
 
 export const updateWrongQuestionStatus = async (id, status) => {
@@ -581,65 +535,69 @@ export const getGeneratedExamsByStudent = async (studentId, useCache = true) => 
     if (cached) return cached
   }
 
-  const { data, error } = await supabase
-    .from(TABLES.GENERATED_EXAMS)
-    .select('*')
-    .eq('student_id', studentId)
-    .order('created_at', { ascending: false })
-
-  if (error) {
-    console.error('Supabase 获取生成试卷列表错误:', error)
+  try {
+    const response = await fetch(`${API_BASE}/generated-exams/student/${studentId}`)
+    if (!response.ok) {
+      const error = await response.json()
+      throw new Error(error.error || '获取生成试卷列表失败')
+    }
+    const result = await response.json()
+    const data = result.generatedExams || []
+    if (data) writeCache(cacheKey, data)
+    return data
+  } catch (error) {
+    console.error('获取生成试卷列表错误:', error)
     if (useCache) {
       const fallback = readFallbackCache(cacheKey)
       if (fallback) return fallback
     }
     throw error
   }
-
-  const result = (data || []).map(exam => ({
-    id: exam.id,
-    student_id: exam.student_id,
-    name: exam.name || '错题重练卷',
-    question_ids: exam.question_ids || [],
-    status: 'ungraded',
-    created_at: exam.created_at,
-    graded_at: null,
-    source: 'generated'
-  }))
-
-  if (data) writeCache(cacheKey, result)
-  return result
 }
 
 export const createGeneratedExam = async (examData) => {
-  const cleanData = {
-    student_id: examData.student_id,
-    name: examData.name || '错题重练卷',
-    question_ids: examData.question_ids || [],
-    created_at: new Date().toISOString()
+  try {
+    const response = await fetch(`${API_BASE}/generated-exams`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json'
+      },
+      body: JSON.stringify({
+        studentId: examData.student_id,
+        name: examData.name,
+        questionIds: examData.question_ids
+      })
+    })
+
+    if (!response.ok) {
+      const error = await response.json()
+      throw new Error(error.error || '创建试卷失败')
+    }
+
+    const result = await response.json()
+    clearCache(`generated_exams_cache_${examData.student_id}`)
+    return result.exam
+  } catch (error) {
+    console.error('创建试卷错误:', error)
+    throw error
   }
-
-  const { data, error } = await supabase
-    .from(TABLES.GENERATED_EXAMS)
-    .insert([cleanData])
-    .select()
-    .single()
-
-  if (error) throw error
-  clearCache(`generated_exams_cache_${examData.student_id}`)
-  return data
 }
 
 export const getQuestionsByIds = async (questionIds) => {
   if (!questionIds || questionIds.length === 0) return []
 
-  const { data, error } = await supabase
-    .from(TABLES.QUESTIONS)
-    .select('*')
-    .in('id', questionIds)
-
-  if (error) throw error
-  return data || []
+  try {
+    const response = await fetch(`${API_BASE}/questions/batch?ids=${questionIds.join(',')}`)
+    if (!response.ok) {
+      const error = await response.json()
+      throw new Error(error.error || '批量获取题目失败')
+    }
+    const result = await response.json()
+    return result.questions || []
+  } catch (error) {
+    console.error('批量获取题目错误:', error)
+    throw error
+  }
 }
 
 // ==================== 缓存清理工具 ====================

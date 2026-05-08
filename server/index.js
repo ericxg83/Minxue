@@ -2,7 +2,7 @@ import 'dotenv/config'
 import express from 'express'
 import cors from 'cors'
 import multer from 'multer'
-import { taskQueue, TASK_EVENTS, getQueueStats } from './queue.js'
+import { taskQueue, getQueueStats } from './queue.js'
 import { query, TABLES, TASK_STATUS } from './config/neon.js'
 import { uploadImage as uploadToOSS } from './services/ossService.js'
 
@@ -29,6 +29,25 @@ const upload = multer({
   storage: multer.memoryStorage(),
   limits: { fileSize: 20 * 1024 * 1024 }
 })
+
+// 格式化任务数据：将 result JSON 字符串解析为对象
+const formatTask = (task) => {
+  if (!task) return task
+  const formatted = { ...task }
+  if (typeof formatted.result === 'string') {
+    try {
+      formatted.result = JSON.parse(formatted.result)
+    } catch {
+      formatted.result = {}
+    }
+  }
+  return formatted
+}
+
+const formatTasks = (tasks) => {
+  if (!Array.isArray(tasks)) return []
+  return tasks.map(formatTask)
+}
 
 // ==================== 健康检查 ====================
 app.get('/api/health', async (req, res) => {
@@ -179,7 +198,7 @@ app.post('/api/tasks/upload', upload.array('files', 20), async (req, res) => {
       success: true,
       count: tasks.filter(t => !t.error).length,
       failed: tasks.filter(t => t.error).length,
-      tasks: tasks
+      tasks: tasks.map(t => t.error ? t : formatTask(t))
     })
   } catch (error) {
     console.error('上传处理失败:', error)
@@ -211,7 +230,7 @@ app.post('/api/tasks/create-by-url', async (req, res) => {
       backoff: { type: 'exponential', delay: 5000 }
     })
 
-    res.json({ success: true, task: savedTask })
+    res.json({ success: true, task: formatTask(savedTask) })
   } catch (error) {
     console.error('创建任务失败:', error)
     res.status(500).json({ error: error.message })
@@ -223,7 +242,7 @@ app.get('/api/tasks/:taskId', async (req, res) => {
     const { taskId } = req.params
     const { rows } = await query(`SELECT * FROM ${TABLES.TASKS} WHERE id = $1`, [taskId])
     if (rows.length === 0) return res.status(404).json({ error: '任务不存在' })
-    res.json({ success: true, task: rows[0] })
+    res.json({ success: true, task: formatTask(rows[0]) })
   } catch (error) {
     console.error('获取任务失败:', error)
     res.status(500).json({ error: error.message })
@@ -237,7 +256,7 @@ app.get('/api/tasks/student/:studentId', async (req, res) => {
       `SELECT * FROM ${TABLES.TASKS} WHERE student_id = $1 ORDER BY created_at DESC`,
       [studentId]
     )
-    res.json({ success: true, tasks: rows })
+    res.json({ success: true, tasks: formatTasks(rows) })
   } catch (error) {
     console.error('获取学生任务失败:', error)
     res.status(500).json({ error: error.message })
@@ -251,7 +270,15 @@ app.post('/api/tasks/:taskId/retry', async (req, res) => {
     if (rows.length === 0) return res.status(404).json({ error: '任务不存在' })
 
     const task = rows[0]
-    const currentResult = task.result || {}
+    // 解析 result JSON 字符串
+    let currentResult = task.result || {}
+    if (typeof currentResult === 'string') {
+      try {
+        currentResult = JSON.parse(currentResult)
+      } catch {
+        currentResult = {}
+      }
+    }
     const newResult = {
       ...currentResult,
       progress: 0,
@@ -486,18 +513,29 @@ app.get('/api/exams/student/:studentId', async (req, res) => {
       [studentId]
     )
 
-    const formattedTaskExams = (taskExams || []).map(task => ({
-      id: task.id,
-      student_id: task.student_id,
-      name: task.name || '未命名试卷',
-      exam_no: '',
-      thumbnail: task.image_url || '',
-      question_count: task.result?.questionCount || 0,
-      status: 'ungraded',
-      created_at: task.created_at,
-      graded_at: null,
-      source: 'upload'
-    }))
+    const formattedTaskExams = (taskExams || []).map(task => {
+      // 解析 result JSON 字符串
+      let result = task.result
+      if (typeof result === 'string') {
+        try {
+          result = JSON.parse(result)
+        } catch {
+          result = {}
+        }
+      }
+      return {
+        id: task.id,
+        student_id: task.student_id,
+        name: task.name || '未命名试卷',
+        exam_no: '',
+        thumbnail: task.image_url || '',
+        question_count: result?.questionCount || 0,
+        status: 'ungraded',
+        created_at: task.created_at,
+        graded_at: null,
+        source: 'upload'
+      }
+    })
 
     const formattedGeneratedExams = (generatedExams || []).map(exam => ({
       id: exam.id,
