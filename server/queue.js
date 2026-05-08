@@ -1,41 +1,57 @@
 import { Queue, Worker } from 'bullmq'
+import Redis from 'ioredis'
 import { processTask } from './worker.js'
 
-// 解析 Redis URL 或配置
-const getRedisConfig = () => {
+// 创建 Redis 连接
+const createRedisConnection = () => {
   if (process.env.REDIS_URL) {
-    // 使用完整的 Redis URL
-    return {
-      url: process.env.REDIS_URL.trim(),
+    console.log('使用 REDIS_URL 连接 Redis')
+    return new Redis(process.env.REDIS_URL.trim(), {
       maxRetriesPerRequest: null,
       enableReadyCheck: false,
-      tls: process.env.REDIS_URL.includes('rediss://') ? {} : undefined
-    }
+      retryStrategy: (times) => {
+        if (times > 3) {
+          console.error('Redis 重连失败，停止重试')
+          return null
+        }
+        return Math.min(times * 1000, 3000)
+      }
+    })
   }
-  
-  // 使用单独的配置
-  return {
+
+  console.log('使用独立配置连接 Redis')
+  return new Redis({
     host: process.env.REDIS_HOST || 'localhost',
     port: parseInt(process.env.REDIS_PORT) || 6379,
     password: process.env.REDIS_PASSWORD || undefined,
     maxRetriesPerRequest: null,
     enableReadyCheck: false,
-    tls: {}
-  }
+    retryStrategy: (times) => {
+      if (times > 3) {
+        console.error('Redis 重连失败，停止重试')
+        return null
+      }
+      return Math.min(times * 1000, 3000)
+    }
+  })
 }
 
-const redisConfig = getRedisConfig()
+const redisConnection = createRedisConnection()
 
-console.log('Redis 配置:', {
-  url: redisConfig.url ? '已设置' : '未设置',
-  host: redisConfig.host,
-  port: redisConfig.port,
-  hasPassword: !!redisConfig.password,
-  tls: !!redisConfig.tls
+redisConnection.on('connect', () => {
+  console.log('✅ Redis 连接成功')
+})
+
+redisConnection.on('error', (err) => {
+  console.error('❌ Redis 连接错误:', err.message)
+})
+
+redisConnection.on('close', () => {
+  console.warn('⚠️ Redis 连接关闭')
 })
 
 export const taskQueue = new Queue('task-processing', {
-  connection: redisConfig,
+  connection: redisConnection,
   defaultJobOptions: {
     removeOnComplete: { count: 100 },
     removeOnFail: { count: 50 },
@@ -59,7 +75,7 @@ const concurrency = parseInt(process.env.CONCURRENCY) || 2
 export const taskWorker = new Worker('task-processing', async (job) => {
   return processTask(job)
 }, {
-  connection: redisConfig,
+  connection: redisConnection,
   concurrency,
   lockDuration: parseInt(process.env.TASK_TIMEOUT_MS) || 1800000
 })
