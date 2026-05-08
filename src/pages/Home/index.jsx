@@ -1,353 +1,93 @@
-import { useState, useRef } from 'react'
-import { Button, ActionSheet, Badge } from 'antd-mobile'
+import { useState } from 'react'
+import { ActionSheet } from 'antd-mobile'
+import { Camera, ChevronRight, Plus, Sparkles, User } from 'lucide-react'
+import { motion } from 'motion/react'
 import { useStudentStore } from '../../store'
 import StudentSwitcher from '../../components/StudentSwitcher'
-
-const COLORS = {
-  primary: '#2B7DE9',
-  primaryLight: '#EBF5FF',
-  primaryDark: '#1A3A5C',
-  accent: '#4A9EFF',
-  bg: '#F5F8FC',
-  card: '#FFFFFF',
-  text: '#1A3A5C',
-  textSecondary: '#8B9DB5',
-  textTertiary: '#A8B8CC',
-  border: '#E5ECF5',
-  success: '#34C759',
-  danger: '#FF3B30',
-  gradientStart: '#2B7DE9',
-  gradientEnd: '#1A6DD4'
-}
 
 export default function Home({ onNavigate }) {
   const { currentStudent, setCurrentStudent } = useStudentStore()
   const [showStudentSwitcher, setShowStudentSwitcher] = useState(false)
-  const fileInputRef = useRef(null)
 
-  const handleUpload = (action) => {
-    if (action === 'camera') {
-      if (fileInputRef.current) {
-        fileInputRef.current.setAttribute('capture', 'environment')
-        fileInputRef.current.click()
-      }
+  const openUploader = (capture) => {
+    const input = document.getElementById('file-input')
+    if (!input) return
+    if (capture) {
+      input.setAttribute('capture', 'environment')
     } else {
-      if (fileInputRef.current) {
-        fileInputRef.current.removeAttribute('capture')
-        fileInputRef.current.click()
-      }
+      input.removeAttribute('capture')
     }
+    input.click()
   }
 
   const showUploadOptions = () => {
     ActionSheet.show({
       actions: [
-        { key: 'camera', text: '拍照上传', description: '拍摄试卷或作业' },
-        { key: 'album', text: '从相册选择', description: '选择已有照片' },
+        { key: 'camera', text: '鎷嶇収涓婁紶', description: '鎷嶆憚璇曞嵎鎴栦綔涓?' },
+        { key: 'album', text: '浠庣浉鍐岄€夋嫨', description: '閫夋嫨宸叉湁鐓х墖' },
       ],
-      onAction: (action) => handleUpload(action.key)
+      onAction: (action) => openUploader(action.key === 'camera')
     })
   }
 
   return (
-    <div style={{
-      minHeight: '100vh',
-      background: `linear-gradient(180deg, ${COLORS.primaryLight} 0%, ${COLORS.bg} 300px, ${COLORS.bg} 100%)`,
-      display: 'flex',
-      flexDirection: 'column',
-    }}>
-      <input
-        ref={fileInputRef}
-        type="file"
-        accept="image/*"
-        multiple
-        style={{ display: 'none' }}
-      />
-
-      {/* Header */}
-      <div style={{
-        padding: '16px 20px 0',
-      }}>
-        {/* Logo Area */}
-        <div style={{
-          display: 'flex',
-          alignItems: 'center',
-          justifyContent: 'space-between',
-          marginBottom: '20px'
-        }}>
-          <div style={{
-            display: 'flex',
-            alignItems: 'center',
-            gap: '12px'
-          }}>
-            <div style={{
-              width: '44px',
-              height: '44px',
-              borderRadius: '14px',
-              background: `linear-gradient(135deg, ${COLORS.gradientStart} 0%, ${COLORS.gradientEnd} 100%)`,
-              display: 'flex',
-              alignItems: 'center',
-              justifyContent: 'center',
-              boxShadow: `0 4px 12px rgba(43, 125, 233, 0.3)`
-            }}>
-              <svg width="24" height="24" viewBox="0 0 24 24" fill="none">
-                <path d="M2 3h8a4 4 0 0 1 4 4v14a3 3 0 0 0-3-3H2z" fill="white" opacity="0.9"/>
-                <path d="M22 3h-8a4 4 0 0 0-4 4v14a3 3 0 0 1 3-3h9z" fill="white" opacity="0.6"/>
-              </svg>
-            </div>
-            <div>
-              <div style={{
-                fontSize: '20px',
-                fontWeight: 700,
-                color: COLORS.primaryDark,
-                letterSpacing: '-0.02em',
-                lineHeight: '1.2'
-              }}>敏学错题助手</div>
-              <div style={{
-                fontSize: '11px',
-                color: COLORS.accent,
-                fontWeight: 600,
-                letterSpacing: '0.05em',
-                textTransform: 'uppercase'
-              }}>AI Study Assistant</div>
-            </div>
+    <div className="px-5 pt-5 pb-28">
+      <section className="mb-5">
+        <div className="flex items-center justify-between mb-3">
+          <div>
+            <h1 className="text-[22px] font-black tracking-tight text-slate-950">鏁忓閿欓鍔╂墜</h1>
+            <p className="text-[11px] font-bold uppercase tracking-widest text-blue-500 mt-0.5">AI Study Assistant</p>
           </div>
-          <div style={{
-            display: 'flex',
-            alignItems: 'center',
-            gap: '6px',
-            background: COLORS.card,
-            padding: '6px 12px',
-            borderRadius: '20px',
-            boxShadow: '0 2px 8px rgba(0,0,0,0.04)'
-          }}>
-            <svg width="16" height="16" viewBox="0 0 24 24" fill={COLORS.accent}>
-              <path d="M12 2l3.09 6.26L22 9.27l-5 4.87 1.18 6.88L12 17.77l-6.18 3.25L7 14.14 2 9.27l6.91-1.01L12 2z" fillRule="evenodd"/>
-            </svg>
-            <span style={{
-              fontSize: '13px',
-              fontWeight: 600,
-              color: COLORS.accent
-            }}>0</span>
-          </div>
-        </div>
-
-        {/* Student Section */}
-        <div style={{
-          display: 'flex',
-          alignItems: 'center',
-          justifyContent: 'space-between',
-          marginBottom: '16px'
-        }}>
-          <div style={{
-            display: 'flex',
-            alignItems: 'center',
-            gap: '6px',
-            color: COLORS.textSecondary,
-            fontSize: '14px'
-          }}>
-            <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor">
-              <path d="M12 12c2.21 0 4-1.79 4-4s-1.79-4-4-4-4 1.79-4 4 1.79 4 4 4zm0 2c-2.67 0-8 1.34-8 4v2h16v-2c0-2.66-5.33-4-8-4z"/>
-            </svg>
-            归属学生
-          </div>
-          <Button
-            fill="none"
-            style={{
-              color: COLORS.accent,
-              fontSize: '13px',
-              fontWeight: 600,
-              padding: '0'
-            }}
+          <button
             onClick={() => onNavigate && onNavigate('students')}
+            className="h-9 px-3 rounded-full bg-white text-blue-600 text-[12px] font-black shadow-sm border border-blue-50 flex items-center gap-1 active:scale-95 transition-all"
           >
-            新增学生
-            <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor" style={{ marginLeft: '2px' }}>
-              <path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm-1 15h2v-4h4v-2h-4V7h-2v4H7v2h4v4z"/>
-            </svg>
-          </Button>
+            <Plus size={14} strokeWidth={3} />
+            鏂板
+          </button>
         </div>
 
-        {/* Student Card */}
-        {currentStudent ? (
-          <div
-            onClick={() => setShowStudentSwitcher(true)}
-            style={{
-              background: `linear-gradient(135deg, ${COLORS.card} 0%, #F8FBFF 100%)`,
-              borderRadius: '16px',
-              padding: '14px 16px',
-              display: 'flex',
-              alignItems: 'center',
-              justifyContent: 'space-between',
-              boxShadow: '0 2px 12px rgba(43, 125, 233, 0.08)',
-              border: `1px solid ${COLORS.border}`,
-              cursor: 'pointer',
-              transition: 'all 0.2s ease'
-            }}
-          >
-            <div style={{
-              display: 'flex',
-              alignItems: 'center',
-              gap: '12px'
-            }}>
-              <div style={{
-                width: '40px',
-                height: '40px',
-                borderRadius: '12px',
-                background: COLORS.primaryLight,
-                display: 'flex',
-                alignItems: 'center',
-                justifyContent: 'center',
-                overflow: 'hidden'
-              }}>
-                {currentStudent.avatar ? (
-                  <img src={currentStudent.avatar} alt="" style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
-                ) : (
-                  <svg width="20" height="20" viewBox="0 0 24 24" fill={COLORS.accent}>
-                    <path d="M12 12c2.21 0 4-1.79 4-4s-1.79-4-4-4-4 1.79-4 4 1.79 4 4 4zm0 2c-2.67 0-8 1.34-8 4v2h16v-2c0-2.66-5.33-4-8-4z"/>
-                  </svg>
-                )}
-              </div>
-              <div>
-                <div style={{
-                  fontSize: '11px',
-                  color: COLORS.textSecondary,
-                  fontWeight: 500
-                }}>当前选择</div>
-                <div style={{
-                  fontSize: '15px',
-                  fontWeight: 600,
-                  color: COLORS.primaryDark
-                }}>{currentStudent.name}</div>
-              </div>
-            </div>
-            <div style={{
-              display: 'flex',
-              alignItems: 'center',
-              gap: '4px',
-              color: COLORS.accent
-            }}>
-              <span style={{ fontSize: '13px', fontWeight: 500 }}>切换</span>
-              <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor">
-                <path d="M10 6L8.59 7.41 13.17 12l-4.58 4.59L10 18l6-6z"/>
-              </svg>
-            </div>
-          </div>
-        ) : (
-          <div
-            onClick={() => setShowStudentSwitcher(true)}
-            style={{
-              background: COLORS.card,
-              borderRadius: '16px',
-              padding: '24px 16px',
-              textAlign: 'center',
-              boxShadow: '0 2px 12px rgba(43, 125, 233, 0.08)',
-              border: `1px solid ${COLORS.border}`,
-              cursor: 'pointer'
-            }}
-          >
-            <div style={{
-              fontSize: '14px',
-              color: COLORS.textSecondary,
-              fontWeight: 500
-            }}>暂无学生，请先添加</div>
-          </div>
-        )}
-      </div>
-
-      {/* Upload Card - Main Area */}
-      <div style={{
-        flex: 1,
-        padding: '20px',
-        display: 'flex',
-        alignItems: 'center',
-        justifyContent: 'center'
-      }}>
-        <div
-          onClick={showUploadOptions}
-          style={{
-            width: '100%',
-            minHeight: '320px',
-            borderRadius: '28px',
-            padding: '48px 32px',
-            background: `linear-gradient(160deg, ${COLORS.primaryLight} 0%, #E0EEFB 50%, #D6E8F7 100%)`,
-            display: 'flex',
-            flexDirection: 'column',
-            alignItems: 'center',
-            justifyContent: 'center',
-            gap: '24px',
-            cursor: 'pointer',
-            boxShadow: '0 8px 32px rgba(43, 125, 233, 0.12), 0 2px 8px rgba(43, 125, 233, 0.06)',
-            border: `2px dashed ${COLORS.accent}40`,
-            transition: 'all 0.25s cubic-bezier(0.4, 0, 0.2, 1)',
-            position: 'relative',
-            overflow: 'hidden'
-          }}
+        <button
+          onClick={() => setShowStudentSwitcher(true)}
+          className="w-full bg-white rounded-2xl p-4 flex items-center justify-between shadow-sm border border-white active:scale-[0.99] transition-all"
         >
-          {/* Decorative circles */}
-          <div style={{
-            position: 'absolute',
-            top: '-40px',
-            right: '-40px',
-            width: '120px',
-            height: '120px',
-            borderRadius: '50%',
-            background: `${COLORS.accent}08`,
-          }} />
-          <div style={{
-            position: 'absolute',
-            bottom: '-20px',
-            left: '-20px',
-            width: '80px',
-            height: '80px',
-            borderRadius: '50%',
-            background: `${COLORS.accent}06`,
-          }} />
-
-          {/* Icon Container */}
-          <div style={{
-            width: '88px',
-            height: '88px',
-            borderRadius: '50%',
-            background: `linear-gradient(135deg, ${COLORS.gradientStart} 0%, ${COLORS.gradientEnd} 100%)`,
-            display: 'flex',
-            alignItems: 'center',
-            justifyContent: 'center',
-            boxShadow: `0 12px 28px rgba(43, 125, 233, 0.35), inset 0 1px 0 rgba(255,255,255,0.2)`,
-            position: 'relative',
-            zIndex: 1
-          }}>
-            <svg width="40" height="40" viewBox="0 0 24 24" fill="white">
-              <path d="M12 15.2a3.2 3.2 0 1 0 0-6.4 3.2 3.2 0 0 0 0 6.4z"/>
-              <path d="M9 2L7.17 4H4c-1.1 0-2 .9-2 2v12c0 1.1.9 2 2 2h16c1.1 0 2-.9 2-2V6c0-1.1-.9-2-2-2h-3.17L15 2H9zm3 15c-2.76 0-5-2.24-5-5s2.24-5 5-5 5 2.24 5 5-2.24 5-5 5z" fillRule="evenodd"/>
-            </svg>
+          <div className="flex items-center gap-3 min-w-0">
+            <div className="w-11 h-11 rounded-2xl bg-blue-50 flex items-center justify-center overflow-hidden shrink-0">
+              {currentStudent?.avatar ? (
+                <img src={currentStudent.avatar} alt="" className="w-full h-full object-cover" />
+              ) : (
+                <User size={20} className="text-blue-500" />
+              )}
+            </div>
+            <div className="text-left min-w-0">
+              <p className="text-[11px] font-bold text-gray-400">褰撳墠閫夋嫨</p>
+              <p className="text-[15px] font-black text-gray-900 truncate">{currentStudent?.name || '璇烽€夋嫨瀛︾敓'}</p>
+            </div>
           </div>
+          <ChevronRight size={18} className="text-gray-300 shrink-0" />
+        </button>
+      </section>
 
-          {/* Text Content */}
-          <div style={{
-            textAlign: 'center',
-            position: 'relative',
-            zIndex: 1
-          }}>
-            <div style={{
-              fontSize: '24px',
-              fontWeight: 700,
-              color: COLORS.primaryDark,
-              marginBottom: '8px',
-              letterSpacing: '-0.02em',
-              lineHeight: '1.3'
-            }}>立即拍照</div>
-            <div style={{
-              fontSize: '14px',
-              color: COLORS.accent,
-              lineHeight: '1.5',
-              fontWeight: 500
-            }}>Qwen-VL 智能识别题目</div>
+      <motion.button
+        whileTap={{ scale: 0.98 }}
+        onClick={showUploadOptions}
+        className="w-full relative overflow-hidden rounded-[2.5rem] bg-gradient-to-br from-blue-600 to-indigo-700 p-8 min-h-[320px] text-white shadow-xl shadow-blue-200 flex flex-col items-center justify-center"
+      >
+        <div className="absolute top-0 right-0 w-40 h-40 bg-white/10 rounded-full blur-3xl -translate-y-12 translate-x-12" />
+        <div className="absolute bottom-0 left-0 w-28 h-28 bg-cyan-300/10 rounded-full blur-2xl translate-y-10 -translate-x-8" />
+        <div className="relative z-10 flex flex-col items-center">
+          <div className="w-20 h-20 bg-white/20 backdrop-blur-md rounded-[2rem] flex items-center justify-center mb-5 border border-white/30 shadow-inner">
+            <Camera size={38} strokeWidth={2.5} />
+          </div>
+          <h2 className="text-2xl font-black tracking-tight mb-2">鎷嶇収涓婁紶閿欓</h2>
+          <p className="text-white/65 text-[13px] font-medium tracking-wide">Qwen-VL 鏅鸿兘璇嗗埆棰樼洰</p>
+          <div className="mt-7 flex items-center gap-1.5 bg-white/15 px-4 py-1.5 rounded-full text-[10px] font-black tracking-widest uppercase">
+            <Sparkles size={12} fill="white" className="shrink-0" />
+            <span>AI 鏅鸿兘璇嗗埆宸插氨缁?/</span>
           </div>
         </div>
-      </div>
+      </motion.button>
 
-      {/* Student Switcher Modal */}
       <StudentSwitcher
         visible={showStudentSwitcher}
         onClose={() => setShowStudentSwitcher(false)}

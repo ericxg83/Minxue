@@ -619,6 +619,74 @@ app.get('/api/questions/batch', async (req, res) => {
   }
 })
 
+app.post('/api/questions', async (req, res) => {
+  try {
+    const questions = req.body.questions || []
+    if (!Array.isArray(questions) || questions.length === 0) {
+      return res.status(400).json({ error: '缺少 questions 数组' })
+    }
+
+    const created = []
+    for (const q of questions) {
+      const { rows } = await query(
+        `INSERT INTO ${TABLES.QUESTIONS} (task_id, student_id, content, options, answer, analysis, question_type, subject, is_correct, status, image_url, ai_tags, manual_tags, tags_source)
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14) RETURNING *`,
+        [
+          q.task_id, q.student_id, q.content || null,
+          JSON.stringify(q.options || []), q.answer || null, q.analysis || null,
+          q.question_type || 'choice', q.subject || null,
+          q.is_correct !== undefined ? q.is_correct : true, q.status || 'pending',
+          q.image_url || null, JSON.stringify(q.ai_tags || []),
+          JSON.stringify(q.manual_tags || []), q.tags_source || 'ai'
+        ]
+      )
+      created.push(rows[0])
+    }
+
+    res.json({ success: true, questions: created })
+  } catch (error) {
+    console.error('创建题目失败:', error)
+    res.status(500).json({ error: error.message })
+  }
+})
+
+app.put('/api/wrong-questions/:id', async (req, res) => {
+  try {
+    const { id } = req.params
+    const { status } = req.body
+    if (!status) return res.status(400).json({ error: '缺少 status' })
+
+    const { rows } = await query(
+      `UPDATE ${TABLES.WRONG_QUESTIONS} SET status = $1, updated_at = NOW() WHERE id = $2 RETURNING *`,
+      [status, id]
+    )
+    if (rows.length === 0) return res.status(404).json({ error: '错题记录不存在' })
+    res.json({ success: true, wrongQuestion: rows[0] })
+  } catch (error) {
+    console.error('更新错题失败:', error)
+    res.status(500).json({ error: error.message })
+  }
+})
+
+app.post('/api/questions/batch', async (req, res) => {
+  try {
+    const { ids } = req.body
+    if (!Array.isArray(ids) || ids.length === 0) {
+      return res.status(400).json({ error: '缺少 ids 数组' })
+    }
+
+    const placeholders = ids.map((_, i) => `$${i + 1}`).join(',')
+    const { rows } = await query(
+      `SELECT * FROM ${TABLES.QUESTIONS} WHERE id IN (${placeholders})`,
+      ids
+    )
+    res.json({ success: true, questions: rows })
+  } catch (error) {
+    console.error('批量获取题目失败:', error)
+    res.status(500).json({ error: error.message })
+  }
+})
+
 // ==================== 队列统计 API ====================
 
 app.get('/api/queue/stats', async (req, res) => {

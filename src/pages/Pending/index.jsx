@@ -18,7 +18,7 @@ import StudentSwitcher from '../../components/StudentSwitcher'
 import QuestionEditDrawer from '../../components/QuestionEditDrawer'
 
 // 使用测试数据
-const USE_MOCK_DATA = false
+const USE_MOCK_DATA = true
 
 // 现代移动应用颜色
 const COLORS = {
@@ -207,11 +207,12 @@ export default function Pending() {
 
   // 切换选择
   const toggleSelection = (id) => {
-    if (selectedIds.includes(id)) {
-      setSelectedIds(selectedIds.filter(i => i !== id))
-    } else {
-      setSelectedIds([...selectedIds, id])
-    }
+    setSelectedIds(prev => {
+      if (prev.includes(id)) {
+        return prev.filter(i => i !== id)
+      }
+      return [...prev, id]
+    })
   }
 
   // 清空选择
@@ -219,9 +220,16 @@ export default function Pending() {
     setSelectedIds([])
   }
 
-  // 全选当前筛选的题目
+  // 全选/取消全选
   const selectAll = () => {
-    setSelectedIds(filteredQuestions.map(q => q.id))
+    setSelectedIds(prev => {
+      const allFilteredIds = filteredQuestions.map(q => q.id)
+      const allSelected = allFilteredIds.length > 0 && allFilteredIds.every(id => prev.includes(id))
+      if (allSelected) {
+        return []
+      }
+      return allFilteredIds
+    })
   }
 
   // 将单个题目加入错题本

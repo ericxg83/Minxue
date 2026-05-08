@@ -13,7 +13,7 @@ import {
 } from 'antd-mobile'
 import { RightOutline, DownOutline } from 'antd-mobile-icons'
 import { useStudentStore, useWrongQuestionStore, useUIStore } from '../../store'
-import { getWrongQuestionsByStudent, deleteWrongQuestion, updateWrongQuestionStatus } from '../../services/supabaseService'
+import { getWrongQuestionsByStudent, deleteWrongQuestion, updateWrongQuestionStatus, createGeneratedExam } from '../../services/supabaseService'
 import { generateQRCodeContent } from '../../services/aiService'
 import { mockWrongQuestions, mockStudents } from '../../data/mockData'
 import StudentSwitcher from '../../components/StudentSwitcher'
@@ -22,7 +22,7 @@ import QuestionEdit from '../QuestionEdit'
 import dayjs from 'dayjs'
 
 // 使用测试数据
-const USE_MOCK_DATA = false
+const USE_MOCK_DATA = true
 
 // 苹果风格颜色
 const APPLE_COLORS = {
@@ -78,8 +78,8 @@ export default function WrongBook({ onScanQR }) {
     wrongQuestions, 
     setWrongQuestions, 
     selectedQuestions, 
-    setSelectedQuestions,
-    clearSelection 
+    toggleSelection: storeToggleSelection,
+    clearSelection: storeClearSelection
   } = useWrongQuestionStore()
   
   const [activeStatus, setActiveStatus] = useState('pending')
@@ -275,17 +275,26 @@ export default function WrongBook({ onScanQR }) {
 
   // 切换选择
   const toggleSelection = (wq) => {
-    const exists = selectedQuestions.find(sq => sq.id === wq.id)
-    if (exists) {
-      setSelectedQuestions(selectedQuestions.filter(sq => sq.id !== wq.id))
-    } else {
-      setSelectedQuestions([...selectedQuestions, wq])
-    }
+    storeToggleSelection(wq)
   }
 
   // 清空选择
   const handleClearSelection = () => {
-    clearSelection()
+    storeClearSelection()
+  }
+
+  // 全选/取消全选当前筛选的题目
+  const handleSelectAll = () => {
+    if (selectedQuestions.length === filteredQuestions.length && filteredQuestions.length > 0) {
+      storeClearSelection()
+    } else {
+      // 全选所有筛选后的题目
+      filteredQuestions.forEach(wq => {
+        if (!selectedQuestions.find(sq => sq.id === wq.id)) {
+          storeToggleSelection(wq)
+        }
+      })
+    }
   }
 
   // 删除错题
@@ -343,6 +352,45 @@ export default function WrongBook({ onScanQR }) {
     })
     setWrongQuestions(updatedWrongQuestions)
     setEditingQuestion(null)
+  }
+
+  // 生成试卷
+  const handleGenerateExam = async () => {
+    if (selectedQuestions.length === 0) {
+      Toast.show('请先选择要组卷的错题')
+      return
+    }
+
+    try {
+      // 提取选中的题目ID
+      const questionIds = selectedQuestions.map(wq => wq.question_id || wq.id)
+      
+      // 创建试卷名称（例如："错题组卷 - 2023年12月1日"）
+      const examName = `错题组卷 - ${dayjs().format('YYYY年MM月DD日')}`
+      
+      // 调用后端API创建试卷
+      const examData = {
+        student_id: currentStudent.id,
+        name: examName,
+        question_ids: questionIds
+      }
+      
+      const result = await createGeneratedExam(examData)
+      
+      Toast.show({
+        icon: 'success',
+        content: '试卷生成成功'
+      })
+      
+      // 清空选择
+      clearSelection()
+    } catch (error) {
+      console.error('生成试卷失败:', error)
+      Toast.show({
+        icon: 'fail',
+        content: '生成试卷失败: ' + (error.message || '未知错误')
+      })
+    }
   }
 
   // 生成打印内容
@@ -647,18 +695,31 @@ export default function WrongBook({ onScanQR }) {
           {getFilterLabel()}
           <DownOutline />
         </div>
-        {hasActiveFilters && (
+        <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
+          {hasActiveFilters && (
+            <div 
+              onClick={resetFilters}
+              style={{
+                fontSize: '14px',
+                color: APPLE_COLORS.textSecondary,
+                cursor: 'pointer'
+              }}
+            >
+              重置
+            </div>
+          )}
           <div 
-            onClick={resetFilters}
+            onClick={handleSelectAll}
             style={{
               fontSize: '14px',
-              color: APPLE_COLORS.textSecondary,
-              cursor: 'pointer'
+              color: selectedQuestions.length === filteredQuestions.length && filteredQuestions.length > 0 ? APPLE_COLORS.primary : APPLE_COLORS.textSecondary,
+              cursor: 'pointer',
+              fontWeight: 500
             }}
           >
-            重置
+            {selectedQuestions.length === filteredQuestions.length && filteredQuestions.length > 0 ? '取消全选' : '全选'}
           </div>
-        )}
+        </div>
       </div>
 
       {/* 错题列表 - 苹果风格 */}
@@ -802,18 +863,34 @@ export default function WrongBook({ onScanQR }) {
             已选 <strong style={{ color: APPLE_COLORS.primary, margin: '0 4px' }}>{selectedQuestions.length}</strong> 题
           </div>
         </div>
-        <Button 
-          color="primary" 
-          disabled={selectedQuestions.length === 0}
-          onClick={() => setShowPrintPreview(true)}
-          style={{ 
-            minWidth: '100px',
-            background: APPLE_COLORS.primary,
-            borderRadius: '10px'
-          }}
-        >
-          打印 ({selectedQuestions.length})
-        </Button>
+        <div style={{ display: 'flex', gap: '8px' }}>
+          <Button 
+            color="primary" 
+            fill="outline"
+            disabled={selectedQuestions.length === 0}
+            onClick={handleGenerateExam}
+            style={{ 
+              minWidth: '80px',
+              borderColor: APPLE_COLORS.primary,
+              color: APPLE_COLORS.primary,
+              borderRadius: '10px'
+            }}
+          >
+            生成试卷
+          </Button>
+          <Button 
+            color="primary" 
+            disabled={selectedQuestions.length === 0}
+            onClick={handlePrint}
+            style={{ 
+              minWidth: '80px',
+              background: APPLE_COLORS.primary,
+              borderRadius: '10px'
+            }}
+          >
+            打印
+          </Button>
+        </div>
       </div>
 
       {/* 打印预览弹窗 */}

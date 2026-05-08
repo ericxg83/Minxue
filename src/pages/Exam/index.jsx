@@ -143,46 +143,6 @@ export default function Exam() {
     )
   }
 
-  // 渲染状态图标 - 苹果风格
-  const renderStatusIcon = (status) => {
-    if (status === 'graded') {
-      return (
-        <div style={{
-          width: '24px',
-          height: '24px',
-          borderRadius: '50%',
-          background: APPLE_COLORS.success,
-          display: 'flex',
-          alignItems: 'center',
-          justifyContent: 'center'
-        }}>
-          <svg width="14" height="14" viewBox="0 0 1024 1024" fill="#fff">
-            <path d="M912 224l-48-48-400 400-176-176-48 48 224 224z"/>
-          </svg>
-        </div>
-      )
-    } else {
-      return (
-        <div style={{
-          width: '24px',
-          height: '24px',
-          borderRadius: '50%',
-          border: '2px solid ' + APPLE_COLORS.danger,
-          display: 'flex',
-          alignItems: 'center',
-          justifyContent: 'center'
-        }}>
-          <div style={{
-            width: '10px',
-            height: '10px',
-            borderRadius: '50%',
-            background: APPLE_COLORS.danger
-          }} />
-        </div>
-      )
-    }
-  }
-
   // 重打印试卷 - 获取错题本组卷的题目
   const handleReprint = async (exam) => {
     const questionIds = exam.question_ids || []
@@ -633,7 +593,7 @@ export default function Exam() {
             {filteredExams.map((exam) => (
               <div
                 key={exam.id}
-                onClick={() => Toast.show('试卷详情功能开发中')}
+                onClick={() => handleReprint(exam)}
                 style={{
                   background: APPLE_COLORS.card,
                   borderRadius: '12px',
@@ -712,7 +672,6 @@ export default function Exam() {
                 {/* 右侧状态和图标 */}
                 <div style={{ flexShrink: 0, display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: '8px' }}>
                   {renderStatusTag(exam.status)}
-                  {renderStatusIcon(exam.status)}
                   {/* 所有试卷都显示重打印按钮 */}
                     <Button
                       size="small"
