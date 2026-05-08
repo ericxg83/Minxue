@@ -613,8 +613,9 @@ export default function App() {
   }
 
   // Filter tasks
-  const filteredTasks = tasks.filter(t => {
-    if (t.student_id !== currentStudent?.id) return false
+  const safeTasks = Array.isArray(tasks) ? tasks : []
+  const filteredTasks = safeTasks.filter(t => {
+    if (!t || t.student_id !== currentStudent?.id) return false
     if (processingFilter === 'all') return true
     return t.status === processingFilter
   })
@@ -711,7 +712,7 @@ export default function App() {
   // Delete task
   const handleDeleteTask = async (taskId) => {
     try {
-      setTasks(tasks.filter(t => t.id !== taskId))
+      setTasks(safeTasks.filter(t => t?.id !== taskId))
       Toast.show({
         icon: 'success',
         content: '删除成功'

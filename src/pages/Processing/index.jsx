@@ -121,11 +121,11 @@ export default function Processing() {
             created_at: '2024-04-20T20:01:00Z'
           }
         ]
-        const currentStudentExistingTasks = tasks.filter(t => t.student_id === currentStudent.id)
+        const currentStudentExistingTasks = safeTasks.filter(t => t?.student_id === currentStudent.id)
         const existingTaskIds = new Set(currentStudentExistingTasks.map(t => t.id))
         const newMockTasks = filteredMockTasks.filter(t => !existingTaskIds.has(t.id))
         const newTestTasks = testTasks.filter(t => !existingTaskIds.has(t.id))
-        const allTasks = [...tasks, ...newMockTasks, ...newTestTasks]
+        const allTasks = [...safeTasks, ...newMockTasks, ...newTestTasks]
         setTasks(allTasks)
         setInitializedStudents(prev => new Set([...prev, currentStudent.id]))
         return
@@ -133,13 +133,13 @@ export default function Processing() {
 
       try {
         const tasksData = await getTasksByStudent(currentStudent.id, true)
-        if (tasksData && tasksData.length > 0) {
+        if (tasksData && Array.isArray(tasksData) && tasksData.length > 0) {
           // 合并数据：用服务器数据更新当前学生的任务，保留其他学生的任务
-          const otherStudentTasks = tasks.filter(t => t.student_id !== currentStudent.id)
+          const otherStudentTasks = safeTasks.filter(t => t?.student_id !== currentStudent.id)
           const currentStudentTaskIds = new Set(tasksData.map(t => t.id))
           // 保留当前学生的临时任务（正在上传中的）
-          const currentStudentTempTasks = tasks.filter(
-            t => t.student_id === currentStudent.id && t.is_temp && !currentStudentTaskIds.has(t.id)
+          const currentStudentTempTasks = safeTasks.filter(
+            t => t?.student_id === currentStudent.id && t?.is_temp && !currentStudentTaskIds.has(t.id)
           )
           setTasks([...otherStudentTasks, ...tasksData, ...currentStudentTempTasks])
         }
@@ -150,13 +150,13 @@ export default function Processing() {
       const backgroundRefresh = async () => {
         try {
           const freshData = await getTasksByStudent(currentStudent.id, false)
-          if (freshData && freshData.length > 0) {
+          if (freshData && Array.isArray(freshData) && freshData.length > 0) {
             // 合并数据：用服务器数据更新当前学生的任务，保留其他学生的任务
-            const otherStudentTasks = tasks.filter(t => t.student_id !== currentStudent.id)
+            const otherStudentTasks = safeTasks.filter(t => t?.student_id !== currentStudent.id)
             const currentStudentTaskIds = new Set(freshData.map(t => t.id))
             // 保留当前学生的临时任务（正在上传中的）
-            const currentStudentTempTasks = tasks.filter(
-              t => t.student_id === currentStudent.id && t.is_temp && !currentStudentTaskIds.has(t.id)
+            const currentStudentTempTasks = safeTasks.filter(
+              t => t?.student_id === currentStudent.id && t?.is_temp && !currentStudentTaskIds.has(t.id)
             )
             setTasks([...otherStudentTasks, ...freshData, ...currentStudentTempTasks])
           }
@@ -171,22 +171,24 @@ export default function Processing() {
     }
   }
 
-  const filteredTasks = tasks
+  const safeTasks = Array.isArray(tasks) ? tasks : []
+
+  const filteredTasks = safeTasks
     .filter(task => {
-      if (task.student_id !== currentStudent?.id) return false
+      if (!task || task.student_id !== currentStudent?.id) return false
       if (activeFilter === 'all') return true
       return task.status === activeFilter
     })
     .sort((a, b) => {
-      const timeA = new Date(a.created_at || 0).getTime()
-      const timeB = new Date(b.created_at || 0).getTime()
+      const timeA = new Date(a?.created_at || 0).getTime()
+      const timeB = new Date(b?.created_at || 0).getTime()
       return timeB - timeA
     })
 
   const getStatusCount = (status) => {
-    const studentTasks = tasks.filter(t => t.student_id === currentStudent?.id)
+    const studentTasks = safeTasks.filter(t => t?.student_id === currentStudent?.id)
     if (status === 'all') return studentTasks.length
-    return studentTasks.filter(t => t.status === status).length
+    return studentTasks.filter(t => t?.status === status).length
   }
 
   const showUploadOptions = () => {
@@ -455,7 +457,7 @@ export default function Processing() {
               icon: 'fail',
               content: '请重新上传图片进行识别'
             })
-            setTasks(tasks.filter(t => t.id !== task.id))
+            setTasks(safeTasks.filter(t => t?.id !== task?.id))
           }
         } catch (error) {
           Toast.clear()
@@ -475,7 +477,7 @@ export default function Processing() {
       confirmText: '删除',
       confirmButtonProps: { color: 'danger' },
       onConfirm: () => {
-        setTasks(tasks.filter(t => t.id !== task.id))
+        setTasks(safeTasks.filter(t => t?.id !== task?.id))
         Toast.show({ icon: 'success', content: '已删除' })
       }
     })
@@ -657,7 +659,7 @@ export default function Processing() {
   }
 
   const getTotalFailedCount = () => {
-    return tasks.filter(t => t.status === 'failed').length
+    return safeTasks.filter(t => t?.status === 'failed').length
   }
   
   const totalFailedCount = getTotalFailedCount()
@@ -892,7 +894,7 @@ export default function Processing() {
                         cancelText: '取消',
                         confirmButtonProps: { color: 'danger' },
                         onConfirm: () => {
-                          setTasks(tasks.filter(t => t.id !== task.id))
+                          setTasks(safeTasks.filter(t => t?.id !== task?.id))
                           Toast.show({ icon: 'success', content: '已删除' })
                         }
                       })
