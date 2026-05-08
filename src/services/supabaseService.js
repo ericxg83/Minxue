@@ -108,7 +108,7 @@ export const deleteStudent = async (id) => {
 }
 
 export const getTasksByStudent = async (studentId, useCache = true) => {
-  const cacheKey = `tasks_cache_${studentId}`
+  const cacheKey = `tasks_${studentId}`
   if (useCache) {
     const cached = readCache(cacheKey, CACHE_MAX_AGE.TASKS)
     if (cached) return cached
@@ -408,11 +408,12 @@ export const clearAllCache = () => {
 export const invalidateCache = (type, studentId) => {
   const keyMap = {
     students: 'students_cache',
-    tasks: `tasks_cache_${studentId}`,
-    exams: `exams_cache_${studentId}`,
-    wrong: `wrong_questions_cache_${studentId}`,
+    tasks: `tasks_${studentId}`,
+    exams: `exams_${studentId}`,
+    wrong: `wrong_questions_${studentId}`,
+    pending: `tasks_${studentId}`,
     questions: null,
-    generated: `generated_exams_cache_${studentId}`
+    generated: `generated_exams_${studentId}`
   }
   const key = keyMap[type]
   if (key) clearCache(key)

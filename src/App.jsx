@@ -198,6 +198,33 @@ export default function App() {
     init()
   }, [])
 
+  // 学生加载完成后，自动加载当前页面数据
+  useEffect(() => {
+    if (!currentStudent) return
+
+    const studentId = currentStudent.id
+
+    // 根据当前页面自动加载数据
+    switch (currentPage) {
+      case 'processing':
+        loadTasks(studentId)
+        preloadEngine.smartPreload('processing', studentId)
+        break
+      case 'pending':
+        loadPendingData(studentId)
+        break
+      case 'wrongbook':
+        loadWrongBookData(studentId)
+        preloadEngine.smartPreload('wrongbook', studentId)
+        break
+      case 'exam':
+        loadGeneratedExams(studentId)
+        break
+      default:
+        break
+    }
+  }, [currentStudent?.id])
+
   // 页面数据加载 - 使用SWR模式
   const loadTasks = useCallback(async (studentId, showLoading = true) => {
     if (!studentId) return
@@ -334,12 +361,13 @@ export default function App() {
     preloadEngine.reset()
   }, [currentStudent?.id])
 
-  // 页面切换时加载数据 + 预加载
+  // 页面切换或学生切换时加载数据
   useEffect(() => {
     if (!currentStudent) return
 
     const studentId = currentStudent.id
 
+    // 根据当前页面自动加载数据
     switch (currentPage) {
       case 'processing':
         loadTasks(studentId)
@@ -354,8 +382,7 @@ export default function App() {
         break
       case 'exam':
         loadGeneratedExams(studentId)
-        const interval = setInterval(() => loadGeneratedExams(studentId, false), 3000)
-        return () => clearInterval(interval)
+        break
       default:
         break
     }
