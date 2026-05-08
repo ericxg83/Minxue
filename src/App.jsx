@@ -231,16 +231,19 @@ export default function App() {
     if (showLoading) useTaskStore.getState().setLoading(true)
 
     try {
+      console.log('🔄 开始加载任务列表, studentId:', studentId)
       const result = await apiService.swrFetch(
         `tasks_${studentId}`,
         () => getTasksByStudent(studentId, false),
         {
           maxAge: 10 * 60 * 1000,
           onUpdate: (fresh) => {
+            console.log('📥 任务列表更新 (onUpdate):', fresh?.length, '条')
             setTasks(fresh)
           }
         }
       )
+      console.log('✅ 任务列表加载完成, 数据源:', result.from, ', 数量:', result.data?.length)
       setTasks(Array.isArray(result.data) ? result.data : [])
     } catch (error) {
       console.error('加载任务失败:', error)
