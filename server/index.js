@@ -177,15 +177,71 @@ app.post('/api/tasks/upload', upload.array('files', 20), async (req, res) => {
         )
         const savedTask = rows[0]
 
-        await taskQueue.add('process-task', {
-          taskId: savedTask.id,
-          studentId: studentId,
-          imageUrl: ossResult.url,
-          originalName: taskData.original_name
-        }, {
-          attempts: parseInt(process.env.MAX_RETRIES) || 3,
-          backoff: { type: 'exponential', delay: 5000 }
-        })
+        // 尝试加入异步任务队列，如果失败则直接同步处理
+        try {
+          if (taskQueue) {
+            await taskQueue.add('process-task', {
+              taskId: savedTask.id,
+              studentId: studentId,
+              imageUrl: ossResult.url,
+              originalName: taskData.original_name
+            }, {
+              attempts: parseInt(process.env.MAX_RETRIES) || 3,
+              backoff: { type: 'exponential', delay: 5000 }
+            })
+            console.log(`✅ 任务已加入队列: ${savedTask.id}`)
+          } else {
+            console.warn('⚠️ Redis 队列不可用，直接同步处理任务...')
+            // Redis 不可用时，直接同步处理任务
+            const { processTask } = await import('./worker.js')
+            try {
+              await processTask({
+                data: {
+                  taskId: savedTask.id,
+                  studentId: studentId,
+                  imageUrl: ossResult.url,
+                  originalName: taskData.original_name
+                },
+                updateProgress: async (progress) => {
+                  console.log(`任务 ${savedTask.id} 进度: ${progress}%`)
+                }
+              })
+              console.log(`✅ 任务同步处理完成: ${savedTask.id}`)
+            } catch (processError) {
+              console.error(`❌ 任务处理失败: ${savedTask.id}`, processError)
+              // 更新任务状态为失败
+              await query(
+                `UPDATE ${TABLES.TASKS} SET status = $1, result = $2 WHERE id = $3`,
+                ['failed', JSON.stringify({ error: processError.message }), savedTask.id]
+              )
+            }
+          }
+        } catch (queueError) {
+          console.error('⚠️ 队列操作失败，直接同步处理:', queueError.message)
+          // 如果队列操作失败，直接同步处理
+          const { processTask } = await import('./worker.js')
+          try {
+            await processTask({
+              data: {
+                taskId: savedTask.id,
+                studentId: studentId,
+                imageUrl: ossResult.url,
+                originalName: taskData.original_name
+              },
+              updateProgress: async (progress) => {
+                console.log(`任务 ${savedTask.id} 进度: ${progress}%`)
+              }
+            })
+            console.log(`✅ 任务同步处理完成: ${savedTask.id}`)
+          } catch (processError) {
+            console.error(`❌ 任务处理失败: ${savedTask.id}`, processError)
+            // 更新任务状态为失败
+            await query(
+              `UPDATE ${TABLES.TASKS} SET status = $1, result = $2 WHERE id = $3`,
+              ['failed', JSON.stringify({ error: processError.message }), savedTask.id]
+            )
+          }
+        }
 
         tasks.push(savedTask)
       } catch (fileError) {
