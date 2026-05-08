@@ -690,41 +690,41 @@ export default function App() {
     }
   }
 
-  // Confirm questions
+  // Confirm questions - 将选中的题目加入错题本
   const handleConfirmQuestions = async () => {
     try {
-      const wrongIds = selectedConfirmIds.filter(id => {
-        const q = pendingQuestions.find(pq => pq.id === id)
-        return q && q.status === 'wrong'
-      })
+      // 将所有选中的题目（不管状态是wrong还是correct）都加入错题本
+      const allSelectedIds = selectedConfirmIds
 
-      if (wrongIds.length > 0) {
-        await addWrongQuestions(currentStudent.id, wrongIds)
+      if (allSelectedIds.length > 0) {
+        await addWrongQuestions(currentStudent.id, allSelectedIds)
       }
 
+      // 从待确认列表中移除已加入错题本的题目
       setPendingQuestions(pendingQuestions.filter(q => !selectedConfirmIds.includes(q.id)))
       setSelectedConfirmIds([])
 
-      // 确认后刷新缓存并重新加载数据
+      // 刷新缓存并重新加载数据
       invalidateCache('wrong', currentStudent.id)
+      invalidateCache('pending', currentStudent.id)
       invalidateCache('tasks', currentStudent.id)
       loadPendingData(currentStudent.id, false)
       loadWrongBookData(currentStudent.id, false)
 
       Toast.show({
         icon: 'success',
-        content: `已确认 ${selectedConfirmIds.length} 道题`
+        content: `已将 ${selectedConfirmIds.length} 题加入错题本`
       })
     } catch (error) {
-      console.error('确认失败:', error)
+      console.error('加入错题本失败:', error)
       Toast.show({
         icon: 'fail',
-        content: '确认失败'
+        content: '加入错题本失败'
       })
     }
   }
 
-  // Generate exam
+  // Generate exam - 组题打印，生成试卷ID并记录打印时间
   const handleGenerateExam = async () => {
     try {
       if (selectedQuestions.length === 0) {
@@ -735,10 +735,18 @@ export default function App() {
         return
       }
 
+      // 生成试卷ID和打印标题
+      const examId = `exam_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`
+      const printTitle = `错题重练卷_${dayjs().format('YYYY-MM-DD HH:mm')}`
+
       const examData = {
+        id: examId,
         student_id: currentStudent.id,
-        name: `错题重练卷_${dayjs().format('MM-DD')}`,
-        question_ids: selectedQuestions.map(q => q.question_id || q.id)
+        name: printTitle,
+        question_ids: selectedQuestions.map(q => q.question_id || q.id),
+        status: 'ungraded',
+        printed_at: new Date().toISOString(), // 记录打印时间
+        created_at: new Date().toISOString()
       }
 
       const { createGeneratedExam } = await import('./services/supabaseService')
@@ -752,13 +760,13 @@ export default function App() {
 
       Toast.show({
         icon: 'success',
-        content: '生成试卷成功'
+        content: '组题打印成功'
       })
     } catch (error) {
-      console.error('生成试卷失败:', error)
+      console.error('组题打印失败:', error)
       Toast.show({
         icon: 'fail',
-        content: '生成试卷失败'
+        content: '组题打印失败'
       })
     }
   }
@@ -791,7 +799,16 @@ export default function App() {
   // Delete exam
   const handleDeleteExam = async (examId) => {
     try {
+      await fetch(`${API_BASE}/generated-exams/${examId}`, {
+        method: 'DELETE'
+      })
+
       setGeneratedExams(generatedExams.filter(e => e.id !== examId))
+
+      // 删除后刷新缓存并重新加载数据
+      invalidateCache('generated', currentStudent.id)
+      loadGeneratedExams(false)
+
       Toast.show({
         icon: 'success',
         content: '删除成功'

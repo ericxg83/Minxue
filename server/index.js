@@ -589,12 +589,23 @@ app.post('/api/generated-exams', async (req, res) => {
     }
 
     const { rows } = await query(
-      `INSERT INTO ${TABLES.GENERATED_EXAMS} (student_id, name, question_ids) VALUES ($1, $2, $3) RETURNING *`,
-      [studentId, name || '错题重练卷', JSON.stringify(questionIds)]
+      `INSERT INTO ${TABLES.GENERATED_EXAMS} (student_id, name, question_ids, status, printed_at, created_at) VALUES ($1, $2, $3, $4, $5, $6) RETURNING *`,
+      [studentId, name || '错题重练卷', JSON.stringify(questionIds), 'ungraded', new Date().toISOString(), new Date().toISOString()]
     )
     res.json({ success: true, exam: rows[0] })
   } catch (error) {
     console.error('创建试卷失败:', error)
+    res.status(500).json({ error: error.message })
+  }
+})
+
+app.delete('/api/generated-exams/:examId', async (req, res) => {
+  try {
+    const { examId } = req.params
+    await query(`DELETE FROM ${TABLES.GENERATED_EXAMS} WHERE id = $1`, [examId])
+    res.json({ success: true, message: '试卷已删除' })
+  } catch (error) {
+    console.error('删除试卷失败:', error)
     res.status(500).json({ error: error.message })
   }
 })

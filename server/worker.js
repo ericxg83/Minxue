@@ -460,19 +460,8 @@ export const processTask = async (job) => {
       await job.updateProgress(90)
       await updateTaskStatus(taskId, TASK_STATUS.PROCESSING, { progress: 90 })
 
-      const wrongQuestionIds = questions
-        .filter(q => !q.is_correct)
-        .map(q => q.id)
-
-      if (wrongQuestionIds.length > 0) {
-        console.log(`📕 添加 ${wrongQuestionIds.length} 道错题到错题本...`)
-        try {
-          await addWrongQuestions(studentId, wrongQuestionIds)
-          console.log(`✅ 错题添加成功`)
-        } catch (wrongError) {
-          console.error('添加错题失败（不影响主流程）:', wrongError)
-        }
-      }
+      // 注意：不再自动加入错题本
+      // 题目会在"待确认"页面显示，由用户审核后手动选择加入错题本
     }
 
     await job.updateProgress(100)
