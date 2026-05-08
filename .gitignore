@@ -37,3 +37,6 @@ capacitor.config.json
 
 # 测试环境配置可以提交（方便团队协作），如需保密请取消下行注释
 # .env.development
+
+# 后端环境变量包含敏感信息，请勿提交
+server/.env
