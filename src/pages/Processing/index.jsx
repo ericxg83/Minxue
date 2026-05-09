@@ -337,34 +337,26 @@ export default function Processing() {
         if (result.success && result.tasks && result.tasks.length > 0) {
           const serverTask = result.tasks[0]
           if (!serverTask.error) {
-            setTasks(prev => prev.map(t =>
-              t.id === tempTask.id ? { ...serverTask, is_temp: false } : t
-            ))
+            updateTaskInStore(tempTask.id, serverTask.status || 'pending', serverTask.result || { progress: 0 })
+            setTasks(prev => {
+              const safePrev = Array.isArray(prev) ? prev : []
+              return safePrev.map(t =>
+                t?.id === tempTask.id ? { ...serverTask, is_temp: false } : t
+              )
+            })
             successCount++
           } else {
             failedCount++
-            setTasks(prev => prev.map(t =>
-              t.id === tempTask.id
-                ? { ...t, status: 'failed', result: { error: serverTask.message || '上传失败' } }
-                : t
-            ))
+            updateTaskInStore(tempTask.id, 'failed', { error: serverTask.message || '上传失败' })
           }
         } else {
           failedCount++
-          setTasks(prev => prev.map(t =>
-            t.id === tempTask.id
-              ? { ...t, status: 'failed', result: { error: result.error || '上传失败' } }
-              : t
-          ))
+          updateTaskInStore(tempTask.id, 'failed', { error: result.error || '上传失败' })
         }
       } catch (error) {
         console.error(`上传文件 ${file.name} 失败:`, error)
         failedCount++
-        setTasks(prev => prev.map(t =>
-          t.id === tempTask.id
-            ? { ...t, status: 'failed', result: { error: error.message || '上传失败' } }
-            : t
-        ))
+        updateTaskInStore(tempTask.id, 'failed', { error: error.message || '上传失败' })
       }
     }
 

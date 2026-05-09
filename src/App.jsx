@@ -228,7 +228,11 @@ export default function App() {
   // 页面数据加载 - 使用SWR模式
   const loadTasks = useCallback(async (studentId, showLoading = true) => {
     if (!studentId) return
-    if (showLoading) useTaskStore.getState().setLoading(true)
+    const state = useTaskStore.getState()
+    const isFirstLoad = !state.initialized
+    if (isFirstLoad && showLoading) {
+      state.setLoading(true)
+    }
 
     try {
       console.log('🔄 开始加载任务列表, studentId:', studentId)
@@ -239,17 +243,26 @@ export default function App() {
           maxAge: 10 * 60 * 1000,
           onUpdate: (fresh) => {
             console.log('📥 任务列表更新 (onUpdate):', fresh?.length, '条')
-            setTasks(fresh)
+            if (Array.isArray(fresh) && fresh.length > 0) {
+              useTaskStore.getState().syncTasksFromServer(fresh)
+            }
           }
         }
       )
       console.log('✅ 任务列表加载完成, 数据源:', result.from, ', 数量:', result.data?.length)
-      setTasks(Array.isArray(result.data) ? result.data : [])
+      const safeData = Array.isArray(result.data) ? result.data : []
+      // 合并现有任务（保留临时上传中的任务）
+      const existingTasks = useTaskStore.getState().tasks || []
+      const serverIds = new Set(safeData.map(t => t?.id).filter(Boolean))
+      const tempTasks = existingTasks.filter(t => t?.is_temp && !serverIds.has(t.id))
+      useTaskStore.getState().setTasks([...safeData, ...tempTasks])
     } catch (error) {
       console.error('加载任务失败:', error)
-      setTasks([])
+      // 不要清空列表，保留现有数据
     } finally {
-      if (showLoading) useTaskStore.getState().setLoading(false)
+      if (isFirstLoad) {
+        useTaskStore.getState().setLoading(false)
+      }
     }
   }, [])
 
@@ -506,7 +519,8 @@ export default function App() {
     // 上传完成后刷新缓存并重新加载列表
     if (successCount > 0) {
       invalidateCache('tasks', currentStudent.id)
-      loadTasks()
+      // 不重新加载，直接使用store中的现有数据
+      // 后台的syncTasksFromServer会自动更新
     }
 
     if (failedCount > 0) {
