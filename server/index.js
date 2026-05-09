@@ -11,26 +11,13 @@ const PORT = process.env.PORT || 3001
 
 const allowedOrigins = process.env.ALLOWED_ORIGIN
   ? process.env.ALLOWED_ORIGIN.split(',')
-  : ['http://localhost:3000', 'http://localhost:5173', 'https://minxue-app.pages.dev', 'https://minxue.pages.dev', 'https://*.pages.dev']
+  : ['http://localhost:3000', 'http://localhost:5173', 'https://minxue-app.pages.dev']
 
 app.use(cors({
   origin: (origin, callback) => {
-    if (!origin || allowedOrigins.includes('*')) {
-      callback(null, true)
-      return
-    }
-    const isAllowed = allowedOrigins.some(allowed => {
-      if (allowed === origin) return true
-      if (allowed.includes('*')) {
-        const pattern = allowed.replace(/\*/g, '.*')
-        return new RegExp(pattern).test(origin)
-      }
-      return false
-    })
-    if (isAllowed) {
+    if (!origin || allowedOrigins.includes('*') || allowedOrigins.includes(origin)) {
       callback(null, true)
     } else {
-      console.warn(`CORS拒绝: ${origin}`)
       callback(new Error('Not allowed by CORS'))
     }
   },
@@ -172,27 +159,12 @@ app.post('/api/tasks/upload', upload.array('files', 20), async (req, res) => {
     const tasks = []
 
     for (const file of files) {
-      let savedTask = null
       try {
-        let imageUrl = null
-        let ossPath = null
-
-        try {
-          const ossResult = await uploadToOSS(file.buffer, file.originalname, studentId)
-          imageUrl = ossResult.url
-          ossPath = ossResult.ossPath
-          console.log(`✅ OSS上传成功: ${ossResult.url}`)
-        } catch (ossError) {
-          console.error('❌ OSS上传失败:', ossError.message)
-          console.warn('⚠️ 将使用Base64数据URL作为fallback...')
-          const base64 = file.buffer.toString('base64')
-          const mimeType = file.mimetype || 'image/jpeg'
-          imageUrl = `data:${mimeType};base64,${base64}`
-        }
+        const ossResult = await uploadToOSS(file.buffer, file.originalname, studentId)
 
         const taskData = {
           student_id: studentId,
-          image_url: imageUrl,
+          image_url: ossResult.url,
           original_name: file.originalname || `照片_${Date.now()}.jpg`,
           status: TASK_STATUS.PENDING,
           result: JSON.stringify({ progress: 0 })
@@ -203,38 +175,15 @@ app.post('/api/tasks/upload', upload.array('files', 20), async (req, res) => {
            VALUES ($1, $2, $3, $4, $5) RETURNING *`,
           [taskData.student_id, taskData.image_url, taskData.original_name, taskData.status, taskData.result]
         )
-        savedTask = rows[0]
+        const savedTask = rows[0]
 
-        const processTaskAsync = async () => {
-          const { processTask } = await import('./worker.js')
-          try {
-            await processTask({
-              data: {
-                taskId: savedTask.id,
-                studentId: studentId,
-                imageUrl: imageUrl,
-                originalName: taskData.original_name
-              },
-              updateProgress: async (progress) => {
-                console.log(`任务 ${savedTask.id} 进度: ${progress}%`)
-              }
-            })
-            console.log(`✅ 任务处理完成: ${savedTask.id}`)
-          } catch (processError) {
-            console.error(`❌ 任务处理失败: ${savedTask.id}`, processError)
-            await query(
-              `UPDATE ${TABLES.TASKS} SET status = $1, result = $2 WHERE id = $3`,
-              ['failed', JSON.stringify({ error: processError.message }), savedTask.id]
-            )
-          }
-        }
-
+        // 尝试加入异步任务队列，如果失败则直接同步处理
         try {
           if (taskQueue) {
             await taskQueue.add('process-task', {
               taskId: savedTask.id,
               studentId: studentId,
-              imageUrl: imageUrl,
+              imageUrl: ossResult.url,
               originalName: taskData.original_name
             }, {
               attempts: parseInt(process.env.MAX_RETRIES) || 3,
@@ -243,11 +192,55 @@ app.post('/api/tasks/upload', upload.array('files', 20), async (req, res) => {
             console.log(`✅ 任务已加入队列: ${savedTask.id}`)
           } else {
             console.warn('⚠️ Redis 队列不可用，直接同步处理任务...')
-            processTaskAsync()
+            // Redis 不可用时，直接同步处理任务
+            const { processTask } = await import('./worker.js')
+            try {
+              await processTask({
+                data: {
+                  taskId: savedTask.id,
+                  studentId: studentId,
+                  imageUrl: ossResult.url,
+                  originalName: taskData.original_name
+                },
+                updateProgress: async (progress) => {
+                  console.log(`任务 ${savedTask.id} 进度: ${progress}%`)
+                }
+              })
+              console.log(`✅ 任务同步处理完成: ${savedTask.id}`)
+            } catch (processError) {
+              console.error(`❌ 任务处理失败: ${savedTask.id}`, processError)
+              // 更新任务状态为失败
+              await query(
+                `UPDATE ${TABLES.TASKS} SET status = $1, result = $2 WHERE id = $3`,
+                ['failed', JSON.stringify({ error: processError.message }), savedTask.id]
+              )
+            }
           }
         } catch (queueError) {
           console.error('⚠️ 队列操作失败，直接同步处理:', queueError.message)
-          processTaskAsync()
+          // 如果队列操作失败，直接同步处理
+          const { processTask } = await import('./worker.js')
+          try {
+            await processTask({
+              data: {
+                taskId: savedTask.id,
+                studentId: studentId,
+                imageUrl: ossResult.url,
+                originalName: taskData.original_name
+              },
+              updateProgress: async (progress) => {
+                console.log(`任务 ${savedTask.id} 进度: ${progress}%`)
+              }
+            })
+            console.log(`✅ 任务同步处理完成: ${savedTask.id}`)
+          } catch (processError) {
+            console.error(`❌ 任务处理失败: ${savedTask.id}`, processError)
+            // 更新任务状态为失败
+            await query(
+              `UPDATE ${TABLES.TASKS} SET status = $1, result = $2 WHERE id = $3`,
+              ['failed', JSON.stringify({ error: processError.message }), savedTask.id]
+            )
+          }
         }
 
         tasks.push(savedTask)

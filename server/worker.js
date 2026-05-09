@@ -350,41 +350,25 @@ export const processTask = async (job) => {
   const { taskId, studentId, imageUrl, originalName } = job.data
   const startTime = Date.now()
 
-  const updateProgress = async (progress) => {
-    if (job && typeof job.updateProgress === 'function') {
-      try {
-        await job.updateProgress(progress)
-      } catch (e) {
-        // 忽略进度更新错误
-      }
-    }
-  }
-
   console.log(`🔄 开始处理任务: ${taskId} (${originalName})`)
 
   try {
-    await updateProgress(5)
+    await job.updateProgress(5)
     await updateTaskStatus(taskId, TASK_STATUS.PROCESSING, {
       progress: 5,
       startedAt: new Date().toISOString()
     })
 
-    console.log(`📥 获取图片: ${imageUrl?.substring(0, 80)}...`)
+    console.log(`📥 下载图片: ${imageUrl}`)
     let imageBuffer
     try {
-      if (imageUrl && imageUrl.startsWith('data:')) {
-        const base64Data = imageUrl.split(',')[1]
-        imageBuffer = Buffer.from(base64Data, 'base64')
-        console.log(`✅ 从Base64数据获取图片: ${imageBuffer.length} bytes`)
-      } else {
-        imageBuffer = await downloadImage(imageUrl)
-      }
+      imageBuffer = await downloadImage(imageUrl)
     } catch (downloadError) {
-      console.warn('获取图片失败:', downloadError.message)
-      throw new Error('获取图片失败: ' + downloadError.message)
+      console.warn('从URL下载失败:', downloadError.message)
+      throw new Error('下载图片失败: ' + downloadError.message)
     }
 
-    await updateProgress(15)
+    await job.updateProgress(15)
     await updateTaskStatus(taskId, TASK_STATUS.PROCESSING, { progress: 15 })
 
     console.log(`🗜️ 压缩图片...`)
@@ -401,12 +385,12 @@ export const processTask = async (job) => {
       throw compressError
     }
 
-    await updateProgress(25)
+    await job.updateProgress(25)
     await updateTaskStatus(taskId, TASK_STATUS.PROCESSING, { progress: 25 })
 
     const imageBase64 = bufferToBase64(compressedBuffer)
 
-    await updateProgress(30)
+    await job.updateProgress(30)
     await updateTaskStatus(taskId, TASK_STATUS.PROCESSING, { progress: 30 })
 
     console.log(`🤖 调用AI识别...`)
@@ -421,7 +405,7 @@ export const processTask = async (job) => {
       throw new Error(ocrResult.error || 'AI识别失败')
     }
 
-    await updateProgress(70)
+    await job.updateProgress(70)
     await updateTaskStatus(taskId, TASK_STATUS.PROCESSING, { progress: 70 })
 
     const questions = ocrResult.questions || []
@@ -442,7 +426,7 @@ export const processTask = async (job) => {
         console.error('保存题目失败:', saveError)
       }
 
-      await updateProgress(80)
+      await job.updateProgress(80)
       await updateTaskStatus(taskId, TASK_STATUS.PROCESSING, { progress: 80 })
 
       console.log(`🏷️ 生成AI标签...`)
@@ -473,14 +457,14 @@ export const processTask = async (job) => {
         }
       }
 
-      await updateProgress(90)
+      await job.updateProgress(90)
       await updateTaskStatus(taskId, TASK_STATUS.PROCESSING, { progress: 90 })
 
       // 注意：不再自动加入错题本
       // 题目会在"待确认"页面显示，由用户审核后手动选择加入错题本
     }
 
-    await updateProgress(100)
+    await job.updateProgress(100)
     const duration = Date.now() - startTime
 
     await updateTaskStatus(taskId, TASK_STATUS.DONE, {

@@ -73,10 +73,9 @@ export const cacheManager = {
     // 写入内存
     memoryCache.set(fullKey, { data, timestamp })
 
-    // 写入 localStorage - 过滤掉大字段（如Base64图片数据）
+    // 写入 localStorage
     try {
-      const cleanedData = cacheManager._cleanDataForStorage(data)
-      localStorage.setItem(fullKey, JSON.stringify(cleanedData))
+      localStorage.setItem(fullKey, JSON.stringify(data))
       localStorage.setItem(`${fullKey}_ts`, String(timestamp))
       localStorage.setItem(`${fullKey}_ver`, CACHE_VERSION)
     } catch (e) {
@@ -84,8 +83,7 @@ export const cacheManager = {
       if (e.name === 'QuotaExceededError') {
         cacheManager.cleanup()
         try {
-          const cleanedData = cacheManager._cleanDataForStorage(data)
-          localStorage.setItem(fullKey, JSON.stringify(cleanedData))
+          localStorage.setItem(fullKey, JSON.stringify(data))
           localStorage.setItem(`${fullKey}_ts`, String(timestamp))
           localStorage.setItem(`${fullKey}_ver`, CACHE_VERSION)
         } catch (e2) {
@@ -93,46 +91,6 @@ export const cacheManager = {
         }
       }
     }
-  },
-
-  _cleanDataForStorage: (data) => {
-    if (!data) return data
-
-    // 如果是数组，清理每个元素
-    if (Array.isArray(data)) {
-      return data.map(item => cacheManager._cleanItem(item))
-    }
-
-    // 如果是单个对象
-    if (typeof data === 'object') {
-      return cacheManager._cleanItem(data)
-    }
-
-    return data
-  },
-
-  _cleanItem: (item) => {
-    if (!item || typeof item !== 'object') return item
-
-    const cleaned = { ...item }
-
-    // 移除或截断大字段
-    if (cleaned.image_url && cleaned.image_url.length > 500) {
-      // 如果是Base64数据URL，替换为占位符
-      if (cleaned.image_url.startsWith('data:')) {
-        cleaned.image_url = '[base64-image-data]'
-      }
-    }
-
-    // 移除result中的大字段
-    if (cleaned.result && typeof cleaned.result === 'object') {
-      const resultStr = JSON.stringify(cleaned.result)
-      if (resultStr.length > 10000) {
-        cleaned.result = { ...cleaned.result, _truncated: true }
-      }
-    }
-
-    return cleaned
   },
 
   remove: (key) => {

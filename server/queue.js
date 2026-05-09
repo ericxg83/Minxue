@@ -8,19 +8,9 @@ let isRedisAvailable = false
 
 const createRedisConnection = () => {
   try {
-    let redisUrl = process.env.REDIS_URL?.trim()
+    const redisUrl = process.env.REDIS_URL?.trim() || `redis://${process.env.REDIS_HOST || 'localhost'}:${parseInt(process.env.REDIS_PORT) || 6379}`
     
-    if (!redisUrl) {
-      redisUrl = `redis://${process.env.REDIS_HOST || 'localhost'}:${parseInt(process.env.REDIS_PORT) || 6379}`
-    }
-    
-    // Upstash Redis 必须使用 TLS (rediss://)
-    if (redisUrl.includes('upstash.io') && !redisUrl.startsWith('rediss://')) {
-      redisUrl = redisUrl.replace('redis://', 'rediss://')
-      console.log('检测到 Upstash Redis，自动启用 TLS 加密连接')
-    }
-    
-    console.log(`尝试连接 Redis: ${redisUrl.replace(/:(.*?)@/, ':****@')}`)
+    console.log(`尝试连接 Redis: ${redisUrl}`)
     redisConnection = new Redis(redisUrl, {
       maxRetriesPerRequest: null,
       enableReadyCheck: false,
