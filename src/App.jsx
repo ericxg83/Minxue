@@ -976,7 +976,7 @@ export default function App() {
     done: 'text-emerald-600',
     failed: 'text-rose-500'
   }
-  const safeTasks = searchFilteredTasks.length > 0 ? searchFilteredTasks : [
+  const displayTasks = searchFilteredTasks.length > 0 ? searchFilteredTasks : [
     { id: 'ui-task-1', original_name: '微信图片_20260428190806_488_...', status: 'done', created_at: '2026-04-29T09:18:00', result: { questionCount: 10 }, image_url: '' },
     { id: 'ui-task-2', original_name: '微信图片_20260402194621_22_1...', status: 'processing', created_at: '2026-04-29T09:13:00', result: { questionCount: 0 }, image_url: '' },
     { id: 'ui-task-3', original_name: '微信图片_20260401123033_7_2...', status: 'failed', created_at: '2026-04-29T08:52:00', result: { questionCount: 0 }, image_url: '' }
