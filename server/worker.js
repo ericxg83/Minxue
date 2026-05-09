@@ -43,7 +43,7 @@ const compressImageBuffer = async (imageBuffer) => {
   try {
     const compressed = await sharp(imageBuffer)
       .resize(1920, 1920, { fit: 'inside', withoutEnlargement: true })
-      .jpeg({ quality: 0.85 })
+      .jpeg({ quality: 85 })
       .toBuffer()
     return compressed
   } catch (error) {
