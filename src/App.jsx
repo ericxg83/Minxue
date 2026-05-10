@@ -358,43 +358,79 @@ export default function App() {
 
   // Upload file handler
   const handleFileSelect = async (e) => {
-    const files = Array.from(e.target.files)
-    if (files.length === 0) return
-    e.target.value = ''
-
-    const duplicateFiles = []
-    const newFiles = []
-
-    for (const file of files) {
-      const localDuplicate = tasks.find(t =>
-        t.original_name === file.name &&
-        t.student_id === currentStudent?.id
-      )
-      if (localDuplicate) {
-        duplicateFiles.push(file)
-      } else {
-        newFiles.push(file)
+    console.log('🔥🔥🔥🔥🔥 [UPLOAD] === handleFileSelect TRIGGERED === 🔥🔥🔥🔥🔥')
+    try {
+      if (!currentStudent || !currentStudent?.id) {
+        console.log('💥💥💥 [UPLOAD] BLOCKED: currentStudent is NULL or undefined!')
+        Toast.show({
+          icon: 'fail',
+          content: '请先选择学生后再上传试卷',
+          duration: 3000
+        })
+        return
       }
-    }
+      console.log('✅ [UPLOAD] currentStudent:', currentStudent.id, currentStudent.name)
 
-    if (duplicateFiles.length > 0) {
+      const files = Array.from(e.target.files)
+      console.log('🔥🔥 [UPLOAD] Files received:', files.length, files.map(f => ({ name: f.name, size: f.size, type: f.type })))
+      if (files.length === 0) {
+        console.log('🔥 [UPLOAD] No files selected, returning early')
+        return
+      }
+      e.target.value = ''
+
+      const duplicateFiles = []
+      const newFiles = []
+
+      for (const file of files) {
+        const localDuplicate = tasks.find(t =>
+          t.original_name === file.name &&
+          t.student_id === currentStudent?.id
+        )
+        if (localDuplicate) {
+          duplicateFiles.push(file)
+        } else {
+          newFiles.push(file)
+        }
+      }
+
+      console.log('🔥🔥 [UPLOAD] After dedup - newFiles:', newFiles.length, 'duplicateFiles:', duplicateFiles.length)
+
+      if (duplicateFiles.length > 0) {
+        Toast.show({
+          icon: 'fail',
+          content: `${duplicateFiles.length} 个文件已存在，已自动跳过`
+        })
+      }
+
+      if (newFiles.length === 0) {
+        console.log('🔥🔥 [UPLOAD] No new files after dedup, returning')
+        return
+      }
+
+      if (USE_MOCK_DATA) {
+        console.log('🔥🔥🔥 [UPLOAD] === Using MOCK path (uploadViaFrontend) ===')
+        await uploadViaFrontend(newFiles)
+      } else {
+        console.log('🔥🔥🔥 [UPLOAD] === Using BACKEND path (uploadViaBackend) ===')
+        await uploadViaBackend(newFiles)
+      }
+    } catch (err) {
+      console.error('💥💥💥💥💥 [UPLOAD] UNCAUGHT ERROR in handleFileSelect:', err)
+      console.error('💥 [UPLOAD] Error stack:', err.stack)
       Toast.show({
         icon: 'fail',
-        content: `${duplicateFiles.length} 个文件已存在，已自动跳过`
+        content: `上传出错: ${err.message}`,
+        duration: 5000
       })
-    }
-
-    if (newFiles.length === 0) return
-
-    if (USE_MOCK_DATA) {
-      await uploadViaFrontend(newFiles)
-    } else {
-      await uploadViaBackend(newFiles)
     }
   }
 
   // Upload via backend API
   const uploadViaBackend = async (files) => {
+    console.log('📤📤📤 [uploadViaBackend] STARTING with', files.length, 'files')
+    console.log('📤 [uploadViaBackend] currentStudent:', currentStudent?.id, currentStudent?.name)
+    
     const pendingTasks = []
     
     files.forEach((file) => {
@@ -412,7 +448,8 @@ export default function App() {
       pendingTasks.push({ tempTask, file })
     })
 
-    Toast.clear()
+    console.log('📤 [uploadViaBackend] Created', pendingTasks.length, 'temp tasks')
+
     Toast.show({
       icon: 'success',
       content: `已添加 ${files.length} 个文件，正在上传...`,
@@ -424,10 +461,13 @@ export default function App() {
 
     for (const { tempTask, file } of pendingTasks) {
       try {
+        console.log('📤📤 [uploadViaBackend] Uploading file:', file.name, 'tempTaskId:', tempTask.id)
         const result = await taskService.uploadFiles(currentStudent.id, [file])
+        console.log('📤📤 [uploadViaBackend] Upload result:', JSON.stringify(result))
         
         if (result.success && result.tasks.length > 0 && !result.tasks[0].error) {
           const serverTask = result.tasks[0]
+          console.log('✅ [uploadViaBackend] File uploaded successfully, serverTaskId:', serverTask.id)
           updateTaskInStore(tempTask.id, 'pending', { progress: 0 })
           setTasks(prev => prev.map(t => 
             t.id === tempTask.id ? { ...serverTask, is_temp: false } : t
@@ -435,10 +475,13 @@ export default function App() {
           successCount++
         } else {
           failedCount++
-          updateTaskInStore(tempTask.id, 'failed', { error: result.error || '上传失败' })
+          const errorMsg = result.tasks[0]?.error || result.error || '上传失败'
+          console.error('❌ [uploadViaBackend] Upload failed:', errorMsg)
+          updateTaskInStore(tempTask.id, 'failed', { error: errorMsg })
         }
       } catch (error) {
-        console.error(`上传文件 ${file.name} 失败:`, error)
+        console.error('💥💥 [uploadViaBackend] EXCEPTION uploading', file.name, ':', error)
+        console.error('💥 [uploadViaBackend] Error stack:', error.stack)
         failedCount++
         updateTaskInStore(tempTask.id, 'failed', { error: error.message || '上传失败' })
       }
@@ -446,6 +489,7 @@ export default function App() {
 
     // 上传完成后刷新缓存并重新加载列表
     if (successCount > 0) {
+      console.log('🔄 [uploadViaBackend] Invalidating cache and reloading tasks')
       invalidateCache('tasks', currentStudent.id)
       loadTasks()
     }
@@ -454,9 +498,17 @@ export default function App() {
       Toast.show({
         icon: 'fail',
         content: `${successCount} 个成功，${failedCount} 个失败`,
+        duration: 3000
+      })
+    } else if (successCount > 0) {
+      Toast.show({
+        icon: 'success',
+        content: `${successCount} 个文件上传成功！`,
         duration: 2000
       })
     }
+
+    console.log('📤📤📤 [uploadViaBackend] COMPLETED - success:', successCount, 'failed:', failedCount)
   }
 
   // Upload via frontend (fallback)

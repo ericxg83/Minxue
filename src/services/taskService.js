@@ -2,29 +2,50 @@ const API_BASE = import.meta.env.VITE_API_URL || '/api'
 
 const apiRequest = async (path, options = {}) => {
   const url = `${API_BASE}${path}`
-  const response = await fetch(url, {
-    ...options,
-    headers: {
-      ...options.headers
+  console.log('📡📡📡 [API] === REQUEST START ===')
+  console.log('📡 [API] URL:', url)
+  console.log('📡 [API] Method:', options.method || 'GET')
+  console.log('📡 [API] Options:', options)
+  try {
+    const response = await fetch(url, {
+      ...options,
+      headers: {
+        ...options.headers
+      }
+    })
+    console.log('📡 [API] Response status:', response.status)
+    console.log('📡 [API] Response OK:', response.ok)
+    
+    if (!response.ok) {
+      const error = await response.json().catch(() => ({ error: response.statusText }))
+      console.error('💥💥💥 [API] ERROR RESPONSE:', error)
+      throw new Error(error.error || `请求失败: ${response.status}`)
     }
-  })
-
-  if (!response.ok) {
-    const error = await response.json().catch(() => ({ error: response.statusText }))
-    throw new Error(error.error || `请求失败: ${response.status}`)
+    const data = await response.json()
+    console.log('📡 [API] Response data (first 300 chars):', JSON.stringify(data).substring(0, 300))
+    console.log('📡📡📡 [API] === REQUEST SUCCESS ===')
+    return data
+  } catch (error) {
+    console.error('💥💥💥 [API] NETWORK ERROR:', error.message)
+    console.error('💥 [API] Error stack:', error.stack)
+    throw error
   }
-
-  return response.json()
 }
 
 export const taskService = {
   uploadFiles: async (studentId, files) => {
+    console.log('📤📤📤 [taskService.uploadFiles] === START ===')
+    console.log('📤 [taskService.uploadFiles] studentId:', studentId)
+    console.log('📤 [taskService.uploadFiles] fileCount:', files.length)
+    console.log('📤 [taskService.uploadFiles] files:', files.map(f => ({ name: f.name, size: f.size, type: f.type })))
+    
     const formData = new FormData()
     formData.append('studentId', studentId)
 
     for (const file of files) {
       formData.append('files', file)
     }
+    console.log('📤 [taskService.uploadFiles] FormData constructed, calling apiRequest...')
 
     return apiRequest('/tasks/upload', {
       method: 'POST',

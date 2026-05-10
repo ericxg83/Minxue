@@ -1,8 +1,9 @@
 import axios from 'axios'
 import sharp from 'sharp'
-import { supabase, TABLES, TASK_STATUS } from './config/supabase.js'
+import { TABLES, TASK_STATUS } from './config/neon.js'
 import { AI_CONFIG, getAIHeaders, buildOCRPrompt, buildTaggingPrompt } from './config/ai.js'
-import { updateTaskStatus, createQuestions, batchUpdateQuestionTags, addWrongQuestions } from './services/supabaseService.js'
+import { updateTaskStatus, createQuestions, batchUpdateQuestionTags, addWrongQuestions } from './services/neonService.js'
+import { uploadImage } from './services/ossService.js'
 
 const TAG_SYNONYM_MAP = {
   '几何-三角形': '三角形',
@@ -256,12 +257,12 @@ export const processTask = async (job) => {
       startedAt: new Date().toISOString()
     })
 
-    console.log(`📥 下载图片: ${imageUrl}`)
+    console.log(` 下载图片: ${imageUrl}`)
     let imageBuffer
     try {
       imageBuffer = await downloadImage(imageUrl)
     } catch (downloadError) {
-      console.warn('从URL下载失败，尝试从Supabase Storage获取:', downloadError.message)
+      console.error('下载图片失败:', downloadError.message)
       throw new Error('下载图片失败: ' + downloadError.message)
     }
 
@@ -392,7 +393,7 @@ export const processTask = async (job) => {
     }
   } catch (error) {
     const duration = Date.now() - startTime
-    console.error(`💥 任务处理失败: ${taskId}`, error.message)
+    console.error(` 任务处理失败: ${taskId}`, error.message)
 
     try {
       await updateTaskStatus(taskId, TASK_STATUS.FAILED, {
