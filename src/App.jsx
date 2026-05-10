@@ -1,4 +1,4 @@
-import { useEffect, useState, useRef, createContext, useContext } from 'react'
+import { useEffect, useState, useRef } from 'react'
 import { 
   Camera, 
   ChevronRight, 
@@ -34,78 +34,11 @@ import StudentSwitcher from './components/StudentSwitcher'
 import QuestionEditDrawer from './components/QuestionEditDrawer'
 import ScanQR from './pages/ScanQR'
 import Grading from './pages/Grading'
+import { useToast } from './components/ToastProvider'
 import dayjs from 'dayjs'
 import jsPDF from 'jspdf'
 
 const isMobile = /Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(navigator.userAgent)
-
-// ==================== UI Tool Components ====================
-
-// Toast Component
-const ToastContext = createContext(null)
-
-function ToastContainer({ toasts }) {
-  return (
-    <div className="fixed top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 z-[9999] flex flex-col items-center gap-3 pointer-events-none">
-      <AnimatePresence>
-        {toasts.map((toast) => (
-          <motion.div
-            key={toast.id}
-            initial={{ opacity: 0, scale: 0.9 }}
-            animate={{ opacity: 1, scale: 1 }}
-            exit={{ opacity: 0, scale: 0.9 }}
-            className={`px-6 py-3 rounded-2xl shadow-xl backdrop-blur-md flex items-center gap-2.5 pointer-events-auto ${
-              toast.type === 'success' ? 'bg-green-500/90 text-white' :
-              toast.type === 'error' ? 'bg-red-500/90 text-white' :
-              toast.type === 'loading' ? 'bg-blue-500/90 text-white' :
-              'bg-gray-900/90 text-white'
-            }`}
-          >
-            {toast.type === 'success' && <CheckCircle2 size={18} />}
-            {toast.type === 'error' && <XCircle size={18} />}
-            {toast.type === 'loading' && <Loader2 size={18} className="animate-spin" />}
-            <span className="text-[13px] font-medium">{toast.message}</span>
-          </motion.div>
-        ))}
-      </AnimatePresence>
-    </div>
-  )
-}
-
-// Toast Hook
-function useToast() {
-  const context = useContext(ToastContext)
-  if (!context) throw new Error('useToast must be used within ToastProvider')
-  return context
-}
-
-// Toast Provider
-function ToastProvider({ children }) {
-  const [toasts, setToasts] = useState([])
-  
-  const show = ({ message, type = 'info', duration = 2000 }) => {
-    const id = Date.now()
-    const newToast = { id, message, type }
-    setToasts(prev => [...prev, newToast])
-    
-    if (duration > 0) {
-      setTimeout(() => {
-        setToasts(prev => prev.filter(t => t.id !== id))
-      }, duration)
-    }
-    
-    return {
-      dismiss: () => setToasts(prev => prev.filter(t => t.id !== id))
-    }
-  }
-  
-  return (
-    <ToastContext.Provider value={{ show, toasts }}>
-      {children}
-      <ToastContainer toasts={toasts} />
-    </ToastContext.Provider>
-  )
-}
 
 // ==================== Main App ====================
 
@@ -362,11 +295,7 @@ export default function App() {
     try {
       if (!currentStudent || !currentStudent?.id) {
         console.log('💥💥💥 [UPLOAD] BLOCKED: currentStudent is NULL or undefined!')
-        Toast.show({
-          icon: 'fail',
-          content: '请先选择学生后再上传试卷',
-          duration: 3000
-        })
+        Toast.show({ message: '请先选择学生后再上传试卷', type: 'error', duration: 3000 })
         return
       }
       console.log('✅ [UPLOAD] currentStudent:', currentStudent.id, currentStudent.name)
@@ -397,10 +326,7 @@ export default function App() {
       console.log('🔥🔥 [UPLOAD] After dedup - newFiles:', newFiles.length, 'duplicateFiles:', duplicateFiles.length)
 
       if (duplicateFiles.length > 0) {
-        Toast.show({
-          icon: 'fail',
-          content: `${duplicateFiles.length} 个文件已存在，已自动跳过`
-        })
+        Toast.show({ message: `${duplicateFiles.length} 个文件已存在，已自动跳过`, type: 'error' })
       }
 
       if (newFiles.length === 0) {
@@ -418,11 +344,7 @@ export default function App() {
     } catch (err) {
       console.error('💥💥💥💥💥 [UPLOAD] UNCAUGHT ERROR in handleFileSelect:', err)
       console.error('💥 [UPLOAD] Error stack:', err.stack)
-      Toast.show({
-        icon: 'fail',
-        content: `上传出错: ${err.message}`,
-        duration: 5000
-      })
+      Toast.show({ message: `上传出错: ${err.message}`, type: 'error', duration: 5000 })
     }
   }
 
@@ -450,11 +372,7 @@ export default function App() {
 
     console.log('📤 [uploadViaBackend] Created', pendingTasks.length, 'temp tasks')
 
-    Toast.show({
-      icon: 'success',
-      content: `已添加 ${files.length} 个文件，正在上传...`,
-      duration: 2000
-    })
+    Toast.show({ message: `已添加 ${files.length} 个文件，正在上传...`, type: 'success', duration: 2000 })
 
     let successCount = 0
     let failedCount = 0
@@ -495,17 +413,9 @@ export default function App() {
     }
 
     if (failedCount > 0) {
-      Toast.show({
-        icon: 'fail',
-        content: `${successCount} 个成功，${failedCount} 个失败`,
-        duration: 3000
-      })
+      Toast.show({ message: `${successCount} 个成功，${failedCount} 个失败`, type: 'error', duration: 3000 })
     } else if (successCount > 0) {
-      Toast.show({
-        icon: 'success',
-        content: `${successCount} 个文件上传成功！`,
-        duration: 2000
-      })
+      Toast.show({ message: `${successCount} 个文件上传成功！`, type: 'success', duration: 2000 })
     }
 
     console.log('📤📤📤 [uploadViaBackend] COMPLETED - success:', successCount, 'failed:', failedCount)
@@ -516,11 +426,7 @@ export default function App() {
     for (const file of files) {
       try {
         setUploading(true)
-        Toast.show({
-          icon: 'loading',
-          content: '正在上传...',
-          duration: 0
-        })
+        Toast.show({ message: '正在上传...', type: 'loading', duration: 0 })
 
         const imageUrl = await uploadImage(file, 'homework')
         const task = await createTask({
@@ -534,10 +440,7 @@ export default function App() {
         processTask(task)
       } catch (error) {
         console.error('上传失败:', error)
-        Toast.show({
-          icon: 'fail',
-          content: '上传失败，请重试'
-        })
+        Toast.show({ message: '上传失败，请重试', type: 'error' })
       } finally {
         setUploading(false)
       }
@@ -548,11 +451,7 @@ export default function App() {
   const processTask = async (task) => {
     try {
       updateTaskInStore(task.id, 'processing')
-      Toast.show({
-        icon: 'loading',
-        content: '正在识别题目...',
-        duration: 0
-      })
+      Toast.show({ message: '正在识别题目...', type: 'loading', duration: 0 })
 
       const compressedImage = await compressImage(task.image_url)
       const result = await recognizeQuestions(compressedImage)
@@ -583,25 +482,15 @@ export default function App() {
           await addWrongQuestions(currentStudent.id, wrongQuestions.map(q => q.id))
         }
 
-        Toast.show({
-          icon: 'success',
-          content: `识别完成，共 ${questions.length} 道题，${wrongQuestions.length} 道错题`,
-          duration: 2000
-        })
+        Toast.show({ message: `识别完成，共 ${questions.length} 道题，${wrongQuestions.length} 道错题`, type: 'success', duration: 2000 })
       } else {
         updateTaskInStore(task.id, 'failed', { error: '未识别到题目' })
-        Toast.show({
-          icon: 'fail',
-          content: '未识别到题目，请重新上传'
-        })
+        Toast.show({ message: '未识别到题目，请重新上传', type: 'error' })
       }
     } catch (error) {
       console.error('识别失败:', error)
       updateTaskInStore(task.id, 'failed', { error: error.message })
-      Toast.show({
-        icon: 'fail',
-        content: '识别失败，请重试'
-      })
+      Toast.show({ message: '识别失败，请重试', type: 'error' })
     }
   }
 
@@ -688,16 +577,10 @@ export default function App() {
       addStudent(newStudent)
       setCurrentStudent(newStudent)
       setShowAddStudent(false)
-      Toast.show({
-        icon: 'success',
-        content: '添加学生成功'
-      })
+      Toast.show({ message: '添加学生成功', type: 'success' })
     } catch (error) {
       console.error('添加学生失败:', error)
-      Toast.show({
-        icon: 'fail',
-        content: '添加学生失败'
-      })
+      Toast.show({ message: '添加学生失败', type: 'error' })
     }
   }
 
@@ -705,16 +588,10 @@ export default function App() {
   const handleDeleteTask = async (taskId) => {
     try {
       setTasks(tasks.filter(t => t.id !== taskId))
-      Toast.show({
-        icon: 'success',
-        content: '删除成功'
-      })
+      Toast.show({ message: '删除成功', type: 'success' })
     } catch (error) {
       console.error('删除失败:', error)
-      Toast.show({
-        icon: 'fail',
-        content: '删除失败'
-      })
+      Toast.show({ message: '删除失败', type: 'error' })
     }
   }
 
@@ -739,16 +616,10 @@ export default function App() {
       loadPendingData()
       loadWrongBookData()
 
-      Toast.show({
-        icon: 'success',
-        content: `已确认 ${selectedConfirmIds.length} 道题`
-      })
+      Toast.show({ message: `已确认 ${selectedConfirmIds.length} 道题`, type: 'success' })
     } catch (error) {
       console.error('确认失败:', error)
-      Toast.show({
-        icon: 'fail',
-        content: '确认失败'
-      })
+      Toast.show({ message: '确认失败', type: 'error' })
     }
   }
 
@@ -757,10 +628,7 @@ export default function App() {
     try {
       const selectedWrongQuestions = wrongQuestions.filter(wq => selectedQuestions.includes(wq.id))
       if (selectedWrongQuestions.length === 0) {
-        Toast.show({
-          icon: 'fail',
-          content: '请先选择错题'
-        })
+        Toast.show({ message: '请先选择错题', type: 'error' })
         return
       }
 
@@ -779,16 +647,10 @@ export default function App() {
       invalidateCache('generated', currentStudent.id)
       loadGeneratedExams(false)
 
-      Toast.show({
-        icon: 'success',
-        content: '生成试卷成功'
-      })
+      Toast.show({ message: '生成试卷成功', type: 'success' })
     } catch (error) {
       console.error('生成试卷失败:', error)
-      Toast.show({
-        icon: 'fail',
-        content: '生成试卷失败'
-      })
+      Toast.show({ message: '生成试卷失败', type: 'error' })
     }
   }
 
@@ -820,16 +682,10 @@ export default function App() {
   const handleDeleteExam = async (examId) => {
     try {
       setGeneratedExams(generatedExams.filter(e => e.id !== examId))
-      Toast.show({
-        icon: 'success',
-        content: '删除成功'
-      })
+      Toast.show({ message: '删除成功', type: 'success' })
     } catch (error) {
       console.error('删除失败:', error)
-      Toast.show({
-        icon: 'fail',
-        content: '删除失败'
-      })
+      Toast.show({ message: '删除失败', type: 'error' })
     }
   }
 
@@ -852,16 +708,10 @@ export default function App() {
         q.id === questionId ? { ...q, ...updates } : q
       ))
       setEditingQuestion(null)
-      Toast.show({
-        icon: 'success',
-        content: '保存成功'
-      })
+      Toast.show({ message: '保存成功', type: 'success' })
     } catch (error) {
       console.error('保存失败:', error)
-      Toast.show({
-        icon: 'fail',
-        content: '保存失败'
-      })
+      Toast.show({ message: '保存失败', type: 'error' })
     }
   }
 
@@ -879,16 +729,10 @@ export default function App() {
         q.id === questionId ? { ...q, manual_tags: tags, tags_source: 'manual' } : q
       ))
       setShowTagManager(false)
-      Toast.show({
-        icon: 'success',
-        content: '标签更新成功'
-      })
+      Toast.show({ message: '标签更新成功', type: 'success' })
     } catch (error) {
       console.error('更新标签失败:', error)
-      Toast.show({
-        icon: 'fail',
-        content: '更新标签失败'
-      })
+      Toast.show({ message: '更新标签失败', type: 'error' })
     }
   }
 
