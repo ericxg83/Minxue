@@ -39,6 +39,7 @@ export const createQuestions = async (questions) => {
     }
 
     return {
+      id: q.id,
       task_id: q.task_id,
       student_id: q.student_id,
       content: q.content || null,
