@@ -1,3 +1,4 @@
+import crypto from 'crypto'
 import axios from 'axios'
 import sharp from 'sharp'
 import { TABLES, TASK_STATUS } from './config/neon.js'
@@ -153,7 +154,7 @@ const recognizeQuestions = async (imageBase64, taskId, retryCount = 0) => {
       }
 
       return {
-        id: `q-${taskId}-${index}`,
+        id: crypto.randomUUID(),
         task_id: taskId,
         content: q.content || '',
         options: q.options || [],
