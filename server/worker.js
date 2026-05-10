@@ -370,50 +370,38 @@ export const processTask = async (job) => {
     console.log(`✅ [Step 4/6] AI 识别成功: ${questions.length} 道题, ${wrongCount} 道错题, 耗时 ${Math.round(ocrResult.duration/1000)}s`)
 
     if (questions.length > 0) {
-      console.log(` [Step 5/6] 保存题目到数据库...`)
+      console.log(`📊 [Step 5/6] 保存题目到数据库...`)
 
       const questionsWithStudentId = questions.map(q => ({
         ...q,
         student_id: studentId
       }))
 
-      try {
-        await createQuestions(questionsWithStudentId)
-        console.log(`✅ [Step 5/6] 题目保存成功`)
-      } catch (saveError) {
-        console.error('保存题目失败:', saveError)
-      }
+      await createQuestions(questionsWithStudentId)
+      console.log(`✅ [Step 5/6] 题目保存成功`)
 
       await job.updateProgress(80)
       await updateTaskStatus(taskId, TASK_STATUS.PROCESSING, { progress: 80 })
 
-      console.log(` [Step 6/6] 生成AI标签...`)
-      try {
-        const tagResults = await generateTagsForQuestions(questions)
-        const tagMap = {}
-        for (const tr of tagResults) {
-          tagMap[tr.questionId] = tr.tags
-        }
-
-        for (const q of questions) {
-          const tags = tagMap[q.id] || ['未分类']
-          q.ai_tags = tags
-          q.tags_source = 'ai'
-        }
-
-        const tagUpdates = questions.map(q => ({
-          id: q.id,
-          ai_tags: q.ai_tags
-        }))
-        await batchUpdateQuestionTags(tagUpdates)
-        console.log(`✅ [Step 6/6] AI标签保存成功`)
-      } catch (tagError) {
-        console.error('AI标签生成失败（不影响主流程）:', tagError)
-        for (const q of questions) {
-          q.ai_tags = ['未分类']
-          q.tags_source = 'ai'
-        }
+      console.log(`📊 [Step 6/6] 生成AI标签...`)
+      const tagResults = await generateTagsForQuestions(questions)
+      const tagMap = {}
+      for (const tr of tagResults) {
+        tagMap[tr.questionId] = tr.tags
       }
+
+      for (const q of questions) {
+        const tags = tagMap[q.id] || ['未分类']
+        q.ai_tags = tags
+        q.tags_source = 'ai'
+      }
+
+      const tagUpdates = questions.map(q => ({
+        id: q.id,
+        ai_tags: q.ai_tags
+      }))
+      await batchUpdateQuestionTags(tagUpdates)
+      console.log(`✅ [Step 6/6] AI标签保存成功`)
 
       await job.updateProgress(90)
       await updateTaskStatus(taskId, TASK_STATUS.PROCESSING, { progress: 90 })
