@@ -272,14 +272,35 @@ const generateTagsForQuestions = async (questions) => {
 }
 
 export const processTask = async (job) => {
-  const { taskId, studentId, imageUrl, originalName } = job.data
+  const { taskId, studentId, imageUrl: rawImageUrl, originalName } = job.data
   const startTime = Date.now()
 
-  console.log(`\n🔥🔥 [Worker] ==========================================`)
+  // Defensive: imageUrl from DB might be string URL, JSON object string, or object
+  let imageUrl
+  if (typeof rawImageUrl === 'string') {
+    // Could be plain URL or JSON string from old object serialization
+    if (rawImageUrl.startsWith('{')) {
+      try {
+        const parsed = JSON.parse(rawImageUrl)
+        imageUrl = parsed.url || parsed.ossPath || ''
+      } catch (e) {
+        imageUrl = rawImageUrl // fallback: assume it's a URL
+      }
+    } else {
+      imageUrl = rawImageUrl // normal URL string
+    }
+  } else if (typeof rawImageUrl === 'object' && rawImageUrl !== null) {
+    imageUrl = rawImageUrl.url || rawImageUrl.ossPath || ''
+  } else {
+    imageUrl = String(rawImageUrl || '')
+  }
+
+  console.log(`\n🔥 [Worker] ==========================================`)
   console.log(`🔥🔥 [Worker] 开始处理任务:`)
   console.log(`   taskId: ${taskId}`)
   console.log(`   studentId: ${studentId}`)
-  console.log(`   imageUrl: ${imageUrl}`)
+  console.log(`   imageUrl (resolved): ${imageUrl}`)
+  console.log(`   imageUrl (raw): ${typeof rawImageUrl} ${String(rawImageUrl).substring(0, 100)}`)
   console.log(`   originalName: ${originalName}`)
   console.log(`🔥🔥 ==========================================\n`)
 

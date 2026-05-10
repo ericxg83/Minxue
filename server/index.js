@@ -65,12 +65,13 @@ app.post('/api/tasks/upload', upload.array('files', 20), async (req, res) => {
         }
 
         const imageUrl = await uploadImage(file.buffer, decodedName, studentId)
-        console.log(`  OSS 上传成功: ${decodedName} → ${imageUrl}`)
+        const safeUrl = typeof imageUrl === 'string' ? imageUrl : (imageUrl?.url || imageUrl?.ossPath || String(imageUrl))
+        console.log(`  OSS 上传成功: ${decodedName} → ${safeUrl}`)
 
         const { rows } = await query(
           `INSERT INTO ${TABLES.TASKS} (student_id, image_url, original_name, status, result)
            VALUES ($1, $2, $3, $4, $5) RETURNING *`,
-          [studentId, imageUrl, decodedName || `照片_${Date.now()}.jpg`, TASK_STATUS.PENDING, JSON.stringify({ progress: 0 })]
+          [studentId, safeUrl, decodedName || `照片_${Date.now()}.jpg`, TASK_STATUS.PENDING, JSON.stringify({ progress: 0 })]
         )
 
         const savedTask = rows[0]
