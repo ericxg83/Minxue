@@ -458,6 +458,21 @@ app.post('/api/questions/batch', async (req, res) => {
   }
 })
 
+// Get questions by task ID
+app.get('/api/questions/task/:taskId', async (req, res) => {
+  try {
+    const { taskId } = req.params
+    const { rows } = await query(
+      `SELECT * FROM ${TABLES.QUESTIONS} WHERE task_id = $1 ORDER BY created_at`,
+      [taskId]
+    )
+    res.json({ success: true, questions: rows })
+  } catch (error) {
+    console.error('获取任务题目失败:', error)
+    res.status(500).json({ error: error.message })
+  }
+})
+
 // Wrong Questions
 app.post('/api/wrong-questions', async (req, res) => {
   try {
