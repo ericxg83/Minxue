@@ -276,15 +276,19 @@ app.post('/api/tasks/create-by-url', async (req, res) => {
     )
     const savedTask = rows[0]
 
-    await taskQueue.add('process-task', {
-      taskId: savedTask.id,
-      studentId: studentId,
-      imageUrl: imageUrl,
-      originalName: savedTask.original_name
-    }, {
-      attempts: parseInt(process.env.MAX_RETRIES) || 3,
-      backoff: { type: 'exponential', delay: 5000 }
-    })
+    if (taskQueue) {
+      await taskQueue.add('process-task', {
+        taskId: savedTask.id,
+        studentId: studentId,
+        imageUrl: imageUrl,
+        originalName: savedTask.original_name
+      }, {
+        attempts: parseInt(process.env.MAX_RETRIES) || 3,
+        backoff: { type: 'exponential', delay: 5000 }
+      })
+    } else {
+      console.warn('⚠️ Redis 队列不可用，任务将依赖 Worker 直接处理')
+    }
 
     res.json({ success: true, task: formatTask(savedTask) })
   } catch (error) {
@@ -347,15 +351,19 @@ app.post('/api/tasks/:taskId/retry', async (req, res) => {
       [TASK_STATUS.PENDING, JSON.stringify(newResult), taskId]
     )
 
-    await taskQueue.add('process-task', {
-      taskId: task.id,
-      studentId: task.student_id,
-      imageUrl: task.image_url,
-      originalName: task.original_name
-    }, {
-      attempts: parseInt(process.env.MAX_RETRIES) || 3,
-      backoff: { type: 'exponential', delay: 5000 }
-    })
+    if (taskQueue) {
+      await taskQueue.add('process-task', {
+        taskId: task.id,
+        studentId: task.student_id,
+        imageUrl: task.image_url,
+        originalName: task.original_name
+      }, {
+        attempts: parseInt(process.env.MAX_RETRIES) || 3,
+        backoff: { type: 'exponential', delay: 5000 }
+      })
+    } else {
+      console.warn('⚠️ Redis 队列不可用，重试任务无法加入队列')
+    }
 
     res.json({ success: true, message: '任务已重新提交' })
   } catch (error) {
@@ -666,26 +674,6 @@ app.delete('/api/generated-exams/:examId', async (req, res) => {
   }
 })
 
-app.get('/api/questions/batch', async (req, res) => {
-  try {
-    const { ids } = req.query
-    if (!ids) return res.status(400).json({ error: '缺少 ids 参数' })
-
-    const questionIds = ids.split(',')
-    if (questionIds.length === 0) return res.json({ success: true, questions: [] })
-
-    const placeholders = questionIds.map((_, i) => `$${i + 1}`).join(',')
-    const { rows } = await query(
-      `SELECT * FROM ${TABLES.QUESTIONS} WHERE id IN (${placeholders})`,
-      questionIds
-    )
-    res.json({ success: true, questions: rows })
-  } catch (error) {
-    console.error('批量获取题目失败:', error)
-    res.status(500).json({ error: error.message })
-  }
-})
-
 app.post('/api/questions', async (req, res) => {
   try {
     const questions = req.body.questions || []
@@ -781,9 +769,27 @@ app.use((err, req, res, next) => {
   res.status(500).json({ error: err.message || '服务器内部错误' })
 })
 
-app.listen(PORT, () => {
-  console.log(`🚀 敏学后端服务已启动: http://localhost:${PORT}`)
-  console.log(`📋 任务队列已就绪，并发数: ${process.env.CONCURRENCY || 2}`)
-  console.log(`🗄️  数据库: Neon PostgreSQL`)
-  console.log(`☁️  文件存储: 阿里 OSS`)
-})
+const createServer = (port = PORT) => {
+  return new Promise((resolve) => {
+    const server = app.listen(port, () => {
+      resolve(server)
+    })
+  })
+}
+
+import { fileURLToPath } from 'url'
+import { dirname } from 'path'
+
+const __filename = fileURLToPath(import.meta.url)
+const __dirname = dirname(__filename)
+
+if (process.argv[1] === __filename || process.argv[1]?.endsWith('server/index.js')) {
+  app.listen(PORT, () => {
+    console.log(`🚀 敏学后端服务已启动: http://localhost:${PORT}`)
+    console.log(`📋 任务队列已就绪，并发数: ${process.env.CONCURRENCY || 2}`)
+    console.log(`🗄️  数据库: Neon PostgreSQL`)
+    console.log(`☁️  文件存储: 阿里 OSS`)
+  })
+}
+
+export { app, createServer }

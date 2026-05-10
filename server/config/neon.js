@@ -95,3 +95,8 @@ export const TRAINING_STATUS = {
   PENDING: 'pending',
   DONE: 'done'
 }
+
+export const getQuestionsByTask = async (taskId) => {
+  const { rows } = await query(`SELECT * FROM ${TABLES.QUESTIONS} WHERE task_id = $1 ORDER BY created_at`, [taskId])
+  return rows
+}

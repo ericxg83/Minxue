@@ -133,16 +133,16 @@ const createQuestions = async (questions) => {
 const batchUpdateQuestionTags = async (tagUpdates) => {
   const results = []
   for (const update of tagUpdates) {
-    try {
-      const { rows } = await query(
-        `UPDATE ${TABLES.QUESTIONS} SET ai_tags = $1, tags_source = 'ai', updated_at = NOW() WHERE id = $2 RETURNING *`,
-        [JSON.stringify(update.ai_tags || []), update.id]
-      )
-      if (rows.length > 0) results.push(rows[0])
-    } catch (error) {
-      console.error(`更新标签失败，题目ID: ${update.id}`, error)
+      try {
+        const { rows } = await query(
+          `UPDATE ${TABLES.QUESTIONS} SET ai_tags = $1, tags_source = 'ai', updated_at = NOW() WHERE id = $2 RETURNING *`,
+          [JSON.stringify(update.ai_tags || []), update.id]
+        )
+        if (rows.length > 0) results.push(rows[0])
+      } catch (error) {
+        console.error(`更新标签失败，题目ID: ${update.id}`, error)
+      }
     }
-  }
   return results
 }
 
@@ -234,6 +234,7 @@ const recognizeQuestions = async (imageBase64, taskId, retryCount = 0) => {
       return {
         id: `q-${taskId}-${index}`,
         task_id: taskId,
+        student_id: taskJob.studentId || null,
         content: q.content || '',
         options: q.options || [],
         answer: q.answer || '',
@@ -242,8 +243,12 @@ const recognizeQuestions = async (imageBase64, taskId, retryCount = 0) => {
         question_type: q.question_type || 'answer',
         subject: q.subject || '数学',
         status: isCorrect ? 'correct' : 'wrong',
+        ai_tags: q.ai_tags || [],
+        manual_tags: q.manual_tags || [],
+        tags_source: q.tags_source || 'ai',
         confidence: q.confidence || 0,
         analysis: q.analysis || '',
+        image_url: imageUrl || null,
         created_at: new Date().toISOString()
       }
     }) || []
