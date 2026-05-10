@@ -1,4 +1,4 @@
-import { useEffect, useState, useRef, useCallback } from 'react'
+import { useEffect, useState, useCallback } from 'react'
 import {
   Camera,
   ChevronRight,
@@ -27,10 +27,10 @@ import {
 import { motion, AnimatePresence } from 'motion/react'
 import { QRCodeSVG } from 'qrcode.react'
 import { useUIStore, useStudentStore, useTaskStore, useWrongQuestionStore, usePendingQuestionStore, useExamStore } from './store'
-import { getStudents, getTasksByStudent, getQuestionsByTask, addWrongQuestions, getWrongQuestionsByStudent, getExamsByStudent, createTask, updateTaskStatus, uploadImage, createQuestions, updateQuestion, updateQuestionTags, invalidateCache } from './services/supabaseService'
+import { getStudents, getTasksByStudent, getQuestionsByTask, addWrongQuestions, getWrongQuestionsByStudent, getExamsByStudent, createTask, uploadImage, createQuestions, updateQuestion, updateQuestionTags, invalidateCache } from './services/supabaseService'
 import { taskService } from './services/taskService'
 import { recognizeQuestions, compressImage, saveRecognitionResult } from './services/aiService'
-import { mockQuestions, mockTasks, mockWrongQuestions, mockExams, mockStudents } from './data/mockData'
+import { mockStudents } from './data/mockData'
 import StudentSwitcher from './components/StudentSwitcher'
 import QuestionEditDrawer from './components/QuestionEditDrawer'
 import { ProcessingSkeleton, PendingSkeleton, WrongBookSkeleton, ExamSkeleton } from './components/Skeleton'
@@ -42,7 +42,6 @@ import Home from './pages/Home'
 import ScanQR from './pages/ScanQR'
 import Grading from './pages/Grading'
 import dayjs from 'dayjs'
-import jsPDF from 'jspdf'
 
 const isMobile = /Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(navigator.userAgent)
 
@@ -54,10 +53,10 @@ export default function App() {
   // Store hooks
   const { currentPage, setCurrentPage } = useUIStore()
   const { students, currentStudent, setCurrentStudent, setStudents, addStudent } = useStudentStore()
-  const { tasks, setTasks, addTask, updateTaskStatus: updateTaskInStore, loading: tasksLoading, initialized: tasksInitialized } = useTaskStore()
-  const { wrongQuestions, setWrongQuestions, selectedQuestions, setSelectedQuestions, toggleSelection, clearSelection, addWrongQuestion, addWrongQuestions: addMultipleToStore, loading: wrongLoading, initialized: wrongInitialized } = useWrongQuestionStore()
-  const { pendingQuestions, setPendingQuestions, addPendingQuestions, loading: pendingLoading, initialized: pendingInitialized } = usePendingQuestionStore()
-  const { exams, setExams, generatedExams, setGeneratedExams, loading: examLoading, initialized: examInitialized } = useExamStore()
+  const { tasks, setTasks, addTask, updateTaskStatus: updateTaskInStore } = useTaskStore()
+  const { wrongQuestions, setWrongQuestions, selectedQuestions, setSelectedQuestions, toggleSelection, clearSelection, addWrongQuestions: addMultipleToStore } = useWrongQuestionStore()
+  const { pendingQuestions, setPendingQuestions } = usePendingQuestionStore()
+  const { exams, setExams, generatedExams, setGeneratedExams } = useExamStore()
 
   // Processing Page State
   const [processingFilter, setProcessingFilter] = useState('all')
@@ -133,8 +132,6 @@ export default function App() {
     clear: () => {}
   }
 
-  // Toast (将在组件渲染后使用)
-
   // ==================== 保持 Render 实例活跃 ====================
   useEffect(() => {
     const API_BASE = import.meta.env.VITE_API_URL || '/api'
@@ -197,33 +194,6 @@ export default function App() {
     }
     init()
   }, [])
-
-  // 学生加载完成后，自动加载当前页面数据
-  useEffect(() => {
-    if (!currentStudent) return
-
-    const studentId = currentStudent.id
-
-    // 根据当前页面自动加载数据
-    switch (currentPage) {
-      case 'processing':
-        loadTasks(studentId)
-        preloadEngine.smartPreload('processing', studentId)
-        break
-      case 'pending':
-        loadPendingData(studentId)
-        break
-      case 'wrongbook':
-        loadWrongBookData(studentId)
-        preloadEngine.smartPreload('wrongbook', studentId)
-        break
-      case 'exam':
-        loadGeneratedExams(studentId)
-        break
-      default:
-        break
-    }
-  }, [currentStudent?.id])
 
   // 页面数据加载 - 使用SWR模式
   const loadTasks = useCallback(async (studentId, showLoading = true) => {
