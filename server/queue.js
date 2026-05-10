@@ -2,9 +2,9 @@ import { Queue, Worker } from 'bullmq'
 import Redis from 'ioredis'
 import { processTask } from './worker.js'
 
-// 创建 Redis 连接
 let redisConnection = null
 let isRedisAvailable = false
+let keepAliveInterval = null
 
 const createRedisConnection = () => {
   try {
@@ -13,19 +13,31 @@ const createRedisConnection = () => {
     console.log(`尝试连接 Redis: ${redisUrl}`)
     redisConnection = new Redis(redisUrl, {
       maxRetriesPerRequest: null,
-      enableReadyCheck: false,
+      enableReadyCheck: true,
       retryStrategy: (times) => {
-        if (times > 3) {
+        if (times > 10) {
           console.error('Redis 重连失败，停止重试')
           isRedisAvailable = false
           return null
         }
-        return Math.min(times * 1000, 3000)
+        const delay = Math.min(times * 2000, 30000)
+        console.log(`Redis 重连尝试 ${times}/10，等待 ${delay}ms`)
+        return delay
+      },
+      reconnectOnError: (err) => {
+        console.error('Redis 错误触发重连:', err.message)
+        return true
       }
     })
 
     redisConnection.on('connect', () => {
       console.log('✅ Redis 连接成功')
+      isRedisAvailable = true
+      startKeepAlive()
+    })
+
+    redisConnection.on('ready', () => {
+      console.log('✅ Redis 准备就绪')
       isRedisAvailable = true
     })
 
@@ -37,6 +49,11 @@ const createRedisConnection = () => {
     redisConnection.on('close', () => {
       console.warn('⚠️ Redis 连接关闭')
       isRedisAvailable = false
+      stopKeepAlive()
+    })
+
+    redisConnection.on('reconnecting', (times) => {
+      console.log(`🔄 Redis 正在重连，尝试次数: ${times}`)
     })
 
     return redisConnection
@@ -47,12 +64,30 @@ const createRedisConnection = () => {
   }
 }
 
+const startKeepAlive = () => {
+  stopKeepAlive()
+  keepAliveInterval = setInterval(async () => {
+    if (redisConnection && isRedisAvailable) {
+      try {
+        await redisConnection.ping()
+      } catch (err) {
+        console.warn('⚠️ Redis 心跳检测失败:', err.message)
+      }
+    }
+  }, 30000)
+}
+
+const stopKeepAlive = () => {
+  if (keepAliveInterval) {
+    clearInterval(keepAliveInterval)
+    keepAliveInterval = null
+  }
+}
+
 const connection = createRedisConnection()
 
-// 检查 Redis 是否可用
-export const isRedisReady = () => isRedisAvailable
+export const isRedisReady = () => isRedisAvailable && redisConnection?.status === 'ready'
 
-// 导出任务队列（如果 Redis 不可用，则返回 null）
 export const taskQueue = connection ? new Queue('task-processing', {
   connection,
   defaultJobOptions: {
@@ -62,7 +97,8 @@ export const taskQueue = connection ? new Queue('task-processing', {
     backoff: {
       type: 'exponential',
       delay: 5000
-    }
+    },
+    timeout: parseInt(process.env.TASK_TIMEOUT_MS) || 1800000
   }
 }) : null
 
@@ -73,7 +109,6 @@ export const TASK_EVENTS = {
   FAILED: 'failed'
 }
 
-// 只有在 Redis 可用时才启动 Worker
 let taskWorker = null
 if (connection) {
   const concurrency = parseInt(process.env.CONCURRENCY) || 2
@@ -83,7 +118,8 @@ if (connection) {
   }, {
     connection,
     concurrency,
-    lockDuration: parseInt(process.env.TASK_TIMEOUT_MS) || 1800000
+    lockDuration: parseInt(process.env.TASK_TIMEOUT_MS) || 1800000,
+    lockRenewTime: 60000
   })
 
   taskWorker.on('completed', (job, result) => {
@@ -100,6 +136,10 @@ if (connection) {
 
   taskWorker.on('stalled', (jobId) => {
     console.warn(`⏰ 任务超时停滞: ${jobId}`)
+  })
+
+  taskWorker.on('active', (job) => {
+    console.log(`🔄 开始处理任务: ${job.id}`)
   })
 }
 
