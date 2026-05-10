@@ -4,7 +4,7 @@ import cors from 'cors'
 import multer from 'multer'
 import { query, TABLES, TASK_STATUS, QUESTION_STATUS, WRONG_STATUS } from './config/neon.js'
 import { uploadImage } from './services/ossService.js'
-import { taskQueue, getQueueStats } from './queue.js'
+import { getTaskQueue, getQueueStats, taskWorker } from './queue.js'
 
 const app = express()
 const PORT = process.env.PORT || 3001
@@ -48,6 +48,10 @@ app.post('/api/tasks/upload', upload.array('files', 20), async (req, res) => {
       return res.status(400).json({ error: '没有上传文件' })
     }
 
+    // 初始化队列（如果尚未初始化）
+    const queue = await getTaskQueue()
+    console.log(`📥 [Upload] 收到 ${files.length} 个文件, studentId=${studentId}, queue=${queue ? 'connected' : 'null'}`)
+
     const tasks = []
 
     for (const file of files) {
@@ -61,6 +65,7 @@ app.post('/api/tasks/upload', upload.array('files', 20), async (req, res) => {
         }
 
         const imageUrl = await uploadImage(file.buffer, decodedName, studentId)
+        console.log(`  OSS 上传成功: ${decodedName} → ${imageUrl}`)
 
         const { rows } = await query(
           `INSERT INTO ${TABLES.TASKS} (student_id, image_url, original_name, status, result)
@@ -69,9 +74,11 @@ app.post('/api/tasks/upload', upload.array('files', 20), async (req, res) => {
         )
 
         const savedTask = rows[0]
+        console.log(`  DB 记录已创建: taskId=${savedTask.id}`)
 
-        if (taskQueue) {
-          await taskQueue.add('process-task', {
+        if (queue) {
+          console.log(`   提交任务到 Redis 队列: taskId=${savedTask.id}`)
+          const job = await queue.add('process-task', {
             taskId: savedTask.id,
             studentId: studentId,
             imageUrl: imageUrl,
@@ -80,6 +87,9 @@ app.post('/api/tasks/upload', upload.array('files', 20), async (req, res) => {
             attempts: parseInt(process.env.MAX_RETRIES) || 3,
             backoff: { type: 'exponential', delay: 5000 }
           })
+          console.log(`  ✅ 任务已加入队列: jobId=${job.id}`)
+        } else {
+          console.log(`  ⚠️  Redis 队列未连接，任务无法异步处理`)
         }
 
         tasks.push(savedTask)
@@ -113,6 +123,8 @@ app.post('/api/tasks/create-by-url', async (req, res) => {
       return res.status(400).json({ error: '缺少 studentId 或 imageUrl' })
     }
 
+    const queue = await getTaskQueue()
+
     const { rows } = await query(
       `INSERT INTO ${TABLES.TASKS} (student_id, image_url, original_name, status, result)
        VALUES ($1, $2, $3, $4, $5) RETURNING *`,
@@ -121,8 +133,8 @@ app.post('/api/tasks/create-by-url', async (req, res) => {
 
     const savedTask = rows[0]
 
-    if (taskQueue) {
-      await taskQueue.add('process-task', {
+    if (queue) {
+      await queue.add('process-task', {
         taskId: savedTask.id,
         studentId: studentId,
         imageUrl: imageUrl,
@@ -186,14 +198,15 @@ app.post('/api/tasks/:taskId/retry', async (req, res) => {
     if (rows.length === 0) return res.status(404).json({ error: '任务不存在' })
 
     const task = rows[0]
+    const queue = await getTaskQueue()
 
     await query(
       `UPDATE ${TABLES.TASKS} SET status = $1, result = $2, updated_at = NOW() WHERE id = $3`,
       [TASK_STATUS.PENDING, JSON.stringify({ progress: 0, retryCount: (task.result?.retryCount || 0) + 1, previousError: task.result?.error || null }), taskId]
     )
 
-    if (taskQueue) {
-      await taskQueue.add('process-task', {
+    if (queue) {
+      await queue.add('process-task', {
         taskId: task.id,
         studentId: task.student_id,
         imageUrl: task.image_url,
@@ -521,9 +534,24 @@ const __filename = fileURLToPath(import.meta.url)
 const __dirname = dirname(__filename)
 
 if (process.argv[1] === __filename || process.argv[1]?.endsWith('server/index.js')) {
-  app.listen(PORT, () => {
+  app.listen(PORT, async () => {
     console.log(`敏学后端服务已启动: http://localhost:${PORT}`)
-    console.log(`任务队列已就绪，并发数: ${process.env.CONCURRENCY || 2}`)
+
+    // 启动队列和 Worker
+    try {
+      const queue = await getTaskQueue()
+      const worker = taskWorker
+      console.log(`任务队列: ${queue ? '已连接' : '未连接'}`)
+      console.log(`Worker: ${worker ? '已启动' : '未启动'}`)
+      if (queue) {
+        const stats = await getQueueStats()
+        console.log(`队列统计: waiting=${stats.waiting}, active=${stats.active}, failed=${stats.failed}`)
+      }
+    } catch (err) {
+      console.error('队列初始化失败:', err.message)
+    }
+
+    console.log(`并发数: ${process.env.CONCURRENCY || 2}`)
     console.log(`数据库: Neon PostgreSQL`)
   })
 }
@@ -531,7 +559,10 @@ if (process.argv[1] === __filename || process.argv[1]?.endsWith('server/index.js
 export { app }
 
 export const createServer = (port = PORT) => {
-  return new Promise((resolve) => {
+  return new Promise(async (resolve) => {
+    // 启动时初始化队列
+    await getTaskQueue()
+
     const server = app.listen(port, () => {
       resolve(server)
     })

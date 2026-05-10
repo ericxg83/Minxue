@@ -5,6 +5,17 @@ import { AI_CONFIG, getAIHeaders, buildOCRPrompt, buildTaggingPrompt } from './c
 import { updateTaskStatus, createQuestions, batchUpdateQuestionTags, addWrongQuestions } from './services/neonService.js'
 import { uploadImage } from './services/ossService.js'
 
+// AI 密钥校验
+const AI_KEY = AI_CONFIG.API_KEY
+if (!AI_KEY) {
+  console.error('❌❌❌ [AI Config] AI_API_KEY 未设置！AI 识别将无法工作！')
+} else {
+  const maskedKey = AI_KEY.substring(0, 6) + '...' + AI_KEY.substring(AI_KEY.length - 4)
+  console.log(`🔑 [AI Config] API Key 已加载: ${maskedKey}`)
+}
+console.log(`🤖 [AI Config] Model: ${AI_CONFIG.MODEL}`)
+console.log(`🔗 [AI Config] Endpoint: ${AI_CONFIG.ENDPOINT}`)
+
 const TAG_SYNONYM_MAP = {
   '几何-三角形': '三角形',
   '直角三角形-勾股定理': '勾股定理',
@@ -60,10 +71,12 @@ const bufferToBase64 = (buffer) => {
 
 const downloadImage = async (imageUrl) => {
   try {
+    console.log(`   正在下载图片: ${imageUrl.substring(0, 80)}...`)
     const response = await axios.get(imageUrl, {
       responseType: 'arraybuffer',
       timeout: 30000
     })
+    console.log(`   图片下载成功: ${Buffer.from(response.data).length} bytes`)
     return Buffer.from(response.data)
   } catch (error) {
     console.error('下载图片失败:', error)
@@ -74,6 +87,9 @@ const downloadImage = async (imageUrl) => {
 const recognizeQuestions = async (imageBase64, taskId, retryCount = 0) => {
   const prompt = buildOCRPrompt()
   const startTime = Date.now()
+
+  console.log(`   🤖 开始调用 AI 视觉识别 (重试 ${retryCount}/${AI_CONFIG.MAX_RETRIES})...`)
+  console.log(`   图片 Base64 长度: ${imageBase64.length} chars`)
 
   const imageUrl = imageBase64.startsWith('data:')
     ? imageBase64
@@ -96,14 +112,19 @@ const recognizeQuestions = async (imageBase64, taskId, retryCount = 0) => {
   }
 
   try {
+    console.log(`   发送请求到: ${AI_CONFIG.ENDPOINT}`)
     const response = await axios.post(AI_CONFIG.ENDPOINT, requestBody, {
       headers: getAIHeaders(),
       timeout: AI_CONFIG.TIMEOUT
     })
 
     const duration = Date.now() - startTime
+    console.log(`   AI 响应耗时: ${duration}ms, status=${response.status}`)
+
     const content = response.data.choices[0]?.message?.content
     if (!content) throw new Error('AI 返回内容为空')
+
+    console.log(`   AI 原始响应 (前300字): ${content.substring(0, 300)}...`)
 
     let jsonStr = content
     const jsonMatch = content.match(/```json\n?([\s\S]*?)\n?```/) ||
@@ -148,16 +169,22 @@ const recognizeQuestions = async (imageBase64, taskId, retryCount = 0) => {
       }
     }) || []
 
+    console.log(`   识别完成: ${questions.length} 道题`)
     return { success: true, questions, duration }
   } catch (error) {
     const duration = Date.now() - startTime
     const errorMessage = error.response?.data?.message || error.message || '未知错误'
+    console.error(`   AI 识别失败: ${errorMessage}`)
+    if (error.response) {
+      console.error(`   HTTP status: ${error.response.status}`)
+      console.error(`   响应体: ${JSON.stringify(error.response.data).substring(0, 300)}`)
+    }
 
     const isNetworkError = !error.response || error.code === 'ECONNABORTED' || error.code === 'ETIMEDOUT'
     const shouldRetry = isNetworkError && retryCount < AI_CONFIG.MAX_RETRIES
 
     if (shouldRetry) {
-      console.log(`识别失败，${retryCount + 1}秒后重试 (${retryCount + 1}/${AI_CONFIG.MAX_RETRIES})...`)
+      console.log(`   ${retryCount + 1}秒后重试 (${retryCount + 1}/${AI_CONFIG.MAX_RETRIES})...`)
       await new Promise(resolve => setTimeout(resolve, (retryCount + 1) * 1000))
       return recognizeQuestions(imageBase64, taskId, retryCount + 1)
     }
@@ -248,16 +275,24 @@ export const processTask = async (job) => {
   const { taskId, studentId, imageUrl, originalName } = job.data
   const startTime = Date.now()
 
-  console.log(`🔄 开始处理任务: ${taskId} (${originalName})`)
+  console.log(`\n🔥🔥 [Worker] ==========================================`)
+  console.log(`🔥🔥 [Worker] 开始处理任务:`)
+  console.log(`   taskId: ${taskId}`)
+  console.log(`   studentId: ${studentId}`)
+  console.log(`   imageUrl: ${imageUrl}`)
+  console.log(`   originalName: ${originalName}`)
+  console.log(`🔥🔥 ==========================================\n`)
 
   try {
+    console.log(`📊 [Step 1/6] 更新任务状态为 PROCESSING...`)
     await job.updateProgress(5)
     await updateTaskStatus(taskId, TASK_STATUS.PROCESSING, {
       progress: 5,
       startedAt: new Date().toISOString()
     })
+    console.log(`✅ [Step 1/6] 状态更新完成`)
 
-    console.log(` 下载图片: ${imageUrl}`)
+    console.log(`📊 [Step 2/6] 从 OSS 下载图片...`)
     let imageBuffer
     try {
       imageBuffer = await downloadImage(imageUrl)
@@ -265,15 +300,16 @@ export const processTask = async (job) => {
       console.error('下载图片失败:', downloadError.message)
       throw new Error('下载图片失败: ' + downloadError.message)
     }
+    console.log(`✅ [Step 2/6] 图片下载完成: ${imageBuffer.length} bytes`)
 
     await job.updateProgress(15)
     await updateTaskStatus(taskId, TASK_STATUS.PROCESSING, { progress: 15 })
 
-    console.log(`🗜️ 压缩图片...`)
+    console.log(`📊 [Step 3/6] 压缩图片...`)
     let compressedBuffer
     try {
       compressedBuffer = await compressImageBuffer(imageBuffer)
-      console.log(`压缩完成: ${imageBuffer.length} → ${compressedBuffer.length} bytes`)
+      console.log(`✅ [Step 3/6] 压缩完成: ${imageBuffer.length} → ${compressedBuffer.length} bytes (${Math.round(compressedBuffer.length/imageBuffer.length*100)}%)`)
     } catch (compressError) {
       console.error('图片压缩失败:', compressError)
       await updateTaskStatus(taskId, TASK_STATUS.FAILED, {
@@ -291,10 +327,11 @@ export const processTask = async (job) => {
     await job.updateProgress(30)
     await updateTaskStatus(taskId, TASK_STATUS.PROCESSING, { progress: 30 })
 
-    console.log(`🤖 调用AI识别...`)
+    console.log(`📊 [Step 4/6] 调用 AI 视觉识别...`)
     const ocrResult = await recognizeQuestions(imageBase64, taskId)
 
     if (!ocrResult.success) {
+      console.error(`❌ [Step 4/6] AI 识别失败: ${ocrResult.error}`)
       await updateTaskStatus(taskId, TASK_STATUS.FAILED, {
         error: ocrResult.error || '识别失败',
         shouldRetry: ocrResult.shouldRetry,
@@ -309,8 +346,10 @@ export const processTask = async (job) => {
     const questions = ocrResult.questions || []
     const wrongCount = questions.filter(q => !q.is_correct).length
 
+    console.log(`✅ [Step 4/6] AI 识别成功: ${questions.length} 道题, ${wrongCount} 道错题, 耗时 ${Math.round(ocrResult.duration/1000)}s`)
+
     if (questions.length > 0) {
-      console.log(`📝 保存 ${questions.length} 道题目到数据库...`)
+      console.log(` [Step 5/6] 保存题目到数据库...`)
 
       const questionsWithStudentId = questions.map(q => ({
         ...q,
@@ -319,7 +358,7 @@ export const processTask = async (job) => {
 
       try {
         await createQuestions(questionsWithStudentId)
-        console.log(`✅ 题目保存成功`)
+        console.log(`✅ [Step 5/6] 题目保存成功`)
       } catch (saveError) {
         console.error('保存题目失败:', saveError)
       }
@@ -327,7 +366,7 @@ export const processTask = async (job) => {
       await job.updateProgress(80)
       await updateTaskStatus(taskId, TASK_STATUS.PROCESSING, { progress: 80 })
 
-      console.log(`🏷️ 生成AI标签...`)
+      console.log(` [Step 6/6] 生成AI标签...`)
       try {
         const tagResults = await generateTagsForQuestions(questions)
         const tagMap = {}
@@ -346,7 +385,7 @@ export const processTask = async (job) => {
           ai_tags: q.ai_tags
         }))
         await batchUpdateQuestionTags(tagUpdates)
-        console.log(`✅ AI标签保存成功`)
+        console.log(`✅ [Step 6/6] AI标签保存成功`)
       } catch (tagError) {
         console.error('AI标签生成失败（不影响主流程）:', tagError)
         for (const q of questions) {
@@ -363,7 +402,7 @@ export const processTask = async (job) => {
         .map(q => q.id)
 
       if (wrongQuestionIds.length > 0) {
-        console.log(`📕 添加 ${wrongQuestionIds.length} 道错题到错题本...`)
+        console.log(` 添加 ${wrongQuestionIds.length} 道错题到错题本...`)
         try {
           await addWrongQuestions(studentId, wrongQuestionIds)
           console.log(`✅ 错题添加成功`)
@@ -371,6 +410,8 @@ export const processTask = async (job) => {
           console.error('添加错题失败（不影响主流程）:', wrongError)
         }
       }
+    } else {
+      console.log(`⚠️  AI 未识别到任何题目`)
     }
 
     await job.updateProgress(100)
@@ -383,7 +424,13 @@ export const processTask = async (job) => {
       completedAt: new Date().toISOString()
     })
 
-    console.log(`🎉 任务完成: ${taskId}，发现 ${questions.length} 题，${wrongCount} 道错题，耗时 ${Math.round(duration / 1000)}s`)
+    console.log(`\n🎉🎉 [Worker] ==========================================`)
+    console.log(`🎉🎉 [Worker] 任务完成:`)
+    console.log(`   taskId: ${taskId}`)
+    console.log(`   题目数: ${questions.length}`)
+    console.log(`   错题数: ${wrongCount}`)
+    console.log(`   总耗时: ${Math.round(duration / 1000)}s`)
+    console.log(`🎉🎉🎉 ==========================================\n`)
 
     return {
       taskId,
@@ -393,7 +440,12 @@ export const processTask = async (job) => {
     }
   } catch (error) {
     const duration = Date.now() - startTime
-    console.error(` 任务处理失败: ${taskId}`, error.message)
+    console.error(`\n💥💥💥 [Worker] ==========================================`)
+    console.error(`💥💥💥 [Worker] 任务处理失败:`)
+    console.error(`   taskId: ${taskId}`)
+    console.error(`   错误: ${error.message}`)
+    console.error(`   堆栈: ${error.stack}`)
+    console.error(`💥💥 ==========================================\n`)
 
     try {
       await updateTaskStatus(taskId, TASK_STATUS.FAILED, {

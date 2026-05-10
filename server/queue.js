@@ -20,12 +20,18 @@ const redisConfig = process.env.REDIS_URL
       tls: {}
     }
 
+console.log(`🔧 [Queue] Redis 配置: ${redisConfig.url ? 'URL 模式' : 'HOST 模式'}`)
+if (redisConfig.url) {
+  console.log(`   Redis URL: ${redisConfig.url.substring(0, 30)}...`)
+}
+
 const initQueue = async () => {
   if (initPromise) return initPromise
   if (queueInitialized) return
 
   initPromise = (async () => {
     try {
+      console.log('🔄 [Queue] 开始初始化 Redis 队列...')
       const { Queue, Worker } = await import('bullmq')
 
       taskQueue = new Queue('task-processing', {
@@ -40,7 +46,9 @@ const initQueue = async () => {
 
       const concurrency = parseInt(process.env.CONCURRENCY) || 2
 
+      console.log(`🔄 [Queue] 创建 Worker (concurrency=${concurrency})...`)
       taskWorker = new Worker('task-processing', async (job) => {
+        console.log(`🔥 [Worker] 收到任务: jobId=${job.id}, taskId=${job.data.taskId}`)
         return processTask(job)
       }, {
         connection: redisConfig,
@@ -49,29 +57,34 @@ const initQueue = async () => {
       })
 
       taskWorker.on('completed', (job, result) => {
-        console.log(`✅ 任务完成: ${job.id} (taskId: ${job.data.taskId})`)
+        console.log(`✅ [Worker] 任务完成: jobId=${job.id}, taskId=${job.data.taskId}, result=${JSON.stringify(result)}`)
       })
 
       taskWorker.on('failed', (job, err) => {
-        console.error(`❌ 任务失败: ${job?.id} (taskId: ${job?.data?.taskId})`, err.message)
+        console.error(`❌ [Worker] 任务失败: jobId=${job?.id}, taskId=${job?.data?.taskId}, error=${err.message}`)
       })
 
       taskWorker.on('error', (err) => {
         if (err.message.includes('WRONGPASS') || err.message.includes('ECONNRESET') || err.message.includes('ETIMEDOUT')) {
           return
         }
-        console.error('️ Worker 错误:', err)
+        console.error('⚠️ [Worker] 错误:', err.message)
       })
 
       taskWorker.on('stalled', (jobId) => {
-        console.warn(`⏰ 任务超时停滞: ${jobId}`)
+        console.warn(`⏰ [Worker] 任务超时停滞: jobId=${jobId}`)
+      })
+
+      taskWorker.on('active', (job) => {
+        console.log(`▶️ [Worker] 任务开始处理: jobId=${job.id}, taskId=${job.data.taskId}`)
       })
 
       queueInitialized = true
-      console.log('✅ Redis 队列已连接')
+      console.log('✅ [Queue] Redis 队列已连接并就绪')
     } catch (err) {
-      console.warn(`️ Redis 队列不可用: ${err.message}`)
-      console.warn('   任务将使用同步处理模式')
+      console.error(`❌ [Queue] Redis 队列初始化失败: ${err.message}`)
+      console.error(`   错误堆栈: ${err.stack}`)
+      console.warn('️ 任务将使用同步处理模式')
       taskQueue = null
       taskWorker = null
       queueInitialized = true
