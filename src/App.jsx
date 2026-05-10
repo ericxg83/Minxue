@@ -34,7 +34,7 @@ import StudentSwitcher from './components/StudentSwitcher'
 import QuestionEditDrawer from './components/QuestionEditDrawer'
 import ScanQR from './pages/ScanQR'
 import Grading from './pages/Grading'
-import { useToast } from './components/ToastProvider'
+import { useToast, ToastProvider } from './components/ToastProvider'
 import dayjs from 'dayjs'
 import jsPDF from 'jspdf'
 
