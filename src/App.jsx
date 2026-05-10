@@ -495,14 +495,14 @@ export default function App() {
   }
 
   // Filter tasks
-  const filteredTasks = tasks.filter(t => {
+  const filteredTasks = (Array.isArray(tasks) ? tasks : []).filter(t => {
     if (t.student_id !== currentStudent?.id) return false
     if (processingFilter === 'all') return true
     return t.status === processingFilter
   })
 
   // Filter pending questions
-  const filteredQuestions = pendingQuestions.filter(q => {
+  const filteredQuestions = (Array.isArray(pendingQuestions) ? pendingQuestions : []).filter(q => {
     if (q.student_id !== currentStudent?.id) return false
     if (confirmFilter === 'all') return true
     return q.status === confirmFilter
@@ -547,7 +547,7 @@ export default function App() {
     return Array.from(tagSet)
   })()
 
-  const filteredWrongQuestions = wrongQuestions.filter(wq => {
+  const filteredWrongQuestions = (Array.isArray(wrongQuestions) ? wrongQuestions : []).filter(wq => {
     if (wq.student_id !== currentStudent?.id) return false
     if (bankFilter !== 'all' && wq.status !== bankFilter) return false
     if (selectedSubject !== 'all' && wq.subject !== selectedSubject) return false
@@ -564,7 +564,7 @@ export default function App() {
   })
 
   // Filter generated exams
-  const studentExams = generatedExams.filter(e => e.student_id === currentStudent?.id)
+  const studentExams = (Array.isArray(generatedExams) ? generatedExams : []).filter(e => e.student_id === currentStudent?.id)
   const filteredExams = studentExams.filter(exam => {
     if (examFilter === 'all') return true
     return exam.status === examFilter
@@ -587,7 +587,7 @@ export default function App() {
   // Delete task
   const handleDeleteTask = async (taskId) => {
     try {
-      setTasks(tasks.filter(t => t.id !== taskId))
+      setTasks((Array.isArray(tasks) ? tasks : []).filter(t => t.id !== taskId))
       Toast.show({ message: '删除成功', type: 'success' })
     } catch (error) {
       console.error('删除失败:', error)
@@ -607,7 +607,7 @@ export default function App() {
         await addWrongQuestions(currentStudent.id, wrongIds)
       }
 
-      setPendingQuestions(pendingQuestions.filter(q => !selectedConfirmIds.includes(q.id)))
+      setPendingQuestions((Array.isArray(pendingQuestions) ? pendingQuestions : []).filter(q => !selectedConfirmIds.includes(q.id)))
       setSelectedConfirmIds([])
 
       // 确认后刷新缓存并重新加载数据
@@ -626,7 +626,7 @@ export default function App() {
   // Generate exam
   const handleGenerateExam = async () => {
     try {
-      const selectedWrongQuestions = wrongQuestions.filter(wq => selectedQuestions.includes(wq.id))
+      const selectedWrongQuestions = (Array.isArray(wrongQuestions) ? wrongQuestions : []).filter(wq => selectedQuestions.includes(wq.id))
       if (selectedWrongQuestions.length === 0) {
         Toast.show({ message: '请先选择错题', type: 'error' })
         return
@@ -681,7 +681,7 @@ export default function App() {
   // Delete exam
   const handleDeleteExam = async (examId) => {
     try {
-      setGeneratedExams(generatedExams.filter(e => e.id !== examId))
+      setGeneratedExams((Array.isArray(generatedExams) ? generatedExams : []).filter(e => e.id !== examId))
       Toast.show({ message: '删除成功', type: 'success' })
     } catch (error) {
       console.error('删除失败:', error)
@@ -753,7 +753,7 @@ export default function App() {
 
   // Mark notification as read
   const handleMarkNotificationRead = (notificationId) => {
-    setNotifications(notifications.filter(n => n.id !== notificationId))
+    setNotifications((Array.isArray(notifications) ? notifications : []).filter(n => n.id !== notificationId))
   }
 
   // Search
@@ -958,9 +958,9 @@ export default function App() {
                 <section className="px-5 pt-4 mb-3 overflow-x-auto no-scrollbar">
                   <div className="flex gap-2 min-w-max">
                     {[
-                      { id: 'all', label: '全部待确认', count: pendingQuestions.filter(q => q.status === 'wrong' || q.status === 'correct' || q.isSuspicious).length },
-                      { id: 'wrong', label: '疑似错题', count: pendingQuestions.filter(q => q.status === 'wrong').length },
-                      { id: 'correct', label: '识别正确', count: pendingQuestions.filter(q => q.status === 'correct' && !q.isSuspicious).length }
+                      { id: 'all', label: '全部待确认', count: (Array.isArray(pendingQuestions) ? pendingQuestions : []).filter(q => q.status === 'wrong' || q.status === 'correct' || q.isSuspicious).length },
+                      { id: 'wrong', label: '疑似错题', count: (Array.isArray(pendingQuestions) ? pendingQuestions : []).filter(q => q.status === 'wrong').length },
+                      { id: 'correct', label: '识别正确', count: (Array.isArray(pendingQuestions) ? pendingQuestions : []).filter(q => q.status === 'correct' && !q.isSuspicious).length }
                     ].map((filter) => (
                       <button
                         key={filter.id}
@@ -1121,8 +1121,8 @@ export default function App() {
                 <section className="px-5 pt-4 mb-3 overflow-x-auto no-scrollbar">
                   <div className="flex gap-2 min-w-max">
                     {[
-                      { id: 'pending', label: '待复习', count: wrongQuestions.filter(wq => wq.status === 'pending').length },
-                      { id: 'mastered', label: '已掌握', count: wrongQuestions.filter(wq => wq.status === 'mastered').length }
+                      { id: 'pending', label: '待复习', count: (Array.isArray(wrongQuestions) ? wrongQuestions : []).filter(wq => wq.status === 'pending').length },
+                      { id: 'mastered', label: '已掌握', count: (Array.isArray(wrongQuestions) ? wrongQuestions : []).filter(wq => wq.status === 'mastered').length }
                     ].map((filter) => (
                       <button
                         key={filter.id}

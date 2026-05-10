@@ -70,7 +70,7 @@ export default function Students() {
   }
 
   // 筛选学生
-  const filteredStudents = students.filter(student => {
+  const filteredStudents = (Array.isArray(students) ? students : []).filter(student => {
     if (!searchKeyword) return true
     return student.name?.toLowerCase().includes(searchKeyword.toLowerCase())
   })

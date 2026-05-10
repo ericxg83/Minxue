@@ -120,9 +120,9 @@ export default function StudentSwitcher({ visible, onClose, onSelectStudent }) {
       if (!USE_MOCK_DATA) {
         await deleteStudent(student.id)
       }
-      setStudents(students.filter(s => s.id !== student.id))
+      setStudents((Array.isArray(students) ? students : []).filter(s => s.id !== student.id))
       if (currentStudent?.id === student.id) {
-        const remaining = students.filter(s => s.id !== student.id)
+        const remaining = (Array.isArray(students) ? students : []).filter(s => s.id !== student.id)
         setCurrentStudent(remaining.length > 0 ? remaining[0] : null)
       }
       setShowDeleteConfirm(null)

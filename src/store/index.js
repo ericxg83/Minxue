@@ -7,7 +7,7 @@ export const useStudentStore = create((set, get) => ({
   
   setCurrentStudent: (student) => set({ currentStudent: student }),
   
-  setStudents: (students) => set({ students }),
+  setStudents: (students) => set({ students: Array.isArray(students) ? students : [] }),
   
   addStudent: (student) => set((state) => ({
     students: [...state.students, student]
@@ -34,7 +34,7 @@ export const useTaskStore = create((set, get) => ({
   
   setCurrentTask: (task) => set({ currentTask: task }),
   
-  setTasks: (tasks) => set({ tasks }),
+  setTasks: (tasks) => set({ tasks: Array.isArray(tasks) ? tasks : [] }),
   
   addTask: (task) => set((state) => ({
     tasks: [task, ...state.tasks]
@@ -137,7 +137,7 @@ export const useWrongQuestionStore = create((set, get) => ({
   selectedQuestions: [],
   
   setWrongQuestions: (questions) => set((state) => ({ 
-    wrongQuestions: typeof questions === 'function' ? questions(state.wrongQuestions) : questions 
+    wrongQuestions: typeof questions === 'function' ? questions(state.wrongQuestions) : (Array.isArray(questions) ? questions : [])
   })),
   
   addWrongQuestion: (question) => set((state) => ({
@@ -191,7 +191,7 @@ export const useWrongQuestionStore = create((set, get) => ({
 export const usePendingQuestionStore = create((set, get) => ({
   pendingQuestions: [],
   
-  setPendingQuestions: (questions) => set({ pendingQuestions: questions }),
+  setPendingQuestions: (questions) => set({ pendingQuestions: Array.isArray(questions) ? questions : [] }),
   
   addPendingQuestion: (question) => set((state) => ({
     pendingQuestions: [question, ...state.pendingQuestions]
@@ -222,7 +222,7 @@ export const useExamStore = create((set, get) => ({
   
   setExams: (exams) => set({ exams }),
   
-  setGeneratedExams: (generatedExams) => set({ generatedExams }),
+  setGeneratedExams: (generatedExams) => set({ generatedExams: Array.isArray(generatedExams) ? generatedExams : [] }),
   
   addExam: (exam) => set((state) => ({
     exams: [exam, ...state.exams]

@@ -108,7 +108,7 @@ export default function Pending() {
       if (USE_MOCK_DATA) {
         console.log('当前学生ID:', currentStudent.id)
         console.log('pendingQuestions:', pendingQuestions)
-        const studentQuestions = pendingQuestions.filter(q => q.student_id === currentStudent.id)
+        const studentQuestions = (Array.isArray(pendingQuestions) ? pendingQuestions : []).filter(q => q.student_id === currentStudent.id)
         console.log('该学生的题目:', studentQuestions)
         
         const addedIds = getAddedToWrongBookIds()
@@ -265,7 +265,7 @@ export default function Pending() {
         saveAddedToWrongBookIds(addedIds)
 
         setQuestions(questions.filter(q => q.id !== question.id))
-        setPendingQuestions(pendingQuestions.filter(q => q.id !== question.id))
+        setPendingQuestions((Array.isArray(pendingQuestions) ? pendingQuestions : []).filter(q => q.id !== question.id))
       } else {
         // 检查是否已在错题本中
         const existingWrong = await getWrongQuestionsByStudent(currentStudent.id)
@@ -396,7 +396,7 @@ export default function Pending() {
         const remainingQuestions = questions.filter(q => !idsToAdd.includes(q.id))
         setQuestions(remainingQuestions)
 
-        const remainingPendingQuestions = pendingQuestions.filter(q => !idsToAdd.includes(q.id))
+        const remainingPendingQuestions = (Array.isArray(pendingQuestions) ? pendingQuestions : []).filter(q => !idsToAdd.includes(q.id))
         setPendingQuestions(remainingPendingQuestions)
       } else {
         await addWrongQuestions(currentStudent.id, idsToAdd)
@@ -527,7 +527,7 @@ export default function Pending() {
 
   // 所有学生疑似错题的总数量
   const getTotalWrongCount = () => {
-    return pendingQuestions.filter(q => q.status === 'wrong' || !q.is_correct).length
+    return (Array.isArray(pendingQuestions) ? pendingQuestions : []).filter(q => q.status === 'wrong' || !q.is_correct).length
   }
   
   const totalWrongCount = getTotalWrongCount()

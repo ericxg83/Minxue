@@ -189,7 +189,7 @@ export default function WrongBook({ onScanQR }) {
   }
 
   // 筛选错题（只显示当前学生的错题）
-  const filteredQuestions = wrongQuestions.filter(wq => {
+  const filteredQuestions = (Array.isArray(wrongQuestions) ? wrongQuestions : []).filter(wq => {
     // 首先过滤当前学生的错题
     if (wq.student_id !== currentStudent?.id) return false
     
@@ -218,7 +218,7 @@ export default function WrongBook({ onScanQR }) {
 
   // 获取各状态数量（只统计当前学生的错题）
   const getStatusCount = (status) => {
-    const studentQuestions = wrongQuestions.filter(wq => wq.student_id === currentStudent?.id)
+    const studentQuestions = (Array.isArray(wrongQuestions) ? wrongQuestions : []).filter(wq => wq.student_id === currentStudent?.id)
     if (status === 'all') return studentQuestions.length
     return studentQuestions.filter(wq => wq.status === status).length
   }
@@ -266,7 +266,7 @@ export default function WrongBook({ onScanQR }) {
 
   // 获取统计数据（只统计当前学生的错题）
   const getStats = () => {
-    const studentQuestions = wrongQuestions.filter(wq => wq.student_id === currentStudent?.id)
+    const studentQuestions = (Array.isArray(wrongQuestions) ? wrongQuestions : []).filter(wq => wq.student_id === currentStudent?.id)
     const total = studentQuestions.length
     const mastered = studentQuestions.filter(wq => wq.status === 'mastered').length
     const pending = total - mastered
@@ -496,7 +496,7 @@ export default function WrongBook({ onScanQR }) {
 
   // 计算所有学生未掌握题的总数（用于顶部按钮提醒）
   const getTotalPendingCount = () => {
-    return wrongQuestions.filter(wq => wq.status !== 'mastered').length
+    return (Array.isArray(wrongQuestions) ? wrongQuestions : []).filter(wq => wq.status !== 'mastered').length
   }
   
   const totalPendingCount = getTotalPendingCount()

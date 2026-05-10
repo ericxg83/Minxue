@@ -64,8 +64,8 @@ export default function Exam() {
       const dbIds = new Set(generatedExamList.map(e => e.id))
       
       // Keep locally added exams not yet in DB + all DB exams for this student
-      const localOnly = generatedExams.filter(e => e.student_id === currentStudent.id && !dbIds.has(e.id))
-      const otherStudents = generatedExams.filter(e => e.student_id !== currentStudent.id)
+      const localOnly = (Array.isArray(generatedExams) ? generatedExams : []).filter(e => e.student_id === currentStudent.id && !dbIds.has(e.id))
+      const otherStudents = (Array.isArray(generatedExams) ? generatedExams : []).filter(e => e.student_id !== currentStudent.id)
       
       setGeneratedExams([...generatedExamList, ...localOnly, ...otherStudents])
 
@@ -74,8 +74,8 @@ export default function Exam() {
           try {
             const freshData = await getGeneratedExamsByStudent(currentStudent.id, false)
             const dbIds = new Set(freshData.map(e => e.id))
-            const localOnly = generatedExams.filter(e => e.student_id === currentStudent.id && !dbIds.has(e.id))
-            const otherStudents = generatedExams.filter(e => e.student_id !== currentStudent.id)
+            const localOnly = (Array.isArray(generatedExams) ? generatedExams : []).filter(e => e.student_id === currentStudent.id && !dbIds.has(e.id))
+            const otherStudents = (Array.isArray(generatedExams) ? generatedExams : []).filter(e => e.student_id !== currentStudent.id)
             setGeneratedExams([...freshData, ...localOnly, ...otherStudents])
           } catch (error) {
             console.debug('后台刷新生成试卷失败:', error)
@@ -124,7 +124,7 @@ export default function Exam() {
     return allExams.filter(e => e.status === status).length
   }
   
-  const totalUngradedCount = generatedExams.filter(e => e.status === 'ungraded').length
+  const totalUngradedCount = (Array.isArray(generatedExams) ? generatedExams : []).filter(e => e.status === 'ungraded').length
   
   // 渲染状态标签 - 苹果风格
   const renderStatusTag = (status) => {
