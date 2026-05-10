@@ -17,15 +17,26 @@ export const uploadFile = async (fileBuffer, originalName, type, studentId) => {
 }
 
 export const uploadImage = async (fileBuffer, originalName, studentId) => {
-  // 检查文件类型
-  const ext = originalName.split('.').pop().toLowerCase()
+  // Decode UTF-8 filename (multer may pass latin1-encoded bytes)
+  let decodedName = originalName
+  try {
+    decodedName = Buffer.from(originalName, 'latin1').toString('utf8')
+    // Verify it's valid UTF-8
+    Buffer.from(decodedName, 'utf8').toString()
+  } catch (e) {
+    // If decoding fails, use original name
+    decodedName = originalName
+  }
+
+  // Extract extension from decoded filename
+  const ext = decodedName.split('.').pop().toLowerCase()
   const allowedExts = ['jpg', 'jpeg', 'png', 'webp']
 
   if (!allowedExts.includes(ext)) {
     throw new Error(`不支持的图片格式: ${ext}`)
   }
 
-  return uploadFile(fileBuffer, originalName, 'images', studentId)
+  return uploadFile(fileBuffer, decodedName, 'images', studentId)
 }
 
 export const uploadPDF = async (fileBuffer, originalName, studentId) => {

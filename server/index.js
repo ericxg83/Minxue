@@ -52,12 +52,20 @@ app.post('/api/tasks/upload', upload.array('files', 20), async (req, res) => {
 
     for (const file of files) {
       try {
-        const imageUrl = await uploadImage(file.buffer, `tasks/${studentId}`, file.originalname)
+        // Decode UTF-8 filename
+        let decodedName = file.originalname
+        try {
+          decodedName = Buffer.from(file.originalname, 'latin1').toString('utf8')
+        } catch (e) {
+          decodedName = file.originalname
+        }
+
+        const imageUrl = await uploadImage(file.buffer, decodedName, studentId)
 
         const { rows } = await query(
           `INSERT INTO ${TABLES.TASKS} (student_id, image_url, original_name, status, result)
            VALUES ($1, $2, $3, $4, $5) RETURNING *`,
-          [studentId, imageUrl, file.originalname || `照片_${Date.now()}.jpg`, TASK_STATUS.PENDING, JSON.stringify({ progress: 0 })]
+          [studentId, imageUrl, decodedName || `照片_${Date.now()}.jpg`, TASK_STATUS.PENDING, JSON.stringify({ progress: 0 })]
         )
 
         const savedTask = rows[0]
@@ -76,10 +84,10 @@ app.post('/api/tasks/upload', upload.array('files', 20), async (req, res) => {
 
         tasks.push(savedTask)
       } catch (fileError) {
-        console.error(`处理文件 ${file.originalname} 失败:`, fileError)
+        console.error(`处理文件 ${decodedName} 失败:`, fileError)
         tasks.push({
           error: true,
-          originalName: file.originalname,
+          originalName: decodedName,
           message: fileError.message
         })
       }
