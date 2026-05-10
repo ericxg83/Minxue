@@ -5,11 +5,7 @@ export const uploadFile = async (fileBuffer, originalName, type, studentId) => {
 
   try {
     const result = await ossClient.put(ossPath, fileBuffer)
-    return {
-      url: getCDNUrl(ossPath),
-      ossPath: result.name,
-      size: result.size
-    }
+    return getCDNUrl(ossPath)
   } catch (error) {
     console.error('OSS 上传失败:', error)
     throw new Error(`文件上传失败: ${error.message}`)

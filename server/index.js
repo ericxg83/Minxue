@@ -235,6 +235,76 @@ app.get('/api/queue/stats', async (req, res) => {
   }
 })
 
+// Diagnostics: Worker Status & System Health
+app.get('/api/diagnostics/worker-status', async (req, res) => {
+  try {
+    const queue = await getTaskQueue()
+    const stats = await getQueueStats()
+
+    // Get failed jobs details
+    let recentFailures = []
+    let recentActive = []
+    if (queue) {
+      try {
+        const failedJobs = await queue.getJobs(['failed'], 0, 4)
+        recentFailures = failedJobs.map(j => ({
+          jobId: j.id,
+          taskId: j.data?.taskId,
+          error: j.failedReason,
+          failedAt: j.finishedOn ? new Date(j.finishedOn).toISOString() : null,
+          attempts: j.attemptsMade
+        }))
+      } catch (e) {}
+
+      try {
+        const activeJobs = await queue.getJobs(['active'], 0, 4)
+        recentActive = activeJobs.map(j => ({
+          jobId: j.id,
+          taskId: j.data?.taskId,
+          progress: j.progress,
+          startedAt: j.processedOn ? new Date(j.processedOn).toISOString() : null
+        }))
+      } catch (e) {}
+    }
+
+    // Check OSS config
+    const ossConfigOk = !!(process.env.OSS_REGION && process.env.OSS_BUCKET && process.env.OSS_ACCESS_KEY_ID)
+
+    // Check AI config
+    const aiConfigOk = !!process.env.AI_API_KEY
+
+    res.json({
+      success: true,
+      timestamp: new Date().toISOString(),
+      worker: {
+        available: !!queue,
+        pid: process.pid
+      },
+      redis: {
+        connected: stats.available || false,
+        waiting: stats.waiting || 0,
+        active: stats.active || 0,
+        completed: stats.completed || 0,
+        failed: stats.failed || 0,
+        delayed: stats.delayed || 0
+      },
+      config: {
+        oss: ossConfigOk,
+        ai: aiConfigOk,
+        neon: !!process.env.NEON_DATABASE_URL,
+        redis: !!(process.env.REDIS_URL || process.env.REDIS_HOST)
+      },
+      jobs: {
+        recentFailures,
+        recentActive
+      }
+    })
+  } catch (error) {
+    console.error('诊断接口失败:', error)
+    res.status(500).json({ error: error.message })
+  }
+})
+
 // Students CRUD
 app.post('/api/students', async (req, res) => {
     try {
