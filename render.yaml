@@ -11,11 +11,7 @@ services:
         value: production
       - key: PORT
         value: 3001
-      - key: SUPABASE_URL
-        sync: false
-      - key: SUPABASE_KEY
-        sync: false
-      - key: SUPABASE_SERVICE_ROLE_KEY
+      - key: NEON_DATABASE_URL
         sync: false
       - key: AI_API_KEY
         sync: false
@@ -23,9 +19,17 @@ services:
         value: https://api-inference.modelscope.cn/v1/chat/completions
       - key: AI_MODEL
         value: Qwen/Qwen3-VL-8B-Instruct
-      - key: REDIS_HOST
+      - key: OSS_REGION
+        value: oss-cn-shanghai
+      - key: OSS_BUCKET
         sync: false
-      - key: REDIS_PASSWORD
+      - key: OSS_ACCESS_KEY_ID
+        sync: false
+      - key: OSS_ACCESS_KEY_SECRET
+        sync: false
+      - key: OSS_CDN_DOMAIN
+        sync: false
+      - key: REDIS_URL
         sync: false
       - key: MAX_RETRIES
         value: 3
