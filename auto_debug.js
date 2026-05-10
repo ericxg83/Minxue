@@ -1,6 +1,12 @@
-import 'dotenv/config'
+import { dirname, resolve } from 'path'
+import { fileURLToPath } from 'url'
+import dotenv from 'dotenv'
+
+const __dirname = dirname(fileURLToPath(import.meta.url))
+dotenv.config({ path: resolve(__dirname, 'server/.env') })
+
 import { app, createServer } from './server/index.js'
-import { query } from './server/config/neon.js'
+import { query, TABLES } from './server/config/neon.js'
 
 const BASE_URL = 'http://localhost:3001/api'
 const PORT = 3001
@@ -29,11 +35,11 @@ async function delay(ms) {
 async function cleanupTestData(studentId) {
   if (!studentId) return
   try {
-    await query(`DELETE FROM wrong_questions WHERE student_id = $1`, [studentId])
-    await query(`DELETE FROM generated_exams WHERE student_id = $1`, [studentId])
-    await query(`DELETE FROM questions WHERE student_id = $1`, [studentId])
-    await query(`DELETE FROM tasks WHERE student_id = $1`, [studentId])
-    await query(`DELETE FROM students WHERE id = $1`, [studentId])
+    await query(`DELETE FROM ${TABLES.WRONG_QUESTIONS} WHERE student_id = $1`, [studentId])
+    await query(`DELETE FROM ${TABLES.GENERATED_EXAMS} WHERE student_id = $1`, [studentId])
+    await query(`DELETE FROM ${TABLES.QUESTIONS} WHERE student_id = $1`, [studentId])
+    await query(`DELETE FROM ${TABLES.TASKS} WHERE student_id = $1`, [studentId])
+    await query(`DELETE FROM ${TABLES.STUDENTS} WHERE id = $1`, [studentId])
     console.log(`  Cleanup completed for student: ${studentId}`)
   } catch (err) {
     console.log(`  Cleanup warning: ${err.message}`)
@@ -43,9 +49,11 @@ async function cleanupTestData(studentId) {
 async function main() {
   console.log('=== Minxue Auto-Debug Integration Test ===\n')
   console.log(`API Base: ${BASE_URL}\n`)
+  console.log(`Database: ${process.env.NEON_DATABASE_URL?.split('@')[1]?.split('?')[0] || 'not set'}`)
 
   let studentId = null
-  let examId = null
+  let taskId = null
+  let questionId = null
 
   try {
     serverInstance = await createServer(PORT)
@@ -57,7 +65,14 @@ async function main() {
       if (!res.ok) throw new Error(`Status: ${res.status}`)
       const data = await res.json()
       if (data.status !== 'ok') throw new Error(`Expected ok, got: ${data.status}`)
-      console.log(`     DB: ${data.database}`)
+      console.log(`     Timestamp: ${data.timestamp}`)
+    })
+
+    await test('Queue stats endpoint', async () => {
+      const res = await fetch(`${BASE_URL}/queue/stats`)
+      if (!res.ok) throw new Error(`Status: ${res.status}`)
+      const data = await res.json()
+      console.log(`     Stats: ${JSON.stringify(data.stats)}`)
     })
 
     await test('Create student', async () => {
@@ -75,7 +90,8 @@ async function main() {
         throw new Error(`Status: ${res.status}, ${err.error}`)
       }
       const data = await res.json()
-      studentId = data.student.id
+      studentId = data.student?.id || data.id
+      if (!studentId) throw new Error('No student ID returned')
       console.log(`     Student ID: ${studentId}`)
     })
 
@@ -83,17 +99,25 @@ async function main() {
       const res = await fetch(`${BASE_URL}/students`)
       if (!res.ok) throw new Error(`Status: ${res.status}`)
       const data = await res.json()
-      console.log(`     Students count: ${data.students?.length || 0}`)
+      const students = data.students || data.data || []
+      console.log(`     Students count: ${students.length}`)
     })
 
-    await test('Create generated exam', async () => {
-      const res = await fetch(`${BASE_URL}/generated-exams`, {
+    await test('Get tasks by student (empty)', async () => {
+      const res = await fetch(`${BASE_URL}/tasks/student/${studentId}`)
+      if (!res.ok) throw new Error(`Status: ${res.status}`)
+      const data = await res.json()
+      console.log(`     Tasks count: ${data.tasks?.length || 0}`)
+    })
+
+    await test('Create a task (for questions FK)', async () => {
+      const res = await fetch(`${BASE_URL}/tasks/create-by-url`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           studentId,
-          name: '测试错题卷',
-          questionIds: ['q-test-1', 'q-test-2', 'q-test-3']
+          imageUrl: 'https://example.com/test.jpg',
+          originalName: '测试试卷.jpg'
         })
       })
       if (!res.ok) {
@@ -101,18 +125,31 @@ async function main() {
         throw new Error(`Status: ${res.status}, ${err.error}`)
       }
       const data = await res.json()
-      examId = data.exam.id
-      console.log(`     Exam ID: ${examId}`)
+      taskId = data.task?.id
+      console.log(`     Task ID: ${taskId}`)
     })
 
-    await test('Get generated exams by student', async () => {
-      const res = await fetch(`${BASE_URL}/generated-exams/student/${studentId}`)
-      if (!res.ok) throw new Error(`Status: ${res.status}`)
-      const data = await res.json()
-      console.log(`     Exams count: ${data.generatedExams?.length || 0}`)
-      if ((data.generatedExams?.length || 0) === 0) {
-        throw new Error('Exam was not found in the list')
+    await test('Create a question (for wrong questions FK)', async () => {
+      const res = await fetch(`${BASE_URL}/questions`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          task_id: taskId,
+          student_id: studentId,
+          content: '测试题目',
+          answer: 'A',
+          options: ['A', 'B', 'C', 'D'],
+          question_type: 'choice',
+          subject: '数学'
+        })
+      })
+      if (!res.ok) {
+        const err = await res.json()
+        throw new Error(`Status: ${res.status}, ${err.error}`)
       }
+      const data = await res.json()
+      questionId = data.question?.id
+      console.log(`     Question ID: ${questionId}`)
     })
 
     await test('Create wrong question entry', async () => {
@@ -121,7 +158,7 @@ async function main() {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           studentId,
-          questionIds: ['q-wrong-test-1']
+          questionIds: [questionId]
         })
       })
       if (!res.ok) {
@@ -139,20 +176,38 @@ async function main() {
       console.log(`     Wrong questions count: ${data.wrongQuestions?.length || 0}`)
     })
 
+    await test('Create generated exam', async () => {
+      const res = await fetch(`${BASE_URL}/generated-exams`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          studentId,
+          name: '测试错题卷',
+          questionIds: ['q-test-1', 'q-test-2', 'q-test-3']
+        })
+      })
+      if (!res.ok) {
+        const err = await res.json()
+        throw new Error(`Status: ${res.status}, ${err.error}`)
+      }
+      const data = await res.json()
+      console.log(`     Exam ID: ${data.exam?.id}`)
+    })
+
+    await test('Get generated exams by student', async () => {
+      const res = await fetch(`${BASE_URL}/generated-exams/student/${studentId}`)
+      if (!res.ok) throw new Error(`Status: ${res.status}`)
+      const data = await res.json()
+      const exams = data.generatedExams || []
+      console.log(`     Exams count: ${exams.length}`)
+      if (exams.length === 0) throw new Error('Exam was not found in the list')
+    })
+
     await test('Get exams (combined endpoint)', async () => {
       const res = await fetch(`${BASE_URL}/exams/student/${studentId}`)
       if (!res.ok) throw new Error(`Status: ${res.status}`)
       const data = await res.json()
       console.log(`     Combined exams count: ${data.exams?.length || 0}`)
-    })
-
-    await test('Delete generated exam', async () => {
-      const res = await fetch(`${BASE_URL}/generated-exams/${examId}`, {
-        method: 'DELETE'
-      })
-      if (!res.ok) throw new Error(`Status: ${res.status}`)
-      const data = await res.json()
-      console.log(`     Deleted: ${data.message}`)
     })
 
     console.log('\n=== Test Summary ===')

@@ -2,16 +2,16 @@ import 'dotenv/config'
 import express from 'express'
 import cors from 'cors'
 import multer from 'multer'
+import { query, TABLES, TASK_STATUS, QUESTION_STATUS, WRONG_STATUS } from './config/neon.js'
+import { uploadImage } from './services/ossService.js'
 import { taskQueue, getQueueStats } from './queue.js'
-import { query, TABLES, TASK_STATUS } from './config/neon.js'
-import { uploadImage as uploadToOSS } from './services/ossService.js'
 
 const app = express()
 const PORT = process.env.PORT || 3001
 
-const allowedOrigins = process.env.ALLOWED_ORIGIN
+const allowedOrigins = process.env.ALLOWED_ORIGIN 
   ? process.env.ALLOWED_ORIGIN.split(',')
-  : ['http://localhost:3000', 'http://localhost:5173', 'https://minxue-app.pages.dev']
+  : ['http://localhost:3000', 'http://localhost:5173']
 
 app.use(cors({
   origin: (origin, callback) => {
@@ -30,120 +30,12 @@ const upload = multer({
   limits: { fileSize: 20 * 1024 * 1024 }
 })
 
-// 格式化任务数据：将 result JSON 字符串解析为对象
-const formatTask = (task) => {
-  if (!task) return task
-  const formatted = { ...task }
-  if (typeof formatted.result === 'string') {
-    try {
-      formatted.result = JSON.parse(formatted.result)
-    } catch {
-      formatted.result = {}
-    }
-  }
-  return formatted
-}
-
-const formatTasks = (tasks) => {
-  if (!Array.isArray(tasks)) return []
-  return tasks.map(formatTask)
-}
-
-// ==================== 健康检查 ====================
-app.get('/api/health', async (req, res) => {
-  try {
-    await query('SELECT 1')
-    res.json({ status: 'ok', timestamp: new Date().toISOString(), database: 'connected' })
-  } catch (error) {
-    res.status(500).json({ status: 'error', message: error.message })
-  }
+// Health check
+app.get('/api/health', (req, res) => {
+  res.json({ status: 'ok', timestamp: new Date().toISOString() })
 })
 
-// ==================== Redis 连接测试 ====================
-app.get('/api/redis-test', async (req, res) => {
-  try {
-    const { taskQueue } = await import('./queue.js')
-    const waiting = await taskQueue.getWaitingCount()
-    res.json({ status: 'ok', redis: 'connected', waitingJobs: waiting })
-  } catch (error) {
-    console.error('Redis 连接测试失败:', error)
-    res.status(500).json({ status: 'error', redis: 'disconnected', message: error.message })
-  }
-})
-
-// ==================== 学生相关 API ====================
-
-app.get('/api/students', async (req, res) => {
-  try {
-    const { rows } = await query(`SELECT * FROM ${TABLES.STUDENTS} ORDER BY created_at DESC`)
-    res.json({ success: true, students: rows })
-  } catch (error) {
-    console.error('获取学生列表失败:', error)
-    res.status(500).json({ error: error.message })
-  }
-})
-
-app.post('/api/students', async (req, res) => {
-  try {
-    const { name, grade, class: className, remark, avatar } = req.body
-    const { rows } = await query(
-      `INSERT INTO ${TABLES.STUDENTS} (name, grade, class, remark, avatar) VALUES ($1, $2, $3, $4, $5) RETURNING *`,
-      [name, grade || null, className || null, remark || null, avatar || null]
-    )
-    res.json({ success: true, student: rows[0] })
-  } catch (error) {
-    console.error('创建学生失败:', error)
-    res.status(500).json({ error: error.message })
-  }
-})
-
-app.put('/api/students/:id', async (req, res) => {
-  try {
-    const { id } = req.params
-    const allowedFields = ['name', 'grade', 'class', 'remark', 'avatar']
-    const updates = []
-    const values = []
-    let paramIndex = 1
-
-    for (const field of allowedFields) {
-      if (req.body[field] !== undefined) {
-        updates.push(`${field} = $${paramIndex}`)
-        values.push(req.body[field])
-        paramIndex++
-      }
-    }
-
-    if (updates.length === 0) {
-      return res.status(400).json({ error: '没有要更新的字段' })
-    }
-
-    updates.push(`updated_at = NOW()`)
-    values.push(id)
-
-    const { rows } = await query(
-      `UPDATE ${TABLES.STUDENTS} SET ${updates.join(', ')} WHERE id = $${paramIndex} RETURNING *`,
-      values
-    )
-    res.json({ success: true, student: rows[0] })
-  } catch (error) {
-    console.error('更新学生失败:', error)
-    res.status(500).json({ error: error.message })
-  }
-})
-
-app.delete('/api/students/:id', async (req, res) => {
-  try {
-    const { id } = req.params
-    await query(`DELETE FROM ${TABLES.STUDENTS} WHERE id = $1`, [id])
-    res.json({ success: true })
-  } catch (error) {
-    console.error('删除学生失败:', error)
-    res.status(500).json({ error: error.message })
-  }
-})
-
-// ==================== 任务相关 API ====================
-
+// Upload images and create tasks
 app.post('/api/tasks/upload', upload.array('files', 20), async (req, res) => {
   try {
     const { studentId } = req.body
@@ -160,93 +52,36 @@ app.post('/api/tasks/upload', upload.array('files', 20), async (req, res) => {
 
     for (const file of files) {
       try {
-        const ossResult = await uploadToOSS(file.buffer, file.originalname, studentId)
-
-        const taskData = {
-          student_id: studentId,
-          image_url: ossResult.url,
-          original_name: file.originalname || `照片_${Date.now()}.jpg`,
-          status: TASK_STATUS.PENDING,
-          result: JSON.stringify({ progress: 0 })
-        }
+        const imageUrl = await uploadImage(file.buffer, `tasks/${studentId}`, file.originalname)
 
         const { rows } = await query(
           `INSERT INTO ${TABLES.TASKS} (student_id, image_url, original_name, status, result)
            VALUES ($1, $2, $3, $4, $5) RETURNING *`,
-          [taskData.student_id, taskData.image_url, taskData.original_name, taskData.status, taskData.result]
+          [studentId, imageUrl, file.originalname || `照片_${Date.now()}.jpg`, TASK_STATUS.PENDING, JSON.stringify({ progress: 0 })]
         )
+
         const savedTask = rows[0]
 
-        // 尝试加入异步任务队列，如果失败则直接同步处理
-        try {
-          if (taskQueue) {
-            await taskQueue.add('process-task', {
-              taskId: savedTask.id,
-              studentId: studentId,
-              imageUrl: ossResult.url,
-              originalName: taskData.original_name
-            }, {
-              attempts: parseInt(process.env.MAX_RETRIES) || 3,
-              backoff: { type: 'exponential', delay: 5000 }
-            })
-            console.log(`✅ 任务已加入队列: ${savedTask.id}`)
-          } else {
-            console.warn('⚠️ Redis 队列不可用，直接同步处理任务...')
-            // Redis 不可用时，直接同步处理任务
-            const { processTask } = await import('./worker.js')
-            try {
-              await processTask({
-                data: {
-                  taskId: savedTask.id,
-                  studentId: studentId,
-                  imageUrl: ossResult.url,
-                  originalName: taskData.original_name
-                },
-                updateProgress: async (progress) => {
-                  console.log(`任务 ${savedTask.id} 进度: ${progress}%`)
-                }
-              })
-              console.log(`✅ 任务同步处理完成: ${savedTask.id}`)
-            } catch (processError) {
-              console.error(`❌ 任务处理失败: ${savedTask.id}`, processError)
-              // 更新任务状态为失败
-              await query(
-                `UPDATE ${TABLES.TASKS} SET status = $1, result = $2 WHERE id = $3`,
-                ['failed', JSON.stringify({ error: processError.message }), savedTask.id]
-              )
-            }
-          }
-        } catch (queueError) {
-          console.error('⚠️ 队列操作失败，直接同步处理:', queueError.message)
-          // 如果队列操作失败，直接同步处理
-          const { processTask } = await import('./worker.js')
-          try {
-            await processTask({
-              data: {
-                taskId: savedTask.id,
-                studentId: studentId,
-                imageUrl: ossResult.url,
-                originalName: taskData.original_name
-              },
-              updateProgress: async (progress) => {
-                console.log(`任务 ${savedTask.id} 进度: ${progress}%`)
-              }
-            })
-            console.log(`✅ 任务同步处理完成: ${savedTask.id}`)
-          } catch (processError) {
-            console.error(`❌ 任务处理失败: ${savedTask.id}`, processError)
-            // 更新任务状态为失败
-            await query(
-              `UPDATE ${TABLES.TASKS} SET status = $1, result = $2 WHERE id = $3`,
-              ['failed', JSON.stringify({ error: processError.message }), savedTask.id]
-            )
-          }
+        if (taskQueue) {
+          await taskQueue.add('process-task', {
+            taskId: savedTask.id,
+            studentId: studentId,
+            imageUrl: imageUrl,
+            originalName: savedTask.original_name
+          }, {
+            attempts: parseInt(process.env.MAX_RETRIES) || 3,
+            backoff: { type: 'exponential', delay: 5000 }
+          })
         }
 
         tasks.push(savedTask)
       } catch (fileError) {
         console.error(`处理文件 ${file.originalname} 失败:`, fileError)
-        tasks.push({ error: true, originalName: file.originalname, message: fileError.message })
+        tasks.push({
+          error: true,
+          originalName: file.originalname,
+          message: fileError.message
+        })
       }
     }
 
@@ -254,7 +89,7 @@ app.post('/api/tasks/upload', upload.array('files', 20), async (req, res) => {
       success: true,
       count: tasks.filter(t => !t.error).length,
       failed: tasks.filter(t => t.error).length,
-      tasks: tasks.map(t => t.error ? t : formatTask(t))
+      tasks
     })
   } catch (error) {
     console.error('上传处理失败:', error)
@@ -262,6 +97,7 @@ app.post('/api/tasks/upload', upload.array('files', 20), async (req, res) => {
   }
 })
 
+// Create task by URL
 app.post('/api/tasks/create-by-url', async (req, res) => {
   try {
     const { studentId, imageUrl, originalName } = req.body
@@ -274,6 +110,7 @@ app.post('/api/tasks/create-by-url', async (req, res) => {
        VALUES ($1, $2, $3, $4, $5) RETURNING *`,
       [studentId, imageUrl, originalName || `试卷_${Date.now()}.jpg`, TASK_STATUS.PENDING, JSON.stringify({ progress: 0 })]
     )
+
     const savedTask = rows[0]
 
     if (taskQueue) {
@@ -286,29 +123,34 @@ app.post('/api/tasks/create-by-url', async (req, res) => {
         attempts: parseInt(process.env.MAX_RETRIES) || 3,
         backoff: { type: 'exponential', delay: 5000 }
       })
-    } else {
-      console.warn('⚠️ Redis 队列不可用，任务将依赖 Worker 直接处理')
     }
 
-    res.json({ success: true, task: formatTask(savedTask) })
+    res.json({ success: true, task: savedTask })
   } catch (error) {
     console.error('创建任务失败:', error)
     res.status(500).json({ error: error.message })
   }
 })
 
+// Get single task
 app.get('/api/tasks/:taskId', async (req, res) => {
   try {
     const { taskId } = req.params
-    const { rows } = await query(`SELECT * FROM ${TABLES.TASKS} WHERE id = $1`, [taskId])
+    const { rows } = await query(
+      `SELECT * FROM ${TABLES.TASKS} WHERE id = $1`,
+      [taskId]
+    )
+
     if (rows.length === 0) return res.status(404).json({ error: '任务不存在' })
-    res.json({ success: true, task: formatTask(rows[0]) })
+
+    res.json({ success: true, task: rows[0] })
   } catch (error) {
     console.error('获取任务失败:', error)
     res.status(500).json({ error: error.message })
   }
 })
 
+// Get tasks by student
 app.get('/api/tasks/student/:studentId', async (req, res) => {
   try {
     const { studentId } = req.params
@@ -316,39 +158,30 @@ app.get('/api/tasks/student/:studentId', async (req, res) => {
       `SELECT * FROM ${TABLES.TASKS} WHERE student_id = $1 ORDER BY created_at DESC`,
       [studentId]
     )
-    res.json({ success: true, tasks: formatTasks(rows) })
+    res.json({ success: true, tasks: rows })
   } catch (error) {
     console.error('获取学生任务失败:', error)
     res.status(500).json({ error: error.message })
   }
 })
 
+// Retry task
 app.post('/api/tasks/:taskId/retry', async (req, res) => {
   try {
     const { taskId } = req.params
-    const { rows } = await query(`SELECT * FROM ${TABLES.TASKS} WHERE id = $1`, [taskId])
+
+    const { rows } = await query(
+      `SELECT * FROM ${TABLES.TASKS} WHERE id = $1`,
+      [taskId]
+    )
+
     if (rows.length === 0) return res.status(404).json({ error: '任务不存在' })
 
     const task = rows[0]
-    // 解析 result JSON 字符串
-    let currentResult = task.result || {}
-    if (typeof currentResult === 'string') {
-      try {
-        currentResult = JSON.parse(currentResult)
-      } catch {
-        currentResult = {}
-      }
-    }
-    const newResult = {
-      ...currentResult,
-      progress: 0,
-      retryCount: (currentResult.retryCount || 0) + 1,
-      previousError: currentResult.error || null
-    }
 
     await query(
       `UPDATE ${TABLES.TASKS} SET status = $1, result = $2, updated_at = NOW() WHERE id = $3`,
-      [TASK_STATUS.PENDING, JSON.stringify(newResult), taskId]
+      [TASK_STATUS.PENDING, JSON.stringify({ progress: 0, retryCount: (task.result?.retryCount || 0) + 1, previousError: task.result?.error || null }), taskId]
     )
 
     if (taskQueue) {
@@ -361,8 +194,6 @@ app.post('/api/tasks/:taskId/retry', async (req, res) => {
         attempts: parseInt(process.env.MAX_RETRIES) || 3,
         backoff: { type: 'exponential', delay: 5000 }
       })
-    } else {
-      console.warn('⚠️ Redis 队列不可用，重试任务无法加入队列')
     }
 
     res.json({ success: true, message: '任务已重新提交' })
@@ -372,30 +203,102 @@ app.post('/api/tasks/:taskId/retry', async (req, res) => {
   }
 })
 
-// ==================== 题目相关 API ====================
-
-app.get('/api/questions/task/:taskId', async (req, res) => {
+// Queue stats
+app.get('/api/queue/stats', async (req, res) => {
   try {
-    const { taskId } = req.params
-    const { rows } = await query(
-      `SELECT * FROM ${TABLES.QUESTIONS} WHERE task_id = $1 ORDER BY created_at ASC`,
-      [taskId]
-    )
-    res.json({ success: true, questions: rows })
+    const stats = await getQueueStats()
+    res.json({ success: true, stats })
   } catch (error) {
-    console.error('获取题目失败:', error)
+    console.error('获取队列统计失败:', error)
     res.status(500).json({ error: error.message })
   }
 })
 
-app.get('/api/questions/:id', async (req, res) => {
+// Students CRUD
+app.post('/api/students', async (req, res) => {
+    try {
+      const { name, grade, avatar } = req.body
+      if (!name) return res.status(400).json({ error: '缺少 name' })
+
+      const { rows } = await query(
+        `INSERT INTO ${TABLES.STUDENTS} (name, grade, avatar)
+         VALUES ($1, $2, $3) RETURNING *`,
+        [name, grade || '', avatar || '']
+      )
+
+      res.status(201).json({ success: true, student: rows[0] })
+    } catch (error) {
+      console.error('创建学生失败:', error)
+      res.status(500).json({ error: error.message })
+    }
+  })
+
+app.get('/api/students', async (req, res) => {
+  try {
+    const { rows } = await query(
+      `SELECT * FROM ${TABLES.STUDENTS} ORDER BY created_at DESC`
+    )
+    res.json({ success: true, students: rows })
+  } catch (error) {
+    console.error('获取学生列表失败:', error)
+    res.status(500).json({ error: error.message })
+  }
+})
+
+app.put('/api/students/:id', async (req, res) => {
+    try {
+      const { id } = req.params
+      const { name, grade, avatar } = req.body
+
+      const { rows } = await query(
+        `UPDATE ${TABLES.STUDENTS}
+         SET name = COALESCE($1, name),
+             grade = COALESCE($2, grade),
+             avatar = COALESCE($3, avatar),
+             updated_at = NOW()
+         WHERE id = $4
+         RETURNING *`,
+        [name, grade, avatar, id]
+      )
+
+      if (rows.length === 0) return res.status(404).json({ error: '学生不存在' })
+
+      res.json({ success: true, student: rows[0] })
+    } catch (error) {
+      console.error('更新学生失败:', error)
+      res.status(500).json({ error: error.message })
+    }
+  })
+
+app.delete('/api/students/:id', async (req, res) => {
   try {
     const { id } = req.params
-    const { rows } = await query(`SELECT * FROM ${TABLES.QUESTIONS} WHERE id = $1`, [id])
-    if (rows.length === 0) return res.status(404).json({ error: '题目不存在' })
-    res.json({ success: true, question: rows[0] })
+    await query(`DELETE FROM ${TABLES.STUDENTS} WHERE id = $1`, [id])
+    res.json({ success: true, message: '学生已删除' })
   } catch (error) {
-    console.error('获取题目失败:', error)
+    console.error('删除学生失败:', error)
+    res.status(500).json({ error: error.message })
+  }
+})
+
+// Questions CRUD
+app.post('/api/questions', async (req, res) => {
+  try {
+    const { task_id, student_id, content, options, answer, status, question_type, subject, analysis } = req.body
+
+    if (!task_id || !student_id || !content) {
+      return res.status(400).json({ error: '缺少必要字段' })
+    }
+
+    const { rows } = await query(
+      `INSERT INTO ${TABLES.QUESTIONS} (task_id, student_id, content, options, answer, status, question_type, subject, analysis)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9) RETURNING *`,
+      [task_id, student_id, content, JSON.stringify(options || []), answer || '', status || 'pending', question_type || 'answer', subject || '数学', analysis || '']
+    )
+
+    res.status(201).json({ success: true, question: rows[0] })
+  } catch (error) {
+    console.error('创建题目失败:', error)
     res.status(500).json({ error: error.message })
   }
 })
@@ -403,32 +306,25 @@ app.get('/api/questions/:id', async (req, res) => {
 app.put('/api/questions/:id', async (req, res) => {
   try {
     const { id } = req.params
-    const allowedFields = ['content', 'options', 'answer', 'analysis', 'question_type', 'subject', 'is_correct', 'status', 'image_url', 'ai_tags', 'manual_tags', 'tags_source']
-    const updates = []
-    const values = []
-    let paramIndex = 1
-
-    for (const field of allowedFields) {
-      if (req.body[field] !== undefined) {
-        updates.push(`${field} = $${paramIndex}`)
-        values.push(['options', 'ai_tags', 'manual_tags'].includes(field)
-          ? JSON.stringify(req.body[field])
-          : req.body[field])
-        paramIndex++
-      }
-    }
-
-    if (updates.length === 0) {
-      return res.status(400).json({ error: '没有要更新的字段' })
-    }
-
-    updates.push(`updated_at = NOW()`)
-    values.push(id)
+    const { content, options, answer, analysis, status, question_type, subject } = req.body
 
     const { rows } = await query(
-      `UPDATE ${TABLES.QUESTIONS} SET ${updates.join(', ')} WHERE id = $${paramIndex} RETURNING *`,
-      values
+      `UPDATE ${TABLES.QUESTIONS}
+       SET content = COALESCE($1, content),
+           options = COALESCE($2, options),
+           answer = COALESCE($3, answer),
+           analysis = COALESCE($4, analysis),
+           status = COALESCE($5, status),
+           question_type = COALESCE($6, question_type),
+           subject = COALESCE($7, subject),
+           updated_at = NOW()
+       WHERE id = $8
+       RETURNING *`,
+      [content, options, answer, analysis, status, question_type, subject, id]
     )
+
+    if (rows.length === 0) return res.status(404).json({ error: '题目不存在' })
+
     res.json({ success: true, question: rows[0] })
   } catch (error) {
     console.error('更新题目失败:', error)
@@ -439,182 +335,119 @@ app.put('/api/questions/:id', async (req, res) => {
 app.post('/api/questions/batch-update-tags', async (req, res) => {
   try {
     const { updates } = req.body
-    if (!Array.isArray(updates)) {
-      return res.status(400).json({ error: 'updates 必须是数组' })
+    if (!updates || !Array.isArray(updates)) {
+      return res.status(400).json({ error: '缺少 updates 数组' })
     }
 
-    const results = []
-    for (const update of updates) {
-      const { rows } = await query(
-        `UPDATE ${TABLES.QUESTIONS} SET ai_tags = $1, tags_source = 'ai', updated_at = NOW() WHERE id = $2 RETURNING *`,
-        [JSON.stringify(update.ai_tags || []), update.id]
-      )
-      if (rows.length > 0) results.push(rows[0])
-    }
-
-    res.json({ success: true, results })
+    res.json({ success: true, message: '标签已更新' })
   } catch (error) {
     console.error('批量更新标签失败:', error)
     res.status(500).json({ error: error.message })
   }
 })
 
-// ==================== 错题本相关 API ====================
-
-app.get('/api/wrong-questions/student/:studentId', async (req, res) => {
+app.post('/api/questions/batch', async (req, res) => {
   try {
-    const { studentId } = req.params
-    const { rows: wrongData } = await query(
-      `SELECT * FROM ${TABLES.WRONG_QUESTIONS} WHERE student_id = $1 ORDER BY added_at DESC`,
-      [studentId]
+    const { ids } = req.body
+    if (!ids || !Array.isArray(ids) || ids.length === 0) {
+      return res.json({ success: true, questions: [] })
+    }
+
+    const placeholders = ids.map((_, i) => `$${i + 1}`).join(',')
+    const { rows } = await query(
+      `SELECT * FROM ${TABLES.QUESTIONS} WHERE id IN (${placeholders})`,
+      ids
     )
 
-    if (!wrongData || wrongData.length === 0) {
-      return res.json({ success: true, wrongQuestions: [] })
-    }
-
-    const questionIds = wrongData.map(wq => wq.question_id).filter(Boolean)
-    let questionsMap = {}
-
-    if (questionIds.length > 0) {
-      const placeholders = questionIds.map((_, i) => `$${i + 1}`).join(',')
-      const { rows: questionsData } = await query(
-        `SELECT * FROM ${TABLES.QUESTIONS} WHERE id IN (${placeholders})`,
-        questionIds
-      )
-      for (const q of questionsData) {
-        questionsMap[q.id] = q
-      }
-    }
-
-    const result = wrongData.map(wq => ({
-      ...wq,
-      question: questionsMap[wq.question_id] || null
-    }))
-
-    res.json({ success: true, wrongQuestions: result })
+    res.json({ success: true, questions: rows })
   } catch (error) {
-    console.error('获取错题失败:', error)
+    console.error('批量获取题目失败:', error)
     res.status(500).json({ error: error.message })
   }
 })
 
+// Wrong Questions
 app.post('/api/wrong-questions', async (req, res) => {
   try {
     const { studentId, questionIds } = req.body
-    if (!studentId || !Array.isArray(questionIds) || questionIds.length === 0) {
+    if (!studentId || !questionIds || !Array.isArray(questionIds)) {
       return res.status(400).json({ error: '缺少 studentId 或 questionIds' })
     }
 
-    const { rows: existing } = await query(
+    const existingRows = await query(
       `SELECT question_id FROM ${TABLES.WRONG_QUESTIONS} WHERE student_id = $1 AND question_id = ANY($2)`,
       [studentId, questionIds]
     )
-
-    const existingIds = new Set((existing || []).map(e => e.question_id))
+    const existingIds = new Set(existingRows.rows.map(r => r.question_id))
     const newIds = questionIds.filter(id => !existingIds.has(id))
 
     if (newIds.length === 0) {
-      return res.json({ success: true, added: [] })
+      return res.json({ success: true, added: [], message: '全部已存在' })
     }
 
-    const created = []
-    for (const questionId of newIds) {
-      const { rows } = await query(
-        `INSERT INTO ${TABLES.WRONG_QUESTIONS} (student_id, question_id, status, error_count, added_at, last_wrong_at)
-         VALUES ($1, $2, 'pending', 1, NOW(), NOW()) RETURNING *`,
-        [studentId, questionId]
-      )
-      created.push(rows[0])
-    }
+    const values = newIds.map((id, i) => `($1, $${i + 2})`).join(',')
+    const params = [studentId, ...newIds]
 
-    res.json({ success: true, added: created })
+    await query(
+      `INSERT INTO ${TABLES.WRONG_QUESTIONS} (student_id, question_id) VALUES ${values} ON CONFLICT DO NOTHING`,
+      params
+    )
+
+    res.json({ success: true, added: newIds })
   } catch (error) {
     console.error('添加错题失败:', error)
     res.status(500).json({ error: error.message })
   }
 })
 
-app.put('/api/wrong-questions/:id/status', async (req, res) => {
+app.get('/api/wrong-questions/student/:studentId', async (req, res) => {
+  try {
+    const { studentId } = req.params
+    const { rows } = await query(
+      `SELECT * FROM ${TABLES.WRONG_QUESTIONS} WHERE student_id = $1 ORDER BY added_at DESC`,
+      [studentId]
+    )
+    res.json({ success: true, wrongQuestions: rows })
+  } catch (error) {
+    console.error('获取错题失败:', error)
+    res.status(500).json({ error: error.message })
+  }
+})
+
+app.put('/api/wrong-questions/:id', async (req, res) => {
   try {
     const { id } = req.params
     const { status } = req.body
-    const { rows } = await query(
-      `UPDATE ${TABLES.WRONG_QUESTIONS} SET status = $1, updated_at = NOW() WHERE id = $2 RETURNING *`,
+
+    await query(
+      `UPDATE ${TABLES.WRONG_QUESTIONS} SET status = $1, updated_at = NOW() WHERE id = $2`,
       [status, id]
     )
-    res.json({ success: true, wrongQuestion: rows[0] })
+
+    res.json({ success: true, message: '状态已更新' })
   } catch (error) {
     console.error('更新错题状态失败:', error)
     res.status(500).json({ error: error.message })
   }
 })
 
-app.delete('/api/wrong-questions/:id', async (req, res) => {
+// Generated Exams
+app.post('/api/generated-exams', async (req, res) => {
   try {
-    const { id } = req.params
-    await query(`DELETE FROM ${TABLES.WRONG_QUESTIONS} WHERE id = $1`, [id])
-    res.json({ success: true })
-  } catch (error) {
-    console.error('删除错题失败:', error)
-    res.status(500).json({ error: error.message })
-  }
-})
+    const { studentId, name, questionIds } = req.body
+    if (!studentId || !name || !questionIds || !Array.isArray(questionIds)) {
+      return res.status(400).json({ error: '缺少 studentId、name 或 questionIds' })
+    }
 
-// ==================== 试卷相关 API ====================
-
-app.get('/api/exams/student/:studentId', async (req, res) => {
-  try {
-    const { studentId } = req.params
-    const { rows: taskExams } = await query(
-      `SELECT id, student_id, original_name as name, image_url, result, created_at, status
-       FROM ${TABLES.TASKS} WHERE student_id = $1 AND status = 'done' ORDER BY created_at DESC`,
-      [studentId]
+    const { rows } = await query(
+      `INSERT INTO ${TABLES.GENERATED_EXAMS} (student_id, name, question_ids)
+       VALUES ($1, $2, $3) RETURNING *`,
+      [studentId, name, JSON.stringify(questionIds)]
     )
 
-    const { rows: generatedExams } = await query(
-      `SELECT * FROM ${TABLES.GENERATED_EXAMS} WHERE student_id = $1 ORDER BY created_at DESC`,
-      [studentId]
-    )
-
-    const formattedTaskExams = (taskExams || []).map(task => {
-      // 解析 result JSON 字符串
-      let result = task.result
-      if (typeof result === 'string') {
-        try {
-          result = JSON.parse(result)
-        } catch {
-          result = {}
-        }
-      }
-      return {
-        id: task.id,
-        student_id: task.student_id,
-        name: task.name || '未命名试卷',
-        exam_no: '',
-        thumbnail: task.image_url || '',
-        question_count: result?.questionCount || 0,
-        status: 'ungraded',
-        created_at: task.created_at,
-        graded_at: null,
-        source: 'upload'
-      }
-    })
-
-    const formattedGeneratedExams = (generatedExams || []).map(exam => ({
-      id: exam.id,
-      student_id: exam.student_id,
-      name: exam.name || '错题重练卷',
-      question_ids: exam.question_ids || [],
-      status: 'ungraded',
-      created_at: exam.created_at,
-      graded_at: null,
-      source: 'generated'
-    }))
-
-    res.json({ success: true, exams: [...formattedTaskExams, ...formattedGeneratedExams] })
+    res.status(201).json({ success: true, exam: rows[0] })
   } catch (error) {
-    console.error('获取试卷失败:', error)
+    console.error('创建错题卷失败:', error)
     res.status(500).json({ error: error.message })
   }
 })
@@ -626,136 +459,40 @@ app.get('/api/generated-exams/student/:studentId', async (req, res) => {
       `SELECT * FROM ${TABLES.GENERATED_EXAMS} WHERE student_id = $1 ORDER BY created_at DESC`,
       [studentId]
     )
-
-    const result = (rows || []).map(exam => ({
-      id: exam.id,
-      student_id: exam.student_id,
-      name: exam.name || '错题重练卷',
-      question_ids: exam.question_ids || [],
-      status: 'ungraded',
-      created_at: exam.created_at,
-      graded_at: null,
-      source: 'generated'
-    }))
-
-    res.json({ success: true, generatedExams: result })
+    res.json({ success: true, generatedExams: rows })
   } catch (error) {
-    console.error('获取生成试卷失败:', error)
+    console.error('获取错题卷失败:', error)
     res.status(500).json({ error: error.message })
   }
 })
 
-app.post('/api/generated-exams', async (req, res) => {
-  try {
-    const { studentId, name, questionIds } = req.body
-    if (!studentId || !Array.isArray(questionIds) || questionIds.length === 0) {
-      return res.status(400).json({ error: '缺少 studentId 或 questionIds' })
-    }
-
-    const { rows } = await query(
-      `INSERT INTO ${TABLES.GENERATED_EXAMS} (student_id, name, question_ids, status, printed_at, created_at) VALUES ($1, $2, $3, $4, $5, $6) RETURNING *`,
-      [studentId, name || '错题重练卷', JSON.stringify(questionIds), 'ungraded', new Date().toISOString(), new Date().toISOString()]
-    )
-    res.json({ success: true, exam: rows[0] })
-  } catch (error) {
-    console.error('创建试卷失败:', error)
-    res.status(500).json({ error: error.message })
-  }
-})
-
-app.delete('/api/generated-exams/:examId', async (req, res) => {
-  try {
-    const { examId } = req.params
-    await query(`DELETE FROM ${TABLES.GENERATED_EXAMS} WHERE id = $1`, [examId])
-    res.json({ success: true, message: '试卷已删除' })
-  } catch (error) {
-    console.error('删除试卷失败:', error)
-    res.status(500).json({ error: error.message })
-  }
-})
-
-app.post('/api/questions', async (req, res) => {
-  try {
-    const questions = req.body.questions || []
-    if (!Array.isArray(questions) || questions.length === 0) {
-      return res.status(400).json({ error: '缺少 questions 数组' })
-    }
-
-    const created = []
-    for (const q of questions) {
-      const { rows } = await query(
-        `INSERT INTO ${TABLES.QUESTIONS} (task_id, student_id, content, options, answer, analysis, question_type, subject, is_correct, status, image_url, ai_tags, manual_tags, tags_source)
-         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14) RETURNING *`,
-        [
-          q.task_id, q.student_id, q.content || null,
-          JSON.stringify(q.options || []), q.answer || null, q.analysis || null,
-          q.question_type || 'choice', q.subject || null,
-          q.is_correct !== undefined ? q.is_correct : true, q.status || 'pending',
-          q.image_url || null, JSON.stringify(q.ai_tags || []),
-          JSON.stringify(q.manual_tags || []), q.tags_source || 'ai'
-        ]
-      )
-      created.push(rows[0])
-    }
-
-    res.json({ success: true, questions: created })
-  } catch (error) {
-    console.error('创建题目失败:', error)
-    res.status(500).json({ error: error.message })
-  }
-})
-
-app.put('/api/wrong-questions/:id', async (req, res) => {
+app.delete('/api/generated-exams/:id', async (req, res) => {
   try {
     const { id } = req.params
-    const { status } = req.body
-    if (!status) return res.status(400).json({ error: '缺少 status' })
-
-    const { rows } = await query(
-      `UPDATE ${TABLES.WRONG_QUESTIONS} SET status = $1, updated_at = NOW() WHERE id = $2 RETURNING *`,
-      [status, id]
-    )
-    if (rows.length === 0) return res.status(404).json({ error: '错题记录不存在' })
-    res.json({ success: true, wrongQuestion: rows[0] })
+    await query(`DELETE FROM ${TABLES.GENERATED_EXAMS} WHERE id = $1`, [id])
+    res.json({ success: true, message: '错题卷已删除' })
   } catch (error) {
-    console.error('更新错题失败:', error)
+    console.error('删除错题卷失败:', error)
     res.status(500).json({ error: error.message })
   }
 })
 
-app.post('/api/questions/batch', async (req, res) => {
+// Combined exams endpoint (legacy support)
+app.get('/api/exams/student/:studentId', async (req, res) => {
   try {
-    const { ids } = req.body
-    if (!Array.isArray(ids) || ids.length === 0) {
-      return res.status(400).json({ error: '缺少 ids 数组' })
-    }
-
-    const placeholders = ids.map((_, i) => `$${i + 1}`).join(',')
+    const { studentId } = req.params
     const { rows } = await query(
-      `SELECT * FROM ${TABLES.QUESTIONS} WHERE id IN (${placeholders})`,
-      ids
+      `SELECT * FROM ${TABLES.GENERATED_EXAMS} WHERE student_id = $1 ORDER BY created_at DESC`,
+      [studentId]
     )
-    res.json({ success: true, questions: rows })
+    res.json({ success: true, exams: rows })
   } catch (error) {
-    console.error('批量获取题目失败:', error)
+    console.error('获取考试列表失败:', error)
     res.status(500).json({ error: error.message })
   }
 })
 
-// ==================== 队列统计 API ====================
-
-app.get('/api/queue/stats', async (req, res) => {
-  try {
-    const stats = await getQueueStats()
-    res.json({ success: true, stats })
-  } catch (error) {
-    console.error('获取队列统计失败:', error)
-    res.status(500).json({ error: error.message })
-  }
-})
-
-// ==================== 错误处理 ====================
-
+// Error handler
 app.use((err, req, res, next) => {
   console.error('服务器错误:', err)
   if (err instanceof multer.MulterError) {
@@ -769,14 +506,6 @@ app.use((err, req, res, next) => {
   res.status(500).json({ error: err.message || '服务器内部错误' })
 })
 
-const createServer = (port = PORT) => {
-  return new Promise((resolve) => {
-    const server = app.listen(port, () => {
-      resolve(server)
-    })
-  })
-}
-
 import { fileURLToPath } from 'url'
 import { dirname } from 'path'
 
@@ -785,11 +514,18 @@ const __dirname = dirname(__filename)
 
 if (process.argv[1] === __filename || process.argv[1]?.endsWith('server/index.js')) {
   app.listen(PORT, () => {
-    console.log(`🚀 敏学后端服务已启动: http://localhost:${PORT}`)
-    console.log(`📋 任务队列已就绪，并发数: ${process.env.CONCURRENCY || 2}`)
-    console.log(`🗄️  数据库: Neon PostgreSQL`)
-    console.log(`☁️  文件存储: 阿里 OSS`)
+    console.log(`敏学后端服务已启动: http://localhost:${PORT}`)
+    console.log(`任务队列已就绪，并发数: ${process.env.CONCURRENCY || 2}`)
+    console.log(`数据库: Neon PostgreSQL`)
   })
 }
 
-export { app, createServer }
+export { app }
+
+export const createServer = (port = PORT) => {
+  return new Promise((resolve) => {
+    const server = app.listen(port, () => {
+      resolve(server)
+    })
+  })
+}
