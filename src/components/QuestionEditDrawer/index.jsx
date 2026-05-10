@@ -2,7 +2,7 @@ import { useState, useEffect } from 'react'
 import { motion, AnimatePresence } from 'motion/react'
 import { X, Loader2, Plus, Trash2, Tag } from 'lucide-react'
 import { usePendingQuestionStore } from '../../store'
-import { updateQuestion, updateQuestionTags } from '../../services/supabaseService'
+import { updateQuestion, updateQuestionTags } from '../../services/apiService'
 
 export default function QuestionEditDrawer({ questionId, visible, onClose, onSave }) {
   const { pendingQuestions, updatePendingQuestion } = usePendingQuestionStore()

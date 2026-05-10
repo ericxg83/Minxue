@@ -7,7 +7,7 @@ import {
 } from 'antd-mobile'
 import { RightOutline } from 'antd-mobile-icons'
 import { useStudentStore, useExamStore } from '../../store'
-import { getGeneratedExamsByStudent, getQuestionsByIds } from '../../services/supabaseService'
+import { getGeneratedExamsByStudent, getQuestionsByIds } from '../../services/apiService'
 import StudentSwitcher from '../../components/StudentSwitcher'
 import dayjs from 'dayjs'
 import jsPDF from 'jspdf'

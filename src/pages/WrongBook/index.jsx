@@ -13,7 +13,7 @@ import {
 } from 'antd-mobile'
 import { RightOutline, DownOutline } from 'antd-mobile-icons'
 import { useStudentStore, useWrongQuestionStore, useUIStore } from '../../store'
-import { getWrongQuestionsByStudent, deleteWrongQuestion, updateWrongQuestionStatus, createGeneratedExam } from '../../services/supabaseService'
+import { getWrongQuestionsByStudent, deleteWrongQuestion, updateWrongQuestionStatus, createGeneratedExam } from '../../services/apiService'
 import { generateQRCodeContent } from '../../services/aiService'
 import { mockWrongQuestions, mockStudents } from '../../data/mockData'
 import StudentSwitcher from '../../components/StudentSwitcher'

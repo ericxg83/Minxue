@@ -11,7 +11,7 @@ import {
 } from 'antd-mobile'
 import { RightOutline } from 'antd-mobile-icons'
 import { useStudentStore, useTaskStore, useWrongQuestionStore, usePendingQuestionStore, useUIStore } from '../../store'
-import { getTasksByStudent, getQuestionsByTask, addWrongQuestions, getWrongQuestionsByStudent } from '../../services/supabaseService'
+import { getTasksByStudent, getQuestionsByTask, addWrongQuestions, getWrongQuestionsByStudent } from '../../services/apiService'
 import { mockQuestions, mockTasks } from '../../data/mockData'
 import { ImageViewer } from 'antd-mobile'
 import StudentSwitcher from '../../components/StudentSwitcher'

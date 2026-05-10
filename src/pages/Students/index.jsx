@@ -9,8 +9,7 @@ import {
   SwipeAction
 } from 'antd-mobile'
 import { useStudentStore, useUIStore } from '../../store'
-import { getStudents, createStudent, updateStudent, deleteStudent } from '../../services/supabaseService'
-import { uploadImage } from '../../services/supabaseService'
+import { getStudents, createStudent, updateStudent, deleteStudent, uploadImage } from '../../services/apiService'
 import ImageCropper from '../../components/ImageCropper'
 
 const GRADE_OPTIONS = ['一年级', '二年级', '三年级', '四年级', '五年级', '六年级', '初一', '初二', '初三', '高一', '高二', '高三']

@@ -2,7 +2,7 @@ import { useState, useEffect, useRef } from 'react'
 import { motion, AnimatePresence } from 'motion/react'
 import { X, Plus, CheckCircle2, ChevronRight, UserPlus, User, Trash2, Pencil } from 'lucide-react'
 import { useStudentStore } from '../../store'
-import { createStudent, getStudents, deleteStudent, updateStudent } from '../../services/supabaseService'
+import { createStudent, getStudents, deleteStudent, updateStudent } from '../../services/apiService'
 import { mockStudents } from '../../data/mockData'
 
 const GRADE_OPTIONS = ['一年级', '二年级', '三年级', '四年级', '五年级', '六年级', '初一', '初二', '初三', '高一', '高二', '高三']

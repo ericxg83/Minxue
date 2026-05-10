@@ -1,7 +1,7 @@
 import { useState, useEffect } from 'react'
 import { Button, Toast, Input, TextArea, Dialog, Mask } from 'antd-mobile'
 import { useStudentStore, usePendingQuestionStore, useUIStore, useWrongQuestionStore } from '../../store'
-import { updateQuestion, updateQuestionTags } from '../../services/supabaseService'
+import { updateQuestion, updateQuestionTags } from '../../services/apiService'
 import { mockQuestions } from '../../data/mockData'
 
 const USE_MOCK_DATA = false

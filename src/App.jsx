@@ -26,7 +26,7 @@ import {
 import { motion, AnimatePresence } from 'motion/react'
 import { QRCodeSVG } from 'qrcode.react'
 import { useUIStore, useStudentStore, useTaskStore, useWrongQuestionStore, usePendingQuestionStore, useExamStore } from './store'
-import { getStudents, getTasksByStudent, getQuestionsByTask, addWrongQuestions, getWrongQuestionsByStudent, getExamsByStudent, createTask, updateTaskStatus, uploadImage, createQuestions, updateQuestion, updateQuestionTags, invalidateCache } from './services/supabaseService'
+import { getStudents, getTasksByStudent, getQuestionsByTask, addWrongQuestions, getWrongQuestionsByStudent, getExamsByStudent, createTask, updateTaskStatus, uploadImage, updateQuestion, updateQuestionTags, invalidateCache } from './services/apiService'
 import { taskService } from './services/taskService'
 import { recognizeQuestions, compressImage, saveRecognitionResult } from './services/aiService'
 import { mockQuestions, mockTasks, mockWrongQuestions, mockExams, mockStudents } from './data/mockData'
@@ -258,7 +258,7 @@ export default function App() {
     if (reprintExam && reprintExam.question_ids?.length > 0) {
       const loadReprintQuestions = async () => {
         try {
-          const { getQuestionsByIds } = await import('./services/supabaseService')
+          const { getQuestionsByIds } = await import('./services/apiService')
           const questions = await getQuestionsByIds(reprintExam.question_ids)
           setReprintQuestions(questions || [])
         } catch (error) {
@@ -347,7 +347,7 @@ export default function App() {
         setGeneratedExams(studentMockExams)
         return
       }
-      const { getGeneratedExamsByStudent } = await import('./services/supabaseService')
+      const { getGeneratedExamsByStudent } = await import('./services/apiService')
       const examList = await getGeneratedExamsByStudent(currentStudent.id, useCache)
       setGeneratedExams(Array.isArray(examList) ? examList : [])
     } catch (error) {
@@ -770,7 +770,7 @@ export default function App() {
         question_ids: selectedWrongQuestions.map(wq => wq.question_id || wq.id)
       }
 
-      const { createGeneratedExam } = await import('./services/supabaseService')
+      const { createGeneratedExam } = await import('./services/apiService')
       const newExam = await createGeneratedExam(examData)
       setGeneratedExams([newExam, ...generatedExams])
       clearSelection()

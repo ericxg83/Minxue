@@ -4,7 +4,7 @@ import { ArrowLeft, Printer, FileDown, QrCode, Eye, EyeOff } from 'lucide-react'
 import { QRCodeSVG } from 'qrcode.react'
 import { useStudentStore, useWrongQuestionStore, useUIStore, useExamStore } from '../../store'
 import { mockWrongQuestions } from '../../data/mockData'
-import { createGeneratedExam } from '../../services/supabaseService'
+import { createGeneratedExam } from '../../services/apiService'
 import dayjs from 'dayjs'
 import jsPDF from 'jspdf'
 
