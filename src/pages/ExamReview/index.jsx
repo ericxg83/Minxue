@@ -640,29 +640,29 @@ export default function ExamReview({ task, onClose }) {
         {/* Phone-like container */}
         <div className="w-full h-full md:max-w-md md:h-[90vh] md:rounded-3xl md:shadow-2xl bg-white flex flex-col overflow-hidden">
           {/* Header */}
-          <header className="bg-white px-4 py-3 flex items-center justify-between border-b border-gray-200 flex-shrink-0">
-            <button onClick={onClose} className="flex items-center gap-1 text-blue-600 text-[15px] font-medium">
-              <ArrowLeft size={20} /> 返回
+          <header className="bg-white px-4 py-2.5 flex items-center justify-between border-b flex-shrink-0" style={{ borderColor: '#E5E7EB' }}>
+            <button onClick={onClose} className="flex items-center gap-1" style={{ color: '#2563EB', fontSize: '13px' }}>
+              <ArrowLeft size={18} /> 返回
             </button>
-            <h2 className="text-[17px] font-bold text-gray-900">复审试卷</h2>
-            <button onClick={resetView} className="flex items-center gap-1 text-gray-400 text-[13px]">
-              <RotateCcw size={15} /> 重置
+            <h2 style={{ fontSize: '15px', fontWeight: 600, color: '#111827' }}>复审试卷</h2>
+            <button onClick={resetView} className="flex items-center gap-1" style={{ color: '#9CA3AF', fontSize: '12px' }}>
+              <RotateCcw size={14} /> 重置
             </button>
           </header>
 
           {/* Stats bar */}
-          <div className="bg-white px-4 py-2 flex items-center justify-between border-b border-gray-100 flex-shrink-0">
-            <div className="flex gap-5">
-              <div className="flex items-center gap-1.5">
-                <CheckCircle2 size={16} className="text-green-500" />
-                <span className="text-[13px] text-gray-500">正确 <strong className="text-green-500">{correctCount}</strong></span>
+          <div className="bg-white px-4 py-1.5 flex items-center justify-between border-b flex-shrink-0" style={{ borderColor: '#E5E7EB' }}>
+            <div className="flex gap-4">
+              <div className="flex items-center gap-1">
+                <CheckCircle2 size={14} className="text-green-500" />
+                <span style={{ fontSize: '12px', color: '#6B7280' }}>正确 <strong className="text-green-500">{correctCount}</strong></span>
               </div>
-              <div className="flex items-center gap-1.5">
-                <XCircle size={16} className="text-red-500" />
-                <span className="text-[13px] text-gray-500">错误 <strong className="text-red-500">{wrongCount}</strong></span>
+              <div className="flex items-center gap-1">
+                <XCircle size={14} className="text-red-500" />
+                <span style={{ fontSize: '12px', color: '#6B7280' }}>错误 <strong className="text-red-500">{wrongCount}</strong></span>
               </div>
             </div>
-            <span className="text-[12px] text-gray-400">点击题块切换判定</span>
+            <span style={{ fontSize: '11px', color: '#9CA3AF' }}>点击题块切换判定</span>
             <button
               onClick={() => setShowDebugLayout(v => !v)}
               className={`text-[10px] px-2 py-0.5 rounded-full border transition-colors ${
@@ -891,20 +891,20 @@ export default function ExamReview({ task, onClose }) {
           </div>
 
           {/* Bottom bar */}
-          <div className="bg-white px-4 py-3 border-t border-gray-200 flex items-center justify-between flex-shrink-0">
-            <span className="text-[13px] text-gray-400">
+          <div className="bg-white px-4 py-2.5 border-t flex items-center justify-between flex-shrink-0" style={{ borderColor: '#E5E7EB' }}>
+            <span style={{ fontSize: '12px', color: '#9CA3AF' }}>
               缩放 {Math.round(scale * 100)}%{changedCount > 0 && ` · ${changedCount} 题已修改`}
             </span>
             <button
               onClick={handleSave}
               disabled={saving || changedCount === 0}
-              className={`px-6 py-2.5 rounded-xl text-[14px] font-bold flex items-center gap-2 transition-all ${
-                changedCount > 0 && !saving
-                  ? 'bg-blue-600 text-white shadow-lg shadow-blue-200 active:bg-blue-700'
-                  : 'bg-gray-100 text-gray-300'
-              }`}
+              className="px-5 py-1.5 rounded-lg text-[13px] font-medium flex items-center gap-1.5 transition-all"
+              style={{
+                background: changedCount > 0 && !saving ? '#2563EB' : '#F3F4F6',
+                color: changedCount > 0 && !saving ? 'white' : '#D1D5DB'
+              }}
             >
-              <Save size={16} />
+              <Save size={15} />
               {saving ? '保存中...' : '确认保存'}
             </button>
           </div>

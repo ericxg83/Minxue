@@ -1,20 +1,15 @@
 import { Pool } from 'pg'
 
-const connectionString = process.env.NEON_DATABASE_URL
-
-if (!connectionString) {
-  console.warn('⚠️  缺少 NEON_DATABASE_URL 环境变量')
-  console.warn('请检查 .env 文件或环境变量配置')
-}
-
-// 懒加载连接池，避免启动时报错
 let _pool = null
 
 const getPool = () => {
   if (!_pool) {
+    const connectionString = process.env.NEON_DATABASE_URL
+    
     if (!connectionString) {
       throw new Error('数据库未配置：缺少 NEON_DATABASE_URL 环境变量')
     }
+    
     _pool = new Pool({
       connectionString,
       ssl: {

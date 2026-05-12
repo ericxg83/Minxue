@@ -1,6 +1,6 @@
 export default function FilterTabsSkeleton({ count = 4 }) {
   return (
-    <section className="px-5 pt-4 mb-3 overflow-x-auto no-scrollbar">
+    <section className="px-4 pt-3 mb-2 overflow-x-auto no-scrollbar">
       <div className="flex gap-2 min-w-max">
         {Array.from({ length: count }).map((_, i) => (
           <div

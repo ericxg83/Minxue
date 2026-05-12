@@ -1,0 +1,490 @@
+{
+  "metadata": {
+    "appName": "敏学App V3",
+    "testType": "综合功能测试",
+    "testDate": "2026-05-11T09:11:45.896Z",
+    "startTime": "2026-05-11T09:11:40.270Z",
+    "duration": 3765,
+    "totalDurationFormatted": "3.77s"
+  },
+  "summary": {
+    "total": 26,
+    "passed": 26,
+    "failed": 0,
+    "skipped": 0,
+    "successRate": "100.0%",
+    "avgResponseTime": "144.81ms"
+  },
+  "categories": {
+    "system": {
+      "total": 3,
+      "passed": 3,
+      "failed": 0,
+      "tests": [
+        {
+          "name": "健康检查接口",
+          "category": "system",
+          "status": "PASSED",
+          "duration": 34,
+          "error": null,
+          "timestamp": "2026-05-11T09:11:42.160Z"
+        },
+        {
+          "name": "诊断接口",
+          "category": "system",
+          "status": "PASSED",
+          "duration": 163,
+          "error": null,
+          "timestamp": "2026-05-11T09:11:42.323Z"
+        },
+        {
+          "name": "队列统计接口",
+          "category": "system",
+          "status": "PASSED",
+          "duration": 55,
+          "error": null,
+          "timestamp": "2026-05-11T09:11:42.378Z"
+        }
+      ]
+    },
+    "students": {
+      "total": 3,
+      "passed": 3,
+      "failed": 0,
+      "tests": [
+        {
+          "name": "创建学生",
+          "category": "students",
+          "status": "PASSED",
+          "duration": 1403,
+          "error": null,
+          "timestamp": "2026-05-11T09:11:43.782Z"
+        },
+        {
+          "name": "获取学生列表",
+          "category": "students",
+          "status": "PASSED",
+          "duration": 98,
+          "error": null,
+          "timestamp": "2026-05-11T09:11:43.880Z"
+        },
+        {
+          "name": "更新学生信息",
+          "category": "students",
+          "status": "PASSED",
+          "duration": 95,
+          "error": null,
+          "timestamp": "2026-05-11T09:11:43.975Z"
+        }
+      ]
+    },
+    "tasks": {
+      "total": 5,
+      "passed": 5,
+      "failed": 0,
+      "tests": [
+        {
+          "name": "获取学生任务(空)",
+          "category": "tasks",
+          "status": "PASSED",
+          "duration": 92,
+          "error": null,
+          "timestamp": "2026-05-11T09:11:44.067Z"
+        },
+        {
+          "name": "创建任务(通过URL)",
+          "category": "tasks",
+          "status": "PASSED",
+          "duration": 195,
+          "error": null,
+          "timestamp": "2026-05-11T09:11:44.262Z"
+        },
+        {
+          "name": "获取单个任务",
+          "category": "tasks",
+          "status": "PASSED",
+          "duration": 82,
+          "error": null,
+          "timestamp": "2026-05-11T09:11:44.344Z"
+        },
+        {
+          "name": "获取学生任务列表(非空)",
+          "category": "tasks",
+          "status": "PASSED",
+          "duration": 82,
+          "error": null,
+          "timestamp": "2026-05-11T09:11:44.426Z"
+        },
+        {
+          "name": "重试任务",
+          "category": "tasks",
+          "status": "PASSED",
+          "duration": 211,
+          "error": null,
+          "timestamp": "2026-05-11T09:11:44.637Z"
+        }
+      ]
+    },
+    "questions": {
+      "total": 5,
+      "passed": 5,
+      "failed": 0,
+      "tests": [
+        {
+          "name": "创建题目",
+          "category": "questions",
+          "status": "PASSED",
+          "duration": 95,
+          "error": null,
+          "timestamp": "2026-05-11T09:11:44.733Z"
+        },
+        {
+          "name": "获取任务题目列表",
+          "category": "questions",
+          "status": "PASSED",
+          "duration": 86,
+          "error": null,
+          "timestamp": "2026-05-11T09:11:44.819Z"
+        },
+        {
+          "name": "更新题目",
+          "category": "questions",
+          "status": "PASSED",
+          "duration": 82,
+          "error": null,
+          "timestamp": "2026-05-11T09:11:44.902Z"
+        },
+        {
+          "name": "批量获取题目",
+          "category": "questions",
+          "status": "PASSED",
+          "duration": 82,
+          "error": null,
+          "timestamp": "2026-05-11T09:11:44.984Z"
+        },
+        {
+          "name": "批量更新标签(空操作)",
+          "category": "questions",
+          "status": "PASSED",
+          "duration": 2,
+          "error": null,
+          "timestamp": "2026-05-11T09:11:44.987Z"
+        }
+      ]
+    },
+    "wrong-questions": {
+      "total": 3,
+      "passed": 3,
+      "failed": 0,
+      "tests": [
+        {
+          "name": "添加错题",
+          "category": "wrong-questions",
+          "status": "PASSED",
+          "duration": 169,
+          "error": null,
+          "timestamp": "2026-05-11T09:11:45.156Z"
+        },
+        {
+          "name": "获取学生错题列表",
+          "category": "wrong-questions",
+          "status": "PASSED",
+          "duration": 81,
+          "error": null,
+          "timestamp": "2026-05-11T09:11:45.237Z"
+        },
+        {
+          "name": "更新错题状态",
+          "category": "wrong-questions",
+          "status": "PASSED",
+          "duration": 82,
+          "error": null,
+          "timestamp": "2026-05-11T09:11:45.319Z"
+        }
+      ]
+    },
+    "exams": {
+      "total": 3,
+      "passed": 3,
+      "failed": 0,
+      "tests": [
+        {
+          "name": "创建试卷",
+          "category": "exams",
+          "status": "PASSED",
+          "duration": 88,
+          "error": null,
+          "timestamp": "2026-05-11T09:11:45.407Z"
+        },
+        {
+          "name": "获取学生试卷列表",
+          "category": "exams",
+          "status": "PASSED",
+          "duration": 83,
+          "error": null,
+          "timestamp": "2026-05-11T09:11:45.490Z"
+        },
+        {
+          "name": "获取考试列表(兼容接口)",
+          "category": "exams",
+          "status": "PASSED",
+          "duration": 81,
+          "error": null,
+          "timestamp": "2026-05-11T09:11:45.571Z"
+        }
+      ]
+    },
+    "delete": {
+      "total": 4,
+      "passed": 4,
+      "failed": 0,
+      "tests": [
+        {
+          "name": "删除试卷",
+          "category": "delete",
+          "status": "PASSED",
+          "duration": 81,
+          "error": null,
+          "timestamp": "2026-05-11T09:11:45.653Z"
+        },
+        {
+          "name": "删除错题",
+          "category": "delete",
+          "status": "PASSED",
+          "duration": 81,
+          "error": null,
+          "timestamp": "2026-05-11T09:11:45.734Z"
+        },
+        {
+          "name": "删除任务",
+          "category": "delete",
+          "status": "PASSED",
+          "duration": 81,
+          "error": null,
+          "timestamp": "2026-05-11T09:11:45.815Z"
+        },
+        {
+          "name": "删除学生",
+          "category": "delete",
+          "status": "PASSED",
+          "duration": 81,
+          "error": null,
+          "timestamp": "2026-05-11T09:11:45.896Z"
+        }
+      ]
+    }
+  },
+  "details": [
+    {
+      "name": "健康检查接口",
+      "category": "system",
+      "status": "PASSED",
+      "duration": 34,
+      "error": null,
+      "timestamp": "2026-05-11T09:11:42.160Z"
+    },
+    {
+      "name": "诊断接口",
+      "category": "system",
+      "status": "PASSED",
+      "duration": 163,
+      "error": null,
+      "timestamp": "2026-05-11T09:11:42.323Z"
+    },
+    {
+      "name": "队列统计接口",
+      "category": "system",
+      "status": "PASSED",
+      "duration": 55,
+      "error": null,
+      "timestamp": "2026-05-11T09:11:42.378Z"
+    },
+    {
+      "name": "创建学生",
+      "category": "students",
+      "status": "PASSED",
+      "duration": 1403,
+      "error": null,
+      "timestamp": "2026-05-11T09:11:43.782Z"
+    },
+    {
+      "name": "获取学生列表",
+      "category": "students",
+      "status": "PASSED",
+      "duration": 98,
+      "error": null,
+      "timestamp": "2026-05-11T09:11:43.880Z"
+    },
+    {
+      "name": "更新学生信息",
+      "category": "students",
+      "status": "PASSED",
+      "duration": 95,
+      "error": null,
+      "timestamp": "2026-05-11T09:11:43.975Z"
+    },
+    {
+      "name": "获取学生任务(空)",
+      "category": "tasks",
+      "status": "PASSED",
+      "duration": 92,
+      "error": null,
+      "timestamp": "2026-05-11T09:11:44.067Z"
+    },
+    {
+      "name": "创建任务(通过URL)",
+      "category": "tasks",
+      "status": "PASSED",
+      "duration": 195,
+      "error": null,
+      "timestamp": "2026-05-11T09:11:44.262Z"
+    },
+    {
+      "name": "获取单个任务",
+      "category": "tasks",
+      "status": "PASSED",
+      "duration": 82,
+      "error": null,
+      "timestamp": "2026-05-11T09:11:44.344Z"
+    },
+    {
+      "name": "获取学生任务列表(非空)",
+      "category": "tasks",
+      "status": "PASSED",
+      "duration": 82,
+      "error": null,
+      "timestamp": "2026-05-11T09:11:44.426Z"
+    },
+    {
+      "name": "重试任务",
+      "category": "tasks",
+      "status": "PASSED",
+      "duration": 211,
+      "error": null,
+      "timestamp": "2026-05-11T09:11:44.637Z"
+    },
+    {
+      "name": "创建题目",
+      "category": "questions",
+      "status": "PASSED",
+      "duration": 95,
+      "error": null,
+      "timestamp": "2026-05-11T09:11:44.733Z"
+    },
+    {
+      "name": "获取任务题目列表",
+      "category": "questions",
+      "status": "PASSED",
+      "duration": 86,
+      "error": null,
+      "timestamp": "2026-05-11T09:11:44.819Z"
+    },
+    {
+      "name": "更新题目",
+      "category": "questions",
+      "status": "PASSED",
+      "duration": 82,
+      "error": null,
+      "timestamp": "2026-05-11T09:11:44.902Z"
+    },
+    {
+      "name": "批量获取题目",
+      "category": "questions",
+      "status": "PASSED",
+      "duration": 82,
+      "error": null,
+      "timestamp": "2026-05-11T09:11:44.984Z"
+    },
+    {
+      "name": "批量更新标签(空操作)",
+      "category": "questions",
+      "status": "PASSED",
+      "duration": 2,
+      "error": null,
+      "timestamp": "2026-05-11T09:11:44.987Z"
+    },
+    {
+      "name": "添加错题",
+      "category": "wrong-questions",
+      "status": "PASSED",
+      "duration": 169,
+      "error": null,
+      "timestamp": "2026-05-11T09:11:45.156Z"
+    },
+    {
+      "name": "获取学生错题列表",
+      "category": "wrong-questions",
+      "status": "PASSED",
+      "duration": 81,
+      "error": null,
+      "timestamp": "2026-05-11T09:11:45.237Z"
+    },
+    {
+      "name": "更新错题状态",
+      "category": "wrong-questions",
+      "status": "PASSED",
+      "duration": 82,
+      "error": null,
+      "timestamp": "2026-05-11T09:11:45.319Z"
+    },
+    {
+      "name": "创建试卷",
+      "category": "exams",
+      "status": "PASSED",
+      "duration": 88,
+      "error": null,
+      "timestamp": "2026-05-11T09:11:45.407Z"
+    },
+    {
+      "name": "获取学生试卷列表",
+      "category": "exams",
+      "status": "PASSED",
+      "duration": 83,
+      "error": null,
+      "timestamp": "2026-05-11T09:11:45.490Z"
+    },
+    {
+      "name": "获取考试列表(兼容接口)",
+      "category": "exams",
+      "status": "PASSED",
+      "duration": 81,
+      "error": null,
+      "timestamp": "2026-05-11T09:11:45.571Z"
+    },
+    {
+      "name": "删除试卷",
+      "category": "delete",
+      "status": "PASSED",
+      "duration": 81,
+      "error": null,
+      "timestamp": "2026-05-11T09:11:45.653Z"
+    },
+    {
+      "name": "删除错题",
+      "category": "delete",
+      "status": "PASSED",
+      "duration": 81,
+      "error": null,
+      "timestamp": "2026-05-11T09:11:45.734Z"
+    },
+    {
+      "name": "删除任务",
+      "category": "delete",
+      "status": "PASSED",
+      "duration": 81,
+      "error": null,
+      "timestamp": "2026-05-11T09:11:45.815Z"
+    },
+    {
+      "name": "删除学生",
+      "category": "delete",
+      "status": "PASSED",
+      "duration": 81,
+      "error": null,
+      "timestamp": "2026-05-11T09:11:45.896Z"
+    }
+  ],
+  "recommendations": [
+    "系统整体运行良好，核心功能正常"
+  ]
+}

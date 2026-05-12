@@ -273,15 +273,15 @@ export default function PrintPreview({ onClose }) {
   if (previewQuestions.length === 0) {
     return (
       <AnimatePresence>
-        <div className="fixed inset-0 bg-gray-50 z-[10000] flex flex-col">
-          <div className="flex items-center justify-between px-5 pt-12 pb-4 bg-white border-b border-gray-100">
-            <button onClick={onClose} className="text-[15px] font-medium text-blue-600">
+        <div className="fixed inset-0 z-[10000] flex flex-col" style={{ background: '#F5F7FA' }}>
+          <div className="flex items-center justify-between px-4 pt-12 pb-3 bg-white border-b" style={{ borderColor: '#E5E7EB' }}>
+            <button onClick={onClose} style={{ fontSize: '13px', color: '#2563EB' }}>
               返回
             </button>
-            <h2 className="text-[17px] font-bold text-gray-900">打印预览</h2>
+            <h2 style={{ fontSize: '15px', fontWeight: 600, color: '#111827' }}>打印预览</h2>
             <div className="w-10" />
           </div>
-          <div className="flex-1 flex items-center justify-center text-gray-400 text-[14px]">
+          <div className="flex-1 flex items-center justify-center" style={{ fontSize: '13px', color: '#9CA3AF' }}>
             请先选择要打印的题目
           </div>
         </div>
@@ -291,14 +291,14 @@ export default function PrintPreview({ onClose }) {
 
   return (
     <AnimatePresence>
-      <div className="fixed inset-0 bg-gray-50 z-[10000] flex flex-col">
+      <div className="fixed inset-0 z-[10000] flex flex-col" style={{ background: '#F5F7FA' }}>
         {/* Header */}
-        <div className="flex items-center justify-between px-5 pt-12 pb-4 bg-white border-b border-gray-100">
-          <button onClick={onClose} className="text-[15px] font-medium text-blue-600">
+        <div className="flex items-center justify-between px-4 pt-12 pb-3 bg-white border-b" style={{ borderColor: '#E5E7EB' }}>
+          <button onClick={onClose} style={{ fontSize: '13px', color: '#2563EB' }}>
             返回
           </button>
-          <h2 className="text-[17px] font-bold text-gray-900">打印预览</h2>
-          <button onClick={handleSimulateScan} className="text-[13px] font-medium text-blue-600">
+          <h2 style={{ fontSize: '15px', fontWeight: 600, color: '#111827' }}>打印预览</h2>
+          <button onClick={handleSimulateScan} style={{ fontSize: '12px', color: '#2563EB' }}>
             {showGradingModal ? '关闭模拟' : '模拟扫码'}
           </button>
         </div>
@@ -377,19 +377,16 @@ export default function PrintPreview({ onClose }) {
         </div>
 
         {/* Bottom Buttons */}
-        <div className="bg-white px-5 py-4 border-t border-gray-100 flex justify-center gap-4">
-          <button 
-            onClick={handleExportPDF}
-            className="px-6 py-3 rounded-xl border-2 border-blue-600 text-blue-600 text-[14px] font-bold hover:bg-blue-50 transition-all flex items-center gap-2"
-          >
-            <FileDown size={16} />
+        <div className="bg-white px-4 py-3 border-t flex justify-center gap-3" style={{ borderColor: '#E5E7EB' }}>
+          <button onClick={handleExportPDF}
+            className="px-5 py-2 rounded-lg text-[13px] font-medium flex items-center gap-1.5"
+            style={{ border: '1px solid #2563EB', color: '#2563EB', background: 'transparent' }}>
+            <FileDown size={15} />
             PDF
           </button>
-          <button 
-            onClick={handlePrint}
-            className="px-8 py-3 rounded-xl bg-blue-600 text-white text-[14px] font-bold hover:bg-blue-500 transition-all flex items-center gap-2"
-          >
-            {isMobile ? <FileDown size={16} /> : <Printer size={16} />}
+          <button onClick={handlePrint}
+            className="px-6 py-2 rounded-lg text-[13px] font-medium flex items-center gap-1.5" style={{ background: '#2563EB', color: 'white' }}>
+            {isMobile ? <FileDown size={15} /> : <Printer size={15} />}
             {isMobile ? '下载PDF' : '直接打印'}
           </button>
         </div>

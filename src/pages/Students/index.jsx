@@ -257,17 +257,17 @@ export default function Students() {
 
   // 渲染学生列表页面
   const renderStudentList = () => (
-    <div style={{ padding: '0', background: '#f5f5f5', minHeight: '100%', paddingBottom: '80px' }}>
+    <div style={{ padding: '0', background: '#F5F7FA', minHeight: '100%', paddingBottom: '80px' }}>
       {/* 顶部标题栏 */}
-      <div style={{ 
-        background: '#fff', 
-        padding: '16px',
+      <div style={{
+        background: '#fff',
+        padding: '12px 16px',
         display: 'flex',
         justifyContent: 'space-between',
         alignItems: 'center',
-        borderBottom: '1px solid #f0f0f0'
+        borderBottom: '1px solid #E5E7EB'
       }}>
-        <h1 style={{ margin: 0, fontSize: '20px', fontWeight: 'bold' }}>切换学生</h1>
+        <h1 style={{ margin: 0, fontSize: '18px', fontWeight: 700 }}>切换学生</h1>
         <div style={{ display: 'flex', gap: '12px' }}>
           <Button fill="none" style={{ color: '#666' }}>
             <svg width="20" height="20" viewBox="0 0 1024 1024" fill="currentColor">
@@ -280,132 +280,113 @@ export default function Students() {
       </div>
 
       {/* 搜索框 */}
-      <div style={{ padding: '12px 16px', background: '#fff', borderBottom: '1px solid #f5f5f5' }}>
-        <div style={{ 
-          display: 'flex', 
-          alignItems: 'center', 
-          background: '#f5f5f5', 
-          borderRadius: '20px',
-          padding: '8px 16px'
+      <div style={{ padding: '10px 16px', background: '#fff', borderBottom: '1px solid #E5E7EB' }}>
+        <div style={{
+          display: 'flex',
+          alignItems: 'center',
+          background: '#F3F4F6',
+          borderRadius: '8px',
+          padding: '6px 12px'
         }}>
-          <svg width="18" height="18" viewBox="0 0 1024 1024" fill="#999" style={{ marginRight: '8px' }}>
+          <svg width="16" height="16" viewBox="0 0 1024 1024" fill="#9CA3AF" style={{ marginRight: '6px' }}>
             <path d="M832 800l-128-128c35.2-41.6 56-96 56-156.8 0-132.8-107.2-240-240-240s-240 107.2-240 240 107.2 240 240 240c60.8 0 115.2-20.8 156.8-56l128 128c9.6 9.6 24 9.6 33.6 0 9.6-9.6 9.6-24 0-33.6zM320 515.2c0-99.2 80-179.2 179.2-179.2s179.2 80 179.2 179.2-80 179.2-179.2 179.2-179.2-80-179.2-179.2z"/>
           </svg>
           <Input
             placeholder="搜索学生姓名"
             value={searchKeyword}
             onChange={val => setSearchKeyword(val)}
-            style={{ '--font-size': '14px', background: 'transparent' }}
+            style={{ '--font-size': '13px', background: 'transparent' }}
           />
         </div>
       </div>
 
       {/* 我的学生标题 */}
-      <div style={{ padding: '16px', fontSize: '14px', color: '#999' }}>
+      <div style={{ padding: '14px 16px 6px', fontSize: '12px', color: '#6B7280' }}>
         我的学生 ({filteredStudents.length})
       </div>
 
-      {/* 学生列表 - 带左滑删除 */}
-      <div style={{ padding: '0 12px' }}>
+      {/* 学生列表 */}
+      <div style={{ padding: '8px 12px' }}>
         {filteredStudents.length === 0 ? (
           <Empty description="暂无学生" style={{ padding: '64px 0' }} />
         ) : (
           <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
             {filteredStudents.map((student) => (
-              <SwipeAction
+              <div
                 key={student.id}
-                rightActions={[
-                  {
-                    key: 'delete',
-                    text: '删除',
-                    color: '#ff4d4f',
-                    onClick: () => handleDelete(student)
-                  }
-                ]}
+                onClick={() => handleSelect(student)}
+                className="card"
+                style={{
+                  padding: '12px',
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'space-between',
+                  cursor: 'pointer',
+                  border: currentStudent?.id === student.id ? '1px solid #2563EB' : '',
+                  background: currentStudent?.id === student.id ? '#F5F8FF' : ''
+                }}
               >
-                <div
-                  onClick={() => handleSelect(student)}
-                  style={{
-                    background: '#fff',
-                    borderRadius: '12px',
-                    padding: '16px',
+                <div style={{ display: 'flex', alignItems: 'center', gap: '10px', flex: 1, minWidth: 0 }}>
+                  <div style={{
+                    width: '36px',
+                    height: '36px',
+                    borderRadius: '50%',
+                    background: '#EFF6FF',
                     display: 'flex',
                     alignItems: 'center',
-                    justifyContent: 'space-between',
-                    cursor: 'pointer',
-                    border: currentStudent?.id === student.id ? '2px solid #1677ff' : '2px solid transparent'
-                  }}
-                >
-                  <div style={{ display: 'flex', alignItems: 'center', gap: '12px', flex: 1 }}>
+                    justifyContent: 'center',
+                    overflow: 'hidden',
+                    flexShrink: 0
+                  }}>
+                    {student.avatar ? (
+                      <img src={student.avatar} alt="" style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
+                    ) : (
+                      <svg width="20" height="20" viewBox="0 0 1024 1024" fill="#2563EB">
+                        <path d="M512 512c88 0 160-72 160-160s-72-160-160-160-160 72-160 160 72 160 160 160zm0-256c52.8 0 96 43.2 96 96s-43.2 96-96 96-96-43.2-96-96 43.2-96 96-96zm448 544v64c0 35.2-28.8 64-64 64H128c-35.2 0-64-28.8-64-64v-64c0-88 72-160 160-160h32c17.6 0 34.4 3.2 50.4 9.6 33.6 12.8 70.4 20.8 108.8 23.2 9.6 0.8 19.2 1.2 28.8 1.2s19.2-0.4 28.8-1.2c38.4-2.4 75.2-10.4 108.8-23.2 16-6.4 32.8-9.6 50.4-9.6h32c88 0 160 72 160 160z"/>
+                      </svg>
+                    )}
+                  </div>
+                  <div style={{ flex: 1, minWidth: 0 }}>
+                    <div style={{ fontSize: '14px', fontWeight: 600, color: '#111827' }}>
+                      {student.name}
+                    </div>
+                    <div style={{ fontSize: '12px', color: '#6B7280', marginTop: '1px' }}>
+                      {student.class || '暂无班级'}
+                    </div>
+                  </div>
+                </div>
+
+                {/* 右侧操作区 */}
+                <div style={{ display: 'flex', alignItems: 'center', gap: '6px', flexShrink: 0 }}>
+                  {/* 编辑按钮 */}
+                  <Button
+                    fill="none"
+                    size="small"
+                    onClick={(e) => openEditPage(student, e)}
+                    style={{ color: '#2563EB', padding: '2px 6px', fontSize: '12px' }}
+                  >
+                    编辑
+                  </Button>
+
+                  {/* 当前选中标记 */}
+                  {currentStudent?.id === student.id && (
                     <div style={{
-                      width: '44px',
-                      height: '44px',
+                      width: '20px',
+                      height: '20px',
                       borderRadius: '50%',
-                      background: '#e6f7ff',
+                      background: '#2563EB',
                       display: 'flex',
                       alignItems: 'center',
                       justifyContent: 'center',
-                      overflow: 'hidden'
+                      flexShrink: 0
                     }}>
-                      {student.avatar ? (
-                        <img src={student.avatar} alt="" style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
-                      ) : (
-                        <svg width="24" height="24" viewBox="0 0 1024 1024" fill="#1677ff">
-                          <path d="M512 512c88 0 160-72 160-160s-72-160-160-160-160 72-160 160 72 160 160 160zm0-256c52.8 0 96 43.2 96 96s-43.2 96-96 96-96-43.2-96-96 43.2-96 96-96zm448 544v64c0 35.2-28.8 64-64 64H128c-35.2 0-64-28.8-64-64v-64c0-88 72-160 160-160h32c17.6 0 34.4 3.2 50.4 9.6 33.6 12.8 70.4 20.8 108.8 23.2 9.6 0.8 19.2 1.2 28.8 1.2s19.2-0.4 28.8-1.2c38.4-2.4 75.2-10.4 108.8-23.2 16-6.4 32.8-9.6 50.4-9.6h32c88 0 160 72 160 160z"/>
-                        </svg>
-                      )}
+                      <svg width="12" height="12" viewBox="0 0 1024 1024" fill="#fff">
+                        <path d="M912 224l-48-48-400 400-176-176-48 48 224 224z"/>
+                      </svg>
                     </div>
-                    <div style={{ flex: 1 }}>
-                      <div style={{ fontSize: '16px', fontWeight: 'bold', color: '#333' }}>
-                        {student.name}
-                      </div>
-                      <div style={{ fontSize: '13px', color: '#999', marginTop: '2px' }}>
-                        {student.class || '暂无班级'}
-                      </div>
-                    </div>
-                  </div>
-                  
-                  {/* 右侧操作区 */}
-                  <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-                    {/* 编辑按钮 */}
-                    <Button
-                      fill="none"
-                      size="small"
-                      onClick={(e) => openEditPage(student, e)}
-                      style={{ color: '#1677ff', padding: '4px 8px' }}
-                    >
-                      编辑
-                    </Button>
-                    
-                    {/* 删除按钮 */}
-                    <Button
-                      fill="none"
-                      size="small"
-                      onClick={(e) => handleDelete(student, e)}
-                      style={{ color: '#ff4d4f', padding: '4px 8px' }}
-                    >
-                      删除
-                    </Button>
-                    
-                    {/* 当前选中标记 */}
-                    {currentStudent?.id === student.id && (
-                      <div style={{
-                        width: '24px',
-                        height: '24px',
-                        borderRadius: '50%',
-                        background: '#1677ff',
-                        display: 'flex',
-                        alignItems: 'center',
-                        justifyContent: 'center'
-                      }}>
-                        <svg width="16" height="16" viewBox="0 0 1024 1024" fill="#fff">
-                          <path d="M912 224l-48-48-400 400-176-176-48 48 224 224z"/>
-                        </svg>
-                      </div>
-                    )}
-                  </div>
+                  )}
                 </div>
-              </SwipeAction>
+              </div>
             ))}
           </div>
         )}
@@ -419,18 +400,19 @@ export default function Students() {
         transform: 'translateX(-50%)',
         zIndex: 100
       }}>
-        <Button 
-          color="primary" 
+        <Button
+          color="primary"
           onClick={openAddPage}
-          style={{ 
-            borderRadius: '24px', 
-            padding: '12px 24px',
+          style={{
+            borderRadius: '20px',
+            padding: '8px 20px',
             display: 'flex',
             alignItems: 'center',
-            gap: '8px'
+            gap: '6px',
+            fontSize: '13px'
           }}
         >
-          <svg width="16" height="16" viewBox="0 0 1024 1024" fill="#fff">
+          <svg width="14" height="14" viewBox="0 0 1024 1024" fill="#fff">
             <path d="M512 64C264.6 64 64 264.6 64 512s200.6 448 448 448 448-200.6 448-448S759.4 64 512 64zm0 832c-212 0-384-172-384-384s172-384 384-384 384 172 384 384-172 384-384 384z"/>
             <path d="M704 480H544V320c0-17.6-14.4-32-32-32s-32 14.4-32 32v160H320c-17.6 0-32 14.4-32 32s14.4 32 32 32h160v160c0 17.6 14.4 32 32 32s32-14.4 32-32V544h160c17.6 0 32-14.4 32-32s-14.4-32-32-32z"/>
           </svg>
@@ -442,7 +424,7 @@ export default function Students() {
 
   // 渲染添加/编辑页面
   const renderAddPage = () => (
-    <div style={{ padding: '0', background: '#f5f5f5', minHeight: '100%' }}>
+    <div style={{ padding: '0', background: '#F5F7FA', minHeight: '100%' }}>
       {/* 隐藏的文件输入 */}
       <input
         ref={fileInputRef}
@@ -462,79 +444,78 @@ export default function Students() {
       </NavBar>
 
       {/* 头像上传 */}
-      <div style={{ 
-        background: '#fff', 
-        padding: '32px 16px',
+      <div style={{
+        background: '#fff',
+        padding: '24px 16px',
         display: 'flex',
         flexDirection: 'column',
-        alignItems: 'center',
-        borderBottom: '1px solid #f5f5f5'
+        alignItems: 'center'
       }}>
-        <div 
+        <div
           onClick={() => fileInputRef.current?.click()}
           style={{
-            width: '80px',
-            height: '80px',
+            width: '64px',
+            height: '64px',
             borderRadius: '50%',
-            background: '#f5f5f5',
+            background: '#F3F4F6',
             display: 'flex',
             flexDirection: 'column',
             alignItems: 'center',
             justifyContent: 'center',
             cursor: 'pointer',
             overflow: 'hidden',
-            border: '2px dashed #ddd'
+            border: '1px dashed #D1D5DB'
           }}
         >
           {formData.avatar ? (
             <img src={formData.avatar} alt="" style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
           ) : (
             <>
-              <svg width="32" height="32" viewBox="0 0 1024 1024" fill="#999">
+              <svg width="24" height="24" viewBox="0 0 1024 1024" fill="#9CA3AF">
                 <path d="M832 256h-96l-32-64c-12.8-25.6-38.4-41.6-67.2-41.6H387.2c-28.8 0-54.4 16-67.2 41.6l-32 64H192c-70.4 0-128 57.6-128 128v384c0 70.4 57.6 128 128 128h640c70.4 0 128-57.6 128-128V384c0-70.4-57.6-128-128-128z"/>
                 <path d="M512 416c-88 0-160 72-160 160s72 160 160 160 160-72 160-160-72-160-160-160zm0 256c-52.8 0-96-43.2-96-96s43.2-96 96-96 96 43.2 96 96-43.2 96-96 96z"/>
               </svg>
-              <span style={{ fontSize: '12px', color: '#999', marginTop: '4px' }}>点击上传头像</span>
+              <span style={{ fontSize: '11px', color: '#9CA3AF', marginTop: '4px' }}>头像</span>
             </>
           )}
         </div>
       </div>
 
       {/* 表单 */}
-      <div style={{ background: '#fff' }}>
+      <div style={{ background: '#fff', borderRadius: '12px', margin: '12px', overflow: 'hidden', border: '1px solid #E5E7EB' }}>
         {/* 姓名 */}
-        <div style={{ 
-          display: 'flex', 
-          alignItems: 'center', 
-          padding: '16px',
-          borderBottom: '1px solid #f5f5f5'
+        <div style={{
+          display: 'flex',
+          alignItems: 'center',
+          padding: '12px 16px',
+          borderBottom: '1px solid #F3F4F6'
         }}>
-          <span style={{ width: '80px', fontSize: '15px', color: '#333' }}>姓名</span>
+          <span style={{ width: '64px', fontSize: '13px', color: '#111827', fontWeight: 500 }}>姓名</span>
           <Input
             placeholder="请输入学生姓名"
             value={formData.name}
             onChange={val => setFormData({ ...formData, name: val })}
-            style={{ flex: 1, '--font-size': '15px' }}
+            style={{ flex: 1, '--font-size': '13px' }}
           />
         </div>
 
         {/* 年级 */}
-        <div style={{ 
-          display: 'flex', 
-          alignItems: 'center', 
-          padding: '16px',
-          borderBottom: '1px solid #f5f5f5'
+        <div style={{
+          display: 'flex',
+          alignItems: 'center',
+          padding: '12px 16px',
+          borderBottom: '1px solid #F3F4F6'
         }}>
-          <span style={{ width: '80px', fontSize: '15px', color: '#333' }}>年级<span style={{ color: '#ff4d4f' }}>*</span></span>
+          <span style={{ width: '64px', fontSize: '13px', color: '#111827', fontWeight: 500 }}>年级<span style={{ color: '#EF4444' }}>*</span></span>
           <select
             value={formData.grade}
             onChange={e => setFormData({ ...formData, grade: e.target.value })}
-            style={{ 
-              flex: 1, 
-              fontSize: '15px', 
+            style={{
+              flex: 1,
+              fontSize: '13px',
               border: 'none',
               background: 'transparent',
-              color: formData.grade ? '#333' : '#999'
+              color: formData.grade ? '#111827' : '#9CA3AF'
             }}
           >
             <option value="">请选择年级</option>
@@ -545,40 +526,39 @@ export default function Students() {
         </div>
 
         {/* 班级 */}
-        <div style={{ 
-          display: 'flex', 
-          alignItems: 'center', 
-          padding: '16px',
-          borderBottom: '1px solid #f5f5f5'
+        <div style={{
+          display: 'flex',
+          alignItems: 'center',
+          padding: '12px 16px',
+          borderBottom: '1px solid #F3F4F6'
         }}>
-          <span style={{ width: '80px', fontSize: '15px', color: '#333' }}>班级</span>
+          <span style={{ width: '64px', fontSize: '13px', color: '#111827', fontWeight: 500 }}>班级</span>
           <Input
             placeholder="请输入班级（如：1班）"
             value={formData.class}
             onChange={val => setFormData({ ...formData, class: val })}
-            style={{ flex: 1, '--font-size': '15px' }}
+            style={{ flex: 1, '--font-size': '13px' }}
           />
         </div>
 
         {/* 备注 */}
-        <div style={{ 
-          display: 'flex', 
-          alignItems: 'flex-start', 
-          padding: '16px',
-          borderBottom: '1px solid #f5f5f5'
+        <div style={{
+          display: 'flex',
+          alignItems: 'flex-start',
+          padding: '12px 16px'
         }}>
-          <span style={{ width: '80px', fontSize: '15px', color: '#333', marginTop: '8px' }}>备注</span>
+          <span style={{ width: '64px', fontSize: '13px', color: '#111827', fontWeight: 500, marginTop: '6px' }}>备注</span>
           <textarea
             placeholder="请输入备注（选填）"
             value={formData.remark}
             onChange={e => setFormData({ ...formData, remark: e.target.value })}
-            style={{ 
-              flex: 1, 
-              fontSize: '15px', 
+            style={{
+              flex: 1,
+              fontSize: '13px',
               border: 'none',
               background: 'transparent',
               resize: 'none',
-              minHeight: '80px',
+              minHeight: '60px',
               fontFamily: 'inherit'
             }}
           />
@@ -587,7 +567,7 @@ export default function Students() {
 
       {/* 删除按钮（编辑模式） */}
       {editingStudent && (
-        <div style={{ padding: '16px', marginTop: '24px' }}>
+        <div style={{ padding: '12px 16px' }}>
           <Button
             block
             color="danger"

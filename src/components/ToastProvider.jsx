@@ -14,10 +14,10 @@ function ToastContainer({ toasts }) {
             initial={{ opacity: 0, scale: 0.9 }}
             animate={{ opacity: 1, scale: 1 }}
             exit={{ opacity: 0, scale: 0.9 }}
-            className={`px-6 py-3 rounded-2xl shadow-xl backdrop-blur-md flex items-center gap-2.5 pointer-events-auto ${
-              toast.type === 'success' ? 'bg-green-500/90 text-white' :
+            className={`px-4 py-2.5 rounded-xl shadow-lg backdrop-blur-md flex items-center gap-2 pointer-events-auto ${
+              toast.type === 'success' ? 'bg-green-600/90 text-white' :
               toast.type === 'error' ? 'bg-red-500/90 text-white' :
-              toast.type === 'loading' ? 'bg-blue-500/90 text-white' :
+              toast.type === 'loading' ? 'bg-blue-600/90 text-white' :
               'bg-gray-900/90 text-white'
             }`}
           >

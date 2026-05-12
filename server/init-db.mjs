@@ -74,6 +74,14 @@ async function initDatabase() {
         analysis TEXT,
         status TEXT DEFAULT 'pending',
         is_suspicious BOOLEAN DEFAULT FALSE,
+        is_correct BOOLEAN DEFAULT FALSE,
+        confidence DECIMAL(3,2) DEFAULT 0.00,
+        student_answer TEXT,
+        image_url TEXT,
+        ai_tags JSONB DEFAULT '[]',
+        manual_tags JSONB DEFAULT '[]',
+        tags_source TEXT DEFAULT 'ai',
+        block_coordinates JSONB,
         created_at TIMESTAMPTZ DEFAULT NOW(),
         updated_at TIMESTAMPTZ DEFAULT NOW()
       )

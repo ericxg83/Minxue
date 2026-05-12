@@ -80,22 +80,22 @@ export default function ScanQR({ onClose, onScanSuccess }) {
           display: 'flex',
           justifyContent: 'space-between',
           alignItems: 'center',
-          padding: '48px 20px 16px'
+          padding: '48px 16px 12px'
         }}>
-          <button 
-            onClick={onClose} 
+          <button
+            onClick={onClose}
             style={{
-              padding: '8px',
+              padding: '4px',
               borderRadius: '50%',
               background: 'transparent',
               border: 'none',
               cursor: 'pointer'
             }}
           >
-            <X size={24} color="#fff" />
+            <X size={22} color="#fff" />
           </button>
-          <h2 style={{ margin: 0, fontSize: '17px', fontWeight: 700, color: '#fff' }}>扫码批改</h2>
-          <div style={{ width: '40px' }} />
+          <h2 style={{ margin: 0, fontSize: '15px', fontWeight: 600, color: '#fff' }}>扫码批改</h2>
+          <div style={{ width: '36px' }} />
         </div>
 
         <div style={{
@@ -126,8 +126,8 @@ export default function ScanQR({ onClose, onScanSuccess }) {
               left: '-2px',
               width: '30px',
               height: '30px',
-              borderTop: '4px solid #3b82f6',
-              borderLeft: '4px solid #3b82f6',
+              borderTop: '4px solid #2563EB',
+              borderLeft: '4px solid #2563EB',
               borderTopLeftRadius: '10px'
             }} />
             <div style={{
@@ -136,8 +136,8 @@ export default function ScanQR({ onClose, onScanSuccess }) {
               right: '-2px',
               width: '30px',
               height: '30px',
-              borderTop: '4px solid #3b82f6',
-              borderRight: '4px solid #3b82f6',
+              borderTop: '4px solid #2563EB',
+              borderRight: '4px solid #2563EB',
               borderTopRightRadius: '10px'
             }} />
             <div style={{
@@ -146,8 +146,8 @@ export default function ScanQR({ onClose, onScanSuccess }) {
               left: '-2px',
               width: '30px',
               height: '30px',
-              borderBottom: '4px solid #3b82f6',
-              borderLeft: '4px solid #3b82f6',
+              borderBottom: '4px solid #2563EB',
+              borderLeft: '4px solid #2563EB',
               borderBottomLeftRadius: '10px'
             }} />
             <div style={{
@@ -156,8 +156,8 @@ export default function ScanQR({ onClose, onScanSuccess }) {
               right: '-2px',
               width: '30px',
               height: '30px',
-              borderBottom: '4px solid #3b82f6',
-              borderRight: '4px solid #3b82f6',
+              borderBottom: '4px solid #2563EB',
+              borderRight: '4px solid #2563EB',
               borderBottomRightRadius: '10px'
             }} />
             
@@ -169,12 +169,12 @@ export default function ScanQR({ onClose, onScanSuccess }) {
                 left: 0,
                 right: 0,
                 height: '2px',
-                background: 'linear-gradient(to right, transparent, #3b82f6, transparent)'
+                background: 'linear-gradient(to right, transparent, #2563EB, transparent)'
               }}
             />
 
             {scanning ? (
-              <Loader2 size={48} color="#3b82f6" className="animate-spin" />
+              <Loader2 size={48} color="#2563EB" className="animate-spin" />
             ) : (
               <div style={{ color: 'rgba(255,255,255,0.6)', fontSize: '14px', textAlign: 'center' }}>
                 点击扫描
@@ -228,7 +228,7 @@ export default function ScanQR({ onClose, onScanSuccess }) {
               height: '52px',
               borderRadius: '50%',
               transition: 'background-color 0.2s',
-              background: scanning ? '#3b82f6' : '#fff'
+              background: scanning ? '#2563EB' : '#fff'
             }} />
           </div>
           

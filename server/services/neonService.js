@@ -54,6 +54,7 @@ export const createQuestions = async (questions) => {
       ai_tags: JSON.stringify(q.ai_tags || []),
       manual_tags: JSON.stringify(q.manual_tags || []),
       tags_source: q.tags_source || 'ai',
+      block_coordinates: q.block_coordinates ? JSON.stringify(q.block_coordinates) : null,
       created_at: new Date().toISOString()
     }
   })
@@ -79,7 +80,7 @@ export const batchUpdateQuestionTags = async (tagUpdates) => {
     try {
       await query(
         `UPDATE ${TABLES.QUESTIONS}
-         SET ai_tags = $1, tags_source = 'ai', updated_at = NOW()
+         SET ai_tags = $1::jsonb, tags_source = 'ai', updated_at = NOW()
          WHERE id = $2`,
         [JSON.stringify(update.ai_tags), update.id]
       )

@@ -852,36 +852,36 @@ export default function App() {
   // Render
   return (
     <ToastProvider>
-      <div className="min-h-screen bg-gray-50">
+      <div className="min-h-screen" style={{ background: '#F5F7FA' }}>
         {/* Header */}
-        <header className="sticky top-0 z-50 bg-white/80 backdrop-blur-xl border-b border-gray-100">
-          <div className="max-w-lg mx-auto px-5 h-14 flex items-center justify-between">
-            <div className="flex items-center gap-3">
+        <header className="sticky top-0 z-50 bg-white/90 border-b" style={{ borderColor: '#E5E7EB' }}>
+          <div className="max-w-lg mx-auto px-4 h-11 flex items-center justify-between">
+            <div className="flex items-center gap-2">
               <button
                 onClick={() => setShowStudentSwitcher(true)}
-                className="flex items-center gap-2 text-gray-900"
+                className="flex items-center gap-1.5 text-gray-900"
               >
-                <div className="w-8 h-8 rounded-full bg-blue-100 flex items-center justify-center">
-                  <User size={16} className="text-blue-600" />
+                <div className="w-7 h-7 rounded-full flex items-center justify-center" style={{ background: '#EFF6FF' }}>
+                  <User size={14} style={{ color: '#2563EB' }} />
                 </div>
-                <span className="text-[15px] font-bold">{currentStudent?.name || '选择学生'}</span>
-                <ChevronDown size={16} className="text-gray-400" />
+                <span style={{ fontSize: '15px', fontWeight: 600 }}>{currentStudent?.name || '选择学生'}</span>
+                <ChevronDown size={14} className="text-gray-400" />
               </button>
             </div>
-            <div className="flex items-center gap-3">
+            <div className="flex items-center gap-2">
               <button
                 onClick={() => setShowSearch(true)}
-                className="w-9 h-9 rounded-full bg-gray-100 flex items-center justify-center"
+                className="w-8 h-8 rounded-full flex items-center justify-center" style={{ background: '#F3F4F6' }}
               >
-                <Search size={18} className="text-gray-600" />
+                <Search size={16} className="text-gray-500" />
               </button>
               <button
                 onClick={handleShowNotifications}
-                className="w-9 h-9 rounded-full bg-gray-100 flex items-center justify-center relative"
+                className="w-8 h-8 rounded-full flex items-center justify-center relative" style={{ background: '#F3F4F6' }}
               >
-                <Bell size={18} className="text-gray-600" />
+                <Bell size={16} className="text-gray-500" />
                 {notifications.length > 0 && (
-                  <span className="absolute -top-1 -right-1 w-4 h-4 bg-red-500 rounded-full text-[10px] text-white flex items-center justify-center">
+                  <span className="absolute -top-0.5 -right-0.5 w-3.5 h-3.5 rounded-full text-[9px] text-white flex items-center justify-center" style={{ background: '#EF4444' }}>
                     {notifications.length}
                   </span>
                 )}
@@ -891,8 +891,8 @@ export default function App() {
         </header>
 
         {/* Main Content */}
-        <main className="max-w-lg mx-auto pb-24">
-          <AnimatePresence mode="wait">
+        <main className="max-w-lg mx-auto" style={{ paddingBottom: '80px' }}>
+          <AnimatePresence>
             {currentPage === 'processing' && (
               <motion.div
                 key="processing-page"
@@ -902,8 +902,8 @@ export default function App() {
                 className="w-full"
               >
                 {/* Filter Tabs */}
-                <section className="px-5 pt-4 mb-3 overflow-x-auto no-scrollbar">
-                  <div className="flex gap-2 min-w-max">
+                <section className="px-4 pt-2.5 mb-1.5 overflow-x-auto no-scrollbar">
+                  <div className="flex gap-1.5 min-w-max">
                     {[
                       { id: 'all', label: '全部', count: filteredTasks.length },
                       { id: 'done', label: '已批改', count: filteredTasks.filter(t => t.status === 'done').length },
@@ -912,16 +912,10 @@ export default function App() {
                       <button
                         key={filter.id}
                         onClick={() => setProcessingFilter(filter.id)}
-                        className={`px-5 py-2.5 rounded-full text-[13px] font-bold flex items-center gap-2 transition-all ${
-                          processingFilter === filter.id
-                          ? 'bg-blue-600 text-white shadow-lg shadow-blue-100'
-                          : 'bg-gray-100/80 text-gray-400'
-                        }`}
+                        className={`filter-chip ${processingFilter === filter.id ? 'active' : 'inactive'}`}
                       >
                         {filter.label}
-                        <span className={`text-[11px] font-medium ${
-                          processingFilter === filter.id ? 'text-white/80' : 'text-gray-300'
-                        }`}>
+                        <span style={{ fontSize: '10px', opacity: 0.7, marginLeft: '3px' }}>
                           {filter.count}
                         </span>
                       </button>
@@ -929,13 +923,13 @@ export default function App() {
                   </div>
                 </section>
 
-                {/* Task List */}
-                <section className="px-5 space-y-3">
+                {/* Task List - Compact File Style */}
+                <section className="px-4 space-y-1">
                   {searchFilteredTasks.length === 0 ? (
-                    <div className="text-center py-20">
-                      <Camera size={48} className="mx-auto text-gray-200 mb-4" />
-                      <p className="text-gray-400 text-[15px]">暂无任务</p>
-                      <p className="text-gray-300 text-[13px] mt-1">点击右下角按钮上传试卷</p>
+                    <div className="text-center py-16">
+                      <Camera size={36} className="mx-auto" style={{ color: '#D1D5DB' }} />
+                      <p className="mt-3" style={{ fontSize: '13px', color: '#9CA3AF' }}>暂无任务</p>
+                      <p className="mt-0.5" style={{ fontSize: '11px', color: '#D1D5DB' }}>点击右下角按钮上传试卷</p>
                     </div>
                   ) : (
                     searchFilteredTasks.map((task) => (
@@ -944,9 +938,14 @@ export default function App() {
                         layout
                         initial={{ opacity: 0, y: 10 }}
                         animate={{ opacity: 1, y: 0 }}
-                        className={`bg-white rounded-2xl p-4 shadow-sm border border-gray-100 relative ${
-                          task.status === 'done' ? 'cursor-pointer active:bg-gray-50' : ''
-                        }`}
+                        className={`${task.status === 'done' ? 'cursor-pointer' : ''}`}
+                        style={{
+                          padding: '8px 12px',
+                          borderRadius: '10px',
+                          background: '#fff',
+                          border: '1px solid #F3F4F6',
+                          transition: 'all 0.15s'
+                        }}
                         onClick={() => {
                           if (task.status === 'done') {
                             setReviewTask(task)
@@ -954,86 +953,93 @@ export default function App() {
                           }
                         }}
                       >
-                        {task.status === 'failed' && (
-                          <span className="absolute top-2 right-2 text-red-500 text-lg" title="处理失败">
-                            ⚠️
-                          </span>
-                        )}
-                        <div className="flex gap-3">
+                        <div className="flex gap-2.5 items-center">
+                          {/* Small thumbnail */}
                           <div
-                            className="w-20 h-20 rounded-xl bg-gray-100 flex-shrink-0 overflow-hidden cursor-pointer"
+                            className="w-9 h-9 rounded-lg flex-shrink-0 overflow-hidden cursor-pointer"
+                            style={{ background: '#F5F5F5' }}
                             onClick={(e) => { e.stopPropagation(); handleViewImage(task.image_url) }}
                           >
                             {task.image_url ? (
-                              <img src={task.image_url} alt="试卷" className="w-full h-full object-cover" />
+                              <img src={task.image_url} alt="" className="w-full h-full object-cover" />
                             ) : (
                               <div className="w-full h-full flex items-center justify-center">
-                                <ImageIcon size={24} className="text-gray-300" />
+                                <ImageIcon size={14} style={{ color: '#D1D5DB' }} />
                               </div>
                             )}
                           </div>
-                          <div className="flex-1 min-w-0 pr-6">
-                            <div className="flex items-start justify-between">
-                              <h3 className="text-[14px] font-bold text-gray-900 truncate">
+                          {/* Content */}
+                          <div className="flex-1 min-w-0">
+                            <div className="flex items-center justify-between gap-1">
+                              <span style={{ fontSize: '13px', fontWeight: 500, color: '#111827' }} className="truncate">
                                 {task.original_name || '未命名试卷'}
-                              </h3>
+                              </span>
                               <button
-                                onClick={(e) => {
-                                  e.stopPropagation()
-                                  setDeleteTarget({ type: 'task', id: task.id })
-                                  setShowDeleteConfirm(true)
-                                }}
-                                className="text-gray-300 hover:text-red-500 transition-colors flex-shrink-0 ml-2"
+                                onClick={(e) => { e.stopPropagation(); setDeleteTarget({ type: 'task', id: task.id }); setShowDeleteConfirm(true) }}
+                                className="flex-shrink-0"
+                                style={{ color: '#E5E7EB' }}
                               >
-                                <Trash2 size={16} />
+                                <Trash2 size={12} />
                               </button>
                             </div>
-                            <p className="text-[11px] text-gray-400 mt-1">
-                              上传时间：{dayjs(task.created_at).format('YYYY/MM/DD HH:mm')}
-                            </p>
-                            {task.status === 'done' && (
-                              <p className="text-[11px] text-gray-400 mt-0.5">
-                                题目数量：{task.result?.questionCount || 0}题
-                              </p>
-                            )}
-                            {task.status === 'done' && task.result?.questionCount && (
-                              <div className="flex gap-3 mt-1.5 text-[11px]">
-                                <span className="text-green-600">
+                            <div className="flex items-center gap-1.5 mt-0.5 flex-wrap">
+                              <span style={{ fontSize: '11px', color: '#9CA3AF' }}>
+                                {dayjs(task.created_at).format('MM/DD HH:mm')}
+                              </span>
+                              {task.result?.questionCount ? (
+                                <>
+                                  <span style={{ fontSize: '10px', color: '#D1D5DB' }}>·</span>
+                                  <span style={{ fontSize: '11px', color: '#9CA3AF' }}>{task.result.questionCount} 题</span>
+                                </>
+                              ) : null}
+                              {/* Inline status for non-done */}
+                              {task.status !== 'done' && (
+                                <>
+                                  <span style={{ fontSize: '10px', color: '#D1D5DB' }}>·</span>
+                                  <span style={{
+                                    fontSize: '11px',
+                                    color: task.status === 'failed' ? '#EF4444' : task.status === 'processing' ? '#2563EB' : '#F59E0B'
+                                  }}>
+                                    {task.status === 'processing' && <Loader2 size={9} className="animate-spin inline" style={{ marginRight: '1px' }} />}
+                                    {task.status === 'processing' ? '批改中' : task.status === 'failed' ? '识别失败' : '等待中'}
+                                  </span>
+                                </>
+                              )}
+                            </div>
+                            {/* Stats or Error */}
+                            {task.status === 'done' && task.result?.questionCount ? (
+                              <div className="flex items-center gap-1.5 mt-0.5">
+                                <span style={{
+                                  fontSize: '10px',
+                                  padding: '0 5px',
+                                  height: '16px',
+                                  lineHeight: '16px',
+                                  borderRadius: '3px',
+                                  background: '#F0FDF4',
+                                  color: '#16A34A',
+                                  display: 'inline-block'
+                                }}>
                                   正确 {task.result?.questionCount - (task.result?.wrongCount || 0)}
                                 </span>
-                                <span className="text-red-500">
+                                <span style={{
+                                  fontSize: '10px',
+                                  padding: '0 5px',
+                                  height: '16px',
+                                  lineHeight: '16px',
+                                  borderRadius: '3px',
+                                  background: '#FEF2F2',
+                                  color: '#EF4444',
+                                  display: 'inline-block'
+                                }}>
                                   错误 {task.result?.wrongCount || 0}
                                 </span>
                               </div>
-                            )}
+                            ) : null}
                             {task.status === 'failed' && task.result?.error && (
-                              <p className="text-[11px] text-red-400 mt-1">
+                              <p style={{ fontSize: '10px', color: '#EF4444', marginTop: '0.5px', lineHeight: 1.2 }}>
                                 {task.result.error}
                               </p>
                             )}
-                            <div className="flex items-center gap-2 mt-2">
-                              {task.status === 'done' ? (
-                                <span className="px-2.5 py-1 rounded-full bg-green-50 text-green-600 text-[11px] font-bold">
-                                  已批改
-                                </span>
-                              ) : (
-                                <span className={`px-2.5 py-1 rounded-full text-[11px] font-bold flex items-center gap-1 ${
-                                  task.status === 'failed'
-                                    ? 'bg-red-50 text-red-600'
-                                    : task.status === 'processing'
-                                    ? 'bg-blue-50 text-blue-600'
-                                    : 'bg-yellow-50 text-yellow-600'
-                                }`}>
-                                  {task.status === 'processing' && <Loader2 size={10} className="animate-spin" />}
-                                  未批改
-                                </span>
-                              )}
-                              {task.result?.questionCount && (
-                                <span className="text-[11px] text-gray-400">
-                                  {task.result.questionCount} 道题
-                                </span>
-                              )}
-                            </div>
                           </div>
                         </div>
                       </motion.div>
@@ -1053,8 +1059,8 @@ export default function App() {
                 className="w-full"
               >
                 {/* Filter Tabs */}
-                <section className="px-5 pt-4 mb-3 overflow-x-auto no-scrollbar">
-                  <div className="flex gap-2 min-w-max">
+                <section className="px-4 pt-3 mb-2 overflow-x-auto no-scrollbar">
+                  <div className="flex gap-1.5 min-w-max">
                     {[
                       { id: 'all', label: '全部', count: (Array.isArray(wrongQuestions) ? wrongQuestions : []).filter(wq => wq.student_id === currentStudent?.id).length },
                       { id: 'pending', label: '待复习', count: (Array.isArray(wrongQuestions) ? wrongQuestions : []).filter(wq => wq.student_id === currentStudent?.id && wq.status === 'pending').length },
@@ -1064,183 +1070,212 @@ export default function App() {
                       <button
                         key={filter.id}
                         onClick={() => setBankFilter(filter.id)}
-                        className={`px-5 py-2.5 rounded-full text-[13px] font-bold flex items-center gap-2 transition-all ${
-                          bankFilter === filter.id
-                          ? 'bg-blue-600 text-white shadow-lg shadow-blue-100'
-                          : 'bg-gray-100/80 text-gray-400'
-                        }`}
+                        className={`filter-chip ${bankFilter === filter.id ? 'active' : 'inactive'}`}
                       >
                         {filter.label}
-                        <span className={`text-[11px] font-medium ${
-                          bankFilter === filter.id ? 'text-white/80' : 'text-gray-300'
-                        }`}>
-                          {filter.count}
-                        </span>
+                        <span style={{ fontSize: '10px', opacity: 0.7, marginLeft: '3px' }}>{filter.count}</span>
                       </button>
                     ))}
                   </div>
                 </section>
 
                 {/* Advanced Filters */}
-                <section className="px-5 mb-4">
-                  <div className="flex gap-2 overflow-x-auto no-scrollbar">
+                <section className="px-4 mb-3 overflow-x-auto no-scrollbar">
+                  <div className="flex gap-1.5 min-w-max">
                     <button
                       onClick={() => setShowSubjectFilter(!showSubjectFilter)}
-                      className={`px-4 py-2 rounded-full text-[12px] font-bold flex items-center gap-1 transition-all ${
-                        selectedSubject !== 'all'
-                        ? 'bg-blue-50 text-blue-600'
-                        : 'bg-gray-100 text-gray-400'
-                      }`}
+                      className={`filter-chip ${selectedSubject !== 'all' ? 'active' : 'inactive'}`}
                     >
-                      科目
-                      <ChevronDown size={12} />
+                      科目<ChevronDown size={10} style={{ marginLeft: '2px' }} />
                     </button>
                     <button
                       onClick={() => setShowTimeFilter(!showTimeFilter)}
-                      className={`px-4 py-2 rounded-full text-[12px] font-bold flex items-center gap-1 transition-all ${
-                        selectedTimeRange !== 'all'
-                        ? 'bg-blue-50 text-blue-600'
-                        : 'bg-gray-100 text-gray-400'
-                      }`}
+                      className={`filter-chip ${selectedTimeRange !== 'all' ? 'active' : 'inactive'}`}
                     >
-                      时间
-                      <ChevronDown size={12} />
+                      时间<ChevronDown size={10} style={{ marginLeft: '2px' }} />
                     </button>
                     <button
                       onClick={() => setShowErrorFilter(!showErrorFilter)}
-                      className={`px-4 py-2 rounded-full text-[12px] font-bold flex items-center gap-1 transition-all ${
-                        selectedErrorCount !== 'all'
-                        ? 'bg-blue-50 text-blue-600'
-                        : 'bg-gray-100 text-gray-400'
-                      }`}
+                      className={`filter-chip ${selectedErrorCount !== 'all' ? 'active' : 'inactive'}`}
                     >
-                      错次
-                      <ChevronDown size={12} />
+                      错次<ChevronDown size={10} style={{ marginLeft: '2px' }} />
                     </button>
                     <button
                       onClick={() => setShowTagFilter(!showTagFilter)}
-                      className={`px-4 py-2 rounded-full text-[12px] font-bold flex items-center gap-1 transition-all ${
-                        selectedTags.length > 0
-                        ? 'bg-blue-50 text-blue-600'
-                        : 'bg-gray-100 text-gray-400'
-                      }`}
+                      className={`filter-chip ${selectedTags.length > 0 ? 'active' : 'inactive'}`}
                     >
-                      标签
-                      <ChevronDown size={12} />
+                      标签<ChevronDown size={10} style={{ marginLeft: '2px' }} />
                     </button>
                   </div>
                 </section>
 
                 {/* Wrong Question List */}
-                <section className="px-5 space-y-3 pb-20">
+                <section className="px-4">
                   {filteredWrongQuestions.length === 0 ? (
-                    <div className="text-center py-20">
-                      <LayoutGrid size={48} className="mx-auto text-gray-200 mb-4" />
-                      <p className="text-gray-400 text-[15px]">暂无错题</p>
-                      <p className="text-gray-300 text-[13px] mt-1">AI批改后错题会自动收录到错题本</p>
+                    <div className="text-center py-16">
+                      <LayoutGrid size={36} className="mx-auto" style={{ color: '#D1D5DB' }} />
+                      <p className="mt-3" style={{ fontSize: '13px', color: '#9CA3AF' }}>暂无错题</p>
+                      <p className="mt-0.5" style={{ fontSize: '11px', color: '#D1D5DB' }}>AI批改后错题会自动收录到错题本</p>
                     </div>
                   ) : (
-                    filteredWrongQuestions.map((wq) => (
-                      <motion.div
-                        key={wq.id}
-                        layout
-                        initial={{ opacity: 0, y: 10 }}
-                        animate={{ opacity: 1, y: 0 }}
-                        className="bg-white rounded-2xl p-4 shadow-sm border border-gray-100"
-                      >
-                        <div className="flex gap-3">
-                          <button
-                            onClick={() => toggleSelection(wq)}
-                            className="flex-shrink-0 mt-1"
+                    <div className="space-y-1.5">
+                      {filteredWrongQuestions.map((wq) => {
+                        const question = wq.question || wq
+                        const isSelected = selectedQuestions.find(q => q.id === wq.id)
+
+                        const statusCfg = {
+                          pending: { bg: '#FFFBEB', color: '#F59E0B', text: '待复习' },
+                          partial: { bg: '#EFF6FF', color: '#2563EB', text: '有点懂' },
+                          mastered: { bg: '#F0FDF4', color: '#16A34A', text: '完全懂' }
+                        }
+                        const st = statusCfg[wq.status] || statusCfg.pending
+
+                        const tags = question.tags_source === 'manual'
+                          ? (question.manual_tags || [])
+                          : (question.ai_tags || [])
+
+                        return (
+                          <motion.div
+                            key={wq.id}
+                            layout
+                            initial={{ opacity: 0, y: 10 }}
+                            animate={{ opacity: 1, y: 0 }}
+                            className="card"
+                            style={{ padding: '10px 12px' }}
                           >
-                            <div className={`w-5 h-5 rounded-md border-2 flex items-center justify-center transition-all ${
-                              selectedQuestions.find(q => q.id === wq.id)
-                              ? 'bg-blue-600 border-blue-600'
-                              : 'border-gray-300'
-                            }`}>
-                              {selectedQuestions.find(q => q.id === wq.id) && (
-                                <CheckCircle2 size={14} className="text-white" />
-                              )}
-                            </div>
-                          </button>
-                          <div className="flex-1 min-w-0">
-                            <div className="flex items-start justify-between">
-                              <div className="flex items-center gap-2">
-                                <span className="text-[12px] text-gray-400 font-medium">错题</span>
-                                <span className="px-2 py-0.5 rounded-full bg-red-50 text-red-600 text-[10px] font-bold">
-                                  错 {wq.error_count || 1} 次
-                                </span>
+                            <div className="flex gap-2.5 items-start">
+                              {/* Checkbox */}
+                              <button
+                                onClick={() => toggleSelection(wq)}
+                                className="flex-shrink-0 mt-0.5"
+                              >
+                                <div
+                                  style={{
+                                    width: '18px',
+                                    height: '18px',
+                                    borderRadius: '4px',
+                                    border: '2px solid',
+                                    borderColor: isSelected ? '#2563EB' : '#D1D5DB',
+                                    background: isSelected ? '#2563EB' : 'transparent',
+                                    display: 'flex',
+                                    alignItems: 'center',
+                                    justifyContent: 'center',
+                                    transition: 'all 0.15s'
+                                  }}
+                                >
+                                  {isSelected && (
+                                    <CheckCircle2 size={12} className="text-white" />
+                                  )}
+                                </div>
+                              </button>
+
+                              {/* Content area */}
+                              <div className="flex-1 min-w-0">
+                                {/* Content - max 2 lines */}
+                                <p className="text-[13px] leading-[1.4] text-gray-900 line-clamp-2">
+                                  {question.content}
+                                </p>
+
+                                {/* Meta row: date · tags · status */}
+                                <div className="flex items-center gap-2 mt-1.5 flex-wrap">
+                                  <span style={{ fontSize: '11px', color: '#9CA3AF', whiteSpace: 'nowrap' }}>
+                                    {dayjs(wq.added_at || wq.created_at).format('MM/DD')}
+                                  </span>
+
+                                  {tags.slice(0, 2).map((tag, idx) => (
+                                    <span
+                                      key={idx}
+                                      style={{
+                                        fontSize: '10px',
+                                        padding: '1px 6px',
+                                        borderRadius: '8px',
+                                        background: '#F3F4F6',
+                                        color: '#6B7280',
+                                        whiteSpace: 'nowrap',
+                                        maxWidth: '80px',
+                                        overflow: 'hidden',
+                                        textOverflow: 'ellipsis'
+                                      }}
+                                    >
+                                      {tag}
+                                    </span>
+                                  ))}
+
+                                  {/* Status badge with colored dot */}
+                                  <span
+                                    onClick={() => handleToggleMastery(wq)}
+                                    style={{
+                                      display: 'inline-flex',
+                                      alignItems: 'center',
+                                      gap: '3px',
+                                      fontSize: '11px',
+                                      padding: '1px 8px',
+                                      borderRadius: '10px',
+                                      background: st.bg,
+                                      color: st.color,
+                                      cursor: 'pointer',
+                                      whiteSpace: 'nowrap',
+                                      fontWeight: 500,
+                                      transition: 'all 0.15s'
+                                    }}
+                                  >
+                                    <span style={{
+                                      width: '5px',
+                                      height: '5px',
+                                      borderRadius: '50%',
+                                      background: st.color,
+                                      display: 'inline-block'
+                                    }} />
+                                    {st.text}
+                                  </span>
+                                </div>
                               </div>
-                              <span 
-                                onClick={() => handleToggleMastery(wq)}
-                                className={`text-[10px] px-2 py-0.5 rounded-full cursor-pointer ${
-                                  wq.status === 'pending'
-                                  ? 'bg-yellow-50 text-yellow-600'
-                                  : wq.status === 'partial'
-                                  ? 'bg-orange-50 text-orange-600'
-                                  : 'bg-green-50 text-green-600'
-                                }`}
-                              >
-                                {wq.status === 'pending' ? '待复习' : wq.status === 'partial' ? '有点懂' : '完全懂'}
-                              </span>
+
+                              {/* Action buttons - weak */}
+                              <div className="flex-shrink-0 flex items-center gap-2.5 ml-1">
+                                <button
+                                  onClick={() => handleOpenEditor(wq)}
+                                  style={{ fontSize: '11px', color: '#D1D5DB', cursor: 'pointer', lineHeight: 1 }}
+                                  title="编辑"
+                                >
+                                  编辑
+                                </button>
+                                <button
+                                  onClick={() => handleDeleteWrongQuestion(wq)}
+                                  style={{ fontSize: '11px', color: '#D1D5DB', cursor: 'pointer', lineHeight: 1 }}
+                                  title="删除"
+                                >
+                                  删除
+                                </button>
+                              </div>
                             </div>
-                            <p className="text-[14px] text-gray-900 mt-2 leading-relaxed">
-                              {(wq.question || wq).content}
-                            </p>
-                            <div className="flex items-center gap-3 mt-3">
-                              <span className="text-[12px] text-gray-400">
-                                {dayjs(wq.added_at || wq.created_at).format('MM-DD')}
-                              </span>
-                              <button
-                                onClick={() => handleManageTags(wq)}
-                                className="text-[12px] text-blue-600 font-medium hover:text-blue-700 flex items-center gap-1"
-                              >
-                                <Tag size={12} />
-                                标签
-                              </button>
-                              <span className="text-gray-200">|</span>
-                              <button
-                                onClick={() => handleOpenEditor(wq)}
-                                className="text-[12px] text-blue-600 font-medium hover:text-blue-700"
-                              >
-                                编辑
-                              </button>
-                              <button
-                                onClick={() => handleDeleteWrongQuestion(wq)}
-                                className="text-[12px] text-red-500 font-medium hover:text-red-600"
-                              >
-                                删除
-                              </button>
-                            </div>
-                          </div>
-                        </div>
-                      </motion.div>
-                    ))
+                          </motion.div>
+                        )
+                      })}
+                    </div>
                   )}
                 </section>
 
-                {/* Bottom Action Bar - Wrongbook */}
-                <div className="fixed bottom-16 left-0 right-0 bg-white/80 backdrop-blur-xl border-t border-gray-100 px-5 py-3 z-40">
-                  <div className="max-w-lg mx-auto flex items-center justify-between">
-                    <div className="flex items-center gap-2">
-                      <span className="text-[13px] text-gray-500">已选</span>
-                      <span className="text-[16px] font-bold text-blue-600">{selectedQuestions.length}</span>
-                      <span className="text-[13px] text-gray-500">题</span>
+                {/* Floating Bottom Action Bar */}
+                <div className="fixed z-40 flex justify-center pointer-events-none" style={{ bottom: 'calc(56px + env(safe-area-inset-bottom, 0px))', left: '12px', right: '12px' }}>
+                  <div className="bg-white/85 backdrop-blur-xl rounded-xl shadow-lg border border-gray-200/80 px-4 py-2.5 w-full max-w-lg flex items-center justify-between pointer-events-auto" style={{ maxWidth: 'calc(448px - 24px)' }}>
+                    <div className="flex items-center gap-1.5">
+                      <span style={{ fontSize: '13px', color: '#6B7280' }}>已选</span>
+                      <span style={{ fontSize: '15px', fontWeight: 700, color: '#2563EB' }}>{selectedQuestions.length}</span>
+                      <span style={{ fontSize: '13px', color: '#6B7280' }}>题</span>
                     </div>
-                    <div className="flex items-center gap-2">
-                      <button
-                        onClick={handlePrintPreview}
-                        disabled={selectedQuestions.length === 0}
-                        className={`px-5 py-2.5 rounded-xl text-[13px] font-bold transition-all flex items-center gap-1 ${
-                          selectedQuestions.length > 0
-                          ? 'bg-blue-600 text-white shadow-lg shadow-blue-100 active:bg-blue-700'
-                          : 'bg-gray-100 text-gray-300'
-                        }`}
-                      >
-                        <Printer size={14} />
-                        组卷打印
-                      </button>
-                    </div>
+                    <button
+                      onClick={handlePrintPreview}
+                      disabled={selectedQuestions.length === 0}
+                      className="flex items-center gap-1.5 px-4 py-1.5 rounded-lg text-[13px] font-medium transition-all"
+                      style={{
+                        background: selectedQuestions.length > 0 ? '#2563EB' : '#F3F4F6',
+                        color: selectedQuestions.length > 0 ? 'white' : '#D1D5DB',
+                      }}
+                    >
+                      <Sparkles size={14} />
+                      生成试卷
+                    </button>
                   </div>
                 </div>
               </motion.div>
@@ -1255,20 +1290,20 @@ export default function App() {
                 className="w-full"
               >
                 {/* Page Title */}
-                <section className="px-5 pt-4 mb-3">
-                  <h2 className="text-[20px] font-bold text-gray-900">历史组卷</h2>
-                  <p className="text-[13px] text-gray-400 mt-1">
+                <section className="px-4 pt-3 mb-2">
+                  <h2 style={{ fontSize: '18px', fontWeight: 700, color: '#111827' }}>历史组卷</h2>
+                  <p style={{ fontSize: '11px', color: '#9CA3AF', marginTop: '1px' }}>
                     共 {studentExams.length} 份试卷
                   </p>
                 </section>
 
                 {/* Exam List */}
-                <section className="px-5 space-y-3">
+                <section className="px-4 space-y-2">
                   {searchFilteredExams.length === 0 ? (
-                    <div className="text-center py-20">
-                      <FileText size={48} className="mx-auto text-gray-200 mb-4" />
-                      <p className="text-gray-400 text-[15px]">暂无组卷记录</p>
-                      <p className="text-gray-300 text-[13px] mt-1">在错题本选择题目后点击"生成试卷"</p>
+                    <div className="text-center py-16">
+                      <FileText size={36} className="mx-auto" style={{ color: '#D1D5DB' }} />
+                      <p className="mt-3" style={{ fontSize: '13px', color: '#9CA3AF' }}>暂无组卷记录</p>
+                      <p className="mt-0.5" style={{ fontSize: '11px', color: '#D1D5DB' }}>在错题本选择题目后点击"生成试卷"</p>
                     </div>
                   ) : (
                     searchFilteredExams.map((exam) => (
@@ -1277,32 +1312,30 @@ export default function App() {
                         layout
                         initial={{ opacity: 0, y: 10 }}
                         animate={{ opacity: 1, y: 0 }}
-                        className="bg-white rounded-2xl p-4 shadow-sm border border-gray-100 relative"
+                        className="card"
+                        style={{ padding: '12px' }}
                       >
-                        <div className="flex items-start justify-between">
-                          <div className="flex-1 min-w-0 pr-4">
-                            <h3 className="text-[15px] font-bold text-gray-900 truncate">{exam.name}</h3>
-                            <p className="text-[12px] text-gray-400 mt-1.5">
-                              生成时间：{dayjs(exam.created_at).format('YYYY/MM/DD HH:mm')}
+                        <div className="flex items-start justify-between gap-2">
+                          <div className="flex-1 min-w-0">
+                            <h3 style={{ fontSize: '14px', fontWeight: 600, color: '#111827' }} className="truncate">{exam.name}</h3>
+                            <p style={{ fontSize: '11px', color: '#9CA3AF', marginTop: '2px' }}>
+                              {dayjs(exam.created_at).format('YYYY/MM/DD HH:mm')}
                             </p>
-                            <p className="text-[12px] text-gray-400 mt-0.5">
+                            <p style={{ fontSize: '11px', color: '#9CA3AF', marginTop: '1px' }}>
                               共 {exam.question_ids?.length || 0} 道题
                             </p>
                           </div>
-                          <div className="flex flex-col items-end gap-2 flex-shrink-0">
-                            <span className={`text-[11px] px-2.5 py-0.5 rounded-full font-medium ${
-                              exam.printed
-                                ? 'bg-green-50 text-green-600'
-                                : 'bg-yellow-50 text-yellow-600'
-                            }`}>
+                          <div className="flex flex-col items-end gap-1.5 flex-shrink-0">
+                            <span className="badge" style={{ background: exam.printed ? '#F0FDF4' : '#FFFBEB', color: exam.printed ? '#16A34A' : '#F59E0B' }}>
                               {exam.printed ? '已打印' : '未打印'}
                             </span>
-                            <div className="flex gap-1.5">
+                            <div className="flex gap-1">
                               <button
                                 onClick={() => handlePrintExam(exam)}
-                                className="py-2 px-4 rounded-xl bg-blue-600 text-white text-[12px] font-bold hover:bg-blue-700 transition-colors flex items-center gap-1.5 shadow-sm"
+                                className="px-3 py-1 rounded-lg text-[12px] font-medium flex items-center gap-1"
+                                style={{ background: '#2563EB', color: 'white' }}
                               >
-                                <Printer size={13} />
+                                <Printer size={12} />
                                 打印
                               </button>
                               <button
@@ -1310,9 +1343,10 @@ export default function App() {
                                   setDeleteTarget({ type: 'exam', id: exam.id })
                                   setShowDeleteConfirm(true)
                                 }}
-                                className="py-2 px-3 rounded-xl bg-gray-100 text-gray-400 text-[12px] font-medium hover:bg-red-50 hover:text-red-500 transition-colors"
+                                className="px-2 py-1 rounded-lg text-[12px]"
+                                style={{ background: '#F3F4F6', color: '#9CA3AF' }}
                               >
-                                <Trash2 size={13} />
+                                <Trash2 size={12} />
                               </button>
                             </div>
                           </div>
@@ -1326,32 +1360,35 @@ export default function App() {
           </AnimatePresence>
         </main>
 
-        {/* Bottom Navigation */}
-        <nav className="fixed bottom-0 left-0 right-0 bg-white/80 backdrop-blur-xl border-t border-gray-100 z-50">
-          <div className="max-w-lg mx-auto px-6 h-16 flex items-center justify-around">
-            {[
-              { id: 'processing', icon: Camera, label: '处理' },
-              { id: 'wrongbook', icon: LayoutGrid, label: '错题本' },
-              { id: 'exam', icon: FileText, label: '试卷' },
-            ].map((tab) => (
-              <button
-                key={tab.id}
-                onClick={() => { setCurrentPage(tab.id); clearSelection() }}
-                className="flex flex-col items-center gap-1.5 transition-all group relative"
-              >
-                <tab.icon 
-                  size={22} 
-                  strokeWidth={currentPage === tab.id ? 2.5 : 2}
-                  className={currentPage === tab.id ? 'text-blue-600' : 'text-gray-300'} 
-                />
-                <span className={`text-[10px] font-bold tracking-[0.05em] uppercase ${currentPage === tab.id ? 'text-blue-600' : 'text-gray-400'}`}>
-                  {tab.label}
-                </span>
-                {currentPage === tab.id && (
-                  <motion.div layoutId="nav-pill" className="absolute -top-1 w-1 h-1 bg-blue-600 rounded-full" />
-                )}
-              </button>
-            ))}
+        {/* Bottom Navigation - iOS Segmented Control Style */}
+        <nav className="fixed bottom-0 left-0 right-0 bg-white/90 border-t z-50" style={{ borderColor: '#E5E7EB' }}>
+          <div className="max-w-lg mx-auto px-3 py-1.5" style={{ paddingBottom: 'calc(0.375rem + env(safe-area-inset-bottom, 0px))' }}>
+            <div className="flex gap-1 rounded-lg p-0.5" style={{ background: '#F3F4F6' }}>
+              {[
+                { id: 'processing', icon: Camera, label: '首页' },
+                { id: 'wrongbook', icon: LayoutGrid, label: '错题本' },
+                { id: 'exam', icon: FileText, label: '组卷记录' },
+              ].map((tab) => (
+                <button
+                  key={tab.id}
+                  onClick={() => { setCurrentPage(tab.id); clearSelection() }}
+                  className="flex-1 flex items-center justify-center gap-1.5 py-1.5 rounded-md transition-all"
+                  style={{
+                    background: currentPage === tab.id ? '#FFFFFF' : 'transparent',
+                    boxShadow: currentPage === tab.id ? '0 1px 2px rgba(0,0,0,0.08)' : 'none',
+                  }}
+                >
+                  <tab.icon
+                    size={16}
+                    strokeWidth={currentPage === tab.id ? 2.5 : 2}
+                    style={{ color: currentPage === tab.id ? '#2563EB' : '#9CA3AF' }}
+                  />
+                  <span style={{ fontSize: '13px', fontWeight: currentPage === tab.id ? 600 : 400, color: currentPage === tab.id ? '#2563EB' : '#9CA3AF' }}>
+                    {tab.label}
+                  </span>
+                </button>
+              ))}
+            </div>
           </div>
         </nav>
 
@@ -1368,9 +1405,10 @@ export default function App() {
             animate={{ scale: 1 }}
             whileTap={{ scale: 0.9 }}
             onClick={() => document.getElementById('file-input').click()}
-            className="fixed right-5 bottom-20 w-14 h-14 bg-blue-600 rounded-full shadow-lg shadow-blue-200 flex items-center justify-center z-50"
+            className="fixed right-4 bottom-16 w-11 h-11 rounded-full flex items-center justify-center z-50"
+            style={{ background: '#2563EB', boxShadow: '0 2px 8px rgba(37,99,235,0.3)' }}
           >
-            <Plus size={24} className="text-white" />
+            <Plus size={20} className="text-white" />
           </motion.button>
         )}
 
@@ -1387,20 +1425,22 @@ export default function App() {
         {/* Delete Confirm Dialog */}
         {showDeleteConfirm && (
           <div className="fixed inset-0 z-[20000] flex items-center justify-center">
-            <div className="absolute inset-0 bg-black/40 backdrop-blur-sm" onClick={() => setShowDeleteConfirm(false)} />
-            <div className="relative bg-white rounded-2xl p-6 mx-5 w-full max-w-sm shadow-xl">
-              <h3 className="text-[16px] font-bold text-gray-900 mb-2">确认删除</h3>
-              <p className="text-[14px] text-gray-500 mb-6">删除后不可恢复，确定要删除吗？</p>
-              <div className="flex gap-3">
+            <div className="absolute inset-0 bg-black/40" onClick={() => setShowDeleteConfirm(false)} />
+            <div className="relative card mx-5 w-full max-w-sm" style={{ padding: '20px' }}>
+              <h3 style={{ fontSize: '16px', fontWeight: 700, color: '#111827', marginBottom: '8px' }}>确认删除</h3>
+              <p style={{ fontSize: '13px', color: '#6B7280', marginBottom: '20px' }}>删除后不可恢复，确定要删除吗？</p>
+              <div className="flex gap-2.5">
                 <button
                   onClick={() => setShowDeleteConfirm(false)}
-                  className="flex-1 py-2.5 rounded-xl bg-gray-100 text-gray-600 text-[14px] font-medium"
+                  className="flex-1 py-2 rounded-lg text-[13px] font-medium"
+                  style={{ background: '#F3F4F6', color: '#6B7280' }}
                 >
                   取消
                 </button>
                 <button
                   onClick={handleConfirmDelete}
-                  className="flex-1 py-2.5 rounded-xl bg-red-500 text-white text-[14px] font-bold"
+                  className="flex-1 py-2 rounded-lg text-[13px] font-medium text-white"
+                  style={{ background: '#EF4444' }}
                 >
                   删除
                 </button>
@@ -1415,15 +1455,15 @@ export default function App() {
             <div className="absolute inset-0 bg-black/40 backdrop-blur-sm" onClick={() => setShowQuestionEditor(false)} />
             <div className="relative mt-auto bg-white rounded-t-2xl max-h-[85vh] min-h-[60vh] flex flex-col shadow-xl">
               {/* Header */}
-              <div className="flex items-center justify-between px-5 py-4 border-b border-gray-100">
-                <h3 className="text-[16px] font-bold text-gray-900">编辑题目</h3>
+              <div className="flex items-center justify-between px-4 py-3 border-b" style={{ borderColor: '#E5E7EB' }}>
+                <h3 style={{ fontSize: '15px', fontWeight: 600, color: '#111827' }}>编辑题目</h3>
                 <button onClick={() => setShowQuestionEditor(false)} className="p-1">
-                  <X size={20} className="text-gray-400" />
+                  <X size={18} style={{ color: '#9CA3AF' }} />
                 </button>
               </div>
 
               {/* Tabs */}
-              <div className="flex border-b border-gray-100">
+              <div className="flex border-b" style={{ borderColor: '#E5E7EB' }}>
                 {[
                   { key: 'stem', label: '题干' },
                   { key: 'answer', label: '答案' },
@@ -1432,58 +1472,56 @@ export default function App() {
                   <button
                     key={tab.key}
                     onClick={() => setEditTab(tab.key)}
-                    className={`flex-1 py-3 text-[14px] font-medium relative ${
-                      editTab === tab.key ? 'text-blue-600' : 'text-gray-400'
-                    }`}
+                    className="flex-1 py-2.5 text-[13px] font-medium relative"
+                    style={{ color: editTab === tab.key ? '#2563EB' : '#9CA3AF' }}
                   >
                     {tab.label}
                     {editTab === tab.key && (
-                      <div className="absolute bottom-0 left-1/3 right-1/3 h-0.5 bg-blue-600 rounded-full" />
+                      <div className="absolute bottom-0 left-1/3 right-1/3 h-0.5 rounded-full" style={{ background: '#2563EB' }} />
                     )}
                   </button>
                 ))}
               </div>
 
               {/* Content */}
-              <div className="flex-1 overflow-y-auto p-5 space-y-4">
+              <div className="flex-1 overflow-y-auto p-4 space-y-3">
                 {/* Stem Tab */}
                 {editTab === 'stem' && (
                   <>
-                    <div>
-                      <label className="text-[13px] font-medium text-gray-500 mb-1.5 block">题目内容</label>
+                    <div className="card" style={{ padding: '12px' }}>
+                      <label style={{ fontSize: '12px', fontWeight: 500, color: '#6B7280', display: 'block', marginBottom: '6px' }}>题目内容</label>
                       <textarea
                         value={editForm.content}
                         onChange={e => updateEditForm('content', e.target.value)}
                         placeholder="请输入题目内容"
-                        className="w-full border border-gray-200 rounded-xl p-3 text-[14px] text-gray-900 min-h-[100px] resize-none focus:outline-none focus:border-blue-300"
+                        className="w-full rounded-lg p-2.5 text-[13px] resize-none focus:outline-none"
+                        style={{ border: '1px solid #E5E7EB', color: '#111827', minHeight: '80px' }}
                       />
                     </div>
 
                     {editForm.question_type === 'choice' && (
-                      <div>
+                      <div className="card" style={{ padding: '12px' }}>
                         <div className="flex items-center justify-between mb-2">
-                          <label className="text-[13px] font-medium text-gray-500">选项</label>
-                          <button
-                            onClick={addEditOption}
-                            className="text-[12px] text-blue-600 font-medium"
-                          >
+                          <label style={{ fontSize: '12px', fontWeight: 500, color: '#6B7280' }}>选项</label>
+                          <button onClick={addEditOption} style={{ fontSize: '12px', color: '#2563EB' }}>
                             + 添加选项
                           </button>
                         </div>
-                        <div className="space-y-2">
+                        <div className="space-y-1.5">
                           {editForm.options.map((opt, idx) => (
-                            <div key={idx} className="flex items-center gap-2">
-                              <span className="w-6 h-6 rounded-full bg-blue-50 text-blue-600 text-[12px] font-bold flex items-center justify-center flex-shrink-0">
+                            <div key={idx} className="flex items-center gap-1.5">
+                              <span className="w-5 h-5 rounded-full flex items-center justify-center text-[11px] font-bold flex-shrink-0" style={{ background: '#EFF6FF', color: '#2563EB' }}>
                                 {String.fromCharCode(65 + idx)}
                               </span>
                               <input
                                 value={opt}
                                 onChange={e => updateEditOption(idx, e.target.value)}
                                 placeholder={`选项 ${String.fromCharCode(65 + idx)}`}
-                                className="flex-1 border border-gray-200 rounded-lg px-3 py-2 text-[14px] focus:outline-none focus:border-blue-300"
+                                className="flex-1 rounded-lg px-2.5 py-1.5 text-[13px] focus:outline-none"
+                                style={{ border: '1px solid #E5E7EB' }}
                               />
-                              <button onClick={() => removeEditOption(idx)} className="p-1">
-                                <X size={14} className="text-red-400" />
+                              <button onClick={() => removeEditOption(idx)} className="p-0.5">
+                                <X size={13} style={{ color: '#EF4444' }} />
                               </button>
                             </div>
                           ))}
@@ -1493,18 +1531,11 @@ export default function App() {
 
                     {editForm.image_url && (
                       <div>
-                        <label className="text-[13px] font-medium text-gray-500 mb-1.5 block">插图</label>
+                        <label style={{ fontSize: '12px', fontWeight: 500, color: '#6B7280', display: 'block', marginBottom: '6px' }}>插图</label>
                         <div className="relative inline-block">
-                          <img
-                            src={editForm.image_url}
-                            alt="插图"
-                            className="max-w-full max-h-[200px] rounded-xl border border-gray-200"
-                          />
-                          <button
-                            onClick={() => updateEditForm('image_url', '')}
-                            className="absolute top-1 right-1 w-6 h-6 rounded-full bg-black/40 flex items-center justify-center"
-                          >
-                            <X size={12} className="text-white" />
+                          <img src={editForm.image_url} alt="插图" className="max-w-full max-h-[180px] rounded-lg" style={{ border: '1px solid #E5E7EB' }} />
+                          <button onClick={() => updateEditForm('image_url', '')} className="absolute top-1 right-1 w-5 h-5 rounded-full flex items-center justify-center" style={{ background: 'rgba(0,0,0,0.4)' }}>
+                            <X size={10} className="text-white" />
                           </button>
                         </div>
                       </div>
@@ -1515,31 +1546,33 @@ export default function App() {
                 {/* Answer Tab */}
                 {editTab === 'answer' && (
                   <>
-                    <div className="bg-gray-50 rounded-xl p-4">
-                      <div className="flex items-center gap-2 mb-1">
-                        <span className="text-[12px] text-gray-400 font-medium">学生答案</span>
-                        <span className="px-1.5 py-0.5 rounded bg-red-100 text-red-600 text-[10px] font-bold">错误记录</span>
+                    <div className="card" style={{ padding: '12px', background: '#F9FAFB' }}>
+                      <div className="flex items-center gap-1.5 mb-1">
+                        <span style={{ fontSize: '11px', color: '#9CA3AF' }}>学生答案</span>
+                        <span className="badge" style={{ background: '#FEF2F2', color: '#EF4444' }}>错误记录</span>
                       </div>
-                      <p className="text-[15px] text-gray-900 mt-1">{editForm.student_answer || '未作答'}</p>
+                      <p style={{ fontSize: '13px', color: '#111827', marginTop: '4px' }}>{editForm.student_answer || '未作答'}</p>
                     </div>
 
-                    <div>
-                      <label className="text-[13px] font-medium text-gray-500 mb-1.5 block">正确答案</label>
+                    <div className="card" style={{ padding: '12px' }}>
+                      <label style={{ fontSize: '12px', fontWeight: 500, color: '#6B7280', display: 'block', marginBottom: '6px' }}>正确答案</label>
                       <input
                         value={editForm.answer}
                         onChange={e => updateEditForm('answer', e.target.value)}
                         placeholder="请输入正确答案"
-                        className="w-full border border-gray-200 rounded-xl px-4 py-3 text-[14px] focus:outline-none focus:border-blue-300"
+                        className="w-full rounded-lg px-3 py-2 text-[13px] focus:outline-none"
+                        style={{ border: '1px solid #E5E7EB' }}
                       />
                     </div>
 
-                    <div>
-                      <label className="text-[13px] font-medium text-gray-500 mb-1.5 block">题目解析</label>
+                    <div className="card" style={{ padding: '12px' }}>
+                      <label style={{ fontSize: '12px', fontWeight: 500, color: '#6B7280', display: 'block', marginBottom: '6px' }}>题目解析</label>
                       <textarea
                         value={editForm.analysis}
                         onChange={e => updateEditForm('analysis', e.target.value)}
                         placeholder="请输入解析内容..."
-                        className="w-full border border-gray-200 rounded-xl p-3 text-[14px] text-gray-900 min-h-[120px] resize-none focus:outline-none focus:border-blue-300"
+                        className="w-full rounded-lg p-2.5 text-[13px] resize-none focus:outline-none"
+                        style={{ border: '1px solid #E5E7EB', color: '#111827', minHeight: '100px' }}
                       />
                     </div>
                   </>
@@ -1547,38 +1580,30 @@ export default function App() {
 
                 {/* Tags Tab */}
                 {editTab === 'tags' && (
-                  <div>
-                    <label className="text-[13px] font-medium text-gray-500 mb-2 block">知识点标签</label>
-                    <div className="flex flex-wrap gap-2 mb-3">
+                  <div className="card" style={{ padding: '12px' }}>
+                    <label style={{ fontSize: '12px', fontWeight: 500, color: '#6B7280', display: 'block', marginBottom: '8px' }}>知识点标签</label>
+                    <div className="flex flex-wrap gap-1.5 mb-3">
                       {editTags.length === 0 ? (
-                        <span className="text-[13px] text-gray-400">暂无标签</span>
+                        <span style={{ fontSize: '12px', color: '#9CA3AF' }}>暂无标签</span>
                       ) : (
                         editTags.map((tag, idx) => (
-                          <span
-                            key={idx}
-                            className="inline-flex items-center gap-1 px-3 py-1.5 rounded-full bg-orange-50 text-orange-600 text-[12px] font-medium"
-                          >
+                          <span key={idx} className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-[11px] font-medium" style={{ background: '#FFF7ED', color: '#EA580C' }}>
                             {tag}
-                            <button onClick={() => handleRemoveEditTag(tag)} className="ml-0.5">
-                              <X size={10} />
-                            </button>
+                            <button onClick={() => handleRemoveEditTag(tag)}><X size={9} /></button>
                           </span>
                         ))
                       )}
                     </div>
-                    <div className="flex gap-2">
+                    <div className="flex gap-1.5">
                       <input
                         value={editNewTag}
                         onChange={e => setEditNewTag(e.target.value)}
                         onKeyDown={e => { if (e.key === 'Enter') { e.preventDefault(); handleAddEditTag() } }}
-                        placeholder="输入标签后按回车添加"
-                        className="flex-1 border border-gray-200 rounded-xl px-3 py-2 text-[14px] focus:outline-none focus:border-blue-300"
+                        placeholder="输入标签后按回车"
+                        className="flex-1 rounded-lg px-2.5 py-1.5 text-[13px] focus:outline-none"
+                        style={{ border: '1px solid #E5E7EB' }}
                       />
-                      <button
-                        onClick={handleAddEditTag}
-                        disabled={!editNewTag.trim()}
-                        className="px-4 py-2 rounded-xl bg-blue-600 text-white text-[13px] font-medium disabled:opacity-50"
-                      >
+                      <button onClick={handleAddEditTag} disabled={!editNewTag.trim()} className="px-3 py-1.5 rounded-lg text-[12px] font-medium text-white" style={{ background: editNewTag.trim() ? '#2563EB' : '#D1D5DB' }}>
                         添加
                       </button>
                     </div>
@@ -1587,16 +1612,18 @@ export default function App() {
               </div>
 
               {/* Footer */}
-              <div className="flex gap-3 px-5 py-4 border-t border-gray-100">
+              <div className="flex gap-2.5 px-4 py-3 border-t" style={{ borderColor: '#E5E7EB' }}>
                 <button
                   onClick={() => setShowQuestionEditor(false)}
-                  className="flex-1 py-2.5 rounded-xl bg-gray-100 text-gray-600 text-[14px] font-medium"
+                  className="flex-1 py-2 rounded-lg text-[13px] font-medium"
+                  style={{ background: '#F3F4F6', color: '#6B7280' }}
                 >
                   取消
                 </button>
                 <button
                   onClick={handleSaveEdit}
-                  className="flex-1 py-2.5 rounded-xl bg-blue-600 text-white text-[14px] font-bold"
+                  className="flex-1 py-2 rounded-lg text-[13px] font-medium text-white"
+                  style={{ background: '#2563EB' }}
                 >
                   保存
                 </button>

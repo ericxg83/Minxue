@@ -1,6 +1,6 @@
 export default function QuestionCardSkeleton() {
   return (
-    <div className="bg-white rounded-2xl p-4 shadow-sm border border-gray-100 animate-pulse">
+    <div className="bg-white rounded-xl p-3 shadow-sm border border-gray-100 animate-pulse">
       <div className="flex gap-3">
         <div className="w-5 h-5 rounded-md bg-gray-200 flex-shrink-0 mt-1" />
         <div className="flex-1 min-w-0 space-y-2">

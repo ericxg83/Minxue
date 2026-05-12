@@ -1,6 +1,6 @@
 export default function ExamCardSkeleton() {
   return (
-    <div className="bg-white rounded-2xl p-4 shadow-sm border border-gray-100 animate-pulse">
+    <div className="bg-white rounded-xl p-3 shadow-sm border border-gray-100 animate-pulse">
       <div className="flex items-start justify-between">
         <div className="space-y-2 flex-1">
           <div className="h-4 bg-gray-200 rounded w-3/4" />

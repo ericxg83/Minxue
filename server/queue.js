@@ -4,25 +4,31 @@ let taskQueue = null
 let taskWorker = null
 let queueInitialized = false
 let initPromise = null
+let redisConfig = null
 
-const redisConfig = process.env.REDIS_URL 
-  ? { 
-      url: process.env.REDIS_URL.trim(), 
-      maxRetriesPerRequest: null,
-      tls: {}
-    }
-  : {
-      host: process.env.REDIS_HOST || 'localhost',
-      port: parseInt(process.env.REDIS_PORT) || 6379,
-      password: process.env.REDIS_PASSWORD || undefined,
-      maxRetriesPerRequest: null,
-      enableReadyCheck: true,
-      tls: {}
-    }
+const getRedisConfig = () => {
+  if (!redisConfig) {
+    redisConfig = process.env.REDIS_URL
+      ? {
+          url: process.env.REDIS_URL.trim(),
+          maxRetriesPerRequest: null,
+          tls: { rejectUnauthorized: false }
+        }
+      : {
+          host: process.env.REDIS_HOST || 'localhost',
+          port: parseInt(process.env.REDIS_PORT) || 6379,
+          password: process.env.REDIS_PASSWORD || undefined,
+          maxRetriesPerRequest: null,
+          enableReadyCheck: true,
+          tls: {}
+        }
 
-console.log(`🔧 [Queue] Redis 配置: ${redisConfig.url ? 'URL 模式' : 'HOST 模式'}`)
-if (redisConfig.url) {
-  console.log(`   Redis URL: ${redisConfig.url.substring(0, 30)}...`)
+    console.log(`🔧 [Queue] Redis 配置: ${redisConfig.url ? 'URL 模式' : 'HOST 模式'}`)
+    if (redisConfig.url) {
+      console.log(`   Redis URL: ${redisConfig.url.substring(0, 30)}...`)
+    }
+  }
+  return redisConfig
 }
 
 const initQueue = async () => {
@@ -33,9 +39,11 @@ const initQueue = async () => {
     try {
       console.log('🔄 [Queue] 开始初始化 Redis 队列...')
       const { Queue, Worker } = await import('bullmq')
+      
+      const connection = getRedisConfig()
 
       taskQueue = new Queue('task-processing', {
-        connection: redisConfig,
+        connection,
         defaultJobOptions: {
           removeOnComplete: { count: 100 },
           removeOnFail: { count: 50 },
@@ -51,7 +59,7 @@ const initQueue = async () => {
         console.log(`🔥 [Worker] 收到任务: jobId=${job.id}, taskId=${job.data.taskId}`)
         return processTask(job)
       }, {
-        connection: redisConfig,
+        connection,
         concurrency,
         lockDuration: parseInt(process.env.TASK_TIMEOUT_MS) || 1800000
       })
@@ -84,7 +92,7 @@ const initQueue = async () => {
     } catch (err) {
       console.error(`❌ [Queue] Redis 队列初始化失败: ${err.message}`)
       console.error(`   错误堆栈: ${err.stack}`)
-      console.warn('️ 任务将使用同步处理模式')
+      console.warn('⚠️ 任务将使用同步处理模式')
       taskQueue = null
       taskWorker = null
       queueInitialized = true

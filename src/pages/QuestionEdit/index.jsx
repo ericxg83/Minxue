@@ -220,13 +220,13 @@ export default function QuestionEdit({ questionId, onClose, onSave }) {
           left: 0,
           right: 0,
           height: '85vh',
-          background: '#F5F5F7',
+          background: '#F5F7FA',
           borderRadius: '12px 12px 0 0',
           display: 'flex',
           alignItems: 'center',
           justifyContent: 'center',
-          color: '#999',
-          fontSize: '14px'
+          color: '#6B7280',
+          fontSize: '13px'
         }}>
           加载中...
         </div>
@@ -246,7 +246,7 @@ export default function QuestionEdit({ questionId, onClose, onSave }) {
         left: 0,
         right: 0,
         height: '85vh',
-        background: '#F5F5F7',
+        background: '#F5F7FA',
         borderRadius: '12px 12px 0 0',
         display: 'flex',
         flexDirection: 'column',
@@ -254,12 +254,12 @@ export default function QuestionEdit({ questionId, onClose, onSave }) {
       }}>
         <div style={{
           background: '#fff',
-          padding: '16px',
+          padding: '12px 16px',
           textAlign: 'center',
-          borderBottom: '1px solid #E5E5EA',
-          fontSize: '17px',
+          borderBottom: '1px solid #E5E7EB',
+          fontSize: '15px',
           fontWeight: 600,
-          color: '#1C1C1E'
+          color: '#111827'
         }}>
           编辑题目
         </div>
@@ -267,7 +267,7 @@ export default function QuestionEdit({ questionId, onClose, onSave }) {
         <div style={{
           background: '#fff',
           display: 'flex',
-          borderBottom: '1px solid #E5E5EA'
+          borderBottom: '1px solid #E5E7EB'
         }}>
           {TABS.map(tab => (
             <div
@@ -275,11 +275,11 @@ export default function QuestionEdit({ questionId, onClose, onSave }) {
               onClick={() => setActiveTab(tab.key)}
               style={{
                 flex: 1,
-                padding: '12px',
+                padding: '10px',
                 textAlign: 'center',
-                fontSize: '15px',
+                fontSize: '13px',
                 fontWeight: 500,
-                color: activeTab === tab.key ? '#007AFF' : '#8E8E93',
+                color: activeTab === tab.key ? '#2563EB' : '#6B7280',
                 position: 'relative',
                 cursor: 'pointer'
               }}
@@ -292,32 +292,32 @@ export default function QuestionEdit({ questionId, onClose, onSave }) {
                   left: '50%',
                   transform: 'translateX(-50%)',
                   width: '20px',
-                  height: '3px',
-                  background: '#007AFF',
-                  borderRadius: '2px'
+                  height: '2px',
+                  background: '#2563EB',
+                  borderRadius: '1px'
                 }} />
               )}
             </div>
           ))}
         </div>
 
-        <div style={{ flex: 1, overflow: 'auto', padding: '16px' }}>
+        <div style={{ flex: 1, overflow: 'auto', padding: '12px' }}>
           {activeTab === 'stem' && (
             <>
               <div style={{
                 background: '#fff',
                 borderRadius: '12px',
-                padding: '16px',
+                padding: '12px',
                 marginBottom: '12px'
               }}>
-                <div style={{ marginBottom: '12px' }}>
-                  <span style={{ fontSize: '14px', fontWeight: 600, color: '#1C1C1E' }}>题目内容</span>
+                <div style={{ marginBottom: '8px' }}>
+                  <span style={{ fontSize: '13px', fontWeight: 600, color: '#111827' }}>题目内容</span>
                   <span style={{
                     marginLeft: '8px',
-                    fontSize: '12px',
-                    color: '#007AFF',
-                    background: '#E8F4FD',
-                    padding: '2px 8px',
+                    fontSize: '11px',
+                    color: '#2563EB',
+                    background: '#EFF6FF',
+                    padding: '1px 6px',
                     borderRadius: '4px'
                   }}>
                     {getTypeLabel()}
@@ -329,20 +329,20 @@ export default function QuestionEdit({ questionId, onClose, onSave }) {
                       placeholder="请输入题目内容"
                       value={formData.content}
                       onChange={val => setFormData({ ...formData, content: val })}
-                      rows={6}
+                      rows={4}
                       showCount
                       maxLength={500}
                       style={{
-                        '--font-size': '14px',
-                        '--placeholder-color': '#C7C7CC'
+                        '--font-size': '13px',
+                        '--placeholder-color': '#9CA3AF'
                       }}
                     />
                   </div>
                 </div>
-                <div style={{ marginTop: '12px', textAlign: 'right' }}>
+                <div style={{ marginTop: '8px', textAlign: 'right' }}>
                   <label style={{
-                    fontSize: '13px',
-                    color: '#007AFF',
+                    fontSize: '12px',
+                    color: '#2563EB',
                     cursor: 'pointer',
                     fontWeight: 500
                   }}>
@@ -357,17 +357,17 @@ export default function QuestionEdit({ questionId, onClose, onSave }) {
                 </div>
                 {displayImageUrl && (
                   <div style={{
-                    marginTop: '12px',
+                    marginTop: '8px',
                     position: 'relative',
                     display: 'inline-block'
                   }}>
                     <div style={{
                       width: '100%',
-                      maxWidth: '300px',
+                      maxWidth: '240px',
                       borderRadius: '8px',
-                      background: '#F5F5F7',
+                      background: '#F5F7FA',
                       overflow: 'hidden',
-                      border: '1px solid #E5E5EA'
+                      border: '1px solid #E5E7EB'
                     }}>
                       <img src={displayImageUrl} alt="题目插图" style={{ width: '100%', height: 'auto', display: 'block' }} />
                     </div>
@@ -399,21 +399,21 @@ export default function QuestionEdit({ questionId, onClose, onSave }) {
                 <div style={{
                   background: '#fff',
                   borderRadius: '12px',
-                  padding: '16px',
+                  padding: '12px',
                   marginTop: '12px'
                 }}>
                   <div style={{
                     display: 'flex',
                     justifyContent: 'space-between',
                     alignItems: 'center',
-                    marginBottom: '16px'
+                    marginBottom: '12px'
                   }}>
-                    <span style={{ fontSize: '14px', fontWeight: 600, color: '#1C1C1E' }}>选项 (单选)</span>
+                    <span style={{ fontSize: '13px', fontWeight: 600, color: '#111827' }}>选项 (单选)</span>
                     <span
                       onClick={addOption}
                       style={{
-                        fontSize: '14px',
-                        color: '#007AFF',
+                        fontSize: '13px',
+                        color: '#2563EB',
                         cursor: 'pointer',
                         fontWeight: 500
                       }}
@@ -422,7 +422,7 @@ export default function QuestionEdit({ questionId, onClose, onSave }) {
                     </span>
                   </div>
 
-                  <div style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
                     {formData.options.map((option, index) => (
                       <div
                         key={index}
@@ -436,8 +436,8 @@ export default function QuestionEdit({ questionId, onClose, onSave }) {
                           width: '28px',
                           height: '28px',
                           borderRadius: '50%',
-                          background: '#E8F4FD',
-                          color: '#007AFF',
+                          background: '#EFF6FF',
+                          color: '#2563EB',
                           display: 'flex',
                           alignItems: 'center',
                           justifyContent: 'center',
@@ -465,7 +465,7 @@ export default function QuestionEdit({ questionId, onClose, onSave }) {
                             flexShrink: 0
                           }}
                         >
-                          <svg width="18" height="18" viewBox="0 0 1024 1024" fill="#FF3B30">
+                          <svg width="18" height="18" viewBox="0 0 1024 1024" fill="#EF4444">
                             <path d="M864 256H736v-64c0-52.8-43.2-96-96-96H384c-52.8 0-96 43.2-96 96v64H160c-17.6 0-32 14.4-32 32s14.4 32 32 32h704c17.6 0 32-14.4 32-32s-14.4-32-32-32zM384 192h256v64H384V192z"/>
                             <path d="M704 384c-17.6 0-32 14.4-32 32v384c0 17.6-14.4 32-32 32s-32-14.4-32-32V416c0-17.6-14.4-32-32-32s-32 14.4-32 32v384c0 17.6-14.4 32-32 32s-32-14.4-32-32V416c0-17.6-14.4-32-32-32s-32 14.4-32 32v384c0 17.6-14.4 32-32 32s-32-14.4-32-32V416c0-17.6-14.4-32-32-32s-32 14.4-32 32v448c0 52.8 43.2 96 96 96h320c52.8 0 96-43.2 96-96V416c0-17.6-14.4-32-32-32z"/>
                           </svg>
@@ -483,35 +483,35 @@ export default function QuestionEdit({ questionId, onClose, onSave }) {
               <div style={{
                 background: '#fff',
                 borderRadius: '12px',
-                padding: '16px',
+                padding: '12px',
                 marginBottom: '12px'
               }}>
                 <div style={{
                   display: 'flex',
                   alignItems: 'flex-start',
-                  gap: '12px',
-                  paddingBottom: '16px',
-                  borderBottom: '1px solid #F0F0F0'
+                  gap: '10px',
+                  paddingBottom: '12px',
+                  borderBottom: '1px solid #F3F4F6'
                 }}>
                   <div style={{
                     width: '32px',
                     height: '32px',
                     borderRadius: '50%',
-                    background: '#F5F5F7',
+                    background: '#F5F7FA',
                     display: 'flex',
                     alignItems: 'center',
                     justifyContent: 'center',
                     flexShrink: 0
                   }}>
-                    <svg width="16" height="16" viewBox="0 0 1024 1024" fill="#8E8E93">
+                    <svg width="16" height="16" viewBox="0 0 1024 1024" fill="#6B7280">
                       <path d="M512 512c88 0 160-72 160-160s-72-160-160-160-160 72-160 160 72 160 160 160zm0-256c52.8 0 96 43.2 96 96s-43.2 96-96 96-96-43.2-96-96 43.2-96 96-96zm448 544v64c0 35.2-28.8 64-64 64H128c-35.2 0-64-28.8-64-64v-64c0-88 72-160 160-160h32c17.6 0 34.4 3.2 50.4 9.6 33.6 12.8 70.4 20.8 108.8 23.2 9.6 0.8 19.2 1.2 28.8 1.2s19.2-0.4 28.8-1.2c38.4-2.4 75.2-10.4 108.8-23.2 16-6.4 32.8-9.6 50.4-9.6h32c88 0 160 72 160 160z"/>
                     </svg>
                   </div>
                   <div style={{ flex: 1 }}>
-                    <div style={{ fontSize: '13px', color: '#8E8E93', marginBottom: '4px' }}>学生答案</div>
-                    <div style={{ fontSize: '15px', color: '#1C1C1E' }}>
+                    <div style={{ fontSize: '12px', color: '#6B7280', marginBottom: '2px' }}>学生答案</div>
+                    <div style={{ fontSize: '14px', color: '#111827' }}>
                       {formData.student_answer || '未作答'}
-                      {isFromWrongBook && <span style={{ color: '#8E8E93', fontSize: '12px' }}> (错误记录)</span>}
+                      {isFromWrongBook && <span style={{ color: '#9CA3AF', fontSize: '11px' }}> (错误记录)</span>}
                     </div>
                   </div>
                 </div>
@@ -519,27 +519,27 @@ export default function QuestionEdit({ questionId, onClose, onSave }) {
                 <div style={{
                   display: 'flex',
                   alignItems: 'flex-start',
-                  gap: '12px',
-                  paddingTop: '16px'
+                  gap: '10px',
+                  paddingTop: '12px'
                 }}>
                   <div style={{
                     width: '32px',
                     height: '32px',
                     borderRadius: '50%',
-                    background: '#E8F4FD',
+                    background: '#EFF6FF',
                     display: 'flex',
                     alignItems: 'center',
                     justifyContent: 'center',
                     flexShrink: 0
                   }}>
-                    <svg width="16" height="16" viewBox="0 0 1024 1024" fill="#007AFF">
+                    <svg width="16" height="16" viewBox="0 0 1024 1024" fill="#2563EB">
                       <path d="M512 64C264.6 64 64 264.6 64 512s200.6 448 448 448 448-200.6 448-448S759.4 64 512 64zm0 832c-212 0-384-172-384-384s172-384 384-384 384 172 384 384-172 384-384 384z"/>
                       <path d="M704 480H544V320c0-17.6-14.4-32-32-32s-32 14.4-32 32v160H320c-17.6 0-32 14.4-32 32s14.4 32 32 32h160v160c0 17.6 14.4 32 32 32s32-14.4 32-32V544h160c17.6 0 32-14.4 32-32s-14.4-32-32-32z"/>
                     </svg>
                   </div>
                   <div style={{ flex: 1 }}>
-                    <div style={{ fontSize: '13px', color: '#007AFF', marginBottom: '4px', fontWeight: 500 }}>正确答案</div>
-                    <div style={{ fontSize: '16px', fontWeight: 600, color: '#1C1C1E' }}>
+                    <div style={{ fontSize: '12px', color: '#2563EB', marginBottom: '2px', fontWeight: 500 }}>正确答案</div>
+                    <div style={{ fontSize: '14px', fontWeight: 600, color: '#111827' }}>
                       {formData.answer || '未设置'}
                     </div>
                   </div>
@@ -549,19 +549,19 @@ export default function QuestionEdit({ questionId, onClose, onSave }) {
               <div style={{
                 background: '#fff',
                 borderRadius: '12px',
-                padding: '16px'
+                padding: '12px'
               }}>
-                <div style={{ fontSize: '14px', fontWeight: 600, color: '#1C1C1E', marginBottom: '12px' }}>
+                <div style={{ fontSize: '13px', fontWeight: 600, color: '#111827', marginBottom: '8px' }}>
                   题目解析 (选填)
                 </div>
                 <TextArea
                   placeholder="请输入详细的 AI 解析内容或手动编辑解析内容..."
                   value={formData.analysis}
                   onChange={val => setFormData({ ...formData, analysis: val })}
-                  rows={6}
+                  rows={4}
                   style={{
-                    '--font-size': '14px',
-                    '--placeholder-color': '#C7C7CC'
+                    '--font-size': '13px',
+                    '--placeholder-color': '#9CA3AF'
                   }}
                 />
               </div>
@@ -572,27 +572,27 @@ export default function QuestionEdit({ questionId, onClose, onSave }) {
             <div style={{
               background: '#fff',
               borderRadius: '12px',
-              padding: '16px'
+              padding: '12px'
             }}>
               <div style={{
                 display: 'flex',
                 justifyContent: 'space-between',
                 alignItems: 'center',
-                marginBottom: '12px'
+                marginBottom: '10px'
               }}>
-                <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-                  <svg width="16" height="16" viewBox="0 0 24 24" fill="#007AFF" stroke="#007AFF" strokeWidth="2">
+                <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+                  <svg width="14" height="14" viewBox="0 0 24 24" fill="#2563EB" stroke="#2563EB" strokeWidth="2">
                     <path d="M20.59 13.41l-7.17 7.17a2 2 0 0 1-2.83 0L2 12V2h10l8.59 8.59a2 2 0 0 1 0 2.82z"/>
                     <line x1="7" y1="7" x2="7.01" y2="7"/>
                   </svg>
-                  <span style={{ fontSize: '14px', fontWeight: 600, color: '#1C1C1E' }}>知识点标签</span>
+                  <span style={{ fontSize: '13px', fontWeight: 600, color: '#111827' }}>知识点标签</span>
                 </div>
                 <span style={{
-                  fontSize: '12px',
-                  padding: '2px 8px',
-                  borderRadius: '10px',
-                  background: tagsSource === 'ai' ? '#E8F4FD' : '#FFF7E6',
-                  color: tagsSource === 'ai' ? '#007AFF' : '#FA8C16'
+                  fontSize: '11px',
+                  padding: '1px 6px',
+                  borderRadius: '8px',
+                  background: tagsSource === 'ai' ? '#EFF6FF' : '#FFFBEB',
+                  color: tagsSource === 'ai' ? '#2563EB' : '#F59E0B'
                 }}>
                   {tagsSource === 'ai' ? 'AI 生成' : '人工修正'}
                 </span>
@@ -600,21 +600,21 @@ export default function QuestionEdit({ questionId, onClose, onSave }) {
 
               {aiTags.length > 0 && tagsSource === 'manual' && (
                 <div style={{
-                  marginBottom: '12px',
-                  paddingBottom: '12px',
-                  borderBottom: '1px solid #F0F0F0'
+                  marginBottom: '10px',
+                  paddingBottom: '10px',
+                  borderBottom: '1px solid #F3F4F6'
                 }}>
-                  <div style={{ fontSize: '12px', color: '#8E8E93', marginBottom: '8px' }}>AI 原始标签</div>
-                  <div style={{ display: 'flex', flexWrap: 'wrap', gap: '8px' }}>
+                  <div style={{ fontSize: '11px', color: '#6B7280', marginBottom: '6px' }}>AI 原始标签</div>
+                  <div style={{ display: 'flex', flexWrap: 'wrap', gap: '6px' }}>
                     {aiTags.map((tag, index) => (
                       <span
                         key={index}
                         style={{
-                          fontSize: '12px',
-                          padding: '4px 10px',
-                          borderRadius: '12px',
-                          background: '#F5F5F7',
-                          color: '#8E8E93'
+                          fontSize: '11px',
+                          padding: '3px 8px',
+                          borderRadius: '10px',
+                          background: '#F5F7FA',
+                          color: '#6B7280'
                         }}
                       >
                         {tag}
@@ -624,19 +624,19 @@ export default function QuestionEdit({ questionId, onClose, onSave }) {
                 </div>
               )}
 
-              <div style={{ display: 'flex', flexWrap: 'wrap', gap: '8px', marginBottom: '12px' }}>
+              <div style={{ display: 'flex', flexWrap: 'wrap', gap: '6px', marginBottom: '10px' }}>
                 {effectiveTags.map((tag, index) => (
                   <span
                     key={index}
                     style={{
-                      fontSize: '13px',
-                      padding: '6px 12px',
-                      borderRadius: '14px',
+                      fontSize: '12px',
+                      padding: '4px 10px',
+                      borderRadius: '12px',
                       display: 'inline-flex',
                       alignItems: 'center',
                       gap: '4px',
-                      background: tagsSource === 'ai' ? '#E8F4FD' : '#FFF7E6',
-                      color: tagsSource === 'ai' ? '#007AFF' : '#FA8C16'
+                      background: tagsSource === 'ai' ? '#EFF6FF' : '#FFFBEB',
+                      color: tagsSource === 'ai' ? '#2563EB' : '#F59E0B'
                     }}
                   >
                     {tag}
@@ -658,7 +658,7 @@ export default function QuestionEdit({ questionId, onClose, onSave }) {
                   </span>
                 ))}
                 {effectiveTags.length === 0 && (
-                  <span style={{ fontSize: '13px', color: '#8E8E93' }}>暂无标签</span>
+                  <span style={{ fontSize: '13px', color: '#6B7280' }}>暂无标签</span>
                 )}
               </div>
 
@@ -668,19 +668,19 @@ export default function QuestionEdit({ questionId, onClose, onSave }) {
                   onChange={val => setNewTagInput(val)}
                   onKeyDown={handleTagInputKeyDown}
                   placeholder="输入标签后按回车添加"
-                  style={{ flex: 1, '--font-size': '14px' }}
+                  style={{ flex: 1, '--font-size': '13px' }}
                 />
                 <Button
                   size="small"
                   color="primary"
                   onClick={handleAddTag}
                   disabled={!newTagInput.trim()}
-                  style={{ borderRadius: '8px' }}
+                  style={{ borderRadius: '6px', fontSize: '12px' }}
                 >
                   添加
                 </Button>
               </div>
-              <div style={{ fontSize: '12px', color: '#8E8E93', marginTop: '8px' }}>
+              <div style={{ fontSize: '11px', color: '#9CA3AF', marginTop: '6px' }}>
                 添加或删除标签后将自动切换为"人工修正"模式
               </div>
             </div>
@@ -689,19 +689,19 @@ export default function QuestionEdit({ questionId, onClose, onSave }) {
 
         <div style={{
           background: '#fff',
-          padding: '16px',
-          borderTop: '1px solid #E5E5EA',
+          padding: '12px',
+          borderTop: '1px solid #E5E7EB',
           display: 'flex',
-          gap: '12px'
+          gap: '10px'
         }}>
           <Button
             style={{
               flex: 1,
-              height: '44px',
-              fontSize: '16px',
+              height: '38px',
+              fontSize: '13px',
               borderRadius: '8px',
-              background: '#F5F5F7',
-              color: '#1C1C1E',
+              background: '#F3F4F6',
+              color: '#111827',
               fontWeight: 500
             }}
             onClick={onClose}
@@ -712,11 +712,11 @@ export default function QuestionEdit({ questionId, onClose, onSave }) {
             color="primary"
             style={{
               flex: 1,
-              height: '44px',
-              fontSize: '16px',
+              height: '38px',
+              fontSize: '13px',
               fontWeight: 600,
               borderRadius: '8px',
-              background: '#007AFF'
+              background: '#2563EB'
             }}
             onClick={handleSave}
           >

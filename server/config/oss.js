@@ -1,26 +1,29 @@
 import OSS from 'ali-oss'
+import crypto from 'crypto'
 
-const region = process.env.OSS_REGION
-const bucket = process.env.OSS_BUCKET
-const accessKeyId = process.env.OSS_ACCESS_KEY_ID
-const accessKeySecret = process.env.OSS_ACCESS_KEY_SECRET
-const cdnDomain = process.env.OSS_CDN_DOMAIN
-
-const hasAllConfig = region && bucket && accessKeyId && accessKeySecret
-
-if (!hasAllConfig) {
-  console.warn('⚠️  缺少 OSS 环境变量配置，文件上传功能将不可用')
-  console.warn('请检查: OSS_REGION, OSS_BUCKET, OSS_ACCESS_KEY_ID, OSS_ACCESS_KEY_SECRET')
-}
-
-// 懒加载 OSS 客户端，避免启动时报错
 let _ossClient = null
+let _cdnDomain = null
 
 export const getOSSClient = () => {
   if (!_ossClient) {
+    const region = process.env.OSS_REGION
+    const bucket = process.env.OSS_BUCKET
+    const accessKeyId = process.env.OSS_ACCESS_KEY_ID
+    const accessKeySecret = process.env.OSS_ACCESS_KEY_SECRET
+    _cdnDomain = process.env.OSS_CDN_DOMAIN
+
+    const hasAllConfig = region && bucket && accessKeyId && accessKeySecret
+
     if (!hasAllConfig) {
       throw new Error('OSS 未配置：缺少环境变量。请检查 OSS_REGION, OSS_BUCKET, OSS_ACCESS_KEY_ID, OSS_ACCESS_KEY_SECRET')
     }
+
+    console.log('[OSS Config] 初始化OSS客户端:')
+    console.log(`  region: ${region}`)
+    console.log(`  bucket: ${bucket}`)
+    console.log(`  accessKeyId: ${accessKeyId?.substring(0, 8)}...`)
+    console.log(`  accessKeySecret长度: ${accessKeySecret?.length}`)
+
     _ossClient = new OSS({
       region,
       bucket,
@@ -33,7 +36,6 @@ export const getOSSClient = () => {
   return _ossClient
 }
 
-// 兼容旧代码的导出
 export const ossClient = new Proxy({}, {
   get(target, prop) {
     const client = getOSSClient()
@@ -42,24 +44,29 @@ export const ossClient = new Proxy({}, {
 })
 
 export const OSS_CONFIG = {
-  region,
-  bucket,
-  cdnDomain: cdnDomain || (region && bucket ? `https://${bucket}.${region}.aliyuncs.com` : ''),
-  maxSize: 20 * 1024 * 1024, // 20MB
+  get region() { return process.env.OSS_REGION },
+  get bucket() { return process.env.OSS_BUCKET },
+  get cdnDomain() {
+    return _cdnDomain || process.env.OSS_CDN_DOMAIN || 
+      (process.env.OSS_REGION && process.env.OSS_BUCKET 
+        ? `https://${process.env.OSS_BUCKET}.${process.env.OSS_REGION}.aliyuncs.com` 
+        : '')
+  },
+  maxSize: 20 * 1024 * 1024,
   allowedTypes: ['image/jpeg', 'image/jpg', 'image/png', 'image/webp', 'application/pdf']
 }
 
-export const generateOSSPath = (type, studentId, filename) => {
+export const generateOSSPath = (type, studentId, ext) => {
   const date = new Date()
   const dateStr = `${date.getFullYear()}${String(date.getMonth() + 1).padStart(2, '0')}${String(date.getDate()).padStart(2, '0')}`
-  const random = Math.random().toString(36).substring(2, 10)
-  const ext = filename.split('.').pop()
-  return `${type}/${studentId}/${dateStr}/${random}.${ext}`
+  const uuid = crypto.randomUUID()
+  return `${type}/${studentId}/${dateStr}/${uuid}.${ext}`
 }
 
 export const getCDNUrl = (ossPath) => {
+  const cdnDomain = process.env.OSS_CDN_DOMAIN
   if (cdnDomain) {
     return `${cdnDomain}/${ossPath}`
   }
-  return `https://${bucket}.${region}.aliyuncs.com/${ossPath}`
+  return `https://${process.env.OSS_BUCKET}.${process.env.OSS_REGION}.aliyuncs.com/${ossPath}`
 }
