@@ -44,11 +44,6 @@ const tabs = [
     icon: (active) => <CameraIcon active={active} />,
   },
   {
-    key: 'pending',
-    title: '待确认',
-    icon: (active) => <BookIcon active={active} />,
-  },
-  {
     key: 'wrongbook',
     title: '错题本',
     icon: (active) => <ChartIcon active={active} />,

@@ -1,47 +1,58 @@
 import { ossClient, generateOSSPath, getCDNUrl, OSS_CONFIG } from '../config/oss.js'
 
-export const uploadFile = async (fileBuffer, originalName, type, studentId) => {
-  const ossPath = generateOSSPath(type, studentId, originalName)
+export const uploadFile = async (fileBuffer, ext, type, studentId) => {
+  const ossPath = generateOSSPath(type, studentId, ext)
+
+  console.log(`[OSS Upload Debug] 准备上传:`)
+  console.log(`  路径: ${ossPath}`)
+  console.log(`  文件大小: ${fileBuffer.length} bytes`)
+  console.log(`  扩展名: ${ext}`)
+  console.log(`  类型: ${type}`)
+  console.log(`  学生ID: ${studentId}`)
 
   try {
+    console.log('[OSS Upload Debug] 正在调用 ossClient.put()...')
     const result = await ossClient.put(ossPath, fileBuffer)
+    console.log('[OSS Upload Debug] ossClient.put() 调用成功')
+    console.log(`  响应状态: ${result.res?.status}`)
+    console.log(`  URL: ${result.url}`)
     return getCDNUrl(ossPath)
   } catch (error) {
     console.error('OSS 上传失败:', error)
+    console.error('OSS 上传错误详情:', {
+      name: error.name,
+      code: error.code,
+      status: error.status,
+      requestId: error.requestId,
+      message: error.message,
+      hostId: error.hostId
+    })
     throw new Error(`文件上传失败: ${error.message}`)
   }
 }
 
 export const uploadImage = async (fileBuffer, originalName, studentId) => {
-  // Decode UTF-8 filename (multer may pass latin1-encoded bytes)
-  let decodedName = originalName
-  try {
-    decodedName = Buffer.from(originalName, 'latin1').toString('utf8')
-    // Verify it's valid UTF-8
-    Buffer.from(decodedName, 'utf8').toString()
-  } catch (e) {
-    // If decoding fails, use original name
-    decodedName = originalName
-  }
-
-  // Extract extension from decoded filename
-  const ext = decodedName.split('.').pop().toLowerCase()
+  // Filename is already UTF-8 decoded at the upload endpoint.
+  // Just extract the extension for the OSS object key.
+  const ext = originalName.split('.').pop().toLowerCase()
   const allowedExts = ['jpg', 'jpeg', 'png', 'webp']
 
   if (!allowedExts.includes(ext)) {
     throw new Error(`不支持的图片格式: ${ext}`)
   }
 
-  return uploadFile(fileBuffer, decodedName, 'images', studentId)
+  // Upload with ASCII-only key (UUID + ext), original name stays in DB only
+  return uploadFile(fileBuffer, ext, 'images', studentId)
 }
 
 export const uploadPDF = async (fileBuffer, originalName, studentId) => {
+  // Filename is already UTF-8 decoded at the upload endpoint.
   const ext = originalName.split('.').pop().toLowerCase()
   if (ext !== 'pdf') {
     throw new Error('只支持 PDF 格式')
   }
 
-  return uploadFile(fileBuffer, originalName, 'pdfs', studentId)
+  return uploadFile(fileBuffer, ext, 'pdfs', studentId)
 }
 
 export const deleteFile = async (ossPath) => {

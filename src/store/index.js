@@ -187,33 +187,6 @@ export const useWrongQuestionStore = create((set, get) => ({
   clearSelection: () => set({ selectedQuestions: [] })
 }))
 
-// 待确认题目状态管理 - 纯内存，无本地存储
-export const usePendingQuestionStore = create((set, get) => ({
-  pendingQuestions: [],
-  
-  setPendingQuestions: (questions) => set({ pendingQuestions: Array.isArray(questions) ? questions : [] }),
-  
-  addPendingQuestion: (question) => set((state) => ({
-    pendingQuestions: [question, ...state.pendingQuestions]
-  })),
-  
-  addPendingQuestions: (questions) => set((state) => ({
-    pendingQuestions: [...questions, ...state.pendingQuestions]
-  })),
-  
-  updatePendingQuestion: (id, updates) => set((state) => ({
-    pendingQuestions: state.pendingQuestions.map(q => 
-      q.id === id ? { ...q, ...updates } : q
-    )
-  })),
-  
-  removePendingQuestion: (id) => set((state) => ({
-    pendingQuestions: state.pendingQuestions.filter(q => q.id !== id)
-  })),
-  
-  clearPendingQuestions: () => set({ pendingQuestions: [] })
-}))
-
 // 试卷状态管理 - 纯内存，无本地存储
 export const useExamStore = create((set, get) => ({
   exams: [],

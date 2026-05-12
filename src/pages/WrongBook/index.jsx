@@ -19,6 +19,8 @@ import { mockWrongQuestions, mockStudents } from '../../data/mockData'
 import StudentSwitcher from '../../components/StudentSwitcher'
 import PrintPreview from '../PrintPreview'
 import QuestionEdit from '../QuestionEdit'
+import ScanQR from '../ScanQR'
+import Grading from '../Grading'
 import dayjs from 'dayjs'
 
 // 使用测试数据
@@ -41,7 +43,8 @@ const APPLE_COLORS = {
 const STATUS_TABS = [
   { key: 'all', label: '全部' },
   { key: 'pending', label: '未掌握' },
-  { key: 'mastered', label: '已掌握' }
+  { key: 'partial', label: '有点掌握' },
+  { key: 'mastered', label: '完全掌握' }
 ]
 
 // 科目选项
@@ -91,6 +94,9 @@ export default function WrongBook({ onScanQR }) {
   const [showStudentSwitcher, setShowStudentSwitcher] = useState(false)
   const [showFilterPanel, setShowFilterPanel] = useState(false)
   const [editingQuestion, setEditingQuestion] = useState(null)
+  const [showScanQR, setShowScanQR] = useState(false)
+  const [showGrading, setShowGrading] = useState(false)
+  const [gradingData, setGradingData] = useState(null)
 
   // 组件挂载时，初始化所有学生的 mock 数据到 store
   useEffect(() => {
@@ -112,7 +118,6 @@ export default function WrongBook({ onScanQR }) {
     }
   }, [currentStudent?.id])
   
-
 
   const loadData = async () => {
     if (!currentStudent) return
@@ -269,8 +274,9 @@ export default function WrongBook({ onScanQR }) {
     const studentQuestions = (Array.isArray(wrongQuestions) ? wrongQuestions : []).filter(wq => wq.student_id === currentStudent?.id)
     const total = studentQuestions.length
     const mastered = studentQuestions.filter(wq => wq.status === 'mastered').length
-    const pending = total - mastered
-    return { total, mastered, pending }
+    const partial = studentQuestions.filter(wq => wq.status === 'partial').length
+    const pending = studentQuestions.filter(wq => wq.status === 'pending').length
+    return { total, mastered, partial, pending }
   }
 
   // 切换选择
@@ -320,14 +326,31 @@ export default function WrongBook({ onScanQR }) {
     })
   }
 
-  // 标记为已掌握
-  const handleMarkMastered = async (id) => {
+  // 切换掌握等级（未掌握 → 有点掌握 → 完全掌握 → 未掌握）
+  const handleToggleMastery = async (wq) => {
+    const currentStatus = wq.status
+    let nextStatus
+    switch (currentStatus) {
+      case 'pending':
+        nextStatus = 'partial'
+        break
+      case 'partial':
+        nextStatus = 'mastered'
+        break
+      case 'mastered':
+        nextStatus = 'pending'
+        break
+      default:
+        nextStatus = 'pending'
+    }
+    
     try {
-      await updateWrongQuestionStatus(id, 'mastered')
+      await updateWrongQuestionStatus(wq.id, nextStatus)
       loadData()
+      const statusText = { pending: '未掌握', partial: '有点掌握', mastered: '完全掌握' }
       Toast.show({
         icon: 'success',
-        content: '已标记为掌握'
+        content: `已标记为${statusText[nextStatus]}`
       })
     } catch (error) {
       Toast.show({
@@ -352,6 +375,26 @@ export default function WrongBook({ onScanQR }) {
     })
     setWrongQuestions(updatedWrongQuestions)
     setEditingQuestion(null)
+  }
+
+  // 扫码批改回调
+  const handleScanSuccess = (scanData) => {
+    setShowScanQR(false)
+    setGradingData(scanData)
+    setShowGrading(true)
+  }
+
+  // 批改完成回调
+  const handleGradingComplete = (result) => {
+    setShowGrading(false)
+    setGradingData(null)
+    
+    Toast.show({
+      icon: 'success',
+      content: `批改完成！已掌握 ${result.masteredCount} 题，未掌握 ${result.notMasteredCount} 题`
+    })
+    
+    loadData()
   }
 
   // 生成试卷
@@ -383,7 +426,7 @@ export default function WrongBook({ onScanQR }) {
       })
       
       // 清空选择
-      clearSelection()
+      storeClearSelection()
     } catch (error) {
       console.error('生成试卷失败:', error)
       Toast.show({
@@ -474,7 +517,21 @@ export default function WrongBook({ onScanQR }) {
           background: '#E8F5E9',
           fontWeight: 500
         }}>
-          已掌握
+          完全掌握
+        </span>
+      )
+    }
+    if (status === 'partial') {
+      return (
+        <span style={{
+          color: APPLE_COLORS.warning,
+          fontSize: '12px',
+          padding: '4px 10px',
+          borderRadius: '12px',
+          background: '#FFF8E1',
+          fontWeight: 500
+        }}>
+          有点掌握
         </span>
       )
     }
@@ -601,7 +658,7 @@ export default function WrongBook({ onScanQR }) {
             textAlign: 'center',
             boxShadow: '0 1px 3px rgba(0,0,0,0.04)'
           }}>
-            <div style={{ fontSize: '12px', color: APPLE_COLORS.textSecondary, marginBottom: '4px' }}>错题数量</div>
+            <div style={{ fontSize: '12px', color: APPLE_COLORS.textSecondary, marginBottom: '4px' }}>错题总数</div>
             <div style={{ fontSize: '22px', fontWeight: 700, color: APPLE_COLORS.danger }}>{stats.total}道</div>
           </div>
           <div style={{ 
@@ -612,19 +669,30 @@ export default function WrongBook({ onScanQR }) {
             textAlign: 'center',
             boxShadow: '0 1px 3px rgba(0,0,0,0.04)'
           }}>
-            <div style={{ fontSize: '12px', color: APPLE_COLORS.textSecondary, marginBottom: '4px' }}>已掌握</div>
+            <div style={{ fontSize: '12px', color: APPLE_COLORS.textSecondary, marginBottom: '4px' }}>完全掌握</div>
             <div style={{ fontSize: '22px', fontWeight: 700, color: APPLE_COLORS.success }}>{stats.mastered}道</div>
           </div>
           <div style={{ 
             flex: 1, 
-            background: '#E8F4FD', 
+            background: '#FFF8E1', 
+            padding: '14px', 
+            borderRadius: '12px',
+            textAlign: 'center',
+            boxShadow: '0 1px 3px rgba(0,0,0,0.04)'
+          }}>
+            <div style={{ fontSize: '12px', color: APPLE_COLORS.textSecondary, marginBottom: '4px' }}>有点掌握</div>
+            <div style={{ fontSize: '22px', fontWeight: 700, color: APPLE_COLORS.warning }}>{stats.partial}道</div>
+          </div>
+          <div style={{ 
+            flex: 1, 
+            background: '#FFEBEE', 
             padding: '14px', 
             borderRadius: '12px',
             textAlign: 'center',
             boxShadow: '0 1px 3px rgba(0,0,0,0.04)'
           }}>
             <div style={{ fontSize: '12px', color: APPLE_COLORS.textSecondary, marginBottom: '4px' }}>未掌握</div>
-            <div style={{ fontSize: '22px', fontWeight: 700, color: APPLE_COLORS.primary }}>{stats.pending}道</div>
+            <div style={{ fontSize: '22px', fontWeight: 700, color: APPLE_COLORS.danger }}>{stats.pending}道</div>
           </div>
         </div>
       </div>
@@ -641,7 +709,7 @@ export default function WrongBook({ onScanQR }) {
         {STATUS_TABS.map(tab => {
           const count = getStatusCount(tab.key)
           const isActive = activeStatus === tab.key
-          const tabColor = tab.key === 'mastered' ? APPLE_COLORS.success : tab.key === 'pending' ? APPLE_COLORS.danger : APPLE_COLORS.primary
+          const tabColor = tab.key === 'mastered' ? APPLE_COLORS.success : tab.key === 'partial' ? APPLE_COLORS.warning : tab.key === 'pending' ? APPLE_COLORS.danger : APPLE_COLORS.primary
           return (
             <div
               key={tab.key}
@@ -765,7 +833,9 @@ export default function WrongBook({ onScanQR }) {
                       <span style={{ fontSize: '12px', color: APPLE_COLORS.textSecondary }}>
                         {dayjs(wq.added_at || wq.created_at).format('YYYY-MM-DD')}
                       </span>
-                      {renderMasteredTag(wq.status)}
+                      <span onClick={() => handleToggleMastery(wq)} style={{ cursor: 'pointer' }} title="点击切换掌握等级">
+                        {renderMasteredTag(wq.status)}
+                      </span>
                     </div>
                   </div>
 
@@ -809,17 +879,30 @@ export default function WrongBook({ onScanQR }) {
                   {/* 错误次数 */}
                   <div style={{ fontSize: '13px', color: APPLE_COLORS.textSecondary, display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
                     <span>错误次数：{question.wrong_count || 1}次</span>
-                    <span 
-                      onClick={() => handleEditQuestion(wq)}
-                      style={{ 
-                        color: APPLE_COLORS.primary, 
-                        fontSize: '13px', 
-                        cursor: 'pointer',
-                        fontWeight: 500
-                      }}
-                    >
-                      编辑
-                    </span>
+                    <div style={{ display: 'flex', gap: '16px' }}>
+                      <span
+                        onClick={() => handleEditQuestion(wq)}
+                        style={{
+                          color: APPLE_COLORS.primary,
+                          fontSize: '13px',
+                          cursor: 'pointer',
+                          fontWeight: 500
+                        }}
+                      >
+                        编辑
+                      </span>
+                      <span
+                        onClick={(e) => { e.stopPropagation(); handleDelete(wq.id) }}
+                        style={{
+                          color: APPLE_COLORS.danger,
+                          fontSize: '13px',
+                          cursor: 'pointer',
+                          fontWeight: 500
+                        }}
+                      >
+                        删除
+                      </span>
+                    </div>
                   </div>
                 </div>
               )
@@ -845,7 +928,7 @@ export default function WrongBook({ onScanQR }) {
         <div style={{ display: 'flex', gap: '12px' }}>
           <Button 
             fill="outline"
-            onClick={onScanQR}
+            onClick={() => setShowScanQR(true)}
             style={{ 
               borderColor: APPLE_COLORS.success, 
               color: APPLE_COLORS.success,
@@ -914,6 +997,28 @@ export default function WrongBook({ onScanQR }) {
           visible={!!editingQuestion}
           onClose={() => setEditingQuestion(null)}
           onSave={handleSaveEdit}
+        />
+      )}
+
+      {/* 扫码批改弹窗 */}
+      {showScanQR && (
+        <ScanQR
+          onClose={() => setShowScanQR(false)}
+          onScanSuccess={handleScanSuccess}
+        />
+      )}
+
+      {/* 批改页面 */}
+      {showGrading && gradingData && (
+        <Grading
+          paperId={gradingData.paperId}
+          studentId={gradingData.studentId}
+          questionIds={gradingData.questionIds}
+          onClose={() => {
+            setShowGrading(false)
+            setGradingData(null)
+          }}
+          onComplete={handleGradingComplete}
         />
       )}
 

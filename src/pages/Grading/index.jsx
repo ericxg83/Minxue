@@ -1,57 +1,92 @@
 import { useState, useEffect } from 'react'
 import { motion, AnimatePresence } from 'motion/react'
-import { CheckCircle2, XCircle, ChevronLeft, ChevronRight, Loader2, QrCode, Image as ImageIcon, Clock, ArrowLeft, Trophy } from 'lucide-react'
-import { mockWrongQuestions, mockStudents } from '../../data/mockData'
-import { useWrongQuestionStore } from '../../store'
+import { CheckCircle2, XCircle, ChevronLeft, ChevronRight, Loader2, QrCode, Eye, EyeOff } from 'lucide-react'
+import { useWrongQuestionStore, useStudentStore } from '../../store'
 import dayjs from 'dayjs'
 
-const USE_MOCK_DATA = false
+const USE_MOCK_DATA = true
 
-export default function Grading({ paperId, studentId, onClose, onComplete }) {
+export default function Grading({ paperId, studentId, questionIds, onClose, onComplete }) {
   const [currentQuestionIndex, setCurrentQuestionIndex] = useState(0)
   const [questions, setQuestions] = useState([])
   const [gradingResults, setGradingResults] = useState({})
   const [studentInfo, setStudentInfo] = useState(null)
   const [showResult, setShowResult] = useState(false)
-  const [isScanning, setIsScanning] = useState(!paperId)
+  const [showAnswerCard, setShowAnswerCard] = useState(true)
+  const [isLoading, setIsLoading] = useState(true)
+  const [masteredBeforeCount, setMasteredBeforeCount] = useState(0)
   
-  const { wrongQuestions, updateWrongQuestionStatus } = useWrongQuestionStore()
+  const { wrongQuestions, updateWrongQuestion, updateWrongQuestionStatus } = useWrongQuestionStore()
+  const { students } = useStudentStore()
+
+  const APPLE_COLORS = {
+    primary: '#007AFF',
+    success: '#34C759',
+    danger: '#FF3B30',
+    warning: '#FF9500',
+    background: '#F2F2F7',
+    card: '#FFFFFF',
+    text: '#1C1C1E',
+    textSecondary: '#8E8E93',
+    border: '#E5E5EA'
+  }
+
+  const loadQuestions = () => {
+    setIsLoading(true)
+    
+    if (USE_MOCK_DATA) {
+      const targetStudentId = studentId || (students[0]?.id)
+      const student = students.find(s => s.id === targetStudentId) || students[0]
+      
+      let targetQuestions = wrongQuestions.filter(wq => wq.student_id === targetStudentId)
+      
+      if (questionIds && questionIds.length > 0) {
+        targetQuestions = targetQuestions.filter(wq => 
+          questionIds.includes(wq.id) || questionIds.includes(wq.question_id)
+        )
+      }
+      
+      const detailedQuestions = targetQuestions.map(wq => ({
+        ...wq,
+        ...wq.question,
+        wrongQuestionId: wq.id,
+        questionId: wq.question_id || wq.id,
+        originalStatus: wq.status,
+        originalErrorCount: wq.error_count || 1,
+        originalPracticeCount: wq.practice_count || 0
+      }))
+      
+      setQuestions(detailedQuestions)
+      
+      const beforeCount = detailedQuestions.filter(q => q.originalStatus === 'mastered').length
+      setMasteredBeforeCount(beforeCount)
+      
+      setStudentInfo({
+        name: student?.name || '学生',
+        class: student?.class || '',
+        date: dayjs().format('YYYY-MM-DD'),
+        practiceCount: detailedQuestions.length > 0 ? (detailedQuestions[0].practice_count || 0) + 1 : 1
+      })
+      
+      setIsLoading(false)
+    } else {
+      setIsLoading(false)
+    }
+  }
 
   useEffect(() => {
-    console.log('Grading: 初始化', { paperId, studentId })
-    if (USE_MOCK_DATA) {
-      const student = mockStudents.find(s => s.id === studentId) || mockStudents[0]
-      const testQuestions = mockWrongQuestions
-        .filter(wq => wq.student_id === student.id)
-        .map(wq => ({
-          ...wq.question,
-          wrongQuestionId: wq.id,
-          originalStatus: wq.status
-        }))
-      
-      console.log('Grading: 加载题目', testQuestions.length, '道')
-      setQuestions(testQuestions)
-      setStudentInfo({
-        name: student.name,
-        class: student.class,
-        date: dayjs().format('YYYY-MM-DD'),
-        retryCount: 2
-      })
-    }
-  }, [paperId, studentId])
-
-  const handleScanComplete = () => {
-    setIsScanning(false)
-  }
+    loadQuestions()
+  }, [paperId, studentId, questionIds])
 
   const handleMarkStatus = (status) => {
     const currentQuestion = questions[currentQuestionIndex]
+    if (!currentQuestion) return
+
     const newResults = {
       ...gradingResults,
-      [currentQuestion.id]: {
-        ...gradingResults[currentQuestion.id],
+      [currentQuestion.wrongQuestionId]: {
         status,
-        questionId: currentQuestion.id,
+        questionId: currentQuestion.questionId,
         wrongQuestionId: currentQuestion.wrongQuestionId,
         markedAt: Date.now()
       }
@@ -69,6 +104,42 @@ export default function Grading({ paperId, studentId, onClose, onComplete }) {
     }
   }
 
+  const updateMasteryLevel = (wrongQuestionId, result) => {
+    const currentQuestion = questions.find(q => q.wrongQuestionId === wrongQuestionId)
+    if (!currentQuestion) return
+
+    const originalStatus = currentQuestion.originalStatus
+    const originalPracticeCount = currentQuestion.originalPracticeCount || 0
+    const originalErrorCount = currentQuestion.originalErrorCount || 1
+
+    let newStatus
+    let newErrorCount = originalErrorCount
+    let newPracticeCount = originalPracticeCount + 1
+
+    if (result.status === 'mastered') {
+      if (originalStatus === 'pending') {
+        newStatus = 'partial'
+      } else if (originalStatus === 'partial') {
+        newStatus = 'mastered'
+      } else if (originalStatus === 'mastered') {
+        newStatus = 'mastered'
+      } else {
+        newStatus = 'partial'
+      }
+    } else {
+      newStatus = 'pending'
+      newErrorCount = originalErrorCount + 1
+    }
+
+    updateWrongQuestion(wrongQuestionId, {
+      status: newStatus,
+      error_count: newErrorCount,
+      practice_count: newPracticeCount,
+      last_graded_at: new Date().toISOString(),
+      grade_count: (currentQuestion.grade_count || 0) + 1
+    })
+  }
+
   const handlePrev = () => {
     if (currentQuestionIndex > 0) {
       setCurrentQuestionIndex(currentQuestionIndex - 1)
@@ -82,16 +153,12 @@ export default function Grading({ paperId, studentId, onClose, onComplete }) {
   }
 
   const handleComplete = async () => {
+    Object.entries(gradingResults).forEach(([wrongQuestionId, result]) => {
+      updateMasteryLevel(wrongQuestionId, result)
+    })
+
     const masteredCount = Object.values(gradingResults).filter(r => r.status === 'mastered').length
-    const notMasteredCount = Object.values(gradingResults).filter(r => r.status === 'not_mastered').length
-    
-    if (USE_MOCK_DATA) {
-      Object.values(gradingResults).forEach(result => {
-        if (result.wrongQuestionId) {
-          updateWrongQuestionStatus(result.wrongQuestionId, result.status)
-        }
-      })
-    }
+    const notMasteredCount = Object.values(gradingResults).filter(r => r.status !== 'mastered').length
     
     onComplete && onComplete({
       masteredCount,
@@ -99,283 +166,427 @@ export default function Grading({ paperId, studentId, onClose, onComplete }) {
       totalQuestions: questions.length,
       results: gradingResults
     })
+    
+    onClose()
   }
 
-  // Scan Page
-  if (isScanning) {
+  if (isLoading) {
     return (
-      <AnimatePresence>
-        <div className="fixed inset-0 bg-black z-[10000] flex flex-col">
-          <div className="flex-1 flex flex-col items-center justify-center relative">
-            <div className="w-[280px] bg-white rounded-[12px] p-5 mb-10">
-              <div className="text-center border-b-2 border-gray-800 pb-3 mb-4">
-                <div className="text-[16px] font-bold">数学错题重练卷</div>
-              </div>
-              <div className="text-[13px] text-gray-700 mb-2">学生姓名：{studentInfo?.name}</div>
-              <div className="text-[13px] text-gray-700 mb-2">重练次数：第{studentInfo?.retryCount}次</div>
-              <div className="text-[13px] text-gray-700 mb-4">日期：{studentInfo?.date}</div>
-              <div className="w-20 h-20 bg-gray-100 mx-auto flex items-center justify-center border border-gray-200 rounded-lg">
-                <QrCode size={32} className="text-gray-400" />
-              </div>
-            </div>
-
-            <div className="text-white text-[14px] text-center">将二维码放入框内，自动识别</div>
-          </div>
-
-          <div className="px-5 pb-8 flex justify-center gap-10">
-            <div className="text-center text-white cursor-pointer">
-              <div className="w-12 h-12 rounded-full bg-white/20 flex items-center justify-center mb-2 mx-auto">
-                <ImageIcon size={24} className="text-white" />
-              </div>
-              <div className="text-[12px]">相册</div>
-            </div>
-            
-            <div 
-              onClick={handleScanComplete}
-              className="w-16 h-16 rounded-full border-4 border-white flex items-center justify-center cursor-pointer"
-            >
-              <div className="w-[52px] h-[52px] rounded-full bg-white" />
-            </div>
-            
-            <div className="text-center text-white cursor-pointer">
-              <div className="w-12 h-12 rounded-full bg-white/20 flex items-center justify-center mb-2 mx-auto">
-                <Clock size={24} className="text-white" />
-              </div>
-              <div className="text-[12px]">扫码历史</div>
-            </div>
-          </div>
-        </div>
-      </AnimatePresence>
+      <div style={{
+        position: 'fixed',
+        inset: 0,
+        background: APPLE_COLORS.card,
+        display: 'flex',
+        alignItems: 'center',
+        justifyContent: 'center',
+        zIndex: 10000
+      }}>
+        <Loader2 size={32} style={{ color: APPLE_COLORS.primary }} className="animate-spin" />
+      </div>
     )
   }
 
-  // Result Page
+  if (questions.length === 0) {
+    return (
+      <div style={{
+        position: 'fixed',
+        inset: 0,
+        background: APPLE_COLORS.card,
+        display: 'flex',
+        alignItems: 'center',
+        justifyContent: 'center',
+        zIndex: 10000,
+        flexDirection: 'column',
+        gap: '16px'
+      }}>
+        <QrCode size={48} style={{ color: APPLE_COLORS.textSecondary }} />
+        <div style={{ fontSize: '16px', color: APPLE_COLORS.textSecondary }}>暂无题目，请重新扫码</div>
+        <button 
+          onClick={onClose}
+          style={{
+            padding: '12px 24px',
+            background: APPLE_COLORS.primary,
+            color: '#fff',
+            borderRadius: '12px',
+            fontSize: '15px',
+            fontWeight: 600
+          }}
+        >
+          返回
+        </button>
+      </div>
+    )
+  }
+
   if (showResult) {
     const masteredCount = Object.values(gradingResults).filter(r => r.status === 'mastered').length
-    const notMasteredCount = Object.values(gradingResults).filter(r => r.status === 'not_mastered').length
+    const notMasteredCount = Object.values(gradingResults).filter(r => r.status !== 'mastered').length
     const total = questions.length
 
     return (
-      <AnimatePresence>
-        <div className="fixed inset-0 bg-white z-[10000] flex flex-col overflow-auto">
-          <motion.div
-            initial={{ opacity: 0, y: 20 }}
-            animate={{ opacity: 1, y: 0 }}
-            className="flex-1 px-6 pt-16"
-          >
-            {/* Success Icon */}
-            <div className="text-center mb-8 mt-8">
-              <div className="w-[120px] h-[120px] rounded-full bg-gradient-to-br from-green-500 to-green-700 flex items-center justify-center mx-auto relative">
-                <CheckCircle2 size={60} className="text-white" strokeWidth={2.5} />
-                <div className="absolute top-[-10px] right-[-10px]">
-                  <Trophy size={30} className="text-yellow-500" />
-                </div>
-              </div>
+      <div style={{
+        position: 'fixed',
+        inset: 0,
+        background: APPLE_COLORS.card,
+        zIndex: 10000,
+        overflow: 'auto'
+      }}>
+        <motion.div
+          initial={{ opacity: 0, y: 20 }}
+          animate={{ opacity: 1, y: 0 }}
+          style={{ padding: '64px 24px 24px' }}
+        >
+          <div style={{ textAlign: 'center', marginBottom: '32px' }}>
+            <div style={{
+              width: '120px',
+              height: '120px',
+              borderRadius: '50%',
+              background: `linear-gradient(135deg, ${APPLE_COLORS.success}, ${APPLE_COLORS.success}dd)`,
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              margin: '0 auto 16px'
+            }}>
+              <CheckCircle2 size={60} color="#fff" strokeWidth={2.5} />
             </div>
-
-            {/* Title */}
-            <div className="text-center mb-8">
-              <div className="text-[24px] font-bold text-gray-900 mb-2">恭喜您！</div>
-              <div className="text-[14px] text-gray-500">本次批改已完成</div>
-              <div className="text-[14px] text-gray-500">你消灭了 {masteredCount} 道错题！</div>
+            <div style={{ fontSize: '24px', fontWeight: 700, color: APPLE_COLORS.text, marginBottom: '8px' }}>
+              批改完成！
             </div>
-
-            {/* Stats Card */}
-            <div className="bg-green-50 border border-green-100 rounded-2xl p-6 mb-6">
-              <div className="text-center mb-4">
-                <div className="w-20 h-20 rounded-full border-8 border-green-500 flex items-center justify-center mx-auto relative">
-                  <span className="text-[28px] font-bold text-green-600">{masteredCount}</span>
-                  <span className="text-[12px] text-gray-400 absolute bottom-2">已掌握</span>
-                </div>
-              </div>
-              
-              <div className="flex justify-around text-[13px]">
-                <div className="text-center">
-                  <div className="text-green-600 font-bold">{masteredCount} 题</div>
-                  <div className="text-gray-400">已掌握 ({Math.round(masteredCount/total*100)}%)</div>
-                </div>
-                <div className="text-center">
-                  <div className="text-red-500 font-bold">{notMasteredCount} 题</div>
-                  <div className="text-gray-400">未掌握 ({Math.round(notMasteredCount/total*100)}%)</div>
-                </div>
-              </div>
+            <div style={{ fontSize: '14px', color: APPLE_COLORS.textSecondary }}>
+              本次共批改 {total} 道题
             </div>
-
-            {/* Details */}
-            <div className="mb-8">
-              <div className="flex justify-between mb-3 text-[14px]">
-                <span className="text-gray-500">重练次数</span>
-                <span className="text-gray-900">+1（本次累计 {studentInfo?.retryCount} 次）</span>
-              </div>
-              <div className="flex justify-between text-[14px]">
-                <span className="text-gray-500">错题本状态</span>
-                <span className="text-green-600">已同步更新</span>
-              </div>
-            </div>
-
-            {/* Complete Button */}
-            <button 
-              onClick={handleComplete}
-              className="w-full py-4 rounded-2xl bg-blue-600 text-white text-[15px] font-bold hover:bg-blue-500 transition-all active:opacity-80"
-            >
-              完成
-            </button>
-          </motion.div>
-        </div>
-      </AnimatePresence>
-    )
-  }
-
-  // Grading Page
-  const currentQuestion = questions[currentQuestionIndex]
-  const currentResult = gradingResults[currentQuestion?.id]
-  const progress = ((currentQuestionIndex + 1) / questions.length) * 100
-
-  if (!currentQuestion) {
-    return (
-      <div className="fixed inset-0 bg-gray-50 z-[10000] flex items-center justify-center">
-        <Loader2 size={32} className="text-blue-500 animate-spin" />
-      </div>
-    )
-  }
-
-  const isShortOptions = currentQuestion.options && currentQuestion.options.every(opt => opt.length <= 10)
-
-  return (
-    <AnimatePresence>
-      <div className="fixed inset-0 bg-gray-50 z-[10000] flex flex-col">
-        {/* Header */}
-        <div className="flex items-center justify-between px-5 pt-12 pb-4 bg-white border-b border-gray-100">
-          <button onClick={onClose} className="text-[14px] font-medium text-gray-500 hover:text-gray-700">
-            退出
-          </button>
-          <h2 className="text-[17px] font-bold text-gray-900">批改中</h2>
-          <span className="text-[14px] font-medium text-blue-600">批改中</span>
-        </div>
-
-        {/* Progress */}
-        <div className="px-5 py-4 bg-white">
-          <div className="flex justify-between mb-3 text-[13px]">
-            <span>{studentInfo?.name}</span>
-            <span className="text-gray-400">{studentInfo?.date}</span>
-            <span>第{studentInfo?.retryCount}次重练</span>
           </div>
-          <div className="w-full h-2 bg-blue-50 rounded-full overflow-hidden">
-            <motion.div 
-              className="h-full bg-blue-600 rounded-full"
-              initial={{ width: 0 }}
-              animate={{ width: `${progress}%` }}
-              transition={{ duration: 0.3 }}
-            />
-          </div>
-          <div className="text-center mt-2 text-[12px] text-gray-400">
-            进度 {currentQuestionIndex + 1}/{questions.length}
-          </div>
-        </div>
 
-        {/* Question Content */}
-        <div className="flex-1 overflow-auto px-5 py-4">
-          <div className="bg-white rounded-2xl p-5 mb-3 shadow-sm">
-            <div className="flex justify-between items-center mb-3">
-              <div>
-                <span className="text-[14px] font-bold text-blue-600 mr-2">第 {currentQuestionIndex + 1} 题</span>
-                <span className="text-[13px] text-gray-400">
-                  {currentQuestion.question_type === 'choice' ? '选择题' : 
-                   currentQuestion.question_type === 'fill' ? '填空题' : '解答题'}
+          <div style={{
+            background: APPLE_COLORS.card,
+            borderRadius: '16px',
+            padding: '24px',
+            marginBottom: '24px',
+            boxShadow: '0 2px 8px rgba(0,0,0,0.04)'
+          }}>
+            <div style={{ display: 'flex', justifyContent: 'space-around', marginBottom: '24px' }}>
+              <div style={{ textAlign: 'center' }}>
+                <div style={{ fontSize: '32px', fontWeight: 700, color: APPLE_COLORS.success }}>{masteredCount}</div>
+                <div style={{ fontSize: '13px', color: APPLE_COLORS.textSecondary, marginTop: '4px' }}>已掌握</div>
+              </div>
+              <div style={{ textAlign: 'center' }}>
+                <div style={{ fontSize: '32px', fontWeight: 700, color: APPLE_COLORS.danger }}>{notMasteredCount}</div>
+                <div style={{ fontSize: '13px', color: APPLE_COLORS.textSecondary, marginTop: '4px' }}>待复习</div>
+              </div>
+              <div style={{ textAlign: 'center' }}>
+                <div style={{ fontSize: '32px', fontWeight: 700, color: APPLE_COLORS.primary }}>{total}</div>
+                <div style={{ fontSize: '13px', color: APPLE_COLORS.textSecondary, marginTop: '4px' }}>总计</div>
+              </div>
+            </div>
+
+            <div style={{ borderTop: `1px solid ${APPLE_COLORS.border}`, paddingTop: '16px' }}>
+              <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '12px', fontSize: '14px' }}>
+                <span style={{ color: APPLE_COLORS.textSecondary }}>学生姓名</span>
+                <span style={{ color: APPLE_COLORS.text, fontWeight: 500 }}>{studentInfo?.name}</span>
+              </div>
+              <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '12px', fontSize: '14px' }}>
+                <span style={{ color: APPLE_COLORS.textSecondary }}>批改日期</span>
+                <span style={{ color: APPLE_COLORS.text, fontWeight: 500 }}>{studentInfo?.date}</span>
+              </div>
+              <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '14px' }}>
+                <span style={{ color: APPLE_COLORS.textSecondary }}>掌握率</span>
+                <span style={{ color: APPLE_COLORS.success, fontWeight: 600 }}>
+                  {total > 0 ? Math.round(masteredCount / total * 100) : 0}%
                 </span>
               </div>
             </div>
-
-            <div className="text-[15px] text-gray-700 leading-relaxed mb-4">
-              {currentQuestion.content}
-            </div>
-
-            {currentQuestion.options && currentQuestion.options.length > 0 && (
-              <div className={`flex ${isShortOptions ? 'flex-wrap gap-6' : 'flex-wrap gap-2'} mb-4`}>
-                {currentQuestion.options.map((opt, i) => (
-                  <div key={i} className="text-[14px] text-gray-700">
-                    {String.fromCharCode(65 + i)}. {opt}
-                  </div>
-                ))}
-              </div>
-            )}
           </div>
 
-          {/* Answer */}
-          <div className="bg-blue-50 border border-blue-100 rounded-2xl p-5 mb-3">
-            <div className="text-[14px] font-bold text-blue-600 mb-2">参考答案</div>
-            <div className="text-[14px] text-gray-700 leading-relaxed">
-              {currentQuestion.answer || '暂无答案'}
-            </div>
-          </div>
+          <button 
+            onClick={handleComplete}
+            style={{
+              width: '100%',
+              padding: '16px',
+              background: APPLE_COLORS.primary,
+              color: '#fff',
+              borderRadius: '12px',
+              fontSize: '16px',
+              fontWeight: 600,
+              border: 'none',
+              cursor: 'pointer'
+            }}
+          >
+            完成并返回
+          </button>
+        </motion.div>
+      </div>
+    )
+  }
 
-          {/* Analysis */}
-          <div className="bg-green-50 border border-green-100 rounded-2xl p-5">
-            <div className="text-[14px] font-bold text-green-600 mb-2">解析</div>
-            <div className="text-[14px] text-gray-700 leading-relaxed">
-              {currentQuestion.analysis || 
-                `本题考查${currentQuestion.question_type === 'choice' ? '基础概念' : '计算能力'}。` +
-                `正确答案是 ${currentQuestion.answer}。` +
-                `解题思路：根据题目条件，运用相关知识点进行推导计算。`
-              }
-            </div>
-          </div>
-        </div>
+  const currentQuestion = questions[currentQuestionIndex]
+  const currentResult = gradingResults[currentQuestion?.wrongQuestionId]
+  const progress = ((currentQuestionIndex + 1) / questions.length) * 100
+  const isShortOptions = currentQuestion?.options && currentQuestion.options.every(opt => opt.length <= 10)
 
-        {/* Bottom Controls */}
-        <div className="bg-white px-5 py-4 border-t border-gray-100">
-          <div className="flex gap-3 mb-4">
-            <button
-              onClick={() => handleMarkStatus('mastered')}
-              className={`flex-1 py-3 px-4 rounded-xl text-[14px] font-bold transition-all flex items-center justify-center gap-1.5 ${
-                currentResult?.status === 'mastered' 
-                  ? 'bg-green-600 text-white' 
-                  : 'bg-green-50 text-green-600'
-              }`}
-            >
-              <CheckCircle2 size={16} />
-              已掌握
-            </button>
-            <button
-              onClick={() => handleMarkStatus('not_mastered')}
-              className={`flex-1 py-3 px-4 rounded-xl text-[14px] font-bold transition-all flex items-center justify-center gap-1.5 ${
-                currentResult?.status === 'not_mastered' 
-                  ? 'bg-red-600 text-white' 
-                  : 'bg-red-50 text-red-600'
-              }`}
-            >
-              <XCircle size={16} />
-              未掌握
-            </button>
-          </div>
-
-          <div className="flex justify-between items-center">
-            <button 
-              onClick={handlePrev}
-              disabled={currentQuestionIndex === 0}
-              className="text-[14px] text-gray-500 disabled:opacity-30"
-            >
-              <div className="flex items-center gap-1">
-                <ChevronLeft size={16} />
-                上一题
-              </div>
-            </button>
-            <span className="text-[14px] text-gray-500">
-              {currentQuestionIndex + 1} / {questions.length}
-            </span>
-            <button 
-              onClick={handleNext}
-              disabled={currentQuestionIndex === questions.length - 1}
-              className="text-[14px] text-gray-500 disabled:opacity-30"
-            >
-              <div className="flex items-center gap-1">
-                下一题
-                <ChevronRight size={16} />
-              </div>
-            </button>
-          </div>
+  return (
+    <div style={{
+      position: 'fixed',
+      inset: 0,
+      background: APPLE_COLORS.background,
+      zIndex: 10000,
+      display: 'flex',
+      flexDirection: 'column'
+    }}>
+      {/* Header */}
+      <div style={{ 
+        background: APPLE_COLORS.card, 
+        padding: '16px 20px',
+        display: 'flex',
+        justifyContent: 'space-between',
+        alignItems: 'center',
+        borderBottom: `1px solid ${APPLE_COLORS.border}`
+      }}>
+        <button 
+          onClick={onClose} 
+          style={{ 
+            fontSize: '15px', 
+            color: APPLE_COLORS.primary,
+            background: 'none',
+            border: 'none',
+            cursor: 'pointer',
+            fontWeight: 500
+          }}
+        >
+          退出
+        </button>
+        <h2 style={{ margin: 0, fontSize: '17px', fontWeight: 600, color: APPLE_COLORS.text }}>批改中</h2>
+        <div style={{ fontSize: '15px', color: APPLE_COLORS.textSecondary }}>
+          {currentQuestionIndex + 1}/{questions.length}
         </div>
       </div>
-    </AnimatePresence>
+
+      {/* Progress Bar */}
+      <div style={{ background: APPLE_COLORS.card, padding: '12px 20px', borderBottom: `1px solid ${APPLE_COLORS.border}` }}>
+        <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '8px', fontSize: '13px' }}>
+          <span style={{ color: APPLE_COLORS.textSecondary }}>{studentInfo?.name}</span>
+          <span style={{ color: APPLE_COLORS.textSecondary }}>第{studentInfo?.practiceCount}次练习</span>
+        </div>
+        <div style={{ width: '100%', height: '4px', background: `${APPLE_COLORS.primary}20`, borderRadius: '2px', overflow: 'hidden' }}>
+          <motion.div 
+            style={{ height: '100%', background: APPLE_COLORS.primary, borderRadius: '2px' }}
+            initial={{ width: 0 }}
+            animate={{ width: `${progress}%` }}
+            transition={{ duration: 0.3 }}
+          />
+        </div>
+      </div>
+
+      {/* Question Content */}
+      <div style={{ flex: 1, overflow: 'auto', padding: '16px' }}>
+        {/* Question Card */}
+        <div style={{
+          background: APPLE_COLORS.card,
+          borderRadius: '16px',
+          padding: '20px',
+          marginBottom: '12px',
+          boxShadow: '0 2px 8px rgba(0,0,0,0.04)'
+        }}>
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '12px' }}>
+            <div>
+              <span style={{ fontSize: '15px', fontWeight: 600, color: APPLE_COLORS.primary, marginRight: '8px' }}>
+                第 {currentQuestionIndex + 1} 题
+              </span>
+              <span style={{ fontSize: '13px', color: APPLE_COLORS.textSecondary }}>
+                {currentQuestion?.question_type === 'choice' ? '选择题' : 
+                 currentQuestion?.question_type === 'fill' ? '填空题' : '解答题'}
+              </span>
+            </div>
+            <div style={{
+              fontSize: '12px',
+              padding: '4px 10px',
+              borderRadius: '12px',
+              background: currentQuestion?.originalStatus === 'mastered' ? '#E8F5E9' :
+                         currentQuestion?.originalStatus === 'partial' ? '#FFF8E1' : '#FFEBEE',
+              color: currentQuestion?.originalStatus === 'mastered' ? APPLE_COLORS.success :
+                     currentQuestion?.originalStatus === 'partial' ? APPLE_COLORS.warning : APPLE_COLORS.danger
+            }}>
+              {currentQuestion?.originalStatus === 'mastered' ? '完全懂' :
+               currentQuestion?.originalStatus === 'partial' ? '有点懂' : '待复习'}
+            </div>
+          </div>
+
+          <div style={{ fontSize: '15px', color: APPLE_COLORS.text, lineHeight: '1.6', marginBottom: '16px' }}>
+            {currentQuestion?.content}
+          </div>
+
+          {currentQuestion?.options && currentQuestion.options.length > 0 && (
+            <div style={{ display: 'flex', flexDirection: isShortOptions ? 'row' : 'column', gap: isShortOptions ? '24px' : '8px', marginBottom: '16px', flexWrap: 'wrap' }}>
+              {currentQuestion.options.map((opt, i) => (
+                <div key={i} style={{ fontSize: '14px', color: APPLE_COLORS.text }}>
+                  {String.fromCharCode(65 + i)}. {opt}
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+
+        {/* Answer Card (Vertical Layout) */}
+        <div style={{
+          background: APPLE_COLORS.card,
+          borderRadius: '16px',
+          overflow: 'hidden',
+          boxShadow: '0 2px 8px rgba(0,0,0,0.04)'
+        }}>
+          <button
+            onClick={() => setShowAnswerCard(!showAnswerCard)}
+            style={{
+              width: '100%',
+              padding: '16px 20px',
+              background: 'none',
+              border: 'none',
+              display: 'flex',
+              justifyContent: 'space-between',
+              alignItems: 'center',
+              cursor: 'pointer',
+              borderBottom: showAnswerCard ? `1px solid ${APPLE_COLORS.border}` : 'none'
+            }}
+          >
+            <span style={{ fontSize: '15px', fontWeight: 600, color: APPLE_COLORS.text }}>
+              标准答案与解析
+            </span>
+            {showAnswerCard ? <Eye size={20} color={APPLE_COLORS.textSecondary} /> : <EyeOff size={20} color={APPLE_COLORS.textSecondary} />}
+          </button>
+
+          <AnimatePresence>
+            {showAnswerCard && (
+              <motion.div
+                initial={{ height: 0, opacity: 0 }}
+                animate={{ height: 'auto', opacity: 1 }}
+                exit={{ height: 0, opacity: 0 }}
+                transition={{ duration: 0.2 }}
+                style={{ overflow: 'hidden' }}
+              >
+                {/* Answer Section */}
+                <div style={{ padding: '16px 20px', background: `${APPLE_COLORS.primary}08` }}>
+                  <div style={{ fontSize: '14px', fontWeight: 600, color: APPLE_COLORS.primary, marginBottom: '8px' }}>
+                    参考答案
+                  </div>
+                  <div style={{ fontSize: '15px', color: APPLE_COLORS.text, lineHeight: '1.6' }}>
+                    {currentQuestion?.answer || '暂无答案'}
+                  </div>
+                </div>
+
+                {/* Analysis Section */}
+                <div style={{ padding: '16px 20px', borderTop: `1px solid ${APPLE_COLORS.border}`, background: `${APPLE_COLORS.success}08` }}>
+                  <div style={{ fontSize: '14px', fontWeight: 600, color: APPLE_COLORS.success, marginBottom: '8px' }}>
+                    解析
+                  </div>
+                  <div style={{ fontSize: '14px', color: APPLE_COLORS.text, lineHeight: '1.6' }}>
+                    {currentQuestion?.analysis || 
+                      `本题考查相关知识点。正确答案是 ${currentQuestion?.answer}。` +
+                      `请根据题目条件，运用所学知识进行推导计算。`
+                    }
+                  </div>
+                </div>
+
+                {/* Student's Previous Answer */}
+                <div style={{ padding: '16px 20px', borderTop: `1px solid ${APPLE_COLORS.border}`, background: `${APPLE_COLORS.warning}08` }}>
+                  <div style={{ fontSize: '14px', fontWeight: 600, color: APPLE_COLORS.warning, marginBottom: '8px' }}>
+                    学生之前答案
+                  </div>
+                  <div style={{ fontSize: '15px', color: APPLE_COLORS.danger, fontWeight: 500 }}>
+                    {currentQuestion?.student_answer || '未作答'}
+                  </div>
+                </div>
+              </motion.div>
+            )}
+          </AnimatePresence>
+        </div>
+      </div>
+
+      {/* Bottom Controls */}
+      <div style={{
+        background: APPLE_COLORS.card,
+        padding: '16px 20px',
+        borderTop: `1px solid ${APPLE_COLORS.border}`
+      }}>
+        <div style={{ display: 'flex', gap: '12px', marginBottom: '16px' }}>
+          <button
+            onClick={() => handleMarkStatus('mastered')}
+            style={{
+              flex: 1,
+              padding: '14px',
+              borderRadius: '12px',
+              fontSize: '15px',
+              fontWeight: 600,
+              border: 'none',
+              cursor: 'pointer',
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              gap: '8px',
+              background: currentResult?.status === 'mastered' ? APPLE_COLORS.success : `${APPLE_COLORS.success}15`,
+              color: currentResult?.status === 'mastered' ? '#fff' : APPLE_COLORS.success
+            }}
+          >
+            <CheckCircle2 size={18} />
+            做对了
+          </button>
+          <button
+            onClick={() => handleMarkStatus('not_mastered')}
+            style={{
+              flex: 1,
+              padding: '14px',
+              borderRadius: '12px',
+              fontSize: '15px',
+              fontWeight: 600,
+              border: 'none',
+              cursor: 'pointer',
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              gap: '8px',
+              background: currentResult?.status === 'not_mastered' ? APPLE_COLORS.danger : `${APPLE_COLORS.danger}15`,
+              color: currentResult?.status === 'not_mastered' ? '#fff' : APPLE_COLORS.danger
+            }}
+          >
+            <XCircle size={18} />
+            做错了
+          </button>
+        </div>
+
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+          <button 
+            onClick={handlePrev}
+            disabled={currentQuestionIndex === 0}
+            style={{
+              fontSize: '15px',
+              color: currentQuestionIndex === 0 ? `${APPLE_COLORS.textSecondary}50` : APPLE_COLORS.textSecondary,
+              background: 'none',
+              border: 'none',
+              cursor: currentQuestionIndex === 0 ? 'not-allowed' : 'pointer',
+              display: 'flex',
+              alignItems: 'center',
+              gap: '4px'
+            }}
+          >
+            <ChevronLeft size={18} />
+            上一题
+          </button>
+          <button 
+            onClick={handleNext}
+            disabled={currentQuestionIndex === questions.length - 1}
+            style={{
+              fontSize: '15px',
+              color: currentQuestionIndex === questions.length - 1 ? `${APPLE_COLORS.textSecondary}50` : APPLE_COLORS.textSecondary,
+              background: 'none',
+              border: 'none',
+              cursor: currentQuestionIndex === questions.length - 1 ? 'not-allowed' : 'pointer',
+              display: 'flex',
+              alignItems: 'center',
+              gap: '4px'
+            }}
+          >
+            下一题
+            <ChevronRight size={18} />
+          </button>
+        </div>
+      </div>
+    </div>
   )
 }

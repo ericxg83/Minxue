@@ -1,9 +1,16 @@
-import 'dotenv/config'
+import dotenv from 'dotenv'
+import { dirname, resolve } from 'path'
+import { fileURLToPath } from 'url'
+
+const __dirname = dirname(fileURLToPath(import.meta.url))
+dotenv.config({ path: resolve(__dirname, '.env') })
+
 import express from 'express'
 import cors from 'cors'
 import multer from 'multer'
 import { query, TABLES, TASK_STATUS, QUESTION_STATUS, WRONG_STATUS } from './config/neon.js'
-import { uploadImage } from './services/ossService.js'
+import { uploadFilesWithRetry } from './services/uploadRetryManager.js'
+import { createUploadReport, logUploadReport } from './services/uploadReportLogger.js'
 import { getTaskQueue, getQueueStats, taskWorker } from './queue.js'
 
 const app = express()
@@ -11,7 +18,7 @@ const PORT = process.env.PORT || 3001
 
 const allowedOrigins = process.env.ALLOWED_ORIGIN 
   ? process.env.ALLOWED_ORIGIN.split(',')
-  : ['http://localhost:3000', 'http://localhost:5173']
+  : ['http://localhost:3000', 'http://localhost:5173', 'http://localhost:4173', 'http://localhost:3001', 'http://localhost:3002', 'http://192.168.71.9:3002']
 
 app.use(cors({
   origin: (origin, callback) => {
@@ -35,7 +42,7 @@ app.get('/api/health', (req, res) => {
   res.json({ status: 'ok', timestamp: new Date().toISOString() })
 })
 
-// Upload images and create tasks
+// Upload images and create tasks (with validation + retry pipeline)
 app.post('/api/tasks/upload', upload.array('files', 20), async (req, res) => {
   try {
     const { studentId } = req.body
@@ -48,67 +55,118 @@ app.post('/api/tasks/upload', upload.array('files', 20), async (req, res) => {
       return res.status(400).json({ error: '没有上传文件' })
     }
 
-    // 初始化队列（如果尚未初始化）
-    const queue = await getTaskQueue()
-    console.log(`📥 [Upload] 收到 ${files.length} 个文件, studentId=${studentId}, queue=${queue ? 'connected' : 'null'}`)
-
-    const tasks = []
-
+    // Fix: multer may interpret UTF-8 filenames as Latin-1 (ISO-8859-1).
+    // Decode each filename back to proper UTF-8 before processing.
     for (const file of files) {
       try {
-        // Decode UTF-8 filename
-        let decodedName = file.originalname
+        const decoded = Buffer.from(file.originalname, 'latin1').toString('utf8')
+        // Verify the decoded string is valid UTF-8 (round-trip check)
+        if (Buffer.from(decoded, 'utf8').toString('utf8') === decoded) {
+          file.originalname = decoded
+        }
+      } catch (e) {
+        // If decoding fails, keep original filename
+      }
+    }
+
+    const queue = await getTaskQueue()
+    console.log(`[Upload Pipeline] 收到 ${files.length} 个文件, studentId=${studentId}`)
+
+    const uploadSummary = await uploadFilesWithRetry(files, studentId, {
+      maxRetries: parseInt(process.env.MAX_RETRIES) || 3,
+      onFileProgress: (filename, step, data) => {
+        console.log(`[Upload Pipeline] [${filename}] ${step}: ${data.valid ? 'PASS' : 'FAIL'}`)
+      },
+    })
+
+    const tasks = []
+    const boundingBoxResults = []
+
+    for (const result of uploadSummary.results) {
+      if (result.success) {
         try {
-          decodedName = Buffer.from(file.originalname, 'latin1').toString('utf8')
-        } catch (e) {
-          decodedName = file.originalname
-        }
+          const safeUrl = typeof result.url === 'string' ? result.url : String(result.url)
+          console.log(`  OSS 上传成功: ${result.filename} → ${safeUrl}`)
 
-        const imageUrl = await uploadImage(file.buffer, decodedName, studentId)
-        const safeUrl = typeof imageUrl === 'string' ? imageUrl : (imageUrl?.url || imageUrl?.ossPath || String(imageUrl))
-        console.log(`  OSS 上传成功: ${decodedName} → ${safeUrl}`)
+          const { rows } = await query(
+            `INSERT INTO ${TABLES.TASKS} (student_id, image_url, original_name, status, result)
+             VALUES ($1, $2, $3, $4, $5) RETURNING *`,
+            [studentId, safeUrl, result.filename, TASK_STATUS.PENDING, JSON.stringify({ progress: 0 })]
+          )
 
-        const { rows } = await query(
-          `INSERT INTO ${TABLES.TASKS} (student_id, image_url, original_name, status, result)
-           VALUES ($1, $2, $3, $4, $5) RETURNING *`,
-          [studentId, safeUrl, decodedName || `照片_${Date.now()}.jpg`, TASK_STATUS.PENDING, JSON.stringify({ progress: 0 })]
-        )
+          const savedTask = rows[0]
+          console.log(`  DB 记录已创建: taskId=${savedTask.id}`)
 
-        const savedTask = rows[0]
-        console.log(`  DB 记录已创建: taskId=${savedTask.id}`)
+          if (queue) {
+            console.log(`   提交任务到 Redis 队列: taskId=${savedTask.id}`)
+            const job = await queue.add('process-task', {
+              taskId: savedTask.id,
+              studentId: studentId,
+              imageUrl: safeUrl,
+              originalName: result.filename
+            }, {
+              attempts: parseInt(process.env.MAX_RETRIES) || 3,
+              backoff: { type: 'exponential', delay: 5000 }
+            })
+            console.log(`  ✅ 任务已加入队列: jobId=${job.id}`)
+          } else {
+            console.log(`  ⚠️  Redis 队列未连接，跳过队列提交`)
+          }
 
-        if (queue) {
-          console.log(`   提交任务到 Redis 队列: taskId=${savedTask.id}`)
-          const job = await queue.add('process-task', {
+          tasks.push(savedTask)
+          boundingBoxResults.push({
+            filename: result.filename,
             taskId: savedTask.id,
-            studentId: studentId,
-            imageUrl: imageUrl,
-            originalName: savedTask.original_name
-          }, {
-            attempts: parseInt(process.env.MAX_RETRIES) || 3,
-            backoff: { type: 'exponential', delay: 5000 }
+            status: 'queued',
+            note: '等待队列处理后生成边界框',
           })
-          console.log(`  ✅ 任务已加入队列: jobId=${job.id}`)
-        } else {
-          console.log(`  ⚠️  Redis 队列未连接，任务无法异步处理`)
+        } catch (dbError) {
+          console.error(`❌ [Upload] 数据库创建任务失败 for ${result.filename}:`, dbError)
+          tasks.push({
+            error: true,
+            originalName: result.filename,
+            message: '数据库写入失败: ' + dbError.message,
+            errorType: 'DB_ERROR'
+          })
+          boundingBoxResults.push({
+            filename: result.filename,
+            status: 'failed',
+            error: dbError.message,
+          })
         }
-
-        tasks.push(savedTask)
-      } catch (fileError) {
-        console.error(`处理文件 ${decodedName} 失败:`, fileError)
+      } else {
+        console.error(`❌ [Upload] 文件 ${result.filename} 上传失败: ${result.errorType} — ${result.error}`)
         tasks.push({
           error: true,
-          originalName: decodedName,
-          message: fileError.message
+          originalName: result.filename,
+          message: result.error || '上传失败',
+          errorType: result.errorType || 'UPLOAD_FAILED',
+          attempts: result.attempts.map(a => ({
+            type: a.type,
+            result: a.result,
+            error: a.error,
+            timestamp: a.timestamp,
+          })),
+        })
+        boundingBoxResults.push({
+          filename: result.filename,
+          status: 'skipped',
+          error: result.error,
+          note: '上传失败，跳过边界框生成',
         })
       }
     }
+
+    const report = createUploadReport(studentId, uploadSummary, boundingBoxResults)
+    logUploadReport(report)
 
     res.json({
       success: true,
       count: tasks.filter(t => !t.error).length,
       failed: tasks.filter(t => t.error).length,
-      tasks
+      reportId: report.id,
+      tasks,
+      summary: report.summary,
     })
   } catch (error) {
     console.error('上传处理失败:', error)
@@ -225,6 +283,18 @@ app.post('/api/tasks/:taskId/retry', async (req, res) => {
   }
 })
 
+// Delete task
+app.delete('/api/tasks/:taskId', async (req, res) => {
+  try {
+    const { taskId } = req.params
+    await query(`DELETE FROM ${TABLES.TASKS} WHERE id = $1`, [taskId])
+    res.json({ success: true, message: '任务已删除' })
+  } catch (error) {
+    console.error('删除任务失败:', error)
+    res.status(500).json({ error: error.message })
+  }
+})
+
 // Queue stats
 app.get('/api/queue/stats', async (req, res) => {
   try {
@@ -232,6 +302,28 @@ app.get('/api/queue/stats', async (req, res) => {
     res.json({ success: true, stats })
   } catch (error) {
     console.error('获取队列统计失败:', error)
+    res.status(500).json({ error: error.message })
+  }
+})
+
+// Diagnostics: Upload Reports
+app.get('/api/diagnostics/upload-reports', async (req, res) => {
+  try {
+    const { getAllUploadReports, getUploadReport, getReportsByStudent } = await import('./services/uploadReportLogger.js')
+    const { reportId, studentId } = req.query
+
+    if (reportId) {
+      const report = getUploadReport(reportId)
+      return res.json({ success: true, report })
+    }
+    if (studentId) {
+      const reports = getReportsByStudent(studentId)
+      return res.json({ success: true, reports })
+    }
+    const reports = getAllUploadReports()
+    res.json({ success: true, count: reports.length, reports })
+  } catch (error) {
+    console.error('获取上传报告诊断失败:', error)
     res.status(500).json({ error: error.message })
   }
 })
@@ -538,6 +630,17 @@ app.put('/api/wrong-questions/:id', async (req, res) => {
   }
 })
 
+app.delete('/api/wrong-questions/:id', async (req, res) => {
+  try {
+    const { id } = req.params
+    await query(`DELETE FROM ${TABLES.WRONG_QUESTIONS} WHERE id = $1`, [id])
+    res.json({ success: true, message: '错题已移出' })
+  } catch (error) {
+    console.error('删除错题失败:', error)
+    res.status(500).json({ error: error.message })
+  }
+})
+
 // Generated Exams
 app.post('/api/generated-exams', async (req, res) => {
   try {
@@ -613,11 +716,7 @@ app.use((err, req, res, next) => {
   res.status(500).json({ error: err.message || '服务器内部错误' })
 })
 
-import { fileURLToPath } from 'url'
-import { dirname } from 'path'
-
 const __filename = fileURLToPath(import.meta.url)
-const __dirname = dirname(__filename)
 
 if (process.argv[1] === __filename || process.argv[1]?.endsWith('server/index.js')) {
   app.listen(PORT, async () => {

@@ -35,6 +35,12 @@ CREATE TABLE questions (
     confidence DECIMAL(3,2) DEFAULT 0.00,
     analysis TEXT,
     question_type VARCHAR(20) DEFAULT 'answer' CHECK (question_type IN ('choice', 'fill', 'answer')),
+    subject VARCHAR(50),
+    image_url VARCHAR(500),
+    ai_tags JSONB DEFAULT '[]',
+    manual_tags JSONB DEFAULT '[]',
+    tags_source VARCHAR(10) DEFAULT 'ai',
+    block_coordinates JSONB,
     status VARCHAR(20) DEFAULT 'pending' CHECK (status IN ('pending', 'wrong', 'mastered')),
     created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
     updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
@@ -45,7 +51,9 @@ CREATE TABLE wrong_questions (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     student_id UUID NOT NULL REFERENCES students(id) ON DELETE CASCADE,
     question_id UUID NOT NULL REFERENCES questions(id) ON DELETE CASCADE,
-    status VARCHAR(20) DEFAULT 'pending' CHECK (status IN ('pending', 'mastered')),
+    status VARCHAR(20) DEFAULT 'pending' CHECK (status IN ('pending', 'partial', 'mastered')),
+    error_count INTEGER DEFAULT 1,
+    practice_count INTEGER DEFAULT 0,
     added_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
     updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
     UNIQUE(student_id, question_id)
@@ -114,6 +122,14 @@ CREATE TRIGGER update_generated_exams_updated_at BEFORE UPDATE ON generated_exam
 
 ALTER TABLE generated_exams ENABLE ROW LEVEL SECURITY;
 CREATE POLICY "Allow all" ON generated_exams FOR ALL USING (true) WITH CHECK (true);
+
+-- 迁移：添加题目表缺失的列（兼容旧数据库）
+-- ALTER TABLE questions ADD COLUMN IF NOT EXISTS subject VARCHAR(50);
+-- ALTER TABLE questions ADD COLUMN IF NOT EXISTS image_url VARCHAR(500);
+-- ALTER TABLE questions ADD COLUMN IF NOT EXISTS ai_tags JSONB DEFAULT '[]';
+-- ALTER TABLE questions ADD COLUMN IF NOT EXISTS manual_tags JSONB DEFAULT '[]';
+-- ALTER TABLE questions ADD COLUMN IF NOT EXISTS tags_source VARCHAR(10) DEFAULT 'ai';
+-- ALTER TABLE questions ADD COLUMN IF NOT EXISTS block_coordinates JSONB;
 
 -- 启用 RLS (Row Level Security)
 ALTER TABLE students ENABLE ROW LEVEL SECURITY;

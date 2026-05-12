@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react'
 import { Button, Toast, Input, TextArea, Dialog, Mask } from 'antd-mobile'
-import { useStudentStore, usePendingQuestionStore, useUIStore, useWrongQuestionStore } from '../../store'
+import { useStudentStore, useUIStore, useWrongQuestionStore } from '../../store'
 import { updateQuestion, updateQuestionTags } from '../../services/apiService'
 import { mockQuestions } from '../../data/mockData'
 
@@ -14,7 +14,6 @@ const TABS = [
 
 export default function QuestionEdit({ questionId, onClose, onSave }) {
   const { currentStudent } = useStudentStore()
-  const { pendingQuestions, updatePendingQuestion } = usePendingQuestionStore()
   const { setLoading } = useUIStore()
   const { wrongQuestions } = useWrongQuestionStore()
   
@@ -26,6 +25,7 @@ export default function QuestionEdit({ questionId, onClose, onSave }) {
   const [manualTags, setManualTags] = useState([])
   const [tagsSource, setTagsSource] = useState('ai')
   const [newTagInput, setNewTagInput] = useState('')
+  const [imageRemoved, setImageRemoved] = useState(false)
   const [formData, setFormData] = useState({
     content: '',
     options: [],
@@ -61,17 +61,14 @@ export default function QuestionEdit({ questionId, onClose, onSave }) {
       }
 
       if (!found) {
-        found = pendingQuestions.find(q => q.id === questionId)
-      }
-
-      if (!found) {
         found = mockQuestions.find(q => q.id === questionId)
       }
       
       if (found) {
         setIsFromWrongBook(isWrongBook)
         setQuestion(found)
-        setDisplayImageUrl('')
+        setDisplayImageUrl(found.image_url || '')
+        setImageRemoved(false)
         setAiTags(found.ai_tags || [])
         setManualTags(found.manual_tags || [])
         setTagsSource(found.tags_source || 'ai')
@@ -147,15 +144,12 @@ export default function QuestionEdit({ questionId, onClose, onSave }) {
         ai_tags: aiTags,
         manual_tags: manualTags,
         tags_source: tagsSource,
+        image_url: imageRemoved ? '' : (displayImageUrl || question?.image_url || ''),
         updated_at: new Date().toISOString()
       }
 
       if (USE_MOCK_DATA) {
-        const isPendingQuestion = pendingQuestions.some(q => q.id === questionId)
-        
-        if (isPendingQuestion) {
-          updatePendingQuestion(questionId, updatedData)
-        } else if (isFromWrongBook) {
+        if (isFromWrongBook) {
           // 错题本的更新通过 onSave 回调处理
         } else {
           const index = mockQuestions.findIndex(q => q.id === questionId)
@@ -364,13 +358,39 @@ export default function QuestionEdit({ questionId, onClose, onSave }) {
                 {displayImageUrl && (
                   <div style={{
                     marginTop: '12px',
-                    width: '100px',
-                    height: '100px',
-                    borderRadius: '8px',
-                    background: '#F5F5F7',
-                    overflow: 'hidden'
+                    position: 'relative',
+                    display: 'inline-block'
                   }}>
-                    <img src={displayImageUrl} alt="" style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
+                    <div style={{
+                      width: '100%',
+                      maxWidth: '300px',
+                      borderRadius: '8px',
+                      background: '#F5F5F7',
+                      overflow: 'hidden',
+                      border: '1px solid #E5E5EA'
+                    }}>
+                      <img src={displayImageUrl} alt="题目插图" style={{ width: '100%', height: 'auto', display: 'block' }} />
+                    </div>
+                    <div
+                      onClick={() => { setDisplayImageUrl(''); setImageRemoved(true); }}
+                      style={{
+                        position: 'absolute',
+                        top: '4px',
+                        right: '4px',
+                        width: '24px',
+                        height: '24px',
+                        borderRadius: '50%',
+                        background: 'rgba(0,0,0,0.5)',
+                        display: 'flex',
+                        alignItems: 'center',
+                        justifyContent: 'center',
+                        cursor: 'pointer'
+                      }}
+                    >
+                      <svg width="14" height="14" viewBox="0 0 1024 1024" fill="#fff">
+                        <path d="M563.8 512l262.5-312.9c4.4-5.2.7-13.1-6.1-13.1h-79.8c-4.7 0-9.2 2.1-12.3 5.7L511.6 449.8 295.1 191.7c-3-3.6-7.5-5.7-12.3-5.7H203c-6.8 0-10.5 7.9-6.1 13.1L459.4 512 196.9 824.9c-4.4 5.2-.7 13.1 6.1 13.1h79.8c4.7 0 9.2-2.1 12.3-5.7l216.5-258.1 216.5 258.1c3 3.6 7.5 5.7 12.3 5.7h79.8c6.8 0 10.5-7.9 6.1-13.1L563.8 512z"/>
+                      </svg>
+                    </div>
                   </div>
                 )}
               </div>

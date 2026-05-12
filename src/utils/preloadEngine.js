@@ -2,15 +2,13 @@ import cacheManager from './cacheManager'
 
 const PRELOAD_CONFIG = {
   processing: ['tasks'],
-  pending: ['tasks', 'pendingQuestions'],
   wrongbook: ['wrongQuestions'],
   exam: ['generatedExams']
 }
 
 const PAGE_PRELOAD_MAP = {
-  processing: ['pending'],
-  pending: ['wrongbook', 'processing'],
-  wrongbook: ['exam', 'pending'],
+  processing: [],
+  wrongbook: ['exam', 'processing'],
   exam: ['wrongbook']
 }
 
@@ -64,16 +62,6 @@ class PreloadEngine {
       case 'processing':
         await getTasksByStudent(studentId, true)
         break
-      case 'pending': {
-        const tasks = await getTasksByStudent(studentId, true)
-        if (tasks && tasks.length > 0) {
-          const doneTasks = tasks.filter(t => t.status === 'done')
-          await Promise.all(
-            doneTasks.slice(0, 3).map(t => getQuestionsByTask(t.id, true))
-          )
-        }
-        break
-      }
       case 'wrongbook':
         await getWrongQuestionsByStudent(studentId, true)
         break

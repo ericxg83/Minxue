@@ -16,22 +16,6 @@ export function ProcessingSkeleton() {
   )
 }
 
-export function PendingSkeleton() {
-  return (
-    <div className="w-full">
-      <FilterTabsSkeleton count={3} />
-      <section className="px-5 mb-4">
-        <div className="h-5 bg-gray-200 rounded w-24 animate-pulse" />
-      </section>
-      <section className="px-5 space-y-3">
-        {Array.from({ length: 3 }).map((_, i) => (
-          <QuestionCardSkeleton key={i} />
-        ))}
-      </section>
-    </div>
-  )
-}
-
 export function WrongBookSkeleton() {
   return (
     <div className="w-full">

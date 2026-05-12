@@ -1,33 +1,34 @@
 import { useState, useRef } from 'react'
 import { motion, AnimatePresence } from 'motion/react'
 import { X, Loader2, Camera, Image as ImageIcon, Clock, QrCode } from 'lucide-react'
+import { useWrongQuestionStore, useStudentStore } from '../../store'
 
 export default function ScanQR({ onClose, onScanSuccess }) {
   const [scanning, setScanning] = useState(false)
   const fileInputRef = useRef(null)
+  const { wrongQuestions } = useWrongQuestionStore()
+  const { currentStudent } = useStudentStore()
 
   const handleScan = () => {
-    console.log('ScanQR: 开始扫描')
     setScanning(true)
     
     setTimeout(() => {
-      console.log('ScanQR: 扫描完成，准备回调')
       setScanning(false)
+      
+      const pendingQuestions = wrongQuestions.filter(wq => 
+        wq.student_id === currentStudent?.id && wq.status !== 'mastered'
+      )
+      
+      const questionIds = pendingQuestions.slice(0, 5).map(wq => wq.id)
       
       const mockData = {
         paperId: 'paper_' + Date.now(),
-        studentId: 'student-1',
-        studentName: '张三',
-        questionIds: ['wq-1', 'wq-2']
+        studentId: currentStudent?.id,
+        studentName: currentStudent?.name,
+        questionIds: questionIds
       }
       
-      console.log('ScanQR: 调用 onScanSuccess:', mockData)
-      
-      if (typeof onScanSuccess === 'function') {
-        onScanSuccess(mockData)
-      } else {
-        console.error('ScanQR: onScanSuccess 不是函数!')
-      }
+      onScanSuccess(mockData)
     }, 1500)
   }
 
@@ -38,27 +39,35 @@ export default function ScanQR({ onClose, onScanSuccess }) {
   const handleFileChange = (e) => {
     const file = e.target.files[0]
     if (file) {
-      console.log('ScanQR: 从相册选择文件:', file.name)
-      
       setTimeout(() => {
+        const pendingQuestions = wrongQuestions.filter(wq => 
+          wq.student_id === currentStudent?.id && wq.status !== 'mastered'
+        )
+        
+        const questionIds = pendingQuestions.slice(0, 5).map(wq => wq.id)
+        
         const mockData = {
           paperId: 'paper_' + Date.now(),
-          studentId: 'student-1',
-          studentName: '张三',
-          questionIds: ['wq-1', 'wq-2']
+          studentId: currentStudent?.id,
+          studentName: currentStudent?.name,
+          questionIds: questionIds
         }
         
-        console.log('ScanQR: 相册识别完成，调用回调:', mockData)
-        if (typeof onScanSuccess === 'function') {
-          onScanSuccess(mockData)
-        }
+        onScanSuccess(mockData)
       }, 1000)
     }
   }
 
   return (
     <AnimatePresence>
-      <div className="fixed inset-0 bg-black z-[10000] flex flex-col">
+      <div style={{
+        position: 'fixed',
+        inset: 0,
+        background: '#000',
+        zIndex: 10000,
+        display: 'flex',
+        flexDirection: 'column'
+      }}>
         <input
           ref={fileInputRef}
           type="file"
@@ -67,67 +76,177 @@ export default function ScanQR({ onClose, onScanSuccess }) {
           onChange={handleFileChange}
         />
 
-        {/* Header */}
-        <div className="flex items-center justify-between px-5 pt-12 pb-4">
-          <button onClick={onClose} className="p-2 rounded-full hover:bg-white/10 transition-colors">
-            <X size={24} className="text-white" />
+        <div style={{
+          display: 'flex',
+          justifyContent: 'space-between',
+          alignItems: 'center',
+          padding: '48px 20px 16px'
+        }}>
+          <button 
+            onClick={onClose} 
+            style={{
+              padding: '8px',
+              borderRadius: '50%',
+              background: 'transparent',
+              border: 'none',
+              cursor: 'pointer'
+            }}
+          >
+            <X size={24} color="#fff" />
           </button>
-          <h2 className="text-[17px] font-bold text-white">扫码批改</h2>
-          <div className="w-10" />
+          <h2 style={{ margin: 0, fontSize: '17px', fontWeight: 700, color: '#fff' }}>扫码批改</h2>
+          <div style={{ width: '40px' }} />
         </div>
 
-        {/* Scan Area */}
-        <div className="flex-1 flex flex-col items-center justify-center relative">
+        <div style={{
+          flex: 1,
+          display: 'flex',
+          flexDirection: 'column',
+          alignItems: 'center',
+          justifyContent: 'center',
+          position: 'relative'
+        }}>
           <div 
             onClick={handleScan}
-            className="w-[280px] h-[280px] border-2 border-white/50 rounded-[20px] relative flex items-center justify-center cursor-pointer"
+            style={{
+              width: '280px',
+              height: '280px',
+              border: '2px solid rgba(255,255,255,0.5)',
+              borderRadius: '20px',
+              position: 'relative',
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              cursor: 'pointer'
+            }}
           >
-            {/* Corner Decorations */}
-            <div className="absolute top-[-2px] left-[-2px] w-[30px] h-[30px] border-t-4 border-l-4 border-blue-500 rounded-tl-[10px]" />
-            <div className="absolute top-[-2px] right-[-2px] w-[30px] h-[30px] border-t-4 border-r-4 border-blue-500 rounded-tr-[10px]" />
-            <div className="absolute bottom-[-2px] left-[-2px] w-[30px] h-[30px] border-b-4 border-l-4 border-blue-500 rounded-bl-[10px]" />
-            <div className="absolute bottom-[-2px] right-[-2px] w-[30px] h-[30px] border-b-4 border-r-4 border-blue-500 rounded-br-[10px]" />
+            <div style={{
+              position: 'absolute',
+              top: '-2px',
+              left: '-2px',
+              width: '30px',
+              height: '30px',
+              borderTop: '4px solid #3b82f6',
+              borderLeft: '4px solid #3b82f6',
+              borderTopLeftRadius: '10px'
+            }} />
+            <div style={{
+              position: 'absolute',
+              top: '-2px',
+              right: '-2px',
+              width: '30px',
+              height: '30px',
+              borderTop: '4px solid #3b82f6',
+              borderRight: '4px solid #3b82f6',
+              borderTopRightRadius: '10px'
+            }} />
+            <div style={{
+              position: 'absolute',
+              bottom: '-2px',
+              left: '-2px',
+              width: '30px',
+              height: '30px',
+              borderBottom: '4px solid #3b82f6',
+              borderLeft: '4px solid #3b82f6',
+              borderBottomLeftRadius: '10px'
+            }} />
+            <div style={{
+              position: 'absolute',
+              bottom: '-2px',
+              right: '-2px',
+              width: '30px',
+              height: '30px',
+              borderBottom: '4px solid #3b82f6',
+              borderRight: '4px solid #3b82f6',
+              borderBottomRightRadius: '10px'
+            }} />
             
-            {/* Scan Line Animation */}
             <motion.div
               animate={{ top: ['0%', '100%', '0%'] }}
               transition={{ duration: 2, repeat: Infinity, ease: 'linear' }}
-              className="absolute left-0 right-0 h-[2px] bg-gradient-to-r from-transparent via-blue-500 to-transparent"
+              style={{
+                position: 'absolute',
+                left: 0,
+                right: 0,
+                height: '2px',
+                background: 'linear-gradient(to right, transparent, #3b82f6, transparent)'
+              }}
             />
 
             {scanning ? (
-              <Loader2 size={48} className="text-blue-500 animate-spin" />
+              <Loader2 size={48} color="#3b82f6" className="animate-spin" />
             ) : (
-              <div className="text-white/60 text-[14px] text-center">点击扫描</div>
+              <div style={{ color: 'rgba(255,255,255,0.6)', fontSize: '14px', textAlign: 'center' }}>
+                点击扫描
+              </div>
             )}
           </div>
 
-          <div className="text-white/80 text-[14px] mt-8 text-center">
+          <div style={{ color: 'rgba(255,255,255,0.8)', fontSize: '14px', marginTop: '32px', textAlign: 'center' }}>
             将二维码放入框内，自动识别
           </div>
         </div>
 
-        {/* Bottom Controls */}
-        <div className="px-10 pb-12 flex justify-between items-center">
-          <div onClick={handleAlbum} className="text-center cursor-pointer">
-            <div className="w-12 h-12 rounded-full bg-white/20 flex items-center justify-center mb-2 mx-auto">
-              <ImageIcon size={24} className="text-white" />
+        <div style={{
+          padding: '0 40px 48px',
+          display: 'flex',
+          justifyContent: 'space-between',
+          alignItems: 'center'
+        }}>
+          <div onClick={handleAlbum} style={{ textAlign: 'center', cursor: 'pointer' }}>
+            <div style={{
+              width: '48px',
+              height: '48px',
+              borderRadius: '50%',
+              background: 'rgba(255,255,255,0.2)',
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              marginBottom: '8px',
+              margin: '0 auto 8px'
+            }}>
+              <ImageIcon size={24} color="#fff" />
             </div>
-            <div className="text-white text-[12px]">相册</div>
+            <div style={{ color: '#fff', fontSize: '12px' }}>相册</div>
           </div>
           
           <div 
             onClick={handleScan}
-            className="w-16 h-16 rounded-full border-4 border-white flex items-center justify-center cursor-pointer"
+            style={{
+              width: '64px',
+              height: '64px',
+              borderRadius: '50%',
+              border: '4px solid #fff',
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              cursor: 'pointer'
+            }}
           >
-            <div className={`w-[52px] h-[52px] rounded-full transition-colors ${scanning ? 'bg-blue-500' : 'bg-white'}`} />
+            <div style={{
+              width: '52px',
+              height: '52px',
+              borderRadius: '50%',
+              transition: 'background-color 0.2s',
+              background: scanning ? '#3b82f6' : '#fff'
+            }} />
           </div>
           
-          <div className="text-center cursor-pointer">
-            <div className="w-12 h-12 rounded-full bg-white/20 flex items-center justify-center mb-2 mx-auto">
-              <Clock size={24} className="text-white" />
+          <div style={{ textAlign: 'center', cursor: 'pointer' }}>
+            <div style={{
+              width: '48px',
+              height: '48px',
+              borderRadius: '50%',
+              background: 'rgba(255,255,255,0.2)',
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              marginBottom: '8px',
+              margin: '0 auto 8px'
+            }}>
+              <Clock size={24} color="#fff" />
             </div>
-            <div className="text-white text-[12px]">历史</div>
+            <div style={{ color: '#fff', fontSize: '12px' }}>历史</div>
           </div>
         </div>
       </div>

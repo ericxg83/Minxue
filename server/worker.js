@@ -1,3 +1,10 @@
+import dotenv from 'dotenv'
+import { dirname, resolve } from 'path'
+import { fileURLToPath } from 'url'
+
+const __dirname = dirname(fileURLToPath(import.meta.url))
+dotenv.config({ path: resolve(__dirname, '.env') })
+
 import crypto from 'crypto'
 import axios from 'axios'
 import sharp from 'sharp'
@@ -51,6 +58,23 @@ const deduplicateTags = (tags) => {
     }
   }
   return unique.length > 0 ? unique : ['未分类']
+}
+
+const deskewImage = async (imageBuffer) => {
+  try {
+    const metadata = await sharp(imageBuffer).metadata()
+    console.log(`   原图信息: ${metadata.width}x${metadata.height}, format=${metadata.format}, orientation=${metadata.orientation || 'none'}`)
+
+    const straightened = await sharp(imageBuffer)
+      .rotate()
+      .normalize()
+      .toBuffer()
+
+    return straightened
+  } catch (error) {
+    console.error('透视拉直失败，使用原图继续:', error.message)
+    return imageBuffer
+  }
 }
 
 const compressImageBuffer = async (imageBuffer) => {
@@ -166,6 +190,7 @@ const recognizeQuestions = async (imageBase64, taskId, retryCount = 0) => {
         status: isCorrect ? 'correct' : 'wrong',
         confidence: q.confidence || 0,
         analysis: q.analysis || '',
+        block_coordinates: q.block_coordinates || null,
         created_at: new Date().toISOString()
       }
     }) || []
@@ -296,12 +321,22 @@ export const processTask = async (job) => {
     imageUrl = String(rawImageUrl || '')
   }
 
+  if (!imageUrl || typeof imageUrl !== 'string' || !imageUrl.startsWith('http')) {
+    console.error(`\n💥 [Worker] taskId=${taskId} — imageUrl 无效: ${String(imageUrl).substring(0, 100)}`)
+    console.error(`  原因: 上传流程未成功完成或 URL 格式错误`)
+    await updateTaskStatus(taskId, TASK_STATUS.FAILED, {
+      error: '文件上传未成功完成，无法生成边界框',
+      errorType: 'UPLOAD_NOT_COMPLETED',
+      failedAt: new Date().toISOString(),
+    })
+    throw new Error('文件上传未成功完成')
+  }
+
   console.log(`\n🔥 [Worker] ==========================================`)
   console.log(`🔥🔥 [Worker] 开始处理任务:`)
   console.log(`   taskId: ${taskId}`)
   console.log(`   studentId: ${studentId}`)
   console.log(`   imageUrl (resolved): ${imageUrl}`)
-  console.log(`   imageUrl (raw): ${typeof rawImageUrl} ${String(rawImageUrl).substring(0, 100)}`)
   console.log(`   originalName: ${originalName}`)
   console.log(`🔥🔥 ==========================================\n`)
 
@@ -327,11 +362,24 @@ export const processTask = async (job) => {
     await job.updateProgress(15)
     await updateTaskStatus(taskId, TASK_STATUS.PROCESSING, { progress: 15 })
 
-    console.log(`📊 [Step 3/6] 压缩图片...`)
+    console.log(`📊 [Step 3/7] 透视拉直图片...`)
+    let straightenedBuffer
+    try {
+      straightenedBuffer = await deskewImage(imageBuffer)
+      console.log(`✅ [Step 3/7] 透视拉直完成`)
+    } catch (deskewError) {
+      console.warn('透视拉直失败，使用原图继续:', deskewError.message)
+      straightenedBuffer = imageBuffer
+    }
+
+    await job.updateProgress(20)
+    await updateTaskStatus(taskId, TASK_STATUS.PROCESSING, { progress: 20 })
+
+    console.log(`📊 [Step 4/7] 压缩图片...`)
     let compressedBuffer
     try {
-      compressedBuffer = await compressImageBuffer(imageBuffer)
-      console.log(`✅ [Step 3/6] 压缩完成: ${imageBuffer.length} → ${compressedBuffer.length} bytes (${Math.round(compressedBuffer.length/imageBuffer.length*100)}%)`)
+      compressedBuffer = await compressImageBuffer(straightenedBuffer)
+      console.log(`✅ [Step 4/7] 压缩完成: ${straightenedBuffer.length} → ${compressedBuffer.length} bytes (${Math.round(compressedBuffer.length/straightenedBuffer.length*100)}%)`)
     } catch (compressError) {
       console.error('图片压缩失败:', compressError)
       await updateTaskStatus(taskId, TASK_STATUS.FAILED, {
@@ -341,19 +389,19 @@ export const processTask = async (job) => {
       throw compressError
     }
 
-    await job.updateProgress(25)
-    await updateTaskStatus(taskId, TASK_STATUS.PROCESSING, { progress: 25 })
-
-    const imageBase64 = bufferToBase64(compressedBuffer)
-
     await job.updateProgress(30)
     await updateTaskStatus(taskId, TASK_STATUS.PROCESSING, { progress: 30 })
 
-    console.log(`📊 [Step 4/6] 调用 AI 视觉识别...`)
+    const imageBase64 = bufferToBase64(compressedBuffer)
+
+    await job.updateProgress(35)
+    await updateTaskStatus(taskId, TASK_STATUS.PROCESSING, { progress: 35 })
+
+    console.log(`📊 [Step 5/7] 调用 AI 视觉识别...`)
     const ocrResult = await recognizeQuestions(imageBase64, taskId)
 
     if (!ocrResult.success) {
-      console.error(`❌ [Step 4/6] AI 识别失败: ${ocrResult.error}`)
+      console.error(`❌ [Step 5/7] AI 识别失败: ${ocrResult.error}`)
       await updateTaskStatus(taskId, TASK_STATUS.FAILED, {
         error: ocrResult.error || '识别失败',
         shouldRetry: ocrResult.shouldRetry,
@@ -368,10 +416,10 @@ export const processTask = async (job) => {
     const questions = ocrResult.questions || []
     const wrongCount = questions.filter(q => !q.is_correct).length
 
-    console.log(`✅ [Step 4/6] AI 识别成功: ${questions.length} 道题, ${wrongCount} 道错题, 耗时 ${Math.round(ocrResult.duration/1000)}s`)
+    console.log(`✅ [Step 5/7] AI 识别成功: ${questions.length} 道题, ${wrongCount} 道错题, 耗时 ${Math.round(ocrResult.duration/1000)}s`)
 
     if (questions.length > 0) {
-      console.log(`📊 [Step 5/6] 保存题目到数据库...`)
+      console.log(`📊 [Step 6/7] 保存题目到数据库...`)
 
       const questionsWithStudentId = questions.map(q => ({
         ...q,
@@ -379,12 +427,12 @@ export const processTask = async (job) => {
       }))
 
       await createQuestions(questionsWithStudentId)
-      console.log(`✅ [Step 5/6] 题目保存成功`)
+      console.log(`✅ [Step 6/7] 题目保存成功`)
 
       await job.updateProgress(80)
       await updateTaskStatus(taskId, TASK_STATUS.PROCESSING, { progress: 80 })
 
-      console.log(`📊 [Step 6/6] 生成AI标签...`)
+      console.log(`📊 [Step 7/7] 生成AI标签...`)
       const tagResults = await generateTagsForQuestions(questions)
       const tagMap = {}
       for (const tr of tagResults) {
@@ -402,7 +450,7 @@ export const processTask = async (job) => {
         ai_tags: q.ai_tags
       }))
       await batchUpdateQuestionTags(tagUpdates)
-      console.log(`✅ [Step 6/6] AI标签保存成功`)
+      console.log(`✅ [Step 7/7] AI标签保存成功`)
 
       await job.updateProgress(90)
       await updateTaskStatus(taskId, TASK_STATUS.PROCESSING, { progress: 90 })

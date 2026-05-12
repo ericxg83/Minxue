@@ -44,6 +44,7 @@ CREATE TABLE IF NOT EXISTS questions (
     ai_tags JSONB DEFAULT '[]'::jsonb,
     manual_tags JSONB DEFAULT '[]'::jsonb,
     tags_source TEXT DEFAULT 'ai' CHECK (tags_source IN ('ai', 'manual')),
+    block_coordinates JSONB,
     created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
     updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
 );

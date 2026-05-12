@@ -7,8 +7,7 @@ const DEFAULT_MAX_AGE = {
   questions: 5 * 60 * 1000,
   wrongQuestions: 5 * 60 * 1000,
   exams: 10 * 60 * 1000,
-  generatedExams: 10 * 60 * 1000,
-  pendingQuestions: 5 * 60 * 1000
+  generatedExams: 10 * 60 * 1000
 }
 
 const memoryCache = new Map()

@@ -1,13 +1,12 @@
 import { useEffect, useState, useRef } from 'react'
-import { 
-  Camera, 
-  ChevronRight, 
-  CheckCircle2, 
-  XCircle, 
-  Loader2, 
-  BookOpen, 
-  LayoutGrid, 
-  FileText, 
+import {
+  Camera,
+  ChevronRight,
+  CheckCircle2,
+  XCircle,
+  Loader2,
+  LayoutGrid,
+  FileText,
   Sparkles,
   Search,
   Bell,
@@ -25,15 +24,17 @@ import {
 } from 'lucide-react'
 import { motion, AnimatePresence } from 'motion/react'
 import { QRCodeSVG } from 'qrcode.react'
-import { useUIStore, useStudentStore, useTaskStore, useWrongQuestionStore, usePendingQuestionStore, useExamStore } from './store'
-import { getStudents, getTasksByStudent, getQuestionsByTask, addWrongQuestions, getWrongQuestionsByStudent, getExamsByStudent, createTask, updateTaskStatus, uploadImage, updateQuestion, updateQuestionTags, invalidateCache } from './services/apiService'
+import { useUIStore, useStudentStore, useTaskStore, useWrongQuestionStore, useExamStore } from './store'
+import { getStudents, getTasksByStudent, getQuestionsByTask, addWrongQuestions, getWrongQuestionsByStudent, getExamsByStudent, createTask, updateTaskStatus, uploadImage, updateQuestion, updateQuestionTags, invalidateCache, createStudent, updateWrongQuestionStatus, getQuestionsByIds } from './services/apiService'
 import { taskService } from './services/taskService'
 import { recognizeQuestions, compressImage, saveRecognitionResult } from './services/aiService'
-import { mockQuestions, mockTasks, mockWrongQuestions, mockExams, mockStudents } from './data/mockData'
+import { mockQuestions, mockTasks, mockWrongQuestions, mockGeneratedExams, mockStudents } from './data/mockData'
 import StudentSwitcher from './components/StudentSwitcher'
-import QuestionEditDrawer from './components/QuestionEditDrawer'
+
 import ScanQR from './pages/ScanQR'
 import Grading from './pages/Grading'
+import PrintPreview from './pages/PrintPreview'
+import ExamReview from './pages/ExamReview'
 import { useToast, ToastProvider } from './components/ToastProvider'
 import dayjs from 'dayjs'
 import jsPDF from 'jspdf'
@@ -50,18 +51,12 @@ export default function App() {
   const { students, currentStudent, setCurrentStudent, setStudents, addStudent } = useStudentStore()
   const { tasks, setTasks, addTask, updateTaskStatus: updateTaskInStore } = useTaskStore()
   const { wrongQuestions, setWrongQuestions, selectedQuestions, setSelectedQuestions, clearSelection, addWrongQuestion, addWrongQuestions: addMultipleToStore } = useWrongQuestionStore()
-  const { pendingQuestions, setPendingQuestions, addPendingQuestions } = usePendingQuestionStore()
   const { exams, setExams, generatedExams, setGeneratedExams } = useExamStore()
 
   // Processing Page State
   const [processingFilter, setProcessingFilter] = useState('all')
   const [uploading, setUploading] = useState(false)
   const [previewImage, setPreviewImage] = useState(null)
-
-  // Confirm Page State
-  const [confirmFilter, setConfirmFilter] = useState('wrong')
-  const [selectedConfirmIds, setSelectedConfirmIds] = useState([])
-  const [editingQuestion, setEditingQuestion] = useState(null)
 
   // Bank Page State
   const [bankFilter, setBankFilter] = useState('pending')
@@ -84,10 +79,6 @@ export default function App() {
   const [reprintQuestions, setReprintQuestions] = useState([])
 
   // Exam Page State
-  const [examFilter, setExamFilter] = useState('all')
-  const [showExamDetail, setShowExamDetail] = useState(false)
-  const [selectedExam, setSelectedExam] = useState(null)
-  const [showExamPrint, setShowExamPrint] = useState(false)
   const [showScanQR, setShowScanQR] = useState(false)
 
   // UI State
@@ -103,6 +94,12 @@ export default function App() {
   const [managingTagsQuestion, setManagingTagsQuestion] = useState(null)
   const [showAddTag, setShowAddTag] = useState(false)
   const [newTagInput, setNewTagInput] = useState('')
+  const [showQuestionEditor, setShowQuestionEditor] = useState(false)
+  const [editingQuestionItem, setEditingQuestionItem] = useState(null)
+  const [editTab, setEditTab] = useState('stem')
+  const [editForm, setEditForm] = useState({ content: '', options: [], answer: '', analysis: '', image_url: '', student_answer: '', question_type: 'choice' })
+  const [editTags, setEditTags] = useState([])
+  const [editNewTag, setEditNewTag] = useState('')
   const [showDeleteConfirm, setShowDeleteConfirm] = useState(false)
   const [deleteTarget, setDeleteTarget] = useState(null)
   const [showBatchActions, setShowBatchActions] = useState(false)
@@ -117,6 +114,10 @@ export default function App() {
   const [cropTaskId, setCropTaskId] = useState(null)
   const [showPrintModal, setShowPrintModal] = useState(false)
   const [printTarget, setPrintTarget] = useState(null)
+  const [selectedImage, setSelectedImage] = useState(null)
+  const [showImageViewer, setShowImageViewer] = useState(false)
+  const [showExamReview, setShowExamReview] = useState(false)
+  const [reviewTask, setReviewTask] = useState(null)
 
   // Toast
   const Toast = useToast()
@@ -150,7 +151,6 @@ export default function App() {
   // Clear data when student changes
   useEffect(() => {
     setTasks([])
-    setPendingQuestions([])
     setWrongQuestions([])
     setGeneratedExams([])
     setExams([])
@@ -163,12 +163,6 @@ export default function App() {
     }
   }, [currentStudent?.id, currentPage])
 
-  // Load pending questions
-  useEffect(() => {
-    if (currentStudent && currentPage === 'pending') {
-      loadPendingData()
-    }
-  }, [currentStudent?.id, currentPage])
 
   // Load wrong questions
   useEffect(() => {
@@ -222,38 +216,6 @@ export default function App() {
     }
   }
 
-  // Pending: Load data
-  const loadPendingData = async () => {
-    if (!currentStudent) return
-    try {
-      if (USE_MOCK_DATA) {
-        return
-      }
-      const taskList = await getTasksByStudent(currentStudent.id, false)
-      const safeTaskList = Array.isArray(taskList) ? taskList : []
-      const doneTasks = safeTaskList.filter(t => t.status === 'done')
-      const allQuestions = []
-      for (const task of doneTasks) {
-        try {
-          const taskQuestions = await getQuestionsByTask(task.id, false)
-          const safeQuestions = Array.isArray(taskQuestions) ? taskQuestions : []
-          allQuestions.push(...safeQuestions.map(q => ({ ...q, status: q.is_correct ? 'correct' : 'wrong' })))
-        } catch (taskError) {
-          console.error(`获取任务 ${task.id} 的题目失败:`, taskError)
-        }
-      }
-
-      const existingWrong = await getWrongQuestionsByStudent(currentStudent.id, false)
-      const wrongQuestionIds = new Set((existingWrong || []).map(w => w.question_id))
-      const pendingOnly = allQuestions.filter(q => !wrongQuestionIds.has(q.id))
-
-      setPendingQuestions(pendingOnly)
-    } catch (error) {
-      console.error('加载待确认数据失败:', error)
-      setPendingQuestions([])
-    }
-  }
-
   // WrongBook: Load data
   const loadWrongBookData = async () => {
     if (!currentStudent) return
@@ -276,7 +238,7 @@ export default function App() {
     if (!currentStudent) return
     try {
       if (USE_MOCK_DATA) {
-        const studentMockExams = mockExams.filter(e => e.student_id === currentStudent.id)
+        const studentMockExams = mockGeneratedExams.filter(e => e.student_id === currentStudent.id)
         setGeneratedExams(studentMockExams)
         return
       }
@@ -393,8 +355,10 @@ export default function App() {
           successCount++
         } else {
           failedCount++
-          const errorMsg = result.tasks[0]?.error || result.error || '上传失败'
+          const taskResult = result.tasks[0] || {}
+          const errorMsg = taskResult.message || taskResult.error || result.error || '上传失败'
           console.error('❌ [uploadViaBackend] Upload failed:', errorMsg)
+          console.error('❌ [uploadViaBackend] Task result:', taskResult)
           updateTaskInStore(tempTask.id, 'failed', { error: errorMsg })
         }
       } catch (error) {
@@ -473,7 +437,7 @@ export default function App() {
           tags_source: 'ai'
         }))
 
-        await createQuestions(questions)
+        // Questions are created by the backend queue worker, just save the recognition result
         await saveRecognitionResult(task.id, result)
         updateTaskInStore(task.id, 'done', result)
 
@@ -498,14 +462,9 @@ export default function App() {
   const filteredTasks = (Array.isArray(tasks) ? tasks : []).filter(t => {
     if (t.student_id !== currentStudent?.id) return false
     if (processingFilter === 'all') return true
+    if (processingFilter === 'done') return t.status === 'done'
+    if (processingFilter === 'pending') return t.status === 'processing' || t.status === 'failed' || t.status === 'pending'
     return t.status === processingFilter
-  })
-
-  // Filter pending questions
-  const filteredQuestions = (Array.isArray(pendingQuestions) ? pendingQuestions : []).filter(q => {
-    if (q.student_id !== currentStudent?.id) return false
-    if (confirmFilter === 'all') return true
-    return q.status === confirmFilter
   })
 
   // Filter wrong questions
@@ -565,10 +524,6 @@ export default function App() {
 
   // Filter generated exams
   const studentExams = (Array.isArray(generatedExams) ? generatedExams : []).filter(e => e.student_id === currentStudent?.id)
-  const filteredExams = studentExams.filter(exam => {
-    if (examFilter === 'all') return true
-    return exam.status === examFilter
-  })
 
   // Add student
   const handleAddStudent = async (studentData) => {
@@ -587,6 +542,8 @@ export default function App() {
   // Delete task
   const handleDeleteTask = async (taskId) => {
     try {
+      const { deleteTask } = await import('./services/apiService')
+      await deleteTask(taskId)
       setTasks((Array.isArray(tasks) ? tasks : []).filter(t => t.id !== taskId))
       Toast.show({ message: '删除成功', type: 'success' })
     } catch (error) {
@@ -595,69 +552,29 @@ export default function App() {
     }
   }
 
-  // Confirm questions
-  const handleConfirmQuestions = async () => {
-    try {
-      const wrongIds = selectedConfirmIds.filter(id => {
-        const q = pendingQuestions.find(pq => pq.id === id)
-        return q && q.status === 'wrong'
-      })
-
-      if (wrongIds.length > 0) {
-        await addWrongQuestions(currentStudent.id, wrongIds)
-      }
-
-      setPendingQuestions((Array.isArray(pendingQuestions) ? pendingQuestions : []).filter(q => !selectedConfirmIds.includes(q.id)))
-      setSelectedConfirmIds([])
-
-      // 确认后刷新缓存并重新加载数据
-      invalidateCache('wrong', currentStudent.id)
-      invalidateCache('tasks', currentStudent.id)
-      loadPendingData()
-      loadWrongBookData()
-
-      Toast.show({ message: `已确认 ${selectedConfirmIds.length} 道题`, type: 'success' })
-    } catch (error) {
-      console.error('确认失败:', error)
-      Toast.show({ message: '确认失败', type: 'error' })
-    }
-  }
-
-  // Generate exam
-  const handleGenerateExam = async () => {
-    try {
-      const selectedWrongQuestions = (Array.isArray(wrongQuestions) ? wrongQuestions : []).filter(wq => selectedQuestions.includes(wq.id))
-      if (selectedWrongQuestions.length === 0) {
-        Toast.show({ message: '请先选择错题', type: 'error' })
-        return
-      }
-
-      const examData = {
-        student_id: currentStudent.id,
-        name: `错题重练卷_${dayjs().format('MM-DD')}`,
-        question_ids: selectedWrongQuestions.map(wq => wq.question_id || wq.id)
-      }
-
-      const { createGeneratedExam } = await import('./services/apiService')
-      const newExam = await createGeneratedExam(examData)
-      setGeneratedExams([newExam, ...generatedExams])
-      clearSelection()
-
-      // 生成试卷后刷新缓存并重新加载数据
-      invalidateCache('generated', currentStudent.id)
-      loadGeneratedExams(false)
-
-      Toast.show({ message: '生成试卷成功', type: 'success' })
-    } catch (error) {
-      console.error('生成试卷失败:', error)
-      Toast.show({ message: '生成试卷失败', type: 'error' })
-    }
-  }
-
   // Print exam
-  const handlePrintExam = (exam) => {
+  const handlePrintExam = async (exam) => {
     setPrintTarget(exam)
     setShowPrintModal(true)
+    const updated = (Array.isArray(generatedExams) ? generatedExams : []).map(e =>
+      e.id === exam.id ? { ...e, printed: true } : e
+    )
+    setGeneratedExams(updated)
+  }
+
+  // Duplicate exam
+  const handleDuplicateExam = (exam) => {
+    const newName = `${exam.name} (副本)`
+    const newExam = {
+      ...exam,
+      id: `gen-${Date.now()}`,
+      name: newName,
+      created_at: new Date().toISOString(),
+      printed: false,
+      status: 'pending'
+    }
+    setGeneratedExams([newExam, ...(Array.isArray(generatedExams) ? generatedExams : [])])
+    Toast.show({ message: '已复制生成新卷', type: 'success' })
   }
 
   // Grade exam
@@ -672,15 +589,12 @@ export default function App() {
     setShowReprint(true)
   }
 
-  // View exam detail
-  const handleViewExamDetail = (exam) => {
-    setSelectedExam(exam)
-    setShowExamDetail(true)
-  }
-
   // Delete exam
   const handleDeleteExam = async (examId) => {
     try {
+      const { apiRequest } = await import('./services/apiService')
+      // Use fetch directly since apiRequest is not exported
+      await fetch(`${import.meta.env.VITE_API_URL || '/api'}/generated-exams/${examId}`, { method: 'DELETE' })
       setGeneratedExams((Array.isArray(generatedExams) ? generatedExams : []).filter(e => e.id !== examId))
       Toast.show({ message: '删除成功', type: 'success' })
     } catch (error) {
@@ -691,28 +605,61 @@ export default function App() {
 
   // View image
   const handleViewImage = (imageUrl) => {
-    setPreviewImageUrl(imageUrl)
-    setShowImagePreview(true)
+    setSelectedImage(imageUrl)
+    setShowImageViewer(true)
+  }
+
+  // Toggle mastery
+  const handleToggleMastery = async (wq) => {
+    const currentStatus = wq.status
+    let nextStatus
+    switch (currentStatus) {
+      case 'pending':
+        nextStatus = 'partial'
+        break
+      case 'partial':
+        nextStatus = 'mastered'
+        break
+      case 'mastered':
+        nextStatus = 'pending'
+        break
+      default:
+        nextStatus = 'pending'
+    }
+    
+    try {
+      await updateWrongQuestionStatus(wq.id, nextStatus)
+      loadWrongBookData()
+      const statusText = { pending: '待复习', partial: '有点懂', mastered: '完全懂' }
+      Toast.show({ message: `已标记为${statusText[nextStatus]}`, type: 'success' })
+    } catch (error) {
+      Toast.show({ message: '操作失败', type: 'error' })
+    }
+  }
+
+  // 打印预览/组卷
+  const handlePrintPreview = () => {
+    if (selectedQuestions.length === 0) {
+      Toast.show({ message: '请先选择要组卷的错题', type: 'error' })
+      return
+    }
+    setShowPrintPreview(true)
+  }
+
+  // Toggle selection for wrong questions
+  const toggleSelection = (question) => {
+    const exists = selectedQuestions.find(q => q.id === question.id)
+    if (exists) {
+      setSelectedQuestions(selectedQuestions.filter(q => q.id !== question.id))
+    } else {
+      setSelectedQuestions([...selectedQuestions, question])
+    }
   }
 
   // Edit question
   const handleEditQuestion = (question) => {
-    setEditingQuestion(question)
-  }
-
-  // Save question edit
-  const handleSaveQuestionEdit = async (questionId, updates) => {
-    try {
-      await updateQuestion(questionId, updates)
-      setPendingQuestions(pendingQuestions.map(q =>
-        q.id === questionId ? { ...q, ...updates } : q
-      ))
-      setEditingQuestion(null)
-      Toast.show({ message: '保存成功', type: 'success' })
-    } catch (error) {
-      console.error('保存失败:', error)
-      Toast.show({ message: '保存失败', type: 'error' })
-    }
+    setManagingTagsQuestion(question)
+    setShowTagManager(true)
   }
 
   // Manage tags
@@ -725,15 +672,142 @@ export default function App() {
   const handleSaveTags = async (questionId, tags) => {
     try {
       await updateQuestionTags(questionId, tags)
-      setPendingQuestions(pendingQuestions.map(q =>
-        q.id === questionId ? { ...q, manual_tags: tags, tags_source: 'manual' } : q
-      ))
+      setWrongQuestions(wrongQuestions.map(wq => {
+        const question = wq.question || wq
+        return question.id === questionId
+          ? { ...wq, question: { ...question, manual_tags: tags, tags_source: 'manual' } }
+          : wq
+      }))
       setShowTagManager(false)
       Toast.show({ message: '标签更新成功', type: 'success' })
     } catch (error) {
       console.error('更新标签失败:', error)
       Toast.show({ message: '更新标签失败', type: 'error' })
     }
+  }
+
+  // Open question editor
+  const handleOpenEditor = (wq) => {
+    const question = wq.question || wq
+    setEditingQuestionItem(wq)
+    setEditForm({
+      content: question.content || '',
+      options: question.options || [],
+      answer: question.answer || '',
+      analysis: question.analysis || '',
+      image_url: question.image_url || '',
+      student_answer: question.student_answer || '',
+      question_type: question.question_type || 'choice'
+    })
+    const tags = question.tags_source === 'manual'
+      ? (question.manual_tags || [])
+      : (question.ai_tags || [])
+    setEditTags([...tags])
+    setEditNewTag('')
+    setEditTab('stem')
+    setShowQuestionEditor(true)
+  }
+
+  // Handle edit form changes
+  const updateEditForm = (field, value) => {
+    setEditForm(prev => ({ ...prev, [field]: value }))
+  }
+
+  // Add option in editor
+  const addEditOption = () => {
+    setEditForm(prev => ({ ...prev, options: [...prev.options, ''] }))
+  }
+
+  // Update option in editor
+  const updateEditOption = (index, value) => {
+    setEditForm(prev => {
+      const newOptions = [...prev.options]
+      newOptions[index] = value
+      return { ...prev, options: newOptions }
+    })
+  }
+
+  // Remove option in editor
+  const removeEditOption = (index) => {
+    setEditForm(prev => ({
+      ...prev,
+      options: prev.options.filter((_, i) => i !== index)
+    }))
+  }
+
+  // Add tag in editor
+  const handleAddEditTag = () => {
+    const trimmed = editNewTag.trim()
+    if (!trimmed || editTags.includes(trimmed)) return
+    setEditTags([...editTags, trimmed])
+    setEditNewTag('')
+  }
+
+  // Remove tag in editor
+  const handleRemoveEditTag = (tag) => {
+    setEditTags(editTags.filter(t => t !== tag))
+  }
+
+  // Save question edits
+  const handleSaveEdit = async () => {
+    if (!editForm.content.trim()) {
+      Toast.show({ message: '请输入题目内容', type: 'error' })
+      return
+    }
+    const question = editingQuestionItem.question || editingQuestionItem
+    const updatedData = {
+      content: editForm.content,
+      options: editForm.options,
+      answer: editForm.answer,
+      analysis: editForm.analysis,
+      image_url: editForm.image_url,
+      question_type: editForm.question_type,
+      manual_tags: editTags,
+      tags_source: 'manual',
+      updated_at: new Date().toISOString()
+    }
+    try {
+      await updateQuestion(question.id, updatedData)
+      setWrongQuestions(wrongQuestions.map(wq => {
+        if (wq.id === editingQuestionItem.id) {
+          return { ...wq, question: { ...(wq.question || wq), ...updatedData } }
+        }
+        return wq
+      }))
+      setShowQuestionEditor(false)
+      setEditingQuestionItem(null)
+      Toast.show({ message: '保存成功', type: 'success' })
+    } catch (error) {
+      console.error('保存失败:', error)
+      Toast.show({ message: '保存失败', type: 'error' })
+    }
+  }
+
+  // Delete wrong question
+  const handleDeleteWrongQuestion = (wq) => {
+    setDeleteTarget({ type: 'wrong', id: wq.id })
+    setShowDeleteConfirm(true)
+  }
+
+  // Confirm delete
+  const handleConfirmDelete = async () => {
+    setShowDeleteConfirm(false)
+    if (deleteTarget?.type === 'task') {
+      await handleDeleteTask(deleteTarget.id)
+    } else if (deleteTarget?.type === 'exam') {
+      await handleDeleteExam(deleteTarget.id)
+    } else if (deleteTarget?.type === 'wrong') {
+      try {
+        const { deleteWrongQuestion } = await import('./services/apiService')
+        await deleteWrongQuestion(deleteTarget.id)
+        setWrongQuestions(wrongQuestions.filter(wq => wq.id !== deleteTarget.id))
+        Toast.show({ message: '已从错题本移除', type: 'success' })
+      } catch (error) {
+        console.error('删除失败:', error)
+        Toast.show({ message: '删除失败', type: 'error' })
+      }
+    }
+    setDeleteTarget(null)
   }
 
   // Show student QR
@@ -766,16 +840,12 @@ export default function App() {
     searchQuery === '' || t.original_name?.toLowerCase().includes(searchQuery.toLowerCase())
   )
 
-  const searchFilteredQuestions = filteredQuestions.filter(q =>
-    searchQuery === '' || q.content?.toLowerCase().includes(searchQuery.toLowerCase())
-  )
-
   const searchFilteredWrongQuestions = filteredWrongQuestions.filter(wq => {
     const question = wq.question || wq
     return searchQuery === '' || question.content?.toLowerCase().includes(searchQuery.toLowerCase())
   })
 
-  const searchFilteredExams = filteredExams.filter(e =>
+  const searchFilteredExams = studentExams.filter(e =>
     searchQuery === '' || e.name?.toLowerCase().includes(searchQuery.toLowerCase())
   )
 
@@ -836,10 +906,8 @@ export default function App() {
                   <div className="flex gap-2 min-w-max">
                     {[
                       { id: 'all', label: '全部', count: filteredTasks.length },
-                      { id: 'pending', label: '待处理', count: filteredTasks.filter(t => t.status === 'pending').length },
-                      { id: 'processing', label: '处理中', count: filteredTasks.filter(t => t.status === 'processing').length },
-                      { id: 'done', label: '已完成', count: filteredTasks.filter(t => t.status === 'done').length },
-                      { id: 'failed', label: '失败', count: filteredTasks.filter(t => t.status === 'failed').length }
+                      { id: 'done', label: '已批改', count: filteredTasks.filter(t => t.status === 'done').length },
+                      { id: 'pending', label: '未批改', count: filteredTasks.filter(t => t.status === 'processing' || t.status === 'failed' || t.status === 'pending').length }
                     ].map((filter) => (
                       <button
                         key={filter.id}
@@ -876,12 +944,25 @@ export default function App() {
                         layout
                         initial={{ opacity: 0, y: 10 }}
                         animate={{ opacity: 1, y: 0 }}
-                        className="bg-white rounded-2xl p-4 shadow-sm border border-gray-100"
+                        className={`bg-white rounded-2xl p-4 shadow-sm border border-gray-100 relative ${
+                          task.status === 'done' ? 'cursor-pointer active:bg-gray-50' : ''
+                        }`}
+                        onClick={() => {
+                          if (task.status === 'done') {
+                            setReviewTask(task)
+                            setShowExamReview(true)
+                          }
+                        }}
                       >
+                        {task.status === 'failed' && (
+                          <span className="absolute top-2 right-2 text-red-500 text-lg" title="处理失败">
+                            ⚠️
+                          </span>
+                        )}
                         <div className="flex gap-3">
                           <div
                             className="w-20 h-20 rounded-xl bg-gray-100 flex-shrink-0 overflow-hidden cursor-pointer"
-                            onClick={() => handleViewImage(task.image_url)}
+                            onClick={(e) => { e.stopPropagation(); handleViewImage(task.image_url) }}
                           >
                             {task.image_url ? (
                               <img src={task.image_url} alt="试卷" className="w-full h-full object-cover" />
@@ -891,44 +972,60 @@ export default function App() {
                               </div>
                             )}
                           </div>
-                          <div className="flex-1 min-w-0">
+                          <div className="flex-1 min-w-0 pr-6">
                             <div className="flex items-start justify-between">
                               <h3 className="text-[14px] font-bold text-gray-900 truncate">
                                 {task.original_name || '未命名试卷'}
                               </h3>
                               <button
-                                onClick={() => {
+                                onClick={(e) => {
+                                  e.stopPropagation()
                                   setDeleteTarget({ type: 'task', id: task.id })
                                   setShowDeleteConfirm(true)
                                 }}
-                                className="text-gray-300 hover:text-red-500 transition-colors"
+                                className="text-gray-300 hover:text-red-500 transition-colors flex-shrink-0 ml-2"
                               >
                                 <Trash2 size={16} />
                               </button>
                             </div>
-                            <p className="text-[12px] text-gray-400 mt-1">
-                              {dayjs(task.created_at).format('MM-DD HH:mm')}
+                            <p className="text-[11px] text-gray-400 mt-1">
+                              上传时间：{dayjs(task.created_at).format('YYYY/MM/DD HH:mm')}
                             </p>
+                            {task.status === 'done' && (
+                              <p className="text-[11px] text-gray-400 mt-0.5">
+                                题目数量：{task.result?.questionCount || 0}题
+                              </p>
+                            )}
+                            {task.status === 'done' && task.result?.questionCount && (
+                              <div className="flex gap-3 mt-1.5 text-[11px]">
+                                <span className="text-green-600">
+                                  正确 {task.result?.questionCount - (task.result?.wrongCount || 0)}
+                                </span>
+                                <span className="text-red-500">
+                                  错误 {task.result?.wrongCount || 0}
+                                </span>
+                              </div>
+                            )}
+                            {task.status === 'failed' && task.result?.error && (
+                              <p className="text-[11px] text-red-400 mt-1">
+                                {task.result.error}
+                              </p>
+                            )}
                             <div className="flex items-center gap-2 mt-2">
-                              {task.status === 'pending' && (
-                                <span className="px-2.5 py-1 rounded-full bg-yellow-50 text-yellow-600 text-[11px] font-bold">
-                                  待处理
-                                </span>
-                              )}
-                              {task.status === 'processing' && (
-                                <span className="px-2.5 py-1 rounded-full bg-blue-50 text-blue-600 text-[11px] font-bold flex items-center gap-1">
-                                  <Loader2 size={10} className="animate-spin" />
-                                  处理中
-                                </span>
-                              )}
-                              {task.status === 'done' && (
+                              {task.status === 'done' ? (
                                 <span className="px-2.5 py-1 rounded-full bg-green-50 text-green-600 text-[11px] font-bold">
-                                  已完成
+                                  已批改
                                 </span>
-                              )}
-                              {task.status === 'failed' && (
-                                <span className="px-2.5 py-1 rounded-full bg-red-50 text-red-600 text-[11px] font-bold">
-                                  失败
+                              ) : (
+                                <span className={`px-2.5 py-1 rounded-full text-[11px] font-bold flex items-center gap-1 ${
+                                  task.status === 'failed'
+                                    ? 'bg-red-50 text-red-600'
+                                    : task.status === 'processing'
+                                    ? 'bg-blue-50 text-blue-600'
+                                    : 'bg-yellow-50 text-yellow-600'
+                                }`}>
+                                  {task.status === 'processing' && <Loader2 size={10} className="animate-spin" />}
+                                  未批改
                                 </span>
                               )}
                               {task.result?.questionCount && (
@@ -943,169 +1040,7 @@ export default function App() {
                     ))
                   )}
                 </section>
-              </motion.div>
-            )}
 
-            {currentPage === 'pending' && (
-              <motion.div
-                key="confirm-page"
-                initial={{ opacity: 0, x: 20 }}
-                animate={{ opacity: 1, x: 0 }}
-                exit={{ opacity: 0, x: -20 }}
-                className="w-full"
-              >
-                {/* Segmented Filters */}
-                <section className="px-5 pt-4 mb-3 overflow-x-auto no-scrollbar">
-                  <div className="flex gap-2 min-w-max">
-                    {[
-                      { id: 'all', label: '全部待确认', count: (Array.isArray(pendingQuestions) ? pendingQuestions : []).filter(q => q.status === 'wrong' || q.status === 'correct' || q.isSuspicious).length },
-                      { id: 'wrong', label: '疑似错题', count: (Array.isArray(pendingQuestions) ? pendingQuestions : []).filter(q => q.status === 'wrong').length },
-                      { id: 'correct', label: '识别正确', count: (Array.isArray(pendingQuestions) ? pendingQuestions : []).filter(q => q.status === 'correct' && !q.isSuspicious).length }
-                    ].map((filter) => (
-                      <button
-                        key={filter.id}
-                        onClick={() => setConfirmFilter(filter.id)}
-                        className={`px-5 py-2.5 rounded-full text-[13px] font-bold flex items-center gap-2 transition-all ${
-                          confirmFilter === filter.id
-                          ? 'bg-blue-600 text-white shadow-lg shadow-blue-100'
-                          : 'bg-gray-100/80 text-gray-400'
-                        }`}
-                      >
-                        {filter.label}
-                        <span className={`text-[11px] font-medium ${
-                          confirmFilter === filter.id ? 'text-white/80' : 'text-gray-300'
-                        }`}>
-                          {filter.count}
-                        </span>
-                      </button>
-                    ))}
-                  </div>
-                </section>
-
-                {/* Select All Bar */}
-                {filteredQuestions.length > 0 && (
-                  <section className="px-5 mb-4">
-                    <button
-                      onClick={() => {
-                        const allFilteredIds = filteredQuestions.map(q => q.id)
-                        const allSelected = allFilteredIds.every(id => selectedConfirmIds.includes(id))
-                        if (allSelected) {
-                          setSelectedConfirmIds([])
-                        } else {
-                          setSelectedConfirmIds(allFilteredIds)
-                        }
-                      }}
-                      className="flex items-center gap-2 text-[12px] font-bold text-gray-400 hover:text-blue-600 transition-colors"
-                    >
-                      <div className={`w-5 h-5 rounded-md border-2 flex items-center justify-center transition-all ${
-                        filteredQuestions.every(q => selectedConfirmIds.includes(q.id))
-                        ? 'bg-blue-600 border-blue-600'
-                        : 'border-gray-300'
-                      }`}>
-                        {filteredQuestions.every(q => selectedConfirmIds.includes(q.id)) && (
-                          <CheckCircle2 size={14} className="text-white" />
-                        )}
-                      </div>
-                      <span>{filteredQuestions.every(q => selectedConfirmIds.includes(q.id)) ? '取消全选' : '全选'}</span>
-                      <span className="text-gray-300">({filteredQuestions.length}题)</span>
-                    </button>
-                  </section>
-                )}
-
-                {/* Question List */}
-                <section className="px-5 space-y-3">
-                  {filteredQuestions.length === 0 ? (
-                    <div className="text-center py-20">
-                      <BookOpen size={48} className="mx-auto text-gray-200 mb-4" />
-                      <p className="text-gray-400 text-[15px]">暂无待确认题目</p>
-                      <p className="text-gray-300 text-[13px] mt-1">上传试卷后会自动识别题目</p>
-                    </div>
-                  ) : (
-                    filteredQuestions.map((q, idx) => (
-                      <motion.div
-                        key={q.id}
-                        layout
-                        initial={{ opacity: 0, y: 10 }}
-                        animate={{ opacity: 1, y: 0 }}
-                        className="bg-white rounded-2xl p-4 shadow-sm border border-gray-100"
-                      >
-                        <div className="flex gap-3">
-                          <button
-                            onClick={() => {
-                              if (selectedConfirmIds.includes(q.id)) {
-                                setSelectedConfirmIds(selectedConfirmIds.filter(id => id !== q.id))
-                              } else {
-                                setSelectedConfirmIds([...selectedConfirmIds, q.id])
-                              }
-                            }}
-                            className="flex-shrink-0 mt-1"
-                          >
-                            <div className={`w-5 h-5 rounded-md border-2 flex items-center justify-center transition-all ${
-                              selectedConfirmIds.includes(q.id)
-                              ? 'bg-blue-600 border-blue-600'
-                              : 'border-gray-300'
-                            }`}>
-                              {selectedConfirmIds.includes(q.id) && (
-                                <CheckCircle2 size={14} className="text-white" />
-                              )}
-                            </div>
-                          </button>
-                          <div className="flex-1 min-w-0">
-                            <div className="flex items-start justify-between">
-                              <span className="text-[12px] text-gray-400 font-medium">第 {idx + 1} 题</span>
-                              <div className="flex items-center gap-2">
-                                {q.status === 'wrong' && (
-                                  <span className="px-2 py-0.5 rounded-full bg-red-50 text-red-600 text-[10px] font-bold">
-                                    疑似错题
-                                  </span>
-                                )}
-                                {q.status === 'correct' && (
-                                  <span className="px-2 py-0.5 rounded-full bg-green-50 text-green-600 text-[10px] font-bold">
-                                    识别正确
-                                  </span>
-                                )}
-                              </div>
-                            </div>
-                            <p className="text-[14px] text-gray-900 mt-2 leading-relaxed">
-                              {q.content}
-                            </p>
-                            {q.options && q.options.length > 0 && (
-                              <div className="mt-3 space-y-1.5">
-                                {q.options.map((opt, optIdx) => (
-                                  <div
-                                    key={optIdx}
-                                    className={`text-[13px] py-2 px-3 rounded-lg ${
-                                      opt === q.answer
-                                      ? 'bg-green-50 text-green-700 font-medium'
-                                      : 'bg-gray-50 text-gray-600'
-                                    }`}
-                                  >
-                                    {opt}
-                                  </div>
-                                ))}
-                              </div>
-                            )}
-                            <div className="flex items-center gap-3 mt-3">
-                              <button
-                                onClick={() => handleEditQuestion(q)}
-                                className="text-[12px] text-blue-600 font-medium hover:text-blue-700"
-                              >
-                                编辑
-                              </button>
-                              <button
-                                onClick={() => handleManageTags(q)}
-                                className="text-[12px] text-blue-600 font-medium hover:text-blue-700 flex items-center gap-1"
-                              >
-                                <Tag size={12} />
-                                标签
-                              </button>
-                            </div>
-                          </div>
-                        </div>
-                      </motion.div>
-                    ))
-                  )}
-                </section>
               </motion.div>
             )}
 
@@ -1121,8 +1056,10 @@ export default function App() {
                 <section className="px-5 pt-4 mb-3 overflow-x-auto no-scrollbar">
                   <div className="flex gap-2 min-w-max">
                     {[
-                      { id: 'pending', label: '待复习', count: (Array.isArray(wrongQuestions) ? wrongQuestions : []).filter(wq => wq.status === 'pending').length },
-                      { id: 'mastered', label: '已掌握', count: (Array.isArray(wrongQuestions) ? wrongQuestions : []).filter(wq => wq.status === 'mastered').length }
+                      { id: 'all', label: '全部', count: (Array.isArray(wrongQuestions) ? wrongQuestions : []).filter(wq => wq.student_id === currentStudent?.id).length },
+                      { id: 'pending', label: '待复习', count: (Array.isArray(wrongQuestions) ? wrongQuestions : []).filter(wq => wq.student_id === currentStudent?.id && wq.status === 'pending').length },
+                      { id: 'partial', label: '有点懂', count: (Array.isArray(wrongQuestions) ? wrongQuestions : []).filter(wq => wq.student_id === currentStudent?.id && wq.status === 'partial').length },
+                      { id: 'mastered', label: '完全懂', count: (Array.isArray(wrongQuestions) ? wrongQuestions : []).filter(wq => wq.student_id === currentStudent?.id && wq.status === 'mastered').length }
                     ].map((filter) => (
                       <button
                         key={filter.id}
@@ -1195,12 +1132,12 @@ export default function App() {
                 </section>
 
                 {/* Wrong Question List */}
-                <section className="px-5 space-y-3">
+                <section className="px-5 space-y-3 pb-20">
                   {filteredWrongQuestions.length === 0 ? (
                     <div className="text-center py-20">
                       <LayoutGrid size={48} className="mx-auto text-gray-200 mb-4" />
                       <p className="text-gray-400 text-[15px]">暂无错题</p>
-                      <p className="text-gray-300 text-[13px] mt-1">在待确认页面标记错题后会自动收录</p>
+                      <p className="text-gray-300 text-[13px] mt-1">AI批改后错题会自动收录到错题本</p>
                     </div>
                   ) : (
                     filteredWrongQuestions.map((wq) => (
@@ -1230,18 +1167,21 @@ export default function App() {
                             <div className="flex items-start justify-between">
                               <div className="flex items-center gap-2">
                                 <span className="text-[12px] text-gray-400 font-medium">错题</span>
-                                {wq.error_count > 1 && (
-                                  <span className="px-2 py-0.5 rounded-full bg-red-50 text-red-600 text-[10px] font-bold">
-                                    错 {wq.error_count} 次
-                                  </span>
-                                )}
+                                <span className="px-2 py-0.5 rounded-full bg-red-50 text-red-600 text-[10px] font-bold">
+                                  错 {wq.error_count || 1} 次
+                                </span>
                               </div>
-                              <span className={`text-[10px] px-2 py-0.5 rounded-full ${
-                                wq.status === 'pending'
-                                ? 'bg-yellow-50 text-yellow-600'
-                                : 'bg-green-50 text-green-600'
-                              }`}>
-                                {wq.status === 'pending' ? '待复习' : '已掌握'}
+                              <span 
+                                onClick={() => handleToggleMastery(wq)}
+                                className={`text-[10px] px-2 py-0.5 rounded-full cursor-pointer ${
+                                  wq.status === 'pending'
+                                  ? 'bg-yellow-50 text-yellow-600'
+                                  : wq.status === 'partial'
+                                  ? 'bg-orange-50 text-orange-600'
+                                  : 'bg-green-50 text-green-600'
+                                }`}
+                              >
+                                {wq.status === 'pending' ? '待复习' : wq.status === 'partial' ? '有点懂' : '完全懂'}
                               </span>
                             </div>
                             <p className="text-[14px] text-gray-900 mt-2 leading-relaxed">
@@ -1258,6 +1198,19 @@ export default function App() {
                                 <Tag size={12} />
                                 标签
                               </button>
+                              <span className="text-gray-200">|</span>
+                              <button
+                                onClick={() => handleOpenEditor(wq)}
+                                className="text-[12px] text-blue-600 font-medium hover:text-blue-700"
+                              >
+                                编辑
+                              </button>
+                              <button
+                                onClick={() => handleDeleteWrongQuestion(wq)}
+                                className="text-[12px] text-red-500 font-medium hover:text-red-600"
+                              >
+                                删除
+                              </button>
                             </div>
                           </div>
                         </div>
@@ -1265,6 +1218,31 @@ export default function App() {
                     ))
                   )}
                 </section>
+
+                {/* Bottom Action Bar - Wrongbook */}
+                <div className="fixed bottom-16 left-0 right-0 bg-white/80 backdrop-blur-xl border-t border-gray-100 px-5 py-3 z-40">
+                  <div className="max-w-lg mx-auto flex items-center justify-between">
+                    <div className="flex items-center gap-2">
+                      <span className="text-[13px] text-gray-500">已选</span>
+                      <span className="text-[16px] font-bold text-blue-600">{selectedQuestions.length}</span>
+                      <span className="text-[13px] text-gray-500">题</span>
+                    </div>
+                    <div className="flex items-center gap-2">
+                      <button
+                        onClick={handlePrintPreview}
+                        disabled={selectedQuestions.length === 0}
+                        className={`px-5 py-2.5 rounded-xl text-[13px] font-bold transition-all flex items-center gap-1 ${
+                          selectedQuestions.length > 0
+                          ? 'bg-blue-600 text-white shadow-lg shadow-blue-100 active:bg-blue-700'
+                          : 'bg-gray-100 text-gray-300'
+                        }`}
+                      >
+                        <Printer size={14} />
+                        组卷打印
+                      </button>
+                    </div>
+                  </div>
+                </div>
               </motion.div>
             )}
 
@@ -1276,80 +1254,68 @@ export default function App() {
                 exit={{ opacity: 0, x: -20 }}
                 className="w-full"
               >
-                {/* Filter Tabs */}
-                <section className="px-5 pt-4 mb-3 overflow-x-auto no-scrollbar">
-                  <div className="flex gap-2 min-w-max">
-                    {[
-                      { id: 'all', label: '全部', count: filteredExams.length },
-                      { id: 'ungraded', label: '未批改', count: filteredExams.filter(e => e.status === 'ungraded').length },
-                      { id: 'graded', label: '已批改', count: filteredExams.filter(e => e.status === 'graded').length }
-                    ].map((filter) => (
-                      <button
-                        key={filter.id}
-                        onClick={() => setExamFilter(filter.id)}
-                        className={`px-5 py-2.5 rounded-full text-[13px] font-bold flex items-center gap-2 transition-all ${
-                          examFilter === filter.id
-                          ? 'bg-blue-600 text-white shadow-lg shadow-blue-100'
-                          : 'bg-gray-100/80 text-gray-400'
-                        }`}
-                      >
-                        {filter.label}
-                        <span className={`text-[11px] font-medium ${
-                          examFilter === filter.id ? 'text-white/80' : 'text-gray-300'
-                        }`}>
-                          {filter.count}
-                        </span>
-                      </button>
-                    ))}
-                  </div>
+                {/* Page Title */}
+                <section className="px-5 pt-4 mb-3">
+                  <h2 className="text-[20px] font-bold text-gray-900">历史组卷</h2>
+                  <p className="text-[13px] text-gray-400 mt-1">
+                    共 {studentExams.length} 份试卷
+                  </p>
                 </section>
 
                 {/* Exam List */}
                 <section className="px-5 space-y-3">
-                  {filteredExams.length === 0 ? (
+                  {searchFilteredExams.length === 0 ? (
                     <div className="text-center py-20">
                       <FileText size={48} className="mx-auto text-gray-200 mb-4" />
-                      <p className="text-gray-400 text-[15px]">暂无试卷</p>
-                      <p className="text-gray-300 text-[13px] mt-1">在错题本选择题目生成试卷</p>
+                      <p className="text-gray-400 text-[15px]">暂无组卷记录</p>
+                      <p className="text-gray-300 text-[13px] mt-1">在错题本选择题目后点击"生成试卷"</p>
                     </div>
                   ) : (
-                    filteredExams.map((exam) => (
+                    searchFilteredExams.map((exam) => (
                       <motion.div
                         key={exam.id}
                         layout
                         initial={{ opacity: 0, y: 10 }}
                         animate={{ opacity: 1, y: 0 }}
-                        className="bg-white rounded-2xl p-4 shadow-sm border border-gray-100"
+                        className="bg-white rounded-2xl p-4 shadow-sm border border-gray-100 relative"
                       >
                         <div className="flex items-start justify-between">
-                          <div>
-                            <h3 className="text-[14px] font-bold text-gray-900">{exam.name}</h3>
-                            <p className="text-[12px] text-gray-400 mt-1">
-                              {dayjs(exam.created_at).format('MM-DD HH:mm')} · {exam.question_ids?.length || 0} 道题
+                          <div className="flex-1 min-w-0 pr-4">
+                            <h3 className="text-[15px] font-bold text-gray-900 truncate">{exam.name}</h3>
+                            <p className="text-[12px] text-gray-400 mt-1.5">
+                              生成时间：{dayjs(exam.created_at).format('YYYY/MM/DD HH:mm')}
+                            </p>
+                            <p className="text-[12px] text-gray-400 mt-0.5">
+                              共 {exam.question_ids?.length || 0} 道题
                             </p>
                           </div>
-                          <span className={`text-[10px] px-2 py-0.5 rounded-full ${
-                            exam.status === 'ungraded'
-                            ? 'bg-yellow-50 text-yellow-600'
-                            : 'bg-green-50 text-green-600'
-                          }`}>
-                            {exam.status === 'ungraded' ? '未批改' : '已批改'}
-                          </span>
-                        </div>
-                        <div className="flex items-center gap-3 mt-4">
-                          <button
-                            onClick={() => handleViewExamDetail(exam)}
-                            className="flex-1 py-2.5 rounded-xl bg-blue-50 text-blue-600 text-[13px] font-bold hover:bg-blue-100 transition-colors"
-                          >
-                            查看详情
-                          </button>
-                          <button
-                            onClick={() => handlePrintExam(exam)}
-                            className="flex-1 py-2.5 rounded-xl bg-gray-100 text-gray-600 text-[13px] font-bold hover:bg-gray-200 transition-colors flex items-center justify-center gap-1"
-                          >
-                            <Printer size={14} />
-                            打印
-                          </button>
+                          <div className="flex flex-col items-end gap-2 flex-shrink-0">
+                            <span className={`text-[11px] px-2.5 py-0.5 rounded-full font-medium ${
+                              exam.printed
+                                ? 'bg-green-50 text-green-600'
+                                : 'bg-yellow-50 text-yellow-600'
+                            }`}>
+                              {exam.printed ? '已打印' : '未打印'}
+                            </span>
+                            <div className="flex gap-1.5">
+                              <button
+                                onClick={() => handlePrintExam(exam)}
+                                className="py-2 px-4 rounded-xl bg-blue-600 text-white text-[12px] font-bold hover:bg-blue-700 transition-colors flex items-center gap-1.5 shadow-sm"
+                              >
+                                <Printer size={13} />
+                                打印
+                              </button>
+                              <button
+                                onClick={() => {
+                                  setDeleteTarget({ type: 'exam', id: exam.id })
+                                  setShowDeleteConfirm(true)
+                                }}
+                                className="py-2 px-3 rounded-xl bg-gray-100 text-gray-400 text-[12px] font-medium hover:bg-red-50 hover:text-red-500 transition-colors"
+                              >
+                                <Trash2 size={13} />
+                              </button>
+                            </div>
+                          </div>
                         </div>
                       </motion.div>
                     ))
@@ -1365,13 +1331,12 @@ export default function App() {
           <div className="max-w-lg mx-auto px-6 h-16 flex items-center justify-around">
             {[
               { id: 'processing', icon: Camera, label: '处理' },
-              { id: 'pending', icon: BookOpen, label: '待确认' },
               { id: 'wrongbook', icon: LayoutGrid, label: '错题本' },
               { id: 'exam', icon: FileText, label: '试卷' },
             ].map((tab) => (
               <button
                 key={tab.id}
-                onClick={() => { setCurrentPage(tab.id); setSelectedConfirmIds([]); clearSelection() }}
+                onClick={() => { setCurrentPage(tab.id); clearSelection() }}
                 className="flex flex-col items-center gap-1.5 transition-all group relative"
               >
                 <tab.icon 
@@ -1419,8 +1384,239 @@ export default function App() {
           onChange={handleFileSelect}
         />
 
-        {/* Modals */}
-        {/* ... (其他模态框组件) ... */}
+        {/* Delete Confirm Dialog */}
+        {showDeleteConfirm && (
+          <div className="fixed inset-0 z-[20000] flex items-center justify-center">
+            <div className="absolute inset-0 bg-black/40 backdrop-blur-sm" onClick={() => setShowDeleteConfirm(false)} />
+            <div className="relative bg-white rounded-2xl p-6 mx-5 w-full max-w-sm shadow-xl">
+              <h3 className="text-[16px] font-bold text-gray-900 mb-2">确认删除</h3>
+              <p className="text-[14px] text-gray-500 mb-6">删除后不可恢复，确定要删除吗？</p>
+              <div className="flex gap-3">
+                <button
+                  onClick={() => setShowDeleteConfirm(false)}
+                  className="flex-1 py-2.5 rounded-xl bg-gray-100 text-gray-600 text-[14px] font-medium"
+                >
+                  取消
+                </button>
+                <button
+                  onClick={handleConfirmDelete}
+                  className="flex-1 py-2.5 rounded-xl bg-red-500 text-white text-[14px] font-bold"
+                >
+                  删除
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* Question Editor Dialog */}
+        {showQuestionEditor && editingQuestionItem && (
+          <div className="fixed inset-0 z-[20000] flex flex-col">
+            <div className="absolute inset-0 bg-black/40 backdrop-blur-sm" onClick={() => setShowQuestionEditor(false)} />
+            <div className="relative mt-auto bg-white rounded-t-2xl max-h-[85vh] min-h-[60vh] flex flex-col shadow-xl">
+              {/* Header */}
+              <div className="flex items-center justify-between px-5 py-4 border-b border-gray-100">
+                <h3 className="text-[16px] font-bold text-gray-900">编辑题目</h3>
+                <button onClick={() => setShowQuestionEditor(false)} className="p-1">
+                  <X size={20} className="text-gray-400" />
+                </button>
+              </div>
+
+              {/* Tabs */}
+              <div className="flex border-b border-gray-100">
+                {[
+                  { key: 'stem', label: '题干' },
+                  { key: 'answer', label: '答案' },
+                  { key: 'tags', label: '标签' }
+                ].map(tab => (
+                  <button
+                    key={tab.key}
+                    onClick={() => setEditTab(tab.key)}
+                    className={`flex-1 py-3 text-[14px] font-medium relative ${
+                      editTab === tab.key ? 'text-blue-600' : 'text-gray-400'
+                    }`}
+                  >
+                    {tab.label}
+                    {editTab === tab.key && (
+                      <div className="absolute bottom-0 left-1/3 right-1/3 h-0.5 bg-blue-600 rounded-full" />
+                    )}
+                  </button>
+                ))}
+              </div>
+
+              {/* Content */}
+              <div className="flex-1 overflow-y-auto p-5 space-y-4">
+                {/* Stem Tab */}
+                {editTab === 'stem' && (
+                  <>
+                    <div>
+                      <label className="text-[13px] font-medium text-gray-500 mb-1.5 block">题目内容</label>
+                      <textarea
+                        value={editForm.content}
+                        onChange={e => updateEditForm('content', e.target.value)}
+                        placeholder="请输入题目内容"
+                        className="w-full border border-gray-200 rounded-xl p-3 text-[14px] text-gray-900 min-h-[100px] resize-none focus:outline-none focus:border-blue-300"
+                      />
+                    </div>
+
+                    {editForm.question_type === 'choice' && (
+                      <div>
+                        <div className="flex items-center justify-between mb-2">
+                          <label className="text-[13px] font-medium text-gray-500">选项</label>
+                          <button
+                            onClick={addEditOption}
+                            className="text-[12px] text-blue-600 font-medium"
+                          >
+                            + 添加选项
+                          </button>
+                        </div>
+                        <div className="space-y-2">
+                          {editForm.options.map((opt, idx) => (
+                            <div key={idx} className="flex items-center gap-2">
+                              <span className="w-6 h-6 rounded-full bg-blue-50 text-blue-600 text-[12px] font-bold flex items-center justify-center flex-shrink-0">
+                                {String.fromCharCode(65 + idx)}
+                              </span>
+                              <input
+                                value={opt}
+                                onChange={e => updateEditOption(idx, e.target.value)}
+                                placeholder={`选项 ${String.fromCharCode(65 + idx)}`}
+                                className="flex-1 border border-gray-200 rounded-lg px-3 py-2 text-[14px] focus:outline-none focus:border-blue-300"
+                              />
+                              <button onClick={() => removeEditOption(idx)} className="p-1">
+                                <X size={14} className="text-red-400" />
+                              </button>
+                            </div>
+                          ))}
+                        </div>
+                      </div>
+                    )}
+
+                    {editForm.image_url && (
+                      <div>
+                        <label className="text-[13px] font-medium text-gray-500 mb-1.5 block">插图</label>
+                        <div className="relative inline-block">
+                          <img
+                            src={editForm.image_url}
+                            alt="插图"
+                            className="max-w-full max-h-[200px] rounded-xl border border-gray-200"
+                          />
+                          <button
+                            onClick={() => updateEditForm('image_url', '')}
+                            className="absolute top-1 right-1 w-6 h-6 rounded-full bg-black/40 flex items-center justify-center"
+                          >
+                            <X size={12} className="text-white" />
+                          </button>
+                        </div>
+                      </div>
+                    )}
+                  </>
+                )}
+
+                {/* Answer Tab */}
+                {editTab === 'answer' && (
+                  <>
+                    <div className="bg-gray-50 rounded-xl p-4">
+                      <div className="flex items-center gap-2 mb-1">
+                        <span className="text-[12px] text-gray-400 font-medium">学生答案</span>
+                        <span className="px-1.5 py-0.5 rounded bg-red-100 text-red-600 text-[10px] font-bold">错误记录</span>
+                      </div>
+                      <p className="text-[15px] text-gray-900 mt-1">{editForm.student_answer || '未作答'}</p>
+                    </div>
+
+                    <div>
+                      <label className="text-[13px] font-medium text-gray-500 mb-1.5 block">正确答案</label>
+                      <input
+                        value={editForm.answer}
+                        onChange={e => updateEditForm('answer', e.target.value)}
+                        placeholder="请输入正确答案"
+                        className="w-full border border-gray-200 rounded-xl px-4 py-3 text-[14px] focus:outline-none focus:border-blue-300"
+                      />
+                    </div>
+
+                    <div>
+                      <label className="text-[13px] font-medium text-gray-500 mb-1.5 block">题目解析</label>
+                      <textarea
+                        value={editForm.analysis}
+                        onChange={e => updateEditForm('analysis', e.target.value)}
+                        placeholder="请输入解析内容..."
+                        className="w-full border border-gray-200 rounded-xl p-3 text-[14px] text-gray-900 min-h-[120px] resize-none focus:outline-none focus:border-blue-300"
+                      />
+                    </div>
+                  </>
+                )}
+
+                {/* Tags Tab */}
+                {editTab === 'tags' && (
+                  <div>
+                    <label className="text-[13px] font-medium text-gray-500 mb-2 block">知识点标签</label>
+                    <div className="flex flex-wrap gap-2 mb-3">
+                      {editTags.length === 0 ? (
+                        <span className="text-[13px] text-gray-400">暂无标签</span>
+                      ) : (
+                        editTags.map((tag, idx) => (
+                          <span
+                            key={idx}
+                            className="inline-flex items-center gap-1 px-3 py-1.5 rounded-full bg-orange-50 text-orange-600 text-[12px] font-medium"
+                          >
+                            {tag}
+                            <button onClick={() => handleRemoveEditTag(tag)} className="ml-0.5">
+                              <X size={10} />
+                            </button>
+                          </span>
+                        ))
+                      )}
+                    </div>
+                    <div className="flex gap-2">
+                      <input
+                        value={editNewTag}
+                        onChange={e => setEditNewTag(e.target.value)}
+                        onKeyDown={e => { if (e.key === 'Enter') { e.preventDefault(); handleAddEditTag() } }}
+                        placeholder="输入标签后按回车添加"
+                        className="flex-1 border border-gray-200 rounded-xl px-3 py-2 text-[14px] focus:outline-none focus:border-blue-300"
+                      />
+                      <button
+                        onClick={handleAddEditTag}
+                        disabled={!editNewTag.trim()}
+                        className="px-4 py-2 rounded-xl bg-blue-600 text-white text-[13px] font-medium disabled:opacity-50"
+                      >
+                        添加
+                      </button>
+                    </div>
+                  </div>
+                )}
+              </div>
+
+              {/* Footer */}
+              <div className="flex gap-3 px-5 py-4 border-t border-gray-100">
+                <button
+                  onClick={() => setShowQuestionEditor(false)}
+                  className="flex-1 py-2.5 rounded-xl bg-gray-100 text-gray-600 text-[14px] font-medium"
+                >
+                  取消
+                </button>
+                <button
+                  onClick={handleSaveEdit}
+                  className="flex-1 py-2.5 rounded-xl bg-blue-600 text-white text-[14px] font-bold"
+                >
+                  保存
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* Exam Review / 复审 */}
+        {showExamReview && reviewTask && (
+          <ExamReview
+            task={reviewTask}
+            onClose={() => { setShowExamReview(false); setReviewTask(null); loadTasks() }}
+          />
+        )}
+
+        {/* Print Preview / 组卷 */}
+        {showPrintPreview && (
+          <PrintPreview onClose={() => setShowPrintPreview(false)} />
+        )}
       </div>
     </ToastProvider>
   )

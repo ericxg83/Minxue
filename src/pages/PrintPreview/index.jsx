@@ -22,7 +22,11 @@ export default function PrintPreview({ onClose }) {
   const { setLoading } = useUIStore()
   const { addGeneratedExam } = useExamStore()
   
-  const [previewQuestions, setPreviewQuestions] = useState([])
+  const initQuestions = selectedQuestions.length > 0 
+    ? selectedQuestions.map(wq => wq.question || wq)
+    : [];
+  
+  const [previewQuestions, setPreviewQuestions] = useState(initQuestions)
   const [currentPage, setCurrentPage] = useState(1)
   const [paperId, setPaperId] = useState('')
   const [qrContent, setQrContent] = useState('')

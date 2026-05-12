@@ -9,6 +9,7 @@ import { RightOutline } from 'antd-mobile-icons'
 import { useStudentStore, useExamStore } from '../../store'
 import { getGeneratedExamsByStudent, getQuestionsByIds } from '../../services/apiService'
 import StudentSwitcher from '../../components/StudentSwitcher'
+import ExamReview from '../ExamReview'
 import dayjs from 'dayjs'
 import jsPDF from 'jspdf'
 
@@ -49,6 +50,8 @@ export default function Exam() {
   const [activeFilter, setActiveFilter] = useState('all')
   const [showStudentSwitcher, setShowStudentSwitcher] = useState(false)
   const [allExams, setAllExams] = useState([])
+  const [showReview, setShowReview] = useState(false)
+  const [reviewExam, setReviewExam] = useState(null)
 
   const loadGeneratedExams = async (forceRefresh = false) => {
     if (!currentStudent) return
@@ -126,9 +129,20 @@ export default function Exam() {
   
   const totalUngradedCount = (Array.isArray(generatedExams) ? generatedExams : []).filter(e => e.status === 'ungraded').length
   
+  const handleOpenReview = (exam) => {
+    setReviewExam(exam)
+    setShowReview(true)
+  }
+
+  const handleCloseReview = () => {
+    setShowReview(false)
+    setReviewExam(null)
+  }
+  
   // 渲染状态标签 - 苹果风格
   const renderStatusTag = (status) => {
     const config = STATUS_CONFIG[status]
+    if (!config) return null
     return (
       <span style={{
         color: config.color,
@@ -593,7 +607,7 @@ export default function Exam() {
             {filteredExams.map((exam) => (
               <div
                 key={exam.id}
-                onClick={() => handleReprint(exam)}
+                onClick={() => exam.status === 'graded' || exam.status === 'done' ? handleOpenReview(exam) : handleReprint(exam)}
                 style={{
                   background: APPLE_COLORS.card,
                   borderRadius: '12px',
@@ -646,31 +660,36 @@ export default function Exam() {
                     </div>
                   </div>
                   
-                  {/* 生成时间和题目数量 */}
-                  <div style={{ display: 'flex', alignItems: 'center', gap: '12px', marginBottom: '4px' }}>
-                    <span style={{ fontSize: '13px', color: APPLE_COLORS.textSecondary, display: 'flex', alignItems: 'center', gap: '4px' }}>
-                      <svg width="14" height="14" viewBox="0 0 1024 1024" fill="currentColor">
-                        <path d="M512 64C264.6 64 64 264.6 64 512s200.6 448 448 448 448-200.6 448-448S759.4 64 512 64zm0 832c-212 0-384-172-384-384s172-384 384-384 384 172 384 384-172 384-384 384z"/>
-                        <path d="M704 480H544V320c0-17.6-14.4-32-32-32s-32 14.4-32 32v192c0 17.6 14.4 32 32 32h192c17.6 0 32-14.4 32-32s-14.4-32-32-32z"/>
-                      </svg>
-                      {dayjs(exam.created_at).format('YYYY-MM-DD HH:mm')}
-                    </span>
+                  {/* 上传时间 */}
+                  <div style={{ fontSize: '12px', color: APPLE_COLORS.textSecondary, marginBottom: '4px' }}>
+                    上传时间：{dayjs(exam.created_at).format('YYYY/MM/DD HH:mm')}
                   </div>
                   
-                  <div style={{ fontSize: '13px', color: APPLE_COLORS.textSecondary, marginBottom: '4px' }}>
-                    题目数：{exam.question_ids?.length || 0}题
+                  {/* 题目数量 */}
+                  <div style={{ fontSize: '12px', color: APPLE_COLORS.textSecondary, marginBottom: '4px' }}>
+                    题目数量：{exam.question_ids?.length || 0}题
                   </div>
 
-                  {/* 批改时间（仅已批改显示） */}
-                  {exam.status === 'graded' && exam.graded_at && (
-                    <div style={{ fontSize: '13px', color: APPLE_COLORS.success }}>
-                      批改时间：{dayjs(exam.graded_at).format('YYYY-MM-DD HH:mm')}
+                  {/* 批改结果（仅已批改显示） */}
+                  {exam.status === 'done' && (
+                    <div style={{ fontSize: '13px', display: 'flex', gap: '12px', marginBottom: '4px' }}>
+                      <span style={{ color: APPLE_COLORS.success }}>
+                        正确 {exam.correct_count || 0}
+                      </span>
+                      <span style={{ color: APPLE_COLORS.danger }}>
+                        错误 {exam.wrong_count || 0}
+                      </span>
                     </div>
                   )}
                 </div>
 
                 {/* 右侧状态和图标 */}
-                <div style={{ flexShrink: 0, display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: '8px' }}>
+                <div style={{ flexShrink: 0, display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: '8px', position: 'relative' }}>
+                  {exam.status === 'failed' && (
+                    <span style={{ position: 'absolute', top: '-4px', right: '-4px', color: APPLE_COLORS.danger, fontSize: '16px' }} title="处理失败">
+                      ⚠️
+                    </span>
+                  )}
                   {renderStatusTag(exam.status)}
                   {/* 所有试卷都显示重打印按钮 */}
                     <Button
@@ -710,6 +729,14 @@ export default function Exam() {
         onClose={() => setShowStudentSwitcher(false)}
         badgeType="grading"
       />
+
+      {/* 试卷复审弹窗 */}
+      {showReview && reviewExam && (
+        <ExamReview
+          exam={reviewExam}
+          onClose={handleCloseReview}
+        />
+      )}
     </div>
   )
 }

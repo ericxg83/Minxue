@@ -1,7 +1,5 @@
 const API_BASE = import.meta.env.VITE_API_URL || '/api'
 
-// ==================== 缓存工具函数 ====================
-
 const CACHE_MAX_AGE = {
   STUDENTS: 15 * 60 * 1000,
   TASKS: 5 * 60 * 1000,
@@ -36,22 +34,12 @@ const writeCache = (key, data) => {
   }
 }
 
-const readFallbackCache = (key) => {
-  try {
-    const cached = localStorage.getItem(key)
-    if (cached) return JSON.parse(cached)
-  } catch (e) {}
-  return null
-}
-
 const clearCache = (key) => {
   try {
     localStorage.removeItem(key)
     localStorage.removeItem(key + '_ts')
   } catch (e) {}
 }
-
-// ==================== HTTP 请求封装 ====================
 
 const apiRequest = async (path, options = {}) => {
   const url = `${API_BASE}${path}`
@@ -70,8 +58,6 @@ const apiRequest = async (path, options = {}) => {
   const data = await response.json()
   return data
 }
-
-// ==================== 学生相关操作 ====================
 
 export const getStudents = async (useCache = true) => {
   if (useCache) {
@@ -124,8 +110,6 @@ export const deleteStudent = async (id) => {
   clearCache('students_cache')
   return true
 }
-
-// ==================== 任务相关操作 ====================
 
 export const getTasksByStudent = async (studentId, useCache = true) => {
   const cacheKey = `tasks_cache_${studentId}`
@@ -192,7 +176,24 @@ export const updateTaskStatus = async (taskId, status, result = null) => {
   return null
 }
 
-// ==================== 题目相关操作 ====================
+const parseQuestionFields = (q) => {
+  const parse = (val, fallback) => {
+    if (!val) return fallback
+    if (typeof val === 'string') {
+      try { return JSON.parse(val) } catch (e) { return fallback }
+    }
+    return Array.isArray(val) ? val : fallback
+  }
+  return {
+    ...q,
+    options: parse(q.options, []),
+    ai_tags: parse(q.ai_tags, []),
+    manual_tags: parse(q.manual_tags, []),
+    block_coordinates: q.block_coordinates
+      ? (typeof q.block_coordinates === 'string' ? (() => { try { return JSON.parse(q.block_coordinates) } catch(e) { return null } })() : q.block_coordinates)
+      : null
+  }
+}
 
 export const getQuestionsByTask = async (taskId, useCache = true) => {
   const cacheKey = `questions_cache_${taskId}`
@@ -203,7 +204,7 @@ export const getQuestionsByTask = async (taskId, useCache = true) => {
   }
 
   const data = await apiRequest(`/questions/task/${taskId}`)
-  const questions = data.questions || []
+  const questions = (data.questions || []).map(parseQuestionFields)
 
   if (questions.length) writeCache(cacheKey, questions)
   return questions
@@ -217,7 +218,7 @@ export const getQuestionsByIds = async (questionIds) => {
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ ids: questionIds })
   })
-  return data.questions || []
+  return (data.questions || []).map(parseQuestionFields)
 }
 
 export const updateQuestion = async (id, updates) => {
@@ -231,7 +232,8 @@ export const updateQuestion = async (id, updates) => {
       analysis: updates.analysis,
       question_type: updates.question_type,
       subject: updates.subject,
-      status: updates.status
+      status: updates.status,
+      image_url: updates.image_url
     })
   })
 }
@@ -243,8 +245,6 @@ export const updateQuestionTags = async (id, manualTags) => {
     body: JSON.stringify({ manual_tags: manualTags, tags_source: 'manual' })
   })
 }
-
-// ==================== 错题本相关操作 ====================
 
 export const getWrongQuestionsByStudent = async (studentId, useCache = true) => {
   const cacheKey = `wrong_questions_cache_${studentId}`
@@ -261,9 +261,13 @@ export const getWrongQuestionsByStudent = async (studentId, useCache = true) => 
   let questionsMap = {}
 
   if (questionIds.length > 0) {
-    const qData = await getQuestionsByIds(questionIds)
-    for (const q of qData) {
-      questionsMap[q.id] = q
+    try {
+      const qData = await getQuestionsByIds(questionIds)
+      for (const q of qData) {
+        questionsMap[q.id] = q
+      }
+    } catch (error) {
+      console.warn('获取题目详情失败，使用错题本原始数据:', error.message)
     }
   }
 
@@ -296,7 +300,9 @@ export const deleteWrongQuestion = async (id) => {
   return apiRequest(`/wrong-questions/${id}`, { method: 'DELETE' })
 }
 
-// ==================== 生成试卷相关操作 ====================
+export const deleteTask = async (taskId) => {
+  return apiRequest(`/tasks/${taskId}`, { method: 'DELETE' })
+}
 
 export const getGeneratedExamsByStudent = async (studentId, useCache = true) => {
   const cacheKey = `generated_exams_cache_${studentId}`
@@ -338,8 +344,6 @@ export const createGeneratedExam = async (examData) => {
   return data.exam
 }
 
-// ==================== 文件上传相关操作 ====================
-
 export const uploadImage = async (file) => {
   const formData = new FormData()
   formData.append('files', file)
@@ -351,8 +355,6 @@ export const uploadImage = async (file) => {
 
   return data.url
 }
-
-// ==================== 缓存清理工具 ====================
 
 export const clearAllCache = () => {
   try {
