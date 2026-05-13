@@ -1476,19 +1476,17 @@ export default function App() {
                             <div className="flex gap-1">
                               <button
                                 onClick={() => handleDownloadPdf(exam)}
-                                className="px-3 py-1 rounded-lg text-[12px] font-medium flex items-center gap-1"
+                                className="px-2 py-1 rounded-lg"
                                 style={{ background: '#2563EB', color: 'white' }}
                               >
                                 <FileText size={12} />
-                                PDF
                               </button>
                               <button
                                 onClick={() => handlePrint(exam)}
-                                className="px-3 py-1 rounded-lg text-[12px] font-medium flex items-center gap-1"
+                                className="px-2 py-1 rounded-lg"
                                 style={{ background: '#2563EB', color: 'white' }}
                               >
                                 <Printer size={12} />
-                                打印
                               </button>
                               <button
                                 onClick={() => {
