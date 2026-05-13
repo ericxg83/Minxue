@@ -556,12 +556,18 @@ export default function App() {
       Toast.show({ message: '该试卷没有题目', type: 'error' })
       return null
     }
-    const questions = await getQuestionsByIds(exam.question_ids)
-    if (!questions?.length) {
-      Toast.show({ message: '加载题目失败', type: 'error' })
+    try {
+      const questions = await getQuestionsByIds(exam.question_ids)
+      if (!questions?.length) {
+        Toast.show({ message: '试卷中的题目已被删除，请重新生成', type: 'error' })
+        return null
+      }
+      return { examQuestions: questions, examTitle: exam.name || '试卷' }
+    } catch (error) {
+      console.error('获取题目失败:', error)
+      Toast.show({ message: '获取题目失败: ' + error.message, type: 'error' })
       return null
     }
-    return { examQuestions: questions, examTitle: exam.name || '试卷' }
   }
 
   // Print exam via browser print
@@ -1470,15 +1476,18 @@ export default function App() {
                             <div className="flex gap-1">
                               <button
                                 onClick={() => handleDownloadPdf(exam)}
-                                className="px-2 py-1 rounded-lg text-[12px]"
-                                style={{ background: '#F3F4F6', color: '#6B7280' }}
+                                className="px-2 py-1 rounded-lg text-[12px] flex items-center gap-1"
+                                style={{ background: '#F3F4F6', color: '#2563EB' }}
+                                title="下载PDF"
                               >
                                 <FileText size={12} />
+                                <span style={{ fontSize: '10px', fontWeight: 700 }}>PDF</span>
                               </button>
                               <button
                                 onClick={() => handlePrint(exam)}
                                 className="px-2 py-1 rounded-lg text-[12px]"
                                 style={{ background: '#F3F4F6', color: '#6B7280' }}
+                                title="打印"
                               >
                                 <Printer size={12} />
                               </button>
