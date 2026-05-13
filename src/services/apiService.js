@@ -126,6 +126,11 @@ export const getTasksByStudent = async (studentId, useCache = true) => {
   return tasks
 }
 
+export const getTaskById = async (taskId) => {
+  const data = await apiRequest(`/tasks/${taskId}`)
+  return data.task
+}
+
 export const getExamsByStudent = async (studentId, useCache = true) => {
   const cacheKey = `exams_cache_${studentId}`
 

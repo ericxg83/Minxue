@@ -1,7 +1,7 @@
 import { useState, useEffect, useCallback } from 'react'
 import { Button, Toast, Input, TextArea, Dialog, Mask } from 'antd-mobile'
 import { useStudentStore, useUIStore, useWrongQuestionStore } from '../../store'
-import { updateQuestion, updateQuestionTags, uploadImage } from '../../services/apiService'
+import { updateQuestion, updateQuestionTags, uploadImage, getTaskById } from '../../services/apiService'
 import { mockQuestions } from '../../data/mockData'
 import Cropper from 'react-easy-crop'
 import 'react-easy-crop/react-easy-crop.css'
@@ -34,6 +34,9 @@ export default function QuestionEdit({ questionId, onClose, onSave }) {
   const [cropZoom, setCropZoom] = useState(1)
   const [croppedAreaPixels, setCroppedAreaPixels] = useState(null)
   const [uploading, setUploading] = useState(false)
+  const [showSourcePicker, setShowSourcePicker] = useState(false)
+  const [taskImageUrl, setTaskImageUrl] = useState('')
+  const [loadingTaskImage, setLoadingTaskImage] = useState(false)
   const [formData, setFormData] = useState({
     content: '',
     options: [],
@@ -106,7 +109,6 @@ export default function QuestionEdit({ questionId, onClose, onSave }) {
   const handleFileSelected = (e) => {
     const file = e.target.files?.[0]
     if (!file) return
-    // Reset input so same file can be re-selected
     e.target.value = ''
     const reader = new FileReader()
     reader.onload = (ev) => {
@@ -115,8 +117,52 @@ export default function QuestionEdit({ questionId, onClose, onSave }) {
       setCropZoom(1)
       setCroppedAreaPixels(null)
       setShowCrop(true)
+      setShowSourcePicker(false)
     }
     reader.readAsDataURL(file)
+  }
+
+  const handleAddImageClick = () => {
+    // If question has a task_id, show source picker with both options
+    if (question?.task_id) {
+      setShowSourcePicker(true)
+    } else {
+      // No task info — directly trigger file picker
+      document.getElementById('question-image-file-input')?.click()
+    }
+  }
+
+  const handleCropFromTask = async () => {
+    if (!question?.task_id) {
+      Toast.show({ icon: 'fail', content: '未找到原试卷信息' })
+      return
+    }
+    setLoadingTaskImage(true)
+    setShowSourcePicker(false)
+    try {
+      const task = await getTaskById(question.task_id)
+      if (!task?.image_url) {
+        Toast.show({ icon: 'fail', content: '原试卷无图片' })
+        return
+      }
+      setTaskImageUrl(task.image_url)
+      setCropImageSrc(task.image_url)
+      setCropArea({ x: 0, y: 0 })
+      setCropZoom(1)
+      setCroppedAreaPixels(null)
+      setShowCrop(true)
+    } catch (error) {
+      console.error('获取原试卷图片失败:', error)
+      Toast.show({ icon: 'fail', content: '获取原试卷失败' })
+    } finally {
+      setLoadingTaskImage(false)
+    }
+  }
+
+  const handleCropFromUpload = () => {
+    setShowSourcePicker(false)
+    // Open the hidden file input
+    document.getElementById('question-image-file-input')?.click()
   }
 
   const handleCropComplete = useCallback((croppedArea, croppedAreaPixels) => {
@@ -429,6 +475,15 @@ export default function QuestionEdit({ questionId, onClose, onSave }) {
                   background: displayImageUrl ? '#F8FAFF' : '#FAFAFA',
                   transition: 'all 0.2s'
                 }}>
+                  {/* Hidden file input for upload source B */}
+                  <input
+                    id="question-image-file-input"
+                    type="file"
+                    accept="image/*"
+                    capture="environment"
+                    onChange={handleFileSelected}
+                    style={{ display: 'none' }}
+                  />
                   {displayImageUrl ? (
                     <div style={{ position: 'relative', display: 'inline-block', width: '100%' }}>
                       <img
@@ -447,19 +502,16 @@ export default function QuestionEdit({ questionId, onClose, onSave }) {
                         display: 'flex', gap: '8px', marginTop: '8px',
                         justifyContent: 'center'
                       }}>
-                        <label style={{
-                          fontSize: '12px', color: '#2563EB', cursor: 'pointer',
-                          padding: '4px 12px', borderRadius: '6px',
-                          background: '#EFF6FF', fontWeight: 500
-                        }}>
+                        <span
+                          onClick={handleAddImageClick}
+                          style={{
+                            fontSize: '12px', color: '#2563EB', cursor: 'pointer',
+                            padding: '4px 12px', borderRadius: '6px',
+                            background: '#EFF6FF', fontWeight: 500
+                          }}
+                        >
                           裁剪替换
-                          <input
-                            type="file"
-                            accept="image/*"
-                            onChange={handleFileSelected}
-                            style={{ display: 'none' }}
-                          />
-                        </label>
+                        </span>
                         <span
                           onClick={handleRemoveImage}
                           style={{
@@ -473,13 +525,10 @@ export default function QuestionEdit({ questionId, onClose, onSave }) {
                       </div>
                     </div>
                   ) : (
-                    <label style={{ cursor: 'pointer', display: 'block' }}>
-                      <input
-                        type="file"
-                        accept="image/*"
-                        onChange={handleFileSelected}
-                        style={{ display: 'none' }}
-                      />
+                    <div
+                      onClick={handleAddImageClick}
+                      style={{ cursor: 'pointer', display: 'block' }}
+                    >
                       <div style={{ color: '#6B7280' }}>
                         <svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="#9CA3AF" strokeWidth="1.5" style={{ margin: '0 auto 8px', display: 'block' }}>
                           <rect x="3" y="3" width="18" height="18" rx="2" ry="2"/>
@@ -489,7 +538,7 @@ export default function QuestionEdit({ questionId, onClose, onSave }) {
                         <div style={{ fontSize: '14px', fontWeight: 500, color: '#2563EB' }}>添加配图</div>
                         <div style={{ fontSize: '11px', color: '#9CA3AF', marginTop: '4px' }}>支持 JPG / PNG / WebP，可选</div>
                       </div>
-                    </label>
+                    </div>
                   )}
                 </div>
               </div>
@@ -823,6 +872,92 @@ export default function QuestionEdit({ questionId, onClose, onSave }) {
           </Button>
         </div>
       </div>
+
+      {/* ── Source Picker Dialog ── */}
+      {showSourcePicker && (
+        <div style={{
+          position: 'fixed', inset: 0, zIndex: 40000,
+          display: 'flex', flexDirection: 'column', justifyContent: 'flex-end',
+          background: 'rgba(0,0,0,0.5)'
+        }}>
+          <div
+            onClick={() => setShowSourcePicker(false)}
+            style={{ flex: 1 }} />
+          <div style={{
+            background: '#fff', borderRadius: '16px 16px 0 0',
+            padding: '24px 20px', paddingBottom: 'calc(24px + env(safe-area-inset-bottom, 0px))'
+          }}>
+            <div style={{ fontSize: '16px', fontWeight: 600, color: '#111827', textAlign: 'center', marginBottom: '20px' }}>
+              选择配图来源
+            </div>
+
+            {/* Source A: from task */}
+            <div
+              onClick={handleCropFromTask}
+              style={{
+                display: 'flex', alignItems: 'center', gap: '16px',
+                padding: '16px', borderRadius: '12px',
+                background: '#F5F7FA', marginBottom: '12px',
+                cursor: 'pointer'
+              }}
+            >
+              <div style={{
+                width: '44px', height: '44px', borderRadius: '12px',
+                background: '#EFF6FF', display: 'flex', alignItems: 'center',
+                justifyContent: 'center', flexShrink: 0
+              }}>
+                <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="#2563EB" strokeWidth="1.5">
+                  <rect x="3" y="3" width="18" height="18" rx="2"/>
+                  <circle cx="8.5" cy="8.5" r="1.5"/>
+                  <polyline points="21 15 16 10 5 21"/>
+                </svg>
+              </div>
+              <div style={{ flex: 1 }}>
+                <div style={{ fontSize: '14px', fontWeight: 600, color: '#111827' }}>从原试卷裁剪</div>
+                <div style={{ fontSize: '12px', color: '#9CA3AF', marginTop: '2px' }}>从原试卷图片中截取本题区域</div>
+              </div>
+              {loadingTaskImage && (
+                <div style={{ fontSize: '12px', color: '#2563EB' }}>加载中...</div>
+              )}
+            </div>
+
+            {/* Source B: upload/photo */}
+            <div
+              onClick={handleCropFromUpload}
+              style={{
+                display: 'flex', alignItems: 'center', gap: '16px',
+                padding: '16px', borderRadius: '12px',
+                background: '#F5F7FA', marginBottom: '8px',
+                cursor: 'pointer'
+              }}
+            >
+              <div style={{
+                width: '44px', height: '44px', borderRadius: '12px',
+                background: '#FEF2F2', display: 'flex', alignItems: 'center',
+                justifyContent: 'center', flexShrink: 0
+              }}>
+                <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="#EF4444" strokeWidth="1.5">
+                  <path d="M23 19a2 2 0 0 1-2 2H3a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h4l2-3h6l2 3h4a2 2 0 0 1 2 2z"/>
+                  <circle cx="12" cy="13" r="4"/>
+                </svg>
+              </div>
+              <div style={{ flex: 1 }}>
+                <div style={{ fontSize: '14px', fontWeight: 600, color: '#111827' }}>拍摄或上传裁剪</div>
+                <div style={{ fontSize: '12px', color: '#9CA3AF', marginTop: '2px' }}>拍照或从相册选择图片进行裁剪</div>
+              </div>
+            </div>
+
+            <div style={{ textAlign: 'center', marginTop: '8px' }}>
+              <span
+                onClick={() => setShowSourcePicker(false)}
+                style={{ fontSize: '13px', color: '#6B7280', cursor: 'pointer', padding: '8px' }}
+              >
+                取消
+              </span>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* ── Image Crop Dialog ── */}
       {showCrop && (
