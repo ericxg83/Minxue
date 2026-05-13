@@ -1,8 +1,10 @@
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useCallback } from 'react'
 import { Button, Toast, Input, TextArea, Dialog, Mask } from 'antd-mobile'
 import { useStudentStore, useUIStore, useWrongQuestionStore } from '../../store'
-import { updateQuestion, updateQuestionTags } from '../../services/apiService'
+import { updateQuestion, updateQuestionTags, uploadImage } from '../../services/apiService'
 import { mockQuestions } from '../../data/mockData'
+import Cropper from 'react-easy-crop'
+import 'react-easy-crop/react-easy-crop.css'
 
 const USE_MOCK_DATA = false
 
@@ -26,6 +28,12 @@ export default function QuestionEdit({ questionId, onClose, onSave }) {
   const [tagsSource, setTagsSource] = useState('ai')
   const [newTagInput, setNewTagInput] = useState('')
   const [imageRemoved, setImageRemoved] = useState(false)
+  const [showCrop, setShowCrop] = useState(false)
+  const [cropImageSrc, setCropImageSrc] = useState('')
+  const [cropArea, setCropArea] = useState({ x: 0, y: 0 })
+  const [cropZoom, setCropZoom] = useState(1)
+  const [croppedAreaPixels, setCroppedAreaPixels] = useState(null)
+  const [uploading, setUploading] = useState(false)
   const [formData, setFormData] = useState({
     content: '',
     options: [],
@@ -95,14 +103,86 @@ export default function QuestionEdit({ questionId, onClose, onSave }) {
     return map[formData.question_type] || '选择题'
   }
 
-  const handleImageUpload = (e) => {
+  const handleFileSelected = (e) => {
     const file = e.target.files?.[0]
     if (!file) return
+    // Reset input so same file can be re-selected
+    e.target.value = ''
     const reader = new FileReader()
     reader.onload = (ev) => {
-      setDisplayImageUrl(ev.target.result)
+      setCropImageSrc(ev.target.result)
+      setCropArea({ x: 0, y: 0 })
+      setCropZoom(1)
+      setCroppedAreaPixels(null)
+      setShowCrop(true)
     }
     reader.readAsDataURL(file)
+  }
+
+  const handleCropComplete = useCallback((croppedArea, croppedAreaPixels) => {
+    setCroppedAreaPixels(croppedAreaPixels)
+  }, [])
+
+  const handleCropConfirm = async () => {
+    if (!cropImageSrc || !croppedAreaPixels) return
+
+    setUploading(true)
+    try {
+      // Create canvas and draw the cropped region
+      const image = new Image()
+      image.crossOrigin = 'anonymous'
+      image.src = cropImageSrc
+      await new Promise((resolve, reject) => {
+        image.onload = resolve
+        image.onerror = reject
+      })
+
+      const canvas = document.createElement('canvas')
+      const ctx = canvas.getContext('2d')
+      canvas.width = croppedAreaPixels.width
+      canvas.height = croppedAreaPixels.height
+      ctx.drawImage(
+        image,
+        croppedAreaPixels.x, croppedAreaPixels.y,
+        croppedAreaPixels.width, croppedAreaPixels.height,
+        0, 0,
+        croppedAreaPixels.width, croppedAreaPixels.height
+      )
+
+      // Convert canvas to blob
+      const blob = await new Promise(resolve => canvas.toBlob(resolve, 'image/jpeg', 0.92))
+      if (!blob) throw new Error('生成图片失败')
+
+      // Upload to OSS
+      const file = new File([blob], 'question_image.jpg', { type: 'image/jpeg' })
+      const url = await uploadImage(file)
+
+      setDisplayImageUrl(url)
+      setImageRemoved(false)
+      setShowCrop(false)
+      setCropImageSrc('')
+      Toast.show({ icon: 'success', content: '图片上传成功' })
+    } catch (error) {
+      console.error('裁剪/上传失败:', error)
+      Toast.show({ icon: 'fail', content: '图片处理失败' })
+    } finally {
+      setUploading(false)
+    }
+  }
+
+  const handleCropCancel = () => {
+    setShowCrop(false)
+    setCropImageSrc('')
+  }
+
+  const handleRemoveImage = () => {
+    Dialog.confirm({
+      content: '确定删除配图？',
+      onConfirm: () => {
+        setDisplayImageUrl('')
+        setImageRemoved(true)
+      }
+    })
   }
 
   const getEffectiveTags = () => {
@@ -339,60 +419,79 @@ export default function QuestionEdit({ questionId, onClose, onSave }) {
                     />
                   </div>
                 </div>
-                <div style={{ marginTop: '8px', textAlign: 'right' }}>
-                  <label style={{
-                    fontSize: '12px',
-                    color: '#2563EB',
-                    cursor: 'pointer',
-                    fontWeight: 500
-                  }}>
-                    {displayImageUrl ? '更换图片' : '上传图片'}
-                    <input
-                      type="file"
-                      accept="image/*"
-                      onChange={handleImageUpload}
-                      style={{ display: 'none' }}
-                    />
-                  </label>
+                {/* Image upload area */}
+                <div style={{
+                  marginTop: '12px',
+                  border: `2px dashed ${displayImageUrl ? '#2563EB' : '#D1D5DB'}`,
+                  borderRadius: '12px',
+                  padding: displayImageUrl ? '12px' : '20px',
+                  textAlign: 'center',
+                  background: displayImageUrl ? '#F8FAFF' : '#FAFAFA',
+                  transition: 'all 0.2s'
+                }}>
+                  {displayImageUrl ? (
+                    <div style={{ position: 'relative', display: 'inline-block', width: '100%' }}>
+                      <img
+                        src={displayImageUrl}
+                        alt="题目配图"
+                        style={{
+                          width: '100%',
+                          maxHeight: '200px',
+                          objectFit: 'contain',
+                          borderRadius: '8px',
+                          display: 'block',
+                          background: '#F5F7FA'
+                        }}
+                      />
+                      <div style={{
+                        display: 'flex', gap: '8px', marginTop: '8px',
+                        justifyContent: 'center'
+                      }}>
+                        <label style={{
+                          fontSize: '12px', color: '#2563EB', cursor: 'pointer',
+                          padding: '4px 12px', borderRadius: '6px',
+                          background: '#EFF6FF', fontWeight: 500
+                        }}>
+                          裁剪替换
+                          <input
+                            type="file"
+                            accept="image/*"
+                            onChange={handleFileSelected}
+                            style={{ display: 'none' }}
+                          />
+                        </label>
+                        <span
+                          onClick={handleRemoveImage}
+                          style={{
+                            fontSize: '12px', color: '#EF4444', cursor: 'pointer',
+                            padding: '4px 12px', borderRadius: '6px',
+                            background: '#FEF2F2', fontWeight: 500
+                          }}
+                        >
+                          删除配图
+                        </span>
+                      </div>
+                    </div>
+                  ) : (
+                    <label style={{ cursor: 'pointer', display: 'block' }}>
+                      <input
+                        type="file"
+                        accept="image/*"
+                        onChange={handleFileSelected}
+                        style={{ display: 'none' }}
+                      />
+                      <div style={{ color: '#6B7280' }}>
+                        <svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="#9CA3AF" strokeWidth="1.5" style={{ margin: '0 auto 8px', display: 'block' }}>
+                          <rect x="3" y="3" width="18" height="18" rx="2" ry="2"/>
+                          <circle cx="8.5" cy="8.5" r="1.5"/>
+                          <polyline points="21 15 16 10 5 21"/>
+                        </svg>
+                        <div style={{ fontSize: '14px', fontWeight: 500, color: '#2563EB' }}>添加配图</div>
+                        <div style={{ fontSize: '11px', color: '#9CA3AF', marginTop: '4px' }}>支持 JPG / PNG / WebP，可选</div>
+                      </div>
+                    </label>
+                  )}
                 </div>
-                {displayImageUrl && (
-                  <div style={{
-                    marginTop: '8px',
-                    position: 'relative',
-                    display: 'inline-block'
-                  }}>
-                    <div style={{
-                      width: '100%',
-                      maxWidth: '240px',
-                      borderRadius: '8px',
-                      background: '#F5F7FA',
-                      overflow: 'hidden',
-                      border: '1px solid #E5E7EB'
-                    }}>
-                      <img src={displayImageUrl} alt="题目插图" style={{ width: '100%', height: 'auto', display: 'block' }} />
-                    </div>
-                    <div
-                      onClick={() => { setDisplayImageUrl(''); setImageRemoved(true); }}
-                      style={{
-                        position: 'absolute',
-                        top: '4px',
-                        right: '4px',
-                        width: '24px',
-                        height: '24px',
-                        borderRadius: '50%',
-                        background: 'rgba(0,0,0,0.5)',
-                        display: 'flex',
-                        alignItems: 'center',
-                        justifyContent: 'center',
-                        cursor: 'pointer'
-                      }}
-                    >
-                      <svg width="14" height="14" viewBox="0 0 1024 1024" fill="#fff">
-                        <path d="M563.8 512l262.5-312.9c4.4-5.2.7-13.1-6.1-13.1h-79.8c-4.7 0-9.2 2.1-12.3 5.7L511.6 449.8 295.1 191.7c-3-3.6-7.5-5.7-12.3-5.7H203c-6.8 0-10.5 7.9-6.1 13.1L459.4 512 196.9 824.9c-4.4 5.2-.7 13.1 6.1 13.1h79.8c4.7 0 9.2-2.1 12.3-5.7l216.5-258.1 216.5 258.1c3 3.6 7.5 5.7 12.3 5.7h79.8c6.8 0 10.5-7.9 6.1-13.1L563.8 512z"/>
-                      </svg>
-                    </div>
-                  </div>
-                )}
               </div>
 
               {formData.question_type === 'choice' && (
@@ -724,6 +823,90 @@ export default function QuestionEdit({ questionId, onClose, onSave }) {
           </Button>
         </div>
       </div>
+
+      {/* ── Image Crop Dialog ── */}
+      {showCrop && (
+        <div style={{
+          position: 'fixed', inset: 0, zIndex: 50000,
+          display: 'flex', flexDirection: 'column',
+          background: '#000'
+        }}>
+          <div style={{
+            flex: 1, position: 'relative',
+            paddingTop: 'env(safe-area-inset-top, 0px)'
+          }}>
+            <Cropper
+              image={cropImageSrc}
+              crop={cropArea}
+              zoom={cropZoom}
+              aspect={4 / 3}
+              cropShape="rect"
+              showGrid={true}
+              onCropChange={setCropArea}
+              onZoomChange={setCropZoom}
+              onCropComplete={handleCropComplete}
+              style={{
+                containerStyle: { background: '#000' },
+                cropAreaStyle: { border: '2px solid #fff', color: 'rgba(255,255,255,0.3)' },
+                mediaStyle: { maxHeight: '100%' }
+              }}
+            />
+          </div>
+          {/* Zoom slider */}
+          <div style={{
+            padding: '12px 20px', background: '#111',
+            display: 'flex', alignItems: 'center', gap: '12px'
+          }}>
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#999" strokeWidth="2">
+              <circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/>
+              <line x1="8" y1="11" x2="14" y2="11"/><line x1="11" y1="8" x2="11" y2="14"/>
+            </svg>
+            <input
+              type="range"
+              min={1}
+              max={3}
+              step={0.1}
+              value={cropZoom}
+              onChange={e => setCropZoom(Number(e.target.value))}
+              style={{ flex: 1, accentColor: '#2563EB' }}
+            />
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#999" strokeWidth="2">
+              <circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/>
+              <line x1="11" y1="8" x2="11" y2="14"/><line x1="8" y1="11" x2="14" y2="11"/>
+            </svg>
+          </div>
+          {/* Bottom buttons */}
+          <div style={{
+            padding: '16px 20px', paddingBottom: 'calc(16px + env(safe-area-inset-bottom, 0px))',
+            background: '#111', display: 'flex', gap: '12px'
+          }}>
+            <button
+              onClick={handleCropCancel}
+              style={{
+                flex: 1, padding: '12px', borderRadius: '10px',
+                border: '1px solid #333', background: 'transparent',
+                color: '#fff', fontSize: '15px', fontWeight: 500,
+                cursor: 'pointer'
+              }}
+            >
+              取消
+            </button>
+            <button
+              onClick={handleCropConfirm}
+              disabled={uploading}
+              style={{
+                flex: 1, padding: '12px', borderRadius: '10px',
+                border: 'none', background: uploading ? '#5B8DEF' : '#2563EB',
+                color: '#fff', fontSize: '15px', fontWeight: 600,
+                cursor: uploading ? 'not-allowed' : 'pointer',
+                display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '6px'
+              }}
+            >
+              {uploading ? '上传中...' : '确认裁剪'}
+            </button>
+          </div>
+        </div>
+      )}
     </Mask>
   )
 }

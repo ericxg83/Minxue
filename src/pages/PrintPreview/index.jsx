@@ -120,6 +120,7 @@ export default function PrintPreview({ onClose }) {
                   <span class="question-type">(${q.question_type === 'choice' ? '选择题' : q.question_type === 'fill' ? '填空题' : '解答题'})</span>
                 </div>
                 <div class="question-content">${content}</div>
+                ${q.image_url ? `<div style="text-align:center;margin-bottom:8px;"><img src="${q.image_url}" alt="配图" style="max-width:100%;max-height:200px;object-fit:contain;border-radius:4px;" /></div>` : ''}
                 ${q.options && q.options.length > 0 ? `
                   <div class="options ${isShortOptions ? 'options-inline' : 'options-grid'}">
                     ${q.options.map((opt, i) => `<div class="option"><span style="display:inline-block;width:14px;height:14px;border:1px solid #999;border-radius:50%;margin-right:6px;vertical-align:middle;"></span>${String.fromCharCode(65 + i)}</div>`).join('')}
@@ -349,6 +350,20 @@ export default function PrintPreview({ onClose }) {
                     </span>
                   </div>
                   <div className="mb-2 leading-relaxed">{content}</div>
+                  {q.image_url && (
+                    <div className="mb-2" style={{ textAlign: 'center' }}>
+                      <img
+                        src={q.image_url}
+                        alt="配图"
+                        style={{
+                          maxWidth: '100%',
+                          maxHeight: '200px',
+                          objectFit: 'contain',
+                          borderRadius: '4px'
+                        }}
+                      />
+                    </div>
+                  )}
                   {q.options && q.options.length > 0 && (
                     <div className={`ml-8 mt-2 ${isShortOptions ? 'flex flex-wrap gap-8' : 'grid grid-cols-2 gap-2'}`}>
                       {q.options.map((opt, i) => (

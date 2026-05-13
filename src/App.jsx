@@ -101,6 +101,7 @@ export default function App() {
   const [editForm, setEditForm] = useState({ content: '', options: [], answer: '', analysis: '', image_url: '', student_answer: '', question_type: 'choice' })
   const [editTags, setEditTags] = useState([])
   const [editNewTag, setEditNewTag] = useState('')
+  const [uploadingImage, setUploadingImage] = useState(false)
   const [showDeleteConfirm, setShowDeleteConfirm] = useState(false)
   const [deleteTarget, setDeleteTarget] = useState(null)
   const [showBatchActions, setShowBatchActions] = useState(false)
@@ -856,6 +857,25 @@ export default function App() {
   // Handle edit form changes
   const updateEditForm = (field, value) => {
     setEditForm(prev => ({ ...prev, [field]: value }))
+  }
+
+  // Upload image for question editor
+  const handleEditImageUpload = async (e) => {
+    const file = e.target.files?.[0]
+    if (!file) return
+    e.target.value = ''
+
+    setUploadingImage(true)
+    try {
+      const url = await uploadImage(file)
+      updateEditForm('image_url', url)
+      Toast.show({ message: '图片上传成功', type: 'success' })
+    } catch (error) {
+      console.error('上传图片失败:', error)
+      Toast.show({ message: '图片上传失败', type: 'error' })
+    } finally {
+      setUploadingImage(false)
+    }
   }
 
   // Add option in editor
@@ -1682,17 +1702,48 @@ export default function App() {
                       </div>
                     )}
 
-                    {editForm.image_url && (
-                      <div>
-                        <label style={{ fontSize: '12px', fontWeight: 500, color: '#6B7280', display: 'block', marginBottom: '6px' }}>插图</label>
-                        <div className="relative inline-block">
-                          <img src={editForm.image_url} alt="插图" className="max-w-full max-h-[180px] rounded-lg" style={{ border: '1px solid #E5E7EB' }} />
-                          <button onClick={() => updateEditForm('image_url', '')} className="absolute top-1 right-1 w-5 h-5 rounded-full flex items-center justify-center" style={{ background: 'rgba(0,0,0,0.4)' }}>
-                            <X size={10} className="text-white" />
-                          </button>
+                    {/* Image upload area */}
+                    <div style={{
+                      border: `2px dashed ${editForm.image_url ? '#2563EB' : '#D1D5DB'}`,
+                      borderRadius: '12px',
+                      padding: editForm.image_url ? '12px' : '16px',
+                      textAlign: 'center',
+                      background: editForm.image_url ? '#F8FAFF' : '#FAFAFA'
+                    }}>
+                      {editForm.image_url ? (
+                        <div style={{ position: 'relative', display: 'inline-block', width: '100%' }}>
+                          <img
+                            src={editForm.image_url}
+                            alt="配图"
+                            style={{ width: '100%', maxHeight: '180px', objectFit: 'contain', borderRadius: '8px', display: 'block', background: '#F5F7FA' }}
+                          />
+                          <div style={{ display: 'flex', gap: '8px', marginTop: '8px', justifyContent: 'center' }}>
+                            <label style={{ fontSize: '12px', color: '#2563EB', cursor: 'pointer', padding: '4px 12px', borderRadius: '6px', background: '#EFF6FF', fontWeight: 500 }}>
+                              {uploadingImage ? '上传中...' : '替换图片'}
+                              <input type="file" accept="image/*" onChange={handleEditImageUpload} style={{ display: 'none' }} disabled={uploadingImage} />
+                            </label>
+                            <span onClick={() => updateEditForm('image_url', '')} style={{ fontSize: '12px', color: '#EF4444', cursor: 'pointer', padding: '4px 12px', borderRadius: '6px', background: '#FEF2F2', fontWeight: 500 }}>
+                              删除配图
+                            </span>
+                          </div>
                         </div>
-                      </div>
-                    )}
+                      ) : (
+                        <label style={{ cursor: 'pointer', display: 'block' }}>
+                          <input type="file" accept="image/*" onChange={handleEditImageUpload} style={{ display: 'none' }} disabled={uploadingImage} />
+                          <div style={{ color: '#6B7280' }}>
+                            <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="#9CA3AF" strokeWidth="1.5" style={{ margin: '0 auto 6px', display: 'block' }}>
+                              <rect x="3" y="3" width="18" height="18" rx="2" ry="2"/>
+                              <circle cx="8.5" cy="8.5" r="1.5"/>
+                              <polyline points="21 15 16 10 5 21"/>
+                            </svg>
+                            <div style={{ fontSize: '13px', fontWeight: 500, color: '#2563EB' }}>
+                              {uploadingImage ? '上传中...' : '添加配图'}
+                            </div>
+                            <div style={{ fontSize: '11px', color: '#9CA3AF', marginTop: '2px' }}>支持 JPG / PNG，可选</div>
+                          </div>
+                        </label>
+                      )}
+                    </div>
                   </>
                 )}
 

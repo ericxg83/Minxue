@@ -233,7 +233,9 @@ export const updateQuestion = async (id, updates) => {
       question_type: updates.question_type,
       subject: updates.subject,
       status: updates.status,
-      image_url: updates.image_url
+      image_url: updates.image_url,
+      is_correct: updates.is_correct,
+      student_answer: updates.student_answer
     })
   })
 }

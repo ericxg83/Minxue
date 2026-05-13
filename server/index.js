@@ -11,6 +11,7 @@ import multer from 'multer'
 import { query, TABLES, TASK_STATUS, QUESTION_STATUS, WRONG_STATUS } from './config/neon.js'
 import { uploadFilesWithRetry } from './services/uploadRetryManager.js'
 import { createUploadReport, logUploadReport } from './services/uploadReportLogger.js'
+import { uploadImage } from './services/ossService.js'
 import { getTaskQueue, getQueueStats, taskWorker } from './queue.js'
 
 const app = express()
@@ -40,6 +41,32 @@ const upload = multer({
 // Health check
 app.get('/api/health', (req, res) => {
   res.json({ status: 'ok', timestamp: new Date().toISOString() })
+})
+
+// Upload a single image (for question images, avatars, etc.)
+app.post('/api/upload', upload.single('files'), async (req, res) => {
+  try {
+    const file = req.file
+    if (!file) {
+      return res.status(400).json({ error: '没有上传文件' })
+    }
+
+    // Decode UTF-8 filename (multer may encode as Latin-1)
+    try {
+      const decoded = Buffer.from(file.originalname, 'latin1').toString('utf8')
+      if (Buffer.from(decoded, 'utf8').toString('utf8') === decoded) {
+        file.originalname = decoded
+      }
+    } catch (e) {}
+
+    const studentId = req.body.studentId || 'unknown'
+    const url = await uploadImage(file.buffer, file.originalname, studentId)
+
+    res.json({ success: true, url })
+  } catch (error) {
+    console.error('上传失败:', error)
+    res.status(500).json({ error: error.message })
+  }
 })
 
 // Upload images and create tasks (with validation + retry pipeline)
@@ -490,7 +517,7 @@ app.post('/api/questions', async (req, res) => {
 app.put('/api/questions/:id', async (req, res) => {
   try {
     const { id } = req.params
-    const { content, options, answer, analysis, status, question_type, subject } = req.body
+    const { content, options, answer, analysis, status, question_type, subject, is_correct, student_answer, image_url } = req.body
 
     const { rows } = await query(
       `UPDATE ${TABLES.QUESTIONS}
@@ -501,10 +528,13 @@ app.put('/api/questions/:id', async (req, res) => {
            status = COALESCE($5, status),
            question_type = COALESCE($6, question_type),
            subject = COALESCE($7, subject),
+           is_correct = COALESCE($8, is_correct),
+           student_answer = COALESCE($9, student_answer),
+           image_url = COALESCE($10, image_url),
            updated_at = NOW()
-       WHERE id = $8
+       WHERE id = $11
        RETURNING *`,
-      [content, options, answer, analysis, status, question_type, subject, id]
+      [content, options, answer, analysis, status, question_type, subject, is_correct, student_answer, image_url, id]
     )
 
     if (rows.length === 0) return res.status(404).json({ error: '题目不存在' })
