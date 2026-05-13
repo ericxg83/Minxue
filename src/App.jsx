@@ -20,6 +20,7 @@ import {
   Image as ImageIcon,
   Maximize,
   Eye,
+  Edit3,
   Tag
 } from 'lucide-react'
 import { motion, AnimatePresence } from 'motion/react'
@@ -552,15 +553,158 @@ export default function App() {
     }
   }
 
-  // Print exam
-  const handlePrintExam = async (exam) => {
-    setPrintTarget(exam)
-    setShowPrintModal(true)
-    const updated = (Array.isArray(generatedExams) ? generatedExams : []).map(e =>
-      e.id === exam.id ? { ...e, printed: true } : e
-    )
-    setGeneratedExams(updated)
+  // Shared helper to get exam questions
+  const getExamQuestions = async (exam) => {
+    if (!exam?.question_ids?.length) {
+      Toast.show({ message: '该试卷没有题目', type: 'error' })
+      return null
+    }
+    const questions = await getQuestionsByIds(exam.question_ids)
+    if (!questions?.length) {
+      Toast.show({ message: '加载题目失败', type: 'error' })
+      return null
+    }
+    return { examQuestions: questions, examTitle: exam.name || '试卷' }
   }
+
+  // Print exam via browser print
+  const handlePrint = async (exam) => {
+    const result = await getExamQuestions(exam)
+    if (!result) return
+    const { examQuestions, examTitle } = result
+
+    const printContent = `
+      <html>
+      <head><title>${examTitle}</title>
+      <style>
+        body { font-family: 'Noto Sans SC', sans-serif; padding: 20px; color: #333; }
+        h1 { text-align: center; font-size: 18px; margin-bottom: 10px; }
+        .meta { text-align: center; font-size: 12px; color: #666; margin-bottom: 20px; }
+        .question { margin-bottom: 16px; page-break-inside: avoid; }
+        .q-title { font-size: 14px; font-weight: 600; margin-bottom: 4px; }
+        .q-content { font-size: 13px; line-height: 1.6; margin-bottom: 6px; }
+        .options { padding-left: 16px; font-size: 13px; line-height: 1.8; }
+        .answer { font-size: 12px; color: #2563EB; margin-top: 4px; padding-top: 4px; border-top: 1px dashed #E5E7EB; }
+        @media print { body { padding: 0; } }
+      </style>
+      </head>
+      <body>
+        <h1>${examTitle}</h1>
+        <div class="meta">共 ${examQuestions.length} 题 · ${dayjs().format('YYYY/MM/DD')}</div>
+        ${examQuestions.map((q, i) => `
+          <div class="question">
+            <div class="q-title">${i + 1}. ${q.question_type === 'choice' ? '选择题' : '非选择题'}</div>
+            <div class="q-content">${q.content}</div>
+            ${q.options?.length ? `<div class="options">${q.options.map((o, oi) => `<div>${String.fromCharCode(65 + oi)}. ${o}</div>`).join('')}</div>` : ''}
+            <div class="answer">答案：${q.answer || '略'}</div>
+          </div>
+        `).join('')}
+      </body>
+      </html>
+    `
+    const printWindow = window.open('', '_blank')
+    if (printWindow) {
+      printWindow.document.write(printContent)
+      printWindow.document.close()
+      printWindow.focus()
+      setTimeout(() => printWindow.print(), 300)
+    }
+    setGeneratedExams((Array.isArray(generatedExams) ? generatedExams : []).map(e =>
+      e.id === exam.id ? { ...e, printed: true, printCount: (e.printCount || 0) + 1 } : e
+    ))
+    Toast.show({ message: '已发送到打印机', type: 'success' })
+  }
+
+  // Download exam as PDF
+  const handleDownloadPdf = async (exam) => {
+    const result = await getExamQuestions(exam)
+    if (!result) return
+    const { examQuestions, examTitle } = result
+
+    const doc = new jsPDF('p', 'mm', 'a4')
+    const pageWidth = doc.internal.pageSize.getWidth()
+    const pageHeight = doc.internal.pageSize.getHeight()
+    const margin = 20
+    let y = margin
+
+    // Title
+    doc.setFontSize(16)
+    doc.setFont('helvetica', 'bold')
+    doc.text(examTitle, pageWidth / 2, y, { align: 'center' })
+    y += 8
+
+    // Meta
+    doc.setFontSize(10)
+    doc.setFont('helvetica', 'normal')
+    doc.setTextColor(100)
+    doc.text(`共 ${examQuestions.length} 题 · ${dayjs().format('YYYY/MM/DD')}`, pageWidth / 2, y, { align: 'center' })
+    y += 10
+
+    // Questions
+    doc.setTextColor(50)
+    for (let i = 0; i < examQuestions.length; i++) {
+      const q = examQuestions[i]
+      const label = `${i + 1}. ${q.question_type === 'choice' ? '选择题' : '非选择题'}`
+
+      if (y > pageHeight - margin) {
+        doc.addPage()
+        y = margin
+      }
+
+      doc.setFontSize(12)
+      doc.setFont('helvetica', 'bold')
+      doc.text(label, margin, y)
+      y += 6
+
+      doc.setFontSize(11)
+      doc.setFont('helvetica', 'normal')
+      const lines = doc.splitTextToSize(q.content || '', pageWidth - margin * 2)
+      if (y + lines.length * 5 > pageHeight - margin) {
+        doc.addPage()
+        y = margin
+        doc.setFontSize(12)
+        doc.setFont('helvetica', 'bold')
+        doc.text(label, margin, y)
+        y += 6
+        doc.setFontSize(11)
+        doc.setFont('helvetica', 'normal')
+      }
+      doc.text(lines, margin, y)
+      y += lines.length * 5 + 3
+
+      if (q.options?.length) {
+        if (y + q.options.length * 5 > pageHeight - margin) {
+          doc.addPage()
+          y = margin
+        }
+        q.options.forEach((opt, oi) => {
+          doc.text(`${String.fromCharCode(65 + oi)}. ${opt}`, margin + 5, y)
+          y += 5
+        })
+        y += 2
+      }
+
+      if (y + 5 > pageHeight - margin) {
+        doc.addPage()
+        y = margin
+      }
+      doc.setFont('helvetica', 'italic')
+      doc.setTextColor(37, 99, 235)
+      doc.text(`答案：${q.answer || '略'}`, margin, y)
+      doc.setTextColor(50)
+      y += 8
+    }
+
+    const fileName = `${examTitle}_${dayjs().format('YYYYMMDD_HHmmss')}.pdf`
+    doc.save(fileName)
+
+    setGeneratedExams((Array.isArray(generatedExams) ? generatedExams : []).map(e =>
+      e.id === exam.id ? { ...e, printed: true, printCount: (e.printCount || 0) + 1 } : e
+    ))
+    Toast.show({ message: 'PDF已生成，请查看下载', type: 'success' })
+  }
+
+  // Duplicate exam
 
   // Duplicate exam
   const handleDuplicateExam = (exam) => {
@@ -1232,20 +1376,20 @@ export default function App() {
                               </div>
 
                               {/* Action buttons - weak */}
-                              <div className="flex-shrink-0 flex items-center gap-2.5 ml-1">
+                              <div className="flex-shrink-0 flex items-center gap-1 ml-1">
                                 <button
                                   onClick={() => handleOpenEditor(wq)}
-                                  style={{ fontSize: '11px', color: '#D1D5DB', cursor: 'pointer', lineHeight: 1 }}
+                                  style={{ fontSize: '11px', color: '#D1D5DB', cursor: 'pointer', lineHeight: 1, display: 'inline-flex', alignItems: 'center' }}
                                   title="编辑"
                                 >
-                                  编辑
+                                  <Edit3 size={14} />
                                 </button>
                                 <button
                                   onClick={() => handleDeleteWrongQuestion(wq)}
-                                  style={{ fontSize: '11px', color: '#D1D5DB', cursor: 'pointer', lineHeight: 1 }}
+                                  style={{ fontSize: '11px', color: '#D1D5DB', cursor: 'pointer', lineHeight: 1, display: 'inline-flex', alignItems: 'center' }}
                                   title="删除"
                                 >
-                                  删除
+                                  <Trash2 size={14} />
                                 </button>
                               </div>
                             </div>
@@ -1331,7 +1475,15 @@ export default function App() {
                             </span>
                             <div className="flex gap-1">
                               <button
-                                onClick={() => handlePrintExam(exam)}
+                                onClick={() => handleDownloadPdf(exam)}
+                                className="px-3 py-1 rounded-lg text-[12px] font-medium flex items-center gap-1"
+                                style={{ background: '#2563EB', color: 'white' }}
+                              >
+                                <FileText size={12} />
+                                PDF
+                              </button>
+                              <button
+                                onClick={() => handlePrint(exam)}
                                 className="px-3 py-1 rounded-lg text-[12px] font-medium flex items-center gap-1"
                                 style={{ background: '#2563EB', color: 'white' }}
                               >
