@@ -26,7 +26,7 @@ import {
 import { motion, AnimatePresence } from 'motion/react'
 import { QRCodeSVG } from 'qrcode.react'
 import { useUIStore, useStudentStore, useTaskStore, useWrongQuestionStore, useExamStore } from './store'
-import { getStudents, getTasksByStudent, getQuestionsByTask, addWrongQuestions, getWrongQuestionsByStudent, getExamsByStudent, createTask, updateTaskStatus, uploadImage, updateQuestion, updateQuestionTags, invalidateCache, createStudent, updateWrongQuestionStatus, getQuestionsByIds } from './services/apiService'
+import { getStudents, getTasksByStudent, getQuestionsByTask, addWrongQuestions, getWrongQuestionsByStudent, getExamsByStudent, getGeneratedExamsByStudent, createTask, updateTaskStatus, uploadImage, updateQuestion, updateQuestionTags, invalidateCache, createStudent, updateWrongQuestionStatus, getQuestionsByIds, deleteTask, deleteGeneratedExam, deleteWrongQuestion } from './services/apiService'
 import { taskService } from './services/taskService'
 import { recognizeQuestions, compressImage, saveRecognitionResult } from './services/aiService'
 import { mockQuestions, mockTasks, mockWrongQuestions, mockGeneratedExams, mockStudents } from './data/mockData'
@@ -186,7 +186,6 @@ export default function App() {
     if (reprintExam && reprintExam.question_ids?.length > 0) {
       const loadReprintQuestions = async () => {
         try {
-          const { getQuestionsByIds } = await import('./services/apiService')
           const questions = await getQuestionsByIds(reprintExam.question_ids)
           setReprintQuestions(questions || [])
         } catch (error) {
@@ -243,7 +242,6 @@ export default function App() {
         setGeneratedExams(studentMockExams)
         return
       }
-      const { getGeneratedExamsByStudent } = await import('./services/apiService')
       const examList = await getGeneratedExamsByStudent(currentStudent.id, useCache)
       setGeneratedExams(Array.isArray(examList) ? examList : [])
     } catch (error) {
@@ -543,13 +541,12 @@ export default function App() {
   // Delete task
   const handleDeleteTask = async (taskId) => {
     try {
-      const { deleteTask } = await import('./services/apiService')
       await deleteTask(taskId)
       setTasks((Array.isArray(tasks) ? tasks : []).filter(t => t.id !== taskId))
       Toast.show({ message: '删除成功', type: 'success' })
     } catch (error) {
       console.error('删除失败:', error)
-      Toast.show({ message: '删除失败', type: 'fail' })
+      Toast.show({ message: '删除失败', type: 'error' })
     }
   }
 
@@ -736,13 +733,12 @@ export default function App() {
   // Delete exam
   const handleDeleteExam = async (examId) => {
     try {
-      const { deleteGeneratedExam } = await import('./services/apiService')
       await deleteGeneratedExam(examId)
       setGeneratedExams((Array.isArray(generatedExams) ? generatedExams : []).filter(e => e.id !== examId))
       Toast.show({ message: '删除成功', type: 'success' })
     } catch (error) {
       console.error('删除失败:', error)
-      Toast.show({ message: '删除失败', type: 'fail' })
+      Toast.show({ message: '删除失败', type: 'error' })
     }
   }
 
@@ -941,7 +937,6 @@ export default function App() {
       await handleDeleteExam(deleteTarget.id)
     } else if (deleteTarget?.type === 'wrong') {
       try {
-        const { deleteWrongQuestion } = await import('./services/apiService')
         await deleteWrongQuestion(deleteTarget.id)
         setWrongQuestions(wrongQuestions.filter(wq => wq.id !== deleteTarget.id))
         Toast.show({ message: '已从错题本移除', type: 'success' })
