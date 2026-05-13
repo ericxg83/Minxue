@@ -304,6 +304,10 @@ export const deleteTask = async (taskId) => {
   return apiRequest(`/tasks/${taskId}`, { method: 'DELETE' })
 }
 
+export const deleteGeneratedExam = async (id) => {
+  return apiRequest(`/generated-exams/${id}`, { method: 'DELETE' })
+}
+
 export const getGeneratedExamsByStudent = async (studentId, useCache = true) => {
   const cacheKey = `generated_exams_cache_${studentId}`
 

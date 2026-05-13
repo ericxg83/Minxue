@@ -549,7 +549,7 @@ export default function App() {
       Toast.show({ message: '删除成功', type: 'success' })
     } catch (error) {
       console.error('删除失败:', error)
-      Toast.show({ message: '删除失败', type: 'error' })
+      Toast.show({ message: '删除失败', type: 'fail' })
     }
   }
 
@@ -736,14 +736,13 @@ export default function App() {
   // Delete exam
   const handleDeleteExam = async (examId) => {
     try {
-      const { apiRequest } = await import('./services/apiService')
-      // Use fetch directly since apiRequest is not exported
-      await fetch(`${import.meta.env.VITE_API_URL || '/api'}/generated-exams/${examId}`, { method: 'DELETE' })
+      const { deleteGeneratedExam } = await import('./services/apiService')
+      await deleteGeneratedExam(examId)
       setGeneratedExams((Array.isArray(generatedExams) ? generatedExams : []).filter(e => e.id !== examId))
       Toast.show({ message: '删除成功', type: 'success' })
     } catch (error) {
       console.error('删除失败:', error)
-      Toast.show({ message: '删除失败', type: 'error' })
+      Toast.show({ message: '删除失败', type: 'fail' })
     }
   }
 
@@ -1476,19 +1475,17 @@ export default function App() {
                             <div className="flex gap-1">
                               <button
                                 onClick={() => handleDownloadPdf(exam)}
-                                className="px-3 py-1 rounded-lg text-[12px] font-medium flex items-center gap-1"
-                                style={{ background: '#2563EB', color: 'white' }}
+                                className="px-2 py-1 rounded-lg text-[12px]"
+                                style={{ background: '#F3F4F6', color: '#6B7280' }}
                               >
                                 <FileText size={12} />
-                                PDF
                               </button>
                               <button
                                 onClick={() => handlePrint(exam)}
-                                className="px-3 py-1 rounded-lg text-[12px] font-medium flex items-center gap-1"
-                                style={{ background: '#2563EB', color: 'white' }}
+                                className="px-2 py-1 rounded-lg text-[12px]"
+                                style={{ background: '#F3F4F6', color: '#6B7280' }}
                               >
                                 <Printer size={12} />
-                                打印
                               </button>
                               <button
                                 onClick={() => {
