@@ -314,6 +314,10 @@ app.post('/api/tasks/:taskId/retry', async (req, res) => {
 app.delete('/api/tasks/:taskId', async (req, res) => {
   try {
     const { taskId } = req.params
+    const uuidRegex = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
+    if (!uuidRegex.test(taskId)) {
+      return res.status(400).json({ error: '无效的任务ID' })
+    }
     await query(`DELETE FROM ${TABLES.TASKS} WHERE id = $1`, [taskId])
     res.json({ success: true, message: '任务已删除' })
   } catch (error) {
@@ -710,6 +714,10 @@ app.get('/api/generated-exams/student/:studentId', async (req, res) => {
 app.delete('/api/generated-exams/:id', async (req, res) => {
   try {
     const { id } = req.params
+    const uuidRegex = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
+    if (!uuidRegex.test(id)) {
+      return res.status(400).json({ error: '无效的试卷ID' })
+    }
     await query(`DELETE FROM ${TABLES.GENERATED_EXAMS} WHERE id = $1`, [id])
     res.json({ success: true, message: '错题卷已删除' })
   } catch (error) {

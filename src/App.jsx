@@ -542,8 +542,16 @@ export default function App() {
   // Delete task
   const handleDeleteTask = async (taskId) => {
     try {
+      // For local-only temp tasks (upload failed/never synced), skip API call
+      if (typeof taskId === 'string' && taskId.startsWith('temp-')) {
+        setTasks((Array.isArray(tasks) ? tasks : []).filter(t => t.id !== taskId))
+        invalidateCache('tasks', currentStudent?.id)
+        Toast.show({ message: '删除成功', type: 'success' })
+        return
+      }
       await deleteTask(taskId)
       setTasks((Array.isArray(tasks) ? tasks : []).filter(t => t.id !== taskId))
+      invalidateCache('tasks', currentStudent?.id)
       Toast.show({ message: '删除成功', type: 'success' })
     } catch (error) {
       console.error('删除失败:', error)
