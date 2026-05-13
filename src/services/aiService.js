@@ -81,6 +81,75 @@ export const clearRecognitionLogs = () => {
   localStorage.removeItem(RECOGNITION_LOGS_KEY)
 }
 
+// ── Answer comparison utilities ──
+
+/**
+ * Normalize answer string for comparison with tolerance for units, case, and formatting.
+ */
+function normalizeAnswer(str) {
+  if (str === null || str === undefined) return ''
+  let s = String(str)
+
+  // Full-width to half-width
+  s = s.replace(/[！-～]/g, ch => String.fromCharCode(ch.charCodeAt(0) - 0xFEE0))
+  s = s.replace(/　/g, ' ')
+
+  s = s.trim()
+  s = s.toUpperCase()
+
+  // Strip trailing common punctuation
+  s = s.replace(/[.,;:!?，。；：！？、）)\]}"'《》「」『』]+$/g, '')
+
+  // Unit synonym replacement
+  const unitPairs = [
+    ['小时', 'H'], ['時', 'H'],
+    ['分钟', 'MIN'], ['分鐘', 'MIN'],
+    ['秒钟', 'S'], ['秒鐘', 'S'],
+    ['厘米', 'CM'], ['毫米', 'MM'],
+    ['千克', 'KG'], ['公里', 'KM'],
+    ['毫升', 'ML'],
+    ['度', '°'],
+    ['米', 'M'], ['时', 'H'], ['時', 'H'],
+    ['分', 'MIN'], ['秒', 'S'],
+    ['克', 'G'], ['升', 'L'],
+  ]
+  for (const [cn, sym] of unitPairs) {
+    s = s.replace(new RegExp(cn, 'g'), sym)
+  }
+
+  // Remove all whitespace
+  s = s.replace(/\s+/g, '')
+
+  return s
+}
+
+/**
+ * Compare student answer against reference answer with tolerance.
+ * Returns { isCorrect: boolean, unrecognized: boolean }
+ */
+function judgeAnswer(studentAnswer, referenceAnswer, questionType) {
+  const rawAnswer = String(studentAnswer || '').trim()
+  const hasAnswer = rawAnswer !== '' && rawAnswer !== '未作答'
+
+  if (!hasAnswer) {
+    return { isCorrect: false, unrecognized: true }
+  }
+
+  if (!referenceAnswer) {
+    return { isCorrect: true, unrecognized: false }
+  }
+
+  if (questionType === 'choice') {
+    const normStudent = String(studentAnswer).trim().toUpperCase()
+    const normRef = String(referenceAnswer).trim().toUpperCase()
+    return { isCorrect: normStudent === normRef, unrecognized: false }
+  }
+
+  const normStudent = normalizeAnswer(studentAnswer)
+  const normRef = normalizeAnswer(referenceAnswer)
+  return { isCorrect: normStudent === normRef, unrecognized: false }
+}
+
 // 调用 AI 接口识别题目（带重试机制）
 export const recognizeQuestions = async (imageBase64, studentId, taskId, retryCount = 0) => {
   const prompt = buildOCRPrompt()
@@ -150,35 +219,12 @@ export const recognizeQuestions = async (imageBase64, studentId, taskId, retryCo
 
     const result = JSON.parse(jsonStr)
 
-    // 为每个题目添加额外信息，并校验答案正确性
+    // 为每个题目添加额外信息，并用标准化比对校验答案正确性
     const questions = result.questions?.map((q, index) => {
-      // 后处理：校验 is_correct 的准确性
-      let isCorrect = false
-      const studentAnswerStr = String(q.student_answer || '').trim()
-      const hasStudentAnswer = studentAnswerStr !== '' && studentAnswerStr !== '未作答'
-      
-      // 如果学生未作答，直接判定为错误
-      if (!hasStudentAnswer) {
-        isCorrect = false
-      }
-      // 如果是选择题，进行答案比对校验
-      else if (q.question_type === 'choice' && q.answer && q.student_answer) {
-        const normalizedAnswer = String(q.answer).trim().toUpperCase()
-        const normalizedStudentAnswer = String(q.student_answer).trim().toUpperCase()
-        // 重新计算 is_correct，确保准确性
-        isCorrect = normalizedAnswer === normalizedStudentAnswer
-      }
-      // 如果是填空题，进行答案比对校验
-      else if (q.question_type === 'fill' && q.answer && q.student_answer) {
-        const normalizedAnswer = String(q.answer).trim()
-        const normalizedStudentAnswer = String(q.student_answer).trim()
-        isCorrect = normalizedAnswer === normalizedStudentAnswer
-      }
-      // 解答题：如果有作答且AI认为正确，信任AI判断；否则以AI返回的为准
-      else {
-        isCorrect = q.is_correct || false
-      }
-      
+      const judgment = judgeAnswer(q.student_answer, q.answer, q.question_type)
+      const isCorrect = judgment.isCorrect
+      const unrecognized = judgment.unrecognized
+
       return {
         id: `q-${taskId}-${index}`,
         task_id: taskId,
@@ -188,6 +234,7 @@ export const recognizeQuestions = async (imageBase64, studentId, taskId, retryCo
         answer: q.answer || '',
         student_answer: q.student_answer || '',
         is_correct: isCorrect,
+        unrecognized: unrecognized,
         question_type: q.question_type || 'answer',
         subject: q.subject || '数学',
         status: isCorrect ? 'correct' : 'wrong',

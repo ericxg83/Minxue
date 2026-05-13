@@ -1,6 +1,6 @@
 import { useState, useEffect, useMemo } from 'react'
 import { motion } from 'motion/react'
-import { ArrowLeft, ChevronLeft, ChevronRight, CheckCircle2, XCircle, Save, Loader2, ChevronDown, ChevronUp } from 'lucide-react'
+import { ArrowLeft, ChevronLeft, ChevronRight, CheckCircle2, XCircle, Save, Loader2, ChevronDown, ChevronUp, AlertTriangle } from 'lucide-react'
 import { useWrongQuestionStore } from '../../store'
 import { useToast } from '../../components/ToastProvider'
 import { updateQuestion, addWrongQuestions, deleteWrongQuestion, getQuestionsByTask } from '../../services/apiService'
@@ -169,6 +169,8 @@ export default function ExamReview({ task, onClose }) {
 
   const currentQuestion = questions[currentIndex]
   const correctness = getCorrectness(currentQuestion.id)
+  const currentStudentAnswer = getStudentAnswer(currentQuestion.id)
+  const isUnrecognized = !currentStudentAnswer || currentStudentAnswer === '未作答'
 
   return (
     <div style={{
@@ -255,14 +257,12 @@ export default function ExamReview({ task, onClose }) {
                 </div>
                 <div style={{
                   fontSize: '12px', padding: '3px 10px', borderRadius: '10px',
-                  background: currentQuestion.is_correct === false ? '#FEE2E2' : '#DCFCE7',
-                  color: currentQuestion.is_correct === false ? COLORS.danger : COLORS.success,
+                  background: isUnrecognized ? '#FEF3C7' : (correctness === false ? '#FEE2E2' : '#DCFCE7'),
+                  color: isUnrecognized ? COLORS.warning : (correctness === false ? COLORS.danger : COLORS.success),
                   display: 'flex', alignItems: 'center', gap: '4px', flexShrink: 0
                 }}>
-                  {currentQuestion.is_correct === false
-                    ? <XCircle size={12} />
-                    : <CheckCircle2 size={12} />}
-                  AI: {currentQuestion.is_correct === false ? '回答错误' : '回答正确'}
+                  {isUnrecognized ? <AlertTriangle size={12} /> : (correctness === false ? <XCircle size={12} /> : <CheckCircle2 size={12} />)}
+                  {isUnrecognized ? 'AI: 未识别' : (correctness === false ? 'AI: 回答错误' : 'AI: 回答正确')}
                 </div>
               </div>
 
@@ -300,7 +300,83 @@ export default function ExamReview({ task, onClose }) {
                 </div>
               )}
 
-              {/* Collapsible answer & analysis */}
+              {/* Answer comparison — student answer + reference answer side by side */}
+              <div style={{
+                background: COLORS.background, borderRadius: '8px', padding: '12px',
+                marginBottom: '12px'
+              }}>
+                <div style={{ display: 'flex', gap: '12px', marginBottom: '12px' }}>
+                  <div style={{ flex: 1 }}>
+                    <div style={{ fontSize: '12px', fontWeight: 600, color: COLORS.textSecondary, marginBottom: '4px' }}>学生答案</div>
+                    <input
+                      type="text"
+                      value={currentStudentAnswer || ''}
+                      onChange={(e) => handleAnswerChange(currentQuestion.id, e.target.value)}
+                      placeholder={isUnrecognized ? '未识别到答案，请输入...' : '输入学生答案...'}
+                      style={{
+                        width: '100%', padding: '8px 10px', borderRadius: '6px',
+                        border: `1px solid ${isUnrecognized ? COLORS.warning : COLORS.border}`,
+                        fontSize: '14px', color: COLORS.text, outline: 'none',
+                        boxSizing: 'border-box', background: COLORS.card
+                      }}
+                    />
+                    {isUnrecognized && (
+                      <div style={{ fontSize: '11px', color: COLORS.warning, marginTop: '4px' }}>
+                        &#9888; AI 未识别到学生答案，请人工补填
+                      </div>
+                    )}
+                  </div>
+                  <div style={{ flex: 1 }}>
+                    <div style={{ fontSize: '12px', fontWeight: 600, color: COLORS.textSecondary, marginBottom: '4px' }}>参考答案</div>
+                    <div style={{
+                      padding: '8px 10px', borderRadius: '6px',
+                      border: `1px solid ${COLORS.border}`,
+                      fontSize: '14px', color: COLORS.text,
+                      background: COLORS.card, minHeight: '36px',
+                      display: 'flex', alignItems: 'center',
+                      wordBreak: 'break-all'
+                    }}>
+                      {currentQuestion.answer || '暂无答案'}
+                    </div>
+                  </div>
+                </div>
+
+                <div>
+                  <div style={{ fontSize: '12px', color: COLORS.textSecondary, marginBottom: '6px' }}>人工评判</div>
+                  <div style={{ display: 'flex', gap: '12px' }}>
+                    <button
+                      onClick={() => handleToggleCorrect(currentQuestion.id, true)}
+                      style={{
+                        flex: 1, padding: '10px', borderRadius: '8px', border: 'none',
+                        cursor: 'pointer', fontSize: '14px', fontWeight: 600,
+                        display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '6px',
+                        background: correctness === true ? '#DCFCE7' : COLORS.card,
+                        color: correctness === true ? COLORS.success : COLORS.textSecondary,
+                        outline: correctness === true ? '2px solid #16A34A50' : `1px solid ${COLORS.border}`
+                      }}
+                    >
+                      <CheckCircle2 size={16} />
+                      正确
+                    </button>
+                    <button
+                      onClick={() => handleToggleCorrect(currentQuestion.id, false)}
+                      style={{
+                        flex: 1, padding: '10px', borderRadius: '8px', border: 'none',
+                        cursor: 'pointer', fontSize: '14px', fontWeight: 600,
+                        display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '6px',
+                        background: correctness === false ? '#FEE2E2' : COLORS.card,
+                        color: correctness === false ? COLORS.danger : COLORS.textSecondary,
+                        outline: correctness === false ? '2px solid #EF444450' : `1px solid ${COLORS.border}`
+                      }}
+                    >
+                      <XCircle size={16} />
+                      错误
+                    </button>
+                  </div>
+                </div>
+              </div>
+
+              {/* Collapsible analysis section */}
               <div style={{ borderTop: `1px solid ${COLORS.border}`, paddingTop: '12px' }}>
                 <button
                   onClick={() => setShowAnswer(!showAnswer)}
@@ -311,78 +387,15 @@ export default function ExamReview({ task, onClose }) {
                   }}
                 >
                   {showAnswer ? <ChevronUp size={16} /> : <ChevronDown size={16} />}
-                  <span style={{ fontWeight: 500 }}>答案与解析</span>
+                  <span style={{ fontWeight: 500 }}>解析</span>
                 </button>
                 {showAnswer && (
-                  <div style={{ marginTop: '10px', display: 'flex', flexDirection: 'column', gap: '10px' }}>
-                    <div style={{ padding: '10px 12px', background: `${COLORS.primary}08`, borderRadius: '8px' }}>
-                      <div style={{ fontSize: '12px', fontWeight: 600, color: COLORS.primary, marginBottom: '4px' }}>参考答案</div>
-                      <div style={{ fontSize: '14px', color: COLORS.text }}>{currentQuestion.answer || '暂无答案'}</div>
-                    </div>
+                  <div style={{ marginTop: '10px' }}>
                     <div style={{ padding: '10px 12px', background: `${COLORS.success}08`, borderRadius: '8px' }}>
-                      <div style={{ fontSize: '12px', fontWeight: 600, color: COLORS.success, marginBottom: '4px' }}>解析</div>
                       <div style={{ fontSize: '13px', color: COLORS.text, lineHeight: '1.6', whiteSpace: 'pre-wrap' }}>{currentQuestion.analysis || '暂无解析'}</div>
                     </div>
                   </div>
                 )}
-              </div>
-            </div>
-
-            {/* Review Card — manual correction controls */}
-            <div style={{
-              background: COLORS.card, borderRadius: '12px', padding: '16px',
-              boxShadow: '0 1px 4px rgba(0,0,0,0.06)'
-            }}>
-              <div style={{ fontSize: '14px', fontWeight: 600, color: COLORS.text, marginBottom: '12px' }}>人工复核</div>
-
-              <div style={{ marginBottom: '14px' }}>
-                <div style={{ fontSize: '12px', color: COLORS.textSecondary, marginBottom: '6px' }}>学生答案</div>
-                <input
-                  type="text"
-                  value={getStudentAnswer(currentQuestion.id) || ''}
-                  onChange={(e) => handleAnswerChange(currentQuestion.id, e.target.value)}
-                  style={{
-                    width: '100%', padding: '10px 12px', borderRadius: '8px',
-                    border: `1px solid ${COLORS.border}`, fontSize: '14px',
-                    color: COLORS.text, outline: 'none', boxSizing: 'border-box',
-                    background: COLORS.card
-                  }}
-                  placeholder="输入学生答案..."
-                />
-              </div>
-
-              <div>
-                <div style={{ fontSize: '12px', color: COLORS.textSecondary, marginBottom: '8px' }}>人工评判</div>
-                <div style={{ display: 'flex', gap: '12px' }}>
-                  <button
-                    onClick={() => handleToggleCorrect(currentQuestion.id, true)}
-                    style={{
-                      flex: 1, padding: '10px', borderRadius: '8px', border: 'none',
-                      cursor: 'pointer', fontSize: '14px', fontWeight: 600,
-                      display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '6px',
-                      background: correctness === true ? '#DCFCE7' : COLORS.background,
-                      color: correctness === true ? COLORS.success : COLORS.textSecondary,
-                      outline: correctness === true ? '2px solid #16A34A50' : 'none'
-                    }}
-                  >
-                    <CheckCircle2 size={16} />
-                    正确
-                  </button>
-                  <button
-                    onClick={() => handleToggleCorrect(currentQuestion.id, false)}
-                    style={{
-                      flex: 1, padding: '10px', borderRadius: '8px', border: 'none',
-                      cursor: 'pointer', fontSize: '14px', fontWeight: 600,
-                      display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '6px',
-                      background: correctness === false ? '#FEE2E2' : COLORS.background,
-                      color: correctness === false ? COLORS.danger : COLORS.textSecondary,
-                      outline: correctness === false ? '2px solid #EF444450' : 'none'
-                    }}
-                  >
-                    <XCircle size={16} />
-                    错误
-                  </button>
-                </div>
               </div>
             </div>
           </motion.div>

@@ -109,6 +109,81 @@ const downloadImage = async (imageUrl) => {
   }
 }
 
+/**
+ * Normalize answer string for comparison with tolerance for units, case, and formatting.
+ * Returns a cleaned string that can be compared for equality.
+ */
+function normalizeAnswer(str) {
+  if (str === null || str === undefined) return ''
+  let s = String(str)
+
+  // Full-width to half-width (includes letters, digits, punctuation)
+  s = s.replace(/[！-～]/g, ch => String.fromCharCode(ch.charCodeAt(0) - 0xFEE0))
+  // Full-width space to regular space
+  s = s.replace(/　/g, ' ')
+
+  // Trim
+  s = s.trim()
+
+  // Case normalization (letters only)
+  s = s.toUpperCase()
+
+  // Strip trailing common punctuation
+  s = s.replace(/[.,;:!?，。；：！？、）)\]}"'《》「」『』]+$/g, '')
+
+  // Unit synonym replacement (Chinese → symbolic); longer patterns first
+  const unitPairs = [
+    ['小时', 'H'], ['時', 'H'],
+    ['分钟', 'MIN'], ['分鐘', 'MIN'],
+    ['秒钟', 'S'], ['秒鐘', 'S'],
+    ['厘米', 'CM'], ['毫米', 'MM'],
+    ['千克', 'KG'], ['公里', 'KM'],
+    ['毫升', 'ML'],
+    ['度', '°'],
+    ['米', 'M'], ['时', 'H'], ['時', 'H'],
+    ['分', 'MIN'], ['秒', 'S'],
+    ['克', 'G'], ['升', 'L'],
+  ]
+  for (const [cn, sym] of unitPairs) {
+    s = s.replace(new RegExp(cn, 'g'), sym)
+  }
+
+  // Remove all whitespace
+  s = s.replace(/\s+/g, '')
+
+  return s
+}
+
+/**
+ * Compare student answer against reference answer with tolerance.
+ * Returns { isCorrect: boolean, unrecognized: boolean }
+ */
+function judgeAnswer(studentAnswer, referenceAnswer, questionType) {
+  const rawAnswer = String(studentAnswer || '').trim()
+  const hasAnswer = rawAnswer !== '' && rawAnswer !== '未作答'
+
+  if (!hasAnswer) {
+    return { isCorrect: false, unrecognized: true }
+  }
+
+  if (!referenceAnswer) {
+    // No reference answer — mark correct for teacher review
+    return { isCorrect: true, unrecognized: false }
+  }
+
+  if (questionType === 'choice') {
+    // Choice: exact letter match, case-insensitive
+    const normStudent = String(studentAnswer).trim().toUpperCase()
+    const normRef = String(referenceAnswer).trim().toUpperCase()
+    return { isCorrect: normStudent === normRef, unrecognized: false }
+  }
+
+  // Fill / answer / other: normalized comparison with tolerance
+  const normStudent = normalizeAnswer(studentAnswer)
+  const normRef = normalizeAnswer(referenceAnswer)
+  return { isCorrect: normStudent === normRef, unrecognized: false }
+}
+
 const recognizeQuestions = async (imageBase64, taskId, retryCount = 0) => {
   const prompt = buildOCRPrompt()
   const startTime = Date.now()
@@ -159,23 +234,9 @@ const recognizeQuestions = async (imageBase64, taskId, retryCount = 0) => {
     const result = JSON.parse(jsonStr)
 
     const questions = result.questions?.map((q, index) => {
-      let isCorrect = false
-      const studentAnswerStr = String(q.student_answer || '').trim()
-      const hasStudentAnswer = studentAnswerStr !== '' && studentAnswerStr !== '未作答'
-
-      if (!hasStudentAnswer) {
-        isCorrect = false
-      } else if (q.question_type === 'choice' && q.answer && q.student_answer) {
-        const normalizedAnswer = String(q.answer).trim().toUpperCase()
-        const normalizedStudentAnswer = String(q.student_answer).trim().toUpperCase()
-        isCorrect = normalizedAnswer === normalizedStudentAnswer
-      } else if (q.question_type === 'fill' && q.answer && q.student_answer) {
-        const normalizedAnswer = String(q.answer).trim()
-        const normalizedStudentAnswer = String(q.student_answer).trim()
-        isCorrect = normalizedAnswer === normalizedStudentAnswer
-      } else {
-        isCorrect = q.is_correct || false
-      }
+      const judgment = judgeAnswer(q.student_answer, q.answer, q.question_type)
+      const isCorrect = judgment.isCorrect
+      const unrecognized = judgment.unrecognized
 
       return {
         id: crypto.randomUUID(),
