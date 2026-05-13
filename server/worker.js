@@ -163,7 +163,7 @@ function judgeAnswer(studentAnswer, referenceAnswer, questionType) {
   const hasAnswer = rawAnswer !== '' && rawAnswer !== '未作答'
 
   if (!hasAnswer) {
-    return { isCorrect: false, unrecognized: true }
+    return { isCorrect: null, unrecognized: true }
   }
 
   if (!referenceAnswer) {
@@ -248,7 +248,7 @@ const recognizeQuestions = async (imageBase64, taskId, retryCount = 0) => {
         is_correct: isCorrect,
         question_type: q.question_type || 'answer',
         subject: q.subject || '数学',
-        status: isCorrect ? 'correct' : 'wrong',
+        status: isCorrect === true ? 'correct' : (isCorrect === false ? 'wrong' : 'pending'),
         confidence: q.confidence || 0,
         analysis: q.analysis || '',
         block_coordinates: q.block_coordinates || null,

@@ -518,6 +518,7 @@ app.put('/api/questions/:id', async (req, res) => {
   try {
     const { id } = req.params
     const { content, options, answer, analysis, status, question_type, subject, is_correct, student_answer, image_url } = req.body
+    const hasIsCorrect = 'is_correct' in req.body
 
     const { rows } = await query(
       `UPDATE ${TABLES.QUESTIONS}
@@ -528,13 +529,13 @@ app.put('/api/questions/:id', async (req, res) => {
            status = COALESCE($5, status),
            question_type = COALESCE($6, question_type),
            subject = COALESCE($7, subject),
-           is_correct = COALESCE($8, is_correct),
+           is_correct = CASE WHEN $12 AND $8 IS NULL THEN NULL WHEN $12 THEN $8 ELSE is_correct END,
            student_answer = COALESCE($9, student_answer),
            image_url = COALESCE($10, image_url),
            updated_at = NOW()
        WHERE id = $11
        RETURNING *`,
-      [content, options, answer, analysis, status, question_type, subject, is_correct, student_answer, image_url, id]
+      [content, options, answer, analysis, status, question_type, subject, is_correct, student_answer, image_url, id, hasIsCorrect]
     )
 
     if (rows.length === 0) return res.status(404).json({ error: '题目不存在' })

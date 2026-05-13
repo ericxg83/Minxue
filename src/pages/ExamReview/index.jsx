@@ -170,7 +170,8 @@ export default function ExamReview({ task, onClose }) {
   const currentQuestion = questions[currentIndex]
   const correctness = getCorrectness(currentQuestion.id)
   const currentStudentAnswer = getStudentAnswer(currentQuestion.id)
-  const isUnrecognized = !currentStudentAnswer || currentStudentAnswer === '未作答'
+  const isPending = correctness === null
+  const noAnswerDetected = !currentStudentAnswer || currentStudentAnswer === '未作答'
 
   return (
     <div style={{
@@ -257,12 +258,12 @@ export default function ExamReview({ task, onClose }) {
                 </div>
                 <div style={{
                   fontSize: '12px', padding: '3px 10px', borderRadius: '10px',
-                  background: isUnrecognized ? '#FEF3C7' : (correctness === false ? '#FEE2E2' : '#DCFCE7'),
-                  color: isUnrecognized ? COLORS.warning : (correctness === false ? COLORS.danger : COLORS.success),
+                  background: isPending ? '#FEF3C7' : (correctness === false ? '#FEE2E2' : '#DCFCE7'),
+                  color: isPending ? COLORS.warning : (correctness === false ? COLORS.danger : COLORS.success),
                   display: 'flex', alignItems: 'center', gap: '4px', flexShrink: 0
                 }}>
-                  {isUnrecognized ? <AlertTriangle size={12} /> : (correctness === false ? <XCircle size={12} /> : <CheckCircle2 size={12} />)}
-                  {isUnrecognized ? 'AI: 未识别' : (correctness === false ? 'AI: 回答错误' : 'AI: 回答正确')}
+                  {isPending ? <AlertTriangle size={12} /> : (correctness === false ? <XCircle size={12} /> : <CheckCircle2 size={12} />)}
+                  {isPending ? '待批' : (correctness === false ? '回答错误' : '回答正确')}
                 </div>
               </div>
 
@@ -312,15 +313,15 @@ export default function ExamReview({ task, onClose }) {
                       type="text"
                       value={currentStudentAnswer || ''}
                       onChange={(e) => handleAnswerChange(currentQuestion.id, e.target.value)}
-                      placeholder={isUnrecognized ? '未识别到答案，请输入...' : '输入学生答案...'}
+                      placeholder={noAnswerDetected ? '未识别到答案，请输入...' : '输入学生答案...'}
                       style={{
                         width: '100%', padding: '8px 10px', borderRadius: '6px',
-                        border: `1px solid ${isUnrecognized ? COLORS.warning : COLORS.border}`,
+                        border: `1px solid ${noAnswerDetected ? COLORS.warning : COLORS.border}`,
                         fontSize: '14px', color: COLORS.text, outline: 'none',
                         boxSizing: 'border-box', background: COLORS.card
                       }}
                     />
-                    {isUnrecognized && (
+                    {noAnswerDetected && (
                       <div style={{ fontSize: '11px', color: COLORS.warning, marginTop: '4px' }}>
                         &#9888; AI 未识别到学生答案，请人工补填
                       </div>

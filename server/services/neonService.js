@@ -32,7 +32,7 @@ export const updateTaskStatus = async (taskId, status, result = null) => {
 export const createQuestions = async (questions) => {
   const questionsWithTime = questions.map(q => {
     let statusValue = 'pending'
-    if (q.status === 'wrong' || !q.is_correct) {
+    if (q.status === 'wrong' || q.is_correct === false) {
       statusValue = 'wrong'
     } else if (q.status === 'mastered') {
       statusValue = 'mastered'
