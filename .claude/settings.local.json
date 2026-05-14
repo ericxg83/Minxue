@@ -80,7 +80,8 @@
       "Bash(curl -s -X POST http://localhost:3001/api/upload -F \"files=@test_upload.jpg;type=image/jpeg\" -F \"studentId=test\")",
       "Bash(rm -f test_upload.jpg)",
       "Bash(ls server/.env)",
-      "Bash(ls .env)"
+      "Bash(ls .env)",
+      "Bash(git pull *)"
     ]
   }
 }
