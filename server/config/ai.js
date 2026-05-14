@@ -1,7 +1,9 @@
+// Use getters so env vars are resolved lazily at access time, not at module import time.
+// This allows dotenv.config() in index.js / worker.js to set process.env before AI_CONFIG is used.
 export const AI_CONFIG = {
-  ENDPOINT: process.env.AI_ENDPOINT || 'https://api-inference.modelscope.cn/v1/chat/completions',
-  API_KEY: process.env.AI_API_KEY,
-  MODEL: process.env.AI_MODEL || 'Qwen/Qwen3-VL-8B-Instruct',
+  get ENDPOINT() { return process.env.AI_ENDPOINT || 'https://api-inference.modelscope.cn/v1/chat/completions' },
+  get API_KEY() { return process.env.AI_API_KEY },
+  get MODEL() { return process.env.AI_MODEL || 'Qwen/Qwen3-VL-8B-Instruct' },
   TIMEOUT: 120000,
   MAX_RETRIES: 2
 }
@@ -71,6 +73,22 @@ block_coordinates 说明（必填）：
 4. 对于填空题，用 ____ 表示填空位置
 5. 对于解答题，content 包含完整题目描述
 6. 分析规则（重要）：analysis 必须只讲解题目本身的知识点和解法，绝对不能提及学生答案是什么、学生作答情况或任何关于学生表现的评价。分析文本不参与 is_correct 判定。`
+
+export const buildAnswerGenerationPrompt = () => `你是一个专业的K12教育数学与理科助教。你的任务是根据题目内容，计算出该题的标准答案/参考答案。
+
+核心规则：
+1. 对于数学计算题、方程题、几何题，必须给出精确的计算结果，不是估算。答案要使用标准的 LaTeX 数学格式，用 \\(...\\) 包裹行内公式，用 $$...$$ 包裹独立公式块。例如分数写为 \\(\\frac{1}{2}x + 2\\) 而不是 "1/2 x + 2"。
+2. 答案应简洁明确，适合与学生的答案进行对比判定。选择题给出正确选项字母（如 "C"），填空题给出填空内容，解答题给出关键步骤和最终结果。
+3. 如果题目是纯文字主观题（如语文阅读理解、作文题）且没有唯一标准答案，返回 { "answer": "", "analysis": "此题为主观题，无唯一标准答案" }。
+4. 物理、化学题目给出数值+单位（如 "10M/S", "2KG"），涉及公式时使用 LaTeX 格式。
+5. 对于完全无法生成答案的题目（例如题目内容残缺、非学术内容），返回 { "answer": "待人工补充", "analysis": "" }。
+
+请按以下 JSON 格式返回结果（只返回 JSON，不要包含其他文字）：
+{
+  "answer": "标准答案（需要 LaTeX 格式的数学内容请使用 \\(...\\) 或 $$...$$ 包裹）",
+  "analysis": "解题过程或思路说明（可选，同样支持 LaTeX）",
+  "subject": "数学/物理/化学/语文/英语/其他"
+}`
 
 export const buildTaggingPrompt = () => `你是一个专业的教育知识点标注助手。你的任务是根据题目内容，提取该题目考察的具体知识点标签。
 

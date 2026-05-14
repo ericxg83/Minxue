@@ -45,6 +45,9 @@ export const createQuestions = async (questions) => {
       content: q.content || null,
       options: JSON.stringify(q.options || []),
       answer: q.answer || null,
+      student_answer: q.student_answer || null,
+      ai_answer: q.ai_answer || null,
+      answer_source: q.answer_source || 'recognized',
       analysis: q.analysis || null,
       question_type: q.question_type || 'choice',
       subject: q.subject || null,
@@ -113,4 +116,25 @@ export const addWrongQuestions = async (studentId, questionIds) => {
   )
 
   return newIds.map(id => ({ question_id: id }))
+}
+
+export const updateQuestionAnswer = async (questionId, answer, analysis) => {
+  if (!answer && !analysis) return
+
+  let analysisClause = ''
+  const params = [answer || null, questionId]
+
+  if (analysis && analysis.trim()) {
+    analysisClause = ', analysis = CASE WHEN (analysis IS NULL OR analysis = \'\') THEN $3 ELSE analysis END'
+    params.splice(1, 0, analysis)
+  }
+
+  await query(
+    `UPDATE ${TABLES.QUESTIONS}
+     SET answer = $1,
+         updated_at = NOW()
+         ${analysisClause}
+     WHERE id = $2`,
+    params
+  )
 }

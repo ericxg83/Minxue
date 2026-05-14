@@ -733,7 +733,7 @@ export default function Exam() {
       {/* 试卷复审弹窗 */}
       {showReview && reviewExam && (
         <ExamReview
-          exam={reviewExam}
+          task={reviewExam}
           onClose={handleCloseReview}
         />
       )}

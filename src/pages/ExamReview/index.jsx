@@ -4,6 +4,7 @@ import { ArrowLeft, ChevronLeft, ChevronRight, CheckCircle2, XCircle, Save, Load
 import { useWrongQuestionStore } from '../../store'
 import { useToast } from '../../components/ToastProvider'
 import { updateQuestion, addWrongQuestions, deleteWrongQuestion, getQuestionsByTask } from '../../services/apiService'
+import MathText from '../../components/MathText'
 
 const COLORS = {
   primary: '#2563EB',
@@ -67,6 +68,25 @@ export default function ExamReview({ task, onClose }) {
     return q ? (q.student_answer || '') : ''
   }
 
+  const getAnswerStatus = (q) => {
+    // Use effective correctness (edits take priority)
+    const effectiveCorrectness = getCorrectness(q.id)
+    const answerSource = q.answer_source || 'recognized'
+    // If the teacher manually filled in an answer, treat as recognized
+    const effectiveSource = answerSource
+    if (effectiveSource === 'blank') return 'not_answered'
+    if (effectiveCorrectness === null) return 'pending'
+    return effectiveCorrectness ? 'correct' : 'wrong'
+  }
+
+  const getAiDisplayAnswer = (q) => {
+    const aiAnswer = q.ai_answer || ''
+    if (!aiAnswer) return null
+    const currentDisplay = getStudentAnswer(q.id)
+    if (aiAnswer === currentDisplay) return null
+    return aiAnswer
+  }
+
   const handleToggleCorrect = (qId, value) => {
     setEdits(prev => ({
       ...prev,
@@ -75,9 +95,16 @@ export default function ExamReview({ task, onClose }) {
   }
 
   const handleAnswerChange = (qId, value) => {
+    const q = questions.find(x => x.id === qId)
+    const wasBlank = q && (q.answer_source === 'blank')
     setEdits(prev => ({
       ...prev,
-      [qId]: { ...(prev[qId] || {}), student_answer: value }
+      [qId]: {
+        ...(prev[qId] || {}),
+        student_answer: value,
+        // When teacher fills in an answer for a blank question, mark as manual
+        ...(wasBlank && value ? { answer_source: 'manual' } : {})
+      }
     }))
   }
 
@@ -170,8 +197,8 @@ export default function ExamReview({ task, onClose }) {
   const currentQuestion = questions[currentIndex]
   const correctness = getCorrectness(currentQuestion.id)
   const currentStudentAnswer = getStudentAnswer(currentQuestion.id)
-  const isPending = correctness === null
-  const noAnswerDetected = !currentStudentAnswer || currentStudentAnswer === '未作答'
+  const answerStatus = getAnswerStatus(currentQuestion)
+  const aiDisplayAnswer = getAiDisplayAnswer(currentQuestion)
 
   return (
     <div style={{
@@ -258,12 +285,18 @@ export default function ExamReview({ task, onClose }) {
                 </div>
                 <div style={{
                   fontSize: '12px', padding: '3px 10px', borderRadius: '10px',
-                  background: isPending ? '#FEF3C7' : (correctness === false ? '#FEE2E2' : '#DCFCE7'),
-                  color: isPending ? COLORS.warning : (correctness === false ? COLORS.danger : COLORS.success),
-                  display: 'flex', alignItems: 'center', gap: '4px', flexShrink: 0
+                  display: 'flex', alignItems: 'center', gap: '4px', flexShrink: 0,
+                  ...(answerStatus === 'correct' ? { background: '#DCFCE7', color: COLORS.success } :
+                      answerStatus === 'wrong' ? { background: '#FEE2E2', color: COLORS.danger } :
+                      answerStatus === 'not_answered' ? { background: '#FEF3C7', color: COLORS.warning } :
+                      { background: '#FEF3C7', color: COLORS.warning })
                 }}>
-                  {isPending ? <AlertTriangle size={12} /> : (correctness === false ? <XCircle size={12} /> : <CheckCircle2 size={12} />)}
-                  {isPending ? '待批' : (correctness === false ? '回答错误' : '回答正确')}
+                  {answerStatus === 'correct' ? <CheckCircle2 size={12} /> :
+                   answerStatus === 'wrong' ? <XCircle size={12} /> :
+                   <AlertTriangle size={12} />}
+                  {answerStatus === 'correct' ? '回答正确' :
+                   answerStatus === 'wrong' ? '回答错误' :
+                   answerStatus === 'not_answered' ? '未作答' : '待批'}
                 </div>
               </div>
 
@@ -271,7 +304,7 @@ export default function ExamReview({ task, onClose }) {
                 fontSize: '15px', color: COLORS.text,
                 lineHeight: '1.7', marginBottom: '16px', whiteSpace: 'pre-wrap'
               }}>
-                {currentQuestion.content}
+                <MathText content={currentQuestion.content} />
               </div>
 
               {currentQuestion.image_url && (
@@ -295,9 +328,27 @@ export default function ExamReview({ task, onClose }) {
                       fontSize: '14px', color: COLORS.text,
                       padding: '8px 12px', background: COLORS.background, borderRadius: '8px'
                     }}>
-                      {String.fromCharCode(65 + i)}. {opt}
+                      {String.fromCharCode(65 + i)}. <MathText content={opt} />
                     </div>
                   ))}
+                </div>
+              )}
+
+              {/* AI recognition result — shown when AI saw something different from displayed student answer */}
+              {aiDisplayAnswer && (
+                <div style={{
+                  border: '1.5px dashed #93C5FD', borderRadius: '8px', padding: '10px 12px',
+                  marginBottom: '12px', background: '#EFF6FF'
+                }}>
+                  <div style={{ fontSize: '12px', fontWeight: 600, color: '#3B82F6', marginBottom: '4px' }}>
+                    🤖 AI识别结果（仅供参考）
+                  </div>
+                  <div style={{ fontSize: '14px', color: COLORS.text, lineHeight: '1.5' }}>
+                    <MathText content={aiDisplayAnswer} />
+                  </div>
+                  <div style={{ fontSize: '11px', color: '#93C5FD', marginTop: '6px' }}>
+                    此内容为AI从试卷图片中识别到的文字，可能与实际学生答案不同
+                  </div>
                 </div>
               )}
 
@@ -313,17 +364,27 @@ export default function ExamReview({ task, onClose }) {
                       type="text"
                       value={currentStudentAnswer || ''}
                       onChange={(e) => handleAnswerChange(currentQuestion.id, e.target.value)}
-                      placeholder={noAnswerDetected ? '未识别到答案，请输入...' : '输入学生答案...'}
+                      placeholder={answerStatus === 'not_answered' ? '未作答 — 如需补填请在此输入' : '输入学生答案...'}
                       style={{
                         width: '100%', padding: '8px 10px', borderRadius: '6px',
-                        border: `1px solid ${noAnswerDetected ? COLORS.warning : COLORS.border}`,
+                        border: `1px solid ${answerStatus === 'not_answered' ? COLORS.warning : COLORS.border}`,
                         fontSize: '14px', color: COLORS.text, outline: 'none',
                         boxSizing: 'border-box', background: COLORS.card
                       }}
                     />
-                    {noAnswerDetected && (
+                    {/* KaTeX preview banner — visible when student answer contains LaTeX */}
+                    {(currentStudentAnswer || '').includes('\\') && (
+                      <div style={{
+                        marginTop: '6px', padding: '6px 8px', borderRadius: '6px',
+                        background: '#F9FAFB', border: '1px dashed #D1D5DB',
+                        fontSize: '14px', minHeight: '20px'
+                      }}>
+                        <MathText content={currentStudentAnswer} />
+                      </div>
+                    )}
+                    {answerStatus === 'not_answered' && (
                       <div style={{ fontSize: '11px', color: COLORS.warning, marginTop: '4px' }}>
-                        &#9888; AI 未识别到学生答案，请人工补填
+                        &#9888; 未识别到学生笔迹，请人工补填答案
                       </div>
                     )}
                   </div>
@@ -332,12 +393,13 @@ export default function ExamReview({ task, onClose }) {
                     <div style={{
                       padding: '8px 10px', borderRadius: '6px',
                       border: `1px solid ${COLORS.border}`,
-                      fontSize: '14px', color: COLORS.text,
+                      fontSize: '14px', color: currentQuestion.answer ? COLORS.text : '#9CA3AF',
                       background: COLORS.card, minHeight: '36px',
                       display: 'flex', alignItems: 'center',
+                      fontStyle: currentQuestion.answer ? 'normal' : 'italic',
                       wordBreak: 'break-all'
                     }}>
-                      {currentQuestion.answer || '暂无答案'}
+                      {currentQuestion.answer ? <MathText content={currentQuestion.answer} /> : '待人工补充'}
                     </div>
                   </div>
                 </div>
@@ -373,6 +435,20 @@ export default function ExamReview({ task, onClose }) {
                       <XCircle size={16} />
                       错误
                     </button>
+                    <button
+                      onClick={() => handleToggleCorrect(currentQuestion.id, null)}
+                      style={{
+                        flex: '0 0 auto', padding: '10px 14px', borderRadius: '8px', border: 'none',
+                        cursor: 'pointer', fontSize: '14px', fontWeight: 600,
+                        display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '6px',
+                        background: correctness === null ? '#FEF3C7' : COLORS.card,
+                        color: correctness === null ? COLORS.warning : COLORS.textSecondary,
+                        outline: correctness === null ? '2px solid #F59E0B50' : `1px solid ${COLORS.border}`
+                      }}
+                    >
+                      <AlertTriangle size={16} />
+                      待定
+                    </button>
                   </div>
                 </div>
               </div>
@@ -393,7 +469,7 @@ export default function ExamReview({ task, onClose }) {
                 {showAnswer && (
                   <div style={{ marginTop: '10px' }}>
                     <div style={{ padding: '10px 12px', background: `${COLORS.success}08`, borderRadius: '8px' }}>
-                      <div style={{ fontSize: '13px', color: COLORS.text, lineHeight: '1.6', whiteSpace: 'pre-wrap' }}>{currentQuestion.analysis || '暂无解析'}</div>
+                      <div style={{ fontSize: '13px', color: COLORS.text, lineHeight: '1.6' }}><MathText content={currentQuestion.analysis || '暂无解析'} /></div>
                     </div>
                   </div>
                 )}

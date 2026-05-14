@@ -77,6 +77,8 @@ async function initDatabase() {
         is_correct BOOLEAN DEFAULT FALSE,
         confidence DECIMAL(3,2) DEFAULT 0.00,
         student_answer TEXT,
+        ai_answer TEXT,
+        answer_source TEXT DEFAULT 'recognized',
         image_url TEXT,
         ai_tags JSONB DEFAULT '[]',
         manual_tags JSONB DEFAULT '[]',

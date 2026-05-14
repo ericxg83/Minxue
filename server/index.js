@@ -43,6 +43,24 @@ app.get('/api/health', (req, res) => {
   res.json({ status: 'ok', timestamp: new Date().toISOString() })
 })
 
+// Proxy image fetch — avoids CORS issues when drawing cross-origin images to canvas
+app.get('/api/proxy-image', async (req, res) => {
+  try {
+    const { url } = req.query
+    if (!url) return res.status(400).json({ error: 'Missing url param' })
+    const decoded = decodeURIComponent(url)
+    const resp = await fetch(decoded)
+    if (!resp.ok) return res.status(resp.status).json({ error: 'Fetch failed' })
+    const buffer = Buffer.from(await resp.arrayBuffer())
+    const contentType = resp.headers.get('content-type') || 'image/jpeg'
+    res.set('Content-Type', contentType)
+    res.set('Cache-Control', 'public, max-age=86400')
+    res.send(buffer)
+  } catch (e) {
+    res.status(500).json({ error: 'Proxy fetch failed' })
+  }
+})
+
 // Upload a single image (for question images, avatars, etc.)
 app.post('/api/upload', upload.single('files'), async (req, res) => {
   try {
@@ -521,8 +539,12 @@ app.post('/api/questions', async (req, res) => {
 app.put('/api/questions/:id', async (req, res) => {
   try {
     const { id } = req.params
-    const { content, options, answer, analysis, status, question_type, subject, is_correct, student_answer, image_url } = req.body
+    const { content, options, answer, analysis, status, question_type, subject, is_correct, student_answer, image_url, ai_answer, answer_source } = req.body
     const hasIsCorrect = 'is_correct' in req.body
+    const hasAnswerSource = 'answer_source' in req.body && answer_source !== undefined
+
+    // PostgreSQL pg 驱动无法推断 undefined 的类型，统一转 null
+    const n = (v) => v === undefined ? null : v
 
     const { rows } = await query(
       `UPDATE ${TABLES.QUESTIONS}
@@ -533,13 +555,15 @@ app.put('/api/questions/:id', async (req, res) => {
            status = COALESCE($5, status),
            question_type = COALESCE($6, question_type),
            subject = COALESCE($7, subject),
-           is_correct = CASE WHEN $12 AND $8 IS NULL THEN NULL WHEN $12 THEN $8 ELSE is_correct END,
+           is_correct = CASE WHEN $14 THEN $8::boolean ELSE is_correct END,
            student_answer = COALESCE($9, student_answer),
            image_url = COALESCE($10, image_url),
+           ai_answer = COALESCE($11, ai_answer),
+           answer_source = CASE WHEN $15 THEN $12::text ELSE answer_source END,
            updated_at = NOW()
-       WHERE id = $11
+       WHERE id = $13
        RETURNING *`,
-      [content, options, answer, analysis, status, question_type, subject, is_correct, student_answer, image_url, id, hasIsCorrect]
+      [n(content), n(options), n(answer), n(analysis), n(status), n(question_type), n(subject), n(is_correct), n(student_answer), n(image_url), n(ai_answer), n(answer_source), id, hasIsCorrect, hasAnswerSource]
     )
 
     if (rows.length === 0) return res.status(404).json({ error: '题目不存在' })
@@ -590,7 +614,7 @@ app.get('/api/questions/task/:taskId', async (req, res) => {
   try {
     const { taskId } = req.params
     const { rows } = await query(
-      `SELECT * FROM ${TABLES.QUESTIONS} WHERE task_id = $1 ORDER BY created_at`,
+      `SELECT * FROM ${TABLES.QUESTIONS} WHERE task_id = $1 ORDER BY COALESCE((block_coordinates->>'y')::float, 99999), created_at`,
       [taskId]
     )
     res.json({ success: true, questions: rows })

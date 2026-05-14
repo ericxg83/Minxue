@@ -9,8 +9,9 @@ import crypto from 'crypto'
 import axios from 'axios'
 import sharp from 'sharp'
 import { TABLES, TASK_STATUS } from './config/neon.js'
-import { AI_CONFIG, getAIHeaders, buildOCRPrompt, buildTaggingPrompt } from './config/ai.js'
-import { updateTaskStatus, createQuestions, batchUpdateQuestionTags, addWrongQuestions } from './services/neonService.js'
+import { query } from './config/neon.js'
+import { AI_CONFIG, getAIHeaders, buildOCRPrompt, buildTaggingPrompt, buildAnswerGenerationPrompt } from './config/ai.js'
+import { updateTaskStatus, createQuestions, batchUpdateQuestionTags, addWrongQuestions, updateQuestionAnswer } from './services/neonService.js'
 import { uploadImage } from './services/ossService.js'
 
 // AI 密钥校验
@@ -107,6 +108,21 @@ const downloadImage = async (imageUrl) => {
     console.error('下载图片失败:', error)
     throw new Error('下载图片失败: ' + error.message)
   }
+}
+
+/**
+ * Determine the source of the student answer: did the AI find actual
+ * handwriting, or did it see a blank line / fill-in placeholder?
+ * Returns 'blank' when AI likely saw empty/placeholder, otherwise 'recognized'.
+ */
+function determineAnswerSource(rawStudentAnswer) {
+  const trimmed = String(rawStudentAnswer || '').trim()
+  if (!trimmed || trimmed === '未作答') return 'blank'
+  // AI commonly returns "____" for fill-in-blank when it reads the
+  // printed blank line instead of actual student handwriting
+  const stripped = trimmed.replace(/\s/g, '')
+  if (/^_+$/.test(stripped)) return 'blank'
+  return 'recognized'
 }
 
 /**
@@ -234,7 +250,12 @@ const recognizeQuestions = async (imageBase64, taskId, retryCount = 0) => {
     const result = JSON.parse(jsonStr)
 
     const questions = result.questions?.map((q, index) => {
-      const judgment = judgeAnswer(q.student_answer, q.answer, q.question_type)
+      const rawStudentAnswer = q.student_answer || ''
+      const answerSource = determineAnswerSource(rawStudentAnswer)
+      const aiAnswer = rawStudentAnswer
+      const cleanedStudentAnswer = answerSource === 'blank' ? '' : rawStudentAnswer
+
+      const judgment = judgeAnswer(cleanedStudentAnswer, q.answer, q.question_type)
       const isCorrect = judgment.isCorrect
       const unrecognized = judgment.unrecognized
 
@@ -244,7 +265,9 @@ const recognizeQuestions = async (imageBase64, taskId, retryCount = 0) => {
         content: q.content || '',
         options: q.options || [],
         answer: q.answer || '',
-        student_answer: q.student_answer || '',
+        student_answer: cleanedStudentAnswer,
+        ai_answer: aiAnswer,
+        answer_source: answerSource,
         is_correct: isCorrect,
         question_type: q.question_type || 'answer',
         subject: q.subject || '数学',
@@ -358,6 +381,124 @@ const generateTagsForQuestions = async (questions) => {
   return results
 }
 
+/**
+ * Generate a single answer for a question via text-only AI call.
+ */
+const generateAnswerForQuestion = async (questionContent, retryCount = 0) => {
+  if (!questionContent || !questionContent.trim()) {
+    return { success: true, answer: '', analysis: '' }
+  }
+
+  const prompt = buildAnswerGenerationPrompt()
+
+  const requestBody = {
+    model: AI_CONFIG.MODEL,
+    messages: [
+      { role: 'system', content: prompt },
+      { role: 'user', content: `请计算以下题目的标准答案：\n\n${questionContent}` }
+    ],
+    temperature: 0.2,
+    max_tokens: 1000
+  }
+
+  try {
+    const response = await axios.post(AI_CONFIG.ENDPOINT, requestBody, {
+      headers: getAIHeaders(),
+      timeout: 30000
+    })
+
+    const content = response.data.choices[0]?.message?.content
+    if (!content) throw new Error('AI 返回内容为空')
+
+    let jsonStr = content
+    const jsonMatch = content.match(/```json\n?([\s\S]*?)\n?```/) ||
+                      content.match(/```\n?([\s\S]*?)\n?```/)
+    if (jsonMatch) jsonStr = jsonMatch[1]
+
+    const result = JSON.parse(jsonStr)
+
+    return {
+      success: true,
+      answer: result.answer || '',
+      analysis: result.analysis || ''
+    }
+  } catch (error) {
+    const errorMessage = error.response?.data?.message || error.message || '未知错误'
+    const isNetworkError = !error.response || error.code === 'ECONNABORTED' || error.code === 'ETIMEDOUT'
+    const shouldRetry = isNetworkError && retryCount < AI_CONFIG.MAX_RETRIES
+
+    if (shouldRetry) {
+      await new Promise(resolve => setTimeout(resolve, (retryCount + 1) * 1000))
+      return generateAnswerForQuestion(questionContent, retryCount + 1)
+    }
+
+    return { success: true, answer: '', analysis: '' }
+  }
+}
+
+/**
+ * Generate missing reference answers for questions that have empty answers.
+ * Only processes questions where answer is null/empty.
+ */
+const generateMissingAnswers = async (questions) => {
+  if (!questions || questions.length === 0) return { updated: 0, total: 0 }
+
+  const needAnswer = questions.filter(q => !q.answer || q.answer.trim() === '')
+  if (needAnswer.length === 0) {
+    console.log('   所有题目已有参考答案，跳过生成')
+    return { updated: 0, total: 0 }
+  }
+
+  console.log(`   需要生成答案: ${needAnswer.length}/${questions.length} 道题`)
+
+  const batchSize = 3
+  let updatedCount = 0
+  let emptyCount = 0
+  let placeholderCount = 0
+
+  for (let i = 0; i < needAnswer.length; i += batchSize) {
+    const batch = needAnswer.slice(i, i + batchSize)
+    const promises = batch.map(async (q) => {
+      const content = q.content || ''
+      const options = (q.options || []).join('；')
+      const fullContent = options ? `${content}\n选项：${options}` : content
+
+      const result = await generateAnswerForQuestion(fullContent)
+
+      if (result.answer && result.answer !== '待人工补充' && result.answer !== '此为主观题，无唯一标准答案') {
+        try {
+          await updateQuestionAnswer(q.id, result.answer, result.analysis)
+          // Update local question object for downstream use
+          q.answer = result.answer
+          if (result.analysis) q.analysis = result.analysis
+          updatedCount++
+          console.log(`     题目 ${q.id.substring(0, 8)}: 答案已生成`)
+        } catch (err) {
+          console.error(`     题目 ${q.id.substring(0, 8)}: 答案写入失败`, err.message)
+        }
+      } else if (result.answer) {
+        // "待人工补充" or "此为主观题" — still save it
+        placeholderCount++
+        try {
+          await updateQuestionAnswer(q.id, result.answer, result.analysis)
+          q.answer = result.answer
+          if (result.analysis) q.analysis = result.analysis
+          console.log(`     题目 ${q.id.substring(0, 8)}: ${result.answer}`)
+        } catch (err) {
+          console.error(`     题目 ${q.id.substring(0, 8)}: 答案写入失败`, err.message)
+        }
+      } else {
+        emptyCount++
+        console.log(`     题目 ${q.id.substring(0, 8)}: AI 无法生成答案（可能需要参考图片）`)
+      }
+    })
+
+    await Promise.all(promises)
+  }
+
+  return { updated: updatedCount, total: needAnswer.length, empty: emptyCount, placeholder: placeholderCount }
+}
+
 export const processTask = async (job) => {
   const { taskId, studentId, imageUrl: rawImageUrl, originalName } = job.data
   const startTime = Date.now()
@@ -423,11 +564,11 @@ export const processTask = async (job) => {
     await job.updateProgress(15)
     await updateTaskStatus(taskId, TASK_STATUS.PROCESSING, { progress: 15 })
 
-    console.log(`📊 [Step 3/7] 透视拉直图片...`)
+    console.log(`📊 [Step 3/8] 透视拉直图片...`)
     let straightenedBuffer
     try {
       straightenedBuffer = await deskewImage(imageBuffer)
-      console.log(`✅ [Step 3/7] 透视拉直完成`)
+      console.log(`✅ [Step 3/8] 透视拉直完成`)
     } catch (deskewError) {
       console.warn('透视拉直失败，使用原图继续:', deskewError.message)
       straightenedBuffer = imageBuffer
@@ -436,11 +577,11 @@ export const processTask = async (job) => {
     await job.updateProgress(20)
     await updateTaskStatus(taskId, TASK_STATUS.PROCESSING, { progress: 20 })
 
-    console.log(`📊 [Step 4/7] 压缩图片...`)
+    console.log(`📊 [Step 4/8] 压缩图片...`)
     let compressedBuffer
     try {
       compressedBuffer = await compressImageBuffer(straightenedBuffer)
-      console.log(`✅ [Step 4/7] 压缩完成: ${straightenedBuffer.length} → ${compressedBuffer.length} bytes (${Math.round(compressedBuffer.length/straightenedBuffer.length*100)}%)`)
+      console.log(`✅ [Step 4/8] 压缩完成: ${straightenedBuffer.length} → ${compressedBuffer.length} bytes (${Math.round(compressedBuffer.length/straightenedBuffer.length*100)}%)`)
     } catch (compressError) {
       console.error('图片压缩失败:', compressError)
       await updateTaskStatus(taskId, TASK_STATUS.FAILED, {
@@ -458,11 +599,11 @@ export const processTask = async (job) => {
     await job.updateProgress(35)
     await updateTaskStatus(taskId, TASK_STATUS.PROCESSING, { progress: 35 })
 
-    console.log(`📊 [Step 5/7] 调用 AI 视觉识别...`)
+    console.log(`📊 [Step 5/8] 调用 AI 视觉识别...`)
     const ocrResult = await recognizeQuestions(imageBase64, taskId)
 
     if (!ocrResult.success) {
-      console.error(`❌ [Step 5/7] AI 识别失败: ${ocrResult.error}`)
+      console.error(`❌ [Step 5/8] AI 识别失败: ${ocrResult.error}`)
       await updateTaskStatus(taskId, TASK_STATUS.FAILED, {
         error: ocrResult.error || '识别失败',
         shouldRetry: ocrResult.shouldRetry,
@@ -475,12 +616,12 @@ export const processTask = async (job) => {
     await updateTaskStatus(taskId, TASK_STATUS.PROCESSING, { progress: 70 })
 
     const questions = ocrResult.questions || []
-    const wrongCount = questions.filter(q => !q.is_correct).length
+    let wrongCount = questions.filter(q => !q.is_correct).length
 
-    console.log(`✅ [Step 5/7] AI 识别成功: ${questions.length} 道题, ${wrongCount} 道错题, 耗时 ${Math.round(ocrResult.duration/1000)}s`)
+    console.log(`✅ [Step 5/8] AI 识别成功: ${questions.length} 道题, ${wrongCount} 道错题, 耗时 ${Math.round(ocrResult.duration/1000)}s`)
 
     if (questions.length > 0) {
-      console.log(`📊 [Step 6/7] 保存题目到数据库...`)
+      console.log(`📊 [Step 6/8] 保存题目到数据库...`)
 
       const questionsWithStudentId = questions.map(q => ({
         ...q,
@@ -488,12 +629,56 @@ export const processTask = async (job) => {
       }))
 
       await createQuestions(questionsWithStudentId)
-      console.log(`✅ [Step 6/7] 题目保存成功`)
+      console.log(`✅ [Step 6/8] 题目保存成功`)
 
       await job.updateProgress(80)
       await updateTaskStatus(taskId, TASK_STATUS.PROCESSING, { progress: 80 })
 
-      console.log(`📊 [Step 7/7] 生成AI标签...`)
+      console.log(`📊 [Step 7/8] 生成AI参考答案...`)
+      const answerGenResult = await generateMissingAnswers(questions)
+      if (answerGenResult.updated > 0) {
+        // Re-judge correctness for questions whose answers were generated
+        let rejudgedWrong = 0
+        for (const q of questions) {
+          if (q.answer && q.answer.trim() && q.answer !== '待人工补充' && q.answer !== '此为主观题，无唯一标准答案') {
+            const originalCorrect = q.is_correct
+            const judgment = judgeAnswer(q.student_answer, q.answer, q.question_type)
+            if (judgment.isCorrect !== originalCorrect) {
+              q.is_correct = judgment.isCorrect
+              // Update is_correct in DB
+              try {
+                await query(
+                  `UPDATE questions SET is_correct = $1, updated_at = NOW() WHERE id = $2`,
+                  [judgment.isCorrect, q.id]
+                )
+              } catch (e) {
+                console.error(`      更新题目 ${q.id.substring(0, 8)} is_correct 失败:`, e.message)
+              }
+              if (!judgment.isCorrect) rejudgedWrong++
+            }
+          }
+        }
+        // Sync wrong-question-book with updated correctness
+        const wrongIds = questions.filter(q => !q.is_correct).map(q => q.id)
+        if (wrongIds.length > 0) {
+          try {
+            await addWrongQuestions(studentId, wrongIds)
+            console.log(`  ✅ 错题本同步: ${wrongIds.length} 道错题（其中 ${rejudgedWrong} 道由AI答案生成判定）`)
+          } catch (e) {
+            console.error('错题本同步失败:', e.message)
+          }
+        }
+        // Recalculate wrong count with updated correctness
+        wrongCount = questions.filter(q => !q.is_correct).length
+        console.log(`✅ [Step 7/8] AI答案生成完成: 生成了 ${answerGenResult.updated}/${answerGenResult.total} 道题的答案, 重新判定 ${rejudgedWrong} 道错题, 当前错题数: ${wrongCount}`)
+      } else {
+        console.log(`✅ [Step 7/8] AI答案生成完成: 无需生成（${answerGenResult.total} 道题需要处理）`)
+      }
+
+      await job.updateProgress(85)
+      await updateTaskStatus(taskId, TASK_STATUS.PROCESSING, { progress: 85 })
+
+      console.log(`📊 [Step 8/8] 生成AI标签...`)
       const tagResults = await generateTagsForQuestions(questions)
       const tagMap = {}
       for (const tr of tagResults) {
@@ -511,24 +696,10 @@ export const processTask = async (job) => {
         ai_tags: q.ai_tags
       }))
       await batchUpdateQuestionTags(tagUpdates)
-      console.log(`✅ [Step 7/7] AI标签保存成功`)
+      console.log(`✅ [Step 8/8] AI标签保存成功`)
 
       await job.updateProgress(90)
       await updateTaskStatus(taskId, TASK_STATUS.PROCESSING, { progress: 90 })
-
-      const wrongQuestionIds = questions
-        .filter(q => !q.is_correct)
-        .map(q => q.id)
-
-      if (wrongQuestionIds.length > 0) {
-        console.log(` 添加 ${wrongQuestionIds.length} 道错题到错题本...`)
-        try {
-          await addWrongQuestions(studentId, wrongQuestionIds)
-          console.log(`✅ 错题添加成功`)
-        } catch (wrongError) {
-          console.error('添加错题失败（不影响主流程）:', wrongError)
-        }
-      }
     } else {
       console.log(`⚠️  AI 未识别到任何题目`)
     }

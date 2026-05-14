@@ -928,6 +928,7 @@ export default function QuestionEdit({ questionId, onClose, onSave }) {
           image={cropImageSrc}
           onConfirm={handleCropConfirm}
           onCancel={handleCropCancel}
+          theme="light"
         />
       )}
     </Mask>

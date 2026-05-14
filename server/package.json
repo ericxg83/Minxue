@@ -3,8 +3,8 @@
   "version": "1.1.0",
   "type": "module",
   "scripts": {
-    "start": "node --env-file=.env index.js",
-    "dev": "node --env-file=.env --watch index.js"
+    "start": "node index.js",
+    "dev": "node --watch index.js"
   },
   "dependencies": {
     "ali-oss": "^6.20.0",

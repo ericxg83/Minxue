@@ -240,7 +240,9 @@ export const updateQuestion = async (id, updates) => {
       status: updates.status,
       image_url: updates.image_url,
       is_correct: updates.is_correct,
-      student_answer: updates.student_answer
+      student_answer: updates.student_answer,
+      ai_answer: updates.ai_answer,
+      answer_source: updates.answer_source
     })
   })
 }

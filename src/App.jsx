@@ -39,45 +39,20 @@ import ExamReview from './pages/ExamReview'
 import { useToast, ToastProvider } from './components/ToastProvider'
 import dayjs from 'dayjs'
 import jsPDF from 'jspdf'
-import Cropper from 'react-easy-crop'
-import 'react-easy-crop/react-easy-crop.css'
+import RectCropper from './components/RectCropper'
 
 const isMobile = /Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(navigator.userAgent)
 
-function getCroppedImg(imageSrc, croppedAreaPixels, maxWidth = 800) {
-  return new Promise((resolve, reject) => {
-    const image = new Image()
-    image.crossOrigin = 'anonymous'
-    image.src = imageSrc
-    image.onload = () => {
-      const canvas = document.createElement('canvas')
-      const ctx = canvas.getContext('2d')
-      let cropWidth = croppedAreaPixels.width
-      let cropHeight = croppedAreaPixels.height
-      if (cropWidth > maxWidth) {
-        const ratio = maxWidth / cropWidth
-        cropWidth = maxWidth
-        cropHeight = cropHeight * ratio
-      }
-      canvas.width = cropWidth
-      canvas.height = cropHeight
-      ctx.drawImage(
-        image,
-        croppedAreaPixels.x, croppedAreaPixels.y,
-        croppedAreaPixels.width, croppedAreaPixels.height,
-        0, 0,
-        cropWidth, cropHeight
-      )
-      canvas.toBlob((blob) => {
-        if (!blob) {
-          reject(new Error('Canvas is empty'))
-          return
-        }
-        resolve(blob)
-      }, 'image/jpeg', 0.92)
-    }
-    image.onerror = (e) => reject(e)
-  })
+function dataURLtoFile(dataUrl, filename) {
+  const arr = dataUrl.split(',')
+  const mime = arr[0].match(/:(.*?);/)[1]
+  const bstr = atob(arr[1])
+  let n = bstr.length
+  const u8arr = new Uint8Array(n)
+  while (n--) {
+    u8arr[n] = bstr.charCodeAt(n)
+  }
+  return new File([u8arr], filename, { type: mime })
 }
 
 // ==================== Main App ====================
@@ -152,9 +127,6 @@ export default function App() {
   const [showImageCrop, setShowImageCrop] = useState(false)
   const [cropImage, setCropImage] = useState(null)
   const [cropTaskId, setCropTaskId] = useState(null)
-  const [cropArea, setCropArea] = useState({ x: 0, y: 0 })
-  const [cropZoom, setCropZoom] = useState(1)
-  const [croppedAreaPixels, setCroppedAreaPixels] = useState(null)
   const [uploadingCrop, setUploadingCrop] = useState(false)
   const [showEditSourcePicker, setShowEditSourcePicker] = useState(false)
   const [loadingTaskImage, setLoadingTaskImage] = useState(false)
@@ -928,9 +900,6 @@ export default function App() {
     const reader = new FileReader()
     reader.onload = (ev) => {
       setCropImage(ev.target.result)
-      setCropArea({ x: 0, y: 0 })
-      setCropZoom(1)
-      setCroppedAreaPixels(null)
       setShowImageCrop(true)
       setShowEditSourcePicker(false)
     }
@@ -956,9 +925,6 @@ export default function App() {
         return
       }
       setCropImage(task.image_url)
-      setCropArea({ x: 0, y: 0 })
-      setCropZoom(1)
-      setCroppedAreaPixels(null)
       setShowImageCrop(true)
     } catch (error) {
       console.error('获取原试卷图片失败:', error)
@@ -975,21 +941,12 @@ export default function App() {
     if (el) el.click()
   }
 
-  // Crop complete callback
-  const handleCropComplete = (croppedArea, croppedAreaPixels) => {
-    setCroppedAreaPixels(croppedAreaPixels)
-  }
-
-  // Confirm crop
-  const handleCropConfirm = async () => {
-    if (!cropImage || !croppedAreaPixels) {
-      Toast.show({ message: '请先选择裁剪区域', type: 'error' })
-      return
-    }
+  // Confirm crop - receives dataUrl from RectCropper
+  const handleCropConfirm = async (dataUrl) => {
+    if (!dataUrl) return
     setUploadingCrop(true)
     try {
-      const blob = await getCroppedImg(cropImage, croppedAreaPixels)
-      const file = new File([blob], 'question_image.jpg', { type: 'image/jpeg' })
+      const file = dataURLtoFile(dataUrl, 'question_image.jpg')
       const url = await uploadImage(file)
       updateEditForm('image_url', url)
       setShowImageCrop(false)
@@ -1007,7 +964,6 @@ export default function App() {
   const handleCropCancel = () => {
     setShowImageCrop(false)
     setCropImage(null)
-    setCroppedAreaPixels(null)
   }
 
   // Add option in editor
@@ -2065,79 +2021,12 @@ export default function App() {
 
         {/* Crop Dialog */}
         {showImageCrop && (
-          <div className="fixed inset-0 z-[40000] flex flex-col" style={{ background: '#000' }}>
-            <div className="flex-1 relative" style={{ paddingTop: 'env(safe-area-inset-top, 20px)' }}>
-              <Cropper
-                image={cropImage}
-                crop={cropArea}
-                zoom={cropZoom}
-                aspect={16 / 9}
-                cropShape="rect"
-                showGrid={true}
-                onCropChange={setCropArea}
-                onZoomChange={setCropZoom}
-                onCropComplete={handleCropComplete}
-                style={{
-                  containerStyle: { background: '#000', width: '100%', height: '100%' },
-                  cropAreaStyle: { border: '2px solid #fff', color: 'rgba(255,255,255,0.5)', borderRadius: '4px' },
-                  mediaStyle: { maxWidth: '100%', maxHeight: '100%' }
-                }}
-              />
-            </div>
-            <div style={{ padding: '12px 20px', background: '#111', display: 'flex', alignItems: 'center', gap: '12px' }}>
-              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#999" strokeWidth="2">
-                <circle cx="11" cy="11" r="8"/>
-                <line x1="21" y1="21" x2="16.65" y2="16.65"/>
-                <line x1="8" y1="11" x2="14" y2="11"/>
-                <line x1="11" y1="8" x2="11" y2="14"/>
-              </svg>
-              <input
-                type="range"
-                min={1}
-                max={5}
-                step={0.1}
-                value={cropZoom}
-                onChange={e => setCropZoom(Number(e.target.value))}
-                style={{ flex: 1, accentColor: '#2563EB', height: '4px' }}
-              />
-              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#999" strokeWidth="2">
-                <circle cx="11" cy="11" r="8"/>
-                <line x1="21" y1="21" x2="16.65" y2="16.65"/>
-                <line x1="11" y1="8" x2="11" y2="14"/>
-                <line x1="8" y1="11" x2="14" y2="11"/>
-                <line x1="11" y1="11" x2="11" y2="11"/>
-              </svg>
-            </div>
-            <div style={{
-              padding: '16px 20px', paddingBottom: 'calc(16px + env(safe-area-inset-bottom, 0px))',
-              background: '#111', display: 'flex', gap: '12px'
-            }}>
-              <button
-                onClick={handleCropCancel}
-                style={{
-                  flex: 1, padding: '14px', borderRadius: '10px',
-                  border: '1px solid #333', background: 'transparent',
-                  color: '#fff', fontSize: '15px', fontWeight: 500,
-                  cursor: 'pointer'
-                }}
-              >
-                取消
-              </button>
-              <button
-                onClick={handleCropConfirm}
-                disabled={uploadingCrop}
-                style={{
-                  flex: 1, padding: '14px', borderRadius: '10px',
-                  border: 'none', background: uploadingCrop ? '#5B8DEF' : '#2563EB',
-                  color: '#fff', fontSize: '15px', fontWeight: 600,
-                  cursor: uploadingCrop ? 'not-allowed' : 'pointer',
-                  display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '6px'
-                }}
-              >
-                {uploadingCrop ? '上传中...' : '确认裁剪'}
-              </button>
-            </div>
-          </div>
+          <RectCropper
+            image={cropImage}
+            onConfirm={handleCropConfirm}
+            onCancel={handleCropCancel}
+            theme="light"
+          />
         )}
 
         {/* Exam Review / 复审 */}
