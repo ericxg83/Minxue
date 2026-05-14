@@ -26,7 +26,7 @@ import {
 import { motion, AnimatePresence } from 'motion/react'
 import { QRCodeSVG } from 'qrcode.react'
 import { useUIStore, useStudentStore, useTaskStore, useWrongQuestionStore, useExamStore } from './store'
-import { getStudents, getTasksByStudent, getQuestionsByTask, addWrongQuestions, getWrongQuestionsByStudent, getExamsByStudent, getGeneratedExamsByStudent, createTask, updateTaskStatus, uploadImage, updateQuestion, updateQuestionTags, invalidateCache, createStudent, updateWrongQuestionStatus, getQuestionsByIds, deleteTask, deleteGeneratedExam, deleteWrongQuestion } from './services/apiService'
+import { getStudents, getTasksByStudent, getQuestionsByTask, addWrongQuestions, getWrongQuestionsByStudent, getExamsByStudent, getGeneratedExamsByStudent, createTask, updateTaskStatus, uploadImage, updateQuestion, updateQuestionTags, invalidateCache, createStudent, updateWrongQuestionStatus, getQuestionsByIds, deleteTask, deleteGeneratedExam, deleteWrongQuestion, getTaskById } from './services/apiService'
 import { taskService } from './services/taskService'
 import { recognizeQuestions, compressImage, saveRecognitionResult } from './services/aiService'
 import { mockQuestions, mockTasks, mockWrongQuestions, mockGeneratedExams, mockStudents } from './data/mockData'
@@ -39,8 +39,46 @@ import ExamReview from './pages/ExamReview'
 import { useToast, ToastProvider } from './components/ToastProvider'
 import dayjs from 'dayjs'
 import jsPDF from 'jspdf'
+import Cropper from 'react-easy-crop'
+import 'react-easy-crop/react-easy-crop.css'
 
 const isMobile = /Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(navigator.userAgent)
+
+function getCroppedImg(imageSrc, croppedAreaPixels, maxWidth = 800) {
+  return new Promise((resolve, reject) => {
+    const image = new Image()
+    image.crossOrigin = 'anonymous'
+    image.src = imageSrc
+    image.onload = () => {
+      const canvas = document.createElement('canvas')
+      const ctx = canvas.getContext('2d')
+      let cropWidth = croppedAreaPixels.width
+      let cropHeight = croppedAreaPixels.height
+      if (cropWidth > maxWidth) {
+        const ratio = maxWidth / cropWidth
+        cropWidth = maxWidth
+        cropHeight = cropHeight * ratio
+      }
+      canvas.width = cropWidth
+      canvas.height = cropHeight
+      ctx.drawImage(
+        image,
+        croppedAreaPixels.x, croppedAreaPixels.y,
+        croppedAreaPixels.width, croppedAreaPixels.height,
+        0, 0,
+        cropWidth, cropHeight
+      )
+      canvas.toBlob((blob) => {
+        if (!blob) {
+          reject(new Error('Canvas is empty'))
+          return
+        }
+        resolve(blob)
+      }, 'image/jpeg', 0.92)
+    }
+    image.onerror = (e) => reject(e)
+  })
+}
 
 // ==================== Main App ====================
 
@@ -114,6 +152,12 @@ export default function App() {
   const [showImageCrop, setShowImageCrop] = useState(false)
   const [cropImage, setCropImage] = useState(null)
   const [cropTaskId, setCropTaskId] = useState(null)
+  const [cropArea, setCropArea] = useState({ x: 0, y: 0 })
+  const [cropZoom, setCropZoom] = useState(1)
+  const [croppedAreaPixels, setCroppedAreaPixels] = useState(null)
+  const [uploadingCrop, setUploadingCrop] = useState(false)
+  const [showEditSourcePicker, setShowEditSourcePicker] = useState(false)
+  const [loadingTaskImage, setLoadingTaskImage] = useState(false)
   const [showPrintModal, setShowPrintModal] = useState(false)
   const [printTarget, setPrintTarget] = useState(null)
   const [selectedImage, setSelectedImage] = useState(null)
@@ -867,23 +911,103 @@ export default function App() {
     setEditForm(prev => ({ ...prev, [field]: value }))
   }
 
-  // Upload image for question editor
-  const handleEditImageUpload = async (e) => {
+  // Open edit source picker
+  const handleOpenEditSourcePicker = () => {
+    setShowEditSourcePicker(true)
+  }
+
+  // Handle file selected for cropping
+  const handleEditFileSelected = (e) => {
     const file = e.target.files?.[0]
     if (!file) return
     e.target.value = ''
+    if (!file.type.startsWith('image/')) {
+      Toast.show({ message: '请选择图片文件', type: 'error' })
+      return
+    }
+    const reader = new FileReader()
+    reader.onload = (ev) => {
+      setCropImage(ev.target.result)
+      setCropArea({ x: 0, y: 0 })
+      setCropZoom(1)
+      setCroppedAreaPixels(null)
+      setShowImageCrop(true)
+      setShowEditSourcePicker(false)
+    }
+    reader.onerror = () => {
+      Toast.show({ message: '图片读取失败', type: 'error' })
+    }
+    reader.readAsDataURL(file)
+  }
 
-    setUploadingImage(true)
+  // Crop from original task image
+  const handleCropFromTask = async () => {
+    const question = editingQuestionItem?.question || editingQuestionItem
+    if (!question?.task_id) {
+      Toast.show({ message: '未找到原试卷信息', type: 'error' })
+      return
+    }
+    setLoadingTaskImage(true)
+    setShowEditSourcePicker(false)
     try {
+      const task = await getTaskById(question.task_id)
+      if (!task?.image_url) {
+        Toast.show({ message: '原试卷无图片', type: 'error' })
+        return
+      }
+      setCropImage(task.image_url)
+      setCropArea({ x: 0, y: 0 })
+      setCropZoom(1)
+      setCroppedAreaPixels(null)
+      setShowImageCrop(true)
+    } catch (error) {
+      console.error('获取原试卷图片失败:', error)
+      Toast.show({ message: '获取原试卷失败', type: 'error' })
+    } finally {
+      setLoadingTaskImage(false)
+    }
+  }
+
+  // Crop from upload
+  const handleCropFromUpload = () => {
+    setShowEditSourcePicker(false)
+    const el = document.getElementById('edit-image-file-input')
+    if (el) el.click()
+  }
+
+  // Crop complete callback
+  const handleCropComplete = (croppedArea, croppedAreaPixels) => {
+    setCroppedAreaPixels(croppedAreaPixels)
+  }
+
+  // Confirm crop
+  const handleCropConfirm = async () => {
+    if (!cropImage || !croppedAreaPixels) {
+      Toast.show({ message: '请先选择裁剪区域', type: 'error' })
+      return
+    }
+    setUploadingCrop(true)
+    try {
+      const blob = await getCroppedImg(cropImage, croppedAreaPixels)
+      const file = new File([blob], 'question_image.jpg', { type: 'image/jpeg' })
       const url = await uploadImage(file)
       updateEditForm('image_url', url)
-      Toast.show({ message: '图片上传成功', type: 'success' })
+      setShowImageCrop(false)
+      setCropImage(null)
+      Toast.show({ message: '图片裁剪上传成功', type: 'success' })
     } catch (error) {
-      console.error('上传图片失败:', error)
-      Toast.show({ message: '图片上传失败', type: 'error' })
+      console.error('裁剪/上传失败:', error)
+      Toast.show({ message: '图片处理失败', type: 'error' })
     } finally {
-      setUploadingImage(false)
+      setUploadingCrop(false)
     }
+  }
+
+  // Cancel crop
+  const handleCropCancel = () => {
+    setShowImageCrop(false)
+    setCropImage(null)
+    setCroppedAreaPixels(null)
   }
 
   // Add option in editor
@@ -1710,46 +1834,64 @@ export default function App() {
                       </div>
                     )}
 
-                    {/* Image upload area */}
+                    {/* Image upload area with cropping */}
+                    <input
+                      id="edit-image-file-input"
+                      type="file"
+                      accept="image/*"
+                      onChange={handleEditFileSelected}
+                      style={{ display: 'none' }}
+                    />
                     <div style={{
                       border: `2px dashed ${editForm.image_url ? '#2563EB' : '#D1D5DB'}`,
                       borderRadius: '12px',
-                      padding: editForm.image_url ? '12px' : '16px',
+                      padding: editForm.image_url ? '12px' : '20px',
                       textAlign: 'center',
-                      background: editForm.image_url ? '#F8FAFF' : '#FAFAFA'
+                      background: editForm.image_url ? '#F8FAFF' : '#FAFAFA',
+                      transition: 'all 0.2s'
                     }}>
                       {editForm.image_url ? (
-                        <div style={{ position: 'relative', display: 'inline-block', width: '100%' }}>
+                        <div style={{ width: '100%' }}>
                           <img
                             src={editForm.image_url}
-                            alt="配图"
-                            style={{ width: '100%', maxHeight: '180px', objectFit: 'contain', borderRadius: '8px', display: 'block', background: '#F5F7FA' }}
+                            alt="题目配图"
+                            style={{
+                              width: '100%',
+                              maxHeight: '200px',
+                              objectFit: 'contain',
+                              borderRadius: '8px',
+                              display: 'block',
+                              background: '#F5F7FA'
+                            }}
                           />
-                          <div style={{ display: 'flex', gap: '8px', marginTop: '8px', justifyContent: 'center' }}>
-                            <label style={{ fontSize: '12px', color: '#2563EB', cursor: 'pointer', padding: '4px 12px', borderRadius: '6px', background: '#EFF6FF', fontWeight: 500 }}>
-                              {uploadingImage ? '上传中...' : '替换图片'}
-                              <input type="file" accept="image/*" onChange={handleEditImageUpload} style={{ display: 'none' }} disabled={uploadingImage} />
-                            </label>
-                            <span onClick={() => updateEditForm('image_url', '')} style={{ fontSize: '12px', color: '#EF4444', cursor: 'pointer', padding: '4px 12px', borderRadius: '6px', background: '#FEF2F2', fontWeight: 500 }}>
+                          <div style={{ display: 'flex', gap: '8px', marginTop: '10px', justifyContent: 'center', flexWrap: 'wrap' }}>
+                            <span
+                              onClick={handleOpenEditSourcePicker}
+                              style={{ fontSize: '12px', color: '#2563EB', cursor: 'pointer', padding: '4px 12px', borderRadius: '6px', background: '#EFF6FF', fontWeight: 500 }}
+                            >
+                              裁剪替换
+                            </span>
+                            <span
+                              onClick={() => updateEditForm('image_url', '')}
+                              style={{ fontSize: '12px', color: '#EF4444', cursor: 'pointer', padding: '4px 12px', borderRadius: '6px', background: '#FEF2F2', fontWeight: 500 }}
+                            >
                               删除配图
                             </span>
                           </div>
                         </div>
                       ) : (
-                        <label style={{ cursor: 'pointer', display: 'block' }}>
-                          <input type="file" accept="image/*" onChange={handleEditImageUpload} style={{ display: 'none' }} disabled={uploadingImage} />
-                          <div style={{ color: '#6B7280' }}>
-                            <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="#9CA3AF" strokeWidth="1.5" style={{ margin: '0 auto 6px', display: 'block' }}>
-                              <rect x="3" y="3" width="18" height="18" rx="2" ry="2"/>
-                              <circle cx="8.5" cy="8.5" r="1.5"/>
-                              <polyline points="21 15 16 10 5 21"/>
-                            </svg>
-                            <div style={{ fontSize: '13px', fontWeight: 500, color: '#2563EB' }}>
-                              {uploadingImage ? '上传中...' : '添加配图'}
-                            </div>
-                            <div style={{ fontSize: '11px', color: '#9CA3AF', marginTop: '2px' }}>支持 JPG / PNG，可选</div>
-                          </div>
-                        </label>
+                        <div
+                          onClick={handleOpenEditSourcePicker}
+                          style={{ cursor: 'pointer', padding: '8px 0' }}
+                        >
+                          <svg width="36" height="36" viewBox="0 0 24 24" fill="none" stroke="#9CA3AF" strokeWidth="1.5" style={{ margin: '0 auto 8px', display: 'block' }}>
+                            <rect x="3" y="3" width="18" height="18" rx="2" ry="2"/>
+                            <circle cx="8.5" cy="8.5" r="1.5"/>
+                            <polyline points="21 15 16 10 5 21"/>
+                          </svg>
+                          <div style={{ fontSize: '14px', fontWeight: 500, color: '#2563EB' }}>添加配图</div>
+                          <div style={{ fontSize: '11px', color: '#9CA3AF', marginTop: '4px' }}>支持裁剪上传，可选</div>
+                        </div>
                       )}
                     </div>
                   </>
@@ -1840,6 +1982,160 @@ export default function App() {
                   保存
                 </button>
               </div>
+            </div>
+          </div>
+        )}
+
+        {/* Edit Source Picker Dialog */}
+        {showEditSourcePicker && (
+          <div className="fixed inset-0 z-[30000] flex flex-col justify-end" style={{ background: 'rgba(0,0,0,0.5)' }}>
+            <div onClick={() => setShowEditSourcePicker(false)} style={{ flex: 1 }} />
+            <div style={{
+              background: '#fff', borderRadius: '16px 16px 0 0',
+              padding: '24px 20px', paddingBottom: 'calc(24px + env(safe-area-inset-bottom, 0px))'
+            }}>
+              <div style={{ fontSize: '16px', fontWeight: 600, color: '#111827', textAlign: 'center', marginBottom: '20px' }}>
+                选择配图来源
+              </div>
+              {(editingQuestionItem?.question || editingQuestionItem)?.task_id && (
+                <div
+                  onClick={handleCropFromTask}
+                  style={{
+                    display: 'flex', alignItems: 'center', gap: '16px',
+                    padding: '16px', borderRadius: '12px',
+                    background: '#F5F7FA', marginBottom: '12px',
+                    cursor: 'pointer', transition: 'background 0.2s'
+                  }}
+                >
+                  <div style={{
+                    width: '48px', height: '48px', borderRadius: '12px',
+                    background: '#EFF6FF', display: 'flex', alignItems: 'center',
+                    justifyContent: 'center', flexShrink: 0
+                  }}>
+                    <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="#2563EB" strokeWidth="1.5">
+                      <rect x="3" y="3" width="18" height="18" rx="2"/>
+                      <circle cx="8.5" cy="8.5" r="1.5"/>
+                      <polyline points="21 15 16 10 5 21"/>
+                    </svg>
+                  </div>
+                  <div style={{ flex: 1 }}>
+                    <div style={{ fontSize: '15px', fontWeight: 600, color: '#111827' }}>从原试卷裁剪</div>
+                    <div style={{ fontSize: '12px', color: '#9CA3AF', marginTop: '2px' }}>从原试卷图片中截取本题区域</div>
+                  </div>
+                  {loadingTaskImage && (
+                    <div style={{ fontSize: '12px', color: '#2563EB' }}>加载中...</div>
+                  )}
+                </div>
+              )}
+              <div
+                onClick={handleCropFromUpload}
+                style={{
+                  display: 'flex', alignItems: 'center', gap: '16px',
+                  padding: '16px', borderRadius: '12px',
+                  background: '#F5F7FA', marginBottom: '8px',
+                  cursor: 'pointer', transition: 'background 0.2s'
+                }}
+              >
+                <div style={{
+                  width: '48px', height: '48px', borderRadius: '12px',
+                  background: '#FEF2F2', display: 'flex', alignItems: 'center',
+                  justifyContent: 'center', flexShrink: 0
+                }}>
+                  <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="#EF4444" strokeWidth="1.5">
+                    <path d="M23 19a2 2 0 0 1-2 2H3a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h4l2-3h6l2 3h4a2 2 0 0 1 2 2z"/>
+                    <circle cx="12" cy="13" r="4"/>
+                  </svg>
+                </div>
+                <div style={{ flex: 1 }}>
+                  <div style={{ fontSize: '15px', fontWeight: 600, color: '#111827' }}>拍摄或上传裁剪</div>
+                  <div style={{ fontSize: '12px', color: '#9CA3AF', marginTop: '2px' }}>拍照或从相册选择图片进行裁剪</div>
+                </div>
+              </div>
+              <div style={{ textAlign: 'center', marginTop: '12px' }}>
+                <span
+                  onClick={() => setShowEditSourcePicker(false)}
+                  style={{ fontSize: '14px', color: '#6B7280', cursor: 'pointer', padding: '8px 16px' }}
+                >
+                  取消
+                </span>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* Crop Dialog */}
+        {showImageCrop && (
+          <div className="fixed inset-0 z-[40000] flex flex-col" style={{ background: '#000' }}>
+            <div className="flex-1 relative" style={{ paddingTop: 'env(safe-area-inset-top, 20px)' }}>
+              <Cropper
+                image={cropImage}
+                crop={cropArea}
+                zoom={cropZoom}
+                aspect={16 / 9}
+                cropShape="rect"
+                showGrid={true}
+                onCropChange={setCropArea}
+                onZoomChange={setCropZoom}
+                onCropComplete={handleCropComplete}
+                style={{
+                  containerStyle: { background: '#000', width: '100%', height: '100%' },
+                  cropAreaStyle: { border: '2px solid #fff', color: 'rgba(255,255,255,0.5)', borderRadius: '4px' },
+                  mediaStyle: { maxWidth: '100%', maxHeight: '100%' }
+                }}
+              />
+            </div>
+            <div style={{ padding: '12px 20px', background: '#111', display: 'flex', alignItems: 'center', gap: '12px' }}>
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#999" strokeWidth="2">
+                <circle cx="11" cy="11" r="8"/>
+                <line x1="21" y1="21" x2="16.65" y2="16.65"/>
+                <line x1="8" y1="11" x2="14" y2="11"/>
+                <line x1="11" y1="8" x2="11" y2="14"/>
+              </svg>
+              <input
+                type="range"
+                min={1}
+                max={5}
+                step={0.1}
+                value={cropZoom}
+                onChange={e => setCropZoom(Number(e.target.value))}
+                style={{ flex: 1, accentColor: '#2563EB', height: '4px' }}
+              />
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#999" strokeWidth="2">
+                <circle cx="11" cy="11" r="8"/>
+                <line x1="21" y1="21" x2="16.65" y2="16.65"/>
+                <line x1="11" y1="8" x2="11" y2="14"/>
+                <line x1="8" y1="11" x2="14" y2="11"/>
+                <line x1="11" y1="11" x2="11" y2="11"/>
+              </svg>
+            </div>
+            <div style={{
+              padding: '16px 20px', paddingBottom: 'calc(16px + env(safe-area-inset-bottom, 0px))',
+              background: '#111', display: 'flex', gap: '12px'
+            }}>
+              <button
+                onClick={handleCropCancel}
+                style={{
+                  flex: 1, padding: '14px', borderRadius: '10px',
+                  border: '1px solid #333', background: 'transparent',
+                  color: '#fff', fontSize: '15px', fontWeight: 500,
+                  cursor: 'pointer'
+                }}
+              >
+                取消
+              </button>
+              <button
+                onClick={handleCropConfirm}
+                disabled={uploadingCrop}
+                style={{
+                  flex: 1, padding: '14px', borderRadius: '10px',
+                  border: 'none', background: uploadingCrop ? '#5B8DEF' : '#2563EB',
+                  color: '#fff', fontSize: '15px', fontWeight: 600,
+                  cursor: uploadingCrop ? 'not-allowed' : 'pointer',
+                  display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '6px'
+                }}
+              >
+                {uploadingCrop ? '上传中...' : '确认裁剪'}
+              </button>
             </div>
           </div>
         )}

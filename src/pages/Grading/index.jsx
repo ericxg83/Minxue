@@ -393,6 +393,22 @@ export default function Grading({ paperId, studentId, questionIds, onClose, onCo
             {currentQuestion?.content}
           </div>
 
+          {currentQuestion?.image_url && (
+            <div style={{ marginBottom: '16px', textAlign: 'center' }}>
+              <img
+                src={currentQuestion.image_url}
+                alt="题目配图"
+                style={{
+                  width: '100%',
+                  maxHeight: '300px',
+                  objectFit: 'contain',
+                  borderRadius: '8px',
+                  background: COLORS.background
+                }}
+              />
+            </div>
+          )}
+
           {currentQuestion?.options && currentQuestion.options.length > 0 && (
             <div style={{ display: 'flex', flexDirection: isShortOptions ? 'row' : 'column', gap: isShortOptions ? '24px' : '8px', marginBottom: '16px', flexWrap: 'wrap' }}>
               {currentQuestion.options.map((opt, i) => (

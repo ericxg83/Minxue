@@ -310,8 +310,12 @@ export default function WrongBook({ onScanQR }) {
       confirmText: '移除',
       onConfirm: async () => {
         try {
-          await deleteWrongQuestion(id)
-          loadData()
+          if (USE_MOCK_DATA) {
+            setWrongQuestions(prev => prev.filter(wq => wq.id !== id))
+          } else {
+            await deleteWrongQuestion(id)
+            loadData()
+          }
           Toast.show({
             icon: 'success',
             content: '已移除'
