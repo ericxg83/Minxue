@@ -3,8 +3,7 @@ import { Button, Toast, Input, TextArea, Dialog, Mask } from 'antd-mobile'
 import { useStudentStore, useUIStore, useWrongQuestionStore } from '../../store'
 import { updateQuestion, updateQuestionTags, uploadImage, getTaskById } from '../../services/apiService'
 import { mockQuestions } from '../../data/mockData'
-import Cropper from 'react-easy-crop'
-import 'react-easy-crop/react-easy-crop.css'
+import RectCropper from '../../components/RectCropper'
 
 const USE_MOCK_DATA = false
 
@@ -14,45 +13,16 @@ const TABS = [
   { key: 'tags', label: '标签' }
 ]
 
-function getCroppedImg(imageSrc, croppedAreaPixels, maxWidth = 800) {
-  return new Promise((resolve, reject) => {
-    const image = new Image()
-    image.crossOrigin = 'anonymous'
-    image.src = imageSrc
-    image.onload = () => {
-      const canvas = document.createElement('canvas')
-      const ctx = canvas.getContext('2d')
-
-      let cropWidth = croppedAreaPixels.width
-      let cropHeight = croppedAreaPixels.height
-
-      if (cropWidth > maxWidth) {
-        const ratio = maxWidth / cropWidth
-        cropWidth = maxWidth
-        cropHeight = cropHeight * ratio
-      }
-
-      canvas.width = cropWidth
-      canvas.height = cropHeight
-
-      ctx.drawImage(
-        image,
-        croppedAreaPixels.x, croppedAreaPixels.y,
-        croppedAreaPixels.width, croppedAreaPixels.height,
-        0, 0,
-        cropWidth, cropHeight
-      )
-
-      canvas.toBlob((blob) => {
-        if (!blob) {
-          reject(new Error('Canvas is empty'))
-          return
-        }
-        resolve(blob)
-      }, 'image/jpeg', 0.92)
-    }
-    image.onerror = (e) => reject(e)
-  })
+function dataURLtoFile(dataUrl, filename) {
+  const arr = dataUrl.split(',')
+  const mime = arr[0].match(/:(.*?);/)[1]
+  const bstr = atob(arr[1])
+  let n = bstr.length
+  const u8arr = new Uint8Array(n)
+  while (n--) {
+    u8arr[n] = bstr.charCodeAt(n)
+  }
+  return new File([u8arr], filename, { type: mime })
 }
 
 export default function QuestionEdit({ questionId, onClose, onSave }) {
@@ -71,12 +41,8 @@ export default function QuestionEdit({ questionId, onClose, onSave }) {
   const [imageRemoved, setImageRemoved] = useState(false)
   const [showCrop, setShowCrop] = useState(false)
   const [cropImageSrc, setCropImageSrc] = useState('')
-  const [cropArea, setCropArea] = useState({ x: 0, y: 0 })
-  const [cropZoom, setCropZoom] = useState(1)
-  const [croppedAreaPixels, setCroppedAreaPixels] = useState(null)
   const [uploading, setUploading] = useState(false)
   const [showSourcePicker, setShowSourcePicker] = useState(false)
-  const [taskImageUrl, setTaskImageUrl] = useState('')
   const [loadingTaskImage, setLoadingTaskImage] = useState(false)
   const [formData, setFormData] = useState({
     content: '',
@@ -86,8 +52,6 @@ export default function QuestionEdit({ questionId, onClose, onSave }) {
     analysis: '',
     question_type: 'choice'
   })
-
-  const cropImageRef = useRef(null)
 
   const cleanOptionPrefix = (options) => {
     return (options || []).map(opt => {
@@ -162,9 +126,6 @@ export default function QuestionEdit({ questionId, onClose, onSave }) {
     const reader = new FileReader()
     reader.onload = (ev) => {
       setCropImageSrc(ev.target.result)
-      setCropArea({ x: 0, y: 0 })
-      setCropZoom(1)
-      setCroppedAreaPixels(null)
       setShowCrop(true)
       setShowSourcePicker(false)
     }
@@ -191,11 +152,7 @@ export default function QuestionEdit({ questionId, onClose, onSave }) {
         Toast.show({ icon: 'fail', content: '原试卷无图片' })
         return
       }
-      setTaskImageUrl(task.image_url)
       setCropImageSrc(task.image_url)
-      setCropArea({ x: 0, y: 0 })
-      setCropZoom(1)
-      setCroppedAreaPixels(null)
       setShowCrop(true)
     } catch (error) {
       console.error('获取原试卷图片失败:', error)
@@ -213,22 +170,12 @@ export default function QuestionEdit({ questionId, onClose, onSave }) {
     }
   }
 
-  const handleCropComplete = useCallback((croppedArea, croppedAreaPixels) => {
-    setCroppedAreaPixels(croppedAreaPixels)
-  }, [])
-
-  const handleCropConfirm = async () => {
-    if (!cropImageSrc || !croppedAreaPixels) {
-      Toast.show({ icon: 'fail', content: '请先选择裁剪区域' })
-      return
-    }
-
+  const handleCropConfirm = async (dataUrl) => {
+    if (!dataUrl) return
     setUploading(true)
     try {
-      const blob = await getCroppedImg(cropImageSrc, croppedAreaPixels)
-      const file = new File([blob], 'question_image.jpg', { type: 'image/jpeg' })
+      const file = dataURLtoFile(dataUrl, 'question_image.jpg')
       const url = await uploadImage(file)
-
       setDisplayImageUrl(url)
       setImageRemoved(false)
       setShowCrop(false)
@@ -245,7 +192,6 @@ export default function QuestionEdit({ questionId, onClose, onSave }) {
   const handleCropCancel = () => {
     setShowCrop(false)
     setCropImageSrc('')
-    setCroppedAreaPixels(null)
   }
 
   const handleRemoveImage = () => {
@@ -978,105 +924,11 @@ export default function QuestionEdit({ questionId, onClose, onSave }) {
 
       {/* Image Crop Dialog */}
       {showCrop && (
-        <div style={{
-          position: 'fixed', inset: 0, zIndex: 50000,
-          display: 'flex', flexDirection: 'column',
-          background: '#000'
-        }}>
-          <div style={{
-            flex: 1, position: 'relative',
-            paddingTop: 'env(safe-area-inset-top, 20px)'
-          }}>
-            <Cropper
-              image={cropImageSrc}
-              crop={cropArea}
-              zoom={cropZoom}
-              aspect={16 / 9}
-              cropShape="rect"
-              showGrid={true}
-              onCropChange={setCropArea}
-              onZoomChange={setCropZoom}
-              onCropComplete={handleCropComplete}
-              style={{
-                containerStyle: { background: '#000', width: '100%', height: '100%' },
-                cropAreaStyle: {
-                  border: '2px solid #fff',
-                  color: 'rgba(255,255,255,0.5)',
-                  borderRadius: '4px'
-                },
-                mediaStyle: { maxWidth: '100%', maxHeight: '100%' }
-              }}
-            />
-          </div>
-
-          <div style={{
-            padding: '12px 20px', background: '#111',
-            display: 'flex', alignItems: 'center', gap: '12px'
-          }}>
-            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#999" strokeWidth="2">
-              <circle cx="11" cy="11" r="8"/>
-              <line x1="21" y1="21" x2="16.65" y2="16.65"/>
-              <line x1="8" y1="11" x2="14" y2="11"/>
-              <line x1="11" y1="8" x2="11" y2="14"/>
-            </svg>
-            <input
-              type="range"
-              min={1}
-              max={5}
-              step={0.1}
-              value={cropZoom}
-              onChange={e => setCropZoom(Number(e.target.value))}
-              style={{ flex: 1, accentColor: '#2563EB', height: '4px' }}
-            />
-            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#999" strokeWidth="2">
-              <circle cx="11" cy="11" r="8"/>
-              <line x1="21" y1="21" x2="16.65" y2="16.65"/>
-              <line x1="11" y1="8" x2="11" y2="14"/>
-              <line x1="8" y1="11" x2="14" y2="11"/>
-              <line x1="11" y1="11" x2="11" y2="11"/>
-            </svg>
-          </div>
-
-          <div style={{
-            padding: '16px 20px', paddingBottom: 'calc(16px + env(safe-area-inset-bottom, 0px))',
-            background: '#111', display: 'flex', gap: '12px'
-          }}>
-            <button
-              onClick={handleCropCancel}
-              style={{
-                flex: 1, padding: '14px', borderRadius: '10px',
-                border: '1px solid #333', background: 'transparent',
-                color: '#fff', fontSize: '15px', fontWeight: 500,
-                cursor: 'pointer'
-              }}
-            >
-              取消
-            </button>
-            <button
-              onClick={handleCropConfirm}
-              disabled={uploading}
-              style={{
-                flex: 1, padding: '14px', borderRadius: '10px',
-                border: 'none', background: uploading ? '#5B8DEF' : '#2563EB',
-                color: '#fff', fontSize: '15px', fontWeight: 600,
-                cursor: uploading ? 'not-allowed' : 'pointer',
-                display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '6px'
-              }}
-            >
-              {uploading ? (
-                <>
-                  <span style={{
-                    display: 'inline-block', width: '16px', height: '16px',
-                    border: '2px solid rgba(255,255,255,0.3)',
-                    borderTopColor: '#fff', borderRadius: '50%',
-                    animation: 'spin 0.8s linear infinite'
-                  }} />
-                  上传中...
-                </>
-              ) : '确认裁剪'}
-            </button>
-          </div>
-        </div>
+        <RectCropper
+          image={cropImageSrc}
+          onConfirm={handleCropConfirm}
+          onCancel={handleCropCancel}
+        />
       )}
     </Mask>
   )
