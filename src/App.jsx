@@ -8,7 +8,7 @@ import {
   LayoutGrid,
   FileText,
   Sparkles,
-  Search,
+  RefreshCw,
   Bell,
   Plus,
   QrCode,
@@ -38,7 +38,7 @@ import PrintPreview from './pages/PrintPreview'
 import ExamReview from './pages/ExamReview'
 import { useToast, ToastProvider } from './components/ToastProvider'
 import dayjs from 'dayjs'
-import jsPDF from 'jspdf'
+import { generateExamPDF } from './utils/pdfGenerator'
 import RectCropper from './components/RectCropper'
 
 const isMobile = /Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(navigator.userAgent)
@@ -102,8 +102,7 @@ export default function App() {
   const [previewImageUrl, setPreviewImageUrl] = useState(null)
   const [showNotifications, setShowNotifications] = useState(false)
   const [notifications, setNotifications] = useState([])
-  const [showSearch, setShowSearch] = useState(false)
-  const [searchQuery, setSearchQuery] = useState('')
+  const [refreshing, setRefreshing] = useState(false)
   const [showTagManager, setShowTagManager] = useState(false)
   const [managingTagsQuestion, setManagingTagsQuestion] = useState(null)
   const [showAddTag, setShowAddTag] = useState(false)
@@ -649,87 +648,23 @@ export default function App() {
     if (!result) return
     const { examQuestions, examTitle } = result
 
-    const doc = new jsPDF('p', 'mm', 'a4')
-    const pageWidth = doc.internal.pageSize.getWidth()
-    const pageHeight = doc.internal.pageSize.getHeight()
-    const margin = 20
-    let y = margin
+    try {
+      await generateExamPDF({
+        title: examTitle,
+        studentName: currentStudent?.name || '',
+        questions: examQuestions,
+        filename: `${examTitle}_${dayjs().format('YYYYMMDD_HHmmss')}`,
+        showAnswers: true,
+      })
 
-    // Title
-    doc.setFontSize(16)
-    doc.setFont('helvetica', 'bold')
-    doc.text(examTitle, pageWidth / 2, y, { align: 'center' })
-    y += 8
-
-    // Meta
-    doc.setFontSize(10)
-    doc.setFont('helvetica', 'normal')
-    doc.setTextColor(100)
-    doc.text(`共 ${examQuestions.length} 题 · ${dayjs().format('YYYY/MM/DD')}`, pageWidth / 2, y, { align: 'center' })
-    y += 10
-
-    // Questions
-    doc.setTextColor(50)
-    for (let i = 0; i < examQuestions.length; i++) {
-      const q = examQuestions[i]
-      const label = `${i + 1}. ${q.question_type === 'choice' ? '选择题' : '非选择题'}`
-
-      if (y > pageHeight - margin) {
-        doc.addPage()
-        y = margin
-      }
-
-      doc.setFontSize(12)
-      doc.setFont('helvetica', 'bold')
-      doc.text(label, margin, y)
-      y += 6
-
-      doc.setFontSize(11)
-      doc.setFont('helvetica', 'normal')
-      const lines = doc.splitTextToSize(q.content || '', pageWidth - margin * 2)
-      if (y + lines.length * 5 > pageHeight - margin) {
-        doc.addPage()
-        y = margin
-        doc.setFontSize(12)
-        doc.setFont('helvetica', 'bold')
-        doc.text(label, margin, y)
-        y += 6
-        doc.setFontSize(11)
-        doc.setFont('helvetica', 'normal')
-      }
-      doc.text(lines, margin, y)
-      y += lines.length * 5 + 3
-
-      if (q.options?.length) {
-        if (y + q.options.length * 5 > pageHeight - margin) {
-          doc.addPage()
-          y = margin
-        }
-        q.options.forEach((opt, oi) => {
-          doc.text(`${String.fromCharCode(65 + oi)}. ${opt}`, margin + 5, y)
-          y += 5
-        })
-        y += 2
-      }
-
-      if (y + 5 > pageHeight - margin) {
-        doc.addPage()
-        y = margin
-      }
-      doc.setFont('helvetica', 'italic')
-      doc.setTextColor(37, 99, 235)
-      doc.text(`答案：${q.answer || '略'}`, margin, y)
-      doc.setTextColor(50)
-      y += 8
+      setGeneratedExams((Array.isArray(generatedExams) ? generatedExams : []).map(e =>
+        e.id === exam.id ? { ...e, printed: true, printCount: (e.printCount || 0) + 1 } : e
+      ))
+      Toast.show({ message: 'PDF已生成，请查看下载', type: 'success' })
+    } catch (error) {
+      console.error('PDF生成失败:', error)
+      Toast.show({ message: 'PDF生成失败', type: 'error' })
     }
-
-    const fileName = `${examTitle}_${dayjs().format('YYYYMMDD_HHmmss')}.pdf`
-    doc.save(fileName)
-
-    setGeneratedExams((Array.isArray(generatedExams) ? generatedExams : []).map(e =>
-      e.id === exam.id ? { ...e, printed: true, printCount: (e.printCount || 0) + 1 } : e
-    ))
-    Toast.show({ message: 'PDF已生成，请查看下载', type: 'success' })
   }
 
   // Duplicate exam
@@ -1082,24 +1017,35 @@ export default function App() {
     setNotifications((Array.isArray(notifications) ? notifications : []).filter(n => n.id !== notificationId))
   }
 
-  // Search
-  const handleSearch = (query) => {
-    setSearchQuery(query)
+  // Manual refresh
+  const handleRefresh = async () => {
+    if (!currentStudent) {
+      Toast.show({ message: '请先选择学生', type: 'error', duration: 1500 })
+      return
+    }
+    setRefreshing(true)
+    try {
+      invalidateCache('students')
+      invalidateCache('tasks', currentStudent.id)
+      invalidateCache('wrong', currentStudent.id)
+      invalidateCache('exams', currentStudent.id)
+      invalidateCache('generated', currentStudent.id)
+
+      if (currentPage === 'processing') {
+        await loadTasks()
+      } else if (currentPage === 'wrongbook') {
+        await loadWrongBookData()
+      } else if (currentPage === 'exam') {
+        await loadGeneratedExams(false)
+      }
+      Toast.show({ message: '刷新成功', type: 'success', duration: 1500 })
+    } catch (error) {
+      console.error('刷新失败:', error)
+      Toast.show({ message: '刷新失败，请重试', type: 'error', duration: 2000 })
+    } finally {
+      setRefreshing(false)
+    }
   }
-
-  // Filter by search
-  const searchFilteredTasks = filteredTasks.filter(t =>
-    searchQuery === '' || t.original_name?.toLowerCase().includes(searchQuery.toLowerCase())
-  )
-
-  const searchFilteredWrongQuestions = filteredWrongQuestions.filter(wq => {
-    const question = wq.question || wq
-    return searchQuery === '' || question.content?.toLowerCase().includes(searchQuery.toLowerCase())
-  })
-
-  const searchFilteredExams = studentExams.filter(e =>
-    searchQuery === '' || e.name?.toLowerCase().includes(searchQuery.toLowerCase())
-  )
 
   // Render
   return (
@@ -1122,10 +1068,11 @@ export default function App() {
             </div>
             <div className="flex items-center gap-2">
               <button
-                onClick={() => setShowSearch(true)}
-                className="w-8 h-8 rounded-full flex items-center justify-center" style={{ background: '#F3F4F6' }}
+                onClick={handleRefresh}
+                disabled={refreshing}
+                className="w-8 h-8 rounded-full flex items-center justify-center" style={{ background: '#F3F4F6', opacity: refreshing ? 0.6 : 1 }}
               >
-                <Search size={16} className="text-gray-500" />
+                <RefreshCw size={16} className={`text-gray-500 ${refreshing ? 'animate-spin' : ''}`} />
               </button>
               <button
                 onClick={handleShowNotifications}
@@ -1177,14 +1124,14 @@ export default function App() {
 
                 {/* Task List - Compact File Style */}
                 <section className="px-4 space-y-1">
-                  {searchFilteredTasks.length === 0 ? (
+                  {filteredTasks.length === 0 ? (
                     <div className="text-center py-16">
                       <Camera size={36} className="mx-auto" style={{ color: '#D1D5DB' }} />
                       <p className="mt-3" style={{ fontSize: '13px', color: '#9CA3AF' }}>暂无任务</p>
                       <p className="mt-0.5" style={{ fontSize: '11px', color: '#D1D5DB' }}>点击右下角按钮上传试卷</p>
                     </div>
                   ) : (
-                    searchFilteredTasks.map((task) => (
+                    filteredTasks.map((task) => (
                       <motion.div
                         key={task.id}
                         layout
@@ -1551,14 +1498,14 @@ export default function App() {
 
                 {/* Exam List */}
                 <section className="px-4 space-y-2">
-                  {searchFilteredExams.length === 0 ? (
+                  {studentExams.length === 0 ? (
                     <div className="text-center py-16">
                       <FileText size={36} className="mx-auto" style={{ color: '#D1D5DB' }} />
                       <p className="mt-3" style={{ fontSize: '13px', color: '#9CA3AF' }}>暂无组卷记录</p>
                       <p className="mt-0.5" style={{ fontSize: '11px', color: '#D1D5DB' }}>在错题本选择题目后点击"生成试卷"</p>
                     </div>
                   ) : (
-                    searchFilteredExams.map((exam) => (
+                    studentExams.map((exam) => (
                       <motion.div
                         key={exam.id}
                         layout

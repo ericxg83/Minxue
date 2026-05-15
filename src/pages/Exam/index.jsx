@@ -11,7 +11,7 @@ import { getGeneratedExamsByStudent, getQuestionsByIds } from '../../services/ap
 import StudentSwitcher from '../../components/StudentSwitcher'
 import ExamReview from '../ExamReview'
 import dayjs from 'dayjs'
-import jsPDF from 'jspdf'
+import { generateExamPDF } from '../../utils/pdfGenerator'
 
 const USE_MOCK_DATA = false
 
@@ -191,89 +191,26 @@ export default function Exam() {
     const examTitle = exam.name
 
     if (isMobile) {
-      const doc = new jsPDF('p', 'mm', 'a4')
-      const pageWidth = 210
-      const pageHeight = 297
-      const margin = 20
-      const contentWidth = pageWidth - margin * 2
-      let y = margin
+      try {
+        generateExamPDF({
+          title: `${currentStudent?.name || '学生'} - ${examTitle}`,
+          studentName: currentStudent?.name || '',
+          questions: examQuestions,
+          filename: `${currentStudent?.name || 'student'}_${examTitle}_${dayjs().format('YYYYMMDD_HHmm')}`,
+          showAnswers: false,
+        })
 
-      doc.setFont('helvetica', 'bold')
-      doc.setFontSize(18)
-      doc.text(`${currentStudent?.name || 'Student'} - ${examTitle}`, pageWidth / 2, y, { align: 'center' })
-      y += 12
-
-      doc.setFont('helvetica', 'normal')
-      doc.setFontSize(10)
-      doc.text(`Total: ${examQuestions.length} questions | Score: 100 | Time: 60min`, pageWidth / 2, y, { align: 'center' })
-      y += 8
-
-      doc.setDrawColor(200)
-      doc.line(margin, y, pageWidth - margin, y)
-      y += 8
-
-      doc.setFontSize(10)
-      doc.text(`Name: ______________    Date: ____/____/____`, margin, y)
-      y += 12
-
-      examQuestions.forEach((q, index) => {
-        if (y > pageHeight - 40) {
-          doc.addPage()
-          y = margin
-        }
-
-        const questionType = q.question_type === 'choice' ? 'Choice' : q.question_type === 'fill' ? 'Fill' : 'Answer'
-        
-        doc.setFont('helvetica', 'bold')
-        doc.setFontSize(12)
-        doc.text(`${index + 1}. (${questionType})`, margin, y)
-        y += 7
-
-        doc.setFont('helvetica', 'normal')
-        doc.setFontSize(11)
-        const qContent = q.content || 'No content'
-        const lines = doc.splitTextToSize(qContent, contentWidth)
-        doc.text(lines, margin, y)
-        y += lines.length * 6
-
-        if (q.options && q.options.length > 0) {
-          y += 3
-          q.options.forEach((opt, i) => {
-            if (y > pageHeight - 20) {
-              doc.addPage()
-              y = margin
-            }
-            doc.text(`${String.fromCharCode(65 + i)}. ${opt}`, margin + 10, y)
-            y += 6
-          })
-        }
-
-        if (q.question_type === 'answer') {
-          y += 5
-          doc.setDrawColor(200)
-          doc.rect(margin, y, contentWidth, 30)
-          y += 35
-        }
-
-        y += 5
-      })
-
-      y += 10
-      if (y > pageHeight - 20) {
-        doc.addPage()
-        y = margin
+        Toast.show({
+          icon: 'success',
+          content: 'PDF已生成，请查看下载'
+        })
+      } catch (error) {
+        console.error('PDF生成失败:', error)
+        Toast.show({
+          icon: 'fail',
+          content: 'PDF生成失败'
+        })
       }
-      doc.setFontSize(8)
-      doc.setTextColor(150)
-      doc.text('Minxue - Smart Learning System', pageWidth / 2, y, { align: 'center' })
-
-      const fileName = `${currentStudent?.name || 'student'}_${examTitle}_${dayjs().format('YYYYMMDD_HHmm')}.pdf`
-      doc.save(fileName)
-
-      Toast.show({
-        icon: 'success',
-        content: 'PDF已生成，请查看下载'
-      })
     } else {
       const printContent = `
         <!DOCTYPE html>
