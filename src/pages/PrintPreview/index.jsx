@@ -2,6 +2,7 @@ import { useState, useRef, useEffect } from 'react'
 import { motion, AnimatePresence } from 'motion/react'
 import { ArrowLeft, Printer, FileDown, QrCode, Eye, EyeOff } from 'lucide-react'
 import { QRCodeSVG } from 'qrcode.react'
+import { Toast } from 'antd-mobile'
 import { useStudentStore, useWrongQuestionStore, useUIStore, useExamStore } from '../../store'
 import { mockWrongQuestions } from '../../data/mockData'
 import { createGeneratedExam } from '../../services/apiService'
@@ -165,16 +166,7 @@ export default function PrintPreview({ onClose }) {
     if (isMobile) {
       await generatePDF()
     } else {
-      const content = generatePrintContent()
-      const w = window.open('', '_blank')
-      if (!w) {
-        alert('请允许弹出窗口来打印试卷')
-        return
-      }
-      w.document.write(content)
-      w.document.close()
-      w.focus()
-      w.print()
+      await generatePDF()
     }
 
     onClose()
@@ -188,6 +180,7 @@ export default function PrintPreview({ onClose }) {
         questions: previewQuestions,
         filename: `${currentStudent?.name || 'student'}_cuoti_${dayjs().format('YYYYMMDD_HHmm')}`,
         showAnswers: false,
+        qrContent: qrContent,
       })
     } catch (error) {
       console.error('PDF生成失败:', error)
@@ -195,10 +188,21 @@ export default function PrintPreview({ onClose }) {
     }
   }
 
-  const handleExportPDF = () => {
-    setTimeout(() => {
-      alert('PDF生成成功')
-    }, 1000)
+  const handleExportPDF = async () => {
+    try {
+      await generateExamPDF({
+        title: `${currentStudent?.name || '学生'} - 错题重练卷`,
+        studentName: currentStudent?.name || '',
+        questions: previewQuestions,
+        filename: `${currentStudent?.name || 'student'}_cuoti_${dayjs().format('YYYYMMDD_HHmm')}`,
+        showAnswers: false,
+        qrContent: qrContent,
+      })
+      Toast.show({ icon: 'success', content: 'PDF已生成，请查看下载' })
+    } catch (error) {
+      console.error('PDF生成失败:', error)
+      Toast.show({ icon: 'fail', content: 'PDF生成失败，请重试' })
+    }
   }
 
   const handleSimulateScan = () => {

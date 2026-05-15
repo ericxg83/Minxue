@@ -1,9 +1,10 @@
 import html2canvas from 'html2canvas'
 import jsPDF from 'jspdf'
+import qrcode from 'qrcode-generator'
 
 const A4_W = 210
 const A4_H = 297
-const CONTENT_W = 170 // A4_W - 2*20 margin
+const CONTENT_W = 170
 
 function escapeHtml(text) {
   if (!text) return ''
@@ -12,6 +13,42 @@ function escapeHtml(text) {
     .replace(/</g, '&lt;')
     .replace(/>/g, '&gt;')
     .replace(/"/g, '&quot;')
+}
+
+function generateQRDataUrl(text, size = 140) {
+  try {
+    const qr = qrcode(0, 'L')
+    qr.addData(text)
+    qr.make()
+
+    const canvas = document.createElement('canvas')
+    canvas.width = size
+    canvas.height = size
+    const ctx = canvas.getContext('2d')
+
+    const cellSize = size / qr.getModuleCount()
+    ctx.fillStyle = '#ffffff'
+    ctx.fillRect(0, 0, size, size)
+    ctx.fillStyle = '#000000'
+
+    for (let row = 0; row < qr.getModuleCount(); row++) {
+      for (let col = 0; col < qr.getModuleCount(); col++) {
+        if (qr.isDark(row, col)) {
+          ctx.fillRect(
+            Math.floor(col * cellSize),
+            Math.floor(row * cellSize),
+            Math.ceil(cellSize),
+            Math.ceil(cellSize)
+          )
+        }
+      }
+    }
+
+    return canvas.toDataURL('image/png')
+  } catch (e) {
+    console.warn('QR code generation failed:', e)
+    return null
+  }
 }
 
 function buildExamHTML({ title, studentName, questions, showAnswers }) {
@@ -53,7 +90,7 @@ function buildExamHTML({ title, studentName, questions, showAnswers }) {
   return `<!DOCTYPE html><html><head><meta charset="utf-8"><style>
     *{margin:0;padding:0;box-sizing:border-box}
     body{font-family:'Microsoft YaHei','PingFang SC','Noto Sans SC','SimSun',sans-serif;color:#1a1a1a}
-    .page{width:794px;padding:30px 40px}
+    .page{width:794px;padding:30px 40px;position:relative}
     .title{text-align:center;font-size:22px;font-weight:bold;margin-bottom:6px;letter-spacing:1px}
     .sub-title{text-align:center;font-size:13px;color:#555;margin-bottom:12px}
     .info{display:flex;justify-content:space-between;font-size:14px;margin-bottom:4px}
@@ -73,8 +110,15 @@ function buildExamHTML({ title, studentName, questions, showAnswers }) {
     .ans-line{border-bottom:1px solid #d0d0d0;height:30px;margin-bottom:3px}
     .answer-key{font-size:12px;color:#2563EB;margin-top:3px;padding-left:36px}
     .footer{text-align:center;font-size:11px;color:#999;margin-top:20px;padding-top:8px;border-top:1px solid #ddd}
+    .qr-container{position:absolute;top:20px;right:40px;text-align:center;}
+    .qr-canvas{width:70px;height:70px;}
+    .qr-text{font-size:10px;color:#999;margin-top:4px;}
   </style></head><body>
   <div class="page">
+    <div id="qr-container" class="qr-container" style="display:none;">
+      <canvas id="qr-canvas" class="qr-canvas" width="140" height="140"></canvas>
+      <div class="qr-text">扫码批改</div>
+    </div>
     <div class="title">${escapeHtml(title)}</div>
     <div class="sub-title">${escapeHtml(studentName)}</div>
     <div class="info">
@@ -91,7 +135,7 @@ function buildExamHTML({ title, studentName, questions, showAnswers }) {
   </body></html>`
 }
 
-export async function generateExamPDF({ title, studentName, questions, filename, showAnswers = false }) {
+export async function generateExamPDF({ title, studentName, questions, filename, showAnswers = false, qrContent }) {
   if (!questions || questions.length === 0) {
     throw new Error('没有题目可生成PDF')
   }
@@ -106,6 +150,41 @@ export async function generateExamPDF({ title, studentName, questions, filename,
   document.body.appendChild(container)
 
   try {
+    if (qrContent) {
+      const qrCanvas = container.querySelector('#qr-canvas')
+      const qrContainer = container.querySelector('#qr-container')
+      if (qrCanvas && qrContainer) {
+        const qr = qrcode(0, 'L')
+        qr.addData(qrContent)
+        qr.make()
+
+        const size = 140
+        qrCanvas.width = size
+        qrCanvas.height = size
+        const ctx = qrCanvas.getContext('2d')
+
+        const cellSize = size / qr.getModuleCount()
+        ctx.fillStyle = '#ffffff'
+        ctx.fillRect(0, 0, size, size)
+        ctx.fillStyle = '#000000'
+
+        for (let row = 0; row < qr.getModuleCount(); row++) {
+          for (let col = 0; col < qr.getModuleCount(); col++) {
+            if (qr.isDark(row, col)) {
+              ctx.fillRect(
+                Math.floor(col * cellSize),
+                Math.floor(row * cellSize),
+                Math.ceil(cellSize),
+                Math.ceil(cellSize)
+              )
+            }
+          }
+        }
+
+        qrContainer.style.display = 'block'
+      }
+    }
+
     const canvas = await html2canvas(container, {
       scale: 2,
       useCORS: true,
@@ -115,7 +194,7 @@ export async function generateExamPDF({ title, studentName, questions, filename,
     })
 
     const imgData = canvas.toDataURL('image/jpeg', 0.92)
-    const pageH = (794 / A4_W) * A4_H // px height of one A4 page at 794px width
+    const pageH = (794 / A4_W) * A4_H
     const totalPages = Math.ceil(canvas.height / pageH)
 
     const doc = new jsPDF('p', 'mm', 'a4')
