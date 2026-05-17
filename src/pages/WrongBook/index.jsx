@@ -15,6 +15,7 @@ import { RightOutline, DownOutline } from 'antd-mobile-icons'
 import { useStudentStore, useWrongQuestionStore, useUIStore } from '../../store'
 import { getWrongQuestionsByStudent, deleteWrongQuestion, updateWrongQuestionStatus, createGeneratedExam } from '../../services/apiService'
 import { generateQRCodeContent } from '../../services/aiService'
+import { generateExamPDF } from '../../utils/pdfGenerator'
 import { mockWrongQuestions, mockStudents } from '../../data/mockData'
 import StudentSwitcher from '../../components/StudentSwitcher'
 import PrintPreview from '../PrintPreview'
@@ -440,73 +441,41 @@ export default function WrongBook({ onScanQR }) {
     }
   }
 
-  // 生成打印内容
-  const handlePrint = () => {
+  const generatePaperId = () => {
+    return 'paper_' + Date.now() + '_' + Math.random().toString(36).substr(2, 9)
+  }
+
+  const handlePrint = async () => {
     if (selectedQuestions.length === 0) {
       Toast.show('请先选择要打印的题目')
       return
     }
 
-    const printWindow = window.open('', '_blank')
-    if (!printWindow) {
-      Toast.show('请允许弹出窗口')
-      return
+    const questions = selectedQuestions.map(wq => wq.question || wq)
+    const newPaperId = generatePaperId()
+    const qrContent = JSON.stringify({
+      type: 'grading',
+      paperId: newPaperId,
+      studentId: currentStudent?.id,
+      studentName: currentStudent?.name,
+      questionIds: selectedQuestions.map(wq => (wq.question || wq).id),
+      timestamp: Date.now()
+    })
+
+    try {
+      await generateExamPDF({
+        title: `${currentStudent?.name || '学生'} - 错题练习`,
+        studentName: currentStudent?.name || '',
+        questions: questions,
+        filename: `${currentStudent?.name || 'student'}_错题练习_${dayjs().format('YYYYMMDD_HHmm')}`,
+        showAnswers: false,
+        qrContent: qrContent,
+      })
+      Toast.show({ icon: 'success', content: 'PDF已生成，包含二维码' })
+    } catch (error) {
+      console.error('PDF生成失败:', error)
+      Toast.show({ icon: 'fail', content: 'PDF生成失败' })
     }
-
-    const printContent = `
-      <!DOCTYPE html>
-      <html>
-      <head>
-        <title>错题打印 - ${currentStudent?.name || '学生'}</title>
-        <style>
-          @page { size: A4; margin: 20mm; }
-          body { font-family: 'Microsoft YaHei', sans-serif; line-height: 1.6; }
-          .header { text-align: center; margin-bottom: 20px; border-bottom: 2px solid #333; padding-bottom: 10px; }
-          .student-name { font-size: 18px; font-weight: bold; }
-          .date { font-size: 12px; color: #666; margin-top: 5px; }
-          .question { margin-bottom: 30px; page-break-inside: avoid; }
-          .question-number { font-weight: bold; font-size: 14px; margin-bottom: 10px; }
-          .question-content { font-size: 14px; margin-bottom: 10px; }
-          .options { margin-left: 20px; margin-bottom: 10px; }
-          .option { margin-bottom: 5px; }
-          .answer-section { margin-top: 15px; padding: 10px; background: #f5f5f5; border-radius: 5px; }
-          .answer-label { font-weight: bold; color: #333; }
-          .student-answer { color: #ff4d4f; }
-          .correct-answer { color: #52c41a; }
-          .footer { margin-top: 30px; text-align: center; font-size: 12px; color: #999; border-top: 1px solid #ddd; padding-top: 10px; }
-        </style>
-      </head>
-      <body>
-        <div class="header">
-          <div class="student-name">${currentStudent?.name || '学生'} - 错题练习</div>
-          <div class="date">生成时间：${dayjs().format('YYYY年MM月DD日 HH:mm')}</div>
-        </div>
-        ${selectedQuestions.map((wq, index) => {
-          const q = wq.question || wq
-          return `
-            <div class="question">
-              <div class="question-number">题目 ${index + 1}</div>
-              <div class="question-content">${q.content || '无内容'}</div>
-              ${q.options && q.options.length > 0 ? `
-                <div class="options">
-                  ${q.options.map((opt, i) => `<div class="option">${String.fromCharCode(65 + i)}. ${opt}</div>`).join('')}
-                </div>
-              ` : ''}
-              <div class="answer-section">
-                <div><span class="answer-label">你的答案：</span><span class="student-answer">${q.student_answer || '未作答'}</span></div>
-                <div><span class="answer-label">正确答案：</span><span class="correct-answer">${q.answer || '无'}</span></div>
-              </div>
-            </div>
-          `
-        }).join('')}
-        <div class="footer">敏学错题本</div>
-        <script>window.onload = function() { window.print(); }</script>
-      </body>
-      </html>
-    `
-
-    printWindow.document.write(printContent)
-    printWindow.document.close()
   }
 
   // 渲染掌握状态标签 - 苹果风格

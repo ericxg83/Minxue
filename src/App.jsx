@@ -55,6 +55,10 @@ function dataURLtoFile(dataUrl, filename) {
   return new File([u8arr], filename, { type: mime })
 }
 
+const generatePaperId = () => {
+  return 'paper_' + Date.now() + '_' + Math.random().toString(36).substr(2, 9)
+}
+
 // ==================== Main App ====================
 
 const USE_MOCK_DATA = false
@@ -93,7 +97,8 @@ export default function App() {
   const [reprintQuestions, setReprintQuestions] = useState([])
 
   // Exam Page State
-  const [showScanQR, setShowScanQR] = useState(false)
+  const [showScanQR, setShowScanQR] = useState(false) // QR scan trigger
+  const [gradingData, setGradingData] = useState(null) // Data from scanned QR
 
   // UI State
   const [showStudentSwitcher, setShowStudentSwitcher] = useState(false)
@@ -600,46 +605,34 @@ export default function App() {
     if (!result) return
     const { examQuestions, examTitle } = result
 
-    const printContent = `
-      <html>
-      <head><title>${examTitle}</title>
-      <style>
-        body { font-family: 'Noto Sans SC', sans-serif; padding: 20px; color: #333; }
-        h1 { text-align: center; font-size: 18px; margin-bottom: 10px; }
-        .meta { text-align: center; font-size: 12px; color: #666; margin-bottom: 20px; }
-        .question { margin-bottom: 16px; page-break-inside: avoid; }
-        .q-title { font-size: 14px; font-weight: 600; margin-bottom: 4px; }
-        .q-content { font-size: 13px; line-height: 1.6; margin-bottom: 6px; }
-        .options { padding-left: 16px; font-size: 13px; line-height: 1.8; }
-        .answer { font-size: 12px; color: #2563EB; margin-top: 4px; padding-top: 4px; border-top: 1px dashed #E5E7EB; }
-        @media print { body { padding: 0; } }
-      </style>
-      </head>
-      <body>
-        <h1>${examTitle}</h1>
-        <div class="meta">共 ${examQuestions.length} 题 · ${dayjs().format('YYYY/MM/DD')}</div>
-        ${examQuestions.map((q, i) => `
-          <div class="question">
-            <div class="q-title">${i + 1}. ${q.question_type === 'choice' ? '选择题' : '非选择题'}</div>
-            <div class="q-content">${q.content}</div>
-            ${q.options?.length ? `<div class="options">${q.options.map((o, oi) => `<div>${String.fromCharCode(65 + oi)}. ${o}</div>`).join('')}</div>` : ''}
-            <div class="answer">答案：${q.answer || '略'}</div>
-          </div>
-        `).join('')}
-      </body>
-      </html>
-    `
-    const printWindow = window.open('', '_blank')
-    if (printWindow) {
-      printWindow.document.write(printContent)
-      printWindow.document.close()
-      printWindow.focus()
-      setTimeout(() => printWindow.print(), 300)
+    const newPaperId = generatePaperId()
+    const qrContent = JSON.stringify({
+      type: 'grading',
+      paperId: newPaperId,
+      studentId: currentStudent?.id,
+      studentName: currentStudent?.name,
+      questionIds: exam.question_ids || [],
+      timestamp: Date.now()
+    })
+
+    try {
+      await generateExamPDF({
+        title: examTitle,
+        studentName: currentStudent?.name || '',
+        questions: examQuestions,
+        filename: `${examTitle}_${dayjs().format('YYYYMMDD_HHmmss')}`,
+        showAnswers: false,
+        qrContent: qrContent,
+      })
+
+      setGeneratedExams((Array.isArray(generatedExams) ? generatedExams : []).map(e =>
+        e.id === exam.id ? { ...e, printed: true, printCount: (e.printCount || 0) + 1 } : e
+      ))
+      Toast.show({ message: 'PDF已生成，包含二维码，请查看下载', type: 'success' })
+    } catch (error) {
+      console.error('PDF生成失败:', error)
+      Toast.show({ message: 'PDF生成失败', type: 'error' })
     }
-    setGeneratedExams((Array.isArray(generatedExams) ? generatedExams : []).map(e =>
-      e.id === exam.id ? { ...e, printed: true, printCount: (e.printCount || 0) + 1 } : e
-    ))
-    Toast.show({ message: '已发送到打印机', type: 'success' })
   }
 
   // Download exam as PDF
@@ -648,19 +641,30 @@ export default function App() {
     if (!result) return
     const { examQuestions, examTitle } = result
 
+    const newPaperId = generatePaperId()
+    const qrContent = JSON.stringify({
+      type: 'grading',
+      paperId: newPaperId,
+      studentId: currentStudent?.id,
+      studentName: currentStudent?.name,
+      questionIds: exam.question_ids || [],
+      timestamp: Date.now()
+    })
+
     try {
       await generateExamPDF({
         title: examTitle,
         studentName: currentStudent?.name || '',
         questions: examQuestions,
         filename: `${examTitle}_${dayjs().format('YYYYMMDD_HHmmss')}`,
-        showAnswers: true,
+        showAnswers: false,
+        qrContent: qrContent,
       })
 
       setGeneratedExams((Array.isArray(generatedExams) ? generatedExams : []).map(e =>
         e.id === exam.id ? { ...e, printed: true, printCount: (e.printCount || 0) + 1 } : e
       ))
-      Toast.show({ message: 'PDF已生成，请查看下载', type: 'success' })
+      Toast.show({ message: 'PDF已生成，包含二维码，请查看下载', type: 'success' })
     } catch (error) {
       console.error('PDF生成失败:', error)
       Toast.show({ message: 'PDF生成失败', type: 'error' })
@@ -688,6 +692,19 @@ export default function App() {
   const handleGradeExam = (exam) => {
     setGradingExam(exam)
     setShowGrading(true)
+  }
+
+  const handleScanSuccess = (scanData) => {
+    setShowScanQR(false)
+    setGradingData(scanData)
+    setShowGrading(true)
+  }
+
+  const handleGradingComplete = (results) => {
+    setShowGrading(false)
+    setGradingData(null)
+    Toast.show({ message: `批改完成，${results.masteredCount} 题已掌握`, type: 'success' })
+    loadWrongBookData()
   }
 
   // Reprint exam
@@ -1067,6 +1084,12 @@ export default function App() {
               </button>
             </div>
             <div className="flex items-center gap-2">
+              <button
+                onClick={() => { setShowScanQR(true); setGradingData(null) }}
+                className="w-8 h-8 rounded-full flex items-center justify-center" style={{ background: '#F3F4F6' }}
+              >
+                <QrCode size={16} style={{ color: '#6B7280' }} />
+              </button>
               <button
                 onClick={handleRefresh}
                 disabled={refreshing}
@@ -1987,6 +2010,25 @@ export default function App() {
         {/* Print Preview / 组卷 */}
         {showPrintPreview && (
           <PrintPreview onClose={() => setShowPrintPreview(false)} />
+        )}
+
+        {/* Scan QR / 扫码批改 */}
+        {showScanQR && (
+          <ScanQR
+            onClose={() => setShowScanQR(false)}
+            onScanSuccess={handleScanSuccess}
+          />
+        )}
+
+        {/* Grading / 批改试卷 */}
+        {showGrading && gradingData && (
+          <Grading
+            paperId={gradingData.paperId}
+            studentId={gradingData.studentId}
+            questionIds={gradingData.questionIds}
+            onClose={() => { setShowGrading(false); setGradingData(null) }}
+            onComplete={handleGradingComplete}
+          />
         )}
       </div>
     </ToastProvider>

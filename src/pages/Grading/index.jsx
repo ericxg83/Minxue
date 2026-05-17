@@ -1,10 +1,9 @@
 import { useState, useEffect } from 'react'
 import { motion, AnimatePresence } from 'motion/react'
 import { CheckCircle2, XCircle, ChevronLeft, ChevronRight, Loader2, QrCode, Eye, EyeOff } from 'lucide-react'
-import { useWrongQuestionStore, useStudentStore } from '../../store'
+import { getQuestionsByIds, updateWrongQuestionStatus } from '../../services/apiService'
+import { useStudentStore } from '../../store'
 import dayjs from 'dayjs'
-
-const USE_MOCK_DATA = true
 
 export default function Grading({ paperId, studentId, questionIds, onClose, onComplete }) {
   const [currentQuestionIndex, setCurrentQuestionIndex] = useState(0)
@@ -14,9 +13,9 @@ export default function Grading({ paperId, studentId, questionIds, onClose, onCo
   const [showResult, setShowResult] = useState(false)
   const [showAnswerCard, setShowAnswerCard] = useState(true)
   const [isLoading, setIsLoading] = useState(true)
+  const [error, setError] = useState(null)
   const [masteredBeforeCount, setMasteredBeforeCount] = useState(0)
-  
-  const { wrongQuestions, updateWrongQuestion, updateWrongQuestionStatus } = useWrongQuestionStore()
+
   const { students } = useStudentStore()
 
   const COLORS = {
@@ -31,113 +30,88 @@ export default function Grading({ paperId, studentId, questionIds, onClose, onCo
     border: '#E5E7EB'
   }
 
-  const loadQuestions = () => {
+  const loadQuestions = async () => {
     setIsLoading(true)
-    
-    if (USE_MOCK_DATA) {
+    setError(null)
+
+    try {
       const targetStudentId = studentId || (students[0]?.id)
       const student = students.find(s => s.id === targetStudentId) || students[0]
-      
-      let targetQuestions = wrongQuestions.filter(wq => wq.student_id === targetStudentId)
-      
-      if (questionIds && questionIds.length > 0) {
-        targetQuestions = targetQuestions.filter(wq => 
-          questionIds.includes(wq.id) || questionIds.includes(wq.question_id)
-        )
+
+      if (!questionIds || questionIds.length === 0) {
+        setError('二维码中未包含题目信息')
+        setIsLoading(false)
+        return
       }
-      
-      const detailedQuestions = targetQuestions.map(wq => ({
-        ...wq,
-        ...wq.question,
-        wrongQuestionId: wq.id,
-        questionId: wq.question_id || wq.id,
-        originalStatus: wq.status,
-        originalErrorCount: wq.error_count || 1,
-        originalPracticeCount: wq.practice_count || 0
+
+      const fetchedQuestions = await getQuestionsByIds(questionIds)
+
+      if (!fetchedQuestions || fetchedQuestions.length === 0) {
+        setError('未找到相关题目，请确认试卷是否有效')
+        setIsLoading(false)
+        return
+      }
+
+      const detailedQuestions = fetchedQuestions.map((q, index) => ({
+        ...q,
+        wrongQuestionId: q.id,
+        questionId: q.id,
+        index
       }))
-      
+
       setQuestions(detailedQuestions)
-      
-      const beforeCount = detailedQuestions.filter(q => q.originalStatus === 'mastered').length
-      setMasteredBeforeCount(beforeCount)
-      
+      setMasteredBeforeCount(detailedQuestions.filter(q => q.status === 'mastered').length)
+
       setStudentInfo({
         name: student?.name || '学生',
         class: student?.class || '',
         date: dayjs().format('YYYY-MM-DD'),
-        practiceCount: detailedQuestions.length > 0 ? (detailedQuestions[0].practice_count || 0) + 1 : 1
+        practiceCount: 1
       })
-      
+
       setIsLoading(false)
-    } else {
+    } catch (err) {
+      console.error('加载题目失败:', err)
+      setError('加载题目失败: ' + err.message)
       setIsLoading(false)
     }
   }
 
   useEffect(() => {
     loadQuestions()
-  }, [paperId, studentId, questionIds])
+  }, [])
 
-  const handleMarkStatus = (status) => {
+  const handleMarkStatus = async (status) => {
     const currentQuestion = questions[currentQuestionIndex]
     if (!currentQuestion) return
 
-    const newResults = {
-      ...gradingResults,
-      [currentQuestion.wrongQuestionId]: {
-        status,
-        questionId: currentQuestion.questionId,
-        wrongQuestionId: currentQuestion.wrongQuestionId,
-        markedAt: Date.now()
+    try {
+      const newStatus = status === 'mastered' ? 'mastered' : 'pending'
+      await updateWrongQuestionStatus(currentQuestion.wrongQuestionId, newStatus)
+
+      const newResults = {
+        ...gradingResults,
+        [currentQuestion.wrongQuestionId]: {
+          status,
+          questionId: currentQuestion.questionId,
+          wrongQuestionId: currentQuestion.wrongQuestionId,
+          markedAt: Date.now()
+        }
       }
-    }
-    setGradingResults(newResults)
+      setGradingResults(newResults)
 
-    if (currentQuestionIndex < questions.length - 1) {
-      setTimeout(() => {
-        setCurrentQuestionIndex(currentQuestionIndex + 1)
-      }, 300)
-    } else {
-      setTimeout(() => {
-        setShowResult(true)
-      }, 300)
-    }
-  }
-
-  const updateMasteryLevel = (wrongQuestionId, result) => {
-    const currentQuestion = questions.find(q => q.wrongQuestionId === wrongQuestionId)
-    if (!currentQuestion) return
-
-    const originalStatus = currentQuestion.originalStatus
-    const originalPracticeCount = currentQuestion.originalPracticeCount || 0
-    const originalErrorCount = currentQuestion.originalErrorCount || 1
-
-    let newStatus
-    let newErrorCount = originalErrorCount
-    let newPracticeCount = originalPracticeCount + 1
-
-    if (result.status === 'mastered') {
-      if (originalStatus === 'pending') {
-        newStatus = 'partial'
-      } else if (originalStatus === 'partial') {
-        newStatus = 'mastered'
-      } else if (originalStatus === 'mastered') {
-        newStatus = 'mastered'
+      if (currentQuestionIndex < questions.length - 1) {
+        setTimeout(() => {
+          setCurrentQuestionIndex(currentQuestionIndex + 1)
+        }, 300)
       } else {
-        newStatus = 'partial'
+        setTimeout(() => {
+          setShowResult(true)
+        }, 300)
       }
-    } else {
-      newStatus = 'pending'
-      newErrorCount = originalErrorCount + 1
+    } catch (err) {
+      console.error('更新状态失败:', err)
     }
-
-    updateWrongQuestion(wrongQuestionId, {
-      status: newStatus,
-      error_count: newErrorCount,
-      practice_count: newPracticeCount,
-      last_graded_at: new Date().toISOString(),
-      grade_count: (currentQuestion.grade_count || 0) + 1
-    })
   }
 
   const handlePrev = () => {
@@ -154,19 +128,19 @@ export default function Grading({ paperId, studentId, questionIds, onClose, onCo
 
   const handleComplete = async () => {
     Object.entries(gradingResults).forEach(([wrongQuestionId, result]) => {
-      updateMasteryLevel(wrongQuestionId, result)
+      updateWrongQuestionStatus(wrongQuestionId, result.status === 'mastered' ? 'mastered' : 'pending')
     })
 
     const masteredCount = Object.values(gradingResults).filter(r => r.status === 'mastered').length
     const notMasteredCount = Object.values(gradingResults).filter(r => r.status !== 'mastered').length
-    
+
     onComplete && onComplete({
       masteredCount,
       notMasteredCount,
       totalQuestions: questions.length,
       results: gradingResults
     })
-    
+
     onClose()
   }
 
@@ -186,6 +160,40 @@ export default function Grading({ paperId, studentId, questionIds, onClose, onCo
     )
   }
 
+  if (error) {
+    return (
+      <div style={{
+        position: 'fixed',
+        inset: 0,
+        background: COLORS.card,
+        display: 'flex',
+        alignItems: 'center',
+        justifyContent: 'center',
+        zIndex: 10000,
+        flexDirection: 'column',
+        gap: '16px'
+      }}>
+        <QrCode size={48} style={{ color: COLORS.danger }} />
+        <div style={{ fontSize: '16px', color: COLORS.danger, textAlign: 'center', padding: '0 20px' }}>{error}</div>
+        <button
+          onClick={onClose}
+          style={{
+            padding: '12px 24px',
+            background: COLORS.primary,
+            color: '#fff',
+            borderRadius: '12px',
+            fontSize: '15px',
+            fontWeight: 600,
+            border: 'none',
+            cursor: 'pointer'
+          }}
+        >
+          返回
+        </button>
+      </div>
+    )
+  }
+
   if (questions.length === 0) {
     return (
       <div style={{
@@ -201,7 +209,7 @@ export default function Grading({ paperId, studentId, questionIds, onClose, onCo
       }}>
         <QrCode size={48} style={{ color: COLORS.textSecondary }} />
         <div style={{ fontSize: '16px', color: COLORS.textSecondary }}>暂无题目，请重新扫码</div>
-        <button 
+        <button
           onClick={onClose}
           style={{
             padding: '12px 24px',
@@ -209,7 +217,9 @@ export default function Grading({ paperId, studentId, questionIds, onClose, onCo
             color: '#fff',
             borderRadius: '12px',
             fontSize: '15px',
-            fontWeight: 600
+            fontWeight: 600,
+            border: 'none',
+            cursor: 'pointer'
           }}
         >
           返回
@@ -312,18 +322,18 @@ export default function Grading({ paperId, studentId, questionIds, onClose, onCo
       flexDirection: 'column'
     }}>
       {/* Header */}
-      <div style={{ 
-        background: COLORS.card, 
+      <div style={{
+        background: COLORS.card,
         padding: '16px 20px',
         display: 'flex',
         justifyContent: 'space-between',
         alignItems: 'center',
         borderBottom: `1px solid ${COLORS.border}`
       }}>
-        <button 
-          onClick={onClose} 
-          style={{ 
-            fontSize: '15px', 
+        <button
+          onClick={onClose}
+          style={{
+            fontSize: '15px',
             color: COLORS.primary,
             background: 'none',
             border: 'none',
@@ -346,7 +356,7 @@ export default function Grading({ paperId, studentId, questionIds, onClose, onCo
           <span style={{ color: COLORS.textSecondary }}>第{studentInfo?.practiceCount}次练习</span>
         </div>
         <div style={{ width: '100%', height: '4px', background: `${COLORS.primary}20`, borderRadius: '2px', overflow: 'hidden' }}>
-          <motion.div 
+          <motion.div
             style={{ height: '100%', background: COLORS.primary, borderRadius: '2px' }}
             initial={{ width: 0 }}
             animate={{ width: `${progress}%` }}
@@ -371,21 +381,21 @@ export default function Grading({ paperId, studentId, questionIds, onClose, onCo
                 第 {currentQuestionIndex + 1} 题
               </span>
               <span style={{ fontSize: '13px', color: COLORS.textSecondary }}>
-                {currentQuestion?.question_type === 'choice' ? '选择题' : 
-                 currentQuestion?.question_type === 'fill' ? '填空题' : '解答题'}
+                {currentQuestion?.question_type === 'choice' ? '选择题' :
+                  currentQuestion?.question_type === 'fill' ? '填空题' : '解答题'}
               </span>
             </div>
             <div style={{
               fontSize: '12px',
               padding: '4px 10px',
               borderRadius: '12px',
-              background: currentQuestion?.originalStatus === 'mastered' ? '#E8F5E9' :
-                         currentQuestion?.originalStatus === 'partial' ? '#FFF8E1' : '#FFEBEE',
-              color: currentQuestion?.originalStatus === 'mastered' ? COLORS.success :
-                     currentQuestion?.originalStatus === 'partial' ? COLORS.warning : COLORS.danger
+              background: currentQuestion?.status === 'mastered' ? '#E8F5E9' :
+                currentQuestion?.status === 'partial' ? '#FFF8E1' : '#FFEBEE',
+              color: currentQuestion?.status === 'mastered' ? COLORS.success :
+                currentQuestion?.status === 'partial' ? COLORS.warning : COLORS.danger
             }}>
-              {currentQuestion?.originalStatus === 'mastered' ? '完全懂' :
-               currentQuestion?.originalStatus === 'partial' ? '有点懂' : '待复习'}
+              {currentQuestion?.status === 'mastered' ? '已掌握' :
+                currentQuestion?.status === 'partial' ? '部分掌握' : '待复习'}
             </div>
           </div>
 
@@ -472,20 +482,10 @@ export default function Grading({ paperId, studentId, questionIds, onClose, onCo
                     解析
                   </div>
                   <div style={{ fontSize: '14px', color: COLORS.text, lineHeight: '1.6' }}>
-                    {currentQuestion?.analysis || 
+                    {currentQuestion?.analysis ||
                       `本题考查相关知识点。正确答案是 ${currentQuestion?.answer}。` +
                       `请根据题目条件，运用所学知识进行推导计算。`
                     }
-                  </div>
-                </div>
-
-                {/* Student's Previous Answer */}
-                <div style={{ padding: '16px 20px', borderTop: `1px solid ${COLORS.border}`, background: `${COLORS.warning}08` }}>
-                  <div style={{ fontSize: '14px', fontWeight: 600, color: COLORS.warning, marginBottom: '8px' }}>
-                    学生之前答案
-                  </div>
-                  <div style={{ fontSize: '15px', color: COLORS.danger, fontWeight: 500 }}>
-                    {currentQuestion?.student_answer || '未作答'}
                   </div>
                 </div>
               </motion.div>
@@ -546,7 +546,7 @@ export default function Grading({ paperId, studentId, questionIds, onClose, onCo
         </div>
 
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-          <button 
+          <button
             onClick={handlePrev}
             disabled={currentQuestionIndex === 0}
             style={{
@@ -563,7 +563,7 @@ export default function Grading({ paperId, studentId, questionIds, onClose, onCo
             <ChevronLeft size={18} />
             上一题
           </button>
-          <button 
+          <button
             onClick={handleNext}
             disabled={currentQuestionIndex === questions.length - 1}
             style={{
