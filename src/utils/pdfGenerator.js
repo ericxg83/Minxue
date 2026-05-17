@@ -15,7 +15,7 @@ function escapeHtml(text) {
     .replace(/"/g, '&quot;')
 }
 
-function generateQRDataUrl(text, size = 140) {
+function generateQRDataUrl(text, size = 200) {
   try {
     const qr = qrcode(0, 'L')
     qr.addData(text)
@@ -111,12 +111,12 @@ function buildExamHTML({ title, studentName, questions, showAnswers }) {
     .answer-key{font-size:12px;color:#2563EB;margin-top:3px;padding-left:36px}
     .footer{text-align:center;font-size:11px;color:#999;margin-top:20px;padding-top:8px;border-top:1px solid #ddd}
     .qr-container{position:absolute;top:20px;right:40px;text-align:center;}
-    .qr-canvas{width:70px;height:70px;}
+    .qr-canvas{width:100px;height:100px;}
     .qr-text{font-size:10px;color:#999;margin-top:4px;}
   </style></head><body>
   <div class="page">
     <div id="qr-container" class="qr-container" style="display:none;">
-      <canvas id="qr-canvas" class="qr-canvas" width="140" height="140"></canvas>
+      <canvas id="qr-canvas" class="qr-canvas" width="200" height="200"></canvas>
       <div class="qr-text">扫码批改</div>
     </div>
     <div class="title">${escapeHtml(title)}</div>
@@ -158,7 +158,7 @@ export async function generateExamPDF({ title, studentName, questions, filename,
         qr.addData(qrContent)
         qr.make()
 
-        const size = 140
+        const size = 200
         qrCanvas.width = size
         qrCanvas.height = size
         const ctx = qrCanvas.getContext('2d')

@@ -1,22 +1,40 @@
 import { useState, useRef, useEffect } from 'react'
 import { motion, AnimatePresence } from 'motion/react'
-import { X, Loader2, Camera, Image as ImageIcon, Clock, QrCode } from 'lucide-react'
+import { X, Loader2, Image as ImageIcon, Clock, QrCode, ClipboardPaste } from 'lucide-react'
 import jsQR from 'jsqr'
-
-const USE_MOCK_SCAN = false
 
 export default function ScanQR({ onClose, onScanSuccess }) {
   const [scanning, setScanning] = useState(false)
   const [scanError, setScanError] = useState(null)
+  const [cameraReady, setCameraReady] = useState(false)
+  const [hasCamera, setHasCamera] = useState(false)
   const videoRef = useRef(null)
   const canvasRef = useRef(null)
   const streamRef = useRef(null)
   const animFrameRef = useRef(null)
   const fileInputRef = useRef(null)
+  const containerRef = useRef(null)
 
   useEffect(() => {
     startCamera()
     return () => stopCamera()
+  }, [])
+
+  useEffect(() => {
+    const handlePaste = (e) => {
+      const items = e.clipboardData?.items
+      if (!items) return
+      for (const item of items) {
+        if (item.type.startsWith('image/')) {
+          e.preventDefault()
+          const file = item.getAsFile()
+          if (file) processImageFile(file)
+          break
+        }
+      }
+    }
+    window.addEventListener('paste', handlePaste)
+    return () => window.removeEventListener('paste', handlePaste)
   }, [])
 
   const startCamera = async () => {
@@ -25,15 +43,17 @@ export default function ScanQR({ onClose, onScanSuccess }) {
         video: { facingMode: 'environment' }
       })
       streamRef.current = stream
+      setHasCamera(true)
       if (videoRef.current) {
         videoRef.current.srcObject = stream
         videoRef.current.setAttribute('playsinline', true)
         videoRef.current.play()
+        setCameraReady(true)
         requestAnimationFrame(tick)
       }
     } catch (err) {
       console.warn('无法访问摄像头:', err)
-      setScanError('无法访问摄像头，请使用相册上传图片')
+      setHasCamera(false)
     }
   }
 
@@ -57,40 +77,39 @@ export default function ScanQR({ onClose, onScanSuccess }) {
       ctx.drawImage(videoRef.current, 0, 0, canvas.width, canvas.height)
       const imageData = ctx.getImageData(0, 0, canvas.width, canvas.height)
       const code = jsQR(imageData.data, imageData.width, imageData.height, {
-        inversionAttempts: 'dontInvert'
+        inversionAttempts: 'attemptBoth'
       })
       if (code) {
         stopCamera()
-        try {
-          const data = JSON.parse(code.data)
-          if (data.type === 'grading') {
-            onScanSuccess({
-              paperId: data.paperId,
-              studentId: data.studentId,
-              studentName: data.studentName,
-              questionIds: data.questionIds,
-              timestamp: data.timestamp
-            })
-          } else {
-            setScanError('无效的二维码类型')
-            startCamera()
-          }
-        } catch {
-          setScanError('无法解析二维码内容')
-          startCamera()
-        }
+        processQRData(code.data)
+        return
       }
     }
     animFrameRef.current = requestAnimationFrame(tick)
   }
 
-  const handleAlbum = () => {
-    fileInputRef.current?.click()
+  const processQRData = (data) => {
+    try {
+      const parsed = JSON.parse(data)
+      if (parsed.type === 'grading') {
+        onScanSuccess({
+          paperId: parsed.paperId,
+          studentId: parsed.studentId,
+          studentName: parsed.studentName,
+          questionIds: parsed.questionIds,
+          timestamp: parsed.timestamp
+        })
+      } else {
+        setScanError('无效的二维码类型，请扫描试卷上的批改二维码')
+        startCamera()
+      }
+    } catch {
+      setScanError('无法解析二维码内容')
+      startCamera()
+    }
   }
 
-  const handleFileChange = (e) => {
-    const file = e.target.files[0]
-    if (!file) return
+  const processImageFile = (file) => {
     setScanning(true)
     setScanError(null)
 
@@ -98,33 +117,28 @@ export default function ScanQR({ onClose, onScanSuccess }) {
     reader.onload = (event) => {
       const img = new Image()
       img.onload = () => {
-        const canvas = document.createElement('canvas')
-        canvas.width = img.width
-        canvas.height = img.height
-        const ctx = canvas.getContext('2d')
-        ctx.drawImage(img, 0, 0)
-        const imageData = ctx.getImageData(0, 0, canvas.width, canvas.height)
-        const code = jsQR(imageData.data, imageData.width, imageData.height)
+        const scales = [1, 2, 3, 0.5]
+        let code = null
+
+        for (const scale of scales) {
+          const canvas = document.createElement('canvas')
+          canvas.width = img.width * scale
+          canvas.height = img.height * scale
+          const ctx = canvas.getContext('2d')
+          ctx.drawImage(img, 0, 0, canvas.width, canvas.height)
+          const imageData = ctx.getImageData(0, 0, canvas.width, canvas.height)
+          
+          code = jsQR(imageData.data, imageData.width, imageData.height, {
+            inversionAttempts: 'attemptBoth'
+          })
+
+          if (code) break
+        }
 
         if (code) {
-          try {
-            const data = JSON.parse(code.data)
-            if (data.type === 'grading') {
-              onScanSuccess({
-                paperId: data.paperId,
-                studentId: data.studentId,
-                studentName: data.studentName,
-                questionIds: data.questionIds,
-                timestamp: data.timestamp
-              })
-            } else {
-              setScanError('无效的二维码类型')
-            }
-          } catch {
-            setScanError('无法解析二维码内容')
-          }
+          processQRData(code.data)
         } else {
-          setScanError('未检测到二维码，请重试')
+          setScanError('未检测到二维码，请确保图片中包含完整的二维码')
         }
         setScanning(false)
       }
@@ -134,7 +148,21 @@ export default function ScanQR({ onClose, onScanSuccess }) {
       }
       img.src = event.target.result
     }
+    reader.onerror = () => {
+      setScanError('图片读取失败')
+      setScanning(false)
+    }
     reader.readAsDataURL(file)
+  }
+
+  const handleAlbum = () => {
+    fileInputRef.current?.click()
+  }
+
+  const handleFileChange = (e) => {
+    const file = e.target.files[0]
+    if (!file) return
+    processImageFile(file)
   }
 
   return (
@@ -154,7 +182,7 @@ export default function ScanQR({ onClose, onScanSuccess }) {
           style={{ display: 'none' }}
           onChange={handleFileChange}
         />
-        <canvas ref={canvasRef} style={{ display: 'none' }} />
+        <canvas ref={canvasRef} style={{ position: 'absolute', left: '-9999px', top: '-9999px', visibility: 'hidden' }} />
 
         <div style={{
           display: 'flex',
@@ -171,7 +199,7 @@ export default function ScanQR({ onClose, onScanSuccess }) {
           <div style={{ width: '36px' }} />
         </div>
 
-        <div style={{
+        <div ref={containerRef} style={{
           flex: 1,
           display: 'flex',
           flexDirection: 'column',
@@ -179,17 +207,22 @@ export default function ScanQR({ onClose, onScanSuccess }) {
           justifyContent: 'center',
           position: 'relative'
         }}>
-          <video ref={videoRef} style={{
-            position: 'absolute', inset: 0, width: '100%', height: '100%', objectFit: 'cover'
-          }} />
-          
+          {hasCamera && cameraReady && (
+            <video ref={videoRef} style={{
+              position: 'absolute', inset: 0, width: '100%', height: '100%', objectFit: 'cover'
+            }} />
+          )}
+
           <div style={{
             width: '280px',
             height: '280px',
             border: '2px solid rgba(255,255,255,0.5)',
             borderRadius: '20px',
             position: 'relative',
-            zIndex: 1
+            zIndex: 1,
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center'
           }}>
             <div style={{
               position: 'absolute', top: '-2px', left: '-2px', width: '30px', height: '30px',
@@ -207,25 +240,50 @@ export default function ScanQR({ onClose, onScanSuccess }) {
               position: 'absolute', bottom: '-2px', right: '-2px', width: '30px', height: '30px',
               borderBottom: '4px solid #2563EB', borderRight: '4px solid #2563EB', borderBottomRightRadius: '10px'
             }} />
-            
-            <motion.div
-              animate={{ top: ['0%', '100%', '0%'] }}
-              transition={{ duration: 2, repeat: Infinity, ease: 'linear' }}
-              style={{
-                position: 'absolute', left: 0, right: 0, height: '2px',
-                background: 'linear-gradient(to right, transparent, #2563EB, transparent)'
-              }}
-            />
+
+            {!hasCamera && !scanning && (
+              <QrCode size={40} color="rgba(255,255,255,0.3)" />
+            )}
+
+            {hasCamera && cameraReady && (
+              <motion.div
+                animate={{ top: ['0%', '100%', '0%'] }}
+                transition={{ duration: 2, repeat: Infinity, ease: 'linear' }}
+                style={{
+                  position: 'absolute', left: 0, right: 0, height: '2px',
+                  background: 'linear-gradient(to right, transparent, #2563EB, transparent)'
+                }}
+              />
+            )}
+
+            {scanning && (
+              <Loader2 size={40} color="#2563EB" className="animate-spin" />
+            )}
           </div>
 
           {scanError && (
-            <div style={{ color: '#EF4444', fontSize: '14px', marginTop: '20px', textAlign: 'center' }}>
+            <div style={{ color: '#EF4444', fontSize: '14px', marginTop: '20px', textAlign: 'center', maxWidth: '280px' }}>
               {scanError}
             </div>
           )}
 
           <div style={{ color: 'rgba(255,255,255,0.8)', fontSize: '14px', marginTop: '24px', textAlign: 'center' }}>
-            将二维码放入框内，自动识别
+            {hasCamera ? '将二维码放入框内，自动识别' : '请使用下方相册按钮上传图片'}
+          </div>
+
+          <div style={{
+            marginTop: '16px',
+            padding: '12px 20px',
+            borderRadius: '12px',
+            background: 'rgba(255,255,255,0.08)',
+            display: 'flex',
+            alignItems: 'center',
+            gap: '8px',
+            color: 'rgba(255,255,255,0.6)',
+            fontSize: '13px'
+          }}>
+            <ClipboardPaste size={16} />
+            <span>或按 Ctrl+V 粘贴截图</span>
           </div>
         </div>
 
@@ -246,7 +304,7 @@ export default function ScanQR({ onClose, onScanSuccess }) {
             </div>
             <div style={{ color: '#fff', fontSize: '12px' }}>相册</div>
           </div>
-          
+
           <div style={{
             width: '64px', height: '64px', borderRadius: '50%',
             border: '4px solid #fff',
@@ -257,7 +315,7 @@ export default function ScanQR({ onClose, onScanSuccess }) {
               background: '#fff'
             }} />
           </div>
-          
+
           <div style={{ textAlign: 'center', opacity: 0.3 }}>
             <div style={{
               width: '48px', height: '48px', borderRadius: '50%',
