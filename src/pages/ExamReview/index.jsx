@@ -1,6 +1,6 @@
 import { useState, useEffect, useMemo } from 'react'
 import { motion } from 'motion/react'
-import { ArrowLeft, ChevronLeft, ChevronRight, CheckCircle2, XCircle, Save, Loader2, ChevronDown, ChevronUp, AlertTriangle } from 'lucide-react'
+import { ArrowLeft, ChevronLeft, ChevronRight, CheckCircle2, XCircle, Save, Loader2, ChevronDown, ChevronUp, AlertTriangle, UserCheck, Bot } from 'lucide-react'
 import { useWrongQuestionStore } from '../../store'
 import { useToast } from '../../components/ToastProvider'
 import { updateQuestion, addWrongQuestions, deleteWrongQuestion, getQuestionsByTask } from '../../services/apiService'
@@ -18,6 +18,26 @@ const COLORS = {
   border: '#E5E7EB'
 }
 
+const getStatusInfo = (q) => {
+  const isCorrect = q.is_correct
+  const source = q.status === 'correct' && is_correct === true ? 'human' : (q._ai_graded ? 'ai' : 'unknown')
+  
+  if (is_correct === true) {
+    return {
+      bg: source === 'human' ? '#D1FAE5' : '#DCFCE7',
+      color: source === 'human' ? '#059669' : COLORS.success,
+      text: source === 'human' ? '已打勾' : 'AI判定正确',
+      icon: source === 'human' ? UserCheck : CheckCircle2,
+      isGreyed: source === 'human',
+      source
+    }
+  }
+  if (is_correct === false) {
+    return { bg: '#FEE2E2', color: COLORS.danger, text: 'AI判定错误', icon: XCircle, source: 'ai' }
+  }
+  return { bg: '#FEF3C7', color: COLORS.warning, text: '未批改', icon: AlertTriangle, source: 'pending' }
+}
+
 export default function ExamReview({ task, onClose }) {
   const { wrongQuestions } = useWrongQuestionStore()
   const Toast = useToast()
@@ -28,8 +48,8 @@ export default function ExamReview({ task, onClose }) {
   const [saving, setSaving] = useState(false)
   const [loading, setLoading] = useState(true)
   const [showAnswer, setShowAnswer] = useState(true)
+  const [showAiCache, setShowAiCache] = useState(false)
 
-  // Build question_id → wrongQuestion.id map for syncing wrong question book
   const wrongIdMap = useMemo(() => {
     const map = {}
     ;(Array.isArray(wrongQuestions) ? wrongQuestions : []).forEach(wq => {
@@ -38,14 +58,13 @@ export default function ExamReview({ task, onClose }) {
     return map
   }, [wrongQuestions])
 
-  // Fetch questions on mount
   useEffect(() => {
     if (!task?.id) return
     const fetchQuestions = async () => {
       try {
         setLoading(true)
         const qs = await getQuestionsByTask(task.id, false)
-        setQuestions(qs)
+        setQuestions(qs.map(q => ({ ...q, _ai_graded: q.status !== 'correct' || q._ai_graded === true })))
       } catch (e) {
         console.error('获取题目失败:', e)
         Toast.show({ message: '获取题目失败', type: 'error' })
@@ -69,12 +88,9 @@ export default function ExamReview({ task, onClose }) {
   }
 
   const getAnswerStatus = (q) => {
-    // Use effective correctness (edits take priority)
     const effectiveCorrectness = getCorrectness(q.id)
     const answerSource = q.answer_source || 'recognized'
-    // If the teacher manually filled in an answer, treat as recognized
-    const effectiveSource = answerSource
-    if (effectiveSource === 'blank') return 'not_answered'
+    if (answerSource === 'blank') return 'not_answered'
     if (effectiveCorrectness === null) return 'pending'
     return effectiveCorrectness ? 'correct' : 'wrong'
   }
@@ -102,7 +118,6 @@ export default function ExamReview({ task, onClose }) {
       [qId]: {
         ...(prev[qId] || {}),
         student_answer: value,
-        // When teacher fills in an answer for a blank question, mark as manual
         ...(wasBlank && value ? { answer_source: 'manual' } : {})
       }
     }))
@@ -132,14 +147,11 @@ export default function ExamReview({ task, onClose }) {
       try {
         await updateQuestion(qId, edits[qId])
         successCount++
-        // Sync wrong question book after saving
         const edit = edits[qId]
         const wrongId = wrongIdMap[qId]
         if (edit.is_correct === false && !wrongId) {
-          // Marked wrong but not in wrong question book — add it
           await addWrongQuestions(task.student_id, [qId]).catch(() => {})
         } else if (edit.is_correct === true && wrongId) {
-          // Marked correct but still in wrong question book — remove it
           await deleteWrongQuestion(wrongId).catch(() => {})
         }
       } catch (e) {
@@ -148,11 +160,10 @@ export default function ExamReview({ task, onClose }) {
     }
     setSaving(false)
     if (successCount > 0) {
-      // Update local questions state to reflect saved edits
       setQuestions(prev => prev.map(q => {
         const edit = edits[q.id]
         if (!edit) return q
-        return { ...q, ...edit }
+        return { ...q, ...edit, _ai_graded: true }
       }))
       setEdits({})
       Toast.show({ message: `已保存 ${successCount} 题`, type: 'success' })
@@ -199,13 +210,13 @@ export default function ExamReview({ task, onClose }) {
   const currentStudentAnswer = getStudentAnswer(currentQuestion.id)
   const answerStatus = getAnswerStatus(currentQuestion)
   const aiDisplayAnswer = getAiDisplayAnswer(currentQuestion)
+  const statusInfo = getStatusInfo(currentQuestion)
 
   return (
     <div style={{
       position: 'fixed', inset: 0, background: COLORS.background,
       zIndex: 10000, display: 'flex', flexDirection: 'column'
     }}>
-      {/* ── Header ── */}
       <div style={{
         background: COLORS.card, padding: '12px 16px',
         display: 'flex', justifyContent: 'space-between', alignItems: 'center',
@@ -224,7 +235,6 @@ export default function ExamReview({ task, onClose }) {
         </div>
       </div>
 
-      {/* ── Question Index Bar ── */}
       <div style={{
         background: COLORS.card, padding: '10px 16px',
         borderBottom: `1px solid ${COLORS.border}`,
@@ -232,10 +242,10 @@ export default function ExamReview({ task, onClose }) {
       }}>
         <div style={{ display: 'flex', gap: '8px', minWidth: 'max-content' }}>
           {questions.map((q, i) => {
-            const qCorrect = getCorrectness(q.id)
+            const info = getStatusInfo(q)
             let bg = COLORS.warning
-            if (qCorrect === true) bg = COLORS.success
-            else if (qCorrect === false) bg = COLORS.danger
+            if (q.is_correct === true) bg = info.isGreyed ? '#D1FAE5' : COLORS.success
+            else if (q.is_correct === false) bg = COLORS.danger
             if (i === currentIndex) bg = COLORS.primary
             return (
               <button
@@ -247,7 +257,8 @@ export default function ExamReview({ task, onClose }) {
                   fontSize: '13px', fontWeight: 600, cursor: 'pointer',
                   flexShrink: 0, display: 'flex', alignItems: 'center', justifyContent: 'center',
                   transition: 'transform 0.15s',
-                  transform: i === currentIndex ? 'scale(1.15)' : 'scale(1)'
+                  transform: i === currentIndex ? 'scale(1.15)' : 'scale(1)',
+                  opacity: info.isGreyed ? 0.7 : 1
                 }}
               >
                 {i + 1}
@@ -257,7 +268,6 @@ export default function ExamReview({ task, onClose }) {
         </div>
       </div>
 
-      {/* ── Question Card Area ── */}
       <div style={{ flex: 1, overflow: 'auto', padding: '12px' }}>
         <motion.div
           key={currentQuestion.id}
@@ -265,10 +275,10 @@ export default function ExamReview({ task, onClose }) {
           animate={{ opacity: 1, x: 0 }}
           transition={{ duration: 0.15 }}
         >
-            {/* Question Card */}
             <div style={{
               background: COLORS.card, borderRadius: '12px', padding: '16px',
-              marginBottom: '12px', boxShadow: '0 1px 4px rgba(0,0,0,0.06)'
+              marginBottom: '12px', boxShadow: '0 1px 4px rgba(0,0,0,0.06)',
+              opacity: statusInfo.isGreyed ? 0.85 : 1
             }}>
               <div style={{
                 display: 'flex', justifyContent: 'space-between',
@@ -286,17 +296,10 @@ export default function ExamReview({ task, onClose }) {
                 <div style={{
                   fontSize: '12px', padding: '3px 10px', borderRadius: '10px',
                   display: 'flex', alignItems: 'center', gap: '4px', flexShrink: 0,
-                  ...(answerStatus === 'correct' ? { background: '#DCFCE7', color: COLORS.success } :
-                      answerStatus === 'wrong' ? { background: '#FEE2E2', color: COLORS.danger } :
-                      answerStatus === 'not_answered' ? { background: '#FEF3C7', color: COLORS.warning } :
-                      { background: '#FEF3C7', color: COLORS.warning })
+                  background: statusInfo.bg, color: statusInfo.color
                 }}>
-                  {answerStatus === 'correct' ? <CheckCircle2 size={12} /> :
-                   answerStatus === 'wrong' ? <XCircle size={12} /> :
-                   <AlertTriangle size={12} />}
-                  {answerStatus === 'correct' ? '回答正确' :
-                   answerStatus === 'wrong' ? '回答错误' :
-                   answerStatus === 'not_answered' ? '未作答' : '待批'}
+                  <statusInfo.icon size={12} />
+                  {statusInfo.text}
                 </div>
               </div>
 
@@ -334,14 +337,13 @@ export default function ExamReview({ task, onClose }) {
                 </div>
               )}
 
-              {/* AI recognition result — shown when AI saw something different from displayed student answer */}
               {aiDisplayAnswer && (
                 <div style={{
                   border: '1.5px dashed #93C5FD', borderRadius: '8px', padding: '10px 12px',
                   marginBottom: '12px', background: '#EFF6FF'
                 }}>
-                  <div style={{ fontSize: '12px', fontWeight: 600, color: '#3B82F6', marginBottom: '4px' }}>
-                    🤖 AI识别结果（仅供参考）
+                  <div style={{ fontSize: '12px', fontWeight: 600, color: '#3B82F6', marginBottom: '4px', display: 'flex', alignItems: 'center', gap: '4px' }}>
+                    <Bot size={12} /> AI识别结果（仅供参考）
                   </div>
                   <div style={{ fontSize: '14px', color: COLORS.text, lineHeight: '1.5' }}>
                     <MathText content={aiDisplayAnswer} />
@@ -352,7 +354,41 @@ export default function ExamReview({ task, onClose }) {
                 </div>
               )}
 
-              {/* Answer comparison — student answer + reference answer side by side */}
+              {(currentQuestion.ai_answer || currentQuestion.analysis) && (
+                <div style={{
+                  border: '1.5px solid #86EFAC', borderRadius: '8px', padding: '10px 12px',
+                  marginBottom: '12px', background: '#F0FDF4'
+                }}>
+                  <button
+                    onClick={() => setShowAiCache(!showAiCache)}
+                    style={{
+                      background: 'none', border: 'none', cursor: 'pointer',
+                      display: 'flex', alignItems: 'center', gap: '6px',
+                      fontSize: '12px', fontWeight: 600, color: COLORS.success, padding: 0, width: '100%'
+                    }}
+                  >
+                    {showAiCache ? <ChevronUp size={14} /> : <ChevronDown size={14} />}
+                    <Bot size={12} /> AI批改缓存
+                  </button>
+                  {showAiCache && (
+                    <div style={{ marginTop: '8px', fontSize: '13px', color: COLORS.text, lineHeight: '1.5' }}>
+                      {currentQuestion.ai_answer && (
+                        <div style={{ marginBottom: '6px' }}>
+                          <span style={{ fontWeight: 600 }}>AI判定答案：</span>
+                          <MathText content={currentQuestion.ai_answer} />
+                        </div>
+                      )}
+                      {currentQuestion.analysis && (
+                        <div>
+                          <span style={{ fontWeight: 600 }}>解析：</span>
+                          <MathText content={currentQuestion.analysis} />
+                        </div>
+                      )}
+                    </div>
+                  )}
+                </div>
+              )}
+
               <div style={{
                 background: COLORS.background, borderRadius: '8px', padding: '12px',
                 marginBottom: '12px'
@@ -372,7 +408,6 @@ export default function ExamReview({ task, onClose }) {
                         boxSizing: 'border-box', background: COLORS.card
                       }}
                     />
-                    {/* KaTeX preview banner — visible when student answer contains LaTeX */}
                     {(currentStudentAnswer || '').includes('\\') && (
                       <div style={{
                         marginTop: '6px', padding: '6px 8px', borderRadius: '6px',
@@ -405,7 +440,9 @@ export default function ExamReview({ task, onClose }) {
                 </div>
 
                 <div>
-                  <div style={{ fontSize: '12px', color: COLORS.textSecondary, marginBottom: '6px' }}>人工评判</div>
+                  <div style={{ fontSize: '12px', color: COLORS.textSecondary, marginBottom: '6px', display: 'flex', alignItems: 'center', gap: '4px' }}>
+                    <UserCheck size={12} /> 人工评判
+                  </div>
                   <div style={{ display: 'flex', gap: '12px' }}>
                     <button
                       onClick={() => handleToggleCorrect(currentQuestion.id, true)}
@@ -453,7 +490,6 @@ export default function ExamReview({ task, onClose }) {
                 </div>
               </div>
 
-              {/* Collapsible analysis section */}
               <div style={{ borderTop: `1px solid ${COLORS.border}`, paddingTop: '12px' }}>
                 <button
                   onClick={() => setShowAnswer(!showAnswer)}
@@ -478,7 +514,6 @@ export default function ExamReview({ task, onClose }) {
           </motion.div>
       </div>
 
-      {/* ── Bottom Action Bar ── */}
       <div style={{
         background: COLORS.card, padding: '12px 16px',
         borderTop: `1px solid ${COLORS.border}`,

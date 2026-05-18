@@ -255,9 +255,20 @@ const recognizeQuestions = async (imageBase64, taskId, retryCount = 0) => {
       const aiAnswer = rawStudentAnswer
       const cleanedStudentAnswer = answerSource === 'blank' ? '' : rawStudentAnswer
 
-      const judgment = judgeAnswer(cleanedStudentAnswer, q.answer, q.question_type)
-      const isCorrect = judgment.isCorrect
-      const unrecognized = judgment.unrecognized
+      // Check if the paper has manual checkmark (✓) — skip AI grading for these
+      const hasManualCheckmark = q.has_manual_checkmark === true
+
+      let isCorrect, status
+      if (hasManualCheckmark) {
+        // Paper already has a ✓ mark — mark as correct, no AI grading needed
+        isCorrect = true
+        status = 'correct'
+      } else {
+        // No manual mark — use normal AI judgment
+        const judgment = judgeAnswer(cleanedStudentAnswer, q.answer, q.question_type)
+        isCorrect = judgment.isCorrect
+        status = isCorrect === true ? 'correct' : (isCorrect === false ? 'wrong' : 'pending')
+      }
 
       return {
         id: crypto.randomUUID(),
@@ -271,7 +282,7 @@ const recognizeQuestions = async (imageBase64, taskId, retryCount = 0) => {
         is_correct: isCorrect,
         question_type: q.question_type || 'answer',
         subject: q.subject || '数学',
-        status: isCorrect === true ? 'correct' : (isCorrect === false ? 'wrong' : 'pending'),
+        status: status,
         confidence: q.confidence || 0,
         analysis: q.analysis || '',
         block_coordinates: q.block_coordinates || null,
