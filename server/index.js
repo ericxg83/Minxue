@@ -728,7 +728,28 @@ app.get('/api/generated-exams/student/:studentId', async (req, res) => {
       `SELECT * FROM ${TABLES.GENERATED_EXAMS} WHERE student_id = $1 ORDER BY created_at DESC`,
       [studentId]
     )
-    res.json({ success: true, generatedExams: rows })
+
+    // 计算每份试卷的正确/错误题目数
+    const examsWithStats = await Promise.all(rows.map(async (exam) => {
+      const qIds = exam.question_ids || []
+      if (qIds.length === 0) {
+        return { ...exam, correct_count: 0, wrong_count: 0, total_count: 0 }
+      }
+      const placeholders = qIds.map((_, i) => `$${i + 2}`).join(',')
+      const { rows: qRows } = await query(
+        `SELECT is_correct FROM ${TABLES.QUESTIONS} WHERE id IN (${placeholders})`,
+        [null, ...qIds]
+      )
+      let correct_count = 0
+      let wrong_count = 0
+      qRows.forEach(q => {
+        if (q.is_correct === true) correct_count++
+        else if (q.is_correct === false) wrong_count++
+      })
+      return { ...exam, correct_count, wrong_count, total_count: qIds.length }
+    }))
+
+    res.json({ success: true, generatedExams: examsWithStats })
   } catch (error) {
     console.error('获取错题卷失败:', error)
     res.status(500).json({ error: error.message })

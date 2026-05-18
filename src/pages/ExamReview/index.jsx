@@ -3,7 +3,7 @@ import { motion } from 'motion/react'
 import { ArrowLeft, ChevronLeft, ChevronRight, CheckCircle2, XCircle, Save, Loader2, ChevronDown, ChevronUp, AlertTriangle, UserCheck, Bot } from 'lucide-react'
 import { useWrongQuestionStore } from '../../store'
 import { useToast } from '../../components/ToastProvider'
-import { updateQuestion, addWrongQuestions, deleteWrongQuestion, getQuestionsByTask } from '../../services/apiService'
+import { updateQuestion, addWrongQuestions, deleteWrongQuestion, getQuestionsByTask, invalidateCache } from '../../services/apiService'
 import MathText from '../../components/MathText'
 
 const COLORS = {
@@ -20,9 +20,9 @@ const COLORS = {
 
 const getStatusInfo = (q) => {
   const isCorrect = q.is_correct
-  const source = q.status === 'correct' && is_correct === true ? 'human' : (q._ai_graded ? 'ai' : 'unknown')
+  const source = q.status === 'correct' && isCorrect === true ? 'human' : (q._ai_graded ? 'ai' : 'unknown')
   
-  if (is_correct === true) {
+  if (isCorrect === true) {
     return {
       bg: source === 'human' ? '#D1FAE5' : '#DCFCE7',
       color: source === 'human' ? '#059669' : COLORS.success,
@@ -32,13 +32,13 @@ const getStatusInfo = (q) => {
       source
     }
   }
-  if (is_correct === false) {
+  if (isCorrect === false) {
     return { bg: '#FEE2E2', color: COLORS.danger, text: 'AI判定错误', icon: XCircle, source: 'ai' }
   }
   return { bg: '#FEF3C7', color: COLORS.warning, text: '未批改', icon: AlertTriangle, source: 'pending' }
 }
 
-export default function ExamReview({ task, onClose }) {
+export default function ExamReview({ task, onClose, onSave }) {
   const { wrongQuestions } = useWrongQuestionStore()
   const Toast = useToast()
 
@@ -166,7 +166,14 @@ export default function ExamReview({ task, onClose }) {
         return { ...q, ...edit, _ai_graded: true }
       }))
       setEdits({})
+      // 清除相关缓存，确保首页数据同步
+      if (task?.student_id) {
+        invalidateCache('generated', task.student_id)
+        invalidateCache('questions', task.student_id)
+      }
       Toast.show({ message: `已保存 ${successCount} 题`, type: 'success' })
+      // 通知父组件重新加载数据
+      if (onSave) onSave()
     } else {
       Toast.show({ message: '保存失败', type: 'error' })
     }
@@ -425,17 +432,22 @@ export default function ExamReview({ task, onClose }) {
                   </div>
                   <div style={{ flex: 1 }}>
                     <div style={{ fontSize: '12px', fontWeight: 600, color: COLORS.textSecondary, marginBottom: '4px' }}>参考答案</div>
-                    <div style={{
-                      padding: '8px 10px', borderRadius: '6px',
-                      border: `1px solid ${COLORS.border}`,
-                      fontSize: '14px', color: currentQuestion.answer ? COLORS.text : '#9CA3AF',
-                      background: COLORS.card, minHeight: '36px',
-                      display: 'flex', alignItems: 'center',
-                      fontStyle: currentQuestion.answer ? 'normal' : 'italic',
-                      wordBreak: 'break-all'
-                    }}>
-                      {currentQuestion.answer ? <MathText content={currentQuestion.answer} /> : '待人工补充'}
-                    </div>
+                    {(() => {
+                      const refAnswer = currentQuestion.answer || currentQuestion.ai_answer || ''
+                      return (
+                        <div style={{
+                          padding: '8px 10px', borderRadius: '6px',
+                          border: `1px solid ${COLORS.border}`,
+                          fontSize: '14px', color: refAnswer ? COLORS.text : '#9CA3AF',
+                          background: COLORS.card, minHeight: '36px',
+                          display: 'flex', alignItems: 'center',
+                          fontStyle: refAnswer ? 'normal' : 'italic',
+                          wordBreak: 'break-all'
+                        }}>
+                          {refAnswer ? <MathText content={refAnswer} /> : '待人工补充'}
+                        </div>
+                      )
+                    })()}
                   </div>
                 </div>
 

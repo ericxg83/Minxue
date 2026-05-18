@@ -138,8 +138,15 @@ export default function Exam() {
     setShowReview(true)
   }
 
-  const handleCloseReview = () => {
+  const handleReviewSave = () => {
+    // 保存时立即刷新首页数据（强制刷新）
+    loadGeneratedExams(true)
+  }
+
+  const handleReviewClose = () => {
     setShowReview(false)
+    // 关闭复审时重新加载数据，确保正确数/错误数同步
+    loadGeneratedExams(true)
     setReviewExam(null)
   }
   
@@ -491,7 +498,8 @@ export default function Exam() {
       {showReview && reviewExam && (
         <ExamReview
           task={reviewExam}
-          onClose={handleCloseReview}
+          onClose={handleReviewClose}
+          onSave={handleReviewSave}
         />
       )}
     </div>
