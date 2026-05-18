@@ -170,6 +170,7 @@ export default function ExamReview({ task, onClose, onSave }) {
       if (task?.student_id) {
         invalidateCache('generated', task.student_id)
         invalidateCache('questions', task.student_id)
+        invalidateCache('tasks', task.student_id)
       }
       // 重新计算首页 task 的统计数据（正确数/错误数）
       if (task?.id) {

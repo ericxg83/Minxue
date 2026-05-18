@@ -1,4 +1,4 @@
-import { useState, useRef, useCallback, useEffect, useMemo } from 'react'
+import { useState, useRef, useCallback, useEffect, useMemo, useLayoutEffect } from 'react'
 
 const HANDLE_HIT_PAD = 6
 
@@ -27,17 +27,14 @@ export default function RectCropper({ image, onConfirm, onCancel, theme = 'light
   const imgRef = useRef(null)
   const previewCanvasRef = useRef(null)
   const previewRafRef = useRef(null)
-  const [imgRect, setImgRect] = useState({ x: 0, y: 0, width: 0, height: 0 })
+  const [imgRect, setImgRect] = useState({ x: 0, y: 0, width: 0, height: 0, scale: 1 })
   const [crop, setCrop] = useState({ x: 0, y: 0, width: 0, height: 0 })
-  const [hasSelection, setHasSelection] = useState(false)
-  const [selecting, setSelecting] = useState(false)
-  const [selectionStart, setSelectionStart] = useState(null)
-  const [selectionEnd, setSelectionEnd] = useState(null)
   const [dragging, setDragging] = useState(false)
   const [resizing, setResizing] = useState(false)
   const [resizeHandle, setResizeHandle] = useState(null)
   const [showInstruction, setShowInstruction] = useState(true)
   const startRef = useRef({ x: 0, y: 0, crop: null })
+  const imgNaturalRef = useRef({ w: 0, h: 0 })
 
   const responsive = useMemo(() => getResponsiveSizes(), [])
   const { MIN_SIZE, HANDLE_SIZE, BORDER_WIDTH } = responsive
@@ -82,9 +79,8 @@ export default function RectCropper({ image, onConfirm, onCancel, theme = 'light
   const computeLayout = useCallback(() => {
     const container = containerRef.current
     const img = imgRef.current
-    if (!container || !img) return
+    if (!container || !img || !imgNaturalRef.current.w) return
 
-    // 通过 getBoundingClientRect 获取 CSS 布局后的实际图片位置
     const containerRect = container.getBoundingClientRect()
     const imgRectDOM = img.getBoundingClientRect()
 
@@ -95,15 +91,29 @@ export default function RectCropper({ image, onConfirm, onCancel, theme = 'light
 
     if (w <= 0 || h <= 0) return
 
-    const naturalW = img.naturalWidth || w
-    const naturalH = img.naturalHeight || h
-    const scale = w / naturalW // 图片显示宽度 / 原始宽度
+    const naturalW = imgNaturalRef.current.w
+    const naturalH = imgNaturalRef.current.h
+    const scale = w / naturalW
 
-    setImgRect({ x, y, width: w, height: h, scale })
+    setImgRect({ x, y, width: w, height: h, scale, naturalW, naturalH })
   }, [])
 
-  // 锁定 body 滚动，防止 iOS 回弹
   useEffect(() => {
+    if (imgRect.width <= 0 || crop.width > 0) return
+    const { width: w, height: h } = imgRect
+    if (w <= 0 || h <= 0) return
+    const ratio = 0.8
+    const cw = Math.round(w * ratio)
+    const ch = Math.round(h * ratio)
+    setCrop({
+      x: Math.round((w - cw) / 2),
+      y: Math.round((h - ch) / 2),
+      width: cw,
+      height: ch
+    })
+  }, [imgRect.width, imgRect.height, crop.width])
+
+  useLayoutEffect(() => {
     const prevOverflow = document.body.style.overflow
     const prevPosition = document.body.style.position
     const prevWidth = document.body.style.width
@@ -117,28 +127,31 @@ export default function RectCropper({ image, onConfirm, onCancel, theme = 'light
     }
   }, [])
 
-  // Instruction auto-dismiss
   useEffect(() => {
     if (!showInstruction) return
-    const timer = setTimeout(() => setShowInstruction(false), 4000)
+    const timer = setTimeout(() => setShowInstruction(false), 3000)
     return () => clearTimeout(timer)
   }, [showInstruction])
 
   useEffect(() => {
     if (!image) return
-    // 不加 crossOrigin：OSS 图片无 CORS 头时依然能显示
     const img = new Image()
     img.onload = () => {
+      imgNaturalRef.current = { w: img.naturalWidth, h: img.naturalHeight }
       if (imgRef.current) {
         imgRef.current.src = image
       }
-      requestAnimationFrame(computeLayout)
+      setCrop({ x: 0, y: 0, width: 0, height: 0 })
+      setShowInstruction(true)
+      setTimeout(() => {
+        computeLayout()
+      }, 80)
     }
     img.onerror = () => {
-      // 直接设置 src 尝试让浏览器原样加载
       if (imgRef.current) {
         imgRef.current.src = image
       }
+      setTimeout(() => computeLayout(), 80)
     }
     img.src = image
   }, [image, computeLayout])
@@ -161,27 +174,14 @@ export default function RectCropper({ image, onConfirm, onCancel, theme = 'light
     }
   }, [])
 
-  /** 手指按下 — 开始划拉选择 */
-  const handleSelectionMouseDown = useCallback((e) => {
-    if (hasSelection) return // 已有选区时交给 handleCropMouseDown
-    e.stopPropagation()
-    e.preventDefault()
-    setShowInstruction(false)
-    const p = getPointer(e)
-    setSelecting(true)
-    setSelectionStart(p)
-    setSelectionEnd(p)
-  }, [hasSelection, getPointer])
-
   const handleCropMouseDown = useCallback((e) => {
-    if (!hasSelection) return
     e.stopPropagation()
     e.preventDefault()
     setShowInstruction(false)
     setDragging(true)
     const p = getPointer(e)
     startRef.current = { x: p.x, y: p.y, crop: { ...crop } }
-  }, [hasSelection, crop, getPointer])
+  }, [crop, getPointer])
 
   const handleResizeMouseDown = useCallback((e, handle) => {
     e.stopPropagation()
@@ -193,17 +193,14 @@ export default function RectCropper({ image, onConfirm, onCancel, theme = 'light
     startRef.current = { x: p.x, y: p.y, crop: { ...crop } }
   }, [crop, getPointer])
 
-  /** 全局 move/up — 处理选择 + 拖拽 + 缩放 */
   useEffect(() => {
-    if (!selecting && !dragging && !resizing) return
+    if (!dragging && !resizing) return
 
     const handleMove = (e) => {
       e.preventDefault()
       const p = getPointer(e)
 
-      if (selecting) {
-        setSelectionEnd(p)
-      } else if (dragging) {
+      if (dragging) {
         const dx = p.x - startRef.current.x
         const dy = p.y - startRef.current.y
         const sc = startRef.current.crop
@@ -239,28 +236,6 @@ export default function RectCropper({ image, onConfirm, onCancel, theme = 'light
     }
 
     const handleUp = () => {
-      if (selecting && selectionStart && selectionEnd) {
-        // 计算最终选区
-        let sx = Math.min(selectionStart.x, selectionEnd.x)
-        let sy = Math.min(selectionStart.y, selectionEnd.y)
-        let sw = Math.abs(selectionEnd.x - selectionStart.x)
-        let sh = Math.abs(selectionEnd.y - selectionStart.y)
-
-        // 相对图片区域的偏移
-        sx = clamp(sx - imgRect.x, 0, imgRect.width)
-        sy = clamp(sy - imgRect.y, 0, imgRect.height)
-        sw = clamp(sw, MIN_SIZE, imgRect.width - sx)
-        sh = clamp(sh, MIN_SIZE, imgRect.height - sy)
-
-        if (sw >= MIN_SIZE && sh >= MIN_SIZE) {
-          setCrop({ x: sx, y: sy, width: sw, height: sh })
-          setHasSelection(true)
-          setShowInstruction(false)
-        }
-      }
-      setSelecting(false)
-      setSelectionStart(null)
-      setSelectionEnd(null)
       setDragging(false)
       setResizing(false)
       setResizeHandle(null)
@@ -276,9 +251,8 @@ export default function RectCropper({ image, onConfirm, onCancel, theme = 'light
       window.removeEventListener('touchmove', handleMove)
       window.removeEventListener('touchend', handleUp)
     }
-  }, [selecting, dragging, resizing, resizeHandle, imgRect, getPointer, selectionStart, selectionEnd, MIN_SIZE])
+  }, [dragging, resizing, resizeHandle, imgRect, getPointer, MIN_SIZE])
 
-  // 实时预览裁剪结果
   const updatePreview = useCallback(() => {
     if (!imgRef.current || !previewCanvasRef.current) return
     if (crop.width <= 0 || crop.height <= 0) return
@@ -321,7 +295,6 @@ export default function RectCropper({ image, onConfirm, onCancel, theme = 'light
       canvas.height = sh
       const ctx = canvas.getContext('2d')
 
-      // 外部 URL 通过后端代理获取（绕过 CORS），data URL 直接绘制
       const src = imgRef.current.src
       if (src && src.startsWith('http')) {
         const proxyUrl = `/api/proxy-image?url=${encodeURIComponent(src)}`
@@ -343,32 +316,29 @@ export default function RectCropper({ image, onConfirm, onCancel, theme = 'light
     }
   }
 
-  const handleReselect = () => {
-    setHasSelection(false)
-    setCrop({ x: 0, y: 0, width: 0, height: 0 })
-    setShowInstruction(true)
+  const handleResetCrop = () => {
+    if (imgRect.width <= 0) return
+    const ratio = 0.8
+    const cw = Math.round(imgRect.width * ratio)
+    const ch = Math.round(imgRect.height * ratio)
+    setCrop({
+      x: Math.round((imgRect.width - cw) / 2),
+      y: Math.round((imgRect.height - ch) / 2),
+      width: cw,
+      height: ch
+    })
   }
 
-  // --- 选择状态：划拉画框时的临时矩形 ---
-  const selRect = selecting && selectionStart && selectionEnd ? {
-    x: Math.min(selectionStart.x, selectionStart.x, selectionEnd.x),
-    y: Math.min(selectionStart.y, selectionStart.y, selectionEnd.y),
-    width: Math.abs(selectionEnd.x - selectionStart.x),
-    height: Math.abs(selectionEnd.y - selectionStart.y)
-  } : null
-
-  // --- 有选区时的遮罩计算 ---
-  const cropX = hasSelection ? crop.x : 0
-  const cropY = hasSelection ? crop.y : 0
-  const cropW = hasSelection ? crop.width : 0
-  const cropH = hasSelection ? crop.height : 0
+  const cropX = crop.x
+  const cropY = crop.y
+  const cropW = crop.width
+  const cropH = crop.height
 
   const topH = imgRect.y + cropY
   const bottomH = imgRect.height - cropY - cropH
   const leftW = cropX
   const rightW = imgRect.width - cropX - cropW
 
-  // 实际裁剪像素尺寸
   const naturalCropWidth = Math.round(crop.width / (imgRect.scale || 1))
   const naturalCropHeight = Math.round(crop.height / (imgRect.scale || 1))
 
@@ -384,6 +354,8 @@ export default function RectCropper({ image, onConfirm, onCancel, theme = 'light
     { key: 'se', style: { bottom: -half, right: -half } }
   ]
 
+  const hasValidCrop = crop.width >= MIN_SIZE && crop.height >= MIN_SIZE
+
   return (
     <div
       style={{
@@ -397,18 +369,15 @@ export default function RectCropper({ image, onConfirm, onCancel, theme = 'light
     >
       <div
         ref={containerRef}
-        onMouseDown={!hasSelection ? handleSelectionMouseDown : undefined}
-        onTouchStart={!hasSelection ? handleSelectionMouseDown : undefined}
         style={{
           flex: 1,
           position: 'relative',
           overflow: 'hidden',
           touchAction: 'none',
           paddingTop: 'env(safe-area-inset-top, 12px)',
-          cursor: !hasSelection ? 'crosshair' : 'default'
+          cursor: 'default'
         }}
       >
-        {/* 背景图片 - CSS 居中显示（始终可见，不加 crossOrigin 以兼容无 CORS 的 OSS） */}
         <img
           ref={imgRef}
           src={image}
@@ -433,7 +402,6 @@ export default function RectCropper({ image, onConfirm, onCancel, theme = 'light
 
         {imgRect.width > 0 && (
           <>
-            {/* 操作提示 */}
             {showInstruction && (
               <div style={{
                 position: 'absolute',
@@ -452,48 +420,28 @@ export default function RectCropper({ image, onConfirm, onCancel, theme = 'light
                 transition: 'opacity 0.3s',
                 opacity: showInstruction ? 1 : 0
               }}>
-                在图片上划拉选择裁剪区域
+                拖动裁剪框调整范围，或拖动角点缩放
               </div>
             )}
 
-            {/* 划拉选择时的临时矩形 */}
-            {selecting && selRect && selRect.width > 0 && selRect.height > 0 && (
-              <div style={{
-                position: 'absolute',
-                left: imgRect.x + selRect.x,
-                top: imgRect.y + selRect.y,
-                width: selRect.width,
-                height: selRect.height,
-                border: `${BORDER_WIDTH}px dashed ${colors.accent}`,
-                background: 'rgba(37,99,235,0.08)',
-                pointerEvents: 'none',
-                zIndex: 3
-              }} />
-            )}
-
-            {/* 有选区时的遮罩 + 裁剪框 */}
-            {hasSelection && (
+            {hasValidCrop && (
               <>
-                {/* 上遮罩 */}
                 <div style={{
                   position: 'absolute', left: imgRect.x, top: 0,
                   width: imgRect.width, height: topH,
                   background: colors.mask, pointerEvents: 'none'
                 }} />
-                {/* 下遮罩 */}
                 <div style={{
                   position: 'absolute', left: imgRect.x, bottom: 0,
                   width: imgRect.width, height: bottomH,
                   background: colors.mask, pointerEvents: 'none'
                 }} />
-                {/* 左遮罩 */}
                 <div style={{
                   position: 'absolute',
                   left: imgRect.x, top: imgRect.y + cropY,
                   width: leftW, height: cropH,
                   background: colors.mask, pointerEvents: 'none'
                 }} />
-                {/* 右遮罩 */}
                 <div style={{
                   position: 'absolute',
                   right: `calc(100% - ${imgRect.x + imgRect.width}px)`,
@@ -502,7 +450,6 @@ export default function RectCropper({ image, onConfirm, onCancel, theme = 'light
                   background: colors.mask, pointerEvents: 'none'
                 }} />
 
-                {/* 裁剪框 */}
                 <div
                   onMouseDown={handleCropMouseDown}
                   onTouchStart={handleCropMouseDown}
@@ -518,13 +465,11 @@ export default function RectCropper({ image, onConfirm, onCancel, theme = 'light
                     willChange: (dragging || resizing) ? 'left, top, width, height' : 'auto'
                   }}
                 >
-                  {/* 边框 */}
                   <div style={{
                     position: 'absolute', inset: 0,
                     border: `${BORDER_WIDTH}px solid ${colors.accent}`,
                     boxSizing: 'border-box'
                   }} />
-                  {/* 角点手柄 */}
                   {handles.map((h) => (
                     <div
                       key={h.key}
@@ -545,7 +490,6 @@ export default function RectCropper({ image, onConfirm, onCancel, theme = 'light
                       }}
                     />
                   ))}
-                  {/* 中心十字线 */}
                   <div style={{
                     position: 'absolute', left: '50%', top: 0, bottom: 0, width: 1,
                     background: colors.accentLight, transform: 'translateX(-50%)', pointerEvents: 'none'
@@ -569,9 +513,8 @@ export default function RectCropper({ image, onConfirm, onCancel, theme = 'light
           borderTop: theme === 'light' ? '1px solid #E5E7EB' : 'none'
         }}
       >
-        {hasSelection ? (
+        {imgRect.width > 0 ? (
           <>
-            {/* 预览 + 尺寸 */}
             <div style={{
               display: 'flex', alignItems: 'center', justifyContent: 'center',
               gap: 12, marginBottom: 12
@@ -599,7 +542,7 @@ export default function RectCropper({ image, onConfirm, onCancel, theme = 'light
 
             <div style={{ display: 'flex', gap: 10 }}>
               <button
-                onClick={handleReselect}
+                onClick={handleResetCrop}
                 style={{
                   padding: '14px 12px',
                   borderRadius: 10,
@@ -612,7 +555,7 @@ export default function RectCropper({ image, onConfirm, onCancel, theme = 'light
                   whiteSpace: 'nowrap'
                 }}
               >
-                重新选择
+                重置
               </button>
               <button
                 onClick={onCancel}
@@ -632,16 +575,18 @@ export default function RectCropper({ image, onConfirm, onCancel, theme = 'light
               </button>
               <button
                 onClick={handleConfirm}
+                disabled={!hasValidCrop}
                 style={{
                   flex: 1,
                   padding: '14px',
                   borderRadius: 10,
                   border: 'none',
-                  background: colors.confirmBg,
-                  color: colors.confirmText,
+                  background: hasValidCrop ? colors.confirmBg : '#D1D5DB',
+                  color: hasValidCrop ? colors.confirmText : '#9CA3AF',
                   fontSize: 15,
                   fontWeight: 600,
-                  cursor: 'pointer'
+                  cursor: hasValidCrop ? 'pointer' : 'not-allowed',
+                  opacity: hasValidCrop ? 1 : 0.6
                 }}
               >
                 确认裁剪
