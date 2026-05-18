@@ -448,20 +448,15 @@ const generateAnswerForQuestion = async (questionContent, retryCount = 0) => {
 }
 
 /**
- * Generate missing reference answers for questions.
- * For multiple choice questions, ALWAYS regenerate to ensure accuracy (OCR answer is unreliable).
- * For other types, only generate when answer is empty.
+ * Generate reference answers for ALL questions via AI calculation.
+ * OCR may confuse student's selected answer with the reference answer,
+ * so reference answers should always come from AI calculation based on question content.
  */
 const generateMissingAnswers = async (questions) => {
   if (!questions || questions.length === 0) return { updated: 0, total: 0 }
 
-  const needAnswer = questions.filter(q => {
-    const hasEmptyAnswer = !q.answer || q.answer.trim() === ''
-    // For multiple choice, ALWAYS regenerate - OCR cannot distinguish between
-    // student's selected answer and the correct reference answer
-    if (q.question_type === 'choice') return true
-    return hasEmptyAnswer
-  })
+  // Always generate reference answers for all questions - never trust OCR for the reference answer
+  const needAnswer = questions.filter(q => true)
   if (needAnswer.length === 0) {
     console.log('   所有题目已有参考答案，跳过生成')
     return { updated: 0, total: 0 }
