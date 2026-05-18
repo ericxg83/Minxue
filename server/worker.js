@@ -449,7 +449,7 @@ const generateAnswerForQuestion = async (questionContent, retryCount = 0) => {
 
 /**
  * Generate missing reference answers for questions.
- * For multiple choice questions without a reliable answer, always generate.
+ * For multiple choice questions, ALWAYS regenerate to ensure accuracy (OCR answer is unreliable).
  * For other types, only generate when answer is empty.
  */
 const generateMissingAnswers = async (questions) => {
@@ -457,14 +457,9 @@ const generateMissingAnswers = async (questions) => {
 
   const needAnswer = questions.filter(q => {
     const hasEmptyAnswer = !q.answer || q.answer.trim() === ''
-    // For multiple choice, always generate to ensure accuracy (OCR may have confused student answer with reference answer)
-    if (q.question_type === 'choice' && !hasEmptyAnswer) {
-      const ans = q.answer.trim()
-      // Only regenerate if answer is not a single letter (A-D), which suggests OCR confusion
-      if (!/^[A-D]$/.test(ans.toUpperCase())) {
-        return true
-      }
-    }
+    // For multiple choice, ALWAYS regenerate - OCR cannot distinguish between
+    // student's selected answer and the correct reference answer
+    if (q.question_type === 'choice') return true
     return hasEmptyAnswer
   })
   if (needAnswer.length === 0) {
