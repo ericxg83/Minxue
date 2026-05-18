@@ -3,6 +3,10 @@ import { motion, AnimatePresence } from 'motion/react'
 import { X, Loader2, Image as ImageIcon, Clock } from 'lucide-react'
 import jsQR from 'jsqr'
 
+// 缩小视频帧以便 jsQR 更容易检测到二维码
+// 手机摄像头分辨率太高(如1920x1080)，二维码在画面中太小无法识别
+const SCALE_DOWN_FACTOR = 0.3
+
 export default function ScanQR({ onClose, onScanSuccess }) {
   const [scanning, setScanning] = useState(false)
   const [cameraReady, setCameraReady] = useState(false)
@@ -33,11 +37,15 @@ export default function ScanQR({ onClose, onScanSuccess }) {
       return
     }
 
-    canvas.width = video.videoWidth
-    canvas.height = video.videoHeight
+    // 缩小帧尺寸以提高 jsQR 检测率
+    const scaledWidth = Math.floor(video.videoWidth * SCALE_DOWN_FACTOR)
+    const scaledHeight = Math.floor(video.videoHeight * SCALE_DOWN_FACTOR)
+
+    canvas.width = scaledWidth
+    canvas.height = scaledHeight
     const ctx = canvas.getContext('2d', { willReadFrequently: true })
-    ctx.drawImage(video, 0, 0, canvas.width, canvas.height)
-    const imageData = ctx.getImageData(0, 0, canvas.width, canvas.height)
+    ctx.drawImage(video, 0, 0, scaledWidth, scaledHeight)
+    const imageData = ctx.getImageData(0, 0, scaledWidth, scaledHeight)
 
     const code = jsQR(imageData.data, imageData.width, imageData.height, {
       inversionAttempts: 'dontInvert'
@@ -121,11 +129,13 @@ export default function ScanQR({ onClose, onScanSuccess }) {
     reader.onload = (event) => {
       const img = new Image()
       img.onload = () => {
+        // 同样缩小图片以提高检测率
         const canvas = document.createElement('canvas')
-        canvas.width = img.width
-        canvas.height = img.height
+        const scale = Math.min(1, 600 / Math.max(img.width, img.height))
+        canvas.width = Math.floor(img.width * scale)
+        canvas.height = Math.floor(img.height * scale)
         const ctx = canvas.getContext('2d', { willReadFrequently: true })
-        ctx.drawImage(img, 0, 0)
+        ctx.drawImage(img, 0, 0, canvas.width, canvas.height)
         const imageData = ctx.getImageData(0, 0, canvas.width, canvas.height)
         const code = jsQR(imageData.data, imageData.width, imageData.height)
 
