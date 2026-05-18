@@ -194,6 +194,22 @@ export default function App() {
     }
   }, [currentStudent?.id, currentPage])
 
+  // Auto-refresh pending tasks every 30 seconds
+  useEffect(() => {
+    if (!currentStudent || currentPage !== 'processing') return
+
+    const interval = setInterval(() => {
+      const pendingTasks = (Array.isArray(tasks) ? tasks : []).filter(t => t.status !== 'done')
+      if (pendingTasks.length > 0) {
+        // Only refresh if there are pending/processing tasks
+        invalidateCache('tasks', currentStudent.id)
+        loadTasks()
+      }
+    }, 30000) // 30 seconds
+
+    return () => clearInterval(interval)
+  }, [currentStudent?.id, currentPage, tasks])
+
 
   // Load wrong questions
   useEffect(() => {
@@ -1115,6 +1131,44 @@ export default function App() {
     }
   }
 
+  // Retry a pending/failed task
+  const handleRetryTask = async (taskId) => {
+    if (!currentStudent) {
+      Toast.show({ message: '请先选择学生', type: 'error', duration: 1500 })
+      return
+    }
+
+    try {
+      Toast.show({ message: '正在重新处理...', type: 'info', duration: 2000 })
+      
+      // Fetch the task info
+      const task = await getTaskById(taskId, false)
+      if (!task) {
+        Toast.show({ message: '任务不存在', type: 'error', duration: 2000 })
+        return
+      }
+
+      // Re-add to queue via server endpoint
+      const response = await fetch('/api/tasks/retry', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ taskId: task.id, imageUrl: task.image_url, studentId: task.student_id, originalName: task.original_name })
+      })
+
+      if (!response.ok) {
+        throw new Error('重新处理失败')
+      }
+
+      Toast.show({ message: '已重新加入处理队列', type: 'success', duration: 2000 })
+
+      // Refresh task list after a short delay
+      setTimeout(() => loadTasks(), 1000)
+    } catch (error) {
+      console.error('重新处理失败:', error)
+      Toast.show({ message: '重新处理失败，请稍后重试', type: 'error', duration: 2000 })
+    }
+  }
+
   // Trigger upload with specified capture mode
   const triggerUpload = (capture) => {
     const input = document.getElementById('file-input')
@@ -1316,13 +1370,72 @@ export default function App() {
                               {task.status !== 'done' && (
                                 <>
                                   <span style={{ fontSize: '10px', color: '#D1D5DB' }}>·</span>
-                                  <span style={{
-                                    fontSize: '11px',
-                                    color: task.status === 'failed' ? '#EF4444' : task.status === 'processing' ? '#2563EB' : '#F59E0B'
-                                  }}>
-                                    {task.status === 'processing' && <Loader2 size={9} className="animate-spin inline" style={{ marginRight: '1px' }} />}
-                                    {task.status === 'processing' ? '批改中' : task.status === 'failed' ? '识别失败' : '等待中'}
-                                  </span>
+                                  {(() => {
+                                    const pendingMinutes = dayjs().diff(dayjs(task.created_at), 'minute')
+                                    const isTimedOut = pendingMinutes > 10
+
+                                    if (task.status === 'processing') {
+                                      return (
+                                        <span style={{ fontSize: '11px', color: '#2563EB' }}>
+                                          <Loader2 size={9} className="animate-spin inline" style={{ marginRight: '1px' }} />
+                                          批改中
+                                        </span>
+                                      )
+                                    }
+
+                                    if (task.status === 'failed') {
+                                      return (
+                                        <span style={{ fontSize: '11px', color: '#EF4444' }}>
+                                          识别失败
+                                          <button
+                                            onClick={(e) => { e.stopPropagation(); handleRetryTask(task.id) }}
+                                            style={{
+                                              marginLeft: '6px',
+                                              fontSize: '10px',
+                                              padding: '1px 6px',
+                                              borderRadius: '4px',
+                                              border: '1px solid #EF4444',
+                                              background: '#FEF2F2',
+                                              color: '#EF4444',
+                                              cursor: 'pointer'
+                                            }}
+                                          >
+                                            重试
+                                          </button>
+                                        </span>
+                                      )
+                                    }
+
+                                    // Pending status
+                                    if (isTimedOut) {
+                                      return (
+                                        <span style={{ fontSize: '11px', color: '#EF4444' }}>
+                                          等待中 ({pendingMinutes}分钟)
+                                          <button
+                                            onClick={(e) => { e.stopPropagation(); handleRetryTask(task.id) }}
+                                            style={{
+                                              marginLeft: '6px',
+                                              fontSize: '10px',
+                                              padding: '1px 6px',
+                                              borderRadius: '4px',
+                                              border: '1px solid #EF4444',
+                                              background: '#FEF2F2',
+                                              color: '#EF4444',
+                                              cursor: 'pointer'
+                                            }}
+                                          >
+                                            重新处理
+                                          </button>
+                                        </span>
+                                      )
+                                    }
+
+                                    return (
+                                      <span style={{ fontSize: '11px', color: '#F59E0B' }}>
+                                        等待中 ({pendingMinutes}分钟)
+                                      </span>
+                                    )
+                                  })()}
                                 </>
                               )}
                             </div>

@@ -1,6 +1,7 @@
 import dotenv from 'dotenv'
 import { dirname, resolve } from 'path'
 import { fileURLToPath } from 'url'
+import { pendingTaskRecovery } from './pendingTaskRecovery.js'
 
 const __dirname = dirname(fileURLToPath(import.meta.url))
 dotenv.config({ path: resolve(__dirname, '.env') })
@@ -387,6 +388,46 @@ app.get('/api/queue/stats', async (req, res) => {
     res.json({ success: true, stats })
   } catch (error) {
     console.error('获取队列统计失败:', error)
+    res.status(500).json({ error: error.message })
+  }
+})
+
+// Retry a pending/failed task
+app.post('/api/tasks/retry', async (req, res) => {
+  try {
+    const { taskId, imageUrl, studentId, originalName } = req.body
+
+    if (!taskId || !imageUrl || !studentId) {
+      return res.status(400).json({ error: '缺少必要参数' })
+    }
+
+    // Update task status back to pending
+    await query(
+      `UPDATE ${TABLES.TASKS} SET status = 'pending', updated_at = NOW() WHERE id = $1`,
+      [taskId]
+    )
+
+    // Re-add to queue
+    const queue = await getTaskQueue()
+    if (!queue) {
+      return res.status(503).json({ error: '队列不可用，请检查 Redis 连接' })
+    }
+
+    await queue.add('process-task', {
+      taskId,
+      studentId,
+      imageUrl,
+      originalName: originalName || '重试任务',
+      retryCount: 1
+    }, {
+      attempts: parseInt(process.env.MAX_RETRIES) || 3,
+      backoff: { type: 'exponential', delay: 5000 }
+    })
+
+    console.log(`[API] 任务已重新加入队列: ${originalName || taskId}`)
+    res.json({ success: true, message: '任务已重新加入队列' })
+  } catch (error) {
+    console.error('重试任务失败:', error)
     res.status(500).json({ error: error.message })
   }
 })
@@ -856,6 +897,13 @@ if (process.argv[1] === __filename || process.argv[1]?.endsWith('server/index.js
       console.error('队列初始化失败:', err.message)
     }
 
+    // 启动 Pending 任务恢复扫描器
+    try {
+      pendingTaskRecovery.start()
+    } catch (err) {
+      console.error('Pending 任务恢复扫描器启动失败:', err.message)
+    }
+
     console.log(`并发数: ${process.env.CONCURRENCY || 2}`)
     console.log(`数据库: Neon PostgreSQL`)
   })
@@ -867,6 +915,13 @@ export const createServer = (port = PORT) => {
   return new Promise(async (resolve) => {
     // 启动时初始化队列
     await getTaskQueue()
+
+    // 启动 Pending 任务恢复扫描器
+    try {
+      pendingTaskRecovery.start()
+    } catch (err) {
+      console.error('Pending 任务恢复扫描器启动失败:', err.message)
+    }
 
     const server = app.listen(port, () => {
       resolve(server)

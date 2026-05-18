@@ -6,11 +6,16 @@ class RedisManager {
     this.currentIndex = 0
     this.pool = this.buildPool()
     this.initialized = false
+    this.healthCheckInterval = null
+    this.healthCheckIntervalMs = 30000 // 30 seconds
+    this.reconnectDelayMs = 5000 // 5 seconds
+    this.isShuttingDown = false
   }
 
   buildPool() {
     const pool = []
 
+    // Primary: Local Redis
     if (process.env.REDIS_LOCAL === 'true' || process.env.REDIS_HOST === 'localhost') {
       pool.push({
         id: 'local',
@@ -19,43 +24,36 @@ class RedisManager {
           port: parseInt(process.env.REDIS_PORT) || 6379,
           password: process.env.REDIS_LOCAL_PASSWORD || undefined,
           enableReadyCheck: true,
-          maxRetriesPerRequest: null
+          maxRetriesPerRequest: null,
+          reconnectOnError: () => true, // Always try to reconnect on error
+          retryStrategy: (times) => {
+            const delay = Math.min(times * 1000, 10000) // Max 10s delay
+            console.log(`[Redis:local] 第 ${times} 次重试，${delay}ms 后重连...`)
+            return delay
+          }
         },
-        type: 'CONFIG'
+        type: 'CONFIG',
+        priority: 1 // Higher priority
       })
     }
 
-    if (process.env.REDIS_POOL_URLS) {
-      const urls = process.env.REDIS_POOL_URLS.split(',').map(u => u.trim()).filter(Boolean)
-      urls.forEach((url, i) => {
-        pool.push({
-          id: `pool_${i}`,
-          url: url,
-          type: 'URL'
-        })
-      })
-    } else if (process.env.REDIS_POOL_CONFIG) {
-      try {
-        const configs = JSON.parse(process.env.REDIS_POOL_CONFIG)
-        configs.forEach((cfg, i) => {
-          pool.push({
-            id: `pool_${i}`,
-            config: cfg,
-            type: 'CONFIG'
-          })
-        })
-      } catch (e) {
-        console.error('REDIS_POOL_CONFIG 解析失败:', e.message)
-      }
-    }
-
+    // Secondary: Upstash Redis (fallback)
     if (process.env.REDIS_URL) {
       pool.push({
-        id: 'upstash_main',
+        id: 'upstash_fallback',
         url: process.env.REDIS_URL.trim(),
-        type: 'URL'
+        type: 'URL',
+        priority: 2,
+        maxRetriesPerRequest: null,
+        retryStrategy: (times) => {
+          if (times > 5) return null // Stop after 5 retries
+          return Math.min(times * 2000, 10000)
+        }
       })
     }
+
+    // Sort by priority (lower number = higher priority)
+    pool.sort((a, b) => (a.priority || 99) - (b.priority || 99))
 
     return pool
   }
@@ -69,26 +67,46 @@ class RedisManager {
       let client
       if (poolItem.type === 'URL') {
         client = new Redis(poolItem.url, {
-          maxRetriesPerRequest: null,
-          tls: { rejectUnauthorized: false }
+          maxRetriesPerRequest: poolItem.maxRetriesPerRequest || null,
+          tls: { rejectUnauthorized: false },
+          retryStrategy: poolItem.retryStrategy
         })
       } else {
-        client = new Redis(poolItem.config)
+        client = new Redis({
+          ...poolItem.config,
+          retryStrategy: poolItem.config?.retryStrategy || undefined
+        })
       }
 
       client.on('error', (err) => {
         console.error(`[Redis:${poolItem.id}] 连接错误: ${err.message}`)
+        // Auto-reconnect is handled by ioredis retryStrategy
       })
 
       client.on('connect', () => {
         console.log(`[Redis:${poolItem.id}] 已连接`)
       })
 
+      client.on('reconnecting', () => {
+        console.log(`[Redis:${poolItem.id}] 正在重连...`)
+      })
+
+      client.on('ready', () => {
+        console.log(`[Redis:${poolItem.id}] 准备就绪`)
+      })
+
+      client.on('end', () => {
+        console.warn(`[Redis:${poolItem.id}] 连接断开`)
+        // Remove from cache so next getAvailableClient will recreate
+        this.clients.delete(poolItem.id)
+      })
+
       await client.ping()
       this.clients.set(poolItem.id, client)
+      console.log(`[Redis:${poolItem.id}] ✅ 连接成功`)
       return client
     } catch (err) {
-      console.error(`[Redis:${poolItem.id}] 连接失败: ${err.message}`)
+      console.error(`[Redis:${poolItem.id}] ❌ 连接失败: ${err.message}`)
       return null
     }
   }
@@ -96,12 +114,16 @@ class RedisManager {
   async init() {
     if (this.initialized) return
 
+    // Try to connect to all Redis instances
     for (const item of this.pool) {
       await this.createClient(item)
     }
 
     this.initialized = true
     console.log(`[Redis] 连接池初始化完成: ${this.clients.size}/${this.pool.length} 个实例`)
+
+    // Start health check
+    this.startHealthCheck()
   }
 
   async getAvailableClient() {
@@ -110,35 +132,77 @@ class RedisManager {
       return null
     }
 
+    // Try each Redis instance in priority order
     for (let i = 0; i < this.pool.length; i++) {
       const idx = (this.currentIndex + i) % this.pool.length
       const item = this.pool[idx]
-      const client = this.clients.get(item.id)
+      let client = this.clients.get(item.id)
 
+      // Try to reconnect if client doesn't exist
       if (!client) {
-        const newClient = await this.createClient(item)
-        if (newClient) {
+        console.log(`[Redis] 尝试重连: ${item.id}`)
+        client = await this.createClient(item)
+        if (client) {
           this.currentIndex = idx
-          return newClient
+          return client
         }
         continue
       }
 
+      // Check if client is still alive
       try {
-        await client.ping()
-        this.currentIndex = idx
-        return client
+        const result = await client.ping()
+        if (result === 'PONG') {
+          this.currentIndex = idx
+          return client
+        }
       } catch (err) {
         console.warn(`[Redis:${item.id}] ping 失败，尝试下一个: ${err.message}`)
         this.clients.delete(item.id)
+        continue
       }
     }
 
-    console.error('[Redis] 所有实例均不可用')
+    console.error('[Redis] ❌ 所有实例均不可用')
     return null
   }
 
+  startHealthCheck() {
+    // Clear existing interval
+    if (this.healthCheckInterval) {
+      clearInterval(this.healthCheckInterval)
+    }
+
+    this.healthCheckInterval = setInterval(async () => {
+      if (this.isShuttingDown) return
+
+      try {
+        const client = await this.getAvailableClient()
+        if (client) {
+          console.log(`[Redis:HealthCheck] ✅ 连接正常 (当前实例: ${this.pool[this.currentIndex]?.id})`)
+        } else {
+          console.warn('[Redis:HealthCheck] ⚠️ 所有 Redis 实例不可用，将在下次请求时重试')
+        }
+      } catch (err) {
+        console.error('[Redis:HealthCheck] 健康检查失败:', err.message)
+      }
+    }, this.healthCheckIntervalMs)
+
+    console.log(`[Redis:HealthCheck] 已启动 (间隔: ${this.healthCheckIntervalMs / 1000}s)`)
+  }
+
+  stopHealthCheck() {
+    if (this.healthCheckInterval) {
+      clearInterval(this.healthCheckInterval)
+      this.healthCheckInterval = null
+      console.log('[Redis:HealthCheck] 已停止')
+    }
+  }
+
   async close() {
+    this.isShuttingDown = true
+    this.stopHealthCheck()
+
     for (const [id, client] of this.clients) {
       try {
         await client.quit()
@@ -153,7 +217,12 @@ class RedisManager {
     return {
       total: this.pool.length,
       connected: this.clients.size,
-      current: this.pool[this.currentIndex]?.id || 'none'
+      current: this.pool[this.currentIndex]?.id || 'none',
+      pool: this.pool.map(item => ({
+        id: item.id,
+        priority: item.priority,
+        connected: this.clients.has(item.id)
+      }))
     }
   }
 }
