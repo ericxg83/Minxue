@@ -393,6 +393,37 @@ const generateTagsForQuestions = async (questions) => {
 }
 
 /**
+ * Extract the final answer letter from analysis text.
+ * AI sometimes puts wrong value in answer field but analysis text is correct.
+ * Patterns: "因此只有④正确，应选A" / "正确答案是D" / "故选 B" / "选C"
+ */
+function extractAnswerFromAnalysis(answer, analysis, options) {
+  if (!analysis) return answer
+
+  // Patterns that indicate a choice answer
+  const patterns = [
+    /应选\s*([A-D])/,
+    /故选\s*([A-D])/,
+    /选\s*([A-D])/,
+    /正确答案[是为：：]?\s*([A-D])/i,
+    /答案[是为：：]?\s*([A-D])/i,
+    /正确选项[是为：：]?\s*([A-D])/i,
+  ]
+
+  for (const pattern of patterns) {
+    const match = analysis.match(pattern)
+    if (match) {
+      const extracted = match[1].toUpperCase()
+      if (extracted !== answer) {
+        console.log(`   [AnswerExtraction] 从解析中提取到正确答案: ${extracted} (AI原answer: ${answer})`)
+        return extracted
+      }
+    }
+  }
+  return answer
+}
+
+/**
  * Generate a single answer for a question via text-only AI call.
  */
 const generateAnswerForQuestion = async (questionContent, retryCount = 0) => {
@@ -480,24 +511,28 @@ const generateMissingAnswers = async (questions) => {
 
       if (result.answer && result.answer !== '待人工补充' && result.answer !== '此为主观题，无唯一标准答案') {
         const oldAnswer = q.answer
+        // AI sometimes returns wrong answer field but correct analysis
+        // Extract the actual answer from analysis text
+        let finalAnswer = extractAnswerFromAnalysis(result.answer, result.analysis, q.options)
         try {
-          await updateQuestionAnswer(q.id, result.answer, result.analysis)
+          await updateQuestionAnswer(q.id, finalAnswer, result.analysis)
           // Update local question object for downstream use
-          q.answer = result.answer
+          q.answer = finalAnswer
           if (result.analysis) q.analysis = result.analysis
           updatedCount++
-          console.log(`     题目 ${q.id.substring(0, 8)}: 答案 ${oldAnswer || '(空)'} → ${result.answer}`)
+          console.log(`     题目 ${q.id.substring(0, 8)}: 答案 ${oldAnswer || '(空)'} → ${finalAnswer}`)
         } catch (err) {
           console.error(`     题目 ${q.id.substring(0, 8)}: 答案写入失败`, err.message)
         }
       } else if (result.answer) {
         // "待人工补充" or "此为主观题" — still save it
+        let finalAnswer = extractAnswerFromAnalysis(result.answer, result.analysis, q.options)
         placeholderCount++
         try {
-          await updateQuestionAnswer(q.id, result.answer, result.analysis)
-          q.answer = result.answer
+          await updateQuestionAnswer(q.id, finalAnswer, result.analysis)
+          q.answer = finalAnswer
           if (result.analysis) q.analysis = result.analysis
-          console.log(`     题目 ${q.id.substring(0, 8)}: ${result.answer}`)
+          console.log(`     题目 ${q.id.substring(0, 8)}: ${finalAnswer}`)
         } catch (err) {
           console.error(`     题目 ${q.id.substring(0, 8)}: 答案写入失败`, err.message)
         }
