@@ -610,9 +610,8 @@ export default function App() {
       type: 'grading',
       paperId: newPaperId,
       studentId: currentStudent?.id,
-      studentName: currentStudent?.name,
       questionIds: exam.question_ids || [],
-      timestamp: Date.now()
+      ts: Date.now()
     })
 
     try {
@@ -644,11 +643,9 @@ export default function App() {
     const newPaperId = generatePaperId()
     const qrContent = JSON.stringify({
       type: 'grading',
-      paperId: newPaperId,
       studentId: currentStudent?.id,
-      studentName: currentStudent?.name,
-      questionIds: exam.question_ids || [],
-      timestamp: Date.now()
+      qIds: exam.question_ids || [],
+      ts: Date.now()
     })
 
     try {

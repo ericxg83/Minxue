@@ -43,11 +43,9 @@ export default function PrintPreview({ onClose }) {
     
     const content = JSON.stringify({
       type: 'grading',
-      paperId: newPaperId,
       studentId: currentStudent?.id,
-      studentName: currentStudent?.name,
-      questionIds: previewQuestions.map(q => q.id),
-      timestamp: Date.now()
+      qIds: previewQuestions.map(q => q.id),
+      ts: Date.now()
     })
     setQrContent(content)
   }, [currentStudent, previewQuestions])

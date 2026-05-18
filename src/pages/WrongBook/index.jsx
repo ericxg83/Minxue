@@ -452,14 +452,11 @@ export default function WrongBook({ onScanQR }) {
     }
 
     const questions = selectedQuestions.map(wq => wq.question || wq)
-    const newPaperId = generatePaperId()
     const qrContent = JSON.stringify({
       type: 'grading',
-      paperId: newPaperId,
       studentId: currentStudent?.id,
-      studentName: currentStudent?.name,
-      questionIds: selectedQuestions.map(wq => (wq.question || wq).id),
-      timestamp: Date.now()
+      qIds: selectedQuestions.map(wq => (wq.question || wq).id),
+      ts: Date.now()
     })
 
     try {

@@ -57,11 +57,11 @@ export default function ScanQR({ onClose, onScanSuccess }) {
         if (data.type === 'grading') {
           stopCamera()
           onScanSuccess({
-            paperId: data.paperId,
+            paperId: data.paperId || '',
             studentId: data.studentId,
-            studentName: data.studentName,
-            questionIds: data.questionIds,
-            timestamp: data.timestamp
+            studentName: data.studentName || '',
+            questionIds: data.questionIds || data.qIds,
+            timestamp: data.timestamp || data.ts
           })
         } else {
           setScanError('无效的二维码类型')
@@ -144,11 +144,11 @@ export default function ScanQR({ onClose, onScanSuccess }) {
             const data = JSON.parse(code.data)
             if (data.type === 'grading') {
               onScanSuccess({
-                paperId: data.paperId,
+                paperId: data.paperId || '',
                 studentId: data.studentId,
-                studentName: data.studentName,
-                questionIds: data.questionIds,
-                timestamp: data.timestamp
+                studentName: data.studentName || '',
+                questionIds: data.questionIds || data.qIds,
+                timestamp: data.timestamp || data.ts
               })
             } else {
               setScanError('无效的二维码类型')

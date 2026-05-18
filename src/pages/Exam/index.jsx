@@ -196,11 +196,9 @@ export default function Exam() {
     const newPaperId = generatePaperId()
     const qrContent = JSON.stringify({
       type: 'grading',
-      paperId: newPaperId,
       studentId: currentStudent?.id,
-      studentName: currentStudent?.name,
-      questionIds: questionIds,
-      timestamp: Date.now()
+      qIds: questionIds,
+      ts: Date.now()
     })
 
     try {
