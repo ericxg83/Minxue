@@ -2144,6 +2144,13 @@ export default function App() {
           <ExamReview
             task={reviewTask}
             onClose={() => { setShowExamReview(false); setReviewTask(null); loadTasks() }}
+            onSave={() => {
+              // 保存后重新计算统计并刷新首页
+              if (reviewTask?.id) {
+                recalculateTaskStats(reviewTask.id).catch(e => console.error('刷新统计失败:', e))
+              }
+              loadTasks()
+            }}
           />
         )}
 
