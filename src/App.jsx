@@ -142,6 +142,11 @@ export default function App() {
   const [reviewTask, setReviewTask] = useState(null)
   const [showUploadOptions, setShowUploadOptions] = useState(false)
 
+  // 初始化状态
+  const [isInitializing, setIsInitializing] = useState(true)
+  const [uploadQueue, setUploadQueue] = useState([])
+  const [isUploading, setIsUploading] = useState(false)
+
   // Toast
   const Toast = useToast()
 
@@ -154,18 +159,21 @@ export default function App() {
           if (mockStudents.length > 0) {
             setCurrentStudent(mockStudents[0])
           }
+          setIsInitializing(false)
           return
         }
-        const studentList = await getStudents()
+        const studentList = await getStudents(true)
         const safeStudentList = Array.isArray(studentList) ? studentList : []
         setStudents(safeStudentList)
         if (safeStudentList.length > 0 && !currentStudent) {
           setCurrentStudent(safeStudentList[0])
         }
+        setIsInitializing(false)
       } catch (error) {
         console.error('加载学生数据失败:', error)
         setStudents([])
         setCurrentStudent(null)
+        setIsInitializing(false)
       }
     }
     init()
@@ -272,17 +280,36 @@ export default function App() {
     }
   }
 
+  // 处理上传队列
+  useEffect(() => {
+    if (uploadQueue.length > 0 && !isUploading && !isInitializing && currentStudent?.id) {
+      processUploadQueue()
+    }
+  }, [uploadQueue, isUploading, isInitializing, currentStudent?.id])
+
+  // 处理上传队列
+  const processUploadQueue = async () => {
+    if (uploadQueue.length === 0 || isUploading || !currentStudent?.id) return
+    
+    setIsUploading(true)
+    const filesToUpload = [...uploadQueue]
+    setUploadQueue([])
+    
+    try {
+      if (USE_MOCK_DATA) {
+        await uploadViaFrontend(filesToUpload)
+      } else {
+        await uploadViaBackend(filesToUpload)
+      }
+    } finally {
+      setIsUploading(false)
+    }
+  }
+
   // Upload file handler
   const handleFileSelect = async (e) => {
     console.log('🔥🔥🔥🔥🔥 [UPLOAD] === handleFileSelect TRIGGERED === 🔥🔥🔥🔥🔥')
     try {
-      if (!currentStudent || !currentStudent?.id) {
-        console.log('💥💥💥 [UPLOAD] BLOCKED: currentStudent is NULL or undefined!')
-        Toast.show({ message: '请先选择学生后再上传试卷', type: 'error', duration: 3000 })
-        return
-      }
-      console.log('✅ [UPLOAD] currentStudent:', currentStudent.id, currentStudent.name)
-
       const files = Array.from(e.target.files)
       console.log('🔥🔥 [UPLOAD] Files received:', files.length, files.map(f => ({ name: f.name, size: f.size, type: f.type })))
       if (files.length === 0) {
@@ -318,6 +345,21 @@ export default function App() {
         console.log('🔥🔥 [UPLOAD] No new files after dedup, returning')
         return
       }
+
+      if (isInitializing) {
+        console.log('🔥 [UPLOAD] Initializing, adding to queue')
+        Toast.show({ message: `正在初始化，已缓存 ${newFiles.length} 个文件，稍后自动上传...`, type: 'success', duration: 2000 })
+        setUploadQueue(prev => [...prev, ...newFiles])
+        return
+      }
+
+      if (!currentStudent || !currentStudent?.id) {
+        console.log('💥💥💥 [UPLOAD] BLOCKED: currentStudent is NULL or undefined!')
+        Toast.show({ message: '请先选择学生后再上传试卷', type: 'error', duration: 3000 })
+        return
+      }
+
+      console.log('✅ [UPLOAD] currentStudent:', currentStudent.id, currentStudent.name)
 
       if (USE_MOCK_DATA) {
         console.log('🔥🔥🔥 [UPLOAD] === Using MOCK path (uploadViaFrontend) ===')
@@ -1088,11 +1130,14 @@ export default function App() {
               <button
                 onClick={() => setShowStudentSwitcher(true)}
                 className="flex items-center gap-1.5 text-gray-900"
+                disabled={isInitializing}
               >
                 <div className="w-7 h-7 rounded-full flex items-center justify-center" style={{ background: '#EFF6FF' }}>
                   <User size={14} style={{ color: '#2563EB' }} />
                 </div>
-                <span style={{ fontSize: '15px', fontWeight: 600 }}>{currentStudent?.name || '选择学生'}</span>
+                <span style={{ fontSize: '15px', fontWeight: 600 }}>
+                  {isInitializing ? '加载中...' : (currentStudent?.name || '选择学生')}
+                </span>
                 <ChevronDown size={14} className="text-gray-400" />
               </button>
             </div>
@@ -1105,10 +1150,10 @@ export default function App() {
               </button>
               <button
                 onClick={handleRefresh}
-                disabled={refreshing}
-                className="w-8 h-8 rounded-full flex items-center justify-center" style={{ background: '#F3F4F6', opacity: refreshing ? 0.6 : 1 }}
+                disabled={refreshing || isInitializing}
+                className="w-8 h-8 rounded-full flex items-center justify-center" style={{ background: '#F3F4F6', opacity: (refreshing || isInitializing) ? 0.6 : 1 }}
               >
-                <RefreshCw size={16} className={`text-gray-500 ${refreshing ? 'animate-spin' : ''}`} />
+                <RefreshCw size={16} className={`${refreshing ? 'animate-spin' : ''} text-gray-500`} />
               </button>
               <button
                 onClick={handleShowNotifications}
@@ -1127,6 +1172,30 @@ export default function App() {
 
         {/* Main Content */}
         <main className="max-w-lg mx-auto" style={{ paddingBottom: '80px' }}>
+          {/* 上传队列提示 */}
+          {uploadQueue.length > 0 && (
+            <div className="sticky top-11 z-40 px-4 py-2" style={{ background: '#FFFBEB', borderBottom: '1px solid #FEF08A' }}>
+              <div className="flex items-center gap-2">
+                <Loader2 size={14} className="animate-spin" style={{ color: '#F59E0B' }} />
+                <span style={{ fontSize: '12px', color: '#92400E' }}>
+                  正在排队上传 {uploadQueue.length} 个文件...
+                </span>
+              </div>
+            </div>
+          )}
+
+          {/* 正在上传提示 */}
+          {isUploading && (
+            <div className="sticky top-11 z-40 px-4 py-2" style={{ background: '#EFF6FF', borderBottom: '1px solid #BFDBFE' }}>
+              <div className="flex items-center gap-2">
+                <Loader2 size={14} className="animate-spin" style={{ color: '#2563EB' }} />
+                <span style={{ fontSize: '12px', color: '#1E40AF' }}>
+                  正在上传试卷...
+                </span>
+              </div>
+            </div>
+          )}
+
           <AnimatePresence>
             {currentPage === 'processing' && (
               <motion.div
@@ -1161,11 +1230,18 @@ export default function App() {
                 {/* Task List - Compact File Style */}
                 <section className="px-4 space-y-1">
                   {filteredTasks.length === 0 ? (
-                    <div className="text-center py-16">
-                      <Camera size={36} className="mx-auto" style={{ color: '#D1D5DB' }} />
-                      <p className="mt-3" style={{ fontSize: '13px', color: '#9CA3AF' }}>暂无任务</p>
-                      <p className="mt-0.5" style={{ fontSize: '11px', color: '#D1D5DB' }}>点击右下角按钮上传试卷</p>
-                    </div>
+                    isInitializing ? (
+                      <div className="text-center py-16">
+                        <Loader2 size={36} className="mx-auto animate-spin" style={{ color: '#9CA3AF' }} />
+                        <p className="mt-3" style={{ fontSize: '13px', color: '#9CA3AF' }}>正在加载学生数据...</p>
+                      </div>
+                    ) : (
+                      <div className="text-center py-16">
+                        <Camera size={36} className="mx-auto" style={{ color: '#D1D5DB' }} />
+                        <p className="mt-3" style={{ fontSize: '13px', color: '#9CA3AF' }}>暂无任务</p>
+                        <p className="mt-0.5" style={{ fontSize: '11px', color: '#D1D5DB' }}>点击右下角按钮上传试卷</p>
+                      </div>
+                    )
                   ) : (
                     filteredTasks.map((task) => (
                       <motion.div
