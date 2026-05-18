@@ -1,35 +1,11 @@
 import { processTask } from './worker.js'
+import { redisManager } from './redisManager.js'
 
 let taskQueue = null
 let taskWorker = null
 let queueInitialized = false
 let initPromise = null
-let redisConfig = null
-
-const getRedisConfig = () => {
-  if (!redisConfig) {
-    redisConfig = process.env.REDIS_URL
-      ? {
-          url: process.env.REDIS_URL.trim(),
-          maxRetriesPerRequest: null,
-          tls: { rejectUnauthorized: false }
-        }
-      : {
-          host: process.env.REDIS_HOST || 'localhost',
-          port: parseInt(process.env.REDIS_PORT) || 6379,
-          password: process.env.REDIS_PASSWORD || undefined,
-          maxRetriesPerRequest: null,
-          enableReadyCheck: true,
-          tls: {}
-        }
-
-    console.log(`🔧 [Queue] Redis 配置: ${redisConfig.url ? 'URL 模式' : 'HOST 模式'}`)
-    if (redisConfig.url) {
-      console.log(`   Redis URL: ${redisConfig.url.substring(0, 30)}...`)
-    }
-  }
-  return redisConfig
-}
+let currentConnection = null
 
 const initQueue = async () => {
   if (initPromise) return initPromise
@@ -37,13 +13,25 @@ const initQueue = async () => {
 
   initPromise = (async () => {
     try {
-      console.log('🔄 [Queue] 开始初始化 Redis 队列...')
+      console.log('🔄 [Queue] 开始初始化 Redis 连接池...')
+      await redisManager.init()
+
+      const connection = await redisManager.getAvailableClient()
+      if (!connection) {
+        throw new Error('无法连接到任何 Redis 实例')
+      }
+
+      currentConnection = connection
+
+      console.log('🔄 [Queue] 开始初始化 BullMQ 队列...')
       const { Queue, Worker } = await import('bullmq')
-      
-      const connection = getRedisConfig()
+
+      const queueConfig = {
+        connection
+      }
 
       taskQueue = new Queue('task-processing', {
-        connection,
+        ...queueConfig,
         defaultJobOptions: {
           removeOnComplete: { count: 100 },
           removeOnFail: { count: 50 },
@@ -72,8 +60,14 @@ const initQueue = async () => {
         console.error(`❌ [Worker] 任务失败: jobId=${job?.id}, taskId=${job?.data?.taskId}, error=${err.message}`)
       })
 
-      taskWorker.on('error', (err) => {
+      taskWorker.on('error', async (err) => {
         if (err.message.includes('WRONGPASS') || err.message.includes('ECONNRESET') || err.message.includes('ETIMEDOUT')) {
+          console.warn('[Queue] 连接异常，尝试切换到下一个 Redis 实例...')
+          const newConnection = await redisManager.getAvailableClient()
+          if (newConnection && newConnection !== currentConnection) {
+            console.log(`[Queue] 已切换到新的 Redis 连接`)
+            currentConnection = newConnection
+          }
           return
         }
         console.error('⚠️ [Worker] 错误:', err.message)
@@ -88,7 +82,8 @@ const initQueue = async () => {
       })
 
       queueInitialized = true
-      console.log('✅ [Queue] Redis 队列已连接并就绪')
+      console.log(`✅ [Queue] Redis 队列已连接并就绪 (实例: ${redisManager.getStats().current})`)
+      console.log(`[Queue] 连接池状态: ${JSON.stringify(redisManager.getStats())}`)
     } catch (err) {
       console.error(`❌ [Queue] Redis 队列初始化失败: ${err.message}`)
       console.error(`   错误堆栈: ${err.stack}`)
