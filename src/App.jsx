@@ -140,6 +140,7 @@ export default function App() {
   const [showImageViewer, setShowImageViewer] = useState(false)
   const [showExamReview, setShowExamReview] = useState(false)
   const [reviewTask, setReviewTask] = useState(null)
+  const [showUploadOptions, setShowUploadOptions] = useState(false)
 
   // Toast
   const Toast = useToast()
@@ -289,6 +290,8 @@ export default function App() {
         return
       }
       e.target.value = ''
+
+      setShowUploadOptions(false)
 
       const duplicateFiles = []
       const newFiles = []
@@ -1061,12 +1064,25 @@ export default function App() {
     }
   }
 
+  // Trigger upload with specified capture mode
+  const triggerUpload = (capture) => {
+    const input = document.getElementById('file-input')
+    if (!input) return
+    if (capture) {
+      input.setAttribute('capture', 'environment')
+    } else {
+      input.removeAttribute('capture')
+    }
+    input.click()
+    setShowUploadOptions(false)
+  }
+
   // Render
   return (
     <ToastProvider>
       <div className="min-h-screen" style={{ background: '#F5F7FA' }}>
         {/* Header */}
-        <header className="sticky top-0 z-50 bg-white/90 border-b" style={{ borderColor: '#E5E7EB' }}>
+        <header className="sticky top-0 z-50 bg-white/90 border-b" style={{ borderColor: '#E5E7EB', paddingTop: 'env(safe-area-inset-top, 0px)' }}>
           <div className="max-w-lg mx-auto px-4 h-11 flex items-center justify-between">
             <div className="flex items-center gap-2">
               <button
@@ -1632,12 +1648,54 @@ export default function App() {
             initial={{ scale: 0 }}
             animate={{ scale: 1 }}
             whileTap={{ scale: 0.9 }}
-            onClick={() => document.getElementById('file-input').click()}
+            onClick={() => setShowUploadOptions(true)}
             className="fixed right-4 bottom-16 w-11 h-11 rounded-full flex items-center justify-center z-50"
             style={{ background: '#2563EB', boxShadow: '0 2px 8px rgba(37,99,235,0.3)' }}
           >
             <Plus size={20} className="text-white" />
           </motion.button>
+        )}
+
+        {/* Upload Options Menu */}
+        {showUploadOptions && (
+          <div className="fixed inset-0 z-[25000] flex items-end">
+            <div className="absolute inset-0 bg-black/40" onClick={() => setShowUploadOptions(false)} />
+            <div className="relative bg-white rounded-t-2xl w-full max-w-lg mx-auto shadow-xl" style={{ paddingBottom: 'calc(16px + env(safe-area-inset-bottom, 0px))' }}>
+              <div className="p-4">
+                <h3 className="text-center text-[15px] font-semibold text-gray-900 mb-4">选择上传方式</h3>
+                <div className="grid grid-cols-2 gap-3">
+                  <button
+                    onClick={() => triggerUpload(true)}
+                    className="flex flex-col items-center gap-2 p-4 rounded-xl bg-blue-50 hover:bg-blue-100 active:bg-blue-100 transition-colors"
+                  >
+                    <div className="w-12 h-12 rounded-full bg-blue-500 flex items-center justify-center">
+                      <Camera size={24} className="text-white" />
+                    </div>
+                    <span className="text-[13px] font-medium text-gray-700">拍摄上传</span>
+                    <span className="text-[11px] text-gray-400">可连续拍摄多张</span>
+                  </button>
+                  <button
+                    onClick={() => triggerUpload(false)}
+                    className="flex flex-col items-center gap-2 p-4 rounded-xl bg-purple-50 hover:bg-purple-100 active:bg-purple-100 transition-colors"
+                  >
+                    <div className="w-12 h-12 rounded-full bg-purple-500 flex items-center justify-center">
+                      <ImageIcon size={24} className="text-white" />
+                    </div>
+                    <span className="text-[13px] font-medium text-gray-700">相册选择</span>
+                    <span className="text-[11px] text-gray-400">可多选试卷上传</span>
+                  </button>
+                </div>
+              </div>
+              <div className="px-4">
+                <button
+                  onClick={() => setShowUploadOptions(false)}
+                  className="w-full py-3 rounded-xl text-[14px] font-medium text-gray-600 bg-gray-100 hover:bg-gray-200 active:bg-gray-200 transition-colors"
+                >
+                  取消
+                </button>
+              </div>
+            </div>
+          </div>
         )}
 
         {/* Hidden File Input */}
