@@ -18,6 +18,24 @@ const COLORS = {
   border: '#E5E7EB'
 }
 
+/**
+ * 判断选项内容是否已经自带字母前缀（如 "A. xxx"），避免显示 "A. A. xxx"
+ */
+const isOptionWithLetterPrefix = (opt) => {
+  if (!opt) return false
+  const trimmed = String(opt).trim()
+  // Match patterns like "A. xxx", "A、xxx", "A) xxx", "A) xxx", "A)"
+  return /^[A-Da-d][.、)\)]\s/.test(trimmed)
+}
+
+/**
+ * 如果选项已带字母前缀，则直接使用；否则自动添加
+ */
+const formatOption = (opt, index) => {
+  if (isOptionWithLetterPrefix(opt)) return <MathText content={opt} />
+  return <>{String.fromCharCode(65 + index)}. <MathText content={opt} /></>
+}
+
 const getStatusInfo = (q) => {
   const isCorrect = q.is_correct
   const source = q.status === 'correct' && isCorrect === true ? 'human' : (q._ai_graded ? 'ai' : 'unknown')
@@ -84,7 +102,9 @@ export default function ExamReview({ task, onClose, onSave }) {
   const getStudentAnswer = (qId) => {
     if (edits[qId] !== undefined && edits[qId].student_answer !== undefined) return edits[qId].student_answer
     const q = questions.find(x => x.id === qId)
-    return q ? (q.student_answer || '') : ''
+    if (!q) return ''
+    // 学生答案：优先使用 AI 识别的原始作答（ai_answer），即 AI 从试卷图片中实际识别到的学生笔迹
+    return q.student_answer || q.ai_answer || ''
   }
 
   const getAnswerStatus = (q) => {
@@ -343,61 +363,9 @@ export default function ExamReview({ task, onClose, onSave }) {
                       fontSize: '14px', color: COLORS.text,
                       padding: '8px 12px', background: COLORS.background, borderRadius: '8px'
                     }}>
-                      {String.fromCharCode(65 + i)}. <MathText content={opt} />
+                      {formatOption(opt, i)}
                     </div>
                   ))}
-                </div>
-              )}
-
-              {aiDisplayAnswer && (
-                <div style={{
-                  border: '1.5px dashed #93C5FD', borderRadius: '8px', padding: '10px 12px',
-                  marginBottom: '12px', background: '#EFF6FF'
-                }}>
-                  <div style={{ fontSize: '12px', fontWeight: 600, color: '#3B82F6', marginBottom: '4px', display: 'flex', alignItems: 'center', gap: '4px' }}>
-                    <Bot size={12} /> AI识别结果（仅供参考）
-                  </div>
-                  <div style={{ fontSize: '14px', color: COLORS.text, lineHeight: '1.5' }}>
-                    <MathText content={aiDisplayAnswer} />
-                  </div>
-                  <div style={{ fontSize: '11px', color: '#93C5FD', marginTop: '6px' }}>
-                    此内容为AI从试卷图片中识别到的文字，可能与实际学生答案不同
-                  </div>
-                </div>
-              )}
-
-              {(currentQuestion.ai_answer || currentQuestion.analysis) && (
-                <div style={{
-                  border: '1.5px solid #86EFAC', borderRadius: '8px', padding: '10px 12px',
-                  marginBottom: '12px', background: '#F0FDF4'
-                }}>
-                  <button
-                    onClick={() => setShowAiCache(!showAiCache)}
-                    style={{
-                      background: 'none', border: 'none', cursor: 'pointer',
-                      display: 'flex', alignItems: 'center', gap: '6px',
-                      fontSize: '12px', fontWeight: 600, color: COLORS.success, padding: 0, width: '100%'
-                    }}
-                  >
-                    {showAiCache ? <ChevronUp size={14} /> : <ChevronDown size={14} />}
-                    <Bot size={12} /> AI批改缓存
-                  </button>
-                  {showAiCache && (
-                    <div style={{ marginTop: '8px', fontSize: '13px', color: COLORS.text, lineHeight: '1.5' }}>
-                      {currentQuestion.ai_answer && (
-                        <div style={{ marginBottom: '6px' }}>
-                          <span style={{ fontWeight: 600 }}>AI判定答案：</span>
-                          <MathText content={currentQuestion.ai_answer} />
-                        </div>
-                      )}
-                      {currentQuestion.analysis && (
-                        <div>
-                          <span style={{ fontWeight: 600 }}>解析：</span>
-                          <MathText content={currentQuestion.analysis} />
-                        </div>
-                      )}
-                    </div>
-                  )}
                 </div>
               )}
 
@@ -435,10 +403,11 @@ export default function ExamReview({ task, onClose, onSave }) {
                       </div>
                     )}
                   </div>
-                  <div style={{ flex: 1 }}>
+                    <div style={{ flex: 1 }}>
                     <div style={{ fontSize: '12px', fontWeight: 600, color: COLORS.textSecondary, marginBottom: '4px' }}>参考答案</div>
                     {(() => {
-                      const refAnswer = currentQuestion.answer || currentQuestion.ai_answer || ''
+                      // 参考答案：始终使用数据库中的 answer 字段（由 AI 计算生成）
+                      const refAnswer = currentQuestion.answer || ''
                       return (
                         <div style={{
                           padding: '8px 10px', borderRadius: '6px',

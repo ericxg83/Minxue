@@ -11,6 +11,23 @@ import { generateExamPDF } from '../../utils/pdfGenerator'
 
 const USE_MOCK_DATA = false
 
+/**
+ * 判断选项内容是否已经自带字母前缀（如 "A. xxx"），避免显示 "A. A. xxx"
+ */
+const isOptionWithLetterPrefix = (opt) => {
+  if (!opt) return false
+  const trimmed = String(opt).trim()
+  return /^[A-Da-d][.、)\)]\s/.test(trimmed)
+}
+
+/**
+ * 如果选项已带字母前缀，则直接使用；否则自动添加
+ */
+const formatOption = (opt, index) => {
+  if (isOptionWithLetterPrefix(opt)) return opt
+  return `${String.fromCharCode(65 + index)}. ${opt}`
+}
+
 const isMobile = /Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(navigator.userAgent)
 
 const generatePaperId = () => {
@@ -122,7 +139,10 @@ export default function PrintPreview({ onClose }) {
                 ${q.image_url ? `<div style="text-align:center;margin-bottom:8px;"><img src="${q.image_url}" alt="配图" style="max-width:100%;max-height:200px;object-fit:contain;border-radius:4px;" /></div>` : ''}
                 ${q.options && q.options.length > 0 ? `
                   <div class="options ${isShortOptions ? 'options-inline' : 'options-grid'}">
-                    ${q.options.map((opt, i) => `<div class="option"><span style="display:inline-block;width:14px;height:14px;border:1px solid #999;border-radius:50%;margin-right:6px;vertical-align:middle;"></span>${String.fromCharCode(65 + i)}</div>`).join('')}
+                    ${q.options.map((opt, i) => {
+                      const formatted = isOptionWithLetterPrefix(opt) ? opt : String.fromCharCode(65 + i) + '. ' + opt
+                      return `<div class="option"><span style="display:inline-block;width:14px;height:14px;border:1px solid #999;border-radius:50%;margin-right:6px;vertical-align:middle;"></span>${formatted}</div>`
+                    }).join('')}
                   </div>
                 ` : ''}
                 ${q.question_type === 'answer' ? `<div class="answer-area">答：</div>` : ''}
@@ -305,7 +325,7 @@ export default function PrintPreview({ onClose }) {
                       {q.options.map((opt, i) => (
                         <div key={i} className="text-[11pt] whitespace-nowrap flex items-center gap-2">
                           <span className="inline-block w-3.5 h-3.5 border border-gray-400 rounded-full flex-shrink-0"></span>
-                          {String.fromCharCode(65 + i)}
+                          {formatOption(opt, i)}
                         </div>
                       ))}
                     </div>

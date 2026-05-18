@@ -448,13 +448,25 @@ const generateAnswerForQuestion = async (questionContent, retryCount = 0) => {
 }
 
 /**
- * Generate missing reference answers for questions that have empty answers.
- * Only processes questions where answer is null/empty.
+ * Generate missing reference answers for questions.
+ * For multiple choice questions without a reliable answer, always generate.
+ * For other types, only generate when answer is empty.
  */
 const generateMissingAnswers = async (questions) => {
   if (!questions || questions.length === 0) return { updated: 0, total: 0 }
 
-  const needAnswer = questions.filter(q => !q.answer || q.answer.trim() === '')
+  const needAnswer = questions.filter(q => {
+    const hasEmptyAnswer = !q.answer || q.answer.trim() === ''
+    // For multiple choice, always generate to ensure accuracy (OCR may have confused student answer with reference answer)
+    if (q.question_type === 'choice' && !hasEmptyAnswer) {
+      const ans = q.answer.trim()
+      // Only regenerate if answer is not a single letter (A-D), which suggests OCR confusion
+      if (!/^[A-D]$/.test(ans.toUpperCase())) {
+        return true
+      }
+    }
+    return hasEmptyAnswer
+  })
   if (needAnswer.length === 0) {
     console.log('   所有题目已有参考答案，跳过生成')
     return { updated: 0, total: 0 }

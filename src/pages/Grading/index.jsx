@@ -5,6 +5,23 @@ import { getQuestionsByIds, updateWrongQuestionStatus } from '../../services/api
 import { useStudentStore } from '../../store'
 import dayjs from 'dayjs'
 
+/**
+ * 判断选项内容是否已经自带字母前缀（如 "A. xxx"），避免显示 "A. A. xxx"
+ */
+const isOptionWithLetterPrefix = (opt) => {
+  if (!opt) return false
+  const trimmed = String(opt).trim()
+  return /^[A-Da-d][.、)\)]\s/.test(trimmed)
+}
+
+/**
+ * 如果选项已带字母前缀，则直接使用；否则自动添加
+ */
+const formatOption = (opt, index) => {
+  if (isOptionWithLetterPrefix(opt)) return opt
+  return `${String.fromCharCode(65 + index)}. ${opt}`
+}
+
 export default function Grading({ paperId, studentId, questionIds, onClose, onComplete }) {
   const [currentQuestionIndex, setCurrentQuestionIndex] = useState(0)
   const [questions, setQuestions] = useState([])
@@ -423,7 +440,7 @@ export default function Grading({ paperId, studentId, questionIds, onClose, onCo
             <div style={{ display: 'flex', flexDirection: isShortOptions ? 'row' : 'column', gap: isShortOptions ? '24px' : '8px', marginBottom: '16px', flexWrap: 'wrap' }}>
               {currentQuestion.options.map((opt, i) => (
                 <div key={i} style={{ fontSize: '14px', color: COLORS.text }}>
-                  {String.fromCharCode(65 + i)}. {opt}
+                  {formatOption(opt, i)}
                 </div>
               ))}
             </div>
