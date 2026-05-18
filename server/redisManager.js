@@ -4,7 +4,7 @@ class RedisManager {
   constructor() {
     this.clients = new Map()
     this.currentIndex = 0
-    this.pool = this.buildPool()
+    this.pool = []
     this.initialized = false
     this.healthCheckInterval = null
     this.healthCheckIntervalMs = 30000 // 30 seconds
@@ -16,7 +16,7 @@ class RedisManager {
     const pool = []
 
     // Primary: Local Redis
-    if (process.env.REDIS_LOCAL === 'true' || process.env.REDIS_HOST === 'localhost') {
+    if (process.env.REDIS_LOCAL === 'true') {
       pool.push({
         id: 'local',
         config: {
@@ -113,6 +113,9 @@ class RedisManager {
 
   async init() {
     if (this.initialized) return
+
+    // Build pool now that env vars are loaded
+    this.pool = this.buildPool()
 
     // Try to connect to all Redis instances
     for (const item of this.pool) {
