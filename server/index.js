@@ -328,6 +328,42 @@ app.post('/api/tasks/:taskId/retry', async (req, res) => {
   }
 })
 
+// Recalculate task statistics from questions
+app.post('/api/tasks/:taskId/recalculate-stats', async (req, res) => {
+  try {
+    const { taskId } = req.params
+
+    const { rows } = await query(
+      `SELECT is_correct FROM ${TABLES.QUESTIONS} WHERE task_id = $1`,
+      [taskId]
+    )
+
+    let questionCount = rows.length
+    let wrongCount = 0
+    rows.forEach(q => {
+      if (q.is_correct === false) wrongCount++
+    })
+
+    const { rows: taskRows } = await query(
+      `UPDATE ${TABLES.TASKS}
+       SET result = COALESCE(result, '{}'::jsonb) || $1::jsonb,
+           updated_at = NOW()
+       WHERE id = $2
+       RETURNING *`,
+      [JSON.stringify({ questionCount, wrongCount, progress: 100 }), taskId]
+    )
+
+    if (taskRows.length === 0) {
+      return res.status(404).json({ error: '任务不存在' })
+    }
+
+    res.json({ success: true, result: taskRows[0].result })
+  } catch (error) {
+    console.error('重新计算任务统计失败:', error)
+    res.status(500).json({ error: error.message })
+  }
+})
+
 // Delete task
 app.delete('/api/tasks/:taskId', async (req, res) => {
   try {

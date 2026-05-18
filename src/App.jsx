@@ -26,7 +26,7 @@ import {
 import { motion, AnimatePresence } from 'motion/react'
 import { QRCodeSVG } from 'qrcode.react'
 import { useUIStore, useStudentStore, useTaskStore, useWrongQuestionStore, useExamStore } from './store'
-import { getStudents, getTasksByStudent, getQuestionsByTask, addWrongQuestions, getWrongQuestionsByStudent, getExamsByStudent, getGeneratedExamsByStudent, createTask, updateTaskStatus, uploadImage, updateQuestion, updateQuestionTags, invalidateCache, createStudent, updateWrongQuestionStatus, getQuestionsByIds, deleteTask, deleteGeneratedExam, deleteWrongQuestion, getTaskById } from './services/apiService'
+import { getStudents, getTasksByStudent, getQuestionsByTask, addWrongQuestions, getWrongQuestionsByStudent, getExamsByStudent, getGeneratedExamsByStudent, createTask, updateTaskStatus, uploadImage, updateQuestion, updateQuestionTags, invalidateCache, createStudent, updateWrongQuestionStatus, getQuestionsByIds, deleteTask, deleteGeneratedExam, deleteWrongQuestion, getTaskById, recalculateTaskStats } from './services/apiService'
 import { taskService } from './services/taskService'
 import { recognizeQuestions, compressImage, saveRecognitionResult } from './services/aiService'
 import { mockQuestions, mockTasks, mockWrongQuestions, mockGeneratedExams, mockStudents } from './data/mockData'
@@ -1090,8 +1090,17 @@ export default function App() {
       invalidateCache('exams', currentStudent.id)
       invalidateCache('generated', currentStudent.id)
 
+      // 重新计算所有已批改任务的统计数据
       if (currentPage === 'processing') {
-        await loadTasks()
+        const taskList = await getTasksByStudent(currentStudent.id, false)
+        const doneTasks = (Array.isArray(taskList) ? taskList : []).filter(t => t.status === 'done')
+        // 并行刷新所有已批改任务的统计
+        await Promise.allSettled(doneTasks.map(t => recalculateTaskStats(t.id)))
+        // 重新加载任务数据
+        setTasks(doneTasks.length > 0 ? taskList : [])
+        // 重新从服务器获取以获取更新后的 result
+        const freshTasks = await getTasksByStudent(currentStudent.id, false)
+        setTasks(Array.isArray(freshTasks) ? freshTasks : [])
       } else if (currentPage === 'wrongbook') {
         await loadWrongBookData()
       } else if (currentPage === 'exam') {

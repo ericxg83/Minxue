@@ -3,7 +3,7 @@ import { motion } from 'motion/react'
 import { ArrowLeft, ChevronLeft, ChevronRight, CheckCircle2, XCircle, Save, Loader2, ChevronDown, ChevronUp, AlertTriangle, UserCheck, Bot } from 'lucide-react'
 import { useWrongQuestionStore } from '../../store'
 import { useToast } from '../../components/ToastProvider'
-import { updateQuestion, addWrongQuestions, deleteWrongQuestion, getQuestionsByTask, invalidateCache } from '../../services/apiService'
+import { updateQuestion, addWrongQuestions, deleteWrongQuestion, getQuestionsByTask, invalidateCache, recalculateTaskStats } from '../../services/apiService'
 import MathText from '../../components/MathText'
 
 const COLORS = {
@@ -166,10 +166,14 @@ export default function ExamReview({ task, onClose, onSave }) {
         return { ...q, ...edit, _ai_graded: true }
       }))
       setEdits({})
-      // 清除相关缓存，确保首页数据同步
+      // 清除相关缓存
       if (task?.student_id) {
         invalidateCache('generated', task.student_id)
         invalidateCache('questions', task.student_id)
+      }
+      // 重新计算首页 task 的统计数据（正确数/错误数）
+      if (task?.id) {
+        await recalculateTaskStats(task.id).catch(e => console.error('刷新统计数据失败:', e))
       }
       Toast.show({ message: `已保存 ${successCount} 题`, type: 'success' })
       // 通知父组件重新加载数据

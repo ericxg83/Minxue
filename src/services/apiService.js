@@ -247,6 +247,14 @@ export const updateQuestion = async (id, updates) => {
   })
 }
 
+export const recalculateTaskStats = async (taskId) => {
+  return apiRequest(`/tasks/${taskId}/recalculate-stats`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({})
+  })
+}
+
 export const updateQuestionTags = async (id, manualTags) => {
   return apiRequest(`/questions/${id}`, {
     method: 'PUT',
