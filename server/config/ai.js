@@ -86,10 +86,18 @@ export const buildAnswerGenerationPrompt = () => `你是一个专业的K12教育
 4. 物理、化学题目给出数值+单位（如 "10M/S", "2KG"），涉及公式时使用 LaTeX 格式。
 5. 对于完全无法生成答案的题目（例如题目内容残缺、非学术内容），返回 { "answer": "待人工补充", "analysis": "" }。
 
+答案一致性要求（极其重要，必须严格遵守）：
+1. **先写 analysis（完整解题过程），再从 analysis 中提取最终答案填入 answer 字段。**
+2. **answer 字段必须与 analysis 的推导结论完全一致。** 绝不允许 analysis 中说"应选A"但 answer 填 "C"。
+3. 选择题：analysis 最后一句必须明确写出"因此正确答案是X"或"应选X"（X为A/B/C/D），answer 字段必须填相同的字母。
+4. 填空题：answer 是填空的具体内容，analysis 中必须推导出该内容。
+5. 解答题：answer 是关键结果/最终答案，analysis 中必须得出该结果。
+6. 输出前自查：answer 和 analysis 是否指向同一个答案？如果不一致，以 analysis 推导的结论为准修正 answer。
+
 请按以下 JSON 格式返回结果（只返回 JSON，不要包含其他文字）：
 {
-  "answer": "标准答案（需要 LaTeX 格式的数学内容请使用 \\(...\\) 或 $$...$$ 包裹）",
-  "analysis": "解题过程或思路说明（可选，同样支持 LaTeX）",
+  "answer": "标准答案（需要 LaTeX 格式的数学内容请使用 \\(...\\) 或 $$...$$ 包裹。选择题只填选项字母，如 C）",
+  "analysis": "解题过程或思路说明（同样支持 LaTeX）。最后必须明确给出结论，如'因此正确答案是 C'。",
   "subject": "数学/物理/化学/语文/英语/其他"
 }`
 
