@@ -479,13 +479,14 @@ const generateMissingAnswers = async (questions) => {
       const result = await generateAnswerForQuestion(fullContent)
 
       if (result.answer && result.answer !== '待人工补充' && result.answer !== '此为主观题，无唯一标准答案') {
+        const oldAnswer = q.answer
         try {
           await updateQuestionAnswer(q.id, result.answer, result.analysis)
           // Update local question object for downstream use
           q.answer = result.answer
           if (result.analysis) q.analysis = result.analysis
           updatedCount++
-          console.log(`     题目 ${q.id.substring(0, 8)}: 答案已生成`)
+          console.log(`     题目 ${q.id.substring(0, 8)}: 答案 ${oldAnswer || '(空)'} → ${result.answer}`)
         } catch (err) {
           console.error(`     题目 ${q.id.substring(0, 8)}: 答案写入失败`, err.message)
         }
