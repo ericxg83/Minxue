@@ -8,6 +8,8 @@ const migrations = [
   `ALTER TABLE questions ADD COLUMN IF NOT EXISTS manual_tags JSONB DEFAULT '[]'`,
   `ALTER TABLE questions ADD COLUMN IF NOT EXISTS tags_source VARCHAR(10) DEFAULT 'ai'`,
   `ALTER TABLE questions ADD COLUMN IF NOT EXISTS block_coordinates JSONB`,
+  `ALTER TABLE questions ADD COLUMN IF NOT EXISTS answer_exception BOOLEAN DEFAULT FALSE`,
+  `ALTER TABLE questions ADD COLUMN IF NOT EXISTS answer_exception_reason TEXT`,
 ]
 
 async function run() {

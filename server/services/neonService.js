@@ -121,33 +121,27 @@ export const addWrongQuestions = async (studentId, questionIds) => {
 export const updateQuestionAnswer = async (questionId, answer, analysis, forceUpdate = false) => {
   if (!answer && !analysis) return
 
-  const params = [answer || null, questionId]
-  let clauses = []
-
-  // answer 字段：与 analysis 保持一致的保护逻辑
-  // 默认：仅当旧值为空时才写入（与 analysis 行为一致）
-  // forceUpdate=true 时：无条件覆盖（用于需要强制更新的场景）
-  if (answer && answer.trim()) {
-    if (forceUpdate) {
-      clauses.push('answer = $1')
-    } else {
-      clauses.push("answer = CASE WHEN (answer IS NULL OR answer = '') THEN $1 ELSE answer END")
-    }
+  let answerClause, params
+  if (forceUpdate) {
+    answerClause = 'answer = $1'
+  } else {
+    answerClause = "answer = COALESCE(NULLIF($1, ''), answer)"
   }
 
-  // analysis 字段：仅当旧值为空时才写入（首次写入保护）
+  // analysis_clause 和参数都依赖 analysis 是否存在
+  let analysis_clause = ''
   if (analysis && analysis.trim()) {
-    clauses.push("analysis = CASE WHEN (analysis IS NULL OR analysis = '') THEN $3 ELSE analysis END")
-    params.splice(1, 0, analysis)
+    analysis_clause = ", analysis = $3"
+    params = [answer || null, questionId, analysis]
+  } else {
+    params = [answer || null, questionId]
   }
-
-  if (clauses.length === 0) return
-
-  clauses.push('updated_at = NOW()')
 
   await query(
     `UPDATE ${TABLES.QUESTIONS}
-     SET ${clauses.join(',\n     ')}
+     SET ${answerClause},
+         updated_at = NOW()
+         ${analysis_clause}
      WHERE id = $2`,
     params
   )
@@ -157,10 +151,11 @@ export const markAnswerException = async (questionId, reason) => {
   try {
     await query(
       `UPDATE ${TABLES.QUESTIONS}
-       SET result = COALESCE(result, '{}'::jsonb) || $1::jsonb,
+       SET answer_exception = $1,
+           answer_exception_reason = $2,
            updated_at = NOW()
-       WHERE id = $2`,
-      [JSON.stringify({ answer_exception: true, exception_reason: reason, exception_time: new Date().toISOString() }), questionId]
+       WHERE id = $3`,
+      [true, reason, questionId]
     )
   } catch (err) {
     console.error(`标记题目 ${questionId} 解析异常失败:`, err.message)
