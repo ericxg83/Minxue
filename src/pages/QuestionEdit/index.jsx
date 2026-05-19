@@ -4,6 +4,8 @@ import { useStudentStore, useUIStore, useWrongQuestionStore } from '../../store'
 import { updateQuestion, updateQuestionTags, uploadImage, getTaskById } from '../../services/apiService'
 import { mockQuestions } from '../../data/mockData'
 import RectCropper from '../../components/RectCropper'
+import EnhancedRectCropper from '../../components/EnhancedRectCropper'
+import { processAndBindCroppedImage } from '../../services/cropImageService'
 
 const USE_MOCK_DATA = false
 
@@ -170,17 +172,46 @@ export default function QuestionEdit({ questionId, onClose, onSave }) {
     }
   }
 
-  const handleCropConfirm = async (dataUrl) => {
+  const handleCropConfirm = async (cropResult) => {
+    const { dataUrl, questionId: cropQuestionId, isStraightened } = cropResult
+    
     if (!dataUrl) return
+    
     setUploading(true)
     try {
-      const file = dataURLtoFile(dataUrl, 'question_image.jpg')
-      const url = await uploadImage(file)
-      setDisplayImageUrl(url)
-      setImageRemoved(false)
-      setShowCrop(false)
-      setCropImageSrc('')
-      Toast.show({ icon: 'success', content: '图片裁剪上传成功' })
+      if (USE_MOCK_DATA) {
+        const file = dataURLtoFile(dataUrl, 'question_image.jpg')
+        const url = await uploadImage(file)
+        setDisplayImageUrl(url)
+        setImageRemoved(false)
+        setShowCrop(false)
+        setCropImageSrc('')
+        Toast.show({ icon: 'success', content: '图片裁剪上传成功' })
+      } else {
+        const targetQuestionId = cropQuestionId || questionId
+        
+        await processAndBindCroppedImage(
+          { dataUrl, questionId: targetQuestionId, isStraightened },
+          (progress, message) => {
+            Toast.show({
+              icon: 'info',
+              content: message,
+              duration: 1000
+            })
+          }
+        )
+        
+        const uploadedUrl = dataUrl
+        
+        setDisplayImageUrl(uploadedUrl)
+        setImageRemoved(false)
+        setShowCrop(false)
+        setCropImageSrc('')
+        Toast.show({ 
+          icon: 'success', 
+          content: isStraightened ? '已拉直并上传配图' : '配图上传成功' 
+        })
+      }
     } catch (error) {
       console.error('裁剪/上传失败:', error)
       Toast.show({ icon: 'fail', content: '图片处理失败: ' + error.message })
@@ -924,11 +955,14 @@ export default function QuestionEdit({ questionId, onClose, onSave }) {
 
       {/* Image Crop Dialog */}
       {showCrop && (
-        <RectCropper
+        <EnhancedRectCropper
           image={cropImageSrc}
           onConfirm={handleCropConfirm}
           onCancel={handleCropCancel}
           theme="light"
+          enableStraighten={true}
+          enableOptimization={true}
+          questionId={questionId}
         />
       )}
     </Mask>
