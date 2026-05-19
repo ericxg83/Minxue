@@ -118,22 +118,36 @@ export const addWrongQuestions = async (studentId, questionIds) => {
   return newIds.map(id => ({ question_id: id }))
 }
 
-export const updateQuestionAnswer = async (questionId, answer, analysis) => {
+export const updateQuestionAnswer = async (questionId, answer, analysis, forceUpdate = false) => {
   if (!answer && !analysis) return
 
-  let analysisClause = ''
   const params = [answer || null, questionId]
+  let clauses = []
 
+  // answer 字段：与 analysis 保持一致的保护逻辑
+  // 默认：仅当旧值为空时才写入（与 analysis 行为一致）
+  // forceUpdate=true 时：无条件覆盖（用于需要强制更新的场景）
+  if (answer && answer.trim()) {
+    if (forceUpdate) {
+      clauses.push('answer = $1')
+    } else {
+      clauses.push("answer = CASE WHEN (answer IS NULL OR answer = '') THEN $1 ELSE answer END")
+    }
+  }
+
+  // analysis 字段：仅当旧值为空时才写入（首次写入保护）
   if (analysis && analysis.trim()) {
-    analysisClause = ', analysis = CASE WHEN (analysis IS NULL OR analysis = \'\') THEN $3 ELSE analysis END'
+    clauses.push("analysis = CASE WHEN (analysis IS NULL OR analysis = '') THEN $3 ELSE analysis END")
     params.splice(1, 0, analysis)
   }
 
+  if (clauses.length === 0) return
+
+  clauses.push('updated_at = NOW()')
+
   await query(
     `UPDATE ${TABLES.QUESTIONS}
-     SET answer = COALESCE(NULLIF($1, ''), answer),
-         updated_at = NOW()
-         ${analysisClause}
+     SET ${clauses.join(',\n     ')}
      WHERE id = $2`,
     params
   )

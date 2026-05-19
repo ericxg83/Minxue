@@ -493,6 +493,18 @@ export default function ExamReview({ task, onClose, onSave }) {
                 </div>
               </div>
 
+              {/* 评判标记说明 */}
+              <div style={{
+                marginTop: '8px', padding: '8px 12px',
+                background: '#F0F9FF', borderRadius: '6px',
+                border: '1px solid #BAE6FD',
+                fontSize: '11px', color: '#0369A1', lineHeight: '1.5'
+              }}>
+                <div style={{ fontWeight: 600, marginBottom: '2px' }}>📝 评判标记说明：</div>
+                <div>✓ 打勾 = 正确（老师已批改确认）&nbsp;|&nbsp; ⭕ 未作答 = 默认正确（系统判定）&nbsp;|&nbsp; ✗ 圈出 = 错误</div>
+                <div style={{ marginTop: '2px' }}>如需修改判定结果，请点击上方 正确/错误/待定 按钮</div>
+              </div>
+
               <div style={{ borderTop: `1px solid ${COLORS.border}`, paddingTop: '12px' }}>
                 <button
                   onClick={() => setShowAnswer(!showAnswer)}

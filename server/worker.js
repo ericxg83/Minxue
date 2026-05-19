@@ -184,8 +184,8 @@ function judgeAnswer(studentAnswer, referenceAnswer, questionType) {
   }
 
   if (!referenceAnswer) {
-    // No reference answer — mark correct for teacher review
-    return { isCorrect: true, unrecognized: false }
+    // No reference answer: mark as pending for manual review instead of assuming correct
+    return { isCorrect: null, unrecognized: true }
   }
 
   if (questionType === 'choice') {
@@ -401,26 +401,40 @@ const generateTagsForQuestions = async (questions) => {
 function extractAnswerFromAnalysis(answer, analysis, options) {
   if (!analysis) return answer
 
-  // Patterns that indicate a choice answer
-  const patterns = [
-    /应选\s*([A-D])/,
-    /故选\s*([A-D])/,
-    /选\s*([A-D])/,
-    /正确答案[是为：：]?\s*([A-D])/i,
-    /答案[是为：：]?\s*([A-D])/i,
-    /正确选项[是为：：]?\s*([A-D])/i,
+  // 精确匹配模式（高优先级）
+  const precisePatterns = [
+    /因此\s*(?:只有|仅)[^.，,]*?正确答案[是为：：]?\s*([A-D])/i,
+    /综上所述[^.，,]*?应选\s*([A-D])/i,
+    /故选\s*([A-D])\s*(?:项)?[，,.。]?$/m,
+    /应选\s*([A-D])\s*选项/i,
   ]
 
-  for (const pattern of patterns) {
+  for (const pattern of precisePatterns) {
+    const match = analysis.match(pattern)
+    if (match) {
+      const extracted = match[1].toUpperCase()
+      console.log(`   [AnswerExtraction] 精确匹配: ${extracted}`)
+      return extracted
+    }
+  }
+
+  // 一般匹配模式
+  const generalPatterns = [
+    /正确答案[是为：：]?\s*([A-D])/i,
+    /答案[是为：：]?\s*([A-D])/i,
+  ]
+
+  for (const pattern of generalPatterns) {
     const match = analysis.match(pattern)
     if (match) {
       const extracted = match[1].toUpperCase()
       if (extracted !== answer) {
-        console.log(`   [AnswerExtraction] 从解析中提取到正确答案: ${extracted} (AI原answer: ${answer})`)
+        console.log(`   [AnswerExtraction] 一般匹配: ${extracted} (原: ${answer})`)
         return extracted
       }
     }
   }
+
   return answer
 }
 
@@ -617,7 +631,7 @@ const generateMissingAnswers = async (questions, imageBuffer = null) => {
         const oldAnswer = q.answer
         let finalAnswer = extractAnswerFromAnalysis(result.answer, result.analysis, q.options)
         try {
-          await updateQuestionAnswer(q.id, finalAnswer, result.analysis)
+          await updateQuestionAnswer(q.id, finalAnswer, result.analysis, true)
           q.answer = finalAnswer
           if (result.analysis) q.analysis = result.analysis
           updatedCount++
@@ -864,7 +878,21 @@ export const processTask = async (job) => {
       } else {
         console.log(`✅ [Step 7/8] AI答案生成完成: 无需生成（${answerGenResult.total} 道题需要处理）`)
         if (answerGenResult.cacheHits !== undefined) {
-          console.log(`📦 [Cache] 缓存命中: ${answerGenResult.cacheHits} 次, 缓存未命中: ${answerGenResult.cacheMisses} 次`)
+          console.log(` [Cache] 缓存命中: ${answerGenResult.cacheHits} 次, 缓存未命中: ${answerGenResult.cacheMisses} 次`)
+        }
+
+        // 降级处理：如果没有任何答案生成且没有缓存命中，标记需要人工复核
+        if (answerGenResult.updated === 0 && answerGenResult.cacheHits === 0 && answerGenResult.total > 0) {
+          console.warn(`  ⚠️ 未生成任何参考答案，标记所有题目需要人工复核`)
+          for (const q of questions) {
+            if (!q.answer || !q.answer.trim()) {
+              try {
+                await markAnswerException(q.id, 'OCR答案待人工确认，AI未生成参考答案')
+              } catch (e) {
+                // ignore
+              }
+            }
+          }
         }
       }
 
