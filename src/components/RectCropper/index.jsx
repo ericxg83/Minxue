@@ -467,7 +467,7 @@ export default function RectCropper({ image, onConfirm, onCancel, theme = 'light
                 >
                   <div style={{
                     position: 'absolute', inset: 0,
-                    border: `${BORDER_WIDTH}px solid ${colors.accent}`,
+                    border: `${BORDER_WIDTH}px dashed ${colors.accent}`,
                     boxSizing: 'border-box'
                   }} />
                   {handles.map((h) => (
@@ -477,15 +477,16 @@ export default function RectCropper({ image, onConfirm, onCancel, theme = 'light
                       onTouchStart={(e) => handleResizeMouseDown(e, h.key)}
                       style={{
                         position: 'absolute',
-                        width: HANDLE_SIZE,
-                        height: HANDLE_SIZE,
+                        width: HANDLE_SIZE + HANDLE_HIT_PAD * 2,
+                        height: HANDLE_SIZE + HANDLE_HIT_PAD * 2,
                         padding: HANDLE_HIT_PAD,
                         backgroundClip: 'content-box',
-                        background: colors.accent,
-                        border: `${BORDER_WIDTH}px solid #fff`,
-                        borderRadius: '50%',
-                        boxShadow: '0 0 4px rgba(0,0,0,0.4)',
+                        background: 'transparent',
+                        borderRadius: '2px',
                         zIndex: 3,
+                        cursor: h.key === 'n' || h.key === 's' ? 'ns-resize' :
+                                h.key === 'e' || h.key === 'w' ? 'ew-resize' :
+                                h.key === 'nw' || h.key === 'se' ? 'nwse-resize' : 'nesw-resize',
                         ...h.style
                       }}
                     />
