@@ -143,6 +143,13 @@ export default function ExamReview({ task, onClose, onSave }) {
     }))
   }
 
+  const handleReferenceAnswerChange = (qId, value) => {
+    setEdits(prev => ({
+      ...prev,
+      [qId]: { ...(prev[qId] || {}), answer: value }
+    }))
+  }
+
   const handlePrev = () => {
     if (currentIndex > 0) setCurrentIndex(currentIndex - 1)
   }
@@ -406,7 +413,7 @@ export default function ExamReview({ task, onClose, onSave }) {
                     <div style={{ flex: 1 }}>
                     <div style={{ fontSize: '12px', fontWeight: 600, color: COLORS.textSecondary, marginBottom: '4px' }}>参考答案</div>
                     {(() => {
-                      const refAnswer = currentQuestion.answer || ''
+                      const refAnswer = edits[currentQuestion.id]?.answer ?? currentQuestion.answer ?? ''
                       const hasException = currentQuestion.result?.answer_exception === true
                       const exceptionReason = currentQuestion.result?.exception_reason || ''
                       
@@ -426,17 +433,18 @@ export default function ExamReview({ task, onClose, onSave }) {
                       }
                       
                       return (
-                        <div style={{
-                          padding: '8px 10px', borderRadius: '6px',
-                          border: `1px solid ${COLORS.border}`,
-                          fontSize: '14px', color: refAnswer ? COLORS.text : '#9CA3AF',
-                          background: COLORS.card, minHeight: '36px',
-                          display: 'flex', alignItems: 'center',
-                          fontStyle: refAnswer ? 'normal' : 'italic',
-                          wordBreak: 'break-all'
-                        }}>
-                          {refAnswer ? <MathText content={refAnswer} /> : '待AI生成答案'}
-                        </div>
+                        <input
+                          type="text"
+                          value={refAnswer}
+                          onChange={(e) => handleReferenceAnswerChange(currentQuestion.id, e.target.value)}
+                          placeholder="输入参考答案..."
+                          style={{
+                            width: '100%', padding: '8px 10px', borderRadius: '6px',
+                            border: `1px solid ${COLORS.border}`,
+                            fontSize: '14px', color: refAnswer ? COLORS.text : '#9CA3AF',
+                            outline: 'none', boxSizing: 'border-box', background: COLORS.card
+                          }}
+                        />
                       )
                     })()}
                   </div>
@@ -474,20 +482,6 @@ export default function ExamReview({ task, onClose, onSave }) {
                     >
                       <XCircle size={16} />
                       错误
-                    </button>
-                    <button
-                      onClick={() => handleToggleCorrect(currentQuestion.id, null)}
-                      style={{
-                        flex: '0 0 auto', padding: '10px 14px', borderRadius: '8px', border: 'none',
-                        cursor: 'pointer', fontSize: '14px', fontWeight: 600,
-                        display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '6px',
-                        background: correctness === null ? '#FEF3C7' : COLORS.card,
-                        color: correctness === null ? COLORS.warning : COLORS.textSecondary,
-                        outline: correctness === null ? '2px solid #F59E0B50' : `1px solid ${COLORS.border}`
-                      }}
-                    >
-                      <AlertTriangle size={16} />
-                      待定
                     </button>
                   </div>
                 </div>
