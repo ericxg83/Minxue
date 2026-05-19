@@ -280,7 +280,7 @@ app.get('/api/tasks/student/:studentId', async (req, res) => {
   try {
     const { studentId } = req.params
     const { rows } = await query(
-      `SELECT * FROM ${TABLES.TASKS} WHERE student_id = $1 ORDER BY created_at DESC`,
+      `SELECT * FROM ${TABLES.TASKS} WHERE student_id = $1 AND deleted_at IS NULL ORDER BY created_at DESC`,
       [studentId]
     )
     res.json({ success: true, tasks: rows })
@@ -365,7 +365,7 @@ app.post('/api/tasks/:taskId/recalculate-stats', async (req, res) => {
   }
 })
 
-// Delete task
+// Delete task - soft delete to preserve wrong questions
 app.delete('/api/tasks/:taskId', async (req, res) => {
   try {
     const { taskId } = req.params
@@ -373,8 +373,15 @@ app.delete('/api/tasks/:taskId', async (req, res) => {
     if (!uuidRegex.test(taskId)) {
       return res.status(400).json({ error: '无效的任务ID' })
     }
-    await query(`DELETE FROM ${TABLES.TASKS} WHERE id = $1`, [taskId])
-    res.json({ success: true, message: '任务已删除' })
+    
+    // Soft delete: set deleted_at instead of actual deletion
+    // This preserves questions and wrong_questions associations
+    await query(
+      `UPDATE ${TABLES.TASKS} SET deleted_at = NOW(), updated_at = NOW() WHERE id = $1`,
+      [taskId]
+    )
+    
+    res.json({ success: true, message: '任务已删除（错题已保留）' })
   } catch (error) {
     console.error('删除任务失败:', error)
     res.status(500).json({ error: error.message })

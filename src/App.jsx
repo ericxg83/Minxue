@@ -1175,10 +1175,15 @@ export default function App() {
   const triggerUpload = (capture) => {
     const input = document.getElementById('file-input')
     if (!input) return
+    
     if (capture) {
+      // Camera mode: single capture, disable multiple
       input.setAttribute('capture', 'environment')
+      input.removeAttribute('multiple')
     } else {
+      // Gallery mode: remove capture to enable multiple selection
       input.removeAttribute('capture')
+      input.setAttribute('multiple', 'multiple')
     }
     input.click()
     setShowUploadOptions(false)
