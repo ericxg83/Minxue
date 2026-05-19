@@ -1,4 +1,5 @@
 import { useState, useRef, useCallback, useEffect, useMemo, useLayoutEffect } from 'react'
+import { optimizeImage } from '../../utils/imageOptimizer'
 
 const HANDLE_HIT_PAD = 6
 
@@ -22,7 +23,7 @@ function clamp(val, min, max) {
   return Math.max(min, Math.min(max, val))
 }
 
-export default function RectCropper({ image, onConfirm, onCancel, theme = 'light' }) {
+export default function RectCropper({ image, onConfirm, onCancel, theme = 'light', enableOptimization = true }) {
   const containerRef = useRef(null)
   const imgRef = useRef(null)
   const previewCanvasRef = useRef(null)
@@ -35,6 +36,15 @@ export default function RectCropper({ image, onConfirm, onCancel, theme = 'light
   const [showInstruction, setShowInstruction] = useState(true)
   const startRef = useRef({ x: 0, y: 0, crop: null })
   const imgNaturalRef = useRef({ w: 0, h: 0 })
+  const [processing, setProcessing] = useState(false)
+  const [showOptions, setShowOptions] = useState(false)
+  const [optimizationOptions, setOptimizationOptions] = useState({
+    removeBlack: true,
+    blackThreshold: 40,
+    contrastFactor: 1.3,
+    sharpenAmount: 0.8,
+    outputFormat: 'image/png'
+  })
 
   const responsive = useMemo(() => getResponsiveSizes(), [])
   const { MIN_SIZE, HANDLE_SIZE, BORDER_WIDTH } = responsive
@@ -284,6 +294,7 @@ export default function RectCropper({ image, onConfirm, onCancel, theme = 'light
   const handleConfirm = async () => {
     if (!imgRef.current || crop.width <= 0 || crop.height <= 0) return
     try {
+      setProcessing(true)
       const scale = imgRect.scale
       const sx = Math.round(crop.x / scale)
       const sy = Math.round(crop.y / scale)
@@ -309,10 +320,18 @@ export default function RectCropper({ image, onConfirm, onCancel, theme = 'light
       } else {
         ctx.drawImage(imgRef.current, sx, sy, sw, sh, 0, 0, sw, sh)
       }
-      const dataUrl = canvas.toDataURL('image/jpeg', 0.92)
+      
+      let dataUrl = canvas.toDataURL('image/jpeg', 0.92)
+      
+      if (enableOptimization) {
+        dataUrl = await optimizeImage(dataUrl, optimizationOptions)
+      }
+      
       onConfirm(dataUrl)
     } catch (err) {
       console.error('裁剪失败:', err)
+    } finally {
+      setProcessing(false)
     }
   }
 
@@ -541,6 +560,135 @@ export default function RectCropper({ image, onConfirm, onCancel, theme = 'light
               </div>
             </div>
 
+            {enableOptimization && (
+              <div style={{ marginBottom: 12 }}>
+                <button
+                  onClick={() => setShowOptions(!showOptions)}
+                  style={{
+                    width: '100%',
+                    padding: '10px',
+                    borderRadius: 8,
+                    border: `1px solid ${colors.accent}30`,
+                    background: showOptions ? `${colors.accent}10` : 'transparent',
+                    color: colors.accent,
+                    fontSize: 13,
+                    fontWeight: 500,
+                    cursor: 'pointer',
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                    gap: 6
+                  }}
+                >
+                  <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                    <circle cx="12" cy="12" r="3"/>
+                    <path d="M12 1v6m0 6v6m11-7h-6m-6 0H1m16.36-5.66l-4.24 4.24m-4.24 4.24l-4.24 4.24m0-12.72l4.24 4.24m4.24 4.24l4.24 4.24"/>
+                  </svg>
+                  {showOptions ? '隐藏优化选项' : '显示图片优化选项'}
+                </button>
+
+                {showOptions && (
+                  <div style={{
+                    marginTop: 12,
+                    padding: 12,
+                    borderRadius: 8,
+                    background: theme === 'light' ? '#F9FAFB' : '#2A2A2A',
+                    border: `1px solid ${colors.accent}20`
+                  }}>
+                    <div style={{ marginBottom: 10 }}>
+                      <label style={{
+                        display: 'flex',
+                        alignItems: 'center',
+                        gap: 8,
+                        fontSize: 13,
+                        color: colors.textPrimary,
+                        cursor: 'pointer'
+                      }}>
+                        <input
+                          type="checkbox"
+                          checked={optimizationOptions.removeBlack}
+                          onChange={(e) => setOptimizationOptions(prev => ({ ...prev, removeBlack: e.target.checked }))}
+                          style={{ accentColor: colors.accent }}
+                        />
+                        去黑处理
+                      </label>
+                    </div>
+
+                    {optimizationOptions.removeBlack && (
+                      <div style={{ marginBottom: 10, paddingLeft: 24 }}>
+                        <div style={{ fontSize: 11, color: colors.textSecondary, marginBottom: 4 }}>
+                          去黑阈值: {optimizationOptions.blackThreshold}
+                        </div>
+                        <input
+                          type="range"
+                          min="20"
+                          max="80"
+                          step="5"
+                          value={optimizationOptions.blackThreshold}
+                          onChange={(e) => setOptimizationOptions(prev => ({ ...prev, blackThreshold: Number(e.target.value) }))}
+                          style={{ width: '100%', accentColor: colors.accent }}
+                        />
+                      </div>
+                    )}
+
+                    <div style={{ marginBottom: 10 }}>
+                      <div style={{ fontSize: 11, color: colors.textSecondary, marginBottom: 4 }}>
+                        对比度: {optimizationOptions.contrastFactor.toFixed(1)}
+                      </div>
+                      <input
+                        type="range"
+                        min="0.5"
+                        max="2.0"
+                        step="0.1"
+                        value={optimizationOptions.contrastFactor}
+                        onChange={(e) => setOptimizationOptions(prev => ({ ...prev, contrastFactor: Number(e.target.value) }))}
+                        style={{ width: '100%', accentColor: colors.accent }}
+                      />
+                    </div>
+
+                    <div style={{ marginBottom: 10 }}>
+                      <div style={{ fontSize: 11, color: colors.textSecondary, marginBottom: 4 }}>
+                        锐化强度: {optimizationOptions.sharpenAmount.toFixed(1)}
+                      </div>
+                      <input
+                        type="range"
+                        min="0"
+                        max="2.0"
+                        step="0.1"
+                        value={optimizationOptions.sharpenAmount}
+                        onChange={(e) => setOptimizationOptions(prev => ({ ...prev, sharpenAmount: Number(e.target.value) }))}
+                        style={{ width: '100%', accentColor: colors.accent }}
+                      />
+                    </div>
+
+                    <div>
+                      <div style={{ fontSize: 11, color: colors.textSecondary, marginBottom: 4 }}>输出格式</div>
+                      <div style={{ display: 'flex', gap: 8 }}>
+                        {['image/png', 'image/jpeg'].map(format => (
+                          <button
+                            key={format}
+                            onClick={() => setOptimizationOptions(prev => ({ ...prev, outputFormat: format }))}
+                            style={{
+                              flex: 1,
+                              padding: '6px 8px',
+                              borderRadius: 6,
+                              border: `1px solid ${optimizationOptions.outputFormat === format ? colors.accent : '#D1D5DB'}`,
+                              background: optimizationOptions.outputFormat === format ? `${colors.accent}15` : 'transparent',
+                              color: optimizationOptions.outputFormat === format ? colors.accent : colors.textSecondary,
+                              fontSize: 12,
+                              cursor: 'pointer'
+                            }}
+                          >
+                            {format === 'image/png' ? 'PNG' : 'JPEG'}
+                          </button>
+                        ))}
+                      </div>
+                    </div>
+                  </div>
+                )}
+              </div>
+            )}
+
             <div style={{ display: 'flex', gap: 10 }}>
               <button
                 onClick={handleResetCrop}
@@ -576,21 +724,29 @@ export default function RectCropper({ image, onConfirm, onCancel, theme = 'light
               </button>
               <button
                 onClick={handleConfirm}
-                disabled={!hasValidCrop}
+                disabled={!hasValidCrop || processing}
                 style={{
                   flex: 1,
                   padding: '14px',
                   borderRadius: 10,
                   border: 'none',
-                  background: hasValidCrop ? colors.confirmBg : '#D1D5DB',
-                  color: hasValidCrop ? colors.confirmText : '#9CA3AF',
+                  background: hasValidCrop && !processing ? colors.confirmBg : '#D1D5DB',
+                  color: hasValidCrop && !processing ? colors.confirmText : '#9CA3AF',
                   fontSize: 15,
                   fontWeight: 600,
-                  cursor: hasValidCrop ? 'pointer' : 'not-allowed',
-                  opacity: hasValidCrop ? 1 : 0.6
+                  cursor: hasValidCrop && !processing ? 'pointer' : 'not-allowed',
+                  opacity: hasValidCrop && !processing ? 1 : 0.6,
+                  position: 'relative'
                 }}
               >
-                确认裁剪
+                {processing ? (
+                  <span style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 6 }}>
+                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" style={{ animation: 'spin 1s linear infinite' }}>
+                      <path d="M21 12a9 9 0 1 1-6.219-8.56"/>
+                    </svg>
+                    处理中...
+                  </span>
+                ) : '确认裁剪'}
               </button>
             </div>
           </>
