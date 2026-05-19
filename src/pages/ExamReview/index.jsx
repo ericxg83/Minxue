@@ -406,8 +406,25 @@ export default function ExamReview({ task, onClose, onSave }) {
                     <div style={{ flex: 1 }}>
                     <div style={{ fontSize: '12px', fontWeight: 600, color: COLORS.textSecondary, marginBottom: '4px' }}>参考答案</div>
                     {(() => {
-                      // 参考答案：始终使用数据库中的 answer 字段（由 AI 计算生成）
                       const refAnswer = currentQuestion.answer || ''
+                      const hasException = currentQuestion.result?.answer_exception === true
+                      const exceptionReason = currentQuestion.result?.exception_reason || ''
+                      
+                      if (hasException) {
+                        return (
+                          <div style={{
+                            padding: '8px 10px', borderRadius: '6px',
+                            border: `1px solid ${COLORS.warning}`,
+                            fontSize: '14px', color: COLORS.warning,
+                            background: '#FFFBEB', minHeight: '36px',
+                            display: 'flex', flexDirection: 'column', justifyContent: 'center', gap: '2px'
+                          }}>
+                            <div style={{ fontStyle: 'italic' }}>&#9888; 解析异常，请人工复核</div>
+                            {exceptionReason && <div style={{ fontSize: '11px', color: '#92400E' }}>{exceptionReason}</div>}
+                          </div>
+                        )
+                      }
+                      
                       return (
                         <div style={{
                           padding: '8px 10px', borderRadius: '6px',
@@ -418,7 +435,7 @@ export default function ExamReview({ task, onClose, onSave }) {
                           fontStyle: refAnswer ? 'normal' : 'italic',
                           wordBreak: 'break-all'
                         }}>
-                          {refAnswer ? <MathText content={refAnswer} /> : '待人工补充'}
+                          {refAnswer ? <MathText content={refAnswer} /> : '待AI生成答案'}
                         </div>
                       )
                     })()}

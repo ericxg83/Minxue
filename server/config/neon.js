@@ -65,7 +65,8 @@ export const TABLES = {
   QUESTIONS: 'questions',
   WRONG_QUESTIONS: 'wrong_questions',
   TRAINING_LOGS: 'training_logs',
-  GENERATED_EXAMS: 'generated_exams'
+  GENERATED_EXAMS: 'generated_exams',
+  QUESTION_CACHE: 'question_cache'
 }
 
 export const TASK_STATUS = {

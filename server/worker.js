@@ -11,8 +11,9 @@ import sharp from 'sharp'
 import { TABLES, TASK_STATUS } from './config/neon.js'
 import { query } from './config/neon.js'
 import { AI_CONFIG, getAIHeaders, buildOCRPrompt, buildTaggingPrompt, buildAnswerGenerationPrompt } from './config/ai.js'
-import { updateTaskStatus, createQuestions, batchUpdateQuestionTags, addWrongQuestions, updateQuestionAnswer } from './services/neonService.js'
+import { updateTaskStatus, createQuestions, batchUpdateQuestionTags, addWrongQuestions, updateQuestionAnswer, markAnswerException, findCachedQuestionByFingerprint, findSimilarQuestion, cacheQuestion, incrementQuestionUseCount } from './services/neonService.js'
 import { uploadImage } from './services/ossService.js'
+import { generateTextFingerprint, generatePHash, PARSER_VERSION, TEXT_SIMILARITY_THRESHOLD } from './utils/questionFingerprint.js'
 
 // AI 密钥校验
 const AI_KEY = AI_CONFIG.API_KEY
@@ -479,53 +480,170 @@ const generateAnswerForQuestion = async (questionContent, retryCount = 0) => {
 }
 
 /**
+ * Check if the AI-generated answer is valid and not abnormal.
+ * Returns { isValid: boolean, reason?: string }
+ */
+function validateAIAnswer(answer, analysis) {
+  if (!answer || answer.trim() === '') {
+    return { isValid: false, reason: '答案为空' }
+  }
+  if (answer === '待人工补充' || answer === '此为主观题，无唯一标准答案') {
+    return { isValid: false, reason: 'AI标记需要人工补充' }
+  }
+  if (analysis && analysis.length < 10 && answer.length > 100) {
+    return { isValid: false, reason: '答案过长且解析过短，疑似异常' }
+  }
+  if (/^[\s_]+$/.test(answer)) {
+    return { isValid: false, reason: '答案仅包含空白或下划线' }
+  }
+  return { isValid: true }
+}
+
+/**
  * Generate reference answers for ALL questions via AI calculation.
  * OCR may confuse student's selected answer with the reference answer,
  * so reference answers should always come from AI calculation based on question content.
  */
-const generateMissingAnswers = async (questions) => {
-  if (!questions || questions.length === 0) return { updated: 0, total: 0 }
+const generateMissingAnswers = async (questions, imageBuffer = null) => {
+  if (!questions || questions.length === 0) return { updated: 0, total: 0, exceptions: 0, cacheHits: 0, cacheMisses: 0 }
 
-  // Always generate reference answers for all questions - never trust OCR for the reference answer
   const needAnswer = questions.filter(q => true)
   if (needAnswer.length === 0) {
     console.log('   所有题目已有参考答案，跳过生成')
-    return { updated: 0, total: 0 }
+    return { updated: 0, total: 0, exceptions: 0, cacheHits: 0, cacheMisses: 0 }
   }
 
   console.log(`   需要生成答案: ${needAnswer.length}/${questions.length} 道题`)
+
+  let phash = null
+  if (imageBuffer) {
+    try {
+      phash = await generatePHash(imageBuffer)
+    } catch (err) {
+      console.error('   生成感知哈希失败:', err.message)
+    }
+  }
 
   const batchSize = 3
   let updatedCount = 0
   let emptyCount = 0
   let placeholderCount = 0
+  let exceptionCount = 0
+  let cacheHitCount = 0
+  let cacheMissCount = 0
 
   for (let i = 0; i < needAnswer.length; i += batchSize) {
     const batch = needAnswer.slice(i, i + batchSize)
     const promises = batch.map(async (q) => {
       const content = q.content || ''
-      const options = (q.options || []).join('；')
-      const fullContent = options ? `${content}\n选项：${options}` : content
+      const options = q.options || []
+      const fullContent = options.length > 0 ? `${content}\n选项：${options.join('；')}` : content
+      const fingerprint = generateTextFingerprint(content, options, q.question_type)
 
+      if (!fingerprint) {
+        console.log(`     题目 ${q.id.substring(0, 8)}: 指纹生成失败，跳过缓存`)
+      } else {
+        const cached = await findCachedQuestionByFingerprint(fingerprint, PARSER_VERSION)
+        
+        if (cached && cached.answer && cached.answer !== '待人工补充' && cached.answer !== '此为主观题，无唯一标准答案') {
+          cacheHitCount++
+          console.log(`     题目 ${q.id.substring(0, 8)}: ✅ 缓存命中 - 复用AI解析结果`)
+          
+          let finalAnswer = extractAnswerFromAnalysis(cached.answer, cached.analysis, q.options)
+          try {
+            await updateQuestionAnswer(q.id, finalAnswer, cached.analysis)
+            q.answer = finalAnswer
+            if (cached.analysis) q.analysis = cached.analysis
+            updatedCount++
+            
+            await incrementQuestionUseCount(fingerprint, PARSER_VERSION)
+          } catch (err) {
+            console.error(`     题目 ${q.id.substring(0, 8)}: 缓存答案写入失败`, err.message)
+            exceptionCount++
+          }
+          return
+        } else if (cached) {
+          console.log(`     题目 ${q.id.substring(0, 8)}: 缓存命中但答案无效，重新调用AI`)
+        } else {
+          const similar = await findSimilarQuestion(fullContent, q.subject || '数学', TEXT_SIMILARITY_THRESHOLD)
+          
+          if (similar && similar.answer) {
+            cacheHitCount++
+            console.log(`     题目 ${q.id.substring(0, 8)}: ✅ 相似题目匹配 (${(similar.similarity * 100).toFixed(1)}%) - 复用答案`)
+            
+            let finalAnswer = extractAnswerFromAnalysis(similar.answer, similar.analysis, q.options)
+            try {
+              await updateQuestionAnswer(q.id, finalAnswer, similar.analysis)
+              q.answer = finalAnswer
+              if (similar.analysis) q.analysis = similar.analysis
+              updatedCount++
+              
+              await cacheQuestion({
+                content: fullContent,
+                options: options,
+                answer: finalAnswer,
+                analysis: similar.analysis,
+                question_type: q.question_type,
+                subject: q.subject,
+                ai_tags: similar.ai_tags,
+                content_type: 'text'
+              }, fingerprint, phash, PARSER_VERSION)
+            } catch (err) {
+              console.error(`     题目 ${q.id.substring(0, 8)}: 相似答案写入失败`, err.message)
+              exceptionCount++
+            }
+            return
+          }
+        }
+      }
+
+      cacheMissCount++
       const result = await generateAnswerForQuestion(fullContent)
+
+      const validation = validateAIAnswer(result.answer, result.analysis)
+      
+      if (!validation.isValid) {
+        exceptionCount++
+        console.log(`     题目 ${q.id.substring(0, 8)}: 解析异常 - ${validation.reason}`)
+        try {
+          await markAnswerException(q.id, validation.reason)
+        } catch (err) {
+          console.error(`     题目 ${q.id.substring(0, 8)}: 异常标记写入失败`, err.message)
+        }
+        return
+      }
 
       if (result.answer && result.answer !== '待人工补充' && result.answer !== '此为主观题，无唯一标准答案') {
         const oldAnswer = q.answer
-        // AI sometimes returns wrong answer field but correct analysis
-        // Extract the actual answer from analysis text
         let finalAnswer = extractAnswerFromAnalysis(result.answer, result.analysis, q.options)
         try {
           await updateQuestionAnswer(q.id, finalAnswer, result.analysis)
-          // Update local question object for downstream use
           q.answer = finalAnswer
           if (result.analysis) q.analysis = result.analysis
           updatedCount++
           console.log(`     题目 ${q.id.substring(0, 8)}: 答案 ${oldAnswer || '(空)'} → ${finalAnswer}`)
+          
+          if (fingerprint) {
+            await cacheQuestion({
+              content: fullContent,
+              options: options,
+              answer: finalAnswer,
+              analysis: result.analysis,
+              question_type: q.question_type,
+              subject: q.subject,
+              content_type: 'text'
+            }, fingerprint, phash, PARSER_VERSION)
+          }
         } catch (err) {
           console.error(`     题目 ${q.id.substring(0, 8)}: 答案写入失败`, err.message)
+          exceptionCount++
+          try {
+            await markAnswerException(q.id, '答案写入失败: ' + err.message)
+          } catch (markErr) {
+            console.error(`     题目 ${q.id.substring(0, 8)}: 异常标记写入失败`, markErr.message)
+          }
         }
       } else if (result.answer) {
-        // "待人工补充" or "此为主观题" — still save it
         let finalAnswer = extractAnswerFromAnalysis(result.answer, result.analysis, q.options)
         placeholderCount++
         try {
@@ -533,19 +651,43 @@ const generateMissingAnswers = async (questions) => {
           q.answer = finalAnswer
           if (result.analysis) q.analysis = result.analysis
           console.log(`     题目 ${q.id.substring(0, 8)}: ${finalAnswer}`)
+          
+          if (fingerprint) {
+            await cacheQuestion({
+              content: fullContent,
+              options: options,
+              answer: finalAnswer,
+              analysis: result.analysis,
+              question_type: q.question_type,
+              subject: q.subject,
+              content_type: 'text'
+            }, fingerprint, phash, PARSER_VERSION)
+          }
         } catch (err) {
           console.error(`     题目 ${q.id.substring(0, 8)}: 答案写入失败`, err.message)
+          exceptionCount++
+          try {
+            await markAnswerException(q.id, '答案写入失败: ' + err.message)
+          } catch (markErr) {
+            console.error(`     题目 ${q.id.substring(0, 8)}: 异常标记写入失败`, markErr.message)
+          }
         }
       } else {
         emptyCount++
         console.log(`     题目 ${q.id.substring(0, 8)}: AI 无法生成答案（可能需要参考图片）`)
+        exceptionCount++
+        try {
+          await markAnswerException(q.id, 'AI无法生成答案')
+        } catch (err) {
+          console.error(`     题目 ${q.id.substring(0, 8)}: 异常标记写入失败`, err.message)
+        }
       }
     })
 
     await Promise.all(promises)
   }
 
-  return { updated: updatedCount, total: needAnswer.length, empty: emptyCount, placeholder: placeholderCount }
+  return { updated: updatedCount, total: needAnswer.length, empty: emptyCount, placeholder: placeholderCount, exceptions: exceptionCount, cacheHits: cacheHitCount, cacheMisses: cacheMissCount }
 }
 
 export const processTask = async (job) => {
@@ -666,6 +808,7 @@ export const processTask = async (job) => {
 
     const questions = ocrResult.questions || []
     let wrongCount = questions.filter(q => !q.is_correct).length
+    let answerGenResult = { updated: 0, total: 0, empty: 0, placeholder: 0, exceptions: 0, cacheHits: 0, cacheMisses: 0 }
 
     console.log(`✅ [Step 5/8] AI 识别成功: ${questions.length} 道题, ${wrongCount} 道错题, 耗时 ${Math.round(ocrResult.duration/1000)}s`)
 
@@ -684,17 +827,16 @@ export const processTask = async (job) => {
       await updateTaskStatus(taskId, TASK_STATUS.PROCESSING, { progress: 80 })
 
       console.log(`📊 [Step 7/8] 生成AI参考答案...`)
-      const answerGenResult = await generateMissingAnswers(questions)
-      if (answerGenResult.updated > 0) {
-        // Re-judge correctness for questions whose answers were generated
-        let rejudgedWrong = 0
+      answerGenResult = await generateMissingAnswers(questions, compressedBuffer)
+      
+      let rejudgedWrong = 0
+      if (answerGenResult.updated > 0 || answerGenResult.exceptions > 0 || answerGenResult.cacheHits > 0) {
         for (const q of questions) {
           if (q.answer && q.answer.trim() && q.answer !== '待人工补充' && q.answer !== '此为主观题，无唯一标准答案') {
             const originalCorrect = q.is_correct
             const judgment = judgeAnswer(q.student_answer, q.answer, q.question_type)
             if (judgment.isCorrect !== originalCorrect) {
               q.is_correct = judgment.isCorrect
-              // Update is_correct in DB
               try {
                 await query(
                   `UPDATE questions SET is_correct = $1, updated_at = NOW() WHERE id = $2`,
@@ -707,7 +849,6 @@ export const processTask = async (job) => {
             }
           }
         }
-        // Sync wrong-question-book with updated correctness
         const wrongIds = questions.filter(q => !q.is_correct).map(q => q.id)
         if (wrongIds.length > 0) {
           try {
@@ -717,11 +858,14 @@ export const processTask = async (job) => {
             console.error('错题本同步失败:', e.message)
           }
         }
-        // Recalculate wrong count with updated correctness
         wrongCount = questions.filter(q => !q.is_correct).length
-        console.log(`✅ [Step 7/8] AI答案生成完成: 生成了 ${answerGenResult.updated}/${answerGenResult.total} 道题的答案, 重新判定 ${rejudgedWrong} 道错题, 当前错题数: ${wrongCount}`)
+        console.log(`✅ [Step 7/8] AI答案生成完成: 生成了 ${answerGenResult.updated}/${answerGenResult.total} 道题的答案, 解析异常 ${answerGenResult.exceptions} 道, 重新判定 ${rejudgedWrong} 道错题, 当前错题数: ${wrongCount}`)
+        console.log(`📦 [Cache] 缓存命中: ${answerGenResult.cacheHits} 次, 缓存未命中: ${answerGenResult.cacheMisses} 次`)
       } else {
         console.log(`✅ [Step 7/8] AI答案生成完成: 无需生成（${answerGenResult.total} 道题需要处理）`)
+        if (answerGenResult.cacheHits !== undefined) {
+          console.log(`📦 [Cache] 缓存命中: ${answerGenResult.cacheHits} 次, 缓存未命中: ${answerGenResult.cacheMisses} 次`)
+        }
       }
 
       await job.updateProgress(85)
@@ -760,7 +904,10 @@ export const processTask = async (job) => {
       questionCount: questions.length,
       wrongCount: wrongCount,
       duration: duration,
-      completedAt: new Date().toISOString()
+      completedAt: new Date().toISOString(),
+      answerExceptions: answerGenResult.exceptions || 0,
+      cacheHits: answerGenResult.cacheHits || 0,
+      cacheMisses: answerGenResult.cacheMisses || 0
     })
 
     console.log(`\n🎉🎉 [Worker] ==========================================`)
@@ -768,6 +915,7 @@ export const processTask = async (job) => {
     console.log(`   taskId: ${taskId}`)
     console.log(`   题目数: ${questions.length}`)
     console.log(`   错题数: ${wrongCount}`)
+    console.log(`   缓存命中: ${answerGenResult.cacheHits || 0} 次`)
     console.log(`   总耗时: ${Math.round(duration / 1000)}s`)
     console.log(`🎉🎉🎉 ==========================================\n`)
 
@@ -775,7 +923,9 @@ export const processTask = async (job) => {
       taskId,
       questionCount: questions.length,
       wrongCount,
-      duration
+      duration,
+      cacheHits: answerGenResult?.cacheHits || 0,
+      cacheMisses: answerGenResult?.cacheMisses || 0
     }
   } catch (error) {
     const duration = Date.now() - startTime

@@ -391,6 +391,28 @@ export const clearAllCache = () => {
   }
 }
 
+export const clearStudentCaches = (studentId) => {
+  try {
+    const studentCacheKeys = [
+      `tasks_cache_${studentId}`,
+      `exams_cache_${studentId}`,
+      `wrong_questions_cache_${studentId}`,
+      `generated_exams_cache_${studentId}`
+    ]
+    studentCacheKeys.forEach(key => {
+      clearCache(key)
+    })
+    Object.keys(localStorage).forEach(key => {
+      if (key.startsWith(`questions_cache_`)) {
+        clearCache(key)
+      }
+    })
+    console.log(`学生 ${studentId} 的缓存已清除`)
+  } catch (e) {
+    console.error('清除学生缓存失败:', e)
+  }
+}
+
 export const invalidateCache = (type, studentId) => {
   const keyMap = {
     students: 'students_cache',
