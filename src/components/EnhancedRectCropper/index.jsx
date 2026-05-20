@@ -390,49 +390,39 @@ export default function EnhancedRectCropper({
       const isHttpImage = src && src.startsWith('http')
       
       if (isHttpImage) {
-        // HTTP images may taint canvas - load via proxy or fetch as data URL
-        let cleanSrc = null
+        // Try loading image via proxy (same-origin, no CORS issues)
+        const proxyUrl = `/api/proxy-image?url=${encodeURIComponent(src)}`
+        const cleanImg = new Image()
         
-        // Try proxy first
         try {
-          const proxyUrl = `/api/proxy-image?url=${encodeURIComponent(src)}`
-          const response = await fetch(proxyUrl)
-          if (response.ok) {
-            const blob = await response.blob()
-            cleanSrc = URL.createObjectURL(blob)
-          }
+          await new Promise((resolve, reject) => {
+            cleanImg.onload = resolve
+            cleanImg.onerror = () => reject(new Error('Proxy image failed to load'))
+            cleanImg.src = proxyUrl
+          })
+          ctx.drawImage(cleanImg, sx, sy, sw, sh, 0, 0, sw, sh)
         } catch (e) {
-          // Proxy failed, try fetching directly with CORS
-        }
-        
-        // If proxy failed, try fetching image directly as blob
-        if (!cleanSrc) {
+          // Proxy failed, try direct fetch with CORS
           try {
             const response = await fetch(src, { mode: 'cors' })
             if (response.ok) {
               const blob = await response.blob()
-              cleanSrc = URL.createObjectURL(blob)
+              const blobUrl = URL.createObjectURL(blob)
+              const corsImg = new Image()
+              await new Promise((resolve, reject) => {
+                corsImg.onload = resolve
+                corsImg.onerror = () => reject(new Error('CORS image failed to load'))
+                corsImg.src = blobUrl
+              })
+              ctx.drawImage(corsImg, sx, sy, sw, sh, 0, 0, sw, sh)
+              URL.revokeObjectURL(blobUrl)
+            } else {
+              throw new Error('CORS fetch failed')
             }
-          } catch (e) {
-            // Both methods failed, fall through to direct draw (may taint canvas)
+          } catch (corsErr) {
+            // All methods failed, try direct draw (may taint canvas)
+            ctx.drawImage(imgRef.current, sx, sy, sw, sh, 0, 0, sw, sh)
           }
-        }
-        
-        if (cleanSrc) {
-          // Draw from clean source URL (data URL or object URL)
-          const cleanImg = new Image()
-          await new Promise((resolve, reject) => {
-            cleanImg.onload = resolve
-            cleanImg.onerror = reject
-            cleanImg.src = cleanSrc
-          })
-          ctx.drawImage(cleanImg, sx, sy, sw, sh, 0, 0, sw, sh)
-          if (cleanSrc.startsWith('blob:')) {
-            URL.revokeObjectURL(cleanSrc)
-          }
-        } else {
-          // Fallback: draw directly (may fail if canvas is tainted)
-          ctx.drawImage(imgRef.current, sx, sy, sw, sh, 0, 0, sw, sh)
         }
       } else {
         // Local file or data URL - safe to draw directly
