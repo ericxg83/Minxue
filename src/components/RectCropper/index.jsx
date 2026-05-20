@@ -143,7 +143,6 @@ export default function RectCropper({ image, onConfirm, onCancel, theme = 'light
   useEffect(() => {
     if (!image) return
     const img = new Image()
-    img.crossOrigin = 'anonymous'
     img.onload = () => {
       imgNaturalRef.current = { w: img.naturalWidth, h: img.naturalHeight }
       if (imgRef.current) {
@@ -437,7 +436,6 @@ export default function RectCropper({ image, onConfirm, onCancel, theme = 'light
         <img
           ref={imgRef}
           src={image}
-          crossOrigin="anonymous"
           alt="crop"
           draggable={false}
           onLoad={computeLayout}

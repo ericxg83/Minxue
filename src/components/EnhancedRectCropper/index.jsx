@@ -573,7 +573,6 @@ export default function EnhancedRectCropper({
         <img
           ref={imgRef}
           src={straightenedImage || image}
-          crossOrigin="anonymous"
           alt="crop"
           draggable={false}
           onLoad={computeLayout}
