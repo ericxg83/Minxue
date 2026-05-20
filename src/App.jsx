@@ -162,32 +162,45 @@ export default function App() {
           setIsInitializing(false)
           return
         }
-        // Try cache first for instant display
-        const result = await getStudents(true)
-        const studentList = result.data || []
-        const safeStudentList = Array.isArray(studentList) ? studentList : []
-        setStudents(safeStudentList)
-        if (safeStudentList.length > 0) {
-          setCurrentStudent(safeStudentList[0])
-        }
-        // UI is now visible with cached data
-        setIsInitializing(false)
         
-        // If data was from cache, refresh in background
-        if (result.fromCache) {
-          getStudents(false).then(freshResult => {
-            const freshList = freshResult.data || []
-            if (Array.isArray(freshList) && freshList.length > 0) {
-              setStudents(freshList)
+        // Try cache first for instant display
+        const cached = localStorage.getItem('students_cache')
+        if (cached) {
+          try {
+            const cachedData = JSON.parse(cached)
+            if (Array.isArray(cachedData) && cachedData.length > 0) {
+              setStudents(cachedData)
+              setCurrentStudent(cachedData[0])
+              setIsInitializing(false)
+              
+              // Background refresh for fresh data
+              getStudents(false).then(freshResult => {
+                const freshList = freshResult.data || []
+                if (Array.isArray(freshList) && freshList.length > 0) {
+                  setStudents(freshList)
+                }
+              }).catch(() => {})
+              return
             }
-          }).catch(() => {
-            // Background refresh failed, silently ignore
-          })
+          } catch (e) { /* ignore parse error */ }
+        }
+        
+        // No cache or invalid cache - show UI immediately, fetch in background
+        setIsInitializing(false)
+        try {
+          const result = await getStudents(false)
+          const studentList = result.data || []
+          const safeStudentList = Array.isArray(studentList) ? studentList : []
+          if (safeStudentList.length > 0) {
+            setStudents(safeStudentList)
+            setCurrentStudent(safeStudentList[0])
+          }
+        } catch (error) {
+          console.error('加载学生数据失败:', error)
+          // Keep empty state, don't show error - user can still navigate
         }
       } catch (error) {
-        console.error('加载学生数据失败:', error)
-        setStudents([])
-        setCurrentStudent(null)
+        console.error('初始化失败:', error)
         setIsInitializing(false)
       }
     }

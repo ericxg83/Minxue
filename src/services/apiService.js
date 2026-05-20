@@ -43,20 +43,30 @@ const clearCache = (key) => {
 
 const apiRequest = async (path, options = {}) => {
   const url = `${API_BASE}${path}`
-  const response = await fetch(url, {
-    ...options,
-    headers: {
-      ...options.headers
+  
+  // Add timeout to prevent hanging requests
+  const controller = new AbortController()
+  const timeoutId = setTimeout(() => controller.abort(), 10000) // 10 second timeout
+  
+  try {
+    const response = await fetch(url, {
+      ...options,
+      headers: {
+        ...options.headers
+      },
+      signal: controller.signal
+    })
+
+    if (!response.ok) {
+      const error = await response.json().catch(() => ({ error: response.statusText }))
+      throw new Error(error.error || `请求失败: ${response.status}`)
     }
-  })
 
-  if (!response.ok) {
-    const error = await response.json().catch(() => ({ error: response.statusText }))
-    throw new Error(error.error || `请求失败: ${response.status}`)
+    const data = await response.json()
+    return data
+  } finally {
+    clearTimeout(timeoutId)
   }
-
-  const data = await response.json()
-  return data
 }
 
 export const getStudents = async (useCache = true) => {
