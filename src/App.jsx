@@ -150,7 +150,7 @@ export default function App() {
   // Toast
   const Toast = useToast()
 
-  // Initialize students
+  // Initialize students - fast path: load cache first, then refresh in background
   useEffect(() => {
     const init = async () => {
       try {
@@ -162,13 +162,28 @@ export default function App() {
           setIsInitializing(false)
           return
         }
-        const studentList = await getStudents(true)
+        // Try cache first for instant display
+        const result = await getStudents(true)
+        const studentList = result.data || []
         const safeStudentList = Array.isArray(studentList) ? studentList : []
         setStudents(safeStudentList)
-        if (safeStudentList.length > 0 && !currentStudent) {
+        if (safeStudentList.length > 0) {
           setCurrentStudent(safeStudentList[0])
         }
+        // UI is now visible with cached data
         setIsInitializing(false)
+        
+        // If data was from cache, refresh in background
+        if (result.fromCache) {
+          getStudents(false).then(freshResult => {
+            const freshList = freshResult.data || []
+            if (Array.isArray(freshList) && freshList.length > 0) {
+              setStudents(freshList)
+            }
+          }).catch(() => {
+            // Background refresh failed, silently ignore
+          })
+        }
       } catch (error) {
         console.error('加载学生数据失败:', error)
         setStudents([])

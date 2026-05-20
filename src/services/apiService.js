@@ -1,7 +1,7 @@
 const API_BASE = import.meta.env.VITE_API_URL || '/api'
 
 const CACHE_MAX_AGE = {
-  STUDENTS: 15 * 60 * 1000,
+  STUDENTS: 24 * 60 * 60 * 1000,
   TASKS: 5 * 60 * 1000,
   EXAMS: 10 * 60 * 1000,
   QUESTIONS: 5 * 60 * 1000,
@@ -62,14 +62,14 @@ const apiRequest = async (path, options = {}) => {
 export const getStudents = async (useCache = true) => {
   if (useCache) {
     const cached = readCache('students_cache', CACHE_MAX_AGE.STUDENTS)
-    if (cached) return cached
+    if (cached) return { data: cached, fromCache: true }
   }
 
   const data = await apiRequest('/students')
   const students = data.students || []
 
   if (students.length) writeCache('students_cache', students)
-  return students
+  return { data: students, fromCache: false }
 }
 
 export const getStudentById = async (id) => {
