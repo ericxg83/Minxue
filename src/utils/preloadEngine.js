@@ -17,7 +17,6 @@ class PreloadEngine {
     this.queue = []
     this.isProcessing = false
     this.preloadedPages = new Set()
-    this.abortControllers = new Map()
   }
 
   preloadPage = async (pageName, studentId, options = {}) => {
@@ -39,22 +38,15 @@ class PreloadEngine {
       return
     }
 
-    const controller = new AbortController()
-    this.abortControllers.set(cacheKey, controller)
-
     try {
-      await this.executePreload(pageName, studentId, controller.signal)
+      await this.executePreload(pageName, studentId)
       this.preloadedPages.add(cacheKey)
     } catch (error) {
-      if (error.name !== 'AbortError') {
-        console.debug(`Preload ${pageName} failed:`, error)
-      }
-    } finally {
-      this.abortControllers.delete(cacheKey)
+      console.debug(`Preload ${pageName} failed:`, error)
     }
   }
 
-  executePreload = async (pageName, studentId, signal) => {
+  executePreload = async (pageName, studentId) => {
     const { getTasksByStudent, getWrongQuestionsByStudent, getGeneratedExamsByStudent, getQuestionsByTask } =
       await import('../services/apiService')
 
@@ -71,8 +63,6 @@ class PreloadEngine {
       default:
         break
     }
-
-    if (signal.aborted) throw new Error('AbortError')
   }
 
   smartPreload = (currentPage, studentId) => {
@@ -112,17 +102,9 @@ class PreloadEngine {
     this._hoverTimer && clearTimeout(this._hoverTimer)
   }
 
-  cancelAll = () => {
-    for (const [key, controller] of this.abortControllers) {
-      controller.abort()
-    }
-    this.abortControllers.clear()
-    this.queue = []
-  }
-
   reset = () => {
     this.preloadedPages.clear()
-    this.cancelAll()
+    this.queue = []
   }
 }
 
