@@ -304,26 +304,18 @@ export default function RectCropper({ image, onConfirm, onCancel, theme = 'light
       const ctx = canvas.getContext('2d')
 
       const src = imgRef.current.src
-      // 使用 imgRef.current 绘制，避免跨域问题
-      // 对于 http 图片，如果设置了 crossOrigin 且服务器支持 CORS，可以直接绘制
-      // 否则需要从原始 image 对象重新加载
       if (src && src.startsWith('http') && !imgRef.current.crossOrigin) {
-        // 如果图片没有设置 crossOrigin，尝试通过代理加载
         const proxyUrl = `/api/proxy-image?url=${encodeURIComponent(src)}`
         const proxyImg = new Image()
         proxyImg.crossOrigin = 'anonymous'
-        await new Promise((resolve, reject) => {
+        await new Promise((resolve) => {
           proxyImg.onload = resolve
-          proxyImg.onerror = () => {
-            // 代理加载失败，尝试直接使用原图（可能会被污染）
-            resolve()
-          }
+          proxyImg.onerror = () => resolve() // 代理失败也继续，尝试降级方案
           proxyImg.src = proxyUrl
         })
         try {
           ctx.drawImage(proxyImg, sx, sy, sw, sh, 0, 0, sw, sh)
         } catch (e) {
-          // 如果代理图片绘制失败，使用原图
           ctx.drawImage(imgRef.current, sx, sy, sw, sh, 0, 0, sw, sh)
         }
       } else {
@@ -339,8 +331,7 @@ export default function RectCropper({ image, onConfirm, onCancel, theme = 'light
       onConfirm(dataUrl)
     } catch (err) {
       console.error('裁剪失败:', err)
-      // 向用户显示错误提示
-      alert('裁剪失败，请重试')
+      alert('裁剪失败: ' + (err.message || '未知错误'))
     } finally {
       setProcessing(false)
     }

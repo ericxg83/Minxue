@@ -11,13 +11,8 @@ function getResponsiveSizes() {
   const touchDevice = 'ontouchstart' in window || navigator.maxTouchPoints > 0
   const smallScreen = Math.min(vw, vh) < 600
 
-  if (smallScreen && touchDevice) {
-    return { MIN_SIZE: 56, HANDLE_SIZE: 26, BORDER_WIDTH: 2.5 }
-  }
-  if (touchDevice || vw < 768) {
-    return { MIN_SIZE: 50, HANDLE_SIZE: 22, BORDER_WIDTH: 2 }
-  }
-  return { MIN_SIZE: 40, HANDLE_SIZE: 18, BORDER_WIDTH: 2 }
+  // 固定最小裁剪尺寸为10x10像素，支持精确选择小区域
+  return { MIN_SIZE: 10, HANDLE_SIZE: smallScreen && touchDevice ? 26 : 22, BORDER_WIDTH: 2 }
 }
 
 function clamp(val, min, max) {
@@ -131,7 +126,9 @@ export default function EnhancedRectCropper({
   }, [])
 
   useEffect(() => {
-    if (imgRect.width <= 0 || crop.width > 0) return
+    if (imgRect.width <= 0) return
+    // 只在crop未初始化时才设置默认值（crop.width === 0且crop.height === 0）
+    if (crop.width > 0 || crop.height > 0) return
     const { width: w, height: h } = imgRect
     if (w <= 0 || h <= 0) return
     const ratio = 0.8
@@ -143,7 +140,7 @@ export default function EnhancedRectCropper({
       width: cw,
       height: ch
     })
-  }, [imgRect.width, imgRect.height, crop.width])
+  }, [imgRect.width, imgRect.height])
 
   useLayoutEffect(() => {
     const prevOverflow = document.body.style.overflow
@@ -390,16 +387,23 @@ export default function EnhancedRectCropper({
       const ctx = canvas.getContext('2d')
 
       const src = imgRef.current.src
-      if (src && src.startsWith('http')) {
+      // 使用 imgRef.current 绘制，避免跨域问题
+      if (src && src.startsWith('http') && !imgRef.current.crossOrigin) {
+        // 如果图片没有设置 crossOrigin，尝试通过代理加载
         const proxyUrl = `/api/proxy-image?url=${encodeURIComponent(src)}`
         const proxyImg = new Image()
         proxyImg.crossOrigin = 'anonymous'
-        await new Promise((resolve, reject) => {
+        await new Promise((resolve) => {
           proxyImg.onload = resolve
-          proxyImg.onerror = reject
+          proxyImg.onerror = () => resolve() // 代理失败也继续，尝试降级方案
           proxyImg.src = proxyUrl
         })
-        ctx.drawImage(proxyImg, sx, sy, sw, sh, 0, 0, sw, sh)
+        try {
+          ctx.drawImage(proxyImg, sx, sy, sw, sh, 0, 0, sw, sh)
+        } catch (e) {
+          // 如果代理图片绘制失败，使用原图
+          ctx.drawImage(imgRef.current, sx, sy, sw, sh, 0, 0, sw, sh)
+        }
       } else {
         ctx.drawImage(imgRef.current, sx, sy, sw, sh, 0, 0, sw, sh)
       }
@@ -428,6 +432,7 @@ export default function EnhancedRectCropper({
       })
     } catch (err) {
       console.error('裁剪失败:', err)
+      alert('裁剪失败: ' + (err.message || '未知错误'))
     } finally {
       setProcessing(false)
     }
