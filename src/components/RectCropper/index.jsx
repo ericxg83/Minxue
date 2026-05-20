@@ -134,6 +134,39 @@ export default function RectCropper({ image, onConfirm, onCancel, theme = 'light
     }
   }, [])
 
+  const [imgSrc, setImgSrc] = useState(null)
+
+  // Load image - convert cross-origin images to blob URLs to avoid canvas tainting
+  useEffect(() => {
+    if (!image) { setImgSrc(null); return }
+    
+    const loadImage = async () => {
+      // For data URLs and same-origin images, use directly
+      if (image.startsWith('data:') || !image.startsWith('http')) {
+        setImgSrc(image)
+        return
+      }
+      
+      // For cross-origin HTTP images, fetch as blob and convert to blob URL
+      // This prevents canvas tainting on any origin
+      try {
+        const response = await fetch(image, { mode: 'cors' })
+        if (!response.ok) throw new Error(`Fetch failed: ${response.status}`)
+        const blob = await response.blob()
+        const blobUrl = URL.createObjectURL(blob)
+        setImgSrc(blobUrl)
+        // Cleanup previous blob URL on unmount or image change
+        return () => { URL.revokeObjectURL(blobUrl) }
+      } catch (e) {
+        console.warn('Failed to fetch image as blob, using direct URL:', e)
+        // Fallback: use direct URL (may taint canvas on cross-origin)
+        setImgSrc(image)
+      }
+    }
+    
+    loadImage()
+  }, [image])
+
   useEffect(() => {
     if (!showInstruction) return
     const timer = setTimeout(() => setShowInstruction(false), 3000)
@@ -141,12 +174,12 @@ export default function RectCropper({ image, onConfirm, onCancel, theme = 'light
   }, [showInstruction])
 
   useEffect(() => {
-    if (!image) return
+    if (!imgSrc) return
     const img = new Image()
     img.onload = () => {
       imgNaturalRef.current = { w: img.naturalWidth, h: img.naturalHeight }
       if (imgRef.current) {
-        imgRef.current.src = image
+        imgRef.current.src = imgSrc
       }
       setCrop({ x: 0, y: 0, width: 0, height: 0 })
       setShowInstruction(true)
@@ -156,12 +189,12 @@ export default function RectCropper({ image, onConfirm, onCancel, theme = 'light
     }
     img.onerror = () => {
       if (imgRef.current) {
-        imgRef.current.src = image
+        imgRef.current.src = imgSrc
       }
       setTimeout(() => computeLayout(), 80)
     }
-    img.src = image
-  }, [image, computeLayout])
+    img.src = imgSrc
+  }, [imgSrc, computeLayout])
 
   useEffect(() => {
     const onResize = () => computeLayout()
@@ -307,46 +340,42 @@ export default function RectCropper({ image, onConfirm, onCancel, theme = 'light
       const isHttpImage = src && src.startsWith('http')
       
       if (isHttpImage) {
-        // Try loading image via proxy (same-origin, no CORS issues)
-        const proxyUrl = `/api/proxy-image?url=${encodeURIComponent(src)}`
-        const cleanImg = new Image()
-        
+        // Fetch cross-origin image as blob, convert to blob URL (same-origin)
+        // Blob URLs never taint the canvas, avoiding SecurityError on toDataURL
         try {
+          const response = await fetch(src)
+          if (!response.ok) throw new Error(`Fetch failed: ${response.status}`)
+          const blob = await response.blob()
+          
+          // Create blob URL (same-origin, never taints canvas)
+          const blobUrl = URL.createObjectURL(blob)
+          
+          const blobImg = new Image()
           await new Promise((resolve, reject) => {
-            cleanImg.onload = resolve
-            cleanImg.onerror = () => reject(new Error('Proxy image failed to load'))
-            cleanImg.src = proxyUrl
+            blobImg.onload = resolve
+            blobImg.onerror = () => reject(new Error('Blob image failed to load'))
+            blobImg.src = blobUrl
           })
-          ctx.drawImage(cleanImg, sx, sy, sw, sh, 0, 0, sw, sh)
+          
+          ctx.drawImage(blobImg, sx, sy, sw, sh, 0, 0, sw, sh)
+          URL.revokeObjectURL(blobUrl)
         } catch (e) {
-          // Proxy failed, try direct fetch with CORS
-          try {
-            const response = await fetch(src, { mode: 'cors' })
-            if (response.ok) {
-              const blob = await response.blob()
-              const blobUrl = URL.createObjectURL(blob)
-              const corsImg = new Image()
-              await new Promise((resolve, reject) => {
-                corsImg.onload = resolve
-                corsImg.onerror = () => reject(new Error('CORS image failed to load'))
-                corsImg.src = blobUrl
-              })
-              ctx.drawImage(corsImg, sx, sy, sw, sh, 0, 0, sw, sh)
-              URL.revokeObjectURL(blobUrl)
-            } else {
-              throw new Error('CORS fetch failed')
-            }
-          } catch (corsErr) {
-            // All methods failed, try direct draw (may taint canvas)
-            ctx.drawImage(imgRef.current, sx, sy, sw, sh, 0, 0, sw, sh)
-          }
+          console.error('Blob draw failed:', e)
+          // Last resort: draw directly (may taint canvas)
+          ctx.drawImage(imgRef.current, sx, sy, sw, sh, 0, 0, sw, sh)
         }
       } else {
         // Local file or data URL - safe to draw directly
         ctx.drawImage(imgRef.current, sx, sy, sw, sh, 0, 0, sw, sh)
       }
       
-      let dataUrl = canvas.toDataURL('image/jpeg', 0.92)
+      let dataUrl
+      try {
+        dataUrl = canvas.toDataURL('image/jpeg', 0.92)
+      } catch (canvasErr) {
+        console.error('Canvas export failed (tainted):', canvasErr)
+        throw new Error('图片跨域限制导致无法导出，请尝试使用本地图片')
+      }
       
       if (enableOptimization) {
         dataUrl = await optimizeImage(dataUrl, optimizationOptions)
