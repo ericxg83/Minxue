@@ -44,29 +44,23 @@ const clearCache = (key) => {
 const apiRequest = async (path, options = {}) => {
   const url = `${API_BASE}${path}`
   
-  // Add timeout to prevent hanging requests
-  const controller = new AbortController()
-  const timeoutId = setTimeout(() => controller.abort(), 10000) // 10 second timeout
+  // No timeout - let the browser handle it naturally (Render cold starts can take 50+ seconds)
+  // The App.jsx init logic already handles failures gracefully
   
-  try {
-    const response = await fetch(url, {
-      ...options,
-      headers: {
-        ...options.headers
-      },
-      signal: controller.signal
-    })
-
-    if (!response.ok) {
-      const error = await response.json().catch(() => ({ error: response.statusText }))
-      throw new Error(error.error || `请求失败: ${response.status}`)
+  const response = await fetch(url, {
+    ...options,
+    headers: {
+      ...options.headers
     }
+  })
 
-    const data = await response.json()
-    return data
-  } finally {
-    clearTimeout(timeoutId)
+  if (!response.ok) {
+    const error = await response.json().catch(() => ({ error: response.statusText }))
+    throw new Error(error.error || `请求失败: ${response.status}`)
   }
+
+  const data = await response.json()
+  return data
 }
 
 export const getStudents = async (useCache = true) => {
