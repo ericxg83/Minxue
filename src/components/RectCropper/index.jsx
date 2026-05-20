@@ -150,9 +150,12 @@ export default function RectCropper({ image, onConfirm, onCancel, theme = 'light
       // For cross-origin HTTP images, fetch as blob and convert to blob URL
       // This prevents canvas tainting on any origin
       try {
-        const response = await fetch(image, { mode: 'cors' })
+        // Don't use mode: 'cors' - default fetch works for public image URLs
+        // even cross-origin, and the blob is same-origin (never taints canvas)
+        const response = await fetch(image)
         if (!response.ok) throw new Error(`Fetch failed: ${response.status}`)
         const blob = await response.blob()
+        if (!blob.type.startsWith('image/')) throw new Error(`Not an image: ${blob.type}`)
         const blobUrl = URL.createObjectURL(blob)
         setImgSrc(blobUrl)
         // Cleanup previous blob URL on unmount or image change
