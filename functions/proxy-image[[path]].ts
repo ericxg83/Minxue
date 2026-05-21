@@ -1,0 +1,34 @@
+export const onRequest: PagesFunction = async (context) => {
+  const url = new URL(context.request.url)
+  const imageUrl = url.searchParams.get('url')
+
+  if (!imageUrl) {
+    return new Response('Missing url parameter', { status: 400 })
+  }
+
+  // Validate that it's an image URL from our trusted sources
+  const trustedDomains = [
+    'minxue-app-oss-oss-cn-shanghai.aliyuncs.com',
+    'minxue-api.onrender.com'
+  ]
+
+  try {
+    const parsedUrl = new URL(imageUrl)
+    if (!trustedDomains.some(d => parsedUrl.hostname.includes(d))) {
+      return new Response('Untrusted domain', { status: 403 })
+    }
+  } catch {
+    return new Response('Invalid URL', { status: 400 })
+  }
+
+  const response = await fetch(imageUrl)
+
+  return new Response(response.body, {
+    headers: {
+      'Content-Type': response.headers.get('Content-Type') || 'image/jpeg',
+      'Access-Control-Allow-Origin': '*',
+      'Cache-Control': 'public, max-age=86400'
+    },
+    status: response.status
+  })
+}

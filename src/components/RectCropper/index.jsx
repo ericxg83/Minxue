@@ -343,29 +343,46 @@ export default function RectCropper({ image, onConfirm, onCancel, theme = 'light
       const isHttpImage = src && src.startsWith('http')
       
       if (isHttpImage) {
-        // Fetch cross-origin image as blob, convert to blob URL (same-origin)
-        // Blob URLs never taint the canvas, avoiding SecurityError on toDataURL
+        // For cross-origin images, use the Cloudflare Pages Function proxy
+        // which fetches from OSS and returns the image with proper CORS headers
         try {
-          const response = await fetch(src)
-          if (!response.ok) throw new Error(`Fetch failed: ${response.status}`)
+          const proxyUrl = `/proxy-image?url=${encodeURIComponent(src)}`
+          const response = await fetch(proxyUrl)
+          if (!response.ok) throw new Error(`Proxy returned ${response.status}`)
+          
           const blob = await response.blob()
+          if (!blob.type.startsWith('image/')) throw new Error(`Not an image: ${blob.type}`)
           
-          // Create blob URL (same-origin, never taints canvas)
           const blobUrl = URL.createObjectURL(blob)
-          
-          const blobImg = new Image()
+          const proxyImg = new Image()
           await new Promise((resolve, reject) => {
-            blobImg.onload = resolve
-            blobImg.onerror = () => reject(new Error('Blob image failed to load'))
-            blobImg.src = blobUrl
+            proxyImg.onload = resolve
+            proxyImg.onerror = () => reject(new Error('Proxy image failed to load'))
+            proxyImg.src = blobUrl
           })
           
-          ctx.drawImage(blobImg, sx, sy, sw, sh, 0, 0, sw, sh)
+          ctx.drawImage(proxyImg, sx, sy, sw, sh, 0, 0, sw, sh)
           URL.revokeObjectURL(blobUrl)
         } catch (e) {
-          console.error('Blob draw failed:', e)
-          // Last resort: draw directly (may taint canvas)
-          ctx.drawImage(imgRef.current, sx, sy, sw, sh, 0, 0, sw, sh)
+          console.error('Proxy draw failed:', e)
+          // Fallback: try direct fetch + blob (works if browser allows cross-origin blob fetch)
+          try {
+            const response = await fetch(src)
+            if (!response.ok) throw new Error(`Direct fetch failed: ${response.status}`)
+            const blob = await response.blob()
+            const blobUrl = URL.createObjectURL(blob)
+            const img = new Image()
+            await new Promise((resolve, reject) => {
+              img.onload = resolve
+              img.onerror = () => reject(new Error('Direct blob image failed'))
+              img.src = blobUrl
+            })
+            ctx.drawImage(img, sx, sy, sw, sh, 0, 0, sw, sh)
+            URL.revokeObjectURL(blobUrl)
+          } catch (e2) {
+            console.error('Direct blob draw also failed:', e2)
+            throw new Error('图片跨域限制导致无法导出，请尝试使用本地图片')
+          }
         }
       } else {
         // Local file or data URL - safe to draw directly

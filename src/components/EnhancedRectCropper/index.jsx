@@ -390,38 +390,45 @@ export default function EnhancedRectCropper({
       const isHttpImage = src && src.startsWith('http')
       
       if (isHttpImage) {
-        // Try loading image via proxy (same-origin, no CORS issues)
-        const proxyUrl = `/api/proxy-image?url=${encodeURIComponent(src)}`
-        const cleanImg = new Image()
-        
+        // For cross-origin images, use the Cloudflare Pages Function proxy
+        // which fetches from OSS and returns the image with proper CORS headers
         try {
+          const proxyUrl = `/proxy-image?url=${encodeURIComponent(src)}`
+          const response = await fetch(proxyUrl)
+          if (!response.ok) throw new Error(`Proxy returned ${response.status}`)
+          
+          const blob = await response.blob()
+          if (!blob.type.startsWith('image/')) throw new Error(`Not an image: ${blob.type}`)
+          
+          const blobUrl = URL.createObjectURL(blob)
+          const proxyImg = new Image()
           await new Promise((resolve, reject) => {
-            cleanImg.onload = resolve
-            cleanImg.onerror = () => reject(new Error('Proxy image failed to load'))
-            cleanImg.src = proxyUrl
+            proxyImg.onload = resolve
+            proxyImg.onerror = () => reject(new Error('Proxy image failed to load'))
+            proxyImg.src = blobUrl
           })
-          ctx.drawImage(cleanImg, sx, sy, sw, sh, 0, 0, sw, sh)
+          
+          ctx.drawImage(proxyImg, sx, sy, sw, sh, 0, 0, sw, sh)
+          URL.revokeObjectURL(blobUrl)
         } catch (e) {
-          // Proxy failed, try direct fetch with CORS
+          console.error('Proxy draw failed:', e)
+          // Fallback: try direct fetch + blob
           try {
-            const response = await fetch(src, { mode: 'cors' })
-            if (response.ok) {
-              const blob = await response.blob()
-              const blobUrl = URL.createObjectURL(blob)
-              const corsImg = new Image()
-              await new Promise((resolve, reject) => {
-                corsImg.onload = resolve
-                corsImg.onerror = () => reject(new Error('CORS image failed to load'))
-                corsImg.src = blobUrl
-              })
-              ctx.drawImage(corsImg, sx, sy, sw, sh, 0, 0, sw, sh)
-              URL.revokeObjectURL(blobUrl)
-            } else {
-              throw new Error('CORS fetch failed')
-            }
-          } catch (corsErr) {
-            // All methods failed, try direct draw (may taint canvas)
-            ctx.drawImage(imgRef.current, sx, sy, sw, sh, 0, 0, sw, sh)
+            const response = await fetch(src)
+            if (!response.ok) throw new Error(`Direct fetch failed: ${response.status}`)
+            const blob = await response.blob()
+            const blobUrl = URL.createObjectURL(blob)
+            const img = new Image()
+            await new Promise((resolve, reject) => {
+              img.onload = resolve
+              img.onerror = () => reject(new Error('Direct blob image failed'))
+              img.src = blobUrl
+            })
+            ctx.drawImage(img, sx, sy, sw, sh, 0, 0, sw, sh)
+            URL.revokeObjectURL(blobUrl)
+          } catch (e2) {
+            console.error('Direct blob draw also failed:', e2)
+            throw new Error('图片跨域限制导致无法导出')
           }
         }
       } else {
