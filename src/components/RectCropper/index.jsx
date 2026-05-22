@@ -318,26 +318,8 @@ export default function RectCropper({ image, onConfirm, onCancel, theme = 'light
     }
   }, [updatePreview])
 
-  // Track if confirm is in progress to prevent double-fires
-  const confirmingRef = useRef(false)
-
   const handleConfirm = async () => {
-    if (confirmingRef.current) {
-      console.log('[RectCropper] handleConfirm already in progress, ignoring')
-      return
-    }
-    confirmingRef.current = true
-
-    console.log('[RectCropper] handleConfirm called', {
-      hasImg: !!imgRef.current,
-      crop,
-      scale: imgRect.scale
-    })
-    if (!imgRef.current || crop.width <= 0 || crop.height <= 0) {
-      console.warn('[RectCropper] handleConfirm returned early - invalid state')
-      confirmingRef.current = false
-      return
-    }
+    if (!imgRef.current || crop.width <= 0 || crop.height <= 0) return
     try {
       setProcessing(true)
       const scale = imgRect.scale
@@ -345,8 +327,6 @@ export default function RectCropper({ image, onConfirm, onCancel, theme = 'light
       const sy = Math.round(crop.y / scale)
       const sw = Math.round(crop.width / scale)
       const sh = Math.round(crop.height / scale)
-
-      console.log('[RectCropper] crop coords', { sx, sy, sw, sh, scale })
 
       const canvas = document.createElement('canvas')
       canvas.width = sw
@@ -356,15 +336,10 @@ export default function RectCropper({ image, onConfirm, onCancel, theme = 'light
       const displayedSrc = imgRef.current.src
       const isDirectHttpUrl = displayedSrc && displayedSrc.startsWith('http')
       
-      console.log('[RectCropper] image source:', { displayedSrc, isDirectHttpUrl })
-      
       if (isDirectHttpUrl) {
         // Direct HTTP URL (no blob conversion): fetch through proxy
         try {
-          // Use different proxy path for Pages vs local dev
-          const proxyPath = window.location.hostname === 'localhost' ? '/api/proxy-image' : '/proxy-image'
-          const proxyUrl = `${proxyPath}?url=${encodeURIComponent(displayedSrc)}`
-          console.log('[RectCropper] fetching via proxy:', proxyUrl)
+          const proxyUrl = `/api/proxy-image?url=${encodeURIComponent(displayedSrc)}`
           const response = await fetch(proxyUrl)
           if (!response.ok) throw new Error(`Proxy returned ${response.status}`)
           const blob = await response.blob()
@@ -379,7 +354,7 @@ export default function RectCropper({ image, onConfirm, onCancel, theme = 'light
           ctx.drawImage(img, sx, sy, sw, sh, 0, 0, sw, sh)
           URL.revokeObjectURL(blobUrl)
         } catch (e) {
-          console.error('[RectCropper] Cross-origin crop failed:', e)
+          console.error('Cross-origin crop failed:', e)
           throw new Error('图片跨域限制导致无法导出，请尝试使用本地图片')
         }
       } else {
@@ -390,20 +365,17 @@ export default function RectCropper({ image, onConfirm, onCancel, theme = 'light
       let dataUrl
       try {
         dataUrl = canvas.toDataURL('image/jpeg', 0.92)
-        console.log('[RectCropper] dataUrl generated, length:', dataUrl.length)
       } catch (canvasErr) {
-        console.error('[RectCropper] Canvas export failed (tainted):', canvasErr)
+        console.error('Canvas export failed (tainted):', canvasErr)
         throw new Error('图片跨域限制导致无法导出，请尝试使用本地图片')
       }
       
-      console.log('[RectCropper] calling onConfirm')
       onConfirm(dataUrl)
     } catch (err) {
-      console.error('[RectCropper] 裁剪失败:', err)
+      console.error('裁剪失败:', err)
       alert('裁剪失败: ' + (err.message || '未知错误'))
     } finally {
       setProcessing(false)
-      confirmingRef.current = false
     }
   }
 
@@ -795,9 +767,7 @@ export default function RectCropper({ image, onConfirm, onCancel, theme = 'light
                 取消
               </button>
               <button
-                onClick={(e) => { e.preventDefault(); handleConfirm(); }}
-                onTouchStart={(e) => { e.preventDefault(); }}
-                onTouchEnd={(e) => { e.preventDefault(); handleConfirm(); }}
+                onClick={handleConfirm}
                 disabled={!hasValidCrop || processing}
                 style={{
                   flex: 1,
@@ -810,8 +780,7 @@ export default function RectCropper({ image, onConfirm, onCancel, theme = 'light
                   fontWeight: 600,
                   cursor: hasValidCrop && !processing ? 'pointer' : 'not-allowed',
                   opacity: hasValidCrop && !processing ? 1 : 0.6,
-                  position: 'relative',
-                  WebkitTapHighlightColor: 'transparent'
+                  position: 'relative'
                 }}
               >
                 {processing ? (

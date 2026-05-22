@@ -1039,29 +1039,19 @@ export default function App() {
   }
 
   // Confirm crop - receives dataUrl from RectCropper
-  const handleCropConfirm = async (result) => {
-    console.log('[handleCropConfirm] called with:', result)
-    // Handle both formats: string dataUrl from RectCropper, or object from EnhancedRectCropper
-    const dataUrl = typeof result === 'string' ? result : (result?.dataUrl || result?.imageUrl)
-    if (!dataUrl) {
-      console.error('[handleCropConfirm] no dataUrl received')
-      Toast.show({ message: '裁剪数据为空，请重试', type: 'error' })
-      return
-    }
+  const handleCropConfirm = async (dataUrl) => {
+    if (!dataUrl) return
     setUploadingCrop(true)
     try {
-      console.log('[handleCropConfirm] uploading, dataUrl length:', dataUrl.length)
       const file = dataURLtoFile(dataUrl, 'question_image.jpg')
-      console.log('[handleCropConfirm] file size:', file.size)
       const url = await uploadImage(file)
-      console.log('[handleCropConfirm] upload success, url:', url)
       updateEditForm('image_url', url)
       setShowImageCrop(false)
       setCropImage(null)
       Toast.show({ message: '图片裁剪上传成功', type: 'success' })
     } catch (error) {
-      console.error('[handleCropConfirm] upload failed:', error)
-      Toast.show({ message: '上传失败: ' + (error.message || '未知错误'), type: 'error' })
+      console.error('裁剪/上传失败:', error)
+      Toast.show({ message: '图片处理失败', type: 'error' })
     } finally {
       setUploadingCrop(false)
     }

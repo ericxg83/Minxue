@@ -370,22 +370,8 @@ export default function EnhancedRectCropper({
     }
   }, [updatePreview])
 
-  const confirmingRef = useRef(false)
-
   const handleConfirm = async () => {
-    if (confirmingRef.current) return
-    confirmingRef.current = true
-    
-    console.log('[EnhancedRectCropper] handleConfirm called', {
-      hasImg: !!imgRef.current,
-      crop,
-      scale: imgRect.scale
-    })
-    if (!imgRef.current || crop.width <= 0 || crop.height <= 0) {
-      console.warn('[EnhancedRectCropper] handleConfirm returned early')
-      confirmingRef.current = false
-      return
-    }
+    if (!imgRef.current || crop.width <= 0 || crop.height <= 0) return
     try {
       setProcessing(true)
       const scale = imgRect.scale
@@ -405,9 +391,7 @@ export default function EnhancedRectCropper({
       if (isCurrentlyCrossOrigin) {
         // Cross-origin image: fetch through backend proxy to avoid CORS
         try {
-          // Use different proxy path for Pages vs local dev
-          const proxyPath = window.location.hostname === 'localhost' ? '/api/proxy-image' : '/proxy-image'
-          const proxyUrl = `${proxyPath}?url=${encodeURIComponent(displayedSrc)}`
+          const proxyUrl = `/api/proxy-image?url=${encodeURIComponent(displayedSrc)}`
           const response = await fetch(proxyUrl)
           if (!response.ok) throw new Error(`Proxy returned ${response.status}`)
           const blob = await response.blob()
@@ -439,11 +423,10 @@ export default function EnhancedRectCropper({
         isStraightened: enableStraighten && straightenedImage !== null
       })
     } catch (err) {
-      console.error('[EnhancedRectCropper] 裁剪失败:', err)
+      console.error('裁剪失败:', err)
       alert('裁剪失败: ' + (err.message || '未知错误'))
     } finally {
       setProcessing(false)
-      confirmingRef.current = false
     }
   }
 
@@ -1002,9 +985,7 @@ export default function EnhancedRectCropper({
                 取消
               </button>
               <button
-                onClick={(e) => { e.preventDefault(); handleConfirm(); }}
-                onTouchStart={(e) => { e.preventDefault(); }}
-                onTouchEnd={(e) => { e.preventDefault(); handleConfirm(); }}
+                onClick={handleConfirm}
                 disabled={!hasValidCrop || processing}
                 style={{
                   flex: 1,
