@@ -282,11 +282,13 @@ export default function RectCropper({ image, onConfirm, onCancel, theme = 'light
     window.addEventListener('mouseup', handleUp)
     window.addEventListener('touchmove', handleMove, { passive: false })
     window.addEventListener('touchend', handleUp)
+    window.addEventListener('touchcancel', handleUp)
     return () => {
       window.removeEventListener('mousemove', handleMove)
       window.removeEventListener('mouseup', handleUp)
       window.removeEventListener('touchmove', handleMove)
       window.removeEventListener('touchend', handleUp)
+      window.removeEventListener('touchcancel', handleUp)
     }
   }, [dragging, resizing, resizeHandle, imgRect, getPointer, MIN_SIZE])
 
@@ -337,13 +339,43 @@ export default function RectCropper({ image, onConfirm, onCancel, theme = 'light
       const isDirectHttpUrl = displayedSrc && displayedSrc.startsWith('http')
       
       if (isDirectHttpUrl) {
-        // Direct HTTP URL (no blob conversion): fetch through proxy
+        // HTTP URL: try proxy first, fallback to no-cors fetch
+        let blob = null
+        
+        // Try 1: Backend proxy (works when running with Express server)
         try {
           const proxyUrl = `/api/proxy-image?url=${encodeURIComponent(displayedSrc)}`
           const response = await fetch(proxyUrl)
-          if (!response.ok) throw new Error(`Proxy returned ${response.status}`)
-          const blob = await response.blob()
-          if (!blob.type.startsWith('image/')) throw new Error(`Not an image: ${blob.type}`)
+          if (response.ok) {
+            blob = await response.blob()
+          }
+        } catch {}
+        
+        // Try 2: Pages Function proxy (for Cloudflare Pages deployment)
+        if (!blob) {
+          try {
+            const proxyUrl = `/proxy-image?url=${encodeURIComponent(displayedSrc)}`
+            const response = await fetch(proxyUrl)
+            if (response.ok) {
+              blob = await response.blob()
+            }
+          } catch {}
+        }
+        
+        // Try 3: Direct no-cors fetch - blob is same-origin, never taints canvas
+        // Note: no-cors returns opaque response with empty blob.type, so we accept non-empty blobs
+        if (!blob) {
+          try {
+            const response = await fetch(displayedSrc, { mode: 'no-cors' })
+            blob = await response.blob()
+            if (blob.size === 0) {
+              blob = null
+              throw new Error('Empty blob from no-cors fetch')
+            }
+          } catch {}
+        }
+        
+        if (blob) {
           const blobUrl = URL.createObjectURL(blob)
           const img = new Image()
           await new Promise((resolve, reject) => {
@@ -353,9 +385,8 @@ export default function RectCropper({ image, onConfirm, onCancel, theme = 'light
           })
           ctx.drawImage(img, sx, sy, sw, sh, 0, 0, sw, sh)
           URL.revokeObjectURL(blobUrl)
-        } catch (e) {
-          console.error('Cross-origin crop failed:', e)
-          throw new Error('图片跨域限制导致无法导出，请尝试使用本地图片')
+        } else {
+          throw new Error('所有跨域图片获取方式均失败')
         }
       } else {
         // blob URL or data URL - already same-origin, safe to draw directly
@@ -745,7 +776,9 @@ export default function RectCropper({ image, onConfirm, onCancel, theme = 'light
                   fontSize: 13,
                   fontWeight: 500,
                   cursor: 'pointer',
-                  whiteSpace: 'nowrap'
+                  whiteSpace: 'nowrap',
+                  WebkitTapHighlightColor: 'transparent',
+                  touchAction: 'manipulation'
                 }}
               >
                 重置
@@ -761,7 +794,9 @@ export default function RectCropper({ image, onConfirm, onCancel, theme = 'light
                   color: colors.cancelText,
                   fontSize: 15,
                   fontWeight: 500,
-                  cursor: 'pointer'
+                  cursor: 'pointer',
+                  WebkitTapHighlightColor: 'transparent',
+                  touchAction: 'manipulation'
                 }}
               >
                 取消
@@ -780,7 +815,9 @@ export default function RectCropper({ image, onConfirm, onCancel, theme = 'light
                   fontWeight: 600,
                   cursor: hasValidCrop && !processing ? 'pointer' : 'not-allowed',
                   opacity: hasValidCrop && !processing ? 1 : 0.6,
-                  position: 'relative'
+                  position: 'relative',
+                  WebkitTapHighlightColor: 'transparent',
+                  touchAction: 'manipulation'
                 }}
               >
                 {processing ? (
