@@ -318,7 +318,16 @@ export default function RectCropper({ image, onConfirm, onCancel, theme = 'light
     }
   }, [updatePreview])
 
+  // Track if confirm is in progress to prevent double-fires
+  const confirmingRef = useRef(false)
+
   const handleConfirm = async () => {
+    if (confirmingRef.current) {
+      console.log('[RectCropper] handleConfirm already in progress, ignoring')
+      return
+    }
+    confirmingRef.current = true
+
     console.log('[RectCropper] handleConfirm called', {
       hasImg: !!imgRef.current,
       crop,
@@ -326,6 +335,7 @@ export default function RectCropper({ image, onConfirm, onCancel, theme = 'light
     })
     if (!imgRef.current || crop.width <= 0 || crop.height <= 0) {
       console.warn('[RectCropper] handleConfirm returned early - invalid state')
+      confirmingRef.current = false
       return
     }
     try {
@@ -393,6 +403,7 @@ export default function RectCropper({ image, onConfirm, onCancel, theme = 'light
       alert('裁剪失败: ' + (err.message || '未知错误'))
     } finally {
       setProcessing(false)
+      confirmingRef.current = false
     }
   }
 
@@ -784,11 +795,9 @@ export default function RectCropper({ image, onConfirm, onCancel, theme = 'light
                 取消
               </button>
               <button
-                onClick={handleConfirm}
-                onTouchEnd={(e) => {
-                  e.preventDefault()
-                  handleConfirm()
-                }}
+                onClick={(e) => { e.preventDefault(); handleConfirm(); }}
+                onTouchStart={(e) => { e.preventDefault(); }}
+                onTouchEnd={(e) => { e.preventDefault(); handleConfirm(); }}
                 disabled={!hasValidCrop || processing}
                 style={{
                   flex: 1,
@@ -801,7 +810,8 @@ export default function RectCropper({ image, onConfirm, onCancel, theme = 'light
                   fontWeight: 600,
                   cursor: hasValidCrop && !processing ? 'pointer' : 'not-allowed',
                   opacity: hasValidCrop && !processing ? 1 : 0.6,
-                  position: 'relative'
+                  position: 'relative',
+                  WebkitTapHighlightColor: 'transparent'
                 }}
               >
                 {processing ? (

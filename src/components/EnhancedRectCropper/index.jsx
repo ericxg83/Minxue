@@ -370,8 +370,22 @@ export default function EnhancedRectCropper({
     }
   }, [updatePreview])
 
+  const confirmingRef = useRef(false)
+
   const handleConfirm = async () => {
-    if (!imgRef.current || crop.width <= 0 || crop.height <= 0) return
+    if (confirmingRef.current) return
+    confirmingRef.current = true
+    
+    console.log('[EnhancedRectCropper] handleConfirm called', {
+      hasImg: !!imgRef.current,
+      crop,
+      scale: imgRect.scale
+    })
+    if (!imgRef.current || crop.width <= 0 || crop.height <= 0) {
+      console.warn('[EnhancedRectCropper] handleConfirm returned early')
+      confirmingRef.current = false
+      return
+    }
     try {
       setProcessing(true)
       const scale = imgRect.scale
@@ -425,10 +439,11 @@ export default function EnhancedRectCropper({
         isStraightened: enableStraighten && straightenedImage !== null
       })
     } catch (err) {
-      console.error('裁剪失败:', err)
+      console.error('[EnhancedRectCropper] 裁剪失败:', err)
       alert('裁剪失败: ' + (err.message || '未知错误'))
     } finally {
       setProcessing(false)
+      confirmingRef.current = false
     }
   }
 
@@ -987,7 +1002,9 @@ export default function EnhancedRectCropper({
                 取消
               </button>
               <button
-                onClick={handleConfirm}
+                onClick={(e) => { e.preventDefault(); handleConfirm(); }}
+                onTouchStart={(e) => { e.preventDefault(); }}
+                onTouchEnd={(e) => { e.preventDefault(); handleConfirm(); }}
                 disabled={!hasValidCrop || processing}
                 style={{
                   flex: 1,
