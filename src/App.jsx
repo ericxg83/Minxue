@@ -1,4 +1,4 @@
-import { useEffect, useState, useRef } from 'react'
+import { useEffect, useState, useRef, lazy, Suspense } from 'react'
 import {
   Camera,
   ChevronRight,
@@ -32,14 +32,36 @@ import { recognizeQuestions, compressImage, saveRecognitionResult } from './serv
 import { mockQuestions, mockTasks, mockWrongQuestions, mockGeneratedExams, mockStudents } from './data/mockData'
 import StudentSwitcher from './components/StudentSwitcher'
 
-import ScanQR from './pages/ScanQR'
-import Grading from './pages/Grading'
-import PrintPreview from './pages/PrintPreview'
-import ExamReview from './pages/ExamReview'
 import { useToast, ToastProvider } from './components/ToastProvider'
 import dayjs from 'dayjs'
 import { generateExamPDF } from './utils/pdfGenerator'
 import RectCropper from './components/RectCropper'
+
+// Lazy load non-critical pages
+const ScanQR = lazy(() => import('./pages/ScanQR'))
+const Grading = lazy(() => import('./pages/Grading'))
+const PrintPreview = lazy(() => import('./pages/PrintPreview'))
+const ExamReview = lazy(() => import('./pages/ExamReview'))
+
+// Simple Suspense fallback
+const LazyFallback = () => (
+  <div className="flex items-center justify-center p-8">
+    <Loader2 size={24} className="animate-spin" style={{ color: '#9CA3AF' }} />
+  </div>
+)
+
+// Task card skeleton for loading state
+const TaskCardSkeleton = () => (
+  <div style={{ padding: '8px 12px', borderRadius: '10px', background: '#fff', border: '1px solid #F3F4F6' }}>
+    <div className="flex gap-2.5 items-center">
+      <div style={{ width: '36px', height: '36px', borderRadius: '8px', background: '#F5F5F5' }} />
+      <div className="flex-1">
+        <div style={{ height: '13px', width: '60%', borderRadius: '6px', background: '#F3F4F6' }} />
+        <div style={{ height: '11px', width: '40%', borderRadius: '4px', background: '#F9FAFB', marginTop: '6px' }} />
+      </div>
+    </div>
+  </div>
+)
 
 const isMobile = /Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(navigator.userAgent)
 
@@ -146,6 +168,7 @@ export default function App() {
   const [isInitializing, setIsInitializing] = useState(true)
   const [uploadQueue, setUploadQueue] = useState([])
   const [isUploading, setIsUploading] = useState(false)
+  const [isLoadingTasks, setIsLoadingTasks] = useState(false)
 
   // Toast
   const Toast = useToast()
@@ -156,8 +179,13 @@ export default function App() {
       try {
         if (USE_MOCK_DATA) {
           setStudents(mockStudents)
-          if (mockStudents.length > 0) {
-            setCurrentStudent(mockStudents[0])
+          // Restore last student from localStorage
+          const lastStudentId = localStorage.getItem('lastStudentId')
+          const studentToSet = lastStudentId 
+            ? mockStudents.find(s => s.id === lastStudentId) 
+            : mockStudents[0]
+          if (studentToSet) {
+            setCurrentStudent(studentToSet)
           }
           setIsInitializing(false)
           return
@@ -170,7 +198,14 @@ export default function App() {
             const cachedData = JSON.parse(cached)
             if (Array.isArray(cachedData) && cachedData.length > 0) {
               setStudents(cachedData)
-              setCurrentStudent(cachedData[0])
+              
+              // Restore last selected student
+              const lastStudentId = localStorage.getItem('lastStudentId')
+              const lastStudent = lastStudentId 
+                ? cachedData.find(s => s.id === lastStudentId) 
+                : null
+              setCurrentStudent(lastStudent || cachedData[0])
+              
               setIsInitializing(false)
               
               // Background refresh for fresh data
@@ -178,6 +213,13 @@ export default function App() {
                 const freshList = freshResult.data || []
                 if (Array.isArray(freshList) && freshList.length > 0) {
                   setStudents(freshList)
+                  // Re-apply last student selection with fresh data
+                  const freshLastStudent = lastStudentId 
+                    ? freshList.find(s => s.id === lastStudentId) 
+                    : null
+                  if (freshLastStudent) {
+                    setCurrentStudent(freshLastStudent)
+                  }
                 }
               }).catch(() => {})
               return
@@ -193,7 +235,12 @@ export default function App() {
           const safeStudentList = Array.isArray(studentList) ? studentList : []
           if (safeStudentList.length > 0) {
             setStudents(safeStudentList)
-            setCurrentStudent(safeStudentList[0])
+            // Restore last selected student
+            const lastStudentId = localStorage.getItem('lastStudentId')
+            const lastStudent = lastStudentId 
+              ? safeStudentList.find(s => s.id === lastStudentId) 
+              : null
+            setCurrentStudent(lastStudent || safeStudentList[0])
           }
         } catch (error) {
           console.error('加载学生数据失败:', error)
@@ -206,6 +253,13 @@ export default function App() {
     }
     init()
   }, [])
+
+  // Persist last selected student
+  useEffect(() => {
+    if (currentStudent?.id) {
+      localStorage.setItem('lastStudentId', currentStudent.id)
+    }
+  }, [currentStudent?.id])
 
   // Clear data when student changes
   useEffect(() => {
@@ -276,6 +330,7 @@ export default function App() {
   // Processing: Load tasks
   const loadTasks = async () => {
     if (!currentStudent) return
+    setIsLoadingTasks(true)
     try {
       if (USE_MOCK_DATA) {
         const filteredMockTasks = mockTasks.filter(t => t.student_id === currentStudent.id)
@@ -287,6 +342,8 @@ export default function App() {
     } catch (error) {
       console.error('加载任务失败:', error)
       setTasks([])
+    } finally {
+      setIsLoadingTasks(false)
     }
   }
 
@@ -1327,7 +1384,13 @@ export default function App() {
 
                 {/* Task List - Compact File Style */}
                 <section className="px-4 space-y-1">
-                  {filteredTasks.length === 0 ? (
+                  {isLoadingTasks ? (
+                    <div className="space-y-1">
+                      <TaskCardSkeleton />
+                      <TaskCardSkeleton />
+                      <TaskCardSkeleton />
+                    </div>
+                  ) : filteredTasks.length === 0 ? (
                     isInitializing ? (
                       <div className="text-center py-16">
                         <Loader2 size={36} className="mx-auto animate-spin" style={{ color: '#9CA3AF' }} />
@@ -2289,41 +2352,49 @@ export default function App() {
 
         {/* Exam Review / 复审 */}
         {showExamReview && reviewTask && (
-          <ExamReview
-            task={reviewTask}
-            onClose={() => { setShowExamReview(false); setReviewTask(null); loadTasks() }}
-            onSave={() => {
-              // 保存后重新计算统计并刷新首页
-              if (reviewTask?.id) {
-                recalculateTaskStats(reviewTask.id).catch(e => console.error('刷新统计失败:', e))
-              }
-              loadTasks()
-            }}
-          />
+          <Suspense fallback={<LazyFallback />}>
+            <ExamReview
+              task={reviewTask}
+              onClose={() => { setShowExamReview(false); setReviewTask(null); loadTasks() }}
+              onSave={() => {
+                // 保存后重新计算统计并刷新首页
+                if (reviewTask?.id) {
+                  recalculateTaskStats(reviewTask.id).catch(e => console.error('刷新统计失败:', e))
+                }
+                loadTasks()
+              }}
+            />
+          </Suspense>
         )}
 
         {/* Print Preview / 组卷 */}
         {showPrintPreview && (
-          <PrintPreview onClose={() => setShowPrintPreview(false)} />
+          <Suspense fallback={<LazyFallback />}>
+            <PrintPreview onClose={() => setShowPrintPreview(false)} />
+          </Suspense>
         )}
 
         {/* Scan QR / 扫码批改 */}
         {showScanQR && (
-          <ScanQR
-            onClose={() => setShowScanQR(false)}
-            onScanSuccess={handleScanSuccess}
-          />
+          <Suspense fallback={<LazyFallback />}>
+            <ScanQR
+              onClose={() => setShowScanQR(false)}
+              onScanSuccess={handleScanSuccess}
+            />
+          </Suspense>
         )}
 
         {/* Grading / 批改试卷 */}
         {showGrading && gradingData && (
-          <Grading
-            paperId={gradingData.paperId}
-            studentId={gradingData.studentId}
-            questionIds={gradingData.questionIds}
-            onClose={() => { setShowGrading(false); setGradingData(null) }}
-            onComplete={handleGradingComplete}
-          />
+          <Suspense fallback={<LazyFallback />}>
+            <Grading
+              paperId={gradingData.paperId}
+              studentId={gradingData.studentId}
+              questionIds={gradingData.questionIds}
+              onClose={() => { setShowGrading(false); setGradingData(null) }}
+              onComplete={handleGradingComplete}
+            />
+          </Suspense>
         )}
       </div>
     </ToastProvider>

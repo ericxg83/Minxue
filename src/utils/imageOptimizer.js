@@ -75,14 +75,11 @@ export async function adjustContrast(imageSrc, factor = 1.2) {
   const imageData = ctx.getImageData(0, 0, canvas.width, canvas.height)
   const data = imageData.data
   
-  // 对比度调整因子
-  const contrastFactor = (259 * (factor * 255 + 255)) / (255 * (259 - factor * 255))
-  
   for (let i = 0; i < data.length; i += 4) {
     for (let c = 0; c < 3; c++) {
       const value = data[i + c]
-      // 应用对比度公式
-      const newValue = contrastFactor * (value - 128) + 128
+      // Simple contrast multiplier: value' = 128 + factor * (value - 128)
+      const newValue = 128 + factor * (value - 128)
       data[i + c] = Math.max(0, Math.min(255, Math.round(newValue)))
     }
   }

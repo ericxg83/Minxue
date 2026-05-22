@@ -1,5 +1,4 @@
 import { useState, useRef, useCallback, useEffect, useMemo, useLayoutEffect } from 'react'
-import { optimizeImage } from '../../utils/imageOptimizer'
 
 const HANDLE_HIT_PAD = 6
 
@@ -148,21 +147,16 @@ export default function RectCropper({ image, onConfirm, onCancel, theme = 'light
       }
       
       // For cross-origin HTTP images, fetch as blob and convert to blob URL
-      // This prevents canvas tainting on any origin
       try {
-        // Don't use mode: 'cors' - default fetch works for public image URLs
-        // even cross-origin, and the blob is same-origin (never taints canvas)
         const response = await fetch(image)
         if (!response.ok) throw new Error(`Fetch failed: ${response.status}`)
         const blob = await response.blob()
         if (!blob.type.startsWith('image/')) throw new Error(`Not an image: ${blob.type}`)
         const blobUrl = URL.createObjectURL(blob)
         setImgSrc(blobUrl)
-        // Cleanup previous blob URL on unmount or image change
         return () => { URL.revokeObjectURL(blobUrl) }
       } catch (e) {
         console.warn('Failed to fetch image as blob, using direct URL:', e)
-        // Fallback: use direct URL (may taint canvas on cross-origin)
         setImgSrc(image)
       }
     }
@@ -339,53 +333,32 @@ export default function RectCropper({ image, onConfirm, onCancel, theme = 'light
       canvas.height = sh
       const ctx = canvas.getContext('2d')
 
-      const src = imgRef.current.src
-      const isHttpImage = src && src.startsWith('http')
+      const displayedSrc = imgRef.current.src
+      const isDirectHttpUrl = displayedSrc && displayedSrc.startsWith('http')
       
-      if (isHttpImage) {
-        // For cross-origin images, use the Cloudflare Pages Function proxy
-        // which fetches from OSS and returns the image with proper CORS headers
+      if (isDirectHttpUrl) {
+        // Direct HTTP URL (no blob conversion): fetch through proxy
         try {
-          const proxyUrl = `/proxy-image?url=${encodeURIComponent(src)}`
+          const proxyUrl = `/api/proxy-image?url=${encodeURIComponent(displayedSrc)}`
           const response = await fetch(proxyUrl)
           if (!response.ok) throw new Error(`Proxy returned ${response.status}`)
-          
           const blob = await response.blob()
           if (!blob.type.startsWith('image/')) throw new Error(`Not an image: ${blob.type}`)
-          
           const blobUrl = URL.createObjectURL(blob)
-          const proxyImg = new Image()
+          const img = new Image()
           await new Promise((resolve, reject) => {
-            proxyImg.onload = resolve
-            proxyImg.onerror = () => reject(new Error('Proxy image failed to load'))
-            proxyImg.src = blobUrl
+            img.onload = resolve
+            img.onerror = () => reject(new Error('Blob image failed'))
+            img.src = blobUrl
           })
-          
-          ctx.drawImage(proxyImg, sx, sy, sw, sh, 0, 0, sw, sh)
+          ctx.drawImage(img, sx, sy, sw, sh, 0, 0, sw, sh)
           URL.revokeObjectURL(blobUrl)
         } catch (e) {
-          console.error('Proxy draw failed:', e)
-          // Fallback: try direct fetch + blob (works if browser allows cross-origin blob fetch)
-          try {
-            const response = await fetch(src)
-            if (!response.ok) throw new Error(`Direct fetch failed: ${response.status}`)
-            const blob = await response.blob()
-            const blobUrl = URL.createObjectURL(blob)
-            const img = new Image()
-            await new Promise((resolve, reject) => {
-              img.onload = resolve
-              img.onerror = () => reject(new Error('Direct blob image failed'))
-              img.src = blobUrl
-            })
-            ctx.drawImage(img, sx, sy, sw, sh, 0, 0, sw, sh)
-            URL.revokeObjectURL(blobUrl)
-          } catch (e2) {
-            console.error('Direct blob draw also failed:', e2)
-            throw new Error('图片跨域限制导致无法导出，请尝试使用本地图片')
-          }
+          console.error('Cross-origin crop failed:', e)
+          throw new Error('图片跨域限制导致无法导出，请尝试使用本地图片')
         }
       } else {
-        // Local file or data URL - safe to draw directly
+        // blob URL or data URL - already same-origin, safe to draw directly
         ctx.drawImage(imgRef.current, sx, sy, sw, sh, 0, 0, sw, sh)
       }
       
@@ -395,10 +368,6 @@ export default function RectCropper({ image, onConfirm, onCancel, theme = 'light
       } catch (canvasErr) {
         console.error('Canvas export failed (tainted):', canvasErr)
         throw new Error('图片跨域限制导致无法导出，请尝试使用本地图片')
-      }
-      
-      if (enableOptimization) {
-        dataUrl = await optimizeImage(dataUrl, optimizationOptions)
       }
       
       onConfirm(dataUrl)

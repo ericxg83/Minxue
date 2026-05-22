@@ -38,3 +38,5 @@ capacitor.config.json
 server/.env
 server/.env.local
 server/.env.*.local
+.env.development
+.env.test

@@ -1,5 +1,4 @@
 import { useState, useRef, useCallback, useEffect, useMemo, useLayoutEffect } from 'react'
-import { optimizeImage, removeTextBackground } from '../../utils/imageOptimizer'
 import { straightenImage, detectImageSkewAngle } from '../../utils/imageStraightener'
 
 const HANDLE_HIT_PAD = 6
@@ -386,50 +385,29 @@ export default function EnhancedRectCropper({
       canvas.height = sh
       const ctx = canvas.getContext('2d')
 
-      const src = imgRef.current.src
-      const isHttpImage = src && src.startsWith('http')
+      const displayedSrc = imgRef.current.src
+      const isCurrentlyCrossOrigin = displayedSrc && displayedSrc.startsWith('http')
       
-      if (isHttpImage) {
-        // For cross-origin images, use the Cloudflare Pages Function proxy
-        // which fetches from OSS and returns the image with proper CORS headers
+      if (isCurrentlyCrossOrigin) {
+        // Cross-origin image: fetch through backend proxy to avoid CORS
         try {
-          const proxyUrl = `/proxy-image?url=${encodeURIComponent(src)}`
+          const proxyUrl = `/api/proxy-image?url=${encodeURIComponent(displayedSrc)}`
           const response = await fetch(proxyUrl)
           if (!response.ok) throw new Error(`Proxy returned ${response.status}`)
-          
           const blob = await response.blob()
           if (!blob.type.startsWith('image/')) throw new Error(`Not an image: ${blob.type}`)
-          
           const blobUrl = URL.createObjectURL(blob)
-          const proxyImg = new Image()
+          const img = new Image()
           await new Promise((resolve, reject) => {
-            proxyImg.onload = resolve
-            proxyImg.onerror = () => reject(new Error('Proxy image failed to load'))
-            proxyImg.src = blobUrl
+            img.onload = resolve
+            img.onerror = () => reject(new Error('Blob image failed'))
+            img.src = blobUrl
           })
-          
-          ctx.drawImage(proxyImg, sx, sy, sw, sh, 0, 0, sw, sh)
+          ctx.drawImage(img, sx, sy, sw, sh, 0, 0, sw, sh)
           URL.revokeObjectURL(blobUrl)
         } catch (e) {
-          console.error('Proxy draw failed:', e)
-          // Fallback: try direct fetch + blob
-          try {
-            const response = await fetch(src)
-            if (!response.ok) throw new Error(`Direct fetch failed: ${response.status}`)
-            const blob = await response.blob()
-            const blobUrl = URL.createObjectURL(blob)
-            const img = new Image()
-            await new Promise((resolve, reject) => {
-              img.onload = resolve
-              img.onerror = () => reject(new Error('Direct blob image failed'))
-              img.src = blobUrl
-            })
-            ctx.drawImage(img, sx, sy, sw, sh, 0, 0, sw, sh)
-            URL.revokeObjectURL(blobUrl)
-          } catch (e2) {
-            console.error('Direct blob draw also failed:', e2)
-            throw new Error('图片跨域限制导致无法导出')
-          }
+          console.error('Cross-origin crop failed:', e)
+          throw new Error('图片跨域限制导致无法导出，请尝试使用本地图片')
         }
       } else {
         // Local file or data URL - safe to draw directly
@@ -437,20 +415,6 @@ export default function EnhancedRectCropper({
       }
       
       let dataUrl = canvas.toDataURL('image/jpeg', 0.92)
-      
-      // 应用优化处理
-      if (enableOptimization) {
-        dataUrl = await optimizeImage(dataUrl, optimizationOptions)
-        
-        // 如果启用了去文字背景
-        if (optimizationOptions.removeTextBg) {
-          dataUrl = await removeTextBackground(dataUrl, {
-            textThreshold: 180,
-            preserveLetters: true,
-            preserveGraphics: true
-          })
-        }
-      }
       
       // 返回裁剪结果和题目ID
       onConfirm({

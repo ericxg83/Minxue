@@ -62,13 +62,64 @@ export default defineConfig(({ mode }) => ({
   build: {
     rollupOptions: {
       output: {
-        manualChunks: {
-          vendor: ['react', 'react-dom', 'react-router-dom'],
-          ui: ['motion', 'lucide-react'],
-          pdf: ['jspdf', 'html2canvas']
-        }
+        manualChunks: (id) => {
+          // Core framework - always loaded first
+          if (id.includes('node_modules/react/') || 
+              id.includes('node_modules/react-dom/') || 
+              id.includes('node_modules/scheduler/')) {
+            return 'react-core'
+          }
+          
+          // UI libraries - defer until needed
+          if (id.includes('node_modules/motion/') || 
+              id.includes('node_modules/framer-motion/')) {
+            return 'motion'
+          }
+          
+          if (id.includes('node_modules/lucide-react/')) {
+            return 'lucide-icons'
+          }
+          
+          // PDF generation - only needed for specific features
+          if (id.includes('node_modules/jspdf/') || 
+              id.includes('node_modules/html2canvas/') || 
+              id.includes('node_modules/rgbcolor/') || 
+              id.includes('node_modules/fflate/')) {
+            return 'pdf-generator'
+          }
+          
+          // QR code libraries
+          if (id.includes('node_modules/qrcode.react/') || 
+              id.includes('node_modules/qrcode-generator/')) {
+            return 'qr-code'
+          }
+          
+          // Other UI components
+          if (id.includes('node_modules/antd-mobile/') || 
+              id.includes('node_modules/@rc-component/')) {
+            return 'antd-mobile'
+          }
+          
+          // Other vendor libs
+          if (id.includes('node_modules/dayjs/') || 
+              id.includes('node_modules/axios/') || 
+              id.includes('node_modules/zustand/')) {
+            return 'vendor-utils'
+          }
+          
+          return null
+        },
+        // Optimize chunk naming for better caching
+        chunkFileNames: 'assets/[name]-[hash].js',
+        entryFileNames: 'assets/[name]-[hash].js',
       }
-    }
+    },
+    // Enable CSS code splitting
+    cssCodeSplit: true,
+    // Optimize build for faster loading
+    target: 'es2020',
+    // Reduce chunk size warning threshold
+    chunkSizeWarningLimit: 500,
   },
   server: {
     port: 3000,

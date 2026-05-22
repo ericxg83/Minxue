@@ -819,10 +819,10 @@ app.get('/api/generated-exams/student/:studentId', async (req, res) => {
       if (qIds.length === 0) {
         return { ...exam, correct_count: 0, wrong_count: 0, total_count: 0 }
       }
-      const placeholders = qIds.map((_, i) => `$${i + 2}`).join(',')
+      const placeholders = qIds.map((_, i) => `$${i + 1}`).join(',')
       const { rows: qRows } = await query(
         `SELECT is_correct FROM ${TABLES.QUESTIONS} WHERE id IN (${placeholders})`,
-        [null, ...qIds]
+        qIds
       )
       let correct_count = 0
       let wrong_count = 0

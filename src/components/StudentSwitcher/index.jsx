@@ -39,7 +39,8 @@ export default function StudentSwitcher({ visible, onClose, onSelectStudent }) {
 
   const loadStudents = async (useCache = true) => {
     try {
-      const loadedStudents = await getStudents(useCache)
+      const result = await getStudents(useCache)
+      const loadedStudents = result.data || []
       setStudents(loadedStudents)
     } catch (error) {
       console.error('加载学生列表失败:', error)
