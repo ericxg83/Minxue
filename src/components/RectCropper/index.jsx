@@ -351,7 +351,9 @@ export default function RectCropper({ image, onConfirm, onCancel, theme = 'light
       if (isDirectHttpUrl) {
         // Direct HTTP URL (no blob conversion): fetch through proxy
         try {
-          const proxyUrl = `/api/proxy-image?url=${encodeURIComponent(displayedSrc)}`
+          // Use different proxy path for Pages vs local dev
+          const proxyPath = window.location.hostname === 'localhost' ? '/api/proxy-image' : '/proxy-image'
+          const proxyUrl = `${proxyPath}?url=${encodeURIComponent(displayedSrc)}`
           console.log('[RectCropper] fetching via proxy:', proxyUrl)
           const response = await fetch(proxyUrl)
           if (!response.ok) throw new Error(`Proxy returned ${response.status}`)

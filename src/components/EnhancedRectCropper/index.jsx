@@ -391,7 +391,9 @@ export default function EnhancedRectCropper({
       if (isCurrentlyCrossOrigin) {
         // Cross-origin image: fetch through backend proxy to avoid CORS
         try {
-          const proxyUrl = `/api/proxy-image?url=${encodeURIComponent(displayedSrc)}`
+          // Use different proxy path for Pages vs local dev
+          const proxyPath = window.location.hostname === 'localhost' ? '/api/proxy-image' : '/proxy-image'
+          const proxyUrl = `${proxyPath}?url=${encodeURIComponent(displayedSrc)}`
           const response = await fetch(proxyUrl)
           if (!response.ok) throw new Error(`Proxy returned ${response.status}`)
           const blob = await response.blob()
