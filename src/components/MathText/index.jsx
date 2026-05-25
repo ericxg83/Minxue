@@ -89,16 +89,20 @@ function preprocessMath(text) {
 
   let result = text
 
+  // === 0. 规范化反斜杠 ===
+  // 数据库转义可能导致双反斜杠，先归一化
+  result = result.replace(/\\\\/g, '\\')
+
+  // === 0.5 处理反斜杠+Unicode符号的组合 (如 \≤ → \leq) ===
+  result = result.replace(/\\≤/g, '\\leq')
+  result = result.replace(/\\≥/g, '\\geq')
+  result = result.replace(/\\≠/g, '\\neq')
+
   // === 1. 除法表达式: a/b → \frac{a}{b} ===
-  // 模式: (括号表达式)/(括号表达式)
   result = result.replace(/(\([^)]+\))\s*\/\s*(\([^)]+\))/g, '\\frac{$1}{$2}')
-  // 模式: (括号表达式)/单项
   result = result.replace(/(\([^)]+\))\s*\/\s*([a-zA-Z0-9]+)/g, '\\frac{$1}{$2}')
-  // 模式: 单项/(括号表达式)
   result = result.replace(/([a-zA-Z0-9]+)\s*\/\s*(\([^)]+\))/g, '\\frac{$1}{$2}')
-  // 模式: 单项/单项 (数字、字母、带度数符号)
   result = result.replace(/([a-zA-Z0-9°]+)\s*\/\s*([a-zA-Z0-9]+)/g, '\\frac{$1}{$2}')
-  // 模式: 负号数字/单项
   result = result.replace(/(-[0-9]+)\s*\/\s*([a-zA-Z0-9]+)/g, '\\frac{$1}{$2}')
 
   // === 2. 指数: x^2 → x^{2} ===
@@ -109,7 +113,7 @@ function preprocessMath(text) {
   result = result.replace(/([a-zA-Z])_([a-zA-Z0-9]+)/g, '$1_{$2}')
   result = result.replace(/([a-zA-Z])_([0-9])/g, '$1_{$2}')
 
-  // === 4. 特殊符号替换 ===
+  // === 4. Unicode特殊符号替换 ===
   for (const [ch, latex] of Object.entries(latexSymbols)) {
     if (result.includes(ch)) {
       const escaped = ch.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
@@ -118,11 +122,11 @@ function preprocessMath(text) {
   }
 
   // === 5. 修复丢失反斜杠的常见 LaTeX 命令 ===
-  // 数据库存储时反斜杠可能丢失，这里做兜底修复
-  result = result.replace(/(?<![a-zA-Z])leq(?![a-zA-Z])/g, '\\leq')
-  result = result.replace(/(?<![a-zA-Z])geq(?![a-zA-Z])/g, '\\geq')
-  result = result.replace(/(?<![a-zA-Z])neq(?![a-zA-Z])/g, '\\neq')
-  result = result.replace(/(?<![a-zA-Z])pm(?![a-zA-Z])/g, '\\pm')
+  // 前面不是字母或反斜杠时才补回反斜杠，避免重复
+  result = result.replace(/(?<![a-zA-Z\\])leq(?![a-zA-Z])/g, '\\leq')
+  result = result.replace(/(?<![a-zA-Z\\])geq(?![a-zA-Z])/g, '\\geq')
+  result = result.replace(/(?<![a-zA-Z\\])neq(?![a-zA-Z])/g, '\\neq')
+  result = result.replace(/(?<![a-zA-Z\\])pm(?![a-zA-Z])/g, '\\pm')
 
   return result
 }
