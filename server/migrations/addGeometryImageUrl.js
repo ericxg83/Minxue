@@ -1,4 +1,4 @@
-import { query } from './config/neon.js'
+import { query } from '../config/neon.js'
 
 /**
  * 数据库迁移：为 questions 表添加 geometry_image_url 字段
