@@ -1,14 +1,31 @@
-# Static assets - serve directly (must come BEFORE catch-all)
+# Static assets - serve directly with correct MIME types (must come BEFORE catch-all)
 /assets/*    /assets/:splat    200
 /sw.js       /sw.js            200
+/manifest.webmanifest  /manifest.webmanifest  200
+/registerSW.js  /registerSW.js  200
+/workbox-*.js  /workbox-*.js  200
+
+# Image and font assets
 /*.png       /:splat           200
 /*.jpg       /:splat           200
+/*.jpeg      /:splat           200
 /*.svg       /:splat           200
 /*.ico       /:splat           200
-/*.json      /:splat           200
-/*.css       /:splat           200
 /*.webp      /:splat           200
-/*.woff2     /:splat           200
 
-# SPA fallback - only for non-asset requests (catch-all, must be last)
+# Web fonts
+/*.woff      /:splat           200
+/*.woff2     /:splat           200
+/*.ttf       /:splat           200
+/*.eot       /:splat           200
+
+# Data files
+/*.json      /:splat           200
+/*.xml       /:splat           200
+
+# CSS/JS (should not happen with Vite hashed assets, but just in case)
+/*.css       /:splat           200
+/*.js        /:splat           200
+
+# SPA fallback - only for non-asset requests (catch-all, must be LAST)
 /*    /index.html   200

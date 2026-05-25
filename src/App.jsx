@@ -37,11 +37,46 @@ import dayjs from 'dayjs'
 import { generateExamPDF } from './utils/pdfGenerator'
 import RectCropper from './components/RectCropper'
 
-// Lazy load non-critical pages
-const ScanQR = lazy(() => import('./pages/ScanQR'))
-const Grading = lazy(() => import('./pages/Grading'))
-const PrintPreview = lazy(() => import('./pages/PrintPreview'))
-const ExamReview = lazy(() => import('./pages/ExamReview'))
+// Lazy load non-critical pages with error handling
+const lazyWithRetry = (factory) => {
+  return lazy(() => {
+    return factory().catch((err) => {
+      console.error('Lazy load failed:', err)
+      // Return a dummy module that renders an error UI
+      return {
+        default: () => (
+          <div style={{
+            position: 'fixed', inset: 0, background: '#fff',
+            display: 'flex', alignItems: 'center', justifyContent: 'center',
+            flexDirection: 'column', gap: '16px', zIndex: 10000, padding: '20px'
+          }}>
+            <div style={{ fontSize: '16px', color: '#EF4444', textAlign: 'center' }}>
+              页面加载失败，请刷新重试
+            </div>
+            <div style={{ fontSize: '12px', color: '#9CA3AF', textAlign: 'center' }}>
+              如果问题持续，请清除浏览器缓存后重试
+            </div>
+            <button
+              onClick={() => window.location.reload()}
+              style={{
+                padding: '10px 24px', background: '#2563EB', color: '#fff',
+                borderRadius: '8px', border: 'none', cursor: 'pointer',
+                fontSize: '14px', fontWeight: 600
+              }}
+            >
+              刷新页面
+            </button>
+          </div>
+        )
+      }
+    })
+  })
+}
+
+const ScanQR = lazyWithRetry(() => import('./pages/ScanQR'))
+const Grading = lazyWithRetry(() => import('./pages/Grading'))
+const PrintPreview = lazyWithRetry(() => import('./pages/PrintPreview'))
+const ExamReview = lazyWithRetry(() => import('./pages/ExamReview'))
 
 // Simple Suspense fallback
 const LazyFallback = () => (
