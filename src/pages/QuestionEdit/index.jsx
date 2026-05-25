@@ -93,8 +93,9 @@ export default function QuestionEdit({ questionId, onClose, onSave }) {
         setAiTags(found.ai_tags || [])
         setManualTags(found.manual_tags || [])
         setTagsSource(found.tags_source || 'ai')
-        // ─ 多模态配图 ─
-        setGeometryImage(found.enhanced_geometry_image || found.geometry_image || null)
+        // ─ 多模态配图 — 数据库字段为 geometry_image_url（字符串URL）
+        const geoUrl = found.geometry_image_url || null
+        setGeometryImage(typeof geoUrl === 'string' ? geoUrl : null)
         setFormData({
           content: found.content || '',
           options: cleanOptionPrefix(found.options || []),
