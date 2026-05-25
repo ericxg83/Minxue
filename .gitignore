@@ -40,3 +40,10 @@ server/.env.local
 server/.env.*.local
 .env.development
 .env.test
+
+# Python cache and test output
+multimodal_exam_engine/__pycache__/
+multimodal_exam_engine/test_output/
+multimodal_exam_engine/test_paper.jpg
+multimodal_exam_engine/real_geometry.png
+real_geometry_enhanced_*.png
