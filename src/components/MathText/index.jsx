@@ -89,14 +89,16 @@ function preprocessMath(text) {
 
   let result = text
 
-  // === 0. 规范化反斜杠 ===
-  // 数据库转义可能导致双反斜杠，先归一化
-  result = result.replace(/\\\\/g, '\\')
-
-  // === 0.5 处理反斜杠+Unicode符号的组合 (如 \≤ → \leq) ===
-  result = result.replace(/\\≤/g, '\\leq')
-  result = result.replace(/\\≥/g, '\\geq')
-  result = result.replace(/\\≠/g, '\\neq')
+  // === 0. 核心修复: 将不规范的 LaTeX 命令直接替换为 Unicode 符号 ===
+  // 数据库中存储的题干包含 \leq 等命令但没有 $ 包裹，
+  // KaTeX 无法正确解析 \leq2 这种连写形式。
+  // 直接替换为 Unicode 符号，前端当作普通数学字符渲染。
+  result = result.replace(/\\leq/g, '≤')
+  result = result.replace(/\\geq/g, '≥')
+  result = result.replace(/\\neq/g, '≠')
+  result = result.replace(/\\times/g, '×')
+  result = result.replace(/\\div/g, '÷')
+  result = result.replace(/\\pm/g, '±')
 
   // === 1. 除法表达式: a/b → \frac{a}{b} ===
   result = result.replace(/(\([^)]+\))\s*\/\s*(\([^)]+\))/g, '\\frac{$1}{$2}')
@@ -113,20 +115,13 @@ function preprocessMath(text) {
   result = result.replace(/([a-zA-Z])_([a-zA-Z0-9]+)/g, '$1_{$2}')
   result = result.replace(/([a-zA-Z])_([0-9])/g, '$1_{$2}')
 
-  // === 4. Unicode特殊符号替换 ===
+  // === 4. Unicode特殊符号替换 (将 Unicode 转为 LaTeX 命令) ===
   for (const [ch, latex] of Object.entries(latexSymbols)) {
     if (result.includes(ch)) {
       const escaped = ch.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
       result = result.replace(new RegExp(escaped, 'g'), latex)
     }
   }
-
-  // === 5. 修复丢失反斜杠的常见 LaTeX 命令 ===
-  // 前面不是字母或反斜杠时才补回反斜杠，避免重复
-  result = result.replace(/(?<![a-zA-Z\\])leq(?![a-zA-Z])/g, '\\leq')
-  result = result.replace(/(?<![a-zA-Z\\])geq(?![a-zA-Z])/g, '\\geq')
-  result = result.replace(/(?<![a-zA-Z\\])neq(?![a-zA-Z])/g, '\\neq')
-  result = result.replace(/(?<![a-zA-Z\\])pm(?![a-zA-Z])/g, '\\pm')
 
   return result
 }
