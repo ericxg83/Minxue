@@ -363,6 +363,54 @@ export default function ExamReview({ task, onClose, onSave }) {
                 </div>
               )}
 
+              {/* ─ 几何配图 (多模态切题引擎自动切出) ─ */}
+              {(currentQuestion.geometry_image_url || currentQuestion.enhanced_geometry_image) && (
+                <div style={{
+                  marginBottom: '16px',
+                  background: '#FAFAFA',
+                  borderRadius: '12px',
+                  padding: '12px',
+                  border: '1px solid #E5E7EB'
+                }}>
+                  <div style={{
+                    display: 'flex', alignItems: 'center', gap: '6px',
+                    marginBottom: '8px'
+                  }}>
+                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#2563EB" strokeWidth="2">
+                      <polygon points="12 2 22 8.5 22 15.5 12 22 2 15.5 2 8.5"/>
+                      <line x1="12" y1="22" x2="12" y2="15.5"/>
+                      <polyline points="22 8.5 12 15.5 2 8.5"/>
+                      <polyline points="2 15.5 12 8.5 22 15.5"/>
+                      <line x1="12" y1="2" x2="12" y2="8.5"/>
+                    </svg>
+                    <span style={{ fontSize: '13px', fontWeight: 600, color: '#2563EB' }}>
+                      几何配图 (AI 自动切题)
+                    </span>
+                  </div>
+                  <img
+                    src={currentQuestion.geometry_image_url || currentQuestion.enhanced_geometry_image}
+                    alt="几何配图"
+                    style={{
+                      width: '100%',
+                      maxHeight: '300px',
+                      objectFit: 'contain',
+                      borderRadius: '8px',
+                      display: 'block',
+                      background: '#FFFFFF',
+                      border: '1px solid #E5E7EB'
+                    }}
+                  />
+                  {currentQuestion.geometry_image?.description && (
+                    <div style={{
+                      fontSize: '11px', color: '#6B7280', marginTop: '6px',
+                      fontStyle: 'italic'
+                    }}>
+                      {currentQuestion.geometry_image.description}
+                    </div>
+                  )}
+                </div>
+              )}
+
               {currentQuestion.options && currentQuestion.options.length > 0 && (
                 <div style={{ display: 'flex', flexDirection: 'column', gap: '8px', marginBottom: '16px' }}>
                   {currentQuestion.options.map((opt, i) => (
