@@ -14,6 +14,57 @@ import { AI_CONFIG, getAIHeaders, buildOCRPrompt, buildTaggingPrompt, buildAnswe
 import { updateTaskStatus, createQuestions, batchUpdateQuestionTags, addWrongQuestions, updateQuestionAnswer, markAnswerException, findCachedQuestionByFingerprint, findSimilarQuestion, cacheQuestion, incrementQuestionUseCount } from './services/neonService.js'
 import { uploadImage } from './services/ossService.js'
 import { generateTextFingerprint, generatePHash, PARSER_VERSION, TEXT_SIMILARITY_THRESHOLD } from './utils/questionFingerprint.js'
+import { uploadFilesWithRetry } from './services/uploadRetryManager.js'
+
+// ── 多模态切题引擎：几何图处理 ──
+// 使用 Sharp 进行裁剪和图像增强（替代浏览器端的 Canvas/OpenCV）
+
+/**
+ * 裁剪几何图并上传到 OSS
+ * @param {Buffer} imageBuffer - 原始试卷图片 buffer
+ * @param {Object} bbox - {x, y, width, height}
+ * @param {string} studentId - 学生ID
+ * @returns {Promise<string|null>} OSS URL 或 null
+ */
+async function cropAndUploadGeometryImage(imageBuffer, bbox, studentId, questionId) {
+  try {
+    if (!bbox || bbox.width <= 0 || bbox.height <= 0) return null
+
+    const padding = 25
+    const left = Math.max(0, bbox.x - padding)
+    const top = Math.max(0, bbox.y - padding)
+    const right = Math.min(bbox.x + bbox.width + padding, await getImageWidth(imageBuffer))
+    const bottom = Math.min(bbox.y + bbox.height + padding, await getImageHeight(imageBuffer))
+    const width = right - left
+    const height = bottom - top
+
+    if (width <= 0 || height <= 0) return null
+
+    // 裁剪
+    const cropped = await sharp(imageBuffer)
+      .extract({ left, top, width, height })
+      .toBuffer()
+
+    // 上传到 OSS
+    const fileName = `geometry_${studentId}_${questionId}.png`
+    const ossUrl = await uploadImage(cropped, fileName, studentId)
+    console.log(`   [几何图] 裁剪上传成功: ${width}x${height} → ${ossUrl}`)
+    return ossUrl
+  } catch (error) {
+    console.error(`  ⚠️ [几何图] 裁剪上传失败:`, error.message)
+    return null
+  }
+}
+
+async function getImageWidth(buffer) {
+  const meta = await sharp(buffer).metadata()
+  return meta.width
+}
+
+async function getImageHeight(buffer) {
+  const meta = await sharp(buffer).metadata()
+  return meta.height
+}
 
 // AI 密钥校验
 const AI_KEY = AI_CONFIG.API_KEY
@@ -829,13 +880,37 @@ export const processTask = async (job) => {
     if (questions.length > 0) {
       console.log(`📊 [Step 6/8] 保存题目到数据库...`)
 
+      // ── 多模态切题：处理几何配图 ──
+      const geometryImageCache = new Map() // bbox 去重缓存 (一图多题)
+
+      for (const q of questions) {
+        if (q.geometry_image?.has_image && q.geometry_image.bbox) {
+          const bbox = q.geometry_image.bbox
+          const cacheKey = JSON.stringify(bbox)
+
+          if (geometryImageCache.has(cacheKey)) {
+            q.geometry_image_url = geometryImageCache.get(cacheKey)
+          } else {
+            q.geometry_image_url = await cropAndUploadGeometryImage(
+              compressedBuffer,
+              bbox,
+              studentId,
+              q.id
+            )
+            if (q.geometry_image_url) {
+              geometryImageCache.set(cacheKey, q.geometry_image_url)
+            }
+          }
+        }
+      }
+
       const questionsWithStudentId = questions.map(q => ({
         ...q,
         student_id: studentId
       }))
 
       await createQuestions(questionsWithStudentId)
-      console.log(`✅ [Step 6/8] 题目保存成功`)
+      console.log(`✅ [Step 6/8] 题目保存成功 (含 ${geometryImageCache.size} 张几何配图)`)
 
       await job.updateProgress(80)
       await updateTaskStatus(taskId, TASK_STATUS.PROCESSING, { progress: 80 })

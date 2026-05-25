@@ -54,6 +54,7 @@ export default function QuestionEdit({ questionId, onClose, onSave }) {
     analysis: '',
     question_type: 'choice'
   })
+  const [geometryImage, setGeometryImage] = useState(null)
 
   const cleanOptionPrefix = (options) => {
     return (options || []).map(opt => {
@@ -92,6 +93,8 @@ export default function QuestionEdit({ questionId, onClose, onSave }) {
         setAiTags(found.ai_tags || [])
         setManualTags(found.manual_tags || [])
         setTagsSource(found.tags_source || 'ai')
+        // ─ 多模态配图 ─
+        setGeometryImage(found.enhanced_geometry_image || found.geometry_image || null)
         setFormData({
           content: found.content || '',
           options: cleanOptionPrefix(found.options || []),
@@ -277,6 +280,10 @@ export default function QuestionEdit({ questionId, onClose, onSave }) {
         manual_tags: manualTags,
         tags_source: tagsSource,
         image_url: imageRemoved ? '' : (displayImageUrl || question?.image_url || ''),
+        // ─ 多模态配图字段 
+        geometry_image: question?.geometry_image || null,
+        enhanced_geometry_image: question?.enhanced_geometry_image || geometryImage || null,
+        geometry_image_url: question?.enhanced_geometry_image || question?.geometry_image_url || null,
         updated_at: new Date().toISOString()
       }
 
@@ -537,6 +544,54 @@ export default function QuestionEdit({ questionId, onClose, onSave }) {
                     </div>
                   )}
                 </div>
+
+                {/* ─ 几何配图 (多模态切题引擎自动切出) ─ */}
+                {geometryImage && (
+                  <div style={{
+                    marginTop: '12px',
+                    background: '#FAFAFA',
+                    borderRadius: '12px',
+                    padding: '12px',
+                    border: '1px solid #E5E7EB'
+                  }}>
+                    <div style={{
+                      display: 'flex', alignItems: 'center', gap: '6px',
+                      marginBottom: '8px'
+                    }}>
+                      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#2563EB" strokeWidth="2">
+                        <polygon points="12 2 22 8.5 22 15.5 12 22 2 15.5 2 8.5"/>
+                        <line x1="12" y1="22" x2="12" y2="15.5"/>
+                        <polyline points="22 8.5 12 15.5 2 8.5"/>
+                        <polyline points="2 15.5 12 8.5 22 15.5"/>
+                        <line x1="12" y1="2" x2="12" y2="8.5"/>
+                      </svg>
+                      <span style={{ fontSize: '13px', fontWeight: 600, color: '#2563EB' }}>
+                        几何配图 (AI 自动切题)
+                      </span>
+                    </div>
+                    <img
+                      src={geometryImage}
+                      alt="几何配图"
+                      style={{
+                        width: '100%',
+                        maxHeight: '300px',
+                        objectFit: 'contain',
+                        borderRadius: '8px',
+                        display: 'block',
+                        background: '#FFFFFF',
+                        border: '1px solid #E5E7EB'
+                      }}
+                    />
+                    {question?.geometry_image?.description && (
+                      <div style={{
+                        fontSize: '11px', color: '#6B7280', marginTop: '6px',
+                        fontStyle: 'italic'
+                      }}>
+                        {question.geometry_image.description}
+                      </div>
+                    )}
+                  </div>
+                )}
               </div>
 
               {formData.question_type === 'choice' && (

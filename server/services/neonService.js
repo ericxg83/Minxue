@@ -54,6 +54,7 @@ export const createQuestions = async (questions) => {
       is_correct: q.is_correct !== undefined ? q.is_correct : true,
       status: statusValue,
       image_url: q.image_url || null,
+      geometry_image_url: q.geometry_image_url || null,
       ai_tags: JSON.stringify(q.ai_tags || []),
       manual_tags: JSON.stringify(q.manual_tags || []),
       tags_source: q.tags_source || 'ai',

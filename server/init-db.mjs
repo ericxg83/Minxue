@@ -84,6 +84,7 @@ async function initDatabase() {
         manual_tags JSONB DEFAULT '[]',
         tags_source TEXT DEFAULT 'ai',
         block_coordinates JSONB,
+        geometry_image_url TEXT,
         created_at TIMESTAMPTZ DEFAULT NOW(),
         updated_at TIMESTAMPTZ DEFAULT NOW()
       )

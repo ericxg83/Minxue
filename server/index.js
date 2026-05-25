@@ -2,6 +2,7 @@ import dotenv from 'dotenv'
 import { dirname, resolve } from 'path'
 import { fileURLToPath } from 'url'
 import { pendingTaskRecovery } from './pendingTaskRecovery.js'
+import { migrateGeometryImageUrl } from './migrations/addGeometryImageUrl.js'
 
 const __dirname = dirname(fileURLToPath(import.meta.url))
 dotenv.config({ path: resolve(__dirname, '.env') })
@@ -601,16 +602,16 @@ app.delete('/api/students/:id', async (req, res) => {
 // Questions CRUD
 app.post('/api/questions', async (req, res) => {
   try {
-    const { task_id, student_id, content, options, answer, status, question_type, subject, analysis } = req.body
+    const { task_id, student_id, content, options, answer, status, question_type, subject, analysis, image_url, geometry_image_url } = req.body
 
     if (!task_id || !student_id || !content) {
       return res.status(400).json({ error: '缺少必要字段' })
     }
 
     const { rows } = await query(
-      `INSERT INTO ${TABLES.QUESTIONS} (task_id, student_id, content, options, answer, status, question_type, subject, analysis)
-       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9) RETURNING *`,
-      [task_id, student_id, content, JSON.stringify(options || []), answer || '', status || 'pending', question_type || 'answer', subject || '数学', analysis || '']
+      `INSERT INTO ${TABLES.QUESTIONS} (task_id, student_id, content, options, answer, status, question_type, subject, analysis, image_url, geometry_image_url)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11) RETURNING *`,
+      [task_id, student_id, content, JSON.stringify(options || []), answer || '', status || 'pending', question_type || 'answer', subject || '数学', analysis || '', image_url || null, geometry_image_url || null]
     )
 
     res.status(201).json({ success: true, question: rows[0] })
@@ -623,7 +624,7 @@ app.post('/api/questions', async (req, res) => {
 app.put('/api/questions/:id', async (req, res) => {
   try {
     const { id } = req.params
-    const { content, options, answer, analysis, status, question_type, subject, is_correct, student_answer, image_url, ai_answer, answer_source } = req.body
+    const { content, options, answer, analysis, status, question_type, subject, is_correct, student_answer, image_url, ai_answer, answer_source, geometry_image_url } = req.body
     const hasIsCorrect = 'is_correct' in req.body
     const hasAnswerSource = 'answer_source' in req.body && answer_source !== undefined
 
@@ -644,10 +645,11 @@ app.put('/api/questions/:id', async (req, res) => {
            image_url = COALESCE($10, image_url),
            ai_answer = COALESCE($11, ai_answer),
            answer_source = CASE WHEN $15 THEN $12::text ELSE answer_source END,
+           geometry_image_url = COALESCE($16, geometry_image_url),
            updated_at = NOW()
        WHERE id = $13
        RETURNING *`,
-      [n(content), n(options), n(answer), n(analysis), n(status), n(question_type), n(subject), n(is_correct), n(student_answer), n(image_url), n(ai_answer), n(answer_source), id, hasIsCorrect, hasAnswerSource]
+      [n(content), n(options), n(answer), n(analysis), n(status), n(question_type), n(subject), n(is_correct), n(student_answer), n(image_url), n(ai_answer), n(answer_source), id, hasIsCorrect, hasAnswerSource, n(geometry_image_url)]
     )
 
     if (rows.length === 0) return res.status(404).json({ error: '题目不存在' })
@@ -909,6 +911,13 @@ if (process.argv[1] === __filename || process.argv[1]?.endsWith('server/index.js
       pendingTaskRecovery.start()
     } catch (err) {
       console.error('Pending 任务恢复扫描器启动失败:', err.message)
+    }
+
+    // 运行数据库迁移
+    try {
+      await migrateGeometryImageUrl()
+    } catch (err) {
+      console.error('数据库迁移失败:', err.message)
     }
 
     console.log(`并发数: ${process.env.CONCURRENCY || 2}`)

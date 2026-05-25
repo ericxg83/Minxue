@@ -246,7 +246,8 @@ export const updateQuestion = async (id, updates) => {
       is_correct: updates.is_correct,
       student_answer: updates.student_answer,
       ai_answer: updates.ai_answer,
-      answer_source: updates.answer_source
+      answer_source: updates.answer_source,
+      geometry_image_url: updates.geometry_image_url
     })
   })
 }

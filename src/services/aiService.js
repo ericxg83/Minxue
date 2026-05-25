@@ -1,5 +1,6 @@
 import axios from 'axios'
 import { AI_CONFIG, getAIHeaders, buildOCRPrompt, buildTaggingPrompt } from '../config/ai'
+import { enhanceImageFromDataURL } from '../utils/imageEnhancer'
 
 // 识别日志存储键名
 const RECOGNITION_LOGS_KEY = 'ai_recognition_logs'
@@ -156,7 +157,7 @@ export const recognizeQuestions = async (imageBase64, studentId, taskId, retryCo
   const startTime = Date.now()
 
   // 确保 base64 图片包含 data URI 前缀
-  const imageUrl = imageBase64.startsWith('data:') 
+  const imageDataURL = imageBase64.startsWith('data:') 
     ? imageBase64 
     : `data:image/jpeg;base64,${imageBase64}`
 
@@ -174,7 +175,7 @@ export const recognizeQuestions = async (imageBase64, studentId, taskId, retryCo
           {
             type: 'image_url',
             image_url: {
-              url: imageUrl
+              url: imageDataURL
             }
           },
           {
@@ -240,23 +241,30 @@ export const recognizeQuestions = async (imageBase64, studentId, taskId, retryCo
         status: isCorrect === true ? 'correct' : (isCorrect === false ? 'wrong' : 'pending'),
         confidence: q.confidence || 0,
         analysis: q.analysis || '',
+        // ─ 多模态切题字段 ──
+        geometry_image: q.geometry_image || null,
+        // 原始图片 dataURL (用于后续裁剪增强)
+        _original_image_url: imageDataURL,
         created_at: new Date().toISOString()
       }
     }) || []
+
+    // ─ 多模态处理: 对含配图的题目进行裁剪+二值化增强 ─
+    const enhancedQuestions = await enhanceGeometryImages(questions)
 
     // 记录成功日志
     logRecognition({
       type: 'success',
       taskId,
       studentId,
-      questionCount: questions.length,
+      questionCount: enhancedQuestions.length,
       duration,
       retryCount
     })
 
     return {
       success: true,
-      questions,
+      questions: enhancedQuestions,
       rawResponse: content,
       duration
     }
@@ -309,6 +317,115 @@ export const recognizeQuestions = async (imageBase64, studentId, taskId, retryCo
 // 重试机制封装（供外部调用）
 export const recognizeQuestionsWithRetry = async (imageBase64, studentId, taskId) => {
   return recognizeQuestions(imageBase64, studentId, taskId, 0)
+}
+
+// ── 几何配图处理 ──
+
+/**
+ * 批量处理含几何配图的题目：裁剪 + 二值化增强
+ * @param {Array} questions - 题目数组
+ * @returns {Promise<Array>} 处理后的题目数组
+ */
+async function enhanceGeometryImages(questions) {
+  const enhanced = []
+  const cache = new Map() // bbox 去重缓存 (一图多题共用同一增强结果)
+
+  for (const q of questions) {
+    // 深拷贝避免修改原对象
+    const question = { ...q }
+
+    if (question.geometry_image?.has_image && question.geometry_image.bbox) {
+      // 生成 bbox 的 cache key (一图多题共用)
+      const cacheKey = JSON.stringify(question.geometry_image.bbox)
+
+      if (cache.has(cacheKey)) {
+        // 复用已增强的图片 (一图多题场景)
+        question.enhanced_geometry_image = cache.get(cacheKey)
+      } else {
+        // 裁剪并增强
+        const bbox = question.geometry_image.bbox
+        const enhancedDataURL = await cropAndEnhanceGeometryImage(
+          question._original_image_url,
+          bbox
+        )
+
+        if (enhancedDataURL) {
+          question.enhanced_geometry_image = enhancedDataURL
+          cache.set(cacheKey, enhancedDataURL)
+          console.log(`[几何图] ${question.id} 增强完成: ${bbox.width}x${bbox.height}`)
+        } else {
+          console.warn(`[几何图] ${question.id} 增强失败`)
+        }
+      }
+    }
+
+    // 清理临时字段 (不发送到服务端)
+    delete question._original_image_url
+    enhanced.push(question)
+  }
+
+  return enhanced
+}
+
+/**
+ * 从原始图片 dataURL 中裁剪指定区域并应用二值化增强
+ * @param {string} imageDataURL - 原始图片的 dataURL
+ * @param {Object} bbox - {x, y, width, height} 裁剪区域
+ * @returns {Promise<string|null>} 增强后的图片 dataURL，失败返回 null
+ */
+async function cropAndEnhanceGeometryImage(imageDataURL, bbox) {
+  try {
+    if (!bbox || bbox.width <= 0 || bbox.height <= 0) {
+      console.warn('几何图 bbox 无效，跳过处理')
+      return null
+    }
+
+    // 1. 加载图片获取尺寸
+    const img = new Image()
+    await new Promise((resolve, reject) => {
+      img.onload = resolve
+      img.onerror = reject
+      img.src = imageDataURL
+    })
+
+    const origW = img.naturalWidth || img.width
+    const origH = img.naturalHeight || img.height
+
+    // 2. 外扩裁剪 (padding = 25px)
+    const padding = 25
+    const x1 = Math.max(0, bbox.x - padding)
+    const y1 = Math.max(0, bbox.y - padding)
+    const x2 = Math.min(origW, bbox.x + bbox.width + padding)
+    const y2 = Math.min(origH, bbox.y + bbox.height + padding)
+    const cropW = x2 - x1
+    const cropH = y2 - y1
+
+    if (cropW <= 0 || cropH <= 0) {
+      console.warn('裁剪区域无效')
+      return null
+    }
+
+    // 3. 裁剪
+    const cropCanvas = document.createElement('canvas')
+    cropCanvas.width = cropW
+    cropCanvas.height = cropH
+    const cropCtx = cropCanvas.getContext('2d')
+    cropCtx.drawImage(img, x1, y1, cropW, cropH, 0, 0, cropW, cropH)
+    const croppedDataURL = cropCanvas.toDataURL('image/png')
+
+    // 4. 应用自适应二值化增强 (对应 Python 版的 ImageEnhancer.enhance_pipeline)
+    const enhancedDataURL = await enhanceImageFromDataURL(croppedDataURL, {
+      blockSize: 41,
+      c: 3,
+      borderSize: 5
+    })
+
+    console.log(`几何图增强完成: ${cropW}x${cropH}`)
+    return enhancedDataURL
+  } catch (error) {
+    console.error('几何图裁剪/增强失败:', error)
+    return null
+  }
 }
 
 // 保存识别结果到本地数据库

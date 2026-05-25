@@ -1,0 +1,6 @@
+PaddleOCR>=2.7.0
+opencv-python>=4.8.0
+Pillow>=10.0.0
+numpy>=1.24.0
+requests>=2.31.0
+python-Levenshtein>=0.21.0
