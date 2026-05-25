@@ -41,6 +41,7 @@ const formatOption = (opt, index) => {
 }
 
 const getStatusInfo = (q) => {
+  if (!q) return { bg: COLORS.warning, color: COLORS.textSecondary, text: '未知', icon: AlertTriangle, isGreyed: false, source: 'unknown' }
   const isCorrect = q.is_correct
   const source = q.status === 'correct' && isCorrect === true ? 'human' : (q._ai_graded ? 'ai' : 'unknown')
 
@@ -130,10 +131,16 @@ export default function ExamReview({ task, onClose, onSave }) {
   }, [imageLoaded, imgNaturalSize, viewportSize])
 
   // ─ 题号切换: 平滑滚动到对应 bbox ──
+  const validQuestionsRef = useRef([])
+  useEffect(() => {
+    validQuestionsRef.current = questions.filter(Boolean)
+  }, [questions])
+
   const jumpToQuestion = useCallback((index) => {
     setCurrentIndex(index)
     setShowAnswer(false)
-    const q = questions[index]
+    const qs = validQuestionsRef.current
+    const q = qs[index]
     if (!q?.block_coordinates || !baseContainerRef.current || !imgNaturalSize.w) return
 
     const bbox = q.block_coordinates
@@ -200,9 +207,29 @@ export default function ExamReview({ task, onClose, onSave }) {
     window.addEventListener('mouseup', onMouseUp)
   }, [panelH, screenH])
 
-  const currentQuestion = questions[currentIndex]
+  // 过滤无效条目
+  const validQuestions = questions.filter(Boolean)
+  const currentQuestion = validQuestions[currentIndex]
+
+  if (!currentQuestion) {
+    return (
+      <div style={{
+        position: 'fixed', inset: 0, background: COLORS.card,
+        display: 'flex', alignItems: 'center', justifyContent: 'center',
+        zIndex: 10000, flexDirection: 'column', gap: '16px'
+      }}>
+        <div style={{ fontSize: '16px', color: COLORS.textSecondary }}>题目数据加载异常</div>
+        <button onClick={onClose} style={{
+          padding: '12px 24px', background: COLORS.primary, color: '#fff',
+          borderRadius: '12px', fontSize: '15px', fontWeight: 600,
+          border: 'none', cursor: 'pointer'
+        }}>返回</button>
+      </div>
+    )
+  }
+
   const correctness = getCorrectness(currentQuestion, edits)
-  const currentStudentAnswer = getStudentAnswer(currentQuestion, edits, questions)
+  const currentStudentAnswer = getStudentAnswer(currentQuestion, edits, validQuestions)
   const answerStatus = getAnswerStatus(currentQuestion, correctness)
   const statusInfo = getStatusInfo(currentQuestion)
   const geoImageUrl = currentQuestion?.geometry_image_url || currentQuestion?.enhanced_geometry_image
@@ -219,7 +246,7 @@ export default function ExamReview({ task, onClose, onSave }) {
     )
   }
 
-  if (questions.length === 0) {
+  if (validQuestions.length === 0) {
     return (
       <div style={{
         position: 'fixed', inset: 0, background: COLORS.card,
@@ -282,7 +309,7 @@ export default function ExamReview({ task, onClose, onSave }) {
           />
 
           {/* 题号标记 (覆盖在原图上) */}
-          {questions.map((q, i) => {
+          {validQuestions.map((q, i) => {
             const bbox = q.block_coordinates
             if (!bbox) return null
             const isCurrent = i === currentIndex
@@ -381,7 +408,7 @@ export default function ExamReview({ task, onClose, onSave }) {
           overflowX: 'auto', flexShrink: 0,
           scrollbarWidth: 'none'
         }}>
-          {questions.map((q, i) => {
+          {validQuestions.map((q, i) => {
             const info = getStatusInfo(q)
             let bg = COLORS.warning
             if (q.is_correct === true) bg = info.isGreyed ? '#D1FAE5' : COLORS.success
@@ -646,13 +673,13 @@ export default function ExamReview({ task, onClose, onSave }) {
           </button>
           <button
             onClick={() => jumpToQuestion(currentIndex + 1)}
-            disabled={currentIndex >= questions.length - 1}
+            disabled={currentIndex >= validQuestions.length - 1}
             style={{
               flex: 1, padding: '8px', borderRadius: '8px',
               border: `1px solid ${COLORS.border}`,
               background: COLORS.card,
-              cursor: currentIndex >= questions.length - 1 ? 'not-allowed' : 'pointer',
-              fontSize: '13px', color: currentIndex >= questions.length - 1 ? '#CCC' : COLORS.textSecondary,
+              cursor: currentIndex >= validQuestions.length - 1 ? 'not-allowed' : 'pointer',
+              fontSize: '13px', color: currentIndex >= validQuestions.length - 1 ? '#CCC' : COLORS.textSecondary,
               display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '4px'
             }}
           >
@@ -707,8 +734,8 @@ function handleToggleCorrect(qId, value, setEdits) {
   }))
 }
 
-function handleAnswerChange(qId, value, setEdits, questions) {
-  const q = questions.find(x => x.id === qId)
+function handleAnswerChange(qId, value, setEdits, validQuestions) {
+  const q = validQuestions.find(x => x.id === qId)
   const wasBlank = q && (q.answer_source === 'blank')
   setEdits(prev => ({
     ...prev,
