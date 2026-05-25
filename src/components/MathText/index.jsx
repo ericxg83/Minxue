@@ -42,11 +42,28 @@ const MathText = ({ content, className = '' }) => {
         continue
       }
 
+      // Try to find inline math $...$ (single dollar, not $$)
+      // Skip if preceded by another $ (to avoid matching $$...$$ incorrectly)
+      if (remaining.startsWith('$') && !remaining.startsWith('$$')) {
+        const singleMatch = remaining.match(/^\$([\s\S]*?)\$/)
+        if (singleMatch && singleMatch[1].length > 0) {
+          parts.push({ type: 'inline', content: singleMatch[1].trim() })
+          remaining = remaining.slice(singleMatch[0].length)
+          hasMath = true
+          continue
+        }
+      }
+
       // Find the next delimiter boundary
       const nextDisplay = remaining.indexOf('$$')
       const nextInline = remaining.indexOf('\\(')
+      const nextSingleDollar = remaining.indexOf('$')
 
       let boundary
+      const candidates = []
+      if (nextDisplay !== -1) candidates.push(nextDisplay)
+      if (nextInline !== -1) candidates.push(nextInline)
+      if (nextSingleDollar !== -1) candidates.push(nextSingleDollar)
       if (nextDisplay === -1 && nextInline === -1) {
         // No more math — rest is plain text
         parts.push({ type: 'text', content: remaining })

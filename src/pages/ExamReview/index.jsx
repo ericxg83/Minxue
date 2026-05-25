@@ -1,6 +1,10 @@
 import { useState, useEffect, useMemo } from 'react'
-import { motion } from 'motion/react'
-import { ArrowLeft, ChevronLeft, ChevronRight, CheckCircle2, XCircle, Save, Loader2, ChevronDown, ChevronUp, AlertTriangle, UserCheck, Bot } from 'lucide-react'
+import { motion, AnimatePresence } from 'motion/react'
+import {
+  ArrowLeft, ChevronLeft, ChevronRight, CheckCircle2, XCircle,
+  Save, Loader2, ChevronDown, ChevronUp, AlertTriangle, UserCheck,
+  Bot, Sparkles
+} from 'lucide-react'
 import { useWrongQuestionStore } from '../../store'
 import { useToast } from '../../components/ToastProvider'
 import { updateQuestion, addWrongQuestions, deleteWrongQuestion, getQuestionsByTask, invalidateCache, recalculateTaskStats } from '../../services/apiService'
@@ -19,18 +23,14 @@ const COLORS = {
 }
 
 /**
- * 判断选项内容是否已经自带字母前缀（如 "A. xxx"），避免显示 "A. A. xxx"
+ * 判断选项内容是否已经自带字母前缀
  */
 const isOptionWithLetterPrefix = (opt) => {
   if (!opt) return false
   const trimmed = String(opt).trim()
-  // Match patterns like "A. xxx", "A、xxx", "A) xxx", "A) xxx", "A)"
   return /^[A-Da-d][.、)\)]\s/.test(trimmed)
 }
 
-/**
- * 如果选项已带字母前缀，则直接使用；否则自动添加
- */
 const formatOption = (opt, index) => {
   if (isOptionWithLetterPrefix(opt)) return <MathText content={opt} />
   return <>{String.fromCharCode(65 + index)}. <MathText content={opt} /></>
@@ -39,7 +39,7 @@ const formatOption = (opt, index) => {
 const getStatusInfo = (q) => {
   const isCorrect = q.is_correct
   const source = q.status === 'correct' && isCorrect === true ? 'human' : (q._ai_graded ? 'ai' : 'unknown')
-  
+
   if (isCorrect === true) {
     return {
       bg: source === 'human' ? '#D1FAE5' : '#DCFCE7',
@@ -65,7 +65,7 @@ export default function ExamReview({ task, onClose, onSave }) {
   const [edits, setEdits] = useState({})
   const [saving, setSaving] = useState(false)
   const [loading, setLoading] = useState(true)
-  const [showAnswer, setShowAnswer] = useState(true)
+  const [showAnswer, setShowAnswer] = useState(false) // 默认折叠
   const [showAiCache, setShowAiCache] = useState(false)
 
   const wrongIdMap = useMemo(() => {
@@ -103,7 +103,6 @@ export default function ExamReview({ task, onClose, onSave }) {
     if (edits[qId] !== undefined && edits[qId].student_answer !== undefined) return edits[qId].student_answer
     const q = questions.find(x => x.id === qId)
     if (!q) return ''
-    // 学生答案：优先使用 AI 识别的原始作答（ai_answer），即 AI 从试卷图片中实际识别到的学生笔迹
     return q.student_answer || q.ai_answer || ''
   }
 
@@ -193,18 +192,15 @@ export default function ExamReview({ task, onClose, onSave }) {
         return { ...q, ...edit, _ai_graded: true }
       }))
       setEdits({})
-      // 清除相关缓存
       if (task?.student_id) {
         invalidateCache('generated', task.student_id)
         invalidateCache('questions', task.student_id)
         invalidateCache('tasks', task.student_id)
       }
-      // 重新计算首页 task 的统计数据（正确数/错误数）
       if (task?.id) {
         await recalculateTaskStats(task.id).catch(e => console.error('刷新统计数据失败:', e))
       }
       Toast.show({ message: `已保存 ${successCount} 题`, type: 'success' })
-      // 通知父组件重新加载数据
       if (onSave) onSave()
     } else {
       Toast.show({ message: '保存失败', type: 'error' })
@@ -250,12 +246,17 @@ export default function ExamReview({ task, onClose, onSave }) {
   const answerStatus = getAnswerStatus(currentQuestion)
   const aiDisplayAnswer = getAiDisplayAnswer(currentQuestion)
   const statusInfo = getStatusInfo(currentQuestion)
+  const geoImageUrl = currentQuestion.geometry_image_url || currentQuestion.enhanced_geometry_image
+
+  // 判断是否是AI判错的题目
+  const isAiWrong = correctness === false
 
   return (
     <div style={{
       position: 'fixed', inset: 0, background: COLORS.background,
       zIndex: 10000, display: 'flex', flexDirection: 'column'
     }}>
+      {/* ── 顶部导航栏 ── */}
       <div style={{
         background: COLORS.card, padding: '12px 16px',
         display: 'flex', justifyContent: 'space-between', alignItems: 'center',
@@ -274,6 +275,7 @@ export default function ExamReview({ task, onClose, onSave }) {
         </div>
       </div>
 
+      {/* ── 题号矩阵导航 ── */}
       <div style={{
         background: COLORS.card, padding: '10px 16px',
         borderBottom: `1px solid ${COLORS.border}`,
@@ -307,18 +309,21 @@ export default function ExamReview({ task, onClose, onSave }) {
         </div>
       </div>
 
+      {/* ── 题目内容区 ── */}
       <div style={{ flex: 1, overflow: 'auto', padding: '12px' }}>
-        <motion.div
-          key={currentQuestion.id}
-          initial={{ opacity: 0, x: 20 }}
-          animate={{ opacity: 1, x: 0 }}
-          transition={{ duration: 0.15 }}
-        >
+        <AnimatePresence mode="wait">
+          <motion.div
+            key={currentQuestion.id}
+            initial={{ opacity: 0, x: 20 }}
+            animate={{ opacity: 1, x: 0 }}
+            transition={{ duration: 0.15 }}
+          >
             <div style={{
               background: COLORS.card, borderRadius: '12px', padding: '16px',
               marginBottom: '12px', boxShadow: '0 1px 4px rgba(0,0,0,0.06)',
               opacity: statusInfo.isGreyed ? 0.85 : 1
             }}>
+              {/* 1. 题目基本信息 */}
               <div style={{
                 display: 'flex', justifyContent: 'space-between',
                 alignItems: 'center', marginBottom: '12px'
@@ -342,13 +347,15 @@ export default function ExamReview({ task, onClose, onSave }) {
                 </div>
               </div>
 
+              {/* 2. 题干文本 (渲染 LaTeX) */}
               <div style={{
                 fontSize: '15px', color: COLORS.text,
-                lineHeight: '1.7', marginBottom: '16px', whiteSpace: 'pre-wrap'
+                lineHeight: '1.7', marginBottom: geoImageUrl ? '8px' : '16px', whiteSpace: 'pre-wrap'
               }}>
                 <MathText content={currentQuestion.content} />
               </div>
 
+              {/* 题目原图 (如有) */}
               {currentQuestion.image_url && (
                 <div style={{ marginBottom: '16px', textAlign: 'center' }}>
                   <img
@@ -363,8 +370,8 @@ export default function ExamReview({ task, onClose, onSave }) {
                 </div>
               )}
 
-              {/* ─ 几何配图 (多模态切题引擎自动切出) ─ */}
-              {(currentQuestion.geometry_image_url || currentQuestion.enhanced_geometry_image) && (
+              {/* 3. 几何配图 (多模态切题引擎 V3) */}
+              {geoImageUrl && (
                 <div style={{
                   marginBottom: '16px',
                   background: '#FAFAFA',
@@ -376,23 +383,17 @@ export default function ExamReview({ task, onClose, onSave }) {
                     display: 'flex', alignItems: 'center', gap: '6px',
                     marginBottom: '8px'
                   }}>
-                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#2563EB" strokeWidth="2">
-                      <polygon points="12 2 22 8.5 22 15.5 12 22 2 15.5 2 8.5"/>
-                      <line x1="12" y1="22" x2="12" y2="15.5"/>
-                      <polyline points="22 8.5 12 15.5 2 8.5"/>
-                      <polyline points="2 15.5 12 8.5 22 15.5"/>
-                      <line x1="12" y1="2" x2="12" y2="8.5"/>
-                    </svg>
+                    <Sparkles size={14} style={{ color: '#2563EB' }} />
                     <span style={{ fontSize: '13px', fontWeight: 600, color: '#2563EB' }}>
-                      几何配图 (AI 自动切题)
+                      V3 智能配图
                     </span>
                   </div>
                   <img
-                    src={currentQuestion.geometry_image_url || currentQuestion.enhanced_geometry_image}
+                    src={geoImageUrl}
                     alt="几何配图"
                     style={{
                       width: '100%',
-                      maxHeight: '300px',
+                      maxHeight: '25vh',
                       objectFit: 'contain',
                       borderRadius: '8px',
                       display: 'block',
@@ -411,6 +412,7 @@ export default function ExamReview({ task, onClose, onSave }) {
                 </div>
               )}
 
+              {/* 选项 (选择题) */}
               {currentQuestion.options && currentQuestion.options.length > 0 && (
                 <div style={{ display: 'flex', flexDirection: 'column', gap: '8px', marginBottom: '16px' }}>
                   {currentQuestion.options.map((opt, i) => (
@@ -424,6 +426,7 @@ export default function ExamReview({ task, onClose, onSave }) {
                 </div>
               )}
 
+              {/* 4. 答案对比区 */}
               <div style={{
                 background: COLORS.background, borderRadius: '8px', padding: '12px',
                 marginBottom: '12px'
@@ -458,13 +461,13 @@ export default function ExamReview({ task, onClose, onSave }) {
                       </div>
                     )}
                   </div>
-                    <div style={{ flex: 1 }}>
+                  <div style={{ flex: 1 }}>
                     <div style={{ fontSize: '12px', fontWeight: 600, color: COLORS.textSecondary, marginBottom: '4px' }}>参考答案</div>
                     {(() => {
                       const refAnswer = edits[currentQuestion.id]?.answer ?? currentQuestion.answer ?? ''
                       const hasException = currentQuestion.result?.answer_exception === true
                       const exceptionReason = currentQuestion.result?.exception_reason || ''
-                      
+
                       if (hasException) {
                         return (
                           <div style={{
@@ -479,7 +482,7 @@ export default function ExamReview({ task, onClose, onSave }) {
                           </div>
                         )
                       }
-                      
+
                       return (
                         <input
                           type="text"
@@ -498,79 +501,132 @@ export default function ExamReview({ task, onClose, onSave }) {
                   </div>
                 </div>
 
+                {/* 5. 人工评判动作区 — 上下堆叠大卡片 */}
                 <div>
-                  <div style={{ fontSize: '12px', color: COLORS.textSecondary, marginBottom: '6px', display: 'flex', alignItems: 'center', gap: '4px' }}>
+                  <div style={{
+                    fontSize: '12px', color: COLORS.textSecondary, marginBottom: '10px',
+                    display: 'flex', alignItems: 'center', gap: '4px', fontWeight: 600
+                  }}>
                     <UserCheck size={12} /> 人工评判
                   </div>
-                  <div style={{ display: 'flex', gap: '12px' }}>
-                    <button
-                      onClick={() => handleToggleCorrect(currentQuestion.id, true)}
-                      style={{
-                        flex: 1, padding: '10px', borderRadius: '8px', border: 'none',
-                        cursor: 'pointer', fontSize: '14px', fontWeight: 600,
-                        display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '6px',
-                        background: correctness === true ? '#DCFCE7' : COLORS.card,
-                        color: correctness === true ? COLORS.success : COLORS.textSecondary,
-                        outline: correctness === true ? '2px solid #16A34A50' : `1px solid ${COLORS.border}`
-                      }}
-                    >
-                      <CheckCircle2 size={16} />
-                      正确
-                    </button>
-                    <button
-                      onClick={() => handleToggleCorrect(currentQuestion.id, false)}
-                      style={{
-                        flex: 1, padding: '10px', borderRadius: '8px', border: 'none',
-                        cursor: 'pointer', fontSize: '14px', fontWeight: 600,
-                        display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '6px',
-                        background: correctness === false ? '#FEE2E2' : COLORS.card,
-                        color: correctness === false ? COLORS.danger : COLORS.textSecondary,
-                        outline: correctness === false ? '2px solid #EF444450' : `1px solid ${COLORS.border}`
-                      }}
-                    >
-                      <XCircle size={16} />
-                      错误
-                    </button>
-                  </div>
+
+                  {isAiWrong && (
+                    <>
+                      {/* 🟢 改判为对 — 醒目绿色，纠偏操作 */}
+                      <button
+                        onClick={() => handleToggleCorrect(currentQuestion.id, true)}
+                        style={{
+                          width: '100%', padding: '14px 16px', borderRadius: '12px',
+                          border: correctness === true ? '2px solid #16A34A' : '2px solid #BBF7D0',
+                          cursor: 'pointer', fontSize: '15px', fontWeight: 600,
+                          display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '8px',
+                          background: correctness === true ? '#DCFCE7' : '#F0FDF4',
+                          color: correctness === true ? '#16A34A' : '#15803D',
+                          marginBottom: '8px', transition: 'all 0.15s'
+                        }}
+                      >
+                        <CheckCircle2 size={18} />
+                        {correctness === true ? '✓ 已改判为对' : '改判为对（学生做对了）'}
+                      </button>
+
+                      {/* ⚪ 维持原判 — 弱化视觉 */}
+                      <button
+                        onClick={() => handleToggleCorrect(currentQuestion.id, false)}
+                        style={{
+                          width: '100%', padding: '12px 16px', borderRadius: '12px',
+                          border: correctness === false ? '2px solid #EF4444' : '1px solid #E5E7EB',
+                          cursor: 'pointer', fontSize: '14px', fontWeight: 500,
+                          display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '6px',
+                          background: correctness === false ? '#FEE2E2' : COLORS.card,
+                          color: correctness === false ? '#EF4444' : '#9CA3AF',
+                          transition: 'all 0.15s'
+                        }}
+                      >
+                        <XCircle size={16} />
+                        {correctness === false ? '✗ 维持原判（确认错误）' : '维持原判'}
+                      </button>
+                    </>
+                  )}
+
+                  {!isAiWrong && (
+                    <>
+                      <button
+                        onClick={() => handleToggleCorrect(currentQuestion.id, true)}
+                        style={{
+                          width: '100%', padding: '14px 16px', borderRadius: '12px',
+                          border: correctness === true ? '2px solid #16A34A' : '1px solid #E5E7EB',
+                          cursor: 'pointer', fontSize: '14px', fontWeight: 600,
+                          display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '6px',
+                          background: correctness === true ? '#DCFCE7' : COLORS.card,
+                          color: correctness === true ? '#16A34A' : COLORS.success,
+                          marginBottom: '8px', transition: 'all 0.15s'
+                        }}
+                      >
+                        <CheckCircle2 size={16} />
+                        {correctness === true ? '✓ 正确' : '标记为正确'}
+                      </button>
+                      <button
+                        onClick={() => handleToggleCorrect(currentQuestion.id, false)}
+                        style={{
+                          width: '100%', padding: '12px 16px', borderRadius: '12px',
+                          border: correctness === false ? '2px solid #EF4444' : '1px solid #E5E7EB',
+                          cursor: 'pointer', fontSize: '14px', fontWeight: 500,
+                          display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '6px',
+                          background: correctness === false ? '#FEE2E2' : COLORS.card,
+                          color: correctness === false ? '#EF4444' : COLORS.textSecondary,
+                          transition: 'all 0.15s'
+                        }}
+                      >
+                        <XCircle size={16} />
+                        {correctness === false ? '✗ 错误' : '标记为错误'}
+                      </button>
+                    </>
+                  )}
                 </div>
               </div>
 
-              {/* 评判标记说明 */}
-              <div style={{
-                marginTop: '8px', padding: '8px 12px',
-                background: '#F0F9FF', borderRadius: '6px',
-                border: '1px solid #BAE6FD',
-                fontSize: '11px', color: '#0369A1', lineHeight: '1.5'
-              }}>
-                <div style={{ fontWeight: 600, marginBottom: '2px' }}>📝 评判标记说明：</div>
-                <div>✓ 打勾 = 正确（老师已批改确认）&nbsp;|&nbsp; ⭕ 未作答 = 默认正确（系统判定）&nbsp;|&nbsp; ✗ 圈出 = 错误</div>
-                <div style={{ marginTop: '2px' }}>如需修改判定结果，请点击上方 正确/错误/待定 按钮</div>
-              </div>
-
+              {/* 6. 底部解析区 (默认折叠) */}
               <div style={{ borderTop: `1px solid ${COLORS.border}`, paddingTop: '12px' }}>
                 <button
                   onClick={() => setShowAnswer(!showAnswer)}
                   style={{
                     background: 'none', border: 'none', cursor: 'pointer',
                     display: 'flex', alignItems: 'center', gap: '6px',
-                    fontSize: '13px', color: COLORS.textSecondary, padding: 0, width: '100%'
+                    fontSize: '13px', color: COLORS.textSecondary, padding: 0, width: '100%',
+                    justifyContent: 'flex-start'
                   }}
                 >
                   {showAnswer ? <ChevronUp size={16} /> : <ChevronDown size={16} />}
-                  <span style={{ fontWeight: 500 }}>解析</span>
+                  <span style={{ fontWeight: 500 }}>
+                    {showAnswer ? '收起解析' : '查看解析'}
+                  </span>
                 </button>
-                {showAnswer && (
-                  <div style={{ marginTop: '10px' }}>
-                    <div style={{ padding: '10px 12px', background: `${COLORS.success}08`, borderRadius: '8px' }}>
-                      <div style={{ fontSize: '13px', color: COLORS.text, lineHeight: '1.6' }}><MathText content={currentQuestion.analysis || '暂无解析'} /></div>
-                    </div>
-                  </div>
-                )}
+                <AnimatePresence>
+                  {showAnswer && (
+                    <motion.div
+                      initial={{ height: 0, opacity: 0 }}
+                      animate={{ height: 'auto', opacity: 1 }}
+                      exit={{ height: 0, opacity: 0 }}
+                      transition={{ duration: 0.2 }}
+                      style={{ overflow: 'hidden' }}
+                    >
+                      <div style={{ marginTop: '10px' }}>
+                        <div style={{ padding: '10px 12px', background: `${COLORS.success}08`, borderRadius: '8px' }}>
+                          <div style={{ fontSize: '13px', color: COLORS.text, lineHeight: '1.6' }}>
+                            <MathText content={currentQuestion.analysis || '暂无解析'} />
+                          </div>
+                        </div>
+                      </div>
+                    </motion.div>
+                  )}
+                </AnimatePresence>
               </div>
             </div>
           </motion.div>
+        </AnimatePresence>
       </div>
 
+      {/* ── 底部操作栏 ── */}
       <div style={{
         background: COLORS.card, padding: '12px 16px',
         borderTop: `1px solid ${COLORS.border}`,
