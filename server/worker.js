@@ -880,27 +880,24 @@ export const processTask = async (job) => {
     if (questions.length > 0) {
       console.log(`📊 [Step 6/8] 保存题目到数据库...`)
 
-      // ── 多模态切题：处理几何配图 ──
+      // ── 多模态切题：处理几何配图 ─
       const geometryImageCache = new Map() // bbox 去重缓存 (一图多题)
 
       for (const q of questions) {
         if (q.geometry_image?.has_image && q.geometry_image.bbox) {
+          console.log(`   [几何图] ${q.id}: 检测到配图, bbox=${JSON.stringify(q.geometry_image.bbox)}`)
           const bbox = q.geometry_image.bbox
           const cacheKey = JSON.stringify(bbox)
-
           if (geometryImageCache.has(cacheKey)) {
             q.geometry_image_url = geometryImageCache.get(cacheKey)
           } else {
-            q.geometry_image_url = await cropAndUploadGeometryImage(
-              compressedBuffer,
-              bbox,
-              studentId,
-              q.id
-            )
+            q.geometry_image_url = await cropAndUploadGeometryImage(compressedBuffer, bbox, studentId, q.id)
             if (q.geometry_image_url) {
               geometryImageCache.set(cacheKey, q.geometry_image_url)
             }
           }
+        } else if (q.content && (q.content.includes('如图') || q.content.includes('图1') || q.content.includes('图示'))) {
+          console.log(`   ⚠️ [几何图] ${q.id}: 题干含"如图"关键词但未返回 geometry_image, content=${q.content.substring(0, 60)}`)
         }
       }
 
