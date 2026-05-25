@@ -6,7 +6,10 @@ import {
 } from 'lucide-react'
 import { useWrongQuestionStore } from '../../store'
 import { useToast } from '../../components/ToastProvider'
-import { updateQuestion, addWrongQuestions, deleteWrongQuestion, getQuestionsByTask, invalidateCache, recalculateTaskStats } from '../../services/apiService'
+import {
+  updateQuestion, addWrongQuestions, deleteWrongQuestion,
+  getQuestionsByTask, invalidateCache, recalculateTaskStats
+} from '../../services/apiService'
 import MathText from '../../components/MathText'
 
 const COLORS = {
@@ -22,17 +25,13 @@ const COLORS = {
 }
 
 // ── 面板边界常量 ──
-const PANEL_MIN_HEIGHT = 220      // 最小面板高度 (保底线, 确保题号和题干可见)
-const PANEL_TOP_MARGIN = 60       // 面板最大上滑后距屏幕顶部的距离
-const PANEL_START_OFFSET = 340    // 初始面板高度
+const PANEL_MIN_HEIGHT = 220
+const PANEL_TOP_MARGIN = 60
+const PANEL_START_OFFSET = 340
 
-/**
- * 判断选项内容是否已经自带字母前缀
- */
 const isOptionWithLetterPrefix = (opt) => {
   if (!opt) return false
-  const trimmed = String(opt).trim()
-  return /^[A-Da-d][.、)\)]\s/.test(trimmed)
+  return /^[A-Da-d][.、)\)]\s/.test(String(opt).trim())
 }
 
 const formatOption = (opt, index) => {
@@ -41,9 +40,17 @@ const formatOption = (opt, index) => {
 }
 
 const getStatusInfo = (q) => {
-  if (!q) return { bg: COLORS.warning, color: COLORS.textSecondary, text: '未知', icon: AlertTriangle, isGreyed: false, source: 'unknown' }
+  if (!q) {
+    return {
+      bg: COLORS.warning, color: COLORS.textSecondary,
+      text: '未知', icon: AlertTriangle,
+      isGreyed: false, source: 'unknown'
+    }
+  }
   const isCorrect = q.is_correct
-  const source = q.status === 'correct' && isCorrect === true ? 'human' : (q._ai_graded ? 'ai' : 'unknown')
+  const source = q.status === 'correct' && isCorrect === true
+    ? 'human'
+    : (q._ai_graded ? 'ai' : 'unknown')
 
   if (isCorrect === true) {
     return {
@@ -56,9 +63,15 @@ const getStatusInfo = (q) => {
     }
   }
   if (isCorrect === false) {
-    return { bg: '#FEE2E2', color: COLORS.danger, text: 'AI判定错误', icon: XCircle, source: 'ai' }
+    return {
+      bg: '#FEE2E2', color: COLORS.danger,
+      text: 'AI判定错误', icon: XCircle, source: 'ai'
+    }
   }
-  return { bg: '#FEF3C7', color: COLORS.warning, text: '未批改', icon: AlertTriangle, source: 'pending' }
+  return {
+    bg: '#FEF3C7', color: COLORS.warning,
+    text: '未批改', icon: AlertTriangle, source: 'pending'
+  }
 }
 
 // ── 主组件 ──
@@ -66,26 +79,29 @@ export default function ExamReview({ task, onClose, onSave }) {
   const { wrongQuestions } = useWrongQuestionStore()
   const Toast = useToast()
 
+  // ── 所有 state hooks (必须在最顶部, 无条件分支) ──
   const [questions, setQuestions] = useState([])
   const [currentIndex, setCurrentIndex] = useState(0)
   const [edits, setEdits] = useState({})
   const [saving, setSaving] = useState(false)
   const [loading, setLoading] = useState(true)
   const [showAnswer, setShowAnswer] = useState(false)
-
-  // 面板手势
   const [panelH, setPanelH] = useState(PANEL_START_OFFSET)
   const [screenH, setScreenH] = useState(window.innerHeight)
-  const draggingRef = useRef(false)
-  const startYRef = useRef(0)
-  const startPanelHRef = useRef(0)
-
-  // 图片缩放
   const [imageLoaded, setImageLoaded] = useState(false)
   const [imgNaturalSize, setImgNaturalSize] = useState({ w: 0, h: 0 })
   const [viewportSize, setViewportSize] = useState({ w: 0, h: 0 })
   const [transform, setTransform] = useState({ x: 0, y: 0, scale: 1 })
+
+  // ── 所有 ref hooks ──
+  const draggingRef = useRef(false)
+  const startYRef = useRef(0)
+  const startPanelHRef = useRef(0)
   const baseContainerRef = useRef(null)
+  const imgRef = useRef(null)
+
+  // ── 派生数据 (useMemo) ──
+  const validQuestions = useMemo(() => questions.filter(Boolean), [questions])
 
   const wrongIdMap = useMemo(() => {
     const map = {}
@@ -95,31 +111,43 @@ export default function ExamReview({ task, onClose, onSave }) {
     return map
   }, [wrongQuestions])
 
+  const currentQuestion = validQuestions[currentIndex] || null
+
+  // ── 数据获取 ──
   useEffect(() => {
     if (!task?.id) return
+    let cancelled = false
     const fetchQuestions = async () => {
       try {
         setLoading(true)
         const qs = await getQuestionsByTask(task.id, false)
-        setQuestions(qs.map(q => ({ ...q, _ai_graded: q.status !== 'correct' || q._ai_graded === true })))
+        if (!cancelled) {
+          setQuestions(qs.map(q => ({
+            ...q,
+            _ai_graded: q.status !== 'correct' || q._ai_graded === true
+          })))
+        }
       } catch (e) {
         console.error('获取题目失败:', e)
-        Toast.show({ message: '获取题目失败', type: 'error' })
+        if (!cancelled) {
+          Toast.show({ message: '获取题目失败', type: 'error' })
+        }
       } finally {
-        setLoading(false)
+        if (!cancelled) setLoading(false)
       }
     }
     fetchQuestions()
+    return () => { cancelled = true }
   }, [task?.id])
 
-  // 监听窗口尺寸
+  // ── 窗口尺寸监听 ──
   useEffect(() => {
     const handler = () => setScreenH(window.innerHeight)
     window.addEventListener('resize', handler)
     return () => window.removeEventListener('resize', handler)
   }, [])
 
-  // 图片加载完成后计算初始缩放
+  // ── 图片加载后计算初始缩放 (使用 requestAnimationFrame 避免渲染期 setState) ──
   useEffect(() => {
     if (!imageLoaded || !imgNaturalSize.w || !viewportSize.w) return
     const scaleX = viewportSize.w / imgNaturalSize.w
@@ -130,17 +158,26 @@ export default function ExamReview({ task, onClose, onSave }) {
     setTransform({ x: offsetX, y: offsetY, scale })
   }, [imageLoaded, imgNaturalSize, viewportSize])
 
-  // ─ 题号切换: 平滑滚动到对应 bbox ──
-  const validQuestionsRef = useRef([])
-  useEffect(() => {
-    validQuestionsRef.current = questions.filter(Boolean)
-  }, [questions])
+  // ── 图片 onLoad 处理 (使用 ref + useEffect 避免渲染期 setState) ──
+  const handleImageLoad = useCallback((e) => {
+    const { naturalWidth, naturalHeight } = e.target
+    setImgNaturalSize({ w: naturalWidth, h: naturalHeight })
+    setImageLoaded(true)
+  }, [])
 
+  // 用 useEffect 监听 imgRef 变化来设置 viewportSize
+  useEffect(() => {
+    const el = imgRef.current
+    if (!el) return
+    const rect = el.getBoundingClientRect()
+    setViewportSize({ w: rect.width, h: rect.height })
+  }, [imgRef.current])
+
+  // ── 题号切换: 平滑滚动到对应 bbox ──
   const jumpToQuestion = useCallback((index) => {
     setCurrentIndex(index)
     setShowAnswer(false)
-    const qs = validQuestionsRef.current
-    const q = qs[index]
+    const q = validQuestions[index]
     if (!q?.block_coordinates || !baseContainerRef.current || !imgNaturalSize.w) return
 
     const bbox = q.block_coordinates
@@ -159,12 +196,11 @@ export default function ExamReview({ task, onClose, onSave }) {
     newX = Math.min(0, Math.max(containerW - imgW, newX))
     newY = Math.min(0, Math.max(containerH - imgH, newY))
 
-    // 启用 CSS transition 平滑过渡
     baseEl.style.transition = 'transform 0.4s cubic-bezier(0.25, 0.46, 0.45, 0.94)'
     setTransform({ x: newX, y: newY, scale })
-  }, [questions, transform, imgNaturalSize])
+  }, [validQuestions, transform, imgNaturalSize])
 
-  // ── 触摸拖拽手势 (原生 Touch Events) ──
+  // ── 触摸拖拽手势 ──
   const handleTouchStart = useCallback((e) => {
     e.preventDefault()
     const touch = e.touches[0]
@@ -186,7 +222,7 @@ export default function ExamReview({ task, onClose, onSave }) {
     draggingRef.current = false
   }, [])
 
-  // Mouse 拖拽 (桌面端调试)
+  // ── Mouse 拖拽 (桌面端调试) ──
   const handleMouseDown = useCallback((e) => {
     e.preventDefault()
     startYRef.current = e.clientY
@@ -207,34 +243,113 @@ export default function ExamReview({ task, onClose, onSave }) {
     window.addEventListener('mouseup', onMouseUp)
   }, [panelH, screenH])
 
-  // 过滤无效条目
-  const validQuestions = questions.filter(Boolean)
-  const currentQuestion = validQuestions[currentIndex]
+  // ── 人工评判 ──
+  const handleToggleCorrect = useCallback((qId, value) => {
+    setEdits(prev => ({
+      ...prev,
+      [qId]: { ...(prev[qId] || {}), is_correct: value }
+    }))
+  }, [])
 
-  if (!currentQuestion) {
-    return (
-      <div style={{
-        position: 'fixed', inset: 0, background: COLORS.card,
-        display: 'flex', alignItems: 'center', justifyContent: 'center',
-        zIndex: 10000, flexDirection: 'column', gap: '16px'
-      }}>
-        <div style={{ fontSize: '16px', color: COLORS.textSecondary }}>题目数据加载异常</div>
-        <button onClick={onClose} style={{
-          padding: '12px 24px', background: COLORS.primary, color: '#fff',
-          borderRadius: '12px', fontSize: '15px', fontWeight: 600,
-          border: 'none', cursor: 'pointer'
-        }}>返回</button>
-      </div>
-    )
-  }
+  // ── 答案变更 ──
+  const handleAnswerChange = useCallback((qId, value) => {
+    const q = questions.find(x => x.id === qId)
+    const wasBlank = q && (q.answer_source === 'blank')
+    setEdits(prev => ({
+      ...prev,
+      [qId]: {
+        ...(prev[qId] || {}),
+        student_answer: value,
+        ...(wasBlank && value ? { answer_source: 'manual' } : {})
+      }
+    }))
+  }, [questions])
 
-  const correctness = getCorrectness(currentQuestion, edits)
-  const currentStudentAnswer = getStudentAnswer(currentQuestion, edits, validQuestions)
-  const answerStatus = getAnswerStatus(currentQuestion, correctness)
-  const statusInfo = getStatusInfo(currentQuestion)
+  // ── 参考答案变更 ──
+  const handleAnswerEdit = useCallback((qId, value) => {
+    setEdits(prev => ({
+      ...prev,
+      [qId]: { ...(prev[qId] || {}), answer: value }
+    }))
+  }, [])
+
+  // ── 保存 ──
+  const handleSaveClick = useCallback(async () => {
+    const dirtyIds = Object.keys(edits)
+    if (dirtyIds.length === 0) {
+      Toast.show({ message: '没有需要保存的修改', type: 'info' })
+      return
+    }
+    setSaving(true)
+    let successCount = 0
+    for (const qId of dirtyIds) {
+      try {
+        await updateQuestion(qId, edits[qId])
+        successCount++
+        const edit = edits[qId]
+        const wrongId = wrongIdMap[qId]
+        if (edit.is_correct === false && !wrongId) {
+          await addWrongQuestions(task.student_id, [qId]).catch(() => {})
+        } else if (edit.is_correct === true && wrongId) {
+          await deleteWrongQuestion(wrongId).catch(() => {})
+        }
+      } catch (e) {
+        console.error('保存失败:', qId, e)
+      }
+    }
+    setSaving(false)
+    if (successCount > 0) {
+      setQuestions(prev => prev.map(q => {
+        const edit = edits[q.id]
+        if (!edit) return q
+        return { ...q, ...edit, _ai_graded: true }
+      }))
+      setEdits({})
+      if (task?.student_id) {
+        invalidateCache('generated', task.student_id)
+        invalidateCache('questions', task.student_id)
+        invalidateCache('tasks', task.student_id)
+      }
+      if (task?.id) {
+        await recalculateTaskStats(task.id).catch(e => console.error('刷新统计数据失败:', e))
+      }
+      Toast.show({ message: `已保存 ${successCount} 题`, type: 'success' })
+      if (onSave) onSave()
+    } else {
+      Toast.show({ message: '保存失败', type: 'error' })
+    }
+  }, [edits, wrongIdMap, task, Toast, onSave])
+
+  // ── 计算派生状态 ──
+  const correctness = useMemo(() => {
+    if (!currentQuestion) return null
+    if (edits[currentQuestion.id]?.is_correct !== undefined) {
+      return edits[currentQuestion.id].is_correct
+    }
+    return currentQuestion.is_correct
+  }, [currentQuestion, edits])
+
+  const currentStudentAnswer = useMemo(() => {
+    if (!currentQuestion) return ''
+    if (edits[currentQuestion.id]?.student_answer !== undefined) {
+      return edits[currentQuestion.id].student_answer
+    }
+    return currentQuestion.student_answer || currentQuestion.ai_answer || ''
+  }, [currentQuestion, edits])
+
+  const answerStatus = useMemo(() => {
+    if (!currentQuestion) return 'pending'
+    const answerSource = currentQuestion.answer_source || 'recognized'
+    if (answerSource === 'blank') return 'not_answered'
+    if (correctness === null) return 'pending'
+    return correctness ? 'correct' : 'wrong'
+  }, [currentQuestion, correctness])
+
+  const statusInfo = useMemo(() => getStatusInfo(currentQuestion), [currentQuestion])
   const geoImageUrl = currentQuestion?.geometry_image_url || currentQuestion?.enhanced_geometry_image
   const isAiWrong = correctness === false
 
+  // ── 条件渲染 (所有 hooks 之后) ──
   if (loading) {
     return (
       <div style={{
@@ -246,14 +361,16 @@ export default function ExamReview({ task, onClose, onSave }) {
     )
   }
 
-  if (validQuestions.length === 0) {
+  if (!currentQuestion || validQuestions.length === 0) {
     return (
       <div style={{
         position: 'fixed', inset: 0, background: COLORS.card,
         display: 'flex', alignItems: 'center', justifyContent: 'center',
         zIndex: 10000, flexDirection: 'column', gap: '16px'
       }}>
-        <div style={{ fontSize: '16px', color: COLORS.textSecondary }}>暂无题目数据</div>
+        <div style={{ fontSize: '16px', color: COLORS.textSecondary }}>
+          {validQuestions.length === 0 ? '暂无题目数据' : '题目数据加载异常'}
+        </div>
         <button onClick={onClose} style={{
           padding: '12px 24px', background: COLORS.primary, color: '#fff',
           borderRadius: '12px', fontSize: '15px', fontWeight: 600,
@@ -271,9 +388,7 @@ export default function ExamReview({ task, onClose, onSave }) {
       {/* ══════════════ 底层: 原卷大图画布 ═══════════════ */}
       <div
         ref={baseContainerRef}
-        style={{
-          position: 'absolute', inset: 0, overflow: 'hidden'
-        }}
+        style={{ position: 'absolute', inset: 0, overflow: 'hidden' }}
       >
         <div
           style={{
@@ -287,19 +402,10 @@ export default function ExamReview({ task, onClose, onSave }) {
         >
           {/* 原卷大图 */}
           <img
+            ref={imgRef}
             src={task.image_url}
             alt="原卷"
-            onLoad={(e) => {
-              const { naturalWidth, naturalHeight } = e.target
-              setImgNaturalSize({ w: naturalWidth, h: naturalHeight })
-              setImageLoaded(true)
-            }}
-            ref={(el) => {
-              if (el) {
-                const rect = el.getBoundingClientRect()
-                setViewportSize({ w: rect.width, h: rect.height })
-              }
-            }}
+            onLoad={handleImageLoad}
             style={{
               display: 'block',
               maxWidth: 'none',
@@ -308,7 +414,7 @@ export default function ExamReview({ task, onClose, onSave }) {
             }}
           />
 
-          {/* 题号标记 (覆盖在原图上) */}
+          {/* 题号标记 */}
           {validQuestions.map((q, i) => {
             const bbox = q.block_coordinates
             if (!bbox) return null
@@ -434,7 +540,7 @@ export default function ExamReview({ task, onClose, onSave }) {
           })}
         </div>
 
-        {/* ── 面板内容区 (可滚动) ── */}
+        {/* ── 面板内容区 ── */}
         <div style={{
           position: 'relative', zIndex: 1,
           flex: 1, overflowY: 'auto', overflowX: 'hidden',
@@ -464,7 +570,7 @@ export default function ExamReview({ task, onClose, onSave }) {
             </div>
           </div>
 
-          {/* 题干 (KaTeX 渲染) */}
+          {/* 题干 */}
           <div style={{
             fontSize: '14.5px', color: COLORS.text,
             lineHeight: '1.65', marginBottom: '8px'
@@ -472,7 +578,7 @@ export default function ExamReview({ task, onClose, onSave }) {
             <MathText content={currentQuestion?.content || ''} />
           </div>
 
-          {/* 选项 (选择题) */}
+          {/* 选项 */}
           {currentQuestion?.options?.length > 0 && (
             <div style={{ display: 'flex', flexDirection: 'column', gap: '4px', marginBottom: '8px' }}>
               {currentQuestion.options.map((opt, i) => (
@@ -514,7 +620,7 @@ export default function ExamReview({ task, onClose, onSave }) {
                 <input
                   type="text"
                   value={currentStudentAnswer || ''}
-                  onChange={(e) => handleAnswerChange(currentQuestion.id, e.target.value, setEdits, questions)}
+                  onChange={(e) => handleAnswerChange(currentQuestion.id, e.target.value)}
                   placeholder={answerStatus === 'not_answered' ? '未作答' : '输入...'}
                   style={{
                     width: '100%', padding: '6px 8px', borderRadius: '5px',
@@ -529,10 +635,7 @@ export default function ExamReview({ task, onClose, onSave }) {
                 <input
                   type="text"
                   value={edits[currentQuestion?.id]?.answer ?? currentQuestion?.answer ?? ''}
-                  onChange={(e) => setEdits(prev => ({
-                    ...prev,
-                    [currentQuestion?.id]: { ...(prev[currentQuestion?.id] || {}), answer: e.target.value }
-                  }))}
+                  onChange={(e) => handleAnswerEdit(currentQuestion?.id, e.target.value)}
                   placeholder="输入..."
                   style={{
                     width: '100%', padding: '6px 8px', borderRadius: '5px',
@@ -549,7 +652,7 @@ export default function ExamReview({ task, onClose, onSave }) {
               {isAiWrong ? (
                 <>
                   <button
-                    onClick={() => handleToggleCorrect(currentQuestion.id, true, setEdits)}
+                    onClick={() => handleToggleCorrect(currentQuestion.id, true)}
                     style={{
                       flex: 1, padding: '8px 0', borderRadius: '8px',
                       border: correctness === true ? '2px solid #16A34A' : '1px solid #BBF7D0',
@@ -562,7 +665,7 @@ export default function ExamReview({ task, onClose, onSave }) {
                     <CheckCircle2 size={14} /> 改判为对
                   </button>
                   <button
-                    onClick={() => handleToggleCorrect(currentQuestion.id, false, setEdits)}
+                    onClick={() => handleToggleCorrect(currentQuestion.id, false)}
                     style={{
                       flex: 1, padding: '8px 0', borderRadius: '8px',
                       border: correctness === false ? '2px solid #EF4444' : '1px solid #E5E7EB',
@@ -578,7 +681,7 @@ export default function ExamReview({ task, onClose, onSave }) {
               ) : (
                 <>
                   <button
-                    onClick={() => handleToggleCorrect(currentQuestion.id, true, setEdits)}
+                    onClick={() => handleToggleCorrect(currentQuestion.id, true)}
                     style={{
                       flex: 1, padding: '8px 0', borderRadius: '8px',
                       border: correctness === true ? '2px solid #16A34A' : '1px solid #E5E7EB',
@@ -591,7 +694,7 @@ export default function ExamReview({ task, onClose, onSave }) {
                     <CheckCircle2 size={14} /> 正确
                   </button>
                   <button
-                    onClick={() => handleToggleCorrect(currentQuestion.id, false, setEdits)}
+                    onClick={() => handleToggleCorrect(currentQuestion.id, false)}
                     style={{
                       flex: 1, padding: '8px 0', borderRadius: '8px',
                       border: correctness === false ? '2px solid #EF4444' : '1px solid #E5E7EB',
@@ -608,7 +711,7 @@ export default function ExamReview({ task, onClose, onSave }) {
             </div>
           </div>
 
-          {/* 解析 (可展开) */}
+          {/* 解析 */}
           <div style={{ borderTop: `1px solid ${COLORS.border}`, paddingTop: '8px' }}>
             <button
               onClick={() => setShowAnswer(!showAnswer)}
@@ -658,7 +761,7 @@ export default function ExamReview({ task, onClose, onSave }) {
             <ChevronLeft size={14} /> 上一题
           </button>
           <button
-            onClick={handleSave(edits, setEdits, setSaving, setQuestions, task, wrongIdMap, Toast, onSave)}
+            onClick={handleSaveClick}
             disabled={saving || Object.keys(edits).length === 0}
             style={{
               padding: '8px 16px', borderRadius: '8px', border: 'none',
@@ -688,7 +791,7 @@ export default function ExamReview({ task, onClose, onSave }) {
         </div>
       </div>
 
-      {/* 返回按钮 (悬浮在底层上方) */}
+      {/* 返回按钮 */}
       <button
         onClick={onClose}
         style={{
@@ -703,94 +806,4 @@ export default function ExamReview({ task, onClose, onSave }) {
       </button>
     </div>
   )
-}
-
-// ── 工具函数 ─
-
-function getCorrectness(q, edits) {
-  if (!q) return null
-  if (edits[q.id] !== undefined && edits[q.id].is_correct !== undefined) return edits[q.id].is_correct
-  return q.is_correct
-}
-
-function getStudentAnswer(q, edits, questions) {
-  if (!q) return ''
-  if (edits[q.id] !== undefined && edits[q.id].student_answer !== undefined) return edits[q.id].student_answer
-  return q.student_answer || q.ai_answer || ''
-}
-
-function getAnswerStatus(q, correctness) {
-  if (!q) return 'pending'
-  const answerSource = q.answer_source || 'recognized'
-  if (answerSource === 'blank') return 'not_answered'
-  if (correctness === null) return 'pending'
-  return correctness ? 'correct' : 'wrong'
-}
-
-function handleToggleCorrect(qId, value, setEdits) {
-  setEdits(prev => ({
-    ...prev,
-    [qId]: { ...(prev[qId] || {}), is_correct: value }
-  }))
-}
-
-function handleAnswerChange(qId, value, setEdits, validQuestions) {
-  const q = validQuestions.find(x => x.id === qId)
-  const wasBlank = q && (q.answer_source === 'blank')
-  setEdits(prev => ({
-    ...prev,
-    [qId]: {
-      ...(prev[qId] || {}),
-      student_answer: value,
-      ...(wasBlank && value ? { answer_source: 'manual' } : {})
-    }
-  }))
-}
-
-function handleSave(edits, setEdits, setSaving, setQuestions, task, wrongIdMap, Toast, onSave) {
-  return async () => {
-    const dirtyIds = Object.keys(edits)
-    if (dirtyIds.length === 0) {
-      Toast.show({ message: '没有需要保存的修改', type: 'info' })
-      return
-    }
-    setSaving(true)
-    let successCount = 0
-    for (const qId of dirtyIds) {
-      try {
-        await updateQuestion(qId, edits[qId])
-        successCount++
-        const edit = edits[qId]
-        const wrongId = wrongIdMap[qId]
-        if (edit.is_correct === false && !wrongId) {
-          await addWrongQuestions(task.student_id, [qId]).catch(() => {})
-        } else if (edit.is_correct === true && wrongId) {
-          await deleteWrongQuestion(wrongId).catch(() => {})
-        }
-      } catch (e) {
-        console.error('保存失败:', qId, e)
-      }
-    }
-    setSaving(false)
-    if (successCount > 0) {
-      setQuestions(prev => prev.map(q => {
-        const edit = edits[q.id]
-        if (!edit) return q
-        return { ...q, ...edit, _ai_graded: true }
-      }))
-      setEdits({})
-      if (task?.student_id) {
-        invalidateCache('generated', task.student_id)
-        invalidateCache('questions', task.student_id)
-        invalidateCache('tasks', task.student_id)
-      }
-      if (task?.id) {
-        await recalculateTaskStats(task.id).catch(e => console.error('刷新统计数据失败:', e))
-      }
-      Toast.show({ message: `已保存 ${successCount} 题`, type: 'success' })
-      if (onSave) onSave()
-    } else {
-      Toast.show({ message: '保存失败', type: 'error' })
-    }
-  }
 }
