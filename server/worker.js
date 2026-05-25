@@ -113,6 +113,38 @@ const deduplicateTags = (tags) => {
   return unique.length > 0 ? unique : ['未分类']
 }
 
+/**
+ * JSON 自动修复 — 处理 AI 返回的畸形 JSON
+ * 常见问题: 未转义反斜杠(\frac → \\frac)、未转义双引号、字符串内换行
+ */
+function repairAIJson(jsonStr) {
+  const saved = []
+  let s = jsonStr
+
+  // 1. 保护已正确转义的序列 (\\, \", \n, \t)
+  s = s.replace(/(\\[\\\"nrt])/g, (m) => {
+    saved.push(m)
+    return `__ESC_${saved.length - 1}__`
+  })
+
+  // 2. 修复字符串值内部未转义的反斜杠 (LaTeX 命令)
+  s = s.replace(/"([^"]*)"/g, (_full, inner) => {
+    if (inner.includes('__ESC_')) return _full
+    const fixed = inner.replace(/\\/g, '\\\\')
+    return `"${fixed}"`
+  })
+
+  // 3. 修复字符串内未转义换行
+  s = s.replace(/"([^"]*?)\n([^"]*?)"/g, '"$1\\n$2"')
+
+  // 4. 恢复保护的转义序列
+  for (let i = 0; i < saved.length; i++) {
+    s = s.replace(`__ESC_${i}__`, saved[i])
+  }
+
+  return s
+}
+
 const deskewImage = async (imageBuffer) => {
   try {
     const metadata = await sharp(imageBuffer).metadata()
@@ -299,7 +331,23 @@ const recognizeQuestions = async (imageBase64, taskId, retryCount = 0) => {
                       content.match(/```\n?([\s\S]*?)\n?```/)
     if (jsonMatch) jsonStr = jsonMatch[1]
 
-    const result = JSON.parse(jsonStr)
+    let result
+    try {
+      result = JSON.parse(jsonStr)
+    } catch (parseError) {
+      console.warn(`⚠️  AI JSON 解析失败，尝试自动修复...`)
+      console.warn(`   原始错误: ${parseError.message}`)
+      const repaired = repairAIJson(jsonStr)
+      console.log(`   修复后 JSON (前200字): ${repaired.substring(0, 200)}...`)
+      try {
+        result = JSON.parse(repaired)
+        console.log(`✅ JSON 自动修复成功！`)
+      } catch (repairError) {
+        console.error(`❌ JSON 自动修复仍然失败: ${repairError.message}`)
+        console.error(`   原始 JSON (前500字): ${jsonStr.substring(0, 500)}`)
+        throw new Error(`AI 返回的 JSON 格式错误，无法解析。原始错误: ${parseError.message}`)
+      }
+    }
 
     const questions = result.questions?.map((q, index) => {
       const rawStudentAnswer = q.student_answer || ''
@@ -403,7 +451,23 @@ const generateTagsForQuestion = async (questionContent, retryCount = 0) => {
                       content.match(/```\n?([\s\S]*?)\n?```/)
     if (jsonMatch) jsonStr = jsonMatch[1]
 
-    const result = JSON.parse(jsonStr)
+    let result
+    try {
+      result = JSON.parse(jsonStr)
+    } catch (parseError) {
+      console.warn(`⚠️  AI JSON 解析失败，尝试自动修复...`)
+      console.warn(`   原始错误: ${parseError.message}`)
+      const repaired = repairAIJson(jsonStr)
+      console.log(`   修复后 JSON (前200字): ${repaired.substring(0, 200)}...`)
+      try {
+        result = JSON.parse(repaired)
+        console.log(`✅ JSON 自动修复成功！`)
+      } catch (repairError) {
+        console.error(`❌ JSON 自动修复仍然失败: ${repairError.message}`)
+        console.error(`   原始 JSON (前500字): ${jsonStr.substring(0, 500)}`)
+        throw new Error(`AI 返回的 JSON 格式错误，无法解析。原始错误: ${parseError.message}`)
+      }
+    }
     const rawTags = result.tags || []
     const tags = deduplicateTags(rawTags)
 
@@ -523,7 +587,23 @@ const generateAnswerForQuestion = async (questionContent, retryCount = 0) => {
                       content.match(/```\n?([\s\S]*?)\n?```/)
     if (jsonMatch) jsonStr = jsonMatch[1]
 
-    const result = JSON.parse(jsonStr)
+    let result
+    try {
+      result = JSON.parse(jsonStr)
+    } catch (parseError) {
+      console.warn(`⚠️  AI JSON 解析失败，尝试自动修复...`)
+      console.warn(`   原始错误: ${parseError.message}`)
+      const repaired = repairAIJson(jsonStr)
+      console.log(`   修复后 JSON (前200字): ${repaired.substring(0, 200)}...`)
+      try {
+        result = JSON.parse(repaired)
+        console.log(`✅ JSON 自动修复成功！`)
+      } catch (repairError) {
+        console.error(`❌ JSON 自动修复仍然失败: ${repairError.message}`)
+        console.error(`   原始 JSON (前500字): ${jsonStr.substring(0, 500)}`)
+        throw new Error(`AI 返回的 JSON 格式错误，无法解析。原始错误: ${parseError.message}`)
+      }
+    }
 
     return {
       success: true,
