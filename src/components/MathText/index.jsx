@@ -117,6 +117,13 @@ function preprocessMath(text) {
     }
   }
 
+  // === 5. 修复丢失反斜杠的常见 LaTeX 命令 ===
+  // 数据库存储时反斜杠可能丢失，这里做兜底修复
+  result = result.replace(/(?<![a-zA-Z])leq(?![a-zA-Z])/g, '\\leq')
+  result = result.replace(/(?<![a-zA-Z])geq(?![a-zA-Z])/g, '\\geq')
+  result = result.replace(/(?<![a-zA-Z])neq(?![a-zA-Z])/g, '\\neq')
+  result = result.replace(/(?<![a-zA-Z])pm(?![a-zA-Z])/g, '\\pm')
+
   return result
 }
 

@@ -1310,10 +1310,9 @@ export default function App() {
   }
 
   // Render
-  return (
-    <ToastProvider>
-      <div className="min-h-screen" style={{ background: '#F5F7FA' }}>
-        {/* Header */}
+  const appContent = (
+    <>
+      {/* Header */}
         <header className="sticky top-0 z-50 bg-white/90 border-b" style={{ borderColor: '#E5E7EB', paddingTop: 'env(safe-area-inset-top, 0px)' }}>
           <div className="max-w-lg mx-auto px-4 h-11 flex items-center justify-between">
             <div className="flex items-center gap-2">
@@ -2431,7 +2430,44 @@ export default function App() {
             />
           </Suspense>
         )}
-      </div>
-    </ToastProvider>
-  )
+      </>
+    )
+
+    return (
+      <ToastProvider>
+        {isMobile ? (
+          <div className="min-h-screen" style={{ background: '#F5F7FA' }}>
+            {appContent}
+          </div>
+        ) : (
+          <div className="min-h-screen" style={{ background: '#1a1a2e', display: 'flex', alignItems: 'center', justifyContent: 'center', padding: '20px' }}>
+            <div style={{
+              width: '100%',
+              maxWidth: '430px',
+              height: '100vh',
+              maxHeight: '932px',
+              background: '#000',
+              borderRadius: '40px',
+              padding: '12px',
+              boxShadow: '0 25px 50px -12px rgba(0,0,0,0.5)',
+              display: 'flex',
+              flexDirection: 'column'
+            }}>
+              {/* 刘海 */}
+              <div style={{ height: '28px', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
+                <div style={{ width: '120px', height: '28px', background: '#000', borderRadius: '0 0 20px 20px' }} />
+              </div>
+              {/* 屏幕内容 */}
+              <div style={{ flex: 1, borderRadius: '32px', overflow: 'hidden', background: '#F5F7FA', position: 'relative' }}>
+                {appContent}
+              </div>
+              {/* 底部指示条 */}
+              <div style={{ height: '20px', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
+                <div style={{ width: '134px', height: '5px', background: '#333', borderRadius: '100px' }} />
+              </div>
+            </div>
+          </div>
+        )}
+      </ToastProvider>
+    )
 }
