@@ -25,11 +25,10 @@ const COLORS = {
 }
 
 // ── 面板边界常量 ──
-const PANEL_MIN_HEIGHT = 60  // 最小高度：至少露出原试卷 60px
-const PANEL_TOP_MARGIN = 60
-const PANEL_START_OFFSET = 60  // 默认仅露出底部 60px
-const PC_CONTAINER_WIDTH = 430  // PC 端模拟器宽度
-const PC_BREAKPOINT = 1024  // PC 断点
+const PANEL_MIN_EXPOSED = 60       // 底部最少露出 60px
+const PANEL_TOP_MARGIN = 60        // 面板最大顶部边距
+const PC_CONTAINER_WIDTH = 430     // PC 端模拟器宽度
+const PC_BREAKPOINT = 1024         // PC 断点
 
 const isOptionWithLetterPrefix = (opt) => {
   if (!opt) return false
@@ -88,35 +87,45 @@ export default function ExamReview({ task, onClose, onSave }) {
   const [saving, setSaving] = useState(false)
   const [loading, setLoading] = useState(true)
   const [showAnswer, setShowAnswer] = useState(false)
-  const [panelH, setPanelH] = useState(PANEL_START_OFFSET)
-  const [imageLoaded, setImageLoaded] = useState(false)
+
+  // isPC 用 lazy initializer + resize 监听
+  const [isPC, setIsPC] = useState(() => typeof window !== 'undefined' && window.innerWidth >= PC_BREAKPOINT)
+  const [screenH, setScreenH] = useState(() => typeof window !== 'undefined' ? window.innerHeight : 800)
+
+  // panelH = 面板高度（从顶部算起）。面板默认覆盖大部分屏幕，bottom: PANEL_MIN_EXPOSED
+  const [panelH, setPanelH] = useState(0)  // 初始为 0，在 containerSize 计算后设置
+
+  // 图片原始尺寸
   const [imgNaturalSize, setImgNaturalSize] = useState({ w: 0, h: 0 })
-  // 图片实际渲染尺寸（用于 OCR 坐标计算）
-  const [renderedImageSize, setRenderedImageSize] = useState({ w: 0, h: 0 })
-  const [renderedScale, setRenderedScale] = useState(1)  // 图片渲染缩放比例
-  // 容器尺寸（试卷视图区域）
-  const [containerSize, setContainerSize] = useState({ w: 0, h: 0 })
-  const [transform, setTransform] = useState({ x: 0, y: 0, scale: 1 })
-  const [isDragging, setIsDragging] = useState(false)  // 拖拽时禁用 transition
-  const [isPC, setIsPC] = useState(() => {
-    if (typeof window === 'undefined') return false
-    return window.innerWidth >= PC_BREAKPOINT
-  })
+  // 试卷区域尺寸
+  const [examAreaSize, setExamAreaSize] = useState({ w: 0, h: 0 })
+  // 初始缩放比例（Contain，计算一次，拖拽时不变）
+  const [initScale, setInitScale] = useState(1)
+  // 图片在容器中的偏移（居中）
+  const [imgOffset, setImgOffset] = useState({ x: 0, y: 0 })
+  // 图片 translateY（随 panelH 变化而平移，不缩放）
+  const [imgTranslateY, setImgTranslateY] = useState(0)
+  // 是否正在拖拽
+  const [isDragging, setIsDragging] = useState(false)
 
   // ── 所有 ref hooks ──
   const draggingRef = useRef(false)
   const startYRef = useRef(0)
   const startPanelHRef = useRef(0)
-  const baseContainerRef = useRef(null)
+  const examAreaRef = useRef(null)       // 试卷可见区域容器 ref
   const imgRef = useRef(null)
-  const imgTransformRef = useRef(null)  // 图片 transform 容器 ref
-  const containerElRef = useRef(null)   // PC/手机 外层容器 ref
+  const containerElRef = useRef(null)    // PC 模拟器容器 ref
+  const isInitializedRef = useRef(false)
 
-  // PC 端检测 + 窗口 resize 监听
+  // ── PC 端检测 + 窗口 resize 监听 ──
   useEffect(() => {
-    const checkPC = () => setIsPC(window.innerWidth >= PC_BREAKPOINT)
-    window.addEventListener('resize', checkPC)
-    return () => window.removeEventListener('resize', checkPC)
+    const handleResize = () => {
+      setIsPC(window.innerWidth >= PC_BREAKPOINT)
+      setScreenH(window.innerHeight)
+      setScreenW(window.innerWidth)
+    }
+    window.addEventListener('resize', handleResize)
+    return () => window.removeEventListener('resize', handleResize)
   }, [])
 
   // ── 派生数据 (useMemo) ──
@@ -131,7 +140,10 @@ export default function ExamReview({ task, onClose, onSave }) {
   }, [wrongQuestions])
 
   const currentQuestion = validQuestions[currentIndex] || null
-  const screenH = typeof window !== 'undefined' ? window.innerHeight : 800
+
+  // 容器宽度
+  const [screenW, setScreenW] = useState(() => typeof window !== 'undefined' ? window.innerWidth : 375)
+  const containerW = isPC ? PC_CONTAINER_WIDTH : screenW
 
   // ── 数据获取 ──
   useEffect(() => {
@@ -160,72 +172,73 @@ export default function ExamReview({ task, onClose, onSave }) {
     return () => { cancelled = true }
   }, [task?.id])
 
-  // ── 容器尺寸监听 (ResizeObserver) ──
+  // ── 计算试卷区域尺寸 + 初始缩放 ──
   useEffect(() => {
-    const el = baseContainerRef.current
-    if (!el) return
+    if (!imgNaturalSize.w || !containerW || screenH <= 0) return
 
-    const updateSize = () => {
-      const rect = el.getBoundingClientRect()
-      setContainerSize({ w: rect.width, h: rect.height })
+    // 试卷区域高度 = 总高度 - 面板最小露出高度
+    const availH = screenH - PANEL_MIN_EXPOSED
+
+    // 试卷区域宽度 = 容器宽度（PC 为模拟器宽度，手机为全屏）
+    const availW = containerW
+
+    setExamAreaSize({ w: availW, h: availH })
+
+    // Contain 缩放：取较小比例
+    const scaleX = availW / imgNaturalSize.w
+    const scaleY = availH / imgNaturalSize.h
+    const scale = Math.min(scaleX, scaleY)
+
+    setInitScale(scale)
+
+    // 图片居中偏移
+    const offsetX = (availW - imgNaturalSize.w * scale) / 2
+    const offsetY = (availH - imgNaturalSize.h * scale) / 2
+    setImgOffset({ x: offsetX, y: offsetY })
+
+    // 初始化面板高度（覆盖大部分，仅露出 PANEL_MIN_EXPOSED）
+    if (!isInitializedRef.current) {
+      const initPanelH = screenH - PANEL_MIN_EXPOSED
+      setPanelH(initPanelH)
+      isInitializedRef.current = true
     }
-    updateSize()
+  }, [imgNaturalSize, containerW, screenH])
 
-    const ro = new ResizeObserver(updateSize)
-    ro.observe(el)
-    return () => ro.disconnect()
-  }, [isPC, panelH])
-
-  // ── 图片加载后计算初始缩放 (Contain 模式：完整缩放到容器内) ──
-  useEffect(() => {
-    if (!imageLoaded || !imgNaturalSize.w || !containerSize.w || !containerSize.h) return
-
-    const scaleX = containerSize.w / imgNaturalSize.w
-    const scaleY = containerSize.h / imgNaturalSize.h
-    const scale = Math.min(scaleX, scaleY)  // Contain 模式
-    const offsetX = (containerSize.w - imgNaturalSize.w * scale) / 2
-    const offsetY = (containerSize.h - imgNaturalSize.h * scale) / 2
-
-    setTransform({ x: offsetX, y: offsetY, scale })
-    setRenderedScale(scale)
-    // 记录图片实际渲染尺寸
-    setRenderedImageSize({
-      w: imgNaturalSize.w * scale,
-      h: imgNaturalSize.h * scale
-    })
-  }, [imageLoaded, imgNaturalSize, containerSize])
-
-  // ── 图片 onLoad 处理 ──
+  // ── 图片 onLoad ──
   const handleImageLoad = useCallback((e) => {
     const { naturalWidth, naturalHeight } = e.target
     setImgNaturalSize({ w: naturalWidth, h: naturalHeight })
-    setImageLoaded(true)
   }, [])
 
-  // ── 题号切换: 平滑滚动到对应 bbox ──
+  // ── 题号切换：平移图片使题目居中 ──
   const jumpToQuestion = useCallback((index) => {
     setCurrentIndex(index)
     setShowAnswer(false)
     const q = validQuestions[index]
-    if (!q?.block_coordinates || !containerSize.w) return
+    if (!q?.block_coordinates || !imgNaturalSize.w) return
 
     const bbox = q.block_coordinates
-    const containerW = containerSize.w
-    const containerH = containerSize.h
-    const scale = transform.scale
-    const bboxCX = (bbox.x + bbox.width / 2) * scale
+    const scale = initScale
+
+    // 题目中心在原图坐标
     const bboxCY = (bbox.y + bbox.height / 2) * scale
 
-    let newX = transform.x + containerW / 2 - bboxCX
-    let newY = transform.y + containerH / 2 - bboxCY
+    // 试卷区域高度
+    const examH = examAreaSize.h
 
-    const imgW = imgNaturalSize.w * scale
+    // 计算新的 translateY：使题目中心在试卷区域中部
+    const targetY = examH / 2 - bboxCY - imgOffset.y
+
+    // 限制范围
     const imgH = imgNaturalSize.h * scale
-    newX = Math.min(0, Math.max(containerW - imgW, newX))
-    newY = Math.min(0, Math.max(containerH - imgH, newY))
+    const minY = examH - imgH  // 底部
+    const maxY = 0             // 顶部
 
-    setTransform({ x: newX, y: newY, scale })
-  }, [validQuestions, transform, imgNaturalSize, containerSize])
+    setImgTranslateY(Math.max(minY, Math.min(maxY, targetY)))
+  }, [validQuestions, initScale, imgOffset, imgNaturalSize, examAreaSize])
+
+  // ── 计算最大面板高度 ──
+  const maxPanelH = screenH - PANEL_MIN_EXPOSED
 
   // ── 触摸拖拽手势 ──
   const handleTouchStart = useCallback((e) => {
@@ -241,9 +254,11 @@ export default function ExamReview({ task, onClose, onSave }) {
     if (!draggingRef.current) return
     e.preventDefault()
     const touch = e.touches[0]
-    const delta = startYRef.current - touch.clientY
+    // 向下滑动 → panelH 增大（遮罩往下盖）
+    // 向上滑动 → panelH 减小（遮罩往上缩，露出更多试卷）
+    const delta = touch.clientY - startYRef.current
     const newH = startPanelHRef.current + delta
-    setPanelH(Math.max(PANEL_MIN_HEIGHT, Math.min(screenH - PANEL_TOP_MARGIN, newH)))
+    setPanelH(Math.max(PANEL_MIN_EXPOSED, Math.min(screenH - PANEL_TOP_MARGIN, newH)))
   }, [screenH])
 
   const handleTouchEnd = useCallback(() => {
@@ -251,7 +266,7 @@ export default function ExamReview({ task, onClose, onSave }) {
     setIsDragging(false)
   }, [])
 
-  // ── Mouse 拖拽 (桌面端调试) ──
+  // ── Mouse 拖拽 ──
   const handleMouseDown = useCallback((e) => {
     e.preventDefault()
     startYRef.current = e.clientY
@@ -260,9 +275,9 @@ export default function ExamReview({ task, onClose, onSave }) {
     setIsDragging(true)
 
     const onMouseMove = (ev) => {
-      const delta = startYRef.current - ev.clientY
+      const delta = ev.clientY - startYRef.current
       const newH = startPanelHRef.current + delta
-      setPanelH(Math.max(PANEL_MIN_HEIGHT, Math.min(screenH - PANEL_TOP_MARGIN, newH)))
+      setPanelH(Math.max(PANEL_MIN_EXPOSED, Math.min(screenH - PANEL_TOP_MARGIN, newH)))
     }
     const onMouseUp = () => {
       draggingRef.current = false
@@ -380,8 +395,8 @@ export default function ExamReview({ task, onClose, onSave }) {
   const geoImageUrl = currentQuestion?.geometry_image_url || currentQuestion?.enhanced_geometry_image
   const isAiWrong = correctness === false
 
-  // ── 计算面板内容区域高度 ──
-  const panelContentHeight = panelH - 40 - 44 - 52  // 减去拖拽手柄 + 导航条 + 底部操作栏
+  // 面板内容区可用高度
+  const panelContentHeight = Math.max(0, panelH - 40 - 44 - 52)
 
   // ── 条件渲染 (所有 hooks 之后) ──
   if (loading) {
@@ -419,40 +434,31 @@ export default function ExamReview({ task, onClose, onSave }) {
     <div
       style={{
         position: 'absolute',
-        left: 0,
-        right: 0,
-        bottom: 0,
+        left: 0, right: 0, top: 0,
         height: panelH,
         zIndex: 10,
         touchAction: 'none',
-        transition: 'height 0.3s cubic-bezier(0.25, 0.46, 0.45, 0.94)',
-        borderRadius: '20px 20px 0 0',
+        transition: isDragging ? 'none' : 'height 0.3s cubic-bezier(0.25, 0.46, 0.45, 0.94)',
+        borderRadius: isPC ? '0' : '0 0 20px 20px',
         overflow: 'hidden',
-        boxShadow: '0 -4px 24px rgba(0,0,0,0.15)',
+        boxShadow: '0 4px 24px rgba(0,0,0,0.15)',
         display: 'flex',
         flexDirection: 'column'
       }}
     >
       {/* 面板背景 */}
-      <div style={{
-        position: 'absolute', inset: 0, background: COLORS.card, zIndex: 0
-      }} />
+      <div style={{ position: 'absolute', inset: 0, background: COLORS.card, zIndex: 0 }} />
 
-      {/* ─ 拖拽手柄 ── */}
+      {/* ─ 拖拽手柄 ─ */}
       <div
         onTouchStart={handleTouchStart}
         onTouchMove={handleTouchMove}
         onTouchEnd={handleTouchEnd}
         onMouseDown={handleMouseDown}
         style={{
-          position: 'relative',
-          zIndex: 1,
-          padding: '10px 16px 6px',
-          cursor: 'grab',
-          flexShrink: 0,
-          display: 'flex',
-          alignItems: 'center',
-          justifyContent: 'center',
+          position: 'relative', zIndex: 1,
+          padding: '10px 16px 6px', cursor: 'grab', flexShrink: 0,
+          display: 'flex', alignItems: 'center', justifyContent: 'center',
           borderBottom: `1px solid ${COLORS.border}`
         }}
       >
@@ -462,10 +468,8 @@ export default function ExamReview({ task, onClose, onSave }) {
       {/* ── 题号导航条 ── */}
       <div style={{
         position: 'relative', zIndex: 1,
-        padding: '8px 12px',
-        display: 'flex', gap: '6px',
-        overflowX: 'auto', flexShrink: 0,
-        scrollbarWidth: 'none'
+        padding: '8px 12px', display: 'flex', gap: '6px',
+        overflowX: 'auto', flexShrink: 0, scrollbarWidth: 'none'
       }}>
         {validQuestions.map((q, i) => {
           const info = getStatusInfo(q)
@@ -474,19 +478,15 @@ export default function ExamReview({ task, onClose, onSave }) {
           else if (q.is_correct === false) bg = COLORS.danger
           if (i === currentIndex) bg = COLORS.primary
           return (
-            <button
-              key={q.id}
-              onClick={() => jumpToQuestion(i)}
-              style={{
-                minWidth: '32px', height: '32px', borderRadius: '16px',
-                background: bg, color: '#fff', border: 'none',
-                fontSize: '13px', fontWeight: 600, cursor: 'pointer',
-                flexShrink: 0, display: 'flex', alignItems: 'center', justifyContent: 'center',
-                transition: 'transform 0.15s',
-                transform: i === currentIndex ? 'scale(1.15)' : 'scale(1)',
-                opacity: info.isGreyed ? 0.7 : 1
-              }}
-            >
+            <button key={q.id} onClick={() => jumpToQuestion(i)} style={{
+              minWidth: '32px', height: '32px', borderRadius: '16px',
+              background: bg, color: '#fff', border: 'none',
+              fontSize: '13px', fontWeight: 600, cursor: 'pointer',
+              flexShrink: 0, display: 'flex', alignItems: 'center', justifyContent: 'center',
+              transition: 'transform 0.15s',
+              transform: i === currentIndex ? 'scale(1.15)' : 'scale(1)',
+              opacity: info.isGreyed ? 0.7 : 1
+            }}>
               {i + 1}
             </button>
           )
@@ -501,10 +501,7 @@ export default function ExamReview({ task, onClose, onSave }) {
         padding: '4px 16px 20px'
       }}>
         {/* 题号标题 */}
-        <div style={{
-          display: 'flex', justifyContent: 'space-between', alignItems: 'center',
-          marginBottom: '6px'
-        }}>
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '6px' }}>
           <div>
             <span style={{ fontSize: '14px', fontWeight: 600, color: COLORS.primary, marginRight: '8px' }}>
               第 {currentIndex + 1} 题
@@ -525,10 +522,7 @@ export default function ExamReview({ task, onClose, onSave }) {
         </div>
 
         {/* 题干 */}
-        <div style={{
-          fontSize: '14.5px', color: COLORS.text,
-          lineHeight: '1.65', marginBottom: '8px'
-        }}>
+        <div style={{ fontSize: '14.5px', color: COLORS.text, lineHeight: '1.65', marginBottom: '8px' }}>
           <MathText content={currentQuestion?.content || ''} />
         </div>
 
@@ -536,10 +530,7 @@ export default function ExamReview({ task, onClose, onSave }) {
         {currentQuestion?.options?.length > 0 && (
           <div style={{ display: 'flex', flexDirection: 'column', gap: '4px', marginBottom: '8px' }}>
             {currentQuestion.options.map((opt, i) => (
-              <div key={i} style={{
-                fontSize: '13px', color: COLORS.text,
-                padding: '4px 8px', background: COLORS.background, borderRadius: '6px'
-              }}>
+              <div key={i} style={{ fontSize: '13px', color: COLORS.text, padding: '4px 8px', background: COLORS.background, borderRadius: '6px' }}>
                 {formatOption(opt, i)}
               </div>
             ))}
@@ -548,116 +539,39 @@ export default function ExamReview({ task, onClose, onSave }) {
 
         {/* 几何配图 */}
         {geoImageUrl && (
-          <div style={{
-            marginBottom: '8px', background: '#FAFAFA',
-            borderRadius: '8px', padding: '8px', border: '1px solid #E5E7EB'
-          }}>
-            <img
-              src={geoImageUrl}
-              alt="几何配图"
-              style={{
-                width: '100%', maxHeight: '20vh',
-                objectFit: 'contain', borderRadius: '6px', display: 'block'
-              }}
-            />
+          <div style={{ marginBottom: '8px', background: '#FAFAFA', borderRadius: '8px', padding: '8px', border: '1px solid #E5E7EB' }}>
+            <img src={geoImageUrl} alt="几何配图" style={{ width: '100%', maxHeight: '20vh', objectFit: 'contain', borderRadius: '6px', display: 'block' }} />
           </div>
         )}
 
         {/* 答案对比区 */}
-        <div style={{
-          background: COLORS.background, borderRadius: '8px', padding: '8px 10px',
-          marginBottom: '8px'
-        }}>
+        <div style={{ background: COLORS.background, borderRadius: '8px', padding: '8px 10px', marginBottom: '8px' }}>
           <div style={{ display: 'flex', gap: '8px', marginBottom: '8px' }}>
             <div style={{ flex: 1 }}>
               <div style={{ fontSize: '11px', fontWeight: 600, color: COLORS.textSecondary, marginBottom: '2px' }}>学生答案</div>
-              <input
-                type="text"
-                value={currentStudentAnswer || ''}
-                onChange={(e) => handleAnswerChange(currentQuestion.id, e.target.value)}
-                placeholder={answerStatus === 'not_answered' ? '未作答' : '输入...'}
-                style={{
-                  width: '100%', padding: '6px 8px', borderRadius: '5px',
-                  border: `1px solid ${answerStatus === 'not_answered' ? COLORS.warning : COLORS.border}`,
-                  fontSize: '13px', color: COLORS.text, outline: 'none',
-                  boxSizing: 'border-box', background: COLORS.card
-                }}
-              />
+              <input type="text" value={currentStudentAnswer || ''} onChange={(e) => handleAnswerChange(currentQuestion.id, e.target.value)} placeholder={answerStatus === 'not_answered' ? '未作答' : '输入...'} style={{ width: '100%', padding: '6px 8px', borderRadius: '5px', border: `1px solid ${answerStatus === 'not_answered' ? COLORS.warning : COLORS.border}`, fontSize: '13px', color: COLORS.text, outline: 'none', boxSizing: 'border-box', background: COLORS.card }} />
             </div>
             <div style={{ flex: 1 }}>
               <div style={{ fontSize: '11px', fontWeight: 600, color: COLORS.textSecondary, marginBottom: '2px' }}>参考答案</div>
-              <input
-                type="text"
-                value={edits[currentQuestion?.id]?.answer ?? currentQuestion?.answer ?? ''}
-                onChange={(e) => handleAnswerEdit(currentQuestion?.id, e.target.value)}
-                placeholder="输入..."
-                style={{
-                  width: '100%', padding: '6px 8px', borderRadius: '5px',
-                  border: `1px solid ${COLORS.border}`,
-                  fontSize: '13px', color: COLORS.text,
-                  outline: 'none', boxSizing: 'border-box', background: COLORS.card
-                }}
-              />
+              <input type="text" value={edits[currentQuestion?.id]?.answer ?? currentQuestion?.answer ?? ''} onChange={(e) => handleAnswerEdit(currentQuestion?.id, e.target.value)} placeholder="输入..." style={{ width: '100%', padding: '6px 8px', borderRadius: '5px', border: `1px solid ${COLORS.border}`, fontSize: '13px', color: COLORS.text, outline: 'none', boxSizing: 'border-box', background: COLORS.card }} />
             </div>
           </div>
-
-          {/* 人工评判 */}
           <div style={{ display: 'flex', gap: '6px' }}>
             {isAiWrong ? (
               <>
-                <button
-                  onClick={() => handleToggleCorrect(currentQuestion.id, true)}
-                  style={{
-                    flex: 1, padding: '8px 0', borderRadius: '8px',
-                    border: correctness === true ? '2px solid #16A34A' : '1px solid #BBF7D0',
-                    cursor: 'pointer', fontSize: '13px', fontWeight: 600,
-                    display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '4px',
-                    background: correctness === true ? '#DCFCE7' : '#F0FDF4',
-                    color: correctness === true ? '#16A34A' : '#15803D',
-                  }}
-                >
+                <button onClick={() => handleToggleCorrect(currentQuestion.id, true)} style={{ flex: 1, padding: '8px 0', borderRadius: '8px', border: correctness === true ? '2px solid #16A34A' : '1px solid #BBF7D0', cursor: 'pointer', fontSize: '13px', fontWeight: 600, display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '4px', background: correctness === true ? '#DCFCE7' : '#F0FDF4', color: correctness === true ? '#16A34A' : '#15803D' }}>
                   <CheckCircle2 size={14} /> 改判为对
                 </button>
-                <button
-                  onClick={() => handleToggleCorrect(currentQuestion.id, false)}
-                  style={{
-                    flex: 1, padding: '8px 0', borderRadius: '8px',
-                    border: correctness === false ? '2px solid #EF4444' : '1px solid #E5E7EB',
-                    cursor: 'pointer', fontSize: '13px', fontWeight: 500,
-                    display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '4px',
-                    background: correctness === false ? '#FEE2E2' : COLORS.card,
-                    color: correctness === false ? '#EF4444' : '#9CA3AF',
-                  }}
-                >
+                <button onClick={() => handleToggleCorrect(currentQuestion.id, false)} style={{ flex: 1, padding: '8px 0', borderRadius: '8px', border: correctness === false ? '2px solid #EF4444' : '1px solid #E5E7EB', cursor: 'pointer', fontSize: '13px', fontWeight: 500, display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '4px', background: correctness === false ? '#FEE2E2' : COLORS.card, color: correctness === false ? '#EF4444' : '#9CA3AF' }}>
                   <XCircle size={14} /> 维持
                 </button>
               </>
             ) : (
               <>
-                <button
-                  onClick={() => handleToggleCorrect(currentQuestion.id, true)}
-                  style={{
-                    flex: 1, padding: '8px 0', borderRadius: '8px',
-                    border: correctness === true ? '2px solid #16A34A' : '1px solid #E5E7EB',
-                    cursor: 'pointer', fontSize: '13px', fontWeight: 600,
-                    display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '4px',
-                    background: correctness === true ? '#DCFCE7' : COLORS.card,
-                    color: correctness === true ? '#16A34A' : COLORS.success,
-                  }}
-                >
+                <button onClick={() => handleToggleCorrect(currentQuestion.id, true)} style={{ flex: 1, padding: '8px 0', borderRadius: '8px', border: correctness === true ? '2px solid #16A34A' : '1px solid #E5E7EB', cursor: 'pointer', fontSize: '13px', fontWeight: 600, display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '4px', background: correctness === true ? '#DCFCE7' : COLORS.card, color: correctness === true ? '#16A34A' : COLORS.success }}>
                   <CheckCircle2 size={14} /> 正确
                 </button>
-                <button
-                  onClick={() => handleToggleCorrect(currentQuestion.id, false)}
-                  style={{
-                    flex: 1, padding: '8px 0', borderRadius: '8px',
-                    border: correctness === false ? '2px solid #EF4444' : '1px solid #E5E7EB',
-                    cursor: 'pointer', fontSize: '13px', fontWeight: 500,
-                    display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '4px',
-                    background: correctness === false ? '#FEE2E2' : COLORS.card,
-                    color: correctness === false ? '#EF4444' : COLORS.textSecondary,
-                  }}
-                >
+                <button onClick={() => handleToggleCorrect(currentQuestion.id, false)} style={{ flex: 1, padding: '8px 0', borderRadius: '8px', border: correctness === false ? '2px solid #EF4444' : '1px solid #E5E7EB', cursor: 'pointer', fontSize: '13px', fontWeight: 500, display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '4px', background: correctness === false ? '#FEE2E2' : COLORS.card, color: correctness === false ? '#EF4444' : COLORS.textSecondary }}>
                   <XCircle size={14} /> 错误
                 </button>
               </>
@@ -667,19 +581,9 @@ export default function ExamReview({ task, onClose, onSave }) {
 
         {/* 解析 */}
         <div style={{ borderTop: `1px solid ${COLORS.border}`, paddingTop: '8px' }}>
-          <button
-            onClick={() => setShowAnswer(!showAnswer)}
-            style={{
-              background: 'none', border: 'none', cursor: 'pointer',
-              display: 'flex', alignItems: 'center', gap: '4px',
-              fontSize: '12px', color: COLORS.textSecondary, padding: 0, width: '100%',
-              justifyContent: 'flex-start'
-            }}
-          >
+          <button onClick={() => setShowAnswer(!showAnswer)} style={{ background: 'none', border: 'none', cursor: 'pointer', display: 'flex', alignItems: 'center', gap: '4px', fontSize: '12px', color: COLORS.textSecondary, padding: 0, width: '100%', justifyContent: 'flex-start' }}>
             {showAnswer ? <ChevronUp size={14} /> : <ChevronDown size={14} />}
-            <span style={{ fontWeight: 500 }}>
-              {showAnswer ? '收起解析' : '查看解析'}
-            </span>
+            <span style={{ fontWeight: 500 }}>{showAnswer ? '收起解析' : '查看解析'}</span>
           </button>
           {showAnswer && (
             <div style={{ marginTop: '6px' }}>
@@ -694,52 +598,14 @@ export default function ExamReview({ task, onClose, onSave }) {
       </div>
 
       {/* ── 底部操作栏 ─ */}
-      <div style={{
-        position: 'relative', zIndex: 1,
-        padding: '8px 12px',
-        display: 'flex', gap: '8px', flexShrink: 0,
-        borderTop: `1px solid ${COLORS.border}`,
-        background: COLORS.card
-      }}>
-        <button
-          onClick={() => jumpToQuestion(currentIndex - 1)}
-          disabled={currentIndex === 0}
-          style={{
-            flex: 1, padding: '8px', borderRadius: '8px',
-            border: `1px solid ${COLORS.border}`,
-            background: COLORS.card, cursor: currentIndex === 0 ? 'not-allowed' : 'pointer',
-            fontSize: '13px', color: currentIndex === 0 ? '#CCC' : COLORS.textSecondary,
-            display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '4px'
-          }}
-        >
+      <div style={{ position: 'relative', zIndex: 1, padding: '8px 12px', display: 'flex', gap: '8px', flexShrink: 0, borderTop: `1px solid ${COLORS.border}`, background: COLORS.card }}>
+        <button onClick={() => jumpToQuestion(currentIndex - 1)} disabled={currentIndex === 0} style={{ flex: 1, padding: '8px', borderRadius: '8px', border: `1px solid ${COLORS.border}`, background: COLORS.card, cursor: currentIndex === 0 ? 'not-allowed' : 'pointer', fontSize: '13px', color: currentIndex === 0 ? '#CCC' : COLORS.textSecondary, display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '4px' }}>
           <ChevronLeft size={14} /> 上一题
         </button>
-        <button
-          onClick={handleSaveClick}
-          disabled={saving || Object.keys(edits).length === 0}
-          style={{
-            padding: '8px 16px', borderRadius: '8px', border: 'none',
-            background: (saving || Object.keys(edits).length === 0) ? '#93C5FD' : COLORS.primary,
-            color: '#fff', cursor: (saving || Object.keys(edits).length === 0) ? 'not-allowed' : 'pointer',
-            fontSize: '13px', fontWeight: 600, display: 'flex', alignItems: 'center', gap: '4px',
-            flexShrink: 0
-          }}
-        >
-          {saving ? <Loader2 size={12} className="animate-spin" /> : <Save size={12} />}
-          保存
+        <button onClick={handleSaveClick} disabled={saving || Object.keys(edits).length === 0} style={{ padding: '8px 16px', borderRadius: '8px', border: 'none', background: (saving || Object.keys(edits).length === 0) ? '#93C5FD' : COLORS.primary, color: '#fff', cursor: (saving || Object.keys(edits).length === 0) ? 'not-allowed' : 'pointer', fontSize: '13px', fontWeight: 600, display: 'flex', alignItems: 'center', gap: '4px', flexShrink: 0 }}>
+          {saving ? <Loader2 size={12} className="animate-spin" /> : <Save size={12} />} 保存
         </button>
-        <button
-          onClick={() => jumpToQuestion(currentIndex + 1)}
-          disabled={currentIndex >= validQuestions.length - 1}
-          style={{
-            flex: 1, padding: '8px', borderRadius: '8px',
-            border: `1px solid ${COLORS.border}`,
-            background: COLORS.card,
-            cursor: currentIndex >= validQuestions.length - 1 ? 'not-allowed' : 'pointer',
-            fontSize: '13px', color: currentIndex >= validQuestions.length - 1 ? '#CCC' : COLORS.textSecondary,
-            display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '4px'
-          }}
-        >
+        <button onClick={() => jumpToQuestion(currentIndex + 1)} disabled={currentIndex >= validQuestions.length - 1} style={{ flex: 1, padding: '8px', borderRadius: '8px', border: `1px solid ${COLORS.border}`, background: COLORS.card, cursor: currentIndex >= validQuestions.length - 1 ? 'not-allowed' : 'pointer', fontSize: '13px', color: currentIndex >= validQuestions.length - 1 ? '#CCC' : COLORS.textSecondary, display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '4px' }}>
           下一题 <ChevronRight size={14} />
         </button>
       </div>
@@ -748,205 +614,77 @@ export default function ExamReview({ task, onClose, onSave }) {
 
   // ── 返回按钮 ──
   const backButton = (
-    <button
-      onClick={onClose}
-      style={{
-        position: 'absolute', top: 12, left: 12, zIndex: 15,
-        background: 'rgba(0,0,0,0.5)', border: 'none', borderRadius: '50%',
-        width: 36, height: 36,
-        display: 'flex', alignItems: 'center', justifyContent: 'center',
-        cursor: 'pointer', color: '#fff', backdropFilter: 'blur(4px)'
-      }}
-    >
+    <button onClick={onClose} style={{
+      position: 'absolute', bottom: PANEL_MIN_EXPOSED + 12, left: 12, zIndex: 15,
+      background: 'rgba(0,0,0,0.5)', border: 'none', borderRadius: '50%',
+      width: 36, height: 36, display: 'flex', alignItems: 'center', justifyContent: 'center',
+      cursor: 'pointer', color: '#fff', backdropFilter: 'blur(4px)'
+    }}>
       <ArrowLeft size={20} />
     </button>
   )
 
-  // ── 主渲染 ──
-  if (isPC) {
-    // PC 端：手机模拟器容器布局
-    const containerMaxH = screenH * 0.92
+  // ── 试卷图渲染（PC 和手机共用） ──
+  const renderExamImage = () => {
+    const renderedW = imgNaturalSize.w * initScale
+    const renderedH = imgNaturalSize.h * initScale
+
     return (
-      <div style={{
-        position: 'fixed', inset: 0, zIndex: 10000,
-        background: 'rgba(26,26,26,0.95)',
-        display: 'flex', alignItems: 'center', justifyContent: 'center',
-        overflow: 'hidden'
-      }}>
-        {/* 手机模拟器容器 */}
-        <div
-          ref={containerElRef}
-          style={{
-            width: PC_CONTAINER_WIDTH,
-            height: containerMaxH,
-            background: '#1a1a1a',
-            borderRadius: '24px',
-            overflow: 'hidden',
-            position: 'relative',
-            boxShadow: '0 0 60px rgba(0,0,0,0.5)',
-            border: '1px solid rgba(255,255,255,0.1)'
-          }}
-        >
-          {/* ══════════════ 试卷区域 ═══════════════ */}
-          <div
-            ref={baseContainerRef}
-            style={{ position: 'absolute', top: 0, left: 0, right: 0, bottom: panelH, overflow: 'hidden' }}
-          >
-            <div
-              ref={imgTransformRef}
-              style={{
-                position: 'relative',
-                width: imgNaturalSize.w || 0,
-                height: imgNaturalSize.h || 0,
-                transform: `translate(${transform.x}px, ${transform.y}px) scale(${transform.scale})`,
-                transformOrigin: '0 0',
-                transition: isDragging ? 'none' : 'transform 0.4s cubic-bezier(0.25, 0.46, 0.45, 0.94)'
-              }}
-            >
-              {/* 原卷大图 */}
-              <img
-                ref={imgRef}
-                src={task.image_url}
-                alt="原卷"
-                onLoad={handleImageLoad}
-                style={{
-                  display: 'block',
-                  maxWidth: 'none',
-                  userSelect: 'none',
-                  pointerEvents: 'none'
-                }}
-              />
-
-              {/* 题号标记 - 基于原始图片坐标，通过 transform 自动缩放 */}
-              {validQuestions.map((q, i) => {
-                const bbox = q.block_coordinates
-                if (!bbox) return null
-                const isCurrent = i === currentIndex
-                return (
-                  <div
-                    key={q.id}
-                    style={{
-                      position: 'absolute',
-                      left: bbox.x,
-                      top: bbox.y,
-                      width: bbox.width,
-                      height: bbox.height,
-                      border: `2.5px solid ${isCurrent ? '#2563EB' : 'rgba(255,255,255,0.35)'}`,
-                      borderRadius: '8px',
-                      pointerEvents: 'none',
-                      zIndex: 2,
-                      transition: 'border-color 0.3s, background 0.3s',
-                      background: isCurrent ? 'rgba(37,99,235,0.08)' : 'transparent'
-                    }}
-                  >
-                    <div style={{
-                      position: 'absolute',
-                      left: '50%',
-                      top: '50%',
-                      transform: 'translate(-50%, -50%)',
-                      width: isCurrent ? 36 : 28,
-                      height: isCurrent ? 36 : 28,
-                      borderRadius: '50%',
-                      background: isCurrent ? COLORS.primary : 'rgba(255,255,255,0.88)',
-                      color: isCurrent ? '#fff' : COLORS.text,
-                      fontSize: isCurrent ? 15 : 13,
-                      fontWeight: 700,
-                      display: 'flex',
-                      alignItems: 'center',
-                      justifyContent: 'center',
-                      boxShadow: '0 2px 8px rgba(0,0,0,0.25)',
-                      transition: 'all 0.3s'
-                    }}>
-                      {i + 1}
-                    </div>
-                  </div>
-                )
-              })}
-            </div>
-          </div>
-
-          {backButton}
-          {panelContent}
-        </div>
-      </div>
-    )
-  }
-
-  // 手机端：全屏布局
-  return (
-    <div style={{
-      position: 'fixed', inset: 0, overflow: 'hidden', zIndex: 10000,
-      background: '#1a1a1a'
-    }}>
-      {/* ══════════════ 试卷区域 ═══════════════ */}
       <div
-        ref={baseContainerRef}
-        style={{ position: 'absolute', top: 0, left: 0, right: 0, bottom: panelH, overflow: 'hidden' }}
+        ref={examAreaRef}
+        style={{
+          position: 'absolute',
+          top: 0, left: 0, right: 0,
+          height: screenH - panelH,
+          overflow: 'hidden',
+          zIndex: 1
+        }}
       >
-        <div
-          ref={imgTransformRef}
-          style={{
-            position: 'relative',
-            width: imgNaturalSize.w || 0,
-            height: imgNaturalSize.h || 0,
-            transform: `translate(${transform.x}px, ${transform.y}px) scale(${transform.scale})`,
-            transformOrigin: '0 0',
-            transition: isDragging ? 'none' : 'transform 0.4s cubic-bezier(0.25, 0.46, 0.45, 0.94)'
-          }}
-        >
+        {/* 图片容器：使用 scale 和 translate 定位 */}
+        <div style={{
+          position: 'absolute',
+          left: imgOffset.x,
+          top: imgOffset.y + imgTranslateY,
+          width: imgNaturalSize.w,
+          height: imgNaturalSize.h,
+          transform: `scale(${initScale})`,
+          transformOrigin: '0 0',
+          transition: isDragging ? 'none' : 'top 0.3s cubic-bezier(0.25, 0.46, 0.45, 0.94)'
+        }}>
           {/* 原卷大图 */}
           <img
             ref={imgRef}
             src={task.image_url}
             alt="原卷"
             onLoad={handleImageLoad}
-            style={{
-              display: 'block',
-              maxWidth: 'none',
-              userSelect: 'none',
-              pointerEvents: 'none'
-            }}
+            style={{ display: 'block', width: '100%', height: '100%', userSelect: 'none', pointerEvents: 'none' }}
           />
 
-          {/* 题号标记 - 基于原始图片坐标，通过 transform 自动缩放 */}
+          {/* 题号标记 - 直接基于原始图片坐标定位，由外层 scale 自动等比缩放 */}
           {validQuestions.map((q, i) => {
             const bbox = q.block_coordinates
             if (!bbox) return null
             const isCurrent = i === currentIndex
             return (
-              <div
-                key={q.id}
-                style={{
-                  position: 'absolute',
-                  left: bbox.x,
-                  top: bbox.y,
-                  width: bbox.width,
-                  height: bbox.height,
-                  border: `2.5px solid ${isCurrent ? '#2563EB' : 'rgba(255,255,255,0.35)'}`,
-                  borderRadius: '8px',
-                  pointerEvents: 'none',
-                  zIndex: 2,
-                  transition: 'border-color 0.3s, background 0.3s',
-                  background: isCurrent ? 'rgba(37,99,235,0.08)' : 'transparent'
-                }}
-              >
+              <div key={q.id} style={{
+                position: 'absolute',
+                left: bbox.x, top: bbox.y,
+                width: bbox.width, height: bbox.height,
+                border: `2.5px solid ${isCurrent ? '#2563EB' : 'rgba(255,255,255,0.35)'}`,
+                borderRadius: '8px', pointerEvents: 'none', zIndex: 2,
+                transition: 'border-color 0.3s, background 0.3s',
+                background: isCurrent ? 'rgba(37,99,235,0.08)' : 'transparent'
+              }}>
                 <div style={{
-                  position: 'absolute',
-                  left: '50%',
-                  top: '50%',
+                  position: 'absolute', left: '50%', top: '50%',
                   transform: 'translate(-50%, -50%)',
-                  width: isCurrent ? 36 : 28,
-                  height: isCurrent ? 36 : 28,
+                  width: isCurrent ? 36 : 28, height: isCurrent ? 36 : 28,
                   borderRadius: '50%',
                   background: isCurrent ? COLORS.primary : 'rgba(255,255,255,0.88)',
                   color: isCurrent ? '#fff' : COLORS.text,
-                  fontSize: isCurrent ? 15 : 13,
-                  fontWeight: 700,
-                  display: 'flex',
-                  alignItems: 'center',
-                  justifyContent: 'center',
-                  boxShadow: '0 2px 8px rgba(0,0,0,0.25)',
-                  transition: 'all 0.3s'
+                  fontSize: isCurrent ? 15 : 13, fontWeight: 700,
+                  display: 'flex', alignItems: 'center', justifyContent: 'center',
+                  boxShadow: '0 2px 8px rgba(0,0,0,0.25)', transition: 'all 0.3s'
                 }}>
                   {i + 1}
                 </div>
@@ -955,7 +693,39 @@ export default function ExamReview({ task, onClose, onSave }) {
           })}
         </div>
       </div>
+    )
+  }
 
+  // ── 主渲染 ──
+  if (isPC) {
+    return (
+      <div style={{
+        position: 'fixed', inset: 0, zIndex: 10000,
+        background: 'rgba(26,26,26,0.95)',
+        display: 'flex', alignItems: 'center', justifyContent: 'center',
+        overflow: 'hidden'
+      }}>
+        <div
+          ref={containerElRef}
+          style={{
+            width: PC_CONTAINER_WIDTH, height: screenH,
+            background: '#1a1a1a', overflow: 'hidden',
+            position: 'relative',
+            boxShadow: '0 0 60px rgba(0,0,0,0.5)',
+            border: '1px solid rgba(255,255,255,0.1)'
+          }}
+        >
+          {renderExamImage()}
+          {backButton}
+          {panelContent}
+        </div>
+      </div>
+    )
+  }
+
+  return (
+    <div style={{ position: 'fixed', inset: 0, overflow: 'hidden', zIndex: 10000, background: '#1a1a1a' }}>
+      {renderExamImage()}
       {backButton}
       {panelContent}
     </div>
