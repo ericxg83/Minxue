@@ -25,7 +25,7 @@ const COLORS = {
 }
 
 // ── 面板边界常量 ──
-const MIN_EXPOSED = 60             // 最少露出 60px（从顶部算起）
+const MIN_EXPOSED = 60             // 底部最少露出 60px
 const PC_CONTAINER_WIDTH = 430     // PC 端模拟器宽度
 const PC_BREAKPOINT = 1024         // PC 断点
 
@@ -79,7 +79,7 @@ export default function ExamReview({ task, onClose, onSave }) {
   const { wrongQuestions } = useWrongQuestionStore()
   const Toast = useToast()
 
-  // ── 所有 state hooks (必须在最顶部, 无条件分支) ──
+  // ── 所有 state hooks ──
   const [questions, setQuestions] = useState([])
   const [currentIndex, setCurrentIndex] = useState(0)
   const [edits, setEdits] = useState({})
@@ -93,14 +93,13 @@ export default function ExamReview({ task, onClose, onSave }) {
   }))
 
   // panelH = 面板高度（从底部算起，BottomSheet）
-  // 初始状态：面板几乎占满，只从顶部露出 MIN_EXPOSED
   const [panelH, setPanelH] = useState(0)
   const isInitializedRef = useRef(false)
 
   // 图片原始尺寸
   const [imgNaturalSize, setImgNaturalSize] = useState({ w: 0, h: 0 })
-  // 初始缩放比例（Contain，计算一次）
-  const [initScale, setInitScale] = useState(1)
+  // 图片实际渲染尺寸（缩放后的像素值，用于 OCR 框定位）
+  const [renderedSize, setRenderedSize] = useState({ w: 0, h: 0 })
   // 图片居中偏移
   const [imgOffset, setImgOffset] = useState({ x: 0, y: 0 })
   // 图片 translateY（切换题目时平移）
@@ -108,12 +107,11 @@ export default function ExamReview({ task, onClose, onSave }) {
   // 是否正在拖拽
   const [isDragging, setIsDragging] = useState(false)
 
-  // ── 所有 ref hooks ──
+  // ── refs ──
   const draggingRef = useRef(false)
   const startYRef = useRef(0)
   const startPanelHRef = useRef(0)
   const imgRef = useRef(null)
-  const containerElRef = useRef(null)
 
   // ── 窗口 resize ──
   useEffect(() => {
@@ -168,18 +166,26 @@ export default function ExamReview({ task, onClose, onSave }) {
   useEffect(() => {
     if (!imgNaturalSize.w || !containerW || !containerH) return
 
-    // Contain 模式：完整缩放到容器内
+    // 可见区域高度 = 总高度 - 面板最小高度
+    const availH = containerH - MIN_EXPOSED
+
+    // Contain 模式：取较小比例确保完整显示
     const scaleX = containerW / imgNaturalSize.w
-    const scaleY = containerH / imgNaturalSize.h
+    const scaleY = availH / imgNaturalSize.h
     const scale = Math.min(scaleX, scaleY)
-    setInitScale(scale)
+
+    // 计算实际渲染尺寸（像素值）
+    const rw = imgNaturalSize.w * scale
+    const rh = imgNaturalSize.h * scale
+
+    setRenderedSize({ w: rw, h: rh })
 
     // 居中偏移
-    const offsetX = (containerW - imgNaturalSize.w * scale) / 2
-    const offsetY = (containerH - imgNaturalSize.h * scale) / 2
+    const offsetX = (containerW - rw) / 2
+    const offsetY = (availH - rh) / 2
     setImgOffset({ x: offsetX, y: offsetY })
 
-    // 初始化面板高度（BottomSheet 从底部算起）
+    // 初始化面板高度
     if (!isInitializedRef.current) {
       setPanelH(containerH - MIN_EXPOSED)
       isInitializedRef.current = true
@@ -196,23 +202,24 @@ export default function ExamReview({ task, onClose, onSave }) {
     setCurrentIndex(index)
     setShowAnswer(false)
     const q = validQuestions[index]
-    if (!q?.block_coordinates || !imgNaturalSize.w) return
+    if (!q?.block_coordinates || !renderedSize.w) return
 
     const bbox = q.block_coordinates
-    const scale = initScale
-    const bboxCY = (bbox.y + bbox.height / 2) * scale
+    // 基于实际渲染尺寸计算题目中心
+    const bboxCY = bbox.y + bbox.height / 2
 
-    // 可用高度 = 容器高度 - 面板高度
+    // 可用高度
     const availH = containerH - panelH
+
+    // 目标：题目中心在可用区域中部
     const targetY = availH / 2 - bboxCY - imgOffset.y
 
     // 限制范围
-    const imgH = imgNaturalSize.h * scale
-    const minY = availH - imgH
+    const minY = availH - renderedSize.h
     const maxY = 0
 
     setImgTranslateY(Math.max(minY, Math.min(maxY, targetY)))
-  }, [validQuestions, initScale, imgOffset, imgNaturalSize, containerH, panelH])
+  }, [validQuestions, renderedSize, imgOffset, containerH, panelH])
 
   // ── 触摸拖拽 ──
   const handleTouchStart = useCallback((e) => {
@@ -227,8 +234,6 @@ export default function ExamReview({ task, onClose, onSave }) {
     if (!draggingRef.current) return
     e.preventDefault()
     const delta = e.touches[0].clientY - startYRef.current
-    // 向下滑 → panelH 减小（露出更多图片）
-    // 向上滑 → panelH 增大（遮住更多图片）
     const newH = startPanelHRef.current - delta
     setPanelH(Math.max(MIN_EXPOSED, Math.min(containerH - 20, newH)))
   }, [containerH])
@@ -520,59 +525,76 @@ export default function ExamReview({ task, onClose, onSave }) {
   )
 
   // ── 试卷图渲染（PC 和手机共用） ──
-  const renderExamImage = () => (
-    <div style={{
-      position: 'absolute', inset: 0, overflow: 'hidden', zIndex: 1
-    }}>
+  const renderExamImage = () => {
+    const availH = containerH - panelH
+
+    return (
       <div style={{
         position: 'absolute',
-        left: imgOffset.x,
-        top: imgOffset.y + imgTranslateY,
-        width: imgNaturalSize.w,
-        height: imgNaturalSize.h,
-        transform: `scale(${initScale})`,
-        transformOrigin: '0 0',
-        transition: isDragging ? 'none' : 'top 0.3s cubic-bezier(0.25, 0.46, 0.45, 0.94)'
+        top: 0, left: 0, right: 0,
+        height: availH,
+        overflow: 'hidden', zIndex: 1
       }}>
-        <img
-          ref={imgRef}
-          src={task.image_url}
-          alt="原卷"
-          onLoad={handleImageLoad}
-          style={{ display: 'block', width: '100%', height: '100%', userSelect: 'none', pointerEvents: 'none' }}
-        />
+        {/* 图片容器：基于实际渲染尺寸定位 */}
+        <div style={{
+          position: 'absolute',
+          left: imgOffset.x,
+          top: imgOffset.y + imgTranslateY,
+          width: renderedSize.w,
+          height: renderedSize.h,
+          transition: isDragging ? 'none' : 'top 0.3s cubic-bezier(0.25, 0.46, 0.45, 0.94)'
+        }}>
+          {/* 原卷大图 */}
+          <img
+            ref={imgRef}
+            src={task.image_url}
+            alt="原卷"
+            onLoad={handleImageLoad}
+            style={{ display: 'block', width: '100%', height: '100%', userSelect: 'none', pointerEvents: 'none' }}
+          />
 
-        {/* 题号标记 */}
-        {validQuestions.map((q, i) => {
-          const bbox = q.block_coordinates
-          if (!bbox) return null
-          const isCurrent = i === currentIndex
-          return (
-            <div key={q.id} style={{
-              position: 'absolute', left: bbox.x, top: bbox.y,
-              width: bbox.width, height: bbox.height,
-              border: `2.5px solid ${isCurrent ? '#2563EB' : 'rgba(255,255,255,0.35)'}`,
-              borderRadius: '8px', pointerEvents: 'none', zIndex: 2,
-              transition: 'border-color 0.3s, background 0.3s',
-              background: isCurrent ? 'rgba(37,99,235,0.08)' : 'transparent'
-            }}>
-              <div style={{
-                position: 'absolute', left: '50%', top: '50%', transform: 'translate(-50%, -50%)',
-                width: isCurrent ? 36 : 28, height: isCurrent ? 36 : 28, borderRadius: '50%',
-                background: isCurrent ? COLORS.primary : 'rgba(255,255,255,0.88)',
-                color: isCurrent ? '#fff' : COLORS.text,
-                fontSize: isCurrent ? 15 : 13, fontWeight: 700,
-                display: 'flex', alignItems: 'center', justifyContent: 'center',
-                boxShadow: '0 2px 8px rgba(0,0,0,0.25)', transition: 'all 0.3s'
+          {/* 题号标记 - 基于实际渲染尺寸等比缩放 */}
+          {validQuestions.map((q, i) => {
+            const bbox = q.block_coordinates
+            if (!bbox || !renderedSize.w || !imgNaturalSize.w) return null
+            const isCurrent = i === currentIndex
+
+            // 计算等比缩放比例：实际渲染尺寸 / 原始尺寸
+            const ratioW = renderedSize.w / imgNaturalSize.w
+            const ratioH = renderedSize.h / imgNaturalSize.h
+
+            return (
+              <div key={q.id} style={{
+                position: 'absolute',
+                left: bbox.x * ratioW,
+                top: bbox.y * ratioH,
+                width: bbox.width * ratioW,
+                height: bbox.height * ratioH,
+                border: `2.5px solid ${isCurrent ? '#2563EB' : 'rgba(255,255,255,0.35)'}`,
+                borderRadius: '8px', pointerEvents: 'none', zIndex: 2,
+                transition: 'border-color 0.3s, background 0.3s',
+                background: isCurrent ? 'rgba(37,99,235,0.08)' : 'transparent'
               }}>
-                {i + 1}
+                <div style={{
+                  position: 'absolute', left: '50%', top: '50%',
+                  transform: 'translate(-50%, -50%)',
+                  width: isCurrent ? 36 : 28, height: isCurrent ? 36 : 28,
+                  borderRadius: '50%',
+                  background: isCurrent ? COLORS.primary : 'rgba(255,255,255,0.88)',
+                  color: isCurrent ? '#fff' : COLORS.text,
+                  fontSize: isCurrent ? 15 : 13, fontWeight: 700,
+                  display: 'flex', alignItems: 'center', justifyContent: 'center',
+                  boxShadow: '0 2px 8px rgba(0,0,0,0.25)', transition: 'all 0.3s'
+                }}>
+                  {i + 1}
+                </div>
               </div>
-            </div>
-          )
-        })}
+            )
+          })}
+        </div>
       </div>
-    </div>
-  )
+    )
+  }
 
   // ── 主渲染 ──
   if (isPC) {
