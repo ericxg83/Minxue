@@ -107,7 +107,7 @@ export default function ExamReview({ task, onClose, onSave }) {
   // 是否正在拖拽
   const [isDragging, setIsDragging] = useState(false)
 
-  // ── refs ──
+  // ── refs ─
   const draggingRef = useRef(false)
   const startYRef = useRef(0)
   const startPanelHRef = useRef(0)
