@@ -125,27 +125,15 @@ export default function ExamReview({ task, onClose, onSave }) {
   const containerH = screenSize.h
 
   // ── 派生数据 ──
-  // 按 bbox.y 排序，确保数组顺序与试卷从上到下的视觉顺序一致
+  // 每个题目自带 block_coordinates，box 渲染时直接从题目对象读取，不存在 index 错位问题
   const validQuestions = useMemo(() => {
     const qs = questions.filter(Boolean)
-    // 调试：打印每道题的 bbox 信息
-    console.log('=== 题目数据 ===')
+    console.log('=== Questions Data ===')
     qs.forEach((q, i) => {
       const bbox = q.block_coordinates
-      console.log(`[${i}] id=${q.id}, question_number=${q.question_number ?? '?'}, bbox_y=${bbox?.y ?? '?'}, content=${q.content?.substring(0, 30) || ''}`)
+      console.log(`  [${i}] id=${q.id?.substring(0,8)}, y=${bbox?.y ?? '?'}, x=${bbox?.x ?? '?'}, w=${bbox?.width ?? '?'}, h=${bbox?.height ?? '?'}, content="${q.content?.substring(0,40) || ''}..."`)
     })
-    // 按 bbox.y 排序（从上到下）
-    const sorted = [...qs].sort((a, b) => {
-      const ay = a.block_coordinates?.y ?? Infinity
-      const by = b.block_coordinates?.y ?? Infinity
-      return ay - by
-    })
-    console.log('=== 排序后 ===')
-    sorted.forEach((q, i) => {
-      const bbox = q.block_coordinates
-      console.log(`[${i}] id=${q.id}, question_number=${q.question_number ?? '?'}, bbox_y=${bbox?.y ?? '?'}, content=${q.content?.substring(0, 30) || ''}`)
-    })
-    return sorted
+    return qs
   }, [questions])
   const wrongIdMap = useMemo(() => {
     const map = {}
@@ -574,22 +562,8 @@ export default function ExamReview({ task, onClose, onSave }) {
             const ratioW = renderedSize.w / imgNaturalSize.w
             const ratioH = renderedSize.h / imgNaturalSize.h
 
-            // 调试输出
-            if (i === 0) {
-              console.log('题号框定位调试:', {
-                bbox: { x: bbox.x, y: bbox.y, w: bbox.width, h: bbox.height },
-                renderedSize,
-                imgNaturalSize,
-                imgPadding,
-                ratio: { w: ratioW, h: ratioH },
-                computed: {
-                  left: bbox.x * ratioW,
-                  top: bbox.y * ratioH,
-                  width: bbox.width * ratioW,
-                  height: bbox.height * ratioH
-                }
-              })
-            }
+            // 调试输出：打印所有题目的 bbox 映射
+            console.log(`Box [${i}] (${i + 1}号题): bbox=(${bbox.x}, ${bbox.y}, ${bbox.width}x${bbox.height}), rendered=(${ratioW.toFixed(3)}, ${ratioH.toFixed(3)}), => left=${(bbox.x * ratioW).toFixed(1)}, top=${(bbox.y * ratioH).toFixed(1)}, w=${(bbox.width * ratioW).toFixed(1)}, h=${(bbox.height * ratioH).toFixed(1)}, content="${q.content?.substring(0, 30)}..."`)
 
             return (
               <div key={q.id} style={{
