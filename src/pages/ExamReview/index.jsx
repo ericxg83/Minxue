@@ -125,7 +125,28 @@ export default function ExamReview({ task, onClose, onSave }) {
   const containerH = screenSize.h
 
   // ── 派生数据 ──
-  const validQuestions = useMemo(() => questions.filter(Boolean), [questions])
+  // 按 bbox.y 排序，确保数组顺序与试卷从上到下的视觉顺序一致
+  const validQuestions = useMemo(() => {
+    const qs = questions.filter(Boolean)
+    // 调试：打印每道题的 bbox 信息
+    console.log('=== 题目数据 ===')
+    qs.forEach((q, i) => {
+      const bbox = q.block_coordinates
+      console.log(`[${i}] id=${q.id}, question_number=${q.question_number ?? '?'}, bbox_y=${bbox?.y ?? '?'}, content=${q.content?.substring(0, 30) || ''}`)
+    })
+    // 按 bbox.y 排序（从上到下）
+    const sorted = [...qs].sort((a, b) => {
+      const ay = a.block_coordinates?.y ?? Infinity
+      const by = b.block_coordinates?.y ?? Infinity
+      return ay - by
+    })
+    console.log('=== 排序后 ===')
+    sorted.forEach((q, i) => {
+      const bbox = q.block_coordinates
+      console.log(`[${i}] id=${q.id}, question_number=${q.question_number ?? '?'}, bbox_y=${bbox?.y ?? '?'}, content=${q.content?.substring(0, 30) || ''}`)
+    })
+    return sorted
+  }, [questions])
   const wrongIdMap = useMemo(() => {
     const map = {}
     ;(Array.isArray(wrongQuestions) ? wrongQuestions : []).forEach(wq => {
@@ -506,7 +527,7 @@ export default function ExamReview({ task, onClose, onSave }) {
 
   // ══════════════════════════════════════════════
   // ── 试卷背景层 + 高亮框覆盖层（完全静态，不联动） ──
-  // ══════════════════════════════════════════════
+  // ════════════════════════════════════════════
   const renderExamImage = () => {
     const availH = containerH - panelH
 
