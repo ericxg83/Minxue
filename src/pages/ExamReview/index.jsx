@@ -98,7 +98,9 @@ export default function ExamReview({ task, onClose, onSave }) {
 
   // 图片原始尺寸
   const [imgNaturalSize, setImgNaturalSize] = useState({ w: 0, h: 0 })
-  // 图片实际 DOM 渲染尺寸（通过 getBoundingClientRect 获取）
+  // 理论 contain 缩放比例（用于初始图片尺寸计算）
+  const [containScale, setContainScale] = useState(0)
+  // 图片实际 DOM 渲染尺寸（通过 getBoundingClientRect 获取，用于 OCR 框定位）
   const [imgRenderedSize, setImgRenderedSize] = useState({ w: 0, h: 0 })
   // 图片在容器中的偏移量（Contain 留白）
   const [imgPadding, setImgPadding] = useState({ left: 0, top: 0 })
@@ -171,7 +173,7 @@ export default function ExamReview({ task, onClose, onSave }) {
     return () => { cancelled = true }
   }, [task?.id])
 
-  // ── 图片加载后：通过 DOM getBoundingClientRect 获取真实渲染尺寸 ──
+  // ─ 计算 Contain 缩放比例（纯数学计算，不依赖 DOM） ──
   useEffect(() => {
     if (!imgNaturalSize.w || !containerW || !containerH) return
 
@@ -183,9 +185,15 @@ export default function ExamReview({ task, onClose, onSave }) {
     const scaleY = availH / imgNaturalSize.h
     const scale = Math.min(scaleX, scaleY)
 
+    setContainScale(scale)
+
+    // 理论渲染尺寸（与 DOM 渲染一致，用于图片尺寸设置）
+    const theoW = imgNaturalSize.w * scale
+    const theoH = imgNaturalSize.h * scale
+
     // 计算留白偏移
-    const padLeft = (containerW - imgNaturalSize.w * scale) / 2
-    const padTop = (availH - imgNaturalSize.h * scale) / 2
+    const padLeft = (containerW - theoW) / 2
+    const padTop = (availH - theoH) / 2
     setImgPadding({ left: padLeft, top: padTop })
 
     // 初始化面板高度
@@ -202,20 +210,16 @@ export default function ExamReview({ task, onClose, onSave }) {
 
     const updateSize = () => {
       const rect = el.getBoundingClientRect()
-      console.log('=== DOM Image Size ===', {
-        rectW: rect.width,
-        rectH: rect.height,
-        naturalW: el.naturalWidth,
-        naturalH: el.naturalHeight,
-        ratioW: rect.width / el.naturalWidth,
-        ratioH: rect.height / el.naturalHeight
-      })
+      // 非零保护：DOM 还未渲染完成，忽略
+      if (rect.width === 0 || rect.height === 0) return
+      if (!el.naturalWidth || !el.naturalHeight) return
+
       setImgRenderedSize({ w: rect.width, h: rect.height })
     }
 
-    // 图片加载完成后立即获取
+    // 图片加载完成后，延迟两帧确保 CSS 布局已完成
     if (el.complete && el.naturalWidth) {
-      updateSize()
+      requestAnimationFrame(() => requestAnimationFrame(updateSize))
     }
 
     const ro = new ResizeObserver(updateSize)
@@ -223,9 +227,20 @@ export default function ExamReview({ task, onClose, onSave }) {
     return () => ro.disconnect()
   }, [imgNaturalSize, isPC, panelH])
 
-  // ── 图片 onLoad ─
+  // ── 图片 onLoad：此时图片已完全渲染，必定能拿到非零尺寸 ──
   const handleImageLoad = useCallback((e) => {
-    setImgNaturalSize({ w: e.target.naturalWidth, h: e.target.naturalHeight })
+    const img = e.target
+    setImgNaturalSize({ w: img.naturalWidth, h: img.naturalHeight })
+
+    // 延迟两帧确保 CSS 布局已完成
+    requestAnimationFrame(() => {
+      requestAnimationFrame(() => {
+        const rect = img.getBoundingClientRect()
+        if (rect.width > 0 && rect.height > 0 && img.naturalWidth > 0) {
+          setImgRenderedSize({ w: rect.width, h: rect.height })
+        }
+      })
+    })
   }, [])
 
   // ── 题号切换：仅切换面板数据，不移动图片 ──
@@ -543,27 +558,36 @@ export default function ExamReview({ task, onClose, onSave }) {
   const renderExamImage = () => {
     const availH = containerH - panelH
 
-    // 关键：使用 DOM getBoundingClientRect 获取的真实渲染尺寸计算比例
+    // 关键：图片用理论 containScale 渲染（非零，确保图片能显示）
+    // OCR 框用 DOM 实测比例定位（确保精准）
+    const displayScale = containScale || 0
+    const displayW = imgNaturalSize.w * displayScale
+    const displayH = imgNaturalSize.h * displayScale
+
+    // DOM 实测比例（用于 OCR 框定位）
     const hasDOMSize = imgRenderedSize.w > 0 && imgRenderedSize.h > 0
-    const ratioW = hasDOMSize ? imgRenderedSize.w / imgNaturalSize.w : 0
-    const ratioH = hasDOMSize ? imgRenderedSize.h / imgNaturalSize.h : 0
+    const ratioW = hasDOMSize ? imgRenderedSize.w / imgNaturalSize.w : displayScale
+    const ratioH = hasDOMSize ? imgRenderedSize.h / imgNaturalSize.h : displayScale
 
     // 计算图片在可见区域内的位置（相对于 examArea）
     const imgTop = imgPadding.top
     const imgLeft = imgPadding.left
 
     // 调试输出
+    console.log('=== Box Calculation ===', {
+      displayScale: displayScale.toFixed(4),
+      hasDOMSize,
+      ratioW: ratioW.toFixed(4),
+      ratioH: ratioH.toFixed(4),
+      displayW: displayW.toFixed(1),
+      displayH: displayH.toFixed(1),
+      imgRenderedSize: `${imgRenderedSize.w.toFixed(1)}x${imgRenderedSize.h.toFixed(1)}`
+    })
     if (hasDOMSize) {
-      console.log('=== Box Calculation (DOM-based) ===')
-      console.log(`  availH=${availH}, containerW=${containerW}`)
-      console.log(`  imgNaturalSize=${imgNaturalSize.w}x${imgNaturalSize.h}`)
-      console.log(`  imgRenderedSize (DOM)=${imgRenderedSize.w.toFixed(1)}x${imgRenderedSize.h.toFixed(1)}`)
-      console.log(`  imgPadding={left:${imgLeft}, top:${imgTop}}`)
-      console.log(`  ratioW=${ratioW.toFixed(4)}, ratioH=${ratioH.toFixed(4)}`)
       validQuestions.forEach((q, i) => {
         const bbox = q.block_coordinates
         if (!bbox) return
-        console.log(`  Box [${i}] (${i+1}号): bbox.y=${bbox.y} => top=${(imgTop + bbox.y * ratioH).toFixed(1)}px, bbox.x=${bbox.x} => left=${(imgLeft + bbox.x * ratioW).toFixed(1)}px, content="${q.content?.substring(0,30)}..."`)
+        console.log(`  Box [${i}] (${i+1}号): bbox=(${bbox.x},${bbox.y},${bbox.width}x${bbox.height}) => top=${(imgTop + bbox.y * ratioH).toFixed(1)}px, left=${(imgLeft + bbox.x * ratioW).toFixed(1)}px, w=${(bbox.width * ratioW).toFixed(1)}, h=${(bbox.height * ratioH).toFixed(1)}, content="${q.content?.substring(0,30)}..."`)
       })
     }
 
@@ -575,7 +599,7 @@ export default function ExamReview({ task, onClose, onSave }) {
         overflow: 'hidden', zIndex: 1,
         transition: isDragging ? 'none' : 'height 0.3s cubic-bezier(0.25, 0.46, 0.45, 0.94)'
       }}>
-        {/* ─ 试卷背景图 ─ */}
+        {/*  试卷背景图 ─ */}
         <img
           ref={imgElRef}
           src={task.image_url}
@@ -585,8 +609,8 @@ export default function ExamReview({ task, onClose, onSave }) {
             position: 'absolute',
             left: imgPadding.left,
             top: imgPadding.top,
-            width: imgNaturalSize.w > 0 ? (imgNaturalSize.w * ratioW) : '100%',
-            height: imgNaturalSize.h > 0 ? (imgNaturalSize.h * ratioH) : '100%',
+            width: imgNaturalSize.w > 0 ? `${displayW}px` : '100%',
+            height: imgNaturalSize.h > 0 ? `${displayH}px` : '100%',
             userSelect: 'none',
             pointerEvents: 'none',
             display: 'block'
@@ -594,50 +618,48 @@ export default function ExamReview({ task, onClose, onSave }) {
         />
 
         {/* ─ 高亮框覆盖层：与图片完全重合 ── */}
-        {hasDOMSize && (
-          <div style={{
-            position: 'absolute',
-            left: imgLeft,
-            top: imgTop,
-            width: imgRenderedSize.w,
-            height: imgRenderedSize.h,
-            pointerEvents: 'none'
-          }}>
-            {validQuestions.map((q, i) => {
-              const bbox = q.block_coordinates
-              if (!bbox) return null
-              const isCurrent = i === currentIndex
+        <div style={{
+          position: 'absolute',
+          left: imgLeft,
+          top: imgTop,
+          width: displayW,
+          height: displayH,
+          pointerEvents: 'none'
+        }}>
+          {validQuestions.map((q, i) => {
+            const bbox = q.block_coordinates
+            if (!bbox) return null
+            const isCurrent = i === currentIndex
 
-              return (
-                <div key={q.id} style={{
-                  position: 'absolute',
-                  left: bbox.x * ratioW,
-                  top: bbox.y * ratioH,
-                  width: bbox.width * ratioW,
-                  height: bbox.height * ratioH,
-                  border: `2.5px solid ${isCurrent ? '#2563EB' : 'rgba(255,255,255,0.35)'}`,
-                  borderRadius: '8px', zIndex: 2,
-                  transition: 'border-color 0.3s, background 0.3s',
-                  background: isCurrent ? 'rgba(37,99,235,0.08)' : 'transparent'
+            return (
+              <div key={q.id} style={{
+                position: 'absolute',
+                left: bbox.x * ratioW,
+                top: bbox.y * ratioH,
+                width: bbox.width * ratioW,
+                height: bbox.height * ratioH,
+                border: `2.5px solid ${isCurrent ? '#2563EB' : 'rgba(255,255,255,0.35)'}`,
+                borderRadius: '8px', zIndex: 2,
+                transition: 'border-color 0.3s, background 0.3s',
+                background: isCurrent ? 'rgba(37,99,235,0.08)' : 'transparent'
+              }}>
+                <div style={{
+                  position: 'absolute', left: '50%', top: '50%',
+                  transform: 'translate(-50%, -50%)',
+                  width: isCurrent ? 36 : 28, height: isCurrent ? 36 : 28,
+                  borderRadius: '50%',
+                  background: isCurrent ? COLORS.primary : 'rgba(255,255,255,0.88)',
+                  color: isCurrent ? '#fff' : COLORS.text,
+                  fontSize: isCurrent ? 15 : 13, fontWeight: 700,
+                  display: 'flex', alignItems: 'center', justifyContent: 'center',
+                  boxShadow: '0 2px 8px rgba(0,0,0,0.25)', transition: 'all 0.3s'
                 }}>
-                  <div style={{
-                    position: 'absolute', left: '50%', top: '50%',
-                    transform: 'translate(-50%, -50%)',
-                    width: isCurrent ? 36 : 28, height: isCurrent ? 36 : 28,
-                    borderRadius: '50%',
-                    background: isCurrent ? COLORS.primary : 'rgba(255,255,255,0.88)',
-                    color: isCurrent ? '#fff' : COLORS.text,
-                    fontSize: isCurrent ? 15 : 13, fontWeight: 700,
-                    display: 'flex', alignItems: 'center', justifyContent: 'center',
-                    boxShadow: '0 2px 8px rgba(0,0,0,0.25)', transition: 'all 0.3s'
-                  }}>
-                    {i + 1}
-                  </div>
+                  {i + 1}
                 </div>
-              )
-            })}
-          </div>
-        )}
+              </div>
+            )
+          })}
+        </div>
       </div>
     )
   }
