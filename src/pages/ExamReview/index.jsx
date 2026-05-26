@@ -112,6 +112,7 @@ export default function ExamReview({ task, onClose, onSave }) {
   const startYRef = useRef(0)
   const startPanelHRef = useRef(0)
   const imgRef = useRef(null)
+  const containerElRef = useRef(null)    // PC 模拟器容器 ref
 
   // ── 窗口 resize ──
   useEffect(() => {
