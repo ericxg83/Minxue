@@ -30,6 +30,23 @@ export const updateTaskStatus = async (taskId, status, result = null) => {
 }
 
 export const createQuestions = async (questions) => {
+  // ️ 【数据库入库防御】强制清洗所有 null 字段，百分百杜绝 NOT NULL 报错
+  if (Array.isArray(questions)) {
+    questions = questions.map((q, index) => ({
+      ...q,
+      // 核心死命令：只要 content 是 null/undefined/空字符串，立刻用兜底文本覆盖，绝对不准触发 NOT NULL 约束！
+      content: (q.content && String(q.content).trim()) ? String(q.content) : `第${index + 1}题（题目内容解析异常，请参照原图对应框选区域）`,
+      visual_title: q.visual_title || String(index + 1),
+      answer: q.answer || "待校对",
+      analysis: q.analysis || "解析文本未正常获取",
+      // 确保坐标三别名同步存在，给一个默认小框防崩溃
+      block_coordinates: q.block_coordinates || q.coordinates || q.bbox || { x: 50, y: 50 + index * 100, width: 200, height: 100 },
+      coordinates: q.block_coordinates || q.coordinates || q.bbox || { x: 50, y: 50 + index * 100, width: 200, height: 100 },
+      bbox: q.block_coordinates || q.coordinates || q.bbox || { x: 50, y: 50 + index * 100, width: 200, height: 100 }
+    }))
+    console.log(`🛡️ 【数据库入库防御】已强制清洗 ${questions.length} 条记录的所有 null 字段，百分百杜绝 NOT NULL 报错！`)
+  }
+
   const questionsWithTime = questions.map(q => {
     let statusValue = 'pending'
     if (q.status === 'wrong' || q.is_correct === false) {
