@@ -458,69 +458,49 @@ const recognizeQuestions = async (imageBase64, taskId, retryCount = 0) => {
     const jsonMatch = content.match(/```json\s*([\s\S]*?)\s*```/)
     jsonStr = jsonMatch ? jsonMatch[1] : content
 
-    let result = null
+    // 初始化默认结构，确保后续代码不会因为 undefined 崩溃
+    let parsedData = { questions: [], block_coordinates: null }
 
     try {
-      // 1. 先将真正的内部换行和特殊空白标准化（替换为安全的转义符，而不是直接删掉）
-      jsonStr = jsonStr.trim()
+      // 预清洗：保护数学公式，去除破坏 JSON 结构的物理换行
+      let cleanedStr = jsonStr.trim()
+        .replace(/\r?\n/g, ' ')    // 物理换行替换为空格
+        .replace(/\\+/g, '\\\\')   // 保护 LaTeX 反斜杠
 
-      // 2. 尝试直接解析
-      result = JSON.parse(jsonStr)
-      console.log(`✅ JSON 首次解析成功`)
+      const result = JSON.parse(cleanedStr)
+      if (result) {
+        parsedData = { ...parsedData, ...result }
+      }
+      console.log(`✅ JSON 解析成功，共 ${parsedData.questions.length} 道题`)
     } catch (e) {
-      console.error(`⚠️ 标准 JSON.parse 失败，启动增强容错清洗...`)
+      console.error(`⚠️ 标准 JSON 解析失败，启动高级健壮性保底清洗...`)
       console.error(`   原始错误: ${e.message}`)
 
-      try {
-        // 容错清洗：修复常见的 LaTeX 换行、未转义引号等问题
-        let fixedStr = jsonStr
-          .replace(/\n/g, ' ')     // 物理换行先用空格替代，防止切断字符串
-          .replace(/\\n/g, '\\\\n') // 保护大模型返回的字面量 \n
-          .replace(/\\+/g, '\\\\')  // 保护数学公式的反斜杠
-
-        result = JSON.parse(fixedStr)
-        console.log(`✅ JSON 容错解析成功`)
-      } catch (innerError) {
-        console.error(`❌ 容错解析依然失败，尝试降级提取关键字段 block_coordinates...`)
-        console.error(`   原始错误: ${innerError.message}`)
-
-        // 保底策略：如果整段 JSON 因为公式死锁，用正则强行把 block_coordinates 抠出来
-        // 绝不能返回 null！
-        const coordRegex = /"block_coordinates"\s*:\s*\{\s*"x"\s*:\s*(\d+)\s*,\s*"y"\s*:\s*(\d+)\s*,\s*"width"\s*:\s*(\d+)\s*,\s*"height"\s*:\s*(\d+)\s*\}/g
-        const coords = []
-        let match
-        while ((match = coordRegex.exec(jsonStr)) !== null) {
-          coords.push({
-            x: parseInt(match[1]),
-            y: parseInt(match[2]),
-            width: parseInt(match[3]),
-            height: parseInt(match[4])
-          })
+      // 保底动作 1：精准正则抠取坐标
+      const coordMatch = jsonStr.match(/"block_coordinates"\s*:\s*(\[[^\]]+\])/)
+      if (coordMatch) {
+        try {
+          parsedData.block_coordinates = JSON.parse(coordMatch[1])
+          console.log(`🎯 成功保底硬提取坐标:`, parsedData.block_coordinates)
+        } catch (cError) {
+          console.error(`   提取坐标失败:`, cError.message)
         }
+      }
 
-        if (coords.length > 0) {
-          console.log(`✅ 保底提取成功！共 ${coords.length} 个坐标`)
-          // 构建最小可用结果，保留坐标数据
-          result = { questions: coords.map((c, i) => ({
-            question_id: `q_${i}`,
-            content: `第${i + 1}题 (坐标已提取，内容需人工核对)`,
-            block_coordinates: c,
-            is_correct: true,
-            confidence: 0.5,
-            question_type: 'fill'
-          })) }
-        } else {
-          console.error(`   保底提取也失败了，无法从 AI 响应中提取任何数据`)
-          throw new Error(`AI 返回的 JSON 格式严重错误，无法解析`)
-        }
+      // 保底动作 2：阻止程序崩溃！如果整个 JSON 碎了，伪造一个空的 questions 数组防止后续数据库操作报错
+      if (!parsedData.questions || !Array.isArray(parsedData.questions)) {
+        parsedData.questions = []
+        console.log(`⚠️ 未找到 questions 数组，使用空数组兜底`)
       }
     }
 
-    if (!result || !result.questions || result.questions.length === 0) {
-      throw new Error('AI 返回的结果中没有找到 questions 数组')
+    // 强制防御拦截：如果真的什么都没拿到，也必须正常结束任务，绝对不允许卡死队列
+    if (!parsedData || (!parsedData.block_coordinates && parsedData.questions.length === 0)) {
+      console.error(`❌ 任务解析彻底失败，强制标记失败释放 Redis 锁`)
+      throw new Error('AI_PARSE_ERROR: 无法从 AI 响应中提取任何有效数据')
     }
 
-    const questions = result.questions?.map((q, index) => {
+    const questions = parsedData.questions?.map((q, index) => {
       const rawStudentAnswer = q.student_answer || ''
       const answerSource = determineAnswerSource(rawStudentAnswer)
       const aiAnswer = rawStudentAnswer
