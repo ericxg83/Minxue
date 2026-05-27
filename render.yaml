@@ -18,7 +18,7 @@ services:
       - key: AI_ENDPOINT
         value: https://api-inference.modelscope.cn/v1/chat/completions
       - key: AI_MODEL
-        value: Qwen/Qwen2-VL-7B-Instruct
+        value: Qwen/Qwen-VL-Chat
       - key: OSS_REGION
         value: oss-cn-shanghai
       - key: OSS_BUCKET
