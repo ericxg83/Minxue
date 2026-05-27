@@ -8,7 +8,7 @@ export const AI_CONFIG = {
     if (!key) console.error('⚠️ [AI_CONFIG] 未找到有效的 API KEY (SILICONFLOW_API_KEY 或 AI_API_KEY)')
     return key
   },
-  get MODEL() { return process.env.AI_MODEL || 'Qwen/Qwen2.5-VL-7B' },
+  get MODEL() { return process.env.AI_MODEL || 'Qwen/Qwen3-VL-8B-Instruct' },
   TIMEOUT: 120000,
   MAX_RETRIES: 2
 }

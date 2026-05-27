@@ -20,7 +20,7 @@ services:
       - key: AI_ENDPOINT
         value: https://api.siliconflow.cn/v1/chat/completions
       - key: AI_MODEL
-        value: Qwen/Qwen2.5-VL-7B
+        value: Qwen/Qwen3-VL-8B-Instruct
       - key: OSS_REGION
         value: oss-cn-shanghai
       - key: OSS_BUCKET
