@@ -600,12 +600,18 @@ const recognizeQuestions = async (imageBase64, taskId, retryCount = 0) => {
     }
 
     const isNetworkError = !error.response || error.code === 'ECONNABORTED' || error.code === 'ETIMEDOUT'
+    const isTimeout = error.code === 'ECONNABORTED' || error.code === 'ETIMEDOUT'
     const shouldRetry = isNetworkError && retryCount < AI_CONFIG.MAX_RETRIES
 
     if (shouldRetry) {
       console.log(`   ${retryCount + 1}秒后重试 (${retryCount + 1}/${AI_CONFIG.MAX_RETRIES})...`)
       await new Promise(resolve => setTimeout(resolve, (retryCount + 1) * 1000))
       return recognizeQuestions(imageBase64, taskId, retryCount + 1)
+    }
+
+    // 当重试用尽，如果是超时错误，则确保任务优雅退出（不会死锁）
+    if (isTimeout) {
+      console.log(`   ⚠️ AI 请求超时且重试已用尽，任务将标记为失败并释放队列锁...`)
     }
 
     return {

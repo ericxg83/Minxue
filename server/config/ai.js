@@ -9,7 +9,7 @@ export const AI_CONFIG = {
     return key
   },
   get MODEL() { return process.env.AI_MODEL || 'Qwen/Qwen3-VL-8B-Instruct' },
-  TIMEOUT: 120000,
+  TIMEOUT: 50000, // 50秒硬超时，防止Render平台因无数据传输而强杀
   MAX_RETRIES: 2
 }
 
