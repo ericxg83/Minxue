@@ -455,35 +455,53 @@ const recognizeQuestions = async (imageBase64, taskId, retryCount = 0) => {
     console.log(`   🔥 [RAW_RESPONSE_END]`)
 
     let jsonStr = content
-    const jsonMatch = content.match(/```json\n?([\s\S]*?)\n?```/) ||
-                      content.match(/```\n?([\s\S]*?)\n?```/)
-    if (jsonMatch) jsonStr = jsonMatch[1]
+    const jsonMatch = content.match(/```json\s*([\s\S]*?)\s*```/)
+    jsonStr = jsonMatch ? jsonMatch[1] : content
 
-    let result
+    let result = null
+
     try {
+      // 1. 先将真正的内部换行和特殊空白标准化（替换为安全的转义符，而不是直接删掉）
+      jsonStr = jsonStr.trim()
+
+      // 2. 尝试直接解析
       result = JSON.parse(jsonStr)
       console.log(`✅ JSON 首次解析成功`)
-    } catch (parseError) {
-      console.warn(`⚠️  AI JSON 解析失败，尝试深度修复...`)
-      console.warn(`   原始错误: ${parseError.message}`)
-
-      // 优先使用深度修复（状态机 + 坐标保护）
-      const repaired = deepRepairAIJson(jsonStr)
-      console.log(`   深度修复后 JSON (前300字): ${repaired.substring(0, 300)}...`)
+    } catch (e) {
+      console.error(`⚠️ 标准 JSON.parse 失败，启动增强容错清洗...`)
+      console.error(`   原始错误: ${e.message}`)
 
       try {
-        result = JSON.parse(repaired)
-        console.log(`✅ JSON 深度修复成功！`)
-      } catch (repairError) {
-        console.error(`❌ JSON 深度修复仍然失败: ${repairError.message}`)
-        console.error(`   尝试保底提取 block_coordinates...`)
+        // 容错清洗：修复常见的 LaTeX 换行、未转义引号等问题
+        let fixedStr = jsonStr
+          .replace(/\n/g, ' ')     // 物理换行先用空格替代，防止切断字符串
+          .replace(/\\n/g, '\\\\n') // 保护大模型返回的字面量 \n
+          .replace(/\\+/g, '\\\\')  // 保护数学公式的反斜杠
 
-        // 保底：正则提取坐标
-        const extractedCoords = extractCoordsFromBrokenJson(jsonStr)
-        if (extractedCoords.length > 0) {
-          console.log(`✅ 保底提取成功！共 ${extractedCoords.length} 个坐标，但其他字段可能丢失`)
-          // 构建最小可用结果
-          result = { questions: extractedCoords.map((c, i) => ({
+        result = JSON.parse(fixedStr)
+        console.log(`✅ JSON 容错解析成功`)
+      } catch (innerError) {
+        console.error(`❌ 容错解析依然失败，尝试降级提取关键字段 block_coordinates...`)
+        console.error(`   原始错误: ${innerError.message}`)
+
+        // 保底策略：如果整段 JSON 因为公式死锁，用正则强行把 block_coordinates 抠出来
+        // 绝不能返回 null！
+        const coordRegex = /"block_coordinates"\s*:\s*\{\s*"x"\s*:\s*(\d+)\s*,\s*"y"\s*:\s*(\d+)\s*,\s*"width"\s*:\s*(\d+)\s*,\s*"height"\s*:\s*(\d+)\s*\}/g
+        const coords = []
+        let match
+        while ((match = coordRegex.exec(jsonStr)) !== null) {
+          coords.push({
+            x: parseInt(match[1]),
+            y: parseInt(match[2]),
+            width: parseInt(match[3]),
+            height: parseInt(match[4])
+          })
+        }
+
+        if (coords.length > 0) {
+          console.log(`✅ 保底提取成功！共 ${coords.length} 个坐标`)
+          // 构建最小可用结果，保留坐标数据
+          result = { questions: coords.map((c, i) => ({
             question_id: `q_${i}`,
             content: `第${i + 1}题 (坐标已提取，内容需人工核对)`,
             block_coordinates: c,
@@ -493,12 +511,12 @@ const recognizeQuestions = async (imageBase64, taskId, retryCount = 0) => {
           })) }
         } else {
           console.error(`   保底提取也失败了，无法从 AI 响应中提取任何数据`)
-          throw new Error(`AI 返回的 JSON 格式严重错误，无法解析。原始错误: ${parseError.message}`)
+          throw new Error(`AI 返回的 JSON 格式严重错误，无法解析`)
         }
       }
     }
 
-    if (!result.questions || result.questions.length === 0) {
+    if (!result || !result.questions || result.questions.length === 0) {
       throw new Error('AI 返回的结果中没有找到 questions 数组')
     }
 
