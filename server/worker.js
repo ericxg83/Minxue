@@ -461,15 +461,26 @@ const recognizeQuestions = async (imageBase64, taskId, retryCount = 0) => {
     // 初始化默认结构，确保后续代码不会因为 undefined 崩溃
     let parsedData = { questions: [], block_coordinates: null }
 
-    // ===== 终极保底防御：在任何解析之前，先把最重要的坐标通过正则死死抠出来 =====
-    const coordMatch = jsonStr.match(/"block_coordinates"\s*:\s*(\[[^\]]+\])/)
-    if (coordMatch) {
-      try {
-        parsedData.block_coordinates = JSON.parse(coordMatch[1])
-        console.log(` 【终极保底成功】强行抠出真实像素坐标:`, parsedData.block_coordinates)
-      } catch (coordError) {
-        console.error(`❌ 正则抠取坐标失败:`, coordError.message)
-      }
+    // ===== 终极保底防御：在任何 JSON.parse 执行前，用正则死死把 block_coordinates 抠出来 =====
+    // block_coordinates 是每道题内部的对象: { "x": 100, "y": 200, "width": 800, "height": 150 }
+    const coordPattern = /"block_coordinates"\s*:\s*\{\s*"x"\s*:\s*(-?\d+)\s*,\s*"y"\s*:\s*(-?\d+)\s*,\s*"width"\s*:\s*(-?\d+)\s*,\s*"height"\s*:\s*(-?\d+)\s*\}/g
+    const extractedCoords = []
+    let cMatch
+    while ((cMatch = coordPattern.exec(jsonStr)) !== null) {
+      extractedCoords.push({
+        x: parseInt(cMatch[1]),
+        y: parseInt(cMatch[2]),
+        width: parseInt(cMatch[3]),
+        height: parseInt(cMatch[4])
+      })
+    }
+
+    if (extractedCoords.length > 0) {
+      console.log(` 【终极保底成功】强行剥离出 ${extractedCoords.length} 个真实像素坐标:`, extractedCoords)
+      // 将坐标暂存，后续可用来重建或验证
+      parsedData._extracted_coords = extractedCoords
+    } else {
+      console.log(`⚠️ 正则未匹配到 block_coordinates 对象，将依赖 JSON.parse 路径`)
     }
 
     // ===== 接下来再去尝试解析文本内容 =====
