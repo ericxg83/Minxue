@@ -461,24 +461,25 @@ const recognizeQuestions = async (imageBase64, taskId, retryCount = 0) => {
     // 初始化默认结构，确保后续代码不会因为 undefined 崩溃
     let parsedData = { questions: [], block_coordinates: null }
 
-    // ===== 终极保底防御：在任何 JSON.parse 执行前，用正则死死把 block_coordinates 抠出来 =====
-    // block_coordinates 是每道题内部的对象: { "x": 100, "y": 200, "width": 800, "height": 150 }
-    const coordPattern = /"block_coordinates"\s*:\s*\{\s*"x"\s*:\s*(-?\d+)\s*,\s*"y"\s*:\s*(-?\d+)\s*,\s*"width"\s*:\s*(-?\d+)\s*,\s*"height"\s*:\s*(-?\d+)\s*\}/g
+    // ===== 【终极物理外挂】：无视任何 JSON 结构报错，直接在原始文本中强抠 <box> 标签！ =====
+    const boxRegex = /<box>\s*([\d.]+)\s*,\s*([\d.]+)\s*,\s*([\d.]+)\s*,\s*([\d.]+)\s*<\/box>/g
     const extractedCoords = []
-    let cMatch
-    while ((cMatch = coordPattern.exec(jsonStr)) !== null) {
+    let bMatch
+    while ((bMatch = boxRegex.exec(content)) !== null) {
       extractedCoords.push({
-        x: parseInt(cMatch[1]),
-        y: parseInt(cMatch[2]),
-        width: parseInt(cMatch[3]),
-        height: parseInt(cMatch[4])
+        x: parseFloat(bMatch[1]),
+        y: parseFloat(bMatch[2]),
+        width: parseFloat(bMatch[3]),
+        height: parseFloat(bMatch[4])
       })
     }
 
+    // 只要抓到了真实坐标，立刻按 y 轴从上到下排序，并作为最高优先级的真理数据！
     if (extractedCoords.length > 0) {
-      console.log(` 【终极保底成功】强行剥离出 ${extractedCoords.length} 个真实像素坐标:`, extractedCoords)
+      extractedCoords.sort((a, b) => a.y - b.y)
+      console.log(`🎯 【外挂提取成功】无视 JSON，成功强抠出 ${extractedCoords.length} 个真实题目坐标！`, extractedCoords)
     } else {
-      console.log(`️ 正则未匹配到 block_coordinates 对象，将依赖 JSON.parse 路径`)
+      console.log(`️ 正则未匹配到 <box> 坐标标签，将依赖 JSON.parse 路径`)
     }
 
     // ===== 接下来再去尝试解析文本内容 =====
@@ -486,34 +487,36 @@ const recognizeQuestions = async (imageBase64, taskId, retryCount = 0) => {
       let cleanedStr = jsonStr.trim()
         .replace(/\r?\n/g, ' ')    // 强制把真实换行变为空格，防止断裂
         .replace(/\\+/g, '\\\\')   // 保护反斜杠
+        .replace(/<box>.*?<\/box>/g, '') // 清理 <box> 标签防止 JSON.parse 干扰
 
       const result = JSON.parse(cleanedStr)
       if (result && result.questions) {
         parsedData.questions = result.questions
 
-        // 如果 JSON 解析出来的题目没有 block_coordinates，用正则提取的坐标回填
+        // 如果 JSON 解析出来的题目没有 block_coordinates，用外挂提取的坐标回填
         if (extractedCoords.length > 0) {
           for (let i = 0; i < parsedData.questions.length && i < extractedCoords.length; i++) {
-            if (!parsedData.questions[i].block_coordinates) {
-              parsedData.questions[i].block_coordinates = extractedCoords[i]
-              console.log(`   ✅ 坐标回填：第${i + 1}题补充了正则提取的坐标`)
-            }
+            // 外挂提取的坐标是最高优先级真理数据，强制覆盖 JSON 中的不可靠坐标
+            parsedData.questions[i].block_coordinates = extractedCoords[i]
+            parsedData.questions[i].coordinates = extractedCoords[i]
+            parsedData.questions[i].bbox = extractedCoords[i]
           }
+          console.log(`   ✅ 坐标强制覆盖：用外挂提取的 ${extractedCoords.length} 个真实坐标替换了 JSON 中的不可靠数据`)
         }
       }
       console.log(`✅ 题目文本解析成功，共 ${parsedData.questions.length} 道题`)
     } catch (e) {
-      console.error(`️ 题目文本解析确实炸了，但没关系，我们的坐标已经安全拿到了！`)
+      console.error(`️ 题目文本解析确实炸了，但没关系，我们的外挂坐标已经安全拿到了！`)
       console.error(`   原始错误: ${e.message}`)
 
-      // 保底动作：如果整体 JSON 炸了，用正则提取的坐标重建最小可用的 questions 数组
+      // 【暴力重建】用外挂提取的坐标重组 questions 数组
       if (extractedCoords.length > 0) {
-        console.log(`   🔄 用正则提取的 ${extractedCoords.length} 个坐标重建 questions 数组`)
-        // 重建题目数组时，必须填满数据库所需的必填字段（content 绝不能为 null）
-        parsedData.questions = extractedCoords.map((c, i) => ({
-          question_id: String(i + 1),
-          visual_title: String(i + 1),
-          content: `第${i + 1}题（题目内容解析异常，请参照原图对应框选区域）`,
+        console.log(`   🔄 用外挂提取的 ${extractedCoords.length} 个坐标重建 questions 数组`)
+
+        parsedData.questions = extractedCoords.map((coord, index) => ({
+          question_id: String(index + 1),
+          visual_title: String(index + 1),
+          content: `第${index + 1}题（题目内容解析异常，请参照原图对应框选区域）`,
           options: [],
           answer: '待校对',
           student_answer: '',
@@ -521,11 +524,11 @@ const recognizeQuestions = async (imageBase64, taskId, retryCount = 0) => {
           is_correct: null,
           confidence: 0.5,
           question_type: 'fill',
-          block_coordinates: c,
-          coordinates: c,
-          bbox: c
+          block_coordinates: coord,
+          coordinates: coord,
+          bbox: coord
         }))
-        console.log(`✅ 【保底重建成功】已补全必填字段并成功注入坐标别名`)
+        console.log(`🎯 【暴力提取成功】成功抢救出 ${extractedCoords.length} 个真实坐标并重组！`)
       } else {
         // 连坐标也没拿到，给一个空数组防止后续崩溃
         parsedData.questions = []
