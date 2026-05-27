@@ -461,37 +461,42 @@ const recognizeQuestions = async (imageBase64, taskId, retryCount = 0) => {
     // 初始化默认结构，确保后续代码不会因为 undefined 崩溃
     let parsedData = { questions: [], block_coordinates: null }
 
+    // ===== 终极保底防御：在任何解析之前，先把最重要的坐标通过正则死死抠出来 =====
+    const coordMatch = jsonStr.match(/"block_coordinates"\s*:\s*(\[[^\]]+\])/)
+    if (coordMatch) {
+      try {
+        parsedData.block_coordinates = JSON.parse(coordMatch[1])
+        console.log(` 【终极保底成功】强行抠出真实像素坐标:`, parsedData.block_coordinates)
+      } catch (coordError) {
+        console.error(`❌ 正则抠取坐标失败:`, coordError.message)
+      }
+    }
+
+    // ===== 接下来再去尝试解析文本内容 =====
     try {
-      // 预清洗：保护数学公式，去除破坏 JSON 结构的物理换行
       let cleanedStr = jsonStr.trim()
-        .replace(/\r?\n/g, ' ')    // 物理换行替换为空格
-        .replace(/\\+/g, '\\\\')   // 保护 LaTeX 反斜杠
+        .replace(/\r?\n/g, ' ')    // 强制把真实换行变为空格，防止断裂
+        .replace(/\\+/g, '\\\\')   // 保护反斜杠
 
       const result = JSON.parse(cleanedStr)
-      if (result) {
-        parsedData = { ...parsedData, ...result }
+      if (result && result.questions) {
+        parsedData.questions = result.questions
       }
-      console.log(`✅ JSON 解析成功，共 ${parsedData.questions.length} 道题`)
+      console.log(`✅ 题目文本解析成功，共 ${parsedData.questions.length} 道题`)
     } catch (e) {
-      console.error(`⚠️ 标准 JSON 解析失败，启动高级健壮性保底清洗...`)
+      console.error(`️ 题目文本解析确实炸了，但没关系，我们的坐标已经安全拿到了！`)
       console.error(`   原始错误: ${e.message}`)
 
-      // 保底动作 1：精准正则抠取坐标
-      const coordMatch = jsonStr.match(/"block_coordinates"\s*:\s*(\[[^\]]+\])/)
-      if (coordMatch) {
-        try {
-          parsedData.block_coordinates = JSON.parse(coordMatch[1])
-          console.log(`🎯 成功保底硬提取坐标:`, parsedData.block_coordinates)
-        } catch (cError) {
-          console.error(`   提取坐标失败:`, cError.message)
-        }
-      }
-
-      // 保底动作 2：阻止程序崩溃！如果整个 JSON 碎了，伪造一个空的 questions 数组防止后续数据库操作报错
+      // 如果整体 JSON 炸了，伪造一个安全的空数组，防止后续数据库报错卡死
       if (!parsedData.questions || !Array.isArray(parsedData.questions)) {
         parsedData.questions = []
         console.log(`⚠️ 未找到 questions 数组，使用空数组兜底`)
       }
+    }
+
+    // 确保释放 BullMQ 队列锁
+    if (!parsedData.block_coordinates) {
+      console.error(`❌ 连保底正则都没拿到坐标，强制释放任务`)
     }
 
     // 强制防御拦截：如果真的什么都没拿到，也必须正常结束任务，绝对不允许卡死队列
