@@ -1107,9 +1107,12 @@ export const processTask = async (job) => {
 
     console.log(`📊 [Step 4/8] 压缩图片...`)
     let compressedBuffer
+    let compressedMeta
     try {
       compressedBuffer = await compressImageBuffer(straightenedBuffer)
-      console.log(`✅ [Step 4/8] 压缩完成: ${straightenedBuffer.length} → ${compressedBuffer.length} bytes (${Math.round(compressedBuffer.length/straightenedBuffer.length*100)}%)`)
+      // 获取压缩后的图片尺寸（AI 返回的坐标基于此尺寸）
+      compressedMeta = await sharp(compressedBuffer).metadata()
+      console.log(`✅ [Step 4/8] 压缩完成: ${straightenedBuffer.length} → ${compressedBuffer.length} bytes, 压缩尺寸: ${compressedMeta.width}x${compressedMeta.height}`)
     } catch (compressError) {
       console.error('图片压缩失败:', compressError)
       await updateTaskStatus(taskId, TASK_STATUS.FAILED, {
@@ -1124,10 +1127,22 @@ export const processTask = async (job) => {
 
     const imageBase64 = bufferToBase64(compressedBuffer)
 
+    // ─ 坐标换算准备：计算压缩图 → 原图的缩放因子 ──
+    // AI 返回的坐标是基于压缩图（最大1920x1920）的像素坐标
+    // 前端渲染的是原图，所以需要将坐标换算回原图空间
+    const straightenedMeta = await sharp(straightenedBuffer).metadata()
+    const origWidth = straightenedMeta.width
+    const origHeight = straightenedMeta.height
+    const compWidth = compressedMeta.width
+    const compHeight = compressedMeta.height
+    const scaleX = origWidth / compWidth
+    const scaleY = origHeight / compHeight
+    console.log(`   [坐标换算] 压缩图 ${compWidth}x${compHeight} → 原图 ${origWidth}x${origHeight}, scaleX=${scaleX.toFixed(4)}, scaleY=${scaleY.toFixed(4)}`)
+
     await job.updateProgress(35)
     await updateTaskStatus(taskId, TASK_STATUS.PROCESSING, { progress: 35 })
 
-    console.log(`📊 [Step 5/8] 调用 AI 视觉识别...`)
+    console.log(` [Step 5/8] 调用 AI 视觉识别...`)
     const ocrResult = await recognizeQuestions(imageBase64, taskId)
 
     if (!ocrResult.success) {
@@ -1144,6 +1159,35 @@ export const processTask = async (job) => {
     await updateTaskStatus(taskId, TASK_STATUS.PROCESSING, { progress: 70 })
 
     const questions = ocrResult.questions || []
+
+    // ── 坐标换算：将 AI 返回的压缩图坐标还原为原图坐标 ──
+    const needScale = (Math.abs(scaleX - 1) > 0.001 || Math.abs(scaleY - 1) > 0.001)
+    if (questions.length > 0 && needScale) {
+      console.log(`   [坐标换算] 开始将 ${questions.length} 道题的坐标从压缩空间还原到原图空间...`)
+      for (const q of questions) {
+        if (q.block_coordinates && typeof q.block_coordinates.x === 'number') {
+          const orig = q.block_coordinates
+          q.block_coordinates = {
+            x: Math.round(orig.x * scaleX),
+            y: Math.round(orig.y * scaleY),
+            width: Math.round(orig.width * scaleX),
+            height: Math.round(orig.height * scaleY)
+          }
+        }
+        // 几何配图坐标也要换算
+        if (q.geometry_image?.has_image && q.geometry_image.bbox) {
+          const gBbox = q.geometry_image.bbox
+          q.geometry_image.bbox = {
+            x: Math.round(gBbox.x * scaleX),
+            y: Math.round(gBbox.y * scaleY),
+            width: Math.round(gBbox.width * scaleX),
+            height: Math.round(gBbox.height * scaleY)
+          }
+        }
+      }
+      console.log(`   [坐标换算] 完成`)
+    }
+
     let wrongCount = questions.filter(q => !q.is_correct).length
     let answerGenResult = { updated: 0, total: 0, empty: 0, placeholder: 0, exceptions: 0, cacheHits: 0, cacheMisses: 0 }
 
