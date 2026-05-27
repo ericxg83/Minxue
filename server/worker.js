@@ -503,23 +503,29 @@ const recognizeQuestions = async (imageBase64, taskId, retryCount = 0) => {
       }
       console.log(`✅ 题目文本解析成功，共 ${parsedData.questions.length} 道题`)
     } catch (e) {
-      console.error(`⚠️ 题目文本解析确实炸了，但没关系，我们的坐标已经安全拿到了！`)
+      console.error(`️ 题目文本解析确实炸了，但没关系，我们的坐标已经安全拿到了！`)
       console.error(`   原始错误: ${e.message}`)
 
       // 保底动作：如果整体 JSON 炸了，用正则提取的坐标重建最小可用的 questions 数组
       if (extractedCoords.length > 0) {
         console.log(`   🔄 用正则提取的 ${extractedCoords.length} 个坐标重建 questions 数组`)
+        // 重建题目数组时，必须填满数据库所需的必填字段（content 绝不能为 null）
         parsedData.questions = extractedCoords.map((c, i) => ({
-          question_id: `q_${i}`,
-          content: `第${i + 1}题`,
-          block_coordinates: c,
+          question_id: String(i + 1),
+          visual_title: String(i + 1),
+          content: `第${i + 1}题（题目内容解析异常，请参照原图对应框选区域）`,
+          options: [],
+          answer: '待校对',
+          student_answer: '',
+          analysis: '公式解析断裂，已启动坐标强行保底隔离',
           is_correct: null,
           confidence: 0.5,
           question_type: 'fill',
-          answer: '',
-          student_answer: '',
-          analysis: ''
+          block_coordinates: c,
+          coordinates: c,
+          bbox: c
         }))
+        console.log(`✅ 【保底重建成功】已补全必填字段并成功注入坐标别名`)
       } else {
         // 连坐标也没拿到，给一个空数组防止后续崩溃
         parsedData.questions = []
