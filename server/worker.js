@@ -477,10 +477,8 @@ const recognizeQuestions = async (imageBase64, taskId, retryCount = 0) => {
 
     if (extractedCoords.length > 0) {
       console.log(` 【终极保底成功】强行剥离出 ${extractedCoords.length} 个真实像素坐标:`, extractedCoords)
-      // 将坐标暂存，后续可用来重建或验证
-      parsedData._extracted_coords = extractedCoords
     } else {
-      console.log(`⚠️ 正则未匹配到 block_coordinates 对象，将依赖 JSON.parse 路径`)
+      console.log(`️ 正则未匹配到 block_coordinates 对象，将依赖 JSON.parse 路径`)
     }
 
     // ===== 接下来再去尝试解析文本内容 =====
@@ -492,16 +490,39 @@ const recognizeQuestions = async (imageBase64, taskId, retryCount = 0) => {
       const result = JSON.parse(cleanedStr)
       if (result && result.questions) {
         parsedData.questions = result.questions
+
+        // 如果 JSON 解析出来的题目没有 block_coordinates，用正则提取的坐标回填
+        if (extractedCoords.length > 0) {
+          for (let i = 0; i < parsedData.questions.length && i < extractedCoords.length; i++) {
+            if (!parsedData.questions[i].block_coordinates) {
+              parsedData.questions[i].block_coordinates = extractedCoords[i]
+              console.log(`   ✅ 坐标回填：第${i + 1}题补充了正则提取的坐标`)
+            }
+          }
+        }
       }
       console.log(`✅ 题目文本解析成功，共 ${parsedData.questions.length} 道题`)
     } catch (e) {
-      console.error(`️ 题目文本解析确实炸了，但没关系，我们的坐标已经安全拿到了！`)
+      console.error(`⚠️ 题目文本解析确实炸了，但没关系，我们的坐标已经安全拿到了！`)
       console.error(`   原始错误: ${e.message}`)
 
-      // 如果整体 JSON 炸了，伪造一个安全的空数组，防止后续数据库报错卡死
-      if (!parsedData.questions || !Array.isArray(parsedData.questions)) {
+      // 保底动作：如果整体 JSON 炸了，用正则提取的坐标重建最小可用的 questions 数组
+      if (extractedCoords.length > 0) {
+        console.log(`   🔄 用正则提取的 ${extractedCoords.length} 个坐标重建 questions 数组`)
+        parsedData.questions = extractedCoords.map((c, i) => ({
+          question_id: `q_${i}`,
+          content: `第${i + 1}题`,
+          block_coordinates: c,
+          is_correct: null,
+          confidence: 0.5,
+          question_type: 'fill',
+          answer: '',
+          student_answer: '',
+          analysis: ''
+        }))
+      } else {
+        // 连坐标也没拿到，给一个空数组防止后续崩溃
         parsedData.questions = []
-        console.log(`⚠️ 未找到 questions 数组，使用空数组兜底`)
       }
     }
 
