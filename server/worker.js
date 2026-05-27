@@ -543,6 +543,23 @@ const recognizeQuestions = async (imageBase64, taskId, retryCount = 0) => {
       throw new Error('AI_PARSE_ERROR: 无法从 AI 响应中提取任何有效数据')
     }
 
+    // 🎯 【几何重排】强制根据 Y 轴坐标从上到下正序排序，彻底解决"张冠李戴"错位问题
+    if (parsedData && Array.isArray(parsedData.questions) && parsedData.questions.length > 0) {
+      parsedData.questions.sort((a, b) => {
+        const yA = a.block_coordinates?.y || a.coordinates?.y || (Array.isArray(a.bbox) ? a.bbox[1] : a.bbox?.y) || 0
+        const yB = b.block_coordinates?.y || b.coordinates?.y || (Array.isArray(b.bbox) ? b.bbox[1] : b.bbox?.y) || 0
+        return yA - yB
+      })
+
+      // 排序完成后，重新校准题目的题号和 visual_title，确保从 1 开始递增
+      parsedData.questions.forEach((q, index) => {
+        q.question_id = String(index + 1)
+        q.visual_title = String(index + 1)
+      })
+      console.log(`🎯 【几何重排成功】已根据试卷物理 Y 轴位置从上到下重新排列 ${parsedData.questions.length} 道题号顺序！`)
+      console.log(`   排序后首题 y=${parsedData.questions[0].block_coordinates?.y || parsedData.questions[0].coordinates?.y || parsedData.questions[0].bbox?.y}, 末题 y=${parsedData.questions[parsedData.questions.length - 1].block_coordinates?.y || parsedData.questions[parsedData.questions.length - 1].coordinates?.y || parsedData.questions[parsedData.questions.length - 1].bbox?.y}`)
+    }
+
     const questions = parsedData.questions?.map((q, index) => {
       const rawStudentAnswer = q.student_answer || ''
       const answerSource = determineAnswerSource(rawStudentAnswer)
