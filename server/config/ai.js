@@ -3,7 +3,7 @@
 export const AI_CONFIG = {
   get ENDPOINT() { return process.env.AI_ENDPOINT || 'https://api-inference.modelscope.cn/v1/chat/completions' },
   get API_KEY() { return process.env.AI_API_KEY },
-  get MODEL() { return process.env.AI_MODEL || 'Qwen/Qwen2.5-VL-3B-Instruct' },
+  get MODEL() { return process.env.AI_MODEL || 'Qwen/Qwen2-VL-7B-Instruct' },
   TIMEOUT: 120000,
   MAX_RETRIES: 2
 }
