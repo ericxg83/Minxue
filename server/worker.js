@@ -558,6 +558,8 @@ const recognizeQuestions = async (imageBase64, taskId, retryCount = 0) => {
         status = isCorrect === true ? 'correct' : (isCorrect === false ? 'wrong' : 'pending')
       }
 
+      const coord = q.block_coordinates || q.coordinates || q.bbox || null
+
       return {
         id: crypto.randomUUID(),
         task_id: taskId,
@@ -573,7 +575,9 @@ const recognizeQuestions = async (imageBase64, taskId, retryCount = 0) => {
         status: status,
         confidence: q.confidence || 0,
         analysis: q.analysis || '',
-        block_coordinates: q.block_coordinates || null,
+        block_coordinates: coord,
+        coordinates: coord,    // 兼容别名
+        bbox: coord,            // 兼容别名
         created_at: new Date().toISOString()
       }
     }) || []
