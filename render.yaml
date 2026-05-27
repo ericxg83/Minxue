@@ -15,10 +15,12 @@ services:
         sync: false
       - key: AI_API_KEY
         sync: false
+      - key: SILICONFLOW_API_KEY
+        sync: false
       - key: AI_ENDPOINT
-        value: https://api-inference.modelscope.cn/v1/chat/completions
+        value: https://api.siliconflow.cn/v1/chat/completions
       - key: AI_MODEL
-        value: Qwen/Qwen-VL-Chat
+        value: Qwen/Qwen2.5-VL-7B
       - key: OSS_REGION
         value: oss-cn-shanghai
       - key: OSS_BUCKET
