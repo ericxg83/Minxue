@@ -312,6 +312,7 @@ const recognizeQuestions = async (imageBase64, taskId, retryCount = 0) => {
   }
 
   try {
+    console.log(`   🔥 [MODEL] 正在请求模型: ${AI_CONFIG.MODEL}`)
     console.log(`   发送请求到: ${AI_CONFIG.ENDPOINT}`)
     const response = await axios.post(AI_CONFIG.ENDPOINT, requestBody, {
       headers: getAIHeaders(),
@@ -324,7 +325,8 @@ const recognizeQuestions = async (imageBase64, taskId, retryCount = 0) => {
     const content = response.data.choices[0]?.message?.content
     if (!content) throw new Error('AI 返回内容为空')
 
-    console.log(`   AI 原始响应 (前300字): ${content.substring(0, 300)}...`)
+    console.log(`    [RAW_RESPONSE] AI 原始响应全文:\n${content}`)
+    console.log(`   🔥 [RAW_RESPONSE_END]`)
 
     let jsonStr = content
     const jsonMatch = content.match(/```json\n?([\s\S]*?)\n?```/) ||
