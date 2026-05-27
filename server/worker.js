@@ -452,11 +452,13 @@ const recognizeQuestions = async (imageBase64, taskId, retryCount = 0) => {
     if (!content) throw new Error('AI 返回内容为空')
 
     console.log(`    [RAW_RESPONSE] AI 原始响应全文:\n${content}`)
-    console.log(`   🔥 [RAW_RESPONSE_END]`)
+    console.log(`    [RAW_RESPONSE_END]`)
 
+    // ===== 【强力滤网】：先强行扒掉大模型违规穿上的 Markdown 外套，再处理 =====
     let jsonStr = content
-    const jsonMatch = content.match(/```json\s*([\s\S]*?)\s*```/)
-    jsonStr = jsonMatch ? jsonMatch[1] : content
+      .replace(/```json\s*/gi, '')  // 扒掉 ```json 前缀
+      .replace(/```\s*/g, '')        // 扒掉剩余的 ``` 后缀
+      .trim()
 
     // 初始化默认结构，确保后续代码不会因为 undefined 崩溃
     let parsedData = { questions: [], block_coordinates: null }
