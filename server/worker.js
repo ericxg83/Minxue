@@ -162,6 +162,7 @@ function recalculateQuestionBoundaries(questions, imageHeight, imageWidth, debug
 
   debugInfo.recalcMethod = 'question-number-y-boundaries'
   debugInfo.totalQuestions = questions.length
+  debugInfo.boundaries = {}
 
   // Sort by Y coordinate
   const sorted = [...questions].sort((a, b) => {
