@@ -1,6 +1,7 @@
 import dotenv from 'dotenv'
 import { dirname, resolve } from 'path'
 import { fileURLToPath } from 'url'
+import fs from 'fs'
 
 const __dirname = dirname(fileURLToPath(import.meta.url))
 dotenv.config({ path: resolve(__dirname, '.env') })
@@ -113,6 +114,217 @@ const deduplicateTags = (tags) => {
   return unique.length > 0 ? unique : ['未分类']
 }
 
+/**
+ * Detect question numbers from content string.
+ * Supports: "1.", "1、", "(1)", "10、", "一、" etc.
+ * @param {string} text - Question content
+ * @returns {number|null} Detected question number, or null
+ */
+function detectQuestionNumber(text) {
+  if (!text) return null
+  const s = text.trim()
+  // 1. or 1、
+  const m1 = s.match(/^(\d+)[.、]/)
+  if (m1) return parseInt(m1[1], 10)
+  // (1)
+  const m2 = s.match(/^(\d+)\)/)
+  if (m2) return parseInt(m2[1], 10)
+  // 一、二、 etc. (simple)
+  const cnNums = { '一': 1, '二': 2, '三': 3, '四': 4, '五': 5, '六': 6, '七': 7, '八': 8, '九': 9, '十': 10 }
+  const m3 = s.match(/^([一二三四五六七八九十]+)[、.]/)
+  if (m3 && cnNums[m3[1]]) return cnNums[m3[1]]
+  // Try extracting from "第N题"
+  const m4 = s.match(/第(\d+)题/)
+  if (m4) return parseInt(m4[1], 10)
+  return null
+}
+
+/**
+ * Recalculate question boundaries using question number Y positions.
+ * 
+ * Algorithm:
+ * 1. Sort questions by Y coordinate (from AI's block_coordinates)
+ * 2. For each question:
+ *    - top = current question's Y (with padding)
+ *    - bottom = next question's Y (with padding)
+ *    - For the last question: bottom = image bottom
+ * 3. Use full width (x=0, width=imageWidth) for each question
+ * 
+ * This ensures: one question box = one complete question, no cross-question, no missing.
+ * 
+ * @param {Array} questions - Array of question objects with block_coordinates
+ * @param {number} imageHeight - Original image height
+ * @param {number} imageWidth - Original image width
+ * @param {Object} debugInfo - Debug output collector
+ */
+function recalculateQuestionBoundaries(questions, imageHeight, imageWidth, debugInfo) {
+  if (!questions || questions.length === 0) return
+
+  debugInfo.recalcMethod = 'question-number-y-boundaries'
+  debugInfo.totalQuestions = questions.length
+
+  // Sort by Y coordinate
+  const sorted = [...questions].sort((a, b) => {
+    const yA = a.block_coordinates?.y || a.coordinates?.y || (Array.isArray(a.bbox) ? a.bbox[1] : a.bbox?.y) || 0
+    const yB = b.block_coordinates?.y || b.coordinates?.y || (Array.isArray(b.bbox) ? b.bbox[1] : b.bbox?.y) || 0
+    return yA - yB
+  })
+
+  // Extract question number Y positions
+  const questionNumberPositions = []
+  for (const q of sorted) {
+    const qNum = detectQuestionNumber(q.content || '') || detectQuestionNumber(q.visual_title || '')
+    const y = q.block_coordinates?.y || q.coordinates?.y || (Array.isArray(q.bbox) ? q.bbox[1] : q.bbox?.y) || 0
+    const height = q.block_coordinates?.height || q.coordinates?.height || (Array.isArray(q.bbox) ? q.bbox[3] : q.bbox?.height) || 0
+    questionNumberPositions.push({
+      questionNumber: qNum,
+      y: y,
+      height: height,
+      content: (q.content || '').substring(0, 50)
+    })
+  }
+  debugInfo.questionNumberPositions = questionNumberPositions.map(p => ({
+    number: p.questionNumber,
+    y: p.y,
+    content: p.content
+  }))
+
+  // Calculate boundaries for each question
+  const PADDING_TOP = 15  // px above question number
+  const PADDING_BOTTOM = 20 // px below question end
+
+  for (let i = 0; i < sorted.length; i++) {
+    const currentY = questionNumberPositions[i].y
+    const nextY = (i < sorted.length - 1) ? questionNumberPositions[i + 1].y : imageHeight
+
+    // Question box: from current question's Y to next question's Y
+    let top = currentY - PADDING_TOP
+    let bottom = nextY - PADDING_BOTTOM
+
+    // Clamp to image bounds
+    top = Math.max(0, top)
+    bottom = Math.min(imageHeight, bottom)
+
+    // Calculate height
+    const newHeight = bottom - top
+
+    if (newHeight <= 0) {
+      console.warn(`   ⚠️ [QuestionBoundary] 第${i + 1}题高度为负或零 (top=${top}, bottom=${bottom})，使用原始高度`)
+      // Fallback: use original coordinates
+      continue
+    }
+
+    // Use full width
+    const newX = 0
+    const newWidth = imageWidth
+
+    // Update the question's coordinates
+    sorted[i].block_coordinates = {
+      x: newX,
+      y: top,
+      width: newWidth,
+      height: newHeight
+    }
+    sorted[i].coordinates = { ...sorted[i].block_coordinates }
+    sorted[i].bbox = { ...sorted[i].block_coordinates }
+
+    debugInfo.boundaries[i] = {
+      questionNumber: questionNumberPositions[i].questionNumber,
+      top: top,
+      bottom: bottom,
+      height: newHeight,
+      nextQuestionY: nextY
+    }
+  }
+
+  // Re-sort by Y (should already be sorted, but ensure consistency)
+  sorted.sort((a, b) => a.block_coordinates.y - b.block_coordinates.y)
+
+  // Update the original questions array in-place
+  for (let i = 0; i < questions.length; i++) {
+    questions[i].block_coordinates = sorted[i].block_coordinates
+    questions[i].coordinates = sorted[i].coordinates
+    questions[i].bbox = sorted[i].bbox
+  }
+
+  console.log(`   ✅ [QuestionBoundary] 已按题号Y坐标重新计算 ${questions.length} 道题的边界框`)
+  console.log(`   [QuestionBoundary] 调试信息:`, JSON.stringify(debugInfo, null, 2))
+}
+
+/**
+ * Generate debug overlay image with question boundary boxes drawn.
+ * Uses Sharp to draw rectangles and text on the image.
+ * 
+ * @param {Buffer} imageBuffer - Original image buffer
+ * @param {Array} questions - Array of questions with block_coordinates
+ * @param {string} outputPath - Path to save debug image
+ */
+async function generateDebugOverlay(imageBuffer, questions, outputPath) {
+  try {
+    const sharpInstance = sharp(imageBuffer)
+    const { width: imgW, height: imgH } = await sharpInstance.metadata()
+
+    // Build SVG overlay
+    let svgOverlay = `<svg width="${imgW}" height="${imgH}" xmlns="http://www.w3.org/2000/svg">`
+
+    const colors = [
+      { stroke: '#FF0000', fill: 'rgba(255,0,0,0.1)' },
+      { stroke: '#00FF00', fill: 'rgba(0,255,0,0.1)' },
+      { stroke: '#0000FF', fill: 'rgba(0,0,255,0.1)' },
+      { stroke: '#FF00FF', fill: 'rgba(255,0,255,0.1)' },
+      { stroke: '#FFFF00', fill: 'rgba(255,255,0,0.1)' },
+    ]
+
+    for (let i = 0; i < questions.length; i++) {
+      const q = questions[i]
+      const bbox = q.block_coordinates
+      if (!bbox) continue
+
+      const color = colors[i % colors.length]
+      const rx = bbox.x
+      const ry = bbox.y
+      const rw = bbox.width
+      const rh = bbox.height
+
+      // Draw rectangle
+      svgOverlay += `<rect x="${rx}" y="${ry}" width="${rw}" height="${rh}" 
+        fill="${color.fill}" stroke="${color.stroke}" stroke-width="3" rx="4"/>`
+
+      // Draw question number label
+      const label = `Q${i + 1}`
+      const fontSize = Math.max(14, Math.min(24, rw / 8))
+      svgOverlay += `<text x="${rx + 8}" y="${ry - 8}" 
+        font-size="${fontSize}" font-weight="bold" fill="${color.stroke}"
+        font-family="Arial, sans-serif">${label}</text>`
+
+      // Draw top/bottom boundary markers
+      svgOverlay += `<line x1="${rx}" y1="${ry}" x2="${rx + rw}" y2="${ry}" 
+        stroke="${color.stroke}" stroke-width="2" stroke-dasharray="5,3"/>`
+      svgOverlay += `<line x1="${rx}" y1="${ry + rh}" x2="${rx + rw}" y2="${ry + rh}" 
+        stroke="${color.stroke}" stroke-width="2" stroke-dasharray="5,3"/>`
+
+      // Draw Y coordinate labels
+      svgOverlay += `<text x="${rx + rw + 5}" y="${ry + fontSize / 2}" 
+        font-size="${Math.max(10, fontSize - 6)}" fill="${color.stroke}"
+        font-family="monospace">y=${Math.round(ry)}</text>`
+      svgOverlay += `<text x="${rx + rw + 5}" y="${ry + rh + fontSize / 2}" 
+        font-size="${Math.max(10, fontSize - 6)}" fill="${color.stroke}"
+        font-family="monospace">y=${Math.round(ry + rh)}</text>`
+    }
+
+    svgOverlay += '</svg>'
+
+    // Composite SVG overlay onto original image
+    await sharpInstance
+      .composite([{ input: Buffer.from(svgOverlay), top: 0, left: 0 }])
+      .jpeg({ quality: 90 })
+      .toFile(outputPath)
+
+    console.log(`   🖼️ [DebugOverlay] 调试图已生成: ${outputPath}`)
+  } catch (error) {
+    console.error(`   ⚠️ [DebugOverlay] 生成调试图失败: ${error.message}`)
+  }
+}
 /**
  * JSON 自动修复 — 处理 AI 返回的畸形 JSON
  * 常见问题: 未转义反斜杠(\frac → \\frac)、未转义双引号、字符串内换行
@@ -1220,6 +1432,20 @@ export const processTask = async (job) => {
         }
       }
       console.log(`   [坐标换算] 完成`)
+    }
+
+    // ─ 重新计算题目边界：基于题号Y坐标的切分方案 ──
+    // 核心逻辑：每道题的top=当前题号Y，bottom=下一题号Y，不再依赖AI返回的不准确高度
+    const debugBoundaryInfo = {}
+    if (questions.length > 0) {
+      console.log(`   [坐标重算] 开始按题号Y坐标重新计算题目边界...`)
+      recalculateQuestionBoundaries(questions, origHeight, origWidth, debugBoundaryInfo)
+      
+      // 生成调试图（可选，可通过环境变量控制）
+      if (process.env.DEBUG_QUESTION_BOUNDARIES === 'true') {
+        const debugOutputPath = `debug_question_boundaries_${taskId}.jpg`
+        await generateDebugOverlay(straightenedBuffer, questions, debugOutputPath)
+      }
     }
 
     let wrongCount = questions.filter(q => !q.is_correct).length
