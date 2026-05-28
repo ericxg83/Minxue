@@ -344,6 +344,14 @@ export const recognizeQuestionsWithRetry = async (imageBase64, studentId, taskId
 async function detectAndBindImages(questions, imageDataURL) {
   if (!questions || questions.length === 0) return questions
   
+  console.log('[图片处理] 开始检测，题目数量:', questions.length)
+  console.log('[图片处理] 原始图片尺寸:', await new Promise((resolve) => {
+    const img = new Image()
+    img.onload = () => resolve(`${img.naturalWidth}x${img.naturalHeight}`)
+    img.onerror = () => resolve('加载失败')
+    img.src = imageDataURL
+  }))
+
   try {
     // 加载试卷图片
     const examImage = await new Promise((resolve, reject) => {
@@ -355,9 +363,17 @@ async function detectAndBindImages(questions, imageDataURL) {
     
     // 检测图片块
     const imageBlocks = await detectImageBlocks(examImage, questions)
+    console.log('[图片处理] 检测到图片块数量:', imageBlocks.length)
+    if (imageBlocks.length > 0) {
+      console.log('[图片处理] 图片块详情:', imageBlocks.map(b => ({
+        bbox: b.bbox,
+        thumbnail_length: b.thumbnail?.length || 0
+      })))
+    }
     
     // 绑定图片到题目
     const questionImageMap = bindImagesToQuestions(questions, imageBlocks, examImage)
+    console.log('[图片处理] 绑定结果 Map 大小:', questionImageMap.size)
     
     // 更新题目对象
     const updatedQuestions = questions.map(q => {
@@ -372,6 +388,7 @@ async function detectAndBindImages(questions, imageDataURL) {
           bbox: img.imageBlock.bbox,
           source: 'auto'
         }))
+        console.log(`[图片处理] 题目 ${q.id} 绑定 ${question.images.length} 张图片`)
       }
       
       // 如果有 AI 检测的 geometry_image，也添加到 images 数组
@@ -386,6 +403,7 @@ async function detectAndBindImages(questions, imageDataURL) {
             bbox: geoImage.bbox,
             source: 'ai'
           })
+          console.log(`[图片处理] 题目 ${q.id} AI几何图已添加`)
         }
       }
       

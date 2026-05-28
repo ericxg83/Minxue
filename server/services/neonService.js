@@ -75,6 +75,7 @@ export const createQuestions = async (questions) => {
       ai_tags: JSON.stringify(q.ai_tags || []),
       manual_tags: JSON.stringify(q.manual_tags || []),
       tags_source: q.tags_source || 'ai',
+      images: q.images_json || q.images ? (Array.isArray(q.images) ? JSON.stringify(q.images) : q.images) : null,
       block_coordinates: q.block_coordinates ? JSON.stringify(q.block_coordinates) : null,
       created_at: new Date().toISOString()
     }

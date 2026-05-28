@@ -1478,6 +1478,15 @@ export const processTask = async (job) => {
         }
       }
 
+      // ── 保存图片数组到 images JSON 字段 ─
+      for (const q of questions) {
+        if (q.images && q.images.length > 0) {
+          // 将 images 数组序列化为 JSON 字符串存储
+          q.images_json = JSON.stringify(q.images)
+          console.log(`   🖼️ [图片] ${q.id}: 保存 ${q.images.length} 张图片关联`)
+        }
+      }
+
       const questionsWithStudentId = questions.map(q => ({
         ...q,
         student_id: studentId
