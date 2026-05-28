@@ -2,15 +2,18 @@ import { useState, useEffect, useMemo, useRef, useCallback } from 'react'
 import {
   ArrowLeft, ChevronLeft, ChevronRight, CheckCircle2, XCircle,
   Save, Loader2, AlertTriangle, UserCheck,
-  ChevronUp, ChevronDown
+  ChevronUp, ChevronDown, Image as ImageIcon, Plus, X, Crop, Eye
 } from 'lucide-react'
 import { useWrongQuestionStore } from '../../store'
 import { useToast } from '../../components/ToastProvider'
 import {
   updateQuestion, addWrongQuestions, deleteWrongQuestion,
-  getQuestionsByTask, invalidateCache, recalculateTaskStats
+  getQuestionsByTask, invalidateCache, recalculateTaskStats,
+  addQuestionImage, uploadImage
 } from '../../services/apiService'
+import { addImageToQuestion } from '../../services/aiService'
 import MathText from '../../components/MathText'
+import EnhancedRectCropper from '../../components/EnhancedRectCropper'
 
 const COLORS = {
   primary: '#2563EB',
@@ -95,6 +98,14 @@ export default function ExamReview({ task, onClose, onSave }) {
   // panelH = 面板高度（从底部算起，BottomSheet）
   const [panelH, setPanelH] = useState(0)
   const isInitializedRef = useRef(false)
+
+  // 图片处理相关状态
+  const [showImageModal, setShowImageModal] = useState(false)
+  const [currentImageIndex, setCurrentImageIndex] = useState(0)
+  const [showCropper, setShowCropper] = useState(false)
+  const [croppingImage, setCroppingImage] = useState(null)
+  const [showDebugOverlay, setShowDebugOverlay] = useState(false)
+  const fileInputRef = useRef(null)
 
   // 图片原始尺寸
   const [imgNaturalSize, setImgNaturalSize] = useState({ w: 0, h: 0 })
@@ -314,6 +325,184 @@ export default function ExamReview({ task, onClose, onSave }) {
     setEdits(prev => ({ ...prev, [qId]: { ...(prev[qId] || {}), answer: value } }))
   }, [])
 
+  // ── 图片处理函数 ──
+  // 获取题目图片列表（兼容新旧数据结构）
+  const getQuestionImages = useCallback((question) => {
+    if (!question) return []
+    // 新格式：images 数组
+    if (question.images && Array.isArray(question.images)) {
+      return question.images
+    }
+    // 旧格式：enhanced_geometry_image 或 geometry_image_url
+    if (question.enhanced_geometry_image || question.geometry_image_url) {
+      return [{
+        thumbnail: question.geometry_image_thumbnail || null,
+        full_image: question.enhanced_geometry_image || question.geometry_image_url,
+        source: 'ai'
+      }]
+    }
+    return []
+  }, [])
+
+  // 打开图片查看器
+  const handleViewImage = useCallback((index) => {
+    setCurrentImageIndex(index)
+    setShowImageModal(true)
+  }, [])
+
+  // 关闭图片查看器
+  const handleCloseImageModal = useCallback(() => {
+    setShowImageModal(false)
+    setCurrentImageIndex(0)
+  }, [])
+
+  // 触发文件选择
+  const handleAddImageClick = useCallback(() => {
+    fileInputRef.current?.click()
+  }, [])
+
+  // 处理文件选择
+  const handleFileSelect = useCallback(async (e) => {
+    const file = e.target.files?.[0]
+    if (!file || !currentQuestion) return
+
+    try {
+      Toast.show({ message: '正在添加图片...', type: 'info' })
+      const imageInfo = await addImageToQuestion(currentQuestion.id, file)
+
+      // 上传到服务器获取 URL
+      const blob = await fetch(imageInfo.full_image).then(r => r.blob())
+      const imageUrl = await uploadImage(new File([blob], 'question-image.png', { type: 'image/png' }))
+      const thumbnailUrl = await uploadImage(new File([await fetch(imageInfo.thumbnail).then(r => r.blob())], 'thumbnail.png', { type: 'image/png' }))
+
+      // 保存到数据库
+      await addQuestionImage(currentQuestion.id, imageUrl, thumbnailUrl, null, 'manual')
+
+      // 更新本地状态
+      setQuestions(prev => prev.map(q => {
+        if (q.id === currentQuestion.id) {
+          const images = getQuestionImages(q)
+          return {
+            ...q,
+            images: [...images, { thumbnail: thumbnailUrl, full_image: imageUrl, source: 'manual' }]
+          }
+        }
+        return q
+      }))
+
+      Toast.show({ message: '图片添加成功', type: 'success' })
+    } catch (error) {
+      console.error('添加图片失败:', error)
+      Toast.show({ message: '添加图片失败', type: 'error' })
+    }
+    e.target.value = ''
+  }, [currentQuestion, Toast])
+
+  // 删除图片
+  const handleDeleteImage = useCallback(async (questionId, imageIndex) => {
+    const question = questions.find(q => q.id === questionId)
+    if (!question) return
+
+    const images = getQuestionImages(question)
+    const image = images[imageIndex]
+
+    try {
+      if (image.id) {
+        // 如果有数据库 ID，从数据库删除
+        await import('../../services/apiService').then(m => m.deleteQuestionImage(questionId, image.id))
+      }
+
+      // 更新本地状态
+      setQuestions(prev => prev.map(q => {
+        if (q.id === questionId) {
+          const imgs = getQuestionImages(q)
+          const newImages = imgs.filter((_, i) => i !== imageIndex)
+          return {
+            ...q,
+            images: newImages,
+            enhanced_geometry_image: newImages[0]?.full_image || null,
+            geometry_image_url: newImages[0]?.full_image || null
+          }
+        }
+        return q
+      }))
+
+      Toast.show({ message: '图片已删除', type: 'success' })
+    } catch (error) {
+      console.error('删除图片失败:', error)
+      Toast.show({ message: '删除图片失败', type: 'error' })
+    }
+  }, [questions, getQuestionImages, Toast])
+
+  // 打开裁剪器
+  const handleCropImage = useCallback((imageIndex) => {
+    const images = getQuestionImages(currentQuestion)
+    if (images[imageIndex]) {
+      setCroppingImage({ url: images[imageIndex].full_image, index: imageIndex })
+      setShowCropper(true)
+    }
+  }, [currentQuestion, getQuestionImages])
+
+  // 保存裁剪结果
+  const handleSaveCrop = useCallback(async (croppedDataUrl) => {
+    if (!croppingImage || !currentQuestion) return
+
+    try {
+      Toast.show({ message: '正在保存裁剪结果...', type: 'info' })
+
+      // 上传裁剪后的图片
+      const blob = await fetch(croppedDataUrl).then(r => r.blob())
+      const imageUrl = await uploadImage(new File([blob], 'cropped-image.png', { type: 'image/png' }))
+
+      // 生成缩略图
+      const thumbnailCanvas = document.createElement('canvas')
+      const thumbnailImg = new Image()
+      await new Promise((resolve, reject) => {
+        thumbnailImg.onload = resolve
+        thumbnailImg.onerror = reject
+        thumbnailImg.src = croppedDataUrl
+      })
+      const scale = Math.min(150 / thumbnailImg.naturalWidth, 150 / thumbnailImg.naturalHeight, 1)
+      thumbnailCanvas.width = thumbnailImg.naturalWidth * scale
+      thumbnailCanvas.height = thumbnailImg.naturalHeight * scale
+      const ctx = thumbnailCanvas.getContext('2d')
+      ctx.drawImage(thumbnailImg, 0, 0, thumbnailCanvas.width, thumbnailCanvas.height)
+      const thumbnailUrl = await uploadImage(new File([await fetch(thumbnailCanvas.toDataURL('image/jpeg', 0.7)).then(r => r.blob())], 'thumbnail.jpg', { type: 'image/jpeg' }))
+
+      // 更新数据库
+      await updateQuestion(currentQuestion.id, {
+        geometry_image_url: imageUrl
+      })
+
+      // 更新本地状态
+      setQuestions(prev => prev.map(q => {
+        if (q.id === currentQuestion.id) {
+          const images = getQuestionImages(q)
+          const newImages = [...images]
+          newImages[croppingImage.index] = {
+            ...newImages[croppingImage.index],
+            full_image: imageUrl,
+            thumbnail: thumbnailUrl
+          }
+          return {
+            ...q,
+            images: newImages,
+            enhanced_geometry_image: imageUrl,
+            geometry_image_url: imageUrl
+          }
+        }
+        return q
+      }))
+
+      setShowCropper(false)
+      setCroppingImage(null)
+      Toast.show({ message: '裁剪保存成功', type: 'success' })
+    } catch (error) {
+      console.error('保存裁剪结果失败:', error)
+      Toast.show({ message: '保存失败', type: 'error' })
+    }
+  }, [croppingImage, currentQuestion, getQuestionImages, Toast])
+
   const handleSaveClick = useCallback(async () => {
     const dirtyIds = Object.keys(edits)
     if (dirtyIds.length === 0) {
@@ -420,24 +609,65 @@ export default function ExamReview({ task, onClose, onSave }) {
         <div style={{ width: 40, height: 4, borderRadius: 2, background: '#D1D5DB' }} />
       </div>
 
-      {/* 题号导航 */}
-      <div style={{ position: 'relative', zIndex: 1, padding: '8px 12px', display: 'flex', gap: '6px', overflowX: 'auto', flexShrink: 0, scrollbarWidth: 'none' }}>
+      {/* 题号导航 - 带缩略图标识 */}
+      <div style={{ position: 'relative', zIndex: 1, padding: '8px 12px', display: 'flex', gap: '6px', overflowX: 'auto', flexShrink: 0, scrollbarWidth: 'none', alignItems: 'center' }}>
         {validQuestions.map((q, i) => {
           const info = getStatusInfo(q)
           let bg = COLORS.warning
           if (q.is_correct === true) bg = info.isGreyed ? '#D1FAE5' : COLORS.success
           else if (q.is_correct === false) bg = COLORS.danger
           if (i === currentIndex) bg = COLORS.primary
+          const images = getQuestionImages(q)
+          const hasImages = images.length > 0
+
           return (
             <button key={q.id} onClick={() => jumpToQuestion(i)} style={{
               minWidth: '32px', height: '32px', borderRadius: '16px', background: bg, color: '#fff', border: 'none',
               fontSize: '13px', fontWeight: 600, cursor: 'pointer', flexShrink: 0, display: 'flex', alignItems: 'center', justifyContent: 'center',
-              transition: 'transform 0.15s', transform: i === currentIndex ? 'scale(1.15)' : 'scale(1)', opacity: info.isGreyed ? 0.7 : 1
+              transition: 'transform 0.15s', transform: i === currentIndex ? 'scale(1.15)' : 'scale(1)', opacity: info.isGreyed ? 0.7 : 1,
+              position: 'relative', overflow: 'hidden'
             }}>
-              {i + 1}
+              {hasImages && (
+                <img
+                  src={images[0].thumbnail || images[0].full_image}
+                  alt=""
+                  style={{
+                    position: 'absolute', inset: 0, width: '100%', height: '100%',
+                    objectFit: 'cover', opacity: 0.3, borderRadius: '16px'
+                  }}
+                />
+              )}
+              <span style={{ position: 'relative', zIndex: 1 }}>{i + 1}</span>
+              {hasImages && (
+                <ImageIcon
+                  size={10}
+                  style={{
+                    position: 'absolute', top: 2, right: 2, zIndex: 1,
+                    opacity: 0.8
+                  }}
+                />
+              )}
             </button>
           )
         })}
+        {/* 调试覆盖层开关 */}
+        {validQuestions.some(q => getQuestionImages(q).length > 0) && (
+          <button
+            onClick={() => setShowDebugOverlay(!showDebugOverlay)}
+            style={{
+              minWidth: '32px', height: '32px', borderRadius: '16px',
+              background: showDebugOverlay ? '#F59E0B' : 'rgba(255,255,255,0.15)',
+              color: showDebugOverlay ? '#fff' : '#9CA3AF',
+              border: 'none', fontSize: '12px', cursor: 'pointer',
+              display: 'flex', alignItems: 'center', justifyContent: 'center',
+              padding: '0 8px', gap: '4px', flexShrink: 0,
+              transition: 'all 0.2s'
+            }}
+          >
+            <Eye size={14} />
+            <span style={{ fontSize: '10px', fontWeight: 600 }}>DEBUG</span>
+          </button>
+        )}
       </div>
 
       {/* 面板内容区 */}
@@ -468,9 +698,110 @@ export default function ExamReview({ task, onClose, onSave }) {
           </div>
         )}
 
-        {geoImageUrl && (
+        {/* 题目图片展示区 */}
+        {(() => {
+          const images = getQuestionImages(currentQuestion)
+          if (images.length === 0) return null
+
+          return (
+            <div style={{ marginBottom: '8px' }}>
+              <div style={{ fontSize: '11px', fontWeight: 600, color: COLORS.textSecondary, marginBottom: '4px', display: 'flex', alignItems: 'center', gap: '4px' }}>
+                <ImageIcon size={12} /> 题目配图 ({images.length})
+              </div>
+
+              {/* 缩略图列表 */}
+              <div style={{ display: 'flex', gap: '6px', overflowX: 'auto', paddingBottom: '4px', scrollbarWidth: 'none' }}>
+                {images.map((img, imgIdx) => (
+                  <div key={imgIdx} style={{ position: 'relative', flexShrink: 0 }}>
+                    <button
+                      onClick={() => handleViewImage(imgIdx)}
+                      style={{
+                        width: '80px', height: '80px', borderRadius: '6px', border: `2px solid ${imgIdx === currentImageIndex ? COLORS.primary : COLORS.border}`,
+                        overflow: 'hidden', cursor: 'pointer', padding: 0, background: COLORS.card
+                      }}
+                    >
+                      <img
+                        src={img.thumbnail || img.full_image}
+                        alt={`配图${imgIdx + 1}`}
+                        style={{ width: '100%', height: '100%', objectFit: 'cover' }}
+                      />
+                    </button>
+                    {/* 删除按钮 */}
+                    <button
+                      onClick={(e) => { e.stopPropagation(); handleDeleteImage(currentQuestion.id, imgIdx) }}
+                      style={{
+                        position: 'absolute', top: '-4px', right: '-4px', width: '20px', height: '20px',
+                        borderRadius: '50%', background: COLORS.danger, border: 'none',
+                        display: 'flex', alignItems: 'center', justifyContent: 'center',
+                        cursor: 'pointer', padding: 0, color: '#fff', zIndex: 2
+                      }}
+                    >
+                      <X size={12} />
+                    </button>
+                    {/* 来源标识 */}
+                    <div style={{
+                      position: 'absolute', bottom: 0, left: 0, right: 0,
+                      background: 'rgba(0,0,0,0.6)', color: '#fff', fontSize: '9px',
+                      textAlign: 'center', padding: '1px 0'
+                    }}>
+                      {img.source === 'ai' ? 'AI' : img.source === 'auto' ? '自动' : '手动'}
+                    </div>
+                  </div>
+                ))}
+                {/* 添加图片按钮 */}
+                <button
+                  onClick={handleAddImageClick}
+                  style={{
+                    width: '80px', height: '80px', borderRadius: '6px',
+                    border: `2px dashed ${COLORS.border}`, background: COLORS.background,
+                    display: 'flex', alignItems: 'center', justifyContent: 'center',
+                    cursor: 'pointer', padding: 0, color: COLORS.textSecondary
+                  }}
+                >
+                  <Plus size={20} />
+                </button>
+              </div>
+
+              {/* 当前选中的大图 */}
+              {images[currentImageIndex] && (
+                <div style={{ marginTop: '8px', background: '#FAFAFA', borderRadius: '8px', padding: '8px', border: '1px solid #E5E7EB' }}>
+                  <img
+                    src={images[currentImageIndex].full_image}
+                    alt="题目配图"
+                    style={{ width: '100%', maxHeight: '25vh', objectFit: 'contain', borderRadius: '6px', display: 'block', cursor: 'pointer' }}
+                    onClick={() => handleViewImage(currentImageIndex)}
+                  />
+                  <div style={{ display: 'flex', gap: '4px', marginTop: '6px', justifyContent: 'flex-end' }}>
+                    <button
+                      onClick={() => handleCropImage(currentImageIndex)}
+                      style={{
+                        padding: '4px 8px', borderRadius: '4px', border: `1px solid ${COLORS.border}`,
+                        background: COLORS.card, cursor: 'pointer', fontSize: '11px', color: COLORS.textSecondary,
+                        display: 'flex', alignItems: 'center', gap: '4px'
+                      }}
+                    >
+                      <Crop size={12} /> 裁剪
+                    </button>
+                    <button
+                      onClick={() => handleViewImage(currentImageIndex)}
+                      style={{
+                        padding: '4px 8px', borderRadius: '4px', border: `1px solid ${COLORS.border}`,
+                        background: COLORS.card, cursor: 'pointer', fontSize: '11px', color: COLORS.textSecondary,
+                        display: 'flex', alignItems: 'center', gap: '4px'
+                      }}
+                    >
+                      <ImageIcon size={12} /> 查看大图
+                    </button>
+                  </div>
+                </div>
+              )}
+            </div>
+          )
+        })()}
+
+        {geoImageUrl && !currentQuestion.images?.length && (
           <div style={{ marginBottom: '8px', background: '#FAFAFA', borderRadius: '8px', padding: '8px', border: '1px solid #E5E7EB' }}>
-            <img src={geoImageUrl} alt="几何配图" style={{ width: '100%', maxHeight: '20vh', objectFit: 'contain', borderRadius: '6px', display: 'block' }} />
+            <img src={geoImageUrl} alt="几何配图" style={{ width: '100%', maxHeight: '20vh', objectFit: 'contain', borderRadius: '6px', display: 'block', cursor: 'pointer' }} onClick={() => handleViewImage(0)} />
           </div>
         )}
 
@@ -659,12 +990,225 @@ export default function ExamReview({ task, onClose, onSave }) {
               </div>
             )
           })}
+          
+          {/* ─ 调试覆盖层：显示题目框、图片框、绑定关系 ── */}
+          {showDebugOverlay && validQuestions.map((q, i) => {
+            const bbox = q.block_coordinates
+            if (!bbox) return null
+            
+            // 获取该题目绑定的图片
+            const images = getQuestionImages(q)
+            
+            return (
+              <div key={`debug-${q.id}`}>
+                {/* 题目框（红色虚线） */}
+                <div style={{
+                  position: 'absolute',
+                  left: bbox.x * ratioW,
+                  top: bbox.y * ratioH,
+                  width: bbox.width * ratioW,
+                  height: bbox.height * ratioH,
+                  border: '2px dashed #EF4444',
+                  borderRadius: '4px', zIndex: 5,
+                  pointerEvents: 'none'
+                }}>
+                  <div style={{
+                    position: 'absolute', top: '-18px', left: '4px',
+                    fontSize: '10px', color: '#EF4444', fontWeight: 700,
+                    background: 'rgba(0,0,0,0.7)', padding: '1px 4px', borderRadius: '2px'
+                  }}>
+                    Q{i + 1} ({bbox.width}x{bbox.height})
+                  </div>
+                </div>
+                
+                {/* 绑定的图片框（绿色实线） */}
+                {images.map((img, imgIdx) => {
+                  if (!img.bbox) return null
+                  return (
+                    <div key={`img-${imgIdx}`} style={{
+                      position: 'absolute',
+                      left: img.bbox.x * ratioW,
+                      top: img.bbox.y * ratioH,
+                      width: img.bbox.width * ratioW,
+                      height: img.bbox.height * ratioH,
+                      border: '2px solid #16A34A',
+                      borderRadius: '4px', zIndex: 6,
+                      background: 'rgba(22,163,74,0.1)',
+                      pointerEvents: 'none'
+                    }}>
+                      <div style={{
+                        position: 'absolute', top: '-18px', left: '4px',
+                        fontSize: '10px', color: '#16A34A', fontWeight: 700,
+                        background: 'rgba(0,0,0,0.7)', padding: '1px 4px', borderRadius: '2px'
+                      }}>
+                        IMG{imgIdx + 1}→Q{i + 1} ({img.bbox.width}x{img.bbox.height})
+                      </div>
+                      {/* 连接线（从图片中心到题目中心） */}
+                      <svg style={{ position: 'absolute', inset: 0, width: '100%', height: '100%', pointerEvents: 'none' }}>
+                        <line
+                          x1={img.bbox.width * ratioW / 2}
+                          y1={img.bbox.height * ratioH / 2}
+                          x2={(bbox.x + bbox.width / 2 - img.bbox.x) * ratioW}
+                          y2={(bbox.y + bbox.height / 2 - img.bbox.y) * ratioH}
+                          stroke="#F59E0B"
+                          strokeWidth="1.5"
+                          strokeDasharray="4,2"
+                        />
+                      </svg>
+                    </div>
+                  )
+                })}
+              </div>
+            )
+          })}
         </div>
       </div>
     )
   }
 
   // ── 主渲染 ──
+  // 图片查看器模态框
+  const renderImageModal = () => {
+    if (!showImageModal || !currentQuestion) return null
+    const images = getQuestionImages(currentQuestion)
+    const currentImg = images[currentImageIndex]
+    if (!currentImg) return null
+
+    return (
+      <div style={{
+        position: 'fixed', inset: 0, zIndex: 10001,
+        background: 'rgba(0,0,0,0.95)',
+        display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center'
+      }} onClick={handleCloseImageModal}>
+        {/* 关闭按钮 */}
+        <button
+          onClick={handleCloseImageModal}
+          style={{
+            position: 'absolute', top: 16, right: 16, zIndex: 10,
+            background: 'rgba(255,255,255,0.2)', border: 'none', borderRadius: '50%',
+            width: 40, height: 40, display: 'flex', alignItems: 'center', justifyContent: 'center',
+            cursor: 'pointer', color: '#fff'
+          }}
+        >
+          <X size={24} />
+        </button>
+
+        {/* 图片信息 */}
+        <div style={{
+          position: 'absolute', top: 16, left: 16, zIndex: 10,
+          color: '#fff', fontSize: '14px', background: 'rgba(0,0,0,0.5)',
+          padding: '6px 12px', borderRadius: '8px'
+        }}>
+          第 {currentIndex + 1} 题 - 图片 {currentImageIndex + 1}/{images.length}
+          {currentImg.source && <span style={{ marginLeft: '8px', opacity: 0.7 }}>({currentImg.source === 'ai' ? 'AI识别' : currentImg.source === 'auto' ? '自动检测' : '手动添加'})</span>}
+        </div>
+
+        {/* 大图显示 */}
+        <img
+          src={currentImg.full_image}
+          alt="题目配图"
+          style={{
+            maxWidth: '90vw', maxHeight: '85vh', objectFit: 'contain',
+            borderRadius: '8px'
+          }}
+          onClick={(e) => e.stopPropagation()}
+        />
+
+        {/* 图片导航 */}
+        {images.length > 1 && (
+          <>
+            <button
+              onClick={(e) => { e.stopPropagation(); setCurrentImageIndex(Math.max(0, currentImageIndex - 1)) }}
+              disabled={currentImageIndex === 0}
+              style={{
+                position: 'absolute', left: 16, top: '50%', transform: 'translateY(-50%)',
+                background: currentImageIndex === 0 ? 'rgba(255,255,255,0.1)' : 'rgba(255,255,255,0.2)',
+                border: 'none', borderRadius: '50%', width: 44, height: 44,
+                display: 'flex', alignItems: 'center', justifyContent: 'center',
+                cursor: currentImageIndex === 0 ? 'not-allowed' : 'pointer', color: '#fff'
+              }}
+            >
+              <ChevronLeft size={24} />
+            </button>
+            <button
+              onClick={(e) => { e.stopPropagation(); setCurrentImageIndex(Math.min(images.length - 1, currentImageIndex + 1)) }}
+              disabled={currentImageIndex === images.length - 1}
+              style={{
+                position: 'absolute', right: 16, top: '50%', transform: 'translateY(-50%)',
+                background: currentImageIndex === images.length - 1 ? 'rgba(255,255,255,0.1)' : 'rgba(255,255,255,0.2)',
+                border: 'none', borderRadius: '50%', width: 44, height: 44,
+                display: 'flex', alignItems: 'center', justifyContent: 'center',
+                cursor: currentImageIndex === images.length - 1 ? 'not-allowed' : 'pointer', color: '#fff'
+              }}
+            >
+              <ChevronRight size={24} />
+            </button>
+          </>
+        )}
+
+        {/* 底部缩略图导航 */}
+        {images.length > 1 && (
+          <div style={{
+            position: 'absolute', bottom: 16, left: '50%', transform: 'translateX(-50%)',
+            display: 'flex', gap: '8px', zIndex: 10
+          }}>
+            {images.map((img, idx) => (
+              <button
+                key={idx}
+                onClick={(e) => { e.stopPropagation(); setCurrentImageIndex(idx) }}
+                style={{
+                  width: '60px', height: '60px', borderRadius: '6px',
+                  border: `3px solid ${idx === currentImageIndex ? '#2563EB' : 'rgba(255,255,255,0.3)'}`,
+                  overflow: 'hidden', cursor: 'pointer', padding: 0, background: 'transparent'
+                }}
+              >
+                <img src={img.thumbnail || img.full_image} alt="" style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
+              </button>
+            ))}
+          </div>
+        )}
+
+        {/* 操作按钮 */}
+        <div style={{
+          position: 'absolute', bottom: images.length > 1 ? 90 : 16, left: '50%', transform: 'translateX(-50%)',
+          display: 'flex', gap: '8px', zIndex: 10
+        }}>
+          <button
+            onClick={(e) => { e.stopPropagation(); handleCropImage(currentImageIndex); handleCloseImageModal() }}
+            style={{
+              padding: '8px 16px', borderRadius: '8px', border: 'none',
+              background: 'rgba(255,255,255,0.2)', color: '#fff',
+              cursor: 'pointer', fontSize: '13px', display: 'flex', alignItems: 'center', gap: '6px'
+            }}
+          >
+            <Crop size={14} /> 裁剪
+          </button>
+          <button
+            onClick={(e) => { e.stopPropagation(); handleDeleteImage(currentQuestion.id, currentImageIndex); handleCloseImageModal() }}
+            style={{
+              padding: '8px 16px', borderRadius: '8px', border: 'none',
+              background: 'rgba(239,68,68,0.5)', color: '#fff',
+              cursor: 'pointer', fontSize: '13px', display: 'flex', alignItems: 'center', gap: '6px'
+            }}
+          >
+            <X size={14} /> 删除
+          </button>
+        </div>
+      </div>
+    )
+  }
+
+  // 隐藏的文件输入框
+  const hiddenFileInput = (
+    <input
+      ref={fileInputRef}
+      type="file"
+      accept="image/*"
+      onChange={handleFileSelect}
+      style={{ display: 'none' }}
+    />
+  )
+
   if (isPC) {
     return (
       <div style={{
@@ -686,7 +1230,16 @@ export default function ExamReview({ task, onClose, onSave }) {
           {renderExamImage()}
           {backButton}
           {panelContent}
+          {hiddenFileInput}
         </div>
+        {renderImageModal()}
+        {showCropper && croppingImage && (
+          <EnhancedRectCropper
+            imageUrl={croppingImage.url}
+            onSave={handleSaveCrop}
+            onCancel={() => { setShowCropper(false); setCroppingImage(null) }}
+          />
+        )}
       </div>
     )
   }
@@ -696,6 +1249,15 @@ export default function ExamReview({ task, onClose, onSave }) {
       {renderExamImage()}
       {backButton}
       {panelContent}
+      {hiddenFileInput}
+      {renderImageModal()}
+      {showCropper && croppingImage && (
+        <EnhancedRectCropper
+          imageUrl={croppingImage.url}
+          onSave={handleSaveCrop}
+          onCancel={() => { setShowCropper(false); setCroppingImage(null) }}
+        />
+      )}
     </div>
   )
 }

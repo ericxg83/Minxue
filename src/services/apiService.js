@@ -198,6 +198,7 @@ const parseQuestionFields = (q) => {
     options: parse(q.options, []),
     ai_tags: parse(q.ai_tags, []),
     manual_tags: parse(q.manual_tags, []),
+    images: parse(q.images, []),
     block_coordinates: q.block_coordinates
       ? (typeof q.block_coordinates === 'string' ? (() => { try { return JSON.parse(q.block_coordinates) } catch(e) { return null } })() : q.block_coordinates)
       : null
@@ -418,18 +419,79 @@ export const clearStudentCaches = (studentId) => {
   }
 }
 
-export const invalidateCache = (type, studentId) => {
-  const keyMap = {
-    students: 'students_cache',
-    tasks: `tasks_cache_${studentId}`,
-    exams: `exams_cache_${studentId}`,
-    wrong: `wrong_questions_cache_${studentId}`,
-    questions: null,
-    generated: `generated_exams_cache_${studentId}`
-  }
+// ── 题目图片相关 API ──
 
-  const key = keyMap[type]
-  if (key) {
-    clearCache(key)
-  }
+/**
+ * 为题目添加图片关联
+ * @param {string} questionId - 题目 ID
+ * @param {string} imageUrl - 图片 URL
+ * @param {string} thumbnailUrl - 缩略图 URL
+ * @param {Object} bbox - 边界框坐标
+ * @param {string} source - 图片来源 (ai/auto/manual)
+ * @returns {Promise<Object>} 图片关联对象
+ */
+export const addQuestionImage = async (questionId, imageUrl, thumbnailUrl, bbox = null, source = 'manual') => {
+  return apiRequest(`/questions/${questionId}/images`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      image_url: imageUrl,
+      thumbnail_url: thumbnailUrl,
+      bbox,
+      source
+    })
+  })
 }
+
+/**
+ * 获取题目的所有图片
+ * @param {string} questionId - 题目 ID
+ * @returns {Promise<Array>} 图片列表
+ */
+export const getQuestionImages = async (questionId) => {
+  const data = await apiRequest(`/questions/${questionId}/images`)
+  return data.images || []
+}
+
+/**
+ * 删除题目的图片
+ * @param {string} questionId - 题目 ID
+ * @param {string} imageId - 图片 ID
+ * @returns {Promise<boolean>}
+ */
+export const deleteQuestionImage = async (questionId, imageId) => {
+  await apiRequest(`/questions/${questionId}/images/${imageId}`, { method: 'DELETE' })
+  return true
+}
+
+/**
+ * 更新题目图片（如裁剪后更新）
+ * @param {string} questionId - 题目 ID
+ * @param {string} imageId - 图片 ID
+ * @param {Object} updates - 更新字段
+ * @returns {Promise<Object>}
+ */
+export const updateQuestionImage = async (questionId, imageId, updates) => {
+  return apiRequest(`/questions/${questionId}/images/${imageId}`, {
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(updates)
+  })
+}
+
+/**
+ * 批量更新题目图片关联
+ * @param {string} taskId - 任务 ID
+ * @param {Array} questionImages - [{questionId, images: [{thumbnail, full_image, bbox, source}]}]
+ * @returns {Promise<Object>}
+ */
+export const syncQuestionImages = async (taskId, questionImages) => {
+  return apiRequest(`/tasks/${taskId}/sync-images`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ question_images: questionImages })
+  })
+}
+
+// ── 导出 aiService 中的图片工具函数 ──
+export { addImageToQuestion } from './aiService'
