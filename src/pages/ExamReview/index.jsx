@@ -27,7 +27,7 @@ const COLORS = {
 // ── 面板边界常量 ──
 const PANEL_MIN_HEIGHT = 220
 const PANEL_TOP_MARGIN = 60
-const PANEL_START_OFFSET = 340
+const PANEL_START_OFFSET = typeof window !== 'undefined' ? window.innerHeight - 80 : 600
 
 const isOptionWithLetterPrefix = (opt) => {
   if (!opt) return false
