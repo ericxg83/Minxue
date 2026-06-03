@@ -380,10 +380,10 @@ export default function QuestionEdit({ questionId, onClose, onSave }) {
       opacity="thin"
     >
       <div style={{
-        display: 'flex', justifyContent: 'center', width: '100%', height: '100%'
+        display: 'flex', justifyContent: 'center', width: '100%', height: '100%', position: 'relative'
       }}>
         <div style={{
-          width: '100%', maxWidth: 480, position: 'relative'
+          width: '100%', maxWidth: 480, position: 'relative', display: 'flex', flexDirection: 'column', justifyContent: 'flex-end', height: '100%'
         }}>
           <input
             id="question-image-file-input"
@@ -394,16 +394,13 @@ export default function QuestionEdit({ questionId, onClose, onSave }) {
           />
 
           <div style={{
-            position: 'absolute',
-            bottom: 0,
-            left: 0,
-            right: 0,
-            height: '85vh',
             background: '#F5F7FA',
+            height: '85vh',
             borderRadius: '12px 12px 0 0',
             display: 'flex',
             flexDirection: 'column',
-            overflow: 'hidden'
+            overflow: 'hidden',
+            position: 'relative'
           }}>
         <div style={{
           background: '#fff',
