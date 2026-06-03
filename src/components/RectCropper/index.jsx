@@ -135,38 +135,10 @@ export default function RectCropper({ image, onConfirm, onCancel, theme = 'light
 
   const [imgSrc, setImgSrc] = useState(null)
 
-  // Load image - use backend proxy to avoid canvas tainting
+  // Load image - use original URL directly (no CORS needed for display)
   useEffect(() => {
     if (!image) { setImgSrc(null); return }
-    
-    // For data URLs, use directly
-    if (image.startsWith('data:')) {
-      setImgSrc(image)
-      return
-    }
-    
-    // For HTTP images, try to fetch via proxy to get a same-origin blob URL
-    const loadImage = async () => {
-      // Try backend proxy
-      try {
-        const proxyUrl = `/api/proxy-image?url=${encodeURIComponent(image)}`
-        const response = await fetch(proxyUrl)
-        if (response.ok) {
-          const blob = await response.blob()
-          if (blob.size > 0) {
-            const blobUrl = URL.createObjectURL(blob)
-            setImgSrc(blobUrl)
-            return () => { URL.revokeObjectURL(blobUrl) }
-          }
-        }
-      } catch {}
-      
-      // Fallback: use original URL directly
-      console.warn('Using original URL for image (canvas may be tainted)')
-      setImgSrc(image)
-    }
-    
-    loadImage()
+    setImgSrc(image)
   }, [image])
 
   useEffect(() => {
@@ -340,14 +312,42 @@ export default function RectCropper({ image, onConfirm, onCancel, theme = 'light
       canvas.height = sh
       const ctx = canvas.getContext('2d')
 
-      // Draw directly from imgRef - this works even with cross-origin images
-      // The canvas may be tainted but we don't need to export it, just crop
+      // Try drawing directly from imgRef (works for same-origin/data URLs)
       try {
         ctx.drawImage(imgRef.current, sx, sy, sw, sh, 0, 0, sw, sh)
+        const dataUrl = canvas.toDataURL('image/jpeg', 0.92)
+        onConfirm(dataUrl)
+        return
       } catch (drawErr) {
-        console.error('Canvas draw failed:', drawErr)
-        throw new Error('图片加载失败，请重试')
+        // Canvas is tainted - need to re-fetch the image
+        console.warn('Canvas tainted, re-fetching image for export:', drawErr)
       }
+      
+      // Re-fetch the image as blob to create a clean canvas
+      let blob = null
+      try {
+        // Try backend proxy
+        const proxyUrl = `/api/proxy-image?url=${encodeURIComponent(image)}`
+        const response = await fetch(proxyUrl)
+        if (response.ok) blob = await response.blob()
+      } catch {}
+      
+      if (!blob || blob.size === 0) {
+        // Try no-cors fetch
+        try {
+          const response = await fetch(image, { mode: 'no-cors' })
+          blob = await response.blob()
+          if (blob.size === 0) blob = null
+        } catch {}
+      }
+      
+      if (!blob || blob.size === 0) {
+        throw new Error('无法获取图片，请检查网络连接')
+      }
+      
+      const bitmap = await createImageBitmap(blob)
+      ctx.drawImage(bitmap, sx, sy, sw, sh, 0, 0, sw, sh)
+      bitmap.close()
       
       const dataUrl = canvas.toDataURL('image/jpeg', 0.92)
       onConfirm(dataUrl)
