@@ -115,10 +115,8 @@ export default function ExamReview({ task, onClose, onSave }) {
   const [imgNaturalSize, setImgNaturalSize] = useState({ w: 0, h: 0 })
   const [viewportSize, setViewportSize] = useState({ w: 0, h: 0 })
   const [transform, setTransform] = useState({ x: 0, y: 0, scale: 1 })
-  // 复审操作: 'correct' | 'wrong' | 'not_answered' | 'excluded' | null
+  // 复审操作: 'correct' | 'wrong' | 'excluded' | null
   const [reviewAction, setReviewAction] = useState(null)
-  // 复审备注
-  const [reviewNote, setReviewNote] = useState('')
 
   // ── 所有 ref hooks ──
   const draggingRef = useRef(false)
@@ -275,8 +273,6 @@ export default function ExamReview({ task, onClose, onSave }) {
   const handleSetReviewAction = useCallback((action) => {
     if (!currentQuestion?.id) return
     const qId = currentQuestion.id
-    const q = questions.find(x => x.id === qId)
-    const wasBlank = q && (q.answer_source === 'blank')
     
     setReviewAction(prev => prev === action ? null : action)
     
@@ -288,22 +284,12 @@ export default function ExamReview({ task, onClose, onSave }) {
         newEdit = { ...existing, is_correct: true, excluded: false }
       } else if (action === 'wrong') {
         newEdit = { ...existing, is_correct: false, excluded: false }
-      } else if (action === 'not_answered') {
-        newEdit = {
-          ...existing,
-          is_correct: null,
-          excluded: false,
-          answer_source: 'blank',
-          student_answer: '',
-          ...(wasBlank ? {} : { answer_source: 'blank' })
-        }
       } else if (action === 'excluded') {
         newEdit = { ...existing, excluded: true }
       }
       
       if (!newEdit) {
-        // Toggle off: remove the review-related fields
-        const { is_correct, excluded, answer_source, student_answer, ...rest } = existing
+        const { is_correct, excluded, ...rest } = existing
         return { ...prev, [qId]: rest }
       }
       
@@ -351,12 +337,10 @@ export default function ExamReview({ task, onClose, onSave }) {
         // 构建更新数据
         const updateData = {
           student_answer: edit.student_answer,
-          answer: edit.answer,
-          review_note: edit.review_note || ''
+          answer: edit.answer
         }
         if (edit.is_correct !== undefined) updateData.is_correct = edit.is_correct
         if (edit.excluded !== undefined) updateData.excluded = edit.excluded
-        if (edit.answer_source) updateData.answer_source = edit.answer_source
         if (edit.status) updateData.status = edit.status
 
         await updateQuestion(qId, updateData)
@@ -364,16 +348,10 @@ export default function ExamReview({ task, onClose, onSave }) {
 
         // 错题本操作
         if (edit.excluded && wrongId) {
-          // 排除本题 → 从错题本移除
           await deleteWrongQuestion(wrongId).catch(() => {})
         } else if (edit.is_correct === true && wrongId) {
-          // 改为正确 → 从错题本移除
           await deleteWrongQuestion(wrongId).catch(() => {})
         } else if (edit.is_correct === false && !wrongId && !edit.excluded) {
-          // 改为错误 → 加入错题本
-          await addWrongQuestions(task.student_id, [qId]).catch(() => {})
-        } else if (edit.answer_source === 'blank' && !wrongId && !edit.excluded) {
-          // 未作答 → 加入错题本
           await addWrongQuestions(task.student_id, [qId]).catch(() => {})
         }
       } catch (e) {
@@ -784,19 +762,6 @@ export default function ExamReview({ task, onClose, onSave }) {
               >
                 <XCircle size={14} /> 错误
               </button>
-              <button
-                onClick={() => handleSetReviewAction('not_answered')}
-                style={{
-                  flex: 1, padding: '8px 0', borderRadius: '8px',
-                  border: (reviewAction === 'not_answered') ? '2px solid #F59E0B' : '1px solid #E5E7EB',
-                  cursor: 'pointer', fontSize: '13px', fontWeight: 500,
-                  display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '4px',
-                  background: (reviewAction === 'not_answered') ? '#FEF3C7' : COLORS.card,
-                  color: (reviewAction === 'not_answered') ? '#F59E0B' : '#9CA3AF',
-                }}
-              >
-                <AlertTriangle size={14} /> 未作答
-              </button>
             </div>
             {/* 排除本题 */}
             <div style={{ marginTop: '6px' }}>
@@ -811,30 +776,8 @@ export default function ExamReview({ task, onClose, onSave }) {
                   color: (reviewAction === 'excluded') ? '#EF4444' : '#DC2626',
                 }}
               >
-                <Trash2 size={14} /> 排除本题 (从错题本移除)
+                <Trash2 size={14} /> 排除本题
               </button>
-            </div>
-            {/* 复审备注 */}
-            <div style={{ marginTop: '8px' }}>
-              <textarea
-                value={edits[currentQuestion?.id]?.review_note ?? ''}
-                onChange={(e) => setEdits(prev => ({
-                  ...prev,
-                  [currentQuestion.id]: { ...(prev[currentQuestion.id] || {}), review_note: e.target.value }
-                }))}
-                placeholder="请输入备注，说明调整原因（可选）"
-                rows={2}
-                style={{
-                  width: '100%', padding: '6px 8px', borderRadius: '5px',
-                  border: `1px solid ${COLORS.border}`,
-                  fontSize: '13px', color: COLORS.text, outline: 'none',
-                  boxSizing: 'border-box', background: COLORS.card, resize: 'vertical',
-                  fontFamily: 'inherit'
-                }}
-              />
-              <div style={{ textAlign: 'right', fontSize: '10px', color: COLORS.textSecondary, marginTop: '2px' }}>
-                {(edits[currentQuestion?.id]?.review_note ?? '').length}/200
-              </div>
             </div>
           </div>
 
