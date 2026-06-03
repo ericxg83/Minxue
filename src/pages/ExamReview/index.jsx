@@ -347,7 +347,6 @@ export default function ExamReview({ task, onClose, onSave }) {
 
   const statusInfo = useMemo(() => getStatusInfo(currentQuestion), [currentQuestion])
   const geoImageUrl = currentQuestion?.geometry_image_url || currentQuestion?.enhanced_geometry_image
-  const isAiWrong = correctness === false
 
   // ── 条件渲染 (所有 hooks 之后) ──
   if (loading) {
@@ -657,65 +656,32 @@ export default function ExamReview({ task, onClose, onSave }) {
 
             {/* 人工评判 */}
             <div style={{ display: 'flex', gap: '6px' }}>
-              {isAiWrong ? (
-                <>
-                  <button
-                    onClick={() => handleToggleCorrect(currentQuestion.id, true)}
-                    style={{
-                      flex: 1, padding: '8px 0', borderRadius: '8px',
-                      border: correctness === true ? '2px solid #16A34A' : '1px solid #BBF7D0',
-                      cursor: 'pointer', fontSize: '13px', fontWeight: 600,
-                      display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '4px',
-                      background: correctness === true ? '#DCFCE7' : '#F0FDF4',
-                      color: correctness === true ? '#16A34A' : '#15803D',
-                    }}
-                  >
-                    <CheckCircle2 size={14} /> 改判为对
-                  </button>
-                  <button
-                    onClick={() => handleToggleCorrect(currentQuestion.id, false)}
-                    style={{
-                      flex: 1, padding: '8px 0', borderRadius: '8px',
-                      border: correctness === false ? '2px solid #EF4444' : '1px solid #E5E7EB',
-                      cursor: 'pointer', fontSize: '13px', fontWeight: 500,
-                      display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '4px',
-                      background: correctness === false ? '#FEE2E2' : COLORS.card,
-                      color: correctness === false ? '#EF4444' : '#9CA3AF',
-                    }}
-                  >
-                    <XCircle size={14} /> 维持
-                  </button>
-                </>
-              ) : (
-                <>
-                  <button
-                    onClick={() => handleToggleCorrect(currentQuestion.id, true)}
-                    style={{
-                      flex: 1, padding: '8px 0', borderRadius: '8px',
-                      border: correctness === true ? '2px solid #16A34A' : '1px solid #E5E7EB',
-                      cursor: 'pointer', fontSize: '13px', fontWeight: 600,
-                      display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '4px',
-                      background: correctness === true ? '#DCFCE7' : COLORS.card,
-                      color: correctness === true ? '#16A34A' : COLORS.success,
-                    }}
-                  >
-                    <CheckCircle2 size={14} /> 正确
-                  </button>
-                  <button
-                    onClick={() => handleToggleCorrect(currentQuestion.id, false)}
-                    style={{
-                      flex: 1, padding: '8px 0', borderRadius: '8px',
-                      border: correctness === false ? '2px solid #EF4444' : '1px solid #E5E7EB',
-                      cursor: 'pointer', fontSize: '13px', fontWeight: 500,
-                      display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '4px',
-                      background: correctness === false ? '#FEE2E2' : COLORS.card,
-                      color: correctness === false ? '#EF4444' : COLORS.textSecondary,
-                    }}
-                  >
-                    <XCircle size={14} /> 错误
-                  </button>
-                </>
-              )}
+              <button
+                onClick={() => handleToggleCorrect(currentQuestion.id, true)}
+                style={{
+                  flex: 1, padding: '8px 0', borderRadius: '8px',
+                  border: correctness === true ? '2px solid #16A34A' : '1px solid #E5E7EB',
+                  cursor: 'pointer', fontSize: '13px', fontWeight: 600,
+                  display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '4px',
+                  background: correctness === true ? '#DCFCE7' : COLORS.card,
+                  color: correctness === true ? '#16A34A' : COLORS.success,
+                }}
+              >
+                <CheckCircle2 size={14} /> 正确
+              </button>
+              <button
+                onClick={() => handleToggleCorrect(currentQuestion.id, false)}
+                style={{
+                  flex: 1, padding: '8px 0', borderRadius: '8px',
+                  border: correctness === false ? '2px solid #EF4444' : '1px solid #E5E7EB',
+                  cursor: 'pointer', fontSize: '13px', fontWeight: 500,
+                  display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '4px',
+                  background: correctness === false ? '#FEE2E2' : COLORS.card,
+                  color: correctness === false ? '#EF4444' : COLORS.textSecondary,
+                }}
+              >
+                <XCircle size={14} /> 错误
+              </button>
             </div>
           </div>
 
