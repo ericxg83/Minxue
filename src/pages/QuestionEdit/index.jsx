@@ -392,7 +392,10 @@ export default function QuestionEdit({ questionId, onClose, onSave }) {
             display: 'flex',
             flexDirection: 'column',
             overflow: 'hidden',
-            position: 'relative'
+            position: 'relative',
+            width: '100%',
+            maxWidth: 480,
+            margin: '0 auto'
           }}>
         <div style={{
           background: '#fff',
