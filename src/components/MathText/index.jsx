@@ -99,6 +99,8 @@ function preprocessMath(text) {
   result = result.replace(/\\times/g, '×')
   result = result.replace(/\\div/g, '÷')
   result = result.replace(/\\pm/g, '±')
+  result = result.replace(/\\perp/g, '')
+  result = result.replace(/\\parallel/g, '∥')
 
   // === 1. 除法表达式: a/b → \frac{a}{b} ===
   result = result.replace(/(\([^)]+\))\s*\/\s*(\([^)]+\))/g, '\\frac{$1}{$2}')
