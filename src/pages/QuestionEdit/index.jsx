@@ -374,9 +374,9 @@ export default function QuestionEdit({ questionId, onClose, onSave }) {
   return (
     <div style={{
       position: 'fixed', inset: 0, zIndex: 10000,
-      background: 'rgba(0,0,0,0.2)', display: 'flex', justifyContent: 'center'
+      background: 'rgba(0,0,0,0.2)', display: 'flex', justifyContent: 'center', alignItems: 'flex-end'
     }}>
-      <div style={{ width: '100%', maxWidth: 480, position: 'relative', display: 'flex', flexDirection: 'column', justifyContent: 'flex-end', height: '100%' }}>
+      <div style={{ width: 480, position: 'relative', display: 'flex', flexDirection: 'column', height: '85vh' }}>
           <input
             id="question-image-file-input"
             type="file"
@@ -392,10 +392,7 @@ export default function QuestionEdit({ questionId, onClose, onSave }) {
             display: 'flex',
             flexDirection: 'column',
             overflow: 'hidden',
-            position: 'relative',
-            width: '100%',
-            maxWidth: 480,
-            margin: '0 auto'
+            position: 'relative'
           }}>
         <div style={{
           background: '#fff',
