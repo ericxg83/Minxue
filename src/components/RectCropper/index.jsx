@@ -376,15 +376,26 @@ export default function RectCropper({ image, onConfirm, onCancel, theme = 'light
         }
         
         if (blob) {
-          const blobUrl = URL.createObjectURL(blob)
-          const img = new Image()
-          await new Promise((resolve, reject) => {
-            img.onload = resolve
-            img.onerror = () => reject(new Error('Blob image failed'))
-            img.src = blobUrl
-          })
-          ctx.drawImage(img, sx, sy, sw, sh, 0, 0, sw, sh)
-          URL.revokeObjectURL(blobUrl)
+          // Use createImageBitmap which is more reliable than new Image() for blob URLs
+          let bitmap
+          try {
+            bitmap = await createImageBitmap(blob)
+          } catch (bitmapErr) {
+            // Fallback: try blob URL with new Image()
+            const blobUrl = URL.createObjectURL(blob)
+            const img = new Image()
+            await new Promise((resolve, reject) => {
+              img.onload = resolve
+              img.onerror = () => reject(new Error('Blob image failed'))
+              img.src = blobUrl
+            })
+            ctx.drawImage(img, sx, sy, sw, sh, 0, 0, sw, sh)
+            URL.revokeObjectURL(blobUrl)
+            bitmap = null
+          }
+          if (bitmap) {
+            ctx.drawImage(bitmap, sx, sy, sw, sh, 0, 0, sw, sh)
+          }
         } else {
           throw new Error('所有跨域图片获取方式均失败')
         }

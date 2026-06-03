@@ -379,26 +379,32 @@ export default function QuestionEdit({ questionId, onClose, onSave }) {
       disableBodyScroll
       opacity="thin"
     >
-      <input
-        id="question-image-file-input"
-        type="file"
-        accept="image/*"
-        onChange={handleFileSelected}
-        style={{ display: 'none' }}
-      />
-
       <div style={{
-        position: 'absolute',
-        bottom: 0,
-        left: 0,
-        right: 0,
-        height: '85vh',
-        background: '#F5F7FA',
-        borderRadius: '12px 12px 0 0',
-        display: 'flex',
-        flexDirection: 'column',
-        overflow: 'hidden'
+        display: 'flex', justifyContent: 'center', width: '100%', height: '100%'
       }}>
+        <div style={{
+          width: '100%', maxWidth: 480, position: 'relative'
+        }}>
+          <input
+            id="question-image-file-input"
+            type="file"
+            accept="image/*"
+            onChange={handleFileSelected}
+            style={{ display: 'none' }}
+          />
+
+          <div style={{
+            position: 'absolute',
+            bottom: 0,
+            left: 0,
+            right: 0,
+            height: '85vh',
+            background: '#F5F7FA',
+            borderRadius: '12px 12px 0 0',
+            display: 'flex',
+            flexDirection: 'column',
+            overflow: 'hidden'
+          }}>
         <div style={{
           background: '#fff',
           padding: '12px 16px',
@@ -1021,6 +1027,8 @@ export default function QuestionEdit({ questionId, onClose, onSave }) {
           questionId={questionId}
         />
       )}
+        </div>
+      </div>
     </Mask>
   )
 }
