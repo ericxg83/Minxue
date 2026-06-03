@@ -352,39 +352,31 @@ export default function QuestionEdit({ questionId, onClose, onSave }) {
 
   if (!question) {
     return (
-      <Mask visible={true} disableBodyScroll opacity="thin">
-        <div style={{
-          position: 'absolute',
-          bottom: 0,
-          left: 0,
-          right: 0,
-          height: '85vh',
-          background: '#F5F7FA',
-          borderRadius: '12px 12px 0 0',
-          display: 'flex',
-          alignItems: 'center',
-          justifyContent: 'center',
-          color: '#6B7280',
-          fontSize: '13px'
-        }}>
-          加载中...
+      <div style={{
+        position: 'fixed', inset: 0, zIndex: 10000,
+        background: 'rgba(0,0,0,0.2)', display: 'flex', justifyContent: 'center'
+      }}>
+        <div style={{ width: '100%', maxWidth: 480, position: 'relative' }}>
+          <div style={{
+            position: 'absolute', bottom: 0, left: 0, right: 0,
+            height: '85vh', background: '#F5F7FA',
+            borderRadius: '12px 12px 0 0', display: 'flex',
+            alignItems: 'center', justifyContent: 'center',
+            color: '#6B7280', fontSize: '13px'
+          }}>
+            加载中...
+          </div>
         </div>
-      </Mask>
+      </div>
     )
   }
 
   return (
-    <Mask
-      visible={true}
-      disableBodyScroll
-      opacity="thin"
-    >
-      <div style={{
-        display: 'flex', justifyContent: 'center', width: '100%', height: '100%', position: 'relative'
-      }}>
-        <div style={{
-          width: '100%', maxWidth: 480, position: 'relative', display: 'flex', flexDirection: 'column', justifyContent: 'flex-end', height: '100%'
-        }}>
+    <div style={{
+      position: 'fixed', inset: 0, zIndex: 10000,
+      background: 'rgba(0,0,0,0.2)', display: 'flex', justifyContent: 'center'
+    }}>
+      <div style={{ width: '100%', maxWidth: 480, position: 'relative', display: 'flex', flexDirection: 'column', justifyContent: 'flex-end', height: '100%' }}>
           <input
             id="question-image-file-input"
             type="file"
@@ -1026,6 +1018,6 @@ export default function QuestionEdit({ questionId, onClose, onSave }) {
       )}
         </div>
       </div>
-    </Mask>
+    </div>
   )
 }
