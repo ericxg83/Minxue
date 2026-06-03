@@ -9,36 +9,9 @@ export default defineConfig(({ mode }) => ({
     tailwindcss(),
     VitePWA({
       registerType: 'prompt',
-      workbox: {
-        globPatterns: ['**/*.{js,css,html,ico,png,svg,woff2}'],
-        cleanupOutdatedCaches: true,
-        skipWaiting: true,
-        clientsClaim: true,
-        runtimeCaching: [
-          {
-            urlPattern: /^https:\/\/cdn\./,
-            handler: 'CacheFirst',
-            options: {
-              cacheName: 'oss-cdn-cache',
-              expiration: {
-                maxEntries: 200,
-                maxAgeSeconds: 30 * 24 * 60 * 60 // 30天
-              }
-            }
-          },
-          {
-            urlPattern: /\.(?:png|jpg|jpeg|webp|svg)$/,
-            handler: 'CacheFirst',
-            options: {
-              cacheName: 'image-cache',
-              expiration: {
-                maxEntries: 100,
-                maxAgeSeconds: 7 * 24 * 60 * 60 // 7天
-              }
-            }
-          }
-        ]
-      },
+      strategies: 'injectManifest',
+      srcDir: 'src',
+      filename: 'sw.js',
       manifest: {
         name: '敏学错题本',
         short_name: '敏学',
@@ -57,6 +30,36 @@ export default defineConfig(({ mode }) => ({
             src: '/icon-512x512.png',
             sizes: '512x512',
             type: 'image/png'
+          }
+        ]
+      },
+      workbox: {
+        globPatterns: ['**/*.{js,css,html,ico,png,svg,woff2}'],
+        cleanupOutdatedCaches: true,
+        skipWaiting: true,
+        clientsClaim: true,
+        runtimeCaching: [
+          {
+            urlPattern: /^https:\/\/cdn\./,
+            handler: 'CacheFirst',
+            options: {
+              cacheName: 'oss-cdn-cache',
+              expiration: {
+                maxEntries: 200,
+                maxAgeSeconds: 30 * 24 * 60 * 60
+              }
+            }
+          },
+          {
+            urlPattern: /\.(?:png|jpg|jpeg|webp|svg)$/,
+            handler: 'CacheFirst',
+            options: {
+              cacheName: 'image-cache',
+              expiration: {
+                maxEntries: 100,
+                maxAgeSeconds: 7 * 24 * 60 * 60
+              }
+            }
           }
         ]
       }
