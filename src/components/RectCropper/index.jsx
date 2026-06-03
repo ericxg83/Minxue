@@ -325,12 +325,22 @@ export default function RectCropper({ image, onConfirm, onCancel, theme = 'light
       
       // Re-fetch the image as blob to create a clean canvas
       let blob = null
+      
+      // Try Cloudflare Pages Function proxy
       try {
-        // Try backend proxy
-        const proxyUrl = `/api/proxy-image?url=${encodeURIComponent(image)}`
+        const proxyUrl = `/proxy-image?url=${encodeURIComponent(image)}`
         const response = await fetch(proxyUrl)
         if (response.ok) blob = await response.blob()
       } catch {}
+      
+      // Fallback: try backend proxy (for local dev with Express)
+      if (!blob || blob.size === 0) {
+        try {
+          const proxyUrl = `/api/proxy-image?url=${encodeURIComponent(image)}`
+          const response = await fetch(proxyUrl)
+          if (response.ok) blob = await response.blob()
+        } catch {}
+      }
       
       if (!blob || blob.size === 0) {
         // Try no-cors fetch
