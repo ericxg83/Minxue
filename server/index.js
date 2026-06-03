@@ -4,38 +4,6 @@ import { fileURLToPath } from 'url'
 import { pendingTaskRecovery } from './pendingTaskRecovery.js'
 import { migrateGeometryImageUrl } from './migrations/addGeometryImageUrl.js'
 
-// 自动执行数据库迁移（包含 images 字段）
-const runMigrations = async () => {
-  const migrations = [
-    `ALTER TABLE questions ADD COLUMN IF NOT EXISTS subject VARCHAR(50)`,
-    `ALTER TABLE questions ADD COLUMN IF NOT EXISTS image_url VARCHAR(500)`,
-    `ALTER TABLE questions ADD COLUMN IF NOT EXISTS ai_tags JSONB DEFAULT '[]'`,
-    `ALTER TABLE questions ADD COLUMN IF NOT EXISTS manual_tags JSONB DEFAULT '[]'`,
-    `ALTER TABLE questions ADD COLUMN IF NOT EXISTS tags_source VARCHAR(10) DEFAULT 'ai'`,
-    `ALTER TABLE questions ADD COLUMN IF NOT EXISTS block_coordinates JSONB`,
-    `ALTER TABLE questions ADD COLUMN IF NOT EXISTS answer_exception BOOLEAN DEFAULT FALSE`,
-    `ALTER TABLE questions ADD COLUMN IF NOT EXISTS answer_exception_reason TEXT`,
-    `ALTER TABLE questions ADD COLUMN IF NOT EXISTS images JSONB DEFAULT '[]'`,
-    `ALTER TABLE questions ADD COLUMN IF NOT EXISTS geometry_image_url VARCHAR(500)`,
-    `ALTER TABLE questions ADD COLUMN IF NOT EXISTS geometry_image_thumbnail VARCHAR(500)`,
-  ]
-
-  console.log('开始执行数据库迁移...')
-  for (const sql of migrations) {
-    try {
-      await query(sql)
-      console.log(`  ✅ ${sql.substring(0, 70)}...`)
-    } catch (err) {
-      if (err.code === '42701') {
-        console.log(`  ⏭️  Column already exists (skipping)`)
-      } else {
-        console.error(`  ❌ 迁移失败: ${err.message}`)
-      }
-    }
-  }
-  console.log('✅ 数据库迁移完成')
-}
-
 const __dirname = dirname(fileURLToPath(import.meta.url))
 dotenv.config({ path: resolve(__dirname, '.env') })
 
@@ -947,7 +915,7 @@ if (process.argv[1] === __filename || process.argv[1]?.endsWith('server/index.js
 
     // 运行数据库迁移
     try {
-      await runMigrations()
+      await migrateGeometryImageUrl()
     } catch (err) {
       console.error('数据库迁移失败:', err.message)
     }

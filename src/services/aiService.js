@@ -1,12 +1,6 @@
 import axios from 'axios'
 import { AI_CONFIG, getAIHeaders, buildOCRPrompt, buildTaggingPrompt } from '../config/ai'
 import { enhanceImageFromDataURL } from '../utils/imageEnhancer'
-import {
-  detectImageBlocks,
-  bindImagesToQuestions,
-  generateThumbnail,
-  processGeometryImage
-} from '../utils/questionImageUtils'
 
 // 识别日志存储键名
 const RECOGNITION_LOGS_KEY = 'ai_recognition_logs'
@@ -256,10 +250,7 @@ export const recognizeQuestions = async (imageBase64, studentId, taskId, retryCo
     }) || []
 
     // ─ 多模态处理: 对含配图的题目进行裁剪+二值化增强 ─
-    let enhancedQuestions = await enhanceGeometryImages(questions)
-
-    // ─ 图片块检测和绑定 ─
-    enhancedQuestions = await detectAndBindImages(enhancedQuestions, imageDataURL)
+    const enhancedQuestions = await enhanceGeometryImages(questions)
 
     // 记录成功日志
     logRecognition({
@@ -331,162 +322,10 @@ export const recognizeQuestionsWithRetry = async (imageBase64, studentId, taskId
 // ── 几何配图处理 ──
 
 /**
- * 检测并绑定图片到题目
- * 1. 检测试卷图片中的图片块
- * 2. 生成缩略图
- * 3. 将图片块绑定到题目
- * 4. 更新题目对象，添加 images 字段
- * 
+ * 批量处理含几何配图的题目：裁剪 + 二值化增强
  * @param {Array} questions - 题目数组
- * @param {string} imageDataURL - 原始试卷图片 dataURL
- * @returns {Promise<Array>} 更新后的题目数组
+ * @returns {Promise<Array>} 处理后的题目数组
  */
-async function detectAndBindImages(questions, imageDataURL) {
-  if (!questions || questions.length === 0) return questions
-  
-  console.log('[图片处理] 开始检测，题目数量:', questions.length)
-  console.log('[图片处理] 原始图片尺寸:', await new Promise((resolve) => {
-    const img = new Image()
-    img.onload = () => resolve(`${img.naturalWidth}x${img.naturalHeight}`)
-    img.onerror = () => resolve('加载失败')
-    img.src = imageDataURL
-  }))
-
-  try {
-    // 加载试卷图片
-    const examImage = await new Promise((resolve, reject) => {
-      const img = new Image()
-      img.onload = () => resolve(img)
-      img.onerror = reject
-      img.src = imageDataURL
-    })
-    
-    // 检测图片块
-    const imageBlocks = await detectImageBlocks(examImage, questions)
-    console.log('[图片处理] 检测到图片块数量:', imageBlocks.length)
-    if (imageBlocks.length > 0) {
-      console.log('[图片处理] 图片块详情:', imageBlocks.map(b => ({
-        bbox: b.bbox,
-        thumbnail_length: b.thumbnail?.length || 0
-      })))
-    }
-    
-    // 绑定图片到题目
-    const questionImageMap = bindImagesToQuestions(questions, imageBlocks, examImage)
-    console.log('[图片处理] 绑定结果 Map 大小:', questionImageMap.size)
-    
-    // 更新题目对象
-    const updatedQuestions = questions.map(q => {
-      const question = { ...q }
-      
-      // 添加自动检测的图片
-      const detectedImages = questionImageMap.get(q.id)
-      if (detectedImages && detectedImages.length > 0) {
-        question.images = detectedImages.map(img => ({
-          thumbnail: img.thumbnail,
-          full_image: img.fullImage,
-          bbox: img.imageBlock.bbox,
-          source: 'auto'
-        }))
-        console.log(`[图片处理] 题目 ${q.id} 绑定 ${question.images.length} 张图片`)
-      }
-      
-      // 如果有 AI 检测的 geometry_image，也添加到 images 数组
-      if (question.geometry_image?.has_image && question.geometry_image.bbox) {
-        if (!question.images) question.images = []
-        
-        const geoImage = await processGeometryImage(question, examImage)
-        if (geoImage) {
-          question.images.push({
-            thumbnail: geoImage.thumbnail,
-            full_image: geoImage.fullImage,
-            bbox: geoImage.bbox,
-            source: 'ai'
-          })
-          console.log(`[图片处理] 题目 ${q.id} AI几何图已添加`)
-        }
-      }
-      
-      // 为向后兼容，保留 enhanced_geometry_image 为第一张图片
-      if (question.images && question.images.length > 0) {
-        question.enhanced_geometry_image = question.images[0].full_image
-        question.geometry_image_url = question.images[0].full_image
-      }
-      
-      return question
-    })
-    
-    const imageCount = updatedQuestions.reduce((sum, q) => sum + (q.images?.length || 0), 0)
-    console.log(`[图片处理] 共检测到 ${imageCount} 张图片，已绑定到题目`)
-    
-    return updatedQuestions
-  } catch (error) {
-    console.error('[图片处理] 失败:', error)
-    return questions
-  }
-}
-
-/**
- * 手动添加图片到题目
- * @param {string} questionId - 题目 ID
- * @param {File|string} imageFile - 图片文件或 dataURL
- * @param {Object} bbox - 图片边界框（可选）
- * @returns {Promise<Object>} 处理后的图片信息
- */
-export async function addImageToQuestion(questionId, imageFile, bbox = null) {
-  try {
-    let dataURL
-    if (imageFile instanceof File) {
-      dataURL = await new Promise((resolve, reject) => {
-        const reader = new FileReader()
-        reader.onload = () => resolve(reader.result)
-        reader.onerror = reject
-        reader.readAsDataURL(imageFile)
-      })
-    } else {
-      dataURL = imageFile
-    }
-    
-    // 生成缩略图
-    const thumbnail = await generateThumbnailFromDataURL(dataURL, 150)
-    
-    return {
-      question_id: questionId,
-      thumbnail,
-      full_image: dataURL,
-      bbox,
-      source: 'manual'
-    }
-  } catch (error) {
-    console.error('[手动添加图片] 失败:', error)
-    throw error
-  }
-}
-
-/**
- * 从 dataURL 生成缩略图
- */
-async function generateThumbnailFromDataURL(dataURL, maxSize) {
-  return new Promise((resolve, reject) => {
-    const img = new Image()
-    img.onload = () => {
-      const scale = Math.min(maxSize / img.naturalWidth, maxSize / img.naturalHeight, 1)
-      
-      const canvas = document.createElement('canvas')
-      canvas.width = Math.round(img.naturalWidth * scale)
-      canvas.height = Math.round(img.naturalHeight * scale)
-      const ctx = canvas.getContext('2d')
-      
-      ctx.imageSmoothingEnabled = true
-      ctx.imageSmoothingQuality = 'high'
-      ctx.drawImage(img, 0, 0, canvas.width, canvas.height)
-      
-      resolve(canvas.toDataURL('image/jpeg', 0.7))
-    }
-    img.onerror = reject
-    img.src = dataURL
-  })
-}
 async function enhanceGeometryImages(questions) {
   const enhanced = []
   const cache = new Map() // bbox 去重缓存 (一图多题共用同一增强结果)

@@ -55,7 +55,6 @@ export default function QuestionEdit({ questionId, onClose, onSave }) {
     question_type: 'choice'
   })
   const [geometryImage, setGeometryImage] = useState(null)
-  const [questionImages, setQuestionImages] = useState([])
 
   const cleanOptionPrefix = (options) => {
     return (options || []).map(opt => {
@@ -97,8 +96,6 @@ export default function QuestionEdit({ questionId, onClose, onSave }) {
         // ─ 多模态配图 — 数据库字段为 geometry_image_url（字符串URL）
         const geoUrl = found.geometry_image_url || null
         setGeometryImage(typeof geoUrl === 'string' ? geoUrl : null)
-        const questionImgs = found.images || []
-        setQuestionImages(questionImgs)
         setFormData({
           content: found.content || '',
           options: cleanOptionPrefix(found.options || []),
@@ -189,15 +186,6 @@ export default function QuestionEdit({ questionId, onClose, onSave }) {
       if (USE_MOCK_DATA) {
         const file = dataURLtoFile(dataUrl, 'question_image.jpg')
         const url = await uploadImage(file)
-        
-        const newImage = {
-          thumbnail: url,
-          full_image: url,
-          bbox: null,
-          source: 'manual'
-        }
-        setQuestionImages(prev => [...prev, newImage])
-        
         setDisplayImageUrl(url)
         setImageRemoved(false)
         setShowCrop(false)
@@ -253,17 +241,6 @@ export default function QuestionEdit({ questionId, onClose, onSave }) {
     })
   }
 
-  const handleRemoveQuestionImage = (indexToRemove) => {
-    Dialog.confirm({
-      content: '确定删除该配图？',
-      confirmText: '删除',
-      cancelText: '取消',
-      onConfirm: () => {
-        setQuestionImages(prev => prev.filter((_, idx) => idx !== indexToRemove))
-      }
-    })
-  }
-
   const getEffectiveTags = () => {
     return tagsSource === 'manual' ? manualTags : aiTags
   }
@@ -304,7 +281,6 @@ export default function QuestionEdit({ questionId, onClose, onSave }) {
         manual_tags: manualTags,
         tags_source: tagsSource,
         image_url: imageRemoved ? '' : (displayImageUrl || question?.image_url || ''),
-        images: questionImages,
         // ─ 多模态配图字段 
         geometry_image: question?.geometry_image || null,
         enhanced_geometry_image: question?.enhanced_geometry_image || geometryImage || null,
@@ -569,93 +545,6 @@ export default function QuestionEdit({ questionId, onClose, onSave }) {
                     </div>
                   )}
                 </div>
-
-                {/* ─ 题目配图 (AI识别或手动上传) ─ */}
-                {questionImages.length > 0 && (
-                  <div style={{
-                    marginTop: '12px',
-                    background: '#FAFAFA',
-                    borderRadius: '12px',
-                    padding: '12px',
-                    border: '1px solid #E5E7EB'
-                  }}>
-                    <div style={{
-                      display: 'flex', alignItems: 'center', justifyContent: 'space-between',
-                      marginBottom: '12px'
-                    }}>
-                      <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
-                        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#2563EB" strokeWidth="2">
-                          <rect x="3" y="3" width="18" height="18" rx="2" ry="2"/>
-                          <circle cx="8.5" cy="8.5" r="1.5"/>
-                          <polyline points="21 15 16 10 5 21"/>
-                        </svg>
-                        <span style={{ fontSize: '13px', fontWeight: 600, color: '#2563EB' }}>
-                          题目配图 ({questionImages.length})
-                        </span>
-                      </div>
-                      <span style={{ fontSize: '11px', color: '#9CA3AF' }}>
-                        {questionImages[0]?.source === 'ai' ? 'AI自动切题' : questionImages[0]?.source === 'auto' ? '自动检测' : '手动添加'}
-                      </span>
-                    </div>
-                    <div style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
-                      {questionImages.map((img, index) => (
-                        <div key={index} style={{ position: 'relative' }}>
-                          <img
-                            src={img.full_image || img.thumbnail}
-                            alt={`题目配图${index + 1}`}
-                            style={{
-                              width: '100%',
-                              maxHeight: '300px',
-                              objectFit: 'contain',
-                              borderRadius: '8px',
-                              display: 'block',
-                              background: '#FFFFFF',
-                              border: '1px solid #E5E7EB'
-                            }}
-                          />
-                          <div style={{
-                            position: 'absolute',
-                            top: '8px',
-                            right: '8px',
-                            display: 'flex',
-                            gap: '6px'
-                          }}>
-                            <div
-                              onClick={() => handleRemoveQuestionImage(index)}
-                              style={{
-                                width: '28px',
-                                height: '28px',
-                                borderRadius: '50%',
-                                background: 'rgba(255, 255, 255, 0.9)',
-                                display: 'flex',
-                                alignItems: 'center',
-                                justifyContent: 'center',
-                                cursor: 'pointer',
-                                boxShadow: '0 2px 4px rgba(0,0,0,0.2)'
-                              }}
-                            >
-                              <svg width="14" height="14" viewBox="0 0 1024 1024" fill="#EF4444">
-                                <path d="M864 256H736v-64c0-52.8-43.2-96-96-96H384c-52.8 0-96 43.2-96 96v64H160c-17.6 0-32 14.4-32 32s14.4 32 32 32h704c17.6 0 32-14.4 32-32s-14.4-32-32-32zM384 192h256v64H384V192z"/>
-                                <path d="M704 384c-17.6 0-32 14.4-32 32v384c0 17.6-14.4 32-32 32s-32-14.4-32-32V416c0-17.6-14.4-32-32-32s-32 14.4-32 32v384c0 17.6-14.4 32-32 32s-32-14.4-32-32V416c0-17.6-14.4-32-32-32s-32 14.4-32 32v384c0 17.6-14.4 32-32 32s-32-14.4-32-32V416c0-17.6-14.4-32-32-32s-32 14.4-32 32v448c0 52.8 43.2 96 96 96h320c52.8 0 96-43.2 96-96V416c0-17.6-14.4-32-32-32z"/>
-                              </svg>
-                            </div>
-                          </div>
-                        </div>
-                      ))}
-                    </div>
-                    <div style={{ marginTop: '12px', textAlign: 'center' }}>
-                      <Button
-                        size="small"
-                        color="primary"
-                        fill="outline"
-                        onClick={handleAddImageClick}
-                        style={{ borderRadius: '6px', fontSize: '12px', height: '32px' }}
-                      >
-                        + 添加配图
-                      </Button>
-                    </div>
-                  </div>
-                )}
 
                 {/* ─ 几何配图 (多模态切题引擎自动切出) ─ */}
                 {geometryImage && (

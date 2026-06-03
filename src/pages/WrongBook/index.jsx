@@ -809,45 +809,6 @@ export default function WrongBook({ onScanQR }) {
                     </div>
                   </div>
 
-                  {/* 题目配图缩略图 */}
-                  {question.images && question.images.length > 0 && (
-                    <div style={{
-                      display: 'flex',
-                      gap: '8px',
-                      marginBottom: '12px',
-                      overflowX: 'auto',
-                      paddingBottom: '4px'
-                    }}>
-                      {question.images.map((img, imgIdx) => (
-                        <div
-                          key={imgIdx}
-                          style={{
-                            flexShrink: 0,
-                            width: '80px',
-                            height: '80px',
-                            borderRadius: '8px',
-                            overflow: 'hidden',
-                            border: '1px solid ' + APPLE_COLORS.border,
-                            background: '#F8F9FA'
-                          }}
-                        >
-                          <img
-                            src={img.thumbnail}
-                            alt={`配图${imgIdx + 1}`}
-                            style={{
-                              width: '100%',
-                              height: '100%',
-                              objectFit: 'cover'
-                            }}
-                            onError={(e) => {
-                              e.target.style.display = 'none'
-                            }}
-                          />
-                        </div>
-                      ))}
-                    </div>
-                  )}
-
                   {/* 题目内容 */}
                   <div style={{ 
                     fontSize: '15px', 

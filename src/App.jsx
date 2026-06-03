@@ -621,7 +621,7 @@ export default function App() {
       Toast.show({ message: '正在识别题目...', type: 'loading', duration: 0 })
 
       const compressedImage = await compressImage(task.image_url)
-      const result = await recognizeQuestions(compressedImage, currentStudent.id, task.id)
+      const result = await recognizeQuestions(compressedImage)
 
       if (result.questions && result.questions.length > 0) {
         const questions = result.questions.map((q, idx) => ({
@@ -636,10 +636,6 @@ export default function App() {
           is_correct: q.is_correct,
           status: q.is_correct ? 'pending' : 'wrong',
           image_url: q.image_url,
-          geometry_image: q.geometry_image,
-          geometry_image_url: q.geometry_image_url,
-          enhanced_geometry_image: q.enhanced_geometry_image,
-          images: q.images || [],
           ai_tags: q.ai_tags || [],
           tags_source: 'ai'
         }))

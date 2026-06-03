@@ -1,7 +1,6 @@
 import dotenv from 'dotenv'
 import { dirname, resolve } from 'path'
 import { fileURLToPath } from 'url'
-import fs from 'fs'
 
 const __dirname = dirname(fileURLToPath(import.meta.url))
 dotenv.config({ path: resolve(__dirname, '.env') })
@@ -115,218 +114,6 @@ const deduplicateTags = (tags) => {
 }
 
 /**
- * Detect question numbers from content string.
- * Supports: "1.", "1、", "(1)", "10、", "一、" etc.
- * @param {string} text - Question content
- * @returns {number|null} Detected question number, or null
- */
-function detectQuestionNumber(text) {
-  if (!text) return null
-  const s = text.trim()
-  // 1. or 1、
-  const m1 = s.match(/^(\d+)[.、]/)
-  if (m1) return parseInt(m1[1], 10)
-  // (1)
-  const m2 = s.match(/^(\d+)\)/)
-  if (m2) return parseInt(m2[1], 10)
-  // 一、二、 etc. (simple)
-  const cnNums = { '一': 1, '二': 2, '三': 3, '四': 4, '五': 5, '六': 6, '七': 7, '八': 8, '九': 9, '十': 10 }
-  const m3 = s.match(/^([一二三四五六七八九十]+)[、.]/)
-  if (m3 && cnNums[m3[1]]) return cnNums[m3[1]]
-  // Try extracting from "第N题"
-  const m4 = s.match(/第(\d+)题/)
-  if (m4) return parseInt(m4[1], 10)
-  return null
-}
-
-/**
- * Recalculate question boundaries using question number Y positions.
- * 
- * Algorithm:
- * 1. Sort questions by Y coordinate (from AI's block_coordinates)
- * 2. For each question:
- *    - top = current question's Y (with padding)
- *    - bottom = next question's Y (with padding)
- *    - For the last question: bottom = image bottom
- * 3. Use full width (x=0, width=imageWidth) for each question
- * 
- * This ensures: one question box = one complete question, no cross-question, no missing.
- * 
- * @param {Array} questions - Array of question objects with block_coordinates
- * @param {number} imageHeight - Original image height
- * @param {number} imageWidth - Original image width
- * @param {Object} debugInfo - Debug output collector
- */
-function recalculateQuestionBoundaries(questions, imageHeight, imageWidth, debugInfo) {
-  if (!questions || questions.length === 0) return
-
-  debugInfo.recalcMethod = 'question-number-y-boundaries'
-  debugInfo.totalQuestions = questions.length
-  debugInfo.boundaries = {}
-
-  // Sort by Y coordinate
-  const sorted = [...questions].sort((a, b) => {
-    const yA = a.block_coordinates?.y || a.coordinates?.y || (Array.isArray(a.bbox) ? a.bbox[1] : a.bbox?.y) || 0
-    const yB = b.block_coordinates?.y || b.coordinates?.y || (Array.isArray(b.bbox) ? b.bbox[1] : b.bbox?.y) || 0
-    return yA - yB
-  })
-
-  // Extract question number Y positions
-  const questionNumberPositions = []
-  for (const q of sorted) {
-    const qNum = detectQuestionNumber(q.content || '') || detectQuestionNumber(q.visual_title || '')
-    const y = q.block_coordinates?.y || q.coordinates?.y || (Array.isArray(q.bbox) ? q.bbox[1] : q.bbox?.y) || 0
-    const height = q.block_coordinates?.height || q.coordinates?.height || (Array.isArray(q.bbox) ? q.bbox[3] : q.bbox?.height) || 0
-    questionNumberPositions.push({
-      questionNumber: qNum,
-      y: y,
-      height: height,
-      content: (q.content || '').substring(0, 50)
-    })
-  }
-  debugInfo.questionNumberPositions = questionNumberPositions.map(p => ({
-    number: p.questionNumber,
-    y: p.y,
-    content: p.content
-  }))
-
-  // Calculate boundaries for each question
-  const PADDING_TOP = 15  // px above question number
-  const PADDING_BOTTOM = 20 // px below question end
-
-  for (let i = 0; i < sorted.length; i++) {
-    const currentY = questionNumberPositions[i].y
-    const nextY = (i < sorted.length - 1) ? questionNumberPositions[i + 1].y : imageHeight
-
-    // Question box: from current question's Y to next question's Y
-    let top = currentY - PADDING_TOP
-    let bottom = nextY - PADDING_BOTTOM
-
-    // Clamp to image bounds
-    top = Math.max(0, top)
-    bottom = Math.min(imageHeight, bottom)
-
-    // Calculate height
-    const newHeight = bottom - top
-
-    if (newHeight <= 0) {
-      console.warn(`   ⚠️ [QuestionBoundary] 第${i + 1}题高度为负或零 (top=${top}, bottom=${bottom})，使用原始高度`)
-      // Fallback: use original coordinates
-      continue
-    }
-
-    // Use full width
-    const newX = 0
-    const newWidth = imageWidth
-
-    // Update the question's coordinates
-    sorted[i].block_coordinates = {
-      x: newX,
-      y: top,
-      width: newWidth,
-      height: newHeight
-    }
-    sorted[i].coordinates = { ...sorted[i].block_coordinates }
-    sorted[i].bbox = { ...sorted[i].block_coordinates }
-
-    debugInfo.boundaries[i] = {
-      questionNumber: questionNumberPositions[i].questionNumber,
-      top: top,
-      bottom: bottom,
-      height: newHeight,
-      nextQuestionY: nextY
-    }
-  }
-
-  // Re-sort by Y (should already be sorted, but ensure consistency)
-  sorted.sort((a, b) => a.block_coordinates.y - b.block_coordinates.y)
-
-  // Update the original questions array in-place
-  for (let i = 0; i < questions.length; i++) {
-    questions[i].block_coordinates = sorted[i].block_coordinates
-    questions[i].coordinates = sorted[i].coordinates
-    questions[i].bbox = sorted[i].bbox
-  }
-
-  console.log(`   ✅ [QuestionBoundary] 已按题号Y坐标重新计算 ${questions.length} 道题的边界框`)
-  console.log(`   [QuestionBoundary] 调试信息:`, JSON.stringify(debugInfo, null, 2))
-}
-
-/**
- * Generate debug overlay image with question boundary boxes drawn.
- * Uses Sharp to draw rectangles and text on the image.
- * 
- * @param {Buffer} imageBuffer - Original image buffer
- * @param {Array} questions - Array of questions with block_coordinates
- * @param {string} outputPath - Path to save debug image
- */
-async function generateDebugOverlay(imageBuffer, questions, outputPath) {
-  try {
-    const sharpInstance = sharp(imageBuffer)
-    const { width: imgW, height: imgH } = await sharpInstance.metadata()
-
-    // Build SVG overlay
-    let svgOverlay = `<svg width="${imgW}" height="${imgH}" xmlns="http://www.w3.org/2000/svg">`
-
-    const colors = [
-      { stroke: '#FF0000', fill: 'rgba(255,0,0,0.1)' },
-      { stroke: '#00FF00', fill: 'rgba(0,255,0,0.1)' },
-      { stroke: '#0000FF', fill: 'rgba(0,0,255,0.1)' },
-      { stroke: '#FF00FF', fill: 'rgba(255,0,255,0.1)' },
-      { stroke: '#FFFF00', fill: 'rgba(255,255,0,0.1)' },
-    ]
-
-    for (let i = 0; i < questions.length; i++) {
-      const q = questions[i]
-      const bbox = q.block_coordinates
-      if (!bbox) continue
-
-      const color = colors[i % colors.length]
-      const rx = bbox.x
-      const ry = bbox.y
-      const rw = bbox.width
-      const rh = bbox.height
-
-      // Draw rectangle
-      svgOverlay += `<rect x="${rx}" y="${ry}" width="${rw}" height="${rh}" 
-        fill="${color.fill}" stroke="${color.stroke}" stroke-width="3" rx="4"/>`
-
-      // Draw question number label
-      const label = `Q${i + 1}`
-      const fontSize = Math.max(14, Math.min(24, rw / 8))
-      svgOverlay += `<text x="${rx + 8}" y="${ry - 8}" 
-        font-size="${fontSize}" font-weight="bold" fill="${color.stroke}"
-        font-family="Arial, sans-serif">${label}</text>`
-
-      // Draw top/bottom boundary markers
-      svgOverlay += `<line x1="${rx}" y1="${ry}" x2="${rx + rw}" y2="${ry}" 
-        stroke="${color.stroke}" stroke-width="2" stroke-dasharray="5,3"/>`
-      svgOverlay += `<line x1="${rx}" y1="${ry + rh}" x2="${rx + rw}" y2="${ry + rh}" 
-        stroke="${color.stroke}" stroke-width="2" stroke-dasharray="5,3"/>`
-
-      // Draw Y coordinate labels
-      svgOverlay += `<text x="${rx + rw + 5}" y="${ry + fontSize / 2}" 
-        font-size="${Math.max(10, fontSize - 6)}" fill="${color.stroke}"
-        font-family="monospace">y=${Math.round(ry)}</text>`
-      svgOverlay += `<text x="${rx + rw + 5}" y="${ry + rh + fontSize / 2}" 
-        font-size="${Math.max(10, fontSize - 6)}" fill="${color.stroke}"
-        font-family="monospace">y=${Math.round(ry + rh)}</text>`
-    }
-
-    svgOverlay += '</svg>'
-
-    // Composite SVG overlay onto original image
-    await sharpInstance
-      .composite([{ input: Buffer.from(svgOverlay), top: 0, left: 0 }])
-      .jpeg({ quality: 90 })
-      .toFile(outputPath)
-
-    console.log(`   🖼️ [DebugOverlay] 调试图已生成: ${outputPath}`)
-  } catch (error) {
-    console.error(`   ⚠️ [DebugOverlay] 生成调试图失败: ${error.message}`)
-  }
-}
-/**
  * JSON 自动修复 — 处理 AI 返回的畸形 JSON
  * 常见问题: 未转义反斜杠(\frac → \\frac)、未转义双引号、字符串内换行
  */
@@ -347,9 +134,8 @@ function repairAIJson(jsonStr) {
     return `"${fixed}"`
   })
 
-  // 3. 修复字符串内未转义换行（处理多行情况）
+  // 3. 修复字符串内未转义换行
   s = s.replace(/"([^"]*?)\n([^"]*?)"/g, '"$1\\n$2"')
-  s = s.replace(/"([^"]*?)\n([^"]*?)"/g, '"$1\\n$2"') // 二次处理嵌套换行
 
   // 4. 恢复保护的转义序列
   for (let i = 0; i < saved.length; i++) {
@@ -357,131 +143,6 @@ function repairAIJson(jsonStr) {
   }
 
   return s
-}
-
-/**
- * 深度修复 AI 返回的 JSON
- * 处理 LaTeX 公式中的反斜杠、未转义换行、以及多行字符串问题
- */
-function deepRepairAIJson(jsonStr) {
-  console.log(`   🔧 [深度修复] 开始深度修复 JSON...`)
-  const origLen = jsonStr.length
-
-  // 第一步：用占位符保护所有已正确转义的序列
-  const escPlaceholders = []
-  let s = jsonStr.replace(/(\\[\\\"nrtb])/g, (m) => {
-    const idx = escPlaceholders.length
-    escPlaceholders.push(m)
-    return `__ESC_PLACEHOLDER_${idx}__`
-  })
-
-  // 第二步：保护 JSON 结构中的冒号、逗号、括号等符号，避免后续处理干扰
-  // 先提取出所有 block_coordinates 对象备用（最核心数据）
-  const coordRegex = /"block_coordinates"\s*:\s*\{[^}]*\}/g
-  const savedCoords = []
-  s = s.replace(coordRegex, (match) => {
-    const idx = savedCoords.length
-    savedCoords.push(match)
-    return `__COORD_PLACEHOLDER_${idx}__`
-  })
-
-  // 第三步：修复字符串内部未转义的反斜杠（LaTeX 公式核心问题）
-  // 使用状态机逐字符处理，避免正则的贪婪匹配问题
-  let result = ''
-  let inString = false
-  let escape = false
-  let lastQuotePos = -1
-  let currentString = ''
-
-  for (let i = 0; i < s.length; i++) {
-    const ch = s[i]
-
-    if (!inString) {
-      if (ch === '"') {
-        inString = true
-        escape = false
-        lastQuotePos = i
-        currentString = '"'
-      } else {
-        result += ch
-      }
-      continue
-    }
-
-    if (escape) {
-      escape = false
-      currentString += ch
-      continue
-    }
-
-    if (ch === '\\') {
-      escape = true
-      currentString += ch
-      continue
-    }
-
-    if (ch === '"') {
-      // 检查是否是字符串结束符：后面必须是逗号、}、]、: 或空白
-      const rest = s.substring(i + 1)
-      const nextNonSpace = rest.match(/^\s*(.)/)
-      const nextChar = nextNonSpace ? nextNonSpace[1] : ''
-
-      if (nextChar === ',' || nextChar === '}' || nextChar === ']' || nextChar === ':' || nextChar === '') {
-        // 字符串正常结束
-        inString = false
-        result += currentString + ch
-        continue
-      } else {
-        // 遇到字符串内部的引号，转义它
-        currentString += '\\"'
-        continue
-      }
-    }
-
-    if (ch === '\n' || ch === '\r') {
-      // 字符串内部的换行符，转义为 \n
-      currentString += '\\n'
-      continue
-    }
-
-    currentString += ch
-  }
-
-  s = result
-
-  // 第四步：恢复 block_coordinates 占位符
-  for (let i = 0; i < savedCoords.length; i++) {
-    s = s.replace(`__COORD_PLACEHOLDER_${i}__`, savedCoords[i])
-  }
-
-  // 第五步：恢复转义序列占位符
-  for (let i = 0; i < escPlaceholders.length; i++) {
-    s = s.replace(`__ESC_PLACEHOLDER_${i}__`, escPlaceholders[i])
-  }
-
-  console.log(`   [深度修复] 修复前: ${origLen} chars, 修复后: ${s.length} chars`)
-  return s
-}
-
-/**
- * 从损坏的 JSON 中尽力提取 block_coordinates
- * 当完全解析失败时，这是最后的保底手段
- */
-function extractCoordsFromBrokenJson(jsonStr) {
-  console.log(`   🚨 [保底提取] 尝试从损坏的 JSON 中提取坐标...`)
-  const coords = []
-  const coordPattern = /"block_coordinates"\s*:\s*\{\s*"x"\s*:\s*(\d+)\s*,\s*"y"\s*:\s*(\d+)\s*,\s*"width"\s*:\s*(\d+)\s*,\s*"height"\s*:\s*(\d+)\s*\}/g
-  let match
-  while ((match = coordPattern.exec(jsonStr)) !== null) {
-    coords.push({
-      x: parseInt(match[1]),
-      y: parseInt(match[2]),
-      width: parseInt(match[3]),
-      height: parseInt(match[4])
-    })
-  }
-  console.log(`   [保底提取] 成功提取 ${coords.length} 个坐标`)
-  return coords
 }
 
 const deskewImage = async (imageBuffer) => {
@@ -651,7 +312,6 @@ const recognizeQuestions = async (imageBase64, taskId, retryCount = 0) => {
   }
 
   try {
-    console.log(`   🔥 [MODEL] 正在请求模型: ${AI_CONFIG.MODEL}`)
     console.log(`   发送请求到: ${AI_CONFIG.ENDPOINT}`)
     const response = await axios.post(AI_CONFIG.ENDPOINT, requestBody, {
       headers: getAIHeaders(),
@@ -664,121 +324,32 @@ const recognizeQuestions = async (imageBase64, taskId, retryCount = 0) => {
     const content = response.data.choices[0]?.message?.content
     if (!content) throw new Error('AI 返回内容为空')
 
-    console.log(`    [RAW_RESPONSE] AI 原始响应全文:\n${content}`)
-    console.log(`    [RAW_RESPONSE_END]`)
+    console.log(`   AI 原始响应 (前300字): ${content.substring(0, 300)}...`)
 
-    // ===== 【强力滤网】：先强行扒掉大模型违规穿上的 Markdown 外套，再处理 =====
     let jsonStr = content
-      .replace(/```json\s*/gi, '')  // 扒掉 ```json 前缀
-      .replace(/```\s*/g, '')        // 扒掉剩余的 ``` 后缀
-      .trim()
+    const jsonMatch = content.match(/```json\n?([\s\S]*?)\n?```/) ||
+                      content.match(/```\n?([\s\S]*?)\n?```/)
+    if (jsonMatch) jsonStr = jsonMatch[1]
 
-    // 初始化默认结构，确保后续代码不会因为 undefined 崩溃
-    let parsedData = { questions: [], block_coordinates: null }
-
-    // ===== 【终极物理外挂】：无视任何 JSON 结构报错，直接在原始文本中强抠 <box> 标签！ =====
-    const boxRegex = /<box>\s*([\d.]+)\s*,\s*([\d.]+)\s*,\s*([\d.]+)\s*,\s*([\d.]+)\s*<\/box>/g
-    const extractedCoords = []
-    let bMatch
-    while ((bMatch = boxRegex.exec(content)) !== null) {
-      extractedCoords.push({
-        x: parseFloat(bMatch[1]),
-        y: parseFloat(bMatch[2]),
-        width: parseFloat(bMatch[3]),
-        height: parseFloat(bMatch[4])
-      })
-    }
-
-    // 只要抓到了真实坐标，立刻按 y 轴从上到下排序，并作为最高优先级的真理数据！
-    if (extractedCoords.length > 0) {
-      extractedCoords.sort((a, b) => a.y - b.y)
-      console.log(`🎯 【外挂提取成功】无视 JSON，成功强抠出 ${extractedCoords.length} 个真实题目坐标！`, extractedCoords)
-    } else {
-      console.log(`️ 正则未匹配到 <box> 坐标标签，将依赖 JSON.parse 路径`)
-    }
-
-    // ===== 接下来再去尝试解析文本内容 =====
+    let result
     try {
-      let cleanedStr = jsonStr.trim()
-        .replace(/\r?\n/g, ' ')    // 强制把真实换行变为空格，防止断裂
-        .replace(/\\+/g, '\\\\')   // 保护反斜杠
-        .replace(/<box>.*?<\/box>/g, '') // 清理 <box> 标签防止 JSON.parse 干扰
-
-      const result = JSON.parse(cleanedStr)
-      if (result && result.questions) {
-        parsedData.questions = result.questions
-
-        // 如果 JSON 解析出来的题目没有 block_coordinates，用外挂提取的坐标回填
-        if (extractedCoords.length > 0) {
-          for (let i = 0; i < parsedData.questions.length && i < extractedCoords.length; i++) {
-            // 外挂提取的坐标是最高优先级真理数据，强制覆盖 JSON 中的不可靠坐标
-            parsedData.questions[i].block_coordinates = extractedCoords[i]
-            parsedData.questions[i].coordinates = extractedCoords[i]
-            parsedData.questions[i].bbox = extractedCoords[i]
-          }
-          console.log(`   ✅ 坐标强制覆盖：用外挂提取的 ${extractedCoords.length} 个真实坐标替换了 JSON 中的不可靠数据`)
-        }
-      }
-      console.log(`✅ 题目文本解析成功，共 ${parsedData.questions.length} 道题`)
-    } catch (e) {
-      console.error(`️ 题目文本解析确实炸了，但没关系，我们的外挂坐标已经安全拿到了！`)
-      console.error(`   原始错误: ${e.message}`)
-
-      // 【暴力重建】用外挂提取的坐标重组 questions 数组
-      if (extractedCoords.length > 0) {
-        console.log(`   🔄 用外挂提取的 ${extractedCoords.length} 个坐标重建 questions 数组`)
-
-        parsedData.questions = extractedCoords.map((coord, index) => ({
-          question_id: String(index + 1),
-          visual_title: String(index + 1),
-          content: `第${index + 1}题（题目内容解析异常，请参照原图对应框选区域）`,
-          options: [],
-          answer: '待校对',
-          student_answer: '',
-          analysis: '公式解析断裂，已启动坐标强行保底隔离',
-          is_correct: null,
-          confidence: 0.5,
-          question_type: 'fill',
-          block_coordinates: coord,
-          coordinates: coord,
-          bbox: coord
-        }))
-        console.log(`🎯 【暴力提取成功】成功抢救出 ${extractedCoords.length} 个真实坐标并重组！`)
-      } else {
-        // 连坐标也没拿到，给一个空数组防止后续崩溃
-        parsedData.questions = []
+      result = JSON.parse(jsonStr)
+    } catch (parseError) {
+      console.warn(`⚠️  AI JSON 解析失败，尝试自动修复...`)
+      console.warn(`   原始错误: ${parseError.message}`)
+      const repaired = repairAIJson(jsonStr)
+      console.log(`   修复后 JSON (前200字): ${repaired.substring(0, 200)}...`)
+      try {
+        result = JSON.parse(repaired)
+        console.log(`✅ JSON 自动修复成功！`)
+      } catch (repairError) {
+        console.error(`❌ JSON 自动修复仍然失败: ${repairError.message}`)
+        console.error(`   原始 JSON (前500字): ${jsonStr.substring(0, 500)}`)
+        throw new Error(`AI 返回的 JSON 格式错误，无法解析。原始错误: ${parseError.message}`)
       }
     }
 
-    // 确保释放 BullMQ 队列锁
-    if (!parsedData.block_coordinates) {
-      console.error(`❌ 连保底正则都没拿到坐标，强制释放任务`)
-    }
-
-    // 强制防御拦截：如果真的什么都没拿到，也必须正常结束任务，绝对不允许卡死队列
-    if (!parsedData || (!parsedData.block_coordinates && parsedData.questions.length === 0)) {
-      console.error(`❌ 任务解析彻底失败，强制标记失败释放 Redis 锁`)
-      throw new Error('AI_PARSE_ERROR: 无法从 AI 响应中提取任何有效数据')
-    }
-
-    // 🎯 【几何重排】强制根据 Y 轴坐标从上到下正序排序，彻底解决"张冠李戴"错位问题
-    if (parsedData && Array.isArray(parsedData.questions) && parsedData.questions.length > 0) {
-      parsedData.questions.sort((a, b) => {
-        const yA = a.block_coordinates?.y || a.coordinates?.y || (Array.isArray(a.bbox) ? a.bbox[1] : a.bbox?.y) || 0
-        const yB = b.block_coordinates?.y || b.coordinates?.y || (Array.isArray(b.bbox) ? b.bbox[1] : b.bbox?.y) || 0
-        return yA - yB
-      })
-
-      // 排序完成后，重新校准题目的题号和 visual_title，确保从 1 开始递增
-      parsedData.questions.forEach((q, index) => {
-        q.question_id = String(index + 1)
-        q.visual_title = String(index + 1)
-      })
-      console.log(`🎯 【几何重排成功】已根据试卷物理 Y 轴位置从上到下重新排列 ${parsedData.questions.length} 道题号顺序！`)
-      console.log(`   排序后首题 y=${parsedData.questions[0].block_coordinates?.y || parsedData.questions[0].coordinates?.y || parsedData.questions[0].bbox?.y}, 末题 y=${parsedData.questions[parsedData.questions.length - 1].block_coordinates?.y || parsedData.questions[parsedData.questions.length - 1].coordinates?.y || parsedData.questions[parsedData.questions.length - 1].bbox?.y}`)
-    }
-
-    const questions = parsedData.questions?.map((q, index) => {
+    const questions = result.questions?.map((q, index) => {
       const rawStudentAnswer = q.student_answer || ''
       const answerSource = determineAnswerSource(rawStudentAnswer)
       const aiAnswer = rawStudentAnswer
@@ -799,8 +370,6 @@ const recognizeQuestions = async (imageBase64, taskId, retryCount = 0) => {
         status = isCorrect === true ? 'correct' : (isCorrect === false ? 'wrong' : 'pending')
       }
 
-      const coord = q.block_coordinates || q.coordinates || q.bbox || null
-
       return {
         id: crypto.randomUUID(),
         task_id: taskId,
@@ -816,9 +385,7 @@ const recognizeQuestions = async (imageBase64, taskId, retryCount = 0) => {
         status: status,
         confidence: q.confidence || 0,
         analysis: q.analysis || '',
-        block_coordinates: coord,
-        coordinates: coord,    // 兼容别名
-        bbox: coord,            // 兼容别名
+        block_coordinates: q.block_coordinates || null,
         created_at: new Date().toISOString()
       }
     }) || []
@@ -835,18 +402,12 @@ const recognizeQuestions = async (imageBase64, taskId, retryCount = 0) => {
     }
 
     const isNetworkError = !error.response || error.code === 'ECONNABORTED' || error.code === 'ETIMEDOUT'
-    const isTimeout = error.code === 'ECONNABORTED' || error.code === 'ETIMEDOUT'
     const shouldRetry = isNetworkError && retryCount < AI_CONFIG.MAX_RETRIES
 
     if (shouldRetry) {
       console.log(`   ${retryCount + 1}秒后重试 (${retryCount + 1}/${AI_CONFIG.MAX_RETRIES})...`)
       await new Promise(resolve => setTimeout(resolve, (retryCount + 1) * 1000))
       return recognizeQuestions(imageBase64, taskId, retryCount + 1)
-    }
-
-    // 当重试用尽，如果是超时错误，则确保任务优雅退出（不会死锁）
-    if (isTimeout) {
-      console.log(`   ⚠️ AI 请求超时且重试已用尽，任务将标记为失败并释放队列锁...`)
     }
 
     return {
@@ -1354,12 +915,9 @@ export const processTask = async (job) => {
 
     console.log(`📊 [Step 4/8] 压缩图片...`)
     let compressedBuffer
-    let compressedMeta
     try {
       compressedBuffer = await compressImageBuffer(straightenedBuffer)
-      // 获取压缩后的图片尺寸（AI 返回的坐标基于此尺寸）
-      compressedMeta = await sharp(compressedBuffer).metadata()
-      console.log(`✅ [Step 4/8] 压缩完成: ${straightenedBuffer.length} → ${compressedBuffer.length} bytes, 压缩尺寸: ${compressedMeta.width}x${compressedMeta.height}`)
+      console.log(`✅ [Step 4/8] 压缩完成: ${straightenedBuffer.length} → ${compressedBuffer.length} bytes (${Math.round(compressedBuffer.length/straightenedBuffer.length*100)}%)`)
     } catch (compressError) {
       console.error('图片压缩失败:', compressError)
       await updateTaskStatus(taskId, TASK_STATUS.FAILED, {
@@ -1374,22 +932,10 @@ export const processTask = async (job) => {
 
     const imageBase64 = bufferToBase64(compressedBuffer)
 
-    // ─ 坐标换算准备：计算压缩图 → 原图的缩放因子 ──
-    // AI 返回的坐标是基于压缩图（最大1920x1920）的像素坐标
-    // 前端渲染的是原图，所以需要将坐标换算回原图空间
-    const straightenedMeta = await sharp(straightenedBuffer).metadata()
-    const origWidth = straightenedMeta.width
-    const origHeight = straightenedMeta.height
-    const compWidth = compressedMeta.width
-    const compHeight = compressedMeta.height
-    const scaleX = origWidth / compWidth
-    const scaleY = origHeight / compHeight
-    console.log(`   [坐标换算] 压缩图 ${compWidth}x${compHeight} → 原图 ${origWidth}x${origHeight}, scaleX=${scaleX.toFixed(4)}, scaleY=${scaleY.toFixed(4)}`)
-
     await job.updateProgress(35)
     await updateTaskStatus(taskId, TASK_STATUS.PROCESSING, { progress: 35 })
 
-    console.log(` [Step 5/8] 调用 AI 视觉识别...`)
+    console.log(`📊 [Step 5/8] 调用 AI 视觉识别...`)
     const ocrResult = await recognizeQuestions(imageBase64, taskId)
 
     if (!ocrResult.success) {
@@ -1406,49 +952,6 @@ export const processTask = async (job) => {
     await updateTaskStatus(taskId, TASK_STATUS.PROCESSING, { progress: 70 })
 
     const questions = ocrResult.questions || []
-
-    // ── 坐标换算：将 AI 返回的压缩图坐标还原为原图坐标 ──
-    const needScale = (Math.abs(scaleX - 1) > 0.001 || Math.abs(scaleY - 1) > 0.001)
-    if (questions.length > 0 && needScale) {
-      console.log(`   [坐标换算] 开始将 ${questions.length} 道题的坐标从压缩空间还原到原图空间...`)
-      for (const q of questions) {
-        if (q.block_coordinates && typeof q.block_coordinates.x === 'number') {
-          const orig = q.block_coordinates
-          q.block_coordinates = {
-            x: Math.round(orig.x * scaleX),
-            y: Math.round(orig.y * scaleY),
-            width: Math.round(orig.width * scaleX),
-            height: Math.round(orig.height * scaleY)
-          }
-        }
-        // 几何配图坐标也要换算
-        if (q.geometry_image?.has_image && q.geometry_image.bbox) {
-          const gBbox = q.geometry_image.bbox
-          q.geometry_image.bbox = {
-            x: Math.round(gBbox.x * scaleX),
-            y: Math.round(gBbox.y * scaleY),
-            width: Math.round(gBbox.width * scaleX),
-            height: Math.round(gBbox.height * scaleY)
-          }
-        }
-      }
-      console.log(`   [坐标换算] 完成`)
-    }
-
-    // ─ 重新计算题目边界：基于题号Y坐标的切分方案 ──
-    // 核心逻辑：每道题的top=当前题号Y，bottom=下一题号Y，不再依赖AI返回的不准确高度
-    const debugBoundaryInfo = {}
-    if (questions.length > 0) {
-      console.log(`   [坐标重算] 开始按题号Y坐标重新计算题目边界...`)
-      recalculateQuestionBoundaries(questions, origHeight, origWidth, debugBoundaryInfo)
-      
-      // 生成调试图（可选，可通过环境变量控制）
-      if (process.env.DEBUG_QUESTION_BOUNDARIES === 'true') {
-        const debugOutputPath = `debug_question_boundaries_${taskId}.jpg`
-        await generateDebugOverlay(straightenedBuffer, questions, debugOutputPath)
-      }
-    }
-
     let wrongCount = questions.filter(q => !q.is_correct).length
     let answerGenResult = { updated: 0, total: 0, empty: 0, placeholder: 0, exceptions: 0, cacheHits: 0, cacheMisses: 0 }
 
@@ -1475,15 +978,6 @@ export const processTask = async (job) => {
           }
         } else if (q.content && (q.content.includes('如图') || q.content.includes('图1') || q.content.includes('图示'))) {
           console.log(`   ⚠️ [几何图] ${q.id}: 题干含"如图"关键词但未返回 geometry_image, content=${q.content.substring(0, 60)}`)
-        }
-      }
-
-      // ── 保存图片数组到 images JSON 字段 ─
-      for (const q of questions) {
-        if (q.images && q.images.length > 0) {
-          // 将 images 数组序列化为 JSON 字符串存储
-          q.images_json = JSON.stringify(q.images)
-          console.log(`   🖼️ [图片] ${q.id}: 保存 ${q.images.length} 张图片关联`)
         }
       }
 

@@ -131,10 +131,6 @@ CREATE POLICY "Allow all" ON generated_exams FOR ALL USING (true) WITH CHECK (tr
 -- ALTER TABLE questions ADD COLUMN IF NOT EXISTS tags_source VARCHAR(10) DEFAULT 'ai';
 -- ALTER TABLE questions ADD COLUMN IF NOT EXISTS block_coordinates JSONB;
 
--- 迁移：添加题目图片关联字段
--- ALTER TABLE questions ADD COLUMN IF NOT EXISTS images JSONB DEFAULT '[]';
--- ALTER TABLE questions ADD COLUMN IF NOT EXISTS geometry_image_thumbnail VARCHAR(500);
-
 -- 启用 RLS (Row Level Security)
 ALTER TABLE students ENABLE ROW LEVEL SECURITY;
 ALTER TABLE tasks ENABLE ROW LEVEL SECURITY;
