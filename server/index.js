@@ -815,24 +815,28 @@ app.get('/api/generated-exams/student/:studentId', async (req, res) => {
       [studentId]
     )
 
-    // 计算每份试卷的正确/错误题目数
+    // 计算每份试卷的正确/错误/未作答/已排除题目数
     const examsWithStats = await Promise.all(rows.map(async (exam) => {
       const qIds = exam.question_ids || []
       if (qIds.length === 0) {
-        return { ...exam, correct_count: 0, wrong_count: 0, total_count: 0 }
+        return { ...exam, correct_count: 0, wrong_count: 0, not_answered_count: 0, excluded_count: 0, total_count: 0 }
       }
       const placeholders = qIds.map((_, i) => `$${i + 1}`).join(',')
       const { rows: qRows } = await query(
-        `SELECT is_correct FROM ${TABLES.QUESTIONS} WHERE id IN (${placeholders})`,
+        `SELECT is_correct, answer_source, excluded FROM ${TABLES.QUESTIONS} WHERE id IN (${placeholders})`,
         qIds
       )
       let correct_count = 0
       let wrong_count = 0
+      let not_answered_count = 0
+      let excluded_count = 0
       qRows.forEach(q => {
-        if (q.is_correct === true) correct_count++
+        if (q.excluded) excluded_count++
+        else if (q.is_correct === true) correct_count++
         else if (q.is_correct === false) wrong_count++
+        else if (q.answer_source === 'blank') not_answered_count++
       })
-      return { ...exam, correct_count, wrong_count, total_count: qIds.length }
+      return { ...exam, correct_count, wrong_count, not_answered_count, excluded_count, total_count: qIds.length }
     }))
 
     res.json({ success: true, generatedExams: examsWithStats })

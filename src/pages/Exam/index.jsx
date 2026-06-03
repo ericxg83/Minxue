@@ -443,6 +443,11 @@ export default function Exam() {
                       <span style={{ color: APPLE_COLORS.danger }}>
                         错误 {exam.wrong_count || 0}
                       </span>
+                      {exam.not_answered_count > 0 && (
+                        <span style={{ color: APPLE_COLORS.warning }}>
+                          未作答 {exam.not_answered_count}
+                        </span>
+                      )}
                     </div>
                   )}
                 </div>
