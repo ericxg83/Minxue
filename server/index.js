@@ -834,7 +834,7 @@ app.get('/api/generated-exams/student/:studentId', async (req, res) => {
         if (q.excluded) excluded_count++
         else if (q.is_correct === true) correct_count++
         else if (q.is_correct === false) wrong_count++
-        else if (q.answer_source === 'blank') not_answered_count++
+        else if (q.is_correct === null || q.answer_source === 'blank') not_answered_count++
       })
       return { ...exam, correct_count, wrong_count, not_answered_count, excluded_count, total_count: qIds.length }
     }))
