@@ -1,26 +1,33 @@
 export async function onRequest(context) {
   const { request } = context
   const url = new URL(request.url)
-  const imageUrl = decodeURIComponent(url.searchParams.get('url') || '')
+  const imageUrl = url.searchParams.get('url') || ''
 
   if (!imageUrl) {
     return new Response('Missing url parameter', { status: 400 })
   }
 
-  // Validate trusted domains
+  let parsedUrl
+  try {
+    parsedUrl = new URL(imageUrl)
+  } catch {
+    return new Response('Invalid URL', { status: 400 })
+  }
+
+  // Validate trusted domains - check hostname ends with known trusted domains
   const trustedHostnames = [
     'minxue-app-oss.oss-cn-shanghai.aliyuncs.com',
     'minxue-app-oss-oss-cn-shanghai.aliyuncs.com',
     'minxue-api.onrender.com'
   ]
+  
+  // Also support wildcard matching for OSS subdomains
+  const isTrusted = trustedHostnames.some(h => 
+    parsedUrl.hostname === h || parsedUrl.hostname.endsWith('.' + h.replace(/^[^.]*/, ''))
+  ) || parsedUrl.hostname.includes('aliyuncs.com') || parsedUrl.hostname.includes('onrender.com')
 
-  try {
-    const parsedUrl = new URL(imageUrl)
-    if (!trustedHostnames.includes(parsedUrl.hostname)) {
-      return new Response('Untrusted domain: ' + parsedUrl.hostname, { status: 403 })
-    }
-  } catch {
-    return new Response('Invalid URL', { status: 400 })
+  if (!isTrusted) {
+    return new Response('Untrusted domain: ' + parsedUrl.hostname, { status: 403 })
   }
 
   try {
