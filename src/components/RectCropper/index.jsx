@@ -335,74 +335,8 @@ export default function RectCropper({ image, onConfirm, onCancel, theme = 'light
       canvas.height = sh
       const ctx = canvas.getContext('2d')
 
-      const displayedSrc = imgRef.current.src
-      const isDirectHttpUrl = displayedSrc && displayedSrc.startsWith('http')
-      
-      if (isDirectHttpUrl) {
-        // HTTP URL: try proxy first, fallback to no-cors fetch
-        let blob = null
-        
-        // Try 1: Backend proxy (works when running with Express server)
-        try {
-          const proxyUrl = `/api/proxy-image?url=${encodeURIComponent(displayedSrc)}`
-          const response = await fetch(proxyUrl)
-          if (response.ok) {
-            blob = await response.blob()
-          }
-        } catch {}
-        
-        // Try 2: Pages Function proxy (for Cloudflare Pages deployment)
-        if (!blob) {
-          try {
-            const proxyUrl = `/proxy-image?url=${encodeURIComponent(displayedSrc)}`
-            const response = await fetch(proxyUrl)
-            if (response.ok) {
-              blob = await response.blob()
-            }
-          } catch {}
-        }
-        
-        // Try 3: Direct no-cors fetch - blob is same-origin, never taints canvas
-        // Note: no-cors returns opaque response with empty blob.type, so we accept non-empty blobs
-        if (!blob) {
-          try {
-            const response = await fetch(displayedSrc, { mode: 'no-cors' })
-            blob = await response.blob()
-            if (blob.size === 0) {
-              blob = null
-              throw new Error('Empty blob from no-cors fetch')
-            }
-          } catch {}
-        }
-        
-        if (blob) {
-          // Use createImageBitmap which is more reliable than new Image() for blob URLs
-          let bitmap
-          try {
-            bitmap = await createImageBitmap(blob)
-          } catch (bitmapErr) {
-            // Fallback: try blob URL with new Image()
-            const blobUrl = URL.createObjectURL(blob)
-            const img = new Image()
-            await new Promise((resolve, reject) => {
-              img.onload = resolve
-              img.onerror = () => reject(new Error('Blob image failed'))
-              img.src = blobUrl
-            })
-            ctx.drawImage(img, sx, sy, sw, sh, 0, 0, sw, sh)
-            URL.revokeObjectURL(blobUrl)
-            bitmap = null
-          }
-          if (bitmap) {
-            ctx.drawImage(bitmap, sx, sy, sw, sh, 0, 0, sw, sh)
-          }
-        } else {
-          throw new Error('所有跨域图片获取方式均失败')
-        }
-      } else {
-        // blob URL or data URL - already same-origin, safe to draw directly
-        ctx.drawImage(imgRef.current, sx, sy, sw, sh, 0, 0, sw, sh)
-      }
+      // imgRef uses blob URL (same-origin) or data URL, safe to draw directly
+      ctx.drawImage(imgRef.current, sx, sy, sw, sh, 0, 0, sw, sh)
       
       let dataUrl
       try {
@@ -485,7 +419,8 @@ export default function RectCropper({ image, onConfirm, onCancel, theme = 'light
       >
         <img
           ref={imgRef}
-          src={image}
+          src={imgSrc || image}
+          crossOrigin="anonymous"
           alt="crop"
           draggable={false}
           onLoad={computeLayout}
