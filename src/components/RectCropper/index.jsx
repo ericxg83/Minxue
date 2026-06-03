@@ -135,10 +135,33 @@ export default function RectCropper({ image, onConfirm, onCancel, theme = 'light
 
   const [imgSrc, setImgSrc] = useState(null)
 
-  // Load image - use original URL directly (no CORS needed for display)
+  // Load image via proxy to avoid CORS/tainted canvas issues
   useEffect(() => {
     if (!image) { setImgSrc(null); return }
-    setImgSrc(image)
+    // Try API proxy first (local dev), then Pages Function proxy (production)
+    const tryLoadViaProxy = async () => {
+      // Try backend API proxy
+      try {
+        const proxyUrl = `/api/proxy-image?url=${encodeURIComponent(image)}`
+        const resp = await fetch(proxyUrl)
+        if (resp.ok) {
+          setImgSrc(proxyUrl)
+          return
+        }
+      } catch {}
+      // Try Pages Function proxy
+      try {
+        const proxyUrl = `/proxy-image?url=${encodeURIComponent(image)}`
+        const resp = await fetch(proxyUrl)
+        if (resp.ok) {
+          setImgSrc(proxyUrl)
+          return
+        }
+      } catch {}
+      // Fallback: direct URL (may cause tainted canvas)
+      setImgSrc(image)
+    }
+    tryLoadViaProxy()
   }, [image])
 
   useEffect(() => {
@@ -312,55 +335,16 @@ export default function RectCropper({ image, onConfirm, onCancel, theme = 'light
       canvas.height = sh
       const ctx = canvas.getContext('2d')
 
-      // Try drawing directly from imgRef (works for same-origin/data URLs)
+      // Image loaded via proxy, so canvas won't be tainted
       try {
         ctx.drawImage(imgRef.current, sx, sy, sw, sh, 0, 0, sw, sh)
         const dataUrl = canvas.toDataURL('image/jpeg', 0.92)
         onConfirm(dataUrl)
         return
       } catch (drawErr) {
-        // Canvas is tainted - need to re-fetch the image
-        console.warn('Canvas tainted, re-fetching image for export:', drawErr)
+        console.error('裁剪导出失败:', drawErr)
+        alert('裁剪失败: ' + (drawErr.message || '未知错误'))
       }
-      
-      // Re-fetch the image as blob to create a clean canvas
-      let blob = null
-      
-      // Try Cloudflare Pages Function proxy
-      try {
-        const proxyUrl = `/proxy-image?url=${encodeURIComponent(image)}`
-        const response = await fetch(proxyUrl)
-        if (response.ok) blob = await response.blob()
-      } catch {}
-      
-      // Fallback: try backend proxy (for local dev with Express)
-      if (!blob || blob.size === 0) {
-        try {
-          const proxyUrl = `/api/proxy-image?url=${encodeURIComponent(image)}`
-          const response = await fetch(proxyUrl)
-          if (response.ok) blob = await response.blob()
-        } catch {}
-      }
-      
-      if (!blob || blob.size === 0) {
-        // Try no-cors fetch
-        try {
-          const response = await fetch(image, { mode: 'no-cors' })
-          blob = await response.blob()
-          if (blob.size === 0) blob = null
-        } catch {}
-      }
-      
-      if (!blob || blob.size === 0) {
-        throw new Error('无法获取图片，请检查网络连接')
-      }
-      
-      const bitmap = await createImageBitmap(blob)
-      ctx.drawImage(bitmap, sx, sy, sw, sh, 0, 0, sw, sh)
-      bitmap.close()
-      
-      const dataUrl = canvas.toDataURL('image/jpeg', 0.92)
-      onConfirm(dataUrl)
     } catch (err) {
       console.error('裁剪失败:', err)
       alert('裁剪失败: ' + (err.message || '未知错误'))
@@ -436,6 +420,7 @@ export default function RectCropper({ image, onConfirm, onCancel, theme = 'light
           src={imgSrc || image}
           alt="crop"
           draggable={false}
+          crossOrigin="anonymous"
           onLoad={computeLayout}
           style={{
             position: 'absolute',

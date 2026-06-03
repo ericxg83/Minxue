@@ -567,6 +567,7 @@ export default function EnhancedRectCropper({
           src={straightenedImage || image}
           alt="crop"
           draggable={false}
+          crossOrigin="anonymous"
           onLoad={computeLayout}
           style={{
             position: 'absolute',
