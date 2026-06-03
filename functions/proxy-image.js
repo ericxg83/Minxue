@@ -8,15 +8,16 @@ export async function onRequest(context) {
   }
 
   // Validate trusted domains
-  const trustedDomains = [
+  const trustedHostnames = [
+    'minxue-app-oss.oss-cn-shanghai.aliyuncs.com',
     'minxue-app-oss-oss-cn-shanghai.aliyuncs.com',
     'minxue-api.onrender.com'
   ]
 
   try {
     const parsedUrl = new URL(imageUrl)
-    if (!trustedDomains.some(d => parsedUrl.hostname.includes(d))) {
-      return new Response('Untrusted domain', { status: 403 })
+    if (!trustedHostnames.includes(parsedUrl.hostname)) {
+      return new Response('Untrusted domain: ' + parsedUrl.hostname, { status: 403 })
     }
   } catch {
     return new Response('Invalid URL', { status: 400 })
