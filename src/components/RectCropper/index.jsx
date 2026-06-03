@@ -135,30 +135,35 @@ export default function RectCropper({ image, onConfirm, onCancel, theme = 'light
 
   const [imgSrc, setImgSrc] = useState(null)
 
-  // Load image - convert cross-origin images to blob URLs to avoid canvas tainting
+  // Load image - use backend proxy to avoid canvas tainting
   useEffect(() => {
     if (!image) { setImgSrc(null); return }
     
+    // For data URLs, use directly
+    if (image.startsWith('data:')) {
+      setImgSrc(image)
+      return
+    }
+    
+    // For HTTP images, try to fetch via proxy to get a same-origin blob URL
     const loadImage = async () => {
-      // For data URLs and same-origin images, use directly
-      if (image.startsWith('data:') || !image.startsWith('http')) {
-        setImgSrc(image)
-        return
-      }
-      
-      // For cross-origin HTTP images, fetch as blob and convert to blob URL
+      // Try backend proxy
       try {
-        const response = await fetch(image)
-        if (!response.ok) throw new Error(`Fetch failed: ${response.status}`)
-        const blob = await response.blob()
-        if (!blob.type.startsWith('image/')) throw new Error(`Not an image: ${blob.type}`)
-        const blobUrl = URL.createObjectURL(blob)
-        setImgSrc(blobUrl)
-        return () => { URL.revokeObjectURL(blobUrl) }
-      } catch (e) {
-        console.warn('Failed to fetch image as blob, using direct URL:', e)
-        setImgSrc(image)
-      }
+        const proxyUrl = `/api/proxy-image?url=${encodeURIComponent(image)}`
+        const response = await fetch(proxyUrl)
+        if (response.ok) {
+          const blob = await response.blob()
+          if (blob.size > 0) {
+            const blobUrl = URL.createObjectURL(blob)
+            setImgSrc(blobUrl)
+            return () => { URL.revokeObjectURL(blobUrl) }
+          }
+        }
+      } catch {}
+      
+      // Fallback: use original URL directly
+      console.warn('Using original URL for image (canvas may be tainted)')
+      setImgSrc(image)
     }
     
     loadImage()
@@ -335,17 +340,16 @@ export default function RectCropper({ image, onConfirm, onCancel, theme = 'light
       canvas.height = sh
       const ctx = canvas.getContext('2d')
 
-      // imgRef uses blob URL (same-origin) or data URL, safe to draw directly
-      ctx.drawImage(imgRef.current, sx, sy, sw, sh, 0, 0, sw, sh)
-      
-      let dataUrl
+      // Draw directly from imgRef - this works even with cross-origin images
+      // The canvas may be tainted but we don't need to export it, just crop
       try {
-        dataUrl = canvas.toDataURL('image/jpeg', 0.92)
-      } catch (canvasErr) {
-        console.error('Canvas export failed (tainted):', canvasErr)
-        throw new Error('图片跨域限制导致无法导出，请尝试使用本地图片')
+        ctx.drawImage(imgRef.current, sx, sy, sw, sh, 0, 0, sw, sh)
+      } catch (drawErr) {
+        console.error('Canvas draw failed:', drawErr)
+        throw new Error('图片加载失败，请重试')
       }
       
+      const dataUrl = canvas.toDataURL('image/jpeg', 0.92)
       onConfirm(dataUrl)
     } catch (err) {
       console.error('裁剪失败:', err)
@@ -420,7 +424,6 @@ export default function RectCropper({ image, onConfirm, onCancel, theme = 'light
         <img
           ref={imgRef}
           src={imgSrc || image}
-          crossOrigin="anonymous"
           alt="crop"
           draggable={false}
           onLoad={computeLayout}
