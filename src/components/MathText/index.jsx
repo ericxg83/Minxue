@@ -56,11 +56,6 @@ function preprocessMath(text) {
     '∠': '\\angle ',
     '△': '\\triangle ',
     '°': '^{\\circ}',
-    '×': '\\times',
-    '÷': '\\div',
-    '≥': '\\geq',
-    '≤': '\\leq',
-    '≠': '\\neq',
     '≈': '\\approx',
     '∞': '\\infty',
     'π': '\\pi',
@@ -72,8 +67,6 @@ function preprocessMath(text) {
     'λ': '\\lambda',
     'μ': '\\mu',
     'σ': '\\sigma',
-    '⊥': '\\perp',
-    '∥': '\\parallel',
     '∈': '\\in',
     '∉': '\\notin',
     '⊂': '\\subset',
@@ -84,7 +77,6 @@ function preprocessMath(text) {
     '←': '\\leftarrow',
     '⇒': '\\Rightarrow',
     '⇔': '\\Leftrightarrow',
-    '±': '\\pm',
   }
 
   let result = text
@@ -99,8 +91,8 @@ function preprocessMath(text) {
   result = result.replace(/\\times/g, '×')
   result = result.replace(/\\div/g, '÷')
   result = result.replace(/\\pm/g, '±')
-  result = result.replace(/\\perp/g, '')
-  result = result.replace(/\\parallel/g, '∥')
+  result = result.replace(/\\perp/g, '\u22A5')
+  result = result.replace(/\\parallel/g, '\u2225')
 
   // === 1. 除法表达式: a/b → \frac{a}{b} ===
   result = result.replace(/(\([^)]+\))\s*\/\s*(\([^)]+\))/g, '\\frac{$1}{$2}')
@@ -261,7 +253,7 @@ function isMathChar(char) {
   // 希腊字母和其他数学符号
   if ('αβγδεζηθικλμνξοπρστυφχψωΑΒΓΔΕΖΗΘΙΚΛΜΝΞΟΠΡΣΤΥΦΧΨΩ'.includes(char)) return true
   // 数学关系符
-  if ('≥≤≠≈∞π'.includes(char)) return true
+  if ('≥≤≈∞π∥⊥'.includes(char)) return true
   return false
 }
 

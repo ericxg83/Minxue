@@ -383,8 +383,16 @@ export default function ExamReview({ task, onClose, onSave }) {
   return (
     <div style={{
       position: 'fixed', inset: 0, overflow: 'hidden', zIndex: 10000,
-      background: '#1a1a1a'
+      background: '#1a1a1a',
+      display: 'flex', justifyContent: 'center'
     }}>
+      <div style={{
+        position: 'relative',
+        width: '100%',
+        maxWidth: 480,
+        height: '100%',
+        overflow: 'hidden'
+      }}>
       {/* ══════════════ 底层: 原卷大图画布 ═══════════════ */}
       <div
         ref={baseContainerRef}
@@ -804,6 +812,7 @@ export default function ExamReview({ task, onClose, onSave }) {
       >
         <ArrowLeft size={20} />
       </button>
+      </div>
     </div>
   )
 }
