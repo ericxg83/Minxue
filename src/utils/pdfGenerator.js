@@ -64,6 +64,9 @@ function buildExamHTML({ title, studentName, questions, showAnswers }) {
       num++
       html += `<div class="question">`
       html += `<div class="q-head"><span class="q-num">${num}.</span><span class="q-text">${escapeHtml(q.content)}</span></div>`
+      if (q.image_url) {
+        html += `<div class="q-image"><img src="${q.image_url}" alt="配图" /></div>`
+      }
       if (q.options && q.options.length > 0) {
         html += `<div class="opts">`
         q.options.forEach((opt, i) => {
@@ -103,6 +106,8 @@ function buildExamHTML({ title, studentName, questions, showAnswers }) {
     .q-head{display:flex;gap:8px;font-size:14px;line-height:1.7;margin-bottom:6px}
     .q-num{font-weight:bold;white-space:nowrap;min-width:28px}
     .q-text{flex:1}
+    .q-image{text-align:center;margin:8px 0 8px 36px}
+    .q-image img{max-width:100%;max-height:250px;object-fit:contain;border-radius:4px}
     .opts{display:grid;grid-template-columns:1fr 1fr 1fr 1fr;gap:4px 12px;padding-left:36px;margin-bottom:4px}
     .opt{font-size:13px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
     .fill-line{width:160px;border-bottom:1.5px solid #333;margin:6px 0 6px 36px;height:22px}
@@ -140,7 +145,38 @@ export async function generateExamPDF({ title, studentName, questions, filename,
     throw new Error('没有题目可生成PDF')
   }
 
-  const html = buildExamHTML({ title, studentName, questions, showAnswers })
+  // Convert cross-origin OSS images to base64 data URLs via backend proxy
+  // The backend /api/proxy-image fetches images from OSS (no CORS needed server-side)
+  const imageMap = new Map()
+  const imageUrls = [...new Set(questions.map(q => q.image_url).filter(Boolean))]
+  
+  await Promise.all(imageUrls.map(async (url) => {
+    try {
+      const proxyUrl = `/api/proxy-image?url=${encodeURIComponent(url)}`
+      const resp = await fetch(proxyUrl)
+      if (resp.ok) {
+        const blob = await resp.blob()
+        const dataUrl = await new Promise((resolve, reject) => {
+          const reader = new FileReader()
+          reader.onloadend = () => resolve(reader.result)
+          reader.onerror = reject
+          reader.readAsDataURL(blob)
+        })
+        imageMap.set(url, dataUrl)
+        return
+      }
+    } catch {}
+    
+    console.warn('Failed to preload image:', url)
+  }))
+
+  // Replace image URLs with data URLs in questions
+  const pdfQuestions = questions.map(q => ({
+    ...q,
+    image_url: q.image_url ? (imageMap.get(q.image_url) || q.image_url) : null
+  }))
+
+  const html = buildExamHTML({ title, studentName, questions: pdfQuestions, showAnswers })
   const container = document.createElement('div')
   container.innerHTML = html
   container.style.position = 'absolute'
