@@ -211,9 +211,19 @@ export default function WrongBook({ onScanQR }) {
     
     // 错题分类筛选（错题/未作答）
     if (activeQuestionType !== 'all') {
-      const practiceCount = wq.practice_count || 0
-      if (activeQuestionType === 'wrong' && practiceCount <= 0) return false
-      if (activeQuestionType === 'unanswered' && practiceCount > 0) return false
+      const question = wq.question || wq
+      const answerSource = question.answer_source || question._answer_source || 'recognized'
+      const isBlank = answerSource === 'blank'
+      const isCorrect = question.is_correct !== undefined ? question.is_correct : wq.is_correct
+      
+      // 复审页面判定逻辑：
+      // 未作答: answer_source === 'blank' && is_correct === null
+      // 错题: is_correct === false
+      const isUnanswered = isBlank && isCorrect === null
+      const isWrong = isCorrect === false
+      
+      if (activeQuestionType === 'wrong' && !isWrong) return false
+      if (activeQuestionType === 'unanswered' && !isUnanswered) return false
     }
     
     // 掌握状态筛选
@@ -309,6 +319,25 @@ export default function WrongBook({ onScanQR }) {
   }
 
   const allTags = getAllTags()
+
+  // 判定题目类型（基于复审页面逻辑）
+  const getQuestionType = (wq) => {
+    const question = wq.question || wq
+    const answerSource = question.answer_source || question._answer_source || 'recognized'
+    const isBlank = answerSource === 'blank'
+    const isCorrect = question.is_correct !== undefined ? question.is_correct : wq.is_correct
+    
+    if (isBlank && isCorrect === null) return 'unanswered'
+    if (isCorrect === false) return 'wrong'
+    return 'other'
+  }
+
+  // 获取各类型数量
+  const getQuestionTypeCount = (type) => {
+    const studentQuestions = (Array.isArray(wrongQuestions) ? wrongQuestions : []).filter(wq => wq.student_id === currentStudent?.id)
+    if (type === 'all') return studentQuestions.length
+    return studentQuestions.filter(wq => getQuestionType(wq) === type).length
+  }
 
   // 获取统计数据（只统计当前学生的错题）
   const getStats = () => {
@@ -872,6 +901,27 @@ export default function WrongBook({ onScanQR }) {
               )}
             </div>
           )}
+
+          {/* 分类筛选（错题/未作答） */}
+          <div 
+            onClick={() => { setActiveFilterType('questionType'); setShowFilterPanel(true) }}
+            style={{
+              display: 'flex',
+              alignItems: 'center',
+              gap: '4px',
+              cursor: 'pointer',
+              color: activeQuestionType !== 'all' ? APPLE_COLORS.danger : APPLE_COLORS.textSecondary,
+              fontWeight: activeQuestionType !== 'all' ? 500 : 400
+            }}
+          >
+            <span style={{ fontSize: '14px' }}>分类</span>
+            <DownOutline style={{ fontSize: '12px' }} />
+            {activeQuestionType !== 'all' && (
+              <span style={{ fontSize: '12px', color: APPLE_COLORS.danger }}>
+                {QUESTION_TYPE_TABS.find(o => o.key === activeQuestionType)?.label}
+              </span>
+            )}
+          </div>
         </div>
         <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
           {/* 排序按钮 */}
