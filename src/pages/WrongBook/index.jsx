@@ -100,7 +100,7 @@ export default function WrongBook({ onScanQR }) {
   const [activeErrorCount, setActiveErrorCount] = useState('all')
   const [activeTag, setActiveTag] = useState('all')
   const [sortBy, setSortBy] = useState('time_desc')
-  const [activeFilterType, setActiveFilterType] = useState('') // 'subject', 'time', 'errorCount', 'tag', 'sort', 'questionType' // time_desc, time_asc, error_asc, subject, tag
+  const [activeFilterType, setActiveFilterType] = useState('') // 'subject', 'time', 'errorCount', 'tag', 'sort', 'questionType'
   const [showPrintPreview, setShowPrintPreview] = useState(false)
   const [showStudentSwitcher, setShowStudentSwitcher] = useState(false)
   const [showFilterPanel, setShowFilterPanel] = useState(false)
