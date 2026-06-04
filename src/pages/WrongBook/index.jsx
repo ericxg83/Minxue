@@ -105,9 +105,10 @@ export default function WrongBook({ onScanQR }) {
   const [activeTime, setActiveTime] = useState('all')
   const [activeErrorCount, setActiveErrorCount] = useState('all')
   const [activeTag, setActiveTag] = useState('all')
-  const [activeCategory, setActiveCategory] = useState('all') // 分类筛选：错题/未作答
+  const [activeCategory, setActiveCategory] = useState('all') // 分类筛选：错题/未作答/全部
   const [sortBy, setSortBy] = useState('time_desc')
   const [activeFilterType, setActiveFilterType] = useState('') // 'subject', 'time', 'errorCount', 'tag', 'sort', 'category'
+  const [showInlineCategoryDropdown, setShowInlineCategoryDropdown] = useState(false) // 分类原地下拉菜单
   const [showPrintPreview, setShowPrintPreview] = useState(false)
   const [showStudentSwitcher, setShowStudentSwitcher] = useState(false)
   const [showFilterPanel, setShowFilterPanel] = useState(false)
