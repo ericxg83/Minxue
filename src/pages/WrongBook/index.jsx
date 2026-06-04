@@ -82,6 +82,13 @@ const ERROR_COUNT_OPTIONS = [
   { key: '5+', label: '5次以上' }
 ]
 
+// 分类筛选选项（用于高级筛选栏的下拉）
+const CATEGORY_OPTIONS = [
+  { key: 'all', label: '全部分类' },
+  { key: 'wrong', label: '错题' },
+  { key: 'unanswered', label: '未作答' }
+]
+
 export default function WrongBook({ onScanQR }) {
   const { currentStudent } = useStudentStore()
   const { 
@@ -98,8 +105,9 @@ export default function WrongBook({ onScanQR }) {
   const [activeTime, setActiveTime] = useState('all')
   const [activeErrorCount, setActiveErrorCount] = useState('all')
   const [activeTag, setActiveTag] = useState('all')
+  const [activeCategory, setActiveCategory] = useState('all') // 分类筛选：错题/未作答
   const [sortBy, setSortBy] = useState('time_desc')
-  const [activeFilterType, setActiveFilterType] = useState('') // 'subject', 'time', 'errorCount', 'tag', 'sort', 'questionType'
+  const [activeFilterType, setActiveFilterType] = useState('') // 'subject', 'time', 'errorCount', 'tag', 'sort', 'category'
   const [showPrintPreview, setShowPrintPreview] = useState(false)
   const [showStudentSwitcher, setShowStudentSwitcher] = useState(false)
   const [showFilterPanel, setShowFilterPanel] = useState(false)
@@ -292,7 +300,7 @@ export default function WrongBook({ onScanQR }) {
   }
 
   // 是否有激活的筛选条件
-  const hasActiveFilters = activeQuestionType !== 'all' || activeSubject !== 'all' || activeTime !== 'all' || activeErrorCount !== 'all' || activeTag !== 'all'
+  const hasActiveFilters = activeQuestionType !== 'all' || activeSubject !== 'all' || activeTime !== 'all' || activeErrorCount !== 'all' || activeTag !== 'all' || activeCategory !== 'all'
 
   const resetFilters = () => {
     setActiveQuestionType('all')
@@ -300,6 +308,7 @@ export default function WrongBook({ onScanQR }) {
     setActiveTime('all')
     setActiveErrorCount('all')
     setActiveTag('all')
+    setActiveCategory('all')
     setSortBy('time_desc')
   }
 
@@ -828,7 +837,7 @@ export default function WrongBook({ onScanQR }) {
             }}
           >
             <span style={{ fontSize: '14px' }}>科目</span>
-            <DownOutline style={{ fontSize: '12px' }} />
+            <DownOutline style={{ fontSize: '12px', pointerEvents: 'none' }} />
             {activeSubject !== 'all' && (
               <span style={{ fontSize: '12px', color: APPLE_COLORS.primary }}>
                 {SUBJECT_OPTIONS.find(o => o.key === activeSubject)?.label}
@@ -849,7 +858,7 @@ export default function WrongBook({ onScanQR }) {
             }}
           >
             <span style={{ fontSize: '14px' }}>时间</span>
-            <DownOutline style={{ fontSize: '12px' }} />
+            <DownOutline style={{ fontSize: '12px', pointerEvents: 'none' }} />
             {activeTime !== 'all' && (
               <span style={{ fontSize: '12px', color: APPLE_COLORS.primary }}>
                 {TIME_OPTIONS.find(o => o.key === activeTime)?.label}
@@ -870,7 +879,7 @@ export default function WrongBook({ onScanQR }) {
             }}
           >
             <span style={{ fontSize: '14px' }}>错次</span>
-            <DownOutline style={{ fontSize: '12px' }} />
+            <DownOutline style={{ fontSize: '12px', pointerEvents: 'none' }} />
             {activeErrorCount !== 'all' && (
               <span style={{ fontSize: '12px', color: APPLE_COLORS.primary }}>
                 {ERROR_COUNT_OPTIONS.find(o => o.key === activeErrorCount)?.label}
@@ -892,7 +901,7 @@ export default function WrongBook({ onScanQR }) {
               }}
             >
               <span style={{ fontSize: '14px' }}>标签</span>
-              <DownOutline style={{ fontSize: '12px' }} />
+              <DownOutline style={{ fontSize: '12px', pointerEvents: 'none' }} />
               {activeTag !== 'all' && (
                 <span style={{ fontSize: '12px', color: APPLE_COLORS.primary }}>
                   {activeTag}
@@ -903,21 +912,21 @@ export default function WrongBook({ onScanQR }) {
 
           {/* 分类筛选（错题/未作答） */}
           <div 
-            onClick={() => { setActiveFilterType('questionType'); setShowFilterPanel(true) }}
+            onClick={() => { setActiveFilterType('category'); setShowFilterPanel(true) }}
             style={{
               display: 'flex',
               alignItems: 'center',
               gap: '4px',
               cursor: 'pointer',
-              color: activeQuestionType !== 'all' ? APPLE_COLORS.danger : APPLE_COLORS.textSecondary,
-              fontWeight: activeQuestionType !== 'all' ? 500 : 400
+              color: activeCategory !== 'all' ? APPLE_COLORS.primary : APPLE_COLORS.textSecondary,
+              fontWeight: activeCategory !== 'all' ? 500 : 400
             }}
           >
             <span style={{ fontSize: '14px' }}>分类</span>
-            <DownOutline style={{ fontSize: '12px' }} />
-            {activeQuestionType !== 'all' && (
-              <span style={{ fontSize: '12px', color: APPLE_COLORS.danger }}>
-                {QUESTION_TYPE_TABS.find(o => o.key === activeQuestionType)?.label}
+            <DownOutline style={{ fontSize: '12px', pointerEvents: 'none' }} />
+            {activeCategory !== 'all' && (
+              <span style={{ fontSize: '12px', color: APPLE_COLORS.primary }}>
+                {CATEGORY_OPTIONS.find(o => o.key === activeCategory)?.label}
               </span>
             )}
           </div>
@@ -936,7 +945,7 @@ export default function WrongBook({ onScanQR }) {
             }}
           >
             <span>排序</span>
-            <DownOutline style={{ fontSize: '12px' }} />
+            <DownOutline style={{ fontSize: '12px', pointerEvents: 'none' }} />
           </div>
           {hasActiveFilters && (
             <div 
@@ -1251,17 +1260,17 @@ export default function WrongBook({ onScanQR }) {
 
           {/* 筛选内容 */}
           <div style={{ padding: '16px' }}>
-            {/* 错题分类筛选 */}
-            {activeFilterType === '' || activeFilterType === 'questionType' ? (
+            {/* 分类筛选（错题/未作答） */}
+            {activeFilterType === '' || activeFilterType === 'category' ? (
               <div style={{ marginBottom: '24px' }}>
-                <div style={{ fontSize: '15px', color: APPLE_COLORS.text, marginBottom: '12px', fontWeight: 500 }}>错题分类</div>
+                <div style={{ fontSize: '15px', color: APPLE_COLORS.text, marginBottom: '12px', fontWeight: 500 }}>分类</div>
                 <div style={{ display: 'flex', flexWrap: 'wrap', gap: '8px' }}>
                   {QUESTION_TYPE_TABS.map(option => {
                     const tabColor = option.key === 'wrong' ? APPLE_COLORS.danger : option.key === 'unanswered' ? APPLE_COLORS.warning : APPLE_COLORS.primary
                     return (
                       <div
                         key={option.key}
-                        onClick={() => setActiveQuestionType(option.key)}
+                        onClick={() => { setActiveQuestionType(option.key); setActiveCategory(option.key) }}
                         style={{
                           padding: '10px 18px',
                           borderRadius: '20px',
