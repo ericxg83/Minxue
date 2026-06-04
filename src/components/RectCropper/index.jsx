@@ -135,13 +135,34 @@ export default function RectCropper({ image, onConfirm, onCancel, theme = 'light
 
   const [imgSrc, setImgSrc] = useState(null)
 
-  // Load image via same-origin proxy to avoid tainted canvas
-  // The Pages Function proxy at /proxy-image serves the image with CORS headers
+  // Load cross-origin image and convert to base64 data URL
+  // This bypasses CORS entirely - the data URL is always same-origin
   useEffect(() => {
     if (!image) { setImgSrc(null); return }
-    // Always use same-origin proxy to avoid canvas tainting
-    const proxyUrl = `/proxy-image?url=${encodeURIComponent(image)}`
-    setImgSrc(proxyUrl)
+    let cancelled = false
+    const toDataUrl = async () => {
+      try {
+        // Step 1: Fetch image as bytes (no-cors works for fetching)
+        const resp = await fetch(image, { mode: 'no-cors' })
+        const blob = await resp.blob()
+        if (cancelled || blob.size === 0) return
+        
+        // Step 2: Convert blob to base64 data URL using FileReader
+        // Data URLs are always treated as same-origin by browsers
+        const reader = new FileReader()
+        reader.onloadend = () => {
+          if (!cancelled) setImgSrc(reader.result)
+        }
+        reader.onerror = () => {
+          if (!cancelled) setImgSrc(image)
+        }
+        reader.readAsDataURL(blob)
+      } catch {
+        if (!cancelled) setImgSrc(image)
+      }
+    }
+    toDataUrl()
+    return () => { cancelled = true }
   }, [image])
 
   useEffect(() => {
