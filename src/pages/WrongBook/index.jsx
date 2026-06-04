@@ -7,9 +7,8 @@ import {
   SpinLoading,
   Checkbox,
   Badge,
-  Dropdown,
-  Space,
-  Mask
+  Popup,
+  Space
 } from 'antd-mobile'
 import { RightOutline, DownOutline } from 'antd-mobile-icons'
 import { useStudentStore, useWrongQuestionStore, useUIStore } from '../../store'
@@ -1218,21 +1217,19 @@ export default function WrongBook({ onScanQR }) {
       )}
 
       {/* 筛选面板弹窗 - 苹果风格 */}
-      <Mask
+      <Popup
         visible={showFilterPanel}
         onMaskClick={() => setShowFilterPanel(false)}
-        opacity={0.5}
-      >
-        <div style={{
-          position: 'fixed',
-          bottom: 0,
-          left: 0,
-          right: 0,
-          background: APPLE_COLORS.card,
-          borderRadius: '20px 20px 0 0',
+        position="bottom"
+        bodyStyle={{
+          borderTopLeftRadius: '20px',
+          borderTopRightRadius: '20px',
           maxHeight: '80vh',
-          overflow: 'auto'
-        }}>
+          overflow: 'auto',
+          background: APPLE_COLORS.card
+        }}
+      >
+        <div>
           {/* 面板头部 */}
           <div style={{
             padding: '16px',
@@ -1475,7 +1472,7 @@ export default function WrongBook({ onScanQR }) {
             </Button>
           </div>
         </div>
-      </Mask>
+      </Popup>
     </div>
   )
 }
