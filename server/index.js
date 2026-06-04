@@ -823,7 +823,7 @@ app.get('/api/generated-exams/student/:studentId', async (req, res) => {
       }
       const placeholders = qIds.map((_, i) => `$${i + 1}`).join(',')
       const { rows: qRows } = await query(
-        `SELECT is_correct, answer_source, excluded FROM ${TABLES.QUESTIONS} WHERE id IN (${placeholders})`,
+        `SELECT is_correct, answer_source FROM ${TABLES.QUESTIONS} WHERE id IN (${placeholders})`,
         qIds
       )
       let correct_count = 0
@@ -831,8 +831,7 @@ app.get('/api/generated-exams/student/:studentId', async (req, res) => {
       let not_answered_count = 0
       let excluded_count = 0
       qRows.forEach(q => {
-        if (q.excluded) excluded_count++
-        else if (q.is_correct === true) correct_count++
+        if (q.is_correct === true) correct_count++
         else if (q.is_correct === false) wrong_count++
         else if (q.is_correct === null || q.answer_source === 'blank') not_answered_count++
       })
