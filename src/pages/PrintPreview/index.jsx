@@ -160,6 +160,7 @@ export default function PrintPreview({ onClose }) {
   }
 
   const handlePrint = async () => {
+    // Create exam record first
     if (currentStudent && selectedQuestions.length > 0) {
       const questionIds = selectedQuestions.map(wq => {
         const q = wq.question || wq
@@ -167,15 +168,16 @@ export default function PrintPreview({ onClose }) {
       }).filter(Boolean)
 
       if (questionIds.length > 0) {
-        createGeneratedExam({
-          student_id: currentStudent.id,
-          name: '错题重练卷',
-          question_ids: questionIds
-        }).then(() => {
-          console.log('试卷已保存')
-        }).catch(error => {
-          console.error('保存生成试卷失败:', error)
-        })
+        try {
+          await createGeneratedExam({
+            student_id: currentStudent.id,
+            name: '错题重练卷',
+            question_ids: questionIds
+          })
+          console.log('组卷记录已保存')
+        } catch (error) {
+          console.error('保存组卷记录失败:', error)
+        }
       }
 
       clearSelection()
@@ -208,6 +210,21 @@ export default function PrintPreview({ onClose }) {
 
   const handleExportPDF = async () => {
     try {
+      // Create exam record first
+      const questionIds = previewQuestions.map(q => q.id).filter(Boolean)
+      if (currentStudent && questionIds.length > 0) {
+        try {
+          await createGeneratedExam({
+            student_id: currentStudent.id,
+            name: '错题重练卷',
+            question_ids: questionIds
+          })
+          console.log('组卷记录已保存')
+        } catch (e) {
+          console.error('保存组卷记录失败:', e)
+        }
+      }
+
       await generateExamPDF({
         title: `${currentStudent?.name || '学生'} - 错题重练卷`,
         studentName: currentStudent?.name || '',
