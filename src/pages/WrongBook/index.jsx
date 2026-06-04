@@ -99,7 +99,8 @@ export default function WrongBook({ onScanQR }) {
   const [activeTime, setActiveTime] = useState('all')
   const [activeErrorCount, setActiveErrorCount] = useState('all')
   const [activeTag, setActiveTag] = useState('all')
-  const [sortBy, setSortBy] = useState('time_desc') // time_desc, time_asc, error_asc, subject, tag
+  const [sortBy, setSortBy] = useState('time_desc')
+  const [activeFilterType, setActiveFilterType] = useState('') // 'subject', 'time', 'errorCount', 'tag', 'sort', 'questionType' // time_desc, time_asc, error_asc, subject, tag
   const [showPrintPreview, setShowPrintPreview] = useState(false)
   const [showStudentSwitcher, setShowStudentSwitcher] = useState(false)
   const [showFilterPanel, setShowFilterPanel] = useState(false)
@@ -785,28 +786,109 @@ export default function WrongBook({ onScanQR }) {
         alignItems: 'center',
         borderBottom: '1px solid ' + APPLE_COLORS.border
       }}>
-        <div 
-          onClick={() => setShowFilterPanel(true)}
-          style={{
-            display: 'flex',
-            alignItems: 'center',
-            gap: '4px',
-            padding: '8px 14px',
-            borderRadius: '20px',
-            background: hasActiveFilters ? '#E8F4FD' : APPLE_COLORS.background,
-            color: hasActiveFilters ? APPLE_COLORS.primary : APPLE_COLORS.textSecondary,
-            fontSize: '14px',
-            cursor: 'pointer',
-            fontWeight: hasActiveFilters ? 500 : 400
-          }}
-        >
-          <svg width="16" height="16" viewBox="0 0 1024 1024" fill="currentColor">
-            <path d="M832 160H192c-17.6 0-32 14.4-32 32s14.4 32 32 32h640c17.6 0 32-14.4 32-32s-14.4-32-32-32zM704 352H320c-17.6 0-32 14.4-32 32s14.4 32 32 32h384c17.6 0 32-14.4 32-32s-14.4-32-32-32zM576 544H448c-17.6 0-32 14.4-32 32s14.4 32 32 32h128c17.6 0 32-14.4 32-32s-14.4-32-32-32zM512 736c-17.6 0-32 14.4-32 32s14.4 32 32 32 32-14.4 32-32-14.4-32-32-32z"/>
-          </svg>
-          {getFilterLabel()}
-          <DownOutline />
+        <div style={{ display: 'flex', gap: '16px', flex: 1 }}>
+          {/* 科目筛选 */}
+          <div 
+            onClick={() => { setActiveFilterType('subject'); setShowFilterPanel(true) }}
+            style={{
+              display: 'flex',
+              alignItems: 'center',
+              gap: '4px',
+              cursor: 'pointer',
+              color: activeSubject !== 'all' ? APPLE_COLORS.primary : APPLE_COLORS.textSecondary,
+              fontWeight: activeSubject !== 'all' ? 500 : 400
+            }}
+          >
+            <span style={{ fontSize: '14px' }}>科目</span>
+            <DownOutline style={{ fontSize: '12px' }} />
+            {activeSubject !== 'all' && (
+              <span style={{ fontSize: '12px', color: APPLE_COLORS.primary }}>
+                {SUBJECT_OPTIONS.find(o => o.key === activeSubject)?.label}
+              </span>
+            )}
+          </div>
+
+          {/* 时间筛选 */}
+          <div 
+            onClick={() => { setActiveFilterType('time'); setShowFilterPanel(true) }}
+            style={{
+              display: 'flex',
+              alignItems: 'center',
+              gap: '4px',
+              cursor: 'pointer',
+              color: activeTime !== 'all' ? APPLE_COLORS.primary : APPLE_COLORS.textSecondary,
+              fontWeight: activeTime !== 'all' ? 500 : 400
+            }}
+          >
+            <span style={{ fontSize: '14px' }}>时间</span>
+            <DownOutline style={{ fontSize: '12px' }} />
+            {activeTime !== 'all' && (
+              <span style={{ fontSize: '12px', color: APPLE_COLORS.primary }}>
+                {TIME_OPTIONS.find(o => o.key === activeTime)?.label}
+              </span>
+            )}
+          </div>
+
+          {/* 错次筛选 */}
+          <div 
+            onClick={() => { setActiveFilterType('errorCount'); setShowFilterPanel(true) }}
+            style={{
+              display: 'flex',
+              alignItems: 'center',
+              gap: '4px',
+              cursor: 'pointer',
+              color: activeErrorCount !== 'all' ? APPLE_COLORS.primary : APPLE_COLORS.textSecondary,
+              fontWeight: activeErrorCount !== 'all' ? 500 : 400
+            }}
+          >
+            <span style={{ fontSize: '14px' }}>错次</span>
+            <DownOutline style={{ fontSize: '12px' }} />
+            {activeErrorCount !== 'all' && (
+              <span style={{ fontSize: '12px', color: APPLE_COLORS.primary }}>
+                {ERROR_COUNT_OPTIONS.find(o => o.key === activeErrorCount)?.label}
+              </span>
+            )}
+          </div>
+
+          {/* 标签筛选 */}
+          {allTags.length > 0 && (
+            <div 
+              onClick={() => { setActiveFilterType('tag'); setShowFilterPanel(true) }}
+              style={{
+                display: 'flex',
+                alignItems: 'center',
+                gap: '4px',
+                cursor: 'pointer',
+                color: activeTag !== 'all' ? APPLE_COLORS.primary : APPLE_COLORS.textSecondary,
+                fontWeight: activeTag !== 'all' ? 500 : 400
+              }}
+            >
+              <span style={{ fontSize: '14px' }}>标签</span>
+              <DownOutline style={{ fontSize: '12px' }} />
+              {activeTag !== 'all' && (
+                <span style={{ fontSize: '12px', color: APPLE_COLORS.primary }}>
+                  {activeTag}
+                </span>
+              )}
+            </div>
+          )}
         </div>
         <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
+          {/* 排序按钮 */}
+          <div 
+            onClick={() => { setActiveFilterType('sort'); setShowFilterPanel(true) }}
+            style={{
+              display: 'flex',
+              alignItems: 'center',
+              gap: '4px',
+              cursor: 'pointer',
+              color: APPLE_COLORS.textSecondary,
+              fontSize: '14px'
+            }}
+          >
+            <span>排序</span>
+            <DownOutline style={{ fontSize: '12px' }} />
+          </div>
           {hasActiveFilters && (
             <div 
               onClick={resetFilters}
@@ -1123,110 +1205,118 @@ export default function WrongBook({ onScanQR }) {
           {/* 筛选内容 */}
           <div style={{ padding: '16px' }}>
             {/* 错题分类筛选 */}
-            <div style={{ marginBottom: '24px' }}>
-              <div style={{ fontSize: '15px', color: APPLE_COLORS.text, marginBottom: '12px', fontWeight: 500 }}>错题分类</div>
-              <div style={{ display: 'flex', flexWrap: 'wrap', gap: '8px' }}>
-                {QUESTION_TYPE_TABS.map(option => {
-                  const tabColor = option.key === 'wrong' ? APPLE_COLORS.danger : option.key === 'unanswered' ? APPLE_COLORS.warning : APPLE_COLORS.primary
-                  return (
+            {activeFilterType === '' || activeFilterType === 'questionType' ? (
+              <div style={{ marginBottom: '24px' }}>
+                <div style={{ fontSize: '15px', color: APPLE_COLORS.text, marginBottom: '12px', fontWeight: 500 }}>错题分类</div>
+                <div style={{ display: 'flex', flexWrap: 'wrap', gap: '8px' }}>
+                  {QUESTION_TYPE_TABS.map(option => {
+                    const tabColor = option.key === 'wrong' ? APPLE_COLORS.danger : option.key === 'unanswered' ? APPLE_COLORS.warning : APPLE_COLORS.primary
+                    return (
+                      <div
+                        key={option.key}
+                        onClick={() => setActiveQuestionType(option.key)}
+                        style={{
+                          padding: '10px 18px',
+                          borderRadius: '20px',
+                          fontSize: '14px',
+                          cursor: 'pointer',
+                          background: activeQuestionType === option.key ? tabColor : APPLE_COLORS.background,
+                          color: activeQuestionType === option.key ? '#fff' : APPLE_COLORS.textSecondary,
+                          fontWeight: activeQuestionType === option.key ? 500 : 400,
+                          transition: 'all 0.2s'
+                        }}
+                      >
+                        {option.label}
+                      </div>
+                    )
+                  })}
+                </div>
+              </div>
+            ) : null}
+
+            {/* 科目筛选 */}
+            {(activeFilterType === '' || activeFilterType === 'subject') ? (
+              <div style={{ marginBottom: '24px' }}>
+                <div style={{ fontSize: '15px', color: APPLE_COLORS.text, marginBottom: '12px', fontWeight: 500 }}>科目</div>
+                <div style={{ display: 'flex', flexWrap: 'wrap', gap: '8px' }}>
+                  {SUBJECT_OPTIONS.map(option => (
                     <div
                       key={option.key}
-                      onClick={() => setActiveQuestionType(option.key)}
+                      onClick={() => setActiveSubject(option.key)}
                       style={{
                         padding: '10px 18px',
                         borderRadius: '20px',
                         fontSize: '14px',
                         cursor: 'pointer',
-                        background: activeQuestionType === option.key ? tabColor : APPLE_COLORS.background,
-                        color: activeQuestionType === option.key ? '#fff' : APPLE_COLORS.textSecondary,
-                        fontWeight: activeQuestionType === option.key ? 500 : 400,
+                        background: activeSubject === option.key ? APPLE_COLORS.primary : APPLE_COLORS.background,
+                        color: activeSubject === option.key ? '#fff' : APPLE_COLORS.textSecondary,
+                        fontWeight: activeSubject === option.key ? 500 : 400,
                         transition: 'all 0.2s'
                       }}
                     >
                       {option.label}
                     </div>
-                  )
-                })}
+                  ))}
+                </div>
               </div>
-            </div>
-
-            {/* 科目筛选 */}
-            <div style={{ marginBottom: '24px' }}>
-              <div style={{ fontSize: '15px', color: APPLE_COLORS.text, marginBottom: '12px', fontWeight: 500 }}>科目</div>
-              <div style={{ display: 'flex', flexWrap: 'wrap', gap: '8px' }}>
-                {SUBJECT_OPTIONS.map(option => (
-                  <div
-                    key={option.key}
-                    onClick={() => setActiveSubject(option.key)}
-                    style={{
-                      padding: '10px 18px',
-                      borderRadius: '20px',
-                      fontSize: '14px',
-                      cursor: 'pointer',
-                      background: activeSubject === option.key ? APPLE_COLORS.primary : APPLE_COLORS.background,
-                      color: activeSubject === option.key ? '#fff' : APPLE_COLORS.textSecondary,
-                      fontWeight: activeSubject === option.key ? 500 : 400,
-                      transition: 'all 0.2s'
-                    }}
-                  >
-                    {option.label}
-                  </div>
-                ))}
-              </div>
-            </div>
+            ) : null}
 
             {/* 时间筛选 */}
-            <div style={{ marginBottom: '24px' }}>
-              <div style={{ fontSize: '15px', color: APPLE_COLORS.text, marginBottom: '12px', fontWeight: 500 }}>加入时间</div>
-              <div style={{ display: 'flex', flexWrap: 'wrap', gap: '8px' }}>
-                {TIME_OPTIONS.map(option => (
-                  <div
-                    key={option.key}
-                    onClick={() => setActiveTime(option.key)}
-                    style={{
-                      padding: '10px 18px',
-                      borderRadius: '20px',
-                      fontSize: '14px',
-                      cursor: 'pointer',
-                      background: activeTime === option.key ? APPLE_COLORS.primary : APPLE_COLORS.background,
-                      color: activeTime === option.key ? '#fff' : APPLE_COLORS.textSecondary,
-                      fontWeight: activeTime === option.key ? 500 : 400,
-                      transition: 'all 0.2s'
-                    }}
-                  >
-                    {option.label}
-                  </div>
-                ))}
+            {(activeFilterType === '' || activeFilterType === 'time') ? (
+              <div style={{ marginBottom: '24px' }}>
+                <div style={{ fontSize: '15px', color: APPLE_COLORS.text, marginBottom: '12px', fontWeight: 500 }}>加入时间</div>
+                <div style={{ display: 'flex', flexWrap: 'wrap', gap: '8px' }}>
+                  {TIME_OPTIONS.map(option => (
+                    <div
+                      key={option.key}
+                      onClick={() => setActiveTime(option.key)}
+                      style={{
+                        padding: '10px 18px',
+                        borderRadius: '20px',
+                        fontSize: '14px',
+                        cursor: 'pointer',
+                        background: activeTime === option.key ? APPLE_COLORS.primary : APPLE_COLORS.background,
+                        color: activeTime === option.key ? '#fff' : APPLE_COLORS.textSecondary,
+                        fontWeight: activeTime === option.key ? 500 : 400,
+                        transition: 'all 0.2s'
+                      }}
+                    >
+                      {option.label}
+                    </div>
+                  ))}
+                </div>
               </div>
-            </div>
+            ) : null}
 
             {/* 错误次数筛选 */}
-            <div style={{ marginBottom: '24px' }}>
-              <div style={{ fontSize: '15px', color: APPLE_COLORS.text, marginBottom: '12px', fontWeight: 500 }}>错误次数</div>
-              <div style={{ display: 'flex', flexWrap: 'wrap', gap: '8px' }}>
-                {ERROR_COUNT_OPTIONS.map(option => (
-                  <div
-                    key={option.key}
-                    onClick={() => setActiveErrorCount(option.key)}
-                    style={{
-                      padding: '10px 18px',
-                      borderRadius: '20px',
-                      fontSize: '14px',
-                      cursor: 'pointer',
-                      background: activeErrorCount === option.key ? APPLE_COLORS.primary : APPLE_COLORS.background,
-                      color: activeErrorCount === option.key ? '#fff' : APPLE_COLORS.textSecondary,
-                      fontWeight: activeErrorCount === option.key ? 500 : 400,
-                      transition: 'all 0.2s'
-                    }}
-                  >
-                    {option.label}
-                  </div>
-                ))}
+            {(activeFilterType === '' || activeFilterType === 'errorCount') ? (
+              <div style={{ marginBottom: '24px' }}>
+                <div style={{ fontSize: '15px', color: APPLE_COLORS.text, marginBottom: '12px', fontWeight: 500 }}>错误次数</div>
+                <div style={{ display: 'flex', flexWrap: 'wrap', gap: '8px' }}>
+                  {ERROR_COUNT_OPTIONS.map(option => (
+                    <div
+                      key={option.key}
+                      onClick={() => setActiveErrorCount(option.key)}
+                      style={{
+                        padding: '10px 18px',
+                        borderRadius: '20px',
+                        fontSize: '14px',
+                        cursor: 'pointer',
+                        background: activeErrorCount === option.key ? APPLE_COLORS.primary : APPLE_COLORS.background,
+                        color: activeErrorCount === option.key ? '#fff' : APPLE_COLORS.textSecondary,
+                        fontWeight: activeErrorCount === option.key ? 500 : 400,
+                        transition: 'all 0.2s'
+                      }}
+                    >
+                      {option.label}
+                    </div>
+                  ))}
+                </div>
               </div>
-            </div>
+            ) : null}
 
             {/* 知识点标签筛选 */}
-            {allTags.length > 0 && (
+            {(activeFilterType === '' || activeFilterType === 'tag') && allTags.length > 0 ? (
               <div style={{ marginBottom: '24px' }}>
                 <div style={{ fontSize: '15px', color: APPLE_COLORS.text, marginBottom: '12px', fontWeight: 500 }}>知识点标签</div>
                 <div style={{ display: 'flex', flexWrap: 'wrap', gap: '8px' }}>
@@ -1265,38 +1355,40 @@ export default function WrongBook({ onScanQR }) {
                   ))}
                 </div>
               </div>
-            )}
+            ) : null}
 
             {/* 排序方式 */}
-            <div style={{ marginBottom: '24px' }}>
-              <div style={{ fontSize: '15px', color: APPLE_COLORS.text, marginBottom: '12px', fontWeight: 500 }}>排序方式</div>
-              <div style={{ display: 'flex', flexWrap: 'wrap', gap: '8px' }}>
-                {[
-                  { key: 'time_desc', label: '最新加入' },
-                  { key: 'time_asc', label: '最早加入' },
-                  { key: 'error_desc', label: '错次最多' },
-                  { key: 'error_asc', label: '错次最少' },
-                  { key: 'subject', label: '按科目' }
-                ].map(option => (
-                  <div
-                    key={option.key}
-                    onClick={() => setSortBy(option.key)}
-                    style={{
-                      padding: '10px 18px',
-                      borderRadius: '20px',
-                      fontSize: '14px',
-                      cursor: 'pointer',
-                      background: sortBy === option.key ? APPLE_COLORS.primary : APPLE_COLORS.background,
-                      color: sortBy === option.key ? '#fff' : APPLE_COLORS.textSecondary,
-                      fontWeight: sortBy === option.key ? 500 : 400,
-                      transition: 'all 0.2s'
-                    }}
-                  >
-                    {option.label}
-                  </div>
-                ))}
+            {activeFilterType === '' || activeFilterType === 'sort' ? (
+              <div style={{ marginBottom: '24px' }}>
+                <div style={{ fontSize: '15px', color: APPLE_COLORS.text, marginBottom: '12px', fontWeight: 500 }}>排序方式</div>
+                <div style={{ display: 'flex', flexWrap: 'wrap', gap: '8px' }}>
+                  {[
+                    { key: 'time_desc', label: '最新加入' },
+                    { key: 'time_asc', label: '最早加入' },
+                    { key: 'error_desc', label: '错次最多' },
+                    { key: 'error_asc', label: '错次最少' },
+                    { key: 'subject', label: '按科目' }
+                  ].map(option => (
+                    <div
+                      key={option.key}
+                      onClick={() => setSortBy(option.key)}
+                      style={{
+                        padding: '10px 18px',
+                        borderRadius: '20px',
+                        fontSize: '14px',
+                        cursor: 'pointer',
+                        background: sortBy === option.key ? APPLE_COLORS.primary : APPLE_COLORS.background,
+                        color: sortBy === option.key ? '#fff' : APPLE_COLORS.textSecondary,
+                        fontWeight: sortBy === option.key ? 500 : 400,
+                        transition: 'all 0.2s'
+                      }}
+                    >
+                      {option.label}
+                    </div>
+                  ))}
+                </div>
               </div>
-            </div>
+            ) : null}
           </div>
 
           {/* 底部按钮 */}
