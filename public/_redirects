@@ -1,6 +1,3 @@
-# API proxy - route to Render backend (must come BEFORE catch-all)
-/api/*    https://minxue-api.onrender.com/api/:splat    200
-
 # Static assets - serve directly with correct MIME types (must come BEFORE catch-all)
 /assets/*    /assets/:splat    200
 /sw.js       /sw.js            200
