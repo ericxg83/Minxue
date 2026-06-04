@@ -216,8 +216,8 @@ export default function WrongBook({ onScanQR }) {
     // 首先过滤当前学生的错题
     if (wq.student_id !== currentStudent?.id) return false
     
-    // 错题分类筛选（错题/未作答）
-    if (activeQuestionType !== 'all') {
+    // 分类筛选（全部/错题/未作答）— 第219-233行
+    if (activeCategory !== 'all') {
       const question = wq.question || wq
       const answerSource = question.answer_source || question._answer_source || 'recognized'
       const isBlank = answerSource === 'blank'
@@ -229,8 +229,8 @@ export default function WrongBook({ onScanQR }) {
       const isUnanswered = isBlank && isCorrect === null
       const isWrong = isCorrect === false
       
-      if (activeQuestionType === 'wrong' && !isWrong) return false
-      if (activeQuestionType === 'unanswered' && !isUnanswered) return false
+      if (activeCategory === 'wrong' && !isWrong) return false
+      if (activeCategory === 'unanswered' && !isUnanswered) return false
     }
     
     // 掌握状态筛选
@@ -284,8 +284,8 @@ export default function WrongBook({ onScanQR }) {
   // 获取当前筛选条件的显示文本
   const getFilterLabel = () => {
     const parts = []
-    if (activeQuestionType !== 'all') {
-      parts.push(QUESTION_TYPE_TABS.find(o => o.key === activeQuestionType)?.label)
+    if (activeCategory !== 'all') {
+      parts.push(CATEGORY_OPTIONS.find(o => o.key === activeCategory)?.label)
     }
     if (activeSubject !== 'all') {
       parts.push(SUBJECT_OPTIONS.find(o => o.key === activeSubject)?.label)
@@ -300,7 +300,7 @@ export default function WrongBook({ onScanQR }) {
   }
 
   // 是否有激活的筛选条件
-  const hasActiveFilters = activeQuestionType !== 'all' || activeSubject !== 'all' || activeTime !== 'all' || activeErrorCount !== 'all' || activeTag !== 'all' || activeCategory !== 'all'
+  const hasActiveFilters = activeCategory !== 'all' || activeSubject !== 'all' || activeTime !== 'all' || activeErrorCount !== 'all' || activeTag !== 'all'
 
   const resetFilters = () => {
     setActiveQuestionType('all')
@@ -1265,20 +1265,20 @@ export default function WrongBook({ onScanQR }) {
               <div style={{ marginBottom: '24px' }}>
                 <div style={{ fontSize: '15px', color: APPLE_COLORS.text, marginBottom: '12px', fontWeight: 500 }}>分类</div>
                 <div style={{ display: 'flex', flexWrap: 'wrap', gap: '8px' }}>
-                  {QUESTION_TYPE_TABS.map(option => {
+                  {CATEGORY_OPTIONS.map(option => {
                     const tabColor = option.key === 'wrong' ? APPLE_COLORS.danger : option.key === 'unanswered' ? APPLE_COLORS.warning : APPLE_COLORS.primary
                     return (
                       <div
                         key={option.key}
-                        onClick={() => { setActiveQuestionType(option.key); setActiveCategory(option.key) }}
+                        onClick={() => setActiveCategory(option.key)}
                         style={{
                           padding: '10px 18px',
                           borderRadius: '20px',
                           fontSize: '14px',
                           cursor: 'pointer',
-                          background: activeQuestionType === option.key ? tabColor : APPLE_COLORS.background,
-                          color: activeQuestionType === option.key ? '#fff' : APPLE_COLORS.textSecondary,
-                          fontWeight: activeQuestionType === option.key ? 500 : 400,
+                          background: activeCategory === option.key ? tabColor : APPLE_COLORS.background,
+                          color: activeCategory === option.key ? '#fff' : APPLE_COLORS.textSecondary,
+                          fontWeight: activeCategory === option.key ? 500 : 400,
                           transition: 'all 0.2s'
                         }}
                       >
