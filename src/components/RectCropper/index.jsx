@@ -135,34 +135,12 @@ export default function RectCropper({ image, onConfirm, onCancel, theme = 'light
 
   const [imgSrc, setImgSrc] = useState(null)
 
-  // Load cross-origin image and convert to base64 data URL
-  // This bypasses CORS entirely - the data URL is always same-origin
+  // Load image via proxy URL as src to keep it same-origin
+  // When proxy isn't available, falls back to direct OSS URL
   useEffect(() => {
     if (!image) { setImgSrc(null); return }
-    let cancelled = false
-    const toDataUrl = async () => {
-      try {
-        // Step 1: Fetch image as bytes (no-cors works for fetching)
-        const resp = await fetch(image, { mode: 'no-cors' })
-        const blob = await resp.blob()
-        if (cancelled || blob.size === 0) return
-        
-        // Step 2: Convert blob to base64 data URL using FileReader
-        // Data URLs are always treated as same-origin by browsers
-        const reader = new FileReader()
-        reader.onloadend = () => {
-          if (!cancelled) setImgSrc(reader.result)
-        }
-        reader.onerror = () => {
-          if (!cancelled) setImgSrc(image)
-        }
-        reader.readAsDataURL(blob)
-      } catch {
-        if (!cancelled) setImgSrc(image)
-      }
-    }
-    toDataUrl()
-    return () => { cancelled = true }
+    const proxyUrl = `/proxy-image?url=${encodeURIComponent(image)}`
+    setImgSrc(proxyUrl)
   }, [image])
 
   useEffect(() => {
@@ -336,16 +314,55 @@ export default function RectCropper({ image, onConfirm, onCancel, theme = 'light
       canvas.height = sh
       const ctx = canvas.getContext('2d')
 
-      // Image loaded via proxy, so canvas won't be tainted
+      // Try drawing directly (works for same-origin images)
       try {
         ctx.drawImage(imgRef.current, sx, sy, sw, sh, 0, 0, sw, sh)
         const dataUrl = canvas.toDataURL('image/jpeg', 0.92)
         onConfirm(dataUrl)
         return
       } catch (drawErr) {
-        console.error('裁剪导出失败:', drawErr)
-        alert('裁剪失败: ' + (drawErr.message || '未知错误'))
+        console.warn('Canvas tainted, re-fetching via proxy for export:', drawErr)
       }
+      
+      // Canvas is tainted (image loaded from cross-origin source).
+      // Re-fetch the image to create a clean canvas for export.
+      let blob = null
+      
+      // Try backend API proxy first (local dev)
+      try {
+        const proxyUrl = `/api/proxy-image?url=${encodeURIComponent(image)}`
+        const resp = await fetch(proxyUrl)
+        if (resp.ok) blob = await resp.blob()
+      } catch {}
+      
+      // Try Pages Function proxy (production)
+      if (!blob || blob.size === 0) {
+        try {
+          const proxyUrl = `/proxy-image?url=${encodeURIComponent(image)}`
+          const resp = await fetch(proxyUrl)
+          if (resp.ok) blob = await resp.blob()
+        } catch {}
+      }
+      
+      // Last resort: no-cors fetch (returns opaque but usable response)
+      if (!blob || blob.size === 0) {
+        try {
+          const resp = await fetch(image, { mode: 'no-cors' })
+          blob = await resp.blob()
+          if (blob.size === 0) blob = null
+        } catch {}
+      }
+      
+      if (!blob || blob.size === 0) {
+        throw new Error('无法获取图片，请检查网络连接')
+      }
+      
+      const bitmap = await createImageBitmap(blob)
+      ctx.drawImage(bitmap, sx, sy, sw, sh, 0, 0, sw, sh)
+      bitmap.close()
+      
+      const dataUrl = canvas.toDataURL('image/jpeg', 0.92)
+      onConfirm(dataUrl)
     } catch (err) {
       console.error('裁剪失败:', err)
       alert('裁剪失败: ' + (err.message || '未知错误'))
@@ -421,7 +438,14 @@ export default function RectCropper({ image, onConfirm, onCancel, theme = 'light
           src={imgSrc || image}
           alt="crop"
           draggable={false}
-          crossOrigin="anonymous"
+          onError={() => {
+            // Proxy failed (e.g. 403), fallback to direct OSS URL
+            // Image will display but canvas will be tainted
+            if (imgSrc !== image) {
+              setImgSrc(image)
+              setLoadFail(true)
+            }
+          }}
           onLoad={computeLayout}
           style={{
             position: 'absolute',
