@@ -48,6 +48,13 @@ const STATUS_TABS = [
   { key: 'mastered', label: '完全掌握' }
 ]
 
+// 错题分类筛选
+const QUESTION_TYPE_TABS = [
+  { key: 'all', label: '全部' },
+  { key: 'wrong', label: '错题' },
+  { key: 'unanswered', label: '未作答' }
+]
+
 // 科目选项
 const SUBJECT_OPTIONS = [
   { key: 'all', label: '全部科目' },
@@ -87,10 +94,12 @@ export default function WrongBook({ onScanQR }) {
   } = useWrongQuestionStore()
   
   const [activeStatus, setActiveStatus] = useState('pending')
+  const [activeQuestionType, setActiveQuestionType] = useState('all')
   const [activeSubject, setActiveSubject] = useState('all')
   const [activeTime, setActiveTime] = useState('all')
   const [activeErrorCount, setActiveErrorCount] = useState('all')
   const [activeTag, setActiveTag] = useState('all')
+  const [sortBy, setSortBy] = useState('time_desc') // time_desc, time_asc, error_asc, subject, tag
   const [showPrintPreview, setShowPrintPreview] = useState(false)
   const [showStudentSwitcher, setShowStudentSwitcher] = useState(false)
   const [showFilterPanel, setShowFilterPanel] = useState(false)
@@ -199,6 +208,13 @@ export default function WrongBook({ onScanQR }) {
     // 首先过滤当前学生的错题
     if (wq.student_id !== currentStudent?.id) return false
     
+    // 错题分类筛选（错题/未作答）
+    if (activeQuestionType !== 'all') {
+      const practiceCount = wq.practice_count || 0
+      if (activeQuestionType === 'wrong' && practiceCount <= 0) return false
+      if (activeQuestionType === 'unanswered' && practiceCount > 0) return false
+    }
+    
     // 掌握状态筛选
     if (activeStatus !== 'all' && wq.status !== activeStatus) return false
     
@@ -222,6 +238,24 @@ export default function WrongBook({ onScanQR }) {
     return true
   })
 
+  // 排序逻辑
+  const sortedQuestions = [...filteredQuestions].sort((a, b) => {
+    switch (sortBy) {
+      case 'time_desc':
+        return new Date(b.added_at || b.created_at) - new Date(a.added_at || a.created_at)
+      case 'time_asc':
+        return new Date(a.added_at || a.created_at) - new Date(b.added_at || b.created_at)
+      case 'error_asc':
+        return (a.error_count || 1) - (b.error_count || 1)
+      case 'error_desc':
+        return (b.error_count || 1) - (a.error_count || 1)
+      case 'subject':
+        return (a.subject || '').localeCompare(b.subject || '', 'zh')
+      default:
+        return 0
+    }
+  })
+
   // 获取各状态数量（只统计当前学生的错题）
   const getStatusCount = (status) => {
     const studentQuestions = (Array.isArray(wrongQuestions) ? wrongQuestions : []).filter(wq => wq.student_id === currentStudent?.id)
@@ -232,6 +266,9 @@ export default function WrongBook({ onScanQR }) {
   // 获取当前筛选条件的显示文本
   const getFilterLabel = () => {
     const parts = []
+    if (activeQuestionType !== 'all') {
+      parts.push(QUESTION_TYPE_TABS.find(o => o.key === activeQuestionType)?.label)
+    }
     if (activeSubject !== 'all') {
       parts.push(SUBJECT_OPTIONS.find(o => o.key === activeSubject)?.label)
     }
@@ -245,13 +282,15 @@ export default function WrongBook({ onScanQR }) {
   }
 
   // 是否有激活的筛选条件
-  const hasActiveFilters = activeSubject !== 'all' || activeTime !== 'all' || activeErrorCount !== 'all' || activeTag !== 'all'
+  const hasActiveFilters = activeQuestionType !== 'all' || activeSubject !== 'all' || activeTime !== 'all' || activeErrorCount !== 'all' || activeTag !== 'all'
 
   const resetFilters = () => {
+    setActiveQuestionType('all')
     setActiveSubject('all')
     setActiveTime('all')
     setActiveErrorCount('all')
     setActiveTag('all')
+    setSortBy('time_desc')
   }
 
   const getAllTags = () => {
@@ -292,11 +331,11 @@ export default function WrongBook({ onScanQR }) {
 
   // 全选/取消全选当前筛选的题目
   const handleSelectAll = () => {
-    if (selectedQuestions.length === filteredQuestions.length && filteredQuestions.length > 0) {
+    if (selectedQuestions.length === sortedQuestions.length && sortedQuestions.length > 0) {
       storeClearSelection()
     } else {
       // 全选所有筛选后的题目
-      filteredQuestions.forEach(wq => {
+      sortedQuestions.forEach(wq => {
         if (!selectedQuestions.find(sq => sq.id === wq.id)) {
           storeToggleSelection(wq)
         }
@@ -703,6 +742,40 @@ export default function WrongBook({ onScanQR }) {
         })}
       </div>
 
+      {/* 错题分类标签 - 苹果风格 */}
+      <div style={{ 
+        background: APPLE_COLORS.card, 
+        padding: '8px 16px',
+        display: 'flex',
+        gap: '8px',
+        overflowX: 'auto',
+        borderBottom: '1px solid ' + APPLE_COLORS.border
+      }}>
+        {QUESTION_TYPE_TABS.map(tab => {
+          const isActive = activeQuestionType === tab.key
+          const tabColor = tab.key === 'wrong' ? APPLE_COLORS.danger : tab.key === 'unanswered' ? APPLE_COLORS.warning : APPLE_COLORS.primary
+          return (
+            <div
+              key={tab.key}
+              onClick={() => setActiveQuestionType(tab.key)}
+              style={{
+                padding: '6px 12px',
+                borderRadius: '16px',
+                fontSize: '13px',
+                whiteSpace: 'nowrap',
+                cursor: 'pointer',
+                background: isActive ? tabColor : APPLE_COLORS.background,
+                color: isActive ? '#fff' : APPLE_COLORS.textSecondary,
+                fontWeight: isActive ? 500 : 400,
+                transition: 'all 0.2s'
+              }}
+            >
+              {tab.label}
+            </div>
+          )
+        })}
+      </div>
+
       {/* 高级筛选栏 - 苹果风格 */}
       <div style={{ 
         background: APPLE_COLORS.card, 
@@ -750,26 +823,26 @@ export default function WrongBook({ onScanQR }) {
             onClick={handleSelectAll}
             style={{
               fontSize: '14px',
-              color: selectedQuestions.length === filteredQuestions.length && filteredQuestions.length > 0 ? APPLE_COLORS.primary : APPLE_COLORS.textSecondary,
+              color: selectedQuestions.length === sortedQuestions.length && sortedQuestions.length > 0 ? APPLE_COLORS.primary : APPLE_COLORS.textSecondary,
               cursor: 'pointer',
               fontWeight: 500
             }}
           >
-            {selectedQuestions.length === filteredQuestions.length && filteredQuestions.length > 0 ? '取消全选' : '全选'}
+            {selectedQuestions.length === sortedQuestions.length && sortedQuestions.length > 0 ? '取消全选' : '全选'}
           </div>
         </div>
       </div>
 
       {/* 错题列表 - 苹果风格 */}
       <div style={{ padding: '12px' }}>
-        {filteredQuestions.length === 0 ? (
+        {sortedQuestions.length === 0 ? (
           <Empty
             description="错题本为空"
             style={{ padding: '64px 0' }}
           />
         ) : (
           <div style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
-            {filteredQuestions.map((wq) => {
+            {sortedQuestions.map((wq) => {
               const question = wq.question || wq
               const isSelected = selectedQuestions.some(sq => sq.id === wq.id)
               
@@ -1049,6 +1122,34 @@ export default function WrongBook({ onScanQR }) {
 
           {/* 筛选内容 */}
           <div style={{ padding: '16px' }}>
+            {/* 错题分类筛选 */}
+            <div style={{ marginBottom: '24px' }}>
+              <div style={{ fontSize: '15px', color: APPLE_COLORS.text, marginBottom: '12px', fontWeight: 500 }}>错题分类</div>
+              <div style={{ display: 'flex', flexWrap: 'wrap', gap: '8px' }}>
+                {QUESTION_TYPE_TABS.map(option => {
+                  const tabColor = option.key === 'wrong' ? APPLE_COLORS.danger : option.key === 'unanswered' ? APPLE_COLORS.warning : APPLE_COLORS.primary
+                  return (
+                    <div
+                      key={option.key}
+                      onClick={() => setActiveQuestionType(option.key)}
+                      style={{
+                        padding: '10px 18px',
+                        borderRadius: '20px',
+                        fontSize: '14px',
+                        cursor: 'pointer',
+                        background: activeQuestionType === option.key ? tabColor : APPLE_COLORS.background,
+                        color: activeQuestionType === option.key ? '#fff' : APPLE_COLORS.textSecondary,
+                        fontWeight: activeQuestionType === option.key ? 500 : 400,
+                        transition: 'all 0.2s'
+                      }}
+                    >
+                      {option.label}
+                    </div>
+                  )
+                })}
+              </div>
+            </div>
+
             {/* 科目筛选 */}
             <div style={{ marginBottom: '24px' }}>
               <div style={{ fontSize: '15px', color: APPLE_COLORS.text, marginBottom: '12px', fontWeight: 500 }}>科目</div>
@@ -1165,6 +1266,37 @@ export default function WrongBook({ onScanQR }) {
                 </div>
               </div>
             )}
+
+            {/* 排序方式 */}
+            <div style={{ marginBottom: '24px' }}>
+              <div style={{ fontSize: '15px', color: APPLE_COLORS.text, marginBottom: '12px', fontWeight: 500 }}>排序方式</div>
+              <div style={{ display: 'flex', flexWrap: 'wrap', gap: '8px' }}>
+                {[
+                  { key: 'time_desc', label: '最新加入' },
+                  { key: 'time_asc', label: '最早加入' },
+                  { key: 'error_desc', label: '错次最多' },
+                  { key: 'error_asc', label: '错次最少' },
+                  { key: 'subject', label: '按科目' }
+                ].map(option => (
+                  <div
+                    key={option.key}
+                    onClick={() => setSortBy(option.key)}
+                    style={{
+                      padding: '10px 18px',
+                      borderRadius: '20px',
+                      fontSize: '14px',
+                      cursor: 'pointer',
+                      background: sortBy === option.key ? APPLE_COLORS.primary : APPLE_COLORS.background,
+                      color: sortBy === option.key ? '#fff' : APPLE_COLORS.textSecondary,
+                      fontWeight: sortBy === option.key ? 500 : 400,
+                      transition: 'all 0.2s'
+                    }}
+                  >
+                    {option.label}
+                  </div>
+                ))}
+              </div>
+            </div>
           </div>
 
           {/* 底部按钮 */}
