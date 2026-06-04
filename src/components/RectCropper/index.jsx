@@ -135,33 +135,13 @@ export default function RectCropper({ image, onConfirm, onCancel, theme = 'light
 
   const [imgSrc, setImgSrc] = useState(null)
 
-  // Load image via proxy to avoid CORS/tainted canvas issues
+  // Load image via same-origin proxy to avoid tainted canvas
+  // The Pages Function proxy at /proxy-image serves the image with CORS headers
   useEffect(() => {
     if (!image) { setImgSrc(null); return }
-    // Try API proxy first (local dev), then Pages Function proxy (production)
-    const tryLoadViaProxy = async () => {
-      // Try backend API proxy
-      try {
-        const proxyUrl = `/api/proxy-image?url=${encodeURIComponent(image)}`
-        const resp = await fetch(proxyUrl)
-        if (resp.ok) {
-          setImgSrc(proxyUrl)
-          return
-        }
-      } catch {}
-      // Try Pages Function proxy
-      try {
-        const proxyUrl = `/proxy-image?url=${encodeURIComponent(image)}`
-        const resp = await fetch(proxyUrl)
-        if (resp.ok) {
-          setImgSrc(proxyUrl)
-          return
-        }
-      } catch {}
-      // Fallback: direct URL (may cause tainted canvas)
-      setImgSrc(image)
-    }
-    tryLoadViaProxy()
+    // Always use same-origin proxy to avoid canvas tainting
+    const proxyUrl = `/proxy-image?url=${encodeURIComponent(image)}`
+    setImgSrc(proxyUrl)
   }, [image])
 
   useEffect(() => {

@@ -14,20 +14,12 @@ export async function onRequest(context) {
     return new Response('Invalid URL', { status: 400 })
   }
 
-  // Validate trusted domains - check hostname ends with known trusted domains
-  const trustedHostnames = [
-    'minxue-app-oss.oss-cn-shanghai.aliyuncs.com',
-    'minxue-app-oss-oss-cn-shanghai.aliyuncs.com',
-    'minxue-api.onrender.com'
-  ]
-  
-  // Also support wildcard matching for OSS subdomains
-  const isTrusted = trustedHostnames.some(h => 
-    parsedUrl.hostname === h || parsedUrl.hostname.endsWith('.' + h.replace(/^[^.]*/, ''))
-  ) || parsedUrl.hostname.includes('aliyuncs.com') || parsedUrl.hostname.includes('onrender.com')
+  // Validate trusted domains - accept any OSS domain and render domain
+  const hostname = parsedUrl.hostname
+  const isTrusted = hostname.includes('aliyuncs.com') || hostname.includes('onrender.com')
 
   if (!isTrusted) {
-    return new Response('Untrusted domain: ' + parsedUrl.hostname, { status: 403 })
+    return new Response('Untrusted domain: ' + hostname, { status: 403 })
   }
 
   try {
