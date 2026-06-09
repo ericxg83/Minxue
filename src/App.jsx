@@ -1247,7 +1247,7 @@ export default function App() {
           </div>
         )
       case 'image': {
-        // 优先TikZ/SVG，回退到局部图，最后占位符
+        // 原图永远是主体，TikZ只是附加
         const renderResult = renderImageBlock(block)
         const graphTypeLabel = {
           function: '函数图',
@@ -1258,8 +1258,28 @@ export default function App() {
         
         return (
           <div className="my-3 text-center">
-            {renderResult.type === 'svg' ? (
-              // 渲染SVG矢量图（TikZ转换）
+            {renderResult.type === 'image' ? (
+              // 显示原图（局部截图）- 永不丢弃
+              <div className="inline-block">
+                <img 
+                  src={renderResult.content} 
+                  alt={block.caption || '题目配图'}
+                  className="rounded border border-gray-200 max-w-full"
+                  style={{ maxHeight: '220px', objectFit: 'contain' }}
+                />
+                {block.caption && (
+                  <div className="text-xs text-gray-500 mt-1 text-center">{block.caption}</div>
+                )}
+                {/* TikZ作为附加信息（可选） */}
+                {renderResult.tikzSvg && (
+                  <div className="mt-2 p-2 rounded border border-blue-200 bg-blue-50/30">
+                    <div className="text-[10px] text-blue-600 mb-1">AI生成矢量图（参考）</div>
+                    <div dangerouslySetInnerHTML={{ __html: renderResult.tikzSvg }} />
+                  </div>
+                )}
+              </div>
+            ) : renderResult.type === 'svg' ? (
+              // 只有TikZ没有原图时才单独显示
               <div className="inline-block">
                 <div 
                   className="rounded border-2 border-blue-200 bg-blue-50/30 overflow-hidden"
@@ -1273,19 +1293,6 @@ export default function App() {
                     {graphTypeLabel}·TikZ
                   </span>
                 </div>
-              </div>
-            ) : renderResult.type === 'image' ? (
-              // 显示截取的局部图
-              <div className="inline-block">
-                <img 
-                  src={renderResult.content} 
-                  alt={block.caption || '题目配图'}
-                  className="rounded border border-gray-200 max-w-full"
-                  style={{ maxHeight: '220px', objectFit: 'contain' }}
-                />
-                {block.caption && (
-                  <div className="text-xs text-gray-500 mt-1 text-center">{block.caption}</div>
-                )}
               </div>
             ) : (
               // 占位符
