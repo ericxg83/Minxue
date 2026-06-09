@@ -35,6 +35,7 @@ import { taskService } from './services/taskService'
 import { recognizeQuestions, compressImage, saveRecognitionResult } from './services/aiService'
 import { processMultiPagePaperLayout } from './services/paperBankAIService'
 import { downloadPaperWord } from './utils/docxGenerator'
+import { renderImageBlock } from './utils/tikzGenerator'
 import { mockQuestions, mockTasks, mockWrongQuestions, mockGeneratedExams, mockStudents } from './data/mockData'
 import StudentSwitcher from './components/StudentSwitcher'
 
@@ -1245,14 +1246,39 @@ export default function App() {
             </div>
           </div>
         )
-      case 'image':
+      case 'image': {
+        // 优先TikZ/SVG，回退到局部图，最后占位符
+        const renderResult = renderImageBlock(block)
+        const graphTypeLabel = {
+          function: '函数图',
+          geometry: '几何图',
+          experiment: '实验装置',
+          other: '图形'
+        }[block.graphType] || '图形'
+        
         return (
           <div className="my-3 text-center">
-            {block.src ? (
+            {renderResult.type === 'svg' ? (
+              // 渲染SVG矢量图（TikZ转换）
+              <div className="inline-block">
+                <div 
+                  className="rounded border-2 border-blue-200 bg-blue-50/30 overflow-hidden"
+                  dangerouslySetInnerHTML={{ __html: renderResult.content }}
+                />
+                <div className="flex items-center justify-center gap-2 mt-1">
+                  {block.caption && (
+                    <span className="text-xs text-gray-500">{block.caption}</span>
+                  )}
+                  <span className="text-[10px] px-1.5 py-0.5 rounded bg-blue-100 text-blue-600 font-medium">
+                    {graphTypeLabel}·TikZ
+                  </span>
+                </div>
+              </div>
+            ) : renderResult.type === 'image' ? (
               // 显示截取的局部图
               <div className="inline-block">
                 <img 
-                  src={block.src} 
+                  src={renderResult.content} 
                   alt={block.caption || '题目配图'}
                   className="rounded border border-gray-200 max-w-full"
                   style={{ maxHeight: '220px', objectFit: 'contain' }}
@@ -1262,17 +1288,18 @@ export default function App() {
                 )}
               </div>
             ) : (
-              // 无图片时显示占位符
+              // 占位符
               <div className="inline-flex flex-col items-center gap-1 px-3 py-2 rounded-lg border-2 border-dashed border-gray-300 bg-gray-50">
                 <ImageIcon size={16} style={{ color: '#9CA3AF' }} />
                 <span className="text-xs text-gray-400">
                   {block.caption ? `[图: ${block.caption}]` : '[图片区域]'}
                 </span>
-                <span className="text-[10px] text-gray-300">未识别到图片</span>
+                <span className="text-[10px] text-gray-300">待插入</span>
               </div>
             )}
           </div>
         )
+      }
       case 'table':
         if (!block.rows || block.rows.length === 0) return null
         return (
@@ -1380,11 +1407,19 @@ export default function App() {
             return qHTML
           case 'text':
             return `<div class="block-text">${escapeHtml(block.content)}</div>`
-          case 'image':
-            if (block.src) {
+          case 'image': {
+            const renderResult = renderImageBlock(block)
+            if (renderResult.type === 'svg') {
+              return `<div class="block-image" style="text-align:center;">${renderResult.content}${block.caption ? `<div style="font-size:10px;color:#666;">${escapeHtml(block.caption)}</div>` : ''}</div>`
+            }
+            if (renderResult.type === 'image') {
               return `<div class="block-image"><img src="${block.src}" alt="${escapeHtml(block.caption || '')}" style="max-width:100%;display:block;margin:8px auto;" /></div>`
             }
+            if (renderResult.type === 'placeholder') {
+              return `<div class="block-image" style="text-align:center;color:#999;font-style:italic;">[图: ${escapeHtml(renderResult.content || '待插入')}]</div>`
+            }
             return ''
+          }
           case 'table':
             if (!block.rows || block.rows.length === 0) return ''
             let tHTML = `<table class="block-table"><tbody>`

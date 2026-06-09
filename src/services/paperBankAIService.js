@@ -117,6 +117,9 @@ function buildLayoutAnalysisPrompt() {
 - options: 选择题选项数组（仅question类型为选择题时）
 - bbox: 区块在原图中的位置 [x1, y1, x2, y2]（像素坐标，以压缩后的图片为准）
 - caption: 图片描述（仅image类型，如"二次函数图像"、"几何图形"）
+- tikzCode: TikZ矢量图代码（仅image类型，如果能识别出规则图形）
+- graphType: 图形类型（仅image类型：function/geometry/experiment/other）
+- graphParams: 图形参数（仅image类型，包含坐标/线条/圆/角度/函数曲线等信息）
 
 type说明：
 - title: 试卷大标题（居中、加粗、大字号）
@@ -135,6 +138,52 @@ type说明：
 4. caption描述图片内容（如"二次函数y=x²-2x的图像"、"三角形ABC"）
 5. 不要将整页作为一张图返回，只识别试卷中嵌入的具体图形
 
+⚠️ TikZ矢量图生成要求（V4功能）：
+对于规则图形（函数图、几何图、坐标系图等），请尝试生成TikZ代码：
+1. graphType: 判断图形类型（function=函数图，geometry=几何图，experiment=实验装置，other=其他）
+2. tikzCode: 生成对应的TikZ代码（使用基本命令：draw、node、circle、arc、axis等）
+3. graphParams: 提取图形参数，包括：
+   - coordinates: 关键点坐标（如函数图的关键点、几何图的顶点）
+   - lines: 线条信息（起点终点、颜色、粗细）
+   - circles: 圆的信息（圆心、半径）
+   - angles: 角度信息（角度值、标注位置）
+   - functions: 函数表达式（如y=x²-2x+1）
+   - labels: 标签文本和位置
+4. 如果图形太复杂或无法准确识别，将tikzCode设为null，系统会自动使用局部图替代
+
+示例（函数图）：
+{
+  "type": "image",
+  "content": "",
+  "confidence": 0.95,
+  "caption": "二次函数y=x²-2x的图像",
+  "bbox": [100, 200, 400, 400],
+  "graphType": "function",
+  "tikzCode": "\\begin{tikzpicture}[scale=0.8]\\draw[->] (-3,0) -- (3,0) node[right] {x};\\draw[->] (0,-3) -- (0,3) node[above] {y};\\draw[domain=-2:3,smooth,variable=\\x,blue] plot ({\\x},{\\x*\\x-2*\\x});\\node at (1,-1) [below right] {O};\\end{tikzpicture}",
+  "graphParams": {
+    "function": "y = x² - 2x",
+    "coordinates": [[-2, 8], [0, 0], [1, -1], [2, 0], [3, 3]],
+    "labels": [["O", 0, 0, "below right"], ["x", 3, 0, "right"], ["y", 0, 3, "above"]]
+  }
+}
+
+示例（几何图）：
+{
+  "type": "image",
+  "content": "",
+  "confidence": 0.92,
+  "caption": "三角形ABC，AD⊥BC",
+  "bbox": [100, 450, 400, 650],
+  "graphType": "geometry",
+  "tikzCode": "\\begin{tikzpicture}[scale=0.8]\\coordinate (A) at (0,3);\\coordinate (B) at (-2,0);\\coordinate (C) at (3,0);\\coordinate (D) at (1,0);\\draw[thick] (A) -- (B) -- (C) -- cycle;\\draw[dashed] (A) -- (D);\\draw (0.8,0) rectangle (1,0.2);\\node[left] at (A) {A};\\node[below left] at (B) {B};\\node[below right] at (C) {C};\\node[below] at (D) {D};\\end{tikzpicture}",
+  "graphParams": {
+    "vertices": [["A", 0, 3], ["B", -2, 0], ["C", 3, 0], ["D", 1, 0]],
+    "lines": [["A", "B"], ["B", "C"], ["C", "A"], ["A", "D"]],
+    "angles": [["A", "D", "B", 90]],
+    "labels": [["A", 0, 3, "left"], ["B", -2, 0, "below left"], ["C", 3, 0, "below right"], ["D", 1, 0, "below"]]
+  }
+}
+
 返回格式：
 {
   "paperInfo": {
@@ -148,10 +197,10 @@ type说明：
     {"type":"subtitle","content":"考试时间：120分钟  满分：150分","confidence":0.95,"style":{"textAlign":"center","fontSize":"12px","color":"#666"},"bbox":[150,70,450,90]},
     {"type":"section","content":"一、选择题（每题3分，共30分）","confidence":0.99,"style":{"fontWeight":"bold","fontSize":"14px"},"bbox":[30,110,400,130]},
     {"type":"question","content":"1. 下列计算正确的是（ ）","confidence":0.97,"options":["A. 2+3=5","B. 2×3=6","C. 2-3=1","D. 2÷3=1"],"bbox":[30,140,500,180]},
-    {"type":"image","content":"","confidence":0.95,"caption":"二次函数图像","bbox":[100,200,400,400]},
+    {"type":"image","content":"","confidence":0.95,"caption":"二次函数图像","bbox":[100,200,400,400],"graphType":"function","tikzCode":"...","graphParams":{...}},
     {"type":"question","content":"2. 如图，三角形ABC中...","confidence":0.92,"bbox":[30,410,500,440]},
-    {"type":"image","content":"","confidence":0.93,"caption":"三角形ABC几何图","bbox":[100,450,400,650]},
-    {"type":"text","content":"注意事项：...","confidence":0.90,"bbox":[30,420,500,460]}
+    {"type":"image","content":"","confidence":0.93,"caption":"三角形ABC几何图","bbox":[100,450,400,650],"graphType":"geometry","tikzCode":"...","graphParams":{...}},
+    {"type":"text","content":"注意事项：...","confidence":0.90,"bbox":[30,660,500,700]}
   ]
 }
 
@@ -161,9 +210,10 @@ type说明：
 3. 保留填空下划线____和括号（ ）
 4. 选择题必须提取options
 5. 每张独立图片返回单独的image区块，给出精确bbox坐标
-6. 所有区块都必须返回bbox坐标
-7. 对不确定的文字标低confidence值（0.5以下表示高度不确定）
-8. 只返回JSON，不要包含其他文字`;
+6. 对规则图形尝试生成tikzCode和graphParams
+7. 所有区块都必须返回bbox坐标
+8. 对不确定的文字标低confidence值（0.5以下表示高度不确定）
+9. 只返回JSON，不要包含其他文字`;
 }
 
 /**
