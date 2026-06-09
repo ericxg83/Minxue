@@ -21,7 +21,8 @@ import {
   Maximize,
   Eye,
   Edit3,
-  Tag
+  Tag,
+  AlertCircle
 } from 'lucide-react'
 import { motion, AnimatePresence } from 'motion/react'
 import { QRCodeSVG } from 'qrcode.react'
@@ -198,6 +199,22 @@ export default function App() {
   const [showExamReview, setShowExamReview] = useState(false)
   const [reviewTask, setReviewTask] = useState(null)
   const [showUploadOptions, setShowUploadOptions] = useState(false)
+
+  // Paper Bank State
+  const [paperBankStep, setPaperBankStep] = useState('list') // list | upload | processing | proofread | export
+  const [paperBankPapers, setPaperBankPapers] = useState(() => {
+    try {
+      const cached = localStorage.getItem('paperbank_papers')
+      return cached ? JSON.parse(cached) : []
+    } catch { return [] }
+  })
+  const [paperBankDraft, setPaperBankDraft] = useState(null)
+  const [paperBankUploadedPages, setPaperBankUploadedPages] = useState([])
+  const [paperBankProcessing, setPaperBankProcessing] = useState(false)
+  const [paperBankProgress, setPaperBankProgress] = useState(0)
+  const [paperBankProofreadContent, setPaperBankProofreadContent] = useState('')
+  const [paperBankProofreadMode, setPaperBankProofreadMode] = useState(false)
+  const [paperBankInfo, setPaperBankInfo] = useState(null)
 
   // 初始化状态
   const [isInitializing, setIsInitializing] = useState(true)
@@ -885,6 +902,168 @@ export default function App() {
     setGradingData(null)
     Toast.show({ message: `批改完成，${results.masteredCount} 题已掌握`, type: 'success' })
     loadWrongBookData()
+  }
+
+  // ==================== Paper Bank Handlers ====================
+
+  // Persist paper bank papers
+  useEffect(() => {
+    try {
+      localStorage.setItem('paperbank_papers', JSON.stringify(paperBankPapers))
+    } catch (e) { /* ignore */ }
+  }, [paperBankPapers])
+
+  // Paper Bank: Handle file select for upload
+  const handlePaperBankFileSelect = async (e) => {
+    const files = Array.from(e.target?.files || [])
+    if (files.length === 0) return
+
+    try {
+      const pages = files.map((file, index) => ({
+        id: `page_${Date.now()}_${index}`,
+        name: file.name,
+        imageUrl: URL.createObjectURL(file),
+        file: file
+      }))
+
+      setPaperBankUploadedPages(prev => [...prev, ...pages])
+      Toast.show({ message: `已添加${files.length}页`, type: 'success', duration: 1500 })
+    } catch (error) {
+      console.error('[PaperBank] 文件选择失败:', error)
+      Toast.show({ message: '文件读取失败', type: 'error', duration: 2000 })
+    }
+  }
+
+  // Paper Bank: Remove uploaded page
+  const handlePaperBankRemovePage = (pageId) => {
+    setPaperBankUploadedPages(prev => prev.filter(p => p.id !== pageId))
+  }
+
+  // Paper Bank: Start AI processing
+  const handlePaperBankStartProcessing = async () => {
+    if (paperBankUploadedPages.length === 0) {
+      Toast.show({ message: '请先上传试卷', type: 'error', duration: 2000 })
+      return
+    }
+
+    setPaperBankProcessing(true)
+    setPaperBankProgress(0)
+    setPaperBankStep('processing')
+
+    try {
+      // Simulate progress
+      const progressInterval = setInterval(() => {
+        setPaperBankProgress(prev => {
+          const next = prev + Math.random() * 15
+          return next >= 95 ? 95 : next
+        })
+      }, 800)
+
+      // Simulate AI processing (in production, this would call the AI API)
+      await new Promise(resolve => setTimeout(resolve, 3000))
+
+      clearInterval(progressInterval)
+      setPaperBankProgress(100)
+
+      // Mock extracted info
+      const mockInfo = {
+        name: paperBankUploadedPages[0]?.name?.replace(/\.[^.]+$/, '') || '未命名试卷',
+        subject: '数学',
+        grade: '初三',
+        examType: '期中考试'
+      }
+
+      // Mock proofread content
+      const mockContent = `【试卷名称】${mockInfo.name}
+【学科】${mockInfo.subject}
+【年级】${mockInfo.grade}
+【考试类型】${mockInfo.examType}
+
+一、选择题（每题3分，共30分）
+
+1. 下列计算正确的是（ ）
+   A. 2 + 3 = 5
+   B. 2 × 3 = 6
+   C. 2 - 3 = 1
+   D. 2 ÷ 3 = 1
+
+2. 若x = 2，则x² + 1的值为（ ）
+   A. 3
+   B. 4
+   C. 5
+   D. 6
+
+二、填空题（每题4分，共20分）
+
+3. 计算：(-2)³ = ______
+
+4. 若a + b = 5，ab = 6，则a² + b² = ______
+
+三、解答题（共50分）
+
+5. （10分）解方程：2x + 5 = 13
+
+6. （15分）已知三角形ABC中，AB = AC，∠A = 40°，求∠B和∠C的度数。
+
+7. （25分）某商品原价100元，先涨价20%，再降价20%，求最终价格。`
+
+      setPaperBankInfo(mockInfo)
+      setPaperBankProofreadContent(mockContent)
+
+      // Delay to show completion
+      setTimeout(() => {
+        setPaperBankStep('proofread')
+      }, 500)
+    } catch (error) {
+      console.error('[PaperBank] AI处理失败:', error)
+      Toast.show({ message: '处理失败，请重试', type: 'error', duration: 3000 })
+      setPaperBankStep('upload')
+    } finally {
+      setPaperBankProcessing(false)
+    }
+  }
+
+  // Paper Bank: Finalize paper (save to bank)
+  const handlePaperBankFinalize = () => {
+    if (!paperBankInfo) return
+
+    const newPaper = {
+      id: `paper_${Date.now()}`,
+      name: paperBankInfo.name,
+      subject: paperBankInfo.subject,
+      grade: paperBankInfo.grade,
+      examType: paperBankInfo.examType,
+      content: paperBankProofreadContent,
+      totalPages: paperBankUploadedPages.length,
+      thumbnail: paperBankUploadedPages[0]?.imageUrl || '',
+      createdAt: new Date().toISOString()
+    }
+
+    setPaperBankPapers(prev => [newPaper, ...prev])
+    Toast.show({ message: '试卷入库成功！', type: 'success', duration: 2000 })
+
+    // Reset
+    setPaperBankStep('list')
+    setPaperBankUploadedPages([])
+    setPaperBankDraft(null)
+    setPaperBankInfo(null)
+    setPaperBankProofreadContent('')
+  }
+
+  // Paper Bank: Reset to upload
+  const handlePaperBankReset = () => {
+    setPaperBankStep('upload')
+    setPaperBankUploadedPages([])
+    setPaperBankDraft(null)
+    setPaperBankInfo(null)
+    setPaperBankProofreadContent('')
+    setPaperBankProofreadMode(false)
+  }
+
+  // Paper Bank: Delete paper from bank
+  const handlePaperBankDelete = (paperId) => {
+    setPaperBankPapers(prev => prev.filter(p => p.id !== paperId))
+    Toast.show({ message: '已删除', type: 'success', duration: 1500 })
   }
 
   // Reprint exam
@@ -1931,6 +2110,263 @@ export default function App() {
                 </section>
               </motion.div>
             )}
+
+            {currentPage === 'paperbank' && (
+              <motion.div
+                key="paperbank-page"
+                initial={{ opacity: 0, x: 20 }}
+                animate={{ opacity: 1, x: 0 }}
+                exit={{ opacity: 0, x: -20 }}
+                className="w-full"
+              >
+                {/* Paper Bank: List View */}
+                {paperBankStep === 'list' && (
+                  <>
+                    <section className="px-4 pt-3 mb-2">
+                      <div className="flex items-center justify-between">
+                        <div>
+                          <h2 style={{ fontSize: '18px', fontWeight: 700, color: '#111827' }}>试卷资源库</h2>
+                          <p style={{ fontSize: '11px', color: '#9CA3AF', marginTop: '1px' }}>
+                            共 {paperBankPapers.length} 份试卷
+                          </p>
+                        </div>
+                        <button
+                          onClick={handlePaperBankReset}
+                          className="px-3 py-1.5 rounded-lg text-[12px] font-medium flex items-center gap-1"
+                          style={{ background: '#2563EB', color: '#fff' }}
+                        >
+                          <Plus size={12} />
+                          上传试卷
+                        </button>
+                      </div>
+                    </section>
+
+                    <section className="px-4 space-y-2">
+                      {paperBankPapers.length === 0 ? (
+                        <div className="text-center py-16">
+                          <Sparkles size={36} className="mx-auto" style={{ color: '#D1D5DB' }} />
+                          <p className="mt-3" style={{ fontSize: '13px', color: '#9CA3AF' }}>暂无入库试卷</p>
+                          <p className="mt-0.5" style={{ fontSize: '11px', color: '#D1D5DB' }}>上传试卷，AI识别后入库保存</p>
+                        </div>
+                      ) : (
+                        paperBankPapers.map((paper) => (
+                          <motion.div
+                            key={paper.id}
+                            layout
+                            initial={{ opacity: 0, y: 10 }}
+                            animate={{ opacity: 1, y: 0 }}
+                            className="card"
+                            style={{ padding: '12px' }}
+                          >
+                            <div className="flex items-start justify-between gap-2">
+                              <div className="flex-1 min-w-0">
+                                <h3 style={{ fontSize: '14px', fontWeight: 600, color: '#111827' }} className="truncate">{paper.name}</h3>
+                                <p style={{ fontSize: '11px', color: '#9CA3AF', marginTop: '2px' }}>
+                                  {paper.subject} · {paper.grade} · {paper.examType}
+                                </p>
+                                <p style={{ fontSize: '11px', color: '#9CA3AF', marginTop: '1px' }}>
+                                  {dayjs(paper.createdAt).format('YYYY/MM/DD HH:mm')} · {paper.totalPages}页
+                                </p>
+                              </div>
+                              <div className="flex gap-1">
+                                <button
+                                  onClick={() => handlePaperBankDelete(paper.id)}
+                                  className="px-2 py-1 rounded-lg text-[12px]"
+                                  style={{ background: '#F3F4F6', color: '#9CA3AF' }}
+                                >
+                                  <Trash2 size={12} />
+                                </button>
+                              </div>
+                            </div>
+                          </motion.div>
+                        ))
+                      )}
+                    </section>
+                  </>
+                )}
+
+                {/* Paper Bank: Upload View */}
+                {paperBankStep === 'upload' && (
+                  <>
+                    <section className="px-4 pt-3 mb-2">
+                      <div className="flex items-center gap-2">
+                        <button onClick={() => setPaperBankStep('list')} className="p-1">
+                          <ChevronRight size={18} style={{ color: '#6B7280', transform: 'rotate(180deg)' }} />
+                        </button>
+                        <h2 style={{ fontSize: '18px', fontWeight: 700, color: '#111827' }}>上传试卷</h2>
+                      </div>
+                      <p style={{ fontSize: '12px', color: '#9CA3AF', marginTop: '4px' }}>支持多页试卷上传，AI将自动识别并提取试卷信息</p>
+                    </section>
+
+                    <section className="px-4 mb-3">
+                      <div className="grid grid-cols-2 gap-3">
+                        <label className="flex flex-col items-center gap-2 p-4 rounded-xl bg-blue-50 active:bg-blue-100 transition-colors cursor-pointer">
+                          <div className="w-12 h-12 rounded-full bg-blue-500 flex items-center justify-center">
+                            <ImageIcon size={24} className="text-white" />
+                          </div>
+                          <span className="text-[13px] font-medium text-gray-700">从相册选择</span>
+                          <span className="text-[11px] text-gray-400">可多选试卷图片</span>
+                          <input
+                            type="file"
+                            accept="image/*"
+                            multiple
+                            onChange={handlePaperBankFileSelect}
+                            className="hidden"
+                          />
+                        </label>
+                        <label className="flex flex-col items-center gap-2 p-4 rounded-xl bg-green-50 active:bg-green-100 transition-colors cursor-pointer">
+                          <div className="w-12 h-12 rounded-full bg-green-500 flex items-center justify-center">
+                            <Camera size={24} className="text-white" />
+                          </div>
+                          <span className="text-[13px] font-medium text-gray-700">拍照上传</span>
+                          <span className="text-[11px] text-gray-400">直接拍摄试卷</span>
+                          <input
+                            type="file"
+                            accept="image/*"
+                            capture="environment"
+                            onChange={handlePaperBankFileSelect}
+                            className="hidden"
+                          />
+                        </label>
+                      </div>
+                    </section>
+
+                    {paperBankUploadedPages.length > 0 && (
+                      <section className="px-4">
+                        <div className="flex items-center justify-between mb-2">
+                          <span style={{ fontSize: '13px', fontWeight: 600, color: '#111827' }}>
+                            已上传 ({paperBankUploadedPages.length}页)
+                          </span>
+                          <button
+                            onClick={() => setPaperBankUploadedPages([])}
+                            style={{ fontSize: '12px', color: '#EF4444' }}
+                          >
+                            清空
+                          </button>
+                        </div>
+                        <div className="space-y-1">
+                          {paperBankUploadedPages.map((page, index) => (
+                            <div key={page.id} className="flex items-center gap-2.5 p-2 rounded-lg" style={{ background: '#F9FAFB' }}>
+                              <div style={{ width: '24px', height: '24px', borderRadius: '50%', background: '#EFF6FF', color: '#2563EB', fontSize: '12px', fontWeight: 600, display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
+                                {index + 1}
+                              </div>
+                              <img src={page.imageUrl} alt="" style={{ width: '48px', height: '48px', borderRadius: '6px', objectFit: 'cover', flexShrink: 0 }} />
+                              <span className="flex-1 truncate" style={{ fontSize: '13px', color: '#4B5563' }}>{page.name}</span>
+                              <button onClick={() => handlePaperBankRemovePage(page.id)} style={{ color: '#9CA3AF' }}>
+                                <X size={14} />
+                              </button>
+                            </div>
+                          ))}
+                        </div>
+                      </section>
+                    )}
+
+                    {paperBankUploadedPages.length > 0 && (
+                      <div className="fixed z-40 flex justify-center pointer-events-none" style={{ bottom: 'calc(56px + env(safe-area-inset-bottom, 0px))', left: '12px', right: '12px' }}>
+                        <button
+                          onClick={handlePaperBankStartProcessing}
+                          className="flex items-center justify-center gap-2 w-full max-w-lg h-12 rounded-xl text-[15px] font-semibold text-white pointer-events-auto"
+                          style={{ background: 'linear-gradient(135deg, #2563EB 0%, #1D4ED8 100%)', boxShadow: '0 4px 12px rgba(37,99,235,0.3)' }}
+                        >
+                          <Sparkles size={18} />
+                          开始AI识别
+                        </button>
+                      </div>
+                    )}
+                  </>
+                )}
+
+                {/* Paper Bank: Processing View */}
+                {paperBankStep === 'processing' && (
+                  <div className="flex flex-col items-center justify-center min-h-[60vh] px-6">
+                    <Loader2 size={48} className="animate-spin" style={{ color: '#2563EB' }} />
+                    <h3 style={{ fontSize: '18px', fontWeight: 600, color: '#111827', marginTop: '20px', marginBottom: '8px' }}>AI正在识别试卷...</h3>
+                    <p style={{ fontSize: '13px', color: '#6B7280', textAlign: 'center', marginBottom: '24px' }}>正在提取试卷名称、识别文字内容、标注疑似错误</p>
+                    
+                    <div style={{ width: '100%', maxWidth: '280px', marginBottom: '24px' }}>
+                      <div style={{ height: '8px', background: '#E5E7EB', borderRadius: '4px', overflow: 'hidden', marginBottom: '8px' }}>
+                        <div style={{ height: '100%', width: `${paperBankProgress}%`, background: 'linear-gradient(90deg, #2563EB, #60A5FA)', borderRadius: '4px', transition: 'width 0.3s ease' }} />
+                      </div>
+                      <p style={{ fontSize: '14px', fontWeight: 600, color: '#2563EB', textAlign: 'center' }}>{Math.round(paperBankProgress)}%</p>
+                    </div>
+
+                    <div style={{ width: '100%', maxWidth: '280px' }}>
+                      {[
+                        { label: '提取试卷信息', done: paperBankProgress >= 20 },
+                        { label: 'OCR文字识别', done: paperBankProgress >= 50 },
+                        { label: '智能校对标注', done: paperBankProgress >= 80 },
+                        { label: '生成校对报告', done: paperBankProgress >= 100 }
+                      ].map((step, i) => (
+                        <div key={i} className="flex items-center gap-2.5 py-2.5" style={{ borderBottom: i < 3 ? '1px solid #F3F4F6' : 'none' }}>
+                          <CheckCircle2 size={16} style={{ color: step.done ? '#16A34A' : '#D1D5DB' }} />
+                          <span style={{ fontSize: '14px', color: step.done ? '#16A34A' : '#9CA3AF' }}>{step.label}</span>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                )}
+
+                {/* Paper Bank: Proofread View */}
+                {paperBankStep === 'proofread' && (
+                  <>
+                    <section className="px-4 pt-3 mb-2">
+                      <div className="flex items-center justify-between">
+                        <div className="flex items-center gap-2">
+                          <button onClick={handlePaperBankReset} className="p-1">
+                            <ChevronRight size={18} style={{ color: '#6B7280', transform: 'rotate(180deg)' }} />
+                          </button>
+                          <div>
+                            <h2 style={{ fontSize: '16px', fontWeight: 600, color: '#111827' }}>{paperBankInfo?.name || '未命名试卷'}</h2>
+                            <p style={{ fontSize: '12px', color: '#9CA3AF' }}>{paperBankInfo?.subject} · {paperBankInfo?.grade} · {paperBankInfo?.examType}</p>
+                          </div>
+                        </div>
+                        <button
+                          onClick={() => setPaperBankProofreadMode(!paperBankProofreadMode)}
+                          className="px-3 py-1.5 rounded-lg text-[12px] flex items-center gap-1"
+                          style={{ background: '#F3F4F6', color: '#4B5563' }}
+                        >
+                          <Edit3 size={12} />
+                          {paperBankProofreadMode ? '预览' : '编辑'}
+                        </button>
+                      </div>
+                    </section>
+
+                    <div className="px-4 mb-2">
+                      <div className="flex items-center gap-2 p-2.5 rounded-lg" style={{ background: '#FFFBEB', border: '1px solid #FEF08A' }}>
+                        <AlertCircle size={14} style={{ color: '#F59E0B' }} />
+                        <span style={{ fontSize: '12px', color: '#92400E' }}>AI已自动识别，请仔细校对内容</span>
+                      </div>
+                    </div>
+
+                    <section className="px-4">
+                      {paperBankProofreadMode ? (
+                        <textarea
+                          value={paperBankProofreadContent}
+                          onChange={(e) => setPaperBankProofreadContent(e.target.value)}
+                          className="w-full rounded-lg p-3 text-[13px] resize-none focus:outline-none"
+                          style={{ border: '1px solid #E5E7EB', color: '#111827', minHeight: '400px', lineHeight: '1.6', background: '#FAFAFA' }}
+                        />
+                      ) : (
+                        <div className="card p-3" style={{ whiteSpace: 'pre-wrap', fontSize: '13px', lineHeight: '1.6', color: '#111827', minHeight: '400px' }}>
+                          {paperBankProofreadContent}
+                        </div>
+                      )}
+                    </section>
+
+                    <div className="fixed z-40 flex justify-center pointer-events-none" style={{ bottom: 'calc(56px + env(safe-area-inset-bottom, 0px))', left: '12px', right: '12px' }}>
+                      <button
+                        onClick={handlePaperBankFinalize}
+                        className="flex items-center justify-center gap-2 w-full max-w-lg h-12 rounded-xl text-[15px] font-semibold text-white pointer-events-auto"
+                        style={{ background: 'linear-gradient(135deg, #16A34A 0%, #15803D 100%)', boxShadow: '0 4px 12px rgba(22,163,74,0.3)' }}
+                      >
+                        <CheckCircle2 size={18} />
+                        确认入库
+                      </button>
+                    </div>
+                  </>
+                )}
+              </motion.div>
+            )}
           </AnimatePresence>
         </main>
 
@@ -1942,6 +2378,7 @@ export default function App() {
                 { id: 'processing', icon: Camera, label: '首页' },
                 { id: 'wrongbook', icon: LayoutGrid, label: '错题本' },
                 { id: 'exam', icon: FileText, label: '组卷记录' },
+                { id: 'paperbank', icon: Sparkles, label: '试卷入库' },
               ].map((tab) => (
                 <button
                   key={tab.id}
