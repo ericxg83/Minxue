@@ -121,6 +121,10 @@ export const recognizePaperPage = async (imageBase64, isFirstPage = true) => {
     model: AI_CONFIG.MODEL,
     messages: [
       {
+        role: 'system',
+        content: '你是一个专业的试卷OCR识别助手。请仔细分析试卷图片并返回JSON格式结果。'
+      },
+      {
         role: 'user',
         content: [
           {
