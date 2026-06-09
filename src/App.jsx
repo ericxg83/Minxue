@@ -34,6 +34,7 @@ import { getStudents, getTasksByStudent, getQuestionsByTask, addWrongQuestions, 
 import { taskService } from './services/taskService'
 import { recognizeQuestions, compressImage, saveRecognitionResult } from './services/aiService'
 import { processMultiPagePaperLayout } from './services/paperBankAIService'
+import { downloadPaperWord } from './utils/docxGenerator'
 import { mockQuestions, mockTasks, mockWrongQuestions, mockGeneratedExams, mockStudents } from './data/mockData'
 import StudentSwitcher from './components/StudentSwitcher'
 
@@ -220,6 +221,8 @@ export default function App() {
   const [paperBankProofreadMode, setPaperBankProofreadMode] = useState(false)
   const [paperBankInfo, setPaperBankInfo] = useState(null)
   const [editingBlock, setEditingBlock] = useState(null) // {pageNo, blockIndex} 当前编辑的区块
+  const [paperBankCurrentPage, setPaperBankCurrentPage] = useState(0) // 当前校对页码（0-based）
+  const [paperBankShowOriginal, setPaperBankShowOriginal] = useState(false) // 是否显示原图对比
 
   // Paper Bank Filter State
   const [paperBankFilterGrade, setPaperBankFilterGrade] = useState('all')
@@ -1046,6 +1049,30 @@ export default function App() {
     }
   }
 
+  // Paper Bank: Download Word file
+  const handlePaperBankDownloadWord = async () => {
+    if (!paperBankInfo) return
+    
+    const paperData = {
+      name: paperBankInfo.name,
+      subject: paperBankInfo.subject,
+      grade: paperBankInfo.grade,
+      examType: paperBankInfo.examType,
+      pages: paperBankReconstructedPages
+    }
+    
+    try {
+      Toast.show({ message: '正在生成Word...', type: 'loading', duration: 0 })
+      await downloadPaperWord(paperData, paperBankInfo.name)
+      Toast.dismiss()
+      Toast.show({ message: 'Word已下载！', type: 'success', duration: 2000 })
+    } catch (error) {
+      console.error('[PaperBank] Word生成失败:', error)
+      Toast.dismiss()
+      Toast.show({ message: 'Word生成失败：' + error.message, type: 'error', duration: 3000 })
+    }
+  }
+
   // Paper Bank: Finalize paper (save to bank)
   const handlePaperBankFinalize = () => {
     if (!paperBankInfo) return
@@ -1088,6 +1115,8 @@ export default function App() {
     setPaperBankDraft(null)
     setPaperBankInfo(null)
     setEditingBlock(null)
+    setPaperBankCurrentPage(0)
+    setPaperBankShowOriginal(false)
     setPaperBankProofreadMode(false)
   }
 
@@ -1095,28 +1124,6 @@ export default function App() {
   const handlePaperBankDelete = (paperId) => {
     setPaperBankPapers(prev => prev.filter(p => p.id !== paperId))
     Toast.show({ message: '已删除', type: 'success', duration: 1500 })
-  }
-
-  // Paper Bank: Sync scroll between left and right panels
-  const leftRef = useRef(null)
-  const rightRef = useRef(null)
-  const isScrolling = useRef(false)
-  
-  const handleScrollSync = (e) => {
-    if (isScrolling.current) return
-    isScrolling.current = true
-    
-    const source = e.target
-    const target = source === leftRef.current ? rightRef.current : leftRef.current
-    
-    if (target) {
-      const scrollRatio = source.scrollTop / (source.scrollHeight - source.clientHeight || 1)
-      target.scrollTop = scrollRatio * (target.scrollHeight - target.clientHeight)
-    }
-    
-    requestAnimationFrame(() => {
-      isScrolling.current = false
-    })
   }
 
   // Paper Bank: Handle block edit
@@ -2926,9 +2933,16 @@ export default function App() {
                   </div>
                 )}
 
-                {/* Paper Bank: Proofread View - Left/Right Comparison Mode */}
-                {paperBankStep === 'proofread' && (
+                {/* Paper Bank: Proofread View - Page-by-Page Preview Mode */}
+                {paperBankStep === 'proofread' && (() => {
+                  const currentPageIdx = paperBankCurrentPage
+                  const totalPages = paperBankReconstructedPages.length
+                  const currentPage = paperBankReconstructedPages[currentPageIdx]
+                  if (!currentPage) return null
+                  
+                  return (
                   <>
+                    {/* Header */}
                     <section className="px-4 pt-3 mb-2">
                       <div className="flex items-center justify-between">
                         <div className="flex items-center gap-2">
@@ -2940,58 +2954,85 @@ export default function App() {
                             <p style={{ fontSize: '12px', color: '#9CA3AF' }}>{paperBankInfo?.subject} · {paperBankInfo?.grade} · {paperBankInfo?.examType}</p>
                           </div>
                         </div>
+                        <div className="flex items-center gap-2">
+                          {/* Toggle Original Image */}
+                          <button
+                            onClick={() => setPaperBankShowOriginal(!paperBankShowOriginal)}
+                            className={`px-3 py-1.5 rounded-lg text-[12px] flex items-center gap-1 ${paperBankShowOriginal ? 'bg-blue-100 text-blue-600' : 'bg-gray-100 text-gray-600'}`}
+                          >
+                            <Eye size={12} />
+                            {paperBankShowOriginal ? '隐藏原图' : '对照原图'}
+                          </button>
+                          {/* Download Word */}
+                          <button
+                            onClick={handlePaperBankDownloadWord}
+                            className="px-3 py-1.5 rounded-lg text-[12px] flex items-center gap-1 bg-blue-600 text-white"
+                          >
+                            <Download size={12} />
+                            导出Word
+                          </button>
+                        </div>
                       </div>
                     </section>
 
-                    <div className="px-4 mb-2">
-                      <div className="flex items-center gap-2 p-2.5 rounded-lg" style={{ background: '#FFFBEB', border: '1px solid #FEF08A' }}>
-                        <AlertCircle size={14} style={{ color: '#F59E0B' }} />
-                        <span style={{ fontSize: '12px', color: '#92400E' }}>左右对照校对模式 · 点击右侧内容可编辑</span>
+                    {/* Page Navigation */}
+                    {totalPages > 1 && (
+                      <div className="px-4 mb-2 flex items-center justify-between">
+                        <button
+                          onClick={() => setPaperBankCurrentPage(Math.max(0, currentPageIdx - 1))}
+                          disabled={currentPageIdx === 0}
+                          className="px-3 py-1.5 rounded-lg text-sm disabled:opacity-30 disabled:cursor-not-allowed bg-gray-100 text-gray-700"
+                        >
+                          上一页
+                        </button>
+                        <span className="text-sm text-gray-500">
+                          第 {currentPageIdx + 1} / {totalPages} 页
+                        </span>
+                        <button
+                          onClick={() => setPaperBankCurrentPage(Math.min(totalPages - 1, currentPageIdx + 1))}
+                          disabled={currentPageIdx === totalPages - 1}
+                          className="px-3 py-1.5 rounded-lg text-sm disabled:opacity-30 disabled:cursor-not-allowed bg-gray-100 text-gray-700"
+                        >
+                          下一页
+                        </button>
                       </div>
-                    </div>
+                    )}
 
-                    {/* Left/Right Comparison Layout */}
-                    <div className="flex gap-2 px-4" style={{ height: 'calc(100vh - 280px)', minHeight: '500px' }}>
-                      {/* Left: Original Images */}
-                      <div 
-                        ref={leftRef}
-                        className="flex-1 overflow-y-auto rounded-lg p-2"
-                        style={{ background: '#F3F4F6', border: '1px solid #E5E7EB' }}
-                        onScroll={handleScrollSync}
-                      >
-                        <div className="text-center text-xs text-gray-500 mb-2 font-medium">原始试卷</div>
-                        {paperBankReconstructedPages.map((page) => (
-                          <div key={page.pageNo} className="mb-4">
-                            <div className="text-xs text-gray-400 text-center mb-1">第 {page.pageNo} 页</div>
+                    {/* Main Content Area */}
+                    <div className="px-4 flex-1" style={{ height: 'calc(100vh - 320px)', minHeight: '400px' }}>
+                      <div className="flex gap-3 h-full">
+                        {/* Left: Original Image (toggleable) */}
+                        {paperBankShowOriginal && (
+                          <div className="w-1/2 overflow-y-auto rounded-lg p-2 bg-gray-100 border border-gray-200">
+                            <div className="text-center text-xs text-gray-500 mb-2 font-medium">原始试卷</div>
                             <img 
-                              src={page.originalImage} 
-                              alt={`第${page.pageNo}页`}
+                              src={currentPage.originalImage} 
+                              alt={`第${currentPage.pageNo}页`}
                               className="max-w-full rounded shadow-sm bg-white"
                             />
                           </div>
-                        ))}
-                      </div>
+                        )}
 
-                      {/* Right: Reconstructed Paper Preview */}
-                      <div 
-                        ref={rightRef}
-                        className="flex-1 overflow-y-auto rounded-lg p-2"
-                        style={{ background: '#F3F4F6', border: '1px solid #E5E7EB' }}
-                        onScroll={handleScrollSync}
-                      >
-                        <div className="text-center text-xs text-gray-500 mb-2 font-medium">数字化重建预览</div>
-                        {paperBankReconstructedPages.map((page) => (
-                          <div key={page.pageNo}>
-                            {renderReconstructedPage(page)}
-                          </div>
-                        ))}
+                        {/* Right: Reconstructed Paper Preview */}
+                        <div className={`${paperBankShowOriginal ? 'w-1/2' : 'w-full'} overflow-y-auto`}>
+                          {renderReconstructedPage(currentPage)}
+                        </div>
                       </div>
                     </div>
 
-                    <div className="fixed z-40 flex justify-center pointer-events-none" style={{ bottom: 'calc(56px + env(safe-area-inset-bottom, 0px))', left: '12px', right: '12px' }}>
+                    {/* Bottom Actions */}
+                    <div className="fixed z-40 flex justify-center gap-3 pointer-events-none" style={{ bottom: 'calc(56px + env(safe-area-inset-bottom, 0px))', left: '12px', right: '12px' }}>
+                      <button
+                        onClick={handlePaperBankDownloadWord}
+                        className="flex items-center justify-center gap-2 w-32 h-12 rounded-xl text-[14px] font-semibold text-white pointer-events-auto"
+                        style={{ background: 'linear-gradient(135deg, #2563EB 0%, #1D4ED8 100%)', boxShadow: '0 4px 12px rgba(37,99,235,0.3)' }}
+                      >
+                        <Download size={16} />
+                        导出Word
+                      </button>
                       <button
                         onClick={handlePaperBankFinalize}
-                        className="flex items-center justify-center gap-2 w-full max-w-lg h-12 rounded-xl text-[15px] font-semibold text-white pointer-events-auto"
+                        className="flex items-center justify-center gap-2 flex-1 max-w-lg h-12 rounded-xl text-[15px] font-semibold text-white pointer-events-auto"
                         style={{ background: 'linear-gradient(135deg, #16A34A 0%, #15803D 100%)', boxShadow: '0 4px 12px rgba(22,163,74,0.3)' }}
                       >
                         <CheckCircle2 size={18} />
@@ -2999,7 +3040,7 @@ export default function App() {
                       </button>
                     </div>
                   </>
-                )}
+                )})()}
               </motion.div>
             )}
           </AnimatePresence>
