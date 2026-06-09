@@ -3075,10 +3075,11 @@ export default function App() {
                             ))}
                             <div className="mx-4 my-2" style={{ borderBottom: '2px solid #333' }} />
                             <div className="px-4 pb-4">
-                              {currentPage.layoutBlocks.map((block, idx) => {
-                                if (block.type === 'title' || block.type === 'subtitle' || block.type === 'footer') return null
-                                return renderBlock(block, currentPage.pageNo, idx)
-                              })}
+                              {currentPage.layoutBlocks
+                                .filter(b => b.type !== 'title' && b.type !== 'subtitle' && b.type !== 'footer')
+                                .map((block, idx) => (
+                                  <div key={block.type + '-' + idx}>{renderBlock(block, currentPage.pageNo, currentPage.layoutBlocks.indexOf(block))}</div>
+                                ))}
                             </div>
                           </div>
                         </div>
@@ -3128,10 +3129,11 @@ export default function App() {
                               )}
                               <div className="mx-8" style={{ borderBottom: '2px solid #333', marginBottom: '16px' }} />
                               <div className="px-8 pb-6">
-                                {currentPage.layoutBlocks.map((block, idx) => {
-                                  if (block.type === 'title' || block.type === 'subtitle') return null
-                                  return renderBlock(block, currentPage.pageNo, idx)
-                                })}
+                                {currentPage.layoutBlocks
+                                  .filter(b => b.type !== 'title' && b.type !== 'subtitle')
+                                  .map((block, idx) => (
+                                    <div key={block.type + '-' + idx}>{renderBlock(block, currentPage.pageNo, currentPage.layoutBlocks.indexOf(block))}</div>
+                                  ))}
                               </div>
                               {allBlocks.filter(b => b.type === 'footer').length > 0 ? (
                                 <div className="px-8 pb-4">
