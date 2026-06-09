@@ -3829,7 +3829,12 @@ export default function App() {
 
     return (
       <ToastProvider>
-        {isMobile ? (
+        {/* PC端 + 试卷入库校对/结果时，全屏显示，跳出手机模拟器 */}
+        {!isMobile && paperBankStep === 'proofread' ? (
+          <div className="min-h-screen flex flex-col" style={{ background: '#F5F7FA' }}>
+            {appContent}
+          </div>
+        ) : isMobile ? (
           <div className="min-h-screen" style={{ background: '#F5F7FA' }}>
             {appContent}
           </div>
