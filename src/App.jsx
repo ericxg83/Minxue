@@ -224,12 +224,19 @@ export default function App() {
   const [editingBlock, setEditingBlock] = useState(null) // {pageNo, blockIndex} 当前编辑的区块
   const [paperBankCurrentPage, setPaperBankCurrentPage] = useState(0) // 当前校对页码（0-based）
   const [paperBankShowOriginal, setPaperBankShowOriginal] = useState(false) // 是否显示原图对比
-  const [paperBankScreenWide, setPaperBankScreenWide] = useState(window.innerWidth >= 800) // 响应式检测
   
-  // 响应式屏幕宽度检测
+  // 响应式检测：使用 document.documentElement.clientWidth 更可靠
+  const [paperBankScreenWide, setPaperBankScreenWide] = useState(() => {
+    if (typeof document !== 'undefined') {
+      return document.documentElement.clientWidth >= 800
+    }
+    return true
+  })
+  
   useEffect(() => {
-    const handleResize = () => setPaperBankScreenWide(window.innerWidth >= 800)
+    const handleResize = () => setPaperBankScreenWide(document.documentElement.clientWidth >= 800)
     window.addEventListener('resize', handleResize)
+    handleResize() // 初始化时立即执行
     return () => window.removeEventListener('resize', handleResize)
   }, [])
 
