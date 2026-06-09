@@ -115,14 +115,15 @@ function buildLayoutAnalysisPrompt() {
 - confidence: 置信度（0.0-1.0，识别不确定的区域标低值）
 - style: 样式提示（textAlign/fontWeight/fontSize/color）
 - options: 选择题选项数组（仅question类型为选择题时）
-- src: 图片base64（仅image类型）
+- bbox: 区块在原图中的位置 [x1, y1, x2, y2]（像素坐标，以压缩后的图片为准）
+- caption: 图片描述（仅image类型，如"二次函数图像"、"几何图形"）
 
 type说明：
 - title: 试卷大标题（居中、加粗、大字号）
 - subtitle: 副标题（考试时间、满分等）
 - section: 大题标题（如"一、选择题"）
 - question: 具体题目（含题干，选择题含options）
-- image: 图片区块（含src和caption）
+- image: 图片区块（函数图、几何图、实验装置图等）
 - table: 表格（含rows二维数组）
 - text: 普通文字段落
 - footer: 页脚（页码等）
@@ -133,14 +134,17 @@ type说明：
     "name": "试卷名称",
     "subject": "学科",
     "grade": "年级",
-    "examType": "考试类型"
+    "examType": "考试类型",
+    "imageWidth": 图片宽度像素,
+    "imageHeight": 图片高度像素
   },
   "layoutBlocks": [
-    {"type":"title","content":"2024年初三数学期中考试卷","confidence":0.98,"style":{"textAlign":"center","fontWeight":"bold","fontSize":"18px"}},
-    {"type":"subtitle","content":"考试时间：120分钟  满分：150分","confidence":0.95,"style":{"textAlign":"center","fontSize":"12px","color":"#666"}},
-    {"type":"section","content":"一、选择题（每题3分，共30分）","confidence":0.99,"style":{"fontWeight":"bold","fontSize":"14px"}},
-    {"type":"question","content":"1. 下列计算正确的是（ ）","confidence":0.97,"options":["A. 2+3=5","B. 2×3=6","C. 2-3=1","D. 2÷3=1"]},
-    {"type":"text","content":"注意事项：...","confidence":0.90}
+    {"type":"title","content":"2024年初三数学期中考试卷","confidence":0.98,"style":{"textAlign":"center","fontWeight":"bold","fontSize":"18px"},"bbox":[100,20,500,60]},
+    {"type":"subtitle","content":"考试时间：120分钟  满分：150分","confidence":0.95,"style":{"textAlign":"center","fontSize":"12px","color":"#666"},"bbox":[150,70,450,90]},
+    {"type":"section","content":"一、选择题（每题3分，共30分）","confidence":0.99,"style":{"fontWeight":"bold","fontSize":"14px"},"bbox":[30,110,400,130]},
+    {"type":"question","content":"1. 下列计算正确的是（ ）","confidence":0.97,"options":["A. 2+3=5","B. 2×3=6","C. 2-3=1","D. 2÷3=1"],"bbox":[30,140,500,180]},
+    {"type":"image","content":"","confidence":0.95,"caption":"二次函数图像","bbox":[100,200,400,400]},
+    {"type":"text","content":"注意事项：...","confidence":0.90,"bbox":[30,420,500,460]}
   ]
 }
 
@@ -149,9 +153,10 @@ type说明：
 2. 数学公式用文本表示（x², √2, ∠ABC等）
 3. 保留填空下划线____和括号（ ）
 4. 选择题必须提取options
-5. 图片保留原图base64（src字段）
-6. 对不确定的文字标低confidence值（0.5以下表示高度不确定）
-7. 只返回JSON，不要包含其他文字`;
+5. 图片必须给出bbox坐标[x1,y1,x2,y2]，精确框住图片区域
+6. 所有区块都必须返回bbox坐标
+7. 对不确定的文字标低confidence值（0.5以下表示高度不确定）
+8. 只返回JSON，不要包含其他文字`;
 }
 
 /**
@@ -248,6 +253,54 @@ export const recognizePaperPageLayout = async (imageBase64) => {
 }
 
 /**
+ * 根据bbox截取局部图并返回base64
+ * @param {string} imageBase64 - 原图base64（data URL格式）
+ * @param {number[]} bbox - [x1, y1, x2, y2] 像素坐标（相对于传入的图片）
+ * @returns {Promise<string|null>} 截取后的base64图片
+ */
+async function cropImageByBbox(imageBase64, bbox) {
+  if (!bbox || bbox.length !== 4) return null
+  
+  try {
+    const [x1, y1, x2, y2] = bbox
+    const width = x2 - x1
+    const height = y2 - y1
+    
+    if (width <= 0 || height <= 0) return null
+    
+    return new Promise((resolve, reject) => {
+      const img = new Image()
+      img.onload = () => {
+        try {
+          const canvas = document.createElement('canvas')
+          canvas.width = Math.min(width, img.width - x1)
+          canvas.height = Math.min(height, img.height - y1)
+          const ctx = canvas.getContext('2d')
+          
+          // 安全边界检查
+          const sx = Math.max(0, x1)
+          const sy = Math.max(0, y1)
+          const sw = Math.min(canvas.width, img.width - sx)
+          const sh = Math.min(canvas.height, img.height - sy)
+          
+          ctx.drawImage(img, sx, sy, sw, sh, 0, 0, sw, sh)
+          
+          const croppedBase64 = canvas.toDataURL('image/png', 0.9)
+          resolve(croppedBase64)
+        } catch (e) {
+          reject(e)
+        }
+      }
+      img.onerror = () => reject(new Error('图片加载失败'))
+      img.src = imageBase64.startsWith('data:') ? imageBase64 : `data:image/jpeg;base64,${imageBase64}`
+    })
+  } catch (e) {
+    console.warn('[cropImage] 截取局部图失败:', e)
+    return null
+  }
+}
+
+/**
  * 处理多页试卷（版面分析模式）
  * @param {Array} pages - 试卷页面数组 [{id, imageUrl, imageBase64}]
  * @returns {Promise<Object>} 包含paperInfo和pageResults的结果
@@ -285,22 +338,44 @@ export const processMultiPagePaperLayout = async (pages) => {
           }
         }
 
-        // 处理区块：确保confidence字段有默认值，不再将整页图片赋值给image区块
-        const processedBlocks = pageData.layoutBlocks.map(block => ({
-          ...block,
-          confidence: block.confidence || 0.8,
-          // image区块不再使用整页图片，只保留描述信息
-          src: block.type === 'image' ? undefined : block.src
-        }))
+        // 处理区块：截取image类型局部图，保留bbox信息
+        const originalImageFull = page.imageBase64.startsWith('data:') 
+          ? page.imageBase64 
+          : `data:image/jpeg;base64,${page.imageBase64}`
+        
+        const processedBlocks = []
+        for (const block of pageData.layoutBlocks) {
+          const processedBlock = {
+            ...block,
+            confidence: block.confidence || 0.8
+          }
+          
+          // 对image类型区块，使用bbox截取局部图
+          if (block.type === 'image' && block.bbox) {
+            try {
+              const croppedImage = await cropImageByBbox(originalImageFull, block.bbox)
+              processedBlock.src = croppedImage || undefined
+            } catch (e) {
+              console.warn(`[PaperBank] image区块截取失败:`, e)
+              processedBlock.src = undefined
+            }
+          }
+          
+          // 非image类型删除src字段
+          if (block.type !== 'image') {
+            delete processedBlock.src
+          }
+          
+          processedBlocks.push(processedBlock)
+        }
 
         results.pageResults.push({
           pageNo: i + 1,
-          originalImage: page.imageBase64.startsWith('data:') ? page.imageBase64 : `data:image/jpeg;base64,${page.imageBase64}`,
+          originalImage: originalImageFull,
           layoutBlocks: processedBlocks
         })
       } else {
         console.warn(`[PaperBank] 第${i + 1}页版面分析失败:`, layoutResult.error)
-        // 即使失败也添加页面记录，保留原图
         results.pageResults.push({
           pageNo: i + 1,
           originalImage: page.imageBase64.startsWith('data:') ? page.imageBase64 : `data:image/jpeg;base64,${page.imageBase64}`,

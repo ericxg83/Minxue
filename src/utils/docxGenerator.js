@@ -150,22 +150,42 @@ function createBlockParagraph(block) {
       if (block.src) {
         try {
           const imageData = base64ToUint8Array(block.src)
+          // 检测图片类型（PNG vs JPEG）
+          const isPng = block.src.startsWith('data:image/png') || block.src.startsWith('data:image/PNG')
           paragraphs.push(
             new Paragraph({
               alignment: AlignmentType.CENTER,
-              spacing: { before: 120, after: 120 },
+              spacing: { before: 80, after: 80 },
               children: [
                 new ImageRun({
                   data: imageData,
                   transformation: {
-                    width: 400,
-                    height: 250
+                    width: 380,
+                    height: 260
                   },
-                  type: 'jpeg'
+                  type: isPng ? 'png' : 'jpeg'
                 })
               ]
             })
           )
+          // 如果有caption，在图片下方添加说明
+          if (block.caption) {
+            paragraphs.push(
+              new Paragraph({
+                alignment: AlignmentType.CENTER,
+                spacing: { before: 40, after: 80 },
+                children: [
+                  new TextRun({
+                    text: `图: ${block.caption}`,
+                    color: '666666',
+                    italics: true,
+                    size: 20,
+                    font: '宋体'
+                  })
+                ]
+              })
+            )
+          }
         } catch (e) {
           console.warn('[WordGen] 图片插入失败:', e)
           paragraphs.push(

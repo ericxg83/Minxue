@@ -1248,13 +1248,29 @@ export default function App() {
       case 'image':
         return (
           <div className="my-3 text-center">
-            <div className="inline-flex flex-col items-center gap-1 px-3 py-2 rounded-lg border-2 border-dashed border-gray-300 bg-gray-50">
-              <ImageIcon size={16} style={{ color: '#9CA3AF' }} />
-              <span className="text-xs text-gray-400">
-                {block.caption ? `[图: ${block.caption}]` : '[图片区域]'}
-              </span>
-              <span className="text-[10px] text-gray-300">Word导出后在此处插入原图</span>
-            </div>
+            {block.src ? (
+              // 显示截取的局部图
+              <div className="inline-block">
+                <img 
+                  src={block.src} 
+                  alt={block.caption || '题目配图'}
+                  className="rounded border border-gray-200 max-w-full"
+                  style={{ maxHeight: '220px', objectFit: 'contain' }}
+                />
+                {block.caption && (
+                  <div className="text-xs text-gray-500 mt-1 text-center">{block.caption}</div>
+                )}
+              </div>
+            ) : (
+              // 无图片时显示占位符
+              <div className="inline-flex flex-col items-center gap-1 px-3 py-2 rounded-lg border-2 border-dashed border-gray-300 bg-gray-50">
+                <ImageIcon size={16} style={{ color: '#9CA3AF' }} />
+                <span className="text-xs text-gray-400">
+                  {block.caption ? `[图: ${block.caption}]` : '[图片区域]'}
+                </span>
+                <span className="text-[10px] text-gray-300">未识别到图片</span>
+              </div>
+            )}
           </div>
         )
       case 'table':
