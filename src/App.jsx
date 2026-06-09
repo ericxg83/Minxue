@@ -226,7 +226,7 @@ export default function App() {
   const [paperBankScreenWide, setPaperBankScreenWide] = useState(window.innerWidth >= 800) // 响应式检测
   
   // 响应式屏幕宽度检测
-  React.useEffect(() => {
+  useEffect(() => {
     const handleResize = () => setPaperBankScreenWide(window.innerWidth >= 800)
     window.addEventListener('resize', handleResize)
     return () => window.removeEventListener('resize', handleResize)
