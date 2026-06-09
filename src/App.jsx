@@ -33,7 +33,7 @@ import { useUIStore, useStudentStore, useTaskStore, useWrongQuestionStore, useEx
 import { getStudents, getTasksByStudent, getQuestionsByTask, addWrongQuestions, getWrongQuestionsByStudent, getExamsByStudent, getGeneratedExamsByStudent, createTask, updateTaskStatus, uploadImage, updateQuestion, updateQuestionTags, invalidateCache, createStudent, updateWrongQuestionStatus, getQuestionsByIds, deleteTask, deleteGeneratedExam, deleteWrongQuestion, getTaskById, recalculateTaskStats, clearStudentCaches } from './services/apiService'
 import { taskService } from './services/taskService'
 import { recognizeQuestions, compressImage, saveRecognitionResult } from './services/aiService'
-import { processMultiPagePaper } from './services/paperBankAIService'
+import { processMultiPagePaperLayout } from './services/paperBankAIService'
 import { mockQuestions, mockTasks, mockWrongQuestions, mockGeneratedExams, mockStudents } from './data/mockData'
 import StudentSwitcher from './components/StudentSwitcher'
 
@@ -214,11 +214,12 @@ export default function App() {
   })
   const [paperBankDraft, setPaperBankDraft] = useState(null)
   const [paperBankUploadedPages, setPaperBankUploadedPages] = useState([])
+  const [paperBankReconstructedPages, setPaperBankReconstructedPages] = useState([]) // 存储每页原图+layoutBlocks
   const [paperBankProcessing, setPaperBankProcessing] = useState(false)
   const [paperBankProgress, setPaperBankProgress] = useState(0)
-  const [paperBankProofreadContent, setPaperBankProofreadContent] = useState('')
   const [paperBankProofreadMode, setPaperBankProofreadMode] = useState(false)
   const [paperBankInfo, setPaperBankInfo] = useState(null)
+  const [editingBlock, setEditingBlock] = useState(null) // {pageNo, blockIndex} 当前编辑的区块
 
   // Paper Bank Filter State
   const [paperBankFilterGrade, setPaperBankFilterGrade] = useState('all')
@@ -977,7 +978,7 @@ export default function App() {
     setPaperBankUploadedPages(prev => prev.filter(p => p.id !== pageId))
   }
 
-  // Paper Bank: Start AI processing
+  // Paper Bank: Start AI processing (Layout Analysis mode)
   const handlePaperBankStartProcessing = async () => {
     if (paperBankUploadedPages.length === 0) {
       Toast.show({ message: '请先上传试卷', type: 'error', duration: 2000 })
@@ -1005,15 +1006,18 @@ export default function App() {
         }
       }, 1000)
 
-      // Call real AI service with pages that have base64 data
-      const result = await processMultiPagePaper(validPages)
+      // Call AI layout analysis service
+      const result = await processMultiPagePaperLayout(validPages)
 
       clearInterval(progressInterval)
       setPaperBankProgress(100)
 
       if (result.success) {
         const info = result.data.paperInfo || {}
-        const fullContent = result.data.fullContent || ''
+        const pageResults = result.data.pageResults || []
+
+        // Store reconstructed pages with original images and layout blocks
+        setPaperBankReconstructedPages(pageResults)
 
         // Set extracted info
         setPaperBankInfo({
@@ -1024,9 +1028,6 @@ export default function App() {
           schoolYear: info.schoolYear || '',
           semester: info.semester || ''
         })
-
-        // Set OCR content for proofreading
-        setPaperBankProofreadContent(fullContent)
 
         // Move to proofread step
         setTimeout(() => {
@@ -1055,9 +1056,15 @@ export default function App() {
       subject: paperBankInfo.subject,
       grade: paperBankInfo.grade,
       examType: paperBankInfo.examType,
-      content: paperBankProofreadContent,
-      totalPages: paperBankUploadedPages.length,
-      thumbnail: paperBankUploadedPages[0]?.imageUrl || '',
+      schoolYear: paperBankInfo.schoolYear,
+      semester: paperBankInfo.semester,
+      pages: paperBankReconstructedPages.map(p => ({
+        pageNo: p.pageNo,
+        originalImage: p.originalImage,
+        layoutBlocks: p.layoutBlocks
+      })),
+      totalPages: paperBankReconstructedPages.length,
+      thumbnail: paperBankReconstructedPages[0]?.originalImage || '',
       createdAt: new Date().toISOString()
     }
 
@@ -1067,18 +1074,20 @@ export default function App() {
     // Reset
     setPaperBankStep('list')
     setPaperBankUploadedPages([])
+    setPaperBankReconstructedPages([])
     setPaperBankDraft(null)
     setPaperBankInfo(null)
-    setPaperBankProofreadContent('')
+    setEditingBlock(null)
   }
 
   // Paper Bank: Reset to upload
   const handlePaperBankReset = () => {
     setPaperBankStep('upload')
     setPaperBankUploadedPages([])
+    setPaperBankReconstructedPages([])
     setPaperBankDraft(null)
     setPaperBankInfo(null)
-    setPaperBankProofreadContent('')
+    setEditingBlock(null)
     setPaperBankProofreadMode(false)
   }
 
@@ -1088,7 +1097,105 @@ export default function App() {
     Toast.show({ message: '已删除', type: 'success', duration: 1500 })
   }
 
-  // Paper Bank: Print paper
+  // Paper Bank: Sync scroll between left and right panels
+  const leftRef = useRef(null)
+  const rightRef = useRef(null)
+  const isScrolling = useRef(false)
+  
+  const handleScrollSync = (e) => {
+    if (isScrolling.current) return
+    isScrolling.current = true
+    
+    const source = e.target
+    const target = source === leftRef.current ? rightRef.current : leftRef.current
+    
+    if (target) {
+      const scrollRatio = source.scrollTop / (source.scrollHeight - source.clientHeight || 1)
+      target.scrollTop = scrollRatio * (target.scrollHeight - target.clientHeight)
+    }
+    
+    requestAnimationFrame(() => {
+      isScrolling.current = false
+    })
+  }
+
+  // Paper Bank: Handle block edit
+  const handleBlockEdit = (pageNo, blockIndex) => {
+    setEditingBlock({ pageNo, blockIndex })
+  }
+
+  // Paper Bank: Update block content
+  const handleBlockUpdate = (pageNo, blockIndex, newContent) => {
+    setPaperBankReconstructedPages(prev => 
+      prev.map(page => 
+        page.pageNo === pageNo
+          ? {
+              ...page,
+              layoutBlocks: page.layoutBlocks.map((block, idx) =>
+                idx === blockIndex ? { ...block, content: newContent } : block
+              )
+            }
+          : page
+      )
+    )
+    setEditingBlock(null)
+  }
+
+  // Paper Bank: Get block class name by type
+  const getBlockClassName = (block) => {
+    switch (block.type) {
+      case 'title':
+        return 'text-xl font-bold text-center mb-3'
+      case 'subtitle':
+        return 'text-sm text-center text-gray-600 mb-2'
+      case 'section':
+        return 'text-base font-bold mt-4 mb-2'
+      case 'question':
+        return 'text-sm mb-3'
+      case 'text':
+        return 'text-sm mb-2'
+      case 'footer':
+        return 'text-xs text-center text-gray-400 mt-4'
+      default:
+        return 'text-sm mb-2'
+    }
+  }
+
+  // Paper Bank: Render block
+  const renderBlock = (block) => {
+    switch (block.type) {
+      case 'title':
+      case 'subtitle':
+      case 'section':
+      case 'question':
+      case 'text':
+      case 'footer':
+        return block.content
+      case 'image':
+        return block.src ? (
+          <img src={block.src} alt={block.caption || '试卷图片'} className="max-w-full my-2" />
+        ) : null
+      case 'table':
+        if (!block.rows || block.rows.length === 0) return null
+        return (
+          <table className="w-full border-collapse border border-gray-300 text-sm my-2">
+            <tbody>
+              {block.rows.map((row, rowIdx) => (
+                <tr key={rowIdx}>
+                  {row.map((cell, cellIdx) => (
+                    <td key={cellIdx} className="border border-gray-300 px-2 py-1">{cell}</td>
+                  ))}
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        )
+      default:
+        return block.content
+    }
+  }
+
+  // Paper Bank: Print paper (supports structured pages with layoutBlocks)
   const handlePaperBankPrint = async (paper) => {
     try {
       Toast.show({ message: '正在生成PDF...', type: 'loading', duration: 0 })
@@ -1098,24 +1205,106 @@ export default function App() {
       const html2canvas = (await import('html2canvas')).default
       const jsPDF = (await import('jspdf')).default
 
-      // Build paper content HTML for PDF
+      // Build block rendering helper
+      function renderBlockToHTML(block) {
+        switch (block.type) {
+          case 'title':
+            return `<div class="block-title">${escapeHtml(block.content)}</div>`
+          case 'subtitle':
+            return `<div class="block-subtitle">${escapeHtml(block.content)}</div>`
+          case 'section':
+            return `<div class="block-section">${escapeHtml(block.content)}</div>`
+          case 'question':
+            let qHTML = `<div class="block-question">${escapeHtml(block.content)}`
+            if (block.options && block.options.length > 0) {
+              qHTML += `<div class="block-options">`
+              block.options.forEach(opt => {
+                qHTML += `<div class="block-option">${escapeHtml(opt)}</div>`
+              })
+              qHTML += `</div>`
+            }
+            qHTML += `</div>`
+            return qHTML
+          case 'text':
+            return `<div class="block-text">${escapeHtml(block.content)}</div>`
+          case 'image':
+            if (block.src) {
+              return `<div class="block-image"><img src="${block.src}" alt="${escapeHtml(block.caption || '')}" style="max-width:100%;display:block;margin:8px auto;" /></div>`
+            }
+            return ''
+          case 'table':
+            if (!block.rows || block.rows.length === 0) return ''
+            let tHTML = `<table class="block-table"><tbody>`
+            block.rows.forEach(row => {
+              tHTML += `<tr>`
+              row.forEach(cell => {
+                tHTML += `<td>${escapeHtml(cell)}</td>`
+              })
+              tHTML += `</tr>`
+            })
+            tHTML += `</tbody></table>`
+            return tHTML
+          case 'footer':
+            return `<div class="block-footer">${escapeHtml(block.content)}</div>`
+          default:
+            return `<div class="block-text">${escapeHtml(block.content || '')}</div>`
+        }
+      }
+
+      // Build paper content HTML from pages with layoutBlocks
+      let pagesHTML = ''
+      
+      if (paper.pages && paper.pages.length > 0) {
+        // New structured format with pages and layoutBlocks
+        paper.pages.forEach((page, pageIdx) => {
+          pagesHTML += `<div class="paper-page">`
+          if (pageIdx === 0) {
+            pagesHTML += `<div class="paper-title">${escapeHtml(paper.name)}</div>`
+            pagesHTML += `<div class="paper-info">${[paper.subject, paper.grade, paper.examType].filter(Boolean).join(' · ') || ''}</div>`
+            pagesHTML += `<div class="divider"></div>`
+          }
+          if (page.layoutBlocks && page.layoutBlocks.length > 0) {
+            page.layoutBlocks.forEach(block => {
+              pagesHTML += renderBlockToHTML(block)
+            })
+          }
+          pagesHTML += `<div class="footer">- ${page.pageNo} -</div>`
+          pagesHTML += `</div>`
+        })
+      } else if (paper.content) {
+        // Legacy format with plain text content
+        pagesHTML = `<div class="paper-page">
+          <div class="paper-title">${escapeHtml(paper.name)}</div>
+          <div class="paper-info">${[paper.subject, paper.grade, paper.examType].filter(Boolean).join(' · ') || ''}</div>
+          <div class="divider"></div>
+          <div class="paper-content">${escapeHtml(paper.content).replace(/\n/g, '<br>')}</div>
+          <div class="footer">- 试卷资源库 · ${dayjs(paper.createdAt).format('YYYY/MM/DD')} -</div>
+        </div>`
+      }
+
       const paperHTML = `<!DOCTYPE html><html><head><meta charset="utf-8"><style>
         *{margin:0;padding:0;box-sizing:border-box}
         body{font-family:'Microsoft YaHei','PingFang SC','Noto Sans SC','SimSun',sans-serif;color:#1a1a1a}
-        .page{width:794px;padding:40px 60px}
+        .paper-page{width:794px;padding:40px 60px;page-break-after:always}
+        .paper-page:last-child{page-break-after:auto}
         .paper-title{text-align:center;font-size:24px;font-weight:bold;margin-bottom:8px}
         .paper-info{text-align:center;font-size:13px;color:#666;margin-bottom:16px}
         .divider{border-top:2px solid #333;margin:12px 0 20px}
         .paper-content{font-size:14px;line-height:2;white-space:pre-wrap;word-break:break-all}
+        .block-title{text-align:center;font-size:22px;font-weight:bold;margin-bottom:12px}
+        .block-subtitle{text-align:center;font-size:13px;color:#666;margin-bottom:12px}
+        .block-section{font-size:16px;font-weight:bold;margin:20px 0 10px;border-left:3px solid #333;padding-left:8px}
+        .block-question{font-size:14px;line-height:1.8;margin-bottom:8px}
+        .block-options{margin:8px 0 8px 20px}
+        .block-option{font-size:14px;line-height:1.6}
+        .block-text{font-size:14px;line-height:1.8;margin-bottom:8px}
+        .block-image{margin:12px 0;text-align:center}
+        .block-table{width:100%;border-collapse:collapse;margin:12px 0;font-size:13px}
+        .block-table td{border:1px solid #333;padding:6px 8px}
+        .block-footer{text-align:center;font-size:11px;color:#999;margin-top:20px;padding-top:8px;border-top:1px solid #ddd}
         .footer{text-align:center;font-size:11px;color:#999;margin-top:30px;padding-top:8px;border-top:1px solid #ddd}
       </style></head><body>
-        <div class="page">
-          <div class="paper-title">${escapeHtml(paper.name)}</div>
-          <div class="paper-info">${[paper.subject, paper.grade, paper.examType].filter(Boolean).join(' · ') || ''}</div>
-          <div class="divider"></div>
-          <div class="paper-content">${escapeHtml(paper.content)}</div>
-          <div class="footer">- 试卷资源库 · ${dayjs(paper.createdAt).format('YYYY/MM/DD')} -</div>
-        </div>
+        ${pagesHTML}
       </body></html>`
 
       const container = document.createElement('div')
@@ -2609,7 +2798,7 @@ export default function App() {
                   </div>
                 )}
 
-                {/* Paper Bank: Proofread View */}
+                {/* Paper Bank: Proofread View - Left/Right Comparison Mode */}
                 {paperBankStep === 'proofread' && (
                   <>
                     <section className="px-4 pt-3 mb-2">
@@ -2623,38 +2812,74 @@ export default function App() {
                             <p style={{ fontSize: '12px', color: '#9CA3AF' }}>{paperBankInfo?.subject} · {paperBankInfo?.grade} · {paperBankInfo?.examType}</p>
                           </div>
                         </div>
-                        <button
-                          onClick={() => setPaperBankProofreadMode(!paperBankProofreadMode)}
-                          className="px-3 py-1.5 rounded-lg text-[12px] flex items-center gap-1"
-                          style={{ background: '#F3F4F6', color: '#4B5563' }}
-                        >
-                          <Edit3 size={12} />
-                          {paperBankProofreadMode ? '预览' : '编辑'}
-                        </button>
                       </div>
                     </section>
 
                     <div className="px-4 mb-2">
                       <div className="flex items-center gap-2 p-2.5 rounded-lg" style={{ background: '#FFFBEB', border: '1px solid #FEF08A' }}>
                         <AlertCircle size={14} style={{ color: '#F59E0B' }} />
-                        <span style={{ fontSize: '12px', color: '#92400E' }}>AI已自动识别，请仔细校对内容</span>
+                        <span style={{ fontSize: '12px', color: '#92400E' }}>左右对照校对模式 · 点击右侧内容可编辑</span>
                       </div>
                     </div>
 
-                    <section className="px-4">
-                      {paperBankProofreadMode ? (
-                        <textarea
-                          value={paperBankProofreadContent}
-                          onChange={(e) => setPaperBankProofreadContent(e.target.value)}
-                          className="w-full rounded-lg p-3 text-[13px] resize-none focus:outline-none"
-                          style={{ border: '1px solid #E5E7EB', color: '#111827', minHeight: '400px', lineHeight: '1.6', background: '#FAFAFA' }}
-                        />
-                      ) : (
-                        <div className="card p-3" style={{ whiteSpace: 'pre-wrap', fontSize: '13px', lineHeight: '1.6', color: '#111827', minHeight: '400px' }}>
-                          {paperBankProofreadContent}
-                        </div>
-                      )}
-                    </section>
+                    {/* Left/Right Comparison Layout */}
+                    <div className="flex gap-2 px-4" style={{ height: 'calc(100vh - 280px)', minHeight: '500px' }}>
+                      {/* Left: Original Images */}
+                      <div 
+                        ref={leftRef}
+                        className="flex-1 overflow-y-auto rounded-lg p-2"
+                        style={{ background: '#F9FAFB', border: '1px solid #E5E7EB' }}
+                        onScroll={handleScrollSync}
+                      >
+                        <div className="text-center text-xs text-gray-500 mb-2 font-medium">原始试卷</div>
+                        {paperBankReconstructedPages.map((page) => (
+                          <div key={page.pageNo} className="mb-4">
+                            <div className="text-xs text-gray-400 text-center mb-1">第 {page.pageNo} 页</div>
+                            <img 
+                              src={page.originalImage} 
+                              alt={`第${page.pageNo}页`}
+                              className="max-w-full rounded shadow-sm"
+                            />
+                          </div>
+                        ))}
+                      </div>
+
+                      {/* Right: Reconstructed Content */}
+                      <div 
+                        ref={rightRef}
+                        className="flex-1 overflow-y-auto rounded-lg p-3"
+                        style={{ background: '#FFFFFF', border: '1px solid #E5E7EB' }}
+                        onScroll={handleScrollSync}
+                      >
+                        <div className="text-center text-xs text-gray-500 mb-2 font-medium">数字化重建</div>
+                        {paperBankReconstructedPages.map((page) => (
+                          <div key={page.pageNo} className="mb-6">
+                            <div className="text-xs text-gray-400 text-center mb-2">第 {page.pageNo} 页</div>
+                            <div className="space-y-1">
+                              {page.layoutBlocks.map((block, idx) => (
+                                <div 
+                                  key={idx}
+                                  className={`relative cursor-pointer rounded p-1 hover:bg-blue-50 transition-colors ${getBlockClassName(block)}`}
+                                  onClick={() => handleBlockEdit(page.pageNo, idx)}
+                                >
+                                  {editingBlock?.pageNo === page.pageNo && editingBlock?.blockIndex === idx ? (
+                                    <textarea
+                                      value={block.content || ''}
+                                      onChange={(e) => handleBlockUpdate(page.pageNo, idx, e.target.value)}
+                                      className="w-full p-1 text-sm border border-blue-400 rounded focus:outline-none focus:ring-2 focus:ring-blue-500"
+                                      style={{ minHeight: '60px', lineHeight: '1.5' }}
+                                      autoFocus
+                                    />
+                                  ) : (
+                                    <div>{renderBlock(block)}</div>
+                                  )}
+                                </div>
+                              ))}
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
 
                     <div className="fixed z-40 flex justify-center pointer-events-none" style={{ bottom: 'calc(56px + env(safe-area-inset-bottom, 0px))', left: '12px', right: '12px' }}>
                       <button
