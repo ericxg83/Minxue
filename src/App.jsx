@@ -1639,21 +1639,26 @@ export default function App() {
       {/* Header */}
         <header className="sticky top-0 z-50 bg-white/90 border-b" style={{ borderColor: '#E5E7EB', paddingTop: 'env(safe-area-inset-top, 0px)' }}>
           <div className="max-w-lg mx-auto px-4 h-11 flex items-center justify-between">
-            <div className="flex items-center gap-2">
-              <button
-                onClick={() => setShowStudentSwitcher(true)}
-                className="flex items-center gap-1.5 text-gray-900"
-                disabled={isInitializing}
-              >
-                <div className="w-7 h-7 rounded-full flex items-center justify-center" style={{ background: '#EFF6FF' }}>
-                  <User size={14} style={{ color: '#2563EB' }} />
-                </div>
-                <span style={{ fontSize: '15px', fontWeight: 600 }}>
-                  {isInitializing ? '加载中...' : (currentStudent?.name || '选择学生')}
-                </span>
-                <ChevronDown size={14} className="text-gray-400" />
-              </button>
-            </div>
+            {currentPage !== 'paperbank' && (
+              <div className="flex items-center gap-2">
+                <button
+                  onClick={() => setShowStudentSwitcher(true)}
+                  className="flex items-center gap-1.5 text-gray-900"
+                  disabled={isInitializing}
+                >
+                  <div className="w-7 h-7 rounded-full flex items-center justify-center" style={{ background: '#EFF6FF' }}>
+                    <User size={14} style={{ color: '#2563EB' }} />
+                  </div>
+                  <span style={{ fontSize: '15px', fontWeight: 600 }}>
+                    {isInitializing ? '加载中...' : (currentStudent?.name || '选择学生')}
+                  </span>
+                  <ChevronDown size={14} className="text-gray-400" />
+                </button>
+              </div>
+            )}
+            {currentPage === 'paperbank' && (
+              <div style={{ fontSize: '15px', fontWeight: 600, color: '#111827' }}>敏学 · 试卷入库</div>
+            )}
             <div className="flex items-center gap-2">
               <button
                 onClick={() => { setShowScanQR(true); setGradingData(null) }}
