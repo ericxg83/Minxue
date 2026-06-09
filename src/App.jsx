@@ -1,4 +1,4 @@
-import { useEffect, useState, useRef, lazy, Suspense } from 'react'
+import { useEffect, useState, useRef, lazy, Suspense, useCallback, useMemo } from 'react'
 import {
   Camera,
   ChevronRight,
@@ -22,7 +22,10 @@ import {
   Eye,
   Edit3,
   Tag,
-  AlertCircle
+  AlertCircle,
+  Search,
+  Filter,
+  Download
 } from 'lucide-react'
 import { motion, AnimatePresence } from 'motion/react'
 import { QRCodeSVG } from 'qrcode.react'
@@ -215,6 +218,13 @@ export default function App() {
   const [paperBankProofreadContent, setPaperBankProofreadContent] = useState('')
   const [paperBankProofreadMode, setPaperBankProofreadMode] = useState(false)
   const [paperBankInfo, setPaperBankInfo] = useState(null)
+
+  // Paper Bank Filter State
+  const [paperBankFilterGrade, setPaperBankFilterGrade] = useState('all')
+  const [paperBankFilterSubject, setPaperBankFilterSubject] = useState('all')
+  const [paperBankSearchKeyword, setPaperBankSearchKeyword] = useState('')
+  const [paperBankShowFilters, setPaperBankShowFilters] = useState(false)
+  const [paperBankPreviewPaper, setPaperBankPreviewPaper] = useState(null)
 
   // 初始化状态
   const [isInitializing, setIsInitializing] = useState(true)
@@ -1065,6 +1075,129 @@ export default function App() {
     setPaperBankPapers(prev => prev.filter(p => p.id !== paperId))
     Toast.show({ message: '已删除', type: 'success', duration: 1500 })
   }
+
+  // Paper Bank: Print paper
+  const handlePaperBankPrint = async (paper) => {
+    try {
+      Toast.show({ message: '正在生成PDF...', type: 'loading', duration: 0 })
+      setPaperBankPreviewPaper(paper)
+
+      // Use html2canvas + jsPDF directly for raw text content
+      const html2canvas = (await import('html2canvas')).default
+      const jsPDF = (await import('jspdf')).default
+
+      // Build paper content HTML for PDF
+      const paperHTML = `<!DOCTYPE html><html><head><meta charset="utf-8"><style>
+        *{margin:0;padding:0;box-sizing:border-box}
+        body{font-family:'Microsoft YaHei','PingFang SC','Noto Sans SC','SimSun',sans-serif;color:#1a1a1a}
+        .page{width:794px;padding:40px 60px}
+        .paper-title{text-align:center;font-size:24px;font-weight:bold;margin-bottom:8px}
+        .paper-info{text-align:center;font-size:13px;color:#666;margin-bottom:16px}
+        .divider{border-top:2px solid #333;margin:12px 0 20px}
+        .paper-content{font-size:14px;line-height:2;white-space:pre-wrap;word-break:break-all}
+        .footer{text-align:center;font-size:11px;color:#999;margin-top:30px;padding-top:8px;border-top:1px solid #ddd}
+      </style></head><body>
+        <div class="page">
+          <div class="paper-title">${escapeHtml(paper.name)}</div>
+          <div class="paper-info">${[paper.subject, paper.grade, paper.examType].filter(Boolean).join(' · ') || ''}</div>
+          <div class="divider"></div>
+          <div class="paper-content">${escapeHtml(paper.content)}</div>
+          <div class="footer">- 试卷资源库 · ${dayjs(paper.createdAt).format('YYYY/MM/DD')} -</div>
+        </div>
+      </body></html>`
+
+      const container = document.createElement('div')
+      container.innerHTML = paperHTML
+      container.style.position = 'absolute'
+      container.style.left = '-9999px'
+      container.style.top = '0'
+      container.style.width = '794px'
+      document.body.appendChild(container)
+
+      try {
+        const canvas = await html2canvas(container, {
+          scale: 2,
+          useCORS: true,
+          logging: false,
+          width: 794,
+          height: container.scrollHeight,
+        })
+
+        const imgData = canvas.toDataURL('image/jpeg', 0.92)
+        const A4_W = 210
+        const A4_H = 297
+        const pageH = (794 / A4_W) * A4_H
+        const totalPages = Math.ceil(canvas.height / pageH)
+
+        const doc = new jsPDF('p', 'mm', 'a4')
+
+        for (let p = 0; p < totalPages; p++) {
+          if (p > 0) doc.addPage()
+          const srcY = p * pageH
+          const sliceH = Math.min(pageH, canvas.height - srcY)
+
+          const pageCanvas = document.createElement('canvas')
+          pageCanvas.width = canvas.width
+          pageCanvas.height = sliceH
+          const ctx = pageCanvas.getContext('2d')
+          ctx.drawImage(canvas, 0, srcY, canvas.width, sliceH, 0, 0, canvas.width, sliceH)
+
+          const pageImg = pageCanvas.toDataURL('image/jpeg', 0.92)
+          const mmH = (sliceH / canvas.width) * A4_W
+          doc.addImage(pageImg, 'JPEG', 0, 0, A4_W, mmH)
+        }
+
+        const filename = `${paper.name || '试卷'}_${dayjs().format('YYYYMMDD')}`
+        doc.save(`${filename}.pdf`)
+        Toast.dismiss()
+        Toast.show({ message: 'PDF已生成，请在下载目录查看', type: 'success', duration: 2000 })
+      } finally {
+        document.body.removeChild(container)
+      }
+    } catch (error) {
+      console.error('[PaperBank] PDF生成失败:', error)
+      Toast.dismiss()
+      Toast.show({ message: 'PDF生成失败，请重试', type: 'error', duration: 3000 })
+    } finally {
+      setPaperBankPreviewPaper(null)
+    }
+  }
+
+  // Escape HTML helper
+  const escapeHtml = (text) => {
+    if (!text) return ''
+    return String(text)
+      .replace(/&/g, '&amp;')
+      .replace(/</g, '&lt;')
+      .replace(/>/g, '&gt;')
+      .replace(/"/g, '&quot;')
+  }
+
+  // Paper Bank: Clear all filters
+  const handlePaperBankClearFilters = () => {
+    setPaperBankFilterGrade('all')
+    setPaperBankFilterSubject('all')
+    setPaperBankSearchKeyword('')
+  }
+
+  // Paper Bank: Get unique grades and subjects from papers
+  const paperBankGrades = Array.from(new Set(paperBankPapers.map(p => p.grade).filter(Boolean)))
+  const paperBankSubjects = Array.from(new Set(paperBankPapers.map(p => p.subject).filter(Boolean)))
+
+  // Paper Bank: Filtered papers
+  const filteredPaperBankPapers = paperBankPapers.filter(paper => {
+    if (paperBankFilterGrade !== 'all' && paper.grade !== paperBankFilterGrade) return false
+    if (paperBankFilterSubject !== 'all' && paper.subject !== paperBankFilterSubject) return false
+    if (paperBankSearchKeyword) {
+      const keyword = paperBankSearchKeyword.toLowerCase()
+      const matchName = paper.name?.toLowerCase().includes(keyword)
+      const matchContent = paper.content?.toLowerCase().includes(keyword)
+      if (!matchName && !matchContent) return false
+    }
+    return true
+  })
+
+  const hasActiveFilters = paperBankFilterGrade !== 'all' || paperBankFilterSubject !== 'all' || paperBankSearchKeyword
 
   // Reprint exam
   const handleReprintExam = (exam) => {
@@ -2127,7 +2260,10 @@ export default function App() {
                         <div>
                           <h2 style={{ fontSize: '18px', fontWeight: 700, color: '#111827' }}>试卷资源库</h2>
                           <p style={{ fontSize: '11px', color: '#9CA3AF', marginTop: '1px' }}>
-                            共 {paperBankPapers.length} 份试卷
+                            {paperBankPapers.length > 0
+                              ? `共 ${paperBankPapers.length} 份试卷`
+                              : '暂无入库试卷'
+                            }
                           </p>
                         </div>
                         <button
@@ -2141,45 +2277,190 @@ export default function App() {
                       </div>
                     </section>
 
-                    <section className="px-4 space-y-2">
-                      {paperBankPapers.length === 0 ? (
-                        <div className="text-center py-16">
-                          <Sparkles size={36} className="mx-auto" style={{ color: '#D1D5DB' }} />
-                          <p className="mt-3" style={{ fontSize: '13px', color: '#9CA3AF' }}>暂无入库试卷</p>
-                          <p className="mt-0.5" style={{ fontSize: '11px', color: '#D1D5DB' }}>上传试卷，AI识别后入库保存</p>
-                        </div>
-                      ) : (
-                        paperBankPapers.map((paper) => (
-                          <motion.div
-                            key={paper.id}
-                            layout
-                            initial={{ opacity: 0, y: 10 }}
-                            animate={{ opacity: 1, y: 0 }}
-                            className="card"
-                            style={{ padding: '12px' }}
-                          >
-                            <div className="flex items-start justify-between gap-2">
-                              <div className="flex-1 min-w-0">
-                                <h3 style={{ fontSize: '14px', fontWeight: 600, color: '#111827' }} className="truncate">{paper.name}</h3>
-                                <p style={{ fontSize: '11px', color: '#9CA3AF', marginTop: '2px' }}>
-                                  {paper.subject} · {paper.grade} · {paper.examType}
-                                </p>
-                                <p style={{ fontSize: '11px', color: '#9CA3AF', marginTop: '1px' }}>
-                                  {dayjs(paper.createdAt).format('YYYY/MM/DD HH:mm')} · {paper.totalPages}页
-                                </p>
-                              </div>
-                              <div className="flex gap-1">
+                    {/* Search Bar */}
+                    <section className="px-4 mb-2">
+                      <div className="flex items-center gap-2 p-2 rounded-xl bg-white" style={{ border: '1px solid #E5E7EB' }}>
+                        <Search size={16} style={{ color: '#9CA3AF', flexShrink: 0 }} />
+                        <input
+                          type="text"
+                          placeholder="搜索试卷名称、内容..."
+                          value={paperBankSearchKeyword}
+                          onChange={(e) => setPaperBankSearchKeyword(e.target.value)}
+                          className="flex-1 bg-transparent text-[13px] outline-none"
+                          style={{ color: '#111827' }}
+                        />
+                        {paperBankSearchKeyword && (
+                          <button onClick={() => setPaperBankSearchKeyword('')} style={{ color: '#9CA3AF' }}>
+                            <X size={14} />
+                          </button>
+                        )}
+                        <button
+                          onClick={() => setPaperBankShowFilters(!paperBankShowFilters)}
+                          className="flex items-center gap-1 px-2 py-1 rounded-lg"
+                          style={{
+                            background: hasActiveFilters ? '#EFF6FF' : '#F3F4F6',
+                            color: hasActiveFilters ? '#2563EB' : '#6B7280'
+                          }}
+                        >
+                          <Filter size={14} />
+                          <span style={{ fontSize: '12px' }}>筛选</span>
+                        </button>
+                      </div>
+                    </section>
+
+                    {/* Filter Panel */}
+                    <AnimatePresence>
+                      {paperBankShowFilters && (
+                        <motion.section
+                          className="px-4 mb-2"
+                          initial={{ height: 0, opacity: 0 }}
+                          animate={{ height: 'auto', opacity: 1 }}
+                          exit={{ height: 0, opacity: 0 }}
+                          transition={{ duration: 0.2 }}
+                        >
+                          <div className="p-3 rounded-xl bg-white" style={{ border: '1px solid #E5E7EB' }}>
+                            <div className="flex items-center justify-between mb-2">
+                              <span style={{ fontSize: '13px', fontWeight: 600, color: '#111827' }}>筛选条件</span>
+                              {hasActiveFilters && (
                                 <button
-                                  onClick={() => handlePaperBankDelete(paper.id)}
-                                  className="px-2 py-1 rounded-lg text-[12px]"
-                                  style={{ background: '#F3F4F6', color: '#9CA3AF' }}
+                                  onClick={handlePaperBankClearFilters}
+                                  style={{ fontSize: '12px', color: '#EF4444' }}
                                 >
-                                  <Trash2 size={12} />
+                                  清除筛选
                                 </button>
+                              )}
+                            </div>
+                            <div className="space-y-2">
+                              {/* Grade Filter */}
+                              <div>
+                                <span style={{ fontSize: '12px', color: '#6B7280', marginBottom: '6px', display: 'block' }}>年级</span>
+                                <div className="flex flex-wrap gap-1.5">
+                                  <button
+                                    onClick={() => setPaperBankFilterGrade('all')}
+                                    className="px-2.5 py-1 rounded-lg text-[12px]"
+                                    style={{
+                                      background: paperBankFilterGrade === 'all' ? '#2563EB' : '#F3F4F6',
+                                      color: paperBankFilterGrade === 'all' ? '#fff' : '#4B5563'
+                                    }}
+                                  >
+                                    全部
+                                  </button>
+                                  {paperBankGrades.map(grade => (
+                                    <button
+                                      key={grade}
+                                      onClick={() => setPaperBankFilterGrade(grade)}
+                                      className="px-2.5 py-1 rounded-lg text-[12px]"
+                                      style={{
+                                        background: paperBankFilterGrade === grade ? '#2563EB' : '#F3F4F6',
+                                        color: paperBankFilterGrade === grade ? '#fff' : '#4B5563'
+                                      }}
+                                    >
+                                      {grade}
+                                    </button>
+                                  ))}
+                                </div>
+                              </div>
+                              {/* Subject Filter */}
+                              <div>
+                                <span style={{ fontSize: '12px', color: '#6B7280', marginBottom: '6px', display: 'block' }}>学科</span>
+                                <div className="flex flex-wrap gap-1.5">
+                                  <button
+                                    onClick={() => setPaperBankFilterSubject('all')}
+                                    className="px-2.5 py-1 rounded-lg text-[12px]"
+                                    style={{
+                                      background: paperBankFilterSubject === 'all' ? '#2563EB' : '#F3F4F6',
+                                      color: paperBankFilterSubject === 'all' ? '#fff' : '#4B5563'
+                                    }}
+                                  >
+                                    全部
+                                  </button>
+                                  {paperBankSubjects.map(subject => (
+                                    <button
+                                      key={subject}
+                                      onClick={() => setPaperBankFilterSubject(subject)}
+                                      className="px-2.5 py-1 rounded-lg text-[12px]"
+                                      style={{
+                                        background: paperBankFilterSubject === subject ? '#2563EB' : '#F3F4F6',
+                                        color: paperBankFilterSubject === subject ? '#fff' : '#4B5563'
+                                      }}
+                                    >
+                                      {subject}
+                                    </button>
+                                  ))}
+                                </div>
                               </div>
                             </div>
-                          </motion.div>
-                        ))
+                          </div>
+                        </motion.section>
+                      )}
+                    </AnimatePresence>
+
+                    {/* Paper List */}
+                    <section className="px-4 space-y-2 pb-4">
+                      {filteredPaperBankPapers.length === 0 ? (
+                        <div className="text-center py-16">
+                          <Sparkles size={36} className="mx-auto" style={{ color: '#D1D5DB' }} />
+                          <p className="mt-3" style={{ fontSize: '13px', color: '#9CA3AF' }}>
+                            {paperBankPapers.length === 0 ? '暂无入库试卷' : '没有匹配的试卷'}
+                          </p>
+                          <p className="mt-0.5" style={{ fontSize: '11px', color: '#D1D5DB' }}>
+                            {paperBankPapers.length === 0 ? '上传试卷，AI识别后入库保存' : '请调整筛选条件'}
+                          </p>
+                        </div>
+                      ) : (
+                        <>
+                          <p style={{ fontSize: '11px', color: '#9CA3AF', marginBottom: '8px' }}>
+                            筛选结果：{filteredPaperBankPapers.length} 份试卷
+                          </p>
+                          {filteredPaperBankPapers.map((paper) => (
+                            <motion.div
+                              key={paper.id}
+                              layout
+                              initial={{ opacity: 0, y: 10 }}
+                              animate={{ opacity: 1, y: 0 }}
+                              className="card"
+                              style={{ padding: '12px' }}
+                            >
+                              <div className="flex items-start justify-between gap-2">
+                                <div className="flex-1 min-w-0">
+                                  <h3 style={{ fontSize: '14px', fontWeight: 600, color: '#111827' }} className="truncate">{paper.name}</h3>
+                                  <div className="flex flex-wrap items-center gap-1.5 mt-1">
+                                    {paper.subject && (
+                                      <span className="px-1.5 py-0.5 rounded" style={{ background: '#EFF6FF', color: '#2563EB', fontSize: '10px', fontWeight: 500 }}>{paper.subject}</span>
+                                    )}
+                                    {paper.grade && (
+                                      <span className="px-1.5 py-0.5 rounded" style={{ background: '#F0FDF4', color: '#16A34A', fontSize: '10px', fontWeight: 500 }}>{paper.grade}</span>
+                                    )}
+                                    {paper.examType && (
+                                      <span className="px-1.5 py-0.5 rounded" style={{ background: '#FFF7ED', color: '#EA580C', fontSize: '10px', fontWeight: 500 }}>{paper.examType}</span>
+                                    )}
+                                  </div>
+                                  <p style={{ fontSize: '11px', color: '#9CA3AF', marginTop: '4px' }}>
+                                    {dayjs(paper.createdAt).format('YYYY/MM/DD HH:mm')} · {paper.totalPages}页
+                                  </p>
+                                </div>
+                                <div className="flex gap-1 flex-shrink-0">
+                                  <button
+                                    onClick={() => handlePaperBankPrint(paper)}
+                                    className="px-2 py-1.5 rounded-lg text-[12px] flex items-center gap-1"
+                                    style={{ background: '#F0FDF4', color: '#16A34A' }}
+                                    title="打印试卷"
+                                  >
+                                    <Printer size={12} />
+                                    打印
+                                  </button>
+                                  <button
+                                    onClick={() => handlePaperBankDelete(paper.id)}
+                                    className="px-2 py-1.5 rounded-lg text-[12px]"
+                                    style={{ background: '#FEF2F2', color: '#EF4444' }}
+                                  >
+                                    <Trash2 size={12} />
+                                  </button>
+                                </div>
+                              </div>
+                            </motion.div>
+                          ))}
+                        </>
                       )}
                     </section>
                   </>
