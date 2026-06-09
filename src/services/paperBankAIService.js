@@ -123,10 +123,17 @@ type说明：
 - subtitle: 副标题（考试时间、满分等）
 - section: 大题标题（如"一、选择题"）
 - question: 具体题目（含题干，选择题含options）
-- image: 图片区块（函数图、几何图、实验装置图等）
+- image: 独立的图片区块（函数图、几何图、实验装置图、坐标系图等）
 - table: 表格（含rows二维数组）
 - text: 普通文字段落
 - footer: 页脚（页码等）
+
+⚠️ 图片识别要求：
+1. 识别试卷中的每一张独立图片（函数图像、几何图形、坐标系、实验装置图等）
+2. 每张图对应一个image类型的区块
+3. 每张图返回其精确的bbox坐标[x1,y1,x2,y2]
+4. caption描述图片内容（如"二次函数y=x²-2x的图像"、"三角形ABC"）
+5. 不要将整页作为一张图返回，只识别试卷中嵌入的具体图形
 
 返回格式：
 {
@@ -134,9 +141,7 @@ type说明：
     "name": "试卷名称",
     "subject": "学科",
     "grade": "年级",
-    "examType": "考试类型",
-    "imageWidth": 图片宽度像素,
-    "imageHeight": 图片高度像素
+    "examType": "考试类型"
   },
   "layoutBlocks": [
     {"type":"title","content":"2024年初三数学期中考试卷","confidence":0.98,"style":{"textAlign":"center","fontWeight":"bold","fontSize":"18px"},"bbox":[100,20,500,60]},
@@ -144,6 +149,8 @@ type说明：
     {"type":"section","content":"一、选择题（每题3分，共30分）","confidence":0.99,"style":{"fontWeight":"bold","fontSize":"14px"},"bbox":[30,110,400,130]},
     {"type":"question","content":"1. 下列计算正确的是（ ）","confidence":0.97,"options":["A. 2+3=5","B. 2×3=6","C. 2-3=1","D. 2÷3=1"],"bbox":[30,140,500,180]},
     {"type":"image","content":"","confidence":0.95,"caption":"二次函数图像","bbox":[100,200,400,400]},
+    {"type":"question","content":"2. 如图，三角形ABC中...","confidence":0.92,"bbox":[30,410,500,440]},
+    {"type":"image","content":"","confidence":0.93,"caption":"三角形ABC几何图","bbox":[100,450,400,650]},
     {"type":"text","content":"注意事项：...","confidence":0.90,"bbox":[30,420,500,460]}
   ]
 }
@@ -153,7 +160,7 @@ type说明：
 2. 数学公式用文本表示（x², √2, ∠ABC等）
 3. 保留填空下划线____和括号（ ）
 4. 选择题必须提取options
-5. 图片必须给出bbox坐标[x1,y1,x2,y2]，精确框住图片区域
+5. 每张独立图片返回单独的image区块，给出精确bbox坐标
 6. 所有区块都必须返回bbox坐标
 7. 对不确定的文字标低confidence值（0.5以下表示高度不确定）
 8. 只返回JSON，不要包含其他文字`;
@@ -238,7 +245,8 @@ export const recognizePaperPageLayout = async (imageBase64) => {
 
     return {
       success: true,
-      data: result
+      data: result,
+      compressedImage: imageDataURL  // 返回压缩后的图片，用于局部图截取
     }
   } catch (error) {
     console.error('[PaperBank] 版面分析失败:', error)
@@ -339,9 +347,11 @@ export const processMultiPagePaperLayout = async (pages) => {
         }
 
         // 处理区块：截取image类型局部图，保留bbox信息
+        // 关键：bbox坐标是相对于压缩后图片的，所以必须用压缩后的图片来截取
         const originalImageFull = page.imageBase64.startsWith('data:') 
           ? page.imageBase64 
           : `data:image/jpeg;base64,${page.imageBase64}`
+        const croppedImageSource = layoutResult.compressedImage || originalImageFull
         
         const processedBlocks = []
         for (const block of pageData.layoutBlocks) {
@@ -350,10 +360,10 @@ export const processMultiPagePaperLayout = async (pages) => {
             confidence: block.confidence || 0.8
           }
           
-          // 对image类型区块，使用bbox截取局部图
+          // 对image类型区块，使用bbox从压缩后的图片截取局部图
           if (block.type === 'image' && block.bbox) {
             try {
-              const croppedImage = await cropImageByBbox(originalImageFull, block.bbox)
+              const croppedImage = await cropImageByBbox(croppedImageSource, block.bbox)
               processedBlock.src = croppedImage || undefined
             } catch (e) {
               console.warn(`[PaperBank] image区块截取失败:`, e)
