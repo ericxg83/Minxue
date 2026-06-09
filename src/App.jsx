@@ -224,21 +224,6 @@ export default function App() {
   const [editingBlock, setEditingBlock] = useState(null) // {pageNo, blockIndex} 当前编辑的区块
   const [paperBankCurrentPage, setPaperBankCurrentPage] = useState(0) // 当前校对页码（0-based）
   const [paperBankShowOriginal, setPaperBankShowOriginal] = useState(false) // 是否显示原图对比
-  
-  // 响应式检测：使用 document.documentElement.clientWidth 更可靠
-  const [paperBankScreenWide, setPaperBankScreenWide] = useState(() => {
-    if (typeof document !== 'undefined') {
-      return document.documentElement.clientWidth >= 800
-    }
-    return true
-  })
-  
-  useEffect(() => {
-    const handleResize = () => setPaperBankScreenWide(document.documentElement.clientWidth >= 800)
-    window.addEventListener('resize', handleResize)
-    handleResize() // 初始化时立即执行
-    return () => window.removeEventListener('resize', handleResize)
-  }, [])
 
   // Paper Bank Filter State
   const [paperBankFilterGrade, setPaperBankFilterGrade] = useState('all')
@@ -2970,7 +2955,7 @@ export default function App() {
                   </div>
                 )}
 
-                {/* Paper Bank: Proofread View - Professional Three-Column Layout */}
+                {/* Paper Bank: Proofread View - CSS Responsive Layout */}
                 {paperBankStep === 'proofread' && (() => {
                   const currentPageIdx = paperBankCurrentPage
                   const totalPages = paperBankReconstructedPages.length
@@ -2989,65 +2974,82 @@ export default function App() {
                   const imageSuccessRate = imageCount > 0 ? Math.round((detectedImageCount / imageCount) * 100) : 100
                   
                   return (
-                  <>
-                    {/* PC端完整三栏布局 */}
-                    {paperBankScreenWide ? (
-                    <div className="flex flex-col" style={{ height: 'calc(100vh - 56px)' }}>
-                      {/* Top Toolbar */}
-                      <div className="flex items-center justify-between px-4 py-2 border-b" style={{ borderColor: '#E5E7EB', background: '#fff' }}>
-                        <div className="flex items-center gap-2">
-                          <button onClick={handlePaperBankReset} className="p-1 hover:bg-gray-100 rounded">
-                            <ChevronRight size={18} style={{ color: '#6B7280', transform: 'rotate(180deg)' }} />
-                          </button>
-                          <div>
-                            <h2 style={{ fontSize: '16px', fontWeight: 600, color: '#111827' }}>{paperBankInfo?.name || '未命名试卷'}</h2>
-                            <p style={{ fontSize: '12px', color: '#9CA3AF' }}>{paperBankInfo?.subject} · {paperBankInfo?.grade} · {paperBankInfo?.examType}</p>
-                          </div>
-                        </div>
-                        <div className="flex items-center gap-2">
-                          {/* Zoom controls */}
-                          <div className="flex items-center gap-1 bg-gray-50 rounded-lg px-2 py-1">
-                            <button onClick={() => {}} className="text-gray-500 hover:text-gray-700" disabled><Minus size={14} /></button>
-                            <span className="text-xs text-gray-600 w-10 text-center">100%</span>
-                            <button onClick={() => {}} className="text-gray-500 hover:text-gray-700" disabled><Plus size={14} /></button>
-                          </div>
-                          {/* Export buttons */}
-                          <button
-                            onClick={handlePaperBankDownloadWord}
-                            className="px-3 py-1.5 rounded-lg text-xs font-medium text-white flex items-center gap-1.5"
-                            style={{ background: '#2563EB' }}
-                          >
-                            <FileText size={13} />
-                            导出Word
-                          </button>
-                          <button
-                            onClick={handlePaperBankPrint}
-                            className="px-3 py-1.5 rounded-lg text-xs font-medium text-gray-600 flex items-center gap-1.5 bg-gray-100 hover:bg-gray-200"
-                          >
-                            <Printer size={13} />
-                            导出PDF
-                          </button>
+                  <div className="flex flex-col" style={{ height: 'calc(100vh - 56px)' }}>
+                    {/* ===== 顶部工具栏 ===== */}
+                    {/* PC工具栏 */}
+                    <div className="hidden md:flex items-center justify-between px-4 py-2 border-b" style={{ borderColor: '#E5E7EB', background: '#fff' }}>
+                      <div className="flex items-center gap-2">
+                        <button onClick={handlePaperBankReset} className="p-1 hover:bg-gray-100 rounded">
+                          <ChevronRight size={18} style={{ color: '#6B7280', transform: 'rotate(180deg)' }} />
+                        </button>
+                        <div>
+                          <h2 style={{ fontSize: '16px', fontWeight: 600, color: '#111827' }}>{paperBankInfo?.name || '未命名试卷'}</h2>
+                          <p style={{ fontSize: '12px', color: '#9CA3AF' }}>{paperBankInfo?.subject} · {paperBankInfo?.grade} · {paperBankInfo?.examType}</p>
                         </div>
                       </div>
-
-                      {/* Tab Navigation */}
-                      <div className="flex items-center gap-0 border-b px-4" style={{ borderColor: '#E5E7EB', background: '#fff' }}>
-                        <div className="px-4 py-2.5 text-sm font-medium border-b-2 cursor-pointer" style={{ borderColor: '#2563EB', color: '#2563EB' }}>
-                          数字化结果
+                      <div className="flex items-center gap-2">
+                        <div className="flex items-center gap-1 bg-gray-50 rounded-lg px-2 py-1">
+                          <button className="text-gray-500" disabled><Minus size={14} /></button>
+                          <span className="text-xs text-gray-600 w-10 text-center">100%</span>
+                          <button className="text-gray-500" disabled><Plus size={14} /></button>
                         </div>
                         <button
-                          onClick={() => setPaperBankShowOriginal(!paperBankShowOriginal)}
-                          className={`px-4 py-2.5 text-sm font-medium cursor-pointer ${paperBankShowOriginal ? 'border-b-2' : ''}`}
-                          style={{ borderColor: paperBankShowOriginal ? '#2563EB' : 'transparent', color: paperBankShowOriginal ? '#2563EB' : '#9CA3AF' }}
+                          onClick={handlePaperBankDownloadWord}
+                          className="px-3 py-1.5 rounded-lg text-xs font-medium text-white flex items-center gap-1.5"
+                          style={{ background: '#2563EB' }}
                         >
-                          图像原文
+                          <FileText size={13} />
+                          导出Word
+                        </button>
+                        <button
+                          onClick={handlePaperBankPrint}
+                          className="px-3 py-1.5 rounded-lg text-xs font-medium text-gray-600 flex items-center gap-1.5 bg-gray-100 hover:bg-gray-200"
+                        >
+                          <Printer size={13} />
+                          导出PDF
                         </button>
                       </div>
+                    </div>
+                    {/* 手机工具栏 */}
+                    <div className="md:hidden flex items-center justify-between px-3 py-2 border-b" style={{ borderColor: '#E5E7EB', background: '#fff' }}>
+                      <div className="flex items-center gap-2">
+                        <button onClick={handlePaperBankReset} className="p-1">
+                          <ChevronRight size={18} style={{ color: '#6B7280', transform: 'rotate(180deg)' }} />
+                        </button>
+                        <h2 style={{ fontSize: '14px', fontWeight: 600 }}>{paperBankInfo?.name || '未命名试卷'}</h2>
+                      </div>
+                      <button
+                        onClick={handlePaperBankDownloadWord}
+                        className="px-2 py-1.5 rounded-lg text-xs font-medium text-white"
+                        style={{ background: '#2563EB' }}
+                      >
+                        导出Word
+                      </button>
+                    </div>
 
-                      {/* Main Three-Column Content */}
-                      <div className="flex-1 flex overflow-hidden">
-                        {/* Left: Original Image */}
-                        <div className="w-[280px] flex-shrink-0 border-r overflow-y-auto p-3 bg-gray-50" style={{ borderColor: '#E5E7EB' }}>
+                    {/* ===== Tab 导航 ===== */}
+                    <div className="flex border-b flex-shrink-0" style={{ borderColor: '#E5E7EB', background: '#fff' }}>
+                      <button
+                        onClick={() => setPaperBankShowOriginal(false)}
+                        className={`flex-1 py-2.5 text-sm font-medium ${!paperBankShowOriginal ? 'border-b-2' : ''}`}
+                        style={{ borderColor: !paperBankShowOriginal ? '#2563EB' : 'transparent', color: !paperBankShowOriginal ? '#2563EB' : '#9CA3AF' }}
+                      >
+                        数字化结果
+                      </button>
+                      <button
+                        onClick={() => setPaperBankShowOriginal(true)}
+                        className={`flex-1 py-2.5 text-sm font-medium ${paperBankShowOriginal ? 'border-b-2' : ''}`}
+                        style={{ borderColor: paperBankShowOriginal ? '#2563EB' : 'transparent', color: paperBankShowOriginal ? '#2563EB' : '#9CA3AF' }}
+                      >
+                        图像原文
+                      </button>
+                    </div>
+
+                    {/* ===== 主内容区域 ===== */}
+                    <div className="flex-1 overflow-hidden">
+                      {/* 图像原文 Tab */}
+                      <div className={`h-full overflow-y-auto p-3 ${paperBankShowOriginal ? 'block' : 'hidden'}`}>
+                        <div className="max-w-lg mx-auto">
                           <div className="text-xs font-medium text-gray-500 mb-2">原始试卷 · 第{currentPage.pageNo}页</div>
                           <img 
                             src={currentPage.originalImage} 
@@ -3055,323 +3057,253 @@ export default function App() {
                             className="w-full rounded shadow-sm bg-white"
                           />
                         </div>
-
-                        {/* Center: Digitized Result */}
-                        <div className="flex-1 overflow-y-auto p-4 bg-white">
-                          <div className="max-w-[700px] mx-auto bg-white rounded-lg shadow-sm border" style={{ borderColor: '#E5E7EB' }}>
-                            {/* Paper header */}
-                            {allBlocks.filter(b => b.type === 'title').length > 0 && (
-                              <div className="px-8 pt-6 pb-2">
-                                {allBlocks.filter(b => b.type === 'title').map((b, i) => (
-                                  <div key={i} className="text-center">
-                                    <div style={{ fontSize: '20px', fontWeight: 'bold', color: '#111827' }}>
-                                      <span 
-                                        className="cursor-pointer rounded px-1 hover:bg-blue-50"
-                                        onClick={() => handleBlockEdit(currentPage.pageNo, currentPage.layoutBlocks.indexOf(b))}
-                                      >
-                                        {b.content}
-                                      </span>
-                                      {b.confidence !== undefined && b.confidence < 0.7 && (
-                                        <span className="inline-flex items-center gap-0.5 text-amber-600 text-[10px] ml-1" title={`置信度: ${Math.round(b.confidence * 100)}%`}>
-                                          <AlertCircle size={10} />
-                                        </span>
-                                      )}
-                                    </div>
-                                  </div>
-                                ))}
-                              </div>
-                            )}
-                            {allBlocks.filter(b => b.type === 'subtitle').length > 0 && (
-                              <div className="px-8 pb-4">
-                                {allBlocks.filter(b => b.type === 'subtitle').map((b, i) => (
-                                  <div key={i} className="text-center" style={{ fontSize: '13px', color: '#6B7280' }}>
-                                    {b.content}
-                                  </div>
-                                ))}
-                              </div>
-                            )}
-                            <div className="mx-8" style={{ borderBottom: '2px solid #333', marginBottom: '16px' }} />
-                            
-                            {/* Content blocks */}
-                            <div className="px-8 pb-6">
-                              {currentPage.layoutBlocks.map((block, idx) => {
-                                // Skip title/subtitle as they're rendered above
-                                if (block.type === 'title' || block.type === 'subtitle') return null
-                                return renderBlock(block, currentPage.pageNo, idx)
-                              })}
-                            </div>
-                            
-                            {/* Footer */}
-                            {allBlocks.filter(b => b.type === 'footer').length > 0 && (
-                              <div className="px-8 pb-4">
-                                {allBlocks.filter(b => b.type === 'footer').map((b, i) => (
-                                  <div key={i} className="text-center" style={{ fontSize: '11px', color: '#9CA3AF', borderTop: '1px solid #E5E7EB', paddingTop: '8px' }}>
-                                    {b.content}
-                                  </div>
-                                ))}
-                              </div>
-                            )}
-                            {allBlocks.filter(b => b.type === 'footer').length === 0 && (
-                              <div className="text-center pb-4" style={{ fontSize: '11px', color: '#9CA3AF', borderTop: '1px solid #E5E7EB', paddingTop: '8px', margin: '0 32px' }}>
-                                - {currentPage.pageNo} -
-                              </div>
-                            )}
-                          </div>
-                        </div>
-
-                        {/* Right: Recognition Status & Content Structure */}
-                        <div className="w-[260px] flex-shrink-0 border-l overflow-y-auto p-3 bg-white" style={{ borderColor: '#E5E7EB' }}>
-                          {/* Recognition Status */}
-                          <div className="mb-4 p-3 rounded-lg border" style={{ borderColor: '#E5E7EB' }}>
-                            <div className="text-xs font-semibold text-gray-700 mb-3">识别状态</div>
-                            <div className="flex items-center gap-3 mb-3">
-                              <div className="relative w-12 h-12">
-                                <svg className="w-12 h-12 transform -rotate-90" viewBox="0 0 36 36">
-                                  <circle cx="18" cy="18" r="14" fill="none" stroke="#E5E7EB" strokeWidth="3"/>
-                                  <circle cx="18" cy="18" r="14" fill="none" stroke="#2563EB" strokeWidth="3"
-                                    strokeDasharray={`${recognitionRate} ${100 - recognitionRate}`}
-                                    strokeLinecap="round"/>
-                                </svg>
-                                <div className="absolute inset-0 flex items-center justify-center">
-                                  <span className="text-[10px] font-bold text-blue-600">{recognitionRate}%</span>
-                                </div>
-                              </div>
-                              <div>
-                                <div className="text-xs font-medium text-gray-700">识别完成</div>
-                                <div className="text-[10px] text-gray-400">共识别{totalItems}项，低置信{lowConfItems}处</div>
-                              </div>
-                            </div>
-                          </div>
-
-                          {/* Content Structure */}
-                          <div className="mb-4">
-                            <div className="text-xs font-semibold text-gray-700 mb-2">内容结构</div>
-                            <div className="text-xs text-gray-500 pl-2">
-                              <div className="mb-1">
-                                <span className="font-medium text-gray-600"></span> {paperBankInfo?.name || '未命名'}
-                              </div>
-                              {allBlocks.filter(b => b.type === 'section').map((sec, i) => (
-                                <div key={i} className="ml-3 mb-1">
-                                  <span className="text-gray-400">└─</span>
-                                  <span className="font-medium text-gray-600">{sec.content}</span>
-                                </div>
-                              ))}
-                              {questionBlocks.map((q, i) => (
-                                <div key={i} className="ml-6 mb-0.5 text-gray-500">
-                                  <span className="text-gray-300">•</span> {q.content?.substring(0, 20)}...
-                                  {q.options && q.options.length > 0 && (
-                                    <span className="text-[10px] text-blue-500 ml-1">{q.options.length}选项</span>
-                                  )}
-                                </div>
-                              ))}
-                              {imageBlocks.map((img, i) => (
-                                <div key={i} className="ml-6 mb-0.5">
-                                  <span className="text-gray-300">•</span>
-                                  <span className="text-amber-600">🖼</span> {img.caption || '图片'}
-                                  <span className={`text-[10px] ml-1 ${img.src ? 'text-green-500' : 'text-amber-500'}`}>
-                                    {img.src ? '✓已识别' : '⚠未识别'}
-                                  </span>
-                                </div>
-                              ))}
-                            </div>
-                          </div>
-
-                          {/* Image Handling */}
-                          {imageBlocks.length > 0 && (
-                            <div className="mb-4">
-                              <div className="text-xs font-semibold text-gray-700 mb-2">图形处理</div>
-                              {imageBlocks.map((img, i) => (
-                                <div key={i} className="mb-3 p-2 rounded-lg border" style={{ borderColor: img.src ? '#D1FAE5' : '#FEF3C7', background: img.src ? '#F0FDF4' : '#FFFBEB' }}>
-                                  <div className="text-xs font-medium text-gray-600 mb-1">
-                                    图形{i + 1} ({img.caption || '未命名'})
-                                  </div>
-                                  {img.src ? (
-                                    <img 
-                                      src={img.src} 
-                                      alt={img.caption || ''}
-                                      className="w-full rounded border border-green-200 mb-1"
-                                      style={{ maxHeight: '120px', objectFit: 'contain' }}
-                                    />
-                                  ) : (
-                                    <div className="w-full h-20 rounded border border-dashed border-amber-300 flex items-center justify-center mb-1 bg-white">
-                                      <span className="text-[10px] text-amber-500">未检测到</span>
-                                    </div>
-                                  )}
-                                  <div className="flex items-center gap-1">
-                                    <span className={`text-[10px] px-1.5 py-0.5 rounded font-medium ${img.src ? 'bg-green-100 text-green-600' : 'bg-amber-100 text-amber-600'}`}>
-                                      {img.src ? '✓ 识别成功' : '⚠ 需手动插入'}
-                                    </span>
-                                  </div>
-                                  <div className="flex gap-1 mt-1">
-                                    <button className="flex-1 text-[10px] py-1 rounded bg-white border text-gray-600 hover:bg-gray-50">查看</button>
-                                    <button className="flex-1 text-[10px] py-1 rounded bg-white border text-gray-600 hover:bg-gray-50">替换</button>
-                                  </div>
-                                </div>
-                              ))}
-                            </div>
-                          )}
-
-                          {/* Image Success Rate */}
-                          {imageCount > 0 && (
-                            <div className="text-[10px] text-gray-400 text-center mt-2">
-                              图形已数字化 {imageSuccessRate}%，可编辑
-                            </div>
-                          )}
-                        </div>
                       </div>
-
-                      {/* Bottom: Image Thumbnails */}
-                      {imageBlocks.length > 0 && (
-                        <div className="border-t p-3 bg-gray-50" style={{ borderColor: '#E5E7EB' }}>
-                          <div className="text-xs font-medium text-gray-500 mb-2">图形对照（点击可放大）</div>
-                          <div className="flex gap-3 overflow-x-auto pb-1">
-                            {imageBlocks.map((img, i) => (
-                              <div key={i} className="flex-shrink-0 w-28">
-                                {img.src ? (
-                                  <div className="rounded-lg overflow-hidden border border-green-200 bg-white">
-                                    <img 
-                                      src={img.src} 
-                                      alt={img.caption || ''}
-                                      className="w-full"
-                                      style={{ maxHeight: '80px', objectFit: 'contain' }}
-                                    />
-                                    <div className="text-[9px] text-gray-500 text-center py-1 truncate px-1">
-                                      数字化图形 (第{img.caption ? img.caption.substring(0, 6) : i + 1}题)
-                                    </div>
-                                  </div>
-                                ) : (
-                                  <div className="rounded-lg overflow-hidden border border-dashed border-amber-300 bg-amber-50 h-20 flex items-center justify-center">
-                                    <span className="text-[10px] text-amber-500">未识别</span>
-                                  </div>
-                                )}
+                      
+                      {/* 数字化结果 Tab */}
+                      <div className={`h-full overflow-y-auto ${paperBankShowOriginal ? 'hidden' : 'block'}`}>
+                        {/* 手机端：单列 */}
+                        <div className="md:hidden p-3">
+                          <div className="bg-white rounded-lg shadow-sm border" style={{ borderColor: '#E5E7EB' }}>
+                            {allBlocks.filter(b => b.type === 'title').map((b, i) => (
+                              <div key={i} className="px-4 pt-4 text-center">
+                                <span className="text-lg font-bold" style={{ color: '#111827' }}>{b.content}</span>
+                                {b.confidence !== undefined && b.confidence < 0.7 && <span className="text-amber-500 text-xs ml-1">⚠</span>}
                               </div>
                             ))}
-                          </div>
-                        </div>
-                      )}
-
-                      {/* Page Navigation (bottom bar) */}
-                      {totalPages > 1 && (
-                        <div className="flex items-center justify-center gap-3 py-2 border-t bg-white" style={{ borderColor: '#E5E7EB' }}>
-                          <button
-                            onClick={() => setPaperBankCurrentPage(Math.max(0, currentPageIdx - 1))}
-                            disabled={currentPageIdx === 0}
-                            className="px-3 py-1.5 rounded-lg text-sm disabled:opacity-30 disabled:cursor-not-allowed bg-gray-100 text-gray-700"
-                          >
-                            上一页
-                          </button>
-                          <span className="text-sm text-gray-500">
-                            第 {currentPageIdx + 1} / {totalPages} 页
-                          </span>
-                          <button
-                            onClick={() => setPaperBankCurrentPage(Math.min(totalPages - 1, currentPageIdx + 1))}
-                            disabled={currentPageIdx === totalPages - 1}
-                            className="px-3 py-1.5 rounded-lg text-sm disabled:opacity-30 disabled:cursor-not-allowed bg-gray-100 text-gray-700"
-                          >
-                            下一页
-                          </button>
-                        </div>
-                      )}
-
-                      {/* Bottom Actions */}
-                      <div className="flex justify-center gap-3 py-2 border-t bg-white" style={{ borderColor: '#E5E7EB' }}>
-                        <button
-                          onClick={handlePaperBankReset}
-                          className="px-6 py-2 rounded-xl text-sm font-medium text-gray-600 bg-gray-100 hover:bg-gray-200"
-                        >
-                          重新上传
-                        </button>
-                        <button
-                          onClick={handlePaperBankFinalize}
-                          className="px-8 py-2 rounded-xl text-sm font-semibold text-white"
-                          style={{ background: 'linear-gradient(135deg, #16A34A 0%, #15803D 100%)' }}
-                        >
-                          确认入库
-                        </button>
-                      </div>
-                    </div>
-                    ) : (
-                    /* 手机端简化布局 */
-                    <div className="flex flex-col" style={{ height: 'calc(100vh - 56px)' }}>
-                      {/* Mobile Header */}
-                      <div className="flex items-center justify-between px-4 py-2 border-b" style={{ borderColor: '#E5E7EB' }}>
-                        <div className="flex items-center gap-2">
-                          <button onClick={handlePaperBankReset} className="p-1">
-                            <ChevronRight size={18} style={{ color: '#6B7280', transform: 'rotate(180deg)' }} />
-                          </button>
-                          <div>
-                            <h2 style={{ fontSize: '14px', fontWeight: 600 }}>{paperBankInfo?.name || '未命名试卷'}</h2>
-                          </div>
-                        </div>
-                        <button
-                          onClick={handlePaperBankDownloadWord}
-                          className="px-2 py-1.5 rounded-lg text-xs font-medium text-white"
-                          style={{ background: '#2563EB' }}
-                        >
-                          导出Word
-                        </button>
-                      </div>
-
-                      {/* Mobile Tab Toggle */}
-                      <div className="flex border-b" style={{ borderColor: '#E5E7EB' }}>
-                        <button
-                          onClick={() => setPaperBankShowOriginal(false)}
-                          className={`flex-1 py-2 text-xs font-medium ${!paperBankShowOriginal ? 'border-b-2' : ''}`}
-                          style={{ borderColor: !paperBankShowOriginal ? '#2563EB' : 'transparent', color: !paperBankShowOriginal ? '#2563EB' : '#9CA3AF' }}
-                        >
-                          数字化结果
-                        </button>
-                        <button
-                          onClick={() => setPaperBankShowOriginal(true)}
-                          className={`flex-1 py-2 text-xs font-medium ${paperBankShowOriginal ? 'border-b-2' : ''}`}
-                          style={{ borderColor: paperBankShowOriginal ? '#2563EB' : 'transparent', color: paperBankShowOriginal ? '#2563EB' : '#9CA3AF' }}
-                        >
-                          图像原文
-                        </button>
-                      </div>
-
-                      {/* Mobile Content */}
-                      <div className="flex-1 overflow-y-auto p-3">
-                        {paperBankShowOriginal ? (
-                          <img 
-                            src={currentPage.originalImage} 
-                            alt={`第${currentPage.pageNo}页`}
-                            className="w-full rounded shadow-sm bg-white"
-                          />
-                        ) : (
-                          <div className="bg-white rounded-lg shadow-sm border" style={{ borderColor: '#E5E7EB' }}>
-                            <div className="px-4 pt-4 pb-2">
-                              {allBlocks.filter(b => b.type === 'title').map((b, i) => (
-                                <div key={i} className="text-center text-lg font-bold">{b.content}</div>
-                              ))}
-                            </div>
-                            <div className="mx-4" style={{ borderBottom: '2px solid #333' }} />
-                            <div className="px-4 py-3">
+                            {allBlocks.filter(b => b.type === 'subtitle').map((b, i) => (
+                              <div key={i} className="px-4 pb-2 text-center text-xs" style={{ color: '#6B7280' }}>{b.content}</div>
+                            ))}
+                            <div className="mx-4 my-2" style={{ borderBottom: '2px solid #333' }} />
+                            <div className="px-4 pb-4">
                               {currentPage.layoutBlocks.map((block, idx) => {
                                 if (block.type === 'title' || block.type === 'subtitle' || block.type === 'footer') return null
                                 return renderBlock(block, currentPage.pageNo, idx)
                               })}
                             </div>
                           </div>
-                        )}
-                      </div>
-
-                      {/* Mobile Page Nav */}
-                      {totalPages > 1 && (
-                        <div className="flex items-center justify-center gap-3 py-2 border-t" style={{ borderColor: '#E5E7EB' }}>
-                          <button onClick={() => setPaperBankCurrentPage(Math.max(0, currentPageIdx - 1))} disabled={currentPageIdx === 0} className="px-3 py-1 text-sm disabled:opacity-30 bg-gray-100 rounded">上一页</button>
-                          <span className="text-xs text-gray-500">{currentPageIdx + 1}/{totalPages}</span>
-                          <button onClick={() => setPaperBankCurrentPage(Math.min(totalPages - 1, currentPageIdx + 1))} disabled={currentPageIdx === totalPages - 1} className="px-3 py-1 text-sm disabled:opacity-30 bg-gray-100 rounded">下一页</button>
                         </div>
-                      )}
+                        
+                        {/* PC端：三栏布局 */}
+                        <div className="hidden md:flex h-full">
+                          {/* 左栏：原始试卷 */}
+                          <div className="w-[280px] flex-shrink-0 border-r overflow-y-auto p-3 bg-gray-50" style={{ borderColor: '#E5E7EB' }}>
+                            <div className="text-xs font-medium text-gray-500 mb-2">原始试卷 · 第{currentPage.pageNo}页</div>
+                            <img 
+                              src={currentPage.originalImage} 
+                              alt={`第${currentPage.pageNo}页`}
+                              className="w-full rounded shadow-sm bg-white"
+                            />
+                          </div>
 
-                      {/* Mobile Actions */}
-                      <div className="flex justify-center gap-3 py-2 border-t" style={{ borderColor: '#E5E7EB' }}>
-                        <button onClick={handlePaperBankFinalize} className="flex-1 mx-4 py-2.5 rounded-xl text-sm font-semibold text-white" style={{ background: '#16A34A' }}>确认入库</button>
+                          {/* 中栏：数字化结果 */}
+                          <div className="flex-1 overflow-y-auto p-4 bg-white">
+                            <div className="max-w-[700px] mx-auto bg-white rounded-lg shadow-sm border" style={{ borderColor: '#E5E7EB' }}>
+                              {allBlocks.filter(b => b.type === 'title').length > 0 && (
+                                <div className="px-8 pt-6 pb-2">
+                                  {allBlocks.filter(b => b.type === 'title').map((b, i) => (
+                                    <div key={i} className="text-center">
+                                      <div style={{ fontSize: '20px', fontWeight: 'bold', color: '#111827' }}>
+                                        <span 
+                                          className="cursor-pointer rounded px-1 hover:bg-blue-50"
+                                          onClick={() => handleBlockEdit(currentPage.pageNo, currentPage.layoutBlocks.indexOf(b))}
+                                        >
+                                          {b.content}
+                                        </span>
+                                        {b.confidence !== undefined && b.confidence < 0.7 && (
+                                          <span className="inline-flex items-center gap-0.5 text-amber-600 text-[10px] ml-1" title={`置信度: ${Math.round(b.confidence * 100)}%`}>
+                                            <AlertCircle size={10} />
+                                          </span>
+                                        )}
+                                      </div>
+                                    </div>
+                                  ))}
+                                </div>
+                              )}
+                              {allBlocks.filter(b => b.type === 'subtitle').length > 0 && (
+                                <div className="px-8 pb-4">
+                                  {allBlocks.filter(b => b.type === 'subtitle').map((b, i) => (
+                                    <div key={i} className="text-center" style={{ fontSize: '13px', color: '#6B7280' }}>{b.content}</div>
+                                  ))}
+                                </div>
+                              )}
+                              <div className="mx-8" style={{ borderBottom: '2px solid #333', marginBottom: '16px' }} />
+                              <div className="px-8 pb-6">
+                                {currentPage.layoutBlocks.map((block, idx) => {
+                                  if (block.type === 'title' || block.type === 'subtitle') return null
+                                  return renderBlock(block, currentPage.pageNo, idx)
+                                })}
+                              </div>
+                              {allBlocks.filter(b => b.type === 'footer').length > 0 ? (
+                                <div className="px-8 pb-4">
+                                  {allBlocks.filter(b => b.type === 'footer').map((b, i) => (
+                                    <div key={i} className="text-center" style={{ fontSize: '11px', color: '#9CA3AF', borderTop: '1px solid #E5E7EB', paddingTop: '8px' }}>{b.content}</div>
+                                  ))}
+                                </div>
+                              ) : (
+                                <div className="text-center pb-4" style={{ fontSize: '11px', color: '#9CA3AF', borderTop: '1px solid #E5E7EB', paddingTop: '8px', margin: '0 32px' }}>
+                                  - {currentPage.pageNo} -
+                                </div>
+                              )}
+                            </div>
+                          </div>
+
+                          {/* 右栏：识别状态 + 内容结构 + 图形处理 */}
+                          <div className="w-[260px] flex-shrink-0 border-l overflow-y-auto p-3 bg-white" style={{ borderColor: '#E5E7EB' }}>
+                            {/* 识别状态 */}
+                            <div className="mb-4 p-3 rounded-lg border" style={{ borderColor: '#E5E7EB' }}>
+                              <div className="text-xs font-semibold text-gray-700 mb-3">识别状态</div>
+                              <div className="flex items-center gap-3 mb-3">
+                                <div className="relative w-12 h-12">
+                                  <svg className="w-12 h-12 transform -rotate-90" viewBox="0 0 36 36">
+                                    <circle cx="18" cy="18" r="14" fill="none" stroke="#E5E7EB" strokeWidth="3"/>
+                                    <circle cx="18" cy="18" r="14" fill="none" stroke="#2563EB" strokeWidth="3"
+                                      strokeDasharray={`${recognitionRate} ${100 - recognitionRate}`}
+                                      strokeLinecap="round"/>
+                                  </svg>
+                                  <div className="absolute inset-0 flex items-center justify-center">
+                                    <span className="text-[10px] font-bold text-blue-600">{recognitionRate}%</span>
+                                  </div>
+                                </div>
+                                <div>
+                                  <div className="text-xs font-medium text-gray-700">识别完成</div>
+                                  <div className="text-[10px] text-gray-400">共识别{totalItems}项，低置信{lowConfItems}处</div>
+                                </div>
+                              </div>
+                            </div>
+
+                            {/* 内容结构 */}
+                            <div className="mb-4">
+                              <div className="text-xs font-semibold text-gray-700 mb-2">内容结构</div>
+                              <div className="text-xs text-gray-500 pl-2">
+                                <div className="mb-1"><span className="font-medium text-gray-600"></span> {paperBankInfo?.name || '未命名'}</div>
+                                {allBlocks.filter(b => b.type === 'section').map((sec, i) => (
+                                  <div key={i} className="ml-3 mb-1">
+                                    <span className="text-gray-400">└─</span>
+                                    <span className="font-medium text-gray-600">{sec.content}</span>
+                                  </div>
+                                ))}
+                                {questionBlocks.map((q, i) => (
+                                  <div key={i} className="ml-6 mb-0.5 text-gray-500">
+                                    <span className="text-gray-300">•</span> {q.content?.substring(0, 20)}...
+                                    {q.options && q.options.length > 0 && <span className="text-[10px] text-blue-500 ml-1">{q.options.length}选项</span>}
+                                  </div>
+                                ))}
+                                {imageBlocks.map((img, i) => (
+                                  <div key={i} className="ml-6 mb-0.5">
+                                    <span className="text-gray-300">•</span>
+                                    <span className="text-amber-600"></span> {img.caption || '图片'}
+                                    <span className={`text-[10px] ml-1 ${img.src ? 'text-green-500' : 'text-amber-500'}`}>
+                                      {img.src ? '✓已识别' : '⚠未识别'}
+                                    </span>
+                                  </div>
+                                ))}
+                              </div>
+                            </div>
+
+                            {/* 图形处理 */}
+                            {imageBlocks.length > 0 && (
+                              <div className="mb-4">
+                                <div className="text-xs font-semibold text-gray-700 mb-2">图形处理</div>
+                                {imageBlocks.map((img, i) => (
+                                  <div key={i} className="mb-3 p-2 rounded-lg border" style={{ borderColor: img.src ? '#D1FAE5' : '#FEF3C7', background: img.src ? '#F0FDF4' : '#FFFBEB' }}>
+                                    <div className="text-xs font-medium text-gray-600 mb-1">
+                                      图形{i + 1} ({img.caption || '未命名'})
+                                    </div>
+                                    {img.src ? (
+                                      <img src={img.src} alt={img.caption || ''} className="w-full rounded border border-green-200 mb-1" style={{ maxHeight: '120px', objectFit: 'contain' }} />
+                                    ) : (
+                                      <div className="w-full h-20 rounded border border-dashed border-amber-300 flex items-center justify-center mb-1 bg-white">
+                                        <span className="text-[10px] text-amber-500">未检测到</span>
+                                      </div>
+                                    )}
+                                    <div className="flex items-center gap-1">
+                                      <span className={`text-[10px] px-1.5 py-0.5 rounded font-medium ${img.src ? 'bg-green-100 text-green-600' : 'bg-amber-100 text-amber-600'}`}>
+                                        {img.src ? '✓ 识别成功' : '⚠ 需手动插入'}
+                                      </span>
+                                    </div>
+                                    <div className="flex gap-1 mt-1">
+                                      <button className="flex-1 text-[10px] py-1 rounded bg-white border text-gray-600 hover:bg-gray-50">查看</button>
+                                      <button className="flex-1 text-[10px] py-1 rounded bg-white border text-gray-600 hover:bg-gray-50">替换</button>
+                                    </div>
+                                  </div>
+                                ))}
+                              </div>
+                            )}
+                            {imageCount > 0 && (
+                              <div className="text-[10px] text-gray-400 text-center mt-2">
+                                图形已数字化 {imageSuccessRate}%，可编辑
+                              </div>
+                            )}
+                          </div>
+                        </div>
                       </div>
                     </div>
+
+                    {/* ===== 底部图形缩略图（PC） ===== */}
+                    {imageBlocks.length > 0 && (
+                      <div className="hidden md:block border-t p-3 bg-gray-50" style={{ borderColor: '#E5E7EB' }}>
+                        <div className="text-xs font-medium text-gray-500 mb-2">图形对照（点击可放大）</div>
+                        <div className="flex gap-3 overflow-x-auto pb-1">
+                          {imageBlocks.map((img, i) => (
+                            <div key={i} className="flex-shrink-0 w-28">
+                              {img.src ? (
+                                <div className="rounded-lg overflow-hidden border border-green-200 bg-white">
+                                  <img src={img.src} alt={img.caption || ''} className="w-full" style={{ maxHeight: '80px', objectFit: 'contain' }} />
+                                  <div className="text-[9px] text-gray-500 text-center py-1 truncate px-1">
+                                    数字化图形 (第{img.caption ? img.caption.substring(0, 6) : i + 1}题)
+                                  </div>
+                                </div>
+                              ) : (
+                                <div className="rounded-lg overflow-hidden border border-dashed border-amber-300 bg-amber-50 h-20 flex items-center justify-center">
+                                  <span className="text-[10px] text-amber-500">未识别</span>
+                                </div>
+                              )}
+                            </div>
+                          ))}
+                        </div>
+                      </div>
                     )}
-                  </>
+
+                    {/* ===== 分页导航 ===== */}
+                    {totalPages > 1 && (
+                      <div className="flex items-center justify-center gap-3 py-2 border-t bg-white flex-shrink-0" style={{ borderColor: '#E5E7EB' }}>
+                        <button
+                          onClick={() => setPaperBankCurrentPage(Math.max(0, currentPageIdx - 1))}
+                          disabled={currentPageIdx === 0}
+                          className="px-3 py-1.5 rounded-lg text-sm disabled:opacity-30 disabled:cursor-not-allowed bg-gray-100 text-gray-700"
+                        >
+                          上一页
+                        </button>
+                        <span className="text-sm text-gray-500">
+                          第 {currentPageIdx + 1} / {totalPages} 页
+                        </span>
+                        <button
+                          onClick={() => setPaperBankCurrentPage(Math.min(totalPages - 1, currentPageIdx + 1))}
+                          disabled={currentPageIdx === totalPages - 1}
+                          className="px-3 py-1.5 rounded-lg text-sm disabled:opacity-30 disabled:cursor-not-allowed bg-gray-100 text-gray-700"
+                        >
+                          下一页
+                        </button>
+                      </div>
+                    )}
+
+                    {/* ===== 底部操作按钮 ===== */}
+                    <div className="flex justify-center gap-3 py-2 border-t bg-white flex-shrink-0" style={{ borderColor: '#E5E7EB' }}>
+                      <button
+                        onClick={handlePaperBankReset}
+                        className="px-6 py-2 rounded-xl text-sm font-medium text-gray-600 bg-gray-100 hover:bg-gray-200"
+                      >
+                        重新上传
+                      </button>
+                      <button
+                        onClick={handlePaperBankFinalize}
+                        className="px-8 py-2 rounded-xl text-sm font-semibold text-white"
+                        style={{ background: 'linear-gradient(135deg, #16A34A 0%, #15803D 100%)' }}
+                      >
+                        确认入库
+                      </button>
+                    </div>
+                  </div>
                 )})()}
               </motion.div>
             )}
