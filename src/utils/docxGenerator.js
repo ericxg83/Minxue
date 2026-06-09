@@ -186,23 +186,6 @@ function createBlockParagraph(block) {
               })
             )
           }
-          // 如果有TikZ代码，在注释中添加TikZ源码供后续编辑
-          if (block.tikzCode) {
-            paragraphs.push(
-              new Paragraph({
-                spacing: { before: 20, after: 40 },
-                children: [
-                  new TextRun({
-                    text: `<!-- TikZ: ${block.tikzCode.substring(0, 100)}... -->`,
-                    color: 'CCCCCC',
-                    italics: true,
-                    size: 16,
-                    font: '宋体'
-                  })
-                ]
-              })
-            )
-          }
         } catch (e) {
           console.warn('[WordGen] 图片插入失败:', e)
           paragraphs.push(
@@ -221,33 +204,19 @@ function createBlockParagraph(block) {
             })
           )
         }
-      } else if (block.tikzCode) {
-        // 没有局部图但有TikZ代码，在Word中显示TikZ源码注释
+      } else {
+        // 没有局部图时显示占位符
         paragraphs.push(
           new Paragraph({
             alignment: AlignmentType.CENTER,
-            spacing: { before: 80, after: 80 },
+            spacing: { before: 60, after: 60 },
             children: [
               new TextRun({
-                text: `[TikZ矢量图: ${block.caption || '图形'}]`,
-                color: '666666',
+                text: `[图片: ${block.caption || '待插入'}]`,
+                color: '999999',
                 italics: true,
                 size: 20,
                 font: '宋体'
-              })
-            ]
-          })
-        )
-        // 添加TikZ源码作为注释
-        paragraphs.push(
-          new Paragraph({
-            spacing: { before: 20, after: 60 },
-            children: [
-              new TextRun({
-                text: block.tikzCode,
-                color: '999999',
-                size: 14,
-                font: 'Courier New'
               })
             ]
           })

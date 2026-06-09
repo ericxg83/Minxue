@@ -35,7 +35,6 @@ import { taskService } from './services/taskService'
 import { recognizeQuestions, compressImage, saveRecognitionResult } from './services/aiService'
 import { processMultiPagePaperLayout } from './services/paperBankAIService'
 import { downloadPaperWord } from './utils/docxGenerator'
-import { renderImageBlock } from './utils/tikzGenerator'
 import { mockQuestions, mockTasks, mockWrongQuestions, mockGeneratedExams, mockStudents } from './data/mockData'
 import StudentSwitcher from './components/StudentSwitcher'
 
@@ -1247,22 +1246,14 @@ export default function App() {
           </div>
         )
       case 'image': {
-        // 原图永远是主体，TikZ只是附加
-        const renderResult = renderImageBlock(block)
-        const graphTypeLabel = {
-          function: '函数图',
-          geometry: '几何图',
-          experiment: '实验装置',
-          other: '图形'
-        }[block.graphType] || '图形'
-        
+        // 有原图（局部截图）→ 显示原图；无原图 → 占位符
         return (
           <div className="my-3 text-center">
-            {renderResult.type === 'image' ? (
-              // 显示原图（局部截图）- 永不丢弃
+            {block.src ? (
+              // 显示截取的局部图 - 永不丢弃
               <div className="inline-block">
                 <img 
-                  src={renderResult.content} 
+                  src={block.src} 
                   alt={block.caption || '题目配图'}
                   className="rounded border border-gray-200 max-w-full"
                   style={{ maxHeight: '220px', objectFit: 'contain' }}
@@ -1270,38 +1261,15 @@ export default function App() {
                 {block.caption && (
                   <div className="text-xs text-gray-500 mt-1 text-center">{block.caption}</div>
                 )}
-                {/* TikZ作为附加信息（可选） */}
-                {renderResult.tikzSvg && (
-                  <div className="mt-2 p-2 rounded border border-blue-200 bg-blue-50/30">
-                    <div className="text-[10px] text-blue-600 mb-1">AI生成矢量图（参考）</div>
-                    <div dangerouslySetInnerHTML={{ __html: renderResult.tikzSvg }} />
-                  </div>
-                )}
-              </div>
-            ) : renderResult.type === 'svg' ? (
-              // 只有TikZ没有原图时才单独显示
-              <div className="inline-block">
-                <div 
-                  className="rounded border-2 border-blue-200 bg-blue-50/30 overflow-hidden"
-                  dangerouslySetInnerHTML={{ __html: renderResult.content }}
-                />
-                <div className="flex items-center justify-center gap-2 mt-1">
-                  {block.caption && (
-                    <span className="text-xs text-gray-500">{block.caption}</span>
-                  )}
-                  <span className="text-[10px] px-1.5 py-0.5 rounded bg-blue-100 text-blue-600 font-medium">
-                    {graphTypeLabel}·TikZ
-                  </span>
-                </div>
               </div>
             ) : (
-              // 占位符
-              <div className="inline-flex flex-col items-center gap-1 px-3 py-2 rounded-lg border-2 border-dashed border-gray-300 bg-gray-50">
-                <ImageIcon size={16} style={{ color: '#9CA3AF' }} />
-                <span className="text-xs text-gray-400">
+              // 占位符 - AI未检测到图形区域
+              <div className="inline-flex flex-col items-center gap-1 px-3 py-2 rounded-lg border-2 border-dashed border-amber-300 bg-amber-50">
+                <ImageIcon size={16} style={{ color: '#D97706' }} />
+                <span className="text-xs text-amber-600">
                   {block.caption ? `[图: ${block.caption}]` : '[图片区域]'}
                 </span>
-                <span className="text-[10px] text-gray-300">待插入</span>
+                <span className="text-[10px] text-amber-400">AI未检测到此区域，请手动插入</span>
               </div>
             )}
           </div>
@@ -1415,17 +1383,10 @@ export default function App() {
           case 'text':
             return `<div class="block-text">${escapeHtml(block.content)}</div>`
           case 'image': {
-            const renderResult = renderImageBlock(block)
-            if (renderResult.type === 'svg') {
-              return `<div class="block-image" style="text-align:center;">${renderResult.content}${block.caption ? `<div style="font-size:10px;color:#666;">${escapeHtml(block.caption)}</div>` : ''}</div>`
+            if (block.src) {
+              return `<div class="block-image" style="text-align:center;"><img src="${block.src}" alt="${escapeHtml(block.caption || '')}" style="max-width:100%;display:block;margin:8px auto;" />${block.caption ? `<div style="font-size:10px;color:#666;">${escapeHtml(block.caption)}</div>` : ''}</div>`
             }
-            if (renderResult.type === 'image') {
-              return `<div class="block-image"><img src="${block.src}" alt="${escapeHtml(block.caption || '')}" style="max-width:100%;display:block;margin:8px auto;" /></div>`
-            }
-            if (renderResult.type === 'placeholder') {
-              return `<div class="block-image" style="text-align:center;color:#999;font-style:italic;">[图: ${escapeHtml(renderResult.content || '待插入')}]</div>`
-            }
-            return ''
+            return `<div class="block-image" style="text-align:center;color:#999;font-style:italic;">[图: ${escapeHtml(block.caption || '待插入')}]</div>`
           }
           case 'table':
             if (!block.rows || block.rows.length === 0) return ''
