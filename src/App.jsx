@@ -224,6 +224,21 @@ export default function App() {
   const [editingBlock, setEditingBlock] = useState(null) // {pageNo, blockIndex} 当前编辑的区块
   const [paperBankCurrentPage, setPaperBankCurrentPage] = useState(0) // 当前校对页码（0-based）
   const [paperBankShowOriginal, setPaperBankShowOriginal] = useState(false) // 是否显示原图对比
+  // 试卷入库视图响应式检测：基于实际容器宽度（适配手机模拟器）
+  const paperBankContainerRef = useRef(null)
+  const [paperBankNarrow, setPaperBankNarrow] = useState(false)
+  
+  useEffect(() => {
+    if (!paperBankContainerRef.current) return
+    const checkWidth = () => {
+      const w = paperBankContainerRef.current?.getBoundingClientRect().width || 0
+      setPaperBankNarrow(w < 768)
+    }
+    checkWidth()
+    const observer = new ResizeObserver(checkWidth)
+    observer.observe(paperBankContainerRef.current)
+    return () => observer.disconnect()
+  }, [paperBankStep])
 
   // Paper Bank Filter State
   const [paperBankFilterGrade, setPaperBankFilterGrade] = useState('all')
@@ -2974,10 +2989,10 @@ export default function App() {
                   const imageSuccessRate = imageCount > 0 ? Math.round((detectedImageCount / imageCount) * 100) : 100
                   
                   return (
-                  <div className="flex flex-col" style={{ height: 'calc(100vh - 56px)' }}>
+                  <div ref={paperBankContainerRef} className="flex flex-col" style={{ height: 'calc(100vh - 56px)' }}>
                     {/* ===== 顶部工具栏 ===== */}
                     {/* PC工具栏 */}
-                    <div className="hidden md:flex items-center justify-between px-4 py-2 border-b" style={{ borderColor: '#E5E7EB', background: '#fff' }}>
+                    <div style={{ display: paperBankNarrow ? 'none' : 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '8px 16px', borderBottom: '1px solid', borderColor: '#E5E7EB', background: '#fff' }}>
                       <div className="flex items-center gap-2">
                         <button onClick={handlePaperBankReset} className="p-1 hover:bg-gray-100 rounded">
                           <ChevronRight size={18} style={{ color: '#6B7280', transform: 'rotate(180deg)' }} />
@@ -3011,7 +3026,7 @@ export default function App() {
                       </div>
                     </div>
                     {/* 手机工具栏 */}
-                    <div className="md:hidden flex items-center justify-between px-3 py-2 border-b" style={{ borderColor: '#E5E7EB', background: '#fff' }}>
+                    <div style={{ display: paperBankNarrow ? 'flex' : 'none', alignItems: 'center', justifyContent: 'space-between', padding: '8px 12px', borderBottom: '1px solid', borderColor: '#E5E7EB', background: '#fff' }}>
                       <div className="flex items-center gap-2">
                         <button onClick={handlePaperBankReset} className="p-1">
                           <ChevronRight size={18} style={{ color: '#6B7280', transform: 'rotate(180deg)' }} />
@@ -3062,7 +3077,7 @@ export default function App() {
                       {/* 数字化结果 Tab */}
                       <div className={`h-full overflow-y-auto ${paperBankShowOriginal ? 'hidden' : 'block'}`}>
                         {/* 手机端：单列 */}
-                        <div className="md:hidden p-3">
+                        <div style={{ display: paperBankNarrow ? 'block' : 'none', padding: '12px' }}>
                           <div className="bg-white rounded-lg shadow-sm border" style={{ borderColor: '#E5E7EB' }}>
                             {allBlocks.filter(b => b.type === 'title').map((b, i) => (
                               <div key={i} className="px-4 pt-4 text-center">
@@ -3085,7 +3100,7 @@ export default function App() {
                         </div>
                         
                         {/* PC端：三栏布局 */}
-                        <div className="hidden md:flex h-full">
+                        <div style={{ display: paperBankNarrow ? 'none' : 'flex', height: '100%' }}>
                           {/* 左栏：原始试卷 */}
                           <div className="w-[280px] flex-shrink-0 border-r overflow-y-auto p-3 bg-gray-50" style={{ borderColor: '#E5E7EB' }}>
                             <div className="text-xs font-medium text-gray-500 mb-2">原始试卷 · 第{currentPage.pageNo}页</div>
@@ -3243,7 +3258,7 @@ export default function App() {
 
                     {/* ===== 底部图形缩略图（PC） ===== */}
                     {imageBlocks.length > 0 && (
-                      <div className="hidden md:block border-t p-3 bg-gray-50" style={{ borderColor: '#E5E7EB' }}>
+                      <div style={{ display: (paperBankNarrow || imageBlocks.length === 0) ? 'none' : 'block', borderTop: '1px solid', borderColor: '#E5E7EB', padding: '12px', background: '#F9FAFB' }}>
                         <div className="text-xs font-medium text-gray-500 mb-2">图形对照（点击可放大）</div>
                         <div className="flex gap-3 overflow-x-auto pb-1">
                           {imageBlocks.map((img, i) => (
