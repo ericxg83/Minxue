@@ -2,6 +2,39 @@ import axios from 'axios'
 import { AI_CONFIG, getAIHeaders } from '../config/ai'
 
 /**
+ * 压缩图片base64数据，减少API请求大小
+ * @param {string} dataURL - 原始data URL格式base64
+ * @param {number} maxWidth - 最大宽度
+ * @param {number} quality - JPEG质量 (0-1)
+ * @returns {Promise<string>} 压缩后的data URL
+ */
+function compressImageBase64(dataURL, maxWidth = 1920, quality = 0.85) {
+  return new Promise((resolve, reject) => {
+    const img = new Image()
+    img.onload = () => {
+      const canvas = document.createElement('canvas')
+      let width = img.width
+      let height = img.height
+
+      if (width > maxWidth) {
+        const ratio = maxWidth / width
+        width = maxWidth
+        height = height * ratio
+      }
+
+      canvas.width = width
+      canvas.height = height
+      const ctx = canvas.getContext('2d')
+      ctx.drawImage(img, 0, 0, width, height)
+
+      resolve(canvas.toDataURL('image/jpeg', quality))
+    }
+    img.onerror = reject
+    img.src = dataURL
+  })
+}
+
+/**
  * 构建试卷信息提取的AI Prompt
  * 用于从试卷图片中提取试卷名称、学科、年级等信息
  */
@@ -88,37 +121,45 @@ function buildPaperOCRPrompt() {
 export const extractPaperInfo = async (imageBase64) => {
   const prompt = buildPaperInfoPrompt()
   
-  const imageDataURL = imageBase64.startsWith('data:') 
+  // 确保图片包含data URI前缀
+  let imageDataURL = imageBase64.startsWith('data:') 
     ? imageBase64 
     : `data:image/jpeg;base64,${imageBase64}`
+
+  // 压缩图片以减少API请求大小（ModelScope API有大小限制）
+  try {
+    imageDataURL = await compressImageBase64(imageDataURL, 1280, 0.7)
+    console.log('[PaperBank] 图片已压缩')
+  } catch (e) {
+    console.warn('[PaperBank] 图片压缩失败，使用原始图片:', e)
+  }
 
   const requestBody = {
     model: AI_CONFIG.MODEL,
     messages: [
       {
-        role: 'system',
-        content: prompt
-      },
-      {
         role: 'user',
         content: [
           {
             type: 'image_url',
-            image_url: { url: imageDataURL, detail: 'high' }
+            image_url: {
+              url: imageDataURL
+            }
           },
           {
             type: 'text',
-            text: '请分析这张试卷图片，提取试卷名称、学科、年级等信息。'
+            text: prompt + '\n\n请分析这张试卷图片，提取试卷名称、学科、年级等信息。'
           }
         ]
       }
     ],
     temperature: 0.1,
-    max_tokens: 500
+    max_tokens: 1024
   }
 
   try {
     console.log('[PaperBank] 开始提取试卷信息...')
+    console.log('[PaperBank] 图片数据长度:', imageDataURL.length, 'bytes')
     const response = await axios.post(
       AI_CONFIG.ENDPOINT,
       requestBody,
@@ -150,6 +191,10 @@ export const extractPaperInfo = async (imageBase64) => {
     }
   } catch (error) {
     console.error('[PaperBank] 试卷信息提取失败:', error)
+    if (error.response) {
+      console.error('[PaperBank] API响应状态:', error.response.status)
+      console.error('[PaperBank] API响应数据:', JSON.stringify(error.response.data).substring(0, 500))
+    }
     return {
       success: false,
       error: error.message || '提取失败'
@@ -165,37 +210,45 @@ export const extractPaperInfo = async (imageBase64) => {
 export const recognizePaperContent = async (imageBase64) => {
   const prompt = buildPaperOCRPrompt()
   
-  const imageDataURL = imageBase64.startsWith('data:') 
+  // 确保图片包含data URI前缀
+  let imageDataURL = imageBase64.startsWith('data:') 
     ? imageBase64 
     : `data:image/jpeg;base64,${imageBase64}`
+
+  // 压缩图片以减少API请求大小
+  try {
+    imageDataURL = await compressImageBase64(imageDataURL, 1920, 0.8)
+    console.log('[PaperBank] OCR识别前图片已压缩')
+  } catch (e) {
+    console.warn('[PaperBank] 图片压缩失败，使用原始图片:', e)
+  }
 
   const requestBody = {
     model: AI_CONFIG.MODEL,
     messages: [
       {
-        role: 'system',
-        content: prompt
-      },
-      {
         role: 'user',
         content: [
           {
             type: 'image_url',
-            image_url: { url: imageDataURL, detail: 'high' }
+            image_url: {
+              url: imageDataURL
+            }
           },
           {
             type: 'text',
-            text: '请识别这张试卷图片中的所有文字内容，保持原始格式。'
+            text: prompt + '\n\n请识别这张试卷图片中的所有文字内容，保持原始格式。'
           }
         ]
       }
     ],
     temperature: 0.1,
-    max_tokens: 8000
+    max_tokens: 4000
   }
 
   try {
     console.log('[PaperBank] 开始OCR识别...')
+    console.log('[PaperBank] 图片数据长度:', imageDataURL.length, 'bytes')
     const response = await axios.post(
       AI_CONFIG.ENDPOINT,
       requestBody,
@@ -228,6 +281,10 @@ export const recognizePaperContent = async (imageBase64) => {
     }
   } catch (error) {
     console.error('[PaperBank] OCR识别失败:', error)
+    if (error.response) {
+      console.error('[PaperBank] API响应状态:', error.response.status)
+      console.error('[PaperBank] API响应数据:', JSON.stringify(error.response.data).substring(0, 500))
+    }
     return {
       success: false,
       error: error.message || '识别失败'

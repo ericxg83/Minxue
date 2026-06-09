@@ -920,10 +920,23 @@ export default function App() {
   // Utility: Convert File to base64
   const fileToBase64 = (file) => {
     return new Promise((resolve, reject) => {
+      // Check file size - limit to 10MB
+      if (file.size > 10 * 1024 * 1024) {
+        reject(new Error('图片过大（超过10MB），请选择较小的图片'))
+        return
+      }
+
       const reader = new FileReader()
+      reader.onloadend = () => {
+        const base64String = reader.result
+        if (base64String && typeof base64String === 'string') {
+          resolve(base64String)
+        } else {
+          reject(new Error('Failed to convert file to base64'))
+        }
+      }
+      reader.onerror = () => reject(new Error('FileReader error'))
       reader.readAsDataURL(file)
-      reader.onload = () => resolve(reader.result)
-      reader.onerror = reject
     })
   }
 
@@ -940,12 +953,16 @@ export default function App() {
     if (files.length === 0) return
 
     try {
-      const pages = files.map((file, index) => ({
-        id: `page_${Date.now()}_${index}`,
-        name: file.name,
-        imageUrl: URL.createObjectURL(file),
-        file: file
-      }))
+      // Convert all files to base64 immediately
+      const pages = await Promise.all(
+        files.map(async (file, index) => ({
+          id: `page_${Date.now()}_${index}`,
+          name: file.name,
+          imageUrl: URL.createObjectURL(file),
+          imageBase64: await fileToBase64(file),
+          file: file
+        }))
+      )
 
       setPaperBankUploadedPages(prev => [...prev, ...pages])
       Toast.show({ message: `已添加${files.length}页`, type: 'success', duration: 1500 })
@@ -967,27 +984,18 @@ export default function App() {
       return
     }
 
+    // Validate base64 data
+    const validPages = paperBankUploadedPages.filter(p => p.imageBase64)
+    if (validPages.length === 0) {
+      Toast.show({ message: '图片数据无效，请重新上传', type: 'error', duration: 2000 })
+      return
+    }
+
     setPaperBankProcessing(true)
     setPaperBankProgress(0)
     setPaperBankStep('processing')
 
     try {
-      // Convert uploaded pages to base64 for AI processing
-      const pagesForAI = await Promise.all(
-        paperBankUploadedPages.map(async (page) => {
-          let imageBase64 = page.imageBase64
-          if (!imageBase64 && page.file) {
-            // Convert File to base64
-            imageBase64 = await fileToBase64(page.file)
-          }
-          return {
-            id: page.id,
-            imageUrl: page.imageUrl,
-            imageBase64: imageBase64
-          }
-        })
-      )
-
       // Update progress during processing
       let currentProgress = 10
       const progressInterval = setInterval(() => {
@@ -997,8 +1005,8 @@ export default function App() {
         }
       }, 1000)
 
-      // Call real AI service
-      const result = await processMultiPagePaper(pagesForAI)
+      // Call real AI service with pages that have base64 data
+      const result = await processMultiPagePaper(validPages)
 
       clearInterval(progressInterval)
       setPaperBankProgress(100)
