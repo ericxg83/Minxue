@@ -2423,7 +2423,13 @@ export default function App() {
                             >
                               <div className="flex items-start justify-between gap-2">
                                 <div className="flex-1 min-w-0">
-                                  <h3 style={{ fontSize: '14px', fontWeight: 600, color: '#111827' }} className="truncate">{paper.name}</h3>
+                                  <h3
+                                    onClick={() => handlePaperBankPrint(paper)}
+                                    style={{ fontSize: '14px', fontWeight: 600, color: '#111827', cursor: 'pointer' }}
+                                    className="truncate hover:text-blue-600 transition-colors"
+                                  >
+                                    {paper.name}
+                                  </h3>
                                   <div className="flex flex-wrap items-center gap-1.5 mt-1">
                                     {paper.subject && (
                                       <span className="px-1.5 py-0.5 rounded" style={{ background: '#EFF6FF', color: '#2563EB', fontSize: '10px', fontWeight: 500 }}>{paper.subject}</span>
@@ -2442,12 +2448,11 @@ export default function App() {
                                 <div className="flex gap-1 flex-shrink-0">
                                   <button
                                     onClick={() => handlePaperBankPrint(paper)}
-                                    className="px-2 py-1.5 rounded-lg text-[12px] flex items-center gap-1"
+                                    className="px-2 py-1.5 rounded-lg text-[12px] flex items-center justify-center"
                                     style={{ background: '#F0FDF4', color: '#16A34A' }}
                                     title="打印试卷"
                                   >
-                                    <Printer size={12} />
-                                    打印
+                                    <Printer size={14} />
                                   </button>
                                   <button
                                     onClick={() => handlePaperBankDelete(paper.id)}
