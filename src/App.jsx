@@ -1141,58 +1141,186 @@ export default function App() {
     setEditingBlock(null)
   }
 
-  // Paper Bank: Get block class name by type
-  const getBlockClassName = (block) => {
-    switch (block.type) {
-      case 'title':
-        return 'text-xl font-bold text-center mb-3'
-      case 'subtitle':
-        return 'text-sm text-center text-gray-600 mb-2'
-      case 'section':
-        return 'text-base font-bold mt-4 mb-2'
-      case 'question':
-        return 'text-sm mb-3'
-      case 'text':
-        return 'text-sm mb-2'
-      case 'footer':
-        return 'text-xs text-center text-gray-400 mt-4'
-      default:
-        return 'text-sm mb-2'
-    }
-  }
+  // Paper Bank: Render a single block with full paper layout styling
+  const renderBlock = (block, pageNo, blockIndex) => {
+    const isEditing = editingBlock?.pageNo === pageNo && editingBlock?.blockIndex === blockIndex
+    
+    const editableContent = (
+      <div 
+        className="cursor-pointer rounded transition-colors hover:bg-blue-50/50"
+        onClick={() => !isEditing && handleBlockEdit(pageNo, blockIndex)}
+      >
+        {isEditing ? (
+          <textarea
+            value={block.content || ''}
+            onChange={(e) => handleBlockUpdate(pageNo, blockIndex, e.target.value)}
+            className="w-full p-2 text-sm border-2 border-blue-400 rounded focus:outline-none focus:ring-2 focus:ring-blue-500 bg-blue-50"
+            style={{ minHeight: '60px', lineHeight: '1.6' }}
+            autoFocus
+            onBlur={() => setEditingBlock(null)}
+          />
+        ) : (
+          <span>{block.content}</span>
+        )}
+      </div>
+    )
 
-  // Paper Bank: Render block
-  const renderBlock = (block) => {
     switch (block.type) {
       case 'title':
+        return (
+          <div className="text-center py-3" style={block.style || {}}>
+            <div style={{ fontSize: '20px', fontWeight: 'bold', lineHeight: '1.3', color: '#111827' }}>
+              {editableContent}
+            </div>
+          </div>
+        )
       case 'subtitle':
+        return (
+          <div className="text-center py-1" style={block.style || {}}>
+            <div style={{ fontSize: '13px', color: '#6B7280', lineHeight: '1.4' }}>
+              {editableContent}
+            </div>
+          </div>
+        )
       case 'section':
+        return (
+          <div className="mt-6 mb-3" style={block.style || {}}>
+            <div className="flex items-center gap-2">
+              <div style={{ width: '3px', height: '18px', background: '#111827', borderRadius: '2px' }} />
+              <div style={{ fontSize: '15px', fontWeight: 'bold', color: '#111827', lineHeight: '1.4' }}>
+                {editableContent}
+              </div>
+            </div>
+            <div className="mt-2" style={{ borderBottom: '1.5px solid #D1D5DB' }} />
+          </div>
+        )
       case 'question':
+        return (
+          <div className="mb-3" style={block.style || {}}>
+            <div style={{ fontSize: '14px', lineHeight: '1.7', color: '#1F2937' }}>
+              {editableContent}
+            </div>
+            {block.options && block.options.length > 0 && (
+              <div className="mt-2 ml-4">
+                {block.options.map((opt, optIdx) => (
+                  <div 
+                    key={optIdx}
+                    className="cursor-pointer rounded px-1 py-0.5 hover:bg-blue-50/50"
+                    onClick={() => {
+                      const newOptions = [...block.options]
+                      const newContent = newOptions[optIdx]
+                      setEditingBlock({ pageNo, blockIndex, optionIndex: optIdx })
+                      // For simplicity, edit the whole option
+                    }}
+                  >
+                    <span style={{ fontSize: '13px', lineHeight: '1.6', color: '#374151' }}>
+                      {opt}
+                    </span>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+        )
       case 'text':
-      case 'footer':
-        return block.content
+        return (
+          <div className="mb-2" style={block.style || {}}>
+            <div style={{ fontSize: '14px', lineHeight: '1.7', color: '#374151' }}>
+              {editableContent}
+            </div>
+          </div>
+        )
       case 'image':
-        return block.src ? (
-          <img src={block.src} alt={block.caption || '试卷图片'} className="max-w-full my-2" />
-        ) : null
+        return (
+          <div className="my-4 text-center">
+            {block.src ? (
+              <img 
+                src={block.src} 
+                alt={block.caption || '试卷图片'} 
+                className="max-w-full rounded mx-auto"
+                style={{ maxHeight: '300px', objectFit: 'contain' }}
+              />
+            ) : (
+              <div className="text-gray-400 text-sm py-4">[图片未识别]</div>
+            )}
+            {block.caption && (
+              <div className="text-xs text-gray-500 mt-1 text-center">{block.caption}</div>
+            )}
+          </div>
+        )
       case 'table':
         if (!block.rows || block.rows.length === 0) return null
         return (
-          <table className="w-full border-collapse border border-gray-300 text-sm my-2">
-            <tbody>
-              {block.rows.map((row, rowIdx) => (
-                <tr key={rowIdx}>
-                  {row.map((cell, cellIdx) => (
-                    <td key={cellIdx} className="border border-gray-300 px-2 py-1">{cell}</td>
-                  ))}
-                </tr>
-              ))}
-            </tbody>
-          </table>
+          <div className="my-4 overflow-x-auto">
+            <table className="w-full border-collapse border border-gray-400 text-sm">
+              <tbody>
+                {block.rows.map((row, rowIdx) => (
+                  <tr key={rowIdx}>
+                    {row.map((cell, cellIdx) => (
+                      <td 
+                        key={cellIdx} 
+                        className="border border-gray-400 px-3 py-2"
+                        style={{ fontSize: '13px', lineHeight: '1.5' }}
+                      >
+                        {cell}
+                      </td>
+                    ))}
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )
+      case 'footer':
+        return (
+          <div className="text-center py-3 mt-4" style={{ borderTop: '1px solid #E5E7EB' }}>
+            <div style={{ fontSize: '11px', color: '#9CA3AF' }}>
+              {editableContent}
+            </div>
+          </div>
         )
       default:
-        return block.content
+        return (
+          <div className="mb-2" style={block.style || {}}>
+            <div style={{ fontSize: '14px', lineHeight: '1.6', color: '#374151' }}>
+              {editableContent}
+            </div>
+          </div>
+        )
     }
+  }
+
+  // Paper Bank: Render a full page of the reconstructed paper
+  const renderReconstructedPage = (page) => {
+    return (
+      <div 
+        className="bg-white rounded-lg shadow-sm overflow-hidden"
+        style={{ 
+          border: '1px solid #E5E7EB',
+          marginBottom: '16px',
+          minHeight: '600px'
+        }}
+      >
+        {/* Page content */}
+        <div className="p-6">
+          {page.layoutBlocks && page.layoutBlocks.length > 0 ? (
+            page.layoutBlocks.map((block, idx) => (
+              <div key={idx}>
+                {renderBlock(block, page.pageNo, idx)}
+              </div>
+            ))
+          ) : (
+            <div className="text-center py-12 text-gray-400 text-sm">
+              {page.error ? `识别失败：${page.error}` : '该页未识别到内容'}
+            </div>
+          )}
+        </div>
+        {/* Page number footer */}
+        <div className="text-center py-2 text-xs text-gray-400" style={{ borderTop: '1px solid #F3F4F6' }}>
+          — {page.pageNo} —
+        </div>
+      </div>
+    )
   }
 
   // Paper Bank: Print paper (supports structured pages with layoutBlocks)
@@ -2828,7 +2956,7 @@ export default function App() {
                       <div 
                         ref={leftRef}
                         className="flex-1 overflow-y-auto rounded-lg p-2"
-                        style={{ background: '#F9FAFB', border: '1px solid #E5E7EB' }}
+                        style={{ background: '#F3F4F6', border: '1px solid #E5E7EB' }}
                         onScroll={handleScrollSync}
                       >
                         <div className="text-center text-xs text-gray-500 mb-2 font-medium">原始试卷</div>
@@ -2838,44 +2966,23 @@ export default function App() {
                             <img 
                               src={page.originalImage} 
                               alt={`第${page.pageNo}页`}
-                              className="max-w-full rounded shadow-sm"
+                              className="max-w-full rounded shadow-sm bg-white"
                             />
                           </div>
                         ))}
                       </div>
 
-                      {/* Right: Reconstructed Content */}
+                      {/* Right: Reconstructed Paper Preview */}
                       <div 
                         ref={rightRef}
-                        className="flex-1 overflow-y-auto rounded-lg p-3"
-                        style={{ background: '#FFFFFF', border: '1px solid #E5E7EB' }}
+                        className="flex-1 overflow-y-auto rounded-lg p-2"
+                        style={{ background: '#F3F4F6', border: '1px solid #E5E7EB' }}
                         onScroll={handleScrollSync}
                       >
-                        <div className="text-center text-xs text-gray-500 mb-2 font-medium">数字化重建</div>
+                        <div className="text-center text-xs text-gray-500 mb-2 font-medium">数字化重建预览</div>
                         {paperBankReconstructedPages.map((page) => (
-                          <div key={page.pageNo} className="mb-6">
-                            <div className="text-xs text-gray-400 text-center mb-2">第 {page.pageNo} 页</div>
-                            <div className="space-y-1">
-                              {page.layoutBlocks.map((block, idx) => (
-                                <div 
-                                  key={idx}
-                                  className={`relative cursor-pointer rounded p-1 hover:bg-blue-50 transition-colors ${getBlockClassName(block)}`}
-                                  onClick={() => handleBlockEdit(page.pageNo, idx)}
-                                >
-                                  {editingBlock?.pageNo === page.pageNo && editingBlock?.blockIndex === idx ? (
-                                    <textarea
-                                      value={block.content || ''}
-                                      onChange={(e) => handleBlockUpdate(page.pageNo, idx, e.target.value)}
-                                      className="w-full p-1 text-sm border border-blue-400 rounded focus:outline-none focus:ring-2 focus:ring-blue-500"
-                                      style={{ minHeight: '60px', lineHeight: '1.5' }}
-                                      autoFocus
-                                    />
-                                  ) : (
-                                    <div>{renderBlock(block)}</div>
-                                  )}
-                                </div>
-                              ))}
-                            </div>
+                          <div key={page.pageNo}>
+                            {renderReconstructedPage(page)}
                           </div>
                         ))}
                       </div>
