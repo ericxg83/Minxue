@@ -33,6 +33,7 @@ import { useUIStore, useStudentStore, useTaskStore, useWrongQuestionStore, useEx
 import { getStudents, getTasksByStudent, getQuestionsByTask, addWrongQuestions, getWrongQuestionsByStudent, getExamsByStudent, getGeneratedExamsByStudent, createTask, updateTaskStatus, uploadImage, updateQuestion, updateQuestionTags, invalidateCache, createStudent, updateWrongQuestionStatus, getQuestionsByIds, deleteTask, deleteGeneratedExam, deleteWrongQuestion, getTaskById, recalculateTaskStats, clearStudentCaches } from './services/apiService'
 import { taskService } from './services/taskService'
 import { recognizeQuestions, compressImage, saveRecognitionResult } from './services/aiService'
+import { processMultiPagePaper } from './services/paperBankAIService'
 import { mockQuestions, mockTasks, mockWrongQuestions, mockGeneratedExams, mockStudents } from './data/mockData'
 import StudentSwitcher from './components/StudentSwitcher'
 
@@ -916,6 +917,16 @@ export default function App() {
 
   // ==================== Paper Bank Handlers ====================
 
+  // Utility: Convert File to base64
+  const fileToBase64 = (file) => {
+    return new Promise((resolve, reject) => {
+      const reader = new FileReader()
+      reader.readAsDataURL(file)
+      reader.onload = () => resolve(reader.result)
+      reader.onerror = reject
+    })
+  }
+
   // Persist paper bank papers
   useEffect(() => {
     try {
@@ -961,69 +972,62 @@ export default function App() {
     setPaperBankStep('processing')
 
     try {
-      // Simulate progress
-      const progressInterval = setInterval(() => {
-        setPaperBankProgress(prev => {
-          const next = prev + Math.random() * 15
-          return next >= 95 ? 95 : next
+      // Convert uploaded pages to base64 for AI processing
+      const pagesForAI = await Promise.all(
+        paperBankUploadedPages.map(async (page) => {
+          let imageBase64 = page.imageBase64
+          if (!imageBase64 && page.file) {
+            // Convert File to base64
+            imageBase64 = await fileToBase64(page.file)
+          }
+          return {
+            id: page.id,
+            imageUrl: page.imageUrl,
+            imageBase64: imageBase64
+          }
         })
-      }, 800)
+      )
 
-      // Simulate AI processing (in production, this would call the AI API)
-      await new Promise(resolve => setTimeout(resolve, 3000))
+      // Update progress during processing
+      let currentProgress = 10
+      const progressInterval = setInterval(() => {
+        currentProgress += Math.random() * 5
+        if (currentProgress < 90) {
+          setPaperBankProgress(currentProgress)
+        }
+      }, 1000)
+
+      // Call real AI service
+      const result = await processMultiPagePaper(pagesForAI)
 
       clearInterval(progressInterval)
       setPaperBankProgress(100)
 
-      // Mock extracted info
-      const mockInfo = {
-        name: paperBankUploadedPages[0]?.name?.replace(/\.[^.]+$/, '') || '未命名试卷',
-        subject: '数学',
-        grade: '初三',
-        examType: '期中考试'
+      if (result.success) {
+        const info = result.data.paperInfo || {}
+        const fullContent = result.data.fullContent || ''
+
+        // Set extracted info
+        setPaperBankInfo({
+          name: info.name || paperBankUploadedPages[0]?.name?.replace(/\.[^.]+$/, '') || '未命名试卷',
+          subject: info.subject || '',
+          grade: info.grade || '',
+          examType: info.examType || '',
+          schoolYear: info.schoolYear || '',
+          semester: info.semester || ''
+        })
+
+        // Set OCR content for proofreading
+        setPaperBankProofreadContent(fullContent)
+
+        // Move to proofread step
+        setTimeout(() => {
+          setPaperBankStep('proofread')
+        }, 500)
+      } else {
+        Toast.show({ message: result.error || 'AI识别失败', type: 'error', duration: 3000 })
+        setPaperBankStep('upload')
       }
-
-      // Mock proofread content
-      const mockContent = `【试卷名称】${mockInfo.name}
-【学科】${mockInfo.subject}
-【年级】${mockInfo.grade}
-【考试类型】${mockInfo.examType}
-
-一、选择题（每题3分，共30分）
-
-1. 下列计算正确的是（ ）
-   A. 2 + 3 = 5
-   B. 2 × 3 = 6
-   C. 2 - 3 = 1
-   D. 2 ÷ 3 = 1
-
-2. 若x = 2，则x² + 1的值为（ ）
-   A. 3
-   B. 4
-   C. 5
-   D. 6
-
-二、填空题（每题4分，共20分）
-
-3. 计算：(-2)³ = ______
-
-4. 若a + b = 5，ab = 6，则a² + b² = ______
-
-三、解答题（共50分）
-
-5. （10分）解方程：2x + 5 = 13
-
-6. （15分）已知三角形ABC中，AB = AC，∠A = 40°，求∠B和∠C的度数。
-
-7. （25分）某商品原价100元，先涨价20%，再降价20%，求最终价格。`
-
-      setPaperBankInfo(mockInfo)
-      setPaperBankProofreadContent(mockContent)
-
-      // Delay to show completion
-      setTimeout(() => {
-        setPaperBankStep('proofread')
-      }, 500)
     } catch (error) {
       console.error('[PaperBank] AI处理失败:', error)
       Toast.show({ message: '处理失败，请重试', type: 'error', duration: 3000 })
