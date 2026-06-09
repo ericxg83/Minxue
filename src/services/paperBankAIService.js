@@ -112,6 +112,7 @@ function buildLayoutAnalysisPrompt() {
 每个区块包含：
 - type: 区块类型（title/subtitle/section/question/image/table/text/footer）
 - content: 文字内容
+- confidence: 置信度（0.0-1.0，识别不确定的区域标低值）
 - style: 样式提示（textAlign/fontWeight/fontSize/color）
 - options: 选择题选项数组（仅question类型为选择题时）
 - src: 图片base64（仅image类型）
@@ -135,11 +136,11 @@ type说明：
     "examType": "考试类型"
   },
   "layoutBlocks": [
-    {"type":"title","content":"2024年初三数学期中考试卷","style":{"textAlign":"center","fontWeight":"bold","fontSize":"18px"}},
-    {"type":"subtitle","content":"考试时间：120分钟  满分：150分","style":{"textAlign":"center","fontSize":"12px","color":"#666"}},
-    {"type":"section","content":"一、选择题（每题3分，共30分）","style":{"fontWeight":"bold","fontSize":"14px"}},
-    {"type":"question","content":"1. 下列计算正确的是（ ）","options":["A. 2+3=5","B. 2×3=6","C. 2-3=1","D. 2÷3=1"]},
-    {"type":"text","content":"注意事项：..."}
+    {"type":"title","content":"2024年初三数学期中考试卷","confidence":0.98,"style":{"textAlign":"center","fontWeight":"bold","fontSize":"18px"}},
+    {"type":"subtitle","content":"考试时间：120分钟  满分：150分","confidence":0.95,"style":{"textAlign":"center","fontSize":"12px","color":"#666"}},
+    {"type":"section","content":"一、选择题（每题3分，共30分）","confidence":0.99,"style":{"fontWeight":"bold","fontSize":"14px"}},
+    {"type":"question","content":"1. 下列计算正确的是（ ）","confidence":0.97,"options":["A. 2+3=5","B. 2×3=6","C. 2-3=1","D. 2÷3=1"]},
+    {"type":"text","content":"注意事项：...","confidence":0.90}
   ]
 }
 
@@ -149,7 +150,8 @@ type说明：
 3. 保留填空下划线____和括号（ ）
 4. 选择题必须提取options
 5. 图片保留原图base64（src字段）
-6. 只返回JSON，不要包含其他文字`;
+6. 对不确定的文字标低confidence值（0.5以下表示高度不确定）
+7. 只返回JSON，不要包含其他文字`;
 }
 
 /**
@@ -283,19 +285,18 @@ export const processMultiPagePaperLayout = async (pages) => {
           }
         }
 
-        // 添加图片base64到image类型的区块
-        const layoutBlocksWithImages = pageData.layoutBlocks.map(block => {
-          if (block.type === 'image' && !block.src) {
-            // 如果没有提供src，使用原图
-            return { ...block, src: page.imageBase64.startsWith('data:') ? page.imageBase64 : `data:image/jpeg;base64,${page.imageBase64}` }
-          }
-          return block
-        })
+        // 处理区块：确保confidence字段有默认值，不再将整页图片赋值给image区块
+        const processedBlocks = pageData.layoutBlocks.map(block => ({
+          ...block,
+          confidence: block.confidence || 0.8,
+          // image区块不再使用整页图片，只保留描述信息
+          src: block.type === 'image' ? undefined : block.src
+        }))
 
         results.pageResults.push({
           pageNo: i + 1,
           originalImage: page.imageBase64.startsWith('data:') ? page.imageBase64 : `data:image/jpeg;base64,${page.imageBase64}`,
-          layoutBlocks: layoutBlocksWithImages
+          layoutBlocks: processedBlocks
         })
       } else {
         console.warn(`[PaperBank] 第${i + 1}页版面分析失败:`, layoutResult.error)

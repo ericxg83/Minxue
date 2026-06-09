@@ -1151,10 +1151,11 @@ export default function App() {
   // Paper Bank: Render a single block with full paper layout styling
   const renderBlock = (block, pageNo, blockIndex) => {
     const isEditing = editingBlock?.pageNo === pageNo && editingBlock?.blockIndex === blockIndex
+    const isLowConfidence = block.confidence !== undefined && block.confidence < 0.7
     
     const editableContent = (
       <div 
-        className="cursor-pointer rounded transition-colors hover:bg-blue-50/50"
+        className={`cursor-pointer rounded transition-colors ${isLowConfidence ? 'bg-amber-50 border border-amber-300 px-1' : 'hover:bg-blue-50/50'}`}
         onClick={() => !isEditing && handleBlockEdit(pageNo, blockIndex)}
       >
         {isEditing ? (
@@ -1167,7 +1168,14 @@ export default function App() {
             onBlur={() => setEditingBlock(null)}
           />
         ) : (
-          <span>{block.content}</span>
+          <div className="flex items-start gap-1">
+            <span>{block.content}</span>
+            {isLowConfidence && (
+              <span className="inline-flex items-center gap-0.5 text-amber-600 text-[10px] ml-1 shrink-0" title={`置信度: ${Math.round(block.confidence * 100)}%`}>
+                <AlertCircle size={10} />
+              </span>
+            )}
+          </div>
         )}
       </div>
     )
@@ -1239,20 +1247,14 @@ export default function App() {
         )
       case 'image':
         return (
-          <div className="my-4 text-center">
-            {block.src ? (
-              <img 
-                src={block.src} 
-                alt={block.caption || '试卷图片'} 
-                className="max-w-full rounded mx-auto"
-                style={{ maxHeight: '300px', objectFit: 'contain' }}
-              />
-            ) : (
-              <div className="text-gray-400 text-sm py-4">[图片未识别]</div>
-            )}
-            {block.caption && (
-              <div className="text-xs text-gray-500 mt-1 text-center">{block.caption}</div>
-            )}
+          <div className="my-3 text-center">
+            <div className="inline-flex flex-col items-center gap-1 px-3 py-2 rounded-lg border-2 border-dashed border-gray-300 bg-gray-50">
+              <ImageIcon size={16} style={{ color: '#9CA3AF' }} />
+              <span className="text-xs text-gray-400">
+                {block.caption ? `[图: ${block.caption}]` : '[图片区域]'}
+              </span>
+              <span className="text-[10px] text-gray-300">Word导出后在此处插入原图</span>
+            </div>
           </div>
         )
       case 'table':
