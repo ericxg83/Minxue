@@ -11,6 +11,7 @@ import {
   RefreshCw,
   Bell,
   Plus,
+  Minus,
   QrCode,
   Printer,
   X,
