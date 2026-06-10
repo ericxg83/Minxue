@@ -15,6 +15,14 @@
           <el-icon><DataAnalysis /></el-icon>
           成长中心
         </el-button>
+        <el-button type="warning" text @click="handleGoToAIReview">
+          <el-icon><View /></el-icon>
+          AI复审
+        </el-button>
+        <el-button type="info" text @click="handleGoToQuestionBank">
+          <el-icon><Collection /></el-icon>
+          题库管理
+        </el-button>
         <el-button type="info" text @click="handleGoToPaperImport">
           <el-icon><Upload /></el-icon>
           试卷入库
@@ -450,7 +458,8 @@ import { ElMessage, ElMessageBox } from 'element-plus'
 import {
   Document, User, Plus, Printer, Picture, PictureFilled,
   EditPen, CircleCheckFilled, CircleCloseFilled, WarningFilled,
-  ArrowLeft, ArrowRight, Upload, Download, CircleCheck, DataAnalysis
+  ArrowLeft, ArrowRight, Upload, Download, CircleCheck, DataAnalysis,
+  View, Collection
 } from '@element-plus/icons-vue'
 import dayjs from 'dayjs'
 
@@ -518,6 +527,16 @@ const handleGoToWrongBook = () => {
 // 跳转到成长中心
 const handleGoToGrowth = () => {
   router.push('/growth')
+}
+
+// 跳转到AI复审中心
+const handleGoToAIReview = () => {
+  router.push('/ai-review')
+}
+
+// 跳转到题库管理
+const handleGoToQuestionBank = () => {
+  router.push('/question-bank')
 }
 
 // 跳转到试卷入库

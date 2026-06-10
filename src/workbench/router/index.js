@@ -3,6 +3,8 @@ import DashboardWorkbench from '../views/DashboardWorkbench.vue'
 import WrongBookWorkbench from '../views/WrongBookWorkbench.vue'
 import ExamWorkbench from '../views/ExamWorkbench.vue'
 import GrowthWorkbench from '../views/GrowthWorkbench.vue'
+import AIReviewWorkbench from '../views/AIReviewWorkbench.vue'
+import QuestionBankWorkbench from '../views/QuestionBankWorkbench.vue'
 
 const routes = [
   {
@@ -27,6 +29,18 @@ const routes = [
     path: '/growth',
     name: 'Growth',
     component: GrowthWorkbench,
+    meta: { requiresPC: true }
+  },
+  {
+    path: '/ai-review',
+    name: 'AIReview',
+    component: AIReviewWorkbench,
+    meta: { requiresPC: true }
+  },
+  {
+    path: '/question-bank',
+    name: 'QuestionBank',
+    component: QuestionBankWorkbench,
     meta: { requiresPC: true }
   }
 ]
