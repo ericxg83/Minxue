@@ -1,6 +1,7 @@
 import { defineStore } from 'pinia'
 import { ref, computed } from 'vue'
 import { getWrongQuestionsByStudent, deleteWrongQuestion, updateWrongQuestionStatus } from '../../services/apiService'
+import { mockWrongQuestions } from '../../data/mockData'
 import dayjs from 'dayjs'
 
 // 使用测试数据（与移动端保持一致）
@@ -185,7 +186,8 @@ export const useWrongBookStore = defineStore('wrongBook', () => {
     loading.value = true
     try {
       if (USE_MOCK_DATA) {
-        // mock 数据已由外部加载，这里不需要重复加载
+        // 直接使用 mock 数据
+        wrongQuestions.value = [...mockWrongQuestions]
         return
       }
 
@@ -251,7 +253,9 @@ export const useWrongBookStore = defineStore('wrongBook', () => {
   // 更新掌握状态
   const updateStatus = async (wqId, status) => {
     try {
-      await updateWrongQuestionStatus(wqId, status)
+      if (!USE_MOCK_DATA) {
+        await updateWrongQuestionStatus(wqId, status)
+      }
       // 更新本地状态
       const wq = wrongQuestions.value.find(w => w.id === wqId)
       if (wq) {
@@ -267,7 +271,9 @@ export const useWrongBookStore = defineStore('wrongBook', () => {
   // 删除错题
   const deleteQuestion = async (wqId) => {
     try {
-      await deleteWrongQuestion(wqId)
+      if (!USE_MOCK_DATA) {
+        await deleteWrongQuestion(wqId)
+      }
       wrongQuestions.value = wrongQuestions.value.filter(wq => wq.id !== wqId)
       selectedQuestions.value = selectedQuestions.value.filter(sq => sq.id !== wqId)
       return true
