@@ -26,7 +26,7 @@
     <!-- 统计卡片区域 -->
     <div class="stats-section">
       <div class="stats-grid">
-        <div class="stat-card stat-card--pending">
+        <div class="stat-card stat-card--pending" @click="currentView = 'review'">
           <div class="stat-card__icon">
             <el-icon><Document /></el-icon>
           </div>
@@ -36,7 +36,7 @@
           </div>
         </div>
         
-        <div class="stat-card stat-card--students">
+        <div class="stat-card stat-card--students" @click="currentView = 'review'">
           <div class="stat-card__icon">
             <el-icon><User /></el-icon>
           </div>
@@ -46,7 +46,7 @@
           </div>
         </div>
         
-        <div class="stat-card stat-card--new">
+        <div class="stat-card stat-card--new" @click="currentView = 'review'">
           <div class="stat-card__icon">
             <el-icon><Plus /></el-icon>
           </div>
@@ -56,20 +56,20 @@
           </div>
         </div>
         
-        <div class="stat-card stat-card--print">
+        <div class="stat-card stat-card--print" @click="currentView = 'reviewTask'">
           <div class="stat-card__icon">
             <el-icon><Printer /></el-icon>
           </div>
           <div class="stat-card__content">
-            <div class="stat-card__value">{{ reviewStore.todayStats.pendingPrintExams }}</div>
+            <div class="stat-card__value">{{ reviewTaskStore.pendingPrintCount }}</div>
             <div class="stat-card__label">待打印重练卷</div>
           </div>
         </div>
       </div>
     </div>
 
-    <!-- 主内容区 -->
-    <main class="main-content">
+    <!-- 主内容区：错题审核视图 -->
+    <main v-if="currentView === 'review'" class="main-content">
       <!-- 左侧：学生列表 -->
       <aside class="left-panel">
         <div class="panel-header">
@@ -285,6 +285,147 @@
         </template>
       </section>
     </main>
+
+    <!-- 重练卷管理视图 -->
+    <main v-else-if="currentView === 'reviewTask'" class="main-content review-task-main">
+      <!-- 左侧：重练任务列表 -->
+      <aside class="left-panel">
+        <div class="panel-header">
+          <span class="panel-title">重练任务</span>
+          <span class="panel-count">{{ reviewTaskStore.todayPendingTasks.length }} 份待打印</span>
+        </div>
+        
+        <!-- 状态筛选 -->
+        <div class="task-filters">
+          <el-radio-group v-model="statusFilterModel" size="small" @change="handleStatusFilterChange">
+            <el-radio-button value="pending_print">待打印</el-radio-button>
+            <el-radio-button value="printed">已打印</el-radio-button>
+            <el-radio-button value="completed">已完成</el-radio-button>
+            <el-radio-button value="all">全部</el-radio-button>
+          </el-radio-group>
+        </div>
+
+        <div class="task-list">
+          <div
+            v-for="task in reviewTaskStore.filteredTasks"
+            :key="task.id"
+            class="task-item"
+            :class="{ 'task-item--active': reviewTaskStore.selectedTask?.id === task.id }"
+            @click="reviewTaskStore.selectTask(task)"
+          >
+            <div class="task-item__avatar">
+              <el-avatar :size="36" :src="getStudentAvatar(task.student_id)">
+                {{ task.student_name.charAt(0) }}
+              </el-avatar>
+            </div>
+            <div class="task-item__info">
+              <div class="task-item__name">{{ task.student_name }} 重练卷</div>
+              <div class="task-item__date">{{ task.review_date }}</div>
+            </div>
+            <div class="task-item__status">
+              <el-tag :type="getTaskStatusType(task.status)" size="small">
+                {{ getTaskStatusText(task.status) }}
+              </el-tag>
+              <div class="task-item__count">{{ task.question_count }} 题</div>
+            </div>
+          </div>
+
+          <el-empty v-if="reviewTaskStore.filteredTasks.length === 0" description="暂无重练任务" />
+        </div>
+      </aside>
+
+      <!-- 右侧：重练卷详情 -->
+      <section class="right-panel task-detail-panel">
+        <template v-if="reviewTaskStore.selectedTask">
+          <!-- 任务详情头部 -->
+          <div class="task-detail-header">
+            <div class="task-detail__info">
+              <el-avatar :size="40" :src="getStudentAvatar(reviewTaskStore.selectedTask.student_id)">
+                {{ reviewTaskStore.selectedTask.student_name.charAt(0) }}
+              </el-avatar>
+              <div class="task-detail__text">
+                <div class="task-detail__name">{{ reviewTaskStore.selectedTask.student_name }} {{ reviewTaskStore.selectedTask.review_date }}重练卷</div>
+                <div class="task-detail__meta">
+                  <span>{{ reviewTaskStore.selectedTask.question_count }} 道题目</span>
+                  <el-tag :type="getTaskStatusType(reviewTaskStore.selectedTask.status)" size="small">
+                    {{ getTaskStatusText(reviewTaskStore.selectedTask.status) }}
+                  </el-tag>
+                </div>
+              </div>
+            </div>
+            <div class="task-detail__actions">
+              <el-button 
+                v-if="reviewTaskStore.selectedTask.status === 'pending_print'"
+                type="primary" 
+                size="default"
+                @click="handleGeneratePDF(reviewTaskStore.selectedTask)"
+              >
+                <el-icon><Download /></el-icon>
+                生成并下载PDF
+              </el-button>
+              <el-button 
+                v-if="reviewTaskStore.selectedTask.status === 'pending_print'"
+                type="success" 
+                size="default"
+                @click="handleMarkPrinted(reviewTaskStore.selectedTask.id)"
+              >
+                <el-icon><Printer /></el-icon>
+                标记已打印
+              </el-button>
+              <el-button 
+                v-if="reviewTaskStore.selectedTask.status === 'printed'"
+                type="info" 
+                size="default"
+                @click="handleMarkCompleted(reviewTaskStore.selectedTask.id)"
+              >
+                <el-icon><CircleCheck /></el-icon>
+                标记已完成
+              </el-button>
+              <el-button 
+                type="default" 
+                size="default"
+                @click="reviewTaskStore.clearSelection()"
+              >
+                返回列表
+              </el-button>
+            </div>
+          </div>
+
+          <!-- 题目预览 -->
+          <div class="task-detail-content">
+            <div class="task-questions">
+              <div 
+                v-for="(q, idx) in selectedTaskQuestions" 
+                :key="q.id"
+                class="task-question"
+              >
+                <div class="task-question__header">
+                  <span class="task-question__num">第 {{ idx + 1 }} 题</span>
+                  <el-tag size="small">{{ q.subject }}</el-tag>
+                  <el-tag size="small" type="info">{{ q.question_type === 'choice' ? '选择题' : q.question_type === 'fill' ? '填空题' : '解答题' }}</el-tag>
+                </div>
+                <div class="task-question__content">
+                  {{ q.content }}
+                </div>
+                <div v-if="q.options && q.options.length > 0" class="task-question__options">
+                  <div v-for="(opt, i) in q.options" :key="i" class="task-option">
+                    <span class="task-option__letter">{{ String.fromCharCode(65 + i) }}</span>
+                    <span class="task-option__text">{{ opt }}</span>
+                  </div>
+                </div>
+                <div v-if="q.answer" class="task-question__answer">
+                  参考答案：{{ q.answer }}
+                </div>
+              </div>
+            </div>
+          </div>
+        </template>
+
+        <template v-else>
+          <el-empty description="请选择重练任务查看详情" />
+        </template>
+      </section>
+    </main>
   </div>
 </template>
 
@@ -292,16 +433,25 @@
 import { ref, computed, onMounted, onUnmounted } from 'vue'
 import { useRouter } from 'vue-router'
 import { useReviewStore } from '../stores/reviewStore'
-import { ElMessage } from 'element-plus'
+import { useReviewTaskStore } from '../stores/reviewTaskStore'
+import { mockStudents } from '../../data/mockData'
+import { ElMessage, ElMessageBox } from 'element-plus'
 import {
   Document, User, Plus, Printer, Picture, PictureFilled,
   EditPen, CircleCheckFilled, CircleCloseFilled, WarningFilled,
-  ArrowLeft, ArrowRight, Upload
+  ArrowLeft, ArrowRight, Upload, Download, CircleCheck
 } from '@element-plus/icons-vue'
 import dayjs from 'dayjs'
 
 const router = useRouter()
 const reviewStore = useReviewStore()
+const reviewTaskStore = useReviewTaskStore()
+
+// 当前视图：review（错题审核）| reviewTask（重练卷管理）
+const currentView = ref('review')
+
+// 状态筛选
+const statusFilterModel = ref('pending_print')
 
 // 当前审核的错题
 const currentQuestion = computed(() => reviewStore.currentReviewQuestion)
@@ -311,6 +461,12 @@ const reviewProgress = computed(() => {
   const total = reviewStore.studentWrongQuestions.length
   if (total === 0) return 0
   return Math.round(((reviewStore.currentReviewIndex + 1) / total) * 100)
+})
+
+// 选中任务的题目
+const selectedTaskQuestions = computed(() => {
+  if (!reviewTaskStore.selectedTask) return []
+  return reviewTaskStore.getTaskQuestions(reviewTaskStore.selectedTask)
 })
 
 // 选择学生
@@ -352,39 +508,85 @@ const handleGoToPaperImport = () => {
   router.push('/paper')
 }
 
+// 状态筛选切换
+const handleStatusFilterChange = (status) => {
+  reviewTaskStore.setStatusFilter(status)
+}
+
+// 获取学生头像
+const getStudentAvatar = (studentId) => {
+  const student = mockStudents.find(s => s.id === studentId)
+  return student?.avatar || ''
+}
+
+// 获取任务状态类型
+const getTaskStatusType = (status) => {
+  switch (status) {
+    case 'pending_print': return 'warning'
+    case 'printed': return 'success'
+    case 'completed': return 'info'
+    default: return ''
+  }
+}
+
+// 获取任务状态文本
+const getTaskStatusText = (status) => {
+  switch (status) {
+    case 'pending_print': return '待打印'
+    case 'printed': return '已打印'
+    case 'completed': return '已完成'
+    default: return '未知'
+  }
+}
+
+// 生成PDF
+const handleGeneratePDF = async (task) => {
+  const success = await reviewTaskStore.generateReviewPDF(task)
+  if (success) {
+    ElMessage.success(`${task.student_name} ${task.review_date}重练卷 已生成并下载`)
+  }
+}
+
+// 标记已打印
+const handleMarkPrinted = (taskId) => {
+  reviewTaskStore.markAsPrinted(taskId)
+}
+
+// 标记已完成
+const handleMarkCompleted = (taskId) => {
+  reviewTaskStore.markAsCompleted(taskId)
+}
+
 // 键盘快捷键处理
 const handleKeyboard = (e) => {
   // 如果正在输入框中，不处理快捷键
   if (e.target.tagName === 'INPUT' || e.target.tagName === 'TEXTAREA') return
   
+  // 只在错题审核视图下处理快捷键
+  if (currentView.value !== 'review') return
+  
   switch (e.key) {
     case 'Enter':
-      // Enter 确认（默认标记为正确）
       e.preventDefault()
       handleReview('correct')
       break
     case 'ArrowLeft':
-      // 左箭头 上一题
       e.preventDefault()
       handlePrevQuestion()
       break
     case 'ArrowRight':
-      // 右箭头 下一题
       e.preventDefault()
       handleNextQuestion()
       break
     case '1':
-      // 数字1 正确
       e.preventDefault()
       handleReview('correct')
       break
     case '2':
-      // 数字2 错误
       e.preventDefault()
       handleReview('wrong')
       break
     case '3':
-      // 数字3 未作答
       e.preventDefault()
       handleReview('unanswered')
       break
@@ -394,6 +596,7 @@ const handleKeyboard = (e) => {
 // 初始化
 onMounted(() => {
   reviewStore.initData()
+  reviewTaskStore.initData()
   window.addEventListener('keydown', handleKeyboard)
 })
 
@@ -905,5 +1108,240 @@ onUnmounted(() => {
 
 .review-actions__buttons .el-button {
   min-width: 100px;
+}
+
+/* 重练卷管理视图样式 */
+.review-task-main {
+  background: #f5f7fa;
+}
+
+/* 任务筛选 */
+.task-filters {
+  padding: 8px;
+  border-bottom: 1px solid #e5e7eb;
+}
+
+.task-filters :deep(.el-radio-group) {
+  width: 100%;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+}
+
+.task-filters :deep(.el-radio-button) {
+  flex: 1;
+  min-width: 0;
+}
+
+.task-filters :deep(.el-radio-button__inner) {
+  width: 100%;
+  font-size: 12px;
+  padding: 6px 8px;
+}
+
+/* 任务列表 */
+.task-list {
+  flex: 1;
+  overflow-y: auto;
+  padding: 8px;
+}
+
+.task-item {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 10px;
+  border-radius: 8px;
+  cursor: pointer;
+  transition: all 0.2s;
+  margin-bottom: 4px;
+}
+
+.task-item:hover {
+  background: #f9fafb;
+}
+
+.task-item--active {
+  background: #eff6ff;
+  border: 1px solid #bfdbfe;
+}
+
+.task-item__avatar {
+  flex-shrink: 0;
+}
+
+.task-item__info {
+  flex: 1;
+  min-width: 0;
+}
+
+.task-item__name {
+  font-size: 13px;
+  font-weight: 500;
+  color: #111827;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.task-item__date {
+  font-size: 11px;
+  color: #6b7280;
+  margin-top: 2px;
+}
+
+.task-item__status {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 4px;
+}
+
+.task-item__count {
+  font-size: 11px;
+  color: #9ca3af;
+}
+
+/* 任务详情面板 */
+.task-detail-panel {
+  background: #fff;
+}
+
+.task-detail-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 12px 20px;
+  background: #fff;
+  border-bottom: 1px solid #e5e7eb;
+}
+
+.task-detail__info {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.task-detail__text {
+  display: flex;
+  flex-direction: column;
+}
+
+.task-detail__name {
+  font-size: 15px;
+  font-weight: 500;
+  color: #111827;
+}
+
+.task-detail__meta {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-top: 4px;
+  font-size: 12px;
+  color: #6b7280;
+}
+
+.task-detail__actions {
+  display: flex;
+  gap: 8px;
+}
+
+.task-detail-content {
+  flex: 1;
+  overflow-y: auto;
+  padding: 16px;
+}
+
+.task-questions {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+.task-question {
+  padding: 16px;
+  background: #f9fafb;
+  border-radius: 8px;
+  border: 1px solid #e5e7eb;
+}
+
+.task-question__header {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 12px;
+}
+
+.task-question__num {
+  font-size: 14px;
+  font-weight: 500;
+  color: #374151;
+}
+
+.task-question__content {
+  font-size: 15px;
+  color: #111827;
+  line-height: 1.6;
+  margin-bottom: 12px;
+}
+
+.task-question__options {
+  display: grid;
+  grid-template-columns: repeat(2, 1fr);
+  gap: 8px;
+  margin-bottom: 12px;
+}
+
+.task-option {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 12px;
+  background: #fff;
+  border-radius: 6px;
+  border: 1px solid #e5e7eb;
+}
+
+.task-option__letter {
+  width: 24px;
+  height: 24px;
+  border-radius: 50%;
+  background: #e5e7eb;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 12px;
+  font-weight: 500;
+  color: #374151;
+  flex-shrink: 0;
+}
+
+.task-option__text {
+  font-size: 14px;
+  color: #111827;
+}
+
+.task-question__answer {
+  padding: 10px 12px;
+  background: #f0fdf4;
+  border-radius: 6px;
+  border-left: 4px solid #22c55e;
+  font-size: 14px;
+  color: #16a34a;
+  font-weight: 500;
+}
+
+/* 统计卡片可点击效果 */
+.stat-card {
+  cursor: pointer;
+  transition: all 0.2s;
+}
+
+.stat-card:hover {
+  background: #f0f4f8;
+  border-color: #cbd5e1;
+  transform: translateY(-1px);
+  box-shadow: 0 2px 4px rgba(0, 0, 0, 0.05);
 }
 </style>

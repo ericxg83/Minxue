@@ -596,3 +596,73 @@ export const mockExams = [
     graded_at: '2024-04-21T11:00:00Z'
   }
 ]
+
+// 自动重练任务数据（review_tasks）
+// 业务逻辑：学生今天产生的新错题 → 加入明日重练池 → 凌晨自动生成重练卷 → 教师直接打印
+export const mockReviewTasks = [
+  {
+    id: 'rt-1',
+    student_id: '550e8400-e29b-41d4-a716-446655440001',
+    student_name: '张三',
+    review_date: '2026-06-11',
+    question_ids: ['q-1', 'q-3', 'q-7'],
+    question_count: 3,
+    status: 'pending_print',  // pending_print（待打印）| printed（已打印）| completed（已完成）
+    pdf_url: null,             // PDF生成后的URL
+    created_at: '2026-06-10T00:00:00Z',  // 凌晨自动生成
+    printed_at: null,
+    completed_at: null
+  },
+  {
+    id: 'rt-2',
+    student_id: '550e8400-e29b-41d4-a716-446655440002',
+    student_name: '李四',
+    review_date: '2026-06-11',
+    question_ids: ['q-7'],
+    question_count: 1,
+    status: 'pending_print',
+    pdf_url: null,
+    created_at: '2026-06-10T00:00:00Z',
+    printed_at: null,
+    completed_at: null
+  },
+  {
+    id: 'rt-3',
+    student_id: '550e8400-e29b-41d4-a716-446655440004',
+    student_name: '赵六',
+    review_date: '2026-06-11',
+    question_ids: ['q-2', 'q-3', 'q-4', 'q-5', 'q-6'],
+    question_count: 5,
+    status: 'pending_print',
+    pdf_url: null,
+    created_at: '2026-06-10T00:00:00Z',
+    printed_at: null,
+    completed_at: null
+  },
+  {
+    id: 'rt-4',
+    student_id: '550e8400-e29b-41d4-a716-446655440001',
+    student_name: '张三',
+    review_date: '2026-06-10',
+    question_ids: ['q-1', 'q-3'],
+    question_count: 2,
+    status: 'printed',
+    pdf_url: 'https://example.com/pdfs/zhangsan-2026-06-10.pdf',
+    created_at: '2026-06-09T00:00:00Z',
+    printed_at: '2026-06-10T09:30:00Z',
+    completed_at: null
+  },
+  {
+    id: 'rt-5',
+    student_id: '550e8400-e29b-41d4-a716-446655440003',
+    student_name: '王五',
+    review_date: '2026-06-10',
+    question_ids: ['q-9'],
+    question_count: 1,
+    status: 'completed',
+    pdf_url: 'https://example.com/pdfs/wangwu-2026-06-10.pdf',
+    created_at: '2026-06-09T00:00:00Z',
+    printed_at: '2026-06-10T08:15:00Z',
+    completed_at: '2026-06-10T16:00:00Z'
+  }
+]
