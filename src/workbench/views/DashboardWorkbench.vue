@@ -105,6 +105,10 @@
                 </el-badge>
                 <span class="student-item__pending-text">待审</span>
               </div>
+              <div class="student-item__lifecycle">
+                <el-tag size="small" type="danger">{{ getStudentNewCount(student.id) }} 新</el-tag>
+                <el-tag size="small" type="warning">{{ getStudentReview1Count(student.id) }} 一练</el-tag>
+              </div>
               <div class="student-item__today">
                 <span class="student-item__today-count">{{ reviewStore.getStudentTodayNewCount(student.id) }}</span>
                 <span class="student-item__today-text">今日</span>
@@ -212,6 +216,9 @@
 
                 <!-- 错误信息 -->
                 <div class="review-meta">
+                  <el-tag :type="lifecycleStore.getStatusColor(currentQuestion.lifecycle_status)" size="small">
+                    {{ lifecycleStore.getStatusLabel(currentQuestion.lifecycle_status) }}
+                  </el-tag>
                   <el-tag type="warning" size="small">
                     错误次数：{{ currentQuestion.error_count || 1 }}
                   </el-tag>
@@ -434,6 +441,7 @@ import { ref, computed, onMounted, onUnmounted } from 'vue'
 import { useRouter } from 'vue-router'
 import { useReviewStore } from '../stores/reviewStore'
 import { useReviewTaskStore } from '../stores/reviewTaskStore'
+import { useLifecycleStore, LIFECYCLE_STATUS_LABELS, LIFECYCLE_STATUS_COLORS } from '../stores/lifecycleStore'
 import { mockStudents } from '../../data/mockData'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import {
@@ -446,6 +454,7 @@ import dayjs from 'dayjs'
 const router = useRouter()
 const reviewStore = useReviewStore()
 const reviewTaskStore = useReviewTaskStore()
+const lifecycleStore = useLifecycleStore()
 
 // 当前视图：review（错题审核）| reviewTask（重练卷管理）
 const currentView = ref('review')
@@ -517,6 +526,20 @@ const handleStatusFilterChange = (status) => {
 const getStudentAvatar = (studentId) => {
   const student = mockStudents.find(s => s.id === studentId)
   return student?.avatar || ''
+}
+
+// 获取学生新错题数量
+const getStudentNewCount = (studentId) => {
+  return reviewStore.wrongQuestions.filter(wq => 
+    wq.student_id === studentId && wq.lifecycle_status === 'new'
+  ).length
+}
+
+// 获取学生第一次重练数量
+const getStudentReview1Count = (studentId) => {
+  return reviewStore.wrongQuestions.filter(wq => 
+    wq.student_id === studentId && wq.lifecycle_status === 'review_1'
+  ).length
 }
 
 // 获取任务状态类型
@@ -845,6 +868,11 @@ onUnmounted(() => {
 .student-item__today-text {
   font-size: 10px;
   color: #6b7280;
+}
+
+.student-item__lifecycle {
+  display: flex;
+  gap: 2px;
 }
 
 /* 右侧审核区域 */

@@ -415,17 +415,21 @@ function isSelected(wq) {
 // ===== 状态数量 =====
 const statusCounts = computed(() => ({
   all: wrongBookStore.filteredQuestions.length,
-  pending: wrongBookStore.stats.pending,
-  partial: wrongBookStore.stats.partial,
+  new: wrongBookStore.stats.new,
+  review_1: wrongBookStore.stats.review_1,
+  review_2: wrongBookStore.stats.review_2,
   mastered: wrongBookStore.stats.mastered
 }))
 
 // ===== 统计卡片 =====
 const statsList = computed(() => [
-  { key: 'all', label: '总题数', value: wrongBookStore.stats.total, color: '#007aff' },
+  { key: 'all', label: '累计错题', value: wrongBookStore.stats.total, color: '#007aff' },
+  { key: 'new', label: '新错题', value: wrongBookStore.stats.new, color: '#ff3b30' },
+  { key: 'review_1', label: '第一次重练', value: wrongBookStore.stats.review_1, color: '#ff9500' },
+  { key: 'review_2', label: '第二次重练', value: wrongBookStore.stats.review_2, color: '#5856d6' },
   { key: 'mastered', label: '已掌握', value: wrongBookStore.stats.mastered, color: '#34c759' },
-  { key: 'partial', label: '部分掌握', value: wrongBookStore.stats.partial, color: '#ff9500' },
-  { key: 'pending', label: '未掌握', value: wrongBookStore.stats.pending, color: '#ff3b30' }
+  { key: 'pendingMaster', label: '待掌握', value: wrongBookStore.stats.pendingMaster, color: '#ff9500' },
+  { key: 'masteryRate', label: '掌握率', value: wrongBookStore.stats.masteryRate + '%', color: '#34c759' }
 ])
 
 // ===== 快速筛选 =====
@@ -433,7 +437,9 @@ const quickFilters = [
   { key: 'error_high', label: '高频错题(3次+)' },
   { key: 'recent', label: '本周新增' },
   { key: 'unanswered', label: '未作答' },
-  { key: 'not_practice', label: '未练习' }
+  { key: 'new_status', label: '新错题' },
+  { key: 'review_1_status', label: '第一次重练' },
+  { key: 'review_2_status', label: '第二次重练' }
 ]
 
 function isQuickFilterActive(key) {
@@ -445,8 +451,14 @@ function isQuickFilterActive(key) {
       return f.time === 'week'
     case 'unanswered':
       return f.category === 'unanswered'
+    case 'new_status':
+      return f.lifecycleStatus === 'new'
+    case 'review_1_status':
+      return f.lifecycleStatus === 'review_1'
+    case 'review_2_status':
+      return f.lifecycleStatus === 'review_2'
     case 'not_practice':
-      return false // 特殊筛选，不在store中
+      return false
     default:
       return false
   }
@@ -469,9 +481,16 @@ function handleQuickFilter(key) {
     case 'unanswered':
       wrongBookStore.setFilter('category', wrongBookStore.filters.category === 'unanswered' ? 'all' : 'unanswered')
       break
+    case 'new_status':
+      wrongBookStore.setFilter('lifecycleStatus', wrongBookStore.filters.lifecycleStatus === 'new' ? 'all' : 'new')
+      break
+    case 'review_1_status':
+      wrongBookStore.setFilter('lifecycleStatus', wrongBookStore.filters.lifecycleStatus === 'review_1' ? 'all' : 'review_1')
+      break
+    case 'review_2_status':
+      wrongBookStore.setFilter('lifecycleStatus', wrongBookStore.filters.lifecycleStatus === 'review_2' ? 'all' : 'review_2')
+      break
     case 'not_practice':
-      // 特殊筛选：练习次数为0
-      // 这里通过设置一个自定义标记，在筛选时处理
       ElMessage.info('筛选未练习题功能开发中')
       break
   }
