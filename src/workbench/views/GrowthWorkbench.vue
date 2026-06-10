@@ -215,13 +215,24 @@ function handleGoBack() {
 }
 
 onMounted(async () => {
+  // 自动清理旧缓存（版本更新时）
+  try {
+    const oldKeys = ['students_cache', 'tasks_cache_', 'wrong_questions_cache_', 'exams_cache_', 'generated_exams_cache_']
+    oldKeys.forEach(prefix => {
+      Object.keys(localStorage).forEach(key => {
+        if (key.startsWith(prefix)) {
+          localStorage.removeItem(key)
+          localStorage.removeItem(key + '_ts')
+        }
+      })
+    })
+  } catch (e) {}
+
   loading.value = true
   try {
     // 加载学生列表
     const result = await getStudents(false)
-    console.log('API返回的学生数据:', result)
     const list = result.data || result || []
-    console.log('处理后的学生列表:', list)
     students.value = Array.isArray(list) ? list : []
 
     // 默认选择第一个学生

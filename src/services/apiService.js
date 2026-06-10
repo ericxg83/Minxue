@@ -1,5 +1,8 @@
 const API_BASE = import.meta.env.VITE_API_URL || '/api'
 
+// 版本号：每次部署时自动清理旧缓存
+const CACHE_VERSION = '20260610-v2'
+
 const CACHE_MAX_AGE = {
   STUDENTS: 24 * 60 * 60 * 1000,
   TASKS: 5 * 60 * 1000,
@@ -40,6 +43,28 @@ const clearCache = (key) => {
     localStorage.removeItem(key + '_ts')
   } catch (e) {}
 }
+
+// 自动检测缓存版本，版本不匹配时清理所有旧缓存
+const checkCacheVersion = () => {
+  const stored = localStorage.getItem('cache_version')
+  if (stored !== CACHE_VERSION) {
+    try {
+      const prefixes = ['students_cache', 'tasks_cache_', 'wrong_questions_cache_', 'exams_cache_', 'generated_exams_cache_', 'questions_cache_', 'cache_version']
+      prefixes.forEach(prefix => {
+        Object.keys(localStorage).forEach(key => {
+          if (key.startsWith(prefix)) {
+            localStorage.removeItem(key)
+            localStorage.removeItem(key + '_ts')
+          }
+        })
+      })
+      localStorage.setItem('cache_version', CACHE_VERSION)
+    } catch (e) {}
+  }
+}
+
+// 页面加载时自动检查
+checkCacheVersion()
 
 const apiRequest = async (path, options = {}) => {
   const url = `${API_BASE}${path}`
@@ -384,6 +409,7 @@ export const uploadImage = async (file) => {
 
 export const clearAllCache = () => {
   try {
+    localStorage.removeItem('cache_version')
     const keys = Object.keys(localStorage)
     for (const key of keys) {
       if (key.includes('_cache') || key.includes('_ts')) {

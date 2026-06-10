@@ -122,8 +122,26 @@ export const useReviewStore = defineStore('review', () => {
     }
   }
 
+  // 清理旧缓存（版本更新时使用）
+  const clearOldCaches = () => {
+    try {
+      const prefixes = ['students_cache', 'tasks_cache_', 'wrong_questions_cache_', 'exams_cache_', 'generated_exams_cache_']
+      prefixes.forEach(prefix => {
+        Object.keys(localStorage).forEach(key => {
+          if (key.startsWith(prefix)) {
+            localStorage.removeItem(key)
+            localStorage.removeItem(key + '_ts')
+          }
+        })
+      })
+    } catch (e) {}
+  }
+
   // 初始化数据
   const initData = async () => {
+    // 清理旧缓存，确保加载最新数据
+    clearOldCaches()
+    
     // 加载学生列表
     await loadStudents()
     
