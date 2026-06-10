@@ -2,6 +2,7 @@ import { useEffect, useState, useRef, lazy, Suspense, useCallback, useMemo } fro
 import {
   Camera,
   ChevronRight,
+  Check,
   CheckCircle2,
   XCircle,
   Loader2,
