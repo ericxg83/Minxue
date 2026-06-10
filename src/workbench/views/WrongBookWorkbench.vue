@@ -102,6 +102,29 @@
           </el-button>
           <el-button size="small" @click="handleResetFilters">重置筛选</el-button>
         </div>
+
+        <!-- 去重开关和统计 -->
+        <div class="dedup-section">
+          <div class="section-title">错题去重</div>
+          <el-switch
+            v-model="dedupEnabledProxy"
+            active-text="开启"
+            inactive-text="关闭"
+            @change="handleDedupToggle"
+          />
+          <div v-if="wrongBookStore.stats.duplicateCount > 0" class="dedup-stats">
+            <span class="dedup-stat-item">
+              原始 <el-tag size="small" type="info">{{ wrongBookStore.stats.rawTotal }}</el-tag>
+            </span>
+            <span class="dedup-stat-arrow">→</span>
+            <span class="dedup-stat-item">
+              去重 <el-tag size="small" type="success">{{ wrongBookStore.stats.total }}</el-tag>
+            </span>
+            <span class="dedup-stat-item">
+              合并 <el-tag size="small" type="danger">{{ wrongBookStore.stats.duplicateCount }}</el-tag>
+            </span>
+          </div>
+        </div>
       </aside>
 
       <!-- ===== 主内容区 ===== -->
@@ -379,6 +402,11 @@ const categoryFilter = computed({
   set: (val) => wrongBookStore.setFilter('category', val)
 })
 
+const dedupEnabledProxy = computed({
+  get: () => wrongBookStore.dedupEnabled,
+  set: (val) => wrongBookStore.setDedupEnabled(val)
+})
+
 const studentDialogVisible = ref(false)
 const showFilterPanel = ref(false)
 const selectedDetailQuestion = ref(null)
@@ -551,6 +579,17 @@ function handleResetFilters() {
   wrongBookStore.resetFilters()
   showFilterPanel.value = false
   ElMessage.success('已重置筛选条件')
+}
+
+// 去重开关切换
+function handleDedupToggle(enabled) {
+  wrongBookStore.setDedupEnabled(enabled)
+  const count = wrongBookStore.stats.duplicateCount
+  if (enabled && count > 0) {
+    ElMessage.success(`已合并 ${count} 道重复错题，学生现在看到的是知识漏洞`)
+  } else if (!enabled) {
+    ElMessage.info('已关闭去重，显示所有错题记录')
+  }
 }
 
 // 分页
@@ -827,6 +866,43 @@ onUnmounted(() => {
 
 .quick-filters .el-button {
   justify-content: flex-start;
+}
+
+/* 去重区域 */
+.dedup-section {
+  padding: 16px;
+  border-top: 1px solid #e5e7eb;
+}
+
+.dedup-section .section-title {
+  font-size: 14px;
+  font-weight: 500;
+  color: #374151;
+  margin-bottom: 12px;
+}
+
+.dedup-stats {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  margin-top: 12px;
+  padding: 8px;
+  background: #f9fafb;
+  border-radius: 8px;
+}
+
+.dedup-stat-item {
+  font-size: 12px;
+  color: #6b7280;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.dedup-stat-arrow {
+  font-size: 14px;
+  color: #9ca3af;
 }
 
 /* ===== 主内容区 ===== */

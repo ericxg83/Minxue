@@ -3,6 +3,7 @@ import { ref, computed } from 'vue'
 import { getWrongQuestionsByStudent, deleteWrongQuestion, updateWrongQuestionStatus } from '../../services/apiService'
 import { mockWrongQuestions } from '../../data/mockData'
 import { useLifecycleStore, LIFECYCLE_STATUS } from './lifecycleStore'
+import { deduplicateWrongQuestions } from '../../utils/questionDedup'
 import dayjs from 'dayjs'
 
 // 使用测试数据（与移动端保持一致）
@@ -16,6 +17,7 @@ export const useWrongBookStore = defineStore('wrongBook', () => {
   const selectedQuestions = ref([])
   const currentStudent = ref(null)
   const loading = ref(false)
+  const dedupEnabled = ref(true)  // 是否启用去重
   
   const filters = ref({
     status: 'pending',
@@ -96,8 +98,8 @@ export const useWrongBookStore = defineStore('wrongBook', () => {
     return Array.from(tagSet).sort()
   })
 
-  // 筛选错题
-  const filteredQuestions = computed(() => {
+  // 原始错题（未去重）
+  const rawFilteredQuestions = computed(() => {
     return (Array.isArray(wrongQuestions.value) ? wrongQuestions.value : [])
       .filter(wq => {
         if (wq.student_id !== currentStudent.value?.id) return false
@@ -115,7 +117,7 @@ export const useWrongBookStore = defineStore('wrongBook', () => {
           if (filters.value.category === 'unanswered' && !isUnanswered) return false
         }
         
-        // 生命周期状态筛选（新增）
+        // 生命周期状态筛选
         if (filters.value.lifecycleStatus !== 'all' && wq.lifecycle_status !== filters.value.lifecycleStatus) return false
         
         // 掌握状态筛选
@@ -148,22 +150,34 @@ export const useWrongBookStore = defineStore('wrongBook', () => {
         
         return true
       })
-      .sort((a, b) => {
-        switch (sortBy.value) {
-          case 'time_desc':
-            return new Date(b.added_at || b.created_at) - new Date(a.added_at || a.created_at)
-          case 'time_asc':
-            return new Date(a.added_at || a.created_at) - new Date(b.added_at || b.created_at)
-          case 'error_asc':
-            return (a.error_count || 1) - (b.error_count || 1)
-          case 'error_desc':
-            return (b.error_count || 1) - (a.error_count || 1)
-          case 'subject':
-            return (a.subject || '').localeCompare(b.subject || '', 'zh')
-          default:
-            return 0
-        }
-      })
+  })
+
+  // 筛选错题（应用去重）
+  const filteredQuestions = computed(() => {
+    const base = rawFilteredQuestions.value
+    
+    // 应用去重
+    const questions = dedupEnabled.value 
+      ? deduplicateWrongQuestions(base)
+      : base
+    
+    // 排序
+    return questions.sort((a, b) => {
+      switch (sortBy.value) {
+        case 'time_desc':
+          return new Date(b.added_at || b.created_at) - new Date(a.added_at || a.created_at)
+        case 'time_asc':
+          return new Date(a.added_at || a.created_at) - new Date(b.added_at || b.created_at)
+        case 'error_asc':
+          return (a.error_count || 1) - (b.error_count || 1)
+        case 'error_desc':
+          return (b.error_count || 1) - (a.error_count || 1)
+        case 'subject':
+          return (a.subject || '').localeCompare(b.subject || '', 'zh')
+        default:
+          return 0
+      }
+    })
   })
 
   // 分页错题
@@ -175,21 +189,43 @@ export const useWrongBookStore = defineStore('wrongBook', () => {
   // 总页数
   const totalPages = computed(() => Math.ceil(filteredQuestions.value.length / pageSize.value))
 
-  // 统计数据（新增生命周期统计）
+  // 统计数据（新增生命周期统计和去重统计）
   const stats = computed(() => {
     const studentQuestions = (Array.isArray(wrongQuestions.value) ? wrongQuestions.value : [])
       .filter(wq => wq.student_id === currentStudent.value?.id)
-    const total = studentQuestions.length
-    const mastered = studentQuestions.filter(wq => wq.lifecycle_status === LIFECYCLE_STATUS.MASTERED).length
-    const newCount = studentQuestions.filter(wq => wq.lifecycle_status === LIFECYCLE_STATUS.NEW).length
-    const review1 = studentQuestions.filter(wq => wq.lifecycle_status === LIFECYCLE_STATUS.REVIEW_1).length
-    const review2 = studentQuestions.filter(wq => wq.lifecycle_status === LIFECYCLE_STATUS.REVIEW_2).length
+    const rawTotal = studentQuestions.length
+    
+    // 去重后的数据
+    const dedupedQuestions = dedupEnabled.value 
+      ? deduplicateWrongQuestions(studentQuestions)
+      : studentQuestions
+    const total = dedupedQuestions.length
+    
+    const mastered = dedupedQuestions.filter(wq => wq.lifecycle_status === LIFECYCLE_STATUS.MASTERED).length
+    const newCount = dedupedQuestions.filter(wq => wq.lifecycle_status === LIFECYCLE_STATUS.NEW).length
+    const review1 = dedupedQuestions.filter(wq => wq.lifecycle_status === LIFECYCLE_STATUS.REVIEW_1).length
+    const review2 = dedupedQuestions.filter(wq => wq.lifecycle_status === LIFECYCLE_STATUS.REVIEW_2).length
     const pendingMaster = total - mastered  // 当前待掌握错题
     
     // 掌握率
     const masteryRate = total > 0 ? Math.round((mastered / total) * 100) : 0
     
-    return { total, mastered, new: newCount, review_1: review1, review_2: review2, pendingMaster, masteryRate }
+    // 去重统计
+    const duplicateCount = rawTotal - total  // 被合并的重复题数
+    const dedupRate = rawTotal > 0 ? Math.round(((rawTotal - total) / rawTotal) * 100) : 0
+    
+    return { 
+      total, 
+      mastered, 
+      new: newCount, 
+      review_1: review1, 
+      review_2: review2, 
+      pendingMaster, 
+      masteryRate,
+      rawTotal,       // 原始错题数（含重复）
+      duplicateCount, // 重复题数
+      dedupRate       // 去重率
+    }
   })
 
   // 加载错题数据
@@ -356,11 +392,24 @@ export const useWrongBookStore = defineStore('wrongBook', () => {
     return studentQuestions.filter(wq => getQuestionType(wq) === type).length
   }
 
+  // 切换去重开关
+  const toggleDedup = () => {
+    dedupEnabled.value = !dedupEnabled.value
+    currentPage.value = 1
+  }
+
+  // 设置去重开关
+  const setDedupEnabled = (enabled) => {
+    dedupEnabled.value = enabled
+    currentPage.value = 1
+  }
+
   return {
     wrongQuestions,
     selectedQuestions,
     currentStudent,
     loading,
+    dedupEnabled,
     filters,
     sortBy,
     searchQuery,
@@ -384,6 +433,8 @@ export const useWrongBookStore = defineStore('wrongBook', () => {
     getStatusCount,
     getLifecycleStatusCount,
     getQuestionTypeCount,
-    getQuestionType
+    getQuestionType,
+    toggleDedup,
+    setDedupEnabled
   }
 })

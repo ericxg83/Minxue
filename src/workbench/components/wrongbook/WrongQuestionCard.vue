@@ -11,6 +11,9 @@
         <span class="meta-text">
           {{ wrongQuestion.subject || '数学' }} · {{ getCategoryLabel }}
         </span>
+        <el-tag v-if="wrongQuestion.is_merged" size="small" type="danger" effect="dark" class="merged-badge">
+          合并 {{ wrongQuestion.wrong_count }} 道
+        </el-tag>
       </div>
       <div class="header-right">
         <span class="date-text">
@@ -55,7 +58,14 @@
 
     <!-- Footer: error count, edit, delete -->
     <div class="card-footer">
-      <span class="error-count">错误次数：{{ errorCount }}次</span>
+      <div class="footer-left">
+        <span class="error-count">错误次数：{{ errorCount }}次</span>
+        <template v-if="wrongQuestion.is_merged">
+          <span class="time-range">
+            首次错误：{{ formatFirstWrongTime }} · 最近错误：{{ formatLastWrongTime }}
+          </span>
+        </template>
+      </div>
       <div class="actions">
         <el-button type="primary" link size="small" @click="$emit('edit', wrongQuestion)">
           编辑
@@ -102,6 +112,18 @@ const getCategoryLabel = computed(() => {
 // Formatted date
 const formatDate = computed(() => {
   const date = props.wrongQuestion.added_at || props.wrongQuestion.created_at
+  return dayjs(date).format('YYYY-MM-DD')
+})
+
+// 首次错误时间（合并题）
+const formatFirstWrongTime = computed(() => {
+  const date = props.wrongQuestion.first_wrong_time || props.wrongQuestion.added_at
+  return dayjs(date).format('YYYY-MM-DD')
+})
+
+// 最近错误时间（合并题）
+const formatLastWrongTime = computed(() => {
+  const date = props.wrongQuestion.last_wrong_time || props.wrongQuestion.added_at
   return dayjs(date).format('YYYY-MM-DD')
 })
 
@@ -198,6 +220,10 @@ const questionContent = computed(() => question.value.content || '')
   color: #8e8e93;
 }
 
+.merged-badge {
+  font-size: 10px !important;
+}
+
 .date-text {
   font-size: 12px;
   color: #8e8e93;
@@ -280,6 +306,17 @@ const questionContent = computed(() => question.value.content || '')
   display: flex;
   justify-content: space-between;
   align-items: center;
+}
+
+.footer-left {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.time-range {
+  font-size: 11px;
+  color: #ff9500;
 }
 
 .error-count {

@@ -143,7 +143,13 @@ export const mockQuestions = [
   { id: 'q-9', task_id: 'task-7', student_id: '550e8400-e29b-41d4-a716-446655440003', content: '若 a > b > 0，则下列不等式正确的是？', options: ['a² < b²', 'a² > b²', 'a² = b²', '无法判断'], answer: 'B', student_answer: 'A', is_correct: false, question_type: 'choice', subject: '数学', analysis: 'a > b > 0 时，两边同时平方得 a² > b²', created_at: '2024-04-22T17:15:00Z' },
   { id: 'q-10', task_id: 'task-7', student_id: '550e8400-e29b-41d4-a716-446655440003', content: '化简：√18 = ?', options: ['3√2', '2√3', '6', '9'], answer: 'A', student_answer: 'A', is_correct: true, question_type: 'choice', subject: '数学', analysis: '√18 = √(9×2) = 3√2', created_at: '2024-04-22T17:15:00Z' },
   { id: 'q-11', task_id: 'task-9', student_id: '550e8400-e29b-41d4-a716-446655440004', content: '一次函数 y = -2x + 4 的斜率是？', options: ['2', '-2', '4', '-4'], answer: 'B', student_answer: 'B', is_correct: true, question_type: 'choice', subject: '数学', analysis: '一次函数 y = kx + b 中，k 即为斜率，这里 k = -2', created_at: '2024-04-22T15:15:00Z' },
-  { id: 'q-12', task_id: 'task-9', student_id: '550e8400-e29b-41d4-a716-446655440004', content: '解不等式：3x - 6 > 0', options: ['x > 2', 'x < 2', 'x > -2', 'x < -2'], answer: 'A', student_answer: 'C', is_correct: false, question_type: 'choice', subject: '数学', analysis: '3x > 6，所以 x > 2', created_at: '2024-04-22T15:15:00Z' }
+  { id: 'q-12', task_id: 'task-9', student_id: '550e8400-e29b-41d4-a716-446655440004', content: '解不等式：3x - 6 > 0', options: ['x > 2', 'x < 2', 'x > -2', 'x < -2'], answer: 'A', student_answer: 'C', is_correct: false, question_type: 'choice', subject: '数学', analysis: '3x > 6，所以 x > 2', created_at: '2024-04-22T15:15:00Z' },
+  // 重复题测试数据 - 鸡兔同笼问题（多次出现，用于去重测试）
+  { id: 'q-13', task_id: 'task-1', student_id: '550e8400-e29b-41d4-a716-446655440001', content: '笼子里有若干只鸡和兔，从上面数有35个头，从下面数有94只脚，问鸡和兔各有多少只？', options: ['鸡23只，兔12只', '鸡20只，兔15只', '鸡25只，兔10只', '鸡18只，兔17只'], answer: 'A', student_answer: 'B', is_correct: false, question_type: 'choice', subject: '数学', analysis: '设鸡x只，兔y只，则x+y=35，2x+4y=94，解得x=23，y=12', created_at: '2024-04-10T10:00:00Z' },
+  { id: 'q-14', task_id: 'task-3', student_id: '550e8400-e29b-41d4-a716-446655440001', content: '笼子里有鸡和兔若干只，从上面数有35个头，从下面数有94只脚，求鸡和兔各几只？', options: ['鸡23只，兔12只', '鸡20只，兔15只', '鸡25只，兔10只', '鸡18只，兔17只'], answer: 'A', student_answer: 'C', is_correct: false, question_type: 'choice', subject: '数学', analysis: '设鸡x只，兔y只，则x+y=35，2x+4y=94，解得x=23，y=12', created_at: '2024-04-15T14:00:00Z' },
+  { id: 'q-15', task_id: 'task-5', student_id: '550e8400-e29b-41d4-a716-446655440001', content: '鸡兔同笼，上有35个头，下有94只脚，问鸡兔各几何？', options: ['鸡23只，兔12只', '鸡20只，兔15只', '鸡25只，兔10只', '鸡18只，兔17只'], answer: 'A', student_answer: 'A', is_correct: false, question_type: 'choice', subject: '数学', analysis: '设鸡x只，兔y只，则x+y=35，2x+4y=94，解得x=23，y=12', created_at: '2024-04-18T16:00:00Z' },
+  { id: 'q-16', task_id: 'task-7', student_id: '550e8400-e29b-41d4-a716-446655440001', content: '笼中有若干只鸡和兔子，数头共35个，数脚共94只，请问鸡和兔子分别有多少只？', options: ['鸡23只，兔12只', '鸡20只，兔15只', '鸡25只，兔10只', '鸡18只，兔17只'], answer: 'A', student_answer: 'B', is_correct: false, question_type: 'choice', subject: '数学', analysis: '设鸡x只，兔y只，则x+y=35，2x+4y=94，解得x=23，y=12', created_at: '2024-04-20T10:00:00Z' },
+  { id: 'q-17', task_id: 'task-9', student_id: '550e8400-e29b-41d4-a716-446655440001', content: '鸡兔同笼问题：头35个，脚94只，求鸡和兔的数量。', options: ['鸡23只，兔12只', '鸡20只，兔15只', '鸡25只，兔10只', '鸡18只，兔17只'], answer: 'A', student_answer: 'D', is_correct: false, question_type: 'choice', subject: '数学', analysis: '设鸡x只，兔y只，则x+y=35，2x+4y=94，解得x=23，y=12', created_at: '2024-04-22T08:00:00Z' }
 ]
 
 // 错题本数据 - 包含科目、错误次数、加入时间等完整信息
@@ -463,6 +469,82 @@ export const mockWrongQuestions = [
     added_at: '2024-04-10T09:00:00Z',
     last_wrong_at: '2024-04-20T16:00:00Z', 
     created_at: '2024-04-20T16:00:00Z' 
+  },
+  // 鸡兔同笼 - 重复错题数据（5次，用于去重测试）
+  { 
+    id: 'wq-22', 
+    student_id: '550e8400-e29b-41d4-a716-446655440001', 
+    question_id: 'q-13', 
+    question: mockQuestions[12], 
+    status: 'pending', 
+    lifecycle_status: 'review_2',
+    error_count: 2, 
+    practice_count: 1,
+    subject: '数学',
+    category: '应用题',
+    added_at: '2024-04-10T10:00:00Z',
+    last_wrong_at: '2024-04-10T10:00:00Z', 
+    created_at: '2024-04-10T10:00:00Z' 
+  },
+  { 
+    id: 'wq-23', 
+    student_id: '550e8400-e29b-41d4-a716-446655440001', 
+    question_id: 'q-14', 
+    question: mockQuestions[13], 
+    status: 'pending', 
+    lifecycle_status: 'new',
+    error_count: 1, 
+    practice_count: 0,
+    subject: '数学',
+    category: '应用题',
+    added_at: '2024-04-15T14:00:00Z',
+    last_wrong_at: '2024-04-15T14:00:00Z', 
+    created_at: '2024-04-15T14:00:00Z' 
+  },
+  { 
+    id: 'wq-24', 
+    student_id: '550e8400-e29b-41d4-a716-446655440001', 
+    question_id: 'q-15', 
+    question: mockQuestions[14], 
+    status: 'pending', 
+    lifecycle_status: 'review_1',
+    error_count: 1, 
+    practice_count: 0,
+    subject: '数学',
+    category: '应用题',
+    added_at: '2024-04-18T16:00:00Z',
+    last_wrong_at: '2024-04-18T16:00:00Z', 
+    created_at: '2024-04-18T16:00:00Z' 
+  },
+  { 
+    id: 'wq-25', 
+    student_id: '550e8400-e29b-41d4-a716-446655440001', 
+    question_id: 'q-16', 
+    question: mockQuestions[15], 
+    status: 'pending', 
+    lifecycle_status: 'new',
+    error_count: 1, 
+    practice_count: 0,
+    subject: '数学',
+    category: '应用题',
+    added_at: '2024-04-20T10:00:00Z',
+    last_wrong_at: '2024-04-20T10:00:00Z', 
+    created_at: '2024-04-20T10:00:00Z' 
+  },
+  { 
+    id: 'wq-26', 
+    student_id: '550e8400-e29b-41d4-a716-446655440001', 
+    question_id: 'q-17', 
+    question: mockQuestions[16], 
+    status: 'pending', 
+    lifecycle_status: 'new',
+    error_count: 1, 
+    practice_count: 0,
+    subject: '数学',
+    category: '应用题',
+    added_at: '2024-04-22T08:00:00Z',
+    last_wrong_at: '2024-06-10T08:00:00Z', 
+    created_at: '2024-04-22T08:00:00Z' 
   }
 ]
 
