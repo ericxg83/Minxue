@@ -219,7 +219,9 @@ onMounted(async () => {
   try {
     // 加载学生列表
     const result = await getStudents(false)
+    console.log('API返回的学生数据:', result)
     const list = result.data || result || []
+    console.log('处理后的学生列表:', list)
     students.value = Array.isArray(list) ? list : []
 
     // 默认选择第一个学生
