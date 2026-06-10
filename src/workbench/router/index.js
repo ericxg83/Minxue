@@ -1,10 +1,24 @@
 import { createRouter, createWebHashHistory } from 'vue-router'
+import DashboardWorkbench from '../views/DashboardWorkbench.vue'
+import WrongBookWorkbench from '../views/WrongBookWorkbench.vue'
 import ExamWorkbench from '../views/ExamWorkbench.vue'
 
 const routes = [
   {
     path: '/',
-    name: 'ExamWorkbench',
+    name: 'Dashboard',
+    component: DashboardWorkbench,
+    meta: { requiresPC: true }
+  },
+  {
+    path: '/wrongbook',
+    name: 'WrongBook',
+    component: WrongBookWorkbench,
+    meta: { requiresPC: true }
+  },
+  {
+    path: '/paper',
+    name: 'PaperImport',
     component: ExamWorkbench,
     meta: { requiresPC: true }
   }
