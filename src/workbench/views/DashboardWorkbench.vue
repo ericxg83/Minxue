@@ -11,6 +11,10 @@
           <el-icon><EditPen /></el-icon>
           错题本编辑
         </el-button>
+        <el-button type="success" text @click="handleGoToGrowth">
+          <el-icon><DataAnalysis /></el-icon>
+          成长中心
+        </el-button>
         <el-button type="info" text @click="handleGoToPaperImport">
           <el-icon><Upload /></el-icon>
           试卷入库
@@ -447,7 +451,7 @@ import { ElMessage, ElMessageBox } from 'element-plus'
 import {
   Document, User, Plus, Printer, Picture, PictureFilled,
   EditPen, CircleCheckFilled, CircleCloseFilled, WarningFilled,
-  ArrowLeft, ArrowRight, Upload, Download, CircleCheck
+  ArrowLeft, ArrowRight, Upload, Download, CircleCheck, DataAnalysis
 } from '@element-plus/icons-vue'
 import dayjs from 'dayjs'
 
@@ -510,6 +514,11 @@ const handleNextQuestion = () => {
 // 跳转到错题本编辑
 const handleGoToWrongBook = () => {
   router.push('/wrongbook')
+}
+
+// 跳转到成长中心
+const handleGoToGrowth = () => {
+  router.push('/growth')
 }
 
 // 跳转到试卷入库
