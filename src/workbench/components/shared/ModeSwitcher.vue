@@ -15,7 +15,7 @@
 
 <script setup>
 import { computed } from 'vue'
-import { useWorkbenchStore } from '../stores/workbenchStore'
+import { useWorkbenchStore } from '../../stores/workbenchStore'
 import { Document, EditPen } from '@element-plus/icons-vue'
 
 const workbenchStore = useWorkbenchStore()
