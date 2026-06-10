@@ -8,6 +8,12 @@
     <meta name="apple-mobile-web-app-capable" content="yes" />
     <meta name="apple-mobile-web-app-status-bar-style" content="default" />
     <title>敏学错题本</title>
+    <script>
+      // PC工作台路由：直接跳转到Vue3入口（在React加载前执行）
+      if (window.location.pathname === '/exam-workbench' || window.location.pathname.startsWith('/exam-workbench/')) {
+        window.location.href = '/workbench.html';
+      }
+    </script>
   </head>
   <body>
     <div id="root"></div>

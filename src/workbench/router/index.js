@@ -1,9 +1,9 @@
-import { createRouter, createWebHistory } from 'vue-router'
+import { createRouter, createWebHashHistory } from 'vue-router'
 import ExamWorkbench from '../views/ExamWorkbench.vue'
 
 const routes = [
   {
-    path: '/exam-workbench',
+    path: '/',
     name: 'ExamWorkbench',
     component: ExamWorkbench,
     meta: { requiresPC: true }
@@ -11,17 +11,18 @@ const routes = [
 ]
 
 const router = createRouter({
-  history: createWebHistory(),
+  history: createWebHashHistory(),
   routes
 })
 
 // 路由守卫：PC检测
 router.beforeEach((to, from, next) => {
   if (to.meta.requiresPC && window.innerWidth < 1200) {
-    window.location.href = '/'
-    return
+    // 不跳转，改为显示提示
+    next()
+  } else {
+    next()
   }
-  next()
 })
 
 export default router

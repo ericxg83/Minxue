@@ -4,6 +4,7 @@ import vue from '@vitejs/plugin-vue'
 import { VitePWA } from 'vite-plugin-pwa'
 import tailwindcss from '@tailwindcss/vite'
 import { resolve } from 'path'
+import fs from 'fs'
 
 export default defineConfig(({ mode }) => ({
   plugins: [
@@ -101,7 +102,7 @@ export default defineConfig(({ mode }) => ({
             return 'react-core'
           }
           
-          // UI libraries - defer until needed
+          // UI libraries
           if (id.includes('node_modules/motion/') || 
               id.includes('node_modules/framer-motion/')) {
             return 'motion'
@@ -156,6 +157,22 @@ export default defineConfig(({ mode }) => ({
         target: 'http://localhost:3001',
         changeOrigin: true
       }
+    },
+    // Dev server: serve workbench.html for /exam-workbench route
+    configureServer(server) {
+      server.middlewares.use((req, res, next) => {
+        if (req.url === '/exam-workbench' || req.url.startsWith('/exam-workbench/')) {
+          const html = fs.readFileSync(resolve(__dirname, 'workbench.html'), 'utf-8')
+          res.setHeader('Content-Type', 'text/html')
+          res.end(html)
+          return
+        }
+        next()
+      })
     }
+  },
+  preview: {
+    port: 4173,
+    host: true
   }
 }))
