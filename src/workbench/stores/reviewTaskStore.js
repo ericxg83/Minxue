@@ -1,8 +1,7 @@
 import { defineStore } from 'pinia'
 import { ref, computed } from 'vue'
 import dayjs from 'dayjs'
-import { mockReviewTasks, mockStudents } from '../../data/mockData'
-import { mockQuestions } from '../../data/mockData'
+import { getGeneratedExamsByStudent, getStudents, getQuestionsByIds } from '../../services/apiService'
 import { generateExamPDF } from '../../utils/pdfGenerator'
 import { ElMessage } from 'element-plus'
 
@@ -16,9 +15,32 @@ export const useReviewTaskStore = defineStore('reviewTask', () => {
   // 筛选条件
   const statusFilter = ref('pending_print')  // pending_print | printed | completed | all
   
+  // 学生列表缓存
+  const students = ref([])
+
+  // 加载学生列表
+  const loadStudents = async () => {
+    try {
+      const result = await getStudents(false)
+      const list = result.data || result || []
+      students.value = Array.isArray(list) ? list : []
+    } catch (e) {
+      console.error('加载学生列表失败:', e)
+      students.value = []
+    }
+  }
+
   // 初始化数据
-  const initData = () => {
-    reviewTasks.value = mockReviewTasks.map(task => ({ ...task }))
+  const initData = async (studentId) => {
+    if (!studentId) return
+    try {
+      const examList = await getGeneratedExamsByStudent(studentId, false)
+      reviewTasks.value = Array.isArray(examList) ? examList : []
+      await loadStudents()
+    } catch (e) {
+      console.error('加载重练任务失败:', e)
+      reviewTasks.value = []
+    }
   }
 
   // 按状态筛选的任务
@@ -68,16 +90,15 @@ export const useReviewTaskStore = defineStore('reviewTask', () => {
   }
 
   // 获取任务的题目
-  const getTaskQuestions = (task) => {
-    return task.question_ids
-      .map(qid => mockQuestions.find(q => q.id === qid))
-      .filter(Boolean)
+  const getTaskQuestions = async (task) => {
+    if (!task.question_ids?.length) return []
+    return getQuestionsByIds(task.question_ids)
   }
 
   // 生成重练卷PDF（自动排版 + 生成）
   const generateReviewPDF = async (task) => {
-    const student = mockStudents.find(s => s.id === task.student_id)
-    const questions = getTaskQuestions(task)
+    const student = students.value.find(s => s.id === task.student_id)
+    const questions = await getTaskQuestions(task)
     
     if (!student || questions.length === 0) {
       ElMessage.error('无法生成重练卷：缺少学生信息或题目')
@@ -176,6 +197,7 @@ export const useReviewTaskStore = defineStore('reviewTask', () => {
     printedCount,
     completedCount,
     todayPendingTasksByStudent,
+    students,
     initData,
     getTaskById,
     getTaskQuestions,

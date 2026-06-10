@@ -446,7 +446,6 @@ import { useRouter } from 'vue-router'
 import { useReviewStore } from '../stores/reviewStore'
 import { useReviewTaskStore } from '../stores/reviewTaskStore'
 import { useLifecycleStore, LIFECYCLE_STATUS_LABELS, LIFECYCLE_STATUS_COLORS } from '../stores/lifecycleStore'
-import { mockStudents } from '../../data/mockData'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import {
   Document, User, Plus, Printer, Picture, PictureFilled,
@@ -533,7 +532,7 @@ const handleStatusFilterChange = (status) => {
 
 // 获取学生头像
 const getStudentAvatar = (studentId) => {
-  const student = mockStudents.find(s => s.id === studentId)
+  const student = reviewStore.students.find(s => s.id === studentId)
   return student?.avatar || ''
 }
 
@@ -626,9 +625,11 @@ const handleKeyboard = (e) => {
 }
 
 // 初始化
-onMounted(() => {
-  reviewStore.initData()
-  reviewTaskStore.initData()
+onMounted(async () => {
+  await reviewStore.initData()
+  if (reviewStore.currentStudent?.id) {
+    await reviewTaskStore.initData(reviewStore.currentStudent.id)
+  }
   window.addEventListener('keydown', handleKeyboard)
 })
 

@@ -369,12 +369,11 @@ import PaginationBar from '../components/shared/PaginationBar.vue'
 
 // 引入store
 import { useWrongBookStore } from '../stores/wrongBookStore'
-
-// 引入mock数据
-import { mockStudents } from '../../data/mockData'
+import { getStudents } from '../../services/apiService'
 
 const router = useRouter()
 const wrongBookStore = useWrongBookStore()
+const studentList = ref([])
 
 // ===== 状态 =====
 const searchQueryProxy = computed({
@@ -415,9 +414,6 @@ const selectedDetailQuestion = ref(null)
 const userName = ref('管理员')
 const userAvatar = ref('')
 const userInitial = computed(() => userName.value.charAt(0))
-
-// ===== 学生列表 =====
-const studentList = mockStudents
 
 // ===== 分页数据 =====
 const paginatedQuestions = computed(() => wrongBookStore.paginatedQuestions)
@@ -713,10 +709,19 @@ function handleKeyDown(e) {
 
 // ===== 初始化 =====
 onMounted(async () => {
-  // 默认选择第一个学生并加载数据
-  if (studentList.length > 0 && !wrongBookStore.currentStudent) {
-    wrongBookStore.setCurrentStudent(studentList[0])
-    await wrongBookStore.loadWrongQuestions(studentList[0].id)
+  try {
+    // 加载学生列表
+    const result = await getStudents(false)
+    const list = result.data || result || []
+    studentList.value = Array.isArray(list) ? list : []
+
+    // 默认选择第一个学生并加载数据
+    if (studentList.value.length > 0 && !wrongBookStore.currentStudent) {
+      wrongBookStore.setCurrentStudent(studentList.value[0])
+      await wrongBookStore.loadWrongQuestions(studentList.value[0].id)
+    }
+  } catch (e) {
+    console.error('加载学生列表失败:', e)
   }
 
   // 注册键盘快捷键

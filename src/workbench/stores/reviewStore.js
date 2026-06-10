@@ -1,14 +1,14 @@
 import { defineStore } from 'pinia'
 import { ref, computed } from 'vue'
 import dayjs from 'dayjs'
-import { mockStudents, mockWrongQuestions } from '../../data/mockData'
+import { getStudents, getWrongQuestionsByStudent } from '../../services/apiService'
 import { useLifecycleStore, LIFECYCLE_STATUS } from './lifecycleStore'
 
 export const useReviewStore = defineStore('review', () => {
   const lifecycleStore = useLifecycleStore()
   
   // 学生列表
-  const students = ref(mockStudents)
+  const students = ref([])
   const currentStudent = ref(null)
   
   // 错题列表
@@ -95,18 +95,49 @@ export const useReviewStore = defineStore('review', () => {
     }
   }
 
+  // 加载学生列表
+  const loadStudents = async () => {
+    try {
+      const result = await getStudents(false)
+      const list = result.data || result || []
+      students.value = Array.isArray(list) ? list : []
+    } catch (e) {
+      console.error('加载学生列表失败:', e)
+      students.value = []
+    }
+  }
+
+  // 加载错题数据
+  const loadWrongQuestions = async (studentId) => {
+    if (!studentId) return
+    try {
+      const data = await getWrongQuestionsByStudent(studentId, false)
+      wrongQuestions.value = (Array.isArray(data) ? data : []).map(wq => ({
+        ...wq,
+        lifecycle_status: wq.lifecycle_status || LIFECYCLE_STATUS.NEW
+      }))
+    } catch (e) {
+      console.error('加载错题数据失败:', e)
+      wrongQuestions.value = []
+    }
+  }
+
   // 初始化数据
-  const initData = () => {
-    // 加载错题数据
-    wrongQuestions.value = mockWrongQuestions.map(wq => ({
-      ...wq,
-      // 确保有lifecycle_status字段
-      lifecycle_status: wq.lifecycle_status || LIFECYCLE_STATUS.NEW,
-      // 添加原始试卷图片（模拟）
-      originalImage: wq.question?.task_id ? 
-        `https://images.unsplash.com/photo-${Math.random() > 0.5 ? '1503676260728-1c00da094a0b' : '1456513080510-7bf3a84b82f8'}?w=800&h=1200&fit=crop` 
-        : null
-    }))
+  const initData = async () => {
+    // 加载学生列表
+    await loadStudents()
+    
+    // 如果有当前学生，加载其错题
+    if (currentStudent.value?.id) {
+      await loadWrongQuestions(currentStudent.value.id)
+    } else {
+      // 加载第一个学生的错题
+      const firstStudent = students.value[0]
+      if (firstStudent) {
+        await loadWrongQuestions(firstStudent.id)
+        setCurrentStudent(firstStudent)
+      }
+    }
     
     // 计算今日统计
     calculateTodayStats()
@@ -192,6 +223,8 @@ export const useReviewStore = defineStore('review', () => {
     getStudentPendingCount,
     getStudentTodayNewCount,
     calculateTodayStats,
+    loadStudents,
+    loadWrongQuestions,
     initData,
     setCurrentStudent,
     nextQuestion,

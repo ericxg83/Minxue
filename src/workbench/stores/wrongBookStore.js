@@ -1,13 +1,12 @@
 import { defineStore } from 'pinia'
 import { ref, computed } from 'vue'
 import { getWrongQuestionsByStudent, deleteWrongQuestion, updateWrongQuestionStatus } from '../../services/apiService'
-import { mockWrongQuestions } from '../../data/mockData'
 import { useLifecycleStore, LIFECYCLE_STATUS } from './lifecycleStore'
 import { deduplicateWrongQuestions } from '../../utils/questionDedup'
 import dayjs from 'dayjs'
 
-// 使用测试数据（与移动端保持一致）
-const USE_MOCK_DATA = true
+// 使用真实API数据
+const USE_MOCK_DATA = false
 
 export const useWrongBookStore = defineStore('wrongBook', () => {
   const lifecycleStore = useLifecycleStore()
@@ -234,15 +233,6 @@ export const useWrongBookStore = defineStore('wrongBook', () => {
     
     loading.value = true
     try {
-      if (USE_MOCK_DATA) {
-        // 直接使用 mock 数据，确保有 lifecycle_status
-        wrongQuestions.value = mockWrongQuestions.map(wq => ({
-          ...wq,
-          lifecycle_status: wq.lifecycle_status || LIFECYCLE_STATUS.NEW
-        }))
-        return
-      }
-
       const data = await getWrongQuestionsByStudent(studentId, true)
       const safeData = Array.isArray(data) ? data : []
       
@@ -305,9 +295,7 @@ export const useWrongBookStore = defineStore('wrongBook', () => {
   // 更新掌握状态
   const updateStatus = async (wqId, status) => {
     try {
-      if (!USE_MOCK_DATA) {
-        await updateWrongQuestionStatus(wqId, status)
-      }
+      await updateWrongQuestionStatus(wqId, status)
       const wq = wrongQuestions.value.find(w => w.id === wqId)
       if (wq) {
         wq.status = status
@@ -333,9 +321,7 @@ export const useWrongBookStore = defineStore('wrongBook', () => {
   // 删除错题
   const deleteQuestion = async (wqId) => {
     try {
-      if (!USE_MOCK_DATA) {
-        await deleteWrongQuestion(wqId)
-      }
+      await deleteWrongQuestion(wqId)
       wrongQuestions.value = wrongQuestions.value.filter(wq => wq.id !== wqId)
       selectedQuestions.value = selectedQuestions.value.filter(sq => sq.id !== wqId)
       return true

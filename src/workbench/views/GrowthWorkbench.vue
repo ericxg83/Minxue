@@ -173,12 +173,12 @@
 import { ref, onMounted, computed } from 'vue'
 import { useRouter } from 'vue-router'
 import { useGrowthStore } from '../stores/growthStore'
-import { mockStudents } from '../../data/mockData'
+import { getStudents } from '../../services/apiService'
 import { ElMessage } from 'element-plus'
 
 const router = useRouter()
 const growthStore = useGrowthStore()
-const students = ref(mockStudents)
+const students = ref([])
 const selectedStudentId = ref(null)
 const loading = ref(false)
 
@@ -214,11 +214,25 @@ function handleGoBack() {
   router.push('/')
 }
 
-onMounted(() => {
-  // 默认选择第一个学生
-  if (students.value.length > 0) {
-    selectedStudentId.value = students.value[0].id
-    growthStore.setCurrentStudent(selectedStudentId.value)
+onMounted(async () => {
+  loading.value = true
+  try {
+    // 加载学生列表
+    const result = await getStudents(false)
+    const list = result.data || result || []
+    students.value = Array.isArray(list) ? list : []
+
+    // 默认选择第一个学生
+    if (students.value.length > 0) {
+      selectedStudentId.value = students.value[0].id
+      growthStore.setCurrentStudent(selectedStudentId.value)
+      await growthStore.loadData(selectedStudentId.value)
+    }
+  } catch (e) {
+    console.error('加载学生列表失败:', e)
+    ElMessage.error('加载数据失败')
+  } finally {
+    loading.value = false
   }
 })
 </script>
