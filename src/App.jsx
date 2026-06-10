@@ -37,7 +37,7 @@ import { taskService } from './services/taskService'
 import { recognizeQuestions, compressImage, saveRecognitionResult } from './services/aiService'
 import { processMultiPagePaperLayout } from './services/paperBankAIService'
 import { downloadPaperWord } from './utils/docxGenerator'
-import { mockQuestions, mockTasks, mockWrongQuestions, mockGeneratedExams, mockStudents } from './data/mockData'
+import { mockQuestions, mockTasks, mockWrongQuestions, mockGeneratedExams } from './data/mockData'
 import StudentSwitcher from './components/StudentSwitcher'
 
 import { useToast, ToastProvider } from './components/ToastProvider'
@@ -262,15 +262,7 @@ export default function App() {
     const init = async () => {
       try {
         if (USE_MOCK_DATA) {
-          setStudents(mockStudents)
-          // Restore last student from localStorage
-          const lastStudentId = localStorage.getItem('lastStudentId')
-          const studentToSet = lastStudentId 
-            ? mockStudents.find(s => s.id === lastStudentId) 
-            : mockStudents[0]
-          if (studentToSet) {
-            setCurrentStudent(studentToSet)
-          }
+          // Mock data path removed - using real API only
           setIsInitializing(false)
           return
         }
