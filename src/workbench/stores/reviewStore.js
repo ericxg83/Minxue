@@ -2,8 +2,11 @@ import { defineStore } from 'pinia'
 import { ref, computed } from 'vue'
 import dayjs from 'dayjs'
 import { mockStudents, mockWrongQuestions } from '../../data/mockData'
+import { useLifecycleStore, LIFECYCLE_STATUS } from './lifecycleStore'
 
 export const useReviewStore = defineStore('review', () => {
+  const lifecycleStore = useLifecycleStore()
+  
   // 学生列表
   const students = ref(mockStudents)
   const currentStudent = ref(null)
@@ -25,12 +28,12 @@ export const useReviewStore = defineStore('review', () => {
     pendingPrintExams: 0    // 已生成待打印重练卷数量
   })
 
-  // 获取当前学生待审核的错题
+  // 获取当前学生待审核的错题（所有非mastered状态的错题）
   const studentWrongQuestions = computed(() => {
     if (!currentStudent.value) return []
     return wrongQuestions.value.filter(wq => 
       wq.student_id === currentStudent.value.id && 
-      wq.status === 'pending'
+      wq.lifecycle_status !== LIFECYCLE_STATUS.MASTERED
     )
   })
 
@@ -43,7 +46,7 @@ export const useReviewStore = defineStore('review', () => {
   // 获取学生待审核题目数
   const getStudentPendingCount = (studentId) => {
     return wrongQuestions.value.filter(wq => 
-      wq.student_id === studentId && wq.status === 'pending'
+      wq.student_id === studentId && wq.lifecycle_status !== LIFECYCLE_STATUS.MASTERED
     ).length
   }
 
@@ -61,22 +64,24 @@ export const useReviewStore = defineStore('review', () => {
   const calculateTodayStats = () => {
     const today = dayjs().format('YYYY-MM-DD')
     
-    // 今日待审核错题数量
-    const pendingReview = wrongQuestions.value.filter(wq => wq.status === 'pending').length
+    // 今日待审核错题数量（非mastered状态）
+    const pendingReview = wrongQuestions.value.filter(wq => 
+      wq.lifecycle_status !== LIFECYCLE_STATUS.MASTERED
+    ).length
     
     // 今日待处理学生数量（有待审核错题的学生数）
     const studentIds = new Set()
     wrongQuestions.value.forEach(wq => {
-      if (wq.status === 'pending') {
+      if (wq.lifecycle_status !== LIFECYCLE_STATUS.MASTERED) {
         studentIds.add(wq.student_id)
       }
     })
     const pendingStudents = studentIds.size
     
-    // 今日新增错题数量
+    // 今日新增错题数量（lifecycle_status为new的错题）
     const newWrongQuestions = wrongQuestions.value.filter(wq => {
       const addedDate = dayjs(wq.added_at).format('YYYY-MM-DD')
-      return addedDate === today
+      return addedDate === today && wq.lifecycle_status === LIFECYCLE_STATUS.NEW
     }).length
     
     // 已生成待打印重练卷数量（模拟数据）
@@ -95,6 +100,8 @@ export const useReviewStore = defineStore('review', () => {
     // 加载错题数据
     wrongQuestions.value = mockWrongQuestions.map(wq => ({
       ...wq,
+      // 确保有lifecycle_status字段
+      lifecycle_status: wq.lifecycle_status || LIFECYCLE_STATUS.NEW,
       // 添加原始试卷图片（模拟）
       originalImage: wq.question?.task_id ? 
         `https://images.unsplash.com/photo-${Math.random() > 0.5 ? '1503676260728-1c00da094a0b' : '1456513080510-7bf3a84b82f8'}?w=800&h=1200&fit=crop` 
@@ -136,20 +143,28 @@ export const useReviewStore = defineStore('review', () => {
     return false
   }
 
-  // 审核错题
+  // 审核错题（使用新的生命周期状态）
   const reviewQuestion = (wqId, result) => {
     const wq = wrongQuestions.value.find(w => w.id === wqId)
     if (wq) {
+      const currentStatus = wq.lifecycle_status || LIFECYCLE_STATUS.NEW
+      
       switch (result) {
         case 'correct':
-          wq.status = 'mastered'
+          // 正确：进入下一个生命周期阶段
+          wq.lifecycle_status = lifecycleStore.getNextStatus(currentStatus)
+          wq.status = wq.lifecycle_status === LIFECYCLE_STATUS.MASTERED ? 'mastered' : 'pending'
+          wq.practice_count = (wq.practice_count || 0) + 1
           break
         case 'wrong':
-          // 保持 pending 或更新错误次数
+          // 错误：重新回到new
+          wq.lifecycle_status = LIFECYCLE_STATUS.NEW
+          wq.status = 'pending'
           wq.error_count = (wq.error_count || 0) + 1
           break
         case 'unanswered':
-          // 标记为未作答
+          // 未作答：保持当前状态或回到new
+          wq.lifecycle_status = LIFECYCLE_STATUS.NEW
           wq.status = 'partial'
           break
       }

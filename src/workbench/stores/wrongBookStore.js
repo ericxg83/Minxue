@@ -2,12 +2,15 @@ import { defineStore } from 'pinia'
 import { ref, computed } from 'vue'
 import { getWrongQuestionsByStudent, deleteWrongQuestion, updateWrongQuestionStatus } from '../../services/apiService'
 import { mockWrongQuestions } from '../../data/mockData'
+import { useLifecycleStore, LIFECYCLE_STATUS } from './lifecycleStore'
 import dayjs from 'dayjs'
 
 // 使用测试数据（与移动端保持一致）
 const USE_MOCK_DATA = true
 
 export const useWrongBookStore = defineStore('wrongBook', () => {
+  const lifecycleStore = useLifecycleStore()
+  
   // 状态
   const wrongQuestions = ref([])
   const selectedQuestions = ref([])
@@ -16,6 +19,7 @@ export const useWrongBookStore = defineStore('wrongBook', () => {
   
   const filters = ref({
     status: 'pending',
+    lifecycleStatus: 'all',    // 新增：生命周期状态筛选
     questionType: 'all',
     subject: 'all',
     time: 'all',
@@ -111,6 +115,9 @@ export const useWrongBookStore = defineStore('wrongBook', () => {
           if (filters.value.category === 'unanswered' && !isUnanswered) return false
         }
         
+        // 生命周期状态筛选（新增）
+        if (filters.value.lifecycleStatus !== 'all' && wq.lifecycle_status !== filters.value.lifecycleStatus) return false
+        
         // 掌握状态筛选
         if (filters.value.status !== 'all' && wq.status !== filters.value.status) return false
         
@@ -168,15 +175,21 @@ export const useWrongBookStore = defineStore('wrongBook', () => {
   // 总页数
   const totalPages = computed(() => Math.ceil(filteredQuestions.value.length / pageSize.value))
 
-  // 统计数据
+  // 统计数据（新增生命周期统计）
   const stats = computed(() => {
     const studentQuestions = (Array.isArray(wrongQuestions.value) ? wrongQuestions.value : [])
       .filter(wq => wq.student_id === currentStudent.value?.id)
     const total = studentQuestions.length
-    const mastered = studentQuestions.filter(wq => wq.status === 'mastered').length
-    const partial = studentQuestions.filter(wq => wq.status === 'partial').length
-    const pending = studentQuestions.filter(wq => wq.status === 'pending').length
-    return { total, mastered, partial, pending }
+    const mastered = studentQuestions.filter(wq => wq.lifecycle_status === LIFECYCLE_STATUS.MASTERED).length
+    const newCount = studentQuestions.filter(wq => wq.lifecycle_status === LIFECYCLE_STATUS.NEW).length
+    const review1 = studentQuestions.filter(wq => wq.lifecycle_status === LIFECYCLE_STATUS.REVIEW_1).length
+    const review2 = studentQuestions.filter(wq => wq.lifecycle_status === LIFECYCLE_STATUS.REVIEW_2).length
+    const pendingMaster = total - mastered  // 当前待掌握错题
+    
+    // 掌握率
+    const masteryRate = total > 0 ? Math.round((mastered / total) * 100) : 0
+    
+    return { total, mastered, new: newCount, review_1: review1, review_2: review2, pendingMaster, masteryRate }
   })
 
   // 加载错题数据
@@ -186,8 +199,11 @@ export const useWrongBookStore = defineStore('wrongBook', () => {
     loading.value = true
     try {
       if (USE_MOCK_DATA) {
-        // 直接使用 mock 数据
-        wrongQuestions.value = [...mockWrongQuestions]
+        // 直接使用 mock 数据，确保有 lifecycle_status
+        wrongQuestions.value = mockWrongQuestions.map(wq => ({
+          ...wq,
+          lifecycle_status: wq.lifecycle_status || LIFECYCLE_STATUS.NEW
+        }))
         return
       }
 
@@ -223,7 +239,7 @@ export const useWrongBookStore = defineStore('wrongBook', () => {
   // 设置当前学生
   const setCurrentStudent = (student) => {
     currentStudent.value = student
-    currentPage.value = 1 // 重置分页
+    currentPage.value = 1
   }
 
   // 切换选择
@@ -256,7 +272,6 @@ export const useWrongBookStore = defineStore('wrongBook', () => {
       if (!USE_MOCK_DATA) {
         await updateWrongQuestionStatus(wqId, status)
       }
-      // 更新本地状态
       const wq = wrongQuestions.value.find(w => w.id === wqId)
       if (wq) {
         wq.status = status
@@ -266,6 +281,17 @@ export const useWrongBookStore = defineStore('wrongBook', () => {
       console.error('更新状态失败:', error)
       return false
     }
+  }
+
+  // 更新生命周期状态（新增）
+  const updateLifecycleStatus = async (wqId, lifecycleStatus) => {
+    const wq = wrongQuestions.value.find(w => w.id === wqId)
+    if (wq) {
+      wq.lifecycle_status = lifecycleStatus
+      wq.status = lifecycleStatus === LIFECYCLE_STATUS.MASTERED ? 'mastered' : 'pending'
+      return true
+    }
+    return false
   }
 
   // 删除错题
@@ -286,13 +312,14 @@ export const useWrongBookStore = defineStore('wrongBook', () => {
   // 设置筛选条件
   const setFilter = (key, value) => {
     filters.value[key] = value
-    currentPage.value = 1 // 重置分页
+    currentPage.value = 1
   }
 
   // 重置筛选
   const resetFilters = () => {
     filters.value = {
       status: 'pending',
+      lifecycleStatus: 'all',
       questionType: 'all',
       subject: 'all',
       time: 'all',
@@ -311,6 +338,14 @@ export const useWrongBookStore = defineStore('wrongBook', () => {
       .filter(wq => wq.student_id === currentStudent.value?.id)
     if (status === 'all') return studentQuestions.length
     return studentQuestions.filter(wq => wq.status === status).length
+  }
+
+  // 获取生命周期状态数量（新增）
+  const getLifecycleStatusCount = (lifecycleStatus) => {
+    const studentQuestions = (Array.isArray(wrongQuestions.value) ? wrongQuestions.value : [])
+      .filter(wq => wq.student_id === currentStudent.value?.id)
+    if (lifecycleStatus === 'all') return studentQuestions.length
+    return studentQuestions.filter(wq => wq.lifecycle_status === lifecycleStatus).length
   }
 
   // 获取各类型数量
@@ -342,10 +377,12 @@ export const useWrongBookStore = defineStore('wrongBook', () => {
     clearSelection,
     selectAll,
     updateStatus,
+    updateLifecycleStatus,
     deleteQuestion,
     setFilter,
     resetFilters,
     getStatusCount,
+    getLifecycleStatusCount,
     getQuestionTypeCount,
     getQuestionType
   }
