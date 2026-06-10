@@ -1,11 +1,14 @@
 import { defineConfig } from 'vite'
 import react from '@vitejs/plugin-react'
+import vue from '@vitejs/plugin-vue'
 import { VitePWA } from 'vite-plugin-pwa'
 import tailwindcss from '@tailwindcss/vite'
+import { resolve } from 'path'
 
 export default defineConfig(({ mode }) => ({
   plugins: [
     react(),
+    vue(),
     tailwindcss(),
     VitePWA({
       registerType: 'prompt',
@@ -65,11 +68,33 @@ export default defineConfig(({ mode }) => ({
       }
     })
   ],
+  resolve: {
+    alias: {
+      '@': resolve(__dirname, 'src'),
+      '@workbench': resolve(__dirname, 'src/workbench')
+    }
+  },
   build: {
     rollupOptions: {
+      input: {
+        main: resolve(__dirname, 'index.html'),
+        workbench: resolve(__dirname, 'workbench.html')
+      },
       output: {
         manualChunks: (id) => {
-          // Core framework - always loaded first
+          // Vue framework
+          if (id.includes('node_modules/vue/') || 
+              id.includes('node_modules/@vue/') ||
+              id.includes('node_modules/pinia/') ||
+              id.includes('node_modules/vue-router/')) {
+            return 'vue-core'
+          }
+          
+          if (id.includes('node_modules/element-plus/')) {
+            return 'element-plus'
+          }
+          
+          // React framework
           if (id.includes('node_modules/react/') || 
               id.includes('node_modules/react-dom/') || 
               id.includes('node_modules/scheduler/')) {
@@ -86,7 +111,7 @@ export default defineConfig(({ mode }) => ({
             return 'lucide-icons'
           }
           
-          // PDF generation - only needed for specific features
+          // PDF generation
           if (id.includes('node_modules/jspdf/') || 
               id.includes('node_modules/html2canvas/') || 
               id.includes('node_modules/rgbcolor/') || 
@@ -94,19 +119,19 @@ export default defineConfig(({ mode }) => ({
             return 'pdf-generator'
           }
           
-          // QR code libraries
+          // QR code
           if (id.includes('node_modules/qrcode.react/') || 
               id.includes('node_modules/qrcode-generator/')) {
             return 'qr-code'
           }
           
-          // Other UI components
+          // Other UI
           if (id.includes('node_modules/antd-mobile/') || 
               id.includes('node_modules/@rc-component/')) {
             return 'antd-mobile'
           }
           
-          // Other vendor libs
+          // Other vendor
           if (id.includes('node_modules/dayjs/') || 
               id.includes('node_modules/axios/') || 
               id.includes('node_modules/zustand/')) {
@@ -115,16 +140,12 @@ export default defineConfig(({ mode }) => ({
           
           return null
         },
-        // Optimize chunk naming for better caching
         chunkFileNames: 'assets/[name]-[hash].js',
         entryFileNames: 'assets/[name]-[hash].js',
       }
     },
-    // Enable CSS code splitting
     cssCodeSplit: true,
-    // Optimize build for faster loading
     target: 'es2020',
-    // Reduce chunk size warning threshold
     chunkSizeWarningLimit: 500,
   },
   server: {
