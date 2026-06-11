@@ -7,7 +7,7 @@
           <svg viewBox="0 0 24 24" fill="none" class="logo-icon" width="24" height="24">
             <path d="M12 2L2 7l10 5 10-5-10-5zM2 17l10 5 10-5M2 12l10 5 10-5" stroke="#1677FF" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
           </svg>
-          <span class="logo-text">错题审核工作台</span>
+          <span class="logo-text">敏学成长工作台</span>
         </div>
       </div>
       <div class="top-header__right">
@@ -362,10 +362,10 @@ import { useReviewStore } from '../stores/reviewStore'
 import { useLifecycleStore } from '../stores/lifecycleStore'
 import { ElMessage } from 'element-plus'
 import {
-  Bell, QuestionFilled, ArrowDown, Search, Filter, ArrowLeft, ArrowRight,
+  Bell, QuestionFilled, ArrowDown, ArrowLeft, ArrowRight,
   Picture, ZoomIn, ZoomOut, RefreshLeft, RefreshRight, Refresh, FullScreen,
   CircleCheckFilled, CircleCloseFilled, WarningFilled, DocumentCopy,
-  List, Grid
+  List, Search, Filter, Grid
 } from '@element-plus/icons-vue'
 import dayjs from 'dayjs'
 
@@ -374,21 +374,21 @@ const reviewStore = useReviewStore()
 const lifecycleStore = useLifecycleStore()
 
 // ===== 导航菜单 =====
-const currentMenu = ref('student-review')
+const currentMenu = ref('proofread')
 const navMenus = [
-  { key: 'student-review', label: '学生审核', icon: 'Document' },
-  { key: 'wrong-book', label: '错题管理', icon: 'EditPen' },
-  { key: 'growth', label: '成长中心', icon: 'DataAnalysis' },
+  { key: 'proofread', label: '题目校对', icon: 'DocumentChecked' },
+  { key: 'wrong-book', label: '错题管理', icon: 'Collection' },
+  { key: 'growth', label: '成长中心', icon: 'TrendCharts' },
   { key: 'ai-review', label: 'AI复审', icon: 'View' },
-  { key: 'question-bank', label: '题库管理', icon: 'Collection' },
-  { key: 'exam-import', label: '试卷入库', icon: 'Upload' },
+  { key: 'question-bank', label: '题库管理', icon: 'Reading' },
+  { key: 'exam-import', label: '试卷入库', icon: 'UploadFilled' },
 ]
 
 const handleNavMenuClick = (key) => {
   currentMenu.value = key
   // 路由跳转
   const routeMap = {
-    'student-review': '/',
+    'proofread': '/',
     'wrong-book': '/wrongbook',
     'growth': '/growth',
     'ai-review': '/ai-review',

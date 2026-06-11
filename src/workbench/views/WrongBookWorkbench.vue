@@ -7,7 +7,7 @@
           <svg viewBox="0 0 24 24" fill="none" class="logo-icon" width="24" height="24">
             <path d="M12 2L2 7l10 5 10-5-10-5zM2 17l10 5 10-5M2 12l10 5 10-5" stroke="#1677FF" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
           </svg>
-          <span class="logo-text">错题审核工作台</span>
+          <span class="logo-text">敏学成长工作台</span>
         </div>
       </div>
       <div class="top-header__right">
@@ -320,16 +320,16 @@ const wrongBookStore = useWrongBookStore()
 // ===== 导航菜单 =====
 const currentMenu = ref('wrong-book')
 const navMenus = [
-  { key: 'student-review', label: '学生审核', icon: 'Document' },
-  { key: 'wrong-book', label: '错题管理', icon: 'EditPen' },
-  { key: 'growth', label: '成长中心', icon: 'DataAnalysis' },
-  { key: 'exam-import', label: '试卷入库', icon: 'Upload' },
+  { key: 'proofread', label: '题目校对', icon: 'DocumentChecked' },
+  { key: 'wrong-book', label: '错题管理', icon: 'Collection' },
+  { key: 'growth', label: '成长中心', icon: 'TrendCharts' },
+  { key: 'exam-import', label: '试卷入库', icon: 'UploadFilled' },
 ]
 
 const handleNavMenuClick = (key) => {
   currentMenu.value = key
   const routeMap = {
-    'student-review': '/',
+    'proofread': '/',
     'wrong-book': '/wrongbook',
     'growth': '/growth',
     'exam-import': '/paper',
