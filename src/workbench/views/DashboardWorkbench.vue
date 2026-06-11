@@ -5,7 +5,8 @@
       <div class="top-header__left">
         <div class="logo">
           <svg viewBox="0 0 24 24" fill="none" class="logo-icon" width="24" height="24">
-            <path d="M12 2L2 7l10 5 10-5-10-5zM2 17l10 5 10-5M2 12l10 5 10-5" stroke="#1677FF" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+            <path d="M12 3L4 7v10l8 4 8-4V7l-8-4z" stroke="#1677FF" stroke-width="2" stroke-linejoin="round"/>
+            <path d="M12 22V12M12 12l8-5M12 12L4 7" stroke="#1677FF" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
           </svg>
           <span class="logo-text">敏学成长工作台</span>
         </div>
