@@ -43,6 +43,7 @@
               <el-icon><component :is="menu.icon" /></el-icon>
             </div>
             <span class="nav-menu-item__text">{{ menu.label }}</span>
+            <span v-if="menu.key === 'exam-import'" class="dev-badge">开发中</span>
           </div>
         </div>
       </aside>
@@ -884,6 +885,18 @@ onUnmounted(() => {
 
 .nav-menu-item__text {
   flex: 1;
+}
+
+.dev-badge {
+  display: inline-block;
+  padding: 1px 6px;
+  background: #FFF7E6;
+  color: #FA8C16;
+  font-size: 10px;
+  border-radius: 4px;
+  font-weight: 500;
+  flex-shrink: 0;
+  border: 1px solid #FFD591;
 }
 
 /* ===== Growth Main Content ===== */

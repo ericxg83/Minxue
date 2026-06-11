@@ -43,6 +43,7 @@
               <el-icon><component :is="menu.icon" /></el-icon>
             </div>
             <span class="nav-menu-item__text">{{ menu.label }}</span>
+            <span v-if="menu.key === 'exam-import'" class="dev-badge">开发中</span>
           </div>
         </div>
       </aside>
@@ -379,8 +380,6 @@ const navMenus = [
   { key: 'proofread', label: '题目校对', icon: 'DocumentChecked' },
   { key: 'wrong-book', label: '错题管理', icon: 'Collection' },
   { key: 'growth', label: '成长中心', icon: 'TrendCharts' },
-  { key: 'ai-review', label: 'AI复审', icon: 'View' },
-  { key: 'question-bank', label: '题库管理', icon: 'Reading' },
   { key: 'exam-import', label: '试卷入库', icon: 'UploadFilled' },
 ]
 
@@ -391,8 +390,6 @@ const handleNavMenuClick = (key) => {
     'proofread': '/',
     'wrong-book': '/wrongbook',
     'growth': '/growth',
-    'ai-review': '/ai-review',
-    'question-bank': '/question-bank',
     'exam-import': '/paper',
   }
   if (routeMap[key] && routeMap[key] !== router.currentRoute.value.path) {
@@ -785,6 +782,18 @@ onUnmounted(() => {
 
 .nav-menu-item__text {
   flex: 1;
+}
+
+.dev-badge {
+  display: inline-block;
+  padding: 1px 6px;
+  background: #FFF7E6;
+  color: #FA8C16;
+  font-size: 10px;
+  border-radius: 4px;
+  font-weight: 500;
+  flex-shrink: 0;
+  border: 1px solid #FFD591;
 }
 
 /* ===== Student Panel (第二栏: 320px) ===== */
