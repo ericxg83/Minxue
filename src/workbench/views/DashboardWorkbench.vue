@@ -149,11 +149,14 @@
               <el-avatar :size="36" :src="reviewStore.currentStudent?.avatar">
                 {{ reviewStore.currentStudent?.name?.charAt(0) || '?' }}
               </el-avatar>
-              <div class="review-info-bar__text">
+              <div class="review-info-bar__student">
                 <div class="review-info-bar__name">{{ reviewStore.currentStudent?.name }}</div>
                 <div class="review-info-bar__class">{{ reviewStore.currentStudent?.grade }}</div>
               </div>
-              <div class="review-info-bar__exam-name">{{ selectedExam.name }}</div>
+              <div class="review-info-bar__exam">
+                <span class="review-info-bar__exam-name">{{ selectedExam.name }}</span>
+                <span class="review-info-bar__exam-total">共 {{ totalQuestions }} 题</span>
+              </div>
             </div>
             <div class="review-info-bar__progress">
               <div class="review-info-bar__progress-bar">
@@ -167,7 +170,7 @@
             <div class="review-info-bar__right">
               <div class="exam-source-selector">
                 <span class="exam-source-label">错题来源：</span>
-                <el-select v-model="selectedExamSource" size="small" style="width: 180px;">
+                <el-select v-model="selectedExamSource" size="small" style="width: 160px;">
                   <el-option :label="selectedExam.name" :value="selectedExam.id" />
                 </el-select>
               </div>
@@ -177,6 +180,10 @@
 
           <!-- 题目导航 -->
           <div class="question-nav-bar">
+            <div class="question-nav-bar__left">
+              <span class="question-nav-bar__label">题目列表</span>
+              <span class="question-nav-bar__total">{{ totalQuestions }} 题</span>
+            </div>
             <div class="question-nav-bar__pages">
               <div
                 v-for="(q, idx) in reviewStore.studentWrongQuestions"
@@ -190,8 +197,7 @@
               >
                 {{ idx + 1 }}
               </div>
-              <!-- 更多题目省略号 -->
-              <template v-if="reviewStore.studentWrongQuestions.length > 13">
+              <template v-if="reviewStore.studentWrongQuestions.length > 15">
                 <span class="question-nav-ellipsis">...</span>
                 <div
                   class="question-nav-btn"
@@ -204,10 +210,14 @@
             </div>
             <div class="question-nav-bar__right">
               <span class="question-nav-legend">
-                <span class="legend-dot legend--pending">待审核</span>
-                <span class="legend-dot legend--correct">正确</span>
-                <span class="legend-dot legend--wrong">错误</span>
-                <span class="legend-dot legend--excluded">已排除</span>
+                <span class="legend-dot legend--pending"></span>
+                <span class="legend-text">待审核</span>
+                <span class="legend-dot legend--correct"></span>
+                <span class="legend-text">正确</span>
+                <span class="legend-dot legend--wrong"></span>
+                <span class="legend-text">错误</span>
+                <span class="legend-dot legend--excluded"></span>
+                <span class="legend-text">排除</span>
               </span>
               <div class="view-mode-btns">
                 <el-icon class="view-mode-btn"><List /></el-icon>
@@ -218,6 +228,7 @@
 
           <!-- 题目图片区 -->
           <div class="question-image-section">
+            <div class="question-image-section__title">题目图片</div>
             <div class="question-image-container">
               <img
                 v-if="currentQuestion?.originalImage"
@@ -234,7 +245,7 @@
                 <span class="placeholder-text">暂无原始图片</span>
               </div>
             </div>
-            <!-- 图片工具栏（悬浮在图片右下角） -->
+            <!-- 图片工具栏 -->
             <div class="image-toolbar-float">
               <el-button text size="small" @click="imageScale = Math.max(0.3, imageScale - 0.2)">
                 <el-icon><ZoomOut /></el-icon>
@@ -260,62 +271,57 @@
           <!-- OCR结果编辑区 - 卡片分区展示 -->
           <div class="ocr-section">
             <div class="ocr-section__header">
-              <span class="ocr-section__title">OCR识别结果 <span class="ocr-section__hint">（可点击修改）</span></span>
+              <span class="ocr-section__title">OCR识别结果</span>
+              <span class="ocr-section__hint">（可点击修改）</span>
             </div>
             <div class="ocr-cards">
               <!-- 题目内容卡片 -->
-              <div class="ocr-card ocr-card--content">
-                <div class="ocr-card__header">
-                  <span class="ocr-card__label">题目内容</span>
-                </div>
+              <div class="ocr-card">
+                <div class="ocr-card__label">题目内容</div>
                 <div class="ocr-card__body">
                   <el-input
                     v-model="ocrData.questionContent"
                     type="textarea"
-                    :rows="3"
+                    :rows="4"
                     placeholder="请输入题目内容"
                     class="ocr-input"
                   />
                 </div>
               </div>
               <!-- 学生答案卡片 -->
-              <div class="ocr-card ocr-card--answer">
-                <div class="ocr-card__header">
-                  <span class="ocr-card__label">学生答案</span>
-                </div>
+              <div class="ocr-card">
+                <div class="ocr-card__label">学生答案</div>
                 <div class="ocr-card__body">
-                  <div class="ocr-answer-content">{{ ocrData.studentAnswer || '请输入学生答案' }}</div>
+                  <div class="ocr-answer-preview">{{ ocrData.studentAnswer || '请输入学生答案' }}</div>
                   <el-input
                     v-model="ocrData.studentAnswer"
+                    type="textarea"
+                    :rows="3"
                     placeholder="请输入学生答案"
                     class="ocr-input"
                   />
                 </div>
               </div>
               <!-- 正确答案卡片 -->
-              <div class="ocr-card ocr-card--correct">
-                <div class="ocr-card__header">
-                  <span class="ocr-card__label">正确答案</span>
-                </div>
+              <div class="ocr-card">
+                <div class="ocr-card__label">正确答案</div>
                 <div class="ocr-card__body">
                   <el-input
                     v-model="ocrData.correctAnswer"
+                    type="textarea"
+                    :rows="3"
                     placeholder="请输入正确答案"
                     class="ocr-input"
                   />
-                  <div class="ocr-card__action">
-                    <el-button text size="small" type="primary">
-                      <el-icon><EditPen /></el-icon>
-                      AI参考答案
-                    </el-button>
-                  </div>
+                  <el-button text size="small" type="primary" class="ocr-card__action-btn">
+                    <el-icon><EditPen /></el-icon>
+                    AI参考答案
+                  </el-button>
                 </div>
               </div>
               <!-- 知识点卡片 -->
-              <div class="ocr-card ocr-card--tags">
-                <div class="ocr-card__header">
-                  <span class="ocr-card__label">知识点</span>
-                </div>
+              <div class="ocr-card">
+                <div class="ocr-card__label">知识点</div>
                 <div class="ocr-card__body">
                   <div class="ocr-tags-list">
                     <el-tag
@@ -340,7 +346,7 @@
               <el-input
                 v-model="ocrData.remark"
                 placeholder="请输入备注信息（选填）"
-                class="ocr-input"
+                class="ocr-input ocr-input--remark"
               />
               <span class="ocr-remark__count">{{ (ocrData.remark || '').length }}/200</span>
             </div>
@@ -348,7 +354,7 @@
 
           <!-- 底部固定操作栏 -->
           <div class="bottom-action-bar">
-            <div class="bottom-action-bar__nav">
+            <div class="bottom-action-bar__left">
               <el-button
                 size="default"
                 @click="handlePrevQuestion"
@@ -366,7 +372,7 @@
                 <el-icon><ArrowRight /></el-icon>
               </el-button>
             </div>
-            <div class="bottom-action-bar__actions">
+            <div class="bottom-action-bar__right">
               <el-button
                 size="default"
                 class="btn-correct"
@@ -607,8 +613,8 @@ const totalQuestions = computed(() => {
 const reviewedCount = computed(() => {
   return reviewStore.studentWrongQuestions.filter(q => {
     const status = q.lifecycle_status || q.status
-    return status === LIFECYCLE_STATUS.REVIEW_1 || 
-           status === LIFECYCLE_STATUS.REVIEW_2 || 
+    return status === LIFECYCLE_STATUS.REVIEW_1 ||
+           status === LIFECYCLE_STATUS.REVIEW_2 ||
            status === LIFECYCLE_STATUS.MASTERED ||
            q.review_status === 'correct' ||
            q.review_status === 'wrong' ||
@@ -625,7 +631,7 @@ const progressPercent = computed(() => {
 const getQuestionStatusClass = (q) => {
   const status = q.lifecycle_status || q.status
   const reviewStatus = q.review_status
-  
+
   if (reviewStatus === 'correct' || status === LIFECYCLE_STATUS.MASTERED) return 'question-status--correct'
   if (reviewStatus === 'wrong' || status === LIFECYCLE_STATUS.NEW) return 'question-status--wrong'
   if (reviewStatus === 'excluded') return 'question-status--excluded'
@@ -1246,7 +1252,6 @@ onUnmounted(() => {
 .review-info-bar {
   display: flex;
   align-items: center;
-  justify-content: space-between;
   padding: 10px 20px;
   background: #fff;
   border-bottom: 1px solid #E5E6EB;
@@ -1260,7 +1265,7 @@ onUnmounted(() => {
   flex-shrink: 0;
 }
 
-.review-info-bar__text {
+.review-info-bar__student {
   display: flex;
   flex-direction: column;
 }
@@ -1276,24 +1281,36 @@ onUnmounted(() => {
   color: #86909C;
 }
 
+.review-info-bar__exam {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
 .review-info-bar__exam-name {
   font-size: 13px;
+  font-weight: 500;
   color: #4E5969;
-  padding: 4px 12px;
+  padding: 2px 10px;
   background: #F2F3F5;
   border-radius: 6px;
+}
+
+.review-info-bar__exam-total {
+  font-size: 12px;
+  color: #86909C;
+  padding-left: 10px;
 }
 
 .review-info-bar__progress {
   flex: 1;
   display: flex;
-  align-items: center;
-  gap: 12px;
+  flex-direction: column;
+  gap: 6px;
   min-width: 0;
 }
 
 .review-info-bar__progress-bar {
-  flex: 1;
   height: 6px;
   background: #F2F3F5;
   border-radius: 3px;
@@ -1311,7 +1328,6 @@ onUnmounted(() => {
   font-size: 12px;
   color: #86909C;
   white-space: nowrap;
-  flex-shrink: 0;
 }
 
 .review-info-bar__percent {
@@ -1335,11 +1351,27 @@ onUnmounted(() => {
 .question-nav-bar {
   display: flex;
   align-items: center;
-  justify-content: space-between;
   padding: 8px 20px;
   background: #fff;
   border-bottom: 1px solid #E5E6EB;
   gap: 12px;
+}
+
+.question-nav-bar__left {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-shrink: 0;
+}
+
+.question-nav-bar__label {
+  font-size: 13px;
+  color: #4E5969;
+}
+
+.question-nav-bar__total {
+  font-size: 12px;
+  color: #86909C;
 }
 
 .question-nav-bar__pages {
@@ -1406,29 +1438,27 @@ onUnmounted(() => {
 .question-nav-legend {
   display: flex;
   align-items: center;
-  gap: 10px;
+  gap: 6px;
   font-size: 11px;
   color: #86909C;
 }
 
 .legend-dot {
-  display: flex;
-  align-items: center;
-  gap: 4px;
-}
-
-.legend-dot::before {
-  content: '';
   width: 8px;
   height: 8px;
   border-radius: 50%;
   display: inline-block;
+  flex-shrink: 0;
 }
 
-.legend--pending::before { background: #1677FF; }
-.legend--correct::before { background: #22C55E; }
-.legend--wrong::before { background: #F53F3F; }
-.legend--excluded::before { background: #FA8C16; }
+.legend--pending { background: #1677FF; }
+.legend--correct { background: #22C55E; }
+.legend--wrong { background: #F53F3F; }
+.legend--excluded { background: #FA8C16; }
+
+.legend-text {
+  flex-shrink: 0;
+}
 
 .view-mode-btns {
   display: flex;
@@ -1461,22 +1491,31 @@ onUnmounted(() => {
   box-shadow: 0 2px 8px rgba(0, 0, 0, 0.04);
   overflow: hidden;
   display: flex;
-  align-items: center;
-  justify-content: center;
+  flex-direction: column;
+}
+
+.question-image-section__title {
+  padding: 8px 16px;
+  font-size: 13px;
+  font-weight: 500;
+  color: #1D2129;
+  border-bottom: 1px solid #F2F3F5;
+  flex-shrink: 0;
 }
 
 .question-image-container {
-  width: 100%;
-  height: 100%;
+  flex: 1;
+  min-height: 0;
   display: flex;
   align-items: center;
   justify-content: center;
   overflow: hidden;
+  padding: 12px;
 }
 
 .question-image {
-  max-width: 95%;
-  max-height: 95%;
+  max-width: 100%;
+  max-height: 100%;
   object-fit: contain;
 }
 
@@ -1536,28 +1575,30 @@ onUnmounted(() => {
 .ocr-section__hint {
   font-size: 12px;
   color: #86909C;
-  font-weight: 400;
+  margin-left: 4px;
 }
 
 .ocr-cards {
   display: grid;
-  grid-template-columns: 1fr 1fr;
-  gap: 1px;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 0;
   background: #F2F3F5;
 }
 
 .ocr-card {
   background: #fff;
   padding: 12px 16px;
+  border-right: 1px solid #F2F3F5;
 }
 
-.ocr-card__header {
-  margin-bottom: 8px;
+.ocr-card:last-child {
+  border-right: none;
 }
 
 .ocr-card__label {
   font-size: 12px;
   color: #86909C;
+  margin-bottom: 8px;
 }
 
 .ocr-card__body {
@@ -1566,18 +1607,19 @@ onUnmounted(() => {
   gap: 8px;
 }
 
-.ocr-answer-content {
+.ocr-answer-preview {
   font-size: 13px;
   color: #1D2129;
-  line-height: 1.5;
+  line-height: 1.6;
   padding: 8px 12px;
   background: #F9FAFB;
   border-radius: 6px;
+  max-height: 60px;
+  overflow-y: auto;
 }
 
-.ocr-card__action {
-  display: flex;
-  align-items: center;
+.ocr-card__action-btn {
+  align-self: flex-start;
 }
 
 .ocr-tags-list {
@@ -1619,13 +1661,13 @@ onUnmounted(() => {
   flex-shrink: 0;
 }
 
-.bottom-action-bar__nav {
+.bottom-action-bar__left {
   display: flex;
   align-items: center;
   gap: 8px;
 }
 
-.bottom-action-bar__actions {
+.bottom-action-bar__right {
   display: flex;
   align-items: center;
   gap: 10px;

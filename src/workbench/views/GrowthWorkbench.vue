@@ -889,6 +889,11 @@ onUnmounted(() => {
   flex: 1;
 }
 
+.nav-menu-item--disabled {
+  cursor: not-allowed;
+  opacity: 0.5;
+}
+
 .dev-badge {
   display: inline-block;
   padding: 1px 6px;
