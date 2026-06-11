@@ -88,26 +88,10 @@
                   <div class="student-card__name">{{ student.name }}</div>
                   <div class="student-card__class">{{ student.grade }}</div>
                 </div>
-                <el-icon v-if="getStudentPendingCount(student.id) > 0" class="student-card__badge">
-                  <ChatDotRound />
-                </el-icon>
               </div>
-              <div class="student-card__stats">
-                <div class="stat-line">
-                  <span class="stat-label">AI批改：</span>
-                  <span class="stat-value">{{ student.aiGraded || 0 }}/{{ student.totalQuestions || 27 }}</span>
-                  <el-icon class="stat-icon--success"><CircleCheckFilled /></el-icon>
-                </div>
-                <div class="stat-line">
-                  <span class="stat-label">人工复核：</span>
-                  <span class="stat-value">{{ student.manualReviewed || 0 }}/{{ student.totalQuestions || 27 }}</span>
-                </div>
-              </div>
-              <div class="student-card__progress">
-                <div class="progress-bar-bg">
-                  <div class="progress-bar-fill" :style="{ width: getStudentProgressPercent(student) + '%' }"></div>
-                </div>
-                <span class="progress-percent">{{ getStudentProgressPercent(student) }}%</span>
+              <div class="student-card__bottom">
+                <span class="student-card__exam-count">共 {{ getStudentExamCount(student.id) }} 份试卷</span>
+                <el-icon class="student-card__arrow"><ArrowRight /></el-icon>
               </div>
             </div>
           </template>
@@ -120,15 +104,19 @@
               :class="{ 'exam-card--active': selectedExam?.id === exam.id }"
               @click="handleSelectExam(exam)"
             >
-              <div class="exam-card__info">
+              <div class="exam-card__header">
                 <div class="exam-card__name">{{ exam.name }}</div>
-                <div class="exam-card__meta">{{ formatDate(exam.created_at) }}</div>
+                <div class="exam-card__date">{{ formatDate(exam.created_at) }}</div>
               </div>
-              <div class="exam-card__progress">
-                <div class="progress-bar-bg">
-                  <div class="progress-bar-fill" :style="{ width: getExamProgressPercent(exam) + '%' }"></div>
+              <div class="exam-card__progress-row">
+                <span class="exam-card__progress-label">人工复核：</span>
+                <span class="exam-card__progress-value">{{ exam.manualReviewed || 0 }}/{{ exam.questionCount || 0 }}</span>
+              </div>
+              <div class="exam-card__progress-bar-wrapper">
+                <div class="exam-card__progress-bar-bg">
+                  <div class="exam-card__progress-bar-fill" :style="{ width: getExamProgressPercent(exam) + '%' }"></div>
                 </div>
-                <span class="progress-percent">{{ getExamProgressPercent(exam) }}%</span>
+                <span class="exam-card__progress-pct">{{ getExamProgressPercent(exam) }}%</span>
               </div>
             </div>
           </template>
@@ -413,7 +401,7 @@ import {
   Bell, QuestionFilled, ArrowDown, ArrowLeft, ArrowRight, Menu,
   Picture, ZoomIn, ZoomOut, RefreshLeft, Refresh,
   CircleCheckFilled, CircleCloseFilled, RemoveFilled, DocumentChecked,
-  Search, Filter, ChatDotRound, CircleCheck, SuccessFilled, Lightning, EditPen, Plus
+  Search, Filter, CircleCheck, SuccessFilled, Lightning, EditPen, Plus
 } from '@element-plus/icons-vue'
 import dayjs from 'dayjs'
 
@@ -458,14 +446,39 @@ const handleSelectStudent = async (student) => {
   selectedStudentForExam.value = student
   selectedExam.value = null
   try {
+    // Load wrong questions for this student
+    await reviewStore.loadWrongQuestions(student.id)
+
+    // Fetch exams
     const exams = await getExamsByStudent(student.id, false)
-    studentExams.value = (exams || []).map(exam => ({
-      ...exam,
-      questionCount: exam.question_count || exam.questionCount || 27,
-      accuracy: exam.accuracy || 0,
-      manualReviewed: exam.manual_reviewed || 0,
-      status: exam.status || 'ungraded'
-    }))
+
+    // Calculate manualReviewed per exam from wrong questions
+    const studentWQs = reviewStore.wrongQuestions.filter(wq => wq.student_id === student.id)
+    const reviewedIds = new Set()
+    studentWQs.forEach(wq => {
+      if (wq.review_status === 'correct' || wq.review_status === 'wrong' || wq.review_status === 'excluded') {
+        reviewedIds.add(wq.question_id)
+      }
+    })
+
+    studentExams.value = (exams || []).map(exam => {
+      const qCount = exam.question_count || exam.questionCount || 0
+      // Count reviewed questions for this exam (by matching question_id with wrong questions of this exam)
+      const reviewedForThisExam = studentWQs.filter(wq => {
+        // Match by task_id if available, otherwise by content match
+        return wq.task_id === exam.id || (exam.id && wq.exam_id === exam.id)
+      }).filter(wq => reviewedIds.has(wq.question_id)).length
+
+      return {
+        ...exam,
+        questionCount: qCount,
+        manualReviewed: reviewedForThisExam,
+        status: exam.status || 'ungraded'
+      }
+    })
+
+    // Update student exam count
+    student.examCount = studentExams.value.length
   } catch (e) {
     studentExams.value = []
   }
@@ -525,7 +538,9 @@ const getQuestionStatusText = (q) => {
   return '未复核'
 }
 
-const getStudentPendingCount = (studentId) => reviewStore.getStudentPendingCount(studentId)
+const getStudentExamCount = (studentId) => {
+  return reviewStore.students.find(s => s.id === studentId)?.examCount || 0
+}
 
 const getStudentProgressPercent = (student) => {
   const total = student.totalQuestions || 27
@@ -735,14 +750,17 @@ onUnmounted(() => {
 .list-panel__list { flex: 1; overflow-y: auto; padding: 0 12px 8px; }
 
 .student-card {
-  background: #fff; border-radius: 12px;
-  cursor: pointer; transition: all 0.2s; margin-bottom: 8px;
+  background: #fff;
+  border-radius: 12px;
+  cursor: pointer;
+  transition: all 0.2s;
+  margin-bottom: 8px;
   padding: 12px;
 }
 .student-card:hover { box-shadow: 0 2px 8px rgba(22, 119, 255, 0.08); }
 .student-card--active { background: #E8F3FF; box-shadow: 0 2px 8px rgba(22, 119, 255, 0.12); }
 
-.student-card__top { display: flex; align-items: center; gap: 10px; margin-bottom: 8px; }
+.student-card__top { display: flex; align-items: center; gap: 10px; }
 .avatar-circle {
   width: 36px; height: 36px; border-radius: 50%;
   background: #E5E6EB; color: #4E5969; font-size: 14px;
@@ -752,34 +770,36 @@ onUnmounted(() => {
 .student-card__info { flex: 1; }
 .student-card__name { font-size: 14px; font-weight: 500; color: #1D2129; }
 .student-card__class { font-size: 12px; color: #86909C; }
-.student-card__badge {
-  font-size: 16px; color: #fff;
-  background: #F53F3F; border-radius: 50%; padding: 2px;
-  width: 20px; height: 20px; display: flex; align-items: center; justify-content: center;
+.student-card__bottom {
+  display: flex; align-items: center; justify-content: space-between;
+  margin-top: 8px; padding-top: 8px; border-top: 1px solid #F2F3F5;
 }
-.student-card__stats { margin-bottom: 8px; }
-.stat-line { display: flex; align-items: center; gap: 4px; font-size: 12px; margin-bottom: 2px; }
-.stat-label { color: #86909C; }
-.stat-value { color: #1D2129; font-weight: 500; }
-.stat-icon--success { color: #52C41A; font-size: 12px; }
-
-.student-card__progress { display: flex; align-items: center; gap: 8px; }
-.progress-bar-bg { flex: 1; height: 6px; background: #F2F3F5; border-radius: 3px; overflow: hidden; }
-.progress-bar-fill { height: 100%; background: #1677FF; border-radius: 3px; transition: width 0.3s ease; }
-.progress-percent { font-size: 12px; color: #86909C; white-space: nowrap; }
+.student-card__exam-count { font-size: 12px; color: #86909C; }
+.student-card__arrow { font-size: 14px; color: #C9CDD4; }
 
 .exam-card {
-  display: flex; align-items: center; gap: 12px;
-  background: #fff; border-radius: 12px;
-  cursor: pointer; transition: all 0.2s; margin-bottom: 8px;
-  padding: 12px;
+  background: #fff;
+  border-radius: 12px;
+  cursor: pointer;
+  transition: all 0.2s;
+  margin-bottom: 8px;
+  padding: 14px 16px;
 }
 .exam-card:hover { box-shadow: 0 2px 8px rgba(22, 119, 255, 0.08); }
 .exam-card--active { background: #E8F3FF; box-shadow: 0 2px 8px rgba(22, 119, 255, 0.12); }
-.exam-card__info { flex: 1; }
-.exam-card__name { font-size: 13px; font-weight: 500; color: #1D2129; margin-bottom: 2px; }
-.exam-card__meta { font-size: 11px; color: #86909C; }
-.exam-card__progress { display: flex; align-items: center; gap: 8px; flex-shrink: 0; }
+
+.exam-card__header { margin-bottom: 8px; }
+.exam-card__name { font-size: 14px; font-weight: 500; color: #1D2129; }
+.exam-card__date { font-size: 12px; color: #86909C; margin-top: 2px; }
+
+.exam-card__progress-row { display: flex; align-items: center; gap: 4px; font-size: 12px; margin-bottom: 6px; }
+.exam-card__progress-label { color: #86909C; }
+.exam-card__progress-value { color: #1D2129; font-weight: 500; }
+
+.exam-card__progress-bar-wrapper { display: flex; align-items: center; gap: 8px; }
+.exam-card__progress-bar-bg { flex: 1; height: 6px; background: #F2F3F5; border-radius: 3px; overflow: hidden; }
+.exam-card__progress-bar-fill { height: 100%; background: #1677FF; border-radius: 3px; transition: width 0.3s ease; }
+.exam-card__progress-pct { font-size: 12px; color: #86909C; white-space: nowrap; }
 
 /* ===== Review Main（与成长中心 growth-main 一致的滚动布局） ===== */
 .review-main {
