@@ -230,6 +230,18 @@
             <div class="question-content-card__body">
               <div class="question-text-panel">
                 <div class="question-text-content">{{ ocrData.questionContent || '暂无题目内容' }}</div>
+                <!-- 选择题选项 -->
+                <div v-if="ocrData.options && ocrData.options.length > 0" class="question-options">
+                  <div
+                    v-for="(opt, idx) in ocrData.options"
+                    :key="idx"
+                    class="option-item"
+                    :class="{ 'option-item--correct': opt === ocrData.correctAnswer }"
+                  >
+                    <span class="option-label">{{ String.fromCharCode(65 + idx) }}.</span>
+                    <span class="option-text">{{ opt }}</span>
+                  </div>
+                </div>
               </div>
               <div class="question-image-panel">
                 <img
@@ -283,7 +295,13 @@
               <div class="ocr-answer-col">
                 <div class="ocr-answer-col__label">参考答案 <span class="ocr-answer-col__sub">（AI生成）</span></div>
                 <div class="ocr-answer-col__content">
-                  {{ ocrData.correctAnswer || '暂无参考答案' }}
+                  <template v-if="ocrData.correctAnswer">
+                    {{ ocrData.correctAnswer }}
+                  </template>
+                  <div v-else class="ai-answer-placeholder">
+                    <el-icon :size="24" color="#C9CDD4"><Warning /></el-icon>
+                    <span class="ai-answer-placeholder__text">解析失败，请人工确认</span>
+                  </div>
                 </div>
                 <div class="ocr-answer-col__action">
                   <el-button text size="small" type="primary">
@@ -415,7 +433,7 @@ import {
   Bell, QuestionFilled, ArrowDown, ArrowLeft, ArrowRight, Menu,
   Picture, ZoomIn, ZoomOut, RefreshLeft, Refresh,
   CircleCheckFilled, CircleCloseFilled, RemoveFilled, DocumentChecked,
-  Search, Filter, CircleCheck, SuccessFilled, Lightning, EditPen, Plus
+  Search, Filter, CircleCheck, SuccessFilled, Lightning, EditPen, Plus, Warning
 } from '@element-plus/icons-vue'
 import dayjs from 'dayjs'
 
@@ -571,8 +589,10 @@ const getExamProgressPercent = (exam) => {
 
 const ocrData = ref({
   questionContent: '',
+  options: [],
   studentAnswer: '',
   correctAnswer: '',
+  analysis: '',
   knowledgePoints: [],
   remark: '',
 })
@@ -593,13 +613,15 @@ watch(currentQuestion, (newQ) => {
   if (newQ?.question) {
     ocrData.value = {
       questionContent: newQ.question.content || '',
+      options: newQ.question.options || [],
       studentAnswer: newQ.question.student_answer || '',
       correctAnswer: newQ.question.answer || '',
+      analysis: newQ.question.analysis || '',
       knowledgePoints: newQ.question.ai_tags || newQ.question.knowledge_points || [],
       remark: newQ.question.remark || '',
     }
   } else {
-    ocrData.value = { questionContent: '', studentAnswer: '', correctAnswer: '', knowledgePoints: [], remark: '' }
+    ocrData.value = { questionContent: '', options: [], studentAnswer: '', correctAnswer: '', analysis: '', knowledgePoints: [], remark: '' }
   }
   resetImageTransform()
 }, { immediate: true })
@@ -632,8 +654,10 @@ const handleSave = () => {
   if (!q) return
   if (q.question) {
     q.question.content = ocrData.value.questionContent
+    q.question.options = ocrData.value.options
     q.question.student_answer = ocrData.value.studentAnswer
     q.question.answer = ocrData.value.correctAnswer
+    q.question.analysis = ocrData.value.analysis
     q.question.ai_tags = ocrData.value.knowledgePoints
     q.question.remark = ocrData.value.remark
   }
@@ -1025,6 +1049,16 @@ onUnmounted(() => {
   overflow-y: auto; max-height: 260px;
 }
 .question-text-content { font-size: 13px; color: #1D2129; line-height: 1.8; white-space: pre-wrap; }
+.question-options { margin-top: 12px; }
+.option-item {
+  display: flex; align-items: baseline; gap: 8px;
+  padding: 6px 12px; border-radius: 8px; margin-bottom: 4px;
+  background: #F9FAFB; transition: background 0.2s;
+}
+.option-item:hover { background: #F2F3F5; }
+.option-item--correct { background: #E8F8EA; }
+.option-label { font-size: 13px; font-weight: 600; color: #1D2129; min-width: 18px; }
+.option-text { font-size: 13px; color: #4E5969; }
 .question-image-panel {
   display: flex; align-items: center; justify-content: center;
   padding: 16px 20px; overflow: hidden; min-height: 200px;
@@ -1074,6 +1108,12 @@ onUnmounted(() => {
   white-space: pre-wrap; min-height: 48px;
 }
 .ocr-answer-col__action { margin-top: 8px; }
+
+.ai-answer-placeholder {
+  display: flex; flex-direction: column; align-items: center; justify-content: center;
+  gap: 8px; padding: 20px; text-align: center;
+}
+.ai-answer-placeholder__text { font-size: 13px; color: #86909C; }
 
 .ocr-knowledge {
   display: flex; align-items: flex-start; gap: 12px;
