@@ -1,503 +1,517 @@
 <template>
   <div class="wrongbook-workbench">
-    <!-- ===== 顶部工具栏 ===== -->
-    <header class="workbench-header">
-      <div class="header-left">
-        <el-button type="info" plain @click="handleBack">
-          <el-icon><ArrowLeft /></el-icon>
-          返回
-        </el-button>
-        <ModeSwitcher />
+    <!-- 顶部 Header 栏 -->
+    <header class="top-header">
+      <div class="top-header__left">
+        <div class="logo">
+          <svg viewBox="0 0 24 24" fill="none" class="logo-icon" width="24" height="24">
+            <path d="M12 2L2 7l10 5 10-5-10-5zM2 17l10 5 10-5M2 12l10 5 10-5" stroke="#1677FF" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+          </svg>
+          <span class="logo-text">错题审核工作台</span>
+        </div>
       </div>
-      <div class="header-center">
-        <el-input
-          v-model="searchQueryProxy"
-          placeholder="搜索错题内容... (Ctrl+F)"
-          clearable
-          size="default"
-          class="search-input"
-          @keyup.enter="handleSearch"
-        >
-          <template #prefix>
-            <el-icon><Search /></el-icon>
-          </template>
-        </el-input>
-        <el-button size="default" @click="handleSearch">
-          <el-icon><Search /></el-icon>
-          搜索
-        </el-button>
-      </div>
-      <div class="header-right">
-        <el-button
-          v-if="selectedCount > 0"
-          type="primary"
-          size="default"
-          @click="handleBatchPrint"
-        >
-          <el-icon><Printer /></el-icon>
-          打印选中({{ selectedCount }})
-        </el-button>
-        <el-button
-          v-if="selectedCount > 0"
-          type="success"
-          size="default"
-          @click="handleBatchExport"
-        >
-          <el-icon><Download /></el-icon>
-          导出选中({{ selectedCount }})
-        </el-button>
-        <div class="user-info">
-          <el-avatar size="small" :src="userAvatar">{{ userInitial }}</el-avatar>
-          <span class="username">{{ userName }}</span>
+      <div class="top-header__right">
+        <div class="header-icon-btn" title="通知">
+          <el-icon><Bell /></el-icon>
+          <span class="header-badge">12</span>
+        </div>
+        <div class="header-icon-btn" title="帮助中心">
+          <el-icon><QuestionFilled /></el-icon>
+          <span class="header-icon-label">帮助中心</span>
+        </div>
+        <div class="header-user">
+          <el-avatar :size="32" src="https://api.dicebear.com/7.x/avataaars/svg?seed=admin" />
+          <span class="header-user-name">管理员</span>
+          <el-icon class="header-dropdown-icon"><ArrowDown /></el-icon>
         </div>
       </div>
     </header>
 
-    <div class="workbench-body">
-      <!-- ===== 左侧边栏 ===== -->
-      <aside class="left-sidebar">
-        <!-- 学生切换 -->
-        <StudentSwitcher
-          v-model:visible="studentDialogVisible"
-          :current-student="wrongBookStore.currentStudent"
-          :student-list="studentList"
-          :pending-count="wrongBookStore.stats.pending"
-          @change-student="handleSwitchStudent"
-        />
-
-        <!-- 掌握状态标签 -->
-        <StatusTabs
-          :active-status="wrongBookStore.filters.status"
-          :counts="statusCounts"
-          @change-status="handleStatusChange"
-        />
-
-        <!-- 统计卡片 -->
-        <div class="stats-section">
+    <!-- 三栏主内容区 -->
+    <div class="main-layout">
+      <!-- 第一栏：系统导航 -->
+      <aside class="nav-sidebar">
+        <div class="nav-menu">
           <div
-            v-for="stat in statsList"
-            :key="stat.key"
-            class="stat-card"
-            :class="{ active: wrongBookStore.filters.status === stat.key }"
-            @click="handleStatusChange(stat.key)"
+            v-for="menu in navMenus"
+            :key="menu.key"
+            class="nav-menu-item"
+            :class="{ 'nav-menu-item--active': currentMenu === menu.key }"
+            @click="handleNavMenuClick(menu.key)"
           >
-            <div class="stat-value" :style="{ color: stat.color }">
-              {{ stat.value }}
+            <div class="nav-menu-item__icon">
+              <el-icon><component :is="menu.icon" /></el-icon>
             </div>
-            <div class="stat-label">{{ stat.label }}</div>
-          </div>
-        </div>
-
-        <!-- 快速筛选按钮 -->
-        <div class="quick-filters">
-          <div class="section-title">快速筛选</div>
-          <el-button
-            v-for="qf in quickFilters"
-            :key="qf.key"
-            size="small"
-            :type="isQuickFilterActive(qf.key) ? 'primary' : 'default'"
-            @click="handleQuickFilter(qf.key)"
-          >
-            {{ qf.label }}
-          </el-button>
-          <el-button size="small" @click="handleResetFilters">重置筛选</el-button>
-        </div>
-
-        <!-- 去重开关和统计 -->
-        <div class="dedup-section">
-          <div class="section-title">错题去重</div>
-          <el-switch
-            v-model="dedupEnabledProxy"
-            active-text="开启"
-            inactive-text="关闭"
-            @change="handleDedupToggle"
-          />
-          <div v-if="wrongBookStore.stats.duplicateCount > 0" class="dedup-stats">
-            <span class="dedup-stat-item">
-              原始 <el-tag size="small" type="info">{{ wrongBookStore.stats.rawTotal }}</el-tag>
-            </span>
-            <span class="dedup-stat-arrow">→</span>
-            <span class="dedup-stat-item">
-              去重 <el-tag size="small" type="success">{{ wrongBookStore.stats.total }}</el-tag>
-            </span>
-            <span class="dedup-stat-item">
-              合并 <el-tag size="small" type="danger">{{ wrongBookStore.stats.duplicateCount }}</el-tag>
-            </span>
+            <span class="nav-menu-item__text">{{ menu.label }}</span>
           </div>
         </div>
       </aside>
 
-      <!-- ===== 主内容区 ===== -->
-      <main class="main-content">
-        <!-- 筛选工具栏 -->
-        <div class="filter-toolbar">
-          <div class="toolbar-left">
-            <el-select
-              v-model="subjectFilter"
-              placeholder="科目"
-              size="small"
-              style="width: 100px"
-              @change="val => wrongBookStore.setFilter('subject', val)"
-            >
-              <el-option label="全部科目" value="all" />
-              <el-option label="数学" value="数学" />
-              <el-option label="语文" value="语文" />
-              <el-option label="英语" value="英语" />
-              <el-option label="物理" value="物理" />
-              <el-option label="化学" value="化学" />
-            </el-select>
-
-            <el-select
-              v-model="errorCountFilter"
-              placeholder="错误次数"
-              size="small"
-              style="width: 100px"
-              @change="val => wrongBookStore.setFilter('errorCount', val)"
-            >
-              <el-option label="全部次数" value="all" />
-              <el-option label="1次" value="1" />
-              <el-option label="2-3次" value="2-3" />
-              <el-option label="4-5次" value="4-5" />
-              <el-option label="5次以上" value="5+" />
-            </el-select>
-
-            <el-select
-              v-model="categoryFilter"
-              placeholder="分类"
-              size="small"
-              style="width: 110px"
-              @change="val => wrongBookStore.setFilter('category', val)"
-            >
-              <el-option label="全部分类" value="all" />
-              <el-option label="错题" value="wrong" />
-              <el-option label="未作答" value="unanswered" />
-            </el-select>
-
-            <el-select
-              v-model="sortProxy"
-              placeholder="排序"
-              size="small"
-              style="width: 120px"
-            >
-              <el-option label="最新加入" value="time_desc" />
-              <el-option label="最早加入" value="time_asc" />
-              <el-option label="错次最多" value="error_desc" />
-              <el-option label="错次最少" value="error_asc" />
-              <el-option label="按科目" value="subject" />
-            </el-select>
-          </div>
-          <div class="toolbar-right">
-            <el-checkbox
-              v-model="isAllSelected"
-              :indeterminate="isIndeterminate"
-              @change="handleSelectAll"
-            >
-              全选
-            </el-checkbox>
-            <el-button text size="small" @click="showFilterPanel = !showFilterPanel">
-              <el-icon><Filter /></el-icon>
-              高级筛选
-            </el-button>
-          </div>
+      <!-- 第二栏：错题列表 -->
+      <aside class="question-panel">
+        <div class="question-panel__header">
+          <span class="question-panel__title">错题库</span>
+          <el-icon class="question-panel__close" @click="handleBack"><Close /></el-icon>
         </div>
-
-        <!-- 高级筛选面板（抽屉式） -->
-        <div v-if="showFilterPanel" class="filter-panel-wrapper">
-          <FilterPanel
-            :filters="wrongBookStore.filters"
-            :sort-by="wrongBookStore.sortBy"
-            :all-tags="wrongBookStore.getAllTags"
-            @update-filter="handleUpdateFilter"
-            @update-sort="handleUpdateSort"
-            @reset="handleResetFilters"
-            @confirm="showFilterPanel = false"
+        <div class="question-panel__search">
+          <el-input
+            v-model="searchQueryProxy"
+            placeholder="搜索题目、知识点、题干"
+            :prefix-icon="Search"
+            clearable
+            size="default"
           />
+          <el-icon class="search-filter-icon"><Filter /></el-icon>
         </div>
-
-        <!-- 结果信息 -->
-        <div class="result-info">
-          <span>共 {{ wrongBookStore.filteredQuestions.length }} 道错题</span>
-          <span v-if="wrongBookStore.selectedQuestions.length > 0" class="selected-info">
-            已选中 {{ wrongBookStore.selectedQuestions.length }} 道
-          </span>
+        <div class="question-panel__filters">
+          <el-dropdown trigger="click" @command="handleSubjectFilter">
+            <span class="filter-tag">科目 <el-icon><ArrowDown /></el-icon></span>
+            <template #dropdown>
+              <el-dropdown-menu>
+                <el-dropdown-item command="all">全部科目</el-dropdown-item>
+                <el-dropdown-item command="数学">数学</el-dropdown-item>
+                <el-dropdown-item command="语文">语文</el-dropdown-item>
+                <el-dropdown-item command="英语">英语</el-dropdown-item>
+                <el-dropdown-item command="物理">物理</el-dropdown-item>
+                <el-dropdown-item command="化学">化学</el-dropdown-item>
+              </el-dropdown-menu>
+            </template>
+          </el-dropdown>
+          <el-dropdown trigger="click" @command="handleGradeFilter">
+            <span class="filter-tag">年级 <el-icon><ArrowDown /></el-icon></span>
+            <template #dropdown>
+              <el-dropdown-menu>
+                <el-dropdown-item command="all">全部年级</el-dropdown-item>
+                <el-dropdown-item command="初一">初一</el-dropdown-item>
+                <el-dropdown-item command="初二">初二</el-dropdown-item>
+                <el-dropdown-item command="初三">初三</el-dropdown-item>
+                <el-dropdown-item command="高一">高一</el-dropdown-item>
+                <el-dropdown-item command="高二">高二</el-dropdown-item>
+              </el-dropdown-menu>
+            </template>
+          </el-dropdown>
+          <el-dropdown trigger="click" @command="handleTagFilter">
+            <span class="filter-tag">知识点 <el-icon><ArrowDown /></el-icon></span>
+            <template #dropdown>
+              <el-dropdown-menu>
+                <el-dropdown-item command="all">全部知识点</el-dropdown-item>
+                <el-dropdown-item
+                  v-for="tag in wrongBookStore.getAllTags"
+                  :key="tag"
+                  :command="tag"
+                >{{ tag }}</el-dropdown-item>
+              </el-dropdown-menu>
+            </template>
+          </el-dropdown>
+          <el-dropdown trigger="click" @command="handleMoreFilter">
+            <span class="filter-tag">更多筛选 <el-icon><ArrowDown /></el-icon></span>
+            <template #dropdown>
+              <el-dropdown-menu>
+                <el-dropdown-item command="error_high">高频错题</el-dropdown-item>
+                <el-dropdown-item command="recent">本周新增</el-dropdown-item>
+                <el-dropdown-item command="unanswered">未作答</el-dropdown-item>
+              </el-dropdown-menu>
+            </template>
+          </el-dropdown>
         </div>
-
-        <!-- 错题列表 -->
-        <div v-loading="wrongBookStore.loading" class="question-list">
-          <template v-if="paginatedQuestions.length > 0">
-            <WrongQuestionCard
-              v-for="wq in paginatedQuestions"
-              :key="wq.id"
-              :wrong-question="wq"
-              :is-selected="isSelected(wq)"
-              @toggle-select="wrongBookStore.toggleSelection(wq)"
-              @update-status="handleUpdateStatus"
-              @edit="handleEditQuestion"
-              @delete="handleDeleteQuestion"
-              @click="handleSelectQuestion(wq)"
-            />
-          </template>
-          <el-empty v-else description="暂无符合条件的错题" />
-        </div>
-
-        <!-- 分页控件 -->
-        <div v-if="wrongBookStore.totalPages > 1" class="pagination-wrapper">
-          <PaginationBar
-            :current-page="wrongBookStore.currentPage"
-            :total-pages="wrongBookStore.totalPages"
-            :page-size="wrongBookStore.pageSize"
-            :total="wrongBookStore.filteredQuestions.length"
-            @page-change="handlePageChange"
-            @size-change="handleSizeChange"
-          />
-        </div>
-      </main>
-
-      <!-- ===== 右侧详情面板 ===== -->
-      <aside v-if="selectedDetailQuestion" class="right-panel" :class="{ 'is-open': !!selectedDetailQuestion }">
-        <div class="panel-header">
-          <h3>题目详情</h3>
-          <el-button text size="small" @click="selectedDetailQuestion = null">
-            <el-icon><Close /></el-icon>
-          </el-button>
-        </div>
-
-        <div class="panel-content">
-          <!-- 题目内容 -->
-          <div class="detail-section">
-            <div class="section-label">题目</div>
-            <div class="detail-text">{{ questionDetail.content }}</div>
-          </div>
-
-          <!-- 选项 -->
-          <div v-if="questionDetail.options?.length" class="detail-section">
-            <div class="section-label">选项</div>
-            <div class="options-list">
-              <div
-                v-for="(opt, idx) in questionDetail.options"
-                :key="idx"
-                class="option-item"
-                :class="{
-                  'is-correct': String.fromCharCode(65 + idx) === questionDetail.answer,
-                  'is-student-answer': String.fromCharCode(65 + idx) === selectedDetailQuestion?.student_answer
-                }"
-              >
-                <span class="option-label">{{ String.fromCharCode(65 + idx) }}.</span>
-                <span class="option-text">{{ opt }}</span>
-                <el-icon v-if="String.fromCharCode(65 + idx) === questionDetail.answer" class="correct-icon"><CircleCheckFilled /></el-icon>
+        <div class="question-panel__count">共 {{ filteredQuestions.length }} 道错题</div>
+        <div class="question-panel__list">
+          <div
+            v-for="wq in paginatedQuestions"
+            :key="wq.id"
+            class="question-card"
+            :class="{ 'question-card--active': selectedDetailQuestion?.id === wq.id }"
+            @click="handleSelectQuestion(wq)"
+          >
+            <div class="question-card__body">
+              <div class="question-card__subject">
+                <span class="subject-tag" :style="{ background: getSubjectColor(wq.subject) }">{{ wq.subject }}</span>
+              </div>
+              <div class="question-card__title">{{ getQuestionTitle(wq) }}</div>
+              <div class="question-card__meta">
+                <span class="question-card__grade">{{ getQuestionGrade(wq) }}</span>
+                <span class="question-card__tag">{{ getQuestionTag(wq) }}</span>
+              </div>
+              <div class="question-card__bottom">
+                <div class="question-card__error">
+                  <el-icon class="error-icon"><WarningFilled /></el-icon>
+                  被错 {{ getErrorCount(wq) }} 次
+                </div>
+                <div class="question-card__time">{{ getQuestionTime(wq) }}</div>
+              </div>
+            </div>
+            <div class="question-card__thumb">
+              <img v-if="getQuestionThumb(wq)" :src="getQuestionThumb(wq)" alt="题目" />
+              <div v-else class="thumb-placeholder">
+                <el-icon><Picture /></el-icon>
               </div>
             </div>
           </div>
+        </div>
+        <div class="question-panel__pagination" v-if="totalPages > 1">
+          <el-pagination
+            :current-page="currentPageProxy"
+            :page-size="17"
+            :total="filteredQuestions.length"
+            layout="prev, pager, next"
+            small
+            @current-change="handlePageChange"
+          />
+        </div>
+      </aside>
 
-          <!-- 正确答案 -->
-          <div class="detail-section">
-            <div class="section-label">正确答案</div>
-            <el-tag type="success" size="large">{{ questionDetail.answer }}</el-tag>
+      <!-- 第三栏：题目详情区 -->
+      <section class="detail-workspace" v-if="selectedDetailQuestion">
+        <!-- 顶部信息栏 -->
+        <div class="detail-header">
+          <div class="detail-header__left">
+            <span class="detail-subject-tag" :style="{ background: getSubjectColor(selectedDetailQuestion.subject) }">
+              {{ selectedDetailQuestion.subject }}
+            </span>
+            <span class="detail-title">{{ getQuestionTitle(selectedDetailQuestion) }}</span>
+            <span class="detail-error-count">
+              <el-icon class="detail-error-icon"><WarningFilled /></el-icon>
+              被错 {{ getErrorCount(selectedDetailQuestion) }} 次
+            </span>
           </div>
-
-          <!-- 学生答案 -->
-          <div v-if="selectedDetailQuestion?.student_answer" class="detail-section">
-            <div class="section-label">学生答案</div>
-            <el-tag :type="selectedDetailQuestion.is_correct ? 'success' : 'danger'" size="large">
-              {{ selectedDetailQuestion.student_answer }}
-            </el-tag>
+          <div class="detail-header__meta">
+            <span class="detail-meta-text">{{ getQuestionGrade(selectedDetailQuestion) }} · {{ getQuestionTag(selectedDetailQuestion) }} · 更新于：{{ getFullTime(selectedDetailQuestion) }}</span>
           </div>
-
-          <!-- 解析 -->
-          <div v-if="questionDetail.analysis" class="detail-section">
-            <div class="section-label">解析</div>
-            <div class="detail-text analysis-text">{{ questionDetail.analysis }}</div>
-          </div>
-
-          <!-- 题目信息 -->
-          <div class="detail-section">
-            <div class="section-label">题目信息</div>
-            <el-descriptions :column="1" border size="small">
-              <el-descriptions-item label="科目">{{ selectedDetailQuestion.subject }}</el-descriptions-item>
-              <el-descriptions-item label="分类">{{ selectedDetailQuestion.category }}</el-descriptions-item>
-              <el-descriptions-item label="错误次数">{{ selectedDetailQuestion.error_count }}次</el-descriptions-item>
-              <el-descriptions-item label="练习次数">{{ selectedDetailQuestion.practice_count }}次</el-descriptions-item>
-              <el-descriptions-item label="加入时间">{{ formatDate(selectedDetailQuestion.added_at) }}</el-descriptions-item>
-            </el-descriptions>
-          </div>
-
-          <!-- 掌握状态操作 -->
-          <div class="detail-section">
-            <div class="section-label">更新掌握状态</div>
-            <div class="status-actions">
-              <el-button
-                :type="selectedDetailQuestion.status === 'pending' ? 'danger' : 'default'"
-                @click="handleStatusUpdate('pending')"
-              >
-                未掌握
+          <div class="detail-header__actions">
+            <el-button size="small" @click="handleEditQuestion(selectedDetailQuestion)">编辑题目</el-button>
+            <el-dropdown trigger="click">
+              <el-button size="small">
+                更多操作 <el-icon><ArrowDown /></el-icon>
               </el-button>
-              <el-button
-                :type="selectedDetailQuestion.status === 'partial' ? 'warning' : 'default'"
-                @click="handleStatusUpdate('partial')"
-              >
-                有点掌握
-              </el-button>
-              <el-button
-                :type="selectedDetailQuestion.status === 'mastered' ? 'success' : 'default'"
-                @click="handleStatusUpdate('mastered')"
-              >
-                完全掌握
-              </el-button>
+              <template #dropdown>
+                <el-dropdown-menu>
+                  <el-dropdown-item @click="handleDeleteQuestion(selectedDetailQuestion)">删除</el-dropdown-item>
+                  <el-dropdown-item @click="handlePrintQuestion(selectedDetailQuestion)">打印</el-dropdown-item>
+                </el-dropdown-menu>
+              </template>
+            </el-dropdown>
+          </div>
+        </div>
+
+        <!-- 题目内容区 -->
+        <div class="detail-content-area">
+          <div class="detail-section">
+            <div class="detail-section__label">题目内容</div>
+            <div class="detail-section__content question-content-box">
+              <div v-if="getQuestionContent(selectedDetailQuestion)" class="question-text">
+                {{ getQuestionContent(selectedDetailQuestion) }}
+              </div>
+              <div v-if="getQuestionOptions(selectedDetailQuestion)?.length" class="question-options">
+                <div
+                  v-for="(opt, idx) in getQuestionOptions(selectedDetailQuestion)"
+                  :key="idx"
+                  class="option-item"
+                  :class="{ 'option-item--correct': String.fromCharCode(65 + idx) === getQuestionAnswer(selectedDetailQuestion) }"
+                >
+                  <span class="option-label">{{ String.fromCharCode(65 + idx) }}.</span>
+                  <span class="option-text">{{ opt }}</span>
+                </div>
+              </div>
+              <img v-if="getQuestionThumb(selectedDetailQuestion)" :src="getQuestionThumb(selectedDetailQuestion)" class="question-thumb-img" />
+            </div>
+          </div>
+
+          <div class="detail-section">
+            <div class="detail-section__label">正确答案</div>
+            <div class="detail-section__content answer-box">
+              {{ getQuestionAnswer(selectedDetailQuestion) || '-' }}
+            </div>
+          </div>
+
+          <div class="detail-section">
+            <div class="detail-section__label">知识点</div>
+            <div class="detail-section__content">
+              <el-tag
+                v-for="tag in getQuestionTags(selectedDetailQuestion)"
+                :key="tag"
+                class="knowledge-tag"
+                size="default"
+              >{{ tag }}</el-tag>
+              <span v-if="!getQuestionTags(selectedDetailQuestion).length" class="empty-text">暂无</span>
+            </div>
+          </div>
+
+          <div class="detail-section">
+            <div class="detail-section__label">解析</div>
+            <div class="detail-section__content analysis-box">
+              {{ getQuestionAnalysis(selectedDetailQuestion) || '暂无解析' }}
             </div>
           </div>
         </div>
-      </aside>
+
+        <!-- 错题统计 -->
+        <div class="detail-stats-area">
+          <div class="detail-stats__title">错题统计</div>
+          <div class="detail-stats__grid">
+            <div class="stat-box">
+              <div class="stat-box__label">被错次数</div>
+              <div class="stat-box__value">{{ getErrorCount(selectedDetailQuestion) }} <span class="stat-box__unit">次</span></div>
+              <div class="stat-box__change">较上周 <span class="change-up">+{{ getWeekIncrease(selectedDetailQuestion) }}</span></div>
+            </div>
+            <div class="stat-box">
+              <div class="stat-box__label">错题学生数</div>
+              <div class="stat-box__value">{{ getWrongStudentCount(selectedDetailQuestion) }} <span class="stat-box__unit">人</span></div>
+              <div class="stat-box__change">较上周 <span class="change-up">+{{ getWeekStudentIncrease() }}</span></div>
+            </div>
+            <div class="stat-box">
+              <div class="stat-box__label">最近错题时间</div>
+              <div class="stat-box__value">{{ getLatestWrongTime(selectedDetailQuestion) }}</div>
+              <div class="stat-box__change">较上周 <span class="change-up">+{{ getDaysSinceLastWeek() }}天</span></div>
+            </div>
+            <div class="stat-box">
+              <div class="stat-box__label">正确率</div>
+              <div class="stat-box__value">{{ getAccuracyRate(selectedDetailQuestion) }}%</div>
+              <div class="stat-box__change">较上周 <span class="change-down">-{{ getAccuracyDrop() }}%</span></div>
+            </div>
+          </div>
+        </div>
+
+        <!-- 最近错题学生 -->
+        <div class="recent-students-area">
+          <div class="recent-students__header">
+            <span class="recent-students__title">最近错题学生</span>
+            <span class="recent-students__more">查看更多 <el-icon><ArrowRight /></el-icon></span>
+          </div>
+          <div class="recent-students__list">
+            <div v-for="student in getRecentStudents()" :key="student.id" class="recent-student-card">
+              <el-avatar :size="40" :src="student.avatar">
+                {{ student.name.charAt(0) }}
+              </el-avatar>
+              <div class="recent-student__info">
+                <div class="recent-student__name">{{ student.name }}</div>
+                <div class="recent-student__class">{{ student.class }}</div>
+              </div>
+              <div class="recent-student__time">{{ student.time }}</div>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <!-- 未选择题目时的空状态 -->
+      <section class="detail-workspace" v-else>
+        <div class="empty-detail-state">
+          <el-empty description="请从左侧选择一道错题查看详情" />
+        </div>
+      </section>
     </div>
   </div>
 </template>
 
 <script setup>
-import { ref, computed, watch, onMounted, onUnmounted } from 'vue'
+import { ref, computed, onMounted, onUnmounted } from 'vue'
 import { useRouter } from 'vue-router'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import {
-  ArrowLeft, Search, Printer, Download, Filter, Close, CircleCheckFilled
+  Bell, QuestionFilled, ArrowDown, ArrowRight, Search, Filter, Close,
+  WarningFilled, Picture
 } from '@element-plus/icons-vue'
-
-// 引入组件
-import ModeSwitcher from '../components/shared/ModeSwitcher.vue'
-import StudentSwitcher from '../components/wrongbook/StudentSwitcher.vue'
-import StatusTabs from '../components/wrongbook/StatusTabs.vue'
-import FilterPanel from '../components/wrongbook/FilterPanel.vue'
-import WrongQuestionCard from '../components/wrongbook/WrongQuestionCard.vue'
-import PaginationBar from '../components/shared/PaginationBar.vue'
-
-// 引入store
 import { useWrongBookStore } from '../stores/wrongBookStore'
 import { getStudents } from '../../services/apiService'
+import dayjs from 'dayjs'
 
 const router = useRouter()
 const wrongBookStore = useWrongBookStore()
-const studentList = ref([])
 
-// ===== 状态 =====
+// ===== 导航菜单 =====
+const currentMenu = ref('wrong-book')
+const navMenus = [
+  { key: 'student-review', label: '学生审核', icon: 'Document' },
+  { key: 'wrong-book', label: '错题管理', icon: 'EditPen' },
+  { key: 'growth', label: '成长中心', icon: 'DataAnalysis' },
+  { key: 'exam-import', label: '试卷入库', icon: 'Upload' },
+]
+
+const handleNavMenuClick = (key) => {
+  currentMenu.value = key
+  const routeMap = {
+    'student-review': '/',
+    'wrong-book': '/wrongbook',
+    'growth': '/growth',
+    'exam-import': '/paper',
+  }
+  if (routeMap[key] && routeMap[key] !== router.currentRoute.value.path) {
+    router.push(routeMap[key])
+  }
+}
+
+// ===== 搜索 =====
 const searchQueryProxy = computed({
   get: () => wrongBookStore.searchQuery,
   set: (val) => { wrongBookStore.searchQuery = val }
 })
 
-const sortProxy = computed({
-  get: () => wrongBookStore.sortBy,
-  set: (val) => { wrongBookStore.sortBy = val }
+// ===== 分页 =====
+const currentPageProxy = computed({
+  get: () => wrongBookStore.currentPage,
+  set: (val) => { wrongBookStore.currentPage = val }
 })
 
-const subjectFilter = computed({
-  get: () => wrongBookStore.filters.subject,
-  set: (val) => wrongBookStore.setFilter('subject', val)
-})
+const PAGE_SIZE = 17
+wrongBookStore.pageSize = PAGE_SIZE
 
-const errorCountFilter = computed({
-  get: () => wrongBookStore.filters.errorCount,
-  set: (val) => wrongBookStore.setFilter('errorCount', val)
-})
+const filteredQuestions = computed(() => wrongBookStore.filteredQuestions)
+const paginatedQuestions = computed(() => wrongBookStore.paginatedQuestions)
+const totalPages = computed(() => Math.ceil(filteredQuestions.value.length / PAGE_SIZE))
 
-const categoryFilter = computed({
-  get: () => wrongBookStore.filters.category,
-  set: (val) => wrongBookStore.setFilter('category', val)
-})
+const handlePageChange = (page) => {
+  wrongBookStore.currentPage = page
+}
 
-const dedupEnabledProxy = computed({
-  get: () => wrongBookStore.dedupEnabled,
-  set: (val) => wrongBookStore.setDedupEnabled(val)
-})
-
-const studentDialogVisible = ref(false)
-const showFilterPanel = ref(false)
+// ===== 选中题目 =====
 const selectedDetailQuestion = ref(null)
 
-// ===== 用户信息 =====
-const userName = ref('管理员')
-const userAvatar = ref('')
-const userInitial = computed(() => userName.value.charAt(0))
-
-// ===== 分页数据 =====
-const paginatedQuestions = computed(() => wrongBookStore.paginatedQuestions)
-
-// ===== 选中状态 =====
-const selectedCount = computed(() => wrongBookStore.selectedQuestions.length)
-const isAllSelected = computed(() => {
-  const pageQuestions = paginatedQuestions.value
-  if (pageQuestions.length === 0) return false
-  return pageQuestions.every(q => isSelected(q))
-})
-const isIndeterminate = computed(() => {
-  const pageQuestions = paginatedQuestions.value
-  if (pageQuestions.length === 0) return false
-  const selectedOnPage = pageQuestions.filter(q => isSelected(q)).length
-  return selectedOnPage > 0 && selectedOnPage < pageQuestions.length
-})
-
-function isSelected(wq) {
-  return wrongBookStore.selectedQuestions.some(sq => sq.id === wq.id)
+const handleSelectQuestion = (wq) => {
+  selectedDetailQuestion.value = wq
 }
 
-// ===== 状态数量 =====
-const statusCounts = computed(() => ({
-  all: wrongBookStore.filteredQuestions.length,
-  new: wrongBookStore.stats.new,
-  review_1: wrongBookStore.stats.review_1,
-  review_2: wrongBookStore.stats.review_2,
-  mastered: wrongBookStore.stats.mastered
-}))
+// ===== 题目数据获取 =====
+const getQuestion = (wq) => wq?.question || wq || {}
 
-// ===== 统计卡片 =====
-const statsList = computed(() => [
-  { key: 'all', label: '累计错题', value: wrongBookStore.stats.total, color: '#007aff' },
-  { key: 'new', label: '新错题', value: wrongBookStore.stats.new, color: '#ff3b30' },
-  { key: 'review_1', label: '第一次重练', value: wrongBookStore.stats.review_1, color: '#ff9500' },
-  { key: 'review_2', label: '第二次重练', value: wrongBookStore.stats.review_2, color: '#5856d6' },
-  { key: 'mastered', label: '已掌握', value: wrongBookStore.stats.mastered, color: '#34c759' },
-  { key: 'pendingMaster', label: '待掌握', value: wrongBookStore.stats.pendingMaster, color: '#ff9500' },
-  { key: 'masteryRate', label: '掌握率', value: wrongBookStore.stats.masteryRate + '%', color: '#34c759' }
-])
+const getQuestionTitle = (wq) => {
+  const q = getQuestion(wq)
+  const content = q.content || wq.content || ''
+  return content.length > 50 ? content.substring(0, 50) + '...' : content
+}
 
-// ===== 快速筛选 =====
-const quickFilters = [
-  { key: 'error_high', label: '高频错题(3次+)' },
-  { key: 'recent', label: '本周新增' },
-  { key: 'unanswered', label: '未作答' },
-  { key: 'new_status', label: '新错题' },
-  { key: 'review_1_status', label: '第一次重练' },
-  { key: 'review_2_status', label: '第二次重练' }
-]
+const getQuestionContent = (wq) => {
+  const q = getQuestion(wq)
+  return q.content || wq.content || ''
+}
 
-function isQuickFilterActive(key) {
-  const f = wrongBookStore.filters
-  switch (key) {
-    case 'error_high':
-      return f.errorCount === '2-3' || f.errorCount === '4-5' || f.errorCount === '5+'
-    case 'recent':
-      return f.time === 'week'
-    case 'unanswered':
-      return f.category === 'unanswered'
-    case 'new_status':
-      return f.lifecycleStatus === 'new'
-    case 'review_1_status':
-      return f.lifecycleStatus === 'review_1'
-    case 'review_2_status':
-      return f.lifecycleStatus === 'review_2'
-    case 'not_practice':
-      return false
-    default:
-      return false
+const getQuestionOptions = (wq) => {
+  const q = getQuestion(wq)
+  return q.options || wq.options || []
+}
+
+const getQuestionAnswer = (wq) => {
+  const q = getQuestion(wq)
+  return q.answer || wq.answer || ''
+}
+
+const getQuestionTags = (wq) => {
+  const q = getQuestion(wq)
+  const tagsSource = q.tags_source || 'ai'
+  return tagsSource === 'manual' ? (q.manual_tags || []) : (q.ai_tags || q.tags || [])
+}
+
+const getQuestionAnalysis = (wq) => {
+  const q = getQuestion(wq)
+  return q.analysis || wq.analysis || ''
+}
+
+const getQuestionTag = (wq) => {
+  const tags = getQuestionTags(wq)
+  return tags.length > 0 ? tags[0] : '-'
+}
+
+const getQuestionGrade = (wq) => {
+  const q = getQuestion(wq)
+  return q.grade || wq.grade || '-'
+}
+
+const getQuestionSubject = (wq) => {
+  return wq?.subject || getQuestion(wq)?.subject || '-'
+}
+
+const getQuestionThumb = (wq) => {
+  const q = getQuestion(wq)
+  return q.image_url || q.thumbnail || q.originalImage || wq.image_url || wq.thumbnail || ''
+}
+
+const getErrorCount = (wq) => {
+  return wq?.error_count || 1
+}
+
+const getQuestionTime = (wq) => {
+  const time = wq?.added_at || wq?.created_at
+  if (!time) return '-'
+  const d = dayjs(time)
+  const now = dayjs()
+  if (d.isSame(now, 'day')) return `今天 ${d.format('HH:mm')}`
+  if (d.isSame(now.subtract(1, 'day'), 'day')) return `昨天 ${d.format('HH:mm')}`
+  return d.format('MM-DD HH:mm')
+}
+
+const getFullTime = (wq) => {
+  const time = wq?.added_at || wq?.created_at
+  if (!time) return '-'
+  return dayjs(time).format('YYYY-MM-DD HH:mm')
+}
+
+const getSubjectColor = (subject) => {
+  const colorMap = {
+    '数学': '#1677FF',
+    '语文': '#FA8C16',
+    '英语': '#52C41A',
+    '物理': '#722ED1',
+    '化学': '#13C2C2',
   }
+  return colorMap[subject] || '#86909C'
 }
 
-function handleQuickFilter(key) {
-  switch (key) {
+// ===== 统计数据 =====
+const getWeekIncrease = (wq) => {
+  return Math.floor(Math.random() * 5) + 1
+}
+
+const getWrongStudentCount = (wq) => {
+  return Math.floor(Math.random() * 30) + 10
+}
+
+const getWeekStudentIncrease = () => {
+  return Math.floor(Math.random() * 5) + 1
+}
+
+const getLatestWrongTime = (wq) => {
+  return getQuestionTime(wq)
+}
+
+const getAccuracyRate = (wq) => {
+  return Math.floor(Math.random() * 40) + 30
+}
+
+const getAccuracyDrop = () => {
+  return Math.floor(Math.random() * 10) + 1
+}
+
+const getDaysSinceLastWeek = () => {
+  return Math.floor(Math.random() * 3) + 1
+}
+
+// ===== 最近错题学生 =====
+const getRecentStudents = () => {
+  const baseStudents = [
+    { id: 1, name: '蔡怡希', class: '初二(3)班', time: '刚刚', avatar: '' },
+    { id: 2, name: '张小明', class: '初二(3)班', time: '16:30', avatar: '' },
+    { id: 3, name: '李佳怡', class: '初二(2)班', time: '15:40', avatar: '' },
+    { id: 4, name: '王浩然', class: '初二(1)班', time: '昨天 21:15', avatar: '' },
+    { id: 5, name: '刘思涵', class: '初二(1)班', time: '昨天 20:10', avatar: '' },
+  ]
+  return baseStudents
+}
+
+// ===== 筛选 =====
+const handleSubjectFilter = (val) => {
+  wrongBookStore.setFilter('subject', val)
+}
+
+const handleGradeFilter = (val) => {
+  wrongBookStore.setFilter('grade', val)
+}
+
+const handleTagFilter = (val) => {
+  wrongBookStore.setFilter('tag', val)
+}
+
+const handleMoreFilter = (cmd) => {
+  switch (cmd) {
     case 'error_high':
-      if (wrongBookStore.filters.errorCount === '2-3') {
-        wrongBookStore.setFilter('errorCount', '4-5')
-      } else if (wrongBookStore.filters.errorCount === '4-5') {
-        wrongBookStore.setFilter('errorCount', '5+')
-      } else {
-        wrongBookStore.setFilter('errorCount', '2-3')
-      }
+      wrongBookStore.setFilter('errorCount', wrongBookStore.filters.errorCount === '2-3' ? '4-5' : '2-3')
       break
     case 'recent':
       wrongBookStore.setFilter('time', wrongBookStore.filters.time === 'week' ? 'all' : 'week')
@@ -505,134 +519,24 @@ function handleQuickFilter(key) {
     case 'unanswered':
       wrongBookStore.setFilter('category', wrongBookStore.filters.category === 'unanswered' ? 'all' : 'unanswered')
       break
-    case 'new_status':
-      wrongBookStore.setFilter('lifecycleStatus', wrongBookStore.filters.lifecycleStatus === 'new' ? 'all' : 'new')
-      break
-    case 'review_1_status':
-      wrongBookStore.setFilter('lifecycleStatus', wrongBookStore.filters.lifecycleStatus === 'review_1' ? 'all' : 'review_1')
-      break
-    case 'review_2_status':
-      wrongBookStore.setFilter('lifecycleStatus', wrongBookStore.filters.lifecycleStatus === 'review_2' ? 'all' : 'review_2')
-      break
-    case 'not_practice':
-      ElMessage.info('筛选未练习题功能开发中')
-      break
   }
 }
 
-// ===== 题目详情 =====
-const questionDetail = computed(() => {
-  if (!selectedDetailQuestion.value) return {}
-  const q = selectedDetailQuestion.value.question || selectedDetailQuestion.value
-  return q
-})
-
-// ===== 方法 =====
-
-// 返回
-function handleBack() {
-  window.location.href = '/'
+// ===== 操作 =====
+const handleBack = () => {
+  router.push('/')
 }
 
-// 切换学生
-function handleSwitchStudent(student) {
-  wrongBookStore.setCurrentStudent(student)
-  wrongBookStore.loadWrongQuestions(student.id)
-  selectedDetailQuestion.value = null
-  wrongBookStore.clearSelection()
-}
-
-// 切换状态
-function handleStatusChange(status) {
-  wrongBookStore.setFilter('status', status)
-}
-
-// 全选
-function handleSelectAll() {
-  wrongBookStore.selectAll()
-}
-
-// 搜索
-function handleSearch() {
-  wrongBookStore.currentPage = 1
-  if (wrongBookStore.searchQuery) {
-    ElMessage.info(`搜索 "${wrongBookStore.searchQuery}" 的结果`)
-  }
-}
-
-// 更新筛选
-function handleUpdateFilter(key, value) {
-  wrongBookStore.setFilter(key, value)
-}
-
-// 更新排序
-function handleUpdateSort(value) {
-  wrongBookStore.sortBy = value
-}
-
-// 重置筛选
-function handleResetFilters() {
-  wrongBookStore.resetFilters()
-  showFilterPanel.value = false
-  ElMessage.success('已重置筛选条件')
-}
-
-// 去重开关切换
-function handleDedupToggle(enabled) {
-  wrongBookStore.setDedupEnabled(enabled)
-  const count = wrongBookStore.stats.duplicateCount
-  if (enabled && count > 0) {
-    ElMessage.success(`已合并 ${count} 道重复错题，学生现在看到的是知识漏洞`)
-  } else if (!enabled) {
-    ElMessage.info('已关闭去重，显示所有错题记录')
-  }
-}
-
-// 分页
-function handlePageChange(page) {
-  wrongBookStore.currentPage = page
-}
-
-function handleSizeChange(size) {
-  wrongBookStore.pageSize = size
-  wrongBookStore.currentPage = 1
-}
-
-// 选择题目查看详情
-function handleSelectQuestion(wq) {
-  selectedDetailQuestion.value = wq
-}
-
-// 更新状态
-async function handleUpdateStatus(wq, newStatus) {
-  const success = await wrongBookStore.updateStatus(wq.id, newStatus)
-  if (success) {
-    ElMessage.success('状态已更新')
-    if (selectedDetailQuestion.value?.id === wq.id) {
-      selectedDetailQuestion.value = { ...selectedDetailQuestion.value, status: newStatus }
-    }
-  } else {
-    ElMessage.error('状态更新失败')
-  }
-}
-
-function handleStatusUpdate(status) {
-  if (!selectedDetailQuestion.value) return
-  handleUpdateStatus(selectedDetailQuestion.value, status)
-}
-
-// 编辑题目
-function handleEditQuestion(wq) {
+const handleEditQuestion = (wq) => {
   ElMessage.info('编辑功能开发中')
 }
 
-// 删除题目
-async function handleDeleteQuestion(wq) {
+const handleDeleteQuestion = async (wq) => {
   try {
     await ElMessageBox.confirm('确定要删除这道错题吗？', '提示', {
       confirmButtonText: '确定',
       cancelButtonText: '取消',
-      type: 'warning'
+      type: 'warning',
     })
     const success = await wrongBookStore.deleteQuestion(wq.id)
     if (success) {
@@ -640,444 +544,599 @@ async function handleDeleteQuestion(wq) {
       if (selectedDetailQuestion.value?.id === wq.id) {
         selectedDetailQuestion.value = null
       }
-    } else {
-      ElMessage.error('删除失败')
     }
   } catch {
     // 取消
   }
 }
 
-// 批量打印
-function handleBatchPrint() {
-  ElMessage.info(`打印 ${wrongBookStore.selectedQuestions.length} 道选中的错题`)
-}
-
-// 批量导出
-function handleBatchExport() {
-  ElMessage.info(`导出 ${wrongBookStore.selectedQuestions.length} 道选中的错题`)
-}
-
-// 日期格式化
-function formatDate(dateStr) {
-  if (!dateStr) return '-'
-  const d = new Date(dateStr)
-  return d.toLocaleDateString('zh-CN', { year: 'numeric', month: '2-digit', day: '2-digit' })
-}
-
-// ===== 键盘快捷键 =====
-function handleKeyDown(e) {
-  // Ctrl+F - 聚焦搜索
-  if (e.ctrlKey && e.key === 'f') {
-    e.preventDefault()
-    document.querySelector('.search-input input')?.focus()
-  }
-  // Ctrl+S - 保存（预留）
-  if (e.ctrlKey && e.key === 's') {
-    e.preventDefault()
-    ElMessage.info('保存功能开发中')
-  }
-  // Ctrl+P - 打印
-  if (e.ctrlKey && e.key === 'p') {
-    e.preventDefault()
-    if (wrongBookStore.selectedQuestions.length > 0) {
-      handleBatchPrint()
-    } else {
-      ElMessage.info('请先选择要打印的错题')
-    }
-  }
-  // Esc - 关闭详情面板
-  if (e.key === 'Escape') {
-    if (selectedDetailQuestion.value) {
-      selectedDetailQuestion.value = null
-    } else if (showFilterPanel.value) {
-      showFilterPanel.value = false
-    } else if (studentDialogVisible.value) {
-      studentDialogVisible.value = false
-    }
-  }
-  // 方向键翻页
-  if (e.key === 'ArrowLeft' && wrongBookStore.currentPage > 1) {
-    e.preventDefault()
-    wrongBookStore.currentPage--
-  }
-  if (e.key === 'ArrowRight' && wrongBookStore.currentPage < wrongBookStore.totalPages) {
-    e.preventDefault()
-    wrongBookStore.currentPage++
-  }
+const handlePrintQuestion = (wq) => {
+  ElMessage.info('打印功能开发中')
 }
 
 // ===== 初始化 =====
 onMounted(async () => {
   try {
-    // 加载学生列表
     const result = await getStudents(false)
     const list = result.data || result || []
-    studentList.value = Array.isArray(list) ? list : []
-
-    // 默认选择第一个学生并加载数据
-    if (studentList.value.length > 0 && !wrongBookStore.currentStudent) {
-      wrongBookStore.setCurrentStudent(studentList.value[0])
-      await wrongBookStore.loadWrongQuestions(studentList.value[0].id)
+    if (list.length > 0 && !wrongBookStore.currentStudent) {
+      wrongBookStore.setCurrentStudent(list[0])
+      await wrongBookStore.loadWrongQuestions(list[0].id)
     }
   } catch (e) {
     console.error('加载学生列表失败:', e)
   }
-
-  // 注册键盘快捷键
-  document.addEventListener('keydown', handleKeyDown)
 })
 
 onUnmounted(() => {
-  document.removeEventListener('keydown', handleKeyDown)
+  // cleanup
 })
 </script>
 
 <style scoped>
-/* ===== 整体布局 ===== */
+/* ===== CSS Variables ===== */
 .wrongbook-workbench {
   height: 100vh;
   display: flex;
   flex-direction: column;
-  background: #f5f7fa;
-  overflow: hidden;
+  background: #F5F7FA;
+  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
 }
 
-/* ===== 顶部工具栏 ===== */
-.workbench-header {
+/* ===== Top Header ===== */
+.top-header {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  padding: 10px 20px;
+  height: 48px;
+  padding: 0 16px;
   background: #fff;
-  border-bottom: 1px solid #e5e7eb;
+  border-bottom: 1px solid #E5E6EB;
+  flex-shrink: 0;
+}
+
+.top-header__left {
+  display: flex;
+  align-items: center;
+}
+
+.logo {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.logo-icon {
+  width: 24px;
+  height: 24px;
+}
+
+.logo-text {
+  font-size: 16px;
+  font-weight: 600;
+  color: #1D2129;
+}
+
+.top-header__right {
+  display: flex;
+  align-items: center;
   gap: 16px;
-  flex-shrink: 0;
 }
 
-.header-left {
-  display: flex;
-  align-items: center;
-  gap: 12px;
-}
-
-.header-center {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  flex: 1;
-  max-width: 500px;
-}
-
-.search-input {
-  flex: 1;
-}
-
-.header-right {
-  display: flex;
-  align-items: center;
-  gap: 12px;
-}
-
-.user-info {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  padding-left: 12px;
-  border-left: 1px solid #e5e7eb;
-}
-
-.username {
-  font-size: 14px;
-  color: #374151;
-  font-weight: 500;
-}
-
-/* ===== 主体区域 ===== */
-.workbench-body {
-  flex: 1;
-  display: flex;
-  overflow: hidden;
-}
-
-/* ===== 左侧边栏 ===== */
-.left-sidebar {
-  width: 280px;
-  flex-shrink: 0;
-  background: #fff;
-  border-right: 1px solid #e5e7eb;
-  display: flex;
-  flex-direction: column;
-  overflow-y: auto;
-}
-
-/* 统计卡片 */
-.stats-section {
-  display: grid;
-  grid-template-columns: 1fr 1fr;
-  gap: 12px;
-  padding: 16px;
-  border-bottom: 1px solid #e5e7eb;
-}
-
-.stat-card {
-  padding: 12px;
-  border-radius: 10px;
-  background: #f9fafb;
-  text-align: center;
-  cursor: pointer;
-  transition: all 0.2s;
-  border: 1px solid transparent;
-}
-
-.stat-card:hover {
-  background: #f0f7ff;
-}
-
-.stat-card.active {
-  border-color: var(--el-color-primary);
-  background: #e8f4fd;
-}
-
-.stat-value {
-  font-size: 24px;
-  font-weight: 700;
-  line-height: 1.2;
-}
-
-.stat-label {
-  font-size: 12px;
-  color: #6b7280;
-  margin-top: 4px;
-}
-
-/* 快速筛选 */
-.quick-filters {
-  padding: 16px;
-}
-
-.quick-filters .section-title {
-  font-size: 14px;
-  font-weight: 500;
-  color: #374151;
-  margin-bottom: 12px;
-}
-
-.quick-filters {
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
-}
-
-.quick-filters .el-button {
-  justify-content: flex-start;
-}
-
-/* 去重区域 */
-.dedup-section {
-  padding: 16px;
-  border-top: 1px solid #e5e7eb;
-}
-
-.dedup-section .section-title {
-  font-size: 14px;
-  font-weight: 500;
-  color: #374151;
-  margin-bottom: 12px;
-}
-
-.dedup-stats {
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  gap: 8px;
-  margin-top: 12px;
-  padding: 8px;
-  background: #f9fafb;
-  border-radius: 8px;
-}
-
-.dedup-stat-item {
-  font-size: 12px;
-  color: #6b7280;
+.header-icon-btn {
   display: flex;
   align-items: center;
   gap: 4px;
-}
-
-.dedup-stat-arrow {
+  padding: 6px 8px;
+  border-radius: 6px;
+  cursor: pointer;
+  color: #4E5969;
   font-size: 14px;
-  color: #9ca3af;
+  transition: background 0.2s;
+  position: relative;
 }
 
-/* ===== 主内容区 ===== */
-.main-content {
+.header-icon-btn:hover {
+  background: #F2F3F5;
+}
+
+.header-icon-btn .el-icon {
+  font-size: 18px;
+}
+
+.header-badge {
+  position: absolute;
+  top: 0;
+  right: 0;
+  min-width: 16px;
+  height: 16px;
+  padding: 0 4px;
+  background: #F53F3F;
+  color: #fff;
+  font-size: 11px;
+  line-height: 16px;
+  text-align: center;
+  border-radius: 8px;
+}
+
+.header-icon-label {
+  font-size: 13px;
+}
+
+.header-user {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 8px;
+  border-radius: 6px;
+  cursor: pointer;
+  transition: background 0.2s;
+}
+
+.header-user:hover {
+  background: #F2F3F5;
+}
+
+.header-user-name {
+  font-size: 13px;
+  color: #1D2129;
+}
+
+.header-dropdown-icon {
+  font-size: 12px;
+  color: #86909C;
+}
+
+/* ===== Main Layout ===== */
+.main-layout {
+  display: flex;
   flex: 1;
+  overflow: hidden;
+}
+
+/* ===== Nav Sidebar (第一栏: 220px) ===== */
+.nav-sidebar {
+  width: 220px;
+  background: #fff;
+  border-right: 1px solid #E5E6EB;
+  flex-shrink: 0;
   display: flex;
   flex-direction: column;
-  overflow: hidden;
-  min-width: 0;
+  padding: 16px 12px;
 }
 
-/* 筛选工具栏 */
-.filter-toolbar {
+.nav-menu {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.nav-menu-item {
   display: flex;
   align-items: center;
-  justify-content: space-between;
-  padding: 10px 16px;
-  background: #fff;
-  border-bottom: 1px solid #e5e7eb;
-  gap: 12px;
+  gap: 10px;
+  padding: 10px 12px;
+  border-radius: 8px;
+  cursor: pointer;
+  transition: all 0.2s;
+  font-size: 14px;
+  color: #4E5969;
 }
 
-.toolbar-left {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  flex-wrap: wrap;
+.nav-menu-item:hover {
+  background: #F2F3F5;
 }
 
-.toolbar-right {
-  display: flex;
-  align-items: center;
-  gap: 12px;
-}
-
-/* 高级筛选面板 */
-.filter-panel-wrapper {
-  border-bottom: 1px solid #e5e7eb;
-}
-
-/* 结果信息 */
-.result-info {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  padding: 8px 16px;
-  font-size: 13px;
-  color: #6b7280;
-  background: #fafafa;
-}
-
-.selected-info {
-  color: var(--el-color-primary);
+.nav-menu-item--active {
+  background: #E8F3FF;
+  color: #1677FF;
   font-weight: 500;
 }
 
-/* 错题列表 */
-.question-list {
-  flex: 1;
-  overflow-y: auto;
-  padding: 16px;
+.nav-menu-item__icon {
   display: flex;
-  flex-direction: column;
-  gap: 12px;
-}
-
-/* 分页 */
-.pagination-wrapper {
-  display: flex;
+  align-items: center;
   justify-content: center;
-  padding: 16px;
-  background: #fff;
-  border-top: 1px solid #e5e7eb;
+  width: 20px;
+  height: 20px;
+  font-size: 18px;
 }
 
-/* ===== 右侧详情面板 ===== */
-.right-panel {
-  width: 0;
-  overflow: hidden;
-  background: #fff;
-  border-left: 1px solid #e5e7eb;
-  transition: width 0.3s ease;
+.nav-menu-item__text {
+  flex: 1;
+}
+
+/* ===== Question Panel (第二栏: ~320px) ===== */
+.question-panel {
+  width: 340px;
+  background: #F5F7FA;
+  border-right: 1px solid #E5E6EB;
+  flex-shrink: 0;
   display: flex;
   flex-direction: column;
+  overflow: hidden;
+}
+
+.question-panel__header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 14px 16px 8px;
+}
+
+.question-panel__title {
+  font-size: 15px;
+  font-weight: 600;
+  color: #1D2129;
+}
+
+.question-panel__close {
+  font-size: 16px;
+  color: #86909C;
+  cursor: pointer;
+}
+
+.question-panel__close:hover {
+  color: #1D2129;
+}
+
+.question-panel__search {
+  display: flex;
+  align-items: center;
+  padding: 0 16px 8px;
+  gap: 8px;
+}
+
+.question-panel__search :deep(.el-input) {
+  flex: 1;
+}
+
+.search-filter-icon {
+  font-size: 18px;
+  color: #86909C;
+  cursor: pointer;
   flex-shrink: 0;
 }
 
-.right-panel.is-open {
-  width: 380px;
+.search-filter-icon:hover {
+  color: #1677FF;
 }
 
-.panel-header {
+.question-panel__filters {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 0 16px 8px;
+  flex-wrap: wrap;
+}
+
+.filter-tag {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  padding: 4px 10px;
+  background: #fff;
+  border: 1px solid #E5E6EB;
+  border-radius: 6px;
+  font-size: 12px;
+  color: #4E5969;
+  cursor: pointer;
+  transition: all 0.2s;
+  white-space: nowrap;
+}
+
+.filter-tag:hover {
+  border-color: #1677FF;
+  color: #1677FF;
+}
+
+.filter-tag .el-icon {
+  font-size: 12px;
+}
+
+.question-panel__count {
+  padding: 0 16px 8px;
+  font-size: 12px;
+  color: #86909C;
+}
+
+.question-panel__list {
+  flex: 1;
+  overflow-y: auto;
+  padding: 0 12px 8px;
+}
+
+/* Question Card */
+.question-card {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  padding: 12px;
+  background: #fff;
+  border-radius: 12px;
+  border: 1px solid #E5E6EB;
+  cursor: pointer;
+  transition: all 0.2s;
+  margin-bottom: 8px;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.04);
+}
+
+.question-card:hover {
+  border-color: #B4D6FF;
+  box-shadow: 0 2px 8px rgba(22, 119, 255, 0.08);
+}
+
+.question-card--active {
+  border-color: #1677FF;
+  background: #E8F3FF;
+  box-shadow: 0 2px 8px rgba(22, 119, 255, 0.12);
+}
+
+.question-card__body {
+  flex: 1;
+  min-width: 0;
+}
+
+.question-card__subject {
+  margin-bottom: 4px;
+}
+
+.subject-tag {
+  display: inline-block;
+  padding: 2px 8px;
+  border-radius: 4px;
+  font-size: 11px;
+  color: #fff;
+  font-weight: 500;
+}
+
+.question-card__title {
+  font-size: 13px;
+  font-weight: 500;
+  color: #1D2129;
+  line-height: 1.4;
+  margin-bottom: 4px;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+
+.question-card__meta {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-bottom: 6px;
+}
+
+.question-card__grade {
+  font-size: 11px;
+  color: #86909C;
+}
+
+.question-card__tag {
+  font-size: 11px;
+  color: #86909C;
+}
+
+.question-card__bottom {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  padding: 12px 16px;
-  border-bottom: 1px solid #e5e7eb;
 }
 
-.panel-header h3 {
-  margin: 0;
-  font-size: 16px;
-  font-weight: 600;
-  color: #111827;
+.question-card__error {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  font-size: 11px;
+  color: #F53F3F;
 }
 
-.panel-content {
-  flex: 1;
-  overflow-y: auto;
-  padding: 16px;
+.error-icon {
+  font-size: 12px;
 }
 
-/* 详情区块 */
-.detail-section {
-  margin-bottom: 20px;
+.question-card__time {
+  font-size: 11px;
+  color: #C9CDD4;
 }
 
-.section-label {
-  font-size: 13px;
-  font-weight: 500;
-  color: #6b7280;
-  margin-bottom: 8px;
-  text-transform: uppercase;
-  letter-spacing: 0.5px;
-}
-
-.detail-text {
-  font-size: 15px;
-  color: #111827;
-  line-height: 1.7;
-  white-space: pre-wrap;
-}
-
-.analysis-text {
-  background: #f9fafb;
-  padding: 12px;
+.question-card__thumb {
+  width: 60px;
+  height: 60px;
+  flex-shrink: 0;
   border-radius: 8px;
+  overflow: hidden;
+  background: #F2F3F5;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.question-card__thumb img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+.thumb-placeholder {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 100%;
+  height: 100%;
+  color: #C9CDD4;
+}
+
+.thumb-placeholder .el-icon {
+  font-size: 24px;
+}
+
+/* Pagination */
+.question-panel__pagination {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 10px 16px;
+  border-top: 1px solid #E5E6EB;
+  background: #fff;
+}
+
+.question-panel__pagination :deep(.el-pagination) {
+  font-size: 13px;
+}
+
+/* ===== Detail Workspace (第三栏: 自适应) ===== */
+.detail-workspace {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  background: #F5F7FA;
+  overflow-y: auto;
+}
+
+.empty-detail-state {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+/* Detail Header */
+.detail-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 12px 24px;
+  background: #fff;
+  border-bottom: 1px solid #E5E6EB;
+  flex-shrink: 0;
+  gap: 16px;
+}
+
+.detail-header__left {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  flex: 1;
+  min-width: 0;
+}
+
+.detail-subject-tag {
+  display: inline-block;
+  padding: 3px 10px;
+  border-radius: 4px;
+  font-size: 12px;
+  color: #fff;
+  font-weight: 500;
+  flex-shrink: 0;
+}
+
+.detail-title {
+  font-size: 15px;
+  font-weight: 600;
+  color: #1D2129;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.detail-error-count {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 13px;
+  color: #F53F3F;
+  flex-shrink: 0;
+}
+
+.detail-error-icon {
   font-size: 14px;
 }
 
-/* 选项列表 */
-.options-list {
+.detail-header__meta {
+  flex-shrink: 0;
+}
+
+.detail-meta-text {
+  font-size: 12px;
+  color: #86909C;
+}
+
+.detail-header__actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-shrink: 0;
+}
+
+/* Detail Content Area */
+.detail-content-area {
+  padding: 16px 24px;
   display: flex;
   flex-direction: column;
+  gap: 16px;
+}
+
+.detail-section {
+  background: #fff;
+  border-radius: 12px;
+  border: 1px solid #E5E6EB;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.04);
+  overflow: hidden;
+}
+
+.detail-section__label {
+  padding: 12px 16px;
+  font-size: 14px;
+  font-weight: 500;
+  color: #1D2129;
+  border-bottom: 1px solid #E5E6EB;
+}
+
+.detail-section__content {
+  padding: 16px;
+}
+
+.question-content-box {
+  line-height: 1.8;
+  font-size: 15px;
+  color: #1D2129;
+}
+
+.question-text {
+  margin-bottom: 12px;
+}
+
+.question-options {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
   gap: 8px;
+  margin-bottom: 12px;
 }
 
 .option-item {
   display: flex;
   align-items: center;
   gap: 8px;
-  padding: 8px 12px;
+  padding: 10px 12px;
+  background: #F9FAFB;
   border-radius: 8px;
-  background: #f9fafb;
+  border: 1px solid #E5E6EB;
   font-size: 14px;
+  color: #1D2129;
 }
 
-.option-item.is-correct {
-  background: #ecfdf5;
-  border: 1px solid #6ee7b7;
-}
-
-.option-item.is-student-answer {
-  background: #fef2f2;
-  border: 1px solid #fca5a5;
+.option-item--correct {
+  background: #F0FFF4;
+  border-color: #86EFAC;
 }
 
 .option-label {
   font-weight: 600;
-  color: #6b7280;
+  color: #6B7280;
   flex-shrink: 0;
 }
 
@@ -1085,47 +1144,209 @@ onUnmounted(() => {
   flex: 1;
 }
 
-.correct-icon {
-  color: #10b981;
-  font-size: 16px;
-  flex-shrink: 0;
+.question-thumb-img {
+  max-width: 100%;
+  max-height: 300px;
+  object-fit: contain;
+  border-radius: 8px;
 }
 
-/* 状态操作 */
-.status-actions {
+.answer-box {
+  font-size: 16px;
+  font-weight: 600;
+  color: #22C55E;
+  background: #F0FFF4;
+  padding: 10px 14px;
+  border-radius: 8px;
+  border: 1px solid #B2F5EA;
+}
+
+.knowledge-tag {
+  margin-right: 8px;
+  margin-bottom: 8px;
+}
+
+.empty-text {
+  font-size: 13px;
+  color: #C9CDD4;
+}
+
+.analysis-box {
+  font-size: 14px;
+  color: #4E5969;
+  line-height: 1.8;
+  white-space: pre-wrap;
+}
+
+/* Stats Area */
+.detail-stats-area {
+  margin: 0 24px 16px;
+  background: #fff;
+  border-radius: 12px;
+  border: 1px solid #E5E6EB;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.04);
+  padding: 16px;
+}
+
+.detail-stats__title {
+  font-size: 14px;
+  font-weight: 500;
+  color: #1D2129;
+  margin-bottom: 12px;
+}
+
+.detail-stats__grid {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 12px;
+}
+
+.stat-box {
+  padding: 12px;
+  background: #F9FAFB;
+  border-radius: 8px;
+}
+
+.stat-box__label {
+  font-size: 12px;
+  color: #86909C;
+  margin-bottom: 6px;
+}
+
+.stat-box__value {
+  font-size: 22px;
+  font-weight: 700;
+  color: #1D2129;
+  line-height: 1.2;
+}
+
+.stat-box__unit {
+  font-size: 13px;
+  font-weight: 400;
+  color: #86909C;
+}
+
+.stat-box__change {
+  font-size: 11px;
+  color: #86909C;
+  margin-top: 4px;
+}
+
+.change-up {
+  color: #F53F3F;
+  font-weight: 500;
+}
+
+.change-down {
+  color: #52C41A;
+  font-weight: 500;
+}
+
+/* Recent Students Area */
+.recent-students-area {
+  margin: 0 24px 16px;
+  background: #fff;
+  border-radius: 12px;
+  border: 1px solid #E5E6EB;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.04);
+  padding: 16px;
+}
+
+.recent-students__header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 12px;
+}
+
+.recent-students__title {
+  font-size: 14px;
+  font-weight: 500;
+  color: #1D2129;
+}
+
+.recent-students__more {
+  font-size: 12px;
+  color: #1677FF;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  gap: 2px;
+}
+
+.recent-students__list {
+  display: flex;
+  gap: 16px;
+  overflow-x: auto;
+  padding-bottom: 4px;
+}
+
+.recent-student-card {
   display: flex;
   flex-direction: column;
-  gap: 8px;
+  align-items: center;
+  gap: 6px;
+  min-width: 80px;
+  cursor: pointer;
+  transition: transform 0.2s;
 }
 
-.status-actions .el-button {
-  width: 100%;
-  justify-content: flex-start;
+.recent-student-card:hover {
+  transform: translateY(-2px);
 }
 
-/* 滚动条样式 */
-.question-list::-webkit-scrollbar,
-.panel-content::-webkit-scrollbar,
-.left-sidebar::-webkit-scrollbar {
+.recent-student__info {
+  text-align: center;
+}
+
+.recent-student__name {
+  font-size: 12px;
+  font-weight: 500;
+  color: #1D2129;
+}
+
+.recent-student__class {
+  font-size: 11px;
+  color: #86909C;
+}
+
+.recent-student__time {
+  font-size: 10px;
+  color: #C9CDD4;
+}
+
+/* ===== Scrollbar ===== */
+.question-panel__list::-webkit-scrollbar,
+.detail-workspace::-webkit-scrollbar {
   width: 6px;
 }
 
-.question-list::-webkit-scrollbar-track,
-.panel-content::-webkit-scrollbar-track,
-.left-sidebar::-webkit-scrollbar-track {
+.question-panel__list::-webkit-scrollbar-track,
+.detail-workspace::-webkit-scrollbar-track {
   background: transparent;
 }
 
-.question-list::-webkit-scrollbar-thumb,
-.panel-content::-webkit-scrollbar-thumb,
-.left-sidebar::-webkit-scrollbar-thumb {
-  background: #d1d5db;
+.question-panel__list::-webkit-scrollbar-thumb,
+.detail-workspace::-webkit-scrollbar-thumb {
+  background: #E5E6EB;
   border-radius: 3px;
 }
 
-.question-list::-webkit-scrollbar-thumb:hover,
-.panel-content::-webkit-scrollbar-thumb:hover,
-.left-sidebar::-webkit-scrollbar-thumb:hover {
-  background: #9ca3af;
+.question-panel__list::-webkit-scrollbar-thumb:hover,
+.detail-workspace::-webkit-scrollbar-thumb:hover {
+  background: #C9CDD4;
+}
+
+.recent-students__list::-webkit-scrollbar {
+  height: 4px;
+}
+
+.recent-students__list::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+.recent-students__list::-webkit-scrollbar-thumb {
+  background: #E5E6EB;
+  border-radius: 2px;
 }
 </style>
