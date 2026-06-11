@@ -505,9 +505,11 @@ const backToStudents = () => {
   selectedExam.value = null
 }
 
-const handleSelectExam = (exam) => {
+const handleSelectExam = async (exam) => {
   selectedExam.value = exam
   reviewStore.currentReviewIndex = 0
+  // Load ALL questions for this exam/task
+  await reviewStore.loadQuestions(exam.id)
 }
 
 const imageScale = ref(1)
@@ -522,14 +524,11 @@ const resetImageTransform = () => {
 const fullscreenVisible = ref(false)
 
 const currentQuestion = computed(() => reviewStore.currentReviewQuestion)
-const totalQuestions = computed(() => reviewStore.studentWrongQuestions.length || 0)
+const totalQuestions = computed(() => reviewStore.allQuestions.length || 0)
 
 const reviewedCount = computed(() => {
-  return reviewStore.studentWrongQuestions.filter(q => {
-    const status = q.lifecycle_status || q.status
-    return status === LIFECYCLE_STATUS.REVIEW_1 || status === LIFECYCLE_STATUS.REVIEW_2 ||
-           status === LIFECYCLE_STATUS.MASTERED || q.review_status === 'correct' ||
-           q.review_status === 'wrong' || q.review_status === 'excluded'
+  return reviewStore.allQuestions.filter(q => {
+    return q.review_status === 'correct' || q.review_status === 'wrong' || q.review_status === 'excluded'
   }).length
 })
 

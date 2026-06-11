@@ -1,7 +1,7 @@
 import { defineStore } from 'pinia'
 import { ref, computed } from 'vue'
 import dayjs from 'dayjs'
-import { getStudents, getWrongQuestionsByStudent } from '../../services/apiService'
+import { getStudents, getWrongQuestionsByStudent, getQuestionsByTask } from '../../services/apiService'
 import { useLifecycleStore, LIFECYCLE_STATUS } from './lifecycleStore'
 
 export const useReviewStore = defineStore('review', () => {
@@ -11,10 +11,14 @@ export const useReviewStore = defineStore('review', () => {
   const students = ref([])
   const currentStudent = ref(null)
   
-  // 错题列表
+  // 错题列表（从 wrong_questions 表）
   const wrongQuestions = ref([])
   
-  // 当前审核的错题索引
+  // 当前试卷的所有题目（从 questions 表）
+  const allQuestions = ref([])
+  const currentTaskId = ref(null)
+  
+  // 当前审核的题目索引
   const currentReviewIndex = ref(0)
   
   // 审核状态
@@ -28,19 +32,15 @@ export const useReviewStore = defineStore('review', () => {
     pendingPrintExams: 0    // 已生成待打印重练卷数量
   })
 
-  // 获取当前学生待审核的错题（所有非mastered状态的错题）
-  const studentWrongQuestions = computed(() => {
-    if (!currentStudent.value) return []
-    return wrongQuestions.value.filter(wq => 
-      wq.student_id === currentStudent.value.id && 
-      wq.lifecycle_status !== LIFECYCLE_STATUS.MASTERED
-    )
+  // 所有题目（用于显示完整题号导航 1~N）
+  const studentAllQuestions = computed(() => {
+    return allQuestions.value
   })
 
-  // 当前审核的错题
+  // 当前审核的题目（优先显示有 review_status 的，即需要人工复核的）
   const currentReviewQuestion = computed(() => {
-    if (studentWrongQuestions.value.length === 0) return null
-    return studentWrongQuestions.value[currentReviewIndex.value] || null
+    if (allQuestions.value.length === 0) return null
+    return allQuestions.value[currentReviewIndex.value] || null
   })
 
   // 获取学生待审核题目数
@@ -104,6 +104,24 @@ export const useReviewStore = defineStore('review', () => {
     } catch (e) {
       console.error('加载学生列表失败:', e)
       students.value = []
+    }
+  }
+
+  // 加载试卷的所有题目
+  const loadQuestions = async (taskId) => {
+    if (!taskId) return
+    currentTaskId.value = taskId
+    try {
+      const questions = await getQuestionsByTask(taskId, false)
+      // Sort questions by sort_order or sequence
+      allQuestions.value = (Array.isArray(questions) ? questions : []).sort((a, b) => {
+        const aOrder = a.sort_order || a.sequence || 0
+        const bOrder = b.sort_order || b.sequence || 0
+        return aOrder - bOrder
+      })
+    } catch (e) {
+      console.error('加载题目数据失败:', e)
+      allQuestions.value = []
     }
   }
 
@@ -171,12 +189,12 @@ export const useReviewStore = defineStore('review', () => {
   const setCurrentStudent = (student) => {
     currentStudent.value = student
     currentReviewIndex.value = 0
-    reviewStatus.value = studentWrongQuestions.value.length > 0 ? 'reviewing' : 'completed'
+    reviewStatus.value = allQuestions.value.length > 0 ? 'reviewing' : 'completed'
   }
 
   // 下一题
   const nextQuestion = () => {
-    if (currentReviewIndex.value < studentWrongQuestions.value.length - 1) {
+    if (currentReviewIndex.value < allQuestions.value.length - 1) {
       currentReviewIndex.value++
       return true
     }
@@ -192,30 +210,41 @@ export const useReviewStore = defineStore('review', () => {
     return false
   }
 
+  // 跳转到指定题目
+  const jumpToQuestion = (idx) => {
+    if (idx >= 0 && idx < allQuestions.value.length) {
+      currentReviewIndex.value = idx
+    }
+  }
+
   // 审核错题（使用新的生命周期状态）
-  const reviewQuestion = (wqId, result) => {
-    const wq = wrongQuestions.value.find(w => w.id === wqId)
-    if (wq) {
-      const currentStatus = wq.lifecycle_status || LIFECYCLE_STATUS.NEW
+  const reviewQuestion = (questionId, result) => {
+    const question = allQuestions.value.find(q => q.id === questionId)
+    if (question) {
+      // Store manual review status on the question
+      question.review_status = result
       
-      switch (result) {
-        case 'correct':
-          // 正确：进入下一个生命周期阶段
-          wq.lifecycle_status = lifecycleStore.getNextStatus(currentStatus)
-          wq.status = wq.lifecycle_status === LIFECYCLE_STATUS.MASTERED ? 'mastered' : 'pending'
-          wq.practice_count = (wq.practice_count || 0) + 1
-          break
-        case 'wrong':
-          // 错误：重新回到new
-          wq.lifecycle_status = LIFECYCLE_STATUS.NEW
-          wq.status = 'pending'
-          wq.error_count = (wq.error_count || 0) + 1
-          break
-        case 'unanswered':
-          // 未作答：保持当前状态或回到new
-          wq.lifecycle_status = LIFECYCLE_STATUS.NEW
-          wq.status = 'partial'
-          break
+      // Also update the wrong question if it exists
+      const wq = wrongQuestions.value.find(w => w.question_id === questionId)
+      if (wq) {
+        const currentStatus = wq.lifecycle_status || LIFECYCLE_STATUS.NEW
+        
+        switch (result) {
+          case 'correct':
+            wq.lifecycle_status = lifecycleStore.getNextStatus(currentStatus)
+            wq.status = wq.lifecycle_status === LIFECYCLE_STATUS.MASTERED ? 'mastered' : 'pending'
+            wq.practice_count = (wq.practice_count || 0) + 1
+            break
+          case 'wrong':
+            wq.lifecycle_status = LIFECYCLE_STATUS.NEW
+            wq.status = 'pending'
+            wq.error_count = (wq.error_count || 0) + 1
+            break
+          case 'exclude':
+            wq.lifecycle_status = LIFECYCLE_STATUS.EXCLUDED
+            wq.status = 'excluded'
+            break
+        }
       }
       
       // 重新计算统计
@@ -229,24 +258,43 @@ export const useReviewStore = defineStore('review', () => {
     }
   }
 
+  // 获取人工复核进度
+  const getManualReviewProgress = () => {
+    const total = allQuestions.value.length
+    if (total === 0) return { reviewed: 0, total: 0, percent: 0 }
+    const reviewed = allQuestions.value.filter(q => q.review_status).length
+    return { reviewed, total, percent: Math.round((reviewed / total) * 100) }
+  }
+
+  // 获取题目状态
+  const getQuestionReviewStatus = (question) => {
+    return question.review_status || null
+  }
+
   return {
     students,
     currentStudent,
     wrongQuestions,
+    allQuestions,
     currentReviewIndex,
+    currentTaskId,
     reviewStatus,
     todayStats,
-    studentWrongQuestions,
+    studentAllQuestions,
     currentReviewQuestion,
     getStudentPendingCount,
     getStudentTodayNewCount,
     calculateTodayStats,
     loadStudents,
     loadWrongQuestions,
+    loadQuestions,
     initData,
     setCurrentStudent,
     nextQuestion,
     prevQuestion,
-    reviewQuestion
+    jumpToQuestion,
+    reviewQuestion,
+    getManualReviewProgress,
+    getQuestionReviewStatus
   }
 })
