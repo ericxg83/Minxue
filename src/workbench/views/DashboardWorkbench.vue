@@ -5,8 +5,7 @@
       <div class="top-header__left">
         <div class="logo">
           <svg viewBox="0 0 24 24" fill="none" class="logo-icon" width="24" height="24">
-            <path d="M12 3L4 7v10l8 4 8-4V7l-8-4z" stroke="#1677FF" stroke-width="2" stroke-linejoin="round"/>
-            <path d="M12 22V12M12 12l8-5M12 12L4 7" stroke="#1677FF" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+            <path d="M12 2L2 7l10 5 10-5-10-5zM2 17l10 5 10-5M2 12l10 5 10-5" stroke="#1677FF" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
           </svg>
           <span class="logo-text">敏学成长工作台</span>
         </div>
@@ -64,7 +63,6 @@
           <span class="list-panel__title">{{ selectedStudentForExam ? '试卷列表' : '学生列表' }}</span>
         </div>
 
-        <!-- 搜索框 -->
         <template v-if="!selectedStudentForExam">
           <div class="list-panel__search">
             <el-input v-model="searchQuery" placeholder="搜索学生姓名" :prefix-icon="Search" clearable size="default" />
@@ -74,7 +72,6 @@
         </template>
 
         <div class="list-panel__list">
-          <!-- 学生卡片列表 -->
           <template v-if="!selectedStudentForExam">
             <div
               v-for="student in filteredStudents"
@@ -115,7 +112,6 @@
             </div>
           </template>
 
-          <!-- 试卷卡片列表 -->
           <template v-else>
             <div
               v-for="exam in studentExams"
@@ -140,40 +136,41 @@
       </aside>
 
       <!-- 第三栏：审核工作区 -->
-      <section class="review-workspace" v-if="selectedExam && currentQuestion">
-        <!-- 顶部信息栏 -->
-        <div class="review-header">
-          <div class="review-header__left">
-            <div class="review-header__student">
-              <div class="review-avatar-circle">{{ reviewStore.currentStudent?.name?.charAt(0) || '?' }}</div>
-              <div class="review-header__student-info">
-                <div class="review-header__name">{{ reviewStore.currentStudent?.name }}</div>
-                <div class="review-header__class">{{ reviewStore.currentStudent?.grade }}</div>
+      <section class="review-main" v-loading="loading">
+        <template v-if="selectedExam && currentQuestion">
+          <!-- 顶部信息卡片 -->
+          <div class="review-header-card">
+            <div class="review-header-card__left">
+              <div class="review-header-card__student">
+                <div class="review-avatar-circle">{{ reviewStore.currentStudent?.name?.charAt(0) || '?' }}</div>
+                <div class="review-header-card__student-info">
+                  <div class="review-header-card__name">{{ reviewStore.currentStudent?.name }}</div>
+                  <div class="review-header-card__class">{{ reviewStore.currentStudent?.grade }}</div>
+                </div>
+              </div>
+              <div class="review-header-card__divider"></div>
+              <div class="review-header-card__exam">
+                <div class="review-header-card__exam-name">{{ selectedExam.name }}</div>
+                <div class="review-header-card__exam-info">
+                  共 {{ totalQuestions }} 题 · AI批改完成 · 人工复核中
+                </div>
               </div>
             </div>
-            <div class="review-header__exam">
-              <div class="review-header__exam-name">{{ selectedExam.name }}</div>
-              <div class="review-header__exam-info">
-                共 {{ totalQuestions }} 题 · AI批改完成 · 人工复核中
+            <div class="review-header-card__center">
+              <div class="review-header-card__ai-badge">
+                <el-icon><CircleCheckFilled /></el-icon>
+                AI批改进度
+              </div>
+              <div class="review-header-card__ai-value">{{ reviewedCount }}/{{ totalQuestions }} 题</div>
+              <div class="review-header-card__ai-status">
+                <el-icon class="ai-done-icon"><CircleCheckFilled /></el-icon>
+                已完成
               </div>
             </div>
-          </div>
-          <div class="review-header__center">
-            <div class="review-header__ai-badge">
-              <el-icon><CircleCheckFilled /></el-icon>
-              AI批改进度
-            </div>
-            <div class="review-header__ai-value">{{ reviewedCount }}/{{ totalQuestions }} 题</div>
-            <div class="review-header__ai-status">
-              <el-icon class="ai-done-icon"><CircleCheckFilled /></el-icon>
-              已完成
-            </div>
-          </div>
-          <div class="review-header__right">
-            <div class="review-header__manual">
-              <div class="review-header__manual-label">人工复核进度</div>
-              <div class="review-header__manual-value">{{ reviewedCount }}/{{ totalQuestions }} 题</div>
-              <div class="review-header__manual-bar">
+            <div class="review-header-card__right">
+              <div class="review-header-card__manual-label">人工复核进度</div>
+              <div class="review-header-card__manual-value">{{ reviewedCount }}/{{ totalQuestions }} 题</div>
+              <div class="review-header-card__manual-bar">
                 <div class="manual-progress-bar">
                   <div class="manual-progress-fill" :style="{ width: progressPercent + '%' }"></div>
                 </div>
@@ -181,123 +178,112 @@
               </div>
             </div>
           </div>
-          <div class="review-header__source">
-            <span class="review-header__source-label">错题来源：</span>
-            <el-select v-model="selectedExamSource" size="small" style="width: 140px;">
-              <el-option :label="selectedExam.name" :value="selectedExam.id" />
-            </el-select>
-          </div>
-        </div>
 
-        <!-- 题号导航 -->
-        <div class="question-nav-bar">
-          <div class="question-nav-bar__pages">
-            <div
-              v-for="(q, idx) in reviewStore.studentWrongQuestions"
-              :key="q.id"
-              class="question-nav-btn"
-              :class="[getQuestionStatusClass(q), { 'question-nav-btn--active': reviewStore.currentReviewIndex === idx }]"
-              @click="jumpToQuestion(idx)"
-              @mouseenter="showQuestionTooltip(idx, $event)"
-              @mouseleave="hideQuestionTooltip"
-            >
-              {{ idx + 1 }}
-            </div>
-          </div>
-          <div class="question-nav-bar__legend">
-            <span class="legend-item"><span class="legend-dot legend--correct"></span>正确</span>
-            <span class="legend-item"><span class="legend-dot legend--wrong"></span>错误</span>
-            <span class="legend-item"><span class="legend-dot legend--excluded"></span>排除</span>
-            <span class="legend-item"><span class="legend-dot legend--pending"></span>未复核</span>
-          </div>
-        </div>
-
-        <!-- 题号Tooltip -->
-        <div v-if="tooltipVisible" class="question-tooltip" :style="{ top: tooltipY + 'px', left: tooltipX + 'px' }">
-          第{{ tooltipIdx + 1 }}题 · {{ tooltipStatusText }}
-        </div>
-
-        <!-- 题目内容区（左文本 右图片） -->
-        <div class="question-content-section">
-          <div class="question-content-section__header">
-            <span class="question-content-section__title">题目内容</span>
-            <div class="image-toolbar-inline">
-              <el-tooltip content="放大" placement="top">
-                <el-button text @click="imageScale = Math.min(3, imageScale + 0.2)"><el-icon><ZoomIn /></el-icon></el-button>
-              </el-tooltip>
-              <el-tooltip content="缩小" placement="top">
-                <el-button text @click="imageScale = Math.max(0.3, imageScale - 0.2)"><el-icon><ZoomOut /></el-icon></el-button>
-              </el-tooltip>
-              <el-tooltip content="旋转" placement="top">
-                <el-button text @click="imageRotation -= 90"><el-icon><RefreshLeft /></el-icon></el-button>
-              </el-tooltip>
-              <el-tooltip content="重置" placement="top">
-                <el-button text @click="resetImageTransform"><el-icon><Refresh /></el-icon></el-button>
+          <!-- 题号导航卡片 -->
+          <div class="question-nav-card">
+            <div class="question-nav-card__pages">
+              <el-tooltip
+                v-for="(q, idx) in reviewStore.studentWrongQuestions"
+                :key="q.id"
+                :content="`第${idx + 1}题 · ${getQuestionStatusText(q)}`"
+                placement="top"
+                :show-after="300"
+              >
+                <div
+                  class="question-nav-btn"
+                  :class="[getQuestionStatusClass(q), { 'question-nav-btn--active': reviewStore.currentReviewIndex === idx }]"
+                  @click="jumpToQuestion(idx)"
+                >
+                  {{ idx + 1 }}
+                </div>
               </el-tooltip>
             </div>
-          </div>
-          <div class="question-content-body">
-            <!-- 左侧：题目文本 -->
-            <div class="question-text-area">
-              <div class="question-text-content">{{ ocrData.questionContent || '暂无题目内容' }}</div>
+            <div class="question-nav-card__legend">
+              <span class="legend-item"><span class="legend-dot legend--pending"></span>未复核</span>
+              <span class="legend-item"><span class="legend-dot legend--correct"></span>正确</span>
+              <span class="legend-item"><span class="legend-dot legend--wrong"></span>错误</span>
+              <span class="legend-item"><span class="legend-dot legend--excluded"></span>排除</span>
             </div>
-            <!-- 右侧：题目图片 -->
-            <div class="question-image-area">
-              <img
-                v-if="currentQuestion?.originalImage"
-                :src="currentQuestion.originalImage"
-                alt="题目图片"
-                class="question-image"
-                :style="{
-                  transform: `scale(${imageScale}) rotate(${imageRotation}deg)`,
-                  transition: imageTransformTransition ? 'transform 0.3s ease' : 'none'
-                }"
-              />
-              <div v-else class="image-preview-placeholder">
-                <el-icon :size="48" color="#C9CDD4"><Picture /></el-icon>
-                <span class="placeholder-text">暂无图片</span>
+          </div>
+
+          <!-- 题目内容卡片 -->
+          <div class="question-content-card">
+            <div class="question-content-card__header">
+              <span class="question-content-card__title">题目内容</span>
+              <div class="image-toolbar">
+                <el-tooltip content="放大" placement="top">
+                  <el-button text @click="imageScale = Math.min(3, imageScale + 0.2)"><el-icon><ZoomIn /></el-icon></el-button>
+                </el-tooltip>
+                <el-tooltip content="缩小" placement="top">
+                  <el-button text @click="imageScale = Math.max(0.3, imageScale - 0.2)"><el-icon><ZoomOut /></el-icon></el-button>
+                </el-tooltip>
+                <el-tooltip content="旋转" placement="top">
+                  <el-button text @click="imageRotation -= 90"><el-icon><RefreshLeft /></el-icon></el-button>
+                </el-tooltip>
+                <el-tooltip content="重置" placement="top">
+                  <el-button text @click="resetImageTransform"><el-icon><Refresh /></el-icon></el-button>
+                </el-tooltip>
               </div>
             </div>
-          </div>
-        </div>
-
-        <!-- OCR识别结果区 -->
-        <div class="ocr-section">
-          <!-- OCR状态行 -->
-          <div class="ocr-status-bar">
-            <span class="ocr-status-badge ocr-status-badge--blue">
-              <el-icon><CircleCheck /></el-icon>
-              OCR识别结果
-            </span>
-            <span class="ocr-status-badge ocr-status-badge--green">
-              <el-icon><SuccessFilled /></el-icon>
-              识别正常
-            </span>
-            <span class="ocr-status-badge ocr-status-badge--purple">
-              <el-icon><Lightning /></el-icon>
-              AI辅助解析
-            </span>
-          </div>
-
-          <!-- 学生答案 + 参考答案 -->
-          <div class="ocr-answer-row">
-            <div class="ocr-answer-col">
-              <div class="ocr-answer-col__label">学生答案 <span class="ocr-answer-col__sub">（OCR识别）</span></div>
-              <div class="ocr-answer-col__body">
-                <el-input
-                  v-model="ocrData.studentAnswer"
-                  type="textarea"
-                  :rows="4"
-                  placeholder="学生作答内容..."
-                  class="ocr-input"
+            <div class="question-content-card__body">
+              <div class="question-text-panel">
+                <div class="question-text-content">{{ ocrData.questionContent || '暂无题目内容' }}</div>
+              </div>
+              <div class="question-image-panel">
+                <img
+                  v-if="currentQuestion?.originalImage"
+                  :src="currentQuestion.originalImage"
+                  alt="题目图片"
+                  class="question-image"
+                  :style="{
+                    transform: `scale(${imageScale}) rotate(${imageRotation}deg)`,
+                    transition: imageTransformTransition ? 'transform 0.3s ease' : 'none'
+                  }"
                 />
+                <div v-else class="image-preview-placeholder">
+                  <el-icon :size="48" color="#C9CDD4"><Picture /></el-icon>
+                  <span class="placeholder-text">暂无图片</span>
+                </div>
               </div>
             </div>
-            <div class="ocr-answer-col">
-              <div class="ocr-answer-col__label">参考答案 <span class="ocr-answer-col__sub">（AI生成）</span></div>
-              <div class="ocr-answer-col__body">
-                <div class="ocr-reference-content">{{ ocrData.correctAnswer || '暂无参考答案' }}</div>
-                <div class="ocr-reference-action">
+          </div>
+
+          <!-- OCR识别结果卡片 -->
+          <div class="ocr-card">
+            <div class="ocr-card__title">
+              <span>OCR识别结果</span>
+              <span class="ocr-card__subtitle">可点击修改</span>
+            </div>
+            <!-- OCR状态徽章行 -->
+            <div class="ocr-status-badges">
+              <span class="ocr-badge ocr-badge--blue">
+                <el-icon><CircleCheck /></el-icon>
+                OCR识别
+              </span>
+              <span class="ocr-badge ocr-badge--green">
+                <el-icon><SuccessFilled /></el-icon>
+                识别正常
+              </span>
+              <span class="ocr-badge ocr-badge--purple">
+                <el-icon><Lightning /></el-icon>
+                AI辅助解析
+              </span>
+            </div>
+
+            <!-- 学生答案 + 参考答案 双栏 -->
+            <div class="ocr-answer-grid">
+              <div class="ocr-answer-col">
+                <div class="ocr-answer-col__label">学生答案 <span class="ocr-answer-col__sub">（OCR识别）</span></div>
+                <div class="ocr-answer-col__content">
+                  {{ ocrData.studentAnswer || '暂无学生答案' }}
+                </div>
+              </div>
+              <div class="ocr-answer-col">
+                <div class="ocr-answer-col__label">参考答案 <span class="ocr-answer-col__sub">（AI生成）</span></div>
+                <div class="ocr-answer-col__content">
+                  {{ ocrData.correctAnswer || '暂无参考答案' }}
+                </div>
+                <div class="ocr-answer-col__action">
                   <el-button text size="small" type="primary">
                     <el-icon><EditPen /></el-icon>
                     AI参考答案
@@ -305,81 +291,81 @@
                 </div>
               </div>
             </div>
-          </div>
 
-          <!-- 知识点标签 -->
-          <div class="ocr-knowledge-row">
-            <div class="ocr-knowledge-row__label">知识点标签</div>
-            <div class="ocr-tags-list">
-              <el-tag
-                v-for="tag in ocrData.knowledgePoints"
-                :key="tag"
-                size="default"
-                closable
-                @close="removeTag(tag)"
-                type="info"
-                effect="light"
-              >
-                {{ tag }}
-              </el-tag>
-              <el-button text size="small" type="primary" @click="showTagSelector = true" class="add-tag-btn">
-                <el-icon><Plus /></el-icon>
-                添加知识点
-              </el-button>
+            <!-- 知识点标签 -->
+            <div class="ocr-knowledge">
+              <div class="ocr-knowledge__label">知识点标签</div>
+              <div class="ocr-tags-list">
+                <el-tag
+                  v-for="tag in ocrData.knowledgePoints"
+                  :key="tag"
+                  size="default"
+                  closable
+                  @close="removeTag(tag)"
+                  effect="light"
+                  round
+                >
+                  {{ tag }}
+                </el-tag>
+                <el-button text size="small" type="primary" @click="showTagSelector = true" class="add-tag-btn">
+                  <el-icon><Plus /></el-icon>
+                  添加知识点
+                </el-button>
+              </div>
+            </div>
+
+            <!-- 题目备注 -->
+            <div class="ocr-remark">
+              <div class="ocr-remark__label">题目备注</div>
+              <el-input
+                v-model="ocrData.remark"
+                placeholder="请输入备注信息（选填）"
+                class="ocr-input"
+              />
+              <span class="ocr-remark__count">{{ (ocrData.remark || '').length }}/200</span>
             </div>
           </div>
 
-          <!-- 题目备注 -->
-          <div class="ocr-remark">
-            <div class="ocr-remark__label">题目备注</div>
-            <el-input
-              v-model="ocrData.remark"
-              placeholder="请输入备注信息（选填）"
-              class="ocr-input ocr-input--remark"
-            />
-            <span class="ocr-remark__count">{{ (ocrData.remark || '').length }}/200</span>
+          <!-- 底部操作卡片 -->
+          <div class="action-card">
+            <div class="action-card__left">
+              <el-button size="default" @click="handlePrevQuestion" :disabled="reviewStore.currentReviewIndex === 0">
+                <el-icon><ArrowLeft /></el-icon>
+                上一题
+              </el-button>
+              <el-button size="default" @click="handleNextQuestion" :disabled="reviewStore.currentReviewIndex >= reviewStore.studentWrongQuestions.length - 1">
+                下一题
+                <el-icon><ArrowRight /></el-icon>
+              </el-button>
+            </div>
+            <div class="action-card__right">
+              <el-button size="default" class="btn-correct" @click="handleReview('correct')">
+                <el-icon><CircleCheckFilled /></el-icon>
+                正确
+              </el-button>
+              <el-button size="default" class="btn-wrong" @click="handleReview('wrong')">
+                <el-icon><CircleCloseFilled /></el-icon>
+                错误
+              </el-button>
+              <el-button size="default" class="btn-exclude" @click="handleReview('exclude')">
+                <el-icon><RemoveFilled /></el-icon>
+                排除本题
+              </el-button>
+              <el-button size="default" type="primary" class="btn-save" @click="handleSave">
+                <el-icon><DocumentChecked /></el-icon>
+                保存
+              </el-button>
+            </div>
           </div>
-        </div>
+        </template>
 
-        <!-- 底部操作栏 -->
-        <div class="bottom-action-bar">
-          <div class="bottom-action-bar__left">
-            <el-button size="default" @click="handlePrevQuestion" :disabled="reviewStore.currentReviewIndex === 0">
-              <el-icon><ArrowLeft /></el-icon>
-              上一题
-            </el-button>
-            <el-button size="default" @click="handleNextQuestion" :disabled="reviewStore.currentReviewIndex >= reviewStore.studentWrongQuestions.length - 1">
-              下一题
-              <el-icon><ArrowRight /></el-icon>
-            </el-button>
+        <!-- 空状态 -->
+        <template v-else>
+          <div class="empty-state">
+            <el-icon :size="64" color="#C9CDD4"><DocumentChecked /></el-icon>
+            <p class="empty-state__text">{{ selectedStudentForExam ? '请从左侧选择一份试卷' : '请从左侧选择一个学生开始审核' }}</p>
           </div>
-          <div class="bottom-action-bar__right">
-            <el-button size="default" class="btn-correct" @click="handleReview('correct')">
-              <el-icon><CircleCheckFilled /></el-icon>
-              正确
-            </el-button>
-            <el-button size="default" class="btn-wrong" @click="handleReview('wrong')">
-              <el-icon><CircleCloseFilled /></el-icon>
-              错误
-            </el-button>
-            <el-button size="default" class="btn-exclude" @click="handleReview('exclude')">
-              <el-icon><RemoveFilled /></el-icon>
-              排除本题
-            </el-button>
-            <el-button size="default" type="primary" class="btn-save" @click="handleSave">
-              <el-icon><DocumentChecked /></el-icon>
-              保存
-            </el-button>
-          </div>
-        </div>
-      </section>
-
-      <!-- 空状态 -->
-      <section class="review-workspace empty-workspace" v-else>
-        <div class="empty-state">
-          <el-icon :size="64" color="#C9CDD4"><DocumentChecked /></el-icon>
-          <p class="empty-state__text">{{ selectedStudentForExam ? '请从左侧选择一份试卷' : '请从左侧选择一个学生开始审核' }}</p>
-        </div>
+        </template>
       </section>
     </div>
 
@@ -427,15 +413,13 @@ import {
   Bell, QuestionFilled, ArrowDown, ArrowLeft, ArrowRight, Menu,
   Picture, ZoomIn, ZoomOut, RefreshLeft, Refresh,
   CircleCheckFilled, CircleCloseFilled, RemoveFilled, DocumentChecked,
-  Search, Filter, ChatDotRound, CircleCheck, SuccessFilled, Lightning, EditPen, Plus, User
+  Search, Filter, ChatDotRound, CircleCheck, SuccessFilled, Lightning, EditPen, Plus
 } from '@element-plus/icons-vue'
 import dayjs from 'dayjs'
 
 const router = useRouter()
 const reviewStore = useReviewStore()
-const lifecycleStore = useLifecycleStore()
 
-// ===== 导航 =====
 const currentMenu = ref('proofread')
 const navMenus = [
   { key: 'proofread', label: '题目校对', icon: 'DocumentChecked' },
@@ -454,8 +438,9 @@ const handleNavMenuClick = (key) => {
   }
 }
 
-// ===== 搜索 =====
 const searchQuery = ref('')
+const loading = ref(false)
+
 const filteredStudents = computed(() => {
   let list = reviewStore.students
   if (searchQuery.value) {
@@ -464,7 +449,6 @@ const filteredStudents = computed(() => {
   return list
 })
 
-// ===== 学生/试卷选择 =====
 const selectedStudentForExam = ref(null)
 const studentExams = ref([])
 const selectedExam = ref(null)
@@ -497,7 +481,6 @@ const handleSelectExam = (exam) => {
   reviewStore.currentReviewIndex = 0
 }
 
-// ===== 图片变换 =====
 const imageScale = ref(1)
 const imageRotation = ref(0)
 const imageTransformTransition = ref(true)
@@ -507,10 +490,8 @@ const resetImageTransform = () => {
   imageRotation.value = 0
 }
 
-// ===== 全屏 =====
 const fullscreenVisible = ref(false)
 
-// ===== 当前题目 =====
 const currentQuestion = computed(() => reviewStore.currentReviewQuestion)
 const totalQuestions = computed(() => reviewStore.studentWrongQuestions.length || 0)
 
@@ -528,7 +509,6 @@ const progressPercent = computed(() => {
   return Math.round((reviewedCount.value / totalQuestions.value) * 100)
 })
 
-// ===== 题目状态 =====
 const getQuestionStatusClass = (q) => {
   const reviewStatus = q.review_status
   if (reviewStatus === 'correct') return 'status-correct'
@@ -545,26 +525,6 @@ const getQuestionStatusText = (q) => {
   return '未复核'
 }
 
-// ===== Tooltip =====
-const tooltipVisible = ref(false)
-const tooltipIdx = ref(0)
-const tooltipStatusText = ref('')
-const tooltipX = ref(0)
-const tooltipY = ref(0)
-
-const showQuestionTooltip = (idx, event) => {
-  const q = reviewStore.studentWrongQuestions[idx]
-  if (!q) return
-  tooltipIdx.value = idx
-  tooltipStatusText.value = getQuestionStatusText(q)
-  const rect = event.currentTarget.getBoundingClientRect()
-  tooltipX.value = rect.left + rect.width / 2
-  tooltipY.value = rect.top - 36
-  tooltipVisible.value = true
-}
-const hideQuestionTooltip = () => { tooltipVisible.value = false }
-
-// ===== 学生进度 =====
 const getStudentPendingCount = (studentId) => reviewStore.getStudentPendingCount(studentId)
 
 const getStudentProgressPercent = (student) => {
@@ -579,10 +539,6 @@ const getExamProgressPercent = (exam) => {
   return total > 0 ? Math.round((reviewed / total) * 100) : 0
 }
 
-// ===== 试卷来源 =====
-const selectedExamSource = ref('exam1')
-
-// ===== OCR数据 =====
 const ocrData = ref({
   questionContent: '',
   studentAnswer: '',
@@ -618,18 +574,15 @@ watch(currentQuestion, (newQ) => {
   resetImageTransform()
 }, { immediate: true })
 
-// ===== 日期 =====
 const formatDate = (dateStr) => {
   if (!dateStr) return ''
   return dayjs(dateStr).format('MM-DD HH:mm')
 }
 
-// ===== 题号导航 =====
 const jumpToQuestion = (idx) => { reviewStore.currentReviewIndex = idx }
 const handlePrevQuestion = () => { reviewStore.prevQuestion() }
 const handleNextQuestion = () => { reviewStore.nextQuestion() }
 
-// ===== 审核 =====
 const handleReview = (result) => {
   const q = currentQuestion.value
   if (!q) return
@@ -644,7 +597,6 @@ const handleReview = (result) => {
   ElMessage.success(resultText[result])
 }
 
-// ===== 保存 =====
 const handleSave = () => {
   const q = currentQuestion.value
   if (!q) return
@@ -658,7 +610,6 @@ const handleSave = () => {
   ElMessage.success('保存成功')
 }
 
-// ===== 键盘 =====
 const handleKeyboard = (e) => {
   if (e.target.tagName === 'INPUT' || e.target.tagName === 'TEXTAREA') return
   switch (e.key) {
@@ -670,7 +621,9 @@ const handleKeyboard = (e) => {
 }
 
 onMounted(async () => {
+  loading.value = true
   await reviewStore.initData()
+  loading.value = false
   window.addEventListener('keydown', handleKeyboard)
 })
 onUnmounted(() => {
@@ -679,6 +632,7 @@ onUnmounted(() => {
 </script>
 
 <style scoped>
+/* ===== 根布局（与成长中心一致） ===== */
 .dashboard-workbench {
   height: 100vh;
   display: flex;
@@ -687,7 +641,7 @@ onUnmounted(() => {
   font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
 }
 
-/* ===== Top Header ===== */
+/* ===== Top Header（与成长中心一致） ===== */
 .top-header {
   display: flex;
   align-items: center;
@@ -729,10 +683,15 @@ onUnmounted(() => {
 /* ===== Main Layout ===== */
 .main-layout { display: flex; flex: 1; overflow: hidden; }
 
-/* ===== Nav Sidebar ===== */
+/* ===== Nav Sidebar（与成长中心一致） ===== */
 .nav-sidebar {
-  width: 220px; background: #fff; border-right: 1px solid #E5E6EB;
-  flex-shrink: 0; display: flex; flex-direction: column; padding: 16px 12px;
+  width: 220px;
+  background: #fff;
+  border-right: 1px solid #E5E6EB;
+  flex-shrink: 0;
+  display: flex;
+  flex-direction: column;
+  padding: 16px 12px;
 }
 .nav-menu { display: flex; flex-direction: column; gap: 4px; }
 .nav-menu-item {
@@ -755,7 +714,7 @@ onUnmounted(() => {
 }
 .collapse-btn { color: #86909C; font-size: 13px; }
 
-/* ===== List Panel (Student/Exam List) ===== */
+/* ===== List Panel ===== */
 .list-panel {
   width: 320px; background: #F5F7FA; border-right: 1px solid #E5E6EB;
   flex-shrink: 0; display: flex; flex-direction: column; overflow: hidden;
@@ -775,14 +734,13 @@ onUnmounted(() => {
 .list-panel__count { padding: 0 16px 6px; font-size: 12px; color: #86909C; }
 .list-panel__list { flex: 1; overflow-y: auto; padding: 0 12px 8px; }
 
-/* 学生卡片 */
 .student-card {
-  background: #fff; border-radius: 12px; border: 1px solid transparent;
+  background: #fff; border-radius: 12px;
   cursor: pointer; transition: all 0.2s; margin-bottom: 8px;
   padding: 12px;
 }
-.student-card:hover { border-color: #B4D6FF; box-shadow: 0 2px 8px rgba(22, 119, 255, 0.08); }
-.student-card--active { border-color: #1677FF; background: #E8F3FF; box-shadow: 0 2px 8px rgba(22, 119, 255, 0.12); }
+.student-card:hover { box-shadow: 0 2px 8px rgba(22, 119, 255, 0.08); }
+.student-card--active { background: #E8F3FF; box-shadow: 0 2px 8px rgba(22, 119, 255, 0.12); }
 
 .student-card__top { display: flex; align-items: center; gap: 10px; margin-bottom: 8px; }
 .avatar-circle {
@@ -810,94 +768,125 @@ onUnmounted(() => {
 .progress-bar-fill { height: 100%; background: #1677FF; border-radius: 3px; transition: width 0.3s ease; }
 .progress-percent { font-size: 12px; color: #86909C; white-space: nowrap; }
 
-/* 试卷卡片 */
 .exam-card {
   display: flex; align-items: center; gap: 12px;
-  background: #fff; border-radius: 12px; border: 1px solid transparent;
+  background: #fff; border-radius: 12px;
   cursor: pointer; transition: all 0.2s; margin-bottom: 8px;
   padding: 12px;
 }
-.exam-card:hover { border-color: #B4D6FF; box-shadow: 0 2px 8px rgba(22, 119, 255, 0.08); }
-.exam-card--active { border-color: #1677FF; background: #E8F3FF; box-shadow: 0 2px 8px rgba(22, 119, 255, 0.12); }
+.exam-card:hover { box-shadow: 0 2px 8px rgba(22, 119, 255, 0.08); }
+.exam-card--active { background: #E8F3FF; box-shadow: 0 2px 8px rgba(22, 119, 255, 0.12); }
 .exam-card__info { flex: 1; }
 .exam-card__name { font-size: 13px; font-weight: 500; color: #1D2129; margin-bottom: 2px; }
 .exam-card__meta { font-size: 11px; color: #86909C; }
 .exam-card__progress { display: flex; align-items: center; gap: 8px; flex-shrink: 0; }
 
-/* ===== Review Workspace ===== */
-.review-workspace { flex: 1; display: flex; flex-direction: column; overflow: hidden; background: #F5F7FA; min-width: 0; }
-.empty-workspace { align-items: center; justify-content: center; }
-.empty-state { display: flex; flex-direction: column; align-items: center; gap: 12px; }
+/* ===== Review Main（与成长中心 growth-main 一致的滚动布局） ===== */
+.review-main {
+  flex: 1;
+  overflow-y: auto;
+  padding: 16px 20px 20px;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+.review-main::-webkit-scrollbar { width: 6px; }
+.review-main::-webkit-scrollbar-track { background: transparent; }
+.review-main::-webkit-scrollbar-thumb { background: #E5E6EB; border-radius: 3px; }
+
+/* 空状态 */
+.empty-state {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  min-height: 400px;
+  gap: 12px;
+}
 .empty-state__text { font-size: 14px; color: #86909C; }
 
-/* ===== Review Header ===== */
-.review-header {
-  display: flex; align-items: center; padding: 10px 20px;
-  background: #fff; border-bottom: 1px solid #E5E6EB; gap: 16px; flex-shrink: 0;
+/* ===== Review Header Card ===== */
+.review-header-card {
+  background: #fff;
+  border-radius: 12px;
+  padding: 16px 20px;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.04);
+  display: flex;
+  align-items: center;
+  gap: 20px;
 }
-.review-header__left { display: flex; align-items: center; gap: 12px; }
-.review-header__student { display: flex; align-items: center; gap: 8px; }
+.review-header-card__left { display: flex; align-items: center; gap: 16px; }
+.review-header-card__student { display: flex; align-items: center; gap: 10px; }
 .review-avatar-circle {
   width: 36px; height: 36px; border-radius: 50%;
   background: #E5E6EB; color: #4E5969; font-size: 14px;
   display: flex; align-items: center; justify-content: center;
   font-weight: 500;
 }
-.review-header__student-info { display: flex; flex-direction: column; }
-.review-header__name { font-size: 15px; font-weight: 600; color: #1D2129; }
-.review-header__class { font-size: 12px; color: #86909C; }
-.review-header__exam { display: flex; flex-direction: column; gap: 2px; }
-.review-header__exam-name { font-size: 14px; font-weight: 500; color: #1D2129; }
-.review-header__exam-info { font-size: 12px; color: #86909C; }
+.review-header-card__student-info { display: flex; flex-direction: column; }
+.review-header-card__name { font-size: 15px; font-weight: 600; color: #1D2129; }
+.review-header-card__class { font-size: 12px; color: #86909C; }
+.review-header-card__divider {
+  width: 1px; height: 32px; background: #E5E6EB; flex-shrink: 0;
+}
+.review-header-card__exam { display: flex; flex-direction: column; gap: 2px; }
+.review-header-card__exam-name { font-size: 14px; font-weight: 500; color: #1D2129; }
+.review-header-card__exam-info { font-size: 12px; color: #86909C; }
 
-.review-header__center {
+.review-header-card__center {
   display: flex; align-items: center; gap: 8px;
   padding: 6px 12px; background: #F6FFED; border-radius: 8px;
-  border: 1px solid #B7EB8F;
 }
-.review-header__ai-badge {
+.review-header-card__ai-badge {
   display: flex; align-items: center; gap: 4px;
   font-size: 12px; color: #52C41A; font-weight: 500;
 }
-.review-header__ai-badge .el-icon { font-size: 14px; }
-.review-header__ai-value { font-size: 12px; color: #389E0D; font-weight: 600; }
-.review-header__ai-status {
+.review-header-card__ai-badge .el-icon { font-size: 14px; }
+.review-header-card__ai-value { font-size: 12px; color: #389E0D; font-weight: 600; }
+.review-header-card__ai-status {
   display: flex; align-items: center; gap: 4px;
   font-size: 12px; color: #52C41A;
 }
 .ai-done-icon { font-size: 14px; }
 
-.review-header__right { display: flex; flex-direction: column; align-items: flex-start; }
-.review-header__manual-label { font-size: 12px; color: #4E5969; font-weight: 500; margin-bottom: 2px; }
-.review-header__manual-value { font-size: 14px; font-weight: 600; color: #1D2129; margin-bottom: 4px; }
-.review-header__manual-bar { display: flex; align-items: center; gap: 8px; }
+.review-header-card__right {
+  margin-left: auto;
+  display: flex; flex-direction: column; align-items: flex-end;
+}
+.review-header-card__manual-label { font-size: 12px; color: #4E5969; font-weight: 500; }
+.review-header-card__manual-value { font-size: 14px; font-weight: 600; color: #1D2129; margin: 4px 0; }
+.review-header-card__manual-bar { display: flex; align-items: center; gap: 8px; }
 .manual-progress-bar { width: 100px; height: 6px; background: #F2F3F5; border-radius: 3px; overflow: hidden; }
 .manual-progress-fill { height: 100%; background: #1677FF; border-radius: 3px; transition: width 0.3s ease; }
 .manual-progress-text { font-size: 12px; color: #1677FF; font-weight: 600; }
 
-.review-header__source { margin-left: auto; display: flex; align-items: center; gap: 8px; }
-.review-header__source-label { font-size: 12px; color: #86909C; }
-
-/* ===== Question Nav ===== */
-.question-nav-bar {
-  display: flex; align-items: center; justify-content: space-between;
-  padding: 8px 20px; background: #fff; border-bottom: 1px solid #E5E6EB; gap: 12px;
+/* ===== Question Nav Card ===== */
+.question-nav-card {
+  background: #fff;
+  border-radius: 12px;
+  padding: 12px 20px;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.04);
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
 }
-.question-nav-bar__pages { display: flex; align-items: center; gap: 4px; overflow-x: auto; flex: 1; }
+.question-nav-card__pages { display: flex; align-items: center; gap: 4px; overflow-x: auto; flex: 1; }
 .question-nav-btn {
   width: 28px; height: 28px; display: flex; align-items: center; justify-content: center;
   border-radius: 6px; font-size: 12px; cursor: pointer; transition: all 0.15s;
-  flex-shrink: 0; font-weight: 500; position: relative;
+  flex-shrink: 0; font-weight: 500;
 }
 .question-nav-btn:hover { transform: scale(1.1); }
 .question-nav-btn--active { box-shadow: 0 0 0 2px #1677FF; }
 
-.status-pending { background: #F2F3F5; color: #86909C; border: 1px solid #E5E6EB; }
-.status-correct { background: #F6FFED; color: #52C41A; border: 1px solid #B7EB8F; }
-.status-wrong { background: #FFF2F0; color: #FF4D4F; border: 1px solid #FFCCC7; }
-.status-excluded { background: #FFF7E6; color: #FA8C16; border: 1px solid #FFD591; }
+.status-pending { background: #F2F3F5; color: #86909C; }
+.status-correct { background: #F6FFED; color: #52C41A; }
+.status-wrong { background: #FFF2F0; color: #FF4D4F; }
+.status-excluded { background: #FFF7E6; color: #FA8C16; }
 
-.question-nav-bar__legend { display: flex; align-items: center; gap: 12px; flex-shrink: 0; }
+.question-nav-card__legend { display: flex; align-items: center; gap: 12px; flex-shrink: 0; }
 .legend-item { display: flex; align-items: center; gap: 4px; font-size: 11px; color: #86909C; }
 .legend-dot { width: 8px; height: 8px; border-radius: 50%; display: inline-block; flex-shrink: 0; }
 .legend--pending { background: #86909C; }
@@ -905,93 +894,104 @@ onUnmounted(() => {
 .legend--wrong { background: #FF4D4F; }
 .legend--excluded { background: #FA8C16; }
 
-/* ===== Tooltip ===== */
-.question-tooltip {
-  position: fixed; transform: translateX(-50%);
-  background: rgba(29, 33, 41, 0.85); color: #fff;
-  font-size: 12px; padding: 4px 10px; border-radius: 6px;
-  white-space: nowrap; z-index: 9999; pointer-events: none;
-}
-
-/* ===== Question Content Section ===== */
-.question-content-section {
-  margin: 10px 20px 0; background: #fff; border-radius: 12px;
-  border: 1px solid #E5E6EB; box-shadow: 0 2px 8px rgba(0, 0, 0, 0.04);
+/* ===== Question Content Card ===== */
+.question-content-card {
+  background: #fff;
+  border-radius: 12px;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.04);
   overflow: hidden;
 }
-.question-content-section__header {
+.question-content-card__header {
   display: flex; align-items: center; justify-content: space-between;
-  padding: 10px 16px; border-bottom: 1px solid #F2F3F5;
+  padding: 12px 20px; border-bottom: 1px solid #F2F3F5;
 }
-.question-content-section__title { font-size: 13px; font-weight: 500; color: #1D2129; }
-.image-toolbar-inline { display: flex; align-items: center; gap: 0; }
-.image-toolbar-inline :deep(.el-button) { padding: 6px 8px; color: #86909C; font-size: 16px; }
-.image-toolbar-inline :deep(.el-button:hover) { color: #1677FF; background: #F2F3F5; }
+.question-content-card__title { font-size: 14px; font-weight: 500; color: #1D2129; }
+.image-toolbar { display: flex; align-items: center; gap: 0; }
+.image-toolbar :deep(.el-button) { padding: 6px 8px; color: #86909C; font-size: 16px; }
+.image-toolbar :deep(.el-button:hover) { color: #1677FF; background: #F2F3F5; }
 
-.question-content-body { display: grid; grid-template-columns: 1fr 1fr; gap: 0; }
-.question-text-area {
-  padding: 16px; border-right: 1px solid #F2F3F5;
-  overflow-y: auto; max-height: 300px;
+.question-content-card__body { display: grid; grid-template-columns: 1fr 1fr; }
+.question-text-panel {
+  padding: 16px 20px; border-right: 1px solid #F2F3F5;
+  overflow-y: auto; max-height: 260px;
 }
 .question-text-content { font-size: 13px; color: #1D2129; line-height: 1.8; white-space: pre-wrap; }
-.question-image-area {
+.question-image-panel {
   display: flex; align-items: center; justify-content: center;
-  padding: 16px; overflow: hidden; min-height: 200px;
+  padding: 16px 20px; overflow: hidden; min-height: 200px;
 }
 .question-image { max-width: 100%; max-height: 100%; object-fit: contain; }
-.image-preview-placeholder { display: flex; flex-direction: column; align-items: center; gap: 8px; color: #C9CDD4; }
+.image-preview-placeholder { display: flex; flex-direction: column; align-items: center; gap: 8px; }
 .placeholder-text { font-size: 13px; color: #86909C; }
 
-/* ===== OCR Section ===== */
-.ocr-section {
-  margin: 10px 20px; background: #fff; border-radius: 12px;
-  border: 1px solid #E5E6EB; box-shadow: 0 2px 8px rgba(0, 0, 0, 0.04);
+/* ===== OCR Card ===== */
+.ocr-card {
+  background: #fff;
+  border-radius: 12px;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.04);
   overflow: hidden;
 }
-
-.ocr-status-bar {
+.ocr-card__title {
   display: flex; align-items: center; gap: 8px;
-  padding: 10px 16px; border-bottom: 1px solid #F2F3F5;
+  padding: 12px 20px; border-bottom: 1px solid #F2F3F5;
+  font-size: 14px; font-weight: 500; color: #1D2129;
 }
-.ocr-status-badge {
+.ocr-card__subtitle { font-size: 12px; color: #86909C; font-weight: 400; }
+
+.ocr-status-badges {
+  display: flex; align-items: center; gap: 8px;
+  padding: 10px 20px; border-bottom: 1px solid #F2F3F5;
+}
+.ocr-badge {
   display: inline-flex; align-items: center; gap: 4px;
   padding: 4px 12px; border-radius: 20px; font-size: 12px; font-weight: 500;
 }
-.ocr-status-badge--blue { background: #E8F3FF; color: #1677FF; }
-.ocr-status-badge--green { background: #F6FFED; color: #52C41A; }
-.ocr-status-badge--purple { background: #F9F0FF; color: #722ED1; }
-.ocr-status-badge .el-icon { font-size: 14px; }
+.ocr-badge--blue { background: #E8F3FF; color: #1677FF; }
+.ocr-badge--green { background: #F6FFED; color: #52C41A; }
+.ocr-badge--purple { background: #F9F0FF; color: #722ED1; }
+.ocr-badge .el-icon { font-size: 14px; }
 
-.ocr-answer-row { display: grid; grid-template-columns: 1fr 1fr; border-bottom: 1px solid #F2F3F5; }
-.ocr-answer-col { padding: 14px 16px; }
+.ocr-answer-grid {
+  display: grid; grid-template-columns: 1fr 1fr;
+  border-bottom: 1px solid #F2F3F5;
+}
+.ocr-answer-col { padding: 14px 20px; }
 .ocr-answer-col:first-child { border-right: 1px solid #F2F3F5; }
 .ocr-answer-col__label { font-size: 12px; font-weight: 500; color: #4E5969; margin-bottom: 8px; }
 .ocr-answer-col__sub { font-weight: 400; color: #86909C; }
-.ocr-answer-col__body { display: flex; flex-direction: column; gap: 8px; }
-.ocr-reference-content {
-  font-size: 12px; color: #1D2129; line-height: 1.7;
+.ocr-answer-col__content {
+  font-size: 13px; color: #1D2129; line-height: 1.7;
   padding: 10px 12px; background: #F9FAFB; border-radius: 8px;
-  border: 1px solid #E5E6EB; white-space: pre-wrap;
-  max-height: 120px; overflow-y: auto;
+  white-space: pre-wrap; min-height: 48px;
 }
-.ocr-reference-action { display: flex; align-items: center; }
+.ocr-answer-col__action { margin-top: 8px; }
 
-.ocr-knowledge-row { display: flex; align-items: flex-start; gap: 12px; padding: 12px 16px; border-bottom: 1px solid #F2F3F5; }
-.ocr-knowledge-row__label { font-size: 12px; font-weight: 500; color: #4E5969; white-space: nowrap; padding-top: 2px; }
+.ocr-knowledge {
+  display: flex; align-items: flex-start; gap: 12px;
+  padding: 12px 20px; border-bottom: 1px solid #F2F3F5;
+}
+.ocr-knowledge__label { font-size: 12px; font-weight: 500; color: #4E5969; white-space: nowrap; padding-top: 2px; }
 .ocr-tags-list { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; flex: 1; }
 .add-tag-btn { font-size: 12px; }
 
-.ocr-remark { display: flex; align-items: center; gap: 12px; padding: 10px 16px; }
+.ocr-remark { display: flex; align-items: center; gap: 12px; padding: 10px 20px; }
 .ocr-remark__label { font-size: 12px; color: #86909C; white-space: nowrap; }
 .ocr-remark__count { font-size: 11px; color: #C9CDD4; white-space: nowrap; }
+.ocr-input :deep(.el-input__wrapper) { box-shadow: none !important; background: #F9FAFB; border-radius: 8px; }
+.ocr-input :deep(.el-input__wrapper):hover { background: #F2F3F5; }
 
-/* ===== Bottom Action Bar ===== */
-.bottom-action-bar {
-  display: flex; align-items: center; justify-content: space-between;
-  padding: 10px 20px; background: #fff; border-top: 1px solid #E5E6EB; flex-shrink: 0;
+/* ===== Action Card ===== */
+.action-card {
+  background: #fff;
+  border-radius: 12px;
+  padding: 12px 20px;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.04);
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
 }
-.bottom-action-bar__left { display: flex; align-items: center; gap: 8px; }
-.bottom-action-bar__right { display: flex; align-items: center; gap: 10px; }
+.action-card__left { display: flex; align-items: center; gap: 8px; }
+.action-card__right { display: flex; align-items: center; gap: 10px; }
 .btn-correct { background: #F6FFED !important; border-color: #B7EB8F !important; color: #52C41A !important; font-weight: 500; }
 .btn-correct:hover { background: #D9F7BE !important; border-color: #73D13D !important; }
 .btn-wrong { background: #FFF2F0 !important; border-color: #FFCCC7 !important; color: #FF4D4F !important; font-weight: 500; }
@@ -1014,7 +1014,7 @@ onUnmounted(() => {
 .tag-option:hover { background: #E8F3FF; color: #1677FF; }
 .tag-option--selected { background: #E8F3FF; color: #1677FF; border: 1px solid #1677FF; }
 
-/* ===== Scrollbar ===== */
+/* ===== 列表滚动条 ===== */
 .list-panel__list::-webkit-scrollbar { width: 6px; }
 .list-panel__list::-webkit-scrollbar-track { background: transparent; }
 .list-panel__list::-webkit-scrollbar-thumb { background: #E5E6EB; border-radius: 3px; }
