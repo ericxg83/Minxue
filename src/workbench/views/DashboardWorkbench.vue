@@ -185,8 +185,8 @@
           <div class="question-nav-card">
             <div class="question-nav-card__pages">
               <el-tooltip
-                v-for="(q, idx) in reviewStore.studentWrongQuestions"
-                :key="q.id"
+                v-for="(q, idx) in reviewStore.allQuestions"
+                :key="q.id || idx"
                 :content="`第${idx + 1}题 · ${getQuestionStatusText(q)}`"
                 placement="top"
                 :show-after="300"
@@ -245,8 +245,8 @@
               </div>
               <div class="question-image-panel">
                 <img
-                  v-if="currentQuestion?.originalImage"
-                  :src="currentQuestion.originalImage"
+                  v-if="currentQuestion?.geometry_image_url"
+                  :src="currentQuestion.geometry_image_url"
                   alt="题目图片"
                   class="question-image"
                   :style="{
@@ -256,7 +256,7 @@
                 />
                 <div v-else class="image-preview-placeholder">
                   <el-icon :size="48" color="#C9CDD4"><Picture /></el-icon>
-                  <span class="placeholder-text">暂无图片</span>
+                  <span class="placeholder-text">暂无配图</span>
                 </div>
               </div>
             </div>
@@ -353,7 +353,7 @@
                 <el-icon><ArrowLeft /></el-icon>
                 上一题
               </el-button>
-              <el-button size="default" @click="handleNextQuestion" :disabled="reviewStore.currentReviewIndex >= reviewStore.studentWrongQuestions.length - 1">
+              <el-button size="default" @click="handleNextQuestion" :disabled="reviewStore.currentReviewIndex >= (reviewStore.allQuestions || []).length - 1">
                 下一题
                 <el-icon><ArrowRight /></el-icon>
               </el-button>
@@ -393,8 +393,8 @@
     <el-dialog v-model="fullscreenVisible" fullscreen :show-close="false" class="fullscreen-dialog" @click="fullscreenVisible = false">
       <div class="fullscreen-image-wrapper" @click.stop>
         <img
-          v-if="currentQuestion?.originalImage"
-          :src="currentQuestion.originalImage"
+          v-if="currentQuestion?.geometry_image_url"
+          :src="currentQuestion.geometry_image_url"
           class="fullscreen-image"
           :style="{ transform: `scale(${imageScale}) rotate(${imageRotation}deg)` }"
         />
@@ -542,11 +542,15 @@ const resetImageTransform = () => {
 const fullscreenVisible = ref(false)
 
 const currentQuestion = computed(() => reviewStore.currentReviewQuestion)
-const totalQuestions = computed(() => reviewStore.allQuestions.length || 0)
+const totalQuestions = computed(() => (reviewStore.allQuestions || []).length || 0)
 
 const reviewedCount = computed(() => {
-  return reviewStore.allQuestions.filter(q => {
-    return q.review_status === 'correct' || q.review_status === 'wrong' || q.review_status === 'excluded'
+  return (reviewStore.allQuestions || []).filter(q => {
+    // 人工复核状态优先
+    const manualStatus = q.review_status
+    if (manualStatus === 'correct' || manualStatus === 'wrong' || manualStatus === 'excluded') return true
+    // 其次看AI批改状态
+    return q.is_correct !== null && q.is_correct !== undefined
   }).length
 })
 
@@ -556,18 +560,27 @@ const progressPercent = computed(() => {
 })
 
 const getQuestionStatusClass = (q) => {
-  const reviewStatus = q.review_status
+  // 人工复核状态优先
+  const reviewStatus = q?.review_status
   if (reviewStatus === 'correct') return 'status-correct'
   if (reviewStatus === 'wrong') return 'status-wrong'
   if (reviewStatus === 'excluded') return 'status-excluded'
+  // AI批改状态
+  if (q?.is_correct === true) return 'status-correct'
+  if (q?.is_correct === false) return 'status-wrong'
   return 'status-pending'
 }
 
 const getQuestionStatusText = (q) => {
-  const reviewStatus = q.review_status
+  // 人工复核状态优先
+  const reviewStatus = q?.review_status
   if (reviewStatus === 'correct') return '正确'
   if (reviewStatus === 'wrong') return '错误'
   if (reviewStatus === 'excluded') return '已排除'
+  // AI批改状态
+  if (q?.is_correct === true) return 'AI判定正确'
+  if (q?.is_correct === false) return 'AI判定错误'
+  if (q?.is_correct === null && q?.answer_source === 'blank') return '未作答'
   return '未复核'
 }
 
@@ -610,15 +623,15 @@ const removeTag = (tag) => {
 }
 
 watch(currentQuestion, (newQ) => {
-  if (newQ?.question) {
+  if (newQ) {
     ocrData.value = {
-      questionContent: newQ.question.content || '',
-      options: newQ.question.options || [],
-      studentAnswer: newQ.question.student_answer || '',
-      correctAnswer: newQ.question.answer || '',
-      analysis: newQ.question.analysis || '',
-      knowledgePoints: newQ.question.ai_tags || newQ.question.knowledge_points || [],
-      remark: newQ.question.remark || '',
+      questionContent: newQ.content || '',
+      options: newQ.options || [],
+      studentAnswer: newQ.student_answer || '',
+      correctAnswer: newQ.answer || '',
+      analysis: newQ.analysis || '',
+      knowledgePoints: newQ.ai_tags || newQ.knowledge_points || [],
+      remark: newQ.remark || '',
     }
   } else {
     ocrData.value = { questionContent: '', options: [], studentAnswer: '', correctAnswer: '', analysis: '', knowledgePoints: [], remark: '' }
@@ -652,15 +665,13 @@ const handleReview = (result) => {
 const handleSave = () => {
   const q = currentQuestion.value
   if (!q) return
-  if (q.question) {
-    q.question.content = ocrData.value.questionContent
-    q.question.options = ocrData.value.options
-    q.question.student_answer = ocrData.value.studentAnswer
-    q.question.answer = ocrData.value.correctAnswer
-    q.question.analysis = ocrData.value.analysis
-    q.question.ai_tags = ocrData.value.knowledgePoints
-    q.question.remark = ocrData.value.remark
-  }
+  q.content = ocrData.value.questionContent
+  q.options = ocrData.value.options
+  q.student_answer = ocrData.value.studentAnswer
+  q.answer = ocrData.value.correctAnswer
+  q.analysis = ocrData.value.analysis
+  q.ai_tags = ocrData.value.knowledgePoints
+  q.remark = ocrData.value.remark
   ElMessage.success('保存成功')
 }
 
