@@ -284,34 +284,62 @@
                 </div>
               </div>
               <div class="question-image-panel">
-                <template v-if="currentQuestion?.geometry_image_url">
-                  <img
-                    :src="currentQuestion.geometry_image_url"
-                    alt="题目图片"
-                    class="question-image"
-                    :style="{
-                      transform: `scale(${imageScale}) rotate(${imageRotation}deg)`,
-                      transition: imageTransformTransition ? 'transform 0.3s ease' : 'none'
-                    }"
-                  />
+                <!-- 查看模式：仅显示图片 -->
+                <template v-if="!isEditing">
+                  <template v-if="currentQuestion?.geometry_image_url">
+                    <img
+                      :src="currentQuestion.geometry_image_url"
+                      alt="题目图片"
+                      class="question-image"
+                      :style="{
+                        transform: `scale(${imageScale}) rotate(${imageRotation}deg)`,
+                        transition: imageTransformTransition ? 'transform 0.3s ease' : 'none'
+                      }"
+                    />
+                  </template>
+                  <div v-else class="image-preview-placeholder">
+                    <el-icon :size="48" color="#C9CDD4"><Picture /></el-icon>
+                    <span class="placeholder-text">暂无配图</span>
+                  </div>
                 </template>
-                <div v-else class="image-preview-placeholder">
-                  <el-icon :size="48" color="#C9CDD4"><Picture /></el-icon>
-                  <span class="placeholder-text">暂无配图</span>
-                </div>
-                <!-- 编辑模式：图片上传 -->
-                <div v-if="isEditing" class="image-upload-wrapper">
-                  <el-upload
-                    class="image-uploader"
-                    :show-file-list="false"
-                    :before-upload="handleImageUpload"
-                    accept="image/*"
-                  >
-                    <el-button type="primary" size="small">
-                      <el-icon><Upload /></el-icon>
-                      {{ currentQuestion?.geometry_image_url ? '更换配图' : '上传配图' }}
+                <!-- 编辑模式：图片编辑面板 -->
+                <div v-else class="image-edit-panel">
+                  <template v-if="localImageUrl">
+                    <!-- 有配图时显示预览 -->
+                    <img
+                      :src="localImageUrl"
+                      alt="题目图片"
+                      class="question-image"
+                    />
+                  </template>
+                  <div v-else class="image-preview-placeholder">
+                    <el-icon :size="48" color="#C9CDD4"><Picture /></el-icon>
+                    <span class="placeholder-text">暂无配图</span>
+                  </div>
+                  <!-- 图片操作按钮组 -->
+                  <div class="image-edit-actions">
+                    <el-upload
+                      class="image-uploader"
+                      :show-file-list="false"
+                      :before-upload="handleImageUpload"
+                      accept=".jpg,.jpeg,.png,.webp,image/jpeg,image/png,image/webp"
+                    >
+                      <el-button type="primary" size="default">
+                        <el-icon><Upload /></el-icon>
+                        {{ localImageUrl ? '替换图片' : '上传图片' }}
+                      </el-button>
+                    </el-upload>
+                    <el-button
+                      v-if="localImageUrl"
+                      type="danger"
+                      size="default"
+                      @click="handleDeleteImage"
+                    >
+                      <el-icon><Delete /></el-icon>
+                      删除图片
                     </el-button>
-                  </el-upload>
+                  </div>
+                  <div class="image-edit-hint">支持 JPG / PNG / WebP 格式</div>
                 </div>
               </div>
             </div>
@@ -537,7 +565,7 @@ import {
   Picture, ZoomIn, ZoomOut, RefreshLeft, Refresh,
   CircleCheckFilled, CircleCloseFilled, RemoveFilled, DocumentChecked,
   Search, Filter, CircleCheck, SuccessFilled, Lightning, EditPen, Plus, Warning,
-  Upload
+  Upload, Delete
 } from '@element-plus/icons-vue'
 import dayjs from 'dayjs'
 
@@ -717,6 +745,7 @@ const ocrData = ref({
 // 编辑模式状态
 const isEditing = ref(false)
 const originalData = ref({}) // 保存原始数据用于取消
+const localImageUrl = ref('') // 本地图片URL（编辑时立即预览）
 
 const showTagSelector = ref(false)
 const allKnowledgeTags = ref(['全等三角形判定', '角的关系推导', '线段等式证明', '平行线的性质', '角平分线定义', '三角形内角和定理', '等式性质', '勾股定理'])
@@ -742,13 +771,16 @@ const handleEnterEdit = () => {
     analysis: q.analysis || '',
     knowledgePoints: JSON.parse(JSON.stringify(q.ai_tags || q.knowledge_points || [])),
     remark: q.remark || '',
+    geometryImageUrl: q.geometry_image_url || '',
   }
+  localImageUrl.value = q.geometry_image_url || ''
   isEditing.value = true
 }
 
 // 取消编辑
 const handleCancelEdit = () => {
   ocrData.value = JSON.parse(JSON.stringify(originalData.value))
+  localImageUrl.value = originalData.value.geometryImageUrl || ''
   isEditing.value = false
 }
 
@@ -770,6 +802,13 @@ const handleImageUpload = async (file) => {
     ElMessage.error('题目ID不存在')
     return false
   }
+  
+  // 立即预览
+  const reader = new FileReader()
+  reader.onload = (e) => {
+    localImageUrl.value = e.target?.result || ''
+  }
+  reader.readAsDataURL(file)
   
   try {
     // 使用 fetch 直接上传图片
@@ -795,6 +834,16 @@ const handleImageUpload = async (file) => {
     ElMessage.error('图片上传失败')
     return false
   }
+}
+
+// 删除题目配图
+const handleDeleteImage = () => {
+  localImageUrl.value = ''
+  const q = currentQuestion.value
+  if (q) {
+    q.geometry_image_url = ''
+  }
+  ElMessage.success('配图已删除')
 }
 
 // 保存修改
@@ -866,10 +915,12 @@ watch(currentQuestion, (newQ) => {
       knowledgePoints: newQ.ai_tags || newQ.knowledge_points || [],
       remark: newQ.remark || '',
     }
+    localImageUrl.value = newQ.geometry_image_url || ''
     // 切换题目时退出编辑模式
     isEditing.value = false
   } else {
     ocrData.value = { questionContent: '', options: [], studentAnswer: '', correctAnswer: '', analysis: '', knowledgePoints: [], remark: '' }
+    localImageUrl.value = ''
   }
   resetImageTransform()
 }, { immediate: true })
@@ -1326,16 +1377,44 @@ onUnmounted(() => {
   min-height: 200px;
   position: relative;
 }
-.question-image { max-width: 100%; max-height: 100%; object-fit: contain; }
-.image-preview-placeholder { display: flex; flex-direction: column; align-items: center; gap: 8px; }
-.placeholder-text { font-size: 13px; color: #86909C; }
-.image-upload-wrapper {
-  margin-top: 12px;
-  position: absolute;
-  bottom: 16px;
-  left: 50%;
-  transform: translateX(-50%);
+/* 编辑模式图片面板 */
+.image-edit-panel {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  width: 100%;
+  gap: 12px;
+  padding: 12px;
 }
+.image-edit-panel .question-image {
+  max-width: 100%;
+  max-height: 220px;
+  object-fit: contain;
+  border-radius: 8px;
+  border: 2px solid #E5E6EB;
+}
+.image-edit-panel .image-preview-placeholder {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 8px;
+  padding: 32px 0 16px;
+}
+.image-edit-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+  justify-content: center;
+}
+.image-edit-hint {
+  font-size: 11px;
+  color: #86909C;
+  margin-top: 4px;
+}
+.question-image { max-width: 100%; max-height: 100%; object-fit: contain; }
+.placeholder-text { font-size: 13px; color: #86909C; }
 
 /* ===== OCR Card ===== */
 .ocr-card {
