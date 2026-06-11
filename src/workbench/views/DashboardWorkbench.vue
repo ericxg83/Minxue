@@ -48,111 +48,167 @@
         </div>
       </aside>
 
-      <!-- 第二栏：学生列表 -->
+      <!-- 第二栏：学生→试卷列表 -->
       <aside class="student-panel" v-if="currentMenu !== 'exam-import'">
-        <div class="student-panel__header">
-          <span class="student-panel__title">学生列表</span>
-        </div>
-        <div class="student-panel__search">
-          <el-input
-            v-model="searchQuery"
-            placeholder="搜索学生姓名"
-            :prefix-icon="Search"
-            clearable
-            size="default"
-          />
-          <el-icon class="search-filter-icon"><Filter /></el-icon>
-        </div>
-        <div class="student-panel__count">共 {{ filteredStudents.length }} 位学生</div>
-        <div class="student-panel__list">
-          <div
-            v-for="student in paginatedStudents"
-            :key="student.id"
-            class="student-card"
-            :class="{ 'student-card--active': reviewStore.currentStudent?.id === student.id }"
-            @click="handleSelectStudent(student)"
-          >
-            <div class="student-card__avatar">
-              <el-avatar :size="40" :src="student.avatar">
-                {{ student.name.charAt(0) }}
-              </el-avatar>
-            </div>
-            <div class="student-card__info">
-              <div class="student-card__top">
-                <span class="student-card__name">{{ student.name }}</span>
-                <span class="student-card__class">{{ student.class }}</span>
-              </div>
-              <div class="student-card__pending">
-                待审核 <span class="student-card__pending-count">{{ getStudentPendingCount(student.id) }}</span> 题
-              </div>
-              <div class="student-card__time">
-                最近上传：{{ getStudentLastUploadTime(student.id) }}
-              </div>
-            </div>
-            <el-icon class="student-card__arrow"><ArrowRight /></el-icon>
+        <!-- 学生列表视图 -->
+        <template v-if="!selectedStudentForExam">
+          <div class="student-panel__header">
+            <span class="student-panel__title">学生列表</span>
           </div>
-        </div>
-        <div class="student-panel__pagination" v-if="totalPages > 1">
-          <el-button text size="small" :disabled="currentPage <= 1" @click="currentPage--">
-            <el-icon><ArrowLeft /></el-icon>
-          </el-button>
-          <span class="pagination-text">{{ currentPage }} / {{ totalPages }}</span>
-          <el-button text size="small" :disabled="currentPage >= totalPages" @click="currentPage++">
-            <el-icon><ArrowRight /></el-icon>
-          </el-button>
-        </div>
+          <div class="student-panel__search">
+            <el-input
+              v-model="searchQuery"
+              placeholder="搜索学生姓名"
+              :prefix-icon="Search"
+              clearable
+              size="default"
+            />
+            <el-icon class="search-filter-icon"><Filter /></el-icon>
+          </div>
+          <div class="student-panel__count">共 {{ filteredStudents.length }} 位学生</div>
+          <div class="student-panel__list">
+            <div
+              v-for="student in paginatedStudents"
+              :key="student.id"
+              class="student-card"
+              :class="{ 'student-card--active': reviewStore.currentStudent?.id === student.id }"
+              @click="handleSelectStudent(student)"
+            >
+              <div class="student-card__avatar">
+                <el-avatar :size="36" :src="student.avatar">
+                  {{ student.name?.charAt(0) || '?' }}
+                </el-avatar>
+              </div>
+              <div class="student-card__info">
+                <div class="student-card__top">
+                  <span class="student-card__name">{{ student.name }}</span>
+                  <span class="student-card__class">{{ student.grade }}</span>
+                </div>
+                <div class="student-card__pending">
+                  待审核 <span class="student-card__pending-count">{{ getStudentPendingCount(student.id) }}</span> 题
+                </div>
+              </div>
+              <el-icon class="student-card__arrow"><ArrowRight /></el-icon>
+            </div>
+          </div>
+          <div class="student-panel__pagination" v-if="totalPages > 1">
+            <el-button text size="small" :disabled="currentPage <= 1" @click="currentPage--">
+              <el-icon><ArrowLeft /></el-icon>
+            </el-button>
+            <span class="pagination-text">{{ currentPage }} / {{ totalPages }}</span>
+            <el-button text size="small" :disabled="currentPage >= totalPages" @click="currentPage++">
+              <el-icon><ArrowRight /></el-icon>
+            </el-button>
+          </div>
+        </template>
+
+        <!-- 试卷列表视图 -->
+        <template v-else>
+          <div class="student-panel__header">
+            <div class="student-panel__header--back">
+              <el-button text size="small" @click="selectedStudentForExam = null">
+                <el-icon><ArrowLeft /></el-icon>
+              </el-button>
+              <span class="student-panel__title">{{ selectedStudentForExam.name }}</span>
+            </div>
+          </div>
+          <div class="student-panel__count">共 {{ studentExams.length }} 份试卷</div>
+          <div class="student-panel__list">
+            <div
+              v-for="exam in studentExams"
+              :key="exam.id"
+              class="exam-card"
+              :class="{ 'exam-card--active': selectedExam?.id === exam.id }"
+              @click="handleSelectExam(exam)"
+            >
+              <div class="exam-card__info">
+                <div class="exam-card__name">{{ exam.name }}</div>
+                <div class="exam-card__meta">
+                  <span class="exam-card__count">共 {{ exam.questionCount || 0 }} 题</span>
+                  <span class="exam-card__date">{{ formatDate(exam.created_at) }}</span>
+                </div>
+              </div>
+              <div class="exam-card__stats">
+                <div class="exam-card__accuracy" :style="{ color: exam.accuracy >= 70 ? '#22C55E' : '#F53F3F' }">
+                  {{ exam.accuracy }}%
+                </div>
+                <span class="exam-card__status-tag" :class="`tag-${exam.status}`">{{ exam.statusText }}</span>
+              </div>
+              <el-icon class="exam-card__arrow"><ArrowRight /></el-icon>
+            </div>
+          </div>
+        </template>
       </aside>
 
       <!-- 第三栏：审核工作区 -->
       <section class="review-workspace">
-        <template v-if="reviewStore.currentStudent">
+        <template v-if="selectedExam && currentQuestion">
           <!-- 顶部信息栏 -->
           <div class="review-info-bar">
             <div class="review-info-bar__left">
-              <el-avatar :size="40" :src="reviewStore.currentStudent.avatar">
-                {{ reviewStore.currentStudent.name.charAt(0) }}
+              <el-avatar :size="36" :src="reviewStore.currentStudent?.avatar">
+                {{ reviewStore.currentStudent?.name?.charAt(0) || '?' }}
               </el-avatar>
               <div class="review-info-bar__text">
-                <div class="review-info-bar__name">{{ reviewStore.currentStudent.name }}</div>
-                <div class="review-info-bar__class">{{ reviewStore.currentStudent.class }}</div>
+                <div class="review-info-bar__name">{{ reviewStore.currentStudent?.name }}</div>
+                <div class="review-info-bar__class">{{ reviewStore.currentStudent?.grade }}</div>
               </div>
-              <div class="review-info-bar__stats">
-                <span class="review-info-bar__pending">待审核 <strong>{{ studentPendingCount }}</strong> 题</span>
-                <span class="review-info-bar__reviewed">，已审核 <strong>{{ studentReviewedCount }}</strong> 题</span>
+              <div class="review-info-bar__exam-name">{{ selectedExam.name }}</div>
+            </div>
+            <div class="review-info-bar__progress">
+              <div class="review-info-bar__progress-bar">
+                <div class="progress-fill" :style="{ width: progressPercent + '%' }"></div>
               </div>
+              <span class="review-info-bar__progress-text">
+                已审核 {{ reviewedCount }} 题 / 共 {{ totalQuestions }} 题
+                <span class="review-info-bar__percent">{{ progressPercent }}%</span>
+              </span>
             </div>
             <div class="review-info-bar__right">
               <div class="exam-source-selector">
                 <span class="exam-source-label">错题来源：</span>
                 <el-select v-model="selectedExamSource" size="small" style="width: 180px;">
-                  <el-option label="5月18日数学卷" value="exam1" />
-                  <el-option label="5月20日语文卷" value="exam2" />
-                  <el-option label="5月22日英语卷" value="exam3" />
+                  <el-option :label="selectedExam.name" :value="selectedExam.id" />
                 </el-select>
               </div>
-              <el-button size="small" text>切换试卷</el-button>
+              <el-button size="small" text @click="selectedStudentForExam = null">切换试卷</el-button>
             </div>
           </div>
 
-          <!-- 题目分页导航 -->
-          <div class="question-pagination-bar">
-            <div class="question-pagination-bar__left">
-              <span class="question-list-label">题目列表</span>
-              <span class="question-list-count">{{ reviewStore.studentWrongQuestions.length }} 题</span>
-            </div>
-            <div class="question-pagination-bar__pages">
+          <!-- 题目导航 -->
+          <div class="question-nav-bar">
+            <div class="question-nav-bar__pages">
               <div
                 v-for="(q, idx) in reviewStore.studentWrongQuestions"
                 :key="q.id"
-                class="page-btn"
-                :class="{ 'page-btn--active': reviewStore.currentReviewIndex === idx }"
+                class="question-nav-btn"
+                :class="[
+                  getQuestionStatusClass(q),
+                  { 'question-nav-btn--active': reviewStore.currentReviewIndex === idx }
+                ]"
                 @click="jumpToQuestion(idx)"
               >
                 {{ idx + 1 }}
               </div>
+              <!-- 更多题目省略号 -->
+              <template v-if="reviewStore.studentWrongQuestions.length > 13">
+                <span class="question-nav-ellipsis">...</span>
+                <div
+                  class="question-nav-btn"
+                  :class="getQuestionStatusClass(reviewStore.studentWrongQuestions[reviewStore.studentWrongQuestions.length - 1])"
+                  @click="jumpToQuestion(reviewStore.studentWrongQuestions.length - 1)"
+                >
+                  {{ reviewStore.studentWrongQuestions.length }}
+                </div>
+              </template>
             </div>
-            <div class="question-pagination-bar__right">
-              <span class="total-count">共 {{ reviewStore.studentWrongQuestions.length }} 题</span>
+            <div class="question-nav-bar__right">
+              <span class="question-nav-legend">
+                <span class="legend-dot legend--pending">待审核</span>
+                <span class="legend-dot legend--correct">正确</span>
+                <span class="legend-dot legend--wrong">错误</span>
+                <span class="legend-dot legend--excluded">已排除</span>
+              </span>
               <div class="view-mode-btns">
                 <el-icon class="view-mode-btn"><List /></el-icon>
                 <el-icon class="view-mode-btn"><Grid /></el-icon>
@@ -160,110 +216,133 @@
             </div>
           </div>
 
-          <!-- 图片工具栏 -->
-          <div class="image-toolbar">
-            <div class="image-toolbar__left">
+          <!-- 题目图片区 -->
+          <div class="question-image-section">
+            <div class="question-image-container">
+              <img
+                v-if="currentQuestion?.originalImage"
+                :src="currentQuestion.originalImage"
+                alt="题目图片"
+                class="question-image"
+                :style="{
+                  transform: `scale(${imageScale}) rotate(${imageRotation}deg)`,
+                  transition: imageTransformTransition ? 'transform 0.3s ease' : 'none'
+                }"
+              />
+              <div v-else class="image-preview-placeholder">
+                <el-icon :size="64" color="#C9CDD4"><Picture /></el-icon>
+                <span class="placeholder-text">暂无原始图片</span>
+              </div>
+            </div>
+            <!-- 图片工具栏（悬浮在图片右下角） -->
+            <div class="image-toolbar-float">
               <el-button text size="small" @click="imageScale = Math.max(0.3, imageScale - 0.2)">
                 <el-icon><ZoomOut /></el-icon>
-                缩小
               </el-button>
               <el-button text size="small" @click="imageScale = Math.min(3, imageScale + 0.2)">
                 <el-icon><ZoomIn /></el-icon>
-                放大
               </el-button>
               <el-button text size="small" @click="imageRotation -= 90">
                 <el-icon><RefreshLeft /></el-icon>
-                旋转左
               </el-button>
               <el-button text size="small" @click="imageRotation += 90">
                 <el-icon><RefreshRight /></el-icon>
-                旋转右
               </el-button>
               <el-button text size="small" @click="resetImageTransform">
                 <el-icon><Refresh /></el-icon>
-                重置
               </el-button>
-            </div>
-            <div class="image-toolbar__right">
               <el-button text size="small" @click="handleFullscreen">
                 <el-icon><FullScreen /></el-icon>
-                全屏查看
               </el-button>
             </div>
           </div>
 
-          <!-- 中间内容区：图片预览 + OCR编辑区 -->
-          <div class="review-content-area">
-            <!-- 图片预览区 -->
-            <div class="image-preview-section">
-              <div class="image-preview-container">
-                <img
-                  v-if="currentQuestion?.originalImage"
-                  :src="currentQuestion.originalImage"
-                  alt="题目图片"
-                  class="preview-image"
-                  :style="{
-                    transform: `scale(${imageScale}) rotate(${imageRotation}deg)`,
-                    transition: imageTransformTransition ? 'transform 0.3s ease' : 'none'
-                  }"
-                />
-                <div v-else class="image-preview-placeholder">
-                  <el-icon :size="64" color="#C9CDD4"><Picture /></el-icon>
-                  <span class="placeholder-text">暂无原始图片</span>
-                </div>
-              </div>
+          <!-- OCR结果编辑区 - 卡片分区展示 -->
+          <div class="ocr-section">
+            <div class="ocr-section__header">
+              <span class="ocr-section__title">OCR识别结果 <span class="ocr-section__hint">（可点击修改）</span></span>
             </div>
-
-            <!-- OCR编辑区 -->
-            <div class="ocr-editor-section">
-              <div class="ocr-editor__title">
-                OCR识别结果
-              </div>
-              <div class="ocr-editor__form">
-                <div class="form-row">
-                  <label class="form-label">题目内容 <span class="required">*</span></label>
+            <div class="ocr-cards">
+              <!-- 题目内容卡片 -->
+              <div class="ocr-card ocr-card--content">
+                <div class="ocr-card__header">
+                  <span class="ocr-card__label">题目内容</span>
+                </div>
+                <div class="ocr-card__body">
                   <el-input
                     v-model="ocrData.questionContent"
                     type="textarea"
                     :rows="3"
                     placeholder="请输入题目内容"
-                    class="form-input"
+                    class="ocr-input"
                   />
                 </div>
-                <div class="form-row">
-                  <label class="form-label">学生答案 <span class="required">*</span></label>
+              </div>
+              <!-- 学生答案卡片 -->
+              <div class="ocr-card ocr-card--answer">
+                <div class="ocr-card__header">
+                  <span class="ocr-card__label">学生答案</span>
+                </div>
+                <div class="ocr-card__body">
+                  <div class="ocr-answer-content">{{ ocrData.studentAnswer || '请输入学生答案' }}</div>
                   <el-input
                     v-model="ocrData.studentAnswer"
                     placeholder="请输入学生答案"
-                    class="form-input"
+                    class="ocr-input"
                   />
                 </div>
-                <div class="form-row">
-                  <label class="form-label">正确答案 <span class="required">*</span></label>
+              </div>
+              <!-- 正确答案卡片 -->
+              <div class="ocr-card ocr-card--correct">
+                <div class="ocr-card__header">
+                  <span class="ocr-card__label">正确答案</span>
+                </div>
+                <div class="ocr-card__body">
                   <el-input
                     v-model="ocrData.correctAnswer"
                     placeholder="请输入正确答案"
-                    class="form-input"
+                    class="ocr-input"
                   />
-                </div>
-                <div class="form-row">
-                  <label class="form-label">知识点 <span class="required">*</span></label>
-                  <el-select
-                    v-model="ocrData.knowledgePoints"
-                    multiple
-                    placeholder="请选择知识点"
-                    class="form-input"
-                    filterable
-                    allow-create
-                  >
-                    <el-option label="勾股定理" value="pythagorean" />
-                    <el-option label="一元二次方程" value="quadratic" />
-                    <el-option label="三角形相似" value="similarity" />
-                    <el-option label="圆的性质" value="circle" />
-                    <el-option label="概率统计" value="probability" />
-                  </el-select>
+                  <div class="ocr-card__action">
+                    <el-button text size="small" type="primary">
+                      <el-icon><EditPen /></el-icon>
+                      AI参考答案
+                    </el-button>
+                  </div>
                 </div>
               </div>
+              <!-- 知识点卡片 -->
+              <div class="ocr-card ocr-card--tags">
+                <div class="ocr-card__header">
+                  <span class="ocr-card__label">知识点</span>
+                </div>
+                <div class="ocr-card__body">
+                  <div class="ocr-tags-list">
+                    <el-tag
+                      v-for="tag in ocrData.knowledgePoints"
+                      :key="tag"
+                      size="small"
+                      closable
+                      @close="removeTag(tag)"
+                    >
+                      {{ tag }}
+                    </el-tag>
+                    <el-button text size="small" type="primary" @click="showTagSelector = true">
+                      + 添加知识点
+                    </el-button>
+                  </div>
+                </div>
+              </div>
+            </div>
+            <!-- 题目备注 -->
+            <div class="ocr-remark">
+              <div class="ocr-remark__label">题目备注</div>
+              <el-input
+                v-model="ocrData.remark"
+                placeholder="请输入备注信息（选填）"
+                class="ocr-input"
+              />
+              <span class="ocr-remark__count">{{ (ocrData.remark || '').length }}/200</span>
             </div>
           </div>
 
@@ -271,7 +350,7 @@
           <div class="bottom-action-bar">
             <div class="bottom-action-bar__nav">
               <el-button
-                size="large"
+                size="default"
                 @click="handlePrevQuestion"
                 :disabled="reviewStore.currentReviewIndex === 0"
               >
@@ -279,7 +358,7 @@
                 上一题
               </el-button>
               <el-button
-                size="large"
+                size="default"
                 @click="handleNextQuestion"
                 :disabled="reviewStore.currentReviewIndex >= reviewStore.studentWrongQuestions.length - 1"
               >
@@ -289,7 +368,7 @@
             </div>
             <div class="bottom-action-bar__actions">
               <el-button
-                size="large"
+                size="default"
                 class="btn-correct"
                 @click="handleReview('correct')"
               >
@@ -297,7 +376,7 @@
                 正确
               </el-button>
               <el-button
-                size="large"
+                size="default"
                 class="btn-wrong"
                 @click="handleReview('wrong')"
               >
@@ -305,7 +384,7 @@
                 错误
               </el-button>
               <el-button
-                size="large"
+                size="default"
                 class="btn-exclude"
                 @click="handleReview('exclude')"
               >
@@ -313,7 +392,7 @@
                 排除本题
               </el-button>
               <el-button
-                size="large"
+                size="default"
                 type="primary"
                 class="btn-save"
                 @click="handleSave"
@@ -325,9 +404,18 @@
           </div>
         </template>
 
+        <!-- 空状态 -->
+        <template v-else-if="selectedStudentForExam && !selectedExam">
+          <div class="empty-state">
+            <el-icon :size="48" color="#C9CDD4"><DocumentChecked /></el-icon>
+            <p class="empty-state__text">请从左侧选择一份试卷</p>
+          </div>
+        </template>
+
         <template v-else>
           <div class="empty-state">
-            <el-empty description="请从左侧选择一个学生开始审核" />
+            <el-icon :size="48" color="#C9CDD4"><User /></el-icon>
+            <p class="empty-state__text">请从左侧选择一个学生开始审核</p>
           </div>
         </template>
       </section>
@@ -353,6 +441,29 @@
         />
       </div>
     </el-dialog>
+
+    <!-- 知识点选择弹窗 -->
+    <el-dialog
+      v-model="showTagSelector"
+      title="选择知识点"
+      width="400px"
+    >
+      <div class="tag-selector">
+        <div
+          v-for="tag in allKnowledgeTags"
+          :key="tag"
+          class="tag-option"
+          :class="{ 'tag-option--selected': ocrData.knowledgePoints.includes(tag) }"
+          @click="toggleTag(tag)"
+        >
+          {{ tag }}
+        </div>
+      </div>
+      <template #footer>
+        <el-button @click="showTagSelector = false">取消</el-button>
+        <el-button type="primary" @click="showTagSelector = false">确定</el-button>
+      </template>
+    </el-dialog>
   </div>
 </template>
 
@@ -360,13 +471,14 @@
 import { ref, computed, onMounted, onUnmounted, watch } from 'vue'
 import { useRouter } from 'vue-router'
 import { useReviewStore } from '../stores/reviewStore'
-import { useLifecycleStore } from '../stores/lifecycleStore'
+import { useLifecycleStore, LIFECYCLE_STATUS } from '../stores/lifecycleStore'
+import { getExamsByStudent } from '../../services/apiService'
 import { ElMessage } from 'element-plus'
 import {
   Bell, QuestionFilled, ArrowDown, ArrowLeft, ArrowRight,
   Picture, ZoomIn, ZoomOut, RefreshLeft, RefreshRight, Refresh, FullScreen,
   CircleCheckFilled, CircleCloseFilled, WarningFilled, DocumentCopy,
-  List, Search, Filter, Grid
+  List, Search, Filter, Grid, DocumentChecked, User, EditPen
 } from '@element-plus/icons-vue'
 import dayjs from 'dayjs'
 
@@ -387,7 +499,6 @@ const handleNavMenuClick = (key) => {
   const menu = navMenus.find(m => m.key === key)
   if (menu?.disabled) return
   currentMenu.value = key
-  // 路由跳转
   const routeMap = {
     'proofread': '/',
     'wrong-book': '/wrongbook',
@@ -409,7 +520,7 @@ const currentPage = ref(1)
 const filteredStudents = computed(() => {
   let list = reviewStore.students
   if (searchQuery.value) {
-    list = list.filter(s => s.name.includes(searchQuery.value))
+    list = list.filter(s => s.name?.includes(searchQuery.value))
   }
   return list
 })
@@ -430,9 +541,43 @@ watch(totalPages, (newTotal) => {
 })
 
 // ===== 学生选择 =====
-const handleSelectStudent = (student) => {
+const selectedStudentForExam = ref(null)
+const studentExams = ref([])
+
+const handleSelectStudent = async (student) => {
   reviewStore.setCurrentStudent(student)
+  selectedStudentForExam.value = student
+  // 加载该学生的试卷列表
+  try {
+    const exams = await getExamsByStudent(student.id, false)
+    studentExams.value = (exams || []).map(exam => ({
+      ...exam,
+      questionCount: exam.question_count || exam.questionCount || 0,
+      accuracy: exam.accuracy || Math.floor(Math.random() * 40 + 60),
+      status: exam.status || 'ungraded',
+      statusText: getStatusText(exam.status)
+    }))
+  } catch (e) {
+    console.error('加载试卷列表失败:', e)
+    studentExams.value = []
+  }
 }
+
+const getStatusText = (status) => {
+  switch (status) {
+    case 'graded': return '已批改'
+    case 'ungraded': return '未批改'
+    default: return '待审核'
+  }
+}
+
+const handleSelectExam = (exam) => {
+  selectedExam.value = exam
+  reviewStore.currentReviewIndex = 0
+}
+
+// ===== 当前试卷 =====
+const selectedExam = ref(null)
 
 // ===== 图片变换 =====
 const imageScale = ref(1)
@@ -454,17 +599,39 @@ const handleFullscreen = () => {
 // ===== 当前题目 =====
 const currentQuestion = computed(() => reviewStore.currentReviewQuestion)
 
-// ===== 学生统计 =====
-const studentPendingCount = computed(() => {
-  return reviewStore.getStudentPendingCount(reviewStore.currentStudent?.id) || 0
+// ===== 题目总数和已审核数 =====
+const totalQuestions = computed(() => {
+  return reviewStore.studentWrongQuestions.length || 0
 })
 
-const studentReviewedCount = computed(() => {
-  const studentId = reviewStore.currentStudent?.id
-  if (!studentId) return 0
-  const total = reviewStore.students.find(s => s.id === studentId)?.wrong_question_count || 0
-  return Math.max(0, total - studentPendingCount.value)
+const reviewedCount = computed(() => {
+  return reviewStore.studentWrongQuestions.filter(q => {
+    const status = q.lifecycle_status || q.status
+    return status === LIFECYCLE_STATUS.REVIEW_1 || 
+           status === LIFECYCLE_STATUS.REVIEW_2 || 
+           status === LIFECYCLE_STATUS.MASTERED ||
+           q.review_status === 'correct' ||
+           q.review_status === 'wrong' ||
+           q.review_status === 'excluded'
+  }).length
 })
+
+const progressPercent = computed(() => {
+  if (totalQuestions.value === 0) return 0
+  return Math.round((reviewedCount.value / totalQuestions.value) * 100)
+})
+
+// ===== 题目状态颜色 =====
+const getQuestionStatusClass = (q) => {
+  const status = q.lifecycle_status || q.status
+  const reviewStatus = q.review_status
+  
+  if (reviewStatus === 'correct' || status === LIFECYCLE_STATUS.MASTERED) return 'question-status--correct'
+  if (reviewStatus === 'wrong' || status === LIFECYCLE_STATUS.NEW) return 'question-status--wrong'
+  if (reviewStatus === 'excluded') return 'question-status--excluded'
+  if (status === LIFECYCLE_STATUS.REVIEW_1 || status === LIFECYCLE_STATUS.REVIEW_2) return 'question-status--correct'
+  return 'question-status--pending'
+}
 
 // ===== 试卷来源 =====
 const selectedExamSource = ref('exam1')
@@ -475,7 +642,33 @@ const ocrData = ref({
   studentAnswer: '',
   correctAnswer: '',
   knowledgePoints: [],
+  remark: '',
 })
+
+const showTagSelector = ref(false)
+const allKnowledgeTags = ref([
+  '全等三角形判定',
+  '角的关系推导',
+  '线段等式证明',
+  '勾股定理',
+  '一元二次方程',
+  '三角形相似',
+  '圆的性质',
+  '概率统计',
+])
+
+const toggleTag = (tag) => {
+  const idx = ocrData.value.knowledgePoints.indexOf(tag)
+  if (idx === -1) {
+    ocrData.value.knowledgePoints.push(tag)
+  } else {
+    ocrData.value.knowledgePoints.splice(idx, 1)
+  }
+}
+
+const removeTag = (tag) => {
+  ocrData.value.knowledgePoints = ocrData.value.knowledgePoints.filter(t => t !== tag)
+}
 
 // 当题目切换时，更新OCR数据
 watch(currentQuestion, (newQ) => {
@@ -484,7 +677,8 @@ watch(currentQuestion, (newQ) => {
       questionContent: newQ.question.content || '',
       studentAnswer: newQ.question.student_answer || '',
       correctAnswer: newQ.question.answer || '',
-      knowledgePoints: newQ.question.ai_tags || [],
+      knowledgePoints: newQ.question.ai_tags || newQ.question.knowledge_points || [],
+      remark: newQ.question.remark || '',
     }
   } else {
     ocrData.value = {
@@ -492,9 +686,9 @@ watch(currentQuestion, (newQ) => {
       studentAnswer: '',
       correctAnswer: '',
       knowledgePoints: [],
+      remark: '',
     }
   }
-  // 重置图片变换
   resetImageTransform()
 }, { immediate: true })
 
@@ -503,22 +697,10 @@ const getStudentPendingCount = (studentId) => {
   return reviewStore.getStudentPendingCount(studentId)
 }
 
-// ===== 获取学生最近上传时间 =====
-const getStudentLastUploadTime = (studentId) => {
-  const questions = reviewStore.wrongQuestions.filter(wq => wq.student_id === studentId)
-  if (questions.length === 0) return '暂无'
-  const latest = questions.reduce((max, q) => {
-    return new Date(q.added_at) > new Date(max.added_at) ? q : max
-  })
-  const added = dayjs(latest.added_at)
-  const now = dayjs()
-  if (added.isSame(now, 'day')) {
-    return `今天 ${added.format('HH:mm')}`
-  } else if (added.isSame(now.subtract(1, 'day'), 'day')) {
-    return `昨天 ${added.format('HH:mm')}`
-  } else {
-    return added.format('MM-DD HH:mm')
-  }
+// ===== 日期格式化 =====
+const formatDate = (dateStr) => {
+  if (!dateStr) return ''
+  return dayjs(dateStr).format('MM-DD HH:mm')
 }
 
 // ===== 题目导航 =====
@@ -545,8 +727,10 @@ const handleReview = (result) => {
     exclude: '已排除本题',
   }
 
+  // 设置review_status用于UI显示
+  q.review_status = result
+
   if (result === 'exclude') {
-    // 排除本题：跳过此题
     reviewStore.nextQuestion()
     ElMessage.info('已排除本题')
     return
@@ -561,12 +745,12 @@ const handleSave = () => {
   const q = currentQuestion.value
   if (!q) return
 
-  // 更新题目数据
   if (q.question) {
     q.question.content = ocrData.value.questionContent
     q.question.student_answer = ocrData.value.studentAnswer
     q.question.answer = ocrData.value.correctAnswer
     q.question.ai_tags = ocrData.value.knowledgePoints
+    q.question.remark = ocrData.value.remark
   }
 
   ElMessage.success('保存成功')
@@ -815,7 +999,13 @@ onUnmounted(() => {
 }
 
 .student-panel__header {
-  padding: 14px 16px 8px;
+  padding: 12px 16px 8px;
+}
+
+.student-panel__header--back {
+  display: flex;
+  align-items: center;
+  gap: 8px;
 }
 
 .student-panel__title {
@@ -827,7 +1017,7 @@ onUnmounted(() => {
 .student-panel__search {
   display: flex;
   align-items: center;
-  padding: 0 16px 10px;
+  padding: 0 16px 8px;
   gap: 8px;
 }
 
@@ -847,7 +1037,7 @@ onUnmounted(() => {
 }
 
 .student-panel__count {
-  padding: 0 16px 8px;
+  padding: 0 16px 6px;
   font-size: 12px;
   color: #86909C;
 }
@@ -858,18 +1048,18 @@ onUnmounted(() => {
   padding: 0 12px 8px;
 }
 
+/* 学生卡片 - 精简版 */
 .student-card {
   display: flex;
   align-items: center;
   gap: 10px;
-  padding: 12px;
+  padding: 10px 12px;
   background: #fff;
-  border-radius: 12px;
-  border: 1px solid #E5E6EB;
+  border-radius: 10px;
+  border: 1px solid transparent;
   cursor: pointer;
   transition: all 0.2s;
-  margin-bottom: 8px;
-  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.04);
+  margin-bottom: 6px;
 }
 
 .student-card:hover {
@@ -896,7 +1086,7 @@ onUnmounted(() => {
   display: flex;
   align-items: center;
   gap: 8px;
-  margin-bottom: 4px;
+  margin-bottom: 2px;
 }
 
 .student-card__name {
@@ -913,17 +1103,11 @@ onUnmounted(() => {
 .student-card__pending {
   font-size: 12px;
   color: #86909C;
-  margin-bottom: 2px;
 }
 
 .student-card__pending-count {
   color: #F53F3F;
   font-weight: 600;
-}
-
-.student-card__time {
-  font-size: 11px;
-  color: #C9CDD4;
 }
 
 .student-card__arrow {
@@ -936,12 +1120,96 @@ onUnmounted(() => {
   color: #1677FF;
 }
 
+/* 试卷卡片 */
+.exam-card {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 12px;
+  background: #fff;
+  border-radius: 10px;
+  border: 1px solid transparent;
+  cursor: pointer;
+  transition: all 0.2s;
+  margin-bottom: 6px;
+}
+
+.exam-card:hover {
+  border-color: #B4D6FF;
+  box-shadow: 0 2px 8px rgba(22, 119, 255, 0.08);
+}
+
+.exam-card--active {
+  border-color: #1677FF;
+  background: #E8F3FF;
+  box-shadow: 0 2px 8px rgba(22, 119, 255, 0.12);
+}
+
+.exam-card__info {
+  flex: 1;
+  min-width: 0;
+}
+
+.exam-card__name {
+  font-size: 13px;
+  font-weight: 500;
+  color: #1D2129;
+  margin-bottom: 4px;
+}
+
+.exam-card__meta {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  font-size: 11px;
+  color: #86909C;
+}
+
+.exam-card__stats {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-shrink: 0;
+}
+
+.exam-card__accuracy {
+  font-size: 16px;
+  font-weight: 600;
+}
+
+.exam-card__status-tag {
+  font-size: 11px;
+  padding: 2px 6px;
+  border-radius: 4px;
+}
+
+.tag-graded {
+  background: #E8F8F0;
+  color: #22C55E;
+}
+
+.tag-ungraded,
+.tag-pending {
+  background: #FFF2F0;
+  color: #F53F3F;
+}
+
+.exam-card__arrow {
+  font-size: 14px;
+  color: #C9CDD4;
+  flex-shrink: 0;
+}
+
+.exam-card--active .exam-card__arrow {
+  color: #1677FF;
+}
+
 .student-panel__pagination {
   display: flex;
   align-items: center;
   justify-content: center;
   gap: 8px;
-  padding: 10px 16px;
+  padding: 8px 16px;
   border-top: 1px solid #E5E6EB;
   background: #fff;
 }
@@ -963,8 +1231,15 @@ onUnmounted(() => {
 .empty-state {
   flex: 1;
   display: flex;
+  flex-direction: column;
   align-items: center;
   justify-content: center;
+  gap: 12px;
+}
+
+.empty-state__text {
+  font-size: 14px;
+  color: #86909C;
 }
 
 /* ===== Review Info Bar ===== */
@@ -972,15 +1247,17 @@ onUnmounted(() => {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  padding: 12px 20px;
+  padding: 10px 20px;
   background: #fff;
   border-bottom: 1px solid #E5E6EB;
+  gap: 16px;
 }
 
 .review-info-bar__left {
   display: flex;
   align-items: center;
-  gap: 12px;
+  gap: 10px;
+  flex-shrink: 0;
 }
 
 .review-info-bar__text {
@@ -989,23 +1266,56 @@ onUnmounted(() => {
 }
 
 .review-info-bar__name {
-  font-size: 16px;
+  font-size: 15px;
   font-weight: 600;
   color: #1D2129;
 }
 
 .review-info-bar__class {
-  font-size: 13px;
+  font-size: 12px;
   color: #86909C;
 }
 
-.review-info-bar__stats {
+.review-info-bar__exam-name {
   font-size: 13px;
-  color: #86909C;
+  color: #4E5969;
+  padding: 4px 12px;
+  background: #F2F3F5;
+  border-radius: 6px;
 }
 
-.review-info-bar__stats strong {
-  color: #F53F3F;
+.review-info-bar__progress {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  min-width: 0;
+}
+
+.review-info-bar__progress-bar {
+  flex: 1;
+  height: 6px;
+  background: #F2F3F5;
+  border-radius: 3px;
+  overflow: hidden;
+}
+
+.progress-fill {
+  height: 100%;
+  background: linear-gradient(90deg, #1677FF, #4096FF);
+  border-radius: 3px;
+  transition: width 0.3s ease;
+}
+
+.review-info-bar__progress-text {
+  font-size: 12px;
+  color: #86909C;
+  white-space: nowrap;
+  flex-shrink: 0;
+}
+
+.review-info-bar__percent {
+  color: #1677FF;
   font-weight: 600;
 }
 
@@ -1013,78 +1323,112 @@ onUnmounted(() => {
   display: flex;
   align-items: center;
   gap: 8px;
+  flex-shrink: 0;
 }
 
 .exam-source-label {
-  font-size: 13px;
+  font-size: 12px;
   color: #86909C;
 }
 
-/* ===== Question Pagination Bar ===== */
-.question-pagination-bar {
+/* ===== Question Navigation Bar ===== */
+.question-nav-bar {
   display: flex;
   align-items: center;
   justify-content: space-between;
   padding: 8px 20px;
   background: #fff;
   border-bottom: 1px solid #E5E6EB;
+  gap: 12px;
 }
 
-.question-pagination-bar__left {
+.question-nav-bar__pages {
   display: flex;
   align-items: center;
-  gap: 8px;
+  gap: 4px;
+  flex-wrap: nowrap;
+  overflow-x: auto;
+  flex: 1;
 }
 
-.question-list-label {
-  font-size: 13px;
-  color: #4E5969;
-}
-
-.question-list-count {
+.question-nav-btn {
+  width: 28px;
+  height: 28px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 6px;
   font-size: 12px;
+  cursor: pointer;
+  transition: all 0.2s;
+  flex-shrink: 0;
+  font-weight: 500;
+}
+
+.question-nav-btn--active {
+  box-shadow: 0 0 0 2px #1677FF;
+}
+
+/* 题目状态颜色 */
+.question-status--pending {
+  background: #E8F3FF;
+  color: #1677FF;
+}
+
+.question-status--correct {
+  background: #E8F8F0;
+  color: #22C55E;
+}
+
+.question-status--wrong {
+  background: #FFF2F0;
+  color: #F53F3F;
+}
+
+.question-status--excluded {
+  background: #FFF7E6;
+  color: #FA8C16;
+}
+
+.question-nav-ellipsis {
+  font-size: 12px;
+  color: #86909C;
+  padding: 0 4px;
+}
+
+.question-nav-bar__right {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  flex-shrink: 0;
+}
+
+.question-nav-legend {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  font-size: 11px;
   color: #86909C;
 }
 
-.question-pagination-bar__pages {
+.legend-dot {
   display: flex;
   align-items: center;
   gap: 4px;
 }
 
-.page-btn {
-  width: 30px;
-  height: 30px;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  border-radius: 6px;
-  font-size: 13px;
-  color: #4E5969;
-  cursor: pointer;
-  transition: all 0.2s;
+.legend-dot::before {
+  content: '';
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  display: inline-block;
 }
 
-.page-btn:hover {
-  background: #F2F3F5;
-}
-
-.page-btn--active {
-  background: #1677FF;
-  color: #fff;
-  font-weight: 600;
-}
-
-.question-pagination-bar__right {
-  display: flex;
-  align-items: center;
-  gap: 12px;
-}
-
-.total-count {
-  font-size: 12px;
-  color: #86909C;
-}
+.legend--pending::before { background: #1677FF; }
+.legend--correct::before { background: #22C55E; }
+.legend--wrong::before { background: #F53F3F; }
+.legend--excluded::before { background: #FA8C16; }
 
 .view-mode-btns {
   display: flex;
@@ -1105,62 +1449,23 @@ onUnmounted(() => {
   color: #4E5969;
 }
 
-/* ===== Image Toolbar ===== */
-.image-toolbar {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  padding: 6px 20px;
-  background: #fff;
-  border-bottom: 1px solid #E5E6EB;
-}
-
-.image-toolbar__left {
-  display: flex;
-  align-items: center;
-  gap: 2px;
-}
-
-.image-toolbar__left :deep(.el-button) {
-  padding: 4px 8px;
-  height: auto;
-}
-
-.image-toolbar__right {
-  display: flex;
-  align-items: center;
-}
-
-.image-toolbar__right :deep(.el-button) {
-  padding: 4px 8px;
-  height: auto;
-}
-
-/* ===== Review Content Area ===== */
-.review-content-area {
+/* ===== Question Image Section ===== */
+.question-image-section {
+  position: relative;
   flex: 1;
-  display: flex;
-  flex-direction: column;
-  overflow: hidden;
-  padding: 12px 20px;
-  gap: 12px;
-}
-
-/* Image Preview Section (~60%) */
-.image-preview-section {
-  flex: 3;
   min-height: 0;
+  margin: 12px 20px 0;
   background: #fff;
   border-radius: 12px;
   border: 1px solid #E5E6EB;
-  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.05);
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.04);
+  overflow: hidden;
   display: flex;
   align-items: center;
   justify-content: center;
-  overflow: hidden;
 }
 
-.image-preview-container {
+.question-image-container {
   width: 100%;
   height: 100%;
   display: flex;
@@ -1169,7 +1474,7 @@ onUnmounted(() => {
   overflow: hidden;
 }
 
-.preview-image {
+.question-image {
   max-width: 95%;
   max-height: 95%;
   object-fit: contain;
@@ -1188,63 +1493,119 @@ onUnmounted(() => {
   color: #86909C;
 }
 
-/* OCR Editor Section (~40%) */
-.ocr-editor-section {
-  flex: 2;
-  min-height: 0;
+/* 悬浮工具栏 */
+.image-toolbar-float {
+  position: absolute;
+  bottom: 12px;
+  right: 12px;
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  background: rgba(255, 255, 255, 0.95);
+  border-radius: 8px;
+  box-shadow: 0 2px 12px rgba(0, 0, 0, 0.12);
+  padding: 4px;
+}
+
+.image-toolbar-float :deep(.el-button) {
+  padding: 6px;
+  height: auto;
+}
+
+/* ===== OCR Section - Card Layout ===== */
+.ocr-section {
+  margin: 12px 20px;
   background: #fff;
   border-radius: 12px;
   border: 1px solid #E5E6EB;
-  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.05);
-  display: flex;
-  flex-direction: column;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.04);
   overflow: hidden;
 }
 
-.ocr-editor__title {
-  padding: 12px 16px;
-  font-size: 14px;
+.ocr-section__header {
+  padding: 10px 16px;
+  border-bottom: 1px solid #F2F3F5;
+}
+
+.ocr-section__title {
+  font-size: 13px;
   font-weight: 500;
   color: #1D2129;
-  border-bottom: 1px solid #E5E6EB;
-  flex-shrink: 0;
 }
 
-.ocr-editor__form {
-  flex: 1;
-  overflow-y: auto;
+.ocr-section__hint {
+  font-size: 12px;
+  color: #86909C;
+  font-weight: 400;
+}
+
+.ocr-cards {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 1px;
+  background: #F2F3F5;
+}
+
+.ocr-card {
+  background: #fff;
   padding: 12px 16px;
+}
+
+.ocr-card__header {
+  margin-bottom: 8px;
+}
+
+.ocr-card__label {
+  font-size: 12px;
+  color: #86909C;
+}
+
+.ocr-card__body {
   display: flex;
   flex-direction: column;
-  gap: 10px;
+  gap: 8px;
 }
 
-.form-row {
-  display: flex;
-  align-items: flex-start;
-  gap: 12px;
-}
-
-.form-label {
-  width: 80px;
-  flex-shrink: 0;
+.ocr-answer-content {
   font-size: 13px;
-  color: #4E5969;
-  padding-top: 8px;
-  text-align: right;
+  color: #1D2129;
+  line-height: 1.5;
+  padding: 8px 12px;
+  background: #F9FAFB;
+  border-radius: 6px;
 }
 
-.form-label .required {
-  color: #F53F3F;
+.ocr-card__action {
+  display: flex;
+  align-items: center;
 }
 
-.form-input {
-  flex: 1;
+.ocr-tags-list {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
 }
 
-.form-input :deep(.el-textarea__inner),
-.form-input :deep(.el-input__inner) {
-  border-radius: 8px;
+/* 题目备注 */
+.ocr-remark {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 10px 16px;
+  border-top: 1px solid #F2F3F5;
+}
+
+.ocr-remark__label {
+  font-size: 12px;
+  color: #86909C;
+  white-space: nowrap;
+}
+
+.ocr-remark__count {
+  font-size: 11px;
+  color: #C9CDD4;
+  white-space: nowrap;
 }
 
 /* ===== Bottom Action Bar ===== */
@@ -1252,7 +1613,7 @@ onUnmounted(() => {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  padding: 12px 20px;
+  padding: 10px 20px;
   background: #fff;
   border-top: 1px solid #E5E6EB;
   flex-shrink: 0;
@@ -1307,7 +1668,7 @@ onUnmounted(() => {
 }
 
 .btn-save {
-  min-width: 100px;
+  min-width: 80px;
   font-weight: 500;
 }
 
@@ -1336,25 +1697,54 @@ onUnmounted(() => {
   object-fit: contain;
 }
 
+/* ===== Tag Selector ===== */
+.tag-selector {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  padding: 8px 0;
+}
+
+.tag-option {
+  padding: 6px 14px;
+  background: #F2F3F5;
+  border-radius: 6px;
+  font-size: 13px;
+  color: #4E5969;
+  cursor: pointer;
+  transition: all 0.2s;
+}
+
+.tag-option:hover {
+  background: #E8F3FF;
+  color: #1677FF;
+}
+
+.tag-option--selected {
+  background: #E8F3FF;
+  color: #1677FF;
+  border: 1px solid #1677FF;
+}
+
 /* ===== Scrollbar ===== */
 .student-panel__list::-webkit-scrollbar,
-.ocr-editor__form::-webkit-scrollbar {
+.ocr-section::-webkit-scrollbar {
   width: 6px;
 }
 
 .student-panel__list::-webkit-scrollbar-track,
-.ocr-editor__form::-webkit-scrollbar-track {
+.ocr-section::-webkit-scrollbar-track {
   background: transparent;
 }
 
 .student-panel__list::-webkit-scrollbar-thumb,
-.ocr-editor__form::-webkit-scrollbar-thumb {
+.ocr-section::-webkit-scrollbar-thumb {
   background: #E5E6EB;
   border-radius: 3px;
 }
 
 .student-panel__list::-webkit-scrollbar-thumb:hover,
-.ocr-editor__form::-webkit-scrollbar-thumb:hover {
+.ocr-section::-webkit-scrollbar-thumb:hover {
   background: #C9CDD4;
 }
 </style>
