@@ -158,10 +158,13 @@ export default defineConfig(({ mode }) => ({
         changeOrigin: true
       }
     },
-    // Dev server: serve workbench.html for /exam-workbench route
+    // Dev server: serve workbench.html for /workbench and /exam-workbench routes
     configureServer(server) {
       server.middlewares.use((req, res, next) => {
-        if (req.url === '/exam-workbench' || req.url.startsWith('/exam-workbench/')) {
+        if (
+          req.url === '/workbench' || req.url.startsWith('/workbench/') ||
+          req.url === '/exam-workbench' || req.url.startsWith('/exam-workbench/')
+        ) {
           const html = fs.readFileSync(resolve(__dirname, 'workbench.html'), 'utf-8')
           res.setHeader('Content-Type', 'text/html')
           res.end(html)
