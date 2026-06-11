@@ -229,7 +229,16 @@
             </div>
             <div class="question-content-card__body">
               <div class="question-text-panel">
-                <div class="question-text-content">{{ ocrData.questionContent || '暂无题目内容' }}</div>
+                <!-- 编辑模式：题目内容可编辑 -->
+                <el-input
+                  v-if="isEditing"
+                  v-model="ocrData.questionContent"
+                  type="textarea"
+                  :rows="6"
+                  placeholder="请输入题目内容"
+                  class="edit-question-input"
+                />
+                <div v-else class="question-text-content">{{ ocrData.questionContent || '暂无题目内容' }}</div>
                 <!-- 选择题选项 -->
                 <div v-if="ocrData.options && ocrData.options.length > 0" class="question-options">
                   <div
@@ -238,25 +247,71 @@
                     class="option-item"
                     :class="{ 'option-item--correct': opt === ocrData.correctAnswer }"
                   >
-                    <span class="option-label">{{ String.fromCharCode(65 + idx) }}.</span>
-                    <span class="option-text">{{ opt }}</span>
+                    <!-- 编辑模式：选项可编辑 -->
+                    <el-input
+                      v-if="isEditing"
+                      v-model="ocrData.options[idx]"
+                      :placeholder="'选项' + String.fromCharCode(65 + idx)"
+                      class="edit-option-input"
+                      size="small"
+                    />
+                    <template v-else>
+                      <span class="option-label">{{ String.fromCharCode(65 + idx) }}.</span>
+                      <span class="option-text">{{ opt }}</span>
+                    </template>
+                    <el-button
+                      v-if="isEditing"
+                      text
+                      size="small"
+                      type="danger"
+                      @click="removeOption(idx)"
+                      class="remove-option-btn"
+                    >
+                      <el-icon><Warning /></el-icon>
+                    </el-button>
                   </div>
+                  <el-button
+                    v-if="isEditing"
+                    text
+                    size="small"
+                    type="primary"
+                    @click="addOption"
+                    class="add-option-btn"
+                  >
+                    <el-icon><Plus /></el-icon>
+                    添加选项
+                  </el-button>
                 </div>
               </div>
               <div class="question-image-panel">
-                <img
-                  v-if="currentQuestion?.geometry_image_url"
-                  :src="currentQuestion.geometry_image_url"
-                  alt="题目图片"
-                  class="question-image"
-                  :style="{
-                    transform: `scale(${imageScale}) rotate(${imageRotation}deg)`,
-                    transition: imageTransformTransition ? 'transform 0.3s ease' : 'none'
-                  }"
-                />
+                <template v-if="currentQuestion?.geometry_image_url">
+                  <img
+                    :src="currentQuestion.geometry_image_url"
+                    alt="题目图片"
+                    class="question-image"
+                    :style="{
+                      transform: `scale(${imageScale}) rotate(${imageRotation}deg)`,
+                      transition: imageTransformTransition ? 'transform 0.3s ease' : 'none'
+                    }"
+                  />
+                </template>
                 <div v-else class="image-preview-placeholder">
                   <el-icon :size="48" color="#C9CDD4"><Picture /></el-icon>
                   <span class="placeholder-text">暂无配图</span>
+                </div>
+                <!-- 编辑模式：图片上传 -->
+                <div v-if="isEditing" class="image-upload-wrapper">
+                  <el-upload
+                    class="image-uploader"
+                    :show-file-list="false"
+                    :before-upload="handleImageUpload"
+                    accept="image/*"
+                  >
+                    <el-button type="primary" size="small">
+                      <el-icon><Upload /></el-icon>
+                      {{ currentQuestion?.geometry_image_url ? '更换配图' : '上传配图' }}
+                    </el-button>
+                  </el-upload>
                 </div>
               </div>
             </div>
@@ -265,14 +320,14 @@
           <!-- OCR识别结果卡片 -->
           <div class="ocr-card">
             <div class="ocr-card__title">
-              <span>OCR识别结果</span>
-              <span class="ocr-card__subtitle">可点击修改</span>
+              <span>题目校对</span>
+              <span class="ocr-card__subtitle">{{ isEditing ? '编辑模式' : '查看模式，点击编辑可修改' }}</span>
             </div>
-            <!-- OCR状态徽章行 -->
+            <!-- 状态徽章行 -->
             <div class="ocr-status-badges">
               <span class="ocr-badge ocr-badge--blue">
                 <el-icon><CircleCheck /></el-icon>
-                OCR识别
+                {{ isEditing ? '编辑中' : '已校对' }}
               </span>
               <span class="ocr-badge ocr-badge--green">
                 <el-icon><SuccessFilled /></el-icon>
@@ -287,15 +342,29 @@
             <!-- 学生答案 + 参考答案 双栏 -->
             <div class="ocr-answer-grid">
               <div class="ocr-answer-col">
-                <div class="ocr-answer-col__label">学生答案 <span class="ocr-answer-col__sub">（OCR识别）</span></div>
-                <div class="ocr-answer-col__content">
-                  {{ ocrData.studentAnswer || '暂无学生答案' }}
+                <div class="ocr-answer-col__label">学生答案 <span class="ocr-answer-col__sub">{{ isEditing ? '（可编辑）' : '（OCR识别）' }}</span></div>
+                <div class="ocr-answer-col__content" :class="{ 'editable-content': isEditing }">
+                  <el-input
+                    v-if="isEditing"
+                    v-model="ocrData.studentAnswer"
+                    placeholder="请输入学生答案"
+                    class="edit-answer-input"
+                  />
+                  <template v-else>
+                    {{ ocrData.studentAnswer || '暂无学生答案' }}
+                  </template>
                 </div>
               </div>
               <div class="ocr-answer-col">
-                <div class="ocr-answer-col__label">参考答案 <span class="ocr-answer-col__sub">（AI生成）</span></div>
-                <div class="ocr-answer-col__content">
-                  <template v-if="ocrData.correctAnswer">
+                <div class="ocr-answer-col__label">标准答案 <span class="ocr-answer-col__sub">{{ isEditing ? '（可编辑）' : '（AI生成）' }}</span></div>
+                <div class="ocr-answer-col__content" :class="{ 'editable-content': isEditing }">
+                  <el-input
+                    v-if="isEditing"
+                    v-model="ocrData.correctAnswer"
+                    placeholder="请输入标准答案"
+                    class="edit-answer-input"
+                  />
+                  <template v-else-if="ocrData.correctAnswer">
                     {{ ocrData.correctAnswer }}
                   </template>
                   <div v-else class="ai-answer-placeholder">
@@ -303,11 +372,23 @@
                     <span class="ai-answer-placeholder__text">解析失败，请人工确认</span>
                   </div>
                 </div>
-                <div class="ocr-answer-col__action">
-                  <el-button text size="small" type="primary">
-                    <el-icon><EditPen /></el-icon>
-                    AI参考答案
-                  </el-button>
+              </div>
+            </div>
+
+            <!-- AI解析 -->
+            <div class="ocr-analysis">
+              <div class="ocr-analysis__label">AI解析 <span class="ocr-analysis__sub">{{ isEditing ? '（可编辑）' : '' }}</span></div>
+              <div class="ocr-analysis__content" :class="{ 'editable-content': isEditing }">
+                <el-input
+                  v-if="isEditing"
+                  v-model="ocrData.analysis"
+                  type="textarea"
+                  :rows="4"
+                  placeholder="请输入题目解析"
+                  class="edit-analysis-input"
+                />
+                <div v-else>
+                  {{ ocrData.analysis || '暂无解析' }}
                 </div>
               </div>
             </div>
@@ -320,14 +401,21 @@
                   v-for="tag in ocrData.knowledgePoints"
                   :key="tag"
                   size="default"
-                  closable
+                  :closable="isEditing"
                   @close="removeTag(tag)"
                   effect="light"
                   round
                 >
                   {{ tag }}
                 </el-tag>
-                <el-button text size="small" type="primary" @click="showTagSelector = true" class="add-tag-btn">
+                <el-button
+                  v-if="isEditing"
+                  text
+                  size="small"
+                  type="primary"
+                  @click="showTagSelector = true"
+                  class="add-tag-btn"
+                >
                   <el-icon><Plus /></el-icon>
                   添加知识点
                 </el-button>
@@ -339,6 +427,7 @@
               <div class="ocr-remark__label">题目备注</div>
               <el-input
                 v-model="ocrData.remark"
+                :disabled="!isEditing"
                 placeholder="请输入备注信息（选填）"
                 class="ocr-input"
               />
@@ -359,22 +448,36 @@
               </el-button>
             </div>
             <div class="action-card__right">
-              <el-button size="default" class="btn-correct" @click="handleReview('correct')">
-                <el-icon><CircleCheckFilled /></el-icon>
-                正确
-              </el-button>
-              <el-button size="default" class="btn-wrong" @click="handleReview('wrong')">
-                <el-icon><CircleCloseFilled /></el-icon>
-                错误
-              </el-button>
-              <el-button size="default" class="btn-exclude" @click="handleReview('exclude')">
-                <el-icon><RemoveFilled /></el-icon>
-                排除本题
-              </el-button>
-              <el-button size="default" type="primary" class="btn-save" @click="handleSave">
-                <el-icon><DocumentChecked /></el-icon>
-                保存
-              </el-button>
+              <!-- 非编辑模式：显示【编辑】按钮 -->
+              <template v-if="!isEditing">
+                <el-button size="default" class="btn-correct" @click="handleReview('correct')">
+                  <el-icon><CircleCheckFilled /></el-icon>
+                  正确
+                </el-button>
+                <el-button size="default" class="btn-wrong" @click="handleReview('wrong')">
+                  <el-icon><CircleCloseFilled /></el-icon>
+                  错误
+                </el-button>
+                <el-button size="default" class="btn-exclude" @click="handleReview('exclude')">
+                  <el-icon><RemoveFilled /></el-icon>
+                  排除本题
+                </el-button>
+                <el-button size="default" type="primary" class="btn-edit" @click="handleEnterEdit">
+                  <el-icon><EditPen /></el-icon>
+                  编辑
+                </el-button>
+              </template>
+              <!-- 编辑模式：显示【取消】【保存修改】按钮 -->
+              <template v-else>
+                <el-button size="default" @click="handleCancelEdit">
+                  <el-icon><RefreshLeft /></el-icon>
+                  取消
+                </el-button>
+                <el-button size="default" type="success" class="btn-save" @click="handleSave">
+                  <el-icon><DocumentChecked /></el-icon>
+                  保存修改
+                </el-button>
+              </template>
             </div>
           </div>
         </template>
@@ -427,13 +530,14 @@ import { ref, computed, onMounted, onUnmounted, watch } from 'vue'
 import { useRouter } from 'vue-router'
 import { useReviewStore } from '../stores/reviewStore'
 import { useLifecycleStore, LIFECYCLE_STATUS } from '../stores/lifecycleStore'
-import { getExamsByStudent } from '../../services/apiService'
-import { ElMessage } from 'element-plus'
+import { getExamsByStudent, updateQuestion, clearStudentCaches } from '../../services/apiService'
+import { ElMessage, ElLoading } from 'element-plus'
 import {
   Bell, QuestionFilled, ArrowDown, ArrowLeft, ArrowRight, Menu,
   Picture, ZoomIn, ZoomOut, RefreshLeft, Refresh,
   CircleCheckFilled, CircleCloseFilled, RemoveFilled, DocumentChecked,
-  Search, Filter, CircleCheck, SuccessFilled, Lightning, EditPen, Plus, Warning
+  Search, Filter, CircleCheck, SuccessFilled, Lightning, EditPen, Plus, Warning,
+  Upload
 } from '@element-plus/icons-vue'
 import dayjs from 'dayjs'
 
@@ -610,6 +714,10 @@ const ocrData = ref({
   remark: '',
 })
 
+// 编辑模式状态
+const isEditing = ref(false)
+const originalData = ref({}) // 保存原始数据用于取消
+
 const showTagSelector = ref(false)
 const allKnowledgeTags = ref(['全等三角形判定', '角的关系推导', '线段等式证明', '平行线的性质', '角平分线定义', '三角形内角和定理', '等式性质', '勾股定理'])
 
@@ -620,6 +728,131 @@ const toggleTag = (tag) => {
 }
 const removeTag = (tag) => {
   ocrData.value.knowledgePoints = ocrData.value.knowledgePoints.filter(t => t !== tag)
+}
+
+// 进入编辑模式
+const handleEnterEdit = () => {
+  const q = currentQuestion.value
+  if (!q) return
+  originalData.value = {
+    questionContent: q.content || '',
+    options: JSON.parse(JSON.stringify(q.options || [])),
+    studentAnswer: q.student_answer || '',
+    correctAnswer: q.answer || '',
+    analysis: q.analysis || '',
+    knowledgePoints: JSON.parse(JSON.stringify(q.ai_tags || q.knowledge_points || [])),
+    remark: q.remark || '',
+  }
+  isEditing.value = true
+}
+
+// 取消编辑
+const handleCancelEdit = () => {
+  ocrData.value = JSON.parse(JSON.stringify(originalData.value))
+  isEditing.value = false
+}
+
+// 添加选项
+const addOption = () => {
+  ocrData.value.options.push('')
+}
+
+// 删除选项
+const removeOption = (idx) => {
+  if (ocrData.value.options.length > 0) {
+    ocrData.value.options.splice(idx, 1)
+  }
+}
+
+// 上传题目配图
+const handleImageUpload = async (file) => {
+  if (!currentQuestion.value?.id) {
+    ElMessage.error('题目ID不存在')
+    return false
+  }
+  
+  try {
+    // 使用 fetch 直接上传图片
+    const formData = new FormData()
+    formData.append('image', file)
+    
+    const response = await fetch(`${import.meta.env.VITE_API_BASE_URL || 'http://localhost:3001'}/api/upload-image`, {
+      method: 'POST',
+      body: formData
+    })
+    
+    if (!response.ok) {
+      throw new Error('上传失败')
+    }
+    
+    const result = await response.json()
+    const q = currentQuestion.value
+    q.geometry_image_url = result.url
+    ElMessage.success('配图上传成功')
+    return false // 阻止 el-upload 默认行为
+  } catch (err) {
+    console.error('图片上传失败:', err)
+    ElMessage.error('图片上传失败')
+    return false
+  }
+}
+
+// 保存修改
+const handleSave = async () => {
+  const q = currentQuestion.value
+  if (!q || !q.id) return
+  
+  const loading = ElLoading.service({
+    lock: true,
+    text: '正在保存修改...',
+    background: 'rgba(0, 0, 0, 0.7)',
+  })
+  
+  try {
+    // 1. 调用API保存题目修改
+    await updateQuestion(q.id, {
+      content: ocrData.value.questionContent,
+      options: ocrData.value.options,
+      answer: ocrData.value.correctAnswer,
+      analysis: ocrData.value.analysis,
+      student_answer: ocrData.value.studentAnswer,
+      geometry_image_url: q.geometry_image_url,
+      ai_tags: ocrData.value.knowledgePoints
+    })
+    
+    // 2. 更新本地题目数据
+    q.content = ocrData.value.questionContent
+    q.options = ocrData.value.options
+    q.student_answer = ocrData.value.studentAnswer
+    q.answer = ocrData.value.correctAnswer
+    q.analysis = ocrData.value.analysis
+    q.ai_tags = ocrData.value.knowledgePoints
+    q.remark = ocrData.value.remark
+    
+    // 3. 清除相关缓存，确保后续页面读取最新数据
+    const studentId = reviewStore.currentStudent?.id
+    if (studentId && selectedExam.value?.id) {
+      // 清除学生相关缓存
+      clearStudentCaches(studentId)
+      // 清除试卷相关缓存
+      clearStudentCaches(null, selectedExam.value.id)
+    }
+    
+    isEditing.value = false
+    loading.close()
+    ElMessage.success('修改已保存，相关数据已自动更新')
+    
+    // 4. 提示用户：修改已全局生效
+    ElMessage({
+      message: '错题管理、知识点统计、成长中心已自动更新',
+      type: 'success',
+      duration: 3000
+    })
+  } catch (err) {
+    loading.close()
+    console.error('保存失败:', err)
+    ElMessage.error('保存失败，请重试')
+  }
 }
 
 watch(currentQuestion, (newQ) => {
@@ -633,6 +866,8 @@ watch(currentQuestion, (newQ) => {
       knowledgePoints: newQ.ai_tags || newQ.knowledge_points || [],
       remark: newQ.remark || '',
     }
+    // 切换题目时退出编辑模式
+    isEditing.value = false
   } else {
     ocrData.value = { questionContent: '', options: [], studentAnswer: '', correctAnswer: '', analysis: '', knowledgePoints: [], remark: '' }
   }
@@ -660,19 +895,6 @@ const handleReview = (result) => {
   }
   reviewStore.reviewQuestion(q.id, result)
   ElMessage.success(resultText[result])
-}
-
-const handleSave = () => {
-  const q = currentQuestion.value
-  if (!q) return
-  q.content = ocrData.value.questionContent
-  q.options = ocrData.value.options
-  q.student_answer = ocrData.value.studentAnswer
-  q.answer = ocrData.value.correctAnswer
-  q.analysis = ocrData.value.analysis
-  q.ai_tags = ocrData.value.knowledgePoints
-  q.remark = ocrData.value.remark
-  ElMessage.success('保存成功')
 }
 
 const handleKeyboard = (e) => {
@@ -1057,26 +1279,63 @@ onUnmounted(() => {
 .question-content-card__body { display: grid; grid-template-columns: 1fr 1fr; }
 .question-text-panel {
   padding: 16px 20px; border-right: 1px solid #F2F3F5;
-  overflow-y: auto; max-height: 260px;
+  overflow-y: auto; max-height: 300px;
 }
 .question-text-content { font-size: 13px; color: #1D2129; line-height: 1.8; white-space: pre-wrap; }
+.edit-question-input :deep(.el-textarea__inner) {
+  font-size: 13px;
+  line-height: 1.8;
+  border: 1px solid #DCDFE6;
+  border-radius: 8px;
+}
+.edit-question-input :deep(.el-textarea__inner:focus) {
+  border-color: #1677FF;
+}
 .question-options { margin-top: 12px; }
 .option-item {
-  display: flex; align-items: baseline; gap: 8px;
+  display: flex; align-items: center; gap: 8px;
   padding: 6px 12px; border-radius: 8px; margin-bottom: 4px;
   background: #F9FAFB; transition: background 0.2s;
 }
 .option-item:hover { background: #F2F3F5; }
 .option-item--correct { background: #E8F8EA; }
 .option-label { font-size: 13px; font-weight: 600; color: #1D2129; min-width: 18px; }
-.option-text { font-size: 13px; color: #4E5969; }
+.option-text { font-size: 13px; color: #4E5969; flex: 1; }
+.edit-option-input { flex: 1; }
+.edit-option-input :deep(.el-input__wrapper) {
+  box-shadow: none !important;
+  background: #fff;
+  border: 1px solid #DCDFE6;
+  border-radius: 6px;
+}
+.remove-option-btn {
+  padding: 4px;
+  color: #FF4D4F;
+}
+.add-option-btn {
+  margin-top: 4px;
+  font-size: 12px;
+}
 .question-image-panel {
-  display: flex; align-items: center; justify-content: center;
-  padding: 16px 20px; overflow: hidden; min-height: 200px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  padding: 16px 20px;
+  overflow: hidden;
+  min-height: 200px;
+  position: relative;
 }
 .question-image { max-width: 100%; max-height: 100%; object-fit: contain; }
 .image-preview-placeholder { display: flex; flex-direction: column; align-items: center; gap: 8px; }
 .placeholder-text { font-size: 13px; color: #86909C; }
+.image-upload-wrapper {
+  margin-top: 12px;
+  position: absolute;
+  bottom: 16px;
+  left: 50%;
+  transform: translateX(-50%);
+}
 
 /* ===== OCR Card ===== */
 .ocr-card {
@@ -1118,6 +1377,18 @@ onUnmounted(() => {
   padding: 10px 12px; background: #F9FAFB; border-radius: 8px;
   white-space: pre-wrap; min-height: 48px;
 }
+.ocr-answer-col__content.editable-content {
+  padding: 8px;
+}
+.edit-answer-input :deep(.el-input__wrapper) {
+  box-shadow: none !important;
+  background: #fff;
+  border: 1px solid #DCDFE6;
+  border-radius: 6px;
+}
+.edit-answer-input :deep(.el-input__wrapper:focus-within) {
+  border-color: #1677FF;
+}
 .ocr-answer-col__action { margin-top: 8px; }
 
 .ai-answer-placeholder {
@@ -1125,6 +1396,43 @@ onUnmounted(() => {
   gap: 8px; padding: 20px; text-align: center;
 }
 .ai-answer-placeholder__text { font-size: 13px; color: #86909C; }
+
+/* AI解析 */
+.ocr-analysis {
+  padding: 12px 20px;
+  border-bottom: 1px solid #F2F3F5;
+}
+.ocr-analysis__label {
+  font-size: 12px;
+  font-weight: 500;
+  color: #4E5969;
+  margin-bottom: 8px;
+}
+.ocr-analysis__sub {
+  font-weight: 400;
+  color: #86909C;
+}
+.ocr-analysis__content {
+  font-size: 13px;
+  color: #1D2129;
+  line-height: 1.7;
+  padding: 10px 12px;
+  background: #F9FAFB;
+  border-radius: 8px;
+  white-space: pre-wrap;
+}
+.ocr-analysis__content.editable-content {
+  padding: 8px;
+}
+.edit-analysis-input :deep(.el-textarea__inner) {
+  font-size: 13px;
+  line-height: 1.7;
+  border: 1px solid #DCDFE6;
+  border-radius: 8px;
+}
+.edit-analysis-input :deep(.el-textarea__inner:focus) {
+  border-color: #1677FF;
+}
 
 .ocr-knowledge {
   display: flex; align-items: flex-start; gap: 12px;
@@ -1139,6 +1447,7 @@ onUnmounted(() => {
 .ocr-remark__count { font-size: 11px; color: #C9CDD4; white-space: nowrap; }
 .ocr-input :deep(.el-input__wrapper) { box-shadow: none !important; background: #F9FAFB; border-radius: 8px; }
 .ocr-input :deep(.el-input__wrapper):hover { background: #F2F3F5; }
+.ocr-input :deep(.el-input__wrapper.is-disabled) { background: #F9FAFB; }
 
 /* ===== Action Card ===== */
 .action-card {
@@ -1158,7 +1467,8 @@ onUnmounted(() => {
 .btn-wrong:hover { background: #FFE8E6 !important; border-color: #FFA39E !important; }
 .btn-exclude { background: #FFF7E6 !important; border-color: #FFD591 !important; color: #FA8C16 !important; font-weight: 500; }
 .btn-exclude:hover { background: #FFF0D1 !important; border-color: #FFC069 !important; }
-.btn-save { min-width: 80px; font-weight: 500; }
+.btn-edit { min-width: 80px; font-weight: 500; }
+.btn-save { min-width: 100px; font-weight: 500; }
 
 /* ===== Fullscreen ===== */
 .fullscreen-dialog :deep(.el-dialog__body) { padding: 0; height: 100vh; display: flex; align-items: center; justify-content: center; background: #000; }
