@@ -330,6 +330,15 @@
                       </el-button>
                     </el-upload>
                     <el-button
+                      v-if="selectedExam?.thumbnail"
+                      type="warning"
+                      size="default"
+                      @click="openCropDialog"
+                    >
+                      <el-icon><Crop /></el-icon>
+                      从原试卷截图选取
+                    </el-button>
+                    <el-button
                       v-if="localImageUrl"
                       type="danger"
                       size="default"
@@ -550,6 +559,63 @@
         <el-button type="primary" @click="showTagSelector = false">确定</el-button>
       </template>
     </el-dialog>
+
+    <!-- 从原试卷截图选取 -->
+    <el-dialog
+      v-model="cropDialogVisible"
+      title="从原试卷截图选取"
+      width="80%"
+      :close-on-click-modal="false"
+      class="crop-dialog"
+    >
+      <div class="crop-container">
+        <div class="crop-image-wrapper" @mousedown="startCrop" @mousemove="moveCrop" @mouseup="endCrop" @mouseleave="endCrop">
+          <img
+            ref="cropImageRef"
+            :src="selectedExam?.thumbnail || selectedExam?.raw_task?.image_url"
+            alt="原试卷"
+            class="crop-source-image"
+            draggable="false"
+          />
+          <!-- 裁剪框 -->
+          <div
+            v-if="isCropping || cropRect"
+            class="crop-selection"
+            :style="{
+              left: cropRect?.x + 'px',
+              top: cropRect?.y + 'px',
+              width: cropRect?.width + 'px',
+              height: cropRect?.height + 'px'
+            }"
+          >
+            <div class="crop-selection__border"></div>
+            <div class="crop-selection__info">
+              {{ Math.round(cropRect?.width) }} × {{ Math.round(cropRect?.height) }}
+            </div>
+          </div>
+        </div>
+        <div class="crop-preview" v-if="cropPreviewUrl">
+          <div class="crop-preview__label">截取预览</div>
+          <img :src="cropPreviewUrl" alt="截取预览" class="crop-preview__image" />
+        </div>
+      </div>
+      <template #footer>
+        <div class="crop-dialog__footer">
+          <span class="crop-hint">在原试卷图片上拖拽框选要截取的题目区域</span>
+          <div>
+            <el-button @click="cancelCrop">取消</el-button>
+            <el-button
+              type="primary"
+              :disabled="!cropPreviewUrl"
+              @click="confirmCrop"
+            >
+              <el-icon><Crop /></el-icon>
+              确认截取并上传
+            </el-button>
+          </div>
+        </div>
+      </template>
+    </el-dialog>
   </div>
 </template>
 
@@ -565,7 +631,7 @@ import {
   Picture, ZoomIn, ZoomOut, RefreshLeft, Refresh,
   CircleCheckFilled, CircleCloseFilled, RemoveFilled, DocumentChecked,
   Search, Filter, CircleCheck, SuccessFilled, Lightning, EditPen, Plus, Warning,
-  Upload, Delete
+  Upload, Delete, Crop
 } from '@element-plus/icons-vue'
 import dayjs from 'dayjs'
 
@@ -750,6 +816,14 @@ const localImageUrl = ref('') // 本地图片URL（编辑时立即预览）
 const showTagSelector = ref(false)
 const allKnowledgeTags = ref(['全等三角形判定', '角的关系推导', '线段等式证明', '平行线的性质', '角平分线定义', '三角形内角和定理', '等式性质', '勾股定理'])
 
+// 截图选取相关状态
+const cropDialogVisible = ref(false)
+const cropImageRef = ref(null)
+const isCropping = ref(false)
+const cropRect = ref(null)
+const cropStartPos = ref(null)
+const cropPreviewUrl = ref('')
+
 const toggleTag = (tag) => {
   const idx = ocrData.value.knowledgePoints.indexOf(tag)
   if (idx === -1) ocrData.value.knowledgePoints.push(tag)
@@ -844,6 +918,152 @@ const handleDeleteImage = () => {
     q.geometry_image_url = ''
   }
   ElMessage.success('配图已删除')
+}
+
+// ============ 截图选取功能 ============
+
+// 打开截图对话框
+const openCropDialog = () => {
+  cropDialogVisible.value = true
+  cropRect.value = null
+  cropPreviewUrl.value = ''
+  isCropping.value = false
+  cropStartPos.value = null
+}
+
+// 开始裁剪
+const startCrop = (e) => {
+  if (!cropImageRef.value) return
+  e.preventDefault()
+  const rect = cropImageRef.value.getBoundingClientRect()
+  isCropping.value = true
+  cropStartPos.value = {
+    x: e.clientX - rect.left,
+    y: e.clientY - rect.top
+  }
+  cropRect.value = {
+    x: cropStartPos.value.x,
+    y: cropStartPos.value.y,
+    width: 0,
+    height: 0
+  }
+  cropPreviewUrl.value = ''
+}
+
+// 移动裁剪框
+const moveCrop = (e) => {
+  if (!isCropping.value || !cropImageRef.value) return
+  e.preventDefault()
+  const rect = cropImageRef.value.getBoundingClientRect()
+  const imgWidth = cropImageRef.value.offsetWidth
+  const imgHeight = cropImageRef.value.offsetHeight
+  const curX = Math.min(Math.max(e.clientX - rect.left, 0), imgWidth)
+  const curY = Math.min(Math.max(e.clientY - rect.top, 0), imgHeight)
+  const startX = cropStartPos.value?.x || 0
+  const startY = cropStartPos.value?.y || 0
+
+  const x = Math.min(startX, curX)
+  const y = Math.min(startY, curY)
+  const width = Math.abs(curX - startX)
+  const height = Math.abs(curY - startY)
+
+  cropRect.value = { x, y, width, height }
+}
+
+// 结束裁剪
+const endCrop = () => {
+  if (!isCropping.value || !cropRect.value || cropRect.value.width < 5 || cropRect.value.height < 5) {
+    isCropping.value = false
+    cropRect.value = null
+    return
+  }
+  isCropping.value = false
+  generateCropPreview()
+}
+
+// 生成裁剪预览
+const generateCropPreview = () => {
+  if (!cropImageRef.value || !cropRect.value) return
+
+  const img = cropImageRef.value
+  const rect = cropRect.value
+
+  // 计算缩放比例（显示尺寸 vs 实际图片尺寸）
+  const scaleX = img.naturalWidth / img.offsetWidth
+  const scaleY = img.naturalHeight / img.offsetHeight
+
+  // 计算实际裁剪区域
+  const actualX = rect.x * scaleX
+  const actualY = rect.y * scaleY
+  const actualW = rect.width * scaleX
+  const actualH = rect.height * scaleY
+
+  // 使用 canvas 生成裁剪图
+  const canvas = document.createElement('canvas')
+  canvas.width = actualW
+  canvas.height = actualH
+  const ctx = canvas.getContext('2d')
+  ctx.drawImage(img, actualX, actualY, actualW, actualH, 0, 0, actualW, actualH)
+
+  cropPreviewUrl.value = canvas.toDataURL('image/jpeg', 0.92)
+}
+
+// 取消裁剪
+const cancelCrop = () => {
+  cropDialogVisible.value = false
+  cropRect.value = null
+  cropPreviewUrl.value = ''
+}
+
+// 确认截取并上传
+const confirmCrop = async () => {
+  if (!cropPreviewUrl.value || !currentQuestion.value?.id) return
+
+  const loading = ElLoading.service({
+    lock: true,
+    text: '正在上传截取图片...',
+    background: 'rgba(0, 0, 0, 0.7)',
+  })
+
+  try {
+    // 将 base64 转为 Blob
+    const base64Data = cropPreviewUrl.value.split(',')[1]
+    const byteCharacters = atob(base64Data)
+    const byteNumbers = new Array(byteCharacters.length)
+    for (let i = 0; i < byteCharacters.length; i++) {
+      byteNumbers[i] = byteCharacters.charCodeAt(i)
+    }
+    const byteArray = new Uint8Array(byteNumbers)
+    const blob = new Blob([byteArray], { type: 'image/jpeg' })
+    const file = new File([blob], 'cropped.jpg', { type: 'image/jpeg' })
+
+    // 上传截图
+    const formData = new FormData()
+    formData.append('image', file)
+
+    const response = await fetch(`${import.meta.env.VITE_API_BASE_URL || 'http://localhost:3001'}/api/upload-image`, {
+      method: 'POST',
+      body: formData
+    })
+
+    if (!response.ok) {
+      throw new Error('上传失败')
+    }
+
+    const result = await response.json()
+    const q = currentQuestion.value
+    q.geometry_image_url = result.url
+    localImageUrl.value = result.url
+
+    cropDialogVisible.value = false
+    cropPreviewUrl.value = ''
+    loading.close()
+    ElMessage.success('截图已成功上传为题目配图')
+  } catch (err) {
+    loading.close()
+    console.error('截图上传失败:', err)
+    ElMessage.error('截图上传失败，请重试')
+  }
 }
 
 // 保存修改
@@ -1562,6 +1782,92 @@ onUnmounted(() => {
 }
 .tag-option:hover { background: #E8F3FF; color: #1677FF; }
 .tag-option--selected { background: #E8F3FF; color: #1677FF; border: 1px solid #1677FF; }
+
+/* ===== 截图选取对话框 ===== */
+.crop-dialog :deep(.el-dialog__body) {
+  padding: 0;
+  max-height: 70vh;
+  overflow-y: auto;
+}
+.crop-container {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  padding: 16px;
+}
+.crop-image-wrapper {
+  position: relative;
+  display: inline-block;
+  overflow: hidden;
+  border-radius: 8px;
+  border: 1px solid #E5E6EB;
+  cursor: crosshair;
+  user-select: none;
+  max-width: 100%;
+}
+.crop-source-image {
+  display: block;
+  max-width: 100%;
+  max-height: 55vh;
+  object-fit: contain;
+}
+.crop-selection {
+  position: absolute;
+  pointer-events: none;
+  z-index: 10;
+}
+.crop-selection__border {
+  width: 100%;
+  height: 100%;
+  border: 2px dashed #1677FF;
+  box-shadow: 0 0 0 100vh rgba(0, 0, 0, 0.45);
+  border-radius: 2px;
+}
+.crop-selection__info {
+  position: absolute;
+  top: -28px;
+  left: 0;
+  background: rgba(22, 119, 255, 0.9);
+  color: #fff;
+  font-size: 11px;
+  padding: 2px 8px;
+  border-radius: 4px;
+  white-space: nowrap;
+}
+.crop-preview {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 8px;
+  padding: 12px;
+  background: #F9FAFB;
+  border-radius: 8px;
+  border: 1px solid #E5E6EB;
+}
+.crop-preview__label {
+  font-size: 12px;
+  font-weight: 500;
+  color: #4E5969;
+}
+.crop-preview__image {
+  max-width: 300px;
+  max-height: 200px;
+  object-fit: contain;
+  border-radius: 4px;
+  border: 1px solid #E5E6EB;
+}
+.crop-dialog__footer {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 12px 20px;
+  border-top: 1px solid #F2F3F5;
+  background: #F9FAFB;
+}
+.crop-hint {
+  font-size: 13px;
+  color: #86909C;
+}
 
 /* ===== 列表滚动条 ===== */
 .list-panel__list::-webkit-scrollbar { width: 6px; }
