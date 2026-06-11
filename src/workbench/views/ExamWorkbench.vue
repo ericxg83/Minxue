@@ -67,7 +67,7 @@
               <span>OCR识别</span>
             </div>
             <div class="feature-item">
-              <el-icon><Scissors /></el-icon>
+              <el-icon><EditPen /></el-icon>
               <span>自动切题</span>
             </div>
             <div class="feature-item">
@@ -87,11 +87,10 @@
 </template>
 
 <script setup>
-import { ref } from 'vue'
 import { useRouter } from 'vue-router'
 import {
   Bell, QuestionFilled, ArrowDown, Files, Upload, View,
-  Scissors, FolderOpened, Connection
+  FolderOpened, Connection, EditPen
 } from '@element-plus/icons-vue'
 
 const router = useRouter()

@@ -36,7 +36,7 @@
             v-for="menu in navMenus"
             :key="menu.key"
             class="nav-menu-item"
-            :class="{ 'nav-menu-item--active': currentMenu === menu.key }"
+            :class="{ 'nav-menu-item--active': currentMenu === menu.key, 'nav-menu-item--disabled': menu.disabled }"
             @click="handleNavMenuClick(menu.key)"
           >
             <div class="nav-menu-item__icon">
@@ -309,10 +309,12 @@ const navMenus = [
   { key: 'proofread', label: '题目校对', icon: 'DocumentChecked' },
   { key: 'wrong-book', label: '错题管理', icon: 'Collection' },
   { key: 'growth', label: '成长中心', icon: 'TrendCharts' },
-  { key: 'exam-import', label: '试卷入库', icon: 'UploadFilled' },
+  { key: 'exam-import', label: '试卷入库', icon: 'UploadFilled', disabled: true },
 ]
 
 const handleNavMenuClick = (key) => {
+  const menu = navMenus.find(m => m.key === key)
+  if (menu?.disabled) return
   currentMenu.value = key
   const routeMap = {
     'proofread': '/',

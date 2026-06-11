@@ -36,7 +36,7 @@
             v-for="menu in navMenus"
             :key="menu.key"
             class="nav-menu-item"
-            :class="{ 'nav-menu-item--active': currentMenu === menu.key }"
+            :class="{ 'nav-menu-item--active': currentMenu === menu.key, 'nav-menu-item--disabled': menu.disabled }"
             @click="handleNavMenuClick(menu.key)"
           >
             <div class="nav-menu-item__icon">
@@ -49,7 +49,7 @@
       </aside>
 
       <!-- 第二栏：学生列表 -->
-      <aside class="student-panel">
+      <aside class="student-panel" v-if="currentMenu !== 'exam-import'">
         <div class="student-panel__header">
           <span class="student-panel__title">学生列表</span>
         </div>
@@ -380,10 +380,12 @@ const navMenus = [
   { key: 'proofread', label: '题目校对', icon: 'DocumentChecked' },
   { key: 'wrong-book', label: '错题管理', icon: 'Collection' },
   { key: 'growth', label: '成长中心', icon: 'TrendCharts' },
-  { key: 'exam-import', label: '试卷入库', icon: 'UploadFilled' },
+  { key: 'exam-import', label: '试卷入库', icon: 'UploadFilled', disabled: true },
 ]
 
 const handleNavMenuClick = (key) => {
+  const menu = navMenus.find(m => m.key === key)
+  if (menu?.disabled) return
   currentMenu.value = key
   // 路由跳转
   const routeMap = {
@@ -759,6 +761,11 @@ onUnmounted(() => {
   transition: all 0.2s;
   font-size: 14px;
   color: #4E5969;
+}
+
+.nav-menu-item--disabled {
+  cursor: not-allowed;
+  opacity: 0.5;
 }
 
 .nav-menu-item:hover {
