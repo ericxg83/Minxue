@@ -108,15 +108,29 @@
                 <div class="exam-card__name">{{ exam.name }}</div>
                 <div class="exam-card__date">{{ formatDate(exam.created_at) }}</div>
               </div>
-              <div class="exam-card__progress-row">
-                <span class="exam-card__progress-label">人工复核：</span>
-                <span class="exam-card__progress-value">{{ exam.manualReviewed || 0 }}/{{ exam.questionCount || 0 }}</span>
-              </div>
-              <div class="exam-card__progress-bar-wrapper">
-                <div class="exam-card__progress-bar-bg">
-                  <div class="exam-card__progress-bar-fill" :style="{ width: getExamProgressPercent(exam) + '%' }"></div>
+              <!-- AI批改进度 -->
+              <div class="exam-card__ai-progress">
+                <div class="exam-card__ai-label">AI批改：</div>
+                <div class="exam-card__ai-bar">
+                  <div class="exam-card__ai-bar-bg">
+                    <div
+                      class="exam-card__ai-bar-fill"
+                      :class="{ 'exam-card__ai-bar-fill--done': exam.aiProgressPercent === 100 }"
+                      :style="{ width: exam.aiProgressPercent + '%' }"
+                    ></div>
+                  </div>
+                  <span class="exam-card__ai-value">{{ exam.aiGradedCount }}/{{ exam.questionCount }}</span>
                 </div>
-                <span class="exam-card__progress-pct">{{ getExamProgressPercent(exam) }}%</span>
+              </div>
+              <!-- 人工复核进度 -->
+              <div class="exam-card__manual-progress">
+                <div class="exam-card__manual-label">人工复核：</div>
+                <div class="exam-card__manual-bar">
+                  <div class="exam-card__manual-bar-bg">
+                    <div class="exam-card__manual-bar-fill" :style="{ width: getExamProgressPercent(exam) + '%' }"></div>
+                  </div>
+                  <span class="exam-card__manual-value">{{ exam.manualReviewed || 0 }}/{{ exam.questionCount }}</span>
+                </div>
               </div>
             </div>
           </template>
@@ -449,7 +463,7 @@ const handleSelectStudent = async (student) => {
     // Load wrong questions for this student
     await reviewStore.loadWrongQuestions(student.id)
 
-    // Fetch exams
+    // Fetch exams with AI grading progress
     const exams = await getExamsByStudent(student.id, false)
 
     // Calculate manualReviewed per exam from wrong questions
@@ -462,24 +476,26 @@ const handleSelectStudent = async (student) => {
     })
 
     studentExams.value = (exams || []).map(exam => {
-      const qCount = exam.question_count || exam.questionCount || 0
-      // Count reviewed questions for this exam (by matching question_id with wrong questions of this exam)
-      const reviewedForThisExam = studentWQs.filter(wq => {
-        // Match by task_id if available, otherwise by content match
-        return wq.task_id === exam.id || (exam.id && wq.exam_id === exam.id)
-      }).filter(wq => reviewedIds.has(wq.question_id)).length
+      const qCount = exam.question_count || 0
+      const aiGraded = exam.ai_graded_count || 0
+
+      // Count manually reviewed questions for this exam
+      const reviewedForThisExam = studentWQs.filter(wq => reviewedIds.has(wq.question_id)).length
 
       return {
         ...exam,
         questionCount: qCount,
+        aiGradedCount: aiGraded,
         manualReviewed: reviewedForThisExam,
-        status: exam.status || 'ungraded'
+        status: exam.status || 'ungraded',
+        aiProgressPercent: qCount > 0 ? Math.round((aiGraded / qCount) * 100) : 0
       }
     })
 
     // Update student exam count
     student.examCount = studentExams.value.length
   } catch (e) {
+    console.error('Load exams failed:', e)
     studentExams.value = []
   }
 }
@@ -788,18 +804,92 @@ onUnmounted(() => {
 .exam-card:hover { box-shadow: 0 2px 8px rgba(22, 119, 255, 0.08); }
 .exam-card--active { background: #E8F3FF; box-shadow: 0 2px 8px rgba(22, 119, 255, 0.12); }
 
-.exam-card__header { margin-bottom: 8px; }
+.exam-card__header { margin-bottom: 10px; }
 .exam-card__name { font-size: 14px; font-weight: 500; color: #1D2129; }
 .exam-card__date { font-size: 12px; color: #86909C; margin-top: 2px; }
 
-.exam-card__progress-row { display: flex; align-items: center; gap: 4px; font-size: 12px; margin-bottom: 6px; }
-.exam-card__progress-label { color: #86909C; }
-.exam-card__progress-value { color: #1D2129; font-weight: 500; }
+/* AI批改进度 */
+.exam-card__ai-progress {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 8px;
+}
+.exam-card__ai-label {
+  font-size: 12px;
+  color: #52C41A;
+  font-weight: 500;
+  white-space: nowrap;
+}
+.exam-card__ai-bar {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex: 1;
+}
+.exam-card__ai-bar-bg {
+  flex: 1;
+  height: 6px;
+  background: #F2F3F5;
+  border-radius: 3px;
+  overflow: hidden;
+}
+.exam-card__ai-bar-fill {
+  height: 100%;
+  background: #FA8C16;
+  border-radius: 3px;
+  transition: width 0.3s ease;
+}
+.exam-card__ai-bar-fill--done {
+  background: #52C41A;
+}
+.exam-card__ai-value {
+  font-size: 12px;
+  color: #1D2129;
+  font-weight: 500;
+  white-space: nowrap;
+  min-width: 48px;
+  text-align: right;
+}
 
-.exam-card__progress-bar-wrapper { display: flex; align-items: center; gap: 8px; }
-.exam-card__progress-bar-bg { flex: 1; height: 6px; background: #F2F3F5; border-radius: 3px; overflow: hidden; }
-.exam-card__progress-bar-fill { height: 100%; background: #1677FF; border-radius: 3px; transition: width 0.3s ease; }
-.exam-card__progress-pct { font-size: 12px; color: #86909C; white-space: nowrap; }
+/* 人工复核进度 */
+.exam-card__manual-progress {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.exam-card__manual-label {
+  font-size: 12px;
+  color: #86909C;
+  white-space: nowrap;
+}
+.exam-card__manual-bar {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex: 1;
+}
+.exam-card__manual-bar-bg {
+  flex: 1;
+  height: 6px;
+  background: #F2F3F5;
+  border-radius: 3px;
+  overflow: hidden;
+}
+.exam-card__manual-bar-fill {
+  height: 100%;
+  background: #1677FF;
+  border-radius: 3px;
+  transition: width 0.3s ease;
+}
+.exam-card__manual-value {
+  font-size: 12px;
+  color: #1D2129;
+  font-weight: 500;
+  white-space: nowrap;
+  min-width: 48px;
+  text-align: right;
+}
 
 /* ===== Review Main（与成长中心 growth-main 一致的滚动布局） ===== */
 .review-main {
