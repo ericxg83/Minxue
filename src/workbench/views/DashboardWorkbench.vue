@@ -572,6 +572,8 @@
         <div class="crop-image-wrapper" ref="cropWrapperRef">
           <!-- 原试卷图片 - 始终渲染，确保 load/error 事件能触发 -->
           <img
+            v-if="cropImageUrl"
+            :key="cropImageUrl"
             ref="cropImageRef"
             :src="cropImageUrl"
             alt="原试卷"
@@ -850,10 +852,11 @@ const cropStartPos = ref(null)
 const cropPreviewUrl = ref('')
 const autoEnhance = ref(true) // 默认开启自动处理
 const processedImageUrl = ref('') // 自动处理后的图片URL（上传用）
-const cropImageLoading = ref(false) // 图片加载状态（初始false，避免空URL时永远loading）
+const cropImageLoading = ref(false) // 图片加载状态（初始false，避免组件初始渲染时卡住）
 const cropImageError = ref(false) // 图片加载失败状态
 const cropUploading = ref(false) // 裁剪上传状态
 const cropRetryCount = ref(0) // 重试次数
+let cropLoadingTimer = null // 加载超时定时器（防止代理服务器不响应时永远卡住）
 
 // 使用后端代理获取图片，避免 CORS 问题导致原试卷不显示
 const cropImageUrl = computed(() => {
@@ -1038,10 +1041,22 @@ const openCropDialog = () => {
   processedImageUrl.value = ''
 
   console.log('开始加载原试卷...')
+
+  // 安全检查：如果图片已经缓存完成，@load不会触发，需要手动结束loading
+  ensureLoadingEnds()
+
+  // 10秒超时保护：防止代理服务器不响应时永远卡住
+  clearTimeout(cropLoadingTimer)
+  cropLoadingTimer = setTimeout(() => {
+    console.warn('[Timeout] 图片加载超时10秒，强制结束loading')
+    cropImageLoading.value = false
+    cropImageError.value = true
+  }, 10000)
 }
 
 // 图片加载成功
 const handleImageLoad = () => {
+  clearTimeout(cropLoadingTimer)
   console.log('========== [Step 4] 图片加载成功 ==========')
   const img = cropImageRef.value
   if (img) {
@@ -1055,15 +1070,26 @@ const handleImageLoad = () => {
 
 // 图片加载失败
 const handleImageError = () => {
+  clearTimeout(cropLoadingTimer)
   console.log('========== [Step 4] 图片加载失败 ==========')
   console.error('失败URL:', cropImageUrl.value)
-
-  // 尝试直接请求代理URL查看返回状态
   const proxyUrl = cropImageUrl.value
   console.log('代理URL:', proxyUrl)
-
   cropImageLoading.value = false
   cropImageError.value = true
+}
+
+// 安全机制：确保在下次DOM更新后，如果cropImageLoading仍为true则强制结束
+// 防止因浏览器缓存或事件丢失导致的永久loading
+const ensureLoadingEnds = () => {
+  setTimeout(() => {
+    const img = cropImageRef.value
+    if (cropImageLoading.value && img && img.complete && img.naturalWidth > 0) {
+      console.warn('[Safety] 图片已加载但loading状态未清除，强制结束')
+      cropImageLoading.value = false
+      cropImageError.value = false
+    }
+  }, 500)
 }
 
 // 开始裁剪
@@ -1234,10 +1260,13 @@ const cropWithDomElement = (x, y, w, h) => {
 
 // 取消裁剪
 const cancelCrop = () => {
+  clearTimeout(cropLoadingTimer)
   cropDialogVisible.value = false
   cropRect.value = null
   cropPreviewUrl.value = ''
   processedImageUrl.value = ''
+  cropImageLoading.value = false
+  cropImageError.value = false
 }
 
 // 确认截取并上传
