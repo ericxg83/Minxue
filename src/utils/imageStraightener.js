@@ -5,9 +5,51 @@
  */
 
 /**
- * 加载图像
+ * 加载图像（支持跨域代理）
  */
-function loadImage(src) {
+async function loadImage(src) {
+  // If it's a data URL or blob URL, load directly
+  if (src.startsWith('data:') || src.startsWith('blob:')) {
+    return new Promise((resolve, reject) => {
+      const img = new Image()
+      img.onload = () => resolve(img)
+      img.onerror = reject
+      img.src = src
+    })
+  }
+  
+  // For HTTP URLs, try to fetch via proxy to avoid canvas tainting
+  let blob = null
+  
+  // Try 1: Backend API proxy
+  try {
+    const proxyUrl = `/api/proxy-image?url=${encodeURIComponent(src)}`
+    const response = await fetch(proxyUrl)
+    if (response.ok) blob = await response.blob()
+  } catch {}
+  
+  // Try 2: Direct no-cors fetch
+  if (!blob || blob.size === 0) {
+    try {
+      const response = await fetch(src, { mode: 'no-cors' })
+      blob = await response.blob()
+      if (blob.size === 0) blob = null
+    } catch {}
+  }
+  
+  if (blob) {
+    const blobUrl = URL.createObjectURL(blob)
+    const img = await new Promise((resolve, reject) => {
+      const img = new Image()
+      img.onload = () => resolve(img)
+      img.onerror = reject
+      img.src = blobUrl
+    })
+    URL.revokeObjectURL(blobUrl)
+    return img
+  }
+  
+  // Last resort: load directly (canvas will be tainted)
   return new Promise((resolve, reject) => {
     const img = new Image()
     img.onload = () => resolve(img)

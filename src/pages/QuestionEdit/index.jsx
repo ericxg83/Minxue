@@ -194,7 +194,7 @@ export default function QuestionEdit({ questionId, onClose, onSave }) {
       } else {
         const targetQuestionId = cropQuestionId || questionId
         
-        await processAndBindCroppedImage(
+        const result = await processAndBindCroppedImage(
           { dataUrl, questionId: targetQuestionId, isStraightened },
           (progress, message) => {
             Toast.show({
@@ -205,15 +205,14 @@ export default function QuestionEdit({ questionId, onClose, onSave }) {
           }
         )
         
-        const uploadedUrl = dataUrl
-        
-        setDisplayImageUrl(uploadedUrl)
+        // 使用 processAndBindCroppedImage 返回的真实上传URL
+        setDisplayImageUrl(result.imageUrl)
         setImageRemoved(false)
         setShowCrop(false)
         setCropImageSrc('')
         Toast.show({ 
           icon: 'success', 
-          content: isStraightened ? '已拉直并上传配图' : '配图上传成功' 
+          content: result.isStraightened ? '已拉直并上传配图' : '配图上传成功' 
         })
       }
     } catch (error) {
