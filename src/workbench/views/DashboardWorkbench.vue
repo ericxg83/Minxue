@@ -1137,16 +1137,22 @@ const handleCropMove = (e) => {
 
 // 处理裁剪结束（绑定到 document）
 const handleCropEnd = () => {
+  console.log('========== [Step 5] 裁剪结束 ==========')
+  console.log('  - isCropping:', isCropping.value)
+  console.log('  - cropRect:', cropRect.value)
+
   // 移除 document 上的事件监听
   document.removeEventListener('mousemove', handleCropMove)
   document.removeEventListener('mouseup', handleCropEnd)
-  
+
   if (!isCropping.value || !cropRect.value || cropRect.value.width < 5 || cropRect.value.height < 5) {
+    console.warn('裁剪区域太小或未定义，不生成预览')
     isCropping.value = false
     cropRect.value = null
     return
   }
   isCropping.value = false
+  console.log('开始生成裁剪预览...')
   generateCropPreview()
 }
 
@@ -1162,14 +1168,25 @@ const endCrop = () => {
 
 // 生成裁剪预览
 const generateCropPreview = async () => {
-  if (!cropImageRef.value || !cropRect.value) return
+  if (!cropImageRef.value || !cropRect.value) {
+    console.error('generateCropPreview: 缺少 cropImageRef 或 cropRect')
+    return
+  }
 
   const img = cropImageRef.value
   const rect = cropRect.value
 
+  console.log('[generateCropPreview] 图片信息:')
+  console.log('  - img.src:', img.src)
+  console.log('  - img.naturalWidth:', img.naturalWidth, 'x', img.naturalHeight)
+  console.log('  - img.clientWidth:', img.clientWidth, 'x', img.clientHeight)
+  console.log('[generateCropPreview] 裁剪区域:', rect)
+
   // 计算缩放比例（实际图片尺寸 vs 显示尺寸）
   const scaleX = img.naturalWidth / img.clientWidth
   const scaleY = img.naturalHeight / img.clientHeight
+
+  console.log('[generateCropPreview] 缩放比例: scaleX=', scaleX, 'scaleY=', scaleY)
 
   // 计算实际裁剪区域
   const actualX = rect.x * scaleX
@@ -1177,31 +1194,40 @@ const generateCropPreview = async () => {
   const actualW = rect.width * scaleX
   const actualH = rect.height * scaleY
 
+  console.log('[generateCropPreview] 实际裁剪区域:', { actualX, actualY, actualW, actualH })
+
   // 使用 fetch 下载图片后裁剪（避免 OSS 跨域导致 canvas 污染）
   await cropImageWithFetch(img.src, actualX, actualY, actualW, actualH)
 }
 
 // 通过 fetch 下载图片后再裁剪（使用后端代理绕过 OSS CORS 限制）
 const cropImageWithFetch = async (imgSrc, x, y, w, h) => {
+  console.log('[cropImageWithFetch] 开始代理下载:', imgSrc)
   try {
     // 使用后端代理下载图片（同源，无 CORS 问题）
     const proxyUrl = `${import.meta.env.VITE_API_BASE_URL || 'http://localhost:4000'}/api/proxy-image?url=${encodeURIComponent(imgSrc)}`
+    console.log('[cropImageWithFetch] 代理URL:', proxyUrl)
     const response = await fetch(proxyUrl)
+    console.log('[cropImageWithFetch] 响应状态:', response.status)
     if (!response.ok) throw new Error('HTTP ' + response.status)
     const blob = await response.blob()
+    console.log('[cropImageWithFetch] Blob大小:', blob.size, 'bytes')
     const blobUrl = URL.createObjectURL(blob)
 
     const img = new Image()
     img.onload = async () => {
+      console.log('[cropImageWithFetch] 代理图片加载成功')
       const canvas = document.createElement('canvas')
       canvas.width = Math.round(w)
       canvas.height = Math.round(h)
       const ctx = canvas.getContext('2d')
       ctx.drawImage(img, x, y, w, h, 0, 0, canvas.width, canvas.height)
+      console.log('[cropImageWithFetch] 绘制canvas完成:', canvas.width, 'x', canvas.height)
 
       // 生成预览
       try {
         cropPreviewUrl.value = canvas.toDataURL('image/jpeg', 0.92)
+        console.log('[cropImageWithFetch] 预览生成成功, length:', cropPreviewUrl.value.length)
       } catch (e) {
         console.error('代理方案 canvas 导出失败:', e)
         cropPreviewUrl.value = ''
@@ -1210,7 +1236,10 @@ const cropImageWithFetch = async (imgSrc, x, y, w, h) => {
       // 异步处理增强
       if (autoEnhance.value && cropPreviewUrl.value) {
         processExamImage(canvas, { autoEnhance: true, padding: 10 })
-          .then(url => { processedImageUrl.value = url })
+          .then(url => {
+            console.log('[cropImageWithFetch] 自动处理完成')
+            processedImageUrl.value = url
+          })
           .catch(() => { processedImageUrl.value = '' })
       } else {
         processedImageUrl.value = ''
@@ -1220,23 +1249,25 @@ const cropImageWithFetch = async (imgSrc, x, y, w, h) => {
     }
 
     img.onerror = () => {
-      console.error('代理图片加载失败')
+      console.error('代理图片加载失败，回退到DOM元素裁剪')
       URL.revokeObjectURL(blobUrl)
       cropWithDomElement(x, y, w, h)
     }
 
     img.src = blobUrl
   } catch (e) {
-    console.error('代理下载失败，使用 DOM 元素:', e)
+    console.error('代理下载失败，使用 DOM 元素裁剪:', e)
     cropWithDomElement(x, y, w, h)
   }
 }
 
 // 使用 DOM 中的 img 元素裁剪（当 fetch 失败时的降级方案）
 const cropWithDomElement = (x, y, w, h) => {
+  console.log('[cropWithDomElement] 开始降级裁剪, 区域:', { x, y, w, h })
   try {
     const domImg = cropImageRef.value
     if (!domImg) {
+      console.error('[cropWithDomElement] cropImageRef 为空')
       cropPreviewUrl.value = ''
       return
     }
@@ -1247,6 +1278,7 @@ const cropWithDomElement = (x, y, w, h) => {
     ctx.drawImage(domImg, x, y, w, h, 0, 0, canvas.width, canvas.height)
     try {
       cropPreviewUrl.value = canvas.toDataURL('image/jpeg', 0.92)
+      console.log('[cropWithDomElement] 预览生成成功, length:', cropPreviewUrl.value.length)
       processedImageUrl.value = ''
     } catch (e) {
       console.error('DOM canvas 被跨域污染，无法导出:', e)
