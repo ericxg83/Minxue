@@ -858,9 +858,26 @@ const cropRetryCount = ref(0) // 重试次数
 // 使用后端代理获取图片，避免 CORS 问题导致原试卷不显示
 const cropImageUrl = computed(() => {
   const rawUrl = selectedExam.value?.thumbnail || selectedExam.value?.raw_task?.image_url
-  if (!rawUrl) return ''
+  
+  console.log('[Step 2] cropImageUrl computed:')
+  console.log('  - selectedExam:', selectedExam.value)
+  console.log('  - thumbnail:', selectedExam.value?.thumbnail)
+  console.log('  - raw_task:', selectedExam.value?.raw_task)
+  console.log('  - raw_task.image_url:', selectedExam.value?.raw_task?.image_url)
+  console.log('  - 最终rawUrl:', rawUrl)
+  
+  if (!rawUrl) {
+    console.error('[Step 3] 原试卷URL为空! 检查 selectedExam 数据')
+    // URL为空时也要结束loading状态，显示错误
+    cropImageLoading.value = false
+    cropImageError.value = true
+    return ''
+  }
+  
   const apiBase = import.meta.env.VITE_API_BASE_URL || 'http://localhost:4000'
-  return `${apiBase}/api/proxy-image?url=${encodeURIComponent(rawUrl)}`
+  const proxyUrl = `${apiBase}/api/proxy-image?url=${encodeURIComponent(rawUrl)}`
+  console.log('[Step 2] 代理URL:', proxyUrl)
+  return proxyUrl
 })
 
 // 图片加载成功
@@ -996,11 +1013,70 @@ const handleDeleteImage = () => {
 
 // 打开截图对话框
 const openCropDialog = () => {
+  const q = currentQuestion.value
+  const exam = selectedExam.value
+
+  console.log('========== [Step 1] 打开弹窗 ==========')
+  console.log('题目数据:', q)
+  console.log('试卷数据:', exam)
+
+  // 检查原试卷URL来源
+  const thumbUrl = exam?.thumbnail
+  const rawTaskUrl = exam?.raw_task?.image_url
+  const rawUrl = thumbUrl || rawTaskUrl
+
+  console.log('thumbnail:', thumbUrl)
+  console.log('raw_task.image_url:', rawTaskUrl)
+  console.log('最终使用URL:', rawUrl)
+
+  if (!rawUrl) {
+    console.error('【错误】原试卷URL为空!')
+    ElMessage.error('未找到原试卷图片')
+    return
+  }
+
+  // 构建代理URL
+  const apiBase = import.meta.env.VITE_API_BASE_URL || 'http://localhost:4000'
+  const proxyUrl = `${apiBase}/api/proxy-image?url=${encodeURIComponent(rawUrl)}`
+  console.log('代理URL:', proxyUrl)
+
   cropDialogVisible.value = true
   cropRect.value = null
   cropPreviewUrl.value = ''
   isCropping.value = false
   cropStartPos.value = null
+  cropImageLoading.value = true
+  cropImageError.value = false
+  cropRetryCount.value = 0
+  processedImageUrl.value = ''
+
+  console.log('开始加载原试卷...')
+}
+
+// 图片加载成功
+const handleImageLoad = () => {
+  console.log('========== [Step 4] 图片加载成功 ==========')
+  const img = cropImageRef.value
+  if (img) {
+    console.log('图片实际尺寸:', img.naturalWidth, 'x', img.naturalHeight)
+    console.log('图片显示尺寸:', img.clientWidth, 'x', img.clientHeight)
+  }
+  cropImageLoading.value = false
+  cropImageError.value = false
+  cropRetryCount.value = 0
+}
+
+// 图片加载失败
+const handleImageError = () => {
+  console.log('========== [Step 4] 图片加载失败 ==========')
+  console.error('失败URL:', cropImageUrl.value)
+
+  // 尝试直接请求代理URL查看返回状态
+  const proxyUrl = cropImageUrl.value
+  console.log('代理URL:', proxyUrl)
+
+  cropImageLoading.value = false
+  cropImageError.value = true
 }
 
 // 开始裁剪
