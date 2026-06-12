@@ -570,20 +570,8 @@
     >
       <div class="crop-container">
         <div class="crop-image-wrapper" ref="cropWrapperRef">
-          <!-- 加载中状态 -->
-          <div v-if="cropImageLoading" class="crop-image-loading">
-            <el-icon class="is-loading" :size="32"><Loading /></el-icon>
-            <span>原试卷加载中...</span>
-          </div>
-          <!-- 加载失败状态 -->
-          <div v-else-if="cropImageError" class="crop-image-error">
-            <el-icon :size="48" color="#C9CDD4"><Warning /></el-icon>
-            <span>图片加载失败</span>
-            <el-button size="small" @click="retryLoadImage">重试</el-button>
-          </div>
-          <!-- 原试卷图片 -->
+          <!-- 原试卷图片 - 始终渲染，确保 load/error 事件能触发 -->
           <img
-            v-else
             ref="cropImageRef"
             :src="cropImageUrl"
             alt="原试卷"
@@ -592,7 +580,19 @@
             @mousedown="startCrop"
             @load="handleImageLoad"
             @error="handleImageError"
+            :style="{ opacity: cropImageLoading ? 0 : 1, pointerEvents: cropImageLoading ? 'none' : 'auto' }"
           />
+          <!-- 加载中覆盖层 -->
+          <div v-if="cropImageLoading" class="crop-image-overlay">
+            <el-icon class="is-loading" :size="32"><Loading /></el-icon>
+            <span>原试卷加载中...</span>
+          </div>
+          <!-- 加载失败覆盖层 -->
+          <div v-else-if="cropImageError" class="crop-image-overlay">
+            <el-icon :size="48" color="#C9CDD4"><Warning /></el-icon>
+            <span>图片加载失败</span>
+            <el-button size="small" @click="retryLoadImage">重试</el-button>
+          </div>
           <!-- 裁剪框 -->
           <div
             v-if="isCropping || cropRect"
@@ -850,20 +850,21 @@ const cropStartPos = ref(null)
 const cropPreviewUrl = ref('')
 const autoEnhance = ref(true) // 默认开启自动处理
 const processedImageUrl = ref('') // 自动处理后的图片URL（上传用）
-const cropImageLoading = ref(true) // 图片加载状态
+const cropImageLoading = ref(false) // 图片加载状态（初始false，避免空URL时永远loading）
 const cropImageError = ref(false) // 图片加载失败状态
 const cropUploading = ref(false) // 裁剪上传状态
 const cropRetryCount = ref(0) // 重试次数
 
 // 使用后端代理获取图片，避免 CORS 问题导致原试卷不显示
 const cropImageUrl = computed(() => {
-  const rawUrl = selectedExam.value?.thumbnail || selectedExam.value?.raw_task?.image_url
+  const exam = selectedExam.value
+  const rawUrl = exam?.thumbnail || exam?.raw_task?.image_url
   
   console.log('[Step 2] cropImageUrl computed:')
-  console.log('  - selectedExam:', selectedExam.value)
-  console.log('  - thumbnail:', selectedExam.value?.thumbnail)
-  console.log('  - raw_task:', selectedExam.value?.raw_task)
-  console.log('  - raw_task.image_url:', selectedExam.value?.raw_task?.image_url)
+  console.log('  - selectedExam:', exam)
+  console.log('  - selectedExam.thumbnail:', exam?.thumbnail)
+  console.log('  - selectedExam.raw_task:', exam?.raw_task)
+  console.log('  - selectedExam.raw_task?.image_url:', exam?.raw_task?.image_url)
   console.log('  - 最终rawUrl:', rawUrl)
   
   if (!rawUrl) {
@@ -879,20 +880,6 @@ const cropImageUrl = computed(() => {
   console.log('[Step 2] 代理URL:', proxyUrl)
   return proxyUrl
 })
-
-// 图片加载成功
-const handleImageLoad = () => {
-  cropImageLoading.value = false
-  cropImageError.value = false
-  cropRetryCount.value = 0
-}
-
-// 图片加载失败
-const handleImageError = () => {
-  cropImageLoading.value = false
-  cropImageError.value = true
-  console.error('原试卷图片加载失败:', cropImageUrl.value)
-}
 
 // 重试加载图片
 const retryLoadImage = () => {
@@ -1255,7 +1242,16 @@ const cancelCrop = () => {
 
 // 确认截取并上传
 const confirmCrop = async () => {
-  if (!cropPreviewUrl.value || !currentQuestion.value?.id || cropUploading.value) return
+  console.log('========== [Step 5] 点击确认裁剪 ==========')
+
+  if (!cropPreviewUrl.value || !currentQuestion.value?.id) {
+    console.warn('[Step 5] 阻止上传: cropPreviewUrl=', cropPreviewUrl.value, 'questionId=', currentQuestion.value?.id)
+    return
+  }
+  if (cropUploading.value) {
+    console.warn('[Step 5] 正在上传中，忽略重复点击')
+    return
+  }
 
   cropUploading.value = true
 
@@ -1263,6 +1259,12 @@ const confirmCrop = async () => {
     // 优先使用处理后的图片，否则使用原始裁剪图片
     const sourceUrl = processedImageUrl.value || cropPreviewUrl.value
     const isProcessed = !!processedImageUrl.value
+
+    console.log('[Step 5] 裁剪数据:')
+    console.log('  - cropRect:', cropRect.value)
+    console.log('  - autoEnhance:', autoEnhance.value)
+    console.log('  - isProcessed:', isProcessed)
+    console.log('  - sourceUrl length:', sourceUrl?.length)
 
     // 将 base64 转为 Blob
     const base64Data = sourceUrl.split(',')[1]
@@ -1277,9 +1279,13 @@ const confirmCrop = async () => {
     const fileName = isProcessed ? 'cropped_processed.png' : 'cropped.jpg'
     const file = new File([blob], fileName, { type: mimeType })
 
+    console.log('[Step 5] 生成Blob成功, size:', blob.size, 'bytes')
+
     // 上传截图
     const formData = new FormData()
     formData.append('files', file)
+
+    console.log('[Step 5] 开始上传到 /api/upload ...')
 
     const response = await fetch(`${import.meta.env.VITE_API_BASE_URL || 'http://localhost:4000'}/api/upload`, {
       method: 'POST',
@@ -1287,13 +1293,18 @@ const confirmCrop = async () => {
     })
 
     if (!response.ok) {
-      throw new Error('上传失败')
+      console.error('[Step 5] 上传失败, status:', response.status)
+      throw new Error('上传失败 HTTP ' + response.status)
     }
 
     const result = await response.json()
+    console.log('[Step 5] 上传成功, response:', result)
+
     const q = currentQuestion.value
     q.geometry_image_url = result.url
     localImageUrl.value = result.url
+
+    console.log('[Step 5] 更新错题配图成功:', result.url)
 
     cropDialogVisible.value = false
     cropPreviewUrl.value = ''
@@ -2062,6 +2073,23 @@ onUnmounted(() => {
   border: 1px solid #E5E6EB;
   margin: 0 auto;
   overflow: hidden;
+  min-height: 200px;
+}
+.crop-image-overlay {
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 12px;
+  background: #F7F8FA;
+  z-index: 20;
+  color: #86909C;
+  font-size: 14px;
 }
 .crop-source-image {
   display: block;
