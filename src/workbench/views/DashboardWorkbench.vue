@@ -570,16 +570,28 @@
     >
       <div class="crop-container">
         <div class="crop-image-wrapper" ref="cropWrapperRef">
+          <!-- 加载中状态 -->
+          <div v-if="cropImageLoading" class="crop-image-loading">
+            <el-icon class="is-loading" :size="32"><Loading /></el-icon>
+            <span>原试卷加载中...</span>
+          </div>
+          <!-- 加载失败状态 -->
+          <div v-else-if="cropImageError" class="crop-image-error">
+            <el-icon :size="48" color="#C9CDD4"><Warning /></el-icon>
+            <span>图片加载失败</span>
+            <el-button size="small" @click="retryLoadImage">重试</el-button>
+          </div>
+          <!-- 原试卷图片 -->
           <img
+            v-else
             ref="cropImageRef"
-            :src="selectedExam?.thumbnail || selectedExam?.raw_task?.image_url"
+            :src="cropImageUrl"
             alt="原试卷"
             class="crop-source-image"
             draggable="false"
             @mousedown="startCrop"
-            @mousemove="moveCrop"
-            @mouseup="endCrop"
-            @mouseleave="endCrop"
+            @load="handleImageLoad"
+            @error="handleImageError"
           />
           <!-- 裁剪框 -->
           <div
@@ -605,16 +617,23 @@
       </div>
       <template #footer>
         <div class="crop-dialog__footer">
-          <span class="crop-hint">在原试卷图片上拖拽框选要截取的题目区域</span>
+          <div class="crop-dialog__footer-left">
+            <span class="crop-hint">在原试卷图片上拖拽框选要截取的题目区域</span>
+            <label class="auto-enhance-checkbox">
+              <input type="checkbox" v-model="autoEnhance" />
+              <span class="checkbox-text">自动处理（去脏边、白底化、增强）</span>
+            </label>
+          </div>
           <div>
             <el-button @click="cancelCrop">取消</el-button>
             <el-button
               type="primary"
-              :disabled="!cropPreviewUrl"
+              :disabled="!cropPreviewUrl || cropUploading"
+              :loading="cropUploading"
               @click="confirmCrop"
             >
-              <el-icon><Crop /></el-icon>
-              确认截取并上传
+              <el-icon v-if="!cropUploading"><Crop /></el-icon>
+              {{ cropUploading ? '上传中...' : '确认截取并上传' }}
             </el-button>
           </div>
         </div>
@@ -629,13 +648,14 @@ import { useRouter } from 'vue-router'
 import { useReviewStore } from '../stores/reviewStore'
 import { useLifecycleStore, LIFECYCLE_STATUS } from '../stores/lifecycleStore'
 import { getExamsByStudent, updateQuestion, clearStudentCaches } from '../../services/apiService'
+import { processExamImage } from '../../utils/imageProcessor'
 import { ElMessage, ElLoading } from 'element-plus'
 import {
   Bell, QuestionFilled, ArrowDown, ArrowLeft, ArrowRight, Menu,
   Picture, ZoomIn, ZoomOut, RefreshLeft, Refresh,
   CircleCheckFilled, CircleCloseFilled, RemoveFilled, DocumentChecked,
   Search, Filter, CircleCheck, SuccessFilled, Lightning, EditPen, Plus, Warning,
-  Upload, Delete, Crop
+  Upload, Delete, Crop, Loading
 } from '@element-plus/icons-vue'
 import dayjs from 'dayjs'
 
@@ -828,6 +848,53 @@ const isCropping = ref(false)
 const cropRect = ref(null)
 const cropStartPos = ref(null)
 const cropPreviewUrl = ref('')
+const autoEnhance = ref(true) // 默认开启自动处理
+const processedImageUrl = ref('') // 自动处理后的图片URL（上传用）
+const cropImageLoading = ref(true) // 图片加载状态
+const cropImageError = ref(false) // 图片加载失败状态
+const cropUploading = ref(false) // 裁剪上传状态
+const cropRetryCount = ref(0) // 重试次数
+
+// 使用后端代理获取图片，避免 CORS 问题导致原试卷不显示
+const cropImageUrl = computed(() => {
+  const rawUrl = selectedExam.value?.thumbnail || selectedExam.value?.raw_task?.image_url
+  if (!rawUrl) return ''
+  const apiBase = import.meta.env.VITE_API_BASE_URL || 'http://localhost:4000'
+  return `${apiBase}/api/proxy-image?url=${encodeURIComponent(rawUrl)}`
+})
+
+// 图片加载成功
+const handleImageLoad = () => {
+  cropImageLoading.value = false
+  cropImageError.value = false
+  cropRetryCount.value = 0
+}
+
+// 图片加载失败
+const handleImageError = () => {
+  cropImageLoading.value = false
+  cropImageError.value = true
+  console.error('原试卷图片加载失败:', cropImageUrl.value)
+}
+
+// 重试加载图片
+const retryLoadImage = () => {
+  if (cropRetryCount.value >= 3) {
+    ElMessage.error('图片加载失败，请检查网络连接或联系管理员')
+    return
+  }
+  cropRetryCount.value++
+  cropImageError.value = false
+  cropImageLoading.value = true
+  // 通过重新设置 src 触发重新加载
+  const img = cropImageRef.value
+  if (img) {
+    img.src = ''
+    setTimeout(() => {
+      img.src = cropImageUrl.value
+    }, 100)
+  }
+}
 
 const toggleTag = (tag) => {
   const idx = ocrData.value.knowledgePoints.indexOf(tag)
@@ -892,9 +959,9 @@ const handleImageUpload = async (file) => {
   try {
     // 使用 fetch 直接上传图片
     const formData = new FormData()
-    formData.append('image', file)
+    formData.append('files', file)
     
-    const response = await fetch(`${import.meta.env.VITE_API_BASE_URL || 'http://localhost:3001'}/api/upload-image`, {
+    const response = await fetch(`${import.meta.env.VITE_API_BASE_URL || 'http://localhost:4000'}/api/upload`, {
       method: 'POST',
       body: formData
     })
@@ -940,12 +1007,11 @@ const openCropDialog = () => {
 const startCrop = (e) => {
   if (!cropImageRef.value) return
   e.preventDefault()
-  // 使用 wrapper 的边界作为参考坐标系（裁剪框定位在 wrapper 内）
-  const wrapperRect = cropWrapperRef.value.getBoundingClientRect()
+  const imgRect = cropImageRef.value.getBoundingClientRect()
   isCropping.value = true
   cropStartPos.value = {
-    x: e.clientX - wrapperRect.left,
-    y: e.clientY - wrapperRect.top
+    x: e.clientX - imgRect.left,
+    y: e.clientY - imgRect.top
   }
   cropRect.value = {
     x: cropStartPos.value.x,
@@ -954,18 +1020,21 @@ const startCrop = (e) => {
     height: 0
   }
   cropPreviewUrl.value = ''
+  
+  // 在 document 上监听移动和释放事件，防止鼠标移出图片区域后丢失
+  document.addEventListener('mousemove', handleCropMove)
+  document.addEventListener('mouseup', handleCropEnd)
 }
 
-// 移动裁剪框
-const moveCrop = (e) => {
-  if (!isCropping.value || !cropWrapperRef.value) return
+// 处理裁剪移动（绑定到 document）
+const handleCropMove = (e) => {
+  if (!isCropping.value || !cropImageRef.value) return
   e.preventDefault()
-  const wrapperRect = cropWrapperRef.value.getBoundingClientRect()
-  // 使用 wrapper 尺寸作为裁剪区域边界
-  const wrapperWidth = cropWrapperRef.value.offsetWidth
-  const wrapperHeight = cropWrapperRef.value.offsetHeight
-  const curX = Math.min(Math.max(e.clientX - wrapperRect.left, 0), wrapperWidth)
-  const curY = Math.min(Math.max(e.clientY - wrapperRect.top, 0), wrapperHeight)
+  const imgRect = cropImageRef.value.getBoundingClientRect()
+  const imgWidth = cropImageRef.value.clientWidth
+  const imgHeight = cropImageRef.value.clientHeight
+  const curX = Math.min(Math.max(e.clientX - imgRect.left, 0), imgWidth)
+  const curY = Math.min(Math.max(e.clientY - imgRect.top, 0), imgHeight)
   const startX = cropStartPos.value?.x || 0
   const startY = cropStartPos.value?.y || 0
 
@@ -977,8 +1046,12 @@ const moveCrop = (e) => {
   cropRect.value = { x, y, width, height }
 }
 
-// 结束裁剪
-const endCrop = () => {
+// 处理裁剪结束（绑定到 document）
+const handleCropEnd = () => {
+  // 移除 document 上的事件监听
+  document.removeEventListener('mousemove', handleCropMove)
+  document.removeEventListener('mouseup', handleCropEnd)
+  
   if (!isCropping.value || !cropRect.value || cropRect.value.width < 5 || cropRect.value.height < 5) {
     isCropping.value = false
     cropRect.value = null
@@ -988,51 +1061,112 @@ const endCrop = () => {
   generateCropPreview()
 }
 
+// 移动裁剪框（保留用于图片上的事件，但主要逻辑在 handleCropMove）
+const moveCrop = (e) => {
+  handleCropMove(e)
+}
+
+// 结束裁剪（保留用于图片上的事件，但主要逻辑在 handleCropEnd）
+const endCrop = () => {
+  handleCropEnd()
+}
+
 // 生成裁剪预览
-const generateCropPreview = () => {
-  if (!cropImageRef.value || !cropRect.value || !cropWrapperRef.value) return
+const generateCropPreview = async () => {
+  if (!cropImageRef.value || !cropRect.value) return
 
   const img = cropImageRef.value
   const rect = cropRect.value
 
-  // 计算图片在 wrapper 中的实际渲染位置
-  const imgRect = img.getBoundingClientRect()
-  const wrapRect = cropWrapperRef.value.getBoundingClientRect()
-  // 图片相对于 wrapper 的偏移（考虑 padding/margin）
-  const imgOffsetX = imgRect.left - wrapRect.left
-  const imgOffsetY = imgRect.top - wrapRect.top
-  const imgDisplayW = img.clientWidth
-  const imgDisplayH = img.clientHeight
-
-  // 裁剪区域相对于图片的坐标
-  const cropRelX = Math.max(0, rect.x - imgOffsetX)
-  const cropRelY = Math.max(0, rect.y - imgOffsetY)
-  const cropRelW = Math.min(rect.width, imgDisplayW - cropRelX)
-  const cropRelH = Math.min(rect.height, imgDisplayH - cropRelY)
-
-  if (cropRelW <= 0 || cropRelH <= 0) {
-    cropPreviewUrl.value = ''
-    return
-  }
-
   // 计算缩放比例（实际图片尺寸 vs 显示尺寸）
-  const scaleX = img.naturalWidth / imgDisplayW
-  const scaleY = img.naturalHeight / imgDisplayH
+  const scaleX = img.naturalWidth / img.clientWidth
+  const scaleY = img.naturalHeight / img.clientHeight
 
   // 计算实际裁剪区域
-  const actualX = cropRelX * scaleX
-  const actualY = cropRelY * scaleY
-  const actualW = cropRelW * scaleX
-  const actualH = cropRelH * scaleY
+  const actualX = rect.x * scaleX
+  const actualY = rect.y * scaleY
+  const actualW = rect.width * scaleX
+  const actualH = rect.height * scaleY
 
-  // 使用 canvas 生成裁剪图
-  const canvas = document.createElement('canvas')
-  canvas.width = Math.round(actualW)
-  canvas.height = Math.round(actualH)
-  const ctx = canvas.getContext('2d')
-  ctx.drawImage(img, actualX, actualY, actualW, actualH, 0, 0, canvas.width, canvas.height)
+  // 使用 fetch 下载图片后裁剪（避免 OSS 跨域导致 canvas 污染）
+  await cropImageWithFetch(img.src, actualX, actualY, actualW, actualH)
+}
 
-  cropPreviewUrl.value = canvas.toDataURL('image/jpeg', 0.92)
+// 通过 fetch 下载图片后再裁剪（使用后端代理绕过 OSS CORS 限制）
+const cropImageWithFetch = async (imgSrc, x, y, w, h) => {
+  try {
+    // 使用后端代理下载图片（同源，无 CORS 问题）
+    const proxyUrl = `${import.meta.env.VITE_API_BASE_URL || 'http://localhost:4000'}/api/proxy-image?url=${encodeURIComponent(imgSrc)}`
+    const response = await fetch(proxyUrl)
+    if (!response.ok) throw new Error('HTTP ' + response.status)
+    const blob = await response.blob()
+    const blobUrl = URL.createObjectURL(blob)
+
+    const img = new Image()
+    img.onload = async () => {
+      const canvas = document.createElement('canvas')
+      canvas.width = Math.round(w)
+      canvas.height = Math.round(h)
+      const ctx = canvas.getContext('2d')
+      ctx.drawImage(img, x, y, w, h, 0, 0, canvas.width, canvas.height)
+
+      // 生成预览
+      try {
+        cropPreviewUrl.value = canvas.toDataURL('image/jpeg', 0.92)
+      } catch (e) {
+        console.error('代理方案 canvas 导出失败:', e)
+        cropPreviewUrl.value = ''
+      }
+
+      // 异步处理增强
+      if (autoEnhance.value && cropPreviewUrl.value) {
+        processExamImage(canvas, { autoEnhance: true, padding: 10 })
+          .then(url => { processedImageUrl.value = url })
+          .catch(() => { processedImageUrl.value = '' })
+      } else {
+        processedImageUrl.value = ''
+      }
+
+      URL.revokeObjectURL(blobUrl)
+    }
+
+    img.onerror = () => {
+      console.error('代理图片加载失败')
+      URL.revokeObjectURL(blobUrl)
+      cropWithDomElement(x, y, w, h)
+    }
+
+    img.src = blobUrl
+  } catch (e) {
+    console.error('代理下载失败，使用 DOM 元素:', e)
+    cropWithDomElement(x, y, w, h)
+  }
+}
+
+// 使用 DOM 中的 img 元素裁剪（当 fetch 失败时的降级方案）
+const cropWithDomElement = (x, y, w, h) => {
+  try {
+    const domImg = cropImageRef.value
+    if (!domImg) {
+      cropPreviewUrl.value = ''
+      return
+    }
+    const canvas = document.createElement('canvas')
+    canvas.width = Math.round(w)
+    canvas.height = Math.round(h)
+    const ctx = canvas.getContext('2d')
+    ctx.drawImage(domImg, x, y, w, h, 0, 0, canvas.width, canvas.height)
+    try {
+      cropPreviewUrl.value = canvas.toDataURL('image/jpeg', 0.92)
+      processedImageUrl.value = ''
+    } catch (e) {
+      console.error('DOM canvas 被跨域污染，无法导出:', e)
+      cropPreviewUrl.value = ''
+    }
+  } catch (e) {
+    console.error('DOM裁剪也失败了:', e)
+    cropPreviewUrl.value = ''
+  }
 }
 
 // 取消裁剪
@@ -1040,35 +1174,38 @@ const cancelCrop = () => {
   cropDialogVisible.value = false
   cropRect.value = null
   cropPreviewUrl.value = ''
+  processedImageUrl.value = ''
 }
 
 // 确认截取并上传
 const confirmCrop = async () => {
-  if (!cropPreviewUrl.value || !currentQuestion.value?.id) return
+  if (!cropPreviewUrl.value || !currentQuestion.value?.id || cropUploading.value) return
 
-  const loading = ElLoading.service({
-    lock: true,
-    text: '正在上传截取图片...',
-    background: 'rgba(0, 0, 0, 0.7)',
-  })
+  cropUploading.value = true
 
   try {
+    // 优先使用处理后的图片，否则使用原始裁剪图片
+    const sourceUrl = processedImageUrl.value || cropPreviewUrl.value
+    const isProcessed = !!processedImageUrl.value
+
     // 将 base64 转为 Blob
-    const base64Data = cropPreviewUrl.value.split(',')[1]
+    const base64Data = sourceUrl.split(',')[1]
     const byteCharacters = atob(base64Data)
     const byteNumbers = new Array(byteCharacters.length)
     for (let i = 0; i < byteCharacters.length; i++) {
       byteNumbers[i] = byteCharacters.charCodeAt(i)
     }
     const byteArray = new Uint8Array(byteNumbers)
-    const blob = new Blob([byteArray], { type: 'image/jpeg' })
-    const file = new File([blob], 'cropped.jpg', { type: 'image/jpeg' })
+    const mimeType = isProcessed ? 'image/png' : 'image/jpeg'
+    const blob = new Blob([byteArray], { type: mimeType })
+    const fileName = isProcessed ? 'cropped_processed.png' : 'cropped.jpg'
+    const file = new File([blob], fileName, { type: mimeType })
 
     // 上传截图
     const formData = new FormData()
-    formData.append('image', file)
+    formData.append('files', file)
 
-    const response = await fetch(`${import.meta.env.VITE_API_BASE_URL || 'http://localhost:3001'}/api/upload-image`, {
+    const response = await fetch(`${import.meta.env.VITE_API_BASE_URL || 'http://localhost:4000'}/api/upload`, {
       method: 'POST',
       body: formData
     })
@@ -1084,12 +1221,14 @@ const confirmCrop = async () => {
 
     cropDialogVisible.value = false
     cropPreviewUrl.value = ''
-    loading.close()
-    ElMessage.success('截图已成功上传为题目配图')
+    processedImageUrl.value = ''
+    const message = isProcessed ? '截图已自动处理并上传为题目配图' : '截图已成功上传为题目配图'
+    ElMessage.success(message)
   } catch (err) {
-    loading.close()
     console.error('截图上传失败:', err)
     ElMessage.error('截图上传失败，请重试')
+  } finally {
+    cropUploading.value = false
   }
 }
 
@@ -1171,6 +1310,24 @@ watch(currentQuestion, (newQ) => {
   }
   resetImageTransform()
 }, { immediate: true })
+
+// 监听自动处理开关变化，重新处理图片
+watch(autoEnhance, async (val) => {
+  if (val && cropRect.value && cropImageRef.value) {
+    // 开启自动处理时，重新处理当前裁剪区域
+    const img = cropImageRef.value
+    const rect = cropRect.value
+    const scaleX = img.naturalWidth / img.clientWidth
+    const scaleY = img.naturalHeight / img.clientHeight
+    const actualX = rect.x * scaleX
+    const actualY = rect.y * scaleY
+    const actualW = rect.width * scaleX
+    const actualH = rect.height * scaleY
+    await cropImageWithFetch(img.src, actualX, actualY, actualW, actualH)
+  } else if (!val) {
+    processedImageUrl.value = ''
+  }
+})
 
 const formatDate = (dateStr) => {
   if (!dateStr) return ''
@@ -1824,16 +1981,14 @@ onUnmounted(() => {
 }
 .crop-image-wrapper {
   position: relative;
-  width: fit-content;
-  max-width: 100%;
+  display: inline-block;
   border-radius: 8px;
   border: 1px solid #E5E6EB;
   margin: 0 auto;
+  overflow: hidden;
 }
 .crop-source-image {
   display: block;
-  width: auto;
-  height: auto;
   max-width: 100%;
   max-height: 55vh;
   object-fit: contain;
@@ -1892,6 +2047,28 @@ onUnmounted(() => {
   padding: 12px 20px;
   border-top: 1px solid #F2F3F5;
   background: #F9FAFB;
+}
+.crop-dialog__footer-left {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.auto-enhance-checkbox {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  cursor: pointer;
+  user-select: none;
+}
+.auto-enhance-checkbox input[type="checkbox"] {
+  cursor: pointer;
+  accent-color: #1677FF;
+  width: 16px;
+  height: 16px;
+}
+.checkbox-text {
+  font-size: 12px;
+  color: #4E5969;
 }
 .crop-hint {
   font-size: 13px;
