@@ -11,7 +11,7 @@ import sharp from 'sharp'
 import { TABLES, TASK_STATUS } from './config/neon.js'
 import { query } from './config/neon.js'
 import { AI_CONFIG, getAIHeaders, buildOCRPrompt, buildTaggingPrompt, buildAnswerGenerationPrompt } from './config/ai.js'
-import { updateTaskStatus, createQuestions, batchUpdateQuestionTags, addWrongQuestions, updateQuestionAnswer, markAnswerException, findCachedQuestionByFingerprint, findSimilarQuestion, cacheQuestion, incrementQuestionUseCount } from './services/neonService.js'
+import { updateTaskStatus, createQuestions, batchUpdateQuestionTags, addWrongQuestions, createJudgement, updateQuestionAnswer, markAnswerException, findCachedQuestionByFingerprint, findSimilarQuestion, cacheQuestion, incrementQuestionUseCount } from './services/neonService.js'
 import { uploadImage } from './services/ossService.js'
 import { generateTextFingerprint, generatePHash, PARSER_VERSION, TEXT_SIMILARITY_THRESHOLD } from './utils/questionFingerprint.js'
 import { uploadFilesWithRetry } from './services/uploadRetryManager.js'
@@ -989,7 +989,29 @@ export const processTask = async (job) => {
       await createQuestions(questionsWithStudentId)
       console.log(`✅ [Step 6/8] 题目保存成功 (含 ${geometryImageCache.size} 张几何配图)`)
 
-      await job.updateProgress(80)
+      
+      // [Shadow Mode] 追加写入 AI OCR 判定记录
+      try {
+        const judgementPromises = questionsWithStudentId.map(q =>
+          createJudgement({
+            questionId: q.id,
+            studentId: q.student_id,
+            source: 'ai_ocr',
+            confidence: q.confidence ?? null,
+            isCorrect: q.is_correct ?? null,
+            content: q.content ?? null,
+            answer: q.answer ?? null,
+            studentAnswer: q.student_answer ?? null,
+            analysis: q.analysis ?? null,
+            metadata: { question_type: q.question_type, originalIsCorrect: q.is_correct }
+          }).catch(e => console.error(`[Shadow] judgements写入失败 (OCR) q=${q.id?.substring(0,8)}:`, e.message))
+        )
+        await Promise.allSettled(judgementPromises)
+        console.log(`  [Shadow] AI OCR判定记录已追加: ${questionsWithStudentId.length} 条`)
+      } catch (e) {
+        console.error('  [Shadow] AI OCR判定记录写入异常:', e.message)
+      }
+await job.updateProgress(80)
       await updateTaskStatus(taskId, TASK_STATUS.PROCESSING, { progress: 80 })
 
       console.log(`📊 [Step 7/8] 生成AI参考答案...`)
@@ -1023,6 +1045,28 @@ export const processTask = async (job) => {
           } catch (e) {
             console.error('错题本同步失败:', e.message)
           }
+        }
+                // [Shadow Mode] 追加写入 AI 答案生成判定记录
+        try {
+          const rejudgePromises = questions.map(q =>
+            createJudgement({
+              questionId: q.id,
+              studentId: studentId,
+              source: 'ai_answer_gen',
+              confidence: q.confidence ?? null,
+              isCorrect: q.is_correct ?? null,
+              content: q.content ?? null,
+              answer: q.answer ?? null,
+              studentAnswer: q.student_answer ?? null,
+              aiAnswer: q.ai_answer ?? null,
+              analysis: q.analysis ?? null,
+              metadata: { question_type: q.question_type }
+            }).catch(e => console.error(`[Shadow] judgements写入失败 (AI答案) q=${q.id?.substring(0,8)}:`, e.message))
+          )
+          await Promise.allSettled(rejudgePromises)
+          console.log(`  [Shadow] AI答案生成判定记录已追加: ${questions.length} 条`)
+        } catch (e) {
+          console.error('  [Shadow] AI答案生成判定记录写入异常:', e.message)
         }
         wrongCount = questions.filter(q => !q.is_correct).length
         console.log(`✅ [Step 7/8] AI答案生成完成: 生成了 ${answerGenResult.updated}/${answerGenResult.total} 道题的答案, 解析异常 ${answerGenResult.exceptions} 道, 重新判定 ${rejudgedWrong} 道错题, 当前错题数: ${wrongCount}`)

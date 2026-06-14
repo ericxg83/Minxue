@@ -393,3 +393,35 @@ export const incrementQuestionUseCount = async (fingerprint, parserVersion = 'v1
     return 0
   }
 }
+
+/**
+ * Shadow Mode: 追加写入判定记录（judgements 表）
+ * 不阻塞主流程——外层调用者负责 try-catch
+ * 用于记录所有 AI / 人工 / PC 编辑的判定历史
+ */
+export const createJudgement = async ({
+  questionId,
+  studentId,
+  source,
+  confidence = null,
+  isCorrect = null,
+  content = null,
+  answer = null,
+  studentAnswer = null,
+  aiAnswer = null,
+  analysis = null,
+  metadata = {}
+}) => {
+  await query(
+    `INSERT INTO ${TABLES.JUDGEMENTS}
+     (question_id, student_id, source, confidence, is_correct,
+      content, answer, student_answer, ai_answer, analysis, metadata)
+     VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)`,
+    [
+      questionId, studentId, source, confidence,
+      isCorrect ?? null, content, answer,
+      studentAnswer, aiAnswer, analysis,
+      JSON.stringify(metadata)
+    ]
+  )
+}

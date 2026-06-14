@@ -7,7 +7,7 @@ const getPool = () => {
     const connectionString = process.env.NEON_DATABASE_URL
     
     if (!connectionString) {
-      throw new Error('数据库未配置：缺少 NEON_DATABASE_URL 环境变量')
+      throw new Error('鏁版嵁搴撴湭閰嶇疆锛氱己灏?NEON_DATABASE_URL 鐜鍙橀噺')
     }
     
     _pool = new Pool({
@@ -21,7 +21,7 @@ const getPool = () => {
     })
 
     _pool.on('error', (err) => {
-      console.error('Neon 数据库连接池错误:', err)
+      console.error('Neon 鏁版嵁搴撹繛鎺ユ睜閿欒:', err)
     })
   }
   return _pool
@@ -34,11 +34,11 @@ export const query = async (text, params) => {
     const result = await pool.query(text, params)
     const duration = Date.now() - start
     if (duration > 100) {
-      console.debug('慢查询:', { text: text.substring(0, 50), duration, rows: result.rowCount })
+      console.debug('鎱㈡煡璇?', { text: text.substring(0, 50), duration, rows: result.rowCount })
     }
     return result
   } catch (error) {
-    console.error('数据库查询错误:', error)
+    console.error('鏁版嵁搴撴煡璇㈤敊璇?', error)
     throw error
   }
 }
@@ -66,7 +66,8 @@ export const TABLES = {
   WRONG_QUESTIONS: 'wrong_questions',
   TRAINING_LOGS: 'training_logs',
   GENERATED_EXAMS: 'generated_exams',
-  QUESTION_CACHE: 'question_cache'
+  QUESTION_CACHE: 'question_cache',
+  JUDGEMENTS: 'judgements'
 }
 
 export const TASK_STATUS = {
@@ -96,3 +97,4 @@ export const getQuestionsByTask = async (taskId) => {
   const { rows } = await query(`SELECT * FROM ${TABLES.QUESTIONS} WHERE task_id = $1 ORDER BY created_at`, [taskId])
   return rows
 }
+

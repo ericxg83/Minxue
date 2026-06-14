@@ -144,3 +144,28 @@ CREATE POLICY "Allow all" ON tasks FOR ALL USING (true) WITH CHECK (true);
 CREATE POLICY "Allow all" ON questions FOR ALL USING (true) WITH CHECK (true);
 CREATE POLICY "Allow all" ON wrong_questions FOR ALL USING (true) WITH CHECK (true);
 CREATE POLICY "Allow all" ON training_logs FOR ALL USING (true) WITH CHECK (true);
+
+-- 判定记录表（Shadow Mode - 只追加不覆盖）
+CREATE TABLE IF NOT EXISTS judgements (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    question_id UUID NOT NULL REFERENCES questions(id) ON DELETE CASCADE,
+    student_id UUID NOT NULL REFERENCES students(id) ON DELETE CASCADE,
+    source VARCHAR(20) NOT NULL CHECK (source IN ('ai_ocr', 'ai_answer_gen', 'manual_review', 'pc_edit')),
+    confidence DECIMAL(3,2),
+    is_correct BOOLEAN,
+    content TEXT,
+    answer TEXT,
+    student_answer TEXT,
+    ai_answer TEXT,
+    analysis TEXT,
+    metadata JSONB DEFAULT '{}'::jsonb,
+    created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
+);
+
+CREATE INDEX idx_judgements_question_id ON judgements(question_id);
+CREATE INDEX idx_judgements_student_id ON judgements(student_id);
+CREATE INDEX idx_judgements_source ON judgements(source);
+CREATE INDEX idx_judgements_created_at ON judgements(created_at DESC);
+
+ALTER TABLE judgements ENABLE ROW LEVEL SECURITY;
+CREATE POLICY "Allow all" ON judgements FOR ALL USING (true) WITH CHECK (true);

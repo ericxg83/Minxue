@@ -13,8 +13,10 @@ import multer from 'multer'
 import { query, TABLES, TASK_STATUS, QUESTION_STATUS, WRONG_STATUS } from './config/neon.js'
 import { uploadFilesWithRetry } from './services/uploadRetryManager.js'
 import { createUploadReport, logUploadReport } from './services/uploadReportLogger.js'
-import { uploadImage } from './services/ossService.js'
+import { createJudgement } from './services/neonService.js'
+import { uploadImage, deleteFile } from './services/ossService.js'
 import { getTaskQueue, getQueueStats, taskWorker } from './queue.js'
+import { processTask } from './worker.js'
 
 const app = express()
 const PORT = process.env.PORT || 4000
@@ -155,9 +157,11 @@ app.post('/api/tasks/upload', upload.array('files', 20), async (req, res) => {
               attempts: parseInt(process.env.MAX_RETRIES) || 3,
               backoff: { type: 'exponential', delay: 5000 }
             })
-            console.log(`  ✅ 任务已加入队列: jobId=${job.id}`)
+            console.log(`  ? 任务已加入队列: jobId=${job.id}`)
           } else {
-            console.log(`  ⚠️  Redis 队列未连接，跳过队列提交`)
+            console.log(`  ??  Redis 队列未连接，跳过队列提交`)
+            // 兜底：直接同步调用 Worker 处理
+            processTask({ data: { taskId: savedTask.id, studentId, imageUrl: safeUrl, originalName: result.filename } }).catch(e => console.error('  ? 同步处理失败: ' + e.message))
           }
 
           tasks.push(savedTask)
@@ -168,7 +172,7 @@ app.post('/api/tasks/upload', upload.array('files', 20), async (req, res) => {
             note: '等待队列处理后生成边界框',
           })
         } catch (dbError) {
-          console.error(`❌ [Upload] 数据库创建任务失败 for ${result.filename}:`, dbError)
+          console.error(`? [Upload] 数据库创建任务失败 for ${result.filename}:`, dbError)
           tasks.push({
             error: true,
             originalName: result.filename,
@@ -180,9 +184,11 @@ app.post('/api/tasks/upload', upload.array('files', 20), async (req, res) => {
             status: 'failed',
             error: dbError.message,
           })
+          // 清理已上传的 OSS 文件（避免生成孤儿文件）
+          try { const urlObj = new URL(result.url); const ossPath = urlObj.pathname.replace(/^\//, ''); await deleteFile(ossPath) } catch (e) { console.error('  OSS 清理失败:', e.message) }
         }
       } else {
-        console.error(`❌ [Upload] 文件 ${result.filename} 上传失败: ${result.errorType} — ${result.error}`)
+        console.error(`? [Upload] 文件 ${result.filename} 上传失败: ${result.errorType} — ${result.error}`)
         tasks.push({
           error: true,
           originalName: result.filename,
@@ -655,6 +661,8 @@ app.put('/api/questions/:id', async (req, res) => {
     if (rows.length === 0) return res.status(404).json({ error: '题目不存在' })
 
     res.json({ success: true, question: rows[0] })
+
+    // [Shadow Mode] 追加写入 PC 编辑判定记录
   } catch (error) {
     console.error('更新题目失败:', error)
     res.status(500).json({ error: error.message })
@@ -738,6 +746,16 @@ app.post('/api/wrong-questions', async (req, res) => {
     )
 
     res.json({ success: true, added: newIds })
+    // [Shadow Mode] 追加写入人工添加错题判定记录
+    for (const qId of newIds) {
+      createJudgement({
+        questionId: qId,
+        studentId: studentId,
+        source: 'manual_review',
+        isCorrect: false,
+        metadata: { action: 'manual_add_to_wrong_book' }
+      }).catch(e => console.error('[Shadow] judgements写入失败 (人工加错题):', e.message))
+    }
   } catch (error) {
     console.error('添加错题失败:', error)
     res.status(500).json({ error: error.message })
@@ -769,6 +787,13 @@ app.put('/api/wrong-questions/:id', async (req, res) => {
     )
 
     res.json({ success: true, message: '状态已更新' })
+    // [Shadow Mode] 追加写入人工复审判定记录（错题状态变更）
+    createJudgement({
+      questionId: id,
+      source: 'manual_review',
+      metadata: { updatedStatus: status, wrongQuestionId: id }
+    }).catch(e => console.error('[Shadow] judgements写入失败 (人工复审):', e.message))
+
   } catch (error) {
     console.error('更新错题状态失败:', error)
     res.status(500).json({ error: error.message })
@@ -947,3 +972,10 @@ export const createServer = (port = PORT) => {
     })
   })
 }
+
+
+
+
+
+
+

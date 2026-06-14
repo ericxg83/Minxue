@@ -858,7 +858,7 @@ const cropUploading = ref(false) // 裁剪上传状态
 const cropRetryCount = ref(0) // 重试次数
 let cropLoadingTimer = null // 加载超时定时器（防止代理服务器不响应时永远卡住）
 
-// 使用后端代理获取图片，避免 CORS 问题导致原试卷不显示
+// 使用 Vite 代理获取图片，避免跨域问题导致原试卷不显示
 const cropImageUrl = computed(() => {
   const exam = selectedExam.value
   const rawUrl = exam?.thumbnail || exam?.raw_task?.image_url
@@ -872,14 +872,13 @@ const cropImageUrl = computed(() => {
   
   if (!rawUrl) {
     console.error('[Step 3] 原试卷URL为空! 检查 selectedExam 数据')
-    // URL为空时也要结束loading状态，显示错误
     cropImageLoading.value = false
     cropImageError.value = true
     return ''
   }
   
-  const apiBase = import.meta.env.VITE_API_BASE_URL || 'http://localhost:4000'
-  const proxyUrl = `${apiBase}/api/proxy-image?url=${encodeURIComponent(rawUrl)}`
+  // 使用相对路径走 Vite 代理（/api -> localhost:3001）
+  const proxyUrl = `/api/proxy-image?url=${encodeURIComponent(rawUrl)}`
   console.log('[Step 2] 代理URL:', proxyUrl)
   return proxyUrl
 })
@@ -968,7 +967,7 @@ const handleImageUpload = async (file) => {
     const formData = new FormData()
     formData.append('files', file)
     
-    const response = await fetch(`${import.meta.env.VITE_API_BASE_URL || 'http://localhost:4000'}/api/upload`, {
+    const response = await fetch('/api/upload', {
       method: 'POST',
       body: formData
     })
@@ -1025,10 +1024,7 @@ const openCropDialog = () => {
     return
   }
 
-  // 构建代理URL
-  const apiBase = import.meta.env.VITE_API_BASE_URL || 'http://localhost:4000'
-  const proxyUrl = `${apiBase}/api/proxy-image?url=${encodeURIComponent(rawUrl)}`
-  console.log('代理URL:', proxyUrl)
+  console.log('代理URL: /api/proxy-image (通过Vite代理)')
 
   cropDialogVisible.value = true
   cropRect.value = null
@@ -1204,8 +1200,8 @@ const generateCropPreview = async () => {
 const cropImageWithFetch = async (imgSrc, x, y, w, h) => {
   console.log('[cropImageWithFetch] 开始代理下载:', imgSrc)
   try {
-    // 使用后端代理下载图片（同源，无 CORS 问题）
-    const proxyUrl = `${import.meta.env.VITE_API_BASE_URL || 'http://localhost:4000'}/api/proxy-image?url=${encodeURIComponent(imgSrc)}`
+    // 使用 Vite 代理下载图片（同源，无 CORS 问题）
+    const proxyUrl = `/api/proxy-image?url=${encodeURIComponent(imgSrc)}`
     console.log('[cropImageWithFetch] 代理URL:', proxyUrl)
     const response = await fetch(proxyUrl)
     console.log('[cropImageWithFetch] 响应状态:', response.status)
@@ -1348,7 +1344,7 @@ const confirmCrop = async () => {
 
     console.log('[Step 5] 开始上传到 /api/upload ...')
 
-    const response = await fetch(`${import.meta.env.VITE_API_BASE_URL || 'http://localhost:4000'}/api/upload`, {
+    const response = await fetch('/api/upload', {
       method: 'POST',
       body: formData
     })

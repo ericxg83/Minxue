@@ -1,4 +1,5 @@
-import { createApp } from 'vue'
+﻿import { createApp } from 'vue'
+import 'katex/dist/katex.min.css'
 import ElementPlus from 'element-plus'
 import 'element-plus/dist/index.css'
 import * as ElementPlusIconsVue from '@element-plus/icons-vue'
@@ -19,3 +20,4 @@ for (const [key, component] of Object.entries(ElementPlusIconsVue)) {
 }
 
 app.mount('#workbench-app')
+

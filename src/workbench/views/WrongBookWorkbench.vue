@@ -200,7 +200,7 @@
             <div class="detail-section__label">题目内容</div>
             <div class="detail-section__content question-content-box">
               <div v-if="getQuestionContent(selectedDetailQuestion)" class="question-text">
-                {{ getQuestionContent(selectedDetailQuestion) }}
+                <MathRender :content="getQuestionContent(selectedDetailQuestion)" />
               </div>
               <div v-if="getQuestionOptions(selectedDetailQuestion)?.length" class="question-options">
                 <div
@@ -240,7 +240,7 @@
           <div class="detail-section">
             <div class="detail-section__label">解析</div>
             <div class="detail-section__content analysis-box">
-              {{ getQuestionAnalysis(selectedDetailQuestion) || '暂无解析' }}
+              <MathRender :content="getQuestionAnalysis(selectedDetailQuestion) || '暂无解析'" />
             </div>
           </div>
         </div>
@@ -314,6 +314,7 @@ import {
 import { useWrongBookStore } from '../stores/wrongBookStore'
 import { getStudents } from '../../services/apiService'
 import dayjs from 'dayjs'
+import MathRender from "../components/MathRender.vue"
 
 const router = useRouter()
 const wrongBookStore = useWrongBookStore()
