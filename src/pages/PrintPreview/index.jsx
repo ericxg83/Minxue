@@ -177,7 +177,7 @@ export default function PrintPreview({ onClose, questions: propQuestions }) {
             name: '错题重练卷',
             question_ids: questionIds
           })
-          console.log('组卷记录已保存')
+          console.debug('组卷记录已保存')
         } catch (error) {
           console.error('保存组卷记录失败:', error)
         }
@@ -222,7 +222,7 @@ export default function PrintPreview({ onClose, questions: propQuestions }) {
             name: '错题重练卷',
             question_ids: questionIds
           })
-          console.log('组卷记录已保存')
+          console.debug('组卷记录已保存')
         } catch (e) {
           console.error('保存组卷记录失败:', e)
         }

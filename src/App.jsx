@@ -486,12 +486,12 @@ export default function App() {
 
   // Upload file handler
   const handleFileSelect = async (e) => {
-    console.log('🔥🔥🔥🔥🔥 [UPLOAD] === handleFileSelect TRIGGERED === 🔥🔥🔥🔥🔥')
+    console.debug('🔥🔥🔥🔥🔥 [UPLOAD] === handleFileSelect TRIGGERED === 🔥🔥🔥🔥🔥')
     try {
       const files = Array.from(e.target.files)
-      console.log('🔥🔥 [UPLOAD] Files received:', files.length, files.map(f => ({ name: f.name, size: f.size, type: f.type })))
+      console.debug('🔥🔥 [UPLOAD] Files received:', files.length, files.map(f => ({ name: f.name, size: f.size, type: f.type })))
       if (files.length === 0) {
-        console.log('🔥 [UPLOAD] No files selected, returning early')
+        console.debug('🔥 [UPLOAD] No files selected, returning early')
         return
       }
       e.target.value = ''
@@ -513,37 +513,37 @@ export default function App() {
         }
       }
 
-      console.log('🔥🔥 [UPLOAD] After dedup - newFiles:', newFiles.length, 'duplicateFiles:', duplicateFiles.length)
+      console.debug('🔥🔥 [UPLOAD] After dedup - newFiles:', newFiles.length, 'duplicateFiles:', duplicateFiles.length)
 
       if (duplicateFiles.length > 0) {
         Toast.show({ message: `${duplicateFiles.length} 个文件已存在，已自动跳过`, type: 'error' })
       }
 
       if (newFiles.length === 0) {
-        console.log('🔥🔥 [UPLOAD] No new files after dedup, returning')
+        console.debug('🔥🔥 [UPLOAD] No new files after dedup, returning')
         return
       }
 
       if (isInitializing) {
-        console.log('🔥 [UPLOAD] Initializing, adding to queue')
+        console.debug('🔥 [UPLOAD] Initializing, adding to queue')
         Toast.show({ message: `正在初始化，已缓存 ${newFiles.length} 个文件，稍后自动上传...`, type: 'success', duration: 2000 })
         setUploadQueue(prev => [...prev, ...newFiles])
         return
       }
 
       if (!currentStudent || !currentStudent?.id) {
-        console.log('💥💥💥 [UPLOAD] BLOCKED: currentStudent is NULL or undefined!')
+        console.debug('💥💥💥 [UPLOAD] BLOCKED: currentStudent is NULL or undefined!')
         Toast.show({ message: '请先选择学生后再上传试卷', type: 'error', duration: 3000 })
         return
       }
 
-      console.log('✅ [UPLOAD] currentStudent:', currentStudent.id, currentStudent.name)
+      console.debug('✅ [UPLOAD] currentStudent:', currentStudent.id, currentStudent.name)
 
       if (USE_MOCK_DATA) {
-        console.log('🔥🔥🔥 [UPLOAD] === Using MOCK path (uploadViaFrontend) ===')
+        console.debug('🔥🔥🔥 [UPLOAD] === Using MOCK path (uploadViaFrontend) ===')
         await uploadViaFrontend(newFiles)
       } else {
-        console.log('🔥🔥🔥 [UPLOAD] === Using BACKEND path (uploadViaBackend) ===')
+        console.debug('🔥🔥🔥 [UPLOAD] === Using BACKEND path (uploadViaBackend) ===')
         await uploadViaBackend(newFiles)
       }
     } catch (err) {
@@ -555,8 +555,8 @@ export default function App() {
 
   // Upload via backend API
   const uploadViaBackend = async (files) => {
-    console.log('📤📤📤 [uploadViaBackend] STARTING with', files.length, 'files')
-    console.log('📤 [uploadViaBackend] currentStudent:', currentStudent?.id, currentStudent?.name)
+    console.debug('📤📤📤 [uploadViaBackend] STARTING with', files.length, 'files')
+    console.debug('📤 [uploadViaBackend] currentStudent:', currentStudent?.id, currentStudent?.name)
     
     const pendingTasks = []
     
@@ -575,7 +575,7 @@ export default function App() {
       pendingTasks.push({ tempTask, file })
     })
 
-    console.log('📤 [uploadViaBackend] Created', pendingTasks.length, 'temp tasks')
+    console.debug('📤 [uploadViaBackend] Created', pendingTasks.length, 'temp tasks')
 
     clearStudentCaches(currentStudent.id)
     
@@ -616,7 +616,7 @@ export default function App() {
 
     // 上传完成后刷新缓存并重新加载列表
     if (successCount > 0) {
-      console.log('🔄 [uploadViaBackend] Invalidating cache and reloading tasks')
+      console.debug('🔄 [uploadViaBackend] Invalidating cache and reloading tasks')
       invalidateCache('tasks', currentStudent.id)
       loadTasks()
     }
@@ -627,7 +627,7 @@ export default function App() {
       Toast.show({ message: `${successCount} 个文件上传成功！`, type: 'success', duration: 2000 })
     }
 
-    console.log('📤📤📤 [uploadViaBackend] COMPLETED - success:', successCount, 'failed:', failedCount)
+    console.debug('📤📤📤 [uploadViaBackend] COMPLETED - success:', successCount, 'failed:', failedCount)
   }
 
   // Upload via frontend (fallback)

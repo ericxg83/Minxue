@@ -64,7 +64,7 @@ export default function Exam() {
       if (USE_MOCK_DATA) return
 
       const generatedExamList = await getGeneratedExamsByStudent(currentStudent.id, !forceRefresh)
-      console.log('生成的试卷数据:', generatedExamList, '当前store数据:', generatedExams.length)
+      console.debug('生成的试卷数据:', generatedExamList, '当前store数据:', generatedExams.length)
       
       // Merge with existing, keeping locally added ones that aren't in DB yet
       const existingIds = new Set(generatedExams.map(e => e.id))

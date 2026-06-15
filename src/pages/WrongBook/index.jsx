@@ -18,7 +18,6 @@ import { generateExamPDF } from '../../utils/pdfGenerator'
 import { mockWrongQuestions, mockStudents } from '../../data/mockData'
 import StudentSwitcher from '../../components/StudentSwitcher'
 import PrintPreview from '../PrintPreview'
-import QuestionEdit from '../QuestionEdit'
 import ScanQR from '../ScanQR'
 import Grading from '../Grading'
 import dayjs from 'dayjs'
@@ -112,7 +111,6 @@ export default function WrongBook({ onScanQR }) {
   const [showPrintPreview, setShowPrintPreview] = useState(false)
   const [showStudentSwitcher, setShowStudentSwitcher] = useState(false)
   const [showFilterPanel, setShowFilterPanel] = useState(false)
-  const [editingQuestion, setEditingQuestion] = useState(null)
   const [showScanQR, setShowScanQR] = useState(false)
   const [showGrading, setShowGrading] = useState(false)
   const [gradingData, setGradingData] = useState(null)
@@ -443,23 +441,6 @@ export default function WrongBook({ onScanQR }) {
     }
   }
 
-  // 编辑题目
-  const handleEditQuestion = (wq) => {
-    setEditingQuestion(wq)
-  }
-
-  // 保存编辑
-  const handleSaveEdit = (updatedQuestion) => {
-    const updatedWrongQuestions = wrongQuestions.map(wq => {
-      if (wq.id === updatedQuestion.id || wq.question_id === updatedQuestion.id) {
-        return { ...wq, question: updatedQuestion }
-      }
-      return wq
-    })
-    setWrongQuestions(updatedWrongQuestions)
-    setEditingQuestion(null)
-  }
-
   // 扫码批改回调
   const handleScanSuccess = (scanData) => {
     setShowScanQR(false)
@@ -502,12 +483,35 @@ export default function WrongBook({ onScanQR }) {
       }
       
       const result = await createGeneratedExam(examData)
-      
+
       Toast.show({
         icon: 'success',
-        content: '试卷生成成功'
+        content: '试卷生成成功，即将开始下载...'
       })
-      
+
+      // 落库成功后自动生成 PDF（移动端直接下载）
+      const questions = selectedQuestions.map(wq => wq.question || wq)
+      const newPaperId = 'paper_' + Date.now() + '_' + Math.random().toString(36).substr(2, 9)
+      const qrContent = JSON.stringify({
+        type: 'grading',
+        paperId: newPaperId,
+        studentId: currentStudent?.id,
+        questionIds: questions.map(q => q.id).filter(Boolean),
+        ts: Date.now()
+      })
+      try {
+        await generateExamPDF({
+          title: `${currentStudent?.name || '学生'} - 错题练习`,
+          studentName: currentStudent?.name || '',
+          questions: questions,
+          filename: `${currentStudent?.name || 'student'}_错题组卷_${dayjs().format('YYYYMMDD_HHmm')}`,
+          showAnswers: false,
+          qrContent: qrContent,
+        })
+      } catch (pdfErr) {
+        console.warn('PDF生成失败:', pdfErr)
+      }
+
       // 清空选择
       storeClearSelection()
     } catch (error) {
@@ -538,6 +542,17 @@ export default function WrongBook({ onScanQR }) {
       questionIds: selectedQuestions.map(wq => (wq.question || wq).id),
       ts: Date.now()
     })
+
+    // 先保存组卷记录
+    try {
+      await createGeneratedExam({
+        student_id: currentStudent.id,
+        name: `错题组卷 - ${dayjs().format('YYYY年MM月DD日')}`,
+        question_ids: selectedQuestions.map(wq => wq.question_id || wq.id)
+      })
+    } catch (e) {
+      console.warn('创建组卷记录失败:', e)
+    }
 
     try {
       await generateExamPDF({
@@ -1087,17 +1102,6 @@ export default function WrongBook({ onScanQR }) {
                     <span>错误次数：{question.wrong_count || 1}次</span>
                     <div style={{ display: 'flex', gap: '16px' }}>
                       <span
-                        onClick={() => handleEditQuestion(wq)}
-                        style={{
-                          color: APPLE_COLORS.primary,
-                          fontSize: '13px',
-                          cursor: 'pointer',
-                          fontWeight: 500
-                        }}
-                      >
-                        编辑
-                      </span>
-                      <span
                         onClick={(e) => { e.stopPropagation(); handleDelete(wq.id) }}
                         style={{
                           color: APPLE_COLORS.danger,
@@ -1195,16 +1199,6 @@ export default function WrongBook({ onScanQR }) {
         onClose={() => setShowStudentSwitcher(false)}
         badgeType="wrongbook"
       />
-
-      {/* 题目编辑弹窗 */}
-      {editingQuestion && (
-        <QuestionEdit
-          questionId={editingQuestion.question?.id || editingQuestion.question_id}
-          visible={!!editingQuestion}
-          onClose={() => setEditingQuestion(null)}
-          onSave={handleSaveEdit}
-        />
-      )}
 
       {/* 扫码批改弹窗 */}
       {showScanQR && (

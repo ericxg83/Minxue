@@ -35,7 +35,7 @@ export default function Students() {
   const fileInputRef = useRef(null)
 
   useEffect(() => {
-    console.log('Students 组件挂载')
+    console.debug('Students 组件挂载')
     if (!USE_MOCK_DATA) {
       loadStudents()
     }
@@ -44,14 +44,14 @@ export default function Students() {
   let loadCount = 0
   const loadStudents = async (useCache = true) => {
     loadCount++
-    console.log(`loadStudents 被调用 (第 ${loadCount} 次)`)
+    console.debug(`loadStudents 被调用 (第 ${loadCount} 次)`)
     setLocalLoading(true)
     setLoading(true)
     
     try {
       const data = await getStudents(useCache)
-      console.log('从 Supabase 加载的学生数据:', data)
-      console.log('Supabase 返回的学生数量:', data?.length || 0)
+      console.debug('从 Supabase 加载的学生数据:', data)
+      console.debug('Supabase 返回的学生数量:', data?.length || 0)
       if (data && data.length > 0) {
         setStudents(data)
       } else {
@@ -180,7 +180,7 @@ export default function Students() {
         }
         Toast.show({ icon: 'success', content: '更新成功' })
       } else {
-        console.log('USE_MOCK_DATA 值:', USE_MOCK_DATA, '准备创建学生')
+        console.debug('USE_MOCK_DATA 值:', USE_MOCK_DATA, '准备创建学生')
         if (USE_MOCK_DATA) {
           const newStudent = {
             ...studentData,
@@ -190,11 +190,11 @@ export default function Students() {
           addStudentInStore(newStudent)
           setCurrentStudent(newStudent)
         } else {
-          console.log('进入 Supabase 创建学生流程')
-          console.log('正在创建学生:', studentData)
+          console.debug('进入 Supabase 创建学生流程')
+          console.debug('正在创建学生:', studentData)
           try {
             const created = await createStudent(studentData)
-            console.log('Supabase 返回的创建结果:', created)
+            console.debug('Supabase 返回的创建结果:', created)
             if (created) {
               addStudentInStore(created)
               setCurrentStudent(created)

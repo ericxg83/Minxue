@@ -215,7 +215,7 @@ export const recognizeQuestions = async (imageBase64, studentId, taskId, retryCo
   }
 
   try {
-    console.log('开始调用AI API，模型:', AI_CONFIG.MODEL)
+    console.debug('开始调用AI API，模型:', AI_CONFIG.MODEL)
     const response = await axios.post(
       AI_CONFIG.ENDPOINT,
       requestBody,
@@ -224,7 +224,7 @@ export const recognizeQuestions = async (imageBase64, studentId, taskId, retryCo
         timeout: AI_CONFIG.TIMEOUT
       }
     )
-    console.log('AI API调用成功，状态:', response.status)
+    console.debug('AI API调用成功，状态:', response.status)
 
     const duration = Date.now() - startTime
 
@@ -323,7 +323,7 @@ export const recognizeQuestions = async (imageBase64, studentId, taskId, retryCo
     const shouldRetry = isNetworkError && retryCount < AI_CONFIG.MAX_RETRIES
 
     if (shouldRetry) {
-      console.log(`识别失败，${retryCount + 1}秒后自动重试 (${retryCount + 1}/${AI_CONFIG.MAX_RETRIES})...`)
+      console.debug(`识别失败，${retryCount + 1}秒后自动重试 (${retryCount + 1}/${AI_CONFIG.MAX_RETRIES})...`)
       await new Promise(resolve => setTimeout(resolve, (retryCount + 1) * 1000))
       return recognizeQuestions(imageBase64, studentId, taskId, retryCount + 1)
     }
@@ -377,7 +377,7 @@ async function enhanceGeometryImages(questions) {
         if (enhancedDataURL) {
           question.enhanced_geometry_image = enhancedDataURL
           cache.set(cacheKey, enhancedDataURL)
-          console.log(`[几何图] ${question.id} 增强完成: ${bbox.width}x${bbox.height}`)
+          console.debug(`[几何图] ${question.id} 增强完成: ${bbox.width}x${bbox.height}`)
         } else {
           console.warn(`[几何图] ${question.id} 增强失败`)
         }
@@ -445,7 +445,7 @@ async function cropAndEnhanceGeometryImage(imageDataURL, bbox) {
       borderSize: 5
     })
 
-    console.log(`几何图增强完成: ${cropW}x${cropH}`)
+    console.debug(`几何图增强完成: ${cropW}x${cropH}`)
     return enhancedDataURL
   } catch (error) {
     console.error('几何图裁剪/增强失败:', error)
@@ -586,7 +586,7 @@ export const generateTagsForQuestion = async (questionContent, retryCount = 0) =
   }
 
   try {
-    console.log('开始调用AI生成标签，题目:', questionContent.substring(0, 50) + '...')
+    console.debug('开始调用AI生成标签，题目:', questionContent.substring(0, 50) + '...')
     const response = await axios.post(
       AI_CONFIG.ENDPOINT,
       requestBody,
@@ -613,7 +613,7 @@ export const generateTagsForQuestion = async (questionContent, retryCount = 0) =
     const tags = deduplicateTags(rawTags)
 
     const duration = Date.now() - startTime
-    console.log(`标签生成完成，耗时 ${duration}ms，标签:`, tags)
+    console.debug(`标签生成完成，耗时 ${duration}ms，标签:`, tags)
 
     logRecognition({
       type: 'tag_success',
@@ -641,7 +641,7 @@ export const generateTagsForQuestion = async (questionContent, retryCount = 0) =
     const shouldRetry = isNetworkError && retryCount < AI_CONFIG.MAX_RETRIES
 
     if (shouldRetry) {
-      console.log(`标签生成失败，${retryCount + 1}秒后自动重试 (${retryCount + 1}/${AI_CONFIG.MAX_RETRIES})...`)
+      console.debug(`标签生成失败，${retryCount + 1}秒后自动重试 (${retryCount + 1}/${AI_CONFIG.MAX_RETRIES})...`)
       await new Promise(resolve => setTimeout(resolve, (retryCount + 1) * 1000))
       return generateTagsForQuestion(questionContent, retryCount + 1)
     }

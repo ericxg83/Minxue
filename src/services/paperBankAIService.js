@@ -37,7 +37,7 @@ export const recognizePaperPageSimple = async (imageBase64) => {
 
   try {
     imageDataURL = await compressImageBase64(imageDataURL, 1600, 0.75)
-    console.log('[PaperBank] 图片已压缩')
+    console.debug('[PaperBank] 图片已压缩')
   } catch (e) {
     console.warn('[PaperBank] 图片压缩失败:', e)
   }
@@ -70,7 +70,7 @@ export const recognizePaperPageSimple = async (imageBase64) => {
   }
 
   try {
-    console.log('[PaperBank] 开始OCR识别...')
+    console.debug('[PaperBank] 开始OCR识别...')
 
     const response = await axios.post(
       AI_CONFIG.ENDPOINT,
@@ -182,7 +182,7 @@ export const recognizePaperPageLayout = async (imageBase64) => {
   // 压缩图片以符合API限制
   try {
     imageDataURL = await compressImageBase64(imageDataURL, 1600, 0.75)
-    console.log('[PaperBank] 图片已压缩')
+    console.debug('[PaperBank] 图片已压缩')
   } catch (e) {
     console.warn('[PaperBank] 图片压缩失败:', e)
   }
@@ -215,7 +215,7 @@ export const recognizePaperPageLayout = async (imageBase64) => {
   }
 
   try {
-    console.log('[PaperBank] 开始版面分析...')
+    console.debug('[PaperBank] 开始版面分析...')
 
     const response = await axios.post(
       AI_CONFIG.ENDPOINT,
@@ -327,12 +327,12 @@ export const processMultiPagePaperLayout = async (pages) => {
   }
 
   try {
-    console.log(`[PaperBank] 开始处理多页试卷（版面分析），共${pages.length}页`)
+    console.debug(`[PaperBank] 开始处理多页试卷（版面分析），共${pages.length}页`)
 
     // 处理每一页
     for (let i = 0; i < pages.length; i++) {
       const page = pages[i]
-      console.log(`[PaperBank] 正在处理第${i + 1}页...`)
+      console.debug(`[PaperBank] 正在处理第${i + 1}页...`)
 
       const layoutResult = await recognizePaperPageLayout(page.imageBase64)
       
@@ -408,7 +408,7 @@ export const processMultiPagePaperLayout = async (pages) => {
       }
     }
 
-    console.log('[PaperBank] 多页试卷版面分析完成')
+    console.debug('[PaperBank] 多页试卷版面分析完成')
     return { success: true, data: results }
   } catch (error) {
     console.error('[PaperBank] 多页试卷版面分析失败:', error)

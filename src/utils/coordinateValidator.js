@@ -151,7 +151,7 @@ export function validateAllBlocks(blocks, imgW, imgH) {
     const result = validateCoordinate(coords, imgW, imgH)
 
     if (result.valid) {
-      console.log(
+      console.debug(
         `${C.OK}✓ ${label}: (x=${coords.x}, y=${coords.y}, w=${coords.width}, h=${coords.height})${C.RESET}`
       )
       validBlocks.push(block)
@@ -246,7 +246,7 @@ export function detectOverlaps(blocks) {
     }
     console.groupEnd()
   } else {
-    console.log(`${C.OK}[Overlap Detection] No overlapping blocks detected${C.RESET}`)
+    console.debug(`${C.OK}[Overlap Detection] No overlapping blocks detected${C.RESET}`)
   }
 
   return overlapping
@@ -332,9 +332,9 @@ export function generateReport(v) {
  * @returns {{ validBlocks: object[], invalidBlocks: object[], report: string }}
  */
 export function validateAnnotationPipeline(blocks, imageNaturalSize) {
-  console.log(`${C.BOLD}${C.INFO}════════════════════════════════════════════════════${C.RESET}`)
-  console.log(`${C.BOLD}${C.INFO}   Annotation Coordinate Validation Pipeline${C.RESET}`)
-  console.log(`${C.BOLD}${C.INFO}════════════════════════════════════════════════════${C.RESET}`)
+  console.debug(`${C.BOLD}${C.INFO}════════════════════════════════════════════════════${C.RESET}`)
+  console.debug(`${C.BOLD}${C.INFO}   Annotation Coordinate Validation Pipeline${C.RESET}`)
+  console.debug(`${C.BOLD}${C.INFO}════════════════════════════════════════════════════${C.RESET}`)
 
   if (!blocks || blocks.length === 0) {
     console.warn(`${C.WARN}[Pipeline] No blocks to validate${C.RESET}`)
@@ -342,20 +342,20 @@ export function validateAnnotationPipeline(blocks, imageNaturalSize) {
   }
 
   if (!imageNaturalSize) {
-    console.log(`${C.INFO}[Pipeline] Image not yet loaded — deferring validation${C.RESET}`)
+    console.debug(`${C.INFO}[Pipeline] Image not yet loaded — deferring validation${C.RESET}`)
     // Can't validate bounds without image dimensions. Assume valid for now.
     return { validBlocks: blocks, invalidBlocks: [], report: 'Image not loaded — bounds validation deferred.' }
   }
 
   const { width: imgW, height: imgH } = imageNaturalSize
-  console.log(`${C.INFO}[Pipeline] Image dimensions: ${imgW} × ${imgH}px${C.RESET}`)
-  console.log(`${C.INFO}[Pipeline] Processing ${blocks.length} annotation(s)...${C.RESET}`)
+  console.debug(`${C.INFO}[Pipeline] Image dimensions: ${imgW} × ${imgH}px${C.RESET}`)
+  console.debug(`${C.INFO}[Pipeline] Processing ${blocks.length} annotation(s)...${C.RESET}`)
 
   const result = validateAllBlocks(blocks, imgW, imgH)
   const report = generateReport(result)
 
   // Print the report to console
-  console.log(report)
+  console.debug(report)
 
   // Critical warning for any invalid blocks
   if (result.invalidBlocks.length > 0) {

@@ -482,7 +482,7 @@ export const clearAllCache = () => {
         localStorage.removeItem(key)
       }
     }
-    console.log('所有缓存已清除')
+    console.debug('所有缓存已清除')
   } catch (e) {
     console.error('清除缓存失败:', e)
   }
@@ -504,7 +504,7 @@ export const clearStudentCaches = (studentId) => {
         clearCache(key)
       }
     })
-    console.log(`学生 ${studentId} 的缓存已清除`)
+    console.debug(`学生 ${studentId} 的缓存已清除`)
   } catch (e) {
     console.error('清除学生缓存失败:', e)
   }
