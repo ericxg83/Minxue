@@ -225,7 +225,7 @@
       </div>
       <template #footer>
         <el-button @click="cropDialogVisible = false">取消</el-button>
-        <el-button type="primary" :disabled="!cropPreviewUrl" @click="confirmCrop">确认裁剪</el-button>
+        <el-button type="primary" :disabled="!cropPreviewUrl" :loading="cropLoading" @click="confirmCrop">确认裁剪</el-button>
       </template>
     </el-dialog>
 
@@ -244,6 +244,7 @@
 import { ref, computed, watch } from 'vue'
 import { useReviewStore } from '../../stores/reviewStore'
 import { updateQuestion, clearStudentCaches, uploadImage } from '../../../services/apiService'
+import { processExamImage } from '../../../utils/imageProcessor'
 import { ElMessage, ElLoading } from 'element-plus'
 import { DocumentChecked, Delete, Plus, Upload, Picture, EditPen, ArrowLeft, ArrowRight, RefreshLeft, Crop } from '@element-plus/icons-vue'
 import MathRender from '../MathRender.vue'
@@ -290,45 +291,21 @@ const cropStart = ref(null)
 const cropMaxWidth = ref(800)
 const cropSizeLabel = ref('')
 const cropPreviewUrl = ref('')
+const cropLoading = ref(false)
 
-// 保存 blob URL 以便后续释放
-let cropBlobUrl = ''
-
-const handleCropFromPaper = async () => {
+const handleCropFromPaper = () => {
   const task = store.currentTask
   if (!task?.image_url) {
     ElMessage.warning('当前试卷无原图')
     return
   }
-  // 先释放之前的 blob URL
-  if (cropBlobUrl) { URL.revokeObjectURL(cropBlobUrl); cropBlobUrl = '' }
-
+  // 直接用原图 URL 加载显示（<img> 标签支持跨域）
+  cropImageSource.value = task.image_url
   cropSelection.value = null
   cropPreviewUrl.value = ''
   cropSizeLabel.value = ''
   cropDialogVisible.value = true
-
-  // 用 fetch 获取原图 → blob → objectURL（避免跨域 canvas taint）
-  try {
-    const resp = await fetch(task.image_url, { mode: 'cors', credentials: 'omit' })
-    if (!resp.ok) throw new Error(`HTTP ${resp.status}`)
-    const blob = await resp.blob()
-    cropBlobUrl = URL.createObjectURL(blob)
-    cropImageSource.value = cropBlobUrl
-  } catch (err) {
-    console.error('加载原图失败:', err)
-    // fallback: 直接用原 URL（可能因跨域导致裁剪预览失败）
-    cropImageSource.value = task.image_url
-  }
 }
-
-// 监听对话框关闭，释放 blob URL
-watch(cropDialogVisible, (v) => {
-  if (!v && cropBlobUrl) {
-    URL.revokeObjectURL(cropBlobUrl)
-    cropBlobUrl = ''
-  }
-})
 
 const getCropRect = () => {
   const img = cropImageRef.value
@@ -337,7 +314,7 @@ const getCropRect = () => {
   const scaleX = img.naturalWidth / rect.width
   const scaleY = img.naturalHeight / rect.height
   const sel = cropSelection.value
-  return { sx: sel.x * scaleX, sy: sel.y * scaleY, sw: sel.w * scaleX, sh: sel.h * scaleY, bw: sel.w, bh: sel.h }
+  return { sx: sel.x * scaleX, sy: sel.y * scaleY, sw: sel.w * scaleX, sh: sel.h * scaleY }
 }
 
 const onCropMouseDown = (e) => {
@@ -376,31 +353,41 @@ const onCropMouseUp = () => {
     cropSizeLabel.value = ''
     return
   }
-  // 生成裁剪预览（白底处理，确保在试卷上完美融合）
-  const img = cropImageRef.value
-  if (!img) return
-  const cr = getCropRect()
-  if (!cr) return
-  const canvas = document.createElement('canvas')
-  canvas.width = cr.sw
-  canvas.height = cr.sh
-  const ctx = canvas.getContext('2d')
-  // 先填充白色背景（使 PNG 透明区域变为白色，与试卷背景融合）
-  ctx.fillStyle = '#ffffff'
-  ctx.fillRect(0, 0, canvas.width, canvas.height)
-  ctx.drawImage(img, cr.sx, cr.sy, cr.sw, cr.sh, 0, 0, cr.sw, cr.sh)
-  try {
+  // 通过 /api/proxy-image 加载原图（同源，canvas 不跨域）
+  const proxyUrl = `/api/proxy-image?url=${encodeURIComponent(cropImageSource.value)}`
+  const loadImg = new Image()
+  loadImg.crossOrigin = 'anonymous'
+  loadImg.onload = () => {
+    const cr = getCropRect()
+    if (!cr) return
+    const canvas = document.createElement('canvas')
+    canvas.width = cr.sw
+    canvas.height = cr.sh
+    const ctx = canvas.getContext('2d')
+    // 先填充白色背景，确保裁剪图在试卷上完美融合
+    ctx.fillStyle = '#ffffff'
+    ctx.fillRect(0, 0, canvas.width, canvas.height)
+    ctx.drawImage(loadImg, cr.sx, cr.sy, cr.sw, cr.sh, 0, 0, cr.sw, cr.sh)
     cropPreviewUrl.value = canvas.toDataURL('image/png')
-  } catch (e) {
-    console.error('生成裁剪预览失败(可能仍为跨域):', e)
-    ElMessage.error('裁剪预览生成失败，请重试')
   }
+  loadImg.onerror = () => {
+    console.error('代理加载原图失败')
+    ElMessage.warning('裁剪预览生成失败（原图加载异常）')
+  }
+  loadImg.src = proxyUrl
 }
 
 const confirmCrop = async () => {
   if (!cropPreviewUrl.value || !q.value?.id) return
+  cropLoading.value = true
   try {
-    const blob = await (await fetch(cropPreviewUrl.value)).blob()
+    // 使用 imageProcessor.js 的 processExamImage 进行白底化 + 去脏边 + 增强
+    const processedDataUrl = await processExamImage(cropPreviewUrl.value, {
+      autoEnhance: true,
+      padding: 5
+    })
+
+    const blob = await (await fetch(processedDataUrl)).blob()
     const file = new File([blob], 'crop.png', { type: 'image/png' })
     const result = await uploadImage(file)
     const url = result.url || result.data?.url
@@ -409,10 +396,12 @@ const confirmCrop = async () => {
     displayImageUrl.value = url
     if (q.value) q.value.geometry_image_url = url
     cropDialogVisible.value = false
-    ElMessage.success('裁剪图片已上传')
+    ElMessage.success('裁剪图片已上传并处理')
   } catch (err) {
     console.error('裁剪上传失败:', err)
     ElMessage.error('裁剪图片上传失败')
+  } finally {
+    cropLoading.value = false
   }
 }
 
