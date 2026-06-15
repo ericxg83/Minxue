@@ -3,6 +3,9 @@ import { dirname, resolve } from 'path'
 import { fileURLToPath } from 'url'
 import { pendingTaskRecovery } from './pendingTaskRecovery.js'
 import { migrateGeometryImageUrl } from './migrations/addGeometryImageUrl.js'
+import { migrateLifecycleStatus } from './migrations/007_add_lifecycle_status.js'
+import { migrateReviewStatus } from './migrations/008_add_review_status.js'
+import { migrateQuestionCacheId } from './migrations/009_add_question_cache_id.js'
 
 const __dirname = dirname(fileURLToPath(import.meta.url))
 dotenv.config({ path: resolve(__dirname, '.env') })
@@ -13,7 +16,7 @@ import multer from 'multer'
 import { query, TABLES, TASK_STATUS, QUESTION_STATUS, WRONG_STATUS } from './config/neon.js'
 import { uploadFilesWithRetry } from './services/uploadRetryManager.js'
 import { createUploadReport, logUploadReport } from './services/uploadReportLogger.js'
-import { createJudgement } from './services/neonService.js'
+import { createJudgement, batchUpdateQuestionTags } from './services/neonService.js'
 import { uploadImage, deleteFile } from './services/ossService.js'
 import { getTaskQueue, getQueueStats, taskWorker } from './queue.js'
 import { processTask } from './worker.js'
@@ -293,6 +296,23 @@ app.get('/api/tasks/student/:studentId', async (req, res) => {
     res.json({ success: true, tasks: rows })
   } catch (error) {
     console.error('获取学生任务失败:', error)
+    res.status(500).json({ error: error.message })
+  }
+})
+
+// Update task (e.g., mark review as done)
+app.put('/api/tasks/:taskId', async (req, res) => {
+  try {
+    const { taskId } = req.params
+    const { status } = req.body
+    const { rows } = await query(
+      `UPDATE ${TABLES.TASKS} SET status = $1, updated_at = NOW() WHERE id = $2 RETURNING *`,
+      [status, taskId]
+    )
+    if (rows.length === 0) return res.status(404).json({ error: '任务不存在' })
+    res.json({ success: true, task: rows[0] })
+  } catch (error) {
+    console.error('更新任务失败:', error)
     res.status(500).json({ error: error.message })
   }
 })
@@ -630,9 +650,22 @@ app.post('/api/questions', async (req, res) => {
 app.put('/api/questions/:id', async (req, res) => {
   try {
     const { id } = req.params
-    const { content, options, answer, analysis, status, question_type, subject, is_correct, student_answer, image_url, ai_answer, answer_source, geometry_image_url } = req.body
+    const { content, options, answer, analysis, status, question_type, subject, is_correct, student_answer, image_url, ai_answer, answer_source, geometry_image_url, review_status } = req.body
     const hasIsCorrect = 'is_correct' in req.body
     const hasAnswerSource = 'answer_source' in req.body && answer_source !== undefined
+    const hasReviewStatus = 'review_status' in req.body
+
+    // [P1-4b] is_correct 变更前读取旧值，用于 judgement 记录
+    let oldIsCorrect = null
+    if (hasIsCorrect) {
+      const { rows: oldRows } = await query(
+        `SELECT is_correct, task_id FROM ${TABLES.QUESTIONS} WHERE id = $1`,
+        [id]
+      )
+      if (oldRows.length > 0) {
+        oldIsCorrect = oldRows[0].is_correct
+      }
+    }
 
     // PostgreSQL pg 驱动无法推断 undefined 的类型，统一转 null
     const n = (v) => v === undefined ? null : v
@@ -652,17 +685,60 @@ app.put('/api/questions/:id', async (req, res) => {
            ai_answer = COALESCE($11, ai_answer),
            answer_source = CASE WHEN $15 THEN $12::text ELSE answer_source END,
            geometry_image_url = COALESCE($16, geometry_image_url),
+           review_status = CASE WHEN $17 THEN $18::text ELSE review_status END,
            updated_at = NOW()
        WHERE id = $13
        RETURNING *`,
-      [n(content), n(options), n(answer), n(analysis), n(status), n(question_type), n(subject), n(is_correct), n(student_answer), n(image_url), n(ai_answer), n(answer_source), id, hasIsCorrect, hasAnswerSource, n(geometry_image_url)]
+      [n(content), n(options), n(answer), n(analysis), n(status), n(question_type), n(subject), n(is_correct), n(student_answer), n(image_url), n(ai_answer), n(answer_source), id, hasIsCorrect, hasAnswerSource, n(geometry_image_url), hasReviewStatus, n(review_status)]
     )
 
     if (rows.length === 0) return res.status(404).json({ error: '题目不存在' })
 
     res.json({ success: true, question: rows[0] })
 
-    // [Shadow Mode] 追加写入 PC 编辑判定记录
+    // [cache_id] 如果题目关联了 question_cache 且更新了权威字段，同步写入缓存
+    const updatedQuestion = rows[0]
+    if (updatedQuestion.cache_id) {
+      const canonicalFields = ['content', 'options', 'answer', 'analysis', 'question_type', 'subject']
+      const hasCanonicalUpdate = canonicalFields.some(f => f in req.body)
+      if (hasCanonicalUpdate) {
+        const cacheUpdates = []
+        const cacheParams = []
+        let paramIdx = 1
+        for (const field of canonicalFields) {
+          if (field in req.body) {
+            let val = req.body[field]
+            if (val !== undefined) {
+              // JSONB 字段需要序列化
+              if (field === 'options') {
+                val = JSON.stringify(val)
+              }
+              cacheUpdates.push(`${field} = $${paramIdx++}`)
+              cacheParams.push(val)
+            }
+          }
+        }
+        if (cacheUpdates.length > 0) {
+          cacheParams.push(updatedQuestion.cache_id)
+          query(
+            `UPDATE ${TABLES.QUESTION_CACHE}
+             SET ${cacheUpdates.join(', ')}, updated_at = NOW()
+             WHERE id = $${paramIdx}`,
+            cacheParams
+          ).catch(e => console.error(`[cache_id] 同步写入缓存失败 cache=${updatedQuestion.cache_id.substring(0, 8)}:`, e.message))
+        }
+      }
+    }
+
+    // [P1-4b] is_correct 变更时追加写入 PC 编辑判定记录
+    if (hasIsCorrect && oldIsCorrect !== is_correct) {
+      createJudgement({
+        questionId: id,
+        source: 'pc_edit',
+        isCorrect: is_correct,
+        metadata: { oldIsCorrect, editedFields: Object.keys(req.body).filter(k => k !== 'id') }
+      }).catch(e => console.error('[Shadow] judgements写入失败 (pc_edit):', e.message))
+    }
   } catch (error) {
     console.error('更新题目失败:', error)
     res.status(500).json({ error: error.message })
@@ -676,7 +752,8 @@ app.post('/api/questions/batch-update-tags', async (req, res) => {
       return res.status(400).json({ error: '缺少 updates 数组' })
     }
 
-    res.json({ success: true, message: '标签已更新' })
+    const results = await batchUpdateQuestionTags(updates)
+    res.json({ success: true, updated: results.length })
   } catch (error) {
     console.error('批量更新标签失败:', error)
     res.status(500).json({ error: error.message })
@@ -708,12 +785,182 @@ app.get('/api/questions/task/:taskId', async (req, res) => {
   try {
     const { taskId } = req.params
     const { rows } = await query(
-      `SELECT * FROM ${TABLES.QUESTIONS} WHERE task_id = $1 ORDER BY COALESCE((block_coordinates->>'y')::float, 99999), created_at`,
+      `SELECT q.*,
+              qc.content AS _cache_content,
+              qc.options AS _cache_options,
+              qc.answer AS _cache_answer,
+              qc.analysis AS _cache_analysis,
+              qc.question_type AS _cache_question_type,
+              qc.subject AS _cache_subject,
+              qc.ai_tags AS _cache_ai_tags
+       FROM ${TABLES.QUESTIONS} q
+       LEFT JOIN ${TABLES.QUESTION_CACHE} qc ON q.cache_id = qc.id
+       WHERE q.task_id = $1
+       ORDER BY COALESCE((q.block_coordinates->>'y')::float, 99999), q.created_at`,
       [taskId]
     )
-    res.json({ success: true, questions: rows })
+    // JS 层做 COALESCE：cache 字段优先于 question 自身字段
+    const merged = rows.map(q => ({
+      ...q,
+      content: q._cache_content ?? q.content,
+      options: q._cache_options ?? q.options,
+      answer: q._cache_answer ?? q.answer,
+      analysis: q._cache_analysis ?? q.analysis,
+      question_type: q._cache_question_type ?? q.question_type,
+      subject: q._cache_subject ?? q.subject,
+      ai_tags: q._cache_ai_tags ?? q.ai_tags
+    }))
+    // 移除 _cache_ 前缀的临时字段
+    for (const qq of merged) {
+      delete qq._cache_content
+      delete qq._cache_options
+      delete qq._cache_answer
+      delete qq._cache_analysis
+      delete qq._cache_question_type
+      delete qq._cache_subject
+      delete qq._cache_ai_tags
+    }
+    res.json({ success: true, questions: merged })
   } catch (error) {
     console.error('获取任务题目失败:', error)
+    res.status(500).json({ error: error.message })
+  }
+})
+
+// Question search & filter
+app.get('/api/questions/search', async (req, res) => {
+  try {
+    const {
+      keyword = '',
+      subject = '',
+      question_type = '',
+      is_correct = '',
+      status = '',
+      student_id = '',
+      limit = '30',
+      offset = '0'
+    } = req.query
+
+    const conditions = []
+    const params = []
+    let idx = 1
+
+    // keyword: search across content, answer, analysis (both q and qc)
+    if (keyword.trim()) {
+      const kw = `%${keyword.trim()}%`
+      conditions.push(`(q.content ILIKE $${idx} OR qc.content ILIKE $${idx} OR qc.answer ILIKE $${idx} OR qc.analysis ILIKE $${idx})`)
+      params.push(kw)
+      idx++
+    }
+
+    if (subject) {
+      conditions.push(`q.subject = $${idx}`)
+      params.push(subject)
+      idx++
+    }
+
+    if (question_type) {
+      conditions.push(`q.question_type = $${idx}`)
+      params.push(question_type)
+      idx++
+    }
+
+    if (is_correct === 'true' || is_correct === 'false') {
+      conditions.push(`q.is_correct = $${idx}`)
+      params.push(is_correct === 'true')
+      idx++
+    }
+
+    if (status) {
+      conditions.push(`q.status = $${idx}`)
+      params.push(status)
+      idx++
+    }
+
+    if (student_id) {
+      conditions.push(`q.student_id = $${idx}`)
+      params.push(student_id)
+      idx++
+    }
+
+    const whereClause = conditions.length > 0 ? 'WHERE ' + conditions.join(' AND ') : ''
+
+    // Count total
+    const countResult = await query(
+      `SELECT COUNT(*) AS total
+       FROM ${TABLES.QUESTIONS} q
+       LEFT JOIN ${TABLES.QUESTION_CACHE} qc ON q.cache_id = qc.id
+       ${whereClause}`,
+      params
+    )
+    const total = parseInt(countResult.rows[0]?.total || '0', 10)
+
+    const limitNum = Math.min(Math.max(parseInt(limit, 10) || 30, 1), 200)
+    const offsetNum = Math.max(parseInt(offset, 10) || 0, 0)
+
+    params.push(limitNum)
+    const limitIdx = idx++
+    params.push(offsetNum)
+    const offsetIdx = idx++
+
+    const { rows } = await query(
+      `SELECT q.*,
+              qc.content AS _cache_content,
+              qc.options AS _cache_options,
+              qc.answer AS _cache_answer,
+              qc.analysis AS _cache_analysis,
+              qc.ai_tags AS _cache_ai_tags
+       FROM ${TABLES.QUESTIONS} q
+       LEFT JOIN ${TABLES.QUESTION_CACHE} qc ON q.cache_id = qc.id
+       ${whereClause}
+       ORDER BY q.updated_at DESC
+       LIMIT $${limitIdx} OFFSET $${offsetIdx}`,
+      params
+    )
+
+    const merged = rows.map(q => ({
+      ...q,
+      content: q._cache_content ?? q.content,
+      options: q._cache_options ?? q.options,
+      answer: q._cache_answer ?? q.answer,
+      analysis: q._cache_analysis ?? q.analysis,
+      ai_tags: q._cache_ai_tags ?? q.ai_tags
+    }))
+    for (const qq of merged) {
+      delete qq._cache_content
+      delete qq._cache_options
+      delete qq._cache_answer
+      delete qq._cache_analysis
+      delete qq._cache_ai_tags
+    }
+
+    res.json({ success: true, questions: merged, total, limit: limitNum, offset: offsetNum })
+  } catch (error) {
+    console.error('题目搜索失败:', error)
+    res.status(500).json({ error: error.message })
+  }
+})
+
+// [P1-4a] 批量查询每道题的最新 judgement
+app.post('/api/judgements/latest', async (req, res) => {
+  try {
+    const { studentId, questionIds } = req.body
+    if (!studentId || !questionIds || !Array.isArray(questionIds) || questionIds.length === 0) {
+      return res.json({ success: true, judgements: [] })
+    }
+
+    const placeholders = questionIds.map((_, i) => `$${i + 2}`).join(',')
+    const { rows } = await query(
+      `SELECT DISTINCT ON (question_id) *
+       FROM ${TABLES.JUDGEMENTS}
+       WHERE student_id = $1 AND question_id IN (${placeholders})
+       ORDER BY question_id, created_at DESC`,
+      [studentId, ...questionIds]
+    )
+
+    res.json({ success: true, judgements: rows })
+  } catch (error) {
+    console.error('获取最新判定记录失败:', error)
     res.status(500).json({ error: error.message })
   }
 })
@@ -776,17 +1023,93 @@ app.get('/api/wrong-questions/student/:studentId', async (req, res) => {
   }
 })
 
+// [P0-2a] 按 (student_id, question_id) upsert，修复扫码批改 ID 错配
+app.put('/api/wrong-questions/upsert', async (req, res) => {
+  try {
+    const { studentId, questionId, status, lifecycleStatus, isCorrect } = req.body
+    if (!studentId || !questionId) {
+      return res.status(400).json({ error: '缺少 studentId 或 questionId' })
+    }
+
+    // 查找已有记录（按 student_id + question_id 唯一约束）
+    let { rows } = await query(
+      `SELECT id FROM ${TABLES.WRONG_QUESTIONS} WHERE student_id = $1 AND question_id = $2`,
+      [studentId, questionId]
+    )
+
+    let wqId
+    if (rows.length === 0) {
+      const { rows: inserted } = await query(
+        `INSERT INTO ${TABLES.WRONG_QUESTIONS} (student_id, question_id, status, error_count, added_at, last_wrong_at, created_at, updated_at)
+         VALUES ($1, $2, 'pending', 1, NOW(), NOW(), NOW(), NOW())
+         RETURNING id`,
+        [studentId, questionId]
+      )
+      wqId = inserted[0].id
+    } else {
+      wqId = rows[0].id
+    }
+
+    // 动态构建 UPDATE SET
+    const setClauses = ["updated_at = NOW()"]
+    const params = []
+    if (status) { params.push(status); setClauses.push(`status = $${params.length}`) }
+    if (lifecycleStatus) { params.push(lifecycleStatus); setClauses.push(`lifecycle_status = $${params.length}`) }
+
+    if (setClauses.length > 1) {
+      params.push(wqId)
+      await query(
+        `UPDATE ${TABLES.WRONG_QUESTIONS} SET ${setClauses.join(', ')} WHERE id = $${params.length}`,
+        params
+      )
+    }
+
+    // 同步更新 questions 表的 is_correct
+    if (isCorrect !== undefined) {
+      await query(
+        `UPDATE ${TABLES.QUESTIONS} SET is_correct = $1, updated_at = NOW() WHERE id = $2`,
+        [isCorrect, questionId]
+      )
+    }
+
+    // [Shadow Mode] 追加写入人工复审判定记录
+    createJudgement({
+      questionId,
+      studentId,
+      source: 'manual_review',
+      isCorrect: isCorrect ?? null,
+      metadata: { status, lifecycleStatus, wrongQuestionId: wqId }
+    }).catch(e => console.error('[Shadow] judgements写入失败 (upsert):', e.message))
+
+    res.json({ success: true, wrongQuestionId: wqId })
+  } catch (error) {
+    console.error('Upsert错题失败:', error)
+    res.status(500).json({ error: error.message })
+  }
+})
+
 app.put('/api/wrong-questions/:id', async (req, res) => {
   try {
     const { id } = req.params
-    const { status } = req.body
+    const { status, lifecycle_status, student_answer } = req.body
 
-    await query(
-      `UPDATE ${TABLES.WRONG_QUESTIONS} SET status = $1, updated_at = NOW() WHERE id = $2`,
-      [status, id]
-    )
+    // 动态构建 SET 子句
+    const setClauses = ["updated_at = NOW()"]
+    const params = []
+    if (status) { params.push(status); setClauses.push(`status = $${params.length}`) }
+    if (lifecycle_status) { params.push(lifecycle_status); setClauses.push(`lifecycle_status = $${params.length}`) }
+    if (student_answer) { params.push(student_answer); setClauses.push(`student_answer = $${params.length}`) }
+
+    if (setClauses.length > 1) {
+      params.push(id)
+      await query(
+        `UPDATE ${TABLES.WRONG_QUESTIONS} SET ${setClauses.join(', ')} WHERE id = $${params.length}`,
+        params
+      )
+    }
 
     res.json({ success: true, message: '状态已更新' })
+
     // [Shadow Mode] 追加写入人工复审判定记录（错题状态变更）
     createJudgement({
       questionId: id,
@@ -885,21 +1208,6 @@ app.delete('/api/generated-exams/:id', async (req, res) => {
   }
 })
 
-// Combined exams endpoint (legacy support)
-app.get('/api/exams/student/:studentId', async (req, res) => {
-  try {
-    const { studentId } = req.params
-    const { rows } = await query(
-      `SELECT * FROM ${TABLES.GENERATED_EXAMS} WHERE student_id = $1 ORDER BY created_at DESC`,
-      [studentId]
-    )
-    res.json({ success: true, exams: rows })
-  } catch (error) {
-    console.error('获取考试列表失败:', error)
-    res.status(500).json({ error: error.message })
-  }
-})
-
 // Error handler
 app.use((err, req, res, next) => {
   console.error('服务器错误:', err)
@@ -944,6 +1252,9 @@ if (process.argv[1] === __filename || process.argv[1]?.endsWith('server/index.js
     // 运行数据库迁移
     try {
       await migrateGeometryImageUrl()
+      await migrateLifecycleStatus()
+      await migrateReviewStatus()
+      await migrateQuestionCacheId()
     } catch (err) {
       console.error('数据库迁移失败:', err.message)
     }

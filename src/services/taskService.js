@@ -80,37 +80,6 @@ export const taskService = {
   }
 }
 
-export const subscribeToTaskUpdates = (onTaskUpdate) => {
-  // 由于任务数据存储在 Neon 数据库中，而非 Supabase，
-  // 使用轮询代替 Supabase Realtime 订阅
-  let polling = true
-  let timerId = null
-  let lastTasks = new Map()
-
-  const poll = async () => {
-    if (!polling) return
-
-    try {
-      // 获取所有学生的任务（通过遍历当前已知任务的学生ID）
-      // 这里简化处理：轮询会由 startTaskPolling 处理每个学生的任务
-      // 此函数仅作为兼容层保留
-    } catch (error) {
-      console.debug('轮询任务更新失败:', error)
-    }
-
-    if (polling) {
-      timerId = setTimeout(poll, 10000)
-    }
-  }
-
-  poll()
-
-  return () => {
-    polling = false
-    if (timerId) clearTimeout(timerId)
-  }
-}
-
 export const startTaskPolling = (studentId, onUpdate, intervalMs = 5000) => {
   let polling = true
   let timerId = null

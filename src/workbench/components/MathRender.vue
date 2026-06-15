@@ -1,5 +1,5 @@
 <template>
-  <div :class="className" :style="{ whiteSpace: 'pre-wrap', lineHeight: '1.8' }" v-html="renderedHtml"></div>
+  <component :is="tag" :class="className" :style="tagStyle" v-html="renderedHtml"></component>
 </template>
 
 <script setup>
@@ -15,7 +15,26 @@ const props = defineProps({
   className: {
     type: String,
     default: ''
+  },
+  autoDetect: {
+    type: Boolean,
+    default: false
+  },
+  tag: {
+    type: String,
+    default: 'div'
   }
+})
+
+const tagStyle = computed(() => {
+  const base = { whiteSpace: 'pre-wrap' }
+  if (props.tag === 'span') {
+    base.display = 'inline'
+    base.lineHeight = 'inherit'
+  } else {
+    base.lineHeight = '1.8'
+  }
+  return base
 })
 
 /**
@@ -83,6 +102,15 @@ function cleanLatex(latex) {
 function renderToHtml(text) {
   if (!text || typeof text !== 'string') {
     return text || ''
+  }
+
+  // autoDetect: 若没有 $ 定界符但包含 LaTeX 命令，将全文视为行内数学
+  if (props.autoDetect && text.indexOf('$') === -1 && /\\[a-zA-Z]{2,}/.test(text)) {
+    try {
+      return katex.renderToString(cleanLatex(text), { displayMode: false, throwOnError: false })
+    } catch (e) {
+      // 渲染失败则降级到普通文本处理
+    }
   }
 
   const htmlParts = []

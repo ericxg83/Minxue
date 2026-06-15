@@ -1,46 +1,46 @@
 import { createRouter, createWebHashHistory } from 'vue-router'
-import DashboardWorkbench from '../views/DashboardWorkbench.vue'
-import WrongBookWorkbench from '../views/WrongBookWorkbench.vue'
-import ExamWorkbench from '../views/ExamWorkbench.vue'
-import GrowthWorkbench from '../views/GrowthWorkbench.vue'
-import AIReviewWorkbench from '../views/AIReviewWorkbench.vue'
-import QuestionBankWorkbench from '../views/QuestionBankWorkbench.vue'
 
 const routes = [
   {
     path: '/',
     name: 'Dashboard',
-    component: DashboardWorkbench,
+    component: () => import('../views/DashboardWorkbench.vue'),
     meta: { requiresPC: true }
   },
   {
     path: '/wrongbook',
     name: 'WrongBook',
-    component: WrongBookWorkbench,
+    component: () => import('../views/WrongBookWorkbench.vue'),
     meta: { requiresPC: true }
   },
   {
     path: '/paper',
     name: 'PaperImport',
-    component: ExamWorkbench,
+    component: () => import('../views/ExamWorkbench.vue'),
     meta: { requiresPC: true }
   },
   {
     path: '/growth',
     name: 'Growth',
-    component: GrowthWorkbench,
+    component: () => import('../views/GrowthWorkbench.vue'),
+    meta: { requiresPC: true }
+  },
+  {
+    path: '/exam-history',
+    name: 'ExamHistory',
+    component: () => import('../views/ExamHistoryWorkbench.vue'),
     meta: { requiresPC: true }
   },
   {
     path: '/ai-review',
     name: 'AIReview',
-    component: AIReviewWorkbench,
+    component: () => import('../views/AIReviewWorkbench.vue'),
     meta: { requiresPC: true }
   },
   {
     path: '/question-bank',
     name: 'QuestionBank',
-    component: QuestionBankWorkbench,
+    component: () => import('../views/QuestionBankWorkbench.vue'),
     meta: { requiresPC: true }
   }
 ]

@@ -1,54 +1,7 @@
 <template>
   <div class="wrongbook-workbench">
-    <!-- 顶部 Header 栏 -->
-    <header class="top-header">
-      <div class="top-header__left">
-        <div class="logo">
-          <svg viewBox="0 0 24 24" fill="none" class="logo-icon" width="24" height="24">
-            <path d="M12 2L2 7l10 5 10-5-10-5zM2 17l10 5 10-5M2 12l10 5 10-5" stroke="#1677FF" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
-          </svg>
-          <span class="logo-text">敏学成长工作台</span>
-        </div>
-      </div>
-      <div class="top-header__right">
-        <div class="header-icon-btn" title="通知">
-          <el-icon><Bell /></el-icon>
-          <span class="header-badge">12</span>
-        </div>
-        <div class="header-icon-btn" title="帮助中心">
-          <el-icon><QuestionFilled /></el-icon>
-          <span class="header-icon-label">帮助中心</span>
-        </div>
-        <div class="header-user">
-          <el-avatar :size="32" src="https://api.dicebear.com/7.x/avataaars/svg?seed=admin" />
-          <span class="header-user-name">管理员</span>
-          <el-icon class="header-dropdown-icon"><ArrowDown /></el-icon>
-        </div>
-      </div>
-    </header>
-
-    <!-- 三栏主内容区 -->
     <div class="main-layout">
-      <!-- 第一栏：系统导航 -->
-      <aside class="nav-sidebar">
-        <div class="nav-menu">
-          <div
-            v-for="menu in navMenus"
-            :key="menu.key"
-            class="nav-menu-item"
-            :class="{ 'nav-menu-item--active': currentMenu === menu.key, 'nav-menu-item--disabled': menu.disabled }"
-            @click="handleNavMenuClick(menu.key)"
-          >
-            <div class="nav-menu-item__icon">
-              <el-icon><component :is="menu.icon" /></el-icon>
-            </div>
-            <span class="nav-menu-item__text">{{ menu.label }}</span>
-            <span v-if="menu.key === 'exam-import'" class="dev-badge">开发中</span>
-          </div>
-        </div>
-      </aside>
-
-      <!-- 第二栏：错题列表 -->
+      <!-- 第一栏：错题列表 -->
       <aside class="question-panel">
         <div class="question-panel__header">
           <span class="question-panel__title">错题库</span>
@@ -178,7 +131,7 @@
           <div class="detail-header__meta">
             <span class="detail-meta-text">{{ getQuestionGrade(selectedDetailQuestion) }} · {{ getQuestionTag(selectedDetailQuestion) }} · 更新于：{{ getFullTime(selectedDetailQuestion) }}</span>
           </div>
-          <div class="detail-header__actions">
+          <div class="detail-header__actions" v-if="!editing">
             <el-button size="small" @click="handleEditQuestion(selectedDetailQuestion)">编辑题目</el-button>
             <el-dropdown trigger="click">
               <el-button size="small">
@@ -192,10 +145,17 @@
               </template>
             </el-dropdown>
           </div>
+          <div class="detail-header__actions" v-else>
+            <el-button size="small" @click="handleCancelEdit">取消</el-button>
+            <el-button size="small" type="success" :loading="saving" @click="handleSave">
+              <el-icon><DocumentChecked /></el-icon> 保存
+            </el-button>
+          </div>
         </div>
 
         <!-- 题目内容区 -->
-        <div class="detail-content-area">
+        <!-- 只读模式 -->
+        <div class="detail-content-area" v-if="!editing">
           <div class="detail-section">
             <div class="detail-section__label">题目内容</div>
             <div class="detail-section__content question-content-box">
@@ -245,8 +205,79 @@
           </div>
         </div>
 
+        <!-- 编辑模式 -->
+        <div class="edit-form-area" v-else>
+          <el-form label-width="80px" size="small">
+            <el-form-item label="题型">
+              <el-select v-model="form.question_type" style="width: 100%" @change="onTypeChange">
+                <el-option label="选择题" value="choice" />
+                <el-option label="填空题" value="fill" />
+                <el-option label="解答题" value="answer" />
+              </el-select>
+            </el-form-item>
+            <el-form-item label="学科">
+              <el-select v-model="form.subject" style="width: 100%" allow-create filterable>
+                <el-option label="数学" value="数学" />
+                <el-option label="物理" value="物理" />
+                <el-option label="化学" value="化学" />
+                <el-option label="英语" value="英语" />
+                <el-option label="语文" value="语文" />
+              </el-select>
+            </el-form-item>
+            <el-form-item label="题干">
+              <el-input v-model="form.content" type="textarea" :rows="4" placeholder="题目内容" />
+            </el-form-item>
+            <el-form-item label="选项" v-if="form.question_type === 'choice'">
+              <div class="option-list">
+                <div v-for="(opt, i) in form.options" :key="i" class="option-row">
+                  <span class="option-letter">{{ String.fromCharCode(65 + i) }}.</span>
+                  <el-input v-model="form.options[i]" placeholder="选项内容" />
+                  <el-button size="small" type="danger" plain @click="removeOption(i)">—</el-button>
+                </div>
+                <el-button size="small" @click="addOption">+ 添加选项</el-button>
+              </div>
+            </el-form-item>
+            <el-form-item label="标准答案">
+              <el-input v-model="form.answer" placeholder="标准答案（如 A）" />
+            </el-form-item>
+            <el-form-item label="知识点">
+              <div class="tags-wrap">
+                <el-tag v-for="tag in form.tags" :key="tag" size="default" closable @close="removeTag(tag)" round>
+                  {{ tag }}
+                </el-tag>
+                <el-button text size="default" type="primary" @click="showTagSelector = true">
+                  <el-icon><Plus /></el-icon> 添加
+                </el-button>
+              </div>
+            </el-form-item>
+            <el-form-item label="配图">
+              <div class="image-wrap">
+                <img v-if="displayImageUrl" :src="displayImageUrl" class="preview-image" />
+                <div v-else class="no-image">
+                  <el-icon :size="20"><Picture /></el-icon>
+                  <span>暂无配图</span>
+                </div>
+                <div class="image-actions">
+                  <el-upload :show-file-list="false" :before-upload="handleImageUpload"
+                    accept=".jpg,.jpeg,.png,.webp,image/jpeg,image/png,image/webp">
+                    <el-button size="small" type="primary">
+                      <el-icon><Upload /></el-icon>{{ displayImageUrl ? '替换' : '上传' }}
+                    </el-button>
+                  </el-upload>
+                  <el-button v-if="displayImageUrl" size="small" type="danger" @click="deleteImage">
+                    <el-icon><Delete /></el-icon> 删除
+                  </el-button>
+                </div>
+              </div>
+            </el-form-item>
+            <el-form-item label="AI 解析">
+              <el-input v-model="form.analysis" type="textarea" :rows="3" placeholder="题目解析" />
+            </el-form-item>
+          </el-form>
+        </div>
+
         <!-- 错题统计 -->
-        <div class="detail-stats-area">
+        <div class="detail-stats-area" v-if="!editing">
           <div class="detail-stats__title">错题统计</div>
           <div class="detail-stats__grid">
             <div class="stat-box">
@@ -273,7 +304,7 @@
         </div>
 
         <!-- 最近错题学生 -->
-        <div class="recent-students-area">
+        <div class="recent-students-area" v-if="!editing">
           <div class="recent-students__header">
             <span class="recent-students__title">最近错题学生</span>
             <span class="recent-students__more">查看更多 <el-icon><ArrowRight /></el-icon></span>
@@ -301,47 +332,33 @@
       </section>
     </div>
   </div>
+
+  <!-- 知识点选择器 -->
+  <el-dialog v-model="showTagSelector" title="选择知识点" width="380px">
+    <div class="tag-grid">
+      <div v-for="tag in allKnowledgeTags" :key="tag" class="tag-option"
+        :class="{ 'tag-selected': form.tags?.includes(tag) }" @click="toggleTag(tag)">{{ tag }}</div>
+    </div>
+    <template #footer><el-button @click="showTagSelector = false">关闭</el-button></template>
+  </el-dialog>
 </template>
 
 <script setup>
 import { ref, computed, onMounted, onUnmounted } from 'vue'
 import { useRouter } from 'vue-router'
-import { ElMessage, ElMessageBox } from 'element-plus'
+import { ElMessage, ElMessageBox, ElLoading } from 'element-plus'
 import {
-  Bell, QuestionFilled, ArrowDown, ArrowRight, Search, Filter, Close,
-  WarningFilled, Picture
+  ArrowDown, ArrowRight, Search, Filter, Close,
+  WarningFilled, Picture, Delete, Plus, Upload,
+  DocumentChecked, RefreshLeft
 } from '@element-plus/icons-vue'
 import { useWrongBookStore } from '../stores/wrongBookStore'
-import { getStudents } from '../../services/apiService'
+import { getStudents, updateQuestion } from '../../services/apiService'
 import dayjs from 'dayjs'
 import MathRender from "../components/MathRender.vue"
 
 const router = useRouter()
 const wrongBookStore = useWrongBookStore()
-
-// ===== 导航菜单 =====
-const currentMenu = ref('wrong-book')
-const navMenus = [
-  { key: 'proofread', label: '题目校对', icon: 'DocumentChecked' },
-  { key: 'wrong-book', label: '错题管理', icon: 'Collection' },
-  { key: 'growth', label: '成长中心', icon: 'TrendCharts' },
-  { key: 'exam-import', label: '试卷入库', icon: 'UploadFilled', disabled: true },
-]
-
-const handleNavMenuClick = (key) => {
-  const menu = navMenus.find(m => m.key === key)
-  if (menu?.disabled) return
-  currentMenu.value = key
-  const routeMap = {
-    'proofread': '/',
-    'wrong-book': '/wrongbook',
-    'growth': '/growth',
-    'exam-import': '/paper',
-  }
-  if (routeMap[key] && routeMap[key] !== router.currentRoute.value.path) {
-    router.push(routeMap[key])
-  }
-}
 
 // ===== 搜索 =====
 const searchQueryProxy = computed({
@@ -364,6 +381,26 @@ const totalPages = computed(() => Math.ceil(filteredQuestions.value.length / PAG
 
 const handlePageChange = (page) => {
   wrongBookStore.currentPage = page
+}
+
+// ===== 编辑状态 =====
+const editing = ref(false)
+const saving = ref(false)
+const form = ref(createEmptyForm())
+const originalData = ref(null)
+const displayImageUrl = ref('')
+const localImageUrl = ref('')
+const showTagSelector = ref(false)
+const allKnowledgeTags = ref([
+  '全等三角形判定', '角的关系推导', '线段等式证明', '平行线的性质',
+  '角平分线定义', '三角形内角和定理', '等式性质', '勾股定理',
+  '相似三角形', '圆的性质', '函数与图像', '概率统计',
+  '有理数运算', '一元二次方程', '二元一次方程组', '分式方程',
+  '因式分解', '二次函数', '反比例函数', '三角函数'
+])
+
+function createEmptyForm() {
+  return { content: '', options: [], answer: '', analysis: '', question_type: 'choice', subject: '', tags: [] }
 }
 
 // ===== 选中题目 =====
@@ -531,8 +568,99 @@ const handleBack = () => {
   router.push('/')
 }
 
+// ===== 编辑操作 =====
 const handleEditQuestion = (wq) => {
-  ElMessage.info('编辑功能开发中')
+  const q = getQuestion(wq)
+  editing.value = true
+  form.value = {
+    content: q.content || wq.content || '',
+    options: JSON.parse(JSON.stringify(q.options || wq.options || [])),
+    answer: q.answer || wq.answer || '',
+    analysis: q.analysis || wq.analysis || '',
+    question_type: q.question_type || wq.question_type || 'choice',
+    subject: q.subject || wq.subject || '',
+    tags: JSON.parse(JSON.stringify(getQuestionTags(wq)))
+  }
+  originalData.value = JSON.parse(JSON.stringify(form.value))
+  displayImageUrl.value = getQuestionThumb(wq)
+  localImageUrl.value = displayImageUrl.value
+}
+
+const handleCancelEdit = () => {
+  editing.value = false
+  form.value = createEmptyForm()
+  displayImageUrl.value = ''
+  localImageUrl.value = ''
+}
+
+const handleSave = async () => {
+  const q = getQuestion(selectedDetailQuestion.value)
+  const questionId = q.id || selectedDetailQuestion.value.question_id
+  if (!questionId) return
+  saving.value = true
+  try {
+    await updateQuestion(questionId, {
+      content: form.value.content,
+      options: form.value.options,
+      answer: form.value.answer,
+      analysis: form.value.analysis,
+      question_type: form.value.question_type,
+      subject: form.value.subject,
+      ai_tags: form.value.tags,
+      geometry_image_url: localImageUrl.value
+    })
+    ElMessage.success('保存成功')
+    editing.value = false
+    // 刷新数据
+    if (wrongBookStore.currentStudent?.id) {
+      await wrongBookStore.loadWrongQuestions(wrongBookStore.currentStudent.id)
+    }
+  } catch (e) {
+    ElMessage.error('保存失败: ' + (e.message || '未知错误'))
+  } finally {
+    saving.value = false
+  }
+}
+
+const onTypeChange = (val) => {
+  if (val !== 'choice') {
+    form.value.options = []
+  } else if (form.value.options.length === 0) {
+    form.value.options = ['', '', '', '']
+  }
+}
+
+const addOption = () => { form.value.options.push('') }
+const removeOption = (idx) => { form.value.options.splice(idx, 1) }
+const removeTag = (tag) => { form.value.tags = form.value.tags.filter(t => t !== tag) }
+const toggleTag = (tag) => {
+  const idx = form.value.tags.indexOf(tag)
+  if (idx === -1) form.value.tags.push(tag)
+  else form.value.tags.splice(idx, 1)
+}
+
+const handleImageUpload = async (file) => {
+  const reader = new FileReader()
+  reader.onload = (e) => { displayImageUrl.value = e.target?.result || '' }
+  reader.readAsDataURL(file)
+  try {
+    const formData = new FormData()
+    formData.append('files', file)
+    const response = await fetch('/api/upload', { method: 'POST', body: formData })
+    if (!response.ok) throw new Error('上传失败')
+    const result = await response.json()
+    displayImageUrl.value = localImageUrl.value = result.url
+    ElMessage.success('配图上传成功')
+  } catch (err) {
+    console.error('图片上传失败:', err)
+    ElMessage.error('图片上传失败')
+  }
+  return false
+}
+
+const deleteImage = () => {
+  localImageUrl.value = displayImageUrl.value = ''
+  ElMessage.success('配图已删除')
 }
 
 const handleDeleteQuestion = async (wq) => {
@@ -580,115 +708,11 @@ onUnmounted(() => {
 <style scoped>
 /* ===== CSS Variables ===== */
 .wrongbook-workbench {
-  height: 100vh;
+  height: 100%;
   display: flex;
   flex-direction: column;
   background: #F5F7FA;
   font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
-}
-
-/* ===== Top Header ===== */
-.top-header {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  height: 48px;
-  padding: 0 16px;
-  background: #fff;
-  border-bottom: 1px solid #E5E6EB;
-  flex-shrink: 0;
-}
-
-.top-header__left {
-  display: flex;
-  align-items: center;
-}
-
-.logo {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-}
-
-.logo-icon {
-  width: 24px;
-  height: 24px;
-}
-
-.logo-text {
-  font-size: 16px;
-  font-weight: 600;
-  color: #1D2129;
-}
-
-.top-header__right {
-  display: flex;
-  align-items: center;
-  gap: 16px;
-}
-
-.header-icon-btn {
-  display: flex;
-  align-items: center;
-  gap: 4px;
-  padding: 6px 8px;
-  border-radius: 6px;
-  cursor: pointer;
-  color: #4E5969;
-  font-size: 14px;
-  transition: background 0.2s;
-  position: relative;
-}
-
-.header-icon-btn:hover {
-  background: #F2F3F5;
-}
-
-.header-icon-btn .el-icon {
-  font-size: 18px;
-}
-
-.header-badge {
-  position: absolute;
-  top: 0;
-  right: 0;
-  min-width: 16px;
-  height: 16px;
-  padding: 0 4px;
-  background: #F53F3F;
-  color: #fff;
-  font-size: 11px;
-  line-height: 16px;
-  text-align: center;
-  border-radius: 8px;
-}
-
-.header-icon-label {
-  font-size: 13px;
-}
-
-.header-user {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  padding: 4px 8px;
-  border-radius: 6px;
-  cursor: pointer;
-  transition: background 0.2s;
-}
-
-.header-user:hover {
-  background: #F2F3F5;
-}
-
-.header-user-name {
-  font-size: 13px;
-  color: #1D2129;
-}
-
-.header-dropdown-icon {
-  font-size: 12px;
-  color: #86909C;
 }
 
 /* ===== Main Layout ===== */
@@ -698,76 +722,7 @@ onUnmounted(() => {
   overflow: hidden;
 }
 
-/* ===== Nav Sidebar (第一栏: 220px) ===== */
-.nav-sidebar {
-  width: 220px;
-  background: #fff;
-  border-right: 1px solid #E5E6EB;
-  flex-shrink: 0;
-  display: flex;
-  flex-direction: column;
-  padding: 16px 12px;
-}
-
-.nav-menu {
-  display: flex;
-  flex-direction: column;
-  gap: 4px;
-}
-
-.nav-menu-item {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  padding: 10px 12px;
-  border-radius: 8px;
-  cursor: pointer;
-  transition: all 0.2s;
-  font-size: 14px;
-  color: #4E5969;
-}
-
-.nav-menu-item:hover {
-  background: #F2F3F5;
-}
-
-.nav-menu-item--active {
-  background: #E8F3FF;
-  color: #1677FF;
-  font-weight: 500;
-}
-
-.nav-menu-item__icon {
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  width: 20px;
-  height: 20px;
-  font-size: 18px;
-}
-
-.nav-menu-item__text {
-  flex: 1;
-}
-
-.nav-menu-item--disabled {
-  cursor: not-allowed;
-  opacity: 0.5;
-}
-
-.dev-badge {
-  display: inline-block;
-  padding: 1px 6px;
-  background: #FFF7E6;
-  color: #FA8C16;
-  font-size: 10px;
-  border-radius: 4px;
-  font-weight: 500;
-  flex-shrink: 0;
-  border: 1px solid #FFD591;
-}
-
-/* ===== Question Panel (第二栏: ~320px) ===== */
+/* ===== Question Panel (第一栏: ~320px) ===== */
 .question-panel {
   width: 340px;
   background: #F5F7FA;
@@ -1369,5 +1324,105 @@ onUnmounted(() => {
 .recent-students__list::-webkit-scrollbar-thumb {
   background: #E5E6EB;
   border-radius: 2px;
+}
+
+/* ===== Edit Form ===== */
+.edit-form-area {
+  padding: 16px 24px;
+  flex: 1;
+  overflow-y: auto;
+}
+
+.edit-form-area .el-form-item {
+  margin-bottom: 16px;
+}
+
+.option-list {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  width: 100%;
+}
+
+.option-row {
+  display: flex;
+  gap: 6px;
+  align-items: center;
+}
+
+.option-letter {
+  font-weight: 700;
+  color: #909399;
+  min-width: 20px;
+  font-size: 14px;
+  flex-shrink: 0;
+}
+
+.option-row .el-input {
+  flex: 1;
+}
+
+.tags-wrap {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  align-items: center;
+}
+
+.image-wrap {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.preview-image {
+  max-width: 100%;
+  max-height: 200px;
+  border-radius: 6px;
+  border: 1px solid #ebeef5;
+  object-fit: contain;
+}
+
+.no-image {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  color: #c0c4cc;
+  font-size: 13px;
+  padding: 8px 0;
+}
+
+.image-actions {
+  display: flex;
+  gap: 6px;
+}
+
+.tag-grid {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.tag-option {
+  padding: 6px 14px;
+  border: 1px solid #dcdfe6;
+  border-radius: 16px;
+  font-size: 13px;
+  color: #606266;
+  cursor: pointer;
+  transition: all 0.2s;
+  user-select: none;
+}
+
+.tag-option:hover {
+  border-color: #409eff;
+  color: #409eff;
+}
+
+.tag-selected {
+  background: #ecf5ff;
+  border-color: #409eff;
+  color: #409eff;
+  font-weight: 500;
 }
 </style>

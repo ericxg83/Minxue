@@ -1,6 +1,6 @@
 import { defineStore } from 'pinia'
 import { ref, computed } from 'vue'
-import { getStudents, getTasksByStudent, getQuestionsByTask } from '../../services/apiService'
+import { getStudents, getTasksByStudent, getQuestionsByTask, updateQuestion } from '../../services/apiService'
 
 // AI批改结果状态
 export const AI_REVIEW_STATUS = {
@@ -153,6 +153,12 @@ export const useAIReviewStore = defineStore('aiReview', () => {
     if (q) {
       q._reviewStatus = result === 'correct' ? AI_REVIEW_STATUS.CONFIRMED : AI_REVIEW_STATUS.CORRECTED
       q._reviewResult = result
+
+      // [P0-3d] 持久化 AI 复审结果
+      const isCorrect = result === 'correct'
+      updateQuestion(questionId, { is_correct: isCorrect }).catch(e =>
+        console.error(`[P0-3d] AI复审结果持久化失败 q=${questionId.substring(0, 8)}:`, e.message)
+      )
     }
   }
 
@@ -162,6 +168,11 @@ export const useAIReviewStore = defineStore('aiReview', () => {
     if (q) {
       Object.assign(q, updates)
       q._reviewStatus = AI_REVIEW_STATUS.CORRECTED
+
+      // [P0-3d] 持久化内容修改
+      updateQuestion(questionId, updates).catch(e =>
+        console.error(`[P0-3d] 题目内容持久化失败 q=${questionId.substring(0, 8)}:`, e.message)
+      )
     }
   }
 

@@ -1,7 +1,7 @@
 import { defineStore } from 'pinia'
 import { ref, computed } from 'vue'
 import dayjs from 'dayjs'
-import { getStudents, getWrongQuestionsByStudent, getQuestionsByTask } from '../../services/apiService'
+import { getStudents, getWrongQuestionsByStudent, getQuestionsByTask, getTasksByStudent, updateWrongQuestionStatus, updateTaskStatus, getLatestJudgements, clearStudentCaches, updateQuestionReviewStatus } from '../../services/apiService'
 import { useLifecycleStore, LIFECYCLE_STATUS } from './lifecycleStore'
 
 export const useReviewStore = defineStore('review', () => {
@@ -17,6 +17,15 @@ export const useReviewStore = defineStore('review', () => {
   // 当前试卷的所有题目（从 questions 表）
   const allQuestions = ref([])
   const currentTaskId = ref(null)
+
+  // 当前选中的试卷（task 对象，含 image_url）
+  const currentTask = ref(null)
+
+  // AI 置信度阈值（低于此值标记为"待确认"）
+  const confidenceThreshold = ref(0.5)
+
+  // 当前学生的已完成任务列表
+  const studentTasks = ref([])
   
   // 当前审核的题目索引
   const currentReviewIndex = ref(0)
@@ -41,6 +50,22 @@ export const useReviewStore = defineStore('review', () => {
   const currentReviewQuestion = computed(() => {
     if (allQuestions.value.length === 0) return null
     return allQuestions.value[currentReviewIndex.value] || null
+  })
+
+  // 题目确认状态：已有人工审核记录 OR AI confidence >= 阈值
+  const questionConfirmationMap = computed(() => {
+    const map = {}
+    for (const q of allQuestions.value) {
+      map[q.id] = !!(q.review_status || (q.confidence != null && q.confidence >= confidenceThreshold.value))
+    }
+    return map
+  })
+
+  // 复审进度
+  const reviewProgress = computed(() => {
+    const total = allQuestions.value.length
+    const confirmed = Object.values(questionConfirmationMap.value).filter(Boolean).length
+    return { total, confirmed, unconfirmed: total - confirmed, percent: total ? Math.round(confirmed / total * 100) : 0 }
   })
 
   // 获取学生待审核题目数
@@ -159,30 +184,27 @@ export const useReviewStore = defineStore('review', () => {
   const initData = async () => {
     // 清理旧缓存，确保加载最新数据
     clearOldCaches()
-    
+
     // 加载学生列表
     await loadStudents()
-    
-    // 如果有当前学生，加载其错题
-    if (currentStudent.value?.id) {
-      await loadWrongQuestions(currentStudent.value.id)
-    } else {
-      // 加载第一个学生的错题
-      const firstStudent = students.value[0]
-      if (firstStudent) {
-        await loadWrongQuestions(firstStudent.id)
-        setCurrentStudent(firstStudent)
+
+    // 默认选择第一个学生（无论是否有错题）
+    const firstStudent = students.value[0]
+    if (firstStudent) {
+      setCurrentStudent(firstStudent)
+      // 加载该学生的已完成任务
+      await loadStudentTasks(firstStudent.id)
+      // 加载错题数据
+      await loadWrongQuestions(firstStudent.id)
+      // 自动选择第一份待复核试卷（优先 done，其次任一）
+      if (studentTasks.value.length > 0) {
+        const firstPending = studentTasks.value.find(t => t.status === 'done')
+        await selectTask(firstPending || studentTasks.value[0])
       }
     }
-    
+
     // 计算今日统计
     calculateTodayStats()
-    
-    // 默认选择第一个有待审核错题的学生
-    const firstStudentWithPending = students.value.find(s => getStudentPendingCount(s.id) > 0)
-    if (firstStudentWithPending) {
-      setCurrentStudent(firstStudentWithPending)
-    }
   }
 
   // 设置当前学生
@@ -223,12 +245,17 @@ export const useReviewStore = defineStore('review', () => {
     if (question) {
       // Store manual review status on the question
       question.review_status = result
-      
+
+      // 持久化 review_status 到数据库
+      updateQuestionReviewStatus(questionId, result).catch(e =>
+        console.error(`review_status 持久化失败 q=${questionId.substring(0, 8)}:`, e.message)
+      )
+
       // Also update the wrong question if it exists
       const wq = wrongQuestions.value.find(w => w.question_id === questionId)
       if (wq) {
         const currentStatus = wq.lifecycle_status || LIFECYCLE_STATUS.NEW
-        
+
         switch (result) {
           case 'correct':
             wq.lifecycle_status = lifecycleStore.getNextStatus(currentStatus)
@@ -245,16 +272,126 @@ export const useReviewStore = defineStore('review', () => {
             wq.status = 'excluded'
             break
         }
+
+        // [P0-3c] 持久化审核结果到数据库
+        updateWrongQuestionStatus(wq.id, wq.status, {
+          lifecycle_status: wq.lifecycle_status
+        }).catch(e => console.error(`[P0-3c] 审核结果持久化失败 wq=${wq.id.substring(0, 8)}:`, e.message))
       }
-      
+
       // 重新计算统计
       calculateTodayStats()
-      
+
       // 自动进入下一题
       if (!nextQuestion()) {
-        // 如果没有更多题目，标记为完成
+        // 最后一道题已复核 → 自动完成复核 + 进入下一份
         reviewStatus.value = 'completed'
+        // 延迟触发自动保存和跳转，让 UI 先更新
+        setTimeout(() => autoCompleteAndAdvance(), 300)
       }
+    }
+  }
+
+  // 自动完成复核并跳转到下一份试卷
+  const autoCompleteAndAdvance = async () => {
+    if (!currentTask.value) return
+    // 先保存复核完成状态
+    await updateTaskStatus(currentTask.value.id, 'reviewed').catch(e =>
+      console.error('自动保存复核状态失败:', e.message)
+    )
+    currentTask.value.status = 'reviewed'
+    if (currentStudent.value?.id) {
+      clearStudentCaches(currentStudent.value.id)
+    }
+    // 刷新任务列表
+    await loadStudentTasks(currentStudent.value.id)
+    // 确保刚复核的试卷始终在 studentTasks 中
+    if (currentTask.value && !studentTasks.value.some(t => t.id === currentTask.value.id)) {
+      studentTasks.value.push({ ...currentTask.value })
+      const sorter = { done: 0, reviewed: 1 }
+      studentTasks.value.sort((a, b) => (sorter[a.status] ?? 99) - (sorter[b.status] ?? 99))
+    }
+    // 自动进入下一份试卷
+    const next = nextTask()
+    if (next) {
+      await selectTask(next)
+    }
+  }
+
+  // 加载当前学生的已完成任务列表（含 done 和 reviewed）
+  const loadStudentTasks = async (studentId) => {
+    try {
+      const tasks = await getTasksByStudent(studentId, false)
+      // 纳入 done 和 reviewed，按 status 排序：done 优先
+      const sorter = { done: 0, reviewed: 1 }
+      studentTasks.value = (tasks || [])
+        .filter(t => t.status === 'done' || t.status === 'reviewed')
+        .sort((a, b) => (sorter[a.status] ?? 99) - (sorter[b.status] ?? 99))
+    } catch (e) {
+      console.error('加载学生任务失败:', e)
+      studentTasks.value = []
+    }
+  }
+
+  // 待复核试卷（status === 'done'）
+  const pendingTasks = computed(() =>
+    studentTasks.value.filter(t => t.status === 'done')
+  )
+
+  // 已复核试卷（status === 'reviewed'）
+  const reviewedTasks = computed(() =>
+    studentTasks.value.filter(t => t.status === 'reviewed')
+  )
+
+  // 其他待复核试卷（status === 'done' 且不是当前试卷）
+  const otherPendingTasks = computed(() => {
+    if (!currentTask.value) return pendingTasks.value
+    return pendingTasks.value.filter(t => t.id !== currentTask.value.id)
+  })
+
+  // 选择试卷 → 加载题目 + 判定数据 + 错题数据
+  const selectTask = async (task) => {
+    currentTask.value = task
+    currentReviewIndex.value = 0
+    reviewStatus.value = 'reviewing'
+    await loadQuestions(task.id)
+
+    // [修复] 加载最新判定数据（含 confidence），合并到每道题
+    if (currentStudent.value?.id && allQuestions.value.length > 0) {
+      await mergeJudgements(currentStudent.value.id, allQuestions.value)
+    }
+
+    if (currentStudent.value?.id) {
+      await loadWrongQuestions(currentStudent.value.id)
+    }
+  }
+
+  // 从 judgements 表合并 confidence 到 questions
+  const mergeJudgements = async (studentId, questions) => {
+    try {
+      const qIds = questions.map(q => q.id).filter(Boolean)
+      if (qIds.length === 0) return
+      const result = await getLatestJudgements(studentId, qIds)
+      const judgements = result.judgements || []
+      if (!Array.isArray(judgements) || judgements.length === 0) return
+
+      const judgeMap = {}
+      for (const j of judgements) {
+        if (j.question_id) judgeMap[j.question_id] = j
+      }
+
+      for (const q of questions) {
+        const j = judgeMap[q.id]
+        if (j) {
+          q.confidence = j.confidence
+          // 若 question 本身没有 is_correct，从 judgement 补充
+          if (q.is_correct == null && j.is_correct != null) {
+            q.is_correct = j.is_correct
+          }
+        }
+      }
+    } catch (e) {
+      console.error('合并判定数据失败:', e)
     }
   }
 
@@ -269,6 +406,33 @@ export const useReviewStore = defineStore('review', () => {
   // 获取题目状态
   const getQuestionReviewStatus = (question) => {
     return question.review_status || null
+  }
+
+  // 跳到下一份试卷（仅在 done 的待复核试卷中导航）
+  const nextTask = () => {
+    if (!currentTask.value || pendingTasks.value.length === 0) return null
+    const idx = pendingTasks.value.findIndex(t => t.id === currentTask.value.id)
+    if (idx < pendingTasks.value.length - 1) {
+      return pendingTasks.value[idx + 1]
+    }
+    return null // 已经是最后一份
+  }
+
+  // 完成任务复核：将试卷标记为 reviewed，清理缓存
+  const completeTaskReview = async () => {
+    if (!currentTask.value) return
+    await updateTaskStatus(currentTask.value.id, 'reviewed')
+    currentTask.value.status = 'reviewed'
+    if (currentStudent.value?.id) {
+      clearStudentCaches(currentStudent.value.id)
+      await loadStudentTasks(currentStudent.value.id)
+    }
+    // 确保刚复核的试卷始终在 studentTasks 中（即使服务端返回有延迟）
+    if (currentTask.value && !studentTasks.value.some(t => t.id === currentTask.value.id)) {
+      studentTasks.value.push({ ...currentTask.value })
+      const sorter = { done: 0, reviewed: 1 }
+      studentTasks.value.sort((a, b) => (sorter[a.status] ?? 99) - (sorter[b.status] ?? 99))
+    }
   }
 
   return {
@@ -295,6 +459,20 @@ export const useReviewStore = defineStore('review', () => {
     jumpToQuestion,
     reviewQuestion,
     getManualReviewProgress,
-    getQuestionReviewStatus
+    getQuestionReviewStatus,
+    // 新增
+    currentTask,
+    confidenceThreshold,
+    studentTasks,
+    questionConfirmationMap,
+    reviewProgress,
+    loadStudentTasks,
+    selectTask,
+    nextTask,
+    completeTaskReview,
+    autoCompleteAndAdvance,
+    otherPendingTasks,
+    pendingTasks,
+    reviewedTasks
   }
 })

@@ -222,7 +222,11 @@ export const updateTaskStatus = async (taskId, status, result = null) => {
     const data = await apiRequest(`/tasks/${taskId}/retry`, { method: 'POST' })
     return data
   }
-  return null
+  return apiRequest(`/tasks/${taskId}`, {
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ status })
+  })
 }
 
 const parseQuestionFields = (q) => {
@@ -287,8 +291,31 @@ export const updateQuestion = async (id, updates) => {
       student_answer: updates.student_answer,
       ai_answer: updates.ai_answer,
       answer_source: updates.answer_source,
-      geometry_image_url: updates.geometry_image_url
+      geometry_image_url: updates.geometry_image_url,
+      ai_tags: updates.ai_tags,           // 修复：使标签编辑落库
+      review_status: updates.review_status // 透传，不覆盖已有值（服务端用 COALESCE）
     })
+  })
+}
+
+/**
+ * 搜索/筛选题目（轻量题目管理）
+ * @param {Object} params - { keyword, subject, question_type, is_correct, status, student_id, limit, offset }
+ */
+export const searchQuestions = async (params = {}) => {
+  const qs = Object.entries(params)
+    .filter(([, v]) => v !== '' && v !== undefined && v !== null)
+    .map(([k, v]) => `${encodeURIComponent(k)}=${encodeURIComponent(v)}`)
+    .join('&')
+  const data = await apiRequest(`/questions/search?${qs}`)
+  return data // { success, questions, total, limit, offset }
+}
+
+export const updateQuestionReviewStatus = async (questionId, reviewStatus) => {
+  return apiRequest(`/questions/${questionId}`, {
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ review_status: reviewStatus })
   })
 }
 
@@ -342,6 +369,14 @@ export const getWrongQuestionsByStudent = async (studentId, useCache = true) => 
   return result
 }
 
+export const getLatestJudgements = async (studentId, questionIds) => {
+  return apiRequest('/judgements/latest', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ studentId, questionIds })
+  })
+}
+
 export const addWrongQuestions = async (studentId, questionIds) => {
   return apiRequest('/wrong-questions', {
     method: 'POST',
@@ -350,11 +385,19 @@ export const addWrongQuestions = async (studentId, questionIds) => {
   })
 }
 
-export const updateWrongQuestionStatus = async (id, status) => {
+export const updateWrongQuestionStatus = async (id, status, extraFields = {}) => {
   return apiRequest(`/wrong-questions/${id}`, {
     method: 'PUT',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ status })
+    body: JSON.stringify({ status, ...extraFields })
+  })
+}
+
+export const upsertWrongQuestionStatus = async (studentId, questionId, status, isCorrect) => {
+  return apiRequest(`/wrong-questions/upsert`, {
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ studentId, questionId, status, isCorrect })
   })
 }
 

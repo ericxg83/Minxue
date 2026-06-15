@@ -58,22 +58,13 @@ CREATE TABLE IF NOT EXISTS wrong_questions (
     error_count INTEGER DEFAULT 1,
     added_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
     last_wrong_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
+    lifecycle_status TEXT DEFAULT 'new',
+    created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
     updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
     UNIQUE(student_id, question_id)
 );
 
--- 5. 练习记录表
-CREATE TABLE IF NOT EXISTS training_logs (
-    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-    student_id UUID NOT NULL REFERENCES students(id) ON DELETE CASCADE,
-    question_id UUID NOT NULL REFERENCES questions(id) ON DELETE CASCADE,
-    status TEXT DEFAULT 'pending' CHECK (status IN ('pending', 'done')),
-    result JSONB,
-    created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
-    updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
-);
-
--- 6. 生成试卷表
+-- 5. 生成试卷表
 CREATE TABLE IF NOT EXISTS generated_exams (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     student_id UUID NOT NULL REFERENCES students(id) ON DELETE CASCADE,
@@ -92,7 +83,6 @@ CREATE INDEX IF NOT EXISTS idx_questions_task_id ON questions(task_id);
 CREATE INDEX IF NOT EXISTS idx_questions_student_id ON questions(student_id);
 CREATE INDEX IF NOT EXISTS idx_wrong_questions_student_id ON wrong_questions(student_id);
 CREATE INDEX IF NOT EXISTS idx_wrong_questions_question_id ON wrong_questions(question_id);
-CREATE INDEX IF NOT EXISTS idx_training_logs_student_id ON training_logs(student_id);
 CREATE INDEX IF NOT EXISTS idx_generated_exams_student_id ON generated_exams(student_id);
 
 -- GIN 索引用于 JSONB 查询
@@ -124,10 +114,7 @@ CREATE TRIGGER update_questions_updated_at BEFORE UPDATE ON questions
 CREATE TRIGGER update_wrong_questions_updated_at BEFORE UPDATE ON wrong_questions
     FOR EACH ROW EXECUTE FUNCTION update_updated_at_column();
 
-CREATE TRIGGER update_training_logs_updated_at BEFORE UPDATE ON training_logs
-    FOR EACH ROW EXECUTE FUNCTION update_updated_at_column();
-
--- 7. �ж���¼����Shadow Mode - ֻ׷�Ӳ����ǣ�
+-- 6. 判定记录表（Shadow Mode - 只追加不修改）
 CREATE TABLE IF NOT EXISTS judgements (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     question_id UUID NOT NULL,

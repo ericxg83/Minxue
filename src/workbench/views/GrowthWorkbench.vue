@@ -1,54 +1,7 @@
 <template>
   <div class="growth-workbench">
-    <!-- 顶部 Header 栏 -->
-    <header class="top-header">
-      <div class="top-header__left">
-        <div class="logo">
-          <svg viewBox="0 0 24 24" fill="none" class="logo-icon" width="24" height="24">
-            <path d="M12 2L2 7l10 5 10-5-10-5zM2 17l10 5 10-5M2 12l10 5 10-5" stroke="#1677FF" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
-          </svg>
-          <span class="logo-text">敏学成长工作台</span>
-        </div>
-      </div>
-      <div class="top-header__right">
-        <div class="header-icon-btn" title="通知">
-          <el-icon><Bell /></el-icon>
-          <span class="header-badge">12</span>
-        </div>
-        <div class="header-icon-btn" title="帮助中心">
-          <el-icon><QuestionFilled /></el-icon>
-          <span class="header-icon-label">帮助中心</span>
-        </div>
-        <div class="header-user">
-          <el-avatar :size="32" src="https://api.dicebear.com/7.x/avataaars/svg?seed=admin" />
-          <span class="header-user-name">管理员</span>
-          <el-icon class="header-dropdown-icon"><ArrowDown /></el-icon>
-        </div>
-      </div>
-    </header>
-
-    <!-- 三栏主内容区 -->
     <div class="main-layout">
-      <!-- 第一栏：系统导航 -->
-      <aside class="nav-sidebar">
-        <div class="nav-menu">
-          <div
-            v-for="menu in navMenus"
-            :key="menu.key"
-            class="nav-menu-item"
-            :class="{ 'nav-menu-item--active': currentMenu === menu.key, 'nav-menu-item--disabled': menu.disabled }"
-            @click="handleNavMenuClick(menu.key)"
-          >
-            <div class="nav-menu-item__icon">
-              <el-icon><component :is="menu.icon" /></el-icon>
-            </div>
-            <span class="nav-menu-item__text">{{ menu.label }}</span>
-            <span v-if="menu.key === 'exam-import'" class="dev-badge">开发中</span>
-          </div>
-        </div>
-      </aside>
-
-      <!-- 第二栏：主内容区 -->
+      <!-- 第一栏：主内容区 -->
       <section class="growth-main" v-loading="loading">
         <!-- 顶部学生选择器 -->
         <div class="growth-selector-bar">
@@ -289,10 +242,9 @@
 
 <script setup>
 import { ref, computed, onMounted, onUnmounted, watch, nextTick } from 'vue'
-import { useRouter } from 'vue-router'
 import { ElMessage } from 'element-plus'
 import {
-  Bell, QuestionFilled, ArrowDown, Download, Document, TrendCharts,
+  ArrowDown, Download, Document, TrendCharts,
   PieChart, Clock, Top, Bottom
 } from '@element-plus/icons-vue'
 import { useGrowthStore } from '../stores/growthStore'
@@ -300,32 +252,7 @@ import { getStudents } from '../../services/apiService'
 import * as echarts from 'echarts'
 import dayjs from 'dayjs'
 
-const router = useRouter()
 const growthStore = useGrowthStore()
-
-// ===== 导航菜单 =====
-const currentMenu = ref('growth')
-const navMenus = [
-  { key: 'proofread', label: '题目校对', icon: 'DocumentChecked' },
-  { key: 'wrong-book', label: '错题管理', icon: 'Collection' },
-  { key: 'growth', label: '成长中心', icon: 'TrendCharts' },
-  { key: 'exam-import', label: '试卷入库', icon: 'UploadFilled', disabled: true },
-]
-
-const handleNavMenuClick = (key) => {
-  const menu = navMenus.find(m => m.key === key)
-  if (menu?.disabled) return
-  currentMenu.value = key
-  const routeMap = {
-    'proofread': '/',
-    'wrong-book': '/wrongbook',
-    'growth': '/growth',
-    'exam-import': '/paper',
-  }
-  if (routeMap[key] && routeMap[key] !== router.currentRoute.value.path) {
-    router.push(routeMap[key])
-  }
-}
 
 // ===== 学生列表 =====
 const students = ref([])
@@ -719,115 +646,11 @@ onUnmounted(() => {
 <style scoped>
 /* ===== CSS Variables ===== */
 .growth-workbench {
-  height: 100vh;
+  height: 100%;
   display: flex;
   flex-direction: column;
   background: #F5F7FA;
   font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
-}
-
-/* ===== Top Header ===== */
-.top-header {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  height: 48px;
-  padding: 0 16px;
-  background: #fff;
-  border-bottom: 1px solid #E5E6EB;
-  flex-shrink: 0;
-}
-
-.top-header__left {
-  display: flex;
-  align-items: center;
-}
-
-.logo {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-}
-
-.logo-icon {
-  width: 24px;
-  height: 24px;
-}
-
-.logo-text {
-  font-size: 16px;
-  font-weight: 600;
-  color: #1D2129;
-}
-
-.top-header__right {
-  display: flex;
-  align-items: center;
-  gap: 16px;
-}
-
-.header-icon-btn {
-  display: flex;
-  align-items: center;
-  gap: 4px;
-  padding: 6px 8px;
-  border-radius: 6px;
-  cursor: pointer;
-  color: #4E5969;
-  font-size: 14px;
-  transition: background 0.2s;
-  position: relative;
-}
-
-.header-icon-btn:hover {
-  background: #F2F3F5;
-}
-
-.header-icon-btn .el-icon {
-  font-size: 18px;
-}
-
-.header-badge {
-  position: absolute;
-  top: 0;
-  right: 0;
-  min-width: 16px;
-  height: 16px;
-  padding: 0 4px;
-  background: #F53F3F;
-  color: #fff;
-  font-size: 11px;
-  line-height: 16px;
-  text-align: center;
-  border-radius: 8px;
-}
-
-.header-icon-label {
-  font-size: 13px;
-}
-
-.header-user {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  padding: 4px 8px;
-  border-radius: 6px;
-  cursor: pointer;
-  transition: background 0.2s;
-}
-
-.header-user:hover {
-  background: #F2F3F5;
-}
-
-.header-user-name {
-  font-size: 13px;
-  color: #1D2129;
-}
-
-.header-dropdown-icon {
-  font-size: 12px;
-  color: #86909C;
 }
 
 /* ===== Main Layout ===== */
@@ -835,75 +658,6 @@ onUnmounted(() => {
   display: flex;
   flex: 1;
   overflow: hidden;
-}
-
-/* ===== Nav Sidebar (第一栏: 220px) ===== */
-.nav-sidebar {
-  width: 220px;
-  background: #fff;
-  border-right: 1px solid #E5E6EB;
-  flex-shrink: 0;
-  display: flex;
-  flex-direction: column;
-  padding: 16px 12px;
-}
-
-.nav-menu {
-  display: flex;
-  flex-direction: column;
-  gap: 4px;
-}
-
-.nav-menu-item {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  padding: 10px 12px;
-  border-radius: 8px;
-  cursor: pointer;
-  transition: all 0.2s;
-  font-size: 14px;
-  color: #4E5969;
-}
-
-.nav-menu-item:hover {
-  background: #F2F3F5;
-}
-
-.nav-menu-item--active {
-  background: #E8F3FF;
-  color: #1677FF;
-  font-weight: 500;
-}
-
-.nav-menu-item__icon {
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  width: 20px;
-  height: 20px;
-  font-size: 18px;
-}
-
-.nav-menu-item__text {
-  flex: 1;
-}
-
-.nav-menu-item--disabled {
-  cursor: not-allowed;
-  opacity: 0.5;
-}
-
-.dev-badge {
-  display: inline-block;
-  padding: 1px 6px;
-  background: #FFF7E6;
-  color: #FA8C16;
-  font-size: 10px;
-  border-radius: 4px;
-  font-weight: 500;
-  flex-shrink: 0;
-  border: 1px solid #FFD591;
 }
 
 /* ===== Growth Main Content ===== */

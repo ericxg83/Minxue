@@ -11,7 +11,7 @@ import sharp from 'sharp'
 import { TABLES, TASK_STATUS } from './config/neon.js'
 import { query } from './config/neon.js'
 import { AI_CONFIG, getAIHeaders, buildOCRPrompt, buildTaggingPrompt, buildAnswerGenerationPrompt } from './config/ai.js'
-import { updateTaskStatus, createQuestions, batchUpdateQuestionTags, addWrongQuestions, createJudgement, updateQuestionAnswer, markAnswerException, findCachedQuestionByFingerprint, findSimilarQuestion, cacheQuestion, incrementQuestionUseCount } from './services/neonService.js'
+import { updateTaskStatus, createQuestions, batchUpdateQuestionTags, addWrongQuestions, createJudgement, getLatestJudgement, updateQuestionAnswer, markAnswerException, findCachedQuestionByFingerprint, findSimilarQuestion, cacheQuestion, incrementQuestionUseCount, updateQuestionCacheId } from './services/neonService.js'
 import { uploadImage } from './services/ossService.js'
 import { generateTextFingerprint, generatePHash, PARSER_VERSION, TEXT_SIMILARITY_THRESHOLD } from './utils/questionFingerprint.js'
 import { uploadFilesWithRetry } from './services/uploadRetryManager.js'
@@ -255,6 +255,85 @@ function normalizeAnswer(str) {
 }
 
 /**
+ * Check if two math expressions are numerically equivalent
+ * by substituting test values for variables and comparing results.
+ * Handles implicit multiplication, ^ exponentiation, and equation prefix.
+ */
+function isMathEquivalent(expr1, expr2) {
+  if (!expr1 || !expr2) return false
+
+  try {
+    // Prepare expression for JS evaluation
+    const prep = (s) => {
+      // Strip equation prefix: "y = 2x - 4" → "2x - 4", "f(x)=..." → "..."
+      const eqIdx = s.indexOf('=')
+      if (eqIdx > 0) s = s.substring(eqIdx + 1)
+      s = s.trim()
+      // ^ → **  (exponentiation)
+      s = s.replace(/\^/g, '**')
+      // Insert * for implicit multiplication: "2x" → "2*x", "2(" → "2*(", ")(" → ")*("
+      s = s.replace(/(\d)([a-zA-Z(])/g, '$1*$2')
+      s = s.replace(/([a-zA-Z)])(\d)/g, '$1*$2')
+      s = s.replace(/\)\(/g, ')*(')
+      return s
+    }
+
+    let e1 = prep(expr1).toLowerCase()
+    let e2 = prep(expr2).toLowerCase()
+
+    // Extract single-letter variables (not adjacent to another letter, exclude e/pi)
+    const allText = e1 + ' ' + e2
+    const varSet = new Set()
+    const varRe = /(?<![a-z])([a-df-z])(?![a-z])/gi
+    let m
+    while ((m = varRe.exec(allText)) !== null) {
+      varSet.add(m[1].toLowerCase())
+    }
+    // Remove common function-name letters that slip through
+    const funcLetters = new Set(['s', 'i', 'n', 'c', 'o', 't', 'a', 'g', 'l', 'e', 'x', 'p', 'r', 'm', 'u', 'v'])
+    for (const fl of funcLetters) {
+      if (varSet.has(fl)) {
+        // Only remove if the letter ONLY appears in function words, not as standalone variable
+        // Keep if it appears as standalone
+        const standaloneRe = new RegExp(`(?<![a-z])${fl}(?![a-z])`, 'g')
+        const inE1 = (e1.match(standaloneRe) || []).length
+        const inE2 = (e2.match(standaloneRe) || []).length
+        if (inE1 === 0 && inE2 === 0) varSet.delete(fl)
+      }
+    }
+
+    if (varSet.size === 0) {
+      // No variables — compare as literal numbers
+      const fn1 = new Function(`"use strict"; return (${e1})`)
+      const fn2 = new Function(`"use strict"; return (${e2})`)
+      return Math.abs(fn1() - fn2()) < 1e-9
+    }
+
+    // Test with diverse values; all must match
+    const testVals = [0, 1, 2, -1, 0.5, 3, -2, 5, 0.25, 10]
+    varsLoop:
+    for (const v of testVals) {
+      let s1 = e1; let s2 = e2
+      for (const vn of varSet) {
+        const re = new RegExp(`(?<![a-z])(${vn})(?![a-z])`, 'g')
+        s1 = s1.replace(re, `(${v})`)
+        s2 = s2.replace(re, `(${v})`)
+      }
+      try {
+        const fn1 = new Function(`"use strict"; return (${s1})`)
+        const fn2 = new Function(`"use strict"; return (${s2})`)
+        if (Math.abs(fn1() - fn2()) > 1e-9) return false
+      } catch {
+        continue varsLoop // skip test values that cause math errors (e.g. division by zero)
+      }
+    }
+    return true
+  } catch {
+    return false
+  }
+}
+
+/**
  * Compare student answer against reference answer with tolerance.
  * Returns { isCorrect: boolean, unrecognized: boolean }
  */
@@ -281,7 +360,19 @@ function judgeAnswer(studentAnswer, referenceAnswer, questionType) {
   // Fill / answer / other: normalized comparison with tolerance
   const normStudent = normalizeAnswer(studentAnswer)
   const normRef = normalizeAnswer(referenceAnswer)
-  return { isCorrect: normStudent === normRef, unrecognized: false }
+
+  // String-level match
+  if (normStudent === normRef) {
+    return { isCorrect: true, unrecognized: false }
+  }
+
+  // String mismatch — try mathematical equivalence
+  // (handles cases like "2x-4" vs "2(x-2)" which are the same but differ textually)
+  if (isMathEquivalent(studentAnswer, referenceAnswer)) {
+    return { isCorrect: true, unrecognized: false }
+  }
+
+  return { isCorrect: false, unrecognized: false }
 }
 
 const recognizeQuestions = async (imageBase64, taskId, retryCount = 0) => {
@@ -308,7 +399,7 @@ const recognizeQuestions = async (imageBase64, taskId, retryCount = 0) => {
       }
     ],
     temperature: 0.3,
-    max_tokens: 4000
+    max_tokens: 8192
   }
 
   try {
@@ -325,6 +416,7 @@ const recognizeQuestions = async (imageBase64, taskId, retryCount = 0) => {
     if (!content) throw new Error('AI 返回内容为空')
 
     console.log(`   AI 原始响应 (前300字): ${content.substring(0, 300)}...`)
+    console.log(`   AI 响应总长度: ${content.length} 字符`)
 
     let jsonStr = content
     const jsonMatch = content.match(/```json\n?([\s\S]*?)\n?```/) ||
@@ -337,7 +429,21 @@ const recognizeQuestions = async (imageBase64, taskId, retryCount = 0) => {
     } catch (parseError) {
       console.warn(`⚠️  AI JSON 解析失败，尝试自动修复...`)
       console.warn(`   原始错误: ${parseError.message}`)
-      const repaired = repairAIJson(jsonStr)
+
+      // 尝试截断修复：如果 JSON 末尾被截断，尝试闭合未完成的字符串和结构
+      let repaired = repairAIJson(jsonStr)
+      // 如果错误是 "Unterminated string"，尝试在末尾补上闭合引号
+      if (parseError.message.includes('Unterminated string')) {
+        repaired = repaired.replace(/("[^"]*)$/, '$1"')
+        // 尝试闭合未闭合的花括号和方括号
+        const openBraces = (repaired.match(/\{/g) || []).length
+        const closeBraces = (repaired.match(/\}/g) || []).length
+        const openBrackets = (repaired.match(/\[/g) || []).length
+        const closeBrackets = (repaired.match(/\]/g) || []).length
+        for (let i = 0; i < openBraces - closeBraces; i++) repaired += '}'
+        for (let i = 0; i < openBrackets - closeBrackets; i++) repaired += ']'
+      }
+
       console.log(`   修复后 JSON (前200字): ${repaired.substring(0, 200)}...`)
       try {
         result = JSON.parse(repaired)
@@ -702,6 +808,9 @@ const generateMissingAnswers = async (questions, imageBuffer = null) => {
             updatedCount++
             
             await incrementQuestionUseCount(fingerprint, PARSER_VERSION)
+            // 设置 cache_id 指向权威缓存条目
+            q.cache_id = cached.id
+            await updateQuestionCacheId(q.id, cached.id)
           } catch (err) {
             console.error(`     题目 ${q.id.substring(0, 8)}: 缓存答案写入失败`, err.message)
             exceptionCount++
@@ -723,7 +832,7 @@ const generateMissingAnswers = async (questions, imageBuffer = null) => {
               if (similar.analysis) q.analysis = similar.analysis
               updatedCount++
               
-              await cacheQuestion({
+              const cacheId = await cacheQuestion({
                 content: fullContent,
                 options: options,
                 answer: finalAnswer,
@@ -733,6 +842,10 @@ const generateMissingAnswers = async (questions, imageBuffer = null) => {
                 ai_tags: similar.ai_tags,
                 content_type: 'text'
               }, fingerprint, phash, PARSER_VERSION)
+              if (cacheId) {
+                q.cache_id = cacheId
+                await updateQuestionCacheId(q.id, cacheId)
+              }
             } catch (err) {
               console.error(`     题目 ${q.id.substring(0, 8)}: 相似答案写入失败`, err.message)
               exceptionCount++
@@ -767,9 +880,9 @@ const generateMissingAnswers = async (questions, imageBuffer = null) => {
           if (result.analysis) q.analysis = result.analysis
           updatedCount++
           console.log(`     题目 ${q.id.substring(0, 8)}: 答案 ${oldAnswer || '(空)'} → ${finalAnswer}`)
-          
+
           if (fingerprint) {
-            await cacheQuestion({
+            const cacheId = await cacheQuestion({
               content: fullContent,
               options: options,
               answer: finalAnswer,
@@ -778,6 +891,10 @@ const generateMissingAnswers = async (questions, imageBuffer = null) => {
               subject: q.subject,
               content_type: 'text'
             }, fingerprint, phash, PARSER_VERSION)
+            if (cacheId) {
+              q.cache_id = cacheId
+              await updateQuestionCacheId(q.id, cacheId)
+            }
           }
         } catch (err) {
           console.error(`     题目 ${q.id.substring(0, 8)}: 答案写入失败`, err.message)
@@ -796,9 +913,9 @@ const generateMissingAnswers = async (questions, imageBuffer = null) => {
           q.answer = finalAnswer
           if (result.analysis) q.analysis = result.analysis
           console.log(`     题目 ${q.id.substring(0, 8)}: ${finalAnswer}`)
-          
+
           if (fingerprint) {
-            await cacheQuestion({
+            const cacheId = await cacheQuestion({
               content: fullContent,
               options: options,
               answer: finalAnswer,
@@ -807,6 +924,10 @@ const generateMissingAnswers = async (questions, imageBuffer = null) => {
               subject: q.subject,
               content_type: 'text'
             }, fingerprint, phash, PARSER_VERSION)
+            if (cacheId) {
+              q.cache_id = cacheId
+              await updateQuestionCacheId(q.id, cacheId)
+            }
           }
         } catch (err) {
           console.error(`     题目 ${q.id.substring(0, 8)}: 答案写入失败`, err.message)
@@ -952,7 +1073,7 @@ export const processTask = async (job) => {
     await updateTaskStatus(taskId, TASK_STATUS.PROCESSING, { progress: 70 })
 
     const questions = ocrResult.questions || []
-    let wrongCount = questions.filter(q => !q.is_correct).length
+    let wrongCount = questions.filter(q => q.is_correct === false).length
     let answerGenResult = { updated: 0, total: 0, empty: 0, placeholder: 0, exceptions: 0, cacheHits: 0, cacheMisses: 0 }
 
     console.log(`✅ [Step 5/8] AI 识别成功: ${questions.length} 道题, ${wrongCount} 道错题, 耗时 ${Math.round(ocrResult.duration/1000)}s`)
@@ -989,7 +1110,20 @@ export const processTask = async (job) => {
       await createQuestions(questionsWithStudentId)
       console.log(`✅ [Step 6/8] 题目保存成功 (含 ${geometryImageCache.size} 张几何配图)`)
 
-      
+      // [P0-1] 初始错题同步 — 仅当 OCR 有参考答案且判错时才同步
+      const ocrWrongIds = questionsWithStudentId.filter(q => q.is_correct === false && q.answer).map(q => q.id)
+      if (ocrWrongIds.length > 0) {
+        try {
+          const confidenceMap = new Map(questionsWithStudentId.map(q => [q.id, q.confidence]))
+          await addWrongQuestions(studentId, ocrWrongIds, confidenceMap)
+          console.log(`  ✅ 错题本初始同步: ${ocrWrongIds.length} 道错题 (OCR后)`)
+        } catch (e) {
+          console.error('  ⚠️ 错题本初始同步失败:', e.message)
+        }
+      } else {
+        console.log('  ℹ️ 无错题需要初始同步')
+      }
+
       // [Shadow Mode] 追加写入 AI OCR 判定记录
       try {
         const judgementPromises = questionsWithStudentId.map(q =>
@@ -1018,9 +1152,28 @@ await job.updateProgress(80)
       answerGenResult = await generateMissingAnswers(questions, compressedBuffer)
       
       let rejudgedWrong = 0
-      if (answerGenResult.updated > 0 || answerGenResult.exceptions > 0 || answerGenResult.cacheHits > 0) {
-        for (const q of questions) {
+      // 始终执行重判定，确保 OCR 阶段错误的 is_correct 可以被纠正
+      for (const q of questions) {
           if (q.answer && q.answer.trim() && q.answer !== '待人工补充' && q.answer !== '此为主观题，无唯一标准答案') {
+            // [P0-1d] 检查人工复核判定，若存在则优先使用，跳过AI重判定
+            const manualJudgement = await getLatestJudgement(q.id, studentId).catch(() => null)
+            if (manualJudgement && manualJudgement.source === 'manual_review' && manualJudgement.is_correct !== null) {
+              if (manualJudgement.is_correct !== q.is_correct) {
+                q.is_correct = manualJudgement.is_correct
+                try {
+                  await query(
+                    `UPDATE questions SET is_correct = $1, updated_at = NOW() WHERE id = $2`,
+                    [manualJudgement.is_correct, q.id]
+                  )
+                } catch (e) {
+                  console.error(`      更新题目 ${q.id.substring(0, 8)} is_correct 失败:`, e.message)
+                }
+                if (manualJudgement.is_correct === false) rejudgedWrong++
+                console.log(`  [P0-1d] 人工判定覆盖AI重判定: q=${q.id.substring(0, 8)}, is_correct=${manualJudgement.is_correct}`)
+              }
+              continue
+            }
+
             const originalCorrect = q.is_correct
             const judgment = judgeAnswer(q.student_answer, q.answer, q.question_type)
             if (judgment.isCorrect !== originalCorrect) {
@@ -1033,14 +1186,15 @@ await job.updateProgress(80)
               } catch (e) {
                 console.error(`      更新题目 ${q.id.substring(0, 8)} is_correct 失败:`, e.message)
               }
-              if (!judgment.isCorrect) rejudgedWrong++
+              if (judgment.isCorrect === false) rejudgedWrong++
             }
           }
         }
-        const wrongIds = questions.filter(q => !q.is_correct).map(q => q.id)
+        const wrongIds = questions.filter(q => q.is_correct === false && q.answer && q.answer.trim() && q.answer !== '待人工补充' && q.answer !== '此为主观题，无唯一标准答案').map(q => q.id)
         if (wrongIds.length > 0) {
           try {
-            await addWrongQuestions(studentId, wrongIds)
+            const confidenceMap = new Map(questions.map(q => [q.id, q.confidence]))
+            await addWrongQuestions(studentId, wrongIds, confidenceMap)
             console.log(`  ✅ 错题本同步: ${wrongIds.length} 道错题（其中 ${rejudgedWrong} 道由AI答案生成判定）`)
           } catch (e) {
             console.error('错题本同步失败:', e.message)
@@ -1068,14 +1222,9 @@ await job.updateProgress(80)
         } catch (e) {
           console.error('  [Shadow] AI答案生成判定记录写入异常:', e.message)
         }
-        wrongCount = questions.filter(q => !q.is_correct).length
+        wrongCount = questions.filter(q => q.is_correct === false).length
         console.log(`✅ [Step 7/8] AI答案生成完成: 生成了 ${answerGenResult.updated}/${answerGenResult.total} 道题的答案, 解析异常 ${answerGenResult.exceptions} 道, 重新判定 ${rejudgedWrong} 道错题, 当前错题数: ${wrongCount}`)
         console.log(`📦 [Cache] 缓存命中: ${answerGenResult.cacheHits} 次, 缓存未命中: ${answerGenResult.cacheMisses} 次`)
-      } else {
-        console.log(`✅ [Step 7/8] AI答案生成完成: 无需生成（${answerGenResult.total} 道题需要处理）`)
-        if (answerGenResult.cacheHits !== undefined) {
-          console.log(` [Cache] 缓存命中: ${answerGenResult.cacheHits} 次, 缓存未命中: ${answerGenResult.cacheMisses} 次`)
-        }
 
         // 降级处理：如果没有任何答案生成且没有缓存命中，标记需要人工复核
         if (answerGenResult.updated === 0 && answerGenResult.cacheHits === 0 && answerGenResult.total > 0) {
@@ -1090,7 +1239,6 @@ await job.updateProgress(80)
             }
           }
         }
-      }
 
       await job.updateProgress(85)
       await updateTaskStatus(taskId, TASK_STATUS.PROCESSING, { progress: 85 })

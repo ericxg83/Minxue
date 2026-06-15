@@ -1,5 +1,5 @@
 import { create } from 'zustand'
-import { subscribeToTaskUpdates, startTaskPolling } from '../services/taskService'
+import { startTaskPolling } from '../services/taskService'
 
 export const useStudentStore = create((set, get) => ({
   currentStudent: null,
@@ -29,7 +29,6 @@ export const useTaskStore = create((set, get) => ({
   currentTask: null,
   tasks: [],
   processingTasks: [],
-  _unsubRealtime: null,
   _unsubPolling: null,
   
   setCurrentTask: (task) => set({ currentTask: task }),
@@ -85,25 +84,6 @@ export const useTaskStore = create((set, get) => ({
     processingTasks: state.processingTasks.filter(t => t.id !== taskId)
   })),
 
-  startRealtimeSync: () => {
-    const state = get()
-    if (state._unsubRealtime) return
-
-    const unsub = subscribeToTaskUpdates((updatedTask) => {
-      get().updateTaskFromServer(updatedTask)
-    })
-
-    set({ _unsubRealtime: unsub })
-  },
-
-  stopRealtimeSync: () => {
-    const state = get()
-    if (state._unsubRealtime) {
-      state._unsubRealtime()
-      set({ _unsubRealtime: null })
-    }
-  },
-
   startPolling: (studentId, intervalMs = 8000) => {
     const state = get()
     if (state._unsubPolling) return
@@ -125,9 +105,8 @@ export const useTaskStore = create((set, get) => ({
 
   cleanup: () => {
     const state = get()
-    if (state._unsubRealtime) state._unsubRealtime()
     if (state._unsubPolling) state._unsubPolling()
-    set({ _unsubRealtime: null, _unsubPolling: null })
+    set({ _unsubPolling: null })
   }
 }))
 

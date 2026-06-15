@@ -1,7 +1,7 @@
 import { useState, useEffect } from 'react'
 import { motion, AnimatePresence } from 'motion/react'
 import { CheckCircle2, XCircle, ChevronLeft, ChevronRight, Loader2, QrCode, Eye, EyeOff } from 'lucide-react'
-import { getQuestionsByIds, updateWrongQuestionStatus } from '../../services/apiService'
+import { getQuestionsByIds, upsertWrongQuestionStatus } from '../../services/apiService'
 import { useStudentStore } from '../../store'
 import dayjs from 'dayjs'
 
@@ -79,6 +79,12 @@ export default function Grading({ paperId, studentId, questionIds, onClose, onCo
       setQuestions(detailedQuestions)
       setMasteredBeforeCount(detailedQuestions.filter(q => q.status === 'mastered').length)
 
+      // [P0-2c] 初始化时确保每条题目在 wrong_questions 中有记录
+      detailedQuestions.forEach(q => {
+        upsertWrongQuestionStatus(targetStudentId, q.id, q.status || 'pending', q.is_correct)
+          .catch(e => console.error(`[P0-2c] 初始化错题记录失败 q=${q.id.substring(0, 8)}:`, e.message))
+      })
+
       setStudentInfo({
         name: student?.name || '学生',
         class: student?.class || '',
@@ -104,14 +110,15 @@ export default function Grading({ paperId, studentId, questionIds, onClose, onCo
 
     try {
       const newStatus = status === 'mastered' ? 'mastered' : 'pending'
-      await updateWrongQuestionStatus(currentQuestion.wrongQuestionId, newStatus)
+      const isCorrect = status === 'mastered'
+      // [P0-2b] 使用 upsert 按 (student_id, question_id) 更新，修复 ID 错配
+      await upsertWrongQuestionStatus(studentId, currentQuestion.id, newStatus, isCorrect)
 
       const newResults = {
         ...gradingResults,
-        [currentQuestion.wrongQuestionId]: {
+        [currentQuestion.id]: {
           status,
-          questionId: currentQuestion.questionId,
-          wrongQuestionId: currentQuestion.wrongQuestionId,
+          questionId: currentQuestion.id,
           markedAt: Date.now()
         }
       }
@@ -144,8 +151,10 @@ export default function Grading({ paperId, studentId, questionIds, onClose, onCo
   }
 
   const handleComplete = async () => {
-    Object.entries(gradingResults).forEach(([wrongQuestionId, result]) => {
-      updateWrongQuestionStatus(wrongQuestionId, result.status === 'mastered' ? 'mastered' : 'pending')
+    Object.entries(gradingResults).forEach(([questionId, result]) => {
+      const newStatus = result.status === 'mastered' ? 'mastered' : 'pending'
+      upsertWrongQuestionStatus(studentId, questionId, newStatus, result.status === 'mastered')
+        .catch(e => console.error(`[P0-2b] 完成时更新失败 q=${questionId.substring(0, 8)}:`, e.message))
     })
 
     const masteredCount = Object.values(gradingResults).filter(r => r.status === 'mastered').length

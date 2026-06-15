@@ -307,12 +307,18 @@ export const useWrongBookStore = defineStore('wrongBook', () => {
     }
   }
 
-  // 更新生命周期状态（新增）
+  // 更新生命周期状态
   const updateLifecycleStatus = async (wqId, lifecycleStatus) => {
     const wq = wrongQuestions.value.find(w => w.id === wqId)
     if (wq) {
       wq.lifecycle_status = lifecycleStatus
       wq.status = lifecycleStatus === LIFECYCLE_STATUS.MASTERED ? 'mastered' : 'pending'
+
+      // [P0-3e] 持久化生命周期状态
+      updateWrongQuestionStatus(wqId, wq.status, {
+        lifecycle_status: lifecycleStatus
+      }).catch(e => console.error(`[P0-3e] 生命周期状态持久化失败 wq=${wqId.substring(0, 8)}:`, e.message))
+
       return true
     }
     return false

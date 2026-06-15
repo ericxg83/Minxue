@@ -170,8 +170,9 @@ export default function App() {
   const [showAddStudent, setShowAddStudent] = useState(false)
   const [showImagePreview, setShowImagePreview] = useState(false)
   const [previewImageUrl, setPreviewImageUrl] = useState(null)
-  const [showNotifications, setShowNotifications] = useState(false)
-  const [notifications, setNotifications] = useState([])
+  const [showSearch, setShowSearch] = useState(false)
+  const [searchKeyword, setSearchKeyword] = useState('')
+  const [showFilterMenu, setShowFilterMenu] = useState(false)
   const [refreshing, setRefreshing] = useState(false)
   const [showTagManager, setShowTagManager] = useState(false)
   const [managingTagsQuestion, setManagingTagsQuestion] = useState(null)
@@ -709,6 +710,19 @@ export default function App() {
     if (processingFilter === 'done') return t.status === 'done'
     if (processingFilter === 'pending') return t.status === 'processing' || t.status === 'failed' || t.status === 'pending'
     return t.status === processingFilter
+  }).filter(t => {
+    if (!searchKeyword) return true
+    const kw = searchKeyword.toLowerCase()
+    if (t.original_name?.toLowerCase().includes(kw)) return true
+    const examQuestions = t.result?.questions
+    if (Array.isArray(examQuestions)) {
+      return examQuestions.some(q => q.content?.toLowerCase().includes(kw))
+    }
+    // Search through question list if available
+    if (t.question_list && Array.isArray(t.question_list)) {
+      return t.question_list.some(q => q.content?.toLowerCase().includes(kw))
+    }
+    return false
   })
 
   // Filter wrong questions
@@ -763,11 +777,21 @@ export default function App() {
         : (question.ai_tags || [])
       if (!selectedTags.some(t => qTags.includes(t))) return false
     }
+    if (searchKeyword) {
+      const kw = searchKeyword.toLowerCase()
+      const question = wq.question || wq
+      const content = question.content || ''
+      if (!content.toLowerCase().includes(kw)) return false
+    }
     return true
   })
 
   // Filter generated exams
-  const studentExams = (Array.isArray(generatedExams) ? generatedExams : []).filter(e => e.student_id === currentStudent?.id)
+  const studentExams = (Array.isArray(generatedExams) ? generatedExams : []).filter(e => {
+    if (e.student_id !== currentStudent?.id) return false
+    if (!searchKeyword) return true
+    return e.name?.toLowerCase().includes(searchKeyword.toLowerCase())
+  })
 
   // Add student
   const handleAddStudent = async (studentData) => {
@@ -1882,16 +1906,6 @@ export default function App() {
     setShowStudentQR(true)
   }
 
-  // Show notifications
-  const handleShowNotifications = () => {
-    setShowNotifications(true)
-  }
-
-  // Mark notification as read
-  const handleMarkNotificationRead = (notificationId) => {
-    setNotifications((Array.isArray(notifications) ? notifications : []).filter(n => n.id !== notificationId))
-  }
-
   // Manual refresh
   const handleRefresh = async () => {
     if (!currentStudent) {
@@ -2012,30 +2026,91 @@ export default function App() {
               <button
                 onClick={() => { setShowScanQR(true); setGradingData(null) }}
                 className="w-8 h-8 rounded-full flex items-center justify-center" style={{ background: '#F3F4F6' }}
+                title="扫码批改"
               >
                 <QrCode size={16} style={{ color: '#6B7280' }} />
               </button>
               <button
-                onClick={handleRefresh}
-                disabled={refreshing || isInitializing}
-                className="w-8 h-8 rounded-full flex items-center justify-center" style={{ background: '#F3F4F6', opacity: (refreshing || isInitializing) ? 0.6 : 1 }}
+                onClick={() => { setShowSearch(s => !s); setShowFilterMenu(false) }}
+                className="w-8 h-8 rounded-full flex items-center justify-center" style={{ background: showSearch ? '#EFF6FF' : '#F3F4F6' }}
+                title="搜索"
               >
-                <RefreshCw size={16} className={`${refreshing ? 'animate-spin' : ''} text-gray-500`} />
+                <Search size={16} style={{ color: showSearch ? '#2563EB' : '#6B7280' }} />
               </button>
               <button
-                onClick={handleShowNotifications}
-                className="w-8 h-8 rounded-full flex items-center justify-center relative" style={{ background: '#F3F4F6' }}
+                onClick={() => { setShowFilterMenu(s => !s); setShowSearch(false) }}
+                className={`w-8 h-8 rounded-full flex items-center justify-center ${showFilterMenu ? 'ring-2 ring-blue-200' : ''}`}
+                style={{ background: showFilterMenu ? '#EFF6FF' : '#F3F4F6' }}
+                title="筛选"
               >
-                <Bell size={16} className="text-gray-500" />
-                {notifications.length > 0 && (
-                  <span className="absolute -top-0.5 -right-0.5 w-3.5 h-3.5 rounded-full text-[9px] text-white flex items-center justify-center" style={{ background: '#EF4444' }}>
-                    {notifications.length}
-                  </span>
-                )}
+                <Filter size={16} style={{ color: showFilterMenu ? '#2563EB' : '#6B7280' }} />
               </button>
             </div>
           </div>
         </header>
+
+        {/* Search Bar */}
+        {showSearch && (
+          <div className="sticky top-11 z-40 px-4 py-2 border-b" style={{ background: '#fff', borderColor: '#E5E7EB' }}>
+            <div className="relative">
+              <Search size={14} className="absolute left-3 top-1/2 -translate-y-1/2" style={{ color: '#9CA3AF' }} />
+              <input
+                type="text"
+                value={searchKeyword}
+                onChange={(e) => setSearchKeyword(e.target.value)}
+                placeholder="搜索题目内容..."
+                className="w-full h-9 pl-9 pr-8 rounded-lg text-[13px] border-0 outline-none"
+                style={{ background: '#F3F4F6' }}
+                autoFocus
+              />
+              {searchKeyword && (
+                <button
+                  onClick={() => setSearchKeyword('')}
+                  className="absolute right-2 top-1/2 -translate-y-1/2"
+                >
+                  <X size={14} style={{ color: '#9CA3AF' }} />
+                </button>
+              )}
+            </div>
+          </div>
+        )}
+
+        {/* Filter Menu */}
+        {showFilterMenu && (
+          <div className="sticky top-11 z-40 px-4 py-2 border-b" style={{ background: '#fff', borderColor: '#E5E7EB' }}>
+            <div className="flex gap-2 flex-wrap">
+              {currentPage === 'processing' && ['all', 'done', 'pending'].map(status => (
+                <button
+                  key={status}
+                  onClick={() => setProcessingFilter(status)}
+                  className="px-3 py-1.5 rounded-full text-[12px] font-medium transition-all"
+                  style={{
+                    background: processingFilter === status ? '#2563EB' : '#F3F4F6',
+                    color: processingFilter === status ? '#fff' : '#6B7280'
+                  }}
+                >
+                  {status === 'all' ? '全部' : status === 'done' ? '已批改' : '未批改'}
+                </button>
+              ))}
+              {currentPage === 'wrongbook' && ['all', 'pending', 'partial', 'mastered'].map(status => (
+                <button
+                  key={status}
+                  onClick={() => setBankFilter(status)}
+                  className="px-3 py-1.5 rounded-full text-[12px] font-medium transition-all"
+                  style={{
+                    background: bankFilter === status ? '#2563EB' : '#F3F4F6',
+                    color: bankFilter === status ? '#fff' : '#6B7280'
+                  }}
+                >
+                  {status === 'all' ? '全部' : status === 'pending' ? '待复习' : status === 'partial' ? '有点懂' : '完全懂'}
+                </button>
+              ))}
+              {currentPage === 'exam' && (
+                <span style={{ fontSize: '12px', color: '#9CA3AF', padding: '6px 0' }}>使用搜索查找组卷记录</span>
+              )}
+            </div>
+          </div>
+        )}
 
         {/* Main Content */}
         <main className="max-w-lg mx-auto" style={{ paddingBottom: '80px' }}>

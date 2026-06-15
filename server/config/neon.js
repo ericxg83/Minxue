@@ -64,7 +64,6 @@ export const TABLES = {
   TASKS: 'tasks',
   QUESTIONS: 'questions',
   WRONG_QUESTIONS: 'wrong_questions',
-  TRAINING_LOGS: 'training_logs',
   GENERATED_EXAMS: 'generated_exams',
   QUESTION_CACHE: 'question_cache',
   JUDGEMENTS: 'judgements'
@@ -74,6 +73,7 @@ export const TASK_STATUS = {
   PENDING: 'pending',
   PROCESSING: 'processing',
   DONE: 'done',
+  REVIEWED: 'reviewed',
   FAILED: 'failed'
 }
 
@@ -86,11 +86,6 @@ export const QUESTION_STATUS = {
 export const WRONG_STATUS = {
   PENDING: 'pending',
   MASTERED: 'mastered'
-}
-
-export const TRAINING_STATUS = {
-  PENDING: 'pending',
-  DONE: 'done'
 }
 
 export const getQuestionsByTask = async (taskId) => {

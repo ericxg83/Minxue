@@ -96,15 +96,35 @@ export const batchUpdateQuestionTags = async (tagUpdates) => {
   return results
 }
 
-export const addWrongQuestions = async (studentId, questionIds) => {
+export const addWrongQuestions = async (studentId, questionIds, questionConfidenceMap = null) => {
   if (!questionIds || questionIds.length === 0) return []
+
+  const CONFIDENCE_THRESHOLD = 0.8
+
+  // [P0-1] 按置信度阈值过滤 — 低于 0.8 的不进入错题本
+  let filteredIds = questionIds
+  if (questionConfidenceMap) {
+    const lowConfList = questionIds.filter(id => {
+      const conf = questionConfidenceMap.get(id)
+      return conf !== undefined && conf !== null && conf < CONFIDENCE_THRESHOLD
+    })
+    if (lowConfList.length > 0) {
+      console.log(`  ⚠️ 低置信度错题已排除: ${lowConfList.length} 道 (阈值: ${CONFIDENCE_THRESHOLD})`)
+    }
+    filteredIds = questionIds.filter(id => {
+      const conf = questionConfidenceMap.get(id)
+      return conf === undefined || conf === null || conf >= CONFIDENCE_THRESHOLD
+    })
+  }
+
+  if (filteredIds.length === 0) return []
 
   const { rows: existing } = await query(
     `SELECT question_id FROM ${TABLES.WRONG_QUESTIONS} WHERE student_id = $1 AND question_id = ANY($2)`,
-    [studentId, questionIds]
+    [studentId, filteredIds]
   )
   const existingIds = new Set(existing.map(e => e.question_id))
-  const newIds = questionIds.filter(id => !existingIds.has(id))
+  const newIds = filteredIds.filter(id => !existingIds.has(id))
 
   if (newIds.length === 0) return []
 
@@ -337,12 +357,14 @@ export const cacheQuestion = async (questionData, fingerprint, phash = null, par
         ]
       )
       console.log(`[QuestionCache] 缓存更新成功`)
+      return existingRows[0].id
     } else {
-      await query(
+      const { rows: newRows } = await query(
         `INSERT INTO ${TABLES.QUESTION_CACHE}
          (question_fingerprint, content_type, content, options, answer, analysis,
           question_type, subject, ai_tags, phash, parser_version, use_count, created_at, updated_at)
-         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, NOW(), NOW())`,
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, NOW(), NOW())
+         RETURNING id`,
         [
           fingerprint,
           questionData.content_type || 'text',
@@ -359,6 +381,7 @@ export const cacheQuestion = async (questionData, fingerprint, phash = null, par
         ]
       )
       console.log(`[QuestionCache] 缓存写入成功`)
+      return newRows[0].id
     }
     
     return true
@@ -424,4 +447,37 @@ export const createJudgement = async ({
       JSON.stringify(metadata)
     ]
   )
+}
+
+/**
+ * 获取某题/学生的最新一条判定记录
+ * 用于三层模型: Question → Judgements → WrongQuestions
+ */
+export const getLatestJudgement = async (questionId, studentId) => {
+  const { rows } = await query(
+    `SELECT * FROM ${TABLES.JUDGEMENTS}
+     WHERE question_id = $1 AND student_id = $2
+     ORDER BY created_at DESC
+     LIMIT 1`,
+    [questionId, studentId]
+  )
+  return rows[0] || null
+}
+
+/**
+ * 更新 questions 表的 cache_id（指向 question_cache 的权威条目）
+ * @param {string} questionId - questions 表 id
+ * @param {string} cacheId - question_cache 表 id
+ */
+export const updateQuestionCacheId = async (questionId, cacheId) => {
+  try {
+    await query(
+      `UPDATE ${TABLES.QUESTIONS}
+       SET cache_id = $1, updated_at = NOW()
+       WHERE id = $2`,
+      [cacheId, questionId]
+    )
+  } catch (error) {
+    console.error(`更新 cache_id 失败 q=${questionId.substring(0, 8)}:`, error.message)
+  }
 }
