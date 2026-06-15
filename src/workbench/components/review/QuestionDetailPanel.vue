@@ -24,10 +24,19 @@
             :type="q.answer_source === 'blank' ? 'warning' : 'info'" effect="plain">
             {{ q.answer_source === 'blank' ? '未作答' : q.answer_source === 'recognized' ? '识别' : q.answer_source }}
           </el-tag>
-          <el-button v-if="!editing" size="small" type="primary" plain @click="handleEnterEdit">
-            <el-icon><EditPen /></el-icon> 编辑
-          </el-button>
-          <el-tag v-else size="small" type="warning">编辑中</el-tag>
+          <template v-if="!editing">
+            <el-button size="small" type="primary" plain @click="handleEnterEdit">
+              <el-icon><EditPen /></el-icon> 编辑
+            </el-button>
+          </template>
+          <template v-else>
+            <el-button size="small" @click="handleCancelEdit">
+              <el-icon><RefreshLeft /></el-icon> 取消
+            </el-button>
+            <el-button size="small" type="success" @click="handleSave">
+              <el-icon><DocumentChecked /></el-icon> 保存
+            </el-button>
+          </template>
         </div>
       </div>
 
@@ -63,6 +72,25 @@
 
       <!-- ═══ 完整题目内容（始终可见，不折叠） ═══ -->
       <div class="ops-question-body">
+        <!-- 题型 & 学科（仅在编辑时显示） -->
+        <div v-if="editing" class="ops-q-section">
+          <div class="ops-q-label">题型 · 学科</div>
+          <div class="ops-type-subject-row">
+            <el-select v-model="form.question_type" style="flex:1">
+              <el-option label="选择题" value="choice" />
+              <el-option label="填空题" value="fill" />
+              <el-option label="解答题" value="answer" />
+            </el-select>
+            <el-select v-model="form.subject" style="flex:1" allow-create filterable placeholder="学科">
+              <el-option label="数学" value="数学" />
+              <el-option label="物理" value="物理" />
+              <el-option label="化学" value="化学" />
+              <el-option label="英语" value="英语" />
+              <el-option label="语文" value="语文" />
+            </el-select>
+          </div>
+        </div>
+
         <!-- 题干 -->
         <div class="ops-q-section" v-if="q.content || (editing && form.content)">
           <div class="ops-q-label">题干</div>
@@ -124,6 +152,9 @@
                 accept=".jpg,.jpeg,.png,.webp,image/jpeg,image/png,image/webp">
                 <el-button size="small" type="primary"><el-icon><Upload /></el-icon>{{ displayImageUrl ? '替换' : '上传' }}</el-button>
               </el-upload>
+              <el-button size="small" type="success" @click="handleCropFromPaper">
+                <el-icon><Crop /></el-icon> 原卷裁剪
+              </el-button>
               <el-button v-if="displayImageUrl" size="small" type="danger" @click="deleteImage">
                 <el-icon><Delete /></el-icon> 删除
               </el-button>
@@ -174,6 +205,30 @@
       </div>
     </template>
 
+    <!-- ═══ 原卷裁剪对话框 ═══ -->
+    <el-dialog v-model="cropDialogVisible" title="从原卷截图" width="auto"
+      :close-on-click-modal="false" destroy-on-close append-to-body>
+      <div class="crop-container" ref="cropContainerRef">
+        <img :src="cropImageSource" class="crop-image" ref="cropImageRef"
+          @mousedown="onCropMouseDown" @mousemove="onCropMouseMove" @mouseup="onCropMouseUp"
+          @mouseleave="onCropMouseUp" draggable="false" />
+        <div v-if="cropSelection" class="crop-selection"
+          :style="{
+            left: cropSelection.x + 'px', top: cropSelection.y + 'px',
+            width: cropSelection.w + 'px', height: cropSelection.h + 'px'
+          }"></div>
+        <div v-if="cropSizeLabel" class="crop-size-label">{{ cropSizeLabel }}</div>
+      </div>
+      <div v-if="cropPreviewUrl" class="crop-preview-bar">
+        <span class="crop-preview-label">预览</span>
+        <img :src="cropPreviewUrl" class="crop-preview-img" />
+      </div>
+      <template #footer>
+        <el-button @click="cropDialogVisible = false">取消</el-button>
+        <el-button type="primary" :disabled="!cropPreviewUrl" @click="confirmCrop">确认裁剪</el-button>
+      </template>
+    </el-dialog>
+
     <el-image-viewer v-if="fullscreenImage" :url-list="[fullscreenImage]" @close="fullscreenImage = ''" />
     <el-dialog v-model="showTagSelector" title="选择知识点" width="380px">
       <div class="tag-grid">
@@ -188,9 +243,9 @@
 <script setup>
 import { ref, computed, watch } from 'vue'
 import { useReviewStore } from '../../stores/reviewStore'
-import { updateQuestion, clearStudentCaches } from '../../../services/apiService'
+import { updateQuestion, clearStudentCaches, uploadImage } from '../../../services/apiService'
 import { ElMessage, ElLoading } from 'element-plus'
-import { DocumentChecked, Delete, Plus, Upload, Picture, EditPen, ArrowLeft, ArrowRight, RefreshLeft } from '@element-plus/icons-vue'
+import { DocumentChecked, Delete, Plus, Upload, Picture, EditPen, ArrowLeft, ArrowRight, RefreshLeft, Crop } from '@element-plus/icons-vue'
 import MathRender from '../MathRender.vue'
 
 const store = useReviewStore()
@@ -219,11 +274,113 @@ watch(() => q.value?.geometry_image_url || q.value?.image_url, (url) => { displa
 const imageUrl = computed(() => q.value?.geometry_image_url || q.value?.image_url || '')
 
 const editing = ref(false)
-const form = ref({ content: '', options: [], answer: '', analysis: '', tags: [] })
+const form = ref({ content: '', options: [], answer: '', analysis: '', tags: [], question_type: 'choice', subject: '' })
 const originalData = ref(null)
 const localImageUrl = ref('')
 const showTagSelector = ref(false)
 const allKnowledgeTags = ref(['全等三角形判定', '角的关系推导', '线段等式证明', '平行线的性质', '角平分线定义', '三角形内角和定理', '等式性质', '勾股定理', '相似三角形', '圆的性质', '函数与图像', '概率统计'])
+
+// ═══ 原卷裁剪相关 ═══
+const cropDialogVisible = ref(false)
+const cropImageSource = ref('')
+const cropContainerRef = ref(null)
+const cropImageRef = ref(null)
+const cropSelection = ref(null)
+const cropStart = ref(null)
+const cropMaxWidth = ref(800)
+const cropSizeLabel = ref('')
+const cropPreviewUrl = ref('')
+
+const handleCropFromPaper = () => {
+  const task = store.currentTask
+  if (!task?.image_url) {
+    ElMessage.warning('当前试卷无原图')
+    return
+  }
+  cropImageSource.value = task.image_url
+  cropSelection.value = null
+  cropPreviewUrl.value = ''
+  cropSizeLabel.value = ''
+  cropDialogVisible.value = true
+}
+
+const getCropRect = () => {
+  const img = cropImageRef.value
+  if (!img || !cropSelection.value) return null
+  const rect = img.getBoundingClientRect()
+  const scaleX = img.naturalWidth / rect.width
+  const scaleY = img.naturalHeight / rect.height
+  const sel = cropSelection.value
+  return { sx: sel.x * scaleX, sy: sel.y * scaleY, sw: sel.w * scaleX, sh: sel.h * scaleY, bw: sel.w, bh: sel.h }
+}
+
+const onCropMouseDown = (e) => {
+  const img = cropImageRef.value
+  if (!img) return
+  const rect = img.getBoundingClientRect()
+  const x = Math.max(0, e.clientX - rect.left)
+  const y = Math.max(0, e.clientY - rect.top)
+  cropStart.value = { x, y }
+  cropSelection.value = { x, y, w: 0, h: 0 }
+  cropPreviewUrl.value = ''
+}
+
+const onCropMouseMove = (e) => {
+  if (!cropStart.value) return
+  const img = cropImageRef.value
+  if (!img) return
+  const rect = img.getBoundingClientRect()
+  const curX = Math.min(Math.max(0, e.clientX - rect.left), rect.width)
+  const curY = Math.min(Math.max(0, e.clientY - rect.top), rect.height)
+  const x = Math.min(cropStart.value.x, curX)
+  const y = Math.min(cropStart.value.y, curY)
+  const w = Math.abs(curX - cropStart.value.x)
+  const h = Math.abs(curY - cropStart.value.y)
+  cropSelection.value = { x, y, w, h }
+  cropSizeLabel.value = `${Math.round(w)} × ${Math.round(h)}`
+}
+
+const onCropMouseUp = () => {
+  if (!cropStart.value || !cropSelection.value) return
+  cropStart.value = null
+  const sel = cropSelection.value
+  if (sel.w < 5 || sel.h < 5) {
+    cropSelection.value = null
+    cropPreviewUrl.value = ''
+    cropSizeLabel.value = ''
+    return
+  }
+  // 生成裁剪预览
+  const img = cropImageRef.value
+  if (!img) return
+  const cr = getCropRect()
+  if (!cr) return
+  const canvas = document.createElement('canvas')
+  canvas.width = cr.sw
+  canvas.height = cr.sh
+  const ctx = canvas.getContext('2d')
+  ctx.drawImage(img, cr.sx, cr.sy, cr.sw, cr.sh, 0, 0, cr.sw, cr.sh)
+  cropPreviewUrl.value = canvas.toDataURL('image/png')
+}
+
+const confirmCrop = async () => {
+  if (!cropPreviewUrl.value || !q.value?.id) return
+  try {
+    const blob = await (await fetch(cropPreviewUrl.value)).blob()
+    const file = new File([blob], 'crop.png', { type: 'image/png' })
+    const result = await uploadImage(file)
+    const url = result.url || result.data?.url
+    if (!url) throw new Error('上传返回无 URL')
+    localImageUrl.value = url
+    displayImageUrl.value = url
+    if (q.value) q.value.geometry_image_url = url
+    cropDialogVisible.value = false
+    ElMessage.success('裁剪图片已上传')
+  } catch (err) {
+    console.error('裁剪上传失败:', err)
+    ElMessage.error('裁剪图片上传失败')
+  }
+}
 
 watch(q, (newQ) => {
   if (newQ) {
@@ -232,7 +389,9 @@ watch(q, (newQ) => {
       options: JSON.parse(JSON.stringify(newQ.options || [])),
       answer: newQ.answer || '',
       analysis: newQ.analysis || '',
-      tags: JSON.parse(JSON.stringify(newQ.ai_tags || newQ.knowledge_points || []))
+      tags: JSON.parse(JSON.stringify(newQ.ai_tags || newQ.knowledge_points || [])),
+      question_type: newQ.question_type || 'choice',
+      subject: newQ.subject || ''
     }
     localImageUrl.value = newQ.geometry_image_url || newQ.image_url || ''
     originalData.value = JSON.parse(JSON.stringify(form.value))
@@ -273,9 +432,10 @@ const handleSave = async () => {
     await updateQuestion(question.id, {
       content: form.value.content, options: form.value.options, answer: form.value.answer,
       analysis: form.value.analysis, student_answer: question.student_answer,
-      geometry_image_url: localImageUrl.value || question.geometry_image_url, ai_tags: form.value.tags
+      geometry_image_url: localImageUrl.value || question.geometry_image_url, ai_tags: form.value.tags,
+      question_type: form.value.question_type, subject: form.value.subject
     })
-    Object.assign(question, { content: form.value.content, options: form.value.options, answer: form.value.answer, analysis: form.value.analysis, ai_tags: form.value.tags, geometry_image_url: localImageUrl.value })
+    Object.assign(question, { content: form.value.content, options: form.value.options, answer: form.value.answer, analysis: form.value.analysis, ai_tags: form.value.tags, geometry_image_url: localImageUrl.value, question_type: form.value.question_type, subject: form.value.subject })
     const studentId = store.currentStudent?.id
     if (studentId) clearStudentCaches(studentId)
     editing.value = false
@@ -335,6 +495,7 @@ const deleteImage = () => {
   background: #f5f7fa;
   border-left: 1px solid #e4e7ed;
   flex-shrink: 0;
+  overflow: hidden;
 }
 .ops-empty {
   flex: 1;
@@ -443,6 +604,7 @@ const deleteImage = () => {
 .ops-question-body {
   flex: 1;
   overflow-y: auto;
+  min-height: 0;
   padding: 12px 16px;
   display: flex;
   flex-direction: column;
@@ -569,4 +731,66 @@ const deleteImage = () => {
 }
 .tag-option:hover { border-color: #409eff; color: #409eff; }
 .tag-selected { background: #ecf5ff; border-color: #409eff; color: #409eff; font-weight: 500; }
+
+/* ═══ 题型 · 学科 ═══ */
+.ops-type-subject-row {
+  display: flex;
+  gap: 8px;
+}
+
+/* ═══ 原卷裁剪 ═══ */
+.crop-container {
+  position: relative;
+  display: inline-block;
+  cursor: crosshair;
+  user-select: none;
+  line-height: 0;
+}
+.crop-image {
+  max-width: 780px;
+  max-height: 70vh;
+  display: block;
+}
+.crop-selection {
+  position: absolute;
+  border: 2px dashed #409eff;
+  background: rgba(64, 158, 255, 0.12);
+  pointer-events: none;
+  z-index: 10;
+}
+.crop-size-label {
+  position: absolute;
+  bottom: -26px;
+  left: 50%;
+  transform: translateX(-50%);
+  font-size: 13px;
+  color: #409eff;
+  font-weight: 600;
+  background: rgba(255,255,255,0.9);
+  padding: 2px 10px;
+  border-radius: 4px;
+  white-space: nowrap;
+  pointer-events: none;
+  z-index: 11;
+}
+.crop-preview-bar {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin-top: 32px;
+  padding-top: 12px;
+  border-top: 1px solid #e4e7ed;
+}
+.crop-preview-label {
+  font-size: 13px;
+  font-weight: 600;
+  color: #909399;
+  flex-shrink: 0;
+}
+.crop-preview-img {
+  max-height: 100px;
+  border: 1px solid #e4e7ed;
+  border-radius: 4px;
+  object-fit: contain;
+}
 </style>
