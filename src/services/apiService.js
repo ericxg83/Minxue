@@ -429,7 +429,7 @@ export const getGeneratedExamsByStudent = async (studentId, useCache = true) => 
     student_id: exam.student_id,
     name: exam.name || '错题重练卷',
     question_ids: exam.question_ids || [],
-    status: 'ungraded',
+    status: exam.status === 'done' || exam.status === 'graded' ? 'graded' : 'ungraded',
     created_at: exam.created_at,
     graded_at: null,
     source: 'generated'
@@ -460,9 +460,10 @@ export const markGeneratedExamGraded = async (examId) => {
   return data
 }
 
-export const uploadImage = async (file) => {
+export const uploadImage = async (file, studentId) => {
   const formData = new FormData()
   formData.append('files', file)
+  if (studentId) formData.append('studentId', studentId)
 
   const data = await apiRequest('/upload', {
     method: 'POST',

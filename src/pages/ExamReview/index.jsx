@@ -349,11 +349,11 @@ export default function ExamReview({ task, onClose, onSave }) {
 
         // 错题本操作
         if (edit.excluded && wrongId) {
-          await deleteWrongQuestion(wrongId).catch(() => {})
+          await deleteWrongQuestion(wrongId).catch(e => console.warn(`[ExamReview] 删除错题失败 q=${qId.substring(0,8)}:`, e.message))
         } else if (edit.is_correct === true && wrongId) {
-          await deleteWrongQuestion(wrongId).catch(() => {})
+          await deleteWrongQuestion(wrongId).catch(e => console.warn(`[ExamReview] 删除错题失败 q=${qId.substring(0,8)}:`, e.message))
         } else if (edit.is_correct === false && !wrongId && !edit.excluded) {
-          await addWrongQuestions(task.student_id, [qId]).catch(() => {})
+          await addWrongQuestions(task.student_id, [qId]).catch(e => console.warn(`[ExamReview] 添加错题失败 q=${qId.substring(0,8)}:`, e.message))
         }
       } catch (e) {
         console.error('保存失败:', qId, e)
