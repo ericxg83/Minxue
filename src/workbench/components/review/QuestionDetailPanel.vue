@@ -209,7 +209,7 @@
     <el-dialog v-model="cropDialogVisible" title="从原卷截图" width="auto"
       :close-on-click-modal="false" destroy-on-close append-to-body>
       <div class="crop-container" ref="cropContainerRef">
-        <img :src="cropImageSource" class="crop-image" ref="cropImageRef"
+        <img :src="cropImageSource" class="crop-image" ref="cropImageRef" crossorigin="anonymous"
           @mousedown="onCropMouseDown" @mousemove="onCropMouseMove" @mouseup="onCropMouseUp"
           @mouseleave="onCropMouseUp" draggable="false" />
         <div v-if="cropSelection" class="crop-selection"
@@ -291,18 +291,44 @@ const cropMaxWidth = ref(800)
 const cropSizeLabel = ref('')
 const cropPreviewUrl = ref('')
 
-const handleCropFromPaper = () => {
+// 保存 blob URL 以便后续释放
+let cropBlobUrl = ''
+
+const handleCropFromPaper = async () => {
   const task = store.currentTask
   if (!task?.image_url) {
     ElMessage.warning('当前试卷无原图')
     return
   }
-  cropImageSource.value = task.image_url
+  // 先释放之前的 blob URL
+  if (cropBlobUrl) { URL.revokeObjectURL(cropBlobUrl); cropBlobUrl = '' }
+
   cropSelection.value = null
   cropPreviewUrl.value = ''
   cropSizeLabel.value = ''
   cropDialogVisible.value = true
+
+  // 用 fetch 获取原图 → blob → objectURL（避免跨域 canvas taint）
+  try {
+    const resp = await fetch(task.image_url, { mode: 'cors', credentials: 'omit' })
+    if (!resp.ok) throw new Error(`HTTP ${resp.status}`)
+    const blob = await resp.blob()
+    cropBlobUrl = URL.createObjectURL(blob)
+    cropImageSource.value = cropBlobUrl
+  } catch (err) {
+    console.error('加载原图失败:', err)
+    // fallback: 直接用原 URL（可能因跨域导致裁剪预览失败）
+    cropImageSource.value = task.image_url
+  }
 }
+
+// 监听对话框关闭，释放 blob URL
+watch(cropDialogVisible, (v) => {
+  if (!v && cropBlobUrl) {
+    URL.revokeObjectURL(cropBlobUrl)
+    cropBlobUrl = ''
+  }
+})
 
 const getCropRect = () => {
   const img = cropImageRef.value
@@ -350,7 +376,7 @@ const onCropMouseUp = () => {
     cropSizeLabel.value = ''
     return
   }
-  // 生成裁剪预览
+  // 生成裁剪预览（白底处理，确保在试卷上完美融合）
   const img = cropImageRef.value
   if (!img) return
   const cr = getCropRect()
@@ -359,8 +385,16 @@ const onCropMouseUp = () => {
   canvas.width = cr.sw
   canvas.height = cr.sh
   const ctx = canvas.getContext('2d')
+  // 先填充白色背景（使 PNG 透明区域变为白色，与试卷背景融合）
+  ctx.fillStyle = '#ffffff'
+  ctx.fillRect(0, 0, canvas.width, canvas.height)
   ctx.drawImage(img, cr.sx, cr.sy, cr.sw, cr.sh, 0, 0, cr.sw, cr.sh)
-  cropPreviewUrl.value = canvas.toDataURL('image/png')
+  try {
+    cropPreviewUrl.value = canvas.toDataURL('image/png')
+  } catch (e) {
+    console.error('生成裁剪预览失败(可能仍为跨域):', e)
+    ElMessage.error('裁剪预览生成失败，请重试')
+  }
 }
 
 const confirmCrop = async () => {
