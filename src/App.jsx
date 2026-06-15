@@ -2650,6 +2650,15 @@ export default function App() {
                             </span>
                             <div className="flex gap-1">
                               <button
+                                onClick={() => handleReprintExam(exam)}
+                                className="px-2 py-1 rounded-lg text-[12px] flex items-center gap-1"
+                                style={{ background: '#F3F4F6', color: '#6B7280' }}
+                                title="重新打印"
+                              >
+                                <RefreshCw size={12} />
+                                <span style={{ fontSize: '10px', fontWeight: 700 }}>重打</span>
+                              </button>
+                              <button
                                 onClick={() => handleDownloadPdf(exam)}
                                 className="px-2 py-1 rounded-lg text-[12px] flex items-center gap-1"
                                 style={{ background: '#F3F4F6', color: '#2563EB' }}

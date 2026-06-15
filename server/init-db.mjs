@@ -129,6 +129,27 @@ async function initDatabase() {
     await pool.query('CREATE INDEX idx_generated_exams_status ON generated_exams(status)')
     console.log('✅ generated_exams 表已创建')
 
+    // judgements 表（AI 判定审计日志）
+    await pool.query(`
+      CREATE TABLE IF NOT EXISTS judgements (
+        id SERIAL PRIMARY KEY,
+        question_id TEXT NOT NULL,
+        student_id TEXT NOT NULL,
+        source TEXT NOT NULL DEFAULT 'ai_ocr',
+        confidence REAL DEFAULT NULL,
+        is_correct BOOLEAN DEFAULT NULL,
+        content TEXT DEFAULT NULL,
+        answer TEXT DEFAULT NULL,
+        student_answer TEXT DEFAULT NULL,
+        ai_answer TEXT DEFAULT NULL,
+        analysis TEXT DEFAULT NULL,
+        metadata JSONB DEFAULT '{}',
+        created_at TIMESTAMPTZ DEFAULT NOW()
+      )
+    `)
+    await pool.query('CREATE INDEX IF NOT EXISTS idx_judgements_question_student ON judgements(question_id, student_id, created_at DESC)')
+    console.log('✅ judgements 表已创建')
+
     // 插入测试学生数据
     const { rows } = await pool.query(`
       INSERT INTO students (id, name, grade) VALUES

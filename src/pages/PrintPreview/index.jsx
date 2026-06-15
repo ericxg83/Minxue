@@ -55,11 +55,12 @@ export default function PrintPreview({ onClose, questions: propQuestions }) {
   const [studentAnswers, setStudentAnswers] = useState({})
   const [gradingResults, setGradingResults] = useState({})
   const printRef = useRef(null)
+  const examRecorded = useRef(false)
 
   useEffect(() => {
     const newPaperId = generatePaperId()
     setPaperId(newPaperId)
-    
+
     const content = JSON.stringify({
       type: 'grading',
       paperId: newPaperId,
@@ -68,6 +69,19 @@ export default function PrintPreview({ onClose, questions: propQuestions }) {
       ts: Date.now()
     })
     setQrContent(content)
+
+    // 挂载时自动保存组卷记录（仅一次）
+    if (previewQuestions.length > 0 && currentStudent && !examRecorded.current) {
+      const qIds = previewQuestions.map(q => q.id).filter(Boolean)
+      if (qIds.length > 0) {
+        createGeneratedExam({
+          student_id: currentStudent.id,
+          name: `${currentStudent.name} - 错题重练`,
+          question_ids: qIds
+        }).then(() => { examRecorded.current = true })
+          .catch(e => console.warn('保存组卷记录失败:', e))
+      }
+    }
   }, [currentStudent, previewQuestions])
 
   useEffect(() => {

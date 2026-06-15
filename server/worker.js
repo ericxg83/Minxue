@@ -121,8 +121,8 @@ function repairAIJson(jsonStr) {
   const saved = []
   let s = jsonStr
 
-  // 1. 保护已正确转义的序列 (\\, \", \n, \t)
-  s = s.replace(/(\\[\\\"nrt])/g, (m) => {
+  // 1. 保护已正确转义的序列 (\\, \", \/, \n, \t, \uXXXX)
+  s = s.replace(/(\\[\\\"\/nrt]|\\u[0-9a-fA-F]{4})/g, (m) => {
     saved.push(m)
     return `__ESC_${saved.length - 1}__`
   })

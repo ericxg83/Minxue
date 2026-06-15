@@ -4,6 +4,7 @@ import { X, Plus, CheckCircle2, ChevronRight, UserPlus, User, Trash2, Pencil } f
 import { useStudentStore } from '../../store'
 import { createStudent, getStudents, deleteStudent, updateStudent } from '../../services/apiService'
 import { mockStudents } from '../../data/mockData'
+import { Dialog } from 'antd-mobile'
 
 const GRADE_OPTIONS = ['一年级', '二年级', '三年级', '四年级', '五年级', '六年级', '初一', '初二', '初三', '高一', '高二', '高三']
 
@@ -174,9 +175,20 @@ export default function StudentSwitcher({ visible, onClose, onSelectStudent }) {
                       <div
                         key={student.id}
                         onClick={() => {
-                          setCurrentStudent(student)
-                          onSelectStudent && onSelectStudent(student)
-                          onClose()
+                          if (currentStudent?.id === student.id) {
+                            onClose()
+                            return
+                          }
+                          Dialog.confirm({
+                            content: `切换至「${student.name}」将清空当前页面数据，是否继续？`,
+                            confirmText: '切换',
+                            cancelText: '取消',
+                            onConfirm: () => {
+                              setCurrentStudent(student)
+                              onSelectStudent && onSelectStudent(student)
+                              onClose()
+                            }
+                          })
                         }}
                         className={`flex items-center justify-between p-3 rounded-xl border transition-all cursor-pointer active:opacity-80 ${
                           currentStudent?.id === student.id

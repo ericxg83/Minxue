@@ -73,7 +73,6 @@ export const TASK_STATUS = {
   PENDING: 'pending',
   PROCESSING: 'processing',
   DONE: 'done',
-  REVIEWED: 'reviewed',
   FAILED: 'failed'
 }
 

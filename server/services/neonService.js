@@ -99,7 +99,7 @@ export const batchUpdateQuestionTags = async (tagUpdates) => {
 export const addWrongQuestions = async (studentId, questionIds, questionConfidenceMap = null) => {
   if (!questionIds || questionIds.length === 0) return []
 
-  const CONFIDENCE_THRESHOLD = 0.8
+  const CONFIDENCE_THRESHOLD = parseFloat(process.env.CONFIDENCE_THRESHOLD) || 0.8
 
   // [P0-1] 按置信度阈值过滤 — 低于 0.8 的不进入错题本
   let filteredIds = questionIds
