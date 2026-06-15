@@ -104,7 +104,9 @@ export default function Exam() {
 
   useEffect(() => {
     const interval = setInterval(() => {
-      loadGeneratedExams(true)
+      if (document.visibilityState === 'visible') {
+        loadGeneratedExams(true)
+      }
     }, 3000)
     return () => clearInterval(interval)
   }, [currentStudent?.id])

@@ -263,13 +263,13 @@ export const getQuestionsByTask = async (taskId, useCache = true) => {
   return questions
 }
 
-export const getQuestionsByIds = async (questionIds) => {
+export const getQuestionsByIds = async (questionIds, studentId) => {
   if (!questionIds || questionIds.length === 0) return []
 
   const data = await apiRequest('/questions/batch', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ ids: questionIds })
+    body: JSON.stringify({ ids: questionIds, studentId })
   })
   return (data.questions || []).map(parseQuestionFields)
 }
@@ -451,6 +451,13 @@ export const createGeneratedExam = async (examData) => {
   })
   clearCache(`generated_exams_cache_${examData.student_id}`)
   return data.exam
+}
+
+export const markGeneratedExamGraded = async (examId) => {
+  const data = await apiRequest(`/generated-exams/${examId}/graded`, {
+    method: 'PUT'
+  })
+  return data
 }
 
 export const uploadImage = async (file) => {

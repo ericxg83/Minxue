@@ -399,8 +399,7 @@ const confirmCrop = async () => {
 
     const blob = await (await fetch(processedDataUrl)).blob()
     const file = new File([blob], 'crop.png', { type: 'image/png' })
-    const result = await uploadImage(file)
-    const url = result.url || result.data?.url
+    const url = await uploadImage(file)
     if (!url) throw new Error('上传返回无 URL')
     localImageUrl.value = url
     displayImageUrl.value = url

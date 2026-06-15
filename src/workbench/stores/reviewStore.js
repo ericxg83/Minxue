@@ -109,8 +109,10 @@ export const useReviewStore = defineStore('review', () => {
       return addedDate === today && wq.lifecycle_status === LIFECYCLE_STATUS.NEW
     }).length
     
-    // 已生成待打印重练卷数量（模拟数据）
-    const pendingPrintExams = 3
+    // 已生成待打印重练卷数量
+    const pendingPrintExams = wrongQuestions.value.filter(wq =>
+      wq.lifecycle_status === LIFECYCLE_STATUS.NEW
+    ).length
     
     todayStats.value = {
       pendingReview,

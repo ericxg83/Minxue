@@ -435,18 +435,32 @@ export const createJudgement = async ({
   analysis = null,
   metadata = {}
 }) => {
-  await query(
-    `INSERT INTO ${TABLES.JUDGEMENTS}
-     (question_id, student_id, source, confidence, is_correct,
-      content, answer, student_answer, ai_answer, analysis, metadata)
-     VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)`,
-    [
-      questionId, studentId, source, confidence,
-      isCorrect ?? null, content, answer,
-      studentAnswer, aiAnswer, analysis,
-      JSON.stringify(metadata)
-    ]
-  )
+  const maxRetries = 2
+  for (let attempt = 0; attempt <= maxRetries; attempt++) {
+    try {
+      await query(
+        `INSERT INTO ${TABLES.JUDGEMENTS}
+         (question_id, student_id, source, confidence, is_correct,
+          content, answer, student_answer, ai_answer, analysis, metadata)
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)`,
+        [
+          questionId, studentId, source, confidence,
+          isCorrect ?? null, content, answer,
+          studentAnswer, aiAnswer, analysis,
+          JSON.stringify(metadata)
+        ]
+      )
+      return // success
+    } catch (error) {
+      if (attempt < maxRetries) {
+        console.warn(`[Judgement] 写入失败(attempt ${attempt + 1}/${maxRetries + 1}): ${error.message}`)
+        await new Promise(r => setTimeout(r, 100 * Math.pow(2, attempt)))
+      } else {
+        console.error(`[Judgement] 写入失败(已达最大重试次数): ${error.message}`)
+        // 不抛异常，不阻塞主流程
+      }
+    }
+  }
 }
 
 /**

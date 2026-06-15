@@ -23,8 +23,8 @@ import ScanQR from '../ScanQR'
 import Grading from '../Grading'
 import dayjs from 'dayjs'
 
-// 使用测试数据
-const USE_MOCK_DATA = true
+// 使用真实 API 数据
+const USE_MOCK_DATA = false
 
 // 苹果风格颜色
 const APPLE_COLORS = {
@@ -530,10 +530,12 @@ export default function WrongBook({ onScanQR }) {
     }
 
     const questions = selectedQuestions.map(wq => wq.question || wq)
+    const newPaperId = 'paper_' + Date.now() + '_' + Math.random().toString(36).substr(2, 9)
     const qrContent = JSON.stringify({
       type: 'grading',
+      paperId: newPaperId,
       studentId: currentStudent?.id,
-      qIds: selectedQuestions.map(wq => (wq.question || wq).id),
+      questionIds: selectedQuestions.map(wq => (wq.question || wq).id),
       ts: Date.now()
     })
 

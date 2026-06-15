@@ -2,7 +2,13 @@
 // This allows dotenv.config() in index.js / worker.js to set process.env before AI_CONFIG is used.
 export const AI_CONFIG = {
   get ENDPOINT() { return process.env.AI_ENDPOINT || 'https://api.siliconflow.cn/v1/chat/completions' },
-  get API_KEY() { return process.env.AI_API_KEY || 'sk-tulnvcklezfdhomxixdizcreiyjucqqwufdsflzccmdwscxb' },
+  get API_KEY() {
+    const key = process.env.AI_API_KEY
+    if (!key) {
+      throw new Error('AI_API_KEY 未配置。请在 .env 文件中设置 AI_API_KEY，或设置环境变量 AI_API_KEY')
+    }
+    return key
+  },
   get MODEL() { return process.env.AI_MODEL || 'Qwen/Qwen2.5-VL-72B-Instruct' },
   TIMEOUT: 120000,
   MAX_RETRIES: 2

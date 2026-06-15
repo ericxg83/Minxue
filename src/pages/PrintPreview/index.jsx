@@ -34,15 +34,17 @@ const generatePaperId = () => {
   return 'paper_' + Date.now() + '_' + Math.random().toString(36).substr(2, 9)
 }
 
-export default function PrintPreview({ onClose }) {
+export default function PrintPreview({ onClose, questions: propQuestions }) {
   const { currentStudent } = useStudentStore()
   const { selectedQuestions, clearSelection } = useWrongQuestionStore()
   const { setLoading } = useUIStore()
   const { addGeneratedExam } = useExamStore()
-  
-  const initQuestions = selectedQuestions.length > 0 
-    ? selectedQuestions.map(wq => wq.question || wq)
-    : [];
+
+  const initQuestions = propQuestions && propQuestions.length > 0
+    ? propQuestions
+    : (selectedQuestions.length > 0
+        ? selectedQuestions.map(wq => wq.question || wq)
+        : []);
   
   const [previewQuestions, setPreviewQuestions] = useState(initQuestions)
   const [currentPage, setCurrentPage] = useState(1)
@@ -60,8 +62,9 @@ export default function PrintPreview({ onClose }) {
     
     const content = JSON.stringify({
       type: 'grading',
+      paperId: newPaperId,
       studentId: currentStudent?.id,
-      qIds: previewQuestions.map(q => q.id),
+      questionIds: previewQuestions.map(q => q.id),
       ts: Date.now()
     })
     setQrContent(content)

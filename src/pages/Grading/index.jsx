@@ -1,7 +1,7 @@
 import { useState, useEffect } from 'react'
 import { motion, AnimatePresence } from 'motion/react'
 import { CheckCircle2, XCircle, ChevronLeft, ChevronRight, Loader2, QrCode, Eye, EyeOff } from 'lucide-react'
-import { getQuestionsByIds, upsertWrongQuestionStatus } from '../../services/apiService'
+import { getQuestionsByIds, upsertWrongQuestionStatus, markGeneratedExamGraded } from '../../services/apiService'
 import { useStudentStore } from '../../store'
 import dayjs from 'dayjs'
 
@@ -22,7 +22,7 @@ const formatOption = (opt, index) => {
   return `${String.fromCharCode(65 + index)}. ${opt}`
 }
 
-export default function Grading({ paperId, studentId, questionIds, onClose, onComplete }) {
+export default function Grading({ paperId, studentId, questionIds, onClose, onComplete, generatedExamId }) {
   const [currentQuestionIndex, setCurrentQuestionIndex] = useState(0)
   const [questions, setQuestions] = useState([])
   const [gradingResults, setGradingResults] = useState({})
@@ -61,7 +61,7 @@ export default function Grading({ paperId, studentId, questionIds, onClose, onCo
         return
       }
 
-      const fetchedQuestions = await getQuestionsByIds(questionIds)
+      const fetchedQuestions = await getQuestionsByIds(questionIds, targetStudentId)
 
       if (!fetchedQuestions || fetchedQuestions.length === 0) {
         setError('未找到相关题目，请确认试卷是否有效')
@@ -85,11 +85,14 @@ export default function Grading({ paperId, studentId, questionIds, onClose, onCo
           .catch(e => console.error(`[P0-2c] 初始化错题记录失败 q=${q.id.substring(0, 8)}:`, e.message))
       })
 
+      // 取第一个题目的 practice_count 作为本次练习次数
+      const maxPracticeCount = detailedQuestions.reduce((max, q) => Math.max(max, q.practice_count || 0), 0)
+
       setStudentInfo({
         name: student?.name || '学生',
         class: student?.class || '',
         date: dayjs().format('YYYY-MM-DD'),
-        practiceCount: 1
+        practiceCount: maxPracticeCount || 1
       })
 
       setIsLoading(false)
@@ -156,6 +159,12 @@ export default function Grading({ paperId, studentId, questionIds, onClose, onCo
       upsertWrongQuestionStatus(studentId, questionId, newStatus, result.status === 'mastered')
         .catch(e => console.error(`[P0-2b] 完成时更新失败 q=${questionId.substring(0, 8)}:`, e.message))
     })
+
+    // 标记组卷为已批改
+    if (generatedExamId) {
+      markGeneratedExamGraded(generatedExamId)
+        .catch(e => console.error('标记组卷已批改失败:', e.message))
+    }
 
     const masteredCount = Object.values(gradingResults).filter(r => r.status === 'mastered').length
     const notMasteredCount = Object.values(gradingResults).filter(r => r.status !== 'mastered').length

@@ -584,34 +584,34 @@ export default function App() {
     let successCount = 0
     let failedCount = 0
 
-    for (const { tempTask, file } of pendingTasks) {
-      try {
-        console.log('📤📤 [uploadViaBackend] Uploading file:', file.name, 'tempTaskId:', tempTask.id)
-        const result = await taskService.uploadFiles(currentStudent.id, [file])
-        console.log('📤📤 [uploadViaBackend] Upload result:', JSON.stringify(result))
-        
-        if (result.success && result.tasks.length > 0 && !result.tasks[0].error) {
-          const serverTask = result.tasks[0]
-          console.log('✅ [uploadViaBackend] File uploaded successfully, serverTaskId:', serverTask.id)
-          updateTaskInStore(tempTask.id, 'pending', { progress: 0 })
-          setTasks(prev => prev.map(t => 
-            t.id === tempTask.id ? { ...serverTask, is_temp: false } : t
-          ))
-          successCount++
-        } else {
+    // 批量上传所有文件（单次请求）
+    try {
+      const files = pendingTasks.map(p => p.file)
+      const result = await taskService.uploadFiles(currentStudent.id, files)
+      const tasks = result.tasks || []
+
+      tasks.forEach((taskResult, idx) => {
+        const tempTask = pendingTasks[idx]?.tempTask
+        if (!tempTask) return
+
+        if (taskResult.error) {
           failedCount++
-          const taskResult = result.tasks[0] || {}
-          const errorMsg = taskResult.message || taskResult.error || result.error || '上传失败'
-          console.error('❌ [uploadViaBackend] Upload failed:', errorMsg)
-          console.error('❌ [uploadViaBackend] Task result:', taskResult)
+          const errorMsg = taskResult.message || taskResult.error || '上传失败'
           updateTaskInStore(tempTask.id, 'failed', { error: errorMsg })
+        } else {
+          successCount++
+          updateTaskInStore(tempTask.id, 'pending', { progress: 0 })
+          setTasks(prev => prev.map(t =>
+            t.id === tempTask.id ? { ...taskResult, is_temp: false } : t
+          ))
         }
-      } catch (error) {
-        console.error('💥💥 [uploadViaBackend] EXCEPTION uploading', file.name, ':', error)
-        console.error('💥 [uploadViaBackend] Error stack:', error.stack)
+      })
+    } catch (error) {
+      console.error('💥 [uploadViaBackend] Batch upload exception:', error)
+      pendingTasks.forEach(({ tempTask }) => {
         failedCount++
         updateTaskInStore(tempTask.id, 'failed', { error: error.message || '上传失败' })
-      }
+      })
     }
 
     // 上传完成后刷新缓存并重新加载列表
@@ -891,8 +891,9 @@ export default function App() {
     const newPaperId = generatePaperId()
     const qrContent = JSON.stringify({
       type: 'grading',
+      paperId: newPaperId,
       studentId: currentStudent?.id,
-      qIds: exam.question_ids || [],
+      questionIds: exam.question_ids || [],
       ts: Date.now()
     })
 
@@ -3158,6 +3159,16 @@ export default function App() {
         {showPrintPreview && (
           <Suspense fallback={<LazyFallback />}>
             <PrintPreview onClose={() => setShowPrintPreview(false)} />
+          </Suspense>
+        )}
+
+        {/* Reprint Exam / 重新打印 */}
+        {showReprint && reprintExam && (
+          <Suspense fallback={<LazyFallback />}>
+            <PrintPreview
+              questions={reprintQuestions}
+              onClose={() => { setShowReprint(false); setReprintExam(null); setReprintQuestions([]) }}
+            />
           </Suspense>
         )}
 

@@ -6,6 +6,7 @@ import { migrateGeometryImageUrl } from './migrations/addGeometryImageUrl.js'
 import { migrateLifecycleStatus } from './migrations/007_add_lifecycle_status.js'
 import { migrateReviewStatus } from './migrations/008_add_review_status.js'
 import { migrateQuestionCacheId } from './migrations/009_add_question_cache_id.js'
+import { migrateJudgements } from './migrations/010_add_judgements_table.js'
 
 const __dirname = dirname(fileURLToPath(import.meta.url))
 dotenv.config({ path: resolve(__dirname, '.env') })
@@ -151,16 +152,24 @@ app.post('/api/tasks/upload', upload.array('files', 20), async (req, res) => {
 
           if (queue) {
             console.log(`   提交任务到 Redis 队列: taskId=${savedTask.id}`)
-            const job = await queue.add('process-task', {
-              taskId: savedTask.id,
-              studentId: studentId,
-              imageUrl: safeUrl,
-              originalName: result.filename
-            }, {
-              attempts: parseInt(process.env.MAX_RETRIES) || 3,
-              backoff: { type: 'exponential', delay: 5000 }
-            })
-            console.log(`  ? 任务已加入队列: jobId=${job.id}`)
+            try {
+              const job = await queue.add('process-task', {
+                taskId: savedTask.id,
+                studentId: studentId,
+                imageUrl: safeUrl,
+                originalName: result.filename
+              }, {
+                attempts: parseInt(process.env.MAX_RETRIES) || 3,
+                backoff: { type: 'exponential', delay: 5000 }
+              })
+              console.log(`  ? 任务已加入队列: jobId=${job.id}`)
+            } catch (queueError) {
+              // 队列提交失败时清理孤儿任务，避免 pending 任务堆积
+              console.error(`  ? 队列提交失败，清理 DB 记录: taskId=${savedTask.id}`, queueError.message)
+              query(`DELETE FROM ${TABLES.TASKS} WHERE id = $1`, [savedTask.id])
+                .catch(e => console.error(`  ? 清理孤儿任务失败:`, e.message))
+              throw queueError // 由外层 catch 统一处理
+            }
           } else {
             console.log(`  ??  Redis 队列未连接，跳过队列提交`)
             // 兜底：直接同步调用 Worker 处理
@@ -762,16 +771,26 @@ app.post('/api/questions/batch-update-tags', async (req, res) => {
 
 app.post('/api/questions/batch', async (req, res) => {
   try {
-    const { ids } = req.body
+    const { ids, studentId } = req.body
     if (!ids || !Array.isArray(ids) || ids.length === 0) {
       return res.json({ success: true, questions: [] })
     }
 
     const placeholders = ids.map((_, i) => `$${i + 1}`).join(',')
-    const { rows } = await query(
-      `SELECT * FROM ${TABLES.QUESTIONS} WHERE id IN (${placeholders})`,
-      ids
-    )
+    let queryStr = `SELECT q.*`
+    // 当提供 studentId 时，LEFT JOIN wrong_questions 带出 practice_count
+    if (studentId) {
+      queryStr += `, wq.practice_count, wq.error_count, wq.status AS wq_status`
+    }
+    queryStr += ` FROM ${TABLES.QUESTIONS} q`
+    if (studentId) {
+      const sidIdx = ids.length + 1
+      queryStr += ` LEFT JOIN ${TABLES.WRONG_QUESTIONS} wq ON wq.question_id = q.id AND wq.student_id = $${sidIdx}`
+    }
+    queryStr += ` WHERE q.id IN (${placeholders})`
+
+    const params = studentId ? [...ids, studentId] : ids
+    const { rows } = await query(queryStr, params)
 
     res.json({ success: true, questions: rows })
   } catch (error) {
@@ -1040,17 +1059,22 @@ app.put('/api/wrong-questions/upsert', async (req, res) => {
     let wqId
     if (rows.length === 0) {
       const { rows: inserted } = await query(
-        `INSERT INTO ${TABLES.WRONG_QUESTIONS} (student_id, question_id, status, error_count, added_at, last_wrong_at, created_at, updated_at)
-         VALUES ($1, $2, 'pending', 1, NOW(), NOW(), NOW(), NOW())
+        `INSERT INTO ${TABLES.WRONG_QUESTIONS} (student_id, question_id, status, error_count, practice_count, added_at, last_wrong_at, created_at, updated_at)
+         VALUES ($1, $2, 'pending', 1, 1, NOW(), NOW(), NOW(), NOW())
          RETURNING id`,
         [studentId, questionId]
       )
       wqId = inserted[0].id
     } else {
       wqId = rows[0].id
+      // 现有记录：递增 practice_count
+      await query(
+        `UPDATE ${TABLES.WRONG_QUESTIONS} SET practice_count = practice_count + 1, updated_at = NOW() WHERE id = $1`,
+        [wqId]
+      )
     }
 
-    // 动态构建 UPDATE SET
+    // 动态构建 UPDATE SET（状态/生命周期）
     const setClauses = ["updated_at = NOW()"]
     const params = []
     if (status) { params.push(status); setClauses.push(`status = $${params.length}`) }
@@ -1208,6 +1232,25 @@ app.delete('/api/generated-exams/:id', async (req, res) => {
   }
 })
 
+// 标记错题卷为已批改
+app.put('/api/generated-exams/:id/graded', async (req, res) => {
+  try {
+    const { id } = req.params
+    const uuidRegex = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
+    if (!uuidRegex.test(id)) {
+      return res.status(400).json({ error: '无效的试卷ID' })
+    }
+    await query(
+      `UPDATE ${TABLES.GENERATED_EXAMS} SET status = 'graded', updated_at = NOW() WHERE id = $1`,
+      [id]
+    )
+    res.json({ success: true, message: '错题卷已标记为已批改' })
+  } catch (error) {
+    console.error('标记错题卷失败:', error)
+    res.status(500).json({ error: error.message })
+  }
+})
+
 // Error handler
 app.use((err, req, res, next) => {
   console.error('服务器错误:', err)
@@ -1255,6 +1298,7 @@ if (process.argv[1] === __filename || process.argv[1]?.endsWith('server/index.js
       await migrateLifecycleStatus()
       await migrateReviewStatus()
       await migrateQuestionCacheId()
+      await migrateJudgements()
     } catch (err) {
       console.error('数据库迁移失败:', err.message)
     }

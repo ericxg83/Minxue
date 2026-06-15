@@ -125,6 +125,20 @@ function normalizeAnswer(str) {
 }
 
 /**
+ * Try numeric equivalence: "1/2" vs "0.5", "12.00" vs "12"
+ */
+function isNumericEquivalent(a, b) {
+  try {
+    const numA = eval(a.replace(/[^0-9+\-*/().]/g, ''))
+    const numB = eval(b.replace(/[^0-9+\-*/().]/g, ''))
+    if (isFinite(numA) && isFinite(numB)) {
+      return Math.abs(numA - numB) < 1e-9
+    }
+  } catch (e) { /* not numeric */ }
+  return false
+}
+
+/**
  * Compare student answer against reference answer with tolerance.
  * Returns { isCorrect: boolean, unrecognized: boolean }
  */
@@ -148,7 +162,18 @@ function judgeAnswer(studentAnswer, referenceAnswer, questionType) {
 
   const normStudent = normalizeAnswer(studentAnswer)
   const normRef = normalizeAnswer(referenceAnswer)
-  return { isCorrect: normStudent === normRef, unrecognized: false }
+
+  // String-level match
+  if (normStudent === normRef) {
+    return { isCorrect: true, unrecognized: false }
+  }
+
+  // Try numeric equivalence (handles "1/2" vs "0.5", "12.0" vs "12")
+  if (isNumericEquivalent(normStudent, normRef)) {
+    return { isCorrect: true, unrecognized: false }
+  }
+
+  return { isCorrect: false, unrecognized: false }
 }
 
 // 调用 AI 接口识别题目（带重试机制）

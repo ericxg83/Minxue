@@ -497,15 +497,15 @@ const getSubjectColor = (subject) => {
 
 // ===== 统计数据 =====
 const getWeekIncrease = (wq) => {
-  return Math.floor(Math.random() * 5) + 1
+  return Math.min(wq.error_count || 0, 99)
 }
 
 const getWrongStudentCount = (wq) => {
-  return Math.floor(Math.random() * 30) + 10
+  return wq.student_count || wq.wrong_student_count || 1
 }
 
 const getWeekStudentIncrease = () => {
-  return Math.floor(Math.random() * 5) + 1
+  return 0
 }
 
 const getLatestWrongTime = (wq) => {
@@ -513,15 +513,17 @@ const getLatestWrongTime = (wq) => {
 }
 
 const getAccuracyRate = (wq) => {
-  return Math.floor(Math.random() * 40) + 30
+  const total = (wq.practice_count || 0) + (wq.error_count || 0)
+  if (total === 0) return 0
+  return Math.round((1 - (wq.error_count || 0) / total) * 100)
 }
 
 const getAccuracyDrop = () => {
-  return Math.floor(Math.random() * 10) + 1
+  return 0
 }
 
 const getDaysSinceLastWeek = () => {
-  return Math.floor(Math.random() * 3) + 1
+  return 0
 }
 
 // ===== 最近错题学生 =====

@@ -8,7 +8,8 @@ import { useWrongQuestionStore } from '../../store'
 import { useToast } from '../../components/ToastProvider'
 import {
   updateQuestion, addWrongQuestions, deleteWrongQuestion,
-  getQuestionsByTask, invalidateCache, recalculateTaskStats
+  getQuestionsByTask, invalidateCache, recalculateTaskStats,
+  updateTaskStatus
 } from '../../services/apiService'
 import MathText from '../../components/MathText'
 
@@ -374,6 +375,8 @@ export default function ExamReview({ task, onClose, onSave }) {
       }
       if (task?.id) {
         await recalculateTaskStats(task.id).catch(e => console.error('刷新统计数据失败:', e))
+        // 复核完成后标记任务为已复核
+        await updateTaskStatus(task.id, 'reviewed').catch(e => console.error('更新任务复核状态失败:', e))
       }
       Toast.show({ message: `已保存 ${successCount} 题`, type: 'success' })
       if (onSave) onSave()
