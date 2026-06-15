@@ -209,7 +209,9 @@
     <el-dialog v-model="cropDialogVisible" title="从原卷截图" width="auto"
       :close-on-click-modal="false" destroy-on-close append-to-body>
       <div class="crop-container" ref="cropContainerRef">
-        <img :src="cropImageSource" class="crop-image" ref="cropImageRef" crossorigin="anonymous"
+        <img :src="cropImageSource" class="crop-image" ref="cropImageRef"
+          @load="cropImageLoaded"
+          @error="cropImageError"
           @mousedown="onCropMouseDown" @mousemove="onCropMouseMove" @mouseup="onCropMouseUp"
           @mouseleave="onCropMouseUp" draggable="false" />
         <div v-if="cropSelection" class="crop-selection"
@@ -305,6 +307,14 @@ const handleCropFromPaper = () => {
   cropPreviewUrl.value = ''
   cropSizeLabel.value = ''
   cropDialogVisible.value = true
+}
+
+const cropImageLoaded = () => {
+  // 原图加载完成，可以裁剪
+}
+const cropImageError = () => {
+  console.error('原卷图片加载失败:', cropImageSource.value)
+  ElMessage.error('原卷图片加载失败，请检查试卷图片是否存在')
 }
 
 const getCropRect = () => {
