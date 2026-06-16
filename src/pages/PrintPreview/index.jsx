@@ -177,36 +177,16 @@ export default function PrintPreview({ onClose, questions: propQuestions }) {
   }
 
   const handlePrint = async () => {
-    // Create exam record first
-    if (currentStudent && selectedQuestions.length > 0) {
-      const questionIds = selectedQuestions.map(wq => {
-        const q = wq.question || wq
-        return q.id
-      }).filter(Boolean)
+    // 生成 PDF（先不关预览，让下载/预览完成）
+    await generatePDF()
 
-      if (questionIds.length > 0) {
-        try {
-          await createGeneratedExam({
-            student_id: currentStudent.id,
-            name: '错题重练卷',
-            question_ids: questionIds
-          })
-          console.debug('组卷记录已保存')
-        } catch (error) {
-          console.error('保存组卷记录失败:', error)
-        }
-      }
-
-      clearSelection()
-    }
-
+    // 提示用户
     if (isMobile) {
-      await generatePDF()
+      Toast.show({ icon: 'success', content: 'PDF 正在新标签页中打开，请使用浏览器的「分享」或「打印」功能' })
     } else {
-      await generatePDF()
+      // 桌面端在打印对话框中操作，不关预览
+      Toast.show({ icon: 'success', content: 'PDF 已生成并开始下载' })
     }
-
-    onClose()
   }
 
   const generatePDF = async () => {

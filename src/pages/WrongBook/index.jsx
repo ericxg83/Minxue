@@ -1171,11 +1171,11 @@ export default function WrongBook({ onScanQR }) {
           >
             生成试卷
           </Button>
-          <Button 
-            color="primary" 
+          <Button
+            color="primary"
             disabled={selectedQuestions.length === 0}
-            onClick={handlePrint}
-            style={{ 
+            onClick={() => setShowPrintPreview(true)}
+            style={{
               minWidth: '80px',
               background: APPLE_COLORS.primary,
               borderRadius: '10px'
