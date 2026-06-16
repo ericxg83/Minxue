@@ -27,5 +27,8 @@
 /*.css       /:splat           200
 /*.js        /:splat           200
 
+# Workbench Vue3 SPA - must come BEFORE the main SPA fallback
+/workbench    /workbench.html    200
+
 # SPA fallback - only for non-asset requests (catch-all, must be LAST)
 /*    /index.html   200
