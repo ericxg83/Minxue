@@ -251,36 +251,14 @@ export async function generateExamPDF({ title, studentName, questions, filename,
       doc.addImage(pageImg, 'JPEG', 0, 0, A4_W, mmH)
     }
 
-    // 生成 blob URL 供移动端使用
+    // 生成 blob URL，返回给调用方展示"查看PDF"链接
     const pdfBlob = doc.output('blob')
+    const blobUrl = URL.createObjectURL(pdfBlob)
 
-    // 桌面端: doc.save() 直接触发下载
+    // doc.save() 尽量触发下载（桌面端可靠，移动端部分浏览器可用）
     doc.save(`${filename}.pdf`)
 
-    // 移动端: 优先用 Web Share API 共享 PDF，回退到新标签打开
-    const isMobile = typeof navigator !== 'undefined' &&
-      /Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(navigator.userAgent)
-    if (isMobile) {
-      const pdfFile = new File([pdfBlob], `${filename}.pdf`, { type: 'application/pdf' })
-      if (navigator.canShare && navigator.canShare({ files: [pdfFile] })) {
-        // 方式2: Web Share API — 可分享到"文件"、AirDrop、打印等
-        navigator.share({ files: [pdfFile], title: filename }).catch(() => {
-          // 用户取消分享不算错误
-        })
-      } else {
-        // 方式3: blob URL + 新标签（iOS Safari 可预览 PDF 后打印）
-        const blobUrl = URL.createObjectURL(pdfBlob)
-        const a = document.createElement('a')
-        a.href = blobUrl
-        a.target = '_blank'
-        a.rel = 'noopener'
-        a.style.display = 'none'
-        document.body.appendChild(a)
-        a.click()
-        document.body.removeChild(a)
-        setTimeout(() => URL.revokeObjectURL(blobUrl), 60000)
-      }
-    }
+    return blobUrl
   } finally {
     document.body.removeChild(container)
   }

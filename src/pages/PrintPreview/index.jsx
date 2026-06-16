@@ -56,6 +56,8 @@ export default function PrintPreview({ onClose, questions: propQuestions }) {
   const [gradingResults, setGradingResults] = useState({})
   const printRef = useRef(null)
   const examRecorded = useRef(false)
+  const [pdfBlobUrl, setPdfBlobUrl] = useState('')
+  const [generatingPdf, setGeneratingPdf] = useState(false)
 
   useEffect(() => {
     const newPaperId = generatePaperId()
@@ -177,21 +179,15 @@ export default function PrintPreview({ onClose, questions: propQuestions }) {
   }
 
   const handlePrint = async () => {
-    // 生成 PDF（先不关预览，让下载/预览完成）
     await generatePDF()
-
-    // 提示用户
-    if (isMobile) {
-      Toast.show({ icon: 'success', content: 'PDF 正在新标签页中打开，请使用浏览器的「分享」或「打印」功能' })
-    } else {
-      // 桌面端在打印对话框中操作，不关预览
-      Toast.show({ icon: 'success', content: 'PDF 已生成并开始下载' })
-    }
   }
 
   const generatePDF = async () => {
+    if (generatingPdf) return
+    setGeneratingPdf(true)
+    setPdfBlobUrl('')
     try {
-      await generateExamPDF({
+      const url = await generateExamPDF({
         title: `${currentStudent?.name || '学生'} - 错题重练卷`,
         studentName: currentStudent?.name || '',
         questions: previewQuestions,
@@ -199,42 +195,31 @@ export default function PrintPreview({ onClose, questions: propQuestions }) {
         showAnswers: false,
         qrContent: qrContent,
       })
+      if (url) setPdfBlobUrl(url)
     } catch (error) {
       console.error('PDF生成失败:', error)
-      alert('PDF生成失败，请重试')
+      Toast.show({ icon: 'fail', content: 'PDF生成失败，请重试' })
+    } finally {
+      setGeneratingPdf(false)
     }
   }
 
   const handleExportPDF = async () => {
-    try {
-      // Create exam record first
-      const questionIds = previewQuestions.map(q => q.id).filter(Boolean)
-      if (currentStudent && questionIds.length > 0) {
-        try {
-          await createGeneratedExam({
-            student_id: currentStudent.id,
-            name: '错题重练卷',
-            question_ids: questionIds
-          })
-          console.debug('组卷记录已保存')
-        } catch (e) {
-          console.error('保存组卷记录失败:', e)
-        }
+    if (generatingPdf) return
+    // Create exam record first
+    const questionIds = previewQuestions.map(q => q.id).filter(Boolean)
+    if (currentStudent && questionIds.length > 0) {
+      try {
+        await createGeneratedExam({
+          student_id: currentStudent.id,
+          name: '错题重练卷',
+          question_ids: questionIds
+        })
+      } catch (e) {
+        console.error('保存组卷记录失败:', e)
       }
-
-      await generateExamPDF({
-        title: `${currentStudent?.name || '学生'} - 错题重练卷`,
-        studentName: currentStudent?.name || '',
-        questions: previewQuestions,
-        filename: `${currentStudent?.name || 'student'}_cuoti_${dayjs().format('YYYYMMDD_HHmm')}`,
-        showAnswers: false,
-        qrContent: qrContent,
-      })
-      Toast.show({ icon: 'success', content: 'PDF已生成，请查看下载' })
-    } catch (error) {
-      console.error('PDF生成失败:', error)
-      Toast.show({ icon: 'fail', content: 'PDF生成失败，请重试' })
     }
+    await generatePDF()
   }
 
   const handleSimulateScan = () => {
@@ -363,17 +348,46 @@ export default function PrintPreview({ onClose, questions: propQuestions }) {
 
         {/* Bottom Buttons */}
         <div className="bg-white px-4 py-3 border-t flex justify-center gap-3" style={{ borderColor: '#E5E7EB' }}>
-          <button onClick={handleExportPDF}
-            className="px-5 py-2 rounded-lg text-[13px] font-medium flex items-center gap-1.5"
-            style={{ border: '1px solid #2563EB', color: '#2563EB', background: 'transparent' }}>
-            <FileDown size={15} />
-            PDF
-          </button>
-          <button onClick={handlePrint}
-            className="px-6 py-2 rounded-lg text-[13px] font-medium flex items-center gap-1.5" style={{ background: '#2563EB', color: 'white' }}>
-            {isMobile ? <FileDown size={15} /> : <Printer size={15} />}
-            {isMobile ? '下载PDF' : '直接打印'}
-          </button>
+          {generatingPdf ? (
+            <div className="flex items-center gap-2 text-[13px]" style={{ color: '#6B7280' }}>
+              <span style={{
+                display: 'inline-block',
+                width: 16,
+                height: 16,
+                border: '2px solid #2563EB',
+                borderTopColor: 'transparent',
+                borderRadius: '50%',
+                animation: 'pdf-spin 0.8s linear infinite'
+              }}></span>
+              <style>{`@keyframes pdf-spin{to{transform:rotate(360deg)}}`}</style>
+              PDF 生成中...
+            </div>
+          ) : pdfBlobUrl ? (
+            <a
+              href={pdfBlobUrl}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="px-5 py-2 rounded-lg text-[13px] font-medium flex items-center gap-1.5"
+              style={{ background: '#10B981', color: 'white' }}
+            >
+              <Eye size={15} />
+              查看PDF
+            </a>
+          ) : (
+            <>
+              <button onClick={handleExportPDF}
+                className="px-5 py-2 rounded-lg text-[13px] font-medium flex items-center gap-1.5"
+                style={{ border: '1px solid #2563EB', color: '#2563EB', background: 'transparent' }}>
+                <FileDown size={15} />
+                PDF
+              </button>
+              <button onClick={handlePrint}
+                className="px-6 py-2 rounded-lg text-[13px] font-medium flex items-center gap-1.5" style={{ background: '#2563EB', color: 'white' }}>
+                {isMobile ? <FileDown size={15} /> : <Printer size={15} />}
+                {isMobile ? '下载PDF' : '直接打印'}
+              </button>
+            </>
+          )}
         </div>
       </div>
     </AnimatePresence>
