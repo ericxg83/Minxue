@@ -10,7 +10,9 @@
     <title>敏学成长工作台</title>
     <script>
       // PC工作台路由：直接跳转到Vue3入口（在React加载前执行）
-      if (window.location.pathname === '/exam-workbench' || window.location.pathname.startsWith('/exam-workbench/')) {
+      const path = window.location.pathname
+      if (path === '/exam-workbench' || path.startsWith('/exam-workbench/') ||
+          path === '/workbench' || path.startsWith('/workbench/')) {
         window.location.href = '/workbench.html';
       }
     </script>
