@@ -41,7 +41,6 @@ import StudentSwitcher from './components/StudentSwitcher'
 
 import { useToast, ToastProvider } from './components/ToastProvider'
 import dayjs from 'dayjs'
-import { generateExamPDF } from './utils/pdfGenerator'
 import RectCropper from './components/RectCropper'
 
 // Lazy load non-critical pages with error handling
@@ -117,10 +116,6 @@ function dataURLtoFile(dataUrl, filename) {
     u8arr[n] = bstr.charCodeAt(n)
   }
   return new File([u8arr], filename, { type: mime })
-}
-
-const generatePaperId = () => {
-  return 'paper_' + Date.now() + '_' + Math.random().toString(36).substr(2, 9)
 }
 
 // ==================== Main App ====================
@@ -826,94 +821,14 @@ export default function App() {
     }
   }
 
-  // Shared helper to get exam questions
-  const getExamQuestions = async (exam) => {
-    if (!exam?.question_ids?.length) {
-      Toast.show({ message: '该试卷没有题目', type: 'error' })
-      return null
-    }
-    try {
-      const questions = await getQuestionsByIds(exam.question_ids)
-      if (!questions?.length) {
-        Toast.show({ message: '试卷中的题目已被删除，请重新生成', type: 'error' })
-        return null
-      }
-      return { examQuestions: questions, examTitle: exam.name || '试卷' }
-    } catch (error) {
-      console.error('获取题目失败:', error)
-      Toast.show({ message: '获取题目失败: ' + error.message, type: 'error' })
-      return null
-    }
-  }
-
-  // Print exam via browser print
+  // Print exam via browser print — 改用 PrintPreview 组件
   const handlePrint = async (exam) => {
-    const result = await getExamQuestions(exam)
-    if (!result) return
-    const { examQuestions, examTitle } = result
-
-    const newPaperId = generatePaperId()
-    const qrContent = JSON.stringify({
-      type: 'grading',
-      paperId: newPaperId,
-      studentId: currentStudent?.id,
-      questionIds: exam.question_ids || [],
-      ts: Date.now()
-    })
-
-    try {
-      await generateExamPDF({
-        title: examTitle,
-        studentName: currentStudent?.name || '',
-        questions: examQuestions,
-        filename: `${examTitle}_${dayjs().format('YYYYMMDD_HHmmss')}`,
-        showAnswers: false,
-        qrContent: qrContent,
-      })
-
-      setGeneratedExams((Array.isArray(generatedExams) ? generatedExams : []).map(e =>
-        e.id === exam.id ? { ...e, printed: true, printCount: (e.printCount || 0) + 1 } : e
-      ))
-      Toast.show({ message: 'PDF已生成，包含二维码，请查看下载', type: 'success' })
-    } catch (error) {
-      console.error('PDF生成失败:', error)
-      Toast.show({ message: 'PDF生成失败', type: 'error' })
-    }
+    handleReprintExam(exam)
   }
 
-  // Download exam as PDF
+  // Download exam as PDF — 改用 PrintPreview 组件
   const handleDownloadPdf = async (exam) => {
-    const result = await getExamQuestions(exam)
-    if (!result) return
-    const { examQuestions, examTitle } = result
-
-    const newPaperId = generatePaperId()
-    const qrContent = JSON.stringify({
-      type: 'grading',
-      paperId: newPaperId,
-      studentId: currentStudent?.id,
-      questionIds: exam.question_ids || [],
-      ts: Date.now()
-    })
-
-    try {
-      await generateExamPDF({
-        title: examTitle,
-        studentName: currentStudent?.name || '',
-        questions: examQuestions,
-        filename: `${examTitle}_${dayjs().format('YYYYMMDD_HHmmss')}`,
-        showAnswers: false,
-        qrContent: qrContent,
-      })
-
-      setGeneratedExams((Array.isArray(generatedExams) ? generatedExams : []).map(e =>
-        e.id === exam.id ? { ...e, printed: true, printCount: (e.printCount || 0) + 1 } : e
-      ))
-      Toast.show({ message: 'PDF已生成，包含二维码，请查看下载', type: 'success' })
-    } catch (error) {
-      console.error('PDF生成失败:', error)
-      Toast.show({ message: 'PDF生成失败', type: 'error' })
-    }
+    handleReprintExam(exam)
   }
 
   // Duplicate exam

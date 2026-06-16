@@ -255,8 +255,12 @@ export async function generateExamPDF({ title, studentName, questions, filename,
     const pdfBlob = doc.output('blob')
     const blobUrl = URL.createObjectURL(pdfBlob)
 
-    // doc.save() 尽量触发下载（桌面端可靠，移动端部分浏览器可用）
-    doc.save(`${filename}.pdf`)
+    // 桌面端直接触发下载；移动端跳过——iOS Safari 会将 blob URL 导航到当前页导致组件卸载
+    const isMobile = typeof navigator !== 'undefined' &&
+      /Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(navigator.userAgent)
+    if (!isMobile) {
+      doc.save(`${filename}.pdf`)
+    }
 
     return blobUrl
   } finally {

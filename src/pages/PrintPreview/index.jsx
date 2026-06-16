@@ -59,6 +59,13 @@ export default function PrintPreview({ onClose, questions: propQuestions }) {
   const [pdfBlobUrl, setPdfBlobUrl] = useState('')
   const [generatingPdf, setGeneratingPdf] = useState(false)
 
+  // 当外部的 questions prop 变化时同步（用于"重打"等异步加载场景）
+  useEffect(() => {
+    if (propQuestions && propQuestions.length > 0) {
+      setPreviewQuestions(propQuestions)
+    }
+  }, [propQuestions])
+
   useEffect(() => {
     const newPaperId = generatePaperId()
     setPaperId(newPaperId)
