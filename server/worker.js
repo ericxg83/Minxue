@@ -450,42 +450,68 @@ const generateTagsForQuestions = async (questions) => {
 }
 
 /**
- * Extract the final answer letter from analysis text.
- * AI sometimes puts wrong value in answer field but analysis text is correct.
- * Patterns: "因此只有④正确，应选A" / "正确答案是D" / "故选 B" / "选C"
+ * Extract the final answer from analysis text.
+ * AI sometimes puts wrong/unsimplified value in answer field but analysis text is correct.
+ * For choice questions: extracts A/B/C/D letter.
+ * For non-choice questions: extracts answer from explicit markers (答案为/答案是/最终答案).
  */
 function extractAnswerFromAnalysis(answer, analysis, options) {
   if (!analysis) return answer
 
-  // 精确匹配模式（高优先级）
-  const precisePatterns = [
-    /因此\s*(?:只有|仅)[^.，,]*?正确答案[是为：：]?\s*([A-D])/i,
-    /综上所述[^.，,]*?应选\s*([A-D])/i,
-    /故选\s*([A-D])\s*(?:项)?[，,.。]?$/m,
-    /应选\s*([A-D])\s*选项/i,
-  ]
+  // ── Choice question patterns (A/B/C/D) ──
+  if (options && options.length > 0) {
+    // 精确匹配模式（高优先级）
+    const precisePatterns = [
+      /因此\s*(?:只有|仅)[^.，,]*?正确答案[是为：：]?\s*([A-D])/i,
+      /综上所述[^.，,]*?应选\s*([A-D])/i,
+      /故选\s*([A-D])\s*(?:项)?[，,.。]?$/m,
+      /应选\s*([A-D])\s*选项/i,
+    ]
 
-  for (const pattern of precisePatterns) {
-    const match = analysis.match(pattern)
-    if (match) {
-      const extracted = match[1].toUpperCase()
-      console.log(`   [AnswerExtraction] 精确匹配: ${extracted}`)
-      return extracted
+    for (const pattern of precisePatterns) {
+      const match = analysis.match(pattern)
+      if (match) {
+        const extracted = match[1].toUpperCase()
+        console.log(`   [AnswerExtraction] 精确匹配: ${extracted}`)
+        return extracted
+      }
+    }
+
+    // 一般匹配模式
+    const generalPatterns = [
+      /正确答案[是为：：]?\s*([A-D])/i,
+      /答案[是为：：]?\s*([A-D])/i,
+    ]
+
+    for (const pattern of generalPatterns) {
+      const match = analysis.match(pattern)
+      if (match) {
+        const extracted = match[1].toUpperCase()
+        if (extracted !== answer) {
+          console.log(`   [AnswerExtraction] 一般匹配: ${extracted} (原: ${answer})`)
+          return extracted
+        }
+      }
     }
   }
 
-  // 一般匹配模式
-  const generalPatterns = [
-    /正确答案[是为：：]?\s*([A-D])/i,
-    /答案[是为：：]?\s*([A-D])/i,
+  // ── Non-choice / general: extract from explicit answer markers ──
+  // AI sometimes puts unsimplified LaTeX (e.g. \\frac{30}{\\sqrt{3}}) in answer field
+  // while analysis has the correct simplified result (e.g. "15").
+  // Look only in tail (last 300 chars) to favor final result over intermediate steps.
+  const tail = analysis.length > 300 ? analysis.substring(analysis.length - 300) : analysis
+  const answerMarkerPatterns = [
+    /答案为[：:]\s*([^\n。，,；;]+)/i,
+    /答案是[：:]\s*([^\n。，,；;]+)/i,
+    /最终答案[：:]\s*([^\n。，,；;]+)/i,
   ]
 
-  for (const pattern of generalPatterns) {
-    const match = analysis.match(pattern)
+  for (const pattern of answerMarkerPatterns) {
+    const match = tail.match(pattern)
     if (match) {
-      const extracted = match[1].toUpperCase()
-      if (extracted !== answer) {
-        console.log(`   [AnswerExtraction] 一般匹配: ${extracted} (原: ${answer})`)
+      const extracted = match[1].trim()
+      if (extracted && extracted !== answer) {
+        console.log(`   [AnswerExtraction] 答案标记匹配: ${extracted} (原: ${answer})`)
         return extracted
       }
     }

@@ -5,7 +5,7 @@
       <span class="nav-stats">
         <span class="stat-unconfirmed">⚠ {{ store.reviewProgress.unconfirmed }}</span>
         <span class="stat-sep">·</span>
-        <span class="stat-confirmed">✓ {{ store.reviewProgress.confirmed }}</span>
+        <span class="stat-confirmed">● {{ store.reviewProgress.confirmed }}</span>
       </span>
     </div>
 
@@ -17,7 +17,7 @@
         :class="{ active: idx === store.currentReviewIndex, confirmed: isConfirmed(q), unconfirmed: !isConfirmed(q) }"
         @click="onSelect(idx)"
       >
-        <span class="item-icon">{{ isConfirmed(q) ? '✓' : '⚠' }}</span>
+        <span class="item-icon">{{ isConfirmed(q) ? '●' : '⚠' }}</span>
         <span class="item-label">{{ idx + 1 }}. {{ typeLabel(q.question_type) }}</span>
         <span class="item-confidence" v-if="q.confidence != null" :class="{ low: q.confidence < store.confidenceThreshold }">
           {{ Math.round(q.confidence * 100) }}
