@@ -1,6 +1,6 @@
 /**
  * 题目图片自动处理工具
- * 功能：去除脏边、白底化、增强对比度、裁剪多余空白
+ * 功能：去除脏边、白底化、增强对比度、去手写、裁剪多余空白
  */
 
 /**
@@ -8,12 +8,14 @@
  * @param {string|Canvas} source - 图片源（base64 URL 或 Canvas 对象）
  * @param {Object} options - 处理选项
  * @param {boolean} options.autoEnhance - 是否自动增强（默认 true）
+ * @param {boolean} options.removeHandwriting - 是否去除手写笔迹（默认 false）
  * @param {number} options.padding - 裁剪后保留的边距像素（默认 10）
  * @returns {Promise<string>} 处理后的 base64 PNG URL
  */
 export async function processExamImage(source, options = {}) {
   const {
     autoEnhance = true,
+    removeHandwriting = false,
     padding = 10
   } = options
 
@@ -40,23 +42,46 @@ export async function processExamImage(source, options = {}) {
   const data = imageData.data
 
   if (autoEnhance) {
-    // 1. 分析背景色（采样四角）
+    // 1. 去手写（可选，在增强之前执行以保留原始笔迹位置信息）
+    if (removeHandwriting) {
+      removeHandwritingPixels(data, width, height)
+    }
+
+    // 2. 分析背景色（采样四角）
     const bgColor = analyzeBackgroundColor(data, width, height)
 
-    // 2. 白底化处理 + 增强对比度
+    // 3. 白底化处理 + 增强对比度
     enhanceAndWhiteBackground(data, width, height, bgColor)
 
-    // 3. 写回处理后的数据
+    // 4. 写回处理后的数据
     ctx.putImageData(imageData, 0, 0)
 
-    // 4. 裁剪多余空白
+    // 5. 裁剪多余空白
     const trimmedCanvas = trimWhitespace(canvas, padding)
 
-    // 5. 输出 PNG
+    // 6. 输出 PNG
     return trimmedCanvas.toDataURL('image/png')
   } else {
     // 不增强，仅转 PNG
     return canvas.toDataURL('image/png')
+  }
+}
+
+/**
+ * 去手写处理：擦除扫描试卷中的蓝色圆珠笔/钢笔笔迹
+ * 通过颜色通道差异识别蓝色墨水并设为白色
+ * 打印文字通常是纯黑色(R≈G≈B且值很低)，蓝色墨水则B通道明显偏高
+ */
+function removeHandwritingPixels(data, width, height) {
+  for (let i = 0; i < data.length; i += 4) {
+    const r = data[i], g = data[i + 1], b = data[i + 2]
+    const avg = (r + g + b) / 3
+
+    // 蓝色墨水检测（最常见的圆珠笔/钢笔颜色）
+    // 特征：蓝通道显著高于红绿通道，非纯白非纯黑
+    if (b > r + 20 && b > g + 15 && avg > 40 && avg < 230) {
+      data[i] = data[i + 1] = data[i + 2] = 255
+    }
   }
 }
 

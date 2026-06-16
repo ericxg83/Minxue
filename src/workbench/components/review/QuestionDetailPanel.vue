@@ -14,6 +14,9 @@
             {{ typeLabel }}
           </el-tag>
           <span class="ops-qnum">#{{ store.currentReviewIndex + 1 }}</span>
+          <el-tag v-if="q.review_status" :type="reviewStatusTagType" size="small" effect="dark" class="ops-review-badge">
+            {{ reviewStatusLabel }}
+          </el-tag>
         </div>
         <div class="ops-header__right">
           <span v-if="q.confidence != null" class="ops-confidence"
@@ -131,15 +134,21 @@
       <div class="ops-actions">
         <template v-if="!editing">
           <div class="ops-buttons-primary">
-            <button class="ops-btn ops-btn-correct" @click="handleReview('correct')">
+            <button class="ops-btn ops-btn-correct"
+              :class="{ 'ops-btn-active': q.review_status === 'correct', 'animate': animatingBtn === 'correct' }"
+              @click="handleReview('correct')">
               <span class="ops-btn-icon">✓</span>
               <span>正确</span>
             </button>
-            <button class="ops-btn ops-btn-wrong" @click="handleReview('wrong')">
+            <button class="ops-btn ops-btn-wrong"
+              :class="{ 'ops-btn-active': q.review_status === 'wrong', 'animate': animatingBtn === 'wrong' }"
+              @click="handleReview('wrong')">
               <span class="ops-btn-icon">✗</span>
               <span>错误</span>
             </button>
-            <button class="ops-btn ops-btn-exclude" @click="handleReview('exclude')">
+            <button class="ops-btn ops-btn-exclude"
+              :class="{ 'ops-btn-active': q.review_status === 'exclude', 'animate': animatingBtn === 'exclude' }"
+              @click="handleReview('exclude')">
               <span class="ops-btn-icon">⊘</span>
               <span>排除</span>
             </button>
@@ -230,6 +239,16 @@ const typeTagType = computed(() => {
 })
 const optionsList = computed(() => q.value?.options || [])
 
+const reviewStatusLabel = computed(() => {
+  if (!q.value?.review_status) return ''
+  const map = { correct: '已标记正确', wrong: '已标记错误', exclude: '已排除' }
+  return map[q.value.review_status] || ''
+})
+const reviewStatusTagType = computed(() => {
+  const map = { correct: 'success', wrong: 'danger', exclude: 'info' }
+  return map[q.value?.review_status] || 'info'
+})
+
 /** 去掉选项文本中已有的字母前缀（如 "A."、"A)"、"A、"），避免显示为 "A.A. 内容" */
 const cleanOptPrefix = (text) => {
   if (!text || typeof text !== 'string') return text
@@ -242,6 +261,7 @@ watch(() => q.value?.geometry_image_url || q.value?.image_url, (url) => { displa
 const imageUrl = computed(() => q.value?.geometry_image_url || q.value?.image_url || '')
 
 const editing = ref(false)
+const animatingBtn = ref('')
 const form = ref({ content: '', options: [], answer: '', analysis: '', tags: [], question_type: 'choice', subject: '' })
 const originalData = ref(null)
 const localImageUrl = ref('')
@@ -356,9 +376,10 @@ const confirmCrop = async () => {
   if (!cropPreviewUrl.value || !q.value?.id) return
   cropLoading.value = true
   try {
-    // 使用 imageProcessor.js 的 processExamImage 进行白底化 + 去脏边 + 增强
+    // 使用 imageProcessor.js 的 processExamImage 进行白底化 + 去脏边 + 去手写 + 增强
     const processedDataUrl = await processExamImage(cropPreviewUrl.value, {
       autoEnhance: true,
+      removeHandwriting: true,
       padding: 5
     })
 
@@ -457,6 +478,9 @@ const handleSave = async () => {
 const handleReview = (result) => {
   const question = q.value
   if (!question) return
+  // 按钮动画反馈（闪烁然后自动跳到下一题）
+  animatingBtn.value = result
+  setTimeout(() => { animatingBtn.value = '' }, 400)
   const resultText = { correct: '已标记为正确', wrong: '已标记为错误', exclude: '已排除本题' }
   store.reviewQuestion(question.id, result)
   ElMessage.success(resultText[result])
@@ -729,6 +753,31 @@ const deleteImage = () => {
 .ops-btn-wrong:hover { background: #fde2e2; border-color: #f89898; }
 .ops-btn-exclude { color: #909399; border-color: #dcdfe6; background: #f4f4f5; }
 .ops-btn-exclude:hover { background: #e9e9eb; border-color: #c8c9cc; }
+
+/* 复审状态标记 */
+.ops-review-badge { margin-left: 4px; }
+
+/* 复审按钮激活状态 */
+.ops-btn-active {
+  transform: scale(1.05);
+  box-shadow: 0 0 0 3px rgba(64,158,255,0.3);
+  border-color: #409eff !important;
+}
+.ops-btn-active.ops-btn-correct { border-color: #67c23a !important; box-shadow: 0 0 0 3px rgba(103,194,58,0.3); }
+.ops-btn-active.ops-btn-wrong { border-color: #f56c6c !important; box-shadow: 0 0 0 3px rgba(245,108,108,0.3); }
+.ops-btn-active.ops-btn-exclude { border-color: #909399 !important; box-shadow: 0 0 0 3px rgba(144,147,153,0.3); }
+
+/* 按钮点击脉冲动画 */
+.ops-btn.animate {
+  animation: btn-pulse 0.4s ease;
+}
+@keyframes btn-pulse {
+  0% { transform: scale(1); }
+  25% { transform: scale(1.08); }
+  50% { transform: scale(0.96); }
+  70% { transform: scale(1.03); }
+  100% { transform: scale(1); }
+}
 
 .tag-grid { display: flex; flex-wrap: wrap; gap: 8px; }
 .tag-option {
