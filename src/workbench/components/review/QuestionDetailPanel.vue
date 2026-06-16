@@ -214,6 +214,7 @@ import { processExamImage } from '../../../utils/imageProcessor'
 import { ElMessage, ElLoading } from 'element-plus'
 import { DocumentChecked, Delete, Plus, Upload, Picture, EditPen, ArrowLeft, ArrowRight, RefreshLeft, Crop } from '@element-plus/icons-vue'
 import MathRender from '../MathRender.vue'
+import QuestionEditForm from './QuestionEditForm.vue'
 
 const store = useReviewStore()
 const q = computed(() => store.currentReviewQuestion)
