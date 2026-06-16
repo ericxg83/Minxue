@@ -220,7 +220,7 @@ import { ref, computed, watch } from 'vue'
 import { useReviewStore } from '../../stores/reviewStore'
 import { updateQuestion, rejudgeQuestion, clearStudentCaches, uploadImage } from '../../../services/apiService'
 import { processExamImage } from '../../../utils/imageProcessor'
-import { ElMessage, ElLoading } from 'element-plus'
+import { ElMessage, ElMessageBox, ElLoading } from 'element-plus'
 import { DocumentChecked, Delete, Plus, Upload, Picture, EditPen, ArrowLeft, ArrowRight, RefreshLeft, Crop } from '@element-plus/icons-vue'
 import MathRender from '../MathRender.vue'
 import QuestionEditForm from './QuestionEditForm.vue'
@@ -478,11 +478,27 @@ const handleSave = async () => {
 const handleReview = (result) => {
   const question = q.value
   if (!question) return
-  // 按钮动画反馈（闪烁然后自动跳到下一题）
+  const resultText = { correct: '已标记为正确', wrong: '已标记为错误', exclude: '已排除本题' }
+  // 完整性检查 — 标记"错误"时检查题目是否完整
+  if (result === 'wrong') {
+    const blocked = store.reviewQuestion(question.id, result)
+    if (blocked?.blocked) {
+      ElMessageBox.confirm(
+        `题目不完整，无法加入错题本：<br><span style="color:#e6a23c">${blocked.issues.map(i => '• ' + i).join('<br>')}</span><br><br>是否现在编辑以补充缺失信息？`,
+        '题目不完整',
+        { confirmButtonText: '去编辑', cancelButtonText: '取消', type: 'warning', dangerouslyUseHTMLString: true }
+      ).then(() => {
+        editMode.value = true
+        expandEditPanel.value = true
+      }).catch(() => {})
+      return
+    }
+  } else {
+    store.reviewQuestion(question.id, result)
+  }
+  // 按钮动画反馈
   animatingBtn.value = result
   setTimeout(() => { animatingBtn.value = '' }, 400)
-  const resultText = { correct: '已标记为正确', wrong: '已标记为错误', exclude: '已排除本题' }
-  store.reviewQuestion(question.id, result)
   ElMessage.success(resultText[result])
 }
 const nextQ = () => { store.nextQuestion() }

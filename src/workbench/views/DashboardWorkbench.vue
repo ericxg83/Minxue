@@ -59,10 +59,23 @@ const onKeydown = (e) => {
   }
 }
 
-const handleQuickReview = (result) => {
+const handleQuickReview = async (result) => {
   const q = store.currentReviewQuestion
   if (!q) return
-  store.reviewQuestion(q.id, result)
+  if (result === 'wrong') {
+    const blocked = store.reviewQuestion(q.id, result)
+    if (blocked?.blocked) {
+      const { ElMessageBox } = await import('element-plus')
+      ElMessageBox.confirm(
+        `题目不完整，无法加入错题本：<br><span style="color:#e6a23c">${blocked.issues.map(i => '• ' + i).join('<br>')}</span><br><br>请先在右侧面板中编辑补充缺失信息。`,
+        '题目不完整',
+        { confirmButtonText: '知道了', cancelButtonText: '取消', type: 'warning', dangerouslyUseHTMLString: true }
+      ).catch(() => {})
+      return
+    }
+  } else {
+    store.reviewQuestion(q.id, result)
+  }
 }
 </script>
 

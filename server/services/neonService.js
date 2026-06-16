@@ -1,4 +1,5 @@
 import { query, TABLES } from '../config/neon.js'
+import { checkQuestionCompleteness } from '../utils/questionCompleteness.js'
 
 export const updateTaskStatus = async (taskId, status, result = null) => {
   const updateData = {
@@ -59,6 +60,7 @@ export const createQuestions = async (questions) => {
       manual_tags: JSON.stringify(q.manual_tags || []),
       tags_source: q.tags_source || 'ai',
       block_coordinates: q.block_coordinates ? JSON.stringify(q.block_coordinates) : null,
+      is_complete: checkQuestionCompleteness(q).isComplete,
       created_at: new Date().toISOString()
     }
   })
@@ -96,7 +98,7 @@ export const batchUpdateQuestionTags = async (tagUpdates) => {
   return results
 }
 
-export const addWrongQuestions = async (studentId, questionIds, questionConfidenceMap = null) => {
+export const addWrongQuestions = async (studentId, questionIds, questionConfidenceMap = null, questionMap = null) => {
   if (!questionIds || questionIds.length === 0) return []
 
   const CONFIDENCE_THRESHOLD = parseFloat(process.env.CONFIDENCE_THRESHOLD) || 0.8
@@ -115,6 +117,20 @@ export const addWrongQuestions = async (studentId, questionIds, questionConfiden
       const conf = questionConfidenceMap.get(id)
       return conf === undefined || conf === null || conf >= CONFIDENCE_THRESHOLD
     })
+  }
+
+  // 完整性过滤 — 仅完整题目可进入错题本
+  if (questionMap) {
+    const completeIds = filteredIds.filter(id => {
+      const q = questionMap.get(id)
+      if (!q) return false
+      return checkQuestionCompleteness(q).isComplete
+    })
+    const skippedCount = filteredIds.length - completeIds.length
+    if (skippedCount > 0) {
+      console.log(`  ⚠️ 完整性检查未通过，未加入错题本: ${skippedCount} 道 (缺少答案/选项/配图)`)
+    }
+    filteredIds = completeIds
   }
 
   if (filteredIds.length === 0) return []

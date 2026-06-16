@@ -7,6 +7,7 @@ import { migrateLifecycleStatus } from './migrations/007_add_lifecycle_status.js
 import { migrateReviewStatus } from './migrations/008_add_review_status.js'
 import { migrateQuestionCacheId } from './migrations/009_add_question_cache_id.js'
 import { migrateJudgements } from './migrations/010_add_judgements_table.js'
+import { migrateIsComplete } from './migrations/011_add_is_complete.js'
 
 const __dirname = dirname(fileURLToPath(import.meta.url))
 dotenv.config({ path: resolve(__dirname, '.env') })
@@ -19,6 +20,7 @@ import { uploadFilesWithRetry } from './services/uploadRetryManager.js'
 import { createUploadReport, logUploadReport } from './services/uploadReportLogger.js'
 import { createJudgement, batchUpdateQuestionTags } from './services/neonService.js'
 import { judgeAnswer } from './services/judgeService.js'
+import { checkQuestionCompleteness } from './utils/questionCompleteness.js'
 import { uploadImage, deleteFile } from './services/ossService.js'
 import { getTaskQueue, getQueueStats, taskWorker } from './queue.js'
 import { processTask } from './worker.js'
@@ -698,9 +700,9 @@ app.post('/api/questions', async (req, res) => {
     }
 
     const { rows } = await query(
-      `INSERT INTO ${TABLES.QUESTIONS} (task_id, student_id, content, options, answer, status, question_type, subject, analysis, image_url, geometry_image_url)
-       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11) RETURNING *`,
-      [task_id, student_id, content, JSON.stringify(options || []), answer || '', status || 'pending', question_type || 'answer', subject || '数学', analysis || '', image_url || null, geometry_image_url || null]
+      `INSERT INTO ${TABLES.QUESTIONS} (task_id, student_id, content, options, answer, status, question_type, subject, analysis, image_url, geometry_image_url, is_complete)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12) RETURNING *`,
+      [task_id, student_id, content, JSON.stringify(options || []), answer || '', status || 'pending', question_type || 'answer', subject || '数学', analysis || '', image_url || null, geometry_image_url || null, checkQuestionCompleteness({ content, options, answer, question_type, geometry_image_url }).isComplete]
     )
 
     res.status(201).json({ success: true, question: rows[0] })
@@ -802,6 +804,21 @@ app.put('/api/questions/:id', async (req, res) => {
         metadata: { oldIsCorrect, editedFields: Object.keys(req.body).filter(k => k !== 'id') }
       }).catch(e => console.error('[Shadow] judgements写入失败 (pc_edit):', e.message))
     }
+
+    // 重算 is_complete（非阻塞）
+    ;(async () => {
+      try {
+        const { isComplete } = checkQuestionCompleteness(updatedQuestion)
+        if (isComplete !== updatedQuestion.is_complete) {
+          await query(
+            `UPDATE ${TABLES.QUESTIONS} SET is_complete = $1, updated_at = NOW() WHERE id = $2`,
+            [isComplete, id]
+          )
+        }
+      } catch (e) {
+        console.error(`is_complete 更新失败 q=${id.substring(0, 8)}:`, e.message)
+      }
+    })()
   } catch (error) {
     console.error('更新题目失败:', error)
     res.status(500).json({ error: error.message })
@@ -848,6 +865,23 @@ app.post('/api/questions/:id/rejudge', async (req, res) => {
     // Sync wrong_questions table
     if (student_id && answer && answer.trim() !== '') {
       if (isCorrect === false) {
+        // 完整性检查 — 不完整的题目不进错题本
+        const { rows: qRows } = await query(
+          `SELECT content, geometry_image_url, question_type, options, answer
+           FROM ${TABLES.QUESTIONS} WHERE id = $1`,
+          [id]
+        )
+        if (qRows.length > 0) {
+          const { isComplete, issues } = checkQuestionCompleteness(qRows[0])
+          if (!isComplete) {
+            console.log(`  ⚠️ [rejudge] 题目不完整，未加入错题本: ${issues.join('; ')} (q=${id.substring(0, 8)})`)
+            return res.json({
+              success: true,
+              is_correct: isCorrect,
+              warning: `题目不完整，未加入错题本: ${issues.join('; ')}`
+            })
+          }
+        }
         // Wrong answer — ensure it's in the wrong book
         const { rows: existing } = await query(
           `SELECT id FROM ${TABLES.WRONG_QUESTIONS}
@@ -1130,7 +1164,28 @@ app.post('/api/wrong-questions', async (req, res) => {
       return res.json({ success: true, added: [], message: '全部已存在' })
     }
 
-    const values = newIds.map((id, i) => `($1, $${i + 2})`).join(',')
+    // 完整性检查 — 过滤不完整题目
+    const { rows: qRows } = await query(
+      `SELECT id, content, geometry_image_url, question_type, options, answer FROM ${TABLES.QUESTIONS} WHERE id = ANY($1)`,
+      [newIds]
+    )
+    const qMap = new Map(qRows.map(r => [r.id, r]))
+    const skippedIds = []
+    const validIds = newIds.filter(id => {
+      const q = qMap.get(id)
+      if (!q) return false
+      const { isComplete } = checkQuestionCompleteness(q)
+      if (!isComplete) skippedIds.push(id)
+      return isComplete
+    })
+    if (skippedIds.length > 0) {
+      console.log(`  ⚠️ [manual-add] ${skippedIds.length} 道题不完整，已跳过: ${skippedIds.join(', ')}`)
+    }
+    if (validIds.length === 0) {
+      return res.json({ success: true, added: [], skipped: skippedIds, message: '所有题目均不完整' })
+    }
+
+    const values = validIds.map((id, i) => `($1, $${i + 2})`).join(',')
     const params = [studentId, ...newIds]
 
     await query(
@@ -1138,9 +1193,9 @@ app.post('/api/wrong-questions', async (req, res) => {
       params
     )
 
-    res.json({ success: true, added: newIds })
+    res.json({ success: true, added: validIds, skipped: skippedIds })
     // [Shadow Mode] 追加写入人工添加错题判定记录
-    for (const qId of newIds) {
+    for (const qId of validIds) {
       createJudgement({
         questionId: qId,
         studentId: studentId,
@@ -1159,7 +1214,9 @@ app.get('/api/wrong-questions/student/:studentId', async (req, res) => {
   try {
     const { studentId } = req.params
     const { rows } = await query(
-      `SELECT * FROM ${TABLES.WRONG_QUESTIONS} WHERE student_id = $1 ORDER BY added_at DESC`,
+      `SELECT wq.* FROM ${TABLES.WRONG_QUESTIONS} wq
+       INNER JOIN ${TABLES.QUESTIONS} q ON q.id = wq.question_id AND q.is_complete = TRUE
+       WHERE wq.student_id = $1 ORDER BY wq.added_at DESC`,
       [studentId]
     )
     res.json({ success: true, wrongQuestions: rows })
@@ -1175,6 +1232,18 @@ app.put('/api/wrong-questions/upsert', async (req, res) => {
     const { studentId, questionId, status, lifecycleStatus, isCorrect } = req.body
     if (!studentId || !questionId) {
       return res.status(400).json({ error: '缺少 studentId 或 questionId' })
+    }
+
+    // 完整性检查 — 不完整的题目不能添加/更新错题本
+    const { rows: qRows } = await query(
+      `SELECT content, geometry_image_url, question_type, options, answer FROM ${TABLES.QUESTIONS} WHERE id = $1`,
+      [questionId]
+    )
+    if (qRows.length > 0) {
+      const { isComplete, issues } = checkQuestionCompleteness(qRows[0])
+      if (!isComplete) {
+        return res.status(422).json({ error: '题目不完整', issues })
+      }
     }
 
     // 查找已有记录（按 student_id + question_id 唯一约束）
@@ -1426,6 +1495,7 @@ if (process.argv[1] === __filename || process.argv[1]?.endsWith('server/index.js
       await migrateReviewStatus()
       await migrateQuestionCacheId()
       await migrateJudgements()
+      await migrateIsComplete()
     } catch (err) {
       console.error('数据库迁移失败:', err.message)
     }

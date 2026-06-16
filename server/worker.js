@@ -976,7 +976,8 @@ export const processTask = async (job) => {
       if (ocrWrongIds.length > 0) {
         try {
           const confidenceMap = new Map(questionsWithStudentId.map(q => [q.id, q.confidence]))
-          await addWrongQuestions(studentId, ocrWrongIds, confidenceMap)
+          const questionMap = new Map(questionsWithStudentId.map(q => [q.id, q]))
+          await addWrongQuestions(studentId, ocrWrongIds, confidenceMap, questionMap)
           console.log(`  ✅ 错题本初始同步: ${ocrWrongIds.length} 道错题 (OCR后)`)
         } catch (e) {
           console.error('  ⚠️ 错题本初始同步失败:', e.message)
@@ -1055,7 +1056,8 @@ await job.updateProgress(80)
         if (wrongIds.length > 0) {
           try {
             const confidenceMap = new Map(questions.map(q => [q.id, q.confidence]))
-            await addWrongQuestions(studentId, wrongIds, confidenceMap)
+            const questionMap = new Map(questions.map(q => [q.id, q]))
+            await addWrongQuestions(studentId, wrongIds, confidenceMap, questionMap)
             console.log(`  ✅ 错题本同步: ${wrongIds.length} 道错题（其中 ${rejudgedWrong} 道由AI答案生成判定）`)
           } catch (e) {
             console.error('错题本同步失败:', e.message)

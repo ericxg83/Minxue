@@ -3,6 +3,7 @@ import { ref, computed } from 'vue'
 import dayjs from 'dayjs'
 import { getStudents, getWrongQuestionsByStudent, getQuestionsByTask, getTasksByStudent, updateWrongQuestionStatus, updateTaskStatus, getLatestJudgements, clearStudentCaches, updateQuestionReviewStatus } from '../../services/apiService'
 import { useLifecycleStore, LIFECYCLE_STATUS } from './lifecycleStore'
+import { checkQuestionCompleteness } from '../../utils/questionCompleteness.js'
 
 export const useReviewStore = defineStore('review', () => {
   const lifecycleStore = useLifecycleStore()
@@ -245,6 +246,14 @@ export const useReviewStore = defineStore('review', () => {
   const reviewQuestion = (questionId, result) => {
     const question = allQuestions.value.find(q => q.id === questionId)
     if (question) {
+      // 完整性检查 — 标记"错误"时，不完整的题目不进错题本
+      if (result === 'wrong') {
+        const { isComplete, issues } = checkQuestionCompleteness(question)
+        if (!isComplete) {
+          return { blocked: true, issues, questionId }
+        }
+      }
+
       // Store manual review status on the question
       question.review_status = result
 
