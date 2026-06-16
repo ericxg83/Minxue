@@ -1,9 +1,9 @@
 // Use getters so env vars are resolved lazily at access time, not at module import time.
 // This allows dotenv.config() in index.js / worker.js to set process.env before AI_CONFIG is used.
 export const AI_CONFIG = {
-  get ENDPOINT() { return process.env.AI_ENDPOINT || 'https://api.siliconflow.cn/v1/chat/completions' },
-  get API_KEY() { return process.env.AI_API_KEY || 'sk-tulnvcklezfdhomxixdizcreiyjucqqwufdsflzccmdwscxb' },
-  get MODEL() { return process.env.AI_MODEL || 'Qwen/Qwen3.5-4B' },
+  get ENDPOINT() { return process.env.AI_ENDPOINT || 'https://api-inference.modelscope.cn/v1/chat/completions' },
+  get API_KEY() { return process.env.AI_API_KEY || 'ms-dae707ae-bcc4-4d7e-aa83-e2165d0cdbf5' },
+  get MODEL() { return process.env.AI_MODEL || 'Qwen/Qwen3-VL-8B-Instruct' },
   TIMEOUT: 120000,
   MAX_RETRIES: 2
 }
