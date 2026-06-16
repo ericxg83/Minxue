@@ -22,7 +22,6 @@ import {
   Image as ImageIcon,
   Maximize,
   Eye,
-  Edit3,
   Tag,
   AlertCircle,
   Search,
@@ -2552,13 +2551,6 @@ export default function App() {
 
                               {/* Action buttons - weak */}
                               <div className="flex-shrink-0 flex items-center gap-1 ml-1">
-                                <button
-                                  onClick={() => handleOpenEditor(wq)}
-                                  style={{ fontSize: '11px', color: '#D1D5DB', cursor: 'pointer', lineHeight: 1, display: 'inline-flex', alignItems: 'center' }}
-                                  title="编辑"
-                                >
-                                  <Edit3 size={14} />
-                                </button>
                                 <button
                                   onClick={() => handleDeleteWrongQuestion(wq)}
                                   style={{ fontSize: '11px', color: '#D1D5DB', cursor: 'pointer', lineHeight: 1, display: 'inline-flex', alignItems: 'center' }}
