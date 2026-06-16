@@ -1,0 +1,165 @@
+/**
+ * Pure judgment functions for comparing student answers against reference answers.
+ * Extracted from worker.js so both the worker and the rejudge endpoint can share them.
+ */
+
+function normalizeAnswer(str) {
+  if (str === null || str === undefined) return ''
+  let s = String(str)
+
+  // Full-width to half-width (includes letters, digits, punctuation)
+  s = s.replace(/[！-～]/g, ch => String.fromCharCode(ch.charCodeAt(0) - 0xFEE0))
+  // Full-width space to regular space
+  s = s.replace(/　/g, ' ')
+
+  // Trim
+  s = s.trim()
+
+  // Case normalization (letters only)
+  s = s.toUpperCase()
+
+  // Strip trailing common punctuation
+  s = s.replace(/[.,;:!?，。；：！？、）)\]}"'《》「」『』]+$/g, '')
+
+  // Unit synonym replacement (Chinese → symbolic); longer patterns first
+  const unitPairs = [
+    ['小时', 'H'], ['時', 'H'],
+    ['分钟', 'MIN'], ['分鐘', 'MIN'],
+    ['秒钟', 'S'], ['秒鐘', 'S'],
+    ['厘米', 'CM'], ['毫米', 'MM'],
+    ['千克', 'KG'], ['公里', 'KM'],
+    ['毫升', 'ML'],
+    ['度', '°'],
+    ['米', 'M'], ['时', 'H'], ['時', 'H'],
+    ['分', 'MIN'], ['秒', 'S'],
+    ['克', 'G'], ['升', 'L'],
+  ]
+  for (const [cn, sym] of unitPairs) {
+    s = s.replace(new RegExp(cn, 'g'), sym)
+  }
+
+  // Remove all whitespace
+  s = s.replace(/\s+/g, '')
+
+  return s
+}
+
+/**
+ * Check if two math expressions are numerically equivalent
+ * by substituting test values for variables and comparing results.
+ * Handles implicit multiplication, ^ exponentiation, and equation prefix.
+ */
+function isMathEquivalent(expr1, expr2) {
+  if (!expr1 || !expr2) return false
+
+  try {
+    // Prepare expression for JS evaluation
+    const prep = (s) => {
+      // Strip equation prefix: "y = 2x - 4" → "2x - 4", "f(x)=..." → "..."
+      const eqIdx = s.indexOf('=')
+      if (eqIdx > 0) s = s.substring(eqIdx + 1)
+      s = s.trim()
+      // ^ → **  (exponentiation)
+      s = s.replace(/\^/g, '**')
+      // Insert * for implicit multiplication: "2x" → "2*x", "2(" → "2*(", ")(" → ")*("
+      s = s.replace(/(\d)([a-zA-Z(])/g, '$1*$2')
+      s = s.replace(/([a-zA-Z)])(\d)/g, '$1*$2')
+      s = s.replace(/\)\(/g, ')*(')
+      return s
+    }
+
+    let e1 = prep(expr1).toLowerCase()
+    let e2 = prep(expr2).toLowerCase()
+
+    // Extract single-letter variables (not adjacent to another letter, exclude e/pi)
+    const allText = e1 + ' ' + e2
+    const varSet = new Set()
+    const varRe = /(?<![a-z])([a-df-z])(?![a-z])/gi
+    let m
+    while ((m = varRe.exec(allText)) !== null) {
+      varSet.add(m[1].toLowerCase())
+    }
+    // Remove common function-name letters that slip through
+    const funcLetters = new Set(['s', 'i', 'n', 'c', 'o', 't', 'a', 'g', 'l', 'e', 'x', 'p', 'r', 'm', 'u', 'v'])
+    for (const fl of funcLetters) {
+      if (varSet.has(fl)) {
+        // Only remove if the letter ONLY appears in function words, not as standalone variable
+        // Keep if it appears as standalone
+        const standaloneRe = new RegExp(`(?<![a-z])${fl}(?![a-z])`, 'g')
+        const inE1 = (e1.match(standaloneRe) || []).length
+        const inE2 = (e2.match(standaloneRe) || []).length
+        if (inE1 === 0 && inE2 === 0) varSet.delete(fl)
+      }
+    }
+
+    if (varSet.size === 0) {
+      // No variables — compare as literal numbers
+      const fn1 = new Function(`"use strict"; return (${e1})`)
+      const fn2 = new Function(`"use strict"; return (${e2})`)
+      return Math.abs(fn1() - fn2()) < 1e-9
+    }
+
+    // Test with diverse values; all must match
+    const testVals = [0, 1, 2, -1, 0.5, 3, -2, 5, 0.25, 10]
+    for (const v of testVals) {
+      let s1 = e1; let s2 = e2
+      for (const vn of varSet) {
+        const re = new RegExp(`(?<![a-z])(${vn})(?![a-z])`, 'g')
+        s1 = s1.replace(re, `(${v})`)
+        s2 = s2.replace(re, `(${v})`)
+      }
+      try {
+        const fn1 = new Function(`"use strict"; return (${s1})`)
+        const fn2 = new Function(`"use strict"; return (${s2})`)
+        if (Math.abs(fn1() - fn2()) > 1e-9) return false
+      } catch {
+        continue // skip test values that cause math errors (e.g. division by zero)
+      }
+    }
+    return true
+  } catch {
+    return false
+  }
+}
+
+/**
+ * Compare student answer against reference answer with tolerance.
+ * Returns { isCorrect: boolean, unrecognized: boolean }
+ */
+export function judgeAnswer(studentAnswer, referenceAnswer, questionType) {
+  const rawAnswer = String(studentAnswer || '').trim()
+  const hasAnswer = rawAnswer !== '' && rawAnswer !== '未作答'
+
+  if (!hasAnswer) {
+    return { isCorrect: null, unrecognized: true }
+  }
+
+  if (!referenceAnswer) {
+    // No reference answer: mark as pending for manual review instead of assuming correct
+    return { isCorrect: null, unrecognized: true }
+  }
+
+  if (questionType === 'choice') {
+    // Choice: exact letter match, case-insensitive
+    const normStudent = String(studentAnswer).trim().toUpperCase()
+    const normRef = String(referenceAnswer).trim().toUpperCase()
+    return { isCorrect: normStudent === normRef, unrecognized: false }
+  }
+
+  // Fill / answer / other: normalized comparison with tolerance
+  const normStudent = normalizeAnswer(studentAnswer)
+  const normRef = normalizeAnswer(referenceAnswer)
+
+  // String-level match
+  if (normStudent === normRef) {
+    return { isCorrect: true, unrecognized: false }
+  }
+
+  // String mismatch — try mathematical equivalence
+  // (handles cases like "2x-4" vs "2(x-2)" which are the same but differ textually)
+  if (isMathEquivalent(studentAnswer, referenceAnswer)) {
+    return { isCorrect: true, unrecognized: false }
+  }
+
+  return { isCorrect: false, unrecognized: false }
+}

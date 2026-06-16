@@ -18,6 +18,7 @@ import { query, TABLES, TASK_STATUS, QUESTION_STATUS, WRONG_STATUS } from './con
 import { uploadFilesWithRetry } from './services/uploadRetryManager.js'
 import { createUploadReport, logUploadReport } from './services/uploadReportLogger.js'
 import { createJudgement, batchUpdateQuestionTags } from './services/neonService.js'
+import { judgeAnswer } from './services/judgeService.js'
 import { uploadImage, deleteFile } from './services/ossService.js'
 import { getTaskQueue, getQueueStats, taskWorker } from './queue.js'
 import { processTask } from './worker.js'
@@ -272,6 +273,59 @@ app.post('/api/tasks/create-by-url', async (req, res) => {
     res.json({ success: true, task: savedTask })
   } catch (error) {
     console.error('创建任务失败:', error)
+    res.status(500).json({ error: error.message })
+  }
+})
+
+// ─────────────────────────────────────────────
+// 通知摘要（跨学生全局聚合）
+// ─────────────────────────────────────────────
+app.get('/api/tasks/summary', async (req, res) => {
+  try {
+    const [{ rows: pendingRows }] = await Promise.all([
+      query(`SELECT COUNT(*)::int AS count FROM ${TABLES.TASKS} WHERE status = $1 AND deleted_at IS NULL`, [TASK_STATUS.DONE]),
+      query(`SELECT COUNT(*)::int AS count FROM ${TABLES.TASKS} WHERE status = $1 AND deleted_at IS NULL`, ['failed'])
+    ])
+
+    const { rows: failedRows } = await query(
+      `SELECT COUNT(*)::int AS count FROM ${TABLES.TASKS} WHERE status = $1 AND deleted_at IS NULL`, ['failed']
+    )
+
+    const { rows: todayWrongRows } = await query(
+      `SELECT COUNT(*)::int AS count FROM ${TABLES.WRONG_QUESTIONS} WHERE lifecycle_status = $1 AND added_at::date = CURRENT_DATE`, ['new']
+    )
+
+    // 最近 5 条待办（用于下拉列表预览）
+    const { rows: recentRows } = await query(
+      `SELECT t.id, t.original_name, t.status, t.created_at, t.updated_at, s.name AS student_name
+       FROM ${TABLES.TASKS} t
+       LEFT JOIN ${TABLES.STUDENTS} s ON s.id = t.student_id
+       WHERE t.deleted_at IS NULL AND (t.status = $1 OR t.status = $2)
+       ORDER BY t.updated_at DESC LIMIT 5`,
+      [TASK_STATUS.DONE, 'failed']
+    )
+
+    const pendingReview = pendingRows[0].count
+    const failedTasks = failedRows[0].count
+
+    res.json({
+      success: true,
+      summary: {
+        pendingReview,
+        failedTasks,
+        todayNewWrongQuestions: todayWrongRows[0].count,
+        totalNotifications: pendingReview + failedTasks,
+        recentTasks: recentRows.map(r => ({
+          id: r.id,
+          originalName: r.original_name,
+          status: r.status,
+          createdAt: r.created_at,
+          studentName: r.student_name
+        }))
+      }
+    })
+  } catch (error) {
+    console.error('获取通知摘要失败:', error)
     res.status(500).json({ error: error.message })
   }
 })
@@ -750,6 +804,79 @@ app.put('/api/questions/:id', async (req, res) => {
     }
   } catch (error) {
     console.error('更新题目失败:', error)
+    res.status(500).json({ error: error.message })
+  }
+})
+
+// ─────────────────────────────────────────────
+// 重批改（重新判定 is_correct）
+// ─────────────────────────────────────────────
+app.post('/api/questions/:id/rejudge', async (req, res) => {
+  try {
+    const { id } = req.params
+
+    const { rows } = await query(
+      `SELECT id, student_id, student_answer, answer, question_type, is_correct
+       FROM ${TABLES.QUESTIONS} WHERE id = $1 AND deleted_at IS NULL`,
+      [id]
+    )
+    if (rows.length === 0) return res.status(404).json({ error: '题目不存在' })
+
+    const q = rows[0]
+    const { student_answer, answer, question_type, student_id, is_correct: oldIsCorrect } = q
+
+    // Re-judge using pure logic (no AI)
+    const { isCorrect } = judgeAnswer(student_answer, answer, question_type)
+
+    // Update is_correct in questions table
+    await query(
+      `UPDATE ${TABLES.QUESTIONS} SET is_correct = $1, updated_at = NOW() WHERE id = $2`,
+      [isCorrect, id]
+    )
+
+    // Write judgement record
+    createJudgement({
+      questionId: id,
+      studentId: student_id,
+      source: 'pc_rejudge',
+      isCorrect,
+      answer,
+      studentAnswer: student_answer,
+      metadata: { oldIsCorrect, questionType: question_type }
+    }).catch(e => console.error('[Shadow] judgements写入失败 (pc_rejudge):', e.message))
+
+    // Sync wrong_questions table
+    if (student_id && answer && answer.trim() !== '') {
+      if (isCorrect === false) {
+        // Wrong answer — ensure it's in the wrong book
+        const { rows: existing } = await query(
+          `SELECT id FROM ${TABLES.WRONG_QUESTIONS}
+           WHERE student_id = $1 AND question_id = $2`,
+          [student_id, id]
+        )
+        if (existing.length === 0) {
+          await query(
+            `INSERT INTO ${TABLES.WRONG_QUESTIONS}
+             (student_id, question_id, status, error_count, added_at, last_wrong_at, created_at)
+             VALUES ($1, $2, 'pending', 1, NOW(), NOW(), NOW())
+             ON CONFLICT DO NOTHING`,
+            [student_id, id]
+          )
+        }
+      } else if (isCorrect === true) {
+        // Now correct — mark as mastered in wrong book if exists
+        await query(
+          `UPDATE ${TABLES.WRONG_QUESTIONS}
+           SET status = 'mastered', mastered_at = NOW(), updated_at = NOW()
+           WHERE student_id = $1 AND question_id = $2 AND status != 'mastered'`,
+          [student_id, id]
+        )
+      }
+    }
+
+    res.json({ success: true, is_correct: isCorrect })
+  } catch (error) {
+    console.error('重批改失败:', error)
     res.status(500).json({ error: error.message })
   }
 })

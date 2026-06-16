@@ -24,9 +24,9 @@
     </div>
 
     <div class="top-navbar__right">
-      <div class="header-icon-btn" title="通知">
-        <el-icon><Bell /></el-icon>
-        <span class="header-badge">12</span>
+      <div id="bell-btn" class="header-icon-btn" title="通知" @click.stop="toggleNotifications">
+        <el-icon :class="{ 'bell-ring': notificationStore.hasNotifications }"><Bell /></el-icon>
+        <span v-if="displayCount > 0" class="header-badge">{{ displayCount }}</span>
       </div>
       <div class="header-icon-btn" title="帮助中心">
         <el-icon><QuestionFilled /></el-icon>
@@ -39,18 +39,59 @@
       </div>
     </div>
   </div>
+
+  <!-- Notification Dropdown -->
+  <Teleport to="body">
+    <div v-if="showNotifications" id="notification-dropdown" class="notification-dropdown" @click.stop>
+      <NotificationList @close="showNotifications = false" />
+    </div>
+  </Teleport>
 </template>
 
 <script setup>
-import { computed } from 'vue'
+import { computed, ref, onMounted, onUnmounted } from 'vue'
 import { useRouter, useRoute } from 'vue-router'
 import {
   Bell, QuestionFilled, ArrowDown,
   DocumentChecked, Collection, Clock, UploadFilled
 } from '@element-plus/icons-vue'
+import { useNotificationStore } from '../../stores/notificationStore'
+import NotificationList from './NotificationList.vue'
 
 const router = useRouter()
 const route = useRoute()
+const notificationStore = useNotificationStore()
+const showNotifications = ref(false)
+
+const displayCount = computed(() => {
+  const n = notificationStore.totalCount
+  return n > 0 ? (n > 99 ? '99+' : n) : 0
+})
+
+function toggleNotifications() {
+  showNotifications.value = !showNotifications.value
+  if (showNotifications.value) {
+    notificationStore.fetchSummary()
+  }
+}
+
+function onDocumentClick(e) {
+  const dropdown = document.getElementById('notification-dropdown')
+  const bell = document.getElementById('bell-btn')
+  if (showNotifications.value && dropdown && !dropdown.contains(e.target) && bell && !bell.contains(e.target)) {
+    showNotifications.value = false
+  }
+}
+
+onMounted(() => {
+  notificationStore.startPolling()
+  document.addEventListener('click', onDocumentClick)
+})
+
+onUnmounted(() => {
+  notificationStore.stopPolling()
+  document.removeEventListener('click', onDocumentClick)
+})
 
 const navItems = [
   { key: 'proofread',       label: '题目校对', path: '/',                icon: 'DocumentChecked' },
@@ -250,5 +291,33 @@ const handleNavClick = (item) => {
   font-weight: 500;
   flex-shrink: 0;
   border: 1px solid #FFD591;
+}
+
+/* ── Notification Dropdown ── */
+.notification-dropdown {
+  position: fixed;
+  top: 60px;
+  right: 20px;
+  z-index: 2000;
+  background: #fff;
+  border-radius: 8px;
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.12);
+  overflow: hidden;
+}
+
+/* ── Bell Icon Ring Animation ── */
+@keyframes bell-ring {
+  0%   { transform: rotate(0) scale(1); }
+  15%  { transform: rotate(18deg) scale(1.1); }
+  30%  { transform: rotate(-12deg) scale(1.05); }
+  45%  { transform: rotate(8deg); }
+  60%  { transform: rotate(-4deg); }
+  75%  { transform: rotate(2deg); }
+  100% { transform: rotate(0) scale(1); }
+}
+
+.header-icon-btn .el-icon.bell-ring {
+  color: #1677FF;
+  animation: bell-ring 0.6s ease-in-out;
 }
 </style>

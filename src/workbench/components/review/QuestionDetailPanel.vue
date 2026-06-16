@@ -91,73 +91,37 @@
           </div>
         </div>
 
-        <!-- 题干 -->
-        <div class="ops-q-section" v-if="q.content || (editing && form.content)">
-          <div class="ops-q-label">题干</div>
-          <el-input v-if="editing" v-model="form.content" type="textarea" :rows="4" placeholder="请输入题目内容" />
-          <div v-else class="ops-q-text">
-            <MathRender :content="q.content" autoDetect />
+        <!-- ═══ 编辑模式：共享编辑表单 ═══ -->
+        <div v-if="editing" class="ops-edit-form-wrapper">
+          <QuestionEditForm
+            v-model:form="form"
+            :display-image-url="displayImageUrl"
+            :show-crop="true"
+            @image-upload="handleImageUpload"
+            @image-crop="handleCropFromPaper"
+            @image-delete="deleteImage"
+            @open-tag-selector="showTagSelector = true"
+          />
+        </div>
+
+        <!-- ═══ 预览模式：题干 + 配图 + 选项（统一卡片） ═══ -->
+        <div v-else class="ops-content-card">
+          <div class="ops-q-section" v-if="q.content">
+            <div class="ops-q-label">题干</div>
+            <div class="ops-q-text"><MathRender :content="q.content" autoDetect /></div>
           </div>
-        </div>
-
-        <!-- 选项 -->
-        <div class="ops-q-section" v-if="optionsList.length > 0">
-          <div class="ops-q-label">选项</div>
-          <div v-for="(opt, idx) in editing ? form.options : optionsList" :key="idx"
-            class="ops-option-row"
-            :class="{ 'option-highlight': !editing && opt === q.answer }">
-            <span class="ops-opt-letter">{{ String.fromCharCode(65 + idx) }}.</span>
-            <el-input v-if="editing" v-model="form.options[idx]" size="default"
-              :placeholder="'选项 ' + String.fromCharCode(65 + idx)" />
-            <span v-else class="ops-opt-text">
-              <MathRender :content="cleanOptPrefix(opt)" autoDetect tag="span" />
-            </span>
-            <el-button v-if="editing" text size="small" type="danger" @click="removeOption(idx)">
-              <el-icon><Delete /></el-icon>
-            </el-button>
-          </div>
-          <el-button v-if="editing" text size="default" type="primary" @click="addOption">
-            <el-icon><Plus /></el-icon> 添加选项
-          </el-button>
-        </div>
-
-        <!-- AI 解析（仅在编辑时展开） -->
-        <div class="ops-q-section" v-if="editing">
-          <div class="ops-q-label">AI 解析</div>
-          <el-input v-model="form.analysis" type="textarea" :rows="3" placeholder="题目解析" />
-        </div>
-
-        <!-- 知识点标签（仅在编辑时显示） -->
-        <div class="ops-q-section" v-if="editing">
-          <div class="ops-q-label">知识点标签</div>
-          <div class="ops-tags">
-            <el-tag v-for="tag in form.tags" :key="tag" size="default" closable @close="removeTag(tag)" round>{{ tag }}</el-tag>
-            <el-button text size="default" type="primary" @click="showTagSelector = true">
-              <el-icon><Plus /></el-icon> 添加
-            </el-button>
-          </div>
-        </div>
-
-        <!-- 配图（始终显示，有图才展示） -->
-        <div class="ops-q-section" v-if="displayImageUrl || editing">
-          <div class="ops-q-label">配图</div>
-          <div class="ops-image-wrap">
-            <img v-if="displayImageUrl" :src="displayImageUrl" class="ops-image" @click="fullscreenImage = displayImageUrl" />
-            <div v-else class="ops-no-image">
-              <el-icon :size="24"><Picture /></el-icon>
-              <span>暂无配图</span>
+          <div class="ops-q-section ops-image-section" v-if="displayImageUrl">
+            <div class="ops-q-label">配图</div>
+            <div class="ops-image-wrap">
+              <img :src="displayImageUrl" class="ops-image" @click="fullscreenImage = displayImageUrl" />
             </div>
-            <div v-if="editing" class="ops-image-actions">
-              <el-upload :show-file-list="false" :before-upload="handleImageUpload"
-                accept=".jpg,.jpeg,.png,.webp,image/jpeg,image/png,image/webp">
-                <el-button size="small" type="primary"><el-icon><Upload /></el-icon>{{ displayImageUrl ? '替换' : '上传' }}</el-button>
-              </el-upload>
-              <el-button size="small" type="success" @click="handleCropFromPaper">
-                <el-icon><Crop /></el-icon> 原卷裁剪
-              </el-button>
-              <el-button v-if="displayImageUrl" size="small" type="danger" @click="deleteImage">
-                <el-icon><Delete /></el-icon> 删除
-              </el-button>
+          </div>
+          <div class="ops-q-section" v-if="optionsList.length > 0">
+            <div class="ops-q-label">选项</div>
+            <div v-for="(opt, idx) in optionsList" :key="idx" class="ops-option-row"
+              :class="{ 'option-highlight': opt === q.answer }">
+              <span class="ops-opt-letter">{{ String.fromCharCode(65 + idx) }}.</span>
+              <span class="ops-opt-text"><MathRender :content="cleanOptPrefix(opt)" autoDetect tag="span" /></span>
             </div>
           </div>
         </div>
@@ -245,7 +209,7 @@
 <script setup>
 import { ref, computed, watch } from 'vue'
 import { useReviewStore } from '../../stores/reviewStore'
-import { updateQuestion, clearStudentCaches, uploadImage } from '../../../services/apiService'
+import { updateQuestion, rejudgeQuestion, clearStudentCaches, uploadImage } from '../../../services/apiService'
 import { processExamImage } from '../../../utils/imageProcessor'
 import { ElMessage, ElLoading } from 'element-plus'
 import { DocumentChecked, Delete, Plus, Upload, Picture, EditPen, ArrowLeft, ArrowRight, RefreshLeft, Crop } from '@element-plus/icons-vue'
@@ -468,6 +432,15 @@ const handleSave = async () => {
       question_type: form.value.question_type, subject: form.value.subject
     })
     Object.assign(question, { content: form.value.content, options: form.value.options, answer: form.value.answer, analysis: form.value.analysis, ai_tags: form.value.tags, geometry_image_url: localImageUrl.value, question_type: form.value.question_type, subject: form.value.subject })
+    // 保存后自动重批改
+    try {
+      const rejudgeResult = await rejudgeQuestion(question.id)
+      if (rejudgeResult.success) {
+        question.is_correct = rejudgeResult.is_correct
+      }
+    } catch (rejudgeErr) {
+      console.warn('重批改失败（不影响保存）:', rejudgeErr.message)
+    }
     const studentId = store.currentStudent?.id
     if (studentId) clearStudentCaches(studentId)
     editing.value = false
@@ -763,6 +736,23 @@ const deleteImage = () => {
 }
 .tag-option:hover { border-color: #409eff; color: #409eff; }
 .tag-selected { background: #ecf5ff; border-color: #409eff; color: #409eff; font-weight: 500; }
+
+/* ═══ 题干+配图+选项 统一卡片 ═══ */
+.ops-content-card {
+  background: #fff;
+  border: 1px solid #e4e7ed;
+  border-radius: 8px;
+  padding: 14px 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+.ops-image-section {
+  border-top: 1px dashed #ebeef5;
+  border-bottom: 1px dashed #ebeef5;
+  padding: 10px 0;
+  margin: 2px 0;
+}
 
 /* ═══ 题型 · 学科 ═══ */
 .ops-type-subject-row {

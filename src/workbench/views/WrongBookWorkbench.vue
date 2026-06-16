@@ -156,24 +156,29 @@
         <!-- 题目内容区 -->
         <!-- 只读模式 -->
         <div class="detail-content-area" v-if="!editing">
+          <!-- 题干 + 配图 + 选项 统一卡片 -->
           <div class="detail-section">
             <div class="detail-section__label">题目内容</div>
-            <div class="detail-section__content question-content-box">
-              <div v-if="getQuestionContent(selectedDetailQuestion)" class="question-text">
-                <MathRender :content="getQuestionContent(selectedDetailQuestion)" />
-              </div>
-              <div v-if="getQuestionOptions(selectedDetailQuestion)?.length" class="question-options">
-                <div
-                  v-for="(opt, idx) in getQuestionOptions(selectedDetailQuestion)"
-                  :key="idx"
-                  class="option-item"
-                  :class="{ 'option-item--correct': String.fromCharCode(65 + idx) === getQuestionAnswer(selectedDetailQuestion) }"
-                >
-                  <span class="option-label">{{ String.fromCharCode(65 + idx) }}.</span>
-                  <span class="option-text">{{ opt }}</span>
+            <div class="detail-section__content">
+              <div class="unified-card">
+                <div class="unified-section" v-if="getQuestionContent(selectedDetailQuestion)">
+                  <div class="unified-label">题干</div>
+                  <div class="unified-text"><MathRender :content="getQuestionContent(selectedDetailQuestion)" /></div>
+                </div>
+                <div class="unified-section unified-image-section" v-if="getQuestionThumb(selectedDetailQuestion)">
+                  <div class="unified-label">配图</div>
+                  <img :src="getQuestionThumb(selectedDetailQuestion)" class="unified-image" />
+                </div>
+                <div class="unified-section" v-if="getQuestionOptions(selectedDetailQuestion)?.length && getQuestion(selectedDetailQuestion).question_type === 'choice'">
+                  <div class="unified-label">选项</div>
+                  <div v-for="(opt, idx) in getQuestionOptions(selectedDetailQuestion)" :key="idx"
+                    class="unified-option-row"
+                    :class="{ 'option-correct': String.fromCharCode(65 + idx) === getQuestionAnswer(selectedDetailQuestion) }">
+                    <span class="unified-opt-letter">{{ String.fromCharCode(65 + idx) }}.</span>
+                    <span class="unified-opt-text"><MathRender :content="opt" autoDetect tag="span" /></span>
+                  </div>
                 </div>
               </div>
-              <img v-if="getQuestionThumb(selectedDetailQuestion)" :src="getQuestionThumb(selectedDetailQuestion)" class="question-thumb-img" />
             </div>
           </div>
 
@@ -207,73 +212,30 @@
 
         <!-- 编辑模式 -->
         <div class="edit-form-area" v-else>
-          <el-form label-width="80px" size="small">
-            <el-form-item label="题型">
-              <el-select v-model="form.question_type" style="width: 100%" @change="onTypeChange">
-                <el-option label="选择题" value="choice" />
-                <el-option label="填空题" value="fill" />
-                <el-option label="解答题" value="answer" />
-              </el-select>
-            </el-form-item>
-            <el-form-item label="学科">
-              <el-select v-model="form.subject" style="width: 100%" allow-create filterable>
-                <el-option label="数学" value="数学" />
-                <el-option label="物理" value="物理" />
-                <el-option label="化学" value="化学" />
-                <el-option label="英语" value="英语" />
-                <el-option label="语文" value="语文" />
-              </el-select>
-            </el-form-item>
-            <el-form-item label="题干">
-              <el-input v-model="form.content" type="textarea" :rows="4" placeholder="题目内容" />
-            </el-form-item>
-            <el-form-item label="选项" v-if="form.question_type === 'choice'">
-              <div class="option-list">
-                <div v-for="(opt, i) in form.options" :key="i" class="option-row">
-                  <span class="option-letter">{{ String.fromCharCode(65 + i) }}.</span>
-                  <el-input v-model="form.options[i]" placeholder="选项内容" />
-                  <el-button size="small" type="danger" plain @click="removeOption(i)">—</el-button>
-                </div>
-                <el-button size="small" @click="addOption">+ 添加选项</el-button>
-              </div>
-            </el-form-item>
-            <el-form-item label="标准答案">
-              <el-input v-model="form.answer" placeholder="标准答案（如 A）" />
-            </el-form-item>
-            <el-form-item label="知识点">
-              <div class="tags-wrap">
-                <el-tag v-for="tag in form.tags" :key="tag" size="default" closable @close="removeTag(tag)" round>
-                  {{ tag }}
-                </el-tag>
-                <el-button text size="default" type="primary" @click="showTagSelector = true">
-                  <el-icon><Plus /></el-icon> 添加
-                </el-button>
-              </div>
-            </el-form-item>
-            <el-form-item label="配图">
-              <div class="image-wrap">
-                <img v-if="displayImageUrl" :src="displayImageUrl" class="preview-image" />
-                <div v-else class="no-image">
-                  <el-icon :size="20"><Picture /></el-icon>
-                  <span>暂无配图</span>
-                </div>
-                <div class="image-actions">
-                  <el-upload :show-file-list="false" :before-upload="handleImageUpload"
-                    accept=".jpg,.jpeg,.png,.webp,image/jpeg,image/png,image/webp">
-                    <el-button size="small" type="primary">
-                      <el-icon><Upload /></el-icon>{{ displayImageUrl ? '替换' : '上传' }}
-                    </el-button>
-                  </el-upload>
-                  <el-button v-if="displayImageUrl" size="small" type="danger" @click="deleteImage">
-                    <el-icon><Delete /></el-icon> 删除
-                  </el-button>
-                </div>
-              </div>
-            </el-form-item>
-            <el-form-item label="AI 解析">
-              <el-input v-model="form.analysis" type="textarea" :rows="3" placeholder="题目解析" />
-            </el-form-item>
-          </el-form>
+          <QuestionEditForm
+            v-model:form="form"
+            :display-image-url="displayImageUrl"
+            :show-crop="false"
+            @image-upload="handleImageUpload"
+            @image-delete="deleteImage"
+            @open-tag-selector="showTagSelector = true"
+          />
+          <!-- 题型+学科(额外放在QuestionEditForm的header插槽下方) -->
+          <div class="edit-type-subject-row">
+            <el-select v-model="form.question_type" style="flex:1" @change="onTypeChange">
+              <el-option label="选择题" value="choice" />
+              <el-option label="填空题" value="fill" />
+              <el-option label="解答题" value="answer" />
+            </el-select>
+            <el-select v-model="form.subject" style="flex:1" allow-create filterable placeholder="学科">
+              <el-option label="数学" value="数学" />
+              <el-option label="物理" value="物理" />
+              <el-option label="化学" value="化学" />
+              <el-option label="英语" value="英语" />
+              <el-option label="语文" value="语文" />
+            </el-select>
+          </div>
+          <el-input v-model="form.answer" size="default" placeholder="标准答案" style="margin-top:12px;" />
         </div>
 
         <!-- 错题统计 -->
@@ -353,9 +315,10 @@ import {
   DocumentChecked, RefreshLeft
 } from '@element-plus/icons-vue'
 import { useWrongBookStore } from '../stores/wrongBookStore'
-import { getStudents, updateQuestion } from '../../services/apiService'
+import { getStudents, updateQuestion, rejudgeQuestion } from '../../services/apiService'
 import dayjs from 'dayjs'
 import MathRender from "../components/MathRender.vue"
+import QuestionEditForm from "../components/review/QuestionEditForm.vue"
 
 const router = useRouter()
 const wrongBookStore = useWrongBookStore()
@@ -461,7 +424,7 @@ const getQuestionSubject = (wq) => {
 
 const getQuestionThumb = (wq) => {
   const q = getQuestion(wq)
-  return q.image_url || q.thumbnail || q.originalImage || wq.image_url || wq.thumbnail || ''
+  return q.geometry_image_url || q.image_url || q.thumbnail || wq.geometry_image_url || wq.image_url || wq.thumbnail || ''
 }
 
 const getErrorCount = (wq) => {
@@ -611,6 +574,15 @@ const handleSave = async () => {
       ai_tags: form.value.tags,
       geometry_image_url: localImageUrl.value
     })
+    // 保存后自动重批改
+    try {
+      const rejudgeResult = await rejudgeQuestion(questionId)
+      if (rejudgeResult.success && q) {
+        q.is_correct = rejudgeResult.is_correct
+      }
+    } catch (rejudgeErr) {
+      console.warn('重批改失败（不影响保存）:', rejudgeErr.message)
+    }
     ElMessage.success('保存成功')
     editing.value = false
     // 刷新数据
@@ -1326,6 +1298,75 @@ onUnmounted(() => {
 .recent-students__list::-webkit-scrollbar-thumb {
   background: #E5E6EB;
   border-radius: 2px;
+}
+
+/* ===== Unified Card (题干+配图+选项 一体) ===== */
+.unified-card {
+  background: #fff;
+  border: 1px solid #e4e7ed;
+  border-radius: 8px;
+  padding: 14px 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+.unified-section {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.unified-section + .unified-section {
+  border-top: 1px dashed #ebeef5;
+  padding-top: 12px;
+}
+.unified-label {
+  font-size: 11px;
+  font-weight: 600;
+  color: #909399;
+  letter-spacing: 0.5px;
+}
+.unified-text {
+  font-size: 15px;
+  line-height: 1.7;
+  color: #303133;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+.unified-image {
+  max-width: 100%;
+  max-height: 200px;
+  border-radius: 6px;
+  border: 1px solid #ebeef5;
+  object-fit: contain;
+}
+.unified-option-row {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  padding: 3px 0;
+}
+.unified-option-row.option-correct .unified-opt-letter,
+.unified-option-row.option-correct .unified-opt-text {
+  color: #67c23a;
+  font-weight: 600;
+}
+.unified-opt-letter {
+  font-weight: 700;
+  color: #909399;
+  min-width: 20px;
+  font-size: 14px;
+  flex-shrink: 0;
+  padding-top: 2px;
+}
+.unified-opt-text {
+  font-size: 15px;
+  color: #303133;
+  line-height: 1.6;
+}
+.edit-type-subject-row {
+  display: flex;
+  gap: 8px;
+  margin-top: 12px;
 }
 
 /* ===== Edit Form ===== */

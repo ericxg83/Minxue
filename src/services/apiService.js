@@ -160,6 +160,11 @@ export const getTaskById = async (taskId) => {
   return data.task
 }
 
+export const getTasksSummary = async () => {
+  const data = await apiRequest('/tasks/summary')
+  return data
+}
+
 export const getExamsByStudent = async (studentId, useCache = true) => {
   const cacheKey = `exams_cache_${studentId}`
 
@@ -309,6 +314,14 @@ export const searchQuestions = async (params = {}) => {
     .join('&')
   const data = await apiRequest(`/questions/search?${qs}`)
   return data // { success, questions, total, limit, offset }
+}
+
+export const rejudgeQuestion = async (questionId) => {
+  return apiRequest(`/questions/${questionId}/rejudge`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({})
+  })
 }
 
 export const updateQuestionReviewStatus = async (questionId, reviewStatus) => {
