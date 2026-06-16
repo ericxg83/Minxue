@@ -13,7 +13,7 @@
       const path = window.location.pathname
       if (path === '/exam-workbench' || path.startsWith('/exam-workbench/') ||
           path === '/workbench' || path.startsWith('/workbench/')) {
-        window.location.href = '/workbench.html';
+        window.location.href = '/workbench.html' + window.location.hash;
       }
     </script>
   </head>

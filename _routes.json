@@ -1,7 +1,7 @@
 {
   "version": 1,
   "include": ["/*"],
-  "exclude": ["/assets/*", "/workbench", "/workbench/*"],
+  "exclude": ["/assets/*"],
   "routes": [
     {
       "src": "/[^.]+",
