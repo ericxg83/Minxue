@@ -27,18 +27,7 @@ jobs:
         uses: android-actions/setup-android@v3
 
       - name: Accept licenses
-        run: |
-          $ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager --licenses 2>&1 || true
-
-      - name: Debug Android SDK
-        run: |
-          echo "ANDROID_HOME=$ANDROID_HOME"
-          echo "JAVA_HOME=$JAVA_HOME"
-          java -version
-          echo "--- SDK platforms ---"
-          ls -la $ANDROID_HOME/platforms/ 2>/dev/null || echo "no platforms dir"
-          echo "--- SDK build-tools ---"
-          ls -la $ANDROID_HOME/build-tools/ 2>/dev/null || echo "no build-tools dir"
+        run: $ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager --licenses 2>&1 || true
 
       - name: Install dependencies
         run: npm ci
@@ -52,23 +41,11 @@ jobs:
           cp -r dist/* android/app/src/main/assets/public/
           cp capacitor.config.json android/app/src/main/assets/capacitor.config.json
 
-      - name: Check Java version
-        run: java -version
-
       - name: Build APK
         working-directory: android
-        run: ./gradlew assembleDebug --stacktrace 2>&1 | tee /tmp/gradle.log
-        continue-on-error: true
-
-      - name: Upload Gradle log
-        if: always()
-        uses: actions/upload-artifact@v4
-        with:
-          name: gradle-log
-          path: /tmp/gradle.log
+        run: ./gradlew assembleDebug
 
       - name: Upload APK
-        if: success()
         uses: actions/upload-artifact@v4
         with:
           name: app-debug
