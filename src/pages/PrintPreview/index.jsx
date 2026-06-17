@@ -274,7 +274,7 @@ export default function PrintPreview({ onClose, questions: propQuestions }) {
         try { printWindow.print() } catch (e) { /* 部分浏览器可能不支持自动打印 */ }
       })
     } else {
-      Toast.show({ content: '请点击「查看PDF」后使用浏览器打印' })
+      // WebView 可能拦截了弹出窗口，引导用户使用下载
     }
   }
 
@@ -451,12 +451,14 @@ export default function PrintPreview({ onClose, questions: propQuestions }) {
             </div>
           ) : pdfBlobUrl && showPdfViewer ? (
             <>
-              <button onClick={handleDownloadPDF} disabled={pdfDownloading}
+              <a
+                href={pdfBlobUrl}
+                download={`${currentStudent?.name || 'student'}_cuoti_${dayjs().format('YYYYMMDD_HHmm')}.pdf`}
                 className="px-5 py-2 rounded-lg text-[13px] font-medium flex items-center gap-1.5"
-                style={{ background: '#10B981', color: 'white', opacity: pdfDownloading ? 0.6 : 1 }}>
+                style={{ background: '#10B981', color: 'white' }}>
                 <FileDown size={15} />
-                {pdfDownloading ? '保存中...' : '保存到手机'}
-              </button>
+                下载PDF
+              </a>
               <button onClick={handlePrintPDF}
                 className="px-6 py-2 rounded-lg text-[13px] font-medium flex items-center gap-1.5" style={{ background: '#2563EB', color: 'white' }}>
                 <Printer size={15} />
