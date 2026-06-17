@@ -7,6 +7,7 @@ import { useStudentStore, useWrongQuestionStore, useUIStore, useExamStore } from
 import { mockWrongQuestions } from '../../data/mockData'
 import { createGeneratedExam } from '../../services/apiService'
 import dayjs from 'dayjs'
+import { saveAs } from 'file-saver'
 import { generateExamPDF } from '../../utils/pdfGenerator'
 
 const USE_MOCK_DATA = false
@@ -58,6 +59,9 @@ export default function PrintPreview({ onClose, questions: propQuestions }) {
   const examRecorded = useRef(false)
   const [pdfBlobUrl, setPdfBlobUrl] = useState('')
   const [generatingPdf, setGeneratingPdf] = useState(false)
+  const [pdfBlob, setPdfBlob] = useState(null)
+  const [showPdfViewer, setShowPdfViewer] = useState(false)
+  const [pdfDownloading, setPdfDownloading] = useState(false)
 
   // 当外部的 questions prop 变化时同步（用于"重打"等异步加载场景）
   useEffect(() => {
@@ -193,8 +197,9 @@ export default function PrintPreview({ onClose, questions: propQuestions }) {
     if (generatingPdf) return
     setGeneratingPdf(true)
     setPdfBlobUrl('')
+    setPdfBlob(null)
     try {
-      const url = await generateExamPDF({
+      const result = await generateExamPDF({
         title: `${currentStudent?.name || '学生'} - 错题重练卷`,
         studentName: currentStudent?.name || '',
         questions: previewQuestions,
@@ -202,7 +207,12 @@ export default function PrintPreview({ onClose, questions: propQuestions }) {
         showAnswers: false,
         qrContent: qrContent,
       })
-      if (url) setPdfBlobUrl(url)
+      if (result) {
+        setPdfBlobUrl(result.blobUrl)
+        setPdfBlob(result.pdfBlob)
+        setShowPdfViewer(true)
+        Toast.show({ icon: 'success', content: 'PDF 已生成' })
+      }
     } catch (error) {
       console.error('PDF生成失败:', error)
       Toast.show({ icon: 'fail', content: 'PDF生成失败，请重试' })
@@ -228,6 +238,52 @@ export default function PrintPreview({ onClose, questions: propQuestions }) {
     }
     await generatePDF()
   }
+
+  const handleDownloadPDF = async () => {
+    if (!pdfBlob || pdfDownloading) return
+    setPdfDownloading(true)
+    try {
+      const filename = `${currentStudent?.name || 'student'}_cuoti_${dayjs().format('YYYYMMDD_HHmm')}.pdf`
+      saveAs(pdfBlob, filename)
+    } catch (e) {
+      console.warn('saveAs 下载失败，尝试 Web Share API:', e)
+      try {
+        const filename = `${currentStudent?.name || 'student'}_cuoti_${dayjs().format('YYYYMMDD_HHmm')}.pdf`
+        const file = new File([pdfBlob], filename, { type: 'application/pdf' })
+        if (navigator.canShare && navigator.canShare({ files: [file] })) {
+          await navigator.share({ files: [file], title: filename })
+        } else {
+          Toast.show({ content: '请长按PDF画面选择保存' })
+        }
+      } catch (shareErr) {
+        if (shareErr.name !== 'AbortError') {
+          console.warn('Web Share API 也失败:', shareErr)
+          Toast.show({ content: '请长按PDF画面选择保存' })
+        }
+      }
+    } finally {
+      setPdfDownloading(false)
+    }
+  }
+
+  const handlePrintPDF = () => {
+    if (!pdfBlobUrl) return
+    const printWindow = window.open(pdfBlobUrl, '_blank')
+    if (printWindow) {
+      printWindow.addEventListener('load', () => {
+        try { printWindow.print() } catch (e) { /* 部分浏览器可能不支持自动打印 */ }
+      })
+    } else {
+      Toast.show({ content: '请点击「查看PDF」后使用浏览器打印' })
+    }
+  }
+
+  // 组件卸载时清理 blob URL 防止内存泄漏
+  useEffect(() => {
+    return () => {
+      if (pdfBlobUrl) URL.revokeObjectURL(pdfBlobUrl)
+    }
+  }, [pdfBlobUrl])
 
   const handleSimulateScan = () => {
     setShowGradingModal(!showGradingModal)
@@ -266,7 +322,30 @@ export default function PrintPreview({ onClose, questions: propQuestions }) {
           </button>
         </div>
 
-        {/* Preview Area */}
+        {/* Preview Area — conditionally show PDF viewer or questions */}
+        {showPdfViewer && pdfBlobUrl ? (
+          <div className="flex-1 flex flex-col bg-gray-100">
+            <div className="flex items-center justify-between px-4 py-2 bg-white border-b" style={{ borderColor: '#E5E7EB' }}>
+              <span style={{ fontSize: '13px', fontWeight: 600, color: '#111827' }}>PDF 预览</span>
+              <button
+                onClick={() => setShowPdfViewer(false)}
+                style={{ fontSize: '13px', color: '#2563EB' }}
+              >
+                返回题目
+              </button>
+            </div>
+            <iframe
+              src={pdfBlobUrl}
+              style={{
+                flex: 1,
+                width: '100%',
+                border: 'none',
+                background: '#fff',
+              }}
+              title="PDF 预览"
+            />
+          </div>
+        ) : (
         <div className="flex-1 bg-gray-200 p-5 overflow-auto flex justify-center">
           <div className="w-full max-w-[210mm] bg-white p-8 shadow-lg relative">
             {/* QR Code */}
@@ -352,6 +431,7 @@ export default function PrintPreview({ onClose, questions: propQuestions }) {
             </div>
           </div>
         </div>
+        )}
 
         {/* Bottom Buttons */}
         <div className="bg-white px-4 py-3 border-t flex justify-center gap-3" style={{ borderColor: '#E5E7EB' }}>
@@ -369,6 +449,20 @@ export default function PrintPreview({ onClose, questions: propQuestions }) {
               <style>{`@keyframes pdf-spin{to{transform:rotate(360deg)}}`}</style>
               PDF 生成中...
             </div>
+          ) : pdfBlobUrl && showPdfViewer ? (
+            <>
+              <button onClick={handleDownloadPDF} disabled={pdfDownloading}
+                className="px-5 py-2 rounded-lg text-[13px] font-medium flex items-center gap-1.5"
+                style={{ background: '#10B981', color: 'white', opacity: pdfDownloading ? 0.6 : 1 }}>
+                <FileDown size={15} />
+                {pdfDownloading ? '保存中...' : '保存到手机'}
+              </button>
+              <button onClick={handlePrintPDF}
+                className="px-6 py-2 rounded-lg text-[13px] font-medium flex items-center gap-1.5" style={{ background: '#2563EB', color: 'white' }}>
+                <Printer size={15} />
+                直接打印
+              </button>
+            </>
           ) : pdfBlobUrl ? (
             <a
               href={pdfBlobUrl}

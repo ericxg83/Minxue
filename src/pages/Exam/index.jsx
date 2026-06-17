@@ -11,6 +11,7 @@ import { getGeneratedExamsByStudent, getQuestionsByIds } from '../../services/ap
 import StudentSwitcher from '../../components/StudentSwitcher'
 import ExamReview from '../ExamReview'
 import dayjs from 'dayjs'
+import { saveAs } from 'file-saver'
 import { generateExamPDF } from '../../utils/pdfGenerator'
 
 const USE_MOCK_DATA = false
@@ -211,14 +212,18 @@ export default function Exam() {
     })
 
     try {
-      await generateExamPDF({
+      const filename = `${currentStudent?.name || 'student'}_${examTitle}_${dayjs().format('YYYYMMDD_HHmm')}`
+      const result = await generateExamPDF({
         title: `${currentStudent?.name || '学生'} - ${examTitle}`,
         studentName: currentStudent?.name || '',
         questions: examQuestions,
-        filename: `${currentStudent?.name || 'student'}_${examTitle}_${dayjs().format('YYYYMMDD_HHmm')}`,
+        filename: filename,
         showAnswers: false,
         qrContent: qrContent,
       })
+      if (result && result.pdfBlob) {
+        saveAs(result.pdfBlob, `${filename}.pdf`)
+      }
 
       Toast.show({
         icon: 'success',

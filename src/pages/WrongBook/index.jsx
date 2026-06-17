@@ -14,6 +14,7 @@ import { RightOutline, DownOutline } from 'antd-mobile-icons'
 import { useStudentStore, useWrongQuestionStore, useUIStore } from '../../store'
 import { getWrongQuestionsByStudent, deleteWrongQuestion, updateWrongQuestionStatus, createGeneratedExam } from '../../services/apiService'
 import { generateQRCodeContent } from '../../services/aiService'
+import { saveAs } from 'file-saver'
 import { generateExamPDF } from '../../utils/pdfGenerator'
 import { mockWrongQuestions, mockStudents } from '../../data/mockData'
 import StudentSwitcher from '../../components/StudentSwitcher'
@@ -489,7 +490,7 @@ export default function WrongBook({ onScanQR }) {
         content: '试卷生成成功，即将开始下载...'
       })
 
-      // 落库成功后自动生成 PDF（移动端直接下载）
+      // 落库成功后自动生成 PDF
       const questions = selectedQuestions.map(wq => wq.question || wq)
       const newPaperId = 'paper_' + Date.now() + '_' + Math.random().toString(36).substr(2, 9)
       const qrContent = JSON.stringify({
@@ -499,15 +500,19 @@ export default function WrongBook({ onScanQR }) {
         questionIds: questions.map(q => q.id).filter(Boolean),
         ts: Date.now()
       })
+      const filename = `${currentStudent?.name || 'student'}_错题组卷_${dayjs().format('YYYYMMDD_HHmm')}`
       try {
-        await generateExamPDF({
+        const result = await generateExamPDF({
           title: `${currentStudent?.name || '学生'} - 错题练习`,
           studentName: currentStudent?.name || '',
           questions: questions,
-          filename: `${currentStudent?.name || 'student'}_错题组卷_${dayjs().format('YYYYMMDD_HHmm')}`,
+          filename: filename,
           showAnswers: false,
           qrContent: qrContent,
         })
+        if (result && result.pdfBlob) {
+          saveAs(result.pdfBlob, `${filename}.pdf`)
+        }
       } catch (pdfErr) {
         console.warn('PDF生成失败:', pdfErr)
       }
@@ -555,14 +560,18 @@ export default function WrongBook({ onScanQR }) {
     }
 
     try {
-      await generateExamPDF({
+      const filename = `${currentStudent?.name || 'student'}_错题练习_${dayjs().format('YYYYMMDD_HHmm')}`
+      const result = await generateExamPDF({
         title: `${currentStudent?.name || '学生'} - 错题练习`,
         studentName: currentStudent?.name || '',
         questions: questions,
-        filename: `${currentStudent?.name || 'student'}_错题练习_${dayjs().format('YYYYMMDD_HHmm')}`,
+        filename: filename,
         showAnswers: false,
         qrContent: qrContent,
       })
+      if (result && result.pdfBlob) {
+        saveAs(result.pdfBlob, `${filename}.pdf`)
+      }
       Toast.show({ icon: 'success', content: 'PDF已生成，包含二维码' })
     } catch (error) {
       console.error('PDF生成失败:', error)

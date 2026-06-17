@@ -251,18 +251,11 @@ export async function generateExamPDF({ title, studentName, questions, filename,
       doc.addImage(pageImg, 'JPEG', 0, 0, A4_W, mmH)
     }
 
-    // 生成 blob URL，返回给调用方展示"查看PDF"链接
+    // 生成 blob URL 和 blob，由调用方决定如何处理（预览/下载/打印）
     const pdfBlob = doc.output('blob')
     const blobUrl = URL.createObjectURL(pdfBlob)
 
-    // 桌面端直接触发下载；移动端跳过——iOS Safari 会将 blob URL 导航到当前页导致组件卸载
-    const isMobile = typeof navigator !== 'undefined' &&
-      /Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(navigator.userAgent)
-    if (!isMobile) {
-      doc.save(`${filename}.pdf`)
-    }
-
-    return blobUrl
+    return { blobUrl, pdfBlob }
   } finally {
     document.body.removeChild(container)
   }
