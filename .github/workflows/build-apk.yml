@@ -32,12 +32,14 @@ jobs:
       - name: Build web app
         run: npm run build
 
-      - name: Sync Capacitor
-        run: |
-          echo "Copying web app to Android assets..."
-          rm -rf android/app/src/main/assets/public
-          cp -r dist android/app/src/main/assets/public
-          cp capacitor.config.json android/app/src/main/assets/capacitor.config.json
+      - name: List workspace
+        run: ls -la && echo "---" && ls -la dist/ | head -5 && echo "---" && ls -la android/app/src/main/assets/ 2>/dev/null || echo "no assets dir"
+
+      - name: Copy web assets to Android
+        run: cp -r dist android/app/src/main/assets/public
+
+      - name: Copy Capacitor config
+        run: cp capacitor.config.json android/app/src/main/assets/capacitor.config.json
 
       - name: Build APK
         working-directory: android
