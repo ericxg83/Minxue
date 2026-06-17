@@ -41,19 +41,24 @@ jobs:
           cp -r dist/* android/app/src/main/assets/public/
           cp capacitor.config.json android/app/src/main/assets/capacitor.config.json
 
-      - name: Run Gradle doctor
-        working-directory: android
-        run: |
-          echo "=== Gradle version ==="
-          ./gradlew --version
-          echo "=== Available tasks ==="
-          ./gradlew tasks --all 2>&1 | head -50
-
       - name: Build APK
         working-directory: android
-        run: ./gradlew assembleDebug --info 2>&1
+        run: |
+          ./gradlew --no-daemon assembleDebug > /tmp/gradle.log 2>&1 || true
+
+      - name: Show Gradle output tail
+        working-directory: android
+        run: tail -200 /tmp/gradle.log
+
+      - name: Upload build output
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: gradle-build-log
+          path: /tmp/gradle.log
 
       - name: Upload APK
+        if: success()
         uses: actions/upload-artifact@v4
         with:
           name: app-debug
