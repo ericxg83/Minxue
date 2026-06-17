@@ -1,6 +1,6 @@
 import { useState, useRef, useEffect } from 'react'
-import { motion, AnimatePresence } from 'motion/react'
-import { ArrowLeft, Printer, FileDown, QrCode, Eye, EyeOff } from 'lucide-react'
+import { AnimatePresence } from 'motion/react'
+import { Printer, FileDown } from 'lucide-react'
 import { QRCodeSVG } from 'qrcode.react'
 import { Toast } from 'antd-mobile'
 import { useStudentStore, useWrongQuestionStore, useUIStore, useExamStore } from '../../store'
@@ -60,7 +60,6 @@ export default function PrintPreview({ onClose, questions: propQuestions }) {
   const [pdfBlobUrl, setPdfBlobUrl] = useState('')
   const [generatingPdf, setGeneratingPdf] = useState(false)
   const [pdfBlob, setPdfBlob] = useState(null)
-  const [showPdfViewer, setShowPdfViewer] = useState(false)
   const [pdfDownloading, setPdfDownloading] = useState(false)
 
   // 当外部的 questions prop 变化时同步（用于"重打"等异步加载场景）
@@ -190,7 +189,7 @@ export default function PrintPreview({ onClose, questions: propQuestions }) {
   }
 
   const handlePrint = async () => {
-    await generatePDF()
+    await handleExportPDF()
   }
 
   const generatePDF = async () => {
@@ -210,8 +209,7 @@ export default function PrintPreview({ onClose, questions: propQuestions }) {
       if (result) {
         setPdfBlobUrl(result.blobUrl)
         setPdfBlob(result.pdfBlob)
-        setShowPdfViewer(true)
-        Toast.show({ icon: 'success', content: 'PDF 已生成' })
+        return result
       }
     } catch (error) {
       console.error('PDF生成失败:', error)
@@ -219,6 +217,7 @@ export default function PrintPreview({ onClose, questions: propQuestions }) {
     } finally {
       setGeneratingPdf(false)
     }
+    return null
   }
 
   const handleExportPDF = async () => {
@@ -236,46 +235,46 @@ export default function PrintPreview({ onClose, questions: propQuestions }) {
         console.error('保存组卷记录失败:', e)
       }
     }
-    await generatePDF()
-  }
-
-  const handleDownloadPDF = async () => {
-    if (!pdfBlob || pdfDownloading) return
-    setPdfDownloading(true)
-    try {
+    const result = await generatePDF()
+    if (result && result.pdfBlob) {
       const filename = `${currentStudent?.name || 'student'}_cuoti_${dayjs().format('YYYYMMDD_HHmm')}.pdf`
-      saveAs(pdfBlob, filename)
-    } catch (e) {
-      console.warn('saveAs 下载失败，尝试 Web Share API:', e)
-      try {
-        const filename = `${currentStudent?.name || 'student'}_cuoti_${dayjs().format('YYYYMMDD_HHmm')}.pdf`
-        const file = new File([pdfBlob], filename, { type: 'application/pdf' })
-        if (navigator.canShare && navigator.canShare({ files: [file] })) {
-          await navigator.share({ files: [file], title: filename })
-        } else {
-          Toast.show({ content: '请长按PDF画面选择保存' })
-        }
-      } catch (shareErr) {
-        if (shareErr.name !== 'AbortError') {
-          console.warn('Web Share API 也失败:', shareErr)
-          Toast.show({ content: '请长按PDF画面选择保存' })
-        }
-      }
-    } finally {
-      setPdfDownloading(false)
+      saveAs(result.pdfBlob, filename)
     }
   }
 
-  const handlePrintPDF = () => {
-    if (!pdfBlobUrl) return
-    const printWindow = window.open(pdfBlobUrl, '_blank')
-    if (printWindow) {
-      printWindow.addEventListener('load', () => {
-        try { printWindow.print() } catch (e) { /* 部分浏览器可能不支持自动打印 */ }
-      })
-    } else {
-      // WebView 可能拦截了弹出窗口，引导用户使用下载
+  const handleDirectPrint = () => {
+    if (generatingPdf || pdfDownloading) return
+    const doPrint = async () => {
+      let blobUrl = pdfBlobUrl
+      if (!blobUrl) {
+        setGeneratingPdf(true)
+        try {
+          const result = await generateExamPDF({
+            title: `${currentStudent?.name || '学生'} - 错题重练卷`,
+            studentName: currentStudent?.name || '',
+            questions: previewQuestions,
+            filename: `${currentStudent?.name || 'student'}_cuoti_${dayjs().format('YYYYMMDD_HHmm')}`,
+            showAnswers: false,
+            qrContent: qrContent,
+          })
+          if (result) {
+            blobUrl = result.blobUrl
+            setPdfBlobUrl(result.blobUrl)
+            setPdfBlob(result.pdfBlob)
+          }
+        } catch (e) {
+          console.error('PDF生成失败:', e)
+          Toast.show({ icon: 'fail', content: 'PDF生成失败' })
+          setGeneratingPdf(false)
+          return
+        }
+        setGeneratingPdf(false)
+      }
+      if (blobUrl) {
+        window.open(blobUrl, '_blank')
+      }
     }
+    doPrint()
   }
 
   // 组件卸载时清理 blob URL 防止内存泄漏
@@ -322,30 +321,7 @@ export default function PrintPreview({ onClose, questions: propQuestions }) {
           </button>
         </div>
 
-        {/* Preview Area — conditionally show PDF viewer or questions */}
-        {showPdfViewer && pdfBlobUrl ? (
-          <div className="flex-1 flex flex-col bg-gray-100">
-            <div className="flex items-center justify-between px-4 py-2 bg-white border-b" style={{ borderColor: '#E5E7EB' }}>
-              <span style={{ fontSize: '13px', fontWeight: 600, color: '#111827' }}>PDF 预览</span>
-              <button
-                onClick={() => setShowPdfViewer(false)}
-                style={{ fontSize: '13px', color: '#2563EB' }}
-              >
-                返回题目
-              </button>
-            </div>
-            <iframe
-              src={pdfBlobUrl}
-              style={{
-                flex: 1,
-                width: '100%',
-                border: 'none',
-                background: '#fff',
-              }}
-              title="PDF 预览"
-            />
-          </div>
-        ) : (
+        {/* Preview Area */}
         <div className="flex-1 bg-gray-200 p-5 overflow-auto flex justify-center">
           <div className="w-full max-w-[210mm] bg-white p-8 shadow-lg relative">
             {/* QR Code */}
@@ -431,7 +407,6 @@ export default function PrintPreview({ onClose, questions: propQuestions }) {
             </div>
           </div>
         </div>
-        )}
 
         {/* Bottom Buttons */}
         <div className="bg-white px-4 py-3 border-t flex justify-center gap-3" style={{ borderColor: '#E5E7EB' }}>
@@ -449,45 +424,18 @@ export default function PrintPreview({ onClose, questions: propQuestions }) {
               <style>{`@keyframes pdf-spin{to{transform:rotate(360deg)}}`}</style>
               PDF 生成中...
             </div>
-          ) : pdfBlobUrl && showPdfViewer ? (
-            <>
-              <a
-                href={pdfBlobUrl}
-                download={`${currentStudent?.name || 'student'}_cuoti_${dayjs().format('YYYYMMDD_HHmm')}.pdf`}
-                className="px-5 py-2 rounded-lg text-[13px] font-medium flex items-center gap-1.5"
-                style={{ background: '#10B981', color: 'white' }}>
-                <FileDown size={15} />
-                下载PDF
-              </a>
-              <button onClick={handlePrintPDF}
-                className="px-6 py-2 rounded-lg text-[13px] font-medium flex items-center gap-1.5" style={{ background: '#2563EB', color: 'white' }}>
-                <Printer size={15} />
-                直接打印
-              </button>
-            </>
-          ) : pdfBlobUrl ? (
-            <a
-              href={pdfBlobUrl}
-              target="_blank"
-              rel="noopener noreferrer"
-              className="px-5 py-2 rounded-lg text-[13px] font-medium flex items-center gap-1.5"
-              style={{ background: '#10B981', color: 'white' }}
-            >
-              <Eye size={15} />
-              查看PDF
-            </a>
           ) : (
             <>
               <button onClick={handleExportPDF}
                 className="px-5 py-2 rounded-lg text-[13px] font-medium flex items-center gap-1.5"
-                style={{ border: '1px solid #2563EB', color: '#2563EB', background: 'transparent' }}>
+                style={{ background: '#10B981', color: 'white' }}>
                 <FileDown size={15} />
-                PDF
+                下载PDF
               </button>
-              <button onClick={handlePrint}
+              <button onClick={handleDirectPrint}
                 className="px-6 py-2 rounded-lg text-[13px] font-medium flex items-center gap-1.5" style={{ background: '#2563EB', color: 'white' }}>
-                {isMobile ? <FileDown size={15} /> : <Printer size={15} />}
-                {isMobile ? '下载PDF' : '直接打印'}
+                <Printer size={15} />
+                直接打印
               </button>
             </>
           )}

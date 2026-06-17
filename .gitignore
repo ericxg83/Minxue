@@ -12,7 +12,7 @@ dist
 dist-ssr
 *.local
 
-# Android build files (Capacitor auto-generated)
+# Android build files (Capacitor auto-generated — only source files are tracked)
 android/
 capacitor.config.json
 
