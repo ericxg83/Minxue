@@ -8,6 +8,65 @@ export const AI_CONFIG = {
   MAX_RETRIES: 2
 }
 
+// ── AI 模型轮换机制 ──
+// ModelScope 免费模型每日有配额限制，单个模型耗尽时自动切换到其他模型
+
+/** 视觉模型列表（OCR 识别用） */
+export const VL_MODELS = [
+  'Qwen/Qwen3-VL-8B-Instruct',
+  'Qwen/Qwen2.5-VL-7B-Instruct',
+]
+
+/** 文本模型列表（答案生成、标签生成用） */
+export const TEXT_MODELS = [
+  'Qwen/Qwen3-VL-8B-Instruct',
+  'Qwen/Qwen3-8B-Instruct',
+  'Qwen/Qwen2.5-72B-Instruct',
+  'Qwen/QwQ-32B',
+  'deepseek-ai/DeepSeek-R1-Distill-Qwen-32B',
+]
+
+let _textIdx = 0
+let _vlIdx = 0
+
+/** 获取当前文本模型 */
+export function getCurrentTextModel() {
+  return TEXT_MODELS[_textIdx] || TEXT_MODELS[0]
+}
+
+/** 获取当前视觉模型 */
+export function getCurrentVLModel() {
+  return VL_MODELS[_vlIdx] || VL_MODELS[0]
+}
+
+/** 切换到下一个文本模型，返回新模型名；如果已遍历所有模型则返回 null */
+export function rotateTextModel() {
+  if (_textIdx >= TEXT_MODELS.length - 1) {
+    console.warn(`⚠️ [ModelRotation] 所有文本模型已尝试完毕`)
+    return null
+  }
+  _textIdx++
+  console.log(`🔄 [ModelRotation] 切换到文本模型: ${TEXT_MODELS[_textIdx]}`)
+  return TEXT_MODELS[_textIdx]
+}
+
+/** 切换到下一个视觉模型，返回新模型名；如果已遍历所有模型则返回 null */
+export function rotateVLModel() {
+  if (_vlIdx >= VL_MODELS.length - 1) {
+    console.warn(`⚠️ [ModelRotation] 所有视觉模型已尝试完毕`)
+    return null
+  }
+  _vlIdx++
+  console.log(`🔄 [ModelRotation] 切换到视觉模型: ${VL_MODELS[_vlIdx]}`)
+  return VL_MODELS[_vlIdx]
+}
+
+/** 重置所有模型索引到初始值 */
+export function resetModelIndex() {
+  _textIdx = 0
+  _vlIdx = 0
+}
+
 export const getAIHeaders = () => ({
   'Content-Type': 'application/json',
   'Authorization': `Bearer ${AI_CONFIG.API_KEY}`

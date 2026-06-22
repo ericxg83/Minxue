@@ -10,7 +10,7 @@ import axios from 'axios'
 import sharp from 'sharp'
 import { TABLES, TASK_STATUS } from './config/neon.js'
 import { query } from './config/neon.js'
-import { AI_CONFIG, getAIHeaders, buildOCRPrompt, buildTaggingPrompt, buildAnswerGenerationPrompt } from './config/ai.js'
+import { AI_CONFIG, getAIHeaders, buildOCRPrompt, buildTaggingPrompt, buildAnswerGenerationPrompt, getCurrentTextModel, getCurrentVLModel, rotateTextModel, rotateVLModel, TEXT_MODELS, VL_MODELS } from './config/ai.js'
 import { updateTaskStatus, createQuestions, batchUpdateQuestionTags, addWrongQuestions, createJudgement, getLatestJudgement, updateQuestionAnswer, markAnswerException, findCachedQuestionByFingerprint, findSimilarQuestion, cacheQuestion, incrementQuestionUseCount, updateQuestionCacheId } from './services/neonService.js'
 import { uploadImage } from './services/ossService.js'
 import { generateTextFingerprint, generatePHash, PARSER_VERSION, TEXT_SIMILARITY_THRESHOLD } from './utils/questionFingerprint.js'
@@ -118,12 +118,12 @@ const deduplicateTags = (tags) => {
  * JSON 自动修复 — 处理 AI 返回的畸形 JSON
  * 常见问题: 未转义反斜杠(\frac → \\frac)、未转义双引号、字符串内换行
  */
-function repairAIJson(jsonStr) {
+export function repairAIJson(jsonStr) {
   const saved = []
   let s = jsonStr
 
-  // 1. 保护已正确转义的序列 (\\, \", \/, \n, \t, \uXXXX)
-  s = s.replace(/(\\[\\\"\/nrt]|\\u[0-9a-fA-F]{4})/g, (m) => {
+  // 1. 保护已正确转义的序列 (\\后接字母=LaTeX命令, 以及标准JSON转义 \\, \", \/, \n, \t, \uXXXX)
+  s = s.replace(/(\\[a-zA-Z\\\"\/nrt]|\\u[0-9a-fA-F]{4})/g, (m) => {
     saved.push(m)
     return `__ESC_${saved.length - 1}__`
   })
@@ -222,7 +222,7 @@ const recognizeQuestions = async (imageBase64, taskId, retryCount = 0) => {
     : `data:image/jpeg;base64,${imageBase64}`
 
   const requestBody = {
-    model: AI_CONFIG.MODEL,
+    model: getCurrentVLModel(),
     messages: [
       { role: 'system', content: prompt },
       {
@@ -342,6 +342,23 @@ const recognizeQuestions = async (imageBase64, taskId, retryCount = 0) => {
       console.error(`   响应体: ${JSON.stringify(error.response.data).substring(0, 300)}`)
     }
 
+    // 配额耗尽 → 切换到下一个 VL 模型（供后续使用），当前任务返回失败
+    if (error.response?.status === 429) {
+      const nextModel = rotateVLModel()
+      if (nextModel) {
+        console.log(`  模型 ${getCurrentVLModel()} 配额耗尽，下一个任务将使用 ${nextModel}`)
+      } else {
+        console.error(`  所有视觉模型配额已耗尽`)
+      }
+      return {
+        success: false,
+        error: errorMessage,
+        questions: [],
+        duration: Date.now() - startTime,
+        shouldRetry: false
+      }
+    }
+
     const isNetworkError = !error.response || error.code === 'ECONNABORTED' || error.code === 'ETIMEDOUT'
     const shouldRetry = isNetworkError && retryCount < AI_CONFIG.MAX_RETRIES
 
@@ -369,7 +386,7 @@ const generateTagsForQuestion = async (questionContent, retryCount = 0) => {
   const prompt = buildTaggingPrompt()
 
   const requestBody = {
-    model: AI_CONFIG.MODEL,
+    model: getCurrentTextModel(),
     messages: [
       { role: 'system', content: prompt },
       { role: 'user', content: `请分析以下题目，提取知识点标签：\n\n${questionContent}` }
@@ -416,6 +433,18 @@ const generateTagsForQuestion = async (questionContent, retryCount = 0) => {
   } catch (error) {
     const errorMessage = error.response?.data?.message || error.message || '未知错误'
     const isNetworkError = !error.response || error.code === 'ECONNABORTED' || error.code === 'ETIMEDOUT'
+
+    // 配额耗尽 → 切换到下一个模型（供后续问题使用），当前问题返回空
+    if (error.response?.status === 429) {
+      const nextModel = rotateTextModel()
+      if (nextModel) {
+        console.log(`  模型 ${getCurrentTextModel()} 配额耗尽，下一个问题将使用 ${nextModel}`)
+      } else {
+        console.error(`  所有文本模型配额已耗尽`)
+      }
+      return { success: true, tags: ['未分类'] }
+    }
+
     const shouldRetry = isNetworkError && retryCount < AI_CONFIG.MAX_RETRIES
 
     if (shouldRetry) {
@@ -455,7 +484,7 @@ const generateTagsForQuestions = async (questions) => {
  * For choice questions: extracts A/B/C/D letter.
  * For non-choice questions: extracts answer from explicit markers (答案为/答案是/最终答案/正确答案是).
  */
-function extractAnswerFromAnalysis(answer, analysis, options) {
+export function extractAnswerFromAnalysis(answer, analysis, options) {
   if (!analysis) return answer
 
   // ── Choice question patterns (A/B/C/D) ──
@@ -499,19 +528,24 @@ function extractAnswerFromAnalysis(answer, analysis, options) {
   // AI sometimes puts unsimplified LaTeX (e.g. \\frac{30}{\\sqrt{3}}) in answer field
   // while analysis has the correct simplified result (e.g. "15").
   // Look only in tail (last 300 chars) to favor final result over intermediate steps.
+  // Note: do NOT use commas (，,) as delimiters — multi-part answers like
+  // "每个盲盒50元，每个杯子30元" contain commas within the answer itself.
+  // Only sentence-ending punctuation (。！？.!? + newline) should terminate the capture.
   const tail = analysis.length > 300 ? analysis.substring(analysis.length - 300) : analysis
   const answerMarkerPatterns = [
-    /因此正确答案是[：:]\s*([^\n。，,；;]+)/i,
-    /正确答案是[：:]\s*([^\n。，,；;]+)/i,
-    /答案为[：:]\s*([^\n。，,；;]+)/i,
-    /答案是[：:]\s*([^\n。，,；;]+)/i,
-    /最终答案[：:]\s*([^\n。，,；;]+)/i,
+    /因此正确答案是[：:]\s*([^\n。！？.!?]+)/i,
+    /正确答案是[：:]\s*([^\n。！？.!?]+)/i,
+    /答案为[：:]\s*([^\n。！？.!?]+)/i,
+    /答案是[：:]\s*([^\n。！？.!?]+)/i,
+    /最终答案[：:]\s*([^\n。！？.!?]+)/i,
   ]
 
   for (const pattern of answerMarkerPatterns) {
     const match = tail.match(pattern)
     if (match) {
-      const extracted = match[1].trim()
+      let extracted = match[1].trim()
+      // Trim trailing commas/punctuation that may remain after removing them from delimiters
+      extracted = extracted.replace(/[，,；;、]+$/, '').trim()
       if (extracted && extracted !== answer) {
         console.log(`   [AnswerExtraction] 答案标记匹配: ${extracted} (原: ${answer})`)
         return extracted
@@ -525,7 +559,7 @@ function extractAnswerFromAnalysis(answer, analysis, options) {
 /**
  * Generate a single answer for a question via text-only AI call.
  */
-const generateAnswerForQuestion = async (questionContent, retryCount = 0) => {
+export const generateAnswerForQuestion = async (questionContent, retryCount = 0) => {
   if (!questionContent || !questionContent.trim()) {
     return { success: true, answer: '', analysis: '' }
   }
@@ -533,13 +567,13 @@ const generateAnswerForQuestion = async (questionContent, retryCount = 0) => {
   const prompt = buildAnswerGenerationPrompt()
 
   const requestBody = {
-    model: AI_CONFIG.MODEL,
+    model: getCurrentTextModel(),
     messages: [
       { role: 'system', content: prompt },
       { role: 'user', content: `请计算以下题目的标准答案：\n\n${questionContent}` }
     ],
     temperature: 0.2,
-    max_tokens: 1000
+    max_tokens: 2048
   }
 
   try {
@@ -562,15 +596,43 @@ const generateAnswerForQuestion = async (questionContent, retryCount = 0) => {
     } catch (parseError) {
       console.warn(`⚠️  AI JSON 解析失败，尝试自动修复...`)
       console.warn(`   原始错误: ${parseError.message}`)
-      const repaired = repairAIJson(jsonStr)
-      console.log(`   修复后 JSON (前200字): ${repaired.substring(0, 200)}...`)
-      try {
-        result = JSON.parse(repaired)
-        console.log(`✅ JSON 自动修复成功！`)
-      } catch (repairError) {
-        console.error(`❌ JSON 自动修复仍然失败: ${repairError.message}`)
-        console.error(`   原始 JSON (前500字): ${jsonStr.substring(0, 500)}`)
-        throw new Error(`AI 返回的 JSON 格式错误，无法解析。原始错误: ${parseError.message}`)
+
+      // 优先尝试修复截断问题 (Unterminated string / Unexpected end)
+      if (parseError.message.includes('Unterminated string') || parseError.message.includes('Unexpected end')) {
+        try {
+          let truncFixed = jsonStr.replace(/("[^"]*)$/, '$1"')
+          const openBraces = (truncFixed.match(/\{/g) || []).length
+          const closeBraces = (truncFixed.match(/\}/g) || []).length
+          const openBrackets = (truncFixed.match(/\[/g) || []).length
+          const closeBrackets = (truncFixed.match(/\]/g) || []).length
+          for (let i = 0; i < openBraces - closeBraces; i++) truncFixed += '}'
+          for (let i = 0; i < openBrackets - closeBrackets; i++) truncFixed += ']'
+          result = JSON.parse(truncFixed)
+          console.log(`✅ JSON 截断修复成功！`)
+        } catch (truncError) {
+          console.warn(`   截断修复失败: ${truncError.message}，尝试 repairAIJson...`)
+          const repaired = repairAIJson(jsonStr)
+          console.log(`   修复后 JSON (前200字): ${repaired.substring(0, 200)}...`)
+          try {
+            result = JSON.parse(repaired)
+            console.log(`✅ JSON 自动修复成功！`)
+          } catch (repairError) {
+            console.error(`❌ JSON 自动修复仍然失败: ${repairError.message}`)
+            console.error(`   原始 JSON (前500字): ${jsonStr.substring(0, 500)}`)
+            throw new Error(`AI 返回的 JSON 格式错误，无法解析。原始错误: ${parseError.message}`)
+          }
+        }
+      } else {
+        const repaired = repairAIJson(jsonStr)
+        console.log(`   修复后 JSON (前200字): ${repaired.substring(0, 200)}...`)
+        try {
+          result = JSON.parse(repaired)
+          console.log(`✅ JSON 自动修复成功！`)
+        } catch (repairError) {
+          console.error(`❌ JSON 自动修复仍然失败: ${repairError.message}`)
+          console.error(`   原始 JSON (前500字): ${jsonStr.substring(0, 500)}`)
+          throw new Error(`AI 返回的 JSON 格式错误，无法解析。原始错误: ${parseError.message}`)
+        }
       }
     }
 
@@ -582,8 +644,19 @@ const generateAnswerForQuestion = async (questionContent, retryCount = 0) => {
   } catch (error) {
     const errorMessage = error.response?.data?.message || error.message || '未知错误'
     const isNetworkError = !error.response || error.code === 'ECONNABORTED' || error.code === 'ETIMEDOUT'
-    const shouldRetry = isNetworkError && retryCount < AI_CONFIG.MAX_RETRIES
 
+    // 配额耗尽 → 切换到下一个模型（供后续问题使用），当前问题返回空
+    if (error.response?.status === 429) {
+      const nextModel = rotateTextModel()
+      if (nextModel) {
+        console.log(`  模型 ${getCurrentTextModel()} 配额耗尽，下一个问题将使用 ${nextModel}`)
+      } else {
+        console.error(`  所有文本模型配额已耗尽`)
+      }
+      return { success: true, answer: '', analysis: '' }
+    }
+
+    const shouldRetry = isNetworkError && retryCount < AI_CONFIG.MAX_RETRIES
     if (shouldRetry) {
       await new Promise(resolve => setTimeout(resolve, (retryCount + 1) * 1000))
       return generateAnswerForQuestion(questionContent, retryCount + 1)
@@ -597,7 +670,7 @@ const generateAnswerForQuestion = async (questionContent, retryCount = 0) => {
  * Check if the AI-generated answer is valid and not abnormal.
  * Returns { isValid: boolean, reason?: string }
  */
-function validateAIAnswer(answer, analysis) {
+export function validateAIAnswer(answer, analysis) {
   if (!answer || answer.trim() === '') {
     return { isValid: false, reason: '答案为空' }
   }
