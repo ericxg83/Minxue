@@ -168,26 +168,8 @@ export const useReviewStore = defineStore('review', () => {
     }
   }
 
-  // 清理旧缓存（版本更新时使用）
-  const clearOldCaches = () => {
-    try {
-      const prefixes = ['students_cache', 'tasks_cache_', 'wrong_questions_cache_', 'exams_cache_', 'generated_exams_cache_']
-      prefixes.forEach(prefix => {
-        Object.keys(localStorage).forEach(key => {
-          if (key.startsWith(prefix)) {
-            localStorage.removeItem(key)
-            localStorage.removeItem(key + '_ts')
-          }
-        })
-      })
-    } catch (e) {}
-  }
-
   // 初始化数据
   const initData = async () => {
-    // 清理旧缓存，确保加载最新数据
-    clearOldCaches()
-
     // 加载学生列表
     await loadStudents()
 
@@ -195,10 +177,11 @@ export const useReviewStore = defineStore('review', () => {
     const firstStudent = students.value[0]
     if (firstStudent) {
       setCurrentStudent(firstStudent)
-      // 加载该学生的已完成任务
-      await loadStudentTasks(firstStudent.id)
-      // 加载错题数据
-      await loadWrongQuestions(firstStudent.id)
+      // 并行加载：已完成任务 + 错题数据，减少串行等待
+      await Promise.all([
+        loadStudentTasks(firstStudent.id),
+        loadWrongQuestions(firstStudent.id)
+      ])
       // 自动选择第一份待复核试卷（优先 done，其次任一）
       if (studentTasks.value.length > 0) {
         const firstPending = studentTasks.value.find(t => t.status === 'done')

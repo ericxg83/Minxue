@@ -453,7 +453,7 @@ const generateTagsForQuestions = async (questions) => {
  * Extract the final answer from analysis text.
  * AI sometimes puts wrong/unsimplified value in answer field but analysis text is correct.
  * For choice questions: extracts A/B/C/D letter.
- * For non-choice questions: extracts answer from explicit markers (答案为/答案是/最终答案).
+ * For non-choice questions: extracts answer from explicit markers (答案为/答案是/最终答案/正确答案是).
  */
 function extractAnswerFromAnalysis(answer, analysis, options) {
   if (!analysis) return answer
@@ -501,6 +501,8 @@ function extractAnswerFromAnalysis(answer, analysis, options) {
   // Look only in tail (last 300 chars) to favor final result over intermediate steps.
   const tail = analysis.length > 300 ? analysis.substring(analysis.length - 300) : analysis
   const answerMarkerPatterns = [
+    /因此正确答案是[：:]\s*([^\n。，,；;]+)/i,
+    /正确答案是[：:]\s*([^\n。，,；;]+)/i,
     /答案为[：:]\s*([^\n。，,；;]+)/i,
     /答案是[：:]\s*([^\n。，,；;]+)/i,
     /最终答案[：:]\s*([^\n。，,；;]+)/i,
@@ -599,7 +601,8 @@ function validateAIAnswer(answer, analysis) {
   if (!answer || answer.trim() === '') {
     return { isValid: false, reason: '答案为空' }
   }
-  if (answer === '待人工补充' || answer === '此为主观题，无唯一标准答案') {
+  const trimmed = answer.trim()
+  if (trimmed === '待人工补充' || trimmed === '此为主观题，无唯一标准答案' || trimmed === '-') {
     return { isValid: false, reason: 'AI标记需要人工补充' }
   }
   if (analysis && analysis.length < 10 && answer.length > 100) {
@@ -720,10 +723,36 @@ const generateMissingAnswers = async (questions, imageBuffer = null) => {
       const result = await generateAnswerForQuestion(fullContent)
 
       const validation = validateAIAnswer(result.answer, result.analysis)
-      
+
       if (!validation.isValid) {
+        // 即使AI答案无效，也尝试从分析文本中提取答案，并保存分析内容
+        if (result.analysis && result.analysis.trim()) {
+          const extracted = extractAnswerFromAnalysis(result.answer, result.analysis, q.options)
+          if (extracted && extracted !== '-' && extracted !== result.answer) {
+            try {
+              await updateQuestionAnswer(q.id, extracted, result.analysis, true)
+              q.answer = extracted
+              q.analysis = result.analysis
+              updatedCount++
+              console.log(`     题目 ${q.id.substring(0, 8)}: 从分析文本提取答案: ${extracted}`)
+              return
+            } catch (err) {
+              console.error(`     题目 ${q.id.substring(0, 8)}: 提取答案写入失败`, err.message)
+            }
+          }
+          // 提取失败或答案未变更，至少保存分析文本
+          try {
+            await query(
+              `UPDATE questions SET analysis = $1, updated_at = NOW() WHERE id = $2`,
+              [result.analysis, q.id]
+            )
+            q.analysis = result.analysis
+            console.log(`     题目 ${q.id.substring(0, 8)}: 答案无效(${validation.reason})，已保存分析文本`)
+          } catch (err) {
+            console.error(`     题目 ${q.id.substring(0, 8)}: 分析文本保存失败`, err.message)
+          }
+        }
         exceptionCount++
-        console.log(`     题目 ${q.id.substring(0, 8)}: 解析异常 - ${validation.reason}`)
         try {
           await markAnswerException(q.id, validation.reason)
         } catch (err) {
