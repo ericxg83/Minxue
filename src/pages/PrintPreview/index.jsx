@@ -81,19 +81,6 @@ export default function PrintPreview({ onClose, questions: propQuestions }) {
       ts: Date.now()
     })
     setQrContent(content)
-
-    // 挂载时自动保存组卷记录（仅一次）
-    if (previewQuestions.length > 0 && currentStudent && !examRecorded.current) {
-      const qIds = previewQuestions.map(q => q.id).filter(Boolean)
-      if (qIds.length > 0) {
-        createGeneratedExam({
-          student_id: currentStudent.id,
-          name: `${currentStudent.name} - 错题重练`,
-          question_ids: qIds
-        }).then(() => { examRecorded.current = true })
-          .catch(e => console.warn('保存组卷记录失败:', e))
-      }
-    }
   }, [currentStudent, previewQuestions])
 
   useEffect(() => {
@@ -220,9 +207,8 @@ export default function PrintPreview({ onClose, questions: propQuestions }) {
     return null
   }
 
-  const handleExportPDF = async () => {
-    if (generatingPdf) return
-    // Create exam record first
+  const saveGeneratedExamRecord = async () => {
+    if (examRecorded.current) return
     const questionIds = previewQuestions.map(q => q.id).filter(Boolean)
     if (currentStudent && questionIds.length > 0) {
       try {
@@ -231,10 +217,16 @@ export default function PrintPreview({ onClose, questions: propQuestions }) {
           name: '错题重练卷',
           question_ids: questionIds
         })
+        examRecorded.current = true
       } catch (e) {
         console.error('保存组卷记录失败:', e)
       }
     }
+  }
+
+  const handleExportPDF = async () => {
+    if (generatingPdf) return
+    await saveGeneratedExamRecord()
     const result = await generatePDF()
     if (result && result.pdfBlob) {
       const filename = `${currentStudent?.name || 'student'}_cuoti_${dayjs().format('YYYYMMDD_HHmm')}.pdf`
@@ -245,6 +237,7 @@ export default function PrintPreview({ onClose, questions: propQuestions }) {
   const handleDirectPrint = () => {
     if (generatingPdf || pdfDownloading) return
     const doPrint = async () => {
+      await saveGeneratedExamRecord()
       let blobUrl = pdfBlobUrl
       if (!blobUrl) {
         setGeneratingPdf(true)
