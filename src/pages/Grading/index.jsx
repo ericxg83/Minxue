@@ -1,7 +1,7 @@
 import { useState, useEffect } from 'react'
 import { motion, AnimatePresence } from 'motion/react'
 import { CheckCircle2, XCircle, ChevronLeft, ChevronRight, Loader2, QrCode, Eye, EyeOff } from 'lucide-react'
-import { getQuestionsByIds, upsertWrongQuestionStatus, markGeneratedExamGraded } from '../../services/apiService'
+import { getQuestionsByIds, batchUpsertWrongQuestionStatus, markGeneratedExamGraded } from '../../services/apiService'
 import { useStudentStore } from '../../store'
 import dayjs from 'dayjs'
 
@@ -32,6 +32,7 @@ export default function Grading({ paperId, studentId, questionIds, onClose, onCo
   const [isLoading, setIsLoading] = useState(true)
   const [error, setError] = useState(null)
   const [masteredBeforeCount, setMasteredBeforeCount] = useState(0)
+  const [isSaving, setIsSaving] = useState(false)
 
   const { students } = useStudentStore()
 
@@ -79,11 +80,7 @@ export default function Grading({ paperId, studentId, questionIds, onClose, onCo
       setQuestions(detailedQuestions)
       setMasteredBeforeCount(detailedQuestions.filter(q => q.status === 'mastered').length)
 
-      // [P0-2c] 初始化时确保每条题目在 wrong_questions 中有记录
-      detailedQuestions.forEach(q => {
-        upsertWrongQuestionStatus(targetStudentId, q.id, q.status || 'pending', q.is_correct)
-          .catch(e => console.error(`[P0-2c] 初始化错题记录失败 q=${q.id.substring(0, 8)}:`, e.message))
-      })
+      // 移除初始化时的单独请求，改为批改完成时统一保存
 
       // 取第一个题目的 practice_count 作为本次练习次数
       const maxPracticeCount = detailedQuestions.reduce((max, q) => Math.max(max, q.practice_count || 0), 0)
@@ -111,33 +108,32 @@ export default function Grading({ paperId, studentId, questionIds, onClose, onCo
     const currentQuestion = questions[currentQuestionIndex]
     if (!currentQuestion) return
 
+    // 只更新本地状态，不发送网络请求
+    const newResults = {
+      ...gradingResults,
+      [currentQuestion.id]: {
+        status,
+        questionId: currentQuestion.id,
+        markedAt: Date.now()
+      }
+    }
+    setGradingResults(newResults)
+
+    // 本地暂存批改结果（防止意外关闭丢失数据）
     try {
-      const newStatus = status === 'mastered' ? 'mastered' : 'pending'
-      const isCorrect = status === 'mastered'
-      // [P0-2b] 使用 upsert 按 (student_id, question_id) 更新，修复 ID 错配
-      await upsertWrongQuestionStatus(studentId, currentQuestion.id, newStatus, isCorrect)
+      localStorage.setItem(`grading_temp_${studentId}`, JSON.stringify(newResults))
+    } catch (e) {
+      console.warn('暂存批改结果失败:', e)
+    }
 
-      const newResults = {
-        ...gradingResults,
-        [currentQuestion.id]: {
-          status,
-          questionId: currentQuestion.id,
-          markedAt: Date.now()
-        }
-      }
-      setGradingResults(newResults)
-
-      if (currentQuestionIndex < questions.length - 1) {
-        setTimeout(() => {
-          setCurrentQuestionIndex(currentQuestionIndex + 1)
-        }, 300)
-      } else {
-        setTimeout(() => {
-          setShowResult(true)
-        }, 300)
-      }
-    } catch (err) {
-      console.error('更新状态失败:', err)
+    if (currentQuestionIndex < questions.length - 1) {
+      setTimeout(() => {
+        setCurrentQuestionIndex(currentQuestionIndex + 1)
+      }, 300)
+    } else {
+      setTimeout(() => {
+        setShowResult(true)
+      }, 300)
     }
   }
 
@@ -154,29 +150,47 @@ export default function Grading({ paperId, studentId, questionIds, onClose, onCo
   }
 
   const handleComplete = async () => {
-    Object.entries(gradingResults).forEach(([questionId, result]) => {
-      const newStatus = result.status === 'mastered' ? 'mastered' : 'pending'
-      upsertWrongQuestionStatus(studentId, questionId, newStatus, result.status === 'mastered')
-        .catch(e => console.error(`[P0-2b] 完成时更新失败 q=${questionId.substring(0, 8)}:`, e.message))
-    })
+    setIsSaving(true)
 
-    // 标记组卷为已批改
-    if (generatedExamId) {
-      markGeneratedExamGraded(generatedExamId)
-        .catch(e => console.error('标记组卷已批改失败:', e.message))
+    try {
+      // 批量提交所有批改结果
+      const resultsArray = Object.entries(gradingResults).map(([questionId, result]) => ({
+        questionId,
+        status: result.status === 'mastered' ? 'mastered' : 'pending',
+        isCorrect: result.status === 'mastered'
+      }))
+
+      if (resultsArray.length > 0) {
+        await batchUpsertWrongQuestionStatus(studentId, resultsArray)
+        console.log(`批量保存成功: ${resultsArray.length} 条批改结果`)
+      }
+
+      // 标记组卷为已批改
+      if (generatedExamId) {
+        await markGeneratedExamGraded(generatedExamId)
+      }
+
+      // 清除本地暂存
+      try {
+        localStorage.removeItem(`grading_temp_${studentId}`)
+      } catch (e) {}
+
+      const masteredCount = Object.values(gradingResults).filter(r => r.status === 'mastered').length
+      const notMasteredCount = Object.values(gradingResults).filter(r => r.status !== 'mastered').length
+
+      onComplete && onComplete({
+        masteredCount,
+        notMasteredCount,
+        totalQuestions: questions.length,
+        results: gradingResults
+      })
+
+      onClose()
+    } catch (err) {
+      console.error('保存批改结果失败:', err)
+      setError(`保存失败: ${err.message}，请稍后重试`)
+      setIsSaving(false)
     }
-
-    const masteredCount = Object.values(gradingResults).filter(r => r.status === 'mastered').length
-    const notMasteredCount = Object.values(gradingResults).filter(r => r.status !== 'mastered').length
-
-    onComplete && onComplete({
-      masteredCount,
-      notMasteredCount,
-      totalQuestions: questions.length,
-      results: gradingResults
-    })
-
-    onClose()
   }
 
   if (isLoading) {
@@ -333,9 +347,16 @@ export default function Grading({ paperId, studentId, questionIds, onClose, onCo
 
           <button onClick={handleComplete} style={{
             width: '100%', padding: '12px', background: COLORS.primary, color: '#fff',
-            borderRadius: '8px', fontSize: '14px', fontWeight: 600, border: 'none', cursor: 'pointer'
-          }}>
-            完成并返回
+            borderRadius: '8px', fontSize: '14px', fontWeight: 600, border: 'none', cursor: 'pointer',
+            display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '8px',
+            opacity: isSaving ? 0.6 : 1
+          }} disabled={isSaving}>
+            {isSaving ? (
+              <>
+                <Loader2 size={16} className="animate-spin" />
+                正在保存...
+              </>
+            ) : '完成并返回'}
           </button>
         </motion.div>
       </div>

@@ -11,11 +11,13 @@ export default function ScanQR({ onClose, onScanSuccess }) {
   const [scanning, setScanning] = useState(false)
   const [cameraReady, setCameraReady] = useState(false)
   const [scanError, setScanError] = useState(null)
+  const [cameraTimeout, setCameraTimeout] = useState(false)
   const videoRef = useRef(null)
   const canvasRef = useRef(null)
   const streamRef = useRef(null)
   const animFrameRef = useRef(null)
   const fileInputRef = useRef(null)
+  const cameraTimeoutRef = useRef(null)
 
   const stopCamera = useCallback(() => {
     if (streamRef.current) {
@@ -25,6 +27,10 @@ export default function ScanQR({ onClose, onScanSuccess }) {
     if (animFrameRef.current) {
       cancelAnimationFrame(animFrameRef.current)
       animFrameRef.current = null
+    }
+    if (cameraTimeoutRef.current) {
+      clearTimeout(cameraTimeoutRef.current)
+      cameraTimeoutRef.current = null
     }
     setCameraReady(false)
   }, [])
@@ -63,6 +69,7 @@ export default function ScanQR({ onClose, onScanSuccess }) {
             questionIds: data.questionIds || data.qIds,
             timestamp: data.timestamp || data.ts
           })
+          return // 识别成功后立即停止，不再继续下一帧
         } else {
           setScanError('无效的二维码类型')
         }
@@ -78,6 +85,14 @@ export default function ScanQR({ onClose, onScanSuccess }) {
 
   const startCamera = async () => {
     try {
+      // 设置 3 秒超时，如果摄像头无响应则提示使用相册
+      cameraTimeoutRef.current = setTimeout(() => {
+        if (!cameraReady) {
+          setCameraTimeout(true)
+          setScanError('摄像头启动超时，请使用相册上传图片')
+        }
+      }, 3000)
+
       const stream = await navigator.mediaDevices.getUserMedia({
         video: {
           facingMode: 'environment',
@@ -95,18 +110,29 @@ export default function ScanQR({ onClose, onScanSuccess }) {
 
         videoRef.current.onloadedmetadata = () => {
           videoRef.current.play().then(() => {
+            if (cameraTimeoutRef.current) {
+              clearTimeout(cameraTimeoutRef.current)
+              cameraTimeoutRef.current = null
+            }
             setCameraReady(true)
             setScanError(null)
+            setCameraTimeout(false)
             animFrameRef.current = requestAnimationFrame(processFrame)
           }).catch(err => {
             console.error('Video play failed:', err)
             setScanError('摄像头启动失败，请使用相册上传图片')
+            setCameraTimeout(true)
           })
         }
       }
     } catch (err) {
       console.error('Camera error:', err)
-      setScanError('无法访问摄像头，请使用相册上传图片')
+      if (err.name === 'NotAllowedError') {
+        setScanError('摄像头权限被拒绝，请在浏览器设置中允许访问摄像头，或使用相册上传')
+      } else {
+        setScanError('无法访问摄像头，请使用相册上传图片')
+      }
+      setCameraTimeout(true)
     }
   }
 
@@ -218,7 +244,7 @@ export default function ScanQR({ onClose, onScanSuccess }) {
             position: 'absolute', inset: 0, width: '100%', height: '100%', objectFit: 'cover'
           }} />
 
-          {!cameraReady && (
+          {!cameraReady && !cameraTimeout && (
             <div style={{
               position: 'absolute', inset: 0,
               display: 'flex', alignItems: 'center', justifyContent: 'center',
@@ -228,6 +254,39 @@ export default function ScanQR({ onClose, onScanSuccess }) {
               <div style={{ color: 'rgba(255,255,255,0.6)', fontSize: '14px' }}>
                 正在启动摄像头...
               </div>
+            </div>
+          )}
+
+          {cameraTimeout && (
+            <div style={{
+              position: 'absolute', inset: 0,
+              display: 'flex', alignItems: 'center', justifyContent: 'center',
+              flexDirection: 'column', gap: '16px', zIndex: 5,
+              background: 'rgba(0,0,0,0.8)', padding: '20px'
+            }}>
+              <ImageIcon size={48} color="#EF4444" />
+              <div style={{ color: '#fff', fontSize: '15px', textAlign: 'center', lineHeight: '1.6' }}>
+                {scanError}
+              </div>
+              <button
+                onClick={handleAlbum}
+                style={{
+                  padding: '12px 32px',
+                  background: '#2563EB',
+                  color: '#fff',
+                  borderRadius: '8px',
+                  fontSize: '15px',
+                  fontWeight: 600,
+                  border: 'none',
+                  cursor: 'pointer',
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: '8px'
+                }}
+              >
+                <ImageIcon size={18} />
+                打开相册
+              </button>
             </div>
           )}
 
@@ -266,13 +325,13 @@ export default function ScanQR({ onClose, onScanSuccess }) {
             />
           </div>
 
-          {scanError && (
+          {scanError && !cameraTimeout && (
             <div style={{ color: '#EF4444', fontSize: '14px', marginTop: '20px', textAlign: 'center', padding: '0 20px' }}>
               {scanError}
             </div>
           )}
 
-          {cameraReady && !scanError && (
+          {cameraReady && !scanError && !cameraTimeout && (
             <div style={{ color: 'rgba(255,255,255,0.8)', fontSize: '14px', marginTop: '24px', textAlign: 'center' }}>
               将二维码放入框内，自动识别
             </div>

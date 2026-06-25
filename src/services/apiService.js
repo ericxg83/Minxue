@@ -66,26 +66,38 @@ const checkCacheVersion = () => {
 // 页面加载时自动检查
 checkCacheVersion()
 
-const apiRequest = async (path, options = {}) => {
+const apiRequest = async (path, options = {}, retries = 3) => {
   const url = `${API_BASE}${path}`
-  
+
   // No timeout - let the browser handle it naturally (Render cold starts can take 50+ seconds)
   // The App.jsx init logic already handles failures gracefully
-  
-  const response = await fetch(url, {
-    ...options,
-    headers: {
-      ...options.headers
+
+  for (let attempt = 0; attempt < retries; attempt++) {
+    try {
+      const response = await fetch(url, {
+        ...options,
+        headers: {
+          ...options.headers
+        }
+      })
+
+      if (!response.ok) {
+        const error = await response.json().catch(() => ({ error: response.statusText }))
+        throw new Error(error.error || `请求失败: ${response.status}`)
+      }
+
+      const data = await response.json()
+      return data
+    } catch (error) {
+      // 最后一次尝试失败时抛出错误
+      if (attempt === retries - 1) {
+        throw error
+      }
+      // 等待后重试（指数退避：1s, 2s）
+      await new Promise(resolve => setTimeout(resolve, Math.pow(2, attempt) * 1000))
+      console.warn(`请求失败，重试 ${attempt + 1}/${retries - 1}:`, path)
     }
-  })
-
-  if (!response.ok) {
-    const error = await response.json().catch(() => ({ error: response.statusText }))
-    throw new Error(error.error || `请求失败: ${response.status}`)
   }
-
-  const data = await response.json()
-  return data
 }
 
 export const getStudents = async (useCache = true) => {
@@ -411,6 +423,22 @@ export const upsertWrongQuestionStatus = async (studentId, questionId, status, i
     method: 'PUT',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ studentId, questionId, status, isCorrect })
+  })
+}
+
+// 批量更新错题状态（Phase 1 优化）
+export const batchUpsertWrongQuestionStatus = async (studentId, results) => {
+  return apiRequest(`/wrong-questions/batch-upsert`, {
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      studentId,
+      results: results.map(r => ({
+        questionId: r.questionId,
+        status: r.status,
+        isCorrect: r.isCorrect
+      }))
+    })
   })
 }
 
