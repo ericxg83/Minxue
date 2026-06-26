@@ -1308,6 +1308,93 @@ app.put('/api/wrong-questions/upsert', async (req, res) => {
   }
 })
 
+// 批量 upsert 错题状态（Phase 1 优化）
+app.put('/api/wrong-questions/batch-upsert', async (req, res) => {
+  try {
+    const { studentId, results } = req.body
+
+    if (!studentId || !Array.isArray(results) || results.length === 0) {
+      return res.status(400).json({ error: '缺少 studentId 或 results 数组' })
+    }
+
+    const successIds = []
+    const failures = []
+
+    // 批量处理每个题目
+    for (const result of results) {
+      const { questionId, status, isCorrect } = result
+
+      if (!questionId) {
+        failures.push({ questionId, error: '缺少 questionId' })
+        continue
+      }
+
+      try {
+        // 查找已有记录
+        let { rows } = await query(
+          `SELECT id FROM ${TABLES.WRONG_QUESTIONS} WHERE student_id = $1 AND question_id = $2`,
+          [studentId, questionId]
+        )
+
+        let wqId
+        if (rows.length === 0) {
+          // 创建新记录
+          const { rows: inserted } = await query(
+            `INSERT INTO ${TABLES.WRONG_QUESTIONS} (student_id, question_id, status, error_count, practice_count, added_at, last_wrong_at, created_at, updated_at)
+             VALUES ($1, $2, $3, 1, 1, NOW(), NOW(), NOW(), NOW())
+             RETURNING id`,
+            [studentId, questionId, status || 'pending']
+          )
+          wqId = inserted[0].id
+        } else {
+          wqId = rows[0].id
+          // 更新现有记录
+          await query(
+            `UPDATE ${TABLES.WRONG_QUESTIONS}
+             SET status = $1, practice_count = practice_count + 1, updated_at = NOW()
+             WHERE id = $2`,
+            [status || 'pending', wqId]
+          )
+        }
+
+        // 同步更新 questions 表的 is_correct
+        if (isCorrect !== undefined) {
+          await query(
+            `UPDATE ${TABLES.QUESTIONS} SET is_correct = $1, updated_at = NOW() WHERE id = $2`,
+            [isCorrect, questionId]
+          )
+        }
+
+        // [Shadow Mode] 追加写入人工复审判定记录
+        createJudgement({
+          questionId,
+          studentId,
+          source: 'manual_review',
+          isCorrect: isCorrect ?? null,
+          metadata: { status, wrongQuestionId: wqId, batchUpsert: true }
+        }).catch(e => console.error('[Shadow] judgements写入失败 (batch-upsert):', e.message))
+
+        successIds.push(questionId)
+      } catch (error) {
+        console.error(`批量处理失败 questionId=${questionId}:`, error.message)
+        failures.push({ questionId, error: error.message })
+      }
+    }
+
+    res.json({
+      success: true,
+      total: results.length,
+      successCount: successIds.length,
+      failureCount: failures.length,
+      successIds,
+      failures
+    })
+  } catch (error) {
+    console.error('批量Upsert错题失败:', error)
+    res.status(500).json({ error: error.message })
+  }
+})
+
 app.put('/api/wrong-questions/:id', async (req, res) => {
   try {
     const { id } = req.params
