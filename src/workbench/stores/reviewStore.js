@@ -69,55 +69,61 @@ export const useReviewStore = defineStore('review', () => {
     return { total, confirmed, unconfirmed: total - confirmed, percent: total ? Math.round(confirmed / total * 100) : 0 }
   })
 
-  // 获取学生待审核题目数
+  // 获取学生待审核题目数（优化：单次遍历）
   const getStudentPendingCount = (studentId) => {
-    return wrongQuestions.value.filter(wq => 
-      wq.student_id === studentId && wq.lifecycle_status !== LIFECYCLE_STATUS.MASTERED
-    ).length
+    let count = 0
+    for (const wq of wrongQuestions.value) {
+      if (wq.student_id === studentId && wq.lifecycle_status !== LIFECYCLE_STATUS.MASTERED) {
+        count++
+      }
+    }
+    return count
   }
 
-  // 获取学生今日新增错题数
+  // 获取学生今日新增错题数（优化：单次遍历）
   const getStudentTodayNewCount = (studentId) => {
     const today = dayjs().format('YYYY-MM-DD')
-    return wrongQuestions.value.filter(wq => {
-      if (wq.student_id !== studentId) return false
-      const addedDate = dayjs(wq.added_at).format('YYYY-MM-DD')
-      return addedDate === today
-    }).length
+    let count = 0
+    for (const wq of wrongQuestions.value) {
+      if (wq.student_id === studentId) {
+        const addedDate = dayjs(wq.added_at).format('YYYY-MM-DD')
+        if (addedDate === today) {
+          count++
+        }
+      }
+    }
+    return count
   }
 
-  // 获取今日统计数据
+  // 获取今日统计数据（优化：单次遍历）
   const calculateTodayStats = () => {
     const today = dayjs().format('YYYY-MM-DD')
-    
-    // 今日待审核错题数量（非mastered状态）
-    const pendingReview = wrongQuestions.value.filter(wq => 
-      wq.lifecycle_status !== LIFECYCLE_STATUS.MASTERED
-    ).length
-    
-    // 今日待处理学生数量（有待审核错题的学生数）
+
+    let pendingReview = 0
+    let newWrongQuestions = 0
+    let pendingPrintExams = 0
     const studentIds = new Set()
-    wrongQuestions.value.forEach(wq => {
+
+    // 单次遍历计算所有统计
+    for (const wq of wrongQuestions.value) {
       if (wq.lifecycle_status !== LIFECYCLE_STATUS.MASTERED) {
+        pendingReview++
         studentIds.add(wq.student_id)
       }
-    })
-    const pendingStudents = studentIds.size
-    
-    // 今日新增错题数量（lifecycle_status为new的错题）
-    const newWrongQuestions = wrongQuestions.value.filter(wq => {
+
       const addedDate = dayjs(wq.added_at).format('YYYY-MM-DD')
-      return addedDate === today && wq.lifecycle_status === LIFECYCLE_STATUS.NEW
-    }).length
-    
-    // 已生成待打印重练卷数量
-    const pendingPrintExams = wrongQuestions.value.filter(wq =>
-      wq.lifecycle_status === LIFECYCLE_STATUS.NEW
-    ).length
-    
+      if (addedDate === today && wq.lifecycle_status === LIFECYCLE_STATUS.NEW) {
+        newWrongQuestions++
+      }
+
+      if (wq.lifecycle_status === LIFECYCLE_STATUS.NEW) {
+        pendingPrintExams++
+      }
+    }
+
     todayStats.value = {
       pendingReview,
-      pendingStudents,
+      pendingStudents: studentIds.size,
       newWrongQuestions,
       pendingPrintExams
     }

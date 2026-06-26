@@ -51,35 +51,40 @@ export const useQuestionStore = defineStore('questionBank', () => {
   // 题目引用映射（question_id -> 使用信息）
   const questionUsageMap = ref({})
 
-  // 过滤后的题目列表
+  // 过滤后的题目列表（优化：合并多个 filter 为单次遍历）
   const filteredQuestions = computed(() => {
-    let result = [...allQuestions.value]
+    const result = []
 
-    // 搜索
-    if (filters.value.search) {
-      const keyword = filters.value.search.toLowerCase()
-      result = result.filter(q => 
-        q.content?.toLowerCase().includes(keyword) ||
-        q.answer?.toLowerCase().includes(keyword) ||
-        q.ai_tags?.some(tag => tag.toLowerCase().includes(keyword)) ||
-        q.manual_tags?.some(tag => tag.toLowerCase().includes(keyword))
-      )
-    }
+    for (const q of allQuestions.value) {
+      // 搜索
+      if (filters.value.search) {
+        const keyword = filters.value.search.toLowerCase()
+        const hasMatch =
+          q.content?.toLowerCase().includes(keyword) ||
+          q.answer?.toLowerCase().includes(keyword) ||
+          q.ai_tags?.some(tag => tag.toLowerCase().includes(keyword)) ||
+          q.manual_tags?.some(tag => tag.toLowerCase().includes(keyword))
 
-    // 类型筛选
-    if (filters.value.type !== 'all') {
-      result = result.filter(q => q.question_type === filters.value.type)
-    }
+        if (!hasMatch) continue
+      }
 
-    // 科目筛选
-    if (filters.value.subject !== 'all') {
-      result = result.filter(q => q.subject === filters.value.subject)
+      // 类型筛选
+      if (filters.value.type !== 'all' && q.question_type !== filters.value.type) {
+        continue
+      }
+
+      // 科目筛选
+      if (filters.value.subject !== 'all' && q.subject !== filters.value.subject) {
+        continue
+      }
+
+      result.push(q)
     }
 
     // 排序
     result.sort((a, b) => {
       let aVal, bVal
-      
+
       switch (filters.value.sortBy) {
         case 'last_seen':
           aVal = new Date(a._lastSeen || 0).getTime()
@@ -97,6 +102,13 @@ export const useQuestionStore = defineStore('questionBank', () => {
           aVal = 0
           bVal = 0
       }
+
+      return filters.value.sortOrder === 'asc' ? aVal - bVal : bVal - aVal
+    })
+
+    pagination.value.total = result.length
+    return result
+  })
 
       return filters.value.sortOrder === 'desc' ? bVal - aVal : aVal - bVal
     })
