@@ -3,6 +3,7 @@ import { ref, computed } from 'vue'
 import { getWrongQuestionsByStudent, deleteWrongQuestion, updateWrongQuestionStatus } from '../../services/apiService'
 import { useLifecycleStore, LIFECYCLE_STATUS } from './lifecycleStore'
 import { deduplicateWrongQuestions } from '../../utils/questionDedup'
+import { debounce } from '../utils/performance'
 import dayjs from 'dayjs'
 
 // 使用真实API数据
@@ -10,14 +11,18 @@ const USE_MOCK_DATA = false
 
 export const useWrongBookStore = defineStore('wrongBook', () => {
   const lifecycleStore = useLifecycleStore()
-  
+
   // 状态
   const wrongQuestions = ref([])
   const selectedQuestions = ref([])
   const currentStudent = ref(null)
   const loading = ref(false)
   const dedupEnabled = ref(true)  // 是否启用去重
-  
+
+  // 去重缓存（优化性能）
+  const dedupCache = ref(null)
+  const dedupCacheKey = ref('')
+
   const filters = ref({
     status: 'pending',
     lifecycleStatus: 'all',    // 新增：生命周期状态筛选
@@ -28,9 +33,10 @@ export const useWrongBookStore = defineStore('wrongBook', () => {
     tag: 'all',
     category: 'all'
   })
-  
+
   const sortBy = ref('time_desc')
   const searchQuery = ref('')
+  const debouncedSearchQuery = ref('')  // 防抖后的搜索词
   const currentPage = ref(1)
   const pageSize = ref(20)
 
@@ -97,69 +103,88 @@ export const useWrongBookStore = defineStore('wrongBook', () => {
     return Array.from(tagSet).sort()
   })
 
-  // 原始错题（未去重）
+  // 原始错题（未去重）- 优化：合并多个 filter 为单次遍历
   const rawFilteredQuestions = computed(() => {
-    return (Array.isArray(wrongQuestions.value) ? wrongQuestions.value : [])
-      .filter(wq => {
-        if (wq.student_id !== currentStudent.value?.id) return false
-        
-        // 分类筛选
-        if (filters.value.category !== 'all') {
-          const question = wq.question || wq
-          const answerSource = question.answer_source || question._answer_source || 'recognized'
-          const isBlank = answerSource === 'blank'
-          const isCorrect = question.is_correct !== undefined ? question.is_correct : wq.is_correct
-          const isUnanswered = isBlank && isCorrect === null
-          const isWrong = isCorrect === false
-          
-          if (filters.value.category === 'wrong' && !isWrong) return false
-          if (filters.value.category === 'unanswered' && !isUnanswered) return false
-        }
-        
-        // 生命周期状态筛选
-        if (filters.value.lifecycleStatus !== 'all' && wq.lifecycle_status !== filters.value.lifecycleStatus) return false
-        
-        // 掌握状态筛选
-        if (filters.value.status !== 'all' && wq.status !== filters.value.status) return false
-        
-        // 科目筛选
-        if (filters.value.subject !== 'all' && wq.subject !== filters.value.subject) return false
-        
-        // 时间筛选
-        if (filters.value.time !== 'all' && !isWithinTimeRange(wq.added_at || wq.created_at, filters.value.time)) return false
-        
-        // 错误次数筛选
-        if (filters.value.errorCount !== 'all' && !matchErrorCount(wq.error_count || 1, filters.value.errorCount)) return false
+    const allQuestions = Array.isArray(wrongQuestions.value) ? wrongQuestions.value : []
+    const result = []
 
-        // 标签筛选
-        if (filters.value.tag !== 'all') {
-          const question = wq.question || wq
-          const tags = question.tags_source === 'manual'
-            ? (question.manual_tags || [])
-            : (question.ai_tags || [])
-          if (!tags.includes(filters.value.tag)) return false
-        }
-        
-        // 搜索筛选
-        if (searchQuery.value) {
-          const q = wq.question || wq
-          const content = q.content || ''
-          if (!content.toLowerCase().includes(searchQuery.value.toLowerCase())) return false
-        }
-        
-        return true
-      })
+    for (const wq of allQuestions) {
+      // 学生筛选
+      if (wq.student_id !== currentStudent.value?.id) continue
+
+      // 分类筛选
+      if (filters.value.category !== 'all') {
+        const question = wq.question || wq
+        const answerSource = question.answer_source || question._answer_source || 'recognized'
+        const isBlank = answerSource === 'blank'
+        const isCorrect = question.is_correct !== undefined ? question.is_correct : wq.is_correct
+        const isUnanswered = isBlank && isCorrect === null
+        const isWrong = isCorrect === false
+
+        if (filters.value.category === 'wrong' && !isWrong) continue
+        if (filters.value.category === 'unanswered' && !isUnanswered) continue
+      }
+
+      // 生命周期状态筛选
+      if (filters.value.lifecycleStatus !== 'all' && wq.lifecycle_status !== filters.value.lifecycleStatus) continue
+
+      // 掌握状态筛选
+      if (filters.value.status !== 'all' && wq.status !== filters.value.status) continue
+
+      // 科目筛选
+      if (filters.value.subject !== 'all' && wq.subject !== filters.value.subject) continue
+
+      // 时间筛选
+      if (filters.value.time !== 'all' && !isWithinTimeRange(wq.added_at || wq.created_at, filters.value.time)) continue
+
+      // 错误次数筛选
+      if (filters.value.errorCount !== 'all' && !matchErrorCount(wq.error_count || 1, filters.value.errorCount)) continue
+
+      // 标签筛选
+      if (filters.value.tag !== 'all') {
+        const question = wq.question || wq
+        const tags = question.tags_source === 'manual'
+          ? (question.manual_tags || [])
+          : (question.ai_tags || [])
+        if (!tags.includes(filters.value.tag)) continue
+      }
+
+      // 搜索筛选（使用防抖后的搜索词）
+      if (debouncedSearchQuery.value) {
+        const q = wq.question || wq
+        const content = q.content || ''
+        if (!content.toLowerCase().includes(debouncedSearchQuery.value.toLowerCase())) continue
+      }
+
+      result.push(wq)
+    }
+
+    return result
   })
 
-  // 筛选错题（应用去重）
+  // 筛选错题（应用去重，带缓存优化）
   const filteredQuestions = computed(() => {
     const base = rawFilteredQuestions.value
-    
-    // 应用去重
-    const questions = dedupEnabled.value 
-      ? deduplicateWrongQuestions(base)
-      : base
-    
+
+    // 应用去重（使用缓存优化）
+    let questions
+    if (dedupEnabled.value) {
+      // 生成缓存键
+      const cacheKey = JSON.stringify(base.map(q => q.id).sort())
+
+      // 如果缓存有效，直接使用
+      if (dedupCacheKey.value === cacheKey && dedupCache.value) {
+        questions = dedupCache.value
+      } else {
+        // 缓存失效，重新去重
+        questions = deduplicateWrongQuestions(base)
+        dedupCache.value = questions
+        dedupCacheKey.value = cacheKey
+      }
+    } else {
+      questions = base
+    }
+
     // 排序
     return questions.sort((a, b) => {
       switch (sortBy.value) {
@@ -188,73 +213,78 @@ export const useWrongBookStore = defineStore('wrongBook', () => {
   // 总页数
   const totalPages = computed(() => Math.ceil(filteredQuestions.value.length / pageSize.value))
 
-  // 统计数据（新增生命周期统计和去重统计）
+  // 统计数据（优化：单次遍历计算所有统计）
   const stats = computed(() => {
-    const studentQuestions = (Array.isArray(wrongQuestions.value) ? wrongQuestions.value : [])
-      .filter(wq => wq.student_id === currentStudent.value?.id)
+    const studentQuestions = []
+    const allQuestions = Array.isArray(wrongQuestions.value) ? wrongQuestions.value : []
+
+    // 单次遍历收集当前学生的错题
+    for (const wq of allQuestions) {
+      if (wq.student_id === currentStudent.value?.id) {
+        studentQuestions.push(wq)
+      }
+    }
+
     const rawTotal = studentQuestions.length
-    
+
     // 去重后的数据
-    const dedupedQuestions = dedupEnabled.value 
+    const dedupedQuestions = dedupEnabled.value
       ? deduplicateWrongQuestions(studentQuestions)
       : studentQuestions
+
     const total = dedupedQuestions.length
-    
-    const mastered = dedupedQuestions.filter(wq => wq.lifecycle_status === LIFECYCLE_STATUS.MASTERED).length
-    const newCount = dedupedQuestions.filter(wq => wq.lifecycle_status === LIFECYCLE_STATUS.NEW).length
-    const review1 = dedupedQuestions.filter(wq => wq.lifecycle_status === LIFECYCLE_STATUS.REVIEW_1).length
-    const review2 = dedupedQuestions.filter(wq => wq.lifecycle_status === LIFECYCLE_STATUS.REVIEW_2).length
-    const pendingMaster = total - mastered  // 当前待掌握错题
-    
+
+    // 单次遍历统计所有指标
+    let mastered = 0
+    let newCount = 0
+    let review1 = 0
+    let review2 = 0
+
+    for (const wq of dedupedQuestions) {
+      if (wq.lifecycle_status === LIFECYCLE_STATUS.MASTERED) mastered++
+      if (wq.lifecycle_status === LIFECYCLE_STATUS.NEW) newCount++
+      if (wq.lifecycle_status === LIFECYCLE_STATUS.REVIEW_1) review1++
+      if (wq.lifecycle_status === LIFECYCLE_STATUS.REVIEW_2) review2++
+    }
+
+    const pendingMaster = total - mastered
+
     // 掌握率
     const masteryRate = total > 0 ? Math.round((mastered / total) * 100) : 0
-    
+
     // 去重统计
-    const duplicateCount = rawTotal - total  // 被合并的重复题数
+    const duplicateCount = rawTotal - total
     const dedupRate = rawTotal > 0 ? Math.round(((rawTotal - total) / rawTotal) * 100) : 0
-    
-    return { 
-      total, 
-      mastered, 
-      new: newCount, 
-      review_1: review1, 
-      review_2: review2, 
-      pendingMaster, 
+
+    return {
+      total,
+      mastered,
+      new: newCount,
+      review_1: review1,
+      review_2: review2,
+      pendingMaster,
       masteryRate,
-      rawTotal,       // 原始错题数（含重复）
-      duplicateCount, // 重复题数
-      dedupRate       // 去重率
+      rawTotal,
+      duplicateCount,
+      dedupRate
     }
   })
 
-  // 加载错题数据
-  const loadWrongQuestions = async (studentId) => {
+  // 加载错题数据（优化：移除自动后台刷新）
+  const loadWrongQuestions = async (studentId, forceRefresh = false) => {
     if (!studentId) return
-    
+
     loading.value = true
     try {
-      const data = await getWrongQuestionsByStudent(studentId, true)
+      // 优化：只在强制刷新时禁用缓存
+      const data = await getWrongQuestionsByStudent(studentId, !forceRefresh)
       const safeData = Array.isArray(data) ? data : []
-      
-      // 合并新数据
-      const existingIds = new Set(wrongQuestions.value.map(wq => wq.id))
-      const newData = safeData.filter(d => !existingIds.has(d.id))
-      if (newData.length > 0) {
-        wrongQuestions.value = [...wrongQuestions.value, ...newData]
-      }
 
-      // 后台静默刷新
-      const backgroundRefresh = async () => {
-        try {
-          const freshData = await getWrongQuestionsByStudent(studentId, false)
-          const safeFreshData = Array.isArray(freshData) ? freshData : []
-          wrongQuestions.value = safeFreshData
-        } catch (error) {
-          console.debug('后台刷新错题失败:', error)
-        }
-      }
-      
-      backgroundRefresh()
+      wrongQuestions.value = safeData
+
+      // 清除去重缓存
+      dedupCache.value = null
+      dedupCacheKey.value = ''
     } catch (error) {
       console.error('加载错题失败:', error)
     } finally {
@@ -357,31 +387,47 @@ export const useWrongBookStore = defineStore('wrongBook', () => {
     }
     sortBy.value = 'time_desc'
     searchQuery.value = ''
+    debouncedSearchQuery.value = ''
     currentPage.value = 1
   }
 
-  // 获取各状态数量
+  // 获取各状态数量（优化：使用单次遍历）
   const getStatusCount = (status) => {
-    const studentQuestions = (Array.isArray(wrongQuestions.value) ? wrongQuestions.value : [])
-      .filter(wq => wq.student_id === currentStudent.value?.id)
-    if (status === 'all') return studentQuestions.length
-    return studentQuestions.filter(wq => wq.status === status).length
+    if (status === 'all') return stats.value.rawTotal
+
+    let count = 0
+    for (const wq of wrongQuestions.value) {
+      if (wq.student_id === currentStudent.value?.id && wq.status === status) {
+        count++
+      }
+    }
+    return count
   }
 
-  // 获取生命周期状态数量（新增）
+  // 获取生命周期状态数量（优化：使用单次遍历）
   const getLifecycleStatusCount = (lifecycleStatus) => {
-    const studentQuestions = (Array.isArray(wrongQuestions.value) ? wrongQuestions.value : [])
-      .filter(wq => wq.student_id === currentStudent.value?.id)
-    if (lifecycleStatus === 'all') return studentQuestions.length
-    return studentQuestions.filter(wq => wq.lifecycle_status === lifecycleStatus).length
+    if (lifecycleStatus === 'all') return stats.value.rawTotal
+
+    let count = 0
+    for (const wq of wrongQuestions.value) {
+      if (wq.student_id === currentStudent.value?.id && wq.lifecycle_status === lifecycleStatus) {
+        count++
+      }
+    }
+    return count
   }
 
-  // 获取各类型数量
+  // 获取各类型数量（优化：使用单次遍历）
   const getQuestionTypeCount = (type) => {
-    const studentQuestions = (Array.isArray(wrongQuestions.value) ? wrongQuestions.value : [])
-      .filter(wq => wq.student_id === currentStudent.value?.id)
-    if (type === 'all') return studentQuestions.length
-    return studentQuestions.filter(wq => getQuestionType(wq) === type).length
+    if (type === 'all') return stats.value.rawTotal
+
+    let count = 0
+    for (const wq of wrongQuestions.value) {
+      if (wq.student_id === currentStudent.value?.id && getQuestionType(wq) === type) {
+        count++
+      }
+    }
+    return count
   }
 
   // 切换去重开关
@@ -396,6 +442,25 @@ export const useWrongBookStore = defineStore('wrongBook', () => {
     currentPage.value = 1
   }
 
+  // 防抖搜索设置函数
+  const debouncedSetSearch = debounce((query) => {
+    debouncedSearchQuery.value = query
+    currentPage.value = 1
+  }, 300)
+
+  // 立即设置搜索词（用于输入框绑定）
+  const setSearchQuery = (query) => {
+    searchQuery.value = query
+    debouncedSetSearch(query)
+  }
+
+  // 强制刷新数据
+  const refreshData = () => {
+    if (currentStudent.value) {
+      loadWrongQuestions(currentStudent.value.id, true)
+    }
+  }
+
   return {
     wrongQuestions,
     selectedQuestions,
@@ -405,6 +470,7 @@ export const useWrongBookStore = defineStore('wrongBook', () => {
     filters,
     sortBy,
     searchQuery,
+    debouncedSearchQuery,
     currentPage,
     pageSize,
     filteredQuestions,
@@ -427,6 +493,8 @@ export const useWrongBookStore = defineStore('wrongBook', () => {
     getQuestionTypeCount,
     getQuestionType,
     toggleDedup,
-    setDedupEnabled
+    setDedupEnabled,
+    setSearchQuery,
+    refreshData
   }
 })

@@ -5,6 +5,43 @@ const api = axios.create({
   timeout: 60000
 })
 
+// 添加请求重试拦截器（Workbench 优化）
+api.interceptors.response.use(
+  response => response,
+  async error => {
+    const config = error.config
+
+    // 如果没有重试配置，初始化
+    if (!config.__retryCount) {
+      config.__retryCount = 0
+    }
+
+    // 最多重试 3 次
+    if (config.__retryCount >= 3) {
+      return Promise.reject(error)
+    }
+
+    // 只对网络错误或 5xx 服务器错误重试
+    const shouldRetry =
+      !error.response ||
+      (error.response.status >= 500 && error.response.status < 600)
+
+    if (!shouldRetry) {
+      return Promise.reject(error)
+    }
+
+    config.__retryCount++
+
+    // 指数退避：1s, 2s, 4s
+    const delay = Math.pow(2, config.__retryCount - 1) * 1000
+    await new Promise(resolve => setTimeout(resolve, delay))
+
+    console.warn(`请求重试 ${config.__retryCount}/3: ${config.url}`)
+
+    return api(config)
+  }
+)
+
 // 获取待校对试卷列表
 export const getPendingPapers = async () => {
   const response = await api.get('/papers/pending')
