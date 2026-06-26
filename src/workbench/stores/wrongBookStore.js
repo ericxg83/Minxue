@@ -1,6 +1,6 @@
 import { defineStore } from 'pinia'
 import { ref, computed } from 'vue'
-import { getWrongQuestionsByStudent, deleteWrongQuestion, updateWrongQuestionStatus } from '../../services/apiService'
+import { getWrongQuestionsByStudent, deleteWrongQuestion, updateWrongQuestionStatus, batchUpsertWrongQuestionStatus } from '../../services/apiService'
 import { useLifecycleStore, LIFECYCLE_STATUS } from './lifecycleStore'
 import { deduplicateWrongQuestions } from '../../utils/questionDedup'
 import { debounce } from '../utils/performance'
@@ -337,6 +337,37 @@ export const useWrongBookStore = defineStore('wrongBook', () => {
     }
   }
 
+  // 批量更新掌握状态（Week 2 优化）
+  const batchUpdateStatus = async (wqIds, status) => {
+    try {
+      if (!currentStudent.value) return false
+
+      // 准备批量更新数据
+      const results = wqIds.map(wqId => ({
+        questionId: wqId,
+        status: status === 'mastered' ? 'mastered' : 'pending',
+        isCorrect: status === 'mastered'
+      }))
+
+      // 调用批量接口
+      await batchUpsertWrongQuestionStatus(currentStudent.value.id, results)
+
+      // 更新本地状态
+      for (const wqId of wqIds) {
+        const wq = wrongQuestions.value.find(w => w.id === wqId)
+        if (wq) {
+          wq.status = status
+        }
+      }
+
+      console.log(`批量更新成功: ${wqIds.length} 条记录`)
+      return true
+    } catch (error) {
+      console.error('批量更新状态失败:', error)
+      return false
+    }
+  }
+
   // 更新生命周期状态
   const updateLifecycleStatus = async (wqId, lifecycleStatus) => {
     const wq = wrongQuestions.value.find(w => w.id === wqId)
@@ -363,6 +394,25 @@ export const useWrongBookStore = defineStore('wrongBook', () => {
       return true
     } catch (error) {
       console.error('删除错题失败:', error)
+      return false
+    }
+  }
+
+  // 批量删除错题（Week 2 优化）
+  const batchDeleteQuestions = async (wqIds) => {
+    try {
+      // 并发删除
+      const deletePromises = wqIds.map(wqId => deleteWrongQuestion(wqId))
+      await Promise.all(deletePromises)
+
+      // 更新本地状态
+      wrongQuestions.value = wrongQuestions.value.filter(wq => !wqIds.includes(wq.id))
+      selectedQuestions.value = selectedQuestions.value.filter(sq => !wqIds.includes(sq.id))
+
+      console.log(`批量删除成功: ${wqIds.length} 条记录`)
+      return true
+    } catch (error) {
+      console.error('批量删除失败:', error)
       return false
     }
   }
@@ -484,8 +534,10 @@ export const useWrongBookStore = defineStore('wrongBook', () => {
     clearSelection,
     selectAll,
     updateStatus,
+    batchUpdateStatus,
     updateLifecycleStatus,
     deleteQuestion,
+    batchDeleteQuestions,
     setFilter,
     resetFilters,
     getStatusCount,
