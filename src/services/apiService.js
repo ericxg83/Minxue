@@ -4,12 +4,12 @@ const API_BASE = import.meta.env.VITE_API_URL || '/api'
 const CACHE_VERSION = '20260610-v2'
 
 const CACHE_MAX_AGE = {
-  STUDENTS: 24 * 60 * 60 * 1000,
-  TASKS: 5 * 60 * 1000,
-  EXAMS: 10 * 60 * 1000,
-  QUESTIONS: 5 * 60 * 1000,
-  WRONG: 5 * 60 * 1000,
-  GENERATED: 10 * 60 * 1000
+  STUDENTS: 60 * 60 * 1000,      // 1小时（Phase 2优化：从24小时调整，学生信息变化频率低）
+  TASKS: 5 * 60 * 1000,          // 5分钟
+  EXAMS: 10 * 60 * 1000,         // 10分钟
+  QUESTIONS: 30 * 60 * 1000,     // 30分钟（Phase 2优化：从5分钟延长，题目内容稳定）
+  WRONG: 5 * 60 * 1000,          // 5分钟
+  GENERATED: 10 * 60 * 1000      // 10分钟
 }
 
 const readCache = (key, maxAge) => {
