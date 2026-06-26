@@ -102,17 +102,19 @@
               </el-button-group>
             </div>
           </div>
-          <div 
+          <div
             class="image-viewer"
             @mousedown="aiReviewStore.startDrag"
             @mousemove="aiReviewStore.onDrag"
             @mouseup="aiReviewStore.endDrag"
             @mouseleave="aiReviewStore.endDrag"
           >
-            <img 
+            <LazyImage
               v-if="aiReviewStore.currentTask?.image_url"
-              :src="aiReviewStore.currentTask.image_url" 
+              :src="aiReviewStore.currentTask.image_url"
               alt="试卷图片"
+              width="100%"
+              height="100%"
               :style="{
                 transform: `scale(${aiReviewStore.imageScale}) translate(${aiReviewStore.imagePosition.x}px, ${aiReviewStore.imagePosition.y}px)`,
                 cursor: aiReviewStore.isDragging ? 'grabbing' : 'grab'
@@ -228,6 +230,7 @@ import { ref, computed, onMounted, onUnmounted } from 'vue'
 import { useRouter } from 'vue-router'
 import { useAIReviewStore, AI_REVIEW_STATUS } from '../stores/aiReviewStore'
 import { ArrowLeft } from '@element-plus/icons-vue'
+import LazyImage from '../components/shared/LazyImage.vue'
 
 const router = useRouter()
 const aiReviewStore = useAIReviewStore()

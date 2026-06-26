@@ -82,6 +82,7 @@
 import { computed } from 'vue'
 import { WarningFilled } from '@element-plus/icons-vue'
 import dayjs from 'dayjs'
+import LazyImage from '../shared/LazyImage.vue'
 
 const props = defineProps({
   wrongQuestion: {

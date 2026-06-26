@@ -70,37 +70,99 @@
         </div>
         <div class="question-panel__count">共 {{ filteredQuestions.length }} 道错题</div>
         <div class="question-panel__list">
-          <div
-            v-for="wq in paginatedQuestions"
-            :key="wq.id"
-            class="question-card"
-            :class="{ 'question-card--active': selectedDetailQuestion?.id === wq.id }"
-            @click="handleSelectQuestion(wq)"
+          <!-- Skeleton loading -->
+          <template v-if="wrongBookStore.loading">
+            <QuestionCardSkeleton v-for="i in 5" :key="i" style="margin-bottom: 8px;" />
+          </template>
+          <!-- Virtual list for questions -->
+          <VirtualList
+            v-else-if="paginatedQuestions.length > 20"
+            :items="paginatedQuestions"
+            :item-height="120"
+            item-key="id"
+            :buffer-size="3"
           >
-            <div class="question-card__body">
-              <div class="question-card__subject">
-                <span class="subject-tag" :style="{ background: getSubjectColor(wq.subject) }">{{ wq.subject }}</span>
-              </div>
-              <div class="question-card__title">{{ getQuestionTitle(wq) }}</div>
-              <div class="question-card__meta">
-                <span class="question-card__grade">{{ getQuestionGrade(wq) }}</span>
-                <span class="question-card__tag">{{ getQuestionTag(wq) }}</span>
-              </div>
-              <div class="question-card__bottom">
-                <div class="question-card__error">
-                  <el-icon class="error-icon"><WarningFilled /></el-icon>
-                  被错 {{ getErrorCount(wq) }} 次
+            <template #default="{ item: wq }">
+              <div
+                class="question-card"
+                :class="{ 'question-card--active': selectedDetailQuestion?.id === wq.id }"
+                @click="handleSelectQuestion(wq)"
+                style="margin-bottom: 8px;"
+              >
+                <div class="question-card__body">
+                  <div class="question-card__subject">
+                    <span class="subject-tag" :style="{ background: getSubjectColor(wq.subject) }">{{ wq.subject }}</span>
+                  </div>
+                  <div class="question-card__title">{{ getQuestionTitle(wq) }}</div>
+                  <div class="question-card__meta">
+                    <span class="question-card__grade">{{ getQuestionGrade(wq) }}</span>
+                    <span class="question-card__tag">{{ getQuestionTag(wq) }}</span>
+                  </div>
+                  <div class="question-card__bottom">
+                    <div class="question-card__error">
+                      <el-icon class="error-icon"><WarningFilled /></el-icon>
+                      被错 {{ getErrorCount(wq) }} 次
+                    </div>
+                    <div class="question-card__time">{{ getQuestionTime(wq) }}</div>
+                  </div>
                 </div>
-                <div class="question-card__time">{{ getQuestionTime(wq) }}</div>
+                <div class="question-card__thumb">
+                  <LazyImage
+                    v-if="getQuestionThumb(wq)"
+                    :src="getQuestionThumb(wq)"
+                    alt="题目缩略图"
+                    width="60"
+                    height="60"
+                    root-margin="100px"
+                  />
+                  <div v-else class="thumb-placeholder">
+                    <el-icon><Picture /></el-icon>
+                  </div>
+                </div>
+              </div>
+            </template>
+          </VirtualList>
+          <!-- Regular list for small datasets -->
+          <template v-else>
+            <div
+              v-for="wq in paginatedQuestions"
+              :key="wq.id"
+              class="question-card"
+              :class="{ 'question-card--active': selectedDetailQuestion?.id === wq.id }"
+              @click="handleSelectQuestion(wq)"
+            >
+              <div class="question-card__body">
+                <div class="question-card__subject">
+                  <span class="subject-tag" :style="{ background: getSubjectColor(wq.subject) }">{{ wq.subject }}</span>
+                </div>
+                <div class="question-card__title">{{ getQuestionTitle(wq) }}</div>
+                <div class="question-card__meta">
+                  <span class="question-card__grade">{{ getQuestionGrade(wq) }}</span>
+                  <span class="question-card__tag">{{ getQuestionTag(wq) }}</span>
+                </div>
+                <div class="question-card__bottom">
+                  <div class="question-card__error">
+                    <el-icon class="error-icon"><WarningFilled /></el-icon>
+                    被错 {{ getErrorCount(wq) }} 次
+                  </div>
+                  <div class="question-card__time">{{ getQuestionTime(wq) }}</div>
+                </div>
+              </div>
+              <div class="question-card__thumb">
+                <LazyImage
+                  v-if="getQuestionThumb(wq)"
+                  :src="getQuestionThumb(wq)"
+                  alt="题目缩略图"
+                  width="60"
+                  height="60"
+                  root-margin="100px"
+                />
+                <div v-else class="thumb-placeholder">
+                  <el-icon><Picture /></el-icon>
+                </div>
               </div>
             </div>
-            <div class="question-card__thumb">
-              <img v-if="getQuestionThumb(wq)" :src="getQuestionThumb(wq)" alt="题目" />
-              <div v-else class="thumb-placeholder">
-                <el-icon><Picture /></el-icon>
-              </div>
-            </div>
-          </div>
+          </template>
         </div>
         <div class="question-panel__pagination" v-if="totalPages > 1">
           <el-pagination
@@ -167,7 +229,13 @@
                 </div>
                 <div class="unified-section unified-image-section" v-if="getQuestionThumb(selectedDetailQuestion)">
                   <div class="unified-label">配图</div>
-                  <img :src="getQuestionThumb(selectedDetailQuestion)" class="unified-image" />
+                  <LazyImage
+                    :src="getQuestionThumb(selectedDetailQuestion)"
+                    alt="题目配图"
+                    width="100%"
+                    height="200px"
+                    class="unified-image"
+                  />
                 </div>
                 <div class="unified-section" v-if="getQuestionOptions(selectedDetailQuestion)?.length && getQuestion(selectedDetailQuestion).question_type === 'choice'">
                   <div class="unified-label">选项</div>
@@ -319,6 +387,9 @@ import { getStudents, updateQuestion, rejudgeQuestion } from '../../services/api
 import dayjs from 'dayjs'
 import MathRender from "../components/MathRender.vue"
 import QuestionEditForm from "../components/review/QuestionEditForm.vue"
+import LazyImage from "../components/shared/LazyImage.vue"
+import QuestionCardSkeleton from "../components/shared/QuestionCardSkeleton.vue"
+import VirtualList from "../components/shared/VirtualList.vue"
 
 const router = useRouter()
 const wrongBookStore = useWrongBookStore()

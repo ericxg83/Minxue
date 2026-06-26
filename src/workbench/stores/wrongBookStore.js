@@ -322,25 +322,40 @@ export const useWrongBookStore = defineStore('wrongBook', () => {
     }
   }
 
-  // 更新掌握状态
+  // 更新掌握状态（带乐观更新）
   const updateStatus = async (wqId, status) => {
+    // 乐观更新：立即更新本地状态
+    const wq = wrongQuestions.value.find(w => w.id === wqId)
+    if (!wq) return false
+
+    const previousStatus = wq.status
+    wq.status = status
+
     try {
       await updateWrongQuestionStatus(wqId, status)
-      const wq = wrongQuestions.value.find(w => w.id === wqId)
-      if (wq) {
-        wq.status = status
-      }
       return true
     } catch (error) {
-      console.error('更新状态失败:', error)
+      // 回滚
+      console.error('更新状态失败，回滚:', error)
+      wq.status = previousStatus
       return false
     }
   }
 
-  // 批量更新掌握状态（Week 2 优化）
+  // 批量更新掌握状态（带乐观更新）
   const batchUpdateStatus = async (wqIds, status) => {
     try {
       if (!currentStudent.value) return false
+
+      // 乐观更新：立即更新本地状态
+      const previousStates = new Map()
+      for (const wqId of wqIds) {
+        const wq = wrongQuestions.value.find(w => w.id === wqId)
+        if (wq) {
+          previousStates.set(wqId, wq.status)
+          wq.status = status
+        }
+      }
 
       // 准备批量更新数据
       const results = wqIds.map(wqId => ({
@@ -352,18 +367,17 @@ export const useWrongBookStore = defineStore('wrongBook', () => {
       // 调用批量接口
       await batchUpsertWrongQuestionStatus(currentStudent.value.id, results)
 
-      // 更新本地状态
-      for (const wqId of wqIds) {
-        const wq = wrongQuestions.value.find(w => w.id === wqId)
-        if (wq) {
-          wq.status = status
-        }
-      }
-
       console.log(`批量更新成功: ${wqIds.length} 条记录`)
       return true
     } catch (error) {
-      console.error('批量更新状态失败:', error)
+      console.error('批量更新状态失败，回滚:', error)
+      // 回滚所有更改
+      for (const wqId of wqIds) {
+        const wq = wrongQuestions.value.find(w => w.id === wqId)
+        if (wq && previousStates.has(wqId)) {
+          wq.status = previousStates.get(wqId)
+        }
+      }
       return false
     }
   }
@@ -385,15 +399,23 @@ export const useWrongBookStore = defineStore('wrongBook', () => {
     return false
   }
 
-  // 删除错题
+  // 删除错题（带乐观更新）
   const deleteQuestion = async (wqId) => {
+    // 乐观更新：立即从列表中移除
+    const wqIndex = wrongQuestions.value.findIndex(wq => wq.id === wqId)
+    if (wqIndex === -1) return false
+
+    const deletedWq = wrongQuestions.value[wqIndex]
+    wrongQuestions.value = wrongQuestions.value.filter(wq => wq.id !== wqId)
+    selectedQuestions.value = selectedQuestions.value.filter(sq => sq.id !== wqId)
+
     try {
       await deleteWrongQuestion(wqId)
-      wrongQuestions.value = wrongQuestions.value.filter(wq => wq.id !== wqId)
-      selectedQuestions.value = selectedQuestions.value.filter(sq => sq.id !== wqId)
       return true
     } catch (error) {
-      console.error('删除错题失败:', error)
+      console.error('删除错题失败，回滚:', error)
+      // 回滚：恢复删除的错题
+      wrongQuestions.value.splice(wqIndex, 0, deletedWq)
       return false
     }
   }
