@@ -66,20 +66,23 @@ const checkCacheVersion = () => {
 // 页面加载时自动检查
 checkCacheVersion()
 
-const apiRequest = async (path, options = {}, retries = 3) => {
+const apiRequest = async (path, options = {}, retries = 2) => {
   const url = `${API_BASE}${path}`
-
-  // No timeout - let the browser handle it naturally (Render cold starts can take 50+ seconds)
-  // The App.jsx init logic already handles failures gracefully
 
   for (let attempt = 0; attempt < retries; attempt++) {
     try {
+      // 每个请求最多等 20 秒，防止 Render 冷启动时长时间挂起
+      const controller = new AbortController()
+      const timeoutId = setTimeout(() => controller.abort(), 20000)
+
       const response = await fetch(url, {
         ...options,
         headers: {
           ...options.headers
-        }
+        },
+        signal: controller.signal
       })
+      clearTimeout(timeoutId)
 
       if (!response.ok) {
         const error = await response.json().catch(() => ({ error: response.statusText }))
@@ -95,7 +98,7 @@ const apiRequest = async (path, options = {}, retries = 3) => {
       }
       // 等待后重试（指数退避：1s, 2s）
       await new Promise(resolve => setTimeout(resolve, Math.pow(2, attempt) * 1000))
-      console.warn(`请求失败，重试 ${attempt + 1}/${retries - 1}:`, path)
+      console.warn(`请求失败，重试 ${attempt + 1}/${retries - 1}:`, path, error.message)
     }
   }
 }

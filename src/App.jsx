@@ -122,6 +122,11 @@ function dataURLtoFile(dataUrl, filename) {
 
 const USE_MOCK_DATA = false
 
+// 判断任务是否已完成批改（兼容不同状态值）
+const isTaskCompleted = (task) => {
+  return task.status === 'done' || task.status === 'graded' || task.status === 'completed' || !!task.result?.questionCount
+}
+
 export default function App() {
   // Store hooks
   const { currentPage, setCurrentPage } = useUIStore()
@@ -298,36 +303,27 @@ export default function App() {
           } catch (e) { /* ignore parse error */ }
         }
         
-        // No cache or invalid cache - show UI immediately, fetch in background
+        // No cache — show mock data immediately, fetch real data in background
         setIsInitializing(false)
-        try {
-          const result = await getStudents(false)
+        setStudents(mockStudents)
+        const lastStudentId = localStorage.getItem('lastStudentId')
+        const initialStudent = lastStudentId
+          ? mockStudents.find(s => s.id === lastStudentId)
+          : null
+        setCurrentStudent(initialStudent || mockStudents[0])
+
+        getStudents(false).then(result => {
           const studentList = result.data || []
-          const safeStudentList = Array.isArray(studentList) ? studentList : []
-          if (safeStudentList.length > 0) {
-            setStudents(safeStudentList)
-            // Restore last selected student
-            const lastStudentId = localStorage.getItem('lastStudentId')
-            const lastStudent = lastStudentId
-              ? safeStudentList.find(s => s.id === lastStudentId)
+          if (Array.isArray(studentList) && studentList.length > 0) {
+            setStudents(studentList)
+            const freshLastStudent = lastStudentId
+              ? studentList.find(s => s.id === lastStudentId)
               : null
-            setCurrentStudent(lastStudent || safeStudentList[0])
-          } else {
-            // API返回空列表，使用模拟数据兜底
-            console.warn('API返回空学生列表，使用模拟数据')
-            setStudents(mockStudents)
-            setCurrentStudent(mockStudents[0])
+            setCurrentStudent(freshLastStudent || studentList[0])
           }
-        } catch (error) {
-          console.error('加载学生数据失败，使用模拟数据:', error)
-          // 使用模拟数据兜底，确保UI可正常显示
-          setStudents(mockStudents)
-          const lastStudentId = localStorage.getItem('lastStudentId')
-          const lastStudent = lastStudentId
-            ? mockStudents.find(s => s.id === lastStudentId)
-            : null
-          setCurrentStudent(lastStudent || mockStudents[0])
-        }
+        }).catch(err => {
+          console.error('后台获取学生数据失败，保留模拟数据:', err)
+        })
       } catch (error) {
         console.error('初始化失败:', error)
         setIsInitializing(false)
@@ -363,7 +359,7 @@ export default function App() {
     if (!currentStudent || currentPage !== 'processing') return
 
     const interval = setInterval(() => {
-      const pendingTasks = (Array.isArray(tasks) ? tasks : []).filter(t => t.status !== 'done')
+      const pendingTasks = (Array.isArray(tasks) ? tasks : []).filter(t => !isTaskCompleted(t))
       if (pendingTasks.length > 0) {
         // Only refresh if there are pending/processing tasks
         invalidateCache('tasks', currentStudent.id)
@@ -712,8 +708,8 @@ export default function App() {
   const filteredTasks = (Array.isArray(tasks) ? tasks : []).filter(t => {
     if (t.student_id !== currentStudent?.id) return false
     if (processingFilter === 'all') return true
-    if (processingFilter === 'done') return t.status === 'done'
-    if (processingFilter === 'pending') return t.status === 'processing' || t.status === 'failed' || t.status === 'pending'
+    if (processingFilter === 'done') return isTaskCompleted(t)
+    if (processingFilter === 'pending') return !isTaskCompleted(t)
     return t.status === processingFilter
   }).filter(t => {
     if (!searchKeyword) return true
@@ -1849,7 +1845,7 @@ export default function App() {
       // 重新计算所有已批改任务的统计数据
       if (currentPage === 'processing') {
         const taskList = await getTasksByStudent(currentStudent.id, false)
-        const doneTasks = (Array.isArray(taskList) ? taskList : []).filter(t => t.status === 'done')
+        const doneTasks = (Array.isArray(taskList) ? taskList : []).filter(t => isTaskCompleted(t))
         // 并行刷新所有已批改任务的统计
         await Promise.allSettled(doneTasks.map(t => recalculateTaskStats(t.id)))
         // 重新加载任务数据
@@ -2078,8 +2074,8 @@ export default function App() {
                   <div className="flex gap-1.5 min-w-max">
                     {[
                       { id: 'all', label: '全部', count: filteredTasks.length },
-                      { id: 'done', label: '已批改', count: filteredTasks.filter(t => t.status === 'done').length },
-                      { id: 'pending', label: '未批改', count: filteredTasks.filter(t => t.status === 'processing' || t.status === 'failed' || t.status === 'pending').length }
+                      { id: 'done', label: '已批改', count: filteredTasks.filter(t => isTaskCompleted(t)).length },
+                      { id: 'pending', label: '未批改', count: filteredTasks.filter(t => !isTaskCompleted(t)).length }
                     ].map((filter) => (
                       <button
                         key={filter.id}
@@ -2123,7 +2119,7 @@ export default function App() {
                         layout
                         initial={{ opacity: 0, y: 10 }}
                         animate={{ opacity: 1, y: 0 }}
-                        className={`${task.status === 'done' ? 'cursor-pointer' : ''}`}
+                        className={`${isTaskCompleted(task) ? 'cursor-pointer' : ''}`}
                         style={{
                           padding: '8px 12px',
                           borderRadius: '10px',
@@ -2132,7 +2128,7 @@ export default function App() {
                           transition: 'all 0.15s'
                         }}
                         onClick={() => {
-                          if (task.status === 'done') {
+                          if (isTaskCompleted(task)) {
                             setReviewTask(task)
                             setShowExamReview(true)
                           }
@@ -2178,7 +2174,7 @@ export default function App() {
                                 </>
                               ) : null}
                               {/* Inline status for non-done */}
-                              {task.status !== 'done' && (
+                              {!isTaskCompleted(task) && (
                                 <>
                                   <span style={{ fontSize: '10px', color: '#D1D5DB' }}>·</span>
                                   {(() => {
@@ -2227,7 +2223,7 @@ export default function App() {
                               )}
                             </div>
                             {/* Stats or Error */}
-                            {task.status === 'done' && task.result?.questionCount ? (
+                            {isTaskCompleted(task) && task.result?.questionCount ? (
                               <div className="flex items-center gap-1.5 mt-0.5">
                                 <span style={{
                                   fontSize: '10px',

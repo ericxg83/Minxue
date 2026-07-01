@@ -110,15 +110,6 @@ export const useQuestionStore = defineStore('questionBank', () => {
     return result
   })
 
-      return filters.value.sortOrder === 'desc' ? bVal - aVal : aVal - bVal
-    })
-
-    // 分页
-    pagination.value.total = result.length
-    const start = (pagination.value.page - 1) * pagination.value.pageSize
-    return result.slice(start, start + pagination.value.pageSize)
-  })
-
   // 已选题目数量
   const selectedCount = computed(() => selectedQuestions.value.length)
 

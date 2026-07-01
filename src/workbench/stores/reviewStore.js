@@ -258,8 +258,9 @@ export const useReviewStore = defineStore('review', () => {
 
         switch (result) {
           case 'correct':
-            wq.lifecycle_status = lifecycleStore.getNextStatus(currentStatus)
-            wq.status = wq.lifecycle_status === LIFECYCLE_STATUS.MASTERED ? 'mastered' : 'pending'
+            // [Bugfix] 人工确认做对 → 直接标记为已掌握，不再渐进式推进
+            wq.lifecycle_status = LIFECYCLE_STATUS.MASTERED
+            wq.status = 'mastered'
             wq.practice_count = (wq.practice_count || 0) + 1
             break
           case 'wrong':
