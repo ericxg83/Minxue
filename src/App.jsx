@@ -124,7 +124,7 @@ const USE_MOCK_DATA = false
 
 // 判断任务是否已完成批改（兼容不同状态值）
 const isTaskCompleted = (task) => {
-  return task.status === 'done' || task.status === 'graded' || task.status === 'completed' || !!task.result?.questionCount
+  return task.status === 'done' || task.status === 'graded' || task.status === 'completed' || task.status === 'reviewed' || !!task.result?.questionCount
 }
 
 export default function App() {

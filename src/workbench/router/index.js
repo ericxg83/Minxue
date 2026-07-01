@@ -32,6 +32,12 @@ const routes = [
     meta: { requiresPC: true }
   },
   {
+    path: '/exam-grading',
+    name: 'ExamGrading',
+    component: () => import('../views/ExamGradingWorkbench.vue'),
+    meta: { requiresPC: true }
+  },
+  {
     path: '/ai-review',
     name: 'AIReview',
     component: () => import('../views/AIReviewWorkbench.vue'),

@@ -15,7 +15,7 @@ dotenv.config({ path: resolve(__dirname, '.env') })
 import express from 'express'
 import cors from 'cors'
 import multer from 'multer'
-import { query, TABLES, TASK_STATUS, QUESTION_STATUS, WRONG_STATUS } from './config/neon.js'
+import { query, TABLES, TASK_STATUS, QUESTION_STATUS, WRONG_STATUS, LIFECYCLE_STATUS } from './config/neon.js'
 import { uploadFilesWithRetry } from './services/uploadRetryManager.js'
 import { createUploadReport, logUploadReport } from './services/uploadReportLogger.js'
 import { createJudgement, batchUpdateQuestionTags } from './services/neonService.js'
@@ -941,7 +941,7 @@ app.post('/api/questions/batch', async (req, res) => {
     let queryStr = `SELECT q.*`
     // 当提供 studentId 时，LEFT JOIN wrong_questions 带出 practice_count
     if (studentId) {
-      queryStr += `, wq.practice_count, wq.error_count, wq.status AS wq_status`
+      queryStr += `, wq.practice_count, wq.error_count, wq.lifecycle_status, wq.status AS wq_status`
     }
     queryStr += ` FROM ${TABLES.QUESTIONS} q`
     if (studentId) {
@@ -1530,6 +1530,125 @@ app.put('/api/generated-exams/:id/graded', async (req, res) => {
     res.json({ success: true, message: '错题卷已标记为已批改' })
   } catch (error) {
     console.error('标记错题卷失败:', error)
+    res.status(500).json({ error: error.message })
+  }
+})
+
+// 批改组卷试卷（含掌握度进阶逻辑）
+app.post('/api/generated-exams/:id/grade', async (req, res) => {
+  try {
+    const { id } = req.params
+    const { studentId, results } = req.body
+
+    if (!studentId || !Array.isArray(results) || results.length === 0) {
+      return res.status(400).json({ error: '缺少 studentId 或 results 数组' })
+    }
+
+    const uuidRegex = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
+    if (!uuidRegex.test(id)) {
+      return res.status(400).json({ error: '无效的试卷ID' })
+    }
+
+    // 掌握度进阶：new → review_1 → review_2 → mastered
+    const getNextLifecycle = (current) => {
+      switch (current) {
+        case LIFECYCLE_STATUS.NEW: return LIFECYCLE_STATUS.REVIEW_1
+        case LIFECYCLE_STATUS.REVIEW_1: return LIFECYCLE_STATUS.REVIEW_2
+        case LIFECYCLE_STATUS.REVIEW_2: return LIFECYCLE_STATUS.MASTERED
+        default: return LIFECYCLE_STATUS.REVIEW_1
+      }
+    }
+
+    const lifecycleChanges = []
+    let masteredCount = 0
+    let upgradedCount = 0
+    let resetCount = 0
+
+    for (const result of results) {
+      const { questionId, isCorrect } = result
+      if (!questionId) continue
+
+      // 查找现有 wrong_questions 记录
+      const { rows } = await query(
+        `SELECT id, lifecycle_status, error_count FROM ${TABLES.WRONG_QUESTIONS}
+         WHERE student_id = $1 AND question_id = $2`,
+        [studentId, questionId]
+      )
+
+      const currentLifecycle = rows.length > 0 ? (rows[0].lifecycle_status || 'new') : 'new'
+      let newLifecycle
+      let errorCountDelta = 0
+
+      if (isCorrect) {
+        // 正确：进阶
+        newLifecycle = getNextLifecycle(currentLifecycle)
+        if (newLifecycle === LIFECYCLE_STATUS.MASTERED && currentLifecycle !== LIFECYCLE_STATUS.MASTERED) {
+          masteredCount++
+        } else if (newLifecycle !== currentLifecycle) {
+          upgradedCount++
+        }
+      } else {
+        // 错误：重置到 new，错误计数 +1
+        newLifecycle = LIFECYCLE_STATUS.NEW
+        errorCountDelta = 1
+        if (currentLifecycle !== LIFECYCLE_STATUS.NEW) {
+          resetCount++
+        }
+      }
+
+      const newStatus = newLifecycle === LIFECYCLE_STATUS.MASTERED ? WRONG_STATUS.MASTERED : WRONG_STATUS.PENDING
+
+      if (rows.length === 0) {
+        // 新建记录
+        await query(
+          `INSERT INTO ${TABLES.WRONG_QUESTIONS}
+           (student_id, question_id, status, lifecycle_status, error_count, practice_count, added_at, last_wrong_at, created_at, updated_at)
+           VALUES ($1, $2, $3, $4, $5, 1, NOW(), NOW(), NOW(), NOW())`,
+          [studentId, questionId, newStatus, newLifecycle, isCorrect ? 0 : 1]
+        )
+      } else {
+        // 更新现有记录
+        const wqId = rows[0].id
+        const currentErrorCount = rows[0].error_count || 1
+        await query(
+          `UPDATE ${TABLES.WRONG_QUESTIONS}
+           SET status = $1, lifecycle_status = $2, error_count = $3, practice_count = practice_count + 1, updated_at = NOW()
+           WHERE id = $4`,
+          [newStatus, newLifecycle, currentErrorCount + errorCountDelta, wqId]
+        )
+      }
+
+      // 同步更新 questions 表的 is_correct
+      await query(
+        `UPDATE ${TABLES.QUESTIONS} SET is_correct = $1, updated_at = NOW() WHERE id = $2`,
+        [isCorrect ? true : false, questionId]
+      )
+
+      lifecycleChanges.push({
+        questionId,
+        previous: currentLifecycle,
+        current: newLifecycle
+      })
+    }
+
+    // 标记组卷为已批改
+    await query(
+      `UPDATE ${TABLES.GENERATED_EXAMS} SET status = 'graded', updated_at = NOW() WHERE id = $1`,
+      [id]
+    )
+
+    res.json({
+      success: true,
+      stats: {
+        total: results.length,
+        masteredCount,
+        upgradedCount,
+        resetCount
+      },
+      lifecycleChanges
+    })
+  } catch (error) {
+    console.error('组卷批改失败:', error)
     res.status(500).json({ error: error.message })
   }
 })

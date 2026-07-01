@@ -96,7 +96,7 @@ onUnmounted(() => {
 const navItems = [
   { key: 'proofread',       label: '题目校对', path: '/',                icon: 'DocumentChecked' },
 { key: 'wrong-book',      label: '错题本',   path: '/wrongbook',        icon: 'Collection' },
-  { key: 'exam-history',    label: '组卷历史', path: '/exam-history',     icon: 'Clock',       disabled: true },
+  { key: 'exam-history',    label: '组卷历史', path: '/exam-history',     icon: 'Clock' },
   { key: 'exam-import',     label: '试卷入库', path: '/paper',            icon: 'UploadFilled',disabled: true },
 ]
 

@@ -37,7 +37,7 @@ const writeCache = (key, data) => {
   }
 }
 
-const clearCache = (key) => {
+export const clearCache = (key) => {
   try {
     localStorage.removeItem(key)
     localStorage.removeItem(key + '_ts')
@@ -500,6 +500,16 @@ export const createGeneratedExam = async (examData) => {
 export const markGeneratedExamGraded = async (examId) => {
   const data = await apiRequest(`/generated-exams/${examId}/graded`, {
     method: 'PUT'
+  })
+  return data
+}
+
+// 批改组卷试卷（含掌握度进阶逻辑）
+export const gradeGeneratedExam = async (examId, studentId, results) => {
+  const data = await apiRequest(`/generated-exams/${examId}/grade`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ studentId, results })
   })
   return data
 }

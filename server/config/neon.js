@@ -87,6 +87,13 @@ export const WRONG_STATUS = {
   MASTERED: 'mastered'
 }
 
+export const LIFECYCLE_STATUS = {
+  NEW: 'new',
+  REVIEW_1: 'review_1',
+  REVIEW_2: 'review_2',
+  MASTERED: 'mastered'
+}
+
 export const getQuestionsByTask = async (taskId) => {
   const { rows } = await query(`SELECT * FROM ${TABLES.QUESTIONS} WHERE task_id = $1 ORDER BY created_at`, [taskId])
   return rows

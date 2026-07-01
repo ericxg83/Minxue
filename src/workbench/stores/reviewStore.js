@@ -1,7 +1,7 @@
 import { defineStore } from 'pinia'
 import { ref, computed } from 'vue'
 import dayjs from 'dayjs'
-import { getStudents, getWrongQuestionsByStudent, getQuestionsByTask, getTasksByStudent, updateWrongQuestionStatus, updateTaskStatus, getLatestJudgements, clearStudentCaches, updateQuestionReviewStatus } from '../../services/apiService'
+import { getStudents, getWrongQuestionsByStudent, getQuestionsByTask, getTasksByStudent, updateWrongQuestionStatus, updateTaskStatus, recalculateTaskStats, getLatestJudgements, clearStudentCaches, updateQuestionReviewStatus } from '../../services/apiService'
 import { useLifecycleStore, LIFECYCLE_STATUS } from './lifecycleStore'
 import { checkQuestionCompleteness } from '../../utils/questionCompleteness.js'
 
@@ -296,7 +296,11 @@ export const useReviewStore = defineStore('review', () => {
   // 自动完成复核并跳转到下一份试卷
   const autoCompleteAndAdvance = async () => {
     if (!currentTask.value) return
-    // 先保存复核完成状态
+    // 先刷新统计数据
+    await recalculateTaskStats(currentTask.value.id).catch(e =>
+      console.error('刷新统计数据失败:', e.message)
+    )
+    // 再保存复核完成状态
     await updateTaskStatus(currentTask.value.id, 'reviewed').catch(e =>
       console.error('自动保存复核状态失败:', e.message)
     )
@@ -422,6 +426,9 @@ export const useReviewStore = defineStore('review', () => {
   // 完成任务复核：将试卷标记为 reviewed，清理缓存
   const completeTaskReview = async () => {
     if (!currentTask.value) return
+    await recalculateTaskStats(currentTask.value.id).catch(e =>
+      console.error('刷新统计数据失败:', e.message)
+    )
     await updateTaskStatus(currentTask.value.id, 'reviewed')
     currentTask.value.status = 'reviewed'
     if (currentStudent.value?.id) {
