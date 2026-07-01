@@ -82,14 +82,6 @@ const ERROR_COUNT_OPTIONS = [
   { key: '5+', label: '5次以上' }
 ]
 
-// 掌握情况筛选选项
-const MASTERY_OPTIONS = [
-  { key: 'all', label: '全部' },
-  { key: 'new', label: '不懂' },
-  { key: 'review', label: '略懂' },
-  { key: 'mastered', label: '完全懂' }
-]
-
 // 分类筛选选项（用于高级筛选栏的下拉）
 const CATEGORY_OPTIONS = [
   { key: 'all', label: '全部分类' },
@@ -107,12 +99,11 @@ export default function WrongBook({ onScanQR }) {
     clearSelection: storeClearSelection
   } = useWrongQuestionStore()
   
-  const [activeStatus, setActiveStatus] = useState('pending')
+  const [activeStatus, setActiveStatus] = useState('all')
   const [activeQuestionType, setActiveQuestionType] = useState('all')
   const [activeSubject, setActiveSubject] = useState('all')
   const [activeTime, setActiveTime] = useState('all')
   const [activeErrorCount, setActiveErrorCount] = useState('all')
-  const [activeMastery, setActiveMastery] = useState('all')
   const [activeTag, setActiveTag] = useState('all')
   const [activeCategory, setActiveCategory] = useState('all') // 分类筛选：错题/未作答/全部
   const [sortBy, setSortBy] = useState('time_desc')
@@ -259,14 +250,6 @@ export default function WrongBook({ onScanQR }) {
     // 错误次数筛选
     if (activeErrorCount !== 'all' && !matchErrorCount(wq.error_count || 1, activeErrorCount)) return false
 
-    // 掌握情况筛选（按 lifecycle_status）
-    if (activeMastery !== 'all') {
-      const ls = wq.lifecycle_status || ''
-      if (activeMastery === 'new' && ls !== 'new') return false
-      if (activeMastery === 'review' && ls !== 'review_1' && ls !== 'review_2') return false
-      if (activeMastery === 'mastered' && ls !== 'mastered') return false
-    }
-
     if (activeTag !== 'all') {
       const question = wq.question || wq
       const tags = question.tags_source === 'manual'
@@ -325,7 +308,7 @@ export default function WrongBook({ onScanQR }) {
   }
 
   // 是否有激活的筛选条件
-  const hasActiveFilters = activeCategory !== 'all' || activeSubject !== 'all' || activeTime !== 'all' || activeErrorCount !== 'all' || activeTag !== 'all' || activeMastery !== 'all'
+  const hasActiveFilters = activeCategory !== 'all' || activeSubject !== 'all' || activeTime !== 'all' || activeErrorCount !== 'all' || activeTag !== 'all'
 
   const resetFilters = () => {
     setActiveQuestionType('all')
@@ -334,7 +317,6 @@ export default function WrongBook({ onScanQR }) {
     setActiveErrorCount('all')
     setActiveTag('all')
     setActiveCategory('all')
-    setActiveMastery('all')
     setSortBy('time_desc')
   }
 
@@ -990,27 +972,6 @@ const renderMasteredTag = (wq) => {
               </span>
             )}
           </div>
-
-          {/* 掌握情况筛选 */}
-          <div
-            onClick={() => { setActiveFilterType('mastery'); setShowFilterPanel(true) }}
-            style={{
-              display: 'flex',
-              alignItems: 'center',
-              gap: '4px',
-              cursor: 'pointer',
-              color: activeMastery !== 'all' ? APPLE_COLORS.primary : APPLE_COLORS.textSecondary,
-              fontWeight: activeMastery !== 'all' ? 500 : 400
-            }}
-          >
-            <span style={{ fontSize: '14px' }}>掌握</span>
-            <DownOutline style={{ fontSize: '12px', pointerEvents: 'none' }} />
-            {activeMastery !== 'all' && (
-              <span style={{ fontSize: '12px', color: APPLE_COLORS.primary }}>
-                {MASTERY_OPTIONS.find(o => o.key === activeMastery)?.label}
-              </span>
-            )}
-          </div>
         </div>
         <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
           {/* 排序按钮 */}
@@ -1339,36 +1300,6 @@ const renderMasteredTag = (wq) => {
                           background: activeCategory === option.key ? tabColor : APPLE_COLORS.background,
                           color: activeCategory === option.key ? '#fff' : APPLE_COLORS.textSecondary,
                           fontWeight: activeCategory === option.key ? 500 : 400,
-                          transition: 'all 0.2s'
-                        }}
-                      >
-                        {option.label}
-                      </div>
-                    )
-                  })}
-                </div>
-              </div>
-            ) : null}
-
-            {/* 掌握情况筛选 */}
-            {(activeFilterType === '' || activeFilterType === 'mastery') ? (
-              <div style={{ marginBottom: '24px' }}>
-                <div style={{ fontSize: '15px', color: APPLE_COLORS.text, marginBottom: '12px', fontWeight: 500 }}>掌握情况</div>
-                <div style={{ display: 'flex', flexWrap: 'wrap', gap: '8px' }}>
-                  {MASTERY_OPTIONS.map(option => {
-                    const tabColor = option.key === 'mastered' ? APPLE_COLORS.success : option.key === 'review' ? APPLE_COLORS.warning : option.key === 'new' ? APPLE_COLORS.danger : APPLE_COLORS.primary
-                    return (
-                      <div
-                        key={option.key}
-                        onClick={() => setActiveMastery(option.key)}
-                        style={{
-                          padding: '10px 18px',
-                          borderRadius: '20px',
-                          fontSize: '14px',
-                          cursor: 'pointer',
-                          background: activeMastery === option.key ? tabColor : APPLE_COLORS.background,
-                          color: activeMastery === option.key ? '#fff' : APPLE_COLORS.textSecondary,
-                          fontWeight: activeMastery === option.key ? 500 : 400,
                           transition: 'all 0.2s'
                         }}
                       >
