@@ -141,7 +141,7 @@ export default function App() {
   const [previewImage, setPreviewImage] = useState(null)
 
   // Bank Page State
-  const [bankFilter, setBankFilter] = useState('pending')
+  const [bankFilter, setBankFilter] = useState('all')
   const [selectedSubject, setSelectedSubject] = useState('all')
   const [selectedTimeRange, setSelectedTimeRange] = useState('all')
   const [selectedErrorCount, setSelectedErrorCount] = useState('all')
@@ -767,7 +767,12 @@ export default function App() {
 
   const filteredWrongQuestions = (Array.isArray(wrongQuestions) ? wrongQuestions : []).filter(wq => {
     if (wq.student_id !== currentStudent?.id) return false
-    if (bankFilter !== 'all' && wq.status !== bankFilter) return false
+    if (bankFilter !== 'all') {
+      const ls = wq.lifecycle_status || 'new'
+      if (bankFilter === 'new' && ls !== 'new') return false
+      if (bankFilter === 'review' && ls !== 'review_1' && ls !== 'review_2') return false
+      if (bankFilter === 'mastered' && ls !== 'mastered') return false
+    }
     if (selectedSubject !== 'all' && wq.subject !== selectedSubject) return false
     if (selectedTimeRange !== 'all' && !isWithinTimeRange(wq.added_at || wq.created_at, selectedTimeRange)) return false
     if (selectedErrorCount !== 'all' && !matchErrorCount(wq.error_count || 1, selectedErrorCount)) return false
@@ -1537,27 +1542,31 @@ export default function App() {
 
   // Toggle mastery
   const handleToggleMastery = async (wq) => {
-    const currentStatus = wq.status
-    let nextStatus
-    switch (currentStatus) {
-      case 'pending':
-        nextStatus = 'partial'
+    const currentLs = wq.lifecycle_status || 'new'
+    let nextLs
+    switch (currentLs) {
+      case 'new':
+        nextLs = 'review_1'
         break
-      case 'partial':
-        nextStatus = 'mastered'
+      case 'review_1':
+        nextLs = 'review_2'
+        break
+      case 'review_2':
+        nextLs = 'mastered'
         break
       case 'mastered':
-        nextStatus = 'pending'
+        nextLs = 'new'
         break
       default:
-        nextStatus = 'pending'
+        nextLs = 'new'
     }
-    
+    const nextStatus = nextLs === 'mastered' ? 'mastered' : 'pending'
+
     try {
-      await updateWrongQuestionStatus(wq.id, nextStatus)
+      await updateWrongQuestionStatus(wq.id, nextStatus, { lifecycle_status: nextLs })
       loadWrongBookData()
-      const statusText = { pending: '待复习', partial: '有点懂', mastered: '完全懂' }
-      Toast.show({ message: `已标记为${statusText[nextStatus]}`, type: 'success' })
+      const statusText = { new: '不懂', review_1: '略懂', review_2: '略懂', mastered: '完全懂' }
+      Toast.show({ message: `已标记为${statusText[nextLs]}`, type: 'success' })
     } catch (error) {
       Toast.show({ message: '操作失败', type: 'error' })
     }
@@ -2014,7 +2023,7 @@ export default function App() {
                   {status === 'all' ? '全部' : status === 'done' ? '已批改' : '未批改'}
                 </button>
               ))}
-              {currentPage === 'wrongbook' && ['all', 'pending', 'partial', 'mastered'].map(status => (
+              {currentPage === 'wrongbook' && ['all', 'new', 'review', 'mastered'].map(status => (
                 <button
                   key={status}
                   onClick={() => setBankFilter(status)}
@@ -2024,7 +2033,7 @@ export default function App() {
                     color: bankFilter === status ? '#fff' : '#6B7280'
                   }}
                 >
-                  {status === 'all' ? '全部' : status === 'pending' ? '待复习' : status === 'partial' ? '有点懂' : '完全懂'}
+                  {status === 'all' ? '全部' : status === 'new' ? '不懂' : status === 'review' ? '略懂' : '完全懂'}
                 </button>
               ))}
               {currentPage === 'exam' && (
@@ -2279,9 +2288,9 @@ export default function App() {
                   <div className="flex gap-1.5 min-w-max">
                     {[
                       { id: 'all', label: '全部', count: (Array.isArray(wrongQuestions) ? wrongQuestions : []).filter(wq => wq.student_id === currentStudent?.id).length },
-                      { id: 'pending', label: '待复习', count: (Array.isArray(wrongQuestions) ? wrongQuestions : []).filter(wq => wq.student_id === currentStudent?.id && wq.status === 'pending').length },
-                      { id: 'partial', label: '有点懂', count: (Array.isArray(wrongQuestions) ? wrongQuestions : []).filter(wq => wq.student_id === currentStudent?.id && wq.status === 'partial').length },
-                      { id: 'mastered', label: '完全懂', count: (Array.isArray(wrongQuestions) ? wrongQuestions : []).filter(wq => wq.student_id === currentStudent?.id && wq.status === 'mastered').length }
+                      { id: 'new', label: '不懂', count: (Array.isArray(wrongQuestions) ? wrongQuestions : []).filter(wq => wq.student_id === currentStudent?.id && (wq.lifecycle_status || 'new') === 'new').length },
+                      { id: 'review', label: '略懂', count: (Array.isArray(wrongQuestions) ? wrongQuestions : []).filter(wq => wq.student_id === currentStudent?.id && (wq.lifecycle_status === 'review_1' || wq.lifecycle_status === 'review_2')).length },
+                      { id: 'mastered', label: '完全懂', count: (Array.isArray(wrongQuestions) ? wrongQuestions : []).filter(wq => wq.student_id === currentStudent?.id && wq.lifecycle_status === 'mastered').length }
                     ].map((filter) => (
                       <button
                         key={filter.id}
@@ -2339,12 +2348,12 @@ export default function App() {
                         const question = wq.question || wq
                         const isSelected = selectedQuestions.find(q => q.id === wq.id)
 
-                        const statusCfg = {
-                          pending: { bg: '#FFFBEB', color: '#F59E0B', text: '待复习' },
-                          partial: { bg: '#EFF6FF', color: '#2563EB', text: '有点懂' },
-                          mastered: { bg: '#F0FDF4', color: '#16A34A', text: '完全懂' }
-                        }
-                        const st = statusCfg[wq.status] || statusCfg.pending
+                        const statusCfg = (() => {
+                          const ls = wq.lifecycle_status || 'new'
+                          if (ls === 'mastered' || wq.status === 'mastered') return { bg: '#F0FDF4', color: '#16A34A', text: '完全懂' }
+                          if (ls === 'review_2' || ls === 'review_1') return { bg: '#EFF6FF', color: '#2563EB', text: '略懂' }
+                          return { bg: '#FFFBEB', color: '#F59E0B', text: '不懂' }
+                        })()
 
                         const tags = question.tags_source === 'manual'
                           ? (question.manual_tags || [])
