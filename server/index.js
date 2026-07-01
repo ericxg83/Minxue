@@ -8,6 +8,7 @@ import { migrateReviewStatus } from './migrations/008_add_review_status.js'
 import { migrateQuestionCacheId } from './migrations/009_add_question_cache_id.js'
 import { migrateJudgements } from './migrations/010_add_judgements_table.js'
 import { migrateIsComplete } from './migrations/011_add_is_complete.js'
+import { migratePracticeCount } from './migrations/012_add_practice_count.js'
 
 const __dirname = dirname(fileURLToPath(import.meta.url))
 dotenv.config({ path: resolve(__dirname, '.env') })
@@ -939,9 +940,9 @@ app.post('/api/questions/batch', async (req, res) => {
 
     const placeholders = ids.map((_, i) => `$${i + 1}`).join(',')
     let queryStr = `SELECT q.*`
-    // 当提供 studentId 时，LEFT JOIN wrong_questions 带出 practice_count
+    // 当提供 studentId 时，LEFT JOIN wrong_questions 带出掌握度信息
     if (studentId) {
-      queryStr += `, wq.practice_count, wq.error_count, wq.lifecycle_status, wq.status AS wq_status`
+      queryStr += `, wq.error_count, wq.lifecycle_status, wq.status AS wq_status`
     }
     queryStr += ` FROM ${TABLES.QUESTIONS} q`
     if (studentId) {
@@ -1702,6 +1703,7 @@ if (process.argv[1] === __filename || process.argv[1]?.endsWith('server/index.js
       await migrateQuestionCacheId()
       await migrateJudgements()
       await migrateIsComplete()
+      await migratePracticeCount()
     } catch (err) {
       console.error('数据库迁移失败:', err.message)
     }
