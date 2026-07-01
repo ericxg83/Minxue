@@ -2436,8 +2436,8 @@ export default function App() {
                                       fontSize: '11px',
                                       padding: '1px 8px',
                                       borderRadius: '10px',
-                                      background: st.bg,
-                                      color: st.color,
+                                      background: statusCfg.bg,
+                                      color: statusCfg.color,
                                       cursor: 'pointer',
                                       whiteSpace: 'nowrap',
                                       fontWeight: 500,
@@ -2448,10 +2448,10 @@ export default function App() {
                                       width: '5px',
                                       height: '5px',
                                       borderRadius: '50%',
-                                      background: st.color,
+                                      background: statusCfg.color,
                                       display: 'inline-block'
                                     }} />
-                                    {st.text}
+                                    {statusCfg.text}
                                   </span>
                                 </div>
                               </div>
