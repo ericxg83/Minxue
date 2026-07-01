@@ -28,11 +28,12 @@ jobs:
 
       - name: Install Android SDK components
         run: |
-          yes | $ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager --licenses 2>/dev/null
+          yes | $ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager --licenses 2>/dev/null || true
           $ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager --install "platforms;android-36" 2>&1 || echo "platforms install skipped"
+          $ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager --install "build-tools;36.0.0" 2>&1 || echo "build-tools install skipped"
           echo "--- SDK contents ---"
-          ls -la $ANDROID_HOME/platforms/ 2>/dev/null
-          ls -la $ANDROID_HOME/build-tools/ 2>/dev/null
+          ls -la $ANDROID_HOME/platforms/ 2>/dev/null || true
+          ls -la $ANDROID_HOME/build-tools/ 2>/dev/null || true
 
       - name: Install dependencies
         run: npm ci
@@ -40,11 +41,8 @@ jobs:
       - name: Build web app
         run: npm run build
 
-      - name: Copy web assets to Android
-        run: |
-          mkdir -p android/app/src/main/assets/public
-          cp -r dist/* android/app/src/main/assets/public/
-          cp capacitor.config.json android/app/src/main/assets/capacitor.config.json
+      - name: Sync Capacitor native plugins
+        run: npx cap sync android
 
       - name: Build APK
         working-directory: android
