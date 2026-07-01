@@ -82,6 +82,14 @@ const ERROR_COUNT_OPTIONS = [
   { key: '5+', label: '5次以上' }
 ]
 
+// 掌握情况筛选选项
+const MASTERY_OPTIONS = [
+  { key: 'all', label: '全部' },
+  { key: 'new', label: '未掌握' },
+  { key: 'review', label: '有点掌握' },
+  { key: 'mastered', label: '完全掌握' }
+]
+
 // 分类筛选选项（用于高级筛选栏的下拉）
 const CATEGORY_OPTIONS = [
   { key: 'all', label: '全部分类' },
@@ -104,6 +112,7 @@ export default function WrongBook({ onScanQR }) {
   const [activeSubject, setActiveSubject] = useState('all')
   const [activeTime, setActiveTime] = useState('all')
   const [activeErrorCount, setActiveErrorCount] = useState('all')
+  const [activeMastery, setActiveMastery] = useState('all')
   const [activeTag, setActiveTag] = useState('all')
   const [activeCategory, setActiveCategory] = useState('all') // 分类筛选：错题/未作答/全部
   const [sortBy, setSortBy] = useState('time_desc')
@@ -245,6 +254,14 @@ export default function WrongBook({ onScanQR }) {
     // 错误次数筛选
     if (activeErrorCount !== 'all' && !matchErrorCount(wq.error_count || 1, activeErrorCount)) return false
 
+    // 掌握情况筛选（按 lifecycle_status）
+    if (activeMastery !== 'all') {
+      const ls = wq.lifecycle_status || ''
+      if (activeMastery === 'new' && ls !== 'new') return false
+      if (activeMastery === 'review' && ls !== 'review_1' && ls !== 'review_2') return false
+      if (activeMastery === 'mastered' && ls !== 'mastered') return false
+    }
+
     if (activeTag !== 'all') {
       const question = wq.question || wq
       const tags = question.tags_source === 'manual'
@@ -300,7 +317,7 @@ export default function WrongBook({ onScanQR }) {
   }
 
   // 是否有激活的筛选条件
-  const hasActiveFilters = activeCategory !== 'all' || activeSubject !== 'all' || activeTime !== 'all' || activeErrorCount !== 'all' || activeTag !== 'all'
+  const hasActiveFilters = activeCategory !== 'all' || activeSubject !== 'all' || activeTime !== 'all' || activeErrorCount !== 'all' || activeTag !== 'all' || activeMastery !== 'all'
 
   const resetFilters = () => {
     setActiveQuestionType('all')
@@ -309,6 +326,7 @@ export default function WrongBook({ onScanQR }) {
     setActiveErrorCount('all')
     setActiveTag('all')
     setActiveCategory('all')
+    setActiveMastery('all')
     setSortBy('time_desc')
   }
 
@@ -579,49 +597,49 @@ export default function WrongBook({ onScanQR }) {
     }
   }
 
-  // 渲染掌握状态标签 - 苹果风格
-  const renderMasteredTag = (status) => {
-    if (status === 'mastered') {
-      return (
-        <span style={{
-          color: APPLE_COLORS.success,
-          fontSize: '12px',
-          padding: '4px 10px',
-          borderRadius: '12px',
-          background: '#E8F5E9',
-          fontWeight: 500
-        }}>
-          完全掌握
-        </span>
-      )
-    }
-    if (status === 'partial') {
-      return (
-        <span style={{
-          color: APPLE_COLORS.warning,
-          fontSize: '12px',
-          padding: '4px 10px',
-          borderRadius: '12px',
-          background: '#FFF8E1',
-          fontWeight: 500
-        }}>
-          有点掌握
-        </span>
-      )
-    }
-    return (
-      <span style={{
-        color: APPLE_COLORS.danger,
-        fontSize: '12px',
-        padding: '4px 10px',
-        borderRadius: '12px',
-        background: '#FFEBEE',
-        fontWeight: 500
-      }}>
-        未掌握
-      </span>
-    )
+// 渲染掌握状态标签 - 基于 lifecycle_status
+const renderMasteredTag = (wq) => {
+  // 优先使用 lifecycle_status（新系统），回退到 status（旧系统）
+  const lifecycle = wq.lifecycle_status || ''
+  const status = wq.status || ''
+
+  let label, color, bg
+  if (lifecycle === 'mastered' || status === 'mastered') {
+    label = '完全掌握'
+    color = APPLE_COLORS.success
+    bg = '#E8F5E9'
+  } else if (lifecycle === 'review_2') {
+    label = '基本掌握'
+    color = '#52C41A'
+    bg = '#F0FAEB'
+  } else if (lifecycle === 'review_1') {
+    label = '有点掌握'
+    color = APPLE_COLORS.warning
+    bg = '#FFF8E1'
+  } else if (lifecycle === 'new' || status === 'pending') {
+    label = '未掌握'
+    color = APPLE_COLORS.danger
+    bg = '#FFEBEE'
+  } else {
+    label = '未掌握'
+    color = APPLE_COLORS.danger
+    bg = '#FFEBEE'
   }
+
+  return (
+    <span style={{
+      color,
+      fontSize: '12px',
+      padding: '4px 10px',
+      borderRadius: '12px',
+      background: bg,
+      fontWeight: 500,
+      display: 'inline-block'
+    }}>
+      {label}
+    </span>
+  )
+}
 
   const stats = getStats()
 
@@ -938,7 +956,7 @@ export default function WrongBook({ onScanQR }) {
           )}
 
           {/* 分类筛选（错题/未作答） */}
-          <div 
+          <div
             onClick={() => { setActiveFilterType('category'); setShowFilterPanel(true) }}
             style={{
               display: 'flex',
@@ -954,6 +972,27 @@ export default function WrongBook({ onScanQR }) {
             {activeCategory !== 'all' && (
               <span style={{ fontSize: '12px', color: APPLE_COLORS.primary }}>
                 {CATEGORY_OPTIONS.find(o => o.key === activeCategory)?.label}
+              </span>
+            )}
+          </div>
+
+          {/* 掌握情况筛选 */}
+          <div
+            onClick={() => { setActiveFilterType('mastery'); setShowFilterPanel(true) }}
+            style={{
+              display: 'flex',
+              alignItems: 'center',
+              gap: '4px',
+              cursor: 'pointer',
+              color: activeMastery !== 'all' ? APPLE_COLORS.primary : APPLE_COLORS.textSecondary,
+              fontWeight: activeMastery !== 'all' ? 500 : 400
+            }}
+          >
+            <span style={{ fontSize: '14px' }}>掌握</span>
+            <DownOutline style={{ fontSize: '12px', pointerEvents: 'none' }} />
+            {activeMastery !== 'all' && (
+              <span style={{ fontSize: '12px', color: APPLE_COLORS.primary }}>
+                {MASTERY_OPTIONS.find(o => o.key === activeMastery)?.label}
               </span>
             )}
           </div>
@@ -1044,7 +1083,7 @@ export default function WrongBook({ onScanQR }) {
                         {dayjs(wq.added_at || wq.created_at).format('YYYY-MM-DD')}
                       </span>
                       <span onClick={() => handleToggleMastery(wq)} style={{ cursor: 'pointer' }} title="点击切换掌握等级">
-                        {renderMasteredTag(wq.status)}
+                        {renderMasteredTag(wq)}
                       </span>
                     </div>
                   </div>
@@ -1285,6 +1324,36 @@ export default function WrongBook({ onScanQR }) {
                           background: activeCategory === option.key ? tabColor : APPLE_COLORS.background,
                           color: activeCategory === option.key ? '#fff' : APPLE_COLORS.textSecondary,
                           fontWeight: activeCategory === option.key ? 500 : 400,
+                          transition: 'all 0.2s'
+                        }}
+                      >
+                        {option.label}
+                      </div>
+                    )
+                  })}
+                </div>
+              </div>
+            ) : null}
+
+            {/* 掌握情况筛选 */}
+            {(activeFilterType === '' || activeFilterType === 'mastery') ? (
+              <div style={{ marginBottom: '24px' }}>
+                <div style={{ fontSize: '15px', color: APPLE_COLORS.text, marginBottom: '12px', fontWeight: 500 }}>掌握情况</div>
+                <div style={{ display: 'flex', flexWrap: 'wrap', gap: '8px' }}>
+                  {MASTERY_OPTIONS.map(option => {
+                    const tabColor = option.key === 'mastered' ? APPLE_COLORS.success : option.key === 'review' ? APPLE_COLORS.warning : option.key === 'new' ? APPLE_COLORS.danger : APPLE_COLORS.primary
+                    return (
+                      <div
+                        key={option.key}
+                        onClick={() => setActiveMastery(option.key)}
+                        style={{
+                          padding: '10px 18px',
+                          borderRadius: '20px',
+                          fontSize: '14px',
+                          cursor: 'pointer',
+                          background: activeMastery === option.key ? tabColor : APPLE_COLORS.background,
+                          color: activeMastery === option.key ? '#fff' : APPLE_COLORS.textSecondary,
+                          fontWeight: activeMastery === option.key ? 500 : 400,
                           transition: 'all 0.2s'
                         }}
                       >
