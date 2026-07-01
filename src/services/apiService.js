@@ -471,7 +471,7 @@ export const getGeneratedExamsByStudent = async (studentId, useCache = true) => 
   const result = exams.map(exam => ({
     id: exam.id,
     student_id: exam.student_id,
-    name: exam.name || '错题重练卷',
+    name: exam.name || `错题卷-${exam.created_at ? exam.created_at.slice(5,10) : new Date().toISOString().slice(5,10)}`,
     question_ids: exam.question_ids || [],
     status: exam.status === 'done' || exam.status === 'graded' ? 'graded' : 'ungraded',
     created_at: exam.created_at,
@@ -489,7 +489,7 @@ export const createGeneratedExam = async (examData) => {
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({
       studentId: examData.student_id,
-      name: examData.name || '错题重练卷',
+      name: examData.name || `错题卷-${new Date().toISOString().slice(5,10)}`,
       questionIds: examData.question_ids || []
     })
   })
