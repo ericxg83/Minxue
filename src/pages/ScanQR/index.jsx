@@ -7,6 +7,14 @@ import jsQR from 'jsqr'
 // 手机摄像头分辨率太高(如1920x1080)，二维码在画面中太小无法识别
 const SCALE_DOWN_FACTOR = 0.3
 
+const isNative = () => {
+  try {
+    return !!(window.Capacitor?.isNativePlatform?.())
+  } catch {
+    return false
+  }
+}
+
 export default function ScanQR({ onClose, onScanSuccess }) {
   const [scanning, setScanning] = useState(false)
   const [cameraReady, setCameraReady] = useState(false)
@@ -108,6 +116,21 @@ export default function ScanQR({ onClose, onScanSuccess }) {
 
   const startCamera = async () => {
     try {
+      // Capacitor Android 需要运行时权限，先检查并请求
+      if (isNative()) {
+        try {
+          const { Camera } = await import('@capacitor/camera')
+          const permResult = await Camera.requestPermissions()
+          if (permResult.camera !== 'granted') {
+            setScanError('摄像头权限被拒绝，请前往系统设置允许相机权限，或使用相册上传')
+            setCameraTimeout(true)
+            return
+          }
+        } catch {
+          // Capacitor 权限请求失败，继续尝试 getUserMedia 兜底
+        }
+      }
+
       // 设置 3 秒超时，如果摄像头无响应则提示使用相册
       cameraTimeoutRef.current = setTimeout(() => {
         if (!cameraReady) {

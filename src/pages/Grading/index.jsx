@@ -29,9 +29,22 @@ export default function Grading({ paperId, studentId, questionIds, onClose, onCo
   const [studentInfo, setStudentInfo] = useState(null)
   const [showResult, setShowResult] = useState(false)
   const [showAnswerCard, setShowAnswerCard] = useState(true)
-  const [isLoading, setIsLoading] = useState(true)
-  const [error, setError] = useState(null)
-  const [masteredBeforeCount, setMasteredBeforeCount] = useState(0)
+  const [manualGradingResults, setManualGradingResults] = useState({})
+
+  // Manual grading section
+  const [manualQuestionIndex, setManualQuestionIndex] = useState(0)
+  const [manualAnswer, setManualAnswer] = useState('')
+  const [manualStatus, setManualStatus] = useState(null)
+
+  const handleManualGrading = (questionId, answer, status) => {
+    // Add manual grading logic here
+    // For now, just simulate saving the grading results
+    setManualGradingResults(prev => ({
+      ...prev,
+      [questionId]: { answer, status }
+    }))
+    setIsLoading(false)
+  }
   const [isSaving, setIsSaving] = useState(false)
 
   const { students } = useStudentStore()

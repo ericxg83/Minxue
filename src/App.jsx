@@ -36,7 +36,7 @@ import { taskService } from './services/taskService'
 import { recognizeQuestions, compressImage, saveRecognitionResult } from './services/aiService'
 import { processMultiPagePaperLayout } from './services/paperBankAIService'
 import { downloadPaperWord } from './utils/docxGenerator'
-import { mockQuestions, mockTasks, mockWrongQuestions, mockGeneratedExams } from './data/mockData'
+import { mockQuestions, mockTasks, mockWrongQuestions, mockGeneratedExams, mockStudents } from './data/mockData'
 import StudentSwitcher from './components/StudentSwitcher'
 
 import { useToast, ToastProvider } from './components/ToastProvider'
@@ -308,14 +308,25 @@ export default function App() {
             setStudents(safeStudentList)
             // Restore last selected student
             const lastStudentId = localStorage.getItem('lastStudentId')
-            const lastStudent = lastStudentId 
-              ? safeStudentList.find(s => s.id === lastStudentId) 
+            const lastStudent = lastStudentId
+              ? safeStudentList.find(s => s.id === lastStudentId)
               : null
             setCurrentStudent(lastStudent || safeStudentList[0])
+          } else {
+            // API返回空列表，使用模拟数据兜底
+            console.warn('API返回空学生列表，使用模拟数据')
+            setStudents(mockStudents)
+            setCurrentStudent(mockStudents[0])
           }
         } catch (error) {
-          console.error('加载学生数据失败:', error)
-          // Keep empty state, don't show error - user can still navigate
+          console.error('加载学生数据失败，使用模拟数据:', error)
+          // 使用模拟数据兜底，确保UI可正常显示
+          setStudents(mockStudents)
+          const lastStudentId = localStorage.getItem('lastStudentId')
+          const lastStudent = lastStudentId
+            ? mockStudents.find(s => s.id === lastStudentId)
+            : null
+          setCurrentStudent(lastStudent || mockStudents[0])
         }
       } catch (error) {
         console.error('初始化失败:', error)
@@ -412,7 +423,7 @@ export default function App() {
       setTasks(Array.isArray(taskList) ? taskList : [])
     } catch (error) {
       console.error('加载任务失败:', error)
-      setTasks([])
+      // Don't clear tasks on failure — keep showing existing data
     } finally {
       setIsLoadingTasks(false)
     }
@@ -2172,7 +2183,6 @@ export default function App() {
                                   <span style={{ fontSize: '10px', color: '#D1D5DB' }}>·</span>
                                   {(() => {
                                     const pendingMinutes = dayjs().diff(dayjs(task.created_at), 'minute')
-                                    const isTimedOut = pendingMinutes > 10
 
                                     if (task.status === 'processing') {
                                       return (
@@ -2206,32 +2216,9 @@ export default function App() {
                                       )
                                     }
 
-                                    // Pending status
-                                    if (isTimedOut) {
-                                      return (
-                                        <span style={{ fontSize: '11px', color: '#EF4444' }}>
-                                          等待中 ({pendingMinutes}分钟)
-                                          <button
-                                            onClick={(e) => { e.stopPropagation(); handleRetryTask(task.id) }}
-                                            style={{
-                                              marginLeft: '6px',
-                                              fontSize: '10px',
-                                              padding: '1px 6px',
-                                              borderRadius: '4px',
-                                              border: '1px solid #EF4444',
-                                              background: '#FEF2F2',
-                                              color: '#EF4444',
-                                              cursor: 'pointer'
-                                            }}
-                                          >
-                                            重新处理
-                                          </button>
-                                        </span>
-                                      )
-                                    }
-
+                                    // Pending status (just show wait time, no reprocess button)
                                     return (
-                                      <span style={{ fontSize: '11px', color: '#F59E0B' }}>
+                                      <span style={{ fontSize: '11px', color: pendingMinutes > 30 ? '#EF4444' : '#F59E0B' }}>
                                         等待中 ({pendingMinutes}分钟)
                                       </span>
                                     )

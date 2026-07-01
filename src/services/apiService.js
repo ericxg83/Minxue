@@ -1,7 +1,7 @@
 const API_BASE = import.meta.env.VITE_API_URL || '/api'
 
 // 版本号：每次部署时自动清理旧缓存
-const CACHE_VERSION = '20260610-v2'
+const CACHE_VERSION = '20260701-v1'
 
 const CACHE_MAX_AGE = {
   STUDENTS: 60 * 60 * 1000,      // 1小时（Phase 2优化：从24小时调整，学生信息变化频率低）
