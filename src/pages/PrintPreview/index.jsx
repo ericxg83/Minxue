@@ -97,12 +97,21 @@ export default function PrintPreview({ onClose, questions: propQuestions }) {
 
   const totalPages = Math.ceil(previewQuestions.length / 5) || 1
 
+  // 根据所选题目自动生成试卷名：按学科归类 + 日期
+  const getExamName = () => {
+    const subjects = [...new Set(previewQuestions.map(q => q.subject).filter(Boolean))]
+    if (subjects.length === 0) return `错题重练-${dayjs().format('MMDD')}`
+    if (subjects.length <= 2) return `${subjects.join('')}-${dayjs().format('MMDD')}`
+    return `综合-${dayjs().format('MMDD')}`
+  }
+
   const generatePrintContent = () => {
+    const examName = getExamName()
     return `
       <!DOCTYPE html>
       <html>
       <head>
-        <title>${currentStudent?.name || '学生'} - 错题重练卷</title>
+        <title>${currentStudent?.name || '学生'} - ${examName}</title>
         <style>
           @page { size: A4; margin: 20mm; }
           body { font-family: 'Microsoft YaHei', 'SimSun', sans-serif; line-height: 1.8; font-size: 12pt; }
@@ -128,7 +137,7 @@ export default function PrintPreview({ onClose, questions: propQuestions }) {
       <body>
         <div class="paper">
           <div class="header">
-            <div class="title">${currentStudent?.name || '学生'} - 错题重练卷</div>
+            <div class="title">${currentStudent?.name || '学生'} - ${examName}</div>
             <div class="subtitle">
               <span>总题数：${previewQuestions.length}题</span>
               <span>满分：100分</span>
@@ -184,12 +193,13 @@ export default function PrintPreview({ onClose, questions: propQuestions }) {
     setGeneratingPdf(true)
     setPdfBlobUrl('')
     setPdfBlob(null)
+    const examName = getExamName()
     try {
       const result = await generateExamPDF({
-        title: `${currentStudent?.name || '学生'} - 错题重练卷`,
+        title: `${currentStudent?.name || '学生'} - ${examName}`,
         studentName: currentStudent?.name || '',
         questions: previewQuestions,
-        filename: `${currentStudent?.name || 'student'}_cuoti_${dayjs().format('YYYYMMDD_HHmm')}`,
+        filename: `${currentStudent?.name || 'student'}_${examName}_${dayjs().format('YYYYMMDD_HHmm')}`,
         showAnswers: false,
         qrContent: qrContent,
       })
@@ -212,9 +222,20 @@ export default function PrintPreview({ onClose, questions: propQuestions }) {
     const questionIds = previewQuestions.map(q => q.id).filter(Boolean)
     if (currentStudent && questionIds.length > 0) {
       try {
+        // 根据所选题目自动生成试卷名：按学科归类 + 日期
+        const subjects = [...new Set(previewQuestions.map(q => q.subject).filter(Boolean))]
+        let examName
+        if (subjects.length === 0) {
+          examName = `错题重练-${dayjs().format('MMDD')}`
+        } else if (subjects.length <= 2) {
+          examName = `${subjects.join('')}-${dayjs().format('MMDD')}`
+        } else {
+          examName = `综合-${dayjs().format('MMDD')}`
+        }
+
         await createGeneratedExam({
           student_id: currentStudent.id,
-          name: '错题重练卷',
+          name: examName,
           question_ids: questionIds
         })
         examRecorded.current = true
@@ -229,7 +250,8 @@ export default function PrintPreview({ onClose, questions: propQuestions }) {
     await saveGeneratedExamRecord()
     const result = await generatePDF()
     if (result && result.pdfBlob) {
-      const filename = `${currentStudent?.name || 'student'}_cuoti_${dayjs().format('YYYYMMDD_HHmm')}.pdf`
+      const examName = getExamName()
+      const filename = `${currentStudent?.name || 'student'}_${examName}_${dayjs().format('YYYYMMDD_HHmm')}.pdf`
       saveAs(result.pdfBlob, filename)
     }
   }
@@ -241,12 +263,13 @@ export default function PrintPreview({ onClose, questions: propQuestions }) {
       let blobUrl = pdfBlobUrl
       if (!blobUrl) {
         setGeneratingPdf(true)
+        const examName = getExamName()
         try {
           const result = await generateExamPDF({
-            title: `${currentStudent?.name || '学生'} - 错题重练卷`,
+            title: `${currentStudent?.name || '学生'} - ${examName}`,
             studentName: currentStudent?.name || '',
             questions: previewQuestions,
-            filename: `${currentStudent?.name || 'student'}_cuoti_${dayjs().format('YYYYMMDD_HHmm')}`,
+            filename: `${currentStudent?.name || 'student'}_${examName}_${dayjs().format('YYYYMMDD_HHmm')}`,
             showAnswers: false,
             qrContent: qrContent,
           })
@@ -330,7 +353,7 @@ export default function PrintPreview({ onClose, questions: propQuestions }) {
 
             {/* Header */}
             <div className="text-center mb-6 pb-4 border-b-2 border-gray-800 pr-20">
-              <div className="text-[18pt] font-bold mb-3">{currentStudent?.name || '学生'} - 错题重练卷</div>
+              <div className="text-[18pt] font-bold mb-3">{currentStudent?.name || '学生'} - {getExamName()}</div>
               <div className="text-[10pt] text-gray-500 flex justify-center gap-8">
                 <span>总题数：{previewQuestions.length}题</span>
                 <span>满分：100分</span>
