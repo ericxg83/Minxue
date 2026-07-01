@@ -39,12 +39,12 @@ const APPLE_COLORS = {
   border: '#E5E5EA'
 }
 
-// 掌握状态筛选标签
+// 掌握状态筛选标签（基于 lifecycle_status）
 const STATUS_TABS = [
   { key: 'all', label: '全部' },
-  { key: 'pending', label: '未掌握' },
-  { key: 'partial', label: '有点掌握' },
-  { key: 'mastered', label: '完全掌握' }
+  { key: 'new', label: '不懂' },
+  { key: 'review', label: '略懂' },
+  { key: 'mastered', label: '完全懂' }
 ]
 
 // 错题分类筛选
@@ -85,9 +85,9 @@ const ERROR_COUNT_OPTIONS = [
 // 掌握情况筛选选项
 const MASTERY_OPTIONS = [
   { key: 'all', label: '全部' },
-  { key: 'new', label: '未掌握' },
-  { key: 'review', label: '有点掌握' },
-  { key: 'mastered', label: '完全掌握' }
+  { key: 'new', label: '不懂' },
+  { key: 'review', label: '略懂' },
+  { key: 'mastered', label: '完全懂' }
 ]
 
 // 分类筛选选项（用于高级筛选栏的下拉）
@@ -242,9 +242,14 @@ export default function WrongBook({ onScanQR }) {
       if (activeCategory === 'unanswered' && !isUnanswered) return false
     }
     
-    // 掌握状态筛选
-    if (activeStatus !== 'all' && wq.status !== activeStatus) return false
-    
+    // 掌握状态筛选（顶部标签和高级筛选共享此逻辑）
+    if (activeStatus !== 'all') {
+      const ls = wq.lifecycle_status || ''
+      if (activeStatus === 'new' && ls !== 'new') return false
+      if (activeStatus === 'review' && ls !== 'review_1' && ls !== 'review_2') return false
+      if (activeStatus === 'mastered' && ls !== 'mastered') return false
+    }
+
     // 科目筛选
     if (activeSubject !== 'all' && wq.subject !== activeSubject) return false
     
@@ -291,11 +296,14 @@ export default function WrongBook({ onScanQR }) {
     }
   })
 
-  // 获取各状态数量（只统计当前学生的错题）
-  const getStatusCount = (status) => {
+  // 获取各状态数量（只统计当前学生的错题，按 lifecycle_status）
+  const getStatusCount = (key) => {
     const studentQuestions = (Array.isArray(wrongQuestions) ? wrongQuestions : []).filter(wq => wq.student_id === currentStudent?.id)
-    if (status === 'all') return studentQuestions.length
-    return studentQuestions.filter(wq => wq.status === status).length
+    if (key === 'all') return studentQuestions.length
+    if (key === 'new') return studentQuestions.filter(wq => (wq.lifecycle_status || 'new') === 'new').length
+    if (key === 'review') return studentQuestions.filter(wq => wq.lifecycle_status === 'review_1' || wq.lifecycle_status === 'review_2').length
+    if (key === 'mastered') return studentQuestions.filter(wq => wq.lifecycle_status === 'mastered').length
+    return 0
   }
 
   // 获取当前筛选条件的显示文本
@@ -365,14 +373,14 @@ export default function WrongBook({ onScanQR }) {
     return studentQuestions.filter(wq => getQuestionType(wq) === type).length
   }
 
-  // 获取统计数据（只统计当前学生的错题）
+  // 获取统计数据（只统计当前学生的错题，按 lifecycle_status）
   const getStats = () => {
     const studentQuestions = (Array.isArray(wrongQuestions) ? wrongQuestions : []).filter(wq => wq.student_id === currentStudent?.id)
     const total = studentQuestions.length
-    const mastered = studentQuestions.filter(wq => wq.status === 'mastered').length
-    const partial = studentQuestions.filter(wq => wq.status === 'partial').length
-    const pending = studentQuestions.filter(wq => wq.status === 'pending').length
-    return { total, mastered, partial, pending }
+    const mastered = studentQuestions.filter(wq => wq.lifecycle_status === 'mastered').length
+    const review = studentQuestions.filter(wq => wq.lifecycle_status === 'review_1' || wq.lifecycle_status === 'review_2').length
+    const notMastered = studentQuestions.filter(wq => (wq.lifecycle_status || 'new') === 'new').length
+    return { total, mastered, review, notMastered }
   }
 
   // 切换选择
@@ -426,31 +434,35 @@ export default function WrongBook({ onScanQR }) {
     })
   }
 
-  // 切换掌握等级（未掌握 → 有点掌握 → 完全掌握 → 未掌握）
+  // 切换掌握等级（不懂 → 略懂 → 完全懂 → 不懂）
   const handleToggleMastery = async (wq) => {
-    const currentStatus = wq.status
-    let nextStatus
-    switch (currentStatus) {
-      case 'pending':
-        nextStatus = 'partial'
+    const currentLs = wq.lifecycle_status || 'new'
+    let nextLs
+    switch (currentLs) {
+      case 'new':
+        nextLs = 'review_1'
         break
-      case 'partial':
-        nextStatus = 'mastered'
+      case 'review_1':
+        nextLs = 'review_2'
+        break
+      case 'review_2':
+        nextLs = 'mastered'
         break
       case 'mastered':
-        nextStatus = 'pending'
+        nextLs = 'new'
         break
       default:
-        nextStatus = 'pending'
+        nextLs = 'new'
     }
-    
+    const nextStatus = nextLs === 'mastered' ? 'mastered' : 'pending'
+
     try {
-      await updateWrongQuestionStatus(wq.id, nextStatus)
+      await updateWrongQuestionStatus(wq.id, nextStatus, { lifecycle_status: nextLs })
       loadData()
-      const statusText = { pending: '未掌握', partial: '有点掌握', mastered: '完全掌握' }
+      const statusText = { new: '不懂', review_1: '略懂', review_2: '略懂', mastered: '完全懂' }
       Toast.show({
         icon: 'success',
-        content: `已标记为${statusText[nextStatus]}`
+        content: `已标记为${statusText[nextLs]}`
       })
     } catch (error) {
       Toast.show({
@@ -605,23 +617,23 @@ const renderMasteredTag = (wq) => {
 
   let label, color, bg
   if (lifecycle === 'mastered' || status === 'mastered') {
-    label = '完全掌握'
+    label = '完全懂'
     color = APPLE_COLORS.success
     bg = '#E8F5E9'
   } else if (lifecycle === 'review_2') {
-    label = '基本掌握'
+    label = '略懂'
     color = '#52C41A'
     bg = '#F0FAEB'
   } else if (lifecycle === 'review_1') {
-    label = '有点掌握'
+    label = '略懂'
     color = APPLE_COLORS.warning
     bg = '#FFF8E1'
   } else if (lifecycle === 'new' || status === 'pending') {
-    label = '未掌握'
+    label = '不懂'
     color = APPLE_COLORS.danger
     bg = '#FFEBEE'
   } else {
-    label = '未掌握'
+    label = '不懂'
     color = APPLE_COLORS.danger
     bg = '#FFEBEE'
   }
@@ -645,7 +657,10 @@ const renderMasteredTag = (wq) => {
 
   // 计算所有学生未掌握题的总数（用于顶部按钮提醒）
   const getTotalPendingCount = () => {
-    return (Array.isArray(wrongQuestions) ? wrongQuestions : []).filter(wq => wq.status !== 'mastered').length
+    return (Array.isArray(wrongQuestions) ? wrongQuestions : []).filter(wq => {
+      const ls = wq.lifecycle_status || ''
+      return ls !== 'mastered' && ls !== 'excluded'
+    }).length
   }
   
   const totalPendingCount = getTotalPendingCount()
@@ -742,10 +757,10 @@ const renderMasteredTag = (wq) => {
       {/* 统计卡片 - 苹果风格 */}
       <div style={{ background: APPLE_COLORS.card, padding: '16px', borderBottom: '1px solid ' + APPLE_COLORS.border }}>
         <div style={{ display: 'flex', gap: '12px' }}>
-          <div style={{ 
-            flex: 1, 
-            background: '#FFEBEE', 
-            padding: '14px', 
+          <div style={{
+            flex: 1,
+            background: '#FFEBEE',
+            padding: '14px',
             borderRadius: '12px',
             textAlign: 'center',
             boxShadow: '0 1px 3px rgba(0,0,0,0.04)'
@@ -753,38 +768,38 @@ const renderMasteredTag = (wq) => {
             <div style={{ fontSize: '12px', color: APPLE_COLORS.textSecondary, marginBottom: '4px' }}>错题总数</div>
             <div style={{ fontSize: '22px', fontWeight: 700, color: APPLE_COLORS.danger }}>{stats.total}道</div>
           </div>
-          <div style={{ 
-            flex: 1, 
-            background: '#E8F5E9', 
-            padding: '14px', 
+          <div style={{
+            flex: 1,
+            background: '#E8F5E9',
+            padding: '14px',
             borderRadius: '12px',
             textAlign: 'center',
             boxShadow: '0 1px 3px rgba(0,0,0,0.04)'
           }}>
-            <div style={{ fontSize: '12px', color: APPLE_COLORS.textSecondary, marginBottom: '4px' }}>完全掌握</div>
+            <div style={{ fontSize: '12px', color: APPLE_COLORS.textSecondary, marginBottom: '4px' }}>完全懂</div>
             <div style={{ fontSize: '22px', fontWeight: 700, color: APPLE_COLORS.success }}>{stats.mastered}道</div>
           </div>
-          <div style={{ 
-            flex: 1, 
-            background: '#FFF8E1', 
-            padding: '14px', 
+          <div style={{
+            flex: 1,
+            background: '#FFF8E1',
+            padding: '14px',
             borderRadius: '12px',
             textAlign: 'center',
             boxShadow: '0 1px 3px rgba(0,0,0,0.04)'
           }}>
-            <div style={{ fontSize: '12px', color: APPLE_COLORS.textSecondary, marginBottom: '4px' }}>有点掌握</div>
-            <div style={{ fontSize: '22px', fontWeight: 700, color: APPLE_COLORS.warning }}>{stats.partial}道</div>
+            <div style={{ fontSize: '12px', color: APPLE_COLORS.textSecondary, marginBottom: '4px' }}>略懂</div>
+            <div style={{ fontSize: '22px', fontWeight: 700, color: APPLE_COLORS.warning }}>{stats.review}道</div>
           </div>
-          <div style={{ 
-            flex: 1, 
-            background: '#FFEBEE', 
-            padding: '14px', 
+          <div style={{
+            flex: 1,
+            background: '#FFEBEE',
+            padding: '14px',
             borderRadius: '12px',
             textAlign: 'center',
             boxShadow: '0 1px 3px rgba(0,0,0,0.04)'
           }}>
-            <div style={{ fontSize: '12px', color: APPLE_COLORS.textSecondary, marginBottom: '4px' }}>未掌握</div>
-            <div style={{ fontSize: '22px', fontWeight: 700, color: APPLE_COLORS.danger }}>{stats.pending}道</div>
+            <div style={{ fontSize: '12px', color: APPLE_COLORS.textSecondary, marginBottom: '4px' }}>不懂</div>
+            <div style={{ fontSize: '22px', fontWeight: 700, color: APPLE_COLORS.danger }}>{stats.notMastered}道</div>
           </div>
         </div>
       </div>
@@ -801,7 +816,7 @@ const renderMasteredTag = (wq) => {
         {STATUS_TABS.map(tab => {
           const count = getStatusCount(tab.key)
           const isActive = activeStatus === tab.key
-          const tabColor = tab.key === 'mastered' ? APPLE_COLORS.success : tab.key === 'partial' ? APPLE_COLORS.warning : tab.key === 'pending' ? APPLE_COLORS.danger : APPLE_COLORS.primary
+          const tabColor = tab.key === 'mastered' ? APPLE_COLORS.success : tab.key === 'review' ? APPLE_COLORS.warning : tab.key === 'new' ? APPLE_COLORS.danger : APPLE_COLORS.primary
           return (
             <div
               key={tab.key}
