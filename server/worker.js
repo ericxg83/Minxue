@@ -736,14 +736,23 @@ const generateMissingAnswers = async (questions, imageBuffer = null) => {
         if (cached && cached.answer && cached.answer !== '待人工补充' && cached.answer !== '此为主观题，无唯一标准答案') {
           cacheHitCount++
           console.log(`     题目 ${q.id.substring(0, 8)}: ✅ 缓存命中 - 复用AI解析结果`)
-          
+
           let finalAnswer = extractAnswerFromAnalysis(cached.answer, cached.analysis, q.options)
           try {
             await updateQuestionAnswer(q.id, finalAnswer, cached.analysis)
             q.answer = finalAnswer
             if (cached.analysis) q.analysis = cached.analysis
             updatedCount++
-            
+
+            // 🔧 如果从解析提取的答案与缓存不同，同步更新缓存以防止后续合并时读取到错误值
+            if (finalAnswer !== cached.answer) {
+              await query(
+                `UPDATE ${TABLES.QUESTION_CACHE} SET answer = $1, updated_at = NOW() WHERE id = $2`,
+                [finalAnswer, cached.id]
+              )
+              console.log(`     题目 ${q.id.substring(0, 8)}: 缓存答案同步更新 ${cached.answer} → ${finalAnswer}`)
+            }
+
             await incrementQuestionUseCount(fingerprint, PARSER_VERSION)
             // 设置 cache_id 指向权威缓存条目
             q.cache_id = cached.id

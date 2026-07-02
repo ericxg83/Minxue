@@ -983,13 +983,13 @@ app.get('/api/questions/task/:taskId', async (req, res) => {
     // JS 层做 COALESCE：cache 字段优先于 question 自身字段
     const merged = rows.map(q => ({
       ...q,
-      content: q._cache_content ?? q.content,
-      options: q._cache_options ?? q.options,
-      answer: q._cache_answer ?? q.answer,
-      analysis: q._cache_analysis ?? q.analysis,
-      question_type: q._cache_question_type ?? q.question_type,
-      subject: q._cache_subject ?? q.subject,
-      ai_tags: q._cache_ai_tags ?? q.ai_tags
+      content: q.content ?? q._cache_content,
+      options: q.options ?? q._cache_options,
+      answer: q.answer ?? q._cache_answer,
+      analysis: q.analysis ?? q._cache_analysis,
+      question_type: q.question_type ?? q._cache_question_type,
+      subject: q.subject ?? q._cache_subject,
+      ai_tags: q.ai_tags ?? q._cache_ai_tags
     }))
     // 移除 _cache_ 前缀的临时字段
     for (const qq of merged) {
@@ -1101,11 +1101,11 @@ app.get('/api/questions/search', async (req, res) => {
 
     const merged = rows.map(q => ({
       ...q,
-      content: q._cache_content ?? q.content,
-      options: q._cache_options ?? q.options,
-      answer: q._cache_answer ?? q.answer,
-      analysis: q._cache_analysis ?? q.analysis,
-      ai_tags: q._cache_ai_tags ?? q.ai_tags
+      content: q.content ?? q._cache_content,
+      options: q.options ?? q._cache_options,
+      answer: q.answer ?? q._cache_answer,
+      analysis: q.analysis ?? q._cache_analysis,
+      ai_tags: q.ai_tags ?? q._cache_ai_tags
     }))
     for (const qq of merged) {
       delete qq._cache_content

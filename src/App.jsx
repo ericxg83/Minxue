@@ -435,7 +435,25 @@ export default function App() {
         return
       }
       const data = await getWrongQuestionsByStudent(currentStudent.id, false)
-      setWrongQuestions(Array.isArray(data) ? data : [])
+      const rawList = Array.isArray(data) ? data : []
+      // 同一题目内容去重：保留上传时间最晚的一条
+      const contentDedupMap = new Map()
+      for (const wq of rawList) {
+        const question = wq.question || wq
+        const content = (question.content || '').trim()
+        if (!content) continue
+        const existing = contentDedupMap.get(content)
+        const curDate = wq.added_at || wq.created_at || ''
+        const existDate = existing ? (existing.added_at || existing.created_at || '') : ''
+        if (!existing || curDate > existDate) {
+          contentDedupMap.set(content, wq)
+        }
+      }
+      const deduped = Array.from(contentDedupMap.values())
+      if (deduped.length < rawList.length) {
+        console.log(`错题本去重: ${rawList.length} → ${deduped.length} 条`)
+      }
+      setWrongQuestions(deduped)
     } catch (error) {
       console.error('加载错题失败:', error)
       setWrongQuestions([])
@@ -1581,6 +1599,19 @@ export default function App() {
     setShowPrintPreview(true)
   }
 
+  // 全选/取消全选当前筛选出的题目
+  const handleSelectAll = () => {
+    const filteredIds = filteredWrongQuestions.map(wq => wq.id)
+    const allSelected = filteredWrongQuestions.length > 0 && filteredWrongQuestions.every(wq => selectedQuestions.find(sq => sq.id === wq.id))
+    if (allSelected) {
+      setSelectedQuestions(selectedQuestions.filter(sq => !filteredIds.includes(sq.id)))
+    } else {
+      const existingIds = new Set(selectedQuestions.map(sq => sq.id))
+      const toAdd = filteredWrongQuestions.filter(wq => !existingIds.has(wq.id))
+      setSelectedQuestions([...selectedQuestions, ...toAdd])
+    }
+  }
+
   // Toggle selection for wrong questions
   const toggleSelection = (question) => {
     const exists = selectedQuestions.find(q => q.id === question.id)
@@ -2331,8 +2362,118 @@ export default function App() {
                     >
                       标签<ChevronDown size={10} style={{ marginLeft: '2px' }} />
                     </button>
+                    {/* 全选/取消全选 */}
+                    <button
+                      onClick={handleSelectAll}
+                      className={`filter-chip ${filteredWrongQuestions.length > 0 && filteredWrongQuestions.every(wq => selectedQuestions.find(sq => sq.id === wq.id)) ? 'active' : 'inactive'}`}
+                      style={{ flexShrink: 0 }}
+                    >
+                      {filteredWrongQuestions.length > 0 && filteredWrongQuestions.every(wq => selectedQuestions.find(sq => sq.id === wq.id)) ? '取消全选' : '全选'}
+                    </button>
                   </div>
                 </section>
+
+                {/* Filter Selection Popup */}
+                {(showSubjectFilter || showTimeFilter || showErrorFilter || showTagFilter) && (
+                  <>
+                    <div
+                      className="fixed inset-0 z-50"
+                      style={{ background: 'rgba(0,0,0,0.2)' }}
+                      onClick={() => {
+                        setShowSubjectFilter(false)
+                        setShowTimeFilter(false)
+                        setShowErrorFilter(false)
+                        setShowTagFilter(false)
+                      }}
+                    />
+                    <div
+                      className="fixed left-0 right-0 z-50 bg-white rounded-t-xl shadow-lg"
+                      style={{
+                        bottom: 0,
+                        paddingBottom: 'env(safe-area-inset-bottom, 8px)',
+                        animation: 'slideUp 0.2s ease-out'
+                      }}
+                    >
+                      <div className="px-4 py-3 border-b border-gray-100">
+                        <span className="text-sm font-semibold text-gray-900">
+                          {showSubjectFilter ? '选择科目' : showTimeFilter ? '选择时间' : showErrorFilter ? '选择错次' : '选择标签'}
+                        </span>
+                      </div>
+                      <div className="px-4 py-3 max-h-56 overflow-y-auto">
+                        <div className="flex flex-wrap gap-2">
+                          {showSubjectFilter && [
+                            { key: 'all', label: '全部科目' },
+                            { key: '数学', label: '数学' },
+                            { key: '语文', label: '语文' },
+                            { key: '英语', label: '英语' },
+                            { key: '物理', label: '物理' },
+                            { key: '化学', label: '化学' }
+                          ].map(s => (
+                            <button
+                              key={s.key}
+                              onClick={() => { setSelectedSubject(s.key); setShowSubjectFilter(false) }}
+                              className={`filter-chip ${selectedSubject === s.key ? 'active' : 'inactive'}`}
+                            >
+                              {s.label}
+                            </button>
+                          ))}
+                          {showTimeFilter && [
+                            { key: 'all', label: '全部时间' },
+                            { key: 'today', label: '今天' },
+                            { key: 'week', label: '最近7天' },
+                            { key: 'month', label: '最近30天' },
+                            { key: 'quarter', label: '最近3个月' }
+                          ].map(t => (
+                            <button
+                              key={t.key}
+                              onClick={() => { setSelectedTimeRange(t.key); setShowTimeFilter(false) }}
+                              className={`filter-chip ${selectedTimeRange === t.key ? 'active' : 'inactive'}`}
+                            >
+                              {t.label}
+                            </button>
+                          ))}
+                          {showErrorFilter && [
+                            { key: 'all', label: '全部次数' },
+                            { key: '1', label: '1次' },
+                            { key: '2-3', label: '2-3次' },
+                            { key: '4-5', label: '4-5次' },
+                            { key: '5+', label: '5次以上' }
+                          ].map(e => (
+                            <button
+                              key={e.key}
+                              onClick={() => { setSelectedErrorCount(e.key); setShowErrorFilter(false) }}
+                              className={`filter-chip ${selectedErrorCount === e.key ? 'active' : 'inactive'}`}
+                            >
+                              {e.label}
+                            </button>
+                          ))}
+                          {showTagFilter && (
+                            <>
+                              <button
+                                onClick={() => { setSelectedTags([]); setShowTagFilter(false) }}
+                                className={`filter-chip ${selectedTags.length === 0 ? 'active' : 'inactive'}`}
+                              >
+                                全部标签
+                              </button>
+                              {allAvailableTags.map(tag => (
+                                <button
+                                  key={tag}
+                                  onClick={() => {
+                                    const has = selectedTags.includes(tag)
+                                    setSelectedTags(has ? selectedTags.filter(t => t !== tag) : [...selectedTags, tag])
+                                  }}
+                                  className={`filter-chip ${selectedTags.includes(tag) ? 'active' : 'inactive'}`}
+                                >
+                                  {tag}
+                                </button>
+                              ))}
+                            </>
+                          )}
+                        </div>
+                      </div>
+                    </div>
+                  </>
+                )}
 
                 {/* Wrong Question List */}
                 <section className="px-4">
