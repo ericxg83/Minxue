@@ -146,10 +146,7 @@ export default function App() {
   const [selectedTimeRange, setSelectedTimeRange] = useState('all')
   const [selectedErrorCount, setSelectedErrorCount] = useState('all')
   const [selectedTags, setSelectedTags] = useState([])
-  const [showTagFilter, setShowTagFilter] = useState(false)
-  const [showTimeFilter, setShowTimeFilter] = useState(false)
-  const [showErrorFilter, setShowErrorFilter] = useState(false)
-  const [showSubjectFilter, setShowSubjectFilter] = useState(false)
+  const [showFilterPanel, setShowFilterPanel] = useState(false)
   const [showQRCode, setShowQRCode] = useState(false)
   const [showPrintOptions, setShowPrintOptions] = useState(false)
   const [printMode, setPrintMode] = useState('all')
@@ -2339,25 +2336,25 @@ export default function App() {
                 <section className="px-4 mb-3 overflow-x-auto no-scrollbar">
                   <div className="flex gap-1.5 min-w-max">
                     <button
-                      onClick={() => setShowSubjectFilter(!showSubjectFilter)}
+                      onClick={() => setShowFilterPanel(true)}
                       className={`filter-chip ${selectedSubject !== 'all' ? 'active' : 'inactive'}`}
                     >
                       科目<ChevronDown size={10} style={{ marginLeft: '2px' }} />
                     </button>
                     <button
-                      onClick={() => setShowTimeFilter(!showTimeFilter)}
+                      onClick={() => setShowFilterPanel(true)}
                       className={`filter-chip ${selectedTimeRange !== 'all' ? 'active' : 'inactive'}`}
                     >
                       时间<ChevronDown size={10} style={{ marginLeft: '2px' }} />
                     </button>
                     <button
-                      onClick={() => setShowErrorFilter(!showErrorFilter)}
+                      onClick={() => setShowFilterPanel(true)}
                       className={`filter-chip ${selectedErrorCount !== 'all' ? 'active' : 'inactive'}`}
                     >
                       错次<ChevronDown size={10} style={{ marginLeft: '2px' }} />
                     </button>
                     <button
-                      onClick={() => setShowTagFilter(!showTagFilter)}
+                      onClick={() => setShowFilterPanel(true)}
                       className={`filter-chip ${selectedTags.length > 0 ? 'active' : 'inactive'}`}
                     >
                       标签<ChevronDown size={10} style={{ marginLeft: '2px' }} />
@@ -2373,102 +2370,202 @@ export default function App() {
                   </div>
                 </section>
 
-                {/* Filter Selection Popup */}
-                {(showSubjectFilter || showTimeFilter || showErrorFilter || showTagFilter) && (
+                {/* Filter Drawer — 参考 PC FilterPanel 的 pill-chip 样式 */}
+                {showFilterPanel && (
                   <>
+                    {/* Overlay */}
+                    <div className="fixed inset-0 z-50 bg-black/30" onClick={() => setShowFilterPanel(false)} />
+                    {/* Drawer */}
                     <div
-                      className="fixed inset-0 z-50"
-                      style={{ background: 'rgba(0,0,0,0.2)' }}
-                      onClick={() => {
-                        setShowSubjectFilter(false)
-                        setShowTimeFilter(false)
-                        setShowErrorFilter(false)
-                        setShowTagFilter(false)
-                      }}
-                    />
-                    <div
-                      className="fixed left-0 right-0 z-50 bg-white rounded-t-xl shadow-lg"
+                      className="fixed top-0 right-0 z-50 h-full bg-white shadow-xl"
                       style={{
-                        bottom: 0,
-                        paddingBottom: 'env(safe-area-inset-bottom, 8px)',
-                        animation: 'slideUp 0.2s ease-out'
+                        width: '85%',
+                        maxWidth: '360px',
+                        animation: 'slideInRight 0.25s ease-out'
                       }}
                     >
-                      <div className="px-4 py-3 border-b border-gray-100">
-                        <span className="text-sm font-semibold text-gray-900">
-                          {showSubjectFilter ? '选择科目' : showTimeFilter ? '选择时间' : showErrorFilter ? '选择错次' : '选择标签'}
-                        </span>
+                      {/* Header */}
+                      <div className="flex items-center justify-between px-4 py-3 border-b border-gray-100">
+                        <span style={{ fontSize: '17px', fontWeight: 600, color: '#1c1c1e' }}>筛选</span>
+                        <button onClick={() => setShowFilterPanel(false)} style={{ padding: '4px', cursor: 'pointer' }}>
+                          <X size={20} style={{ color: '#8E8E93' }} />
+                        </button>
                       </div>
-                      <div className="px-4 py-3 max-h-56 overflow-y-auto">
-                        <div className="flex flex-wrap gap-2">
-                          {showSubjectFilter && [
-                            { key: 'all', label: '全部科目' },
-                            { key: '数学', label: '数学' },
-                            { key: '语文', label: '语文' },
-                            { key: '英语', label: '英语' },
-                            { key: '物理', label: '物理' },
-                            { key: '化学', label: '化学' }
-                          ].map(s => (
-                            <button
-                              key={s.key}
-                              onClick={() => { setSelectedSubject(s.key); setShowSubjectFilter(false) }}
-                              className={`filter-chip ${selectedSubject === s.key ? 'active' : 'inactive'}`}
-                            >
-                              {s.label}
-                            </button>
-                          ))}
-                          {showTimeFilter && [
-                            { key: 'all', label: '全部时间' },
-                            { key: 'today', label: '今天' },
-                            { key: 'week', label: '最近7天' },
-                            { key: 'month', label: '最近30天' },
-                            { key: 'quarter', label: '最近3个月' }
-                          ].map(t => (
-                            <button
-                              key={t.key}
-                              onClick={() => { setSelectedTimeRange(t.key); setShowTimeFilter(false) }}
-                              className={`filter-chip ${selectedTimeRange === t.key ? 'active' : 'inactive'}`}
-                            >
-                              {t.label}
-                            </button>
-                          ))}
-                          {showErrorFilter && [
-                            { key: 'all', label: '全部次数' },
-                            { key: '1', label: '1次' },
-                            { key: '2-3', label: '2-3次' },
-                            { key: '4-5', label: '4-5次' },
-                            { key: '5+', label: '5次以上' }
-                          ].map(e => (
-                            <button
-                              key={e.key}
-                              onClick={() => { setSelectedErrorCount(e.key); setShowErrorFilter(false) }}
-                              className={`filter-chip ${selectedErrorCount === e.key ? 'active' : 'inactive'}`}
-                            >
-                              {e.label}
-                            </button>
-                          ))}
-                          {showTagFilter && (
-                            <>
-                              <button
-                                onClick={() => { setSelectedTags([]); setShowTagFilter(false) }}
-                                className={`filter-chip ${selectedTags.length === 0 ? 'active' : 'inactive'}`}
-                              >
-                                全部标签
-                              </button>
-                              {allAvailableTags.map(tag => (
+
+                      {/* Scrollable content */}
+                      <div className="overflow-y-auto" style={{ height: 'calc(100% - 52px)' }}>
+                        <div style={{ padding: '16px' }}>
+                          {/* 科目 */}
+                          <div style={{ marginBottom: '24px' }}>
+                            <div style={{ fontSize: '15px', color: '#1c1c1e', marginBottom: '12px', fontWeight: 500 }}>科目</div>
+                            <div className="flex flex-wrap gap-2">
+                              {[
+                                { key: 'all', label: '全部科目' },
+                                { key: '数学', label: '数学' },
+                                { key: '语文', label: '语文' },
+                                { key: '英语', label: '英语' },
+                                { key: '物理', label: '物理' },
+                                { key: '化学', label: '化学' }
+                              ].map(s => (
                                 <button
-                                  key={tag}
-                                  onClick={() => {
-                                    const has = selectedTags.includes(tag)
-                                    setSelectedTags(has ? selectedTags.filter(t => t !== tag) : [...selectedTags, tag])
+                                  key={s.key}
+                                  onClick={() => setSelectedSubject(s.key)}
+                                  style={{
+                                    padding: '8px 16px',
+                                    borderRadius: '20px',
+                                    fontSize: '13px',
+                                    border: 'none',
+                                    cursor: 'pointer',
+                                    fontWeight: selectedSubject === s.key ? 500 : 400,
+                                    background: selectedSubject === s.key ? '#2563EB' : '#F2F2F7',
+                                    color: selectedSubject === s.key ? '#fff' : '#8E8E93',
+                                    transition: 'all 0.15s'
                                   }}
-                                  className={`filter-chip ${selectedTags.includes(tag) ? 'active' : 'inactive'}`}
                                 >
-                                  {tag}
+                                  {s.label}
                                 </button>
                               ))}
-                            </>
+                            </div>
+                          </div>
+
+                          {/* 时间 */}
+                          <div style={{ marginBottom: '24px' }}>
+                            <div style={{ fontSize: '15px', color: '#1c1c1e', marginBottom: '12px', fontWeight: 500 }}>加入时间</div>
+                            <div className="flex flex-wrap gap-2">
+                              {[
+                                { key: 'all', label: '全部时间' },
+                                { key: 'today', label: '今天' },
+                                { key: 'week', label: '最近7天' },
+                                { key: 'month', label: '最近30天' },
+                                { key: 'quarter', label: '最近3个月' }
+                              ].map(t => (
+                                <button
+                                  key={t.key}
+                                  onClick={() => setSelectedTimeRange(t.key)}
+                                  style={{
+                                    padding: '8px 16px',
+                                    borderRadius: '20px',
+                                    fontSize: '13px',
+                                    border: 'none',
+                                    cursor: 'pointer',
+                                    fontWeight: selectedTimeRange === t.key ? 500 : 400,
+                                    background: selectedTimeRange === t.key ? '#2563EB' : '#F2F2F7',
+                                    color: selectedTimeRange === t.key ? '#fff' : '#8E8E93',
+                                    transition: 'all 0.15s'
+                                  }}
+                                >
+                                  {t.label}
+                                </button>
+                              ))}
+                            </div>
+                          </div>
+
+                          {/* 错次 */}
+                          <div style={{ marginBottom: '24px' }}>
+                            <div style={{ fontSize: '15px', color: '#1c1c1e', marginBottom: '12px', fontWeight: 500 }}>错误次数</div>
+                            <div className="flex flex-wrap gap-2">
+                              {[
+                                { key: 'all', label: '全部次数' },
+                                { key: '1', label: '1次' },
+                                { key: '2-3', label: '2-3次' },
+                                { key: '4-5', label: '4-5次' },
+                                { key: '5+', label: '5次以上' }
+                              ].map(e => (
+                                <button
+                                  key={e.key}
+                                  onClick={() => setSelectedErrorCount(e.key)}
+                                  style={{
+                                    padding: '8px 16px',
+                                    borderRadius: '20px',
+                                    fontSize: '13px',
+                                    border: 'none',
+                                    cursor: 'pointer',
+                                    fontWeight: selectedErrorCount === e.key ? 500 : 400,
+                                    background: selectedErrorCount === e.key ? '#2563EB' : '#F2F2F7',
+                                    color: selectedErrorCount === e.key ? '#fff' : '#8E8E93',
+                                    transition: 'all 0.15s'
+                                  }}
+                                >
+                                  {e.label}
+                                </button>
+                              ))}
+                            </div>
+                          </div>
+
+                          {/* 标签 */}
+                          {allAvailableTags.length > 0 && (
+                            <div style={{ marginBottom: '24px' }}>
+                              <div style={{ fontSize: '15px', color: '#1c1c1e', marginBottom: '12px', fontWeight: 500 }}>知识点标签</div>
+                              <div className="flex flex-wrap gap-2">
+                                <button
+                                  onClick={() => setSelectedTags([])}
+                                  style={{
+                                    padding: '8px 16px',
+                                    borderRadius: '20px',
+                                    fontSize: '13px',
+                                    border: 'none',
+                                    cursor: 'pointer',
+                                    fontWeight: selectedTags.length === 0 ? 500 : 400,
+                                    background: selectedTags.length === 0 ? '#2563EB' : '#F2F2F7',
+                                    color: selectedTags.length === 0 ? '#fff' : '#8E8E93',
+                                    transition: 'all 0.15s'
+                                  }}
+                                >
+                                  全部标签
+                                </button>
+                                {allAvailableTags.map(tag => {
+                                  const isActive = selectedTags.includes(tag)
+                                  return (
+                                    <button
+                                      key={tag}
+                                      onClick={() => {
+                                        setSelectedTags(isActive ? selectedTags.filter(t => t !== tag) : [...selectedTags, tag])
+                                      }}
+                                      style={{
+                                        padding: '8px 16px',
+                                        borderRadius: '20px',
+                                        fontSize: '13px',
+                                        border: 'none',
+                                        cursor: 'pointer',
+                                        fontWeight: isActive ? 500 : 400,
+                                        background: isActive ? '#fa8c16' : '#F2F2F7',
+                                        color: isActive ? '#fff' : '#8E8E93',
+                                        transition: 'all 0.15s'
+                                      }}
+                                    >
+                                      {tag}
+                                    </button>
+                                  )
+                                })}
+                              </div>
+                            </div>
                           )}
+
+                          {/* Reset */}
+                          <div style={{ paddingTop: '12px', borderTop: '1px solid #E5E5EA' }}>
+                            <button
+                              onClick={() => {
+                                setSelectedSubject('all')
+                                setSelectedTimeRange('all')
+                                setSelectedErrorCount('all')
+                                setSelectedTags([])
+                              }}
+                              style={{
+                                width: '100%',
+                                padding: '10px',
+                                borderRadius: '20px',
+                                fontSize: '14px',
+                                fontWeight: 500,
+                                border: 'none',
+                                cursor: 'pointer',
+                                background: '#F2F2F7',
+                                color: '#8E8E93',
+                                transition: 'all 0.15s'
+                              }}
+                            >
+                              重置
+                            </button>
+                          </div>
                         </div>
                       </div>
                     </div>

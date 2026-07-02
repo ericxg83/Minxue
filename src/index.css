@@ -156,12 +156,12 @@ button {
   }
 }
 
-/* Slide up animation for filter popup */
-@keyframes slideUp {
+/* Slide in from right for filter drawer */
+@keyframes slideInRight {
   from {
-    transform: translateY(100%);
+    transform: translateX(100%);
   }
   to {
-    transform: translateY(0);
+    transform: translateX(0);
   }
 }
