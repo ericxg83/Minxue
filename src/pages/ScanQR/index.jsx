@@ -98,6 +98,7 @@ export default function ScanQR({ onClose, onScanSuccess }) {
             studentId: data.studentId,
             studentName: data.studentName || '',
             questionIds: data.questionIds || data.qIds,
+            generatedExamId: data.generatedExamId || '',
             timestamp: data.timestamp || data.ts
           })
           return // 识别成功后立即停止，不再继续下一帧
@@ -220,6 +221,7 @@ export default function ScanQR({ onClose, onScanSuccess }) {
                 studentId: data.studentId,
                 studentName: data.studentName || '',
                 questionIds: data.questionIds || data.qIds,
+                generatedExamId: data.generatedExamId || '',
                 timestamp: data.timestamp || data.ts
               })
             } else {

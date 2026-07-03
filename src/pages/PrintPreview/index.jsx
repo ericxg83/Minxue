@@ -61,6 +61,12 @@ export default function PrintPreview({ onClose, questions: propQuestions }) {
   const [generatingPdf, setGeneratingPdf] = useState(false)
   const [pdfBlob, setPdfBlob] = useState(null)
   const [pdfDownloading, setPdfDownloading] = useState(false)
+  const [generatedExamId, setGeneratedExamId] = useState('')
+
+  // 组件挂载时即保存组卷记录，使二维码中包含 generatedExamId
+  useEffect(() => {
+    saveGeneratedExamRecord()
+  }, [])
 
   // 当外部的 questions prop 变化时同步（用于"重打"等异步加载场景）
   useEffect(() => {
@@ -77,11 +83,13 @@ export default function PrintPreview({ onClose, questions: propQuestions }) {
       type: 'grading',
       paperId: newPaperId,
       studentId: currentStudent?.id,
+      studentName: currentStudent?.name || '',
       questionIds: previewQuestions.map(q => q.id),
+      generatedExamId: generatedExamId || undefined,
       ts: Date.now()
     })
     setQrContent(content)
-  }, [currentStudent, previewQuestions])
+  }, [currentStudent, previewQuestions, generatedExamId])
 
   useEffect(() => {
     if (selectedQuestions.length > 0) {
@@ -233,11 +241,12 @@ export default function PrintPreview({ onClose, questions: propQuestions }) {
           examName = `综合-${dayjs().format('MMDD')}`
         }
 
-        await createGeneratedExam({
+        const exam = await createGeneratedExam({
           student_id: currentStudent.id,
           name: examName,
           question_ids: questionIds
         })
+        if (exam?.id) setGeneratedExamId(exam.id)
         examRecorded.current = true
       } catch (e) {
         console.error('保存组卷记录失败:', e)

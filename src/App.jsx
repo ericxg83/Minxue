@@ -152,7 +152,6 @@ export default function App() {
   const [printMode, setPrintMode] = useState('all')
   const [printSize, setPrintSize] = useState('a4')
   const [showGrading, setShowGrading] = useState(false)
-  const [gradingExam, setGradingExam] = useState(null)
   const [showReprint, setShowReprint] = useState(false)
   const [reprintExam, setReprintExam] = useState(null)
   const [reprintQuestions, setReprintQuestions] = useState([])
@@ -873,12 +872,6 @@ export default function App() {
     }
     setGeneratedExams([newExam, ...(Array.isArray(generatedExams) ? generatedExams : [])])
     Toast.show({ message: '已复制生成新卷', type: 'success' })
-  }
-
-  // Grade exam
-  const handleGradeExam = (exam) => {
-    setGradingExam(exam)
-    setShowGrading(true)
   }
 
   const handleScanSuccess = (scanData) => {
@@ -3335,6 +3328,7 @@ export default function App() {
               paperId={gradingData.paperId}
               studentId={gradingData.studentId}
               questionIds={gradingData.questionIds}
+              generatedExamId={gradingData.generatedExamId}
               onClose={() => { setShowGrading(false); setGradingData(null) }}
               onComplete={handleGradingComplete}
             />
