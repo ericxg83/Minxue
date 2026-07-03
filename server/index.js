@@ -703,7 +703,7 @@ app.post('/api/questions', async (req, res) => {
     const { rows } = await query(
       `INSERT INTO ${TABLES.QUESTIONS} (task_id, student_id, content, options, answer, status, question_type, subject, analysis, image_url, geometry_image_url, is_complete)
        VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12) RETURNING *`,
-      [task_id, student_id, content, JSON.stringify(options || []), answer || '', status || 'pending', question_type || 'answer', subject || '数学', analysis || '', image_url || null, geometry_image_url || null, checkQuestionCompleteness({ content, options, answer, question_type, geometry_image_url }).isComplete]
+      [task_id, student_id, content, JSON.stringify(options || []), answer || null, status || 'pending', question_type || 'answer', subject || '数学', analysis || '', image_url || null, geometry_image_url || null, checkQuestionCompleteness({ content, options, answer, question_type, geometry_image_url }).isComplete]
     )
 
     res.status(201).json({ success: true, question: rows[0] })
@@ -939,12 +939,19 @@ app.post('/api/questions/batch', async (req, res) => {
     }
 
     const placeholders = ids.map((_, i) => `$${i + 1}`).join(',')
-    let queryStr = `SELECT q.*`
+    let queryStr = `SELECT q.*,
+      qc.content AS _cache_content,
+      qc.options AS _cache_options,
+      qc.answer AS _cache_answer,
+      qc.analysis AS _cache_analysis,
+      qc.ai_tags AS _cache_ai_tags`
     // 当提供 studentId 时，LEFT JOIN wrong_questions 带出掌握度信息
     if (studentId) {
       queryStr += `, wq.error_count, wq.lifecycle_status, wq.status AS wq_status`
     }
-    queryStr += ` FROM ${TABLES.QUESTIONS} q`
+    const cacheIdx = ids.length + 1
+    queryStr += ` FROM ${TABLES.QUESTIONS} q
+       LEFT JOIN ${TABLES.QUESTION_CACHE} qc ON q.cache_id = qc.id`
     if (studentId) {
       const sidIdx = ids.length + 1
       queryStr += ` LEFT JOIN ${TABLES.WRONG_QUESTIONS} wq ON wq.question_id = q.id AND wq.student_id = $${sidIdx}`
@@ -954,7 +961,23 @@ app.post('/api/questions/batch', async (req, res) => {
     const params = studentId ? [...ids, studentId] : ids
     const { rows } = await query(queryStr, params)
 
-    res.json({ success: true, questions: rows })
+    const merged = rows.map(q => ({
+      ...q,
+      content: q.content || q._cache_content,
+      options: q.options || q._cache_options,
+      answer: q.answer || q._cache_answer,
+      analysis: q.analysis || q._cache_analysis,
+      ai_tags: q.ai_tags || q._cache_ai_tags
+    }))
+    for (const qq of merged) {
+      delete qq._cache_content
+      delete qq._cache_options
+      delete qq._cache_answer
+      delete qq._cache_analysis
+      delete qq._cache_ai_tags
+    }
+
+    res.json({ success: true, questions: merged })
   } catch (error) {
     console.error('批量获取题目失败:', error)
     res.status(500).json({ error: error.message })
@@ -985,7 +1008,7 @@ app.get('/api/questions/task/:taskId', async (req, res) => {
       ...q,
       content: q.content ?? q._cache_content,
       options: q.options ?? q._cache_options,
-      answer: q.answer ?? q._cache_answer,
+      answer: q.answer || q._cache_answer,
       analysis: q.analysis ?? q._cache_analysis,
       question_type: q.question_type ?? q._cache_question_type,
       subject: q.subject ?? q._cache_subject,
@@ -1103,9 +1126,9 @@ app.get('/api/questions/search', async (req, res) => {
       ...q,
       content: q.content ?? q._cache_content,
       options: q.options ?? q._cache_options,
-      answer: q.answer ?? q._cache_answer,
-      analysis: q.analysis ?? q._cache_analysis,
-      ai_tags: q.ai_tags ?? q._cache_ai_tags
+      answer: q.answer || q._cache_answer,
+      analysis: q.analysis || q._cache_analysis,
+      ai_tags: q.ai_tags || q._cache_ai_tags
     }))
     for (const qq of merged) {
       delete qq._cache_content

@@ -58,9 +58,21 @@
             <span v-if="editing" style="color:#e6a23c;font-weight:400;"> 编辑</span>
           </span>
           <el-input v-if="editing" v-model="form.answer" size="default" placeholder="标准答案" />
-          <span v-else class="ops-cmp-value correct-val">
-            <MathRender :content="q.answer || '—'" autoDetect tag="span" />
+          <span v-else-if="q.answer" class="ops-cmp-value correct-val">
+            <MathRender :content="q.answer" autoDetect tag="span" />
           </span>
+          <div v-else class="quick-answer-wrap">
+            <div v-if="!quickAnswerEditing" class="ops-cmp-value missing-val" @click="startQuickAnswerEdit">
+              — <span class="quick-edit-hint">点击填写</span>
+            </div>
+            <div v-else class="quick-answer-edit">
+              <el-input v-model="quickAnswerText" size="small" placeholder="输入标准答案" @keyup.enter="saveQuickAnswer" ref="quickInputRef" />
+              <div class="quick-answer-actions">
+                <el-button size="small" type="primary" :loading="quickAnswerSaving" @click="saveQuickAnswer">保存</el-button>
+                <el-button size="small" @click="cancelQuickAnswerEdit">取消</el-button>
+              </div>
+            </div>
+          </div>
         </div>
       </div>
 
@@ -216,7 +228,7 @@
 </template>
 
 <script setup>
-import { ref, computed, watch } from 'vue'
+import { ref, computed, watch, nextTick } from 'vue'
 import { useReviewStore } from '../../stores/reviewStore'
 import { updateQuestion, rejudgeQuestion, clearStudentCaches, uploadImage } from '../../../services/apiService'
 import { processExamImage } from '../../../utils/imageProcessor'
@@ -262,6 +274,10 @@ const imageUrl = computed(() => q.value?.geometry_image_url || q.value?.image_ur
 
 const editing = ref(false)
 const animatingBtn = ref('')
+const quickAnswerEditing = ref(false)
+const quickAnswerText = ref('')
+const quickAnswerSaving = ref(false)
+const quickInputRef = ref(null)
 const form = ref({ content: '', options: [], answer: '', analysis: '', tags: [], question_type: 'choice', subject: '' })
 const originalData = ref(null)
 const localImageUrl = ref('')
@@ -419,7 +435,43 @@ watch(q, (newQ) => {
     localImageUrl.value = ''
   }
   editing.value = false
+  quickAnswerEditing.value = false
+  quickAnswerText.value = ''
 }, { immediate: true })
+
+const startQuickAnswerEdit = () => {
+  quickAnswerText.value = q.value?.answer || ''
+  quickAnswerEditing.value = true
+  nextTick(() => {
+    quickInputRef.value?.focus()
+  })
+}
+const cancelQuickAnswerEdit = () => {
+  quickAnswerEditing.value = false
+  quickAnswerText.value = ''
+}
+const saveQuickAnswer = async () => {
+  const question = q.value
+  if (!question?.id) return
+  const text = quickAnswerText.value?.trim()
+  if (!text) {
+    ElMessage.warning('请输入标准答案')
+    return
+  }
+  quickAnswerSaving.value = true
+  try {
+    await updateQuestion(question.id, { answer: text })
+    question.answer = text
+    quickAnswerEditing.value = false
+    quickAnswerText.value = ''
+    ElMessage.success('标准答案已保存')
+  } catch (err) {
+    console.error('保存标准答案失败:', err)
+    ElMessage.error('保存失败，请重试')
+  } finally {
+    quickAnswerSaving.value = false
+  }
+}
 
 const handleEnterEdit = () => {
   originalData.value = JSON.parse(JSON.stringify(form.value))
@@ -625,6 +677,19 @@ const deleteImage = () => {
   margin: 0 12px;
   flex-shrink: 0;
 }
+
+/* ── 快速填写标准答案 ── */
+.quick-answer-wrap { min-height: 32px; display: flex; align-items: center; }
+.missing-val {
+  color: #c0c4cc; cursor: pointer; transition: color 0.15s;
+  display: inline-flex; align-items: center; gap: 6px; font-size: 18px;
+}
+.missing-val:hover { color: #409eff; }
+.quick-edit-hint { font-size: 12px; font-weight: 400; color: #409eff; }
+.quick-answer-edit {
+  display: flex; flex-direction: column; gap: 6px;
+}
+.quick-answer-actions { display: flex; gap: 4px; }
 
 /* ── AI 判定 ── */
 .ops-ai-row {
