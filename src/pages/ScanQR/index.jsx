@@ -202,15 +202,28 @@ export default function ScanQR({ onClose, onScanSuccess }) {
     reader.onload = (event) => {
       const img = new Image()
       img.onload = () => {
-        // Phase 2: 复用 canvas，优化内存使用
+        // 尝试多个分辨率以提升 jsQR 检测率
+        // 手机照片分辨率很高(如4032x3024)，二维码在画面中占比很小
+        // 先用较高分辨率(2000px)扫描，如失败再尝试降低
+        const scanResolutions = [2000, 1200, 600]
+        let code = null
         const canvas = canvasRef.current
-        const scale = Math.min(1, 600 / Math.max(img.width, img.height))
-        canvas.width = Math.floor(img.width * scale)
-        canvas.height = Math.floor(img.height * scale)
-        const ctx = canvas.getContext('2d', { willReadFrequently: true })
-        ctx.drawImage(img, 0, 0, canvas.width, canvas.height)
-        const imageData = ctx.getImageData(0, 0, canvas.width, canvas.height)
-        const code = jsQR(imageData.data, imageData.width, imageData.height)
+
+        for (const maxDim of scanResolutions) {
+          const scale = Math.min(1, maxDim / Math.max(img.width, img.height))
+          const w = Math.floor(img.width * scale)
+          const h = Math.floor(img.height * scale)
+          if (w === canvas.width && h === canvas.height) continue
+          canvas.width = w
+          canvas.height = h
+          const ctx = canvas.getContext('2d', { willReadFrequently: true })
+          ctx.drawImage(img, 0, 0, w, h)
+          const imageData = ctx.getImageData(0, 0, w, h)
+          code = jsQR(imageData.data, imageData.width, imageData.height, {
+            inversionAttempts: 'attemptBoth'
+          })
+          if (code) break
+        }
 
         if (code) {
           try {
