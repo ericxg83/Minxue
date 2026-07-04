@@ -15,14 +15,14 @@ import MathText from '../../components/MathText'
 
 const COLORS = {
   primary: '#3B82F6',
-  success: '#2D9D6E',
-  danger: '#E55353',
-  warning: '#E8A838',
-  background: '#F5F4F1',
+  success: '#16A34A',
+  danger: '#DC2626',
+  warning: '#D97706',
+  background: '#EEF2FF',
   card: '#FFFFFF',
-  text: '#1C1C1E',
-  textSecondary: '#8E8E93',
-  border: '#E8E5E0'
+  text: '#1E293B',
+  textSecondary: '#64748B',
+  border: '#E2E8F0'
 }
 
 // ── 面板边界常量 ──

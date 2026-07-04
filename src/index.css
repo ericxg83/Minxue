@@ -1,54 +1,60 @@
 @import "tailwindcss";
 
 :root {
-  /* ── Claude-Inspired Backgrounds ── */
-  --bg: #F5F4F1;             /* warm light page bg */
-  --bg-card: #FFFFFF;         /* clean white card bg */
-  --bg-hover: #F0EDE8;        /* warm hover state */
-  --bg-elevated: #FAFAF8;     /* warm white for elevated surfaces */
-  --bg-secondary: #EDE9E3;    /* warm gray secondary bg */
-  --bg-mist: #F8F7F4;         /* between bg and card */
+  /* ── UI UX Pro Max · Educational App Palette ── */
+  --bg: #EEF2FF;             /* light indigo-blue bg */
+  --bg-card: #FFFFFF;        /* clean white card bg */
+  --bg-hover: #E2E8F0;       /* hover state */
+  --bg-elevated: #F8FAFF;    /* elevated surface */
+  --bg-secondary: #E2E8F0;   /* gray secondary bg */
+  --bg-mist: #F1F5F9;        /* between bg and card */
 
-  /* ── Blue Accent ── */
+  /* ── Primary — Blue (user preference) ── */
   --primary: #3B82F6;         /* clean blue */
-  --primary-hover: #2563EB;   /* darker blue for hover */
-  --primary-soft: #EFF6FF;    /* light blue bg */
-  --primary-mist: #F5F8FF;    /* very light blue mist */
+  --primary-hover: #2563EB;   /* darker blue */
+  --primary-soft: #DBEAFE;    /* light blue bg */
+  --primary-mist: #EFF6FF;    /* very light blue mist */
+
+  /* ── Accent — Energetic Orange (Educational App CTA) ── */
+  --accent: #EA580C;          /* energetic orange CTA */
+  --accent-hover: #C2410C;
+  --accent-soft: #FFF7ED;     /* light orange bg */
 
   /* ── Semantic Colors ── */
-  --success: #2D9D6E;
-  --success-soft: #E8F8F0;
-  --warning: #E8A838;
-  --warning-soft: #FFF8E8;
-  --danger: #E55353;
-  --danger-soft: #FFECEC;
-  --info: #5B8DEF;
-  --info-soft: #EAF1FE;
+  --success: #16A34A;
+  --success-soft: #DCFCE7;
+  --warning: #D97706;
+  --warning-soft: #FEF3C7;
+  --danger: #DC2626;
+  --danger-soft: #FEE2E2;
+  --info: #4F46E5;
+  --info-soft: #EEF2FF;
 
   /* ── Text ── */
-  --text: #1C1C1E;            /* primary text */
-  --text-secondary: #8E8E93;  /* secondary text */
-  --text-tertiary: #B8B8BE;   /* placeholder / disabled */
+  --text: #1E293B;            /* primary text */
+  --text-secondary: #64748B;  /* secondary text */
+  --text-tertiary: #94A3B8;   /* placeholder / disabled */
   --text-inverse: #FFFFFF;
 
   /* ── Borders ── */
-  --border: #E8E5E0;          /* subtle warm border */
-  --border-light: #F0EDE8;    /* even lighter border */
+  --border: #E2E8F0;          /* subtle border */
+  --border-light: #F1F5F9;    /* even lighter */
 
-  /* ── Radius ── */
-  --radius-sm: 8px;
-  --radius-md: 12px;
-  --radius-lg: 16px;
-  --radius-xl: 20px;
-  --radius-2xl: 24px;
+  /* ── Radius — Claymorphism: slightly larger, tactile ── */
+  --radius-sm: 10px;
+  --radius-md: 14px;
+  --radius-lg: 18px;
+  --radius-xl: 22px;
+  --radius-2xl: 28px;
   --radius-full: 9999px;
 
-  /* ── Shadows ── */
-  --shadow-sm: 0 1px 2px rgba(0,0,0,0.04);
-  --shadow-md: 0 2px 8px rgba(0,0,0,0.06);
-  --shadow-lg: 0 4px 16px rgba(0,0,0,0.08);
-  --shadow-xl: 0 8px 24px rgba(0,0,0,0.10);
-  --shadow-purple: 0 2px 12px rgba(59,130,246,0.25);
+  /* ── Shadows — Claymorphism: soft, tactile depth ── */
+  --shadow-sm: 0 1px 3px rgba(0,0,0,0.06);
+  --shadow-md: 0 3px 10px rgba(0,0,0,0.08);
+  --shadow-lg: 0 6px 20px rgba(0,0,0,0.10);
+  --shadow-xl: 0 10px 30px rgba(0,0,0,0.12);
+  --shadow-primary: 0 3px 14px rgba(59,130,246,0.25);
+  --shadow-accent: 0 3px 14px rgba(234,88,12,0.25);
 }
 
 html, body, #root {
@@ -61,7 +67,7 @@ body {
   margin: 0;
   background: var(--bg);
   color: var(--text);
-  font-family: -apple-system, BlinkMacSystemFont, "SF Pro Text", "SF Pro Display", "PingFang SC", "Helvetica Neue", "Inter", sans-serif;
+  font-family: -apple-system, BlinkMacSystemFont, "SF Pro Text", "SF Pro Display", "PingFang SC", "Inter", sans-serif;
   font-size: 14px;
   line-height: 1.5;
 }
@@ -76,39 +82,35 @@ button {
 }
 
 /* ── Scrollbar ── */
-.no-scrollbar::-webkit-scrollbar {
-  display: none;
-}
-.no-scrollbar {
-  -ms-overflow-style: none;
-  scrollbar-width: none;
-}
+.no-scrollbar::-webkit-scrollbar { display: none; }
+.no-scrollbar { -ms-overflow-style: none; scrollbar-width: none; }
 
-/* ── Card ── */
+/* ── Card — Claymorphism: soft, tactile ── */
 .card {
   background: var(--bg-card);
-  border: 1px solid var(--border);
+  border: 1px solid var(--border-light);
   border-radius: var(--radius-md);
   box-shadow: var(--shadow-sm);
-  transition: box-shadow 0.2s ease, transform 0.2s ease;
+  transition: box-shadow 0.25s ease, transform 0.2s ease;
 }
 .card:active {
+  transform: scale(0.98);
   box-shadow: var(--shadow-md);
 }
 
-/* ── Tab Pill - iOS segmented control style ── */
+/* ── Tab Pill ── */
 .tab-pill {
   display: flex;
   gap: 2px;
   background: var(--bg-secondary);
   border-radius: var(--radius-sm);
-  padding: 2px;
+  padding: 3px;
 }
 
 .tab-pill-item {
   flex: 1;
-  padding: 7px 14px;
-  border-radius: 6px;
+  padding: 8px 16px;
+  border-radius: 8px;
   font-size: 13px;
   font-weight: 500;
   color: var(--text-secondary);
@@ -129,7 +131,7 @@ button {
 
 /* ── Filter Chip ── */
 .filter-chip {
-  padding: 5px 14px;
+  padding: 6px 16px;
   border-radius: var(--radius-full);
   font-size: 12px;
   font-weight: 500;
@@ -138,12 +140,11 @@ button {
   transition: all 0.2s ease;
   white-space: nowrap;
 }
-
 .filter-chip.active {
   background: var(--primary);
   color: white;
+  box-shadow: var(--shadow-primary);
 }
-
 .filter-chip.inactive {
   background: var(--bg-secondary);
   color: var(--text-secondary);
@@ -160,10 +161,33 @@ button {
   border-radius: var(--radius-full);
   font-size: 10px;
   font-weight: 600;
-  letter-spacing: 0.02em;
 }
 
-/* ── Claude Button ── */
+/* ── CTA Button (Accent Orange) ── */
+.btn-cta {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  padding: 12px 24px;
+  background: linear-gradient(135deg, var(--accent), #F97316);
+  color: white;
+  border: none;
+  border-radius: var(--radius-sm);
+  font-size: 15px;
+  font-weight: 700;
+  transition: all 0.2s ease;
+  box-shadow: var(--shadow-accent);
+}
+.btn-cta:hover {
+  transform: translateY(-1px);
+  box-shadow: 0 4px 18px rgba(234,88,12,0.35);
+}
+.btn-cta:active {
+  transform: scale(0.97);
+}
+
+/* ── Primary Button ── */
 .btn-primary {
   display: inline-flex;
   align-items: center;
@@ -177,10 +201,7 @@ button {
   font-size: 14px;
   font-weight: 600;
   transition: all 0.2s ease;
-}
-.btn-primary:hover {
-  background: var(--primary-hover);
-  box-shadow: var(--shadow-purple);
+  box-shadow: var(--shadow-primary);
 }
 .btn-primary:active {
   transform: scale(0.97);
@@ -211,19 +232,19 @@ button {
   100% { background-position: 200% 0; }
 }
 .skeleton {
-  background: linear-gradient(90deg, #EDE9E3 25%, #F5F4F1 50%, #EDE9E3 75%);
+  background: linear-gradient(90deg, #E2E8F0 25%, #F1F5F9 50%, #E2E8F0 75%);
   background-size: 200% 100%;
   animation: shimmer 1.5s ease-in-out infinite;
   border-radius: var(--radius-sm);
 }
 
-/* ── Entrance animation ── */
+/* ── Entrance animations (150-300ms · micro-interactions) ── */
 @keyframes fadeUp {
   from { opacity: 0; transform: translateY(8px); }
   to { opacity: 1; transform: translateY(0); }
 }
 .animate-fade-up {
-  animation: fadeUp 0.3s ease-out;
+  animation: fadeUp 0.25s ease-out;
 }
 
 @keyframes fadeIn {
@@ -232,6 +253,14 @@ button {
 }
 .animate-fade-in {
   animation: fadeIn 0.2s ease-out;
+}
+
+/* ── Tap feedback ── */
+.tap-scale {
+  transition: transform 0.15s ease;
+}
+.tap-scale:active {
+  transform: scale(0.96);
 }
 
 /* ── Print styles ── */
@@ -253,16 +282,10 @@ button {
   to { transform: translateX(0); }
 }
 
-/* ── Pulse ring ── */
-@keyframes pulse-ring {
-  0% { box-shadow: 0 0 0 0 rgba(59,130,246,0.3); }
-  70% { box-shadow: 0 0 0 12px rgba(59,130,246,0); }
-  100% { box-shadow: 0 0 0 0 rgba(59,130,246,0); }
-}
-
 /* ── Glass overlay ── */
 .glass {
-  background: rgba(255,255,255,0.72);
-  backdrop-filter: blur(12px);
-  -webkit-backdrop-filter: blur(12px);
+  background: rgba(255,255,255,0.78);
+  backdrop-filter: blur(14px);
+  -webkit-backdrop-filter: blur(14px);
+  border-bottom: 1px solid rgba(226,232,240,0.6);
 }

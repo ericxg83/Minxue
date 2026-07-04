@@ -2882,13 +2882,13 @@ export default function App() {
             whileTap={{ scale: 0.9 }}
             whileHover={{ scale: 1.05 }}
             onClick={() => setShowUploadOptions(true)}
-            className="fixed right-5 z-50 flex items-center justify-center"
+            className="fixed right-5 z-50 flex items-center justify-center shadow-lg tap-scale"
             style={{
-              width: '52px',
-              height: '52px',
+              width: '54px',
+              height: '54px',
               borderRadius: '16px',
               background: 'linear-gradient(135deg, var(--primary) 0%, #60A5FA 100%)',
-              boxShadow: '0 4px 16px rgba(59,130,246,0.35)',
+              boxShadow: 'var(--shadow-primary)',
               bottom: 'calc(80px + env(safe-area-inset-bottom, 0px))',
             }}
           >
@@ -2920,10 +2920,10 @@ export default function App() {
                 <div className="grid grid-cols-2 gap-4">
                   <button
                     onClick={() => triggerUpload(true)}
-                    className="flex flex-col items-center gap-3 p-5 rounded-2xl transition-all active:scale-[0.97]"
-                    style={{ background: 'var(--primary-soft)' }}
+                    className="flex flex-col items-center gap-3 p-5 rounded-2xl transition-all active:scale-[0.97] tap-scale"
+                    style={{ background: 'var(--accent-soft)' }}
                   >
-                    <div className="w-14 h-14 rounded-2xl flex items-center justify-center" style={{ background: 'var(--primary)' }}>
+                    <div className="w-14 h-14 rounded-2xl flex items-center justify-center shadow-md" style={{ background: 'linear-gradient(135deg, var(--accent), #F97316)' }}>
                       <Camera size={28} className="text-white" />
                     </div>
                     <div className="text-center">
@@ -2933,10 +2933,10 @@ export default function App() {
                   </button>
                   <button
                     onClick={() => triggerUpload(false)}
-                    className="flex flex-col items-center gap-3 p-5 rounded-2xl transition-all active:scale-[0.97]"
-                    style={{ background: 'var(--info-soft)' }}
+                    className="flex flex-col items-center gap-3 p-5 rounded-2xl transition-all active:scale-[0.97] tap-scale"
+                    style={{ background: 'var(--primary-soft)' }}
                   >
-                    <div className="w-14 h-14 rounded-2xl flex items-center justify-center" style={{ background: 'var(--info)' }}>
+                    <div className="w-14 h-14 rounded-2xl flex items-center justify-center shadow-md" style={{ background: 'var(--primary)' }}>
                       <ImageIcon size={28} className="text-white" />
                     </div>
                     <div className="text-center">

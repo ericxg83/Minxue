@@ -82,13 +82,13 @@ export default function Home({ onNavigate }) {
         className="w-full relative overflow-hidden rounded-3xl p-8 text-white shadow-xl flex flex-col items-center justify-center"
         style={{
           minHeight: '320px',
-          background: 'linear-gradient(145deg, #3B82F6 0%, #60A5FA 40%, #93C5FD 100%)',
-          boxShadow: '0 8px 32px rgba(59,130,246,0.3)',
+          background: 'linear-gradient(145deg, #2563EB 0%, #3B82F6 40%, #60A5FA 100%)',
+          boxShadow: 'var(--shadow-primary)',
         }}
       >
         {/* Decorative blobs */}
         <div className="absolute -top-16 -right-16 w-48 h-48 rounded-full" style={{ background: 'rgba(255,255,255,0.08)' }} />
-        <div className="absolute -bottom-12 -left-12 w-36 h-36 rounded-full" style={{ background: 'rgba(167,139,250,0.2)' }} />
+        <div className="absolute -bottom-12 -left-12 w-36 h-36 rounded-full" style={{ background: 'rgba(96,165,250,0.2)' }} />
         <div className="absolute top-1/2 right-8 w-20 h-20 rounded-full" style={{ background: 'rgba(255,255,255,0.05)' }} />
 
         <div className="relative z-10 flex flex-col items-center">
@@ -97,7 +97,7 @@ export default function Home({ onNavigate }) {
           </div>
           <h2 className="text-2xl font-bold tracking-tight mb-1.5">拍照上传错题</h2>
           <p className="text-sm font-medium tracking-wide" style={{ color: 'rgba(255,255,255,0.7)' }}>Qwen-VL 智能识别题目</p>
-          <div className="mt-6 flex items-center gap-1.5 px-4 py-1.5 rounded-full text-[10px] font-semibold tracking-widest uppercase" style={{ background: 'rgba(255,255,255,0.12)' }}>
+          <div className="mt-6 flex items-center gap-1.5 px-4 py-1.5 rounded-full text-[10px] font-semibold tracking-widest uppercase" style={{ background: 'rgba(251,146,60,0.25)' }}>
             <Sparkles size={12} fill="white" className="shrink-0" />
             <span>AI 智能识别已就绪</span>
           </div>
