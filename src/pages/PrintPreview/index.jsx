@@ -353,11 +353,11 @@ export default function PrintPreview({ onClose, questions: propQuestions }) {
             <div className="absolute top-6 right-8 text-center">
               <QRCodeSVG
                 value={qrContent || 'https://minxue.app/grading'}
-                size={70}
+                size={50}
                 level="H"
                 includeMargin={true}
               />
-              <div className="text-[8pt] text-gray-400 mt-1">扫码批改</div>
+              <div className="text-[7pt] text-gray-400 mt-1">扫码批改</div>
             </div>
 
             {/* Header */}

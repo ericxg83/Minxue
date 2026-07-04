@@ -245,46 +245,51 @@ export default function Exam() {
             <div
               key={exam.id}
               onClick={() => (exam.status === 'graded' || exam.status === 'done') ? handleOpenReview(exam) : handleReprint(exam)}
-              className="card active:scale-[0.99] transition-all"
-              style={{ padding: '16px', cursor: 'pointer' }}
+              className="card list-card active:scale-[0.99] transition-all"
             >
-              <div className="flex gap-3">
+              <div className="list-card-row items-center">
                 {/* Icon */}
-                <div className="w-[72px] h-[54px] rounded-xl flex items-center justify-center shrink-0" style={{ background: 'var(--primary-soft)' }}>
-                  <FileText size={28} style={{ color: 'var(--primary)' }} />
+                <div className="w-10 h-10 rounded-xl flex items-center justify-center shrink-0" style={{ background: 'var(--primary-soft)' }}>
+                  <FileText size={18} style={{ color: 'var(--primary)' }} />
                 </div>
 
                 {/* Content */}
                 <div className="flex-1 min-w-0">
-                  <div className="flex items-start justify-between gap-2 mb-1">
-                    <p className="text-[15px] font-semibold truncate" style={{ color: 'var(--text)' }}>
+                  <div className="flex items-start justify-between gap-2">
+                    <p className="text-card-title truncate">
                       {exam.name}
                     </p>
                     {exam.status === 'failed' && (
-                      <AlertCircle size={14} style={{ color: 'var(--danger)', flexShrink: 0 }} />
+                      <AlertCircle size={13} style={{ color: 'var(--danger)', flexShrink: 0 }} />
                     )}
                   </div>
 
-                  <div className="flex items-center gap-2 text-[11px]" style={{ color: 'var(--text-tertiary)' }}>
-                    <span>{dayjs(exam.created_at).format('MM/DD HH:mm')}</span>
+                  <div className="flex items-center gap-2 mt-1 flex-wrap">
+                    <span className="text-meta">{dayjs(exam.created_at).format('MM/DD HH:mm')}</span>
                     <span className="w-0.5 h-0.5 rounded-full" style={{ background: 'var(--text-tertiary)' }} />
-                    <span>{exam.question_ids?.length || 0} 题</span>
+                    <span className="text-meta-highlight">{exam.question_ids?.length || 0} 题</span>
+                    {exam.status !== 'done' && exam.status !== 'graded' && (
+                      <>
+                        <span className="w-0.5 h-0.5 rounded-full" style={{ background: 'var(--text-tertiary)' }} />
+                        {renderStatusTag(exam.status)}
+                      </>
+                    )}
                   </div>
 
                   {/* Grading Results */}
                   {exam.status === 'done' && (
-                    <div className="flex items-center gap-3 mt-2">
-                      <span className="inline-flex items-center gap-1 text-[11px] font-medium px-2.5 py-0.5 rounded-full" style={{ background: 'var(--success-soft)', color: 'var(--success)' }}>
-                        <CheckCircle size={11} />
+                    <div className="flex items-center gap-2 mt-1.5">
+                      <span className="stat-pill" style={{ background: 'var(--success-soft)', color: 'var(--success)' }}>
+                        <CheckCircle size={10} />
                         正确 {exam.correct_count || 0}
                       </span>
-                      <span className="inline-flex items-center gap-1 text-[11px] font-medium px-2.5 py-0.5 rounded-full" style={{ background: 'var(--danger-soft)', color: 'var(--danger)' }}>
-                        <XCircle size={11} />
+                      <span className="stat-pill" style={{ background: 'var(--danger-soft)', color: 'var(--danger)' }}>
+                        <XCircle size={10} />
                         错误 {exam.wrong_count || 0}
                       </span>
                       {exam.not_answered_count > 0 && (
-                        <span className="inline-flex items-center gap-1 text-[11px] font-medium px-2.5 py-0.5 rounded-full" style={{ background: 'var(--warning-soft)', color: 'var(--warning)' }}>
-                          <AlertCircle size={11} />
+                        <span className="stat-pill" style={{ background: 'var(--warning-soft)', color: 'var(--warning)' }}>
+                          <AlertCircle size={10} />
                           未作答 {exam.not_answered_count}
                         </span>
                       )}
@@ -292,12 +297,12 @@ export default function Exam() {
                   )}
                 </div>
 
-                {/* Right side */}
+                {/* Right side actions */}
                 <div className="flex flex-col items-end gap-2 shrink-0">
-                  {renderStatusTag(exam.status)}
+                  {exam.status === 'done' && renderStatusTag(exam.status)}
                   <button
                     onClick={(e) => { e.stopPropagation(); handleReprint(exam) }}
-                    className="inline-flex items-center gap-1 text-[10px] font-medium px-2.5 py-1 rounded-lg transition-colors"
+                    className="inline-flex items-center gap-1 text-[10px] font-medium px-2.5 py-1 rounded-lg transition-colors tap-scale"
                     style={{ background: 'var(--primary-soft)', color: 'var(--primary)' }}
                   >
                     <Printer size={11} />

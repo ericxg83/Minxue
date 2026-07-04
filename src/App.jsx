@@ -2149,10 +2149,8 @@ export default function App() {
                         layout
                         initial={{ opacity: 0, y: 10 }}
                         animate={{ opacity: 1, y: 0 }}
-                        className={`card ${isTaskCompleted(task) ? 'cursor-pointer hover:shadow-md' : ''}`}
+                        className={`card list-card ${isTaskCompleted(task) ? 'cursor-pointer hover:shadow-md' : ''}`}
                         style={{
-                          padding: '12px 14px',
-                          transition: 'all 0.2s ease',
                           borderLeft: isTaskCompleted(task) ? '3px solid var(--primary)' : '3px solid var(--warning)',
                         }}
                         onClick={() => {
@@ -2162,8 +2160,8 @@ export default function App() {
                           }
                         }}
                       >
-                        <div className="flex gap-3 items-center">
-                          {/* Thumbnail with Claude-style mask */}
+                        <div className="list-card-row items-center">
+                          {/* Thumbnail */}
                           <div
                             className="w-10 h-10 rounded-xl flex-shrink-0 overflow-hidden cursor-pointer ring-1 ring-black/5"
                             style={{ background: 'var(--bg-mist)' }}
@@ -2179,29 +2177,28 @@ export default function App() {
                           </div>
                           {/* Content */}
                           <div className="flex-1 min-w-0">
-                            <div className="flex items-center justify-between gap-1">
-                              <span style={{ fontSize: '14px', fontWeight: 600, color: 'var(--text)' }} className="truncate">
+                            <div className="flex items-center justify-between gap-2">
+                              <span className="text-card-title truncate">
                                 {task.original_name || '未命名试卷'}
                               </span>
                               <button
                                 onClick={(e) => { e.stopPropagation(); setDeleteTarget({ type: 'task', id: task.id }); setShowDeleteConfirm(true) }}
-                                className="flex-shrink-0 opacity-0 group-hover:opacity-100 transition-opacity"
+                                className="flex-shrink-0 opacity-0 group-hover:opacity-100 transition-opacity tap-scale"
                                 style={{ color: 'var(--text-tertiary)' }}
                               >
                                 <Trash2 size={13} />
                               </button>
                             </div>
                             <div className="flex items-center gap-2 mt-1 flex-wrap">
-                              <span style={{ fontSize: '11px', color: 'var(--text-tertiary)' }}>
+                              <span className="text-meta">
                                 {dayjs(task.created_at).format('MM/DD HH:mm')}
                               </span>
                               {task.result?.questionCount ? (
                                 <>
                                   <span className="w-0.5 h-0.5 rounded-full" style={{ background: 'var(--text-tertiary)' }} />
-                                  <span style={{ fontSize: '11px', color: 'var(--text-secondary)' }}>{task.result.questionCount} 题</span>
+                                  <span className="text-meta-highlight">{task.result.questionCount} 题</span>
                                 </>
                               ) : null}
-                              {/* Inline status for non-done */}
                               {!isTaskCompleted(task) && (
                                 <>
                                   <span className="w-0.5 h-0.5 rounded-full" style={{ background: 'var(--text-tertiary)' }} />
@@ -2210,8 +2207,8 @@ export default function App() {
 
                                     if (task.status === 'processing') {
                                       return (
-                                        <span className="inline-flex items-center gap-1" style={{ fontSize: '11px', color: 'var(--primary)' }}>
-                                          <span className="inline-block w-2 h-2 rounded-full animate-pulse" style={{ background: 'var(--primary)' }} />
+                                        <span className="inline-flex items-center gap-1 text-meta" style={{ color: 'var(--primary)' }}>
+                                          <span className="inline-block w-1.5 h-1.5 rounded-full animate-pulse" style={{ background: 'var(--primary)' }} />
                                           批改中
                                         </span>
                                       )
@@ -2219,12 +2216,12 @@ export default function App() {
 
                                     if (task.status === 'failed') {
                                       return (
-                                        <span className="inline-flex items-center gap-1" style={{ fontSize: '11px', color: 'var(--danger)' }}>
-                                          <span className="inline-block w-2 h-2 rounded-full" style={{ background: 'var(--danger)' }} />
+                                        <span className="inline-flex items-center gap-1 text-meta" style={{ color: 'var(--danger)' }}>
+                                          <span className="inline-block w-1.5 h-1.5 rounded-full" style={{ background: 'var(--danger)' }} />
                                           识别失败
                                           <button
                                             onClick={(e) => { e.stopPropagation(); handleRetryTask(task.id) }}
-                                            className="rounded text-[10px] font-medium px-1.5 py-0.5 transition-colors"
+                                            className="rounded text-[10px] font-medium px-1.5 py-0.5 transition-colors tap-scale"
                                             style={{
                                               border: '1px solid var(--danger)',
                                               background: 'var(--danger-soft)',
@@ -2237,10 +2234,9 @@ export default function App() {
                                       )
                                     }
 
-                                    // Pending status
                                     return (
-                                      <span className="inline-flex items-center gap-1" style={{ fontSize: '11px', color: pendingMinutes > 30 ? 'var(--danger)' : 'var(--warning)' }}>
-                                        <span className="inline-block w-2 h-2 rounded-full" style={{ background: pendingMinutes > 30 ? 'var(--danger)' : 'var(--warning)' }} />
+                                      <span className="inline-flex items-center gap-1 text-meta" style={{ color: pendingMinutes > 30 ? 'var(--danger)' : 'var(--warning)' }}>
+                                        <span className="inline-block w-1.5 h-1.5 rounded-full" style={{ background: pendingMinutes > 30 ? 'var(--danger)' : 'var(--warning)' }} />
                                         等待中 ({pendingMinutes}分钟)
                                       </span>
                                     )
@@ -2248,37 +2244,20 @@ export default function App() {
                                 </>
                               )}
                             </div>
-                            {/* Stats */}
                             {isTaskCompleted(task) && task.result?.questionCount ? (
                               <div className="flex items-center gap-2 mt-1.5">
-                                <span className="inline-flex items-center gap-1" style={{
-                                  fontSize: '10px',
-                                  padding: '1px 8px',
-                                  height: '18px',
-                                  borderRadius: 'var(--radius-full)',
-                                  background: 'var(--success-soft)',
-                                  color: 'var(--success)',
-                                  fontWeight: 500,
-                                }}>
+                                <span className="stat-pill" style={{ background: 'var(--success-soft)', color: 'var(--success)' }}>
                                   <Check size={10} />
                                   正确 {task.result?.questionCount - (task.result?.wrongCount || 0)}
                                 </span>
-                                <span className="inline-flex items-center gap-1" style={{
-                                  fontSize: '10px',
-                                  padding: '1px 8px',
-                                  height: '18px',
-                                  borderRadius: 'var(--radius-full)',
-                                  background: 'var(--danger-soft)',
-                                  color: 'var(--danger)',
-                                  fontWeight: 500,
-                                }}>
+                                <span className="stat-pill" style={{ background: 'var(--danger-soft)', color: 'var(--danger)' }}>
                                   <X size={10} />
                                   错误 {task.result?.wrongCount || 0}
                                 </span>
                               </div>
                             ) : null}
                             {task.status === 'failed' && task.result?.error && (
-                              <p style={{ fontSize: '10px', color: 'var(--danger)', marginTop: '3px', lineHeight: 1.3 }}>
+                              <p className="text-meta mt-0.5" style={{ color: 'var(--danger)' }}>
                                 {task.result.error}
                               </p>
                             )}

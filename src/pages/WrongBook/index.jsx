@@ -11,6 +11,7 @@ import {
   Space
 } from 'antd-mobile'
 import { RightOutline, DownOutline } from 'antd-mobile-icons'
+import { AlertTriangle } from 'lucide-react'
 import { useStudentStore, useWrongQuestionStore, useUIStore } from '../../store'
 import { getWrongQuestionsByStudent, deleteWrongQuestion, updateWrongQuestionStatus, createGeneratedExam } from '../../services/apiService'
 import { generateQRCodeContent } from '../../services/aiService'
@@ -1031,33 +1032,19 @@ const renderMasteredTag = (wq) => {
               return (
                 <div
                   key={wq.id}
-                  style={{
-                    background: CLAUDE_COLORS.card,
-                    borderRadius: '12px',
-                    padding: '16px',
-                    boxShadow: '0 1px 3px rgba(0,0,0,0.04)'
-                  }}
+                  className="card list-card"
                 >
                   {/* 头部：复选框、分类、日期、掌握状态 */}
-                  <div style={{ 
-                    display: 'flex', 
-                    justifyContent: 'space-between', 
-                    alignItems: 'center',
-                    marginBottom: '12px'
-                  }}>
-                    <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                  <div className="flex items-center justify-between mb-3">
+                    <div className="flex items-center gap-2">
                       <Checkbox
                         checked={isSelected}
                         onChange={() => toggleSelection(wq)}
                       />
-                      <span style={{ fontSize: '14px', color: CLAUDE_COLORS.textSecondary }}>
-                        {question.subject || '数学'} · {question.category || '其他'}
-                      </span>
+                      <span className="text-label">{question.subject || '数学'} · {question.category || '其他'}</span>
                     </div>
-                    <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-                      <span style={{ fontSize: '12px', color: CLAUDE_COLORS.textSecondary }}>
-                        {dayjs(wq.added_at || wq.created_at).format('YYYY-MM-DD')}
-                      </span>
+                    <div className="flex items-center gap-2">
+                      <span className="text-meta">{dayjs(wq.added_at || wq.created_at).format('MM/DD')}</span>
                       <span onClick={() => handleToggleMastery(wq)} style={{ cursor: 'pointer' }} title="点击切换掌握等级">
                         {renderMasteredTag(wq)}
                       </span>
@@ -1065,31 +1052,14 @@ const renderMasteredTag = (wq) => {
                   </div>
 
                   {/* 题目内容 */}
-                  <div style={{ 
-                    fontSize: '15px', 
-                    color: CLAUDE_COLORS.text, 
-                    lineHeight: '1.6',
-                    marginBottom: '8px'
-                  }}>
+                  <div className="text-body mb-2">
                     {question.content}
                   </div>
 
                   {/* 原试卷已删除提示 */}
                   {(!question.task_id || wq.task_deleted) && (
-                    <div style={{
-                      fontSize: '12px',
-                      color: 'var(--warning)',
-                      background: 'var(--warning-soft)',
-                      padding: '6px 10px',
-                      borderRadius: '8px',
-                      marginBottom: '8px',
-                      display: 'flex',
-                      alignItems: 'center',
-                      gap: '4px'
-                    }}>
-                      <svg width="14" height="14" viewBox="0 0 1024 1024" fill="currentColor">
-                        <path d="M512 64C264.6 64 64 264.6 64 512s200.6 448 448 448 448-200.6 448-448S759.4 64 512 64zm-32 240c0-4.4 3.6-8 8-8h48c4.4 0 8 3.6 8 8v240c0 4.4-3.6 8-8 8h-48c-4.4 0-8-3.6-8-8V304zm32 416c-17.7 0-32-14.3-32-32s14.3-32 32-32 32 14.3 32 32-14.3 32-32 32z"/>
-                      </svg>
+                    <div className="inline-flex items-center gap-1.5 text-badge mb-2 px-2.5 py-1 rounded-lg" style={{ background: 'var(--warning-soft)', color: 'var(--warning)' }}>
+                      <AlertTriangle size={11} />
                       原试卷已删除，但错题保留
                     </div>
                   )}
@@ -1101,17 +1071,14 @@ const renderMasteredTag = (wq) => {
                       : (question.ai_tags || [])
                     if (tags.length === 0) return null
                     return (
-                      <div style={{ display: 'flex', flexWrap: 'wrap', gap: '6px', marginBottom: '8px' }}>
+                      <div className="flex flex-wrap gap-1.5 mb-2">
                         {tags.map((tag, idx) => (
                           <span
                             key={idx}
+                            className="text-badge px-2 py-0.5 rounded-lg"
                             style={{
-                              fontSize: '11px',
-                              padding: '2px 8px',
-                              borderRadius: '10px',
                               background: question.tags_source === 'manual' ? 'var(--warning-soft)' : 'var(--primary-soft)',
-                              color: question.tags_source === 'manual' ? 'var(--warning)' : CLAUDE_COLORS.primary,
-                              fontWeight: 400
+                              color: question.tags_source === 'manual' ? 'var(--warning)' : 'var(--primary)',
                             }}
                           >
                             {tag}
@@ -1122,21 +1089,18 @@ const renderMasteredTag = (wq) => {
                   })()}
 
                   {/* 错误次数 */}
-                  <div style={{ fontSize: '13px', color: CLAUDE_COLORS.textSecondary, display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                    <span>错误次数：{question.wrong_count || 1}次</span>
-                    <div style={{ display: 'flex', gap: '16px' }}>
-                      <span
-                        onClick={(e) => { e.stopPropagation(); handleDelete(wq.id) }}
-                        style={{
-                          color: CLAUDE_COLORS.danger,
-                          fontSize: '13px',
-                          cursor: 'pointer',
-                          fontWeight: 500
-                        }}
-                      >
-                        删除
-                      </span>
-                    </div>
+                  <div className="flex items-center justify-between mt-1">
+                    <span className="text-meta-highlight">错误 {question.wrong_count || 1}次</span>
+                    <button
+                      onClick={(e) => { e.stopPropagation(); handleDelete(wq.id) }}
+                      className="tap-scale text-meta-highlight px-2 py-0.5 rounded-lg transition-colors"
+                      style={{ color: 'var(--danger)' }}
+                    >
+                      删除
+                    </button>
+                  </div>
+                </div>
+              )
                   </div>
                 </div>
               )

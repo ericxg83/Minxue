@@ -203,6 +203,11 @@ fi
 
 # Add default JVM options here. You can also use JAVA_OPTS and GRADLE_OPTS to pass JVM options to this script.
 DEFAULT_JVM_OPTS='"-Xmx64m" "-Xms64m"'
+# 使用 Java agent 修复 JDK PipeImpl UDS 问题（Unix Domain Socket 在本机 Windows 上不可用）
+AGENT_PATH="D:/Minxue_App_V3/agent/pipefix-agent.jar"
+if [ -f "$AGENT_PATH" ]; then
+    JAVA_OPTS="$JAVA_OPTS -javaagent:$AGENT_PATH"
+fi
 
 # Collect all arguments for the java command:
 #   * DEFAULT_JVM_OPTS, JAVA_OPTS, and optsEnvironmentVar are not allowed to contain shell fragments,

@@ -116,8 +116,8 @@ function buildExamHTML({ title, studentName, questions, showAnswers }) {
     .answer-key{font-size:12px;color:#2563EB;margin-top:3px;padding-left:36px}
     .footer{text-align:center;font-size:11px;color:#999;margin-top:20px;padding-top:8px;border-top:1px solid #ddd}
     .qr-container{position:absolute;top:16px;right:16px;text-align:center;}
-    .qr-canvas{width:150px;height:150px;}
-    .qr-text{font-size:11px;color:#666;margin-top:4px;font-weight:bold;}
+    .qr-canvas{width:80px;height:80px;}
+    .qr-text{font-size:9px;color:#666;margin-top:2px;font-weight:bold;}
   </style></head><body>
   <div class="page">
     <div id="qr-container" class="qr-container" style="display:none;">
@@ -194,7 +194,7 @@ export async function generateExamPDF({ title, studentName, questions, filename,
         qr.addData(qrContent)
         qr.make()
 
-        const size = 300
+        const size = 160
         qrCanvas.width = size
         qrCanvas.height = size
         const ctx = qrCanvas.getContext('2d')
