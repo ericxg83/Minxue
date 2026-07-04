@@ -1,47 +1,69 @@
 @import "tailwindcss";
 
 :root {
-  /* Backgrounds */
-  --bg: #F5F7FA;
-  --bg-card: #FFFFFF;
-  --bg-secondary: #F3F4F6;
+  /* ── Claude-Inspired Backgrounds ── */
+  --bg: #F5F4F1;             /* warm light page bg */
+  --bg-card: #FFFFFF;         /* clean white card bg */
+  --bg-hover: #F0EDE8;        /* warm hover state */
+  --bg-elevated: #FAFAF8;     /* warm white for elevated surfaces */
+  --bg-secondary: #EDE9E3;    /* warm gray secondary bg */
+  --bg-mist: #F8F7F4;         /* between bg and card */
 
-  /* Borders */
-  --border: #E5E7EB;
-  --border-light: #F3F4F6;
+  /* ── Blue Accent ── */
+  --primary: #3B82F6;         /* clean blue */
+  --primary-hover: #2563EB;   /* darker blue for hover */
+  --primary-soft: #EFF6FF;    /* light blue bg */
+  --primary-mist: #F5F8FF;    /* very light blue mist */
 
-  /* Radius */
-  --radius-card: 12px;
+  /* ── Semantic Colors ── */
+  --success: #2D9D6E;
+  --success-soft: #E8F8F0;
+  --warning: #E8A838;
+  --warning-soft: #FFF8E8;
+  --danger: #E55353;
+  --danger-soft: #FFECEC;
+  --info: #5B8DEF;
+  --info-soft: #EAF1FE;
+
+  /* ── Text ── */
+  --text: #1C1C1E;            /* primary text */
+  --text-secondary: #8E8E93;  /* secondary text */
+  --text-tertiary: #B8B8BE;   /* placeholder / disabled */
+  --text-inverse: #FFFFFF;
+
+  /* ── Borders ── */
+  --border: #E8E5E0;          /* subtle warm border */
+  --border-light: #F0EDE8;    /* even lighter border */
+
+  /* ── Radius ── */
+  --radius-sm: 8px;
+  --radius-md: 12px;
+  --radius-lg: 16px;
+  --radius-xl: 20px;
+  --radius-2xl: 24px;
   --radius-full: 9999px;
 
-  /* Shadows */
-  --shadow-card: 0 1px 2px rgba(0,0,0,0.04);
-
-  /* Colors */
-  --primary: #2563EB;
-  --primary-bg: #EFF6FF;
-  --success: #16A34A;
-  --success-bg: #F0FDF4;
-  --warning: #F59E0B;
-  --warning-bg: #FFFBEB;
-  --danger: #EF4444;
-  --danger-bg: #FEF2F2;
-  --gray: #6B7280;
-  --gray-light: #9CA3AF;
-  --text: #111827;
-  --text-secondary: #6B7280;
+  /* ── Shadows ── */
+  --shadow-sm: 0 1px 2px rgba(0,0,0,0.04);
+  --shadow-md: 0 2px 8px rgba(0,0,0,0.06);
+  --shadow-lg: 0 4px 16px rgba(0,0,0,0.08);
+  --shadow-xl: 0 8px 24px rgba(0,0,0,0.10);
+  --shadow-purple: 0 2px 12px rgba(59,130,246,0.25);
 }
 
 html, body, #root {
   min-height: 100%;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
 }
 
 body {
   margin: 0;
   background: var(--bg);
-  -webkit-font-smoothing: antialiased;
-  text-rendering: optimizeLegibility;
-  font-family: -apple-system, BlinkMacSystemFont, "PingFang SC", "Helvetica Neue", "Inter", sans-serif;
+  color: var(--text);
+  font-family: -apple-system, BlinkMacSystemFont, "SF Pro Text", "SF Pro Display", "PingFang SC", "Helvetica Neue", "Inter", sans-serif;
+  font-size: 14px;
+  line-height: 1.5;
 }
 
 button, input, select, textarea {
@@ -50,9 +72,10 @@ button, input, select, textarea {
 
 button {
   -webkit-tap-highlight-color: transparent;
+  cursor: pointer;
 }
 
-/* Scrollbar */
+/* ── Scrollbar ── */
 .no-scrollbar::-webkit-scrollbar {
   display: none;
 }
@@ -61,32 +84,36 @@ button {
   scrollbar-width: none;
 }
 
-/* Card */
+/* ── Card ── */
 .card {
   background: var(--bg-card);
   border: 1px solid var(--border);
-  border-radius: var(--radius-card);
-  box-shadow: var(--shadow-card);
+  border-radius: var(--radius-md);
+  box-shadow: var(--shadow-sm);
+  transition: box-shadow 0.2s ease, transform 0.2s ease;
+}
+.card:active {
+  box-shadow: var(--shadow-md);
 }
 
-/* Tab pill - iOS segmented control style */
+/* ── Tab Pill - iOS segmented control style ── */
 .tab-pill {
   display: flex;
   gap: 2px;
   background: var(--bg-secondary);
-  border-radius: 8px;
+  border-radius: var(--radius-sm);
   padding: 2px;
 }
 
 .tab-pill-item {
   flex: 1;
-  padding: 6px 12px;
+  padding: 7px 14px;
   border-radius: 6px;
   font-size: 13px;
   font-weight: 500;
-  color: var(--gray);
+  color: var(--text-secondary);
   text-align: center;
-  transition: all 0.15s ease;
+  transition: all 0.2s ease;
   cursor: pointer;
   border: none;
   background: transparent;
@@ -96,18 +123,19 @@ button {
 .tab-pill-item.active {
   background: white;
   color: var(--primary);
-  box-shadow: 0 1px 2px rgba(0,0,0,0.08);
+  box-shadow: var(--shadow-sm);
+  font-weight: 600;
 }
 
-/* Filter chip */
+/* ── Filter Chip ── */
 .filter-chip {
-  padding: 4px 12px;
+  padding: 5px 14px;
   border-radius: var(--radius-full);
   font-size: 12px;
   font-weight: 500;
   border: none;
   cursor: pointer;
-  transition: all 0.15s ease;
+  transition: all 0.2s ease;
   white-space: nowrap;
 }
 
@@ -118,50 +146,123 @@ button {
 
 .filter-chip.inactive {
   background: var(--bg-secondary);
-  color: var(--gray);
+  color: var(--text-secondary);
+}
+.filter-chip.inactive:hover {
+  background: var(--bg-hover);
 }
 
-/* Badge */
+/* ── Badge ── */
 .badge {
   display: inline-flex;
   align-items: center;
-  padding: 1px 6px;
+  padding: 2px 8px;
   border-radius: var(--radius-full);
   font-size: 10px;
   font-weight: 600;
+  letter-spacing: 0.02em;
 }
 
-/* Print styles */
+/* ── Claude Button ── */
+.btn-primary {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  padding: 10px 20px;
+  background: var(--primary);
+  color: white;
+  border: none;
+  border-radius: var(--radius-sm);
+  font-size: 14px;
+  font-weight: 600;
+  transition: all 0.2s ease;
+}
+.btn-primary:hover {
+  background: var(--primary-hover);
+  box-shadow: var(--shadow-purple);
+}
+.btn-primary:active {
+  transform: scale(0.97);
+}
+
+.btn-secondary {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  padding: 10px 20px;
+  background: var(--bg-secondary);
+  color: var(--text);
+  border: none;
+  border-radius: var(--radius-sm);
+  font-size: 14px;
+  font-weight: 500;
+  transition: all 0.2s ease;
+}
+.btn-secondary:active {
+  background: var(--bg-hover);
+  transform: scale(0.97);
+}
+
+/* ── Skeleton shimmer ── */
+@keyframes shimmer {
+  0% { background-position: -200% 0; }
+  100% { background-position: 200% 0; }
+}
+.skeleton {
+  background: linear-gradient(90deg, #EDE9E3 25%, #F5F4F1 50%, #EDE9E3 75%);
+  background-size: 200% 100%;
+  animation: shimmer 1.5s ease-in-out infinite;
+  border-radius: var(--radius-sm);
+}
+
+/* ── Entrance animation ── */
+@keyframes fadeUp {
+  from { opacity: 0; transform: translateY(8px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+.animate-fade-up {
+  animation: fadeUp 0.3s ease-out;
+}
+
+@keyframes fadeIn {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+.animate-fade-in {
+  animation: fadeIn 0.2s ease-out;
+}
+
+/* ── Print styles ── */
 @media print {
-  .no-print {
-    display: none !important;
-  }
-
-  .print-only {
-    display: block !important;
-  }
-
-  body {
-    background: white;
-  }
+  .no-print { display: none !important; }
+  .print-only { display: block !important; }
+  body { background: white; }
 }
 
-/* Animation for loading spinner */
+/* ── Loading spinner ── */
 @keyframes spin {
-  from {
-    transform: rotate(0deg);
-  }
-  to {
-    transform: rotate(360deg);
-  }
+  from { transform: rotate(0deg); }
+  to { transform: rotate(360deg); }
 }
 
-/* Slide in from right for filter drawer */
+/* ── Slide in from right ── */
 @keyframes slideInRight {
-  from {
-    transform: translateX(100%);
-  }
-  to {
-    transform: translateX(0);
-  }
+  from { transform: translateX(100%); }
+  to { transform: translateX(0); }
+}
+
+/* ── Pulse ring ── */
+@keyframes pulse-ring {
+  0% { box-shadow: 0 0 0 0 rgba(59,130,246,0.3); }
+  70% { box-shadow: 0 0 0 12px rgba(59,130,246,0); }
+  100% { box-shadow: 0 0 0 0 rgba(59,130,246,0); }
+}
+
+/* ── Glass overlay ── */
+.glass {
+  background: rgba(255,255,255,0.72);
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
 }

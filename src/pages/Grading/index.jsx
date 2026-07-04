@@ -36,15 +36,15 @@ const getNextLifecycle = (current) => {
 }
 
 const COLORS = {
-  primary: '#2563EB',
-  success: '#16A34A',
-  danger: '#EF4444',
-  warning: '#F59E0B',
-  background: '#F5F7FA',
+  primary: '#3B82F6',
+  success: '#2D9D6E',
+  danger: '#E55353',
+  warning: '#E8A838',
+  background: '#F5F4F1',
   card: '#FFFFFF',
-  text: '#111827',
-  textSecondary: '#6B7280',
-  border: '#E5E7EB'
+  text: '#1C1C1E',
+  textSecondary: '#8E8E93',
+  border: '#E8E5E0'
 }
 
 export default function Grading({ paperId, studentId, questionIds, onClose, onComplete, generatedExamId }) {
@@ -386,8 +386,8 @@ export default function Grading({ paperId, studentId, questionIds, onClose, onCo
               return (
                 <span key={step} style={{
                   fontSize: '12px', padding: '2px 8px', borderRadius: '4px',
-                  background: isActive ? '#E8F3FF' : '#F5F7FA',
-                  color: isActive ? COLORS.primary : '#C0C4CC',
+                  background: isActive ? 'var(--primary-soft)' : 'var(--bg)',
+                  color: isActive ? COLORS.primary : 'var(--text-tertiary)',
                   fontWeight: isActive ? 500 : 400,
                   transition: 'all 0.3s'
                 }}>

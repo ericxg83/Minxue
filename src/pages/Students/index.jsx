@@ -1,16 +1,9 @@
 import { useEffect, useState, useRef } from 'react'
-import {
-  Button,
-  Toast,
-  Empty,
-  Dialog,
-  Input,
-  NavBar,
-  SwipeAction
-} from 'antd-mobile'
+import { Button, Toast, Empty, Dialog } from 'antd-mobile'
 import { useStudentStore, useUIStore } from '../../store'
 import { getStudents, createStudent, updateStudent, deleteStudent, uploadImage } from '../../services/apiService'
 import ImageCropper from '../../components/ImageCropper'
+import { User, Plus, Pencil, Trash2, Check, Search, X, ArrowLeft, Camera, ChevronRight } from 'lucide-react'
 
 const GRADE_OPTIONS = ['一年级', '二年级', '三年级', '四年级', '五年级', '六年级', '初一', '初二', '初三', '高一', '高二', '高三']
 
@@ -19,87 +12,58 @@ const USE_MOCK_DATA = false
 export default function Students() {
   const { students, setStudents, currentStudent, setCurrentStudent, updateStudent: updateStudentInStore, addStudent: addStudentInStore, removeStudent: removeStudentFromStore } = useStudentStore()
   const { setLoading, setCurrentPage } = useUIStore()
-  
+
   const [loading, setLocalLoading] = useState(false)
   const [searchKeyword, setSearchKeyword] = useState('')
   const [showAddPage, setShowAddPage] = useState(false)
   const [editingStudent, setEditingStudent] = useState(null)
-  const [formData, setFormData] = useState({
-    name: '',
-    grade: '',
-    class: '',
-    remark: '',
-    avatar: ''
-  })
-  const [cropperImage, setCropperImage] = useState(null)  // 裁剪器显示的图片
+  const [formData, setFormData] = useState({ name: '', grade: '', class: '', remark: '', avatar: '' })
+  const [cropperImage, setCropperImage] = useState(null)
   const fileInputRef = useRef(null)
 
   useEffect(() => {
-    console.debug('Students 组件挂载')
-    if (!USE_MOCK_DATA) {
-      loadStudents()
-    }
+    if (!USE_MOCK_DATA) loadStudents()
   }, [])
 
   let loadCount = 0
   const loadStudents = async (useCache = true) => {
     loadCount++
-    console.debug(`loadStudents 被调用 (第 ${loadCount} 次)`)
     setLocalLoading(true)
     setLoading(true)
-    
     try {
       const data = await getStudents(useCache)
-      console.debug('从 Supabase 加载的学生数据:', data)
-      console.debug('Supabase 返回的学生数量:', data?.length || 0)
-      if (data && data.length > 0) {
-        setStudents(data)
-      } else {
-        console.warn('Supabase 中没有学生数据')
-      }
+      if (data && data.length > 0) setStudents(data)
     } catch (error) {
-      console.error('加载失败:', error)
-      Toast.show({
-        icon: 'fail',
-        content: '加载学生列表失败'
-      })
+      Toast.show({ icon: 'fail', content: '加载学生列表失败' })
     } finally {
       setLocalLoading(false)
       setLoading(false)
     }
   }
 
-  // 筛选学生
   const filteredStudents = (Array.isArray(students) ? students : []).filter(student => {
     if (!searchKeyword) return true
     return student.name?.toLowerCase().includes(searchKeyword.toLowerCase())
   })
 
-  // 选择学生并返回
   const handleSelect = (student) => {
     setCurrentStudent(student)
-    Toast.show({
-      icon: 'success',
-      content: `已切换到 ${student.name}`
-    })
-    // 返回上一页
+    Toast.show({ icon: 'success', content: `已切换到 ${student.name}` })
     setCurrentPage('home')
   }
 
-  // 打开添加页面
   const openAddPage = () => {
     setFormData({ name: '', grade: '', class: '', remark: '', avatar: '' })
     setEditingStudent(null)
     setShowAddPage(true)
   }
 
-  // 打开编辑页面
   const openEditPage = (student, e) => {
     e.stopPropagation()
-    setFormData({ 
-      name: student.name || '', 
-      grade: student.grade || '', 
-      class: student.class || '', 
+    setFormData({
+      name: student.name || '',
+      grade: student.grade || '',
+      class: student.class || '',
       remark: student.remark || '',
       avatar: student.avatar || ''
     })
@@ -107,121 +71,73 @@ export default function Students() {
     setShowAddPage(true)
   }
 
-  // 处理头像上传 - 先打开裁剪器
   const handleAvatarUpload = async (e) => {
     const file = e.target.files[0]
     if (!file) return
-
     try {
-      // 读取文件为 base64，用于裁剪器显示
       const reader = new FileReader()
-      reader.onload = (event) => {
-        setCropperImage(event.target.result)
-      }
+      reader.onload = (event) => setCropperImage(event.target.result)
       reader.readAsDataURL(file)
     } catch (error) {
       Toast.show({ icon: 'fail', content: '图片读取失败' })
     }
   }
 
-  // 裁剪完成后的处理
   const handleCropComplete = async (croppedImage) => {
     setCropperImage(null)
     setFormData({ ...formData, avatar: croppedImage })
     Toast.show({ icon: 'success', content: '头像设置成功' })
   }
 
-  // 取消裁剪
   const handleCropCancel = () => {
     setCropperImage(null)
-    // 清空文件输入，允许再次选择同一文件
-    if (fileInputRef.current) {
-      fileInputRef.current.value = ''
-    }
+    if (fileInputRef.current) fileInputRef.current.value = ''
   }
 
-  // 保存学生
   const handleSave = async () => {
-    if (!formData.name.trim()) {
-      Toast.show('请输入学生姓名')
-      return
-    }
-    if (!formData.grade) {
-      Toast.show('请选择年级')
-      return
-    }
+    if (!formData.name.trim()) { Toast.show('请输入学生姓名'); return }
+    if (!formData.grade) { Toast.show('请选择年级'); return }
 
     setLoading(true)
-    
     try {
-      // 组合班级信息
-      const classInfo = formData.grade && formData.class 
+      const classInfo = formData.grade && formData.class
         ? `${formData.grade}·${formData.class}`
         : formData.grade || formData.class
 
-      const studentData = {
-        ...formData,
-        class: classInfo
-      }
+      const studentData = { ...formData, class: classInfo }
 
       if (editingStudent) {
         if (USE_MOCK_DATA) {
-          const updatedStudent = { ...editingStudent, ...studentData, updated_at: new Date().toISOString() }
           updateStudentInStore(editingStudent.id, studentData)
-          if (currentStudent?.id === editingStudent.id) {
-            setCurrentStudent(updatedStudent)
-          }
+          if (currentStudent?.id === editingStudent.id) setCurrentStudent({ ...currentStudent, ...studentData })
         } else {
           await updateStudent(editingStudent.id, studentData)
-          if (currentStudent?.id === editingStudent.id) {
-            setCurrentStudent({ ...currentStudent, ...studentData })
-          }
+          if (currentStudent?.id === editingStudent.id) setCurrentStudent({ ...currentStudent, ...studentData })
           await loadStudents(false)
         }
         Toast.show({ icon: 'success', content: '更新成功' })
       } else {
-        console.debug('USE_MOCK_DATA 值:', USE_MOCK_DATA, '准备创建学生')
         if (USE_MOCK_DATA) {
-          const newStudent = {
-            ...studentData,
-            id: `student-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`,
-            created_at: new Date().toISOString()
-          }
+          const newStudent = { ...studentData, id: `student-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`, created_at: new Date().toISOString() }
           addStudentInStore(newStudent)
           setCurrentStudent(newStudent)
         } else {
-          console.debug('进入 Supabase 创建学生流程')
-          console.debug('正在创建学生:', studentData)
-          try {
-            const created = await createStudent(studentData)
-            console.debug('Supabase 返回的创建结果:', created)
-            if (created) {
-              addStudentInStore(created)
-              setCurrentStudent(created)
-            }
-            await loadStudents(false)
-          } catch (err) {
-            console.error('创建学生时出错:', err)
-            throw err
-          }
+          const created = await createStudent(studentData)
+          if (created) { addStudentInStore(created); setCurrentStudent(created) }
+          await loadStudents(false)
         }
         Toast.show({ icon: 'success', content: '添加成功' })
       }
-      
       setShowAddPage(false)
     } catch (error) {
-      console.error('保存失败:', error)
-      const errorMessage = error?.message || error?.error?.message || '保存失败，请重试'
-      Toast.show({ icon: 'fail', content: errorMessage })
+      Toast.show({ icon: 'fail', content: error?.message || '保存失败，请重试' })
     } finally {
       setLoading(false)
     }
   }
 
-  // 删除学生 - 带确认对话框
   const handleDelete = async (student, e) => {
     if (e) e.stopPropagation()
-    
     Dialog.confirm({
       title: '删除确认',
       content: `确定要删除学生「${student.name}」吗？此操作不可恢复。`,
@@ -230,23 +146,16 @@ export default function Students() {
       onConfirm: async () => {
         setLoading(true)
         try {
-        if (USE_MOCK_DATA) {
-          removeStudentFromStore(student.id)
-          if (currentStudent?.id === student.id) {
-            setCurrentStudent(null)
-          }
-        } else {
-            // Supabase 模式
+          if (USE_MOCK_DATA) {
+            removeStudentFromStore(student.id)
+            if (currentStudent?.id === student.id) setCurrentStudent(null)
+          } else {
             await deleteStudent(student.id)
-            if (currentStudent?.id === student.id) {
-              setCurrentStudent(null)
-            }
-            // 重新加载学生列表
+            if (currentStudent?.id === student.id) setCurrentStudent(null)
             await loadStudents(false)
           }
           Toast.show({ icon: 'success', content: '删除成功' })
         } catch (error) {
-          console.error('删除失败:', error)
           Toast.show({ icon: 'fail', content: '删除失败，请重试' })
         } finally {
           setLoading(false)
@@ -255,337 +164,236 @@ export default function Students() {
     })
   }
 
-  // 渲染学生列表页面
   const renderStudentList = () => (
-    <div style={{ padding: '0', background: '#F5F7FA', minHeight: '100%', paddingBottom: '80px' }}>
-      {/* 顶部标题栏 */}
-      <div style={{
-        background: '#fff',
-        padding: '12px 16px',
-        display: 'flex',
-        justifyContent: 'space-between',
-        alignItems: 'center',
-        borderBottom: '1px solid #E5E7EB'
-      }}>
-        <h1 style={{ margin: 0, fontSize: '18px', fontWeight: 700 }}>切换学生</h1>
-        <div style={{ display: 'flex', gap: '12px' }}>
-          <Button fill="none" style={{ color: '#666' }}>
-            <svg width="20" height="20" viewBox="0 0 1024 1024" fill="currentColor">
-              <path d="M464 144c0-26.4 21.6-48 48-48s48 21.6 48 48-21.6 48-48 48-48-21.6-48-48z"/>
-              <path d="M464 464c0-26.4 21.6-48 48-48s48 21.6 48 48-21.6 48-48 48-48-21.6-48-48z"/>
-              <path d="M464 784c0-26.4 21.6-48 48-48s48 21.6 48 48-21.6 48-48 48-48-21.6-48-48z"/>
-            </svg>
-          </Button>
+    <div style={{ minHeight: '100%', paddingBottom: '80px' }}>
+      {/* Header */}
+      <div className="sticky top-0 z-10 glass border-b" style={{ borderColor: 'rgba(232,229,224,0.5)' }}>
+        <div className="max-w-lg mx-auto px-4 h-12 flex items-center justify-between">
+          <button onClick={() => setCurrentPage('home')} className="flex items-center gap-1 text-sm font-medium" style={{ color: 'var(--text-secondary)' }}>
+            <ArrowLeft size={18} />
+            返回
+          </button>
+          <h1 className="text-[17px] font-bold" style={{ color: 'var(--text)' }}>切换学生</h1>
+          <div className="w-10" />
         </div>
       </div>
 
-      {/* 搜索框 */}
-      <div style={{ padding: '10px 16px', background: '#fff', borderBottom: '1px solid #E5E7EB' }}>
-        <div style={{
-          display: 'flex',
-          alignItems: 'center',
-          background: '#F3F4F6',
-          borderRadius: '8px',
-          padding: '6px 12px'
-        }}>
-          <svg width="16" height="16" viewBox="0 0 1024 1024" fill="#9CA3AF" style={{ marginRight: '6px' }}>
-            <path d="M832 800l-128-128c35.2-41.6 56-96 56-156.8 0-132.8-107.2-240-240-240s-240 107.2-240 240 107.2 240 240 240c60.8 0 115.2-20.8 156.8-56l128 128c9.6 9.6 24 9.6 33.6 0 9.6-9.6 9.6-24 0-33.6zM320 515.2c0-99.2 80-179.2 179.2-179.2s179.2 80 179.2 179.2-80 179.2-179.2 179.2-179.2-80-179.2-179.2z"/>
-          </svg>
-          <Input
+      {/* Search */}
+      <div className="max-w-lg mx-auto px-4 pt-3 pb-2">
+        <div className="relative">
+          <Search size={14} className="absolute left-3 top-1/2 -translate-y-1/2" style={{ color: 'var(--text-tertiary)' }} />
+          <input
             placeholder="搜索学生姓名"
             value={searchKeyword}
-            onChange={val => setSearchKeyword(val)}
-            style={{ '--font-size': '13px', background: 'transparent' }}
+            onChange={e => setSearchKeyword(e.target.value)}
+            className="w-full h-9 pl-9 pr-3 rounded-xl text-[13px] border-0 outline-none"
+            style={{ background: 'var(--bg-mist)' }}
           />
         </div>
       </div>
 
-      {/* 我的学生标题 */}
-      <div style={{ padding: '14px 16px 6px', fontSize: '12px', color: '#6B7280' }}>
-        我的学生 ({filteredStudents.length})
+      {/* Count */}
+      <div className="max-w-lg mx-auto px-4 pb-1">
+        <p style={{ fontSize: '11px', fontWeight: 600, color: 'var(--text-tertiary)', letterSpacing: '0.04em' }}>
+          我的学生 · {filteredStudents.length}
+        </p>
       </div>
 
-      {/* 学生列表 */}
-      <div style={{ padding: '8px 12px' }}>
+      {/* Student List */}
+      <div className="max-w-lg mx-auto px-4 space-y-2">
         {filteredStudents.length === 0 ? (
-          <Empty description="暂无学生" style={{ padding: '64px 0' }} />
+          <div className="flex flex-col items-center justify-center py-24 animate-fade-in">
+            <div className="w-16 h-16 rounded-3xl flex items-center justify-center" style={{ background: 'var(--bg-secondary)' }}>
+              <User size={28} style={{ color: 'var(--text-tertiary)' }} />
+            </div>
+            <p className="mt-4" style={{ fontSize: '15px', fontWeight: 600, color: 'var(--text)' }}>暂无学生</p>
+            <p className="mt-1" style={{ fontSize: '12px', color: 'var(--text-tertiary)' }}>点击下方按钮添加学生</p>
+          </div>
         ) : (
-          <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
-            {filteredStudents.map((student) => (
+          filteredStudents.map((student) => {
+            const isCurrent = currentStudent?.id === student.id
+            return (
               <div
                 key={student.id}
                 onClick={() => handleSelect(student)}
-                className="card"
+                className="card flex items-center justify-between active:scale-[0.99] transition-all"
                 style={{
-                  padding: '12px',
-                  display: 'flex',
-                  alignItems: 'center',
-                  justifyContent: 'space-between',
+                  padding: '14px',
                   cursor: 'pointer',
-                  border: currentStudent?.id === student.id ? '1px solid #2563EB' : '',
-                  background: currentStudent?.id === student.id ? '#F5F8FF' : ''
+                  borderColor: isCurrent ? 'var(--primary)' : 'var(--border)',
+                  background: isCurrent ? 'var(--primary-mist)' : 'var(--bg-card)',
                 }}
               >
-                <div style={{ display: 'flex', alignItems: 'center', gap: '10px', flex: 1, minWidth: 0 }}>
-                  <div style={{
-                    width: '36px',
-                    height: '36px',
-                    borderRadius: '50%',
-                    background: '#EFF6FF',
-                    display: 'flex',
-                    alignItems: 'center',
-                    justifyContent: 'center',
-                    overflow: 'hidden',
-                    flexShrink: 0
-                  }}>
+                <div className="flex items-center gap-3 flex-1 min-w-0">
+                  <div className="w-10 h-10 rounded-xl flex items-center justify-center overflow-hidden shrink-0" style={{ background: 'var(--primary-soft)' }}>
                     {student.avatar ? (
-                      <img src={student.avatar} alt="" style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
+                      <img src={student.avatar} alt="" className="w-full h-full object-cover" />
                     ) : (
-                      <svg width="20" height="20" viewBox="0 0 1024 1024" fill="#2563EB">
-                        <path d="M512 512c88 0 160-72 160-160s-72-160-160-160-160 72-160 160 72 160 160 160zm0-256c52.8 0 96 43.2 96 96s-43.2 96-96 96-96-43.2-96-96 43.2-96 96-96zm448 544v64c0 35.2-28.8 64-64 64H128c-35.2 0-64-28.8-64-64v-64c0-88 72-160 160-160h32c17.6 0 34.4 3.2 50.4 9.6 33.6 12.8 70.4 20.8 108.8 23.2 9.6 0.8 19.2 1.2 28.8 1.2s19.2-0.4 28.8-1.2c38.4-2.4 75.2-10.4 108.8-23.2 16-6.4 32.8-9.6 50.4-9.6h32c88 0 160 72 160 160z"/>
-                      </svg>
+                      <User size={18} style={{ color: 'var(--primary)' }} />
                     )}
                   </div>
-                  <div style={{ flex: 1, minWidth: 0 }}>
-                    <div style={{ fontSize: '14px', fontWeight: 600, color: '#111827' }}>
+                  <div className="flex-1 min-w-0">
+                    <p className="text-[14px] font-semibold truncate" style={{ color: 'var(--text)' }}>
                       {student.name}
-                    </div>
-                    <div style={{ fontSize: '12px', color: '#6B7280', marginTop: '1px' }}>
+                    </p>
+                    <p className="text-[11px] mt-0.5" style={{ color: 'var(--text-tertiary)' }}>
                       {student.class || '暂无班级'}
-                    </div>
+                    </p>
                   </div>
                 </div>
 
-                {/* 右侧操作区 */}
-                <div style={{ display: 'flex', alignItems: 'center', gap: '6px', flexShrink: 0 }}>
-                  {/* 编辑按钮 */}
-                  <Button
-                    fill="none"
-                    size="small"
+                <div className="flex items-center gap-1.5 shrink-0">
+                  <button
                     onClick={(e) => openEditPage(student, e)}
-                    style={{ color: '#2563EB', padding: '2px 6px', fontSize: '12px' }}
+                    className="w-8 h-8 rounded-xl flex items-center justify-center transition-colors"
+                    style={{ background: 'var(--bg-secondary)' }}
                   >
-                    编辑
-                  </Button>
+                    <Pencil size={13} style={{ color: 'var(--text-secondary)' }} />
+                  </button>
 
-                  {/* 当前选中标记 */}
-                  {currentStudent?.id === student.id && (
-                    <div style={{
-                      width: '20px',
-                      height: '20px',
-                      borderRadius: '50%',
-                      background: '#2563EB',
-                      display: 'flex',
-                      alignItems: 'center',
-                      justifyContent: 'center',
-                      flexShrink: 0
-                    }}>
-                      <svg width="12" height="12" viewBox="0 0 1024 1024" fill="#fff">
-                        <path d="M912 224l-48-48-400 400-176-176-48 48 224 224z"/>
-                      </svg>
+                  {isCurrent && (
+                    <div className="w-7 h-7 rounded-lg flex items-center justify-center" style={{ background: 'var(--primary)' }}>
+                      <Check size={14} className="text-white" />
                     </div>
                   )}
                 </div>
               </div>
-            ))}
-          </div>
+            )
+          })
         )}
       </div>
 
-      {/* 底部添加按钮 */}
-      <div style={{
-        position: 'fixed',
-        bottom: '20px',
-        left: '50%',
-        transform: 'translateX(-50%)',
-        zIndex: 100
-      }}>
-        <Button
-          color="primary"
-          onClick={openAddPage}
-          style={{
-            borderRadius: '20px',
-            padding: '8px 20px',
-            display: 'flex',
-            alignItems: 'center',
-            gap: '6px',
-            fontSize: '13px'
-          }}
-        >
-          <svg width="14" height="14" viewBox="0 0 1024 1024" fill="#fff">
-            <path d="M512 64C264.6 64 64 264.6 64 512s200.6 448 448 448 448-200.6 448-448S759.4 64 512 64zm0 832c-212 0-384-172-384-384s172-384 384-384 384 172 384 384-172 384-384 384z"/>
-            <path d="M704 480H544V320c0-17.6-14.4-32-32-32s-32 14.4-32 32v160H320c-17.6 0-32 14.4-32 32s14.4 32 32 32h160v160c0 17.6 14.4 32 32 32s32-14.4 32-32V544h160c17.6 0 32-14.4 32-32s-14.4-32-32-32z"/>
-          </svg>
-          添加学生
-        </Button>
-      </div>
+      {/* Floating Add Button */}
+      <button
+        onClick={openAddPage}
+        className="fixed flex items-center justify-center z-40 active:scale-90 transition-all"
+        style={{
+          width: '52px',
+          height: '52px',
+          borderRadius: '16px',
+          background: 'linear-gradient(135deg, var(--primary) 0%, #60A5FA 100%)',
+          boxShadow: '0 4px 16px rgba(59,130,246,0.35)',
+          bottom: 'calc(24px + env(safe-area-inset-bottom, 0px))',
+          right: '24px',
+        }}
+      >
+        <Plus size={24} strokeWidth={3} className="text-white" />
+      </button>
     </div>
   )
 
-  // 渲染添加/编辑页面
   const renderAddPage = () => (
-    <div style={{ padding: '0', background: '#F5F7FA', minHeight: '100%' }}>
-      {/* 隐藏的文件输入 */}
-      <input
-        ref={fileInputRef}
-        type="file"
-        accept="image/*"
-        style={{ display: 'none' }}
-        onChange={handleAvatarUpload}
-      />
+    <div style={{ minHeight: '100%' }}>
+      <input ref={fileInputRef} type="file" accept="image/*" style={{ display: 'none' }} onChange={handleAvatarUpload} />
 
-      {/* 顶部导航栏 */}
-      <NavBar
-        back={null}
-        left={<Button fill="none" onClick={() => setShowAddPage(false)}>取消</Button>}
-        right={<Button fill="none" color="primary" onClick={handleSave}>保存</Button>}
-      >
-        {editingStudent ? '编辑学生' : '添加学生'}
-      </NavBar>
+      {/* Header */}
+      <div className="sticky top-0 z-10 glass border-b" style={{ borderColor: 'rgba(232,229,224,0.5)' }}>
+        <div className="max-w-lg mx-auto px-4 h-12 flex items-center justify-between">
+          <button onClick={() => setShowAddPage(false)} className="text-sm font-medium" style={{ color: 'var(--text-secondary)' }}>
+            <X size={18} />
+          </button>
+          <h1 className="text-[17px] font-bold" style={{ color: 'var(--text)' }}>
+            {editingStudent ? '编辑学生' : '添加学生'}
+          </h1>
+          <button
+            onClick={handleSave}
+            className="text-sm font-semibold px-3 py-1.5 rounded-xl transition-colors"
+            style={{ background: 'var(--primary-soft)', color: 'var(--primary)' }}
+          >
+            保存
+          </button>
+        </div>
+      </div>
 
-      {/* 头像上传 */}
-      <div style={{
-        background: '#fff',
-        padding: '24px 16px',
-        display: 'flex',
-        flexDirection: 'column',
-        alignItems: 'center'
-      }}>
+      {/* Avatar */}
+      <div className="flex justify-center pt-6 pb-4">
         <div
           onClick={() => fileInputRef.current?.click()}
-          style={{
-            width: '64px',
-            height: '64px',
-            borderRadius: '50%',
-            background: '#F3F4F6',
-            display: 'flex',
-            flexDirection: 'column',
-            alignItems: 'center',
-            justifyContent: 'center',
-            cursor: 'pointer',
-            overflow: 'hidden',
-            border: '1px dashed #D1D5DB'
-          }}
+          className="relative cursor-pointer group"
         >
-          {formData.avatar ? (
-            <img src={formData.avatar} alt="" style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
-          ) : (
-            <>
-              <svg width="24" height="24" viewBox="0 0 1024 1024" fill="#9CA3AF">
-                <path d="M832 256h-96l-32-64c-12.8-25.6-38.4-41.6-67.2-41.6H387.2c-28.8 0-54.4 16-67.2 41.6l-32 64H192c-70.4 0-128 57.6-128 128v384c0 70.4 57.6 128 128 128h640c70.4 0 128-57.6 128-128V384c0-70.4-57.6-128-128-128z"/>
-                <path d="M512 416c-88 0-160 72-160 160s72 160 160 160 160-72 160-160-72-160-160-160zm0 256c-52.8 0-96-43.2-96-96s43.2-96 96-96 96 43.2 96 96-43.2 96-96 96z"/>
-              </svg>
-              <span style={{ fontSize: '11px', color: '#9CA3AF', marginTop: '4px' }}>头像</span>
-            </>
-          )}
+          <div className="w-20 h-20 rounded-2xl flex items-center justify-center overflow-hidden transition-all ring-1 ring-black/5" style={{ background: 'var(--bg-mist)' }}>
+            {formData.avatar ? (
+              <img src={formData.avatar} alt="" className="w-full h-full object-cover" />
+            ) : (
+              <Camera size={28} style={{ color: 'var(--text-tertiary)' }} />
+            )}
+          </div>
+          <div className="absolute -bottom-1 -right-1 w-6 h-6 rounded-lg flex items-center justify-center" style={{ background: 'var(--primary)', boxShadow: '0 2px 8px rgba(59,130,246,0.3)' }}>
+            <Plus size={12} className="text-white" strokeWidth={3} />
+          </div>
         </div>
       </div>
 
-      {/* 表单 */}
-      <div style={{ background: '#fff', borderRadius: '12px', margin: '12px', overflow: 'hidden', border: '1px solid #E5E7EB' }}>
-        {/* 姓名 */}
-        <div style={{
-          display: 'flex',
-          alignItems: 'center',
-          padding: '12px 16px',
-          borderBottom: '1px solid #F3F4F6'
-        }}>
-          <span style={{ width: '64px', fontSize: '13px', color: '#111827', fontWeight: 500 }}>姓名</span>
-          <Input
-            placeholder="请输入学生姓名"
-            value={formData.name}
-            onChange={val => setFormData({ ...formData, name: val })}
-            style={{ flex: 1, '--font-size': '13px' }}
-          />
+      {/* Form */}
+      <div className="max-w-lg mx-auto px-4 space-y-3">
+        <div className="card overflow-hidden divide-y" style={{ borderColor: 'var(--border)' }}>
+          {/* Name */}
+          <div className="flex items-center px-4 py-3.5">
+            <span className="text-[13px] font-semibold w-16 shrink-0" style={{ color: 'var(--text)' }}>姓名</span>
+            <input
+              placeholder="请输入学生姓名"
+              value={formData.name}
+              onChange={e => setFormData({ ...formData, name: e.target.value })}
+              className="flex-1 text-[13px] border-0 outline-none bg-transparent"
+              style={{ color: 'var(--text)' }}
+            />
+          </div>
+
+          {/* Grade */}
+          <div className="flex items-center px-4 py-3.5">
+            <span className="text-[13px] font-semibold w-16 shrink-0" style={{ color: 'var(--text)' }}>
+              年级<span style={{ color: 'var(--danger)' }}>*</span>
+            </span>
+            <select
+              value={formData.grade}
+              onChange={e => setFormData({ ...formData, grade: e.target.value })}
+              className="flex-1 text-[13px] border-0 bg-transparent outline-none"
+              style={{ color: formData.grade ? 'var(--text)' : 'var(--text-tertiary)' }}
+            >
+              <option value="">请选择年级</option>
+              {GRADE_OPTIONS.map(grade => (<option key={grade} value={grade}>{grade}</option>))}
+            </select>
+            <ChevronRight size={14} style={{ color: 'var(--text-tertiary)' }} />
+          </div>
+
+          {/* Class */}
+          <div className="flex items-center px-4 py-3.5">
+            <span className="text-[13px] font-semibold w-16 shrink-0" style={{ color: 'var(--text)' }}>班级</span>
+            <input
+              placeholder="如：1班"
+              value={formData.class}
+              onChange={e => setFormData({ ...formData, class: e.target.value })}
+              className="flex-1 text-[13px] border-0 outline-none bg-transparent"
+              style={{ color: 'var(--text)' }}
+            />
+          </div>
+
+          {/* Remark */}
+          <div className="flex items-start px-4 py-3.5">
+            <span className="text-[13px] font-semibold w-16 shrink-0 pt-0.5" style={{ color: 'var(--text)' }}>备注</span>
+            <textarea
+              placeholder="选填"
+              value={formData.remark}
+              onChange={e => setFormData({ ...formData, remark: e.target.value })}
+              className="flex-1 text-[13px] border-0 bg-transparent resize-none outline-none"
+              style={{ color: 'var(--text)', minHeight: '44px', fontFamily: 'inherit' }}
+            />
+          </div>
         </div>
 
-        {/* 年级 */}
-        <div style={{
-          display: 'flex',
-          alignItems: 'center',
-          padding: '12px 16px',
-          borderBottom: '1px solid #F3F4F6'
-        }}>
-          <span style={{ width: '64px', fontSize: '13px', color: '#111827', fontWeight: 500 }}>年级<span style={{ color: '#EF4444' }}>*</span></span>
-          <select
-            value={formData.grade}
-            onChange={e => setFormData({ ...formData, grade: e.target.value })}
-            style={{
-              flex: 1,
-              fontSize: '13px',
-              border: 'none',
-              background: 'transparent',
-              color: formData.grade ? '#111827' : '#9CA3AF'
-            }}
-          >
-            <option value="">请选择年级</option>
-            {GRADE_OPTIONS.map(grade => (
-              <option key={grade} value={grade}>{grade}</option>
-            ))}
-          </select>
-        </div>
-
-        {/* 班级 */}
-        <div style={{
-          display: 'flex',
-          alignItems: 'center',
-          padding: '12px 16px',
-          borderBottom: '1px solid #F3F4F6'
-        }}>
-          <span style={{ width: '64px', fontSize: '13px', color: '#111827', fontWeight: 500 }}>班级</span>
-          <Input
-            placeholder="请输入班级（如：1班）"
-            value={formData.class}
-            onChange={val => setFormData({ ...formData, class: val })}
-            style={{ flex: 1, '--font-size': '13px' }}
-          />
-        </div>
-
-        {/* 备注 */}
-        <div style={{
-          display: 'flex',
-          alignItems: 'flex-start',
-          padding: '12px 16px'
-        }}>
-          <span style={{ width: '64px', fontSize: '13px', color: '#111827', fontWeight: 500, marginTop: '6px' }}>备注</span>
-          <textarea
-            placeholder="请输入备注（选填）"
-            value={formData.remark}
-            onChange={e => setFormData({ ...formData, remark: e.target.value })}
-            style={{
-              flex: 1,
-              fontSize: '13px',
-              border: 'none',
-              background: 'transparent',
-              resize: 'none',
-              minHeight: '60px',
-              fontFamily: 'inherit'
-            }}
-          />
-        </div>
-      </div>
-
-      {/* 删除按钮（编辑模式） */}
-      {editingStudent && (
-        <div style={{ padding: '12px 16px' }}>
-          <Button
-            block
-            color="danger"
-            fill="outline"
+        {editingStudent && (
+          <button
             onClick={(e) => handleDelete(editingStudent, e)}
+            className="w-full py-3 rounded-2xl text-[14px] font-medium transition-colors active:scale-[0.98]"
+            style={{ background: 'var(--danger-soft)', color: 'var(--danger)' }}
           >
             删除学生
-          </Button>
-        </div>
-      )}
+          </button>
+        )}
+      </div>
 
-      {/* 头像裁剪器 */}
       {cropperImage && (
-        <ImageCropper
-          image={cropperImage}
-          onCropComplete={handleCropComplete}
-          onCancel={handleCropCancel}
-        />
+        <ImageCropper image={cropperImage} onCropComplete={handleCropComplete} onCancel={handleCropCancel} />
       )}
     </div>
   )

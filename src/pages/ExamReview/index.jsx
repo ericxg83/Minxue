@@ -14,15 +14,15 @@ import {
 import MathText from '../../components/MathText'
 
 const COLORS = {
-  primary: '#2563EB',
-  success: '#16A34A',
-  danger: '#EF4444',
-  warning: '#F59E0B',
-  background: '#F5F7FA',
+  primary: '#3B82F6',
+  success: '#2D9D6E',
+  danger: '#E55353',
+  warning: '#E8A838',
+  background: '#F5F4F1',
   card: '#FFFFFF',
-  text: '#111827',
-  textSecondary: '#6B7280',
-  border: '#E5E7EB'
+  text: '#1C1C1E',
+  textSecondary: '#8E8E93',
+  border: '#E8E5E0'
 }
 
 // ── 面板边界常量 ──
@@ -43,7 +43,7 @@ const formatOption = (opt, index) => {
 const getStatusInfo = (q) => {
   if (!q) {
     return {
-      bg: '#F3F4F6', color: COLORS.textSecondary,
+      bg: 'var(--bg-secondary)', color: COLORS.textSecondary,
       text: '未知', icon: AlertTriangle,
       isGreyed: false, source: 'unknown'
     }
@@ -52,7 +52,7 @@ const getStatusInfo = (q) => {
   // 1. 已排除
   if (q.excluded) {
     return {
-      bg: '#F3F4F6', color: COLORS.textSecondary,
+      bg: 'var(--bg-secondary)', color: COLORS.textSecondary,
       text: '已排除', icon: XCircle,
       isGreyed: true, source: 'excluded'
     }
@@ -64,7 +64,7 @@ const getStatusInfo = (q) => {
   // 2. 未作答 — 学生未作答
   if (isBlank && q.is_correct === null) {
     return {
-      bg: '#FFF3CD', color: COLORS.warning,
+      bg: 'var(--warning-soft)', color: COLORS.warning,
       text: '未作答', icon: AlertTriangle,
       isGreyed: false, source: 'not_answered'
     }
@@ -74,8 +74,8 @@ const getStatusInfo = (q) => {
   if (q.is_correct === true) {
     const source = q.status === 'correct' ? 'human' : 'ai'
     return {
-      bg: source === 'human' ? '#D1FAE5' : '#DCFCE7',
-      color: source === 'human' ? '#059669' : COLORS.success,
+      bg: source === 'human' ? 'var(--success-soft)' : 'var(--success-soft)',
+      color: source === 'human' ? 'var(--success)' : COLORS.success,
       text: source === 'human' ? '已打勾' : 'AI判定正确',
       icon: source === 'human' ? UserCheck : CheckCircle2,
       isGreyed: source === 'human',
@@ -86,14 +86,14 @@ const getStatusInfo = (q) => {
   // 4. 错误 — AI判定错误
   if (q.is_correct === false) {
     return {
-      bg: '#FEE2E2', color: COLORS.danger,
+      bg: 'var(--danger-soft)', color: COLORS.danger,
       text: 'AI判定错误', icon: XCircle, source: 'ai_wrong'
     }
   }
 
   // 5. 未批改 — AI无法判定/待人工复审
   return {
-    bg: '#EFF6FF', color: '#3B82F6',
+    bg: 'var(--primary-soft)', color: 'var(--primary)',
     text: '未批改 / 待复审', icon: Clock, source: 'pending'
   }
 }
@@ -500,7 +500,7 @@ export default function ExamReview({ task, onClose, onSave }) {
                   top: bbox.y,
                   width: bbox.width,
                   height: bbox.height,
-                  border: `2.5px solid ${isCurrent ? '#2563EB' : 'rgba(255,255,255,0.35)'}`,
+                  border: `2.5px solid ${isCurrent ? 'var(--primary)' : 'rgba(255,255,255,0.35)'}`,
                   borderRadius: '8px',
                   pointerEvents: 'none',
                   zIndex: 2,
@@ -520,17 +520,17 @@ export default function ExamReview({ task, onClose, onSave }) {
                     if (isCurrent) return COLORS.primary
                     const s = getStatusInfo(q)
                     return s.source === 'ai' || s.source === 'human'
-                      ? (q.is_correct === true ? '#16A34A' : '#EF4444')
-                      : s.source === 'not_answered' ? '#F59E0B'
-                      : s.source === 'excluded' ? '#9CA3AF'
+                      ? (q.is_correct === true ? 'var(--success)' : 'var(--danger)')
+                      : s.source === 'not_answered' ? 'var(--warning)'
+                      : s.source === 'excluded' ? 'var(--text-tertiary)'
                       : s.bg
                   })(),
                   color: isCurrent ? '#fff' : (() => {
                     const s = getStatusInfo(q)
                     return s.source === 'ai' || s.source === 'human'
-                      ? (q.is_correct === true ? '#16A34A' : '#EF4444')
-                      : s.source === 'not_answered' ? '#F59E0B'
-                      : s.source === 'excluded' ? '#9CA3AF'
+                      ? (q.is_correct === true ? 'var(--success)' : 'var(--danger)')
+                      : s.source === 'not_answered' ? 'var(--warning)'
+                      : s.source === 'excluded' ? 'var(--text-tertiary)'
                       : s.color
                   })(),
                   fontSize: isCurrent ? 15 : 13,
@@ -590,7 +590,8 @@ export default function ExamReview({ task, onClose, onSave }) {
             borderBottom: `1px solid ${COLORS.border}`
           }}
         >
-          <div style={{ width: 40, height: 4, borderRadius: 2, background: '#D1D5DB' }} />
+          <div style={{ width: 40, height: 4, borderRadius: 2, background: 'var(--border)',
+          borderRadius: 2, }} />
         </div>
 
         {/* ── 题号导航条 ── */}
@@ -747,7 +748,7 @@ export default function ExamReview({ task, onClose, onSave }) {
                   cursor: 'pointer', fontSize: '13px', fontWeight: 600,
                   display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '4px',
                   background: (reviewAction === 'correct') ? '#DCFCE7' : COLORS.card,
-                  color: (reviewAction === 'correct') ? '#16A34A' : '#15803D',
+                  color: (reviewAction === 'correct') ? 'var(--success)' : '#15803D',
                 }}
               >
                 <CheckCircle2 size={14} /> 正确
@@ -759,8 +760,8 @@ export default function ExamReview({ task, onClose, onSave }) {
                   border: (reviewAction === 'wrong') ? '2px solid #EF4444' : '1px solid #E5E7EB',
                   cursor: 'pointer', fontSize: '13px', fontWeight: 500,
                   display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '4px',
-                  background: (reviewAction === 'wrong') ? '#FEE2E2' : COLORS.card,
-                  color: (reviewAction === 'wrong') ? '#EF4444' : '#9CA3AF',
+                  background: (reviewAction === 'wrong') ? 'var(--danger-soft)' : COLORS.card,
+                  color: (reviewAction === 'wrong') ? 'var(--danger)' : 'var(--text-tertiary)',
                 }}
               >
                 <XCircle size={14} /> 错误
@@ -776,7 +777,7 @@ export default function ExamReview({ task, onClose, onSave }) {
                   cursor: 'pointer', fontSize: '13px', fontWeight: 600,
                   display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '6px',
                   background: (reviewAction === 'excluded') ? '#FFF1F0' : '#FFF8F5',
-                  color: (reviewAction === 'excluded') ? '#EF4444' : '#DC2626',
+                  color: (reviewAction === 'excluded') ? 'var(--danger)' : '#DC2626',
                 }}
               >
                 <Trash2 size={14} /> 排除本题
@@ -838,7 +839,7 @@ export default function ExamReview({ task, onClose, onSave }) {
             disabled={saving || Object.keys(edits).length === 0}
             style={{
               padding: '8px 16px', borderRadius: '8px', border: 'none',
-              background: (saving || Object.keys(edits).length === 0) ? '#93C5FD' : COLORS.primary,
+              background: (saving || Object.keys(edits).length === 0) ? 'var(--primary-soft)' : COLORS.primary,
               color: '#fff', cursor: (saving || Object.keys(edits).length === 0) ? 'not-allowed' : 'pointer',
               fontSize: '13px', fontWeight: 600, display: 'flex', alignItems: 'center', gap: '4px',
               flexShrink: 0

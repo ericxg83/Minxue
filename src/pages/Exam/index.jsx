@@ -1,10 +1,5 @@
 import { useEffect, useState } from 'react'
-import {
-  Button,
-  Toast,
-  Empty,
-  Badge
-} from 'antd-mobile'
+import { Button, Toast, Empty, Badge } from 'antd-mobile'
 import { RightOutline } from 'antd-mobile-icons'
 import { useStudentStore, useExamStore } from '../../store'
 import { getGeneratedExamsByStudent, getQuestionsByIds } from '../../services/apiService'
@@ -13,6 +8,7 @@ import ExamReview from '../ExamReview'
 import dayjs from 'dayjs'
 import { saveAs } from 'file-saver'
 import { generateExamPDF } from '../../utils/pdfGenerator'
+import { FileText, RefreshCw, User, Printer, CheckCircle, XCircle, AlertCircle, Clock } from 'lucide-react'
 
 const USE_MOCK_DATA = false
 
@@ -22,36 +18,18 @@ const generatePaperId = () => {
   return 'paper_' + Date.now() + '_' + Math.random().toString(36).substr(2, 9)
 }
 
-// 苹果风格颜色
-const APPLE_COLORS = {
-  primary: '#007AFF',
-  success: '#34C759',
-  danger: '#FF3B30',
-  warning: '#FF9500',
-  background: '#F2F2F7',
-  card: '#FFFFFF',
-  text: '#1C1C1E',
-  textSecondary: '#8E8E93',
-  border: '#E5E5EA'
-}
-
-// 筛选标签
-const FILTER_TABS = [
-  { key: 'all', label: '全部' },
-  { key: 'ungraded', label: '未批改' },
-  { key: 'graded', label: '已批改' }
-]
-
-// 状态配置 - 苹果风格
+// Claude-inspired status config
 const STATUS_CONFIG = {
-  ungraded: { text: '未批改', color: APPLE_COLORS.danger, bgColor: '#FFEBEE' },
-  graded: { text: '已批改', color: APPLE_COLORS.success, bgColor: '#E8F5E9' }
+  ungraded: { text: '未批改', color: 'var(--warning)', bgColor: 'var(--warning-soft)' },
+  graded: { text: '已批改', color: 'var(--success)', bgColor: 'var(--success-soft)' },
+  done: { text: '已批改', color: 'var(--success)', bgColor: 'var(--success-soft)' },
+  failed: { text: '失败', color: 'var(--danger)', bgColor: 'var(--danger-soft)' },
 }
 
 export default function Exam() {
   const { currentStudent } = useStudentStore()
   const { setGeneratedExams, generatedExams } = useExamStore()
-  
+
   const [activeFilter, setActiveFilter] = useState('all')
   const [showStudentSwitcher, setShowStudentSwitcher] = useState(false)
   const [allExams, setAllExams] = useState([])
@@ -60,54 +38,28 @@ export default function Exam() {
 
   const loadGeneratedExams = async (forceRefresh = false) => {
     if (!currentStudent) return
-    
+
     try {
       if (USE_MOCK_DATA) return
-
       const generatedExamList = await getGeneratedExamsByStudent(currentStudent.id, !forceRefresh)
-      console.debug('生成的试卷数据:', generatedExamList, '当前store数据:', generatedExams.length)
-      
-      // Merge with existing, keeping locally added ones that aren't in DB yet
+
       const existingIds = new Set(generatedExams.map(e => e.id))
       const dbIds = new Set(generatedExamList.map(e => e.id))
-      
-      // Keep locally added exams not yet in DB + all DB exams for this student
       const localOnly = (Array.isArray(generatedExams) ? generatedExams : []).filter(e => e.student_id === currentStudent.id && !dbIds.has(e.id))
       const otherStudents = (Array.isArray(generatedExams) ? generatedExams : []).filter(e => e.student_id !== currentStudent.id)
-      
       setGeneratedExams([...generatedExamList, ...localOnly, ...otherStudents])
-
-      if (!forceRefresh) {
-        const backgroundRefresh = async () => {
-          try {
-            const freshData = await getGeneratedExamsByStudent(currentStudent.id, false)
-            const dbIds = new Set(freshData.map(e => e.id))
-            const localOnly = (Array.isArray(generatedExams) ? generatedExams : []).filter(e => e.student_id === currentStudent.id && !dbIds.has(e.id))
-            const otherStudents = (Array.isArray(generatedExams) ? generatedExams : []).filter(e => e.student_id !== currentStudent.id)
-            setGeneratedExams([...freshData, ...localOnly, ...otherStudents])
-          } catch (error) {
-            console.debug('后台刷新生成试卷失败:', error)
-          }
-        }
-        
-        backgroundRefresh()
-      }
     } catch (error) {
       console.error('加载生成试卷失败:', error)
     }
   }
 
   useEffect(() => {
-    if (currentStudent) {
-      loadGeneratedExams(true)
-    }
+    if (currentStudent) loadGeneratedExams(true)
   }, [currentStudent?.id])
 
   useEffect(() => {
     const interval = setInterval(() => {
-      if (document.visibilityState === 'visible') {
-        loadGeneratedExams(true)
-      }
+      if (document.visibilityState === 'visible') loadGeneratedExams(true)
     }, 3000)
     return () => clearInterval(interval)
   }, [currentStudent?.id])
@@ -116,11 +68,7 @@ export default function Exam() {
     const generated = generatedExams
       .filter(e => e.student_id === currentStudent?.id)
       .map(e => ({ ...e, source: 'generated' }))
-    
-    const sorted = generated.sort((a, b) => 
-      new Date(b.created_at) - new Date(a.created_at)
-    )
-    
+    const sorted = generated.sort((a, b) => new Date(b.created_at) - new Date(a.created_at))
     setAllExams(sorted)
   }, [generatedExams, currentStudent?.id])
 
@@ -133,82 +81,66 @@ export default function Exam() {
     if (status === 'all') return allExams.length
     return allExams.filter(e => e.status === status).length
   }
-  
+
   const totalUngradedCount = (Array.isArray(generatedExams) ? generatedExams : []).filter(e => e.status === 'ungraded').length
-  
+
   const handleOpenReview = (exam) => {
     setReviewExam(exam)
     setShowReview(true)
   }
 
-  const handleReviewSave = () => {
-    // 保存时立即刷新首页数据（强制刷新）
-    loadGeneratedExams(true)
-  }
+  const handleReviewSave = () => loadGeneratedExams(true)
 
   const handleReviewClose = () => {
     setShowReview(false)
-    // 关闭复审时重新加载数据，确保正确数/错误数同步
     loadGeneratedExams(true)
     setReviewExam(null)
   }
-  
-  // 渲染状态标签 - 苹果风格
+
   const renderStatusTag = (status) => {
     const config = STATUS_CONFIG[status]
     if (!config) return null
     return (
-      <span style={{
+      <span className="inline-flex items-center gap-1" style={{
         color: config.color,
-        fontSize: '12px',
-        padding: '4px 10px',
-        borderRadius: '12px',
+        fontSize: '11px',
+        padding: '2px 10px',
+        borderRadius: 'var(--radius-full)',
         background: config.bgColor,
-        fontWeight: 500
+        fontWeight: 600
       }}>
+        {status === 'done' && <CheckCircle size={10} />}
+        {status === 'ungraded' && <Clock size={10} />}
         {config.text}
       </span>
     )
   }
 
-  // 重打印试卷 - 获取错题本组卷的题目
   const handleReprint = async (exam) => {
     const questionIds = exam.question_ids || []
     if (questionIds.length === 0) {
-      Toast.show({
-        icon: 'fail',
-        content: '该试卷暂无题目可打印'
-      })
+      Toast.show({ icon: 'fail', content: '该试卷暂无题目可打印' })
       return
     }
-    
+
     let examQuestions = []
     try {
       examQuestions = await getQuestionsByIds(questionIds)
     } catch (error) {
       console.error('获取题目失败:', error)
-      Toast.show({
-        icon: 'fail',
-        content: '获取题目失败'
-      })
+      Toast.show({ icon: 'fail', content: '获取题目失败' })
       return
     }
-    
+
     if (examQuestions.length === 0) {
-      Toast.show({
-        icon: 'fail',
-        content: '该试卷暂无题目可打印'
-      })
+      Toast.show({ icon: 'fail', content: '该试卷暂无题目可打印' })
       return
     }
 
     const examTitle = exam.name
     const newPaperId = generatePaperId()
     const qrContent = JSON.stringify({
-      type: 'grading',
-      studentId: currentStudent?.id,
-      qIds: questionIds,
-      ts: Date.now()
+      type: 'grading', studentId: currentStudent?.id, qIds: questionIds, ts: Date.now()
     })
 
     try {
@@ -217,241 +149,142 @@ export default function Exam() {
         title: `${currentStudent?.name || '学生'} - ${examTitle}`,
         studentName: currentStudent?.name || '',
         questions: examQuestions,
-        filename: filename,
+        filename,
         showAnswers: false,
-        qrContent: qrContent,
+        qrContent,
       })
-      if (result && result.pdfBlob) {
-        saveAs(result.pdfBlob, `${filename}.pdf`)
-      }
-
-      Toast.show({
-        icon: 'success',
-        content: 'PDF已生成，请查看下载'
-      })
+      if (result && result.pdfBlob) saveAs(result.pdfBlob, `${filename}.pdf`)
+      Toast.show({ icon: 'success', content: 'PDF已生成，请查看下载' })
     } catch (error) {
       console.error('PDF生成失败:', error)
-      Toast.show({
-        icon: 'fail',
-        content: 'PDF生成失败'
-      })
+      Toast.show({ icon: 'fail', content: 'PDF生成失败' })
     }
   }
 
   if (!currentStudent) {
     return (
-      <Empty
-        description="请先选择学生"
-        style={{ padding: '64px 0' }}
-      />
+      <div className="flex items-center justify-center py-24" style={{ color: 'var(--text-tertiary)' }}>
+        <div className="text-center">
+          <User size={36} className="mx-auto mb-3" style={{ color: 'var(--text-tertiary)' }} />
+          <p style={{ fontSize: '14px' }}>请先选择学生</p>
+        </div>
+      </div>
     )
   }
 
   return (
-    <div style={{ padding: '0', background: APPLE_COLORS.background, minHeight: '100%', paddingBottom: '80px' }}>
-      {/* 顶部标题栏 - 苹果风格 */}
-      <div style={{ 
-        background: APPLE_COLORS.card, 
-        padding: '16px',
-        display: 'flex',
-        justifyContent: 'space-between',
-        alignItems: 'center',
-        borderBottom: '1px solid ' + APPLE_COLORS.border
-      }}>
-        <h1 style={{ margin: 0, fontSize: '20px', fontWeight: 600, color: APPLE_COLORS.text }}>试卷</h1>
-        <Button 
-          fill="none" 
-          style={{ color: APPLE_COLORS.primary, fontSize: '15px' }}
-          onClick={() => loadGeneratedExams(true)}
-        >
-          <span style={{ display: 'flex', alignItems: 'center', gap: '4px' }}>
-            <svg width="18" height="18" viewBox="0 0 1024 1024" fill="currentColor">
-              <path d="M832 384c-12.8-12.8-32-12.8-44.8 0L704 467.2V320c0-105.6-86.4-192-192-192S320 214.4 320 320s86.4 192 192 192c48 0 92.8-17.6 128-48 12.8-12.8 12.8-32 0-44.8s-32-12.8-44.8 0C572.8 438.4 544 448 512 448c-70.4 0-128-57.6-128-128s57.6-128 128-128 128 57.6 128 128v147.2l-83.2-83.2c-12.8-12.8-32-12.8-44.8 0s-12.8 32 0 44.8l137.6 137.6c12.8 12.8 32 12.8 44.8 0l137.6-137.6c12.8-12.8 12.8-32 0-44.8z"/>
-            </svg>
-            刷新
-          </span>
-        </Button>
-      </div>
-
-      {/* 学生信息卡片 - 苹果风格 */}
-      <div style={{ background: APPLE_COLORS.card, padding: '16px', borderBottom: '1px solid ' + APPLE_COLORS.border }}>
-        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
-          <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
-            <div
-              style={{
-                width: '48px',
-                height: '48px',
-                borderRadius: '50%',
-                background: 'linear-gradient(135deg, #E8F4FD 0%, #D6EBFA 100%)',
-                display: 'flex',
-                alignItems: 'center',
-                justifyContent: 'center',
-                overflow: 'hidden',
-                boxShadow: '0 2px 8px rgba(0,122,255,0.15)'
-              }}
-            >
+    <div style={{ minHeight: '100%', paddingBottom: '80px' }}>
+      {/* Student Info Card */}
+      <section className="mx-4 mt-3 mb-2">
+        <div className="card p-4 flex items-center justify-between">
+          <div className="flex items-center gap-3">
+            <div className="w-12 h-12 rounded-xl flex items-center justify-center overflow-hidden" style={{ background: 'var(--primary-soft)' }}>
               {currentStudent.avatar ? (
-                <img src={currentStudent.avatar} alt="" style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
+                <img src={currentStudent.avatar} alt="" className="w-full h-full object-cover" />
               ) : (
-                <svg width="28" height="28" viewBox="0 0 1024 1024" fill={APPLE_COLORS.primary}>
-                  <path d="M512 512c88 0 160-72 160-160s-72-160-160-160-160 72-160 160 72 160 160 160zm0-256c52.8 0 96 43.2 96 96s-43.2 96-96 96-96-43.2-96-96 43.2-96 96-96zm448 544v64c0 35.2-28.8 64-64 64H128c-35.2 0-64-28.8-64-64v-64c0-88 72-160 160-160h32c17.6 0 34.4 3.2 50.4 9.6 33.6 12.8 70.4 20.8 108.8 23.2 9.6 0.8 19.2 1.2 28.8 1.2s19.2-0.4 28.8-1.2c38.4-2.4 75.2-10.4 108.8-23.2 16-6.4 32.8-9.6 50.4-9.6h32c88 0 160 72 160 160zM128 800h768c0-52.8-43.2-96-96-96h-32c-11.2 0-22.4 2.4-32.8 6.4-40 16-84.8 25.6-130.4 28.8-11.2 0.8-22.4 1.2-33.6 1.2s-22.4-0.4-33.6-1.2c-45.6-3.2-90.4-12.8-130.4-28.8-10.4-4-21.6-6.4-32.8-6.4h-32c-52.8 0-96 43.2-96 96z"/>
-                </svg>
+                <User size={22} style={{ color: 'var(--primary)' }} />
               )}
             </div>
             <div>
-              <div style={{ fontSize: '17px', fontWeight: 600, color: APPLE_COLORS.text }}>
+              <p style={{ fontSize: '16px', fontWeight: 600, color: 'var(--text)' }}>
                 {currentStudent.name}
-              </div>
-              <div style={{ fontSize: '13px', color: APPLE_COLORS.textSecondary, marginTop: '2px' }}>
+              </p>
+              <p style={{ fontSize: '12px', color: 'var(--text-tertiary)', marginTop: '1px' }}>
                 {currentStudent.class || '暂无班级'}
-              </div>
+              </p>
             </div>
           </div>
-          <Button 
-            fill="none" 
-            style={{ color: APPLE_COLORS.primary, fontSize: '15px', display: 'flex', alignItems: 'center', gap: '4px' }}
+          <button
             onClick={() => setShowStudentSwitcher(true)}
+            className="flex items-center gap-1 text-[13px] font-medium px-3 py-1.5 rounded-xl transition-colors"
+            style={{ background: 'var(--bg-secondary)', color: 'var(--text-secondary)' }}
           >
-            切换学生
-            <Badge 
+            切换
+            <Badge
               content={totalUngradedCount > 0 ? (totalUngradedCount > 9 ? '9+' : String(totalUngradedCount)) : null}
-              style={{ 
-                '--color': APPLE_COLORS.primary,
-                '--background': '#fff',
-                '--border': APPLE_COLORS.primary,
-                '--padding': '0 6px',
-                '--font-size': '12px',
-                '--top': '-4px'
-              }}
+              style={{ '--color': 'var(--primary)', '--background': '#fff', '--padding': '0 6px', '--font-size': '11px' }}
             >
               <RightOutline />
             </Badge>
-          </Button>
+          </button>
         </div>
-      </div>
+      </section>
 
-      {/* 筛选标签 - 苹果风格 */}
-      <div style={{ 
-        background: APPLE_COLORS.card, 
-        padding: '12px 16px',
-        display: 'flex',
-        gap: '8px',
-        overflowX: 'auto',
-        borderBottom: '1px solid ' + APPLE_COLORS.border
-      }}>
-        {FILTER_TABS.map(tab => {
-          const count = getStatusCount(tab.key)
-          const isActive = activeFilter === tab.key
-          const tabColor = tab.key === 'graded' ? APPLE_COLORS.success : tab.key === 'ungraded' ? APPLE_COLORS.danger : APPLE_COLORS.primary
-          return (
-            <div
-              key={tab.key}
-              onClick={() => setActiveFilter(tab.key)}
-              style={{
-                padding: '8px 16px',
-                borderRadius: '20px',
-                fontSize: '14px',
-                whiteSpace: 'nowrap',
-                cursor: 'pointer',
-                background: isActive ? tabColor : APPLE_COLORS.background,
-                color: isActive ? '#fff' : APPLE_COLORS.textSecondary,
-                fontWeight: isActive ? 600 : 400,
-                transition: 'all 0.2s',
-                boxShadow: isActive ? `0 2px 8px ${tabColor}40` : 'none'
-              }}
-            >
-              {tab.label} {count}
-            </div>
-          )
-        })}
-      </div>
-
-      {/* 试卷列表 - 苹果风格 */}
-      <div style={{ padding: '12px' }}>
-        {filteredExams.length === 0 ? (
-          <Empty
-            description="暂无试卷"
-            style={{ padding: '64px 0' }}
-          />
-        ) : (
-          <div style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
-            {filteredExams.map((exam) => (
-              <div
-                key={exam.id}
-                onClick={() => exam.status === 'graded' || exam.status === 'done' ? handleOpenReview(exam) : handleReprint(exam)}
-                style={{
-                  background: APPLE_COLORS.card,
-                  borderRadius: '12px',
-                  padding: '16px',
-                  display: 'flex',
-                  gap: '12px',
-                  alignItems: 'flex-start',
-                  cursor: 'pointer',
-                  boxShadow: '0 1px 3px rgba(0,0,0,0.04)'
-                }}
+      {/* Filter Tabs */}
+      <section className="px-4 mb-3 overflow-x-auto no-scrollbar">
+        <div className="flex gap-2 min-w-max">
+          {['all', 'ungraded', 'graded'].map((key) => {
+            const count = getStatusCount(key)
+            const isActive = activeFilter === key
+            return (
+              <button
+                key={key}
+                onClick={() => setActiveFilter(key)}
+                className={`filter-chip ${isActive ? 'active' : 'inactive'}`}
               >
-                {/* 缩略图 - 固定试卷图标 */}
-                <div 
-                  style={{
-                    width: '80px',
-                    height: '60px',
-                    borderRadius: '10px',
-                    background: '#E8F4FD',
-                    overflow: 'hidden',
-                    flexShrink: 0,
-                    display: 'flex',
-                    alignItems: 'center',
-                    justifyContent: 'center'
-                  }}
-                >
-                  <svg width="32" height="32" viewBox="0 0 1024 1024" fill={APPLE_COLORS.primary}>
-                    <path d="M854.6 288.6L639.4 73.4c-6-6-14.1-9.4-22.6-9.4H192c-17.7 0-32 14.3-32 32v832c0 17.7 14.3 32 32 32h640c17.7 0 32-14.3 32-32V311.3c0-8.5-3.4-16.7-9.4-22.7zM790.2 326H602V137.8L790.2 326zM816 872H208V152h346v192c0 17.7 14.3 32 32 32h192v496z"/>
-                  </svg>
+                {key === 'all' ? '全部' : key === 'ungraded' ? '未批改' : '已批改'}
+                <span style={{ fontSize: '10px', opacity: 0.7, marginLeft: '3px' }}>{count}</span>
+              </button>
+            )
+          })}
+        </div>
+      </section>
+
+      {/* Exam List */}
+      <section className="px-4 space-y-2.5">
+        {filteredExams.length === 0 ? (
+          <div className="flex flex-col items-center justify-center py-24 animate-fade-in">
+            <div className="w-16 h-16 rounded-3xl flex items-center justify-center" style={{ background: 'var(--bg-secondary)' }}>
+              <FileText size={28} style={{ color: 'var(--text-tertiary)' }} />
+            </div>
+            <p className="mt-4" style={{ fontSize: '15px', fontWeight: 600, color: 'var(--text)' }}>暂无试卷</p>
+            <p className="mt-1" style={{ fontSize: '12px', color: 'var(--text-tertiary)' }}>上传试卷后将在此处显示</p>
+          </div>
+        ) : (
+          filteredExams.map((exam) => (
+            <div
+              key={exam.id}
+              onClick={() => (exam.status === 'graded' || exam.status === 'done') ? handleOpenReview(exam) : handleReprint(exam)}
+              className="card active:scale-[0.99] transition-all"
+              style={{ padding: '16px', cursor: 'pointer' }}
+            >
+              <div className="flex gap-3">
+                {/* Icon */}
+                <div className="w-[72px] h-[54px] rounded-xl flex items-center justify-center shrink-0" style={{ background: 'var(--primary-soft)' }}>
+                  <FileText size={28} style={{ color: 'var(--primary)' }} />
                 </div>
 
-                {/* 内容 */}
-                <div style={{ flex: 1, minWidth: 0 }}>
-                  <div style={{ 
-                    display: 'flex', 
-                    justifyContent: 'space-between', 
-                    alignItems: 'flex-start',
-                    marginBottom: '8px'
-                  }}>
-                    <div style={{ 
-                      fontSize: '15px', 
-                      color: APPLE_COLORS.text,
-                      fontWeight: 600,
-                      overflow: 'hidden',
-                      textOverflow: 'ellipsis',
-                      whiteSpace: 'nowrap',
-                      flex: 1,
-                      marginRight: '8px'
-                    }}>
+                {/* Content */}
+                <div className="flex-1 min-w-0">
+                  <div className="flex items-start justify-between gap-2 mb-1">
+                    <p className="text-[15px] font-semibold truncate" style={{ color: 'var(--text)' }}>
                       {exam.name}
-                    </div>
-                  </div>
-                  
-                  {/* 上传时间 */}
-                  <div style={{ fontSize: '12px', color: APPLE_COLORS.textSecondary, marginBottom: '4px' }}>
-                    上传时间：{dayjs(exam.created_at).format('YYYY/MM/DD HH:mm')}
-                  </div>
-                  
-                  {/* 题目数量 */}
-                  <div style={{ fontSize: '12px', color: APPLE_COLORS.textSecondary, marginBottom: '4px' }}>
-                    题目数量：{exam.question_ids?.length || 0}题
+                    </p>
+                    {exam.status === 'failed' && (
+                      <AlertCircle size={14} style={{ color: 'var(--danger)', flexShrink: 0 }} />
+                    )}
                   </div>
 
-                  {/* 批改结果（仅已批改显示） */}
+                  <div className="flex items-center gap-2 text-[11px]" style={{ color: 'var(--text-tertiary)' }}>
+                    <span>{dayjs(exam.created_at).format('MM/DD HH:mm')}</span>
+                    <span className="w-0.5 h-0.5 rounded-full" style={{ background: 'var(--text-tertiary)' }} />
+                    <span>{exam.question_ids?.length || 0} 题</span>
+                  </div>
+
+                  {/* Grading Results */}
                   {exam.status === 'done' && (
-                    <div style={{ fontSize: '13px', display: 'flex', gap: '12px', marginBottom: '4px' }}>
-                      <span style={{ color: APPLE_COLORS.success }}>
+                    <div className="flex items-center gap-3 mt-2">
+                      <span className="inline-flex items-center gap-1 text-[11px] font-medium px-2.5 py-0.5 rounded-full" style={{ background: 'var(--success-soft)', color: 'var(--success)' }}>
+                        <CheckCircle size={11} />
                         正确 {exam.correct_count || 0}
                       </span>
-                      <span style={{ color: APPLE_COLORS.danger }}>
+                      <span className="inline-flex items-center gap-1 text-[11px] font-medium px-2.5 py-0.5 rounded-full" style={{ background: 'var(--danger-soft)', color: 'var(--danger)' }}>
+                        <XCircle size={11} />
                         错误 {exam.wrong_count || 0}
                       </span>
                       {exam.not_answered_count > 0 && (
-                        <span style={{ color: APPLE_COLORS.warning }}>
+                        <span className="inline-flex items-center gap-1 text-[11px] font-medium px-2.5 py-0.5 rounded-full" style={{ background: 'var(--warning-soft)', color: 'var(--warning)' }}>
+                          <AlertCircle size={11} />
                           未作答 {exam.not_answered_count}
                         </span>
                       )}
@@ -459,54 +292,32 @@ export default function Exam() {
                   )}
                 </div>
 
-                {/* 右侧状态和图标 */}
-                <div style={{ flexShrink: 0, display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: '8px', position: 'relative' }}>
-                  {exam.status === 'failed' && (
-                    <span style={{ position: 'absolute', top: '-4px', right: '-4px', color: APPLE_COLORS.danger, fontSize: '16px' }} title="处理失败">
-                      ⚠️
-                    </span>
-                  )}
+                {/* Right side */}
+                <div className="flex flex-col items-end gap-2 shrink-0">
                   {renderStatusTag(exam.status)}
-                  {/* 所有试卷都显示重打印按钮 */}
-                    <Button
-                      size="small"
-                      fill="outline"
-                      style={{
-                        borderColor: APPLE_COLORS.primary,
-                        color: APPLE_COLORS.primary,
-                        fontSize: '12px',
-                        padding: '4px 10px',
-                        borderRadius: '10px',
-                        marginTop: '4px'
-                      }}
-                      onClick={(e) => {
-                        e.stopPropagation()
-                        handleReprint(exam)
-                      }}
-                    >
-                      <span style={{ display: 'flex', alignItems: 'center', gap: '4px' }}>
-                        <svg width="14" height="14" viewBox="0 0 1024 1024" fill="currentColor">
-                          <path d="M768 256H640v-64c0-35.2-28.8-64-64-64H448c-35.2 0-64 28.8-64 64v64H256c-52.8 0-96 43.2-96 96v320c0 52.8 43.2 96 96 96h512c52.8 0 96-43.2 96-96V352c0-52.8-43.2-96-96-96zM448 192h128v64H448V192zm320 512H256V352h512v352z"/>
-                          <path d="M320 448h384v64H320zM320 544h256v64H320z"/>
-                        </svg>
-                        {isMobile ? '下载PDF' : '下载PDF'}
-                      </span>
-                    </Button>
+                  <button
+                    onClick={(e) => { e.stopPropagation(); handleReprint(exam) }}
+                    className="inline-flex items-center gap-1 text-[10px] font-medium px-2.5 py-1 rounded-lg transition-colors"
+                    style={{ background: 'var(--primary-soft)', color: 'var(--primary)' }}
+                  >
+                    <Printer size={11} />
+                    {isMobile ? 'PDF' : 'PDF'}
+                  </button>
                 </div>
               </div>
-            ))}
-          </div>
+            </div>
+          ))
         )}
-      </div>
+      </section>
 
-      {/* 学生切换弹窗 */}
+      {/* Student Switcher */}
       <StudentSwitcher
         visible={showStudentSwitcher}
         onClose={() => setShowStudentSwitcher(false)}
         badgeType="grading"
       />
 
-      {/* 试卷复审弹窗 */}
+      {/* Exam Review Modal */}
       {showReview && reviewExam && (
         <ExamReview
           task={reviewExam}

@@ -26,17 +26,17 @@ import dayjs from 'dayjs'
 // 使用真实 API 数据
 const USE_MOCK_DATA = false
 
-// 苹果风格颜色
-const APPLE_COLORS = {
-  primary: '#007AFF',
-  success: '#34C759',
-  danger: '#FF3B30',
-  warning: '#FF9500',
-  background: '#F2F2F7',
+// Claude-inspired color constants
+const CLAUDE_COLORS = {
+  primary: '#3B82F6',
+  success: '#2D9D6E',
+  danger: '#E55353',
+  warning: '#E8A838',
+  background: '#F5F4F1',
   card: '#FFFFFF',
   text: '#1C1C1E',
   textSecondary: '#8E8E93',
-  border: '#E5E5EA'
+  border: '#E8E5E0'
 }
 
 // 掌握状态筛选标签（基于 lifecycle_status）
@@ -600,24 +600,24 @@ const renderMasteredTag = (wq) => {
   let label, color, bg
   if (lifecycle === 'mastered' || status === 'mastered') {
     label = '完全懂'
-    color = APPLE_COLORS.success
-    bg = '#E8F5E9'
+    color = CLAUDE_COLORS.success
+    bg = 'var(--success-soft)'
   } else if (lifecycle === 'review_2') {
     label = '略懂'
-    color = '#52C41A'
-    bg = '#F0FAEB'
+    color = 'var(--success)'
+    bg = 'var(--success-soft)'
   } else if (lifecycle === 'review_1') {
     label = '略懂'
-    color = APPLE_COLORS.warning
-    bg = '#FFF8E1'
+    color = 'var(--warning)'
+    bg = 'var(--warning-soft)'
   } else if (lifecycle === 'new' || status === 'pending') {
     label = '不懂'
-    color = APPLE_COLORS.danger
-    bg = '#FFEBEE'
+    color = 'var(--danger)'
+    bg = 'var(--danger-soft)'
   } else {
     label = '不懂'
-    color = APPLE_COLORS.danger
-    bg = '#FFEBEE'
+    color = 'var(--danger)'
+    bg = 'var(--danger-soft)'
   }
 
   return (
@@ -657,19 +657,19 @@ const renderMasteredTag = (wq) => {
   }
 
   return (
-    <div style={{ padding: '0', background: APPLE_COLORS.background, minHeight: '100%', paddingBottom: '80px' }}>
+    <div style={{ padding: '0', background: CLAUDE_COLORS.background, minHeight: '100%', paddingBottom: '80px' }}>
       {/* 顶部标题栏 - 苹果风格 */}
       <div style={{ 
-        background: APPLE_COLORS.card, 
+        background: CLAUDE_COLORS.card, 
         padding: '16px',
         display: 'flex',
         justifyContent: 'space-between',
         alignItems: 'center',
-        borderBottom: '1px solid ' + APPLE_COLORS.border
+        borderBottom: '1px solid ' + CLAUDE_COLORS.border
       }}>
-        <h1 style={{ margin: 0, fontSize: '20px', fontWeight: 600, color: APPLE_COLORS.text }}>错题本</h1>
+        <h1 style={{ margin: 0, fontSize: '20px', fontWeight: 600, color: CLAUDE_COLORS.text }}>错题本</h1>
         <div style={{ display: 'flex', gap: '12px' }}>
-          <Button fill="none" style={{ color: APPLE_COLORS.textSecondary, fontSize: '15px' }}>
+          <Button fill="none" style={{ color: CLAUDE_COLORS.textSecondary, fontSize: '15px' }}>
             <svg width="22" height="22" viewBox="0 0 1024 1024" fill="currentColor">
               <path d="M464 144c0-26.4 21.6-48 48-48s48 21.6 48 48-21.6 48-48 48-48-21.6-48-48z"/>
               <path d="M464 464c0-26.4 21.6-48 48-48s48 21.6 48 48-21.6 48-48 48-48-21.6-48-48z"/>
@@ -680,7 +680,7 @@ const renderMasteredTag = (wq) => {
       </div>
 
       {/* 学生信息卡片 - 苹果风格 */}
-      <div style={{ background: APPLE_COLORS.card, padding: '16px', borderBottom: '1px solid ' + APPLE_COLORS.border }}>
+      <div style={{ background: CLAUDE_COLORS.card, padding: '16px', borderBottom: '1px solid ' + CLAUDE_COLORS.border }}>
         <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
           <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
             <div
@@ -699,32 +699,32 @@ const renderMasteredTag = (wq) => {
               {currentStudent.avatar ? (
                 <img src={currentStudent.avatar} alt="" style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
               ) : (
-                <svg width="28" height="28" viewBox="0 0 1024 1024" fill={APPLE_COLORS.primary}>
+                <svg width="28" height="28" viewBox="0 0 1024 1024" fill={CLAUDE_COLORS.primary}>
                   <path d="M512 512c88 0 160-72 160-160s-72-160-160-160-160 72-160 160 72 160 160 160zm0-256c52.8 0 96 43.2 96 96s-43.2 96-96 96-96-43.2-96-96 43.2-96 96-96zm448 544v64c0 35.2-28.8 64-64 64H128c-35.2 0-64-28.8-64-64v-64c0-88 72-160 160-160h32c17.6 0 34.4 3.2 50.4 9.6 33.6 12.8 70.4 20.8 108.8 23.2 9.6 0.8 19.2 1.2 28.8 1.2s19.2-0.4 28.8-1.2c38.4-2.4 75.2-10.4 108.8-23.2 16-6.4 32.8-9.6 50.4-9.6h32c88 0 160 72 160 160zM128 800h768c0-52.8-43.2-96-96-96h-32c-11.2 0-22.4 2.4-32.8 6.4-40 16-84.8 25.6-130.4 28.8-11.2 0.8-22.4 1.2-33.6 1.2s-22.4-0.4-33.6-1.2c-45.6-3.2-90.4-12.8-130.4-28.8-10.4-4-21.6-6.4-32.8-6.4h-32c-52.8 0-96 43.2-96 96z"/>
                 </svg>
               )}
             </div>
             <div>
-              <div style={{ fontSize: '17px', fontWeight: 600, color: APPLE_COLORS.text }}>
+              <div style={{ fontSize: '17px', fontWeight: 600, color: CLAUDE_COLORS.text }}>
                 {currentStudent.name}
               </div>
-              <div style={{ fontSize: '13px', color: APPLE_COLORS.textSecondary, marginTop: '2px' }}>
+              <div style={{ fontSize: '13px', color: CLAUDE_COLORS.textSecondary, marginTop: '2px' }}>
                 {currentStudent.class || '暂无班级'}
               </div>
             </div>
           </div>
           <Button 
             fill="none" 
-            style={{ color: APPLE_COLORS.primary, fontSize: '15px', display: 'flex', alignItems: 'center', gap: '4px' }}
+            style={{ color: CLAUDE_COLORS.primary, fontSize: '15px', display: 'flex', alignItems: 'center', gap: '4px' }}
             onClick={() => setShowStudentSwitcher(true)}
           >
             切换学生
             <Badge 
               content={totalPendingCount > 0 ? (totalPendingCount > 99 ? '99+' : String(totalPendingCount)) : null}
               style={{ 
-                '--color': APPLE_COLORS.danger,
+                '--color': CLAUDE_COLORS.danger,
                 '--background': '#fff',
-                '--border': APPLE_COLORS.danger,
+                '--border': CLAUDE_COLORS.danger,
                 '--padding': '0 6px',
                 '--font-size': '12px',
                 '--top': '-4px'
@@ -737,68 +737,68 @@ const renderMasteredTag = (wq) => {
       </div>
 
       {/* 统计卡片 - 苹果风格 */}
-      <div style={{ background: APPLE_COLORS.card, padding: '16px', borderBottom: '1px solid ' + APPLE_COLORS.border }}>
+      <div style={{ background: CLAUDE_COLORS.card, padding: '16px', borderBottom: '1px solid ' + CLAUDE_COLORS.border }}>
         <div style={{ display: 'flex', gap: '12px' }}>
           <div style={{
             flex: 1,
-            background: '#FFEBEE',
+            background: 'var(--danger-soft)',
             padding: '14px',
             borderRadius: '12px',
             textAlign: 'center',
             boxShadow: '0 1px 3px rgba(0,0,0,0.04)'
           }}>
-            <div style={{ fontSize: '12px', color: APPLE_COLORS.textSecondary, marginBottom: '4px' }}>错题总数</div>
-            <div style={{ fontSize: '22px', fontWeight: 700, color: APPLE_COLORS.danger }}>{stats.total}道</div>
+            <div style={{ fontSize: '12px', color: CLAUDE_COLORS.textSecondary, marginBottom: '4px' }}>错题总数</div>
+            <div style={{ fontSize: '22px', fontWeight: 700, color: 'var(--danger)' }}>{stats.total}道</div>
           </div>
           <div style={{
             flex: 1,
-            background: '#E8F5E9',
+            background: 'var(--success-soft)',
             padding: '14px',
             borderRadius: '12px',
             textAlign: 'center',
             boxShadow: '0 1px 3px rgba(0,0,0,0.04)'
           }}>
-            <div style={{ fontSize: '12px', color: APPLE_COLORS.textSecondary, marginBottom: '4px' }}>完全懂</div>
-            <div style={{ fontSize: '22px', fontWeight: 700, color: APPLE_COLORS.success }}>{stats.mastered}道</div>
+            <div style={{ fontSize: '12px', color: CLAUDE_COLORS.textSecondary, marginBottom: '4px' }}>完全懂</div>
+            <div style={{ fontSize: '22px', fontWeight: 700, color: 'var(--success)' }}>{stats.mastered}道</div>
           </div>
           <div style={{
             flex: 1,
-            background: '#FFF8E1',
+            background: 'var(--warning-soft)',
             padding: '14px',
             borderRadius: '12px',
             textAlign: 'center',
             boxShadow: '0 1px 3px rgba(0,0,0,0.04)'
           }}>
-            <div style={{ fontSize: '12px', color: APPLE_COLORS.textSecondary, marginBottom: '4px' }}>略懂</div>
-            <div style={{ fontSize: '22px', fontWeight: 700, color: APPLE_COLORS.warning }}>{stats.review}道</div>
+            <div style={{ fontSize: '12px', color: CLAUDE_COLORS.textSecondary, marginBottom: '4px' }}>略懂</div>
+            <div style={{ fontSize: '22px', fontWeight: 700, color: 'var(--warning)' }}>{stats.review}道</div>
           </div>
           <div style={{
             flex: 1,
-            background: '#FFEBEE',
+            background: 'var(--danger-soft)',
             padding: '14px',
             borderRadius: '12px',
             textAlign: 'center',
             boxShadow: '0 1px 3px rgba(0,0,0,0.04)'
           }}>
-            <div style={{ fontSize: '12px', color: APPLE_COLORS.textSecondary, marginBottom: '4px' }}>不懂</div>
-            <div style={{ fontSize: '22px', fontWeight: 700, color: APPLE_COLORS.danger }}>{stats.notMastered}道</div>
+            <div style={{ fontSize: '12px', color: CLAUDE_COLORS.textSecondary, marginBottom: '4px' }}>不懂</div>
+            <div style={{ fontSize: '22px', fontWeight: 700, color: 'var(--danger)' }}>{stats.notMastered}道</div>
           </div>
         </div>
       </div>
 
       {/* 筛选标签 - 苹果风格 */}
       <div style={{ 
-        background: APPLE_COLORS.card, 
+        background: CLAUDE_COLORS.card, 
         padding: '12px 16px',
         display: 'flex',
         gap: '8px',
         overflowX: 'auto',
-        borderBottom: '1px solid ' + APPLE_COLORS.border
+        borderBottom: '1px solid ' + CLAUDE_COLORS.border
       }}>
         {STATUS_TABS.map(tab => {
           const count = getStatusCount(tab.key)
           const isActive = activeStatus === tab.key
-          const tabColor = tab.key === 'mastered' ? APPLE_COLORS.success : tab.key === 'review' ? APPLE_COLORS.warning : tab.key === 'new' ? APPLE_COLORS.danger : APPLE_COLORS.primary
+          const tabColor = tab.key === 'mastered' ? CLAUDE_COLORS.success : tab.key === 'review' ? CLAUDE_COLORS.warning : tab.key === 'new' ? CLAUDE_COLORS.danger : CLAUDE_COLORS.primary
           return (
             <div
               key={tab.key}
@@ -809,8 +809,8 @@ const renderMasteredTag = (wq) => {
                 fontSize: '14px',
                 whiteSpace: 'nowrap',
                 cursor: 'pointer',
-                background: isActive ? tabColor : APPLE_COLORS.background,
-                color: isActive ? '#fff' : APPLE_COLORS.textSecondary,
+                background: isActive ? tabColor : CLAUDE_COLORS.background,
+                color: isActive ? '#fff' : CLAUDE_COLORS.textSecondary,
                 fontWeight: isActive ? 600 : 400,
                 transition: 'all 0.2s',
                 boxShadow: isActive ? `0 2px 8px ${tabColor}40` : 'none'
@@ -824,16 +824,16 @@ const renderMasteredTag = (wq) => {
 
       {/* 错题分类标签 - 苹果风格 */}
       <div style={{ 
-        background: APPLE_COLORS.card, 
+        background: CLAUDE_COLORS.card, 
         padding: '8px 16px',
         display: 'flex',
         gap: '8px',
         overflowX: 'auto',
-        borderBottom: '1px solid ' + APPLE_COLORS.border
+        borderBottom: '1px solid ' + CLAUDE_COLORS.border
       }}>
         {QUESTION_TYPE_TABS.map(tab => {
           const isActive = activeQuestionType === tab.key
-          const tabColor = tab.key === 'wrong' ? APPLE_COLORS.danger : tab.key === 'unanswered' ? APPLE_COLORS.warning : APPLE_COLORS.primary
+          const tabColor = tab.key === 'wrong' ? CLAUDE_COLORS.danger : tab.key === 'unanswered' ? CLAUDE_COLORS.warning : CLAUDE_COLORS.primary
           return (
             <div
               key={tab.key}
@@ -844,8 +844,8 @@ const renderMasteredTag = (wq) => {
                 fontSize: '13px',
                 whiteSpace: 'nowrap',
                 cursor: 'pointer',
-                background: isActive ? tabColor : APPLE_COLORS.background,
-                color: isActive ? '#fff' : APPLE_COLORS.textSecondary,
+                background: isActive ? tabColor : CLAUDE_COLORS.background,
+                color: isActive ? '#fff' : CLAUDE_COLORS.textSecondary,
                 fontWeight: isActive ? 500 : 400,
                 transition: 'all 0.2s'
               }}
@@ -858,12 +858,12 @@ const renderMasteredTag = (wq) => {
 
       {/* 高级筛选栏 - 苹果风格 */}
       <div style={{ 
-        background: APPLE_COLORS.card, 
+        background: CLAUDE_COLORS.card, 
         padding: '12px 16px',
         display: 'flex',
         justifyContent: 'space-between',
         alignItems: 'center',
-        borderBottom: '1px solid ' + APPLE_COLORS.border
+        borderBottom: '1px solid ' + CLAUDE_COLORS.border
       }}>
         <div style={{ display: 'flex', gap: '16px', flex: 1 }}>
           {/* 科目筛选 */}
@@ -874,14 +874,14 @@ const renderMasteredTag = (wq) => {
               alignItems: 'center',
               gap: '4px',
               cursor: 'pointer',
-              color: activeSubject !== 'all' ? APPLE_COLORS.primary : APPLE_COLORS.textSecondary,
+              color: activeSubject !== 'all' ? CLAUDE_COLORS.primary : CLAUDE_COLORS.textSecondary,
               fontWeight: activeSubject !== 'all' ? 500 : 400
             }}
           >
             <span style={{ fontSize: '14px' }}>科目</span>
             <DownOutline style={{ fontSize: '12px', pointerEvents: 'none' }} />
             {activeSubject !== 'all' && (
-              <span style={{ fontSize: '12px', color: APPLE_COLORS.primary }}>
+              <span style={{ fontSize: '12px', color: CLAUDE_COLORS.primary }}>
                 {SUBJECT_OPTIONS.find(o => o.key === activeSubject)?.label}
               </span>
             )}
@@ -895,14 +895,14 @@ const renderMasteredTag = (wq) => {
               alignItems: 'center',
               gap: '4px',
               cursor: 'pointer',
-              color: activeTime !== 'all' ? APPLE_COLORS.primary : APPLE_COLORS.textSecondary,
+              color: activeTime !== 'all' ? CLAUDE_COLORS.primary : CLAUDE_COLORS.textSecondary,
               fontWeight: activeTime !== 'all' ? 500 : 400
             }}
           >
             <span style={{ fontSize: '14px' }}>时间</span>
             <DownOutline style={{ fontSize: '12px', pointerEvents: 'none' }} />
             {activeTime !== 'all' && (
-              <span style={{ fontSize: '12px', color: APPLE_COLORS.primary }}>
+              <span style={{ fontSize: '12px', color: CLAUDE_COLORS.primary }}>
                 {TIME_OPTIONS.find(o => o.key === activeTime)?.label}
               </span>
             )}
@@ -916,14 +916,14 @@ const renderMasteredTag = (wq) => {
               alignItems: 'center',
               gap: '4px',
               cursor: 'pointer',
-              color: activeErrorCount !== 'all' ? APPLE_COLORS.primary : APPLE_COLORS.textSecondary,
+              color: activeErrorCount !== 'all' ? CLAUDE_COLORS.primary : CLAUDE_COLORS.textSecondary,
               fontWeight: activeErrorCount !== 'all' ? 500 : 400
             }}
           >
             <span style={{ fontSize: '14px' }}>错次</span>
             <DownOutline style={{ fontSize: '12px', pointerEvents: 'none' }} />
             {activeErrorCount !== 'all' && (
-              <span style={{ fontSize: '12px', color: APPLE_COLORS.primary }}>
+              <span style={{ fontSize: '12px', color: CLAUDE_COLORS.primary }}>
                 {ERROR_COUNT_OPTIONS.find(o => o.key === activeErrorCount)?.label}
               </span>
             )}
@@ -938,14 +938,14 @@ const renderMasteredTag = (wq) => {
                 alignItems: 'center',
                 gap: '4px',
                 cursor: 'pointer',
-                color: activeTag !== 'all' ? APPLE_COLORS.primary : APPLE_COLORS.textSecondary,
+                color: activeTag !== 'all' ? CLAUDE_COLORS.primary : CLAUDE_COLORS.textSecondary,
                 fontWeight: activeTag !== 'all' ? 500 : 400
               }}
             >
               <span style={{ fontSize: '14px' }}>标签</span>
               <DownOutline style={{ fontSize: '12px', pointerEvents: 'none' }} />
               {activeTag !== 'all' && (
-                <span style={{ fontSize: '12px', color: APPLE_COLORS.primary }}>
+                <span style={{ fontSize: '12px', color: CLAUDE_COLORS.primary }}>
                   {activeTag}
                 </span>
               )}
@@ -960,14 +960,14 @@ const renderMasteredTag = (wq) => {
               alignItems: 'center',
               gap: '4px',
               cursor: 'pointer',
-              color: activeCategory !== 'all' ? APPLE_COLORS.primary : APPLE_COLORS.textSecondary,
+              color: activeCategory !== 'all' ? CLAUDE_COLORS.primary : CLAUDE_COLORS.textSecondary,
               fontWeight: activeCategory !== 'all' ? 500 : 400
             }}
           >
             <span style={{ fontSize: '14px' }}>分类</span>
             <DownOutline style={{ fontSize: '12px', pointerEvents: 'none' }} />
             {activeCategory !== 'all' && (
-              <span style={{ fontSize: '12px', color: APPLE_COLORS.primary }}>
+              <span style={{ fontSize: '12px', color: CLAUDE_COLORS.primary }}>
                 {CATEGORY_OPTIONS.find(o => o.key === activeCategory)?.label}
               </span>
             )}
@@ -982,7 +982,7 @@ const renderMasteredTag = (wq) => {
               alignItems: 'center',
               gap: '4px',
               cursor: 'pointer',
-              color: APPLE_COLORS.textSecondary,
+              color: CLAUDE_COLORS.textSecondary,
               fontSize: '14px'
             }}
           >
@@ -994,7 +994,7 @@ const renderMasteredTag = (wq) => {
               onClick={resetFilters}
               style={{
                 fontSize: '14px',
-                color: APPLE_COLORS.textSecondary,
+                color: CLAUDE_COLORS.textSecondary,
                 cursor: 'pointer'
               }}
             >
@@ -1005,7 +1005,7 @@ const renderMasteredTag = (wq) => {
             onClick={handleSelectAll}
             style={{
               fontSize: '14px',
-              color: selectedQuestions.length === sortedQuestions.length && sortedQuestions.length > 0 ? APPLE_COLORS.primary : APPLE_COLORS.textSecondary,
+              color: selectedQuestions.length === sortedQuestions.length && sortedQuestions.length > 0 ? CLAUDE_COLORS.primary : CLAUDE_COLORS.textSecondary,
               cursor: 'pointer',
               fontWeight: 500
             }}
@@ -1032,7 +1032,7 @@ const renderMasteredTag = (wq) => {
                 <div
                   key={wq.id}
                   style={{
-                    background: APPLE_COLORS.card,
+                    background: CLAUDE_COLORS.card,
                     borderRadius: '12px',
                     padding: '16px',
                     boxShadow: '0 1px 3px rgba(0,0,0,0.04)'
@@ -1050,12 +1050,12 @@ const renderMasteredTag = (wq) => {
                         checked={isSelected}
                         onChange={() => toggleSelection(wq)}
                       />
-                      <span style={{ fontSize: '14px', color: APPLE_COLORS.textSecondary }}>
+                      <span style={{ fontSize: '14px', color: CLAUDE_COLORS.textSecondary }}>
                         {question.subject || '数学'} · {question.category || '其他'}
                       </span>
                     </div>
                     <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-                      <span style={{ fontSize: '12px', color: APPLE_COLORS.textSecondary }}>
+                      <span style={{ fontSize: '12px', color: CLAUDE_COLORS.textSecondary }}>
                         {dayjs(wq.added_at || wq.created_at).format('YYYY-MM-DD')}
                       </span>
                       <span onClick={() => handleToggleMastery(wq)} style={{ cursor: 'pointer' }} title="点击切换掌握等级">
@@ -1067,7 +1067,7 @@ const renderMasteredTag = (wq) => {
                   {/* 题目内容 */}
                   <div style={{ 
                     fontSize: '15px', 
-                    color: APPLE_COLORS.text, 
+                    color: CLAUDE_COLORS.text, 
                     lineHeight: '1.6',
                     marginBottom: '8px'
                   }}>
@@ -1078,8 +1078,8 @@ const renderMasteredTag = (wq) => {
                   {(!question.task_id || wq.task_deleted) && (
                     <div style={{
                       fontSize: '12px',
-                      color: '#FF9500',
-                      background: '#FFF8E1',
+                      color: 'var(--warning)',
+                      background: 'var(--warning-soft)',
                       padding: '6px 10px',
                       borderRadius: '8px',
                       marginBottom: '8px',
@@ -1109,8 +1109,8 @@ const renderMasteredTag = (wq) => {
                               fontSize: '11px',
                               padding: '2px 8px',
                               borderRadius: '10px',
-                              background: question.tags_source === 'manual' ? '#FFF7E6' : '#E8F4FD',
-                              color: question.tags_source === 'manual' ? '#FA8C16' : APPLE_COLORS.primary,
+                              background: question.tags_source === 'manual' ? 'var(--warning-soft)' : 'var(--primary-soft)',
+                              color: question.tags_source === 'manual' ? 'var(--warning)' : CLAUDE_COLORS.primary,
                               fontWeight: 400
                             }}
                           >
@@ -1122,13 +1122,13 @@ const renderMasteredTag = (wq) => {
                   })()}
 
                   {/* 错误次数 */}
-                  <div style={{ fontSize: '13px', color: APPLE_COLORS.textSecondary, display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                  <div style={{ fontSize: '13px', color: CLAUDE_COLORS.textSecondary, display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
                     <span>错误次数：{question.wrong_count || 1}次</span>
                     <div style={{ display: 'flex', gap: '16px' }}>
                       <span
                         onClick={(e) => { e.stopPropagation(); handleDelete(wq.id) }}
                         style={{
-                          color: APPLE_COLORS.danger,
+                          color: CLAUDE_COLORS.danger,
                           fontSize: '13px',
                           cursor: 'pointer',
                           fontWeight: 500
@@ -1151,9 +1151,9 @@ const renderMasteredTag = (wq) => {
         bottom: '50px',
         left: 0,
         right: 0,
-        background: APPLE_COLORS.card,
+        background: CLAUDE_COLORS.card,
         padding: '12px 16px',
-        borderTop: '1px solid ' + APPLE_COLORS.border,
+        borderTop: '1px solid ' + CLAUDE_COLORS.border,
         display: 'flex',
         justifyContent: 'space-between',
         alignItems: 'center',
@@ -1164,8 +1164,8 @@ const renderMasteredTag = (wq) => {
             fill="outline"
             onClick={() => setShowScanQR(true)}
             style={{ 
-              borderColor: APPLE_COLORS.success, 
-              color: APPLE_COLORS.success,
+              borderColor: CLAUDE_COLORS.success, 
+              color: CLAUDE_COLORS.success,
               borderRadius: '10px'
             }}
           >
@@ -1176,8 +1176,8 @@ const renderMasteredTag = (wq) => {
               扫码批改
             </span>
           </Button>
-          <div style={{ fontSize: '14px', color: APPLE_COLORS.textSecondary, display: 'flex', alignItems: 'center' }}>
-            已选 <strong style={{ color: APPLE_COLORS.primary, margin: '0 4px' }}>{selectedQuestions.length}</strong> 题
+          <div style={{ fontSize: '14px', color: CLAUDE_COLORS.textSecondary, display: 'flex', alignItems: 'center' }}>
+            已选 <strong style={{ color: CLAUDE_COLORS.primary, margin: '0 4px' }}>{selectedQuestions.length}</strong> 题
           </div>
         </div>
         <div style={{ display: 'flex', gap: '8px' }}>
@@ -1188,8 +1188,8 @@ const renderMasteredTag = (wq) => {
             onClick={handleGenerateExam}
             style={{ 
               minWidth: '80px',
-              borderColor: APPLE_COLORS.primary,
-              color: APPLE_COLORS.primary,
+              borderColor: CLAUDE_COLORS.primary,
+              color: CLAUDE_COLORS.primary,
               borderRadius: '10px'
             }}
           >
@@ -1201,7 +1201,7 @@ const renderMasteredTag = (wq) => {
             onClick={() => setShowPrintPreview(true)}
             style={{
               minWidth: '80px',
-              background: APPLE_COLORS.primary,
+              background: CLAUDE_COLORS.primary,
               borderRadius: '10px'
             }}
           >
@@ -1256,24 +1256,24 @@ const renderMasteredTag = (wq) => {
           borderTopRightRadius: '20px',
           maxHeight: '80vh',
           overflow: 'auto',
-          background: APPLE_COLORS.card
+          background: CLAUDE_COLORS.card
         }}
       >
         <div>
           {/* 面板头部 */}
           <div style={{
             padding: '16px',
-            borderBottom: '1px solid ' + APPLE_COLORS.border,
+            borderBottom: '1px solid ' + CLAUDE_COLORS.border,
             display: 'flex',
             justifyContent: 'space-between',
             alignItems: 'center'
           }}>
-            <span style={{ fontSize: '18px', fontWeight: 600, color: APPLE_COLORS.text }}>筛选条件</span>
+            <span style={{ fontSize: '18px', fontWeight: 600, color: CLAUDE_COLORS.text }}>筛选条件</span>
             <div 
               onClick={() => setShowFilterPanel(false)}
               style={{ padding: '4px', cursor: 'pointer' }}
             >
-              <svg width="24" height="24" viewBox="0 0 1024 1024" fill={APPLE_COLORS.textSecondary}>
+              <svg width="24" height="24" viewBox="0 0 1024 1024" fill={CLAUDE_COLORS.textSecondary}>
                 <path d="M563.8 512l262.5-312.9c4.4-5.2.7-13.1-6.1-13.1h-79.8c-4.7 0-9.2 2.1-12.3 5.7L511.6 449.8 295.1 191.7c-3-3.6-7.5-5.7-12.3-5.7H203c-6.8 0-10.5 7.9-6.1 13.1L459.4 512 196.9 824.9c-4.4 5.2-.7 13.1 6.1 13.1h79.8c4.7 0 9.2-2.1 12.3-5.7l216.5-258.1 216.5 258.1c3 3.6 7.5 5.7 12.3 5.7h79.8c6.8 0 10.5-7.9 6.1-13.1L563.8 512z"/>
               </svg>
             </div>
@@ -1284,10 +1284,10 @@ const renderMasteredTag = (wq) => {
             {/* 分类筛选（错题/未作答） */}
             {activeFilterType === '' || activeFilterType === 'category' ? (
               <div style={{ marginBottom: '24px' }}>
-                <div style={{ fontSize: '15px', color: APPLE_COLORS.text, marginBottom: '12px', fontWeight: 500 }}>分类</div>
+                <div style={{ fontSize: '15px', color: CLAUDE_COLORS.text, marginBottom: '12px', fontWeight: 500 }}>分类</div>
                 <div style={{ display: 'flex', flexWrap: 'wrap', gap: '8px' }}>
                   {CATEGORY_OPTIONS.map(option => {
-                    const tabColor = option.key === 'wrong' ? APPLE_COLORS.danger : option.key === 'unanswered' ? APPLE_COLORS.warning : APPLE_COLORS.primary
+                    const tabColor = option.key === 'wrong' ? CLAUDE_COLORS.danger : option.key === 'unanswered' ? CLAUDE_COLORS.warning : CLAUDE_COLORS.primary
                     return (
                       <div
                         key={option.key}
@@ -1297,8 +1297,8 @@ const renderMasteredTag = (wq) => {
                           borderRadius: '20px',
                           fontSize: '14px',
                           cursor: 'pointer',
-                          background: activeCategory === option.key ? tabColor : APPLE_COLORS.background,
-                          color: activeCategory === option.key ? '#fff' : APPLE_COLORS.textSecondary,
+                          background: activeCategory === option.key ? tabColor : CLAUDE_COLORS.background,
+                          color: activeCategory === option.key ? '#fff' : CLAUDE_COLORS.textSecondary,
                           fontWeight: activeCategory === option.key ? 500 : 400,
                           transition: 'all 0.2s'
                         }}
@@ -1314,7 +1314,7 @@ const renderMasteredTag = (wq) => {
             {/* 科目筛选 */}
             {(activeFilterType === '' || activeFilterType === 'subject') ? (
               <div style={{ marginBottom: '24px' }}>
-                <div style={{ fontSize: '15px', color: APPLE_COLORS.text, marginBottom: '12px', fontWeight: 500 }}>科目</div>
+                <div style={{ fontSize: '15px', color: CLAUDE_COLORS.text, marginBottom: '12px', fontWeight: 500 }}>科目</div>
                 <div style={{ display: 'flex', flexWrap: 'wrap', gap: '8px' }}>
                   {SUBJECT_OPTIONS.map(option => (
                     <div
@@ -1325,8 +1325,8 @@ const renderMasteredTag = (wq) => {
                         borderRadius: '20px',
                         fontSize: '14px',
                         cursor: 'pointer',
-                        background: activeSubject === option.key ? APPLE_COLORS.primary : APPLE_COLORS.background,
-                        color: activeSubject === option.key ? '#fff' : APPLE_COLORS.textSecondary,
+                        background: activeSubject === option.key ? CLAUDE_COLORS.primary : CLAUDE_COLORS.background,
+                        color: activeSubject === option.key ? '#fff' : CLAUDE_COLORS.textSecondary,
                         fontWeight: activeSubject === option.key ? 500 : 400,
                         transition: 'all 0.2s'
                       }}
@@ -1341,7 +1341,7 @@ const renderMasteredTag = (wq) => {
             {/* 时间筛选 */}
             {(activeFilterType === '' || activeFilterType === 'time') ? (
               <div style={{ marginBottom: '24px' }}>
-                <div style={{ fontSize: '15px', color: APPLE_COLORS.text, marginBottom: '12px', fontWeight: 500 }}>加入时间</div>
+                <div style={{ fontSize: '15px', color: CLAUDE_COLORS.text, marginBottom: '12px', fontWeight: 500 }}>加入时间</div>
                 <div style={{ display: 'flex', flexWrap: 'wrap', gap: '8px' }}>
                   {TIME_OPTIONS.map(option => (
                     <div
@@ -1352,8 +1352,8 @@ const renderMasteredTag = (wq) => {
                         borderRadius: '20px',
                         fontSize: '14px',
                         cursor: 'pointer',
-                        background: activeTime === option.key ? APPLE_COLORS.primary : APPLE_COLORS.background,
-                        color: activeTime === option.key ? '#fff' : APPLE_COLORS.textSecondary,
+                        background: activeTime === option.key ? CLAUDE_COLORS.primary : CLAUDE_COLORS.background,
+                        color: activeTime === option.key ? '#fff' : CLAUDE_COLORS.textSecondary,
                         fontWeight: activeTime === option.key ? 500 : 400,
                         transition: 'all 0.2s'
                       }}
@@ -1368,7 +1368,7 @@ const renderMasteredTag = (wq) => {
             {/* 错误次数筛选 */}
             {(activeFilterType === '' || activeFilterType === 'errorCount') ? (
               <div style={{ marginBottom: '24px' }}>
-                <div style={{ fontSize: '15px', color: APPLE_COLORS.text, marginBottom: '12px', fontWeight: 500 }}>错误次数</div>
+                <div style={{ fontSize: '15px', color: CLAUDE_COLORS.text, marginBottom: '12px', fontWeight: 500 }}>错误次数</div>
                 <div style={{ display: 'flex', flexWrap: 'wrap', gap: '8px' }}>
                   {ERROR_COUNT_OPTIONS.map(option => (
                     <div
@@ -1379,8 +1379,8 @@ const renderMasteredTag = (wq) => {
                         borderRadius: '20px',
                         fontSize: '14px',
                         cursor: 'pointer',
-                        background: activeErrorCount === option.key ? APPLE_COLORS.primary : APPLE_COLORS.background,
-                        color: activeErrorCount === option.key ? '#fff' : APPLE_COLORS.textSecondary,
+                        background: activeErrorCount === option.key ? CLAUDE_COLORS.primary : CLAUDE_COLORS.background,
+                        color: activeErrorCount === option.key ? '#fff' : CLAUDE_COLORS.textSecondary,
                         fontWeight: activeErrorCount === option.key ? 500 : 400,
                         transition: 'all 0.2s'
                       }}
@@ -1395,7 +1395,7 @@ const renderMasteredTag = (wq) => {
             {/* 知识点标签筛选 */}
             {(activeFilterType === '' || activeFilterType === 'tag') && allTags.length > 0 ? (
               <div style={{ marginBottom: '24px' }}>
-                <div style={{ fontSize: '15px', color: APPLE_COLORS.text, marginBottom: '12px', fontWeight: 500 }}>知识点标签</div>
+                <div style={{ fontSize: '15px', color: CLAUDE_COLORS.text, marginBottom: '12px', fontWeight: 500 }}>知识点标签</div>
                 <div style={{ display: 'flex', flexWrap: 'wrap', gap: '8px' }}>
                   <div
                     onClick={() => setActiveTag('all')}
@@ -1404,8 +1404,8 @@ const renderMasteredTag = (wq) => {
                       borderRadius: '20px',
                       fontSize: '14px',
                       cursor: 'pointer',
-                      background: activeTag === 'all' ? APPLE_COLORS.primary : APPLE_COLORS.background,
-                      color: activeTag === 'all' ? '#fff' : APPLE_COLORS.textSecondary,
+                      background: activeTag === 'all' ? CLAUDE_COLORS.primary : CLAUDE_COLORS.background,
+                      color: activeTag === 'all' ? '#fff' : CLAUDE_COLORS.textSecondary,
                       fontWeight: activeTag === 'all' ? 500 : 400,
                       transition: 'all 0.2s'
                     }}
@@ -1421,8 +1421,8 @@ const renderMasteredTag = (wq) => {
                         borderRadius: '20px',
                         fontSize: '14px',
                         cursor: 'pointer',
-                        background: activeTag === tag ? '#FA8C16' : APPLE_COLORS.background,
-                        color: activeTag === tag ? '#fff' : APPLE_COLORS.textSecondary,
+                        background: activeTag === tag ? 'var(--warning)' : CLAUDE_COLORS.background,
+                        color: activeTag === tag ? '#fff' : CLAUDE_COLORS.textSecondary,
                         fontWeight: activeTag === tag ? 500 : 400,
                         transition: 'all 0.2s'
                       }}
@@ -1437,7 +1437,7 @@ const renderMasteredTag = (wq) => {
             {/* 排序方式 */}
             {activeFilterType === '' || activeFilterType === 'sort' ? (
               <div style={{ marginBottom: '24px' }}>
-                <div style={{ fontSize: '15px', color: APPLE_COLORS.text, marginBottom: '12px', fontWeight: 500 }}>排序方式</div>
+                <div style={{ fontSize: '15px', color: CLAUDE_COLORS.text, marginBottom: '12px', fontWeight: 500 }}>排序方式</div>
                 <div style={{ display: 'flex', flexWrap: 'wrap', gap: '8px' }}>
                   {[
                     { key: 'time_desc', label: '最新加入' },
@@ -1454,8 +1454,8 @@ const renderMasteredTag = (wq) => {
                         borderRadius: '20px',
                         fontSize: '14px',
                         cursor: 'pointer',
-                        background: sortBy === option.key ? APPLE_COLORS.primary : APPLE_COLORS.background,
-                        color: sortBy === option.key ? '#fff' : APPLE_COLORS.textSecondary,
+                        background: sortBy === option.key ? CLAUDE_COLORS.primary : CLAUDE_COLORS.background,
+                        color: sortBy === option.key ? '#fff' : CLAUDE_COLORS.textSecondary,
                         fontWeight: sortBy === option.key ? 500 : 400,
                         transition: 'all 0.2s'
                       }}
@@ -1471,7 +1471,7 @@ const renderMasteredTag = (wq) => {
           {/* 底部按钮 */}
           <div style={{
             padding: '12px 16px',
-            borderTop: '1px solid ' + APPLE_COLORS.border,
+            borderTop: '1px solid ' + CLAUDE_COLORS.border,
             display: 'flex',
             gap: '12px'
           }}>
@@ -1480,8 +1480,8 @@ const renderMasteredTag = (wq) => {
               style={{ 
                 flex: 1,
                 borderRadius: '10px',
-                borderColor: APPLE_COLORS.border,
-                color: APPLE_COLORS.text
+                borderColor: CLAUDE_COLORS.border,
+                color: CLAUDE_COLORS.text
               }}
               onClick={() => {
                 resetFilters()
@@ -1494,7 +1494,7 @@ const renderMasteredTag = (wq) => {
               style={{ 
                 flex: 1,
                 borderRadius: '10px',
-                background: APPLE_COLORS.primary
+                background: CLAUDE_COLORS.primary
               }}
               onClick={() => setShowFilterPanel(false)}
             >

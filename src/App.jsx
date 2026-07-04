@@ -1957,62 +1957,66 @@ export default function App() {
   const appContent = (
     <>
       {/* Header */}
-        <header className="sticky top-0 z-50 bg-white/90 border-b" style={{ borderColor: '#E5E7EB', paddingTop: 'env(safe-area-inset-top, 0px)' }}>
-          <div className="max-w-lg mx-auto px-4 h-11 flex items-center justify-between">
+        <header className="sticky top-0 z-50 glass border-b" style={{ borderColor: 'rgba(232,229,224,0.5)', paddingTop: 'env(safe-area-inset-top, 0px)' }}>
+          <div className="max-w-lg mx-auto px-4 h-12 flex items-center justify-between">
             <div className="flex items-center gap-2">
               <button
                 onClick={() => setShowStudentSwitcher(true)}
-                className="flex items-center gap-1.5 text-gray-900"
+                className="flex items-center gap-2 text-[var(--text)] active:scale-[0.97] transition-transform"
                 disabled={isInitializing}
               >
-                <div className="w-7 h-7 rounded-full flex items-center justify-center" style={{ background: '#EFF6FF' }}>
-                  <User size={14} style={{ color: '#2563EB' }} />
+                <div className="w-7 h-7 rounded-lg flex items-center justify-center" style={{ background: 'var(--primary-soft)' }}>
+                  <User size={14} style={{ color: 'var(--primary)' }} />
                 </div>
-                <span style={{ fontSize: '15px', fontWeight: 600 }}>
+                <span style={{ fontSize: '15px', fontWeight: 600, letterSpacing: '-0.01em' }}>
                   {isInitializing ? '加载中...' : (currentStudent?.name || '选择学生')}
                 </span>
-                <ChevronDown size={14} className="text-gray-400" />
+                <ChevronDown size={14} style={{ color: 'var(--text-tertiary)' }} />
               </button>
             </div>
-            <div className="flex items-center gap-2">
+            <div className="flex items-center gap-1.5">
               <button
                 onClick={() => { setShowScanQR(true); setGradingData(null) }}
-                className="w-8 h-8 rounded-full flex items-center justify-center" style={{ background: '#F3F4F6' }}
+                className="w-8 h-8 rounded-xl flex items-center justify-center transition-colors"
+                style={{ background: 'var(--bg-secondary)' }}
                 title="扫码批改"
               >
-                <QrCode size={16} style={{ color: '#6B7280' }} />
+                <QrCode size={16} style={{ color: 'var(--text-secondary)' }} />
               </button>
               <button
                 onClick={() => { setShowSearch(s => !s); setShowFilterMenu(false) }}
-                className="w-8 h-8 rounded-full flex items-center justify-center" style={{ background: showSearch ? '#EFF6FF' : '#F3F4F6' }}
+                className="w-8 h-8 rounded-xl flex items-center justify-center transition-colors"
+                style={{ background: showSearch ? 'var(--primary-soft)' : 'var(--bg-secondary)' }}
                 title="搜索"
               >
-                <Search size={16} style={{ color: showSearch ? '#2563EB' : '#6B7280' }} />
+                <Search size={16} style={{ color: showSearch ? 'var(--primary)' : 'var(--text-secondary)' }} />
               </button>
               <button
                 onClick={() => { setShowFilterMenu(s => !s); setShowSearch(false) }}
-                className={`w-8 h-8 rounded-full flex items-center justify-center ${showFilterMenu ? 'ring-2 ring-blue-200' : ''}`}
-                style={{ background: showFilterMenu ? '#EFF6FF' : '#F3F4F6' }}
+                className="w-8 h-8 rounded-xl flex items-center justify-center transition-colors"
+                style={{
+                  background: showFilterMenu ? 'var(--primary-soft)' : 'var(--bg-secondary)',
+                }}
                 title="筛选"
               >
-                <Filter size={16} style={{ color: showFilterMenu ? '#2563EB' : '#6B7280' }} />
+                <Filter size={16} style={{ color: showFilterMenu ? 'var(--primary)' : 'var(--text-secondary)' }} />
               </button>
             </div>
           </div>
         </header>
 
-        {/* Search Bar */}
+        {/* Search Bar — Claude style */}
         {showSearch && (
-          <div className="sticky top-11 z-40 px-4 py-2 border-b" style={{ background: '#fff', borderColor: '#E5E7EB' }}>
+          <div className="sticky top-12 z-40 px-4 py-2.5 border-b animate-fade-in" style={{ background: 'var(--bg-card)', borderColor: 'var(--border)' }}>
             <div className="relative">
-              <Search size={14} className="absolute left-3 top-1/2 -translate-y-1/2" style={{ color: '#9CA3AF' }} />
+              <Search size={14} className="absolute left-3 top-1/2 -translate-y-1/2" style={{ color: 'var(--text-tertiary)' }} />
               <input
                 type="text"
                 value={searchKeyword}
                 onChange={(e) => setSearchKeyword(e.target.value)}
                 placeholder="搜索题目内容..."
-                className="w-full h-9 pl-9 pr-8 rounded-lg text-[13px] border-0 outline-none"
-                style={{ background: '#F3F4F6' }}
+                className="w-full h-9 pl-9 pr-8 rounded-xl text-[13px] border-0 outline-none"
+                style={{ background: 'var(--bg-mist)' }}
                 autoFocus
               />
               {searchKeyword && (
@@ -2020,26 +2024,22 @@ export default function App() {
                   onClick={() => setSearchKeyword('')}
                   className="absolute right-2 top-1/2 -translate-y-1/2"
                 >
-                  <X size={14} style={{ color: '#9CA3AF' }} />
+                  <X size={14} style={{ color: 'var(--text-tertiary)' }} />
                 </button>
               )}
             </div>
           </div>
         )}
 
-        {/* Filter Menu */}
+        {/* Filter Menu — Claude style */}
         {showFilterMenu && (
-          <div className="sticky top-11 z-40 px-4 py-2 border-b" style={{ background: '#fff', borderColor: '#E5E7EB' }}>
+          <div className="sticky top-12 z-40 px-4 py-3 border-b animate-fade-in" style={{ background: 'var(--bg-card)', borderColor: 'var(--border)' }}>
             <div className="flex gap-2 flex-wrap">
               {currentPage === 'processing' && ['all', 'done', 'pending'].map(status => (
                 <button
                   key={status}
                   onClick={() => setProcessingFilter(status)}
-                  className="px-3 py-1.5 rounded-full text-[12px] font-medium transition-all"
-                  style={{
-                    background: processingFilter === status ? '#2563EB' : '#F3F4F6',
-                    color: processingFilter === status ? '#fff' : '#6B7280'
-                  }}
+                  className={`filter-chip ${processingFilter === status ? 'active' : 'inactive'}`}
                 >
                   {status === 'all' ? '全部' : status === 'done' ? '已批改' : '未批改'}
                 </button>
@@ -2048,17 +2048,13 @@ export default function App() {
                 <button
                   key={status}
                   onClick={() => setBankFilter(status)}
-                  className="px-3 py-1.5 rounded-full text-[12px] font-medium transition-all"
-                  style={{
-                    background: bankFilter === status ? '#2563EB' : '#F3F4F6',
-                    color: bankFilter === status ? '#fff' : '#6B7280'
-                  }}
+                  className={`filter-chip ${bankFilter === status ? 'active' : 'inactive'}`}
                 >
                   {status === 'all' ? '全部' : status === 'new' ? '不懂' : status === 'review' ? '略懂' : '完全懂'}
                 </button>
               ))}
               {currentPage === 'exam' && (
-                <span style={{ fontSize: '12px', color: '#9CA3AF', padding: '6px 0' }}>使用搜索查找组卷记录</span>
+                <span style={{ fontSize: '12px', color: 'var(--text-tertiary)', padding: '6px 0' }}>使用搜索查找组卷记录</span>
               )}
             </div>
           </div>
@@ -2066,24 +2062,24 @@ export default function App() {
 
         {/* Main Content */}
         <main className="max-w-lg mx-auto" style={{ paddingBottom: '80px' }}>
-          {/* 上传队列提示 */}
+          {/* 上传队列提示 — Claude style */}
           {uploadQueue.length > 0 && (
-            <div className="sticky top-11 z-40 px-4 py-2" style={{ background: '#FFFBEB', borderBottom: '1px solid #FEF08A' }}>
-              <div className="flex items-center gap-2">
-                <Loader2 size={14} className="animate-spin" style={{ color: '#F59E0B' }} />
-                <span style={{ fontSize: '12px', color: '#92400E' }}>
+            <div className="sticky top-11 z-40 px-4 py-2.5 animate-fade-in" style={{ background: 'var(--warning-soft)', borderBottom: '1px solid rgba(232,168,56,0.2)' }}>
+              <div className="flex items-center gap-2.5">
+                <div className="w-2 h-2 rounded-full animate-pulse" style={{ background: 'var(--warning)' }} />
+                <span style={{ fontSize: '12px', fontWeight: 500, color: '#7C5A1E' }}>
                   正在排队上传 {uploadQueue.length} 个文件...
                 </span>
               </div>
             </div>
           )}
 
-          {/* 正在上传提示 */}
+          {/* 正在上传提示 — Claude style */}
           {isUploading && (
-            <div className="sticky top-11 z-40 px-4 py-2" style={{ background: '#EFF6FF', borderBottom: '1px solid #BFDBFE' }}>
-              <div className="flex items-center gap-2">
-                <Loader2 size={14} className="animate-spin" style={{ color: '#2563EB' }} />
-                <span style={{ fontSize: '12px', color: '#1E40AF' }}>
+            <div className="sticky top-11 z-40 px-4 py-2.5 animate-fade-in" style={{ background: 'var(--primary-soft)', borderBottom: '1px solid rgba(59,130,246,0.15)' }}>
+              <div className="flex items-center gap-2.5">
+                <div className="w-2 h-2 rounded-full animate-pulse" style={{ background: 'var(--primary)' }} />
+                <span style={{ fontSize: '12px', fontWeight: 500, color: '#4A3F9E' }}>
                   正在上传试卷...
                 </span>
               </div>
@@ -2131,15 +2127,19 @@ export default function App() {
                     </div>
                   ) : filteredTasks.length === 0 ? (
                     isInitializing ? (
-                      <div className="text-center py-16">
-                        <Loader2 size={36} className="mx-auto animate-spin" style={{ color: '#9CA3AF' }} />
-                        <p className="mt-3" style={{ fontSize: '13px', color: '#9CA3AF' }}>正在加载学生数据...</p>
+                      <div className="flex flex-col items-center justify-center py-24 animate-fade-in">
+                        <div className="w-12 h-12 rounded-2xl flex items-center justify-center" style={{ background: 'var(--primary-soft)' }}>
+                          <Loader2 size={24} className="animate-spin" style={{ color: 'var(--primary)' }} />
+                        </div>
+                        <p className="mt-4" style={{ fontSize: '14px', fontWeight: 500, color: 'var(--text-secondary)' }}>正在加载学生数据...</p>
                       </div>
                     ) : (
-                      <div className="text-center py-16">
-                        <Camera size={36} className="mx-auto" style={{ color: '#D1D5DB' }} />
-                        <p className="mt-3" style={{ fontSize: '13px', color: '#9CA3AF' }}>暂无任务</p>
-                        <p className="mt-0.5" style={{ fontSize: '11px', color: '#D1D5DB' }}>点击右下角按钮上传试卷</p>
+                      <div className="flex flex-col items-center justify-center py-24 animate-fade-in">
+                        <div className="w-16 h-16 rounded-3xl flex items-center justify-center" style={{ background: 'var(--bg-secondary)' }}>
+                          <Camera size={28} style={{ color: 'var(--text-tertiary)' }} />
+                        </div>
+                        <p className="mt-4" style={{ fontSize: '15px', fontWeight: 600, color: 'var(--text)' }}>暂无任务</p>
+                        <p className="mt-1" style={{ fontSize: '12px', color: 'var(--text-tertiary)' }}>点击右下角按钮上传试卷</p>
                       </div>
                     )
                   ) : (
@@ -2149,13 +2149,11 @@ export default function App() {
                         layout
                         initial={{ opacity: 0, y: 10 }}
                         animate={{ opacity: 1, y: 0 }}
-                        className={`${isTaskCompleted(task) ? 'cursor-pointer' : ''}`}
+                        className={`card ${isTaskCompleted(task) ? 'cursor-pointer hover:shadow-md' : ''}`}
                         style={{
-                          padding: '8px 12px',
-                          borderRadius: '10px',
-                          background: '#fff',
-                          border: '1px solid #F3F4F6',
-                          transition: 'all 0.15s'
+                          padding: '12px 14px',
+                          transition: 'all 0.2s ease',
+                          borderLeft: isTaskCompleted(task) ? '3px solid var(--primary)' : '3px solid var(--warning)',
                         }}
                         onClick={() => {
                           if (isTaskCompleted(task)) {
@@ -2164,56 +2162,56 @@ export default function App() {
                           }
                         }}
                       >
-                        <div className="flex gap-2.5 items-center">
-                          {/* Small thumbnail */}
+                        <div className="flex gap-3 items-center">
+                          {/* Thumbnail with Claude-style mask */}
                           <div
-                            className="w-9 h-9 rounded-lg flex-shrink-0 overflow-hidden cursor-pointer"
-                            style={{ background: '#F5F5F5' }}
+                            className="w-10 h-10 rounded-xl flex-shrink-0 overflow-hidden cursor-pointer ring-1 ring-black/5"
+                            style={{ background: 'var(--bg-mist)' }}
                             onClick={(e) => { e.stopPropagation(); handleViewImage(task.image_url) }}
                           >
                             {task.image_url ? (
                               <img src={task.image_url} alt="" className="w-full h-full object-cover" />
                             ) : (
                               <div className="w-full h-full flex items-center justify-center">
-                                <ImageIcon size={14} style={{ color: '#D1D5DB' }} />
+                                <FileText size={16} style={{ color: 'var(--text-tertiary)' }} />
                               </div>
                             )}
                           </div>
                           {/* Content */}
                           <div className="flex-1 min-w-0">
                             <div className="flex items-center justify-between gap-1">
-                              <span style={{ fontSize: '13px', fontWeight: 500, color: '#111827' }} className="truncate">
+                              <span style={{ fontSize: '14px', fontWeight: 600, color: 'var(--text)' }} className="truncate">
                                 {task.original_name || '未命名试卷'}
                               </span>
                               <button
                                 onClick={(e) => { e.stopPropagation(); setDeleteTarget({ type: 'task', id: task.id }); setShowDeleteConfirm(true) }}
-                                className="flex-shrink-0"
-                                style={{ color: '#E5E7EB' }}
+                                className="flex-shrink-0 opacity-0 group-hover:opacity-100 transition-opacity"
+                                style={{ color: 'var(--text-tertiary)' }}
                               >
-                                <Trash2 size={12} />
+                                <Trash2 size={13} />
                               </button>
                             </div>
-                            <div className="flex items-center gap-1.5 mt-0.5 flex-wrap">
-                              <span style={{ fontSize: '11px', color: '#9CA3AF' }}>
+                            <div className="flex items-center gap-2 mt-1 flex-wrap">
+                              <span style={{ fontSize: '11px', color: 'var(--text-tertiary)' }}>
                                 {dayjs(task.created_at).format('MM/DD HH:mm')}
                               </span>
                               {task.result?.questionCount ? (
                                 <>
-                                  <span style={{ fontSize: '10px', color: '#D1D5DB' }}>·</span>
-                                  <span style={{ fontSize: '11px', color: '#9CA3AF' }}>{task.result.questionCount} 题</span>
+                                  <span className="w-0.5 h-0.5 rounded-full" style={{ background: 'var(--text-tertiary)' }} />
+                                  <span style={{ fontSize: '11px', color: 'var(--text-secondary)' }}>{task.result.questionCount} 题</span>
                                 </>
                               ) : null}
                               {/* Inline status for non-done */}
                               {!isTaskCompleted(task) && (
                                 <>
-                                  <span style={{ fontSize: '10px', color: '#D1D5DB' }}>·</span>
+                                  <span className="w-0.5 h-0.5 rounded-full" style={{ background: 'var(--text-tertiary)' }} />
                                   {(() => {
                                     const pendingMinutes = dayjs().diff(dayjs(task.created_at), 'minute')
 
                                     if (task.status === 'processing') {
                                       return (
-                                        <span style={{ fontSize: '11px', color: '#2563EB' }}>
-                                          <Loader2 size={9} className="animate-spin inline" style={{ marginRight: '1px' }} />
+                                        <span className="inline-flex items-center gap-1" style={{ fontSize: '11px', color: 'var(--primary)' }}>
+                                          <span className="inline-block w-2 h-2 rounded-full animate-pulse" style={{ background: 'var(--primary)' }} />
                                           批改中
                                         </span>
                                       )
@@ -2221,19 +2219,16 @@ export default function App() {
 
                                     if (task.status === 'failed') {
                                       return (
-                                        <span style={{ fontSize: '11px', color: '#EF4444' }}>
+                                        <span className="inline-flex items-center gap-1" style={{ fontSize: '11px', color: 'var(--danger)' }}>
+                                          <span className="inline-block w-2 h-2 rounded-full" style={{ background: 'var(--danger)' }} />
                                           识别失败
                                           <button
                                             onClick={(e) => { e.stopPropagation(); handleRetryTask(task.id) }}
+                                            className="rounded text-[10px] font-medium px-1.5 py-0.5 transition-colors"
                                             style={{
-                                              marginLeft: '6px',
-                                              fontSize: '10px',
-                                              padding: '1px 6px',
-                                              borderRadius: '4px',
-                                              border: '1px solid #EF4444',
-                                              background: '#FEF2F2',
-                                              color: '#EF4444',
-                                              cursor: 'pointer'
+                                              border: '1px solid var(--danger)',
+                                              background: 'var(--danger-soft)',
+                                              color: 'var(--danger)',
                                             }}
                                           >
                                             重试
@@ -2242,9 +2237,10 @@ export default function App() {
                                       )
                                     }
 
-                                    // Pending status (just show wait time, no reprocess button)
+                                    // Pending status
                                     return (
-                                      <span style={{ fontSize: '11px', color: pendingMinutes > 30 ? '#EF4444' : '#F59E0B' }}>
+                                      <span className="inline-flex items-center gap-1" style={{ fontSize: '11px', color: pendingMinutes > 30 ? 'var(--danger)' : 'var(--warning)' }}>
+                                        <span className="inline-block w-2 h-2 rounded-full" style={{ background: pendingMinutes > 30 ? 'var(--danger)' : 'var(--warning)' }} />
                                         等待中 ({pendingMinutes}分钟)
                                       </span>
                                     )
@@ -2252,37 +2248,37 @@ export default function App() {
                                 </>
                               )}
                             </div>
-                            {/* Stats or Error */}
+                            {/* Stats */}
                             {isTaskCompleted(task) && task.result?.questionCount ? (
-                              <div className="flex items-center gap-1.5 mt-0.5">
-                                <span style={{
+                              <div className="flex items-center gap-2 mt-1.5">
+                                <span className="inline-flex items-center gap-1" style={{
                                   fontSize: '10px',
-                                  padding: '0 5px',
-                                  height: '16px',
-                                  lineHeight: '16px',
-                                  borderRadius: '3px',
-                                  background: '#F0FDF4',
-                                  color: '#16A34A',
-                                  display: 'inline-block'
+                                  padding: '1px 8px',
+                                  height: '18px',
+                                  borderRadius: 'var(--radius-full)',
+                                  background: 'var(--success-soft)',
+                                  color: 'var(--success)',
+                                  fontWeight: 500,
                                 }}>
+                                  <Check size={10} />
                                   正确 {task.result?.questionCount - (task.result?.wrongCount || 0)}
                                 </span>
-                                <span style={{
+                                <span className="inline-flex items-center gap-1" style={{
                                   fontSize: '10px',
-                                  padding: '0 5px',
-                                  height: '16px',
-                                  lineHeight: '16px',
-                                  borderRadius: '3px',
-                                  background: '#FEF2F2',
-                                  color: '#EF4444',
-                                  display: 'inline-block'
+                                  padding: '1px 8px',
+                                  height: '18px',
+                                  borderRadius: 'var(--radius-full)',
+                                  background: 'var(--danger-soft)',
+                                  color: 'var(--danger)',
+                                  fontWeight: 500,
                                 }}>
+                                  <X size={10} />
                                   错误 {task.result?.wrongCount || 0}
                                 </span>
                               </div>
                             ) : null}
                             {task.status === 'failed' && task.result?.error && (
-                              <p style={{ fontSize: '10px', color: '#EF4444', marginTop: '0.5px', lineHeight: 1.2 }}>
+                              <p style={{ fontSize: '10px', color: 'var(--danger)', marginTop: '3px', lineHeight: 1.3 }}>
                                 {task.result.error}
                               </p>
                             )}
@@ -2827,35 +2823,48 @@ export default function App() {
           </AnimatePresence>
         </main>
 
-        {/* Bottom Navigation - iOS Segmented Control Style */}
-        <nav className="fixed bottom-0 left-0 right-0 bg-white/90 border-t z-50" style={{ borderColor: '#E5E7EB' }}>
-          <div className="max-w-lg mx-auto px-3 py-1.5" style={{ paddingBottom: 'calc(0.375rem + env(safe-area-inset-bottom, 0px))' }}>
-            <div className="flex gap-1 rounded-lg p-0.5" style={{ background: '#F3F4F6' }}>
-              {[
-                { id: 'processing', icon: Camera, label: '首页' },
-                { id: 'wrongbook', icon: LayoutGrid, label: '错题本' },
-                { id: 'exam', icon: FileText, label: '组卷记录' },
-              ].map((tab) => (
+        {/* Bottom Navigation — Claude Style */}
+        <nav className="fixed bottom-0 left-0 right-0 z-50 glass border-t" style={{ borderColor: 'rgba(232,229,224,0.6)' }}>
+          <div className="max-w-lg mx-auto flex items-center justify-around" style={{ padding: '6px 0', paddingBottom: 'calc(6px + env(safe-area-inset-bottom, 0px))' }}>
+            {[
+              { id: 'processing', icon: Camera, label: '首页' },
+              { id: 'wrongbook', icon: LayoutGrid, label: '错题本' },
+              { id: 'exam', icon: FileText, label: '组卷记录' },
+            ].map((tab) => {
+              const isActive = currentPage === tab.id
+              return (
                 <button
                   key={tab.id}
                   onClick={() => { setCurrentPage(tab.id); clearSelection() }}
-                  className="flex-1 flex items-center justify-center gap-1.5 py-1.5 rounded-md transition-all"
-                  style={{
-                    background: currentPage === tab.id ? '#FFFFFF' : 'transparent',
-                    boxShadow: currentPage === tab.id ? '0 1px 2px rgba(0,0,0,0.08)' : 'none',
-                  }}
+                  className="flex flex-col items-center justify-center gap-0.5 transition-all active:scale-90"
+                  style={{ minWidth: '64px', padding: '4px 12px' }}
                 >
-                  <tab.icon
-                    size={16}
-                    strokeWidth={currentPage === tab.id ? 2.5 : 2}
-                    style={{ color: currentPage === tab.id ? '#2563EB' : '#9CA3AF' }}
-                  />
-                  <span style={{ fontSize: '13px', fontWeight: currentPage === tab.id ? 600 : 400, color: currentPage === tab.id ? '#2563EB' : '#9CA3AF' }}>
+                  <div
+                    className="flex items-center justify-center transition-all duration-200"
+                    style={{
+                      width: '32px',
+                      height: '32px',
+                      borderRadius: 'var(--radius-sm)',
+                      background: isActive ? 'var(--primary-soft)' : 'transparent',
+                    }}
+                  >
+                    <tab.icon
+                      size={18}
+                      strokeWidth={isActive ? 2.5 : 1.8}
+                      style={{ color: isActive ? 'var(--primary)' : 'var(--text-tertiary)' }}
+                    />
+                  </div>
+                  <span style={{
+                    fontSize: '10px',
+                    fontWeight: isActive ? 600 : 400,
+                    color: isActive ? 'var(--primary)' : 'var(--text-tertiary)',
+                    letterSpacing: '0.02em',
+                  }}>
                     {tab.label}
                   </span>
                 </button>
-              ))}
-            </div>
+              )
+            })}
           </div>
         </nav>
 
@@ -2865,59 +2874,88 @@ export default function App() {
           onClose={() => setShowStudentSwitcher(false)}
         />
 
-        {/* Floating Action Button */}
+        {/* Floating Action Button — Claude style */}
         {currentPage === 'processing' && (
           <motion.button
-            initial={{ scale: 0 }}
-            animate={{ scale: 1 }}
+            initial={{ scale: 0, opacity: 0 }}
+            animate={{ scale: 1, opacity: 1 }}
             whileTap={{ scale: 0.9 }}
+            whileHover={{ scale: 1.05 }}
             onClick={() => setShowUploadOptions(true)}
-            className="fixed right-4 bottom-16 w-11 h-11 rounded-full flex items-center justify-center z-50"
-            style={{ background: '#2563EB', boxShadow: '0 2px 8px rgba(37,99,235,0.3)' }}
+            className="fixed right-5 z-50 flex items-center justify-center"
+            style={{
+              width: '52px',
+              height: '52px',
+              borderRadius: '16px',
+              background: 'linear-gradient(135deg, var(--primary) 0%, #60A5FA 100%)',
+              boxShadow: '0 4px 16px rgba(59,130,246,0.35)',
+              bottom: 'calc(80px + env(safe-area-inset-bottom, 0px))',
+            }}
           >
-            <Plus size={20} className="text-white" />
+            <Plus size={24} strokeWidth={3} className="text-white" />
           </motion.button>
         )}
 
-        {/* Upload Options Menu */}
+        {/* Upload Options Menu — Claude style */}
         {showUploadOptions && (
-          <div className="fixed inset-0 z-[25000] flex items-end">
-            <div className="absolute inset-0 bg-black/40" onClick={() => setShowUploadOptions(false)} />
-            <div className="relative bg-white rounded-t-2xl w-full max-w-lg mx-auto shadow-xl" style={{ paddingBottom: 'calc(16px + env(safe-area-inset-bottom, 0px))' }}>
-              <div className="p-4">
-                <h3 className="text-center text-[15px] font-semibold text-gray-900 mb-4">选择上传方式</h3>
-                <div className="grid grid-cols-2 gap-3">
+          <div className="fixed inset-0 z-[25000] flex items-end justify-center">
+            <motion.div
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
+              className="absolute inset-0 bg-black/50 backdrop-blur-sm"
+              onClick={() => setShowUploadOptions(false)}
+            />
+            <motion.div
+              initial={{ opacity: 0, y: 40 }}
+              animate={{ opacity: 1, y: 0 }}
+              transition={{ type: 'spring', damping: 25, stiffness: 300 }}
+              className="relative bg-white rounded-t-3xl w-full max-w-lg mx-auto shadow-xl"
+              style={{ paddingBottom: 'calc(24px + env(safe-area-inset-bottom, 0px))' }}
+            >
+              <div className="flex justify-center pt-3 pb-1">
+                <div className="w-8 h-1 rounded-full" style={{ background: 'var(--border)' }} />
+              </div>
+              <div className="px-6 pt-2 pb-4">
+                <h3 className="text-center text-[17px] font-semibold text-[var(--text)] mb-6">上传试卷</h3>
+                <div className="grid grid-cols-2 gap-4">
                   <button
                     onClick={() => triggerUpload(true)}
-                    className="flex flex-col items-center gap-2 p-4 rounded-xl bg-blue-50 hover:bg-blue-100 active:bg-blue-100 transition-colors"
+                    className="flex flex-col items-center gap-3 p-5 rounded-2xl transition-all active:scale-[0.97]"
+                    style={{ background: 'var(--primary-soft)' }}
                   >
-                    <div className="w-12 h-12 rounded-full bg-blue-500 flex items-center justify-center">
-                      <Camera size={24} className="text-white" />
+                    <div className="w-14 h-14 rounded-2xl flex items-center justify-center" style={{ background: 'var(--primary)' }}>
+                      <Camera size={28} className="text-white" />
                     </div>
-                    <span className="text-[13px] font-medium text-gray-700">拍摄上传</span>
-                    <span className="text-[11px] text-gray-400">可连续拍摄多张</span>
+                    <div className="text-center">
+                      <span className="block text-[14px] font-semibold" style={{ color: 'var(--text)' }}>拍照上传</span>
+                      <span className="block text-[11px] mt-0.5" style={{ color: 'var(--text-secondary)' }}>可连续拍摄多张</span>
+                    </div>
                   </button>
                   <button
                     onClick={() => triggerUpload(false)}
-                    className="flex flex-col items-center gap-2 p-4 rounded-xl bg-purple-50 hover:bg-purple-100 active:bg-purple-100 transition-colors"
+                    className="flex flex-col items-center gap-3 p-5 rounded-2xl transition-all active:scale-[0.97]"
+                    style={{ background: 'var(--info-soft)' }}
                   >
-                    <div className="w-12 h-12 rounded-full bg-purple-500 flex items-center justify-center">
-                      <ImageIcon size={24} className="text-white" />
+                    <div className="w-14 h-14 rounded-2xl flex items-center justify-center" style={{ background: 'var(--info)' }}>
+                      <ImageIcon size={28} className="text-white" />
                     </div>
-                    <span className="text-[13px] font-medium text-gray-700">相册选择</span>
-                    <span className="text-[11px] text-gray-400">可多选试卷上传</span>
+                    <div className="text-center">
+                      <span className="block text-[14px] font-semibold" style={{ color: 'var(--text)' }}>相册选择</span>
+                      <span className="block text-[11px] mt-0.5" style={{ color: 'var(--text-secondary)' }}>可多选试卷上传</span>
+                    </div>
                   </button>
                 </div>
               </div>
-              <div className="px-4">
+              <div className="px-6 pb-2">
                 <button
                   onClick={() => setShowUploadOptions(false)}
-                  className="w-full py-3 rounded-xl text-[14px] font-medium text-gray-600 bg-gray-100 hover:bg-gray-200 active:bg-gray-200 transition-colors"
+                  className="w-full py-3.5 rounded-2xl text-[15px] font-medium transition-colors active:scale-[0.98]"
+                  style={{ background: 'var(--bg-secondary)', color: 'var(--text-secondary)' }}
                 >
                   取消
                 </button>
               </div>
-            </div>
+            </motion.div>
           </div>
         )}
 
@@ -2931,43 +2969,61 @@ export default function App() {
           onChange={handleFileSelect}
         />
 
-        {/* Delete Confirm Dialog */}
+        {/* Delete Confirm Dialog — Claude style */}
         {showDeleteConfirm && (
           <div className="fixed inset-0 z-[20000] flex items-center justify-center">
-            <div className="absolute inset-0 bg-black/40" onClick={() => setShowDeleteConfirm(false)} />
-            <div className="relative card mx-5 w-full max-w-sm" style={{ padding: '20px' }}>
-              <h3 style={{ fontSize: '16px', fontWeight: 700, color: '#111827', marginBottom: '8px' }}>确认删除</h3>
-              <p style={{ fontSize: '13px', color: '#6B7280', marginBottom: '20px' }}>删除后不可恢复，确定要删除吗？</p>
-              <div className="flex gap-2.5">
-                <button
-                  onClick={() => setShowDeleteConfirm(false)}
-                  className="flex-1 py-2 rounded-lg text-[13px] font-medium"
-                  style={{ background: '#F3F4F6', color: '#6B7280' }}
-                >
-                  取消
-                </button>
-                <button
-                  onClick={handleConfirmDelete}
-                  className="flex-1 py-2 rounded-lg text-[13px] font-medium text-white"
-                  style={{ background: '#EF4444' }}
-                >
-                  删除
-                </button>
+            <motion.div
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
+              className="absolute inset-0 bg-black/50 backdrop-blur-sm"
+              onClick={() => setShowDeleteConfirm(false)}
+            />
+            <motion.div
+              initial={{ opacity: 0, scale: 0.92 }}
+              animate={{ opacity: 1, scale: 1 }}
+              transition={{ type: 'spring', damping: 25, stiffness: 300 }}
+              className="relative card mx-5 w-full max-w-sm"
+              style={{ padding: '24px' }}
+            >
+              <div className="flex flex-col items-center text-center">
+                <div className="w-12 h-12 rounded-2xl flex items-center justify-center mb-4" style={{ background: 'var(--danger-soft)' }}>
+                  <AlertCircle size={24} style={{ color: 'var(--danger)' }} />
+                </div>
+                <h3 style={{ fontSize: '17px', fontWeight: 700, color: 'var(--text)', marginBottom: '6px' }}>确认删除</h3>
+                <p style={{ fontSize: '13px', color: 'var(--text-secondary)', marginBottom: '24px', lineHeight: 1.5 }}>
+                  删除后不可恢复，确定要删除吗？
+                </p>
+                <div className="flex gap-3 w-full">
+                  <button
+                    onClick={() => setShowDeleteConfirm(false)}
+                    className="flex-1 py-2.5 rounded-xl text-[14px] font-medium transition-colors active:scale-[0.98]"
+                    style={{ background: 'var(--bg-secondary)', color: 'var(--text-secondary)' }}
+                  >
+                    取消
+                  </button>
+                  <button
+                    onClick={handleConfirmDelete}
+                    className="flex-1 py-2.5 rounded-xl text-[14px] font-medium text-white transition-colors active:scale-[0.98]"
+                    style={{ background: 'var(--danger)' }}
+                  >
+                    删除
+                  </button>
+                </div>
               </div>
-            </div>
+            </motion.div>
           </div>
         )}
 
-        {/* Question Editor Dialog */}
+        {/* Question Editor Dialog — Claude style */}
         {showQuestionEditor && editingQuestionItem && (
           <div className="fixed inset-0 z-[20000] flex flex-col">
-            <div className="absolute inset-0 bg-black/40 backdrop-blur-sm" onClick={() => setShowQuestionEditor(false)} />
-            <div className="relative mt-auto bg-white rounded-t-2xl max-h-[85vh] min-h-[60vh] flex flex-col shadow-xl">
+            <div className="absolute inset-0 bg-black/50 backdrop-blur-sm" onClick={() => setShowQuestionEditor(false)} />
+            <div className="relative mt-auto bg-white rounded-t-3xl max-h-[85vh] min-h-[60vh] flex flex-col shadow-xl">
               {/* Header */}
-              <div className="flex items-center justify-between px-4 py-3 border-b" style={{ borderColor: '#E5E7EB' }}>
-                <h3 style={{ fontSize: '15px', fontWeight: 600, color: '#111827' }}>编辑题目</h3>
-                <button onClick={() => setShowQuestionEditor(false)} className="p-1">
-                  <X size={18} style={{ color: '#9CA3AF' }} />
+              <div className="flex items-center justify-between px-5 py-4 border-b" style={{ borderColor: 'var(--border)' }}>
+                <h3 style={{ fontSize: '16px', fontWeight: 700, color: 'var(--text)' }}>编辑题目</h3>
+                <button onClick={() => setShowQuestionEditor(false)} className="w-8 h-8 rounded-xl flex items-center justify-center" style={{ background: 'var(--bg-secondary)' }}>
+                  <X size={16} style={{ color: 'var(--text-secondary)' }} />
                 </button>
               </div>
 
@@ -2981,45 +3037,45 @@ export default function App() {
                   <button
                     key={tab.key}
                     onClick={() => setEditTab(tab.key)}
-                    className="flex-1 py-2.5 text-[13px] font-medium relative"
-                    style={{ color: editTab === tab.key ? '#2563EB' : '#9CA3AF' }}
+                    className="flex-1 py-2.5 text-[13px] font-medium relative transition-colors"
+                    style={{ color: editTab === tab.key ? 'var(--primary)' : 'var(--text-tertiary)' }}
                   >
                     {tab.label}
                     {editTab === tab.key && (
-                      <div className="absolute bottom-0 left-1/3 right-1/3 h-0.5 rounded-full" style={{ background: '#2563EB' }} />
+                      <div className="absolute bottom-0 left-1/3 right-1/3 h-0.5 rounded-full" style={{ background: 'var(--primary)' }} />
                     )}
                   </button>
                 ))}
               </div>
 
               {/* Content */}
-              <div className="flex-1 overflow-y-auto p-4 space-y-3">
+              <div className="flex-1 overflow-y-auto p-5 space-y-4">
                 {/* Stem Tab */}
                 {editTab === 'stem' && (
                   <>
-                    <div className="card" style={{ padding: '12px' }}>
-                      <label style={{ fontSize: '12px', fontWeight: 500, color: '#6B7280', display: 'block', marginBottom: '6px' }}>题目内容</label>
+                    <div className="card" style={{ padding: '14px' }}>
+                      <label style={{ fontSize: '12px', fontWeight: 600, color: 'var(--text-secondary)', display: 'block', marginBottom: '6px' }}>题目内容</label>
                       <textarea
                         value={editForm.content}
                         onChange={e => updateEditForm('content', e.target.value)}
                         placeholder="请输入题目内容"
-                        className="w-full rounded-lg p-2.5 text-[13px] resize-none focus:outline-none"
-                        style={{ border: '1px solid #E5E7EB', color: '#111827', minHeight: '80px' }}
+                        className="w-full rounded-xl p-3 text-[13px] resize-none focus:outline-none transition-all"
+                        style={{ border: '1px solid var(--border)', color: 'var(--text)', minHeight: '80px', background: 'var(--bg-mist)' }}
                       />
                     </div>
 
                     {editForm.question_type === 'choice' && (
-                      <div className="card" style={{ padding: '12px' }}>
+                      <div className="card" style={{ padding: '14px' }}>
                         <div className="flex items-center justify-between mb-2">
-                          <label style={{ fontSize: '12px', fontWeight: 500, color: '#6B7280' }}>选项</label>
-                          <button onClick={addEditOption} style={{ fontSize: '12px', color: '#2563EB' }}>
+                          <label style={{ fontSize: '12px', fontWeight: 600, color: 'var(--text-secondary)' }}>选项</label>
+                          <button onClick={addEditOption} style={{ fontSize: '12px', color: 'var(--primary)', fontWeight: 500 }}>
                             + 添加选项
                           </button>
                         </div>
-                        <div className="space-y-1.5">
+                        <div className="space-y-2">
                           {editForm.options.map((opt, idx) => (
-                            <div key={idx} className="flex items-center gap-1.5">
-                              <span className="w-5 h-5 rounded-full flex items-center justify-center text-[11px] font-bold flex-shrink-0" style={{ background: '#EFF6FF', color: '#2563EB' }}>
+                            <div key={idx} className="flex items-center gap-2">
+                              <span className="w-6 h-6 rounded-lg flex items-center justify-center text-[11px] font-bold flex-shrink-0" style={{ background: 'var(--primary-soft)', color: 'var(--primary)' }}>
                                 {String.fromCharCode(65 + idx)}
                               </span>
                               <input
