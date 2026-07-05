@@ -28,7 +28,6 @@ import {
   Filter,
   Download
 } from 'lucide-react'
-import { SwipeAction } from 'antd-mobile'
 import { motion, AnimatePresence } from 'motion/react'
 import { QRCodeSVG } from 'qrcode.react'
 import { useUIStore, useStudentStore, useTaskStore, useWrongQuestionStore, useExamStore } from './store'
@@ -2145,20 +2144,15 @@ export default function App() {
                     )
                   ) : (
                     filteredTasks.map((task) => (
-                      <SwipeAction
+                      <motion.div
                         key={task.id}
-                        rightActions={[{
-                          key: 'delete',
-                          text: '删除',
-                          color: 'danger',
-                          onClick: () => { setDeleteTarget({ type: 'task', id: task.id }); setShowDeleteConfirm(true) }
-                        }]}
-                      >
-                        <motion.div
-                          layout
-                          initial={{ opacity: 0, y: 10 }}
-                          animate={{ opacity: 1, y: 0 }}
+                        layout
+                        initial={{ opacity: 0, y: 10 }}
+                        animate={{ opacity: 1, y: 0 }}
                         className={`card list-card ${isTaskCompleted(task) ? 'cursor-pointer hover:shadow-md' : ''}`}
+                        style={{
+                          borderLeft: isTaskCompleted(task) ? '3px solid var(--primary)' : '3px solid var(--warning)',
+                        }}
                         onClick={() => {
                           if (isTaskCompleted(task)) {
                             setReviewTask(task)
@@ -2270,7 +2264,6 @@ export default function App() {
                           </div>
                         </div>
                       </motion.div>
-                      </SwipeAction>
                     ))
                   )}
                 </section>
@@ -2573,16 +2566,8 @@ export default function App() {
                           : (question.ai_tags || [])
 
                         return (
-                          <SwipeAction
-                            key={wq.id}
-                            rightActions={[{
-                              key: 'delete',
-                              text: '删除',
-                              color: 'danger',
-                              onClick: () => handleDeleteWrongQuestion(wq)
-                            }]}
-                          >
                           <motion.div
+                            key={wq.id}
                             layout
                             initial={{ opacity: 0, y: 10 }}
                             animate={{ opacity: 1, y: 0 }}
@@ -2689,7 +2674,6 @@ export default function App() {
                               </div>
                             </div>
                           </motion.div>
-                          </SwipeAction>
                         )
                       })}
                     </div>
@@ -2747,19 +2731,11 @@ export default function App() {
                     </div>
                   ) : (
                     studentExams.map((exam) => (
-                      <SwipeAction
+                      <motion.div
                         key={exam.id}
-                        rightActions={[{
-                          key: 'delete',
-                          text: '删除',
-                          color: 'danger',
-                          onClick: () => { setDeleteTarget({ type: 'exam', id: exam.id }); setShowDeleteConfirm(true) }
-                        }]}
-                      >
-                        <motion.div
-                          layout
-                          initial={{ opacity: 0, y: 10 }}
-                          animate={{ opacity: 1, y: 0 }}
+                        layout
+                        initial={{ opacity: 0, y: 10 }}
+                        animate={{ opacity: 1, y: 0 }}
                         className="card"
                         style={{ padding: '12px' }}
                       >
@@ -2818,7 +2794,6 @@ export default function App() {
                           </div>
                         </div>
                       </motion.div>
-                      </SwipeAction>
                     ))
                   )}
                 </section>

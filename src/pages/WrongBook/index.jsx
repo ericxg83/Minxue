@@ -8,8 +8,7 @@ import {
   Checkbox,
   Badge,
   Popup,
-  Space,
-  SwipeAction
+  Space
 } from 'antd-mobile'
 import { RightOutline, DownOutline } from 'antd-mobile-icons'
 import { AlertTriangle } from 'lucide-react'
@@ -1031,18 +1030,10 @@ const renderMasteredTag = (wq) => {
               const isSelected = selectedQuestions.some(sq => sq.id === wq.id)
               
               return (
-                <SwipeAction
+                <div
                   key={wq.id}
-                  rightActions={[{
-                    key: 'delete',
-                    text: '删除',
-                    color: 'danger',
-                    onClick: () => handleDelete(wq.id)
-                  }]}
+                  className="card list-card"
                 >
-                  <div
-                    className="card list-card"
-                  >
                   {/* 头部：复选框、分类、日期、掌握状态 */}
                   <div className="flex items-center justify-between mb-3">
                     <div className="flex items-center gap-2">
@@ -1109,7 +1100,10 @@ const renderMasteredTag = (wq) => {
                     </button>
                   </div>
                 </div>
-                </SwipeAction>
+              )
+                  </div>
+                </div>
+              )
             })}
           </div>
         )}
