@@ -1,8 +1,8 @@
 import { useEffect, useState } from 'react'
-import { Button, Toast, Empty, Badge } from 'antd-mobile'
+import { Button, Toast, Empty, Badge, SwipeAction, Dialog } from 'antd-mobile'
 import { RightOutline } from 'antd-mobile-icons'
 import { useStudentStore, useExamStore } from '../../store'
-import { getGeneratedExamsByStudent, getQuestionsByIds } from '../../services/apiService'
+import { getGeneratedExamsByStudent, getQuestionsByIds, deleteGeneratedExam } from '../../services/apiService'
 import StudentSwitcher from '../../components/StudentSwitcher'
 import ExamReview from '../ExamReview'
 import dayjs from 'dayjs'
@@ -161,6 +161,23 @@ export default function Exam() {
     }
   }
 
+  const handleDelete = (exam) => {
+    Dialog.confirm({
+      content: '确定删除这份试卷？删除后不可恢复。',
+      confirmText: '删除',
+      onConfirm: async () => {
+        try {
+          await deleteGeneratedExam(exam.id)
+          Toast.show({ icon: 'success', content: '删除成功' })
+          loadGeneratedExams(true)
+        } catch (error) {
+          console.error('删除试卷失败:', error)
+          Toast.show({ icon: 'fail', content: '删除失败' })
+        }
+      }
+    })
+  }
+
   if (!currentStudent) {
     return (
       <div className="flex items-center justify-center py-24" style={{ color: 'var(--text-tertiary)' }}>
@@ -242,11 +259,19 @@ export default function Exam() {
           </div>
         ) : (
           filteredExams.map((exam) => (
-            <div
+            <SwipeAction
               key={exam.id}
-              onClick={() => (exam.status === 'graded' || exam.status === 'done') ? handleOpenReview(exam) : handleReprint(exam)}
-              className="card list-card active:scale-[0.99] transition-all"
+              rightActions={[{
+                key: 'delete',
+                text: '删除',
+                color: 'danger',
+                onClick: () => handleDelete(exam)
+              }]}
             >
+              <div
+                onClick={() => (exam.status === 'graded' || exam.status === 'done') ? handleOpenReview(exam) : handleReprint(exam)}
+                className="card list-card active:scale-[0.99] transition-all"
+              >
               <div className="list-card-row items-center">
                 {/* Icon */}
                 <div className="w-10 h-10 rounded-xl flex items-center justify-center shrink-0" style={{ background: 'var(--primary-soft)' }}>
@@ -310,7 +335,7 @@ export default function Exam() {
                   </button>
                 </div>
               </div>
-            </div>
+            </SwipeAction>
           ))
         )}
       </section>
