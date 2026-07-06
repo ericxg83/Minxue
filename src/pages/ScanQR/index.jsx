@@ -1,6 +1,6 @@
 import { useState, useRef, useEffect, useCallback } from 'react'
 import { motion, AnimatePresence } from 'motion/react'
-import { X, Loader2, Image as ImageIcon, Camera } from 'lucide-react'
+import { X, Loader2, Image as ImageIcon } from 'lucide-react'
 import jsQR from 'jsqr'
 
 const isNative = () => {
@@ -11,20 +11,46 @@ const isNative = () => {
   }
 }
 
+// 扫码成功后处理结果
+const handleScanResult = (rawValue, onScanSuccess, setScanError) => {
+  try {
+    const data = JSON.parse(rawValue)
+    if (data.type === 'grading') {
+      onScanSuccess({
+        paperId: data.paperId || '',
+        studentId: data.studentId,
+        studentName: data.studentName || '',
+        questionIds: data.questionIds || data.qIds,
+        generatedExamId: data.generatedExamId || '',
+        timestamp: data.timestamp || data.ts
+      })
+      return true
+    } else {
+      setScanError('无效的二维码类型')
+      return false
+    }
+  } catch {
+    setScanError('无法解析二维码内容')
+    return false
+  }
+}
+
 export default function ScanQR({ onClose, onScanSuccess }) {
   const [scanning, setScanning] = useState(false)
   const [cameraReady, setCameraReady] = useState(false)
   const [scanError, setScanError] = useState(null)
   const [cameraTimeout, setCameraTimeout] = useState(false)
+  const [initMsg, setInitMsg] = useState('正在启动相机...')
   const videoRef = useRef(null)
   const canvasRef = useRef(null)
   const streamRef = useRef(null)
   const animFrameRef = useRef(null)
   const fileInputRef = useRef(null)
   const cameraTimeoutRef = useRef(null)
-  const scanLockRef = useRef(false) // 防止重复处理
+  const scanLockRef = useRef(false)
+  const mountedRef = useRef(true)
 
-  // ----- getUserMedia + jsQR（Web/PWA 兜底方案）-----
+  // ----- getUserMedia + jsQR（兜底方案）-----
   const SCALE_DOWN_FACTOR = 0.3
 
   const stopCamera = useCallback(() => {
@@ -53,219 +79,176 @@ export default function ScanQR({ onClose, onScanSuccess }) {
 
     const scaledWidth = Math.floor(video.videoWidth * SCALE_DOWN_FACTOR)
     const scaledHeight = Math.floor(video.videoHeight * SCALE_DOWN_FACTOR)
-
     const centerSize = 280
-    const frameWidth = video.videoWidth
-    const frameHeight = video.videoHeight
-    const cropX = Math.max(0, (frameWidth - centerSize) / 2)
-    const cropY = Math.max(0, (frameHeight - centerSize) / 2)
-    const cropWidth = Math.min(centerSize, frameWidth)
-    const cropHeight = Math.min(centerSize, frameHeight)
-
-    const scaledCropX = Math.floor(cropX * SCALE_DOWN_FACTOR)
-    const scaledCropY = Math.floor(cropY * SCALE_DOWN_FACTOR)
-    const scaledCropWidth = Math.floor(cropWidth * SCALE_DOWN_FACTOR)
-    const scaledCropHeight = Math.floor(cropHeight * SCALE_DOWN_FACTOR)
+    const cropX = Math.max(0, (video.videoWidth - centerSize) / 2)
+    const cropY = Math.max(0, (video.videoHeight - centerSize) / 2)
+    const cropW = Math.min(centerSize, video.videoWidth)
+    const cropH = Math.min(centerSize, video.videoHeight)
 
     canvas.width = scaledWidth
     canvas.height = scaledHeight
     const ctx = canvas.getContext('2d', { willReadFrequently: true })
     ctx.drawImage(video, 0, 0, scaledWidth, scaledHeight)
 
-    const imageData = ctx.getImageData(scaledCropX, scaledCropY, scaledCropWidth, scaledCropHeight)
-    const code = jsQR(imageData.data, imageData.width, imageData.height, {
-      inversionAttempts: 'dontInvert'
-    })
+    const imageData = ctx.getImageData(
+      Math.floor(cropX * SCALE_DOWN_FACTOR), Math.floor(cropY * SCALE_DOWN_FACTOR),
+      Math.floor(cropW * SCALE_DOWN_FACTOR), Math.floor(cropH * SCALE_DOWN_FACTOR)
+    )
+    const code = jsQR(imageData.data, imageData.width, imageData.height, { inversionAttempts: 'dontInvert' })
 
     if (code && !scanLockRef.current) {
       scanLockRef.current = true
-      try {
-        const data = JSON.parse(code.data)
-        if (data.type === 'grading') {
-          stopCamera()
-          onScanSuccess({
-            paperId: data.paperId || '',
-            studentId: data.studentId,
-            studentName: data.studentName || '',
-            questionIds: data.questionIds || data.qIds,
-            generatedExamId: data.generatedExamId || '',
-            timestamp: data.timestamp || data.ts
-          })
-          return
-        } else {
-          setScanError('无效的二维码类型')
-        }
-      } catch {
-        setScanError('无法解析二维码内容')
-      }
+      const ok = handleScanResult(code.data, onScanSuccess, setScanError)
+      if (ok) { stopCamera(); return }
       scanLockRef.current = false
     }
-
     if (streamRef.current) {
       animFrameRef.current = requestAnimationFrame(processFrame)
     }
   }, [stopCamera, onScanSuccess])
 
-  const startWebCamera = async () => {
+  const startWebCamera = useCallback(async () => {
     try {
+      setInitMsg('正在启动摄像头...')
       cameraTimeoutRef.current = setTimeout(() => {
-        if (!cameraReady) {
+        if (!cameraReady && mountedRef.current) {
           setCameraTimeout(true)
           setScanError('摄像头启动超时，请使用相册上传图片或重试')
         }
-      }, 5000)
+      }, 8000)
 
       const stream = await navigator.mediaDevices.getUserMedia({
-        video: {
-          facingMode: { exact: 'environment' },
-          width: { ideal: 1920 },
-          height: { ideal: 1080 }
-        }
+        video: { facingMode: 'environment', width: { ideal: 1280 }, height: { ideal: 720 } }
       })
+      if (!mountedRef.current) { stream.getTracks().forEach(t => t.stop()); return }
+
       streamRef.current = stream
-
-      try {
-        const track = stream.getVideoTracks()[0]
-        if (track?.applyConstraints) {
-          await track.applyConstraints({ advanced: [{ focusMode: 'continuous-video' }] })
-        }
-      } catch { /* 不支持自动对焦，忽略 */ }
-
       if (videoRef.current) {
         videoRef.current.srcObject = stream
         videoRef.current.setAttribute('playsinline', 'true')
         videoRef.current.setAttribute('autoplay', 'true')
         videoRef.current.setAttribute('muted', 'true')
-        videoRef.current.onloadedmetadata = () => {
-          videoRef.current.play().then(() => {
-            if (cameraTimeoutRef.current) {
-              clearTimeout(cameraTimeoutRef.current)
-              cameraTimeoutRef.current = null
-            }
-            setCameraReady(true)
-            setScanError(null)
-            setCameraTimeout(false)
-            animFrameRef.current = requestAnimationFrame(processFrame)
-          }).catch(() => {
-            setScanError('摄像头启动失败')
-            setCameraTimeout(true)
-          })
+        await videoRef.current.play()
+        if (cameraTimeoutRef.current) clearTimeout(cameraTimeoutRef.current)
+        if (mountedRef.current) {
+          setCameraReady(true)
+          setScanError(null)
+          setCameraTimeout(false)
+          animFrameRef.current = requestAnimationFrame(processFrame)
         }
       }
     } catch (err) {
-      console.error('Camera error:', err)
-      if (err.name === 'NotAllowedError') {
-        setScanError('摄像头权限被拒绝')
-      } else if (err.name === 'OverconstrainedError') {
-        try {
-          const fallbackStream = await navigator.mediaDevices.getUserMedia({
-            video: { facingMode: 'environment', width: { ideal: 1280 }, height: { ideal: 720 } }
-          })
-          streamRef.current = fallbackStream
-          if (videoRef.current) {
-            videoRef.current.srcObject = fallbackStream
-            videoRef.current.setAttribute('playsinline', 'true')
-            videoRef.current.setAttribute('autoplay', 'true')
-            videoRef.current.setAttribute('muted', 'true')
-            videoRef.current.onloadedmetadata = () => {
-              videoRef.current.play().then(() => {
-                if (cameraTimeoutRef.current) clearTimeout(cameraTimeoutRef.current)
-                setCameraReady(true)
-                setScanError(null)
-                setCameraTimeout(false)
-                animFrameRef.current = requestAnimationFrame(processFrame)
-              })
-            }
-          }
-        } catch {
-          setScanError('无法访问摄像头')
-          setCameraTimeout(true)
-        }
-      } else {
-        setScanError('无法访问摄像头')
+      console.error('Web camera error:', err)
+      if (mountedRef.current) {
+        setScanError(err.name === 'NotAllowedError' ? '摄像头权限被拒绝' : '无法访问摄像头')
         setCameraTimeout(true)
       }
     }
+  }, [cameraReady, processFrame])
+
+  // ----- 原生扫码层 -----
+  const tryGoogleScan = async () => {
+    // 方法 1: GmsBarcodeScanner.scan() — Google 扫码模块，有独立 UI
+    const { BarcodeScanner, BarcodeFormat } = await import('@capacitor-mlkit/barcode-scanning')
+    const { available } = await BarcodeScanner.isGoogleBarcodeScannerModuleAvailable()
+    if (!available) {
+      return null
+    }
+    const result = await BarcodeScanner.scan({
+      formats: [BarcodeFormat.QrCode],
+      autoZoom: true,
+    })
+    return result?.barcodes?.[0]?.rawValue || null
   }
 
-  // ----- 原生扫码（@capacitor-mlkit/barcode-scanning）-----
+  const tryEmbeddedScan = async () => {
+    // 方法 2: CameraX + ML Kit startScan() — 嵌入 WebView 的预览
+    const { BarcodeScanner, BarcodeFormat, LensFacing } = await import('@capacitor-mlkit/barcode-scanning')
+
+    const eventResult = await new Promise((resolve, reject) => {
+      const timeout = setTimeout(() => {
+        BarcodeScanner.removeAllListeners()
+        BarcodeScanner.stopScan().catch(() => {})
+        reject(new Error('startScan timeout'))
+      }, 15000)
+
+      BarcodeScanner.addListener('barcodesScanned', async (event) => {
+        const barcode = event.barcodes?.[0]
+        if (barcode?.rawValue) {
+          clearTimeout(timeout)
+          await BarcodeScanner.removeAllListeners().catch(() => {})
+          await BarcodeScanner.stopScan().catch(() => {})
+          resolve(barcode.rawValue)
+        }
+      }).catch(reject)
+
+      BarcodeScanner.startScan({
+        formats: [BarcodeFormat.QrCode],
+        lensFacing: LensFacing.Back,
+      }).catch(reject)
+    })
+
+    return eventResult
+  }
+
   const startNativeScan = async () => {
     try {
-      const { BarcodeScanner, BarcodeFormat, LensFacing } = await import('@capacitor-mlkit/barcode-scanning')
+      const { BarcodeScanner } = await import('@capacitor-mlkit/barcode-scanning')
 
-      const permResult = await BarcodeScanner.requestPermissions()
-      if (permResult.camera !== 'granted') {
+      // 1. 请求权限
+      const perm = await BarcodeScanner.requestPermissions()
+      if (perm.camera !== 'granted') {
         setScanError('摄像头权限被拒绝')
         setCameraTimeout(true)
         return
       }
 
-      // 让 WebView 背景透明，原生摄像头画面透出
-      document.body?.classList.add('barcode-scanner-active')
-
-      // 监听二维码检测
-      await BarcodeScanner.addListener('barcodesScanned', async (event) => {
-        if (scanLockRef.current) return
-        const barcode = event.barcodes?.[0]
-        if (barcode?.rawValue) {
-          scanLockRef.current = true
-          try {
-            const data = JSON.parse(barcode.rawValue)
-            if (data.type === 'grading') {
-              await BarcodeScanner.removeAllListeners()
-              await BarcodeScanner.stopScan()
-              document.body?.classList.remove('barcode-scanner-active')
-              onScanSuccess({
-                paperId: data.paperId || '',
-                studentId: data.studentId,
-                studentName: data.studentName || '',
-                questionIds: data.questionIds || data.qIds,
-                generatedExamId: data.generatedExamId || '',
-                timestamp: data.timestamp || data.ts
-              })
-            } else {
-              setScanError('无效的二维码类型')
-              scanLockRef.current = false
-            }
-          } catch {
-            setScanError('无法解析二维码内容')
-            scanLockRef.current = false
-          }
+      // 2. 先尝试 Google 扫码模块 (有独立原生 UI，最可靠)
+      setInitMsg('正在启动扫码...')
+      try {
+        const rawValue = await tryGoogleScan()
+        if (rawValue) {
+          handleScanResult(rawValue, onScanSuccess, setScanError)
+          return
         }
-      })
+      } catch (e) {
+        console.warn('Google scan failed, trying embedded:', e)
+      }
 
-      // 启动原生摄像头（支持自动对焦）
-      await BarcodeScanner.startScan({
-        formats: [BarcodeFormat.QrCode],
-        lensFacing: LensFacing.Back,
-      })
-
-      setCameraReady(true)
+      // 3. Google 模块不可用，尝试 CameraX 嵌入预览
+      setInitMsg('正在启动相机...')
+      const rawValue = await tryEmbeddedScan()
+      if (rawValue) {
+        handleScanResult(rawValue, onScanSuccess, setScanError)
+      }
     } catch (err) {
-      console.error('Native scan error:', err)
-      // 降级到 getUserMedia
-      setScanError(null)
-      startWebCamera()
+      console.error('All native scan methods failed:', err)
+      // 4. 全部失败，降级到 getUserMedia
+      if (mountedRef.current) {
+        setScanError(null)
+        await startWebCamera()
+      }
     }
   }
 
   const stopNativeScan = async () => {
     try {
       const { BarcodeScanner } = await import('@capacitor-mlkit/barcode-scanning')
-      await BarcodeScanner.removeAllListeners()
-      await BarcodeScanner.stopScan()
+      await BarcodeScanner.removeAllListeners().catch(() => {})
+      await BarcodeScanner.stopScan().catch(() => {})
     } catch { /* ignore */ }
-    document.body?.classList.remove('barcode-scanner-active')
   }
 
-  // ----- 启动逻辑 -----
+  // ----- 启动 -----
   useEffect(() => {
+    mountedRef.current = true
     if (isNative()) {
       startNativeScan()
     } else {
       startWebCamera()
     }
     return () => {
+      mountedRef.current = false
       if (isNative()) {
         stopNativeScan()
       } else {
@@ -274,56 +257,31 @@ export default function ScanQR({ onClose, onScanSuccess }) {
     }
   }, [])
 
-  const handleAlbum = () => {
-    fileInputRef.current?.click()
-  }
+  const handleAlbum = () => { fileInputRef.current?.click() }
 
   const handleFileChange = (e) => {
     const file = e.target.files[0]
     if (!file) return
     setScanning(true)
     setScanError(null)
-
     const reader = new FileReader()
     reader.onload = (event) => {
       const img = new Image()
       img.onload = () => {
         const canvas = canvasRef.current
-        const scanResolutions = [1200, 800, 600]
+        const res = [1200, 800, 600]
         let code = null
-        for (const maxDim of scanResolutions) {
-          const scale = Math.min(1, maxDim / Math.max(img.width, img.height))
-          const w = Math.floor(img.width * scale)
-          const h = Math.floor(img.height * scale)
-          canvas.width = w
-          canvas.height = h
+        for (const d of res) {
+          const s = Math.min(1, d / Math.max(img.width, img.height))
+          canvas.width = Math.floor(img.width * s)
+          canvas.height = Math.floor(img.height * s)
           const ctx = canvas.getContext('2d', { willReadFrequently: true })
-          ctx.drawImage(img, 0, 0, w, h)
-          const imageData = ctx.getImageData(0, 0, w, h)
-          code = jsQR(imageData.data, imageData.width, imageData.height, { inversionAttempts: 'attemptBoth' })
+          ctx.drawImage(img, 0, 0, canvas.width, canvas.height)
+          code = jsQR(ctx.getImageData(0, 0, canvas.width, canvas.height).data, canvas.width, canvas.height, { inversionAttempts: 'attemptBoth' })
           if (code) break
         }
-        if (code) {
-          try {
-            const data = JSON.parse(code.data)
-            if (data.type === 'grading') {
-              onScanSuccess({
-                paperId: data.paperId || '',
-                studentId: data.studentId,
-                studentName: data.studentName || '',
-                questionIds: data.questionIds || data.qIds,
-                generatedExamId: data.generatedExamId || '',
-                timestamp: data.timestamp || data.ts
-              })
-            } else {
-              setScanError('无效的二维码类型')
-            }
-          } catch {
-            setScanError('无法解析二维码内容')
-          }
-        } else {
-          setScanError('未检测到二维码，请确保图片清晰')
-        }
+        if (code) handleScanResult(code.data, onScanSuccess, setScanError)
+        else setScanError('未检测到二维码，请确保图片清晰')
         setScanning(false)
       }
       img.onerror = () => { setScanError('图片加载失败'); setScanning(false) }
@@ -332,21 +290,12 @@ export default function ScanQR({ onClose, onScanSuccess }) {
     reader.readAsDataURL(file)
   }
 
-  const isOnNative = isNative()
-
   return (
     <AnimatePresence>
       <div style={{
-        position: 'fixed', inset: 0, background: isOnNative ? 'transparent' : '#000',
+        position: 'fixed', inset: 0, background: '#000',
         zIndex: 10000, display: 'flex', flexDirection: 'column'
       }}>
-        {/* 全局样式：原生扫码时透明背景 */}
-        <style>{`
-          body.barcode-scanner-active {
-            background: transparent !important;
-          }
-        `}</style>
-
         <input ref={fileInputRef} type="file" accept="image/*" style={{ display: 'none' }} onChange={handleFileChange} />
         <canvas ref={canvasRef} style={{ display: 'none' }} />
 
@@ -369,8 +318,8 @@ export default function ScanQR({ onClose, onScanSuccess }) {
         <div style={{
           flex: 1, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', position: 'relative'
         }}>
-          {/* Web 模式：实时摄像头预览 */}
-          {!isOnNative && (
+          {/* 非原生端：实时摄像头预览 */}
+          {!isNative() && (
             <video ref={videoRef} style={{
               position: 'absolute', inset: 0, width: '100%', height: '100%', objectFit: 'cover'
             }} />
@@ -384,7 +333,7 @@ export default function ScanQR({ onClose, onScanSuccess }) {
             }}>
               <Loader2 size={32} color="#fff" className="animate-spin" />
               <div style={{ color: 'rgba(255,255,255,0.8)', fontSize: '14px', textShadow: '0 1px 4px rgba(0,0,0,0.5)' }}>
-                正在启动相机...
+                {initMsg}
               </div>
             </div>
           )}
