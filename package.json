@@ -14,6 +14,7 @@
     "android:run": "npm run android:build && npx cap run android"
   },
   "dependencies": {
+    "@capacitor-mlkit/barcode-scanning": "^8.1.0",
     "@capacitor/android": "^8.3.1",
     "@capacitor/camera": "^8.2.0",
     "@capacitor/cli": "^8.3.1",
