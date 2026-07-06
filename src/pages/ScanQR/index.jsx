@@ -1,6 +1,6 @@
 import { useState, useRef, useEffect, useCallback } from 'react'
 import { motion, AnimatePresence } from 'motion/react'
-import { X, Loader2, Image as ImageIcon, Clock } from 'lucide-react'
+import { X, Loader2, Image as ImageIcon, Clock, Camera } from 'lucide-react'
 import jsQR from 'jsqr'
 
 // 缩小视频帧以便 jsQR 更容易检测到二维码
@@ -27,6 +27,8 @@ export default function ScanQR({ onClose, onScanSuccess }) {
   const fileInputRef = useRef(null)
   const cameraTimeoutRef = useRef(null)
 
+  const nativePlatform = isNative()
+
   const stopCamera = useCallback(() => {
     if (streamRef.current) {
       streamRef.current.getTracks().forEach(track => track.stop())
@@ -51,12 +53,9 @@ export default function ScanQR({ onClose, onScanSuccess }) {
       return
     }
 
-    // 缩小帧尺寸以提高 jsQR 检测率
     const scaledWidth = Math.floor(video.videoWidth * SCALE_DOWN_FACTOR)
     const scaledHeight = Math.floor(video.videoHeight * SCALE_DOWN_FACTOR)
 
-    // Phase 2: 只处理中心识别框区域，提升性能约 40%
-    // 计算中心 280x280 框在视频中的位置
     const centerSize = 280
     const frameWidth = video.videoWidth
     const frameHeight = video.videoHeight
@@ -65,7 +64,6 @@ export default function ScanQR({ onClose, onScanSuccess }) {
     const cropWidth = Math.min(centerSize, frameWidth)
     const cropHeight = Math.min(centerSize, frameHeight)
 
-    // 按缩放比例调整裁剪区域
     const scaledCropX = Math.floor(cropX * SCALE_DOWN_FACTOR)
     const scaledCropY = Math.floor(cropY * SCALE_DOWN_FACTOR)
     const scaledCropWidth = Math.floor(cropWidth * SCALE_DOWN_FACTOR)
@@ -76,7 +74,6 @@ export default function ScanQR({ onClose, onScanSuccess }) {
     const ctx = canvas.getContext('2d', { willReadFrequently: true })
     ctx.drawImage(video, 0, 0, scaledWidth, scaledHeight)
 
-    // 只获取框内区域的图像数据
     const imageData = ctx.getImageData(
       scaledCropX,
       scaledCropY,
@@ -101,7 +98,7 @@ export default function ScanQR({ onClose, onScanSuccess }) {
             generatedExamId: data.generatedExamId || '',
             timestamp: data.timestamp || data.ts
           })
-          return // 识别成功后立即停止，不再继续下一帧
+          return
         } else {
           setScanError('无效的二维码类型')
         }
@@ -117,7 +114,6 @@ export default function ScanQR({ onClose, onScanSuccess }) {
 
   const startCamera = async () => {
     try {
-      // Capacitor Android 需要运行时权限，先检查并请求
       if (isNative()) {
         try {
           const { Camera } = await import('@capacitor/camera')
@@ -132,7 +128,6 @@ export default function ScanQR({ onClose, onScanSuccess }) {
         }
       }
 
-      // 设置 3 秒超时，如果摄像头无响应则提示使用相册
       cameraTimeoutRef.current = setTimeout(() => {
         if (!cameraReady) {
           setCameraTimeout(true)
@@ -140,11 +135,13 @@ export default function ScanQR({ onClose, onScanSuccess }) {
         }
       }, 3000)
 
+      // Android WebView 的 getUserMedia 无法触发自动对焦，导致画面模糊。
+      // 这里是针对非原生环境（浏览器/PWA）的回退方案，使用较高分辨率以获取更清晰的画面。
       const stream = await navigator.mediaDevices.getUserMedia({
         video: {
           facingMode: 'environment',
-          width: { ideal: 1280 },
-          height: { ideal: 720 }
+          width: { ideal: 1920 },
+          height: { ideal: 1080 }
         }
       })
       streamRef.current = stream
@@ -183,10 +180,102 @@ export default function ScanQR({ onClose, onScanSuccess }) {
     }
   }
 
+  const scanImageWithJsQR = useCallback((img) => {
+    const canvas = canvasRef.current
+    // 尝试多个分辨率以提升 jsQR 检测率
+    const scanResolutions = [1200, 800, 600]
+    let code = null
+
+    for (const maxDim of scanResolutions) {
+      const scale = Math.min(1, maxDim / Math.max(img.width, img.height))
+      const w = Math.floor(img.width * scale)
+      const h = Math.floor(img.height * scale)
+      canvas.width = w
+      canvas.height = h
+      const ctx = canvas.getContext('2d', { willReadFrequently: true })
+      ctx.drawImage(img, 0, 0, w, h)
+      const imageData = ctx.getImageData(0, 0, w, h)
+      code = jsQR(imageData.data, imageData.width, imageData.height, {
+        inversionAttempts: 'attemptBoth'
+      })
+      if (code) break
+    }
+    return code
+  }, [])
+
+  // 原生拍照：使用 Capacitor Camera 插件打开系统相机（支持自动对焦），然后扫描照片
+  const handleNativeCapture = async () => {
+    setScanning(true)
+    setScanError(null)
+    try {
+      const { Camera, CameraResultType, CameraSource } = await import('@capacitor/camera')
+      const photo = await Camera.getPhoto({
+        quality: 100,
+        allowEditing: false,
+        resultType: CameraResultType.Base64,
+        source: CameraSource.Camera,
+        width: 1920
+      })
+
+      if (!photo.base64String) {
+        throw new Error('No photo data')
+      }
+
+      const img = new Image()
+      img.onload = () => {
+        const code = scanImageWithJsQR(img)
+
+        if (code) {
+          try {
+            const data = JSON.parse(code.data)
+            if (data.type === 'grading') {
+              onScanSuccess({
+                paperId: data.paperId || '',
+                studentId: data.studentId,
+                studentName: data.studentName || '',
+                questionIds: data.questionIds || data.qIds,
+                generatedExamId: data.generatedExamId || '',
+                timestamp: data.timestamp || data.ts
+              })
+            } else {
+              setScanError('无效的二维码类型')
+            }
+          } catch {
+            setScanError('无法解析二维码内容')
+          }
+        } else {
+          setScanError('未检测到二维码，请确保图片清晰并包含二维码')
+        }
+        setScanning(false)
+      }
+      img.onerror = () => {
+        setScanError('图片加载失败')
+        setScanning(false)
+      }
+      img.src = `data:image/jpeg;base64,${photo.base64String}`
+    } catch (err) {
+      console.error('Native camera error:', err)
+      // 用户取消拍照不算错误，静默处理
+      if (err.message && !err.message.toLowerCase().includes('cancell')) {
+        setScanError('拍照失败，请重试或使用相册')
+      }
+      setScanning(false)
+    }
+  }
+
   useEffect(() => {
+    if (nativePlatform) {
+      // 原生端：不启动 getUserMedia（Android WebView 不支持自动对焦），
+      // 改用系统拍照界面（已有原生自动对焦支持）
+      setCameraTimeout(false)
+      setScanError(null)
+      return
+    }
+
+    // 非原生端（浏览器/PWA）：使用 getUserMedia 实时预览
     startCamera()
     return () => stopCamera()
-  }, [stopCamera])
+  }, [nativePlatform])
 
   const handleAlbum = () => {
     fileInputRef.current?.click()
@@ -202,28 +291,7 @@ export default function ScanQR({ onClose, onScanSuccess }) {
     reader.onload = (event) => {
       const img = new Image()
       img.onload = () => {
-        // 尝试多个分辨率以提升 jsQR 检测率
-        // 手机照片分辨率很高(如4032x3024)，二维码在画面中占比很小
-        // 先用较高分辨率(2000px)扫描，如失败再尝试降低
-        const scanResolutions = [2000, 1200, 600]
-        let code = null
-        const canvas = canvasRef.current
-
-        for (const maxDim of scanResolutions) {
-          const scale = Math.min(1, maxDim / Math.max(img.width, img.height))
-          const w = Math.floor(img.width * scale)
-          const h = Math.floor(img.height * scale)
-          if (w === canvas.width && h === canvas.height) continue
-          canvas.width = w
-          canvas.height = h
-          const ctx = canvas.getContext('2d', { willReadFrequently: true })
-          ctx.drawImage(img, 0, 0, w, h)
-          const imageData = ctx.getImageData(0, 0, w, h)
-          code = jsQR(imageData.data, imageData.width, imageData.height, {
-            inversionAttempts: 'attemptBoth'
-          })
-          if (code) break
-        }
+        const code = scanImageWithJsQR(img)
 
         if (code) {
           try {
@@ -256,6 +324,8 @@ export default function ScanQR({ onClose, onScanSuccess }) {
     }
     reader.readAsDataURL(file)
   }
+
+  const showNativeUI = nativePlatform && !scanning
 
   return (
     <AnimatePresence>
@@ -301,11 +371,27 @@ export default function ScanQR({ onClose, onScanSuccess }) {
           justifyContent: 'center',
           position: 'relative'
         }}>
-          <video ref={videoRef} style={{
-            position: 'absolute', inset: 0, width: '100%', height: '100%', objectFit: 'cover'
-          }} />
+          {/* 原生端：不显示视频，显示拍照提示 */}
+          {showNativeUI && (
+            <div style={{
+              display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '16px', position: 'absolute', zIndex: 5, padding: '20px'
+            }}>
+              <Camera size={64} color="rgba(255,255,255,0.3)" />
+              <div style={{ color: 'rgba(255,255,255,0.6)', fontSize: '14px', textAlign: 'center' }}>
+                点击下方拍照按钮，使用系统相机识别二维码
+              </div>
+            </div>
+          )}
 
-          {!cameraReady && !cameraTimeout && (
+          {/* 非原生端：实时摄像头预览 */}
+          {!nativePlatform && (
+            <video ref={videoRef} style={{
+              position: 'absolute', inset: 0, width: '100%', height: '100%', objectFit: 'cover'
+            }} />
+          )}
+
+          {/* 摄像头加载中（仅非原生端） */}
+          {!nativePlatform && !cameraReady && !cameraTimeout && (
             <div style={{
               position: 'absolute', inset: 0,
               display: 'flex', alignItems: 'center', justifyContent: 'center',
@@ -318,7 +404,8 @@ export default function ScanQR({ onClose, onScanSuccess }) {
             </div>
           )}
 
-          {cameraTimeout && (
+          {/* 摄像头超时（仅非原生端） */}
+          {!nativePlatform && cameraTimeout && (
             <div style={{
               position: 'absolute', inset: 0,
               display: 'flex', alignItems: 'center', justifyContent: 'center',
@@ -351,6 +438,7 @@ export default function ScanQR({ onClose, onScanSuccess }) {
             </div>
           )}
 
+          {/* 扫码框 */}
           <div style={{
             width: '280px',
             height: '280px',
@@ -376,23 +464,41 @@ export default function ScanQR({ onClose, onScanSuccess }) {
               borderBottom: '4px solid #2563EB', borderRight: '4px solid #2563EB', borderBottomRightRadius: '10px'
             }} />
 
-            <motion.div
-              animate={{ top: ['0%', '100%', '0%'] }}
-              transition={{ duration: 2, repeat: Infinity, ease: 'linear' }}
-              style={{
-                position: 'absolute', left: 0, right: 0, height: '2px',
-                background: 'linear-gradient(to right, transparent, #2563EB, transparent)'
-              }}
-            />
+            {!nativePlatform && (
+              <motion.div
+                animate={{ top: ['0%', '100%', '0%'] }}
+                transition={{ duration: 2, repeat: Infinity, ease: 'linear' }}
+                style={{
+                  position: 'absolute', left: 0, right: 0, height: '2px',
+                  background: 'linear-gradient(to right, transparent, #2563EB, transparent)'
+                }}
+              />
+            )}
           </div>
 
+          {/* 扫描中加载指示 */}
+          {scanning && (
+            <div style={{
+              position: 'absolute', inset: 0, zIndex: 20,
+              display: 'flex', alignItems: 'center', justifyContent: 'center',
+              background: 'rgba(0,0,0,0.6)'
+            }}>
+              <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '16px' }}>
+                <Loader2 size={40} color="#2563EB" className="animate-spin" />
+                <div style={{ color: '#fff', fontSize: '15px' }}>识别中...</div>
+              </div>
+            </div>
+          )}
+
+          {/* 错误提示（非超时状态） */}
           {scanError && !cameraTimeout && (
             <div style={{ color: '#EF4444', fontSize: '14px', marginTop: '20px', textAlign: 'center', padding: '0 20px' }}>
               {scanError}
             </div>
           )}
 
-          {cameraReady && !scanError && !cameraTimeout && (
+          {/* 提示文字 */}
+          {!nativePlatform && cameraReady && !scanError && !cameraTimeout && (
             <div style={{ color: 'rgba(255,255,255,0.8)', fontSize: '14px', marginTop: '24px', textAlign: 'center' }}>
               将二维码放入框内，自动识别
             </div>
@@ -417,15 +523,25 @@ export default function ScanQR({ onClose, onScanSuccess }) {
             <div style={{ color: '#fff', fontSize: '12px' }}>相册</div>
           </div>
 
-          <div style={{
-            width: '64px', height: '64px', borderRadius: '50%',
-            border: '4px solid #fff',
-            display: 'flex', alignItems: 'center', justifyContent: 'center'
-          }}>
+          {/* 拍照按钮：原生端触发系统拍照，非原生端为占位 */}
+          <div
+            onClick={nativePlatform ? handleNativeCapture : undefined}
+            style={{
+              width: '64px', height: '64px', borderRadius: '50%',
+              border: nativePlatform ? '4px solid #2563EB' : '4px solid #fff',
+              display: 'flex', alignItems: 'center', justifyContent: 'center',
+              cursor: nativePlatform ? 'pointer' : 'default',
+              transition: 'transform 0.2s',
+              ...(nativePlatform ? { active: { transform: 'scale(0.95)' } } : {})
+            }}
+          >
             <div style={{
               width: '52px', height: '52px', borderRadius: '50%',
-              background: '#fff'
-            }} />
+              background: nativePlatform ? '#2563EB' : '#fff',
+              display: 'flex', alignItems: 'center', justifyContent: 'center'
+            }}>
+              <Camera size={28} color="#fff" />
+            </div>
           </div>
 
           <div style={{ textAlign: 'center', opacity: 0.3 }}>
@@ -440,6 +556,14 @@ export default function ScanQR({ onClose, onScanSuccess }) {
             <div style={{ color: '#fff', fontSize: '12px' }}>历史</div>
           </div>
         </div>
+
+        {nativePlatform && (
+          <div style={{ textAlign: 'center', paddingBottom: '8px' }}>
+            <div style={{ color: 'rgba(255,255,255,0.5)', fontSize: '12px' }}>
+              点击拍照按钮，使用系统相机识别
+            </div>
+          </div>
+        )}
       </div>
     </AnimatePresence>
   )
