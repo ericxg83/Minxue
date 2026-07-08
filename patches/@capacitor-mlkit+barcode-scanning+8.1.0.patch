@@ -1,0 +1,205 @@
+diff --git a/node_modules/@capacitor-mlkit/barcode-scanning/android/src/main/java/io/capawesome/capacitorjs/plugins/mlkit/barcodescanning/BarcodeScanner.java b/node_modules/@capacitor-mlkit/barcode-scanning/android/src/main/java/io/capawesome/capacitorjs/plugins/mlkit/barcodescanning/BarcodeScanner.java
+index 6ccdc25..930259a 100644
+--- a/node_modules/@capacitor-mlkit/barcode-scanning/android/src/main/java/io/capawesome/capacitorjs/plugins/mlkit/barcodescanning/BarcodeScanner.java
++++ b/node_modules/@capacitor-mlkit/barcode-scanning/android/src/main/java/io/capawesome/capacitorjs/plugins/mlkit/barcodescanning/BarcodeScanner.java
+@@ -7,15 +7,21 @@ import android.annotation.SuppressLint;
+ import android.content.Context;
+ import android.content.Intent;
+ import android.content.pm.PackageManager;
++import android.graphics.Canvas;
+ import android.graphics.Color;
++import android.graphics.Paint;
++import android.graphics.Path;
+ import android.graphics.Point;
++import android.graphics.RectF;
+ import android.media.Image;
+ import android.net.Uri;
+ import android.provider.Settings;
+-import android.view.Display;
++import android.view.Gravity;
++import android.view.View;
+ import android.view.ViewGroup;
+ import android.view.WindowManager;
+ import android.widget.FrameLayout;
++import android.widget.TextView;
+ import androidx.annotation.NonNull;
+ import androidx.annotation.Nullable;
+ import androidx.camera.core.Camera;
+@@ -70,6 +76,12 @@ public class BarcodeScanner implements ImageAnalysis.Analyzer {
+     @Nullable
+     private PreviewView previewView;
+ 
++    @Nullable
++    private ScanOverlay scanOverlay;
++
++    @Nullable
++    private View closeButton;
++
+     @Nullable
+     private ScanSettings scanSettings;
+ 
+@@ -102,9 +114,6 @@ public class BarcodeScanner implements ImageAnalysis.Analyzer {
+         // Stop the camera if running
+         stopScan();
+ 
+-        // Hide WebView background
+-        hideWebViewBackground();
+-
+         this.scanSettings = scanSettings;
+ 
+         BarcodeScannerOptions options = buildBarcodeScannerOptions(scanSettings);
+@@ -134,10 +143,19 @@ public class BarcodeScanner implements ImageAnalysis.Analyzer {
+                         new FrameLayout.LayoutParams(FrameLayout.LayoutParams.MATCH_PARENT, FrameLayout.LayoutParams.MATCH_PARENT)
+                     );
+                     previewView.setScaleType(PreviewView.ScaleType.FILL_CENTER);
+-                    previewView.setBackgroundColor(Color.BLACK);
++                    previewView.setBackgroundColor(Color.TRANSPARENT);
++
++                    // Add preview view ON TOP of the WebView (not behind)
++                    ViewGroup parentView = (ViewGroup) plugin.getBridge().getWebView().getParent();
++                    parentView.addView(previewView);
++
++                    // Add semi-transparent overlay with clear scan area
++                    scanOverlay = new ScanOverlay(plugin.getActivity());
++                    parentView.addView(scanOverlay);
+ 
+-                    // Add preview view behind the WebView
+-                    ((ViewGroup) plugin.getBridge().getWebView().getParent()).addView(previewView, 0);
++                    // Add close button (top-left)
++                    closeButton = createCloseButton();
++                    parentView.addView(closeButton);
+ 
+                     Preview preview = new Preview.Builder().build();
+                     preview.setSurfaceProvider(previewView.getSurfaceProvider());
+@@ -163,7 +181,6 @@ public class BarcodeScanner implements ImageAnalysis.Analyzer {
+      * Must run on UI thread.
+      */
+     public void stopScan() {
+-        showWebViewBackground();
+         disableTorch();
+         // Stop the camera
+         if (processCameraProvider != null) {
+@@ -171,6 +188,15 @@ public class BarcodeScanner implements ImageAnalysis.Analyzer {
+         }
+         processCameraProvider = null;
+         camera = null;
++        // Remove overlay and close button
++        if (scanOverlay != null) {
++            ((ViewGroup) scanOverlay.getParent()).removeView(scanOverlay);
++            scanOverlay = null;
++        }
++        if (closeButton != null) {
++            ((ViewGroup) closeButton.getParent()).removeView(closeButton);
++            closeButton = null;
++        }
+         if (previewView != null) {
+             ((ViewGroup) previewView.getParent()).removeView(previewView);
+             previewView = null;
+@@ -400,20 +426,6 @@ public class BarcodeScanner implements ImageAnalysis.Analyzer {
+         }
+     }
+ 
+-    /**
+-     * Must run on UI thread.
+-     */
+-    private void hideWebViewBackground() {
+-        plugin.getBridge().getWebView().setBackgroundColor(Color.TRANSPARENT);
+-    }
+-
+-    /**
+-     * Must run on UI thread.
+-     */
+-    private void showWebViewBackground() {
+-        plugin.getBridge().getWebView().setBackgroundColor(Color.WHITE);
+-    }
+-
+     private void handleScannedBarcode(Barcode barcode, Point imageSize) {
+         plugin.notifyBarcodeScannedListener(barcode, imageSize);
+     }
+@@ -426,6 +438,86 @@ public class BarcodeScanner implements ImageAnalysis.Analyzer {
+         plugin.notifyScanErrorListener(exception.getMessage());
+     }
+ 
++    // ===== Native overlay =====
++
++    private View createCloseButton() {
++        TextView btn = new TextView(plugin.getActivity());
++        btn.setText("✕");
++        btn.setTextColor(Color.WHITE);
++        btn.setTextSize(20);
++        btn.setGravity(Gravity.CENTER);
++        android.graphics.drawable.GradientDrawable bg = new android.graphics.drawable.GradientDrawable();
++        bg.setShape(android.graphics.drawable.GradientDrawable.OVAL);
++        bg.setColor(Color.argb(100, 0, 0, 0));
++        bg.setSize(48, 48);
++        btn.setBackground(bg);
++        btn.setElevation(10);
++        FrameLayout.LayoutParams lp = new FrameLayout.LayoutParams(48, 48);
++        lp.topMargin = 56;
++        lp.leftMargin = 20;
++        btn.setLayoutParams(lp);
++        btn.setOnClickListener(v -> {
++            stopScan();
++            plugin.getBridge().getWebView().evaluateJavascript(
++                "document.dispatchEvent(new CustomEvent('scan-cancelled'))", null
++            );
++        });
++        return btn;
++    }
++
++    private static class ScanOverlay extends View {
++        private final Paint overlayPaint;
++        private final Paint cornerPaint;
++        private final RectF scanRect;
++        private final float cornerLength = 40;
++
++        public ScanOverlay(Context context) {
++            super(context);
++            overlayPaint = new Paint();
++            overlayPaint.setColor(Color.argb(180, 0, 0, 0));
++            overlayPaint.setAntiAlias(true);
++            overlayPaint.setStyle(Paint.Style.FILL);
++
++            cornerPaint = new Paint();
++            cornerPaint.setColor(Color.WHITE);
++            cornerPaint.setStrokeWidth(5);
++            cornerPaint.setStyle(Paint.Style.STROKE);
++            cornerPaint.setAntiAlias(true);
++
++            scanRect = new RectF();
++        }
++
++        @Override
++        protected void onSizeChanged(int w, int h, int oldw, int oldh) {
++            super.onSizeChanged(w, h, oldw, oldh);
++            int scanSize = (int) (Math.min(w, h) * 0.65f);
++            int left = (w - scanSize) / 2;
++            int top = (int) ((h - scanSize) / 2 * 0.85f);
++            scanRect.set(left, top, left + scanSize, top + scanSize);
++        }
++
++        @Override
++        protected void onDraw(Canvas canvas) {
++            super.onDraw(canvas);
++            // Draw semi-transparent overlay with a hole in the scan area
++            Path path = new Path();
++            path.addRect(new RectF(0, 0, getWidth(), getHeight()), Path.Direction.CW);
++            path.addRoundRect(scanRect, 20, 20, Path.Direction.CCW);
++            canvas.drawPath(path, overlayPaint);
++
++            // Draw corner marks
++            float l = scanRect.left, t = scanRect.top, r = scanRect.right, b = scanRect.bottom, cl = cornerLength;
++            canvas.drawLine(l, t, l + cl, t, cornerPaint);
++            canvas.drawLine(l, t, l, t + cl, cornerPaint);
++            canvas.drawLine(r, t, r - cl, t, cornerPaint);
++            canvas.drawLine(r, t, r, t + cl, cornerPaint);
++            canvas.drawLine(l, b, l + cl, b, cornerPaint);
++            canvas.drawLine(l, b, l, b - cl, cornerPaint);
++            canvas.drawLine(r, b, r - cl, b, cornerPaint);
++            canvas.drawLine(r, b, r, b - cl, cornerPaint);
++        }
++    }
++
+     private BarcodeScannerOptions buildBarcodeScannerOptions(ScanSettings scanSettings) {
+         int[] formats = scanSettings.formats.length == 0 ? new int[] { Barcode.FORMAT_ALL_FORMATS } : scanSettings.formats;
+         BarcodeScannerOptions options = new BarcodeScannerOptions.Builder().setBarcodeFormats(formats[0], formats).build();

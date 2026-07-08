@@ -11,7 +11,8 @@
     "preview": "vite preview --host --port $PORT",
     "android": "npx cap open android",
     "android:build": "npm run build && npx cap sync android",
-    "android:run": "npm run android:build && npx cap run android"
+    "android:run": "npm run android:build && npx cap run android",
+    "postinstall": "patch-package"
   },
   "dependencies": {
     "@capacitor-mlkit/barcode-scanning": "^8.1.0",
@@ -66,6 +67,7 @@
     "eslint-plugin-react-hooks": "^5.1.0-rc.0",
     "eslint-plugin-react-refresh": "^0.4.9",
     "globals": "^15.9.0",
+    "patch-package": "^8.0.1",
     "vite": "^5.4.21",
     "vite-plugin-pwa": "^0.20.1"
   }
