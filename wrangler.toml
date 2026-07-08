@@ -3,23 +3,12 @@ compatibility_date = "2025-01-01"
 
 pages_build_output_dir = "dist"
 
-[build]
-command = "npm run build"
-
-[build.upload]
-format = "service-worker"
-
 [[headers]]
 for = "/*"
 [headers.values]
 X-Frame-Options = "DENY"
 X-Content-Type-Options = "nosniff"
 Referrer-Policy = "strict-origin-when-cross-origin"
-
-# API 代理到 Render
-[[routes]]
-pattern = "/api/*"
-custom_domain = false
 
 # 静态资源缓存
 [[headers]]
