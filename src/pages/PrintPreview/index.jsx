@@ -1,6 +1,6 @@
 import { useState, useRef, useEffect } from 'react'
 import { AnimatePresence } from 'motion/react'
-import { Printer, FileDown } from 'lucide-react'
+import { Printer, FileDown, Loader2 } from 'lucide-react'
 import { QRCodeSVG } from 'qrcode.react'
 import { Toast } from 'antd-mobile'
 import { useStudentStore, useWrongQuestionStore, useUIStore, useExamStore } from '../../store'
@@ -46,12 +46,14 @@ export default function PrintPreview({ onClose, questions: propQuestions, existi
   const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
   const validExistingId = existingExamId && UUID_RE.test(existingExamId) ? existingExamId : ''
 
+  // 重打模式：不从 store selectedQuestions fallback，避免异步加载期间被残留数据污染
   const initQuestions = propQuestions && propQuestions.length > 0
     ? propQuestions
-    : (selectedQuestions.length > 0
-        ? selectedQuestions.map(wq => wq.question || wq)
-        : []);
-  
+    : (validExistingId ? []
+        : (selectedQuestions.length > 0
+            ? selectedQuestions.map(wq => wq.question || wq)
+            : []));
+
   const [previewQuestions, setPreviewQuestions] = useState(initQuestions)
   const [currentPage, setCurrentPage] = useState(1)
   const [paperId, setPaperId] = useState('')
@@ -114,7 +116,9 @@ export default function PrintPreview({ onClose, questions: propQuestions, existi
     }
   }, [currentStudent, previewQuestions, generatedExamId])
 
+  // 重打模式（validExistingId）下不从 store selectedQuestions 恢复，避免覆盖已加载的 propQuestions
   useEffect(() => {
+    if (validExistingId) return
     if (selectedQuestions.length > 0) {
       const questions = selectedQuestions.map(wq => wq.question || wq)
       setPreviewQuestions(questions)
@@ -350,8 +354,15 @@ export default function PrintPreview({ onClose, questions: propQuestions, existi
             <h2 style={{ fontSize: '15px', fontWeight: 600, color: '#111827' }}>打印预览</h2>
             <div className="w-10" />
           </div>
-          <div className="flex-1 flex items-center justify-center" style={{ fontSize: '13px', color: '#9CA3AF' }}>
-            请先选择要打印的题目
+          <div className="flex-1 flex flex-col items-center justify-center gap-3" style={{ fontSize: '13px', color: '#9CA3AF' }}>
+            {validExistingId ? (
+              <>
+                <Loader2 size={28} className="animate-spin" />
+                <span>正在加载试卷题目...</span>
+              </>
+            ) : (
+              <span>请先选择要打印的题目</span>
+            )}
           </div>
         </div>
       </AnimatePresence>
