@@ -10,6 +10,7 @@
  */
 
 const { chromium } = require('playwright');
+const dayjs = require('dayjs');
 
 const APP_URL = 'http://localhost:3000';
 
@@ -191,15 +192,22 @@ const APP_URL = 'http://localhost:3000';
     }
   }
 
-  // 验证 2: 标题包含目标试卷名称（非必要但辅助）
+  // 验证 2: 标题应包含原始试卷名称（如 "数学-0702"），而非当天日期（"0708"）
   if (previewInfo.titleText && targetExam.name) {
-    const targetNamePart = targetExam.name.replace(/^[^-]*-/, '').trim(); // e.g., "数学-0702" → "0702"
-    if (previewInfo.titleText.includes(targetNamePart)) {
-      console.log(`✅ PASS: 标题包含目标试卷标识 "${targetNamePart}"`);
-    } else if (previewInfo.titleText.includes(examItems[0].name.split('-')[1]?.trim() || '')) {
-      console.log(`⚠️  标题可能仍指向第一条试卷`);
+    // targetExam.name 如 "数学-0702"
+    const originalName = targetExam.name.trim()
+    if (previewInfo.titleText.includes(originalName)) {
+      console.log(`✅ PASS: 标题显示原始试卷名 "${originalName}"`)
     } else {
-      console.log(`ℹ️  标题: "${previewInfo.titleText}" (无法直接判定)`);
+      // 检查是否仍为当天日期
+      const todayStr = dayjs().format('MMDD')
+      if (previewInfo.titleText.includes(todayStr)) {
+        passed = false
+        failures.push(`标题仍显示当天日期 "${todayStr}"，而非原始名称 "${originalName}"`)
+        console.log(`❌ FAIL: 标题仍显示当天日期 "${todayStr}"，应为 "${originalName}"`)
+      } else {
+        console.log(`ℹ️  标题: "${previewInfo.titleText}" (包含 "${originalName}" 的部分)`)
+      }
     }
   }
 

@@ -3342,6 +3342,7 @@ export default function App() {
             <PrintPreview
               questions={reprintQuestions}
               existingExamId={reprintExam.id}
+              examName={reprintExam.name}
               onClose={() => { setShowReprint(false); setReprintExam(null); setReprintQuestions([]) }}
             />
           </Suspense>

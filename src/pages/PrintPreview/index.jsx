@@ -35,7 +35,7 @@ const generatePaperId = () => {
   return 'paper_' + Date.now() + '_' + Math.random().toString(36).substr(2, 9)
 }
 
-export default function PrintPreview({ onClose, questions: propQuestions, existingExamId }) {
+export default function PrintPreview({ onClose, questions: propQuestions, existingExamId, examName }) {
   const { currentStudent } = useStudentStore()
   const { selectedQuestions, clearSelection } = useWrongQuestionStore()
   const { setLoading } = useUIStore()
@@ -132,8 +132,9 @@ export default function PrintPreview({ onClose, questions: propQuestions, existi
 
   const totalPages = Math.ceil(previewQuestions.length / 5) || 1
 
-  // 根据所选题目自动生成试卷名：按学科归类 + 日期
+  // 根据所选题目自动生成试卷名：重打模式使用原始试卷名，新建模式按学科归类 + 日期
   const getExamName = () => {
+    if (examName) return examName
     const subjects = [...new Set(previewQuestions.map(q => q.subject).filter(Boolean))]
     if (subjects.length === 0) return `错题重练-${dayjs().format('MMDD')}`
     if (subjects.length <= 2) return `${subjects.join('')}-${dayjs().format('MMDD')}`
