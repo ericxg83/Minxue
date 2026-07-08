@@ -17,7 +17,7 @@ function escapeHtml(text) {
 
 function generateQRDataUrl(text, size = 140) {
   try {
-    const qr = qrcode(0, 'L')
+    const qr = qrcode(0, 'M')
     qr.addData(text)
     qr.make()
 
@@ -115,13 +115,13 @@ function buildExamHTML({ title, studentName, questions, showAnswers }) {
     .ans-line{border-bottom:1px solid #d0d0d0;height:30px;margin-bottom:3px}
     .answer-key{font-size:12px;color:#2563EB;margin-top:3px;padding-left:36px}
     .footer{text-align:center;font-size:11px;color:#999;margin-top:20px;padding-top:8px;border-top:1px solid #ddd}
-    .qr-container{position:absolute;top:16px;right:16px;text-align:center;}
-    .qr-canvas{width:80px;height:80px;}
-    .qr-text{font-size:9px;color:#666;margin-top:2px;font-weight:bold;}
+    .qr-container{position:absolute;top:16px;right:16px;text-align:center;background:#fff;padding:6px;border-radius:4px;}
+    .qr-canvas{width:220px;height:220px;display:block;}
+    .qr-text{font-size:11px;color:#333;margin-top:4px;font-weight:bold;letter-spacing:1px;}
   </style></head><body>
   <div class="page">
     <div id="qr-container" class="qr-container" style="display:none;">
-      <canvas id="qr-canvas" class="qr-canvas" width="140" height="140"></canvas>
+      <canvas id="qr-canvas" class="qr-canvas" width="440" height="440"></canvas>
       <div class="qr-text">扫码批改</div>
     </div>
     <div class="title">${escapeHtml(title)}</div>
@@ -190,16 +190,19 @@ export async function generateExamPDF({ title, studentName, questions, filename,
       const qrCanvas = container.querySelector('#qr-canvas')
       const qrContainer = container.querySelector('#qr-container')
       if (qrCanvas && qrContainer) {
-        const qr = qrcode(0, 'L')
+        const qr = qrcode(0, 'M')
         qr.addData(qrContent)
         qr.make()
 
-        const size = 160
+        const size = 440
         qrCanvas.width = size
         qrCanvas.height = size
         const ctx = qrCanvas.getContext('2d')
 
-        const cellSize = size / qr.getModuleCount()
+        // 四周留 4 模块静区（QR 规范要求），提高打印后识别率
+        const quietModules = 4
+        const cellSize = size / (qr.getModuleCount() + quietModules * 2)
+        const offset = cellSize * quietModules
         ctx.fillStyle = '#ffffff'
         ctx.fillRect(0, 0, size, size)
         ctx.fillStyle = '#000000'
@@ -208,8 +211,8 @@ export async function generateExamPDF({ title, studentName, questions, filename,
           for (let col = 0; col < qr.getModuleCount(); col++) {
             if (qr.isDark(row, col)) {
               ctx.fillRect(
-                Math.floor(col * cellSize),
-                Math.floor(row * cellSize),
+                Math.floor(offset + col * cellSize),
+                Math.floor(offset + row * cellSize),
                 Math.ceil(cellSize),
                 Math.ceil(cellSize)
               )

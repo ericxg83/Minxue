@@ -62,6 +62,14 @@ export default function PrintPreview({ onClose, questions: propQuestions }) {
   const [pdfBlob, setPdfBlob] = useState(null)
   const [pdfDownloading, setPdfDownloading] = useState(false)
   const [generatedExamId, setGeneratedExamId] = useState('')
+  const examIdRef = useRef('') // 同步保存组卷ID，避免导出时 state 未刷新
+
+  // 计算二维码内容：优先短格式（组卷ID），兜底旧 JSON
+  const getQrContent = () => {
+    const examId = examIdRef.current || generatedExamId
+    if (examId) return `MXG:${examId.toUpperCase()}`
+    return qrContent
+  }
 
   // 组件挂载时即保存组卷记录，使二维码中包含 generatedExamId
   useEffect(() => {
@@ -79,16 +87,21 @@ export default function PrintPreview({ onClose, questions: propQuestions }) {
     const newPaperId = generatePaperId()
     setPaperId(newPaperId)
 
-    const content = JSON.stringify({
-      type: 'grading',
-      paperId: newPaperId,
-      studentId: currentStudent?.id,
-      studentName: currentStudent?.name || '',
-      questionIds: previewQuestions.map(q => q.id),
-      generatedExamId: generatedExamId || undefined,
-      ts: Date.now()
-    })
-    setQrContent(content)
+    if (generatedExamId) {
+      // 短格式：只放组卷ID（全大写走 QR alphanumeric 模式，密度最低，打印后模块大、易扫描）
+      // 扫码端通过 GET /generated-exams/:id 拉取 studentId / questionIds
+      setQrContent(`MXG:${generatedExamId.toUpperCase()}`)
+    } else {
+      // 兜底：组卷记录尚未创建成功时使用完整 JSON（密度高，但保证可用）
+      setQrContent(JSON.stringify({
+        type: 'grading',
+        paperId: newPaperId,
+        studentId: currentStudent?.id,
+        studentName: currentStudent?.name || '',
+        questionIds: previewQuestions.map(q => q.id),
+        ts: Date.now()
+      }))
+    }
   }, [currentStudent, previewQuestions, generatedExamId])
 
   useEffect(() => {
@@ -209,7 +222,7 @@ export default function PrintPreview({ onClose, questions: propQuestions }) {
         questions: previewQuestions,
         filename: `${currentStudent?.name || 'student'}_${examName}_${dayjs().format('YYYYMMDD_HHmm')}`,
         showAnswers: false,
-        qrContent: qrContent,
+        qrContent: getQrContent(),
       })
       if (result) {
         setPdfBlobUrl(result.blobUrl)
@@ -246,7 +259,10 @@ export default function PrintPreview({ onClose, questions: propQuestions }) {
           name: examName,
           question_ids: questionIds
         })
-        if (exam?.id) setGeneratedExamId(exam.id)
+        if (exam?.id) {
+          examIdRef.current = exam.id
+          setGeneratedExamId(exam.id)
+        }
         examRecorded.current = true
       } catch (e) {
         console.error('保存组卷记录失败:', e)
@@ -280,7 +296,7 @@ export default function PrintPreview({ onClose, questions: propQuestions }) {
             questions: previewQuestions,
             filename: `${currentStudent?.name || 'student'}_${examName}_${dayjs().format('YYYYMMDD_HHmm')}`,
             showAnswers: false,
-            qrContent: qrContent,
+            qrContent: getQrContent(),
           })
           if (result) {
             blobUrl = result.blobUrl
@@ -353,11 +369,11 @@ export default function PrintPreview({ onClose, questions: propQuestions }) {
             <div className="absolute top-6 right-8 text-center">
               <QRCodeSVG
                 value={qrContent || 'https://minxue.app/grading'}
-                size={50}
+                size={200}
                 level="H"
                 includeMargin={true}
               />
-              <div className="text-[7pt] text-gray-400 mt-1">扫码批改</div>
+              <div className="text-[9pt] text-gray-400 mt-2">扫码批改</div>
             </div>
 
             {/* Header */}

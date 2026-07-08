@@ -483,6 +483,12 @@ export const getGeneratedExamsByStudent = async (studentId, useCache = true) => 
   return result
 }
 
+// 按 ID 获取单个组卷（扫码批改：二维码只含组卷ID）
+export const getGeneratedExamById = async (examId) => {
+  const data = await apiRequest(`/generated-exams/${examId}`)
+  return data.exam
+}
+
 export const createGeneratedExam = async (examData) => {
   const data = await apiRequest('/generated-exams', {
     method: 'POST',

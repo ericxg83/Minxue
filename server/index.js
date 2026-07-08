@@ -938,7 +938,14 @@ app.post('/api/questions/batch', async (req, res) => {
       return res.json({ success: true, questions: [] })
     }
 
-    const placeholders = ids.map((_, i) => `$${i + 1}`).join(',')
+    // 过滤掉无效的 UUID（防止 PostgreSQL 报错 "invalid input syntax for type uuid"）
+    const uuidRegex = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
+    const validIds = ids.filter(id => uuidRegex.test(id))
+    if (validIds.length === 0) {
+      return res.json({ success: true, questions: [] })
+    }
+
+    const placeholders = validIds.map((_, i) => `$${i + 1}`).join(',')
     let queryStr = `SELECT q.*,
       qc.content AS _cache_content,
       qc.options AS _cache_options,
@@ -949,16 +956,14 @@ app.post('/api/questions/batch', async (req, res) => {
     if (studentId) {
       queryStr += `, wq.error_count, wq.lifecycle_status, wq.status AS wq_status`
     }
-    const cacheIdx = ids.length + 1
     queryStr += ` FROM ${TABLES.QUESTIONS} q
        LEFT JOIN ${TABLES.QUESTION_CACHE} qc ON q.cache_id = qc.id`
     if (studentId) {
-      const sidIdx = ids.length + 1
-      queryStr += ` LEFT JOIN ${TABLES.WRONG_QUESTIONS} wq ON wq.question_id = q.id AND wq.student_id = $${sidIdx}`
+      queryStr += ` LEFT JOIN ${TABLES.WRONG_QUESTIONS} wq ON wq.question_id = q.id AND wq.student_id = $${validIds.length + 1}`
     }
     queryStr += ` WHERE q.id IN (${placeholders})`
 
-    const params = studentId ? [...ids, studentId] : ids
+    const params = studentId ? [...validIds, studentId] : validIds
     const { rows } = await query(queryStr, params)
 
     const merged = rows.map(q => ({
@@ -1520,6 +1525,31 @@ app.get('/api/generated-exams/student/:studentId', async (req, res) => {
     res.json({ success: true, generatedExams: examsWithStats })
   } catch (error) {
     console.error('获取错题卷失败:', error)
+    res.status(500).json({ error: error.message })
+  }
+})
+
+// 按 ID 查询单个组卷（扫码批改：二维码只含组卷ID，扫码后拉取详情）
+app.get('/api/generated-exams/:id', async (req, res) => {
+  try {
+    const { id } = req.params
+    const uuidRegex = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
+    if (!uuidRegex.test(id)) {
+      return res.status(400).json({ error: '无效的试卷ID' })
+    }
+    const { rows } = await query(
+      `SELECT e.*, s.name AS student_name
+       FROM ${TABLES.GENERATED_EXAMS} e
+       LEFT JOIN ${TABLES.STUDENTS} s ON s.id = e.student_id
+       WHERE e.id = $1`,
+      [id]
+    )
+    if (rows.length === 0) {
+      return res.status(404).json({ error: '试卷不存在' })
+    }
+    res.json({ success: true, exam: rows[0] })
+  } catch (error) {
+    console.error('获取组卷失败:', error)
     res.status(500).json({ error: error.message })
   }
 })
