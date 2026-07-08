@@ -3341,6 +3341,7 @@ export default function App() {
           <Suspense fallback={<LazyFallback />}>
             <PrintPreview
               questions={reprintQuestions}
+              existingExamId={reprintExam.id}
               onClose={() => { setShowReprint(false); setReprintExam(null); setReprintQuestions([]) }}
             />
           </Suspense>

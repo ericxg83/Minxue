@@ -35,11 +35,16 @@ const generatePaperId = () => {
   return 'paper_' + Date.now() + '_' + Math.random().toString(36).substr(2, 9)
 }
 
-export default function PrintPreview({ onClose, questions: propQuestions }) {
+export default function PrintPreview({ onClose, questions: propQuestions, existingExamId }) {
   const { currentStudent } = useStudentStore()
   const { selectedQuestions, clearSelection } = useWrongQuestionStore()
   const { setLoading } = useUIStore()
   const { addGeneratedExam } = useExamStore()
+
+  // 仅当 existingExamId 是合法 UUID（服务端真实组卷ID）时才复用；
+  // 本地副本(gen-xxx等)不是有效ID，扫码端会拒绝，退回正常新建流程
+  const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
+  const validExistingId = existingExamId && UUID_RE.test(existingExamId) ? existingExamId : ''
 
   const initQuestions = propQuestions && propQuestions.length > 0
     ? propQuestions
@@ -61,8 +66,8 @@ export default function PrintPreview({ onClose, questions: propQuestions }) {
   const [generatingPdf, setGeneratingPdf] = useState(false)
   const [pdfBlob, setPdfBlob] = useState(null)
   const [pdfDownloading, setPdfDownloading] = useState(false)
-  const [generatedExamId, setGeneratedExamId] = useState('')
-  const examIdRef = useRef('') // 同步保存组卷ID，避免导出时 state 未刷新
+  const [generatedExamId, setGeneratedExamId] = useState(validExistingId || '')
+  const examIdRef = useRef(validExistingId || '') // 同步保存组卷ID，避免导出时 state 未刷新
 
   // 计算二维码内容：优先短格式（组卷ID），兜底旧 JSON
   const getQrContent = () => {
@@ -72,7 +77,12 @@ export default function PrintPreview({ onClose, questions: propQuestions }) {
   }
 
   // 组件挂载时即保存组卷记录，使二维码中包含 generatedExamId
+  // 重打/历史重下场景已带合法 existingExamId，直接复用，无需新建
   useEffect(() => {
+    if (validExistingId) {
+      examRecorded.current = true
+      return
+    }
     saveGeneratedExamRecord()
   }, [])
 
