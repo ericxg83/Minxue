@@ -15,6 +15,12 @@ function escapeHtml(text) {
     .replace(/"/g, '&quot;')
 }
 
+// 判断选项是否已自带字母前缀（如 "A. xxx" / "A、xxx"），避免出现 "A. A. xxx"
+function hasLetterPrefix(opt) {
+  if (!opt) return false
+  return /^[A-Da-d][.、)）]\s*/.test(String(opt).trim())
+}
+
 function generateQRDataUrl(text, size = 140) {
   try {
     const qr = qrcode(0, 'M')
@@ -68,9 +74,14 @@ function buildExamHTML({ title, studentName, questions, showAnswers }) {
         html += `<div class="q-image"><img src="${q.image_url}" alt="配图" /></div>`
       }
       if (q.options && q.options.length > 0) {
-        html += `<div class="opts">`
+        // 根据选项最大长度决定列数：短则 4 列，中等 2 列，长则 1 列（每项独占一行）
+        const maxLen = Math.max(...q.options.map(o => String(o || '').length))
+        const cols = maxLen <= 8 ? 4 : maxLen <= 20 ? 2 : 1
+        html += `<div class="opts opts-${cols}">`
         q.options.forEach((opt, i) => {
-          html += `<span class="opt">${String.fromCharCode(65 + i)}. ${escapeHtml(opt)}</span>`
+          // 选项已带字母前缀则直接用，否则补 "A. "
+          const label = hasLetterPrefix(opt) ? '' : `${String.fromCharCode(65 + i)}. `
+          html += `<span class="opt">${label}${escapeHtml(opt)}</span>`
         })
         html += `</div>`
       }
@@ -94,29 +105,34 @@ function buildExamHTML({ title, studentName, questions, showAnswers }) {
     *{margin:0;padding:0;box-sizing:border-box}
     body{font-family:'Microsoft YaHei','PingFang SC','Noto Sans SC','SimSun',sans-serif;color:#1a1a1a}
     .page{width:794px;padding:30px 40px;position:relative}
-    .title{text-align:center;font-size:22px;font-weight:bold;margin-bottom:6px;letter-spacing:1px}
-    .sub-title{text-align:center;font-size:13px;color:#555;margin-bottom:12px}
-    .info{display:flex;justify-content:space-between;font-size:14px;margin-bottom:4px}
+    /* 顶部预留二维码位置：标题区右侧留出 160px 空间，避免文字与二维码重叠 */
+    .head-area{min-height:150px;padding-right:170px}
+    .title{font-size:22px;font-weight:bold;margin-bottom:6px;letter-spacing:1px}
+    .sub-title{font-size:13px;color:#555;margin-bottom:12px}
+    .info{display:flex;gap:40px;font-size:14px;margin-bottom:4px}
     .info span{display:inline-block}
     .info .blank{display:inline-block;width:100px;border-bottom:1px solid #333;margin-left:4px}
     .divider{border-top:2px solid #333;margin:6px 0 10px}
-    .total-info{font-size:13px;color:#666;margin-bottom:10px;text-align:right}
+    .total-info{font-size:13px;color:#666;margin-bottom:10px}
     .section-header{font-size:16px;font-weight:bold;margin:14px 0 10px;padding:6px 0 6px 12px;border-left:4px solid #2563EB;background:#f8faff}
-    .question{margin-bottom:14px;page-break-inside:avoid}
-    .q-head{display:flex;gap:8px;font-size:14px;line-height:1.7;margin-bottom:6px}
+    .question{margin-bottom:16px;page-break-inside:avoid}
+    .q-head{display:flex;gap:8px;font-size:14px;line-height:1.8;margin-bottom:8px}
     .q-num{font-weight:bold;white-space:nowrap;min-width:28px}
-    .q-text{flex:1}
+    .q-text{flex:1;word-break:break-word}
     .q-image{text-align:center;margin:8px 0 8px 36px}
     .q-image img{max-width:100%;max-height:250px;object-fit:contain;border-radius:4px}
-    .opts{display:grid;grid-template-columns:1fr 1fr 1fr 1fr;gap:4px 12px;padding-left:36px;margin-bottom:4px}
-    .opt{font-size:13px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
-    .fill-line{width:160px;border-bottom:1.5px solid #333;margin:6px 0 6px 36px;height:22px}
+    .opts{display:grid;gap:8px 16px;padding-left:36px;margin-bottom:4px}
+    .opts-1{grid-template-columns:1fr}
+    .opts-2{grid-template-columns:1fr 1fr}
+    .opts-4{grid-template-columns:repeat(4,1fr)}
+    .opt{font-size:13px;line-height:1.6;word-break:break-word}
+    .fill-line{width:220px;border-bottom:1.5px solid #333;margin:8px 0 6px 36px;height:24px}
     .ans-area{margin:6px 0 6px 36px}
-    .ans-line{border-bottom:1px solid #d0d0d0;height:30px;margin-bottom:3px}
-    .answer-key{font-size:12px;color:#2563EB;margin-top:3px;padding-left:36px}
+    .ans-line{border-bottom:1px solid #d0d0d0;height:32px;margin-bottom:4px}
+    .answer-key{font-size:12px;color:#2563EB;margin-top:4px;padding-left:36px}
     .footer{text-align:center;font-size:11px;color:#999;margin-top:20px;padding-top:8px;border-top:1px solid #ddd}
-    .qr-container{position:absolute;top:16px;right:16px;text-align:center;background:#fff;padding:6px;border-radius:4px;}
-    .qr-canvas{width:220px;height:220px;display:block;}
+    .qr-container{position:absolute;top:24px;right:36px;text-align:center;background:#fff;padding:4px;}
+    .qr-canvas{width:150px;height:150px;display:block;}
     .qr-text{font-size:11px;color:#333;margin-top:4px;font-weight:bold;letter-spacing:1px;}
   </style></head><body>
   <div class="page">
@@ -124,15 +140,17 @@ function buildExamHTML({ title, studentName, questions, showAnswers }) {
       <canvas id="qr-canvas" class="qr-canvas" width="440" height="440"></canvas>
       <div class="qr-text">扫码批改</div>
     </div>
-    <div class="title">${escapeHtml(title)}</div>
-    <div class="sub-title">${escapeHtml(studentName)}</div>
-    <div class="info">
-      <span>姓名：<span class="blank"></span></span>
-      <span>班级：<span class="blank"></span></span>
-      <span>得分：<span class="blank"></span></span>
+    <div class="head-area">
+      <div class="title">${escapeHtml(title)}</div>
+      <div class="sub-title">${escapeHtml(studentName)}</div>
+      <div class="info">
+        <span>姓名：<span class="blank"></span></span>
+        <span>班级：<span class="blank"></span></span>
+        <span>得分：<span class="blank"></span></span>
+      </div>
+      <div class="divider"></div>
+      <div class="total-info">共 ${questions.length} 题</div>
     </div>
-    <div class="divider"></div>
-    <div class="total-info">共 ${questions.length} 题</div>
     ${renderSection(choiceQs, '一、选择题')}
     ${renderSection(fillQs, '二、填空题')}
     ${renderSection(answerQs, '三、解答题')}

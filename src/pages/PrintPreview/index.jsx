@@ -39,7 +39,7 @@ export default function PrintPreview({ onClose, questions: propQuestions, existi
   const { currentStudent } = useStudentStore()
   const { selectedQuestions, clearSelection } = useWrongQuestionStore()
   const { setLoading } = useUIStore()
-  const { addGeneratedExam } = useExamStore()
+  const { addGeneratedExam, generatedExams } = useExamStore()
 
   // 仅当 existingExamId 是合法 UUID（服务端真实组卷ID）时才复用；
   // 本地副本(gen-xxx等)不是有效ID，扫码端会拒绝，退回正常新建流程
@@ -70,6 +70,23 @@ export default function PrintPreview({ onClose, questions: propQuestions, existi
   const [pdfDownloading, setPdfDownloading] = useState(false)
   const [generatedExamId, setGeneratedExamId] = useState(validExistingId || '')
   const examIdRef = useRef(validExistingId || '') // 同步保存组卷ID，避免导出时 state 未刷新
+  const [savedExamName, setSavedExamName] = useState('') // 保存后的带序号最终名，供展示/文件名统一使用
+
+  // A4 页面按真实宽度(794px)渲染，再缩放适配视口宽度（手机端完整呈现，不再挤压变形）
+  const A4_PX = 794
+  const previewWrapRef = useRef(null)
+  const [previewScale, setPreviewScale] = useState(1)
+  useEffect(() => {
+    const compute = () => {
+      const wrap = previewWrapRef.current
+      if (!wrap) return
+      const avail = wrap.clientWidth
+      setPreviewScale(Math.min(1, avail / A4_PX))
+    }
+    compute()
+    window.addEventListener('resize', compute)
+    return () => window.removeEventListener('resize', compute)
+  }, [previewQuestions.length])
 
   // 计算二维码内容：优先短格式（组卷ID），兜底旧 JSON
   const getQrContent = () => {
@@ -132,13 +149,50 @@ export default function PrintPreview({ onClose, questions: propQuestions, existi
 
   const totalPages = Math.ceil(previewQuestions.length / 5) || 1
 
-  // 根据所选题目自动生成试卷名：重打模式使用原始试卷名，新建模式按学科归类 + 日期
-  const getExamName = () => {
+  // 按题型分组，与 PDF 排版一致：选择题 / 填空题 / 解答题
+  const questionSections = (() => {
+    const choice = previewQuestions.filter(q => q.question_type === 'choice')
+    const fill = previewQuestions.filter(q => q.question_type === 'fill')
+    const answer = previewQuestions.filter(q => q.question_type === 'answer')
+    const other = previewQuestions.filter(
+      q => !['choice', 'fill', 'answer'].includes(q.question_type)
+    )
+    const sections = []
+    let num = 0
+    if (choice.length) sections.push({ label: '一、选择题', items: choice.map(q => ({ q, num: ++num })) })
+    if (fill.length) sections.push({ label: '二、填空题', items: fill.map(q => ({ q, num: ++num })) })
+    if (answer.length) sections.push({ label: '三、解答题', items: answer.map(q => ({ q, num: ++num })) })
+    if (other.length) sections.push({ label: '四、其他', items: other.map(q => ({ q, num: ++num })) })
+    return sections
+  })()
+
+  // 计算 base 试卷名（不含序号）：重打模式用原始名，新建模式按学科 + 日期
+  const getBaseExamName = () => {
     if (examName) return examName
     const subjects = [...new Set(previewQuestions.map(q => q.subject).filter(Boolean))]
     if (subjects.length === 0) return `错题重练-${dayjs().format('MMDD')}`
     if (subjects.length <= 2) return `${subjects.join('')}-${dayjs().format('MMDD')}`
     return `综合-${dayjs().format('MMDD')}`
+  }
+
+  // 展示/文件名用：已保存则用带序号的最终名，否则用 base 名
+  const getExamName = () => savedExamName || getBaseExamName()
+
+  // 生成带序号的组卷名：同一学生、同一 base 名（科目+日期）当天第几张 → -01/-02...
+  // 例："数学-0708-01"、"数学-0708-02"，避免同天多张重名难以区分
+  const buildExamNameWithSeq = (baseName) => {
+    const today = dayjs().format('YYYY-MM-DD')
+    // 统计当前学生今天已存在、且 base 名相同的组卷数量
+    const sameBaseToday = (generatedExams || []).filter(e => {
+      if (e.student_id !== currentStudent?.id) return false
+      const createdDay = e.created_at ? dayjs(e.created_at).format('YYYY-MM-DD') : null
+      if (createdDay !== today) return false
+      // 去掉已有的 -NN 序号后比较 base
+      const eBase = (e.name || '').replace(/-\d{2}$/, '')
+      return eBase === baseName
+    }).length
+    const seq = String(sameBaseToday + 1).padStart(2, '0')
+    return `${baseName}-${seq}`
   }
 
   const generatePrintContent = () => {
@@ -258,16 +312,10 @@ export default function PrintPreview({ onClose, questions: propQuestions, existi
     const questionIds = previewQuestions.map(q => q.id).filter(Boolean)
     if (currentStudent && questionIds.length > 0) {
       try {
-        // 根据所选题目自动生成试卷名：按学科归类 + 日期
-        const subjects = [...new Set(previewQuestions.map(q => q.subject).filter(Boolean))]
-        let examName
-        if (subjects.length === 0) {
-          examName = `错题重练-${dayjs().format('MMDD')}`
-        } else if (subjects.length <= 2) {
-          examName = `${subjects.join('')}-${dayjs().format('MMDD')}`
-        } else {
-          examName = `综合-${dayjs().format('MMDD')}`
-        }
+        // 计算 base 名（科目+日期），再追加当天序号
+        const baseName = getBaseExamName()
+        const examName = buildExamNameWithSeq(baseName)
+        setSavedExamName(examName)
 
         const exam = await createGeneratedExam({
           student_id: currentStudent.id,
@@ -277,6 +325,18 @@ export default function PrintPreview({ onClose, questions: propQuestions, existi
         if (exam?.id) {
           examIdRef.current = exam.id
           setGeneratedExamId(exam.id)
+          // 加入 store，使后续同天组卷的序号继续递增
+          if (addGeneratedExam) {
+            addGeneratedExam({
+              id: exam.id,
+              student_id: currentStudent.id,
+              name: examName,
+              question_ids: questionIds,
+              created_at: exam.created_at || new Date().toISOString(),
+              status: 'ungraded',
+              source: 'generated',
+            })
+          }
         }
         examRecorded.current = true
       } catch (e) {
@@ -384,89 +444,107 @@ export default function PrintPreview({ onClose, questions: propQuestions, existi
           </button>
         </div>
 
-        {/* Preview Area */}
-        <div className="flex-1 bg-gray-200 p-5 overflow-auto flex justify-center">
-          <div className="w-full max-w-[210mm] bg-white p-8 shadow-lg relative">
-            {/* QR Code */}
-            <div className="absolute top-6 right-8 text-center">
-              <QRCodeSVG
-                value={qrContent || 'https://minxue.app/grading'}
-                size={200}
-                level="H"
-                includeMargin={true}
-              />
-              <div className="text-[9pt] text-gray-400 mt-2">扫码批改</div>
-            </div>
-
-            {/* Header */}
-            <div className="text-center mb-6 pb-4 border-b-2 border-gray-800 pr-20">
-              <div className="text-[18pt] font-bold mb-3">{currentStudent?.name || '学生'} - {getExamName()}</div>
-              <div className="text-[10pt] text-gray-500 flex justify-center gap-8">
-                <span>总题数：{previewQuestions.length}题</span>
-                <span>满分：100分</span>
-                <span>限时：60分钟</span>
-              </div>
-            </div>
-
-            {/* Info Bar */}
-            <div className="flex justify-start items-center mb-6 text-[10pt] border-b border-gray-200 pb-3 gap-10">
-              <span>姓名：______________</span>
-              <span>日期：____年____月____日</span>
-            </div>
-
-            {/* Questions */}
-            {previewQuestions.map((q, index) => {
-              const isShortOptions = q.options && q.options.every(opt => opt.length <= 10)
-              let content = q.content
-              if (q.question_type === 'fill') {
-                content = content.replace(/_____/g, '__________')
-              }
-              return (
-                <div key={q.id} className="mb-6">
-                  <div className="flex items-baseline gap-2 mb-2">
-                    <span className="font-bold min-w-[30px]">{index + 1}.</span>
-                    <span className="text-[9pt] text-gray-400">
-                      ({q.question_type === 'choice' ? '选择题' : q.question_type === 'fill' ? '填空题' : '解答题'})
-                    </span>
-                  </div>
-                  <div className="mb-2 leading-relaxed">{content}</div>
-                  {q.image_url && (
-                    <div className="mb-2" style={{ textAlign: 'center' }}>
-                      <img
-                        src={q.image_url}
-                        alt="配图"
-                        style={{
-                          maxWidth: '100%',
-                          maxHeight: '200px',
-                          objectFit: 'contain',
-                          borderRadius: '4px'
-                        }}
-                      />
-                    </div>
-                  )}
-                  {q.options && q.options.length > 0 && (
-                    <div className={`ml-8 mt-2 ${isShortOptions ? 'flex flex-wrap gap-8' : 'grid grid-cols-2 gap-2'}`}>
-                      {q.options.map((opt, i) => (
-                        <div key={i} className="text-[11pt] whitespace-nowrap flex items-center gap-2">
-                          <span className="inline-block w-3.5 h-3.5 border border-gray-400 rounded-full flex-shrink-0"></span>
-                          {formatOption(opt, i)}
-                        </div>
-                      ))}
-                    </div>
-                  )}
-                  {q.question_type === 'answer' && (
-                    <div className="mt-4 p-3 border border-gray-200 rounded-lg min-h-[60px]">答：</div>
-                  )}
+        {/* Preview Area — A4 真实宽度渲染后按视口缩放，手机端完整呈现 */}
+        <div ref={previewWrapRef} className="flex-1 bg-gray-200 p-3 sm:p-5 overflow-auto">
+          <div
+            style={{
+              width: A4_PX * previewScale,
+              height: previewScale < 1 ? 'auto' : undefined,
+              margin: '0 auto',
+            }}
+          >
+            <div
+              style={{
+                width: A4_PX,
+                transform: `scale(${previewScale})`,
+                transformOrigin: 'top left',
+              }}
+            >
+              <div className="bg-white shadow-lg relative" style={{ padding: '30px 40px' }}>
+                {/* QR Code — 顶部右侧固定，标题区已预留空间避免重叠 */}
+                <div className="absolute text-center" style={{ top: 24, right: 36 }}>
+                  <QRCodeSVG
+                    value={qrContent || 'https://minxue.app/grading'}
+                    size={150}
+                    level="H"
+                    includeMargin={true}
+                  />
+                  <div className="text-[11px] text-gray-500 mt-1 font-bold tracking-wider">扫码批改</div>
                 </div>
-              )
-            })}
 
-            {/* Footer */}
-            <div className="mt-10 text-center text-[9pt] text-gray-400 border-t border-gray-200 pt-4">
-              敏学错题本 - 智能学习助手
-            </div>
-            <div className="text-center mt-4 text-[10pt] text-gray-500">
-              第 {currentPage} 页 / 共 {totalPages} 页
+                {/* Header — 右侧留出 170px 给二维码 */}
+                <div style={{ minHeight: 150, paddingRight: 170 }}>
+                  <div className="text-[22px] font-bold mb-1.5 tracking-wide">{currentStudent?.name || '学生'} - {getExamName()}</div>
+                  <div className="text-[13px] text-gray-500 mb-3">{currentStudent?.name || '学生'}</div>
+                  <div className="flex gap-10 text-[14px] mb-1">
+                    <span>姓名：<span className="inline-block w-[100px] border-b border-gray-800 ml-1"></span></span>
+                    <span>班级：<span className="inline-block w-[100px] border-b border-gray-800 ml-1"></span></span>
+                    <span>得分：<span className="inline-block w-[100px] border-b border-gray-800 ml-1"></span></span>
+                  </div>
+                  <div className="border-t-2 border-gray-800 mt-1.5 mb-2.5"></div>
+                  <div className="text-[13px] text-gray-500 mb-2.5">共 {previewQuestions.length} 题</div>
+                </div>
+
+                {/* Questions — 按题型分节，与 PDF 一致 */}
+                {questionSections.map((section) => (
+                  <div key={section.label}>
+                    <div className="text-[16px] font-bold my-3 py-1.5 pl-3 border-l-4 border-blue-600 bg-blue-50">
+                      {section.label}
+                    </div>
+                    {section.items.map(({ q, num }) => {
+                      const maxLen = q.options && q.options.length
+                        ? Math.max(...q.options.map(o => String(o || '').length))
+                        : 0
+                      const colClass = maxLen <= 8 ? 'grid-cols-4' : maxLen <= 20 ? 'grid-cols-2' : 'grid-cols-1'
+                      let content = q.content || ''
+                      if (q.question_type === 'fill') {
+                        content = content.replace(/_____/g, '__________')
+                      }
+                      return (
+                        <div key={q.id} className="mb-4" style={{ pageBreakInside: 'avoid' }}>
+                          <div className="flex gap-2 text-[14px] leading-[1.8] mb-2">
+                            <span className="font-bold min-w-[28px] whitespace-nowrap">{num}.</span>
+                            <span className="flex-1 break-words">{content}</span>
+                          </div>
+                          {q.image_url && (
+                            <div className="my-2 ml-9" style={{ textAlign: 'center' }}>
+                              <img
+                                src={q.image_url}
+                                alt="配图"
+                                style={{ maxWidth: '100%', maxHeight: '250px', objectFit: 'contain', borderRadius: '4px' }}
+                              />
+                            </div>
+                          )}
+                          {q.options && q.options.length > 0 && (
+                            <div className={`grid ${colClass} gap-x-4 gap-y-2 pl-9 mb-1`}>
+                              {q.options.map((opt, i) => (
+                                <div key={i} className="text-[13px] leading-relaxed break-words">
+                                  {formatOption(opt, i)}
+                                </div>
+                              ))}
+                            </div>
+                          )}
+                          {q.question_type === 'fill' && (
+                            <div className="ml-9 mt-2 mb-1.5 border-b-[1.5px] border-gray-800" style={{ width: 220, height: 24 }}></div>
+                          )}
+                          {q.question_type === 'answer' && (
+                            <div className="ml-9 mt-1.5">
+                              {[0, 1, 2, 3, 4].map(r => (
+                                <div key={r} className="border-b border-gray-300" style={{ height: 32, marginBottom: 4 }}></div>
+                              ))}
+                            </div>
+                          )}
+                        </div>
+                      )
+                    })}
+                  </div>
+                ))}
+
+                {/* Footer */}
+                <div className="mt-5 text-center text-[11px] text-gray-400 border-t border-gray-200 pt-2">
+                  敏学错题本 - 智能学习助手
+                </div>
+              </div>
             </div>
           </div>
         </div>
