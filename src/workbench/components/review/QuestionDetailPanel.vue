@@ -61,6 +61,9 @@
           <span v-else-if="q.answer" class="ops-cmp-value correct-val">
             <MathRender :content="q.answer" autoDetect tag="span" />
           </span>
+          <span v-else-if="q.analysis" class="ops-cmp-value correct-val ref-answer-val">
+            <MathRender :content="q.analysis" autoDetect tag="span" />
+          </span>
           <div v-else class="quick-answer-wrap">
             <div v-if="!quickAnswerEditing" class="ops-cmp-value missing-val" @click="startQuickAnswerEdit">
               — <span class="quick-edit-hint">点击填写</span>
@@ -671,6 +674,16 @@ const deleteImage = () => {
 }
 .student-val { background: #f5f7fa; color: #303133; }
 .correct-val { color: #67c23a; }
+.ref-answer-val {
+  font-size: 13px;
+  font-weight: 500;
+  line-height: 1.6;
+  word-break: normal;
+  overflow-wrap: anywhere;
+  white-space: pre-wrap;
+  max-height: 160px;
+  overflow-y: auto;
+}
 .ops-cmp-divider {
   width: 1px;
   background: #e4e7ed;
