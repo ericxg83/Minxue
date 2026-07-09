@@ -37,7 +37,7 @@ export default function SwipeableRow({
   const [animating, setAnimating] = useState(true)
 
   // 拖动过程中的实时状态全部放在 ref，避免闭包读到过期的 state
-  const drag = useRef({ active: false, x0: 0, y0: 0, base: 0, cur: 0, axis: null })
+  const drag = useRef({ active: false, x0: 0, y0: 0, base: 0, cur: 0, axis: null, captured: false })
   const openRef = useRef(false)
   const justDraggedRef = useRef(false) // 刚发生过拖动 → 抑制随后的 click
 
@@ -79,8 +79,12 @@ export default function SwipeableRow({
     drag.current.y0 = e.clientY
     drag.current.base = drag.current.cur
     drag.current.axis = null
+    drag.current.captured = false
+    // 注意：不要在这里 setPointerCapture。
+    // 指针捕获会把随后的 click 事件目标重定向到本包裹层，
+    // 导致卡片内部（标题/勾选框等）的点击全部失效。
+    // 仅在确认为「横向拖动」后再捕获。
     setAnimating(false)
-    try { e.currentTarget.setPointerCapture(e.pointerId) } catch { /* noop */ }
   }
 
   const onPointerMove = (e) => {
@@ -92,6 +96,10 @@ export default function SwipeableRow({
     if (d.axis === null) {
       if (Math.abs(dx) < TAP_SLOP && Math.abs(dy) < TAP_SLOP) return
       d.axis = Math.abs(dx) > Math.abs(dy) ? 'x' : 'y'
+      // 确认横向拖动后才捕获指针，保证纵向点击/滚动不受影响
+      if (d.axis === 'x') {
+        try { e.currentTarget.setPointerCapture(e.pointerId); d.captured = true } catch { /* noop */ }
+      }
     }
     if (d.axis === 'y') return // 纵向手势交给页面滚动
     e.preventDefault()
@@ -106,7 +114,10 @@ export default function SwipeableRow({
     const d = drag.current
     if (!d.active) return
     d.active = false
-    try { e.currentTarget.releasePointerCapture(e.pointerId) } catch { /* noop */ }
+    if (d.captured) {
+      try { e.currentTarget.releasePointerCapture(e.pointerId) } catch { /* noop */ }
+      d.captured = false
+    }
     if (d.axis === 'x') {
       justDraggedRef.current = true // 拦截紧随其后的 click
       if (d.cur < -OPEN_THRESHOLD) open()
