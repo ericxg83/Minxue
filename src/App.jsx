@@ -38,6 +38,7 @@ import { processMultiPagePaperLayout } from './services/paperBankAIService'
 import { downloadPaperWord } from './utils/docxGenerator'
 import { mockQuestions, mockTasks, mockWrongQuestions, mockGeneratedExams, mockStudents } from './data/mockData'
 import StudentSwitcher from './components/StudentSwitcher'
+import SwipeableRow from './components/SwipeableRow'
 
 import { useToast, ToastProvider } from './components/ToastProvider'
 import dayjs from 'dayjs'
@@ -2118,7 +2119,7 @@ export default function App() {
                 </section>
 
                 {/* Task List - Compact File Style */}
-                <section className="px-4 space-y-1">
+                <section className="px-4 space-y-2">
                   {isLoadingTasks ? (
                     <div className="space-y-1">
                       <TaskCardSkeleton />
@@ -2144,22 +2145,26 @@ export default function App() {
                     )
                   ) : (
                     filteredTasks.map((task) => (
-                      <motion.div
+                      <SwipeableRow
                         key={task.id}
-                        layout
-                        initial={{ opacity: 0, y: 10 }}
-                        animate={{ opacity: 1, y: 0 }}
-                        className={`card list-card ${isTaskCompleted(task) ? 'cursor-pointer hover:shadow-md' : ''}`}
-                        style={{
-                          borderLeft: isTaskCompleted(task) ? '3px solid var(--primary)' : '3px solid var(--warning)',
-                        }}
-                        onClick={() => {
-                          if (isTaskCompleted(task)) {
-                            setReviewTask(task)
-                            setShowExamReview(true)
-                          }
-                        }}
+                        onDelete={() => { setDeleteTarget({ type: 'task', id: task.id }); setShowDeleteConfirm(true) }}
                       >
+                        <motion.div
+                          layout
+                          initial={{ opacity: 0, y: 10 }}
+                          animate={{ opacity: 1, y: 0 }}
+                          className={`card ${isTaskCompleted(task) ? 'cursor-pointer hover:shadow-md' : ''}`}
+                          style={{
+                            padding: '12px',
+                            borderLeft: isTaskCompleted(task) ? '3px solid var(--primary)' : '3px solid var(--warning)',
+                          }}
+                          onClick={() => {
+                            if (isTaskCompleted(task)) {
+                              setReviewTask(task)
+                              setShowExamReview(true)
+                            }
+                          }}
+                        >
                         <div className="list-card-row items-center">
                           {/* Thumbnail */}
                           <div
@@ -2181,13 +2186,6 @@ export default function App() {
                               <span className="text-card-title truncate">
                                 {task.original_name || '未命名试卷'}
                               </span>
-                              <button
-                                onClick={(e) => { e.stopPropagation(); setDeleteTarget({ type: 'task', id: task.id }); setShowDeleteConfirm(true) }}
-                                className="flex-shrink-0 opacity-0 group-hover:opacity-100 transition-opacity tap-scale"
-                                style={{ color: 'var(--text-tertiary)' }}
-                              >
-                                <Trash2 size={13} />
-                              </button>
                             </div>
                             <div className="flex items-center gap-2 mt-1 flex-wrap">
                               <span className="text-meta">
@@ -2263,7 +2261,8 @@ export default function App() {
                             )}
                           </div>
                         </div>
-                      </motion.div>
+                        </motion.div>
+                      </SwipeableRow>
                     ))
                   )}
                 </section>
@@ -2549,7 +2548,7 @@ export default function App() {
                       <p className="mt-0.5" style={{ fontSize: '11px', color: '#D1D5DB' }}>AI批改后错题会自动收录到错题本</p>
                     </div>
                   ) : (
-                    <div className="space-y-1.5">
+                    <div className="space-y-2">
                       {filteredWrongQuestions.map((wq) => {
                         const question = wq.question || wq
                         const isSelected = selectedQuestions.find(q => q.id === wq.id)
@@ -2566,13 +2565,16 @@ export default function App() {
                           : (question.ai_tags || [])
 
                         return (
-                          <motion.div
+                          <SwipeableRow
                             key={wq.id}
+                            onDelete={() => handleDeleteWrongQuestion(wq)}
+                          >
+                          <motion.div
                             layout
                             initial={{ opacity: 0, y: 10 }}
                             animate={{ opacity: 1, y: 0 }}
                             className="card"
-                            style={{ padding: '10px 12px' }}
+                            style={{ padding: '12px' }}
                           >
                             <div className="flex gap-2.5 items-start">
                               {/* Checkbox */}
@@ -2661,19 +2663,9 @@ export default function App() {
                                   </span>
                                 </div>
                               </div>
-
-                              {/* Action buttons - weak */}
-                              <div className="flex-shrink-0 flex items-center gap-1 ml-1">
-                                <button
-                                  onClick={() => handleDeleteWrongQuestion(wq)}
-                                  style={{ fontSize: '11px', color: '#D1D5DB', cursor: 'pointer', lineHeight: 1, display: 'inline-flex', alignItems: 'center' }}
-                                  title="删除"
-                                >
-                                  <Trash2 size={14} />
-                                </button>
-                              </div>
                             </div>
                           </motion.div>
+                          </SwipeableRow>
                         )
                       })}
                     </div>
@@ -2731,8 +2723,11 @@ export default function App() {
                     </div>
                   ) : (
                     studentExams.map((exam) => (
-                      <motion.div
+                      <SwipeableRow
                         key={exam.id}
+                        onDelete={() => { setDeleteTarget({ type: 'exam', id: exam.id }); setShowDeleteConfirm(true) }}
+                      >
+                      <motion.div
                         layout
                         initial={{ opacity: 0, y: 10 }}
                         animate={{ opacity: 1, y: 0 }}
@@ -2780,20 +2775,11 @@ export default function App() {
                               >
                                 <Printer size={12} />
                               </button>
-                              <button
-                                onClick={() => {
-                                  setDeleteTarget({ type: 'exam', id: exam.id })
-                                  setShowDeleteConfirm(true)
-                                }}
-                                className="px-2 py-1 rounded-lg text-[12px]"
-                                style={{ background: '#F3F4F6', color: '#9CA3AF' }}
-                              >
-                                <Trash2 size={12} />
-                              </button>
                             </div>
                           </div>
                         </div>
                       </motion.div>
+                      </SwipeableRow>
                     ))
                   )}
                 </section>
