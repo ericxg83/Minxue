@@ -982,6 +982,17 @@ app.post('/api/questions/batch', async (req, res) => {
       delete qq._cache_ai_tags
     }
 
+    // 关键修复：PostgreSQL 的 `WHERE id IN (...)` 不保证返回顺序与输入顺序一致，
+    // 且移动端（不带 studentId，无 JOIN）与 PC 后台（带 studentId，含 LEFT JOIN）
+    // 的查询计划不同，会导致同一套卷子的题目在两端以不同顺序展现（重大 BUG）。
+    // 这里按输入 question_ids 的顺序重新排序，确保两端完全一致。
+    const orderMap = new Map(validIds.map((id, idx) => [id, idx]))
+    merged.sort((a, b) => {
+      const ia = orderMap.has(a.id) ? orderMap.get(a.id) : Number.MAX_SAFE_INTEGER
+      const ib = orderMap.has(b.id) ? orderMap.get(b.id) : Number.MAX_SAFE_INTEGER
+      return ia - ib
+    })
+
     res.json({ success: true, questions: merged })
   } catch (error) {
     console.error('批量获取题目失败:', error)
