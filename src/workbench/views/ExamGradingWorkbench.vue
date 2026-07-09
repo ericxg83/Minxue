@@ -97,27 +97,39 @@
           <div class="question-nav">
             <span class="question-number">第 {{ store.currentQuestionIndex + 1 }} / {{ store.totalQuestions }} 题</span>
             <div class="question-dots">
-              <span
-                v-for="(q, idx) in store.questions"
-                :key="q.id"
-                class="dot"
-                :class="{
-                  'dot--active': idx === store.currentQuestionIndex,
-                  'dot--correct': store.gradingResults[q.id]?.isCorrect === true,
-                  'dot--wrong': store.gradingResults[q.id]?.isCorrect === false,
-                  'dot--pending': !store.gradingResults[q.id]
-                }"
-                @click="store.currentQuestionIndex = idx"
-              />
+              <template v-for="section in questionSections" :key="section.type">
+                <span class="dot-section-label">{{ section.label }}</span>
+                <span
+                  v-for="globalIdx in section.dotIndices"
+                  :key="store.questions[globalIdx].id"
+                  class="dot"
+                  :class="{
+                    'dot--active': globalIdx === store.currentQuestionIndex,
+                    'dot--correct': store.gradingResults[store.questions[globalIdx].id]?.isCorrect === true,
+                    'dot--wrong': store.gradingResults[store.questions[globalIdx].id]?.isCorrect === false,
+                    'dot--pending': !store.gradingResults[store.questions[globalIdx].id]
+                  }"
+                  @click="store.currentQuestionIndex = globalIdx"
+                />
+              </template>
             </div>
           </div>
 
           <!-- Question Card -->
-          <el-card class="question-card" shadow="never">
+          <el-card class="question-card" :class="questionCardClass" shadow="never">
             <template #header>
               <div class="question-header">
                 <span class="question-type-tag">{{ questionTypeLabel }}</span>
                 <span class="question-subject" v-if="store.currentQuestion.subject">{{ store.currentQuestion.subject }}</span>
+                <el-tag
+                  v-if="store.gradingResults[store.currentQuestion.id]"
+                  :type="isCurrentGradedCorrect ? 'success' : 'danger'"
+                  size="small"
+                  effect="dark"
+                  class="grading-status-tag"
+                >
+                  {{ isCurrentGradedCorrect ? '已掌握' : '未掌握' }}
+                </el-tag>
               </div>
             </template>
             <div class="question-content" v-html="store.currentQuestion.content || '（题目内容为空）'"></div>
@@ -132,28 +144,31 @@
             </div>
           </el-card>
 
-          <!-- Collapsible Answer Card -->
-          <el-card class="answer-card" shadow="never" :body-style="{ padding: '12px 16px' }">
-            <div class="answer-toggle" @click="showAnswer = !showAnswer">
-              <el-icon><component :is="showAnswer ? 'ArrowDownBold' : 'ArrowRightBold'" /></el-icon>
-              <span>标准答案与解析</span>
-            </div>
-            <el-collapse-transition>
-              <div v-show="showAnswer" class="answer-body">
-                <div class="answer-row">
-                  <span class="answer-label">标准答案：</span>
-                  <span class="answer-value">{{ store.currentQuestion.answer || '无' }}</span>
+          <!-- Answer & Analysis Card (always visible) -->
+          <el-card class="answer-card" shadow="never" :body-style="{ padding: '14px 16px' }">
+            <div class="answer-body">
+              <!-- Side-by-side comparison: student vs standard -->
+              <div class="ops-compare-bar">
+                <div class="ops-compare-item">
+                  <div class="ops-cmp-label">学生答案</div>
+                  <div class="ops-cmp-value student-val">
+                    {{ store.currentQuestion.student_answer || '（未作答）' }}
+                  </div>
                 </div>
-                <div v-if="store.currentQuestion.student_answer" class="answer-row">
-                  <span class="answer-label">学生答案：</span>
-                  <span class="answer-value">{{ store.currentQuestion.student_answer }}</span>
-                </div>
-                <div class="answer-row" v-if="store.currentQuestion.analysis">
-                  <span class="answer-label">解析：</span>
-                  <span class="answer-value analysis-text">{{ store.currentQuestion.analysis }}</span>
+                <div class="ops-cmp-divider"></div>
+                <div class="ops-compare-item">
+                  <div class="ops-cmp-label">标准答案</div>
+                  <div class="ops-cmp-value correct-val">
+                    {{ store.currentQuestion.answer || '无' }}
+                  </div>
                 </div>
               </div>
-            </el-collapse-transition>
+              <!-- Analysis -->
+              <div v-if="store.currentQuestion.analysis" class="analysis-row">
+                <span class="analysis-label">解析：</span>
+                <span class="analysis-text">{{ store.currentQuestion.analysis }}</span>
+              </div>
+            </div>
           </el-card>
         </div>
       </main>
@@ -181,6 +196,9 @@
               未掌握
             </el-button>
           </div>
+          <div class="action-hints">
+            <span>Enter 掌握 · Delete 未掌握 · ← → 切换</span>
+          </div>
           <div class="nav-buttons">
             <el-button :disabled="store.currentQuestionIndex === 0" @click="store.goToPrev()">
               <el-icon><ArrowLeft /></el-icon> 上一题
@@ -204,7 +222,7 @@
 import { ref, computed, onMounted, onUnmounted } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import {
-  ArrowLeft, ArrowRight, ArrowDownBold, ArrowRightBold,
+  ArrowLeft, ArrowRight,
   Check, Close, CircleCheckFilled
 } from '@element-plus/icons-vue'
 import { useExamGradingStore } from '../stores/examGradingStore'
@@ -214,9 +232,47 @@ const route = useRoute()
 const router = useRouter()
 const store = useExamGradingStore()
 
-const showAnswer = ref(false)
 const showCompletion = ref(false)
 const currentStudentName = ref('')
+
+// 题型分组：用于导航圆点区域显示标签
+const TYPE_LABEL_MAP = {
+  choice: '选择题',
+  fill: '填空题',
+  essay: '解答题',
+  judge: '判断题',
+  multiple_choice: '多选题',
+  calculation: '计算题'
+}
+
+const questionSections = computed(() => {
+  const sections = []
+  let currentType = null
+  let currentSection = null
+  store.questions.forEach((q, idx) => {
+    if (q.question_type !== currentType) {
+      currentType = q.question_type
+      currentSection = { type: currentType, label: TYPE_LABEL_MAP[currentType] || currentType, dotIndices: [] }
+      sections.push(currentSection)
+    }
+    currentSection.dotIndices.push(idx)
+  })
+  return sections
+})
+
+const questionCardClass = computed(() => {
+  const result = store.gradingResults[store.currentQuestion.id]
+  if (!result) return {}
+  return {
+    'question-card--correct': result.isCorrect === true,
+    'question-card--wrong': result.isCorrect === false
+  }
+})
+
+// 当前题目是否已批改为掌握
+const isCurrentGradedCorrect = computed(() => {
+  return store.gradingResults[store.currentQuestion.id]?.isCorrect === true
+})
 
 // 监听完成弹窗关闭后自动回退
 const handleBack = () => {
@@ -302,10 +358,22 @@ const handleSave = async () => {
 // 键盘快捷键
 const handleKeydown = (e) => {
   if (showCompletion.value) return
-  if (e.key === 'ArrowLeft') {
-    store.goToPrev()
-  } else if (e.key === 'ArrowRight') {
-    store.goToNext()
+  switch (e.key) {
+    case 'Enter':
+      e.preventDefault()
+      handleMarkCorrect()
+      break
+    case 'Delete':
+    case 'Backspace':
+      e.preventDefault()
+      handleMarkWrong()
+      break
+    case 'ArrowLeft':
+      store.goToPrev()
+      break
+    case 'ArrowRight':
+      store.goToNext()
+      break
   }
 }
 
@@ -594,43 +662,81 @@ onMounted(() => {
   overflow: hidden;
 }
 
-.answer-toggle {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  cursor: pointer;
-  font-size: 13px;
-  color: #1677FF;
-  user-select: none;
-}
-
 .answer-body {
-  margin-top: 12px;
   display: flex;
   flex-direction: column;
-  gap: 8px;
+  gap: 10px;
 }
 
-.answer-row {
+/* ── 答案左右对照条 ── */
+.ops-compare-bar {
+  display: flex;
+  align-items: stretch;
+  background: #fff;
+  padding: 10px 14px;
+  border-radius: 6px;
+  box-shadow: 0 1px 2px rgba(0,0,0,0.04);
+}
+
+.ops-compare-item {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  min-width: 0;
+}
+
+.ops-cmp-label {
+  font-size: 11px;
+  font-weight: 600;
+  color: #909399;
+  letter-spacing: 0.5px;
+}
+
+.ops-cmp-value {
+  font-size: 15px;
+  font-weight: 600;
+  padding: 5px 8px;
+  border-radius: 4px;
+  line-height: 1.4;
+  word-break: break-all;
+}
+
+.student-val {
+  background: #f5f7fa;
+  color: #303133;
+}
+
+.correct-val {
+  color: #67c23a;
+}
+
+.ops-cmp-divider {
+  width: 1px;
+  background: #e4e7ed;
+  margin: 0 12px;
+  flex-shrink: 0;
+}
+
+/* ── 解析 ── */
+.analysis-row {
   display: flex;
   gap: 8px;
   font-size: 14px;
   line-height: 1.6;
+  padding: 0 14px;
 }
 
-.answer-label {
-  color: #86909C;
+.analysis-label {
+  color: #909399;
+  font-weight: 600;
   white-space: nowrap;
-}
-
-.answer-value {
-  color: #1D2129;
-  flex: 1;
 }
 
 .analysis-text {
   color: #4E5969;
   white-space: pre-wrap;
+  flex: 1;
 }
 
 /* Footer */
@@ -716,4 +822,41 @@ onMounted(() => {
 .stat-value--success { color: #67C23A; }
 .stat-value--primary { color: #1677FF; }
 .stat-value--danger { color: #F56C6C; }
+
+/* ── 批改后卡片边框 ── */
+.question-card--correct {
+  border: 1px solid #67C23A;
+}
+
+.question-card--wrong {
+  border: 1px solid #F56C6C;
+}
+
+/* ── 题目卡片头部批改状态标签 ── */
+.grading-status-tag {
+  margin-left: auto;
+}
+
+/* ── 导航圆点题型分组标签 ── */
+.dot-section-label {
+  font-size: 11px;
+  font-weight: 600;
+  color: #909399;
+  letter-spacing: 0.5px;
+  padding: 2px 0;
+  flex-basis: 100%;
+  margin-top: 4px;
+}
+
+.dot-section-label:first-child {
+  margin-top: 0;
+}
+
+/* ── 底部快捷键提示 ── */
+.action-hints {
+  text-align: center;
+  color: #999;
+  font-size: 12px;
+  white-space: nowrap;
+}
 </style>
