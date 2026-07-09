@@ -56,8 +56,16 @@ export const useExamGradingStore = defineStore('examGrading', () => {
     error.value = null
     try {
       const fetched = await getQuestionsByIds(currentExam.value.question_ids, studentId)
-      // 为每道题补充序号
-      questions.value = (fetched || []).map((q, idx) => ({ ...q, _index: idx }))
+      // 按题型分组排序，与打印/PDF 排版一致：选择题 → 填空题 → 解答题 → 其他
+      // 同题型内保持原始顺序
+      const TYPE_ORDER = { choice: 0, fill: 1, essay: 2, answer: 2 }
+      questions.value = (fetched || [])
+        .map((q, idx) => ({ ...q, _originalIndex: idx }))
+        .sort((a, b) => {
+          const oa = TYPE_ORDER[a.question_type] ?? 99
+          const ob = TYPE_ORDER[b.question_type] ?? 99
+          return oa !== ob ? oa - ob : a._originalIndex - b._originalIndex
+        })
     } catch (e) {
       console.error('加载题目失败:', e)
       error.value = '加载题目失败: ' + e.message
