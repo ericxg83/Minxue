@@ -32,12 +32,11 @@
             <el-icon><ArrowLeft /></el-icon>
             <span>返回</span>
           </el-button>
-          <el-divider direction="vertical" />
           <span class="exam-title">{{ store.currentExam?.name || '组卷批改' }}</span>
           <span class="student-name" v-if="currentStudentName"> · {{ currentStudentName }}</span>
         </div>
         <div class="grading-header__right">
-          <el-progress :percentage="store.progress" :stroke-width="16" :format="progressFormat" />
+          <el-progress :percentage="store.progress" :stroke-width="14" :format="progressFormat" />
         </div>
       </header>
 
@@ -80,12 +79,12 @@
         <div class="grading-content">
           <!-- Mastery Status Bar -->
           <div class="mastery-bar">
-            <span class="mastery-label">掌握度：</span>
+            <span class="mastery-label">掌握度</span>
             <div class="mastery-steps">
               <span class="mastery-step" :class="{ active: store.currentLifecycleLabel === '新错题' }">不懂</span>
-              <span class="mastery-arrow">→</span>
+              <span class="mastery-arrow"><svg width="16" height="16" viewBox="0 0 16 16" fill="none"><path d="M6 4l4 4-4 4" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg></span>
               <span class="mastery-step" :class="{ active: store.currentLifecycleLabel === '第一次重练' }">略懂</span>
-              <span class="mastery-arrow">→</span>
+              <span class="mastery-arrow"><svg width="16" height="16" viewBox="0 0 16 16" fill="none"><path d="M6 4l4 4-4 4" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg></span>
               <span class="mastery-step" :class="{ active: store.currentLifecycleLabel === '已掌握' }">完全懂</span>
             </div>
             <el-tag v-if="store.currentErrorCount > 0" type="danger" size="small" effect="plain" class="error-count-tag">
@@ -446,130 +445,172 @@ onMounted(() => {
   padding: 80px;
 }
 
-/* Header */
+/* ── Header ── */
 .grading-header {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  padding: 12px 20px;
-  background: #fff;
-  border-bottom: 1px solid #e4e7ed;
+  padding: 14px 24px;
+  background: linear-gradient(135deg, #1677FF, #4096FF);
+  box-shadow: 0 2px 12px rgba(22, 119, 255, 0.3);
   flex-shrink: 0;
+  z-index: 10;
 }
 
 .grading-header__left {
   display: flex;
   align-items: center;
-  gap: 8px;
+  gap: 10px;
 }
 
 .back-btn {
-  font-size: 14px;
+  font-size: 13px;
+  color: rgba(255,255,255,0.9) !important;
+  padding: 4px 10px !important;
+  border-radius: 8px !important;
+  background: rgba(255,255,255,0.15) !important;
+  transition: all 0.2s;
+}
+.back-btn:hover {
+  background: rgba(255,255,255,0.25) !important;
+}
+.back-btn .el-icon {
+  color: rgba(255,255,255,0.9) !important;
 }
 
 .exam-title {
   font-size: 15px;
   font-weight: 600;
-  color: #1D2129;
+  color: #fff;
 }
 
 .student-name {
-  font-size: 14px;
-  color: #86909C;
+  font-size: 13px;
+  color: rgba(255,255,255,0.75);
 }
 
 .grading-header__right {
-  width: 240px;
+  width: 220px;
+}
+.grading-header__right :deep(.el-progress-bar__outer) {
+  background: rgba(255,255,255,0.25) !important;
+}
+.grading-header__right :deep(.el-progress-bar__inner) {
+  background: #fff !important;
+}
+.grading-header__right :deep(.el-progress__text) {
+  color: #fff !important;
+  font-size: 13px !important;
+  font-weight: 500;
 }
 
-/* Main Content */
+/* ── Main Content ── */
 .grading-main {
   flex: 1;
   overflow-y: auto;
-  padding: 16px 20px;
+  padding: 20px 24px;
 }
+.grading-main::-webkit-scrollbar { width: 6px; }
+.grading-main::-webkit-scrollbar-track { background: transparent; }
+.grading-main::-webkit-scrollbar-thumb { background: #E5E6EB; border-radius: 3px; }
+.grading-main::-webkit-scrollbar-thumb:hover { background: #C9CDD4; }
 
 .grading-content {
-  max-width: 800px;
+  max-width: 820px;
   margin: 0 auto;
   display: flex;
   flex-direction: column;
-  gap: 12px;
+  gap: 16px;
 }
 
-/* Mastery Bar */
+/* ── Mastery Bar ── */
 .mastery-bar {
   display: flex;
   align-items: center;
-  gap: 12px;
-  padding: 10px 16px;
+  gap: 14px;
+  padding: 12px 18px;
   background: #fff;
-  border-radius: 8px;
-  border: 1px solid #e4e7ed;
+  border-radius: 12px;
+  box-shadow: 0 2px 8px rgba(0,0,0,0.04);
 }
 
 .mastery-label {
-  font-size: 13px;
-  color: #86909C;
+  font-size: 12px;
+  font-weight: 600;
+  color: #909399;
+  letter-spacing: 0.5px;
   white-space: nowrap;
+  padding: 2px 10px;
+  border-radius: 6px;
+  background: #f5f7fa;
 }
 
 .mastery-steps {
   display: flex;
   align-items: center;
-  gap: 6px;
+  gap: 4px;
 }
 
 .mastery-step {
-  font-size: 13px;
+  font-size: 12px;
+  font-weight: 500;
   color: #c0c4cc;
-  padding: 2px 8px;
-  border-radius: 4px;
+  padding: 3px 10px;
+  border-radius: 6px;
   background: #f5f7fa;
-  transition: all 0.3s;
+  transition: all 0.3s ease;
 }
 
 .mastery-step.active {
   color: #1677FF;
   background: #E8F3FF;
-  font-weight: 500;
+  font-weight: 600;
+  box-shadow: 0 1px 4px rgba(22,119,255,0.15);
 }
 
 .mastery-arrow {
   color: #dcdfe6;
-  font-size: 12px;
+  display: flex;
+  align-items: center;
 }
 
 .error-count-tag {
   margin-left: auto;
 }
 
-/* Question Navigation */
+/* ── Question Navigation ── */
 .question-nav {
   display: flex;
   align-items: center;
-  gap: 12px;
+  gap: 14px;
 }
 
 .question-number {
-  font-size: 13px;
+  font-size: 12px;
+  font-weight: 600;
   color: #86909C;
   white-space: nowrap;
+  background: #fff;
+  padding: 6px 14px;
+  border-radius: 8px;
+  box-shadow: 0 1px 4px rgba(0,0,0,0.04);
 }
 
 .question-dots {
   display: flex;
   gap: 6px;
   flex-wrap: wrap;
+  align-items: center;
 }
 
 .dot {
-  width: 10px;
-  height: 10px;
+  width: 12px;
+  height: 12px;
   border-radius: 50%;
   cursor: pointer;
-  transition: all 0.2s;
+  transition: all 0.25s ease;
   border: 2px solid transparent;
+  position: relative;
 }
 
 .dot--pending {
@@ -578,24 +619,54 @@ onMounted(() => {
 
 .dot--correct {
   background: #67C23A;
+  box-shadow: 0 1px 4px rgba(103, 194, 58, 0.3);
 }
 
 .dot--wrong {
   background: #F56C6C;
+  box-shadow: 0 1px 4px rgba(245, 108, 108, 0.3);
 }
 
 .dot--active {
   border-color: #1677FF;
   transform: scale(1.3);
+  box-shadow: 0 0 0 3px rgba(22, 119, 255, 0.15);
 }
 
-/* Question Card */
+.dot-section-label {
+  font-size: 11px;
+  font-weight: 600;
+  color: #909399;
+  letter-spacing: 0.5px;
+  padding: 2px 6px 2px 0;
+  flex-basis: 100%;
+  margin-top: 4px;
+}
+
+.dot-section-label:first-child {
+  margin-top: 0;
+}
+
+/* ── Question Card ── */
 .question-card {
-  border-radius: 8px;
+  border-radius: 12px;
+  box-shadow: 0 2px 8px rgba(0,0,0,0.04);
+  border: 1px solid #e4e7ed;
+  transition: all 0.3s ease;
+}
+
+.question-card--correct {
+  border-color: #67C23A;
+  box-shadow: 0 2px 12px rgba(103, 194, 58, 0.12);
+}
+
+.question-card--wrong {
+  border-color: #F56C6C;
+  box-shadow: 0 2px 12px rgba(245, 108, 108, 0.12);
 }
 
 .question-card :deep(.el-card__header) {
-  padding: 10px 16px;
+  padding: 12px 18px;
   border-bottom: 1px solid #f2f3f5;
 }
 
@@ -607,11 +678,13 @@ onMounted(() => {
 
 .question-type-tag {
   display: inline-block;
-  padding: 1px 8px;
+  padding: 2px 10px;
   font-size: 11px;
-  border-radius: 4px;
-  background: #E8F3FF;
+  font-weight: 600;
+  border-radius: 6px;
+  background: linear-gradient(135deg, #E8F3FF, #F0F5FF);
   color: #1677FF;
+  letter-spacing: 0.3px;
 }
 
 .question-subject {
@@ -619,11 +692,16 @@ onMounted(() => {
   color: #86909C;
 }
 
+.grading-status-tag {
+  margin-left: auto;
+}
+
 .question-content {
   font-size: 15px;
-  line-height: 1.7;
+  line-height: 1.8;
   color: #1D2129;
   white-space: pre-wrap;
+  padding: 4px 0;
 }
 
 .question-image {
@@ -633,7 +711,7 @@ onMounted(() => {
 
 .question-image .el-image {
   max-height: 300px;
-  border-radius: 6px;
+  border-radius: 8px;
 }
 
 .question-options {
@@ -641,6 +719,9 @@ onMounted(() => {
   display: flex;
   flex-direction: column;
   gap: 6px;
+  padding: 8px 12px;
+  background: #fafafa;
+  border-radius: 8px;
 }
 
 .option-item {
@@ -654,36 +735,45 @@ onMounted(() => {
 .option-label {
   font-weight: 600;
   color: #1D2129;
+  min-width: 20px;
 }
 
-/* Answer Card */
+/* ── Answer Card ── */
 .answer-card {
-  border-radius: 8px;
+  border-radius: 12px;
+  box-shadow: 0 2px 8px rgba(0,0,0,0.04);
   overflow: hidden;
 }
 
 .answer-body {
   display: flex;
   flex-direction: column;
-  gap: 10px;
+  gap: 12px;
 }
 
-/* ── 答案左右对照条 ── */
+/* Answer comparison bar */
 .ops-compare-bar {
   display: flex;
   align-items: stretch;
+  gap: 0;
   background: #fff;
-  padding: 10px 14px;
-  border-radius: 6px;
-  box-shadow: 0 1px 2px rgba(0,0,0,0.04);
+  padding: 0;
+  border-radius: 8px;
+  overflow: hidden;
+  border: 1px solid #f0f0f0;
 }
 
 .ops-compare-item {
   flex: 1;
   display: flex;
   flex-direction: column;
-  gap: 4px;
+  gap: 6px;
+  padding: 12px 14px;
   min-width: 0;
+}
+
+.ops-compare-item:first-child {
+  background: #fafafa;
 }
 
 .ops-cmp-label {
@@ -691,40 +781,43 @@ onMounted(() => {
   font-weight: 600;
   color: #909399;
   letter-spacing: 0.5px;
+  text-transform: uppercase;
 }
 
 .ops-cmp-value {
   font-size: 15px;
   font-weight: 600;
-  padding: 5px 8px;
-  border-radius: 4px;
-  line-height: 1.4;
+  padding: 6px 10px;
+  border-radius: 6px;
+  line-height: 1.5;
   word-break: break-all;
 }
 
 .student-val {
-  background: #f5f7fa;
+  background: #fff;
   color: #303133;
+  border: 1px solid #e8e8e8;
 }
 
 .correct-val {
-  color: #67c23a;
+  color: #52C41A;
+  background: #f6ffed;
+  border: 1px solid #b7eb8f;
 }
 
 .ops-cmp-divider {
   width: 1px;
   background: #e4e7ed;
-  margin: 0 12px;
   flex-shrink: 0;
 }
 
-/* ── 解析 ── */
+/* Analysis */
 .analysis-row {
   display: flex;
   gap: 8px;
   font-size: 14px;
-  line-height: 1.6;
-  padding: 0 14px;
+  line-height: 1.7;
+  padding: 0 14px 2px;
 }
 
 .analysis-label {
@@ -737,18 +830,21 @@ onMounted(() => {
   color: #4E5969;
   white-space: pre-wrap;
   flex: 1;
+  line-height: 1.7;
 }
 
-/* Footer */
+/* ── Footer ── */
 .grading-footer {
   flex-shrink: 0;
   background: #fff;
-  border-top: 1px solid #e4e7ed;
-  padding: 12px 20px;
+  border-top: none;
+  box-shadow: 0 -2px 12px rgba(0,0,0,0.06);
+  padding: 14px 24px;
+  z-index: 10;
 }
 
 .footer-inner {
-  max-width: 800px;
+  max-width: 820px;
   margin: 0 auto;
   display: flex;
   align-items: center;
@@ -758,11 +854,57 @@ onMounted(() => {
 
 .grade-buttons {
   display: flex;
-  gap: 8px;
+  gap: 10px;
 }
 
-.grade-buttons .el-button {
-  min-width: 100px;
+.grade-buttons .el-button.el-button--success {
+  background: linear-gradient(135deg, #52C41A, #73D13D);
+  border: none;
+  min-width: 110px;
+  font-weight: 600;
+  border-radius: 10px;
+  box-shadow: 0 2px 8px rgba(82, 196, 26, 0.3);
+  transition: all 0.25s;
+}
+.grade-buttons .el-button.el-button--success:hover {
+  box-shadow: 0 4px 14px rgba(82, 196, 26, 0.4);
+  transform: translateY(-1px);
+}
+.grade-buttons .el-button.el-button--success:active {
+  transform: translateY(0);
+}
+.grade-buttons .el-button.el-button--success.is-disabled {
+  background: #e8e8e8 !important;
+  box-shadow: none !important;
+}
+
+.grade-buttons .el-button.el-button--danger {
+  background: linear-gradient(135deg, #F56C6C, #FF7875);
+  border: none;
+  min-width: 110px;
+  font-weight: 600;
+  border-radius: 10px;
+  box-shadow: 0 2px 8px rgba(245, 108, 108, 0.3);
+  transition: all 0.25s;
+}
+.grade-buttons .el-button.el-button--danger:hover {
+  box-shadow: 0 4px 14px rgba(245, 108, 108, 0.4);
+  transform: translateY(-1px);
+}
+.grade-buttons .el-button.el-button--danger:active {
+  transform: translateY(0);
+}
+.grade-buttons .el-button.el-button--danger.is-disabled {
+  background: #e8e8e8 !important;
+  box-shadow: none !important;
+}
+
+.action-hints {
+  text-align: center;
+  color: #bfc4cc;
+  font-size: 12px;
+  white-space: nowrap;
+  letter-spacing: 0.3px;
 }
 
 .nav-buttons {
@@ -770,18 +912,31 @@ onMounted(() => {
   gap: 8px;
 }
 
+.nav-buttons .el-button {
+  border-radius: 8px;
+  font-weight: 500;
+}
+
 .complete-area {
   min-width: 120px;
   text-align: right;
 }
 
-/* Completion Dialog */
+.complete-area .el-button.el-button--primary {
+  border-radius: 10px;
+  font-weight: 600;
+  background: linear-gradient(135deg, #1677FF, #4096FF);
+  border: none;
+  box-shadow: 0 2px 8px rgba(22, 119, 255, 0.3);
+}
+
+/* ── Completion Dialog ── */
 .completion-content {
   display: flex;
   flex-direction: column;
   align-items: center;
   gap: 20px;
-  padding: 20px 0;
+  padding: 24px 0 8px;
 }
 
 .completion-icon {
@@ -803,8 +958,8 @@ onMounted(() => {
 .stat-row {
   display: flex;
   justify-content: space-between;
-  padding: 6px 16px;
-  border-radius: 6px;
+  padding: 8px 16px;
+  border-radius: 8px;
   background: #f5f7fa;
 }
 
@@ -822,41 +977,4 @@ onMounted(() => {
 .stat-value--success { color: #67C23A; }
 .stat-value--primary { color: #1677FF; }
 .stat-value--danger { color: #F56C6C; }
-
-/* ── 批改后卡片边框 ── */
-.question-card--correct {
-  border: 1px solid #67C23A;
-}
-
-.question-card--wrong {
-  border: 1px solid #F56C6C;
-}
-
-/* ── 题目卡片头部批改状态标签 ── */
-.grading-status-tag {
-  margin-left: auto;
-}
-
-/* ── 导航圆点题型分组标签 ── */
-.dot-section-label {
-  font-size: 11px;
-  font-weight: 600;
-  color: #909399;
-  letter-spacing: 0.5px;
-  padding: 2px 0;
-  flex-basis: 100%;
-  margin-top: 4px;
-}
-
-.dot-section-label:first-child {
-  margin-top: 0;
-}
-
-/* ── 底部快捷键提示 ── */
-.action-hints {
-  text-align: center;
-  color: #999;
-  font-size: 12px;
-  white-space: nowrap;
-}
 </style>
