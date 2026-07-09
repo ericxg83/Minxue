@@ -485,7 +485,12 @@ export const getGeneratedExamsByStudent = async (studentId, useCache = true) => 
     status: exam.status === 'done' || exam.status === 'graded' ? 'graded' : 'ungraded',
     created_at: exam.created_at,
     graded_at: null,
-    source: 'generated'
+    source: 'generated',
+    correct_count: exam.correct_count || 0,
+    wrong_count: exam.wrong_count || 0,
+    total_count: exam.total_count || 0,
+    not_answered_count: exam.not_answered_count || 0,
+    excluded_count: exam.excluded_count || 0
   }))
 
   if (exams.length) writeCache(cacheKey, result)
