@@ -13,7 +13,7 @@ import {
   Bell,
   Plus,
   Minus,
-  QrCode,
+  ScanLine,
   Printer,
   X,
   Trash2,
@@ -24,14 +24,12 @@ import {
   Eye,
   Tag,
   AlertCircle,
-  Search,
-  Filter,
   Download
 } from 'lucide-react'
 import { motion, AnimatePresence } from 'motion/react'
 import { QRCodeSVG } from 'qrcode.react'
 import { useUIStore, useStudentStore, useTaskStore, useWrongQuestionStore, useExamStore } from './store'
-import { getStudents, getTasksByStudent, getQuestionsByTask, addWrongQuestions, getWrongQuestionsByStudent, getExamsByStudent, getGeneratedExamsByStudent, createTask, updateTaskStatus, uploadImage, updateQuestion, updateQuestionTags, invalidateCache, createStudent, updateWrongQuestionStatus, getQuestionsByIds, deleteTask, deleteGeneratedExam, deleteWrongQuestion, getTaskById, recalculateTaskStats, clearStudentCaches } from './services/apiService'
+import { getStudents, getTasksByStudent, getQuestionsByTask, addWrongQuestions, getWrongQuestionsByStudent, getExamsByStudent, getGeneratedExamsByStudent, createTask, updateTaskStatus, uploadImage, updateQuestion, updateQuestionTags, invalidateCache, createStudent, updateWrongQuestionStatus, getQuestionsByIds, deleteTask, deleteGeneratedExam, deleteWrongQuestion, getTaskById, recalculateTaskStats, clearStudentCaches, peekCache } from './services/apiService'
 import { taskService } from './services/taskService'
 import { recognizeQuestions, compressImage, saveRecognitionResult } from './services/aiService'
 import { processMultiPagePaperLayout } from './services/paperBankAIService'
@@ -166,9 +164,6 @@ export default function App() {
   const [showAddStudent, setShowAddStudent] = useState(false)
   const [showImagePreview, setShowImagePreview] = useState(false)
   const [previewImageUrl, setPreviewImageUrl] = useState(null)
-  const [showSearch, setShowSearch] = useState(false)
-  const [searchKeyword, setSearchKeyword] = useState('')
-  const [showFilterMenu, setShowFilterMenu] = useState(false)
   const [refreshing, setRefreshing] = useState(false)
   const [showTagManager, setShowTagManager] = useState(false)
   const [managingTagsQuestion, setManagingTagsQuestion] = useState(null)
@@ -378,7 +373,7 @@ export default function App() {
   // Load exams
   useEffect(() => {
     if (currentStudent && currentPage === 'exam') {
-      loadGeneratedExams(false)
+      loadGeneratedExams(false, true) // 首次进入：先展示缓存再后台刷新
       const interval = setInterval(() => loadGeneratedExams(false), 3000)
       return () => clearInterval(interval)
     }
@@ -402,18 +397,23 @@ export default function App() {
     }
   }, [reprintExam])
 
-  // Processing: Load tasks
-  const loadTasks = async () => {
+  // Processing: Load tasks（秒开策略：先展示本地缓存，再后台刷新）
+  const loadTasks = async (showSkeleton = true) => {
     if (!currentStudent) return
-    setIsLoadingTasks(true)
+    const studentId = currentStudent.id
+    if (USE_MOCK_DATA) {
+      setTasks(mockTasks.filter(t => t.student_id === studentId))
+      return
+    }
+    // 1) 无视 TTL 先读缓存立即上屏（避免白屏等待网络）
+    const cached = peekCache(`tasks_cache_${studentId}`)
+    const hasCache = Array.isArray(cached) && cached.length > 0
+    if (hasCache) setTasks(cached)
+    if (showSkeleton && !hasCache) setIsLoadingTasks(true)
+    // 2) 后台拉取最新数据覆盖
     try {
-      if (USE_MOCK_DATA) {
-        const filteredMockTasks = mockTasks.filter(t => t.student_id === currentStudent.id)
-        setTasks(filteredMockTasks)
-        return
-      }
-      const taskList = await getTasksByStudent(currentStudent.id, false)
-      setTasks(Array.isArray(taskList) ? taskList : [])
+      const taskList = await getTasksByStudent(studentId, false)
+      if (Array.isArray(taskList)) setTasks(taskList)
     } catch (error) {
       console.error('加载任务失败:', error)
       // Don't clear tasks on failure — keep showing existing data
@@ -422,18 +422,13 @@ export default function App() {
     }
   }
 
-  // WrongBook: Load data
+  // WrongBook: Load data（秒开策略：先展示本地缓存，再后台刷新）
   const loadWrongBookData = async () => {
     if (!currentStudent) return
-    try {
-      if (USE_MOCK_DATA) {
-        const filteredMock = mockWrongQuestions.filter(wq => wq.student_id === currentStudent.id)
-        setWrongQuestions(filteredMock)
-        return
-      }
-      const data = await getWrongQuestionsByStudent(currentStudent.id, false)
-      const rawList = Array.isArray(data) ? data : []
-      // 同一题目内容去重：保留上传时间最晚的一条
+    const studentId = currentStudent.id
+
+    // 同一题目内容去重：保留上传时间最晚的一条
+    const dedupByContent = (rawList) => {
       const contentDedupMap = new Map()
       for (const wq of rawList) {
         const question = wq.question || wq
@@ -446,31 +441,52 @@ export default function App() {
           contentDedupMap.set(content, wq)
         }
       }
-      const deduped = Array.from(contentDedupMap.values())
+      return Array.from(contentDedupMap.values())
+    }
+
+    if (USE_MOCK_DATA) {
+      setWrongQuestions(mockWrongQuestions.filter(wq => wq.student_id === studentId))
+      return
+    }
+
+    // 1) 先用缓存立即上屏
+    const cached = peekCache(`wrong_questions_cache_${studentId}`)
+    if (Array.isArray(cached) && cached.length > 0) {
+      setWrongQuestions(dedupByContent(cached))
+    }
+    // 2) 后台拉取最新数据覆盖
+    try {
+      const data = await getWrongQuestionsByStudent(studentId, false)
+      const rawList = Array.isArray(data) ? data : []
+      const deduped = dedupByContent(rawList)
       if (deduped.length < rawList.length) {
         console.log(`错题本去重: ${rawList.length} → ${deduped.length} 条`)
       }
       setWrongQuestions(deduped)
     } catch (error) {
       console.error('加载错题失败:', error)
-      setWrongQuestions([])
+      // 网络失败时保留已展示的缓存数据
     }
   }
 
-  // Exam: Load generated exams
-  const loadGeneratedExams = async (useCache = false) => {
+  // Exam: Load generated exams（秒开策略：先展示本地缓存，再后台刷新）
+  const loadGeneratedExams = async (useCache = false, showCachedFirst = false) => {
     if (!currentStudent) return
+    const studentId = currentStudent.id
+    if (USE_MOCK_DATA) {
+      setGeneratedExams(mockGeneratedExams.filter(e => e.student_id === studentId))
+      return
+    }
+    if (showCachedFirst) {
+      const cached = peekCache(`generated_exams_cache_${studentId}`)
+      if (Array.isArray(cached) && cached.length > 0) setGeneratedExams(cached)
+    }
     try {
-      if (USE_MOCK_DATA) {
-        const studentMockExams = mockGeneratedExams.filter(e => e.student_id === currentStudent.id)
-        setGeneratedExams(studentMockExams)
-        return
-      }
-      const examList = await getGeneratedExamsByStudent(currentStudent.id, useCache)
-      setGeneratedExams(Array.isArray(examList) ? examList : [])
+      const examList = await getGeneratedExamsByStudent(studentId, useCache)
+      if (Array.isArray(examList)) setGeneratedExams(examList)
     } catch (error) {
       console.error('加载试卷失败:', error)
-      setGeneratedExams([])
+      // 网络失败时保留已展示的数据
     }
   }
 
@@ -726,19 +742,6 @@ export default function App() {
     if (processingFilter === 'done') return isTaskCompleted(t)
     if (processingFilter === 'pending') return !isTaskCompleted(t)
     return t.status === processingFilter
-  }).filter(t => {
-    if (!searchKeyword) return true
-    const kw = searchKeyword.toLowerCase()
-    if (t.original_name?.toLowerCase().includes(kw)) return true
-    const examQuestions = t.result?.questions
-    if (Array.isArray(examQuestions)) {
-      return examQuestions.some(q => q.content?.toLowerCase().includes(kw))
-    }
-    // Search through question list if available
-    if (t.question_list && Array.isArray(t.question_list)) {
-      return t.question_list.some(q => q.content?.toLowerCase().includes(kw))
-    }
-    return false
   })
 
   // Filter wrong questions
@@ -798,21 +801,11 @@ export default function App() {
         : (question.ai_tags || [])
       if (!selectedTags.some(t => qTags.includes(t))) return false
     }
-    if (searchKeyword) {
-      const kw = searchKeyword.toLowerCase()
-      const question = wq.question || wq
-      const content = question.content || ''
-      if (!content.toLowerCase().includes(kw)) return false
-    }
     return true
   })
 
   // Filter generated exams
-  const studentExams = (Array.isArray(generatedExams) ? generatedExams : []).filter(e => {
-    if (e.student_id !== currentStudent?.id) return false
-    if (!searchKeyword) return true
-    return e.name?.toLowerCase().includes(searchKeyword.toLowerCase())
-  })
+  const studentExams = (Array.isArray(generatedExams) ? generatedExams : []).filter(e => e.student_id === currentStudent?.id)
 
   // Add student
   const handleAddStudent = async (studentData) => {
@@ -1982,84 +1975,11 @@ export default function App() {
                 style={{ background: 'var(--bg-secondary)' }}
                 title="扫码批改"
               >
-                <QrCode size={16} style={{ color: 'var(--text-secondary)' }} />
-              </button>
-              <button
-                onClick={() => { setShowSearch(s => !s); setShowFilterMenu(false) }}
-                className="w-8 h-8 rounded-xl flex items-center justify-center transition-colors"
-                style={{ background: showSearch ? 'var(--primary-soft)' : 'var(--bg-secondary)' }}
-                title="搜索"
-              >
-                <Search size={16} style={{ color: showSearch ? 'var(--primary)' : 'var(--text-secondary)' }} />
-              </button>
-              <button
-                onClick={() => { setShowFilterMenu(s => !s); setShowSearch(false) }}
-                className="w-8 h-8 rounded-xl flex items-center justify-center transition-colors"
-                style={{
-                  background: showFilterMenu ? 'var(--primary-soft)' : 'var(--bg-secondary)',
-                }}
-                title="筛选"
-              >
-                <Filter size={16} style={{ color: showFilterMenu ? 'var(--primary)' : 'var(--text-secondary)' }} />
+                <ScanLine size={16} style={{ color: 'var(--text-secondary)' }} />
               </button>
             </div>
           </div>
         </header>
-
-        {/* Search Bar — Claude style */}
-        {showSearch && (
-          <div className="sticky top-12 z-40 px-4 py-2.5 border-b animate-fade-in" style={{ background: 'var(--bg-card)', borderColor: 'var(--border)' }}>
-            <div className="relative">
-              <Search size={14} className="absolute left-3 top-1/2 -translate-y-1/2" style={{ color: 'var(--text-tertiary)' }} />
-              <input
-                type="text"
-                value={searchKeyword}
-                onChange={(e) => setSearchKeyword(e.target.value)}
-                placeholder="搜索题目内容..."
-                className="w-full h-9 pl-9 pr-8 rounded-xl text-[13px] border-0 outline-none"
-                style={{ background: 'var(--bg-mist)' }}
-                autoFocus
-              />
-              {searchKeyword && (
-                <button
-                  onClick={() => setSearchKeyword('')}
-                  className="absolute right-2 top-1/2 -translate-y-1/2"
-                >
-                  <X size={14} style={{ color: 'var(--text-tertiary)' }} />
-                </button>
-              )}
-            </div>
-          </div>
-        )}
-
-        {/* Filter Menu — Claude style */}
-        {showFilterMenu && (
-          <div className="sticky top-12 z-40 px-4 py-3 border-b animate-fade-in" style={{ background: 'var(--bg-card)', borderColor: 'var(--border)' }}>
-            <div className="flex gap-2 flex-wrap">
-              {currentPage === 'processing' && ['all', 'done', 'pending'].map(status => (
-                <button
-                  key={status}
-                  onClick={() => setProcessingFilter(status)}
-                  className={`filter-chip ${processingFilter === status ? 'active' : 'inactive'}`}
-                >
-                  {status === 'all' ? '全部' : status === 'done' ? '已批改' : '未批改'}
-                </button>
-              ))}
-              {currentPage === 'wrongbook' && ['all', 'new', 'review', 'mastered'].map(status => (
-                <button
-                  key={status}
-                  onClick={() => setBankFilter(status)}
-                  className={`filter-chip ${bankFilter === status ? 'active' : 'inactive'}`}
-                >
-                  {status === 'all' ? '全部' : status === 'new' ? '不懂' : status === 'review' ? '略懂' : '完全懂'}
-                </button>
-              ))}
-              {currentPage === 'exam' && (
-                <span style={{ fontSize: '12px', color: 'var(--text-tertiary)', padding: '6px 0' }}>使用搜索查找组卷记录</span>
-              )}
-            </div>
-          </div>
-        )}
 
         {/* Main Content */}
         <main className="max-w-lg mx-auto" style={{ paddingBottom: '80px' }}>

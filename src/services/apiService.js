@@ -44,6 +44,15 @@ export const clearCache = (key) => {
   } catch (e) {}
 }
 
+// 无视 TTL 直接读取缓存（用于「先展示旧数据、后台再刷新」的秒开策略）
+export const peekCache = (key) => {
+  try {
+    const cached = localStorage.getItem(key)
+    if (cached) return JSON.parse(cached)
+  } catch (e) {}
+  return null
+}
+
 // 自动检测缓存版本，版本不匹配时清理所有旧缓存
 const checkCacheVersion = () => {
   const stored = localStorage.getItem('cache_version')
