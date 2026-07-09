@@ -29,7 +29,7 @@ import {
 import { motion, AnimatePresence } from 'motion/react'
 import { QRCodeSVG } from 'qrcode.react'
 import { useUIStore, useStudentStore, useTaskStore, useWrongQuestionStore, useExamStore } from './store'
-import { getStudents, getTasksByStudent, getQuestionsByTask, addWrongQuestions, getWrongQuestionsByStudent, getExamsByStudent, getGeneratedExamsByStudent, createTask, updateTaskStatus, uploadImage, updateQuestion, updateQuestionTags, invalidateCache, createStudent, updateWrongQuestionStatus, getQuestionsByIds, deleteTask, deleteGeneratedExam, deleteWrongQuestion, getTaskById, recalculateTaskStats, clearStudentCaches, peekCache } from './services/apiService'
+import { getStudents, getTasksByStudent, getQuestionsByTask, addWrongQuestions, getWrongQuestionsByStudent, getExamsByStudent, getGeneratedExamsByStudent, getGeneratedExamById, createTask, updateTaskStatus, uploadImage, updateQuestion, updateQuestionTags, invalidateCache, createStudent, updateWrongQuestionStatus, getQuestionsByIds, deleteTask, deleteGeneratedExam, deleteWrongQuestion, getTaskById, recalculateTaskStats, clearStudentCaches, peekCache } from './services/apiService'
 import { taskService } from './services/taskService'
 import { recognizeQuestions, compressImage, saveRecognitionResult } from './services/aiService'
 import { processMultiPagePaperLayout } from './services/paperBankAIService'
@@ -379,12 +379,16 @@ export default function App() {
     }
   }, [currentStudent?.id, currentPage])
 
-  // Load questions for reprint
+  // Load questions for reprint — 始终从服务端获取最新 question_ids，防止缓存/列表数据过期
   useEffect(() => {
     if (reprintExam && reprintExam.question_ids?.length > 0) {
       const loadReprintQuestions = async () => {
         try {
-          const questions = await getQuestionsByIds(reprintExam.question_ids)
+          // 1) 用组卷 ID 从服务端拉取最新记录（确保 question_ids 是最新的）
+          const freshExam = await getGeneratedExamById(reprintExam.id).catch(() => null)
+          const questionIds = freshExam?.question_ids || reprintExam.question_ids
+          // 2) 按最新的 question_ids 加载题目（不加 studentId，与移动端其他接口一致）
+          const questions = await getQuestionsByIds(questionIds)
           setReprintQuestions(questions || [])
         } catch (error) {
           console.error('加载题目失败:', error)

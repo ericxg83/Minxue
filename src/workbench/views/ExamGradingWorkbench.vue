@@ -208,7 +208,7 @@ import {
   Check, Close, CircleCheckFilled
 } from '@element-plus/icons-vue'
 import { useExamGradingStore } from '../stores/examGradingStore'
-import { getStudents } from '../../services/apiService'
+import { getStudents, getGeneratedExamById } from '../../services/apiService'
 
 const route = useRoute()
 const router = useRouter()
@@ -328,28 +328,20 @@ onMounted(async () => {
   }
 
   // 加载试卷数据
-  // 从缓存或重新获取试卷详情
-  const examsCacheKey = `generated_exams_cache_${studentId}`
-  const cached = localStorage.getItem(examsCacheKey)
-  let exam = null
-  if (cached) {
-    const exams = JSON.parse(cached)
-    exam = exams.find(e => e.id === examId)
-  }
-
-  if (exam) {
-    store.loadExam(exam)
-  } else {
-    // 如果缓存中没有，从缓存读取时只存了精简信息，尝试从 API 获取
-    try {
-      const { getGeneratedExamsByStudent } = await import('../../services/apiService')
-      const exams = await getGeneratedExamsByStudent(studentId, false)
-      exam = exams.find(e => e.id === examId)
-      if (exam) store.loadExam(exam)
-    } catch (e) {
-      store.error = '加载试卷信息失败'
+  // 始终从服务端 GET /generated-exams/:id 拉取最新 question_ids，
+  // 避免 localStorage 缓存或列表快照中的过期数据 BUG
+  try {
+    const freshExam = await getGeneratedExamById(examId)
+    if (freshExam) {
+      store.loadExam(freshExam)
+    } else {
+      store.error = '试卷不存在'
       return
     }
+  } catch (e) {
+    console.error('加载试卷信息失败:', e)
+    store.error = '加载试卷信息失败'
+    return
   }
 
   await store.loadQuestions(studentId)
