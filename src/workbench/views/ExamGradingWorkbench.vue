@@ -96,21 +96,18 @@
           <div class="question-nav">
             <span class="question-number">第 {{ store.currentQuestionIndex + 1 }} / {{ store.totalQuestions }} 题</span>
             <div class="question-dots">
-              <template v-for="section in questionSections" :key="section.type">
-                <span class="dot-section-label">{{ section.label }}</span>
-                <span
-                  v-for="globalIdx in section.dotIndices"
-                  :key="store.questions[globalIdx].id"
-                  class="dot"
-                  :class="{
-                    'dot--active': globalIdx === store.currentQuestionIndex,
-                    'dot--correct': store.gradingResults[store.questions[globalIdx].id]?.isCorrect === true,
-                    'dot--wrong': store.gradingResults[store.questions[globalIdx].id]?.isCorrect === false,
-                    'dot--pending': !store.gradingResults[store.questions[globalIdx].id]
-                  }"
-                  @click="store.currentQuestionIndex = globalIdx"
-                />
-              </template>
+              <span
+                v-for="(q, idx) in store.questions"
+                :key="q.id"
+                class="dot"
+                :class="{
+                  'dot--active': idx === store.currentQuestionIndex,
+                  'dot--correct': store.gradingResults[q.id]?.isCorrect === true,
+                  'dot--wrong': store.gradingResults[q.id]?.isCorrect === false,
+                  'dot--pending': !store.gradingResults[q.id]
+                }"
+                @click="store.currentQuestionIndex = idx"
+              />
             </div>
           </div>
 
@@ -233,31 +230,6 @@ const store = useExamGradingStore()
 
 const showCompletion = ref(false)
 const currentStudentName = ref('')
-
-// 题型分组：用于导航圆点区域显示标签
-const TYPE_LABEL_MAP = {
-  choice: '选择题',
-  fill: '填空题',
-  essay: '解答题',
-  judge: '判断题',
-  multiple_choice: '多选题',
-  calculation: '计算题'
-}
-
-const questionSections = computed(() => {
-  const sections = []
-  let currentType = null
-  let currentSection = null
-  store.questions.forEach((q, idx) => {
-    if (q.question_type !== currentType) {
-      currentType = q.question_type
-      currentSection = { type: currentType, label: TYPE_LABEL_MAP[currentType] || currentType, dotIndices: [] }
-      sections.push(currentSection)
-    }
-    currentSection.dotIndices.push(idx)
-  })
-  return sections
-})
 
 const questionCardClass = computed(() => {
   const result = store.gradingResults[store.currentQuestion.id]
@@ -599,8 +571,14 @@ onMounted(() => {
 .question-dots {
   display: flex;
   gap: 6px;
-  flex-wrap: wrap;
   align-items: center;
+  overflow-x: auto;
+  flex: 1;
+  padding: 4px 0;
+}
+
+.question-dots::-webkit-scrollbar {
+  height: 0;
 }
 
 .dot {
@@ -610,7 +588,7 @@ onMounted(() => {
   cursor: pointer;
   transition: all 0.25s ease;
   border: 2px solid transparent;
-  position: relative;
+  flex-shrink: 0;
 }
 
 .dot--pending {
@@ -631,20 +609,6 @@ onMounted(() => {
   border-color: #1677FF;
   transform: scale(1.3);
   box-shadow: 0 0 0 3px rgba(22, 119, 255, 0.15);
-}
-
-.dot-section-label {
-  font-size: 11px;
-  font-weight: 600;
-  color: #909399;
-  letter-spacing: 0.5px;
-  padding: 2px 6px 2px 0;
-  flex-basis: 100%;
-  margin-top: 4px;
-}
-
-.dot-section-label:first-child {
-  margin-top: 0;
 }
 
 /* ── Question Card ── */
