@@ -79,7 +79,7 @@ export const getAIHeaders = () => ({
 // Key / Endpoint / 模型 全部通过环境变量注入，部署端（Render）后台填写即可。
 export const BACKUP_CONFIG = {
   get ENDPOINT() {
-    return process.env.BACKUP_ENDPOINT || 'https://openrouter.ai/api/v1/chat/completions'
+    return process.env.BACKUP_ENDPOINT || 'https://api.siliconflow.cn/v1/chat/completions'
   },
   get API_KEY() {
     // 未配置则返回一个明显无效的占位，调用时会自然失败并 fallback
@@ -87,7 +87,7 @@ export const BACKUP_CONFIG = {
   },
   // 备用厂商默认使用的文本模型（OpenRouter 免费模型）
   get MODEL() {
-    return process.env.BACKUP_MODEL || 'tencent/hy3:free'
+    return process.env.BACKUP_MODEL || 'Qwen/Qwen2.5-7B-Instruct'
   },
   // 备用厂商默认使用的视觉模型
   get VL_MODEL() {
