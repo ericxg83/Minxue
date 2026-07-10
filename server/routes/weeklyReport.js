@@ -409,8 +409,6 @@ function getIsoWeek(date) {
 function buildSubjectDiagnosis(knowledgeDiagnosis, subjectAccuracyMap) {
   const bySubject = {}
   for (const kp of knowledgeDiagnosis) {
-    // 过滤掉 AI 未识别到的"未分类"标签
-    if (kp.tag === '未分类') continue
     const subj = kp.subject || '其他'
     if (!bySubject[subj]) bySubject[subj] = []
     bySubject[subj].push(kp)
