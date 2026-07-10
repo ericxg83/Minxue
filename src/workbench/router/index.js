@@ -48,6 +48,12 @@ const routes = [
     name: 'QuestionBank',
     component: () => import('../views/QuestionBankWorkbench.vue'),
     meta: { requiresPC: true }
+  },
+  {
+    path: '/weekly-report',
+    name: 'WeeklyReport',
+    component: () => import('../views/WeeklyReportWorkbench.vue'),
+    meta: { requiresPC: false }
   }
 ]
 

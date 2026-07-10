@@ -25,6 +25,7 @@ import { checkQuestionCompleteness } from './utils/questionCompleteness.js'
 import { uploadImage, deleteFile } from './services/ossService.js'
 import { getTaskQueue, getQueueStats, taskWorker } from './queue.js'
 import { processTask } from './worker.js'
+import weeklyReportRouter from './routes/weeklyReport.js'
 
 const app = express()
 const PORT = process.env.PORT || 4000
@@ -1731,6 +1732,9 @@ app.use((err, req, res, next) => {
   }
   res.status(500).json({ error: err.message || '服务器内部错误' })
 })
+
+// 周学习诊断报告
+app.use('/api/weekly-report', weeklyReportRouter)
 
 const __filename = fileURLToPath(import.meta.url)
 

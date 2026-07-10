@@ -599,3 +599,24 @@ export const invalidateCache = (type, studentId) => {
     clearCache(key)
   }
 }
+
+// ─────────────────────────────────────────────
+// 周学习诊断报告
+// ─────────────────────────────────────────────
+
+/**
+ * 获取某个学生的本周统计数据
+ * @param {string} studentId
+ * @param {number} weeks - 周数，默认 1
+ */
+export const getWeeklyReport = async (studentId, weeks = 1) => {
+  return apiRequest(`/weekly-report/${studentId}?weeks=${weeks}`)
+}
+
+/**
+ * 获取所有学生的本周统计摘要
+ * @param {number} weeks
+ */
+export const getAllWeeklyReports = async (weeks = 1) => {
+  return apiRequest(`/weekly-report?weeks=${weeks}`)
+}
