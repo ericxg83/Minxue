@@ -378,12 +378,12 @@ const recognizeQuestions = async (imageBase64, taskId, retryCount = 0) => {
   }
 }
 
-const generateTagsForQuestion = async (questionContent, retryCount = 0) => {
+const generateTagsForQuestion = async (questionContent, subject = null, retryCount = 0) => {
   if (!questionContent || !questionContent.trim()) {
     return { success: true, tags: ['未分类'] }
   }
 
-  const prompt = buildTaggingPrompt()
+  const prompt = buildTaggingPrompt(subject)
 
   const requestBody = {
     model: getCurrentTextModel(),
@@ -449,7 +449,7 @@ const generateTagsForQuestion = async (questionContent, retryCount = 0) => {
 
     if (shouldRetry) {
       await new Promise(resolve => setTimeout(resolve, (retryCount + 1) * 1000))
-      return generateTagsForQuestion(questionContent, retryCount + 1)
+      return generateTagsForQuestion(questionContent, subject, retryCount + 1)
     }
 
     return { success: true, tags: ['未分类'] }
@@ -468,7 +468,7 @@ const generateTagsForQuestions = async (questions) => {
       const content = q.content || ''
       const options = (q.options || []).join('；')
       const fullContent = options ? `${content}\n选项：${options}` : content
-      const tagResult = await generateTagsForQuestion(fullContent)
+      const tagResult = await generateTagsForQuestion(fullContent, q.subject)
       return { questionId: q.id, tags: tagResult.tags }
     })
     const batchResults = await Promise.all(tagPromises)
@@ -639,7 +639,8 @@ export const generateAnswerForQuestion = async (questionContent, retryCount = 0)
     return {
       success: true,
       answer: result.answer || '',
-      analysis: result.analysis || ''
+      analysis: result.analysis || '',
+      subject: result.subject || null
     }
   } catch (error) {
     const errorMessage = error.response?.data?.message || error.message || '未知错误'
@@ -685,6 +686,24 @@ export function validateAIAnswer(answer, analysis) {
     return { isValid: false, reason: '答案仅包含空白或下划线' }
   }
   return { isValid: true }
+}
+
+/**
+ * Save subject to question in DB and update in-memory object.
+ * Only updates when current subject is NULL/empty to preserve manual edits.
+ */
+const saveQuestionSubject = async (q, subject) => {
+  if (subject && subject.trim()) {
+    q.subject = subject.trim()
+    try {
+      await query(
+        `UPDATE ${TABLES.QUESTIONS} SET subject = $1, updated_at = NOW() WHERE id = $2 AND (subject IS NULL OR subject = '')`,
+        [subject.trim(), q.id]
+      )
+    } catch (err) {
+      console.error(`     题目 ${q.id.substring(0, 8)}: 学科更新失败`, err.message)
+    }
+  }
 }
 
 /**
@@ -753,6 +772,9 @@ const generateMissingAnswers = async (questions, imageBuffer = null) => {
               console.log(`     题目 ${q.id.substring(0, 8)}: 缓存答案同步更新 ${cached.answer} → ${finalAnswer}`)
             }
 
+            // 同步学科（从缓存恢复到题目）
+            await saveQuestionSubject(q, cached.subject)
+
             await incrementQuestionUseCount(fingerprint, PARSER_VERSION)
             // 设置 cache_id 指向权威缓存条目
             q.cache_id = cached.id
@@ -777,6 +799,8 @@ const generateMissingAnswers = async (questions, imageBuffer = null) => {
               q.answer = finalAnswer
               if (similar.analysis) q.analysis = similar.analysis
               updatedCount++
+              // 同步学科
+              await saveQuestionSubject(q, similar.subject)
               
               const cacheId = await cacheQuestion({
                 content: fullContent,
@@ -816,6 +840,7 @@ const generateMissingAnswers = async (questions, imageBuffer = null) => {
               q.answer = extracted
               q.analysis = result.analysis
               updatedCount++
+              await saveQuestionSubject(q, result.subject)
               console.log(`     题目 ${q.id.substring(0, 8)}: 从分析文本提取答案: ${extracted}`)
               return
             } catch (err) {
@@ -829,6 +854,7 @@ const generateMissingAnswers = async (questions, imageBuffer = null) => {
               [result.analysis, q.id]
             )
             q.analysis = result.analysis
+            await saveQuestionSubject(q, result.subject)
             console.log(`     题目 ${q.id.substring(0, 8)}: 答案无效(${validation.reason})，已保存分析文本`)
           } catch (err) {
             console.error(`     题目 ${q.id.substring(0, 8)}: 分析文本保存失败`, err.message)
@@ -850,6 +876,7 @@ const generateMissingAnswers = async (questions, imageBuffer = null) => {
           await updateQuestionAnswer(q.id, finalAnswer, result.analysis, true)
           q.answer = finalAnswer
           if (result.analysis) q.analysis = result.analysis
+          await saveQuestionSubject(q, result.subject)
           updatedCount++
           console.log(`     题目 ${q.id.substring(0, 8)}: 答案 ${oldAnswer || '(空)'} → ${finalAnswer}`)
 
@@ -884,6 +911,7 @@ const generateMissingAnswers = async (questions, imageBuffer = null) => {
           await updateQuestionAnswer(q.id, finalAnswer, result.analysis)
           q.answer = finalAnswer
           if (result.analysis) q.analysis = result.analysis
+          await saveQuestionSubject(q, result.subject)
           console.log(`     题目 ${q.id.substring(0, 8)}: ${finalAnswer}`)
 
           if (fingerprint) {
