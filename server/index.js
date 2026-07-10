@@ -1750,9 +1750,11 @@ app.post('/api/admin/backfill-tags', async (req, res) => {
 
   try {
     // 重置模型轮换索引，从第一个模型开始
+    backfillProgress.detail = '重置模型索引...'
     resetModelIndex()
 
     // 1. 查找需要回填的题目
+    backfillProgress.detail = '查询数据库中...'
     const { rows: questions } = await query(
       `SELECT q.id, q.content, q.options, q.subject, q.ai_tags, q.question_type
        FROM ${TABLES.QUESTIONS} q
@@ -1825,6 +1827,7 @@ app.post('/api/admin/backfill-tags', async (req, res) => {
 
     console.log(`[BackfillTags] 完成！更新:${backfillProgress.updated} 跳过:${backfillProgress.skipped} 失败:${backfillProgress.failed}`)
   } catch (err) {
+    backfillProgress.detail = `错误: ${err.message}`
     console.error('[BackfillTags] 执行失败:', err)
   } finally {
     backfillProgress.done = true
