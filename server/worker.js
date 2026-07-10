@@ -115,6 +115,18 @@ const deduplicateTags = (tags) => {
 }
 
 /**
+ * 归一化 AI 返回的难度值为 1-5 的整数；无法解析时返回 null（表示未判定，交由回填重试）。
+ */
+const normalizeDifficulty = (raw) => {
+  if (raw === null || raw === undefined || raw === '') return null
+  const n = Math.round(Number(raw))
+  if (!Number.isFinite(n)) return null
+  if (n < 1) return 1
+  if (n > 5) return 5
+  return n
+}
+
+/**
  * JSON 自动修复 — 处理 AI 返回的畸形 JSON
  * 常见问题: 未转义反斜杠(\frac → \\frac)、未转义双引号、字符串内换行
  */
@@ -380,7 +392,7 @@ const recognizeQuestions = async (imageBase64, taskId, retryCount = 0) => {
 
 export const generateTagsForQuestion = async (questionContent, subject = null, retryCount = 0) => {
   if (!questionContent || !questionContent.trim()) {
-    return { success: true, tags: ['未分类'] }
+    return { success: true, tags: ['未分类'], difficulty: null }
   }
 
   const prompt = buildTaggingPrompt(subject)
@@ -417,8 +429,9 @@ export const generateTagsForQuestion = async (questionContent, subject = null, r
     }
     const rawTags = result.tags || []
     const tags = deduplicateTags(rawTags)
+    const difficulty = normalizeDifficulty(result.difficulty)
 
-    return { success: true, tags }
+    return { success: true, tags, difficulty }
   } catch (error) {
     // callTextCompletion 内部已完成"主API→备用API"切换，
     // 两家都失败时不再写「未分类」（否则该题将永远无法被回填），
@@ -431,7 +444,7 @@ export const generateTagsForQuestion = async (questionContent, subject = null, r
       return generateTagsForQuestion(questionContent, subject, retryCount + 1)
     }
 
-    return { success: false, tags: null }
+    return { success: false, tags: null, difficulty: null }
   }
 }
 
@@ -448,7 +461,7 @@ const generateTagsForQuestions = async (questions) => {
       const options = (q.options || []).join('；')
       const fullContent = options ? `${content}\n选项：${options}` : content
       const tagResult = await generateTagsForQuestion(fullContent, q.subject)
-      return { questionId: q.id, tags: tagResult.tags }
+      return { questionId: q.id, tags: tagResult.tags, difficulty: tagResult.difficulty }
     })
     const batchResults = await Promise.all(tagPromises)
     results.push(...batchResults)
@@ -1205,8 +1218,10 @@ await job.updateProgress(80)
       console.log(`📊 [Step 8/8] 生成AI标签...`)
       const tagResults = await generateTagsForQuestions(questions)
       const tagMap = {}
+      const difficultyMap = {}
       for (const tr of tagResults) {
         tagMap[tr.questionId] = tr.tags
+        difficultyMap[tr.questionId] = tr.difficulty
       }
 
       for (const q of questions) {
@@ -1221,11 +1236,13 @@ await job.updateProgress(80)
           q.ai_tags = null
           q.tags_source = null
         }
+        q.difficulty = difficultyMap[q.id] ?? null
       }
 
       const tagUpdates = questions.map(q => ({
         id: q.id,
-        ai_tags: q.ai_tags
+        ai_tags: q.ai_tags,
+        difficulty: q.difficulty
       }))
       await batchUpdateQuestionTags(tagUpdates)
       console.log(`✅ [Step 8/8] AI标签保存成功`)

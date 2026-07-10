@@ -40,6 +40,7 @@ CREATE TABLE questions (
     ai_tags JSONB DEFAULT '[]',
     manual_tags JSONB DEFAULT '[]',
     tags_source VARCHAR(10) DEFAULT 'ai',
+    difficulty SMALLINT CHECK (difficulty IS NULL OR difficulty BETWEEN 1 AND 5),
     block_coordinates JSONB,
     status VARCHAR(20) DEFAULT 'pending' CHECK (status IN ('pending', 'wrong', 'mastered')),
     created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
@@ -145,7 +146,7 @@ CREATE POLICY "Allow all" ON questions FOR ALL USING (true) WITH CHECK (true);
 CREATE POLICY "Allow all" ON wrong_questions FOR ALL USING (true) WITH CHECK (true);
 CREATE POLICY "Allow all" ON training_logs FOR ALL USING (true) WITH CHECK (true);
 
--- ÅÐ¶¨¼ÇÂ¼±í£¨Shadow Mode - Ö»×·¼Ó²»¸²¸Ç£©
+-- ï¿½Ð¶ï¿½ï¿½ï¿½Â¼ï¿½ï¿½ï¿½ï¿½Shadow Mode - Ö»×·ï¿½Ó²ï¿½ï¿½ï¿½ï¿½Ç£ï¿½
 CREATE TABLE IF NOT EXISTS judgements (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     question_id UUID NOT NULL REFERENCES questions(id) ON DELETE CASCADE,

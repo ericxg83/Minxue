@@ -14,6 +14,9 @@
             {{ typeLabel }}
           </el-tag>
           <span class="ops-qnum">#{{ store.currentReviewIndex + 1 }}</span>
+          <el-tag v-if="difficultyLabel" :type="difficultyTagType" size="small" effect="plain" class="ops-difficulty-badge">
+            {{ difficultyLabel }}
+          </el-tag>
           <el-tag v-if="q.review_status" :type="reviewStatusTagType" size="small" effect="dark" class="ops-review-badge">
             {{ reviewStatusLabel }}
           </el-tag>
@@ -253,6 +256,18 @@ const typeTagType = computed(() => {
   return map[q.value?.question_type] || 'info'
 })
 const optionsList = computed(() => q.value?.options || [])
+
+// 难度系数（1-5）显示
+const difficultyLabel = computed(() => {
+  const d = q.value?.difficulty
+  if (d == null) return ''
+  const map = { 1: '基础', 2: '简单', 3: '中等', 4: '较难', 5: '难题' }
+  return `难度${d}·${map[d] || ''}`
+})
+const difficultyTagType = computed(() => {
+  const map = { 1: 'success', 2: 'success', 3: 'warning', 4: 'danger', 5: 'danger' }
+  return map[q.value?.difficulty] || 'info'
+})
 
 const reviewStatusLabel = computed(() => {
   if (!q.value?.review_status) return ''

@@ -48,6 +48,7 @@ CREATE TABLE IF NOT EXISTS questions (
   ai_tags JSONB DEFAULT '[]',
   manual_tags JSONB DEFAULT '[]',
   tags_source TEXT DEFAULT 'ai',
+  difficulty SMALLINT CHECK (difficulty IS NULL OR difficulty BETWEEN 1 AND 5),
   block_coordinates JSONB,
   created_at TIMESTAMPTZ DEFAULT NOW(),
   updated_at TIMESTAMPTZ DEFAULT NOW()

@@ -10,6 +10,7 @@ const migrations = [
   `ALTER TABLE questions ADD COLUMN IF NOT EXISTS block_coordinates JSONB`,
   `ALTER TABLE questions ADD COLUMN IF NOT EXISTS answer_exception BOOLEAN DEFAULT FALSE`,
   `ALTER TABLE questions ADD COLUMN IF NOT EXISTS answer_exception_reason TEXT`,
+  `ALTER TABLE questions ADD COLUMN IF NOT EXISTS difficulty SMALLINT CHECK (difficulty IS NULL OR difficulty BETWEEN 1 AND 5)`,
 ]
 
 async function run() {

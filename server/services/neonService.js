@@ -59,6 +59,7 @@ export const createQuestions = async (questions) => {
       ai_tags: JSON.stringify(q.ai_tags || []),
       manual_tags: JSON.stringify(q.manual_tags || []),
       tags_source: q.tags_source || 'ai',
+      difficulty: q.difficulty ?? null,
       block_coordinates: q.block_coordinates ? JSON.stringify(q.block_coordinates) : null,
       is_complete: checkQuestionCompleteness(q).isComplete,
       created_at: new Date().toISOString()
@@ -84,22 +85,42 @@ export const batchUpdateQuestionTags = async (tagUpdates) => {
   const results = []
   for (const update of tagUpdates) {
     try {
+      const hasDifficulty = update.difficulty !== undefined && update.difficulty !== null
       if (update.ai_tags && update.ai_tags.length > 0) {
-        // 成功识别 → 写入标签
-        await query(
-          `UPDATE ${TABLES.QUESTIONS}
-           SET ai_tags = $1::jsonb, tags_source = 'ai', updated_at = NOW()
-           WHERE id = $2`,
-          [JSON.stringify(update.ai_tags), update.id]
-        )
+        // 成功识别 → 写入标签（难度若判定成功则一并写入，否则保留原值）
+        if (hasDifficulty) {
+          await query(
+            `UPDATE ${TABLES.QUESTIONS}
+             SET ai_tags = $1::jsonb, tags_source = 'ai', difficulty = $2, updated_at = NOW()
+             WHERE id = $3`,
+            [JSON.stringify(update.ai_tags), update.difficulty, update.id]
+          )
+        } else {
+          await query(
+            `UPDATE ${TABLES.QUESTIONS}
+             SET ai_tags = $1::jsonb, tags_source = 'ai', updated_at = NOW()
+             WHERE id = $2`,
+            [JSON.stringify(update.ai_tags), update.id]
+          )
+        }
       } else {
-        // 识别失败 → 保留 ai_tags 为 NULL（不写「未分类」），留给每日回填重试
-        await query(
-          `UPDATE ${TABLES.QUESTIONS}
-           SET ai_tags = NULL, tags_source = NULL, updated_at = NOW()
-           WHERE id = $1`,
-          [update.id]
-        )
+        // 识别失败 → 保留 ai_tags 为 NULL（不写「未分类」），留给每日回填重试；
+        // 难度若单独判定成功仍写入。
+        if (hasDifficulty) {
+          await query(
+            `UPDATE ${TABLES.QUESTIONS}
+             SET ai_tags = NULL, tags_source = NULL, difficulty = $1, updated_at = NOW()
+             WHERE id = $2`,
+            [update.difficulty, update.id]
+          )
+        } else {
+          await query(
+            `UPDATE ${TABLES.QUESTIONS}
+             SET ai_tags = NULL, tags_source = NULL, updated_at = NOW()
+             WHERE id = $1`,
+            [update.id]
+          )
+        }
       }
       results.push({ id: update.id })
     } catch (error) {

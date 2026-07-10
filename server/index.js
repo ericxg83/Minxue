@@ -9,6 +9,7 @@ import { migrateQuestionCacheId } from './migrations/009_add_question_cache_id.j
 import { migrateJudgements } from './migrations/010_add_judgements_table.js'
 import { migrateIsComplete } from './migrations/011_add_is_complete.js'
 import { migratePracticeCount } from './migrations/012_add_practice_count.js'
+import { migrateDifficulty } from './migrations/013_add_difficulty.js'
 
 const __dirname = dirname(fileURLToPath(import.meta.url))
 dotenv.config({ path: resolve(__dirname, '.env') })
@@ -1738,25 +1739,27 @@ app.use((err, req, res, next) => {
 let backfillRunning = false
 let backfillProgress = { total: 0, updated: 0, skipped: 0, failed: 0, done: false, detail: '' }
 
-app.post('/api/admin/backfill-tags', async (req, res) => {
+/**
+ * 回填核心逻辑：捞取「缺知识点标签 或 缺难度」的题目，逐题重新生成并写回。
+ * 供手动接口和定时任务共用。带并发锁，重复调用会直接返回。
+ * @param {{limit?:number, trigger?:string}} opts
+ */
+async function runBackfillTags({ limit = 500, trigger = 'manual' } = {}) {
   if (backfillRunning) {
-    return res.status(409).json({ error: '回填任务正在进行中', progress: backfillProgress })
+    return { started: false, reason: 'running', progress: backfillProgress }
   }
   backfillRunning = true
   backfillProgress = { total: 0, updated: 0, skipped: 0, failed: 0, done: false, detail: '' }
-
-  // 异步执行，不阻塞响应
-  res.json({ success: true, message: '标签回填任务已启动' })
 
   try {
     // 重置模型轮换索引，从第一个模型开始
     backfillProgress.detail = '重置模型索引...'
     resetModelIndex()
 
-    // 1. 查找需要回填的题目
+    // 1. 查找需要回填的题目：知识点标签缺失 或 难度未判定
     backfillProgress.detail = '查询数据库中...'
     const { rows: questions } = await query(
-      `SELECT q.id, q.content, q.options, q.subject, q.ai_tags, q.question_type
+      `SELECT q.id, q.content, q.options, q.subject, q.ai_tags, q.difficulty, q.question_type
        FROM ${TABLES.QUESTIONS} q
        WHERE q.is_complete = TRUE
          AND (
@@ -1764,21 +1767,21 @@ app.post('/api/admin/backfill-tags', async (req, res) => {
            OR q.ai_tags = ''
            OR q.ai_tags = '[]'
            OR q.ai_tags::text = '["未分类"]'
+           OR q.difficulty IS NULL
          )
        ORDER BY q.created_at DESC
-       LIMIT 500`,
-      []
+       LIMIT $1`,
+      [limit]
     )
 
     backfillProgress.total = questions.length
     if (questions.length === 0) {
-      console.log('[BackfillTags] 没有待回填的题目')
+      console.log(`[BackfillTags] (${trigger}) 没有待回填的题目`)
       backfillProgress.done = true
-      backfillRunning = false
-      return
+      return { started: true, total: 0 }
     }
 
-    console.log(`[BackfillTags] 找到 ${questions.length} 道需要回填标签的题目`)
+    console.log(`[BackfillTags] (${trigger}) 找到 ${questions.length} 道需要回填标签/难度的题目`)
 
     // 2. 逐题处理（串行，避免并发触发模型限流）
     for (let i = 0; i < questions.length; i++) {
@@ -1792,27 +1795,44 @@ app.post('/api/admin/backfill-tags', async (req, res) => {
       backfillProgress.detail = `[${i + 1}/${questions.length}] ${shortId}`
 
       try {
-        // 单次生成标签，内置重试和模型轮换
+        // 单次生成标签+难度，内置重试和主备 API 切换
         const tagResult = await generateTagsForQuestion(fullContent, subject)
 
-        if (tagResult && tagResult.tags && tagResult.tags.length > 0 && tagResult.tags[0] !== '未分类') {
-          const uniqueTags = [...new Set(tagResult.tags.map(t => t.trim()).filter(Boolean))]
+        const hasTags = tagResult && tagResult.tags && tagResult.tags.length > 0 && tagResult.tags[0] !== '未分类'
+        const hasDifficulty = tagResult && tagResult.difficulty !== null && tagResult.difficulty !== undefined
+
+        if (hasTags || hasDifficulty) {
+          // 动态拼装 SET 子句：只更新本次成功识别出的字段，避免用 NULL 覆盖已有值
+          const sets = []
+          const params = []
+          let p = 1
+          if (hasTags) {
+            const uniqueTags = [...new Set(tagResult.tags.map(t => t.trim()).filter(Boolean))]
+            sets.push(`ai_tags = $${p++}::jsonb`, `tags_source = 'ai'`)
+            params.push(JSON.stringify(uniqueTags))
+          }
+          if (hasDifficulty) {
+            sets.push(`difficulty = $${p++}`)
+            params.push(tagResult.difficulty)
+          }
+          sets.push('updated_at = NOW()')
+          params.push(q.id)
+
           try {
             await query(
-              `UPDATE ${TABLES.QUESTIONS}
-               SET ai_tags = $1::jsonb, tags_source = 'ai', updated_at = NOW()
-               WHERE id = $2`,
-              [JSON.stringify(uniqueTags), q.id]
+              `UPDATE ${TABLES.QUESTIONS} SET ${sets.join(', ')} WHERE id = $${p}`,
+              params
             )
             backfillProgress.updated++
-            console.log(`  [BackfillTags] ✅ [${i + 1}/${questions.length}] ${shortId}: ${uniqueTags.join(', ')}`)
+            const tagStr = hasTags ? tagResult.tags.join(', ') : '(保留原标签)'
+            console.log(`  [BackfillTags] ✅ [${i + 1}/${questions.length}] ${shortId}: ${tagStr} | 难度=${hasDifficulty ? tagResult.difficulty : '-'}`)
           } catch (err) {
             backfillProgress.failed++
             console.error(`  [BackfillTags] ❌ [${i + 1}/${questions.length}] ${shortId}: DB写入失败 ${err.message}`)
           }
         } else {
-          // AI 未返回有效标签（主备均失败或内容残缺）→ 保持 ai_tags 为 NULL，
-          // 不写「未分类」，让每日回填任务可持续重试。计入 skipped 以便观察。
+          // AI 未返回有效标签且未判定难度（主备均失败或内容残缺）→ 保持字段为 NULL，
+          // 不写「未分类」，让后续回填任务可持续重试。计入 skipped 以便观察。
           backfillProgress.skipped++
           console.log(`  [BackfillTags] ⏭️ [${i + 1}/${questions.length}] ${shortId}: 未识别/失败 (${subject || '无学科'})`)
         }
@@ -1827,15 +1847,28 @@ app.post('/api/admin/backfill-tags', async (req, res) => {
       }
     }
 
-    console.log(`[BackfillTags] 完成！更新:${backfillProgress.updated} 跳过:${backfillProgress.skipped} 失败:${backfillProgress.failed}`)
+    console.log(`[BackfillTags] (${trigger}) 完成！更新:${backfillProgress.updated} 跳过:${backfillProgress.skipped} 失败:${backfillProgress.failed}`)
+    return { started: true, total: questions.length }
   } catch (err) {
     backfillProgress.detail = `错误: ${err.message}`
-    console.error('[BackfillTags] 执行失败:', err)
+    console.error(`[BackfillTags] (${trigger}) 执行失败:`, err)
+    return { started: true, error: err.message }
   } finally {
     backfillProgress.done = true
     backfillProgress.detail = ''
     backfillRunning = false
   }
+}
+
+app.post('/api/admin/backfill-tags', async (req, res) => {
+  if (backfillRunning) {
+    return res.status(409).json({ error: '回填任务正在进行中', progress: backfillProgress })
+  }
+  // 异步执行，不阻塞响应
+  res.json({ success: true, message: '标签回填任务已启动' })
+  runBackfillTags({ trigger: 'manual' }).catch(err => {
+    console.error('[BackfillTags] 手动回填异常:', err)
+  })
 })
 
     // 查询回填进度
@@ -1882,8 +1915,25 @@ if (process.argv[1] === __filename || process.argv[1]?.endsWith('server/index.js
       await migrateJudgements()
       await migrateIsComplete()
       await migratePracticeCount()
+      await migrateDifficulty()
     } catch (err) {
       console.error('数据库迁移失败:', err.message)
+    }
+
+    // 定时自动回填知识点标签+难度：让曾因限流失败的题目能被持续重试补齐。
+    // 启动 2 分钟后先跑一次，之后每 BACKFILL_INTERVAL_HOURS 小时（默认 6h）跑一次。
+    try {
+      const intervalHours = Number(process.env.BACKFILL_INTERVAL_HOURS) || 6
+      const intervalMs = intervalHours * 60 * 60 * 1000
+      setTimeout(() => {
+        runBackfillTags({ trigger: 'auto' }).catch(e => console.error('[BackfillTags] 定时回填异常:', e.message))
+      }, 2 * 60 * 1000)
+      setInterval(() => {
+        runBackfillTags({ trigger: 'auto' }).catch(e => console.error('[BackfillTags] 定时回填异常:', e.message))
+      }, intervalMs)
+      console.log(`⏰ 知识点/难度定时回填已启用（每 ${intervalHours} 小时）`)
+    } catch (err) {
+      console.error('定时回填启动失败:', err.message)
     }
 
     console.log(`并发数: ${process.env.CONCURRENCY || 2}`)

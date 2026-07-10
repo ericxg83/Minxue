@@ -23,7 +23,8 @@ import {
   getAIHeaders,
   buildTaggingPrompt,
   getCurrentTextModel,
-  rotateTextModel
+  rotateTextModel,
+  callTextCompletion
 } from './config/ai.js'
 
 // ── Config ──
@@ -38,34 +39,33 @@ let skipped = 0
 let failed = 0
 let modelRotations = 0
 
+function normalizeDifficulty(raw) {
+  if (raw === null || raw === undefined || raw === '') return null
+  const n = Math.round(Number(raw))
+  if (!Number.isFinite(n)) return null
+  if (n < 1) return 1
+  if (n > 5) return 5
+  return n
+}
+
 /**
- * Generate tags for a single question (replicates worker.js logic
- * but uses the improved buildTaggingPrompt with subject context).
+ * Generate tags + difficulty for a single question.
+ * Uses callTextCompletion so it inherits the primary→backup API fallback.
  */
 async function generateTag(questionContent, subject = null, retryCount = 0) {
   if (!questionContent || !questionContent.trim()) {
-    return { success: true, tags: ['未分类'] }
+    return { success: true, tags: ['未分类'], difficulty: null }
   }
 
   const prompt = buildTaggingPrompt(subject)
 
-  const requestBody = {
-    model: getCurrentTextModel(),
-    messages: [
-      { role: 'system', content: prompt },
-      { role: 'user', content: `请分析以下题目，提取知识点标签：\n\n${questionContent}` }
-    ],
-    temperature: 0.2,
-    max_tokens: 500
-  }
-
   try {
-    const response = await axios.post(AI_CONFIG.ENDPOINT, requestBody, {
-      headers: getAIHeaders(),
-      timeout: 30000
+    const { content } = await callTextCompletion({
+      systemContent: prompt,
+      userContent: `请分析以下题目，提取知识点标签：\n\n${questionContent}`,
+      temperature: 0.2,
+      maxTokens: 500
     })
-
-    const content = response.data.choices[0]?.message?.content
     if (!content) throw new Error('AI 返回内容为空')
 
     let jsonStr = content
@@ -92,29 +92,17 @@ async function generateTag(questionContent, subject = null, retryCount = 0) {
     const rawTags = result.tags || []
     // Deduplicate
     const uniqueTags = [...new Set(rawTags.map(t => t.trim()).filter(Boolean))]
-    return { success: true, tags: uniqueTags }
+    return { success: true, tags: uniqueTags, difficulty: normalizeDifficulty(result.difficulty) }
   } catch (error) {
-    const errorMessage = error.response?.data?.message || error.message || '未知错误'
     const isNetworkError = !error.response || error.code === 'ECONNABORTED' || error.code === 'ETIMEDOUT'
-    const isQuota = error.response?.status === 429
-
-    if (isQuota) {
-      const nextModel = rotateTextModel()
-      modelRotations++
-      if (nextModel) {
-        console.log(`  ⚠️ 模型配额耗尽，已切换到 ${nextModel}，跳过当前题目`)
-      } else {
-        console.error(`  ❌ 所有文本模型配额已耗尽`)
-      }
-      return { success: true, tags: ['未分类'] }
-    }
 
     if (isNetworkError && retryCount < MAX_RETRIES) {
       await new Promise(resolve => setTimeout(resolve, (retryCount + 1) * 2000))
       return generateTag(questionContent, subject, retryCount + 1)
     }
 
-    return { success: true, tags: ['未分类'] }
+    // 主备 API 都失败 → 保持字段为空，交给后续回填重试（不写「未分类」）
+    return { success: false, tags: null, difficulty: null }
   }
 }
 
@@ -144,9 +132,9 @@ async function main() {
   console.log('  查找所有标签为 NULL/空/["未分类"] 的题目...')
   console.log('='.repeat(60))
 
-  // 1. Find questions with bad tags
+  // 1. Find questions missing tags OR difficulty
   const { rows: questions } = await query(
-    `SELECT q.id, q.content, q.options, q.subject, q.ai_tags, q.question_type
+    `SELECT q.id, q.content, q.options, q.subject, q.ai_tags, q.difficulty, q.question_type
      FROM ${TABLES.QUESTIONS} q
      WHERE q.is_complete = TRUE
        AND (
@@ -154,6 +142,7 @@ async function main() {
          OR q.ai_tags = ''
          OR q.ai_tags = '[]'
          OR q.ai_tags::text = '["未分类"]'
+         OR q.difficulty IS NULL
        )
      ORDER BY q.created_at DESC
      LIMIT 500`,
@@ -166,7 +155,7 @@ async function main() {
     process.exit(0)
   }
 
-  console.log(`📊 找到 ${total} 道需要回填标签的题目\n`)
+  console.log(`📊 找到 ${total} 道需要回填标签/难度的题目\n`)
 
   // 2. Process in batches
   for (let i = 0; i < questions.length; i += CONCURRENCY) {
@@ -181,23 +170,39 @@ async function main() {
       const shortId = q.id.substring(0, 8)
       const tagResult = await generateTag(fullContent, subject)
 
-      if (!tagResult.tags || tagResult.tags.length === 0 || tagResult.tags[0] === '未分类') {
+      const hasTags = tagResult.tags && tagResult.tags.length > 0 && tagResult.tags[0] !== '未分类'
+      const hasDifficulty = tagResult.difficulty !== null && tagResult.difficulty !== undefined
+
+      if (!hasTags && !hasDifficulty) {
         skipped++
-        console.log(`  ⏭️  [${i + batch.indexOf(q) + 1}/${total}] ${shortId}: 无法识别标签 (${subject || '无学科'})`)
+        console.log(`  ⏭️  [${i + batch.indexOf(q) + 1}/${total}] ${shortId}: 无法识别标签/难度 (${subject || '无学科'})`)
         return
       }
 
-      const uniqueTags = deduplicateTags(tagResult.tags)
+      // 动态拼装 SET：只更新本次成功识别的字段，避免用 NULL 覆盖已有值
+      const sets = []
+      const params = []
+      let p = 1
+      if (hasTags) {
+        const uniqueTags = deduplicateTags(tagResult.tags)
+        sets.push(`ai_tags = $${p++}::jsonb`, `tags_source = 'ai'`)
+        params.push(JSON.stringify(uniqueTags))
+      }
+      if (hasDifficulty) {
+        sets.push(`difficulty = $${p++}`)
+        params.push(tagResult.difficulty)
+      }
+      sets.push('updated_at = NOW()')
+      params.push(q.id)
 
       try {
         await query(
-          `UPDATE ${TABLES.QUESTIONS}
-           SET ai_tags = $1::jsonb, tags_source = 'ai', updated_at = NOW()
-           WHERE id = $2`,
-          [JSON.stringify(uniqueTags), q.id]
+          `UPDATE ${TABLES.QUESTIONS} SET ${sets.join(', ')} WHERE id = $${p}`,
+          params
         )
         updated++
-        console.log(`  ✅ [${i + batch.indexOf(q) + 1}/${total}] ${shortId}: ${uniqueTags.join(', ')} (${subject || '无学科'})`)
+        const tagStr = hasTags ? deduplicateTags(tagResult.tags).join(', ') : '(保留原标签)'
+        console.log(`  ✅ [${i + batch.indexOf(q) + 1}/${total}] ${shortId}: ${tagStr} | 难度=${hasDifficulty ? tagResult.difficulty : '-'} (${subject || '无学科'})`)
       } catch (err) {
         failed++
         console.error(`  ❌ [${i + batch.indexOf(q) + 1}/${total}] ${shortId}: DB更新失败 ${err.message}`)

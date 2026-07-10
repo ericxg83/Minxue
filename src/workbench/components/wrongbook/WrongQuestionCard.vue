@@ -14,6 +14,9 @@
         <el-tag v-if="wrongQuestion.is_merged" size="small" type="danger" effect="dark" class="merged-badge">
           合并 {{ wrongQuestion.wrong_count }} 道
         </el-tag>
+        <el-tag v-if="difficultyInfo" :type="difficultyInfo.type" size="small" effect="plain" class="difficulty-badge">
+          {{ difficultyInfo.text }}
+        </el-tag>
       </div>
       <div class="header-right">
         <span class="date-text">
@@ -140,6 +143,15 @@ const knowledgeTags = computed(() => {
     return (q.manual_tags || []).map(name => ({ name, sourceType: 'manual' }))
   }
   return (q.ai_tags || []).map(name => ({ name, sourceType: 'ai' }))
+})
+
+// 难度系数（1-5）
+const difficultyInfo = computed(() => {
+  const d = question.value?.difficulty
+  if (d == null) return null
+  const labelMap = { 1: '基础', 2: '简单', 3: '中等', 4: '较难', 5: '难题' }
+  const typeMap = { 1: 'success', 2: 'success', 3: 'warning', 4: 'danger', 5: 'danger' }
+  return { text: `难度${d}·${labelMap[d] || ''}`, type: typeMap[d] || 'info' }
 })
 
 // Error count
