@@ -1,5 +1,7 @@
 // Use getters so env vars are resolved lazily at access time, not at module import time.
 // This allows dotenv.config() in index.js / worker.js to set process.env before AI_CONFIG is used.
+import axios from 'axios'
+
 export const AI_CONFIG = {
   get ENDPOINT() { return process.env.AI_ENDPOINT || 'https://api-inference.modelscope.cn/v1/chat/completions' },
   get API_KEY() { return process.env.AI_API_KEY || 'ms-dae707ae-bcc4-4d7e-aa83-e2165d0cdbf5' },
@@ -71,6 +73,112 @@ export const getAIHeaders = () => ({
   'Content-Type': 'application/json',
   'Authorization': `Bearer ${AI_CONFIG.API_KEY}`
 })
+
+// ── 备用 API（OpenRouter）──
+// 当主 API（ModelScope）因配额/限流失败时，自动切换到备用厂商。
+// Key / Endpoint / 模型 全部通过环境变量注入，部署端（Render）后台填写即可。
+export const BACKUP_CONFIG = {
+  get ENDPOINT() {
+    return process.env.BACKUP_ENDPOINT || 'https://openrouter.ai/api/v1/chat/completions'
+  },
+  get API_KEY() {
+    // 未配置则返回一个明显无效的占位，调用时会自然失败并 fallback
+    return process.env.BACKUP_API_KEY || ''
+  },
+  // 备用厂商默认使用的文本模型（OpenRouter 免费模型）
+  get MODEL() {
+    return process.env.BACKUP_MODEL || 'tencent/hy3:free'
+  },
+  // 备用厂商默认使用的视觉模型
+  get VL_MODEL() {
+    return process.env.BACKUP_VL_MODEL || 'qwen/qwen2.5-vl-7b-instruct:free'
+  },
+  // 是否向备用 API 发送 reasoning:{enabled:false}（思考型免费模型需要）
+  get DISABLE_REASONING() {
+    return process.env.BACKUP_DISABLE_REASONING === 'true' || BACKUP_CONFIG.MODEL.includes('hy3')
+  },
+  get ENABLED() {
+    return Boolean(process.env.BACKUP_API_KEY)
+  }
+}
+
+const _backupAxios = axios.create({ timeout: 60000 })
+
+/**
+ * 统一发起一次文本聊天补全请求，内置"主 API → 备用 API"自动切换。
+ *
+ * @param {{systemContent:string, userContent:string, temperature?:number, maxTokens?:number, model?:string}} opts
+ * @returns {Promise<{content:string, usedBackup:boolean}>}
+ * @throws 当主、备均调用失败（非限流类错误）时抛出最后一个错误
+ *
+ * 设计要点：
+ * - 限流（429）或主 Key 缺失时，自动尝试备用；
+ * - 若连备用也限流，仍抛出错误，由调用方决定重试/写未分类；
+ * - 调用方无需关心当前用的是哪家，只拿回 content 文本。
+ */
+export async function callTextCompletion(opts) {
+  const { systemContent, userContent, temperature = 0.2, maxTokens = 500, model } = opts
+  const messages = [
+    { role: 'system', content: systemContent },
+    { role: 'user', content: userContent }
+  ]
+
+  // 1. 先尝试主 API（ModelScope）
+  const primaryBody = {
+    model: model || getCurrentTextModel(),
+    messages,
+    temperature,
+    max_tokens: maxTokens
+  }
+  try {
+    const resp = await axios.post(AI_CONFIG.ENDPOINT, primaryBody, {
+      headers: getAIHeaders(),
+      timeout: 30000
+    })
+    const content = resp.data?.choices?.[0]?.message?.content
+    if (!content) throw new Error('AI 返回内容为空')
+    return { content, usedBackup: false }
+  } catch (primaryErr) {
+    const status = primaryErr.response?.status
+    const isQuota = status === 429
+    const primaryKeyMissing = !AI_CONFIG.API_KEY
+    if (!isQuota && !primaryKeyMissing && !primaryErr.response) {
+      // 非限流、非 Key 缺失的网络异常 → 直接抛出，不轻易切备用（可能是临时抖动由调用方重试）
+    }
+    console.warn(`⚠️ [AI] 主 API 调用失败${isQuota ? '（429 限流）' : primaryKeyMissing ? '（Key 缺失）' : ''}，尝试备用 API...`)
+
+    // 2. 备用 API（OpenRouter）
+    if (!BACKUP_CONFIG.ENABLED) {
+      throw new Error(`主 API 失败且无备用 API：${primaryErr.message}`)
+    }
+    const backupBody = {
+      model: model || BACKUP_CONFIG.MODEL,
+      messages,
+      temperature,
+      max_tokens: maxTokens,
+      // 部分免费模型（如 tencent/hy3）是"思考模型"，默认把预算花在 reasoning 上导致 content 为空；
+      // 显式关闭思考，强制直接输出正文。
+      ...(BACKUP_CONFIG.DISABLE_REASONING ? { reasoning: { enabled: false } } : {})
+    }
+    try {
+      const resp = await _backupAxios.post(BACKUP_CONFIG.ENDPOINT, backupBody, {
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${BACKUP_CONFIG.API_KEY}`,
+          'HTTP-Referer': 'https://minxue.edu',
+          'X-Title': 'Minxue'
+        }
+      })
+      const content = resp.data?.choices?.[0]?.message?.content
+      if (!content) throw new Error('备用 AI 返回内容为空')
+      console.log(`✅ [AI] 备用 API 调用成功（${model || BACKUP_CONFIG.MODEL}）`)
+      return { content, usedBackup: true }
+    } catch (backupErr) {
+      console.error(`❌ [AI] 备用 API 也失败：${backupErr.message}`)
+      throw backupErr
+    }
+  }
+}
 
 export const buildOCRPrompt = () => `你是一个专业的教育题目识别助手。请仔细分析上传的作业图片，识别其中的题目内容、几何配图和位置。
 

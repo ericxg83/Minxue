@@ -10,7 +10,7 @@ import axios from 'axios'
 import sharp from 'sharp'
 import { TABLES, TASK_STATUS } from './config/neon.js'
 import { query } from './config/neon.js'
-import { AI_CONFIG, getAIHeaders, buildOCRPrompt, buildTaggingPrompt, buildAnswerGenerationPrompt, getCurrentTextModel, getCurrentVLModel, rotateTextModel, rotateVLModel, TEXT_MODELS, VL_MODELS } from './config/ai.js'
+import { AI_CONFIG, getAIHeaders, buildOCRPrompt, buildTaggingPrompt, buildAnswerGenerationPrompt, getCurrentTextModel, getCurrentVLModel, rotateTextModel, rotateVLModel, TEXT_MODELS, VL_MODELS, callTextCompletion } from './config/ai.js'
 import { updateTaskStatus, createQuestions, batchUpdateQuestionTags, addWrongQuestions, createJudgement, getLatestJudgement, updateQuestionAnswer, markAnswerException, findCachedQuestionByFingerprint, findSimilarQuestion, cacheQuestion, incrementQuestionUseCount, updateQuestionCacheId } from './services/neonService.js'
 import { uploadImage } from './services/ossService.js'
 import { generateTextFingerprint, generatePHash, PARSER_VERSION, TEXT_SIMILARITY_THRESHOLD } from './utils/questionFingerprint.js'
@@ -385,24 +385,13 @@ export const generateTagsForQuestion = async (questionContent, subject = null, r
 
   const prompt = buildTaggingPrompt(subject)
 
-  const requestBody = {
-    model: getCurrentTextModel(),
-    messages: [
-      { role: 'system', content: prompt },
-      { role: 'user', content: `请分析以下题目，提取知识点标签：\n\n${questionContent}` }
-    ],
-    temperature: 0.2,
-    max_tokens: 500
-  }
-
   try {
-    const response = await axios.post(AI_CONFIG.ENDPOINT, requestBody, {
-      headers: getAIHeaders(),
-      timeout: 30000
+    const { content } = await callTextCompletion({
+      systemContent: prompt,
+      userContent: `请分析以下题目，提取知识点标签：\n\n${questionContent}`,
+      temperature: 0.2,
+      maxTokens: 500
     })
-
-    const content = response.data.choices[0]?.message?.content
-    if (!content) throw new Error('AI 返回内容为空')
 
     let jsonStr = content
     const jsonMatch = content.match(/```json\n?([\s\S]*?)\n?```/) ||
@@ -431,20 +420,10 @@ export const generateTagsForQuestion = async (questionContent, subject = null, r
 
     return { success: true, tags }
   } catch (error) {
-    const errorMessage = error.response?.data?.message || error.message || '未知错误'
+    // callTextCompletion 内部已完成"主API→备用API"切换，
+    // 两家都失败时不再写「未分类」（否则该题将永远无法被回填），
+    // 而是返回 tags:null，让题目保持 ai_tags=NULL，由每日回填任务持续重试。
     const isNetworkError = !error.response || error.code === 'ECONNABORTED' || error.code === 'ETIMEDOUT'
-
-    // 配额耗尽 → 切换到下一个模型（供后续问题使用），当前问题返回空
-    if (error.response?.status === 429) {
-      const nextModel = rotateTextModel()
-      if (nextModel) {
-        console.log(`  模型 ${getCurrentTextModel()} 配额耗尽，下一个问题将使用 ${nextModel}`)
-      } else {
-        console.error(`  所有文本模型配额已耗尽`)
-      }
-      return { success: true, tags: ['未分类'] }
-    }
-
     const shouldRetry = isNetworkError && retryCount < AI_CONFIG.MAX_RETRIES
 
     if (shouldRetry) {
@@ -452,7 +431,7 @@ export const generateTagsForQuestion = async (questionContent, subject = null, r
       return generateTagsForQuestion(questionContent, subject, retryCount + 1)
     }
 
-    return { success: true, tags: ['未分类'] }
+    return { success: false, tags: null }
   }
 }
 
@@ -566,24 +545,13 @@ export const generateAnswerForQuestion = async (questionContent, retryCount = 0)
 
   const prompt = buildAnswerGenerationPrompt()
 
-  const requestBody = {
-    model: getCurrentTextModel(),
-    messages: [
-      { role: 'system', content: prompt },
-      { role: 'user', content: `请计算以下题目的标准答案：\n\n${questionContent}` }
-    ],
-    temperature: 0.2,
-    max_tokens: 2048
-  }
-
   try {
-    const response = await axios.post(AI_CONFIG.ENDPOINT, requestBody, {
-      headers: getAIHeaders(),
-      timeout: 30000
+    const { content } = await callTextCompletion({
+      systemContent: prompt,
+      userContent: `请计算以下题目的标准答案：\n\n${questionContent}`,
+      temperature: 0.2,
+      maxTokens: 2048
     })
-
-    const content = response.data.choices[0]?.message?.content
-    if (!content) throw new Error('AI 返回内容为空')
 
     let jsonStr = content
     const jsonMatch = content.match(/```json\n?([\s\S]*?)\n?```/) ||
@@ -643,20 +611,9 @@ export const generateAnswerForQuestion = async (questionContent, retryCount = 0)
       subject: result.subject || null
     }
   } catch (error) {
-    const errorMessage = error.response?.data?.message || error.message || '未知错误'
+    // callTextCompletion 内部已完成"主API→备用API"切换，
+    // 两家都失败（限流/网络）时才到这里，按原逻辑重试或返回空
     const isNetworkError = !error.response || error.code === 'ECONNABORTED' || error.code === 'ETIMEDOUT'
-
-    // 配额耗尽 → 切换到下一个模型（供后续问题使用），当前问题返回空
-    if (error.response?.status === 429) {
-      const nextModel = rotateTextModel()
-      if (nextModel) {
-        console.log(`  模型 ${getCurrentTextModel()} 配额耗尽，下一个问题将使用 ${nextModel}`)
-      } else {
-        console.error(`  所有文本模型配额已耗尽`)
-      }
-      return { success: true, answer: '', analysis: '' }
-    }
-
     const shouldRetry = isNetworkError && retryCount < AI_CONFIG.MAX_RETRIES
     if (shouldRetry) {
       await new Promise(resolve => setTimeout(resolve, (retryCount + 1) * 1000))
@@ -1253,9 +1210,17 @@ await job.updateProgress(80)
       }
 
       for (const q of questions) {
-        const tags = tagMap[q.id] || ['未分类']
-        q.ai_tags = tags
-        q.tags_source = 'ai'
+        const tags = tagMap[q.id]
+        if (tags && tags.length > 0) {
+          // 成功识别 → 保存标签
+          q.ai_tags = tags
+          q.tags_source = 'ai'
+        } else {
+          // 识别失败（主备 API 都挂了）→ 保留 ai_tags 为 NULL，
+          // 不写「未分类」，让每日回填任务后续能重新捞起该题重试。
+          q.ai_tags = null
+          q.tags_source = null
+        }
       }
 
       const tagUpdates = questions.map(q => ({

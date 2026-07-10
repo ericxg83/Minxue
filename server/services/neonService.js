@@ -84,12 +84,23 @@ export const batchUpdateQuestionTags = async (tagUpdates) => {
   const results = []
   for (const update of tagUpdates) {
     try {
-      await query(
-        `UPDATE ${TABLES.QUESTIONS}
-         SET ai_tags = $1::jsonb, tags_source = 'ai', updated_at = NOW()
-         WHERE id = $2`,
-        [JSON.stringify(update.ai_tags), update.id]
-      )
+      if (update.ai_tags && update.ai_tags.length > 0) {
+        // 成功识别 → 写入标签
+        await query(
+          `UPDATE ${TABLES.QUESTIONS}
+           SET ai_tags = $1::jsonb, tags_source = 'ai', updated_at = NOW()
+           WHERE id = $2`,
+          [JSON.stringify(update.ai_tags), update.id]
+        )
+      } else {
+        // 识别失败 → 保留 ai_tags 为 NULL（不写「未分类」），留给每日回填重试
+        await query(
+          `UPDATE ${TABLES.QUESTIONS}
+           SET ai_tags = NULL, tags_source = NULL, updated_at = NOW()
+           WHERE id = $1`,
+          [update.id]
+        )
+      }
       results.push({ id: update.id })
     } catch (error) {
       console.error(`更新标签失败，题目ID: ${update.id}`, error)
