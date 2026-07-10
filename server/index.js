@@ -24,7 +24,7 @@ import { judgeAnswer } from './services/judgeService.js'
 import { checkQuestionCompleteness } from './utils/questionCompleteness.js'
 import { uploadImage, deleteFile } from './services/ossService.js'
 import { getTaskQueue, getQueueStats, taskWorker } from './queue.js'
-import { processTask } from './worker.js'
+import { processTask, generateTagsForQuestion } from './worker.js'
 import weeklyReportRouter from './routes/weeklyReport.js'
 
 const app = express()
@@ -1731,6 +1731,101 @@ app.use((err, req, res, next) => {
     }
   }
   res.status(500).json({ error: err.message || '服务器内部错误' })
+})
+
+// 知识点标签回填：为所有已有题目重新生成 AI 知识点标签
+let backfillRunning = false
+let backfillProgress = { total: 0, updated: 0, skipped: 0, failed: 0, done: false }
+
+app.post('/api/admin/backfill-tags', async (req, res) => {
+  if (backfillRunning) {
+    return res.status(409).json({ error: '回填任务正在进行中', progress: backfillProgress })
+  }
+  backfillRunning = true
+  backfillProgress = { total: 0, updated: 0, skipped: 0, failed: 0, done: false }
+
+  // 异步执行，不阻塞响应
+  res.json({ success: true, message: '标签回填任务已启动' })
+
+  try {
+    // 1. 查找需要回填的题目
+    const { rows: questions } = await query(
+      `SELECT q.id, q.content, q.options, q.subject, q.ai_tags, q.question_type
+       FROM ${TABLES.QUESTIONS} q
+       WHERE q.is_complete = TRUE
+         AND (
+           q.ai_tags IS NULL
+           OR q.ai_tags = ''
+           OR q.ai_tags = '[]'
+           OR q.ai_tags::text = '["未分类"]'
+         )
+       ORDER BY q.created_at DESC
+       LIMIT 500`,
+      []
+    )
+
+    backfillProgress.total = questions.length
+    if (questions.length === 0) {
+      console.log('[BackfillTags] 没有待回填的题目')
+      backfillProgress.done = true
+      backfillRunning = false
+      return
+    }
+
+    console.log(`[BackfillTags] 找到 ${questions.length} 道需要回填标签的题目`)
+
+    // 2. 分批处理
+    const CONCURRENCY = 3
+    for (let i = 0; i < questions.length; i += CONCURRENCY) {
+      const batch = questions.slice(i, i + CONCURRENCY)
+      const promises = batch.map(async (q) => {
+        const content = q.content || ''
+        const options = (q.options || []).join('；')
+        const fullContent = options ? `${content}\n选项：${options}` : content
+        const subject = q.subject || null
+
+        const tagResult = await generateTagsForQuestion(fullContent, subject)
+
+        if (!tagResult.tags || tagResult.tags.length === 0 || tagResult.tags[0] === '未分类') {
+          backfillProgress.skipped++
+          return
+        }
+
+        const uniqueTags = [...new Set(tagResult.tags.map(t => t.trim()).filter(Boolean))]
+
+        try {
+          await query(
+            `UPDATE ${TABLES.QUESTIONS}
+             SET ai_tags = $1::jsonb, tags_source = 'ai', updated_at = NOW()
+             WHERE id = $2`,
+            [JSON.stringify(uniqueTags), q.id]
+          )
+          backfillProgress.updated++
+          console.log(`  [BackfillTags] ✅ ${q.id.substring(0, 8)}: ${uniqueTags.join(', ')}`)
+        } catch (err) {
+          backfillProgress.failed++
+          console.error(`  [BackfillTags] ❌ ${q.id.substring(0, 8)}: ${err.message}`)
+        }
+      })
+      await Promise.allSettled(promises)
+      // 限速延迟
+      if (i + CONCURRENCY < questions.length) {
+        await new Promise(r => setTimeout(r, 200))
+      }
+    }
+
+    console.log(`[BackfillTags] 完成！更新:${backfillProgress.updated} 跳过:${backfillProgress.skipped} 失败:${backfillProgress.failed}`)
+  } catch (err) {
+    console.error('[BackfillTags] 执行失败:', err)
+  } finally {
+    backfillProgress.done = true
+    backfillRunning = false
+  }
+})
+
+// 查询回填进度
+app.get('/api/admin/backfill-tags/progress', (req, res) => {
+  res.json({ success: true, ...backfillProgress })
 })
 
 // 周学习诊断报告

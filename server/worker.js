@@ -378,7 +378,7 @@ const recognizeQuestions = async (imageBase64, taskId, retryCount = 0) => {
   }
 }
 
-const generateTagsForQuestion = async (questionContent, subject = null, retryCount = 0) => {
+export const generateTagsForQuestion = async (questionContent, subject = null, retryCount = 0) => {
   if (!questionContent || !questionContent.trim()) {
     return { success: true, tags: ['未分类'] }
   }
