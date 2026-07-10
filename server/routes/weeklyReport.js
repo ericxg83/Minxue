@@ -76,9 +76,10 @@ router.get('/:studentId', async (req, res) => {
       [studentId, periodStart, periodEnd]
     )
 
-    // 6. 本周知识点诊断（从 ai_tags 展开，兼容 text 和 jsonb）
+    // 6. 本周知识点诊断（从 ai_tags 展开，兼容 text 和 jsonb），带学科
     const { rows: tagRows } = await query(
       `SELECT
+        COALESCE(NULLIF(q.subject, ''), '其他') AS subject,
         jsonb_array_elements_text(CASE WHEN jsonb_typeof(q.ai_tags::jsonb) = 'array' THEN q.ai_tags::jsonb ELSE '[]'::jsonb END) AS tag,
         COUNT(*) FILTER (WHERE q.is_correct = false)::int AS wrong_count,
         COUNT(*)::int AS total_count
@@ -91,8 +92,40 @@ router.get('/:studentId', async (req, res) => {
         AND q.ai_tags IS NOT NULL
         AND q.ai_tags != ''
         AND q.ai_tags != '[]'
-      GROUP BY tag
-      ORDER BY wrong_count DESC, total_count DESC`,
+      GROUP BY subject, tag
+      ORDER BY subject, wrong_count DESC, total_count DESC`,
+      [studentId, periodStart, periodEnd]
+    )
+
+    // 7. 每日正确率趋势（本周批改题目按日期分组）
+    const { rows: trendRows } = await query(
+      `SELECT
+        to_char(created_at, 'MM-DD') AS day,
+        COUNT(*)::int AS total,
+        COUNT(*) FILTER (WHERE is_correct = true)::int AS correct
+      FROM ${TABLES.QUESTIONS}
+      WHERE student_id = $1
+        AND created_at >= $2
+        AND created_at < $3
+        AND is_complete = TRUE
+      GROUP BY day
+      ORDER BY day`,
+      [studentId, periodStart, periodEnd]
+    )
+
+    // 8. 各学科整体正确率（本周批改题目按学科聚合）
+    const { rows: subjectAccRows } = await query(
+      `SELECT
+        COALESCE(NULLIF(subject, ''), '其他') AS subject,
+        COUNT(*)::int AS total,
+        COUNT(*) FILTER (WHERE is_correct = true)::int AS correct
+      FROM ${TABLES.QUESTIONS}
+      WHERE student_id = $1
+        AND created_at >= $2
+        AND created_at < $3
+        AND is_complete = TRUE
+      GROUP BY subject
+      ORDER BY total DESC`,
       [studentId, periodStart, periodEnd]
     )
 
@@ -123,6 +156,7 @@ router.get('/:studentId', async (req, res) => {
     }
 
     const knowledgeDiagnosis = tagRows.map(r => ({
+      subject: r.subject,
       tag: r.tag,
       wrongCount: r.wrong_count,
       totalCount: r.total_count,
@@ -131,15 +165,34 @@ router.get('/:studentId', async (req, res) => {
         : 0
     }))
 
+    // 各学科整体正确率映射
+    const subjectAccuracyMap = {}
+    for (const r of subjectAccRows) {
+      subjectAccuracyMap[r.subject] = r.total > 0
+        ? Math.round((r.correct / r.total) * 1000) / 10
+        : 0
+    }
+
+    // 按学科分组诊断：每科取 TOP5 薄弱知识点，附占比与掌握标签
+    const subjectDiagnosis = buildSubjectDiagnosis(knowledgeDiagnosis, subjectAccuracyMap)
+
+    // 每日趋势（补全本周 7 天，缺失日 accuracy=null）
+    const dailyTrend = buildDailyTrend(trendRows, periodStart)
+
+    const weekNum = getIsoWeek(periodStart)
+
     const result = {
       success: true,
       student: studentRows[0],
       period: {
         start: periodStart.toISOString().split('T')[0],
-        end: periodEnd.toISOString().split('T')[0]
+        end: periodEnd.toISOString().split('T')[0],
+        weekNum
       },
       stats,
-      knowledgeDiagnosis
+      knowledgeDiagnosis,
+      subjectDiagnosis,
+      dailyTrend
     }
 
     res.json(result)
@@ -249,7 +302,8 @@ router.get('/', async (req, res) => {
       success: true,
       period: {
         start: periodStart.toISOString().split('T')[0],
-        end: periodEnd.toISOString().split('T')[0]
+        end: periodEnd.toISOString().split('T')[0],
+        weekNum: getIsoWeek(periodStart)
       },
       reports
     })
@@ -280,6 +334,100 @@ function getWeekEnd(weeksAgo = 0) {
   const end = new Date(start)
   end.setDate(start.getDate() + 7)
   return end
+}
+
+/**
+ * ISO 周数（周一为一周起始）
+ */
+function getIsoWeek(date) {
+  const d = new Date(Date.UTC(date.getFullYear(), date.getMonth(), date.getDate()))
+  const dayNum = d.getUTCDay() || 7
+  d.setUTCDate(d.getUTCDate() + 4 - dayNum)
+  const yearStart = new Date(Date.UTC(d.getUTCFullYear(), 0, 1))
+  return Math.ceil(((d - yearStart) / 86400000 + 1) / 7)
+}
+
+/**
+ * 按学科分组诊断：每科取 TOP5 薄弱知识点
+ * @param {Array} knowledgeDiagnosis - [{subject, tag, wrongCount, totalCount, accuracy}]
+ * @param {Object} subjectAccuracyMap - { 学科: 整体正确率 }
+ * @returns {Array} [{ subject, accuracy, topTags:[{tag,wrongCount,totalCount,ratio,masteryLabel}] }]
+ */
+function buildSubjectDiagnosis(knowledgeDiagnosis, subjectAccuracyMap) {
+  const bySubject = {}
+  for (const kp of knowledgeDiagnosis) {
+    const subj = kp.subject || '其他'
+    if (!bySubject[subj]) bySubject[subj] = []
+    bySubject[subj].push(kp)
+  }
+
+  return Object.keys(bySubject).map(subject => {
+    const tags = bySubject[subject]
+    // 本科总错误次数（用于计算占比）
+    const totalWrong = tags.reduce((sum, t) => sum + t.wrongCount, 0)
+    const topTags = tags
+      .slice()
+      .sort((a, b) => b.wrongCount - a.wrongCount || b.totalCount - a.totalCount)
+      .slice(0, 5)
+      .map(t => ({
+        tag: t.tag,
+        wrongCount: t.wrongCount,
+        totalCount: t.totalCount,
+        accuracy: t.accuracy,
+        ratio: totalWrong > 0 ? Math.round((t.wrongCount / totalWrong) * 100) : 0,
+        masteryLabel: masteryLabelFor(t.accuracy)
+      }))
+    return {
+      subject,
+      accuracy: subjectAccuracyMap[subject] ?? null,
+      topTags
+    }
+  }).sort((a, b) => {
+    // 有整体正确率的学科在前，正确率低的（更需关注）在前
+    const wrongA = a.topTags.reduce((s, t) => s + t.wrongCount, 0)
+    const wrongB = b.topTags.reduce((s, t) => s + t.wrongCount, 0)
+    return wrongB - wrongA
+  })
+}
+
+/**
+ * 掌握标签：按知识点正确率分档
+ */
+function masteryLabelFor(accuracy) {
+  if (accuracy >= 80) return '需巩固'   // 掌握较好，巩固即可
+  if (accuracy >= 50) return '需关注'   // 中等，需关注
+  return '待加强'                        // 薄弱，重点加强
+}
+
+/**
+ * 补全本周 7 天趋势，缺失日 accuracy=null
+ * @param {Array} trendRows - [{day:'MM-DD', total, correct}]
+ * @param {Date} periodStart - 周一
+ * @returns {Array} [{ date:'MM-DD', accuracy:number|null, count:number }]
+ */
+function buildDailyTrend(trendRows, periodStart) {
+  const map = {}
+  for (const r of trendRows) {
+    map[r.day] = {
+      accuracy: r.total > 0 ? Math.round((r.correct / r.total) * 1000) / 10 : null,
+      count: r.total
+    }
+  }
+
+  const days = []
+  for (let i = 0; i < 7; i++) {
+    const d = new Date(periodStart)
+    d.setDate(periodStart.getDate() + i)
+    const mm = String(d.getMonth() + 1).padStart(2, '0')
+    const dd = String(d.getDate()).padStart(2, '0')
+    const key = `${mm}-${dd}`
+    days.push({
+      date: key,
+      accuracy: map[key] ? map[key].accuracy : null,
+      count: map[key] ? map[key].count : 0
+    })
+  }
+  return days
 }
 
 export default router

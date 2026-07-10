@@ -4,213 +4,358 @@ import { PDFDocument } from 'pdf-lib'
 import { generateExamPDF } from './pdfGenerator'
 import { getQuestionsByIds, createGeneratedExam } from '../services/apiService'
 import dayjs from 'dayjs'
+import isoWeek from 'dayjs/plugin/isoWeek'
+
+dayjs.extend(isoWeek)
 
 const A4_W = 210
 const A4_H = 297
 
 /**
- * 生成诊断报告 HTML 内容
- * 第一页：学习概览，第二页：知识点诊断
+ * 设计 token（PDF HTML 无法引用 CSS 变量，写死等值 hex）
+ * 对齐 workbench-theme.css / PRODUCT.md「温暖·可靠·清晰」
+ */
+const T = {
+  primary: '#3B82F6', primaryDark: '#2563EB', primarySoft: '#DBEAFE', primaryMist: '#EFF6FF',
+  success: '#16A34A', successSoft: '#DCFCE7',
+  warning: '#D97706', warningSoft: '#FEF3C7',
+  danger: '#DC2626', dangerSoft: '#FEE2E2',
+  accent: '#EA580C', accentSoft: '#FFF7ED',
+  text: '#1E293B', textSec: '#64748B', textTer: '#94A3B8',
+  border: '#E2E8F0', borderLight: '#F1F5F9', bg: '#F8FAFC'
+}
+
+function colorForAccuracy(acc) {
+  if (acc == null) return T.textTer
+  return acc >= 80 ? T.success : acc >= 60 ? T.warning : T.danger
+}
+
+/** 掌握标签配色 */
+function masteryStyle(label) {
+  switch (label) {
+    case '待加强': return { bg: T.dangerSoft, color: T.danger }
+    case '需关注': return { bg: T.warningSoft, color: T.warning }
+    case '需巩固': return { bg: T.accentSoft, color: T.accent }
+    default: return { bg: T.borderLight, color: T.textSec }
+  }
+}
+
+/** 老师寄语（依据统计自动拼装模板话术） */
+function buildTeacherComment(stats, weakestTag) {
+  const parts = []
+  const completeRate = stats.totalTasks > 0 ? stats.completedTasks / stats.totalTasks : 0
+  if (completeRate >= 0.8) parts.push('本周学习态度认真，作业完成情况良好')
+  else if (completeRate >= 0.4) parts.push('本周作业完成情况尚可，仍有提升空间')
+  else parts.push('本周作业完成率偏低，请督促孩子按时完成练习')
+
+  if (stats.accuracy >= 85) parts.push('整体正确率优秀，继续保持')
+  else if (stats.accuracy >= 60) parts.push(`整体正确率 ${stats.accuracy}%，${weakestTag ? '「' + weakestTag + '」' : '部分知识点'}仍需加强练习`)
+  else parts.push(`整体正确率 ${stats.accuracy}%，建议重点复习本周错题，夯实基础`)
+
+  return parts.join('，') + '！'
+}
+
+/** 老师建议（按薄弱学科自动生成） */
+function buildTeacherAdvice(subjectDiagnosis) {
+  if (!subjectDiagnosis || subjectDiagnosis.length === 0) {
+    return '本周暂无明显薄弱知识点，建议保持练习节奏，适当拓展提高题型。'
+  }
+  const tips = subjectDiagnosis.slice(0, 2).map(s => {
+    const top = s.topTags && s.topTags[0]
+    if (top) return `${s.subject}重点加强「${top.tag}」类型题训练`
+    return `${s.subject}保持巩固练习`
+  })
+  return `建议周末${tips.join('，')}；多做变式练习，及时复盘错题，提升举一反三能力。`
+}
+
+/** 内联 SVG 折线趋势图（本周每日正确率） */
+function renderTrendChart(dailyTrend) {
+  const W = 700, H = 180
+  const padL = 40, padR = 20, padT = 20, padB = 34
+  const innerW = W - padL - padR
+  const innerH = H - padT - padB
+  const n = dailyTrend.length
+  const stepX = n > 1 ? innerW / (n - 1) : innerW
+
+  const xOf = (i) => padL + i * stepX
+  const yOf = (acc) => padT + innerH - (acc / 100) * innerH
+
+  // 网格线 + y 轴刻度
+  let grid = ''
+  for (let v = 0; v <= 100; v += 25) {
+    const y = yOf(v)
+    grid += `<line x1="${padL}" y1="${y}" x2="${W - padR}" y2="${y}" stroke="${T.borderLight}" stroke-width="1"/>`
+    grid += `<text x="${padL - 8}" y="${y + 4}" text-anchor="end" font-size="10" fill="${T.textTer}">${v}%</text>`
+  }
+
+  // 折线：仅连接有数据的相邻点
+  const pts = dailyTrend.map((d, i) => ({ i, acc: d.accuracy, x: xOf(i), y: d.accuracy != null ? yOf(d.accuracy) : null }))
+  let segs = ''
+  let prev = null
+  for (const p of pts) {
+    if (p.y != null) {
+      if (prev) segs += `<line x1="${prev.x}" y1="${prev.y}" x2="${p.x}" y2="${p.y}" stroke="${T.primary}" stroke-width="2.5" stroke-linecap="round"/>`
+      prev = p
+    }
+  }
+
+  // 数据点 + 百分比标签
+  let dots = ''
+  for (const p of pts) {
+    if (p.y != null) {
+      dots += `<circle cx="${p.x}" cy="${p.y}" r="4" fill="#fff" stroke="${T.primary}" stroke-width="2.5"/>`
+      dots += `<text x="${p.x}" y="${p.y - 10}" text-anchor="middle" font-size="11" font-weight="600" fill="${T.primaryDark}">${p.acc}%</text>`
+    } else {
+      dots += `<circle cx="${p.x}" cy="${yOf(0)}" r="3" fill="${T.textTer}" opacity="0.4"/>`
+    }
+  }
+
+  // x 轴标签
+  let xlabels = ''
+  for (const p of pts) {
+    xlabels += `<text x="${p.x}" y="${H - 12}" text-anchor="middle" font-size="10" fill="${T.textSec}">${dailyTrend[p.i].date}</text>`
+  }
+
+  return `<svg width="${W}" height="${H}" viewBox="0 0 ${W} ${H}" xmlns="http://www.w3.org/2000/svg">
+    ${grid}${segs}${dots}${xlabels}
+  </svg>`
+}
+
+/** 价值点图标（简洁线性 SVG） */
+const VALUE_ICONS = {
+  find: `<svg width="22" height="22" viewBox="0 0 24 24" fill="none"><circle cx="11" cy="11" r="7" stroke="${T.primary}" stroke-width="2"/><path d="M16 16l4 4" stroke="${T.primary}" stroke-width="2" stroke-linecap="round"/></svg>`,
+  train: `<svg width="22" height="22" viewBox="0 0 24 24" fill="none"><path d="M12 3l2.5 5 5.5.8-4 3.9.9 5.5L12 17l-4.9 2.6.9-5.5-4-3.9 5.5-.8L12 3z" stroke="${T.primary}" stroke-width="2" stroke-linejoin="round"/></svg>`,
+  grow: `<svg width="22" height="22" viewBox="0 0 24 24" fill="none"><path d="M4 18l6-6 4 4 6-8" stroke="${T.primary}" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/><path d="M15 8h5v5" stroke="${T.primary}" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>`
+}
+
+/** 内联头像（取姓名首字，避免外链图片在 html2canvas 中的 CORS/渲染问题） */
+function renderAvatar(student) {
+  const initial = escapeHtml((student.name || '学').trim().charAt(0))
+  return `<div class="avatar"><span>${initial}</span></div>`
+}
+
+/**
+ * 生成诊断报告 HTML 内容（3 页：封面 / 概览 / 学科诊断）
  */
 function buildDiagnosisHTML(reportData) {
-  const { student, period, stats, knowledgeDiagnosis } = reportData
-  const weekNum = dayjs(period.start).isoWeek()
-  const accuracyColor = stats.accuracy >= 80 ? '#16A34A' : stats.accuracy >= 60 ? '#D97706' : '#DC2626'
+  const { student, period, stats, subjectDiagnosis = [], dailyTrend = [] } = reportData
+  const weekNum = period.weekNum || dayjs(period.start).isoWeek()
+  const accColor = colorForAccuracy(stats.accuracy)
 
-  // 知识点诊断行
-  const knowledgeRows = (knowledgeDiagnosis || []).map(kp => {
-    const kpAccuracy = kp.accuracy
-    const barColor = kpAccuracy >= 80 ? '#16A34A' : kpAccuracy >= 60 ? '#D97706' : '#DC2626'
-    return `
-      <tr>
-        <td>${escapeHtml(kp.tag)}</td>
-        <td>${kp.totalCount} 题</td>
-        <td>${kp.wrongCount} 次</td>
-        <td style="color: ${barColor}; font-weight: 600;">${kpAccuracy}%</td>
-        <td>
-          <div class="progress-bar-bg">
-            <div class="progress-bar-fill" style="width: ${kpAccuracy}%; background: ${barColor};"></div>
-          </div>
-        </td>
-      </tr>
-    `
-  }).join('')
+  // 最薄弱知识点（跨学科 wrongCount 最高）
+  let weakestTag = ''
+  for (const s of subjectDiagnosis) {
+    if (s.topTags && s.topTags[0]) { weakestTag = s.topTags[0].tag; break }
+  }
 
-  const hasKnowledgeData = knowledgeDiagnosis && knowledgeDiagnosis.length > 0
+  const teacherComment = buildTeacherComment(stats, weakestTag)
+  const teacherAdvice = buildTeacherAdvice(subjectDiagnosis)
+
+  // Logo（复用 TopNavBar SVG）
+  const logoSvg = `<svg viewBox="0 0 24 24" fill="none" width="26" height="26"><path d="M12 2L2 7l10 5 10-5-10-5zM2 17l10 5 10-5M2 12l10 5 10-5" stroke="${T.primary}" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>`
+
+  // 波浪装饰
+  const waveSvg = `<svg viewBox="0 0 794 120" preserveAspectRatio="none" width="794" height="120" xmlns="http://www.w3.org/2000/svg"><path d="M0 40 C 150 90, 300 0, 450 40 S 700 90, 794 40 L794 120 L0 120 Z" fill="${T.primaryMist}"/><path d="M0 60 C 180 110, 320 20, 500 60 S 720 100, 794 60 L794 120 L0 120 Z" fill="${T.primarySoft}" opacity="0.6"/></svg>`
+
+  // ── 学科诊断表格 ──
+  const subjectCards = subjectDiagnosis.length > 0 ? subjectDiagnosis.map(s => {
+    const rows = s.topTags.map(t => {
+      const ms = masteryStyle(t.masteryLabel)
+      return `<tr>
+        <td class="kt-tag">${escapeHtml(t.tag)}</td>
+        <td class="kt-c" style="color:${t.wrongCount >= 3 ? T.danger : T.text};font-weight:${t.wrongCount >= 3 ? 600 : 400}">${t.wrongCount}</td>
+        <td class="kt-c">${t.ratio}%</td>
+        <td class="kt-c"><span class="mastery" style="background:${ms.bg};color:${ms.color}">${t.masteryLabel}</span></td>
+      </tr>`
+    }).join('')
+    const sAcc = s.accuracy != null ? s.accuracy : '—'
+    const sAccColor = colorForAccuracy(s.accuracy)
+    return `<div class="subj-card">
+      <div class="subj-head">
+        <div class="subj-name"><span class="subj-dot"></span>${escapeHtml(s.subject)}</div>
+        <div class="subj-acc">正确率：<b style="color:${sAccColor}">${sAcc}${s.accuracy != null ? '%' : ''}</b></div>
+      </div>
+      <table class="kt-table">
+        <thead><tr><th style="width:40%">知识点</th><th>错误次数</th><th>占比</th><th>掌握情况</th></tr></thead>
+        <tbody>${rows}</tbody>
+      </table>
+    </div>`
+  }).join('') : `<div class="empty-state"><div class="empty-icon">🎉</div><div>本周暂无薄弱知识点</div><div class="empty-sub">完成作业批改后自动生成学科诊断</div></div>`
 
   return `<!DOCTYPE html>
 <html><head><meta charset="utf-8"><style>
   *{margin:0;padding:0;box-sizing:border-box}
-  body{font-family:'Microsoft YaHei','PingFang SC','Noto Sans SC','SimSun',sans-serif;color:#1a1a1a;background:#fff}
-  .page{width:794px;padding:40px;position:relative}
+  body{font-family:'Microsoft YaHei','PingFang SC','Noto Sans SC',sans-serif;color:${T.text};background:#fff}
+  .page{width:794px;height:1123px;position:relative;overflow:hidden;background:#fff}
+  .pad{padding:44px 48px}
 
-  /* 第一页：学习概览 */
-  .report-header{text-align:center;margin-bottom:24px}
-  .report-title{font-size:24px;font-weight:bold;color:#1E293B;letter-spacing:2px}
-  .report-subtitle{font-size:13px;color:#64748B;margin-top:6px}
-  .divider{border-top:2px solid #E2E8F0;margin:16px 0}
+  /* 页眉 */
+  .ph{display:flex;align-items:center;justify-content:space-between;margin-bottom:28px}
+  .ph-logo{display:flex;align-items:center;gap:8px;font-size:15px;font-weight:700;color:${T.text}}
+  .ph-logo .sub{font-size:9px;color:${T.textTer};font-weight:400}
+  .week-badge{background:${T.primary};color:#fff;font-size:12px;font-weight:600;padding:5px 14px;border-radius:20px;letter-spacing:1px}
 
-  /* 学生信息区 */
-  .student-info{display:flex;justify-content:space-between;align-items:center;padding:16px 20px;background:#F8FAFC;border-radius:12px;margin-bottom:20px}
-  .student-name{font-size:18px;font-weight:bold;color:#1E293B}
-  .student-meta{font-size:13px;color:#64748B;margin-top:4px}
-  .period-badge{font-size:12px;color:#2563EB;background:#EFF6FF;padding:6px 14px;border-radius:20px;font-weight:500}
+  .sec-num{color:${T.primary};font-weight:800;font-size:22px;margin-right:8px}
+  .sec-title{display:flex;align-items:center;font-size:19px;font-weight:700;color:${T.text};margin-bottom:20px}
+  .sub-label{display:flex;align-items:center;gap:6px;font-size:13px;font-weight:600;color:${T.textSec};margin:0 0 14px}
 
-  /* KPI 卡片 */
-  .kpi-grid{display:grid;grid-template-columns:1fr 1fr 1fr;gap:12px;margin-bottom:20px}
-  .kpi-card{background:#fff;border:1px solid #E2E8F0;border-radius:12px;padding:16px;text-align:center}
-  .kpi-card .kpi-value{font-size:28px;font-weight:700;margin:4px 0}
-  .kpi-card .kpi-label{font-size:12px;color:#64748B}
-  .kpi-card .kpi-unit{font-size:14px;font-weight:400;color:#94A3B8}
+  /* 页脚 */
+  .pf{position:absolute;left:48px;right:48px;bottom:26px;display:flex;justify-content:space-between;align-items:center;font-size:11px;color:${T.textTer};border-top:1px solid ${T.borderLight};padding-top:10px}
 
-  .kpi-row2{display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-bottom:20px}
-  .kpi-card-half{background:#fff;border:1px solid #E2E8F0;border-radius:12px;padding:16px;text-align:center}
+  /* ── 封面页 ── */
+  .cover{height:1123px;display:flex;flex-direction:column;position:relative}
+  .cover-top{display:flex;align-items:center;justify-content:space-between;padding:44px 48px 0}
+  .cover-body{flex:1;display:flex;flex-direction:column;align-items:center;text-align:center;padding:20px 48px}
+  .cover-title{font-size:46px;font-weight:800;color:${T.text};letter-spacing:4px;margin-top:36px}
+  .cover-sub{font-size:16px;color:${T.textSec};margin-top:12px;letter-spacing:1px}
+  .avatar{width:96px;height:96px;border-radius:50%;margin-top:44px;border:4px solid ${T.primarySoft};background:linear-gradient(135deg,${T.primary},${T.primaryDark});display:flex;align-items:center;justify-content:center}
+  .avatar span{color:#fff;font-size:40px;font-weight:700}
+  .cover-name{font-size:24px;font-weight:700;color:${T.text};margin-top:16px}
+  .cover-name .tag{font-size:14px;font-weight:400;color:${T.textSec};margin-left:6px}
+  .class-badge{display:inline-block;font-size:13px;color:${T.primaryDark};background:${T.primaryMist};padding:5px 16px;border-radius:16px;margin-top:12px;font-weight:500}
+  .period-line{font-size:13px;color:${T.textTer};margin-top:14px}
+  .values{display:flex;gap:16px;margin-top:44px;width:100%;max-width:560px}
+  .value-item{flex:1;background:${T.bg};border:1px solid ${T.borderLight};border-radius:14px;padding:18px 12px;text-align:center}
+  .value-icon{width:44px;height:44px;border-radius:12px;background:${T.primaryMist};display:flex;align-items:center;justify-content:center;margin:0 auto 10px}
+  .value-t{font-size:14px;font-weight:600;color:${T.text}}
+  .value-d{font-size:11px;color:${T.textSec};margin-top:5px;line-height:1.5}
+  .slogan{font-size:15px;font-weight:600;color:${T.primary};margin-top:40px;letter-spacing:1px}
+  .wave{position:absolute;left:0;right:0;bottom:0;line-height:0}
 
-  /* 作业详情 */
-  .detail-section{background:#fff;border:1px solid #E2E8F0;border-radius:12px;padding:20px;margin-bottom:16px}
-  .detail-section .section-title{font-size:15px;font-weight:600;color:#1E293B;margin-bottom:12px;padding-bottom:8px;border-bottom:1px solid #F1F5F9}
-  .detail-row{display:flex;justify-content:space-between;padding:8px 0;font-size:14px}
-  .detail-row .label{color:#64748B}
-  .detail-row .value{color:#1E293B;font-weight:500}
+  /* ── KPI ── */
+  .kpi-row{display:flex;gap:14px;margin-bottom:16px}
+  .kpi{flex:1;background:#fff;border:1px solid ${T.border};border-radius:14px;padding:18px 16px;display:flex;flex-direction:column;justify-content:center}
+  .kpi-v{font-size:30px;font-weight:800;color:${T.text};line-height:1.1}
+  .kpi-v .u{font-size:14px;font-weight:500;color:${T.textTer};margin-left:3px}
+  .kpi-l{font-size:12px;color:${T.textSec};margin-top:6px}
+  .kpi.ring-kpi{flex-direction:row;align-items:center;gap:16px}
+  .ring{width:78px;height:78px;border-radius:50%;background:conic-gradient(${accColor} ${stats.accuracy * 3.6}deg, ${T.borderLight} 0);display:flex;align-items:center;justify-content:center;position:relative;flex-shrink:0}
+  .ring::before{content:'';position:absolute;width:56px;height:56px;border-radius:50%;background:#fff}
+  .ring-t{position:relative;z-index:1;font-size:19px;font-weight:800;color:${accColor}}
+  .ring-side .rl{font-size:12px;color:${T.textSec}}
+  .ring-side .rv{font-size:13px;color:${T.text};margin-top:2px;font-weight:600}
 
-  /* 正确率大圆环 */
-  .accuracy-ring{display:flex;align-items:center;justify-content:center;gap:20px;margin:16px 0}
-  .ring-chart{width:100px;height:100px;border-radius:50%;background:conic-gradient(${accuracyColor} ${stats.accuracy * 3.6}deg, #F1F5F9 ${stats.accuracy * 3.6}deg);display:flex;align-items:center;justify-content:center;position:relative}
-  .ring-chart::before{content:'';position:absolute;width:72px;height:72px;border-radius:50%;background:#fff}
-  .ring-text{position:relative;z-index:1;font-size:22px;font-weight:700;color:${accuracyColor}}
-  .ring-label{font-size:12px;color:#64748B}
+  /* 三色卡 */
+  .tri-row{display:flex;gap:14px;margin-bottom:22px}
+  .tri{flex:1;border-radius:14px;padding:16px;border:1px solid transparent}
+  .tri-v{font-size:26px;font-weight:800;line-height:1.1}
+  .tri-l{font-size:12px;margin-top:5px;font-weight:500}
 
-  /* 第二页：知识点诊断 */
-  .page-break{page-break-before:always;padding-top:40px}
-  .knowledge-table{width:100%;border-collapse:collapse;font-size:13px}
-  .knowledge-table th{background:#F8FAFC;padding:10px 12px;text-align:left;font-weight:600;color:#475569;border-bottom:2px solid #E2E8F0}
-  .knowledge-table td{padding:10px 12px;border-bottom:1px solid #F1F5F9;color:#334155}
-  .knowledge-table tr:last-child td{border-bottom:none}
-  .progress-bar-bg{width:100%;height:8px;background:#F1F5F9;border-radius:4px;overflow:hidden}
-  .progress-bar-fill{height:100%;border-radius:4px;transition:width 0.3s}
+  /* 趋势卡 */
+  .chart-card{background:#fff;border:1px solid ${T.border};border-radius:14px;padding:18px 16px 8px;margin-bottom:22px}
+  .chart-card svg{display:block;width:100%;height:auto}
 
-  .empty-state{text-align:center;padding:40px;color:#94A3B8;font-size:14px}
-  .empty-state .empty-icon{font-size:48px;margin-bottom:12px}
+  /* 老师寄语 */
+  .comment{background:${T.primaryMist};border:1px solid ${T.primarySoft};border-radius:14px;padding:18px 20px;display:flex;gap:12px;align-items:flex-start}
+  .comment-icon{flex-shrink:0;width:32px;height:32px;border-radius:10px;background:${T.primary};display:flex;align-items:center;justify-content:center}
+  .comment-t{font-size:13px;font-weight:700;color:${T.text};margin-bottom:5px}
+  .comment-d{font-size:13px;color:${T.textSec};line-height:1.7}
 
-  .footer-text{text-align:center;font-size:11px;color:#94A3B8;margin-top:24px;padding-top:12px;border-top:1px solid #F1F5F9}
+  /* ── 学科诊断 ── */
+  .subj-card{background:#fff;border:1px solid ${T.border};border-radius:14px;padding:16px 18px;margin-bottom:16px}
+  .subj-head{display:flex;align-items:center;justify-content:space-between;margin-bottom:12px}
+  .subj-name{display:flex;align-items:center;gap:8px;font-size:16px;font-weight:700;color:${T.text}}
+  .subj-dot{width:8px;height:18px;border-radius:4px;background:${T.primary}}
+  .subj-acc{font-size:13px;color:${T.textSec}}
+  .kt-table{width:100%;border-collapse:collapse;font-size:13px}
+  .kt-table th{background:${T.bg};padding:9px 12px;text-align:center;font-weight:600;color:${T.textSec};border-bottom:1px solid ${T.border}}
+  .kt-table th:first-child{text-align:left}
+  .kt-table td{padding:9px 12px;border-bottom:1px solid ${T.borderLight};color:${T.text}}
+  .kt-table tr:last-child td{border-bottom:none}
+  .kt-tag{font-weight:500}
+  .kt-c{text-align:center}
+  .mastery{display:inline-block;padding:2px 10px;border-radius:12px;font-size:11px;font-weight:600}
+
+  .advice{background:${T.accentSoft};border:1px solid #FED7AA;border-radius:14px;padding:16px 20px;margin-top:6px}
+  .advice-t{font-size:13px;font-weight:700;color:${T.accent};margin-bottom:6px;display:flex;align-items:center;gap:6px}
+  .advice-d{font-size:13px;color:#9A3412;line-height:1.7}
+
+  .empty-state{text-align:center;padding:80px 40px;color:${T.textTer}}
+  .empty-icon{font-size:52px;margin-bottom:14px}
+  .empty-sub{margin-top:8px;font-size:12px}
 </style></head><body>
-  <!-- 第一页 -->
+
+  <!-- ═══ 封面页 ═══ -->
   <div class="page">
-    <div class="report-header">
-      <div class="report-title">📖 周学习诊断报告</div>
-      <div class="report-subtitle">敏学智能学习系统 · 自动生成</div>
-    </div>
-
-    <div class="student-info">
-      <div>
-        <div class="student-name">${escapeHtml(student.name)}</div>
-        <div class="student-meta">${student.grade || ''}${student.class ? ' · ' + escapeHtml(student.class) : ''}</div>
+    <div class="cover">
+      <div class="cover-top">
+        <div class="ph-logo">${logoSvg}<div>敏学教育<div class="sub">AI 智能批改 · 精准提分</div></div></div>
+        <div class="week-badge">WEEK ${weekNum}</div>
       </div>
-      <div class="period-badge">第 ${weekNum} 周 · ${period.start} ~ ${period.end}</div>
-    </div>
-
-    <div class="divider"></div>
-
-    <!-- 正确率 -->
-    <div class="accuracy-ring">
-      <div class="ring-chart">
-        <div class="ring-text">${stats.accuracy}%</div>
+      <div class="cover-body">
+        <div class="cover-title">敏学成长报告</div>
+        <div class="cover-sub">周学习诊断 · 个性化训练</div>
+        ${renderAvatar(student)}
+        <div class="cover-name">${escapeHtml(student.name)}<span class="tag">同学</span></div>
+        <div class="class-badge">${escapeHtml(student.grade || '')}</div>
+        <div class="period-line">学习周期：${period.start} ~ ${period.end}</div>
+        <div class="values">
+          <div class="value-item"><div class="value-icon">${VALUE_ICONS.find}</div><div class="value-t">发现问题</div><div class="value-d">精准定位学习薄弱点</div></div>
+          <div class="value-item"><div class="value-icon">${VALUE_ICONS.train}</div><div class="value-t">针对训练</div><div class="value-d">错题重练强化提升</div></div>
+          <div class="value-item"><div class="value-icon">${VALUE_ICONS.grow}</div><div class="value-t">持续进步</div><div class="value-d">每周追踪看得见</div></div>
+        </div>
+        <div class="slogan">每一次努力，都是成长的脚印！</div>
       </div>
-      <div>
-        <div class="ring-label">本周正确率</div>
-        <div style="font-size:13px;color:#64748B;margin-top:4px;">
-          正确 ${stats.correctCount} 题 / 共 ${stats.totalQuestions} 题
+      <div class="wave">${waveSvg}</div>
+    </div>
+  </div>
+
+  <!-- ═══ 概览页 ═══ -->
+  <div class="page">
+    <div class="pad">
+      <div class="ph">
+        <div class="ph-logo">${logoSvg}<div>敏学成长报告</div></div>
+        <div class="week-badge">WEEK ${weekNum}</div>
+      </div>
+      <div class="sec-title"><span class="sec-num">01</span>本周学习概览</div>
+
+      <div class="sub-label">整体表现</div>
+      <div class="kpi-row">
+        <div class="kpi"><div class="kpi-v">${stats.completedTasks}<span class="u">次</span></div><div class="kpi-l">完成作业</div></div>
+        <div class="kpi"><div class="kpi-v">${stats.totalQuestions}<span class="u">题</span></div><div class="kpi-l">AI 批改题量</div></div>
+        <div class="kpi ring-kpi">
+          <div class="ring"><div class="ring-t">${stats.accuracy}%</div></div>
+          <div class="ring-side"><div class="rl">整体正确率</div><div class="rv">${stats.correctCount}/${stats.totalQuestions} 题</div></div>
         </div>
       </div>
-    </div>
 
-    <!-- KPI 卡片：三列 -->
-    <div class="kpi-grid">
-      <div class="kpi-card">
-        <div class="kpi-label">本周作业</div>
-        <div class="kpi-value">${stats.totalTasks}<span class="kpi-unit"> 份</span></div>
-        <div style="font-size:12px;color:#64748B;">已完成 ${stats.completedTasks} 份</div>
+      <div class="tri-row">
+        <div class="tri" style="background:${T.warningSoft};border-color:#FDE68A"><div class="tri-v" style="color:${T.warning}">${stats.newWrongCount}<span style="font-size:14px"> 题</span></div><div class="tri-l" style="color:#92400E">新增错题</div></div>
+        <div class="tri" style="background:${T.successSoft};border-color:#BBF7D0"><div class="tri-v" style="color:${T.success}">${stats.masteredCount}<span style="font-size:14px"> 题</span></div><div class="tri-l" style="color:#166534">已掌握错题</div></div>
+        <div class="tri" style="background:${T.primaryMist};border-color:${T.primarySoft}"><div class="tri-v" style="color:${T.primary}">${stats.pendingCount}<span style="font-size:14px"> 题</span></div><div class="tri-l" style="color:${T.primaryDark}">待提升错题</div></div>
       </div>
-      <div class="kpi-card">
-        <div class="kpi-label">新增错题</div>
-        <div class="kpi-value" style="color:${stats.newWrongCount > 0 ? '#DC2626' : '#16A34A'}">${stats.newWrongCount}<span class="kpi-unit"> 题</span></div>
-        <div style="font-size:12px;color:#64748B;">本周新收录</div>
-      </div>
-      <div class="kpi-card">
-        <div class="kpi-label">已掌握</div>
-        <div class="kpi-value" style="color:#16A34A">${stats.masteredCount}<span class="kpi-unit"> 题</span></div>
-        <div style="font-size:12px;color:#64748B;">待提升 ${stats.pendingCount} 题</div>
+
+      <div class="sub-label">正确率趋势（本周）</div>
+      <div class="chart-card">${renderTrendChart(dailyTrend.length ? dailyTrend : [])}</div>
+
+      <div class="comment">
+        <div class="comment-icon"><svg width="18" height="18" viewBox="0 0 24 24" fill="none"><path d="M4 5h16v11H8l-4 4V5z" stroke="#fff" stroke-width="2" stroke-linejoin="round"/></svg></div>
+        <div><div class="comment-t">老师寄语</div><div class="comment-d">${escapeHtml(teacherComment)}</div></div>
       </div>
     </div>
-
-    <!-- 作业与批改详情 -->
-    <div class="detail-section">
-      <div class="section-title">📋 学习详情</div>
-      <div class="detail-row">
-        <span class="label">作业完成情况</span>
-        <span class="value">${stats.completedTasks} / ${stats.totalTasks} 份${stats.totalTasks > 0 && stats.completedTasks < stats.totalTasks ? '（还有 ' + (stats.totalTasks - stats.completedTasks) + ' 份批改中）' : ''}</span>
-      </div>
-      <div class="detail-row">
-        <span class="label">总批改题量</span>
-        <span class="value">${stats.totalQuestions} 题</span>
-      </div>
-      <div class="detail-row">
-        <span class="label">正确题数</span>
-        <span class="value" style="color:#16A34A">${stats.correctCount} 题</span>
-      </div>
-      <div class="detail-row">
-        <span class="label">错误题数</span>
-        <span class="value" style="color:#DC2626">${stats.wrongCount} 题</span>
-      </div>
-      <div class="detail-row">
-        <span class="label">错题掌握情况</span>
-        <span class="value">已掌握 ${stats.masteredCount} 题 · 待提升 ${stats.pendingCount} 题</span>
-      </div>
-    </div>
-
-    <div class="footer-text">敏学教育 · 让学习更有温度</div>
+    <div class="pf"><span>敏学教育 · 让学习更有温度</span><span>- 1 -</span></div>
   </div>
 
-  <!-- 第二页：知识点诊断 -->
-  <div class="page page-break">
-    <div class="report-header">
-      <div class="report-title" style="font-size:20px;">📊 知识点掌握诊断</div>
-      <div class="report-subtitle">${escapeHtml(student.name)} · 第 ${weekNum} 周</div>
-    </div>
+  <!-- ═══ 学科诊断页 ═══ -->
+  <div class="page">
+    <div class="pad">
+      <div class="ph">
+        <div class="ph-logo">${logoSvg}<div>敏学成长报告</div></div>
+        <div class="week-badge">WEEK ${weekNum}</div>
+      </div>
+      <div class="sec-title"><span class="sec-num">02</span>学科诊断分析</div>
+      <div class="sub-label">薄弱知识点 TOP 5</div>
 
-    <div class="divider"></div>
+      ${subjectCards}
 
-    ${hasKnowledgeData ? `
-    <table class="knowledge-table">
-      <thead>
-        <tr>
-          <th style="width:28%;">知识点</th>
-          <th style="width:16%;">总题数</th>
-          <th style="width:16%;">错误次数</th>
-          <th style="width:14%;">正确率</th>
-          <th style="width:26%;">掌握程度</th>
-        </tr>
-      </thead>
-      <tbody>
-        ${knowledgeRows}
-      </tbody>
-    </table>
-    <div style="margin-top:16px;padding:12px 16px;background:#FFF7ED;border-radius:8px;border:1px solid #FED7AA;">
-      <div style="font-size:13px;font-weight:600;color:#C2410C;margin-bottom:4px;">🔍 高频薄弱点</div>
-      <div style="font-size:12px;color:#9A3412;">
-        ${knowledgeDiagnosis.slice(0, 3).map(kp => `「${kp.tag}」正确率 ${kp.accuracy}%，错误 ${kp.wrongCount} 次`).join('；')}
+      <div class="advice">
+        <div class="advice-t"><svg width="16" height="16" viewBox="0 0 24 24" fill="none"><path d="M9 18h6M10 21h4M12 3a6 6 0 00-4 10c.7.7 1 1.4 1 2h6c0-.6.3-1.3 1-2a6 6 0 00-4-10z" stroke="${T.accent}" stroke-width="2" stroke-linejoin="round"/></svg>老师建议</div>
+        <div class="advice-d">${escapeHtml(teacherAdvice)}</div>
       </div>
     </div>
-    ` : `
-    <div class="empty-state">
-      <div class="empty-icon">🎉</div>
-      <div>本周暂无知识点诊断数据</div>
-      <div style="margin-top:8px;font-size:12px;">完成作业批改后自动生成知识点分析</div>
-    </div>
-    `}
-
-    <div class="footer-text" style="margin-top:${hasKnowledgeData ? '24px' : '60px'}">敏学教育 · 让学习更有温度</div>
+    <div class="pf"><span>敏学教育 · 让学习更有温度</span><span>- 2 -</span></div>
   </div>
+
 </body></html>`
 }
 
@@ -224,7 +369,8 @@ function escapeHtml(text) {
 }
 
 /**
- * 生成诊断报告 PDF（页 1-2）
+ * 生成诊断报告 PDF（封面 + 概览 + 学科诊断，共 3 页）
+ * 每个 .page 元素单独截图为一个 A4 页面，保证分页边界干净
  * @param {Object} reportData - 周统计数据
  * @returns {Blob} 诊断报告 PDF blob
  */
@@ -239,34 +385,24 @@ async function generateDiagnosisPDF(reportData) {
   document.body.appendChild(container)
 
   try {
-    const canvas = await html2canvas(container, {
-      scale: 2,
-      useCORS: true,
-      logging: false,
-      width: 794,
-      height: container.scrollHeight,
-    })
-
-    const imgData = canvas.toDataURL('image/jpeg', 0.92)
-    const pageH = (794 / A4_W) * A4_H
-    const totalPages = Math.ceil(canvas.height / pageH)
-
+    const pageEls = Array.from(container.querySelectorAll('.page'))
     const doc = new jsPDF('p', 'mm', 'a4')
 
-    for (let p = 0; p < totalPages; p++) {
+    for (let p = 0; p < pageEls.length; p++) {
+      const el = pageEls[p]
+      const canvas = await html2canvas(el, {
+        scale: 2,
+        useCORS: true,
+        allowTaint: true,
+        logging: false,
+        backgroundColor: '#ffffff',
+        width: 794,
+        height: 1123,
+      })
+      const img = canvas.toDataURL('image/jpeg', 0.92)
       if (p > 0) doc.addPage()
-      const srcY = p * pageH
-      const sliceH = Math.min(pageH, canvas.height - srcY)
-
-      const pageCanvas = document.createElement('canvas')
-      pageCanvas.width = canvas.width
-      pageCanvas.height = sliceH
-      const ctx = pageCanvas.getContext('2d')
-      ctx.drawImage(canvas, 0, srcY, canvas.width, sliceH, 0, 0, canvas.width, sliceH)
-
-      const pageImg = pageCanvas.toDataURL('image/jpeg', 0.92)
-      const mmH = (sliceH / canvas.width) * A4_W
-      doc.addImage(pageImg, 'JPEG', 0, 0, A4_W, mmH)
+      // 每页铺满整张 A4
+      doc.addImage(img, 'JPEG', 0, 0, A4_W, A4_H)
     }
 
     return doc.output('blob')
