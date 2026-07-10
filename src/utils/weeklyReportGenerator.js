@@ -382,7 +382,7 @@ export async function generateWeeklyReport(studentId, { weeks = 1 } = {}) {
  * @param {Function} options.onProgress - 进度回调 (studentName, status)
  * @returns {Array<{student, pdfBlob, status, error?}>}
  */
-export async function generateAllWeeklyReports({ weeks = 1, onProgress } = {}) {
+export async function generateAllWeeklyReports({ weeks = 1, onProgress, studentIds = null } = {}) {
   const API_BASE = import.meta.env.VITE_API_URL || '/api'
 
   // 1. 获取所有学生的摘要
@@ -392,8 +392,14 @@ export async function generateAllWeeklyReports({ weeks = 1, onProgress } = {}) {
 
   const results = []
 
+  // 若指定了 studentIds，仅生成勾选的学生
+  const idSet = Array.isArray(studentIds) && studentIds.length > 0 ? new Set(studentIds) : null
+  const targetReports = idSet
+    ? summaryData.reports.filter(r => idSet.has(r.student.id))
+    : summaryData.reports
+
   // 串行为每个学生生成（避免浏览器内存爆炸）
-  for (const report of summaryData.reports) {
+  for (const report of targetReports) {
     const { student, stats } = report
     if (!stats || stats.totalQuestions === 0) {
       // 本周无数据 → 跳过但记录

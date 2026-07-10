@@ -41,6 +41,15 @@
         >
           一键生成全部学生
         </el-button>
+        <el-button
+          type="success"
+          plain
+          :loading="generatingAll"
+          :disabled="checkedIds.length === 0"
+          @click="handleGenerateSelected"
+        >
+          生成勾选学生{{ checkedIds.length ? ` (${checkedIds.length})` : '' }}
+        </el-button>
       </div>
     </header>
 
@@ -51,17 +60,29 @@
         <div class="section-title">
           <el-icon><DataAnalysis /></el-icon>
           本周学习概览（{{ summaryData.reports.filter(r => r.stats?.totalQuestions > 0).length }}/{{ summaryData.reports.length }} 人有数据）
+          <el-checkbox
+            :model-value="allChecked"
+            :indeterminate="isIndeterminate"
+            @change="toggleCheckAll"
+            style="margin-left: 16px;"
+          >全选</el-checkbox>
         </div>
         <div class="kpi-grid">
           <div
             v-for="r in summaryData.reports"
             :key="r.student.id"
             class="kpi-card"
-            @click="selectedStudentId = r.student.id"
-            style="cursor: pointer;"
+            :class="{ 'kpi-card--checked': checkedIds.includes(r.student.id) }"
           >
-            <div class="kpi-card__name">{{ r.student.name }}</div>
-            <div class="kpi-card__row">
+            <div class="kpi-card__header">
+              <el-checkbox
+                :model-value="checkedIds.includes(r.student.id)"
+                @change="(v) => toggleCheck(r.student.id, v)"
+                @click.stop
+              />
+              <div class="kpi-card__name" @click="selectedStudentId = r.student.id" style="cursor: pointer;">{{ r.student.name }}</div>
+            </div>
+            <div class="kpi-card__row" @click="selectedStudentId = r.student.id" style="cursor: pointer;">
               <div class="kpi-item">
                 <div class="kpi-value" :style="{ color: getAccuracyColor(r.stats?.accuracy) }">
                   {{ r.stats ? r.stats.accuracy + '%' : '-' }}
@@ -260,6 +281,30 @@ const generatingAll = ref(false)
 const progressList = ref([])
 const results = ref([])
 const currentStudentDetail = ref(null)
+const checkedIds = ref([])
+
+const allChecked = computed(() =>
+  summaryData.value?.reports?.length > 0 &&
+  checkedIds.value.length === summaryData.value.reports.length
+)
+const isIndeterminate = computed(() =>
+  checkedIds.value.length > 0 &&
+  checkedIds.value.length < (summaryData.value?.reports?.length || 0)
+)
+
+function toggleCheck(id, checked) {
+  if (checked) {
+    if (!checkedIds.value.includes(id)) checkedIds.value.push(id)
+  } else {
+    checkedIds.value = checkedIds.value.filter(x => x !== id)
+  }
+}
+
+function toggleCheckAll(checked) {
+  checkedIds.value = checked
+    ? (summaryData.value?.reports || []).map(r => r.student.id)
+    : []
+}
 
 const weekNum = dayjs().isoWeek()
 const periodLabel = computed(() => {
@@ -346,6 +391,38 @@ async function handleGenerateAll() {
   try {
     const arr = await generateAllWeeklyReports({
       weeks: 1,
+      onProgress: (studentName, status) => {
+        progressList.value = progressList.value.filter(p => p.name !== studentName)
+        progressList.value.push({ name: studentName, status })
+      }
+    })
+    results.value = arr
+
+    const done = arr.filter(r => r.status === 'done').length
+    const skipped = arr.filter(r => r.status === 'skipped').length
+    const failed = arr.filter(r => r.status === 'failed').length
+    ElMessage.success(`已完成！成功 ${done} 人${skipped ? `，无数据 ${skipped} 人` : ''}${failed ? `，失败 ${failed} 人` : ''}`)
+  } catch (e) {
+    ElMessage.error('批量生成失败: ' + (e.message || '未知错误'))
+  } finally {
+    generatingAll.value = false
+  }
+}
+
+async function handleGenerateSelected() {
+  if (checkedIds.value.length === 0) {
+    ElMessage.warning('请先勾选学生')
+    return
+  }
+  generatingAll.value = true
+  progressList.value = []
+  results.value = []
+  currentStudentDetail.value = null
+
+  try {
+    const arr = await generateAllWeeklyReports({
+      weeks: 1,
+      studentIds: [...checkedIds.value],
       onProgress: (studentName, status) => {
         progressList.value = progressList.value.filter(p => p.name !== studentName)
         progressList.value.push({ name: studentName, status })
@@ -497,6 +574,22 @@ const topWeakTags = computed(() => {
 
 .kpi-card:hover {
   box-shadow: 0 2px 8px rgba(0,0,0,0.08);
+}
+
+.kpi-card--checked {
+  border-color: #1677FF;
+  background: #F0F7FF;
+}
+
+.kpi-card__header {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 10px;
+}
+
+.kpi-card__header .kpi-card__name {
+  margin-bottom: 0;
 }
 
 .kpi-card__name {

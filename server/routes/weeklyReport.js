@@ -14,7 +14,7 @@ router.get('/:studentId', async (req, res) => {
     const { studentId } = req.params
     const weeks = parseInt(req.query.weeks) || 1
     const periodStart = getWeekStart(weeks)
-    const periodEnd = getWeekEnd()
+    const periodEnd = getWeekEnd(1)
 
     // 1. 获取学生信息
     const { rows: studentRows } = await query(
@@ -157,7 +157,7 @@ router.get('/', async (req, res) => {
   try {
     const weeks = parseInt(req.query.weeks) || 1
     const periodStart = getWeekStart(weeks)
-    const periodEnd = getWeekEnd()
+    const periodEnd = getWeekEnd(1)
 
     // 获取所有学生
     const { rows: studentRows } = await query(
