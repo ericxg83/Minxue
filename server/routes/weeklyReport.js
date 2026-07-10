@@ -92,8 +92,8 @@ router.get('/:studentId', async (req, res) => {
         AND q.ai_tags IS NOT NULL
         AND q.ai_tags != ''
         AND q.ai_tags != '[]'
-      GROUP BY subject, tag
-      ORDER BY subject, wrong_count DESC, total_count DESC`,
+      GROUP BY COALESCE(NULLIF(q.subject, ''), '其他'), tag
+      ORDER BY COALESCE(NULLIF(q.subject, ''), '其他'), wrong_count DESC, total_count DESC`,
       [studentId, periodStart, periodEnd]
     )
 
