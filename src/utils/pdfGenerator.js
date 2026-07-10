@@ -250,16 +250,19 @@ export async function generateExamPDF({ title, studentName, questions, filename,
       height: container.scrollHeight,
     })
 
-    const imgData = canvas.toDataURL('image/jpeg', 0.92)
-    const pageH = (794 / A4_W) * A4_H
-    const totalPages = Math.ceil(canvas.height / pageH)
+    // html2canvas scale 参数导致的像素倍率
+    const scale = 2
+    const cssW = 794
+    const cssPageH = (cssW / A4_W) * A4_H          // 1123 CSS pixels
+    const actualPageH = cssPageH * scale            // 2246 actual canvas pixels
+    const totalPages = Math.ceil(canvas.height / actualPageH)
 
     const doc = new jsPDF('p', 'mm', 'a4')
 
     for (let p = 0; p < totalPages; p++) {
       if (p > 0) doc.addPage()
-      const srcY = p * pageH
-      const sliceH = Math.min(pageH, canvas.height - srcY)
+      const srcY = p * actualPageH
+      const sliceH = Math.min(actualPageH, canvas.height - srcY)
 
       const pageCanvas = document.createElement('canvas')
       pageCanvas.width = canvas.width
@@ -268,7 +271,9 @@ export async function generateExamPDF({ title, studentName, questions, filename,
       ctx.drawImage(canvas, 0, srcY, canvas.width, sliceH, 0, 0, canvas.width, sliceH)
 
       const pageImg = pageCanvas.toDataURL('image/jpeg', 0.92)
-      const mmH = (sliceH / canvas.width) * A4_W
+      // 正确的 mm 高度计算：在 CSS 像素空间下计算
+      const sliceH_css = sliceH / scale
+      const mmH = (sliceH_css / cssW) * A4_W
       doc.addImage(pageImg, 'JPEG', 0, 0, A4_W, mmH)
     }
 

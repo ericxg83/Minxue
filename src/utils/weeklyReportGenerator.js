@@ -184,7 +184,7 @@ function buildDiagnosisHTML(reportData) {
         <tbody>${rows}</tbody>
       </table>
     </div>`
-  }).join('') : `<div class="empty-state"><div class="empty-icon">🎉</div><div>本周暂无薄弱知识点</div><div class="empty-sub">完成作业批改后自动生成学科诊断</div></div>`
+  }).join('') : `<div class="empty-state"><div class="empty-icon" style="font-size:32px;margin-bottom:8px">--</div><div>本周暂无薄弱知识点</div><div class="empty-sub" style="font-size:13px;color:${T.textTer};margin-top:6px">AI 将持续识别学习中的薄弱环节</div></div>`
 
   return `<!DOCTYPE html>
 <html><head><meta charset="utf-8"><style>
