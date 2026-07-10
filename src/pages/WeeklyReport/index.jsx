@@ -5,7 +5,9 @@ import {
   Empty,
   SpinLoading,
   Popup,
-  Space
+  Space,
+  Segmented,
+  Picker
 } from 'antd-mobile'
 import { Download, FileText, CheckCircle2, XCircle, Loader2, AlertTriangle } from 'lucide-react'
 import { useStudentStore, useUIStore } from '../../store'
@@ -43,15 +45,38 @@ export default function WeeklyReport() {
   const [loadingSummary, setLoadingSummary] = useState(false)
   const weekNum = dayjs().isoWeek()
 
-  // 加载所有学生的周统计摘要（仅用于展示概览）
+  // ── Period State ──
+  const [periodMode, setPeriodMode] = useState('week')
+  const [periodOffset, setPeriodOffset] = useState(0)
+
+  const periodLabel = (() => {
+    if (periodMode === 'all') return '全部时间'
+    if (periodMode === 'week') {
+      const start = dayjs().subtract(periodOffset, 'week').startOf('isoWeek')
+      const end = dayjs().subtract(periodOffset, 'week').endOf('isoWeek')
+      return `第${dayjs().subtract(periodOffset, 'week').isoWeek()}周 ${start.format('MM/DD')} ~ ${end.format('MM/DD')}`
+    }
+    if (periodMode === 'month') {
+      return dayjs().subtract(periodOffset, 'month').format('YYYY年M月')
+    }
+    return ''
+  })()
+
+  const periodModeOptions = [
+    { label: '周', value: 'week' },
+    { label: '月', value: 'month' },
+    { label: '全部', value: 'all' }
+  ]
+
+  // 当周期变化时刷新数据
   useEffect(() => {
     loadSummary()
-  }, [])
+  }, [periodMode, periodOffset])
 
   const loadSummary = async () => {
     setLoadingSummary(true)
     try {
-      const data = await getAllWeeklyReports(1)
+      const data = await getAllWeeklyReports({ mode: periodMode, offset: periodOffset })
       if (data.success) {
         setSummaryData(data)
       }
@@ -72,9 +97,10 @@ export default function WeeklyReport() {
     setGenerating(true)
 
     try {
-      const pdfBlob = await generateWeeklyReport(currentStudent.id, { weeks: 1 })
+      const pdfBlob = await generateWeeklyReport(currentStudent.id, { mode: periodMode, offset: periodOffset })
       if (pdfBlob) {
-        const filename = `${currentStudent.name}_周学习诊断报告_第${weekNum}周_${dayjs().format('YYYYMMDD')}.pdf`
+        const suffix = periodMode === 'all' ? '全部时间' : (periodMode === 'month' ? dayjs().subtract(periodOffset, 'month').format('M月') : `第${weekNum}周`)
+        const filename = `${currentStudent.name}_周学习诊断报告_${suffix}_${dayjs().format('YYYYMMDD')}.pdf`
         saveAs(pdfBlob, filename)
         Toast.show({ icon: 'success', content: '报告已生成' })
       } else {
@@ -97,7 +123,8 @@ export default function WeeklyReport() {
 
     try {
       const resultsArr = await generateAllWeeklyReports({
-        weeks: 1,
+        mode: periodMode,
+        offset: periodOffset,
         onProgress: (studentName, status) => {
           setProgressList(prev => {
             const existing = prev.findIndex(p => p.name === studentName)
@@ -168,11 +195,54 @@ export default function WeeklyReport() {
         padding: '16px',
         borderBottom: '1px solid ' + CLAUDE_COLORS.border
       }}>
-        <h1 style={{ margin: 0, fontSize: '20px', fontWeight: 600, color: CLAUDE_COLORS.text }}>
-          周学习诊断报告
-        </h1>
-        <div style={{ fontSize: '13px', color: CLAUDE_COLORS.textSecondary, marginTop: '4px' }}>
-          第 {weekNum} 周 · {dayjs().startOf('isoWeek').format('MM/DD')} ~ {dayjs().endOf('isoWeek').format('MM/DD')}
+        <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '8px' }}>
+          <h1 style={{ margin: 0, fontSize: '20px', fontWeight: 600, color: CLAUDE_COLORS.text, flex: 1 }}>
+            周学习诊断报告
+          </h1>
+          <Segmented
+            options={periodModeOptions}
+            value={periodMode}
+            onChange={v => setPeriodMode(v)}
+            style={{ '--font-size': '12px' }}
+          />
+        </div>
+        <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+          <div style={{ fontSize: '13px', color: CLAUDE_COLORS.textSecondary }}>
+            {periodLabel}
+          </div>
+          {periodMode !== 'all' && (
+            <select
+              value={periodOffset}
+              onChange={e => setPeriodOffset(Number(e.target.value))}
+              style={{
+                fontSize: '12px', padding: '2px 6px', borderRadius: '6px',
+                border: '1px solid ' + CLAUDE_COLORS.border, background: CLAUDE_COLORS.card, color: CLAUDE_COLORS.text
+              }}
+            >
+              {periodMode === 'week' ? (
+                <>
+                  <option value={0}>本周</option>
+                  <option value={1}>上周</option>
+                  <option value={2}>前2周</option>
+                  <option value={3}>前3周</option>
+                  <option value={4}>前4周</option>
+                  <option value={5}>前5周</option>
+                  <option value={6}>前6周</option>
+                  <option value={7}>前7周</option>
+                  <option value={8}>前8周</option>
+                  <option value={9}>前9周</option>
+                  <option value={10}>前10周</option>
+                </>
+              ) : (
+                <>
+                  <option value={0}>本月</option>
+                  <option value={1}>上月</option>
+                  <option value={2}>前2月</option>
+                  <option value={3}>前3月</option>
+                </>
+              )}
+            </select>
+          )}
         </div>
       </div>
 

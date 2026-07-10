@@ -605,18 +605,29 @@ export const invalidateCache = (type, studentId) => {
 // ─────────────────────────────────────────────
 
 /**
+ * 构建周期查询参数（兼容旧版 weeks 参数）
+ * @param {Object|number} opts - { mode?: 'week'|'month'|'all', offset?: number } 或旧版 weeks 数字
+ */
+function buildPeriodParams(opts) {
+  if (typeof opts === 'number') return `weeks=${opts}`
+  const mode = opts?.mode || 'week'
+  const offset = opts?.offset ?? 0
+  return `mode=${mode}&offset=${offset}`
+}
+
+/**
  * 获取某个学生的本周统计数据
  * @param {string} studentId
- * @param {number} weeks - 周数，默认 1
+ * @param {Object|number} [opts] - { mode, offset } 或旧版 weeks 数字
  */
-export const getWeeklyReport = async (studentId, weeks = 1) => {
-  return apiRequest(`/weekly-report/${studentId}?weeks=${weeks}`)
+export const getWeeklyReport = async (studentId, opts = {}) => {
+  return apiRequest(`/weekly-report/${studentId}?${buildPeriodParams(opts)}`)
 }
 
 /**
  * 获取所有学生的本周统计摘要
- * @param {number} weeks
+ * @param {Object|number} [opts] - { mode, offset } 或旧版 weeks 数字
  */
-export const getAllWeeklyReports = async (weeks = 1) => {
-  return apiRequest(`/weekly-report?weeks=${weeks}`)
+export const getAllWeeklyReports = async (opts = {}) => {
+  return apiRequest(`/weekly-report?${buildPeriodParams(opts)}`)
 }

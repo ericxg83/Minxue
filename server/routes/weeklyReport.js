@@ -7,14 +7,15 @@ const router = Router()
  * GET /api/weekly-report/:studentId
  * 获取学生本周学习统计数据
  * Query params:
- *   - weeks: 周数，默认 1（本周），2 表示近两周
+ *   - mode: 'week' | 'month' | 'all'，默认 week
+ *   - offset: 偏移量，0=当前，1=上一个...
+ *   - weeks: (兼容旧参数) 周数，默认 1（本周），2 表示近两周
  */
 router.get('/:studentId', async (req, res) => {
   try {
     const { studentId } = req.params
-    const weeks = parseInt(req.query.weeks) || 1
-    const periodStart = getWeekStart(weeks)
-    const periodEnd = getWeekEnd(1)
+    const { periodStart, periodEnd, mode, offset } = parsePeriod(req.query)
+    const isWeekMode = mode === 'week'
 
     // 1. 获取学生信息
     const { rows: studentRows } = await query(
@@ -63,7 +64,17 @@ router.get('/:studentId', async (req, res) => {
       [studentId, periodStart, periodEnd]
     )
 
-    // 5. 获取本周新增错题的 question_id 列表（用于组卷）
+    // 5a. 本周新增错题总数（所有生命周期状态，不含 mastered 过滤）
+    const { rows: wrongCountRows } = await query(
+      `SELECT COUNT(*)::int AS count
+      FROM ${TABLES.WRONG_QUESTIONS}
+      WHERE student_id = $1
+        AND added_at >= $2
+        AND added_at < $3`,
+      [studentId, periodStart, periodEnd]
+    )
+
+    // 5b. 获取可用于组卷的错题 question_id（仅含已完成题目，排除已掌握）
     const { rows: wrongIdRows } = await query(
       `SELECT wq.question_id
       FROM ${TABLES.WRONG_QUESTIONS} wq
@@ -149,7 +160,7 @@ router.get('/:studentId', async (req, res) => {
       accuracy: questionRows[0]?.total > 0
         ? Math.round((questionRows[0].correct / questionRows[0].total) * 1000) / 10
         : 0,
-      newWrongCount: wrongIdRows.length,
+      newWrongCount: wrongCountRows[0]?.count || 0,
       masteredCount,
       pendingCount,
       wrongQuestionIds: wrongIdRows.map(r => r.question_id)
@@ -176,10 +187,10 @@ router.get('/:studentId', async (req, res) => {
     // 按学科分组诊断：每科取 TOP5 薄弱知识点，附占比与掌握标签
     const subjectDiagnosis = buildSubjectDiagnosis(knowledgeDiagnosis, subjectAccuracyMap)
 
-    // 每日趋势（补全本周 7 天，缺失日 accuracy=null）
-    const dailyTrend = buildDailyTrend(trendRows, periodStart)
+    // 每日趋势（周模式补全 7 天，月/全部模式不生成趋势）
+    const dailyTrend = isWeekMode ? buildDailyTrend(trendRows, periodStart) : []
 
-    const weekNum = getIsoWeek(periodStart)
+    const weekNum = isWeekMode ? getIsoWeek(periodStart) : null
 
     const result = {
       success: true,
@@ -187,6 +198,8 @@ router.get('/:studentId', async (req, res) => {
       period: {
         start: periodStart.toISOString().split('T')[0],
         end: periodEnd.toISOString().split('T')[0],
+        mode,
+        offset,
         weekNum
       },
       stats,
@@ -208,9 +221,8 @@ router.get('/:studentId', async (req, res) => {
  */
 router.get('/', async (req, res) => {
   try {
-    const weeks = parseInt(req.query.weeks) || 1
-    const periodStart = getWeekStart(weeks)
-    const periodEnd = getWeekEnd(1)
+    const { periodStart, periodEnd, mode } = parsePeriod(req.query)
+    const isWeekMode = mode === 'week'
 
     // 获取所有学生
     const { rows: studentRows } = await query(
@@ -303,7 +315,8 @@ router.get('/', async (req, res) => {
       period: {
         start: periodStart.toISOString().split('T')[0],
         end: periodEnd.toISOString().split('T')[0],
-        weekNum: getIsoWeek(periodStart)
+        mode,
+        weekNum: isWeekMode ? getIsoWeek(periodStart) : null
       },
       reports
     })
@@ -314,26 +327,66 @@ router.get('/', async (req, res) => {
 })
 
 /**
- * 计算周起始日（周一 00:00:00）
+ * 解析周期参数，向后兼容 ?weeks=N
+ * @param {Object} query - req.query
+ * @returns {{ periodStart: Date, periodEnd: Date, mode: string, offset: number }}
  */
-function getWeekStart(weeksAgo = 0) {
-  const now = new Date()
-  const dayOfWeek = now.getDay() // 0=Sun, 1=Mon...
-  const diff = dayOfWeek === 0 ? 6 : dayOfWeek - 1 // 距周一的天数
-  const monday = new Date(now)
-  monday.setDate(now.getDate() - diff - (weeksAgo - 1) * 7)
-  monday.setHours(0, 0, 0, 0)
-  return monday
+function parsePeriod(query) {
+  // 兼容旧参数 weeks: weeks=1 本周, weeks=2 上周
+  if (query.weeks !== undefined && !query.mode) {
+    const weeks = parseInt(query.weeks) || 1
+    return {
+      mode: 'week',
+      offset: weeks - 1,
+      ...getWeekRange(weeks - 1)
+    }
+  }
+
+  const mode = query.mode || 'week'
+  const offset = parseInt(query.offset) || 0
+  const { periodStart, periodEnd } = getPeriodRange(mode, offset)
+  return { mode, offset, periodStart, periodEnd }
 }
 
 /**
- * 计算周结束日（周日 23:59:59）
+ * 根据 mode 和 offset 计算起止日期
  */
-function getWeekEnd(weeksAgo = 0) {
-  const start = getWeekStart(weeksAgo)
-  const end = new Date(start)
-  end.setDate(start.getDate() + 7)
-  return end
+function getPeriodRange(mode, offset = 0) {
+  const now = new Date()
+
+  if (mode === 'all') {
+    // 全部时间：远古到未来
+    return {
+      periodStart: new Date('2000-01-01T00:00:00Z'),
+      periodEnd: new Date('2099-12-31T23:59:59Z')
+    }
+  }
+
+  if (mode === 'month') {
+    const year = now.getFullYear()
+    const month = now.getMonth() - offset
+    const start = new Date(year, month, 1)
+    const end = new Date(year, month + 1, 1)
+    return { periodStart: start, periodEnd: end }
+  }
+
+  // week 模式
+  return getWeekRange(offset)
+}
+
+/**
+ * 计算第 N 周（offset=0 本周）的周一~下周一
+ */
+function getWeekRange(offset = 0) {
+  const now = new Date()
+  const dayOfWeek = now.getDay()
+  const diff = dayOfWeek === 0 ? 6 : dayOfWeek - 1
+  const monday = new Date(now)
+  monday.setDate(now.getDate() - diff - offset * 7)
+  monday.setHours(0, 0, 0, 0)
+  const end = new Date(monday)
+  end.setDate(monday.getDate() + 7)
+  return { periodStart: monday, periodEnd: end }
 }
 
 /**

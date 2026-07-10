@@ -139,7 +139,11 @@ function renderAvatar(student) {
  */
 function buildDiagnosisHTML(reportData) {
   const { student, period, stats, subjectDiagnosis = [], dailyTrend = [] } = reportData
-  const weekNum = period.weekNum || dayjs(period.start).isoWeek()
+  const mode = period.mode || 'week'
+  const weekNum = period.weekNum || (mode === 'week' ? dayjs(period.start).isoWeek() : null)
+  const badgeLabel = mode === 'month'
+    ? dayjs(period.start).format('M月')
+    : mode === 'all' ? 'ALL' : `WEEK ${weekNum}`
   const accColor = colorForAccuracy(stats.accuracy)
 
   // 最薄弱知识点（跨学科 wrongCount 最高）
@@ -280,7 +284,7 @@ function buildDiagnosisHTML(reportData) {
     <div class="cover">
       <div class="cover-top">
         <div class="ph-logo">${logoSvg}<div>敏学教育<div class="sub">AI 智能批改 · 精准提分</div></div></div>
-        <div class="week-badge">WEEK ${weekNum}</div>
+        <div class="week-badge">${badgeLabel}</div>
       </div>
       <div class="cover-body">
         <div class="cover-title">敏学成长报告</div>
@@ -305,7 +309,7 @@ function buildDiagnosisHTML(reportData) {
     <div class="pad">
       <div class="ph">
         <div class="ph-logo">${logoSvg}<div>敏学成长报告</div></div>
-        <div class="week-badge">WEEK ${weekNum}</div>
+        <div class="week-badge">${badgeLabel}</div>
       </div>
       <div class="sec-title"><span class="sec-num">01</span>本周学习概览</div>
 
@@ -341,7 +345,7 @@ function buildDiagnosisHTML(reportData) {
     <div class="pad">
       <div class="ph">
         <div class="ph-logo">${logoSvg}<div>敏学成长报告</div></div>
-        <div class="week-badge">WEEK ${weekNum}</div>
+        <div class="week-badge">${badgeLabel}</div>
       </div>
       <div class="sec-title"><span class="sec-num">02</span>学科诊断分析</div>
       <div class="sub-label">薄弱知识点 TOP 5</div>
@@ -481,13 +485,14 @@ async function generateExamPDFForReport(studentId, studentName, wrongQuestionIds
  * 生成完整的周学习诊断报告（诊断 + 错题再测卷，合并为一个 PDF）
  * @param {string} studentId
  * @param {Object} options
- * @param {number} options.weeks - 周数，默认 1
+ * @param {string} options.mode - 'week' | 'month' | 'all'
+ * @param {number} options.offset - 偏移量
  * @returns {Blob} 合并后的 PDF blob
  */
-export async function generateWeeklyReport(studentId, { weeks = 1 } = {}) {
-  // 1. 获取周统计数据
+export async function generateWeeklyReport(studentId, { mode = 'week', offset = 0 } = {}) {
+  // 1. 获取周期统计数据
   const API_BASE = import.meta.env.VITE_API_URL || '/api'
-  const resp = await fetch(`${API_BASE}/weekly-report/${studentId}?weeks=${weeks}`)
+  const resp = await fetch(`${API_BASE}/weekly-report/${studentId}?mode=${mode}&offset=${offset}`)
   if (!resp.ok) throw new Error('获取周统计数据失败')
   const reportData = await resp.json()
   if (!reportData.success) throw new Error(reportData.error || '获取周统计数据失败')
@@ -514,15 +519,16 @@ export async function generateWeeklyReport(studentId, { weeks = 1 } = {}) {
 /**
  * 为所有学生生成周学习诊断报告
  * @param {Object} options
- * @param {number} options.weeks
+ * @param {string} options.mode - 'week' | 'month' | 'all'
+ * @param {number} options.offset - 偏移量
  * @param {Function} options.onProgress - 进度回调 (studentName, status)
  * @returns {Array<{student, pdfBlob, status, error?}>}
  */
-export async function generateAllWeeklyReports({ weeks = 1, onProgress, studentIds = null } = {}) {
+export async function generateAllWeeklyReports({ mode = 'week', offset = 0, onProgress, studentIds = null } = {}) {
   const API_BASE = import.meta.env.VITE_API_URL || '/api'
 
   // 1. 获取所有学生的摘要
-  const summaryResp = await fetch(`${API_BASE}/weekly-report?weeks=${weeks}`)
+  const summaryResp = await fetch(`${API_BASE}/weekly-report?mode=${mode}&offset=${offset}`)
   if (!summaryResp.ok) throw new Error('获取学生周统计失败')
   const summaryData = await summaryResp.json()
 

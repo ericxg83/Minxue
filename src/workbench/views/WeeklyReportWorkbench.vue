@@ -25,9 +25,17 @@
             </span>
           </el-option>
         </el-select>
+        <el-segmented v-model="periodMode" :options="periodModeOptions" style="margin-left: 4px;" />
+        <el-select
+          v-if="periodMode !== 'all'"
+          v-model="periodOffset"
+          style="width: 110px"
+          size="small"
+        >
+          <el-option v-for="opt in offsetOptions" :key="opt.value" :label="opt.label" :value="opt.value" />
+        </el-select>
       </div>
       <div class="top-bar-right">
-        <span class="stat-item">第 {{ weekNum }} 周</span>
         <span class="stat-item">{{ periodLabel }}</span>
         <el-button type="primary" :loading="generating" @click="handleGenerateCurrent">
           {{ selectedStudentId ? `生成 ${currentStudentName} 的报告` : '生成本周报告' }}
@@ -260,7 +268,7 @@
 </template>
 
 <script setup>
-import { ref, computed, onMounted } from 'vue'
+import { ref, computed, watch, onMounted } from 'vue'
 import { ElMessage } from 'element-plus'
 import { Download, DataAnalysis, TrendCharts, List, FolderOpened, WarningFilled } from '@element-plus/icons-vue'
 import { getStudents, getAllWeeklyReports } from '../../services/apiService'
@@ -306,16 +314,72 @@ function toggleCheckAll(checked) {
     : []
 }
 
-const weekNum = dayjs().isoWeek()
+// ── Period State ──
+const periodMode = ref('week')
+const periodOffset = ref(0)
+
+const periodModeOptions = [
+  { label: '周', value: 'week' },
+  { label: '月', value: 'month' },
+  { label: '全部', value: 'all' }
+]
+
+const offsetOptions = computed(() => {
+  if (periodMode.value === 'week') {
+    return [
+      { label: '本周', value: 0 },
+      { label: '上周', value: 1 },
+      { label: '前2周', value: 2 },
+      { label: '前3周', value: 3 },
+      { label: '前4周', value: 4 },
+      { label: '前5周', value: 5 },
+      { label: '前6周', value: 6 },
+      { label: '前7周', value: 7 },
+      { label: '前8周', value: 8 },
+      { label: '前9周', value: 9 },
+      { label: '前10周', value: 10 }
+    ]
+  }
+  if (periodMode.value === 'month') {
+    return [
+      { label: '本月', value: 0 },
+      { label: '上月', value: 1 },
+      { label: '前2月', value: 2 },
+      { label: '前3月', value: 3 }
+    ]
+  }
+  return []
+})
+
+const weekNum = computed(() => {
+  if (periodMode.value !== 'week') return ''
+  return dayjs().subtract(periodOffset.value, 'week').isoWeek()
+})
+
 const periodLabel = computed(() => {
-  const start = dayjs().startOf('isoWeek')
-  const end = dayjs().endOf('isoWeek')
-  return `${start.format('MM/DD')} ~ ${end.format('MM/DD')}`
+  if (periodMode.value === 'all') return '全部时间'
+  if (periodMode.value === 'week') {
+    const start = dayjs().subtract(periodOffset.value, 'week').startOf('isoWeek')
+    const end = dayjs().subtract(periodOffset.value, 'week').endOf('isoWeek')
+    return `第${dayjs().subtract(periodOffset.value, 'week').isoWeek()}周 ${start.format('MM/DD')} ~ ${end.format('MM/DD')}`
+  }
+  if (periodMode.value === 'month') {
+    const m = dayjs().subtract(periodOffset.value, 'month')
+    return `${m.format('YYYY年M月')}`
+  }
+  return ''
 })
 
 const currentStudentName = computed(() => {
   const s = studentList.value.find(s => s.id === selectedStudentId.value)
   return s?.name || ''
+})
+
+// ── Watch period changes to refresh data ──
+
+watch([periodMode, periodOffset], () => {
+  loadSummary()
+  if (selectedStudentId.value) handleStudentChange(selectedStudentId.value)
 })
 
 // ── Lifecycle ──
@@ -337,7 +401,7 @@ async function loadStudents() {
 async function loadSummary() {
   loadingSummary.value = true
   try {
-    const data = await getAllWeeklyReports(1)
+    const data = await getAllWeeklyReports({ mode: periodMode.value, offset: periodOffset.value })
     if (data.success) summaryData.value = data
   } catch (e) {
     console.warn('加载周统计失败:', e)
@@ -351,7 +415,7 @@ async function handleStudentChange(id) {
   if (!id) return
   try {
     const API_BASE = import.meta.env.VITE_API_URL || '/api'
-    const resp = await fetch(`${API_BASE}/weekly-report/${id}?weeks=1`)
+    const resp = await fetch(`${API_BASE}/weekly-report/${id}?mode=${periodMode.value}&offset=${periodOffset.value}`)
     const data = await resp.json()
     if (data.success) currentStudentDetail.value = data
   } catch (e) {
@@ -366,14 +430,15 @@ async function handleGenerateCurrent() {
   }
   generating.value = true
   try {
-    const pdfBlob = await generateWeeklyReport(selectedStudentId.value, { weeks: 1 })
+    const pdfBlob = await generateWeeklyReport(selectedStudentId.value, { mode: periodMode.value, offset: periodOffset.value })
     if (pdfBlob) {
       const name = currentStudentName.value
-      const filename = `${name}_周学习诊断报告_第${weekNum}周_${dayjs().format('YYYYMMDD')}.pdf`
+      const suffix = periodMode.value === 'all' ? '全部时间' : (periodMode.value === 'month' ? dayjs().subtract(periodOffset.value, 'month').format('M月') : `第${weekNum.value}周`)
+      const filename = `${name}_周学习诊断报告_${suffix}_${dayjs().format('YYYYMMDD')}.pdf`
       saveAs(pdfBlob, filename)
       ElMessage.success('报告已生成')
     } else {
-      ElMessage.warning('本周暂无学习数据')
+      ElMessage.warning('该时段暂无学习数据')
     }
   } catch (e) {
     ElMessage.error('生成失败: ' + (e.message || '未知错误'))
@@ -390,7 +455,8 @@ async function handleGenerateAll() {
 
   try {
     const arr = await generateAllWeeklyReports({
-      weeks: 1,
+      mode: periodMode.value,
+      offset: periodOffset.value,
       onProgress: (studentName, status) => {
         progressList.value = progressList.value.filter(p => p.name !== studentName)
         progressList.value.push({ name: studentName, status })
@@ -421,7 +487,8 @@ async function handleGenerateSelected() {
 
   try {
     const arr = await generateAllWeeklyReports({
-      weeks: 1,
+      mode: periodMode.value,
+      offset: periodOffset.value,
       studentIds: [...checkedIds.value],
       onProgress: (studentName, status) => {
         progressList.value = progressList.value.filter(p => p.name !== studentName)
@@ -443,7 +510,8 @@ async function handleGenerateSelected() {
 
 function handleDownload(r) {
   if (!r.pdfBlob) return
-  const filename = `${r.student.name}_周学习诊断报告_第${weekNum}周_${dayjs().format('YYYYMMDD')}.pdf`
+  const suffix = periodMode.value === 'all' ? '全部时间' : (periodMode.value === 'month' ? dayjs().subtract(periodOffset.value, 'month').format('M月') : `第${weekNum.value}周`)
+  const filename = `${r.student.name}_周学习诊断报告_${suffix}_${dayjs().format('YYYYMMDD')}.pdf`
   saveAs(r.pdfBlob, filename)
 }
 
