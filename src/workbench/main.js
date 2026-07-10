@@ -2,6 +2,7 @@
 import 'katex/dist/katex.min.css'
 import ElementPlus from 'element-plus'
 import 'element-plus/dist/index.css'
+import './styles/workbench-theme.css'
 import * as ElementPlusIconsVue from '@element-plus/icons-vue'
 import zhCn from 'element-plus/dist/locale/zh-cn.mjs'
 import { createPinia } from 'pinia'

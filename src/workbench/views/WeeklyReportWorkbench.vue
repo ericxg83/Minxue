@@ -21,7 +21,7 @@
             <span style="display: flex; align-items: center; gap: 8px;">
               <el-avatar :size="22" :src="s.avatar" />
               {{ s.name }}
-              <span style="font-size: 12px; color: #86909C;">{{ s.grade }}</span>
+              <span style="font-size: 12px; color: var(--wb-text-tertiary);">{{ s.grade }}</span>
             </span>
           </el-option>
         </el-select>
@@ -90,13 +90,13 @@
                 <div class="kpi-label">正确率</div>
               </div>
               <div class="kpi-item">
-                <div class="kpi-value" style="color: #F53F3F;">
+                <div class="kpi-value" style="color: var(--wb-danger);">
                   {{ r.stats ? r.stats.newWrongCount : '-' }}
                 </div>
                 <div class="kpi-label">新增错题</div>
               </div>
               <div class="kpi-item">
-                <div class="kpi-value" style="color: #1677FF;">
+                <div class="kpi-value" style="color: var(--wb-primary);">
                   {{ r.stats ? r.stats.totalTasks : '-' }}
                 </div>
                 <div class="kpi-label">作业(份)</div>
@@ -136,9 +136,9 @@
           <div class="kpi-card-big">
             <div class="kpi-card-big__label">错题掌握</div>
             <div class="kpi-card-big__value">
-              <span style="color: #16A34A;">{{ currentStudentDetail.stats.masteredCount }}</span>
+              <span style="color: var(--wb-success);">{{ currentStudentDetail.stats.masteredCount }}</span>
               <span class="unit"> / </span>
-              <span style="color: #DC2626;">{{ currentStudentDetail.stats.pendingCount }}</span>
+              <span style="color: var(--wb-danger);">{{ currentStudentDetail.stats.pendingCount }}</span>
             </div>
             <div class="kpi-card-big__sub">
               已掌握 {{ currentStudentDetail.stats.masteredCount }} 题 · 待提升 {{ currentStudentDetail.stats.pendingCount }} 题
@@ -158,7 +158,7 @@
             <el-table-column prop="totalCount" label="总题数" width="80" align="center" />
             <el-table-column prop="wrongCount" label="错误次数" width="90" align="center">
               <template #default="{ row }">
-                <span :style="{ color: row.wrongCount >= 3 ? '#DC2626' : '#666', fontWeight: row.wrongCount >= 3 ? 600 : 400 }">
+                <span :style="{ color: row.wrongCount >= 3 ? 'var(--wb-danger)' : 'var(--wb-text-secondary)', fontWeight: row.wrongCount >= 3 ? 600 : 400 }">
                   {{ row.wrongCount }}
                 </span>
               </template>
@@ -186,7 +186,7 @@
         <!-- 高频薄弱点提示 -->
         <el-card class="warning-card" v-if="currentStudentDetail.knowledgeDiagnosis?.length > 0" style="margin-top: 12px;">
           <div class="warning-card__content">
-            <el-icon style="color: #FA8C16; margin-right: 8px;"><WarningFilled /></el-icon>
+            <el-icon style="color: var(--wb-warning); margin-right: 8px;"><WarningFilled /></el-icon>
             <span>
               <strong>本周高频薄弱点：</strong>
               {{ topWeakTags }}
@@ -456,8 +456,8 @@ function handleDownloadAll() {
 
 // ── Helpers ──
 function getAccuracyColor(accuracy) {
-  if (!accuracy && accuracy !== 0) return '#86909C'
-  return accuracy >= 80 ? '#16A34A' : accuracy >= 60 ? '#D97706' : '#DC2626'
+  if (!accuracy && accuracy !== 0) return 'var(--wb-text-tertiary)'
+  return accuracy >= 80 ? 'var(--wb-success)' : accuracy >= 60 ? 'var(--wb-warning)' : 'var(--wb-danger)'
 }
 
 function getStatusType(status) {
@@ -496,7 +496,7 @@ const topWeakTags = computed(() => {
   height: 100%;
   display: flex;
   flex-direction: column;
-  background: #F2F3F5;
+  background: var(--wb-bg);
 }
 
 /* ── Top Bar ── */
@@ -504,9 +504,9 @@ const topWeakTags = computed(() => {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  padding: 12px 20px;
-  background: #fff;
-  border-bottom: 1px solid #e4e7ed;
+  padding: 12px 24px;
+  background: var(--wb-bg-card);
+  border-bottom: 1px solid var(--wb-border);
   flex-shrink: 0;
   flex-wrap: wrap;
   gap: 8px;
@@ -522,7 +522,7 @@ const topWeakTags = computed(() => {
 .page-title {
   font-size: 18px;
   font-weight: 600;
-  color: #1D2129;
+  color: var(--wb-text);
   white-space: nowrap;
 }
 
@@ -535,7 +535,7 @@ const topWeakTags = computed(() => {
 
 .stat-item {
   font-size: 13px;
-  color: #86909C;
+  color: var(--wb-text-tertiary);
   white-space: nowrap;
 }
 
@@ -543,13 +543,13 @@ const topWeakTags = computed(() => {
 .main-content {
   flex: 1;
   overflow-y: auto;
-  padding: 16px 20px;
+  padding: 16px 24px;
 }
 
 .section-title {
   font-size: 15px;
   font-weight: 600;
-  color: #1D2129;
+  color: var(--wb-text);
   margin-bottom: 12px;
   display: flex;
   align-items: center;
@@ -565,20 +565,21 @@ const topWeakTags = computed(() => {
 }
 
 .kpi-card {
-  background: #fff;
-  border-radius: 8px;
+  background: var(--wb-bg-card);
+  border-radius: var(--wb-radius-md);
   padding: 16px;
-  border: 1px solid #e4e7ed;
-  transition: box-shadow 0.2s;
+  border: 1px solid var(--wb-border);
+  transition: box-shadow 0.25s ease, transform 0.2s ease;
 }
 
 .kpi-card:hover {
-  box-shadow: 0 2px 8px rgba(0,0,0,0.08);
+  box-shadow: var(--wb-shadow-md);
+  transform: translateY(-1px);
 }
 
 .kpi-card--checked {
-  border-color: #1677FF;
-  background: #F0F7FF;
+  border-color: var(--wb-primary);
+  background: var(--wb-primary-mist);
 }
 
 .kpi-card__header {
@@ -595,7 +596,7 @@ const topWeakTags = computed(() => {
 .kpi-card__name {
   font-size: 14px;
   font-weight: 600;
-  color: #1D2129;
+  color: var(--wb-text);
   margin-bottom: 10px;
 }
 
@@ -616,13 +617,13 @@ const topWeakTags = computed(() => {
 
 .kpi-label {
   font-size: 11px;
-  color: #86909C;
+  color: var(--wb-text-tertiary);
   margin-top: 2px;
 }
 
 .no-data {
   font-size: 12px;
-  color: #C9CDD4;
+  color: var(--wb-text-tertiary);
   text-align: center;
   padding: 8px;
 }
@@ -636,33 +637,38 @@ const topWeakTags = computed(() => {
 }
 
 .kpi-card-big {
-  background: #fff;
-  border-radius: 8px;
+  background: var(--wb-bg-card);
+  border-radius: var(--wb-radius-md);
   padding: 16px 20px;
-  border: 1px solid #e4e7ed;
+  border: 1px solid var(--wb-border);
+  transition: box-shadow 0.25s ease;
+}
+
+.kpi-card-big:hover {
+  box-shadow: var(--wb-shadow-sm);
 }
 
 .kpi-card-big__label {
   font-size: 13px;
-  color: #86909C;
+  color: var(--wb-text-tertiary);
   margin-bottom: 4px;
 }
 
 .kpi-card-big__value {
   font-size: 28px;
   font-weight: 700;
-  color: #1D2129;
+  color: var(--wb-text);
 }
 
 .kpi-card-big__value .unit {
   font-size: 14px;
   font-weight: 400;
-  color: #86909C;
+  color: var(--wb-text-tertiary);
 }
 
 .kpi-card-big__sub {
   font-size: 12px;
-  color: #86909C;
+  color: var(--wb-text-tertiary);
   margin-top: 4px;
 }
 
@@ -693,9 +699,9 @@ const topWeakTags = computed(() => {
 }
 
 .progress-list {
-  background: #fff;
-  border-radius: 8px;
-  border: 1px solid #e4e7ed;
+  background: var(--wb-bg-card);
+  border-radius: var(--wb-radius-md);
+  border: 1px solid var(--wb-border);
 }
 
 .progress-item {
@@ -703,7 +709,7 @@ const topWeakTags = computed(() => {
   justify-content: space-between;
   align-items: center;
   padding: 10px 16px;
-  border-bottom: 1px solid #F2F3F5;
+  border-bottom: 1px solid var(--wb-border-light);
 }
 
 .progress-item:last-child {
@@ -712,7 +718,7 @@ const topWeakTags = computed(() => {
 
 .progress-name {
   font-size: 14px;
-  color: #1D2129;
+  color: var(--wb-text);
 }
 
 /* ── Results ── */
@@ -721,9 +727,9 @@ const topWeakTags = computed(() => {
 }
 
 .result-list {
-  background: #fff;
-  border-radius: 8px;
-  border: 1px solid #e4e7ed;
+  background: var(--wb-bg-card);
+  border-radius: var(--wb-radius-md);
+  border: 1px solid var(--wb-border);
 }
 
 .result-item {
@@ -731,7 +737,7 @@ const topWeakTags = computed(() => {
   justify-content: space-between;
   align-items: center;
   padding: 12px 16px;
-  border-bottom: 1px solid #F2F3F5;
+  border-bottom: 1px solid var(--wb-border-light);
 }
 
 .result-item:last-child {
@@ -747,7 +753,7 @@ const topWeakTags = computed(() => {
 .result-name {
   font-size: 14px;
   font-weight: 500;
-  color: #1D2129;
+  color: var(--wb-text);
 }
 
 /* ── Responsive ── */

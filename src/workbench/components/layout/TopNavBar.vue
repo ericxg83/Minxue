@@ -120,9 +120,9 @@ const handleNavClick = (item) => {
   align-items: center;
   justify-content: space-between;
   height: 56px;
-  padding: 0 20px;
-  background: #fff;
-  border-bottom: 1px solid #e4e7ed;
+  padding: 0 24px;
+  background: var(--wb-bg-card);
+  border-bottom: 1px solid var(--wb-border);
   flex-shrink: 0;
   z-index: 100;
 }
@@ -147,7 +147,7 @@ const handleNavClick = (item) => {
 .logo-text {
   font-size: 16px;
   font-weight: 600;
-  color: #1D2129;
+  color: var(--wb-text);
 }
 
 /* ── Center: Navigation Items ── */
@@ -162,22 +162,23 @@ const handleNavClick = (item) => {
   align-items: center;
   gap: 6px;
   padding: 8px 16px;
-  border-radius: 8px;
+  border-radius: var(--wb-radius-sm);
   cursor: pointer;
   font-size: 14px;
-  color: #4E5969;
-  transition: all 0.2s;
+  color: var(--wb-text-secondary);
+  transition: background 0.2s ease, color 0.2s ease;
   position: relative;
   user-select: none;
 }
 
 .nav-item:hover {
-  background: #F2F3F5;
+  background: var(--wb-bg-hover);
+  color: var(--wb-text);
 }
 
 .nav-item--active {
-  background: #E8F3FF;
-  color: #1677FF;
+  background: var(--wb-primary-soft);
+  color: var(--wb-primary);
   font-weight: 500;
 }
 
@@ -190,7 +191,7 @@ const handleNavClick = (item) => {
   width: 24px;
   height: 3px;
   border-radius: 2px;
-  background: #1677FF;
+  background: var(--wb-primary);
 }
 
 .nav-item--disabled {
@@ -221,17 +222,18 @@ const handleNavClick = (item) => {
   display: flex;
   align-items: center;
   gap: 4px;
-  padding: 6px 8px;
-  border-radius: 6px;
+  padding: 6px 10px;
+  border-radius: var(--wb-radius-sm);
   cursor: pointer;
-  color: #4E5969;
+  color: var(--wb-text-secondary);
   font-size: 14px;
-  transition: background 0.2s;
+  transition: background 0.2s ease, color 0.2s ease;
   position: relative;
 }
 
 .header-icon-btn:hover {
-  background: #F2F3F5;
+  background: var(--wb-bg-hover);
+  color: var(--wb-text);
 }
 
 .header-icon-btn .el-icon {
@@ -241,16 +243,17 @@ const handleNavClick = (item) => {
 .header-badge {
   position: absolute;
   top: 0;
-  right: 0;
+  right: 2px;
   min-width: 16px;
   height: 16px;
-  padding: 0 4px;
-  background: #F53F3F;
+  padding: 0 5px;
+  background: var(--wb-danger);
   color: #fff;
   font-size: 11px;
   line-height: 16px;
   text-align: center;
   border-radius: 8px;
+  font-weight: 600;
 }
 
 .header-icon-label {
@@ -261,37 +264,39 @@ const handleNavClick = (item) => {
   display: flex;
   align-items: center;
   gap: 6px;
-  padding: 4px 8px;
-  border-radius: 6px;
+  padding: 4px 10px;
+  border-radius: var(--wb-radius-sm);
   cursor: pointer;
-  transition: background 0.2s;
+  transition: background 0.2s ease;
 }
 
 .header-user:hover {
-  background: #F2F3F5;
+  background: var(--wb-bg-hover);
 }
 
 .header-user-name {
   font-size: 13px;
-  color: #1D2129;
+  color: var(--wb-text);
+  font-weight: 500;
 }
 
 .header-dropdown-icon {
   font-size: 12px;
-  color: #86909C;
+  color: var(--wb-text-tertiary);
 }
 
 /* ── Dev Badge ── */
 .dev-badge {
   display: inline-block;
-  padding: 1px 6px;
-  background: #FFF7E6;
-  color: #FA8C16;
+  padding: 1px 8px;
+  background: var(--wb-warning-soft);
+  color: var(--wb-warning);
   font-size: 10px;
   border-radius: 4px;
   font-weight: 500;
   flex-shrink: 0;
-  border: 1px solid #FFD591;
+  border: 1px solid #FDE68A;
+  line-height: 18px;
 }
 
 /* ── Notification Dropdown ── */
@@ -318,7 +323,7 @@ const handleNavClick = (item) => {
 }
 
 .header-icon-btn .el-icon.bell-ring {
-  color: #1677FF;
+  color: var(--wb-primary);
   animation: bell-ring 0.6s ease-in-out;
 }
 </style>

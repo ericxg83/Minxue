@@ -1,0 +1,206 @@
+/* ═══════════════════════════════════════════
+   敏学成长工作台 · 主题覆盖
+   统一 Element Plus 主题色与移动端一致
+   并建立全局设计 token 体系
+   ═══════════════════════════════════════════ */
+
+/* ── Element Plus CSS 变量覆盖 ── */
+:root {
+  /* 主色 → 与移动端一致 (#3B82F6 = Tailwind blue-500) */
+  --el-color-primary: #3B82F6;
+  --el-color-primary-light-3: #93C5FD;
+  --el-color-primary-light-5: #BFDBFE;
+  --el-color-primary-light-7: #DBEAFE;
+  --el-color-primary-light-8: #EFF6FF;
+  --el-color-primary-light-9: #F5F9FF;
+  --el-color-primary-dark-2: #2563EB;
+
+  /* 成功/警告/危险 与移动端语义色一致 */
+  --el-color-success: #16A34A;
+  --el-color-warning: #D97706;
+  --el-color-danger: #DC2626;
+  --el-color-info: #4F46E5;
+
+  /* 边框 */
+  --el-border-color: #E2E8F0;
+  --el-border-color-light: #F1F5F9;
+  --el-border-color-lighter: #F8FAFC;
+  --el-border-radius-base: 10px;
+  --el-border-radius-small: 8px;
+  --el-border-radius-round: 20px;
+  --el-border-radius-circle: 100%;
+
+  /* 字体 */
+  --el-font-size-base: 14px;
+  --el-font-size-small: 13px;
+  --el-font-size-extra-small: 12px;
+  --el-font-size-medium: 16px;
+  --el-font-size-large: 18px;
+  --el-font-weight-primary: 500;
+
+  /* 背景 */
+  --el-bg-color: #F8FAFC;
+  --el-bg-color-overlay: #FFFFFF;
+  --el-bg-color-page: #F1F5F9;
+  --el-fill-color: #F1F5F9;
+  --el-fill-color-light: #F8FAFC;
+  --el-fill-color-lighter: #FCFCFD;
+
+  /* 文字 */
+  --el-text-color-primary: #1E293B;
+  --el-text-color-regular: #334155;
+  --el-text-color-secondary: #64748B;
+  --el-text-color-placeholder: #94A3B8;
+  --el-text-color-disabled: #CBD5E1;
+
+  /* 阴影 */
+  --el-box-shadow: 0 1px 3px rgba(0, 0, 0, 0.06);
+  --el-box-shadow-light: 0 1px 2px rgba(0, 0, 0, 0.04);
+  --el-box-shadow-lighter: 0 0 1px rgba(0, 0, 0, 0.02);
+  --el-box-shadow-dark: 0 3px 10px rgba(0, 0, 0, 0.08);
+}
+
+/* ── 工作台全局设计 token（复用移动端 index.css 的设计）─── */
+:root {
+  /* 背景 */
+  --wb-bg: #F1F5F9;
+  --wb-bg-card: #FFFFFF;
+  --wb-bg-hover: #F1F5F9;
+  --wb-bg-elevated: #F8FAFC;
+  --wb-bg-mist: #F8FAFC;
+
+  /* 主色 */
+  --wb-primary: #3B82F6;
+  --wb-primary-hover: #2563EB;
+  --wb-primary-soft: #DBEAFE;
+  --wb-primary-mist: #EFF6FF;
+
+  /* 强调色（教育类 CTA） */
+  --wb-accent: #EA580C;
+  --wb-accent-hover: #C2410C;
+  --wb-accent-soft: #FFF7ED;
+
+  /* 语义色 */
+  --wb-success: #16A34A;
+  --wb-success-soft: #DCFCE7;
+  --wb-warning: #D97706;
+  --wb-warning-soft: #FEF3C7;
+  --wb-danger: #DC2626;
+  --wb-danger-soft: #FEE2E2;
+  --wb-info: #4F46E5;
+
+  /* 文字 */
+  --wb-text: #1E293B;
+  --wb-text-secondary: #64748B;
+  --wb-text-tertiary: #94A3B8;
+  --wb-text-inverse: #FFFFFF;
+
+  /* 边框 */
+  --wb-border: #E2E8F0;
+  --wb-border-light: #F1F5F9;
+
+  /* 圆角（Claymorphism: 略大、有触感） */
+  --wb-radius-sm: 10px;
+  --wb-radius-md: 14px;
+  --wb-radius-lg: 18px;
+  --wb-radius-full: 9999px;
+
+  /* 阴影（柔和、有触感深度） */
+  --wb-shadow-sm: 0 1px 3px rgba(0, 0, 0, 0.06);
+  --wb-shadow-md: 0 3px 10px rgba(0, 0, 0, 0.08);
+  --wb-shadow-lg: 0 6px 20px rgba(0, 0, 0, 0.10);
+}
+
+/* ── 全局样式重置 ── */
+html, body {
+  margin: 0;
+  padding: 0;
+  overflow: hidden;
+  height: 100%;
+}
+
+body {
+  font-family: -apple-system, BlinkMacSystemFont, "PingFang SC", "SF Pro Text", "SF Pro Display", "Inter", sans-serif;
+  font-size: 14px;
+  color: var(--wb-text);
+  background: var(--wb-bg);
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+/* ── Card 基础样式 ── */
+.wb-card {
+  background: var(--wb-bg-card);
+  border: 1px solid var(--wb-border-light);
+  border-radius: var(--wb-radius-md);
+  box-shadow: var(--wb-shadow-sm);
+  transition: box-shadow 0.25s ease, transform 0.2s ease;
+}
+
+.wb-card:hover {
+  box-shadow: var(--wb-shadow-md);
+}
+
+/* ── 按钮基础（和 Element Plus 互补）── */
+.wb-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  padding: 8px 18px;
+  border: none;
+  border-radius: var(--wb-radius-sm);
+  font-size: 14px;
+  font-weight: 500;
+  cursor: pointer;
+  transition: all 0.2s ease;
+}
+
+.wb-btn--primary {
+  background: var(--wb-primary);
+  color: white;
+}
+.wb-btn--primary:hover {
+  background: var(--wb-primary-hover);
+}
+
+.wb-btn--secondary {
+  background: var(--wb-bg-hover);
+  color: var(--wb-text);
+}
+.wb-btn--secondary:hover {
+  background: var(--wb-border);
+}
+
+/* ── 动画 ── */
+@keyframes wb-fade-up {
+  from { opacity: 0; transform: translateY(8px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+.wb-animate-fade-up {
+  animation: wb-fade-up 0.25s ease-out;
+}
+
+@keyframes wb-fade-in {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+.wb-animate-fade-in {
+  animation: wb-fade-in 0.2s ease-out;
+}
+
+/* ── Scrollbar ── */
+::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+::-webkit-scrollbar-thumb {
+  background: #CBD5E1;
+  border-radius: 3px;
+}
+::-webkit-scrollbar-thumb:hover {
+  background: #94A3B8;
+}
