@@ -1795,10 +1795,7 @@ app.post('/api/admin/backfill-tags', async (req, res) => {
         // 单次生成标签，内置重试和模型轮换
         const tagResult = await generateTagsForQuestion(fullContent, subject)
 
-        if (!tagResult.tags || tagResult.tags.length === 0 || tagResult.tags[0] === '未分类') {
-          backfillProgress.skipped++
-          console.log(`  [BackfillTags] ⏭️ [${i + 1}/${questions.length}] ${shortId}: 未识别 (${subject || '无学科'})`)
-        } else {
+        if (tagResult && tagResult.tags && tagResult.tags.length > 0 && tagResult.tags[0] !== '未分类') {
           const uniqueTags = [...new Set(tagResult.tags.map(t => t.trim()).filter(Boolean))]
           try {
             await query(
@@ -1813,6 +1810,11 @@ app.post('/api/admin/backfill-tags', async (req, res) => {
             backfillProgress.failed++
             console.error(`  [BackfillTags] ❌ [${i + 1}/${questions.length}] ${shortId}: DB写入失败 ${err.message}`)
           }
+        } else {
+          // AI 未返回有效标签（主备均失败或内容残缺）→ 保持 ai_tags 为 NULL，
+          // 不写「未分类」，让每日回填任务可持续重试。计入 skipped 以便观察。
+          backfillProgress.skipped++
+          console.log(`  [BackfillTags] ⏭️ [${i + 1}/${questions.length}] ${shortId}: 未识别/失败 (${subject || '无学科'})`)
         }
       } catch (err) {
         backfillProgress.failed++
