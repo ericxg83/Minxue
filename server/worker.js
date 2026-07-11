@@ -131,31 +131,66 @@ const normalizeDifficulty = (raw) => {
  * 常见问题: 未转义反斜杠(\frac → \\frac)、未转义双引号、字符串内换行
  */
 export function repairAIJson(jsonStr) {
-  const saved = []
-  let s = jsonStr
+  // 逐字符状态机：只在「字符串内部」做修复，避免破坏结构。
+  // 处理三类畸形：
+  //   1. 非法反斜杠转义（LaTeX 单反斜杠命令，如 \angle \circ \triangle）→ 双写为 \\
+  //   2. 字符串内的裸控制字符（真实换行/回车/制表符）→ 转义为 \n \r \t
+  //   3. 字符串内未转义的双引号（后面不是 , } ] : 或结尾）→ 转义为 \"
+  // 合法的 JSON 转义（\" \\ \/ \b \f \n \r \t \uXXXX）原样保留。
+  let out = ''
+  let inString = false
 
-  // 1. 保护已正确转义的序列 (\\后接字母=LaTeX命令, 以及标准JSON转义 \\, \", \/, \n, \t, \uXXXX)
-  s = s.replace(/(\\[a-zA-Z\\\"\/nrt]|\\u[0-9a-fA-F]{4})/g, (m) => {
-    saved.push(m)
-    return `__ESC_${saved.length - 1}__`
-  })
+  for (let i = 0; i < jsonStr.length; i++) {
+    const ch = jsonStr[i]
 
-  // 2. 修复字符串值内部未转义的反斜杠 (LaTeX 命令)
-  s = s.replace(/"([^"]*)"/g, (_full, inner) => {
-    if (inner.includes('__ESC_')) return _full
-    const fixed = inner.replace(/\\/g, '\\\\')
-    return `"${fixed}"`
-  })
+    if (!inString) {
+      out += ch
+      if (ch === '"') inString = true
+      continue
+    }
 
-  // 3. 修复字符串内未转义换行
-  s = s.replace(/"([^"]*?)\n([^"]*?)"/g, '"$1\\n$2"')
-
-  // 4. 恢复保护的转义序列
-  for (let i = 0; i < saved.length; i++) {
-    s = s.replace(`__ESC_${i}__`, saved[i])
+    // ── 字符串内部 ──
+    if (ch === '\\') {
+      const next = jsonStr[i + 1]
+      if (next === '"' || next === '\\' || next === '/') {
+        out += ch + next // 无歧义的合法转义，保留
+        i++
+      } else if (next === 'u' && /^[0-9a-fA-F]{4}$/.test(jsonStr.substr(i + 2, 4))) {
+        out += ch // 合法 \uXXXX
+      } else if (next !== undefined && 'bfnrt'.includes(next)) {
+        // \b \f \n \r \t 与 LaTeX 命令(\frac \theta \nu \rho \beta \triangle...)开头冲突。
+        // 判据：转义字母后若还跟字母 → LaTeX 命令，双写反斜杠；否则视为真正的 JSON 转义。
+        const after = jsonStr[i + 2]
+        if (after !== undefined && /[a-zA-Z]/.test(after)) {
+          out += '\\\\' // LaTeX 单反斜杠命令 → 字面反斜杠
+        } else {
+          out += ch + next // 真正的 \n \t 等
+          i++
+        }
+      } else {
+        out += '\\\\' // 其它非法转义(\a \c \s ...) → 字面反斜杠，双写
+      }
+    } else if (ch === '"') {
+      // 判断这个引号是「真正的闭合引号」还是「字符串内的字面引号」
+      const rest = jsonStr.slice(i + 1)
+      if (/^\s*[,}\]:]/.test(rest) || /^\s*$/.test(rest)) {
+        out += ch
+        inString = false
+      } else {
+        out += '\\"' // 字面引号，转义
+      }
+    } else if (ch === '\n') {
+      out += '\\n'
+    } else if (ch === '\r') {
+      out += '\\r'
+    } else if (ch === '\t') {
+      out += '\\t'
+    } else {
+      out += ch
+    }
   }
 
-  return s
+  return out
 }
 
 const deskewImage = async (imageBuffer) => {
