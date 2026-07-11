@@ -1737,38 +1737,50 @@ app.use((err, req, res, next) => {
 
 // 知识点标签回填：为所有已有题目重新生成 AI 知识点标签
 let backfillRunning = false
-let backfillProgress = { total: 0, updated: 0, skipped: 0, failed: 0, done: false, detail: '' }
+let backfillProgress = { total: 0, updated: 0, skipped: 0, failed: 0, done: false, detail: '', remaining: null }
 
-/**
- * 回填核心逻辑：捞取「缺知识点标签 或 缺难度」的题目，逐题重新生成并写回。
- * 供手动接口和定时任务共用。带并发锁，重复调用会直接返回。
- * @param {{limit?:number, trigger?:string}} opts
- */
-async function runBackfillTags({ limit = 500, trigger = 'manual' } = {}) {
-  if (backfillRunning) {
-    return { started: false, reason: 'running', progress: backfillProgress }
-  }
-  backfillRunning = true
-  backfillProgress = { total: 0, updated: 0, skipped: 0, failed: 0, done: false, detail: '' }
-
-  try {
-    // 重置模型轮换索引，从第一个模型开始
-    backfillProgress.detail = '重置模型索引...'
-    resetModelIndex()
-
-    // 1. 查找需要回填的题目：知识点标签缺失 或 难度未判定
-    backfillProgress.detail = '查询数据库中...'
-    const { rows: questions } = await query(
-      `SELECT q.id, q.content, q.options, q.subject, q.ai_tags, q.difficulty, q.question_type
-       FROM ${TABLES.QUESTIONS} q
-       WHERE q.is_complete = TRUE
+// 筛选"缺知识点标签 或 缺难度"的题目 —— select 与 count 共用，避免两处漂移
+const BACKFILL_WHERE = `q.is_complete = TRUE
          AND (
            q.ai_tags IS NULL
            OR q.ai_tags = ''
            OR q.ai_tags = '[]'
            OR q.ai_tags::text = '["未分类"]'
            OR q.difficulty IS NULL
-         )
+         )`
+
+/** 统计当前仍待回填的题目总数（全局，跨批次） */
+async function countBackfillRemaining() {
+  const { rows } = await query(
+    `SELECT COUNT(*)::int AS n FROM ${TABLES.QUESTIONS} q WHERE ${BACKFILL_WHERE}`
+  )
+  return rows[0]?.n ?? 0
+}
+
+/**
+ * 回填核心逻辑（小批量）：每次只捞 limit 道「缺标签 或 缺难度」的题目，逐题重生成并写回。
+ * free 实例内存/CPU 有限，单批控制在 ~20 题 / 20 余秒内结束，避免长任务被 OOM/spin-down 腰斩。
+ * chain=true 时，一批跑完若仍有剩余，自动延时触发下一批，直到全部补齐。
+ * @param {{limit?:number, trigger?:string, chain?:boolean}} opts
+ */
+async function runBackfillTags({ limit = 20, trigger = 'manual', chain = false } = {}) {
+  if (backfillRunning) {
+    return { started: false, reason: 'running', progress: backfillProgress }
+  }
+  backfillRunning = true
+  backfillProgress = { total: 0, updated: 0, skipped: 0, failed: 0, done: false, detail: '', remaining: null }
+
+  try {
+    // 重置模型轮换索引，从第一个模型开始
+    backfillProgress.detail = '重置模型索引...'
+    resetModelIndex()
+
+    // 1. 查找本批需要回填的题目：知识点标签缺失 或 难度未判定
+    backfillProgress.detail = '查询数据库中...'
+    const { rows: questions } = await query(
+      `SELECT q.id, q.content, q.options, q.subject, q.ai_tags, q.difficulty, q.question_type
+       FROM ${TABLES.QUESTIONS} q
+       WHERE ${BACKFILL_WHERE}
        ORDER BY q.created_at DESC
        LIMIT $1`,
       [limit]
@@ -1778,10 +1790,11 @@ async function runBackfillTags({ limit = 500, trigger = 'manual' } = {}) {
     if (questions.length === 0) {
       console.log(`[BackfillTags] (${trigger}) 没有待回填的题目`)
       backfillProgress.done = true
-      return { started: true, total: 0 }
+      backfillProgress.remaining = 0
+      return { started: true, total: 0, remaining: 0 }
     }
 
-    console.log(`[BackfillTags] (${trigger}) 找到 ${questions.length} 道需要回填标签/难度的题目`)
+    console.log(`[BackfillTags] (${trigger}) 本批 ${questions.length} 道（小批量）`)
 
     // 2. 逐题处理（串行，避免并发触发模型限流）
     for (let i = 0; i < questions.length; i++) {
@@ -1847,16 +1860,32 @@ async function runBackfillTags({ limit = 500, trigger = 'manual' } = {}) {
       }
     }
 
-    console.log(`[BackfillTags] (${trigger}) 完成！更新:${backfillProgress.updated} 跳过:${backfillProgress.skipped} 失败:${backfillProgress.failed}`)
+    console.log(`[BackfillTags] (${trigger}) 本批完成！更新:${backfillProgress.updated} 跳过:${backfillProgress.skipped} 失败:${backfillProgress.failed}`)
     return { started: true, total: questions.length }
   } catch (err) {
     backfillProgress.detail = `错误: ${err.message}`
     console.error(`[BackfillTags] (${trigger}) 执行失败:`, err)
     return { started: true, error: err.message }
   } finally {
+    // 统计全局剩余，供进度接口展示；失败时置 null 不阻断
+    try {
+      backfillProgress.remaining = await countBackfillRemaining()
+    } catch { backfillProgress.remaining = null }
     backfillProgress.done = true
     backfillProgress.detail = ''
     backfillRunning = false
+
+    // 自链式：本批跑完仍有剩余则延时触发下一批，直至补齐。
+    // 用短批 + 15s 间隙，规避 free 实例内存峰值与 spin-down；
+    // 仅当本批确有产出（updated>0）才继续，避免主备全挂时空转刷屏。
+    if (chain && backfillProgress.remaining > 0 && backfillProgress.updated > 0) {
+      const nextRemaining = backfillProgress.remaining
+      setTimeout(() => {
+        console.log(`[BackfillTags] (chain) 仍剩 ${nextRemaining} 道，触发下一批...`)
+        runBackfillTags({ limit, trigger: 'chain', chain: true })
+          .catch(e => console.error('[BackfillTags] 链式回填异常:', e.message))
+      }, 15000)
+    }
   }
 }
 
@@ -1864,9 +1893,9 @@ app.post('/api/admin/backfill-tags', async (req, res) => {
   if (backfillRunning) {
     return res.status(409).json({ error: '回填任务正在进行中', progress: backfillProgress })
   }
-  // 异步执行，不阻塞响应
-  res.json({ success: true, message: '标签回填任务已启动' })
-  runBackfillTags({ trigger: 'manual' }).catch(err => {
+  // 异步执行，不阻塞响应。chain=true → 小批量自动接力直至补齐。
+  res.json({ success: true, message: '标签回填任务已启动（小批量自动接力）' })
+  runBackfillTags({ trigger: 'manual', chain: true }).catch(err => {
     console.error('[BackfillTags] 手动回填异常:', err)
   })
 })
@@ -1926,10 +1955,10 @@ if (process.argv[1] === __filename || process.argv[1]?.endsWith('server/index.js
       const intervalHours = Number(process.env.BACKFILL_INTERVAL_HOURS) || 6
       const intervalMs = intervalHours * 60 * 60 * 1000
       setTimeout(() => {
-        runBackfillTags({ trigger: 'auto' }).catch(e => console.error('[BackfillTags] 定时回填异常:', e.message))
+        runBackfillTags({ trigger: 'auto', chain: true }).catch(e => console.error('[BackfillTags] 定时回填异常:', e.message))
       }, 2 * 60 * 1000)
       setInterval(() => {
-        runBackfillTags({ trigger: 'auto' }).catch(e => console.error('[BackfillTags] 定时回填异常:', e.message))
+        runBackfillTags({ trigger: 'auto', chain: true }).catch(e => console.error('[BackfillTags] 定时回填异常:', e.message))
       }, intervalMs)
       console.log(`⏰ 知识点/难度定时回填已启用（每 ${intervalHours} 小时）`)
     } catch (err) {
