@@ -61,6 +61,9 @@ export const createQuestions = async (questions) => {
       tags_source: q.tags_source || 'ai',
       difficulty: q.difficulty ?? null,
       block_coordinates: q.block_coordinates ? JSON.stringify(q.block_coordinates) : null,
+      question_number: q.question_number ?? null,
+      text_bbox: q.text_bbox ? JSON.stringify(q.text_bbox) : null,
+      image_type: q.image_type || null,
       is_complete: checkQuestionCompleteness(q).isComplete,
       created_at: new Date().toISOString()
     }
@@ -542,4 +545,78 @@ export const updateQuestionCacheId = async (questionId, cacheId) => {
   } catch (error) {
     console.error(`更新 cache_id 失败 q=${questionId.substring(0, 8)}:`, error.message)
   }
+}
+
+// ── question_assets CRUD ──
+
+/**
+ * 创建题目资源记录
+ * @param {Object} asset - { question_id, asset_type, original_image_url, cropped_image_url, bbox, tikz_code, tikz_status }
+ * @returns {Object} 创建的记录
+ */
+export const createQuestionAsset = async (asset) => {
+  const { rows } = await query(
+    `INSERT INTO ${TABLES.QUESTION_ASSETS}
+     (question_id, asset_type, original_image_url, cropped_image_url, bbox, tikz_code, tikz_status)
+     VALUES ($1, $2, $3, $4, $5, $6, $7)
+     RETURNING *`,
+    [
+      asset.question_id,
+      asset.asset_type || 'geometry_image',
+      asset.original_image_url || null,
+      asset.cropped_image_url || null,
+      asset.bbox ? JSON.stringify(asset.bbox) : null,
+      asset.tikz_code || null,
+      asset.tikz_status || 'none'
+    ]
+  )
+  return rows[0]
+}
+
+/**
+ * 获取题目的所有资源
+ * @param {string} questionId
+ * @returns {Array} 资源列表
+ */
+export const getQuestionAssets = async (questionId) => {
+  const { rows } = await query(
+    `SELECT * FROM ${TABLES.QUESTION_ASSETS}
+     WHERE question_id = $1
+     ORDER BY created_at`,
+    [questionId]
+  )
+  return rows
+}
+
+/**
+ * 按类型获取题目的资源
+ * @param {string} questionId
+ * @param {string} assetType - 'geometry_image', 'chart_image', etc.
+ * @returns {Array} 资源列表
+ */
+export const getQuestionAssetsByType = async (questionId, assetType) => {
+  const { rows } = await query(
+    `SELECT * FROM ${TABLES.QUESTION_ASSETS}
+     WHERE question_id = $1 AND asset_type = $2
+     ORDER BY created_at`,
+    [questionId, assetType]
+  )
+  return rows
+}
+
+/**
+ * 更新题目资源的 tikz 信息
+ * @param {string} assetId
+ * @param {Object} upd - { tikz_code, tikz_status }
+ */
+export const updateQuestionAssetTikz = async (assetId, upd) => {
+  const { tikz_code, tikz_status } = upd
+  await query(
+    `UPDATE ${TABLES.QUESTION_ASSETS}
+     SET tikz_code = COALESCE($1, tikz_code),
+         tikz_status = COALESCE($2, tikz_status),
+         updated_at = NOW()
+     WHERE id = $3`,
+    [tikz_code || null, tikz_status || null, assetId]
+  )
 }

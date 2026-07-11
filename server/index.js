@@ -10,6 +10,7 @@ import { migrateJudgements } from './migrations/010_add_judgements_table.js'
 import { migrateIsComplete } from './migrations/011_add_is_complete.js'
 import { migratePracticeCount } from './migrations/012_add_practice_count.js'
 import { migrateDifficulty } from './migrations/013_add_difficulty.js'
+import { migratePageUnderstanding } from './migrations/014_add_page_understanding.js'
 
 const __dirname = dirname(fileURLToPath(import.meta.url))
 dotenv.config({ path: resolve(__dirname, '.env') })
@@ -20,7 +21,7 @@ import multer from 'multer'
 import { query, TABLES, TASK_STATUS, QUESTION_STATUS, WRONG_STATUS, LIFECYCLE_STATUS } from './config/neon.js'
 import { uploadFilesWithRetry } from './services/uploadRetryManager.js'
 import { createUploadReport, logUploadReport } from './services/uploadReportLogger.js'
-import { createJudgement, batchUpdateQuestionTags } from './services/neonService.js'
+import { createJudgement, batchUpdateQuestionTags, getQuestionAssets, getQuestionAssetsByType } from './services/neonService.js'
 import { judgeAnswer } from './services/judgeService.js'
 import { checkQuestionCompleteness } from './utils/questionCompleteness.js'
 import { uploadImage, deleteFile } from './services/ossService.js'
@@ -1164,6 +1165,29 @@ app.get('/api/questions/search', async (req, res) => {
   }
 })
 
+// ── question_assets API ──
+
+/**
+ * GET /api/questions/:questionId/assets
+ * 获取指定题目的所有资源（几何图、图表等）
+ */
+app.get('/api/questions/:questionId/assets', async (req, res) => {
+  try {
+    const { questionId } = req.params
+    const { type } = req.query
+    let assets
+    if (type) {
+      assets = await getQuestionAssetsByType(questionId, type)
+    } else {
+      assets = await getQuestionAssets(questionId)
+    }
+    res.json({ success: true, assets })
+  } catch (error) {
+    console.error('获取题目资源失败:', error)
+    res.status(500).json({ error: error.message })
+  }
+})
+
 // [P1-4a] 批量查询每道题的最新 judgement
 app.post('/api/judgements/latest', async (req, res) => {
   try {
@@ -1976,6 +2000,7 @@ if (process.argv[1] === __filename || process.argv[1]?.endsWith('server/index.js
       await migrateIsComplete()
       await migratePracticeCount()
       await migrateDifficulty()
+      await migratePageUnderstanding()
     } catch (err) {
       console.error('数据库迁移失败:', err.message)
     }

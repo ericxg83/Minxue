@@ -277,6 +277,11 @@ export const recognizeQuestions = async (imageBase64, studentId, taskId, retryCo
         analysis: q.analysis || '',
         // ─ 多模态切题字段 ──
         geometry_image: q.geometry_image || null,
+        // 页面理解字段
+        question_number: q.question_number || null,
+        text_bbox: q.text_bbox || null,
+        image_type: q.image_type || null,
+        image_bbox: q.image_bbox || null,
         // 原始图片 dataURL (用于后续裁剪增强)
         _original_image_url: imageDataURL,
         created_at: new Date().toISOString()

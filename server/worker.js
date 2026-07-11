@@ -11,7 +11,7 @@ import sharp from 'sharp'
 import { TABLES, TASK_STATUS } from './config/neon.js'
 import { query } from './config/neon.js'
 import { AI_CONFIG, getAIHeaders, buildOCRPrompt, buildTaggingPrompt, buildAnswerGenerationPrompt, getCurrentTextModel, getCurrentVLModel, rotateTextModel, rotateVLModel, TEXT_MODELS, VL_MODELS, callTextCompletion } from './config/ai.js'
-import { updateTaskStatus, createQuestions, batchUpdateQuestionTags, addWrongQuestions, createJudgement, getLatestJudgement, updateQuestionAnswer, markAnswerException, findCachedQuestionByFingerprint, findSimilarQuestion, cacheQuestion, incrementQuestionUseCount, updateQuestionCacheId } from './services/neonService.js'
+import { updateTaskStatus, createQuestions, batchUpdateQuestionTags, addWrongQuestions, createJudgement, getLatestJudgement, updateQuestionAnswer, markAnswerException, findCachedQuestionByFingerprint, findSimilarQuestion, cacheQuestion, incrementQuestionUseCount, updateQuestionCacheId, createQuestionAsset } from './services/neonService.js'
 import { uploadImage } from './services/ossService.js'
 import { generateTextFingerprint, generatePHash, PARSER_VERSION, TEXT_SIMILARITY_THRESHOLD } from './utils/questionFingerprint.js'
 import { uploadFilesWithRetry } from './services/uploadRetryManager.js'
@@ -339,6 +339,11 @@ const recognizeQuestions = async (imageBase64, taskId, retryCount = 0) => {
         confidence: q.confidence || 0,
         analysis: q.analysis || '',
         block_coordinates: q.block_coordinates || null,
+        question_number: q.question_number || null,
+        text_bbox: q.text_bbox || null,
+        image_type: q.image_type || null,
+        image_bbox: q.image_bbox || null,
+        geometry_image: q.geometry_image || null,
         created_at: new Date().toISOString()
       }
     }) || []
@@ -1055,9 +1060,21 @@ export const processTask = async (job) => {
       const geometryImageCache = new Map() // bbox 去重缓存 (一图多题)
 
       for (const q of questions) {
-        if (q.geometry_image?.has_image && q.geometry_image.bbox) {
-          console.log(`   [几何图] ${q.id}: 检测到配图, bbox=${JSON.stringify(q.geometry_image.bbox)}`)
-          const bbox = q.geometry_image.bbox
+        // 优先使用新格式 image_bbox/image_type，向后兼容旧格式 geometry_image
+        const hasImage = q.image_type && q.image_type !== 'none'
+        const hasLegacyImage = q.geometry_image?.has_image && q.geometry_image.bbox
+        const imageBbox = q.image_bbox || (q.geometry_image?.bbox || null)
+        const imageType = q.image_type || (hasLegacyImage ? 'geometry' : null)
+
+        if (hasImage || hasLegacyImage) {
+          const bbox = imageBbox
+          if (!bbox) {
+            if (q.content && (q.content.includes('如图') || q.content.includes('图1') || q.content.includes('图示'))) {
+              console.log(`   ⚠️ [几何图] ${q.id}: 题干含"如图"关键词但未返回 bbox`)
+            }
+            continue
+          }
+          console.log(`   [${imageType || 'geometry'}] ${q.id}: 检测到配图, bbox=${JSON.stringify(bbox)}`)
           const cacheKey = JSON.stringify(bbox)
           if (geometryImageCache.has(cacheKey)) {
             q.geometry_image_url = geometryImageCache.get(cacheKey)
@@ -1079,6 +1096,31 @@ export const processTask = async (job) => {
 
       await createQuestions(questionsWithStudentId)
       console.log(`✅ [Step 6/8] 题目保存成功 (含 ${geometryImageCache.size} 张几何配图)`)
+
+      // ── 页面理解：将裁剪后的几何图保存到 question_assets ──
+      let assetCount = 0
+      for (const q of questions) {
+        if (q.geometry_image_url) {
+          try {
+            const imageType = q.image_type || 'geometry'
+            const imageBbox = q.image_bbox || (q.geometry_image?.bbox || null)
+            await createQuestionAsset({
+              question_id: q.id,
+              asset_type: imageType === 'chart' ? 'chart_image' : 'geometry_image',
+              original_image_url: imageUrl,
+              cropped_image_url: q.geometry_image_url,
+              bbox: imageBbox,
+              tikz_status: imageType === 'geometry' ? 'pending' : 'none'
+            })
+            assetCount++
+          } catch (e) {
+            console.error(`   ⚠️ [question_assets] 保存失败 q=${q.id.substring(0, 8)}:`, e.message)
+          }
+        }
+      }
+      if (assetCount > 0) {
+        console.log(`   ✅ [question_assets] 已保存 ${assetCount} 条资源记录（其中 geometry 类型标记为 tikz_status=pending）`)
+      }
 
       // [P0-1] 初始错题同步 — 仅当 OCR 有参考答案且判错时才同步
       const ocrWrongIds = questionsWithStudentId.filter(q => q.is_correct === false && q.answer).map(q => q.id)

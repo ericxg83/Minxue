@@ -643,6 +643,14 @@ export default function ExamReview({ task, onClose, onSave }) {
               <span style={{ fontSize: '14px', fontWeight: 600, color: COLORS.primary, marginRight: '8px' }}>
                 第 {currentIndex + 1} 题
               </span>
+              {currentQuestion?.question_number && (
+                <span style={{
+                  fontSize: '11px', color: '#fff', background: COLORS.primary,
+                  padding: '1px 6px', borderRadius: '4px', marginRight: '6px'
+                }}>
+                  原卷题号 {currentQuestion.question_number}
+                </span>
+              )}
               <span style={{ fontSize: '12px', color: COLORS.textSecondary }}>
                 {currentQuestion?.question_type === 'choice' ? '选择题' :
                  currentQuestion?.question_type === 'fill' ? '填空题' : '解答题'}
@@ -697,6 +705,33 @@ export default function ExamReview({ task, onClose, onSave }) {
                   objectFit: 'contain', borderRadius: '6px', display: 'block'
                 }}
               />
+              {/* 配图类型标签 + 生成TikZ按钮 */}
+              <div style={{
+                display: 'flex', justifyContent: 'space-between',
+                alignItems: 'center', marginTop: '6px'
+              }}>
+                <span style={{
+                  fontSize: '11px', padding: '2px 8px', borderRadius: '4px',
+                  background: currentQuestion?.image_type === 'chart' ? '#FEF3C7' : '#DBEAFE',
+                  color: currentQuestion?.image_type === 'chart' ? '#92400E' : '#1E40AF',
+                  fontWeight: 500
+                }}>
+                  {currentQuestion?.image_type === 'chart' ? '📊 图表' : '📐 几何图'}
+                </span>
+                <button
+                  onClick={() => {
+                    Toast.show({ message: 'TikZ生成功能即将上线', type: 'info' })
+                  }}
+                  style={{
+                    padding: '4px 12px', borderRadius: '6px',
+                    border: '1px solid #6366F1', background: '#EEF2FF',
+                    color: '#4F46E5', fontSize: '12px', fontWeight: 600,
+                    cursor: 'pointer', display: 'flex', alignItems: 'center', gap: '4px'
+                  }}
+                >
+                  生成TikZ图
+                </button>
+              </div>
             </div>
           )}
 

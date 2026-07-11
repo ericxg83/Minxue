@@ -41,11 +41,15 @@ CREATE TABLE IF NOT EXISTS questions (
     is_correct BOOLEAN DEFAULT true,
     status TEXT DEFAULT 'pending' CHECK (status IN ('pending', 'wrong', 'mastered')),
     image_url TEXT,
+    geometry_image_url TEXT,
+    block_coordinates JSONB,
+    question_number INTEGER,
+    text_bbox JSONB,
+    image_type VARCHAR(20),
     ai_tags JSONB DEFAULT '[]'::jsonb,
     manual_tags JSONB DEFAULT '[]'::jsonb,
     tags_source TEXT DEFAULT 'ai' CHECK (tags_source IN ('ai', 'manual')),
     difficulty SMALLINT CHECK (difficulty IS NULL OR difficulty BETWEEN 1 AND 5),
-    block_coordinates JSONB,
     created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
     updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
 );
@@ -115,6 +119,9 @@ CREATE TRIGGER update_questions_updated_at BEFORE UPDATE ON questions
 CREATE TRIGGER update_wrong_questions_updated_at BEFORE UPDATE ON wrong_questions
     FOR EACH ROW EXECUTE FUNCTION update_updated_at_column();
 
+CREATE TRIGGER update_question_assets_updated_at BEFORE UPDATE ON question_assets
+    FOR EACH ROW EXECUTE FUNCTION update_updated_at_column();
+
 -- 6. 判定记录表（Shadow Mode - 只追加不修改）
 CREATE TABLE IF NOT EXISTS judgements (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
@@ -136,3 +143,20 @@ CREATE INDEX IF NOT EXISTS idx_judgements_question_id ON judgements(question_id)
 CREATE INDEX IF NOT EXISTS idx_judgements_student_id ON judgements(student_id);
 CREATE INDEX IF NOT EXISTS idx_judgements_source ON judgements(source);
 CREATE INDEX IF NOT EXISTS idx_judgements_created_at ON judgements(created_at DESC);
+
+-- 7. 题目资源表（页面理解产物）
+CREATE TABLE IF NOT EXISTS question_assets (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    question_id UUID NOT NULL REFERENCES questions(id) ON DELETE CASCADE,
+    asset_type VARCHAR(30) NOT NULL DEFAULT 'geometry_image',
+    original_image_url TEXT,
+    cropped_image_url TEXT,
+    bbox JSONB,
+    tikz_code TEXT,
+    tikz_status VARCHAR(10) DEFAULT 'none' CHECK (tikz_status IN ('none', 'pending', 'done', 'failed')),
+    created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
+    updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
+);
+
+CREATE INDEX IF NOT EXISTS idx_question_assets_question_id ON question_assets(question_id);
+CREATE INDEX IF NOT EXISTS idx_question_assets_asset_type ON question_assets(asset_type);
