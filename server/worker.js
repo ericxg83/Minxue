@@ -10,7 +10,8 @@ import axios from 'axios'
 import sharp from 'sharp'
 import { TABLES, TASK_STATUS } from './config/neon.js'
 import { query } from './config/neon.js'
-import { AI_CONFIG, getAIHeaders, buildOCRPrompt, buildTaggingPrompt, buildAnswerGenerationPrompt, buildGeometryExtractionPrompt, getCurrentTextModel, getCurrentVLModel, rotateTextModel, rotateVLModel, TEXT_MODELS, VL_MODELS, callTextCompletion, callVisionCompletion } from './config/ai.js'
+import { AI_CONFIG, getAIHeaders, buildOCRPrompt, buildTaggingPrompt, buildAnswerGenerationPrompt, buildGeometryReconstructionPrompt, getCurrentTextModel, getCurrentVLModel, rotateTextModel, rotateVLModel, TEXT_MODELS, VL_MODELS, callTextCompletion, callVisionCompletion } from './config/ai.js'
+import { parseGeometryStructure, renderGeometrySvg, isEmptyStructure } from './utils/geometrySvg.js'
 import { updateTaskStatus, createQuestions, batchUpdateQuestionTags, addWrongQuestions, createJudgement, getLatestJudgement, updateQuestionAnswer, markAnswerException, findCachedQuestionByFingerprint, findSimilarQuestion, cacheQuestion, incrementQuestionUseCount, updateQuestionCacheId, createQuestionAsset, updateQuestionAssetCleanData } from './services/neonService.js'
 import { uploadImage } from './services/ossService.js'
 import { generateTextFingerprint, generatePHash, PARSER_VERSION, TEXT_SIMILARITY_THRESHOLD } from './utils/questionFingerprint.js'
@@ -73,74 +74,59 @@ async function downloadImageBuffer(url) {
 }
 
 /**
- * AI 视觉模型几何元素提取：从裁剪图中提取纯几何元素，输出 TikZ 代码。
+ * 几何重建：从原始裁剪图识别结构化几何数据，服务端渲染成干净 SVG。
  *
- * 替代原有的 Sharp 二值化方案。调用视觉模型理解几何结构，
- * 保留几何线段、点标记、角度符号、长度标注，删除中文/题号/笔迹/水印。
+ * 不做任何图像清理（灰度化/二值化/滤镜）。视觉模型只负责"读懂"几何结构，
+ * 输出点/线/圆/标注的结构化 JSON；服务端确定性地把 JSON 渲染成白底黑线 SVG，
+ * 天然去除中文/题号/笔迹/水印/草稿。
  *
  * @param {Buffer} imageBuffer - 原始裁剪几何图 buffer
  * @param {string} questionId - 题目 ID（用于日志）
- * @returns {Promise<string|null>} TikZ 代码字符串或 null
+ * @returns {Promise<{svg: string, structure: object}|null>}
  */
-async function extractGeometryToTikz(imageBuffer, questionId) {
+async function reconstructGeometrySvg(imageBuffer, questionId) {
+  const shortId = questionId.substring(0, 8)
   try {
     const base64 = imageBuffer.toString('base64')
     const dataURL = `data:image/png;base64,${base64}`
 
     const result = await callVisionCompletion({
       imageDataURL: dataURL,
-      systemPrompt: buildGeometryExtractionPrompt(),
-      userText: '请从这张几何图中提取纯几何元素，输出TikZ代码。',
-      temperature: 0.2,
-      maxTokens: 4096
+      systemPrompt: buildGeometryReconstructionPrompt(),
+      userText: '请识别这张几何图中的纯几何结构（点/线/圆/标注），只输出结构化 JSON。',
+      temperature: 0.1,
+      maxTokens: 2048
     })
 
-    // 复用 tikzWorker 中的提取逻辑
-    const tikzCode = extractTikzCode(result.content)
-    if (!tikzCode) {
-      console.warn(`   ⚠️ [几何提取] ${questionId.substring(0, 8)}: 未找到有效的 TikZ 代码`)
-      // 尝试抢救：如果内容包含 \draw 或 \path，当作 TikZ 代码
-      if (result.content.includes('\\draw') || result.content.includes('\\path')) {
-        return result.content.trim()
-      }
+    const structure = parseGeometryStructure(result.content)
+    if (!structure) {
+      console.warn(`   ⚠️ [几何重建] ${shortId}: 未能解析出几何结构 JSON`)
       return null
     }
-    return tikzCode
+    if (isEmptyStructure(structure)) {
+      console.warn(`   ⚠️ [几何重建] ${shortId}: 未识别到有效几何结构（空）`)
+      return null
+    }
+
+    const svg = renderGeometrySvg(structure)
+    if (!svg) {
+      console.warn(`   ⚠️ [几何重建] ${shortId}: 结构渲染 SVG 失败`)
+      return null
+    }
+    return { svg, structure }
   } catch (error) {
-    console.error(`   ⚠️ [几何提取] ${questionId.substring(0, 8)} 失败:`, error.message)
+    console.error(`   ⚠️ [几何重建] ${shortId} 失败:`, error.message)
     return null
   }
 }
 
 /**
- * 从 AI 回复中提取 TikZ 代码（复用 tikzWorker.js 中的逻辑）
- */
-function extractTikzCode(content) {
-  if (!content) return null
-
-  // 尝试匹配 ```tikz ... ``` 或 ```latex ... ``` 代码块
-  const codeBlockMatch = content.match(/```(?:tex|latex|tikz)?\s*\n?([\s\S]*?)\n?```/)
-  if (codeBlockMatch) {
-    const code = codeBlockMatch[1].trim()
-    if (code.includes('\\begin{tikzpicture}')) return code
-  }
-
-  // 尝试直接匹配 \begin{tikzpicture} ... \end{tikzpicture}
-  const tikzMatch = content.match(/\\begin\{tikzpicture\}[\s\S]*?\\end\{tikzpicture\}/)
-  if (tikzMatch) return tikzMatch[0].trim()
-
-  // 如果整段内容看起来就是 TikZ 代码
-  if (content.includes('\\begin{tikzpicture}') && content.includes('\\end{tikzpicture}')) {
-    return content.trim()
-  }
-
-  return null
-}
-
-/**
- * 处理单个几何图的 AI 提取流水线：下载 → AI 视觉模型提取 → 入库
+ * 处理单个几何图的重建流水线：下载 → 视觉模型识别几何结构 → 服务端渲染干净 SVG → 入库
  *
- * 替换原有流程：下载 → Sharp 二值化 → 上传 OSS → 结构分析 → 入库 → 入队
+ * 几何重建（第三阶段），替代图片清理方案：
+ *   下载原始裁剪图 → 视觉模型输出结构化 JSON → renderGeometrySvg() 确定性渲染 SVG →
+ *   存入 clean_geometry_svg 字段（白底黑线，仅含几何元素）。
+ *   clean_geometry_svg 作为后续 TikZ 生成的输入。
  *
  * @param {Object} q - 题目对象（含 geometry_image_url、id）
  * @param {string} studentId - 学生 ID
@@ -149,54 +135,57 @@ async function processGeometryCleaning(q, studentId) {
   if (!q.geometry_image_url) return
 
   const shortId = q.id.substring(0, 8)
-  console.log(`   [几何净化] ${shortId}: 开始 AI 几何提取...`)
+  console.log(`   [几何重建] ${shortId}: 开始识别几何结构...`)
 
   // 1. 下载裁剪好的几何图
   const rawBuffer = await downloadImageBuffer(q.geometry_image_url)
   if (!rawBuffer) {
-    console.warn(`   ⚠️ [几何净化] ${shortId}: 下载失败，跳过`)
+    console.warn(`   ⚠️ [几何重建] ${shortId}: 下载失败，跳过`)
     return
   }
 
-  // 2. AI 视觉模型提取几何元素 → 输出 TikZ 代码
-  let tikzCode = null
+  // 2. 视觉模型识别几何结构 → 服务端渲染干净 SVG
+  let svg = null
   try {
-    tikzCode = await extractGeometryToTikz(rawBuffer, q.id)
-    if (!tikzCode) {
-      console.warn(`   ⚠️ [几何净化] ${shortId}: AI 提取失败，跳过`)
+    const result = await reconstructGeometrySvg(rawBuffer, q.id)
+    if (!result) {
+      console.warn(`   ⚠️ [几何重建] ${shortId}: 重建失败，跳过`)
       return
     }
-    console.log(`   [几何净化] ${shortId}: AI 提取完成，TikZ 代码 ${tikzCode.length} 字符`)
+    svg = result.svg
+    const st = result.structure
+    console.log(
+      `   [几何重建] ${shortId}: 识别到 ${st.points.length} 点 / ${st.segments.length} 线 / ${st.circles.length} 圆，SVG ${svg.length} 字符`
+    )
   } catch (error) {
-    console.error(`   ⚠️ [几何净化] ${shortId}: AI 提取异常:`, error.message)
+    console.error(`   ⚠️ [几何重建] ${shortId}: 重建异常:`, error.message)
     return
   }
 
-  // 3. 存入 question_assets 表（clean_geometry_image_url 存 TikZ 代码，不是 URL）
+  // 3. 存入 question_assets 表（clean_geometry_svg 存干净 SVG 源码）
   try {
     await updateQuestionAssetCleanData(q.id, {
-      clean_geometry_image_url: tikzCode,
+      clean_geometry_svg: svg,
       geometry_crop_type: 'clean_geometry'
     })
-    console.log(`   [几何净化] ${shortId}: 数据入库成功`)
+    console.log(`   [几何重建] ${shortId}: 数据入库成功`)
   } catch (error) {
-    console.error(`   ⚠️ [几何净化] ${shortId}: 入库失败:`, error.message)
+    console.error(`   ⚠️ [几何重建] ${shortId}: 入库失败:`, error.message)
   }
 
-  // 4. 反范式写入 questions 表（双写 clean_geometry_image_url + tikz_svg_url）
+  // 4. 反范式写入 questions 表
   try {
     await query(
       `UPDATE ${TABLES.QUESTIONS}
-       SET clean_geometry_image_url = $1,
-           tikz_svg_url = $1,
+       SET clean_geometry_svg = $1,
            display_image_type = COALESCE(display_image_type, 'clean'),
            updated_at = NOW()
        WHERE id = $2`,
-      [tikzCode, q.id]
+      [svg, q.id]
     )
-    console.log(`   [几何净化] ${shortId}: questions 表更新成功`)
+    console.log(`   [几何重建] ${shortId}: questions 表更新成功`)
   } catch (error) {
-    console.warn(`   ⚠️ [几何净化] ${shortId}: questions 表写入失败:`, error.message)
+    console.warn(`   ⚠️ [几何重建] ${shortId}: questions 表写入失败:`, error.message)
   }
 }
 

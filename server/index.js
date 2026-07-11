@@ -14,6 +14,7 @@ import { migratePageUnderstanding } from './migrations/014_add_page_understandin
 import { migrateGeometryCleanup } from './migrations/015_add_geometry_cleanup.js'
 import { migrateGeometryTikzDisplay } from './migrations/016_add_tikz_display.js'
 import { migrateGeometryCropType } from './migrations/017_add_geometry_crop_type.js'
+import { migrateCleanGeometrySvg } from './migrations/018_add_clean_geometry_svg.js'
 
 const __dirname = dirname(fileURLToPath(import.meta.url))
 dotenv.config({ path: resolve(__dirname, '.env') })
@@ -2009,6 +2010,7 @@ if (process.argv[1] === __filename || process.argv[1]?.endsWith('server/index.js
       await migrateGeometryCleanup()
       await migrateGeometryTikzDisplay()
       await migrateGeometryCropType()
+      await migrateCleanGeometrySvg()
     } catch (err) {
       console.error('数据库迁移失败:', err.message)
     }

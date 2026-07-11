@@ -627,13 +627,14 @@ export const updateQuestionAssetTikz = async (assetId, upd) => {
  * @param {Object} data - { clean_geometry_image_url, geometry_crop_type }
  */
 export const updateQuestionAssetCleanData = async (questionId, data) => {
-  const { clean_geometry_image_url, geometry_crop_type } = data
+  const { clean_geometry_image_url, clean_geometry_svg, geometry_crop_type } = data
   await query(
     `UPDATE ${TABLES.QUESTION_ASSETS}
      SET clean_geometry_image_url = COALESCE($1, clean_geometry_image_url),
-         geometry_crop_type = COALESCE($2, geometry_crop_type),
+         clean_geometry_svg = COALESCE($2, clean_geometry_svg),
+         geometry_crop_type = COALESCE($3, geometry_crop_type),
          updated_at = NOW()
-     WHERE question_id = $3`,
-    [clean_geometry_image_url || null, geometry_crop_type || null, questionId]
+     WHERE question_id = $4`,
+    [clean_geometry_image_url || null, clean_geometry_svg || null, geometry_crop_type || null, questionId]
   )
 }

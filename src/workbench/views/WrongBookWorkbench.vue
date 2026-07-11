@@ -231,8 +231,11 @@
                 </div>
                 <div class="unified-section unified-image-section" v-if="detailDisplayUrl">
                   <div class="unified-label">配图</div>
-                  <!-- TikZ 代码 → 内联 SVG -->
-                  <div v-if="detailDisplayType === 'tikz_code'" class="tikz-svg-container"
+                  <!-- 干净 SVG 源码（几何重建）→ 直接内联渲染 -->
+                  <div v-if="detailDisplayType === 'svg_code'" class="tikz-svg-container"
+                       v-html="detailDisplayUrl" @click="openDetailFullscreen"></div>
+                  <!-- TikZ 代码 → tikzToSvg 转换后内联 SVG -->
+                  <div v-else-if="detailDisplayType === 'tikz_code'" class="tikz-svg-container"
                        v-html="renderTikzSvg(detailDisplayUrl)" @click="openDetailFullscreen"></div>
                   <!-- URL → LazyImage -->
                   <LazyImage
@@ -493,7 +496,10 @@ const renderTikzSvg = (code) => {
 
 /** 点击 SVG 全屏查看 */
 const openDetailFullscreen = () => {
-  const svg = renderTikzSvg(detailDisplayUrl.value)
+  // svg_code 已是 SVG 源码，直接用；tikz_code 需转换
+  const svg = detailDisplayType.value === 'svg_code'
+    ? detailDisplayUrl.value
+    : renderTikzSvg(detailDisplayUrl.value)
   if (svg) {
     fullscreenSvg.value = svg
     showFullscreenSvg.value = true
@@ -557,16 +563,17 @@ const getQuestionThumb = (wq) => {
   const q = getQuestion(wq)
   const info = getGeometryDisplayUrl(q)
   const val = info.url ? info : getGeometryDisplayUrl(wq)
-  // TikZ 代码不能作为图片 URL，缩略图返回空（改用 SVG 渲染）
-  if (val.type === 'tikz_code') return ''
+  // SVG 源码 / TikZ 代码不能作为图片 URL，缩略图返回空（改用内联 SVG 渲染）
+  if (val.type === 'svg_code' || val.type === 'tikz_code') return ''
   return val.url || ''
 }
 
-/** 缩略图：TikZ 代码渲染为内联 SVG 字符串，否则返回空 */
+/** 缩略图：干净 SVG 源码直接内联，TikZ 代码转换后内联，否则返回空 */
 const getQuestionThumbSvg = (wq) => {
   const q = getQuestion(wq)
   const info = getGeometryDisplayUrl(q)
   const val = info.url ? info : getGeometryDisplayUrl(wq)
+  if (val.type === 'svg_code') return val.url
   if (val.type === 'tikz_code') return renderTikzSvg(val.url)
   return ''
 }

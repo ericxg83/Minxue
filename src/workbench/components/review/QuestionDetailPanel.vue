@@ -134,8 +134,11 @@
           <div class="ops-q-section ops-image-section" v-if="displayImageUrl">
     <div class="ops-q-label">配图</div>
     <div class="ops-image-wrap">
-      <!-- TikZ 代码 → 内联 SVG -->
-      <div v-if="displayType === 'tikz_code'" class="tikz-svg-container"
+      <!-- 干净 SVG 源码（几何重建）→ 直接内联渲染 -->
+      <div v-if="displayType === 'svg_code'" class="tikz-svg-container"
+           v-html="displayImageUrl" @click="openFullscreen"></div>
+      <!-- TikZ 代码 → tikzToSvg 转换后内联 SVG -->
+      <div v-else-if="displayType === 'tikz_code'" class="tikz-svg-container"
            v-html="renderTikzSvg(displayImageUrl)" @click="openFullscreen"></div>
       <!-- URL → <img> 标签 -->
       <img v-else :src="displayImageUrl" class="ops-image" @click="fullscreenImage = displayImageUrl" />
@@ -324,7 +327,10 @@ const renderTikzSvg = (code) => {
 
 /** 点击 SVG 全屏查看 */
 const openFullscreen = () => {
-  const svg = renderTikzSvg(displayImageUrl.value)
+  // svg_code 已是 SVG 源码，直接用；tikz_code 需转换
+  const svg = displayType.value === 'svg_code'
+    ? displayImageUrl.value
+    : renderTikzSvg(displayImageUrl.value)
   if (svg) {
     fullscreenSvg.value = svg
     showFullscreenSvg.value = true
