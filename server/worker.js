@@ -235,41 +235,6 @@ function denormalizeBbox(bbox, imgW, imgH) {
   }
 }
 
-/**
- * 对单个题目的所有 bbox 字段做归一化→像素换算（就地修改并返回）。
- */
-function denormalizeQuestionBboxes(q, imgW, imgH) {
-  if (q.block_coordinates) q.block_coordinates = denormalizeBbox(q.block_coordinates, imgW, imgH)
-  if (q.text_bbox) q.text_bbox = denormalizeBbox(q.text_bbox, imgW, imgH)
-  if (q.image_bbox) q.image_bbox = denormalizeBbox(q.image_bbox, imgW, imgH)
-  if (q.geometry_image?.bbox) {
-    q.geometry_image = { ...q.geometry_image, bbox: denormalizeBbox(q.geometry_image.bbox, imgW, imgH) }
-  }
-  return q
-}
-
-/**
- * 将题目的所有 bbox 等比例缩放（就地修改）。
- * 用于将 compressedBuffer 像素空间的坐标缩放到原图（straightenedBuffer）像素空间。
- * @param {Object} q - question 对象
- * @param {number} sx - 水平缩放比
- * @param {number} sy - 垂直缩放比
- */
-function scaleQuestionBboxes(q, sx, sy) {
-  const s = (v, f) => Math.round((typeof v === 'number' && isFinite(v) ? v : 0) * f)
-  const scale = (bbox) => {
-    if (!bbox) return
-    bbox.x = s(bbox.x, sx)
-    bbox.y = s(bbox.y, sy)
-    bbox.width  = s(bbox.width, sx)
-    bbox.height = s(bbox.height, sy)
-  }
-  if (q.block_coordinates) scale(q.block_coordinates)
-  if (q.text_bbox) scale(q.text_bbox)
-  if (q.image_bbox) scale(q.image_bbox)
-  if (q.geometry_image?.bbox) scale(q.geometry_image.bbox)
-}
-
 // AI 密钥校验
 const AI_KEY = AI_CONFIG.API_KEY
 if (!AI_KEY) {
@@ -1319,15 +1284,17 @@ export const processTask = async (job) => {
     if (questions.length > 0) {
       console.log(`📊 [Step 6/8] 保存题目到数据库...`)
 
-      // ── 坐标归一化修正：Qwen3-VL 返回 [0,1000] 归一化坐标，统一换算为 compressedBuffer 实际像素 ──
-      // 必须在裁剪/入库前完成，否则配图会被裁到错误位置（张冠李戴到邻题）。
+      // ── 坐标存储策略：block_coordinates / text_bbox 保持 AI 返回的 0-1000 归一化坐标直接入库 ──
+      // 前端按图片实际显示尺寸(naturalWidth/naturalHeight)换算像素，彻底与分辨率解耦，
+      // 无论展示原图还是压缩图，overlay 都能精准对齐。
+      // 几何图裁剪需要 compressedBuffer 的像素坐标，故仅在裁剪处把 image bbox 局部换算，
+      // 不影响入库的归一化值。
+      let _compW = 0, _compH = 0
       try {
         const _meta = await sharp(compressedBuffer).metadata()
-        const _imgW = _meta.width, _imgH = _meta.height
-        for (const q of questions) denormalizeQuestionBboxes(q, _imgW, _imgH)
-        console.log(`   [坐标] 已将 ${questions.length} 道题的 bbox 从 0-1000 归一化换算为像素 (基于 ${_imgW}x${_imgH})`)
-      } catch (coordErr) {
-        console.warn(`   ⚠️ [坐标] 归一化换算失败，沿用原始坐标: ${coordErr.message}`)
+        _compW = _meta.width; _compH = _meta.height
+      } catch (e) {
+        console.warn(`   ⚠️ [坐标] 读取压缩图尺寸失败: ${e.message}`)
       }
 
       // ── 多模态切题：处理几何配图 ─
@@ -1350,12 +1317,14 @@ export const processTask = async (job) => {
             }
             continue
           }
-          console.log(`   [${imageType || 'geometry'}] ${q.id}: 检测到配图, bbox=${JSON.stringify(bbox)}`)
+          console.log(`   [${imageType || 'geometry'}] ${q.id}: 检测到配图, bbox(归一化)=${JSON.stringify(bbox)}`)
+          // bbox 为 0-1000 归一化坐标；裁剪需换算为 compressedBuffer 像素坐标（仅局部使用，不写回 q）
+          const pixelBbox = (_compW && _compH) ? denormalizeBbox(bbox, _compW, _compH) : bbox
           const cacheKey = JSON.stringify(bbox)
           if (geometryImageCache.has(cacheKey)) {
             q.geometry_image_url = geometryImageCache.get(cacheKey)
           } else {
-            q.geometry_image_url = await cropAndUploadGeometryImage(compressedBuffer, bbox, studentId, q.id)
+            q.geometry_image_url = await cropAndUploadGeometryImage(compressedBuffer, pixelBbox, studentId, q.id)
             if (q.geometry_image_url) {
               geometryImageCache.set(cacheKey, q.geometry_image_url)
             }
@@ -1363,27 +1332,6 @@ export const processTask = async (job) => {
         } else if (q.content && (q.content.includes('如图') || q.content.includes('图1') || q.content.includes('图示'))) {
           console.log(`   ⚠️ [几何图] ${q.id}: 题干含"如图"关键词但未返回 geometry_image, content=${q.content.substring(0, 60)}`)
         }
-      }
-
-      // ── 坐标缩放：将 bbox 从 compressedBuffer 像素空间换算到原图（straightenedBuffer）像素空间 ──
-      // 前端展示的是 OSS 原图（image_url），分辨率通常远高于 compressedBuffer（max 1920x1920），
-      // 因此需要将坐标等比放大，使 bbox 方框能精准覆盖原图上对应题目区域。
-      // 注意：此步骤必须在几何图裁剪（使用 compressedBuffer 像素坐标）之后执行。
-      try {
-        const _origMeta = await sharp(straightenedBuffer).metadata()
-        const _origW = _origMeta.width, _origH = _origMeta.height
-        const _compMeta = await sharp(compressedBuffer).metadata()
-        const _compW = _compMeta.width, _compH = _compMeta.height
-        if (_origW !== _compW || _origH !== _compH) {
-          const sx = _origW / _compW
-          const sy = _origH / _compH
-          for (const q of questions) scaleQuestionBboxes(q, sx, sy)
-          console.log(`   [坐标] 已将 bbox 从压缩空间 (${_compW}x${_compH}) 缩放到原图空间 (${_origW}x${_origH}), scale=(${sx.toFixed(4)}, ${sy.toFixed(4)})`)
-        } else {
-          console.log(`   [坐标] 压缩图与原图尺寸一致 (${_compW}x${_compH})，无需缩放`)
-        }
-      } catch (scaleErr) {
-        console.warn(`   ⚠️ [坐标] 缩放失败，沿用压缩空间坐标: ${scaleErr.message}`)
       }
 
       const questionsWithStudentId = questions.map(q => ({

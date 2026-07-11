@@ -151,6 +151,9 @@ const dragPanY = ref(0)
 // 图片状态
 const imgError = ref(false)
 const imgLoaded = ref(false)
+// 图片自然尺寸（用于将归一化 0-1000 坐标换算为像素）
+const imgNaturalW = ref(0)
+const imgNaturalH = ref(0)
 
 // ─── 工具函数 ─────────────────────────────────────────────
 
@@ -172,15 +175,17 @@ const getBlockCoords = (q) => {
   }
 }
 
-/** 定位框样式（原始像素坐标） */
+/** 定位框样式：block_coordinates 为归一化 0-1000 坐标，按图片自然尺寸换算为像素 */
 const getOverlayStyle = (q) => {
   const bbox = getBlockCoords(q)
   if (!bbox) return { display: 'none' }
+  const nW = imgNaturalW.value, nH = imgNaturalH.value
+  if (!nW || !nH) return { display: 'none' }
   return {
-    left: bbox.x + 'px',
-    top: bbox.y + 'px',
-    width: bbox.width + 'px',
-    height: bbox.height + 'px'
+    left: (bbox.x / 1000 * nW) + 'px',
+    top: (bbox.y / 1000 * nH) + 'px',
+    width: (bbox.width / 1000 * nW) + 'px',
+    height: (bbox.height / 1000 * nH) + 'px'
   }
 }
 
@@ -196,6 +201,10 @@ const imageLayerStyle = computed(() => ({
 const onImgLoad = () => {
   imgError.value = false
   imgLoaded.value = true
+  if (imgRef.value) {
+    imgNaturalW.value = imgRef.value.naturalWidth || 0
+    imgNaturalH.value = imgRef.value.naturalHeight || 0
+  }
   fitToContainer()
 }
 

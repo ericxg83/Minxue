@@ -212,8 +212,13 @@ export default function ExamReview({ task, onClose, onSave }) {
     const containerW = baseEl.clientWidth
     const containerH = baseEl.clientHeight
     const scale = transform.scale
-    const bboxCX = (bbox.x + bbox.width / 2) * scale
-    const bboxCY = (bbox.y + bbox.height / 2) * scale
+    // block_coordinates 为归一化 0-1000 坐标，先换算为图片像素再计算中心
+    const bboxPxX = bbox.x / 1000 * imgNaturalSize.w
+    const bboxPxY = bbox.y / 1000 * imgNaturalSize.h
+    const bboxPxW = bbox.width / 1000 * imgNaturalSize.w
+    const bboxPxH = bbox.height / 1000 * imgNaturalSize.h
+    const bboxCX = (bboxPxX + bboxPxW / 2) * scale
+    const bboxCY = (bboxPxY + bboxPxH / 2) * scale
 
     let newX = transform.x + containerW / 2 - bboxCX
     let newY = transform.y + containerH / 2 - bboxCY
@@ -489,17 +494,24 @@ export default function ExamReview({ task, onClose, onSave }) {
           {/* 题号标记 */}
           {validQuestions.map((q, i) => {
             const bbox = q.block_coordinates
-            if (!bbox) return null
+            if (!bbox || !imgNaturalSize.w || !imgNaturalSize.h) return null
+            // block_coordinates 为归一化 0-1000 坐标，按图片自然尺寸换算为像素
+            const px = {
+              left: bbox.x / 1000 * imgNaturalSize.w,
+              top: bbox.y / 1000 * imgNaturalSize.h,
+              width: bbox.width / 1000 * imgNaturalSize.w,
+              height: bbox.height / 1000 * imgNaturalSize.h
+            }
             const isCurrent = i === currentIndex
             return (
               <div
                 key={q.id}
                 style={{
                   position: 'absolute',
-                  left: bbox.x,
-                  top: bbox.y,
-                  width: bbox.width,
-                  height: bbox.height,
+                  left: px.left,
+                  top: px.top,
+                  width: px.width,
+                  height: px.height,
                   border: `2.5px solid ${isCurrent ? 'var(--primary)' : 'rgba(255,255,255,0.35)'}`,
                   borderRadius: '8px',
                   pointerEvents: 'none',
