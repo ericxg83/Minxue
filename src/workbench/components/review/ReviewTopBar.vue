@@ -1,70 +1,155 @@
 <template>
   <div class="top-bar">
     <div class="top-bar-left">
-      <el-select
-        v-model="selectedStudentId"
-        placeholder="选择学生"
-        size="default"
-        style="width: 200px"
-        @change="onStudentChange"
-      >
-        <el-option
-          v-for="s in store.students"
-          :key="s.id"
-          :label="s.name"
-          :value="s.id"
-        />
-      </el-select>
+      <!-- homework 模式：学生 + 试卷下拉（原逻辑） -->
+      <template v-if="!store.examMode">
+        <el-select
+          v-model="selectedStudentId"
+          placeholder="选择学生"
+          size="default"
+          style="width: 200px"
+          @change="onStudentChange"
+        >
+          <el-option
+            v-for="s in store.students"
+            :key="s.id"
+            :label="s.name"
+            :value="s.id"
+          />
+        </el-select>
 
-      <el-select
-        v-model="selectedTaskId"
-        placeholder="选择试卷"
-        size="default"
-        style="width: 300px; margin-left: 16px"
-        :disabled="!store.currentStudent"
-        @change="onTaskChange"
-      >
-        <el-option-group v-if="store.pendingTasks.length > 0" label="待复核">
-          <el-option
-            v-for="t in store.pendingTasks"
-            :key="t.id"
-            :label="t.original_name || '未命名试卷'"
-            :value="t.id"
-          />
-        </el-option-group>
-        <el-option-group v-if="store.reviewedTasks.length > 0" label="已复核">
-          <el-option
-            v-for="t in store.reviewedTasks"
-            :key="t.id"
-            :label="`✓ ${t.original_name || '未命名试卷'}`"
-            :value="t.id"
-          />
-        </el-option-group>
-      </el-select>
+        <el-select
+          v-model="selectedTaskId"
+          placeholder="选择试卷"
+          size="default"
+          style="width: 300px; margin-left: 16px"
+          :disabled="!store.currentStudent"
+          @change="onTaskChange"
+        >
+          <el-option-group v-if="store.pendingTasks.length > 0" label="待复核">
+            <el-option
+              v-for="t in store.pendingTasks"
+              :key="t.id"
+              :label="t.original_name || '未命名试卷'"
+              :value="t.id"
+            />
+          </el-option-group>
+          <el-option-group v-if="store.reviewedTasks.length > 0" label="已复核">
+            <el-option
+              v-for="t in store.reviewedTasks"
+              :key="t.id"
+              :label="`✓ ${t.original_name || '未命名试卷'}`"
+              :value="t.id"
+            />
+          </el-option-group>
+        </el-select>
+      </template>
+
+      <!-- wrong_retry 模式：返回按钮 + 卷名 + 模式标识 -->
+      <template v-else>
+        <el-button text @click="handleBack" class="back-btn">
+          <el-icon><ArrowLeft /></el-icon>
+          <span>返回</span>
+        </el-button>
+        <span class="exam-mode-name">{{ store.currentTask?.name || '错题重练卷' }}</span>
+        <el-tag type="primary" size="small" effect="plain">{{ store.reviewConfig.topTitle }}</el-tag>
+      </template>
     </div>
 
     <div class="top-bar-right">
-      <span v-if="store.allQuestions.length > 0" class="complete-status">
-        {{ store.reviewProgress.confirmed }}/{{ store.reviewProgress.total }} 已确认
-      </span>
+      <div v-if="store.allQuestions.length > 0" class="status-chips">
+        <span class="status-chip chip-correct">
+          <StatusIcon state="correct" :size="16" />
+          <span class="chip-label">AI正确</span>
+          <span class="chip-count">{{ store.aiStateStats.correct }}</span>
+        </span>
+        <span class="status-chip chip-wrong">
+          <StatusIcon state="wrong" :size="16" />
+          <span class="chip-label">AI错误</span>
+          <span class="chip-count">{{ store.aiStateStats.wrong }}</span>
+        </span>
+        <span class="status-chip chip-pending">
+          <StatusIcon state="pending" :size="16" />
+          <span class="chip-label">待复核</span>
+          <span class="chip-count">{{ store.aiStateStats.pending }}</span>
+        </span>
+        <span class="status-chip chip-exception">
+          <StatusIcon state="exception" :size="16" />
+          <span class="chip-label">AI异常</span>
+          <span class="chip-count">{{ store.aiStateStats.exception }}</span>
+        </span>
+        <span class="status-chip chip-processing">
+          <StatusIcon state="processing" :size="16" />
+          <span class="chip-label">处理中</span>
+          <span class="chip-count">{{ store.aiStateStats.processing }}</span>
+        </span>
+      </div>
       <el-button size="default" type="success"
         :disabled="store.reviewProgress.confirmed !== store.reviewProgress.total || store.reviewProgress.total === 0"
         @click="handleComplete">
-        ✓ 完成复核
+        ✓ {{ store.reviewConfig.completeLabel }}
       </el-button>
-      <el-button size="default" type="primary" :disabled="!canNextTask" @click="goNextTask">
+      <el-button v-if="!store.examMode" size="default" type="primary" :disabled="!canNextTask" @click="goNextTask">
         ▶ 下一份
       </el-button>
     </div>
   </div>
+
+  <!-- 错题未入册拦截清单（仅 homework） -->
+  <el-dialog
+    v-if="!store.examMode"
+    v-model="store.wrongGateVisible"
+    title="有错题尚未进入错题本，无法完成复核"
+    width="560px"
+    :close-on-click-modal="false"
+  >
+    <div class="wrong-gate-tip">
+      以下标记为错误的题目必须成功加入错题本后，才能完成复核：
+    </div>
+    <ul class="wrong-gate-list">
+      <li v-for="item in store.wrongGateList" :key="item.questionId" class="wrong-gate-item">
+        <div class="wrong-gate-info">
+          <span class="wrong-gate-no">第 {{ item.index + 1 }} 题</span>
+          <span
+            v-if="store.isQuestionInBook(item.questionId)"
+            class="wrong-gate-badge done">已加入 ✓</span>
+          <span v-else-if="item.reason === 'incomplete'" class="wrong-gate-badge warn">
+            题目元素不完整：{{ item.issues.join('；') }}，请先编辑并保存
+          </span>
+          <span v-else class="wrong-gate-badge warn">尚未加入错题本</span>
+        </div>
+        <div class="wrong-gate-actions">
+          <el-button
+            v-if="!store.isQuestionInBook(item.questionId) && item.reason === 'complete'"
+            size="small" type="primary" :loading="item.adding"
+            @click="handleAddToBook(item)">加入错题本</el-button>
+          <el-button
+            v-if="!store.isQuestionInBook(item.questionId) && item.reason === 'incomplete'"
+            size="small" type="warning"
+            @click="store.focusQuestionForEdit(item.questionId)">去编辑</el-button>
+        </div>
+      </li>
+    </ul>
+    <template #footer>
+      <el-button @click="store.wrongGateVisible = false">稍后再说</el-button>
+      <el-button
+        type="success"
+        :disabled="store.unresolvedWrongQuestions.length > 0"
+        @click="handleGateComplete">完成复核</el-button>
+    </template>
+  </el-dialog>
 </template>
 
 <script setup>
 import { ref, computed, watch } from 'vue'
+import { useRouter } from 'vue-router'
+import { ArrowLeft } from '@element-plus/icons-vue'
 import { ElMessage } from 'element-plus'
 import { useReviewStore } from '../../stores/reviewStore'
+import StatusIcon from './StatusIcon.vue'
 
 const store = useReviewStore()
+const router = useRouter()
 
 const selectedStudentId = ref('')
 const selectedTaskId = ref('')
@@ -115,11 +200,40 @@ const goNextTask = async () => {
   }
 }
 
+// wrong_retry 模式返回组卷历史
+const handleBack = () => {
+  router.push('/exam-history')
+}
+
+// 完成批改（按场景分支）
 const handleComplete = async () => {
+  if (store.examMode) {
+    // wrong_retry：批量保存掌握度，弹汇总
+    try {
+      const data = await store.completeReview()
+      if (data) {
+        store.showGradeSummary = true
+      }
+    } catch (e) {
+      ElMessage.error('保存失败，请重试')
+    }
+    return
+  }
+
+  // homework：门禁 → 完成复核 → 自动跳下一份
+  const list = store.getUnresolvedWrong()
+  if (list.length > 0) {
+    store.openWrongGate(list)
+    return
+  }
+  await doComplete()
+}
+
+// homework：真正执行完成复核 + 自动跳下一份
+const doComplete = async () => {
   try {
     await store.completeTaskReview()
     ElMessage.success('试卷复核完成，已保存')
-    // 自动跳转到下一份待复核试卷
     const next = store.nextTask()
     if (next) {
       selectedTaskId.value = next.id
@@ -129,6 +243,23 @@ const handleComplete = async () => {
   } catch (err) {
     console.error('保存失败:', err)
     ElMessage.error('保存失败，请重试')
+  }
+}
+
+// homework：错题清单弹窗中「完成复核」
+const handleGateComplete = async () => {
+  if (store.unresolvedWrongQuestions.length > 0) return
+  store.wrongGateVisible = false
+  await doComplete()
+}
+
+// homework：错题清单弹窗中「加入错题本」
+const handleAddToBook = async (item) => {
+  item.adding = true
+  try {
+    await store.addQuestionToBook(item.questionId)
+  } finally {
+    item.adding = false
   }
 }
 </script>
@@ -154,10 +285,95 @@ const handleComplete = async () => {
   align-items: center;
   gap: 8px;
 }
-.complete-status {
-  font-size: 13px;
-  color: #67c23a;
+.status-chips {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+.status-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 3px 8px;
+  border-radius: 12px;
+  font-size: 12px;
   font-weight: 500;
+  border: 1px solid;
   white-space: nowrap;
+}
+.chip-label { color: #606266; }
+.chip-count { font-weight: 700; }
+.chip-correct { background: #f0f9eb; border-color: #c2e7b0; }
+.chip-correct .chip-count { color: #67c23a; }
+.chip-wrong { background: #fef0f0; border-color: #fbc4c4; }
+.chip-wrong .chip-count { color: #f56c6c; }
+.chip-pending { background: #fdf6ec; border-color: #faecd8; }
+.chip-pending .chip-count { color: #e6a23c; }
+.chip-exception { background: #fff4e6; border-color: #ffd8a8; }
+.chip-exception .chip-count { color: #fa8c16; }
+.chip-processing { background: #f5effd; border-color: #e3d4fb; }
+.chip-processing .chip-count { color: #9254de; }
+
+.back-btn {
+  font-size: 13px;
+  color: #606266 !important;
+}
+.exam-mode-name {
+  font-size: 15px;
+  font-weight: 600;
+  color: #1D2129;
+  margin-left: 4px;
+}
+
+/* ── 错题拦截清单弹窗 ── */
+.wrong-gate-tip {
+  font-size: 13px;
+  color: #606266;
+  margin-bottom: 12px;
+  line-height: 1.6;
+}
+.wrong-gate-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  max-height: 50vh;
+  overflow-y: auto;
+}
+.wrong-gate-item {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 10px 12px;
+  border: 1px solid #ebeef5;
+  border-radius: 6px;
+  margin-bottom: 8px;
+  background: #fafafa;
+}
+.wrong-gate-info {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  min-width: 0;
+}
+.wrong-gate-no {
+  font-size: 14px;
+  font-weight: 600;
+  color: #303133;
+}
+.wrong-gate-badge {
+  font-size: 12px;
+  line-height: 1.5;
+}
+.wrong-gate-badge.warn {
+  color: #e6a23c;
+}
+.wrong-gate-badge.done {
+  color: #67c23a;
+  font-weight: 600;
+}
+.wrong-gate-actions {
+  flex-shrink: 0;
 }
 </style>

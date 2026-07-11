@@ -10,6 +10,7 @@
       <!-- ═══ 顶栏 ═══ -->
       <div class="ops-header">
         <div class="ops-header__left">
+          <span class="ops-mode-title">{{ store.reviewConfig.detailTitle }}</span>
           <el-tag :type="typeTagType" size="small" effect="dark" class="ops-type-tag">
             {{ typeLabel }}
           </el-tag>
@@ -91,6 +92,27 @@
           style="width:100px;margin-left:auto;" />
       </div>
 
+      <!-- 本次掌握变化（仅 wrong_retry 模式） -->
+      <div class="ops-mastery-row" v-if="store.reviewConfig.showMasteryChange && q">
+        <div class="ops-mastery-item">
+          <span class="ops-mastery-label">之前</span>
+          <el-tag size="small" :type="masteryColor(previousLifecycle)">{{ masteryLabel(previousLifecycle) }}</el-tag>
+        </div>
+        <el-icon class="ops-mastery-arrow"><Right /></el-icon>
+        <div class="ops-mastery-item">
+          <span class="ops-mastery-label">本次</span>
+          <el-tag v-if="q.review_status" size="small" :type="q.review_status === 'correct' ? 'success' : 'danger'">
+            {{ q.review_status === 'correct' ? '答对' : '答错' }}
+          </el-tag>
+          <span v-else class="ops-mastery-pending">待批改</span>
+        </div>
+        <el-icon class="ops-mastery-arrow"><Right /></el-icon>
+        <div class="ops-mastery-item">
+          <span class="ops-mastery-label">结果</span>
+          <el-tag size="small" :type="masteryColor(nextLifecycle)">{{ masteryLabel(nextLifecycle) }}</el-tag>
+        </div>
+      </div>
+
       <!-- ═══ 完整题目内容（始终可见，不折叠） ═══ -->
       <div class="ops-question-body">
         <!-- 题型 & 学科（仅在编辑时显示） -->
@@ -100,6 +122,7 @@
             <el-select v-model="form.question_type" style="flex:1">
               <el-option label="选择题" value="choice" />
               <el-option label="填空题" value="fill" />
+              <el-option label="判断题" value="judge" />
               <el-option label="解答题" value="answer" />
             </el-select>
             <el-select v-model="form.subject" style="flex:1" allow-create filterable placeholder="学科">
@@ -176,15 +199,15 @@
               :class="{ 'ops-btn-active': q.review_status === 'correct', 'animate': animatingBtn === 'correct' }"
               @click="handleReview('correct')">
               <span class="ops-btn-icon">✓</span>
-              <span>正确</span>
+              <span>{{ store.reviewConfig.buttons.correct }}</span>
             </button>
             <button class="ops-btn ops-btn-wrong"
               :class="{ 'ops-btn-active': q.review_status === 'wrong', 'animate': animatingBtn === 'wrong' }"
               @click="handleReview('wrong')">
               <span class="ops-btn-icon">✗</span>
-              <span>错误</span>
+              <span>{{ store.reviewConfig.buttons.wrong }}</span>
             </button>
-            <button class="ops-btn ops-btn-exclude"
+            <button v-if="store.reviewConfig.showExclude" class="ops-btn ops-btn-exclude"
               :class="{ 'ops-btn-active': q.review_status === 'exclude', 'animate': animatingBtn === 'exclude' }"
               @click="handleReview('exclude')">
               <span class="ops-btn-icon">⊘</span>
@@ -264,20 +287,35 @@ import { processExamImage } from '../../../utils/imageProcessor'
 import { getGeometryDisplayUrl, getTikzStatus } from '../../../utils/geometryDisplay'
 import { tikzToSvg } from '../../../utils/tikzGenerator'
 import { ElMessage, ElMessageBox, ElLoading } from 'element-plus'
-import { DocumentChecked, Delete, Plus, Upload, Picture, EditPen, ArrowLeft, ArrowRight, RefreshLeft, Crop } from '@element-plus/icons-vue'
+import { DocumentChecked, Delete, Plus, Upload, Picture, EditPen, ArrowLeft, ArrowRight, RefreshLeft, Crop, Right } from '@element-plus/icons-vue'
 import MathRender from '../MathRender.vue'
 import QuestionEditForm from './QuestionEditForm.vue'
+import { LIFECYCLE_STATUS, LIFECYCLE_STATUS_LABELS, LIFECYCLE_STATUS_COLORS, useLifecycleStore } from '../../stores/lifecycleStore'
 
 const store = useReviewStore()
+const lifecycleStore = useLifecycleStore()
 const q = computed(() => store.currentReviewQuestion)
+
+// ── 掌握度展示（wrong_retry 模式） ──
+const previousLifecycle = computed(() => store.previousLifecycle(q.value))
+const nextLifecycle = computed(() => {
+  if (!q.value?.review_status) return previousLifecycle.value
+  return store.examMode
+    ? (q.value.review_status === 'correct'
+        ? lifecycleStore.getNextStatus(previousLifecycle.value)
+        : LIFECYCLE_STATUS.NEW)
+    : previousLifecycle.value
+})
+const masteryLabel = (status) => LIFECYCLE_STATUS_LABELS[status] || status
+const masteryColor = (status) => LIFECYCLE_STATUS_COLORS[status] || 'info'
 
 const typeLabel = computed(() => {
   if (!q.value) return ''
-  const map = { choice: '选择题', fill: '填空题', answer: '解答题' }
+  const map = { choice: '选择题', fill: '填空题', answer: '解答题', judge: '判断题' }
   return map[q.value.question_type] || q.value.question_type || '未知题型'
 })
 const typeTagType = computed(() => {
-  const map = { choice: '', fill: 'success', answer: 'warning' }
+  const map = { choice: '', fill: 'success', answer: 'warning', judge: 'primary' }
   return map[q.value?.question_type] || 'info'
 })
 const optionsList = computed(() => q.value?.options || [])
@@ -339,6 +377,16 @@ const openFullscreen = () => {
 
 const editing = ref(false)
 const animatingBtn = ref('')
+// 错题拦截弹窗「去编辑」触发：监听 store.pendingEditQuestionId 自动打开编辑面板
+const editMode = ref(false)
+const expandEditPanel = ref(false)
+watch(() => store.pendingEditQuestionId, async (id) => {
+  if (id && q.value && q.value.id === id) {
+    await nextTick()
+    handleEnterEdit()
+    store.pendingEditQuestionId = null
+  }
+})
 const quickAnswerEditing = ref(false)
 const quickAnswerText = ref('')
 const quickAnswerSaving = ref(false)
@@ -595,9 +643,16 @@ const handleSave = async () => {
 const handleReview = (result) => {
   const question = q.value
   if (!question) return
-  const resultText = { correct: '已标记为正确', wrong: '已标记为错误', exclude: '已排除本题' }
-  // 完整性检查 — 标记"错误"时检查题目是否完整
-  if (result === 'wrong') {
+  const btn = store.reviewConfig.buttons
+  const cfg = store.reviewConfig
+  const resultText = {
+    correct: `已标记为${btn.correct}`,
+    wrong: `已标记为${btn.wrong}`,
+    exclude: '已排除本题'
+  }
+  // homework 模式：标记"错误"需完整性检查（错误题要入错题本）
+  // wrong_retry 模式：错误不再入册，跳过完整性门禁
+  if (result === 'wrong' && !store.examMode) {
     const blocked = store.reviewQuestion(question.id, result)
     if (blocked?.blocked) {
       ElMessageBox.confirm(
@@ -605,8 +660,7 @@ const handleReview = (result) => {
         '题目不完整',
         { confirmButtonText: '去编辑', cancelButtonText: '取消', type: 'warning', dangerouslyUseHTMLString: true }
       ).then(() => {
-        editMode.value = true
-        expandEditPanel.value = true
+        handleEnterEdit()
       }).catch(() => {})
       return
     }
@@ -802,6 +856,44 @@ const handleUseClean = async () => {
   padding: 8px 14px;
   border-bottom: 1px solid #f0f0f0;
   flex-shrink: 0;
+}
+
+/* ── 掌握度变化（wrong_retry） ── */
+.ops-mastery-row {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 10px;
+  background: #f7f8fa;
+  margin: 0 10px;
+  padding: 10px 14px;
+  border-radius: 6px;
+  flex-shrink: 0;
+}
+.ops-mastery-item {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+.ops-mastery-label {
+  font-size: 11px;
+  font-weight: 600;
+  color: #909399;
+  letter-spacing: 0.5px;
+}
+.ops-mastery-arrow {
+  color: #c0c4cc;
+  font-size: 14px;
+}
+.ops-mastery-pending {
+  font-size: 13px;
+  color: #c0c4cc;
+}
+.ops-mode-title {
+  font-size: 14px;
+  font-weight: 600;
+  color: #303133;
+  margin-right: 4px;
 }
 .ops-ai-icon {
   width: 22px; height: 22px; border-radius: 50%;

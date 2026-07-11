@@ -1,9 +1,10 @@
 import { defineStore } from 'pinia'
 import { ref, computed } from 'vue'
 import dayjs from 'dayjs'
-import { getStudents, getWrongQuestionsByStudent, getQuestionsByTask, getTasksByStudent, updateWrongQuestionStatus, updateTaskStatus, recalculateTaskStats, getLatestJudgements, clearStudentCaches, updateQuestionReviewStatus } from '../../services/apiService'
+import { getStudents, getWrongQuestionsByStudent, getQuestionsByTask, getTasksByStudent, updateWrongQuestionStatus, updateTaskStatus, recalculateTaskStats, getLatestJudgements, clearStudentCaches, updateQuestionReviewStatus, addWrongQuestions, getGeneratedExamById, getQuestionsByIds, gradeGeneratedExam, clearCache } from '../../services/apiService'
 import { useLifecycleStore, LIFECYCLE_STATUS } from './lifecycleStore'
 import { checkQuestionCompleteness } from '../../utils/questionCompleteness.js'
+import { TASK_TYPE, getReviewConfig } from '../config/reviewConfig'
 
 export const useReviewStore = defineStore('review', () => {
   const lifecycleStore = useLifecycleStore()
@@ -33,6 +34,27 @@ export const useReviewStore = defineStore('review', () => {
   
   // 审核状态
   const reviewStatus = ref('idle') // idle, reviewing, completed
+
+  // 该学生全部待复核试卷已完成 → 展示空状态
+  const reviewAllDone = ref(false)
+
+  // 错题拦截弹窗状态
+  const wrongGateVisible = ref(false)
+  const wrongGateList = ref([]) // [{ questionId, index, reason, issues? }]
+  // ReviewTopBar 触发「去编辑」时记录的待编辑题目，QuestionDetailPanel 监听后打开编辑面板
+  const pendingEditQuestionId = ref(null)
+
+  // ── 统一批改工作台：场景模式 ──
+  // taskType 决定业务逻辑分支：homework（题目校对）/ wrong_retry（错题重练）
+  const taskType = ref(TASK_TYPE.HOMEWORK)
+  const currentExamId = ref(null)      // wrong_retry 模式：当前组卷 ID
+  const examMode = computed(() => taskType.value === TASK_TYPE.WRONG_RETRY)
+  const reviewConfig = computed(() => getReviewConfig(taskType.value))
+  // wrong_retry 完成时掌握度汇总（来自 POST /grade 返回）
+  const lastGradeSummary = ref(null)
+  const gradeSaving = ref(false)
+  // wrong_retry 完成汇总弹窗可见性（由 ReviewTopBar 触发，弹窗渲染在 ReviewWorkspace）
+  const showGradeSummary = ref(false)
   
   // 今日统计数据
   const todayStats = ref({
@@ -54,10 +76,14 @@ export const useReviewStore = defineStore('review', () => {
   })
 
   // 题目确认状态：已有人工审核记录 OR AI confidence >= 阈值
+  // wrong_retry 模式：仅看人工 review_status（错题重练不走置信度自动确认）
   const questionConfirmationMap = computed(() => {
     const map = {}
     for (const q of allQuestions.value) {
-      map[q.id] = !!(q.review_status || (q.confidence != null && q.confidence >= confidenceThreshold.value))
+      const manual = !!q.review_status
+      map[q.id] = examMode.value
+        ? manual
+        : (manual || (q.confidence != null && q.confidence >= confidenceThreshold.value))
     }
     return map
   })
@@ -67,6 +93,30 @@ export const useReviewStore = defineStore('review', () => {
     const total = allQuestions.value.length
     const confirmed = Object.values(questionConfirmationMap.value).filter(Boolean).length
     return { total, confirmed, unconfirmed: total - confirmed, percent: total ? Math.round(confirmed / total * 100) : 0 }
+  })
+
+  // 当前试卷中「判定为错但未成功入册」的错题列表
+  // - 判定为错：人工标 wrong，或 AI 判错且人工未覆盖（review_status 为空且 is_correct===false）
+  // - 未入册：wrongQuestions（已按 is_complete=TRUE 过滤）中无对应记录
+  // 每条附带 reason: 'complete'（可加入错题本）| 'incomplete'（题目元素不完整，需先编辑）
+  const unresolvedWrongQuestions = computed(() => {
+    const inBook = new Set(wrongQuestions.value.map(wq => wq.question_id))
+    return allQuestions.value
+      .map((q, idx) => ({ question: q, index: idx }))
+      .filter(({ question: q }) => {
+        const isWrong = q.review_status === 'wrong' ||
+          (q.review_status == null && q.is_correct === false)
+        return isWrong && !inBook.has(q.id)
+      })
+      .map(({ question: q, index }) => {
+        const { isComplete, issues } = checkQuestionCompleteness(q)
+        return {
+          questionId: q.id,
+          index,
+          reason: isComplete ? 'complete' : 'incomplete',
+          issues
+        }
+      })
   })
 
   // 获取学生待审核题目数（优化：单次遍历）
@@ -204,6 +254,7 @@ export const useReviewStore = defineStore('review', () => {
     currentStudent.value = student
     currentReviewIndex.value = 0
     reviewStatus.value = allQuestions.value.length > 0 ? 'reviewing' : 'completed'
+    reviewAllDone.value = false
   }
 
   // 下一题
@@ -231,71 +282,101 @@ export const useReviewStore = defineStore('review', () => {
     }
   }
 
-  // 审核错题（使用新的生命周期状态）
+  // 审核错题（统一入口，按 taskType 分支业务逻辑）
   const reviewQuestion = (questionId, result) => {
     const question = allQuestions.value.find(q => q.id === questionId)
-    if (question) {
-      // 完整性检查 — 标记"错误"时，不完整的题目不进错题本
-      if (result === 'wrong') {
-        const { isComplete, issues } = checkQuestionCompleteness(question)
-        if (!isComplete) {
-          return { blocked: true, issues, questionId }
-        }
-      }
+    if (!question) return
 
-      // Store manual review status on the question
+    // ── wrong_retry 模式：仅记录 review_status，错误不再入册 ──
+    if (examMode.value) {
       question.review_status = result
-
-      // 持久化 review_status 到数据库
+      const sourceType = TASK_TYPE.WRONG_RETRY
       updateQuestionReviewStatus(questionId, result).catch(e =>
         console.error(`review_status 持久化失败 q=${questionId.substring(0, 8)}:`, e.message)
       )
-
-      // Also update the wrong question if it exists
-      const wq = wrongQuestions.value.find(w => w.question_id === questionId)
-      if (wq) {
-        const currentStatus = wq.lifecycle_status || LIFECYCLE_STATUS.NEW
-
-        switch (result) {
-          case 'correct':
-            // [Bugfix] 人工确认做对 → 直接标记为已掌握，不再渐进式推进
-            wq.lifecycle_status = LIFECYCLE_STATUS.MASTERED
-            wq.status = 'mastered'
-            wq.practice_count = (wq.practice_count || 0) + 1
-            break
-          case 'wrong':
-            wq.lifecycle_status = LIFECYCLE_STATUS.NEW
-            wq.status = 'pending'
-            wq.error_count = (wq.error_count || 0) + 1
-            break
-          case 'exclude':
-            wq.lifecycle_status = LIFECYCLE_STATUS.EXCLUDED
-            wq.status = 'excluded'
-            break
-        }
-
-        // [P0-3c] 持久化审核结果到数据库
-        updateWrongQuestionStatus(wq.id, wq.status, {
-          lifecycle_status: wq.lifecycle_status
-        }).catch(e => console.error(`[P0-3c] 审核结果持久化失败 wq=${wq.id.substring(0, 8)}:`, e.message))
-      }
-
-      // 重新计算统计
-      calculateTodayStats()
-
+      // 写入 source_type，标记该题复核来源于错题重练（服务端 COALESCE 不覆盖 homework 旧值）
+      updateQuestionSourceType(questionId, sourceType).catch(e =>
+        console.error(`source_type 持久化失败 q=${questionId.substring(0, 8)}:`, e.message)
+      )
       // 自动进入下一题
       if (!nextQuestion()) {
-        // 最后一道题已复核 → 自动完成复核 + 进入下一份
         reviewStatus.value = 'completed'
-        // 延迟触发自动保存和跳转，让 UI 先更新
-        setTimeout(() => autoCompleteAndAdvance(), 300)
+      }
+      return
+    }
+
+    // ── homework 模式：完整逻辑（完整性校验 + 错题本同步） ──
+    // 完整性检查 — 标记"错误"时，不完整的题目不进错题本
+    if (result === 'wrong') {
+      const { isComplete, issues } = checkQuestionCompleteness(question)
+      if (!isComplete) {
+        return { blocked: true, issues, questionId }
       }
     }
+
+    // Store manual review status on the question
+    question.review_status = result
+
+    // 持久化 review_status 到数据库
+    updateQuestionReviewStatus(questionId, result).catch(e =>
+      console.error(`review_status 持久化失败 q=${questionId.substring(0, 8)}:`, e.message)
+    )
+
+    // Also update the wrong question if it exists
+    const wq = wrongQuestions.value.find(w => w.question_id === questionId)
+    if (wq) {
+      const currentStatus = wq.lifecycle_status || LIFECYCLE_STATUS.NEW
+
+      switch (result) {
+        case 'correct':
+          // [Bugfix] 人工确认做对 → 直接标记为已掌握，不再渐进式推进
+          wq.lifecycle_status = LIFECYCLE_STATUS.MASTERED
+          wq.status = 'mastered'
+          wq.practice_count = (wq.practice_count || 0) + 1
+          break
+        case 'wrong':
+          wq.lifecycle_status = LIFECYCLE_STATUS.NEW
+          wq.status = 'pending'
+          wq.error_count = (wq.error_count || 0) + 1
+          break
+        case 'exclude':
+          wq.lifecycle_status = LIFECYCLE_STATUS.EXCLUDED
+          wq.status = 'excluded'
+          break
+      }
+
+      // [P0-3c] 持久化审核结果到数据库
+      updateWrongQuestionStatus(wq.id, wq.status, {
+        lifecycle_status: wq.lifecycle_status
+      }).catch(e => console.error(`[P0-3c] 审核结果持久化失败 wq=${wq.id.substring(0, 8)}:`, e.message))
+    }
+
+    // 重新计算统计
+    calculateTodayStats()
+
+    // 自动进入下一题
+    if (!nextQuestion()) {
+      // 最后一道题已复核 → 自动完成复核 + 进入下一份
+      reviewStatus.value = 'completed'
+      // 延迟触发自动保存和跳转，让 UI 先更新
+      setTimeout(() => autoCompleteAndAdvance(), 300)
+    }
+  }
+
+  // 仅写入 source_type（留给错题重练模式标记复核来源）
+  const updateQuestionSourceType = (questionId, sourceType) => {
+    return updateQuestion(questionId, { source_type: sourceType })
   }
 
   // 自动完成复核并跳转到下一份试卷
   const autoCompleteAndAdvance = async () => {
     if (!currentTask.value) return
+    // 门禁：存在未入册错题则拦截，弹清单等用户处理（不标记复核、不跳转）
+    const list = getUnresolvedWrong()
+    if (list.length > 0) {
+      openWrongGate(list)
+      return
+    }
     // 先刷新统计数据
     await recalculateTaskStats(currentTask.value.id).catch(e =>
       console.error('刷新统计数据失败:', e.message)
@@ -316,10 +397,12 @@ export const useReviewStore = defineStore('review', () => {
       const sorter = { done: 0, reviewed: 1 }
       studentTasks.value.sort((a, b) => (sorter[a.status] ?? 99) - (sorter[b.status] ?? 99))
     }
-    // 自动进入下一份试卷
+    // 自动进入下一份试卷；无则全部完成 → 空状态
     const next = nextTask()
     if (next) {
       await selectTask(next)
+    } else {
+      reviewAllDone.value = true
     }
   }
 
@@ -359,6 +442,7 @@ export const useReviewStore = defineStore('review', () => {
     currentTask.value = task
     currentReviewIndex.value = 0
     reviewStatus.value = 'reviewing'
+    reviewAllDone.value = false
     await loadQuestions(task.id)
 
     // [修复] 加载最新判定数据（含 confidence），合并到每道题
@@ -400,6 +484,115 @@ export const useReviewStore = defineStore('review', () => {
     }
   }
 
+  // ── 统一批改工作台：场景模式控制 ──
+
+  // 设置当前批改场景（homework / wrong_retry）
+  const setTaskType = (type) => {
+    taskType.value = type || TASK_TYPE.HOMEWORK
+  }
+
+  // 退出批改时重置为默认模式，避免污染 homework 入口
+  const resetReviewMode = () => {
+    taskType.value = TASK_TYPE.HOMEWORK
+    currentExamId.value = null
+    lastGradeSummary.value = null
+    gradeSaving.value = false
+  }
+
+  // wrong_retry 模式：加载组卷 + 题目 + 判定 + 历史掌握度
+  const initForWrongRetry = async (examId, studentId) => {
+    if (!examId || !studentId) {
+      console.error('initForWrongRetry 缺少 examId/studentId')
+      return
+    }
+    taskType.value = TASK_TYPE.WRONG_RETRY
+    currentExamId.value = examId
+    reviewAllDone.value = false
+    reviewStatus.value = 'idle'
+
+    try {
+      const exam = await getGeneratedExamById(examId)
+      if (!exam) {
+        console.error('组卷不存在:', examId)
+        return
+      }
+      // 设置当前学生（仅用于展示，不触发 homework 的任务加载）
+      const student = students.value.find(s => s.id === studentId)
+      if (!student) {
+        // 学生列表可能尚未加载，先拉一次
+        await loadStudents()
+      }
+      currentStudent.value = students.value.find(s => s.id === studentId) || currentStudent.value
+
+      // 合成 currentTask：重练卷无扫描原图，image_url 留空（PaperViewerPanel 显示占位）
+      currentTask.value = {
+        id: exam.id,
+        name: exam.name || '错题重练卷',
+        image_url: '',
+      }
+      currentReviewIndex.value = 0
+
+      // 按组卷 question_ids 顺序加载题目
+      const fetched = await getQuestionsByIds(exam.question_ids || [], studentId)
+      allQuestions.value = (Array.isArray(fetched) ? fetched : [])
+        .slice()
+        .sort((a, b) => {
+          const ai = (exam.question_ids || []).indexOf(a.id)
+          const bi = (exam.question_ids || []).indexOf(b.id)
+          return (ai < 0 ? 9999 : ai) - (bi < 0 ? 9999 : bi)
+        })
+
+      // 合并最新判定（含 confidence）
+      if (currentStudent.value?.id && allQuestions.value.length > 0) {
+        await mergeJudgements(currentStudent.value.id, allQuestions.value)
+      }
+      // 加载历史掌握度，用于右栏「本次掌握变化」展示
+      if (currentStudent.value?.id) {
+        await loadWrongQuestions(currentStudent.value.id)
+      }
+
+      reviewStatus.value = allQuestions.value.length > 0 ? 'reviewing' : 'completed'
+    } catch (e) {
+      console.error('加载错题重练卷失败:', e)
+    }
+  }
+
+  // 取得某题的历史掌握度（用于 wrong_retry 右栏展示「之前」）
+  const previousLifecycle = (question) => {
+    if (!question) return LIFECYCLE_STATUS.NEW
+    const wq = wrongQuestions.value.find(w => w.question_id === question.id)
+    return wq?.lifecycle_status || LIFECYCLE_STATUS.NEW
+  }
+
+  // 完成批改（按场景分支）
+  const completeReview = async () => {
+    if (examMode.value) {
+      // wrong_retry：批量调用 POST /grade 计算掌握度进阶
+      if (!currentExamId.value || !currentStudent.value?.id) return null
+      const results = allQuestions.value.map(q => ({
+        questionId: q.id,
+        isCorrect: q.review_status === 'correct'
+      }))
+      if (results.length === 0) return null
+      gradeSaving.value = true
+      try {
+        const data = await gradeGeneratedExam(currentExamId.value, currentStudent.value.id, results)
+        lastGradeSummary.value = data
+        // 清缓存，使组卷历史刷新
+        clearCache(`generated_exams_cache_${currentStudent.value.id}`)
+        return data
+      } catch (e) {
+        console.error('保存错题重练批改失败:', e)
+        throw e
+      } finally {
+        gradeSaving.value = false
+      }
+    }
+    // homework：沿用现有完成逻辑（含 wrong-gate）
+    await completeTaskReview()
+    return null
+  }
+
   // 获取人工复核进度
   const getManualReviewProgress = () => {
     const total = allQuestions.value.length
@@ -412,6 +605,51 @@ export const useReviewStore = defineStore('review', () => {
   const getQuestionReviewStatus = (question) => {
     return question.review_status || null
   }
+
+  // ── 5 态语义判定（用于左侧图标 / 顶部统计）──────────────────────
+  // 返回：correct（AI正确）| wrong（AI错误）| pending（待复核）| exception（AI异常）| processing（处理中）
+  // 优先用既有人工复核结果，其次 AI 判定字段。
+  const getAiState = (q) => {
+    if (!q) return 'processing'
+
+    // 人工已复核 → 以人工结论为最高优先级
+    if (q.review_status === 'correct') return 'correct'
+    if (q.review_status === 'wrong') return 'wrong'
+
+    // AI 异常：未识别答案 / OCR 失败
+    if (q.answer_source === 'blank') return 'exception'
+
+    // 处理中：AI 尚未出任何判定
+    if (q.is_correct == null && q.confidence == null) return 'processing'
+
+    // AI 错误：判定学生答案错误
+    if (q.is_correct === false) return 'wrong'
+
+    // AI 正确 + 已确认（人工复核 或 置信度达标）
+    const manual = !!q.review_status
+    const confirmed = examMode.value
+      ? manual
+      : (manual || (q.confidence != null && q.confidence >= confidenceThreshold.value))
+    if (q.is_correct === true && confirmed) return 'correct'
+
+    // 其余 → 待复核（置信度不足 / AI 不确定）
+    return 'pending'
+  }
+
+  // 5 态数量汇总（用于顶部统计）
+  const aiStateStats = computed(() => {
+    const stats = { correct: 0, wrong: 0, pending: 0, exception: 0, processing: 0 }
+    for (const q of allQuestions.value) {
+      stats[getAiState(q)]++
+    }
+    return stats
+  })
+
+  // 需要老师处理的题数（待复核 + 异常 + 处理中）
+  const needsAttentionCount = computed(() => {
+    const s = aiStateStats.value
+    return s.pending + s.exception + s.processing
+  })
 
   // 跳到下一份试卷（仅在 done 的待复核试卷中导航）
   const nextTask = () => {
@@ -441,6 +679,48 @@ export const useReviewStore = defineStore('review', () => {
       const sorter = { done: 0, reviewed: 1 }
       studentTasks.value.sort((a, b) => (sorter[a.status] ?? 99) - (sorter[b.status] ?? 99))
     }
+    // 全部待复核试卷完成 → 展示空状态
+    if (!nextTask()) {
+      reviewAllDone.value = true
+    }
+  }
+
+  // ── 错题拦截门禁 ──────────────────────────────────────────
+
+  // 返回当前试卷未入册错题清单（供按钮点击 / 自动完成时校验）
+  const getUnresolvedWrong = () => unresolvedWrongQuestions.value
+
+  // 弹出错题拦截清单
+  const openWrongGate = (list) => {
+    wrongGateList.value = Array.isArray(list) ? list : []
+    wrongGateVisible.value = true
+  }
+
+  // 弹窗中单题是否已成功入册（用于显示「已加入 ✓」）
+  const isQuestionInBook = (questionId) =>
+    wrongQuestions.value.some(wq => wq.question_id === questionId)
+
+  // 将一道题加入错题本（仅对完整题有效；不完整题服务端会跳过）
+  const addQuestionToBook = async (questionId) => {
+    const studentId = currentStudent.value?.id
+    if (!studentId || !questionId) return
+    await addWrongQuestions(studentId, [questionId]).catch(e =>
+      console.error('加入错题本失败:', e.message)
+    )
+    if (studentId) {
+      clearStudentCaches(studentId)
+      await loadWrongQuestions(studentId)
+    }
+  }
+
+  // ReviewTopBar 触发「去编辑」：跳到该题并通知详情面板打开编辑
+  const focusQuestionForEdit = (questionId) => {
+    const idx = allQuestions.value.findIndex(q => q.id === questionId)
+    if (idx >= 0) {
+      jumpToQuestion(idx)
+      pendingEditQuestionId.value = questionId
+    }
+    wrongGateVisible.value = false
   }
 
   return {
@@ -468,6 +748,10 @@ export const useReviewStore = defineStore('review', () => {
     reviewQuestion,
     getManualReviewProgress,
     getQuestionReviewStatus,
+    // 5 态语义判定
+    getAiState,
+    aiStateStats,
+    needsAttentionCount,
     // 新增
     currentTask,
     confidenceThreshold,
@@ -481,6 +765,30 @@ export const useReviewStore = defineStore('review', () => {
     autoCompleteAndAdvance,
     otherPendingTasks,
     pendingTasks,
-    reviewedTasks
+    reviewedTasks,
+    // 复核完成门禁 / 空状态
+    reviewAllDone,
+    wrongGateVisible,
+    wrongGateList,
+    pendingEditQuestionId,
+    unresolvedWrongQuestions,
+    getUnresolvedWrong,
+    openWrongGate,
+    addQuestionToBook,
+    focusQuestionForEdit,
+    isQuestionInBook,
+    // 统一批改工作台：场景模式
+    taskType,
+    examMode,
+    reviewConfig,
+    currentExamId,
+    lastGradeSummary,
+    gradeSaving,
+    showGradeSummary,
+    setTaskType,
+    resetReviewMode,
+    initForWrongRetry,
+    previousLifecycle,
+    completeReview
   }
 })

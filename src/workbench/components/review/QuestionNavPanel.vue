@@ -3,9 +3,7 @@
     <div class="nav-header">
       <span class="nav-title">题目列表</span>
       <span class="nav-stats">
-        <span class="stat-unconfirmed">⚠ {{ store.reviewProgress.unconfirmed }}</span>
-        <span class="stat-sep">·</span>
-        <span class="stat-confirmed">● {{ store.reviewProgress.confirmed }}</span>
+        <span class="stat-attention">需处理 {{ store.needsAttentionCount }}</span>
       </span>
     </div>
 
@@ -14,14 +12,27 @@
         v-for="(q, idx) in store.allQuestions"
         :key="q.id"
         class="nav-item"
-        :class="{ active: idx === store.currentReviewIndex, confirmed: isConfirmed(q), unconfirmed: !isConfirmed(q) }"
+        :class="{ active: idx === store.currentReviewIndex }"
         @click="onSelect(idx)"
       >
-        <span class="item-icon">{{ isConfirmed(q) ? '●' : '⚠' }}</span>
+        <StatusIcon :state="store.getAiState(q)" :size="18" />
         <span class="item-label">{{ idx + 1 }}. {{ typeLabel(q.question_type) }}</span>
-        <span class="item-confidence" v-if="q.confidence != null" :class="{ low: q.confidence < store.confidenceThreshold }">
-          {{ Math.round(q.confidence * 100) }}
-        </span>
+        <span
+          v-if="q.difficulty != null"
+          class="item-difficulty"
+          :class="'diff-' + q.difficulty"
+        >{{ difficultyText(q.difficulty) }}</span>
+        <span
+          v-if="store.getAiState(q) === 'exception'"
+          class="item-confidence exception">未识别答案</span>
+        <span
+          v-else-if="store.getAiState(q) === 'processing'"
+          class="item-confidence processing">处理中</span>
+        <span
+          v-else-if="q.confidence != null"
+          class="item-confidence"
+          :class="{ low: q.confidence < store.confidenceThreshold }"
+        >{{ Math.round(q.confidence * 100) }}</span>
       </div>
     </div>
 
@@ -48,17 +59,20 @@
 <script setup>
 import { ref, computed } from 'vue'
 import { useReviewStore } from '../../stores/reviewStore'
+import StatusIcon from './StatusIcon.vue'
 
 const store = useReviewStore()
 const threshold = ref(store.confidenceThreshold)
 
-const isConfirmed = (q) => {
-  return !!(q.review_status || (q.confidence != null && q.confidence >= store.confidenceThreshold))
+const typeLabel = (type) => {
+  const map = { choice: '选择题', fill: '填空题', answer: '解答题', judge: '判断题' }
+  return map[type] || '?'
 }
 
-const typeLabel = (type) => {
-  const map = { choice: '选择题', fill: '填空题', answer: '解答题' }
-  return map[type] || '?'
+// 难度等级（1-5）简短标签
+const difficultyText = (d) => {
+  const map = { 1: '难度1', 2: '难度2', 3: '难度3', 4: '难度4', 5: '难度5' }
+  return map[d] || ''
 }
 
 const onSelect = (idx) => {
@@ -95,9 +109,11 @@ const onThresholdChange = (val) => {
 .nav-stats {
   font-size: 13px;
 }
-.stat-unconfirmed { color: #e6a23c; margin-right: 3px; }
-.stat-sep { color: #dcdfe6; margin: 0 4px; }
-.stat-confirmed { color: #67c23a; }
+.stat-attention {
+  color: #f56c6c;
+  font-weight: 600;
+  white-space: nowrap;
+}
 .nav-list {
   flex: 1;
   overflow-y: auto;
@@ -120,8 +136,6 @@ const onThresholdChange = (val) => {
   background: #ecf5ff;
   border-left-color: #409eff;
 }
-.nav-item.confirmed .item-icon { color: #67c23a; }
-.nav-item.unconfirmed .item-icon { color: #e6a23c; }
 .item-label {
   flex: 1;
   color: #303133;
@@ -139,6 +153,31 @@ const onThresholdChange = (val) => {
 .item-confidence.low {
   color: #e6a23c;
   background: #fdf6ec;
+}
+.item-confidence.exception {
+  color: #fa8c16;
+  background: #fff4e6;
+}
+.item-confidence.processing {
+  color: #9254de;
+  background: #f5effd;
+}
+.item-difficulty {
+  font-size: 11px;
+  padding: 0 6px;
+  border-radius: 8px;
+  white-space: nowrap;
+  color: #67c23a;
+  background: #f0f9eb;
+}
+.item-difficulty.diff-3 {
+  color: #e6a23c;
+  background: #fdf6ec;
+}
+.item-difficulty.diff-4,
+.item-difficulty.diff-5 {
+  color: #f56c6c;
+  background: #fef0f0;
 }
 .nav-empty {
   flex: 1;

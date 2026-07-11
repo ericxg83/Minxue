@@ -32,9 +32,14 @@ const routes = [
     meta: { requiresPC: true }
   },
   {
-    path: '/exam-grading',
-    name: 'ExamGrading',
-    component: () => import('../views/ExamGradingWorkbench.vue'),
+    path: '/review/wrong-retry',
+    name: 'WrongRetryReview',
+    component: () => import('../components/review/ReviewWorkspace.vue'),
+    props: (route) => ({
+      taskType: 'wrong_retry',
+      examId: route.query.examId,
+      studentId: route.query.studentId,
+    }),
     meta: { requiresPC: true }
   },
   {

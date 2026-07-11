@@ -15,6 +15,8 @@ import { migrateGeometryCleanup } from './migrations/015_add_geometry_cleanup.js
 import { migrateGeometryTikzDisplay } from './migrations/016_add_tikz_display.js'
 import { migrateGeometryCropType } from './migrations/017_add_geometry_crop_type.js'
 import { migrateCleanGeometrySvg } from './migrations/018_add_clean_geometry_svg.js'
+import { migrateSourceType } from './migrations/019_add_source_type.js'
+import { migrateRetryTaskFields } from './migrations/020_add_retry_task_fields.js'
 
 const __dirname = dirname(fileURLToPath(import.meta.url))
 dotenv.config({ path: resolve(__dirname, '.env') })
@@ -110,8 +112,20 @@ app.post('/api/upload', upload.single('files'), async (req, res) => {
 // Upload images and create tasks (with validation + retry pipeline)
 app.post('/api/tasks/upload', upload.array('files', 20), async (req, res) => {
   try {
-    const { studentId } = req.body
-    if (!studentId) {
+    const { studentId, taskType, generatedExamId } = req.body
+    const normalizedTaskType = taskType === 'wrong_retry' ? 'wrong_retry' : 'general'
+    const normalizedGeneratedExamId = generatedExamId && /^[0-9a-f-]{36}$/i.test(generatedExamId) ? generatedExamId : null
+
+    // 错题重练上传：未传 studentId 时，从组卷记录自动关联（二维码只承载 task 定位）
+    let resolvedStudentId = studentId
+    if (!resolvedStudentId && normalizedGeneratedExamId) {
+      const { rows } = await query(
+        `SELECT student_id FROM ${TABLES.GENERATED_EXAMS} WHERE id = $1`,
+        [normalizedGeneratedExamId]
+      )
+      if (rows.length > 0) resolvedStudentId = rows[0].student_id
+    }
+    if (!resolvedStudentId) {
       return res.status(400).json({ error: '缺少 studentId' })
     }
 
@@ -135,9 +149,9 @@ app.post('/api/tasks/upload', upload.array('files', 20), async (req, res) => {
     }
 
     const queue = await getTaskQueue()
-    console.log(`[Upload Pipeline] 收到 ${files.length} 个文件, studentId=${studentId}`)
+    console.log(`[Upload Pipeline] 收到 ${files.length} 个文件, studentId=${resolvedStudentId}`)
 
-    const uploadSummary = await uploadFilesWithRetry(files, studentId, {
+    const uploadSummary = await uploadFilesWithRetry(files, resolvedStudentId, {
       maxRetries: parseInt(process.env.MAX_RETRIES) || 3,
       onFileProgress: (filename, step, data) => {
         console.log(`[Upload Pipeline] [${filename}] ${step}: ${data.valid ? 'PASS' : 'FAIL'}`)
@@ -154,9 +168,9 @@ app.post('/api/tasks/upload', upload.array('files', 20), async (req, res) => {
           console.log(`  OSS 上传成功: ${result.filename} → ${safeUrl}`)
 
           const { rows } = await query(
-            `INSERT INTO ${TABLES.TASKS} (student_id, image_url, original_name, status, result)
-             VALUES ($1, $2, $3, $4, $5) RETURNING *`,
-            [studentId, safeUrl, result.filename, TASK_STATUS.PENDING, JSON.stringify({ progress: 0 })]
+            `INSERT INTO ${TABLES.TASKS} (student_id, image_url, original_name, status, result, task_type, generated_exam_id)
+             VALUES ($1, $2, $3, $4, $5, $6, $7) RETURNING *`,
+            [resolvedStudentId, safeUrl, result.filename, TASK_STATUS.PENDING, JSON.stringify({ progress: 0 }), normalizedTaskType, normalizedGeneratedExamId]
           )
 
           const savedTask = rows[0]
@@ -167,7 +181,7 @@ app.post('/api/tasks/upload', upload.array('files', 20), async (req, res) => {
             try {
               const job = await queue.add('process-task', {
                 taskId: savedTask.id,
-                studentId: studentId,
+                studentId: resolvedStudentId,
                 imageUrl: safeUrl,
                 originalName: result.filename
               }, {
@@ -185,7 +199,7 @@ app.post('/api/tasks/upload', upload.array('files', 20), async (req, res) => {
           } else {
             console.log(`  ??  Redis 队列未连接，跳过队列提交`)
             // 兜底：直接同步调用 Worker 处理
-            processTask({ data: { taskId: savedTask.id, studentId, imageUrl: safeUrl, originalName: result.filename } }).catch(e => console.error('  ? 同步处理失败: ' + e.message))
+            processTask({ data: { taskId: savedTask.id, studentId: resolvedStudentId, imageUrl: safeUrl, originalName: result.filename } }).catch(e => console.error('  ? 同步处理失败: ' + e.message))
           }
 
           tasks.push(savedTask)
@@ -724,11 +738,12 @@ app.post('/api/questions', async (req, res) => {
 app.put('/api/questions/:id', async (req, res) => {
   try {
     const { id } = req.params
-    const { content, options, answer, analysis, status, question_type, subject, is_correct, student_answer, image_url, ai_answer, answer_source, geometry_image_url, review_status, display_image_type } = req.body
+    const { content, options, answer, analysis, status, question_type, subject, is_correct, student_answer, image_url, ai_answer, answer_source, geometry_image_url, review_status, display_image_type, source_type } = req.body
     const hasIsCorrect = 'is_correct' in req.body
     const hasAnswerSource = 'answer_source' in req.body && answer_source !== undefined
     const hasReviewStatus = 'review_status' in req.body
     const hasDisplayImageType = 'display_image_type' in req.body
+    const hasSourceType = 'source_type' in req.body && source_type !== undefined
 
     // [P1-4b] is_correct 变更前读取旧值，用于 judgement 记录
     let oldIsCorrect = null
@@ -762,10 +777,11 @@ app.put('/api/questions/:id', async (req, res) => {
            geometry_image_url = COALESCE($16, geometry_image_url),
            review_status = CASE WHEN $17 THEN $18::text ELSE review_status END,
            display_image_type = CASE WHEN $20 THEN $19::text ELSE display_image_type END,
+           source_type = CASE WHEN $21 THEN $22::text ELSE source_type END,
            updated_at = NOW()
        WHERE id = $13
        RETURNING *`,
-      [n(content), n(options), n(answer), n(analysis), n(status), n(question_type), n(subject), n(is_correct), n(student_answer), n(image_url), n(ai_answer), n(answer_source), id, hasIsCorrect, hasAnswerSource, n(geometry_image_url), hasReviewStatus, n(review_status), n(display_image_type), hasDisplayImageType]
+      [n(content), n(options), n(answer), n(analysis), n(status), n(question_type), n(subject), n(is_correct), n(student_answer), n(image_url), n(ai_answer), n(answer_source), id, hasIsCorrect, hasAnswerSource, n(geometry_image_url), hasReviewStatus, n(review_status), n(display_image_type), hasDisplayImageType, hasSourceType, n(source_type)]
     )
 
     if (rows.length === 0) return res.status(404).json({ error: '题目不存在' })
@@ -1632,6 +1648,60 @@ app.put('/api/generated-exams/:id/graded', async (req, res) => {
   }
 })
 
+// ===== 错题重练任务入口（二维码 = /retry-task/:id） =====
+const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
+
+// 错题重练任务详情（入口页拉取）：学生/名称/题数/状态 + 关联批改任务状态
+app.get('/api/retry-tasks/:id', async (req, res) => {
+  try {
+    const { id } = req.params
+    if (!UUID_RE.test(id)) return res.status(400).json({ error: '无效的任务ID' })
+    const { rows } = await query(
+      `SELECT e.*, s.name AS student_name
+       FROM ${TABLES.GENERATED_EXAMS} e
+       LEFT JOIN ${TABLES.STUDENTS} s ON s.id = e.student_id
+       WHERE e.id = $1`,
+      [id]
+    )
+    if (rows.length === 0) return res.status(404).json({ error: '任务不存在' })
+    const exam = rows[0]
+    let gradingTask = null
+    if (exam.retry_task_id) {
+      const { rows: tRows } = await query(
+        `SELECT id, status, result, image_url, original_name, created_at FROM ${TABLES.TASKS} WHERE id = $1`,
+        [exam.retry_task_id]
+      )
+      if (tRows.length) gradingTask = tRows[0]
+    }
+    res.json({ success: true, task: { ...exam, gradingTask } })
+  } catch (error) {
+    console.error('获取错题重练任务失败:', error)
+    res.status(500).json({ error: error.message })
+  }
+})
+
+// 关联 AI 批改任务 + 置 grading（上传答卷照片后调用）
+app.patch('/api/retry-tasks/:id/link', async (req, res) => {
+  try {
+    const { id } = req.params
+    const { retryTaskId } = req.body || {}
+    if (!UUID_RE.test(id)) return res.status(400).json({ error: '无效的任务ID' })
+    if (!retryTaskId || !UUID_RE.test(retryTaskId)) {
+      return res.status(400).json({ error: '无效的批改任务ID' })
+    }
+    await query(
+      `UPDATE ${TABLES.GENERATED_EXAMS}
+       SET retry_task_id = $1, status = 'grading', updated_at = NOW()
+       WHERE id = $2`,
+      [retryTaskId, id]
+    )
+    res.json({ success: true, message: '已关联批改任务' })
+  } catch (error) {
+    console.error('关联错题重练任务失败:', error)
+    res.status(500).json({ error: error.message })
+  }
+})
+
 // 批改组卷试卷（含掌握度进阶逻辑）
 app.post('/api/generated-exams/:id/grade', async (req, res) => {
   try {
@@ -2011,6 +2081,8 @@ if (process.argv[1] === __filename || process.argv[1]?.endsWith('server/index.js
       await migrateGeometryTikzDisplay()
       await migrateGeometryCropType()
       await migrateCleanGeometrySvg()
+      await migrateSourceType()
+      await migrateRetryTaskFields()
     } catch (err) {
       console.error('数据库迁移失败:', err.message)
     }

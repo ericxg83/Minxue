@@ -322,7 +322,8 @@ export const updateQuestion = async (id, updates) => {
       answer_source: updates.answer_source,
       geometry_image_url: updates.geometry_image_url,
       ai_tags: updates.ai_tags,           // 修复：使标签编辑落库
-      review_status: updates.review_status // 透传，不覆盖已有值（服务端用 COALESCE）
+      review_status: updates.review_status, // 透传，不覆盖已有值（服务端用 COALESCE）
+      source_type: updates.source_type     // 统一批改工作台：标记复核来源场景
     })
   })
 }
@@ -501,6 +502,12 @@ export const getGeneratedExamsByStudent = async (studentId, useCache = true) => 
 export const getGeneratedExamById = async (examId) => {
   const data = await apiRequest(`/generated-exams/${examId}`)
   return data.exam
+}
+
+// 错题重练任务入口（二维码 = /retry-task/:id）：拉取任务详情 + 关联批改任务状态
+export const getRetryTask = async (taskId) => {
+  const data = await apiRequest(`/retry-tasks/${taskId}`)
+  return data.task
 }
 
 export const createGeneratedExam = async (examData) => {

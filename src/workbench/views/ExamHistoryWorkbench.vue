@@ -216,7 +216,7 @@ async function loadExams() {
 
 function startGrading(exam) {
   router.push({
-    name: 'ExamGrading',
+    path: '/review/wrong-retry',
     query: {
       examId: exam.id,
       studentId: selectedStudentId.value
