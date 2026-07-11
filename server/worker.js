@@ -224,6 +224,71 @@ function denormalizeBbox(bbox, imgW, imgH) {
   }
 }
 
+/**
+ * 将几何配图 bbox 收紧到本题范围内，避免 AI 把相邻题目（题号/题干/下一道配图）圈进来。
+ *
+ * 常见错误：AI 返回的 image_bbox 高度过大，纵向跨越到下一题。此处用本题 block_coordinates
+ * 作为硬边界做交集裁剪，并对明显异常（高度过大）的框做保守收缩。全部使用 0-1000 归一化坐标。
+ *
+ * @param {Object} imageBbox - 配图 bbox（归一化 0-1000）
+ * @param {Object|null} blockBox - 本题 block_coordinates（归一化 0-1000），无则返回原值
+ * @returns {Object} 收紧后的 bbox（归一化 0-1000）
+ */
+function clampImageBboxToBlock(imageBbox, blockBox) {
+  if (!imageBbox || typeof imageBbox !== 'object') return imageBbox
+  if (!blockBox || typeof blockBox !== 'object') return imageBbox
+
+  const num = (v, d = 0) => (typeof v === 'number' && isFinite(v) ? v : d)
+
+  const ix = num(imageBbox.x)
+  const iy = num(imageBbox.y)
+  const iw = num(imageBbox.width)
+  const ih = num(imageBbox.height)
+  if (iw <= 0 || ih <= 0) return imageBbox
+
+  const bx = num(blockBox.x)
+  const by = num(blockBox.y)
+  const bw = num(blockBox.width)
+  const bh = num(blockBox.height)
+  if (bw <= 0 || bh <= 0) return imageBbox
+
+  // 与本题 block 求交集（本题 block 略放宽一点，避免把贴边的顶点字母裁掉）
+  const pad = 10 // 归一化 0-1000 下约 1%
+  const blkLeft = bx - pad
+  const blkTop = by - pad
+  const blkRight = bx + bw + pad
+  const blkBottom = by + bh + pad
+
+  const left = Math.max(ix, blkLeft)
+  const top = Math.max(iy, blkTop)
+  const right = Math.min(ix + iw, blkRight)
+  const bottom = Math.min(iy + ih, blkBottom)
+
+  let nx = left
+  let ny = top
+  let nw = right - left
+  let nh = bottom - top
+
+  // 交集无效（AI 框完全在 block 之外）→ 保底用 block 自身范围，避免裁到别处
+  if (nw <= 0 || nh <= 0) {
+    nx = bx; ny = by; nw = bw; nh = bh
+  }
+
+  const clamp01000 = (v) => Math.max(0, Math.min(1000, Math.round(v)))
+  const result = {
+    ...imageBbox,
+    x: clamp01000(nx),
+    y: clamp01000(ny),
+    width: clamp01000(nw),
+    height: clamp01000(nh),
+  }
+
+  if (result.x !== ix || result.y !== iy || result.width !== iw || result.height !== ih) {
+    console.log(`   [几何图] bbox 越界收紧: ${JSON.stringify({ x: ix, y: iy, width: iw, height: ih })} → ${JSON.stringify({ x: result.x, y: result.y, width: result.width, height: result.height })}`)
+  }
+  return result
+}
+
 // AI 密钥校验
 const AI_KEY = AI_CONFIG.API_KEY
 if (!AI_KEY) {
@@ -1307,9 +1372,11 @@ export const processTask = async (job) => {
             continue
           }
           console.log(`   [${imageType || 'geometry'}] ${q.id}: 检测到配图, bbox(归一化)=${JSON.stringify(bbox)}`)
+          // 越界收紧：用本题 block_coordinates 作硬边界，防止 bbox 跨到相邻题目
+          const safeBbox = clampImageBboxToBlock(bbox, q.block_coordinates)
           // bbox 为 0-1000 归一化坐标；裁剪需换算为 compressedBuffer 像素坐标（仅局部使用，不写回 q）
-          const pixelBbox = (_compW && _compH) ? denormalizeBbox(bbox, _compW, _compH) : bbox
-          const cacheKey = JSON.stringify(bbox)
+          const pixelBbox = (_compW && _compH) ? denormalizeBbox(safeBbox, _compW, _compH) : safeBbox
+          const cacheKey = JSON.stringify(safeBbox)
           if (geometryImageCache.has(cacheKey)) {
             q.geometry_image_url = geometryImageCache.get(cacheKey)
           } else {
