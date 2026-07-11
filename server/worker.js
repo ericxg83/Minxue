@@ -67,6 +67,44 @@ async function getImageHeight(buffer) {
   return meta.height
 }
 
+/**
+ * 将 Qwen3-VL 返回的【归一化 0-1000】bbox 换算为目标图片的实际像素坐标。
+ *
+ * ⚠️ 关键：Qwen3-VL 系列 grounding 输出的坐标是相对整张图片的 0-1000 归一化值，
+ * 不是绝对像素（官方基准：绝对像素格式得分 0，1000-base 最可靠）。若直接当像素用，
+ * 会把页面底部 (y≈750) 的配图裁到中上部 → 张冠李戴裁到邻题。此处统一换算修正。
+ *
+ * @param {Object} bbox - {x, y, width, height}，取值 0-1000
+ * @param {number} imgW - 目标图片实际宽度(px)
+ * @param {number} imgH - 目标图片实际高度(px)
+ * @returns {Object|null} 像素坐标 {x, y, width, height}
+ */
+function denormalizeBbox(bbox, imgW, imgH) {
+  if (!bbox || typeof bbox !== 'object') return bbox
+  const n = (v) => (typeof v === 'number' && isFinite(v) ? v : 0)
+  const clamp = (v) => Math.max(0, Math.min(1000, n(v)))
+  return {
+    ...bbox,
+    x: Math.round(clamp(bbox.x) / 1000 * imgW),
+    y: Math.round(clamp(bbox.y) / 1000 * imgH),
+    width: Math.round(clamp(bbox.width) / 1000 * imgW),
+    height: Math.round(clamp(bbox.height) / 1000 * imgH),
+  }
+}
+
+/**
+ * 对单个题目的所有 bbox 字段做归一化→像素换算（就地修改并返回）。
+ */
+function denormalizeQuestionBboxes(q, imgW, imgH) {
+  if (q.block_coordinates) q.block_coordinates = denormalizeBbox(q.block_coordinates, imgW, imgH)
+  if (q.text_bbox) q.text_bbox = denormalizeBbox(q.text_bbox, imgW, imgH)
+  if (q.image_bbox) q.image_bbox = denormalizeBbox(q.image_bbox, imgW, imgH)
+  if (q.geometry_image?.bbox) {
+    q.geometry_image = { ...q.geometry_image, bbox: denormalizeBbox(q.geometry_image.bbox, imgW, imgH) }
+  }
+  return q
+}
+
 // AI 密钥校验
 const AI_KEY = AI_CONFIG.API_KEY
 if (!AI_KEY) {
@@ -1115,6 +1153,17 @@ export const processTask = async (job) => {
 
     if (questions.length > 0) {
       console.log(`📊 [Step 6/8] 保存题目到数据库...`)
+
+      // ── 坐标归一化修正：Qwen3-VL 返回 [0,1000] 归一化坐标，统一换算为 compressedBuffer 实际像素 ──
+      // 必须在裁剪/入库前完成，否则配图会被裁到错误位置（张冠李戴到邻题）。
+      try {
+        const _meta = await sharp(compressedBuffer).metadata()
+        const _imgW = _meta.width, _imgH = _meta.height
+        for (const q of questions) denormalizeQuestionBboxes(q, _imgW, _imgH)
+        console.log(`   [坐标] 已将 ${questions.length} 道题的 bbox 从 0-1000 归一化换算为像素 (基于 ${_imgW}x${_imgH})`)
+      } catch (coordErr) {
+        console.warn(`   ⚠️ [坐标] 归一化换算失败，沿用原始坐标: ${coordErr.message}`)
+      }
 
       // ── 多模态切题：处理几何配图 ─
       const geometryImageCache = new Map() // bbox 去重缓存 (一图多题)
