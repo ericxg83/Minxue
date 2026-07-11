@@ -82,6 +82,7 @@ const ScanQR = lazyWithRetry(() => import('./pages/ScanQR'))
 const Grading = lazyWithRetry(() => import('./pages/Grading'))
 const PrintPreview = lazyWithRetry(() => import('./pages/PrintPreview'))
 const ExamReview = lazyWithRetry(() => import('./pages/ExamReview'))
+const RetryTask = lazyWithRetry(() => import('./pages/RetryTask'))
 
 // Simple Suspense fallback
 const LazyFallback = () => (
@@ -104,6 +105,12 @@ const TaskCardSkeleton = () => (
 )
 
 const isMobile = /Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(navigator.userAgent)
+
+// 错题重练任务入口路由：/retry-task/:id 仅渲染 RetryTask 页（二维码唯一入口）
+const getRetryTaskIdFromPath = () => {
+  const m = window.location.pathname.match(/^\/retry-task\/([0-9a-fA-F-]{36})$/)
+  return m ? m[1] : null
+}
 
 function dataURLtoFile(dataUrl, filename) {
   const arr = dataUrl.split(',')
@@ -133,6 +140,14 @@ export default function App() {
   const { tasks, setTasks, addTask, updateTaskStatus: updateTaskInStore } = useTaskStore()
   const { wrongQuestions, setWrongQuestions, selectedQuestions, setSelectedQuestions, clearSelection, addWrongQuestion, addWrongQuestions: addMultipleToStore } = useWrongQuestionStore()
   const { exams, setExams, generatedExams, setGeneratedExams } = useExamStore()
+
+  // 错题重练任务入口：pathname 命中 /retry-task/:id 时全屏渲染 RetryTask
+  const [retryTaskId, setRetryTaskId] = useState(() => getRetryTaskIdFromPath())
+  useEffect(() => {
+    const onPop = () => setRetryTaskId(getRetryTaskIdFromPath())
+    window.addEventListener('popstate', onPop)
+    return () => window.removeEventListener('popstate', onPop)
+  }, [])
 
   // Processing Page State
   const [processingFilter, setProcessingFilter] = useState('all')
@@ -874,6 +889,13 @@ export default function App() {
 
   const handleScanSuccess = (scanData) => {
     setShowScanQR(false)
+    // 新格式：扫码内容含 /retry-task/{id} → 进入「任务入口页」（二维码只定位 task，不进批改页）
+    if (scanData?.retryTaskId) {
+      window.history.pushState({ retryTask: scanData.retryTaskId }, '', `/retry-task/${scanData.retryTaskId}`)
+      setRetryTaskId(scanData.retryTaskId)
+      return
+    }
+    // 旧格式：MXG:<id> → 沿用原有批改流程
     setGradingData(scanData)
     setShowGrading(true)
   }
@@ -3284,6 +3306,24 @@ export default function App() {
         )}
       </>
     )
+
+    // 错题重练任务入口：/retry-task/:id 全屏渲染，无底部 tab
+    if (retryTaskId) {
+      return (
+        <ToastProvider>
+          <Suspense fallback={<LazyFallback />}>
+            <RetryTask
+              taskId={retryTaskId}
+              onBack={() => {
+                setRetryTaskId(null)
+                if (window.history.length > 1) window.history.back()
+                else window.location.assign('/')
+              }}
+            />
+          </Suspense>
+        </ToastProvider>
+      )
+    }
 
     return (
       <ToastProvider>

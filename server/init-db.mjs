@@ -52,6 +52,8 @@ async function initDatabase() {
         original_name TEXT,
         status TEXT DEFAULT 'pending',
         result JSONB,
+        task_type TEXT DEFAULT 'general',
+        generated_exam_id UUID,
         created_at TIMESTAMPTZ DEFAULT NOW(),
         updated_at TIMESTAMPTZ DEFAULT NOW()
       )
@@ -121,6 +123,7 @@ async function initDatabase() {
         name TEXT NOT NULL,
         question_ids JSONB,
         status TEXT DEFAULT 'ungraded',
+        retry_task_id UUID,
         created_at TIMESTAMPTZ DEFAULT NOW(),
         updated_at TIMESTAMPTZ DEFAULT NOW()
       )

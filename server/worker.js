@@ -12,6 +12,7 @@ import { TABLES, TASK_STATUS } from './config/neon.js'
 import { query } from './config/neon.js'
 import { AI_CONFIG, getAIHeaders, buildOCRPrompt, buildTaggingPrompt, buildAnswerGenerationPrompt, buildGeometryReconstructionPrompt, getCurrentTextModel, getCurrentVLModel, rotateTextModel, rotateVLModel, TEXT_MODELS, VL_MODELS, callTextCompletion, callVisionCompletion } from './config/ai.js'
 import { parseGeometryStructure, renderGeometrySvg, isEmptyStructure } from './utils/geometrySvg.js'
+import { validateGeometryLabels } from './utils/geometryLabelValidator.js'
 import { updateTaskStatus, createQuestions, batchUpdateQuestionTags, addWrongQuestions, createJudgement, getLatestJudgement, updateQuestionAnswer, markAnswerException, findCachedQuestionByFingerprint, findSimilarQuestion, cacheQuestion, incrementQuestionUseCount, updateQuestionCacheId, createQuestionAsset, updateQuestionAssetCleanData } from './services/neonService.js'
 import { uploadImage } from './services/ossService.js'
 import { generateTextFingerprint, generatePHash, PARSER_VERSION, TEXT_SIMILARITY_THRESHOLD } from './utils/questionFingerprint.js'
@@ -107,8 +108,13 @@ async function reconstructGeometrySvg(imageBuffer, questionId) {
       console.warn(`   ⚠️ [几何重建] ${shortId}: 未识别到有效几何结构（空）`)
       return null
     }
+    // 服务端二次整理：把模型 labels 按空间规则拆成 geometry_labels / ignored_labels
+    const validated = validateGeometryLabels(structure)
+    const nGeo = validated.geometry_labels.length
+    const nIgn = validated.ignored_labels.length
+    console.log(`   [几何重建] ${shortId}: 标注二次整理 ${nGeo} 几何 / ${nIgn} 忽略`)
 
-    const svg = renderGeometrySvg(structure)
+    const svg = renderGeometrySvg(validated)
     if (!svg) {
       console.warn(`   ⚠️ [几何重建] ${shortId}: 结构渲染 SVG 失败`)
       return null
@@ -162,11 +168,12 @@ async function processGeometryCleaning(q, studentId) {
     return
   }
 
-  // 3. 存入 question_assets 表（clean_geometry_svg 存干净 SVG 源码）
+  // 3. 存入 question_assets 表（clean_geometry_svg 存干净 SVG 源码，geometry_structure_json 存结构化数据）
   try {
     await updateQuestionAssetCleanData(q.id, {
       clean_geometry_svg: svg,
-      geometry_crop_type: 'clean_geometry'
+      geometry_crop_type: 'clean_geometry',
+      geometry_structure_json: st
     })
     console.log(`   [几何重建] ${shortId}: 数据入库成功`)
   } catch (error) {

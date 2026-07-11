@@ -115,7 +115,7 @@ export default function QuestionEdit({ questionId, onClose, onSave }) {
   }
 
   const getTypeLabel = () => {
-    const map = { choice: '选择题', fill: '填空题', answer: '解答题' }
+    const map = { choice: '选择题', fill: '填空题', answer: '解答题', judge: '判断题' }
     return map[formData.question_type] || '选择题'
   }
 

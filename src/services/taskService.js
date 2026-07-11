@@ -53,6 +53,22 @@ export const taskService = {
     })
   },
 
+  // 错题重练任务入口：老师/学生上传完成后的答卷照片。
+  // 通过 generatedExamId 自动关联 student_id / 组卷，无需用户重新选择。
+  // taskType='wrong_retry' 使该批改任务进入统一的错题重练批改流程。
+  uploadRetryAnswer: async (generatedExamId, files) => {
+    const formData = new FormData()
+    formData.append('generatedExamId', generatedExamId)
+
+    for (const file of files) {
+      formData.append('files', file)
+    }
+    return apiRequest('/tasks/upload', {
+      method: 'POST',
+      body: formData
+    })
+  },
+
   createTaskByUrl: async (studentId, imageUrl, originalName) => {
     return apiRequest('/tasks/create-by-url', {
       method: 'POST',

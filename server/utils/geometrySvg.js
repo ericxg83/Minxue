@@ -1,10 +1,14 @@
 /**
  * 几何重建：结构化 JSON → 干净 SVG。
  *
- * 视觉模型输出的几何结构（点/线/圆/标注）在服务端确定性地渲染成 SVG。
+ * 视觉模型输出的几何结构（点/线/圆/坐标系/约束）在服务端确定性地渲染成 SVG。
  * 输出：白色背景、黑色线条、保留顶点字母/几何数字/角度标记，仅含几何元素。
  *
  * 坐标系：模型输出的是数学平面坐标（y 向上为正），本模块渲染时翻转 y。
+ *
+ * 兼容性：支持新旧两种格式：
+ *   旧格式：points[i].{x, y}（直接坐标字段）
+ *   新格式：points[i].position.{x, y}（含 type 字段）
  */
 
 const SVG_W = 400
@@ -16,8 +20,6 @@ const isNum = (v) => typeof v === 'number' && isFinite(v)
 /**
  * 从模型返回的文本中解析出几何结构 JSON。
  * 兼容：纯 JSON、```json 代码块、前后夹带说明文字的情况。
- * @param {string} content
- * @returns {object|null}
  */
 export function parseGeometryStructure(content) {
   if (!content || typeof content !== 'string') return null
@@ -48,14 +50,62 @@ export function parseGeometryStructure(content) {
   return null
 }
 
-/** 规范化结构：确保各字段为数组 */
+/** 规范化结构：确保各字段为数组，兼容新旧格式 */
 function normalizeStructure(obj) {
+  // 兼容新旧 points 格式
+  let points = Array.isArray(obj.points) ? obj.points : []
+  points = points.map(p => {
+    if (p == null) return null
+    // 新格式：{ label, type, position: { x, y } }
+    if (p.position && isNum(p.position.x) && isNum(p.position.y)) {
+      return {
+        label: p.label ?? '',
+        type: p.type || 'vertex',
+        x: p.position.x,
+        y: p.position.y
+      }
+    }
+    // 旧格式：{ label, x, y }
+    if (isNum(p.x) && isNum(p.y)) {
+      return {
+        label: p.label ?? '',
+        type: p.type || 'vertex',
+        x: p.x,
+        y: p.y
+      }
+    }
+    return null
+  }).filter(Boolean)
+
+  // segments 兼容新老格式
+  let segments = Array.isArray(obj.segments) ? obj.segments : []
+  segments = segments.map(seg => {
+    if (seg == null) return null
+    return {
+      from: seg.from ?? seg.start ?? '',
+      to: seg.to ?? seg.end ?? '',
+      style: seg.style || 'solid',
+      relation: seg.relation || 'normal'
+    }
+  }).filter(s => s.from && s.to)
+
   return {
-    points: Array.isArray(obj.points) ? obj.points : [],
-    segments: Array.isArray(obj.segments) ? obj.segments : [],
+    points,
+    segments,
     circles: Array.isArray(obj.circles) ? obj.circles : [],
-    labels: Array.isArray(obj.labels) ? obj.labels : [],
+    // 优先用分类后的 geometry_labels；旧结构无该字段时回退到 labels（向后兼容已渲染的题）
+    labels: Array.isArray(obj.geometry_labels) ? obj.geometry_labels
+          : Array.isArray(obj.labels) ? obj.labels : [],
     rightAngles: Array.isArray(obj.rightAngles) ? obj.rightAngles : [],
+    coordinate_system: obj.coordinate_system && typeof obj.coordinate_system === 'object'
+      ? {
+          exists: !!obj.coordinate_system.exists,
+          origin: obj.coordinate_system.origin || '',
+          x_axis: !!obj.coordinate_system.x_axis,
+          y_axis: !!obj.coordinate_system.y_axis
+        }
+      : { exists: false, origin: '', x_axis: false, y_axis: false },
+    constraints: Array.isArray(obj.constraints) ? obj.constraints : [],
   }
 }
 
@@ -86,7 +136,7 @@ const strokeDash = (style) => {
 
 /**
  * 把几何结构渲染成 SVG 字符串。
- * @param {object} structure - { points, segments, circles, labels, rightAngles }
+ * @param {object} structure - { points, segments, circles, labels, rightAngles, coordinate_system, constraints }
  * @returns {string|null} SVG 源码，或 null（无有效元素）
  */
 export function renderGeometrySvg(structure) {
@@ -96,7 +146,7 @@ export function renderGeometrySvg(structure) {
   // 建立顶点查找表
   const pmap = {}
   for (const p of s.points) {
-    if (p && p.label != null && isNum(p.x) && isNum(p.y)) pmap[p.label] = p
+    if (p && p.label && isNum(p.x) && isNum(p.y)) pmap[p.label] = p
   }
 
   // 收集所有坐标计算包围盒
@@ -147,6 +197,61 @@ export function renderGeometrySvg(structure) {
     `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${SVG_W} ${SVG_H}" width="${SVG_W}" height="${SVG_H}">`
   )
   parts.push(`<rect x="0" y="0" width="${SVG_W}" height="${SVG_H}" fill="#ffffff"/>`)
+
+  // ── 坐标轴（在线段之前绘制，确保在底层） ──
+  const cs = s.coordinate_system
+  if (cs.exists) {
+    const axisColor = '#555555'
+    const axisWidth = 1.2
+    // 找原点
+    let ox = MARGIN + offsetX - minX * scale  // 数学原点在 SVG 中的 x
+    let oy = MARGIN + offsetY + maxY * scale   // 数学原点在 SVG 中的 y
+    let originLabel = null
+    if (cs.origin && pmap[cs.origin]) {
+      ox = toX(pmap[cs.origin].x)
+      oy = toY(pmap[cs.origin].y)
+      originLabel = cs.origin
+    }
+
+    // 确定轴端点：沿 x/y 方向延伸到图形边界
+    const xEnd = toX(maxX + (maxX - minX) * 0.15)
+    const xStart = toX(minX - (maxX - minX) * 0.15)
+    const yEnd = toY(minY - (maxY - minY) * 0.15)
+    const yStart = toY(maxY + (maxY - minY) * 0.15)
+
+    // 用 <g> 分组，方便统一样式
+    parts.push(`<g stroke="${axisColor}" stroke-width="${axisWidth}" fill="none" stroke-linecap="round">`)
+
+    // X 轴
+    if (cs.x_axis) {
+      parts.push(`<line x1="${fmt(xStart)}" y1="${fmt(oy)}" x2="${fmt(xEnd)}" y2="${fmt(oy)}"/>`)
+      // X 轴箭头
+      const arrowSize = 8
+      parts.push(`<polyline points="${fmt(xEnd)},${fmt(oy)} ${fmt(xEnd - arrowSize)},${fmt(oy - arrowSize * 0.5)} ${fmt(xEnd - arrowSize)},${fmt(oy + arrowSize * 0.5)}" fill="${axisColor}" stroke="none"/>`)
+    }
+
+    // Y 轴
+    if (cs.y_axis) {
+      parts.push(`<line x1="${fmt(ox)}" y1="${fmt(yStart)}" x2="${fmt(ox)}" y2="${fmt(yEnd)}"/>`)
+      // Y 轴箭头
+      const arrowSize = 8
+      parts.push(`<polyline points="${fmt(ox)},${fmt(yEnd)} ${fmt(ox - arrowSize * 0.5)},${fmt(yEnd + arrowSize)} ${fmt(ox + arrowSize * 0.5)},${fmt(yEnd + arrowSize)}" fill="${axisColor}" stroke="none"/>`)
+    }
+
+    parts.push('</g>')
+
+    // 轴标签 "x" 和 "y"
+    parts.push(`<g fill="${axisColor}" font-family="Times New Roman, serif" font-size="14" font-style="italic">`)
+    if (cs.x_axis) {
+      parts.push(`<text x="${fmt(xEnd + 4)}" y="${fmt(oy + 4)}" text-anchor="start">x</text>`)
+    }
+    if (cs.y_axis) {
+      parts.push(`<text x="${fmt(ox + 4)}" y="${fmt(yEnd - 4)}" text-anchor="start">y</text>`)
+    }
+    parts.push('</g>')
+  }
+
+  // ── 主几何图形（黑色线条） ──
   parts.push(`<g stroke="#111111" stroke-width="1.6" fill="none" stroke-linecap="round" stroke-linejoin="round">`)
 
   // 圆
@@ -166,9 +271,39 @@ export function renderGeometrySvg(structure) {
     parts.push(
       `<line x1="${fmt(a.x)}" y1="${fmt(a.y)}" x2="${fmt(b.x)}" y2="${fmt(b.y)}"${strokeDash(seg.style)}/>`
     )
+
+    // 垂直标记：在交点处画小方块（如果 relation 是 perpendicular 且没有 rightAngles 条目）
+    if (seg.relation === 'perpendicular') {
+      // 检查是否已有 rightAngles 条目覆盖此关系
+      const hasRightAngleEntry = s.rightAngles.some(
+        ra => ra.vertex === seg.from || ra.vertex === seg.to
+      )
+      if (!hasRightAngleEntry) {
+        // 在 from 端点画直角标记
+        const sq = rightAngleSquare(a, a, b, 10)
+        if (sq) parts.push(`<polyline points="${sq}"/>`)
+      }
+    }
+
+    // 平行标记：在线的中点附近画小箭头（// 标记）
+    if (seg.relation === 'parallel') {
+      const mx = (a.x + b.x) / 2
+      const my = (a.y + b.y) / 2
+      const dx = b.x - a.x
+      const dy = b.y - a.y
+      const len = Math.hypot(dx, dy) || 1
+      // 法线方向（垂直方向）
+      const nx = -dy / len * 8
+      const ny = dx / len * 8
+      // 两条平行线标记
+      parts.push(
+        `<line x1="${fmt(mx + nx * 1.5)}" y1="${fmt(my + ny * 1.5)}" x2="${fmt(mx + nx * 1.5)}" y2="${fmt(my + ny * 1.5)}" stroke="none"/>`,
+        `<line x1="${fmt(mx + nx * 0.8)}" y1="${fmt(my + ny * 0.8)}" x2="${fmt(mx + nx * 0.8)}" y2="${fmt(my + ny * 0.8)}" stroke="none"/>`
+      )
+    }
   }
 
-  // 直角标记（小方块）
+  // 直角标记
   for (const ra of s.rightAngles) {
     const v = findCoord(ra?.vertex)
     const a = findCoord(ra?.from)
@@ -180,18 +315,23 @@ export function renderGeometrySvg(structure) {
 
   parts.push(`</g>`)
 
-  // 顶点圆点
+  // ── 顶点圆点 ──
   parts.push(`<g fill="#111111">`)
   for (const p of s.points) {
     if (!isNum(p?.x) || !isNum(p?.y)) continue
-    parts.push(`<circle cx="${fmt(toX(p.x))}" cy="${fmt(toY(p.y))}" r="2.4"/>`)
+    // 原点用稍大的空心圆
+    if (p.type === 'origin') {
+      parts.push(`<circle cx="${fmt(toX(p.x))}" cy="${fmt(toY(p.y))}" r="3" fill="none" stroke="#111111" stroke-width="1.2"/>`)
+    } else {
+      parts.push(`<circle cx="${fmt(toX(p.x))}" cy="${fmt(toY(p.y))}" r="2.4"/>`)
+    }
   }
   parts.push(`</g>`)
 
-  // 顶点字母标注
+  // ── 顶点字母标注 ──
   parts.push(`<g fill="#111111" font-family="Times New Roman, serif" font-size="16" font-style="italic">`)
   for (const p of s.points) {
-    if (!isNum(p?.x) || !isNum(p?.y) || p.label == null) continue
+    if (!isNum(p?.x) || !isNum(p?.y) || !p.label) continue
     const pos = labelOffset(p, s.points)
     parts.push(
       `<text x="${fmt(toX(p.x) + pos.dx)}" y="${fmt(toY(p.y) + pos.dy)}" text-anchor="${pos.anchor}">${esc(p.label)}</text>`
@@ -199,7 +339,7 @@ export function renderGeometrySvg(structure) {
   }
   parts.push(`</g>`)
 
-  // 长度/角度标注
+  // ── 长度/角度/文字标注 ──
   parts.push(`<g fill="#111111" font-family="Times New Roman, serif" font-size="14">`)
   for (const l of s.labels) {
     if (!isNum(l?.x) || !isNum(l?.y) || l.text == null) continue
@@ -208,6 +348,9 @@ export function renderGeometrySvg(structure) {
     )
   }
   parts.push(`</g>`)
+
+  // ── SVG 底部注释：存储原始结构 JSON（调试用，不渲染可见内容） ──
+  // geometry_structure_json 单独存储，不嵌入 SVG
 
   parts.push(`</svg>`)
   return parts.join('')

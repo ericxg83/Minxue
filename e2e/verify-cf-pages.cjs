@@ -1,7 +1,8 @@
 /**
- * 对线上 Cloudflare Pages 验证组卷选择 bug
+ * 对线上 Cloudflare Pages 验证组卷选择 bug 修复 + 标题显示修复
  */
 const { chromium } = require('playwright');
+const dayjs = require('dayjs');
 const APP_URL = 'https://minxue.pages.dev';
 
 (async () => {
@@ -54,7 +55,7 @@ const APP_URL = 'https://minxue.pages.dev';
     return;
   }
 
-  // 找题数不同的（优先 9 道题）
+  // 找题数不同的（优先 9 道题）；如题数全部相同则选最后一条
   const firstCount = parseInt(examItems[0].details.join('').match(/(\d+)\s*道题/)?.[1] || '0', 10);
   let targetIdx = -1;
   for (let i = examItems.length - 1; i >= 0; i--) {
@@ -69,6 +70,11 @@ const APP_URL = 'https://minxue.pages.dev';
       if (c !== firstCount && c > 0) { targetIdx = i; break; }
     }
   }
+  // 若所有题数相同，选最后一条（非第一条即可验证标题）
+  if (targetIdx === -1) {
+    targetIdx = examItems.length - 1;
+    console.log(`   所有试卷题数相同(${firstCount})，选择最后一条验证标题显示`);
+  }
 
   const target = examItems[targetIdx];
   const targetCount = parseInt(target.details.join('').match(/(\d+)\s*道题/)?.[1] || '0', 10);
@@ -82,21 +88,52 @@ const APP_URL = 'https://minxue.pages.dev';
     const allText = document.body.innerText;
     const totalMatch = allText.match(/总题数[：:]\s*(\d+)/);
     const qrSvg = document.querySelector('svg');
-    return { totalQuestions: totalMatch ? parseInt(totalMatch[1], 10) : null, hasQR: !!qrSvg };
+    // 找到试卷标题
+    const titleEl = document.querySelector('[class*="font-bold mb-3"]');
+    const titleText = titleEl?.textContent?.trim() || '';
+    return {
+      totalQuestions: totalMatch ? parseInt(totalMatch[1], 10) : null,
+      hasQR: !!qrSvg,
+      titleText,
+    };
   });
 
   console.log(`   预览总题数: ${preview.totalQuestions}`);
+  console.log(`   试卷标题: ${preview.titleText}`);
   console.log(`   有二维码: ${preview.hasQR}`);
 
-  if (preview.totalQuestions === targetCount) {
-    console.log(`\n✅ 题数匹配 (${targetCount}) — 修复已上线`);
-  } else if (preview.totalQuestions === firstCount) {
-    console.log(`\n❌ 显示的是第一条的 ${firstCount} 题，不是目标的 ${targetCount} 题 — 老代码`);
-    console.log(`   Cloudflare Pages 还没有部署修复。需要手动触发重新部署。`);
+  let passed = true;
+
+  // 验证题数匹配（仅当题数不同时有意义）
+  if (targetCount !== firstCount) {
+    if (preview.totalQuestions === targetCount) {
+      console.log(`\n✅ 题数匹配 (${targetCount}) — 修复已上线`);
+    } else if (preview.totalQuestions === firstCount) {
+      console.log(`\n❌ 显示的是第一条的 ${firstCount} 题，不是目标的 ${targetCount} 题`);
+      passed = false;
+    } else {
+      console.log(`\n⚠️  预览 ${preview.totalQuestions} 题 ≠ 目标 ${targetCount} 题`);
+      passed = false;
+    }
   } else {
-    console.log(`\n⚠️  预览 ${preview.totalQuestions} 题 ≠ 目标 ${targetCount} 题`);
+    console.log(`\nℹ️  题数相同 (${firstCount})，无法通过题数验证 — 标题验证为主`);
   }
 
-  await page.screenshot({ path: 'cf-pages-bug-verification.png' });
+  // 验证标题显示原始试卷名
+  const todayStr = dayjs().format('MMDD');
+  if (preview.titleText && target.name) {
+    if (preview.titleText.includes(target.name.trim())) {
+      console.log(`✅ 标题显示原始试卷名 "${target.name}"`);
+    } else if (preview.titleText.includes(todayStr)) {
+      console.log(`❌ 标题仍显示当天日期 "${todayStr}"，应为 "${target.name}"`);
+      passed = false;
+    } else {
+      console.log(`ℹ️  标题: "${preview.titleText}"`);
+    }
+  }
+
+  console.log(`\n${passed ? '✅ 全部验证通过' : '❌ 有验证失败'}`);
+
+  await page.screenshot({ path: 'cf-pages-verification.png' });
   await browser.close();
 })();

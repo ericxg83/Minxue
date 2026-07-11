@@ -9,6 +9,7 @@ import axios from 'axios'
 import { query, TABLES } from './config/neon.js'
 import { buildTikzGenerationPrompt, callVisionCompletion } from './config/ai.js'
 import { updateQuestionAssetTikz } from './services/neonService.js'
+import { renderGeometryTikZ, isEmptyStructure } from './utils/geometryTikZ.js'
 
 // ── 辅助：从 URL 下载图片 buffer ──
 async function downloadImageBuffer(url) {
@@ -66,41 +67,49 @@ export async function processTikzGeneration(job) {
     return
   }
 
-  // 1. 下载净化图
-  const imageBuffer = await downloadImageBuffer(cleanGeometryUrl)
-  if (!imageBuffer) {
-    console.error(`[TikZ] ${shortId}: 下载净化图失败，标记 failed`)
-    await markFailed(questionId)
-    return
-  }
+  // ── 优先路径：基于 geometry_structure_json 确定性生成 TikZ ──
+  // 不再让 AI 自由猜测布局，完全由结构数据驱动渲染。
+  let tikzCode = await generateTikZFromStructure(questionId, shortId)
 
-  // 2. 调 VL 模型生成 TikZ
-  let tikzCode = null
-  try {
-    const base64 = imageBuffer.toString('base64')
-    const dataURL = `data:image/png;base64,${base64}`
+  // ── 回退路径：无结构数据则调 VL 模型生成（旧图兼容） ──
+  if (!tikzCode) {
+    console.log(`[TikZ] ${shortId}: 无结构数据，回退到 VL 模型生成...`)
 
-    const result = await callVisionCompletion({
-      imageDataURL: dataURL,
-      systemPrompt: buildTikzGenerationPrompt(),
-      userText: '请根据这个几何图形生成TikZ代码。',
-      temperature: 0.2,
-      maxTokens: 4096
-    })
-
-    // 3. 提取 TikZ 代码
-    tikzCode = extractTikzCode(result.content)
-    if (!tikzCode) {
-      console.warn(`[TikZ] ${shortId}: VL 返回内容中未找到有效 TikZ 代码`)
-      // 尝试将整段内容作为 TikZ 代码保存
-      if (result.content.includes('\\draw') || result.content.includes('\\path')) {
-        tikzCode = result.content.trim()
-      }
+    // 1. 下载净化图
+    const imageBuffer = await downloadImageBuffer(cleanGeometryUrl)
+    if (!imageBuffer) {
+      console.error(`[TikZ] ${shortId}: 下载净化图失败，标记 failed`)
+      await markFailed(questionId)
+      return
     }
-  } catch (error) {
-    console.error(`[TikZ] ${shortId}: VL 模型调用失败:`, error.message)
-    await markFailed(questionId)
-    return
+
+    // 2. 调 VL 模型生成 TikZ
+    try {
+      const base64 = imageBuffer.toString('base64')
+      const dataURL = `data:image/png;base64,${base64}`
+
+      const result = await callVisionCompletion({
+        imageDataURL: dataURL,
+        systemPrompt: buildTikzGenerationPrompt(),
+        userText: '请根据这个几何图形生成TikZ代码。',
+        temperature: 0.2,
+        maxTokens: 4096
+      })
+
+      // 3. 提取 TikZ 代码
+      tikzCode = extractTikzCode(result.content)
+      if (!tikzCode) {
+        console.warn(`[TikZ] ${shortId}: VL 返回内容中未找到有效 TikZ 代码`)
+        // 尝试将整段内容作为 TikZ 代码保存
+        if (result.content.includes('\\draw') || result.content.includes('\\path')) {
+          tikzCode = result.content.trim()
+        }
+      }
+    } catch (error) {
+      console.error(`[TikZ] ${shortId}: VL 模型调用失败:`, error.message)
+      await markFailed(questionId)
+      return
+    }
   }
 
   if (!tikzCode) {
@@ -146,8 +155,36 @@ export async function processTikzGeneration(job) {
 }
 
 /**
- * 标记 TikZ 生成失败
+ * 基于 geometry_structure_json 确定性生成 TikZ 代码。
+ * 不再让 AI 自由猜测布局，完全由结构数据驱动渲染。
+ * @returns {Promise<string|null>}
  */
+async function generateTikZFromStructure(questionId, shortId) {
+  try {
+    const { rows } = await query(
+      `SELECT geometry_structure_json
+       FROM ${TABLES.QUESTION_ASSETS}
+       WHERE question_id = $1 AND asset_type = 'geometry_image'
+       ORDER BY created_at DESC LIMIT 1`,
+      [questionId]
+    )
+    const struct = rows[0]?.geometry_structure_json
+    if (!struct || isEmptyStructure(struct)) {
+      console.log(`[TikZ] ${shortId}: 无有效 geometry_structure_json，回退`)
+      return null
+    }
+    const tikzCode = renderGeometryTikZ(struct)
+    if (!tikzCode) {
+      console.warn(`[TikZ] ${shortId}: 结构渲染 TikZ 失败`)
+      return null
+    }
+    console.log(`✅ [TikZ] ${shortId}: 基于结构 JSON 确定性生成 TikZ (${tikzCode.length} 字符)`)
+    return tikzCode
+  } catch (error) {
+    console.error(`[TikZ] ${shortId}: 读取结构 JSON 失败:`, error.message)
+    return null
+  }
+}
 async function markFailed(questionId) {
   const shortId = (questionId || '').substring(0, 8)
   try {

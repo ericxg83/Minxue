@@ -88,10 +88,17 @@ export default function PrintPreview({ onClose, questions: propQuestions, existi
     return () => window.removeEventListener('resize', compute)
   }, [previewQuestions.length])
 
-  // 计算二维码内容：优先短格式（组卷ID），兜底旧 JSON
+  // 二维码内容：错题重练任务入口 URL（/retry-task/{id}），任意相机可扫
+  // 二维码只承载唯一 task 定位，不再绑定具体批改页面
+  const getRetryTaskUrl = (id) => {
+    const base = import.meta.env.VITE_APP_BASE_URL || window.location.origin
+    return `${base}/retry-task/${id.toUpperCase()}`
+  }
+
+  // 计算二维码内容：优先任务入口 URL，兜底旧 JSON
   const getQrContent = () => {
     const examId = examIdRef.current || generatedExamId
-    if (examId) return `MXG:${examId.toUpperCase()}`
+    if (examId) return getRetryTaskUrl(examId)
     return qrContent
   }
 
@@ -117,9 +124,8 @@ export default function PrintPreview({ onClose, questions: propQuestions, existi
     setPaperId(newPaperId)
 
     if (generatedExamId) {
-      // 短格式：只放组卷ID（全大写走 QR alphanumeric 模式，密度最低，打印后模块大、易扫描）
-      // 扫码端通过 GET /generated-exams/:id 拉取 studentId / questionIds
-      setQrContent(`MXG:${generatedExamId.toUpperCase()}`)
+      // 二维码 = 错题重练任务入口 URL（任意相机可扫），不再绑定具体批改页面
+      setQrContent(getRetryTaskUrl(generatedExamId))
     } else {
       // 兜底：组卷记录尚未创建成功时使用完整 JSON（密度高，但保证可用）
       setQrContent(JSON.stringify({
@@ -248,7 +254,7 @@ export default function PrintPreview({ onClose, questions: propQuestions, existi
               <div class="question">
                 <div class="question-header">
                   <span class="question-number">${index + 1}.</span>
-                  <span class="question-type">(${q.question_type === 'choice' ? '选择题' : q.question_type === 'fill' ? '填空题' : '解答题'})</span>
+                  <span class="question-type">(${q.question_type === 'choice' ? '选择题' : q.question_type === 'fill' ? '填空题' : q.question_type === 'judge' ? '判断题' : '解答题'})</span>
                 </div>
                 <div class="question-content">${content}</div>
                 ${q.image_url ? `<div style="text-align:center;margin-bottom:8px;"><img src="${q.image_url}" alt="配图" style="max-width:100%;max-height:200px;object-fit:contain;border-radius:4px;" /></div>` : ''}
@@ -464,7 +470,7 @@ export default function PrintPreview({ onClose, questions: propQuestions, existi
                 {/* QR Code — 顶部右侧固定，标题区已预留空间避免重叠 */}
                 <div className="absolute text-center" style={{ top: 24, right: 36 }}>
                   <QRCodeSVG
-                    value={qrContent || 'https://minxue.app/grading'}
+                    value={qrContent || 'https://minxue.app/retry-task'}
                     size={150}
                     level="H"
                     includeMargin={true}

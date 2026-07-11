@@ -37,6 +37,14 @@ const enhanceContrast = (imageData) => {
 const handleScanResult = async (rawValue, onScanSuccess, setScanError, setLoading) => {
   const raw = String(rawValue || '').trim()
 
+  // 错题重练任务入口 URL：https://{domain}/retry-task/<id>
+  // 扫码后只定位 task，进入「任务入口页」，不再直接进批改页
+  const urlM = raw.match(/\/retry-task\/([0-9a-fA-F-]{36})(?:[/?#]|$)/)
+  if (urlM) {
+    onScanSuccess({ retryTaskId: urlM[1].toLowerCase() })
+    return true
+  }
+
   // 新短格式：MXG:<组卷ID>（二维码只含ID，密度低易扫描）
   const m = raw.match(/^MXG:([0-9A-F]{8}-[0-9A-F]{4}-[0-9A-F]{4}-[0-9A-F]{4}-[0-9A-F]{12})$/i)
   if (m) {
