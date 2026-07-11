@@ -1893,7 +1893,18 @@ app.post('/api/admin/backfill-tags', async (req, res) => {
   if (backfillRunning) {
     return res.status(409).json({ error: '回填任务正在进行中', progress: backfillProgress })
   }
-  // 异步执行，不阻塞响应。chain=true → 小批量自动接力直至补齐。
+
+  // sync=1：在请求内同步跑完一小批再返回。free 实例空闲时事件循环几乎不给 CPU，
+  // 后台 setTimeout 接力会被冻结；把一批放进「有活跃请求」的处理器里执行，
+  // 才能保证整批拿到 CPU。由外部驱动（curl 循环 / cron）反复调用直到 remaining=0。
+  const sync = req.query.sync === '1' || req.query.sync === 'true'
+  if (sync) {
+    const limit = Math.min(Math.max(Number(req.query.limit) || 5, 1), 20)
+    const result = await runBackfillTags({ limit, trigger: 'sync', chain: false })
+    return res.json({ success: true, sync: true, ...result, progress: backfillProgress })
+  }
+
+  // 异步模式（兼容旧调用）：不阻塞响应，chain=true 小批量自动接力。
   res.json({ success: true, message: '标签回填任务已启动（小批量自动接力）' })
   runBackfillTags({ trigger: 'manual', chain: true }).catch(err => {
     console.error('[BackfillTags] 手动回填异常:', err)
