@@ -289,7 +289,16 @@ const recognizeQuestions = async (imageBase64, taskId, retryCount = 0) => {
       }
     }
 
-    const questions = result.questions?.map((q, index) => {
+    // 兼容两种返回格式：对象 {"questions": [...]} 或纯数组 [...]
+    // 部分模型（如 Qwen3-VL-30B-A3B-Instruct）会直接返回题目数组，而非包裹在 questions 字段里。
+    const questionsArray = Array.isArray(result)
+      ? result
+      : (Array.isArray(result?.questions) ? result.questions : [])
+    if (questionsArray.length === 0) {
+      console.warn(`⚠️  解析出 0 道题（result 类型: ${Array.isArray(result) ? 'array' : typeof result}，keys: ${result && !Array.isArray(result) ? Object.keys(result).join(',') : 'N/A'}）`)
+    }
+
+    const questions = questionsArray.map((q, index) => {
       const rawStudentAnswer = q.student_answer || ''
       const answerSource = determineAnswerSource(rawStudentAnswer)
       const aiAnswer = rawStudentAnswer
