@@ -12,6 +12,7 @@ import { migratePracticeCount } from './migrations/012_add_practice_count.js'
 import { migrateDifficulty } from './migrations/013_add_difficulty.js'
 import { migratePageUnderstanding } from './migrations/014_add_page_understanding.js'
 import { migrateGeometryCleanup } from './migrations/015_add_geometry_cleanup.js'
+import { migrateGeometryTikzDisplay } from './migrations/016_add_tikz_display.js'
 
 const __dirname = dirname(fileURLToPath(import.meta.url))
 dotenv.config({ path: resolve(__dirname, '.env') })
@@ -721,10 +722,11 @@ app.post('/api/questions', async (req, res) => {
 app.put('/api/questions/:id', async (req, res) => {
   try {
     const { id } = req.params
-    const { content, options, answer, analysis, status, question_type, subject, is_correct, student_answer, image_url, ai_answer, answer_source, geometry_image_url, review_status } = req.body
+    const { content, options, answer, analysis, status, question_type, subject, is_correct, student_answer, image_url, ai_answer, answer_source, geometry_image_url, review_status, display_image_type } = req.body
     const hasIsCorrect = 'is_correct' in req.body
     const hasAnswerSource = 'answer_source' in req.body && answer_source !== undefined
     const hasReviewStatus = 'review_status' in req.body
+    const hasDisplayImageType = 'display_image_type' in req.body
 
     // [P1-4b] is_correct 变更前读取旧值，用于 judgement 记录
     let oldIsCorrect = null
@@ -757,10 +759,11 @@ app.put('/api/questions/:id', async (req, res) => {
            answer_source = CASE WHEN $15 THEN $12::text ELSE answer_source END,
            geometry_image_url = COALESCE($16, geometry_image_url),
            review_status = CASE WHEN $17 THEN $18::text ELSE review_status END,
+           display_image_type = CASE WHEN $20 THEN $19::text ELSE display_image_type END,
            updated_at = NOW()
        WHERE id = $13
        RETURNING *`,
-      [n(content), n(options), n(answer), n(analysis), n(status), n(question_type), n(subject), n(is_correct), n(student_answer), n(image_url), n(ai_answer), n(answer_source), id, hasIsCorrect, hasAnswerSource, n(geometry_image_url), hasReviewStatus, n(review_status)]
+      [n(content), n(options), n(answer), n(analysis), n(status), n(question_type), n(subject), n(is_correct), n(student_answer), n(image_url), n(ai_answer), n(answer_source), id, hasIsCorrect, hasAnswerSource, n(geometry_image_url), hasReviewStatus, n(review_status), n(display_image_type), hasDisplayImageType]
     )
 
     if (rows.length === 0) return res.status(404).json({ error: '题目不存在' })
@@ -2003,6 +2006,7 @@ if (process.argv[1] === __filename || process.argv[1]?.endsWith('server/index.js
       await migrateDifficulty()
       await migratePageUnderstanding()
       await migrateGeometryCleanup()
+      await migrateGeometryTikzDisplay()
     } catch (err) {
       console.error('数据库迁移失败:', err.message)
     }

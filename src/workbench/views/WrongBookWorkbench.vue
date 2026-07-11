@@ -237,8 +237,16 @@
                     class="unified-image"
                   />
                   <div style="margin-top:6px; display:flex; justify-content:flex-end;">
-                    <el-button size="small" plain style="color:#4F46E5; border-color:#6366F1;" @click.stop="handleGenerateTikZ(selectedDetailQuestion)">
-                      生成TikZ图
+                    <template v-if="tikzStatus === 'done'">
+                      <el-button v-if="!isTikzActive" size="small" type="primary" plain @click.stop="handleUseTikz">
+                        采用TikZ图
+                      </el-button>
+                      <el-button v-else size="small" plain @click.stop="handleUseClean">
+                        显示原图
+                      </el-button>
+                    </template>
+                    <el-button v-else-if="tikzStatus === 'pending'" size="small" disabled plain>
+                      TikZ生成中...
                     </el-button>
                   </div>
                 </div>
@@ -389,6 +397,7 @@ import {
 } from '@element-plus/icons-vue'
 import { useWrongBookStore } from '../stores/wrongBookStore'
 import { getStudents, updateQuestion, rejudgeQuestion } from '../../services/apiService'
+import { getGeometryDisplayUrl, getTikzStatus } from '../../utils/geometryDisplay'
 import dayjs from 'dayjs'
 import MathRender from "../components/MathRender.vue"
 import QuestionEditForm from "../components/review/QuestionEditForm.vue"
@@ -445,6 +454,9 @@ function createEmptyForm() {
 // ===== 选中题目 =====
 const selectedDetailQuestion = ref(null)
 
+const tikzStatus = computed(() => getTikzStatus(selectedDetailQuestion.value))
+const isTikzActive = computed(() => selectedDetailQuestion.value?.display_image_type === 'tikz')
+
 const handleSelectQuestion = (wq) => {
   selectedDetailQuestion.value = wq
 }
@@ -500,7 +512,7 @@ const getQuestionSubject = (wq) => {
 
 const getQuestionThumb = (wq) => {
   const q = getQuestion(wq)
-  return q.geometry_image_url || q.image_url || q.thumbnail || wq.geometry_image_url || wq.image_url || wq.thumbnail || ''
+  return getGeometryDisplayUrl(q).url || getGeometryDisplayUrl(wq).url || ''
 }
 
 const getErrorCount = (wq) => {
@@ -736,8 +748,38 @@ const handlePrintQuestion = (wq) => {
   ElMessage.info('打印功能开发中')
 }
 
-const handleGenerateTikZ = (wq) => {
-  ElMessage.info('TikZ生成功能即将上线')
+const handleUseTikz = async () => {
+  const wq = selectedDetailQuestion.value
+  if (!wq?.id) return
+  const q = getQuestion(wq)
+  const questionId = q.id || wq.question_id || wq.id
+  if (!questionId) return
+  try {
+    await updateQuestion(questionId, { display_image_type: 'tikz' })
+    if (q) q.display_image_type = 'tikz'
+    wq.display_image_type = 'tikz'
+    ElMessage.success('已切换为TikZ图显示')
+  } catch (err) {
+    console.error('切换TikZ图失败:', err)
+    ElMessage.error('切换失败，请重试')
+  }
+}
+
+const handleUseClean = async () => {
+  const wq = selectedDetailQuestion.value
+  if (!wq?.id) return
+  const q = getQuestion(wq)
+  const questionId = q.id || wq.question_id || wq.id
+  if (!questionId) return
+  try {
+    await updateQuestion(questionId, { display_image_type: 'clean' })
+    if (q) q.display_image_type = 'clean'
+    wq.display_image_type = 'clean'
+    ElMessage.success('已切换为净化图显示')
+  } catch (err) {
+    console.error('切换净化图失败:', err)
+    ElMessage.error('切换失败，请重试')
+  }
 }
 
 // ===== 初始化 =====

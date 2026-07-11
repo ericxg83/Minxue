@@ -208,6 +208,42 @@ async function processGeometryCleaning(q, studentId) {
   } catch (error) {
     console.error(`   ⚠️ [几何净化] ${shortId}: 入库失败:`, error.message)
   }
+
+  // 6. 反范式写入 questions 表（clean_geometry_image_url 副本，避免 API JOIN）
+  if (cleanUrl) {
+    try {
+      await query(
+        `UPDATE ${TABLES.QUESTIONS}
+         SET clean_geometry_image_url = $1, updated_at = NOW()
+         WHERE id = $2`,
+        [cleanUrl, q.id]
+      )
+    } catch (error) {
+      console.warn(`   ⚠️ [几何净化] ${shortId}: questions 表写入失败:`, error.message)
+    }
+  }
+
+  // 7. 非阻塞入队 TikZ 生成任务
+  if (cleanUrl) {
+    try {
+      const { getTikzQueue } = await import('./queue.js')
+      const tq = await getTikzQueue()
+      if (tq) {
+        await tq.add('tikz-generation', {
+          questionId: q.id,
+          cleanGeometryUrl: cleanUrl
+        }, {
+          attempts: 2,
+          backoff: { type: 'exponential', delay: 10000 },
+          removeOnComplete: { count: 50 },
+          removeOnFail: { count: 20 }
+        })
+        console.log(`   [TikZ] ${shortId}: 已入队 TikZ 生成`)
+      }
+    } catch (error) {
+      console.warn(`   ⚠️ [TikZ] ${shortId}: 入队失败:`, error.message)
+    }
+  }
 }
 
 async function getImageWidth(buffer) {

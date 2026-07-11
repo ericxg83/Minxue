@@ -3,6 +3,8 @@ import { redisManager } from './redisManager.js'
 
 let taskQueue = null
 let taskWorker = null
+let tikzQueue = null
+let tikzWorker = null
 let queueInitialized = false
 let initPromise = null
 let currentConnection = null
@@ -52,6 +54,39 @@ const initQueue = async () => {
         lockDuration: parseInt(process.env.TASK_TIMEOUT_MS) || 1800000
       })
 
+      // ── TikZ 生成队列 ──
+      tikzQueue = new Queue('tikz-generation', {
+        ...queueConfig,
+        defaultJobOptions: {
+          removeOnComplete: { count: 100 },
+          removeOnFail: { count: 50 },
+          attempts: 2,
+          backoff: { type: 'exponential', delay: 10000 }
+        }
+      })
+
+      tikzWorker = new Worker('tikz-generation', async (job) => {
+        console.log(`[TikZ Worker] 收到任务: questionId=${job.data.questionId}`)
+        const { processTikzGeneration } = await import('./tikzWorker.js')
+        return processTikzGeneration(job)
+      }, {
+        connection,
+        concurrency: 2,
+        lockDuration: 600000
+      })
+
+      tikzWorker.on('completed', (job) => {
+        console.log(`✅ [TikZ Worker] 完成: questionId=${job.data.questionId}`)
+      })
+      tikzWorker.on('failed', (job, err) => {
+        console.error(`❌ [TikZ Worker] 失败: questionId=${job?.data?.questionId}, error=${err.message}`)
+      })
+      tikzWorker.on('error', (err) => {
+        // 复用同一 connection 的切换逻辑，不重复处理
+        if (err.message.includes('WRONGPASS') || err.message.includes('ECONNRESET') || err.message.includes('ETIMEDOUT')) return
+        console.error('⚠️ [TikZ Worker] 错误:', err.message)
+      })
+
       taskWorker.on('completed', (job, result) => {
         console.log(`✅ [Worker] 任务完成: jobId=${job.id}, taskId=${job.data.taskId}, result=${JSON.stringify(result)}`)
       })
@@ -97,7 +132,7 @@ const initQueue = async () => {
   return initPromise
 }
 
-export { taskQueue, taskWorker }
+export { taskQueue, taskWorker, tikzQueue, tikzWorker }
 
 export const TASK_EVENTS = {
   STARTED: 'started',
@@ -150,4 +185,18 @@ export const getTaskWorker = async () => {
     await initQueue()
   }
   return taskWorker
+}
+
+export const getTikzQueue = async () => {
+  if (!queueInitialized) {
+    await initQueue()
+  }
+  return tikzQueue
+}
+
+export const getTikzWorker = async () => {
+  if (!queueInitialized) {
+    await initQueue()
+  }
+  return tikzWorker
 }

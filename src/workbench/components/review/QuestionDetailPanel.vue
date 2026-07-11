@@ -136,8 +136,16 @@
             <div class="ops-image-wrap">
               <img :src="displayImageUrl" class="ops-image" @click="fullscreenImage = displayImageUrl" />
               <div style="display:flex; gap:6px; margin-top:4px;">
-                <el-button size="small" plain style="color:#4F46E5; border-color:#6366F1;" @click="handleGenerateTikZ">
-                  生成TikZ图
+                <template v-if="tikzStatus === 'done'">
+                  <el-button v-if="!isTikzActive" size="small" type="primary" plain @click="handleUseTikz">
+                    采用TikZ图
+                  </el-button>
+                  <el-button v-else size="small" plain @click="handleUseClean">
+                    显示原图
+                  </el-button>
+                </template>
+                <el-button v-else-if="tikzStatus === 'pending'" size="small" disabled plain>
+                  TikZ生成中...
                 </el-button>
               </div>
             </div>
@@ -243,6 +251,7 @@ import { ref, computed, watch, nextTick } from 'vue'
 import { useReviewStore } from '../../stores/reviewStore'
 import { updateQuestion, rejudgeQuestion, clearStudentCaches, uploadImage } from '../../../services/apiService'
 import { processExamImage } from '../../../utils/imageProcessor'
+import { getGeometryDisplayUrl, getTikzStatus } from '../../../utils/geometryDisplay'
 import { ElMessage, ElMessageBox, ElLoading } from 'element-plus'
 import { DocumentChecked, Delete, Plus, Upload, Picture, EditPen, ArrowLeft, ArrowRight, RefreshLeft, Crop } from '@element-plus/icons-vue'
 import MathRender from '../MathRender.vue'
@@ -290,9 +299,10 @@ const cleanOptPrefix = (text) => {
   return text.replace(/^[A-Da-d][.、)）\s]?\s*/, '')
 }
 
-const displayImageUrl = ref('')
+const displayImageUrl = computed(() => getGeometryDisplayUrl(q.value).url)
+const tikzStatus = computed(() => getTikzStatus(q.value))
+const isTikzActive = computed(() => q.value?.display_image_type === 'tikz')
 const fullscreenImage = ref('')
-watch(() => q.value?.geometry_image_url || q.value?.image_url, (url) => { displayImageUrl.value = url || '' }, { immediate: true })
 const imageUrl = computed(() => q.value?.geometry_image_url || q.value?.image_url || '')
 
 const editing = ref(false)
@@ -606,8 +616,30 @@ const deleteImage = () => {
   ElMessage.success('配图已删除')
 }
 
-const handleGenerateTikZ = () => {
-  ElMessage.info('TikZ生成功能即将上线')
+const handleUseTikz = async () => {
+  const question = q.value
+  if (!question?.id) return
+  try {
+    await updateQuestion(question.id, { display_image_type: 'tikz' })
+    question.display_image_type = 'tikz'
+    ElMessage.success('已切换为TikZ图显示')
+  } catch (err) {
+    console.error('切换TikZ图失败:', err)
+    ElMessage.error('切换失败，请重试')
+  }
+}
+
+const handleUseClean = async () => {
+  const question = q.value
+  if (!question?.id) return
+  try {
+    await updateQuestion(question.id, { display_image_type: 'clean' })
+    question.display_image_type = 'clean'
+    ElMessage.success('已切换为净化图显示')
+  } catch (err) {
+    console.error('切换净化图失败:', err)
+    ElMessage.error('切换失败，请重试')
+  }
 }
 </script>
 
