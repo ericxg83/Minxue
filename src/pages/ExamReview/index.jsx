@@ -1,7 +1,7 @@
 import { useState, useEffect, useMemo, useRef, useCallback } from 'react'
 import {
   ArrowLeft, ChevronLeft, ChevronRight, CheckCircle2, XCircle,
-  Save, Loader2, AlertTriangle, UserCheck, Clock, Trash2,
+  Save, Loader2, AlertTriangle, Clock, Trash2,
   ChevronUp, ChevronDown
 } from 'lucide-react'
 import { useWrongQuestionStore } from '../../store'
@@ -58,45 +58,79 @@ const getStatusInfo = (q) => {
     }
   }
 
-  const answerSource = q.answer_source || 'recognized'
-  const isBlank = answerSource === 'blank'
+  const confidence = q.confidence != null ? q.confidence : 0
 
-  // 2. 未作答 — 学生未作答
-  if (isBlank && q.is_correct === null) {
+  // 2. 紫灰：处理中 — AI任务尚未完成（confidence=0，无 student_answer，非 blank）
+  if (confidence === 0 && !q.student_answer && q.answer_source !== 'blank') {
     return {
-      bg: 'var(--warning-soft)', color: COLORS.warning,
-      text: '未作答', icon: AlertTriangle,
-      isGreyed: false, source: 'not_answered'
+      bg: '#E5E7EB', color: '#9CA3AF',
+      text: '处理中', icon: Clock,
+      isGreyed: true, source: 'processing'
     }
   }
 
-  // 3. 正确 — AI或人工判定正确
-  if (q.is_correct === true) {
-    const source = q.status === 'correct' ? 'human' : 'ai'
+  // 3. 橙色：AI异常 — OCR失败 / 未作答 / 数据缺失
+  if (q.answer_source === 'blank' || q.is_correct === null) {
     return {
-      bg: source === 'human' ? 'var(--success-soft)' : 'var(--success-soft)',
-      color: source === 'human' ? 'var(--success)' : COLORS.success,
-      text: source === 'human' ? '已打勾' : 'AI判定正确',
-      icon: source === 'human' ? UserCheck : CheckCircle2,
-      isGreyed: source === 'human',
-      source
+      bg: '#FFF3E0', color: '#F97316',
+      text: q.answer_source === 'blank' ? '未作答' : 'AI异常',
+      icon: AlertTriangle,
+      isGreyed: false, source: 'error'
     }
   }
 
-  // 4. 错误 — AI判定错误
-  if (q.is_correct === false) {
-    return {
-      bg: 'var(--danger-soft)', color: COLORS.danger,
-      text: 'AI判定错误', icon: XCircle, source: 'ai_wrong'
+  // 4. AI 高置信度（>= 90%）— 绿色正确 / 红色错误
+  if (confidence >= 0.9) {
+    if (q.is_correct === true) {
+      return {
+        bg: 'var(--success-soft)', color: COLORS.success,
+        text: 'AI正确', icon: CheckCircle2,
+        isGreyed: false, source: 'ai_correct'
+      }
+    }
+    if (q.is_correct === false) {
+      return {
+        bg: 'var(--danger-soft)', color: COLORS.danger,
+        text: 'AI错误', icon: XCircle,
+        isGreyed: false, source: 'ai_wrong'
+      }
     }
   }
 
-  // 5. 未批改 — AI无法判定/待人工复审
+  // 5. 黄色：AI不确定 — 置信度不足，需人工复核
   return {
-    bg: 'var(--primary-soft)', color: 'var(--primary)',
-    text: '未批改 / 待复审', icon: Clock, source: 'pending'
+    bg: 'var(--warning-soft)', color: COLORS.warning,
+    text: '待人工复核', icon: Clock,
+    isGreyed: false, source: 'uncertain'
   }
 }
+
+// 圆点颜色映射
+const DOT_COLORS = {
+  ai_correct: COLORS.success,
+  ai_wrong: COLORS.danger,
+  uncertain: COLORS.warning,
+  error: '#F97316',
+  processing: '#9CA3AF',
+  excluded: '#9CA3AF',
+  unknown: '#9CA3AF'
+}
+
+// 统计标签组件
+const StatChip = ({ label, count, color, bg }) => (
+  <div style={{
+    display: 'inline-flex', alignItems: 'center', gap: '3px',
+    padding: '2px 8px', borderRadius: '10px',
+    background: bg, color, fontSize: '11px', fontWeight: 600,
+    whiteSpace: 'nowrap'
+  }}>
+    <span style={{
+      display: 'inline-block', width: 7, height: 7, borderRadius: '50%',
+      background: color
+    }} />
+    {label} {count}
+  </div>
+)
 
 // ── 主组件 ──
 export default function ExamReview({ task, onClose, onSave }) {
@@ -418,6 +452,16 @@ export default function ExamReview({ task, onClose, onSave }) {
   const statusInfo = useMemo(() => getStatusInfo(currentQuestion), [currentQuestion])
   const geoImageUrl = currentQuestion?.geometry_image_url || currentQuestion?.enhanced_geometry_image
 
+  // ── 统计各状态数量 ──
+  const stats = useMemo(() => {
+    const counts = { uncertain: 0, error: 0, ai_correct: 0, ai_wrong: 0, processing: 0, excluded: 0 }
+    validQuestions.forEach(q => {
+      const info = getStatusInfo(q)
+      if (counts[info.source] !== undefined) counts[info.source]++
+    })
+    return counts
+  }, [validQuestions])
+
   // ── 条件渲染 (所有 hooks 之后) ──
   if (loading) {
     return (
@@ -531,20 +575,9 @@ export default function ExamReview({ task, onClose, onSave }) {
                   background: (() => {
                     if (isCurrent) return COLORS.primary
                     const s = getStatusInfo(q)
-                    return s.source === 'ai' || s.source === 'human'
-                      ? (q.is_correct === true ? 'var(--success)' : 'var(--danger)')
-                      : s.source === 'not_answered' ? 'var(--warning)'
-                      : s.source === 'excluded' ? 'var(--text-tertiary)'
-                      : s.bg
+                    return DOT_COLORS[s.source] || COLORS.warning
                   })(),
-                  color: isCurrent ? '#fff' : (() => {
-                    const s = getStatusInfo(q)
-                    return s.source === 'ai' || s.source === 'human'
-                      ? (q.is_correct === true ? 'var(--success)' : 'var(--danger)')
-                      : s.source === 'not_answered' ? 'var(--warning)'
-                      : s.source === 'excluded' ? 'var(--text-tertiary)'
-                      : s.color
-                  })(),
+                  color: '#fff',
                   fontSize: isCurrent ? 15 : 13,
                   fontWeight: 700,
                   display: 'flex',
@@ -606,6 +639,20 @@ export default function ExamReview({ task, onClose, onSave }) {
           borderRadius: 2, }} />
         </div>
 
+        {/* ── 顶部统计 ── */}
+        <div style={{
+          position: 'relative', zIndex: 1,
+          padding: '6px 12px',
+          display: 'flex', flexWrap: 'wrap', gap: '6px',
+          borderBottom: `1px solid ${COLORS.border}`,
+          flexShrink: 0
+        }}>
+          <StatChip label="待人工复核" count={stats.uncertain} color={COLORS.warning} bg="#FEF3C7" />
+          <StatChip label="AI异常" count={stats.error} color="#F97316" bg="#FFF3E0" />
+          <StatChip label="AI正确" count={stats.ai_correct} color={COLORS.success} bg="#DCFCE7" />
+          <StatChip label="AI错误" count={stats.ai_wrong} color={COLORS.danger} bg="#FEE2E2" />
+        </div>
+
         {/* ── 题号导航条 ── */}
         <div style={{
           position: 'relative', zIndex: 1,
@@ -616,22 +663,22 @@ export default function ExamReview({ task, onClose, onSave }) {
         }}>
           {validQuestions.map((q, i) => {
             const info = getStatusInfo(q)
-            let bg = COLORS.warning
-            if (q.is_correct === true) bg = info.isGreyed ? '#D1FAE5' : COLORS.success
-            else if (q.is_correct === false) bg = COLORS.danger
-            if (i === currentIndex) bg = COLORS.primary
+            const dotColor = DOT_COLORS[info.source] || COLORS.warning
+            const isCurrent = i === currentIndex
             return (
               <button
                 key={q.id}
                 onClick={() => jumpToQuestion(i)}
+                title={info.text}
                 style={{
                   minWidth: '32px', height: '32px', borderRadius: '16px',
-                  background: bg, color: '#fff', border: 'none',
+                  background: isCurrent ? COLORS.primary : dotColor,
+                  color: '#fff', border: 'none',
                   fontSize: '13px', fontWeight: 600, cursor: 'pointer',
                   flexShrink: 0, display: 'flex', alignItems: 'center', justifyContent: 'center',
                   transition: 'transform 0.15s',
-                  transform: i === currentIndex ? 'scale(1.15)' : 'scale(1)',
-                  opacity: info.isGreyed ? 0.7 : 1
+                  transform: isCurrent ? 'scale(1.15)' : 'scale(1)',
+                  opacity: info.isGreyed ? 0.6 : 1
                 }}
               >
                 {i + 1}
@@ -665,7 +712,8 @@ export default function ExamReview({ task, onClose, onSave }) {
               )}
               <span style={{ fontSize: '12px', color: COLORS.textSecondary }}>
                 {currentQuestion?.question_type === 'choice' ? '选择题' :
-                 currentQuestion?.question_type === 'fill' ? '填空题' : '解答题'}
+                 currentQuestion?.question_type === 'fill' ? '填空题' :
+                 currentQuestion?.question_type === 'judge' ? '判断题' : '解答题'}
               </span>
             </div>
             <div style={{

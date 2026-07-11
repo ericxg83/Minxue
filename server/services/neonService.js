@@ -64,6 +64,7 @@ export const createQuestions = async (questions) => {
       question_number: q.question_number ?? null,
       text_bbox: q.text_bbox ? JSON.stringify(q.text_bbox) : null,
       image_type: q.image_type || null,
+      confidence: q.confidence ?? 0,
       is_complete: checkQuestionCompleteness(q).isComplete,
       created_at: new Date().toISOString()
     }
@@ -624,17 +625,24 @@ export const updateQuestionAssetTikz = async (assetId, upd) => {
 /**
  * 更新题目的几何图净化层数据
  * @param {string} questionId
- * @param {Object} data - { clean_geometry_image_url, geometry_crop_type }
+ * @param {Object} data - { clean_geometry_image_url, clean_geometry_svg, geometry_crop_type, geometry_structure_json }
  */
 export const updateQuestionAssetCleanData = async (questionId, data) => {
-  const { clean_geometry_image_url, clean_geometry_svg, geometry_crop_type } = data
+  const { clean_geometry_image_url, clean_geometry_svg, geometry_crop_type, geometry_structure_json } = data
   await query(
     `UPDATE ${TABLES.QUESTION_ASSETS}
      SET clean_geometry_image_url = COALESCE($1, clean_geometry_image_url),
          clean_geometry_svg = COALESCE($2, clean_geometry_svg),
          geometry_crop_type = COALESCE($3, geometry_crop_type),
+         geometry_structure_json = COALESCE($4::jsonb, geometry_structure_json),
          updated_at = NOW()
-     WHERE question_id = $4`,
-    [clean_geometry_image_url || null, clean_geometry_svg || null, geometry_crop_type || null, questionId]
+     WHERE question_id = $5`,
+    [
+      clean_geometry_image_url || null,
+      clean_geometry_svg || null,
+      geometry_crop_type || null,
+      geometry_structure_json != null ? JSON.stringify(geometry_structure_json) : null,
+      questionId
+    ]
   )
 }
