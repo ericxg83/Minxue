@@ -1749,9 +1749,28 @@ const BACKFILL_WHERE = `q.is_complete = TRUE
            OR q.difficulty IS NULL
          )`
 
+/** 把题目 options 归一化成字符串数组：兼容数组 / JSON字符串 / 对象 / null */
+function normalizeOptionsToArray(raw) {
+  if (raw == null) return []
+  if (Array.isArray(raw)) return raw
+  if (typeof raw === 'string') {
+    const s = raw.trim()
+    if (!s) return []
+    try {
+      const parsed = JSON.parse(s)
+      if (Array.isArray(parsed)) return parsed
+      if (parsed && typeof parsed === 'object') return Object.values(parsed)
+      return [String(parsed)]
+    } catch {
+      return [s]
+    }
+  }
+  if (typeof raw === 'object') return Object.values(raw)
+  return [String(raw)]
+}
+
 /** 统计当前仍待回填的题目总数（全局，跨批次） */
-async function countBackfillRemaining() {
-  const { rows } = await query(
+async function countBackfillRemaining() {  const { rows } = await query(
     `SELECT COUNT(*)::int AS n FROM ${TABLES.QUESTIONS} q WHERE ${BACKFILL_WHERE}`
   )
   return rows[0]?.n ?? 0
@@ -1800,11 +1819,12 @@ async function runBackfillTags({ limit = 20, trigger = 'manual', chain = false }
     for (let i = 0; i < questions.length; i++) {
       const q = questions[i]
       const content = q.content || ''
-      const options = (q.options || []).join('；')
+      // options 可能是数组、JSON 字符串、对象或 null（不同来源/历史数据不一致）——统一成数组
+      const options = normalizeOptionsToArray(q.options).join('；')
       const fullContent = options ? `${content}\n选项：${options}` : content
       const subject = q.subject || null
 
-      const shortId = q.id.substring(0, 8)
+      const shortId = String(q.id).substring(0, 8)
       backfillProgress.detail = `[${i + 1}/${questions.length}] ${shortId}`
 
       try {
