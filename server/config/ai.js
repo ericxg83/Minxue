@@ -15,14 +15,15 @@ export const AI_CONFIG = {
 
 /** 视觉模型列表（OCR 识别用）
  *  第一个优先取环境变量 AI_MODEL / VL_MODEL，方便线上快速切换而无需改代码；
- *  其余为 ModelScope 当前可用的候选，模型下线（400 no provider）时自动向后轮换。
+ *  其余为 ModelScope 当前可用的候选，模型下线（400 no provider）或配额耗尽时自动向后轮换。
  *  注意：数组内去重，避免环境变量与候选重复导致轮换空转。
- *  ⚠️ 2026-07 实测：ModelScope 免费在线推理仅 Qwen3-VL-8B 可用，
- *     Qwen2.5-VL 的 7B/32B/72B 均 "has no provider supported"，故候选只保留 8B。
+ *  ⚠️ 2026-07 实测：ModelScope 免费在线推理仅 Qwen3-VL 系列可用，
+ *     Qwen2.5-VL 及非 Qwen 模型均 "has no provider supported"。
  *     平台日后恢复其他模型时，改 Render 环境变量 AI_MODEL 即可，无需改代码。 */
 export const VL_MODELS = [...new Set([
   process.env.AI_MODEL,
   process.env.VL_MODEL,
+  'Qwen/Qwen3-VL-30B-A3B-Instruct',
   'Qwen/Qwen3-VL-8B-Instruct',
 ].filter(Boolean))]
 
