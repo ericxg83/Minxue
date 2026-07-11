@@ -10,8 +10,8 @@ import axios from 'axios'
 import sharp from 'sharp'
 import { TABLES, TASK_STATUS } from './config/neon.js'
 import { query } from './config/neon.js'
-import { AI_CONFIG, getAIHeaders, buildOCRPrompt, buildTaggingPrompt, buildAnswerGenerationPrompt, getCurrentTextModel, getCurrentVLModel, rotateTextModel, rotateVLModel, TEXT_MODELS, VL_MODELS, callTextCompletion, callVisionCompletion } from './config/ai.js'
-import { updateTaskStatus, createQuestions, batchUpdateQuestionTags, addWrongQuestions, createJudgement, getLatestJudgement, updateQuestionAnswer, markAnswerException, findCachedQuestionByFingerprint, findSimilarQuestion, cacheQuestion, incrementQuestionUseCount, updateQuestionCacheId, createQuestionAsset } from './services/neonService.js'
+import { AI_CONFIG, getAIHeaders, buildOCRPrompt, buildTaggingPrompt, buildAnswerGenerationPrompt, buildGeometryStructurePrompt, getCurrentTextModel, getCurrentVLModel, rotateTextModel, rotateVLModel, TEXT_MODELS, VL_MODELS, callTextCompletion, callVisionCompletion } from './config/ai.js'
+import { updateTaskStatus, createQuestions, batchUpdateQuestionTags, addWrongQuestions, createJudgement, getLatestJudgement, updateQuestionAnswer, markAnswerException, findCachedQuestionByFingerprint, findSimilarQuestion, cacheQuestion, incrementQuestionUseCount, updateQuestionCacheId, createQuestionAsset, updateQuestionAssetCleanData } from './services/neonService.js'
 import { uploadImage } from './services/ossService.js'
 import { generateTextFingerprint, generatePHash, PARSER_VERSION, TEXT_SIMILARITY_THRESHOLD } from './utils/questionFingerprint.js'
 import { uploadFilesWithRetry } from './services/uploadRetryManager.js'
@@ -54,6 +54,159 @@ async function cropAndUploadGeometryImage(imageBuffer, bbox, studentId, question
   } catch (error) {
     console.error(`  ⚠️ [几何图] 裁剪上传失败:`, error.message)
     return null
+  }
+}
+
+/**
+ * 从 URL 下载图片为 Buffer
+ * @param {string} url
+ * @returns {Promise<Buffer|null>}
+ */
+async function downloadImageBuffer(url) {
+  try {
+    const resp = await axios.get(url, { responseType: 'arraybuffer', timeout: 30000 })
+    return Buffer.from(resp.data)
+  } catch (error) {
+    console.error(`   ⚠️ [下载] 图片下载失败: ${error.message}`)
+    return null
+  }
+}
+
+/**
+ * 几何图净化：使用 Sharp 将裁剪后的几何图处理为白底黑线的干净版本。
+ *
+ * 处理流程：
+ * 1. 灰度化 — 去除彩色信息（手写红笔、彩色标注等）
+ * 2. 自适应对比度拉伸 — 增强线条/文字与背景的区分度
+ * 3. 二值化阈值 — 转为纯黑白，去除非几何噪点
+ * 4. 反相（若需要）— 确保白底黑线
+ *
+ * 目标效果：
+ * - 白色或浅色背景
+ * - 黑色几何线条（实线/虚线/弧线）
+ * - 保留几何标签文字（A/B/C/D、角度标记、长度标记）
+ * - 去除手写痕迹、非几何文字、涂鸦
+ *
+ * @param {Buffer} imageBuffer - 原始裁剪几何图
+ * @returns {Promise<Buffer>} 净化后的图片 Buffer（PNG 格式）
+ */
+async function cleanGeometryImage(imageBuffer) {
+  // 1. 灰度化 + 归一化对比度 + 二值化阈值
+  const cleaned = await sharp(imageBuffer)
+    .grayscale()                      // 转灰度，去除颜色信息
+    .normalize()                      // 拉伸对比度到全范围
+    .threshold(128)                   // 二值化：>128 变白，≤128 变黑
+    .png()                            // 无损 PNG 输出
+    .toBuffer()
+  return cleaned
+}
+
+/**
+ * 对净化后的几何图进行 VL 视觉分析，提取几何结构 JSON。
+ *
+ * 调用 callVisionCompletion 将净化图发给视觉模型，让模型识别：
+ * - 顶点标签（A/B/C/D 等）
+ * - 线段、圆、弧
+ * - 角度标记、长度标记
+ * - 对称性、图形类型
+ *
+ * @param {Buffer} cleanImageBuffer - 净化后的几何图 buffer
+ * @param {string} questionId - 题目 ID（用于日志）
+ * @returns {Promise<Object|null>} 几何结构 JSON 或 null
+ */
+async function analyzeGeometryStructure(cleanImageBuffer, questionId) {
+  try {
+    // 将 buffer 转为 data URL（PNG base64）
+    const base64 = cleanImageBuffer.toString('base64')
+    const dataURL = `data:image/png;base64,${base64}`
+
+    const result = await callVisionCompletion({
+      imageDataURL: dataURL,
+      systemPrompt: buildGeometryStructurePrompt(),
+      userText: '请分析这个几何图形的结构，返回JSON格式的结果。',
+      temperature: 0.2,
+      maxTokens: 4096
+    })
+
+    const rawContent = result.content
+    // 提取 JSON（兼容模型可能输出额外文字）
+    const jsonMatch = rawContent.match(/\{[\s\S]*\}/)
+    if (!jsonMatch) {
+      console.warn(`   ⚠️ [几何结构] ${questionId.substring(0, 8)}: 未找到有效的 JSON 输出`)
+      return null
+    }
+
+    const parsed = JSON.parse(jsonMatch[0])
+    if (!parsed.type || parsed.type === 'unknown') {
+      console.warn(`   ⚠️ [几何结构] ${questionId.substring(0, 8)}: 无法识别几何结构（type=${parsed.type}）`)
+    }
+    return parsed
+  } catch (error) {
+    console.error(`   ⚠️ [几何结构] ${questionId.substring(0, 8)} 分析失败:`, error.message)
+    return null
+  }
+}
+
+/**
+ * 处理单个几何图的净化层流水线：下载 → 净化 → 上传 → 结构分析 → 入库
+ *
+ * @param {Object} q - 题目对象（含 geometry_image_url、id）
+ * @param {string} studentId - 学生 ID
+ */
+async function processGeometryCleaning(q, studentId) {
+  if (!q.geometry_image_url) return
+
+  const shortId = q.id.substring(0, 8)
+  console.log(`   [几何净化] ${shortId}: 开始处理...`)
+
+  // 1. 下载裁剪好的几何图
+  const rawBuffer = await downloadImageBuffer(q.geometry_image_url)
+  if (!rawBuffer) {
+    console.warn(`   ⚠️ [几何净化] ${shortId}: 下载失败，跳过`)
+    return
+  }
+
+  // 2. Sharp 净化
+  let cleanBuffer
+  try {
+    cleanBuffer = await cleanGeometryImage(rawBuffer)
+    console.log(`   [几何净化] ${shortId}: Sharp 净化完成 (${rawBuffer.length} → ${cleanBuffer.length} bytes)`)
+  } catch (error) {
+    console.error(`   ⚠️ [几何净化] ${shortId}: 净化失败:`, error.message)
+    return
+  }
+
+  // 3. 上传净化图到 OSS
+  const cleanFileName = `geometry_clean_${studentId}_${q.id}.png`
+  let cleanUrl = null
+  try {
+    cleanUrl = await uploadImage(cleanBuffer, cleanFileName, studentId)
+    console.log(`   [几何净化] ${shortId}: 净化图上传 → ${cleanUrl}`)
+  } catch (error) {
+    console.error(`   ⚠️ [几何净化] ${shortId}: 上传失败:`, error.message)
+    // 继续做结构分析，不上传也可以分析
+  }
+
+  // 4. VL 模型分析几何结构
+  let structureJson = null
+  try {
+    structureJson = await analyzeGeometryStructure(cleanBuffer, q.id)
+    if (structureJson) {
+      console.log(`   [几何结构] ${shortId}: type=${structureJson.type}, points=${(structureJson.points || []).length}, lines=${(structureJson.lines || []).length}`)
+    }
+  } catch (error) {
+    console.error(`   ⚠️ [几何结构] ${shortId}: 结构分析失败:`, error.message)
+  }
+
+  // 5. 存入 question_assets 表
+  try {
+    await updateQuestionAssetCleanData(q.id, {
+      clean_geometry_image_url: cleanUrl,
+      geometry_structure_json: structureJson
+    })
+    console.log(`   [几何净化] ${shortId}: 数据入库成功`)
+  } catch (error) {
+    console.error(`   ⚠️ [几何净化] ${shortId}: 入库失败:`, error.message)
   }
 }
 
@@ -1174,6 +1327,8 @@ export const processTask = async (job) => {
         const hasLegacyImage = q.geometry_image?.has_image && q.geometry_image.bbox
         const imageBbox = q.image_bbox || (q.geometry_image?.bbox || null)
         const imageType = q.image_type || (hasLegacyImage ? 'geometry' : null)
+        // 确保 q.image_type 在后续步骤（如几何图净化层）中可读
+        if (!q.image_type && imageType) q.image_type = imageType
 
         if (hasImage || hasLegacyImage) {
           const bbox = imageBbox
@@ -1229,6 +1384,26 @@ export const processTask = async (job) => {
       }
       if (assetCount > 0) {
         console.log(`   ✅ [question_assets] 已保存 ${assetCount} 条资源记录（其中 geometry 类型标记为 tikz_status=pending）`)
+      }
+
+      // ── 几何图净化层：截图 → 干净几何图 → 几何结构JSON ──
+      // 对每道有几何配图的题目，执行：
+      //   1. 下载裁剪后的几何图
+      //   2. Sharp 净化（灰度 + 二值化 → 白底黑线）
+      //   3. 上传净化图到 OSS
+      //   4. VL 模型分析几何结构（点、线、标签等）
+      //   5. 存入 question_assets 表
+      // 设计为"尽力而为"：任一环节失败不阻塞主流程，仅记录日志。
+      const geometryCleaningPromises = questions
+        .filter(q => q.geometry_image_url && q.image_type !== 'chart')
+        .map(q => processGeometryCleaning(q, studentId).catch(err => {
+          console.error(`   ⚠️ [几何净化] ${q.id.substring(0, 8)} 处理异常:`, err.message)
+        }))
+
+      if (geometryCleaningPromises.length > 0) {
+        console.log(`📊 [几何图净化层] 开始处理 ${geometryCleaningPromises.length} 张几何图...`)
+        await Promise.allSettled(geometryCleaningPromises)
+        console.log(`✅ [几何图净化层] 完成`)
       }
 
       // [P0-1] 初始错题同步 — 仅当 OCR 有参考答案且判错时才同步

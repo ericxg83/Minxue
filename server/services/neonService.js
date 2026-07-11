@@ -620,3 +620,20 @@ export const updateQuestionAssetTikz = async (assetId, upd) => {
     [tikz_code || null, tikz_status || null, assetId]
   )
 }
+
+/**
+ * 更新题目的几何图净化层数据
+ * @param {string} questionId
+ * @param {Object} data - { clean_geometry_image_url, geometry_structure_json }
+ */
+export const updateQuestionAssetCleanData = async (questionId, data) => {
+  const { clean_geometry_image_url, geometry_structure_json } = data
+  await query(
+    `UPDATE ${TABLES.QUESTION_ASSETS}
+     SET clean_geometry_image_url = COALESCE($1, clean_geometry_image_url),
+         geometry_structure_json = COALESCE($2, geometry_structure_json),
+         updated_at = NOW()
+     WHERE question_id = $3`,
+    [clean_geometry_image_url || null, geometry_structure_json ? JSON.stringify(geometry_structure_json) : null, questionId]
+  )
+}

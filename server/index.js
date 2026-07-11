@@ -11,6 +11,7 @@ import { migrateIsComplete } from './migrations/011_add_is_complete.js'
 import { migratePracticeCount } from './migrations/012_add_practice_count.js'
 import { migrateDifficulty } from './migrations/013_add_difficulty.js'
 import { migratePageUnderstanding } from './migrations/014_add_page_understanding.js'
+import { migrateGeometryCleanup } from './migrations/015_add_geometry_cleanup.js'
 
 const __dirname = dirname(fileURLToPath(import.meta.url))
 dotenv.config({ path: resolve(__dirname, '.env') })
@@ -2001,6 +2002,7 @@ if (process.argv[1] === __filename || process.argv[1]?.endsWith('server/index.js
       await migratePracticeCount()
       await migrateDifficulty()
       await migratePageUnderstanding()
+      await migrateGeometryCleanup()
     } catch (err) {
       console.error('数据库迁移失败:', err.message)
     }

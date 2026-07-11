@@ -455,3 +455,64 @@ export const buildTaggingPrompt = (subject = null) => {
   "difficulty": 3
 }`
 }
+
+/**
+ * 构建几何结构分析 prompt — 用于从净化的几何图中提取抽象结构（点、线、标签）。
+ *
+ * 输入：经过 Sharp 净化处理后的几何图（白底黑线，去除非几何文字/手写痕迹）
+ * 输出：结构化的几何描述 JSON
+ */
+export const buildGeometryStructurePrompt = () => `你是一个专业的几何图形结构分析助手。请分析给定的几何图形，提取其中的几何结构信息。
+
+注意：图中的文字标注已尽量保留（几何标签如A、B、C、D等顶点字母；角度标记如30°、45°；长度标记如2cm、3cm等）。
+请忽略任何残留的非几何文字（如题目编号、页码、水印痕迹等），只关注几何图形本身的结构。
+
+请按以下 JSON 格式返回分析结果（只返回 JSON，不要包含其他文字）：
+{
+  "type": "triangle/quadrilateral/circle/polygon/composite/unknown",
+  "points": [
+    {"name": "A", "description": "顶点A"},
+    {"name": "B", "description": "顶点B"},
+    {"name": "C", "description": "顶点C"},
+    {"name": "O", "description": "圆心O"}
+  ],
+  "lines": [
+    {"from": "A", "to": "B", "type": "solid/dashed/dotted", "description": "边AB"},
+    {"from": "B", "to": "C", "type": "solid", "description": "边BC"}
+  ],
+  "circles": [
+    {"center": "O", "radius_point": "A", "description": "以O为圆心、OA为半径的圆"}
+  ],
+  "angles": [
+    {"vertex": "B", "arms": ["A", "C"], "value": "90°", "description": "直角∠ABC"}
+  ],
+  "labels": [
+    {"text": "30°", "position": "near B", "description": "角度标注"},
+    {"text": "2cm", "position": "on AB", "description": "长度标注"},
+    {"text": "a", "position": "on BC", "description": "边长变量"}
+  ],
+  "shape_count": 1,
+  "symmetry": "none/vertical/horizontal/radial",
+  "description": "简要描述图形的整体结构和已知条件"
+}
+
+字段说明：
+- type: 图形类型。triangle=三角形, quadrilateral=四边形, circle=圆形, polygon=多边形, composite=组合图形, unknown=无法确定
+- points: 图中所有顶点/关键点，name 为标签字母或自定义名称
+- lines: 所有线段/边。from/to 引用 points 中的 name，type 表示线型
+- circles: 所有圆（包括圆弧）。center/radius_point 引用 points 中的 name
+- angles: 所有角度标记或隐含的角度关系。value 尽可能提取数值，未知角度留空字符串
+- labels: 图中所有文字标注（角度值、长度、变量名等）
+- shape_count: 图中基本几何图形的数量
+- symmetry: 对称性
+- description: 整体描述，包括已知条件和几何关系
+
+识别要点：
+1. 仔细识别所有顶点字母标签（A、B、C、D、E、F、O、P、Q等），它们通常位于线的端点或交点附近
+2. 识别所有线段，注意区分实线和虚线
+3. 识别角度标记（弧线+数字或字母）
+4. 识别长度标记（数字+单位，或变量如a、b、x）
+5. 识别直角标记（正方形小框）
+6. 识别平行/垂直标记（箭头或小线段）
+7. 如果是组合图形，type 用 "composite" 并描述各组成部分
+8. 如果图中无有效几何结构（纯文字、非几何图），type 填 "unknown"，其他数组为空`
