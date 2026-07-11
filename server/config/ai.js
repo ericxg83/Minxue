@@ -13,11 +13,18 @@ export const AI_CONFIG = {
 // ── AI 模型轮换机制 ──
 // ModelScope 免费模型每日有配额限制，单个模型耗尽时自动切换到其他模型
 
-/** 视觉模型列表（OCR 识别用） */
-export const VL_MODELS = [
+/** 视觉模型列表（OCR 识别用）
+ *  第一个优先取环境变量 AI_MODEL / VL_MODEL，方便线上快速切换而无需改代码；
+ *  其余为 ModelScope 当前可用的候选，模型下线（400 no provider）时自动向后轮换。
+ *  注意：数组内去重，避免环境变量与候选重复导致轮换空转。
+ *  ⚠️ 2026-07 实测：ModelScope 免费在线推理仅 Qwen3-VL-8B 可用，
+ *     Qwen2.5-VL 的 7B/32B/72B 均 "has no provider supported"，故候选只保留 8B。
+ *     平台日后恢复其他模型时，改 Render 环境变量 AI_MODEL 即可，无需改代码。 */
+export const VL_MODELS = [...new Set([
+  process.env.AI_MODEL,
+  process.env.VL_MODEL,
   'Qwen/Qwen3-VL-8B-Instruct',
-  'Qwen/Qwen2.5-VL-7B-Instruct',
-]
+].filter(Boolean))]
 
 /** 文本模型列表（答案生成、标签生成用） */
 export const TEXT_MODELS = [
@@ -175,6 +182,101 @@ export async function callTextCompletion(opts) {
       return { content, usedBackup: true }
     } catch (backupErr) {
       console.error(`❌ [AI] 备用 API 也失败：${backupErr.message}`)
+      throw backupErr
+    }
+  }
+}
+
+/**
+ * 发起一次「视觉（多模态）」聊天补全请求，内置"主 API → 备用 API"回退。
+ *
+ * 与 callTextCompletion 的差异：user 消息走多模态 content 数组（image_url + text）。
+ *
+ * @param {{imageDataURL:string, systemPrompt:string, userText:string, temperature?:number, maxTokens?:number, model?:string}} opts
+ * @returns {Promise<{content:string, usedBackup:boolean}>}
+ * @throws 主、备均失败时抛出最后一个错误（含 axios error，供调用方读取 error.response.status）
+ *
+ * 设计要点：
+ * - 仅在「配额/限流(429)」或「主 Key 缺失」时才回退备用；
+ * - 其它错误（如 400 "no provider supported" 模型下线）直接抛出，
+ *   由 worker 侧的 VL 模型轮换逻辑处理，保持本函数职责单一。
+ */
+export async function callVisionCompletion(opts) {
+  const {
+    imageDataURL,
+    systemPrompt,
+    userText = '请识别这张作业图片中的所有题目，并返回JSON格式结果。',
+    temperature = 0.3,
+    maxTokens = 8192,
+    model
+  } = opts
+
+  const buildMessages = () => ([
+    { role: 'system', content: systemPrompt },
+    {
+      role: 'user',
+      content: [
+        { type: 'image_url', image_url: { url: imageDataURL } },
+        { type: 'text', text: userText }
+      ]
+    }
+  ])
+
+  // 1. 主 API（ModelScope）
+  const primaryBody = {
+    model: model || getCurrentVLModel(),
+    messages: buildMessages(),
+    temperature,
+    max_tokens: maxTokens
+  }
+  try {
+    const resp = await axios.post(AI_CONFIG.ENDPOINT, primaryBody, {
+      headers: getAIHeaders(),
+      timeout: AI_CONFIG.TIMEOUT
+    })
+    const content = resp.data?.choices?.[0]?.message?.content
+    if (!content) throw new Error('AI 返回内容为空')
+    return { content, usedBackup: false }
+  } catch (primaryErr) {
+    const status = primaryErr.response?.status
+    const isQuota = status === 429
+    const primaryKeyMissing = !AI_CONFIG.API_KEY
+
+    // 仅配额/限流或 Key 缺失才回退备用；其它错误（如 400 模型下线）交给上层轮换。
+    if (!isQuota && !primaryKeyMissing) {
+      throw primaryErr
+    }
+    if (!BACKUP_CONFIG.ENABLED) {
+      console.warn(`⚠️ [AI-Vision] 主 API 配额耗尽但未配置备用 API，放弃回退`)
+      throw primaryErr
+    }
+
+    console.warn(`⚠️ [AI-Vision] 主 API${isQuota ? '（429 配额耗尽）' : '（Key 缺失）'}，回退备用视觉 API...`)
+
+    // 2. 备用 API
+    const backupBody = {
+      model: model || BACKUP_CONFIG.VL_MODEL,
+      messages: buildMessages(),
+      temperature,
+      max_tokens: maxTokens,
+      ...(BACKUP_CONFIG.DISABLE_REASONING ? { reasoning: { enabled: false } } : {})
+    }
+    try {
+      const resp = await _backupAxios.post(BACKUP_CONFIG.ENDPOINT, backupBody, {
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${BACKUP_CONFIG.API_KEY}`,
+          'HTTP-Referer': 'https://minxue.edu',
+          'X-Title': 'Minxue'
+        },
+        timeout: AI_CONFIG.TIMEOUT
+      })
+      const content = resp.data?.choices?.[0]?.message?.content
+      if (!content) throw new Error('备用 AI 返回内容为空')
+      console.log(`✅ [AI-Vision] 备用 API 调用成功（${model || BACKUP_CONFIG.VL_MODEL}）`)
+      return { content, usedBackup: true }
+    } catch (backupErr) {
+      console.error(`❌ [AI-Vision] 备用视觉 API 也失败：${backupErr.message}`)
       throw backupErr
     }
   }

@@ -10,7 +10,7 @@ import axios from 'axios'
 import sharp from 'sharp'
 import { TABLES, TASK_STATUS } from './config/neon.js'
 import { query } from './config/neon.js'
-import { AI_CONFIG, getAIHeaders, buildOCRPrompt, buildTaggingPrompt, buildAnswerGenerationPrompt, getCurrentTextModel, getCurrentVLModel, rotateTextModel, rotateVLModel, TEXT_MODELS, VL_MODELS, callTextCompletion } from './config/ai.js'
+import { AI_CONFIG, getAIHeaders, buildOCRPrompt, buildTaggingPrompt, buildAnswerGenerationPrompt, getCurrentTextModel, getCurrentVLModel, rotateTextModel, rotateVLModel, TEXT_MODELS, VL_MODELS, callTextCompletion, callVisionCompletion } from './config/ai.js'
 import { updateTaskStatus, createQuestions, batchUpdateQuestionTags, addWrongQuestions, createJudgement, getLatestJudgement, updateQuestionAnswer, markAnswerException, findCachedQuestionByFingerprint, findSimilarQuestion, cacheQuestion, incrementQuestionUseCount, updateQuestionCacheId, createQuestionAsset } from './services/neonService.js'
 import { uploadImage } from './services/ossService.js'
 import { generateTextFingerprint, generatePHash, PARSER_VERSION, TEXT_SIMILARITY_THRESHOLD } from './utils/questionFingerprint.js'
@@ -233,33 +233,20 @@ const recognizeQuestions = async (imageBase64, taskId, retryCount = 0) => {
     ? imageBase64
     : `data:image/jpeg;base64,${imageBase64}`
 
-  const requestBody = {
-    model: getCurrentVLModel(),
-    messages: [
-      { role: 'system', content: prompt },
-      {
-        role: 'user',
-        content: [
-          { type: 'image_url', image_url: { url: imageUrl } },
-          { type: 'text', text: '请识别这张作业图片中的所有题目，并返回JSON格式结果。' }
-        ]
-      }
-    ],
-    temperature: 0.3,
-    max_tokens: 8192
-  }
-
   try {
-    console.log(`   发送请求到: ${AI_CONFIG.ENDPOINT}`)
-    const response = await axios.post(AI_CONFIG.ENDPOINT, requestBody, {
-      headers: getAIHeaders(),
-      timeout: AI_CONFIG.TIMEOUT
+    console.log(`   发送请求到: ${AI_CONFIG.ENDPOINT} (model=${getCurrentVLModel()})`)
+    // 主 API（ModelScope）→ 配额耗尽(429)时内置回退到备用视觉 API
+    const { content, usedBackup } = await callVisionCompletion({
+      imageDataURL: imageUrl,
+      systemPrompt: prompt,
+      userText: '请识别这张作业图片中的所有题目，并返回JSON格式结果。',
+      temperature: 0.3,
+      maxTokens: 8192
     })
 
     const duration = Date.now() - startTime
-    console.log(`   AI 响应耗时: ${duration}ms, status=${response.status}`)
+    console.log(`   AI 响应耗时: ${duration}ms${usedBackup ? ' (备用 API)' : ''}`)
 
-    const content = response.data.choices[0]?.message?.content
     if (!content) throw new Error('AI 返回内容为空')
 
     console.log(`   AI 原始响应 (前300字): ${content.substring(0, 300)}...`)
@@ -359,17 +346,46 @@ const recognizeQuestions = async (imageBase64, taskId, retryCount = 0) => {
       console.error(`   响应体: ${JSON.stringify(error.response.data).substring(0, 300)}`)
     }
 
-    // 配额耗尽 → 切换到下一个 VL 模型（供后续使用），当前任务返回失败
+    // 配额耗尽 → 此处说明主 API 429 且备用 API 也失败（callVisionCompletion 已尝试回退）。
+    // 轮换到下一个 VL 模型供后续任务使用，当前任务返回失败。
     if (error.response?.status === 429) {
       const nextModel = rotateVLModel()
       if (nextModel) {
-        console.log(`  模型 ${getCurrentVLModel()} 配额耗尽，下一个任务将使用 ${nextModel}`)
+        console.log(`  模型配额耗尽且备用不可用，下一个任务将使用 ${nextModel}`)
       } else {
-        console.error(`  所有视觉模型配额已耗尽`)
+        console.error(`  所有视觉模型配额已耗尽，且备用 API 不可用`)
       }
       return {
         success: false,
         error: errorMessage,
+        questions: [],
+        duration: Date.now() - startTime,
+        shouldRetry: false
+      }
+    }
+
+    // 模型不可用（400/404，或 ModelScope "has no provider supported" / "not found"）
+    // → 立即轮换到下一个 VL 模型并在本次任务内重试；轮完所有模型才放弃。
+    const status = error.response?.status
+    const bodyText = JSON.stringify(error.response?.data || '').toLowerCase()
+    const isModelUnavailable =
+      (status === 400 || status === 404) &&
+      (bodyText.includes('no provider') ||
+       bodyText.includes('not found') ||
+       bodyText.includes('does not exist') ||
+       bodyText.includes('has no provider supported'))
+
+    if (isModelUnavailable) {
+      const failedModel = getCurrentVLModel()
+      const nextModel = rotateVLModel()
+      if (nextModel && nextModel !== failedModel) {
+        console.warn(`  ⚠️ 视觉模型 ${failedModel} 当前无可用服务商，切换到 ${nextModel} 并重试...`)
+        return recognizeQuestions(imageBase64, taskId, retryCount)
+      }
+      console.error(`  ❌ 所有视觉模型均无可用服务商，请更新 AI_MODEL / VL_MODELS 配置`)
+      return {
+        success: false,
+        error: `视觉模型不可用: ${errorMessage}`,
         questions: [],
         duration: Date.now() - startTime,
         shouldRetry: false
