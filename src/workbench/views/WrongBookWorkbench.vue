@@ -236,6 +236,11 @@
                     height="200px"
                     class="unified-image"
                   />
+                  <div style="margin-top:6px; display:flex; justify-content:flex-end;">
+                    <el-button size="small" plain style="color:#4F46E5; border-color:#6366F1;" @click.stop="handleGenerateTikZ(selectedDetailQuestion)">
+                      生成TikZ图
+                    </el-button>
+                  </div>
                 </div>
                 <div class="unified-section" v-if="getQuestionOptions(selectedDetailQuestion)?.length && getQuestion(selectedDetailQuestion).question_type === 'choice'">
                   <div class="unified-label">选项</div>
@@ -729,6 +734,10 @@ const handleDeleteQuestion = async (wq) => {
 
 const handlePrintQuestion = (wq) => {
   ElMessage.info('打印功能开发中')
+}
+
+const handleGenerateTikZ = (wq) => {
+  ElMessage.info('TikZ生成功能即将上线')
 }
 
 // ===== 初始化 =====

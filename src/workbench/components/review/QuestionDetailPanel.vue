@@ -135,6 +135,11 @@
             <div class="ops-q-label">配图</div>
             <div class="ops-image-wrap">
               <img :src="displayImageUrl" class="ops-image" @click="fullscreenImage = displayImageUrl" />
+              <div style="display:flex; gap:6px; margin-top:4px;">
+                <el-button size="small" plain style="color:#4F46E5; border-color:#6366F1;" @click="handleGenerateTikZ">
+                  生成TikZ图
+                </el-button>
+              </div>
             </div>
           </div>
           <div class="ops-q-section" v-if="optionsList.length > 0">
@@ -599,6 +604,10 @@ const deleteImage = () => {
   localImageUrl.value = displayImageUrl.value = ''
   if (q.value) q.value.geometry_image_url = ''
   ElMessage.success('配图已删除')
+}
+
+const handleGenerateTikZ = () => {
+  ElMessage.info('TikZ生成功能即将上线')
 }
 </script>
 
