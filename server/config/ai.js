@@ -460,62 +460,43 @@ export const buildTaggingPrompt = (subject = null) => {
  * 构建几何结构分析 prompt — 用于从净化的几何图中提取抽象结构（点、线、标签）。
  *
  * 输入：经过 Sharp 净化处理后的几何图（白底黑线，去除非几何文字/手写痕迹）
- * 输出：结构化的几何描述 JSON
+ * 输出：TikZ 代码
  */
-export const buildGeometryStructurePrompt = () => `你是一个专业的几何图形结构分析助手。请分析给定的几何图形，提取其中的几何结构信息。
+export const buildGeometryExtractionPrompt = () => `你是一个专业的几何图形提取助手。请分析给定的几何图裁剪区域，从中提取纯几何元素，输出 TikZ 代码。
 
-注意：图中的文字标注已尽量保留（几何标签如A、B、C、D等顶点字母；角度标记如30°、45°；长度标记如2cm、3cm等）。
-请忽略任何残留的非几何文字（如题目编号、页码、水印痕迹等），只关注几何图形本身的结构。
+## 核心任务
+从裁剪图中识别哪些元素属于几何图形，忽略非几何内容，只生成纯几何的 TikZ 矢量图。
 
-请按以下 JSON 格式返回分析结果（只返回 JSON，不要包含其他文字）：
-{
-  "type": "triangle/quadrilateral/circle/polygon/composite/unknown",
-  "points": [
-    {"name": "A", "description": "顶点A"},
-    {"name": "B", "description": "顶点B"},
-    {"name": "C", "description": "顶点C"},
-    {"name": "O", "description": "圆心O"}
-  ],
-  "lines": [
-    {"from": "A", "to": "B", "type": "solid/dashed/dotted", "description": "边AB"},
-    {"from": "B", "to": "C", "type": "solid", "description": "边BC"}
-  ],
-  "circles": [
-    {"center": "O", "radius_point": "A", "description": "以O为圆心、OA为半径的圆"}
-  ],
-  "angles": [
-    {"vertex": "B", "arms": ["A", "C"], "value": "90°", "description": "直角∠ABC"}
-  ],
-  "labels": [
-    {"text": "30°", "position": "near B", "description": "角度标注"},
-    {"text": "2cm", "position": "on AB", "description": "长度标注"},
-    {"text": "a", "position": "on BC", "description": "边长变量"}
-  ],
-  "shape_count": 1,
-  "symmetry": "none/vertical/horizontal/radial",
-  "description": "简要描述图形的整体结构和已知条件"
-}
+## 保留的元素
+- 几何线段（实线、虚线、点划线）
+- 顶点标注字母（A/B/C/D/O/P/Q/M/N 等）
+- 角度弧线、角度数值（如 30°、45°、90°）
+- 长度标注（如 2cm、3cm、a、b、x 等几何相关变量）
+- 直角符号（方形标记）
+- 圆、弧线
+- 平行/垂直标记符号（箭头、小线段）
+- 坐标轴（如果存在）
 
-字段说明：
-- type: 图形类型。triangle=三角形, quadrilateral=四边形, circle=圆形, polygon=多边形, composite=组合图形, unknown=无法确定
-- points: 图中所有顶点/关键点，name 为标签字母或自定义名称
-- lines: 所有线段/边。from/to 引用 points 中的 name，type 表示线型
-- circles: 所有圆（包括圆弧）。center/radius_point 引用 points 中的 name
-- angles: 所有角度标记或隐含的角度关系。value 尽可能提取数值，未知角度留空字符串
-- labels: 图中所有文字标注（角度值、长度、变量名等）
-- shape_count: 图中基本几何图形的数量
-- symmetry: 对称性
-- description: 整体描述，包括已知条件和几何关系
+## 删除的元素
+- 所有中文文字（题目描述、说明文字）
+- 题号编号（如 "图1"、"图2"、"图3"、"第1题" 等）
+- 页码、页眉页脚
+- 解析文字、解题过程
+- 学生笔迹、涂鸦
+- 水印、二维码、条形码
+- 非几何装饰元素
 
-识别要点：
-1. 仔细识别所有顶点字母标签（A、B、C、D、E、F、O、P、Q等），它们通常位于线的端点或交点附近
-2. 识别所有线段，注意区分实线和虚线
-3. 识别角度标记（弧线+数字或字母）
-4. 识别长度标记（数字+单位，或变量如a、b、x）
-5. 识别直角标记（正方形小框）
-6. 识别平行/垂直标记（箭头或小线段）
-7. 如果是组合图形，type 用 "composite" 并描述各组成部分
-8. 如果图中无有效几何结构（纯文字、非几何图），type 填 "unknown"，其他数组为空`
+## 输出要求
+1. 只输出完整的 TikZ 代码（包含 \\\\begin{tikzpicture} 和 \\\\end{tikzpicture}），不要附加任何说明文字。
+2. 使用绝对坐标 (x,y)，单位 cm，保持几何关系与原图一致。
+3. 实线用 \\\\draw，虚线用 \\\\draw[dashed]，点划线用 \\\\draw[dotted]。
+4. 顶点字母用 \\\\node 标注，位置在点的外部（如 above, below, left, right）。
+5. 角度用 \\\\draw arc 路径绘制，弧线半径 0.3-0.5cm。
+6. 直角用直角标记（两个小线段或 rectangle 路径）。
+7. 缩放比例建议 scale=1 或 scale=0.8。
+8. 不要添加原图中没有的辅助线或标注。
+9. 生成的 TikZ 代码应该看起来像教材中的几何插图。
+10. 不要使用 \\\\tkzMarkAngle 等需要额外包的命令，使用纯 TikZ 路径。`
 
 /**
  * 构建 TikZ 代码生成 prompt — 让 VL 模型根据几何图输出 TikZ 源码。

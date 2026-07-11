@@ -10,7 +10,7 @@ import axios from 'axios'
 import sharp from 'sharp'
 import { TABLES, TASK_STATUS } from './config/neon.js'
 import { query } from './config/neon.js'
-import { AI_CONFIG, getAIHeaders, buildOCRPrompt, buildTaggingPrompt, buildAnswerGenerationPrompt, buildGeometryStructurePrompt, getCurrentTextModel, getCurrentVLModel, rotateTextModel, rotateVLModel, TEXT_MODELS, VL_MODELS, callTextCompletion, callVisionCompletion } from './config/ai.js'
+import { AI_CONFIG, getAIHeaders, buildOCRPrompt, buildTaggingPrompt, buildAnswerGenerationPrompt, buildGeometryExtractionPrompt, getCurrentTextModel, getCurrentVLModel, rotateTextModel, rotateVLModel, TEXT_MODELS, VL_MODELS, callTextCompletion, callVisionCompletion } from './config/ai.js'
 import { updateTaskStatus, createQuestions, batchUpdateQuestionTags, addWrongQuestions, createJudgement, getLatestJudgement, updateQuestionAnswer, markAnswerException, findCachedQuestionByFingerprint, findSimilarQuestion, cacheQuestion, incrementQuestionUseCount, updateQuestionCacheId, createQuestionAsset, updateQuestionAssetCleanData } from './services/neonService.js'
 import { uploadImage } from './services/ossService.js'
 import { generateTextFingerprint, generatePHash, PARSER_VERSION, TEXT_SIMILARITY_THRESHOLD } from './utils/questionFingerprint.js'
@@ -73,82 +73,74 @@ async function downloadImageBuffer(url) {
 }
 
 /**
- * 几何图净化：使用 Sharp 将裁剪后的几何图处理为白底黑线的干净版本。
+ * AI 视觉模型几何元素提取：从裁剪图中提取纯几何元素，输出 TikZ 代码。
  *
- * 处理流程：
- * 1. 灰度化 — 去除彩色信息（手写红笔、彩色标注等）
- * 2. 自适应对比度拉伸 — 增强线条/文字与背景的区分度
- * 3. 二值化阈值 — 转为纯黑白，去除非几何噪点
- * 4. 反相（若需要）— 确保白底黑线
+ * 替代原有的 Sharp 二值化方案。调用视觉模型理解几何结构，
+ * 保留几何线段、点标记、角度符号、长度标注，删除中文/题号/笔迹/水印。
  *
- * 目标效果：
- * - 白色或浅色背景
- * - 黑色几何线条（实线/虚线/弧线）
- * - 保留几何标签文字（A/B/C/D、角度标记、长度标记）
- * - 去除手写痕迹、非几何文字、涂鸦
- *
- * @param {Buffer} imageBuffer - 原始裁剪几何图
- * @returns {Promise<Buffer>} 净化后的图片 Buffer（PNG 格式）
- */
-async function cleanGeometryImage(imageBuffer) {
-  // 1. 灰度化 + 归一化对比度 + 二值化阈值
-  const cleaned = await sharp(imageBuffer)
-    .grayscale()                      // 转灰度，去除颜色信息
-    .normalize()                      // 拉伸对比度到全范围
-    .threshold(128)                   // 二值化：>128 变白，≤128 变黑
-    .png()                            // 无损 PNG 输出
-    .toBuffer()
-  return cleaned
-}
-
-/**
- * 对净化后的几何图进行 VL 视觉分析，提取几何结构 JSON。
- *
- * 调用 callVisionCompletion 将净化图发给视觉模型，让模型识别：
- * - 顶点标签（A/B/C/D 等）
- * - 线段、圆、弧
- * - 角度标记、长度标记
- * - 对称性、图形类型
- *
- * @param {Buffer} cleanImageBuffer - 净化后的几何图 buffer
+ * @param {Buffer} imageBuffer - 原始裁剪几何图 buffer
  * @param {string} questionId - 题目 ID（用于日志）
- * @returns {Promise<Object|null>} 几何结构 JSON 或 null
+ * @returns {Promise<string|null>} TikZ 代码字符串或 null
  */
-async function analyzeGeometryStructure(cleanImageBuffer, questionId) {
+async function extractGeometryToTikz(imageBuffer, questionId) {
   try {
-    // 将 buffer 转为 data URL（PNG base64）
-    const base64 = cleanImageBuffer.toString('base64')
+    const base64 = imageBuffer.toString('base64')
     const dataURL = `data:image/png;base64,${base64}`
 
     const result = await callVisionCompletion({
       imageDataURL: dataURL,
-      systemPrompt: buildGeometryStructurePrompt(),
-      userText: '请分析这个几何图形的结构，返回JSON格式的结果。',
+      systemPrompt: buildGeometryExtractionPrompt(),
+      userText: '请从这张几何图中提取纯几何元素，输出TikZ代码。',
       temperature: 0.2,
       maxTokens: 4096
     })
 
-    const rawContent = result.content
-    // 提取 JSON（兼容模型可能输出额外文字）
-    const jsonMatch = rawContent.match(/\{[\s\S]*\}/)
-    if (!jsonMatch) {
-      console.warn(`   ⚠️ [几何结构] ${questionId.substring(0, 8)}: 未找到有效的 JSON 输出`)
+    // 复用 tikzWorker 中的提取逻辑
+    const tikzCode = extractTikzCode(result.content)
+    if (!tikzCode) {
+      console.warn(`   ⚠️ [几何提取] ${questionId.substring(0, 8)}: 未找到有效的 TikZ 代码`)
+      // 尝试抢救：如果内容包含 \draw 或 \path，当作 TikZ 代码
+      if (result.content.includes('\\draw') || result.content.includes('\\path')) {
+        return result.content.trim()
+      }
       return null
     }
-
-    const parsed = JSON.parse(jsonMatch[0])
-    if (!parsed.type || parsed.type === 'unknown') {
-      console.warn(`   ⚠️ [几何结构] ${questionId.substring(0, 8)}: 无法识别几何结构（type=${parsed.type}）`)
-    }
-    return parsed
+    return tikzCode
   } catch (error) {
-    console.error(`   ⚠️ [几何结构] ${questionId.substring(0, 8)} 分析失败:`, error.message)
+    console.error(`   ⚠️ [几何提取] ${questionId.substring(0, 8)} 失败:`, error.message)
     return null
   }
 }
 
 /**
- * 处理单个几何图的净化层流水线：下载 → 净化 → 上传 → 结构分析 → 入库
+ * 从 AI 回复中提取 TikZ 代码（复用 tikzWorker.js 中的逻辑）
+ */
+function extractTikzCode(content) {
+  if (!content) return null
+
+  // 尝试匹配 ```tikz ... ``` 或 ```latex ... ``` 代码块
+  const codeBlockMatch = content.match(/```(?:tex|latex|tikz)?\s*\n?([\s\S]*?)\n?```/)
+  if (codeBlockMatch) {
+    const code = codeBlockMatch[1].trim()
+    if (code.includes('\\begin{tikzpicture}')) return code
+  }
+
+  // 尝试直接匹配 \begin{tikzpicture} ... \end{tikzpicture}
+  const tikzMatch = content.match(/\\begin\{tikzpicture\}[\s\S]*?\\end\{tikzpicture\}/)
+  if (tikzMatch) return tikzMatch[0].trim()
+
+  // 如果整段内容看起来就是 TikZ 代码
+  if (content.includes('\\begin{tikzpicture}') && content.includes('\\end{tikzpicture}')) {
+    return content.trim()
+  }
+
+  return null
+}
+
+/**
+ * 处理单个几何图的 AI 提取流水线：下载 → AI 视觉模型提取 → 入库
+ *
+ * 替换原有流程：下载 → Sharp 二值化 → 上传 OSS → 结构分析 → 入库 → 入队
  *
  * @param {Object} q - 题目对象（含 geometry_image_url、id）
  * @param {string} studentId - 学生 ID
@@ -157,7 +149,7 @@ async function processGeometryCleaning(q, studentId) {
   if (!q.geometry_image_url) return
 
   const shortId = q.id.substring(0, 8)
-  console.log(`   [几何净化] ${shortId}: 开始处理...`)
+  console.log(`   [几何净化] ${shortId}: 开始 AI 几何提取...`)
 
   // 1. 下载裁剪好的几何图
   const rawBuffer = await downloadImageBuffer(q.geometry_image_url)
@@ -166,83 +158,45 @@ async function processGeometryCleaning(q, studentId) {
     return
   }
 
-  // 2. Sharp 净化
-  let cleanBuffer
+  // 2. AI 视觉模型提取几何元素 → 输出 TikZ 代码
+  let tikzCode = null
   try {
-    cleanBuffer = await cleanGeometryImage(rawBuffer)
-    console.log(`   [几何净化] ${shortId}: Sharp 净化完成 (${rawBuffer.length} → ${cleanBuffer.length} bytes)`)
+    tikzCode = await extractGeometryToTikz(rawBuffer, q.id)
+    if (!tikzCode) {
+      console.warn(`   ⚠️ [几何净化] ${shortId}: AI 提取失败，跳过`)
+      return
+    }
+    console.log(`   [几何净化] ${shortId}: AI 提取完成，TikZ 代码 ${tikzCode.length} 字符`)
   } catch (error) {
-    console.error(`   ⚠️ [几何净化] ${shortId}: 净化失败:`, error.message)
+    console.error(`   ⚠️ [几何净化] ${shortId}: AI 提取异常:`, error.message)
     return
   }
 
-  // 3. 上传净化图到 OSS
-  const cleanFileName = `geometry_clean_${studentId}_${q.id}.png`
-  let cleanUrl = null
-  try {
-    cleanUrl = await uploadImage(cleanBuffer, cleanFileName, studentId)
-    console.log(`   [几何净化] ${shortId}: 净化图上传 → ${cleanUrl}`)
-  } catch (error) {
-    console.error(`   ⚠️ [几何净化] ${shortId}: 上传失败:`, error.message)
-    // 继续做结构分析，不上传也可以分析
-  }
-
-  // 4. VL 模型分析几何结构
-  let structureJson = null
-  try {
-    structureJson = await analyzeGeometryStructure(cleanBuffer, q.id)
-    if (structureJson) {
-      console.log(`   [几何结构] ${shortId}: type=${structureJson.type}, points=${(structureJson.points || []).length}, lines=${(structureJson.lines || []).length}`)
-    }
-  } catch (error) {
-    console.error(`   ⚠️ [几何结构] ${shortId}: 结构分析失败:`, error.message)
-  }
-
-  // 5. 存入 question_assets 表
+  // 3. 存入 question_assets 表（clean_geometry_image_url 存 TikZ 代码，不是 URL）
   try {
     await updateQuestionAssetCleanData(q.id, {
-      clean_geometry_image_url: cleanUrl,
-      geometry_structure_json: structureJson
+      clean_geometry_image_url: tikzCode,
+      geometry_crop_type: 'clean_geometry'
     })
     console.log(`   [几何净化] ${shortId}: 数据入库成功`)
   } catch (error) {
     console.error(`   ⚠️ [几何净化] ${shortId}: 入库失败:`, error.message)
   }
 
-  // 6. 反范式写入 questions 表（clean_geometry_image_url 副本，避免 API JOIN）
-  if (cleanUrl) {
-    try {
-      await query(
-        `UPDATE ${TABLES.QUESTIONS}
-         SET clean_geometry_image_url = $1, updated_at = NOW()
-         WHERE id = $2`,
-        [cleanUrl, q.id]
-      )
-    } catch (error) {
-      console.warn(`   ⚠️ [几何净化] ${shortId}: questions 表写入失败:`, error.message)
-    }
-  }
-
-  // 7. 非阻塞入队 TikZ 生成任务
-  if (cleanUrl) {
-    try {
-      const { getTikzQueue } = await import('./queue.js')
-      const tq = await getTikzQueue()
-      if (tq) {
-        await tq.add('tikz-generation', {
-          questionId: q.id,
-          cleanGeometryUrl: cleanUrl
-        }, {
-          attempts: 2,
-          backoff: { type: 'exponential', delay: 10000 },
-          removeOnComplete: { count: 50 },
-          removeOnFail: { count: 20 }
-        })
-        console.log(`   [TikZ] ${shortId}: 已入队 TikZ 生成`)
-      }
-    } catch (error) {
-      console.warn(`   ⚠️ [TikZ] ${shortId}: 入队失败:`, error.message)
-    }
+  // 4. 反范式写入 questions 表（双写 clean_geometry_image_url + tikz_svg_url）
+  try {
+    await query(
+      `UPDATE ${TABLES.QUESTIONS}
+       SET clean_geometry_image_url = $1,
+           tikz_svg_url = $1,
+           display_image_type = COALESCE(display_image_type, 'clean'),
+           updated_at = NOW()
+       WHERE id = $2`,
+      [tikzCode, q.id]
+    )
+    console.log(`   [几何净化] ${shortId}: questions 表更新成功`)
+  } catch (error) {
+    console.warn(`   ⚠️ [几何净化] ${shortId}: questions 表写入失败:`, error.message)
   }
 }
 
@@ -292,6 +246,28 @@ function denormalizeQuestionBboxes(q, imgW, imgH) {
     q.geometry_image = { ...q.geometry_image, bbox: denormalizeBbox(q.geometry_image.bbox, imgW, imgH) }
   }
   return q
+}
+
+/**
+ * 将题目的所有 bbox 等比例缩放（就地修改）。
+ * 用于将 compressedBuffer 像素空间的坐标缩放到原图（straightenedBuffer）像素空间。
+ * @param {Object} q - question 对象
+ * @param {number} sx - 水平缩放比
+ * @param {number} sy - 垂直缩放比
+ */
+function scaleQuestionBboxes(q, sx, sy) {
+  const s = (v, f) => Math.round((typeof v === 'number' && isFinite(v) ? v : 0) * f)
+  const scale = (bbox) => {
+    if (!bbox) return
+    bbox.x = s(bbox.x, sx)
+    bbox.y = s(bbox.y, sy)
+    bbox.width  = s(bbox.width, sx)
+    bbox.height = s(bbox.height, sy)
+  }
+  if (q.block_coordinates) scale(q.block_coordinates)
+  if (q.text_bbox) scale(q.text_bbox)
+  if (q.image_bbox) scale(q.image_bbox)
+  if (q.geometry_image?.bbox) scale(q.geometry_image.bbox)
 }
 
 // AI 密钥校验
@@ -1387,6 +1363,27 @@ export const processTask = async (job) => {
         } else if (q.content && (q.content.includes('如图') || q.content.includes('图1') || q.content.includes('图示'))) {
           console.log(`   ⚠️ [几何图] ${q.id}: 题干含"如图"关键词但未返回 geometry_image, content=${q.content.substring(0, 60)}`)
         }
+      }
+
+      // ── 坐标缩放：将 bbox 从 compressedBuffer 像素空间换算到原图（straightenedBuffer）像素空间 ──
+      // 前端展示的是 OSS 原图（image_url），分辨率通常远高于 compressedBuffer（max 1920x1920），
+      // 因此需要将坐标等比放大，使 bbox 方框能精准覆盖原图上对应题目区域。
+      // 注意：此步骤必须在几何图裁剪（使用 compressedBuffer 像素坐标）之后执行。
+      try {
+        const _origMeta = await sharp(straightenedBuffer).metadata()
+        const _origW = _origMeta.width, _origH = _origMeta.height
+        const _compMeta = await sharp(compressedBuffer).metadata()
+        const _compW = _compMeta.width, _compH = _compMeta.height
+        if (_origW !== _compW || _origH !== _compH) {
+          const sx = _origW / _compW
+          const sy = _origH / _compH
+          for (const q of questions) scaleQuestionBboxes(q, sx, sy)
+          console.log(`   [坐标] 已将 bbox 从压缩空间 (${_compW}x${_compH}) 缩放到原图空间 (${_origW}x${_origH}), scale=(${sx.toFixed(4)}, ${sy.toFixed(4)})`)
+        } else {
+          console.log(`   [坐标] 压缩图与原图尺寸一致 (${_compW}x${_compH})，无需缩放`)
+        }
+      } catch (scaleErr) {
+        console.warn(`   ⚠️ [坐标] 缩放失败，沿用压缩空间坐标: ${scaleErr.message}`)
       }
 
       const questionsWithStudentId = questions.map(q => ({

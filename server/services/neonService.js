@@ -624,16 +624,16 @@ export const updateQuestionAssetTikz = async (assetId, upd) => {
 /**
  * 更新题目的几何图净化层数据
  * @param {string} questionId
- * @param {Object} data - { clean_geometry_image_url, geometry_structure_json }
+ * @param {Object} data - { clean_geometry_image_url, geometry_crop_type }
  */
 export const updateQuestionAssetCleanData = async (questionId, data) => {
-  const { clean_geometry_image_url, geometry_structure_json } = data
+  const { clean_geometry_image_url, geometry_crop_type } = data
   await query(
     `UPDATE ${TABLES.QUESTION_ASSETS}
      SET clean_geometry_image_url = COALESCE($1, clean_geometry_image_url),
-         geometry_structure_json = COALESCE($2, geometry_structure_json),
+         geometry_crop_type = COALESCE($2, geometry_crop_type),
          updated_at = NOW()
      WHERE question_id = $3`,
-    [clean_geometry_image_url || null, geometry_structure_json ? JSON.stringify(geometry_structure_json) : null, questionId]
+    [clean_geometry_image_url || null, geometry_crop_type || null, questionId]
   )
 }

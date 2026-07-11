@@ -12,25 +12,26 @@
 
 /**
  * 将 TikZ 代码转换为 SVG 字符串（简化转换器）
- * 支持常见的 TikZ 命令：draw, node, coordinate, plot, circle, rectangle
- * 
+ * 支持常见的 TikZ 命令：draw, node, coordinate, plot, circle, rectangle,
+ * pic (angle/right angle), arc, tkzMarkAngle, tkzMarkRightAngle, fill, path
+ *
  * @param {string} tikzCode - TikZ代码
  * @param {boolean} strict - 严格模式：只返回有实质内容的SVG，空白坐标系返回null
  */
 export function tikzToSvg(tikzCode, strict = false) {
   if (!tikzCode) return null
-  
+
   try {
     // 清理 TikZ 代码
     const cleanCode = tikzCode
       .replace(/\\begin\{tikzpicture\}.*?\[/, '')
       .replace(/\\end\{tikzpicture\}/, '')
       .replace(/\\begin\{tikzpicture\}/, '')
-    
+
     // 提取 scale
     const scaleMatch = cleanCode.match(/scale=(\d+\.?\d*)/)
     const tikzScale = scaleMatch ? parseFloat(scaleMatch[1]) : 1
-    
+
     // 提取坐标点
     const coordRegex = /\\coordinate\s*\(?(\w+)\)?\s*at\s*\(\s*(-?[\d.]+)\s*,\s*(-?[\d.]+)\s*\)/g
     const coordinates = []
@@ -38,63 +39,335 @@ export function tikzToSvg(tikzCode, strict = false) {
     while ((match = coordRegex.exec(cleanCode)) !== null) {
       coordinates.push({ name: match[1], x: parseFloat(match[2]), y: parseFloat(match[3]) })
     }
-    
+
+    // 提取所有被引用的坐标名（A/B/C/D等）并推断其位置
+    const inferMissingCoords = () => {
+      // 从 \node at (x,y) 语句中提取隐式坐标
+      const implicitCoordRegex = /\\node.*?at\s*\(\s*(-?[\d.]+)\s*,\s*(-?[\d.]+)\s*\)\s*\{(\w+)\}/g
+      while ((match = implicitCoordRegex.exec(cleanCode)) !== null) {
+        const name = match[3]
+        const x = parseFloat(match[1]), y = parseFloat(match[2])
+        if (!coordinates.find(c => c.name === name)) {
+          coordinates.push({ name, x, y })
+        }
+      }
+    }
+    inferMissingCoords()
+
     const svgElements = []
     const svgWidth = 380
     const svgHeight = 280
     let hasSubstantialContent = false
-    
-    // 如果有坐标点，计算缩放和偏移
-    if (coordinates.length > 0) {
-      const xs = coordinates.map(c => c.x)
-      const ys = coordinates.map(c => c.y)
-      const minX = Math.min(...xs), maxX = Math.max(...xs)
-      const minY = Math.min(...ys), maxY = Math.max(...ys)
-      const rangeX = maxX - minX || 1, rangeY = maxY - minY || 1
-      const scale = Math.min(svgWidth / (rangeX * 1.8), svgHeight / (rangeY * 1.8)) * tikzScale
-      const offsetX = svgWidth / 2 - (minX + maxX) / 2 * scale
-      const offsetY = svgHeight / 2 + (minY + maxY) / 2 * scale
-      
-      // 绘制线条
-      const drawLineRegex = /\\draw(?:\[([^\]]*)\])?\s*\((\w+)\)\s*(?:--|to)\s*\((\w+)\)(?:\s*--\s*\((\w+)\))?\s*(?:--\s*cycle)?/g
-      while ((match = drawLineRegex.exec(cleanCode)) !== null) {
-        const from = coordinates.find(c => c.name === match[2])
-        const to = coordinates.find(c => c.name === match[3])
-        if (from && to) {
-          hasSubstantialContent = true
-          const x1 = from.x * scale + offsetX
-          const y1 = -from.y * scale + offsetY
-          const x2 = to.x * scale + offsetX
-          const y2 = -to.y * scale + offsetY
-          const style = match[1] || ''
-          const strokeColor = style.includes('red') ? '#DC2626' : style.includes('blue') ? '#3B82F6' : '#333'
-          const strokeWidth = style.includes('thick') ? '2' : '1.5'
-          const dash = style.includes('dashed') ? 'stroke-dasharray="4,3"' : ''
-          svgElements.push(`<line x1="${x1.toFixed(1)}" y1="${y1.toFixed(1)}" x2="${x2.toFixed(1)}" y2="${y2.toFixed(1)}" stroke="${strokeColor}" stroke-width="${strokeWidth}" ${dash}/>` )
+
+    // 坐标转换函数
+    const scale = coordinates.length > 0
+      ? (() => {
+          const xs = coordinates.map(c => c.x)
+          const ys = coordinates.map(c => c.y)
+          const minX = Math.min(...xs), maxX = Math.max(...xs)
+          const minY = Math.min(...ys), maxY = Math.max(...ys)
+          const rangeX = maxX - minX || 1, rangeY = maxY - minY || 1
+          return Math.min(svgWidth / (rangeX * 1.8), svgHeight / (rangeY * 1.8)) * tikzScale
+        })()
+      : 40 * tikzScale
+
+    const offsetX = coordinates.length > 0
+      ? svgWidth / 2 - (Math.min(...coordinates.map(c => c.x)) + Math.max(...coordinates.map(c => c.x))) / 2 * scale
+      : svgWidth / 2
+    const offsetY = coordinates.length > 0
+      ? svgHeight / 2 + (Math.min(...coordinates.map(c => c.y)) + Math.max(...coordinates.map(c => c.y))) / 2 * scale
+      : svgHeight / 2
+
+    const toSvgX = (x) => x * scale + offsetX
+    const toSvgY = (y) => -y * scale + offsetY
+
+    const findCoord = (name) => coordinates.find(c => c.name === name)
+
+    // 解析样式属性
+    const parseStyle = (styleStr) => {
+      const s = styleStr || ''
+      return {
+        strokeColor: s.includes('red') ? '#DC2626' : s.includes('blue') ? '#3B82F6' : '#333',
+        strokeWidth: s.includes('thick') ? '2' : s.includes('ultra thick') ? '2.5' : s.includes('very thick') ? '2' : '1.5',
+        dash: s.includes('dashed') ? 'stroke-dasharray="6,3"' : s.includes('dotted') ? 'stroke-dasharray="2,3"' : s.includes('dash pattern') ? 'stroke-dasharray="3,2"' : '',
+        fill: s.includes('fill') ? (s.includes('gray!') || s.includes('lightgray') ? '#E5E7EB' : '#F3F4F6') : null,
+        opacity: s.includes('opacity=') ? parseFloat(s.match(/opacity=([\d.]+)/)?.[1] || '1') : 1
+      }
+    }
+
+    // ── 1. 绝对坐标线条 ──
+    // \draw (x1,y1) -- (x2,y2); 或 \draw (x1,y1) -- (x2,y2) -- (x3,y3) -- cycle;
+    const absDrawRegex = /\\draw(?:\[([^\]]*)\])?\s*\((-?[\d.]+)\s*,\s*(-?[\d.]+)\)\s*((?:--\s*\(-?[\d.]+\s*,\s*-?[\d.]+\)\s*)*)(?:--\s*cycle)?\s*;/g
+    while ((match = absDrawRegex.exec(cleanCode)) !== null) {
+      const style = match[1] || ''
+      const styleInfo = parseStyle(style)
+      const startX = parseFloat(match[2]), startY = parseFloat(match[3])
+      const remaining = match[4]
+
+      // 解析所有后续点
+      const points = [[startX, startY]]
+      const segmentRegex = /--\s*\((-?[\d.]+)\s*,\s*(-?[\d.]+)\)/g
+      let segMatch
+      while ((segMatch = segmentRegex.exec(remaining)) !== null) {
+        points.push([parseFloat(segMatch[1]), parseFloat(segMatch[2])])
+      }
+
+      if (points.length >= 2) {
+        hasSubstantialContent = true
+        for (let i = 0; i < points.length - 1; i++) {
+          const x1 = toSvgX(points[i][0]), y1 = toSvgY(points[i][1])
+          const x2 = toSvgX(points[i+1][0]), y2 = toSvgY(points[i+1][1])
+          svgElements.push(`<line x1="${x1.toFixed(1)}" y1="${y1.toFixed(1)}" x2="${x2.toFixed(1)}" y2="${y2.toFixed(1)}" stroke="${styleInfo.strokeColor}" stroke-width="${styleInfo.strokeWidth}" ${styleInfo.dash}/>`)
+        }
+        // 如果包含 cycle，闭合路径
+        const fullMatch = match[0]
+        if (fullMatch.includes('-- cycle')) {
+          const x1 = toSvgX(points[points.length-1][0]), y1 = toSvgY(points[points.length-1][1])
+          const x2 = toSvgX(points[0][0]), y2 = toSvgY(points[0][1])
+          svgElements.push(`<line x1="${x1.toFixed(1)}" y1="${y1.toFixed(1)}" x2="${x2.toFixed(1)}" y2="${y2.toFixed(1)}" stroke="${styleInfo.strokeColor}" stroke-width="${styleInfo.strokeWidth}" ${styleInfo.dash}/>`)
         }
       }
-      
-      // 绘制标签
-      const nodeRegex = /\\node(?:\[([^\]]*)\])?\s*at\s*\(\s*(-?[\d.]+)\s*,\s*(-?[\d.]+)\s*\)\s*\{([^}]+)\}/g
-      while ((match = nodeRegex.exec(cleanCode)) !== null) {
-        hasSubstantialContent = true
-        const x = parseFloat(match[2]) * scale + offsetX
-        const y = -parseFloat(match[3]) * scale + offsetY
-        const text = match[4].replace(/\\\$/g, '')
-        const pos = match[1] || ''
-        const anchor = getAnchorFromPos(pos)
-        svgElements.push(`<text x="${x.toFixed(1)}" y="${y.toFixed(1)}" text-anchor="${anchor.x}" dominant-baseline="${anchor.y}" font-size="13" fill="#1F2937">${text}</text>`)
+    }
+
+    // ── 2. 命名坐标线条（原逻辑增强：支持多段线和cycle）──
+    const drawLineRegex = /\\draw(?:\[([^\]]*)\])?\s*\((\w+)\)\s*((?:--\s*\((\w+)\)\s*)*)(?:--\s*cycle)?/g
+    while ((match = drawLineRegex.exec(cleanCode)) !== null) {
+      const style = match[1] || ''
+      const styleInfo = parseStyle(style)
+      const startName = match[2]
+      const midPart = match[0]
+
+      // 收集所有命名的点
+      const namedPoints = [startName]
+      const nameRegex = /--\s*\((\w+)\)/g
+      let nMatch
+      while ((nMatch = nameRegex.exec(midPart)) !== null) {
+        namedPoints.push(nMatch[1])
       }
-      
-      // 绘制直角标记
-      const rightAngleRegex = /\\draw\s*\(([\d.]+),([\d.]+)\)\s*rectangle\s*\(([\d.]+),([\d.]+)\)/g
-      while ((match = rightAngleRegex.exec(cleanCode)) !== null) {
+
+      if (namedPoints.length >= 2) {
+        const firstCoord = findCoord(namedPoints[0])
+        if (!firstCoord) continue
         hasSubstantialContent = true
-        const x1 = parseFloat(match[1]) * scale + offsetX
-        const y1 = -parseFloat(match[2]) * scale + offsetY
-        const x2 = parseFloat(match[3]) * scale + offsetX
-        const y2 = -parseFloat(match[4]) * scale + offsetY
-        svgElements.push(`<rect x="${x1.toFixed(1)}" y="${y2.toFixed(1)}" width="${(x2-x1).toFixed(1)}" height="${(y1-y2).toFixed(1)}" fill="none" stroke="#666" stroke-width="1"/>`)
+
+        for (let i = 0; i < namedPoints.length - 1; i++) {
+          const from = findCoord(namedPoints[i])
+          const to = findCoord(namedPoints[i + 1])
+          if (from && to) {
+            const x1 = toSvgX(from.x), y1 = toSvgY(from.y)
+            const x2 = toSvgX(to.x), y2 = toSvgY(to.y)
+            svgElements.push(`<line x1="${x1.toFixed(1)}" y1="${y1.toFixed(1)}" x2="${x2.toFixed(1)}" y2="${y2.toFixed(1)}" stroke="${styleInfo.strokeColor}" stroke-width="${styleInfo.strokeWidth}" ${styleInfo.dash}/>`)
+          }
+        }
+        if (midPart.includes('-- cycle') && namedPoints.length > 1) {
+          const from = findCoord(namedPoints[namedPoints.length - 1])
+          const to = findCoord(namedPoints[0])
+          if (from && to) {
+            svgElements.push(`<line x1="${toSvgX(from.x).toFixed(1)}" y1="${toSvgY(from.y).toFixed(1)}" x2="${toSvgX(to.x).toFixed(1)}" y2="${toSvgY(to.y).toFixed(1)}" stroke="${styleInfo.strokeColor}" stroke-width="${styleInfo.strokeWidth}" ${styleInfo.dash}/>`)
+          }
+        }
+      }
+    }
+
+    // 兼容旧格式：简单的 named-from -- named-to
+    const simpleLineRegex = /\\draw(?:\[([^\]]*)\])?\s*\((\w+)\)\s*--\s*\((\w+)\)/g
+    while ((match = simpleLineRegex.exec(cleanCode)) !== null) {
+      // 避免重复（已被上面新的 drawLineRegex 捕获）
+      if (match[0].includes('--') && !match[0].match(/\((\w+)\)\s*--\s*\((\w+)\)\s*--/)) {
+        const style = match[1] || ''
+        const styleInfo = parseStyle(style)
+        const from = findCoord(match[2]), to = findCoord(match[3])
+        if (from && to) {
+          hasSubstantialContent = true
+          const x1 = toSvgX(from.x), y1 = toSvgY(from.y)
+          const x2 = toSvgX(to.x), y2 = toSvgY(to.y)
+          svgElements.push(`<line x1="${x1.toFixed(1)}" y1="${y1.toFixed(1)}" x2="${x2.toFixed(1)}" y2="${y2.toFixed(1)}" stroke="${styleInfo.strokeColor}" stroke-width="${styleInfo.strokeWidth}" ${styleInfo.dash}/>`)
+        }
+      }
+    }
+
+    // ── 3. 节点/标签 ──
+    const nodeRegex = /\\node(?:\[([^\]]*)\])?\s*at\s*\(\s*(-?[\d.]+)\s*,\s*(-?[\d.]+)\s*\)\s*\{([^}]+)\}/g
+    while ((match = nodeRegex.exec(cleanCode)) !== null) {
+      hasSubstantialContent = true
+      const x = toSvgX(parseFloat(match[2]))
+      const y = toSvgY(parseFloat(match[3]))
+      const text = match[4].replace(/\\\$/g, '').replace(/\\text\{([^}]*)\}/g, '$1')
+      const pos = match[1] || ''
+      const anchor = getAnchorFromPos(pos)
+      svgElements.push(`<text x="${x.toFixed(1)}" y="${y.toFixed(1)}" text-anchor="${anchor.x}" dominant-baseline="${anchor.y}" font-size="13" fill="#1F2937">${text}</text>`)
+    }
+
+    // ── 4. 直角标记（rectangle）──
+    const rightAngleRegex = /\\draw\s*\(([-\d.]+),([-\d.]+)\)\s*rectangle\s*\(([-\d.]+),([-\d.]+)\)/g
+    while ((match = rightAngleRegex.exec(cleanCode)) !== null) {
+      hasSubstantialContent = true
+      const x1 = toSvgX(parseFloat(match[1])), y1 = toSvgY(parseFloat(match[2]))
+      const x2 = toSvgX(parseFloat(match[3])), y2 = toSvgY(parseFloat(match[4]))
+      svgElements.push(`<rect x="${Math.min(x1,x2).toFixed(1)}" y="${Math.min(y1,y2).toFixed(1)}" width="${Math.abs(x2-x1).toFixed(1)}" height="${Math.abs(y2-y1).toFixed(1)}" fill="none" stroke="#666" stroke-width="1"/>`)
+    }
+
+    // ── 5. 圆弧（arc）──
+    // \draw (x,y) arc[start angle=..., end angle=..., radius=...];
+    // \draw (x,y) arc (start:end:radius);
+    const arcRegex = /\\draw(?:\[([^\]]*)\])?\s*\((-?[\d.]+)\s*,\s*(-?[\d.]+)\)\s*arc\s*\[?start\s*angle\s*=\s*(-?[\d.]+)\s*,\s*end\s*angle\s*=\s*(-?[\d.]+)\s*,\s*radius\s*=\s*([\d.]+)\s*cm?\]?/g
+    while ((match = arcRegex.exec(cleanCode)) !== null) {
+      hasSubstantialContent = true
+      const cx = toSvgX(parseFloat(match[2])), cy = toSvgY(parseFloat(match[3]))
+      const startAngle = parseFloat(match[4]), endAngle = parseFloat(match[5])
+      const radius = parseFloat(match[6]) * scale
+      const startRad = startAngle * Math.PI / 180, endRad = endAngle * Math.PI / 180
+      const sx = cx + radius * Math.cos(startRad), sy = cy - radius * Math.sin(startRad)
+      const ex = cx + radius * Math.cos(endRad), ey = cy - radius * Math.sin(endRad)
+      const largeArc = (endAngle - startAngle) > 180 ? 1 : 0
+      const style = match[1] || ''
+      const styleInfo = parseStyle(style)
+      svgElements.push(`<path d="M ${sx.toFixed(1)} ${sy.toFixed(1)} A ${radius.toFixed(1)} ${radius.toFixed(1)} 0 ${largeArc} 0 ${ex.toFixed(1)} ${ey.toFixed(1)}" fill="none" stroke="${styleInfo.strokeColor}" stroke-width="${styleInfo.strokeWidth}"/>`)
+    }
+
+    // ── 6. \pic 角度标记 ──
+    // \pic[draw, angle radius=0.5cm] {angle = A--B--C};
+    const picAngleRegex = /\\pic(?:\[([^\]]*)\])?\s*\{angle\s*=\s*(\w+)\s*--\s*(\w+)\s*--\s*(\w+)\s*\}/g
+    while ((match = picAngleRegex.exec(cleanCode)) !== null) {
+      const style = match[1] || ''
+      const radiusMatch = style.match(/angle\s*radius\s*=\s*([\d.]+)/)
+      const picRadius = radiusMatch ? parseFloat(radiusMatch[1]) : 0.5
+      const vertex = findCoord(match[3])
+      const arm1 = findCoord(match[2]), arm2 = findCoord(match[4])
+      if (vertex && arm1 && arm2) {
+        hasSubstantialContent = true
+        // 计算两条边的角度
+        const vx = vertex.x, vy = vertex.y
+        const a1x = arm1.x - vx, a1y = arm1.y - vy
+        const a2x = arm2.x - vx, a2y = arm2.y - vy
+        const angle1 = Math.atan2(a1y, a1x) * 180 / Math.PI
+        const angle2 = Math.atan2(a2y, a2x) * 180 / Math.PI
+        const r = picRadius * scale
+        const startA = Math.min(angle1, angle2), endA = Math.max(angle1, angle2)
+        const largeArc = (endA - startA) > 180 ? 1 : 0
+        const sx = toSvgX(vx) + r * Math.cos(startA * Math.PI / 180)
+        const sy = toSvgY(vy) - r * Math.sin(startA * Math.PI / 180)
+        const ex = toSvgX(vx) + r * Math.cos(endA * Math.PI / 180)
+        const ey = toSvgY(vy) - r * Math.sin(endA * Math.PI / 180)
+        svgElements.push(`<path d="M ${sx.toFixed(1)} ${sy.toFixed(1)} A ${r.toFixed(1)} ${r.toFixed(1)} 0 ${largeArc} 0 ${ex.toFixed(1)} ${ey.toFixed(1)}" fill="none" stroke="#666" stroke-width="1"/>`)
+      }
+    }
+
+    // \pic[draw] {right angle = A--B--C};
+    const picRightAngleRegex = /\\pic(?:\[([^\]]*)\])?\s*\{right\s*angle\s*=\s*(\w+)\s*--\s*(\w+)\s*--\s*(\w+)\s*\}/g
+    while ((match = picRightAngleRegex.exec(cleanCode)) !== null) {
+      const vertex = findCoord(match[3])
+      const arm1 = findCoord(match[2]), arm2 = findCoord(match[4])
+      if (vertex && arm1 && arm2) {
+        hasSubstantialContent = true
+        const r = 0.3 * scale
+        // 沿两条边方向偏移 r 距离
+        const len1 = Math.sqrt((arm1.x - vertex.x)**2 + (arm1.y - vertex.y)**2) || 1
+        const len2 = Math.sqrt((arm2.x - vertex.x)**2 + (arm2.y - vertex.y)**2) || 1
+        const ux1 = (arm1.x - vertex.x) / len1, uy1 = (arm1.y - vertex.y) / len1
+        const ux2 = (arm2.x - vertex.x) / len2, uy2 = (arm2.y - vertex.y) / len2
+        const p1x = toSvgX(vertex.x + ux1 * r / scale), p1y = toSvgY(vertex.y + uy1 * r / scale)
+        const p2x = toSvgX(vertex.x + ux1 * r / scale + ux2 * r / scale), p2y = toSvgY(vertex.y + uy1 * r / scale + uy2 * r / scale)
+        const p3x = toSvgX(vertex.x + ux2 * r / scale), p3y = toSvgY(vertex.y + uy2 * r / scale)
+        svgElements.push(`<polyline points="${p1x.toFixed(1)},${p1y.toFixed(1)} ${p2x.toFixed(1)},${p2y.toFixed(1)} ${p3x.toFixed(1)},${p3y.toFixed(1)}" fill="none" stroke="#666" stroke-width="1"/>`)
+      }
+    }
+
+    // ── 7. \tkzMarkAngle ──
+    // \tkzMarkAngle[size=0.5](A,B,C)
+    const tkzAngleRegex = /\\tkzMarkAngle(?:\[([^\]]*)\])?\s*\((\w+)\s*,\s*(\w+)\s*,\s*(\w+)\)/g
+    while ((match = tkzAngleRegex.exec(cleanCode)) !== null) {
+      const style = match[1] || ''
+      const sizeMatch = style.match(/size\s*=\s*([\d.]+)/)
+      const tkzRadius = sizeMatch ? parseFloat(sizeMatch[1]) : 0.5
+      const vertex = findCoord(match[3])
+      const arm1 = findCoord(match[2]), arm2 = findCoord(match[4])
+      if (vertex && arm1 && arm2) {
+        hasSubstantialContent = true
+        const vx = vertex.x, vy = vertex.y
+        const a1x = arm1.x - vx, a1y = arm1.y - vy
+        const a2x = arm2.x - vx, a2y = arm2.y - vy
+        const angle1 = Math.atan2(a1y, a1x) * 180 / Math.PI
+        const angle2 = Math.atan2(a2y, a2x) * 180 / Math.PI
+        const r = tkzRadius * scale
+        const startA = Math.min(angle1, angle2), endA = Math.max(angle1, angle2)
+        const largeArc = (endA - startA) > 180 ? 1 : 0
+        const sx = toSvgX(vx) + r * Math.cos(startA * Math.PI / 180)
+        const sy = toSvgY(vy) - r * Math.sin(startA * Math.PI / 180)
+        const ex = toSvgX(vx) + r * Math.cos(endA * Math.PI / 180)
+        const ey = toSvgY(vy) - r * Math.sin(endA * Math.PI / 180)
+        svgElements.push(`<path d="M ${sx.toFixed(1)} ${sy.toFixed(1)} A ${r.toFixed(1)} ${r.toFixed(1)} 0 ${largeArc} 0 ${ex.toFixed(1)} ${ey.toFixed(1)}" fill="none" stroke="#666" stroke-width="1"/>`)
+      }
+    }
+
+    // ── 8. \tkzMarkRightAngle ──
+    // \tkzMarkRightAngle[size=0.3](A,B,C)
+    const tkzRightAngleRegex = /\\tkzMarkRightAngle(?:\[([^\]]*)\])?\s*\((\w+)\s*,\s*(\w+)\s*,\s*(\w+)\)/g
+    while ((match = tkzRightAngleRegex.exec(cleanCode)) !== null) {
+      const style = match[1] || ''
+      const sizeMatch = style.match(/size\s*=\s*([\d.]+)/)
+      const sz = sizeMatch ? parseFloat(sizeMatch[1]) : 0.3
+      const vertex = findCoord(match[3])
+      const arm1 = findCoord(match[2]), arm2 = findCoord(match[4])
+      if (vertex && arm1 && arm2) {
+        hasSubstantialContent = true
+        const r = sz * scale
+        const len1 = Math.sqrt((arm1.x - vertex.x)**2 + (arm1.y - vertex.y)**2) || 1
+        const len2 = Math.sqrt((arm2.x - vertex.x)**2 + (arm2.y - vertex.y)**2) || 1
+        const ux1 = (arm1.x - vertex.x) / len1, uy1 = (arm1.y - vertex.y) / len1
+        const ux2 = (arm2.x - vertex.x) / len2, uy2 = (arm2.y - vertex.y) / len2
+        const p1x = toSvgX(vertex.x + ux1 * r / scale), p1y = toSvgY(vertex.y + uy1 * r / scale)
+        const p2x = toSvgX(vertex.x + ux1 * r / scale + ux2 * r / scale), p2y = toSvgY(vertex.y + uy1 * r / scale + uy2 * r / scale)
+        const p3x = toSvgX(vertex.x + ux2 * r / scale), p3y = toSvgY(vertex.y + uy2 * r / scale)
+        svgElements.push(`<polyline points="${p1x.toFixed(1)},${p1y.toFixed(1)} ${p2x.toFixed(1)},${p2y.toFixed(1)} ${p3x.toFixed(1)},${p3y.toFixed(1)}" fill="none" stroke="#666" stroke-width="1"/>`)
+      }
+    }
+
+    // ── 9. 圆 ──
+    // \draw (x,y) circle (r); 或 \draw[fill] (x,y) circle (r);
+    const circleRegex = /\\draw(?:\[([^\]]*)\])?\s*\((-?[\d.]+)\s*,\s*(-?[\d.]+)\)\s*circle\s*\(?([\d.]+)\s*cm?\)?/g
+    while ((match = circleRegex.exec(cleanCode)) !== null) {
+      hasSubstantialContent = true
+      const cx = toSvgX(parseFloat(match[2])), cy = toSvgY(parseFloat(match[3]))
+      const r = parseFloat(match[4]) * scale
+      const style = match[1] || ''
+      const styleInfo = parseStyle(style)
+      const fillAttr = styleInfo.fill ? ` fill="${styleInfo.fill}"` : ' fill="none"'
+      svgElements.push(`<circle cx="${cx.toFixed(1)}" cy="${cy.toFixed(1)}" r="${r.toFixed(1)}"${fillAttr} stroke="${styleInfo.strokeColor}" stroke-width="${styleInfo.strokeWidth}"/>`)
+    }
+
+    // ── 10. 填充路径 \fill ──
+    // \fill (x1,y1) -- (x2,y2) -- (x3,y3) -- cycle;
+    const fillRegex = /\\fill(?:\[([^\]]*)\])?\s*\((-?[\d.]+)\s*,\s*(-?[\d.]+)\)\s*((?:--\s*\(-?[\d.]+\s*,\s*-?[\d.]+\)\s*)*)(?:--\s*cycle)?/g
+    while ((match = fillRegex.exec(cleanCode)) !== null) {
+      hasSubstantialContent = true
+      const points = [[parseFloat(match[2]), parseFloat(match[3])]]
+      const segRegex = /--\s*\((-?[\d.]+)\s*,\s*(-?[\d.]+)\)/g
+      let segM
+      while ((segM = segRegex.exec(match[4])) !== null) {
+        points.push([parseFloat(segM[1]), parseFloat(segM[2])])
+      }
+      const pointsStr = points.map(p => `${toSvgX(p[0]).toFixed(1)},${toSvgY(p[1]).toFixed(1)}`).join(' ')
+      const styleInfo = parseStyle(match[1] || '')
+      svgElements.push(`<polygon points="${pointsStr}" fill="${styleInfo.fill || '#E5E7EB'}" stroke="${styleInfo.strokeColor}" stroke-width="${styleInfo.strokeWidth}" opacity="${styleInfo.opacity}"/>`)
+    }
+
+    // ── 11. 路径命令 \path ──
+    const pathRegex = /\\path(?:\[([^\]]*)\])?\s*\((-?[\d.]+)\s*,\s*(-?[\d.]+)\)\s*((?:--\s*\(-?[\d.]+\s*,\s*-?[\d.]+\)\s*)*)(?:--\s*cycle)?/g
+    while ((match = pathRegex.exec(cleanCode)) !== null) {
+      hasSubstantialContent = true
+      const style = match[1] || ''
+      const styleInfo = parseStyle(style)
+      const points = [[parseFloat(match[2]), parseFloat(match[3])]]
+      const segRegex = /--\s*\((-?[\d.]+)\s*,\s*(-?[\d.]+)\)/g
+      let segM
+      while ((segM = segRegex.exec(match[4])) !== null) {
+        points.push([parseFloat(segM[1]), parseFloat(segM[2])])
+      }
+      if (points.length >= 2) {
+        for (let i = 0; i < points.length - 1; i++) {
+          svgElements.push(`<line x1="${toSvgX(points[i][0]).toFixed(1)}" y1="${toSvgY(points[i][1]).toFixed(1)}" x2="${toSvgX(points[i+1][0]).toFixed(1)}" y2="${toSvgY(points[i+1][1]).toFixed(1)}" stroke="${styleInfo.strokeColor}" stroke-width="${styleInfo.strokeWidth}" ${styleInfo.dash}/>`)
+        }
       }
     }
     

@@ -107,8 +107,9 @@
                   </div>
                 </div>
                 <div class="question-card__thumb">
+                  <div v-if="getQuestionThumbSvg(wq)" class="thumb-svg" v-html="getQuestionThumbSvg(wq)"></div>
                   <LazyImage
-                    v-if="getQuestionThumb(wq)"
+                    v-else-if="getQuestionThumb(wq)"
                     :src="getQuestionThumb(wq)"
                     alt="题目缩略图"
                     width="60"
@@ -149,8 +150,9 @@
                 </div>
               </div>
               <div class="question-card__thumb">
+                <div v-if="getQuestionThumbSvg(wq)" class="thumb-svg" v-html="getQuestionThumbSvg(wq)"></div>
                 <LazyImage
-                  v-if="getQuestionThumb(wq)"
+                  v-else-if="getQuestionThumb(wq)"
                   :src="getQuestionThumb(wq)"
                   alt="题目缩略图"
                   width="60"
@@ -227,10 +229,15 @@
                   <div class="unified-label">题干</div>
                   <div class="unified-text"><MathRender :content="getQuestionContent(selectedDetailQuestion)" /></div>
                 </div>
-                <div class="unified-section unified-image-section" v-if="getQuestionThumb(selectedDetailQuestion)">
+                <div class="unified-section unified-image-section" v-if="detailDisplayUrl">
                   <div class="unified-label">配图</div>
+                  <!-- TikZ 代码 → 内联 SVG -->
+                  <div v-if="detailDisplayType === 'tikz_code'" class="tikz-svg-container"
+                       v-html="renderTikzSvg(detailDisplayUrl)" @click="openDetailFullscreen"></div>
+                  <!-- URL → LazyImage -->
                   <LazyImage
-                    :src="getQuestionThumb(selectedDetailQuestion)"
+                    v-else
+                    :src="detailDisplayUrl"
                     alt="题目配图"
                     width="100%"
                     height="200px"
@@ -384,6 +391,11 @@
     </div>
     <template #footer><el-button @click="showTagSelector = false">关闭</el-button></template>
   </el-dialog>
+
+  <!-- 几何矢量图全屏查看 -->
+  <el-dialog v-model="showFullscreenSvg" title="几何矢量图" width="480px" :close-on-click-modal="true" @close="fullscreenSvg = ''">
+    <div class="tikz-fullscreen-svg" v-html="fullscreenSvg" style="display:flex;justify-content:center;"></div>
+  </el-dialog>
 </template>
 
 <script setup>
@@ -398,6 +410,7 @@ import {
 import { useWrongBookStore } from '../stores/wrongBookStore'
 import { getStudents, updateQuestion, rejudgeQuestion } from '../../services/apiService'
 import { getGeometryDisplayUrl, getTikzStatus } from '../../utils/geometryDisplay'
+import { tikzToSvg } from '../../utils/tikzGenerator'
 import dayjs from 'dayjs'
 import MathRender from "../components/MathRender.vue"
 import QuestionEditForm from "../components/review/QuestionEditForm.vue"
@@ -457,6 +470,36 @@ const selectedDetailQuestion = ref(null)
 const tikzStatus = computed(() => getTikzStatus(selectedDetailQuestion.value))
 const isTikzActive = computed(() => selectedDetailQuestion.value?.display_image_type === 'tikz')
 
+// 详情面板配图显示信息（区分 TikZ 代码 vs URL）
+const detailDisplayInfo = computed(() => {
+  const wq = selectedDetailQuestion.value
+  if (!wq) return { url: null, type: 'none' }
+  const q = getQuestion(wq)
+  const info = getGeometryDisplayUrl(q)
+  if (info.url) return info
+  return getGeometryDisplayUrl(wq)
+})
+const detailDisplayType = computed(() => detailDisplayInfo.value.type)
+const detailDisplayUrl = computed(() => detailDisplayInfo.value.url)
+
+const fullscreenSvg = ref('')
+const showFullscreenSvg = ref(false)
+
+/** 将 TikZ 代码渲染为 SVG 字符串 */
+const renderTikzSvg = (code) => {
+  if (!code) return ''
+  return tikzToSvg(code) || ''
+}
+
+/** 点击 SVG 全屏查看 */
+const openDetailFullscreen = () => {
+  const svg = renderTikzSvg(detailDisplayUrl.value)
+  if (svg) {
+    fullscreenSvg.value = svg
+    showFullscreenSvg.value = true
+  }
+}
+
 const handleSelectQuestion = (wq) => {
   selectedDetailQuestion.value = wq
 }
@@ -512,7 +555,20 @@ const getQuestionSubject = (wq) => {
 
 const getQuestionThumb = (wq) => {
   const q = getQuestion(wq)
-  return getGeometryDisplayUrl(q).url || getGeometryDisplayUrl(wq).url || ''
+  const info = getGeometryDisplayUrl(q)
+  const val = info.url ? info : getGeometryDisplayUrl(wq)
+  // TikZ 代码不能作为图片 URL，缩略图返回空（改用 SVG 渲染）
+  if (val.type === 'tikz_code') return ''
+  return val.url || ''
+}
+
+/** 缩略图：TikZ 代码渲染为内联 SVG 字符串，否则返回空 */
+const getQuestionThumbSvg = (wq) => {
+  const q = getQuestion(wq)
+  const info = getGeometryDisplayUrl(q)
+  const val = info.url ? info : getGeometryDisplayUrl(wq)
+  if (val.type === 'tikz_code') return renderTikzSvg(val.url)
+  return ''
 }
 
 const getErrorCount = (wq) => {
@@ -1045,6 +1101,20 @@ onUnmounted(() => {
   font-size: 24px;
 }
 
+.thumb-svg {
+  width: 100%;
+  height: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: #fff;
+}
+.thumb-svg :deep(svg) {
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
+}
+
 /* Pagination */
 .question-panel__pagination {
   display: flex;
@@ -1460,6 +1530,22 @@ onUnmounted(() => {
   border-radius: 6px;
   border: 1px solid #ebeef5;
   object-fit: contain;
+}
+.tikz-svg-container {
+  max-width: 100%;
+  max-height: 240px;
+  border-radius: 6px;
+  border: 1px solid #ebeef5;
+  background: #fff;
+  padding: 8px;
+  cursor: zoom-in;
+  display: flex;
+  justify-content: center;
+  align-items: center;
+}
+.tikz-svg-container :deep(svg) {
+  max-width: 100%;
+  height: auto;
 }
 .unified-option-row {
   display: flex;

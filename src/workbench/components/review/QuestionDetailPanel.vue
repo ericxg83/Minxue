@@ -132,24 +132,28 @@
             <div class="ops-q-text"><MathRender :content="q.content" autoDetect /></div>
           </div>
           <div class="ops-q-section ops-image-section" v-if="displayImageUrl">
-            <div class="ops-q-label">配图</div>
-            <div class="ops-image-wrap">
-              <img :src="displayImageUrl" class="ops-image" @click="fullscreenImage = displayImageUrl" />
-              <div style="display:flex; gap:6px; margin-top:4px;">
-                <template v-if="tikzStatus === 'done'">
-                  <el-button v-if="!isTikzActive" size="small" type="primary" plain @click="handleUseTikz">
-                    采用TikZ图
-                  </el-button>
-                  <el-button v-else size="small" plain @click="handleUseClean">
-                    显示原图
-                  </el-button>
-                </template>
-                <el-button v-else-if="tikzStatus === 'pending'" size="small" disabled plain>
-                  TikZ生成中...
-                </el-button>
-              </div>
-            </div>
-          </div>
+    <div class="ops-q-label">配图</div>
+    <div class="ops-image-wrap">
+      <!-- TikZ 代码 → 内联 SVG -->
+      <div v-if="displayType === 'tikz_code'" class="tikz-svg-container"
+           v-html="renderTikzSvg(displayImageUrl)" @click="openFullscreen"></div>
+      <!-- URL → <img> 标签 -->
+      <img v-else :src="displayImageUrl" class="ops-image" @click="fullscreenImage = displayImageUrl" />
+      <div style="display:flex; gap:6px; margin-top:4px;">
+        <template v-if="tikzStatus === 'done'">
+          <el-button v-if="!isTikzActive" size="small" type="primary" plain @click="handleUseTikz">
+            采用TikZ图
+          </el-button>
+          <el-button v-else size="small" plain @click="handleUseClean">
+            显示原图
+          </el-button>
+        </template>
+        <el-button v-else-if="tikzStatus === 'pending'" size="small" disabled plain>
+          TikZ生成中...
+        </el-button>
+      </div>
+    </div>
+  </div>
           <div class="ops-q-section" v-if="optionsList.length > 0">
             <div class="ops-q-label">选项</div>
             <div v-for="(opt, idx) in optionsList" :key="idx" class="ops-option-row"
@@ -236,6 +240,9 @@
     </el-dialog>
 
     <el-image-viewer v-if="fullscreenImage" :url-list="[fullscreenImage]" @close="fullscreenImage = ''" />
+    <el-dialog v-model="showFullscreenSvg" title="几何矢量图" width="480px" :close-on-click-modal="true" @close="fullscreenSvg = ''">
+      <div class="tikz-fullscreen-svg" v-html="fullscreenSvg" style="display:flex;justify-content:center;"></div>
+    </el-dialog>
     <el-dialog v-model="showTagSelector" title="选择知识点" width="380px">
       <div class="tag-grid">
         <div v-for="tag in allKnowledgeTags" :key="tag" class="tag-option"
@@ -252,6 +259,7 @@ import { useReviewStore } from '../../stores/reviewStore'
 import { updateQuestion, rejudgeQuestion, clearStudentCaches, uploadImage } from '../../../services/apiService'
 import { processExamImage } from '../../../utils/imageProcessor'
 import { getGeometryDisplayUrl, getTikzStatus } from '../../../utils/geometryDisplay'
+import { tikzToSvg } from '../../../utils/tikzGenerator'
 import { ElMessage, ElMessageBox, ElLoading } from 'element-plus'
 import { DocumentChecked, Delete, Plus, Upload, Picture, EditPen, ArrowLeft, ArrowRight, RefreshLeft, Crop } from '@element-plus/icons-vue'
 import MathRender from '../MathRender.vue'
@@ -300,10 +308,28 @@ const cleanOptPrefix = (text) => {
 }
 
 const displayImageUrl = computed(() => getGeometryDisplayUrl(q.value).url)
+const displayType = computed(() => getGeometryDisplayUrl(q.value).type)
 const tikzStatus = computed(() => getTikzStatus(q.value))
 const isTikzActive = computed(() => q.value?.display_image_type === 'tikz')
 const fullscreenImage = ref('')
+const fullscreenSvg = ref('')
+const showFullscreenSvg = ref(false)
 const imageUrl = computed(() => q.value?.geometry_image_url || q.value?.image_url || '')
+
+/** 将 TikZ 代码渲染为 SVG 字符串 */
+const renderTikzSvg = (code) => {
+  if (!code) return ''
+  return tikzToSvg(code) || ''
+}
+
+/** 点击 SVG 全屏查看 */
+const openFullscreen = () => {
+  const svg = renderTikzSvg(displayImageUrl.value)
+  if (svg) {
+    fullscreenSvg.value = svg
+    showFullscreenSvg.value = true
+  }
+}
 
 const editing = ref(false)
 const animatingBtn = ref('')
@@ -846,6 +872,22 @@ const handleUseClean = async () => {
   cursor: zoom-in;
   border: 1px solid #ebeef5;
   object-fit: contain;
+}
+.tikz-svg-container {
+  max-width: 100%;
+  max-height: 280px;
+  border-radius: 6px;
+  cursor: zoom-in;
+  border: 1px solid #ebeef5;
+  background: #fff;
+  padding: 8px;
+  display: flex;
+  justify-content: center;
+  align-items: center;
+}
+.tikz-svg-container :deep(svg) {
+  max-width: 100%;
+  height: auto;
 }
 .ops-no-image {
   display: flex;
