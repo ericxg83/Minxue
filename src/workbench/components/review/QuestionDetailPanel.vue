@@ -84,10 +84,10 @@
       </div>
 
       <!-- AI 判定 -->
-      <div class="ops-ai-row" v-if="q.is_correct != null">
-        <span class="ops-ai-icon" :class="q.is_correct ? 'ai-ok' : 'ai-fail'">{{ q.is_correct ? '✓' : '✗' }}</span>
-        <span class="ops-ai-text">{{ q.is_correct ? 'AI 判定正确' : 'AI 判定错误' }}</span>
-        <el-progress v-if="q.confidence != null" :percentage="Math.round(q.confidence * 100)"
+      <div class="ops-ai-row" v-if="q.is_correct != null || q.review_status">
+        <span class="ops-ai-icon" :class="getAiStateClass(q)">{{ getAiStateIcon(q) }}</span>
+        <span class="ops-ai-text">{{ getAiStateText(q) }}</span>
+        <el-progress v-if="q.confidence != null && getAiState(q) === 'pending'" :percentage="Math.round(q.confidence * 100)"
           :stroke-width="8" :color="q.confidence >= store.confidenceThreshold ? '#67c23a' : '#e6a23c'"
           style="width:100px;margin-left:auto;" />
       </div>
@@ -305,6 +305,68 @@ const reviewStatusTagType = computed(() => {
   const map = { correct: 'success', wrong: 'danger', exclude: 'info' }
   return map[q.value?.review_status] || 'info'
 })
+
+// AI状态相关方法（与store保持一致）
+const getAiState = (q) => {
+  if (!q) return 'processing'
+
+  // 人工已复核 → 以人工结论为最高优先级
+  if (q.review_status === 'correct') return 'correct'
+  if (q.review_status === 'wrong') return 'wrong'
+
+  // AI 异常：未识别答案 / OCR 失败
+  if (q.answer_source === 'blank') return 'exception'
+
+  // 处理中：AI 尚未出任何判定
+  if (q.is_correct == null && q.confidence == null) return 'processing'
+
+  // AI 错误：判定学生答案错误
+  if (q.is_correct === false) return 'wrong'
+
+  // AI 正确 + 已确认（人工复核 或 置信度达标）
+  const manual = !!q.review_status
+  const confirmed = manual || (q.confidence != null && q.confidence >= store.confidenceThreshold.value)
+  if (q.is_correct === true && confirmed) return 'correct'
+
+  // 其余 → 待复核（置信度不足 / AI 不确定）
+  return 'pending'
+}
+
+const getAiStateClass = (q) => {
+  const state = getAiState(q)
+  const map = {
+    correct: 'ai-ok',
+    wrong: 'ai-fail',
+    pending: 'ai-pending',
+    exception: 'ai-exception',
+    processing: 'ai-processing'
+  }
+  return map[state] || 'ai-pending'
+}
+
+const getAiStateIcon = (q) => {
+  const state = getAiState(q)
+  const map = {
+    correct: '✓',
+    wrong: '✗',
+    pending: '!',
+    exception: '!',
+    processing: '…'
+  }
+  return map[state] || '!'
+}
+
+const getAiStateText = (q) => {
+  const state = getAiState(q)
+  const map = {
+    correct: 'AI 判定正确',
+    wrong: 'AI 判定错误',
+    pending: '待复核',
+    exception: 'AI异常',
+    processing: '处理中'
+  }
+  return map[state] || 'AI判定中'
+}
 
 /** 去掉选项文本中已有的字母前缀（如 "A."、"A)"、"A、"），避免显示为 "A.A. 内容" */
 const cleanOptPrefix = (text) => {
@@ -834,6 +896,9 @@ const handleUseClean = async () => {
 }
 .ai-ok { background: #67c23a; }
 .ai-fail { background: #f56c6c; }
+.ai-pending { background: #e6a23c; }
+.ai-exception { background: #fa8c16; }
+.ai-processing { background: #9254de; }
 .ops-ai-text { font-size: 13px; color: #606266; }
 
 /* ═══ 完整题目内容区（可滚动） ═══ */

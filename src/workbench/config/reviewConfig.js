@@ -46,8 +46,8 @@ export const REVIEW_CONFIG = {
     // 数据来源：paper=生成的练习卷
     source: 'paper',
     modeLabel: '错题重练',
-    topTitle: '练习批改',
-    detailTitle: '练习批改',
+    topTitle: '重练批改',
+    detailTitle: '重练批改',
     buttons: {
       correct: '正确',
       wrong: '错误',

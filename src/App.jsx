@@ -32,6 +32,7 @@ import { getStudents, getTasksByStudent, getQuestionsByTask, addWrongQuestions, 
 import { taskService } from './services/taskService'
 import { recognizeQuestions, compressImage, saveRecognitionResult } from './services/aiService'
 import { processMultiPagePaperLayout } from './services/paperBankAIService'
+import { detectQRCode, groupFilesByQRCode } from './services/qrDetectionService'
 import { downloadPaperWord } from './utils/docxGenerator'
 import { mockQuestions, mockTasks, mockWrongQuestions, mockGeneratedExams, mockStudents } from './data/mockData'
 import StudentSwitcher from './components/StudentSwitcher'
@@ -152,6 +153,7 @@ export default function App() {
   const [processingFilter, setProcessingFilter] = useState('all')
   const [uploading, setUploading] = useState(false)
   const [previewImage, setPreviewImage] = useState(null)
+  const [uploadingTasks, setUploadingTasks] = useState([]) // Track uploading tasks for batch processing
 
   // Bank Page State
   const [bankFilter, setBankFilter] = useState('all')
@@ -224,6 +226,9 @@ export default function App() {
       return cached ? JSON.parse(cached) : []
     } catch { return [] }
   })
+
+  // QR Detection State
+  const [qrDetectionResults, setQrDetectionResults] = useState({})
   const [paperBankDraft, setPaperBankDraft] = useState(null)
   const [paperBankUploadedPages, setPaperBankUploadedPages] = useState([])
   const [paperBankReconstructedPages, setPaperBankReconstructedPages] = useState([]) // 存储每页原图+layoutBlocks
@@ -537,7 +542,7 @@ export default function App() {
     }
   }
 
-  // Upload file handler
+  // Upload file handler with QR detection
   const handleFileSelect = async (e) => {
     console.debug('🔥🔥🔥🔥🔥 [UPLOAD] === handleFileSelect TRIGGERED === 🔥🔥🔥🔥🔥')
     try {
@@ -592,17 +597,126 @@ export default function App() {
 
       console.debug('✅ [UPLOAD] currentStudent:', currentStudent.id, currentStudent.name)
 
-      if (USE_MOCK_DATA) {
-        console.debug('🔥🔥🔥 [UPLOAD] === Using MOCK path (uploadViaFrontend) ===')
-        await uploadViaFrontend(newFiles)
-      } else {
-        console.debug('🔥🔥🔥 [UPLOAD] === Using BACKEND path (uploadViaBackend) ===')
-        await uploadViaBackend(newFiles)
+      // Step 1: Detect QR codes for all files
+      setUploading(true)
+      Toast.show({ message: '正在检测二维码...', type: 'loading', duration: 0 })
+
+      const filesWithQR = []
+      for (const file of newFiles) {
+        const qrContent = await detectQRCode(file)
+        filesWithQR.push({ file, qrContent })
+        console.debug(`🔍 [QR] File: ${file.name}, QR Content:`, qrContent)
       }
+
+      // Step 2: Group files by QR code content
+      const groupedFiles = groupFilesByQRCode(filesWithQR)
+      console.debug('📁 [QR] Grouped files:', groupedFiles)
+
+      // Step 3: Process each group
+      for (const group of groupedFiles) {
+        if (group.isRetryPaper && group.qrContent) {
+          // Handle retry paper (group by QR content)
+          await uploadRetryPaperGroup(group.files, group.qrContent)
+        } else {
+          // Handle regular homework (each file individually)
+          for (const file of group.files) {
+            await uploadRegularHomework(file)
+          }
+        }
+      }
+
+      setUploading(false)
     } catch (err) {
       console.error('💥💥💥💥💥 [UPLOAD] UNCAUGHT ERROR in handleFileSelect:', err)
       console.error('💥 [UPLOAD] Error stack:', err.stack)
       Toast.show({ message: `上传出错: ${err.message}`, type: 'error', duration: 5000 })
+      setUploading(false)
+    }
+  }
+
+  // Upload via backend API
+  const uploadRetryPaperGroup = async (files, qrContent) => {
+    console.debug('🔄 [UPLOAD] === Processing retry paper group ===')
+    console.debug('🔄 [UPLOAD] QR Content:', qrContent)
+    console.debug('🔄 [UPLOAD] Files count:', files.length)
+
+    Toast.show({ message: `检测到错题重练卷，正在上传 ${files.length} 页...`, type: 'loading', duration: 0 })
+
+    try {
+      // Create a single task for the entire paper
+      const tempTask = {
+        id: `temp-retry-${Date.now()}`,
+        student_id: currentStudent.id,
+        original_name: `错题重练_${qrContent}_${dayjs().format('YYYY-MM-DD_HH-mm-ss')}`,
+        task_type: 'retry_paper',
+        retry_paper_id: qrContent,
+        pages: files.map((file, index) => ({
+          id: `page-${index + 1}`,
+          image_url: URL.createObjectURL(file),
+          file_name: file.name,
+          page_number: index + 1
+        })),
+        status: 'pending',
+        created_at: new Date().toISOString(),
+        isRetryPaper: true
+      }
+
+      // Add temp task to store
+      addTask(tempTask)
+      setUploadingTasks(prev => [...prev, tempTask.id])
+
+      // Upload all files to backend as a batch
+      const formData = new FormData()
+      formData.append('studentId', currentStudent.id)
+      formData.append('taskType', 'retry_paper')
+      formData.append('retryPaperId', qrContent)
+
+      files.forEach((file, index) => {
+        formData.append(`files`, file)
+        formData.append(`fileNames[${index}]`, file.name)
+      })
+
+      const result = await taskService.uploadFiles(currentStudent.id, files, {
+        taskType: 'retry_paper',
+        retryPaperId: qrContent
+      })
+
+      // Update task with real ID and status
+      if (result.success && result.tasks && result.tasks.length > 0) {
+        const updatedTask = result.tasks[0]
+        updateTaskInStore(tempTask.id, 'processing', {
+          id: updatedTask.id,
+          generatedExamId: updatedTask.generated_exam_id
+        })
+
+        // Process the task (AI grading will handle retry paper logic)
+        processTask(updatedTask)
+      }
+
+      Toast.show({ message: `错题重练卷上传成功！`, type: 'success', duration: 2000 })
+    } catch (error) {
+      console.error('💥 [uploadRetryPaperGroup] Error:', error)
+      updateTaskInStore(tempTask.id, 'failed', { error: error.message || '上传失败' })
+      Toast.show({ message: '错题重练卷上传失败', type: 'error', duration: 3000 })
+    } finally {
+      setUploadingTasks(prev => prev.filter(id => id !== tempTask.id))
+    }
+  }
+
+  // Upload regular homework (single file)
+  const uploadRegularHomework = async (file) => {
+    console.debug('📝 [UPLOAD] === Processing regular homework ===')
+    console.debug('📝 [UPLOAD] File:', file.name)
+
+    try {
+      if (USE_MOCK_DATA) {
+        await uploadViaFrontend([file])
+      } else {
+        await uploadViaBackend([file])
+      }
+    } catch (error) {
+      console.error('💥 [uploadRegularHomework] Error:', error)
+      Toast.show({ message: `作业上传失败: ${error.message}`, type: 'error', duration: 3000 })
     }
   }
 
@@ -2147,17 +2261,76 @@ export default function App() {
                           }}
                         >
                         <div className="list-card-row items-center">
+                          {/* Task Type Badge */}
+                          <div className="flex-shrink-0 mr-2">
+                            {task.task_type === 'retry_paper' ? (
+                              <span className="inline-flex items-center gap-1 px-2 py-1 rounded-full text-xs font-medium" style={{
+                                background: 'var(--purple-soft)',
+                                color: 'var(--purple)',
+                                border: '1px solid var(--purple)'
+                              }}>
+                                <ScanLine size={10} />
+                                错题重练
+                              </span>
+                            ) : (
+                              <span className="inline-flex items-center gap-1 px-2 py-1 rounded-full text-xs font-medium" style={{
+                                background: 'var(--primary-soft)',
+                                color: 'var(--primary)',
+                                border: '1px solid var(--primary)'
+                              }}>
+                                <BookOpen size={10} />
+                                日常作业
+                              </span>
+                            )}
+                          </div>
+
                           {/* Thumbnail */}
                           <div
-                            className="w-10 h-10 rounded-xl flex-shrink-0 overflow-hidden cursor-pointer ring-1 ring-black/5"
+                            className="relative w-10 h-10 rounded-xl flex-shrink-0 overflow-hidden cursor-pointer ring-1 ring-black/5"
                             style={{ background: 'var(--bg-mist)' }}
                             onClick={(e) => { e.stopPropagation(); handleViewImage(task.image_url) }}
                           >
                             {task.image_url ? (
-                              <img src={task.image_url} alt="" className="w-full h-full object-cover" />
+                              task.isRetryPaper && task.pages && task.pages.length > 1 ? (
+                                // Stacked pages for retry papers
+                                <div className="relative w-full h-full">
+                                  {task.pages.slice(0, 3).map((page, index) => (
+                                    <div
+                                      key={page.id}
+                                      className="absolute inset-0 rounded-lg overflow-hidden"
+                                      style={{
+                                        transform: `translateX(${index * 2}px) translateY(${index * 2}px)`,
+                                        zIndex: index,
+                                        boxShadow: '0 1px 3px rgba(0,0,0,0.2)'
+                                      }}
+                                    >
+                                      <img
+                                        src={page.image_url || task.image_url}
+                                        alt={`Page ${page.page_number}`}
+                                        className="w-full h-full object-cover"
+                                      />
+                                    </div>
+                                  ))}
+                                  {task.pages.length > 3 && (
+                                    <div className="absolute inset-0 rounded-lg bg-gray-100 flex items-center justify-center text-xs font-medium text-gray-500">
+                                      +{task.pages.length - 3}页
+                                    </div>
+                                  )}
+                                </div>
+                              ) : (
+                                // Single image for regular homework
+                                <img src={task.image_url} alt="" className="w-full h-full object-cover" />
+                              )
                             ) : (
                               <div className="w-full h-full flex items-center justify-center">
                                 <FileText size={16} style={{ color: 'var(--text-tertiary)' }} />
+                              </div>
+                            )}
+
+                            {/* Page count indicator for retry papers */}
+                            {task.isRetryPaper && task.pages && task.pages.length > 1 && (
+                              <div className="absolute -top-1 -right-1 bg-purple-500 text-white text-xs rounded-full w-5 h-5 flex items-center justify-center font-medium border-2 border-white shadow-sm">
+                                {task.pages.length}
                               </div>
                             )}
                           </div>

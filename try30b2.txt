@@ -1,0 +1,8 @@
+[Qwen/Qwen3-VL-30B-A3B-Instruct]
+  geoLabels=undefined
+  ignored=undefined
+  labels=["50°","2.5","1.5","1.5","1.5"]
+[Qwen/Qwen3-VL-8B-Instruct]
+  geoLabels=undefined
+  ignored=undefined
+  labels=[{"label":"50","position":"near A","relation":"angle at vertex A"},{"label":"15","position":"near B","relation":"angle at vertex B"},{"label":"65","position":"near D","relation":"angle at vertex D"}]
