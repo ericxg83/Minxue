@@ -38,11 +38,20 @@ export const taskService = {
     console.debug('📤 [taskService.uploadFiles] studentId:', studentId)
     console.debug('📤 [taskService.uploadFiles] fileCount:', files.length)
     console.debug('📤 [taskService.uploadFiles] files:', files.map(f => ({ name: f.name, size: f.size, type: f.type })))
+    console.debug('📤 [taskService.uploadFiles] options:', options)
 
     const formData = new FormData()
     formData.append('studentId', studentId)
     if (options.generatedExamId) formData.append('generatedExamId', options.generatedExamId)
     if (options.taskType) formData.append('taskType', options.taskType)
+    if (options.retryPaperId) formData.append('retryPaperId', options.retryPaperId)
+
+    // Add file names for multi-page papers
+    if (options.fileNames) {
+      options.fileNames.forEach((name, index) => {
+        formData.append(`fileNames[${index}]`, name)
+      })
+    }
 
     for (const file of files) {
       formData.append('files', file)

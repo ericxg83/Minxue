@@ -22,9 +22,10 @@
 const isNum = (v) => typeof v === 'number' && isFinite(v)
 
 // 阈值（相对图形尺度 extent = max(包围盒宽, 高)，自动适配不同缩放）
-const REGION_PAD_FRAC = 0.30 // 图形 bbox 外扩比例，定义"几何区域内"
-const PROX_FRAC = 0.22 // 距最近几何元素（线段/点）的最大距离（占 extent 比例）
-const ANGLE_POINT_FRAC = 0.40 // 角度标注：距顶点的最大距离（占 extent 比例，放宽以容纳顶点外侧标注）
+// 减小阈值：更严格地要求标注必须紧贴几何元素，避免误判题干数字
+const REGION_PAD_FRAC = 0.20  // 图形 bbox 外扩比例，定义"几何区域内"（收紧）
+const PROX_FRAC = 0.18        // 距最近几何元素（线段/点）的最大距离（收紧）
+const ANGLE_POINT_FRAC = 0.35 // 角度标注：距顶点的最大距离（收紧）
 
 /**
  * 对候选 label 去重（按 text + 坐标）。

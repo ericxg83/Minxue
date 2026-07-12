@@ -733,6 +733,7 @@ export default function App() {
         student_id: currentStudent.id,
         image_url: URL.createObjectURL(file),
         original_name: file.name || `照片_${dayjs().format('YYYY-MM-DD_HH-mm-ss')}.jpg`,
+        task_type: 'homework',
         status: 'pending',
         result: { progress: 0 },
         created_at: new Date().toISOString(),
@@ -809,6 +810,7 @@ export default function App() {
           student_id: currentStudent.id,
           image_url: imageUrl,
           original_name: file.name || `照片_${dayjs().format('YYYY-MM-DD_HH-mm-ss')}.jpg`,
+          task_type: 'homework',
           status: 'pending'
         })
 
@@ -2108,16 +2110,14 @@ export default function App() {
   const triggerUpload = (capture) => {
     const input = document.getElementById('file-input')
     if (!input) return
-    
+
+    // Both camera and gallery modes support multiple selection
     if (capture) {
-      // Camera mode: single capture, disable multiple
       input.setAttribute('capture', 'environment')
-      input.removeAttribute('multiple')
     } else {
-      // Gallery mode: remove capture to enable multiple selection
       input.removeAttribute('capture')
-      input.setAttribute('multiple', 'multiple')
     }
+    input.setAttribute('multiple', 'multiple')
     input.click()
     setShowUploadOptions(false)
   }
@@ -2345,12 +2345,27 @@ export default function App() {
                               <span className="text-meta">
                                 {dayjs(task.created_at).format('MM/DD HH:mm')}
                               </span>
+                              {/* Task status indicators */}
+                              {task.task_type === 'retry_paper' && (
+                                <>
+                                  <span className="w-0.5 h-0.5 rounded-full" style={{ background: 'var(--text-tertiary)' }} />
+                                  <span className="text-xs" style={{ color: 'var(--purple)' }}>错题重练</span>
+                                </>
+                              )}
                               {task.result?.questionCount ? (
                                 <>
                                   <span className="w-0.5 h-0.5 rounded-full" style={{ background: 'var(--text-tertiary)' }} />
                                   <span className="text-meta-highlight">{task.result.questionCount} 题</span>
                                 </>
                               ) : null}
+
+                              {/* Task type and page count */}
+                              {task.isRetryPaper && task.pages && task.pages.length > 1 && (
+                                <>
+                                  <span className="w-0.5 h-0.5 rounded-full" style={{ background: 'var(--text-tertiary)' }} />
+                                  <span className="text-meta-highlight">{task.pages.length} 页</span>
+                                </>
+                              )}
                               {!isTaskCompleted(task) && (
                                 <>
                                   <span className="w-0.5 h-0.5 rounded-full" style={{ background: 'var(--text-tertiary)' }} />
