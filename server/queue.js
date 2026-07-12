@@ -44,13 +44,20 @@ const initQueue = async () => {
 
       const concurrency = parseInt(process.env.CONCURRENCY) || 2
 
-      console.log(`🔄 [Queue] 创建 Worker (concurrency=${concurrency})...`)
+      // Polling tuning: BullMQ idle-workers poll Redis on `drainDelay` (seconds).
+      // Default 5s => ~12 req/min/worker. 60s => ~1 req/min/worker => ~12x fewer.
+      const drainDelay = parseInt(process.env.REDIS_DRAIN_DELAY) || 60
+      const stalledInterval = parseInt(process.env.REDIS_STALLED_INTERVAL) || 300000 // 5 min
+
+      console.log(`🔄 [Queue] 创建 Worker (concurrency=${concurrency}, drainDelay=${drainDelay}s)...`)
       taskWorker = new Worker('task-processing', async (job) => {
         console.log(`🔥 [Worker] 收到任务: jobId=${job.id}, taskId=${job.data.taskId}`)
         return processTask(job)
       }, {
         connection,
         concurrency,
+        drainDelay,
+        stalledInterval,
         lockDuration: parseInt(process.env.TASK_TIMEOUT_MS) || 1800000
       })
 
@@ -72,6 +79,8 @@ const initQueue = async () => {
       }, {
         connection,
         concurrency: 2,
+        drainDelay,
+        stalledInterval,
         lockDuration: 600000
       })
 

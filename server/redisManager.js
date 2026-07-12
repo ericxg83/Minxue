@@ -7,7 +7,7 @@ class RedisManager {
     this.pool = []
     this.initialized = false
     this.healthCheckInterval = null
-    this.healthCheckIntervalMs = 30000 // 30 seconds
+    this.healthCheckIntervalMs = 60000 // 60 seconds (reduced from 30s to cut request volume)
     this.reconnectDelayMs = 5000 // 5 seconds
     this.isShuttingDown = false
   }
@@ -15,7 +15,7 @@ class RedisManager {
   buildPool() {
     const pool = []
 
-    // Primary: Local Redis
+    // Highest priority: Local Redis (only when explicitly enabled)
     if (process.env.REDIS_LOCAL === 'true') {
       pool.push({
         id: 'local',
@@ -33,24 +33,38 @@ class RedisManager {
           }
         },
         type: 'CONFIG',
-        priority: 1 // Higher priority
+        priority: 0 // Highest priority
       })
     }
 
-    // Secondary: Upstash Redis (fallback)
+    // Collect every Upstash instance into a failover-ordered list.
+    // REDIS_URL            -> primary (preferred)
+    // REDIS_POOL_URLS      -> comma-separated backups (e.g. the old quota-exhausted account)
+    const urlEntries = []
     if (process.env.REDIS_URL) {
+      urlEntries.push({ url: process.env.REDIS_URL.trim(), label: 'upstash_primary' })
+    }
+    if (process.env.REDIS_POOL_URLS) {
+      process.env.REDIS_POOL_URLS
+        .split(',')
+        .map(s => s.trim())
+        .filter(Boolean)
+        .forEach((u, i) => urlEntries.push({ url: u, label: `upstash_backup_${i + 1}` }))
+    }
+
+    urlEntries.forEach((entry, idx) => {
       pool.push({
-        id: 'upstash_fallback',
-        url: process.env.REDIS_URL.trim(),
+        id: entry.label,
+        url: entry.url,
         type: 'URL',
-        priority: 2,
+        priority: idx + 1, // lower number = higher priority; primary first
         maxRetriesPerRequest: null,
         retryStrategy: (times) => {
           if (times > 5) return null // Stop after 5 retries
           return Math.min(times * 2000, 10000)
         }
       })
-    }
+    })
 
     // Sort by priority (lower number = higher priority)
     pool.sort((a, b) => (a.priority || 99) - (b.priority || 99))

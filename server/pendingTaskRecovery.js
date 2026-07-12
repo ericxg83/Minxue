@@ -1,4 +1,4 @@
-import { redisManager } from './redisManager.js'
+import { getTaskQueue } from './queue.js'
 import { query, TABLES } from './config/neon.js'
 
 const PENDING_TIMEOUT_MS = 10 * 60 * 1000 // 10 minutes
@@ -61,31 +61,28 @@ class PendingTaskRecovery {
         console.log(`   ${i + 1}. ${task.original_name} (已等待 ${pendingMinutes} 分钟)`)
       })
 
-      // Try to recover each task
-      const connection = await redisManager.getAvailableClient()
-      if (!connection) {
-        console.error('[PendingTaskRecovery] ❌ 无法连接 Redis，跳过恢复')
+      // Reuse the shared queue connection instead of creating a fresh Queue per scan.
+      const queue = await getTaskQueue()
+      if (!queue) {
+        console.error('[PendingTaskRecovery] ❌ 队列不可用，跳过恢复')
         return
       }
 
-      const { Queue } = await import('bullmq')
-      const taskQueue = new Queue('task-processing', { connection })
+      // Single Redis call to fetch all in-flight jobs (was one getJobs() per task = N+1).
+      const inFlightJobs = await queue.getJobs(['waiting', 'active', 'delayed'])
+      const inFlightTaskIds = new Set(inFlightJobs.map(j => j.data?.taskId).filter(Boolean))
 
       let recoveredCount = 0
       for (const task of rows) {
         try {
-          // Check if task is already in queue
-          const jobs = await taskQueue.getJobs(['waiting', 'active', 'delayed'])
-          const alreadyInQueue = jobs.some(job => job.data.taskId === task.id)
-
-          if (alreadyInQueue) {
+          if (inFlightTaskIds.has(task.id)) {
             console.log(`[PendingTaskRecovery] ⏭️  ${task.original_name} 已在队列中`)
             continue
           }
 
           // Add task back to queue
           const retryCount = (task.result?.retryCount || 0) + 1
-          await taskQueue.add('process-task', {
+          await queue.add('process-task', {
             taskId: task.id,
             studentId: task.student_id,
             imageUrl: task.image_url,
@@ -104,7 +101,6 @@ class PendingTaskRecovery {
         }
       }
 
-      await taskQueue.close()
       console.log(`[PendingTaskRecovery] ✅ 恢复完成: ${recoveredCount}/${rows.length} 个任务`)
 
     } catch (err) {

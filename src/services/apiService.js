@@ -58,7 +58,7 @@ const checkCacheVersion = () => {
   const stored = localStorage.getItem('cache_version')
   if (stored !== CACHE_VERSION) {
     try {
-      const prefixes = ['students_cache', 'tasks_cache_', 'wrong_questions_cache_', 'exams_cache_', 'generated_exams_cache_', 'questions_cache_', 'cache_version']
+      const prefixes = ['students_cache', 'tasks_cache_', 'tasks_summary_cache', 'wrong_questions_cache_', 'exams_cache_', 'generated_exams_cache_', 'questions_cache_', 'cache_version']
       prefixes.forEach(prefix => {
         Object.keys(localStorage).forEach(key => {
           if (key.startsWith(prefix)) {
@@ -184,8 +184,18 @@ export const getTaskById = async (taskId) => {
   return data.task
 }
 
-export const getTasksSummary = async () => {
+export const getTasksSummary = async (useCache = true) => {
+  const cacheKey = 'tasks_summary_cache'
+
+  if (useCache) {
+    // Summary changes slowly; cache 90s so the 45s notification poll
+    // only hits the backend ~every 90s instead of every poll.
+    const cached = readCache(cacheKey, 90 * 1000)
+    if (cached) return cached
+  }
+
   const data = await apiRequest('/tasks/summary')
+  if (data?.success) writeCache(cacheKey, data)
   return data
 }
 
