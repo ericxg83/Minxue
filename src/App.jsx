@@ -23,8 +23,7 @@ import {
   Eye,
   Tag,
   AlertCircle,
-  Download,
-  BookOpen
+  Download
 } from 'lucide-react'
 import { motion, AnimatePresence } from 'motion/react'
 import { QRCodeSVG } from 'qrcode.react'
@@ -2262,32 +2261,9 @@ export default function App() {
                           }}
                         >
                         <div className="list-card-row items-center">
-                          {/* Task Type Badge */}
-                          <div className="flex-shrink-0 mr-2">
-                            {task.task_type === 'retry_paper' ? (
-                              <span className="inline-flex items-center gap-1 px-2 py-1 rounded-full text-xs font-medium" style={{
-                                background: 'var(--purple-soft)',
-                                color: 'var(--purple)',
-                                border: '1px solid var(--purple)'
-                              }}>
-                                <ScanLine size={10} />
-                                错题重练
-                              </span>
-                            ) : (
-                              <span className="inline-flex items-center gap-1 px-2 py-1 rounded-full text-xs font-medium" style={{
-                                background: 'var(--primary-soft)',
-                                color: 'var(--primary)',
-                                border: '1px solid var(--primary)'
-                              }}>
-                                <BookOpen size={10} />
-                                日常作业
-                              </span>
-                            )}
-                          </div>
-
-                          {/* Thumbnail */}
+                          {/* Thumbnail — square paper preview */}
                           <div
-                            className="relative w-10 h-10 rounded-xl flex-shrink-0 overflow-hidden cursor-pointer ring-1 ring-black/5"
+                            className="relative w-14 h-14 rounded-xl flex-shrink-0 overflow-hidden cursor-pointer ring-1 ring-black/5"
                             style={{ background: 'var(--bg-mist)' }}
                             onClick={(e) => { e.stopPropagation(); handleViewImage(task.image_url) }}
                           >
@@ -2337,7 +2313,22 @@ export default function App() {
                           </div>
                           {/* Content */}
                           <div className="flex-1 min-w-0">
-                            <div className="flex items-center justify-between gap-2">
+                            <div className="flex items-center gap-1.5 min-w-0">
+                              {task.task_type === 'retry_paper' ? (
+                                <span className="inline-flex items-center flex-shrink-0 px-1.5 py-0.5 rounded-md text-[10px] font-medium" style={{
+                                  background: 'var(--purple-soft)',
+                                  color: 'var(--purple)'
+                                }}>
+                                  错题重练
+                                </span>
+                              ) : (
+                                <span className="inline-flex items-center flex-shrink-0 px-1.5 py-0.5 rounded-md text-[10px] font-medium" style={{
+                                  background: 'var(--primary-soft)',
+                                  color: 'var(--primary)'
+                                }}>
+                                  日常作业
+                                </span>
+                              )}
                               <span className="text-card-title truncate">
                                 {task.original_name || '未命名试卷'}
                               </span>
@@ -2346,13 +2337,6 @@ export default function App() {
                               <span className="text-meta">
                                 {dayjs(task.created_at).format('MM/DD HH:mm')}
                               </span>
-                              {/* Task status indicators */}
-                              {task.task_type === 'retry_paper' && (
-                                <>
-                                  <span className="w-0.5 h-0.5 rounded-full" style={{ background: 'var(--text-tertiary)' }} />
-                                  <span className="text-xs" style={{ color: 'var(--purple)' }}>错题重练</span>
-                                </>
-                              )}
                               {task.result?.questionCount ? (
                                 <>
                                   <span className="w-0.5 h-0.5 rounded-full" style={{ background: 'var(--text-tertiary)' }} />
