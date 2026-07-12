@@ -23,7 +23,8 @@ import {
   Eye,
   Tag,
   AlertCircle,
-  Download
+  Download,
+  BookOpen
 } from 'lucide-react'
 import { motion, AnimatePresence } from 'motion/react'
 import { QRCodeSVG } from 'qrcode.react'
