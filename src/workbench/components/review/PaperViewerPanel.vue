@@ -85,26 +85,26 @@
         <span v-else class="page-indicator">第 1 页</span>
       </div>
 
-      <!-- 其他待复核试卷缩略图（仅练习批改保留） -->
-      <div v-if="store.reviewConfig.showOtherPapers && store.otherPendingTasks.length > 0" class="pending-thumbnails">
+      <!-- 其他待复核页图缩略图（同一份练习卷的其他答题卡页，仅练习批改保留） -->
+      <div v-if="store.reviewConfig.showOtherPapers && store.otherPendingPages.length > 0" class="pending-thumbnails">
         <div class="thumbnails-header">
-          <span>其他待复核试卷 ({{ store.otherPendingTasks.length }})</span>
+          <span>其他待复核试卷 ({{ store.otherPendingPages.length }})</span>
         </div>
         <div class="thumbnails-scroll">
           <div
-            v-for="t in store.otherPendingTasks"
-            :key="t.id"
+            v-for="(page, idx) in store.otherPendingPages"
+            :key="page.id"
             class="thumbnail-card"
-            @click="switchToTask(t)"
+            @click="switchToPage(page, idx)"
           >
             <div class="thumbnail-img-wrap">
-              <img :src="t.image_url" :alt="t.original_name" class="thumbnail-img" />
+              <img :src="page.image_url" :alt="page.original_name" class="thumbnail-img" />
               <div class="thumbnail-overlay">
                 <el-icon><View /></el-icon>
                 <span>复核</span>
               </div>
             </div>
-            <span class="thumbnail-name">{{ t.original_name || '未命名试卷' }}</span>
+            <span class="thumbnail-name">{{ page.original_name || '未命名试卷' }}</span>
           </div>
         </div>
       </div>
@@ -329,6 +329,15 @@ const switchToTask = async (task) => {
   if (!task || task.id === store.currentTask?.id) return
   await store.selectTask(task)
   fitToContainer()
+}
+
+/** 切换到同一份练习卷的其他页图 */
+const switchToPage = (page) => {
+  if (!store.currentTask?._pageTasks) return
+  const actualIndex = store.currentTask._pageTasks.findIndex(p => p.id === page.id)
+  if (actualIndex >= 0) {
+    store.setPageIndex(actualIndex)
+  }
 }
 
 

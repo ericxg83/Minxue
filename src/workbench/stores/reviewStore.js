@@ -477,10 +477,13 @@ export const useReviewStore = defineStore('review', () => {
     studentTasks.value.filter(t => t.status === 'reviewed')
   )
 
-  // 其他待复核试卷（status === 'done' 且不是当前试卷）
-  const otherPendingTasks = computed(() => {
-    if (!currentTask.value) return pendingTasks.value
-    return pendingTasks.value.filter(t => t.id !== currentTask.value.id)
+  // 其他待复核页（同一份练习卷的其他答题卡页图，不是其他试卷）
+  const otherPendingPages = computed(() => {
+    const t = currentTask.value
+    if (!t || source.value !== 'paper') return []
+    const pages = Array.isArray(t._pageTasks) ? t._pageTasks : []
+    if (pages.length <= 1) return []
+    return pages.filter((_, i) => i !== currentPageIndex.value)
   })
 
   // 选择试卷 → 加载题目 + 判定数据 + 错题数据
@@ -772,7 +775,7 @@ export const useReviewStore = defineStore('review', () => {
     nextTask,
     completeTaskReview,
     autoCompleteAndAdvance,
-    otherPendingTasks,
+    otherPendingPages,
     pendingTasks,
     reviewedTasks,
     // 复核完成门禁 / 空状态
