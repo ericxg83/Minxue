@@ -259,7 +259,12 @@
       "Bash(ls -la src/workbench/services/)",
       "Bash(ls -la src/workbench/utils/)",
       "Bash(ls src/services/)",
-      "Bash(ls src/utils/)"
+      "Bash(ls src/utils/)",
+      "Bash(curl -s --max-time 8 http://localhost:4000/api/tasks/b4f0880e-bafb-416d-9e22-9a4fef86dd9a)",
+      "Bash(node -e \"let d='';process.stdin.on\\('data',c=>d+=c\\);process.stdin.on\\('end',\\(\\)=>{const j=JSON.parse\\(d\\);const t=j.task||j;console.log\\(JSON.stringify\\({id:t.id,status:t.status,name:t.original_name,student:t.student_id,created:t.created_at,updated:t.updated_at,result:t.result,image:t.image_url},null,2\\)\\)}\\)\")",
+      "Bash(curl -s --max-time 8 \"http://localhost:4000/api/questions/task/70c382e8\")",
+      "Bash(curl -s --max-time 8 \"http://localhost:4000/api/tasks/student/02d73792-6cff-402b-9dad-bacd734c569a\")",
+      "Bash(node -e \"let d='';process.stdin.on\\('data',c=>d+=c\\);process.stdin.on\\('end',\\(\\)=>{const j=JSON.parse\\(d\\);\\(j.tasks||[]\\).filter\\(t=>t.status==='processing'||t.status==='pending'||t.status==='failed'\\).forEach\\(t=>console.log\\(t.id,t.status,t.original_name,JSON.stringify\\(t.result\\)\\)\\)}\\)\")"
     ]
   }
 }
