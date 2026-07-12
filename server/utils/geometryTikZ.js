@@ -66,6 +66,22 @@ function normalizeStructure(obj) {
     }
   }).filter(s => s.from && s.to)
 
+  // ── 图形类型判断层 ──
+  // figure_type: 'coordinate'(A 坐标/函数图) | 'geometry'(B 纯几何示意图) | 'geometry_with_coords'(C 带坐标背景的几何图)
+  const rawCs = obj.coordinate_system && typeof obj.coordinate_system === 'object'
+    ? {
+        exists: !!obj.coordinate_system.exists,
+        origin: obj.coordinate_system.origin || '',
+        x_axis: !!obj.coordinate_system.x_axis,
+        y_axis: !!obj.coordinate_system.y_axis
+      }
+    : { exists: false, origin: '', x_axis: false, y_axis: false }
+  const figure_type = normalizeFigureType(obj.figure_type, rawCs)
+  // 服务端硬性保护：纯几何示意图（类型 B）绝不绘制坐标轴。
+  const coordinate_system = figure_type === 'geometry'
+    ? { exists: false, origin: '', x_axis: false, y_axis: false }
+    : rawCs
+
   return {
     points,
     segments,
@@ -74,16 +90,22 @@ function normalizeStructure(obj) {
     labels: Array.isArray(obj.geometry_labels) ? obj.geometry_labels
           : Array.isArray(obj.labels) ? obj.labels : [],
     rightAngles: Array.isArray(obj.rightAngles) ? obj.rightAngles : [],
-    coordinate_system: obj.coordinate_system && typeof obj.coordinate_system === 'object'
-      ? {
-          exists: !!obj.coordinate_system.exists,
-          origin: obj.coordinate_system.origin || '',
-          x_axis: !!obj.coordinate_system.x_axis,
-          y_axis: !!obj.coordinate_system.y_axis
-        }
-      : { exists: false, origin: '', x_axis: false, y_axis: false },
+    figure_type,
+    coordinate_system,
     constraints: Array.isArray(obj.constraints) ? obj.constraints : [],
   }
+}
+
+/**
+ * 归一化图形类型（与 geometrySvg.js 保持一致）。
+ * A 坐标/函数图 → 'coordinate'；B 纯几何示意图 → 'geometry'；C 带坐标背景的几何图 → 'geometry_with_coords'。
+ */
+function normalizeFigureType(raw, cs) {
+  const t = typeof raw === 'string' ? raw.trim().toLowerCase() : ''
+  if (t === 'coordinate' || t === 'function' || t === 'a') return 'coordinate'
+  if (t === 'geometry' || t === 'b') return 'geometry'
+  if (t === 'geometry_with_coords' || t === 'geometry_with_coordinates' || t === 'c') return 'geometry_with_coords'
+  return cs && cs.exists ? 'coordinate' : 'geometry'
 }
 
 /** 结构是否为空（无任何可渲染几何元素） */

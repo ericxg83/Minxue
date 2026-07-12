@@ -89,6 +89,24 @@ function normalizeStructure(obj) {
     }
   }).filter(s => s.from && s.to)
 
+  // ── 图形类型判断层 ──
+  // figure_type: 'coordinate'(A 坐标/函数图) | 'geometry'(B 纯几何示意图) | 'geometry_with_coords'(C 带坐标背景的几何图)
+  // 缺省时（旧结构无该字段）按坐标系存在性回退推断，保持向后兼容。
+  const rawCs = obj.coordinate_system && typeof obj.coordinate_system === 'object'
+    ? {
+        exists: !!obj.coordinate_system.exists,
+        origin: obj.coordinate_system.origin || '',
+        x_axis: !!obj.coordinate_system.x_axis,
+        y_axis: !!obj.coordinate_system.y_axis
+      }
+    : { exists: false, origin: '', x_axis: false, y_axis: false }
+  const figure_type = normalizeFigureType(obj.figure_type, rawCs)
+  // 服务端硬性保护：纯几何示意图（类型 B）绝不绘制坐标轴，
+  // 即使模型误判 coordinate_system.exists=true 也强制关闭，避免给几何题凭空加坐标系。
+  const coordinate_system = figure_type === 'geometry'
+    ? { exists: false, origin: '', x_axis: false, y_axis: false }
+    : rawCs
+
   return {
     points,
     segments,
@@ -97,16 +115,24 @@ function normalizeStructure(obj) {
     labels: Array.isArray(obj.geometry_labels) ? obj.geometry_labels
           : Array.isArray(obj.labels) ? obj.labels : [],
     rightAngles: Array.isArray(obj.rightAngles) ? obj.rightAngles : [],
-    coordinate_system: obj.coordinate_system && typeof obj.coordinate_system === 'object'
-      ? {
-          exists: !!obj.coordinate_system.exists,
-          origin: obj.coordinate_system.origin || '',
-          x_axis: !!obj.coordinate_system.x_axis,
-          y_axis: !!obj.coordinate_system.y_axis
-        }
-      : { exists: false, origin: '', x_axis: false, y_axis: false },
+    figure_type,
+    coordinate_system,
     constraints: Array.isArray(obj.constraints) ? obj.constraints : [],
   }
+}
+
+/**
+ * 归一化图形类型。
+ * A 坐标/函数图 → 'coordinate'；B 纯几何示意图 → 'geometry'；C 带坐标背景的几何图 → 'geometry_with_coords'。
+ * 模型未给出 figure_type 时按坐标系存在性回退：有坐标轴 → coordinate，否则 → geometry。
+ */
+function normalizeFigureType(raw, cs) {
+  const t = typeof raw === 'string' ? raw.trim().toLowerCase() : ''
+  if (t === 'coordinate' || t === 'function' || t === 'a') return 'coordinate'
+  if (t === 'geometry' || t === 'b') return 'geometry'
+  if (t === 'geometry_with_coords' || t === 'geometry_with_coordinates' || t === 'c') return 'geometry_with_coords'
+  // 回退推断
+  return cs && cs.exists ? 'coordinate' : 'geometry'
 }
 
 /** 结构是否为空（无任何可渲染几何元素） */
@@ -213,40 +239,44 @@ export function renderGeometrySvg(structure) {
       originLabel = cs.origin
     }
 
-    // 确定轴端点：沿 x/y 方向延伸到图形边界
-    const xEnd = toX(maxX + (maxX - minX) * 0.15)
-    const xStart = toX(minX - (maxX - minX) * 0.15)
-    const yEnd = toY(minY - (maxY - minY) * 0.15)
-    const yStart = toY(maxY + (maxY - minY) * 0.15)
+    // 确定轴端点：沿 x/y 方向延伸到图形边界。
+    // 命名以「数学方向」为准，避免混淆 SVG 的 y 向下：
+    //   xPos = x 正方向端（右）、xNeg = 负方向端（左）
+    //   yPos = y 正方向端（上，SVG 里是最小 y 像素）、yNeg = 负方向端（下）
+    const xPos = toX(maxX + (maxX - minX) * 0.15) // x 轴正向：右侧箭头处
+    const xNeg = toX(minX - (maxX - minX) * 0.15) // x 轴负向：左端
+    const yNeg = toY(minY - (maxY - minY) * 0.15) // y 轴负向：下端
+    const yPos = toY(maxY + (maxY - minY) * 0.15) // y 轴正向：上侧箭头处
 
     // 用 <g> 分组，方便统一样式
     parts.push(`<g stroke="${axisColor}" stroke-width="${axisWidth}" fill="none" stroke-linecap="round">`)
 
-    // X 轴
+    // X 轴（箭头在正方向 = 右端）
     if (cs.x_axis) {
-      parts.push(`<line x1="${fmt(xStart)}" y1="${fmt(oy)}" x2="${fmt(xEnd)}" y2="${fmt(oy)}"/>`)
-      // X 轴箭头
+      parts.push(`<line x1="${fmt(xNeg)}" y1="${fmt(oy)}" x2="${fmt(xPos)}" y2="${fmt(oy)}"/>`)
+      // X 轴箭头（指向右）
       const arrowSize = 8
-      parts.push(`<polyline points="${fmt(xEnd)},${fmt(oy)} ${fmt(xEnd - arrowSize)},${fmt(oy - arrowSize * 0.5)} ${fmt(xEnd - arrowSize)},${fmt(oy + arrowSize * 0.5)}" fill="${axisColor}" stroke="none"/>`)
+      parts.push(`<polyline points="${fmt(xPos)},${fmt(oy)} ${fmt(xPos - arrowSize)},${fmt(oy - arrowSize * 0.5)} ${fmt(xPos - arrowSize)},${fmt(oy + arrowSize * 0.5)}" fill="${axisColor}" stroke="none"/>`)
     }
 
-    // Y 轴
+    // Y 轴（箭头在正方向 = 上端）
     if (cs.y_axis) {
-      parts.push(`<line x1="${fmt(ox)}" y1="${fmt(yStart)}" x2="${fmt(ox)}" y2="${fmt(yEnd)}"/>`)
-      // Y 轴箭头
+      parts.push(`<line x1="${fmt(ox)}" y1="${fmt(yNeg)}" x2="${fmt(ox)}" y2="${fmt(yPos)}"/>`)
+      // Y 轴箭头（指向上）
       const arrowSize = 8
-      parts.push(`<polyline points="${fmt(ox)},${fmt(yEnd)} ${fmt(ox - arrowSize * 0.5)},${fmt(yEnd + arrowSize)} ${fmt(ox + arrowSize * 0.5)},${fmt(yEnd + arrowSize)}" fill="${axisColor}" stroke="none"/>`)
+      parts.push(`<polyline points="${fmt(ox)},${fmt(yPos)} ${fmt(ox - arrowSize * 0.5)},${fmt(yPos + arrowSize)} ${fmt(ox + arrowSize * 0.5)},${fmt(yPos + arrowSize)}" fill="${axisColor}" stroke="none"/>`)
     }
 
     parts.push('</g>')
 
-    // 轴标签 "x" 和 "y"
+    // 轴标签 "x"（右箭头旁）和 "y"（上箭头旁）——符合中国教材习惯：
+    //   y 在 y 轴顶端（正方向）附近，绝不放到原点下方。
     parts.push(`<g fill="${axisColor}" font-family="Times New Roman, serif" font-size="14" font-style="italic">`)
     if (cs.x_axis) {
-      parts.push(`<text x="${fmt(xEnd + 4)}" y="${fmt(oy + 4)}" text-anchor="start">x</text>`)
+      parts.push(`<text x="${fmt(xPos + 4)}" y="${fmt(oy + 4)}" text-anchor="start">x</text>`)
     }
     if (cs.y_axis) {
-      parts.push(`<text x="${fmt(ox + 4)}" y="${fmt(yEnd - 4)}" text-anchor="start">y</text>`)
+      parts.push(`<text x="${fmt(ox + 6)}" y="${fmt(yPos + 12)}" text-anchor="start">y</text>`)
     }
     parts.push('</g>')
   }

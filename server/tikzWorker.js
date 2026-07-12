@@ -10,6 +10,7 @@ import { query, TABLES } from './config/neon.js'
 import { buildTikzGenerationPrompt, callVisionCompletion } from './config/ai.js'
 import { updateQuestionAssetTikz } from './services/neonService.js'
 import { renderGeometryTikZ, isEmptyStructure } from './utils/geometryTikZ.js'
+import { validateGeometryLabels } from './utils/geometryLabelValidator.js'
 
 // ── 辅助：从 URL 下载图片 buffer ──
 async function downloadImageBuffer(url) {
@@ -173,7 +174,10 @@ async function generateTikZFromStructure(questionId, shortId) {
       console.log(`[TikZ] ${shortId}: 无有效 geometry_structure_json，回退`)
       return null
     }
-    const tikzCode = renderGeometryTikZ(struct)
+    // 与 SVG 路径保持一致：渲染前先跑服务端标注校验，过滤幻觉/题干数字，
+    // 避免 TikZ 出现原图中不存在的边长/坐标数字。
+    const validated = validateGeometryLabels(struct)
+    const tikzCode = renderGeometryTikZ(validated)
     if (!tikzCode) {
       console.warn(`[TikZ] ${shortId}: 结构渲染 TikZ 失败`)
       return null
