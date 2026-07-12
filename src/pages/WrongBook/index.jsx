@@ -13,10 +13,7 @@ import {
 import { RightOutline, DownOutline } from 'antd-mobile-icons'
 import { AlertTriangle } from 'lucide-react'
 import { useStudentStore, useWrongQuestionStore, useUIStore } from '../../store'
-import { getWrongQuestionsByStudent, deleteWrongQuestion, updateWrongQuestionStatus, createGeneratedExam } from '../../services/apiService'
-import { generateQRCodeContent } from '../../services/aiService'
-import { saveAs } from 'file-saver'
-import { generateExamPDF } from '../../utils/pdfGenerator'
+import { getWrongQuestionsByStudent, deleteWrongQuestion, updateWrongQuestionStatus, getGeneratedExamsByStudent } from '../../services/apiService'
 import { mockWrongQuestions, mockStudents } from '../../data/mockData'
 import StudentSwitcher from '../../components/StudentSwitcher'
 import PrintPreview from '../PrintPreview'
@@ -487,71 +484,48 @@ export default function WrongBook({ onScanQR }) {
       return
     }
 
+    // 检查是否有相同题目的组卷记录（最近7天内）
     try {
-      // 提取选中的题目ID
-      const questionIds = selectedQuestions.map(wq => wq.question_id || wq.id)
+      const existingExams = await getGeneratedExamsByStudent(currentStudent.id, false)
+      if (existingExams && existingExams.length > 0) {
+        const selectedQuestionIds = new Set(selectedQuestions.map(wq => wq.question_id || wq.id))
+        const sevenDaysAgo = dayjs().subtract(7, 'day')
 
-      // 创建试卷名称（例如："错题组卷 - 2023年12月1日"）
-      const examName = `错题组卷 - ${dayjs().format('YYYY年MM月DD日')}`
+        const duplicateExam = existingExams.find(exam => {
+          const examDate = dayjs(exam.created_at)
+          // 只检查最近7天的记录
+          if (examDate.isBefore(sevenDaysAgo)) return false
 
-      // 调用后端API创建试卷
-      const examData = {
-        student_id: currentStudent.id,
-        name: examName,
-        question_ids: questionIds
-      }
+          const examQuestionIds = new Set(exam.question_ids || [])
+          // 检查题目是否完全相同
+          if (examQuestionIds.size !== selectedQuestionIds.size) return false
 
-      try {
-        const result = await createGeneratedExam(examData)
-      } catch (apiErr) {
-        console.warn('创建组卷记录失败，将直接生成PDF:', apiErr)
-      }
-
-      Toast.show({
-        icon: 'loading',
-        content: '正在生成试卷，请稍候...'
-      })
-
-      // 落库成功后自动生成 PDF
-      const questions = selectedQuestions.map(wq => wq.question || wq)
-      const newPaperId = 'paper_' + Date.now() + '_' + Math.random().toString(36).substr(2, 9)
-      const qrContent = JSON.stringify({
-        type: 'grading',
-        paperId: newPaperId,
-        studentId: currentStudent?.id,
-        questionIds: questions.map(q => q.id).filter(Boolean),
-        ts: Date.now()
-      })
-      const filename = `${currentStudent?.name || 'student'}_错题组卷_${dayjs().format('YYYYMMDD_HHmm')}`
-
-      const result = await generateExamPDF({
-        title: `${currentStudent?.name || '学生'} - 错题练习`,
-        studentName: currentStudent?.name || '',
-        questions: questions,
-        filename: filename,
-        showAnswers: false,
-        qrContent: qrContent,
-      })
-
-      if (result && result.pdfBlob) {
-        saveAs(result.pdfBlob, `${filename}.pdf`)
-        Toast.show({
-          icon: 'success',
-          content: '试卷生成成功！'
+          for (const id of selectedQuestionIds) {
+            if (!examQuestionIds.has(id)) return false
+          }
+          return true
         })
-      } else {
-        throw new Error('PDF生成结果为空')
-      }
 
-      // 清空选择
-      storeClearSelection()
-    } catch (error) {
-      console.error('生成试卷失败:', error)
-      Toast.show({
-        icon: 'fail',
-        content: '生成试卷失败，请稍后重试'
-      })
+        if (duplicateExam) {
+          Dialog.confirm({
+            title: '提示',
+            content: `您已经生成过相同的错题卷（${dayjs(duplicateExam.created_at).format('MM月DD日 HH:mm')}）。\n\n如需重新打印，请前往"组卷历史"页面。`,
+            confirmText: '前往组卷历史',
+            cancelText: '取消',
+            onConfirm: () => {
+              // 切换到组卷历史页面
+              window.location.href = '#/exam'
+            }
+          })
+          return
+        }
+      }
+    } catch (e) {
+      console.warn('检查重复组卷失败:', e)
     }
+
+    // 打开预览页面（记录将在下载/打印时创建）
+    setShowPrintPreview(true)
   }
 
   const generatePaperId = () => {
@@ -559,50 +533,8 @@ export default function WrongBook({ onScanQR }) {
   }
 
   const handlePrint = async () => {
-    if (selectedQuestions.length === 0) {
-      Toast.show('请先选择要打印的题目')
-      return
-    }
-
-    const questions = selectedQuestions.map(wq => wq.question || wq)
-    const newPaperId = 'paper_' + Date.now() + '_' + Math.random().toString(36).substr(2, 9)
-    const qrContent = JSON.stringify({
-      type: 'grading',
-      paperId: newPaperId,
-      studentId: currentStudent?.id,
-      questionIds: selectedQuestions.map(wq => (wq.question || wq).id),
-      ts: Date.now()
-    })
-
-    // 先保存组卷记录
-    try {
-      await createGeneratedExam({
-        student_id: currentStudent.id,
-        name: `错题组卷 - ${dayjs().format('YYYY年MM月DD日')}`,
-        question_ids: selectedQuestions.map(wq => wq.question_id || wq.id)
-      })
-    } catch (e) {
-      console.warn('创建组卷记录失败:', e)
-    }
-
-    try {
-      const filename = `${currentStudent?.name || 'student'}_错题练习_${dayjs().format('YYYYMMDD_HHmm')}`
-      const result = await generateExamPDF({
-        title: `${currentStudent?.name || '学生'} - 错题练习`,
-        studentName: currentStudent?.name || '',
-        questions: questions,
-        filename: filename,
-        showAnswers: false,
-        qrContent: qrContent,
-      })
-      if (result && result.pdfBlob) {
-        saveAs(result.pdfBlob, `${filename}.pdf`)
-      }
-      Toast.show({ icon: 'success', content: 'PDF已生成，包含二维码' })
-    } catch (error) {
-      console.error('PDF生成失败:', error)
-      Toast.show({ icon: 'fail', content: 'PDF生成失败' })
-    }
+    // 打印按钮也打开预览页面（与生成试卷相同逻辑）
+    handleGenerateExam()
   }
 
 // 渲染掌握状态标签 - 基于 lifecycle_status
