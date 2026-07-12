@@ -33,14 +33,16 @@ const apiRequest = async (path, options = {}) => {
 }
 
 export const taskService = {
-  uploadFiles: async (studentId, files) => {
+  uploadFiles: async (studentId, files, options = {}) => {
     console.debug('📤📤📤 [taskService.uploadFiles] === START ===')
     console.debug('📤 [taskService.uploadFiles] studentId:', studentId)
     console.debug('📤 [taskService.uploadFiles] fileCount:', files.length)
     console.debug('📤 [taskService.uploadFiles] files:', files.map(f => ({ name: f.name, size: f.size, type: f.type })))
-    
+
     const formData = new FormData()
     formData.append('studentId', studentId)
+    if (options.generatedExamId) formData.append('generatedExamId', options.generatedExamId)
+    if (options.taskType) formData.append('taskType', options.taskType)
 
     for (const file of files) {
       formData.append('files', file)

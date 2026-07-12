@@ -9,12 +9,11 @@ import {
   LayoutGrid,
   FileText,
   Sparkles,
-  RefreshCw,
   Bell,
   Plus,
   Minus,
   ScanLine,
-  Printer,
+  Upload,
   X,
   Trash2,
   ChevronDown,
@@ -169,6 +168,9 @@ export default function App() {
   const [showReprint, setShowReprint] = useState(false)
   const [reprintExam, setReprintExam] = useState(null)
   const [reprintQuestions, setReprintQuestions] = useState([])
+  const [submitExamId, setSubmitExamId] = useState(null) // 正在上传答卷的组卷 id
+  const submitFileInputRef = useRef(null)
+  const submitTargetExamRef = useRef(null)
 
   // Exam Page State
   const [showScanQR, setShowScanQR] = useState(false) // QR scan trigger
@@ -860,11 +862,6 @@ export default function App() {
     }
   }
 
-  // Print exam via browser print — 改用 PrintPreview 组件
-  const handlePrint = async (exam) => {
-    handleReprintExam(exam)
-  }
-
   // Download exam as PDF — 改用 PrintPreview 组件
   const handleDownloadPdf = async (exam) => {
     handleReprintExam(exam)
@@ -1550,6 +1547,44 @@ export default function App() {
     setShowReprint(true)
   }
 
+  // 提交作业：上传该组卷的答卷图，走错题重练批改流程（与二维码入口一致）
+  const handleSubmitExam = (exam) => {
+    submitTargetExamRef.current = exam
+    submitFileInputRef.current?.click()
+  }
+
+  const handleSubmitFilesSelected = async (e) => {
+    const files = Array.from(e.target.files || [])
+    e.target.value = ''
+    const exam = submitTargetExamRef.current
+    if (!exam || files.length === 0) return
+    const studentId = exam.student_id || currentStudent?.id
+    if (!studentId) {
+      Toast.show({ message: '缺少学生信息，无法提交', type: 'error' })
+      return
+    }
+    setSubmitExamId(exam.id)
+    const loadingToast = Toast.show({ message: '正在上传答卷...', type: 'loading', duration: 0 })
+    try {
+      const res = await taskService.uploadFiles(studentId, files, {
+        generatedExamId: exam.id,
+        taskType: 'wrong_retry'
+      })
+      const created = (res?.tasks || []).filter(t => !t.error)
+      if (created.length === 0) throw new Error(res?.report?.summary || '上传失败')
+      loadingToast?.dismiss?.()
+      Toast.show({ message: '答卷已提交，开始批改', type: 'success', duration: 2000 })
+      loadGeneratedExams(false)
+    } catch (error) {
+      console.error('提交作业失败:', error)
+      loadingToast?.dismiss?.()
+      Toast.show({ message: error.message || '提交失败，请重试', type: 'error', duration: 3000 })
+    } finally {
+      setSubmitExamId(null)
+      submitTargetExamRef.current = null
+    }
+  }
+
   // Delete exam
   const handleDeleteExam = async (examId) => {
     try {
@@ -2192,12 +2227,18 @@ export default function App() {
                               <div className="flex items-center gap-2 mt-1.5">
                                 <span className="stat-pill" style={{ background: 'var(--success-soft)', color: 'var(--success)' }}>
                                   <Check size={10} />
-                                  正确 {task.result?.questionCount - (task.result?.wrongCount || 0)}
+                                  正确 {task.result?.questionCount - (task.result?.wrongCount || 0) - (task.result?.emptyCount || 0)}
                                 </span>
                                 <span className="stat-pill" style={{ background: 'var(--danger-soft)', color: 'var(--danger)' }}>
                                   <X size={10} />
                                   错误 {task.result?.wrongCount || 0}
                                 </span>
+                                {task.result?.emptyCount > 0 && (
+                                  <span className="stat-pill" style={{ background: 'var(--warning-soft)', color: 'var(--warning)' }}>
+                                    <AlertCircle size={10} />
+                                    空题 {task.result.emptyCount}
+                                  </span>
+                                )}
                               </div>
                             ) : null}
                             {task.status === 'failed' && task.result?.error && (
@@ -2653,7 +2694,7 @@ export default function App() {
               >
                 {/* Page Title */}
                 <section className="px-4 pt-3 mb-2">
-                  <h2 style={{ fontSize: '18px', fontWeight: 700, color: '#111827' }}>历史组卷</h2>
+                  <h2 style={{ fontSize: '18px', fontWeight: 700, color: '#111827' }}>组卷历史</h2>
                   <p style={{ fontSize: '11px', color: '#9CA3AF', marginTop: '1px' }}>
                     共 {studentExams.length} 份试卷
                   </p>
@@ -2664,7 +2705,7 @@ export default function App() {
                   {studentExams.length === 0 ? (
                     <div className="text-center py-16">
                       <FileText size={36} className="mx-auto" style={{ color: '#D1D5DB' }} />
-                      <p className="mt-3" style={{ fontSize: '13px', color: '#9CA3AF' }}>暂无组卷记录</p>
+                      <p className="mt-3" style={{ fontSize: '13px', color: '#9CA3AF' }}>暂无组卷历史</p>
                       <p className="mt-0.5" style={{ fontSize: '11px', color: '#D1D5DB' }}>在错题本选择题目后点击"生成试卷"</p>
                     </div>
                   ) : (
@@ -2696,30 +2737,21 @@ export default function App() {
                             </span>
                             <div className="flex gap-1">
                               <button
-                                onClick={() => handleReprintExam(exam)}
-                                className="px-2 py-1 rounded-lg text-[12px] flex items-center gap-1"
-                                style={{ background: '#F3F4F6', color: '#6B7280' }}
-                                title="重新打印"
-                              >
-                                <RefreshCw size={12} />
-                                <span style={{ fontSize: '10px', fontWeight: 700 }}>重打</span>
-                              </button>
-                              <button
                                 onClick={() => handleDownloadPdf(exam)}
-                                className="px-2 py-1 rounded-lg text-[12px] flex items-center gap-1"
+                                className="px-2 py-1 rounded-lg"
                                 style={{ background: '#F3F4F6', color: '#2563EB' }}
                                 title="下载PDF"
                               >
                                 <FileText size={12} />
-                                <span style={{ fontSize: '10px', fontWeight: 700 }}>PDF</span>
                               </button>
                               <button
-                                onClick={() => handlePrint(exam)}
-                                className="px-2 py-1 rounded-lg text-[12px]"
-                                style={{ background: '#F3F4F6', color: '#6B7280' }}
-                                title="打印"
+                                onClick={() => handleSubmitExam(exam)}
+                                disabled={submitExamId === exam.id}
+                                className="px-2 py-1 rounded-lg"
+                                style={{ background: submitExamId === exam.id ? '#EDE9FE' : '#F3F4F6', color: '#7C3AED' }}
+                                title="提交作业"
                               >
-                                <Printer size={12} />
+                                {submitExamId === exam.id ? <Loader2 size={12} className="animate-spin" /> : <Upload size={12} />}
                               </button>
                             </div>
                           </div>
@@ -2729,6 +2761,16 @@ export default function App() {
                     ))
                   )}
                 </section>
+
+                {/* 提交作业隐藏文件输入（拍照/相册，多张） */}
+                <input
+                  ref={submitFileInputRef}
+                  type="file"
+                  accept="image/*"
+                  multiple
+                  style={{ display: 'none' }}
+                  onChange={handleSubmitFilesSelected}
+                />
               </motion.div>
             )}
 
@@ -2741,7 +2783,7 @@ export default function App() {
             {[
               { id: 'processing', icon: Camera, label: '首页' },
               { id: 'wrongbook', icon: LayoutGrid, label: '错题本' },
-              { id: 'exam', icon: FileText, label: '组卷记录' },
+              { id: 'exam', icon: FileText, label: '组卷历史' },
             ].map((tab) => {
               const isActive = currentPage === tab.id
               return (

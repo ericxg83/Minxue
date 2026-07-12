@@ -1401,10 +1401,24 @@ const processSlimGrading = async (job) => {
     }
 
     await job.updateProgress(100)
+
+    // 统计空白题数（学生未作答）
+    let emptyCount = 0
+    try {
+      const { rows: blankRows } = await query(
+        `SELECT COUNT(*) AS cnt FROM ${TABLES.QUESTIONS} WHERE task_id = $1 AND answer_source = 'blank'`,
+        [taskId]
+      )
+      emptyCount = parseInt(blankRows[0]?.cnt || 0)
+    } catch (e) {
+      console.error('   [Slim] 统计空白题数失败:', e.message)
+    }
+
     await updateTaskStatus(taskId, TASK_STATUS.DONE, {
       questionCount: storedQuestions.length,
       autoCount,
       manualCount,
+      emptyCount,
       duration: Date.now() - startTime,
       completedAt: new Date().toISOString()
     })
@@ -1846,9 +1860,22 @@ await job.updateProgress(80)
     await job.updateProgress(100)
     const duration = Date.now() - startTime
 
+    // 统计空白题数（学生未作答）
+    let emptyCount = 0
+    try {
+      const { rows: blankRows } = await query(
+        `SELECT COUNT(*) AS cnt FROM ${TABLES.QUESTIONS} WHERE task_id = $1 AND answer_source = 'blank'`,
+        [taskId]
+      )
+      emptyCount = parseInt(blankRows[0]?.cnt || 0)
+    } catch (e) {
+      console.error('   统计空白题数失败:', e.message)
+    }
+
     await updateTaskStatus(taskId, TASK_STATUS.DONE, {
       questionCount: questions.length,
       wrongCount: wrongCount,
+      emptyCount: emptyCount,
       duration: duration,
       completedAt: new Date().toISOString(),
       answerExceptions: answerGenResult.exceptions || 0,
@@ -1869,6 +1896,7 @@ await job.updateProgress(80)
       taskId,
       questionCount: questions.length,
       wrongCount,
+      emptyCount,
       duration,
       cacheHits: answerGenResult?.cacheHits || 0,
       cacheMisses: answerGenResult?.cacheMisses || 0

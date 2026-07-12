@@ -452,14 +452,16 @@ app.post('/api/tasks/:taskId/recalculate-stats', async (req, res) => {
     const { taskId } = req.params
 
     const { rows } = await query(
-      `SELECT is_correct FROM ${TABLES.QUESTIONS} WHERE task_id = $1`,
+      `SELECT is_correct, answer_source FROM ${TABLES.QUESTIONS} WHERE task_id = $1`,
       [taskId]
     )
 
     let questionCount = rows.length
     let wrongCount = 0
+    let emptyCount = 0
     rows.forEach(q => {
       if (q.is_correct === false) wrongCount++
+      if (q.answer_source === 'blank') emptyCount++
     })
 
     const { rows: taskRows } = await query(
@@ -468,7 +470,7 @@ app.post('/api/tasks/:taskId/recalculate-stats', async (req, res) => {
            updated_at = NOW()
        WHERE id = $2
        RETURNING *`,
-      [JSON.stringify({ questionCount, wrongCount, progress: 100 }), taskId]
+      [JSON.stringify({ questionCount, wrongCount, emptyCount, progress: 100 }), taskId]
     )
 
     if (taskRows.length === 0) {
