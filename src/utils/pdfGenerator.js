@@ -164,10 +164,11 @@ export async function generateExamPDF({ title, studentName, questions, filename,
   }
 
   // Convert cross-origin OSS images to base64 data URLs via backend proxy
-  // The backend /api/proxy-image fetches images from OSS (no CORS needed server-side)
   const imageMap = new Map()
   const imageUrls = [...new Set(questions.map(q => q.image_url).filter(Boolean))]
-  
+
+  console.log(`开始加载 ${imageUrls.length} 张图片...`)
+
   await Promise.all(imageUrls.map(async (url) => {
     try {
       const proxyUrl = `/api/proxy-image?url=${encodeURIComponent(url)}`
@@ -183,10 +184,14 @@ export async function generateExamPDF({ title, studentName, questions, filename,
         imageMap.set(url, dataUrl)
         return
       }
-    } catch {}
-    
+    } catch (err) {
+      console.warn('Failed to preload image:', url, err.message)
+    }
+
     console.warn('Failed to preload image:', url)
   }))
+
+  console.log(`图片加载完成: ${imageMap.size}/${imageUrls.length}`)
 
   // Replace image URLs with data URLs in questions
   const pdfQuestions = questions.map(q => ({
@@ -259,6 +264,39 @@ export async function generateExamPDF({ title, studentName, questions, filename,
 
     const doc = new jsPDF('p', 'mm', 'a4')
 
+    // 生成二维码图片 data URL（每页都需要）
+    let qrImgData = null
+    if (qrContent) {
+      const qr = qrcode(0, 'M')
+      qr.addData(qrContent)
+      qr.make()
+
+      const size = 120
+      const qrCanvas = document.createElement('canvas')
+      qrCanvas.width = size
+      qrCanvas.height = size
+      const ctx = qrCanvas.getContext('2d')
+
+      const cellSize = size / qr.getModuleCount()
+      ctx.fillStyle = '#ffffff'
+      ctx.fillRect(0, 0, size, size)
+      ctx.fillStyle = '#000000'
+
+      for (let row = 0; row < qr.getModuleCount(); row++) {
+        for (let col = 0; col < qr.getModuleCount(); col++) {
+          if (qr.isDark(row, col)) {
+            ctx.fillRect(
+              Math.floor(col * cellSize),
+              Math.floor(row * cellSize),
+              Math.ceil(cellSize),
+              Math.ceil(cellSize)
+            )
+          }
+        }
+      }
+      qrImgData = qrCanvas.toDataURL('image/png')
+    }
+
     for (let p = 0; p < totalPages; p++) {
       if (p > 0) doc.addPage()
       const srcY = p * actualPageH
@@ -271,10 +309,15 @@ export async function generateExamPDF({ title, studentName, questions, filename,
       ctx.drawImage(canvas, 0, srcY, canvas.width, sliceH, 0, 0, canvas.width, sliceH)
 
       const pageImg = pageCanvas.toDataURL('image/jpeg', 0.92)
-      // 正确的 mm 高度计算：在 CSS 像素空间下计算
       const sliceH_css = sliceH / scale
       const mmH = (sliceH_css / cssW) * A4_W
       doc.addImage(pageImg, 'JPEG', 0, 0, A4_W, mmH)
+
+      // 在每页右上角添加二维码（小尺寸）
+      if (qrImgData) {
+        const qrSize = 35
+        doc.addImage(qrImgData, 'PNG', A4_W - qrSize - 8, 8, qrSize, qrSize)
+      }
     }
 
     // 生成 blob URL 和 blob，由调用方决定如何处理（预览/下载/打印）

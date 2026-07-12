@@ -482,25 +482,34 @@ export default function WrongBook({ onScanQR }) {
       return
     }
 
+    if (selectedQuestions.length > 30) {
+      Toast.show('最多只能选择30题生成试卷')
+      return
+    }
+
     try {
       // 提取选中的题目ID
       const questionIds = selectedQuestions.map(wq => wq.question_id || wq.id)
-      
+
       // 创建试卷名称（例如："错题组卷 - 2023年12月1日"）
       const examName = `错题组卷 - ${dayjs().format('YYYY年MM月DD日')}`
-      
+
       // 调用后端API创建试卷
       const examData = {
         student_id: currentStudent.id,
         name: examName,
         question_ids: questionIds
       }
-      
-      const result = await createGeneratedExam(examData)
+
+      try {
+        const result = await createGeneratedExam(examData)
+      } catch (apiErr) {
+        console.warn('创建组卷记录失败，将直接生成PDF:', apiErr)
+      }
 
       Toast.show({
-        icon: 'success',
-        content: '试卷生成成功，即将开始下载...'
+        icon: 'loading',
+        content: '正在生成试卷，请稍候...'
       })
 
       // 落库成功后自动生成 PDF
@@ -514,20 +523,24 @@ export default function WrongBook({ onScanQR }) {
         ts: Date.now()
       })
       const filename = `${currentStudent?.name || 'student'}_错题组卷_${dayjs().format('YYYYMMDD_HHmm')}`
-      try {
-        const result = await generateExamPDF({
-          title: `${currentStudent?.name || '学生'} - 错题练习`,
-          studentName: currentStudent?.name || '',
-          questions: questions,
-          filename: filename,
-          showAnswers: false,
-          qrContent: qrContent,
+
+      const result = await generateExamPDF({
+        title: `${currentStudent?.name || '学生'} - 错题练习`,
+        studentName: currentStudent?.name || '',
+        questions: questions,
+        filename: filename,
+        showAnswers: false,
+        qrContent: qrContent,
+      })
+
+      if (result && result.pdfBlob) {
+        saveAs(result.pdfBlob, `${filename}.pdf`)
+        Toast.show({
+          icon: 'success',
+          content: '试卷生成成功！'
         })
-        if (result && result.pdfBlob) {
-          saveAs(result.pdfBlob, `${filename}.pdf`)
-        }
-      } catch (pdfErr) {
-        console.warn('PDF生成失败:', pdfErr)
+      } else {
+        throw new Error('PDF生成结果为空')
       }
 
       // 清空选择
@@ -536,7 +549,7 @@ export default function WrongBook({ onScanQR }) {
       console.error('生成试卷失败:', error)
       Toast.show({
         icon: 'fail',
-        content: '生成试卷失败: ' + (error.message || '未知错误')
+        content: '生成试卷失败，请稍后重试'
       })
     }
   }
