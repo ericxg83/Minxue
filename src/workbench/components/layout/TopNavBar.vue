@@ -94,9 +94,9 @@ onUnmounted(() => {
 })
 
 const navItems = [
-  { key: 'proofread',       label: '题目校对', path: '/',                icon: 'DocumentChecked' },
+  { key: 'proofread',       label: '作业批改', path: '/',                icon: 'DocumentChecked' },
 { key: 'wrong-book',      label: '错题本',   path: '/wrongbook',        icon: 'Collection' },
-  { key: 'exam-history',    label: '组卷历史', path: '/exam-history',     icon: 'Clock' },
+  { key: 'exam-history',    label: '练习批改', path: '/exam-history',     icon: 'Clock' },
   { key: 'weekly-report',   label: '诊断报告', path: '/weekly-report',    icon: 'DataAnalysis' },
   { key: 'exam-import',     label: '试卷入库', path: '/paper',            icon: 'UploadFilled',disabled: true },
 ]
