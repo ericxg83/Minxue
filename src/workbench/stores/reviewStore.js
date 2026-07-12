@@ -255,15 +255,29 @@ export const useReviewStore = defineStore('review', () => {
         loadStudentTasks(firstStudent.id),
         loadWrongQuestions(firstStudent.id)
       ])
-      // 自动选择第一份待复核试卷（优先 done，其次任一）
-      if (studentTasks.value.length > 0) {
-        const firstPending = studentTasks.value.find(t => t.status === 'done')
-        await selectTask(firstPending || studentTasks.value[0])
-      }
+      // 自动选择第一份待复核试卷；无则展示空状态
+      await autoSelectPendingTask()
     }
 
     // 计算今日统计
     calculateTodayStats()
+  }
+
+  // 自动选择第一份「待复核」试卷（status === 'done'）。
+  // 无待复核试卷时，不自动打开已复核试卷，而是清空当前上下文并展示空状态。
+  // 已复核试卷仍可通过顶部「选择试卷」下拉手动查看。
+  const autoSelectPendingTask = async () => {
+    const firstPending = studentTasks.value.find(t => t.status === 'done')
+    if (firstPending) {
+      await selectTask(firstPending)
+      return firstPending
+    }
+    // 无待复核 → 空状态：清空当前试卷 / 题目，避免残留已复核试卷
+    currentTask.value = null
+    allQuestions.value = []
+    currentReviewIndex.value = 0
+    reviewAllDone.value = true
+    return null
   }
 
   // 设置当前学生
@@ -754,6 +768,7 @@ export const useReviewStore = defineStore('review', () => {
     reviewProgress,
     loadStudentTasks,
     selectTask,
+    autoSelectPendingTask,
     nextTask,
     completeTaskReview,
     autoCompleteAndAdvance,

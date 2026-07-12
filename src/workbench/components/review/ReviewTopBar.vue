@@ -137,15 +137,16 @@ const store = useReviewStore()
 const selectedStudentId = ref('')
 const selectedTaskId = ref('')
 
-// 当 store 中 currentStudent 变化时同步下拉框
+// 当 store 中 currentStudent 变化时同步下拉框（immediate：remount 时 store 为单例，
+// 需立即回填本地选择，避免下拉显示空「选择学生」）
 watch(() => store.currentStudent?.id, (id) => {
   selectedStudentId.value = id || ''
-})
+}, { immediate: true })
 
 // 当 store 中 currentTask 变化时同步下拉框
 watch(() => store.currentTask?.id, (id) => {
   selectedTaskId.value = id || ''
-})
+}, { immediate: true })
 
 const canNextTask = computed(() => {
   if (!store.currentTask || store.pendingTasks.length === 0) return false
@@ -158,13 +159,9 @@ const onStudentChange = async (studentId) => {
   if (!student) return
   store.setCurrentStudent(student)
   await store.loadStudentTasks(studentId)
-  // 自动选择第一份待复核试卷（优先 done）
-  const firstPending = store.studentTasks.find(t => t.status === 'done')
-  const target = firstPending || store.studentTasks[0]
-  if (target) {
-    selectedTaskId.value = target.id
-    await store.selectTask(target)
-  }
+  // 仅自动打开「待复核」试卷；无则展示空状态（已复核试卷可手动从下拉查看）
+  const target = await store.autoSelectPendingTask()
+  selectedTaskId.value = target?.id || ''
 }
 
 const onTaskChange = async (taskId) => {
