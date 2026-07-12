@@ -20,7 +20,7 @@
         <!-- 图片图层 -->
         <div class="image-layer" :style="imageLayerStyle">
           <img
-            :src="store.currentTask.image_url"
+            :src="store.currentPageImage"
             ref="imgRef"
             @load="onImgLoad"
             @error="onImgError"
@@ -29,9 +29,9 @@
             class="paper-image"
           />
 
-          <!-- 仅当前选中题目显示定位框 -->
+          <!-- 仅当前选中题目显示定位框（坐标系与当前页图一致时才画，优雅降级） -->
           <div
-            v-if="store.currentReviewQuestion && getBlockCoords(store.currentReviewQuestion)"
+            v-if="showBbox && store.currentReviewQuestion && getBlockCoords(store.currentReviewQuestion)"
             class="question-overlay overlay-current"
             :style="getOverlayStyle(store.currentReviewQuestion)"
             :title="`第${store.currentReviewIndex + 1}题`"
@@ -65,13 +65,28 @@
         </div>
       </div>
 
-      <!-- 页码标签 -->
+      <!-- 页码标签 / 多页切换 -->
       <div class="page-bar">
-        <span class="page-indicator">第 1 页</span>
+        <template v-if="store.currentPaperPages.length > 1">
+          <el-button
+            size="small" text
+            :disabled="store.currentPageIndex <= 0"
+            @click="prevPage"
+          >‹ 上一页</el-button>
+          <span class="page-indicator">
+            第 {{ store.currentPageIndex + 1 }} / {{ store.currentPaperPages.length }} 页
+          </span>
+          <el-button
+            size="small" text
+            :disabled="store.currentPageIndex >= store.currentPaperPages.length - 1"
+            @click="nextPage"
+          >下一页 ›</el-button>
+        </template>
+        <span v-else class="page-indicator">第 1 页</span>
       </div>
 
-      <!-- 其他待复核试卷缩略图 -->
-      <div v-if="store.otherPendingTasks.length > 0" class="pending-thumbnails">
+      <!-- 其他待复核试卷缩略图（仅练习批改保留） -->
+      <div v-if="store.reviewConfig.showOtherPapers && store.otherPendingTasks.length > 0" class="pending-thumbnails">
         <div class="thumbnails-header">
           <span>其他待复核试卷 ({{ store.otherPendingTasks.length }})</span>
         </div>
@@ -94,8 +109,8 @@
         </div>
       </div>
 
-      <!-- 已复核试卷（可折叠） -->
-      <div v-if="store.reviewedTasks.length > 0" class="reviewed-thumbnails">
+      <!-- 已复核试卷（可折叠，仅练习批改保留） -->
+      <div v-if="store.reviewConfig.showOtherPapers && store.reviewedTasks.length > 0" class="reviewed-thumbnails">
         <div class="thumbnails-header toggle-header" @click="showReviewed = !showReviewed">
           <el-icon class="toggle-arrow" :class="{ expanded: showReviewed }"><ArrowRight /></el-icon>
           <span>已复核试卷 ({{ store.reviewedTasks.length }})</span>
@@ -123,7 +138,7 @@
 </template>
 
 <script setup>
-import { ref, computed } from 'vue'
+import { ref, computed, watch } from 'vue'
 import { useReviewStore } from '../../stores/reviewStore'
 import { Picture, WarningFilled, View, ArrowRight } from '@element-plus/icons-vue'
 
@@ -131,6 +146,12 @@ const store = useReviewStore()
 
 // 已复核试卷折叠状态
 const showReviewed = ref(false)
+
+// bbox 优雅降级：仅当题目坐标与当前页图坐标系一致时绘制。
+// image 模式：坐标相对学生上传原图，可绘制。
+// paper 模式：练习卷题目的 block_coordinates 相对「原始作业图」，与答题卡页图不对齐，
+//            后端坐标管线就绪前不绘制（有坐标也不画），避免错位。
+const showBbox = computed(() => store.source === 'image')
 
 const containerRef = ref(null)
 const imgRef = ref(null)
@@ -234,9 +255,18 @@ const onImgError = () => {
 const retryLoad = () => {
   imgError.value = false
   if (imgRef.value) {
-    imgRef.value.src = store.currentTask?.image_url || ''
+    imgRef.value.src = store.currentPageImage || ''
   }
 }
+
+// ─── 多页切换 ─────────────────────────────────────────────
+const prevPage = () => store.setPageIndex(store.currentPageIndex - 1)
+const nextPage = () => store.setPageIndex(store.currentPageIndex + 1)
+
+// 切换页图后重置自适应（等图片自然尺寸更新由 onImgLoad 处理，这里兜底）
+watch(() => store.currentPageImage, () => {
+  imgError.value = false
+})
 
 // ─── 缩放控制 ─────────────────────────────────────────────
 

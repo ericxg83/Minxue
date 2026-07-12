@@ -1,7 +1,7 @@
 import { defineStore } from 'pinia'
 import { ref, computed } from 'vue'
 import dayjs from 'dayjs'
-import { getStudents, getWrongQuestionsByStudent, getQuestionsByTask, getTasksByStudent, updateWrongQuestionStatus, updateTaskStatus, recalculateTaskStats, getLatestJudgements, clearStudentCaches, updateQuestionReviewStatus, addWrongQuestions } from '../../services/apiService'
+import { getStudents, getWrongQuestionsByStudent, getQuestionsByTask, getTasksByStudent, updateWrongQuestionStatus, updateTaskStatus, recalculateTaskStats, getLatestJudgements, clearStudentCaches, updateQuestionReviewStatus, addWrongQuestions, getGeneratedExamsByStudent, getQuestionsByIds, gradeGeneratedExam } from '../../services/apiService'
 import { useLifecycleStore, LIFECYCLE_STATUS } from './lifecycleStore'
 import { checkQuestionCompleteness } from '../../utils/questionCompleteness.js'
 import { TASK_TYPE, getReviewConfig } from '../config/reviewConfig'
@@ -44,9 +44,37 @@ export const useReviewStore = defineStore('review', () => {
   // ReviewTopBar 触发「去编辑」时记录的待编辑题目，QuestionDetailPanel 监听后打开编辑面板
   const pendingEditQuestionId = ref(null)
 
-  // ── 批改工作台：场景模式（当前仅 homework 题目校对）──
+  // ── 批改工作台：场景模式（homework 题目校对 / paper 错题重练）──
   const taskType = ref(TASK_TYPE.HOMEWORK)
   const reviewConfig = computed(() => getReviewConfig(taskType.value))
+  // 数据来源：image=学生上传图片 | paper=生成的练习卷
+  const source = computed(() => reviewConfig.value.source)
+
+  // ── 多页试卷查看（image 模式恒为单页；paper 模式为答题卡多页）──
+  // 当前试卷（exam/task）对应的页图任务列表；currentTask 上挂载 _pageTasks（paper 模式）
+  const currentPageIndex = ref(0)
+  // 页图列表：image 模式 = [currentTask 自身]；paper 模式 = 该 exam 关联的答题卡 task 行
+  const currentPaperPages = computed(() => {
+    const t = currentTask.value
+    if (!t) return []
+    if (source.value === 'paper') {
+      const pages = Array.isArray(t._pageTasks) ? t._pageTasks : []
+      return pages.length > 0 ? pages : (t.image_url ? [t] : [])
+    }
+    return t.image_url ? [t] : []
+  })
+  // 当前页图 URL
+  const currentPageImage = computed(() => {
+    const pages = currentPaperPages.value
+    if (pages.length === 0) return currentTask.value?.image_url || ''
+    const idx = Math.min(currentPageIndex.value, pages.length - 1)
+    return pages[idx]?.image_url || ''
+  })
+  const setPageIndex = (i) => {
+    if (i >= 0 && i < currentPaperPages.value.length) {
+      currentPageIndex.value = i
+    }
+  }
   
   // 今日统计数据
   const todayStats = ref({
@@ -345,13 +373,7 @@ export const useReviewStore = defineStore('review', () => {
       return
     }
     // 先刷新统计数据
-    await recalculateTaskStats(currentTask.value.id).catch(e =>
-      console.error('刷新统计数据失败:', e.message)
-    )
-    // 再保存复核完成状态
-    await updateTaskStatus(currentTask.value.id, 'reviewed').catch(e =>
-      console.error('自动保存复核状态失败:', e.message)
-    )
+    await persistTaskCompletion(currentTask.value)
     currentTask.value.status = 'reviewed'
     if (currentStudent.value?.id) {
       clearStudentCaches(currentStudent.value.id)
@@ -375,6 +397,10 @@ export const useReviewStore = defineStore('review', () => {
 
   // 加载当前学生的已完成任务列表（含 done 和 reviewed）
   const loadStudentTasks = async (studentId) => {
+    // paper 模式：练习卷列表映射为统一的 studentTasks 语义
+    if (source.value === 'paper') {
+      return loadStudentPapers(studentId)
+    }
     try {
       const tasks = await getTasksByStudent(studentId, false)
       // 纳入 done 和 reviewed，按 status 排序：done 优先
@@ -384,6 +410,45 @@ export const useReviewStore = defineStore('review', () => {
         .sort((a, b) => (sorter[a.status] ?? 99) - (sorter[b.status] ?? 99))
     } catch (e) {
       console.error('加载学生任务失败:', e)
+      studentTasks.value = []
+    }
+  }
+
+  // paper 模式：加载练习卷（generated_exams），映射为统一 task 结构
+  // status: ungraded/grading → 'done'(待复核) ; graded → 'reviewed'(已复核)
+  const loadStudentPapers = async (studentId) => {
+    try {
+      const [exams, tasks] = await Promise.all([
+        getGeneratedExamsByStudent(studentId, false),
+        getTasksByStudent(studentId, false)
+      ])
+      // 按 generated_exam_id 归拢答题卡页图（每张上传照片一行 task）
+      const pagesByExam = {}
+      for (const t of (tasks || [])) {
+        const gid = t.generated_exam_id
+        if (!gid) continue
+        ;(pagesByExam[gid] = pagesByExam[gid] || []).push(t)
+      }
+      for (const gid of Object.keys(pagesByExam)) {
+        pagesByExam[gid].sort((a, b) => new Date(a.created_at) - new Date(b.created_at))
+      }
+      const sorter = { done: 0, reviewed: 1 }
+      studentTasks.value = (Array.isArray(exams) ? exams : []).map(exam => {
+        const pages = pagesByExam[exam.id] || []
+        return {
+          // 统一 task 语义（复用 topbar/缩略图/完成逻辑）
+          id: exam.id,
+          original_name: exam.name || '未命名练习卷',
+          status: exam.status === 'graded' ? 'reviewed' : 'done',
+          image_url: pages[0]?.image_url || '',
+          // paper 专属：题目 ID 列表 + 多页图任务
+          _questionIds: exam.question_ids || [],
+          _pageTasks: pages,
+          _isPaper: true,
+        }
+      }).sort((a, b) => (sorter[a.status] ?? 99) - (sorter[b.status] ?? 99))
+    } catch (e) {
+      console.error('加载练习卷失败:', e)
       studentTasks.value = []
     }
   }
@@ -408,9 +473,16 @@ export const useReviewStore = defineStore('review', () => {
   const selectTask = async (task) => {
     currentTask.value = task
     currentReviewIndex.value = 0
+    currentPageIndex.value = 0
     reviewStatus.value = 'reviewing'
     reviewAllDone.value = false
-    await loadQuestions(task.id)
+
+    if (source.value === 'paper') {
+      // paper 模式：题目来自练习卷 question_ids
+      await loadPaperQuestions(task)
+    } else {
+      await loadQuestions(task.id)
+    }
 
     // [修复] 加载最新判定数据（含 confidence），合并到每道题
     if (currentStudent.value?.id && allQuestions.value.length > 0) {
@@ -419,6 +491,29 @@ export const useReviewStore = defineStore('review', () => {
 
     if (currentStudent.value?.id) {
       await loadWrongQuestions(currentStudent.value.id)
+    }
+  }
+
+  // paper 模式：按练习卷 question_ids 拉取题目，保持 question_ids 顺序
+  const loadPaperQuestions = async (task) => {
+    const ids = task?._questionIds || []
+    currentTaskId.value = task?.id || null
+    if (ids.length === 0) {
+      allQuestions.value = []
+      return
+    }
+    try {
+      const fetched = await getQuestionsByIds(ids, currentStudent.value?.id)
+      const list = Array.isArray(fetched) ? fetched : []
+      // 按 question_ids 原始顺序排列
+      allQuestions.value = list.slice().sort((a, b) => {
+        const ai = ids.indexOf(a.id)
+        const bi = ids.indexOf(b.id)
+        return (ai < 0 ? 9999 : ai) - (bi < 0 ? 9999 : bi)
+      })
+    } catch (e) {
+      console.error('加载练习卷题目失败:', e)
+      allQuestions.value = []
     }
   }
 
@@ -461,6 +556,7 @@ export const useReviewStore = defineStore('review', () => {
   // 退出批改时重置为默认模式
   const resetReviewMode = () => {
     taskType.value = TASK_TYPE.HOMEWORK
+    currentPageIndex.value = 0
   }
 
   // 获取人工复核进度
@@ -529,13 +625,43 @@ export const useReviewStore = defineStore('review', () => {
     return null // 已经是最后一份
   }
 
+  // 持久化「完成复核」：按数据来源分支落库
+  // - image：刷新任务统计 + 标记 task=reviewed
+  // - paper：按各题正误调用 gradeGeneratedExam（掌握度进阶 + 标记 exam=graded）
+  const persistTaskCompletion = async (task) => {
+    if (!task) return
+    if (source.value === 'paper') {
+      const results = allQuestions.value
+        .map(q => ({ questionId: q.id, isCorrect: effectiveIsCorrect(q) }))
+        .filter(r => r.isCorrect != null)
+      if (results.length > 0 && currentStudent.value?.id) {
+        await gradeGeneratedExam(task.id, currentStudent.value.id, results).catch(e =>
+          console.error('保存练习卷批改结果失败:', e.message)
+        )
+      }
+      return
+    }
+    // image 模式
+    await recalculateTaskStats(task.id).catch(e =>
+      console.error('刷新统计数据失败:', e.message)
+    )
+    await updateTaskStatus(task.id, 'reviewed').catch(e =>
+      console.error('保存复核状态失败:', e.message)
+    )
+  }
+
+  // 结合人工复核结果得到每题最终正误（供 paper 提交）
+  const effectiveIsCorrect = (q) => {
+    if (q.review_status === 'correct') return true
+    if (q.review_status === 'wrong') return false
+    if (q.review_status === 'exclude') return null // 排除不计入
+    return q.is_correct ?? null
+  }
+
   // 完成任务复核：将试卷标记为 reviewed，清理缓存
   const completeTaskReview = async () => {
     if (!currentTask.value) return
-    await recalculateTaskStats(currentTask.value.id).catch(e =>
-      console.error('刷新统计数据失败:', e.message)
-    )
-    await updateTaskStatus(currentTask.value.id, 'reviewed')
+    await persistTaskCompletion(currentTask.value)
     currentTask.value.status = 'reviewed'
     if (currentStudent.value?.id) {
       clearStudentCaches(currentStudent.value.id)
@@ -648,7 +774,13 @@ export const useReviewStore = defineStore('review', () => {
     // 批改工作台：场景模式
     taskType,
     reviewConfig,
+    source,
     setTaskType,
-    resetReviewMode
+    resetReviewMode,
+    // 多页试卷查看
+    currentPageIndex,
+    currentPaperPages,
+    currentPageImage,
+    setPageIndex
   }
 })

@@ -28,7 +28,7 @@ const routes = [
   {
     path: '/exam-history',
     name: 'ExamHistory',
-    component: () => import('../views/ExamHistoryWorkbench.vue'),
+    component: () => import('../views/PracticeReviewWorkbench.vue'),
     meta: { requiresPC: true }
   },
   {
