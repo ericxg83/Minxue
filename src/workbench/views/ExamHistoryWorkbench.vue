@@ -1,12 +1,13 @@
 <template>
   <div class="exam-history-workbench">
-    <!-- Top Bar: Student Selector + Stats -->
+    <!-- Top Bar: 学生 + 试卷 选择器 + 统计 -->
     <header class="top-bar">
       <div class="top-bar-left">
+        <span class="page-title">组卷历史</span>
         <el-select
           v-model="selectedStudentId"
           placeholder="选择学生"
-          style="width: 200px"
+          style="width: 180px"
           @change="handleStudentChange"
         >
           <el-option
@@ -16,7 +17,30 @@
             :value="s.id"
           />
         </el-select>
-        <span class="page-title">组卷历史</span>
+        <el-select
+          v-model="selectedExamId"
+          placeholder="选择试卷"
+          style="width: 320px"
+          :disabled="!selectedStudentId || exams.length === 0"
+          @change="handleExamChange"
+        >
+          <el-option-group v-if="pendingExams.length > 0" label="待批改">
+            <el-option
+              v-for="exam in pendingExams"
+              :key="exam.id"
+              :label="`${exam.name} · ${formatDate(exam.created_at)}`"
+              :value="exam.id"
+            />
+          </el-option-group>
+          <el-option-group v-if="gradedExams.length > 0" label="已批改">
+            <el-option
+              v-for="exam in gradedExams"
+              :key="exam.id"
+              :label="`✓ ${exam.name} · ${formatDate(exam.created_at)}`"
+              :value="exam.id"
+            />
+          </el-option-group>
+        </el-select>
       </div>
       <div class="top-bar-right">
         <template v-if="exams.length > 0">
@@ -24,12 +48,15 @@
           <span class="stat-graded">已批改 {{ gradedCount }}</span>
           <span class="stat-ungraded">待批改 {{ ungradedCount }}</span>
         </template>
+        <el-button text type="primary" size="small" @click="refresh">
+          <el-icon><Refresh /></el-icon> 刷新
+        </el-button>
       </div>
     </header>
 
-    <!-- Main Content: Card List + Detail -->
+    <!-- Main Content: 详情占满 -->
     <main class="main-content">
-      <!-- Loading -->
+      <!-- Loading（加载试卷列表） -->
       <div v-if="loading" class="content-loading">
         <el-skeleton :rows="4" animated />
       </div>
@@ -43,121 +70,97 @@
         <el-empty description="该学生暂无组卷记录" :image-size="100" />
       </div>
 
-      <!-- Exam Cards + Detail -->
-      <template v-else>
-        <div class="content-layout">
-          <!-- Left: Exam List -->
-          <div class="exam-list">
-            <div class="list-header">
-              <span class="list-title">试卷列表</span>
-              <el-button text type="primary" size="small" @click="loadExams">
-                <el-icon><Refresh /></el-icon> 刷新
-              </el-button>
-            </div>
-            <div class="exam-list-scroll">
-            <div
-              v-for="exam in exams"
-              :key="exam.id"
-              class="exam-card"
-              :class="{ 'exam-card--selected': selectedExam?.id === exam.id }"
-              @click="selectExam(exam)"
+      <div v-else-if="!selectedExam" class="content-empty">
+        <el-empty description="请在顶部选择一份试卷" :image-size="100" />
+      </div>
+
+      <!-- 试卷详情（占满） -->
+      <div v-else class="exam-detail">
+        <div class="detail-inner">
+          <div class="detail-header">
+            <h3>{{ selectedExam.name }}</h3>
+            <el-tag
+              :type="selectedExam.status === 'graded' ? 'success' : 'warning'"
+              size="small"
+              effect="dark"
             >
-              <div class="exam-card__top">
-                <span class="exam-card__name">{{ exam.name }}</span>
-                <el-tag
-                  :type="exam.status === 'graded' ? 'success' : 'warning'"
-                  size="small"
-                  effect="light"
-                >
-                  {{ exam.status === 'graded' ? '已批改' : '未批改' }}
-                </el-tag>
-              </div>
-              <div class="exam-card__meta">
-                <span>{{ formatDate(exam.created_at) }}</span>
-                <span>·</span>
-                <span>{{ exam.total_count || exam.question_ids?.length || 0 }} 题</span>
-              </div>
-              <div v-if="exam.status === 'graded'" class="exam-card__stats">
-                <span class="stat-correct">正确 {{ exam.correct_count || 0 }}</span>
-                <span class="stat-wrong">错误 {{ exam.wrong_count || 0 }}</span>
-                <span class="stat-rate">正确率 {{ computeAccuracy(exam) }}%</span>
-              </div>
+              {{ selectedExam.status === 'graded' ? '已批改' : '未批改' }}
+            </el-tag>
+          </div>
+          <div class="detail-meta">
+            {{ formatDate(selectedExam.created_at) }} ·
+            {{ selectedExam.total_count || selectedExam.question_ids?.length || 0 }} 题
+          </div>
+
+          <!-- 未批改：批改入口 -->
+          <div v-if="selectedExam.status !== 'graded'" class="grade-action">
+            <span class="grade-action__hint">该卷尚未批改，批改结果将调整每道题的掌握度</span>
+            <el-button type="primary" @click="startGrading(selectedExam)">
+              <el-icon><EditPen /></el-icon> 开始批改
+            </el-button>
+          </div>
+
+          <!-- 已批改：统计卡 -->
+          <div v-else class="stats-grid">
+            <div class="stat-box stat-box--total">
+              <div class="stat-box__value">{{ selectedExam.total_count || selectedExam.question_ids?.length || 0 }}</div>
+              <div class="stat-box__label">总题数</div>
             </div>
+            <div class="stat-box stat-box--correct">
+              <div class="stat-box__value">{{ selectedExam.correct_count || 0 }}</div>
+              <div class="stat-box__label">正确</div>
+            </div>
+            <div class="stat-box stat-box--wrong">
+              <div class="stat-box__value">{{ selectedExam.wrong_count || 0 }}</div>
+              <div class="stat-box__label">错误</div>
+            </div>
+            <div class="stat-box stat-box--rate">
+              <div class="stat-box__value">{{ computeAccuracy(selectedExam) }}%</div>
+              <div class="stat-box__label">正确率</div>
             </div>
           </div>
-          <div class="exam-detail">
-            <template v-if="!selectedExam">
-              <div class="detail-hint">
-                <el-empty description="从左侧选择一份试卷" :image-size="80" />
+
+          <el-divider />
+
+          <!-- 题目图片（多张） -->
+          <h4 class="detail-subtitle">
+            题目详情
+            <span v-if="examQuestions.length" class="detail-subtitle__count">（{{ examQuestions.length }} 题）</span>
+          </h4>
+
+          <div v-if="questionsLoading" class="questions-loading">
+            <el-skeleton :rows="3" animated />
+          </div>
+
+          <div v-else-if="examQuestions.length === 0" class="questions-empty">
+            <el-empty description="未获取到题目内容" :image-size="80" />
+          </div>
+
+          <div v-else class="q-list">
+            <div v-for="(q, idx) in examQuestions" :key="q.id" class="q-card">
+              <div class="q-card__head">
+                <span class="q-index">第 {{ idx + 1 }} 题</span>
+                <span
+                  v-if="q.is_correct === true"
+                  class="q-status q-status--correct"
+                >正确</span>
+                <span
+                  v-else-if="q.is_correct === false"
+                  class="q-status q-status--wrong"
+                >错误</span>
               </div>
-            </template>
-
-            <!-- Ungraded -->
-            <template v-else-if="selectedExam.status !== 'graded'">
-              <div class="detail-ungraded">
-                <el-icon :size="48" color="#1677FF"><EditPen /></el-icon>
-                <h3>{{ selectedExam.name }}</h3>
-                <p>共 {{ selectedExam.total_count || selectedExam.question_ids?.length || 0 }} 道题目</p>
-                <p class="detail-hint-text">请批改此试卷，批改结果将调整每道题的掌握度</p>
-                <el-button type="primary" size="large" @click="startGrading(selectedExam)">
-                  <el-icon><EditPen /></el-icon> 开始批改
-                </el-button>
-              </div>
-            </template>
-
-            <!-- Graded Result -->
-            <template v-else>
-              <div class="detail-graded">
-                <div class="detail-header">
-                  <h3>{{ selectedExam.name }}</h3>
-                  <el-tag type="success" size="small" effect="dark">已批改</el-tag>
-                </div>
-                <div class="detail-meta">
-                  {{ formatDate(selectedExam.created_at) }} · {{ selectedExam.total_count || selectedExam.question_ids?.length || 0 }} 题
-                </div>
-
-                <div class="stats-grid">
-                  <div class="stat-box stat-box--total">
-                    <div class="stat-box__value">{{ selectedExam.total_count || selectedExam.question_ids?.length || 0 }}</div>
-                    <div class="stat-box__label">总题数</div>
-                  </div>
-                  <div class="stat-box stat-box--correct">
-                    <div class="stat-box__value">{{ selectedExam.correct_count || 0 }}</div>
-                    <div class="stat-box__label">正确</div>
-                  </div>
-                  <div class="stat-box stat-box--wrong">
-                    <div class="stat-box__value">{{ selectedExam.wrong_count || 0 }}</div>
-                    <div class="stat-box__label">错误</div>
-                  </div>
-                  <div class="stat-box stat-box--rate">
-                    <div class="stat-box__value">{{ computeAccuracy(selectedExam) }}%</div>
-                    <div class="stat-box__label">正确率</div>
-                  </div>
-                </div>
-
-                <el-divider />
-
-                <h4 class="detail-subtitle">答题详情</h4>
-                <div class="detail-list">
-                  <div
-                    v-for="i in (selectedExam.total_count || selectedExam.question_ids?.length || 0)"
-                    :key="i"
-                    class="detail-row"
-                  >
-                    <span class="detail-index">第 {{ i }} 题</span>
-                    <span
-                      class="detail-status"
-                      :class="i <= (selectedExam.correct_count || 0) ? 'detail-status--correct' : 'detail-status--wrong'"
-                    >
-                      {{ i <= (selectedExam.correct_count || 0) ? '正确' : '错误' }}
-                    </span>
-                  </div>
-                </div>
-              </div>
-            </template>
+              <img
+                v-if="imgSrc(q)"
+                :src="imgSrc(q)"
+                class="q-image"
+                alt="题目图片"
+                loading="lazy"
+              />
+              <div v-else class="q-noimage">该题暂无图片</div>
+            </div>
           </div>
         </div>
-      </template>
+      </div>
     </main>
   </div>
 </template>
@@ -165,9 +168,14 @@
 <script setup>
 import { ref, computed, onMounted } from 'vue'
 import { useRouter } from 'vue-router'
-import { Close, EditPen, Refresh } from '@element-plus/icons-vue'
+import { EditPen, Refresh } from '@element-plus/icons-vue'
 import dayjs from 'dayjs'
-import { getStudents, getGeneratedExamsByStudent } from '../../services/apiService'
+import {
+  getStudents,
+  getGeneratedExamsByStudent,
+  getQuestionsByIds,
+  getLatestJudgements
+} from '../../services/apiService'
 
 const router = useRouter()
 
@@ -175,10 +183,16 @@ const studentList = ref([])
 const selectedStudentId = ref('')
 const exams = ref([])
 const selectedExam = ref(null)
+const selectedExamId = ref('')
 const loading = ref(false)
+
+const examQuestions = ref([])
+const questionsLoading = ref(false)
 
 const gradedCount = computed(() => exams.value.filter(e => e.status === 'graded').length)
 const ungradedCount = computed(() => exams.value.filter(e => e.status !== 'graded').length)
+const pendingExams = computed(() => exams.value.filter(e => e.status !== 'graded'))
+const gradedExams = computed(() => exams.value.filter(e => e.status === 'graded'))
 
 function computeAccuracy(exam) {
   const total = exam.total_count || exam.question_ids?.length || 0
@@ -191,18 +205,22 @@ function formatDate(dateStr) {
   return dayjs(dateStr).format('MM/DD HH:mm')
 }
 
-function selectExam(exam) {
-  selectedExam.value = exam
+// 题目图片优先取 image_url（错题裁剪图），几何题回退 geometry_image_url
+function imgSrc(q) {
+  return q?.image_url || q?.geometry_image_url || ''
 }
 
 async function handleStudentChange(studentId) {
   selectedStudentId.value = studentId
-  selectedExam.value = null
   await loadExams()
+  selectFirstExam()
 }
 
 async function loadExams() {
-  if (!selectedStudentId.value) return
+  if (!selectedStudentId.value) {
+    exams.value = []
+    return
+  }
   loading.value = true
   try {
     exams.value = await getGeneratedExamsByStudent(selectedStudentId.value, false)
@@ -211,6 +229,90 @@ async function loadExams() {
     exams.value = []
   } finally {
     loading.value = false
+  }
+}
+
+// 切换学生后自动选中最新（列表首项）一份试卷
+function selectFirstExam() {
+  if (exams.value.length > 0) {
+    selectExam(exams.value[0])
+  } else {
+    selectedExam.value = null
+    selectedExamId.value = ''
+    examQuestions.value = []
+  }
+}
+
+function handleExamChange(examId) {
+  const exam = exams.value.find(e => e.id === examId)
+  if (exam) selectExam(exam)
+}
+
+async function selectExam(exam) {
+  selectedExam.value = exam
+  selectedExamId.value = exam.id
+  await loadExamQuestions(exam)
+}
+
+// 加载该卷的真实题目（含图片）；已批改卷合并最新判定得到每题正误
+async function loadExamQuestions(exam) {
+  const ids = exam.question_ids || []
+  if (ids.length === 0) {
+    examQuestions.value = []
+    return
+  }
+  questionsLoading.value = true
+  try {
+    const fetched = await getQuestionsByIds(ids, selectedStudentId.value)
+    const list = (Array.isArray(fetched) ? fetched : []).slice().sort((a, b) => {
+      const ai = ids.indexOf(a.id)
+      const bi = ids.indexOf(b.id)
+      return (ai < 0 ? 9999 : ai) - (bi < 0 ? 9999 : bi)
+    })
+    await mergeJudgements(list)
+    // 防止异步竞态：仅当仍是当前选中卷时写入
+    if (selectedExam.value?.id === exam.id) {
+      examQuestions.value = list
+    }
+  } catch (e) {
+    console.error('加载试卷题目失败:', e)
+    if (selectedExam.value?.id === exam.id) examQuestions.value = []
+  } finally {
+    questionsLoading.value = false
+  }
+}
+
+// 合并最新判定，补齐每题 is_correct（题目本身缺失时）
+async function mergeJudgements(questions) {
+  try {
+    const qIds = questions.map(q => q.id).filter(Boolean)
+    if (qIds.length === 0 || !selectedStudentId.value) return
+    const result = await getLatestJudgements(selectedStudentId.value, qIds)
+    const judgements = result.judgements || []
+    if (!Array.isArray(judgements) || judgements.length === 0) return
+    const judgeMap = {}
+    for (const j of judgements) {
+      if (j.question_id) judgeMap[j.question_id] = j
+    }
+    for (const q of questions) {
+      const j = judgeMap[q.id]
+      if (j && q.is_correct == null && j.is_correct != null) {
+        q.is_correct = j.is_correct
+      }
+    }
+  } catch (e) {
+    console.error('合并判定数据失败:', e)
+  }
+}
+
+async function refresh() {
+  const prevId = selectedExamId.value
+  await loadExams()
+  const keep = exams.value.find(e => e.id === prevId)
+  if (keep) {
+    selectExam(keep)
+  } else {
+    selectFirstExam()
   }
 }
 
@@ -226,13 +328,14 @@ function startGrading(exam) {
 
 onMounted(async () => {
   try {
-    // Fix: getStudents returns { data: students[] }, not { students[] }
+    // getStudents 返回 { data: students[] }
     const result = await getStudents(false)
     const list = result.data || result || []
     studentList.value = Array.isArray(list) ? list : []
     if (studentList.value.length > 0) {
       selectedStudentId.value = studentList.value[0].id
       await loadExams()
+      selectFirstExam()
     }
   } catch (e) {
     console.error('加载学生列表失败:', e)
@@ -262,13 +365,14 @@ onMounted(async () => {
 .top-bar-left {
   display: flex;
   align-items: center;
-  gap: 16px;
+  gap: 12px;
 }
 
 .page-title {
   font-size: 16px;
   font-weight: 600;
   color: #1D2129;
+  margin-right: 4px;
 }
 
 .top-bar-right {
@@ -297,142 +401,16 @@ onMounted(async () => {
   padding: 40px;
 }
 
-/* ── Content Layout ── */
-.content-layout {
-  display: flex;
-  height: 100%;
-}
-
-/* ── Left: Exam List ── */
-.exam-list {
-  width: 380px;
-  min-width: 380px;
-  display: flex;
-  flex-direction: column;
-  background: #fff;
-  border-right: 1px solid #e4e7ed;
-}
-
-.list-header {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  padding: 12px 16px;
-  border-bottom: 1px solid #f2f3f5;
-}
-
-.list-title {
-  font-size: 14px;
-  font-weight: 500;
-  color: #1D2129;
-}
-
-.exam-list-scroll {
-  flex: 1;
-  overflow-y: auto;
-  padding: 8px;
-}
-
-/* Exam Card */
-.exam-card {
-  padding: 12px;
-  border-radius: 8px;
-  cursor: pointer;
-  transition: all 0.2s;
-  margin: 0 8px 6px;
-  border: 1px solid transparent;
-}
-
-.exam-card:hover {
-  background: #f5f7fa;
-}
-
-.exam-card--selected {
-  background: #E8F3FF;
-  border-color: #1677FF;
-}
-
-.exam-card__top {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 8px;
-  margin-bottom: 4px;
-}
-
-.exam-card__name {
-  font-size: 14px;
-  font-weight: 500;
-  color: #1D2129;
-  flex: 1;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.exam-card__meta {
-  font-size: 12px;
-  color: #86909C;
-  display: flex;
-  gap: 6px;
-  margin-bottom: 4px;
-}
-
-.exam-card__stats {
-  display: flex;
-  gap: 12px;
-  font-size: 12px;
-}
-
-.stat-correct { color: #67C23A; font-weight: 500; }
-.stat-wrong { color: #F56C6C; font-weight: 500; }
-.stat-rate { color: #1677FF; font-weight: 500; }
-
-/* ── Right: Detail ── */
+/* ── 详情（占满） ── */
 .exam-detail {
-  flex: 1;
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  justify-content: center;
+  height: 100%;
   overflow-y: auto;
-  padding: 32px;
+  padding: 24px 32px;
 }
 
-.detail-hint {
-  color: #c0c4cc;
-}
-
-.detail-ungraded {
-  text-align: center;
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  gap: 12px;
-  max-width: 400px;
-}
-
-.detail-ungraded h3 {
-  margin: 0;
-  font-size: 18px;
-  color: #1D2129;
-}
-
-.detail-ungraded p {
-  margin: 0;
-  color: #86909C;
-  font-size: 14px;
-}
-
-.detail-hint-text {
-  color: #c0c4cc;
-  font-size: 13px;
-}
-
-/* Graded Detail */
-.detail-graded {
-  width: 100%;
-  max-width: 600px;
+.detail-inner {
+  max-width: 760px;
+  margin: 0 auto;
 }
 
 .detail-header {
@@ -454,11 +432,28 @@ onMounted(async () => {
   margin-bottom: 24px;
 }
 
+/* 未批改批改入口 */
+.grade-action {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  padding: 16px 20px;
+  background: #fff;
+  border: 1px solid #e4e7ed;
+  border-radius: 8px;
+}
+
+.grade-action__hint {
+  flex: 1;
+  font-size: 13px;
+  color: #86909C;
+}
+
+/* 已批改统计卡 */
 .stats-grid {
   display: grid;
   grid-template-columns: repeat(4, 1fr);
   gap: 12px;
-  margin-bottom: 8px;
 }
 
 .stat-box {
@@ -488,45 +483,76 @@ onMounted(async () => {
 .detail-subtitle {
   font-size: 15px;
   color: #1D2129;
-  margin: 0 0 12px 0;
+  margin: 0 0 16px 0;
 }
 
-.detail-list {
+.detail-subtitle__count {
+  font-size: 13px;
+  color: #86909C;
+  font-weight: 400;
+}
+
+.questions-loading,
+.questions-empty {
+  padding: 12px 0;
+}
+
+/* ── 题目图片列表 ── */
+.q-list {
   display: flex;
   flex-direction: column;
-  gap: 4px;
+  gap: 16px;
 }
 
-.detail-row {
+.q-card {
+  background: #fff;
+  border: 1px solid #e4e7ed;
+  border-radius: 8px;
+  overflow: hidden;
+}
+
+.q-card__head {
   display: flex;
   align-items: center;
-  gap: 12px;
-  padding: 8px 12px;
-  background: #fff;
-  border-radius: 6px;
-  border: 1px solid #f2f3f5;
+  justify-content: space-between;
+  padding: 10px 14px;
+  border-bottom: 1px solid #f2f3f5;
 }
 
-.detail-index {
-  font-size: 13px;
+.q-index {
+  font-size: 14px;
+  font-weight: 600;
   color: #4E5969;
-  flex: 1;
 }
 
-.detail-status {
+.q-status {
   font-size: 12px;
   font-weight: 500;
-  padding: 2px 8px;
+  padding: 2px 10px;
   border-radius: 4px;
 }
 
-.detail-status--correct {
+.q-status--correct {
   color: #67C23A;
   background: #F0F9EB;
 }
 
-.detail-status--wrong {
+.q-status--wrong {
   color: #F56C6C;
   background: #FEF0F0;
+}
+
+.q-image {
+  display: block;
+  max-width: 100%;
+  margin: 0 auto;
+  padding: 12px;
+}
+
+.q-noimage {
+  padding: 24px;
+  text-align: center;
+  font-size: 13px;
+  color: #c0c4cc;
 }
 </style>
