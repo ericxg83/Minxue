@@ -119,8 +119,8 @@ export default function RetryTask({ taskId, onBack }) {
   }
 
   const goToWorkbench = () => {
-    const gradingTaskId = task?.gradingTask?.id || task?.retry_task_id
-    const url = `${REVIEW_WORKBENCH_BASE}?task=${encodeURIComponent(gradingTaskId || '')}&type=wrong_retry`
+    // 批改结果在「组卷历史」查看/改判（低置信度题回退人工判定）
+    const url = `${REVIEW_WORKBENCH_BASE}#/exam-history`
     window.location.href = url
   }
 
@@ -239,7 +239,7 @@ export default function RetryTask({ taskId, onBack }) {
             </div>
           )}
 
-          {/* 已完成：进入批改工作台 */}
+          {/* 已完成：进入组卷历史查看批改结果 */}
           {isDone && (
             <div className="mt-4 bg-white rounded-2xl p-5 shadow-sm">
               <div className="text-[14px]" style={{ color: '#16A34A' }}>
@@ -250,7 +250,7 @@ export default function RetryTask({ taskId, onBack }) {
                 className="w-full mt-3 py-3 rounded-xl text-[14px] font-semibold"
                 style={{ background: '#2563EB', color: '#fff' }}
               >
-                进入批改工作台
+                查看批改结果
               </button>
             </div>
           )}
@@ -260,7 +260,7 @@ export default function RetryTask({ taskId, onBack }) {
             <div className="mt-4 bg-white rounded-2xl p-5 shadow-sm flex items-center gap-3">
               <Loader2 size={18} className="animate-spin" style={{ color: '#2563EB' }} />
               <span style={{ fontSize: '13px', color: '#475569' }}>
-                AI 正在批改，完成后可在此进入批改工作台。
+                AI 正在批改，完成后可在「组卷历史」查看结果。
               </span>
             </div>
           )}

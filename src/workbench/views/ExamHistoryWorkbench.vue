@@ -92,12 +92,9 @@
             {{ selectedExam.total_count || selectedExam.question_ids?.length || 0 }} 题
           </div>
 
-          <!-- 未批改：批改入口 -->
+          <!-- 未批改：批改提示 -->
           <div v-if="selectedExam.status !== 'graded'" class="grade-action">
-            <span class="grade-action__hint">该卷尚未批改，批改结果将调整每道题的掌握度</span>
-            <el-button type="primary" @click="startGrading(selectedExam)">
-              <el-icon><EditPen /></el-icon> 开始批改
-            </el-button>
+            <span class="grade-action__hint">该卷尚未批改，请逐题判定正确/错误后保存，批改结果将调整每道题的掌握度</span>
           </div>
 
           <!-- 已批改：统计卡 -->
@@ -141,13 +138,14 @@
               <div class="q-card__head">
                 <span class="q-index">第 {{ idx + 1 }} 题</span>
                 <span
-                  v-if="q.is_correct === true"
+                  v-if="effectiveCorrect(q) === true"
                   class="q-status q-status--correct"
                 >正确</span>
                 <span
-                  v-else-if="q.is_correct === false"
+                  v-else-if="effectiveCorrect(q) === false"
                   class="q-status q-status--wrong"
                 >错误</span>
+                <span v-else class="q-status q-status--pending">待判定</span>
               </div>
               <img
                 v-if="imgSrc(q)"
@@ -157,27 +155,47 @@
                 loading="lazy"
               />
               <div v-else class="q-noimage">该题暂无图片</div>
+              <!-- 改判操作 -->
+              <div class="q-rejudge">
+                <el-button
+                  size="small"
+                  :type="effectiveCorrect(q) === true ? 'success' : 'default'"
+                  :plain="effectiveCorrect(q) !== true"
+                  @click="setResult(q, true)"
+                >✓ 判为正确</el-button>
+                <el-button
+                  size="small"
+                  :type="effectiveCorrect(q) === false ? 'danger' : 'default'"
+                  :plain="effectiveCorrect(q) !== false"
+                  @click="setResult(q, false)"
+                >✗ 判为错误</el-button>
+              </div>
             </div>
           </div>
         </div>
       </div>
     </main>
+
+    <!-- 底部保存栏：有改判待提交时显示 -->
+    <footer v-if="selectedExam && hasChanges" class="save-bar">
+      <span class="save-bar__hint">已改判 {{ Object.keys(pendingResults).length }} 题</span>
+      <el-button :loading="saving" type="primary" @click="saveGrading">保存批改结果</el-button>
+    </footer>
   </div>
 </template>
 
 <script setup>
 import { ref, computed, onMounted } from 'vue'
-import { useRouter } from 'vue-router'
-import { EditPen, Refresh } from '@element-plus/icons-vue'
+import { Refresh } from '@element-plus/icons-vue'
+import { ElMessage } from 'element-plus'
 import dayjs from 'dayjs'
 import {
   getStudents,
   getGeneratedExamsByStudent,
   getQuestionsByIds,
-  getLatestJudgements
+  getLatestJudgements,
+  gradeGeneratedExam
 } from '../../services/apiService'
-
-const router = useRouter()
 
 const studentList = ref([])
 const selectedStudentId = ref('')
@@ -188,6 +206,11 @@ const loading = ref(false)
 
 const examQuestions = ref([])
 const questionsLoading = ref(false)
+
+// 改判：本地记录被手动改判的题目（questionId -> true/false），保存时提交
+const pendingResults = ref({})
+const saving = ref(false)
+const hasChanges = computed(() => Object.keys(pendingResults.value).length > 0)
 
 const gradedCount = computed(() => exams.value.filter(e => e.status === 'graded').length)
 const ungradedCount = computed(() => exams.value.filter(e => e.status !== 'graded').length)
@@ -251,6 +274,7 @@ function handleExamChange(examId) {
 async function selectExam(exam) {
   selectedExam.value = exam
   selectedExamId.value = exam.id
+  pendingResults.value = {}
   await loadExamQuestions(exam)
 }
 
@@ -316,14 +340,40 @@ async function refresh() {
   }
 }
 
-function startGrading(exam) {
-  router.push({
-    path: '/review/wrong-retry',
-    query: {
-      examId: exam.id,
-      studentId: selectedStudentId.value
-    }
-  })
+// 改判：将某题标为正确/错误（本地记录，保存时统一提交）
+function setResult(q, isCorrect) {
+  q.is_correct = isCorrect
+  pendingResults.value = { ...pendingResults.value, [q.id]: isCorrect }
+}
+
+// 判定后的每题正误（优先本地改判，其次题目自身）
+function effectiveCorrect(q) {
+  if (q.id in pendingResults.value) return pendingResults.value[q.id]
+  return q.is_correct
+}
+
+// 保存改判结果 → 调用批改接口，更新掌握度并将卷标记为已批改
+async function saveGrading() {
+  if (!selectedExam.value) return
+  const results = examQuestions.value
+    .filter(q => effectiveCorrect(q) != null)
+    .map(q => ({ questionId: q.id, isCorrect: effectiveCorrect(q) }))
+  if (results.length === 0) {
+    ElMessage.warning('请先对题目做出正确/错误判定')
+    return
+  }
+  saving.value = true
+  try {
+    await gradeGeneratedExam(selectedExam.value.id, selectedStudentId.value, results)
+    ElMessage.success('批改结果已保存')
+    pendingResults.value = {}
+    await refresh()
+  } catch (e) {
+    console.error('保存批改结果失败:', e)
+    ElMessage.error('保存失败，请重试')
+  } finally {
+    saving.value = false
+  }
 }
 
 onMounted(async () => {
@@ -540,6 +590,35 @@ onMounted(async () => {
 .q-status--wrong {
   color: #F56C6C;
   background: #FEF0F0;
+}
+
+.q-status--pending {
+  color: #E6A23C;
+  background: #FDF6EC;
+}
+
+.q-rejudge {
+  display: flex;
+  gap: 8px;
+  padding: 10px 14px;
+  border-top: 1px solid #f2f3f5;
+}
+
+/* ── 底部保存栏 ── */
+.save-bar {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 16px;
+  padding: 12px 32px;
+  background: #fff;
+  border-top: 1px solid #e4e7ed;
+  flex-shrink: 0;
+}
+
+.save-bar__hint {
+  font-size: 13px;
+  color: #86909C;
 }
 
 .q-image {

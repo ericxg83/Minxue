@@ -1220,9 +1220,229 @@ const generateMissingAnswers = async (questions, imageBuffer = null) => {
   return { updated: updatedCount, total: needAnswer.length, empty: emptyCount, placeholder: placeholderCount, exceptions: exceptionCount, cacheHits: cacheHitCount, cacheMisses: cacheMissCount }
 }
 
-export const processTask = async (job) => {
-  const { taskId, studentId, imageUrl: rawImageUrl, originalName } = job.data
+/**
+ * 精简批改管线（错题重练卷）
+ *
+ * 前置：student 已上传答卷照片，后端已按 generatedExamId 关联 student_id + task_type，
+ * 并将该卷题目（含标准答案 / 题型）写入 questions 表。
+ *
+ * 流程：
+ *   1. 下载 + 拉直 + 压缩答卷图片
+ *   2. OCR 仅提取每道题的【学生手写答案】（不生成参考答案、不做 AI 作答）
+ *   3. 按题号顺序与组卷 question_ids 对齐
+ *   4. 对已识别的标准答案做 judgeAnswer → 得到 { isCorrect, confidence }
+ *   5. 置信度门禁（>=0.8）且仅客观题可自动判定；低置信度 / 未识别 / 主观题 → 回退人工
+ *   6. 全部高置信度 → POST /grade 标记 graded + 推进掌握度；否则整卷保持未批改，
+ *      预填结果，老师在「组卷历史」逐题改判后再保存。
+ */
+const CONFIDENCE_THRESHOLD = parseFloat(process.env.CONFIDENCE_THRESHOLD) || 0.8
+// OCR 返回的题型不可信时，回退到题库已存的 question_type
+const SUBJECTIVE_TYPES = new Set(['answer', 'essay', 'proof', 'drawing', 'composition'])
+
+const processSlimGrading = async (job) => {
+  const { taskId, studentId, imageUrl: rawImageUrl, originalName, generatedExamId } = job.data
   const startTime = Date.now()
+
+  const resolveImageUrl = (raw) => {
+    if (typeof raw === 'string') {
+      if (raw.startsWith('{')) {
+        try {
+          const parsed = JSON.parse(raw)
+          return parsed.url || parsed.ossPath || ''
+        } catch { return raw }
+      }
+      return raw
+    }
+    if (typeof raw === 'object' && raw !== null) return raw.url || raw.ossPath || ''
+    return String(raw || '')
+  }
+  const imageUrl = resolveImageUrl(rawImageUrl)
+
+  const fail = async (msg) => {
+    console.error(`💥 [Slim] taskId=${taskId} 失败: ${msg}`)
+    await updateTaskStatus(taskId, TASK_STATUS.FAILED, { error: msg, failedAt: new Date().toISOString() }).catch(() => {})
+    throw new Error(msg)
+  }
+
+  console.log(`\n🔹 [Slim] 开始精简批改: examId=${generatedExamId}, taskId=${taskId}`)
+
+  try {
+    await job.updateProgress(5)
+    await updateTaskStatus(taskId, TASK_STATUS.PROCESSING, { progress: 5 })
+
+    // 拉取组卷题目（含存储的标准答案 / 题型 / 题号）
+    const examRes = await query(
+      `SELECT question_ids FROM ${TABLES.GENERATED_EXAMS} WHERE id = $1`,
+      [generatedExamId]
+    )
+    if (examRes.rows.length === 0) return fail('组卷记录不存在')
+
+    const questionIds = Array.isArray(examRes.rows[0].question_ids)
+      ? examRes.rows[0].question_ids
+      : (typeof examRes.rows[0].question_ids === 'string'
+          ? JSON.parse(examRes.rows[0].question_ids || '[]')
+          : [])
+
+    if (questionIds.length === 0) return fail('组卷无题目')
+
+    const { rows: bankQuestions } = await query(
+      `SELECT id, content, answer, analysis, question_type, options, sort_order
+       FROM ${TABLES.QUESTIONS} WHERE id = ANY($1)`,
+      [questionIds]
+    )
+    // 保持与 question_ids 一致的顺序
+    const orderMap = new Map(questionIds.map((id, idx) => [id, idx]))
+    const storedQuestions = bankQuestions
+      .sort((a, b) => (orderMap.get(a.id) ?? 0) - (orderMap.get(b.id) ?? 0))
+      .map((q, idx) => ({ ...q, expected_number: idx + 1 }))
+
+    await job.updateProgress(20)
+    await updateTaskStatus(taskId, TASK_STATUS.PROCESSING, { progress: 20 })
+
+    // 下载 + 拉直 + 压缩图片
+    let imageBuffer
+    try { imageBuffer = await downloadImage(imageUrl) }
+    catch (e) { return fail('下载答卷图片失败: ' + e.message) }
+
+    let straightened
+    try { straightened = await deskewImage(imageBuffer) }
+    catch { straightened = imageBuffer }
+    let compressed
+    try { compressed = await compressImageBuffer(straightened) }
+    catch (e) { return fail('图片压缩失败: ' + e.message) }
+
+    await job.updateProgress(35)
+    await updateTaskStatus(taskId, TASK_STATUS.PROCESSING, { progress: 35 })
+
+    // OCR：仅取学生答案
+    const ocrResult = await recognizeQuestions(bufferToBase64(compressed), taskId)
+    if (!ocrResult.success) return fail(ocrResult.error || 'AI 识别失败')
+
+    const ocrQuestions = ocrResult.questions || []
+    console.log(`\n🔹 [Slim] OCR 识别 ${ocrQuestions.length} 道学生答案，组卷共 ${storedQuestions.length} 题`)
+
+    await job.updateProgress(70)
+    await updateTaskStatus(taskId, TASK_STATUS.PROCESSING, { progress: 70 })
+
+    // 按题号顺序对齐（OCR 顺序即卷面顺序，与题库一致）
+    const results = []
+    let autoCount = 0
+    let manualCount = 0
+
+    for (let i = 0; i < storedQuestions.length; i++) {
+      const stored = storedQuestions[i]
+      const ocr = ocrQuestions[i]
+      const studentAnswer = (ocr?.student_answer || '').toString().trim()
+
+      // 存储答案为空（OCR 之前未生成）：无法自动判定
+      if (!stored.answer || !stored.answer.trim()) {
+        results.push({ questionId: stored.id, isCorrect: null, source: 'manual', reason: 'no_reference_answer' })
+        manualCount++
+        continue
+      }
+
+      // 主观题：交由人工判定
+      const qType = (stored.question_type || '').toLowerCase()
+      if (SUBJECTIVE_TYPES.has(qType)) {
+        results.push({ questionId: stored.id, isCorrect: null, source: 'manual', reason: 'subjective' })
+        manualCount++
+        continue
+      }
+
+      // 学生未作答
+      if (!studentAnswer) {
+        results.push({ questionId: stored.id, isCorrect: false, source: 'ocr', confidence: 0, reason: 'blank' })
+        autoCount++
+        continue
+      }
+
+      const judgment = judgeAnswer(studentAnswer, stored.answer, stored.question_type)
+      const confidence = ocr?.confidence != null ? Number(ocr.confidence) : 0
+      const highConfidence = confidence >= CONFIDENCE_THRESHOLD
+
+      if (!highConfidence) {
+        // 低置信度：不自动判定，预填但回退人工确认
+        results.push({ questionId: stored.id, isCorrect: null, source: 'manual', reason: 'low_confidence', confidence })
+        manualCount++
+        continue
+      }
+
+      results.push({ questionId: stored.id, isCorrect: judgment.isCorrect, source: 'ocr', confidence })
+      autoCount++
+    }
+
+    // 预填每道题的 is_correct + confidence（供组卷历史查看 / 改判）
+    for (const r of results) {
+      if (r.isCorrect !== null) {
+        await query(
+          `UPDATE ${TABLES.QUESTIONS} SET is_correct = $1, confidence = $2, updated_at = NOW() WHERE id = $3`,
+          [r.isCorrect, r.confidence ?? null, r.questionId]
+        ).catch((e) => console.error(`[Slim] 预填 is_correct 失败 q=${r.questionId?.substring(0, 8)}:`, e.message))
+      }
+    }
+
+    await job.updateProgress(90)
+    await updateTaskStatus(taskId, TASK_STATUS.PROCESSING, { progress: 90 })
+
+    // 仅当全部题都成功自动判定（无任何 manual 回退）才标记 graded + 推进掌握度
+    const allAuto = manualCount === 0 && autoCount > 0
+    if (allAuto) {
+      const gradeResults = results
+        .filter((r) => r.isCorrect !== null)
+        .map((r) => ({ questionId: r.questionId, isCorrect: r.isCorrect }))
+      const gradePayload = { id: generatedExamId, studentId, results: gradeResults }
+      await callGradeEndpoint(gradePayload).catch((e) => {
+        console.error('[Slim] 自动批改提交失败:', e.message)
+      })
+      console.log(`\n🔹 [Slim] 全自动判定完成：${autoCount} 题，组卷已标记 graded`)
+    } else {
+      // 存在需人工判定的题：整卷保持未批改，老师在组卷历史逐题改判后保存
+      console.log(`\n🔹 [Slim] 存在 ${manualCount} 道需人工判定题，整卷保持未批改，等待改判`)
+    }
+
+    await job.updateProgress(100)
+    await updateTaskStatus(taskId, TASK_STATUS.DONE, {
+      questionCount: storedQuestions.length,
+      autoCount,
+      manualCount,
+      duration: Date.now() - startTime,
+      completedAt: new Date().toISOString()
+    })
+
+    return { taskId, examId: generatedExamId, autoCount, manualCount, allAuto }
+  } catch (error) {
+    const duration = Date.now() - startTime
+    console.error(`\n💥💥 [Slim] 精简批改失败: taskId=${taskId}, ${error.message}`)
+    await updateTaskStatus(taskId, TASK_STATUS.FAILED, { error: error.message, failedAt: new Date().toISOString() }).catch(() => {})
+    throw error
+  }
+}
+
+// 调用 /generated-exams/:id/grade（复用组卷批改掌握度进阶逻辑）
+const callGradeEndpoint = async ({ id, studentId, results }) => {
+  const base = process.env.API_BASE_URL || `http://localhost:${process.env.PORT || 4000}`
+  const url = `${base}/api/generated-exams/${id}/grade`
+  const resp = await fetch(url, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ studentId, results })
+  })
+  if (!resp.ok) {
+    const body = await resp.json().catch(() => ({}))
+    throw new Error(body.error || `HTTP ${resp.status}`)
+  }
+  return resp.json()
+}
+
+export const processTask = async (job) => {
+  const { taskId, studentId, imageUrl: rawImageUrl, originalName, generatedExamId } = job.data
+
+  // ── 精简管线（错题重练）：按组卷 question_ids 匹配题库已存答案，自动判定 ──
+  // 不跑完整 OCR+AI作答+AI判卷 worker，仅 OCR 学生手写答案 → 与存储答案 deterministic 比对
+  // → 置信度门禁（0.8）→ 全部高置信度则自动批改并推进掌握度；否则回退人工改判。
+  if (generatedExamId) {
+    return processSlimGrading(job)
+  }
 
   // Defensive: imageUrl from DB might be string URL, JSON object string, or object
   let imageUrl

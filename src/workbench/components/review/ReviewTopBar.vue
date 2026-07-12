@@ -1,59 +1,46 @@
 <template>
   <div class="top-bar">
     <div class="top-bar-left">
-      <!-- homework 模式：学生 + 试卷下拉（原逻辑） -->
-      <template v-if="!store.examMode">
-        <el-select
-          v-model="selectedStudentId"
-          placeholder="选择学生"
-          size="default"
-          style="width: 200px"
-          @change="onStudentChange"
-        >
+      <el-select
+        v-model="selectedStudentId"
+        placeholder="选择学生"
+        size="default"
+        style="width: 200px"
+        @change="onStudentChange"
+      >
+        <el-option
+          v-for="s in store.students"
+          :key="s.id"
+          :label="s.name"
+          :value="s.id"
+        />
+      </el-select>
+
+      <el-select
+        v-model="selectedTaskId"
+        placeholder="选择试卷"
+        size="default"
+        style="width: 300px; margin-left: 16px"
+        :disabled="!store.currentStudent"
+        @change="onTaskChange"
+      >
+        <el-option-group v-if="store.pendingTasks.length > 0" label="待复核">
           <el-option
-            v-for="s in store.students"
-            :key="s.id"
-            :label="s.name"
-            :value="s.id"
+            v-for="t in store.pendingTasks"
+            :key="t.id"
+            :label="t.original_name || '未命名试卷'"
+            :value="t.id"
           />
-        </el-select>
-
-        <el-select
-          v-model="selectedTaskId"
-          placeholder="选择试卷"
-          size="default"
-          style="width: 300px; margin-left: 16px"
-          :disabled="!store.currentStudent"
-          @change="onTaskChange"
-        >
-          <el-option-group v-if="store.pendingTasks.length > 0" label="待复核">
-            <el-option
-              v-for="t in store.pendingTasks"
-              :key="t.id"
-              :label="t.original_name || '未命名试卷'"
-              :value="t.id"
-            />
-          </el-option-group>
-          <el-option-group v-if="store.reviewedTasks.length > 0" label="已复核">
-            <el-option
-              v-for="t in store.reviewedTasks"
-              :key="t.id"
-              :label="`✓ ${t.original_name || '未命名试卷'}`"
-              :value="t.id"
-            />
-          </el-option-group>
-        </el-select>
-      </template>
-
-      <!-- wrong_retry 模式：返回按钮 + 卷名 + 模式标识 -->
-      <template v-else>
-        <el-button text @click="handleBack" class="back-btn">
-          <el-icon><ArrowLeft /></el-icon>
-          <span>返回</span>
-        </el-button>
-        <span class="exam-mode-name">{{ store.currentTask?.name || '错题重练卷' }}</span>
-        <el-tag type="primary" size="small" effect="plain">{{ store.reviewConfig.topTitle }}</el-tag>
-      </template>
+        </el-option-group>
+        <el-option-group v-if="store.reviewedTasks.length > 0" label="已复核">
+          <el-option
+            v-for="t in store.reviewedTasks"
+            :key="t.id"
+            :label="`✓ ${t.original_name || '未命名试卷'}`"
+            :value="t.id"
+          />
+        </el-option-group>
+      </el-select>
     </div>
 
     <div class="top-bar-right">
@@ -89,15 +76,14 @@
         @click="handleComplete">
         ✓ {{ store.reviewConfig.completeLabel }}
       </el-button>
-      <el-button v-if="!store.examMode" size="default" type="primary" :disabled="!canNextTask" @click="goNextTask">
+      <el-button size="default" type="primary" :disabled="!canNextTask" @click="goNextTask">
         ▶ 下一份
       </el-button>
     </div>
   </div>
 
-  <!-- 错题未入册拦截清单（仅 homework） -->
+  <!-- 错题未入册拦截清单 -->
   <el-dialog
-    v-if="!store.examMode"
     v-model="store.wrongGateVisible"
     title="有错题尚未进入错题本，无法完成复核"
     width="560px"
@@ -142,14 +128,11 @@
 
 <script setup>
 import { ref, computed, watch } from 'vue'
-import { useRouter } from 'vue-router'
-import { ArrowLeft } from '@element-plus/icons-vue'
 import { ElMessage } from 'element-plus'
 import { useReviewStore } from '../../stores/reviewStore'
 import StatusIcon from './StatusIcon.vue'
 
 const store = useReviewStore()
-const router = useRouter()
 
 const selectedStudentId = ref('')
 const selectedTaskId = ref('')
@@ -200,27 +183,9 @@ const goNextTask = async () => {
   }
 }
 
-// wrong_retry 模式返回组卷历史
-const handleBack = () => {
-  router.push('/exam-history')
-}
-
-// 完成批改（按场景分支）
+// 完成批改
 const handleComplete = async () => {
-  if (store.examMode) {
-    // wrong_retry：批量保存掌握度，弹汇总
-    try {
-      const data = await store.completeReview()
-      if (data) {
-        store.showGradeSummary = true
-      }
-    } catch (e) {
-      ElMessage.error('保存失败，请重试')
-    }
-    return
-  }
-
-  // homework：门禁 → 完成复核 → 自动跳下一份
+  // 门禁 → 完成复核 → 自动跳下一份
   const list = store.getUnresolvedWrong()
   if (list.length > 0) {
     store.openWrongGate(list)
@@ -229,7 +194,7 @@ const handleComplete = async () => {
   await doComplete()
 }
 
-// homework：真正执行完成复核 + 自动跳下一份
+// 真正执行完成复核 + 自动跳下一份
 const doComplete = async () => {
   try {
     await store.completeTaskReview()
@@ -246,14 +211,14 @@ const doComplete = async () => {
   }
 }
 
-// homework：错题清单弹窗中「完成复核」
+// 错题清单弹窗中「完成复核」
 const handleGateComplete = async () => {
   if (store.unresolvedWrongQuestions.length > 0) return
   store.wrongGateVisible = false
   await doComplete()
 }
 
-// homework：错题清单弹窗中「加入错题本」
+// 错题清单弹窗中「加入错题本」
 const handleAddToBook = async (item) => {
   item.adding = true
   try {

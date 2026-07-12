@@ -92,27 +92,6 @@
           style="width:100px;margin-left:auto;" />
       </div>
 
-      <!-- 本次掌握变化（仅 wrong_retry 模式） -->
-      <div class="ops-mastery-row" v-if="store.reviewConfig.showMasteryChange && q">
-        <div class="ops-mastery-item">
-          <span class="ops-mastery-label">之前</span>
-          <el-tag size="small" :type="masteryColor(previousLifecycle)">{{ masteryLabel(previousLifecycle) }}</el-tag>
-        </div>
-        <el-icon class="ops-mastery-arrow"><Right /></el-icon>
-        <div class="ops-mastery-item">
-          <span class="ops-mastery-label">本次</span>
-          <el-tag v-if="q.review_status" size="small" :type="q.review_status === 'correct' ? 'success' : 'danger'">
-            {{ q.review_status === 'correct' ? '答对' : '答错' }}
-          </el-tag>
-          <span v-else class="ops-mastery-pending">待批改</span>
-        </div>
-        <el-icon class="ops-mastery-arrow"><Right /></el-icon>
-        <div class="ops-mastery-item">
-          <span class="ops-mastery-label">结果</span>
-          <el-tag size="small" :type="masteryColor(nextLifecycle)">{{ masteryLabel(nextLifecycle) }}</el-tag>
-        </div>
-      </div>
-
       <!-- ═══ 完整题目内容（始终可见，不折叠） ═══ -->
       <div class="ops-question-body">
         <!-- 题型 & 学科（仅在编辑时显示） -->
@@ -287,27 +266,12 @@ import { processExamImage } from '../../../utils/imageProcessor'
 import { getGeometryDisplayUrl, getTikzStatus } from '../../../utils/geometryDisplay'
 import { tikzToSvg } from '../../../utils/tikzGenerator'
 import { ElMessage, ElMessageBox, ElLoading } from 'element-plus'
-import { DocumentChecked, Delete, Plus, Upload, Picture, EditPen, ArrowLeft, ArrowRight, RefreshLeft, Crop, Right } from '@element-plus/icons-vue'
+import { DocumentChecked, Delete, Plus, Upload, Picture, EditPen, ArrowLeft, ArrowRight, RefreshLeft, Crop } from '@element-plus/icons-vue'
 import MathRender from '../MathRender.vue'
 import QuestionEditForm from './QuestionEditForm.vue'
-import { LIFECYCLE_STATUS, LIFECYCLE_STATUS_LABELS, LIFECYCLE_STATUS_COLORS, useLifecycleStore } from '../../stores/lifecycleStore'
 
 const store = useReviewStore()
-const lifecycleStore = useLifecycleStore()
 const q = computed(() => store.currentReviewQuestion)
-
-// ── 掌握度展示（wrong_retry 模式） ──
-const previousLifecycle = computed(() => store.previousLifecycle(q.value))
-const nextLifecycle = computed(() => {
-  if (!q.value?.review_status) return previousLifecycle.value
-  return store.examMode
-    ? (q.value.review_status === 'correct'
-        ? lifecycleStore.getNextStatus(previousLifecycle.value)
-        : LIFECYCLE_STATUS.NEW)
-    : previousLifecycle.value
-})
-const masteryLabel = (status) => LIFECYCLE_STATUS_LABELS[status] || status
-const masteryColor = (status) => LIFECYCLE_STATUS_COLORS[status] || 'info'
 
 const typeLabel = computed(() => {
   if (!q.value) return ''
@@ -644,15 +608,13 @@ const handleReview = (result) => {
   const question = q.value
   if (!question) return
   const btn = store.reviewConfig.buttons
-  const cfg = store.reviewConfig
   const resultText = {
     correct: `已标记为${btn.correct}`,
     wrong: `已标记为${btn.wrong}`,
     exclude: '已排除本题'
   }
-  // homework 模式：标记"错误"需完整性检查（错误题要入错题本）
-  // wrong_retry 模式：错误不再入册，跳过完整性门禁
-  if (result === 'wrong' && !store.examMode) {
+  // 标记"错误"需完整性检查（错误题要入错题本）
+  if (result === 'wrong') {
     const blocked = store.reviewQuestion(question.id, result)
     if (blocked?.blocked) {
       ElMessageBox.confirm(
@@ -858,37 +820,7 @@ const handleUseClean = async () => {
   flex-shrink: 0;
 }
 
-/* ── 掌握度变化（wrong_retry） ── */
-.ops-mastery-row {
-  display: flex;
-  align-items: center;
-  flex-wrap: wrap;
-  gap: 10px;
-  background: #f7f8fa;
-  margin: 0 10px;
-  padding: 10px 14px;
-  border-radius: 6px;
-  flex-shrink: 0;
-}
-.ops-mastery-item {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-}
-.ops-mastery-label {
-  font-size: 11px;
-  font-weight: 600;
-  color: #909399;
-  letter-spacing: 0.5px;
-}
-.ops-mastery-arrow {
-  color: #c0c4cc;
-  font-size: 14px;
-}
-.ops-mastery-pending {
-  font-size: 13px;
-  color: #c0c4cc;
-}
+/* ── 顶栏模式标题 ── */
 .ops-mode-title {
   font-size: 14px;
   font-weight: 600;

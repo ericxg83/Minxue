@@ -183,7 +183,9 @@ app.post('/api/tasks/upload', upload.array('files', 20), async (req, res) => {
                 taskId: savedTask.id,
                 studentId: resolvedStudentId,
                 imageUrl: safeUrl,
-                originalName: result.filename
+                originalName: result.filename,
+                generatedExamId: normalizedGeneratedExamId,
+                taskType: normalizedTaskType
               }, {
                 attempts: parseInt(process.env.MAX_RETRIES) || 3,
                 backoff: { type: 'exponential', delay: 5000 }
@@ -199,7 +201,7 @@ app.post('/api/tasks/upload', upload.array('files', 20), async (req, res) => {
           } else {
             console.log(`  ??  Redis 队列未连接，跳过队列提交`)
             // 兜底：直接同步调用 Worker 处理
-            processTask({ data: { taskId: savedTask.id, studentId: resolvedStudentId, imageUrl: safeUrl, originalName: result.filename } }).catch(e => console.error('  ? 同步处理失败: ' + e.message))
+            processTask({ data: { taskId: savedTask.id, studentId: resolvedStudentId, imageUrl: safeUrl, originalName: result.filename, generatedExamId: normalizedGeneratedExamId, taskType: normalizedTaskType } }).catch(e => console.error('  ? 同步处理失败: ' + e.message))
           }
 
           tasks.push(savedTask)

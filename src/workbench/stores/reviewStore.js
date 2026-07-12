@@ -1,7 +1,7 @@
 import { defineStore } from 'pinia'
 import { ref, computed } from 'vue'
 import dayjs from 'dayjs'
-import { getStudents, getWrongQuestionsByStudent, getQuestionsByTask, getTasksByStudent, updateWrongQuestionStatus, updateTaskStatus, recalculateTaskStats, getLatestJudgements, clearStudentCaches, updateQuestionReviewStatus, addWrongQuestions, getGeneratedExamById, getQuestionsByIds, gradeGeneratedExam, clearCache } from '../../services/apiService'
+import { getStudents, getWrongQuestionsByStudent, getQuestionsByTask, getTasksByStudent, updateWrongQuestionStatus, updateTaskStatus, recalculateTaskStats, getLatestJudgements, clearStudentCaches, updateQuestionReviewStatus, addWrongQuestions } from '../../services/apiService'
 import { useLifecycleStore, LIFECYCLE_STATUS } from './lifecycleStore'
 import { checkQuestionCompleteness } from '../../utils/questionCompleteness.js'
 import { TASK_TYPE, getReviewConfig } from '../config/reviewConfig'
@@ -44,17 +44,9 @@ export const useReviewStore = defineStore('review', () => {
   // ReviewTopBar 触发「去编辑」时记录的待编辑题目，QuestionDetailPanel 监听后打开编辑面板
   const pendingEditQuestionId = ref(null)
 
-  // ── 统一批改工作台：场景模式 ──
-  // taskType 决定业务逻辑分支：homework（题目校对）/ wrong_retry（错题重练）
+  // ── 批改工作台：场景模式（当前仅 homework 题目校对）──
   const taskType = ref(TASK_TYPE.HOMEWORK)
-  const currentExamId = ref(null)      // wrong_retry 模式：当前组卷 ID
-  const examMode = computed(() => taskType.value === TASK_TYPE.WRONG_RETRY)
   const reviewConfig = computed(() => getReviewConfig(taskType.value))
-  // wrong_retry 完成时掌握度汇总（来自 POST /grade 返回）
-  const lastGradeSummary = ref(null)
-  const gradeSaving = ref(false)
-  // wrong_retry 完成汇总弹窗可见性（由 ReviewTopBar 触发，弹窗渲染在 ReviewWorkspace）
-  const showGradeSummary = ref(false)
   
   // 今日统计数据
   const todayStats = ref({
@@ -76,14 +68,11 @@ export const useReviewStore = defineStore('review', () => {
   })
 
   // 题目确认状态：已有人工审核记录 OR AI confidence >= 阈值
-  // wrong_retry 模式：仅看人工 review_status（错题重练不走置信度自动确认）
   const questionConfirmationMap = computed(() => {
     const map = {}
     for (const q of allQuestions.value) {
       const manual = !!q.review_status
-      map[q.id] = examMode.value
-        ? manual
-        : (manual || (q.confidence != null && q.confidence >= confidenceThreshold.value))
+      map[q.id] = manual || (q.confidence != null && q.confidence >= confidenceThreshold.value)
     }
     return map
   })
@@ -287,25 +276,7 @@ export const useReviewStore = defineStore('review', () => {
     const question = allQuestions.value.find(q => q.id === questionId)
     if (!question) return
 
-    // ── wrong_retry 模式：仅记录 review_status，错误不再入册 ──
-    if (examMode.value) {
-      question.review_status = result
-      const sourceType = TASK_TYPE.WRONG_RETRY
-      updateQuestionReviewStatus(questionId, result).catch(e =>
-        console.error(`review_status 持久化失败 q=${questionId.substring(0, 8)}:`, e.message)
-      )
-      // 写入 source_type，标记该题复核来源于错题重练（服务端 COALESCE 不覆盖 homework 旧值）
-      updateQuestionSourceType(questionId, sourceType).catch(e =>
-        console.error(`source_type 持久化失败 q=${questionId.substring(0, 8)}:`, e.message)
-      )
-      // 自动进入下一题
-      if (!nextQuestion()) {
-        reviewStatus.value = 'completed'
-      }
-      return
-    }
-
-    // ── homework 模式：完整逻辑（完整性校验 + 错题本同步） ──
+    // ── 完整逻辑（完整性校验 + 错题本同步） ──
     // 完整性检查 — 标记"错误"时，不完整的题目不进错题本
     if (result === 'wrong') {
       const { isComplete, issues } = checkQuestionCompleteness(question)
@@ -364,10 +335,6 @@ export const useReviewStore = defineStore('review', () => {
   }
 
   // 仅写入 source_type（留给错题重练模式标记复核来源）
-  const updateQuestionSourceType = (questionId, sourceType) => {
-    return updateQuestion(questionId, { source_type: sourceType })
-  }
-
   // 自动完成复核并跳转到下一份试卷
   const autoCompleteAndAdvance = async () => {
     if (!currentTask.value) return
@@ -484,113 +451,16 @@ export const useReviewStore = defineStore('review', () => {
     }
   }
 
-  // ── 统一批改工作台：场景模式控制 ──
+  // ── 批改工作台：场景模式控制 ──
 
-  // 设置当前批改场景（homework / wrong_retry）
+  // 设置当前批改场景（保留接口，当前仅 homework）
   const setTaskType = (type) => {
     taskType.value = type || TASK_TYPE.HOMEWORK
   }
 
-  // 退出批改时重置为默认模式，避免污染 homework 入口
+  // 退出批改时重置为默认模式
   const resetReviewMode = () => {
     taskType.value = TASK_TYPE.HOMEWORK
-    currentExamId.value = null
-    lastGradeSummary.value = null
-    gradeSaving.value = false
-  }
-
-  // wrong_retry 模式：加载组卷 + 题目 + 判定 + 历史掌握度
-  const initForWrongRetry = async (examId, studentId) => {
-    if (!examId || !studentId) {
-      console.error('initForWrongRetry 缺少 examId/studentId')
-      return
-    }
-    taskType.value = TASK_TYPE.WRONG_RETRY
-    currentExamId.value = examId
-    reviewAllDone.value = false
-    reviewStatus.value = 'idle'
-
-    try {
-      const exam = await getGeneratedExamById(examId)
-      if (!exam) {
-        console.error('组卷不存在:', examId)
-        return
-      }
-      // 设置当前学生（仅用于展示，不触发 homework 的任务加载）
-      const student = students.value.find(s => s.id === studentId)
-      if (!student) {
-        // 学生列表可能尚未加载，先拉一次
-        await loadStudents()
-      }
-      currentStudent.value = students.value.find(s => s.id === studentId) || currentStudent.value
-
-      // 合成 currentTask：重练卷无扫描原图，image_url 留空（PaperViewerPanel 显示占位）
-      currentTask.value = {
-        id: exam.id,
-        name: exam.name || '错题重练卷',
-        image_url: '',
-      }
-      currentReviewIndex.value = 0
-
-      // 按组卷 question_ids 顺序加载题目
-      const fetched = await getQuestionsByIds(exam.question_ids || [], studentId)
-      allQuestions.value = (Array.isArray(fetched) ? fetched : [])
-        .slice()
-        .sort((a, b) => {
-          const ai = (exam.question_ids || []).indexOf(a.id)
-          const bi = (exam.question_ids || []).indexOf(b.id)
-          return (ai < 0 ? 9999 : ai) - (bi < 0 ? 9999 : bi)
-        })
-
-      // 合并最新判定（含 confidence）
-      if (currentStudent.value?.id && allQuestions.value.length > 0) {
-        await mergeJudgements(currentStudent.value.id, allQuestions.value)
-      }
-      // 加载历史掌握度，用于右栏「本次掌握变化」展示
-      if (currentStudent.value?.id) {
-        await loadWrongQuestions(currentStudent.value.id)
-      }
-
-      reviewStatus.value = allQuestions.value.length > 0 ? 'reviewing' : 'completed'
-    } catch (e) {
-      console.error('加载错题重练卷失败:', e)
-    }
-  }
-
-  // 取得某题的历史掌握度（用于 wrong_retry 右栏展示「之前」）
-  const previousLifecycle = (question) => {
-    if (!question) return LIFECYCLE_STATUS.NEW
-    const wq = wrongQuestions.value.find(w => w.question_id === question.id)
-    return wq?.lifecycle_status || LIFECYCLE_STATUS.NEW
-  }
-
-  // 完成批改（按场景分支）
-  const completeReview = async () => {
-    if (examMode.value) {
-      // wrong_retry：批量调用 POST /grade 计算掌握度进阶
-      if (!currentExamId.value || !currentStudent.value?.id) return null
-      const results = allQuestions.value.map(q => ({
-        questionId: q.id,
-        isCorrect: q.review_status === 'correct'
-      }))
-      if (results.length === 0) return null
-      gradeSaving.value = true
-      try {
-        const data = await gradeGeneratedExam(currentExamId.value, currentStudent.value.id, results)
-        lastGradeSummary.value = data
-        // 清缓存，使组卷历史刷新
-        clearCache(`generated_exams_cache_${currentStudent.value.id}`)
-        return data
-      } catch (e) {
-        console.error('保存错题重练批改失败:', e)
-        throw e
-      } finally {
-        gradeSaving.value = false
-      }
-    }
-    // homework：沿用现有完成逻辑（含 wrong-gate）
-    await completeTaskReview()
-    return null
   }
 
   // 获取人工复核进度
@@ -627,9 +497,7 @@ export const useReviewStore = defineStore('review', () => {
 
     // AI 正确 + 已确认（人工复核 或 置信度达标）
     const manual = !!q.review_status
-    const confirmed = examMode.value
-      ? manual
-      : (manual || (q.confidence != null && q.confidence >= confidenceThreshold.value))
+    const confirmed = manual || (q.confidence != null && q.confidence >= confidenceThreshold.value)
     if (q.is_correct === true && confirmed) return 'correct'
 
     // 其余 → 待复核（置信度不足 / AI 不确定）
@@ -777,18 +645,10 @@ export const useReviewStore = defineStore('review', () => {
     addQuestionToBook,
     focusQuestionForEdit,
     isQuestionInBook,
-    // 统一批改工作台：场景模式
+    // 批改工作台：场景模式
     taskType,
-    examMode,
     reviewConfig,
-    currentExamId,
-    lastGradeSummary,
-    gradeSaving,
-    showGradeSummary,
     setTaskType,
-    resetReviewMode,
-    initForWrongRetry,
-    previousLifecycle,
-    completeReview
+    resetReviewMode
   }
 })

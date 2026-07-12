@@ -6,13 +6,6 @@
       <span>请在上方选择学生和试卷</span>
     </div>
 
-    <!-- 重练卷无原图占位（wrong_retry 模式 currentTask 无 image_url） -->
-    <div v-else-if="!store.currentTask.image_url" class="paper-no-image">
-      <el-icon size="56"><DocumentCopy /></el-icon>
-      <div class="paper-no-image-title">错题重练卷</div>
-      <div class="paper-no-image-sub">该卷无原卷扫描图，可直接在右侧逐题批改</div>
-    </div>
-
     <template v-else>
       <!-- 查看器容器 -->
       <div
@@ -132,7 +125,7 @@
 <script setup>
 import { ref, computed } from 'vue'
 import { useReviewStore } from '../../stores/reviewStore'
-import { Picture, WarningFilled, View, ArrowRight, DocumentCopy } from '@element-plus/icons-vue'
+import { Picture, WarningFilled, View, ArrowRight } from '@element-plus/icons-vue'
 
 const store = useReviewStore()
 
@@ -321,27 +314,6 @@ const switchToTask = async (task) => {
   background: #f0f2f5;
   position: relative;
   overflow: hidden;
-}
-
-/* ── 重练卷无原图占位 ── */
-.paper-no-image {
-  flex: 1;
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  justify-content: center;
-  gap: 10px;
-  color: #c0c4cc;
-  font-size: 14px;
-}
-.paper-no-image-title {
-  font-size: 17px;
-  font-weight: 600;
-  color: #606266;
-}
-.paper-no-image-sub {
-  font-size: 13px;
-  color: #c0c4cc;
 }
 
 /* ── 查看器容器 ── */
