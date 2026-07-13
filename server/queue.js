@@ -44,7 +44,9 @@ const initQueue = async () => {
         }
       })
 
-      const concurrency = parseInt(process.env.CONCURRENCY) || 2
+      // 降低 worker 并发以缓解 AI 429 限流：默认单任务串行处理。
+      // 全局 AI 请求并发另由 config/ai.js 的 withAiLimit（AI_CONCURRENCY，默认2）兜底。
+      const concurrency = parseInt(process.env.CONCURRENCY) || 1
 
       // Polling tuning: BullMQ idle-workers poll Redis on `drainDelay` (seconds).
       // Default 5s => ~12 req/min/worker. 60s => ~1 req/min/worker => ~12x fewer.

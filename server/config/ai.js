@@ -10,6 +10,80 @@ export const AI_CONFIG = {
   MAX_RETRIES: 2
 }
 
+// ── 429 限流退避策略 ──
+// 命中 429（配额/限流）时，对同一 provider 依次等待后重试；耗尽后再走切备用/抛出逻辑。
+export const RETRY_DELAYS_429 = [5000, 15000, 60000]
+
+const sleep = (ms) => new Promise(resolve => setTimeout(resolve, ms))
+
+// ── 全局 AI 并发信号量 ──
+// 跨所有任务、所有题目共享的闸门，限制"同时在途"的 AI HTTP 请求数，从源头压住 429。
+// 上限由 AI_CONCURRENCY 控制，默认 2。等待期间（含 429 退避 sleep）会释放名额，避免占坑。
+const _aiLimit = parseInt(process.env.AI_CONCURRENCY) || 2
+let _aiActive = 0
+const _aiWaiters = []
+
+function _acquireAiSlot() {
+  if (_aiActive < _aiLimit) {
+    _aiActive++
+    return Promise.resolve()
+  }
+  return new Promise(resolve => _aiWaiters.push(resolve))
+}
+
+function _releaseAiSlot() {
+  const next = _aiWaiters.shift()
+  if (next) {
+    next() // 名额转交给下一个等待者，_aiActive 保持不变
+  } else {
+    _aiActive = Math.max(0, _aiActive - 1)
+  }
+}
+
+/**
+ * 在全局 AI 并发闸门内执行一次异步操作（通常是一次 HTTP 请求）。
+ * 保证任一时刻在途 AI 请求不超过 AI_CONCURRENCY（默认 2）。
+ * @template T
+ * @param {() => Promise<T>} fn
+ * @returns {Promise<T>}
+ */
+export async function withAiLimit(fn) {
+  await _acquireAiSlot()
+  try {
+    return await fn()
+  } finally {
+    _releaseAiSlot()
+  }
+}
+
+/**
+ * 发起一次带 429 指数退避重试的 axios 请求，整体处于全局并发闸门内。
+ * - 命中 429：按 RETRY_DELAYS_429（5s/15s/60s）等待后重试同一请求；
+ *   退避 sleep 期间释放并发名额（把 sleep 放在闸门外，重试时重新入闸）。
+ * - 非 429 错误：直接抛出，交由上层 provider 切换逻辑处理。
+ * @param {import('axios').AxiosInstance | typeof import('axios').default} client
+ * @param {string} endpoint
+ * @param {object} body
+ * @param {object} axiosOptions
+ * @returns {Promise<import('axios').AxiosResponse>}
+ */
+async function postWith429Retry(client, endpoint, body, axiosOptions) {
+  for (let attempt = 0; ; attempt++) {
+    try {
+      return await withAiLimit(() => client.post(endpoint, body, axiosOptions))
+    } catch (err) {
+      const status = err.response?.status
+      if (status === 429 && attempt < RETRY_DELAYS_429.length) {
+        const delay = RETRY_DELAYS_429[attempt]
+        console.warn(`⚠️ [AI] 429 限流，${delay / 1000}s 后重试（第 ${attempt + 1}/${RETRY_DELAYS_429.length} 次）...`)
+        await sleep(delay)
+        continue
+      }
+      throw err
+    }
+  }
+}
+
 // ── AI 模型轮换机制 ──
 // ModelScope 免费模型每日有配额限制，单个模型耗尽时自动切换到其他模型
 
@@ -139,7 +213,7 @@ export async function callTextCompletion(opts) {
     max_tokens: maxTokens
   }
   try {
-    const resp = await axios.post(AI_CONFIG.ENDPOINT, primaryBody, {
+    const resp = await postWith429Retry(axios, AI_CONFIG.ENDPOINT, primaryBody, {
       headers: getAIHeaders(),
       timeout: 30000
     })
@@ -169,7 +243,7 @@ export async function callTextCompletion(opts) {
       ...(BACKUP_CONFIG.DISABLE_REASONING ? { reasoning: { enabled: false } } : {})
     }
     try {
-      const resp = await _backupAxios.post(BACKUP_CONFIG.ENDPOINT, backupBody, {
+      const resp = await postWith429Retry(_backupAxios, BACKUP_CONFIG.ENDPOINT, backupBody, {
         headers: {
           'Content-Type': 'application/json',
           'Authorization': `Bearer ${BACKUP_CONFIG.API_KEY}`,
@@ -310,7 +384,7 @@ export async function callVisionCompletion(opts) {
     const currentModel = p.model()
     const body = p.buildBody(currentModel)
     try {
-      const resp = await _backupAxios.post(p.endpoint, body, {
+      const resp = await postWith429Retry(_backupAxios, p.endpoint, body, {
         headers: p.headers(),
         timeout: AI_CONFIG.TIMEOUT
       })

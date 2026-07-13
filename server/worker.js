@@ -10,12 +10,13 @@ import axios from 'axios'
 import sharp from 'sharp'
 import { TABLES, TASK_STATUS } from './config/neon.js'
 import { query } from './config/neon.js'
-import { AI_CONFIG, getAIHeaders, buildOCRPrompt, buildTaggingPrompt, buildAnswerGenerationPrompt, getCurrentTextModel, getCurrentVLModel, rotateTextModel, rotateVLModel, TEXT_MODELS, VL_MODELS, callTextCompletion, callVisionCompletion } from './config/ai.js'
+import { AI_CONFIG, getAIHeaders, buildOCRPrompt, buildAnswerGenerationPrompt, getCurrentTextModel, getCurrentVLModel, rotateTextModel, rotateVLModel, TEXT_MODELS, VL_MODELS, callTextCompletion, callVisionCompletion } from './config/ai.js'
 import { updateTaskStatus, createQuestions, batchUpdateQuestionTags, addWrongQuestions, createJudgement, getLatestJudgement, updateQuestionAnswer, markAnswerException, findCachedQuestionByFingerprint, findSimilarQuestion, cacheQuestion, incrementQuestionUseCount, updateQuestionCacheId, createQuestionAsset } from './services/neonService.js'
 import { uploadImage } from './services/ossService.js'
 import { generateTextFingerprint, generatePHash, PARSER_VERSION, TEXT_SIMILARITY_THRESHOLD } from './utils/questionFingerprint.js'
 import { uploadFilesWithRetry } from './services/uploadRetryManager.js'
 import { judgeAnswer } from './services/judgeService.js'
+import { classifyQuestionLocally } from './utils/localTagger.js'
 
 // ── 多模态切题引擎：几何图处理 ──
 // 使用 Sharp 进行裁剪和图像增强（替代浏览器端的 Canvas/OpenCV）
@@ -228,18 +229,6 @@ const deduplicateTags = (tags) => {
     }
   }
   return unique.length > 0 ? unique : ['未分类']
-}
-
-/**
- * 归一化 AI 返回的难度值为 1-5 的整数；无法解析时返回 null（表示未判定，交由回填重试）。
- */
-const normalizeDifficulty = (raw) => {
-  if (raw === null || raw === undefined || raw === '') return null
-  const n = Math.round(Number(raw))
-  if (!Number.isFinite(n)) return null
-  if (n < 1) return 1
-  if (n > 5) return 5
-  return n
 }
 
 /**
@@ -571,84 +560,27 @@ const recognizeQuestions = async (imageBase64, taskId, retryCount = 0) => {
   }
 }
 
-export const generateTagsForQuestion = async (questionContent, subject = null, retryCount = 0) => {
+// 标签生成已改为本地规则分类（零 LLM / 零 API），治理 429 限流。
+// 保留导出签名兼容旧调用方；难度统一 3，留待每日回填任务用 LLM 修正。
+export const generateTagsForQuestion = async (questionContent, subject = null) => {
   if (!questionContent || !questionContent.trim()) {
     return { success: true, tags: ['未分类'], difficulty: null }
   }
-
-  const prompt = buildTaggingPrompt(subject)
-
-  try {
-    const { content } = await callTextCompletion({
-      systemContent: prompt,
-      userContent: `请分析以下题目，提取知识点标签：\n\n${questionContent}`,
-      temperature: 0.2,
-      maxTokens: 500
-    })
-
-    let jsonStr = content
-    const jsonMatch = content.match(/```json\n?([\s\S]*?)\n?```/) ||
-                      content.match(/```\n?([\s\S]*?)\n?```/)
-    if (jsonMatch) jsonStr = jsonMatch[1]
-
-    let result
-    try {
-      result = JSON.parse(jsonStr)
-    } catch (parseError) {
-      console.warn(`⚠️  AI JSON 解析失败，尝试自动修复...`)
-      console.warn(`   原始错误: ${parseError.message}`)
-      const repaired = repairAIJson(jsonStr)
-      console.log(`   修复后 JSON (前200字): ${repaired.substring(0, 200)}...`)
-      try {
-        result = JSON.parse(repaired)
-        console.log(`✅ JSON 自动修复成功！`)
-      } catch (repairError) {
-        console.error(`❌ JSON 自动修复仍然失败: ${repairError.message}`)
-        console.error(`   原始 JSON (前500字): ${jsonStr.substring(0, 500)}`)
-        throw new Error(`AI 返回的 JSON 格式错误，无法解析。原始错误: ${parseError.message}`)
-      }
-    }
-    const rawTags = result.tags || []
-    const tags = deduplicateTags(rawTags)
-    const difficulty = normalizeDifficulty(result.difficulty)
-
-    return { success: true, tags, difficulty }
-  } catch (error) {
-    // callTextCompletion 内部已完成"主API→备用API"切换，
-    // 两家都失败时不再写「未分类」（否则该题将永远无法被回填），
-    // 而是返回 tags:null，让题目保持 ai_tags=NULL，由每日回填任务持续重试。
-    const isNetworkError = !error.response || error.code === 'ECONNABORTED' || error.code === 'ETIMEDOUT'
-    const shouldRetry = isNetworkError && retryCount < AI_CONFIG.MAX_RETRIES
-
-    if (shouldRetry) {
-      await new Promise(resolve => setTimeout(resolve, (retryCount + 1) * 1000))
-      return generateTagsForQuestion(questionContent, subject, retryCount + 1)
-    }
-
-    return { success: false, tags: null, difficulty: null }
-  }
+  const { tags, difficulty } = classifyQuestionLocally(questionContent, subject)
+  return { success: true, tags: deduplicateTags(tags), difficulty }
 }
 
 const generateTagsForQuestions = async (questions) => {
   if (!questions || questions.length === 0) return []
 
-  const batchSize = 3
-  const results = []
-
-  for (let i = 0; i < questions.length; i += batchSize) {
-    const batch = questions.slice(i, i + batchSize)
-    const tagPromises = batch.map(async (q) => {
-      const content = q.content || ''
-      const options = (q.options || []).join('；')
-      const fullContent = options ? `${content}\n选项：${options}` : content
-      const tagResult = await generateTagsForQuestion(fullContent, q.subject)
-      return { questionId: q.id, tags: tagResult.tags, difficulty: tagResult.difficulty }
-    })
-    const batchResults = await Promise.all(tagPromises)
-    results.push(...batchResults)
-  }
-
-  return results
+  // 纯本地计算，无需 batch / 并发 / 网络
+  return questions.map((q) => {
+    const content = q.content || ''
+    const options = (q.options || []).join('；')
+    const fullContent = options ? `${content}\n选项：${options}` : content
+    const { tags, difficulty } = classifyQuestionLocally(fullContent, q.subject)
+    return { questionId: q.id, tags: deduplicateTags(tags), difficulty }
+  })
 }
 
 /**
@@ -882,7 +814,7 @@ const generateMissingAnswers = async (questions, imageBuffer = null) => {
     }
   }
 
-  const batchSize = 3
+  const batchSize = 2
   let updatedCount = 0
   let emptyCount = 0
   let placeholderCount = 0
@@ -1337,6 +1269,7 @@ const callGradeEndpoint = async ({ id, studentId, results }) => {
 
 export const processTask = async (job) => {
   const { taskId, studentId, imageUrl: rawImageUrl, originalName, generatedExamId } = job.data
+  const startTime = Date.now()
 
   // ── 精简管线（错题重练）：按组卷 question_ids 匹配题库已存答案，自动判定 ──
   // 不跑完整 OCR+AI作答+AI判卷 worker，仅 OCR 学生手写答案 → 与存储答案 deterministic 比对
@@ -1692,7 +1625,7 @@ await job.updateProgress(80)
       await job.updateProgress(85)
       await updateTaskStatus(taskId, TASK_STATUS.PROCESSING, { progress: 85 })
 
-      console.log(`📊 [Step 8/8] 生成AI标签...`)
+      console.log(`📊 [Step 8/8] 生成本地标签...`)
       const tagResults = await generateTagsForQuestions(questions)
       const tagMap = {}
       const difficultyMap = {}
@@ -1703,17 +1636,11 @@ await job.updateProgress(80)
 
       for (const q of questions) {
         const tags = tagMap[q.id]
-        if (tags && tags.length > 0) {
-          // 成功识别 → 保存标签
-          q.ai_tags = tags
-          q.tags_source = 'ai'
-        } else {
-          // 识别失败（主备 API 都挂了）→ 保留 ai_tags 为 NULL，
-          // 不写「未分类」，让每日回填任务后续能重新捞起该题重试。
-          q.ai_tags = null
-          q.tags_source = null
-        }
-        q.difficulty = difficultyMap[q.id] ?? null
+        // 本地规则分类必得标签（至少 ['未分类']）→ 标记来源为 local。
+        // 难度统一为默认值（3），留待每日回填任务用 LLM 修正。
+        q.ai_tags = tags && tags.length > 0 ? tags : ['未分类']
+        q.tags_source = 'local'
+        q.difficulty = difficultyMap[q.id] ?? 3
       }
 
       const tagUpdates = questions.map(q => ({
@@ -1722,7 +1649,7 @@ await job.updateProgress(80)
         difficulty: q.difficulty
       }))
       await batchUpdateQuestionTags(tagUpdates)
-      console.log(`✅ [Step 8/8] AI标签保存成功`)
+      console.log(`✅ [Step 8/8] 本地标签保存成功`)
 
       await job.updateProgress(90)
       await updateTaskStatus(taskId, TASK_STATUS.PROCESSING, { progress: 90 })
