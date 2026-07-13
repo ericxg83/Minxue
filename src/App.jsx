@@ -603,7 +603,7 @@ export default function App() {
 
       // Step 1: Detect QR codes for all files
       setUploading(true)
-      Toast.show({ message: '正在检测二维码...', type: 'loading', duration: 0 })
+      const qrToast = Toast.show({ message: '正在检测二维码...', type: 'loading', duration: 0 })
 
       const filesWithQR = []
       for (const file of newFiles) {
@@ -611,6 +611,7 @@ export default function App() {
         filesWithQR.push({ file, qrContent })
         console.debug(`🔍 [QR] File: ${file.name}, QR Content:`, qrContent)
       }
+      qrToast.dismiss()
 
       // Step 2: Group files by QR code content
       const groupedFiles = groupFilesByQRCode(filesWithQR)
@@ -644,7 +645,7 @@ export default function App() {
     console.debug('🔄 [UPLOAD] QR Content:', qrContent)
     console.debug('🔄 [UPLOAD] Files count:', files.length)
 
-    Toast.show({ message: `检测到错题重练卷，正在上传 ${files.length} 页...`, type: 'loading', duration: 0 })
+    const retryToast = Toast.show({ message: `检测到错题重练卷，正在上传 ${files.length} 页...`, type: 'loading', duration: 0 })
 
     let tempTask
     try {
@@ -698,12 +699,15 @@ export default function App() {
         processTask(updatedTask)
       }
 
+      retryToast.dismiss()
       Toast.show({ message: `错题重练卷上传成功！`, type: 'success', duration: 2000 })
     } catch (error) {
       console.error('💥 [uploadRetryPaperGroup] Error:', error)
       if (tempTask) updateTaskInStore(tempTask.id, 'failed', { error: error.message || '上传失败' })
+      retryToast.dismiss()
       Toast.show({ message: '错题重练卷上传失败', type: 'error', duration: 3000 })
     } finally {
+      retryToast.dismiss()
       if (tempTask) setUploadingTasks(prev => prev.filter(id => id !== tempTask.id))
     }
   }
@@ -808,7 +812,7 @@ export default function App() {
     for (const file of files) {
       try {
         setUploading(true)
-        Toast.show({ message: '正在上传...', type: 'loading', duration: 0 })
+        const uploadToast = Toast.show({ message: '正在上传...', type: 'loading', duration: 0 })
 
         const imageUrl = await uploadImage(file, 'homework')
         const task = await createTask({
@@ -820,6 +824,7 @@ export default function App() {
         })
 
         addTask(task)
+        uploadToast.dismiss()
         processTask(task)
       } catch (error) {
         console.error('上传失败:', error)
@@ -832,9 +837,9 @@ export default function App() {
 
   // Process task (AI recognition)
   const processTask = async (task) => {
+    const recognizeToast = Toast.show({ message: '正在识别题目...', type: 'loading', duration: 0 })
     try {
       updateTaskInStore(task.id, 'processing')
-      Toast.show({ message: '正在识别题目...', type: 'loading', duration: 0 })
 
       const compressedImage = await compressImage(task.image_url)
       const result = await recognizeQuestions(compressedImage)
@@ -865,14 +870,17 @@ export default function App() {
           await addWrongQuestions(currentStudent.id, wrongQuestions.map(q => q.id))
         }
 
+        recognizeToast.dismiss()
         Toast.show({ message: `识别完成，共 ${questions.length} 道题，${wrongQuestions.length} 道错题`, type: 'success', duration: 2000 })
       } else {
         updateTaskInStore(task.id, 'failed', { error: '未识别到题目' })
+        recognizeToast.dismiss()
         Toast.show({ message: '未识别到题目，请重新上传', type: 'error' })
       }
     } catch (error) {
       console.error('识别失败:', error)
       updateTaskInStore(task.id, 'failed', { error: error.message })
+      recognizeToast.dismiss()
       Toast.show({ message: '识别失败，请重试', type: 'error' })
     }
   }
@@ -1169,9 +1177,9 @@ export default function App() {
     }
     
     try {
-      Toast.show({ message: '正在生成Word...', type: 'loading', duration: 0 })
+      const wordToast = Toast.show({ message: '正在生成Word...', type: 'loading', duration: 0 })
       await downloadPaperWord(paperData, paperBankInfo.name)
-      Toast.dismiss()
+      wordToast.dismiss()
       Toast.show({ message: 'Word已下载！', type: 'success', duration: 2000 })
     } catch (error) {
       console.error('[PaperBank] Word生成失败:', error)

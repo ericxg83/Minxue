@@ -1,8 +1,11 @@
-import { createContext, useContext, useState } from 'react'
+import { createContext, useContext, useState, useRef, useCallback } from 'react'
 import { motion, AnimatePresence } from 'motion/react'
 import { CheckCircle2, XCircle, Loader2 } from 'lucide-react'
 
 const ToastContext = createContext(null)
+
+// Hard cap so a forgotten dismiss can never leave a loading toast on screen forever.
+const LOADING_MAX_DURATION = 30000
 
 function ToastContainer({ toasts }) {
   return (
@@ -34,25 +37,52 @@ function ToastContainer({ toasts }) {
 
 export function ToastProvider({ children }) {
   const [toasts, setToasts] = useState([])
+  const timers = useRef({})
+  const idSeq = useRef(0)
 
-  const show = ({ message, type = 'info', duration = 2000 }) => {
-    const id = Date.now()
-    const newToast = { id, message, type }
-    setToasts(prev => [...prev, newToast])
+  const dismiss = useCallback((id) => {
+    setToasts(prev => {
+      const idsToRemove = id == null ? prev.map(t => t.id) : [id]
+      idsToRemove.forEach(tid => {
+        if (timers.current[tid]) {
+          clearTimeout(timers.current[tid])
+          delete timers.current[tid]
+        }
+      })
+      return id == null ? [] : prev.filter(t => t.id !== id)
+    })
+  }, [])
 
-    if (duration > 0) {
-      setTimeout(() => {
-        setToasts(prev => prev.filter(t => t.id !== id))
-      }, duration)
+  const show = useCallback(({ message, type = 'info', duration = 2000 }) => {
+    const id = ++idSeq.current
+
+    // Only one loading toast at a time: replace any existing loading toast
+    // instead of stacking them into a pile.
+    setToasts(prev => {
+      const loadingToasts = prev.filter(t => t.type === 'loading')
+      const filtered = type === 'loading' ? prev.filter(t => t.type !== 'loading') : prev
+      if (type === 'loading') {
+        loadingToasts.forEach(t => {
+          if (timers.current[t.id]) {
+            clearTimeout(timers.current[t.id])
+            delete timers.current[t.id]
+          }
+        })
+      }
+      return [...filtered, { id, message, type }]
+    })
+
+    // Loading toasts (even duration: 0) always get an auto-dismiss safety cap.
+    const liveDuration = type === 'loading' && duration <= 0 ? LOADING_MAX_DURATION : duration
+    if (liveDuration > 0) {
+      timers.current[id] = setTimeout(() => dismiss(id), liveDuration)
     }
 
-    return {
-      dismiss: () => setToasts(prev => prev.filter(t => t.id !== id))
-    }
-  }
+    return { id, dismiss: () => dismiss(id) }
+  }, [dismiss])
 
   return (
-    <ToastContext.Provider value={{ show, toasts }}>
+    <ToastContext.Provider value={{ show, dismiss, toasts }}>
       {children}
       <ToastContainer toasts={toasts} />
     </ToastContext.Provider>
