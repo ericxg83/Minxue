@@ -173,24 +173,32 @@ export const getAIHeaders = () => ({
 // ── 备用 API（多厂商，各自独立 Key，按优先级排列）──
 // 当主 API（ModelScope）因配额/限流失败时，自动切换到备用厂商。
 // 各厂商使用独立环境变量注入 Key，部署端（Render）后台填写即可。
-// 视觉链路优先级（PROVIDER_PRIORITY）：Sensnova 在前（付费额度稳定），Agnes 在后（免费，实测可视觉）。
+// 视觉链路优先级：TackleKey（gemini，实测可用）→ Agnes（免费，实测可视觉）→ OpenRouter（免费视觉，每日限额）
 // 厂商定义：
-//   - Sensnova（商汤）：SENSNOVA_API_KEY，endpoint token.sensenova.cn
-//      付费额度，文本 + 视觉均可用，最稳定；sensenova-6.7-flash-lite 为思考模型，
-//      正文只进 reasoning 字段，content 恒为空，需 extractContent 回退。
+//   - TackleKey：TACKLEKEY_API_KEY，endpoint api.tacklekey.com
+//      聚合多家模型。视觉用 google/gemini-2.5-flash-nothink（实测可跑视觉 OCR 且返回干净 JSON）；
+//      gpt-5.5:free / gemma-4-31b-it:free 也列入轮询，待其上游渠道恢复后自动启用。
 //   - Agnes：AGNES_API_KEY，endpoint apihub.agnes-ai.com
 //      免费，实测可跑视觉 OCR（agnes-2.0-flash），但免费渠道易过载、偏慢。
+//   - Sensnova（商汤）：SENSNOVA_API_KEY，endpoint token.sensenova.cn
+//      付费额度、最稳定，但 sensenova-6.7-flash-lite 为思考模型，content 恒为空且 reasoning
+//      为散文、不产 JSON，不适配结构化 OCR，故【仅作文本备用】，不进视觉链。
 //   - OpenRouter：BACKUP_API_KEY（兼容旧单一 key 写法），endpoint openrouter.ai
-//      免费模型每日 50 次限额；若只配了 BACKUP_API_KEY 且为 sk-or- 前缀则启用。
+//      免费视觉模型每日 50 次限额；若只配了 BACKUP_API_KEY 且为 sk-or- 前缀则启用。
 const BACKUP_VENDOR_DEFS = [
   {
-    name: 'Sensnova',
-    envKey: 'SENSNOVA_API_KEY',
-    keyPrefix: 'sk-iq',
-    endpoint: 'https://token.sensenova.cn/v1/chat/completions',
-    textModel: 'sensenova-6.7-flash-lite',
-    vlModels: ['sensenova-6.7-flash-lite'],
-    isThinking: true,
+    name: 'TackleKey',
+    envKey: 'TACKLEKEY_API_KEY',
+    keyPrefix: 'sk-6f',
+    endpoint: 'https://api.tacklekey.com/v1/chat/completions',
+    textModel: 'openai/gpt-5.5:free',
+    // 视觉模型：gemini 当前可用放最前；gpt-5.5 / gemma 待上游渠道恢复后轮询启用
+    vlModels: [
+      'google/gemini-2.5-flash-nothink',
+      'openai/gpt-5.5:free',
+      'google/gemma-4-31b-it:free'
+    ],
+    isThinking: false,
     referer: null
   },
   {
@@ -203,6 +211,17 @@ const BACKUP_VENDOR_DEFS = [
     vlModels: ['agnes-2.0-flash'],
     isThinking: true,
     referer: 'https://minxue.edu'
+  },
+  {
+    name: 'Sensnova',
+    envKey: 'SENSNOVA_API_KEY',
+    keyPrefix: 'sk-iq',
+    endpoint: 'https://token.sensenova.cn/v1/chat/completions',
+    textModel: 'sensenova-6.7-flash-lite',
+    // 思考模型不产 JSON，不适配结构化 OCR，仅作文本备用，不进视觉链
+    vlModels: [],
+    isThinking: true,
+    referer: null
   },
   {
     name: 'OpenRouter',

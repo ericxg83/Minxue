@@ -22,13 +22,16 @@ services:
         sync: false
       - key: MODELSCOPE_BACKUP_API_KEY
         sync: false
-      # 备用 API（多厂商，各自独立 Key，按优先级 Sensnova → Agnes → OpenRouter）
-      # 视觉兜底链：首选 Sensnova（付费额度），其次 Agnes（免费，实测可视觉）。
+      # 备用 API（多厂商，各自独立 Key，优先级 TackleKey → Agnes → Sensnova → OpenRouter）
+      # 视觉兜底链：TackleKey(gemini，实测可用) → Agnes(免费可视觉) → OpenRouter(免费视觉,每日限额)
+      # Sensnova 仅作文本备用（思考模型不产 JSON，不适配结构化 OCR）。
       # 以下变量均标 sync:false 留空，由代码按 Key 前缀自动路由厂商 / endpoint / 模型，
       # 勿在此硬编码，否则覆盖自动路由逻辑。
-      - key: SENSNOVA_API_KEY
+      - key: TACKLEKEY_API_KEY
         sync: false
       - key: AGNES_API_KEY
+        sync: false
+      - key: SENSNOVA_API_KEY
         sync: false
       - key: BACKUP_API_KEY
         sync: false
