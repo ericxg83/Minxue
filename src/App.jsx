@@ -12,7 +12,6 @@ import {
   Bell,
   Plus,
   Minus,
-  ScanLine,
   Upload,
   X,
   Trash2,
@@ -23,7 +22,8 @@ import {
   Eye,
   Tag,
   AlertCircle,
-  Download
+  Download,
+  BarChart3
 } from 'lucide-react'
 import { motion, AnimatePresence } from 'motion/react'
 import { QRCodeSVG } from 'qrcode.react'
@@ -83,6 +83,7 @@ const Grading = lazyWithRetry(() => import('./pages/Grading'))
 const PrintPreview = lazyWithRetry(() => import('./pages/PrintPreview'))
 const ExamReview = lazyWithRetry(() => import('./pages/ExamReview'))
 const RetryTask = lazyWithRetry(() => import('./pages/RetryTask'))
+const WeeklyReport = lazyWithRetry(() => import('./pages/WeeklyReport'))
 
 // Simple Suspense fallback
 const LazyFallback = () => (
@@ -217,6 +218,8 @@ export default function App() {
   const [showExamReview, setShowExamReview] = useState(false)
   const [reviewTask, setReviewTask] = useState(null)
   const [showUploadOptions, setShowUploadOptions] = useState(false)
+  const [showNotifications, setShowNotifications] = useState(false)
+  const [showLearningReport, setShowLearningReport] = useState(false)
 
   // Paper Bank State
   const [paperBankStep, setPaperBankStep] = useState('list') // list | upload | processing | proofread | export
@@ -2146,12 +2149,20 @@ export default function App() {
             </div>
             <div className="flex items-center gap-1.5">
               <button
-                onClick={() => { setShowScanQR(true); setGradingData(null) }}
+                onClick={() => setShowLearningReport(true)}
                 className="w-8 h-8 rounded-xl flex items-center justify-center transition-colors"
                 style={{ background: 'var(--bg-secondary)' }}
-                title="扫码批改"
+                title="学习报告"
               >
-                <ScanLine size={16} style={{ color: 'var(--text-secondary)' }} />
+                <BarChart3 size={16} style={{ color: 'var(--text-secondary)' }} />
+              </button>
+              <button
+                onClick={() => setShowNotifications(true)}
+                className="w-8 h-8 rounded-xl flex items-center justify-center transition-colors"
+                style={{ background: 'var(--bg-secondary)' }}
+                title="通知"
+              >
+                <Bell size={16} style={{ color: 'var(--text-secondary)' }} />
               </button>
             </div>
           </div>
@@ -2255,7 +2266,6 @@ export default function App() {
                           className={`card ${isTaskCompleted(task) ? 'cursor-pointer hover:shadow-md' : ''}`}
                           style={{
                             padding: '12px',
-                            borderLeft: isTaskCompleted(task) ? '3px solid var(--primary)' : '3px solid var(--warning)',
                           }}
                           onClick={() => {
                             if (isTaskCompleted(task)) {
@@ -3515,6 +3525,60 @@ export default function App() {
               onComplete={handleGradingComplete}
             />
           </Suspense>
+        )}
+
+        {/* Notification Panel / 通知 */}
+        {showNotifications && (
+          <div className="fixed inset-0 z-[100] animate-fade-in" style={{ background: 'rgba(0,0,0,0.3)' }}>
+            <div
+              className="absolute bottom-0 left-0 right-0 animate-slide-up"
+              style={{
+                background: '#fff',
+                borderRadius: '16px 16px 0 0',
+                maxHeight: '70vh',
+                overflow: 'hidden',
+                display: 'flex',
+                flexDirection: 'column'
+              }}
+            >
+              <div className="flex items-center justify-between px-4 py-3 border-b" style={{ borderColor: '#F3F4F6' }}>
+                <h3 style={{ fontSize: '16px', fontWeight: 600, color: '#111827' }}>通知</h3>
+                <button
+                  onClick={() => setShowNotifications(false)}
+                  className="w-7 h-7 rounded-lg flex items-center justify-center"
+                  style={{ background: '#F5F5F5' }}
+                >
+                  <X size={14} style={{ color: '#6B7280' }} />
+                </button>
+              </div>
+              <div className="flex-1 overflow-y-auto p-4">
+                <div className="flex flex-col items-center justify-center py-12" style={{ color: '#9CA3AF' }}>
+                  <Bell size={32} strokeWidth={1.5} style={{ color: '#D1D5DB', marginBottom: '12px' }} />
+                  <p style={{ fontSize: '14px', fontWeight: 500 }}>暂无新通知</p>
+                  <p style={{ fontSize: '12px', marginTop: '4px' }}>批改完成、系统消息将在此显示</p>
+                </div>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* Learning Report / 学习报告 */}
+        {showLearningReport && (
+          <div className="fixed inset-0 z-[100] bg-white overflow-y-auto animate-fade-in" style={{ paddingTop: 'env(safe-area-inset-top, 0px)' }}>
+            <div className="sticky top-0 z-10 bg-white border-b px-4 py-3 flex items-center justify-between" style={{ borderColor: '#F3F4F6' }}>
+              <h3 style={{ fontSize: '17px', fontWeight: 600, color: '#111827' }}>学习报告</h3>
+              <button
+                onClick={() => setShowLearningReport(false)}
+                className="w-7 h-7 rounded-lg flex items-center justify-center"
+                style={{ background: '#F5F5F5' }}
+              >
+                <X size={14} style={{ color: '#6B7280' }} />
+              </button>
+            </div>
+            <Suspense fallback={<LazyFallback />}>
+              <WeeklyReport />
+            </Suspense>
+          </div>
         )}
       </>
     )

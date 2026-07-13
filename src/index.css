@@ -352,6 +352,15 @@ button {
   to { transform: translateX(0); }
 }
 
+/* ── Slide up from bottom ── */
+@keyframes slideUp {
+  from { transform: translateY(100%); }
+  to { transform: translateY(0); }
+}
+.animate-slide-up {
+  animation: slideUp 0.3s ease-out;
+}
+
 /* ── Glass overlay — iOS navigation bar material ── */
 .glass {
   background: rgba(249,249,251,0.8);
