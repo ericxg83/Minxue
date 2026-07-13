@@ -2265,9 +2265,9 @@ export default function App() {
                           }}
                         >
                         <div className="list-card-row items-center">
-                          {/* Thumbnail — square paper preview */}
+                          {/* Thumbnail — portrait paper preview (A4-like), small radius for legibility */}
                           <div
-                            className="relative w-14 h-14 rounded-xl flex-shrink-0 overflow-hidden cursor-pointer ring-1 ring-black/5"
+                            className="relative w-12 h-16 rounded-md flex-shrink-0 overflow-hidden cursor-pointer ring-1 ring-black/5"
                             style={{ background: 'var(--bg-mist)' }}
                             onClick={(e) => { e.stopPropagation(); handleViewImage(task.image_url) }}
                           >
@@ -2278,7 +2278,7 @@ export default function App() {
                                   {task.pages.slice(0, 3).map((page, index) => (
                                     <div
                                       key={page.id}
-                                      className="absolute inset-0 rounded-lg overflow-hidden"
+                                      className="absolute inset-0 rounded overflow-hidden"
                                       style={{
                                         transform: `translateX(${index * 2}px) translateY(${index * 2}px)`,
                                         zIndex: index,
@@ -2293,7 +2293,7 @@ export default function App() {
                                     </div>
                                   ))}
                                   {task.pages.length > 3 && (
-                                    <div className="absolute inset-0 rounded-lg bg-gray-100 flex items-center justify-center text-xs font-medium text-gray-500">
+                                    <div className="absolute inset-0 rounded bg-gray-100 flex items-center justify-center text-xs font-medium text-gray-500">
                                       +{task.pages.length - 3}页
                                     </div>
                                   )}
@@ -2318,19 +2318,13 @@ export default function App() {
                           {/* Content */}
                           <div className="flex-1 min-w-0">
                             <div className="flex items-center gap-1.5 min-w-0">
-                              {task.task_type === 'retry_paper' ? (
+                              {/* 顶部已有「日常作业/错题重练」筛选，列表内仅保留「错题重练」标识用于「全部」下区分，日常作业默认多数项不再重复标注 */}
+                              {task.task_type === 'retry_paper' && (
                                 <span className="inline-flex items-center flex-shrink-0 px-1.5 py-0.5 rounded-md text-[10px] font-medium" style={{
                                   background: 'var(--purple-soft)',
                                   color: 'var(--purple)'
                                 }}>
                                   错题重练
-                                </span>
-                              ) : (
-                                <span className="inline-flex items-center flex-shrink-0 px-1.5 py-0.5 rounded-md text-[10px] font-medium" style={{
-                                  background: 'var(--primary-soft)',
-                                  color: 'var(--primary)'
-                                }}>
-                                  日常作业
                                 </span>
                               )}
                               <span className="text-card-title truncate">
