@@ -19,11 +19,17 @@ services:
       - key: AI_ENDPOINT
         value: https://api-inference.modelscope.cn/v1/chat/completions
       - key: AI_MODEL
-        value: Qwen/Qwen3-VL-8B-Instruct
+        sync: false
       - key: MODELSCOPE_BACKUP_API_KEY
         sync: false
-      # 备用 API：按 BACKUP_API_KEY 前缀自动路由厂商（sk-iq→Sensnova / sk-or→OpenRouter / sk-m7→Agnes）
-      # 以下三项留空，由代码按厂商自动注入 endpoint / 文本模型 / 视觉模型，勿在此硬编码，否则覆盖自动路由
+      # 备用 API（多厂商，各自独立 Key，按优先级 Sensnova → Agnes → OpenRouter）
+      # 视觉兜底链：首选 Sensnova（付费额度），其次 Agnes（免费，实测可视觉）。
+      # 以下变量均标 sync:false 留空，由代码按 Key 前缀自动路由厂商 / endpoint / 模型，
+      # 勿在此硬编码，否则覆盖自动路由逻辑。
+      - key: SENSNOVA_API_KEY
+        sync: false
+      - key: AGNES_API_KEY
+        sync: false
       - key: BACKUP_API_KEY
         sync: false
       - key: BACKUP_ENDPOINT

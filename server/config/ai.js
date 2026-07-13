@@ -158,21 +158,43 @@ export const getAIHeaders = () => ({
   'Authorization': `Bearer ${AI_CONFIG.API_KEY}`
 })
 
-// ── 备用 API（多厂商，按 Key 前缀自动路由）──
+// ── 备用 API（多厂商，各自独立 Key，按优先级排列）──
 // 当主 API（ModelScope）因配额/限流失败时，自动切换到备用厂商。
-// 支持以下厂商（共用一个 BACKUP_API_KEY 环境变量，按前缀识别）：
-//   - sk-or-...   → OpenRouter（https://openrouter.ai/api/v1）
-//                  免费模型每日 50 次限额，文本/视觉均可用（视觉用 :free VL 模型）。
-//   - sk-m7... / sk-jU... → Agnes（https://apihub.agnes-ai.com/v1）
-//                  仅文本可用（agnes-2.0-flash），/chat/completions 不支持 image_url 多模态。
-//   - sk-iq...    → 商汤 Sensnova（https://token.sensenova.cn/v1）
-//                  付费额度，文本 + 视觉均可用，且最稳定（无每日免费限额）。
-//                  注意：sensenova-6.7-flash-lite 为思考模型，正文只进 reasoning 字段、
-//                  content 恒为空，需在调用处做 reasoning 回退（见 extractContent）。
-// Key / 模型 全部通过环境变量注入，部署端（Render）后台填写即可。
-const BACKUP_VENDORS = [
+// 各厂商使用独立环境变量注入 Key，部署端（Render）后台填写即可。
+// 视觉链路优先级（PROVIDER_PRIORITY）：Sensnova 在前（付费额度稳定），Agnes 在后（免费，实测可视觉）。
+// 厂商定义：
+//   - Sensnova（商汤）：SENSNOVA_API_KEY，endpoint token.sensenova.cn
+//      付费额度，文本 + 视觉均可用，最稳定；sensenova-6.7-flash-lite 为思考模型，
+//      正文只进 reasoning 字段，content 恒为空，需 extractContent 回退。
+//   - Agnes：AGNES_API_KEY，endpoint apihub.agnes-ai.com
+//      免费，实测可跑视觉 OCR（agnes-2.0-flash），但免费渠道易过载、偏慢。
+//   - OpenRouter：BACKUP_API_KEY（兼容旧单一 key 写法），endpoint openrouter.ai
+//      免费模型每日 50 次限额；若只配了 BACKUP_API_KEY 且为 sk-or- 前缀则启用。
+const BACKUP_VENDOR_DEFS = [
+  {
+    name: 'Sensnova',
+    envKey: 'SENSNOVA_API_KEY',
+    keyPrefix: 'sk-iq',
+    endpoint: 'https://token.sensenova.cn/v1/chat/completions',
+    textModel: 'sensenova-6.7-flash-lite',
+    vlModels: ['sensenova-6.7-flash-lite'],
+    isThinking: true,
+    referer: null
+  },
+  {
+    name: 'Agnes',
+    envKey: 'AGNES_API_KEY',
+    keyPrefix: 'sk-m7',
+    endpoint: 'https://apihub.agnes-ai.com/v1/chat/completions',
+    textModel: 'agnes-2.0-flash',
+    // Agnes 实测可跑视觉 OCR，按视觉兜底链路纳入
+    vlModels: ['agnes-2.0-flash'],
+    isThinking: true,
+    referer: 'https://minxue.edu'
+  },
   {
     name: 'OpenRouter',
+    envKey: 'BACKUP_API_KEY',
     keyPrefix: 'sk-or-',
     endpoint: 'https://openrouter.ai/api/v1/chat/completions',
     textModel: 'tencent/hy3:free',
@@ -186,74 +208,48 @@ const BACKUP_VENDORS = [
     ],
     isThinking: false,
     referer: 'https://minxue.edu'
-  },
-  {
-    name: 'Agnes',
-    keyPrefix: 'sk-m7',
-    endpoint: 'https://apihub.agnes-ai.com/v1/chat/completions',
-    textModel: 'agnes-2.0-flash',
-    // Agnes 的 /chat/completions 不支持 image_url 多模态，故视觉模型列表为空（仅作文本备用）。
-    vlModels: [],
-    isThinking: true,
-    referer: 'https://minxue.edu'
-  },
-  {
-    name: 'Sensnova',
-    keyPrefix: 'sk-iq',
-    endpoint: 'https://token.sensenova.cn/v1/chat/completions',
-    textModel: 'sensenova-6.7-flash-lite',
-    // 商汤多模态视觉模型（已实测可读取图片内容，付费额度稳定）
-    vlModels: ['sensenova-6.7-flash-lite'],
-    isThinking: true,
-    referer: null
   }
 ]
 
-function resolveBackupVendor() {
-  const key = process.env.BACKUP_API_KEY || ''
-  if (!key) return null
-  return BACKUP_VENDORS.find(v => key.startsWith(v.keyPrefix)) || null
+// 已启用（配了有效 key）的厂商，按列表顺序即优先级（Sensnova → Agnes → OpenRouter）
+function resolveBackupVendors() {
+  return BACKUP_VENDOR_DEFS.filter(v => {
+    const key = process.env[v.envKey] || ''
+    return key && key.startsWith(v.keyPrefix)
+  })
 }
 
 export const BACKUP_CONFIG = {
-  get VENDOR() {
-    return resolveBackupVendor()
+  // 所有已启用的备用厂商（按优先级排列）
+  get VENDORS() {
+    return resolveBackupVendors()
   },
   get ENABLED() {
-    return Boolean(resolveBackupVendor())
+    return resolveBackupVendors().length > 0
   },
+  // 第一个启用的厂商（文本链路默认用它）
+  get PRIMARY() {
+    return resolveBackupVendors()[0] || null
+  },
+  // 兼容旧调用：默认 endpoint / key / model（取第一个启用厂商）
   get ENDPOINT() {
-    return process.env.BACKUP_ENDPOINT || resolveBackupVendor()?.endpoint ||
-      'https://apihub.agnes-ai.com/v1/chat/completions'
+    return process.env.BACKUP_ENDPOINT || this.PRIMARY?.endpoint ||
+      'https://token.sensenova.cn/v1/chat/completions'
   },
   get API_KEY() {
-    return process.env.BACKUP_API_KEY || ''
+    return this.PRIMARY?.apiKey || process.env.BACKUP_API_KEY || ''
   },
-  // 备用厂商默认使用的文本模型（可被 BACKUP_MODEL 环境变量覆盖）
   get MODEL() {
-    return process.env.BACKUP_MODEL || resolveBackupVendor()?.textModel || 'agnes-2.0-flash'
+    return process.env.BACKUP_MODEL || this.PRIMARY?.textModel || 'sensenova-6.7-flash-lite'
   },
-  // 备用厂商默认使用的视觉模型（单值，兼容旧逻辑；多模型轮询见 VL_MODELS_LIST）
-  get VL_MODEL() {
-    return process.env.BACKUP_VL_MODEL || this.VL_MODELS_LIST[0] || ''
-  },
-  // 备用厂商所有可用视觉模型（按厂商轮询，任一成功即返回）
+  // 所有启用厂商的视觉模型（按优先级平铺，任一成功即返回）
   get VL_MODELS_LIST() {
     if (process.env.BACKUP_VL_MODEL) return [process.env.BACKUP_VL_MODEL]
-    return resolveBackupVendor()?.vlModels || []
+    return resolveBackupVendors().flatMap(v => v.vlModels)
   },
-  // 当前厂商是否为思考模型（正文只进 reasoning，需回退取正文）
-  get IS_THINKING() {
-    return resolveBackupVendor()?.isThinking || false
-  },
-  // 是否向备用 API 发送 reasoning:{enabled:false}（思考型免费模型需要，如 hy3）
-  // 注意：Sensnova 思考模型不认该开关，且我们用 extractContent 从 reasoning 回退，故不开启。
   get DISABLE_REASONING() {
     return process.env.BACKUP_DISABLE_REASONING === 'true' ||
-      (resolveBackupVendor()?.textModel || '').includes('hy3')
-  },
-  get REFERER() {
-    return resolveBackupVendor()?.referer || null
+      (this.PRIMARY?.textModel || '').includes('hy3')
   }
 }
 
@@ -395,35 +391,40 @@ export async function callTextCompletion(opts) {
     }
   }
 
-  // 2. 备用 API（OpenRouter）
+  // 2. 备用 API（跨厂商，按优先级 Sensnova → Agnes → OpenRouter，任一成功即返回）
   if (!BACKUP_CONFIG.ENABLED) {
     throw new Error(`主 API 失败且无备用 API：${primaryErr.message}`)
   }
+  const backupVendors = BACKUP_CONFIG.VENDORS
+  for (const v of backupVendors) {
+    const vKey = process.env[v.envKey] || ''
     const backupBody = {
-      model: model || BACKUP_CONFIG.MODEL,
+      model: model || v.textModel,
       messages,
       temperature,
       max_tokens: maxTokens,
       // 部分免费模型（如 tencent/hy3）是"思考模型"，默认把预算花在 reasoning 上导致 content 为空；
       // 显式关闭思考，强制直接输出正文。
-      ...(BACKUP_CONFIG.DISABLE_REASONING ? { reasoning: { enabled: false } } : {})
+      ...(v.textModel.includes('hy3') ? { reasoning: { enabled: false } } : {})
     }
     try {
-      const resp = await postWith429Retry(_backupAxios, BACKUP_CONFIG.ENDPOINT, backupBody, {
+      const resp = await postWith429Retry(_backupAxios, v.endpoint, backupBody, {
         headers: {
           'Content-Type': 'application/json',
-          'Authorization': `Bearer ${BACKUP_CONFIG.API_KEY}`,
-          ...(BACKUP_CONFIG.REFERER ? { 'HTTP-Referer': BACKUP_CONFIG.REFERER, 'X-Title': 'Minxue' } : {})
+          'Authorization': `Bearer ${vKey}`,
+          ...(v.referer ? { 'HTTP-Referer': v.referer, 'X-Title': 'Minxue' } : {})
         }
       })
       const content = extractContent(resp.data?.choices?.[0]?.message)
       if (!content) throw new Error('备用 AI 返回内容为空')
-      console.log(`✅ [AI] 备用 API 调用成功（${model || BACKUP_CONFIG.MODEL}）`)
+      console.log(`✅ [AI] 备用 API（${v.name}）调用成功（${model || v.textModel}）`)
       return { content, usedBackup: true }
     } catch (backupErr) {
-      console.error(`❌ [AI] 备用 API 也失败：${backupErr.message}`)
-      throw backupErr
+      console.warn(`⚠️ [AI] 备用 API（${v.name}）失败：${backupErr.message}，尝试下一个...`)
     }
+  }
+  console.error(`❌ [AI] 所有备用 API 均失败`)
+  throw new Error(`所有备用 API 均失败：${primaryErr.message}`)
 }
 
 /**
@@ -432,13 +433,12 @@ export async function callTextCompletion(opts) {
  * Provider 顺序：
  *   1. 主 API（ModelScope Qwen3-VL，Key A）
  *   2. 备用2 API（ModelScope 第二把 Key，同一端点独立免费额度）
- *   3. 备用 API（OpenRouter / Agnes，跨厂商）
- *   4. 第三备用（OpenRouter 免费模型，如 qwen2.5-vl-7b）
+ *   3. 跨厂商备用（按优先级 Sensnova → Agnes → OpenRouter，视觉模型逐个轮询）
  *
  * 只有在所有 Provider 均失败时才抛出错误，记录失败日志。
  * 几何图重建 Worker 使用此函数，保证即使主 API 配额耗尽也能继续。
  *
- * @param {{imageDataURL:string, systemPrompt:string, userText:string, temperature?:number, maxTokens?:number, model?:string}} opts
+ * @param {{imageDataURL:string, systemPrompt:string, userText?:string, temperature?:number, maxTokens?:number, model?:string}} opts
  * @returns {Promise<{content:string, usedBackup:boolean}>}
  * @throws 所有 Provider 均失败时抛出最后一个错误
  */
@@ -508,43 +508,46 @@ export async function callVisionCompletion(opts) {
     })
   }
 
-  // 备用 API（跨厂商：OpenRouter / Agnes / Sensnova，按 BACKUP_API_KEY 前缀自动路由）
-  // 按当前厂商的视觉模型列表逐个展开为独立 Provider，任一成功即返回；
-  // 全部失败或该厂商无视觉模型（如 Agnes 不支持多模态）则跳过，不影响主链路。
+  // 备用 API（跨厂商：按优先级 Sensnova → Agnes → OpenRouter，各自独立 Key）
+  // 每个启用厂商的视觉模型逐个展开为独立 Provider，按厂商优先级排列；
+  // 任一成功即返回，全部失败则跳过，不影响主链路。
   if (BACKUP_CONFIG.ENABLED) {
-    const vendor = BACKUP_CONFIG.VENDOR
-    const vlModels = BACKUP_CONFIG.VL_MODELS_LIST
-    const disableReasoning = BACKUP_CONFIG.DISABLE_REASONING
-    vlModels.forEach((vlModel, idx) => {
-      providers.push({
-        name: `备用 API (${vendor?.name || '跨厂商'}${vlModels.length > 1 ? ` #${idx + 1}` : ''})`,
-        endpoint: BACKUP_CONFIG.ENDPOINT,
-        model: () => model || vlModel,
-        headers: () => {
-          const h = {
-            'Content-Type': 'application/json',
-            'Authorization': `Bearer ${BACKUP_CONFIG.API_KEY}`
-          }
-          if (BACKUP_CONFIG.REFERER) {
-            h['HTTP-Referer'] = BACKUP_CONFIG.REFERER
-            h['X-Title'] = 'Minxue'
-          }
-          return h
-        },
-        buildBody: (m) => {
-          const body = {
-            model: m,
-            messages: buildMessages(),
-            temperature,
-            max_tokens: maxTokens
-          }
-          if (disableReasoning) {
-            body.reasoning = { enabled: false }
-          }
-          return body
-        },
-        // 备用 Provider：任一错误都跳过，继续尝试下一个（含思考模型 reasoning 回退）
-        shouldSkipOnError: () => true
+    BACKUP_CONFIG.VENDORS.forEach(vendor => {
+      const vKey = process.env[vendor.envKey] || ''
+      const vlModels = process.env.BACKUP_VL_MODEL
+        ? [process.env.BACKUP_VL_MODEL]
+        : vendor.vlModels
+      vlModels.forEach((vlModel, idx) => {
+        providers.push({
+          name: `备用 API (${vendor.name}${vlModels.length > 1 ? ` #${idx + 1}` : ''})`,
+          endpoint: vendor.endpoint,
+          model: () => model || vlModel,
+          headers: () => {
+            const h = {
+              'Content-Type': 'application/json',
+              'Authorization': `Bearer ${vKey}`
+            }
+            if (vendor.referer) {
+              h['HTTP-Referer'] = vendor.referer
+              h['X-Title'] = 'Minxue'
+            }
+            return h
+          },
+          buildBody: (m) => {
+            const body = {
+              model: m,
+              messages: buildMessages(),
+              temperature,
+              max_tokens: maxTokens
+            }
+            if (vendor.textModel.includes('hy3')) {
+              body.reasoning = { enabled: false }
+            }
+            return body
+          },
+          // 备用 Provider：任一错误都跳过，继续尝试下一个（含思考模型 reasoning 回退）
+          shouldSkipOnError: () => true
+        })
       })
     })
   }
