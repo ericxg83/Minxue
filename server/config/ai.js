@@ -158,31 +158,102 @@ export const getAIHeaders = () => ({
   'Authorization': `Bearer ${AI_CONFIG.API_KEY}`
 })
 
-// ── 备用 API（OpenRouter）──
+// ── 备用 API（多厂商，按 Key 前缀自动路由）──
 // 当主 API（ModelScope）因配额/限流失败时，自动切换到备用厂商。
-// Key / Endpoint / 模型 全部通过环境变量注入，部署端（Render）后台填写即可。
+// 支持以下厂商（共用一个 BACKUP_API_KEY 环境变量，按前缀识别）：
+//   - sk-or-...   → OpenRouter（https://openrouter.ai/api/v1）
+//                  免费模型每日 50 次限额，文本/视觉均可用（视觉用 :free VL 模型）。
+//   - sk-m7... / sk-jU... → Agnes（https://apihub.agnes-ai.com/v1）
+//                  仅文本可用（agnes-2.0-flash），/chat/completions 不支持 image_url 多模态。
+//   - sk-iq...    → 商汤 Sensnova（https://token.sensenova.cn/v1）
+//                  付费额度，文本 + 视觉均可用，且最稳定（无每日免费限额）。
+//                  注意：sensenova-6.7-flash-lite 为思考模型，正文只进 reasoning 字段、
+//                  content 恒为空，需在调用处做 reasoning 回退（见 extractContent）。
+// Key / 模型 全部通过环境变量注入，部署端（Render）后台填写即可。
+const BACKUP_VENDORS = [
+  {
+    name: 'OpenRouter',
+    keyPrefix: 'sk-or-',
+    endpoint: 'https://openrouter.ai/api/v1/chat/completions',
+    textModel: 'tencent/hy3:free',
+    // OpenRouter 免费且支持图像输入的视觉模型（按官方 /api/v1/models 清单核实）
+    vlModels: [
+      'google/gemma-4-31b-it:free',
+      'nvidia/nemotron-nano-12b-v2-vl:free',
+      'google/gemma-4-26b-a4b-it:free',
+      'openrouter/free',
+      'nvidia/nemotron-3.5-content-safety:free'
+    ],
+    isThinking: false,
+    referer: 'https://minxue.edu'
+  },
+  {
+    name: 'Agnes',
+    keyPrefix: 'sk-m7',
+    endpoint: 'https://apihub.agnes-ai.com/v1/chat/completions',
+    textModel: 'agnes-2.0-flash',
+    // Agnes 的 /chat/completions 不支持 image_url 多模态，故视觉模型列表为空（仅作文本备用）。
+    vlModels: [],
+    isThinking: true,
+    referer: 'https://minxue.edu'
+  },
+  {
+    name: 'Sensnova',
+    keyPrefix: 'sk-iq',
+    endpoint: 'https://token.sensenova.cn/v1/chat/completions',
+    textModel: 'sensenova-6.7-flash-lite',
+    // 商汤多模态视觉模型（已实测可读取图片内容，付费额度稳定）
+    vlModels: ['sensenova-6.7-flash-lite'],
+    isThinking: true,
+    referer: null
+  }
+]
+
+function resolveBackupVendor() {
+  const key = process.env.BACKUP_API_KEY || ''
+  if (!key) return null
+  return BACKUP_VENDORS.find(v => key.startsWith(v.keyPrefix)) || null
+}
+
 export const BACKUP_CONFIG = {
-  get ENDPOINT() {
-    return process.env.BACKUP_ENDPOINT || 'https://apihub.agnes-ai.com/v1/chat/completions'
-  },
-  get API_KEY() {
-    // 未配置则返回一个明显无效的占位，调用时会自然失败并 fallback
-    return process.env.BACKUP_API_KEY || ''
-  },
-  // 备用厂商默认使用的文本模型（OpenRouter 免费模型）
-  get MODEL() {
-    return process.env.BACKUP_MODEL || 'agnes-2.0-flash'
-  },
-  // 备用厂商默认使用的视觉模型
-  get VL_MODEL() {
-    return process.env.BACKUP_VL_MODEL || 'qwen/qwen2.5-vl-7b-instruct:free'
-  },
-  // 是否向备用 API 发送 reasoning:{enabled:false}（思考型免费模型需要）
-  get DISABLE_REASONING() {
-    return process.env.BACKUP_DISABLE_REASONING === 'true' || BACKUP_CONFIG.MODEL.includes('hy3')
+  get VENDOR() {
+    return resolveBackupVendor()
   },
   get ENABLED() {
-    return Boolean(process.env.BACKUP_API_KEY)
+    return Boolean(resolveBackupVendor())
+  },
+  get ENDPOINT() {
+    return process.env.BACKUP_ENDPOINT || resolveBackupVendor()?.endpoint ||
+      'https://apihub.agnes-ai.com/v1/chat/completions'
+  },
+  get API_KEY() {
+    return process.env.BACKUP_API_KEY || ''
+  },
+  // 备用厂商默认使用的文本模型（可被 BACKUP_MODEL 环境变量覆盖）
+  get MODEL() {
+    return process.env.BACKUP_MODEL || resolveBackupVendor()?.textModel || 'agnes-2.0-flash'
+  },
+  // 备用厂商默认使用的视觉模型（单值，兼容旧逻辑；多模型轮询见 VL_MODELS_LIST）
+  get VL_MODEL() {
+    return process.env.BACKUP_VL_MODEL || this.VL_MODELS_LIST[0] || ''
+  },
+  // 备用厂商所有可用视觉模型（按厂商轮询，任一成功即返回）
+  get VL_MODELS_LIST() {
+    if (process.env.BACKUP_VL_MODEL) return [process.env.BACKUP_VL_MODEL]
+    return resolveBackupVendor()?.vlModels || []
+  },
+  // 当前厂商是否为思考模型（正文只进 reasoning，需回退取正文）
+  get IS_THINKING() {
+    return resolveBackupVendor()?.isThinking || false
+  },
+  // 是否向备用 API 发送 reasoning:{enabled:false}（思考型免费模型需要，如 hy3）
+  // 注意：Sensnova 思考模型不认该开关，且我们用 extractContent 从 reasoning 回退，故不开启。
+  get DISABLE_REASONING() {
+    return process.env.BACKUP_DISABLE_REASONING === 'true' ||
+      (resolveBackupVendor()?.textModel || '').includes('hy3')
+  },
+  get REFERER() {
+    return resolveBackupVendor()?.referer || null
   }
 }
 
@@ -208,6 +279,24 @@ export const MODELSCOPE_BACKUP = {
 }
 
 const _backupAxios = axios.create({ timeout: 60000 })
+
+/**
+ * 从模型响应消息中提取正文内容。
+ * 多数 OpenAI 风格模型把正文放在 message.content；
+ * 但部分思考模型（如商汤 sensenova-6.7-flash-lite、Agnes）正文只进
+ * message.reasoning，content 恒为空——此时回退用 reasoning 作为内容，
+ * 否则会被上层判成"空响应"而失败。
+ * @param {object} message 响应中的 choices[].message
+ * @returns {string}
+ */
+export function extractContent(message) {
+  if (!message) return ''
+  const content = message.content
+  if (typeof content === 'string' && content.trim()) return content
+  const reasoning = message.reasoning
+  if (typeof reasoning === 'string' && reasoning.trim()) return reasoning
+  return ''
+}
 
 /**
  * 统一发起一次文本聊天补全请求，内置"主 API → 备用 API"自动切换。
@@ -297,7 +386,7 @@ export async function callTextCompletion(opts) {
         },
         timeout: 30000
       })
-      const content = resp.data?.choices?.[0]?.message?.content
+      const content = extractContent(resp.data?.choices?.[0]?.message)
       if (!content) throw new Error('备用2 AI 返回内容为空')
       console.log(`✅ [AI] 备用2 API（魔搭第二 Key）调用成功（${b2Model}）`)
       return { content, usedBackup: true }
@@ -324,11 +413,10 @@ export async function callTextCompletion(opts) {
         headers: {
           'Content-Type': 'application/json',
           'Authorization': `Bearer ${BACKUP_CONFIG.API_KEY}`,
-          'HTTP-Referer': 'https://minxue.edu',
-          'X-Title': 'Minxue'
+          ...(BACKUP_CONFIG.REFERER ? { 'HTTP-Referer': BACKUP_CONFIG.REFERER, 'X-Title': 'Minxue' } : {})
         }
       })
-      const content = resp.data?.choices?.[0]?.message?.content
+      const content = extractContent(resp.data?.choices?.[0]?.message)
       if (!content) throw new Error('备用 AI 返回内容为空')
       console.log(`✅ [AI] 备用 API 调用成功（${model || BACKUP_CONFIG.MODEL}）`)
       return { content, usedBackup: true }
@@ -420,60 +508,44 @@ export async function callVisionCompletion(opts) {
     })
   }
 
-  // 备用 API 1（OpenRouter / Agnes）
+  // 备用 API（跨厂商：OpenRouter / Agnes / Sensnova，按 BACKUP_API_KEY 前缀自动路由）
+  // 按当前厂商的视觉模型列表逐个展开为独立 Provider，任一成功即返回；
+  // 全部失败或该厂商无视觉模型（如 Agnes 不支持多模态）则跳过，不影响主链路。
   if (BACKUP_CONFIG.ENABLED) {
-    providers.push({
-      name: '备用 API (OpenRouter)',
-      endpoint: BACKUP_CONFIG.ENDPOINT,
-      model: () => model || BACKUP_CONFIG.VL_MODEL,
-      headers: () => ({
-        'Content-Type': 'application/json',
-        'Authorization': `Bearer ${BACKUP_CONFIG.API_KEY}`,
-        'HTTP-Referer': 'https://minxue.edu',
-        'X-Title': 'Minxue'
-      }),
-      buildBody: (m) => {
-        const body = {
-          model: m,
-          messages: buildMessages(),
-          temperature,
-          max_tokens: maxTokens
-        }
-        if (BACKUP_CONFIG.DISABLE_REASONING) {
-          body.reasoning = { enabled: false }
-        }
-        return body
-      },
-      // 备用 API 所有错误都跳过（尝试下一个备用）
-      shouldSkipOnError: () => true
-    })
-  }
-
-  // 备用 API 2（第三备用 — 不同免费模型，仅在 OpenRouter 启用时可用）
-  if (BACKUP_CONFIG.ENABLED && process.env.BACKUP_VL_MODEL_3) {
-    providers.push({
-      name: '第三备用 API',
-      endpoint: BACKUP_CONFIG.ENDPOINT,
-      model: () => model || process.env.BACKUP_VL_MODEL_3,
-      headers: () => ({
-        'Content-Type': 'application/json',
-        'Authorization': `Bearer ${BACKUP_CONFIG.API_KEY}`,
-        'HTTP-Referer': 'https://minxue.edu',
-        'X-Title': 'Minxue'
-      }),
-      buildBody: (m) => {
-        const body = {
-          model: m,
-          messages: buildMessages(),
-          temperature,
-          max_tokens: maxTokens
-        }
-        if (BACKUP_CONFIG.DISABLE_REASONING) {
-          body.reasoning = { enabled: false }
-        }
-        return body
-      },
-      shouldSkipOnError: () => true
+    const vendor = BACKUP_CONFIG.VENDOR
+    const vlModels = BACKUP_CONFIG.VL_MODELS_LIST
+    const disableReasoning = BACKUP_CONFIG.DISABLE_REASONING
+    vlModels.forEach((vlModel, idx) => {
+      providers.push({
+        name: `备用 API (${vendor?.name || '跨厂商'}${vlModels.length > 1 ? ` #${idx + 1}` : ''})`,
+        endpoint: BACKUP_CONFIG.ENDPOINT,
+        model: () => model || vlModel,
+        headers: () => {
+          const h = {
+            'Content-Type': 'application/json',
+            'Authorization': `Bearer ${BACKUP_CONFIG.API_KEY}`
+          }
+          if (BACKUP_CONFIG.REFERER) {
+            h['HTTP-Referer'] = BACKUP_CONFIG.REFERER
+            h['X-Title'] = 'Minxue'
+          }
+          return h
+        },
+        buildBody: (m) => {
+          const body = {
+            model: m,
+            messages: buildMessages(),
+            temperature,
+            max_tokens: maxTokens
+          }
+          if (disableReasoning) {
+            body.reasoning = { enabled: false }
+          }
+          return body
+        },
+        // 备用 Provider：任一错误都跳过，继续尝试下一个（含思考模型 reasoning 回退）
+        shouldSkipOnError: () => true
+      })
     })
   }
 
@@ -492,7 +564,7 @@ export async function callVisionCompletion(opts) {
           headers: p.headers(),
           timeout: AI_CONFIG.TIMEOUT
         })
-        const content = resp.data?.choices?.[0]?.message?.content
+        const content = extractContent(resp.data?.choices?.[0]?.message)
         if (!content) {
           providerLastErr = new Error('AI 返回内容为空')
           console.warn(`⚠️ [AI-Vision] ${p.name}（${currentModel}）返回空内容（第 ${attempt + 1}/${MAX_PROVIDER_RETRY + 1} 次），${attempt < MAX_PROVIDER_RETRY ? '立即重试' : '放弃并跳到下一个 Provider'}`)
