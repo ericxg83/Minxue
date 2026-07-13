@@ -371,6 +371,7 @@ button {
 
 /* ── Phone frame — desktop browser simulates iPhone ── */
 .phone-frame {
+  width: 100%;
   max-width: 430px;
   margin: 0 auto;
   min-height: 100vh;
@@ -393,6 +394,7 @@ button {
     padding: 0;
   }
   .phone-frame {
+    width: 430px;
     margin: 18px auto;
     border-radius: 36px;
     overflow: hidden;

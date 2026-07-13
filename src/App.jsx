@@ -2509,10 +2509,10 @@ export default function App() {
                 {showFilterPanel && (
                   <>
                     {/* Overlay */}
-                    <div className="fixed inset-0 z-50 bg-black/30" onClick={() => setShowFilterPanel(false)} />
+                    <div className="absolute inset-0 z-50 bg-black/30" onClick={() => setShowFilterPanel(false)} />
                     {/* Drawer */}
                     <div
-                      className="fixed top-0 right-0 z-50 h-full bg-white shadow-xl"
+                      className="absolute top-0 right-0 z-50 h-full bg-white shadow-xl"
                       style={{
                         width: '85%',
                         maxWidth: '360px',
@@ -2841,7 +2841,7 @@ export default function App() {
                 </section>
 
                 {/* Floating Bottom Action Bar */}
-                <div className="fixed z-40 flex justify-center pointer-events-none" style={{ bottom: 'calc(56px + env(safe-area-inset-bottom, 0px))', left: '12px', right: '12px' }}>
+                <div className="absolute z-40 flex justify-center pointer-events-none" style={{ bottom: 'calc(56px + env(safe-area-inset-bottom, 0px))', left: '12px', right: '12px' }}>
                   <div className="bg-white/85 backdrop-blur-xl rounded-xl shadow-lg border border-gray-200/80 px-4 py-2.5 w-full max-w-lg flex items-center justify-between pointer-events-auto" style={{ maxWidth: 'calc(448px - 24px)' }}>
                     <div className="flex items-center gap-1.5">
                       <span style={{ fontSize: '13px', color: '#6B7280' }}>已选</span>
@@ -3002,7 +3002,6 @@ export default function App() {
             })}
           </div>
         </nav>
-        </div>
 
         {/* Student Sheet */}
         <StudentSwitcher
@@ -3018,7 +3017,7 @@ export default function App() {
             whileTap={{ scale: 0.9 }}
             whileHover={{ scale: 1.05 }}
             onClick={() => setShowUploadOptions(true)}
-            className="fixed right-5 z-50 flex items-center justify-center shadow-lg tap-scale"
+            className="absolute right-5 z-50 flex items-center justify-center shadow-lg tap-scale"
             style={{
               width: '54px',
               height: '54px',
@@ -3034,7 +3033,7 @@ export default function App() {
 
         {/* Upload Options Menu — Claude style */}
         {showUploadOptions && (
-          <div className="fixed inset-0 z-[25000] flex items-end justify-center">
+          <div className="absolute inset-0 z-[25000] flex items-end justify-center">
             <motion.div
               initial={{ opacity: 0 }}
               animate={{ opacity: 1 }}
@@ -3107,7 +3106,7 @@ export default function App() {
 
         {/* Delete Confirm Dialog — Claude style */}
         {showDeleteConfirm && (
-          <div className="fixed inset-0 z-[20000] flex items-center justify-center">
+          <div className="absolute inset-0 z-[20000] flex items-center justify-center">
             <motion.div
               initial={{ opacity: 0 }}
               animate={{ opacity: 1 }}
@@ -3152,7 +3151,7 @@ export default function App() {
 
         {/* Question Editor Dialog — Claude style */}
         {showQuestionEditor && editingQuestionItem && (
-          <div className="fixed inset-0 z-[20000] flex flex-col">
+          <div className="absolute inset-0 z-[20000] flex flex-col">
             <div className="absolute inset-0 bg-black/50 backdrop-blur-sm" onClick={() => setShowQuestionEditor(false)} />
             <div className="relative mt-auto bg-white rounded-t-3xl max-h-[85vh] min-h-[60vh] flex flex-col shadow-xl">
               {/* Header */}
@@ -3384,7 +3383,7 @@ export default function App() {
 
         {/* Edit Source Picker Dialog */}
         {showEditSourcePicker && (
-          <div className="fixed inset-0 z-[30000] flex flex-col justify-end" style={{ background: 'rgba(0,0,0,0.5)' }}>
+          <div className="absolute inset-0 z-[30000] flex flex-col justify-end" style={{ background: 'rgba(0,0,0,0.5)' }}>
             <div onClick={() => setShowEditSourcePicker(false)} style={{ flex: 1 }} />
             <div style={{
               background: '#fff', borderRadius: '16px 16px 0 0',
@@ -3531,7 +3530,7 @@ export default function App() {
 
         {/* Notification Panel / 通知 */}
         {showNotifications && (
-          <div className="fixed inset-0 z-[100] animate-fade-in" style={{ background: 'rgba(0,0,0,0.3)' }}>
+          <div className="absolute inset-0 z-[100] animate-fade-in" style={{ background: 'rgba(0,0,0,0.3)' }}>
             <div
               className="absolute bottom-0 left-0 right-0 animate-slide-up"
               style={{
@@ -3566,7 +3565,7 @@ export default function App() {
 
         {/* Learning Report / 学习报告 */}
         {showLearningReport && (
-          <div className="fixed inset-0 z-[100] bg-white overflow-y-auto animate-fade-in" style={{ paddingTop: 'env(safe-area-inset-top, 0px)' }}>
+          <div className="absolute inset-0 z-[100] bg-white overflow-y-auto animate-fade-in" style={{ paddingTop: 'env(safe-area-inset-top, 0px)' }}>
             <div className="sticky top-0 z-10 bg-white border-b px-4 py-3 flex items-center justify-between" style={{ borderColor: '#F3F4F6' }}>
               <h3 style={{ fontSize: '17px', fontWeight: 600, color: '#111827' }}>学习报告</h3>
               <button
@@ -3582,6 +3581,7 @@ export default function App() {
             </Suspense>
           </div>
         )}
+        </div>
       </>
     )
 

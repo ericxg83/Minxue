@@ -143,14 +143,14 @@ export default function StudentSwitcher({ visible, onClose, onSelectStudent }) {
             animate={{ opacity: 1 }}
             exit={{ opacity: 0 }}
             onClick={onClose}
-            className="fixed inset-0 bg-black/50 backdrop-blur-sm z-[10000]"
+            className="absolute inset-0 bg-black/50 backdrop-blur-sm z-[10000]"
           />
           <motion.div
             initial={{ y: '100%' }}
             animate={{ y: 0 }}
             exit={{ y: '100%' }}
             transition={{ type: 'spring', damping: 25, stiffness: 200 }}
-            className="fixed bottom-0 left-0 right-0 max-w-md mx-auto bg-white rounded-t-xl overflow-hidden z-[10001]"
+            className="absolute bottom-0 left-0 right-0 max-w-full mx-auto bg-white rounded-t-xl overflow-hidden z-[10001]"
           >
             <div className="relative px-5 pt-5 pb-6">
               {/* Header */}
@@ -305,13 +305,13 @@ export default function StudentSwitcher({ visible, onClose, onSelectStudent }) {
                   animate={{ opacity: 1 }}
                   exit={{ opacity: 0 }}
                   onClick={() => setShowDeleteConfirm(null)}
-                  className="fixed inset-0 bg-black/60 backdrop-blur-sm z-[10002]"
+                  className="absolute inset-0 bg-black/60 backdrop-blur-sm z-[10002]"
                 />
                 <motion.div
                   initial={{ opacity: 0, scale: 0.9, y: 20 }}
                   animate={{ opacity: 1, scale: 1, y: 0 }}
                   exit={{ opacity: 0, scale: 0.9, y: 20 }}
-                  className="fixed top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 z-[10003] bg-white rounded-xl shadow-lg max-w-[280px] w-[85%] overflow-hidden"
+                  className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 z-[10003] bg-white rounded-xl shadow-lg max-w-[280px] w-[85%] overflow-hidden"
                 >
                   <div className="px-5 pt-5 pb-2">
                     <h3 className="text-[16px] font-bold text-slate-900 text-center">确认删除</h3>
