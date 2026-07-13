@@ -34,10 +34,9 @@ import { judgeAnswer } from './services/judgeService.js'
 import { checkQuestionCompleteness } from './utils/questionCompleteness.js'
 import { uploadImage, deleteFile } from './services/ossService.js'
 import { getTaskQueue, getGeometryQueue, getQueueStats, taskWorker } from './queue.js'
-import { processTask, generateTagsForQuestion } from './worker.js'
+import { processTask } from './worker.js'
 // 定时回填走 LLM（backfillTags.js 的 generateTag），用于修正上传热路径产出的
-// 本地占位标签/难度（difficulty 默认 3）。worker 的 generateTagsForQuestion 已改为
-// 本地规则分类，只作上传时零 API 占位，不能用于回填修正，故此处显式引入 LLM 版。
+// 本地占位标签/难度（difficulty 默认 3），写入 tags_source='ai' 后退出筛选。
 import { generateTag as generateTagWithLLM } from './backfillTags.js'
 import { AI_CONFIG, getAIHeaders, buildTaggingPrompt, resetModelIndex } from './config/ai.js'
 import weeklyReportRouter from './routes/weeklyReport.js'
