@@ -22,18 +22,10 @@ services:
         sync: false
       - key: MODELSCOPE_BACKUP_API_KEY
         sync: false
-      # 备用 API（多厂商，各自独立 Key，优先级 TackleKey → Agnes → Sensnova → OpenRouter）
-      # 视觉兜底链：TackleKey(gemini，实测可用) → Agnes(免费可视觉) → OpenRouter(免费视觉,每日限额)
-      # Sensnova 仅作文本备用（思考模型不产 JSON，不适配结构化 OCR）。
-      # 以下变量均标 sync:false 留空，由代码按 Key 前缀自动路由厂商 / endpoint / 模型，
-      # 勿在此硬编码，否则覆盖自动路由逻辑。
+      # 备用 API：仅 TackleKey 一个厂商兜底（视觉/文本统一用 gemini-2.5-flash-nothink）
+      # 已移除 Agnes / Sensnova / OpenRouter（不产 JSON 或免费额度不可用）。
+      # 标 sync:false 留空，由代码按 Key 前缀自动路由 endpoint / 模型，勿硬编码。
       - key: TACKLEKEY_API_KEY
-        sync: false
-      - key: AGNES_API_KEY
-        sync: false
-      - key: SENSNOVA_API_KEY
-        sync: false
-      - key: BACKUP_API_KEY
         sync: false
       - key: BACKUP_ENDPOINT
         sync: false
