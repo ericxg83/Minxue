@@ -13,16 +13,43 @@ const A4_H = 297
 
 /**
  * 设计 token（PDF HTML 无法引用 CSS 变量，写死等值 hex）
- * 对齐 workbench-theme.css / PRODUCT.md「温暖·可靠·清晰」
+ * 对齐「敏学成长中心」品牌视觉：蓝→青渐变主色、橙色强调、清爽留白
  */
 const T = {
-  primary: '#3B82F6', primaryDark: '#2563EB', primarySoft: '#DBEAFE', primaryMist: '#EFF6FF',
+  primary: '#2E7CF6', primaryDark: '#1D5FD6', primarySoft: '#D6E6FF', primaryMist: '#EEF5FF',
+  teal: '#22C7A9', tealSoft: '#D8F7EF',
   success: '#16A34A', successSoft: '#DCFCE7',
   warning: '#D97706', warningSoft: '#FEF3C7',
-  danger: '#DC2626', dangerSoft: '#FEE2E2',
-  accent: '#EA580C', accentSoft: '#FFF7ED',
-  text: '#1E293B', textSec: '#64748B', textTer: '#94A3B8',
-  border: '#E2E8F0', borderLight: '#F1F5F9', bg: '#F8FAFC'
+  danger: '#F0564D', dangerSoft: '#FDECEC',
+  accent: '#F97316', accentSoft: '#FFF3E8',
+  purple: '#8B5CF6', purpleSoft: '#EFE9FF',
+  text: '#1E293B', textSec: '#64748B', textTer: '#9AA6B8',
+  border: '#E7EDF5', borderLight: '#F1F5FB', bg: '#F6F9FE'
+}
+
+/** 品牌信息（统一维护，便于替换） */
+const BRAND = {
+  nameCn: '敏学成长中心',
+  nameEn: 'MINXUE GROWTH CENTER',
+  slogan: '用数据记录学习，用训练帮助成长'
+}
+
+/**
+ * 品牌 Logo Lockup：渐变「M」标 + 中英文字号
+ * @param {Object} opt
+ * @param {boolean} opt.compact - 内页紧凑版（较小字号）
+ */
+function renderLogo({ compact = false } = {}) {
+  const mark = `<svg class="brand-mark" width="${compact ? 30 : 40}" height="${compact ? 30 : 40}" viewBox="0 0 40 40" fill="none" xmlns="http://www.w3.org/2000/svg">
+    <defs>
+      <linearGradient id="mxg" x1="0" y1="0" x2="40" y2="40" gradientUnits="userSpaceOnUse">
+        <stop stop-color="${T.primary}"/><stop offset="1" stop-color="${T.teal}"/>
+      </linearGradient>
+    </defs>
+    <rect x="1" y="1" width="38" height="38" rx="11" fill="url(#mxg)"/>
+    <path d="M11 28V13.5c0-.6.75-.9 1.16-.45L20 21l7.84-7.95c.41-.45 1.16-.16 1.16.45V28" stroke="#fff" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"/>
+  </svg>`
+  return `<div class="brand ${compact ? 'brand-sm' : ''}">${mark}<div class="brand-tx"><div class="brand-cn">${BRAND.nameCn}</div><div class="brand-en">${BRAND.nameEn}</div></div></div>`
 }
 
 function colorForAccuracy(acc) {
@@ -40,7 +67,22 @@ function masteryStyle(label) {
   }
 }
 
-/** 老师寄语（依据统计自动拼装模板话术） */
+/** 知识点行首彩色图标（循环取色，呼应参考图的圆形图标） */
+const KT_ICON_PALETTE = [
+  { bg: T.primary, soft: T.primaryMist },
+  { bg: T.primaryDark, soft: T.primarySoft },
+  { bg: T.teal, soft: T.tealSoft },
+  { bg: T.success, soft: T.successSoft },
+  { bg: T.purple, soft: T.purpleSoft },
+]
+function ktRowIcon(index) {
+  const c = KT_ICON_PALETTE[index % KT_ICON_PALETTE.length]
+  return `<span class="kt-ic" style="background:${c.soft};color:${c.bg}">
+    <svg width="15" height="15" viewBox="0 0 24 24" fill="none"><rect x="4" y="4" width="16" height="16" rx="4.5" stroke="currentColor" stroke-width="2"/><path d="M8.5 12h7M12 8.5v7" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>
+  </span>`
+}
+
+/** 学习寄语（依据统计自动拼装模板话术） */
 function buildTeacherComment(stats, weakestTag) {
   const parts = []
   const completeRate = stats.totalTasks > 0 ? stats.completedTasks / stats.totalTasks : 0
@@ -55,7 +97,7 @@ function buildTeacherComment(stats, weakestTag) {
   return parts.join('，') + '！'
 }
 
-/** 老师建议（按薄弱学科自动生成） */
+/** 学习建议（按薄弱学科自动生成） */
 function buildTeacherAdvice(subjectDiagnosis) {
   if (!subjectDiagnosis || subjectDiagnosis.length === 0) {
     return '本周暂无明显薄弱知识点，建议保持练习节奏，适当拓展提高题型。'
@@ -155,18 +197,19 @@ function buildDiagnosisHTML(reportData) {
   const teacherComment = buildTeacherComment(stats, weakestTag)
   const teacherAdvice = buildTeacherAdvice(subjectDiagnosis)
 
-  // Logo（复用 TopNavBar SVG）
-  const logoSvg = `<svg viewBox="0 0 24 24" fill="none" width="26" height="26"><path d="M12 2L2 7l10 5 10-5-10-5zM2 17l10 5 10-5M2 12l10 5 10-5" stroke="${T.primary}" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>`
+  // 品牌 Logo Lockup
+  const logoFull = renderLogo({ compact: false })
+  const logoSm = renderLogo({ compact: true })
 
   // 波浪装饰
   const waveSvg = `<svg viewBox="0 0 794 120" preserveAspectRatio="none" width="794" height="120" xmlns="http://www.w3.org/2000/svg"><path d="M0 40 C 150 90, 300 0, 450 40 S 700 90, 794 40 L794 120 L0 120 Z" fill="${T.primaryMist}"/><path d="M0 60 C 180 110, 320 20, 500 60 S 720 100, 794 60 L794 120 L0 120 Z" fill="${T.primarySoft}" opacity="0.6"/></svg>`
 
   // ── 学科诊断表格 ──
   const subjectCards = subjectDiagnosis.length > 0 ? subjectDiagnosis.map(s => {
-    const rows = s.topTags.map(t => {
+    const rows = s.topTags.map((t, i) => {
       const ms = masteryStyle(t.masteryLabel)
       return `<tr>
-        <td class="kt-tag">${escapeHtml(t.tag)}</td>
+        <td class="kt-tag"><span class="kt-tag-wrap">${ktRowIcon(i)}${escapeHtml(t.tag)}</span></td>
         <td class="kt-c" style="color:${t.wrongCount >= 3 ? T.danger : T.text};font-weight:${t.wrongCount >= 3 ? 600 : 400}">${t.wrongCount}</td>
         <td class="kt-c">${t.ratio}%</td>
         <td class="kt-c"><span class="mastery" style="background:${ms.bg};color:${ms.color}">${t.masteryLabel}</span></td>
@@ -176,7 +219,7 @@ function buildDiagnosisHTML(reportData) {
     const sAccColor = colorForAccuracy(s.accuracy)
     return `<div class="subj-card">
       <div class="subj-head">
-        <div class="subj-name"><span class="subj-dot"></span>${escapeHtml(s.subject)}</div>
+        <div class="subj-name"><span class="subj-badge"><svg width="15" height="15" viewBox="0 0 24 24" fill="none"><path d="M5 4h11a2 2 0 012 2v13H7a2 2 0 00-2 2V4z" stroke="${T.primary}" stroke-width="2" stroke-linejoin="round"/><path d="M5 4v15" stroke="${T.primary}" stroke-width="2" stroke-linecap="round"/></svg></span>${escapeHtml(s.subject)}</div>
         <div class="subj-acc">正确率：<b style="color:${sAccColor}">${sAcc}${s.accuracy != null ? '%' : ''}</b></div>
       </div>
       <table class="kt-table">
@@ -193,26 +236,36 @@ function buildDiagnosisHTML(reportData) {
   .page{width:794px;height:1123px;position:relative;overflow:hidden;background:#fff}
   .pad{padding:44px 48px}
 
-  /* 页眉 */
-  .ph{display:flex;align-items:center;justify-content:space-between;margin-bottom:28px}
-  .ph-logo{display:flex;align-items:center;gap:8px;font-size:15px;font-weight:700;color:${T.text}}
-  .ph-logo .sub{font-size:9px;color:${T.textTer};font-weight:400}
-  .week-badge{background:${T.primary};color:#fff;font-size:12px;font-weight:600;padding:5px 14px;border-radius:20px;letter-spacing:1px}
+  /* 品牌 Logo Lockup */
+  .brand{display:flex;align-items:center;gap:11px}
+  .brand-mark{display:block;flex-shrink:0}
+  .brand-cn{font-size:20px;font-weight:800;color:${T.text};letter-spacing:1px;line-height:1.1}
+  .brand-en{font-size:9px;font-weight:600;color:${T.textTer};letter-spacing:1.5px;margin-top:3px}
+  .brand-sm .brand-cn{font-size:15px}
+  .brand-sm .brand-en{font-size:7.5px;letter-spacing:1px;margin-top:2px}
 
-  .sec-num{color:${T.primary};font-weight:800;font-size:22px;margin-right:8px}
-  .sec-title{display:flex;align-items:center;font-size:19px;font-weight:700;color:${T.text};margin-bottom:20px}
+  /* 页眉 */
+  .ph{display:flex;align-items:flex-start;justify-content:space-between;margin-bottom:30px}
+  .ph-right{text-align:right}
+  .week-badge{display:inline-block;background:linear-gradient(135deg,${T.primary},${T.primaryDark});color:#fff;font-size:12px;font-weight:700;padding:6px 16px;border-radius:20px;letter-spacing:1.5px}
+  .ph-cap{font-size:11px;color:${T.textSec};font-weight:500;margin-top:7px}
+
+  .sec-num{color:${T.primary};font-weight:800;font-size:26px;margin-right:10px;letter-spacing:1px}
+  .sec-title{display:flex;align-items:center;font-size:22px;font-weight:800;color:${T.text};margin-bottom:6px}
+  .sec-sub{font-size:13px;color:${T.textSec};margin:0 0 20px 2px}
   .sub-label{display:flex;align-items:center;gap:6px;font-size:13px;font-weight:600;color:${T.textSec};margin:0 0 14px}
+  .sub-label::before{content:'';width:4px;height:14px;border-radius:2px;background:${T.primary}}
 
   /* 页脚 */
-  .pf{position:absolute;left:48px;right:48px;bottom:26px;display:flex;justify-content:space-between;align-items:center;font-size:11px;color:${T.textTer};border-top:1px solid ${T.borderLight};padding-top:10px}
+  .pf{position:absolute;left:48px;right:48px;bottom:26px;display:flex;justify-content:space-between;align-items:center;font-size:11px;color:${T.textTer};border-top:1px solid ${T.borderLight};padding-top:12px}
 
   /* ── 封面页 ── */
   .cover{height:1123px;display:flex;flex-direction:column;position:relative}
-  .cover-top{display:flex;align-items:center;justify-content:space-between;padding:44px 48px 0}
+  .cover-top{display:flex;align-items:flex-start;justify-content:space-between;padding:44px 48px 0}
   .cover-body{flex:1;display:flex;flex-direction:column;align-items:center;text-align:center;padding:20px 48px}
   .cover-title{font-size:46px;font-weight:800;color:${T.text};letter-spacing:4px;margin-top:36px}
   .cover-sub{font-size:16px;color:${T.textSec};margin-top:12px;letter-spacing:1px}
-  .avatar{width:96px;height:96px;border-radius:50%;margin-top:44px;border:4px solid ${T.primarySoft};background:linear-gradient(135deg,${T.primary},${T.primaryDark});display:flex;align-items:center;justify-content:center}
+  .avatar{width:96px;height:96px;border-radius:50%;margin-top:44px;border:4px solid ${T.primarySoft};background:linear-gradient(135deg,${T.primary},${T.teal});display:flex;align-items:center;justify-content:center}
   .avatar span{color:#fff;font-size:40px;font-weight:700}
   .cover-name{font-size:24px;font-weight:700;color:${T.text};margin-top:16px}
   .cover-name .tag{font-size:14px;font-weight:400;color:${T.textSec};margin-left:6px}
@@ -249,30 +302,34 @@ function buildDiagnosisHTML(reportData) {
   .chart-card{background:#fff;border:1px solid ${T.border};border-radius:14px;padding:18px 16px 8px;margin-bottom:22px}
   .chart-card svg{display:block;width:100%;height:auto}
 
-  /* 老师寄语 */
+  /* 寄语卡 */
   .comment{background:${T.primaryMist};border:1px solid ${T.primarySoft};border-radius:14px;padding:18px 20px;display:flex;gap:12px;align-items:flex-start}
-  .comment-icon{flex-shrink:0;width:32px;height:32px;border-radius:10px;background:${T.primary};display:flex;align-items:center;justify-content:center}
+  .comment-icon{flex-shrink:0;width:32px;height:32px;border-radius:10px;background:linear-gradient(135deg,${T.primary},${T.teal});display:flex;align-items:center;justify-content:center}
   .comment-t{font-size:13px;font-weight:700;color:${T.text};margin-bottom:5px}
   .comment-d{font-size:13px;color:${T.textSec};line-height:1.7}
 
   /* ── 学科诊断 ── */
-  .subj-card{background:#fff;border:1px solid ${T.border};border-radius:14px;padding:16px 18px;margin-bottom:16px}
+  .subj-card{background:#fff;border:1px solid ${T.border};border-radius:16px;padding:18px 20px;margin-bottom:16px;box-shadow:0 1px 3px rgba(30,64,120,.04)}
   .subj-head{display:flex;align-items:center;justify-content:space-between;margin-bottom:12px}
-  .subj-name{display:flex;align-items:center;gap:8px;font-size:16px;font-weight:700;color:${T.text}}
-  .subj-dot{width:8px;height:18px;border-radius:4px;background:${T.primary}}
+  .subj-name{display:flex;align-items:center;gap:9px;font-size:17px;font-weight:800;color:${T.text}}
+  .subj-badge{width:26px;height:26px;border-radius:7px;background:${T.primaryMist};display:flex;align-items:center;justify-content:center;flex-shrink:0}
   .subj-acc{font-size:13px;color:${T.textSec}}
   .kt-table{width:100%;border-collapse:collapse;font-size:13px}
-  .kt-table th{background:${T.bg};padding:9px 12px;text-align:center;font-weight:600;color:${T.textSec};border-bottom:1px solid ${T.border}}
-  .kt-table th:first-child{text-align:left}
-  .kt-table td{padding:9px 12px;border-bottom:1px solid ${T.borderLight};color:${T.text}}
+  .kt-table th{background:${T.bg};padding:10px 12px;text-align:center;font-weight:600;color:${T.textSec};border-bottom:1px solid ${T.border}}
+  .kt-table th:first-child{text-align:left;border-top-left-radius:8px;border-bottom-left-radius:8px}
+  .kt-table th:last-child{border-top-right-radius:8px;border-bottom-right-radius:8px}
+  .kt-table td{padding:11px 12px;border-bottom:1px solid ${T.borderLight};color:${T.text}}
   .kt-table tr:last-child td{border-bottom:none}
   .kt-tag{font-weight:500}
+  .kt-tag-wrap{display:flex;align-items:center;gap:10px}
+  .kt-ic{width:28px;height:28px;border-radius:50%;display:inline-flex;align-items:center;justify-content:center;flex-shrink:0}
   .kt-c{text-align:center}
-  .mastery{display:inline-block;padding:2px 10px;border-radius:12px;font-size:11px;font-weight:600}
+  .mastery{display:inline-block;padding:3px 12px;border-radius:12px;font-size:11px;font-weight:600}
 
-  .advice{background:${T.accentSoft};border:1px solid #FED7AA;border-radius:14px;padding:16px 20px;margin-top:6px}
-  .advice-t{font-size:13px;font-weight:700;color:${T.accent};margin-bottom:6px;display:flex;align-items:center;gap:6px}
-  .advice-d{font-size:13px;color:#9A3412;line-height:1.7}
+  .advice{background:${T.accentSoft};border:1px solid #FCD9B6;border-radius:16px;padding:18px 22px;margin-top:6px;display:flex;gap:13px;align-items:flex-start}
+  .advice-icon{flex-shrink:0;width:34px;height:34px;border-radius:50%;background:linear-gradient(135deg,${T.accent},#FBB040);display:flex;align-items:center;justify-content:center}
+  .advice-t{font-size:14px;font-weight:800;color:${T.accent};margin-bottom:6px}
+  .advice-d{font-size:13px;color:#9A4A10;line-height:1.8}
 
   .empty-state{text-align:center;padding:80px 40px;color:${T.textTer}}
   .empty-icon{font-size:52px;margin-bottom:14px}
@@ -283,12 +340,12 @@ function buildDiagnosisHTML(reportData) {
   <div class="page">
     <div class="cover">
       <div class="cover-top">
-        <div class="ph-logo">${logoSvg}<div>敏学教育<div class="sub">AI 智能批改 · 精准提分</div></div></div>
-        <div class="week-badge">${badgeLabel}</div>
+        ${logoFull}
+        <div class="ph-right"><div class="week-badge">${badgeLabel}</div><div class="ph-cap">每周学习报告</div></div>
       </div>
       <div class="cover-body">
-        <div class="cover-title">敏学成长报告</div>
-        <div class="cover-sub">周学习诊断 · 个性化训练</div>
+        <div class="cover-title">成长诊断报告</div>
+        <div class="cover-sub">${BRAND.slogan}</div>
         ${renderAvatar(student)}
         <div class="cover-name">${escapeHtml(student.name)}<span class="tag">同学</span></div>
         <div class="class-badge">${escapeHtml(student.grade || '')}</div>
@@ -308,12 +365,13 @@ function buildDiagnosisHTML(reportData) {
   <div class="page">
     <div class="pad">
       <div class="ph">
-        <div class="ph-logo">${logoSvg}<div>敏学成长报告</div></div>
-        <div class="week-badge">${badgeLabel}</div>
+        ${logoSm}
+        <div class="ph-right"><div class="week-badge">${badgeLabel}</div><div class="ph-cap">每周学习报告</div></div>
       </div>
       <div class="sec-title"><span class="sec-num">01</span>本周学习概览</div>
+      <div class="sec-sub">整体表现速览</div>
 
-      <div class="sub-label">整体表现</div>
+      <div class="sub-label">核心数据</div>
       <div class="kpi-row">
         <div class="kpi"><div class="kpi-v">${stats.completedTasks}<span class="u">次</span></div><div class="kpi-l">完成作业</div></div>
         <div class="kpi"><div class="kpi-v">${stats.totalQuestions}<span class="u">题</span></div><div class="kpi-l">AI 批改题量</div></div>
@@ -334,30 +392,30 @@ function buildDiagnosisHTML(reportData) {
 
       <div class="comment">
         <div class="comment-icon"><svg width="18" height="18" viewBox="0 0 24 24" fill="none"><path d="M4 5h16v11H8l-4 4V5z" stroke="#fff" stroke-width="2" stroke-linejoin="round"/></svg></div>
-        <div><div class="comment-t">老师寄语</div><div class="comment-d">${escapeHtml(teacherComment)}</div></div>
+        <div><div class="comment-t">学习寄语</div><div class="comment-d">${escapeHtml(teacherComment)}</div></div>
       </div>
     </div>
-    <div class="pf"><span>敏学教育 · 让学习更有温度</span><span>- 1 -</span></div>
+    <div class="pf"><span>${BRAND.nameCn} · ${BRAND.slogan}</span><span>- 02 -</span></div>
   </div>
 
   <!-- ═══ 学科诊断页 ═══ -->
   <div class="page">
     <div class="pad">
       <div class="ph">
-        <div class="ph-logo">${logoSvg}<div>敏学成长报告</div></div>
-        <div class="week-badge">${badgeLabel}</div>
+        ${logoSm}
+        <div class="ph-right"><div class="week-badge">${badgeLabel}</div><div class="ph-cap">每周学习报告</div></div>
       </div>
       <div class="sec-title"><span class="sec-num">02</span>学科诊断分析</div>
-      <div class="sub-label">薄弱知识点 TOP 5</div>
+      <div class="sec-sub">薄弱知识点 TOP 5</div>
 
       ${subjectCards}
 
       <div class="advice">
-        <div class="advice-t"><svg width="16" height="16" viewBox="0 0 24 24" fill="none"><path d="M9 18h6M10 21h4M12 3a6 6 0 00-4 10c.7.7 1 1.4 1 2h6c0-.6.3-1.3 1-2a6 6 0 00-4-10z" stroke="${T.accent}" stroke-width="2" stroke-linejoin="round"/></svg>老师建议</div>
-        <div class="advice-d">${escapeHtml(teacherAdvice)}</div>
+        <div class="advice-icon"><svg width="18" height="18" viewBox="0 0 24 24" fill="none"><path d="M9 18h6M10 21h4M12 3a6 6 0 00-4 10c.7.7 1 1.4 1 2h6c0-.6.3-1.3 1-2a6 6 0 00-4-10z" stroke="#fff" stroke-width="2" stroke-linejoin="round"/></svg></div>
+        <div><div class="advice-t">学习建议</div><div class="advice-d">${escapeHtml(teacherAdvice)}</div></div>
       </div>
     </div>
-    <div class="pf"><span>敏学教育 · 让学习更有温度</span><span>- 2 -</span></div>
+    <div class="pf"><span>${BRAND.nameCn} · ${BRAND.slogan}</span><span>- 03 -</span></div>
   </div>
 
 </body></html>`
