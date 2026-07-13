@@ -2318,7 +2318,14 @@ export default function App() {
                           {/* Content */}
                           <div className="flex-1 min-w-0">
                             <div className="flex items-center gap-1.5 min-w-0">
-                              {/* 顶部已有「日常作业/错题重练」筛选，列表内不再重复标注任务类型 */}
+                              {/* 轻量类型区分：错题重练显示紫色小圆点，日常作业(默认多数项)不显示；类型筛选仍由顶部负责 */}
+                              {task.task_type === 'retry_paper' && (
+                                <span
+                                  className="flex-shrink-0 w-1.5 h-1.5 rounded-full"
+                                  style={{ background: 'var(--purple)' }}
+                                  title="错题重练"
+                                />
+                              )}
                               <span className="text-card-title truncate">
                                 {task.original_name || '未命名试卷'}
                               </span>
