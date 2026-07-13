@@ -17,6 +17,7 @@ import { migrateGeometryCropType } from './migrations/017_add_geometry_crop_type
 import { migrateCleanGeometrySvg } from './migrations/018_add_clean_geometry_svg.js'
 import { migrateSourceType } from './migrations/019_add_source_type.js'
 import { migrateRetryTaskFields } from './migrations/020_add_retry_task_fields.js'
+import { migrateGeometryReconstructionAsync } from './migrations/021_add_geometry_reconstruction_async.js'
 
 const __dirname = dirname(fileURLToPath(import.meta.url))
 dotenv.config({ path: resolve(__dirname, '.env') })
@@ -31,7 +32,7 @@ import { createJudgement, batchUpdateQuestionTags, getQuestionAssets, getQuestio
 import { judgeAnswer } from './services/judgeService.js'
 import { checkQuestionCompleteness } from './utils/questionCompleteness.js'
 import { uploadImage, deleteFile } from './services/ossService.js'
-import { getTaskQueue, getQueueStats, taskWorker } from './queue.js'
+import { getTaskQueue, getGeometryQueue, getQueueStats, taskWorker } from './queue.js'
 import { processTask, generateTagsForQuestion } from './worker.js'
 import { AI_CONFIG, getAIHeaders, buildTaggingPrompt, resetModelIndex } from './config/ai.js'
 import weeklyReportRouter from './routes/weeklyReport.js'
@@ -2087,6 +2088,7 @@ if (process.argv[1] === __filename || process.argv[1]?.endsWith('server/index.js
       await migrateCleanGeometrySvg()
       await migrateSourceType()
       await migrateRetryTaskFields()
+      await migrateGeometryReconstructionAsync()
     } catch (err) {
       console.error('数据库迁移失败:', err.message)
     }

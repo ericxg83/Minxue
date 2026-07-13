@@ -5,6 +5,8 @@ let taskQueue = null
 let taskWorker = null
 let tikzQueue = null
 let tikzWorker = null
+let geometryQueue = null
+let geometryWorker = null
 let queueInitialized = false
 let initPromise = null
 let currentConnection = null
@@ -96,6 +98,43 @@ const initQueue = async () => {
         console.error('⚠️ [TikZ Worker] 错误:', err.message)
       })
 
+      // ── 几何图重建队列 ──
+      geometryQueue = new Queue('geometry-reconstruction', {
+        ...queueConfig,
+        defaultJobOptions: {
+          removeOnComplete: { count: 100 },
+          removeOnFail: { count: 50 },
+          attempts: 1, // 重试由 Worker 内部逻辑控制（5min/30min/2h），不走 BullMQ backoff
+          backoff: null
+        }
+      })
+
+      geometryWorker = new Worker('geometry-reconstruction', async (job) => {
+        console.log(`[几何Worker] 收到任务: assetId=${job.data?.assetId}, batch=${job.data?.batch}`)
+        const { processGeometryReconstruction } = await import('./geometryWorker.js')
+        return processGeometryReconstruction(job)
+      }, {
+        connection,
+        concurrency: 1, // 几何重建单并发（Vision API 限流友好）
+        drainDelay,
+        stalledInterval,
+        lockDuration: 600000 // 10 min
+      })
+
+      geometryWorker.on('completed', (job) => {
+        const result = job.returnvalue
+        if (result?.success) {
+          console.log(`✅ [几何Worker] 完成: ${result.questionId || result.assetId || ''}`)
+        }
+      })
+      geometryWorker.on('failed', (job, err) => {
+        console.error(`❌ [几何Worker] 失败: ${job?.data?.assetId || ''}, error=${err.message}`)
+      })
+      geometryWorker.on('error', (err) => {
+        if (err.message.includes('WRONGPASS') || err.message.includes('ECONNRESET') || err.message.includes('ETIMEDOUT')) return
+        console.error('⚠️ [几何Worker] 错误:', err.message)
+      })
+
       taskWorker.on('completed', (job, result) => {
         console.log(`✅ [Worker] 任务完成: jobId=${job.id}, taskId=${job.data.taskId}, result=${JSON.stringify(result)}`)
       })
@@ -141,7 +180,7 @@ const initQueue = async () => {
   return initPromise
 }
 
-export { taskQueue, taskWorker, tikzQueue, tikzWorker }
+export { taskQueue, taskWorker, tikzQueue, tikzWorker, geometryQueue, geometryWorker }
 
 export const TASK_EVENTS = {
   STARTED: 'started',
@@ -208,4 +247,18 @@ export const getTikzWorker = async () => {
     await initQueue()
   }
   return tikzWorker
+}
+
+export const getGeometryQueue = async () => {
+  if (!queueInitialized) {
+    await initQueue()
+  }
+  return geometryQueue
+}
+
+export const getGeometryWorker = async () => {
+  if (!queueInitialized) {
+    await initQueue()
+  }
+  return geometryWorker
 }

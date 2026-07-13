@@ -255,9 +255,18 @@
                         显示原图
                       </el-button>
                     </template>
-                    <el-button v-else-if="tikzStatus === 'pending'" size="small" disabled plain>
-                      TikZ生成中...
-                    </el-button>
+                    <el-tag v-else-if="tikzStatus === 'pending'" size="small" type="warning" effect="dark">
+                      几何图重建中...
+                    </el-tag>
+                    <el-tag v-else-if="tikzStatus === 'processing'" size="small" type="info" effect="dark">
+                      几何图重建中...
+                    </el-tag>
+                    <template v-else-if="tikzStatus === 'failed'">
+                      <el-tag size="small" type="danger" effect="dark">重建失败</el-tag>
+                      <el-button size="small" type="warning" plain :loading="retryGeometryLoading" @click.stop="handleRetryGeometry">
+                        重新生成
+                      </el-button>
+                    </template>
                   </div>
                 </div>
                 <div class="unified-section" v-if="getQuestionOptions(selectedDetailQuestion)?.length && getQuestion(selectedDetailQuestion).question_type === 'choice'">
@@ -411,7 +420,7 @@ import {
   DocumentChecked, RefreshLeft
 } from '@element-plus/icons-vue'
 import { useWrongBookStore } from '../stores/wrongBookStore'
-import { getStudents, updateQuestion, rejudgeQuestion } from '../../services/apiService'
+import { getStudents, updateQuestion, rejudgeQuestion, retryGeometry } from '../../services/apiService'
 import { getGeometryDisplayUrl, getTikzStatus } from '../../utils/geometryDisplay'
 import { tikzToSvg } from '../../utils/tikzGenerator'
 import dayjs from 'dayjs'
@@ -862,6 +871,32 @@ onMounted(async () => {
 onUnmounted(() => {
   // cleanup
 })
+
+const retryGeometryLoading = ref(false)
+
+const handleRetryGeometry = async () => {
+  const wq = selectedDetailQuestion.value
+  if (!wq?.id) return
+  const q = getQuestion(wq)
+  const questionId = q.id || wq.question_id || wq.id
+  if (!questionId) return
+  retryGeometryLoading.value = true
+  try {
+    const result = await retryGeometry(questionId)
+    if (result.success) {
+      if (q) q.tikz_status = 'pending'
+      wq.tikz_status = 'pending'
+      ElMessage.success('已重新提交几何图重建任务')
+    } else {
+      ElMessage.error(result.error || '重新提交失败')
+    }
+  } catch (err) {
+    console.error('几何图重试失败:', err)
+    ElMessage.error('重新提交失败，请稍后重试')
+  } finally {
+    retryGeometryLoading.value = false
+  }
+}
 </script>
 
 <style scoped>

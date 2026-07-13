@@ -153,9 +153,18 @@
             显示原图
           </el-button>
         </template>
-        <el-button v-else-if="tikzStatus === 'pending'" size="small" disabled plain>
-          TikZ生成中...
-        </el-button>
+        <el-tag v-else-if="tikzStatus === 'pending'" size="small" type="warning" effect="dark">
+          几何图重建中...
+        </el-tag>
+        <el-tag v-else-if="tikzStatus === 'processing'" size="small" type="info" effect="dark">
+          几何图重建中...
+        </el-tag>
+        <template v-else-if="tikzStatus === 'failed'">
+          <el-tag size="small" type="danger" effect="dark">重建失败</el-tag>
+          <el-button size="small" type="warning" plain :loading="retryGeometryLoading" @click="handleRetryGeometry">
+            重新生成
+          </el-button>
+        </template>
       </div>
     </div>
   </div>
@@ -261,7 +270,7 @@
 <script setup>
 import { ref, computed, watch, nextTick } from 'vue'
 import { useReviewStore } from '../../stores/reviewStore'
-import { updateQuestion, rejudgeQuestion, clearStudentCaches, uploadImage } from '../../../services/apiService'
+import { updateQuestion, rejudgeQuestion, retryGeometry, clearStudentCaches, uploadImage } from '../../../services/apiService'
 import { processExamImage } from '../../../utils/imageProcessor'
 import { getGeometryDisplayUrl, getTikzStatus } from '../../../utils/geometryDisplay'
 import { tikzToSvg } from '../../../utils/tikzGenerator'
@@ -749,6 +758,28 @@ const handleUseClean = async () => {
   } catch (err) {
     console.error('切换净化图失败:', err)
     ElMessage.error('切换失败，请重试')
+  }
+}
+
+const retryGeometryLoading = ref(false)
+
+const handleRetryGeometry = async () => {
+  const question = q.value
+  if (!question?.id) return
+  retryGeometryLoading.value = true
+  try {
+    const result = await retryGeometry(question.id)
+    if (result.success) {
+      question.tikz_status = 'pending'
+      ElMessage.success('已重新提交几何图重建任务')
+    } else {
+      ElMessage.error(result.error || '重新提交失败')
+    }
+  } catch (err) {
+    console.error('几何图重试失败:', err)
+    ElMessage.error('重新提交失败，请稍后重试')
+  } finally {
+    retryGeometryLoading.value = false
   }
 }
 </script>

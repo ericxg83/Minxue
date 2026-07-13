@@ -646,3 +646,93 @@ export const updateQuestionAssetCleanData = async (questionId, data) => {
     ]
   )
 }
+
+/**
+ * 更新几何重建状态（异步 worker 专用）
+ * @param {string} assetId - question_assets.id
+ * @param {Object} upd - { tikz_status, tikz_json, tikz_url, tikz_code, last_error, retry_count, processed_at }
+ */
+export const updateGeometryReconstructionStatus = async (assetId, upd) => {
+  const { tikz_status, tikz_json, tikz_url, tikz_code, last_error, retry_count, processed_at } = upd
+  await query(
+    `UPDATE ${TABLES.QUESTION_ASSETS}
+     SET tikz_status = COALESCE($1, tikz_status),
+         tikz_json = CASE WHEN $2::jsonb IS NOT NULL THEN $2::jsonb ELSE tikz_json END,
+         tikz_url = COALESCE($3, tikz_url),
+         tikz_code = COALESCE($4, tikz_code),
+         last_error = COALESCE($5, last_error),
+         retry_count = CASE WHEN $6::int IS NOT NULL THEN $6::int ELSE retry_count END,
+         processed_at = COALESCE($7, processed_at),
+         updated_at = NOW()
+     WHERE id = $8`,
+    [
+      tikz_status || null,
+      tikz_json != null ? JSON.stringify(tikz_json) : null,
+      tikz_url || null,
+      tikz_code || null,
+      last_error || null,
+      retry_count != null ? retry_count : null,
+      processed_at || null,
+      assetId
+    ]
+  )
+}
+
+/**
+ * 同步更新 questions 表的反范式字段（干净 SVG + 显示类型）
+ * @param {string} questionId
+ * @param {string} cleanSvg - 干净 SVG 源码
+ */
+export const updateQuestionDenormalizedSvg = async (questionId, cleanSvg) => {
+  await query(
+    `UPDATE ${TABLES.QUESTIONS}
+     SET clean_geometry_svg = $1,
+         display_image_type = COALESCE(display_image_type, 'clean'),
+         updated_at = NOW()
+     WHERE id = $2`,
+    [cleanSvg, questionId]
+  )
+}
+
+/**
+ * 获取待处理的几何重建资产（Worker 扫描用）
+ * @param {number} [limit=10] - 一次最多取多少条
+ * @returns {Array} 资产列表
+ */
+export const getPendingGeometryAssets = async (limit = 10) => {
+  const { rows } = await query(
+    `SELECT a.id, a.question_id, a.cropped_image_url,
+            a.retry_count, a.last_error, a.tikz_status,
+            q.geometry_image_url, q.image_type,
+            q.student_id
+     FROM ${TABLES.QUESTION_ASSETS} a
+     JOIN ${TABLES.QUESTIONS} q ON q.id = a.question_id
+     WHERE a.asset_type = 'geometry_image'
+       AND a.tikz_status = 'pending'
+     ORDER BY a.created_at ASC
+     LIMIT $1`,
+    [limit]
+  )
+  return rows
+}
+
+/**
+ * 获取失败的几何重建资产（人工重新触发用）
+ * @param {number} [limit=20]
+ * @returns {Array} 资产列表
+ */
+export const getFailedGeometryAssets = async (limit = 20) => {
+  const { rows } = await query(
+    `SELECT a.id, a.question_id, a.cropped_image_url,
+            a.retry_count, a.last_error, a.tikz_status,
+            q.geometry_image_url, q.image_type
+     FROM ${TABLES.QUESTION_ASSETS} a
+     JOIN ${TABLES.QUESTIONS} q ON q.id = a.question_id
+     WHERE a.asset_type = 'geometry_image'
+       AND a.tikz_status = 'failed'
+     ORDER BY a.updated_at DESC
+     LIMIT $1`,
+    [limit]
+  )
+  return rows
+}

@@ -359,6 +359,14 @@ export const rejudgeQuestion = async (questionId) => {
   })
 }
 
+export const retryGeometry = async (questionId) => {
+  return apiRequest(`/questions/${questionId}/retry-geometry`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({})
+  })
+}
+
 export const updateQuestionReviewStatus = async (questionId, reviewStatus) => {
   return apiRequest(`/questions/${questionId}`, {
     method: 'PUT',

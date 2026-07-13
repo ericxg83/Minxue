@@ -79,12 +79,28 @@ export function getGeometryDisplayUrl(question) {
 
 /**
  * 返回几何图重建状态：
- * - 'done'    — clean_geometry_svg 是 SVG 源码，或 tikz_svg_url 存在，或 clean_geometry_image_url 是代码
- * - 'pending' — clean_geometry_image_url 存在但不是代码（等待处理中），或有原始裁剪图但尚未重建
- * - 'none'    — 无几何图，不需要处理
+ * - 'done'       — clean_geometry_svg 是 SVG 源码，或 tikz_svg_url 存在，或 clean_geometry_image_url 是代码
+ * - 'pending'    — 等待异步重建（视觉模型尚未处理）
+ * - 'processing' — 异步重建进行中
+ * - 'failed'     — 异步重建失败，可重试
+ * - 'none'       — 无几何图，不需要处理
+ *
+ * 优先使用 API 返回的 tikz_status（异步重建管道），
+ * 兼容旧数据（无 tikz_status 字段时按原有逻辑推断）。
  */
 export function getTikzStatus(question) {
   if (!question) return 'none'
+
+  // 异步重建管道：tikz_status 由 API 返回（新流程）
+  if (question.tikz_status) {
+    if (question.tikz_status === 'completed') return 'done'
+    if (question.tikz_status === 'processing') return 'processing'
+    if (question.tikz_status === 'failed') return 'failed'
+    if (question.tikz_status === 'pending') return 'pending'
+    if (question.tikz_status === 'none') return 'none'
+  }
+
+  // 兼容旧数据：无 tikz_status 字段时按原有逻辑推断
   if (isSvgCode(question.clean_geometry_svg)) return 'done'
   if (question.tikz_svg_url) return 'done'
   if (isSvgCode(question.clean_geometry_image_url)) return 'done'
@@ -92,4 +108,32 @@ export function getTikzStatus(question) {
   if (question.clean_geometry_image_url) return 'pending'
   if (question.geometry_image_url) return 'pending'
   return 'none'
+}
+
+/**
+ * 返回前端显示的几何图状态文本。
+ */
+export function getTikzStatusText(status) {
+  const map = {
+    done: '几何图已生成',
+    pending: '几何图重建中...',
+    processing: '几何图重建中...',
+    failed: '重建失败',
+    none: ''
+  }
+  return map[status] || ''
+}
+
+/**
+ * 返回前端显示的几何图状态标签类型（Element Plus 标签类型）。
+ */
+export function getTikzStatusTagType(status) {
+  const map = {
+    done: 'success',
+    pending: 'warning',
+    processing: 'info',
+    failed: 'danger',
+    none: 'info'
+  }
+  return map[status] || 'info'
 }

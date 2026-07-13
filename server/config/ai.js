@@ -189,18 +189,19 @@ export async function callTextCompletion(opts) {
 }
 
 /**
- * 发起一次「视觉（多模态）」聊天补全请求，内置"主 API → 备用 API"回退。
+ * 发起一次「视觉（多模态）」聊天补全请求，按 Provider 列表依次尝试，任一成功即返回。
  *
- * 与 callTextCompletion 的差异：user 消息走多模态 content 数组（image_url + text）。
+ * Provider 顺序：
+ *   1. 主 API（ModelScope Qwen3-VL）
+ *   2. 备用 API（OpenRouter / Agnes）
+ *   3. 第三备用（OpenRouter 免费模型，如 qwen2.5-vl-7b）
+ *
+ * 只有在所有 Provider 均失败时才抛出错误，记录失败日志。
+ * 几何图重建 Worker 使用此函数，保证即使主 API 配额耗尽也能继续。
  *
  * @param {{imageDataURL:string, systemPrompt:string, userText:string, temperature?:number, maxTokens?:number, model?:string}} opts
  * @returns {Promise<{content:string, usedBackup:boolean}>}
- * @throws 主、备均失败时抛出最后一个错误（含 axios error，供调用方读取 error.response.status）
- *
- * 设计要点：
- * - 仅在「配额/限流(429)」或「主 Key 缺失」时才回退备用；
- * - 其它错误（如 400 "no provider supported" 模型下线）直接抛出，
- *   由 worker 侧的 VL 模型轮换逻辑处理，保持本函数职责单一。
+ * @throws 所有 Provider 均失败时抛出最后一个错误
  */
 export async function callVisionCompletion(opts) {
   const {
@@ -223,64 +224,121 @@ export async function callVisionCompletion(opts) {
     }
   ])
 
-  // 1. 主 API（ModelScope）
-  const primaryBody = {
-    model: model || getCurrentVLModel(),
-    messages: buildMessages(),
-    temperature,
-    max_tokens: maxTokens
-  }
-  try {
-    const resp = await axios.post(AI_CONFIG.ENDPOINT, primaryBody, {
-      headers: getAIHeaders(),
-      timeout: AI_CONFIG.TIMEOUT
+  // ── Provider 定义列表 ──
+  // 按顺序尝试，任一成功即返回。
+  const providers = [
+    {
+      name: '主 API (ModelScope)',
+      endpoint: AI_CONFIG.ENDPOINT,
+      model: () => model || getCurrentVLModel(),
+      headers: () => getAIHeaders(),
+      buildBody: (m) => ({
+        model: m,
+        messages: buildMessages(),
+        temperature,
+        max_tokens: maxTokens
+      }),
+      // 仅当 429 或 Key 缺失才跳过此 Provider
+      shouldSkipOnError: (err) => {
+        const status = err.response?.status
+        return status === 429 || !AI_CONFIG.API_KEY
+      }
+    }
+  ]
+
+  // 备用 API 1（OpenRouter / Agnes）
+  if (BACKUP_CONFIG.ENABLED) {
+    providers.push({
+      name: '备用 API (OpenRouter)',
+      endpoint: BACKUP_CONFIG.ENDPOINT,
+      model: () => model || BACKUP_CONFIG.VL_MODEL,
+      headers: () => ({
+        'Content-Type': 'application/json',
+        'Authorization': `Bearer ${BACKUP_CONFIG.API_KEY}`,
+        'HTTP-Referer': 'https://minxue.edu',
+        'X-Title': 'Minxue'
+      }),
+      buildBody: (m) => {
+        const body = {
+          model: m,
+          messages: buildMessages(),
+          temperature,
+          max_tokens: maxTokens
+        }
+        if (BACKUP_CONFIG.DISABLE_REASONING) {
+          body.reasoning = { enabled: false }
+        }
+        return body
+      },
+      // 备用 API 所有错误都跳过（尝试下一个备用）
+      shouldSkipOnError: () => true
     })
-    const content = resp.data?.choices?.[0]?.message?.content
-    if (!content) throw new Error('AI 返回内容为空')
-    return { content, usedBackup: false }
-  } catch (primaryErr) {
-    const status = primaryErr.response?.status
-    const isQuota = status === 429
-    const primaryKeyMissing = !AI_CONFIG.API_KEY
+  }
 
-    // 仅配额/限流或 Key 缺失才回退备用；其它错误（如 400 模型下线）交给上层轮换。
-    if (!isQuota && !primaryKeyMissing) {
-      throw primaryErr
-    }
-    if (!BACKUP_CONFIG.ENABLED) {
-      console.warn(`⚠️ [AI-Vision] 主 API 配额耗尽但未配置备用 API，放弃回退`)
-      throw primaryErr
-    }
+  // 备用 API 2（第三备用 — 不同免费模型，仅在 OpenRouter 启用时可用）
+  if (BACKUP_CONFIG.ENABLED && process.env.BACKUP_VL_MODEL_3) {
+    providers.push({
+      name: '第三备用 API',
+      endpoint: BACKUP_CONFIG.ENDPOINT,
+      model: () => model || process.env.BACKUP_VL_MODEL_3,
+      headers: () => ({
+        'Content-Type': 'application/json',
+        'Authorization': `Bearer ${BACKUP_CONFIG.API_KEY}`,
+        'HTTP-Referer': 'https://minxue.edu',
+        'X-Title': 'Minxue'
+      }),
+      buildBody: (m) => {
+        const body = {
+          model: m,
+          messages: buildMessages(),
+          temperature,
+          max_tokens: maxTokens
+        }
+        if (BACKUP_CONFIG.DISABLE_REASONING) {
+          body.reasoning = { enabled: false }
+        }
+        return body
+      },
+      shouldSkipOnError: () => true
+    })
+  }
 
-    console.warn(`⚠️ [AI-Vision] 主 API${isQuota ? '（429 配额耗尽）' : '（Key 缺失）'}，回退备用视觉 API...`)
-
-    // 2. 备用 API
-    const backupBody = {
-      model: model || BACKUP_CONFIG.VL_MODEL,
-      messages: buildMessages(),
-      temperature,
-      max_tokens: maxTokens,
-      ...(BACKUP_CONFIG.DISABLE_REASONING ? { reasoning: { enabled: false } } : {})
-    }
+  // ── 依次尝试每个 Provider ──
+  let lastError = null
+  for (let i = 0; i < providers.length; i++) {
+    const p = providers[i]
+    const currentModel = p.model()
+    const body = p.buildBody(currentModel)
     try {
-      const resp = await _backupAxios.post(BACKUP_CONFIG.ENDPOINT, backupBody, {
-        headers: {
-          'Content-Type': 'application/json',
-          'Authorization': `Bearer ${BACKUP_CONFIG.API_KEY}`,
-          'HTTP-Referer': 'https://minxue.edu',
-          'X-Title': 'Minxue'
-        },
+      const resp = await _backupAxios.post(p.endpoint, body, {
+        headers: p.headers(),
         timeout: AI_CONFIG.TIMEOUT
       })
       const content = resp.data?.choices?.[0]?.message?.content
-      if (!content) throw new Error('备用 AI 返回内容为空')
-      console.log(`✅ [AI-Vision] 备用 API 调用成功（${model || BACKUP_CONFIG.VL_MODEL}）`)
-      return { content, usedBackup: true }
-    } catch (backupErr) {
-      console.error(`❌ [AI-Vision] 备用视觉 API 也失败：${backupErr.message}`)
-      throw backupErr
+      if (!content) throw new Error('AI 返回内容为空')
+      const label = i === 0 ? '主' : `备用 (${i})`
+      console.log(`✅ [AI-Vision] ${label} API 调用成功（${currentModel}）`)
+      return { content, usedBackup: i > 0 }
+    } catch (err) {
+      lastError = err
+      const status = err.response?.status
+      const skip = p.shouldSkipOnError(err)
+      const reason = status === 429 ? '429 配额耗尽'
+        : status === 503 ? '503 服务不可用'
+        : status === 400 ? '400 模型不可用'
+        : status ? `HTTP ${status}`
+        : err.code || err.message
+      console.warn(`⚠️ [AI-Vision] ${p.name}（${currentModel}）失败: ${reason}${skip ? '，尝试下一个...' : '（不可跳过）'}`)
+      if (!skip) {
+        // 不可跳过的错误（如 400 模型下线）→ 直接抛出，让调用方处理模型轮换
+        throw err
+      }
     }
   }
+
+  // 所有 Provider 均失败
+  console.error(`❌ [AI-Vision] 所有 Provider 均失败，共 ${providers.length} 个`)
+  throw lastError || new Error('所有 Vision API Provider 均不可用')
 }
 
 export const buildOCRPrompt = () => `你是一个专业的教育题目识别助手。请仔细分析上传的作业图片，识别其中的题目内容、几何配图和位置。

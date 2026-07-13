@@ -10,10 +10,8 @@ import axios from 'axios'
 import sharp from 'sharp'
 import { TABLES, TASK_STATUS } from './config/neon.js'
 import { query } from './config/neon.js'
-import { AI_CONFIG, getAIHeaders, buildOCRPrompt, buildTaggingPrompt, buildAnswerGenerationPrompt, buildGeometryReconstructionPrompt, getCurrentTextModel, getCurrentVLModel, rotateTextModel, rotateVLModel, TEXT_MODELS, VL_MODELS, callTextCompletion, callVisionCompletion } from './config/ai.js'
-import { parseGeometryStructure, renderGeometrySvg, isEmptyStructure } from './utils/geometrySvg.js'
-import { validateGeometryLabels } from './utils/geometryLabelValidator.js'
-import { updateTaskStatus, createQuestions, batchUpdateQuestionTags, addWrongQuestions, createJudgement, getLatestJudgement, updateQuestionAnswer, markAnswerException, findCachedQuestionByFingerprint, findSimilarQuestion, cacheQuestion, incrementQuestionUseCount, updateQuestionCacheId, createQuestionAsset, updateQuestionAssetCleanData } from './services/neonService.js'
+import { AI_CONFIG, getAIHeaders, buildOCRPrompt, buildTaggingPrompt, buildAnswerGenerationPrompt, getCurrentTextModel, getCurrentVLModel, rotateTextModel, rotateVLModel, TEXT_MODELS, VL_MODELS, callTextCompletion, callVisionCompletion } from './config/ai.js'
+import { updateTaskStatus, createQuestions, batchUpdateQuestionTags, addWrongQuestions, createJudgement, getLatestJudgement, updateQuestionAnswer, markAnswerException, findCachedQuestionByFingerprint, findSimilarQuestion, cacheQuestion, incrementQuestionUseCount, updateQuestionCacheId, createQuestionAsset } from './services/neonService.js'
 import { uploadImage } from './services/ossService.js'
 import { generateTextFingerprint, generatePHash, PARSER_VERSION, TEXT_SIMILARITY_THRESHOLD } from './utils/questionFingerprint.js'
 import { uploadFilesWithRetry } from './services/uploadRetryManager.js'
@@ -33,166 +31,55 @@ async function cropAndUploadGeometryImage(imageBuffer, bbox, studentId, question
   try {
     if (!bbox || bbox.width <= 0 || bbox.height <= 0) return null
 
-    const padding = 25
-    const left = Math.max(0, bbox.x - padding)
-    const top = Math.max(0, bbox.y - padding)
-    const right = Math.min(bbox.x + bbox.width + padding, await getImageWidth(imageBuffer))
-    const bottom = Math.min(bbox.y + bbox.height + padding, await getImageHeight(imageBuffer))
-    const width = right - left
-    const height = bottom - top
+    // ── 1. padding 20% ──
+    // 原始固定 padding=25px 在小图（~200px）上不够 → AI 识别困难。
+    // 改为按 bbox 尺寸动态计算 20% padding，保证小图有足够上下文。
+    const imgW = await getImageWidth(imageBuffer)
+    const imgH = await getImageHeight(imageBuffer)
+    const padX = Math.round(bbox.width * 0.20)
+    const padY = Math.round(bbox.height * 0.20)
+
+    const left = Math.max(0, bbox.x - padX)
+    const top = Math.max(0, bbox.y - padY)
+    const right = Math.min(bbox.x + bbox.width + padX, imgW)
+    const bottom = Math.min(bbox.y + bbox.height + padY, imgH)
+    let width = right - left
+    let height = bottom - top
 
     if (width <= 0 || height <= 0) return null
 
-    // 裁剪
-    const cropped = await sharp(imageBuffer)
-      .extract({ left, top, width, height })
-      .toBuffer()
+    // ── 2. 输出图片最小尺寸 800px ──
+    // 原始 212x223 对 Vision 模型太小 → 按比例放大至短边 >= 800px
+    const MIN_SIZE = 800
+    let resizeOpts = null
+    if (width < MIN_SIZE || height < MIN_SIZE) {
+      const scale = Math.max(MIN_SIZE / width, MIN_SIZE / height)
+      const newW = Math.round(width * scale)
+      const newH = Math.round(height * scale)
+      // 避免放大超大图（上限 2400px）
+      if (newW <= 2400 && newH <= 2400) {
+        resizeOpts = { width: newW, height: newH }
+      }
+    }
+
+    // ── 3. 裁剪 + 可选放大 ──
+    let pipeline = sharp(imageBuffer).extract({ left, top, width, height })
+    if (resizeOpts) {
+      pipeline = pipeline.resize(resizeOpts.width, resizeOpts.height, { fit: 'fill' })
+    }
+    const cropped = await pipeline.png().toBuffer()
+
+    const outW = resizeOpts ? resizeOpts.width : width
+    const outH = resizeOpts ? resizeOpts.height : height
 
     // 上传到 OSS
     const fileName = `geometry_${studentId}_${questionId}.png`
     const ossUrl = await uploadImage(cropped, fileName, studentId)
-    console.log(`   [几何图] 裁剪上传成功: ${width}x${height} → ${ossUrl}`)
+    console.log(`   [几何图] 裁剪上传成功: ${width}x${height} → ${outW}x${outH} → ${ossUrl}`)
     return ossUrl
   } catch (error) {
     console.error(`  ⚠️ [几何图] 裁剪上传失败:`, error.message)
     return null
-  }
-}
-
-/**
- * 从 URL 下载图片为 Buffer
- * @param {string} url
- * @returns {Promise<Buffer|null>}
- */
-async function downloadImageBuffer(url) {
-  try {
-    const resp = await axios.get(url, { responseType: 'arraybuffer', timeout: 30000 })
-    return Buffer.from(resp.data)
-  } catch (error) {
-    console.error(`   ⚠️ [下载] 图片下载失败: ${error.message}`)
-    return null
-  }
-}
-
-/**
- * 几何重建：从原始裁剪图识别结构化几何数据，服务端渲染成干净 SVG。
- *
- * 不做任何图像清理（灰度化/二值化/滤镜）。视觉模型只负责"读懂"几何结构，
- * 输出点/线/圆/标注的结构化 JSON；服务端确定性地把 JSON 渲染成白底黑线 SVG，
- * 天然去除中文/题号/笔迹/水印/草稿。
- *
- * @param {Buffer} imageBuffer - 原始裁剪几何图 buffer
- * @param {string} questionId - 题目 ID（用于日志）
- * @returns {Promise<{svg: string, structure: object}|null>}
- */
-async function reconstructGeometrySvg(imageBuffer, questionId) {
-  const shortId = questionId.substring(0, 8)
-  try {
-    const base64 = imageBuffer.toString('base64')
-    const dataURL = `data:image/png;base64,${base64}`
-
-    const result = await callVisionCompletion({
-      imageDataURL: dataURL,
-      systemPrompt: buildGeometryReconstructionPrompt(),
-      userText: '请识别这张几何图中的纯几何结构（点/线/圆/标注），只输出结构化 JSON。',
-      temperature: 0.1,
-      maxTokens: 2048
-    })
-
-    const structure = parseGeometryStructure(result.content)
-    if (!structure) {
-      console.warn(`   ⚠️ [几何重建] ${shortId}: 未能解析出几何结构 JSON`)
-      return null
-    }
-    if (isEmptyStructure(structure)) {
-      console.warn(`   ⚠️ [几何重建] ${shortId}: 未识别到有效几何结构（空）`)
-      return null
-    }
-    // 服务端二次整理：把模型 labels 按空间规则拆成 geometry_labels / ignored_labels
-    const validated = validateGeometryLabels(structure)
-    const nGeo = validated.geometry_labels.length
-    const nIgn = validated.ignored_labels.length
-    console.log(`   [几何重建] ${shortId}: 标注二次整理 ${nGeo} 几何 / ${nIgn} 忽略`)
-
-    const svg = renderGeometrySvg(validated)
-    if (!svg) {
-      console.warn(`   ⚠️ [几何重建] ${shortId}: 结构渲染 SVG 失败`)
-      return null
-    }
-    return { svg, structure }
-  } catch (error) {
-    console.error(`   ⚠️ [几何重建] ${shortId} 失败:`, error.message)
-    return null
-  }
-}
-
-/**
- * 处理单个几何图的重建流水线：下载 → 视觉模型识别几何结构 → 服务端渲染干净 SVG → 入库
- *
- * 几何重建（第三阶段），替代图片清理方案：
- *   下载原始裁剪图 → 视觉模型输出结构化 JSON → renderGeometrySvg() 确定性渲染 SVG →
- *   存入 clean_geometry_svg 字段（白底黑线，仅含几何元素）。
- *   clean_geometry_svg 作为后续 TikZ 生成的输入。
- *
- * @param {Object} q - 题目对象（含 geometry_image_url、id）
- * @param {string} studentId - 学生 ID
- */
-async function processGeometryCleaning(q, studentId) {
-  if (!q.geometry_image_url) return
-
-  const shortId = q.id.substring(0, 8)
-  console.log(`   [几何重建] ${shortId}: 开始识别几何结构...`)
-
-  // 1. 下载裁剪好的几何图
-  const rawBuffer = await downloadImageBuffer(q.geometry_image_url)
-  if (!rawBuffer) {
-    console.warn(`   ⚠️ [几何重建] ${shortId}: 下载失败，跳过`)
-    return
-  }
-
-  // 2. 视觉模型识别几何结构 → 服务端渲染干净 SVG
-  let svg = null
-  try {
-    const result = await reconstructGeometrySvg(rawBuffer, q.id)
-    if (!result) {
-      console.warn(`   ⚠️ [几何重建] ${shortId}: 重建失败，跳过`)
-      return
-    }
-    svg = result.svg
-    const st = result.structure
-    console.log(
-      `   [几何重建] ${shortId}: 识别到 ${st.points.length} 点 / ${st.segments.length} 线 / ${st.circles.length} 圆，SVG ${svg.length} 字符`
-    )
-  } catch (error) {
-    console.error(`   ⚠️ [几何重建] ${shortId}: 重建异常:`, error.message)
-    return
-  }
-
-  // 3. 存入 question_assets 表（clean_geometry_svg 存干净 SVG 源码，geometry_structure_json 存结构化数据）
-  try {
-    await updateQuestionAssetCleanData(q.id, {
-      clean_geometry_svg: svg,
-      geometry_crop_type: 'clean_geometry',
-      geometry_structure_json: st
-    })
-    console.log(`   [几何重建] ${shortId}: 数据入库成功`)
-  } catch (error) {
-    console.error(`   ⚠️ [几何重建] ${shortId}: 入库失败:`, error.message)
-  }
-
-  // 4. 反范式写入 questions 表
-  try {
-    await query(
-      `UPDATE ${TABLES.QUESTIONS}
-       SET clean_geometry_svg = $1,
-           display_image_type = COALESCE(display_image_type, 'clean'),
-           updated_at = NOW()
-       WHERE id = $2`,
-      [svg, q.id]
-    )
-    console.log(`   [几何重建] ${shortId}: questions 表更新成功`)
-  } catch (error) {
-    console.warn(`   ⚠️ [几何重建] ${shortId}: questions 表写入失败:`, error.message)
   }
 }
 
@@ -1664,25 +1551,11 @@ export const processTask = async (job) => {
         console.log(`   ✅ [question_assets] 已保存 ${assetCount} 条资源记录（其中 geometry 类型标记为 tikz_status=pending）`)
       }
 
-      // ── 几何图净化层：截图 → 干净几何图 → 几何结构JSON ──
-      // 对每道有几何配图的题目，执行：
-      //   1. 下载裁剪后的几何图
-      //   2. Sharp 净化（灰度 + 二值化 → 白底黑线）
-      //   3. 上传净化图到 OSS
-      //   4. VL 模型分析几何结构（点、线、标签等）
-      //   5. 存入 question_assets 表
-      // 设计为"尽力而为"：任一环节失败不阻塞主流程，仅记录日志。
-      const geometryCleaningPromises = questions
-        .filter(q => q.geometry_image_url && q.image_type !== 'chart')
-        .map(q => processGeometryCleaning(q, studentId).catch(err => {
-          console.error(`   ⚠️ [几何净化] ${q.id.substring(0, 8)} 处理异常:`, err.message)
-        }))
-
-      if (geometryCleaningPromises.length > 0) {
-        console.log(`📊 [几何图净化层] 开始处理 ${geometryCleaningPromises.length} 张几何图...`)
-        await Promise.allSettled(geometryCleaningPromises)
-        console.log(`✅ [几何图净化层] 完成`)
-      }
+      // ── 几何图重建 → 已改为后台异步任务 ──
+      // 不再在此处同步调用 processGeometryCleaning()。
+      // 由 geometryWorker 扫描 pending 状态的 geometry 资产，
+      // 异步调用 Vision API 完成结构识别 + SVG 渲染。
+      // 详见 geometryWorker.js 和 pendingTaskRecovery.js。
 
       // [P0-1] 初始错题同步 — 仅当 OCR 有参考答案且判错时才同步
       const ocrWrongIds = questionsWithStudentId.filter(q => q.is_correct === false && q.answer).map(q => q.id)

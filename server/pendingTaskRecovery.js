@@ -1,7 +1,15 @@
-import { getTaskQueue } from './queue.js'
+import { getTaskQueue, getGeometryQueue } from './queue.js'
 import { query, TABLES } from './config/neon.js'
 
 const PENDING_TIMEOUT_MS = 10 * 60 * 1000 // 10 minutes
+
+// 几何重建重试延迟（与服务端 handleRetry 保持一致）
+const GEOMETRY_RETRY_DELAYS = [
+  5 * 60 * 1000,   // 第 1 次失败 → 5 分钟
+  30 * 60 * 1000,  // 第 2 次失败 → 30 分钟
+  2 * 60 * 60 * 1000 // 第 3 次失败 → 2 小时
+]
+const GEOMETRY_MAX_RETRIES = GEOMETRY_RETRY_DELAYS.length
 
 class PendingTaskRecovery {
   constructor() {
@@ -37,6 +45,20 @@ class PendingTaskRecovery {
   async scanAndRecover() {
     this.isRunning = true
 
+    try {
+      await this.scanPendingTasks()
+      await this.scanGeometryAssets()
+    } catch (err) {
+      console.error('[PendingTaskRecovery] ❌ 扫描失败:', err)
+    } finally {
+      this.isRunning = false
+    }
+  }
+
+  /**
+   * 扫描超时的 pending 主任务并重新入队
+   */
+  async scanPendingTasks() {
     try {
       console.log('[PendingTaskRecovery]  开始扫描超时 pending 任务...')
 
@@ -102,11 +124,97 @@ class PendingTaskRecovery {
       }
 
       console.log(`[PendingTaskRecovery] ✅ 恢复完成: ${recoveredCount}/${rows.length} 个任务`)
-
     } catch (err) {
-      console.error('[PendingTaskRecovery] ❌ 扫描失败:', err)
-    } finally {
-      this.isRunning = false
+      console.error('[PendingTaskRecovery] ❌ pending 任务扫描失败:', err)
+    }
+  }
+
+  /**
+   * 扫描 geometry 重建资产：
+   *   1. failed 状态且 retry_count < MAX_RETRIES → 按时间表重新入队
+   *   2. pending 状态超过 30 分钟 → 重新入队（防止 Worker 漏掉）
+   */
+  async scanGeometryAssets() {
+    try {
+      const geometryQueue = await getGeometryQueue()
+      if (!geometryQueue) {
+        console.log('[PendingTaskRecovery] ⏭️  geometry 队列不可用，跳过')
+        return
+      }
+
+      // ── 1. 扫描需要重试的 failed 资产 ──
+      const { rows: failedRows } = await query(
+        `SELECT a.id, a.question_id, a.retry_count, a.updated_at, a.last_error
+         FROM ${TABLES.QUESTION_ASSETS} a
+         WHERE a.asset_type = 'geometry_image'
+           AND a.tikz_status = 'failed'
+           AND a.retry_count < $1
+           AND a.retry_count > 0
+         ORDER BY a.updated_at ASC`,
+        [GEOMETRY_MAX_RETRIES]
+      )
+
+      if (failedRows.length > 0) {
+        const now = Date.now()
+        let retryCount = 0
+        for (const asset of failedRows) {
+          const retries = asset.retry_count || 0
+          const delay = GEOMETRY_RETRY_DELAYS[Math.min(retries - 1, GEOMETRY_RETRY_DELAYS.length - 1)]
+          const elapsed = now - new Date(asset.updated_at).getTime()
+          if (elapsed >= delay) {
+            // 重试时间已到 → 重新入队
+            try {
+              await geometryQueue.add('reconstruct', {
+                assetId: asset.id,
+                retryCount: retries + 1
+              }, {
+                attempts: 1
+              })
+              // 重置为 pending 状态
+              await query(
+                `UPDATE ${TABLES.QUESTION_ASSETS}
+                 SET tikz_status = 'pending', updated_at = NOW()
+                 WHERE id = $1`,
+                [asset.id]
+              )
+              console.log(`[PendingTaskRecovery] ✅ 几何资产重试: ${asset.question_id?.substring(0, 8)} (第 ${retries + 1} 次重试)`)
+              retryCount++
+            } catch (err) {
+              console.error(`[PendingTaskRecovery]  几何重试失败 ${asset.id?.substring(0, 8)}:`, err.message)
+            }
+          }
+        }
+        if (retryCount > 0) {
+          console.log(`[PendingTaskRecovery] ✅ 几何资产重试: ${retryCount}/${failedRows.length} 个`)
+        }
+      }
+
+      // ── 2. 扫描超时的 pending 资产（30 分钟以上未处理） ──
+      const { rows: stalePending } = await query(
+        `SELECT a.id, a.question_id, a.created_at
+         FROM ${TABLES.QUESTION_ASSETS} a
+         WHERE a.asset_type = 'geometry_image'
+           AND a.tikz_status = 'pending'
+           AND a.created_at < NOW() - INTERVAL '30 minutes'
+         ORDER BY a.created_at ASC
+         LIMIT 20`
+      )
+
+      if (stalePending.length > 0) {
+        console.log(`[PendingTaskRecovery] 📋 发现 ${stalePending.length} 个超时未处理的几何资产`)
+        for (const asset of stalePending) {
+          try {
+            await geometryQueue.add('reconstruct', {
+              assetId: asset.id
+            }, { attempts: 1 })
+            console.log(`[PendingTaskRecovery] ✅ 重新入队: ${asset.question_id?.substring(0, 8)}`)
+          } catch (err) {
+            console.error(`[PendingTaskRecovery]  入队失败 ${asset.id?.substring(0, 8)}:`, err.message)
+          }
+        }
+      }
+    } catch (err) {
+      console.error('[PendingTaskRecovery] ❌ 几何资产扫描失败:', err)
     }
   }
 }
