@@ -646,9 +646,10 @@ export default function App() {
 
     Toast.show({ message: `检测到错题重练卷，正在上传 ${files.length} 页...`, type: 'loading', duration: 0 })
 
+    let tempTask
     try {
       // Create a single task for the entire paper
-      const tempTask = {
+      tempTask = {
         id: `temp-retry-${Date.now()}`,
         student_id: currentStudent.id,
         original_name: `错题重练_${qrContent}_${dayjs().format('YYYY-MM-DD_HH-mm-ss')}`,
@@ -700,10 +701,10 @@ export default function App() {
       Toast.show({ message: `错题重练卷上传成功！`, type: 'success', duration: 2000 })
     } catch (error) {
       console.error('💥 [uploadRetryPaperGroup] Error:', error)
-      updateTaskInStore(tempTask.id, 'failed', { error: error.message || '上传失败' })
+      if (tempTask) updateTaskInStore(tempTask.id, 'failed', { error: error.message || '上传失败' })
       Toast.show({ message: '错题重练卷上传失败', type: 'error', duration: 3000 })
     } finally {
-      setUploadingTasks(prev => prev.filter(id => id !== tempTask.id))
+      if (tempTask) setUploadingTasks(prev => prev.filter(id => id !== tempTask.id))
     }
   }
 
