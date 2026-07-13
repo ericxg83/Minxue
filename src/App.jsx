@@ -873,11 +873,12 @@ export default function App() {
   }
 
   // Filter tasks
+  const isRetryTask = (t) => t.task_type === 'retry_paper' || t.task_type === 'wrong_retry'
   const filteredTasks = (Array.isArray(tasks) ? tasks : []).filter(t => {
     if (t.student_id !== currentStudent?.id) return false
     if (processingFilter === 'all') return true
-    if (processingFilter === 'done') return isTaskCompleted(t)
-    if (processingFilter === 'pending') return !isTaskCompleted(t)
+    if (processingFilter === 'homework') return !isRetryTask(t)
+    if (processingFilter === 'retry') return isRetryTask(t)
     return t.status === processingFilter
   })
 
@@ -2194,11 +2195,14 @@ export default function App() {
                 {/* Filter Tabs */}
                 <section className="px-4 pt-2.5 mb-1.5 overflow-x-auto no-scrollbar">
                   <div className="flex gap-1.5 min-w-max">
-                    {[
-                      { id: 'all', label: '全部', count: filteredTasks.length },
-                      { id: 'done', label: '已批改', count: filteredTasks.filter(t => isTaskCompleted(t)).length },
-                      { id: 'pending', label: '未批改', count: filteredTasks.filter(t => !isTaskCompleted(t)).length }
-                    ].map((filter) => (
+                    {(() => {
+                      const studentTasks = (Array.isArray(tasks) ? tasks : []).filter(t => t.student_id === currentStudent?.id)
+                      return [
+                        { id: 'all', label: '全部', count: studentTasks.length },
+                        { id: 'homework', label: '日常作业', count: studentTasks.filter(t => !isRetryTask(t)).length },
+                        { id: 'retry', label: '错题重练', count: studentTasks.filter(t => isRetryTask(t)).length }
+                      ]
+                    })().map((filter) => (
                       <button
                         key={filter.id}
                         onClick={() => setProcessingFilter(filter.id)}
