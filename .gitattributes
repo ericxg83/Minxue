@@ -1,0 +1,14 @@
+# Normalize all text files to LF on commit/checkout.
+# Prevents CRLF line endings from breaking JS template literals
+# (arrow chars like ↑ inside backtick strings trigger SyntaxError on Node).
+* text=auto eol=lf
+
+*.js text eol=lf
+*.mjs text eol=lf
+*.jsx text eol=lf
+*.vue text eol=lf
+*.json text eol=lf
+*.css text eol=lf
+*.html text eol=lf
+*.yml text eol=lf
+*.yaml text eol=lf
