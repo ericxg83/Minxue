@@ -2150,7 +2150,15 @@ export default function App() {
             </div>
             <div className="flex items-center gap-1.5">
               <button
-                onClick={() => setShowLearningReport(true)}
+                onClick={() => {
+                  // 移动端：显示移动端报告
+                  if (isMobile) {
+                    setShowMobileReport(true);
+                  } else {
+                    // PC端：跳转到报告模块
+                    window.location.href = '/report';
+                  }
+                }}
                 className="w-8 h-8 rounded-xl flex items-center justify-center transition-colors"
                 style={{ background: 'var(--bg-secondary)' }}
                 title="学习报告"
@@ -2170,7 +2178,7 @@ export default function App() {
         </header>
 
         {/* Main Content */}
-        <main className="max-w-lg mx-auto overflow-scroll-area" style={{ paddingBottom: '12px' }}>
+        <main className="w-full overflow-scroll-area" style={{ paddingBottom: '12px' }}>
           {/* 上传队列提示 — Claude style */}
           {uploadQueue.length > 0 && (
             <div className="sticky top-11 z-40 px-4 py-2.5 animate-fade-in" style={{ background: 'var(--warning-soft)', borderBottom: '1px solid rgba(232,168,56,0.2)' }}>
