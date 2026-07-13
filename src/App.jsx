@@ -23,7 +23,8 @@ import {
   Tag,
   AlertCircle,
   Download,
-  BarChart3
+  BarChart3,
+  SlidersHorizontal
 } from 'lucide-react'
 import { motion, AnimatePresence } from 'motion/react'
 import { QRCodeSVG } from 'qrcode.react'
@@ -2150,15 +2151,7 @@ export default function App() {
             </div>
             <div className="flex items-center gap-1.5">
               <button
-                onClick={() => {
-                  // 移动端：显示移动端报告
-                  if (isMobile) {
-                    setShowMobileReport(true);
-                  } else {
-                    // PC端：跳转到报告模块
-                    window.location.href = '/report';
-                  }
-                }}
+                onClick={() => setShowLearningReport(true)}
                 className="w-8 h-8 rounded-xl flex items-center justify-center transition-colors"
                 style={{ background: 'var(--bg-secondary)' }}
                 title="学习报告"
@@ -2454,63 +2447,56 @@ export default function App() {
                 exit={{ opacity: 0, x: -20 }}
                 className="w-full"
               >
-                {/* Filter Tabs */}
-                <section className="px-4 pt-3 mb-2 overflow-x-auto no-scrollbar">
-                  <div className="flex gap-1.5 min-w-max">
-                    {[
-                      { id: 'all', label: '全部', count: (Array.isArray(wrongQuestions) ? wrongQuestions : []).filter(wq => wq.student_id === currentStudent?.id).length },
-                      { id: 'new', label: '不懂', count: (Array.isArray(wrongQuestions) ? wrongQuestions : []).filter(wq => wq.student_id === currentStudent?.id && (wq.lifecycle_status || 'new') === 'new').length },
-                      { id: 'review', label: '略懂', count: (Array.isArray(wrongQuestions) ? wrongQuestions : []).filter(wq => wq.student_id === currentStudent?.id && (wq.lifecycle_status === 'review_1' || wq.lifecycle_status === 'review_2')).length },
-                      { id: 'mastered', label: '完全懂', count: (Array.isArray(wrongQuestions) ? wrongQuestions : []).filter(wq => wq.student_id === currentStudent?.id && wq.lifecycle_status === 'mastered').length }
-                    ].map((filter) => (
-                      <button
-                        key={filter.id}
-                        onClick={() => setBankFilter(filter.id)}
-                        className={`filter-chip ${bankFilter === filter.id ? 'active' : 'inactive'}`}
-                      >
-                        {filter.label}
-                        <span style={{ fontSize: '10px', opacity: 0.7, marginLeft: '3px' }}>{filter.count}</span>
-                      </button>
-                    ))}
+                {/* Filter Tabs + 筛选图标 */}
+                <section className="px-4 pt-3 mb-3 flex items-center gap-2">
+                  <div className="flex-1 min-w-0 overflow-x-auto no-scrollbar">
+                    <div className="flex gap-1.5 min-w-max">
+                      {[
+                        { id: 'all', label: '全部', count: (Array.isArray(wrongQuestions) ? wrongQuestions : []).filter(wq => wq.student_id === currentStudent?.id).length },
+                        { id: 'new', label: '不懂', count: (Array.isArray(wrongQuestions) ? wrongQuestions : []).filter(wq => wq.student_id === currentStudent?.id && (wq.lifecycle_status || 'new') === 'new').length },
+                        { id: 'review', label: '略懂', count: (Array.isArray(wrongQuestions) ? wrongQuestions : []).filter(wq => wq.student_id === currentStudent?.id && (wq.lifecycle_status === 'review_1' || wq.lifecycle_status === 'review_2')).length },
+                        { id: 'mastered', label: '完全懂', count: (Array.isArray(wrongQuestions) ? wrongQuestions : []).filter(wq => wq.student_id === currentStudent?.id && wq.lifecycle_status === 'mastered').length }
+                      ].map((filter) => (
+                        <button
+                          key={filter.id}
+                          onClick={() => setBankFilter(filter.id)}
+                          className={`filter-chip ${bankFilter === filter.id ? 'active' : 'inactive'}`}
+                        >
+                          {filter.label}
+                          <span style={{ fontSize: '10px', opacity: 0.7, marginLeft: '3px' }}>{filter.count}</span>
+                        </button>
+                      ))}
+                    </div>
                   </div>
-                </section>
-
-                {/* Advanced Filters */}
-                <section className="px-4 mb-3 overflow-x-auto no-scrollbar">
-                  <div className="flex gap-1.5 min-w-max">
-                    <button
-                      onClick={() => setShowFilterPanel(true)}
-                      className={`filter-chip ${selectedSubject !== 'all' ? 'active' : 'inactive'}`}
-                    >
-                      科目<ChevronDown size={10} style={{ marginLeft: '2px' }} />
-                    </button>
-                    <button
-                      onClick={() => setShowFilterPanel(true)}
-                      className={`filter-chip ${selectedTimeRange !== 'all' ? 'active' : 'inactive'}`}
-                    >
-                      时间<ChevronDown size={10} style={{ marginLeft: '2px' }} />
-                    </button>
-                    <button
-                      onClick={() => setShowFilterPanel(true)}
-                      className={`filter-chip ${selectedErrorCount !== 'all' ? 'active' : 'inactive'}`}
-                    >
-                      错次<ChevronDown size={10} style={{ marginLeft: '2px' }} />
-                    </button>
-                    <button
-                      onClick={() => setShowFilterPanel(true)}
-                      className={`filter-chip ${selectedTags.length > 0 ? 'active' : 'inactive'}`}
-                    >
-                      标签<ChevronDown size={10} style={{ marginLeft: '2px' }} />
-                    </button>
-                    {/* 全选/取消全选 */}
-                    <button
-                      onClick={handleSelectAll}
-                      className={`filter-chip ${filteredWrongQuestions.length > 0 && filteredWrongQuestions.every(wq => selectedQuestions.find(sq => sq.id === wq.id)) ? 'active' : 'inactive'}`}
-                      style={{ flexShrink: 0 }}
-                    >
-                      {filteredWrongQuestions.length > 0 && filteredWrongQuestions.every(wq => selectedQuestions.find(sq => sq.id === wq.id)) ? '取消全选' : '全选'}
-                    </button>
-                  </div>
+                  {/* 筛选图标 */}
+                  <button
+                    onClick={() => setShowFilterPanel(true)}
+                    className="relative flex-shrink-0 flex items-center justify-center"
+                    style={{
+                      width: '34px',
+                      height: '34px',
+                      borderRadius: '10px',
+                      border: '1px solid #E5E7EB',
+                      background: '#fff',
+                      color: '#4B5563',
+                      cursor: 'pointer'
+                    }}
+                    aria-label="筛选"
+                  >
+                    <SlidersHorizontal size={17} />
+                    {(selectedSubject !== 'all' || selectedTimeRange !== 'all' || selectedErrorCount !== 'all' || selectedTags.length > 0) && (
+                      <span style={{
+                        position: 'absolute',
+                        top: '-3px',
+                        right: '-3px',
+                        width: '9px',
+                        height: '9px',
+                        borderRadius: '50%',
+                        background: '#EF4444',
+                        border: '2px solid #fff'
+                      }} />
+                    )}
+                  </button>
                 </section>
 
                 {/* Filter Drawer — 参考 PC FilterPanel 的 pill-chip 样式 */}
@@ -2851,10 +2837,36 @@ export default function App() {
                 {/* Floating Bottom Action Bar */}
                 <div className="absolute z-40 flex justify-center pointer-events-none" style={{ bottom: 'calc(56px + env(safe-area-inset-bottom, 0px))', left: '12px', right: '12px' }}>
                   <div className="bg-white/85 backdrop-blur-xl rounded-xl shadow-lg border border-gray-200/80 px-4 py-2.5 w-full max-w-lg flex items-center justify-between pointer-events-auto" style={{ maxWidth: 'calc(448px - 24px)' }}>
-                    <div className="flex items-center gap-1.5">
-                      <span style={{ fontSize: '13px', color: '#6B7280' }}>已选</span>
-                      <span style={{ fontSize: '15px', fontWeight: 700, color: '#2563EB' }}>{selectedQuestions.length}</span>
-                      <span style={{ fontSize: '13px', color: '#6B7280' }}>题</span>
+                    <div className="flex items-center gap-2.5">
+                      <button
+                        onClick={handleSelectAll}
+                        className="flex items-center gap-1 text-[13px] font-medium"
+                        style={{ color: '#2563EB', cursor: 'pointer' }}
+                      >
+                        <div
+                          style={{
+                            width: '16px',
+                            height: '16px',
+                            borderRadius: '4px',
+                            border: '2px solid',
+                            borderColor: filteredWrongQuestions.length > 0 && filteredWrongQuestions.every(wq => selectedQuestions.find(sq => sq.id === wq.id)) ? '#2563EB' : '#D1D5DB',
+                            background: filteredWrongQuestions.length > 0 && filteredWrongQuestions.every(wq => selectedQuestions.find(sq => sq.id === wq.id)) ? '#2563EB' : 'transparent',
+                            display: 'flex',
+                            alignItems: 'center',
+                            justifyContent: 'center'
+                          }}
+                        >
+                          {filteredWrongQuestions.length > 0 && filteredWrongQuestions.every(wq => selectedQuestions.find(sq => sq.id === wq.id)) && (
+                            <CheckCircle2 size={11} className="text-white" />
+                          )}
+                        </div>
+                        全选
+                      </button>
+                      <div className="flex items-center gap-1.5">
+                        <span style={{ fontSize: '13px', color: '#6B7280' }}>已选</span>
+                        <span style={{ fontSize: '15px', fontWeight: 700, color: '#2563EB' }}>{selectedQuestions.length}</span>
+                        <span style={{ fontSize: '13px', color: '#6B7280' }}>题</span>
+                      </div>
                     </div>
                     <button
                       onClick={handlePrintPreview}
