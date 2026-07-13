@@ -130,7 +130,7 @@ export async function processTikzGeneration(job) {
     if (rows.length > 0) {
       await updateQuestionAssetTikz(rows[0].id, {
         tikz_code: tikzCode,
-        tikz_status: 'done'
+        tikz_status: 'completed'
       })
     } else {
       console.warn(`[TikZ] ${shortId}: 未找到 question_assets 记录`)

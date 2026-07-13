@@ -7,26 +7,42 @@ export const updateTaskStatus = async (taskId, status, result = null) => {
     updated_at: new Date().toISOString()
   }
 
+  // 运维字段：从 result 提取并写入独立列（补齐前仅存于 result JSON 内）。
+  // retry_count / last_error / started_at / failed_at 任一缺失则保留原值（COALESCE）。
+  const retryCount = (result && typeof result.retry_count === 'number') ? result.retry_count : null
+  const lastError = (result && typeof result.last_error === 'string') ? result.last_error : null
+  const startedAt = (result && result.startedAt) ? result.startedAt : null
+  const failedAt = (result && result.failedAt) ? result.failedAt : null
+
   if (result !== null) {
     const { rows } = await query(
       `SELECT result FROM ${TABLES.TASKS} WHERE id = $1`,
       [taskId]
     )
     const existingResult = rows[0]?.result || {}
-    if (typeof existingResult === 'string') {
-      updateData.result = JSON.stringify({ ...JSON.parse(existingResult), ...result })
-    } else {
-      updateData.result = JSON.stringify({ ...existingResult, ...result })
-    }
+    const merged = typeof existingResult === 'string'
+      ? { ...JSON.parse(existingResult), ...result }
+      : { ...existingResult, ...result }
+    // 让独立列与 result JSON 内的同名字段保持一致，便于两端查看。
+    if (retryCount !== null) merged.retryCount = retryCount
+    if (lastError !== null) merged.last_error = lastError
+    if (startedAt !== null) merged.startedAt = startedAt
+    if (failedAt !== null) merged.failedAt = failedAt
+    updateData.result = JSON.stringify(merged)
   } else {
     updateData.result = JSON.stringify(result || {})
   }
 
   await query(
     `UPDATE ${TABLES.TASKS}
-     SET status = $1, result = $2, updated_at = $3
-     WHERE id = $4`,
-    [status, updateData.result, updateData.updated_at, taskId]
+     SET status = $1, result = $2, updated_at = $3,
+         retry_count = COALESCE($4, retry_count),
+         last_error = COALESCE($5, last_error),
+         started_at = COALESCE($6::timestamptz, started_at),
+         failed_at = COALESCE($7::timestamptz, failed_at)
+     WHERE id = $8`,
+    [status, updateData.result, updateData.updated_at,
+     retryCount, lastError, startedAt, failedAt, taskId]
   )
 }
 
@@ -63,6 +79,7 @@ export const createQuestions = async (questions) => {
       block_coordinates: q.block_coordinates ? JSON.stringify(q.block_coordinates) : null,
       question_number: q.question_number ?? null,
       text_bbox: q.text_bbox ? JSON.stringify(q.text_bbox) : null,
+      image_bbox: (q.image_bbox || q.geometry_image?.bbox) ? JSON.stringify(q.image_bbox || q.geometry_image.bbox) : null,
       image_type: q.image_type || null,
       confidence: q.confidence ?? 0,
       is_complete: checkQuestionCompleteness(q).isComplete,

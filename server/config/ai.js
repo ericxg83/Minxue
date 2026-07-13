@@ -184,6 +184,27 @@ export const BACKUP_CONFIG = {
   }
 }
 
+// ── 备用2 API（魔搭 ModelScope 第二把 Key）──
+// 与主 API 同一端点（api-inference.modelscope.cn），但使用独立的免费额度 Key。
+// 当主 Key 配额耗尽（429）时，先切换到此 Key 继续消耗独立额度；
+// 仍失败才走跨厂商备用（OpenRouter / Agnes）。
+// Key / Model 全部通过环境变量注入，部署端（Render）后台填写即可。
+export const MODELSCOPE_BACKUP = {
+  get ENDPOINT() {
+    return AI_CONFIG.ENDPOINT
+  },
+  get API_KEY() {
+    return process.env.MODELSCOPE_BACKUP_API_KEY || ''
+  },
+  // 默认与主 API 同模型（都是 ModelScope 在线推理，可独立覆盖）
+  get MODEL() {
+    return process.env.MODELSCOPE_BACKUP_MODEL || AI_CONFIG.MODEL
+  },
+  get ENABLED() {
+    return Boolean(process.env.MODELSCOPE_BACKUP_API_KEY)
+  }
+}
+
 const _backupAxios = axios.create({ timeout: 60000 })
 
 /**
@@ -212,27 +233,81 @@ export async function callTextCompletion(opts) {
     temperature,
     max_tokens: maxTokens
   }
-  try {
-    const resp = await postWith429Retry(axios, AI_CONFIG.ENDPOINT, primaryBody, {
-      headers: getAIHeaders(),
-      timeout: 30000
-    })
-    const content = resp.data?.choices?.[0]?.message?.content
-    if (!content) throw new Error('AI 返回内容为空')
-    return { content, usedBackup: false }
-  } catch (primaryErr) {
-    const status = primaryErr.response?.status
-    const isQuota = status === 429
-    const primaryKeyMissing = !AI_CONFIG.API_KEY
-    if (!isQuota && !primaryKeyMissing && !primaryErr.response) {
-      // 非限流、非 Key 缺失的网络异常 → 直接抛出，不轻易切备用（可能是临时抖动由调用方重试）
-    }
-    console.warn(`⚠️ [AI] 主 API 调用失败${isQuota ? '（429 限流）' : primaryKeyMissing ? '（Key 缺失）' : ''}，尝试备用 API...`)
 
-    // 2. 备用 API（OpenRouter）
-    if (!BACKUP_CONFIG.ENABLED) {
-      throw new Error(`主 API 失败且无备用 API：${primaryErr.message}`)
+  // 主 API 空响应 / 瞬时网络抖动：原地重试，不急于切备用（节省配额、避免误判限流）。
+  const MAX_PRIMARY_RETRY = 2
+  let primaryErr = null
+  const tryPrimary = async () => {
+    for (let attempt = 0; attempt <= MAX_PRIMARY_RETRY; attempt++) {
+      try {
+        const resp = await postWith429Retry(axios, AI_CONFIG.ENDPOINT, primaryBody, {
+          headers: getAIHeaders(),
+          timeout: 30000
+        })
+        const content = resp.data?.choices?.[0]?.message?.content
+        if (!content) {
+          primaryErr = new Error('AI 返回内容为空')
+          console.warn(`⚠️ [AI] 主 API 返回空内容（第 ${attempt + 1}/${MAX_PRIMARY_RETRY + 1} 次），${attempt < MAX_PRIMARY_RETRY ? '立即重试' : '放弃并转备用'}`)
+          continue
+        }
+        return { content }
+      } catch (err) {
+        primaryErr = err
+        const isNetwork = !err.response || err.code === 'ECONNABORTED' || err.code === 'ETIMEDOUT'
+        if (isNetwork && attempt < MAX_PRIMARY_RETRY) {
+          console.warn(`⚠️ [AI] 主 API 网络异常（第 ${attempt + 1} 次），重试...`)
+          continue
+        }
+        return { err } // 非网络错误（400/503 等）→ 直接交备用
+      }
     }
+    return { err: primaryErr }
+  }
+
+  const primaryResult = await tryPrimary()
+  if (primaryResult.content) {
+    return { content: primaryResult.content, usedBackup: false }
+  }
+  primaryErr = primaryResult.err
+  const status = primaryErr.response?.status
+  const isQuota = status === 429
+  const primaryKeyMissing = !AI_CONFIG.API_KEY
+  if (!isQuota && !primaryKeyMissing && !primaryErr.response) {
+    // 非限流、非 Key 缺失的网络异常 → 直接抛出，不轻易切备用（可能是临时抖动由调用方重试）
+    throw primaryErr
+  }
+  console.warn(`⚠️ [AI] 主 API 调用失败${isQuota ? '（429 限流）' : primaryKeyMissing ? '（Key 缺失）' : ''}，尝试备用 API...`)
+
+  // 1.5 备用2 API（魔搭第二把 Key，同一端点独立免费额度）
+  if (MODELSCOPE_BACKUP.ENABLED) {
+    const b2Model = model || MODELSCOPE_BACKUP.MODEL
+    const b2Body = {
+      model: b2Model,
+      messages,
+      temperature,
+      max_tokens: maxTokens
+    }
+    try {
+      const resp = await postWith429Retry(axios, MODELSCOPE_BACKUP.ENDPOINT, b2Body, {
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${MODELSCOPE_BACKUP.API_KEY}`
+        },
+        timeout: 30000
+      })
+      const content = resp.data?.choices?.[0]?.message?.content
+      if (!content) throw new Error('备用2 AI 返回内容为空')
+      console.log(`✅ [AI] 备用2 API（魔搭第二 Key）调用成功（${b2Model}）`)
+      return { content, usedBackup: true }
+    } catch (b2Err) {
+      console.warn(`⚠️ [AI] 备用2 API（魔搭第二 Key）失败：${b2Err.message}，继续尝试跨厂商备用...`)
+    }
+  }
+
+  // 2. 备用 API（OpenRouter）
+  if (!BACKUP_CONFIG.ENABLED) {
+    throw new Error(`主 API 失败且无备用 API：${primaryErr.message}`)
+  }
     const backupBody = {
       model: model || BACKUP_CONFIG.MODEL,
       messages,
@@ -259,16 +334,16 @@ export async function callTextCompletion(opts) {
       console.error(`❌ [AI] 备用 API 也失败：${backupErr.message}`)
       throw backupErr
     }
-  }
 }
 
 /**
  * 发起一次「视觉（多模态）」聊天补全请求，按 Provider 列表依次尝试，任一成功即返回。
  *
  * Provider 顺序：
- *   1. 主 API（ModelScope Qwen3-VL）
- *   2. 备用 API（OpenRouter / Agnes）
- *   3. 第三备用（OpenRouter 免费模型，如 qwen2.5-vl-7b）
+ *   1. 主 API（ModelScope Qwen3-VL，Key A）
+ *   2. 备用2 API（ModelScope 第二把 Key，同一端点独立免费额度）
+ *   3. 备用 API（OpenRouter / Agnes，跨厂商）
+ *   4. 第三备用（OpenRouter 免费模型，如 qwen2.5-vl-7b）
  *
  * 只有在所有 Provider 均失败时才抛出错误，记录失败日志。
  * 几何图重建 Worker 使用此函数，保证即使主 API 配额耗尽也能继续。
@@ -319,6 +394,30 @@ export async function callVisionCompletion(opts) {
       }
     }
   ]
+
+  // 备用2 API（魔搭第二把 Key，同一端点独立免费额度）
+  if (MODELSCOPE_BACKUP.ENABLED) {
+    providers.push({
+      name: '备用2 API (魔搭第二 Key)',
+      endpoint: MODELSCOPE_BACKUP.ENDPOINT,
+      model: () => model || MODELSCOPE_BACKUP.MODEL,
+      headers: () => ({
+        'Content-Type': 'application/json',
+        'Authorization': `Bearer ${MODELSCOPE_BACKUP.API_KEY}`
+      }),
+      buildBody: (m) => ({
+        model: m,
+        messages: buildMessages(),
+        temperature,
+        max_tokens: maxTokens
+      }),
+      // 与主 API 同端点：仅当 429 或 Key 缺失才跳过此 Provider
+      shouldSkipOnError: (err) => {
+        const status = err.response?.status
+        return status === 429 || !MODELSCOPE_BACKUP.API_KEY
+      }
+    })
+  }
 
   // 备用 API 1（OpenRouter / Agnes）
   if (BACKUP_CONFIG.ENABLED) {
@@ -382,31 +481,53 @@ export async function callVisionCompletion(opts) {
   for (let i = 0; i < providers.length; i++) {
     const p = providers[i]
     const currentModel = p.model()
-    const body = p.buildBody(currentModel)
-    try {
-      const resp = await postWith429Retry(_backupAxios, p.endpoint, body, {
-        headers: p.headers(),
-        timeout: AI_CONFIG.TIMEOUT
-      })
-      const content = resp.data?.choices?.[0]?.message?.content
-      if (!content) throw new Error('AI 返回内容为空')
+    // 单 Provider 空响应 / 瞬时网络抖动：原地重试，避免空响应被直接判为"该 Provider 失败"。
+    const MAX_PROVIDER_RETRY = 2
+    let providerContent = null
+    let providerLastErr = null
+    for (let attempt = 0; attempt <= MAX_PROVIDER_RETRY && !providerContent; attempt++) {
+      try {
+        const resp = await postWith429Retry(_backupAxios, p.endpoint, p.buildBody(currentModel), {
+          headers: p.headers(),
+          timeout: AI_CONFIG.TIMEOUT
+        })
+        const content = resp.data?.choices?.[0]?.message?.content
+        if (!content) {
+          providerLastErr = new Error('AI 返回内容为空')
+          console.warn(`⚠️ [AI-Vision] ${p.name}（${currentModel}）返回空内容（第 ${attempt + 1}/${MAX_PROVIDER_RETRY + 1} 次），${attempt < MAX_PROVIDER_RETRY ? '立即重试' : '放弃并跳到下一个 Provider'}`)
+          continue
+        }
+        providerContent = content
+      } catch (err) {
+        providerLastErr = err
+        const isNetwork = !err.response || err.code === 'ECONNABORTED' || err.code === 'ETIMEDOUT'
+        if (isNetwork && attempt < MAX_PROVIDER_RETRY) {
+          console.warn(`⚠️ [AI-Vision] ${p.name}（${currentModel}）网络异常（第 ${attempt + 1} 次），重试...`)
+          continue
+        }
+        break // 非网络错误（含 429）→ 跳出，按 shouldSkipOnError 决定是否跳下一个
+      }
+    }
+
+    if (providerContent) {
       const label = i === 0 ? '主' : `备用 (${i})`
       console.log(`✅ [AI-Vision] ${label} API 调用成功（${currentModel}）`)
-      return { content, usedBackup: i > 0 }
-    } catch (err) {
-      lastError = err
-      const status = err.response?.status
-      const skip = p.shouldSkipOnError(err)
-      const reason = status === 429 ? '429 配额耗尽'
-        : status === 503 ? '503 服务不可用'
-        : status === 400 ? '400 模型不可用'
-        : status ? `HTTP ${status}`
-        : err.code || err.message
-      console.warn(`⚠️ [AI-Vision] ${p.name}（${currentModel}）失败: ${reason}${skip ? '，尝试下一个...' : '（不可跳过）'}`)
-      if (!skip) {
-        // 不可跳过的错误（如 400 模型下线）→ 直接抛出，让调用方处理模型轮换
-        throw err
-      }
+      return { content: providerContent, usedBackup: i > 0 }
+    }
+
+    const err = providerLastErr || new Error('空响应')
+    lastError = err
+    const status = err.response?.status
+    const skip = p.shouldSkipOnError(err)
+    const reason = status === 429 ? '429 配额耗尽'
+      : status === 503 ? '503 服务不可用'
+      : status === 400 ? '400 模型不可用'
+      : status ? `HTTP ${status}`
+      : err.code || err.message
+    console.warn(`⚠️ [AI-Vision] ${p.name}（${currentModel}）失败: ${reason}${skip ? '，尝试下一个...' : '（不可跳过）'}`)
+    if (!skip) {
+      // 不可跳过的错误（如 400 模型下线）→ 直接抛出，让调用方处理模型轮换
+      throw err
     }
   }
 

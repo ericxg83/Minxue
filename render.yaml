@@ -20,6 +20,8 @@ services:
         value: https://api-inference.modelscope.cn/v1/chat/completions
       - key: AI_MODEL
         value: Qwen/Qwen3-VL-8B-Instruct
+      - key: MODELSCOPE_BACKUP_API_KEY
+        sync: false
       - key: OSS_REGION
         value: oss-cn-shanghai
       - key: OSS_BUCKET

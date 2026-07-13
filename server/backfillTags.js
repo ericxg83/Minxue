@@ -13,7 +13,8 @@ import dotenv from 'dotenv'
 import { dirname, resolve } from 'path'
 import { fileURLToPath } from 'url'
 
-const __dirname = dirname(fileURLToPath(import.meta.url))
+const __filename = fileURLToPath(import.meta.url)
+const __dirname = dirname(__filename)
 dotenv.config({ path: resolve(__dirname, '.env') })
 
 import axios from 'axios'
@@ -51,8 +52,10 @@ function normalizeDifficulty(raw) {
 /**
  * Generate tags + difficulty for a single question.
  * Uses callTextCompletion so it inherits the primary→backup API fallback.
+ * Exported so the scheduled backfill (server/index.js) can用 LLM 修正
+ * 上传热路径产出的本地占位标签/难度（difficulty 默认 3）。
  */
-async function generateTag(questionContent, subject = null, retryCount = 0) {
+export async function generateTag(questionContent, subject = null, retryCount = 0) {
   if (!questionContent || !questionContent.trim()) {
     return { success: true, tags: ['未分类'], difficulty: null }
   }
@@ -109,7 +112,7 @@ async function generateTag(questionContent, subject = null, retryCount = 0) {
 /**
  * Deduplicate tags: keep the most specific version of near-duplicates.
  */
-function deduplicateTags(tags) {
+export function deduplicateTags(tags) {
   if (!tags || tags.length <= 1) return tags || []
   const result = []
   for (const tag of tags) {
@@ -230,7 +233,11 @@ async function main() {
   process.exit(0)
 }
 
-main().catch(err => {
-  console.error('脚本执行失败:', err)
-  process.exit(1)
-})
+// 仅当作为独立脚本直接运行时才自动跑批；被 import（如 server/index.js 定时回填）时不执行。
+const _isMain = process.argv[1] && (process.argv[1] === __filename || process.argv[1].endsWith('backfillTags.js'))
+if (_isMain) {
+  main().catch(err => {
+    console.error('脚本执行失败:', err)
+    process.exit(1)
+  })
+}

@@ -23,6 +23,10 @@ CREATE TABLE IF NOT EXISTS tasks (
     original_name TEXT,
     status TEXT DEFAULT 'pending' CHECK (status IN ('pending', 'processing', 'done', 'failed')),
     result JSONB,
+    retry_count INTEGER DEFAULT 0,
+    last_error TEXT,
+    started_at TIMESTAMP WITH TIME ZONE,
+    failed_at TIMESTAMP WITH TIME ZONE,
     created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
     updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
 );
@@ -84,6 +88,7 @@ CREATE TABLE IF NOT EXISTS generated_exams (
 
 CREATE INDEX IF NOT EXISTS idx_tasks_student_id ON tasks(student_id);
 CREATE INDEX IF NOT EXISTS idx_tasks_status ON tasks(status);
+CREATE INDEX IF NOT EXISTS idx_tasks_status_retry ON tasks(status, retry_count);
 CREATE INDEX IF NOT EXISTS idx_questions_task_id ON questions(task_id);
 CREATE INDEX IF NOT EXISTS idx_questions_student_id ON questions(student_id);
 CREATE INDEX IF NOT EXISTS idx_wrong_questions_student_id ON wrong_questions(student_id);
@@ -153,10 +158,17 @@ CREATE TABLE IF NOT EXISTS question_assets (
     cropped_image_url TEXT,
     bbox JSONB,
     tikz_code TEXT,
-    tikz_status VARCHAR(10) DEFAULT 'none' CHECK (tikz_status IN ('none', 'pending', 'done', 'failed')),
+    tikz_url TEXT,
+    tikz_json JSONB,
+    tikz_status VARCHAR(10) DEFAULT 'none' CHECK (tikz_status IN ('none', 'pending', 'processing', 'completed', 'failed')),
+    retry_count INTEGER DEFAULT 0,
+    last_error TEXT,
+    processed_at TIMESTAMP WITH TIME ZONE,
     created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
     updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
 );
 
 CREATE INDEX IF NOT EXISTS idx_question_assets_question_id ON question_assets(question_id);
 CREATE INDEX IF NOT EXISTS idx_question_assets_asset_type ON question_assets(asset_type);
+CREATE INDEX IF NOT EXISTS idx_question_assets_type_status ON question_assets(asset_type, tikz_status);
+CREATE INDEX IF NOT EXISTS idx_question_assets_type_status_retry ON question_assets(asset_type, tikz_status, retry_count);

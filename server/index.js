@@ -18,6 +18,7 @@ import { migrateCleanGeometrySvg } from './migrations/018_add_clean_geometry_svg
 import { migrateSourceType } from './migrations/019_add_source_type.js'
 import { migrateRetryTaskFields } from './migrations/020_add_retry_task_fields.js'
 import { migrateGeometryReconstructionAsync } from './migrations/021_add_geometry_reconstruction_async.js'
+import { migrateTaskSystemFields } from './migrations/022_task_system_fields.js'
 
 const __dirname = dirname(fileURLToPath(import.meta.url))
 dotenv.config({ path: resolve(__dirname, '.env') })
@@ -34,6 +35,10 @@ import { checkQuestionCompleteness } from './utils/questionCompleteness.js'
 import { uploadImage, deleteFile } from './services/ossService.js'
 import { getTaskQueue, getGeometryQueue, getQueueStats, taskWorker } from './queue.js'
 import { processTask, generateTagsForQuestion } from './worker.js'
+// 定时回填走 LLM（backfillTags.js 的 generateTag），用于修正上传热路径产出的
+// 本地占位标签/难度（difficulty 默认 3）。worker 的 generateTagsForQuestion 已改为
+// 本地规则分类，只作上传时零 API 占位，不能用于回填修正，故此处显式引入 LLM 版。
+import { generateTag as generateTagWithLLM } from './backfillTags.js'
 import { AI_CONFIG, getAIHeaders, buildTaggingPrompt, resetModelIndex } from './config/ai.js'
 import weeklyReportRouter from './routes/weeklyReport.js'
 
@@ -1844,7 +1849,9 @@ app.use((err, req, res, next) => {
 let backfillRunning = false
 let backfillProgress = { total: 0, updated: 0, skipped: 0, failed: 0, done: false, detail: '', remaining: null }
 
-// 筛选"缺知识点标签 或 缺难度"的题目 —— select 与 count 共用，避免两处漂移
+// 筛选"缺知识点标签 或 缺难度 或 仅有本地占位"的题目 —— select 与 count 共用，避免两处漂移。
+// tags_source='local'：上传热路径用本地规则分类打的占位（tags 可能是「未分类」、difficulty 恒为 3），
+// 需由定时 LLM 回填修正；修正成功后 tags_source 被写为 'ai'，自然不再被重复捞取。
 const BACKFILL_WHERE = `q.is_complete = TRUE
          AND (
            q.ai_tags IS NULL
@@ -1852,6 +1859,7 @@ const BACKFILL_WHERE = `q.is_complete = TRUE
            OR q.ai_tags = '[]'
            OR q.ai_tags::text = '["未分类"]'
            OR q.difficulty IS NULL
+           OR q.tags_source = 'local'
          )`
 
 /** 把题目 options 归一化成字符串数组：兼容数组 / JSON字符串 / 对象 / null */
@@ -1933,8 +1941,9 @@ async function runBackfillTags({ limit = 20, trigger = 'manual', chain = false }
       backfillProgress.detail = `[${i + 1}/${questions.length}] ${shortId}`
 
       try {
-        // 单次生成标签+难度，内置重试和主备 API 切换
-        const tagResult = await generateTagsForQuestion(fullContent, subject)
+        // 单次生成标签+难度（LLM），内置重试和主备 API 切换。
+        // 回填的目的就是用 LLM 修正上传时的本地占位（tags 可能是「未分类」、difficulty 恒为 3）。
+        const tagResult = await generateTagWithLLM(fullContent, subject)
 
         const hasTags = tagResult && tagResult.tags && tagResult.tags.length > 0 && tagResult.tags[0] !== '未分类'
         const hasDifficulty = tagResult && tagResult.difficulty !== null && tagResult.difficulty !== undefined
@@ -2089,6 +2098,7 @@ if (process.argv[1] === __filename || process.argv[1]?.endsWith('server/index.js
       await migrateSourceType()
       await migrateRetryTaskFields()
       await migrateGeometryReconstructionAsync()
+      await migrateTaskSystemFields()
     } catch (err) {
       console.error('数据库迁移失败:', err.message)
     }

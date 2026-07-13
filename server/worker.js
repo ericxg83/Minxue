@@ -22,6 +22,116 @@ import { classifyQuestionLocally } from './utils/localTagger.js'
 // 使用 Sharp 进行裁剪和图像增强（替代浏览器端的 Canvas/OpenCV）
 
 /**
+ * 估算图像倾斜角（投影廓线法）。
+ * 对灰度像素在 [-maxDeg, +maxDeg] 内逐档旋转，取「行方向投影方差」最大的角度：
+ * 线条图水平对齐时，暗像素会集中到少数几行，行投影方差最大。
+ * 纯 JS，无 opencv 依赖；仅用于轻度纠偏（±maxDeg 内）。
+ *
+ * @param {Buffer} grayRaw - 灰度原始像素 (Uint8, 每像素 1 通道)
+ * @param {number} w
+ * @param {number} h
+ * @param {number} maxDeg - 搜索范围（默认 6°）
+ * @param {number} step - 搜索步长（默认 0.5°）
+ * @returns {number} 建议旋转角度（度）
+ */
+function estimateSkewAngle(grayRaw, w, h, maxDeg = 6, step = 0.5) {
+  const DARK = 160 // 低于此灰度算「暗像素」（线条/笔迹）
+  const cx = w / 2, cy = h / 2
+  let bestAngle = 0
+  let bestScore = -1
+
+  for (let deg = -maxDeg; deg <= maxDeg + 1e-9; deg += step) {
+    const rad = (deg * Math.PI) / 180
+    const cos = Math.cos(rad), sin = Math.sin(rad)
+    const rowDark = new Float64Array(h)
+    const sx = w > 400 ? 2 : 1 // 大图跳采提速
+    const sy = h > 400 ? 2 : 1
+    for (let y = 0; y < h; y += sy) {
+      const dy = y - cy
+      for (let x = 0; x < w; x += sx) {
+        if (grayRaw[y * w + x] >= DARK) continue
+        const dx = x - cx
+        const ry = Math.round(cy + dx * sin + dy * cos)
+        if (ry >= 0 && ry < h) rowDark[ry] += 1
+      }
+    }
+    let mean = 0
+    for (let i = 0; i < h; i++) mean += rowDark[i]
+    mean /= h
+    let variance = 0
+    for (let i = 0; i < h; i++) {
+      const d = rowDark[i] - mean
+      variance += d * d
+    }
+    if (variance > bestScore) {
+      bestScore = variance
+      bestAngle = deg
+    }
+  }
+  return bestAngle
+}
+
+/**
+ * 几何配图净化：去灰底 / 去浅笔迹 / 白背景 / 轻度纠偏。
+ *
+ * 处理链（全部基于 sharp，无 opencv）：
+ *   1. 灰度化 + 归一化（拉伸对比度）
+ *   2. gamma 提亮：把浅灰背景、浅铅笔痕推向纯白
+ *   3. 阈值二值化：低于阈值的暗像素（印刷线条）保留为黑，其余变白
+ *      —— 铅笔作答通常比印刷线浅，阈值可滤掉大部分；印刷几何线条保留
+ *   4. 中值滤波去椒盐噪点
+ *   5. 投影廓线法估算倾斜角 → 轻度旋转纠偏（白底填充）
+ *   6. trim 去掉纠偏后四周多余白边
+ *
+ * 失败时返回原 buffer，绝不阻断主流程。
+ *
+ * @param {Buffer} buffer - 已裁剪的配图 PNG buffer
+ * @returns {Promise<Buffer>}
+ */
+async function cleanGeometryCrop(buffer) {
+  try {
+    // ── 1~4. 灰度 → 提亮 → 二值化 → 去噪 ──
+    const cleaned = await sharp(buffer)
+      .grayscale()
+      .normalize()
+      .gamma(1.6)                 // 提亮中间调，压掉浅灰背景/浅笔迹
+      .threshold(170)             // 二值化：印刷线条(暗)保留，浅底/浅笔迹变白
+      .median(2)                  // 去椒盐噪点
+      .toColourspace('b-w')
+      .toBuffer()
+
+    // ── 5. 估算倾斜角（用净化后的灰度像素）──
+    let angle = 0
+    try {
+      const { data, info } = await sharp(cleaned)
+        .grayscale()
+        .raw()
+        .toBuffer({ resolveWithObject: true })
+      angle = estimateSkewAngle(data, info.width, info.height)
+    } catch (e) {
+      console.warn(`   ⚠️ [几何图净化] 倾斜估算失败，跳过纠偏: ${e.message}`)
+    }
+
+    // ── 5~6. 轻度纠偏（白底填充）+ trim 去白边 ──
+    let pipeline = sharp(cleaned)
+    if (Math.abs(angle) >= 0.5) {
+      pipeline = pipeline.rotate(angle, { background: '#ffffff' })
+      console.log(`   [几何图净化] 纠偏 ${angle.toFixed(1)}°`)
+    }
+    const out = await pipeline
+      .flatten({ background: '#ffffff' })
+      .trim({ threshold: 10 })    // 去掉旋转/裁剪残留的四周白边
+      .png()
+      .toBuffer()
+
+    return out
+  } catch (error) {
+    console.warn(`   ⚠️ [几何图净化] 失败，使用未净化图继续: ${error.message}`)
+    return buffer
+  }
+}
+
+/**
  * 裁剪几何图并上传到 OSS
  * @param {Buffer} imageBuffer - 原始试卷图片 buffer
  * @param {Object} bbox - {x, y, width, height}
@@ -68,15 +178,22 @@ async function cropAndUploadGeometryImage(imageBuffer, bbox, studentId, question
     if (resizeOpts) {
       pipeline = pipeline.resize(resizeOpts.width, resizeOpts.height, { fit: 'fill' })
     }
-    const cropped = await pipeline.png().toBuffer()
+    let cropped = await pipeline.png().toBuffer()
 
-    const outW = resizeOpts ? resizeOpts.width : width
-    const outH = resizeOpts ? resizeOpts.height : height
+    // ── 4. 配图净化：去灰底 / 去浅笔迹 / 白背景 / 轻度纠偏 ──
+    // 可用 GEOMETRY_CLEAN=0 关闭（回退到未净化裁剪图）。净化失败内部已兜底返回原图。
+    if (process.env.GEOMETRY_CLEAN !== '0') {
+      cropped = await cleanGeometryCrop(cropped)
+    }
+
+    const outMeta = await sharp(cropped).metadata()
+    const outW = outMeta.width || (resizeOpts ? resizeOpts.width : width)
+    const outH = outMeta.height || (resizeOpts ? resizeOpts.height : height)
 
     // 上传到 OSS
     const fileName = `geometry_${studentId}_${questionId}.png`
     const ossUrl = await uploadImage(cropped, fileName, studentId)
-    console.log(`   [几何图] 裁剪上传成功: ${width}x${height} → ${outW}x${outH} → ${ossUrl}`)
+    console.log(`   [几何图] 裁剪+净化上传成功: ${width}x${height} → ${outW}x${outH} → ${ossUrl}`)
     return ossUrl
   } catch (error) {
     console.error(`  ⚠️ [几何图] 裁剪上传失败:`, error.message)
@@ -1079,7 +1196,7 @@ const processSlimGrading = async (job) => {
 
   const fail = async (msg) => {
     console.error(`💥 [Slim] taskId=${taskId} 失败: ${msg}`)
-    await updateTaskStatus(taskId, TASK_STATUS.FAILED, { error: msg, failedAt: new Date().toISOString() }).catch(() => {})
+    await updateTaskStatus(taskId, TASK_STATUS.FAILED, { error: msg, last_error: msg, failedAt: new Date().toISOString() }).catch(() => {})
     throw new Error(msg)
   }
 
@@ -1244,9 +1361,9 @@ const processSlimGrading = async (job) => {
 
     return { taskId, examId: generatedExamId, autoCount, manualCount, allAuto }
   } catch (error) {
-    const duration = Date.now() - startTime
+    const duration = startTime ? Date.now() - startTime : 0
     console.error(`\n💥💥 [Slim] 精简批改失败: taskId=${taskId}, ${error.message}`)
-    await updateTaskStatus(taskId, TASK_STATUS.FAILED, { error: error.message, failedAt: new Date().toISOString() }).catch(() => {})
+    await updateTaskStatus(taskId, TASK_STATUS.FAILED, { error: error.message, last_error: error.message, failedAt: new Date().toISOString() }).catch(() => {})
     throw error
   }
 }
@@ -1318,11 +1435,12 @@ export const processTask = async (job) => {
   console.log(`🔥🔥 ==========================================\n`)
 
   try {
+    const startedAt = new Date().toISOString()
     console.log(`📊 [Step 1/6] 更新任务状态为 PROCESSING...`)
     await job.updateProgress(5)
     await updateTaskStatus(taskId, TASK_STATUS.PROCESSING, {
       progress: 5,
-      startedAt: new Date().toISOString()
+      startedAt
     })
     console.log(`✅ [Step 1/6] 状态更新完成`)
 
@@ -1361,7 +1479,9 @@ export const processTask = async (job) => {
       console.error('图片压缩失败:', compressError)
       await updateTaskStatus(taskId, TASK_STATUS.FAILED, {
         error: '图片压缩失败: ' + compressError.message,
-        duration: Date.now() - startTime
+        last_error: '图片压缩失败: ' + compressError.message,
+        duration: Date.now() - startTime,
+        failedAt: new Date().toISOString()
       })
       throw compressError
     }
@@ -1381,8 +1501,10 @@ export const processTask = async (job) => {
       console.error(`❌ [Step 5/8] AI 识别失败: ${ocrResult.error}`)
       await updateTaskStatus(taskId, TASK_STATUS.FAILED, {
         error: ocrResult.error || '识别失败',
+        last_error: ocrResult.error || '识别失败',
         shouldRetry: ocrResult.shouldRetry,
-        duration: Date.now() - startTime
+        duration: Date.now() - startTime,
+        failedAt: new Date().toISOString()
       })
       throw new Error(ocrResult.error || 'AI识别失败')
     }
@@ -1702,7 +1824,7 @@ await job.updateProgress(80)
       cacheMisses: answerGenResult?.cacheMisses || 0
     }
   } catch (error) {
-    const duration = Date.now() - startTime
+    const duration = startTime ? Date.now() - startTime : 0
     console.error(`\n💥💥💥 [Worker] ==========================================`)
     console.error(`💥💥💥 [Worker] 任务处理失败:`)
     console.error(`   taskId: ${taskId}`)
@@ -1711,8 +1833,26 @@ await job.updateProgress(80)
     console.error(`💥💥 ==========================================\n`)
 
     try {
+      // 解析已有 retry_count（存于 result JSON），失败自增一次。
+      let prevRetry = 0
+      try {
+        const { rows } = await query(
+          `SELECT result, retry_count FROM ${TABLES.TASKS} WHERE id = $1`,
+          [taskId]
+        )
+        if (rows.length > 0) {
+          if (typeof rows[0].retry_count === 'number') prevRetry = rows[0].retry_count
+          else if (rows[0].result) {
+            const r = typeof rows[0].result === 'string' ? JSON.parse(rows[0].result) : rows[0].result
+            prevRetry = Number(r?.retryCount || 0)
+          }
+        }
+      } catch { /* 读取失败则 retry 从 0 计 */ }
+
       await updateTaskStatus(taskId, TASK_STATUS.FAILED, {
         error: error.message || '处理失败',
+        last_error: error.message || '处理失败',
+        retry_count: prevRetry + 1,
         duration: duration,
         failedAt: new Date().toISOString()
       })

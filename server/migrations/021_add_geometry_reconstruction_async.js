@@ -1,3 +1,5 @@
+import { query } from '../config/neon.js'
+
 /**
  * 数据库迁移：几何图重建异步化。
  *

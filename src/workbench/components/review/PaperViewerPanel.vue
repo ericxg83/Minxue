@@ -31,7 +31,7 @@
 
           <!-- 仅当前选中题目显示定位框（坐标系与当前页图一致时才画，优雅降级） -->
           <div
-            v-if="showBbox && store.currentReviewQuestion && getBlockCoords(store.currentReviewQuestion)"
+            v-if="showBbox && store.currentReviewQuestion && getDisplayBox(store.currentReviewQuestion)"
             class="question-overlay overlay-current"
             :style="getOverlayStyle(store.currentReviewQuestion)"
             :title="`第${store.currentReviewIndex + 1}题`"
@@ -196,9 +196,49 @@ const getBlockCoords = (q) => {
   }
 }
 
-/** 定位框样式：block_coordinates 为归一化 0-1000 坐标，按图片自然尺寸换算为像素 */
+/** 安全解析任意 bbox 字段（兼容 string/object，统一 {x,y,width,height}） */
+const parseBbox = (raw) => {
+  if (!raw) return null
+  let c = raw
+  if (typeof c === 'string') {
+    try { c = JSON.parse(c) } catch { return null }
+  }
+  if (!c || typeof c !== 'object') return null
+  const x = c.x ?? c.left
+  const y = c.y ?? c.top
+  const w = c.width
+  const h = c.height
+  if ([x, y, w, h].some(v => typeof v !== 'number' || !isFinite(v))) return null
+  if (w <= 0 || h <= 0) return null
+  return { x, y, width: w, height: h }
+}
+
+/** 求两个 bbox 的并集（外接矩形），任一为空则返回另一个 */
+const unionBbox = (a, b) => {
+  if (!a) return b
+  if (!b) return a
+  const left = Math.min(a.x, b.x)
+  const top = Math.min(a.y, b.y)
+  const right = Math.max(a.x + a.width, b.x + b.width)
+  const bottom = Math.max(a.y + a.height, b.y + b.height)
+  return { x: left, y: top, width: right - left, height: bottom - top }
+}
+
+/**
+ * 定位框坐标：优先用 text_bbox ∪ image_bbox 的并集（更贴合题目实际范围），
+ * 二者都缺时回退到 block_coordinates（AI 粗估的整体区域，常偏大/偏移）。
+ */
+const getDisplayBox = (q) => {
+  if (!q) return null
+  const textB = parseBbox(q.text_bbox)
+  const imageB = parseBbox(q.image_bbox)
+  const union = unionBbox(textB, imageB)
+  return union || getBlockCoords(q)
+}
+
+/** 定位框样式：bbox 为归一化 0-1000 坐标，按图片自然尺寸换算为像素 */
 const getOverlayStyle = (q) => {
-  const bbox = getBlockCoords(q)
+  const bbox = getDisplayBox(q)
   if (!bbox) return { display: 'none' }
   const nW = imgNaturalW.value, nH = imgNaturalH.value
   if (!nW || !nH) return { display: 'none' }

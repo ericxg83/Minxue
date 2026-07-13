@@ -51,6 +51,21 @@ export const migratePageUnderstanding = async () => {
       console.log('✅ image_type 字段已存在，跳过')
     }
 
+    // ── 3b. 添加 image_bbox 字段 ──
+    // 配图区域坐标（归一化 0-1000）。持久化后前端复核页可用 text_bbox ∪ image_bbox
+    // 的并集绘制更贴合的题目定位框（block_coordinates 常偏大/偏移）。
+    const { rows: colIb } = await query(`
+      SELECT column_name
+      FROM information_schema.columns
+      WHERE table_name = 'questions' AND column_name = 'image_bbox'
+    `)
+    if (colIb.length === 0) {
+      await query(`ALTER TABLE questions ADD COLUMN image_bbox JSONB`)
+      console.log('✅ 已添加 image_bbox 字段到 questions 表')
+    } else {
+      console.log('✅ image_bbox 字段已存在，跳过')
+    }
+
     // ── 4. 创建 question_assets 表 ──
     const { rows: tblAssets } = await query(`
       SELECT table_name

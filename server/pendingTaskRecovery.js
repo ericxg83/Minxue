@@ -47,11 +47,153 @@ class PendingTaskRecovery {
 
     try {
       await this.scanPendingTasks()
+      await this.scanFailedTasks()
+      await this.scanProcessingStuck()
       await this.scanGeometryAssets()
     } catch (err) {
       console.error('[PendingTaskRecovery] ❌ 扫描失败:', err)
     } finally {
       this.isRunning = false
+    }
+  }
+
+  /**
+   * 扫描 failed 主任务并自动重试（此前任务系统只恢复 pending）。
+   * 限制：同一任务最多自动重试 MAX_AUTO_RETRIES 次（含 worker 内部 + 此处），
+   * 超出后保持 failed，避免对注定失败的图片无限重试。
+   */
+  async scanFailedTasks() {
+    try {
+      const MAX_AUTO_RETRIES = 3
+      console.log('[PendingTaskRecovery]  开始扫描 failed 任务...')
+
+      const { rows } = await query(
+        `SELECT id, student_id, image_url, original_name, status, created_at, result, retry_count, last_error
+         FROM ${TABLES.TASKS}
+         WHERE status = 'failed'
+           AND COALESCE(retry_count, 0) < $1
+           AND created_at > NOW() - INTERVAL '7 days'
+         ORDER BY updated_at ASC`,
+        [MAX_AUTO_RETRIES]
+      )
+
+      if (rows.length === 0) {
+        console.log('[PendingTaskRecovery] ✅ 没有可自动重试的 failed 任务')
+        return
+      }
+
+      console.log(`[PendingTaskRecovery] 📋 找到 ${rows.length} 个可自动重试的 failed 任务:`)
+      rows.forEach((t, i) => {
+        console.log(`   ${i + 1}. ${t.original_name} (retry_count=${t.retry_count || 0}, ${String(t.last_error || '').substring(0, 60)})`)
+      })
+
+      const queue = await getTaskQueue()
+      if (!queue) {
+        console.error('[PendingTaskRecovery] ❌ 队列不可用，跳过恢复')
+        return
+      }
+
+      // 去重：已在队列中的任务不再重复入队。
+      const inFlightJobs = await queue.getJobs(['waiting', 'active', 'delayed'])
+      const inFlightTaskIds = new Set(inFlightJobs.map(j => j.data?.taskId).filter(Boolean))
+
+      let recoveredCount = 0
+      for (const task of rows) {
+        try {
+          if (inFlightTaskIds.has(task.id)) {
+            console.log(`[PendingTaskRecovery] ⏭️ ${task.original_name} 已在队列中`)
+            continue
+          }
+          await query(
+            `UPDATE ${TABLES.TASKS} SET status = 'pending', last_error = NULL, updated_at = NOW() WHERE id = $1`,
+            [task.id]
+          )
+          await queue.add('process-task', {
+            taskId: task.id,
+            studentId: task.student_id,
+            imageUrl: task.image_url,
+            originalName: task.original_name,
+            retryCount: (task.retry_count || 0) + 1
+          }, {
+            attempts: parseInt(process.env.MAX_RETRIES) || 3,
+            backoff: { type: 'exponential', delay: 5000 }
+          })
+          console.log(`[PendingTaskRecovery] ✅ 已恢复 failed 任务: ${task.original_name} (retry ${task.retry_count || 0}→${(task.retry_count || 0) + 1})`)
+          recoveredCount++
+        } catch (err) {
+          console.error(`[PendingTaskRecovery]  恢复失败 ${task.original_name}:`, err.message)
+        }
+      }
+      console.log(`[PendingTaskRecovery] ✅ failed 任务恢复完成: ${recoveredCount}/${rows.length}`)
+    } catch (err) {
+      console.error('[PendingTaskRecovery] ❌ failed 任务扫描失败:', err)
+    }
+  }
+
+  /**
+   * 扫描 stuck processing 任务：started_at 距今超过 PROCESSING_TIMEOUT_MS 仍未结束
+   * （worker 崩溃 / 锁超时未回填），重置为 pending 重新入队。
+   */
+  async scanProcessingStuck() {
+    try {
+      const PROCESSING_TIMEOUT_MS = parseInt(process.env.TASK_PROCESSING_TIMEOUT_MS) || 30 * 60 * 1000 // 30 min
+      console.log('[PendingTaskRecovery]  开始扫描 stuck processing 任务...')
+
+      const { rows } = await query(
+        `SELECT id, student_id, image_url, original_name, status, started_at, retry_count
+         FROM ${TABLES.TASKS}
+         WHERE status = 'processing'
+           AND (started_at IS NULL OR started_at < NOW() - INTERVAL '${PROCESSING_TIMEOUT_MS / 1000 / 60} minutes')
+         ORDER BY started_at ASC NULLS FIRST`,
+        []
+      )
+
+      if (rows.length === 0) {
+        console.log('[PendingTaskRecovery] ✅ 没有 stuck processing 任务')
+        return
+      }
+
+      console.log(`[PendingTaskRecovery] 📋 找到 ${rows.length} 个 stuck processing 任务`)
+
+      const queue = await getTaskQueue()
+      if (!queue) {
+        console.error('[PendingTaskRecovery] ❌ 队列不可用，跳过恢复')
+        return
+      }
+
+      const inFlightJobs = await queue.getJobs(['waiting', 'active', 'delayed'])
+      const inFlightTaskIds = new Set(inFlightJobs.map(j => j.data?.taskId).filter(Boolean))
+
+      let recoveredCount = 0
+      for (const task of rows) {
+        try {
+          if (inFlightTaskIds.has(task.id)) {
+            console.log(`[PendingTaskRecovery] ⏭️ ${task.original_name} 已在队列中`)
+            continue
+          }
+          await query(
+            `UPDATE ${TABLES.TASKS} SET status = 'pending', updated_at = NOW() WHERE id = $1`,
+            [task.id]
+          )
+          await queue.add('process-task', {
+            taskId: task.id,
+            studentId: task.student_id,
+            imageUrl: task.image_url,
+            originalName: task.original_name,
+            retryCount: (task.retry_count || 0) + 1
+          }, {
+            attempts: parseInt(process.env.MAX_RETRIES) || 3,
+            backoff: { type: 'exponential', delay: 5000 }
+          })
+          console.log(`[PendingTaskRecovery] ✅ 已恢复 stuck processing 任务: ${task.original_name}`)
+          recoveredCount++
+        } catch (err) {
+          console.error(`[PendingTaskRecovery]  恢复失败 ${task.original_name}:`, err.message)
+        }
+      }
+      console.log(`[PendingTaskRecovery] ✅ stuck processing 恢复完成: ${recoveredCount}/${rows.length}`)
+    } catch (err) {
+      console.error('[PendingTaskRecovery] ❌ stuck processing 扫描失败:', err)
     }
   }
 
