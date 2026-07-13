@@ -368,3 +368,47 @@ button {
   -webkit-backdrop-filter: saturate(180%) blur(20px);
   border-bottom: 0.5px solid rgba(0,0,0,0.12);
 }
+
+/* ── Phone frame — desktop browser simulates iPhone ── */
+.phone-frame {
+  max-width: 430px;
+  margin: 0 auto;
+  min-height: 100vh;
+  min-height: 100dvh;
+  background: var(--bg);
+  position: relative;
+  display: flex;
+  flex-direction: column;
+}
+
+@media (min-width: 500px) {
+  html, body {
+    background: #e5e5ea !important;
+  }
+  body {
+    display: flex;
+    justify-content: center;
+    align-items: flex-start;
+    min-height: 100vh;
+    padding: 0;
+  }
+  .phone-frame {
+    margin: 18px auto;
+    border-radius: 36px;
+    overflow: hidden;
+    box-shadow:
+      0 0 0 0.5px rgba(255,255,255,0.15),
+      0 0 0 4px #1c1c1e,
+      0 20px 60px rgba(0,0,0,0.35);
+    max-height: calc(100vh - 36px);
+    max-height: calc(100dvh - 36px);
+    min-height: auto;
+    height: calc(100vh - 36px);
+    height: calc(100dvh - 36px);
+  }
+  .phone-frame .overflow-scroll-area {
+    flex: 1;
+    overflow-y: auto;
+    -webkit-overflow-scrolling: touch;
+  }
+}

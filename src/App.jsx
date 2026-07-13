@@ -2129,7 +2129,8 @@ export default function App() {
   // Render
   const appContent = (
     <>
-      {/* Header */}
+      <div className="phone-frame">
+        {/* Header */}
         <header className="sticky top-0 z-50 glass border-b" style={{ borderColor: 'rgba(232,229,224,0.5)', paddingTop: 'env(safe-area-inset-top, 0px)' }}>
           <div className="max-w-lg mx-auto px-4 h-12 flex items-center justify-between">
             <div className="flex items-center gap-2">
@@ -2169,7 +2170,7 @@ export default function App() {
         </header>
 
         {/* Main Content */}
-        <main className="max-w-lg mx-auto" style={{ paddingBottom: '80px' }}>
+        <main className="max-w-lg mx-auto overflow-scroll-area" style={{ paddingBottom: '12px' }}>
           {/* 上传队列提示 — Claude style */}
           {uploadQueue.length > 0 && (
             <div className="sticky top-11 z-40 px-4 py-2.5 animate-fade-in" style={{ background: 'var(--warning-soft)', borderBottom: '1px solid rgba(232,168,56,0.2)' }}>
@@ -2958,7 +2959,7 @@ export default function App() {
         </main>
 
         {/* Bottom Navigation — Claude Style */}
-        <nav className="fixed bottom-0 left-0 right-0 z-50 glass border-t" style={{ borderColor: 'rgba(232,229,224,0.6)' }}>
+        <nav className="sticky bottom-0 z-50 glass border-t" style={{ borderColor: 'rgba(232,229,224,0.6)' }}>
           <div className="max-w-lg mx-auto flex items-center justify-around" style={{ padding: '6px 0', paddingBottom: 'calc(6px + env(safe-area-inset-bottom, 0px))' }}>
             {[
               { id: 'processing', icon: Camera, label: '首页' },
@@ -3001,6 +3002,7 @@ export default function App() {
             })}
           </div>
         </nav>
+        </div>
 
         {/* Student Sheet */}
         <StudentSwitcher
