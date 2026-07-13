@@ -94,11 +94,13 @@ async function postWith429Retry(client, endpoint, body, axiosOptions) {
  *  ⚠️ 2026-07 实测：ModelScope 免费在线推理仅 Qwen3-VL 系列可用，
  *     Qwen2.5-VL 及非 Qwen 模型均 "has no provider supported"。
  *     平台日后恢复其他模型时，改 Render 环境变量 AI_MODEL 即可，无需改代码。 */
+// ⚠️ 默认优先 8B（免费额度更稳、不易 429）；30B 仅作为 8B 配额耗尽时的轮换候选。
+// 顺序即轮换顺序：getCurrentVLModel() 取 VL_MODELS[0]，故 8B 必须排在最前。
 export const VL_MODELS = [...new Set([
   process.env.AI_MODEL,
   process.env.VL_MODEL,
-  'Qwen/Qwen3-VL-30B-A3B-Instruct',
   'Qwen/Qwen3-VL-8B-Instruct',
+  'Qwen/Qwen3-VL-30B-A3B-Instruct',
 ].filter(Boolean))]
 
 /** 文本模型列表（答案生成、标签生成用） */
