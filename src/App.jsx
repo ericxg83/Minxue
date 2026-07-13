@@ -3610,37 +3610,9 @@ export default function App() {
           <div className="min-h-screen flex flex-col" style={{ background: '#F5F7FA' }}>
             {appContent}
           </div>
-        ) : isMobile ? (
-          <div className="min-h-screen" style={{ background: '#F5F7FA' }}>
-            {appContent}
-          </div>
         ) : (
-          <div className="min-h-screen" style={{ background: '#1a1a2e', display: 'flex', alignItems: 'center', justifyContent: 'center', padding: '20px' }}>
-            <div style={{
-              width: '100%',
-              maxWidth: '430px',
-              height: '100vh',
-              maxHeight: '932px',
-              background: '#000',
-              borderRadius: '40px',
-              padding: '12px',
-              boxShadow: '0 25px 50px -12px rgba(0,0,0,0.5)',
-              display: 'flex',
-              flexDirection: 'column'
-            }}>
-              {/* 刘海 */}
-              <div style={{ height: '28px', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
-                <div style={{ width: '120px', height: '28px', background: '#000', borderRadius: '0 0 20px 20px' }} />
-              </div>
-              {/* 屏幕内容 */}
-              <div style={{ flex: 1, borderRadius: '32px', overflow: 'hidden', background: '#F5F7FA', position: 'relative' }}>
-                {appContent}
-              </div>
-              {/* 底部指示条 */}
-              <div style={{ height: '20px', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
-                <div style={{ width: '134px', height: '5px', background: '#333', borderRadius: '100px' }} />
-              </div>
-            </div>
+          <div className="min-h-screen" style={{ background: isMobile ? '#F5F7FA' : '#e5e5ea' }}>
+            {appContent}
           </div>
         )}
       </ToastProvider>
