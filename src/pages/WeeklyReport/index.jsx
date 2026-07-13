@@ -6,7 +6,7 @@ import {
 } from 'antd-mobile'
 import { Download } from 'lucide-react'
 import { useStudentStore } from '../../store'
-import { getAllWeeklyReports } from '../../services/apiService'
+import { getWeeklyReport } from '../../services/apiService'
 import { generateWeeklyReport } from '../../utils/weeklyReportGenerator'
 import { saveAs } from 'file-saver'
 import dayjs from 'dayjs'
@@ -59,7 +59,7 @@ export default function WeeklyReport() {
   const { currentStudent } = useStudentStore()
 
   const [generating, setGenerating] = useState(false)
-  const [summaryData, setSummaryData] = useState(null)
+  const [reportData, setReportData] = useState(null)
   const [loadingSummary, setLoadingSummary] = useState(false)
 
   const [periodMode, setPeriodMode] = useState('week')
@@ -80,15 +80,21 @@ export default function WeeklyReport() {
 
   useEffect(() => {
     loadSummary()
-  }, [periodMode, periodOffset])
+  }, [periodMode, periodOffset, currentStudent?.id])
 
   const loadSummary = async () => {
+    if (!currentStudent?.id) {
+      setReportData(null)
+      return
+    }
     setLoadingSummary(true)
     try {
-      const data = await getAllWeeklyReports({ mode: periodMode, offset: periodOffset })
-      if (data.success) setSummaryData(data)
+      // 与 PC 端报告模块同源：单学生接口返回 stats + knowledgeDiagnosis + subjectDiagnosis
+      const data = await getWeeklyReport(currentStudent.id, { mode: periodMode, offset: periodOffset })
+      setReportData(data?.success ? data : null)
     } catch (err) {
-      console.warn('加载统计摘要失败:', err)
+      console.warn('加载周报告失败:', err)
+      setReportData(null)
     } finally {
       setLoadingSummary(false)
     }
@@ -117,10 +123,15 @@ export default function WeeklyReport() {
     }
   }
 
-  const stats = summaryData?.reports?.find(r => r.student?.id === currentStudent?.id)?.stats
-  const reportData = summaryData?.reports?.find(r => r.student?.id === currentStudent?.id)
+  const stats = reportData?.stats
   const subjectDiagnosis = reportData?.subjectDiagnosis || []
+  const knowledgeDiagnosis = reportData?.knowledgeDiagnosis || []
   const dailyTrend = reportData?.dailyTrend || []
+
+  // 高频薄弱点（按错误次数排序取前 3，与 PC 端一致）
+  const topWeakTags = [...knowledgeDiagnosis]
+    .sort((a, b) => (b.wrongCount || 0) - (a.wrongCount || 0))
+    .slice(0, 3)
 
   // 最薄弱知识点
   let weakestTag = ''
@@ -220,8 +231,13 @@ export default function WeeklyReport() {
               background: T.card, borderRadius: '14px', padding: '16px',
               border: '1px solid ' + T.borderLight
             }}>
-              <div style={{ fontSize: '15px', fontWeight: 600, color: T.text, marginBottom: '14px' }}>
-                学习概览
+              <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '14px' }}>
+                <span style={{
+                  display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
+                  minWidth: '22px', height: '22px', padding: '0 6px', borderRadius: '6px',
+                  background: T.primary, color: '#fff', fontSize: '12px', fontWeight: 700
+                }}>01</span>
+                <span style={{ fontSize: '15px', fontWeight: 600, color: T.text }}>本周学习概览</span>
               </div>
               {stats ? (
                 <>
@@ -281,17 +297,38 @@ export default function WeeklyReport() {
               )}
             </div>
 
-            {/* 学科诊断 */}
-            {subjectDiagnosis.length > 0 && (
+            {/* 02 学科诊断分析 */}
+            {stats && (subjectDiagnosis.length > 0 || knowledgeDiagnosis.length > 0) && (
               <div style={{
                 background: T.card, borderRadius: '14px', padding: '16px', marginTop: '12px',
                 border: '1px solid ' + T.borderLight
               }}>
-                <div style={{ fontSize: '15px', fontWeight: 600, color: T.text, marginBottom: '12px' }}>
-                  学科诊断
+                <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '14px' }}>
+                  <span style={{
+                    display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
+                    minWidth: '22px', height: '22px', padding: '0 6px', borderRadius: '6px',
+                    background: T.accent, color: '#fff', fontSize: '12px', fontWeight: 700
+                  }}>02</span>
+                  <span style={{ fontSize: '15px', fontWeight: 600, color: T.text }}>学科诊断分析</span>
                 </div>
+
+                {/* 高频薄弱点提示（与 PC 端一致） */}
+                {topWeakTags.length > 0 && (
+                  <div style={{
+                    background: T.warningSoft, borderRadius: '10px', padding: '10px 12px',
+                    marginBottom: '14px', display: 'flex', gap: '8px', alignItems: 'flex-start'
+                  }}>
+                    <span style={{ fontSize: '14px', lineHeight: '20px' }}>⚠️</span>
+                    <div style={{ fontSize: '12px', color: '#9A3412', lineHeight: 1.6 }}>
+                      <strong>本周高频薄弱点：</strong>
+                      {topWeakTags.map(t => `「${t.tag}」正确率 ${t.accuracy}%`).join('；')}
+                    </div>
+                  </div>
+                )}
+
+                {/* 学科概览：各科正确率 + 薄弱标签 */}
                 {subjectDiagnosis.map((s, i) => (
-                  <div key={i} style={{ marginBottom: i < subjectDiagnosis.length - 1 ? '12px' : 0 }}>
+                  <div key={i} style={{ marginBottom: '12px' }}>
                     <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '8px' }}>
                       <span style={{ fontSize: '14px', fontWeight: 600, color: T.text }}>{s.subject}</span>
                       <span style={{ fontSize: '12px', fontWeight: 600, color: colorForAccuracy(s.accuracy) }}>
@@ -316,18 +353,54 @@ export default function WeeklyReport() {
                   </div>
                 ))}
 
+                {/* 知识点掌握明细（与 PC 端知识点诊断表同源） */}
+                {knowledgeDiagnosis.length > 0 && (
+                  <div style={{ marginTop: subjectDiagnosis.length > 0 ? '8px' : 0 }}>
+                    <div style={{ fontSize: '12px', fontWeight: 600, color: T.textSec, margin: '4px 0 10px' }}>
+                      知识点掌握明细
+                    </div>
+                    {knowledgeDiagnosis.map((k, i) => (
+                      <div key={i} style={{ marginBottom: i < knowledgeDiagnosis.length - 1 ? '12px' : 0 }}>
+                        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '4px' }}>
+                          <span style={{ fontSize: '13px', color: T.text, flex: 1, marginRight: '8px', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                            {k.tag}
+                          </span>
+                          <span style={{ fontSize: '11px', color: T.textTer, marginRight: '8px', flexShrink: 0 }}>
+                            错{k.wrongCount}/{k.totalCount}题
+                          </span>
+                          <span style={{
+                            fontSize: '11px', fontWeight: 700, flexShrink: 0,
+                            color: colorForAccuracy(k.accuracy), minWidth: '38px', textAlign: 'right'
+                          }}>
+                            {k.accuracy}%
+                          </span>
+                        </div>
+                        <div style={{ height: '6px', borderRadius: '3px', background: T.borderLight, overflow: 'hidden' }}>
+                          <div style={{
+                            height: '100%', width: `${Math.max(0, Math.min(100, k.accuracy))}%`,
+                            background: colorForAccuracy(k.accuracy), borderRadius: '3px',
+                            transition: 'width 0.3s ease'
+                          }} />
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                )}
+
                 {/* 老师建议 */}
-                <div style={{
-                  marginTop: '12px', background: '#FFF7ED', borderRadius: '10px',
-                  padding: '12px 14px', border: '1px solid #FED7AA'
-                }}>
-                  <div style={{ fontSize: '12px', fontWeight: 600, color: T.accent, marginBottom: '4px' }}>
-                    老师建议
+                {teacherAdvice && (
+                  <div style={{
+                    marginTop: '14px', background: '#FFF7ED', borderRadius: '10px',
+                    padding: '12px 14px', border: '1px solid #FED7AA'
+                  }}>
+                    <div style={{ fontSize: '12px', fontWeight: 600, color: T.accent, marginBottom: '4px' }}>
+                      老师建议
+                    </div>
+                    <div style={{ fontSize: '13px', color: '#9A3412', lineHeight: 1.6 }}>
+                      {teacherAdvice}
+                    </div>
                   </div>
-                  <div style={{ fontSize: '13px', color: '#9A3412', lineHeight: 1.6 }}>
-                    {teacherAdvice}
-                  </div>
-                </div>
+                )}
               </div>
             )}
           </div>
