@@ -4,6 +4,7 @@ services:
     rootDir: server
     plan: free
     env: node
+    nodeVersion: "22"
     buildCommand: npm install
     startCommand: node index.js
     envVars:
