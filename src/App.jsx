@@ -2318,15 +2318,7 @@ export default function App() {
                           {/* Content */}
                           <div className="flex-1 min-w-0">
                             <div className="flex items-center gap-1.5 min-w-0">
-                              {/* 顶部已有「日常作业/错题重练」筛选，列表内仅保留「错题重练」标识用于「全部」下区分，日常作业默认多数项不再重复标注 */}
-                              {task.task_type === 'retry_paper' && (
-                                <span className="inline-flex items-center flex-shrink-0 px-1.5 py-0.5 rounded-md text-[10px] font-medium" style={{
-                                  background: 'var(--purple-soft)',
-                                  color: 'var(--purple)'
-                                }}>
-                                  错题重练
-                                </span>
-                              )}
+                              {/* 顶部已有「日常作业/错题重练」筛选，列表内不再重复标注任务类型 */}
                               <span className="text-card-title truncate">
                                 {task.original_name || '未命名试卷'}
                               </span>
