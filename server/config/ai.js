@@ -67,13 +67,14 @@ export async function withAiLimit(fn) {
  * @param {object} axiosOptions
  * @returns {Promise<import('axios').AxiosResponse>}
  */
-async function postWith429Retry(client, endpoint, body, axiosOptions) {
+async function postWith429Retry(client, endpoint, body, axiosOptions, { retry429 = true } = {}) {
   for (let attempt = 0; ; attempt++) {
     try {
       return await withAiLimit(() => client.post(endpoint, body, axiosOptions))
     } catch (err) {
       const status = err.response?.status
-      if (status === 429 && attempt < RETRY_DELAYS_429.length) {
+      // retry429=false 时（主 API 直连场景）：429 不重试，立即抛出交由上层切备用，避免白等退避
+      if (retry429 && status === 429 && attempt < RETRY_DELAYS_429.length) {
         const delay = RETRY_DELAYS_429[attempt]
         console.warn(`⚠️ [AI] 429 限流，${delay / 1000}s 后重试（第 ${attempt + 1}/${RETRY_DELAYS_429.length} 次）...`)
         await sleep(delay)
@@ -82,6 +83,17 @@ async function postWith429Retry(client, endpoint, body, axiosOptions) {
       throw err
     }
   }
+}
+
+// ── 主 API 当日限额标记 ──
+// 一旦主 API（ModelScope）命中 429，当天剩余时间都不再直连主 API，
+// 直接从跨厂商备用开始尝试，避免每个任务都白等 80s 退避（免费额度按天重置）。
+let _mainRateLimitedDate = null
+function markMainRateLimited() {
+  _mainRateLimitedDate = new Date().toISOString().slice(0, 10)
+}
+export function isMainRateLimitedToday() {
+  return _mainRateLimitedDate === new Date().toISOString().slice(0, 10)
 }
 
 // ── AI 模型轮换机制 ──
@@ -330,7 +342,7 @@ export async function callTextCompletion(opts) {
         const resp = await postWith429Retry(axios, AI_CONFIG.ENDPOINT, primaryBody, {
           headers: getAIHeaders(),
           timeout: 30000
-        })
+        }, { retry429: false })
         const content = resp.data?.choices?.[0]?.message?.content
         if (!content) {
           primaryErr = new Error('AI 返回内容为空')
@@ -351,19 +363,32 @@ export async function callTextCompletion(opts) {
     return { err: primaryErr }
   }
 
-  const primaryResult = await tryPrimary()
-  if (primaryResult.content) {
-    return { content: primaryResult.content, usedBackup: false }
+  // 当天主 API 已限额：跳过主 API 直连，直接走备用，避免每个任务白等
+  if (isMainRateLimitedToday()) {
+    console.warn(`⚠️ [AI] 主 API 今日已限额，跳过直连，直接从备用 API 开始`)
+    primaryErr = new Error('主 API 今日限额，已跳过')
+    const status = 429
+    const isQuota = true
+    const primaryKeyMissing = false
+    if (!isQuota && !primaryKeyMissing && !primaryErr.response) {
+      throw primaryErr
+    }
+    console.warn(`⚠️ [AI] 主 API 调用失败（429 限流），尝试备用 API...`)
+  } else {
+    const primaryResult = await tryPrimary()
+    if (primaryResult.content) {
+      return { content: primaryResult.content, usedBackup: false }
+    }
+    primaryErr = primaryResult.err
+    const status = primaryErr.response?.status
+    const isQuota = status === 429
+    const primaryKeyMissing = !AI_CONFIG.API_KEY
+    if (!isQuota && !primaryKeyMissing && !primaryErr.response) {
+      // 非限流、非 Key 缺失的网络异常 → 直接抛出，不轻易切备用（可能是临时抖动由调用方重试）
+      throw primaryErr
+    }
+    console.warn(`⚠️ [AI] 主 API 调用失败${isQuota ? '（429 限流）' : primaryKeyMissing ? '（Key 缺失）' : ''}，尝试备用 API...`)
   }
-  primaryErr = primaryResult.err
-  const status = primaryErr.response?.status
-  const isQuota = status === 429
-  const primaryKeyMissing = !AI_CONFIG.API_KEY
-  if (!isQuota && !primaryKeyMissing && !primaryErr.response) {
-    // 非限流、非 Key 缺失的网络异常 → 直接抛出，不轻易切备用（可能是临时抖动由调用方重试）
-    throw primaryErr
-  }
-  console.warn(`⚠️ [AI] 主 API 调用失败${isQuota ? '（429 限流）' : primaryKeyMissing ? '（Key 缺失）' : ''}，尝试备用 API...`)
 
   // 1.5 备用2 API（魔搭第二把 Key，同一端点独立免费额度）
   if (MODELSCOPE_BACKUP.ENABLED) {
@@ -465,8 +490,15 @@ export async function callVisionCompletion(opts) {
 
   // ── Provider 定义列表 ──
   // 按顺序尝试，任一成功即返回。
-  const providers = [
-    {
+  const skipMainToday = isMainRateLimitedToday()
+  if (skipMainToday) {
+    console.warn(`⚠️ [AI-Vision] 主 API 今日已限额，跳过直连，从备用开始尝试`)
+  }
+  const providers = []
+
+  // 主 API（ModelScope）：当天未限额时才加入；命中 429 时立即标记，后续任务跳过
+  if (!skipMainToday) {
+    providers.push({
       name: '主 API (ModelScope)',
       endpoint: AI_CONFIG.ENDPOINT,
       model: () => model || getCurrentVLModel(),
@@ -477,13 +509,14 @@ export async function callVisionCompletion(opts) {
         temperature,
         max_tokens: maxTokens
       }),
-      // 仅当 429 或 Key 缺失才跳过此 Provider
+      // 429 不重试（retry429=false），命中即标记当日限额并跳过；Key 缺失也跳过
       shouldSkipOnError: (err) => {
         const status = err.response?.status
+        if (status === 429) markMainRateLimited()
         return status === 429 || !AI_CONFIG.API_KEY
       }
-    }
-  ]
+    })
+  }
 
   // 备用2 API（魔搭第二把 Key，同一端点独立免费额度）
   if (MODELSCOPE_BACKUP.ENABLED) {
@@ -566,7 +599,7 @@ export async function callVisionCompletion(opts) {
         const resp = await postWith429Retry(_backupAxios, p.endpoint, p.buildBody(currentModel), {
           headers: p.headers(),
           timeout: AI_CONFIG.TIMEOUT
-        })
+        }, { retry429: i !== 0 })
         const content = extractContent(resp.data?.choices?.[0]?.message)
         if (!content) {
           providerLastErr = new Error('AI 返回内容为空')
@@ -586,9 +619,10 @@ export async function callVisionCompletion(opts) {
     }
 
     if (providerContent) {
-      const label = i === 0 ? '主' : `备用 (${i})`
+      const usedMain = p.name.includes('主 API')
+      const label = usedMain ? '主' : `备用 (${i})`
       console.log(`✅ [AI-Vision] ${label} API 调用成功（${currentModel}）`)
-      return { content: providerContent, usedBackup: i > 0 }
+      return { content: providerContent, usedBackup: !usedMain }
     }
 
     const err = providerLastErr || new Error('空响应')
