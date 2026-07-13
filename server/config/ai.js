@@ -413,11 +413,10 @@ export async function callVisionCompletion(opts) {
         temperature,
         max_tokens: maxTokens
       }),
-      // 与主 API 同端点：仅当 429 或 Key 缺失才跳过此 Provider
-      shouldSkipOnError: (err) => {
-        const status = err.response?.status
-        return status === 429 || !MODELSCOPE_BACKUP.API_KEY
-      }
+      // 备用 Provider：任一错误（含 401 鉴权失败 / Key 未绑定阿里云账号）都跳过，
+      // 继续尝试后续跨厂商备用（OpenRouter / agnES），绝不因本层失败而中止整条链路
+      // （旧逻辑对 401 返回 false 会直接 throw，挡住后面真正可用的备用）。
+      shouldSkipOnError: () => true
     })
   }
 
