@@ -72,14 +72,127 @@ function estimateSkewAngle(grayRaw, w, h, maxDeg = 6, step = 0.5) {
 }
 
 /**
- * 几何配图净化：去灰底 / 去浅笔迹 / 白背景 / 轻度纠偏。
+ * 估算局部纸张背景（低频亮度场）。
+ * 粗网格均值池化（block 平均）+ 最近邻上采样：抹掉细几何线条，
+ * 只保留纸面亮度 + 拍摄阴影的大尺度渐变，作为每个像素的"白底"基准。
+ * 最近邻 + 均值池化不会像插值那样把阴影极值压向中灰，阴影归一化才准确。
  *
- * 处理链（全部基于 sharp，无 opencv）：
- *   1. 灰度化 + 归一化（拉伸对比度）
- *   2. gamma 提亮：把浅灰背景、浅铅笔痕推向纯白
- *   3. 阈值二值化：低于阈值的暗像素（印刷线条）保留为黑，其余变白
- *      —— 铅笔作答通常比印刷线浅，阈值可滤掉大部分；印刷几何线条保留
- *   4. 中值滤波去椒盐噪点
+ * @param {Uint8Array} grayRaw 灰度原始像素
+ * @param {number} w
+ * @param {number} h
+ * @returns {Uint8Array}
+ */
+function estimatePaperBackground(grayRaw, w, h) {
+  const GRID = 32 // 背景网格分辨率（cell 越大越宽容线条，越平滑阴影）
+  const cw = Math.ceil(w / GRID)
+  const ch = Math.ceil(h / GRID)
+  const gw = Math.ceil(w / cw)
+  const gh = Math.ceil(h / ch)
+  const grid = new Float32Array(gw * gh)
+  const cnt = new Int32Array(gw * gh)
+  for (let y = 0; y < h; y++) {
+    const gy = (y / ch) | 0
+    for (let x = 0; x < w; x++) {
+      const gx = (x / cw) | 0
+      const gi = gy * gw + gx
+      grid[gi] += grayRaw[y * w + x]
+      cnt[gi] += 1
+    }
+  }
+  const bg = new Uint8Array(w * h)
+  const lastGx = gw - 1, lastGy = gh - 1
+  for (let y = 0; y < h; y++) {
+    const gy = Math.min((y / ch) | 0, lastGy)
+    for (let x = 0; x < w; x++) {
+      const gx = Math.min((x / cw) | 0, lastGx)
+      const gi = gy * gw + gx
+      bg[y * w + x] = cnt[gi] ? Math.round(grid[gi] / cnt[gi]) : 255
+    }
+  }
+  return bg
+}
+
+/**
+ * 去除孤立椒盐噪点（保边）：仅当某像素是 3x3 邻域内的"极端离群点"
+ * （与全部 8 个邻居都明显不同）时才视为噪点并替换为邻域中值。
+ * 连通的几何线条像素至少与某个邻居同色，不会被判定为离群 → 细线完整保留；
+ * 而单点噪点（死点/扫描噪点）因四周皆异色而被抹除。
+ * 边缘像素直接拷贝。
+ *
+ * @param {Uint8Array} src 单通道灰度
+ * @param {number} w
+ * @param {number} h
+ * @returns {Uint8Array}
+ */
+function removeIsolatedSpecks(src, w, h) {
+  const T = 40 // 与邻居差异超过此值才视为离群噪点
+  const dst = new Uint8Array(src.length)
+  for (let y = 0; y < h; y++) {
+    for (let x = 0; x < w; x++) {
+      const i = y * w + x
+      if (x === 0 || y === 0 || x === w - 1 || y === h - 1) {
+        dst[i] = src[i]
+        continue
+      }
+      const v = src[i]
+      const nb = [
+        src[i - w - 1], src[i - w], src[i - w + 1],
+        src[i - 1], src[i + 1],
+        src[i + w - 1], src[i + w], src[i + w + 1],
+      ]
+      let mn = 255, mx = 0
+      for (let k = 0; k < 9; k++) { if (nb[k] < mn) mn = nb[k]; if (nb[k] > mx) mx = nb[k] }
+      if (v < mn - T || v > mx + T) {
+        const sorted = nb.slice().sort((p, q) => p - q)
+        dst[i] = sorted[4]
+      } else {
+        dst[i] = v
+      }
+    }
+  }
+  return dst
+}
+
+/**
+ * 几何图像素级净化（无阈值）：阴影归一化 + 软白底映射。
+ *
+ * 核心：用局部背景亮度归一化，消除整片阴影；再用软映射把线条平滑推向深色
+ * （不硬切 0/255），保留抗锯齿边缘 → 教材插图效果，而非纯黑白 mask。
+ *
+ *   ratio    = gray / bg            // 纸面≈1，线条<1（阴影区 bg 低，纸面仍归一为≈1）
+ *   strength = 1 - ratio            // 0=纸面(白)，1=纯黑线条
+ *   out      = 255 - strength^γ * depth   // 软映射，线条最暗≈255-depth（保留灰阶，不死黑）
+ *
+ * @param {Uint8Array} grayRaw 灰度原始像素
+ * @param {Uint8Array} bg 局部背景亮度场（同尺寸）
+ * @param {number} w
+ * @param {number} h
+ * @returns {Uint8Array} 净化后的灰度像素（背景≈白，线条平滑深色）
+ */
+function cleanGeometryPixels(grayRaw, bg, w, h) {
+  const lineDepth = 235   // 线条最暗约 255-235 = 20（保留灰阶，避免死黑，教材风）
+  const gamma = 0.8       // <1：略微加深细线 / 浅铅笔痕，又不至于过黑
+  const out = new Uint8Array(grayRaw.length)
+  for (let i = 0; i < grayRaw.length; i++) {
+    const b = bg[i] || 1
+    const ratio = grayRaw[i] / b
+    let strength = 1 - ratio
+    if (strength < 0) strength = 0
+    else if (strength > 1) strength = 1
+    out[i] = Math.round(255 - Math.pow(strength, gamma) * lineDepth)
+  }
+  return out
+}
+
+/**
+ * 几何配图净化：自适应背景校正 / 去灰底阴影 / 保边去噪 / 白背景 / 轻度纠偏。
+ *
+ * 处理链（全部基于 sharp，无 opencv，最终输出非二值 mask，接近教材插图）：
+ *   1. 灰度化，取出原始像素
+ *   2. 自适应背景估计：大幅降采样→上采样，得到局部纸面+阴影的低频亮度场
+ *   3. 3x3 中值保边去噪（去椒盐噪点 / 浅笔迹，保留细线）
+ *   4. 阴影归一化 + 软白底映射（按局部背景亮度归一化消除整片阴影；
+ *      线条平滑推向深色，不硬切 0/255，保留抗锯齿边缘）
  *   5. 投影廓线法估算倾斜角 → 轻度旋转纠偏（白底填充）
  *   6. trim 去掉纠偏后四周多余白边
  *
@@ -90,35 +203,36 @@ function estimateSkewAngle(grayRaw, w, h, maxDeg = 6, step = 0.5) {
  */
 async function cleanGeometryCrop(buffer) {
   try {
-    // ── 1~4. 灰度 → 提亮 → 二值化 → 去噪 ──
-    const cleaned = await sharp(buffer)
+    // ── 1. 灰度原始像素 ──
+    const { data: grayRaw, info } = await sharp(buffer)
       .grayscale()
-      .normalize()
-      .gamma(1.6)                 // 提亮中间调，压掉浅灰背景/浅笔迹
-      .threshold(170)             // 二值化：印刷线条(暗)保留，浅底/浅笔迹变白
-      .median(2)                  // 去椒盐噪点
-      .toColourspace('b-w')
-      .toBuffer()
+      .raw()
+      .toBuffer({ resolveWithObject: true })
+    const w = info.width, h = info.height
+    if (!w || !h) throw new Error('空图像')
+
+    // ── 2. 自适应背景估计（局部纸面 + 阴影低频场）──
+    const bg = await estimatePaperBackground(grayRaw, w, h)
+
+    // ── 3~4. 去孤立噪点 + 阴影归一化 + 软白底映射（无阈值）──
+    const denoised = removeIsolatedSpecks(grayRaw, w, h)
+    const clean = cleanGeometryPixels(denoised, bg, w, h)
 
     // ── 5. 估算倾斜角（用净化后的灰度像素）──
     let angle = 0
     try {
-      const { data, info } = await sharp(cleaned)
-        .grayscale()
-        .raw()
-        .toBuffer({ resolveWithObject: true })
-      angle = estimateSkewAngle(data, info.width, info.height)
+      angle = estimateSkewAngle(clean, w, h)
     } catch (e) {
       console.warn(`   ⚠️ [几何图净化] 倾斜估算失败，跳过纠偏: ${e.message}`)
     }
 
     // ── 5~6. 轻度纠偏（白底填充）+ trim 去白边 ──
-    let pipeline = sharp(cleaned)
+    let img = sharp(clean, { raw: { width: w, height: h, channels: 1 } }).png()
     if (Math.abs(angle) >= 0.5) {
-      pipeline = pipeline.rotate(angle, { background: '#ffffff' })
+      img = img.rotate(angle, { background: '#ffffff' })
       console.log(`   [几何图净化] 纠偏 ${angle.toFixed(1)}°`)
     }
-    const out = await pipeline
+    const out = await img
       .flatten({ background: '#ffffff' })
       .trim({ threshold: 10 })    // 去掉旋转/裁剪残留的四周白边
       .png()
