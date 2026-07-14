@@ -1353,7 +1353,6 @@ app.get('/api/wrong-questions/student/:studentId', async (req, res) => {
     console.error('获取错题失败:', error)
     res.status(500).json({ error: error.message })
   }
-  }
 })
 
 // [P0-2a] 按 (student_id, question_id) upsert，修复扫码批改 ID 错配
