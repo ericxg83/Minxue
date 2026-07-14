@@ -3,16 +3,16 @@
     <div class="page-header">
       <h2>练习册管理</h2>
       <el-button type="primary" @click="showCreateDialog = true">
-        <el-icon><Plus /></el-icon> 新建练习册
+        <el-icon><Plus /></el-icon>
+        新建练习册
       </el-button>
     </div>
 
-    <!-- 练习册列表 -->
     <el-table :data="worksheets" v-loading="loading" stripe style="width: 100%">
       <el-table-column prop="name" label="名称" min-width="180" />
       <el-table-column prop="grade" label="年级" width="100" />
       <el-table-column prop="subject" label="科目" width="100" />
-      <el-table-column label="答案数" width="80">
+      <el-table-column label="答案数" width="90">
         <template #default="{ row }">{{ row.answer_count || 0 }} 题</template>
       </el-table-column>
       <el-table-column label="状态" width="100">
@@ -30,7 +30,7 @@
           <el-button size="small" @click="handleReview(row)" :disabled="row.answer_count === 0">
             审核答案
           </el-button>
-          <el-button size="small" @click="handleUploadPdf(row)">上传PDF</el-button>
+          <el-button size="small" @click="handleUploadPdf(row)">上传 PDF</el-button>
           <el-button
             size="small"
             :type="row.status === 'published' ? 'warning' : 'success'"
@@ -49,7 +49,6 @@
 
     <el-empty v-if="!loading && worksheets.length === 0" description="暂无练习册，点击右上角新建" />
 
-    <!-- 新建对话框 -->
     <el-dialog v-model="showCreateDialog" title="新建练习册" width="420px">
       <el-form :model="createForm" label-width="60px">
         <el-form-item label="名称">
@@ -72,8 +71,7 @@
       </template>
     </el-dialog>
 
-    <!-- PDF上传对话框 -->
-    <el-dialog v-model="showPdfDialog" title="上传答案PDF" width="500px">
+    <el-dialog v-model="showPdfDialog" title="上传答案 PDF" width="500px">
       <div v-if="!pdfUploaded">
         <el-upload
           drag
@@ -83,9 +81,9 @@
           :limit="1"
         >
           <el-icon class="el-icon--upload" :size="48"><UploadFilled /></el-icon>
-          <div class="el-upload__text">拖拽PDF到此处，或<em>点击选择</em></div>
+          <div class="el-upload__text">拖拽 PDF 到此处，或 <em>点击选择</em></div>
           <template #tip>
-            <div class="el-upload__tip">支持含参考答案的练习册PDF（含题目+答案页 或 纯答案页）</div>
+            <div class="el-upload__tip">支持含参考答案的练习册 PDF（含题目+答案页 或 纯答案页）</div>
           </template>
         </el-upload>
         <div v-if="selectedPdf" class="pdf-info">
@@ -115,7 +113,13 @@ import { ref, onMounted } from 'vue'
 import { useRouter } from 'vue-router'
 import { Plus, UploadFilled } from '@element-plus/icons-vue'
 import { ElMessage } from 'element-plus'
-import { getWorkbooks, createWorkbook, deleteWorkbook, updateWorkbookStatus, uploadPdf } from '../api/worksheetApi.js'
+import {
+  getWorksheets,
+  createWorksheet,
+  deleteWorksheet,
+  updateWorksheetStatus,
+  uploadPdf,
+} from '../../services/apiService.js'
 
 const router = useRouter()
 const worksheets = ref([])
@@ -124,7 +128,6 @@ const showCreateDialog = ref(false)
 const creating = ref(false)
 const createForm = ref({ name: '', subject: '', grade: '' })
 
-// PDF upload
 const showPdfDialog = ref(false)
 const selectedPdf = ref(null)
 const parsing = ref(false)
@@ -135,30 +138,36 @@ const currentWorksheetId = ref(null)
 const loadData = async () => {
   loading.value = true
   try {
-    worksheets.value = await getWorkbooks()
+    worksheets.value = await getWorksheets()
   } catch (e) {
     ElMessage.error('加载练习册列表失败: ' + e.message)
+  } finally {
+    loading.value = false
   }
-  loading.value = false
 }
 
 onMounted(loadData)
 
-const statusType = (s) => {
-  if (s === 'published') return 'success'
-  if (s === 'reviewing') return 'warning'
+const statusType = (status) => {
+  if (status === 'published') return 'success'
+  if (status === 'reviewing') return 'warning'
   return 'info'
 }
 
-const statusLabel = (s) => {
-  if (s === 'published') return '已发布'
-  if (s === 'reviewing') return '审核中'
+const statusLabel = (status) => {
+  if (status === 'published') return '已发布'
+  if (status === 'reviewing') return '审核中'
   return '草稿'
 }
 
-const formatDate = (d) => {
-  if (!d) return ''
-  return new Date(d).toLocaleString('zh-CN', { month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit' })
+const formatDate = (value) => {
+  if (!value) return ''
+  return new Date(value).toLocaleString('zh-CN', {
+    month: '2-digit',
+    day: '2-digit',
+    hour: '2-digit',
+    minute: '2-digit',
+  })
 }
 
 const handleCreate = async () => {
@@ -166,22 +175,24 @@ const handleCreate = async () => {
     ElMessage.warning('请输入练习册名称')
     return
   }
+
   creating.value = true
   try {
-    await createWorkbook(createForm.value)
+    await createWorksheet(createForm.value)
     ElMessage.success('创建成功')
     showCreateDialog.value = false
     createForm.value = { name: '', subject: '', grade: '' }
     await loadData()
   } catch (e) {
     ElMessage.error('创建失败: ' + e.message)
+  } finally {
+    creating.value = false
   }
-  creating.value = false
 }
 
 const handleDelete = async (row) => {
   try {
-    await deleteWorkbook(row.id)
+    await deleteWorksheet(row.id)
     ElMessage.success('已删除')
     await loadData()
   } catch (e) {
@@ -192,7 +203,7 @@ const handleDelete = async (row) => {
 const handleToggleStatus = async (row) => {
   const newStatus = row.status === 'published' ? 'draft' : 'published'
   try {
-    await updateWorkbookStatus(row.id, newStatus)
+    await updateWorksheetStatus(row.id, newStatus)
     ElMessage.success(newStatus === 'published' ? '已发布' : '已撤回')
     await loadData()
   } catch (e) {
@@ -217,6 +228,7 @@ const handlePdfSelect = (uploadFile) => {
 
 const startParse = async () => {
   if (!selectedPdf.value || !currentWorksheetId.value) return
+
   parsing.value = true
   try {
     const result = await uploadPdf(currentWorksheetId.value, selectedPdf.value)
@@ -226,8 +238,9 @@ const startParse = async () => {
     await loadData()
   } catch (e) {
     ElMessage.error('解析失败: ' + e.message)
+  } finally {
+    parsing.value = false
   }
-  parsing.value = false
 }
 
 const resetPdfUpload = () => {
@@ -263,14 +276,9 @@ const gotoReview = () => {
 
 .pdf-info {
   margin-top: 16px;
-  text-align: center;
 }
 
 .parse-result {
-  text-align: center;
-}
-
-.mt-3 {
-  margin-top: 12px;
+  padding: 8px 0;
 }
 </style>

@@ -60,6 +60,9 @@ export default function Home({ onNavigate }) {
   }
 
   const handleRegularUpload = () => {
+    window.dispatchEvent(new CustomEvent('set-workbook-flow', {
+      detail: { flow: 'regular' }
+    }))
     // Use existing regular upload flow
     const input = document.getElementById('file-input')
     if (!input) return

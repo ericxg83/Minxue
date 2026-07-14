@@ -614,6 +614,15 @@ export const deleteWorksheet = async (id) => {
   return apiRequest(`/worksheets/${id}`, { method: 'DELETE' })
 }
 
+export const updateWorksheetStatus = async (id, status) => {
+  const data = await apiRequest(`/worksheets/${id}/status`, {
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ status })
+  })
+  return data.worksheet
+}
+
 export const getStudentWorksheetSetting = async (studentId, subject) => {
   const data = await apiRequest(`/worksheets/student-settings/${studentId}?subject=${encodeURIComponent(subject)}`)
   return data.setting || null
@@ -625,6 +634,17 @@ export const upsertStudentWorksheetSetting = async (studentId, subject, workshee
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ studentId, subject, worksheetId })
   })
+}
+
+export const uploadPdf = async (id, file, onProgress) => {
+  const fd = new FormData()
+  fd.append('file', file)
+  const data = await apiRequest(`/worksheets/${id}/parse-pdf`, {
+    method: 'POST',
+    body: fd,
+    onUploadProgress: onProgress
+  })
+  return data
 }
 
 export const clearAllCache = () => {
