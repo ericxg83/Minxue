@@ -1,4 +1,4 @@
-import { useEffect, useState, useRef } from 'react'
+import { useEffect, useState, useRef, useMemo } from 'react'
 import {
   Button,
   Toast,
@@ -210,27 +210,28 @@ export default function WrongBook({ onScanQR }) {
   }
 
   // 筛选错题（只显示当前学生的错题）
-  const filteredQuestions = (Array.isArray(wrongQuestions) ? wrongQuestions : []).filter(wq => {
+  const filteredQuestions = useMemo(() => {
+    return (Array.isArray(wrongQuestions) ? wrongQuestions : []).filter(wq => {
     // 首先过滤当前学生的错题
     if (wq.student_id !== currentStudent?.id) return false
-    
+
     // 分类筛选（全部/错题/未作答）— 第219-233行
     if (activeCategory !== 'all') {
       const question = wq.question || wq
       const answerSource = question.answer_source || question._answer_source || 'recognized'
       const isBlank = answerSource === 'blank'
       const isCorrect = question.is_correct !== undefined ? question.is_correct : wq.is_correct
-      
+
       // 复审页面判定逻辑：
       // 未作答: answer_source === 'blank' && is_correct === null
       // 错题: is_correct === false
       const isUnanswered = isBlank && isCorrect === null
       const isWrong = isCorrect === false
-      
+
       if (activeCategory === 'wrong' && !isWrong) return false
       if (activeCategory === 'unanswered' && !isUnanswered) return false
     }
-    
+
     // 掌握状态筛选（顶部标签和高级筛选共享此逻辑）
     if (activeStatus !== 'all') {
       const ls = wq.lifecycle_status || ''
@@ -241,10 +242,10 @@ export default function WrongBook({ onScanQR }) {
 
     // 科目筛选
     if (activeSubject !== 'all' && wq.subject !== activeSubject) return false
-    
+
     // 时间筛选
     if (activeTime !== 'all' && !isWithinTimeRange(wq.added_at || wq.created_at, activeTime)) return false
-    
+
     // 错误次数筛选
     if (activeErrorCount !== 'all' && !matchErrorCount(wq.error_count || 1, activeErrorCount)) return false
 
@@ -255,37 +256,41 @@ export default function WrongBook({ onScanQR }) {
         : (question.ai_tags || [])
       if (!tags.includes(activeTag)) return false
     }
-    
+
     return true
-  })
+    })
+  }, [wrongQuestions, currentStudent?.id, activeCategory, activeStatus, activeSubject, activeTime, activeErrorCount, activeTag])
 
   // 排序逻辑
-  const sortedQuestions = [...filteredQuestions].sort((a, b) => {
-    switch (sortBy) {
-      case 'time_desc':
-        return new Date(b.added_at || b.created_at) - new Date(a.added_at || a.created_at)
-      case 'time_asc':
-        return new Date(a.added_at || a.created_at) - new Date(b.added_at || b.created_at)
-      case 'error_asc':
-        return (a.error_count || 1) - (b.error_count || 1)
-      case 'error_desc':
-        return (b.error_count || 1) - (a.error_count || 1)
-      case 'subject':
-        return (a.subject || '').localeCompare(b.subject || '', 'zh')
-      default:
-        return 0
-    }
-  })
+  const sortedQuestions = useMemo(() => {
+    return [...filteredQuestions].sort((a, b) => {
+      switch (sortBy) {
+        case 'time_desc':
+          return new Date(b.added_at || b.created_at) - new Date(a.added_at || a.created_at)
+        case 'time_asc':
+          return new Date(a.added_at || a.created_at) - new Date(b.added_at || b.created_at)
+        case 'error_asc':
+          return (a.error_count || 1) - (b.error_count || 1)
+        case 'error_desc':
+          return (b.error_count || 1) - (a.error_count || 1)
+        case 'subject':
+          return (a.subject || '').localeCompare(b.subject || '', 'zh')
+        default:
+          return 0
+      }
+    })
+  }, [filteredQuestions, sortBy])
 
-  // 获取各状态数量（只统计当前学生的错题，按 lifecycle_status）
-  const getStatusCount = (key) => {
+  // 各掌握状态计数（预计算）
+  const statusCounts = useMemo(() => {
     const studentQuestions = (Array.isArray(wrongQuestions) ? wrongQuestions : []).filter(wq => wq.student_id === currentStudent?.id)
-    if (key === 'all') return studentQuestions.length
-    if (key === 'new') return studentQuestions.filter(wq => (wq.lifecycle_status || 'new') === 'new').length
-    if (key === 'review') return studentQuestions.filter(wq => wq.lifecycle_status === 'review_1' || wq.lifecycle_status === 'review_2').length
-    if (key === 'mastered') return studentQuestions.filter(wq => wq.lifecycle_status === 'mastered').length
-    return 0
-  }
+    return {
+      all: studentQuestions.length,
+      new: studentQuestions.filter(wq => (wq.lifecycle_status || 'new') === 'new').length,
+      review: studentQuestions.filter(wq => wq.lifecycle_status === 'review_1' || wq.lifecycle_status === 'review_2').length,
+      mastered: studentQuestions.filter(wq => wq.lifecycle_status === 'mastered').length
+    }
+  }, [wrongQuestions, currentStudent?.id])
 
   // 获取当前筛选条件的显示文本
   const getFilterLabel = () => {
@@ -318,7 +323,7 @@ export default function WrongBook({ onScanQR }) {
     setSortBy('time_desc')
   }
 
-  const getAllTags = () => {
+  const allTags = useMemo(() => {
     const tagSet = new Set()
     wrongQuestions
       .filter(wq => wq.student_id === currentStudent?.id)
@@ -330,9 +335,7 @@ export default function WrongBook({ onScanQR }) {
         tags.forEach(tag => tagSet.add(tag))
       })
     return Array.from(tagSet).sort()
-  }
-
-  const allTags = getAllTags()
+  }, [wrongQuestions, currentStudent?.id])
 
   // 判定题目类型（基于复审页面逻辑）
   const getQuestionType = (wq) => {
@@ -346,22 +349,25 @@ export default function WrongBook({ onScanQR }) {
     return 'other'
   }
 
-  // 获取各类型数量
-  const getQuestionTypeCount = (type) => {
+  // 各题目类型计数（预计算）
+  const questionTypeCounts = useMemo(() => {
     const studentQuestions = (Array.isArray(wrongQuestions) ? wrongQuestions : []).filter(wq => wq.student_id === currentStudent?.id)
-    if (type === 'all') return studentQuestions.length
-    return studentQuestions.filter(wq => getQuestionType(wq) === type).length
-  }
+    return {
+      all: studentQuestions.length,
+      wrong: studentQuestions.filter(wq => getQuestionType(wq) === 'wrong').length,
+      unanswered: studentQuestions.filter(wq => getQuestionType(wq) === 'unanswered').length
+    }
+  }, [wrongQuestions, currentStudent?.id])
 
-  // 获取统计数据（只统计当前学生的错题，按 lifecycle_status）
-  const getStats = () => {
+  // 统计数据（预计算）
+  const stats = useMemo(() => {
     const studentQuestions = (Array.isArray(wrongQuestions) ? wrongQuestions : []).filter(wq => wq.student_id === currentStudent?.id)
     const total = studentQuestions.length
     const mastered = studentQuestions.filter(wq => wq.lifecycle_status === 'mastered').length
     const review = studentQuestions.filter(wq => wq.lifecycle_status === 'review_1' || wq.lifecycle_status === 'review_2').length
     const notMastered = studentQuestions.filter(wq => (wq.lifecycle_status || 'new') === 'new').length
     return { total, mastered, review, notMastered }
-  }
+  }, [wrongQuestions, currentStudent?.id])
 
   // 切换选择
   const toggleSelection = (wq) => {
@@ -581,8 +587,7 @@ const renderMasteredTag = (wq) => {
   )
 }
 
-  const stats = getStats()
-
+  
   // 计算所有学生未掌握题的总数（用于顶部按钮提醒）
   const getTotalPendingCount = () => {
     return (Array.isArray(wrongQuestions) ? wrongQuestions : []).filter(wq => {
@@ -742,7 +747,7 @@ const renderMasteredTag = (wq) => {
         borderBottom: '1px solid ' + CLAUDE_COLORS.border
       }}>
         {STATUS_TABS.map(tab => {
-          const count = getStatusCount(tab.key)
+          const count = statusCounts[tab.key]
           const isActive = activeStatus === tab.key
           const tabColor = tab.key === 'mastered' ? CLAUDE_COLORS.success : tab.key === 'review' ? CLAUDE_COLORS.warning : tab.key === 'new' ? CLAUDE_COLORS.danger : CLAUDE_COLORS.primary
           return (

@@ -81,20 +81,21 @@ export const useGrowthStore = defineStore('growth', () => {
     }).length
   })
 
+  // ⚡ 缓存去重后的错题列表，供后续计算复用（避免每次 5 次独立去重）
+  const dedupedWrongQuestions = computed(() => {
+    if (!currentStudentId.value) return []
+    const studentWrong = wrongQuestions.value.filter(wq => wq.student_id === currentStudentId.value)
+    return deduplicateWrongQuestions(studentWrong)
+  })
+
   // 累计错题（去重后，知识漏洞数量）
   const totalWrongQuestions = computed(() => {
-    if (!currentStudentId.value) return 0
-    const studentWrong = wrongQuestions.value.filter(wq => wq.student_id === currentStudentId.value)
-    const deduped = deduplicateWrongQuestions(studentWrong)
-    return deduped.length
+    return dedupedWrongQuestions.value.length
   })
 
   // 已掌握题目
   const masteredQuestions = computed(() => {
-    if (!currentStudentId.value) return 0
-    const studentWrong = wrongQuestions.value.filter(wq => wq.student_id === currentStudentId.value)
-    const deduped = deduplicateWrongQuestions(studentWrong)
-    return deduped.filter(wq => wq.lifecycle_status === LIFECYCLE_STATUS.MASTERED).length
+    return dedupedWrongQuestions.value.filter(wq => wq.lifecycle_status === LIFECYCLE_STATUS.MASTERED).length
   })
 
   // 未掌握题目（待掌握 = 累计错题 - 已掌握）
@@ -125,9 +126,7 @@ export const useGrowthStore = defineStore('growth', () => {
   const eliminatedWrongLast30Days = computed(() => {
     if (!currentStudentId.value) return 0
     const thirtyDaysAgo = dayjs().subtract(30, 'day')
-    const studentWrong = wrongQuestions.value.filter(wq => wq.student_id === currentStudentId.value)
-    const deduped = deduplicateWrongQuestions(studentWrong)
-    return deduped.filter(wq => {
+    return dedupedWrongQuestions.value.filter(wq => {
       if (wq.lifecycle_status !== LIFECYCLE_STATUS.MASTERED) return false
       const lastWrong = dayjs(wq.last_wrong_at || wq.added_at)
       return lastWrong.isAfter(thirtyDaysAgo)

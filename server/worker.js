@@ -11,7 +11,7 @@ import sharp from 'sharp'
 import { TABLES, TASK_STATUS } from './config/neon.js'
 import { query } from './config/neon.js'
 import { AI_CONFIG, getAIHeaders, buildOCRPrompt, buildAnswerGenerationPrompt, getCurrentTextModel, getCurrentVLModel, rotateTextModel, rotateVLModel, TEXT_MODELS, VL_MODELS, callTextCompletion, callVisionCompletion } from './config/ai.js'
-import { updateTaskStatus, createQuestions, batchUpdateQuestionTags, addWrongQuestions, createJudgement, getLatestJudgement, updateQuestionAnswer, markAnswerException, findCachedQuestionByFingerprint, findSimilarQuestion, cacheQuestion, incrementQuestionUseCount, updateQuestionCacheId, createQuestionAsset } from './services/neonService.js'
+import { updateTaskStatus, createQuestions, batchUpdateQuestionTags, addWrongQuestions, createJudgement, getLatestJudgement, updateQuestionAnswer, markAnswerException, findCachedQuestionByFingerprint, cacheQuestion, incrementQuestionUseCount, updateQuestionCacheId, createQuestionAsset } from './services/neonService.js'
 import { uploadImage } from './services/ossService.js'
 import { generateTextFingerprint, generatePHash, PARSER_VERSION, TEXT_SIMILARITY_THRESHOLD } from './utils/questionFingerprint.js'
 import { uploadFilesWithRetry } from './services/uploadRetryManager.js'
@@ -1045,13 +1045,21 @@ const generateMissingAnswers = async (questions, imageBuffer = null) => {
     }
   }
 
-  const batchSize = 2
+  // ⚡ 优化：大幅提高并行度。withAiLimit 全局信号量（默认2）已限制 AI 并发数，
+  // 因此加大 batch 可让更多题目同时发起指纹查询，消除 for 循环批间等待。
+  // 同时移除耗时的 findSimilarQuestion（加载50条+编辑距离计算），直接走 AI 调用。
+  const batchSize = Math.min(needAnswer.length, 20)
   let updatedCount = 0
   let emptyCount = 0
   let placeholderCount = 0
   let exceptionCount = 0
   let cacheHitCount = 0
   let cacheMissCount = 0
+
+  // 辅助函数：非关键 DB 写入 fire-and-forget，不阻塞主流程
+  const fireForget = (fn, label) => {
+    fn().catch(err => console.error(`     [fire-forget] ${label}: ${err.message}`))
+  }
 
   for (let i = 0; i < needAnswer.length; i += batchSize) {
     const batch = needAnswer.slice(i, i + batchSize)
@@ -1061,11 +1069,10 @@ const generateMissingAnswers = async (questions, imageBuffer = null) => {
       const fullContent = options.length > 0 ? `${content}\n选项：${options.join('；')}` : content
       const fingerprint = generateTextFingerprint(content, options, q.question_type)
 
-      if (!fingerprint) {
-        console.log(`     题目 ${q.id.substring(0, 8)}: 指纹生成失败，跳过缓存`)
-      } else {
+      // 缓存查找
+      if (fingerprint) {
         const cached = await findCachedQuestionByFingerprint(fingerprint, PARSER_VERSION)
-        
+
         if (cached && cached.answer && cached.answer !== '待人工补充' && cached.answer !== '此为主观题，无唯一标准答案') {
           cacheHitCount++
           console.log(`     题目 ${q.id.substring(0, 8)}: ✅ 缓存命中 - 复用AI解析结果`)
@@ -1077,22 +1084,17 @@ const generateMissingAnswers = async (questions, imageBuffer = null) => {
             if (cached.analysis) q.analysis = cached.analysis
             updatedCount++
 
-            // 🔧 如果从解析提取的答案与缓存不同，同步更新缓存以防止后续合并时读取到错误值
+            // 非关键写入：fire-and-forget
             if (finalAnswer !== cached.answer) {
-              await query(
+              fireForget(() => query(
                 `UPDATE ${TABLES.QUESTION_CACHE} SET answer = $1, updated_at = NOW() WHERE id = $2`,
                 [finalAnswer, cached.id]
-              )
-              console.log(`     题目 ${q.id.substring(0, 8)}: 缓存答案同步更新 ${cached.answer} → ${finalAnswer}`)
+              ), `缓存答案同步更新 q=${q.id.substring(0, 8)}`)
             }
-
-            // 同步学科（从缓存恢复到题目）
-            await saveQuestionSubject(q, cached.subject)
-
-            await incrementQuestionUseCount(fingerprint, PARSER_VERSION)
-            // 设置 cache_id 指向权威缓存条目
+            fireForget(() => saveQuestionSubject(q, cached.subject), `学科同步 q=${q.id.substring(0, 8)}`)
+            fireForget(() => incrementQuestionUseCount(fingerprint, PARSER_VERSION), `useCount q=${q.id.substring(0, 8)}`)
             q.cache_id = cached.id
-            await updateQuestionCacheId(q.id, cached.id)
+            fireForget(() => updateQuestionCacheId(q.id, cached.id), `cacheId q=${q.id.substring(0, 8)}`)
           } catch (err) {
             console.error(`     题目 ${q.id.substring(0, 8)}: 缓存答案写入失败`, err.message)
             exceptionCount++
@@ -1100,52 +1102,15 @@ const generateMissingAnswers = async (questions, imageBuffer = null) => {
           return
         } else if (cached) {
           console.log(`     题目 ${q.id.substring(0, 8)}: 缓存命中但答案无效，重新调用AI`)
-        } else {
-          const similar = await findSimilarQuestion(fullContent, q.subject || '数学', TEXT_SIMILARITY_THRESHOLD)
-          
-          if (similar && similar.answer) {
-            cacheHitCount++
-            console.log(`     题目 ${q.id.substring(0, 8)}: ✅ 相似题目匹配 (${(similar.similarity * 100).toFixed(1)}%) - 复用答案`)
-            
-            let finalAnswer = extractAnswerFromAnalysis(similar.answer, similar.analysis, q.options)
-            try {
-              await updateQuestionAnswer(q.id, finalAnswer, similar.analysis)
-              q.answer = finalAnswer
-              if (similar.analysis) q.analysis = similar.analysis
-              updatedCount++
-              // 同步学科
-              await saveQuestionSubject(q, similar.subject)
-              
-              const cacheId = await cacheQuestion({
-                content: fullContent,
-                options: options,
-                answer: finalAnswer,
-                analysis: similar.analysis,
-                question_type: q.question_type,
-                subject: q.subject,
-                ai_tags: similar.ai_tags,
-                content_type: 'text'
-              }, fingerprint, phash, PARSER_VERSION)
-              if (cacheId) {
-                q.cache_id = cacheId
-                await updateQuestionCacheId(q.id, cacheId)
-              }
-            } catch (err) {
-              console.error(`     题目 ${q.id.substring(0, 8)}: 相似答案写入失败`, err.message)
-              exceptionCount++
-            }
-            return
-          }
         }
+        // ⚡ 移除了 findSimilarQuestion（逐条编辑距离计算，收益低、开销大），直接走 AI 调用
       }
 
       cacheMissCount++
       const result = await generateAnswerForQuestion(fullContent)
-
       const validation = validateAIAnswer(result.answer, result.analysis)
 
       if (!validation.isValid) {
-        // 即使AI答案无效，也尝试从分析文本中提取答案，并保存分析内容
         if (result.analysis && result.analysis.trim()) {
           const extracted = extractAnswerFromAnalysis(result.answer, result.analysis, q.options)
           if (extracted && extracted !== '-' && extracted !== result.answer) {
@@ -1154,32 +1119,21 @@ const generateMissingAnswers = async (questions, imageBuffer = null) => {
               q.answer = extracted
               q.analysis = result.analysis
               updatedCount++
-              await saveQuestionSubject(q, result.subject)
+              fireForget(() => saveQuestionSubject(q, result.subject), `学科 q=${q.id.substring(0, 8)}`)
               console.log(`     题目 ${q.id.substring(0, 8)}: 从分析文本提取答案: ${extracted}`)
               return
             } catch (err) {
               console.error(`     题目 ${q.id.substring(0, 8)}: 提取答案写入失败`, err.message)
             }
           }
-          // 提取失败或答案未变更，至少保存分析文本
-          try {
-            await query(
-              `UPDATE questions SET analysis = $1, updated_at = NOW() WHERE id = $2`,
-              [result.analysis, q.id]
-            )
-            q.analysis = result.analysis
+          // 至少保存分析文本（fire-and-forget）
+          fireForget(async () => {
+            await query(`UPDATE questions SET analysis = $1, updated_at = NOW() WHERE id = $2`, [result.analysis, q.id])
             await saveQuestionSubject(q, result.subject)
-            console.log(`     题目 ${q.id.substring(0, 8)}: 答案无效(${validation.reason})，已保存分析文本`)
-          } catch (err) {
-            console.error(`     题目 ${q.id.substring(0, 8)}: 分析文本保存失败`, err.message)
-          }
+          }, `分析文本保存 q=${q.id.substring(0, 8)}`)
         }
         exceptionCount++
-        try {
-          await markAnswerException(q.id, validation.reason)
-        } catch (err) {
-          console.error(`     题目 ${q.id.substring(0, 8)}: 异常标记写入失败`, err.message)
-        }
+        fireForget(() => markAnswerException(q.id, validation.reason), `异常标记 q=${q.id.substring(0, 8)}`)
         return
       }
 
@@ -1190,33 +1144,28 @@ const generateMissingAnswers = async (questions, imageBuffer = null) => {
           await updateQuestionAnswer(q.id, finalAnswer, result.analysis, true)
           q.answer = finalAnswer
           if (result.analysis) q.analysis = result.analysis
-          await saveQuestionSubject(q, result.subject)
           updatedCount++
           console.log(`     题目 ${q.id.substring(0, 8)}: 答案 ${oldAnswer || '(空)'} → ${finalAnswer}`)
 
+          // 非关键写入：fire-and-forget
           if (fingerprint) {
-            const cacheId = await cacheQuestion({
-              content: fullContent,
-              options: options,
-              answer: finalAnswer,
-              analysis: result.analysis,
-              question_type: q.question_type,
-              subject: q.subject,
-              content_type: 'text'
-            }, fingerprint, phash, PARSER_VERSION)
-            if (cacheId) {
-              q.cache_id = cacheId
-              await updateQuestionCacheId(q.id, cacheId)
-            }
+            fireForget(async () => {
+              const cacheId = await cacheQuestion({
+                content: fullContent, options, answer: finalAnswer,
+                analysis: result.analysis, question_type: q.question_type,
+                subject: q.subject, content_type: 'text'
+              }, fingerprint, phash, PARSER_VERSION)
+              if (cacheId) {
+                q.cache_id = cacheId
+                await updateQuestionCacheId(q.id, cacheId)
+              }
+            }, `缓存写入 q=${q.id.substring(0, 8)}`)
           }
+          fireForget(() => saveQuestionSubject(q, result.subject), `学科 q=${q.id.substring(0, 8)}`)
         } catch (err) {
           console.error(`     题目 ${q.id.substring(0, 8)}: 答案写入失败`, err.message)
           exceptionCount++
-          try {
-            await markAnswerException(q.id, '答案写入失败: ' + err.message)
-          } catch (markErr) {
-            console.error(`     题目 ${q.id.substring(0, 8)}: 异常标记写入失败`, markErr.message)
-          }
+          fireForget(() => markAnswerException(q.id, '答案写入失败: ' + err.message), `异常标记 q=${q.id.substring(0, 8)}`)
         }
       } else if (result.answer) {
         let finalAnswer = extractAnswerFromAnalysis(result.answer, result.analysis, q.options)
@@ -1225,46 +1174,36 @@ const generateMissingAnswers = async (questions, imageBuffer = null) => {
           await updateQuestionAnswer(q.id, finalAnswer, result.analysis)
           q.answer = finalAnswer
           if (result.analysis) q.analysis = result.analysis
-          await saveQuestionSubject(q, result.subject)
           console.log(`     题目 ${q.id.substring(0, 8)}: ${finalAnswer}`)
 
           if (fingerprint) {
-            const cacheId = await cacheQuestion({
-              content: fullContent,
-              options: options,
-              answer: finalAnswer,
-              analysis: result.analysis,
-              question_type: q.question_type,
-              subject: q.subject,
-              content_type: 'text'
-            }, fingerprint, phash, PARSER_VERSION)
-            if (cacheId) {
-              q.cache_id = cacheId
-              await updateQuestionCacheId(q.id, cacheId)
-            }
+            fireForget(async () => {
+              const cacheId = await cacheQuestion({
+                content: fullContent, options, answer: finalAnswer,
+                analysis: result.analysis, question_type: q.question_type,
+                subject: q.subject, content_type: 'text'
+              }, fingerprint, phash, PARSER_VERSION)
+              if (cacheId) {
+                q.cache_id = cacheId
+                await updateQuestionCacheId(q.id, cacheId)
+              }
+            }, `缓存写入 q=${q.id.substring(0, 8)}`)
           }
+          fireForget(() => saveQuestionSubject(q, result.subject), `学科 q=${q.id.substring(0, 8)}`)
         } catch (err) {
           console.error(`     题目 ${q.id.substring(0, 8)}: 答案写入失败`, err.message)
           exceptionCount++
-          try {
-            await markAnswerException(q.id, '答案写入失败: ' + err.message)
-          } catch (markErr) {
-            console.error(`     题目 ${q.id.substring(0, 8)}: 异常标记写入失败`, markErr.message)
-          }
+          fireForget(() => markAnswerException(q.id, '答案写入失败: ' + err.message), `异常标记 q=${q.id.substring(0, 8)}`)
         }
       } else {
         emptyCount++
         console.log(`     题目 ${q.id.substring(0, 8)}: AI 无法生成答案（可能需要参考图片）`)
         exceptionCount++
-        try {
-          await markAnswerException(q.id, 'AI无法生成答案')
-        } catch (err) {
-          console.error(`     题目 ${q.id.substring(0, 8)}: 异常标记写入失败`, err.message)
-        }
+        fireForget(() => markAnswerException(q.id, 'AI无法生成答案'), `异常标记 q=${q.id.substring(0, 8)}`)
       }
     })
 
-    await Promise.all(promises)
+    await Promise.allSettled(promises)
   }
 
   return { updated: updatedCount, total: needAnswer.length, empty: emptyCount, placeholder: placeholderCount, exceptions: exceptionCount, cacheHits: cacheHitCount, cacheMisses: cacheMissCount }
@@ -1571,42 +1510,32 @@ export const processTask = async (job) => {
     await job.updateProgress(15)
     await updateTaskStatus(taskId, TASK_STATUS.PROCESSING, { progress: 15 })
 
-    console.log(`📊 [Step 3/8] 透视拉直图片...`)
-    let straightenedBuffer
-    try {
-      straightenedBuffer = await deskewImage(imageBuffer)
-      console.log(`✅ [Step 3/8] 透视拉直完成`)
-    } catch (deskewError) {
-      console.warn('透视拉直失败，使用原图继续:', deskewError.message)
-      straightenedBuffer = imageBuffer
-    }
-
-    await job.updateProgress(20)
-    await updateTaskStatus(taskId, TASK_STATUS.PROCESSING, { progress: 20 })
-
-    console.log(`📊 [Step 4/8] 压缩图片...`)
+    console.log(`📊 [Step 3~4/8] 拉直并压缩图片（合并 Sharp 管线）...`)
     let compressedBuffer
     try {
-      compressedBuffer = await compressImageBuffer(straightenedBuffer)
-      console.log(`✅ [Step 4/8] 压缩完成: ${straightenedBuffer.length} → ${compressedBuffer.length} bytes (${Math.round(compressedBuffer.length/straightenedBuffer.length*100)}%)`)
-    } catch (compressError) {
-      console.error('图片压缩失败:', compressError)
+      // ⚡ 合并 deskew + compress 为单次 Sharp 管线，避免中间 buffer 分配和二次初始化
+      compressedBuffer = await sharp(imageBuffer)
+        .rotate()
+        .normalize()
+        .resize(1920, 1920, { fit: 'inside', withoutEnlargement: true })
+        .jpeg({ quality: 85 })
+        .toBuffer()
+      console.log(`✅ [Step 3~4/8] 拉直+压缩完成: ${imageBuffer.length} → ${compressedBuffer.length} bytes (${Math.round(compressedBuffer.length/imageBuffer.length*100)}%)`)
+    } catch (processError) {
+      console.error('图片处理失败:', processError)
       await updateTaskStatus(taskId, TASK_STATUS.FAILED, {
-        error: '图片压缩失败: ' + compressError.message,
-        last_error: '图片压缩失败: ' + compressError.message,
+        error: '图片处理失败: ' + processError.message,
+        last_error: '图片处理失败: ' + processError.message,
         duration: Date.now() - startTime,
         failedAt: new Date().toISOString()
       })
-      throw compressError
+      throw processError
     }
 
     await job.updateProgress(30)
     await updateTaskStatus(taskId, TASK_STATUS.PROCESSING, { progress: 30 })
 
     const imageBase64 = bufferToBase64(compressedBuffer)
-
-    await job.updateProgress(35)
-    await updateTaskStatus(taskId, TASK_STATUS.PROCESSING, { progress: 35 })
 
     console.log(`📊 [Step 5/8] 调用 AI 视觉识别...`)
     const ocrResult = await recognizeQuestions(imageBase64, taskId)
@@ -1648,32 +1577,38 @@ export const processTask = async (job) => {
         console.warn(`   ⚠️ [坐标] 读取压缩图尺寸失败: ${e.message}`)
       }
 
-      // ── 多模态切题：处理几何配图 ─
+      // ── 多模态切题：处理几何配图（⚡ 并行化） ─
       const geometryImageCache = new Map() // bbox 去重缓存 (一图多题)
 
-      for (const q of questions) {
-        // 优先使用新格式 image_bbox/image_type，向后兼容旧格式 geometry_image
-        const hasImage = q.image_type && q.image_type !== 'none'
-        const hasLegacyImage = q.geometry_image?.has_image && q.geometry_image.bbox
-        const imageBbox = q.image_bbox || (q.geometry_image?.bbox || null)
-        const imageType = q.image_type || (hasLegacyImage ? 'geometry' : null)
-        // 确保 q.image_type 在后续步骤（如几何图净化层）中可读
-        if (!q.image_type && imageType) q.image_type = imageType
-
-        if (hasImage || hasLegacyImage) {
+      // 收集所有需要裁剪几何图的题目
+      const geometryTasks = questions
+        .filter(q => {
+          const hasImage = q.image_type && q.image_type !== 'none'
+          const hasLegacyImage = q.geometry_image?.has_image && q.geometry_image.bbox
+          const imageType = q.image_type || (hasLegacyImage ? 'geometry' : null)
+          if (!q.image_type && imageType) q.image_type = imageType
+          return hasImage || hasLegacyImage
+        })
+        .map(q => {
+          const imageBbox = q.image_bbox || (q.geometry_image?.bbox || null)
+          const imageType = q.image_type || 'geometry'
           const bbox = imageBbox
           if (!bbox) {
             if (q.content && (q.content.includes('如图') || q.content.includes('图1') || q.content.includes('图示'))) {
               console.log(`   ⚠️ [几何图] ${q.id}: 题干含"如图"关键词但未返回 bbox`)
             }
-            continue
+            return null
           }
-          console.log(`   [${imageType || 'geometry'}] ${q.id}: 检测到配图, bbox(归一化)=${JSON.stringify(bbox)}`)
-          // 越界收紧：用本题 block_coordinates 作硬边界，防止 bbox 跨到相邻题目
           const safeBbox = clampImageBboxToBlock(bbox, q.block_coordinates)
-          // bbox 为 0-1000 归一化坐标；裁剪需换算为 compressedBuffer 像素坐标（仅局部使用，不写回 q）
           const pixelBbox = (_compW && _compH) ? denormalizeBbox(safeBbox, _compW, _compH) : safeBbox
           const cacheKey = JSON.stringify(safeBbox)
+          return { q, safeBbox, pixelBbox, cacheKey, imageType, imageBbox }
+        })
+        .filter(Boolean)
+
+      if (geometryTasks.length > 0) {
+        console.log(`   [几何图] ⚡ 并行裁剪 ${geometryTasks.length} 张配图...`)
+        await Promise.allSettled(geometryTasks.map(async ({ q, safeBbox, pixelBbox, cacheKey }) => {
           if (geometryImageCache.has(cacheKey)) {
             q.geometry_image_url = geometryImageCache.get(cacheKey)
           } else {
@@ -1682,7 +1617,13 @@ export const processTask = async (job) => {
               geometryImageCache.set(cacheKey, q.geometry_image_url)
             }
           }
-        } else if (q.content && (q.content.includes('如图') || q.content.includes('图1') || q.content.includes('图示'))) {
+        }))
+      }
+
+      // 标记有"如图"关键词但无 bbox 的题
+      for (const q of questions) {
+        const hasBbox = (q.image_type && q.image_type !== 'none') || (q.geometry_image?.has_image && q.geometry_image.bbox)
+        if (!hasBbox && q.content && (q.content.includes('如图') || q.content.includes('图1') || q.content.includes('图示'))) {
           console.log(`   ⚠️ [几何图] ${q.id}: 题干含"如图"关键词但未返回 geometry_image, content=${q.content.substring(0, 60)}`)
         }
       }
@@ -1695,28 +1636,23 @@ export const processTask = async (job) => {
       await createQuestions(questionsWithStudentId)
       console.log(`✅ [Step 6/8] 题目保存成功 (含 ${geometryImageCache.size} 张几何配图)`)
 
-      // ── 页面理解：将裁剪后的几何图保存到 question_assets ──
-      let assetCount = 0
-      for (const q of questions) {
-        if (q.geometry_image_url) {
-          try {
-            const imageType = q.image_type || 'geometry'
-            const imageBbox = q.image_bbox || (q.geometry_image?.bbox || null)
-            await createQuestionAsset({
-              question_id: q.id,
-              asset_type: imageType === 'chart' ? 'chart_image' : 'geometry_image',
-              original_image_url: imageUrl,
-              cropped_image_url: q.geometry_image_url,
-              bbox: imageBbox,
-              tikz_status: imageType === 'geometry' ? 'pending' : 'none'
-            })
-            assetCount++
-          } catch (e) {
-            console.error(`   ⚠️ [question_assets] 保存失败 q=${q.id.substring(0, 8)}:`, e.message)
-          }
-        }
-      }
-      if (assetCount > 0) {
+      // ── 页面理解：将裁剪后的几何图保存到 question_assets（⚡ 并行化） ──
+      const geometryQuestions = questions.filter(q => q.geometry_image_url)
+      if (geometryQuestions.length > 0) {
+        const assetResults = await Promise.allSettled(geometryQuestions.map(async (q) => {
+          const imageType = q.image_type || 'geometry'
+          const imageBbox = q.image_bbox || (q.geometry_image?.bbox || null)
+          await createQuestionAsset({
+            question_id: q.id,
+            asset_type: imageType === 'chart' ? 'chart_image' : 'geometry_image',
+            original_image_url: imageUrl,
+            cropped_image_url: q.geometry_image_url,
+            bbox: imageBbox,
+            tikz_status: imageType === 'geometry' ? 'pending' : 'none'
+          })
+          return true
+        }))
+        const assetCount = assetResults.filter(r => r.status === 'fulfilled').length
         console.log(`   ✅ [question_assets] 已保存 ${assetCount} 条资源记录（其中 geometry 类型标记为 tikz_status=pending）`)
       }
 

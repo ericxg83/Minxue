@@ -309,53 +309,59 @@ app.post('/api/tasks/create-by-url', async (req, res) => {
   }
 })
 
+// ── 通知摘要缓存（10 秒 TTL，减少轮询时的重复查询）──
+let summaryCache = { data: null, timestamp: 0 }
+const SUMMARY_TTL = 10000
+
 // ─────────────────────────────────────────────
 // 通知摘要（跨学生全局聚合）
 // ─────────────────────────────────────────────
 app.get('/api/tasks/summary', async (req, res) => {
   try {
-    const [{ rows: pendingRows }] = await Promise.all([
-      query(`SELECT COUNT(*)::int AS count FROM ${TABLES.TASKS} WHERE status = $1 AND deleted_at IS NULL`, [TASK_STATUS.DONE]),
-      query(`SELECT COUNT(*)::int AS count FROM ${TABLES.TASKS} WHERE status = $1 AND deleted_at IS NULL`, ['failed'])
-    ])
+    // 缓存命中且未过期
+    const now = Date.now()
+    if (summaryCache.data && (now - summaryCache.timestamp) < SUMMARY_TTL) {
+      return res.json(summaryCache.data)
+    }
 
-    const { rows: failedRows } = await query(
-      `SELECT COUNT(*)::int AS count FROM ${TABLES.TASKS} WHERE status = $1 AND deleted_at IS NULL`, ['failed']
+    // 单次查询：用子查询合并 3 个 COUNT，避免 3 次 DB 往返
+    const { rows } = await query(
+      `SELECT
+         COALESCE((SELECT COUNT(*)::int FROM ${TABLES.TASKS} WHERE status = $1 AND deleted_at IS NULL), 0) AS pending_review,
+         COALESCE((SELECT COUNT(*)::int FROM ${TABLES.TASKS} WHERE status = $2 AND deleted_at IS NULL), 0) AS failed_tasks,
+         COALESCE((SELECT COUNT(*)::int FROM ${TABLES.WRONG_QUESTIONS} WHERE lifecycle_status = $3 AND added_at::date = CURRENT_DATE), 0) AS today_new_wrong,
+         (SELECT COALESCE(json_agg(row_to_json(t)), '[]'::json) FROM (
+           SELECT t.id, t.original_name, t.status, t.created_at, t.updated_at, s.name AS student_name
+           FROM ${TABLES.TASKS} t
+           LEFT JOIN ${TABLES.STUDENTS} s ON s.id = t.student_id
+           WHERE t.deleted_at IS NULL AND (t.status = $1 OR t.status = $2)
+           ORDER BY t.updated_at DESC LIMIT 5
+         ) t) AS recent_tasks`,
+      [TASK_STATUS.DONE, 'failed', 'new']
     )
 
-    const { rows: todayWrongRows } = await query(
-      `SELECT COUNT(*)::int AS count FROM ${TABLES.WRONG_QUESTIONS} WHERE lifecycle_status = $1 AND added_at::date = CURRENT_DATE`, ['new']
-    )
-
-    // 最近 5 条待办（用于下拉列表预览）
-    const { rows: recentRows } = await query(
-      `SELECT t.id, t.original_name, t.status, t.created_at, t.updated_at, s.name AS student_name
-       FROM ${TABLES.TASKS} t
-       LEFT JOIN ${TABLES.STUDENTS} s ON s.id = t.student_id
-       WHERE t.deleted_at IS NULL AND (t.status = $1 OR t.status = $2)
-       ORDER BY t.updated_at DESC LIMIT 5`,
-      [TASK_STATUS.DONE, 'failed']
-    )
-
-    const pendingReview = pendingRows[0].count
-    const failedTasks = failedRows[0].count
-
-    res.json({
+    const r = rows[0]
+    const data = {
       success: true,
       summary: {
-        pendingReview,
-        failedTasks,
-        todayNewWrongQuestions: todayWrongRows[0].count,
-        totalNotifications: pendingReview + failedTasks,
-        recentTasks: recentRows.map(r => ({
-          id: r.id,
-          originalName: r.original_name,
-          status: r.status,
-          createdAt: r.created_at,
-          studentName: r.student_name
+        pendingReview: r.pending_review,
+        failedTasks: r.failed_tasks,
+        todayNewWrongQuestions: r.today_new_wrong,
+        totalNotifications: r.pending_review + r.failed_tasks,
+        recentTasks: (r.recent_tasks || []).map(t => ({
+          id: t.id,
+          originalName: t.original_name,
+          status: t.status,
+          createdAt: t.created_at,
+          studentName: t.student_name
         }))
       }
-    })
+    }
+
+    // 写入缓存
+    summaryCache = { data, timestamp: now }
+
+    res.json(data)
   } catch (error) {
     console.error('获取通知摘要失败:', error)
     res.status(500).json({ error: error.message })
@@ -384,9 +390,14 @@ app.get('/api/tasks/:taskId', async (req, res) => {
 app.get('/api/tasks/student/:studentId', async (req, res) => {
   try {
     const { studentId } = req.params
+    const limit = Math.min(parseInt(req.query.limit) || 50, 200)
+    const offset = parseInt(req.query.offset) || 0
     const { rows } = await query(
-      `SELECT * FROM ${TABLES.TASKS} WHERE student_id = $1 AND deleted_at IS NULL ORDER BY created_at DESC`,
-      [studentId]
+      `SELECT id, student_id, status, original_name, image_url, question_count, wrong_count,
+              empty_count, result, created_at, updated_at, source_type
+       FROM ${TABLES.TASKS} WHERE student_id = $1 AND deleted_at IS NULL
+       ORDER BY created_at DESC LIMIT $2 OFFSET $3`,
+      [studentId, limit, offset]
     )
     res.json({ success: true, tasks: rows })
   } catch (error) {
@@ -668,18 +679,29 @@ app.post('/api/students', async (req, res) => {
       )
 
       res.status(201).json({ success: true, student: rows[0] })
+	      studentsCache = { data: null, timestamp: 0 } // 使缓存失效
     } catch (error) {
       console.error('创建学生失败:', error)
       res.status(500).json({ error: error.message })
     }
   })
 
+// ── 学生列表缓存（5 分钟 TTL，学生列表变化极慢）──
+let studentsCache = { data: null, timestamp: 0 }
+const STUDENTS_TTL = 300000
+
 app.get('/api/students', async (req, res) => {
   try {
+    const now = Date.now()
+    if (studentsCache.data && (now - studentsCache.timestamp) < STUDENTS_TTL) {
+      return res.json(studentsCache.data)
+    }
     const { rows } = await query(
-      `SELECT * FROM ${TABLES.STUDENTS} ORDER BY created_at DESC`
+      `SELECT id, name, grade, avatar, created_at FROM ${TABLES.STUDENTS} ORDER BY created_at DESC`
     )
-    res.json({ success: true, students: rows })
+    const data = { success: true, students: rows }
+    studentsCache = { data, timestamp: now }
+    res.json(data)
   } catch (error) {
     console.error('获取学生列表失败:', error)
     res.status(500).json({ error: error.message })
@@ -705,6 +727,7 @@ app.put('/api/students/:id', async (req, res) => {
       if (rows.length === 0) return res.status(404).json({ error: '学生不存在' })
 
       res.json({ success: true, student: rows[0] })
+      studentsCache = { data: null, timestamp: 0 } // 使缓存失效
     } catch (error) {
       console.error('更新学生失败:', error)
       res.status(500).json({ error: error.message })
@@ -715,6 +738,7 @@ app.delete('/api/students/:id', async (req, res) => {
   try {
     const { id } = req.params
     await query(`DELETE FROM ${TABLES.STUDENTS} WHERE id = $1`, [id])
+    studentsCache = { data: null, timestamp: 0 } // 使缓存失效
     res.json({ success: true, message: '学生已删除' })
   } catch (error) {
     console.error('删除学生失败:', error)
@@ -1311,16 +1335,19 @@ app.post('/api/wrong-questions', async (req, res) => {
 app.get('/api/wrong-questions/student/:studentId', async (req, res) => {
   try {
     const { studentId } = req.params
+    const limit = Math.min(parseInt(req.query.limit) || 100, 500)
+    const offset = parseInt(req.query.offset) || 0
     const { rows } = await query(
       `SELECT wq.* FROM ${TABLES.WRONG_QUESTIONS} wq
        INNER JOIN ${TABLES.QUESTIONS} q ON q.id = wq.question_id AND q.is_complete = TRUE
-       WHERE wq.student_id = $1 ORDER BY wq.added_at DESC`,
-      [studentId]
+       WHERE wq.student_id = $1 ORDER BY wq.added_at DESC LIMIT $2 OFFSET $3`,
+      [studentId, limit, offset]
     )
     res.json({ success: true, wrongQuestions: rows })
   } catch (error) {
     console.error('获取错题失败:', error)
     res.status(500).json({ error: error.message })
+  }
   }
 })
 
@@ -1563,33 +1590,40 @@ app.post('/api/generated-exams', async (req, res) => {
 app.get('/api/generated-exams/student/:studentId', async (req, res) => {
   try {
     const { studentId } = req.params
+    const limit = Math.min(parseInt(req.query.limit) || 50, 200)
+    const offset = parseInt(req.query.offset) || 0
     const { rows } = await query(
-      `SELECT * FROM ${TABLES.GENERATED_EXAMS} WHERE student_id = $1 ORDER BY created_at DESC`,
-      [studentId]
+      `SELECT id, student_id, name, question_ids, status, retry_task_id, created_at, updated_at
+       FROM ${TABLES.GENERATED_EXAMS} WHERE student_id = $1
+       ORDER BY created_at DESC LIMIT $2 OFFSET $3`,
+      [studentId, limit, offset]
     )
 
-    // 计算每份试卷的正确/错误/未作答/已排除题目数
-    const examsWithStats = await Promise.all(rows.map(async (exam) => {
-      const qIds = exam.question_ids || []
-      if (qIds.length === 0) {
-        return { ...exam, correct_count: 0, wrong_count: 0, not_answered_count: 0, excluded_count: 0, total_count: 0 }
-      }
-      const placeholders = qIds.map((_, i) => `$${i + 1}`).join(',')
+    // 批量计算所有试卷的统计（1 次查询替代 N 次 per-exam 查询）
+    const allQIds = [...new Set(rows.flatMap(e => e.question_ids || []))]
+    const qCorrectMap = new Map()
+    if (allQIds.length > 0) {
+      const placeholders = allQIds.map((_, i) => `$${i + 1}`).join(',')
       const { rows: qRows } = await query(
-        `SELECT is_correct, answer_source FROM ${TABLES.QUESTIONS} WHERE id IN (${placeholders})`,
-        qIds
+        `SELECT id, is_correct, answer_source FROM ${TABLES.QUESTIONS} WHERE id IN (${placeholders})`,
+        allQIds
       )
-      let correct_count = 0
-      let wrong_count = 0
-      let not_answered_count = 0
-      let excluded_count = 0
-      qRows.forEach(q => {
-        if (q.is_correct === true) correct_count++
-        else if (q.is_correct === false) wrong_count++
-        else if (q.is_correct === null || q.answer_source === 'blank') not_answered_count++
-      })
-      return { ...exam, correct_count, wrong_count, not_answered_count, excluded_count, total_count: qIds.length }
-    }))
+      for (const q of qRows) {
+        qCorrectMap.set(q.id, { is_correct: q.is_correct, answer_source: q.answer_source })
+      }
+    }
+
+    const examsWithStats = rows.map(exam => {
+      const qIds = exam.question_ids || []
+      let correct_count = 0, wrong_count = 0, not_answered_count = 0
+      for (const qid of qIds) {
+        const info = qCorrectMap.get(qid)
+        if (!info || info.is_correct === null || info.answer_source === 'blank') not_answered_count++
+        else if (info.is_correct === true) correct_count++
+        else wrong_count++
+      }
+      return { ...exam, correct_count, wrong_count, not_answered_count, excluded_count: 0, total_count: qIds.length }
+    })
 
     res.json({ success: true, generatedExams: examsWithStats })
   } catch (error) {
@@ -1741,23 +1775,34 @@ app.post('/api/generated-exams/:id/grade', async (req, res) => {
     let upgradedCount = 0
     let resetCount = 0
 
+    // ── 批量获取现有 wrong_questions 记录，只需 1 次查询 ──
+    const questionIds = results.map(r => r.questionId).filter(Boolean)
+    const { rows: existingWqRows } = await query(
+      `SELECT id, question_id, lifecycle_status, error_count FROM ${TABLES.WRONG_QUESTIONS}
+       WHERE student_id = $1 AND question_id = ANY($2::uuid[])`,
+      [studentId, questionIds]
+    )
+    const wqByQuestionId = new Map()
+    for (const row of existingWqRows) {
+      wqByQuestionId.set(row.question_id, row)
+    }
+
+    // ── 批量计算并构建 INSERT / UPDATE 参数 ──
+    const insertRows = [] // 需要 INSERT 的新记录
+    const updateWqRows = [] // 需要 UPDATE 的现有记录（按 id）
+    const updateQIds = [] // 需要更新 questions.is_correct
+    const updateQValues = []
+
     for (const result of results) {
       const { questionId, isCorrect } = result
       if (!questionId) continue
 
-      // 查找现有 wrong_questions 记录
-      const { rows } = await query(
-        `SELECT id, lifecycle_status, error_count FROM ${TABLES.WRONG_QUESTIONS}
-         WHERE student_id = $1 AND question_id = $2`,
-        [studentId, questionId]
-      )
-
-      const currentLifecycle = rows.length > 0 ? (rows[0].lifecycle_status || 'new') : 'new'
+      const existing = wqByQuestionId.get(questionId)
+      const currentLifecycle = existing ? (existing.lifecycle_status || 'new') : 'new'
       let newLifecycle
       let errorCountDelta = 0
 
       if (isCorrect) {
-        // 正确：进阶
         newLifecycle = getNextLifecycle(currentLifecycle)
         if (newLifecycle === LIFECYCLE_STATUS.MASTERED && currentLifecycle !== LIFECYCLE_STATUS.MASTERED) {
           masteredCount++
@@ -1765,7 +1810,6 @@ app.post('/api/generated-exams/:id/grade', async (req, res) => {
           upgradedCount++
         }
       } else {
-        // 错误：重置到 new，错误计数 +1
         newLifecycle = LIFECYCLE_STATUS.NEW
         errorCountDelta = 1
         if (currentLifecycle !== LIFECYCLE_STATUS.NEW) {
@@ -1775,37 +1819,63 @@ app.post('/api/generated-exams/:id/grade', async (req, res) => {
 
       const newStatus = newLifecycle === LIFECYCLE_STATUS.MASTERED ? WRONG_STATUS.MASTERED : WRONG_STATUS.PENDING
 
-      if (rows.length === 0) {
-        // 新建记录
-        await query(
-          `INSERT INTO ${TABLES.WRONG_QUESTIONS}
-           (student_id, question_id, status, lifecycle_status, error_count, practice_count, added_at, last_wrong_at, created_at, updated_at)
-           VALUES ($1, $2, $3, $4, $5, 1, NOW(), NOW(), NOW(), NOW())`,
-          [studentId, questionId, newStatus, newLifecycle, isCorrect ? 0 : 1]
-        )
+      if (!existing) {
+        insertRows.push({ studentId, questionId, newStatus, newLifecycle, isCorrect })
       } else {
-        // 更新现有记录
-        const wqId = rows[0].id
-        const currentErrorCount = rows[0].error_count || 1
-        await query(
-          `UPDATE ${TABLES.WRONG_QUESTIONS}
-           SET status = $1, lifecycle_status = $2, error_count = $3, practice_count = practice_count + 1, updated_at = NOW()
-           WHERE id = $4`,
-          [newStatus, newLifecycle, currentErrorCount + errorCountDelta, wqId]
-        )
+        updateWqRows.push({ wqId: existing.id, currentErrorCount: existing.error_count || 1, newStatus, newLifecycle, errorCountDelta })
       }
 
-      // 同步更新 questions 表的 is_correct
-      await query(
-        `UPDATE ${TABLES.QUESTIONS} SET is_correct = $1, updated_at = NOW() WHERE id = $2`,
-        [isCorrect ? true : false, questionId]
-      )
+      updateQIds.push(questionId)
+      updateQValues.push(isCorrect ? true : false)
 
       lifecycleChanges.push({
         questionId,
         previous: currentLifecycle,
         current: newLifecycle
       })
+    }
+
+    // ── 批量 INSERT 新 wrong_questions ──
+    if (insertRows.length > 0) {
+      const insertPlaceholders = insertRows.map((_, i) => {
+        const base = i * 7
+        return `($${base + 1}, $${base + 2}, $${base + 3}, $${base + 4}, $${base + 5}, $${base + 6}, $${base + 7})`
+      }).join(', ')
+      const insertParams = insertRows.flatMap(r => [
+        r.studentId, r.questionId, r.newStatus, r.newLifecycle,
+        r.isCorrect ? 0 : 1, new Date().toISOString(), new Date().toISOString()
+      ])
+      await query(
+        `INSERT INTO ${TABLES.WRONG_QUESTIONS}
+         (student_id, question_id, status, lifecycle_status, error_count, created_at, updated_at)
+         VALUES ${insertPlaceholders}`,
+        insertParams
+      )
+    }
+
+    // ── 批量 UPDATE 现有 wrong_questions ──
+    for (const wq of updateWqRows) {
+      await query(
+        `UPDATE ${TABLES.WRONG_QUESTIONS}
+         SET status = $1, lifecycle_status = $2, error_count = $3, practice_count = practice_count + 1, updated_at = NOW()
+         WHERE id = $4`,
+        [wq.newStatus, wq.newLifecycle, wq.currentErrorCount + wq.errorCountDelta, wq.wqId]
+      )
+    }
+
+    // ── 批量 UPDATE questions.is_correct（1 条 SQL 替代 N 条）──
+    if (updateQIds.length > 0) {
+      const caseClauses = updateQIds.map((_, i) =>
+        `WHEN $${i * 2 + 1}::uuid THEN $${i * 2 + 2}`
+      ).join(' ')
+      const caseParams = updateQIds.flatMap((id, i) => [id, updateQValues[i]])
+      // 参数索引靠后，补 PARAMS_OFFSET
+      const idsParamIdx = caseParams.length + 1
+      await query(
+        `UPDATE ${TABLES.QUESTIONS} SET is_correct = CASE id ${caseClauses} END, updated_at = NOW()
+         WHERE id = ANY($${idsParamIdx}::uuid[])`,
+        [...caseParams, updateQIds]
+      )
     }
 
     // 标记组卷为已批改

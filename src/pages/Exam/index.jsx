@@ -57,12 +57,7 @@ export default function Exam() {
     if (currentStudent) loadGeneratedExams(true)
   }, [currentStudent?.id])
 
-  useEffect(() => {
-    const interval = setInterval(() => {
-      if (document.visibilityState === 'visible') loadGeneratedExams(true)
-    }, 3000)
-    return () => clearInterval(interval)
-  }, [currentStudent?.id])
+  // ⚡ 轮询已移至 App.jsx（15s + visibility check），此处不再重复调度
 
   useEffect(() => {
     const generated = generatedExams

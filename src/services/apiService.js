@@ -75,39 +75,61 @@ const checkCacheVersion = () => {
 // 页面加载时自动检查
 checkCacheVersion()
 
+// ── 请求去重：相同并发请求只发一次 ──
+const inFlightRequests = new Map()
+
 const apiRequest = async (path, options = {}, retries = 2) => {
-  const url = `${API_BASE}${path}`
+  const method = (options.method || 'GET').toUpperCase()
 
-  for (let attempt = 0; attempt < retries; attempt++) {
-    try {
-      // 每个请求最多等 20 秒，防止 Render 冷启动时长时间挂起
-      const controller = new AbortController()
-      const timeoutId = setTimeout(() => controller.abort(), 20000)
+  // 仅对 GET 请求做去重（POST/PUT/DELETE 有副作用，不做去重）
+  if (method === 'GET') {
+    const bodyKey = JSON.stringify(options.body).slice(0, 200)
+    const dedupKey = `${method}:${path}:${bodyKey}`
+    if (inFlightRequests.has(dedupKey)) {
+      return inFlightRequests.get(dedupKey)
+    }
+    const promise = executeRequest()
+    inFlightRequests.set(dedupKey, promise)
+    promise.finally(() => inFlightRequests.delete(dedupKey))
+    return promise
+  }
 
-      const response = await fetch(url, {
-        ...options,
-        headers: {
-          ...options.headers
-        },
-        signal: controller.signal
-      })
-      clearTimeout(timeoutId)
+  return executeRequest()
 
-      if (!response.ok) {
-        const error = await response.json().catch(() => ({ error: response.statusText }))
-        throw new Error(error.error || `请求失败: ${response.status}`)
+  async function executeRequest() {
+    const url = `${API_BASE}${path}`
+
+    for (let attempt = 0; attempt < retries; attempt++) {
+      try {
+        // 每个请求最多等 20 秒，防止 Render 冷启动时长时间挂起
+        const controller = new AbortController()
+        const timeoutId = setTimeout(() => controller.abort(), 20000)
+
+        const response = await fetch(url, {
+          ...options,
+          headers: {
+            ...options.headers
+          },
+          signal: controller.signal
+        })
+        clearTimeout(timeoutId)
+
+        if (!response.ok) {
+          const error = await response.json().catch(() => ({ error: response.statusText }))
+          throw new Error(error.error || `请求失败: ${response.status}`)
+        }
+
+        const data = await response.json()
+        return data
+      } catch (error) {
+        // 最后一次尝试失败时抛出错误
+        if (attempt === retries - 1) {
+          throw error
+        }
+        // 等待后重试（指数退避：1s, 2s）
+        await new Promise(resolve => setTimeout(resolve, Math.pow(2, attempt) * 1000))
+        console.warn(`请求失败，重试 ${attempt + 1}/${retries - 1}:`, path, error.message)
       }
-
-      const data = await response.json()
-      return data
-    } catch (error) {
-      // 最后一次尝试失败时抛出错误
-      if (attempt === retries - 1) {
-        throw error
-      }
-      // 等待后重试（指数退避：1s, 2s）
-      await new Promise(resolve => setTimeout(resolve, Math.pow(2, attempt) * 1000))
-      console.warn(`请求失败，重试 ${attempt + 1}/${retries - 1}:`, path, error.message)
     }
   }
 }

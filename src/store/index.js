@@ -65,9 +65,23 @@ export const useTaskStore = create((set, get) => ({
   }),
   
   syncTasksFromServer: (serverTasks) => set((state) => {
+    // 浅比较：如果服务器数据和当前数据一致，不触发重渲染
+    if (state.tasks.length === serverTasks.length) {
+      let unchanged = true
+      for (let i = 0; i < state.tasks.length; i++) {
+        if (state.tasks[i].id !== serverTasks[i]?.id ||
+            state.tasks[i].status !== serverTasks[i]?.status ||
+            state.tasks[i].updated_at !== serverTasks[i]?.updated_at) {
+          unchanged = false
+          break
+        }
+      }
+      if (unchanged) return state // 无变化，跳过 set
+    }
+
     const taskMap = new Map()
     for (const st of serverTasks) {
-      taskMap.set(st.id, { ...st })
+      taskMap.set(st.id, st) // ⚡ 不再解构创建新对象，保留引用
     }
     for (const t of state.tasks) {
       if (!taskMap.has(t.id)) {

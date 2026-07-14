@@ -396,11 +396,13 @@ export default function App() {
     }
   }, [currentStudent?.id, currentPage])
 
-  // Load exams
+  // Load exams（合并原 App.jsx 3s 轮询与 Exam/index.jsx 3s 轮询，统一由 App 层调度）
   useEffect(() => {
     if (currentStudent && currentPage === 'exam') {
       loadGeneratedExams(false, true) // 首次进入：先展示缓存再后台刷新
-      const interval = setInterval(() => loadGeneratedExams(false), 3000)
+      const interval = setInterval(() => {
+        if (document.visibilityState === 'visible') loadGeneratedExams(false)
+      }, 15000) // ⚡ 3s→15s，exams 状态变化慢，无需高频轮询
       return () => clearInterval(interval)
     }
   }, [currentStudent?.id, currentPage])
@@ -887,13 +889,13 @@ export default function App() {
 
   // Filter tasks
   const isRetryTask = (t) => t.task_type === 'retry_paper' || t.task_type === 'wrong_retry'
-  const filteredTasks = (Array.isArray(tasks) ? tasks : []).filter(t => {
+  const filteredTasks = useMemo(() => (Array.isArray(tasks) ? tasks : []).filter(t => {
     if (t.student_id !== currentStudent?.id) return false
     if (processingFilter === 'all') return true
     if (processingFilter === 'homework') return !isRetryTask(t)
     if (processingFilter === 'retry') return isRetryTask(t)
     return t.status === processingFilter
-  })
+  }), [tasks, currentStudent?.id, processingFilter])
 
   // Filter wrong questions
   const isWithinTimeRange = (dateStr, timeKey) => {
@@ -920,7 +922,7 @@ export default function App() {
     }
   }
 
-  const allAvailableTags = (() => {
+  const allAvailableTags = useMemo(() => {
     const tagSet = new Set()
     wrongQuestions
       .filter(wq => wq.student_id === currentStudent?.id)
@@ -932,9 +934,9 @@ export default function App() {
         tags.forEach(tag => tagSet.add(tag))
       })
     return Array.from(tagSet)
-  })()
+  }, [wrongQuestions, currentStudent?.id])
 
-  const filteredWrongQuestions = (Array.isArray(wrongQuestions) ? wrongQuestions : []).filter(wq => {
+  const filteredWrongQuestions = useMemo(() => (Array.isArray(wrongQuestions) ? wrongQuestions : []).filter(wq => {
     if (wq.student_id !== currentStudent?.id) return false
     if (bankFilter !== 'all') {
       const ls = wq.lifecycle_status || 'new'
@@ -953,10 +955,11 @@ export default function App() {
       if (!selectedTags.some(t => qTags.includes(t))) return false
     }
     return true
-  })
+  }), [wrongQuestions, currentStudent?.id, bankFilter, selectedSubject, selectedTimeRange, selectedErrorCount, selectedTags])
 
   // Filter generated exams
-  const studentExams = (Array.isArray(generatedExams) ? generatedExams : []).filter(e => e.student_id === currentStudent?.id)
+  const studentExams = useMemo(() => (Array.isArray(generatedExams) ? generatedExams : []).filter(e => e.student_id === currentStudent?.id),
+    [generatedExams, currentStudent?.id])
 
   // Add student
   const handleAddStudent = async (studentData) => {

@@ -103,51 +103,49 @@ export const createQuestions = async (questions) => {
 }
 
 export const batchUpdateQuestionTags = async (tagUpdates) => {
+  if (!tagUpdates || tagUpdates.length === 0) return []
   const results = []
+
+  // 批量 UPDATE：通过 CASE WHEN + VALUES 构造单条 SQL，替代 N 条逐行 UPDATE
+  const caseValues = []
+  const caseParams = []
+  let paramIdx = 1
+
   for (const update of tagUpdates) {
-    try {
-      const hasDifficulty = update.difficulty !== undefined && update.difficulty !== null
-      if (update.ai_tags && update.ai_tags.length > 0) {
-        // 成功识别 → 写入标签（难度若判定成功则一并写入，否则保留原值）
-        if (hasDifficulty) {
-          await query(
-            `UPDATE ${TABLES.QUESTIONS}
-             SET ai_tags = $1::jsonb, tags_source = 'ai', difficulty = $2, updated_at = NOW()
-             WHERE id = $3`,
-            [JSON.stringify(update.ai_tags), update.difficulty, update.id]
-          )
-        } else {
-          await query(
-            `UPDATE ${TABLES.QUESTIONS}
-             SET ai_tags = $1::jsonb, tags_source = 'ai', updated_at = NOW()
-             WHERE id = $2`,
-            [JSON.stringify(update.ai_tags), update.id]
-          )
-        }
-      } else {
-        // 识别失败 → 保留 ai_tags 为 NULL（不写「未分类」），留给每日回填重试；
-        // 难度若单独判定成功仍写入。
-        if (hasDifficulty) {
-          await query(
-            `UPDATE ${TABLES.QUESTIONS}
-             SET ai_tags = NULL, tags_source = NULL, difficulty = $1, updated_at = NOW()
-             WHERE id = $2`,
-            [update.difficulty, update.id]
-          )
-        } else {
-          await query(
-            `UPDATE ${TABLES.QUESTIONS}
-             SET ai_tags = NULL, tags_source = NULL, updated_at = NOW()
-             WHERE id = $1`,
-            [update.id]
-          )
-        }
-      }
-      results.push({ id: update.id })
-    } catch (error) {
-      console.error(`更新标签失败，题目ID: ${update.id}`, error)
-    }
+    const hasDifficulty = update.difficulty !== undefined && update.difficulty !== null
+    const aiTagsJson = update.ai_tags && update.ai_tags.length > 0
+      ? JSON.stringify(update.ai_tags)
+      : null
+
+    // 存参数：id, ai_tags, tags_source, difficulty
+    caseParams.push(update.id)
+    caseParams.push(aiTagsJson)
+    caseParams.push(aiTagsJson ? 'ai' : null)
+    caseParams.push(hasDifficulty ? update.difficulty : null)
+
+    caseValues.push(
+      `($${paramIdx}::uuid, $${paramIdx + 1}::jsonb, $${paramIdx + 2}, $${paramIdx + 3})`
+    )
+    paramIdx += 4
+
+    results.push({ id: update.id })
   }
+
+  try {
+    await query(
+      `UPDATE ${TABLES.QUESTIONS} AS q SET
+        ai_tags = v.ai_tags,
+        tags_source = v.tags_source,
+        difficulty = COALESCE(v.difficulty, q.difficulty),
+        updated_at = NOW()
+      FROM (VALUES ${caseValues.join(', ')}) AS v(id, ai_tags, tags_source, difficulty)
+      WHERE q.id = v.id`,
+      caseParams
+    )
+  } catch (error) {
+    console.error(`批量更新标签失败 (${tagUpdates.length} 题):`, error.message)
+  }
+
   return results
 }
 
@@ -398,62 +396,40 @@ const levenshteinDistance = (str1, str2) => {
 export const cacheQuestion = async (questionData, fingerprint, phash = null, parserVersion = 'v1') => {
   try {
     console.log(`[QuestionCache] 写入缓存: fingerprint=${fingerprint.substring(0, 16)}..., phash=${phash ? phash.substring(0, 16) + '...' : 'null'}, version=${parserVersion}`)
-    
-    const { rows: existingRows } = await query(
-      `SELECT id FROM ${TABLES.QUESTION_CACHE}
-       WHERE question_fingerprint = $1 AND parser_version = $2`,
-      [fingerprint, parserVersion]
+
+    // 使用 ON CONFLICT 替代 SELECT-before-INSERT/UPDATE，将 2 次 DB 往返减为 1 次
+    const { rows } = await query(
+      `INSERT INTO ${TABLES.QUESTION_CACHE}
+       (question_fingerprint, content_type, content, options, answer, analysis,
+        question_type, subject, ai_tags, phash, parser_version, use_count, created_at, updated_at)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, 0, NOW(), NOW())
+       ON CONFLICT (question_fingerprint, parser_version) DO UPDATE SET
+         content = EXCLUDED.content,
+         options = EXCLUDED.options,
+         answer = EXCLUDED.answer,
+         analysis = EXCLUDED.analysis,
+         question_type = EXCLUDED.question_type,
+         subject = EXCLUDED.subject,
+         ai_tags = EXCLUDED.ai_tags,
+         phash = EXCLUDED.phash,
+         updated_at = NOW()
+       RETURNING id`,
+      [
+        fingerprint,
+        questionData.content_type || 'text',
+        questionData.content || null,
+        JSON.stringify(questionData.options || []),
+        questionData.answer || null,
+        questionData.analysis || null,
+        questionData.question_type || 'choice',
+        questionData.subject || null,
+        JSON.stringify(questionData.ai_tags || []),
+        phash,
+        parserVersion
+      ]
     )
-    
-    if (existingRows.length > 0) {
-      await query(
-        `UPDATE ${TABLES.QUESTION_CACHE}
-         SET content = $1, options = $2, answer = $3, analysis = $4,
-             question_type = $5, subject = $6, ai_tags = $7, phash = $8,
-             updated_at = NOW()
-         WHERE question_fingerprint = $9 AND parser_version = $10`,
-        [
-          questionData.content || null,
-          JSON.stringify(questionData.options || []),
-          questionData.answer || null,
-          questionData.analysis || null,
-          questionData.question_type || 'choice',
-          questionData.subject || null,
-          JSON.stringify(questionData.ai_tags || []),
-          phash,
-          fingerprint,
-          parserVersion
-        ]
-      )
-      console.log(`[QuestionCache] 缓存更新成功`)
-      return existingRows[0].id
-    } else {
-      const { rows: newRows } = await query(
-        `INSERT INTO ${TABLES.QUESTION_CACHE}
-         (question_fingerprint, content_type, content, options, answer, analysis,
-          question_type, subject, ai_tags, phash, parser_version, use_count, created_at, updated_at)
-         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, NOW(), NOW())
-         RETURNING id`,
-        [
-          fingerprint,
-          questionData.content_type || 'text',
-          questionData.content || null,
-          JSON.stringify(questionData.options || []),
-          questionData.answer || null,
-          questionData.analysis || null,
-          questionData.question_type || 'choice',
-          questionData.subject || null,
-          JSON.stringify(questionData.ai_tags || []),
-          phash,
-          parserVersion,
-          0
-        ]
-      )
-      console.log(`[QuestionCache] 缓存写入成功`)
-      return newRows[0].id
-    }
-    
-    return true
+    console.log(`[QuestionCache] 缓存写入成功`)
+    return rows[0].id
   } catch (error) {
     console.error('[QuestionCache] 缓存写入失败:', error.message)
     return false
@@ -538,7 +514,7 @@ export const createJudgement = async ({
  */
 export const getLatestJudgement = async (questionId, studentId) => {
   const { rows } = await query(
-    `SELECT * FROM ${TABLES.JUDGEMENTS}
+    `SELECT id, question_id, student_id, source, is_correct, metadata, created_at FROM ${TABLES.JUDGEMENTS}
      WHERE question_id = $1 AND student_id = $2
      ORDER BY created_at DESC
      LIMIT 1`,

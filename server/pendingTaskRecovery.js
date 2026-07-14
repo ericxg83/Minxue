@@ -46,10 +46,13 @@ class PendingTaskRecovery {
     this.isRunning = true
 
     try {
-      await this.scanPendingTasks()
-      await this.scanFailedTasks()
-      await this.scanProcessingStuck()
-      await this.scanGeometryAssets()
+      // ⚡ 并行执行 4 个独立扫描，替代串行 4 次
+      await Promise.allSettled([
+        this.scanPendingTasks(),
+        this.scanFailedTasks(),
+        this.scanProcessingStuck(),
+        this.scanGeometryAssets()
+      ])
     } catch (err) {
       console.error('[PendingTaskRecovery] ❌ 扫描失败:', err)
     } finally {

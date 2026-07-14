@@ -110,6 +110,8 @@ export const taskService = {
 export const startTaskPolling = (studentId, onUpdate, intervalMs = 5000) => {
   let polling = true
   let timerId = null
+  let failCount = 0
+  const MAX_BACKOFF_MS = 30000 // 最大退避 30s
 
   const poll = async () => {
     if (!polling) return
@@ -119,12 +121,17 @@ export const startTaskPolling = (studentId, onUpdate, intervalMs = 5000) => {
       if (result.success && polling) {
         onUpdate(result.tasks)
       }
+      failCount = 0 // 成功后重置失败计数
     } catch (error) {
       console.debug('轮询任务状态失败:', error)
+      failCount++
     }
 
     if (polling) {
-      timerId = setTimeout(poll, intervalMs)
+      // 指数退避：失败后 5s → 10s → 20s → 30s（上限），成功后恢复原间隔
+      const backoff = Math.min(intervalMs * Math.pow(2, failCount - 1), MAX_BACKOFF_MS)
+      const nextInterval = failCount > 0 ? backoff : intervalMs
+      timerId = setTimeout(poll, nextInterval)
     }
   }
 

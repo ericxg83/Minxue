@@ -198,17 +198,24 @@ function resolveBackupVendors() {
   })
 }
 
+// ⚡ 缓存 resolveBackupVendors 结果，避免每次 getter 调用都重新过滤数组
+let _resolvedVendorsCache = null
+function getResolvedVendors() {
+  if (!_resolvedVendorsCache) _resolvedVendorsCache = resolveBackupVendors()
+  return _resolvedVendorsCache
+}
+
 export const BACKUP_CONFIG = {
   // 所有已启用的备用厂商（按优先级排列）
   get VENDORS() {
-    return resolveBackupVendors()
+    return getResolvedVendors()
   },
   get ENABLED() {
-    return resolveBackupVendors().length > 0
+    return getResolvedVendors().length > 0
   },
   // 第一个启用的厂商（文本链路默认用它）
   get PRIMARY() {
-    return resolveBackupVendors()[0] || null
+    return getResolvedVendors()[0] || null
   },
   // 兼容旧调用：默认 endpoint / key / model（取第一个启用厂商）
   get ENDPOINT() {
@@ -224,7 +231,7 @@ export const BACKUP_CONFIG = {
   // 所有启用厂商的视觉模型（按优先级平铺，任一成功即返回）
   get VL_MODELS_LIST() {
     if (process.env.BACKUP_VL_MODEL) return [process.env.BACKUP_VL_MODEL]
-    return resolveBackupVendors().flatMap(v => v.vlModels)
+    return getResolvedVendors().flatMap(v => v.vlModels)
   },
   get DISABLE_REASONING() {
     return process.env.BACKUP_DISABLE_REASONING === 'true' ||
@@ -334,12 +341,6 @@ export async function callTextCompletion(opts) {
   if (isMainRateLimitedToday()) {
     console.warn(`⚠️ [AI] 主 API 今日已限额，跳过直连，直接从备用 API 开始`)
     primaryErr = new Error('主 API 今日限额，已跳过')
-    const status = 429
-    const isQuota = true
-    const primaryKeyMissing = false
-    if (!isQuota && !primaryKeyMissing && !primaryErr.response) {
-      throw primaryErr
-    }
     console.warn(`⚠️ [AI] 主 API 调用失败（429 限流），尝试备用 API...`)
   } else {
     const primaryResult = await tryPrimary()
