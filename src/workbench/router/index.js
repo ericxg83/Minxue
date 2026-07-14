@@ -48,6 +48,18 @@ const routes = [
     name: 'WeeklyReport',
     component: () => import('../views/WeeklyReportWorkbench.vue'),
     meta: { requiresPC: false }
+  },
+  {
+    path: '/worksheets',
+    name: 'WorksheetMgr',
+    component: () => import('../views/WorksheetManagement.vue'),
+    meta: { requiresPC: true }
+  },
+  {
+    path: '/worksheets/:id/review',
+    name: 'WorksheetReview',
+    component: () => import('../views/WorksheetReview.vue'),
+    meta: { requiresPC: true }
   }
 ]
 

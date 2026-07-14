@@ -45,6 +45,8 @@ export const taskService = {
     if (options.generatedExamId) formData.append('generatedExamId', options.generatedExamId)
     if (options.taskType) formData.append('taskType', options.taskType)
     if (options.retryPaperId) formData.append('retryPaperId', options.retryPaperId)
+    if (options.worksheetId) formData.append('worksheetId', options.worksheetId)
+    if (options.subject) formData.append('subject', options.subject)
 
     // Add file names for multi-page papers
     if (options.fileNames) {
@@ -70,6 +72,25 @@ export const taskService = {
   uploadRetryAnswer: async (generatedExamId, files) => {
     const formData = new FormData()
     formData.append('generatedExamId', generatedExamId)
+
+    for (const file of files) {
+      formData.append('files', file)
+    }
+    return apiRequest('/tasks/upload', {
+      method: 'POST',
+      body: formData
+    })
+  },
+
+  // 练习册任务入口：学生上传练习册作业照片
+  // taskType='workbook' 使该批改任务进入练习册批改流程
+  // 会使用 worksheetId 和 subject 匹配标准答案
+  uploadWorkbookAnswer: async (studentId, files, worksheetId, subject) => {
+    const formData = new FormData()
+    formData.append('studentId', studentId)
+    formData.append('taskType', 'workbook')
+    formData.append('worksheetId', worksheetId)
+    formData.append('subject', subject)
 
     for (const file of files) {
       formData.append('files', file)

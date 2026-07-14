@@ -4,10 +4,31 @@ import { Camera, ChevronRight, Plus, Sparkles, User, ScanLine, BookOpen } from '
 import { motion } from 'motion/react'
 import { useStudentStore } from '../../store'
 import StudentSwitcher from '../../components/StudentSwitcher'
+import UploadTypeSelector from '../../components/UploadTypeSelector'
 
 export default function Home({ onNavigate }) {
   const { currentStudent, setCurrentStudent } = useStudentStore()
   const [showStudentSwitcher, setShowStudentSwitcher] = useState(false)
+  const [showUploadTypeSelector, setShowUploadTypeSelector] = useState(false)
+
+  const handleWorkbookUpload = (uploadData) => {
+    // Set global state for workbook upload
+    window.dispatchEvent(new CustomEvent('set-workbook-flow', {
+      detail: {
+        flow: 'workbook',
+        worksheetId: uploadData.worksheetId,
+        subject: uploadData.subject
+      }
+    }))
+
+    // Trigger file input click
+    setTimeout(() => {
+      const input = document.getElementById('file-input')
+      if (input) {
+        input.click()
+      }
+    }, 100)
+  }
 
   const openUploader = (capture) => {
     const input = document.getElementById('file-input')
@@ -21,13 +42,36 @@ export default function Home({ onNavigate }) {
   }
 
   const showUploadOptions = () => {
-    ActionSheet.show({
-      actions: [
-        { key: 'camera', text: '拍照上传', description: '拍摄试卷或作业' },
-        { key: 'album', text: '从相册选择', description: '选择已有照片' },
-      ],
-      onAction: (action) => openUploader(action.key === 'camera')
-    })
+    setShowUploadTypeSelector(true)
+  }
+
+  const handleUploadTypeSelect = (uploadData) => {
+    console.log('Selected upload type:', uploadData)
+    setShowUploadTypeSelector(false)
+
+    // Continue with the selected upload type
+    if (uploadData.type === 'workbook') {
+      handleWorkbookUpload(uploadData)
+    } else if (uploadData.type === 'regular') {
+      handleRegularUpload()
+    } else if (uploadData.type === 'wrong_retry') {
+      handleWrongRetryUpload()
+    }
+  }
+
+  const handleRegularUpload = () => {
+    // Use existing regular upload flow
+    const input = document.getElementById('file-input')
+    if (!input) return
+    input.setAttribute('capture', 'environment')
+    input.click()
+  }
+
+  const handleWrongRetryUpload = () => {
+    // Navigate to QR scan page
+    if (window.goToPage) {
+      window.goToPage('scan-qr')
+    }
   }
 
   return (
@@ -103,6 +147,15 @@ export default function Home({ onNavigate }) {
           </div>
         </div>
       </motion.button>
+
+      {/* Upload Type Selector Modal */}
+      {showUploadTypeSelector && (
+        <UploadTypeSelector
+          visible={showUploadTypeSelector}
+          onClose={() => setShowUploadTypeSelector(false)}
+          onUpload={handleUploadTypeSelect}
+        />
+      )}
 
       {/* Quick Actions Section */}
       <section className="mt-6">

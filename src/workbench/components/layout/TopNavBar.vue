@@ -53,7 +53,7 @@ import { computed, ref, onMounted, onUnmounted } from 'vue'
 import { useRouter, useRoute } from 'vue-router'
 import {
   Bell, QuestionFilled, ArrowDown,
-  DocumentChecked, Collection, Clock, UploadFilled, DataAnalysis
+  DocumentChecked, Collection, Clock, UploadFilled, DataAnalysis, Notebook
 } from '@element-plus/icons-vue'
 import { useNotificationStore } from '../../stores/notificationStore'
 import NotificationList from './NotificationList.vue'
@@ -96,6 +96,7 @@ onUnmounted(() => {
 const navItems = [
   { key: 'proofread',       label: '作业批改', path: '/',                icon: 'DocumentChecked' },
 { key: 'wrong-book',      label: '错题本',   path: '/wrongbook',        icon: 'Collection' },
+  { key: 'worksheets',      label: '练习册管理', path: '/worksheets',      icon: 'Notebook' },
   { key: 'exam-history',    label: '重练批改', path: '/exam-history',     icon: 'Clock' },
   { key: 'weekly-report',   label: '诊断报告', path: '/weekly-report',    icon: 'DataAnalysis' },
   { key: 'exam-import',     label: '试卷入库', path: '/paper',            icon: 'UploadFilled',disabled: true },

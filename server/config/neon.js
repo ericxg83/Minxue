@@ -67,7 +67,10 @@ export const TABLES = {
   GENERATED_EXAMS: 'generated_exams',
   QUESTION_CACHE: 'question_cache',
   JUDGEMENTS: 'judgements',
-  QUESTION_ASSETS: 'question_assets'
+  QUESTION_ASSETS: 'question_assets',
+  WORKSHEETS: 'worksheets',
+  WORKSHEET_ANSWERS: 'worksheet_answers',
+  STUDENT_WORKSHEET_SETTINGS: 'student_worksheet_settings'
 }
 
 export const TASK_STATUS = {

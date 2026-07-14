@@ -11,7 +11,7 @@ import sharp from 'sharp'
 import { TABLES, TASK_STATUS } from './config/neon.js'
 import { query } from './config/neon.js'
 import { AI_CONFIG, getAIHeaders, buildOCRPrompt, buildAnswerGenerationPrompt, getCurrentTextModel, getCurrentVLModel, rotateTextModel, rotateVLModel, TEXT_MODELS, VL_MODELS, callTextCompletion, callVisionCompletion } from './config/ai.js'
-import { updateTaskStatus, createQuestions, batchUpdateQuestionTags, addWrongQuestions, createJudgement, getLatestJudgement, updateQuestionAnswer, markAnswerException, findCachedQuestionByFingerprint, cacheQuestion, incrementQuestionUseCount, updateQuestionCacheId, createQuestionAsset } from './services/neonService.js'
+import { updateTaskStatus, createQuestions, batchUpdateQuestionTags, addWrongQuestions, createJudgement, getLatestJudgement, updateQuestionAnswer, markAnswerException, findCachedQuestionByFingerprint, cacheQuestion, incrementQuestionUseCount, updateQuestionCacheId, createQuestionAsset, lookupWorksheetAnswer } from './services/neonService.js'
 import { uploadImage } from './services/ossService.js'
 import { generateTextFingerprint, generatePHash, PARSER_VERSION, TEXT_SIMILARITY_THRESHOLD } from './utils/questionFingerprint.js'
 import { uploadFilesWithRetry } from './services/uploadRetryManager.js'
@@ -1437,6 +1437,223 @@ const callGradeEndpoint = async ({ id, studentId, results }) => {
   return resp.json()
 }
 
+// ── 练习册批改管线 ──
+// OCR 只识别题号+学生答案，不从 worksheet 提取参考答案
+// 答案从 worksheet_answers 表查找，judgeAnswer 对比判定
+const processWorkbookGrading = async (job) => {
+  const { taskId, studentId, imageUrl: rawImageUrl, worksheetId } = job.data
+  const startTime = Date.now()
+
+  console.log(`\n📘 [Workbook] 开始练习册批改 taskId=${taskId}, worksheetId=${worksheetId}`)
+
+  // 1. 解析 imageUrl
+  let imageUrl
+  if (typeof rawImageUrl === 'string') {
+    imageUrl = rawImageUrl.startsWith('{')
+      ? (JSON.parse(rawImageUrl).url || '')
+      : rawImageUrl
+  } else {
+    imageUrl = rawImageUrl?.url || String(rawImageUrl || '')
+  }
+  if (!imageUrl?.startsWith('http')) {
+    await updateTaskStatus(taskId, TASK_STATUS.FAILED, {
+      error: 'imageUrl 无效', errorType: 'INVALID_URL'
+    })
+    throw new Error('imageUrl 无效')
+  }
+
+  await updateTaskStatus(taskId, TASK_STATUS.PROCESSING, { progress: 5 })
+
+  // 2. 下载图片
+  const imagePath = await downloadImage(imageUrl)
+  if (!imagePath) {
+    await updateTaskStatus(taskId, TASK_STATUS.FAILED, {
+      error: '图片下载失败', errorType: 'DOWNLOAD_FAILED'
+    })
+    throw new Error('图片下载失败')
+  }
+
+  await updateTaskStatus(taskId, TASK_STATUS.PROCESSING, { progress: 15 })
+
+  // 3. 纠偏 + 压缩
+  const compressedBuffer = await sharp(imagePath)
+    .rotate()
+    .resize(1920, undefined, { fit: 'inside', withoutEnlargement: true })
+    .jpeg({ quality: 85 })
+    .toBuffer()
+
+  await updateTaskStatus(taskId, TASK_STATUS.PROCESSING, { progress: 30 })
+
+  // 4. OCR — 只提取题号+学生答案，不要求 AI 生成参考答案
+  // 使用更简单的 prompt，减少 token 消耗
+  const workbookPrompt = `你是一个作业批改助手。请识别图片中每道题的题号和学生手写答案。
+
+只输出 JSON 数组，格式：
+[
+  {
+    "question_number": 1,
+    "student_answer": "A",
+    "content": "题目内容（可选）",
+    "question_type": "choice"  // choice | fill | answer
+  }
+]
+
+注意：
+- question_number 必须是数字
+- student_answer 是学生手写的答案，没有则填 null
+- 不要猜测标准答案
+- 只返回 JSON，不要其他文字`
+
+  console.log(`   [Workbook] 开始 AI 识别题号+学生答案...`)
+  const { content } = await callVisionCompletion({
+    imageDataURL: `data:image/jpeg;base64,${compressedBuffer.toString('base64')}`,
+    systemPrompt: workbookPrompt,
+    userText: '识别这张作业图片中的所有题目和学生答案。',
+    temperature: 0.3,
+    maxTokens: 4096
+  })
+
+  await updateTaskStatus(taskId, TASK_STATUS.PROCESSING, { progress: 60 })
+
+  if (!content) {
+    await updateTaskStatus(taskId, TASK_STATUS.FAILED, {
+      error: 'AI 识别返回为空', errorType: 'AI_EMPTY'
+    })
+    throw new Error('AI 识别返回为空')
+  }
+
+  // 解析 JSON
+  let questions = []
+  try {
+    const jsonMatch = content.match(/```json\n?([\s\S]*?)\n?```/) ||
+                      content.match(/```\n?([\s\S]*?)\n?```/) ||
+                      content.match(/\[[\s\S]*\]/)
+    const jsonStr = jsonMatch ? jsonMatch[1] || jsonMatch[0] : content
+    questions = JSON.parse(jsonStr)
+    if (!Array.isArray(questions)) questions = [questions]
+  } catch (e) {
+    console.error(`   [Workbook] JSON 解析失败:`, e.message)
+    await updateTaskStatus(taskId, TASK_STATUS.FAILED, {
+      error: 'AI 识别结果解析失败', errorType: 'JSON_PARSE_ERROR'
+    })
+    throw new Error('JSON 解析失败')
+  }
+
+  console.log(`   [Workbook] AI 识别到 ${questions.length} 道题`)
+
+  // 5. 查找标准答案并判定
+  let wrongCount = 0
+  let matchedCount = 0
+  for (const q of questions) {
+    if (!q.question_number) continue
+
+    const answerRow = await lookupWorksheetAnswer(worksheetId, q.question_number)
+    if (answerRow) {
+      q.answer = answerRow.answer
+      q.answer_source = 'worksheet'
+      q.question_type = answerRow.answer_type || q.question_type || 'choice'
+      matchedCount++
+
+      if (q.student_answer && q.student_answer !== 'null') {
+        const judgment = judgeAnswer(q.student_answer, q.answer, q.question_type)
+        q.is_correct = judgment.isCorrect
+        if (q.is_correct === false) wrongCount++
+      } else {
+        q.is_correct = null // 未作答
+      }
+      console.log(`   [Workbook] 题 ${q.question_number}: 学生="${q.student_answer}" 标准="${q.answer}" → ${q.is_correct === true ? '正确' : q.is_correct === false ? '错误' : '待人工'}`)
+    } else {
+      console.log(`   [Workbook] 题 ${q.question_number}: 答案库无匹配，标记待人工`)
+      q.is_correct = null
+    }
+  }
+  console.log(`   [Workbook] 答案匹配: ${matchedCount}/${questions.length} 题, 错误: ${wrongCount} 题`)
+
+  await updateTaskStatus(taskId, TASK_STATUS.PROCESSING, { progress: 80 })
+
+  // 6. 保存到数据库（复用现有 createQuestions）
+  const questionsWithStudentId = questions.map(q => ({
+    ...q,
+    student_id: studentId,
+    task_id: taskId,
+    content: q.content || `第 ${q.question_number} 题`,
+    options: q.options || [],
+    analysis: q.analysis || '',
+    student_answer: q.student_answer || null,
+    ai_answer: null,
+    is_complete: true,
+    confidence: q.is_correct !== null ? 0.95 : null,
+    question_type: q.question_type || 'choice',
+    image_url: imageUrl,
+    source_type: 'workbook'
+  }))
+
+  await createQuestions(questionsWithStudentId)
+
+  // 7. 同步错题本（错误的写入）
+  const wrongQuestionIds = questions
+    .filter(q => q.is_correct === false && q.question_number)
+    .map(q => q.question_number)
+  if (wrongQuestionIds.length > 0) {
+    const questionMap = {}
+    questionsWithStudentId.forEach(q => {
+      if (q.is_correct === false) {
+        questionMap[q.question_number] = q
+      }
+    })
+    // 需要查询实际 question_id（临时用 question_number 关联）
+    const { rows: dbQuestions } = await query(
+      `SELECT id, question_number FROM ${TABLES.QUESTIONS} WHERE task_id = $1`,
+      [taskId]
+    )
+    const wrongIds = dbQuestions
+      .filter(dq => wrongQuestionIds.includes(dq.question_number))
+      .map(dq => dq.id)
+
+    if (wrongIds.length > 0) {
+      await addWrongQuestions(studentId, wrongIds, {}, {})
+      console.log(`   [Workbook] 已添加 ${wrongIds.length} 题到错题本`)
+    }
+  }
+
+  // 8. 记录 judgement
+  for (const q of questionsWithStudentId) {
+    if (q.answer && q.student_answer) {
+      try {
+        await createJudgement({
+          questionId: q.id,
+          studentId,
+          source: 'ai_ocr',
+          confidence: q.is_correct !== null ? 0.95 : null,
+          isCorrect: q.is_correct,
+          content: q.content,
+          answer: q.answer,
+          studentAnswer: q.student_answer,
+          analysis: q.analysis,
+          metadata: { worksheet_id: worksheetId, source: 'workbook_pipeline' }
+        })
+      } catch (e) {
+        // 非阻塞
+      }
+    }
+  }
+
+  // 9. 完成
+  const duration = ((Date.now() - startTime) / 1000).toFixed(1)
+  await updateTaskStatus(taskId, TASK_STATUS.DONE, {
+    progress: 100,
+    stats: {
+      questionCount: questions.length,
+      wrongCount,
+      matchedCount,
+      duration: `${duration}s`,
+      source: 'workbook'
+    }
+  })
+
+  console.log(`✅ [Workbook] 完成: ${questions.length} 题, ${wrongCount} 错, 耗时 ${duration}s`)
+}
+
 export const processTask = async (job) => {
   const { taskId, studentId, imageUrl: rawImageUrl, originalName, generatedExamId } = job.data
   const startTime = Date.now()
@@ -1446,6 +1663,12 @@ export const processTask = async (job) => {
   // → 置信度门禁（0.8）→ 全部高置信度则自动批改并推进掌握度；否则回退人工改判。
   if (generatedExamId) {
     return processSlimGrading(job)
+  }
+
+  // ── 练习册管线：OCR 只识别题号+学生答案，不生成参考答案 ──
+  // 答案从 worksheet_answers 查找，judgeAnswer 对比判定
+  if (job.data.taskType === 'workbook' && job.data.worksheetId) {
+    return processWorkbookGrading(job)
   }
 
   // Defensive: imageUrl from DB might be string URL, JSON object string, or object

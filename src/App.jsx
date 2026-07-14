@@ -24,7 +24,9 @@ import {
   AlertCircle,
   Download,
   BarChart3,
-  SlidersHorizontal
+  SlidersHorizontal,
+  BookOpen,
+  RefreshCw
 } from 'lucide-react'
 import { motion, AnimatePresence } from 'motion/react'
 import { QRCodeSVG } from 'qrcode.react'
@@ -38,6 +40,7 @@ import { downloadPaperWord } from './utils/docxGenerator'
 import { mockQuestions, mockTasks, mockWrongQuestions, mockGeneratedExams, mockStudents } from './data/mockData'
 import StudentSwitcher from './components/StudentSwitcher'
 import SwipeableRow from './components/SwipeableRow'
+import WorksheetPicker from './components/WorksheetPicker'
 
 import { useToast, ToastProvider } from './components/ToastProvider'
 import dayjs from 'dayjs'
@@ -219,6 +222,37 @@ export default function App() {
   const [showExamReview, setShowExamReview] = useState(false)
   const [reviewTask, setReviewTask] = useState(null)
   const [showUploadOptions, setShowUploadOptions] = useState(false)
+  const [showWorksheetPicker, setShowWorksheetPicker] = useState(false)
+  const [selectedWorksheetId, setSelectedWorksheetId] = useState(null)
+  const [pendingFlow, setPendingFlow] = useState(null) // 'workbook' | null
+  const [flowSubject, setFlowSubject] = useState('数学')
+
+  // Listen for workbook flow events from Home page
+  useEffect(() => {
+    const handleWorkbookFlow = (e) => {
+      if (e.detail?.flow === 'workbook') {
+        setPendingFlow('workbook')
+        setSelectedWorksheetId(e.detail.worksheetId)
+        setFlowSubject(e.detail.subject || '数学')
+      }
+    }
+
+    window.addEventListener('set-workbook-flow', handleWorkbookFlow)
+
+    // Clear pending flow on page navigation
+    const handleRouteChange = () => {
+      if (pendingFlow === 'workbook') {
+        setPendingFlow(null)
+        setSelectedWorksheetId(null)
+      }
+    }
+
+    window.addEventListener('popstate', handleRouteChange)
+    return () => {
+      window.removeEventListener('set-workbook-flow', handleWorkbookFlow)
+      window.removeEventListener('popstate', handleRouteChange)
+    }
+  }, [])
   const [showNotifications, setShowNotifications] = useState(false)
   const [showLearningReport, setShowLearningReport] = useState(false)
 
@@ -632,6 +666,12 @@ export default function App() {
         }
       }
 
+      // Clear workbook flow after upload
+      if (pendingFlow === 'workbook') {
+        setPendingFlow(null)
+        setSelectedWorksheetId(null)
+      }
+
       setUploading(false)
     } catch (err) {
       console.error('💥💥💥💥💥 [UPLOAD] UNCAUGHT ERROR in handleFileSelect:', err)
@@ -735,20 +775,22 @@ export default function App() {
   const uploadViaBackend = async (files) => {
     console.debug('📤📤📤 [uploadViaBackend] STARTING with', files.length, 'files')
     console.debug('📤 [uploadViaBackend] currentStudent:', currentStudent?.id, currentStudent?.name)
-    
+
+    const isWorkbook = pendingFlow === 'workbook' && selectedWorksheetId
     const pendingTasks = []
-    
+
     files.forEach((file) => {
       const tempTask = {
         id: `temp-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`,
         student_id: currentStudent.id,
         image_url: URL.createObjectURL(file),
         original_name: file.name || `照片_${dayjs().format('YYYY-MM-DD_HH-mm-ss')}.jpg`,
-        task_type: 'homework',
+        task_type: isWorkbook ? 'workbook' : 'homework',
         status: 'pending',
         result: { progress: 0 },
         created_at: new Date().toISOString(),
-        is_temp: true
+        is_temp: true,
+        ...(isWorkbook && { worksheet_id: selectedWorksheetId })
       }
       addTask(tempTask)
       pendingTasks.push({ tempTask, file })
@@ -766,7 +808,13 @@ export default function App() {
     // 批量上传所有文件（单次请求）
     try {
       const files = pendingTasks.map(p => p.file)
-      const result = await taskService.uploadFiles(currentStudent.id, files)
+      const options = {}
+      if (isWorkbook) {
+        options.worksheetId = selectedWorksheetId
+        options.taskType = 'workbook'
+        options.subject = flowSubject
+      }
+      const result = await taskService.uploadFiles(currentStudent.id, files, options)
       const tasks = result.tasks || []
 
       tasks.forEach((taskResult, idx) => {
@@ -3041,6 +3089,30 @@ export default function App() {
           onClose={() => setShowStudentSwitcher(false)}
         />
 
+        {/* Worksheet Picker */}
+        <WorksheetPicker
+          visible={showWorksheetPicker}
+          onClose={() => {
+            setShowWorksheetPicker(false)
+            setPendingFlow(null)
+          }}
+          onSelect={({ worksheetId, worksheetName }) => {
+            setSelectedWorksheetId(worksheetId)
+            if (worksheetId) {
+              // 选完练习册 → 打开相机
+              setTimeout(() => {
+                const input = document.getElementById('file-input')
+                if (input) {
+                  input.setAttribute('capture', 'environment')
+                  input.setAttribute('multiple', 'multiple')
+                  input.click()
+                }
+              }, 300)
+            }
+          }}
+          subject={flowSubject}
+        />
+
         {/* Floating Action Button — Claude style */}
         {currentPage === 'processing' && (
           <motion.button
@@ -3063,7 +3135,7 @@ export default function App() {
           </motion.button>
         )}
 
-        {/* Upload Options Menu — Claude style */}
+        {/* Upload Options Menu — Three cards */}
         {showUploadOptions && (
           <div className="absolute inset-0 z-[25000] flex items-end justify-center">
             <motion.div
@@ -3083,35 +3155,65 @@ export default function App() {
                 <div className="w-8 h-1 rounded-full" style={{ background: 'var(--border)' }} />
               </div>
               <div className="px-6 pt-2 pb-4">
-                <h3 className="text-center text-[17px] font-semibold text-[var(--text)] mb-6">上传试卷</h3>
-                <div className="grid grid-cols-2 gap-4">
-                  <button
-                    onClick={() => triggerUpload(true)}
-                    className="flex flex-col items-center gap-3 p-5 rounded-2xl transition-all active:scale-[0.97] tap-scale"
-                    style={{ background: 'var(--accent-soft)' }}
-                  >
-                    <div className="w-14 h-14 rounded-2xl flex items-center justify-center shadow-md" style={{ background: 'linear-gradient(135deg, var(--accent), #F97316)' }}>
-                      <Camera size={28} className="text-white" />
-                    </div>
-                    <div className="text-center">
-                      <span className="block text-[14px] font-semibold" style={{ color: 'var(--text)' }}>拍照上传</span>
-                      <span className="block text-[11px] mt-0.5" style={{ color: 'var(--text-secondary)' }}>可连续拍摄多张</span>
-                    </div>
-                  </button>
-                  <button
-                    onClick={() => triggerUpload(false)}
-                    className="flex flex-col items-center gap-3 p-5 rounded-2xl transition-all active:scale-[0.97] tap-scale"
-                    style={{ background: 'var(--primary-soft)' }}
-                  >
-                    <div className="w-14 h-14 rounded-2xl flex items-center justify-center shadow-md" style={{ background: 'var(--primary)' }}>
-                      <ImageIcon size={28} className="text-white" />
-                    </div>
-                    <div className="text-center">
-                      <span className="block text-[14px] font-semibold" style={{ color: 'var(--text)' }}>相册选择</span>
-                      <span className="block text-[11px] mt-0.5" style={{ color: 'var(--text-secondary)' }}>可多选试卷上传</span>
-                    </div>
-                  </button>
-                </div>
+                <h3 className="text-center text-[17px] font-semibold text-[var(--text)] mb-6">新建批改任务</h3>
+
+                {/* 卡片1: 日常作业 */}
+                <button
+                  onClick={() => {
+                    setShowUploadOptions(false)
+                    setPendingFlow('workbook')
+                    setShowWorksheetPicker(true)
+                  }}
+                  className="w-full flex items-center gap-4 p-4 rounded-2xl transition-all active:scale-[0.98] tap-scale mb-3"
+                  style={{ background: 'var(--accent-soft)' }}
+                >
+                  <div className="w-14 h-14 rounded-2xl flex items-center justify-center shadow-md flex-shrink-0" style={{ background: 'linear-gradient(135deg, var(--accent), #F97316)' }}>
+                    <BookOpen size={28} className="text-white" />
+                  </div>
+                  <div className="text-left">
+                    <span className="block text-[15px] font-semibold" style={{ color: 'var(--text)' }}>日常作业</span>
+                    <span className="block text-[12px] mt-0.5" style={{ color: 'var(--text-secondary)' }}>练习册/同步练习，已有标准答案</span>
+                  </div>
+                </button>
+
+                {/* 卡片2: 普通试卷 */}
+                <button
+                  onClick={() => {
+                    setShowUploadOptions(false)
+                    setPendingFlow(null)
+                    setSelectedWorksheetId(null)
+                    triggerUpload(true)
+                  }}
+                  className="w-full flex items-center gap-4 p-4 rounded-2xl transition-all active:scale-[0.98] tap-scale mb-3"
+                  style={{ background: 'var(--primary-soft)' }}
+                >
+                  <div className="w-14 h-14 rounded-2xl flex items-center justify-center shadow-md flex-shrink-0" style={{ background: 'var(--primary)' }}>
+                    <FileText size={28} className="text-white" />
+                  </div>
+                  <div className="text-left">
+                    <span className="block text-[15px] font-semibold" style={{ color: 'var(--text)' }}>普通试卷</span>
+                    <span className="block text-[12px] mt-0.5" style={{ color: 'var(--text-secondary)' }}>考试卷/临时卷，AI智能批改</span>
+                  </div>
+                </button>
+
+                {/* 卡片3: 错题重练 */}
+                <button
+                  onClick={() => {
+                    setShowUploadOptions(false)
+                    setShowScanQR(true)
+                  }}
+                  className="w-full flex items-center gap-4 p-4 rounded-2xl transition-all active:scale-[0.98] tap-scale"
+                  style={{ background: 'var(--bg-secondary)' }}
+                >
+                  <div className="w-14 h-14 rounded-2xl flex items-center justify-center shadow-md flex-shrink-0" style={{ background: '#8B5CF6' }}>
+                    <RefreshCw size={28} className="text-white" />
+                  </div>
+                  <div className="text-left">
+                    <span className="block text-[15px] font-semibold" style={{ color: 'var(--text)' }}>错题重练</span>
+                    <span className="block text-[12px] mt-0.5" style={{ color: 'var(--text-secondary)' }}>扫二维码批改</span>
+                  </div>
+                </button>
+
               </div>
               <div className="px-6 pb-2">
                 <button

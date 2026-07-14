@@ -594,6 +594,39 @@ export const uploadImage = async (file, studentId) => {
   return data.url
 }
 
+// ── 练习册 API ──
+
+export const getWorksheets = async () => {
+  const data = await apiRequest('/worksheets')
+  return data.worksheets || []
+}
+
+export const createWorksheet = async ({ name, subject, grade }) => {
+  const data = await apiRequest('/worksheets', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ name, subject, grade })
+  })
+  return data.worksheet
+}
+
+export const deleteWorksheet = async (id) => {
+  return apiRequest(`/worksheets/${id}`, { method: 'DELETE' })
+}
+
+export const getStudentWorksheetSetting = async (studentId, subject) => {
+  const data = await apiRequest(`/worksheets/student-settings/${studentId}?subject=${encodeURIComponent(subject)}`)
+  return data.setting || null
+}
+
+export const upsertStudentWorksheetSetting = async (studentId, subject, worksheetId) => {
+  return apiRequest('/worksheets/student-settings', {
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ studentId, subject, worksheetId })
+  })
+}
+
 export const clearAllCache = () => {
   try {
     localStorage.removeItem('cache_version')

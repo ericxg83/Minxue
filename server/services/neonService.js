@@ -729,3 +729,145 @@ export const getFailedGeometryAssets = async (limit = 20) => {
   )
   return rows
 }
+
+// ── 练习册 CRUD ──
+
+export const createWorksheet = async ({ name, subject, grade }) => {
+  const { rows } = await query(
+    `INSERT INTO ${TABLES.WORKSHEETS} (name, subject, grade) VALUES ($1, $2, $3) RETURNING *`,
+    [name, subject || null, grade || null]
+  )
+  return rows[0]
+}
+
+export const getAllWorksheets = async () => {
+  const { rows } = await query(
+    `SELECT w.*, COUNT(wa.id)::int AS answer_count
+     FROM ${TABLES.WORKSHEETS} w
+     LEFT JOIN ${TABLES.WORKSHEET_ANSWERS} wa ON wa.worksheet_id = w.id
+     GROUP BY w.id ORDER BY w.created_at DESC`
+  )
+  return rows
+}
+
+export const getWorksheetById = async (id) => {
+  const { rows } = await query(
+    `SELECT w.*, COUNT(wa.id)::int AS answer_count
+     FROM ${TABLES.WORKSHEETS} w
+     LEFT JOIN ${TABLES.WORKSHEET_ANSWERS} wa ON wa.worksheet_id = w.id
+     WHERE w.id = $1 GROUP BY w.id`,
+    [id]
+  )
+  return rows[0] || null
+}
+
+export const updateWorksheetStatus = async (id, status) => {
+  const { rows } = await query(
+    `UPDATE ${TABLES.WORKSHEETS} SET status = $2 WHERE id = $1 RETURNING *`,
+    [id, status]
+  )
+  return rows[0] || null
+}
+
+export const updateWorksheetPdfUrl = async (id, pdfUrl) => {
+  const { rows } = await query(
+    `UPDATE ${TABLES.WORKSHEETS} SET pdf_url = $2 WHERE id = $1 RETURNING *`,
+    [id, pdfUrl]
+  )
+  return rows[0] || null
+}
+
+export const updateWorksheetAnswerCount = async (id) => {
+  const { rows } = await query(
+    `UPDATE ${TABLES.WORKSHEETS} SET answer_count = (
+       SELECT COUNT(*) FROM ${TABLES.WORKSHEET_ANSWERS} WHERE worksheet_id = $1
+     ) WHERE id = $1 RETURNING *`,
+    [id]
+  )
+  return rows[0] || null
+}
+
+export const deleteWorksheet = async (id) => {
+  await query(`DELETE FROM ${TABLES.WORKSHEETS} WHERE id = $1`, [id])
+}
+
+// ── 答案 CRUD ──
+
+export const batchInsertAnswers = async (worksheetId, answers) => {
+  if (!answers || answers.length === 0) return []
+  const values = answers.map((_, i) =>
+    `($1, $${i * 4 + 2}, $${i * 4 + 3}, $${i * 4 + 4}, $${i * 4 + 5})`
+  ).join(',')
+  const params = [worksheetId]
+  for (const a of answers) {
+    params.push(a.question_no, a.answer, a.answer_type || 'choice', a.section || null)
+  }
+  const { rows } = await query(
+    `INSERT INTO ${TABLES.WORKSHEET_ANSWERS} (worksheet_id, question_no, answer, answer_type, section)
+     VALUES ${values}
+     ON CONFLICT (worksheet_id, section, question_no)
+     DO UPDATE SET answer = EXCLUDED.answer, answer_type = EXCLUDED.answer_type
+     RETURNING *`,
+    params
+  )
+  return rows
+}
+
+export const getWorksheetAnswers = async (worksheetId) => {
+  const { rows } = await query(
+    `SELECT * FROM ${TABLES.WORKSHEET_ANSWERS}
+     WHERE worksheet_id = $1 ORDER BY question_no ASC`,
+    [worksheetId]
+  )
+  return rows
+}
+
+export const updateWorksheetAnswer = async (id, { answer, answer_type }) => {
+  const { rows } = await query(
+    `UPDATE ${TABLES.WORKSHEET_ANSWERS} SET answer = $2, answer_type = COALESCE($3, answer_type)
+     WHERE id = $1 RETURNING *`,
+    [id, answer, answer_type || null]
+  )
+  return rows[0] || null
+}
+
+export const deleteWorksheetAnswersByWorksheet = async (worksheetId) => {
+  await query(`DELETE FROM ${TABLES.WORKSHEET_ANSWERS} WHERE worksheet_id = $1`, [worksheetId])
+}
+
+// ── 学生默认练习册 ──
+
+export const getStudentWorksheetSetting = async (studentId, subject) => {
+  const { rows } = await query(
+    `SELECT s.*, w.name AS worksheet_name, w.subject AS worksheet_subject
+     FROM ${TABLES.STUDENT_WORKSHEET_SETTINGS} s
+     LEFT JOIN ${TABLES.WORKSHEETS} w ON w.id = s.default_worksheet_id
+     WHERE s.student_id = $1 AND s.subject = $2`,
+    [studentId, subject]
+  )
+  return rows[0] || null
+}
+
+export const upsertStudentWorksheetSetting = async (studentId, subject, worksheetId) => {
+  const { rows } = await query(
+    `INSERT INTO ${TABLES.STUDENT_WORKSHEET_SETTINGS} (student_id, subject, default_worksheet_id)
+     VALUES ($1, $2, $3)
+     ON CONFLICT (student_id, subject)
+     DO UPDATE SET default_worksheet_id = $3, updated_at = NOW()
+     RETURNING *`,
+    [studentId, subject, worksheetId]
+  )
+  return rows[0]
+}
+
+// ── Worker 用：查找单条答案 ──
+
+export const lookupWorksheetAnswer = async (worksheetId, questionNo) => {
+  const { rows } = await query(
+    `SELECT answer, answer_type FROM ${TABLES.WORKSHEET_ANSWERS}
+     WHERE worksheet_id = $1 AND question_no = $2
+     LIMIT 1`,
+    [worksheetId, questionNo]
+  )
+  return rows[0] || null
+}

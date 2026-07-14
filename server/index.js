@@ -19,6 +19,7 @@ import { migrateSourceType } from './migrations/019_add_source_type.js'
 import { migrateRetryTaskFields } from './migrations/020_add_retry_task_fields.js'
 import { migrateGeometryReconstructionAsync } from './migrations/021_add_geometry_reconstruction_async.js'
 import { migrateTaskSystemFields } from './migrations/022_task_system_fields.js'
+import { migrateWorksheets } from './migrations/023_add_worksheets_tables.js'
 
 const __dirname = dirname(fileURLToPath(import.meta.url))
 dotenv.config({ path: resolve(__dirname, '.env') })
@@ -40,6 +41,7 @@ import { processTask } from './worker.js'
 import { generateTag as generateTagWithLLM } from './backfillTags.js'
 import { AI_CONFIG, getAIHeaders, buildTaggingPrompt, resetModelIndex } from './config/ai.js'
 import weeklyReportRouter from './routes/weeklyReport.js'
+import worksheetsRouter from './routes/worksheets.js'
 
 const app = express()
 const PORT = process.env.PORT || 4000
@@ -117,8 +119,10 @@ app.post('/api/upload', upload.single('files'), async (req, res) => {
 // Upload images and create tasks (with validation + retry pipeline)
 app.post('/api/tasks/upload', upload.array('files', 20), async (req, res) => {
   try {
-    const { studentId, taskType, generatedExamId } = req.body
-    const normalizedTaskType = taskType === 'wrong_retry' ? 'wrong_retry' : 'general'
+    const { studentId, taskType, generatedExamId, worksheetId, subject } = req.body
+    const normalizedTaskType = taskType === 'wrong_retry' ? 'wrong_retry'
+      : taskType === 'workbook' ? 'workbook'
+      : 'general'
     const normalizedGeneratedExamId = generatedExamId && /^[0-9a-f-]{36}$/i.test(generatedExamId) ? generatedExamId : null
 
     // 错题重练上传：未传 studentId 时，从组卷记录自动关联（二维码只承载 task 定位）
@@ -173,9 +177,9 @@ app.post('/api/tasks/upload', upload.array('files', 20), async (req, res) => {
           console.log(`  OSS 上传成功: ${result.filename} → ${safeUrl}`)
 
           const { rows } = await query(
-            `INSERT INTO ${TABLES.TASKS} (student_id, image_url, original_name, status, result, task_type, generated_exam_id)
-             VALUES ($1, $2, $3, $4, $5, $6, $7) RETURNING *`,
-            [resolvedStudentId, safeUrl, result.filename, TASK_STATUS.PENDING, JSON.stringify({ progress: 0 }), normalizedTaskType, normalizedGeneratedExamId]
+            `INSERT INTO ${TABLES.TASKS} (student_id, image_url, original_name, status, result, task_type, generated_exam_id, worksheet_id, subject)
+             VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9) RETURNING *`,
+            [resolvedStudentId, safeUrl, result.filename, TASK_STATUS.PENDING, JSON.stringify({ progress: 0 }), normalizedTaskType, normalizedGeneratedExamId, worksheetId || null, subject || null]
           )
 
           const savedTask = rows[0]
@@ -190,7 +194,8 @@ app.post('/api/tasks/upload', upload.array('files', 20), async (req, res) => {
                 imageUrl: safeUrl,
                 originalName: result.filename,
                 generatedExamId: normalizedGeneratedExamId,
-                taskType: normalizedTaskType
+                taskType: normalizedTaskType,
+                worksheetId: worksheetId || null
               }, {
                 attempts: parseInt(process.env.MAX_RETRIES) || 3,
                 backoff: { type: 'exponential', delay: 5000 }
@@ -206,7 +211,7 @@ app.post('/api/tasks/upload', upload.array('files', 20), async (req, res) => {
           } else {
             console.log(`  ??  Redis 队列未连接，跳过队列提交`)
             // 兜底：直接同步调用 Worker 处理
-            processTask({ data: { taskId: savedTask.id, studentId: resolvedStudentId, imageUrl: safeUrl, originalName: result.filename, generatedExamId: normalizedGeneratedExamId, taskType: normalizedTaskType } }).catch(e => console.error('  ? 同步处理失败: ' + e.message))
+            processTask({ data: { taskId: savedTask.id, studentId: resolvedStudentId, imageUrl: safeUrl, originalName: result.filename, generatedExamId: normalizedGeneratedExamId, taskType: normalizedTaskType, worksheetId: worksheetId || null } }).catch(e => console.error('  ? 同步处理失败: ' + e.message))
           }
 
           tasks.push(savedTask)
@@ -2121,6 +2126,7 @@ app.get('/api/admin/backfill-tags/progress', (req, res) => {
 
 // 周学习诊断报告
 app.use('/api/weekly-report', weeklyReportRouter)
+app.use('/api/worksheets', worksheetsRouter)
 
 const __filename = fileURLToPath(import.meta.url)
 
@@ -2168,6 +2174,7 @@ if (process.argv[1] === __filename || process.argv[1]?.endsWith('server/index.js
       await migrateRetryTaskFields()
       await migrateGeometryReconstructionAsync()
       await migrateTaskSystemFields()
+      await migrateWorksheets()
     } catch (err) {
       console.error('数据库迁移失败:', err.message)
     }
