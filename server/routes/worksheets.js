@@ -6,6 +6,7 @@ import {
   getWorksheetById,
   updateWorksheetStatus,
   updateWorksheetPdfUrl,
+  updateWorksheetParseStatus,
   updateWorksheetAnswerCount,
   deleteWorksheet,
   batchInsertAnswers,
@@ -106,86 +107,99 @@ router.post('/:id/parse-pdf', pdfUpload.single('file'), async (req, res) => {
 
     const file = req.file
     if (!file) return res.status(400).json({ error: '请上传 PDF 文件' })
-
-    const pdfUrl = await uploadPDF(file.buffer, file.originalname, 'system')
-    await updateWorksheetPdfUrl(worksheetId, pdfUrl)
-
-    let fullText = ''
-    try {
-      fullText = await extractPdfText(file.buffer)
-    } catch (e) {
-      console.log('PDF text extraction failed, will try OCR fallback:', e.message)
+    if (worksheet.parse_status === 'parsing') {
+      return res.status(409).json({ error: '该练习册正在解析中，请稍候' })
     }
 
-    let parsedAnswers = []
-    const lowConfidence = []
-    let markerFound = false
-    let ocrTruncatedInfo = null
+    // 文件已收到：先告知前端上传成功，解析在后台进行，前端轮询 parse_status
+    await updateWorksheetParseStatus(worksheetId, { status: 'parsing' })
+    res.json({ success: true, parsing: true, message: '上传成功，解析已开始' })
 
-    if (fullText && fullText.trim().length > 50) {
-      const answerSection = fullText.replace(/[\s\S]*?(参考答案|标准答案|参考解答|答案)/, '')
-      markerFound = answerSection.length < fullText.length
-      parsedAnswers = parseAnswerText(markerFound ? answerSection : fullText, lowConfidence)
-      if (markerFound && parsedAnswers.length === 0) {
-        // 标记词切分后无结果（可能切错位置），退回全文解析
-        parsedAnswers = parseAnswerText(fullText, lowConfidence)
-      }
-    }
-
-    if (parsedAnswers.length === 0) {
-      try {
-        // 扫描版 PDF：逐页渲染成图片后走视觉模型 OCR
-        const { images, totalPages } = await renderPdfToJpegs(file.buffer, { maxPages: 20 })
-        if (totalPages > images.length) {
-          ocrTruncatedInfo = { totalPages, ocrPages: images.length }
-          console.log(`PDF 共 ${totalPages} 页，仅 OCR 前 ${images.length} 页`)
-        }
-        for (const imageBuffer of images) {
-          const ocrResult = await ocrExtractAnswers(imageBuffer.toString('base64'), lowConfidence)
-          parsedAnswers.push(...ocrResult)
-        }
-      } catch (e) {
-        console.log('OCR fallback failed:', e.message)
-      }
-    }
-
-    // 同一题号去重：保留置信度更高的；置信度相同保留靠后的（答案区通常在文末）
-    const byQuestionNo = new Map()
-    for (const a of parsedAnswers) {
-      const prev = byQuestionNo.get(a.question_no)
-      if (!prev || a.confidence >= prev.confidence) byQuestionNo.set(a.question_no, a)
-    }
-    parsedAnswers = [...byQuestionNo.values()].sort((a, b) => a.question_no - b.question_no)
-
-    if (parsedAnswers.length > 0) {
-      await batchInsertAnswers(worksheetId, parsedAnswers)
-      await updateWorksheetAnswerCount(worksheetId)
-      await updateWorksheetStatus(worksheetId, 'reviewing')
-    }
-
-    const updated = await getWorksheetById(worksheetId)
-
-    // 明确边界：本功能面向纯答案页 PDF，疑似完整 PDF（题干+答案）时提示重新裁剪上传
-    let warning = null
-    if (parsedAnswers.length === 0) {
-      warning = '未能解析出任何答案，请确认上传的是纯答案页 PDF。'
-    } else if (ocrTruncatedInfo) {
-      warning = `PDF 共 ${ocrTruncatedInfo.totalPages} 页，仅识别了前 ${ocrTruncatedInfo.ocrPages} 页。若答案位于文件末尾，请裁剪为纯答案页后重新上传。`
-    } else if (!markerFound && lowConfidence.length > parsedAnswers.length * 0.5) {
-      warning = '未检测到"参考答案"标记，且低置信度条目偏多，可能混入了题干内容。建议裁剪为纯答案页后重新上传。'
-    }
-
-    res.json({
-      success: true,
-      count: parsedAnswers.length,
-      lowConfidence,
-      warning,
-      worksheet: updated,
+    parsePdfInBackground(worksheetId, file).catch(async (e) => {
+      console.error('PDF 后台解析失败:', e)
+      await updateWorksheetParseStatus(worksheetId, {
+        status: 'failed',
+        error: e.message || '未知错误',
+      }).catch(() => {})
     })
   } catch (e) {
     res.status(500).json({ error: 'PDF 解析失败: ' + e.message })
   }
 })
+
+async function parsePdfInBackground(worksheetId, file) {
+  const pdfUrl = await uploadPDF(file.buffer, file.originalname, 'system')
+  await updateWorksheetPdfUrl(worksheetId, pdfUrl)
+
+  let fullText = ''
+  try {
+    fullText = await extractPdfText(file.buffer)
+  } catch (e) {
+    console.log('PDF text extraction failed, will try OCR fallback:', e.message)
+  }
+
+  let parsedAnswers = []
+  const lowConfidence = []
+  let markerFound = false
+  let ocrTruncatedInfo = null
+
+  if (fullText && fullText.trim().length > 50) {
+    const answerSection = fullText.replace(/[\s\S]*?(参考答案|标准答案|参考解答|答案)/, '')
+    markerFound = answerSection.length < fullText.length
+    parsedAnswers = parseAnswerText(markerFound ? answerSection : fullText, lowConfidence)
+    if (markerFound && parsedAnswers.length === 0) {
+      // 标记词切分后无结果（可能切错位置），退回全文解析
+      parsedAnswers = parseAnswerText(fullText, lowConfidence)
+    }
+  }
+
+  if (parsedAnswers.length === 0) {
+    try {
+      // 扫描版 PDF：逐页渲染成图片后走视觉模型 OCR
+      const { images, totalPages } = await renderPdfToJpegs(file.buffer, { maxPages: 20 })
+      if (totalPages > images.length) {
+        ocrTruncatedInfo = { totalPages, ocrPages: images.length }
+        console.log(`PDF 共 ${totalPages} 页，仅 OCR 前 ${images.length} 页`)
+      }
+      for (const imageBuffer of images) {
+        const ocrResult = await ocrExtractAnswers(imageBuffer.toString('base64'), lowConfidence)
+        parsedAnswers.push(...ocrResult)
+      }
+    } catch (e) {
+      console.log('OCR fallback failed:', e.message)
+    }
+  }
+
+  // 同一题号去重：保留置信度更高的；置信度相同保留靠后的（答案区通常在文末）
+  const byQuestionNo = new Map()
+  for (const a of parsedAnswers) {
+    const prev = byQuestionNo.get(a.question_no)
+    if (!prev || a.confidence >= prev.confidence) byQuestionNo.set(a.question_no, a)
+  }
+  parsedAnswers = [...byQuestionNo.values()].sort((a, b) => a.question_no - b.question_no)
+
+  if (parsedAnswers.length > 0) {
+    await batchInsertAnswers(worksheetId, parsedAnswers)
+    await updateWorksheetAnswerCount(worksheetId)
+    await updateWorksheetStatus(worksheetId, 'reviewing')
+  }
+
+  // 明确边界：本功能面向纯答案页 PDF，疑似完整 PDF（题干+答案）时提示重新裁剪上传
+  let warning = null
+  if (parsedAnswers.length === 0) {
+    warning = '未能解析出任何答案，请确认上传的是纯答案页 PDF。'
+  } else if (ocrTruncatedInfo) {
+    warning = `PDF 共 ${ocrTruncatedInfo.totalPages} 页，仅识别了前 ${ocrTruncatedInfo.ocrPages} 页。若答案位于文件末尾，请裁剪为纯答案页后重新上传。`
+  } else if (!markerFound && lowConfidence.length > parsedAnswers.length * 0.5) {
+    warning = '未检测到"参考答案"标记，且低置信度条目偏多，可能混入了题干内容。建议裁剪为纯答案页后重新上传。'
+  }
+
+  await updateWorksheetParseStatus(worksheetId, {
+    status: 'done',
+    count: parsedAnswers.length,
+    warning,
+  })
+}
 
 function parseAnswerText(text, lowConfidence) {
   const results = []

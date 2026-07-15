@@ -71,8 +71,8 @@
       </template>
     </el-dialog>
 
-    <el-dialog v-model="showPdfDialog" title="上传答案 PDF" width="500px">
-      <div v-if="!pdfUploaded">
+    <el-dialog v-model="showPdfDialog" title="上传答案 PDF" width="500px" @close="onPdfDialogClose">
+      <div v-if="!pdfUploaded && parseStatus !== 'parsing'">
         <el-upload
           drag
           accept=".pdf"
@@ -89,9 +89,19 @@
         <div v-if="selectedPdf" class="pdf-info">
           <p>已选择: {{ selectedPdf.name }}</p>
           <el-button type="primary" @click="startParse" :loading="parsing" class="mt-3">
-            开始解析
+            {{ parsing ? '上传中...' : '开始解析' }}
           </el-button>
         </div>
+      </div>
+      <div v-else-if="parseStatus === 'parsing'" class="parse-result">
+        <el-result icon="info" title="正在解析">
+          <template #sub-title>
+            <p>已上传 PDF，后台正在解析答案...</p>
+            <el-icon class="is-loading" :size="32" style="margin-top:12px;color:var(--el-color-primary)">
+              <Loading />
+            </el-icon>
+          </template>
+        </el-result>
       </div>
       <div v-else class="parse-result">
         <el-result :icon="parseWarning ? 'warning' : 'success'" title="解析完成">
@@ -118,7 +128,7 @@
 <script setup>
 import { ref, onMounted } from 'vue'
 import { useRouter } from 'vue-router'
-import { Plus, UploadFilled } from '@element-plus/icons-vue'
+import { Plus, UploadFilled, Loading } from '@element-plus/icons-vue'
 import { ElMessage } from 'element-plus'
 import {
   getWorksheets,
@@ -126,6 +136,7 @@ import {
   deleteWorksheet,
   updateWorksheetStatus,
   uploadPdf,
+  getWorksheet,
 } from '../../services/apiService.js'
 
 const router = useRouter()
@@ -141,6 +152,8 @@ const parsing = ref(false)
 const pdfUploaded = ref(false)
 const parseCount = ref(0)
 const parseWarning = ref(null)
+const parseStatus = ref('idle')
+let parsePollTimer = null
 const currentWorksheetId = ref(null)
 
 const loadData = async () => {
@@ -229,31 +242,78 @@ const handleUploadPdf = (row) => {
   pdfUploaded.value = false
   selectedPdf.value = null
   parseWarning.value = null
+  parseCount.value = 0
+  parseStatus.value = 'idle'
+  if (parsePollTimer) {
+    clearInterval(parsePollTimer)
+    parsePollTimer = null
+  }
 }
 
 const handlePdfSelect = (uploadFile) => {
   selectedPdf.value = uploadFile.raw
 }
 
+const pollParseStatus = async () => {
+  if (!currentWorksheetId.value) return
+  try {
+    const ws = await getWorksheet(currentWorksheetId.value)
+    if (!ws) return
+    parseStatus.value = ws.parse_status || 'idle'
+
+    if (ws.parse_status === 'done') {
+      parseCount.value = ws.parse_count || 0
+      parseWarning.value = ws.parse_warning || null
+      pdfUploaded.value = true
+      parsing.value = false
+      if (parsePollTimer) {
+        clearInterval(parsePollTimer)
+        parsePollTimer = null
+      }
+      if (ws.parse_warning) {
+        ElMessage.warning(ws.parse_warning)
+      } else {
+        ElMessage.success(`解析完成，共 ${parseCount.value} 条答案`)
+      }
+      await loadData()
+    } else if (ws.parse_status === 'failed') {
+      parseCount.value = 0
+      parseWarning.value = null
+      pdfUploaded.value = false
+      parsing.value = false
+      if (parsePollTimer) {
+        clearInterval(parsePollTimer)
+        parsePollTimer = null
+      }
+      ElMessage.error('解析失败: ' + (ws.parse_error || '未知错误'))
+      await loadData()
+    }
+    // 'parsing' — continue polling
+  } catch (e) {
+    // poll error, keep trying
+  }
+}
+
 const startParse = async () => {
   if (!selectedPdf.value || !currentWorksheetId.value) return
 
   parsing.value = true
+  parseStatus.value = 'parsing'
   try {
-    const result = await uploadPdf(currentWorksheetId.value, selectedPdf.value)
-    parseCount.value = result.count || 0
-    parseWarning.value = result.warning || null
-    pdfUploaded.value = true
-    if (result.warning) {
-      ElMessage.warning(result.warning)
-    } else {
-      ElMessage.success(`解析完成，共 ${parseCount.value} 条答案`)
-    }
-    await loadData()
+    await uploadPdf(currentWorksheetId.value, selectedPdf.value)
+    // 上传成功，立即给用户反馈
+    ElMessage.success('上传成功，开始解析...')
+
+    // 立即开始轮询解析状态
+    // 先等 2 秒让后端写上 parse_status='parsing'
+    setTimeout(() => {
+      pollParseStatus()
+      parsePollTimer = setInterval(pollParseStatus, 2000)
+    }, 2000)
   } catch (e) {
-    ElMessage.error('解析失败: ' + e.message)
-  } finally {
     parsing.value = false
+    parseStatus.value = 'idle'
+    ElMessage.error('上传失败: ' + e.message)
   }
 }
 
@@ -261,6 +321,19 @@ const resetPdfUpload = () => {
   pdfUploaded.value = false
   selectedPdf.value = null
   parseWarning.value = null
+  parseCount.value = 0
+  parseStatus.value = 'idle'
+  if (parsePollTimer) {
+    clearInterval(parsePollTimer)
+    parsePollTimer = null
+  }
+}
+
+const onPdfDialogClose = () => {
+  if (parsePollTimer) {
+    clearInterval(parsePollTimer)
+    parsePollTimer = null
+  }
 }
 
 const gotoReview = () => {

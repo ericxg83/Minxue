@@ -20,6 +20,8 @@ import { migrateRetryTaskFields } from './migrations/020_add_retry_task_fields.j
 import { migrateGeometryReconstructionAsync } from './migrations/021_add_geometry_reconstruction_async.js'
 import { migrateTaskSystemFields } from './migrations/022_task_system_fields.js'
 import { migrateWorksheets } from './migrations/023_add_worksheets_tables.js'
+import { migrateTaskImages } from './migrations/024_add_task_images.js'
+import { migrateWorksheetParseStatus } from './migrations/025_add_worksheet_parse_status.js'
 
 const __dirname = dirname(fileURLToPath(import.meta.url))
 dotenv.config({ path: resolve(__dirname, '.env') })
@@ -170,93 +172,117 @@ app.post('/api/tasks/upload', upload.array('files', 20), async (req, res) => {
     const tasks = []
     const boundingBoxResults = []
 
-    for (const result of uploadSummary.results) {
-      if (result.success) {
-        try {
-          const safeUrl = typeof result.url === 'string' ? result.url : String(result.url)
-          console.log(`  OSS 上传成功: ${result.filename} → ${safeUrl}`)
+    // ── 多图一任务：一次上传的所有成功文件合并为一个 task ──
+    // images JSONB 按上传顺序存 [{page_number, image_url, file_name}]，
+    // image_url 列保留 = 第 1 页（缩略图 / 旧代码兼容）。
+    const succeeded = uploadSummary.results.filter(r => r.success)
+    const failed = uploadSummary.results.filter(r => !r.success)
 
-          const { rows } = await query(
-            `INSERT INTO ${TABLES.TASKS} (student_id, image_url, original_name, status, result, task_type, generated_exam_id, worksheet_id, subject)
-             VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9) RETURNING *`,
-            [resolvedStudentId, safeUrl, result.filename, TASK_STATUS.PENDING, JSON.stringify({ progress: 0 }), normalizedTaskType, normalizedGeneratedExamId, worksheetId || null, subject || null]
-          )
+    for (const result of failed) {
+      console.error(`? [Upload] 文件 ${result.filename} 上传失败: ${result.errorType} — ${result.error}`)
+      tasks.push({
+        error: true,
+        originalName: result.filename,
+        message: result.error || '上传失败',
+        errorType: result.errorType || 'UPLOAD_FAILED',
+        attempts: result.attempts.map(a => ({
+          type: a.type,
+          result: a.result,
+          error: a.error,
+          timestamp: a.timestamp,
+        })),
+      })
+      boundingBoxResults.push({
+        filename: result.filename,
+        status: 'skipped',
+        error: result.error,
+        note: '上传失败，跳过边界框生成',
+      })
+    }
 
-          const savedTask = rows[0]
-          console.log(`  DB 记录已创建: taskId=${savedTask.id}`)
+    if (succeeded.length > 0) {
+      const images = succeeded.map((result, index) => ({
+        page_number: index + 1,
+        image_url: typeof result.url === 'string' ? result.url : String(result.url),
+        file_name: result.filename,
+      }))
+      const firstUrl = images[0].image_url
+      const taskName = succeeded.length > 1
+        ? `${succeeded[0].filename} 等${succeeded.length}页`
+        : succeeded[0].filename
 
-          if (queue) {
-            console.log(`   提交任务到 Redis 队列: taskId=${savedTask.id}`)
-            try {
-              const job = await queue.add('process-task', {
-                taskId: savedTask.id,
-                studentId: resolvedStudentId,
-                imageUrl: safeUrl,
-                originalName: result.filename,
-                generatedExamId: normalizedGeneratedExamId,
-                taskType: normalizedTaskType,
-                worksheetId: worksheetId || null
-              }, {
-                attempts: parseInt(process.env.MAX_RETRIES) || 3,
-                backoff: { type: 'exponential', delay: 5000 }
-              })
-              console.log(`  ? 任务已加入队列: jobId=${job.id}`)
-            } catch (queueError) {
-              // 队列提交失败时清理孤儿任务，避免 pending 任务堆积
-              console.error(`  ? 队列提交失败，清理 DB 记录: taskId=${savedTask.id}`, queueError.message)
-              query(`DELETE FROM ${TABLES.TASKS} WHERE id = $1`, [savedTask.id])
-                .catch(e => console.error(`  ? 清理孤儿任务失败:`, e.message))
-              throw queueError // 由外层 catch 统一处理
-            }
-          } else {
-            console.log(`  ??  Redis 队列未连接，跳过队列提交`)
-            // 兜底：直接同步调用 Worker 处理
-            processTask({ data: { taskId: savedTask.id, studentId: resolvedStudentId, imageUrl: safeUrl, originalName: result.filename, generatedExamId: normalizedGeneratedExamId, taskType: normalizedTaskType, worksheetId: worksheetId || null } }).catch(e => console.error('  ? 同步处理失败: ' + e.message))
+      try {
+        for (const img of images) {
+          console.log(`  OSS 上传成功: ${img.file_name} → ${img.image_url}`)
+        }
+
+        const { rows } = await query(
+          `INSERT INTO ${TABLES.TASKS} (student_id, image_url, images, original_name, status, result, task_type, generated_exam_id, worksheet_id, subject)
+           VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10) RETURNING *`,
+          [resolvedStudentId, firstUrl, JSON.stringify(images), taskName, TASK_STATUS.PENDING, JSON.stringify({ progress: 0 }), normalizedTaskType, normalizedGeneratedExamId, worksheetId || null, subject || null]
+        )
+
+        const savedTask = rows[0]
+        console.log(`  DB 记录已创建: taskId=${savedTask.id} (${images.length} 页)`)
+
+        const jobData = {
+          taskId: savedTask.id,
+          studentId: resolvedStudentId,
+          imageUrl: firstUrl,
+          images,
+          originalName: taskName,
+          generatedExamId: normalizedGeneratedExamId,
+          taskType: normalizedTaskType,
+          worksheetId: worksheetId || null
+        }
+
+        if (queue) {
+          console.log(`   提交任务到 Redis 队列: taskId=${savedTask.id}`)
+          try {
+            const job = await queue.add('process-task', jobData, {
+              attempts: parseInt(process.env.MAX_RETRIES) || 3,
+              backoff: { type: 'exponential', delay: 5000 }
+            })
+            console.log(`  ? 任务已加入队列: jobId=${job.id}`)
+          } catch (queueError) {
+            // 队列提交失败时清理孤儿任务，避免 pending 任务堆积
+            console.error(`  ? 队列提交失败，清理 DB 记录: taskId=${savedTask.id}`, queueError.message)
+            query(`DELETE FROM ${TABLES.TASKS} WHERE id = $1`, [savedTask.id])
+              .catch(e => console.error(`  ? 清理孤儿任务失败:`, e.message))
+            throw queueError // 由外层 catch 统一处理
           }
+        } else {
+          console.log(`  ??  Redis 队列未连接，跳过队列提交`)
+          // 兜底：直接同步调用 Worker 处理
+          processTask({ data: jobData }).catch(e => console.error('  ? 同步处理失败: ' + e.message))
+        }
 
-          tasks.push(savedTask)
+        tasks.push(savedTask)
+        for (const img of images) {
           boundingBoxResults.push({
-            filename: result.filename,
+            filename: img.file_name,
             taskId: savedTask.id,
             status: 'queued',
             note: '等待队列处理后生成边界框',
           })
-        } catch (dbError) {
-          console.error(`? [Upload] 数据库创建任务失败 for ${result.filename}:`, dbError)
-          tasks.push({
-            error: true,
-            originalName: result.filename,
-            message: '数据库写入失败: ' + dbError.message,
-            errorType: 'DB_ERROR'
-          })
+        }
+      } catch (dbError) {
+        console.error(`? [Upload] 数据库创建任务失败:`, dbError)
+        tasks.push({
+          error: true,
+          originalName: taskName,
+          message: '数据库写入失败: ' + dbError.message,
+          errorType: 'DB_ERROR'
+        })
+        for (const img of images) {
           boundingBoxResults.push({
-            filename: result.filename,
+            filename: img.file_name,
             status: 'failed',
             error: dbError.message,
           })
           // 清理已上传的 OSS 文件（避免生成孤儿文件）
-          try { const urlObj = new URL(result.url); const ossPath = urlObj.pathname.replace(/^\//, ''); await deleteFile(ossPath) } catch (e) { console.error('  OSS 清理失败:', e.message) }
+          try { const urlObj = new URL(img.image_url); const ossPath = urlObj.pathname.replace(/^\//, ''); await deleteFile(ossPath) } catch (e) { console.error('  OSS 清理失败:', e.message) }
         }
-      } else {
-        console.error(`? [Upload] 文件 ${result.filename} 上传失败: ${result.errorType} — ${result.error}`)
-        tasks.push({
-          error: true,
-          originalName: result.filename,
-          message: result.error || '上传失败',
-          errorType: result.errorType || 'UPLOAD_FAILED',
-          attempts: result.attempts.map(a => ({
-            type: a.type,
-            result: a.result,
-            error: a.error,
-            timestamp: a.timestamp,
-          })),
-        })
-        boundingBoxResults.push({
-          filename: result.filename,
-          status: 'skipped',
-          error: result.error,
-          note: '上传失败，跳过边界框生成',
-        })
       }
     }
 
@@ -453,6 +479,7 @@ app.post('/api/tasks/:taskId/retry', async (req, res) => {
         taskId: task.id,
         studentId: task.student_id,
         imageUrl: task.image_url,
+        images: task.images || null,
         originalName: task.original_name
       }, {
         attempts: parseInt(process.env.MAX_RETRIES) || 3,
@@ -2174,6 +2201,8 @@ if (process.argv[1] === __filename || process.argv[1]?.endsWith('server/index.js
       await migrateGeometryReconstructionAsync()
       await migrateTaskSystemFields()
       await migrateWorksheets()
+      await migrateTaskImages()
+      await migrateWorksheetParseStatus()
     } catch (err) {
       console.error('数据库迁移失败:', err.message)
     }

@@ -601,6 +601,11 @@ export const getWorksheets = async () => {
   return data.worksheets || []
 }
 
+export const getWorksheet = async (id) => {
+  const data = await apiRequest(`/worksheets/${id}`)
+  return data.worksheet
+}
+
 export const createWorksheet = async ({ name, subject, grade }) => {
   const data = await apiRequest('/worksheets', {
     method: 'POST',

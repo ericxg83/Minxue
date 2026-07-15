@@ -81,6 +81,7 @@ export const createQuestions = async (questions) => {
       text_bbox: q.text_bbox ? JSON.stringify(q.text_bbox) : null,
       image_bbox: (q.image_bbox || q.geometry_image?.bbox) ? JSON.stringify(q.image_bbox || q.geometry_image.bbox) : null,
       image_type: q.image_type || null,
+      page_number: q.page_number ?? null,
       confidence: q.confidence ?? 0,
       is_complete: checkQuestionCompleteness(q).isComplete,
       created_at: new Date().toISOString()
@@ -773,6 +774,16 @@ export const updateWorksheetPdfUrl = async (id, pdfUrl) => {
   const { rows } = await query(
     `UPDATE ${TABLES.WORKSHEETS} SET pdf_url = $2 WHERE id = $1 RETURNING *`,
     [id, pdfUrl]
+  )
+  return rows[0] || null
+}
+
+export const updateWorksheetParseStatus = async (id, { status, count = null, warning = null, error = null }) => {
+  const { rows } = await query(
+    `UPDATE ${TABLES.WORKSHEETS}
+     SET parse_status = $2, parse_count = $3, parse_warning = $4, parse_error = $5
+     WHERE id = $1 RETURNING *`,
+    [id, status, count, warning, error]
   )
   return rows[0] || null
 }
