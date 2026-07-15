@@ -9,6 +9,10 @@ function normalizeAnswer(str) {
 
   // Full-width to half-width (includes letters, digits, punctuation)
   s = s.replace(/[！-～]/g, ch => String.fromCharCode(ch.charCodeAt(0) - 0xFEE0))
+
+  // Chinese comma（、→ ,）
+  s = s.replace(/、/g, ',')
+
   // Full-width space to regular space
   s = s.replace(/　/g, ' ')
 
@@ -42,6 +46,19 @@ function normalizeAnswer(str) {
   s = s.replace(/\s+/g, '')
 
   return s
+}
+
+/** Normalize judge (true/false) answer to a canonical form: 'T' or 'F' */
+function normalizeJudgeAnswer(str) {
+  if (!str) return ''
+  const s = String(str).trim()
+  // Correct/True indicators
+  if (/^[✓√✔vV]$/.test(s)) return 'T'       // checkmark variants
+  if (/^(正确|对|是|true|yes|T)$/i.test(s)) return 'T'
+  // Wrong/False indicators
+  if (/^[✗✘×xX]$/.test(s)) return 'F'       // cross variants
+  if (/^(错误|错|否|false|no|F)$/i.test(s)) return 'F'
+  return s.toUpperCase()
 }
 
 /**
@@ -146,6 +163,13 @@ export function judgeAnswer(studentAnswer, referenceAnswer, questionType) {
     return { isCorrect: normStudent === normRef, unrecognized: false }
   }
 
+  if (questionType === 'judge') {
+    // Judge: normalize both to T/F and compare
+    const normStudent = normalizeJudgeAnswer(studentAnswer)
+    const normRef = normalizeJudgeAnswer(referenceAnswer)
+    return { isCorrect: normStudent === normRef, unrecognized: false }
+  }
+
   // Fill / answer / other: normalized comparison with tolerance
   const normStudent = normalizeAnswer(studentAnswer)
   const normRef = normalizeAnswer(referenceAnswer)
@@ -159,6 +183,32 @@ export function judgeAnswer(studentAnswer, referenceAnswer, questionType) {
   // (handles cases like "2x-4" vs "2(x-2)" which are the same but differ textually)
   if (isMathEquivalent(studentAnswer, referenceAnswer)) {
     return { isCorrect: true, unrecognized: false }
+  }
+
+  // Fallback: if both answers contain the same set of numbers (integers or decimals),
+  // consider them equivalent. This handles cases where the AI generates a verbose
+  // reference answer (e.g. "奇数是1,3,5,7,9；素数是2,3,5,7") while the student
+  // gives a concise answer (e.g. "1,3,5,7,9；2,3,5,7").
+  const studentNums = (normStudent.match(/\d+(\.\d+)?/g) || []).sort().join(',')
+  const refNums = (normRef.match(/\d+(\.\d+)?/g) || []).sort().join(',')
+  if (studentNums && refNums && studentNums === refNums) {
+    return { isCorrect: true, unrecognized: false }
+  }
+
+  // Fallback: detect judge-like answers even when question_type is not 'judge'
+  // (e.g. AI classified a judge question as "fill"). If student wrote √/×/✓/✗
+  // and reference contains 正确/错误/对/错, try judge normalization.
+  const rawStudent = String(studentAnswer || '').trim()
+  const rawRef = String(referenceAnswer || '').trim()
+  const isJudgeLikeStudent = /^[✓√✔✗✘×vVxX]$/.test(rawStudent) ||
+    /^(正确|错误|对|错|true|false|yes|no|T|F)$/i.test(rawStudent)
+  const isJudgeLikeRef = /(正确|错误|对|错|true|false|T|F)/i.test(rawRef)
+  if (isJudgeLikeStudent && isJudgeLikeRef) {
+    const jNorm = normalizeJudgeAnswer(rawStudent)
+    const jRef = normalizeJudgeAnswer(rawRef)
+    if (jNorm && jRef && jNorm === jRef) {
+      return { isCorrect: true, unrecognized: false }
+    }
   }
 
   return { isCorrect: false, unrecognized: false }

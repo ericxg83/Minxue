@@ -227,6 +227,72 @@ export default function App() {
   const [pendingFlow, setPendingFlow] = useState(null) // 'workbook' | null
   const [flowSubject, setFlowSubject] = useState('数学')
 
+  // ── 多图暂存区（拍照+相册连拍/多选）──
+  const [showStaging, setShowStaging] = useState(false)
+  const [stagingFiles, setStagingFiles] = useState([]) // [{ file, url, name }]
+  const [stagingType, setStagingType] = useState(null) // 'regular' | 'workbook' | 'wrong_retry'
+  const [stagingUploading, setStagingUploading] = useState(false)
+  const cameraInputRef = useRef(null)
+  const albumInputRef = useRef(null)
+
+  const toPreviews = (files) =>
+    Array.from(files).map((f) => ({
+      file: f,
+      url: f.type?.startsWith('image/') ? URL.createObjectURL(f) : null,
+      name: f.name
+    }))
+
+  const handleStagingSelectFiles = (e) => {
+    const files = e.target.files
+    if (!files || files.length === 0) return
+    setStagingFiles((prev) => [...prev, ...toPreviews(files)])
+    if (e.target && 'value' in e.target) e.target.value = ''
+  }
+
+  const removeStagingFile = (idx) => {
+    setStagingFiles((prev) => {
+      const next = prev.filter((_, i) => i !== idx)
+      if (prev[idx]?.url) URL.revokeObjectURL(prev[idx].url)
+      return next
+    })
+  }
+
+  const clearStaging = () => {
+    stagingFiles.forEach((p) => { if (p.url) URL.revokeObjectURL(p.url) })
+    setStagingFiles([])
+    setStagingType(null)
+    setStagingUploading(false)
+    setShowStaging(false)
+  }
+
+  const openStaging = (type) => {
+    setStagingType(type)
+    setStagingFiles([])
+    setShowStaging(true)
+  }
+
+  const stagingRef = useRef([])
+  stagingRef.current = stagingFiles
+  const stagingTypeRef = useRef(null)
+  stagingTypeRef.current = stagingType
+
+  // 提交暂存区（构造合成事件传给 handleFileSelect）
+  const handleSubmitStaging = async () => {
+    const files = stagingRef.current
+    if (files.length === 0) return
+    setStagingUploading(true)
+    try {
+      const dt = new DataTransfer()
+      files.forEach((p) => dt.items.add(p.file))
+      setShowStaging(false)
+      await handleFileSelect({ target: { files: dt.files } })
+    } catch (err) {
+      console.error('暂存区提交失败:', err)
+    } finally {
+      setStagingUploading(false)
+    }
+  }
+
   const clearPendingUploadFlow = useCallback(() => {
     setPendingFlow(null)
     setSelectedWorksheetId(null)
@@ -596,7 +662,7 @@ export default function App() {
         console.debug('🔥 [UPLOAD] No files selected, returning early')
         return
       }
-      e.target.value = ''
+      if (e.target && 'value' in e.target) e.target.value = ''
 
       setShowUploadOptions(false)
 
@@ -645,9 +711,8 @@ export default function App() {
       setUploading(true)
 
       if (pendingFlow === 'workbook') {
-        for (const file of newFiles) {
-          await uploadRegularHomework(file)
-        }
+        // 多图一任务：整批文件合并为一个任务
+        await uploadRegularHomework(newFiles)
         clearPendingUploadFlow()
       } else {
         const qrToast = Toast.show({ message: '正在检测二维码...', type: 'loading', duration: 0 })
@@ -670,10 +735,8 @@ export default function App() {
             // Handle retry paper (group by QR content)
             await uploadRetryPaperGroup(group.files, group.qrContent)
           } else {
-            // Handle regular homework (each file individually)
-            for (const file of group.files) {
-              await uploadRegularHomework(file)
-            }
+            // Handle regular homework — 多图一任务：同组文件合并为一个任务
+            await uploadRegularHomework(group.files)
           }
         }
 
@@ -762,16 +825,17 @@ export default function App() {
     }
   }
 
-  // Upload regular homework (single file)
-  const uploadRegularHomework = async (file) => {
+  // Upload regular homework — 多图一任务：整批文件合并为一个任务
+  const uploadRegularHomework = async (fileOrFiles) => {
+    const files = Array.isArray(fileOrFiles) ? fileOrFiles : [fileOrFiles]
     console.debug('📝 [UPLOAD] === Processing regular homework ===')
-    console.debug('📝 [UPLOAD] File:', file.name)
+    console.debug('📝 [UPLOAD] Files:', files.map(f => f.name))
 
     try {
       if (USE_MOCK_DATA) {
-        await uploadViaFrontend([file])
+        await uploadViaFrontend(files)
       } else {
-        await uploadViaBackend([file])
+        await uploadViaBackend(files)
       }
     } catch (error) {
       console.error('💥 [uploadRegularHomework] Error:', error)
@@ -779,43 +843,48 @@ export default function App() {
     }
   }
 
-  // Upload via backend API
+  // Upload via backend API — 多图一任务：一次上传的所有文件合并为一个任务
   const uploadViaBackend = async (files) => {
     console.debug('📤📤📤 [uploadViaBackend] STARTING with', files.length, 'files')
     console.debug('📤 [uploadViaBackend] currentStudent:', currentStudent?.id, currentStudent?.name)
 
     const isWorkbook = pendingFlow === 'workbook' && selectedWorksheetId
-    const pendingTasks = []
+    const firstFile = files[0]
+    const taskName = files.length > 1
+      ? `${firstFile.name || '作业'} 等${files.length}页`
+      : (firstFile.name || `照片_${dayjs().format('YYYY-MM-DD_HH-mm-ss')}.jpg`)
 
-    files.forEach((file) => {
-      const tempTask = {
-        id: `temp-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`,
-        student_id: currentStudent.id,
+    const tempTask = {
+      id: `temp-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`,
+      student_id: currentStudent.id,
+      image_url: URL.createObjectURL(firstFile),
+      original_name: taskName,
+      task_type: isWorkbook ? 'workbook' : 'homework',
+      pages: files.map((file, index) => ({
+        id: `page-${index + 1}`,
         image_url: URL.createObjectURL(file),
-        original_name: file.name || `照片_${dayjs().format('YYYY-MM-DD_HH-mm-ss')}.jpg`,
-        task_type: isWorkbook ? 'workbook' : 'homework',
-        status: 'pending',
-        result: { progress: 0 },
-        created_at: new Date().toISOString(),
-        is_temp: true,
-        ...(isWorkbook && { worksheet_id: selectedWorksheetId })
-      }
-      addTask(tempTask)
-      pendingTasks.push({ tempTask, file })
-    })
+        file_name: file.name,
+        page_number: index + 1
+      })),
+      status: 'pending',
+      result: { progress: 0 },
+      created_at: new Date().toISOString(),
+      is_temp: true,
+      ...(isWorkbook && { worksheet_id: selectedWorksheetId })
+    }
+    addTask(tempTask)
 
-    console.debug('📤 [uploadViaBackend] Created', pendingTasks.length, 'temp tasks')
+    console.debug('📤 [uploadViaBackend] Created 1 temp task with', files.length, 'pages')
 
     clearStudentCaches(currentStudent.id)
-    
-    Toast.show({ message: `已添加 ${files.length} 个文件，正在上传...`, type: 'success', duration: 2000 })
+
+    Toast.show({ message: files.length > 1 ? `已添加 ${files.length} 张图片，正在上传...` : '已添加 1 个文件，正在上传...', type: 'success', duration: 2000 })
 
     let successCount = 0
     let failedCount = 0
 
-    // 批量上传所有文件（单次请求）
+    // 批量上传所有文件（单次请求 → 后端合并为一个任务）
     try {
-      const files = pendingTasks.map(p => p.file)
       const options = {}
       if (isWorkbook) {
         options.worksheetId = selectedWorksheetId
@@ -823,30 +892,23 @@ export default function App() {
         options.subject = flowSubject
       }
       const result = await taskService.uploadFiles(currentStudent.id, files, options)
-      const tasks = result.tasks || []
+      const taskResult = (result.tasks || []).find(t => !t.error) || (result.tasks || [])[0]
 
-      tasks.forEach((taskResult, idx) => {
-        const tempTask = pendingTasks[idx]?.tempTask
-        if (!tempTask) return
-
-        if (taskResult.error) {
-          failedCount++
-          const errorMsg = taskResult.message || taskResult.error || '上传失败'
-          updateTaskInStore(tempTask.id, 'failed', { error: errorMsg })
-        } else {
-          successCount++
-          updateTaskInStore(tempTask.id, 'pending', { progress: 0 })
-          setTasks(prev => prev.map(t =>
-            t.id === tempTask.id ? { ...taskResult, is_temp: false } : t
-          ))
-        }
-      })
+      if (taskResult && !taskResult.error) {
+        successCount = 1
+        updateTaskInStore(tempTask.id, 'pending', { progress: 0 })
+        setTasks(prev => prev.map(t =>
+          t.id === tempTask.id ? { ...taskResult, pages: taskResult.images || tempTask.pages, is_temp: false } : t
+        ))
+      } else {
+        failedCount = 1
+        const errorMsg = taskResult?.message || taskResult?.error || '上传失败'
+        updateTaskInStore(tempTask.id, 'failed', { error: errorMsg })
+      }
     } catch (error) {
       console.error('💥 [uploadViaBackend] Batch upload exception:', error)
-      pendingTasks.forEach(({ tempTask }) => {
-        failedCount++
-        updateTaskInStore(tempTask.id, 'failed', { error: error.message || '上传失败' })
-      })
+      failedCount = 1
+      updateTaskInStore(tempTask.id, 'failed', { error: error.message || '上传失败' })
     }
 
     // 上传完成后刷新缓存并重新加载列表
@@ -857,9 +919,9 @@ export default function App() {
     }
 
     if (failedCount > 0) {
-      Toast.show({ message: successCount + ' 个成功，' + failedCount + ' 个失败', type: 'error', duration: 3000 })
+      Toast.show({ message: '上传失败', type: 'error', duration: 3000 })
     } else if (successCount > 0) {
-      Toast.show({ message: successCount + ' 个文件上传成功', type: 'success', duration: 2000 })
+      Toast.show({ message: files.length > 1 ? `${files.length} 张图片已合并为一个任务` : '上传成功', type: 'success', duration: 2000 })
     }
 
     console.debug('📤📤📤 [uploadViaBackend] COMPLETED - success:', successCount, 'failed:', failedCount)
@@ -1744,7 +1806,7 @@ export default function App() {
 
   const handleSubmitFilesSelected = async (e) => {
     const files = Array.from(e.target.files || [])
-    e.target.value = ''
+    if (e.target && 'value' in e.target) e.target.value = ''
     const exam = submitTargetExamRef.current
     if (!exam || files.length === 0) return
     const studentId = exam.student_id || currentStudent?.id
@@ -1922,7 +1984,7 @@ export default function App() {
   const handleEditFileSelected = (e) => {
     const file = e.target.files?.[0]
     if (!file) return
-    e.target.value = ''
+    if (e.target && 'value' in e.target) e.target.value = ''
     if (!file.type.startsWith('image/')) {
       Toast.show({ message: '请选择图片文件', type: 'error' })
       return
@@ -2352,48 +2414,56 @@ export default function App() {
                             onClick={(e) => { e.stopPropagation(); handleViewImage(task.image_url) }}
                           >
                             {task.image_url ? (
-                              task.isRetryPaper && task.pages && task.pages.length > 1 ? (
-                                // Stacked pages for retry papers
-                                <div className="relative w-full h-full">
-                                  {task.pages.slice(0, 3).map((page, index) => (
-                                    <div
-                                      key={page.id}
-                                      className="absolute inset-0 rounded overflow-hidden"
-                                      style={{
-                                        transform: `translateX(${index * 2}px) translateY(${index * 2}px)`,
-                                        zIndex: index,
-                                        boxShadow: '0 1px 3px rgba(0,0,0,0.2)'
-                                      }}
-                                    >
-                                      <img
-                                        src={page.image_url || task.image_url}
-                                        alt={`Page ${page.page_number}`}
-                                        className="w-full h-full object-cover"
-                                      />
+                              (() => {
+                                const taskPages = task.pages || (task.images ? task.images.map((img, i) => ({ ...img, id: img.id || `page-${i}` })) : null)
+                                const isMultiPage = taskPages && taskPages.length > 1
+                                if (isMultiPage) {
+                                  // Stacked pages for multi-page tasks
+                                  return (
+                                    <div className="relative w-full h-full">
+                                      {taskPages.slice(0, 3).map((page, index) => (
+                                        <div
+                                          key={page.id || index}
+                                          className="absolute inset-0 rounded overflow-hidden"
+                                          style={{
+                                            transform: `translateX(${index * 2}px) translateY(${index * 2}px)`,
+                                            zIndex: index,
+                                            boxShadow: '0 1px 3px rgba(0,0,0,0.2)'
+                                          }}
+                                        >
+                                          <img
+                                            src={page.image_url || task.image_url}
+                                            alt={`Page ${page.page_number}`}
+                                            className="w-full h-full object-cover"
+                                          />
+                                        </div>
+                                      ))}
+                                      {taskPages.length > 3 && (
+                                        <div className="absolute inset-0 rounded bg-gray-100 flex items-center justify-center text-xs font-medium text-gray-500">
+                                          +{taskPages.length - 3}页
+                                        </div>
+                                      )}
                                     </div>
-                                  ))}
-                                  {task.pages.length > 3 && (
-                                    <div className="absolute inset-0 rounded bg-gray-100 flex items-center justify-center text-xs font-medium text-gray-500">
-                                      +{task.pages.length - 3}页
-                                    </div>
-                                  )}
-                                </div>
-                              ) : (
-                                // Single image for regular homework
-                                <img src={task.image_url} alt="" className="w-full h-full object-cover" />
-                              )
+                                  )
+                                }
+                                // Single image
+                                return <img src={task.image_url} alt="" className="w-full h-full object-cover" />
+                              })()
                             ) : (
                               <div className="w-full h-full flex items-center justify-center">
                                 <FileText size={16} style={{ color: 'var(--text-tertiary)' }} />
                               </div>
                             )}
 
-                            {/* Page count indicator for retry papers */}
-                            {task.isRetryPaper && task.pages && task.pages.length > 1 && (
-                              <div className="absolute -top-1 -right-1 bg-purple-500 text-white text-xs rounded-full w-5 h-5 flex items-center justify-center font-medium border-2 border-white shadow-sm">
-                                {task.pages.length}
-                              </div>
-                            )}
+                            {/* Page count indicator for multi-page tasks */}
+                            {(() => {
+                              const taskPages = task.pages || (task.images ? task.images.map((img, i) => ({ ...img, id: img.id || `page-${i}` })) : null)
+                              return taskPages && taskPages.length > 1 ? (
+                                <div className="absolute -top-1 -right-1 bg-purple-500 text-white text-xs rounded-full w-5 h-5 flex items-center justify-center font-medium border-2 border-white shadow-sm">
+                                  {taskPages.length}
+                                </div>
+                              ) : null
+                            })()}
                           </div>
                           {/* Content */}
                           <div className="flex-1 min-w-0">
@@ -2422,12 +2492,15 @@ export default function App() {
                               ) : null}
 
                               {/* Task type and page count */}
-                              {task.isRetryPaper && task.pages && task.pages.length > 1 && (
-                                <>
-                                  <span className="w-0.5 h-0.5 rounded-full" style={{ background: 'var(--text-tertiary)' }} />
-                                  <span className="text-meta-highlight">{task.pages.length} 页</span>
-                                </>
-                              )}
+                              {(() => {
+                                const taskPages = task.pages || (task.images ? task.images.map((img, i) => ({ ...img, id: img.id || `page-${i}` })) : null)
+                                return taskPages && taskPages.length > 1 ? (
+                                  <>
+                                    <span className="w-0.5 h-0.5 rounded-full" style={{ background: 'var(--text-tertiary)' }} />
+                                    <span className="text-meta-highlight">{taskPages.length} 页</span>
+                                  </>
+                                ) : null
+                              })()}
                               {!isTaskCompleted(task) && (
                                 <>
                                   <span className="w-0.5 h-0.5 rounded-full" style={{ background: 'var(--text-tertiary)' }} />
@@ -3102,20 +3175,17 @@ export default function App() {
           visible={showWorksheetPicker}
           onClose={() => {
             setShowWorksheetPicker(false)
-            setPendingFlow(null)
           }}
           onSelect={({ worksheetId, worksheetName }) => {
             setSelectedWorksheetId(worksheetId)
+            setShowWorksheetPicker(false)
             if (worksheetId) {
-              // 选完练习册 → 打开相机
-              setTimeout(() => {
-                const input = document.getElementById('file-input')
-                if (input) {
-                  input.setAttribute('capture', 'environment')
-                  input.setAttribute('multiple', 'multiple')
-                  input.click()
-                }
-              }, 300)
+              // 选完练习册 → 打开暂存区（连拍/多选）
+              setPendingFlow('workbook')
+              openStaging('workbook')
+            } else {
+              // 用户点击"不使用练习册" → 清除 workbook 流程
+              setPendingFlow(null)
             }
           }}
           subject={flowSubject}
@@ -3190,7 +3260,7 @@ export default function App() {
                     setShowUploadOptions(false)
                     setPendingFlow(null)
                     setSelectedWorksheetId(null)
-                    triggerUpload(true)
+                    openStaging('regular')
                   }}
                   className="w-full flex items-center gap-4 p-4 rounded-2xl transition-all active:scale-[0.98] tap-scale mb-3"
                   style={{ background: 'var(--primary-soft)' }}
@@ -3204,13 +3274,13 @@ export default function App() {
                   </div>
                 </button>
 
-                {/* 卡片3: 错题重练 — 拍照上传，handleFileSelect 自动识别照片中的二维码并定位重练卷 */}
+                {/* 卡片3: 错题重练 — 拍照上传，自动识别照片中的二维码并定位重练卷 */}
                 <button
                   onClick={() => {
                     setShowUploadOptions(false)
                     setPendingFlow(null)
                     setSelectedWorksheetId(null)
-                    triggerUpload(true)
+                    openStaging('wrong_retry')
                   }}
                   className="w-full flex items-center gap-4 p-4 rounded-2xl transition-all active:scale-[0.98] tap-scale"
                   style={{ background: 'var(--bg-secondary)' }}
@@ -3233,6 +3303,112 @@ export default function App() {
                 >
                   取消
                 </button>
+              </div>
+            </motion.div>
+          </div>
+        )}
+
+        {/* 拍照+相册暂存区 */}
+        {showStaging && (
+          <div className="absolute inset-0 z-[25000] flex items-end justify-center">
+            <motion.div
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
+              className="absolute inset-0 bg-black/50 backdrop-blur-sm"
+              onClick={() => !stagingUploading && clearStaging()}
+            />
+            <motion.div
+              initial={{ opacity: 0, y: 40 }}
+              animate={{ opacity: 1, y: 0 }}
+              transition={{ type: 'spring', damping: 25, stiffness: 300 }}
+              className="relative bg-white rounded-t-3xl w-full max-w-lg mx-auto shadow-xl"
+              style={{ paddingBottom: 'calc(24px + env(safe-area-inset-bottom, 0px))' }}
+            >
+              <input ref={cameraInputRef} type="file" accept="image/*" capture="environment" multiple style={{ display: 'none' }} onChange={handleStagingSelectFiles} />
+              <input ref={albumInputRef} type="file" accept="image/*" multiple style={{ display: 'none' }} onChange={handleStagingSelectFiles} />
+
+              <div className="flex justify-center pt-3 pb-1">
+                <div className="w-8 h-1 rounded-full" style={{ background: 'var(--border)' }} />
+              </div>
+              <div className="px-6 pt-2 pb-4">
+                <div className="flex items-center justify-between mb-4">
+                  <h3 className="text-[17px] font-semibold" style={{ color: 'var(--text)' }}>
+                    {stagingType === 'workbook' ? '练习册作业' : stagingType === 'wrong_retry' ? '错题重练' : '普通试卷'}
+                  </h3>
+                  <button
+                    onClick={() => !stagingUploading && clearStaging()}
+                    className="w-7 h-7 rounded-full flex items-center justify-center active:scale-90"
+                    style={{ background: 'var(--bg-mist)' }}
+                  >
+                    <X size={14} style={{ color: 'var(--text-tertiary)' }} />
+                  </button>
+                </div>
+
+                {/* 拍照 + 相册按钮 */}
+                <div className="flex gap-2 mb-4">
+                  <button
+                    onClick={() => cameraInputRef.current?.click()}
+                    className="flex-1 py-2.5 rounded-xl text-[13px] font-semibold flex items-center justify-center gap-2 active:scale-[0.97] transition-all"
+                    style={{ background: 'var(--primary)', color: '#fff' }}
+                  >
+                    <Camera size={16} />
+                    拍照
+                  </button>
+                  <button
+                    onClick={() => albumInputRef.current?.click()}
+                    className="flex-1 py-2.5 rounded-xl text-[13px] font-semibold flex items-center justify-center gap-2 active:scale-[0.97] transition-all"
+                    style={{ background: 'var(--bg-mist)', color: 'var(--text)' }}
+                  >
+                    <ImageIcon size={16} />
+                    相册
+                  </button>
+                </div>
+
+                {/* 预览网格 */}
+                {stagingFiles.length > 0 && (
+                  <div className="grid grid-cols-3 gap-2 mb-4">
+                    {stagingFiles.map((p, i) => (
+                      <div key={i} className="relative rounded-lg overflow-hidden" style={{ aspectRatio: '1 / 1', background: '#F3F4F6' }}>
+                        {p.url ? (
+                          <img src={p.url} alt={p.name} className="w-full h-full object-cover" />
+                        ) : (
+                          <div className="w-full h-full flex items-center justify-center" style={{ color: '#9CA3AF' }}>
+                            <ImageIcon size={20} />
+                          </div>
+                        )}
+                        <button
+                          onClick={() => removeStagingFile(i)}
+                          className="absolute top-1 right-1 w-5 h-5 rounded-full flex items-center justify-center"
+                          style={{ background: 'rgba(0,0,0,0.5)', color: '#fff', fontSize: '12px' }}
+                        >x</button>
+                      </div>
+                    ))}
+                  </div>
+                )}
+
+                {stagingFiles.length === 0 && (
+                  <div className="flex flex-col items-center justify-center py-8" style={{ color: 'var(--text-tertiary)' }}>
+                    <ImageIcon size={32} className="mb-2" />
+                    <p className="text-[13px]">点击上方按钮拍摄或选择照片</p>
+                    <p className="text-[11px] mt-1">支持连拍和相册多选</p>
+                  </div>
+                )}
+
+                {/* 提交按钮 */}
+                {stagingFiles.length > 0 && (
+                  <button
+                    onClick={handleSubmitStaging}
+                    disabled={stagingUploading}
+                    className="w-full py-3 rounded-xl text-[14px] font-semibold flex items-center justify-center gap-2 transition-all active:scale-[0.98]"
+                    style={{
+                      background: stagingUploading ? '#CBD5E1' : '#2563EB',
+                      color: '#fff'
+                    }}
+                  >
+                    {stagingUploading ? <Loader2 size={16} className="animate-spin" /> : <Upload size={16} />}
+                    {stagingUploading ? '上传中...' : `上传 ${stagingFiles.length} 张图片${stagingFiles.length > 1 ? '（合并为一个任务）' : ''}`}
+                  </button>
+                )}
               </div>
             </motion.div>
           </div>

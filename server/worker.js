@@ -1672,27 +1672,39 @@ export const processTask = async (job) => {
   }
 
   // Defensive: imageUrl from DB might be string URL, JSON object string, or object
-  let imageUrl
-  if (typeof rawImageUrl === 'string') {
-    // Could be plain URL or JSON string from old object serialization
-    if (rawImageUrl.startsWith('{')) {
-      try {
-        const parsed = JSON.parse(rawImageUrl)
-        imageUrl = parsed.url || parsed.ossPath || ''
-      } catch (e) {
-        imageUrl = rawImageUrl // fallback: assume it's a URL
+  const resolveUrl = (raw) => {
+    if (typeof raw === 'string') {
+      // Could be plain URL or JSON string from old object serialization
+      if (raw.startsWith('{')) {
+        try {
+          const parsed = JSON.parse(raw)
+          return parsed.url || parsed.ossPath || ''
+        } catch (e) {
+          return raw // fallback: assume it's a URL
+        }
       }
-    } else {
-      imageUrl = rawImageUrl // normal URL string
+      return raw // normal URL string
     }
-  } else if (typeof rawImageUrl === 'object' && rawImageUrl !== null) {
-    imageUrl = rawImageUrl.url || rawImageUrl.ossPath || ''
-  } else {
-    imageUrl = String(rawImageUrl || '')
+    if (typeof raw === 'object' && raw !== null) return raw.url || raw.ossPath || ''
+    return String(raw || '')
   }
+  const imageUrl = resolveUrl(rawImageUrl)
 
-  if (!imageUrl || typeof imageUrl !== 'string' || !imageUrl.startsWith('http')) {
-    console.error(`\n💥 [Worker] taskId=${taskId} — imageUrl 无效: ${String(imageUrl).substring(0, 100)}`)
+  // ── 多图一任务：job.data.images 为页数组 [{page_number, image_url, file_name}] ──
+  // 旧任务/恢复链路可能只有 imageUrl，回退为单页。
+  let rawPages = Array.isArray(job.data.images) && job.data.images.length > 0
+    ? job.data.images
+    : (typeof job.data.images === 'string' ? (() => { try { return JSON.parse(job.data.images) } catch { return null } })() : null)
+  if (!Array.isArray(rawPages) || rawPages.length === 0) {
+    rawPages = [{ page_number: 1, image_url: imageUrl }]
+  }
+  const pages = rawPages
+    .map((p, i) => ({ pageNumber: p.page_number || i + 1, imageUrl: resolveUrl(p.image_url), fileName: p.file_name || null }))
+    .sort((a, b) => a.pageNumber - b.pageNumber)
+
+  const invalidPage = pages.find(p => !p.imageUrl || typeof p.imageUrl !== 'string' || !p.imageUrl.startsWith('http'))
+  if (invalidPage) {
+    console.error(`\n💥 [Worker] taskId=${taskId} — 第 ${invalidPage.pageNumber} 页 imageUrl 无效: ${String(invalidPage.imageUrl).substring(0, 100)}`)
     console.error(`  原因: 上传流程未成功完成或 URL 格式错误`)
     await updateTaskStatus(taskId, TASK_STATUS.FAILED, {
       error: '文件上传未成功完成，无法生成边界框',
@@ -1706,7 +1718,8 @@ export const processTask = async (job) => {
   console.log(`🔥🔥 [Worker] 开始处理任务:`)
   console.log(`   taskId: ${taskId}`)
   console.log(`   studentId: ${studentId}`)
-  console.log(`   imageUrl (resolved): ${imageUrl}`)
+  console.log(`   页数: ${pages.length}`)
+  pages.forEach(p => console.log(`   第 ${p.pageNumber} 页: ${p.imageUrl}`))
   console.log(`   originalName: ${originalName}`)
   console.log(`🔥🔥 ==========================================\n`)
 
@@ -1720,69 +1733,93 @@ export const processTask = async (job) => {
     })
     console.log(`✅ [Step 1/6] 状态更新完成`)
 
-    console.log(`📊 [Step 2/6] 从 OSS 下载图片...`)
-    let imageBuffer
-    try {
-      imageBuffer = await downloadImage(imageUrl)
-    } catch (downloadError) {
-      console.error('下载图片失败:', downloadError.message)
-      throw new Error('下载图片失败: ' + downloadError.message)
-    }
-    console.log(`✅ [Step 2/6] 图片下载完成: ${imageBuffer.length} bytes`)
+    // ── Step 2~5：逐页 下载 → 拉直压缩 → AI 识别，questions 打上 page_number 后合并 ──
+    // 进度在 5→70 区间按页均分。
+    const pageBuffers = new Map() // pageNumber → 压缩后 buffer（几何裁剪按页取图）
+    const questions = []
+    let totalOcrDuration = 0
 
-    await job.updateProgress(15)
-    await updateTaskStatus(taskId, TASK_STATUS.PROCESSING, { progress: 15 })
+    for (let pageIdx = 0; pageIdx < pages.length; pageIdx++) {
+      const page = pages[pageIdx]
+      const pageLabel = pages.length > 1 ? `第 ${page.pageNumber}/${pages.length} 页 ` : ''
+      const progressBase = 5 + Math.round((pageIdx / pages.length) * 65)
 
-    console.log(`📊 [Step 3~4/8] 拉直并压缩图片（合并 Sharp 管线）...`)
-    let compressedBuffer
-    try {
-      // ⚡ 合并 deskew + compress 为单次 Sharp 管线，避免中间 buffer 分配和二次初始化
-      compressedBuffer = await sharp(imageBuffer)
-        .rotate()
-        .normalize()
-        .resize(1920, 1920, { fit: 'inside', withoutEnlargement: true })
-        .jpeg({ quality: 85 })
-        .toBuffer()
-      console.log(`✅ [Step 3~4/8] 拉直+压缩完成: ${imageBuffer.length} → ${compressedBuffer.length} bytes (${Math.round(compressedBuffer.length/imageBuffer.length*100)}%)`)
-    } catch (processError) {
-      console.error('图片处理失败:', processError)
-      await updateTaskStatus(taskId, TASK_STATUS.FAILED, {
-        error: '图片处理失败: ' + processError.message,
-        last_error: '图片处理失败: ' + processError.message,
-        duration: Date.now() - startTime,
-        failedAt: new Date().toISOString()
-      })
-      throw processError
-    }
+      console.log(`📊 [Step 2/6] ${pageLabel}从 OSS 下载图片...`)
+      let imageBuffer
+      try {
+        imageBuffer = await downloadImage(page.imageUrl)
+      } catch (downloadError) {
+        console.error('下载图片失败:', downloadError.message)
+        throw new Error(`下载图片失败(${pageLabel.trim() || '第 1 页'}): ` + downloadError.message)
+      }
+      console.log(`✅ [Step 2/6] ${pageLabel}图片下载完成: ${imageBuffer.length} bytes`)
 
-    await job.updateProgress(30)
-    await updateTaskStatus(taskId, TASK_STATUS.PROCESSING, { progress: 30 })
+      await job.updateProgress(progressBase + Math.round(10 / pages.length))
+      await updateTaskStatus(taskId, TASK_STATUS.PROCESSING, { progress: progressBase + Math.round(10 / pages.length) })
 
-    const imageBase64 = bufferToBase64(compressedBuffer)
+      console.log(`📊 [Step 3~4/8] ${pageLabel}拉直并压缩图片（合并 Sharp 管线）...`)
+      let compressedBuffer
+      try {
+        // ⚡ 合并 deskew + compress 为单次 Sharp 管线，避免中间 buffer 分配和二次初始化
+        compressedBuffer = await sharp(imageBuffer)
+          .rotate()
+          .normalize()
+          .resize(1920, 1920, { fit: 'inside', withoutEnlargement: true })
+          .jpeg({ quality: 85 })
+          .toBuffer()
+        console.log(`✅ [Step 3~4/8] ${pageLabel}拉直+压缩完成: ${imageBuffer.length} → ${compressedBuffer.length} bytes (${Math.round(compressedBuffer.length/imageBuffer.length*100)}%)`)
+      } catch (processError) {
+        console.error('图片处理失败:', processError)
+        await updateTaskStatus(taskId, TASK_STATUS.FAILED, {
+          error: '图片处理失败: ' + processError.message,
+          last_error: '图片处理失败: ' + processError.message,
+          duration: Date.now() - startTime,
+          failedAt: new Date().toISOString()
+        })
+        throw processError
+      }
+      pageBuffers.set(page.pageNumber, compressedBuffer)
 
-    console.log(`📊 [Step 5/8] 调用 AI 视觉识别...`)
-    const ocrResult = await recognizeQuestions(imageBase64, taskId)
+      await job.updateProgress(progressBase + Math.round(25 / pages.length))
+      await updateTaskStatus(taskId, TASK_STATUS.PROCESSING, { progress: progressBase + Math.round(25 / pages.length) })
 
-    if (!ocrResult.success) {
-      console.error(`❌ [Step 5/8] AI 识别失败: ${ocrResult.error}`)
-      await updateTaskStatus(taskId, TASK_STATUS.FAILED, {
-        error: ocrResult.error || '识别失败',
-        last_error: ocrResult.error || '识别失败',
-        shouldRetry: ocrResult.shouldRetry,
-        duration: Date.now() - startTime,
-        failedAt: new Date().toISOString()
-      })
-      throw new Error(ocrResult.error || 'AI识别失败')
+      const imageBase64 = bufferToBase64(compressedBuffer)
+
+      console.log(`📊 [Step 5/8] ${pageLabel}调用 AI 视觉识别...`)
+      const ocrResult = await recognizeQuestions(imageBase64, taskId)
+
+      if (!ocrResult.success) {
+        console.error(`❌ [Step 5/8] ${pageLabel}AI 识别失败: ${ocrResult.error}`)
+        await updateTaskStatus(taskId, TASK_STATUS.FAILED, {
+          error: ocrResult.error || '识别失败',
+          last_error: ocrResult.error || '识别失败',
+          shouldRetry: ocrResult.shouldRetry,
+          duration: Date.now() - startTime,
+          failedAt: new Date().toISOString()
+        })
+        throw new Error(ocrResult.error || 'AI识别失败')
+      }
+
+      totalOcrDuration += ocrResult.duration || 0
+      // 仅打 page_number；不写 q.image_url（前端把 question.image_url 当"题目配图"展示，整页照片会误显）
+      const pageQuestions = (ocrResult.questions || []).map(q => ({
+        ...q,
+        page_number: page.pageNumber,
+      }))
+      questions.push(...pageQuestions)
+      console.log(`✅ [Step 5/8] ${pageLabel}识别 ${pageQuestions.length} 道题`)
     }
 
     await job.updateProgress(70)
     await updateTaskStatus(taskId, TASK_STATUS.PROCESSING, { progress: 70 })
 
-    const questions = ocrResult.questions || []
+    // 兼容后续单图逻辑：compressedBuffer 指向第 1 页（pHash 缓存等非关键路径）
+    const compressedBuffer = pageBuffers.get(pages[0].pageNumber)
+
     let wrongCount = questions.filter(q => q.is_correct === false).length
     let answerGenResult = { updated: 0, total: 0, empty: 0, placeholder: 0, exceptions: 0, cacheHits: 0, cacheMisses: 0 }
 
-    console.log(`✅ [Step 5/8] AI 识别成功: ${questions.length} 道题, ${wrongCount} 道错题, 耗时 ${Math.round(ocrResult.duration/1000)}s`)
+    console.log(`✅ [Step 5/8] AI 识别成功: ${pages.length} 页共 ${questions.length} 道题, ${wrongCount} 道错题, OCR 耗时 ${Math.round(totalOcrDuration/1000)}s`)
 
     if (questions.length > 0) {
       console.log(`📊 [Step 6/8] 保存题目到数据库...`)
@@ -1790,18 +1827,20 @@ export const processTask = async (job) => {
       // ── 坐标存储策略：block_coordinates / text_bbox 保持 AI 返回的 0-1000 归一化坐标直接入库 ──
       // 前端按图片实际显示尺寸(naturalWidth/naturalHeight)换算像素，彻底与分辨率解耦，
       // 无论展示原图还是压缩图，overlay 都能精准对齐。
-      // 几何图裁剪需要 compressedBuffer 的像素坐标，故仅在裁剪处把 image bbox 局部换算，
+      // 几何图裁剪需要对应页压缩图的像素坐标，故仅在裁剪处把 image bbox 局部换算，
       // 不影响入库的归一化值。
-      let _compW = 0, _compH = 0
-      try {
-        const _meta = await sharp(compressedBuffer).metadata()
-        _compW = _meta.width; _compH = _meta.height
-      } catch (e) {
-        console.warn(`   ⚠️ [坐标] 读取压缩图尺寸失败: ${e.message}`)
+      const pageDims = new Map() // pageNumber → {w, h}
+      for (const [pageNo, buf] of pageBuffers) {
+        try {
+          const _meta = await sharp(buf).metadata()
+          pageDims.set(pageNo, { w: _meta.width, h: _meta.height })
+        } catch (e) {
+          console.warn(`   ⚠️ [坐标] 读取第 ${pageNo} 页压缩图尺寸失败: ${e.message}`)
+        }
       }
 
       // ── 多模态切题：处理几何配图（⚡ 并行化） ─
-      const geometryImageCache = new Map() // bbox 去重缓存 (一图多题)
+      const geometryImageCache = new Map() // 页码+bbox 去重缓存 (一图多题)
 
       // 收集所有需要裁剪几何图的题目
       const geometryTasks = questions
@@ -1822,20 +1861,23 @@ export const processTask = async (job) => {
             }
             return null
           }
+          const pageNo = q.page_number || pages[0].pageNumber
+          const dims = pageDims.get(pageNo)
           const safeBbox = clampImageBboxToBlock(bbox, q.block_coordinates)
-          const pixelBbox = (_compW && _compH) ? denormalizeBbox(safeBbox, _compW, _compH) : safeBbox
-          const cacheKey = JSON.stringify(safeBbox)
-          return { q, safeBbox, pixelBbox, cacheKey, imageType, imageBbox }
+          const pixelBbox = dims ? denormalizeBbox(safeBbox, dims.w, dims.h) : safeBbox
+          const cacheKey = `${pageNo}:${JSON.stringify(safeBbox)}`
+          return { q, safeBbox, pixelBbox, cacheKey, imageType, imageBbox, pageNo }
         })
         .filter(Boolean)
 
       if (geometryTasks.length > 0) {
         console.log(`   [几何图] ⚡ 并行裁剪 ${geometryTasks.length} 张配图...`)
-        await Promise.allSettled(geometryTasks.map(async ({ q, safeBbox, pixelBbox, cacheKey }) => {
+        await Promise.allSettled(geometryTasks.map(async ({ q, safeBbox, pixelBbox, cacheKey, pageNo }) => {
           if (geometryImageCache.has(cacheKey)) {
             q.geometry_image_url = geometryImageCache.get(cacheKey)
           } else {
-            q.geometry_image_url = await cropAndUploadGeometryImage(compressedBuffer, pixelBbox, studentId, q.id)
+            const pageBuffer = pageBuffers.get(pageNo) || compressedBuffer
+            q.geometry_image_url = await cropAndUploadGeometryImage(pageBuffer, pixelBbox, studentId, q.id)
             if (q.geometry_image_url) {
               geometryImageCache.set(cacheKey, q.geometry_image_url)
             }
@@ -1865,10 +1907,11 @@ export const processTask = async (job) => {
         const assetResults = await Promise.allSettled(geometryQuestions.map(async (q) => {
           const imageType = q.image_type || 'geometry'
           const imageBbox = q.image_bbox || (q.geometry_image?.bbox || null)
+          const sourcePage = pages.find(p => p.pageNumber === q.page_number)
           await createQuestionAsset({
             question_id: q.id,
             asset_type: imageType === 'chart' ? 'chart_image' : 'geometry_image',
-            original_image_url: imageUrl,
+            original_image_url: sourcePage?.imageUrl || imageUrl,
             cropped_image_url: q.geometry_image_url,
             bbox: imageBbox,
             tikz_status: imageType === 'geometry' ? 'pending' : 'none'
