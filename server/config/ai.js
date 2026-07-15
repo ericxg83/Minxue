@@ -465,6 +465,24 @@ export async function callVisionCompletion(opts) {
     }
   }
 
+  // Agnes 视觉兜底
+  const AGNES_KEY = process.env.AGNES_API_KEY
+  if (AGNES_KEY) {
+    providers.push(async () => {
+      const content = await requestOpenAIProvider({
+        endpoint: 'https://apihub.agnes-ai.com/v1/chat/completions',
+        apiKey: AGNES_KEY,
+        model: 'agnes-1.5-flash',
+        messages,
+        temperature,
+        maxTokens: Math.min(maxTokens, 4096),
+        timeout: AI_CONFIG.TIMEOUT,
+        vendor: { name: 'Agnes', referer: null },
+      })
+      return { content, usedBackup: true }
+    })
+  }
+
   let lastError = null
   for (const provider of providers) {
     try {
