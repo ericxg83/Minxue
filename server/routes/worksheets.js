@@ -14,7 +14,8 @@ import {
   getStudentWorksheetSetting,
   upsertStudentWorksheetSetting,
 } from '../services/neonService.js'
-import { uploadImage } from '../services/ossService.js'
+import { uploadPDF } from '../services/ossService.js'
+import { extractPdfText, renderPdfToJpegs } from '../services/pdfService.js'
 import { callVisionCompletion } from '../config/ai.js'
 
 const router = Router()
@@ -106,43 +107,55 @@ router.post('/:id/parse-pdf', pdfUpload.single('file'), async (req, res) => {
     const file = req.file
     if (!file) return res.status(400).json({ error: '请上传 PDF 文件' })
 
-    const pdfUrl = await uploadImage(file.buffer, `worksheets/${worksheetId}/${file.originalname}`, 'system')
+    const pdfUrl = await uploadPDF(file.buffer, file.originalname, 'system')
     await updateWorksheetPdfUrl(worksheetId, pdfUrl)
 
     let fullText = ''
     try {
-      const pdf = await import('pdf-parse')
-      const data = await pdf.default(file.buffer)
-      fullText = data.text || ''
+      fullText = await extractPdfText(file.buffer)
     } catch (e) {
-      console.log('pdf-parse failed, will try OCR fallback:', e.message)
+      console.log('PDF text extraction failed, will try OCR fallback:', e.message)
     }
 
     let parsedAnswers = []
     const lowConfidence = []
+    let markerFound = false
+    let ocrTruncatedInfo = null
 
     if (fullText && fullText.trim().length > 50) {
-      const answerSection = fullText.replace(/.*?(参考答案|答案|标准答案|参考解答)/s, '')
-      if (answerSection.length < fullText.length * 0.3) {
+      const answerSection = fullText.replace(/[\s\S]*?(参考答案|标准答案|参考解答|答案)/, '')
+      markerFound = answerSection.length < fullText.length
+      parsedAnswers = parseAnswerText(markerFound ? answerSection : fullText, lowConfidence)
+      if (markerFound && parsedAnswers.length === 0) {
+        // 标记词切分后无结果（可能切错位置），退回全文解析
         parsedAnswers = parseAnswerText(fullText, lowConfidence)
-      } else {
-        parsedAnswers = parseAnswerText(answerSection, lowConfidence)
       }
     }
 
     if (parsedAnswers.length === 0) {
       try {
-        const sharp = await import('sharp')
-        const imageBuffer = await sharp.default(file.buffer).jpeg({ quality: 85 }).toBuffer()
-        const base64 = imageBuffer.toString('base64')
-        const ocrResult = await ocrExtractAnswers(base64)
-        if (ocrResult.length > 0) {
-          parsedAnswers = ocrResult
+        // 扫描版 PDF：逐页渲染成图片后走视觉模型 OCR
+        const { images, totalPages } = await renderPdfToJpegs(file.buffer, { maxPages: 20 })
+        if (totalPages > images.length) {
+          ocrTruncatedInfo = { totalPages, ocrPages: images.length }
+          console.log(`PDF 共 ${totalPages} 页，仅 OCR 前 ${images.length} 页`)
+        }
+        for (const imageBuffer of images) {
+          const ocrResult = await ocrExtractAnswers(imageBuffer.toString('base64'), lowConfidence)
+          parsedAnswers.push(...ocrResult)
         }
       } catch (e) {
         console.log('OCR fallback failed:', e.message)
       }
     }
+
+    // 同一题号去重：保留置信度更高的；置信度相同保留靠后的（答案区通常在文末）
+    const byQuestionNo = new Map()
+    for (const a of parsedAnswers) {
+      const prev = byQuestionNo.get(a.question_no)
+      if (!prev || a.confidence >= prev.confidence) byQuestionNo.set(a.question_no, a)
+    }
+    parsedAnswers = [...byQuestionNo.values()].sort((a, b) => a.question_no - b.question_no)
 
     if (parsedAnswers.length > 0) {
       await batchInsertAnswers(worksheetId, parsedAnswers)
@@ -152,10 +165,21 @@ router.post('/:id/parse-pdf', pdfUpload.single('file'), async (req, res) => {
 
     const updated = await getWorksheetById(worksheetId)
 
+    // 明确边界：本功能面向纯答案页 PDF，疑似完整 PDF（题干+答案）时提示重新裁剪上传
+    let warning = null
+    if (parsedAnswers.length === 0) {
+      warning = '未能解析出任何答案，请确认上传的是纯答案页 PDF。'
+    } else if (ocrTruncatedInfo) {
+      warning = `PDF 共 ${ocrTruncatedInfo.totalPages} 页，仅识别了前 ${ocrTruncatedInfo.ocrPages} 页。若答案位于文件末尾，请裁剪为纯答案页后重新上传。`
+    } else if (!markerFound && lowConfidence.length > parsedAnswers.length * 0.5) {
+      warning = '未检测到"参考答案"标记，且低置信度条目偏多，可能混入了题干内容。建议裁剪为纯答案页后重新上传。'
+    }
+
     res.json({
       success: true,
       count: parsedAnswers.length,
       lowConfidence,
+      warning,
       worksheet: updated,
     })
   } catch (e) {
@@ -216,7 +240,7 @@ function parseAnswerText(text, lowConfidence) {
   return results
 }
 
-async function ocrExtractAnswers(base64Image) {
+async function ocrExtractAnswers(base64Image, lowConfidence = []) {
   const { content } = await callVisionCompletion({
     imageDataURL: `data:image/jpeg;base64,${base64Image}`,
     systemPrompt: '你是一个作业答案识别助手。请从图片中提取所有题号和对应答案。只输出题号和答案，每行一个，格式如“1. A”或“13. 2017”。',
@@ -225,7 +249,6 @@ async function ocrExtractAnswers(base64Image) {
     maxTokens: 4096,
   })
 
-  const lowConfidence = []
   return parseAnswerText(content || '', lowConfidence)
 }
 

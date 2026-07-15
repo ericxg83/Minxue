@@ -83,7 +83,7 @@
           <el-icon class="el-icon--upload" :size="48"><UploadFilled /></el-icon>
           <div class="el-upload__text">拖拽 PDF 到此处，或 <em>点击选择</em></div>
           <template #tip>
-            <div class="el-upload__tip">支持含参考答案的练习册 PDF（含题目+答案页 或 纯答案页）</div>
+            <div class="el-upload__tip">请上传纯答案页 PDF（建议先裁掉题干页，解析更快更准）</div>
           </template>
         </el-upload>
         <div v-if="selectedPdf" class="pdf-info">
@@ -94,13 +94,20 @@
         </div>
       </div>
       <div v-else class="parse-result">
-        <el-result icon="success" title="解析完成">
+        <el-result :icon="parseWarning ? 'warning' : 'success'" title="解析完成">
           <template #sub-title>
             <p>共解析出 <strong>{{ parseCount }}</strong> 条答案</p>
           </template>
           <template #extra>
-            <el-button type="primary" @click="gotoReview">审核答案</el-button>
-            <el-button @click="resetPdfUpload">继续上传</el-button>
+            <el-alert
+              v-if="parseWarning"
+              :title="parseWarning"
+              type="warning"
+              :closable="false"
+              class="parse-warning"
+            />
+            <el-button type="primary" @click="gotoReview" :disabled="parseCount === 0">审核答案</el-button>
+            <el-button @click="resetPdfUpload">重新上传</el-button>
           </template>
         </el-result>
       </div>
@@ -133,6 +140,7 @@ const selectedPdf = ref(null)
 const parsing = ref(false)
 const pdfUploaded = ref(false)
 const parseCount = ref(0)
+const parseWarning = ref(null)
 const currentWorksheetId = ref(null)
 
 const loadData = async () => {
@@ -220,6 +228,7 @@ const handleUploadPdf = (row) => {
   showPdfDialog.value = true
   pdfUploaded.value = false
   selectedPdf.value = null
+  parseWarning.value = null
 }
 
 const handlePdfSelect = (uploadFile) => {
@@ -233,8 +242,13 @@ const startParse = async () => {
   try {
     const result = await uploadPdf(currentWorksheetId.value, selectedPdf.value)
     parseCount.value = result.count || 0
+    parseWarning.value = result.warning || null
     pdfUploaded.value = true
-    ElMessage.success(`解析完成，共 ${parseCount.value} 条答案`)
+    if (result.warning) {
+      ElMessage.warning(result.warning)
+    } else {
+      ElMessage.success(`解析完成，共 ${parseCount.value} 条答案`)
+    }
     await loadData()
   } catch (e) {
     ElMessage.error('解析失败: ' + e.message)
@@ -246,6 +260,7 @@ const startParse = async () => {
 const resetPdfUpload = () => {
   pdfUploaded.value = false
   selectedPdf.value = null
+  parseWarning.value = null
 }
 
 const gotoReview = () => {
@@ -280,5 +295,10 @@ const gotoReview = () => {
 
 .parse-result {
   padding: 8px 0;
+}
+
+.parse-warning {
+  margin-bottom: 16px;
+  text-align: left;
 }
 </style>

@@ -22,6 +22,7 @@ export const uploadPdf = (id, file, onProgress) => {
   fd.append('file', file)
   return api.post(`/worksheets/${id}/parse-pdf`, fd, {
     headers: { 'Content-Type': 'multipart/form-data' },
+    timeout: 600000, // 解析含 OCR 兜底可能超过默认 2 分钟
     onUploadProgress: onProgress
   }).then(r => r.data)
 }
