@@ -71,10 +71,14 @@ export default function Home({ onNavigate }) {
   }
 
   const handleWrongRetryUpload = () => {
-    // Navigate to QR scan page
-    if (window.goToPage) {
-      window.goToPage('scan-qr')
-    }
+    // 拍照上传：照片中的二维码由 handleFileSelect 自动识别并定位对应重练卷
+    window.dispatchEvent(new CustomEvent('set-workbook-flow', {
+      detail: { flow: 'regular' }
+    }))
+    const input = document.getElementById('file-input')
+    if (!input) return
+    input.setAttribute('capture', 'environment')
+    input.click()
   }
 
   return (

@@ -635,8 +635,7 @@ export default function ExamReview({ task, onClose, onSave }) {
             borderBottom: `1px solid ${COLORS.border}`
           }}
         >
-          <div style={{ width: 40, height: 4, borderRadius: 2, background: 'var(--border)',
-          borderRadius: 2, }} />
+          <div style={{ width: 40, height: 4, borderRadius: 2, background: 'var(--border)' }} />
         </div>
 
         {/* ── 顶部统计 ── */}

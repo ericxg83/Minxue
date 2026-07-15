@@ -398,8 +398,8 @@ app.get('/api/tasks/student/:studentId', async (req, res) => {
     const limit = Math.min(parseInt(req.query.limit) || 50, 200)
     const offset = parseInt(req.query.offset) || 0
     const { rows } = await query(
-      `SELECT id, student_id, status, original_name, image_url, question_count, wrong_count,
-              empty_count, result, created_at, updated_at, source_type
+      `SELECT id, student_id, status, original_name, image_url, result,
+              created_at, updated_at, task_type, worksheet_id, subject, generated_exam_id
        FROM ${TABLES.TASKS} WHERE student_id = $1 AND deleted_at IS NULL
        ORDER BY created_at DESC LIMIT $2 OFFSET $3`,
       [studentId, limit, offset]

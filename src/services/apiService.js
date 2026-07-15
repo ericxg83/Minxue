@@ -83,7 +83,7 @@ const apiRequest = async (path, options = {}, retries = 2) => {
 
   // 仅对 GET 请求做去重（POST/PUT/DELETE 有副作用，不做去重）
   if (method === 'GET') {
-    const bodyKey = JSON.stringify(options.body).slice(0, 200)
+    const bodyKey = options.body ? String(JSON.stringify(options.body)).slice(0, 200) : ''
     const dedupKey = `${method}:${path}:${bodyKey}`
     if (inFlightRequests.has(dedupKey)) {
       return inFlightRequests.get(dedupKey)

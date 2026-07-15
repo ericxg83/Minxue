@@ -149,7 +149,7 @@ export default function UploadTypeSelector({ visible, onClose, onUpload }) {
             </div>
             <div className="text-left">
               <h4 className="font-bold text-base" style={{ color: 'var(--text)' }}>错题重练</h4>
-              <p className="text-sm mt-1" style={{ color: 'var(--text-tertiary)' }}>扫二维码，智能推荐练习</p>
+              <p className="text-sm mt-1" style={{ color: 'var(--text-tertiary)' }}>拍照上传，自动识别卷上二维码批改</p>
             </div>
             <ChevronRight size={20} style={{ color: 'var(--text-tertiary)' }} />
           </button>

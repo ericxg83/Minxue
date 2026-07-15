@@ -60,10 +60,10 @@ const lazyWithRetry = (factory) => {
             flexDirection: 'column', gap: '16px', zIndex: 10000, padding: '20px'
           }}>
             <div style={{ fontSize: '16px', color: '#EF4444', textAlign: 'center' }}>
-              椤甸潰鍔犺浇澶辫触锛岃鍒锋柊閲嶈瘯
+              页面加载失败，请刷新重试
             </div>
             <div style={{ fontSize: '12px', color: '#9CA3AF', textAlign: 'center' }}>
-              濡傛灉闂鎸佺画锛岃娓呴櫎娴忚鍣ㄧ紦瀛樺悗閲嶈瘯
+              如果问题持续，请清除浏览器缓存后重试
             </div>
             <button
               onClick={() => window.location.reload()}
@@ -73,7 +73,7 @@ const lazyWithRetry = (factory) => {
                 fontSize: '14px', fontWeight: 600
               }}
             >
-              鍒锋柊椤甸潰
+              刷新页面
             </button>
           </div>
         )
@@ -111,7 +111,7 @@ const TaskCardSkeleton = () => (
 
 const isMobile = /Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(navigator.userAgent)
 
-// 閿欓閲嶇粌浠诲姟鍏ュ彛璺敱锛?retry-task/:id 浠呮覆鏌?RetryTask 椤碉紙浜岀淮鐮佸敮涓€鍏ュ彛锛?
+// 错题重练任务入口路由：/retry-task/:id 仅渲染 RetryTask 页（二维码唯一入口）
 const getRetryTaskIdFromPath = () => {
   const m = window.location.pathname.match(/^\/retry-task\/([0-9a-fA-F-]{36})$/)
   return m ? m[1] : null
@@ -133,7 +133,7 @@ function dataURLtoFile(dataUrl, filename) {
 
 const USE_MOCK_DATA = false
 
-// 鍒ゆ柇浠诲姟鏄惁宸插畬鎴愭壒鏀癸紙鍏煎涓嶅悓鐘舵€佸€硷級
+// 判断任务是否已完成批改（兼容不同状态值）
 const isTaskCompleted = (task) => {
   return task.status === 'done' || task.status === 'graded' || task.status === 'completed' || task.status === 'reviewed' || !!task.result?.questionCount
 }
@@ -146,7 +146,7 @@ export default function App() {
   const { wrongQuestions, setWrongQuestions, selectedQuestions, setSelectedQuestions, clearSelection, addWrongQuestion, addWrongQuestions: addMultipleToStore } = useWrongQuestionStore()
   const { exams, setExams, generatedExams, setGeneratedExams } = useExamStore()
 
-  // 閿欓閲嶇粌浠诲姟鍏ュ彛锛歱athname 鍛戒腑 /retry-task/:id 鏃跺叏灞忔覆鏌?RetryTask
+  // 错题重练任务入口：pathname 命中 /retry-task/:id 时全屏渲染 RetryTask
   const [retryTaskId, setRetryTaskId] = useState(() => getRetryTaskIdFromPath())
   useEffect(() => {
     const onPop = () => setRetryTaskId(getRetryTaskIdFromPath())
@@ -175,7 +175,7 @@ export default function App() {
   const [showReprint, setShowReprint] = useState(false)
   const [reprintExam, setReprintExam] = useState(null)
   const [reprintQuestions, setReprintQuestions] = useState([])
-  const [submitExamId, setSubmitExamId] = useState(null) // 姝ｅ湪涓婁紶绛斿嵎鐨勭粍鍗?id
+  const [submitExamId, setSubmitExamId] = useState(null) // 正在上传答卷的组卷 id
   const submitFileInputRef = useRef(null)
   const submitTargetExamRef = useRef(null)
 
@@ -225,12 +225,12 @@ export default function App() {
   const [showWorksheetPicker, setShowWorksheetPicker] = useState(false)
   const [selectedWorksheetId, setSelectedWorksheetId] = useState(null)
   const [pendingFlow, setPendingFlow] = useState(null) // 'workbook' | null
-  const [flowSubject, setFlowSubject] = useState('鏁板')
+  const [flowSubject, setFlowSubject] = useState('数学')
 
   const clearPendingUploadFlow = useCallback(() => {
     setPendingFlow(null)
     setSelectedWorksheetId(null)
-    setFlowSubject('鏁板')
+    setFlowSubject('数学')
   }, [])
 
   // Listen for workbook flow events from Home page
@@ -273,15 +273,15 @@ export default function App() {
   const [qrDetectionResults, setQrDetectionResults] = useState({})
   const [paperBankDraft, setPaperBankDraft] = useState(null)
   const [paperBankUploadedPages, setPaperBankUploadedPages] = useState([])
-  const [paperBankReconstructedPages, setPaperBankReconstructedPages] = useState([]) // 瀛樺偍姣忛〉鍘熷浘+layoutBlocks
+  const [paperBankReconstructedPages, setPaperBankReconstructedPages] = useState([]) // 存储每页原图+layoutBlocks
   const [paperBankProcessing, setPaperBankProcessing] = useState(false)
   const [paperBankProgress, setPaperBankProgress] = useState(0)
   const [paperBankProofreadMode, setPaperBankProofreadMode] = useState(false)
   const [paperBankInfo, setPaperBankInfo] = useState(null)
-  const [editingBlock, setEditingBlock] = useState(null) // {pageNo, blockIndex} 褰撳墠缂栬緫鐨勫尯鍧?
-  const [paperBankCurrentPage, setPaperBankCurrentPage] = useState(0) // 褰撳墠鏍″椤电爜锛?-based锛?
-  const [paperBankShowOriginal, setPaperBankShowOriginal] = useState(false) // 鏄惁鏄剧ず鍘熷浘瀵规瘮
-  // 璇曞嵎鍏ュ簱瑙嗗浘鍝嶅簲寮忔娴嬶細鍩轰簬瀹為檯瀹瑰櫒瀹藉害锛堥€傞厤鎵嬫満妯℃嫙鍣級
+  const [editingBlock, setEditingBlock] = useState(null) // {pageNo, blockIndex} 当前编辑的区块
+  const [paperBankCurrentPage, setPaperBankCurrentPage] = useState(0) // 当前校对页码（0-based）
+  const [paperBankShowOriginal, setPaperBankShowOriginal] = useState(false) // 是否显示原图对比
+  // 试卷入库视图响应式检测：基于实际容器宽度（适配手机模拟器）
   const paperBankContainerRef = useRef(null)
   const [paperBankNarrow, setPaperBankNarrow] = useState(false)
   
@@ -304,7 +304,7 @@ export default function App() {
   const [paperBankShowFilters, setPaperBankShowFilters] = useState(false)
   const [paperBankPreviewPaper, setPaperBankPreviewPaper] = useState(null)
 
-  // 鍒濆鍖栫姸鎬?
+  // 初始化状态
   const [isInitializing, setIsInitializing] = useState(true)
   const [uploadQueue, setUploadQueue] = useState([])
   const [isUploading, setIsUploading] = useState(false)
@@ -359,7 +359,7 @@ export default function App() {
           } catch (e) { /* ignore parse error */ }
         }
         
-        // No cache 鈥?show mock data immediately, fetch real data in background
+        // No cache — show mock data immediately, fetch real data in background
         setIsInitializing(false)
         setStudents(mockStudents)
         const lastStudentId = localStorage.getItem('lastStudentId')
@@ -378,10 +378,10 @@ export default function App() {
             setCurrentStudent(freshLastStudent || studentList[0])
           }
         }).catch(err => {
-          console.error('鍚庡彴鑾峰彇瀛︾敓鏁版嵁澶辫触锛屼繚鐣欐ā鎷熸暟鎹?', err)
+          console.error('后台获取学生数据失败，保留模拟数据:', err)
         })
       } catch (error) {
-        console.error('鍒濆鍖栧け璐?', error)
+        console.error('初始化失败:', error)
         setIsInitializing(false)
       }
     }
@@ -434,30 +434,30 @@ export default function App() {
     }
   }, [currentStudent?.id, currentPage])
 
-  // Load exams锛堝悎骞跺師 App.jsx 3s 杞涓?Exam/index.jsx 3s 杞锛岀粺涓€鐢?App 灞傝皟搴︼級
+  // Load exams（合并原 App.jsx 3s 轮询与 Exam/index.jsx 3s 轮询，统一由 App 层调度）
   useEffect(() => {
     if (currentStudent && currentPage === 'exam') {
-      loadGeneratedExams(false, true) // 棣栨杩涘叆锛氬厛灞曠ず缂撳瓨鍐嶅悗鍙板埛鏂?
+      loadGeneratedExams(false, true) // 首次进入：先展示缓存再后台刷新
       const interval = setInterval(() => {
         if (document.visibilityState === 'visible') loadGeneratedExams(false)
-      }, 15000) // 鈿?3s鈫?5s锛宔xams 鐘舵€佸彉鍖栨參锛屾棤闇€楂橀杞
+      }, 15000) // ⚡ 3s→15s，exams 状态变化慢，无需高频轮询
       return () => clearInterval(interval)
     }
   }, [currentStudent?.id, currentPage])
 
-  // Load questions for reprint 鈥?濮嬬粓浠庢湇鍔＄鑾峰彇鏈€鏂?question_ids锛岄槻姝㈢紦瀛?鍒楄〃鏁版嵁杩囨湡
+  // Load questions for reprint — 始终从服务端获取最新 question_ids，防止缓存/列表数据过期
   useEffect(() => {
     if (reprintExam && reprintExam.question_ids?.length > 0) {
       const loadReprintQuestions = async () => {
         try {
-          // 1) 鐢ㄧ粍鍗?ID 浠庢湇鍔＄鎷夊彇鏈€鏂拌褰曪紙纭繚 question_ids 鏄渶鏂扮殑锛?
+          // 1) 用组卷 ID 从服务端拉取最新记录（确保 question_ids 是最新的）
           const freshExam = await getGeneratedExamById(reprintExam.id).catch(() => null)
           const questionIds = freshExam?.question_ids || reprintExam.question_ids
-          // 2) 鎸夋渶鏂扮殑 question_ids 鍔犺浇棰樼洰锛堜笉鍔?studentId锛屼笌绉诲姩绔叾浠栨帴鍙ｄ竴鑷达級
+          // 2) 按最新的 question_ids 加载题目（不加 studentId，与移动端其他接口一致）
           const questions = await getQuestionsByIds(questionIds)
           setReprintQuestions(questions || [])
         } catch (error) {
-          console.error('鍔犺浇棰樼洰澶辫触:', error)
+          console.error('加载题目失败:', error)
           setReprintQuestions([])
         }
       }
@@ -467,7 +467,7 @@ export default function App() {
     }
   }, [reprintExam])
 
-  // Processing: Load tasks锛堢寮€绛栫暐锛氬厛灞曠ず鏈湴缂撳瓨锛屽啀鍚庡彴鍒锋柊锛?
+  // Processing: Load tasks（秒开策略：先展示本地缓存，再后台刷新）
   const loadTasks = async (showSkeleton = true) => {
     if (!currentStudent) return
     const studentId = currentStudent.id
@@ -475,29 +475,29 @@ export default function App() {
       setTasks(mockTasks.filter(t => t.student_id === studentId))
       return
     }
-    // 1) 鏃犺 TTL 鍏堣缂撳瓨绔嬪嵆涓婂睆锛堥伩鍏嶇櫧灞忕瓑寰呯綉缁滐級
+    // 1) 无视 TTL 先读缓存立即上屏（避免白屏等待网络）
     const cached = peekCache(`tasks_cache_${studentId}`)
     const hasCache = Array.isArray(cached) && cached.length > 0
     if (hasCache) setTasks(cached)
     if (showSkeleton && !hasCache) setIsLoadingTasks(true)
-    // 2) 鍚庡彴鎷夊彇鏈€鏂版暟鎹鐩?
+    // 2) 后台拉取最新数据覆盖
     try {
       const taskList = await getTasksByStudent(studentId, false)
       if (Array.isArray(taskList)) setTasks(taskList)
     } catch (error) {
-      console.error('鍔犺浇浠诲姟澶辫触:', error)
-      // Don't clear tasks on failure 鈥?keep showing existing data
+      console.error('加载任务失败:', error)
+      // Don't clear tasks on failure — keep showing existing data
     } finally {
       setIsLoadingTasks(false)
     }
   }
 
-  // WrongBook: Load data锛堢寮€绛栫暐锛氬厛灞曠ず鏈湴缂撳瓨锛屽啀鍚庡彴鍒锋柊锛?
+  // WrongBook: Load data（秒开策略：先展示本地缓存，再后台刷新）
   const loadWrongBookData = async () => {
     if (!currentStudent) return
     const studentId = currentStudent.id
 
-    // 鍚屼竴棰樼洰鍐呭鍘婚噸锛氫繚鐣欎笂浼犳椂闂存渶鏅氱殑涓€鏉?
+    // 同一题目内容去重：保留上传时间最晚的一条
     const dedupByContent = (rawList) => {
       const contentDedupMap = new Map()
       for (const wq of rawList) {
@@ -519,12 +519,12 @@ export default function App() {
       return
     }
 
-    // 1) 鍏堢敤缂撳瓨绔嬪嵆涓婂睆
+    // 1) 先用缓存立即上屏
     const cached = peekCache(`wrong_questions_cache_${studentId}`)
     if (Array.isArray(cached) && cached.length > 0) {
       setWrongQuestions(dedupByContent(cached))
     }
-    // 2) 鍚庡彴鎷夊彇鏈€鏂版暟鎹鐩?
+    // 2) 后台拉取最新数据覆盖
     try {
       const data = await getWrongQuestionsByStudent(studentId, false)
       const rawList = Array.isArray(data) ? data : []
@@ -534,12 +534,12 @@ export default function App() {
       }
       setWrongQuestions(deduped)
     } catch (error) {
-      console.error('鍔犺浇閿欓澶辫触:', error)
-      // 缃戠粶澶辫触鏃朵繚鐣欏凡灞曠ず鐨勭紦瀛樻暟鎹?
+      console.error('加载错题失败:', error)
+      // 网络失败时保留已展示的缓存数据
     }
   }
 
-  // Exam: Load generated exams锛堢寮€绛栫暐锛氬厛灞曠ず鏈湴缂撳瓨锛屽啀鍚庡彴鍒锋柊锛?
+  // Exam: Load generated exams（秒开策略：先展示本地缓存，再后台刷新）
   const loadGeneratedExams = async (useCache = false, showCachedFirst = false) => {
     if (!currentStudent) return
     const studentId = currentStudent.id
@@ -555,19 +555,19 @@ export default function App() {
       const examList = await getGeneratedExamsByStudent(studentId, useCache)
       if (Array.isArray(examList)) setGeneratedExams(examList)
     } catch (error) {
-      console.error('鍔犺浇璇曞嵎澶辫触:', error)
-      // 缃戠粶澶辫触鏃朵繚鐣欏凡灞曠ず鐨勬暟鎹?
+      console.error('加载试卷失败:', error)
+      // 网络失败时保留已展示的数据
     }
   }
 
-  // 澶勭悊涓婁紶闃熷垪
+  // 处理上传队列
   useEffect(() => {
     if (uploadQueue.length > 0 && !isUploading && !isInitializing && currentStudent?.id) {
       processUploadQueue()
     }
   }, [uploadQueue, isUploading, isInitializing, currentStudent?.id])
 
-  // 澶勭悊涓婁紶闃熷垪
+  // 处理上传队列
   const processUploadQueue = async () => {
     if (uploadQueue.length === 0 || isUploading || !currentStudent?.id) return
     
@@ -588,12 +588,12 @@ export default function App() {
 
   // Upload file handler with QR detection
   const handleFileSelect = async (e) => {
-    console.debug('馃敟馃敟馃敟馃敟馃敟 [UPLOAD] === handleFileSelect TRIGGERED === 馃敟馃敟馃敟馃敟馃敟')
+    console.debug('🔥🔥🔥🔥🔥 [UPLOAD] === handleFileSelect TRIGGERED === 🔥🔥🔥🔥🔥')
     try {
       const files = Array.from(e.target.files)
-      console.debug('馃敟馃敟 [UPLOAD] Files received:', files.length, files.map(f => ({ name: f.name, size: f.size, type: f.type })))
+      console.debug('🔥🔥 [UPLOAD] Files received:', files.length, files.map(f => ({ name: f.name, size: f.size, type: f.type })))
       if (files.length === 0) {
-        console.debug('馃敟 [UPLOAD] No files selected, returning early')
+        console.debug('🔥 [UPLOAD] No files selected, returning early')
         return
       }
       e.target.value = ''
@@ -615,31 +615,31 @@ export default function App() {
         }
       }
 
-      console.debug('馃敟馃敟 [UPLOAD] After dedup - newFiles:', newFiles.length, 'duplicateFiles:', duplicateFiles.length)
+      console.debug('🔥🔥 [UPLOAD] After dedup - newFiles:', newFiles.length, 'duplicateFiles:', duplicateFiles.length)
 
       if (duplicateFiles.length > 0) {
-        Toast.show({ message: `${duplicateFiles.length} 涓枃浠跺凡瀛樺湪锛屽凡鑷姩璺宠繃`, type: 'error' })
+        Toast.show({ message: `${duplicateFiles.length} 个文件已存在，已自动跳过`, type: 'error' })
       }
 
       if (newFiles.length === 0) {
-        console.debug('馃敟馃敟 [UPLOAD] No new files after dedup, returning')
+        console.debug('🔥🔥 [UPLOAD] No new files after dedup, returning')
         return
       }
 
       if (isInitializing) {
-        console.debug('馃敟 [UPLOAD] Initializing, adding to queue')
-        Toast.show({ message: `姝ｅ湪鍒濆鍖栵紝宸茬紦瀛?${newFiles.length} 涓枃浠讹紝绋嶅悗鑷姩涓婁紶...`, type: 'success', duration: 2000 })
+        console.debug('🔥 [UPLOAD] Initializing, adding to queue')
+        Toast.show({ message: `正在初始化，已缓存 ${newFiles.length} 个文件，稍后自动上传...`, type: 'success', duration: 2000 })
         setUploadQueue(prev => [...prev, ...newFiles])
         return
       }
 
       if (!currentStudent || !currentStudent?.id) {
-        console.debug('馃挜馃挜馃挜 [UPLOAD] BLOCKED: currentStudent is NULL or undefined!')
-        Toast.show({ message: '璇峰厛閫夋嫨瀛︾敓鍚庡啀涓婁紶璇曞嵎', type: 'error', duration: 3000 })
+        console.debug('💥💥💥 [UPLOAD] BLOCKED: currentStudent is NULL or undefined!')
+        Toast.show({ message: '请先选择学生后再上传试卷', type: 'error', duration: 3000 })
         return
       }
 
-      console.debug('鉁?[UPLOAD] currentStudent:', currentStudent.id, currentStudent.name)
+      console.debug('✅ [UPLOAD] currentStudent:', currentStudent.id, currentStudent.name)
 
       // Step 1: Detect QR codes for all files
       setUploading(true)
@@ -682,20 +682,20 @@ export default function App() {
 
       setUploading(false)
     } catch (err) {
-      console.error('馃挜馃挜馃挜馃挜馃挜 [UPLOAD] UNCAUGHT ERROR in handleFileSelect:', err)
-      console.error('馃挜 [UPLOAD] Error stack:', err.stack)
-      Toast.show({ message: `涓婁紶鍑洪敊: ${err.message}`, type: 'error', duration: 5000 })
+      console.error('💥💥💥💥💥 [UPLOAD] UNCAUGHT ERROR in handleFileSelect:', err)
+      console.error('💥 [UPLOAD] Error stack:', err.stack)
+      Toast.show({ message: `上传出错: ${err.message}`, type: 'error', duration: 5000 })
       setUploading(false)
     }
   }
 
   // Upload via backend API
   const uploadRetryPaperGroup = async (files, qrContent) => {
-    console.debug('馃攧 [UPLOAD] === Processing retry paper group ===')
-    console.debug('馃攧 [UPLOAD] QR Content:', qrContent)
-    console.debug('馃攧 [UPLOAD] Files count:', files.length)
+    console.debug('🔄 [UPLOAD] === Processing retry paper group ===')
+    console.debug('🔄 [UPLOAD] QR Content:', qrContent)
+    console.debug('🔄 [UPLOAD] Files count:', files.length)
 
-    const retryToast = Toast.show({ message: `妫€娴嬪埌閿欓閲嶇粌鍗凤紝姝ｅ湪涓婁紶 ${files.length} 椤?..`, type: 'loading', duration: 0 })
+    const retryToast = Toast.show({ message: `检测到错题重练卷，正在上传 ${files.length} 页...`, type: 'loading', duration: 0 })
 
     let tempTask
     try {
@@ -703,7 +703,7 @@ export default function App() {
       tempTask = {
         id: `temp-retry-${Date.now()}`,
         student_id: currentStudent.id,
-        original_name: `閿欓閲嶇粌_${qrContent}_${dayjs().format('YYYY-MM-DD_HH-mm-ss')}`,
+        original_name: `错题重练_${qrContent}_${dayjs().format('YYYY-MM-DD_HH-mm-ss')}`,
         task_type: 'retry_paper',
         retry_paper_id: qrContent,
         pages: files.map((file, index) => ({
@@ -750,10 +750,10 @@ export default function App() {
       }
 
       retryToast.dismiss()
-      Toast.show({ message: `閿欓閲嶇粌鍗蜂笂浼犳垚鍔燂紒`, type: 'success', duration: 2000 })
+      Toast.show({ message: `错题重练卷上传成功！`, type: 'success', duration: 2000 })
     } catch (error) {
-      console.error('馃挜 [uploadRetryPaperGroup] Error:', error)
-      if (tempTask) updateTaskInStore(tempTask.id, 'failed', { error: error.message || '涓婁紶澶辫触' })
+      console.error('💥 [uploadRetryPaperGroup] Error:', error)
+      if (tempTask) updateTaskInStore(tempTask.id, 'failed', { error: error.message || '上传失败' })
       retryToast.dismiss()
       Toast.show({ message: '错题重练卷上传失败', type: 'error', duration: 3000 })
     } finally {
@@ -764,8 +764,8 @@ export default function App() {
 
   // Upload regular homework (single file)
   const uploadRegularHomework = async (file) => {
-    console.debug('馃摑 [UPLOAD] === Processing regular homework ===')
-    console.debug('馃摑 [UPLOAD] File:', file.name)
+    console.debug('📝 [UPLOAD] === Processing regular homework ===')
+    console.debug('📝 [UPLOAD] File:', file.name)
 
     try {
       if (USE_MOCK_DATA) {
@@ -774,15 +774,15 @@ export default function App() {
         await uploadViaBackend([file])
       }
     } catch (error) {
-      console.error('馃挜 [uploadRegularHomework] Error:', error)
-      Toast.show({ message: `浣滀笟涓婁紶澶辫触: ${error.message}`, type: 'error', duration: 3000 })
+      console.error('💥 [uploadRegularHomework] Error:', error)
+      Toast.show({ message: `作业上传失败: ${error.message}`, type: 'error', duration: 3000 })
     }
   }
 
   // Upload via backend API
   const uploadViaBackend = async (files) => {
-    console.debug('馃摛馃摛馃摛 [uploadViaBackend] STARTING with', files.length, 'files')
-    console.debug('馃摛 [uploadViaBackend] currentStudent:', currentStudent?.id, currentStudent?.name)
+    console.debug('📤📤📤 [uploadViaBackend] STARTING with', files.length, 'files')
+    console.debug('📤 [uploadViaBackend] currentStudent:', currentStudent?.id, currentStudent?.name)
 
     const isWorkbook = pendingFlow === 'workbook' && selectedWorksheetId
     const pendingTasks = []
@@ -792,7 +792,7 @@ export default function App() {
         id: `temp-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`,
         student_id: currentStudent.id,
         image_url: URL.createObjectURL(file),
-        original_name: file.name || `鐓х墖_${dayjs().format('YYYY-MM-DD_HH-mm-ss')}.jpg`,
+        original_name: file.name || `照片_${dayjs().format('YYYY-MM-DD_HH-mm-ss')}.jpg`,
         task_type: isWorkbook ? 'workbook' : 'homework',
         status: 'pending',
         result: { progress: 0 },
@@ -804,16 +804,16 @@ export default function App() {
       pendingTasks.push({ tempTask, file })
     })
 
-    console.debug('馃摛 [uploadViaBackend] Created', pendingTasks.length, 'temp tasks')
+    console.debug('📤 [uploadViaBackend] Created', pendingTasks.length, 'temp tasks')
 
     clearStudentCaches(currentStudent.id)
     
-    Toast.show({ message: `宸叉坊鍔?${files.length} 涓枃浠讹紝姝ｅ湪涓婁紶...`, type: 'success', duration: 2000 })
+    Toast.show({ message: `已添加 ${files.length} 个文件，正在上传...`, type: 'success', duration: 2000 })
 
     let successCount = 0
     let failedCount = 0
 
-    // 鎵归噺涓婁紶鎵€鏈夋枃浠讹紙鍗曟璇锋眰锛?
+    // 批量上传所有文件（单次请求）
     try {
       const files = pendingTasks.map(p => p.file)
       const options = {}
@@ -831,7 +831,7 @@ export default function App() {
 
         if (taskResult.error) {
           failedCount++
-          const errorMsg = taskResult.message || taskResult.error || '涓婁紶澶辫触'
+          const errorMsg = taskResult.message || taskResult.error || '上传失败'
           updateTaskInStore(tempTask.id, 'failed', { error: errorMsg })
         } else {
           successCount++
@@ -842,16 +842,16 @@ export default function App() {
         }
       })
     } catch (error) {
-      console.error('馃挜 [uploadViaBackend] Batch upload exception:', error)
+      console.error('💥 [uploadViaBackend] Batch upload exception:', error)
       pendingTasks.forEach(({ tempTask }) => {
         failedCount++
-        updateTaskInStore(tempTask.id, 'failed', { error: error.message || '涓婁紶澶辫触' })
+        updateTaskInStore(tempTask.id, 'failed', { error: error.message || '上传失败' })
       })
     }
 
-    // 涓婁紶瀹屾垚鍚庡埛鏂扮紦瀛樺苟閲嶆柊鍔犺浇鍒楄〃
+    // 上传完成后刷新缓存并重新加载列表
     if (successCount > 0) {
-      console.debug('馃攧 [uploadViaBackend] Invalidating cache and reloading tasks')
+      console.debug('🔄 [uploadViaBackend] Invalidating cache and reloading tasks')
       invalidateCache('tasks', currentStudent.id)
       loadTasks()
     }
@@ -862,7 +862,7 @@ export default function App() {
       Toast.show({ message: successCount + ' 个文件上传成功', type: 'success', duration: 2000 })
     }
 
-    console.debug('馃摛馃摛馃摛 [uploadViaBackend] COMPLETED - success:', successCount, 'failed:', failedCount)
+    console.debug('📤📤📤 [uploadViaBackend] COMPLETED - success:', successCount, 'failed:', failedCount)
   }
 
   // Upload via frontend (fallback)
@@ -870,13 +870,13 @@ export default function App() {
     for (const file of files) {
       try {
         setUploading(true)
-        const uploadToast = Toast.show({ message: '姝ｅ湪涓婁紶...', type: 'loading', duration: 0 })
+        const uploadToast = Toast.show({ message: '正在上传...', type: 'loading', duration: 0 })
 
         const imageUrl = await uploadImage(file, 'homework')
         const task = await createTask({
           student_id: currentStudent.id,
           image_url: imageUrl,
-          original_name: file.name || `鐓х墖_${dayjs().format('YYYY-MM-DD_HH-mm-ss')}.jpg`,
+          original_name: file.name || `照片_${dayjs().format('YYYY-MM-DD_HH-mm-ss')}.jpg`,
           task_type: 'homework',
           status: 'pending'
         })
@@ -885,8 +885,8 @@ export default function App() {
         uploadToast.dismiss()
         processTask(task)
       } catch (error) {
-        console.error('涓婁紶澶辫触:', error)
-        Toast.show({ message: '涓婁紶澶辫触锛岃閲嶈瘯', type: 'error' })
+        console.error('上传失败:', error)
+        Toast.show({ message: '上传失败，请重试', type: 'error' })
       } finally {
         setUploading(false)
       }
@@ -895,7 +895,7 @@ export default function App() {
 
   // Process task (AI recognition)
   const processTask = async (task) => {
-    const recognizeToast = Toast.show({ message: '姝ｅ湪璇嗗埆棰樼洰...', type: 'loading', duration: 0 })
+    const recognizeToast = Toast.show({ message: '正在识别题目...', type: 'loading', duration: 0 })
     try {
       updateTaskInStore(task.id, 'processing')
 
@@ -931,15 +931,15 @@ export default function App() {
         recognizeToast.dismiss()
         Toast.show({ message: '识别完成，共 ' + questions.length + ' 道题，' + wrongQuestions.length + ' 道错题', type: 'success', duration: 2000 })
       } else {
-        updateTaskInStore(task.id, 'failed', { error: '鏈瘑鍒埌棰樼洰' })
+        updateTaskInStore(task.id, 'failed', { error: '未识别到题目' })
         recognizeToast.dismiss()
-        Toast.show({ message: '鏈瘑鍒埌棰樼洰锛岃閲嶆柊涓婁紶', type: 'error' })
+        Toast.show({ message: '未识别到题目，请重新上传', type: 'error' })
       }
     } catch (error) {
-      console.error('璇嗗埆澶辫触:', error)
+      console.error('识别失败:', error)
       updateTaskInStore(task.id, 'failed', { error: error.message })
       recognizeToast.dismiss()
-      Toast.show({ message: '璇嗗埆澶辫触锛岃閲嶈瘯', type: 'error' })
+      Toast.show({ message: '识别失败，请重试', type: 'error' })
     }
   }
 
@@ -1024,10 +1024,10 @@ export default function App() {
       addStudent(newStudent)
       setCurrentStudent(newStudent)
       setShowAddStudent(false)
-      Toast.show({ message: '娣诲姞瀛︾敓鎴愬姛', type: 'success' })
+      Toast.show({ message: '添加学生成功', type: 'success' })
     } catch (error) {
-      console.error('娣诲姞瀛︾敓澶辫触:', error)
-      Toast.show({ message: '娣诲姞瀛︾敓澶辫触', type: 'error' })
+      console.error('添加学生失败:', error)
+      Toast.show({ message: '添加学生失败', type: 'error' })
     }
   }
 
@@ -1038,20 +1038,20 @@ export default function App() {
       if (typeof taskId === 'string' && taskId.startsWith('temp-')) {
         setTasks((Array.isArray(tasks) ? tasks : []).filter(t => t.id !== taskId))
         invalidateCache('tasks', currentStudent?.id)
-        Toast.show({ message: '鍒犻櫎鎴愬姛', type: 'success' })
+        Toast.show({ message: '删除成功', type: 'success' })
         return
       }
       await deleteTask(taskId)
       setTasks((Array.isArray(tasks) ? tasks : []).filter(t => t.id !== taskId))
       invalidateCache('tasks', currentStudent?.id)
-      Toast.show({ message: '鍒犻櫎鎴愬姛', type: 'success' })
+      Toast.show({ message: '删除成功', type: 'success' })
     } catch (error) {
-      console.error('鍒犻櫎澶辫触:', error)
-      Toast.show({ message: '鍒犻櫎澶辫触', type: 'error' })
+      console.error('删除失败:', error)
+      Toast.show({ message: '删除失败', type: 'error' })
     }
   }
 
-  // Download exam as PDF 鈥?鏀圭敤 PrintPreview 缁勪欢
+  // Download exam as PDF — 改用 PrintPreview 组件
   const handleDownloadPdf = async (exam) => {
     handleReprintExam(exam)
   }
@@ -1060,7 +1060,7 @@ export default function App() {
 
   // Duplicate exam
   const handleDuplicateExam = (exam) => {
-    const newName = `${exam.name} (鍓湰)`
+    const newName = `${exam.name} (副本)`
     const newExam = {
       ...exam,
       id: `gen-${Date.now()}`,
@@ -1075,13 +1075,13 @@ export default function App() {
 
   const handleScanSuccess = (scanData) => {
     setShowScanQR(false)
-    // 鏂版牸寮忥細鎵爜鍐呭鍚?/retry-task/{id} 鈫?杩涘叆銆屼换鍔″叆鍙ｉ〉銆嶏紙浜岀淮鐮佸彧瀹氫綅 task锛屼笉杩涙壒鏀归〉锛?
+    // 新格式：扫码内容含 /retry-task/{id} → 进入「任务入口页」（二维码只定位 task，不进批改页）
     if (scanData?.retryTaskId) {
       window.history.pushState({ retryTask: scanData.retryTaskId }, '', `/retry-task/${scanData.retryTaskId}`)
       setRetryTaskId(scanData.retryTaskId)
       return
     }
-    // 鏃ф牸寮忥細MXG:<id> 鈫?娌跨敤鍘熸湁鎵规敼娴佺▼
+    // 旧格式：MXG:<id> → 沿用原有批改流程
     setGradingData(scanData)
     setShowGrading(true)
   }
@@ -1145,8 +1145,8 @@ export default function App() {
       setPaperBankUploadedPages(prev => [...prev, ...pages])
       Toast.show({ message: '已添加 ' + files.length + ' 页', type: 'success', duration: 1500 })
     } catch (error) {
-      console.error('[PaperBank] 鏂囦欢閫夋嫨澶辫触:', error)
-      Toast.show({ message: '鏂囦欢璇诲彇澶辫触', type: 'error', duration: 2000 })
+      console.error('[PaperBank] 文件选择失败:', error)
+      Toast.show({ message: '文件读取失败', type: 'error', duration: 2000 })
     }
   }
 
@@ -1158,14 +1158,14 @@ export default function App() {
   // Paper Bank: Start AI processing (Layout Analysis mode)
   const handlePaperBankStartProcessing = async () => {
     if (paperBankUploadedPages.length === 0) {
-      Toast.show({ message: '璇峰厛涓婁紶璇曞嵎', type: 'error', duration: 2000 })
+      Toast.show({ message: '请先上传试卷', type: 'error', duration: 2000 })
       return
     }
 
     // Validate base64 data
     const validPages = paperBankUploadedPages.filter(p => p.imageBase64)
     if (validPages.length === 0) {
-      Toast.show({ message: '鍥剧墖鏁版嵁鏃犳晥锛岃閲嶆柊涓婁紶', type: 'error', duration: 2000 })
+      Toast.show({ message: '图片数据无效，请重新上传', type: 'error', duration: 2000 })
       return
     }
 
@@ -1211,12 +1211,12 @@ export default function App() {
           setPaperBankStep('proofread')
         }, 500)
       } else {
-        Toast.show({ message: result.error || 'AI璇嗗埆澶辫触', type: 'error', duration: 3000 })
+        Toast.show({ message: result.error || 'AI识别失败', type: 'error', duration: 3000 })
         setPaperBankStep('upload')
       }
     } catch (error) {
-      console.error('[PaperBank] AI澶勭悊澶辫触:', error)
-      Toast.show({ message: '澶勭悊澶辫触锛岃閲嶈瘯', type: 'error', duration: 3000 })
+      console.error('[PaperBank] AI处理失败:', error)
+      Toast.show({ message: '处理失败，请重试', type: 'error', duration: 3000 })
       setPaperBankStep('upload')
     } finally {
       setPaperBankProcessing(false)
@@ -1236,12 +1236,12 @@ export default function App() {
     }
     
     try {
-      const wordToast = Toast.show({ message: '姝ｅ湪鐢熸垚Word...', type: 'loading', duration: 0 })
+      const wordToast = Toast.show({ message: '正在生成Word...', type: 'loading', duration: 0 })
       await downloadPaperWord(paperData, paperBankInfo.name)
       wordToast.dismiss()
-      Toast.show({ message: 'Word宸蹭笅杞斤紒', type: 'success', duration: 2000 })
+      Toast.show({ message: 'Word已下载！', type: 'success', duration: 2000 })
     } catch (error) {
-      console.error('[PaperBank] Word鐢熸垚澶辫触:', error)
+      console.error('[PaperBank] Word生成失败:', error)
       Toast.dismiss()
       Toast.show({ message: 'Word 生成失败: ' + error.message, type: 'error', duration: 3000 })
     }
@@ -1345,7 +1345,7 @@ export default function App() {
           <div className="flex items-start gap-1">
             <span>{block.content}</span>
             {isLowConfidence && (
-              <span className="inline-flex items-center gap-0.5 text-amber-600 text-[10px] ml-1 shrink-0" title={`缃俊搴? ${Math.round(block.confidence * 100)}%`}>
+              <span className="inline-flex items-center gap-0.5 text-amber-600 text-[10px] ml-1 shrink-0" title={`置信度: ${Math.round(block.confidence * 100)}%`}>
                 <AlertCircle size={10} />
               </span>
             )}
@@ -1420,15 +1420,15 @@ export default function App() {
           </div>
         )
       case 'image': {
-        // 鏈夊師鍥撅紙灞€閮ㄦ埅鍥撅級鈫?鏄剧ず鍘熷浘锛涙棤鍘熷浘 鈫?鍗犱綅绗?
+        // 有原图（局部截图）→ 显示原图；无原图 → 占位符
         return (
           <div className="my-3 text-center">
             {block.src ? (
-              // 鏄剧ず鎴彇鐨勫眬閮ㄥ浘 - 姘镐笉涓㈠純
+              // 显示截取的局部图 - 永不丢弃
               <div className="inline-block">
                 <img 
                   src={block.src} 
-                  alt={block.caption || '棰樼洰閰嶅浘'}
+                  alt={block.caption || '题目配图'}
                   className="rounded border border-gray-200 max-w-full"
                   style={{ maxHeight: '220px', objectFit: 'contain' }}
                 />
@@ -1437,13 +1437,13 @@ export default function App() {
                 )}
               </div>
             ) : (
-              // 鍗犱綅绗?- AI鏈娴嬪埌鍥惧舰鍖哄煙
+              // 占位符 - AI未检测到图形区域
               <div className="inline-flex flex-col items-center gap-1 px-3 py-2 rounded-lg border-2 border-dashed border-amber-300 bg-amber-50">
                 <ImageIcon size={16} style={{ color: '#D97706' }} />
                 <span className="text-xs text-amber-600">
-                  {block.caption ? `[鍥? ${block.caption}]` : '[鍥剧墖鍖哄煙]'}
+                  {block.caption ? `[图: ${block.caption}]` : '[图片区域]'}
                 </span>
-                <span className="text-[10px] text-amber-400">AI鏈娴嬪埌姝ゅ尯鍩燂紝璇锋墜鍔ㄦ彃鍏?</span>
+                <span className="text-[10px] text-amber-400">AI未检测到此区域，请手动插入</span>
               </div>
             )}
           </div>
@@ -1512,13 +1512,13 @@ export default function App() {
             ))
           ) : (
             <div className="text-center py-12 text-gray-400 text-sm">
-              {page.error ? `璇嗗埆澶辫触锛?{page.error}` : '璇ラ〉鏈瘑鍒埌鍐呭'}
+              {page.error ? `识别失败：${page.error}` : '该页未识别到内容'}
             </div>
           )}
         </div>
         {/* Page number footer */}
         <div className="text-center py-2 text-xs text-gray-400" style={{ borderTop: '1px solid #F3F4F6' }}>
-          鈥?{page.pageNo} 鈥?
+          — {page.pageNo} —
         </div>
       </div>
     )
@@ -1527,7 +1527,7 @@ export default function App() {
   // Paper Bank: Print paper (supports structured pages with layoutBlocks)
   const handlePaperBankPrint = async (paper) => {
     try {
-      Toast.show({ message: '姝ｅ湪鐢熸垚PDF...', type: 'loading', duration: 0 })
+      Toast.show({ message: '正在生成PDF...', type: 'loading', duration: 0 })
       setPaperBankPreviewPaper(paper)
 
       // Use html2canvas + jsPDF directly for raw text content
@@ -1560,7 +1560,7 @@ export default function App() {
             if (block.src) {
               return `<div class="block-image" style="text-align:center;"><img src="${block.src}" alt="${escapeHtml(block.caption || '')}" style="max-width:100%;display:block;margin:8px auto;" />${block.caption ? `<div style="font-size:10px;color:#666;">${escapeHtml(block.caption)}</div>` : ''}</div>`
             }
-            return `<div class="block-image" style="text-align:center;color:#999;font-style:italic;">[鍥? ${escapeHtml(block.caption || '寰呮彃鍏?')}]</div>`
+            return `<div class="block-image" style="text-align:center;color:#999;font-style:italic;">[图: ${escapeHtml(block.caption || '待插入')}]</div>`
           }
           case 'table':
             if (!block.rows || block.rows.length === 0) return ''
@@ -1590,7 +1590,7 @@ export default function App() {
           pagesHTML += `<div class="paper-page">`
           if (pageIdx === 0) {
             pagesHTML += `<div class="paper-title">${escapeHtml(paper.name)}</div>`
-            pagesHTML += `<div class="paper-info">${[paper.subject, paper.grade, paper.examType].filter(Boolean).join(' 路 ') || ''}</div>`
+            pagesHTML += `<div class="paper-info">${[paper.subject, paper.grade, paper.examType].filter(Boolean).join(' · ') || ''}</div>`
             pagesHTML += `<div class="divider"></div>`
           }
           if (page.layoutBlocks && page.layoutBlocks.length > 0) {
@@ -1605,10 +1605,10 @@ export default function App() {
         // Legacy format with plain text content
         pagesHTML = `<div class="paper-page">
           <div class="paper-title">${escapeHtml(paper.name)}</div>
-          <div class="paper-info">${[paper.subject, paper.grade, paper.examType].filter(Boolean).join(' 路 ') || ''}</div>
+          <div class="paper-info">${[paper.subject, paper.grade, paper.examType].filter(Boolean).join(' · ') || ''}</div>
           <div class="divider"></div>
           <div class="paper-content">${escapeHtml(paper.content).replace(/\n/g, '<br>')}</div>
-          <div class="footer">- 璇曞嵎璧勬簮搴?路 ${dayjs(paper.createdAt).format('YYYY/MM/DD')} -</div>
+          <div class="footer">- 试卷资源库 · ${dayjs(paper.createdAt).format('YYYY/MM/DD')} -</div>
         </div>`
       }
 
@@ -1678,17 +1678,17 @@ export default function App() {
           doc.addImage(pageImg, 'JPEG', 0, 0, A4_W, mmH)
         }
 
-        const filename = `${paper.name || '璇曞嵎'}_${dayjs().format('YYYYMMDD')}`
+        const filename = `${paper.name || '试卷'}_${dayjs().format('YYYYMMDD')}`
         doc.save(`${filename}.pdf`)
         Toast.dismiss()
-        Toast.show({ message: 'PDF宸茬敓鎴愶紝璇峰湪涓嬭浇鐩綍鏌ョ湅', type: 'success', duration: 2000 })
+        Toast.show({ message: 'PDF已生成，请在下载目录查看', type: 'success', duration: 2000 })
       } finally {
         document.body.removeChild(container)
       }
     } catch (error) {
-      console.error('[PaperBank] PDF鐢熸垚澶辫触:', error)
+      console.error('[PaperBank] PDF生成失败:', error)
       Toast.dismiss()
-      Toast.show({ message: 'PDF鐢熸垚澶辫触锛岃閲嶈瘯', type: 'error', duration: 3000 })
+      Toast.show({ message: 'PDF生成失败，请重试', type: 'error', duration: 3000 })
     } finally {
       setPaperBankPreviewPaper(null)
     }
@@ -1736,7 +1736,7 @@ export default function App() {
     setShowReprint(true)
   }
 
-  // 鎻愪氦浣滀笟锛氫笂浼犺缁勫嵎鐨勭瓟鍗峰浘锛岃蛋閿欓閲嶇粌鎵规敼娴佺▼锛堜笌浜岀淮鐮佸叆鍙ｄ竴鑷达級
+  // 提交作业：上传该组卷的答卷图，走错题重练批改流程（与二维码入口一致）
   const handleSubmitExam = (exam) => {
     submitTargetExamRef.current = exam
     submitFileInputRef.current?.click()
@@ -1753,21 +1753,21 @@ export default function App() {
       return
     }
     setSubmitExamId(exam.id)
-    const loadingToast = Toast.show({ message: '姝ｅ湪涓婁紶绛斿嵎...', type: 'loading', duration: 0 })
+    const loadingToast = Toast.show({ message: '正在上传答卷...', type: 'loading', duration: 0 })
     try {
       const res = await taskService.uploadFiles(studentId, files, {
         generatedExamId: exam.id,
         taskType: 'wrong_retry'
       })
       const created = (res?.tasks || []).filter(t => !t.error)
-      if (created.length === 0) throw new Error(res?.report?.summary || '涓婁紶澶辫触')
+      if (created.length === 0) throw new Error(res?.report?.summary || '上传失败')
       loadingToast?.dismiss?.()
       Toast.show({ message: '答卷已提交，开始批改', type: 'success', duration: 2000 })
       loadGeneratedExams(false)
     } catch (error) {
-      console.error('鎻愪氦浣滀笟澶辫触:', error)
+      console.error('提交作业失败:', error)
       loadingToast?.dismiss?.()
-      Toast.show({ message: error.message || '鎻愪氦澶辫触锛岃閲嶈瘯', type: 'error', duration: 3000 })
+      Toast.show({ message: error.message || '提交失败，请重试', type: 'error', duration: 3000 })
     } finally {
       setSubmitExamId(null)
       submitTargetExamRef.current = null
@@ -1779,10 +1779,10 @@ export default function App() {
     try {
       await deleteGeneratedExam(examId)
       setGeneratedExams((Array.isArray(generatedExams) ? generatedExams : []).filter(e => e.id !== examId))
-      Toast.show({ message: '鍒犻櫎鎴愬姛', type: 'success' })
+      Toast.show({ message: '删除成功', type: 'success' })
     } catch (error) {
-      console.error('鍒犻櫎澶辫触:', error)
-      Toast.show({ message: '鍒犻櫎澶辫触', type: 'error' })
+      console.error('删除失败:', error)
+      Toast.show({ message: '删除失败', type: 'error' })
     }
   }
 
@@ -1817,23 +1817,23 @@ export default function App() {
     try {
       await updateWrongQuestionStatus(wq.id, nextStatus, { lifecycle_status: nextLs })
       loadWrongBookData()
-      const statusText = { new: '涓嶆噦', review_1: '鐣ユ噦', review_2: '鐣ユ噦', mastered: '瀹屽叏鎳?' }
-      Toast.show({ message: `宸叉爣璁颁负${statusText[nextLs]}`, type: 'success' })
+      const statusText = { new: '不懂', review_1: '略懂', review_2: '略懂', mastered: '完全懂' }
+      Toast.show({ message: `已标记为${statusText[nextLs]}`, type: 'success' })
     } catch (error) {
-      Toast.show({ message: '鎿嶄綔澶辫触', type: 'error' })
+      Toast.show({ message: '操作失败', type: 'error' })
     }
   }
 
-  // 鎵撳嵃棰勮/缁勫嵎
+  // 打印预览/组卷
   const handlePrintPreview = () => {
     if (selectedQuestions.length === 0) {
-      Toast.show({ message: '璇峰厛閫夋嫨瑕佺粍鍗风殑閿欓', type: 'error' })
+      Toast.show({ message: '请先选择要组卷的错题', type: 'error' })
       return
     }
     setShowPrintPreview(true)
   }
 
-  // 鍏ㄩ€?鍙栨秷鍏ㄩ€夊綋鍓嶇瓫閫夊嚭鐨勯鐩?
+  // 全选/取消全选当前筛选出的题目
   const handleSelectAll = () => {
     const filteredIds = filteredWrongQuestions.map(wq => wq.id)
     const allSelected = filteredWrongQuestions.length > 0 && filteredWrongQuestions.every(wq => selectedQuestions.find(sq => sq.id === wq.id))
@@ -1879,10 +1879,10 @@ export default function App() {
           : wq
       }))
       setShowTagManager(false)
-      Toast.show({ message: '鏍囩鏇存柊鎴愬姛', type: 'success' })
+      Toast.show({ message: '标签更新成功', type: 'success' })
     } catch (error) {
-      console.error('鏇存柊鏍囩澶辫触:', error)
-      Toast.show({ message: '鏇存柊鏍囩澶辫触', type: 'error' })
+      console.error('更新标签失败:', error)
+      Toast.show({ message: '更新标签失败', type: 'error' })
     }
   }
 
@@ -1924,7 +1924,7 @@ export default function App() {
     if (!file) return
     e.target.value = ''
     if (!file.type.startsWith('image/')) {
-      Toast.show({ message: '璇烽€夋嫨鍥剧墖鏂囦欢', type: 'error' })
+      Toast.show({ message: '请选择图片文件', type: 'error' })
       return
     }
     const reader = new FileReader()
@@ -1934,7 +1934,7 @@ export default function App() {
       setShowEditSourcePicker(false)
     }
     reader.onerror = () => {
-      Toast.show({ message: '鍥剧墖璇诲彇澶辫触', type: 'error' })
+      Toast.show({ message: '图片读取失败', type: 'error' })
     }
     reader.readAsDataURL(file)
   }
@@ -1943,7 +1943,7 @@ export default function App() {
   const handleCropFromTask = async () => {
     const question = editingQuestionItem?.question || editingQuestionItem
     if (!question?.task_id) {
-      Toast.show({ message: '鏈壘鍒板師璇曞嵎淇℃伅', type: 'error' })
+      Toast.show({ message: '未找到原试卷信息', type: 'error' })
       return
     }
     setLoadingTaskImage(true)
@@ -1951,13 +1951,13 @@ export default function App() {
     try {
       const task = await getTaskById(question.task_id)
       if (!task?.image_url) {
-        Toast.show({ message: '鍘熻瘯鍗锋棤鍥剧墖', type: 'error' })
+        Toast.show({ message: '原试卷无图片', type: 'error' })
         return
       }
       setCropImage(task.image_url)
       setShowImageCrop(true)
     } catch (error) {
-      console.error('鑾峰彇鍘熻瘯鍗峰浘鐗囧け璐?', error)
+      console.error('获取原试卷图片失败:', error)
       Toast.show({ message: '获取原试卷失败', type: 'error' })
     } finally {
       setLoadingTaskImage(false)
@@ -1981,10 +1981,10 @@ export default function App() {
       updateEditForm('image_url', url)
       setShowImageCrop(false)
       setCropImage(null)
-      Toast.show({ message: '鍥剧墖瑁佸壀涓婁紶鎴愬姛', type: 'success' })
+      Toast.show({ message: '图片裁剪上传成功', type: 'success' })
     } catch (error) {
-      console.error('瑁佸壀/涓婁紶澶辫触:', error)
-      Toast.show({ message: '鍥剧墖澶勭悊澶辫触', type: 'error' })
+      console.error('裁剪/上传失败:', error)
+      Toast.show({ message: '图片处理失败', type: 'error' })
     } finally {
       setUploadingCrop(false)
     }
@@ -2059,10 +2059,10 @@ export default function App() {
       }))
       setShowQuestionEditor(false)
       setEditingQuestionItem(null)
-      Toast.show({ message: '淇濆瓨鎴愬姛', type: 'success' })
+      Toast.show({ message: '保存成功', type: 'success' })
     } catch (error) {
-      console.error('淇濆瓨澶辫触:', error)
-      Toast.show({ message: '淇濆瓨澶辫触', type: 'error' })
+      console.error('保存失败:', error)
+      Toast.show({ message: '保存失败', type: 'error' })
     }
   }
 
@@ -2085,8 +2085,8 @@ export default function App() {
         setWrongQuestions(wrongQuestions.filter(wq => wq.id !== deleteTarget.id))
         Toast.show({ message: '已从错题本移除', type: 'success' })
       } catch (error) {
-        console.error('鍒犻櫎澶辫触:', error)
-        Toast.show({ message: '鍒犻櫎澶辫触', type: 'error' })
+        console.error('删除失败:', error)
+        Toast.show({ message: '删除失败', type: 'error' })
       }
     }
     setDeleteTarget(null)
@@ -2105,7 +2105,7 @@ export default function App() {
   // Manual refresh
   const handleRefresh = async () => {
     if (!currentStudent) {
-      Toast.show({ message: '璇峰厛閫夋嫨瀛︾敓', type: 'error', duration: 1500 })
+      Toast.show({ message: '请先选择学生', type: 'error', duration: 1500 })
       return
     }
     setRefreshing(true)
@@ -2116,15 +2116,15 @@ export default function App() {
       invalidateCache('exams', currentStudent.id)
       invalidateCache('generated', currentStudent.id)
 
-      // 閲嶆柊璁＄畻鎵€鏈夊凡鎵规敼浠诲姟鐨勭粺璁℃暟鎹?
+      // 重新计算所有已批改任务的统计数据
       if (currentPage === 'processing') {
         const taskList = await getTasksByStudent(currentStudent.id, false)
         const doneTasks = (Array.isArray(taskList) ? taskList : []).filter(t => isTaskCompleted(t))
-        // 骞惰鍒锋柊鎵€鏈夊凡鎵规敼浠诲姟鐨勭粺璁?
+        // 并行刷新所有已批改任务的统计
         await Promise.allSettled(doneTasks.map(t => recalculateTaskStats(t.id)))
-        // 閲嶆柊鍔犺浇浠诲姟鏁版嵁
+        // 重新加载任务数据
         setTasks(doneTasks.length > 0 ? taskList : [])
-        // 閲嶆柊浠庢湇鍔″櫒鑾峰彇浠ヨ幏鍙栨洿鏂板悗鐨?result
+        // 重新从服务器获取以获取更新后的 result
         const freshTasks = await getTasksByStudent(currentStudent.id, false)
         setTasks(Array.isArray(freshTasks) ? freshTasks : [])
       } else if (currentPage === 'wrongbook') {
@@ -2132,10 +2132,10 @@ export default function App() {
       } else if (currentPage === 'exam') {
         await loadGeneratedExams(false)
       }
-      Toast.show({ message: '鍒锋柊鎴愬姛', type: 'success', duration: 1500 })
+      Toast.show({ message: '刷新成功', type: 'success', duration: 1500 })
     } catch (error) {
-      console.error('鍒锋柊澶辫触:', error)
-      Toast.show({ message: '鍒锋柊澶辫触锛岃閲嶈瘯', type: 'error', duration: 2000 })
+      console.error('刷新失败:', error)
+      Toast.show({ message: '刷新失败，请重试', type: 'error', duration: 2000 })
     } finally {
       setRefreshing(false)
     }
@@ -2144,12 +2144,12 @@ export default function App() {
   // Retry a pending/failed task
   const handleRetryTask = async (taskId) => {
     if (!currentStudent) {
-      Toast.show({ message: '璇峰厛閫夋嫨瀛︾敓', type: 'error', duration: 1500 })
+      Toast.show({ message: '请先选择学生', type: 'error', duration: 1500 })
       return
     }
 
     try {
-      Toast.show({ message: '姝ｅ湪閲嶆柊澶勭悊...', type: 'info', duration: 2000 })
+      Toast.show({ message: '正在重新处理...', type: 'info', duration: 2000 })
       
       // Fetch the task info
       const task = await getTaskById(taskId, false)
@@ -2166,7 +2166,7 @@ export default function App() {
       })
 
       if (!response.ok) {
-        throw new Error('閲嶆柊澶勭悊澶辫触')
+        throw new Error('重新处理失败')
       }
 
       Toast.show({ message: '已重新加入处理队列', type: 'success', duration: 2000 })
@@ -2174,8 +2174,8 @@ export default function App() {
       // Refresh task list after a short delay
       setTimeout(() => loadTasks(), 1000)
     } catch (error) {
-      console.error('閲嶆柊澶勭悊澶辫触:', error)
-      Toast.show({ message: '閲嶆柊澶勭悊澶辫触锛岃绋嶅悗閲嶈瘯', type: 'error', duration: 2000 })
+      console.error('重新处理失败:', error)
+      Toast.show({ message: '重新处理失败，请稍后重试', type: 'error', duration: 2000 })
     }
   }
 
@@ -2212,7 +2212,7 @@ export default function App() {
                   <User size={14} style={{ color: 'var(--primary)' }} />
                 </div>
                 <span style={{ fontSize: '15px', fontWeight: 600, letterSpacing: '-0.01em' }}>
-                  {isInitializing ? '鍔犺浇涓?..' : (currentStudent?.name || '閫夋嫨瀛︾敓')}
+                  {isInitializing ? '加载中...' : (currentStudent?.name || '选择学生')}
                 </span>
                 <ChevronDown size={14} style={{ color: 'var(--text-tertiary)' }} />
               </button>
@@ -2222,7 +2222,7 @@ export default function App() {
                 onClick={() => setShowLearningReport(true)}
                 className="w-8 h-8 rounded-xl flex items-center justify-center transition-colors"
                 style={{ background: 'var(--bg-secondary)' }}
-                title="瀛︿範鎶ュ憡"
+                title="学习报告"
               >
                 <BarChart3 size={16} style={{ color: 'var(--text-secondary)' }} />
               </button>
@@ -2230,7 +2230,7 @@ export default function App() {
                 onClick={() => setShowNotifications(true)}
                 className="w-8 h-8 rounded-xl flex items-center justify-center transition-colors"
                 style={{ background: 'var(--bg-secondary)' }}
-                title="閫氱煡"
+                title="通知"
               >
                 <Bell size={16} style={{ color: 'var(--text-secondary)' }} />
               </button>
@@ -2240,25 +2240,25 @@ export default function App() {
 
         {/* Main Content */}
         <main className="w-full overflow-scroll-area" style={{ paddingBottom: '12px' }}>
-          {/* 涓婁紶闃熷垪鎻愮ず 鈥?Claude style */}
+          {/* 上传队列提示 — Claude style */}
           {uploadQueue.length > 0 && (
             <div className="sticky top-11 z-40 px-4 py-2.5 animate-fade-in" style={{ background: 'var(--warning-soft)', borderBottom: '1px solid rgba(232,168,56,0.2)' }}>
               <div className="flex items-center gap-2.5">
                 <div className="w-2 h-2 rounded-full animate-pulse" style={{ background: 'var(--warning)' }} />
                 <span style={{ fontSize: '12px', fontWeight: 500, color: '#7C5A1E' }}>
-                  姝ｅ湪鎺掗槦涓婁紶 {uploadQueue.length} 涓枃浠?..
+                  正在排队上传 {uploadQueue.length} 个文件...
                 </span>
               </div>
             </div>
           )}
 
-          {/* 姝ｅ湪涓婁紶鎻愮ず 鈥?Claude style */}
+          {/* 正在上传提示 — Claude style */}
           {isUploading && (
             <div className="sticky top-11 z-40 px-4 py-2.5 animate-fade-in" style={{ background: 'var(--primary-soft)', borderBottom: '1px solid rgba(59,130,246,0.15)' }}>
               <div className="flex items-center gap-2.5">
                 <div className="w-2 h-2 rounded-full animate-pulse" style={{ background: 'var(--primary)' }} />
                 <span style={{ fontSize: '12px', fontWeight: 500, color: '#4A3F9E' }}>
-                  姝ｅ湪涓婁紶璇曞嵎...
+                  正在上传试卷...
                 </span>
               </div>
             </div>
@@ -2279,9 +2279,9 @@ export default function App() {
                     {(() => {
                       const studentTasks = (Array.isArray(tasks) ? tasks : []).filter(t => t.student_id === currentStudent?.id)
                       return [
-                        { id: 'all', label: '鍏ㄩ儴', count: studentTasks.length },
-                        { id: 'homework', label: '鏃ュ父浣滀笟', count: studentTasks.filter(t => !isRetryTask(t)).length },
-                        { id: 'retry', label: '閿欓閲嶇粌', count: studentTasks.filter(t => isRetryTask(t)).length }
+                        { id: 'all', label: '全部', count: studentTasks.length },
+                        { id: 'homework', label: '日常作业', count: studentTasks.filter(t => !isRetryTask(t)).length },
+                        { id: 'retry', label: '错题重练', count: studentTasks.filter(t => isRetryTask(t)).length }
                       ]
                     })().map((filter) => (
                       <button
@@ -2312,15 +2312,15 @@ export default function App() {
                         <div className="w-12 h-12 rounded-2xl flex items-center justify-center" style={{ background: 'var(--primary-soft)' }}>
                           <Loader2 size={24} className="animate-spin" style={{ color: 'var(--primary)' }} />
                         </div>
-                        <p className="mt-4" style={{ fontSize: '14px', fontWeight: 500, color: 'var(--text-secondary)' }}>姝ｅ湪鍔犺浇瀛︾敓鏁版嵁...</p>
+                        <p className="mt-4" style={{ fontSize: '14px', fontWeight: 500, color: 'var(--text-secondary)' }}>正在加载学生数据...</p>
                       </div>
                     ) : (
                       <div className="flex flex-col items-center justify-center py-24 animate-fade-in">
                         <div className="w-16 h-16 rounded-3xl flex items-center justify-center" style={{ background: 'var(--bg-secondary)' }}>
                           <Camera size={28} style={{ color: 'var(--text-tertiary)' }} />
                         </div>
-                        <p className="mt-4" style={{ fontSize: '15px', fontWeight: 600, color: 'var(--text)' }}>鏆傛棤浠诲姟</p>
-                        <p className="mt-1" style={{ fontSize: '12px', color: 'var(--text-tertiary)' }}>鐐瑰嚮鍙充笅瑙掓寜閽笂浼犺瘯鍗?</p>
+                        <p className="mt-4" style={{ fontSize: '15px', fontWeight: 600, color: 'var(--text)' }}>暂无任务</p>
+                        <p className="mt-1" style={{ fontSize: '12px', color: 'var(--text-tertiary)' }}>点击右下角按钮上传试卷</p>
                       </div>
                     )
                   ) : (
@@ -2345,7 +2345,7 @@ export default function App() {
                           }}
                         >
                         <div className="list-card-row items-center">
-                          {/* Thumbnail 鈥?portrait paper preview (A4-like), small radius for legibility */}
+                          {/* Thumbnail — portrait paper preview (A4-like), small radius for legibility */}
                           <div
                             className="relative w-12 h-16 rounded-md flex-shrink-0 overflow-hidden cursor-pointer ring-1 ring-black/5"
                             style={{ background: 'var(--bg-mist)' }}
@@ -2374,7 +2374,7 @@ export default function App() {
                                   ))}
                                   {task.pages.length > 3 && (
                                     <div className="absolute inset-0 rounded bg-gray-100 flex items-center justify-center text-xs font-medium text-gray-500">
-                                      +{task.pages.length - 3}椤?
+                                      +{task.pages.length - 3}页
                                     </div>
                                   )}
                                 </div>
@@ -2398,16 +2398,16 @@ export default function App() {
                           {/* Content */}
                           <div className="flex-1 min-w-0">
                             <div className="flex items-center gap-1.5 min-w-0">
-                              {/* 杞婚噺绫诲瀷鍖哄垎锛氶敊棰橀噸缁冩樉绀虹传鑹插皬鍦嗙偣锛屾棩甯镐綔涓?榛樿澶氭暟椤?涓嶆樉绀猴紱绫诲瀷绛涢€変粛鐢遍《閮ㄨ礋璐?*/}
+                              {/* 轻量类型区分：错题重练显示紫色小圆点，日常作业(默认多数项)不显示；类型筛选仍由顶部负责 */}
                               {task.task_type === 'retry_paper' && (
                                 <span
                                   className="flex-shrink-0 w-1.5 h-1.5 rounded-full"
                                   style={{ background: 'var(--purple)' }}
-                                  title="閿欓閲嶇粌"
+                                  title="错题重练"
                                 />
                               )}
                               <span className="text-card-title truncate">
-                                {task.original_name || '鏈懡鍚嶈瘯鍗?'}
+                                {task.original_name || '未命名试卷'}
                               </span>
                             </div>
                             <div className="flex items-center gap-2 mt-1 flex-wrap">
@@ -2417,7 +2417,7 @@ export default function App() {
                               {task.result?.questionCount ? (
                                 <>
                                   <span className="w-0.5 h-0.5 rounded-full" style={{ background: 'var(--text-tertiary)' }} />
-                                  <span className="text-meta-highlight">{task.result.questionCount} 棰?</span>
+                                  <span className="text-meta-highlight">{task.result.questionCount} 题</span>
                                 </>
                               ) : null}
 
@@ -2425,7 +2425,7 @@ export default function App() {
                               {task.isRetryPaper && task.pages && task.pages.length > 1 && (
                                 <>
                                   <span className="w-0.5 h-0.5 rounded-full" style={{ background: 'var(--text-tertiary)' }} />
-                                  <span className="text-meta-highlight">{task.pages.length} 椤?</span>
+                                  <span className="text-meta-highlight">{task.pages.length} 页</span>
                                 </>
                               )}
                               {!isTaskCompleted(task) && (
@@ -2438,7 +2438,7 @@ export default function App() {
                                       return (
                                         <span className="inline-flex items-center gap-1 text-meta" style={{ color: 'var(--primary)' }}>
                                           <span className="inline-block w-1.5 h-1.5 rounded-full animate-pulse" style={{ background: 'var(--primary)' }} />
-                                          鎵规敼涓?
+                                          批改中
                                         </span>
                                       )
                                     }
@@ -2447,7 +2447,7 @@ export default function App() {
                                       return (
                                         <span className="inline-flex items-center gap-1 text-meta" style={{ color: 'var(--danger)' }}>
                                           <span className="inline-block w-1.5 h-1.5 rounded-full" style={{ background: 'var(--danger)' }} />
-                                          璇嗗埆澶辫触
+                                          识别失败
                                           <button
                                             onClick={(e) => { e.stopPropagation(); handleRetryTask(task.id) }}
                                             className="rounded text-[10px] font-medium px-1.5 py-0.5 transition-colors tap-scale"
@@ -2457,7 +2457,7 @@ export default function App() {
                                               color: 'var(--danger)',
                                             }}
                                           >
-                                            閲嶈瘯
+                                            重试
                                           </button>
                                         </span>
                                       )
@@ -2466,7 +2466,7 @@ export default function App() {
                                     return (
                                       <span className="inline-flex items-center gap-1 text-meta" style={{ color: pendingMinutes > 30 ? 'var(--danger)' : 'var(--warning)' }}>
                                         <span className="inline-block w-1.5 h-1.5 rounded-full" style={{ background: pendingMinutes > 30 ? 'var(--danger)' : 'var(--warning)' }} />
-                                        绛夊緟涓?({pendingMinutes}鍒嗛挓)
+                                        等待中 ({pendingMinutes}分钟)
                                       </span>
                                     )
                                   })()}
@@ -2477,16 +2477,16 @@ export default function App() {
                               <div className="flex items-center gap-2 mt-1.5">
                                 <span className="stat-pill" style={{ background: 'var(--success-soft)', color: 'var(--success)' }}>
                                   <Check size={10} />
-                                  姝ｇ‘ {task.result?.questionCount - (task.result?.wrongCount || 0) - (task.result?.emptyCount || 0)}
+                                  正确 {task.result?.questionCount - (task.result?.wrongCount || 0) - (task.result?.emptyCount || 0)}
                                 </span>
                                 <span className="stat-pill" style={{ background: 'var(--danger-soft)', color: 'var(--danger)' }}>
                                   <X size={10} />
-                                  閿欒 {task.result?.wrongCount || 0}
+                                  错误 {task.result?.wrongCount || 0}
                                 </span>
                                 {task.result?.emptyCount > 0 && (
                                   <span className="stat-pill" style={{ background: 'var(--warning-soft)', color: 'var(--warning)' }}>
                                     <AlertCircle size={10} />
-                                    绌洪 {task.result.emptyCount}
+                                    空题 {task.result.emptyCount}
                                   </span>
                                 )}
                               </div>
@@ -2515,15 +2515,15 @@ export default function App() {
                 exit={{ opacity: 0, x: -20 }}
                 className="w-full"
               >
-                {/* Filter Tabs + 绛涢€夊浘鏍?*/}
+                {/* Filter Tabs + 筛选图标 */}
                 <section className="px-4 pt-3 mb-3 flex items-center gap-2">
                   <div className="flex-1 min-w-0 overflow-x-auto no-scrollbar">
                     <div className="flex gap-1.5 min-w-max">
                       {[
-                        { id: 'all', label: '鍏ㄩ儴', count: (Array.isArray(wrongQuestions) ? wrongQuestions : []).filter(wq => wq.student_id === currentStudent?.id).length },
-                        { id: 'new', label: '涓嶆噦', count: (Array.isArray(wrongQuestions) ? wrongQuestions : []).filter(wq => wq.student_id === currentStudent?.id && (wq.lifecycle_status || 'new') === 'new').length },
-                        { id: 'review', label: '鐣ユ噦', count: (Array.isArray(wrongQuestions) ? wrongQuestions : []).filter(wq => wq.student_id === currentStudent?.id && (wq.lifecycle_status === 'review_1' || wq.lifecycle_status === 'review_2')).length },
-                        { id: 'mastered', label: '瀹屽叏鎳?', count: (Array.isArray(wrongQuestions) ? wrongQuestions : []).filter(wq => wq.student_id === currentStudent?.id && wq.lifecycle_status === 'mastered').length }
+                        { id: 'all', label: '全部', count: (Array.isArray(wrongQuestions) ? wrongQuestions : []).filter(wq => wq.student_id === currentStudent?.id).length },
+                        { id: 'new', label: '不懂', count: (Array.isArray(wrongQuestions) ? wrongQuestions : []).filter(wq => wq.student_id === currentStudent?.id && (wq.lifecycle_status || 'new') === 'new').length },
+                        { id: 'review', label: '略懂', count: (Array.isArray(wrongQuestions) ? wrongQuestions : []).filter(wq => wq.student_id === currentStudent?.id && (wq.lifecycle_status === 'review_1' || wq.lifecycle_status === 'review_2')).length },
+                        { id: 'mastered', label: '完全懂', count: (Array.isArray(wrongQuestions) ? wrongQuestions : []).filter(wq => wq.student_id === currentStudent?.id && wq.lifecycle_status === 'mastered').length }
                       ].map((filter) => (
                         <button
                           key={filter.id}
@@ -2536,7 +2536,7 @@ export default function App() {
                       ))}
                     </div>
                   </div>
-                  {/* 绛涢€夊浘鏍?*/}
+                  {/* 筛选图标 */}
                   <button
                     onClick={() => setShowFilterPanel(true)}
                     className="relative flex-shrink-0 flex items-center justify-center"
@@ -2549,7 +2549,7 @@ export default function App() {
                       color: '#4B5563',
                       cursor: 'pointer'
                     }}
-                    aria-label="绛涢€?"
+                    aria-label="筛选"
                   >
                     <SlidersHorizontal size={17} />
                     {(selectedSubject !== 'all' || selectedTimeRange !== 'all' || selectedErrorCount !== 'all' || selectedTags.length > 0) && (
@@ -2567,7 +2567,7 @@ export default function App() {
                   </button>
                 </section>
 
-                {/* Filter Drawer 鈥?鍙傝€?PC FilterPanel 鐨?pill-chip 鏍峰紡 */}
+                {/* Filter Drawer — 参考 PC FilterPanel 的 pill-chip 样式 */}
                 {showFilterPanel && (
                   <>
                     {/* Overlay */}
@@ -2583,7 +2583,7 @@ export default function App() {
                     >
                       {/* Header */}
                       <div className="flex items-center justify-between px-4 py-3 border-b border-gray-100">
-                        <span style={{ fontSize: '17px', fontWeight: 600, color: '#1c1c1e' }}>绛涢€?</span>
+                        <span style={{ fontSize: '17px', fontWeight: 600, color: '#1c1c1e' }}>筛选</span>
                         <button onClick={() => setShowFilterPanel(false)} style={{ padding: '4px', cursor: 'pointer' }}>
                           <X size={20} style={{ color: '#8E8E93' }} />
                         </button>
@@ -2592,17 +2592,17 @@ export default function App() {
                       {/* Scrollable content */}
                       <div className="overflow-y-auto" style={{ height: 'calc(100% - 52px)' }}>
                         <div style={{ padding: '16px' }}>
-                          {/* 绉戠洰 */}
+                          {/* 科目 */}
                           <div style={{ marginBottom: '24px' }}>
-                            <div style={{ fontSize: '15px', color: '#1c1c1e', marginBottom: '12px', fontWeight: 500 }}>绉戠洰</div>
+                            <div style={{ fontSize: '15px', color: '#1c1c1e', marginBottom: '12px', fontWeight: 500 }}>科目</div>
                             <div className="flex flex-wrap gap-2">
                               {[
-                                { key: 'all', label: '鍏ㄩ儴绉戠洰' },
-                                { key: '鏁板', label: '鏁板' },
-                                { key: '璇枃', label: '璇枃' },
-                                { key: '鑻辫', label: '鑻辫' },
-                                { key: '鐗╃悊', label: '鐗╃悊' },
-                                { key: '鍖栧', label: '鍖栧' }
+                                { key: 'all', label: '全部科目' },
+                                { key: '数学', label: '数学' },
+                                { key: '语文', label: '语文' },
+                                { key: '英语', label: '英语' },
+                                { key: '物理', label: '物理' },
+                                { key: '化学', label: '化学' }
                               ].map(s => (
                                 <button
                                   key={s.key}
@@ -2625,13 +2625,13 @@ export default function App() {
                             </div>
                           </div>
 
-                          {/* 鏃堕棿 */}
+                          {/* 时间 */}
                           <div style={{ marginBottom: '24px' }}>
-                            <div style={{ fontSize: '15px', color: '#1c1c1e', marginBottom: '12px', fontWeight: 500 }}>鍔犲叆鏃堕棿</div>
+                            <div style={{ fontSize: '15px', color: '#1c1c1e', marginBottom: '12px', fontWeight: 500 }}>加入时间</div>
                             <div className="flex flex-wrap gap-2">
                               {[
-                                { key: 'all', label: '鍏ㄩ儴鏃堕棿' },
-                                { key: 'today', label: '浠婂ぉ' },
+                                { key: 'all', label: '全部时间' },
+                                { key: 'today', label: '今天' },
                                 { key: 'week', label: '最近7天' },
                                 { key: 'month', label: '最近30天' },
                                 { key: 'quarter', label: '最近3个月' }
@@ -2657,12 +2657,12 @@ export default function App() {
                             </div>
                           </div>
 
-                          {/* 閿欐 */}
+                          {/* 错次 */}
                           <div style={{ marginBottom: '24px' }}>
-                            <div style={{ fontSize: '15px', color: '#1c1c1e', marginBottom: '12px', fontWeight: 500 }}>閿欒娆℃暟</div>
+                            <div style={{ fontSize: '15px', color: '#1c1c1e', marginBottom: '12px', fontWeight: 500 }}>错误次数</div>
                             <div className="flex flex-wrap gap-2">
                               {[
-                                { key: 'all', label: '鍏ㄩ儴娆℃暟' },
+                                { key: 'all', label: '全部次数' },
                                 { key: '1', label: '1次' },
                                 { key: '2-3', label: '2-3次' },
                                 { key: '4-5', label: '4-5次' },
@@ -2689,10 +2689,10 @@ export default function App() {
                             </div>
                           </div>
 
-                          {/* 鏍囩 */}
+                          {/* 标签 */}
                           {allAvailableTags.length > 0 && (
                             <div style={{ marginBottom: '24px' }}>
-                              <div style={{ fontSize: '15px', color: '#1c1c1e', marginBottom: '12px', fontWeight: 500 }}>鐭ヨ瘑鐐规爣绛?</div>
+                              <div style={{ fontSize: '15px', color: '#1c1c1e', marginBottom: '12px', fontWeight: 500 }}>知识点标签</div>
                               <div className="flex flex-wrap gap-2">
                                 <button
                                   onClick={() => setSelectedTags([])}
@@ -2708,7 +2708,7 @@ export default function App() {
                                     transition: 'all 0.15s'
                                   }}
                                 >
-                                  鍏ㄩ儴鏍囩
+                                  全部标签
                                 </button>
                                 {allAvailableTags.map(tag => {
                                   const isActive = selectedTags.includes(tag)
@@ -2760,7 +2760,7 @@ export default function App() {
                                 transition: 'all 0.15s'
                               }}
                             >
-                              閲嶇疆
+                              重置
                             </button>
                           </div>
                         </div>
@@ -2774,8 +2774,8 @@ export default function App() {
                   {filteredWrongQuestions.length === 0 ? (
                     <div className="text-center py-16">
                       <LayoutGrid size={36} className="mx-auto" style={{ color: '#D1D5DB' }} />
-                      <p className="mt-3" style={{ fontSize: '13px', color: '#9CA3AF' }}>鏆傛棤閿欓</p>
-                      <p className="mt-0.5" style={{ fontSize: '11px', color: '#D1D5DB' }}>AI鎵规敼鍚庨敊棰樹細鑷姩鏀跺綍鍒伴敊棰樻湰</p>
+                      <p className="mt-3" style={{ fontSize: '13px', color: '#9CA3AF' }}>暂无错题</p>
+                      <p className="mt-0.5" style={{ fontSize: '11px', color: '#D1D5DB' }}>AI批改后错题会自动收录到错题本</p>
                     </div>
                   ) : (
                     <div className="space-y-2">
@@ -2785,9 +2785,9 @@ export default function App() {
 
                         const statusCfg = (() => {
                           const ls = wq.lifecycle_status || 'new'
-                          if (ls === 'mastered' || wq.status === 'mastered') return { bg: '#F0FDF4', color: '#16A34A', text: '瀹屽叏鎳?' }
-                          if (ls === 'review_2' || ls === 'review_1') return { bg: '#EFF6FF', color: '#2563EB', text: '鐣ユ噦' }
-                          return { bg: '#FFFBEB', color: '#F59E0B', text: '涓嶆噦' }
+                          if (ls === 'mastered' || wq.status === 'mastered') return { bg: '#F0FDF4', color: '#16A34A', text: '完全懂' }
+                          if (ls === 'review_2' || ls === 'review_1') return { bg: '#EFF6FF', color: '#2563EB', text: '略懂' }
+                          return { bg: '#FFFBEB', color: '#F59E0B', text: '不懂' }
                         })()
 
                         const tags = question.tags_source === 'manual'
@@ -2839,7 +2839,7 @@ export default function App() {
                                   {question.content}
                                 </p>
 
-                                {/* Meta row: date 路 tags 路 status */}
+                                {/* Meta row: date · tags · status */}
                                 <div className="flex items-center gap-2 mt-1.5 flex-wrap">
                                   <span style={{ fontSize: '11px', color: '#9CA3AF', whiteSpace: 'nowrap' }}>
                                     {dayjs(wq.added_at || wq.created_at).format('MM/DD')}
@@ -2928,12 +2928,12 @@ export default function App() {
                             <CheckCircle2 size={11} className="text-white" />
                           )}
                         </div>
-                        鍏ㄩ€?
+                        全选
                       </button>
                       <div className="flex items-center gap-1.5">
-                        <span style={{ fontSize: '13px', color: '#6B7280' }}>宸查€?</span>
+                        <span style={{ fontSize: '13px', color: '#6B7280' }}>已选</span>
                         <span style={{ fontSize: '15px', fontWeight: 700, color: '#2563EB' }}>{selectedQuestions.length}</span>
-                        <span style={{ fontSize: '13px', color: '#6B7280' }}>棰?</span>
+                        <span style={{ fontSize: '13px', color: '#6B7280' }}>题</span>
                       </div>
                     </div>
                     <button
@@ -2946,7 +2946,7 @@ export default function App() {
                       }}
                     >
                       <Sparkles size={14} />
-                      鐢熸垚璇曞嵎
+                      生成试卷
                     </button>
                   </div>
                 </div>
@@ -2963,9 +2963,9 @@ export default function App() {
               >
                 {/* Page Title */}
                 <section className="px-4 pt-3 mb-2">
-                  <h2 style={{ fontSize: '18px', fontWeight: 700, color: '#111827' }}>缁勫嵎鍘嗗彶</h2>
+                  <h2 style={{ fontSize: '18px', fontWeight: 700, color: '#111827' }}>组卷历史</h2>
                   <p style={{ fontSize: '11px', color: '#9CA3AF', marginTop: '1px' }}>
-                    鍏?{studentExams.length} 浠借瘯鍗?
+                    共 {studentExams.length} 份试卷
                   </p>
                 </section>
 
@@ -2974,8 +2974,8 @@ export default function App() {
                   {studentExams.length === 0 ? (
                     <div className="text-center py-16">
                       <FileText size={36} className="mx-auto" style={{ color: '#D1D5DB' }} />
-                      <p className="mt-3" style={{ fontSize: '13px', color: '#9CA3AF' }}>鏆傛棤缁勫嵎鍘嗗彶</p>
-                      <p className="mt-0.5" style={{ fontSize: '11px', color: '#D1D5DB' }}>鍦ㄩ敊棰樻湰閫夋嫨棰樼洰鍚庣偣鍑?鐢熸垚璇曞嵎"</p>
+                      <p className="mt-3" style={{ fontSize: '13px', color: '#9CA3AF' }}>暂无组卷历史</p>
+                      <p className="mt-0.5" style={{ fontSize: '11px', color: '#D1D5DB' }}>在错题本选择题目后点击"生成试卷"</p>
                     </div>
                   ) : (
                     studentExams.map((exam) => (
@@ -2997,19 +2997,19 @@ export default function App() {
                               {dayjs(exam.created_at).format('YYYY/MM/DD HH:mm')}
                             </p>
                             <p style={{ fontSize: '11px', color: '#9CA3AF', marginTop: '1px' }}>
-                              鍏?{exam.question_ids?.length || 0} 閬撻
+                              共 {exam.question_ids?.length || 0} 道题
                             </p>
                           </div>
                           <div className="flex flex-col items-end gap-1.5 flex-shrink-0">
                             <span className="badge" style={{ background: exam.printed ? '#F0FDF4' : '#FFFBEB', color: exam.printed ? '#16A34A' : '#F59E0B' }}>
-                              {exam.printed ? '宸叉墦鍗?' : '鏈墦鍗?'}
+                              {exam.printed ? '已打印' : '未打印'}
                             </span>
                             <div className="flex gap-1">
                               <button
                                 onClick={() => handleDownloadPdf(exam)}
                                 className="px-2 py-1 rounded-lg"
                                 style={{ background: '#F3F4F6', color: '#2563EB' }}
-                                title="涓嬭浇PDF"
+                                title="下载PDF"
                               >
                                 <FileText size={12} />
                               </button>
@@ -3018,7 +3018,7 @@ export default function App() {
                                 disabled={submitExamId === exam.id}
                                 className="px-2 py-1 rounded-lg"
                                 style={{ background: submitExamId === exam.id ? '#EDE9FE' : '#F3F4F6', color: '#7C3AED' }}
-                                title="鎻愪氦浣滀笟"
+                                title="提交作业"
                               >
                                 {submitExamId === exam.id ? <Loader2 size={12} className="animate-spin" /> : <Upload size={12} />}
                               </button>
@@ -3031,7 +3031,7 @@ export default function App() {
                   )}
                 </section>
 
-                {/* 鎻愪氦浣滀笟闅愯棌鏂囦欢杈撳叆锛堟媿鐓?鐩稿唽锛屽寮狅級 */}
+                {/* 提交作业隐藏文件输入（拍照/相册，多张） */}
                 <input
                   ref={submitFileInputRef}
                   type="file"
@@ -3046,7 +3046,7 @@ export default function App() {
           </AnimatePresence>
         </main>
 
-        {/* Bottom Navigation 鈥?Claude Style */}
+        {/* Bottom Navigation — Claude Style */}
         <nav className="sticky bottom-0 z-50 glass border-t" style={{ borderColor: 'rgba(232,229,224,0.6)' }}>
           <div className="max-w-lg mx-auto flex items-center justify-around" style={{ padding: '6px 0', paddingBottom: 'calc(6px + env(safe-area-inset-bottom, 0px))' }}>
             {[
@@ -3107,7 +3107,7 @@ export default function App() {
           onSelect={({ worksheetId, worksheetName }) => {
             setSelectedWorksheetId(worksheetId)
             if (worksheetId) {
-              // 閫夊畬缁冧範鍐?鈫?鎵撳紑鐩告満
+              // 选完练习册 → 打开相机
               setTimeout(() => {
                 const input = document.getElementById('file-input')
                 if (input) {
@@ -3121,7 +3121,7 @@ export default function App() {
           subject={flowSubject}
         />
 
-        {/* Floating Action Button 鈥?Claude style */}
+        {/* Floating Action Button — Claude style */}
         {currentPage === 'processing' && (
           <motion.button
             initial={{ scale: 0, opacity: 0 }}
@@ -3143,7 +3143,7 @@ export default function App() {
           </motion.button>
         )}
 
-        {/* Upload Options Menu 鈥?Three cards */}
+        {/* Upload Options Menu — Three cards */}
         {showUploadOptions && (
           <div className="absolute inset-0 z-[25000] flex items-end justify-center">
             <motion.div
@@ -3163,9 +3163,9 @@ export default function App() {
                 <div className="w-8 h-1 rounded-full" style={{ background: 'var(--border)' }} />
               </div>
               <div className="px-6 pt-2 pb-4">
-                <h3 className="text-center text-[17px] font-semibold text-[var(--text)] mb-6">鏂板缓鎵规敼浠诲姟</h3>
+                <h3 className="text-center text-[17px] font-semibold text-[var(--text)] mb-6">新建批改任务</h3>
 
-                {/* 鍗＄墖1: 鏃ュ父浣滀笟 */}
+                {/* 卡片1: 日常作业 */}
                 <button
                   onClick={() => {
                     setShowUploadOptions(false)
@@ -3179,12 +3179,12 @@ export default function App() {
                     <BookOpen size={28} className="text-white" />
                   </div>
                   <div className="text-left">
-                    <span className="block text-[15px] font-semibold" style={{ color: 'var(--text)' }}>鏃ュ父浣滀笟</span>
-                    <span className="block text-[12px] mt-0.5" style={{ color: 'var(--text-secondary)' }}>缁冧範鍐?鍚屾缁冧範锛屽凡鏈夋爣鍑嗙瓟妗?</span>
+                    <span className="block text-[15px] font-semibold" style={{ color: 'var(--text)' }}>日常作业</span>
+                    <span className="block text-[12px] mt-0.5" style={{ color: 'var(--text-secondary)' }}>练习册/同步练习，已有标准答案</span>
                   </div>
                 </button>
 
-                {/* 鍗＄墖2: 鏅€氳瘯鍗?*/}
+                {/* 卡片2: 普通试卷 */}
                 <button
                   onClick={() => {
                     setShowUploadOptions(false)
@@ -3199,16 +3199,18 @@ export default function App() {
                     <FileText size={28} className="text-white" />
                   </div>
                   <div className="text-left">
-                    <span className="block text-[15px] font-semibold" style={{ color: 'var(--text)' }}>鏅€氳瘯鍗?</span>
-                    <span className="block text-[12px] mt-0.5" style={{ color: 'var(--text-secondary)' }}>鑰冭瘯鍗?涓存椂鍗凤紝AI鏅鸿兘鎵规敼</span>
+                    <span className="block text-[15px] font-semibold" style={{ color: 'var(--text)' }}>普通试卷</span>
+                    <span className="block text-[12px] mt-0.5" style={{ color: 'var(--text-secondary)' }}>考试卷/临时卷，AI智能批改</span>
                   </div>
                 </button>
 
-                {/* 鍗＄墖3: 閿欓閲嶇粌 */}
+                {/* 卡片3: 错题重练 — 拍照上传，handleFileSelect 自动识别照片中的二维码并定位重练卷 */}
                 <button
                   onClick={() => {
                     setShowUploadOptions(false)
-                    setShowScanQR(true)
+                    setPendingFlow(null)
+                    setSelectedWorksheetId(null)
+                    triggerUpload(true)
                   }}
                   className="w-full flex items-center gap-4 p-4 rounded-2xl transition-all active:scale-[0.98] tap-scale"
                   style={{ background: 'var(--bg-secondary)' }}
@@ -3217,8 +3219,8 @@ export default function App() {
                     <RefreshCw size={28} className="text-white" />
                   </div>
                   <div className="text-left">
-                    <span className="block text-[15px] font-semibold" style={{ color: 'var(--text)' }}>閿欓閲嶇粌</span>
-                    <span className="block text-[12px] mt-0.5" style={{ color: 'var(--text-secondary)' }}>鎵簩缁寸爜鎵规敼</span>
+                    <span className="block text-[15px] font-semibold" style={{ color: 'var(--text)' }}>错题重练</span>
+                    <span className="block text-[12px] mt-0.5" style={{ color: 'var(--text-secondary)' }}>拍照上传，自动识别卷上二维码批改</span>
                   </div>
                 </button>
 
@@ -3229,7 +3231,7 @@ export default function App() {
                   className="w-full py-3.5 rounded-2xl text-[15px] font-medium transition-colors active:scale-[0.98]"
                   style={{ background: 'var(--bg-secondary)', color: 'var(--text-secondary)' }}
                 >
-                  鍙栨秷
+                  取消
                 </button>
               </div>
             </motion.div>
@@ -3246,7 +3248,7 @@ export default function App() {
           onChange={handleFileSelect}
         />
 
-        {/* Delete Confirm Dialog 鈥?Claude style */}
+        {/* Delete Confirm Dialog — Claude style */}
         {showDeleteConfirm && (
           <div className="absolute inset-0 z-[20000] flex items-center justify-center">
             <motion.div
@@ -3266,9 +3268,9 @@ export default function App() {
                 <div className="w-12 h-12 rounded-2xl flex items-center justify-center mb-4" style={{ background: 'var(--danger-soft)' }}>
                   <AlertCircle size={24} style={{ color: 'var(--danger)' }} />
                 </div>
-                <h3 style={{ fontSize: '17px', fontWeight: 700, color: 'var(--text)', marginBottom: '6px' }}>纭鍒犻櫎</h3>
+                <h3 style={{ fontSize: '17px', fontWeight: 700, color: 'var(--text)', marginBottom: '6px' }}>确认删除</h3>
                 <p style={{ fontSize: '13px', color: 'var(--text-secondary)', marginBottom: '24px', lineHeight: 1.5 }}>
-                  鍒犻櫎鍚庝笉鍙仮澶嶏紝纭畾瑕佸垹闄ゅ悧锛?
+                  删除后不可恢复，确定要删除吗？
                 </p>
                 <div className="flex gap-3 w-full">
                   <button
@@ -3276,14 +3278,14 @@ export default function App() {
                     className="flex-1 py-2.5 rounded-xl text-[14px] font-medium transition-colors active:scale-[0.98]"
                     style={{ background: 'var(--bg-secondary)', color: 'var(--text-secondary)' }}
                   >
-                    鍙栨秷
+                    取消
                   </button>
                   <button
                     onClick={handleConfirmDelete}
                     className="flex-1 py-2.5 rounded-xl text-[14px] font-medium text-white transition-colors active:scale-[0.98]"
                     style={{ background: 'var(--danger)' }}
                   >
-                    鍒犻櫎
+                    删除
                   </button>
                 </div>
               </div>
@@ -3291,14 +3293,14 @@ export default function App() {
           </div>
         )}
 
-        {/* Question Editor Dialog 鈥?Claude style */}
+        {/* Question Editor Dialog — Claude style */}
         {showQuestionEditor && editingQuestionItem && (
           <div className="absolute inset-0 z-[20000] flex flex-col">
             <div className="absolute inset-0 bg-black/50 backdrop-blur-sm" onClick={() => setShowQuestionEditor(false)} />
             <div className="relative mt-auto bg-white rounded-t-3xl max-h-[85vh] min-h-[60vh] flex flex-col shadow-xl">
               {/* Header */}
               <div className="flex items-center justify-between px-5 py-4 border-b" style={{ borderColor: 'var(--border)' }}>
-                <h3 style={{ fontSize: '16px', fontWeight: 700, color: 'var(--text)' }}>缂栬緫棰樼洰</h3>
+                <h3 style={{ fontSize: '16px', fontWeight: 700, color: 'var(--text)' }}>编辑题目</h3>
                 <button onClick={() => setShowQuestionEditor(false)} className="w-8 h-8 rounded-xl flex items-center justify-center" style={{ background: 'var(--bg-secondary)' }}>
                   <X size={16} style={{ color: 'var(--text-secondary)' }} />
                 </button>
@@ -3307,9 +3309,9 @@ export default function App() {
               {/* Tabs */}
               <div className="flex border-b" style={{ borderColor: '#E5E7EB' }}>
                 {[
-                  { key: 'stem', label: '棰樺共' },
-                  { key: 'answer', label: '绛旀' },
-                  { key: 'tags', label: '鏍囩' }
+                  { key: 'stem', label: '题干' },
+                  { key: 'answer', label: '答案' },
+                  { key: 'tags', label: '标签' }
                 ].map(tab => (
                   <button
                     key={tab.key}
@@ -3331,11 +3333,11 @@ export default function App() {
                 {editTab === 'stem' && (
                   <>
                     <div className="card" style={{ padding: '14px' }}>
-                      <label style={{ fontSize: '12px', fontWeight: 600, color: 'var(--text-secondary)', display: 'block', marginBottom: '6px' }}>棰樼洰鍐呭</label>
+                      <label style={{ fontSize: '12px', fontWeight: 600, color: 'var(--text-secondary)', display: 'block', marginBottom: '6px' }}>题目内容</label>
                       <textarea
                         value={editForm.content}
                         onChange={e => updateEditForm('content', e.target.value)}
-                        placeholder="璇疯緭鍏ラ鐩唴瀹?"
+                        placeholder="请输入题目内容"
                         className="w-full rounded-xl p-3 text-[13px] resize-none focus:outline-none transition-all"
                         style={{ border: '1px solid var(--border)', color: 'var(--text)', minHeight: '80px', background: 'var(--bg-mist)' }}
                       />
@@ -3344,9 +3346,9 @@ export default function App() {
                     {editForm.question_type === 'choice' && (
                       <div className="card" style={{ padding: '14px' }}>
                         <div className="flex items-center justify-between mb-2">
-                          <label style={{ fontSize: '12px', fontWeight: 600, color: 'var(--text-secondary)' }}>閫夐」</label>
+                          <label style={{ fontSize: '12px', fontWeight: 600, color: 'var(--text-secondary)' }}>选项</label>
                           <button onClick={addEditOption} style={{ fontSize: '12px', color: 'var(--primary)', fontWeight: 500 }}>
-                            + 娣诲姞閫夐」
+                            + 添加选项
                           </button>
                         </div>
                         <div className="space-y-2">
@@ -3358,7 +3360,7 @@ export default function App() {
                               <input
                                 value={opt}
                                 onChange={e => updateEditOption(idx, e.target.value)}
-                                placeholder={`閫夐」 ${String.fromCharCode(65 + idx)}`}
+                                placeholder={`选项 ${String.fromCharCode(65 + idx)}`}
                                 className="flex-1 rounded-lg px-2.5 py-1.5 text-[13px] focus:outline-none"
                                 style={{ border: '1px solid #E5E7EB' }}
                               />
@@ -3391,7 +3393,7 @@ export default function App() {
                         <div style={{ width: '100%' }}>
                           <img
                             src={editForm.image_url}
-                            alt="棰樼洰閰嶅浘"
+                            alt="题目配图"
                             style={{
                               width: '100%',
                               maxHeight: '200px',
@@ -3406,13 +3408,13 @@ export default function App() {
                               onClick={handleOpenEditSourcePicker}
                               style={{ fontSize: '12px', color: '#2563EB', cursor: 'pointer', padding: '4px 12px', borderRadius: '6px', background: '#EFF6FF', fontWeight: 500 }}
                             >
-                              瑁佸壀鏇挎崲
+                              裁剪替换
                             </span>
                             <span
                               onClick={() => updateEditForm('image_url', '')}
                               style={{ fontSize: '12px', color: '#EF4444', cursor: 'pointer', padding: '4px 12px', borderRadius: '6px', background: '#FEF2F2', fontWeight: 500 }}
                             >
-                              鍒犻櫎閰嶅浘
+                              删除配图
                             </span>
                           </div>
                         </div>
@@ -3426,8 +3428,8 @@ export default function App() {
                             <circle cx="8.5" cy="8.5" r="1.5"/>
                             <polyline points="21 15 16 10 5 21"/>
                           </svg>
-                          <div style={{ fontSize: '14px', fontWeight: 500, color: '#2563EB' }}>娣诲姞閰嶅浘</div>
-                          <div style={{ fontSize: '11px', color: '#9CA3AF', marginTop: '4px' }}>鏀寔瑁佸壀涓婁紶锛屽彲閫?</div>
+                          <div style={{ fontSize: '14px', fontWeight: 500, color: '#2563EB' }}>添加配图</div>
+                          <div style={{ fontSize: '11px', color: '#9CA3AF', marginTop: '4px' }}>支持裁剪上传，可选</div>
                         </div>
                       )}
                     </div>
@@ -3439,29 +3441,29 @@ export default function App() {
                   <>
                     <div className="card" style={{ padding: '12px', background: '#F9FAFB' }}>
                       <div className="flex items-center gap-1.5 mb-1">
-                        <span style={{ fontSize: '11px', color: '#9CA3AF' }}>瀛︾敓绛旀</span>
-                        <span className="badge" style={{ background: '#FEF2F2', color: '#EF4444' }}>閿欒璁板綍</span>
+                        <span style={{ fontSize: '11px', color: '#9CA3AF' }}>学生答案</span>
+                        <span className="badge" style={{ background: '#FEF2F2', color: '#EF4444' }}>错误记录</span>
                       </div>
-                      <p style={{ fontSize: '13px', color: '#111827', marginTop: '4px' }}>{editForm.student_answer || '鏈綔绛?'}</p>
+                      <p style={{ fontSize: '13px', color: '#111827', marginTop: '4px' }}>{editForm.student_answer || '未作答'}</p>
                     </div>
 
                     <div className="card" style={{ padding: '12px' }}>
-                      <label style={{ fontSize: '12px', fontWeight: 500, color: '#6B7280', display: 'block', marginBottom: '6px' }}>姝ｇ‘绛旀</label>
+                      <label style={{ fontSize: '12px', fontWeight: 500, color: '#6B7280', display: 'block', marginBottom: '6px' }}>正确答案</label>
                       <input
                         value={editForm.answer}
                         onChange={e => updateEditForm('answer', e.target.value)}
-                        placeholder="璇疯緭鍏ユ纭瓟妗?"
+                        placeholder="请输入正确答案"
                         className="w-full rounded-lg px-3 py-2 text-[13px] focus:outline-none"
                         style={{ border: '1px solid #E5E7EB' }}
                       />
                     </div>
 
                     <div className="card" style={{ padding: '12px' }}>
-                      <label style={{ fontSize: '12px', fontWeight: 500, color: '#6B7280', display: 'block', marginBottom: '6px' }}>棰樼洰瑙ｆ瀽</label>
+                      <label style={{ fontSize: '12px', fontWeight: 500, color: '#6B7280', display: 'block', marginBottom: '6px' }}>题目解析</label>
                       <textarea
                         value={editForm.analysis}
                         onChange={e => updateEditForm('analysis', e.target.value)}
-                        placeholder="璇疯緭鍏ヨВ鏋愬唴瀹?.."
+                        placeholder="请输入解析内容..."
                         className="w-full rounded-lg p-2.5 text-[13px] resize-none focus:outline-none"
                         style={{ border: '1px solid #E5E7EB', color: '#111827', minHeight: '100px' }}
                       />
@@ -3472,10 +3474,10 @@ export default function App() {
                 {/* Tags Tab */}
                 {editTab === 'tags' && (
                   <div className="card" style={{ padding: '12px' }}>
-                    <label style={{ fontSize: '12px', fontWeight: 500, color: '#6B7280', display: 'block', marginBottom: '8px' }}>鐭ヨ瘑鐐规爣绛?</label>
+                    <label style={{ fontSize: '12px', fontWeight: 500, color: '#6B7280', display: 'block', marginBottom: '8px' }}>知识点标签</label>
                     <div className="flex flex-wrap gap-1.5 mb-3">
                       {editTags.length === 0 ? (
-                        <span style={{ fontSize: '12px', color: '#9CA3AF' }}>鏆傛棤鏍囩</span>
+                        <span style={{ fontSize: '12px', color: '#9CA3AF' }}>暂无标签</span>
                       ) : (
                         editTags.map((tag, idx) => (
                           <span key={idx} className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-[11px] font-medium" style={{ background: '#FFF7ED', color: '#EA580C' }}>
@@ -3490,12 +3492,12 @@ export default function App() {
                         value={editNewTag}
                         onChange={e => setEditNewTag(e.target.value)}
                         onKeyDown={e => { if (e.key === 'Enter') { e.preventDefault(); handleAddEditTag() } }}
-                        placeholder="杈撳叆鏍囩鍚庢寜鍥炶溅"
+                        placeholder="输入标签后按回车"
                         className="flex-1 rounded-lg px-2.5 py-1.5 text-[13px] focus:outline-none"
                         style={{ border: '1px solid #E5E7EB' }}
                       />
                       <button onClick={handleAddEditTag} disabled={!editNewTag.trim()} className="px-3 py-1.5 rounded-lg text-[12px] font-medium text-white" style={{ background: editNewTag.trim() ? '#2563EB' : '#D1D5DB' }}>
-                        娣诲姞
+                        添加
                       </button>
                     </div>
                   </div>
@@ -3509,14 +3511,14 @@ export default function App() {
                   className="flex-1 py-2 rounded-lg text-[13px] font-medium"
                   style={{ background: '#F3F4F6', color: '#6B7280' }}
                 >
-                  鍙栨秷
+                  取消
                 </button>
                 <button
                   onClick={handleSaveEdit}
                   className="flex-1 py-2 rounded-lg text-[13px] font-medium text-white"
                   style={{ background: '#2563EB' }}
                 >
-                  淇濆瓨
+                  保存
                 </button>
               </div>
             </div>
@@ -3532,7 +3534,7 @@ export default function App() {
               padding: '24px 20px', paddingBottom: 'calc(24px + env(safe-area-inset-bottom, 0px))'
             }}>
               <div style={{ fontSize: '16px', fontWeight: 600, color: '#111827', textAlign: 'center', marginBottom: '20px' }}>
-                閫夋嫨閰嶅浘鏉ユ簮
+                选择配图来源
               </div>
               {(editingQuestionItem?.question || editingQuestionItem)?.task_id && (
                 <div
@@ -3556,11 +3558,11 @@ export default function App() {
                     </svg>
                   </div>
                   <div style={{ flex: 1 }}>
-                    <div style={{ fontSize: '15px', fontWeight: 600, color: '#111827' }}>浠庡師璇曞嵎瑁佸壀</div>
-                    <div style={{ fontSize: '12px', color: '#9CA3AF', marginTop: '2px' }}>浠庡師璇曞嵎鍥剧墖涓埅鍙栨湰棰樺尯鍩?</div>
+                    <div style={{ fontSize: '15px', fontWeight: 600, color: '#111827' }}>从原试卷裁剪</div>
+                    <div style={{ fontSize: '12px', color: '#9CA3AF', marginTop: '2px' }}>从原试卷图片中截取本题区域</div>
                   </div>
                   {loadingTaskImage && (
-                    <div style={{ fontSize: '12px', color: '#2563EB' }}>鍔犺浇涓?..</div>
+                    <div style={{ fontSize: '12px', color: '#2563EB' }}>加载中...</div>
                   )}
                 </div>
               )}
@@ -3584,8 +3586,8 @@ export default function App() {
                   </svg>
                 </div>
                 <div style={{ flex: 1 }}>
-                  <div style={{ fontSize: '15px', fontWeight: 600, color: '#111827' }}>鎷嶆憚鎴栦笂浼犺鍓?</div>
-                  <div style={{ fontSize: '12px', color: '#9CA3AF', marginTop: '2px' }}>鎷嶇収鎴栦粠鐩稿唽閫夋嫨鍥剧墖杩涜瑁佸壀</div>
+                  <div style={{ fontSize: '15px', fontWeight: 600, color: '#111827' }}>拍摄或上传裁剪</div>
+                  <div style={{ fontSize: '12px', color: '#9CA3AF', marginTop: '2px' }}>拍照或从相册选择图片进行裁剪</div>
                 </div>
               </div>
               <div style={{ textAlign: 'center', marginTop: '12px' }}>
@@ -3593,7 +3595,7 @@ export default function App() {
                   onClick={() => setShowEditSourcePicker(false)}
                   style={{ fontSize: '14px', color: '#6B7280', cursor: 'pointer', padding: '8px 16px' }}
                 >
-                  鍙栨秷
+                  取消
                 </span>
               </div>
             </div>
@@ -3610,16 +3612,16 @@ export default function App() {
           />
         )}
 
-        {/* Exam Review / 澶嶅 */}
+        {/* Exam Review / 复审 */}
         {showExamReview && reviewTask && (
           <Suspense fallback={<LazyFallback />}>
             <ExamReview
               task={reviewTask}
               onClose={() => { setShowExamReview(false); setReviewTask(null); loadTasks() }}
               onSave={() => {
-                // 淇濆瓨鍚庨噸鏂拌绠楃粺璁″苟鍒锋柊棣栭〉
+                // 保存后重新计算统计并刷新首页
                 if (reviewTask?.id) {
-                  recalculateTaskStats(reviewTask.id).catch(e => console.error('鍒锋柊缁熻澶辫触:', e))
+                  recalculateTaskStats(reviewTask.id).catch(e => console.error('刷新统计失败:', e))
                 }
                 loadTasks()
               }}
@@ -3627,14 +3629,14 @@ export default function App() {
           </Suspense>
         )}
 
-        {/* Print Preview / 缁勫嵎 */}
+        {/* Print Preview / 组卷 */}
         {showPrintPreview && (
           <Suspense fallback={<LazyFallback />}>
             <PrintPreview onClose={() => setShowPrintPreview(false)} />
           </Suspense>
         )}
 
-        {/* Reprint Exam / 閲嶆柊鎵撳嵃 */}
+        {/* Reprint Exam / 重新打印 */}
         {showReprint && reprintExam && (
           <Suspense fallback={<LazyFallback />}>
             <PrintPreview
@@ -3646,7 +3648,7 @@ export default function App() {
           </Suspense>
         )}
 
-        {/* Scan QR / 鎵爜鎵规敼 */}
+        {/* Scan QR / 扫码批改 */}
         {showScanQR && (
           <Suspense fallback={<LazyFallback />}>
             <ScanQR
@@ -3656,7 +3658,7 @@ export default function App() {
           </Suspense>
         )}
 
-        {/* Grading / 鎵规敼璇曞嵎 */}
+        {/* Grading / 批改试卷 */}
         {showGrading && gradingData && (
           <Suspense fallback={<LazyFallback />}>
             <Grading
@@ -3670,7 +3672,7 @@ export default function App() {
           </Suspense>
         )}
 
-        {/* Notification Panel / 閫氱煡 */}
+        {/* Notification Panel / 通知 */}
         {showNotifications && (
           <div className="absolute inset-0 z-[100] animate-fade-in" style={{ background: 'rgba(0,0,0,0.3)' }}>
             <div
@@ -3685,7 +3687,7 @@ export default function App() {
               }}
             >
               <div className="flex items-center justify-between px-4 py-3 border-b" style={{ borderColor: '#F3F4F6' }}>
-                <h3 style={{ fontSize: '16px', fontWeight: 600, color: '#111827' }}>閫氱煡</h3>
+                <h3 style={{ fontSize: '16px', fontWeight: 600, color: '#111827' }}>通知</h3>
                 <button
                   onClick={() => setShowNotifications(false)}
                   className="w-7 h-7 rounded-lg flex items-center justify-center"
@@ -3697,19 +3699,19 @@ export default function App() {
               <div className="flex-1 overflow-y-auto p-4">
                 <div className="flex flex-col items-center justify-center py-12" style={{ color: '#9CA3AF' }}>
                   <Bell size={32} strokeWidth={1.5} style={{ color: '#D1D5DB', marginBottom: '12px' }} />
-                  <p style={{ fontSize: '14px', fontWeight: 500 }}>鏆傛棤鏂伴€氱煡</p>
-                  <p style={{ fontSize: '12px', marginTop: '4px' }}>鎵规敼瀹屾垚銆佺郴缁熸秷鎭皢鍦ㄦ鏄剧ず</p>
+                  <p style={{ fontSize: '14px', fontWeight: 500 }}>暂无新通知</p>
+                  <p style={{ fontSize: '12px', marginTop: '4px' }}>批改完成、系统消息将在此显示</p>
                 </div>
               </div>
             </div>
           </div>
         )}
 
-        {/* Learning Report / 瀛︿範鎶ュ憡 */}
+        {/* Learning Report / 学习报告 */}
         {showLearningReport && (
           <div className="absolute inset-0 z-[100] bg-white overflow-y-auto animate-fade-in" style={{ paddingTop: 'env(safe-area-inset-top, 0px)' }}>
             <div className="sticky top-0 z-10 bg-white border-b px-4 py-3 flex items-center justify-between" style={{ borderColor: '#F3F4F6' }}>
-              <h3 style={{ fontSize: '17px', fontWeight: 600, color: '#111827' }}>瀛︿範鎶ュ憡</h3>
+              <h3 style={{ fontSize: '17px', fontWeight: 600, color: '#111827' }}>学习报告</h3>
               <button
                 onClick={() => setShowLearningReport(false)}
                 className="w-7 h-7 rounded-lg flex items-center justify-center"
@@ -3727,7 +3729,7 @@ export default function App() {
       </>
     )
 
-    // 閿欓閲嶇粌浠诲姟鍏ュ彛锛?retry-task/:id 鍏ㄥ睆娓叉煋锛屾棤搴曢儴 tab
+    // 错题重练任务入口：/retry-task/:id 全屏渲染，无底部 tab
     if (retryTaskId) {
       return (
         <ToastProvider>
@@ -3747,7 +3749,7 @@ export default function App() {
 
     return (
       <ToastProvider>
-        {/* PC绔?+ 璇曞嵎鍏ュ簱鏍″/缁撴灉鏃讹紝鍏ㄥ睆鏄剧ず锛岃烦鍑烘墜鏈烘ā鎷熷櫒 */}
+        {/* PC端 + 试卷入库校对/结果时，全屏显示，跳出手机模拟器 */}
         {!isMobile && paperBankStep === 'proofread' ? (
           <div className="min-h-screen flex flex-col" style={{ background: '#F5F7FA' }}>
             {appContent}
