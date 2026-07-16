@@ -130,7 +130,7 @@ router.post('/:id/parse-pdf', pdfUpload.single('file'), async (req, res) => {
 
 async function parsePdfInBackground(worksheetId, file) {
   // 整体超时兜底：OCR 兜底走 AI 单页 2 分钟 * 20 页上限，给 5 分钟防止无限等待
-  const OVERALL_TIMEOUT = 5 * 60 * 1000
+  const OVERALL_TIMEOUT = 10 * 60 * 1000
   let overallTimer
   const timeoutPromise = new Promise((_, reject) => {
     overallTimer = setTimeout(() => reject(new Error(`PDF 解析整体超时（>${OVERALL_TIMEOUT / 1000}s）`)), OVERALL_TIMEOUT)
@@ -181,7 +181,7 @@ async function doParse(worksheetId, file) {
   if (parsedAnswers.length === 0) {
     try {
       // 扫描版 PDF：逐页渲染成图片后走视觉模型 OCR
-      const { images, totalPages } = await renderPdfToJpegs(file.buffer, { maxPages: 20 })
+      const { images, totalPages } = await renderPdfToJpegs(file.buffer, { maxPages: 20, scale: 3 })
       if (totalPages > images.length) {
         ocrTruncatedInfo = { totalPages, ocrPages: images.length }
         console.log(`PDF 共 ${totalPages} 页，仅 OCR 前 ${images.length} 页`)
@@ -239,8 +239,17 @@ function parseAnswerText(text, lowConfidence) {
   const lines = text.split('\n')
   let currentSection = null
 
-  // 检测章节标题行（如"第一章阶段卷Ⅰ""第三章阶段练Ⅱ""第二章评价测试卷"）
-  const sectionRegex = /^第[一二三四五六七八九十\d]+[章节].*(?:阶段卷|评价测试|阶段练|综合练习|单元测试|测试卷|月考|期中|期末|阶段|练习)/
+  // 检测章节标题行（如"第一章阶段卷Ⅰ""期中测试卷""第一单元综合练习"等）
+  const isSectionHeader = (line) => {
+    if (/^\d/.test(line)) return false // 数字开头的行是答案行
+    // 第X章/节/单元/部分/篇
+    if (/^第[一二三四五六七八九十\d]+[章节单元部分篇]/.test(line)) return true
+    // 中文数字开头的章节/单元
+    if (/^[一二三四五六七八九十]+[章节单元]/.test(line)) return true
+    // 常见试卷/练习关键词
+    if (/(?:阶段卷|评价测试|阶段练|综合练习|单元测试|测试卷|月考卷|期中卷|期末卷|模拟卷|真题卷|专题练习|专项练习|专项训练|复习卷|巩固卷|提升卷|拓展卷|检测卷|验收卷|达标卷|冲刺卷|押题卷|预测卷|闯关练习|水平测试|能力测试|单元卷|阶段卷|综合卷|练习卷|模拟测试|真题演练)/.test(line)) return true
+    return false
+  }
 
   const processedLines = []
 
@@ -249,13 +258,15 @@ function parseAnswerText(text, lowConfidence) {
     if (!trimmed) continue
 
     // 检测章节标题
-    if (sectionRegex.test(trimmed)) {
+    if (isSectionHeader(trimmed)) {
       currentSection = trimmed.replace(/[：:].*$/, '').trim() // 去掉冒号后的说明
       continue // 标题行不加入答案解析
     }
 
-    // 预处理：拆分行内多答案（如 "19. 2 因素；20. 1/10；21. 1 800 米"）
-    const parts = trimmed.split(/[；;](?=\s*\d+\s*[.．、\s])/)
+    // 预处理：拆分行内多答案（如 "19. 2 因素；20. 1/10" 或 "12. 1,3,9,27  13. 10  14. C"）
+    // 分号分割：两个答案之间用中文/英文分号隔开
+    // 空格分割：两个答案之间用 2+ 空格隔开，且下一段以"数字+点"开头
+    const parts = trimmed.split(/(?:[；;]|\s{2,})(?=\s*\d+\s*[.．、])/)
     if (parts.length > 1) {
       for (const part of parts) {
         const subLine = part.trim()
@@ -298,7 +309,7 @@ function parseAnswerText(text, lowConfidence) {
     m = trimmed.match(/^(\d+)[.．、\s]\s*(.+)$/)
     if (m) {
       const ans = m[2].trim()
-      if (ans.length < 50) {
+      if (ans.length < 200) {
         const questionNo = parseInt(m[1], 10)
         results.push({
           question_no: questionNo,
@@ -318,9 +329,9 @@ function parseAnswerText(text, lowConfidence) {
 async function ocrExtractAnswers(base64Image, lowConfidence = []) {
   const { content } = await callVisionCompletion({
     imageDataURL: `data:image/jpeg;base64,${base64Image}`,
-    systemPrompt: '你是一个作业答案识别助手。请从图片中提取所有题号和对应答案。只输出题号和答案，每行一个，格式如”1. A”或”13. 2017”。如果图片包含章节标题（如”第一章”或”阶段练”），请在对应答案前保留章节标题行，不要省略。',
+    systemPrompt: '你是一个作业答案识别助手。请从图片中提取所有题号和对应答案。重要：每行只能输出一个题号和它的答案，绝对不要在一行输出多个答案（如"1. A 2. B 3. C"是错误的）。格式如"1. A"或"13. 2017"。如果图片包含章节标题（如"第一阶段"或"阶段练"），请在对应答案前保留章节标题行，不要省略。',
     userText: '请提取这份练习册答案中的所有题号和对应答案。',
-    temperature: 0.1,
+    temperature: 0.0,
     maxTokens: 4096,
   })
 
