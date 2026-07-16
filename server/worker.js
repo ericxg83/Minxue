@@ -1572,6 +1572,7 @@ const processWorkbookGrading = async (job) => {
 
   let allQuestions = []
   let allPageTitles = []
+  const pageDataList = []   // 逐页数据：{ pageTitle, imageUrl, questions[] }
   let ocrErrors = 0
 
   for (let pageIdx = 0; pageIdx < imageList.length; pageIdx++) {
@@ -1640,6 +1641,7 @@ const processWorkbookGrading = async (job) => {
 
     allQuestions.push(...questions)
     if (pageTitle) allPageTitles.push(pageTitle)
+    pageDataList.push({ pageTitle, imageUrl: url, questions })
 
     const progress = 5 + Math.round(((pageIdx + 1) / imageList.length) * 60)
     await updateTaskStatus(taskId, TASK_STATUS.PROCESSING, { progress })
@@ -1654,76 +1656,76 @@ const processWorkbookGrading = async (job) => {
     throw new Error(errorDetail)
   }
 
-  // 3. 章节感知的答案匹配
+  // 3. 逐页章节感知的答案匹配
   const answersBySection = await getWorksheetAnswersBySection(worksheetId)
 
-  // 用所有页的 page_title 做多票定标题：取出现次数最多（且非空）的标题
-  // 解决第一页没拍到页眉但后续页拍到的问题
+  // 统计所有页标题（仅用于诊断日志）
   const titleFreq = {}
   for (const t of allPageTitles) {
     if (t) titleFreq[t] = (titleFreq[t] || 0) + 1
   }
-  const titleEntries = Object.entries(titleFreq)
-  const bestPageTitle = titleEntries.length > 0
-    ? titleEntries.sort((a, b) => b[1] - a[1])[0][0]
-    : null
 
-  const matchedSection = pickAnswerSection(answersBySection, bestPageTitle, allQuestions)
-  const sectionAnswers = matchedSection !== null ? answersBySection.get(matchedSection) : null
-
-  // 章节匹配诊断信息（写入 task metadata 供前端排查）
-  const sectionMatchInfo = {
-    page_title_count: allPageTitles.length,
-    best_page_title: bestPageTitle,
-    matched_section: matchedSection,
-    total_sections: answersBySection.size,
-    no_header_photo: !bestPageTitle && allPageTitles.length > 0
-  }
-  if (!bestPageTitle && allPageTitles.length === 0) {
-    sectionMatchInfo.match_fail_reason = '所有页面均未识别到页眉/页码（照片可能未拍到页面顶部）'
-  } else if (matchedSection === null) {
-    sectionMatchInfo.match_fail_reason = '题号覆盖率不足50%，无法确认所属章节'
-  }
-
-  console.log(`   [Workbook] 章节匹配: 标题投票=${JSON.stringify(titleFreq)} → "${bestPageTitle}" → "${matchedSection}" (共 ${answersBySection.size} 个章节, ${allQuestions.length} 道题)`)
-
-  // 4. 逐题判定
   let wrongCount = 0
   let matchedCount = 0
   let emptyCount = 0
-  for (const q of allQuestions) {
-    if (!q.question_number) continue
+  const pagesMatchInfo = []
 
-    const answerRow = sectionAnswers ? sectionAnswers.get(Number(q.question_number)) : null
-    if (answerRow) {
-      q.answer = answerRow.answer
-      q.answer_source = 'worksheet'
-      q.question_type = answerRow.answer_type || q.question_type || 'choice'
-      matchedCount++
+  for (const { pageTitle, imageUrl, questions } of pageDataList) {
+    if (questions.length === 0) continue
 
-      const hasAnswer = q.student_answer && q.student_answer !== 'null' && q.student_answer !== '未作答'
-      if (hasAnswer) {
-        const judgment = judgeAnswer(q.student_answer, q.answer, q.question_type)
-        q.is_correct = judgment.isCorrect
-        if (q.is_correct === false) wrongCount++
+    // 每页独立匹配章节：
+    //   - 有 page_title 的用标题匹配
+    //   - 无 page_title 的降级为题号覆盖率打分
+    const matchedSection = pickAnswerSection(answersBySection, pageTitle, questions)
+    const sectionAnswers = matchedSection !== null ? answersBySection.get(matchedSection) : null
+
+    pagesMatchInfo.push({
+      has_title: !!pageTitle,
+      page_title: pageTitle,
+      matched_section: matchedSection,
+      question_count: questions.length
+    })
+
+    console.log(`   [Workbook] 页匹配: title="${pageTitle}" → section="${matchedSection}" (${questions.length} 题)`)
+
+    // 对该页题目逐题判定
+    for (const q of questions) {
+      if (!q.question_number) continue
+
+      const answerRow = sectionAnswers ? sectionAnswers.get(Number(q.question_number)) : null
+      if (answerRow) {
+        q.answer = answerRow.answer
+        q.answer_source = 'worksheet'
+        q.question_type = answerRow.answer_type || q.question_type || 'choice'
+        matchedCount++
+
+        const hasAnswer = q.student_answer && q.student_answer !== 'null' && q.student_answer !== '未作答'
+        if (hasAnswer) {
+          const judgment = judgeAnswer(q.student_answer, q.answer, q.question_type)
+          q.is_correct = judgment.isCorrect
+          if (q.is_correct === false) wrongCount++
+        } else {
+          q.is_correct = null // 未作答
+          emptyCount++
+        }
+        console.log(`   [Workbook] 题 ${q.question_number}: 学生="${q.student_answer}" 标准="${q.answer}" → ${q.is_correct === true ? '正确' : q.is_correct === false ? '错误' : '待人工'}`)
       } else {
-        q.is_correct = null // 未作答
-        emptyCount++
+        console.log(`   [Workbook] 题 ${q.question_number}: 答案库无匹配（页标题="${pageTitle}"），标记待人工`)
+        q.is_correct = null
       }
-      console.log(`   [Workbook] 题 ${q.question_number}: 学生="${q.student_answer}" 标准="${q.answer}" → ${q.is_correct === true ? '正确' : q.is_correct === false ? '错误' : '待人工'}`)
-    } else {
-      console.log(`   [Workbook] 题 ${q.question_number}: 答案库无匹配，标记待人工`)
-      q.is_correct = null
     }
   }
+
   console.log(`   [Workbook] 答案匹配: ${matchedCount}/${allQuestions.length} 题, 错误: ${wrongCount} 题, 空: ${emptyCount} 题`)
 
-  // 匹配率过低（<50%）视为章节定位失败，不做对错判定，全部转人工，避免"整页全错"
-  if (allQuestions.length >= 5 && matchedCount > 0 && matchedCount < allQuestions.length * 0.5) {
-    console.warn(`   [Workbook] ⚠️ 匹配率过低 (${matchedCount}/${allQuestions.length})，判定结果不可信，全部转人工`)
-    for (const q of allQuestions) { q.is_correct = null }
-    wrongCount = 0
-    emptyCount = 0
+  // 章节匹配诊断信息（写入 task metadata 供前端排查）
+  const sectionMatchInfo = {
+    pages: pagesMatchInfo,
+    total_sections: answersBySection.size
+  }
+  const allNoMatch = pagesMatchInfo.every(p => p.matched_section === null)
+  if (allNoMatch) {
+    sectionMatchInfo.match_fail_reason = '所有页面均无法匹配到所属章节'
   }
 
   await updateTaskStatus(taskId, TASK_STATUS.PROCESSING, { progress: 75 })
