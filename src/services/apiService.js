@@ -649,8 +649,7 @@ export const uploadPdf = async (id, file, precomputedAnswers = null) => {
   }
   const data = await apiRequest(`/worksheets/${id}/parse-pdf`, {
     method: 'POST',
-    body: fd,
-    onUploadProgress: onProgress
+    body: fd
   })
   return data
 }
