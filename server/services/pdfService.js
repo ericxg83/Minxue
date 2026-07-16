@@ -21,10 +21,26 @@ const loadPdfjs = () => {
   return pdfjsPromise
 }
 
+// 为可能卡住的操作添加超时兜底
+const withTimeout = (promise, ms, label = 'Operation') => {
+  let timer
+  return Promise.race([
+    promise,
+    new Promise((_, reject) => {
+      timer = setTimeout(() => reject(new Error(`${label} timed out after ${ms}ms`)), ms)
+    }),
+  ]).finally(() => clearTimeout(timer))
+}
+
 // 提取文字版 PDF 的全文（保留换行，供逐行解析答案）
-export const extractPdfText = async (fileBuffer) => {
+// timeoutMs: 文档加载超时（默认 30s），之后抛出异常让调用方走 OCR 兜底
+export const extractPdfText = async (fileBuffer, timeoutMs = 30000) => {
   const pdfjs = await loadPdfjs()
-  const doc = await pdfjs.getDocument({ data: new Uint8Array(fileBuffer), useSystemFonts: true }).promise
+  const doc = await withTimeout(
+    pdfjs.getDocument({ data: new Uint8Array(fileBuffer), useSystemFonts: true }).promise,
+    timeoutMs,
+    `PDF document loading (>${Math.round(timeoutMs / 1000)}s)`
+  )
   try {
     let text = ''
     for (let i = 1; i <= doc.numPages; i++) {
@@ -50,12 +66,17 @@ export const extractPdfText = async (fileBuffer) => {
 }
 
 // 将扫描版 PDF 逐页渲染为 JPEG buffer（供视觉模型 OCR）
-export const renderPdfToJpegs = async (fileBuffer, { scale = 2, maxPages = 20, quality = 0.85 } = {}) => {
+// timeoutMs: 每页渲染超时（默认 30s），避免卡在某页
+export const renderPdfToJpegs = async (fileBuffer, { scale = 2, maxPages = 20, quality = 0.85, timeoutMs = 30000 } = {}) => {
   const pdfjs = await loadPdfjs()
-  const doc = await pdfjs.getDocument({
-    data: new Uint8Array(fileBuffer),
-    standardFontDataUrl: STANDARD_FONT_DATA_URL,
-  }).promise
+  const doc = await withTimeout(
+    pdfjs.getDocument({
+      data: new Uint8Array(fileBuffer),
+      standardFontDataUrl: STANDARD_FONT_DATA_URL,
+    }).promise,
+    timeoutMs,
+    `PDF document loading for render (>${Math.round(timeoutMs / 1000)}s)`
+  )
   try {
     const pageCount = Math.min(doc.numPages, maxPages)
     const images = []
@@ -66,7 +87,11 @@ export const renderPdfToJpegs = async (fileBuffer, { scale = 2, maxPages = 20, q
       const ctx = canvas.getContext('2d')
       ctx.fillStyle = '#ffffff'
       ctx.fillRect(0, 0, canvas.width, canvas.height)
-      await page.render({ canvasContext: ctx, viewport }).promise
+      await withTimeout(
+        page.render({ canvasContext: ctx, viewport }).promise,
+        timeoutMs,
+        `PDF page ${i} rendering (>${Math.round(timeoutMs / 1000)}s)`
+      )
       images.push(canvas.toBuffer('image/jpeg', quality))
       page.cleanup()
     }

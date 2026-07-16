@@ -11,7 +11,7 @@ import sharp from 'sharp'
 import { TABLES, TASK_STATUS } from './config/neon.js'
 import { query } from './config/neon.js'
 import { AI_CONFIG, getAIHeaders, buildOCRPrompt, buildAnswerGenerationPrompt, getCurrentTextModel, getCurrentVLModel, rotateTextModel, rotateVLModel, TEXT_MODELS, VL_MODELS, callTextCompletion, callVisionCompletion } from './config/ai.js'
-import { updateTaskStatus, createQuestions, batchUpdateQuestionTags, addWrongQuestions, createJudgement, getLatestJudgement, updateQuestionAnswer, markAnswerException, findCachedQuestionByFingerprint, cacheQuestion, incrementQuestionUseCount, updateQuestionCacheId, createQuestionAsset, lookupWorksheetAnswer } from './services/neonService.js'
+import { updateTaskStatus, createQuestions, batchUpdateQuestionTags, addWrongQuestions, createJudgement, updateQuestionAnswer, markAnswerException, findCachedQuestionByFingerprint, cacheQuestion, incrementQuestionUseCount, updateQuestionCacheId, createQuestionAsset, lookupWorksheetAnswer } from './services/neonService.js'
 import { uploadImage } from './services/ossService.js'
 import { generateTextFingerprint, generatePHash, PARSER_VERSION, TEXT_SIMILARITY_THRESHOLD } from './utils/questionFingerprint.js'
 import { uploadFilesWithRetry } from './services/uploadRetryManager.js'
@@ -1771,16 +1771,15 @@ export const processTask = async (job) => {
     })
     console.log(`✅ [Step 1/6] 状态更新完成`)
 
-    // ── Step 2~5：逐页 下载 → 拉直压缩 → AI 识别，questions 打上 page_number 后合并 ──
-    // 进度在 5→70 区间按页均分。
+    // ── Step 2~5：并行 下载 → 拉直压缩 → AI 识别 ──
+    // 各页独立无依赖，Promise.all 并发提升吞吐。
+    // 进度在 5→70 区间直接跳到完成值（并行下无法精确递增）。
     const pageBuffers = new Map() // pageNumber → 压缩后 buffer（几何裁剪按页取图）
     const questions = []
     let totalOcrDuration = 0
 
-    for (let pageIdx = 0; pageIdx < pages.length; pageIdx++) {
-      const page = pages[pageIdx]
+    const pageTasks = pages.map(async (page, pageIdx) => {
       const pageLabel = pages.length > 1 ? `第 ${page.pageNumber}/${pages.length} 页 ` : ''
-      const progressBase = 5 + Math.round((pageIdx / pages.length) * 65)
 
       console.log(`📊 [Step 2/6] ${pageLabel}从 OSS 下载图片...`)
       let imageBuffer
@@ -1791,9 +1790,6 @@ export const processTask = async (job) => {
         throw new Error(`下载图片失败(${pageLabel.trim() || '第 1 页'}): ` + downloadError.message)
       }
       console.log(`✅ [Step 2/6] ${pageLabel}图片下载完成: ${imageBuffer.length} bytes`)
-
-      await job.updateProgress(progressBase + Math.round(10 / pages.length))
-      await updateTaskStatus(taskId, TASK_STATUS.PROCESSING, { progress: progressBase + Math.round(10 / pages.length) })
 
       console.log(`📊 [Step 3~4/8] ${pageLabel}拉直并压缩图片（合并 Sharp 管线）...`)
       let compressedBuffer
@@ -1808,18 +1804,8 @@ export const processTask = async (job) => {
         console.log(`✅ [Step 3~4/8] ${pageLabel}拉直+压缩完成: ${imageBuffer.length} → ${compressedBuffer.length} bytes (${Math.round(compressedBuffer.length/imageBuffer.length*100)}%)`)
       } catch (processError) {
         console.error('图片处理失败:', processError)
-        await updateTaskStatus(taskId, TASK_STATUS.FAILED, {
-          error: '图片处理失败: ' + processError.message,
-          last_error: '图片处理失败: ' + processError.message,
-          duration: Date.now() - startTime,
-          failedAt: new Date().toISOString()
-        })
         throw processError
       }
-      pageBuffers.set(page.pageNumber, compressedBuffer)
-
-      await job.updateProgress(progressBase + Math.round(25 / pages.length))
-      await updateTaskStatus(taskId, TASK_STATUS.PROCESSING, { progress: progressBase + Math.round(25 / pages.length) })
 
       const imageBase64 = bufferToBase64(compressedBuffer)
 
@@ -1828,24 +1814,23 @@ export const processTask = async (job) => {
 
       if (!ocrResult.success) {
         console.error(`❌ [Step 5/8] ${pageLabel}AI 识别失败: ${ocrResult.error}`)
-        await updateTaskStatus(taskId, TASK_STATUS.FAILED, {
-          error: ocrResult.error || '识别失败',
-          last_error: ocrResult.error || '识别失败',
-          shouldRetry: ocrResult.shouldRetry,
-          duration: Date.now() - startTime,
-          failedAt: new Date().toISOString()
-        })
         throw new Error(ocrResult.error || 'AI识别失败')
       }
 
-      totalOcrDuration += ocrResult.duration || 0
-      // 仅打 page_number；不写 q.image_url（前端把 question.image_url 当"题目配图"展示，整页照片会误显）
       const pageQuestions = (ocrResult.questions || []).map(q => ({
         ...q,
         page_number: page.pageNumber,
       }))
-      questions.push(...pageQuestions)
+
       console.log(`✅ [Step 5/8] ${pageLabel}识别 ${pageQuestions.length} 道题`)
+      return { pageNumber: page.pageNumber, compressedBuffer, ocrDuration: ocrResult.duration || 0, pageQuestions }
+    })
+
+    const pageResults = await Promise.all(pageTasks)
+    for (const r of pageResults) {
+      pageBuffers.set(r.pageNumber, r.compressedBuffer)
+      questions.push(...r.pageQuestions)
+      totalOcrDuration += r.ocrDuration
     }
 
     await job.updateProgress(70)
@@ -2010,11 +1995,31 @@ await job.updateProgress(80)
       
       let rejudgedWrong = 0
       // 始终执行重判定，确保 OCR 阶段错误的 is_correct 可以被纠正
-      for (const q of questions) {
-          if (q.answer && q.answer.trim() && q.answer !== '待人工补充' && q.answer !== '此为主观题，无唯一标准答案') {
-            // [P0-1d] 检查人工复核判定，若存在则优先使用，跳过AI重判定
-            const manualJudgement = await getLatestJudgement(q.id, studentId).catch(() => null)
-            if (manualJudgement && manualJudgement.source === 'manual_review' && manualJudgement.is_correct !== null) {
+      // 批量查询所有人工复核判定，避免逐题 N+1 DB 查询
+      const judgementableQuestions = questions.filter(q =>
+        q.answer && q.answer.trim() && q.answer !== '待人工补充' && q.answer !== '此为主观题，无唯一标准答案'
+      )
+      let manualJudgementMap = new Map()
+      if (judgementableQuestions.length > 0) {
+        try {
+          const questionIds = judgementableQuestions.map(q => q.id)
+          const { rows: judgements } = await query(
+            `SELECT DISTINCT ON (question_id) question_id, id, source, is_correct
+             FROM ${TABLES.JUDGEMENTS}
+             WHERE question_id = ANY($1) AND student_id = $2 AND source = 'manual_review'
+             ORDER BY question_id, created_at DESC`,
+            [questionIds, studentId]
+          )
+          for (const j of judgements) {
+            manualJudgementMap.set(j.question_id, j)
+          }
+        } catch (e) {
+          console.error('  批量查询人工判定失败:', e.message)
+        }
+      }
+      for (const q of judgementableQuestions) {
+          const manualJudgement = manualJudgementMap.get(q.id)
+          if (manualJudgement && manualJudgement.is_correct !== null) {
               if (manualJudgement.is_correct !== q.is_correct) {
                 q.is_correct = manualJudgement.is_correct
                 try {
@@ -2045,7 +2050,6 @@ await job.updateProgress(80)
               }
               if (judgment.isCorrect === false) rejudgedWrong++
             }
-          }
         }
         const wrongIds = questions.filter(q => q.is_correct === false && q.answer && q.answer.trim() && q.answer !== '待人工补充' && q.answer !== '此为主观题，无唯一标准答案').map(q => q.id)
         if (wrongIds.length > 0) {

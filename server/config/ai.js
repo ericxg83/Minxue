@@ -14,11 +14,11 @@ export const AI_CONFIG = {
   MAX_RETRIES: 2,
 }
 
-export const RETRY_DELAYS_429 = [5000, 15000, 60000]
+export const RETRY_DELAYS_429 = [5000]
 
 const sleep = (ms) => new Promise(resolve => setTimeout(resolve, ms))
 
-const _aiLimit = parseInt(process.env.AI_CONCURRENCY || '2', 10)
+const _aiLimit = parseInt(process.env.AI_CONCURRENCY || '4', 10)
 let _aiActive = 0
 const _aiWaiters = []
 
@@ -85,9 +85,6 @@ export const VL_MODELS = [...new Set([
 export const TEXT_MODELS = [
   'Qwen/Qwen3-VL-8B-Instruct',
   'Qwen/Qwen3-8B-Instruct',
-  'Qwen/Qwen2.5-72B-Instruct',
-  'Qwen/QwQ-32B',
-  'deepseek-ai/DeepSeek-R1-Distill-Qwen-32B',
 ]
 
 let _textIdx = 0

@@ -96,7 +96,7 @@
       <div v-else-if="parseStatus === 'parsing'" class="parse-result">
         <el-result icon="info" title="正在解析">
           <template #sub-title>
-            <p>已上传 PDF，后台正在解析答案...</p>
+            <p>{{ parseMessage }}</p>
             <el-icon class="is-loading" :size="32" style="margin-top:12px;color:var(--el-color-primary)">
               <Loading />
             </el-icon>
@@ -153,7 +153,9 @@ const pdfUploaded = ref(false)
 const parseCount = ref(0)
 const parseWarning = ref(null)
 const parseStatus = ref('idle')
+const parseMessage = ref('')
 let parsePollTimer = null
+let parseMessageTimer = null
 const currentWorksheetId = ref(null)
 
 const loadData = async () => {
@@ -244,9 +246,14 @@ const handleUploadPdf = (row) => {
   parseWarning.value = null
   parseCount.value = 0
   parseStatus.value = 'idle'
+  parseMessage.value = ''
   if (parsePollTimer) {
     clearInterval(parsePollTimer)
     parsePollTimer = null
+  }
+  if (parseMessageTimer) {
+    clearTimeout(parseMessageTimer)
+    parseMessageTimer = null
   }
 }
 
@@ -270,6 +277,10 @@ const pollParseStatus = async () => {
         clearInterval(parsePollTimer)
         parsePollTimer = null
       }
+      if (parseMessageTimer) {
+        clearTimeout(parseMessageTimer)
+        parseMessageTimer = null
+      }
       if (ws.parse_warning) {
         ElMessage.warning(ws.parse_warning)
       } else {
@@ -285,6 +296,10 @@ const pollParseStatus = async () => {
         clearInterval(parsePollTimer)
         parsePollTimer = null
       }
+      if (parseMessageTimer) {
+        clearTimeout(parseMessageTimer)
+        parseMessageTimer = null
+      }
       ElMessage.error('解析失败: ' + (ws.parse_error || '未知错误'))
       await loadData()
     }
@@ -299,6 +314,15 @@ const startParse = async () => {
 
   parsing.value = true
   parseStatus.value = 'parsing'
+  parseMessage.value = '已上传 PDF，后台正在解析答案...'
+
+  // 如果超过 15 秒还没解析完，提示用户正在耗时的 OCR 识别中
+  parseMessageTimer = setTimeout(() => {
+    if (parseStatus.value === 'parsing') {
+      parseMessage.value = '正在逐页 OCR 识别中（扫描版 PDF 耗时较长，请耐心等待...）'
+    }
+  }, 15000)
+
   try {
     await uploadPdf(currentWorksheetId.value, selectedPdf.value)
     // 上传成功，立即给用户反馈
@@ -313,6 +337,10 @@ const startParse = async () => {
   } catch (e) {
     parsing.value = false
     parseStatus.value = 'idle'
+    if (parseMessageTimer) {
+      clearTimeout(parseMessageTimer)
+      parseMessageTimer = null
+    }
     ElMessage.error('上传失败: ' + e.message)
   }
 }
@@ -323,9 +351,14 @@ const resetPdfUpload = () => {
   parseWarning.value = null
   parseCount.value = 0
   parseStatus.value = 'idle'
+  parseMessage.value = ''
   if (parsePollTimer) {
     clearInterval(parsePollTimer)
     parsePollTimer = null
+  }
+  if (parseMessageTimer) {
+    clearTimeout(parseMessageTimer)
+    parseMessageTimer = null
   }
 }
 
@@ -333,6 +366,10 @@ const onPdfDialogClose = () => {
   if (parsePollTimer) {
     clearInterval(parsePollTimer)
     parsePollTimer = null
+  }
+  if (parseMessageTimer) {
+    clearTimeout(parseMessageTimer)
+    parseMessageTimer = null
   }
 }
 

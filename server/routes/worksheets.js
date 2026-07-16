@@ -128,6 +128,30 @@ router.post('/:id/parse-pdf', pdfUpload.single('file'), async (req, res) => {
 })
 
 async function parsePdfInBackground(worksheetId, file) {
+  // 整体超时兜底：OCR 兜底走 AI 单页 2 分钟 * 20 页上限，给 5 分钟防止无限等待
+  const OVERALL_TIMEOUT = 5 * 60 * 1000
+  let overallTimer
+  const timeoutPromise = new Promise((_, reject) => {
+    overallTimer = setTimeout(() => reject(new Error(`PDF 解析整体超时（>${OVERALL_TIMEOUT / 1000}s）`)), OVERALL_TIMEOUT)
+  })
+
+  try {
+    await Promise.race([
+      doParse(worksheetId, file),
+      timeoutPromise,
+    ])
+  } catch (e) {
+    console.error('PDF 后台解析失败:', e)
+    await updateWorksheetParseStatus(worksheetId, {
+      status: 'failed',
+      error: e.message || '未知错误',
+    }).catch(() => {})
+  } finally {
+    clearTimeout(overallTimer)
+  }
+}
+
+async function doParse(worksheetId, file) {
   const pdfUrl = await uploadPDF(file.buffer, file.originalname, 'system')
   await updateWorksheetPdfUrl(worksheetId, pdfUrl)
 
@@ -161,10 +185,11 @@ async function parsePdfInBackground(worksheetId, file) {
         ocrTruncatedInfo = { totalPages, ocrPages: images.length }
         console.log(`PDF 共 ${totalPages} 页，仅 OCR 前 ${images.length} 页`)
       }
-      for (const imageBuffer of images) {
-        const ocrResult = await ocrExtractAnswers(imageBuffer.toString('base64'), lowConfidence)
-        parsedAnswers.push(...ocrResult)
-      }
+      // 并行走 OCR，AI 并发由 withAiLimit 全局控制（默认 4 路）
+      const ocrResults = await Promise.all(
+        images.map(img => ocrExtractAnswers(img.toString('base64'), lowConfidence))
+      )
+      for (const r of ocrResults) parsedAnswers.push(...r)
     } catch (e) {
       console.log('OCR fallback failed:', e.message)
     }
