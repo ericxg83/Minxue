@@ -19,7 +19,7 @@
       <div class="panel pdf-panel">
         <div class="panel-title">PDF预览</div>
         <div class="panel-content">
-          <img v-if="worksheet?.pdf_url" :src="worksheet.pdf_url" class="pdf-preview" alt="PDF预览" />
+          <iframe v-if="pdfProxyUrl" :src="pdfProxyUrl" class="pdf-preview" frameborder="0"></iframe>
           <el-empty v-else description="无PDF文件" />
         </div>
       </div>
@@ -104,6 +104,10 @@ const selectedAnswer = ref(null)
 const filterMode = ref('all')
 const editForm = ref({ answer: '', answer_type: 'choice' })
 const saving = ref(false)
+
+const pdfProxyUrl = computed(() => {
+  return worksheet.value?.pdf_url ? `/api/worksheets/${worksheetId}/pdf` : null
+})
 
 const filteredAnswers = computed(() => {
   if (filterMode.value === 'low') {
@@ -238,6 +242,10 @@ const confProgress = (c) => {
   min-width: 0;
 }
 
+.pdf-panel {
+  flex: 2;
+}
+
 .panel-title {
   padding: 12px 16px;
   font-size: 13px;
@@ -249,14 +257,16 @@ const confProgress = (c) => {
 
 .panel-content {
   flex: 1;
-  overflow: auto;
-  padding: 12px;
+  overflow: hidden;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
 }
 
 .pdf-preview {
   width: 100%;
-  height: auto;
-  border-radius: 4px;
+  height: 100%;
+  border: none;
 }
 
 .list-filters {

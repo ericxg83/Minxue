@@ -16,6 +16,7 @@ import {
   upsertStudentWorksheetSetting,
 } from '../services/neonService.js'
 import { uploadPDF } from '../services/ossService.js'
+import { ossClient } from '../config/oss.js'
 import { extractPdfText, renderPdfToJpegs } from '../services/pdfService.js'
 import { callVisionCompletion } from '../config/ai.js'
 
@@ -291,6 +292,24 @@ async function ocrExtractAnswers(base64Image, lowConfidence = []) {
 
   return parseAnswerText(content || '', lowConfidence)
 }
+
+router.get('/:id/pdf', async (req, res) => {
+  try {
+    const worksheet = await getWorksheetById(req.params.id)
+    if (!worksheet || !worksheet.pdf_url) {
+      return res.status(404).json({ error: 'PDF 不存在' })
+    }
+    const url = new URL(worksheet.pdf_url)
+    const ossPath = url.pathname.slice(1) // 去掉开头的 /
+    const result = await ossClient.get(ossPath)
+    res.setHeader('Content-Type', 'application/pdf')
+    res.setHeader('Content-Disposition', 'inline')
+    res.setHeader('X-Frame-Options', 'SAMEORIGIN')
+    res.send(result.content)
+  } catch (e) {
+    res.status(500).json({ error: 'PDF 获取失败: ' + e.message })
+  }
+})
 
 router.get('/:id/answers', async (req, res) => {
   try {
