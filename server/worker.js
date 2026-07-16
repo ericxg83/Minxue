@@ -863,17 +863,28 @@ export function extractAnswerFromAnalysis(answer, analysis, options) {
   // ── Non-choice / general: extract from explicit answer markers ──
   // AI sometimes puts unsimplified LaTeX (e.g. \\frac{30}{\\sqrt{3}}) in answer field
   // while analysis has the correct simplified result (e.g. "15").
-  // Look only in tail (last 300 chars) to favor final result over intermediate steps.
+  // Look only in tail (last 800 chars) to favor final result over intermediate steps.
   // Note: do NOT use commas (，,) as delimiters — multi-part answers like
   // "每个盲盒50元，每个杯子30元" contain commas within the answer itself.
   // Only sentence-ending punctuation (。！？.!? + newline) should terminate the capture.
-  const tail = analysis.length > 300 ? analysis.substring(analysis.length - 300) : analysis
+  const tail = analysis.length > 800 ? analysis.substring(analysis.length - 800) : analysis
   const answerMarkerPatterns = [
-    /因此正确答案是[：:]\s*([^\n。！？.!?]+)/i,
-    /正确答案是[：:]\s*([^\n。！？.!?]+)/i,
-    /答案为[：:]\s*([^\n。！？.!?]+)/i,
-    /答案是[：:]\s*([^\n。！？.!?]+)/i,
-    /最终答案[：:]\s*([^\n。！？.!?]+)/i,
+    // "所以正确答案：14和2310" (no "是" after "正确答案")
+    /(?:所以|因此|故)正确答案[：:]?\s*([^\n。！？.!?]+)/i,
+    // "因此正确答案是：14和2310"
+    /因此正确答案是[：:]?\s*([^\n。！？.!?]+)/i,
+    // "正确答案是：14和2310"
+    /正确答案是[：:]?\s*([^\n。！？.!?]+)/i,
+    // "正确答案：14和2310" (no "是")
+    /正确答案[：:]?\s*([^\n。！？.!?]+)/i,
+    // "答案为：14和2310"
+    /答案为[：:]?\s*([^\n。！？.!?]+)/i,
+    // "故答案为：14和2310"
+    /故答案为[：:]?\s*([^\n。！？.!?]+)/i,
+    // "答案是：14和2310" (with or without colon)
+    /答案是[：:]?\s*([^\n。！？.!?]+)/i,
+    // "最终答案：14和2310"
+    /最终答案[：:]?\s*([^\n。！？.!?]+)/i,
   ]
 
   for (const pattern of answerMarkerPatterns) {
@@ -1655,8 +1666,27 @@ const processWorkbookGrading = async (job) => {
 }
 
 export const processTask = async (job) => {
-  const { taskId, studentId, imageUrl: rawImageUrl, originalName, generatedExamId } = job.data
+  const { taskId, studentId, imageUrl: rawImageUrl, originalName } = job.data
   const startTime = Date.now()
+
+  // ── 路由字段兜底：恢复链路重新入队的 job 可能缺 taskType/worksheetId/generatedExamId，
+  // 从 tasks 行回读，防止 workbook/错题重练任务被静默降级为完整 AI 管线 ──
+  if (job.data.taskType === undefined && taskId) {
+    try {
+      const { rows } = await query(
+        `SELECT task_type, worksheet_id, generated_exam_id FROM ${TABLES.TASKS} WHERE id = $1`,
+        [taskId]
+      )
+      if (rows[0]) {
+        job.data.taskType = rows[0].task_type || 'general'
+        if (!job.data.worksheetId) job.data.worksheetId = rows[0].worksheet_id || null
+        if (!job.data.generatedExamId) job.data.generatedExamId = rows[0].generated_exam_id || null
+      }
+    } catch (e) {
+      console.error(`⚠️ 路由字段回读失败 taskId=${taskId}:`, e.message)
+    }
+  }
+  const generatedExamId = job.data.generatedExamId
 
   // ── 精简管线（错题重练）：按组卷 question_ids 匹配题库已存答案，自动判定 ──
   // 不跑完整 OCR+AI作答+AI判卷 worker，仅 OCR 学生手写答案 → 与存储答案 deterministic 比对

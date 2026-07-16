@@ -71,7 +71,8 @@ class PendingTaskRecovery {
       console.log('[PendingTaskRecovery]  开始扫描 failed 任务...')
 
       const { rows } = await query(
-        `SELECT id, student_id, image_url, images, original_name, status, created_at, result, retry_count, last_error
+        `SELECT id, student_id, image_url, images, original_name, status, created_at, result, retry_count, last_error,
+                task_type, worksheet_id, generated_exam_id, subject
          FROM ${TABLES.TASKS}
          WHERE status = 'failed'
            AND COALESCE(retry_count, 0) < $1
@@ -117,6 +118,11 @@ class PendingTaskRecovery {
             imageUrl: task.image_url,
             images: task.images || null,
             originalName: task.original_name,
+            // 路由字段必须随恢复 job 带全，否则 workbook/错题重练任务会被静默降级为完整 AI 管线
+            taskType: task.task_type || 'general',
+            worksheetId: task.worksheet_id || null,
+            generatedExamId: task.generated_exam_id || null,
+            subject: task.subject || null,
             retryCount: (task.retry_count || 0) + 1
           }, {
             attempts: parseInt(process.env.MAX_RETRIES) || 3,
@@ -144,7 +150,8 @@ class PendingTaskRecovery {
       console.log('[PendingTaskRecovery]  开始扫描 stuck processing 任务...')
 
       const { rows } = await query(
-        `SELECT id, student_id, image_url, images, original_name, status, started_at, retry_count
+        `SELECT id, student_id, image_url, images, original_name, status, started_at, retry_count,
+                task_type, worksheet_id, generated_exam_id, subject
          FROM ${TABLES.TASKS}
          WHERE status = 'processing'
            AND (started_at IS NULL OR started_at < NOW() - INTERVAL '${PROCESSING_TIMEOUT_MS / 1000 / 60} minutes')
@@ -185,6 +192,11 @@ class PendingTaskRecovery {
             imageUrl: task.image_url,
             images: task.images || null,
             originalName: task.original_name,
+            // 路由字段必须随恢复 job 带全，否则 workbook/错题重练任务会被静默降级为完整 AI 管线
+            taskType: task.task_type || 'general',
+            worksheetId: task.worksheet_id || null,
+            generatedExamId: task.generated_exam_id || null,
+            subject: task.subject || null,
             retryCount: (task.retry_count || 0) + 1
           }, {
             attempts: parseInt(process.env.MAX_RETRIES) || 3,
@@ -211,7 +223,8 @@ class PendingTaskRecovery {
 
       // Find tasks that have been pending for too long
       const { rows } = await query(
-        `SELECT id, student_id, image_url, images, original_name, status, created_at, result
+        `SELECT id, student_id, image_url, images, original_name, status, created_at, result,
+                task_type, worksheet_id, generated_exam_id, subject
          FROM ${TABLES.TASKS}
          WHERE status = 'pending'
          AND created_at < NOW() - INTERVAL '${PENDING_TIMEOUT_MS / 1000 / 60} minutes'
@@ -257,6 +270,11 @@ class PendingTaskRecovery {
             imageUrl: task.image_url,
             images: task.images || null,
             originalName: task.original_name,
+            // 路由字段必须随恢复 job 带全，否则 workbook/错题重练任务会被静默降级为完整 AI 管线
+            taskType: task.task_type || 'general',
+            worksheetId: task.worksheet_id || null,
+            generatedExamId: task.generated_exam_id || null,
+            subject: task.subject || null,
             retryCount,
             recovered: true
           }, {
