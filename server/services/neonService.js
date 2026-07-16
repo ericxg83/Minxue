@@ -1,5 +1,5 @@
 import { randomUUID } from 'node:crypto'
-import { query, TABLES } from '../config/neon.js'
+import { query, TABLES, transaction } from '../config/neon.js'
 import { checkQuestionCompleteness } from '../utils/questionCompleteness.js'
 
 export const updateTaskStatus = async (taskId, status, result = null) => {
@@ -828,6 +828,32 @@ export const batchInsertAnswers = async (worksheetId, answers) => {
   return rows
 }
 
+/**
+ * 事务性替换练习册答案：先清空后插入，避免并发解析产生重复行
+ */
+export const replaceWorksheetAnswers = async (worksheetId, answers) => {
+  return transaction(async (client) => {
+    await client.query(`DELETE FROM ${TABLES.WORKSHEET_ANSWERS} WHERE worksheet_id = $1`, [worksheetId])
+    if (!answers || answers.length === 0) return []
+    const values = answers.map((_, i) =>
+      `($1, $${i * 4 + 2}, $${i * 4 + 3}, $${i * 4 + 4}, $${i * 4 + 5})`
+    ).join(',')
+    const params = [worksheetId]
+    for (const a of answers) {
+      params.push(a.question_no, a.answer, a.answer_type || 'choice', a.section || null)
+    }
+    const { rows } = await client.query(
+      `INSERT INTO ${TABLES.WORKSHEET_ANSWERS} (worksheet_id, question_no, answer, answer_type, section)
+       VALUES ${values}
+       ON CONFLICT (worksheet_id, section, question_no)
+       DO UPDATE SET answer = EXCLUDED.answer, answer_type = EXCLUDED.answer_type
+       RETURNING *`,
+      params
+    )
+    return rows
+  })
+}
+
 export const getWorksheetAnswers = async (worksheetId) => {
   const { rows } = await query(
     `SELECT * FROM ${TABLES.WORKSHEET_ANSWERS}
@@ -878,7 +904,8 @@ export const upsertStudentWorksheetSetting = async (studentId, subject, workshee
 // ── Worker 用：查找单条答案 ──
 
 export const lookupWorksheetAnswer = async (worksheetId, questionNo) => {
-  // ORDER BY created_at DESC：若历史上存在重复题号（旧版重复解析产生），取最新一条，保证确定性
+  // 保留重复条目场景下的一致性：若存在重复（旧版无事务解析产生），取最新一条
+  // 最近一次解析的答案可靠性最高
   const { rows } = await query(
     `SELECT answer, answer_type FROM ${TABLES.WORKSHEET_ANSWERS}
      WHERE worksheet_id = $1 AND question_no = $2

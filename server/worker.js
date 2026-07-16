@@ -1497,21 +1497,24 @@ const processWorkbookGrading = async (job) => {
 
   // 4. OCR — 只提取题号+学生答案，不要求 AI 生成参考答案
   // 使用更简单的 prompt，减少 token 消耗
-  const workbookPrompt = `你是一个作业批改助手。请识别图片中每道题的题号和学生手写答案。
+  const workbookPrompt = `你是一个专业的学生手写答案识别助手。请从作业图片中提取每道题的题号和对应的学生手写答案。
+
+⚠️ 关键：请严格区分印刷体文字和手写文字
+- 印刷体文字（题目、选项、题号数字等）→ 不要作为 student_answer
+- 手写体文字（学生书写的内容）→ 这才是 student_answer
 
 只输出 JSON 数组，格式：
 [
   {
     "question_number": 1,
-    "student_answer": "A",
-    "content": "题目内容（可选）",
+    "student_answer": "学生手写的答案文本，没有则填 null",
     "question_type": "choice"  // choice | fill | answer
   }
 ]
 
 注意：
-- question_number 必须是数字
-- student_answer 是学生手写的答案，没有则填 null
+- question_number 从印刷体题号读取，必须是数字
+- student_answer 只提取学生手写的内容，如果没有手写迹，填 null
 - 不要猜测标准答案
 - 只返回 JSON，不要其他文字`
 

@@ -22,6 +22,7 @@ import { migrateTaskSystemFields } from './migrations/022_task_system_fields.js'
 import { migrateWorksheets } from './migrations/023_add_worksheets_tables.js'
 import { migrateTaskImages } from './migrations/024_add_task_images.js'
 import { migrateWorksheetParseStatus } from './migrations/025_add_worksheet_parse_status.js'
+import { migrateDeduplicateWorksheetAnswers } from './migrations/026_dedupe_worksheet_answers.js'
 
 const __dirname = dirname(fileURLToPath(import.meta.url))
 dotenv.config({ path: resolve(__dirname, '.env') })
@@ -2203,6 +2204,7 @@ if (process.argv[1] === __filename || process.argv[1]?.endsWith('server/index.js
       await migrateWorksheets()
       await migrateTaskImages()
       await migrateWorksheetParseStatus()
+      await migrateDeduplicateWorksheetAnswers()
     } catch (err) {
       console.error('数据库迁移失败:', err.message)
     }
