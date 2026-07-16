@@ -220,7 +220,7 @@ app.post('/api/tasks/upload', upload.array('files', 20), async (req, res) => {
         const { rows } = await query(
           `INSERT INTO ${TABLES.TASKS} (student_id, image_url, images, original_name, status, result, task_type, generated_exam_id, worksheet_id, subject)
            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10) RETURNING *`,
-          [resolvedStudentId, firstUrl, JSON.stringify(images), taskName, TASK_STATUS.PENDING, JSON.stringify({ progress: 0 }), normalizedTaskType, normalizedGeneratedExamId, worksheetId || null, subject || null]
+          [resolvedStudentId, firstUrl, JSON.stringify(images), taskName, TASK_STATUS.PROCESSING, JSON.stringify({ progress: 0 }), normalizedTaskType, normalizedGeneratedExamId, worksheetId || null, subject || null]
         )
 
         const savedTask = rows[0]

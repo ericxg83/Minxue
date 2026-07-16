@@ -885,6 +885,7 @@ export default function App() {
 
     let successCount = 0
     let failedCount = 0
+    let realTaskId = null
 
     // 批量上传所有文件（单次请求 → 后端合并为一个任务）
     try {
@@ -899,6 +900,7 @@ export default function App() {
 
       if (taskResult && !taskResult.error) {
         successCount = 1
+        realTaskId = taskResult.id
         updateTaskInStore(tempTask.id, 'processing', { progress: 0 })
         setTasks(prev => prev.map(t =>
           t.id === tempTask.id ? { ...taskResult, status: 'processing', pages: taskResult.images || tempTask.pages, is_temp: false } : t
@@ -918,7 +920,13 @@ export default function App() {
     if (successCount > 0) {
       console.debug('🔄 [uploadViaBackend] Invalidating cache and reloading tasks')
       invalidateCache('tasks', currentStudent.id)
-      loadTasks()
+      loadTasks().then(() => {
+        // loadTasks 异步完成会从服务端拉取数据（status=pending），
+        // 覆盖掉刚才设置的 processing 状态，需要重新确认
+        if (realTaskId) {
+          updateTaskInStore(realTaskId, 'processing', { progress: 0 })
+        }
+      })
     }
 
     if (failedCount > 0) {
