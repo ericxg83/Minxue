@@ -1511,50 +1511,40 @@ export function pickAnswerSection(answersBySection, pageTitle, questions) {
 }
 
 const processWorkbookGrading = async (job) => {
-  const { taskId, studentId, imageUrl: rawImageUrl, worksheetId } = job.data
+  const { taskId, studentId, imageUrl: rawImageUrl, worksheetId, images: jobImages } = job.data
   const startTime = Date.now()
 
   console.log(`\n📘 [Workbook] 开始练习册批改 taskId=${taskId}, worksheetId=${worksheetId}`)
 
-  // 1. 解析 imageUrl
-  let imageUrl
-  if (typeof rawImageUrl === 'string') {
-    imageUrl = rawImageUrl.startsWith('{')
-      ? (JSON.parse(rawImageUrl).url || '')
-      : rawImageUrl
-  } else {
-    imageUrl = rawImageUrl?.url || String(rawImageUrl || '')
+  // 1. 收集所有待处理的图片URL（支持多页）
+  const resolveUrl = (url) => {
+    if (typeof url === 'string') return url.startsWith('{') ? (JSON.parse(url).url || '') : url
+    return url?.url || String(url || '')
   }
-  if (!imageUrl?.startsWith('http')) {
+
+  let imageList
+  if (Array.isArray(jobImages) && jobImages.length > 0) {
+    imageList = jobImages.map(img => ({
+      image_url: resolveUrl(img.image_url),
+      page_number: img.page_number || 0
+    }))
+  } else {
+    // 降级：只有单张图片
+    imageList = [{ image_url: resolveUrl(rawImageUrl), page_number: 1 }]
+  }
+
+  imageList = imageList.filter(img => img.image_url?.startsWith('http'))
+
+  if (imageList.length === 0) {
     await updateTaskStatus(taskId, TASK_STATUS.FAILED, {
-      error: 'imageUrl 无效', errorType: 'INVALID_URL'
+      error: '所有图片URL无效', errorType: 'INVALID_URL'
     })
-    throw new Error('imageUrl 无效')
+    throw new Error('所有图片URL无效')
   }
 
   await updateTaskStatus(taskId, TASK_STATUS.PROCESSING, { progress: 5 })
 
-  // 2. 下载图片
-  const imagePath = await downloadImage(imageUrl)
-  if (!imagePath) {
-    await updateTaskStatus(taskId, TASK_STATUS.FAILED, {
-      error: '图片下载失败', errorType: 'DOWNLOAD_FAILED'
-    })
-    throw new Error('图片下载失败')
-  }
-
-  await updateTaskStatus(taskId, TASK_STATUS.PROCESSING, { progress: 15 })
-
-  // 3. 纠偏 + 压缩
-  const compressedBuffer = await sharp(imagePath)
-    .rotate()
-    .resize(1920, undefined, { fit: 'inside', withoutEnlargement: true })
-    .jpeg({ quality: 85 })
-    .toBuffer()
-
-  await updateTaskStatus(taskId, TASK_STATUS.PROCESSING, { progress: 30 })
-
-  // 4. OCR — 提取页面标题 + 题号 + 学生答案，不要求 AI 生成参考答案
+  // 2. 逐页处理：下载 → 压缩 → OCR → 解析
   const workbookPrompt = `你是一个专业的学生手写答案识别助手。请从作业图片中提取页面标题和每道题的题号、学生手写答案。
 
 ⚠️ 关键：请严格区分印刷体文字和手写文字
@@ -1580,61 +1570,102 @@ const processWorkbookGrading = async (job) => {
 - 不要猜测标准答案
 - 只返回 JSON，不要其他文字`
 
-  console.log(`   [Workbook] 开始 AI 识别标题+题号+学生答案...`)
-  const { content } = await callVisionCompletion({
-    imageDataURL: `data:image/jpeg;base64,${compressedBuffer.toString('base64')}`,
-    systemPrompt: workbookPrompt,
-    userText: '识别这张作业图片的页面标题和所有题目的学生答案。',
-    temperature: 0.1,
-    maxTokens: 4096
-  })
+  let allQuestions = []
+  let allPageTitles = []
+  let ocrErrors = 0
 
-  await updateTaskStatus(taskId, TASK_STATUS.PROCESSING, { progress: 60 })
+  for (let pageIdx = 0; pageIdx < imageList.length; pageIdx++) {
+    const { image_url: url } = imageList[pageIdx]
+    console.log(`   [Workbook] 处理第 ${pageIdx + 1}/${imageList.length} 页: ${url.substring(0, 60)}...`)
 
-  if (!content) {
-    await updateTaskStatus(taskId, TASK_STATUS.FAILED, {
-      error: 'AI 识别返回为空', errorType: 'AI_EMPTY'
-    })
-    throw new Error('AI 识别返回为空')
-  }
-
-  // 解析 JSON（兼容旧格式：纯数组 = 无标题）
-  let questions = []
-  let pageTitle = null
-  try {
-    const jsonMatch = content.match(/```json\n?([\s\S]*?)\n?```/) ||
-                      content.match(/```\n?([\s\S]*?)\n?```/) ||
-                      content.match(/[\[{][\s\S]*[\]}]/)
-    const jsonStr = jsonMatch ? jsonMatch[1] || jsonMatch[0] : content
-    const parsed = JSON.parse(jsonStr)
-    if (Array.isArray(parsed)) {
-      questions = parsed
-    } else if (parsed && typeof parsed === 'object') {
-      pageTitle = parsed.page_title || null
-      questions = Array.isArray(parsed.questions) ? parsed.questions : []
+    // 下载图片
+    let imageBuffer
+    try {
+      imageBuffer = await downloadImage(url)
+    } catch (e) {
+      console.error(`   [Workbook] 第 ${pageIdx + 1} 页下载失败:`, e.message)
+      ocrErrors++
+      continue
     }
-  } catch (e) {
-    console.error(`   [Workbook] JSON 解析失败:`, e.message)
-    await updateTaskStatus(taskId, TASK_STATUS.FAILED, {
-      error: 'AI 识别结果解析失败', errorType: 'JSON_PARSE_ERROR'
+
+    // 纠偏 + 压缩
+    const compressedBuffer = await sharp(imageBuffer)
+      .rotate()
+      .resize(1920, undefined, { fit: 'inside', withoutEnlargement: true })
+      .jpeg({ quality: 85 })
+      .toBuffer()
+
+    // OCR
+    const { content } = await callVisionCompletion({
+      imageDataURL: `data:image/jpeg;base64,${compressedBuffer.toString('base64')}`,
+      systemPrompt: workbookPrompt,
+      userText: '识别这张作业图片的页面标题和所有题目的学生答案。',
+      temperature: 0.1,
+      maxTokens: 4096
     })
-    throw new Error('JSON 解析失败')
+
+    if (!content) {
+      console.error(`   [Workbook] 第 ${pageIdx + 1} 页AI识别返回为空，跳过`)
+      ocrErrors++
+      continue
+    }
+
+    // 解析 JSON
+    let questions = []
+    let pageTitle = null
+    try {
+      const jsonMatch = content.match(/```json\n?([\s\S]*?)\n?```/) ||
+                        content.match(/```\n?([\s\S]*?)\n?```/) ||
+                        content.match(/[\[{][\s\S]*[\]}]/)
+      const jsonStr = jsonMatch ? jsonMatch[1] || jsonMatch[0] : content
+      const parsed = JSON.parse(jsonStr)
+      if (Array.isArray(parsed)) {
+        questions = parsed
+      } else if (parsed && typeof parsed === 'object') {
+        pageTitle = parsed.page_title || null
+        questions = Array.isArray(parsed.questions) ? parsed.questions : []
+      }
+    } catch (e) {
+      console.error(`   [Workbook] 第 ${pageIdx + 1} 页JSON解析失败:`, e.message)
+      ocrErrors++
+      continue
+    }
+
+    console.log(`   [Workbook] 第 ${pageIdx + 1} 页: 识别到 ${questions.length} 道题, 标题="${pageTitle}"`)
+
+    // 标记每道题来自哪页图片，保存时写入 image_url
+    for (const q of questions) {
+      q._page_image_url = url
+    }
+
+    allQuestions.push(...questions)
+    if (pageTitle) allPageTitles.push(pageTitle)
+
+    const progress = 5 + Math.round(((pageIdx + 1) / imageList.length) * 60)
+    await updateTaskStatus(taskId, TASK_STATUS.PROCESSING, { progress })
   }
 
-  console.log(`   [Workbook] AI 识别到 ${questions.length} 道题, 页面标题="${pageTitle}"`)
+  // 所有页面都识别失败
+  if (allQuestions.length === 0) {
+    const errorDetail = ocrErrors > 0 ? `${ocrErrors} 页识别失败` : '所有页面识别结果为空'
+    await updateTaskStatus(taskId, TASK_STATUS.FAILED, {
+      error: errorDetail, errorType: 'AI_EMPTY'
+    })
+    throw new Error(errorDetail)
+  }
 
-  // 5. 章节感知的答案匹配：
-  // 练习册答案按 (section, question_no) 存储，多套试卷题号重叠。
-  // 旧逻辑忽略 section 直接按题号取"最新一条"，会拿到其它章节的答案 → 全部判错。
-  // 新逻辑：先用页面标题匹配章节；匹配不到则按"题号覆盖率 + 题型吻合度"打分选章节。
+  // 3. 章节感知的答案匹配
   const answersBySection = await getWorksheetAnswersBySection(worksheetId)
-  const matchedSection = pickAnswerSection(answersBySection, pageTitle, questions)
+  const bestPageTitle = allPageTitles[0] || null
+  const matchedSection = pickAnswerSection(answersBySection, bestPageTitle, allQuestions)
   const sectionAnswers = matchedSection !== null ? answersBySection.get(matchedSection) : null
-  console.log(`   [Workbook] 章节匹配: "${pageTitle}" → "${matchedSection}" (共 ${answersBySection.size} 个章节)`)
+  console.log(`   [Workbook] 章节匹配: "${bestPageTitle}" → "${matchedSection}" (共 ${answersBySection.size} 个章节, ${allQuestions.length} 道题)`)
 
+  // 4. 逐题判定
   let wrongCount = 0
   let matchedCount = 0
-  for (const q of questions) {
+  let emptyCount = 0
+  for (const q of allQuestions) {
     if (!q.question_number) continue
 
     const answerRow = sectionAnswers ? sectionAnswers.get(Number(q.question_number)) : null
@@ -1644,12 +1675,14 @@ const processWorkbookGrading = async (job) => {
       q.question_type = answerRow.answer_type || q.question_type || 'choice'
       matchedCount++
 
-      if (q.student_answer && q.student_answer !== 'null') {
+      const hasAnswer = q.student_answer && q.student_answer !== 'null' && q.student_answer !== '未作答'
+      if (hasAnswer) {
         const judgment = judgeAnswer(q.student_answer, q.answer, q.question_type)
         q.is_correct = judgment.isCorrect
         if (q.is_correct === false) wrongCount++
       } else {
         q.is_correct = null // 未作答
+        emptyCount++
       }
       console.log(`   [Workbook] 题 ${q.question_number}: 学生="${q.student_answer}" 标准="${q.answer}" → ${q.is_correct === true ? '正确' : q.is_correct === false ? '错误' : '待人工'}`)
     } else {
@@ -1657,24 +1690,25 @@ const processWorkbookGrading = async (job) => {
       q.is_correct = null
     }
   }
-  console.log(`   [Workbook] 答案匹配: ${matchedCount}/${questions.length} 题, 错误: ${wrongCount} 题`)
+  console.log(`   [Workbook] 答案匹配: ${matchedCount}/${allQuestions.length} 题, 错误: ${wrongCount} 题, 空: ${emptyCount} 题`)
 
   // 匹配率过低（<50%）视为章节定位失败，不做对错判定，全部转人工，避免"整页全错"
-  if (questions.length >= 5 && matchedCount > 0 && matchedCount < questions.length * 0.5) {
-    console.warn(`   [Workbook] ⚠️ 匹配率过低 (${matchedCount}/${questions.length})，判定结果不可信，全部转人工`)
-    for (const q of questions) { q.is_correct = null }
+  if (allQuestions.length >= 5 && matchedCount > 0 && matchedCount < allQuestions.length * 0.5) {
+    console.warn(`   [Workbook] ⚠️ 匹配率过低 (${matchedCount}/${allQuestions.length})，判定结果不可信，全部转人工`)
+    for (const q of allQuestions) { q.is_correct = null }
     wrongCount = 0
+    emptyCount = 0
   }
 
-  await updateTaskStatus(taskId, TASK_STATUS.PROCESSING, { progress: 80 })
+  await updateTaskStatus(taskId, TASK_STATUS.PROCESSING, { progress: 75 })
 
-  // 6. 保存到数据库（复用现有 createQuestions）
+  // 5. 保存到数据库（复用现有 createQuestions）
   // 幂等：恢复链路/重试可能对同一 task 重复执行，先清掉旧题目行防止成倍重复
   const deletedOld = await deleteQuestionsByTaskId(taskId)
   if (deletedOld > 0) {
     console.log(`   [Workbook] 幂等清理: 删除旧题目 ${deletedOld} 行 (taskId=${taskId})`)
   }
-  const questionsWithStudentId = questions.map(q => ({
+  const questionsWithStudentId = allQuestions.map(q => ({
     ...q,
     id: crypto.randomUUID(),
     student_id: studentId,
@@ -1687,14 +1721,16 @@ const processWorkbookGrading = async (job) => {
     is_complete: true,
     confidence: q.is_correct !== null ? 0.95 : null,
     question_type: q.question_type || 'choice',
-    image_url: imageUrl,
+    image_url: q._page_image_url || imageList[0]?.image_url || '',
     source_type: 'workbook'
   }))
+  // 清除临时标记字段
+  for (const q of questionsWithStudentId) { delete q._page_image_url }
 
   await createQuestions(questionsWithStudentId)
 
-  // 7. 同步错题本（错误的写入）
-  const wrongQuestionIds = questions
+  // 6. 同步错题本（错误的写入）
+  const wrongQuestionIds = allQuestions
     .filter(q => q.is_correct === false && q.question_number)
     .map(q => q.question_number)
   if (wrongQuestionIds.length > 0) {
@@ -1704,7 +1740,6 @@ const processWorkbookGrading = async (job) => {
         questionMap[q.question_number] = q
       }
     })
-    // 需要查询实际 question_id（临时用 question_number 关联）
     const { rows: dbQuestions } = await query(
       `SELECT id, question_number FROM ${TABLES.QUESTIONS} WHERE task_id = $1`,
       [taskId]
@@ -1719,9 +1754,9 @@ const processWorkbookGrading = async (job) => {
     }
   }
 
-  // 8. 记录 judgement
+  // 7. 记录 judgement
   for (const q of questionsWithStudentId) {
-    if (q.answer && q.student_answer) {
+    if (q.answer && q.student_answer && q.student_answer !== 'null') {
       try {
         await createJudgement({
           questionId: q.id,
@@ -1741,19 +1776,19 @@ const processWorkbookGrading = async (job) => {
     }
   }
 
-  // 9. 完成
+  // 8. 完成
   const duration = ((Date.now() - startTime) / 1000).toFixed(1)
   await updateTaskStatus(taskId, TASK_STATUS.DONE, {
     progress: 100,
-    questionCount: questions.length,
+    questionCount: allQuestions.length,
     wrongCount,
     matchedCount,
-    emptyCount: 0,
+    emptyCount,
     duration: `${duration}s`,
     source: 'workbook'
   })
 
-  console.log(`✅ [Workbook] 完成: ${questions.length} 题, ${wrongCount} 错, 耗时 ${duration}s`)
+  console.log(`✅ [Workbook] 完成: ${allQuestions.length} 题, ${wrongCount} 错, ${emptyCount} 空, 共 ${imageList.length} 页, 耗时 ${duration}s`)
 }
 
 export const processTask = async (job) => {
