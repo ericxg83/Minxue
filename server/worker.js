@@ -1656,10 +1656,36 @@ const processWorkbookGrading = async (job) => {
 
   // 3. 章节感知的答案匹配
   const answersBySection = await getWorksheetAnswersBySection(worksheetId)
-  const bestPageTitle = allPageTitles[0] || null
+
+  // 用所有页的 page_title 做多票定标题：取出现次数最多（且非空）的标题
+  // 解决第一页没拍到页眉但后续页拍到的问题
+  const titleFreq = {}
+  for (const t of allPageTitles) {
+    if (t) titleFreq[t] = (titleFreq[t] || 0) + 1
+  }
+  const titleEntries = Object.entries(titleFreq)
+  const bestPageTitle = titleEntries.length > 0
+    ? titleEntries.sort((a, b) => b[1] - a[1])[0][0]
+    : null
+
   const matchedSection = pickAnswerSection(answersBySection, bestPageTitle, allQuestions)
   const sectionAnswers = matchedSection !== null ? answersBySection.get(matchedSection) : null
-  console.log(`   [Workbook] 章节匹配: "${bestPageTitle}" → "${matchedSection}" (共 ${answersBySection.size} 个章节, ${allQuestions.length} 道题)`)
+
+  // 章节匹配诊断信息（写入 task metadata 供前端排查）
+  const sectionMatchInfo = {
+    page_title_count: allPageTitles.length,
+    best_page_title: bestPageTitle,
+    matched_section: matchedSection,
+    total_sections: answersBySection.size,
+    no_header_photo: !bestPageTitle && allPageTitles.length > 0
+  }
+  if (!bestPageTitle && allPageTitles.length === 0) {
+    sectionMatchInfo.match_fail_reason = '所有页面均未识别到页眉/页码（照片可能未拍到页面顶部）'
+  } else if (matchedSection === null) {
+    sectionMatchInfo.match_fail_reason = '题号覆盖率不足50%，无法确认所属章节'
+  }
+
+  console.log(`   [Workbook] 章节匹配: 标题投票=${JSON.stringify(titleFreq)} → "${bestPageTitle}" → "${matchedSection}" (共 ${answersBySection.size} 个章节, ${allQuestions.length} 道题)`)
 
   // 4. 逐题判定
   let wrongCount = 0
@@ -1785,7 +1811,8 @@ const processWorkbookGrading = async (job) => {
     matchedCount,
     emptyCount,
     duration: `${duration}s`,
-    source: 'workbook'
+    source: 'workbook',
+    sectionMatch: sectionMatchInfo
   })
 
   console.log(`✅ [Workbook] 完成: ${allQuestions.length} 题, ${wrongCount} 错, ${emptyCount} 空, 共 ${imageList.length} 页, 耗时 ${duration}s`)
