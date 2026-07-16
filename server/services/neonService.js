@@ -1,3 +1,4 @@
+import { randomUUID } from 'node:crypto'
 import { query, TABLES } from '../config/neon.js'
 import { checkQuestionCompleteness } from '../utils/questionCompleteness.js'
 
@@ -56,7 +57,8 @@ export const createQuestions = async (questions) => {
     }
 
     return {
-      id: q.id,
+      // 防御：questions.id 无数据库默认值，调用方未提供时在此兜底生成
+      id: q.id || randomUUID(),
       task_id: q.task_id,
       student_id: q.student_id,
       content: q.content || null,
@@ -874,11 +876,18 @@ export const upsertStudentWorksheetSetting = async (studentId, subject, workshee
 // ── Worker 用：查找单条答案 ──
 
 export const lookupWorksheetAnswer = async (worksheetId, questionNo) => {
+  // ORDER BY created_at DESC：若历史上存在重复题号（旧版重复解析产生），取最新一条，保证确定性
   const { rows } = await query(
     `SELECT answer, answer_type FROM ${TABLES.WORKSHEET_ANSWERS}
      WHERE worksheet_id = $1 AND question_no = $2
+     ORDER BY created_at DESC
      LIMIT 1`,
     [worksheetId, questionNo]
   )
   return rows[0] || null
+}
+
+// ── 重新解析 PDF 前清空旧答案（重复解析 = 整体替换；section 为 NULL 时唯一约束不生效，必须显式清空）──
+export const clearWorksheetAnswers = async (worksheetId) => {
+  await query(`DELETE FROM ${TABLES.WORKSHEET_ANSWERS} WHERE worksheet_id = $1`, [worksheetId])
 }

@@ -14,6 +14,7 @@ import {
   updateWorksheetAnswer,
   getStudentWorksheetSetting,
   upsertStudentWorksheetSetting,
+  clearWorksheetAnswers,
 } from '../services/neonService.js'
 import { uploadPDF } from '../services/ossService.js'
 import { extractPdfText, renderPdfToJpegs } from '../services/pdfService.js'
@@ -179,6 +180,8 @@ async function parsePdfInBackground(worksheetId, file) {
   parsedAnswers = [...byQuestionNo.values()].sort((a, b) => a.question_no - b.question_no)
 
   if (parsedAnswers.length > 0) {
+    // 重复解析 = 整体替换：先清空旧答案，避免重复条目（NULL section 会绕过唯一约束）
+    await clearWorksheetAnswers(worksheetId)
     await batchInsertAnswers(worksheetId, parsedAnswers)
     await updateWorksheetAnswerCount(worksheetId)
     await updateWorksheetStatus(worksheetId, 'reviewing')

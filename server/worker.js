@@ -1585,6 +1585,7 @@ const processWorkbookGrading = async (job) => {
   // 6. 保存到数据库（复用现有 createQuestions）
   const questionsWithStudentId = questions.map(q => ({
     ...q,
+    id: crypto.randomUUID(),
     student_id: studentId,
     task_id: taskId,
     content: q.content || `第 ${q.question_number} 题`,
@@ -1671,7 +1672,7 @@ export const processTask = async (job) => {
 
   // ── 路由字段兜底：恢复链路重新入队的 job 可能缺 taskType/worksheetId/generatedExamId，
   // 从 tasks 行回读，防止 workbook/错题重练任务被静默降级为完整 AI 管线 ──
-  if (job.data.taskType === undefined && taskId) {
+  if ((job.data.taskType === undefined || (job.data.taskType === 'workbook' && !job.data.worksheetId)) && taskId) {
     try {
       const { rows } = await query(
         `SELECT task_type, worksheet_id, generated_exam_id FROM ${TABLES.TASKS} WHERE id = $1`,
@@ -1685,6 +1686,10 @@ export const processTask = async (job) => {
     } catch (e) {
       console.error(`⚠️ 路由字段回读失败 taskId=${taskId}:`, e.message)
     }
+  }
+  // 兜底后仍缺 worksheetId 的 workbook 任务：显式告警（将降级为 general 管线）
+  if (job.data.taskType === 'workbook' && !job.data.worksheetId) {
+    console.error(`⚠️ [路由] workbook 任务缺少 worksheetId，降级为 general 管线 taskId=${taskId}`)
   }
   const generatedExamId = job.data.generatedExamId
 
