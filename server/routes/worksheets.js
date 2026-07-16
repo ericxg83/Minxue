@@ -196,13 +196,19 @@ async function doParse(worksheetId, file) {
     }
   }
 
-  // 同一题号去重：保留置信度更高的；置信度相同保留靠后的（答案区通常在文末）
-  const byQuestionNo = new Map()
+  // 按 (章节, 题号) 去重：同一章节内保留置信度高的，相同则保留靠后的
+  const byKey = new Map()
   for (const a of parsedAnswers) {
-    const prev = byQuestionNo.get(a.question_no)
-    if (!prev || a.confidence >= prev.confidence) byQuestionNo.set(a.question_no, a)
+    const key = (a.section || '') + '|' + a.question_no
+    const prev = byKey.get(key)
+    if (!prev || a.confidence >= prev.confidence) byKey.set(key, a)
   }
-  parsedAnswers = [...byQuestionNo.values()].sort((a, b) => a.question_no - b.question_no)
+  parsedAnswers = [...byKey.values()].sort((a, b) => {
+    const sa = a.section || ''
+    const sb = b.section || ''
+    if (sa !== sb) return sa.localeCompare(sb, 'zh')
+    return a.question_no - b.question_no
+  })
 
   if (parsedAnswers.length > 0) {
     // 事务性替换：先清空旧答案再插入，避免并发解析产生重复行
@@ -231,11 +237,36 @@ async function doParse(worksheetId, file) {
 function parseAnswerText(text, lowConfidence) {
   const results = []
   const lines = text.split('\n')
+  let currentSection = null
+
+  // 检测章节标题行（如"第一章阶段卷Ⅰ""第三章阶段练Ⅱ""第二章评价测试卷"）
+  const sectionRegex = /^第[一二三四五六七八九十\d]+[章节].*(?:阶段卷|评价测试|阶段练|综合练习|单元测试|测试卷|月考|期中|期末|阶段|练习)/
+
+  const processedLines = []
 
   for (const line of lines) {
     const trimmed = line.trim()
     if (!trimmed) continue
 
+    // 检测章节标题
+    if (sectionRegex.test(trimmed)) {
+      currentSection = trimmed.replace(/[：:].*$/, '').trim() // 去掉冒号后的说明
+      continue // 标题行不加入答案解析
+    }
+
+    // 预处理：拆分行内多答案（如 "19. 2 因素；20. 1/10；21. 1 800 米"）
+    const parts = trimmed.split(/[；;](?=\s*\d+\s*[.．、\s])/)
+    if (parts.length > 1) {
+      for (const part of parts) {
+        const subLine = part.trim()
+        if (subLine) processedLines.push({ line: subLine, section: currentSection })
+      }
+    } else {
+      processedLines.push({ line: trimmed, section: currentSection })
+    }
+  }
+
+  for (const { line: trimmed, section } of processedLines) {
     let m = trimmed.match(/^\(?(\d+)\)?[.．、\s]\s*([A-Da-d])\s*$/)
     if (m) {
       results.push({
@@ -243,6 +274,7 @@ function parseAnswerText(text, lowConfidence) {
         answer: m[2].toUpperCase(),
         answer_type: 'choice',
         confidence: 0.95,
+        section,
       })
       continue
     }
@@ -257,6 +289,7 @@ function parseAnswerText(text, lowConfidence) {
           answer: letters[i],
           answer_type: 'choice',
           confidence: 0.9,
+          section,
         })
       }
       continue
@@ -272,8 +305,9 @@ function parseAnswerText(text, lowConfidence) {
           answer: ans,
           answer_type: 'answer',
           confidence: 0.8,
+          section,
         })
-        lowConfidence.push({ question_no: questionNo, answer: ans })
+        lowConfidence.push({ question_no: questionNo, answer: ans, section })
       }
     }
   }
@@ -284,7 +318,7 @@ function parseAnswerText(text, lowConfidence) {
 async function ocrExtractAnswers(base64Image, lowConfidence = []) {
   const { content } = await callVisionCompletion({
     imageDataURL: `data:image/jpeg;base64,${base64Image}`,
-    systemPrompt: '你是一个作业答案识别助手。请从图片中提取所有题号和对应答案。只输出题号和答案，每行一个，格式如“1. A”或“13. 2017”。',
+    systemPrompt: '你是一个作业答案识别助手。请从图片中提取所有题号和对应答案。只输出题号和答案，每行一个，格式如”1. A”或”13. 2017”。如果图片包含章节标题（如”第一章”或”阶段练”），请在对应答案前保留章节标题行，不要省略。',
     userText: '请提取这份练习册答案中的所有题号和对应答案。',
     temperature: 0.1,
     maxTokens: 4096,

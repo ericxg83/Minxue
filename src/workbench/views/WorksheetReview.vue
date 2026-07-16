@@ -32,6 +32,10 @@
             <el-radio-button value="all">全部</el-radio-button>
             <el-radio-button value="low">低置信度</el-radio-button>
           </el-radio-group>
+          <el-select v-if="sections.length > 0" v-model="sectionFilter" size="small" style="width:180px;margin-left:8px" placeholder="筛选章节">
+            <el-option label="全部章节" value="all" />
+            <el-option v-for="s in sections" :key="s" :label="s" :value="s" />
+          </el-select>
         </div>
         <div class="answer-list">
           <div
@@ -41,6 +45,7 @@
             :class="{ active: selectedAnswer?.id === a.id, low: a.confidence < 0.85 }"
             @click="selectAnswer(a)"
           >
+            <span v-if="a.section" class="qsection">{{ a.section }}</span>
             <span class="qno">{{ a.question_no }}</span>
             <span class="qans">{{ a.answer }}</span>
             <span class="qconf" :class="confClass(a.confidence)">{{ (a.confidence * 100).toFixed(0) }}%</span>
@@ -102,18 +107,27 @@ const worksheet = ref(null)
 const answers = ref([])
 const selectedAnswer = ref(null)
 const filterMode = ref('all')
+const sectionFilter = ref('all')
 const editForm = ref({ answer: '', answer_type: 'choice' })
 const saving = ref(false)
 
-const pdfProxyUrl = computed(() => {
-  return worksheet.value?.pdf_url ? `/api/worksheets/${worksheetId}/pdf` : null
+const sections = computed(() => {
+  const seen = new Set()
+  for (const a of answers.value) {
+    if (a.section) seen.add(a.section)
+  }
+  return [...seen].sort((a, b) => a.localeCompare(b, 'zh'))
 })
 
 const filteredAnswers = computed(() => {
-  if (filterMode.value === 'low') {
-    return answers.value.filter(a => a.confidence < 0.85)
+  let list = answers.value
+  if (sectionFilter.value !== 'all') {
+    list = list.filter(a => a.section === sectionFilter.value)
   }
-  return answers.value
+  if (filterMode.value === 'low') {
+    list = list.filter(a => a.confidence < 0.85)
+  }
+  return list
 })
 
 const statusType = computed(() => {
@@ -306,6 +320,18 @@ const confProgress = (c) => {
   width: 32px;
   font-weight: 600;
   font-size: 13px;
+}
+
+.qsection {
+  font-size: 11px;
+  color: var(--el-color-info);
+  background: var(--wb-bg-hover);
+  padding: 1px 6px;
+  border-radius: 3px;
+  white-space: nowrap;
+  max-width: 120px;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 .qans {
