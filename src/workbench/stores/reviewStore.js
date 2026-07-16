@@ -581,6 +581,9 @@ export const useReviewStore = defineStore('review', () => {
       await mergeJudgements(currentStudent.value.id, allQuestions.value)
     }
 
+    // [多试卷聚合] 同步当前题目归属的任务，确保中间面板图片与题目对应
+    syncTaskForCurrentQuestion()
+
     if (currentStudent.value?.id) {
       await loadWrongQuestions(currentStudent.value.id)
     }

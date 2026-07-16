@@ -46,6 +46,11 @@ function cleanLatex(latex) {
 
   let s = latex
 
+  // --- 0. Unicode normalization (NFC) to fix OCR garbled encoding ---
+  if (typeof s.normalize === 'function') {
+    s = s.normalize('NFC')
+  }
+
   // --- 1. Unicode superscripts -> ^N (e.g. x² -> x^2, y³ -> y^3) ---
   const superscriptMap = {
     '\u2070': '^0', '\u00B9': '^1', '\u00B2': '^2', '\u00B3': '^3',
@@ -104,8 +109,13 @@ function renderToHtml(text) {
     return text || ''
   }
 
-  // autoDetect: 若没有 $ 定界符但包含 LaTeX 命令，将全文视为行内数学
-  if (props.autoDetect && text.indexOf('$') === -1 && /\\[a-zA-Z]{2,}/.test(text)) {
+  // Unicode normalization to fix OCR garbled encoding
+  if (typeof text.normalize === 'function') {
+    text = text.normalize('NFC')
+  }
+
+  // autoDetect: 若没有 $ 定界符但包含已知 LaTeX 命令，将全文视为行内数学
+  if (props.autoDetect && text.indexOf('$') === -1 && /^\s*\\[a-zA-Z]/.test(text) && /\\[a-zA-Z]{2,}/.test(text)) {
     try {
       return katex.renderToString(cleanLatex(text), { displayMode: false, throwOnError: false })
     } catch (e) {

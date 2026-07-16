@@ -315,7 +315,7 @@ const reviewStatusTagType = computed(() => {
   return map[q.value?.review_status] || 'info'
 })
 
-// AI状态相关方法（与store保持一致）
+//AI状态相关方法（与store保持一致）
 const getAiState = (q) => {
   if (!q) return 'processing'
 
@@ -334,7 +334,8 @@ const getAiState = (q) => {
 
   // AI 正确 + 已确认（人工复核 或 置信度达标）
   const manual = !!q.review_status
-  const confirmed = manual || (q.confidence != null && q.confidence >= store.confidenceThreshold.value)
+  // 注意：Pinia 自动解包 ref，store.confidenceThreshold 已是数字，不能加 .value
+  const confirmed = manual || (q.confidence != null && q.confidence >= store.confidenceThreshold)
   if (q.is_correct === true && confirmed) return 'correct'
 
   // 其余 → 待复核（置信度不足 / AI 不确定）
