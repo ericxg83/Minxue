@@ -27,8 +27,8 @@ export default function UploadTypeSelector({ visible, onClose, onUpload }) {
 
   const selectWorkbook = async () => {
     setUploadType('workbook')
-    setShowStudentSelector(true)
     await loadWorksheets()
+    setShowStudentSelector(true)
   }
 
   const selectRegular = () => {
@@ -66,10 +66,15 @@ export default function UploadTypeSelector({ visible, onClose, onUpload }) {
         if (worksheet) {
           setSelectedWorksheet(worksheet)
           setShowWorksheetPicker(false)
+          return // 找到默认练习册，不显示选择器
         }
       }
+      // 没有默认练习册，显示选择器
+      setShowWorksheetPicker(true)
     } catch (error) {
       console.error('Failed to check default worksheet:', error)
+      // 出错时也显示选择器
+      setShowWorksheetPicker(true)
     }
   }
 
