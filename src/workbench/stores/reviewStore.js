@@ -31,6 +31,9 @@ export const useReviewStore = defineStore('review', () => {
   
   // 当前审核的题目索引
   const currentReviewIndex = ref(0)
+
+  // 多试卷聚合：题目 → 所属任务映射（image 模式，pending 任务聚合）
+  const questionToTaskMap = ref({})
   
   // 审核状态
   const reviewStatus = ref('idle') // idle, reviewing, completed
@@ -276,6 +279,7 @@ export const useReviewStore = defineStore('review', () => {
     currentTask.value = null
     allQuestions.value = []
     currentReviewIndex.value = 0
+    questionToTaskMap.value = {}
     reviewAllDone.value = true
     return null
   }
@@ -292,6 +296,7 @@ export const useReviewStore = defineStore('review', () => {
   const nextQuestion = () => {
     if (currentReviewIndex.value < allQuestions.value.length - 1) {
       currentReviewIndex.value++
+      syncTaskForCurrentQuestion()
       return true
     }
     return false
@@ -301,6 +306,7 @@ export const useReviewStore = defineStore('review', () => {
   const prevQuestion = () => {
     if (currentReviewIndex.value > 0) {
       currentReviewIndex.value--
+      syncTaskForCurrentQuestion()
       return true
     }
     return false
@@ -310,6 +316,22 @@ export const useReviewStore = defineStore('review', () => {
   const jumpToQuestion = (idx) => {
     if (idx >= 0 && idx < allQuestions.value.length) {
       currentReviewIndex.value = idx
+      syncTaskForCurrentQuestion()
+    }
+  }
+
+  // 多试卷聚合模式：根据当前题目的归属任务切换 currentTask，使 PaperViewerPanel 显示正确页图
+  const syncTaskForCurrentQuestion = () => {
+    if (source.value !== 'image') return
+    const q = allQuestions.value[currentReviewIndex.value]
+    if (!q) return
+    const taskId = questionToTaskMap.value[q.id]
+    if (taskId && taskId !== currentTask.value?.id) {
+      const task = studentTasks.value.find(t => t.id === taskId)
+      if (task) {
+        currentTask.value = task
+        currentPageIndex.value = 0
+      }
     }
   }
 
@@ -386,7 +408,25 @@ export const useReviewStore = defineStore('review', () => {
       openWrongGate(list)
       return
     }
-    // 先刷新统计数据
+    // 聚合模式：一次性完成所有待复核任务
+    const isAggregated = source.value === 'image' && Object.keys(questionToTaskMap.value).length > 0
+    if (isAggregated) {
+      const pending = studentTasks.value.filter(t => t.status === 'done')
+      for (const task of pending) {
+        await persistTaskCompletion(task)
+      }
+      if (currentStudent.value?.id) {
+        clearStudentCaches(currentStudent.value.id)
+      }
+      await loadStudentTasks(currentStudent.value.id)
+      allQuestions.value = []
+      questionToTaskMap.value = {}
+      currentTask.value = null
+      currentReviewIndex.value = 0
+      reviewAllDone.value = true
+      return
+    }
+    // 原有单试卷流程
     await persistTaskCompletion(currentTask.value)
     currentTask.value.status = 'reviewed'
     if (currentStudent.value?.id) {
@@ -486,6 +526,31 @@ export const useReviewStore = defineStore('review', () => {
     return pages.filter((_, i) => i !== currentPageIndex.value)
   })
 
+  // 加载所有待复核试卷的题目（image 模式：多试卷聚合）
+  const loadAllPendingQuestions = async () => {
+    const pending = studentTasks.value.filter(t => t.status === 'done')
+    const allQs = []
+    const map = {}
+    for (const task of pending) {
+      try {
+        const questions = await getQuestionsByTask(task.id, false)
+        const sorted = (Array.isArray(questions) ? questions : []).sort((a, b) => {
+          const aOrder = a.sort_order || a.sequence || 0
+          const bOrder = b.sort_order || b.sequence || 0
+          return aOrder - bOrder
+        })
+        for (const q of sorted) {
+          map[q.id] = task.id
+        }
+        allQs.push(...sorted)
+      } catch (e) {
+        console.error(`loadAllPendingQuestions: task ${task.id} 加载题目失败:`, e)
+      }
+    }
+    allQuestions.value = allQs
+    questionToTaskMap.value = map
+  }
+
   // 选择试卷 → 加载题目 + 判定数据 + 错题数据
   const selectTask = async (task) => {
     currentTask.value = task
@@ -493,12 +558,22 @@ export const useReviewStore = defineStore('review', () => {
     currentPageIndex.value = 0
     reviewStatus.value = 'reviewing'
     reviewAllDone.value = false
+    questionToTaskMap.value = {}
 
     if (source.value === 'paper') {
-      // paper 模式：题目来自练习卷 question_ids
       await loadPaperQuestions(task)
     } else {
-      await loadQuestions(task.id)
+      // image 模式：待复核试卷聚合显示所有待复核题目
+      if (task.status === 'done') {
+        if (studentTasks.value.filter(t => t.status === 'done').length > 1) {
+          await loadAllPendingQuestions()
+        } else {
+          // 仅一份待复核，直接加载
+          await loadQuestions(task.id)
+        }
+      } else {
+        await loadQuestions(task.id)
+      }
     }
 
     // [修复] 加载最新判定数据（含 confidence），合并到每道题
@@ -678,6 +753,27 @@ export const useReviewStore = defineStore('review', () => {
   // 完成任务复核：将试卷标记为 reviewed，清理缓存
   const completeTaskReview = async () => {
     if (!currentTask.value) return
+
+    // 聚合模式：一次性完成所有待复核任务（所有试卷一起复核完成）
+    const isAggregated = Object.keys(questionToTaskMap.value).length > 0
+    if (isAggregated) {
+      const pending = studentTasks.value.filter(t => t.status === 'done')
+      for (const task of pending) {
+        await persistTaskCompletion(task)
+      }
+      if (currentStudent.value?.id) {
+        clearStudentCaches(currentStudent.value.id)
+        await loadStudentTasks(currentStudent.value.id)
+      }
+      allQuestions.value = []
+      questionToTaskMap.value = {}
+      currentTask.value = null
+      currentReviewIndex.value = 0
+      reviewAllDone.value = true
+      return
+    }
+
+    // 原有单试卷逻辑
     await persistTaskCompletion(currentTask.value)
     currentTask.value.status = 'reviewed'
     if (currentStudent.value?.id) {
@@ -690,8 +786,15 @@ export const useReviewStore = defineStore('review', () => {
       const sorter = { done: 0, reviewed: 1 }
       studentTasks.value.sort((a, b) => (sorter[a.status] ?? 99) - (sorter[b.status] ?? 99))
     }
-    // 全部待复核试卷完成 → 展示空状态
-    if (!nextTask()) {
+    // 还有待复核试卷 → 重新聚合加载题目；无 → 空状态
+    const next = nextTask()
+    if (next) {
+      await selectTask(next)
+    } else {
+      allQuestions.value = []
+      questionToTaskMap.value = {}
+      currentTask.value = null
+      currentReviewIndex.value = 0
       reviewAllDone.value = true
     }
   }
@@ -799,6 +902,9 @@ export const useReviewStore = defineStore('review', () => {
     currentPageIndex,
     currentPaperPages,
     currentPageImage,
-    setPageIndex
+    setPageIndex,
+    // 多试卷聚合
+    questionToTaskMap,
+    loadAllPendingQuestions
   }
 })

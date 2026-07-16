@@ -12,11 +12,18 @@
         v-for="(q, idx) in store.allQuestions"
         :key="q.id"
         class="nav-item"
-        :class="{ active: idx === store.currentReviewIndex }"
+        :class="{
+          active: idx === store.currentReviewIndex,
+          'paper-start': paperLabels[idx] && idx > 0
+        }"
         @click="onSelect(idx)"
       >
         <StatusIcon :state="store.getAiState(q)" :size="18" />
         <span class="item-label">{{ idx + 1 }}. {{ typeLabel(q.question_type) }}</span>
+        <span
+          v-if="paperLabels[idx]"
+          class="item-paper-tag"
+        >{{ paperLabels[idx] }}</span>
         <span
           v-if="q.difficulty != null"
           class="item-difficulty"
@@ -63,6 +70,26 @@ import StatusIcon from './StatusIcon.vue'
 
 const store = useReviewStore()
 const threshold = ref(store.confidenceThreshold)
+
+// 多试卷聚合：题目归属试卷序号标签（仅每卷首题显示）
+const paperLabels = computed(() => {
+  const map = store.questionToTaskMap
+  if (!map || Object.keys(map).length === 0) return []
+  const taskIds = [...new Set(Object.values(map))]
+  const taskOrder = store.studentTasks
+    .filter(t => taskIds.includes(t.id))
+    .map(t => t.id)
+  const labels = []
+  let currentPaperId = null
+  for (const q of store.allQuestions) {
+    const tid = map[q.id]
+    const isFirst = tid !== currentPaperId
+    if (isFirst) currentPaperId = tid
+    const paperIdx = taskOrder.indexOf(tid)
+    labels.push(isFirst && paperIdx >= 0 ? `卷${paperIdx + 1}` : '')
+  }
+  return labels
+})
 
 const typeLabel = (type) => {
   const map = { choice: '选择题', fill: '填空题', answer: '解答题', judge: '判断题' }
@@ -129,6 +156,13 @@ const onThresholdChange = (val) => {
   transition: background 0.15s;
   gap: 8px;
 }
+.nav-item.paper-start {
+  border-top: 1px dashed #e4e7ed;
+  margin-top: 2px;
+}
+.nav-item.paper-start:first-child {
+  border-top: none;
+}
 .nav-item:hover {
   background: #f5f7fa;
 }
@@ -169,6 +203,16 @@ const onThresholdChange = (val) => {
   white-space: nowrap;
   color: #67c23a;
   background: #f0f9eb;
+}
+.item-paper-tag {
+  font-size: 10px;
+  padding: 0 5px;
+  border-radius: 4px;
+  white-space: nowrap;
+  color: #409eff;
+  background: #ecf5ff;
+  border: 1px solid #d9ecff;
+  flex-shrink: 0;
 }
 .item-difficulty.diff-3 {
   color: #e6a23c;
