@@ -641,13 +641,26 @@ export const upsertStudentWorksheetSetting = async (studentId, subject, workshee
   })
 }
 
-export const uploadPdf = async (id, file, onProgress) => {
+export const uploadPdf = async (id, file, precomputedAnswers = null) => {
   const fd = new FormData()
   fd.append('file', file)
+  if (precomputedAnswers) {
+    fd.append('precomputed_answers', JSON.stringify(precomputedAnswers))
+  }
   const data = await apiRequest(`/worksheets/${id}/parse-pdf`, {
     method: 'POST',
     body: fd,
     onUploadProgress: onProgress
+  })
+  return data
+}
+
+export const uploadImages = async (id, files) => {
+  const fd = new FormData()
+  for (const f of files) fd.append('files', f)
+  const data = await apiRequest(`/worksheets/${id}/parse-images`, {
+    method: 'POST',
+    body: fd
   })
   return data
 }

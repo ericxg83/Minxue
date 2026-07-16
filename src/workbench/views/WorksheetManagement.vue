@@ -71,27 +71,59 @@
       </template>
     </el-dialog>
 
-    <el-dialog v-model="showPdfDialog" title="上传答案 PDF" width="500px" @close="onPdfDialogClose">
-      <div v-if="!pdfUploaded && parseStatus !== 'parsing'">
-        <el-upload
-          drag
-          accept=".pdf"
-          :auto-upload="false"
-          :on-change="handlePdfSelect"
-          :limit="1"
-        >
-          <el-icon class="el-icon--upload" :size="48"><UploadFilled /></el-icon>
-          <div class="el-upload__text">拖拽 PDF 到此处，或 <em>点击选择</em></div>
-          <template #tip>
-            <div class="el-upload__tip">请上传纯答案页 PDF（建议先裁掉题干页，解析更快更准）</div>
-          </template>
-        </el-upload>
-        <div v-if="selectedPdf" class="pdf-info">
-          <p>已选择: {{ selectedPdf.name }}</p>
-          <el-button type="primary" @click="startParse" :loading="parsing" class="mt-3">
-            {{ parsing ? '上传中...' : '开始解析' }}
-          </el-button>
-        </div>
+    <el-dialog v-model="showPdfDialog" title="上传答案" width="550px" @close="onPdfDialogClose">
+      <div v-if="parseStatus !== 'parsing' && parseStatus !== 'done'">
+        <el-tabs v-model="uploadTab">
+          <el-tab-pane label="PDF上传" name="pdf">
+            <el-upload
+              drag
+              accept=".pdf"
+              :auto-upload="false"
+              :on-change="handlePdfSelect"
+              :limit="1"
+            >
+              <el-icon class="el-icon--upload" :size="48"><UploadFilled /></el-icon>
+              <div class="el-upload__text">拖拽 PDF 到此处，或 <em>点击选择</em></div>
+              <template #tip>
+                <div class="el-upload__tip">请上传纯答案页 PDF（建议先裁掉题干页，解析更快更准）</div>
+              </template>
+            </el-upload>
+            <div v-if="selectedPdf" class="pdf-info">
+              <p>已选择: {{ selectedPdf.name }}</p>
+              <el-button type="primary" @click="startParse" :loading="parsing" class="mt-3">
+                {{ parsing ? '上传中...' : '开始解析' }}
+              </el-button>
+            </div>
+          </el-tab-pane>
+          <el-tab-pane label="图片上传" name="image">
+            <el-upload
+              multiple
+              accept="image/jpeg,image/png,image/webp"
+              :auto-upload="false"
+              :on-change="handleImageSelect"
+              :limit="30"
+              :file-list="[]"
+            >
+              <el-icon class="el-icon--upload" :size="48"><PictureFilled /></el-icon>
+              <div class="el-upload__text">拖拽图片到此处，或 <em>点击选择</em></div>
+              <template #tip>
+                <div class="el-upload__tip">支持 JPEG/PNG/WebP，最多 30 张，每张最大 20MB（原图直传，无需裁剪）</div>
+              </template>
+            </el-upload>
+            <div v-if="selectedImages.length > 0" class="image-previews">
+              <div v-for="(img, i) in selectedImages" :key="i" class="img-thumb-item">
+                <img :src="img.url" class="img-thumb" />
+                <span class="img-name">{{ img.name }}</span>
+                <el-button size="small" type="danger" circle @click="removeImage(i)" class="img-remove">×</el-button>
+              </div>
+              <div class="image-actions">
+                <el-button type="primary" @click="startImageParse" :loading="parsing">
+                  {{ parsing ? '上传中...' : `开始解析（${selectedImages.length} 张）` }}
+                </el-button>
+              </div>
+            </div>
+          </el-tab-pane>
+        </el-tabs>
       </div>
       <div v-else-if="parseStatus === 'parsing'" class="parse-result">
         <el-result icon="info" title="正在解析">
@@ -117,7 +149,7 @@
               class="parse-warning"
             />
             <el-button type="primary" @click="gotoReview" :disabled="parseCount === 0">审核答案</el-button>
-            <el-button @click="resetPdfUpload">重新上传</el-button>
+            <el-button @click="resetUpload">重新上传</el-button>
           </template>
         </el-result>
       </div>
@@ -128,7 +160,7 @@
 <script setup>
 import { ref, onMounted } from 'vue'
 import { useRouter } from 'vue-router'
-import { Plus, UploadFilled, Loading } from '@element-plus/icons-vue'
+import { Plus, UploadFilled, Loading, PictureFilled } from '@element-plus/icons-vue'
 import { ElMessage } from 'element-plus'
 import {
   getWorksheets,
@@ -136,6 +168,7 @@ import {
   deleteWorksheet,
   updateWorksheetStatus,
   uploadPdf,
+  uploadImages,
   getWorksheet,
 } from '../../services/apiService.js'
 

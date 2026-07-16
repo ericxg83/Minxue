@@ -107,28 +107,144 @@ router.post('/:id/parse-pdf', pdfUpload.single('file'), async (req, res) => {
     if (!worksheet) return res.status(404).json({ error: '练习册不存在' })
 
     const file = req.file
-    if (!file) return res.status(400).json({ error: '请上传 PDF 文件' })
+    const precomputedAnswersRaw = req.body.precomputed_answers
+
+    if (!file && !precomputedAnswersRaw) {
+      return res.status(400).json({ error: '请上传 PDF 文件或预埋答案' })
+    }
+
     if (worksheet.parse_status === 'parsing') {
       return res.status(409).json({ error: '该练习册正在解析中，请稍候' })
+    }
+
+    let precomputedAnswers = null
+    if (precomputedAnswersRaw) {
+      try {
+        const parsed = JSON.parse(precomputedAnswersRaw)
+        if (!Array.isArray(parsed)) throw new Error('格式错误')
+        // 验证每项结构：{ question_no, answer, answer_type?, section? }
+        precomputedAnswers = parsed.filter(a =>
+          a && typeof a.question_no !== 'undefined' && typeof a.answer !== 'undefined'
+        ).map(a => ({
+          question_no: parseInt(a.question_no, 10),
+          answer: String(a.answer),
+          answer_type: a.answer_type || 'answer',
+          section: a.section || null,
+          confidence: 1.0, // 预埋答案置信度最高
+        }))
+      } catch (e) {
+        return res.status(400).json({ error: '预埋答案格式错误，应为 JSON 数组' })
+      }
     }
 
     // 文件已收到：先告知前端上传成功，解析在后台进行，前端轮询 parse_status
     await updateWorksheetParseStatus(worksheetId, { status: 'parsing' })
     res.json({ success: true, parsing: true, message: '上传成功，解析已开始' })
 
-    parsePdfInBackground(worksheetId, file).catch(async (e) => {
-      console.error('PDF 后台解析失败:', e)
+    if (precomputedAnswers && !file) {
+      // 纯预埋答案模式：无需 PDF，直接保存
+      parsePrecomputedInBackground(worksheetId, precomputedAnswers).catch(async (e) => {
+        console.error('预埋答案保存失败:', e)
+        await updateWorksheetParseStatus(worksheetId, {
+          status: 'failed',
+          error: e.message || '未知错误',
+        }).catch(() => {})
+      })
+    } else {
+      // 需要 PDF 解析（可能同时有预埋答案作为辅助）
+      parsePdfInBackground(worksheetId, file, precomputedAnswers).catch(async (e) => {
+        console.error('PDF 后台解析失败:', e)
+        await updateWorksheetParseStatus(worksheetId, {
+          status: 'failed',
+          error: e.message || '未知错误',
+        }).catch(() => {})
+      })
+    }
+  } catch (e) {
+    res.status(500).json({ error: 'PDF 解析失败: ' + e.message })
+  }
+})
+
+// 图片答案上传：直接用视觉模型 OCR，不走 PDF 渲染步骤，更清晰更准
+const IMAGE_MIME_TYPES = ['image/jpeg', 'image/png', 'image/webp']
+const imageUpload = multer({
+  storage: multer.memoryStorage(),
+  limits: { fileSize: 20 * 1024 * 1024 }, // 单张 20MB
+})
+
+router.post('/:id/parse-images', imageUpload.array('files', 30), async (req, res) => {
+  try {
+    const worksheetId = req.params.id
+    const worksheet = await getWorksheetById(worksheetId)
+    if (!worksheet) return res.status(404).json({ error: '练习册不存在' })
+
+    const files = req.files
+    if (!files || files.length === 0) return res.status(400).json({ error: '请上传至少一张图片' })
+    if (worksheet.parse_status === 'parsing') {
+      return res.status(409).json({ error: '该练习册正在解析中，请稍候' })
+    }
+
+    // 校验图片格式
+    for (const f of files) {
+      if (!IMAGE_MIME_TYPES.includes(f.mimetype)) {
+        return res.status(400).json({ error: `不支持的文件格式: ${f.originalname}（仅支持 JPEG/PNG/WebP）` })
+      }
+    }
+
+    await updateWorksheetParseStatus(worksheetId, { status: 'parsing' })
+    res.json({ success: true, parsing: true, message: '上传成功，解析已开始' })
+
+    parseImagesInBackground(worksheetId, files).catch(async (e) => {
+      console.error('图片后台解析失败:', e)
       await updateWorksheetParseStatus(worksheetId, {
         status: 'failed',
         error: e.message || '未知错误',
       }).catch(() => {})
     })
   } catch (e) {
-    res.status(500).json({ error: 'PDF 解析失败: ' + e.message })
+    res.status(500).json({ error: '图片解析失败: ' + e.message })
   }
 })
 
-async function parsePdfInBackground(worksheetId, file) {
+async function parseImagesInBackground(worksheetId, files) {
+  const OVERALL_TIMEOUT = 10 * 60 * 1000
+  let overallTimer
+  const timeoutPromise = new Promise((_, reject) => {
+    overallTimer = setTimeout(() => reject(new Error(`图片解析整体超时（>${OVERALL_TIMEOUT / 1000}s）`)), OVERALL_TIMEOUT)
+  })
+
+  try {
+    await Promise.race([
+      doParseImages(worksheetId, files),
+      timeoutPromise,
+    ])
+  } catch (e) {
+    console.error('图片后台解析失败:', e)
+    await updateWorksheetParseStatus(worksheetId, {
+      status: 'failed',
+      error: e.message || '未知错误',
+    }).catch(() => {})
+  } finally {
+    clearTimeout(overallTimer)
+  }
+}
+
+async function doParseImages(worksheetId, files) {
+  const lowConfidence = []
+  // 并行走 OCR，AI 并发由 withAiLimit 全局控制（默认 4 路）
+  const ocrResults = await Promise.all(
+    files.map(f => ocrExtractAnswers(f.buffer.toString('base64'), lowConfidence))
+  )
+  const parsedAnswers = []
+  for (const r of ocrResults) parsedAnswers.push(...r)
+
+  await processOcrResults(worksheetId, parsedAnswers, {
+    lowConfidence,
+    sourceLabel: '图片',
+  })
+}
+
+async function parsePdfInBackground(worksheetId, file, precomputedAnswers = null) {
   // 整体超时兜底：OCR 兜底走 AI 单页 2 分钟 * 20 页上限，给 5 分钟防止无限等待
   const OVERALL_TIMEOUT = 10 * 60 * 1000
   let overallTimer
@@ -138,7 +254,7 @@ async function parsePdfInBackground(worksheetId, file) {
 
   try {
     await Promise.race([
-      doParse(worksheetId, file),
+      doParse(worksheetId, file, precomputedAnswers),
       timeoutPromise,
     ])
   } catch (e) {
@@ -152,7 +268,23 @@ async function parsePdfInBackground(worksheetId, file) {
   }
 }
 
-async function doParse(worksheetId, file) {
+async function parsePrecomputedInBackground(worksheetId, precomputedAnswers) {
+  try {
+    await processOcrResults(worksheetId, precomputedAnswers, {
+      markerFound: false,
+      lowConfidence: [],
+      sourceLabel: '预埋答案',
+    })
+  } catch (e) {
+    console.error('预埋答案保存失败:', e)
+    await updateWorksheetParseStatus(worksheetId, {
+      status: 'failed',
+      error: e.message || '未知错误',
+    }).catch(() => {})
+  }
+}
+
+async function doParse(worksheetId, file, precomputedAnswers = null) {
   const pdfUrl = await uploadPDF(file.buffer, file.originalname, 'system')
   await updateWorksheetPdfUrl(worksheetId, pdfUrl)
 
@@ -196,6 +328,48 @@ async function doParse(worksheetId, file) {
     }
   }
 
+  // 若有预埋答案，以预埋答案为准（置信度最高，覆盖 OCR 结果）
+  if (precomputedAnswers && precomputedAnswers.length > 0) {
+    const precomputedMap = new Map()
+    for (const a of precomputedAnswers) {
+      const key = (a.section || '') + '|' + a.question_no
+      precomputedMap.set(key, a)
+    }
+    // 用预埋答案替换同题号的 OCR 结果
+    const merged = [...parsedAnswers]
+    for (const [key, pa] of precomputedMap) {
+      const idx = merged.findIndex(a => (a.section || '') + '|' + a.question_no === key)
+      if (idx >= 0) {
+        merged[idx] = { ...merged[idx], ...pa, confidence: 1.0 }
+      } else {
+        merged.push(pa)
+      }
+    }
+    parsedAnswers = merged
+  }
+
+  // 共享去重、保存、状态更新逻辑
+  await processOcrResults(worksheetId, parsedAnswers, {
+    ocrTruncatedInfo,
+    markerFound,
+    lowConfidence,
+    sourceLabel: 'PDF',
+  })
+}
+
+/**
+ * 共享的去重 + 保存 + 状态更新 + 生成警告
+ * @param {string} worksheetId
+ * @param {Array} parsedAnswers - 原始解析结果数组
+ * @param {Object} [options]
+ * @param {Object} [options.ocrTruncatedInfo] - { totalPages, ocrPages }，有值表示文件被截断
+ * @param {boolean} [options.markerFound] - PDF 文本模式是否找到"参考答案"标记
+ * @param {Array} [options.lowConfidence] - 低置信度条目列表
+ * @param {string} [options.sourceLabel] - 来源标签（"PDF"或"图片"），用于错误提示
+ */
+async function processOcrResults(worksheetId, parsedAnswers, options = {}) {
+  const { ocrTruncatedInfo, markerFound, lowConfidence = [], sourceLabel = '文件' } = options
+
   // 按 (章节, 题号) 去重：同一章节内保留置信度高的，相同则保留靠后的
   const byKey = new Map()
   for (const a of parsedAnswers) {
@@ -217,14 +391,14 @@ async function doParse(worksheetId, file) {
     await updateWorksheetStatus(worksheetId, 'reviewing')
   }
 
-  // 明确边界：本功能面向纯答案页 PDF，疑似完整 PDF（题干+答案）时提示重新裁剪上传
+  // 生成警告提示
   let warning = null
   if (parsedAnswers.length === 0) {
-    warning = '未能解析出任何答案，请确认上传的是纯答案页 PDF。'
+    warning = `未能解析出任何答案，请确认上传的是纯答案页${sourceLabel}。`
   } else if (ocrTruncatedInfo) {
-    warning = `PDF 共 ${ocrTruncatedInfo.totalPages} 页，仅识别了前 ${ocrTruncatedInfo.ocrPages} 页。若答案位于文件末尾，请裁剪为纯答案页后重新上传。`
+    warning = `${sourceLabel}共 ${ocrTruncatedInfo.totalPages} 页，仅识别了前 ${ocrTruncatedInfo.ocrPages} 页。若答案位于文件末尾，请裁剪为纯答案页后重新上传。`
   } else if (!markerFound && lowConfidence.length > parsedAnswers.length * 0.5) {
-    warning = '未检测到"参考答案"标记，且低置信度条目偏多，可能混入了题干内容。建议裁剪为纯答案页后重新上传。'
+    warning = `未检测到"参考答案"标记，且低置信度条目偏多，可能混入了题干内容。建议裁剪为纯答案页后重新上传。`
   }
 
   await updateWorksheetParseStatus(worksheetId, {
