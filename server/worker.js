@@ -1623,7 +1623,7 @@ const processWorkbookGrading = async (job) => {
       .map(dq => dq.id)
 
     if (wrongIds.length > 0) {
-      await addWrongQuestions(studentId, wrongIds, {}, {})
+      await addWrongQuestions(studentId, wrongIds, null, null)
       console.log(`   [Workbook] 已添加 ${wrongIds.length} 题到错题本`)
     }
   }
