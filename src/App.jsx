@@ -899,9 +899,9 @@ export default function App() {
 
       if (taskResult && !taskResult.error) {
         successCount = 1
-        updateTaskInStore(tempTask.id, 'pending', { progress: 0 })
+        updateTaskInStore(tempTask.id, 'processing', { progress: 0 })
         setTasks(prev => prev.map(t =>
-          t.id === tempTask.id ? { ...taskResult, pages: taskResult.images || tempTask.pages, is_temp: false } : t
+          t.id === tempTask.id ? { ...taskResult, status: 'processing', pages: taskResult.images || tempTask.pages, is_temp: false } : t
         ))
       } else {
         failedCount = 1

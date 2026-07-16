@@ -1745,13 +1745,12 @@ const processWorkbookGrading = async (job) => {
   const duration = ((Date.now() - startTime) / 1000).toFixed(1)
   await updateTaskStatus(taskId, TASK_STATUS.DONE, {
     progress: 100,
-    stats: {
-      questionCount: questions.length,
-      wrongCount,
-      matchedCount,
-      duration: `${duration}s`,
-      source: 'workbook'
-    }
+    questionCount: questions.length,
+    wrongCount,
+    matchedCount,
+    emptyCount: 0,
+    duration: `${duration}s`,
+    source: 'workbook'
   })
 
   console.log(`✅ [Workbook] 完成: ${questions.length} 题, ${wrongCount} 错, 耗时 ${duration}s`)
