@@ -160,7 +160,7 @@ export const addWrongQuestions = async (studentId, questionIds, questionConfiden
   // [P0-1] 按置信度阈值过滤 — 低于 0.8 的不进入错题本
   // 注意：questionConfidenceMap 必须是 Map 实例（有 .get 方法）
   let filteredIds = questionIds
-  if (questionConfidenceMap && typeof questionConfidenceMap.get === 'function') {
+  if (questionConfidenceMap instanceof Map) {
     const lowConfList = questionIds.filter(id => {
       const conf = questionConfidenceMap.get(id)
       return conf !== undefined && conf !== null && conf < CONFIDENCE_THRESHOLD
@@ -176,7 +176,7 @@ export const addWrongQuestions = async (studentId, questionIds, questionConfiden
 
   // 完整性过滤 — 仅完整题目可进入错题本
   // 注意：questionMap 必须是 Map 实例（有 .get 方法）
-  if (questionMap && typeof questionMap.get === 'function') {
+  if (questionMap instanceof Map) {
     const completeIds = filteredIds.filter(id => {
       const q = questionMap.get(id)
       if (!q) return false
