@@ -916,6 +916,33 @@ export const lookupWorksheetAnswer = async (worksheetId, questionNo) => {
   return rows[0] || null
 }
 
+// ── Worker 用：整册答案按章节分组（章节感知批改，见 worker processWorkbookGrading）──
+export const getWorksheetAnswersBySection = async (worksheetId) => {
+  const { rows } = await query(
+    `SELECT section, question_no, answer, answer_type FROM ${TABLES.WORKSHEET_ANSWERS}
+     WHERE worksheet_id = $1
+     ORDER BY created_at ASC`,
+    [worksheetId]
+  )
+  const bySection = new Map()
+  for (const r of rows) {
+    const key = r.section || ''
+    if (!bySection.has(key)) bySection.set(key, new Map())
+    // 同章节同题号重复时保留最新（rows 按 created_at 升序，后写覆盖）
+    bySection.get(key).set(r.question_no, { answer: r.answer, answer_type: r.answer_type })
+  }
+  return bySection
+}
+
+// ── Worker 用：重跑任务前清空旧题目（幂等，防止恢复链路重复入队产生重复题目行）──
+export const deleteQuestionsByTaskId = async (taskId) => {
+  const { rowCount } = await query(
+    `DELETE FROM ${TABLES.QUESTIONS} WHERE task_id = $1`,
+    [taskId]
+  )
+  return rowCount
+}
+
 // ── 重新解析 PDF 前清空旧答案（重复解析 = 整体替换；section 为 NULL 时唯一约束不生效，必须显式清空）──
 export const clearWorksheetAnswers = async (worksheetId) => {
   await query(`DELETE FROM ${TABLES.WORKSHEET_ANSWERS} WHERE worksheet_id = $1`, [worksheetId])

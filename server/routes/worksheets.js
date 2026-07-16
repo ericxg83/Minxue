@@ -19,6 +19,7 @@ import { uploadPDF } from '../services/ossService.js'
 import { ossClient } from '../config/oss.js'
 import { extractPdfText, renderPdfToJpegs } from '../services/pdfService.js'
 import { callVisionCompletion } from '../config/ai.js'
+import { parseAnswerText, normalizeSectionName } from '../services/answerParseService.js'
 
 const router = Router()
 const pdfUpload = multer({
@@ -129,7 +130,7 @@ router.post('/:id/parse-pdf', pdfUpload.single('file'), async (req, res) => {
           question_no: parseInt(a.question_no, 10),
           answer: String(a.answer),
           answer_type: a.answer_type || 'answer',
-          section: a.section || null,
+          section: normalizeSectionName(a.section),
           confidence: 1.0, // 预埋答案置信度最高
         }))
       } catch (e) {
@@ -231,12 +232,19 @@ async function parseImagesInBackground(worksheetId, files) {
 
 async function doParseImages(worksheetId, files) {
   const lowConfidence = []
-  // 并行走 OCR，AI 并发由 withAiLimit 全局控制（默认 4 路）
-  const ocrResults = await Promise.all(
-    files.map(f => ocrExtractAnswers(f.buffer.toString('base64'), lowConfidence))
+  // OCR 并行执行（AI 并发由 withAiLimit 全局控制），但解析必须按页顺序进行：
+  // 章节标题只出现在首页，后续页答案要延续上一页的章节，否则会落到 section=null
+  // 与其它章节的同题号互相覆盖。
+  const ocrContents = await Promise.all(
+    files.map(f => ocrExtractRawText(f.buffer.toString('base64')))
   )
   const parsedAnswers = []
-  for (const r of ocrResults) parsedAnswers.push(...r)
+  let carrySection = null
+  for (const content of ocrContents) {
+    const { answers, lastSection } = parseAnswerText(content, lowConfidence, carrySection)
+    parsedAnswers.push(...answers)
+    carrySection = lastSection
+  }
 
   await processOcrResults(worksheetId, parsedAnswers, {
     lowConfidence,
@@ -303,10 +311,10 @@ async function doParse(worksheetId, file, precomputedAnswers = null) {
   if (fullText && fullText.trim().length > 50) {
     const answerSection = fullText.replace(/[\s\S]*?(参考答案|标准答案|参考解答|答案)/, '')
     markerFound = answerSection.length < fullText.length
-    parsedAnswers = parseAnswerText(markerFound ? answerSection : fullText, lowConfidence)
+    parsedAnswers = parseAnswerText(markerFound ? answerSection : fullText, lowConfidence).answers
     if (markerFound && parsedAnswers.length === 0) {
       // 标记词切分后无结果（可能切错位置），退回全文解析
-      parsedAnswers = parseAnswerText(fullText, lowConfidence)
+      parsedAnswers = parseAnswerText(fullText, lowConfidence).answers
     }
   }
 
@@ -318,11 +326,16 @@ async function doParse(worksheetId, file, precomputedAnswers = null) {
         ocrTruncatedInfo = { totalPages, ocrPages: images.length }
         console.log(`PDF 共 ${totalPages} 页，仅 OCR 前 ${images.length} 页`)
       }
-      // 并行走 OCR，AI 并发由 withAiLimit 全局控制（默认 4 路）
-      const ocrResults = await Promise.all(
-        images.map(img => ocrExtractAnswers(img.toString('base64'), lowConfidence))
+      // OCR 并行，解析按页顺序（章节跨页延续，见 doParseImages 说明）
+      const ocrContents = await Promise.all(
+        images.map(img => ocrExtractRawText(img.toString('base64')))
       )
-      for (const r of ocrResults) parsedAnswers.push(...r)
+      let carrySection = null
+      for (const content of ocrContents) {
+        const { answers, lastSection } = parseAnswerText(content, lowConfidence, carrySection)
+        parsedAnswers.push(...answers)
+        carrySection = lastSection
+      }
     } catch (e) {
       console.log('OCR fallback failed:', e.message)
     }
@@ -408,108 +421,15 @@ async function processOcrResults(worksheetId, parsedAnswers, options = {}) {
   })
 }
 
-function parseAnswerText(text, lowConfidence) {
-  const results = []
-  const lines = text.split('\n')
-  let currentSection = null
-
-  // 检测章节标题行（如"第一章阶段卷Ⅰ""期中测试卷""第一单元综合练习"等）
-  const isSectionHeader = (line) => {
-    if (/^\d/.test(line)) return false // 数字开头的行是答案行
-    // 第X章/节/单元/部分/篇
-    if (/^第[一二三四五六七八九十\d]+[章节单元部分篇]/.test(line)) return true
-    // 中文数字开头的章节/单元
-    if (/^[一二三四五六七八九十]+[章节单元]/.test(line)) return true
-    // 常见试卷/练习关键词
-    if (/(?:阶段卷|评价测试|阶段练|综合练习|单元测试|测试卷|月考卷|期中卷|期末卷|模拟卷|真题卷|专题练习|专项练习|专项训练|复习卷|巩固卷|提升卷|拓展卷|检测卷|验收卷|达标卷|冲刺卷|押题卷|预测卷|闯关练习|水平测试|能力测试|单元卷|阶段卷|综合卷|练习卷|模拟测试|真题演练)/.test(line)) return true
-    return false
-  }
-
-  const processedLines = []
-
-  for (const line of lines) {
-    const trimmed = line.trim()
-    if (!trimmed) continue
-
-    // 检测章节标题
-    if (isSectionHeader(trimmed)) {
-      currentSection = trimmed.replace(/[：:].*$/, '').trim() // 去掉冒号后的说明
-      continue // 标题行不加入答案解析
-    }
-
-    // 预处理：拆分行内多答案（如 "19. 2 因素；20. 1/10" 或 "12. 1,3,9,27  13. 10  14. C"）
-    // 分号分割：两个答案之间用中文/英文分号隔开
-    // 空格分割：两个答案之间用 2+ 空格隔开，且下一段以"数字+点"开头
-    const parts = trimmed.split(/(?:[；;]|\s{2,})(?=\s*\d+\s*[.．、])/)
-    if (parts.length > 1) {
-      for (const part of parts) {
-        const subLine = part.trim()
-        if (subLine) processedLines.push({ line: subLine, section: currentSection })
-      }
-    } else {
-      processedLines.push({ line: trimmed, section: currentSection })
-    }
-  }
-
-  for (const { line: trimmed, section } of processedLines) {
-    let m = trimmed.match(/^\(?(\d+)\)?[.．、\s]\s*([A-Da-d])\s*$/)
-    if (m) {
-      results.push({
-        question_no: parseInt(m[1], 10),
-        answer: m[2].toUpperCase(),
-        answer_type: 'choice',
-        confidence: 0.95,
-        section,
-      })
-      continue
-    }
-
-    m = trimmed.match(/^(\d+)\s*[-~]\s*(\d+)\s+([A-Da-d]+)\s*$/)
-    if (m) {
-      const start = parseInt(m[1], 10)
-      const letters = m[3].toUpperCase().split('')
-      for (let i = 0; i < letters.length; i++) {
-        results.push({
-          question_no: start + i,
-          answer: letters[i],
-          answer_type: 'choice',
-          confidence: 0.9,
-          section,
-        })
-      }
-      continue
-    }
-
-    m = trimmed.match(/^(\d+)[.．、\s]\s*(.+)$/)
-    if (m) {
-      const ans = m[2].trim()
-      if (ans.length < 200) {
-        const questionNo = parseInt(m[1], 10)
-        results.push({
-          question_no: questionNo,
-          answer: ans,
-          answer_type: 'answer',
-          confidence: 0.8,
-          section,
-        })
-        lowConfidence.push({ question_no: questionNo, answer: ans, section })
-      }
-    }
-  }
-
-  return results
-}
-
-async function ocrExtractAnswers(base64Image, lowConfidence = []) {
+async function ocrExtractRawText(base64Image) {
   const { content } = await callVisionCompletion({
     imageDataURL: `data:image/jpeg;base64,${base64Image}`,
-    systemPrompt: '你是一个作业答案识别助手。请从图片中提取所有题号和对应答案。重要：每行只能输出一个题号和它的答案，绝对不要在一行输出多个答案（如"1. A 2. B 3. C"是错误的）。格式如"1. A"或"13. 2017"。如果图片包含章节标题（如"第一阶段"或"阶段练"），请在对应答案前保留章节标题行，不要省略。',
+    systemPrompt: '你是一个作业答案识别助手。请从图片中提取所有题号和对应答案。重要：每行只能输出一个题号和它的答案，绝对不要在一行输出多个答案（如"1. A 2. B 3. C"是错误的）。格式如"1. A"或"13. 2017"。判断题答案请输出 √ 或 ×。如果图片包含章节标题（如"第一章阶段练1"或"第二章评价测试卷"），请在对应答案前单独一行输出完整章节标题，不要省略、不要与答案同行。',
     userText: '请提取这份练习册答案中的所有题号和对应答案。',
     temperature: 0.0,
     maxTokens: 4096,
   })
-
-  return parseAnswerText(content || '', lowConfidence)
+  return content || ''
 }
 
 router.get('/:id/pdf', async (req, res) => {

@@ -16,6 +16,12 @@
       "autoPort": true
     },
     {
+      "name": "frontend-debug",
+      "runtimeExecutable": "npx",
+      "runtimeArgs": ["vite", "--host", "--port", "3987", "--strictPort"],
+      "port": 3987
+    },
+    {
       "name": "frontend-prod",
       "runtimeExecutable": "npx",
       "runtimeArgs": ["http-server", "dist", "-p", "4175", "-c-1", "--cors"],

@@ -11,11 +11,12 @@ import sharp from 'sharp'
 import { TABLES, TASK_STATUS } from './config/neon.js'
 import { query } from './config/neon.js'
 import { AI_CONFIG, getAIHeaders, buildOCRPrompt, buildAnswerGenerationPrompt, getCurrentTextModel, getCurrentVLModel, rotateTextModel, rotateVLModel, TEXT_MODELS, VL_MODELS, callTextCompletion, callVisionCompletion } from './config/ai.js'
-import { updateTaskStatus, createQuestions, batchUpdateQuestionTags, addWrongQuestions, createJudgement, updateQuestionAnswer, markAnswerException, findCachedQuestionByFingerprint, cacheQuestion, incrementQuestionUseCount, updateQuestionCacheId, createQuestionAsset, lookupWorksheetAnswer } from './services/neonService.js'
+import { updateTaskStatus, createQuestions, batchUpdateQuestionTags, addWrongQuestions, createJudgement, updateQuestionAnswer, markAnswerException, findCachedQuestionByFingerprint, cacheQuestion, incrementQuestionUseCount, updateQuestionCacheId, createQuestionAsset, lookupWorksheetAnswer, getWorksheetAnswersBySection, deleteQuestionsByTaskId } from './services/neonService.js'
 import { uploadImage } from './services/ossService.js'
 import { generateTextFingerprint, generatePHash, PARSER_VERSION, TEXT_SIMILARITY_THRESHOLD } from './utils/questionFingerprint.js'
 import { uploadFilesWithRetry } from './services/uploadRetryManager.js'
 import { judgeAnswer } from './services/judgeService.js'
+import { normalizeSectionName } from './services/answerParseService.js'
 import { classifyQuestionLocally } from './utils/localTagger.js'
 
 // ── 多模态切题引擎：几何图处理 ──
@@ -1451,6 +1452,64 @@ const callGradeEndpoint = async ({ id, studentId, results }) => {
 // ── 练习册批改管线 ──
 // OCR 只识别题号+学生答案，不从 worksheet 提取参考答案
 // 答案从 worksheet_answers 表查找，judgeAnswer 对比判定
+
+/**
+ * 选择本页作业对应的答案章节。
+ * @param {Map<string, Map<number, {answer, answer_type}>>} answersBySection
+ * @param {string|null} pageTitle - OCR 识别的页面标题
+ * @param {Array} questions - OCR 识别的题目 [{question_number, question_type}]
+ * @returns {string|null} 章节 key（'' 表示无章节），null 表示无答案可用
+ */
+export function pickAnswerSection(answersBySection, pageTitle, questions) {
+  if (!answersBySection || answersBySection.size === 0) return null
+  // 只有一个章节：直接用
+  if (answersBySection.size === 1) return [...answersBySection.keys()][0]
+
+  const normTitle = normalizeSectionName(pageTitle)
+
+  // 1. 标题精确/包含匹配
+  if (normTitle) {
+    for (const key of answersBySection.keys()) {
+      if (key && (key === normTitle || normTitle.includes(key) || key.includes(normTitle))) {
+        return key
+      }
+    }
+  }
+
+  // 2. 按"题号覆盖率 + 题型吻合度"打分
+  const qNos = questions.filter(q => q.question_number).map(q => Number(q.question_number))
+  if (qNos.length === 0) return null
+
+  let bestKey = null
+  let bestScore = -1
+  for (const [key, ansMap] of answersBySection) {
+    let covered = 0
+    let typeMatch = 0
+    for (const q of questions) {
+      const row = ansMap.get(Number(q.question_number))
+      if (!row) continue
+      covered++
+      // 题型吻合度：OCR 认为是选择题且答案库也是选择题 → 强信号
+      const ocrIsChoice = q.question_type === 'choice' || /^[A-Da-d]$/.test(String(q.student_answer || '').trim())
+      const refIsChoice = row.answer_type === 'choice'
+      if (ocrIsChoice === refIsChoice) typeMatch++
+    }
+    const score = covered / qNos.length + (covered > 0 ? (typeMatch / covered) * 0.5 : 0)
+    if (score > bestScore) {
+      bestScore = score
+      bestKey = key
+    }
+  }
+
+  // 覆盖率过低（连一半题号都对不上）视为没有可信章节
+  if (bestKey !== null) {
+    const ansMap = answersBySection.get(bestKey)
+    const covered = qNos.filter(no => ansMap.has(no)).length
+    if (covered < qNos.length * 0.5) return null
+  }
+  return bestKey
+}
+
 const processWorkbookGrading = async (job) => {
   const { taskId, studentId, imageUrl: rawImageUrl, worksheetId } = job.data
   const startTime = Date.now()
@@ -1495,35 +1554,38 @@ const processWorkbookGrading = async (job) => {
 
   await updateTaskStatus(taskId, TASK_STATUS.PROCESSING, { progress: 30 })
 
-  // 4. OCR — 只提取题号+学生答案，不要求 AI 生成参考答案
-  // 使用更简单的 prompt，减少 token 消耗
-  const workbookPrompt = `你是一个专业的学生手写答案识别助手。请从作业图片中提取每道题的题号和对应的学生手写答案。
+  // 4. OCR — 提取页面标题 + 题号 + 学生答案，不要求 AI 生成参考答案
+  const workbookPrompt = `你是一个专业的学生手写答案识别助手。请从作业图片中提取页面标题和每道题的题号、学生手写答案。
 
 ⚠️ 关键：请严格区分印刷体文字和手写文字
 - 印刷体文字（题目、选项、题号数字等）→ 不要作为 student_answer
 - 手写体文字（学生书写的内容）→ 这才是 student_answer
 
-只输出 JSON 数组，格式：
-[
-  {
-    "question_number": 1,
-    "student_answer": "学生手写的答案文本，没有则填 null",
-    "question_type": "choice"  // choice | fill | answer
-  }
-]
+只输出 JSON 对象，格式：
+{
+  "page_title": "页面顶部印刷体标题，如'第一章阶段练1'或'第二章评价测试卷'，没有则填 null",
+  "questions": [
+    {
+      "question_number": 1,
+      "student_answer": "学生手写的答案文本，没有则填 null",
+      "question_type": "choice"  // choice | fill | judge | answer
+    }
+  ]
+}
 
 注意：
+- page_title 从页面页眉/大标题的印刷体读取，尽量完整
 - question_number 从印刷体题号读取，必须是数字
-- student_answer 只提取学生手写的内容，如果没有手写迹，填 null
+- student_answer 只提取学生手写的内容，如果没有手写迹，填 null；判断题的 √/× 也要提取
 - 不要猜测标准答案
 - 只返回 JSON，不要其他文字`
 
-  console.log(`   [Workbook] 开始 AI 识别题号+学生答案...`)
+  console.log(`   [Workbook] 开始 AI 识别标题+题号+学生答案...`)
   const { content } = await callVisionCompletion({
     imageDataURL: `data:image/jpeg;base64,${compressedBuffer.toString('base64')}`,
     systemPrompt: workbookPrompt,
-    userText: '识别这张作业图片中的所有题目和学生答案。',
-    temperature: 0.3,
+    userText: '识别这张作业图片的页面标题和所有题目的学生答案。',
+    temperature: 0.1,
     maxTokens: 4096
   })
 
@@ -1536,15 +1598,21 @@ const processWorkbookGrading = async (job) => {
     throw new Error('AI 识别返回为空')
   }
 
-  // 解析 JSON
+  // 解析 JSON（兼容旧格式：纯数组 = 无标题）
   let questions = []
+  let pageTitle = null
   try {
     const jsonMatch = content.match(/```json\n?([\s\S]*?)\n?```/) ||
                       content.match(/```\n?([\s\S]*?)\n?```/) ||
-                      content.match(/\[[\s\S]*\]/)
+                      content.match(/[\[{][\s\S]*[\]}]/)
     const jsonStr = jsonMatch ? jsonMatch[1] || jsonMatch[0] : content
-    questions = JSON.parse(jsonStr)
-    if (!Array.isArray(questions)) questions = [questions]
+    const parsed = JSON.parse(jsonStr)
+    if (Array.isArray(parsed)) {
+      questions = parsed
+    } else if (parsed && typeof parsed === 'object') {
+      pageTitle = parsed.page_title || null
+      questions = Array.isArray(parsed.questions) ? parsed.questions : []
+    }
   } catch (e) {
     console.error(`   [Workbook] JSON 解析失败:`, e.message)
     await updateTaskStatus(taskId, TASK_STATUS.FAILED, {
@@ -1553,15 +1621,23 @@ const processWorkbookGrading = async (job) => {
     throw new Error('JSON 解析失败')
   }
 
-  console.log(`   [Workbook] AI 识别到 ${questions.length} 道题`)
+  console.log(`   [Workbook] AI 识别到 ${questions.length} 道题, 页面标题="${pageTitle}"`)
 
-  // 5. 查找标准答案并判定
+  // 5. 章节感知的答案匹配：
+  // 练习册答案按 (section, question_no) 存储，多套试卷题号重叠。
+  // 旧逻辑忽略 section 直接按题号取"最新一条"，会拿到其它章节的答案 → 全部判错。
+  // 新逻辑：先用页面标题匹配章节；匹配不到则按"题号覆盖率 + 题型吻合度"打分选章节。
+  const answersBySection = await getWorksheetAnswersBySection(worksheetId)
+  const matchedSection = pickAnswerSection(answersBySection, pageTitle, questions)
+  const sectionAnswers = matchedSection !== null ? answersBySection.get(matchedSection) : null
+  console.log(`   [Workbook] 章节匹配: "${pageTitle}" → "${matchedSection}" (共 ${answersBySection.size} 个章节)`)
+
   let wrongCount = 0
   let matchedCount = 0
   for (const q of questions) {
     if (!q.question_number) continue
 
-    const answerRow = await lookupWorksheetAnswer(worksheetId, q.question_number)
+    const answerRow = sectionAnswers ? sectionAnswers.get(Number(q.question_number)) : null
     if (answerRow) {
       q.answer = answerRow.answer
       q.answer_source = 'worksheet'
@@ -1583,9 +1659,21 @@ const processWorkbookGrading = async (job) => {
   }
   console.log(`   [Workbook] 答案匹配: ${matchedCount}/${questions.length} 题, 错误: ${wrongCount} 题`)
 
+  // 匹配率过低（<50%）视为章节定位失败，不做对错判定，全部转人工，避免"整页全错"
+  if (questions.length >= 5 && matchedCount > 0 && matchedCount < questions.length * 0.5) {
+    console.warn(`   [Workbook] ⚠️ 匹配率过低 (${matchedCount}/${questions.length})，判定结果不可信，全部转人工`)
+    for (const q of questions) { q.is_correct = null }
+    wrongCount = 0
+  }
+
   await updateTaskStatus(taskId, TASK_STATUS.PROCESSING, { progress: 80 })
 
   // 6. 保存到数据库（复用现有 createQuestions）
+  // 幂等：恢复链路/重试可能对同一 task 重复执行，先清掉旧题目行防止成倍重复
+  const deletedOld = await deleteQuestionsByTaskId(taskId)
+  if (deletedOld > 0) {
+    console.log(`   [Workbook] 幂等清理: 删除旧题目 ${deletedOld} 行 (taskId=${taskId})`)
+  }
   const questionsWithStudentId = questions.map(q => ({
     ...q,
     id: crypto.randomUUID(),

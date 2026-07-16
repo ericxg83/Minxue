@@ -669,8 +669,11 @@ export default function App() {
       const duplicateFiles = []
       const newFiles = []
 
+      // 确保 tasks 已经是数组，防止访问 undefined
+      const safeTasks = tasks || []
+
       for (const file of files) {
-        const localDuplicate = tasks.find(t =>
+        const localDuplicate = safeTasks.find(t =>
           t.original_name === file.name &&
           t.student_id === currentStudent?.id
         )
