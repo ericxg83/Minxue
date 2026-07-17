@@ -68,6 +68,11 @@ export const useReviewStore = defineStore('review', () => {
   })
   // 当前页图 URL
   const currentPageImage = computed(() => {
+    // 多页练习册/多图任务：使用当前题目自身的 image_url
+    const q = allQuestions.value[currentReviewIndex.value]
+    if (q?.image_url && source.value === 'image') {
+      return q.image_url
+    }
     const pages = currentPaperPages.value
     if (pages.length === 0) return currentTask.value?.image_url || ''
     const idx = Math.min(currentPageIndex.value, pages.length - 1)
