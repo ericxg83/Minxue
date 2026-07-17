@@ -53,10 +53,10 @@ export const useReviewStore = defineStore('review', () => {
   // 数据来源：image=学生上传图片 | paper=生成的练习卷
   const source = computed(() => reviewConfig.value.source)
 
-  // ── 多页试卷查看（image 模式恒为单页；paper 模式为答题卡多页）──
+  // ── 多页试卷查看 ──
   // 当前试卷（exam/task）对应的页图任务列表；currentTask 上挂载 _pageTasks（paper 模式）
   const currentPageIndex = ref(0)
-  // 页图列表：image 模式 = [currentTask 自身]；paper 模式 = 该 exam 关联的答题卡 task 行
+  // 页图列表：image 模式 = 从 task.images JSONB 构建；paper 模式 = 该 exam 关联的答题卡 task 行
   const currentPaperPages = computed(() => {
     const t = currentTask.value
     if (!t) return []
@@ -64,7 +64,12 @@ export const useReviewStore = defineStore('review', () => {
       const pages = Array.isArray(t._pageTasks) ? t._pageTasks : []
       return pages.length > 0 ? pages : (t.image_url ? [t] : [])
     }
-    return t.image_url ? [t] : []
+    // image 模式：从 task.images JSONB 构建页图列表（支持多页上传）
+    const imgs = t.images || []
+    if (Array.isArray(imgs) && imgs.length > 0) {
+      return imgs.map(img => ({ ...img, id: img.id || `page-${img.page_number}` }))
+    }
+    return t.image_url ? [{ image_url: t.image_url, page_number: 1 }] : []
   })
   // 当前页图 URL
   const currentPageImage = computed(() => {
@@ -301,7 +306,7 @@ export const useReviewStore = defineStore('review', () => {
   const nextQuestion = () => {
     if (currentReviewIndex.value < allQuestions.value.length - 1) {
       currentReviewIndex.value++
-      syncTaskForCurrentQuestion()
+      syncPageForCurrentQuestion()
       return true
     }
     return false
@@ -311,7 +316,7 @@ export const useReviewStore = defineStore('review', () => {
   const prevQuestion = () => {
     if (currentReviewIndex.value > 0) {
       currentReviewIndex.value--
-      syncTaskForCurrentQuestion()
+      syncPageForCurrentQuestion()
       return true
     }
     return false
@@ -321,22 +326,19 @@ export const useReviewStore = defineStore('review', () => {
   const jumpToQuestion = (idx) => {
     if (idx >= 0 && idx < allQuestions.value.length) {
       currentReviewIndex.value = idx
-      syncTaskForCurrentQuestion()
+      syncPageForCurrentQuestion()
     }
   }
 
-  // 多试卷聚合模式：根据当前题目的归属任务切换 currentTask，使 PaperViewerPanel 显示正确页图
-  const syncTaskForCurrentQuestion = () => {
-    if (source.value !== 'image') return
+  // 题目切换时同步页面索引：使 PaperViewerPanel 显示当前题目所在页的图片
+  const syncPageForCurrentQuestion = () => {
     const q = allQuestions.value[currentReviewIndex.value]
     if (!q) return
-    const taskId = questionToTaskMap.value[q.id]
-    if (taskId && taskId !== currentTask.value?.id) {
-      const task = studentTasks.value.find(t => t.id === taskId)
-      if (task) {
-        currentTask.value = task
-        currentPageIndex.value = 0
-      }
+    const pageNum = q.page_number || 1
+    const pages = currentPaperPages.value
+    const idx = pages.findIndex(p => p.page_number === pageNum)
+    if (idx >= 0 && idx !== currentPageIndex.value) {
+      currentPageIndex.value = idx
     }
   }
 
@@ -568,17 +570,8 @@ export const useReviewStore = defineStore('review', () => {
     if (source.value === 'paper') {
       await loadPaperQuestions(task)
     } else {
-      // image 模式：待复核试卷聚合显示所有待复核题目
-      if (task.status === 'done') {
-        if (studentTasks.value.filter(t => t.status === 'done').length > 1) {
-          await loadAllPendingQuestions()
-        } else {
-          // 仅一份待复核，直接加载
-          await loadQuestions(task.id)
-        }
-      } else {
-        await loadQuestions(task.id)
-      }
+      // image 模式：只加载选中任务的题目，不聚合其他待复核任务
+      await loadQuestions(task.id)
     }
 
     // [修复] 加载最新判定数据（含 confidence），合并到每道题
@@ -586,8 +579,8 @@ export const useReviewStore = defineStore('review', () => {
       await mergeJudgements(currentStudent.value.id, allQuestions.value)
     }
 
-    // [多试卷聚合] 同步当前题目归属的任务，确保中间面板图片与题目对应
-    syncTaskForCurrentQuestion()
+    // 同步当前题目所在页，确保 PaperViewerPanel 显示正确页图
+    syncPageForCurrentQuestion()
 
     if (currentStudent.value?.id) {
       await loadWrongQuestions(currentStudent.value.id)
