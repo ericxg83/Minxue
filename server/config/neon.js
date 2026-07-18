@@ -70,7 +70,9 @@ export const TABLES = {
   QUESTION_ASSETS: 'question_assets',
   WORKSHEETS: 'worksheets',
   WORKSHEET_ANSWERS: 'worksheet_answers',
-  STUDENT_WORKSHEET_SETTINGS: 'student_worksheet_settings'
+  STUDENT_WORKSHEET_SETTINGS: 'student_worksheet_settings',
+  RESOURCES: 'resources',
+  RESOURCE_ANSWERS: 'resource_answers'
 }
 
 export const TASK_STATUS = {

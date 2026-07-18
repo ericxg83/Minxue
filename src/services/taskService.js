@@ -46,6 +46,7 @@ export const taskService = {
     if (options.taskType) formData.append('taskType', options.taskType)
     if (options.retryPaperId) formData.append('retryPaperId', options.retryPaperId)
     if (options.worksheetId) formData.append('worksheetId', options.worksheetId)
+    if (options.resourceId) formData.append('resourceId', options.resourceId)
     if (options.subject) formData.append('subject', options.subject)
 
     // Add file names for multi-page papers

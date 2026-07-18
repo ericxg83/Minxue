@@ -123,7 +123,7 @@ router.post('/:id/parse-pdf', pdfUpload.single('file'), async (req, res) => {
       try {
         const parsed = JSON.parse(precomputedAnswersRaw)
         if (!Array.isArray(parsed)) throw new Error('格式错误')
-        // 验证每项结构：{ question_no, answer, answer_type?, section? }
+        // 验证每项结构：{ question_no, answer, answer_type?, section?, content? }
         precomputedAnswers = parsed.filter(a =>
           a && typeof a.question_no !== 'undefined' && typeof a.answer !== 'undefined'
         ).map(a => ({
@@ -131,6 +131,7 @@ router.post('/:id/parse-pdf', pdfUpload.single('file'), async (req, res) => {
           answer: String(a.answer),
           answer_type: a.answer_type || 'answer',
           section: normalizeSectionName(a.section),
+          content: (a.content != null && String(a.content).trim()) ? String(a.content).trim() : null, // 题干（若提供）
           confidence: 1.0, // 预埋答案置信度最高
         }))
       } catch (e) {

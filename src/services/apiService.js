@@ -641,6 +641,58 @@ export const upsertStudentWorksheetSetting = async (studentId, subject, workshee
   })
 }
 
+// ── 统一资源 API ──
+
+export const getResources = async ({ type, subject } = {}) => {
+  const params = new URLSearchParams()
+  if (type) params.set('type', type)
+  if (subject) params.set('subject', subject)
+  const qs = params.toString()
+  const data = await apiRequest(`/resources${qs ? '?' + qs : ''}`)
+  return data.resources || []
+}
+
+export const getResource = async (id) => {
+  const data = await apiRequest(`/resources/${id}`)
+  return data.resource
+}
+
+export const createResource = async ({ name, type, subject, grade, examDate }) => {
+  const data = await apiRequest('/resources', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ name, type, subject, grade, examDate })
+  })
+  return data.resource
+}
+
+export const deleteResource = async (id) => {
+  return apiRequest(`/resources/${id}`, { method: 'DELETE' })
+}
+
+export const getResourceAnswers = async (resourceId) => {
+  const data = await apiRequest(`/resources/${resourceId}/answers`)
+  return data.answers || []
+}
+
+export const updateResourceAnswers = async (resourceId, answers) => {
+  const data = await apiRequest(`/resources/${resourceId}/answers`, {
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ answers })
+  })
+  return data.answers || []
+}
+
+export const updateResourceAnswerStatus = async (resourceId, answerStatus) => {
+  const data = await apiRequest(`/resources/${resourceId}/answers/status`, {
+    method: 'PATCH',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ answerStatus })
+  })
+  return data.answers || []
+}
+
 export const uploadPdf = async (id, file, precomputedAnswers = null) => {
   const fd = new FormData()
   fd.append('file', file)

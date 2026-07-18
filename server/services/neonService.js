@@ -836,17 +836,17 @@ export const replaceWorksheetAnswers = async (worksheetId, answers) => {
     await client.query(`DELETE FROM ${TABLES.WORKSHEET_ANSWERS} WHERE worksheet_id = $1`, [worksheetId])
     if (!answers || answers.length === 0) return []
     const values = answers.map((_, i) =>
-      `($1, $${i * 4 + 2}, $${i * 4 + 3}, $${i * 4 + 4}, $${i * 4 + 5})`
+      `($1, $${i * 5 + 2}, $${i * 5 + 3}, $${i * 5 + 4}, $${i * 5 + 5}, $${i * 5 + 6})`
     ).join(',')
     const params = [worksheetId]
     for (const a of answers) {
-      params.push(a.question_no, a.answer, a.answer_type || 'choice', a.section || null)
+      params.push(a.question_no, a.answer, a.answer_type || 'choice', a.section || null, a.content || null)
     }
     const { rows } = await client.query(
-      `INSERT INTO ${TABLES.WORKSHEET_ANSWERS} (worksheet_id, question_no, answer, answer_type, section)
+      `INSERT INTO ${TABLES.WORKSHEET_ANSWERS} (worksheet_id, question_no, answer, answer_type, section, content)
        VALUES ${values}
        ON CONFLICT (worksheet_id, section, question_no)
-       DO UPDATE SET answer = EXCLUDED.answer, answer_type = EXCLUDED.answer_type
+       DO UPDATE SET answer = EXCLUDED.answer, answer_type = EXCLUDED.answer_type, content = EXCLUDED.content
        RETURNING *`,
       params
     )
@@ -919,7 +919,7 @@ export const lookupWorksheetAnswer = async (worksheetId, questionNo) => {
 // ── Worker 用：整册答案按章节分组（章节感知批改，见 worker processWorkbookGrading）──
 export const getWorksheetAnswersBySection = async (worksheetId) => {
   const { rows } = await query(
-    `SELECT section, question_no, answer, answer_type FROM ${TABLES.WORKSHEET_ANSWERS}
+    `SELECT section, question_no, answer, answer_type, content FROM ${TABLES.WORKSHEET_ANSWERS}
      WHERE worksheet_id = $1
      ORDER BY created_at ASC`,
     [worksheetId]
@@ -929,7 +929,7 @@ export const getWorksheetAnswersBySection = async (worksheetId) => {
     const key = r.section || ''
     if (!bySection.has(key)) bySection.set(key, new Map())
     // 同章节同题号重复时保留最新（rows 按 created_at 升序，后写覆盖）
-    bySection.get(key).set(r.question_no, { answer: r.answer, answer_type: r.answer_type })
+    bySection.get(key).set(r.question_no, { answer: r.answer, answer_type: r.answer_type, content: r.content || null })
   }
   return bySection
 }
@@ -946,4 +946,165 @@ export const deleteQuestionsByTaskId = async (taskId) => {
 // ── 重新解析 PDF 前清空旧答案（重复解析 = 整体替换；section 为 NULL 时唯一约束不生效，必须显式清空）──
 export const clearWorksheetAnswers = async (worksheetId) => {
   await query(`DELETE FROM ${TABLES.WORKSHEET_ANSWERS} WHERE worksheet_id = $1`, [worksheetId])
+}
+
+// ═══════════════════════════════════════════════
+// 统一资源答案库 CRUD
+// ═══════════════════════════════════════════════
+
+export const createResource = async ({ name, type, subject, grade, examDate }) => {
+  const { rows } = await query(
+    `INSERT INTO ${TABLES.RESOURCES} (name, resource_type, subject, grade, exam_date)
+     VALUES ($1, $2, $3, $4, $5) RETURNING *`,
+    [name, type, subject || null, grade || null, examDate || null]
+  )
+  return rows[0]
+}
+
+export const getAllResources = async ({ type, subject } = {}) => {
+  const conditions = []
+  const params = []
+  let idx = 1
+  if (type) {
+    conditions.push(`resource_type = $${idx++}`)
+    params.push(type)
+  }
+  if (subject) {
+    conditions.push(`subject = $${idx++}`)
+    params.push(subject)
+  }
+  const where = conditions.length > 0 ? `WHERE ${conditions.join(' AND ')}` : ''
+  const { rows } = await query(
+    `SELECT r.*,
+       (SELECT COUNT(*)::int FROM ${TABLES.RESOURCE_ANSWERS} ra WHERE ra.resource_id = r.id) AS answer_count
+     FROM ${TABLES.RESOURCES} r
+     ${where}
+     ORDER BY r.created_at DESC`,
+    params
+  )
+  return rows
+}
+
+export const getResourceById = async (id) => {
+  const { rows } = await query(
+    `SELECT r.*,
+       (SELECT COUNT(*)::int FROM ${TABLES.RESOURCE_ANSWERS} ra WHERE ra.resource_id = r.id) AS answer_count
+     FROM ${TABLES.RESOURCES} r WHERE r.id = $1`,
+    [id]
+  )
+  return rows[0] || null
+}
+
+export const updateResource = async (id, updates) => {
+  const setClauses = []
+  const params = [id]
+  let idx = 2
+  for (const [key, value] of Object.entries(updates)) {
+    const col = key === 'answerStatus' ? 'answer_status'
+      : key === 'examDate' ? 'exam_date'
+      : key === 'resourceType' ? 'resource_type'
+      : key === 'parseStatus' ? 'parse_status'
+      : key === 'parseCount' ? 'parse_count'
+      : key === 'parseWarning' ? 'parse_warning'
+      : key === 'parseError' ? 'parse_error'
+      : key
+    setClauses.push(`${col} = $${idx++}`)
+    params.push(value)
+  }
+  if (setClauses.length === 0) return null
+  const { rows } = await query(
+    `UPDATE ${TABLES.RESOURCES} SET ${setClauses.join(', ')} WHERE id = $1 RETURNING *`,
+    params
+  )
+  return rows[0] || null
+}
+
+export const deleteResource = async (id) => {
+  await query(`DELETE FROM ${TABLES.RESOURCES} WHERE id = $1`, [id])
+}
+
+export const getResourceAnswers = async (resourceId) => {
+  const { rows } = await query(
+    `SELECT * FROM ${TABLES.RESOURCE_ANSWERS}
+     WHERE resource_id = $1 ORDER BY question_no ASC`,
+    [resourceId]
+  )
+  return rows
+}
+
+/**
+ * 事务性替换资源答案
+ */
+export const replaceResourceAnswers = async (resourceId, answers) => {
+  return transaction(async (client) => {
+    await client.query(`DELETE FROM ${TABLES.RESOURCE_ANSWERS} WHERE resource_id = $1`, [resourceId])
+    if (!answers || answers.length === 0) return []
+    const values = answers.map((_, i) =>
+      `($1, $${i * 7 + 2}, $${i * 7 + 3}, $${i * 7 + 4}, $${i * 7 + 5}, $${i * 7 + 6}, $${i * 7 + 7}, $${i * 7 + 8})`
+    ).join(',')
+    const params = [resourceId]
+    for (const a of answers) {
+      params.push(
+        a.question_no,
+        a.answer,
+        a.answer_type || 'choice',
+        a.content || null,
+        a.section || null,
+        a.answer_status || 'ai_draft',
+        a.source || 'ai_parse'
+      )
+    }
+    const { rows } = await client.query(
+      `INSERT INTO ${TABLES.RESOURCE_ANSWERS}
+       (resource_id, question_no, answer, answer_type, content, section, answer_status, source)
+       VALUES ${values}
+       ON CONFLICT (resource_id, section, question_no)
+       DO UPDATE SET
+         answer = EXCLUDED.answer,
+         answer_type = EXCLUDED.answer_type,
+         content = EXCLUDED.content,
+         answer_status = EXCLUDED.answer_status,
+         source = EXCLUDED.source
+       RETURNING *`,
+      params
+    )
+    return rows
+  })
+}
+
+/**
+ * 批量更新 resource_answers 状态（如 ai_draft → teacher_verified）
+ */
+export const updateResourceAnswerStatus = async (resourceId, answerStatus) => {
+  const { rows } = await query(
+    `UPDATE ${TABLES.RESOURCE_ANSWERS}
+     SET answer_status = $2
+     WHERE resource_id = $1
+     RETURNING *`,
+    [resourceId, answerStatus]
+  )
+  // 同步更新 resources 表聚合状态
+  await query(
+    `UPDATE ${TABLES.RESOURCES} SET answer_status = $2 WHERE id = $1`,
+    [resourceId, answerStatus]
+  )
+  return rows
+}
+
+/**
+ * Worker 用：批量查询答案（跳过未 verified 的）
+ */
+export const bulkLookupResourceAnswers = async (resourceId, questionNos) => {
+  if (!questionNos || questionNos.length === 0) return []
+  const placeholders = questionNos.map((_, i) => `$${i + 2}`).join(',')
+  const { rows } = await query(
+    `SELECT question_no, answer, answer_type, answer_status, content
+     FROM ${TABLES.RESOURCE_ANSWERS}
+     WHERE resource_id = $1
+       AND question_no IN (${placeholders})
+       AND answer_status IN ('teacher_verified', 'official_verified')
+     ORDER BY question_no ASC`,
+    [resourceId, ...questionNos]
+  )
+  return rows
 }

@@ -11,7 +11,7 @@ import sharp from 'sharp'
 import { TABLES, TASK_STATUS } from './config/neon.js'
 import { query } from './config/neon.js'
 import { AI_CONFIG, getAIHeaders, buildOCRPrompt, buildAnswerGenerationPrompt, getCurrentTextModel, getCurrentVLModel, rotateTextModel, rotateVLModel, TEXT_MODELS, VL_MODELS, callTextCompletion, callVisionCompletion } from './config/ai.js'
-import { updateTaskStatus, createQuestions, batchUpdateQuestionTags, addWrongQuestions, createJudgement, updateQuestionAnswer, markAnswerException, findCachedQuestionByFingerprint, cacheQuestion, incrementQuestionUseCount, updateQuestionCacheId, createQuestionAsset, lookupWorksheetAnswer, getWorksheetAnswersBySection, deleteQuestionsByTaskId } from './services/neonService.js'
+import { updateTaskStatus, createQuestions, batchUpdateQuestionTags, addWrongQuestions, createJudgement, updateQuestionAnswer, markAnswerException, findCachedQuestionByFingerprint, cacheQuestion, incrementQuestionUseCount, updateQuestionCacheId, createQuestionAsset, lookupWorksheetAnswer, getWorksheetAnswersBySection, deleteQuestionsByTaskId, bulkLookupResourceAnswers, getResourceById } from './services/neonService.js'
 import { uploadImage } from './services/ossService.js'
 import { generateTextFingerprint, generatePHash, PARSER_VERSION, TEXT_SIMILARITY_THRESHOLD } from './utils/questionFingerprint.js'
 import { uploadFilesWithRetry } from './services/uploadRetryManager.js'
@@ -1706,6 +1706,10 @@ const processWorkbookGrading = async (job) => {
         q.answer = answerRow.answer
         q.answer_source = 'worksheet'
         q.question_type = answerRow.answer_type || q.question_type || 'choice'
+        // 回填题干：答案库有题干时用真实题干替换占位符 "第 N 题"
+        if (answerRow.content && String(answerRow.content).trim()) {
+          q.content = String(answerRow.content).trim()
+        }
         matchedCount++
 
         const hasAnswer = q.student_answer && q.student_answer !== 'null' && q.student_answer !== '未作答'
@@ -1834,6 +1838,231 @@ const processWorkbookGrading = async (job) => {
   console.log(`✅ [Workbook] 完成: ${allQuestions.length} 题, ${wrongCount} 错, ${emptyCount} 空, 共 ${imageList.length} 页, 耗时 ${duration}s`)
 }
 
+// ═══════════════════════════════════════════════
+// 统一答案库管线
+// ═══════════════════════════════════════════════
+//
+// 适用场景：
+//   - worksheet（official_verified）：练习册已有官方答案
+//   - exam（teacher_verified）：试卷已有教师审核答案
+//   - retry_paper（teacher_verified）：错题重练卷已有答案
+//
+// 流程：OCR 提取学生答案 → resource_answers 查找 → judgeAnswer 比对
+// 跳过 AI 生成答案，大幅节省成本。
+
+const processAnswerBankGrading = async (job) => {
+  const { taskId, studentId, imageUrl: rawImageUrl, originalName, resourceId } = job.data
+  const startTime = Date.now()
+
+  const resolveImageUrl = (raw) => {
+    if (typeof raw === 'string') {
+      if (raw.startsWith('{')) {
+        try { const parsed = JSON.parse(raw); return parsed.url || parsed.ossPath || '' }
+        catch { return raw }
+      }
+      return raw
+    }
+    if (typeof raw === 'object' && raw !== null) return raw.url || raw.ossPath || ''
+    return String(raw || '')
+  }
+
+  const fail = async (msg) => {
+    console.error(`💥 [AnswerBank] taskId=${taskId} 失败: ${msg}`)
+    await updateTaskStatus(taskId, TASK_STATUS.FAILED, { error: msg, last_error: msg, failedAt: new Date().toISOString() }).catch(() => {})
+    throw new Error(msg)
+  }
+
+  console.log(`\n🔹 [AnswerBank] 开始答案库批改: resourceId=${resourceId}, taskId=${taskId}`)
+
+  try {
+    await job.updateProgress(5)
+    await updateTaskStatus(taskId, TASK_STATUS.PROCESSING, { progress: 5 })
+
+    // 查询资源信息，确认答案状态
+    const resource = await getResourceById(resourceId)
+    if (!resource) return fail('资源不存在')
+    if (resource.answer_status === 'none' || resource.answer_status === 'ai_draft') {
+      console.warn(`⚠️ [AnswerBank] 资源答案未审核 (${resource.answer_status})，降级为 general 管线`)
+      // 清除 resource_id 后重新走 general 管线
+      job.data.resourceId = null
+      return processTask(job)
+    }
+
+    // 多图处理
+    let rawPages = Array.isArray(job.data.images) && job.data.images.length > 0
+      ? job.data.images
+      : (typeof job.data.images === 'string' ? (() => { try { return JSON.parse(job.data.images) } catch { return null } })() : null)
+    if (!Array.isArray(rawPages) || rawPages.length === 0) {
+      const url = resolveImageUrl(rawImageUrl)
+      rawPages = [{ page_number: 1, image_url: url }]
+    }
+    const pages = rawPages.map((p, i) => ({ pageNumber: p.page_number || i + 1, imageUrl: resolveImageUrl(p.image_url), fileName: p.file_name || null }))
+
+    if (pages.length === 0 || !pages[0].imageUrl) return fail('无有效图片')
+
+    await job.updateProgress(10)
+    await updateTaskStatus(taskId, TASK_STATUS.PROCESSING, { progress: 10 })
+
+    // 下载所有图片
+    const imageBuffers = []
+    for (const page of pages) {
+      try {
+        const buf = await downloadImage(page.imageUrl)
+        imageBuffers.push({ pageNumber: page.pageNumber, buffer: buf })
+      } catch (e) {
+        console.error(`⚠️ [AnswerBank] 第 ${page.pageNumber} 页下载失败: ${e.message}`)
+      }
+    }
+    if (imageBuffers.length === 0) return fail('图片全部下载失败')
+
+    await job.updateProgress(20)
+    await updateTaskStatus(taskId, TASK_STATUS.PROCESSING, { progress: 20 })
+
+    // OCR 提取学生答案（复用 recognizeQuestions 统一处理 JSON 解析+重试）
+    const allQuestions = []
+    for (const { pageNumber, buffer } of imageBuffers) {
+      let compressed
+      try {
+        compressed = await sharp(buffer).rotate().normalize().resize(1920, 1920, { fit: 'inside' }).jpeg({ quality: 85 }).toBuffer()
+      } catch (e) {
+        console.error(`⚠️ [AnswerBank] 第 ${pageNumber} 页压缩失败: ${e.message}`)
+        continue
+      }
+
+      const imageBase64 = bufferToBase64(compressed)
+      const ocrResult = await recognizeQuestions(imageBase64, taskId).catch(e => {
+        console.error(`⚠️ [AnswerBank] 第 ${pageNumber} 页 OCR 失败: ${e.message}`)
+        return null
+      })
+      if (!ocrResult || !ocrResult.success) continue
+
+      for (const q of (ocrResult.questions || [])) {
+        allQuestions.push({ ...q, page_number: pageNumber })
+      }
+    }
+
+    if (allQuestions.length === 0) return fail('OCR 未识别到任何题目')
+
+    await job.updateProgress(40)
+    await updateTaskStatus(taskId, TASK_STATUS.PROCESSING, { progress: 40 })
+
+    // 从答案库批量查询
+    const questionNos = allQuestions.map(q => q.question_number)
+    const cachedAnswers = await bulkLookupResourceAnswers(resourceId, questionNos)
+    const answerMap = new Map(cachedAnswers.map(a => [a.question_no, a]))
+
+    // 比对并保存
+    const savedQuestions = []
+    let emptyCount = 0, matchedCount = 0
+
+    for (const q of allQuestions) {
+      const cached = answerMap.get(q.question_number)
+      const studentAnswer = (q.student_answer || '').trim()
+      const isEmpty = !studentAnswer
+
+      let isCorrect = null
+      let judgementSource = 'ai_ocr'
+
+      if (cached && !isEmpty) {
+        // 用 cached.answer 作为参考答案
+        const judgement = await judgeAnswer({
+          questionType: q.question_type || cached.answer_type || 'answer',
+          studentAnswer,
+          answer: cached.answer,
+          options: null
+        }).catch(() => ({ isCorrect: false, confidence: 0 }))
+
+        isCorrect = judgement.isCorrect
+        matchedCount++
+      } else if (isEmpty) {
+        emptyCount++
+        isCorrect = null
+      } else {
+        // 答案库无此题目，标记为待审核
+        isCorrect = null
+      }
+
+      const questionData = {
+        task_id: taskId,
+        student_id: studentId,
+        content: q.content || `第${q.question_number}题`,
+        question_type: q.question_type || (cached ? cached.answer_type : 'answer'),
+        answer: cached ? cached.answer : null,
+        student_answer: studentAnswer,
+        ai_answer: null,
+        answer_source: isEmpty ? 'blank' : 'recognized',
+        is_correct: isCorrect,
+        status: isCorrect === false ? 'wrong' : 'pending',
+        page_number: q.page_number,
+        question_number: q.question_number,
+        is_suspicious: false,
+        confidence: isEmpty ? 0 : (cached ? 0.85 : 0),
+        source_type: resource.resource_type === 'exam' ? 'exam' : 'homework'
+      }
+
+      savedQuestions.push(questionData)
+    }
+
+    await job.updateProgress(60)
+    await updateTaskStatus(taskId, TASK_STATUS.PROCESSING, { progress: 60 })
+
+    // 幂等：先清旧题，再批量写入
+    const deletedOld = await deleteQuestionsByTaskId(taskId)
+    if (deletedOld > 0) {
+      console.log(`   [AnswerBank] 幂等清理: 删除旧题目 ${deletedOld} 行`)
+    }
+
+    // 每个 question 预生成 ID，供错题本和 judgement 使用
+    const questionsWithIds = savedQuestions.map(q => ({
+      ...q,
+      id: crypto.randomUUID(),
+      student_id: studentId,
+      task_id: taskId
+    }))
+
+    await createQuestions(questionsWithIds)
+
+    // 同步错题本 + judgement
+    let wrongCount = 0
+    for (const q of questionsWithIds) {
+      if (q.is_correct === false) {
+        wrongCount++
+        await addWrongQuestions(studentId, [q.id], null, null).catch(e =>
+          console.error(`⚠️ [AnswerBank] 错题本同步失败 questionId=${q.id}:`, e.message)
+        )
+      }
+      // 写 judgement 审计记录
+      await createJudgement({
+        questionId: q.id,
+        studentId,
+        source: 'ai_answer_gen',
+        confidence: q.confidence || 0,
+        isCorrect: q.is_correct,
+        content: q.content,
+        answer: q.answer,
+        studentAnswer: q.student_answer,
+        metadata: { resource_id: resourceId, answer_bank: true }
+      }).catch(e => console.error(`⚠️ [AnswerBank] judgement 写入失败:`, e.message))
+    }
+
+    const duration = ((Date.now() - startTime) / 1000).toFixed(1)
+    await updateTaskStatus(taskId, TASK_STATUS.DONE, {
+      questionCount: createdQuestions.length,
+      wrongCount,
+      emptyCount,
+      matchedCount,
+      duration: `${duration}s`,
+      source: 'answer_bank',
+      resourceType: resource.resource_type
+    })
+
+    console.log(`✅ [AnswerBank] 完成: ${createdQuestions.length} 题, ${wrongCount} 错, ${emptyCount} 空, ${matchedCount} 匹配答案库, 耗时 ${duration}s`)
+  } catch (e) {
+    console.error(`💥 [AnswerBank] 异常:`, e.message)
+    await updateTaskStatus(taskId, TASK_STATUS.FAILED, { error: e.message, last_error: e.message, failedAt: new Date().toISOString() }).catch(() => {})
+  }
+}
+
 export const processTask = async (job) => {
   const { taskId, studentId, imageUrl: rawImageUrl, originalName } = job.data
   const startTime = Date.now()
@@ -1843,13 +2072,14 @@ export const processTask = async (job) => {
   if ((job.data.taskType === undefined || (job.data.taskType === 'workbook' && !job.data.worksheetId)) && taskId) {
     try {
       const { rows } = await query(
-        `SELECT task_type, worksheet_id, generated_exam_id FROM ${TABLES.TASKS} WHERE id = $1`,
+        `SELECT task_type, worksheet_id, generated_exam_id, resource_id FROM ${TABLES.TASKS} WHERE id = $1`,
         [taskId]
       )
       if (rows[0]) {
         job.data.taskType = rows[0].task_type || 'general'
         if (!job.data.worksheetId) job.data.worksheetId = rows[0].worksheet_id || null
         if (!job.data.generatedExamId) job.data.generatedExamId = rows[0].generated_exam_id || null
+        if (!job.data.resourceId) job.data.resourceId = rows[0].resource_id || null
       }
     } catch (e) {
       console.error(`⚠️ 路由字段回读失败 taskId=${taskId}:`, e.message)
@@ -1860,6 +2090,13 @@ export const processTask = async (job) => {
     console.error(`⚠️ [路由] workbook 任务缺少 worksheetId，降级为 general 管线 taskId=${taskId}`)
   }
   const generatedExamId = job.data.generatedExamId
+  const resourceId = job.data.resourceId
+
+  // ── 统一答案库管线：优先使用 resource_answers（已审核的答案库）──
+  // 跳过 AI 生成答案步骤，仅 OCR + 比对缓存答案，大幅节省成本
+  if (resourceId) {
+    return processAnswerBankGrading(job)
+  }
 
   // ── 精简管线（错题重练）：按组卷 question_ids 匹配题库已存答案，自动判定 ──
   // 不跑完整 OCR+AI作答+AI判卷 worker，仅 OCR 学生手写答案 → 与存储答案 deterministic 比对

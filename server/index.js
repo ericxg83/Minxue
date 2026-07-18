@@ -23,6 +23,8 @@ import { migrateWorksheets } from './migrations/023_add_worksheets_tables.js'
 import { migrateTaskImages } from './migrations/024_add_task_images.js'
 import { migrateWorksheetParseStatus } from './migrations/025_add_worksheet_parse_status.js'
 import { migrateDeduplicateWorksheetAnswers } from './migrations/026_dedupe_worksheet_answers.js'
+import { migrateWorksheetAnswerContent } from './migrations/027_add_worksheet_answer_content.js'
+import { migrateResources } from './migrations/028_add_resources.js'
 
 const __dirname = dirname(fileURLToPath(import.meta.url))
 dotenv.config({ path: resolve(__dirname, '.env') })
@@ -45,6 +47,7 @@ import { generateTag as generateTagWithLLM } from './backfillTags.js'
 import { AI_CONFIG, getAIHeaders, buildTaggingPrompt, resetModelIndex } from './config/ai.js'
 import weeklyReportRouter from './routes/weeklyReport.js'
 import worksheetsRouter from './routes/worksheets.js'
+import resourcesRouter from './routes/resources.js'
 
 const app = express()
 const PORT = process.env.PORT || 4000
@@ -122,11 +125,12 @@ app.post('/api/upload', upload.single('files'), async (req, res) => {
 // Upload images and create tasks (with validation + retry pipeline)
 app.post('/api/tasks/upload', upload.array('files', 20), async (req, res) => {
   try {
-    const { studentId, taskType, generatedExamId, worksheetId, subject } = req.body
+    const { studentId, taskType, generatedExamId, worksheetId, subject, resourceId } = req.body
     const normalizedTaskType = taskType === 'wrong_retry' ? 'wrong_retry'
       : taskType === 'workbook' ? 'workbook'
       : 'general'
     const normalizedGeneratedExamId = generatedExamId && /^[0-9a-f-]{36}$/i.test(generatedExamId) ? generatedExamId : null
+    const normalizedResourceId = resourceId && /^[0-9a-f-]{36}$/i.test(resourceId) ? resourceId : null
 
     // 错题重练上传：未传 studentId 时，从组卷记录自动关联（二维码只承载 task 定位）
     let resolvedStudentId = studentId
@@ -218,9 +222,9 @@ app.post('/api/tasks/upload', upload.array('files', 20), async (req, res) => {
         }
 
         const { rows } = await query(
-          `INSERT INTO ${TABLES.TASKS} (student_id, image_url, images, original_name, status, result, task_type, generated_exam_id, worksheet_id, subject)
-           VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10) RETURNING *`,
-          [resolvedStudentId, firstUrl, JSON.stringify(images), taskName, TASK_STATUS.PROCESSING, JSON.stringify({ progress: 0 }), normalizedTaskType, normalizedGeneratedExamId, worksheetId || null, subject || null]
+          `INSERT INTO ${TABLES.TASKS} (student_id, image_url, images, original_name, status, result, task_type, generated_exam_id, worksheet_id, subject, resource_id)
+           VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11) RETURNING *`,
+          [resolvedStudentId, firstUrl, JSON.stringify(images), taskName, TASK_STATUS.PROCESSING, JSON.stringify({ progress: 0 }), normalizedTaskType, normalizedGeneratedExamId, worksheetId || null, subject || null, normalizedResourceId]
         )
 
         const savedTask = rows[0]
@@ -234,7 +238,8 @@ app.post('/api/tasks/upload', upload.array('files', 20), async (req, res) => {
           originalName: taskName,
           generatedExamId: normalizedGeneratedExamId,
           taskType: normalizedTaskType,
-          worksheetId: worksheetId || null
+          worksheetId: worksheetId || null,
+          resourceId: normalizedResourceId
         }
 
         if (queue) {
@@ -2155,6 +2160,7 @@ app.get('/api/admin/backfill-tags/progress', (req, res) => {
 // 周学习诊断报告
 app.use('/api/weekly-report', weeklyReportRouter)
 app.use('/api/worksheets', worksheetsRouter)
+app.use('/api/resources', resourcesRouter)
 
 const __filename = fileURLToPath(import.meta.url)
 
@@ -2206,6 +2212,8 @@ if (process.argv[1] === __filename || process.argv[1]?.endsWith('server/index.js
       await migrateTaskImages()
       await migrateWorksheetParseStatus()
       await migrateDeduplicateWorksheetAnswers()
+      await migrateWorksheetAnswerContent()
+      await migrateResources()
     } catch (err) {
       console.error('数据库迁移失败:', err.message)
     }
