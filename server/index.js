@@ -1108,7 +1108,8 @@ app.get('/api/questions/task/:taskId', async (req, res) => {
        FROM ${TABLES.QUESTIONS} q
        LEFT JOIN ${TABLES.QUESTION_CACHE} qc ON q.cache_id = qc.id
        WHERE q.task_id = $1
-       ORDER BY COALESCE((q.block_coordinates->>'y')::float, 99999), q.created_at`,
+       ORDER BY COALESCE(q.page_number, 1),
+                COALESCE((q.block_coordinates->>'y')::float, 99999), q.created_at`,
       [taskId]
     )
     // JS 层做 COALESCE：cache 字段优先于 question 自身字段

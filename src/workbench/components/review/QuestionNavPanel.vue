@@ -71,24 +71,44 @@ import StatusIcon from './StatusIcon.vue'
 const store = useReviewStore()
 const threshold = ref(store.confidenceThreshold)
 
-// 多试卷聚合：题目归属试卷序号标签（仅每卷首题显示）
+// 题目归属试卷序号标签（仅每卷首题显示）
+// 两种来源：
+// 1. 多试卷聚合模式：按 questionToTaskMap 映射到任务序号
+// 2. 单任务多图（一次上传多张试卷）：按题目 page_number 映射到页序号
 const paperLabels = computed(() => {
   const map = store.questionToTaskMap
-  if (!map || Object.keys(map).length === 0) return []
-  const taskIds = [...new Set(Object.values(map))]
-  const taskOrder = store.studentTasks
-    .filter(t => taskIds.includes(t.id))
-    .map(t => t.id)
-  const labels = []
-  let currentPaperId = null
-  for (const q of store.allQuestions) {
-    const tid = map[q.id]
-    const isFirst = tid !== currentPaperId
-    if (isFirst) currentPaperId = tid
-    const paperIdx = taskOrder.indexOf(tid)
-    labels.push(isFirst && paperIdx >= 0 ? `卷${paperIdx + 1}` : '')
+  if (map && Object.keys(map).length > 0) {
+    const taskIds = [...new Set(Object.values(map))]
+    const taskOrder = store.studentTasks
+      .filter(t => taskIds.includes(t.id))
+      .map(t => t.id)
+    const labels = []
+    let currentPaperId = null
+    for (const q of store.allQuestions) {
+      const tid = map[q.id]
+      const isFirst = tid !== currentPaperId
+      if (isFirst) currentPaperId = tid
+      const paperIdx = taskOrder.indexOf(tid)
+      labels.push(isFirst && paperIdx >= 0 ? `卷${paperIdx + 1}` : '')
+    }
+    return labels
   }
-  return labels
+  // 单任务多图：每页（每张上传的试卷）首题标注 卷N，按上传顺序（page_number）编号
+  const pages = store.currentPaperPages
+  if (pages.length > 1) {
+    const pageOrder = pages.map(p => p.page_number)
+    const labels = []
+    let currentPage = null
+    for (const q of store.allQuestions) {
+      const pn = q.page_number || 1
+      const isFirst = pn !== currentPage
+      if (isFirst) currentPage = pn
+      const pageIdx = pageOrder.indexOf(pn)
+      labels.push(isFirst && pageIdx >= 0 ? `卷${pageIdx + 1}` : '')
+    }
+    return labels
+  }
+  return []
 })
 
 const typeLabel = (type) => {

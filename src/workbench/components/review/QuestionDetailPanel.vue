@@ -391,7 +391,6 @@ const isTikzActive = computed(() => q.value?.display_image_type === 'tikz')
 const fullscreenImage = ref('')
 const fullscreenSvg = ref('')
 const showFullscreenSvg = ref(false)
-const imageUrl = computed(() => q.value?.geometry_image_url || q.value?.image_url || '')
 
 /** 将 TikZ 代码渲染为 SVG 字符串 */
 const renderTikzSvg = (code) => {
@@ -576,7 +575,8 @@ watch(q, (newQ) => {
       question_type: newQ.question_type || 'choice',
       subject: newQ.subject || ''
     }
-    localImageUrl.value = newQ.geometry_image_url || newQ.image_url || ''
+    // 配图仅取题干裁剪图；image_url 是整页试卷图，不能作为配图展示
+    localImageUrl.value = newQ.geometry_image_url || ''
     originalData.value = JSON.parse(JSON.stringify(form.value))
     originalData.value.geometryImageUrl = localImageUrl.value
   } else {

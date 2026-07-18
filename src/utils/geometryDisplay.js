@@ -34,7 +34,9 @@ export function isTikzCode(str) {
  * 4. clean_geometry_image_url 是 TikZ 代码 → type='tikz_code'（第二阶段旧数据）
  * 5. clean_geometry_image_url 是 URL → type='clean'（第一阶段旧数据）
  * 6. geometry_image_url → type='raw'（原始裁剪图）
- * 7. image_url → type='raw'（整页图回退）
+ *
+ * 注意：不回退到 image_url——该字段是题目所在的整页试卷图（多页任务按页存储），
+ * 不是题干配图。无配图的题目应返回 none，由试卷查看面板展示整页图。
  */
 export function getGeometryDisplayUrl(question) {
   if (!question) return { url: null, type: 'none' }
@@ -69,11 +71,7 @@ export function getGeometryDisplayUrl(question) {
     return { url: question.geometry_image_url, type: 'raw' }
   }
 
-  // 7. 最后回退到 image_url（整页图）
-  if (question.image_url) {
-    return { url: question.image_url, type: 'raw' }
-  }
-
+  // 不再回退到 image_url：那是整页试卷图，不是题干配图（无配图 → none）
   return { url: null, type: 'none' }
 }
 

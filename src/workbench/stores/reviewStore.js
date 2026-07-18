@@ -227,8 +227,12 @@ export const useReviewStore = defineStore('review', () => {
     currentTaskId.value = taskId
     try {
       const questions = await getQuestionsByTask(taskId, false)
-      // Sort questions by sort_order or sequence
+      // 排序：先按 page_number（图片上传顺序，卷1在卷2前），再按 sort_order/sequence
+      // （服务端已按 page_number + 版面 y 坐标返回，此处稳定排序不破坏页内顺序）
       allQuestions.value = (Array.isArray(questions) ? questions : []).sort((a, b) => {
+        const aPage = a.page_number || 1
+        const bPage = b.page_number || 1
+        if (aPage !== bPage) return aPage - bPage
         const aOrder = a.sort_order || a.sequence || 0
         const bOrder = b.sort_order || b.sequence || 0
         return aOrder - bOrder
