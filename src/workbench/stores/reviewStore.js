@@ -222,14 +222,47 @@ export const useReviewStore = defineStore('review', () => {
   }
 
   // 加载试卷的所有题目
+  // URL 归一化：去掉查询串、协议与 host，仅保留末段路径（OSS object key/文件名）。
+  // 用于把题目 image_url 与 task.images 的 image_url 做鲁棒匹配——
+  // 两者可能因 resolveUrl（CDN/签名）导致 host、query 不同，但对象路径稳定。
+  const normalizeUrlKey = (u) => {
+    if (!u || typeof u !== 'string') return ''
+    const noQuery = u.split('?')[0]
+    const seg = noQuery.split('/').filter(Boolean)
+    return seg.slice(-2).join('/') || noQuery
+  }
+
+  // 回填 page_number：部分批改管线（如练习册路径）未给题目写入 page_number，
+  // 导致分卷排序 / 卷N标注 / 中央页图同步全部塌缩到"第1页"。
+  // 用题目 image_url 匹配 task.images 的上传顺序，为缺失页号的题目补上有效页号。
+  const backfillPageNumbers = (list) => {
+    if (list.every(q => q.page_number != null)) return
+    const imgs = currentTask.value?.images
+    if (!Array.isArray(imgs) || imgs.length <= 1) return
+    const keyToPage = new Map()
+    imgs.forEach((img, i) => {
+      const k = normalizeUrlKey(img?.image_url)
+      if (k) keyToPage.set(k, img.page_number || i + 1)
+    })
+    if (keyToPage.size === 0) return
+    for (const q of list) {
+      if (q.page_number != null) continue
+      const k = normalizeUrlKey(q.image_url)
+      if (k && keyToPage.has(k)) q.page_number = keyToPage.get(k)
+    }
+  }
+
   const loadQuestions = async (taskId) => {
     if (!taskId) return
     currentTaskId.value = taskId
     try {
       const questions = await getQuestionsByTask(taskId, false)
+      const list = Array.isArray(questions) ? questions : []
+      // 缺失页号时按 image_url 回填，保证多卷任务能正确分卷
+      backfillPageNumbers(list)
       // 排序：先按 page_number（图片上传顺序，卷1在卷2前），再按 sort_order/sequence
       // （服务端已按 page_number + 版面 y 坐标返回，此处稳定排序不破坏页内顺序）
-      allQuestions.value = (Array.isArray(questions) ? questions : []).sort((a, b) => {
+      allQuestions.value = list.sort((a, b) => {
         const aPage = a.page_number || 1
         const bPage = b.page_number || 1
         if (aPage !== bPage) return aPage - bPage
