@@ -1558,7 +1558,8 @@ const processWorkbookGrading = async (job) => {
     {
       "question_number": 1,
       "student_answer": "学生手写的答案文本，没有则填 null",
-      "question_type": "choice"  // choice | fill | judge | answer
+      "question_type": "choice",  // choice | fill | judge | answer
+      "block_coordinates": { "x": 120, "y": 300, "width": 760, "height": 90 }
     }
   ]
 }
@@ -1567,6 +1568,10 @@ const processWorkbookGrading = async (job) => {
 - page_title 从页面页眉/大标题的印刷体读取，尽量完整
 - question_number 从印刷体题号读取，必须是数字
 - student_answer 只提取学生手写的内容，如果没有手写迹，填 null；判断题的 √/× 也要提取
+- block_coordinates 是该题在图片中的整体外接矩形框（含题号、题干、学生作答区），
+  用【归一化 0-1000 坐标系】：x/y 为矩形左上角，width/height 为宽高，
+  取值范围 0-1000（相对图片宽/高的千分比，与图片实际像素分辨率无关）。
+  必须为每道题都返回该框，用于前端在原图上定位题目。
 - 不要猜测标准答案
 - 只返回 JSON，不要其他文字`
 
@@ -1634,9 +1639,13 @@ const processWorkbookGrading = async (job) => {
 
     console.log(`   [Workbook] 第 ${pageIdx + 1} 页: 识别到 ${questions.length} 道题, 标题="${pageTitle}"`)
 
-    // 标记每道题来自哪页图片，保存时写入 image_url
+    // 标记每道题来自哪页图片（image_url）及页码（page_number），保存时写入。
+    // page_number 用于前端分卷排序 / 卷N标注 / 中央页图同步——
+    // 缺失会导致多卷任务全部塌缩到"第1页"。用上传顺序页号，兜底 pageIdx+1。
+    const pageNo = imageList[pageIdx].page_number || (pageIdx + 1)
     for (const q of questions) {
       q._page_image_url = url
+      q._page_number = pageNo
     }
 
     allQuestions.push(...questions)
@@ -1750,10 +1759,15 @@ const processWorkbookGrading = async (job) => {
     confidence: q.is_correct !== null ? 0.95 : null,
     question_type: q.question_type || 'choice',
     image_url: q._page_image_url || imageList[0]?.image_url || '',
+    page_number: q._page_number || 1,
+    // 题目定位框（归一化 0-1000）：来自 OCR，供前端在原图上画蓝色定位框。
+    // 同时写入 text_bbox，使前端 getDisplayBox 的首选路径生效。
+    block_coordinates: q.block_coordinates || null,
+    text_bbox: q.block_coordinates || null,
     source_type: 'workbook'
   }))
   // 清除临时标记字段
-  for (const q of questionsWithStudentId) { delete q._page_image_url }
+  for (const q of questionsWithStudentId) { delete q._page_image_url; delete q._page_number }
 
   await createQuestions(questionsWithStudentId)
 
