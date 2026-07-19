@@ -60,6 +60,11 @@ const routes = [
     name: 'WorksheetReview',
     component: () => import('../views/WorksheetReview.vue'),
     meta: { requiresPC: true }
+  {
+    path: '/paper/:id/review',
+    name: 'ExamAnswerReview',
+    component: () => import('../views/ExamAnswerReview.vue'),
+    meta: { requiresPC: true }
   }
 ]
 

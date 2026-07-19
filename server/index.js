@@ -36,7 +36,7 @@ import multer from 'multer'
 import { query, TABLES, TASK_STATUS, QUESTION_STATUS, WRONG_STATUS, LIFECYCLE_STATUS } from './config/neon.js'
 import { uploadFilesWithRetry } from './services/uploadRetryManager.js'
 import { createUploadReport, logUploadReport } from './services/uploadReportLogger.js'
-import { createJudgement, batchUpdateQuestionTags, getQuestionAssets, getQuestionAssetsByType } from './services/neonService.js'
+import { createJudgement, batchUpdateQuestionTags, getQuestionAssets, getQuestionAssetsByType, createResource, replaceResourceAnswers } from './services/neonService.js'
 import { judgeAnswer } from './services/judgeService.js'
 import { checkQuestionCompleteness } from './utils/questionCompleteness.js'
 import { uploadImage, deleteFile } from './services/ossService.js'
@@ -547,17 +547,103 @@ app.delete('/api/tasks/:taskId', async (req, res) => {
     if (!uuidRegex.test(taskId)) {
       return res.status(400).json({ error: '无效的任务ID' })
     }
-    
+
     // Soft delete: set deleted_at instead of actual deletion
     // This preserves questions and wrong_questions associations
     await query(
       `UPDATE ${TABLES.TASKS} SET deleted_at = NOW(), updated_at = NOW() WHERE id = $1`,
       [taskId]
     )
-    
+
     res.json({ success: true, message: '任务已删除（错题已保留）' })
   } catch (error) {
     console.error('删除任务失败:', error)
+    res.status(500).json({ error: error.message })
+  }
+})
+
+// Save task answers as exam answer key (存档为答案库)
+app.post('/api/tasks/:taskId/save-as-answer-key', async (req, res) => {
+  try {
+    const { taskId } = req.params
+    const { name, subject, grade } = req.body
+    if (!name) return res.status(400).json({ error: '缺少资源名称' })
+
+    // 1. Fetch task
+    const { rows: tasks } = await query(
+      `SELECT * FROM ${TABLES.TASKS} WHERE id = $1`,
+      [taskId]
+    )
+    const task = tasks[0]
+    if (!task) return res.status(404).json({ error: '任务不存在' })
+    if (task.status !== 'done' && task.status !== 'reviewed') {
+      return res.status(400).json({ error: '任务状态必须是 done 或 reviewed' })
+    }
+
+    // 2. Fetch questions from this task
+    const { rows: questions } = await query(
+      `SELECT * FROM ${TABLES.QUESTIONS} WHERE task_id = $1 AND answer IS NOT NULL ORDER BY question_number ASC`,
+      [taskId]
+    )
+    if (questions.length === 0) return res.status(400).json({ error: '该任务没有题目答案数据' })
+
+    // 3. Create resource
+    const resource = await createResource({
+      name,
+      type: 'exam',
+      subject: subject || task.subject || null,
+      grade: grade || null
+    })
+
+    // 4. Build answers from questions
+    const answers = questions.map(q => ({
+      question_no: q.question_number,
+      answer: q.answer || '',
+      answer_type: q.question_type || 'answer',
+      content: q.content || null,
+      section: null,
+      answer_status: 'teacher_verified',
+      source: 'teacher_approve'
+    }))
+
+    // 5. Save answers via replaceResourceAnswers (transactional)
+    await replaceResourceAnswers(resource.id, answers)
+
+    // 6. Update resource answer_count and status
+    await query(
+      `UPDATE ${TABLES.RESOURCES} SET answer_count = $2, answer_status = 'teacher_verified', status = 'published' WHERE id = $1`,
+      [resource.id, answers.length]
+    )
+
+    // 7. Update task resource_id
+    await query(
+      `UPDATE ${TABLES.TASKS} SET resource_id = $2, updated_at = NOW() WHERE id = $1`,
+      [taskId, resource.id]
+    )
+
+    res.json({ success: true, resource })
+  } catch (error) {
+    console.error('存档答案库失败:', error)
+    res.status(500).json({ error: error.message })
+  }
+})
+
+// Get tasks by resource_id (for exam answer key usage history)
+app.get('/api/tasks/resource/:resourceId', async (req, res) => {
+  try {
+    const { resourceId } = req.params
+    const { rows } = await query(
+      `SELECT t.id, t.student_id, t.status, t.original_name, t.created_at,
+              s.name AS student_name
+       FROM ${TABLES.TASKS} t
+       LEFT JOIN ${TABLES.STUDENTS} s ON s.id = t.student_id
+       WHERE t.resource_id = $1 AND t.deleted_at IS NULL
+       ORDER BY t.created_at DESC`,
+      [resourceId]
+    )
+    res.json({ success: true, tasks: rows })
+  } catch (error) {
+    console.error('获取资源任务失败:', error)
     res.status(500).json({ error: error.message })
   }
 })
@@ -2156,6 +2242,31 @@ app.post('/api/admin/backfill-tags', async (req, res) => {
     // 查询回填进度
 app.get('/api/admin/backfill-tags/progress', (req, res) => {
   res.json({ success: true, ...backfillProgress })
+})
+
+// 获取已发布的试卷答案库列表（供移动端选择器）
+app.get('/api/resources/exam-papers', async (req, res) => {
+  try {
+    const { subject } = req.query
+    const conditions = ["resource_type = 'exam'", "answer_status IN ('teacher_verified', 'official_verified')"]
+    const params = []
+    let idx = 1
+    if (subject) {
+      conditions.push(`subject = $${idx++}`)
+      params.push(subject)
+    }
+    const { rows } = await query(
+      `SELECT r.*,
+         (SELECT COUNT(*)::int FROM ${TABLES.RESOURCE_ANSWERS} ra WHERE ra.resource_id = r.id) AS answer_count
+       FROM ${TABLES.RESOURCES} r
+       WHERE ${conditions.join(' AND ')}
+       ORDER BY r.created_at DESC`,
+      params
+    )
+    res.json({ success: true, resources: rows })
+  } catch (e) {
+    res.status(500).json({ error: e.message })
+  }
 })
 
 // 周学习诊断报告

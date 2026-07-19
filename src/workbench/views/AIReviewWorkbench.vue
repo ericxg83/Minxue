@@ -78,8 +78,8 @@
         <span class="question-index">
           第 {{ aiReviewStore.currentQuestionIndex + 1 }} / {{ aiReviewStore.taskQuestions.length }} 题
         </span>
-        <el-button 
-          @click="aiReviewStore.nextQuestion" 
+        <el-button
+          @click="aiReviewStore.nextQuestion"
           :disabled="aiReviewStore.currentQuestionIndex === aiReviewStore.taskQuestions.length - 1"
         >
           下一题 →
@@ -128,8 +128,8 @@
         <div class="right-panel">
           <div class="panel-header">
             <h3>AI识别结果</h3>
-            <el-tag 
-              :type="currentQuestionStatusType" 
+            <el-tag
+              :type="currentQuestionStatusType"
               size="small"
             >
               {{ currentQuestionStatus }}
@@ -178,8 +178,8 @@
             <div class="field-section">
               <label>AI判定</label>
               <div class="ai-result">
-                <el-tag 
-                  :type="aiResultType" 
+                <el-tag
+                  :type="aiResultType"
                   size="large"
                 >
                   {{ aiResultText }}
@@ -222,6 +222,58 @@
         </div>
       </div>
     </div>
+
+    <!-- 完成视图 -->
+    <div v-if="aiReviewStore.reviewStatus === 'completed'" class="completed-view">
+      <div class="completed-card">
+        <div class="completed-icon">✅</div>
+        <h3>复审完成</h3>
+        <div class="completed-stats">
+          <div class="stat-item">
+            <span class="stat-value">{{ aiReviewStore.stats.confirmed }}</span>
+            <span class="stat-label">已确认</span>
+          </div>
+          <div class="stat-item">
+            <span class="stat-value">{{ aiReviewStore.stats.corrected }}</span>
+            <span class="stat-label">已修正</span>
+          </div>
+          <div class="stat-item">
+            <span class="stat-value">{{ aiReviewStore.stats.total }}</span>
+            <span class="stat-label">总题数</span>
+          </div>
+        </div>
+        <div class="completed-actions">
+          <el-button @click="aiReviewStore.backToTaskList">返回列表</el-button>
+          <el-button type="warning" @click="showSaveDialog = true" :loading="savingAnswerKey">
+            <el-icon><FolderOpened /></el-icon>
+            存档为答案库
+          </el-button>
+        </div>
+      </div>
+    </div>
+
+    <!-- 存档答案库对话框 -->
+    <el-dialog v-model="showSaveDialog" title="存档为试卷答案库" width="420px">
+      <el-form :model="saveForm" label-width="70px">
+        <el-form-item label="试卷名称">
+          <el-input v-model="saveForm.name" :placeholder="defaultSaveName" />
+        </el-form-item>
+        <el-form-item label="科目">
+          <el-select v-model="saveForm.subject" placeholder="选择科目" style="width: 100%">
+            <el-option label="数学" value="数学" />
+            <el-option label="英语" value="英语" />
+            <el-option label="语文" value="语文" />
+          </el-select>
+        </el-form-item>
+        <el-form-item label="年级">
+          <el-input v-model="saveForm.grade" placeholder="如：六年级" />
+        </el-form-item>
+      </el-form>
+      <template #footer>
+        <el-button @click="showSaveDialog = false">取消</el-button>
+        <el-button type="primary" @click="handleSaveAnswerKey" :loading="savingAnswerKey">确认存档</el-button>
+      </template>
+    </el-dialog>
   </div>
 </template>
 
@@ -229,8 +281,10 @@
 import { ref, computed, onMounted, onUnmounted } from 'vue'
 import { useRouter } from 'vue-router'
 import { useAIReviewStore, AI_REVIEW_STATUS } from '../stores/aiReviewStore'
-import { ArrowLeft } from '@element-plus/icons-vue'
+import { FolderOpened, ArrowLeft } from '@element-plus/icons-vue'
+import { ElMessage } from 'element-plus'
 import LazyImage from '../components/shared/LazyImage.vue'
+import { saveTaskAsAnswerKey } from '../api/examApi.js'
 
 const router = useRouter()
 const aiReviewStore = useAIReviewStore()
@@ -349,6 +403,42 @@ const formatDate = (dateStr) => {
   if (!dateStr) return ''
   const date = new Date(dateStr)
   return date.toLocaleDateString('zh-CN')
+}
+
+// 存档为答案库
+const showSaveDialog = ref(false)
+const savingAnswerKey = ref(false)
+const saveForm = ref({ name: '', subject: '', grade: '' })
+
+const defaultSaveName = computed(() => {
+  return aiReviewStore.currentTask?.original_name || '未命名试卷'
+})
+
+const handleSaveAnswerKey = async () => {
+  const taskId = aiReviewStore.currentTask?.id
+  if (!taskId) return
+
+  // 自动填入默认值
+  if (!saveForm.value.name) {
+    saveForm.value.name = defaultSaveName.value
+  }
+
+  savingAnswerKey.value = true
+  try {
+    const name = saveForm.value.name || defaultSaveName.value
+    const resource = await saveTaskAsAnswerKey(taskId, {
+      name,
+      subject: saveForm.value.subject,
+      grade: saveForm.value.grade
+    })
+    ElMessage.success(`答案库已创建: ${name}`)
+    showSaveDialog.value = false
+    aiReviewStore.backToTaskList()
+  } catch (e) {
+    console.error('存档答案库失败:', e)
+    ElMessage.error('存档失败: ' + (e.response?.data?.error || e.message))
+  }
+  savingAnswerKey.value = false
 }
 
 // 生命周期
@@ -607,5 +697,64 @@ onUnmounted(() => {
   text-align: center;
   color: #999;
   font-size: 12px;
+}
+
+/* 完成视图 */
+.completed-view {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.completed-card {
+  background: #fff;
+  border-radius: 16px;
+  padding: 48px 64px;
+  text-align: center;
+  box-shadow: 0 4px 24px rgba(0,0,0,0.1);
+}
+
+.completed-icon {
+  font-size: 48px;
+  margin-bottom: 16px;
+}
+
+.completed-card h3 {
+  font-size: 24px;
+  font-weight: 600;
+  color: #1D2129;
+  margin: 0 0 24px;
+}
+
+.completed-stats {
+  display: flex;
+  gap: 32px;
+  justify-content: center;
+  margin-bottom: 32px;
+}
+
+.stat-item {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+}
+
+.stat-value {
+  font-size: 32px;
+  font-weight: 700;
+  color: #1677FF;
+}
+
+.stat-label {
+  font-size: 13px;
+  color: #86909C;
+  margin-top: 4px;
+}
+
+.completed-actions {
+  display: flex;
+  gap: 12px;
+  justify-content: center;
 }
 </style>

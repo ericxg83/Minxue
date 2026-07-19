@@ -41,6 +41,7 @@ import { mockQuestions, mockTasks, mockWrongQuestions, mockGeneratedExams, mockS
 import StudentSwitcher from './components/StudentSwitcher'
 import SwipeableRow from './components/SwipeableRow'
 import WorksheetPicker from './components/WorksheetPicker'
+import ExamPicker from './components/ExamPicker'
 
 import { useToast, ToastProvider } from './components/ToastProvider'
 import dayjs from 'dayjs'
@@ -224,8 +225,11 @@ export default function App() {
   const [showUploadOptions, setShowUploadOptions] = useState(false)
   const [showWorksheetPicker, setShowWorksheetPicker] = useState(false)
   const [selectedWorksheetId, setSelectedWorksheetId] = useState(null)
-  const [pendingFlow, setPendingFlow] = useState(null) // 'workbook' | null
+  const [pendingFlow, setPendingFlow] = useState(null) // 'workbook' | 'exam' | null
   const [flowSubject, setFlowSubject] = useState('数学')
+  const [showExamPicker, setShowExamPicker] = useState(false)
+  const [selectedExamResourceId, setSelectedExamResourceId] = useState(null)
+  const [selectedExamResourceName, setSelectedExamResourceName] = useState(null)
 
   // ── 多图暂存区（拍照+相册连拍/多选）──
   const [showStaging, setShowStaging] = useState(false)
@@ -296,6 +300,8 @@ export default function App() {
   const clearPendingUploadFlow = useCallback(() => {
     setPendingFlow(null)
     setSelectedWorksheetId(null)
+    setSelectedExamResourceId(null)
+    setSelectedExamResourceName(null)
     setFlowSubject('数学')
   }, [])
 
@@ -717,6 +723,10 @@ export default function App() {
         // 多图一任务：整批文件合并为一个任务
         await uploadRegularHomework(newFiles)
         clearPendingUploadFlow()
+      } else if (pendingFlow === 'exam') {
+        // 试卷答案库：直接上传，不走 QR 检测
+        await uploadRegularHomework(newFiles)
+        clearPendingUploadFlow()
       } else {
         const qrToast = Toast.show({ message: '正在检测二维码...', type: 'loading', duration: 0 })
 
@@ -852,6 +862,7 @@ export default function App() {
     console.debug('📤 [uploadViaBackend] currentStudent:', currentStudent?.id, currentStudent?.name)
 
     const isWorkbook = pendingFlow === 'workbook' && selectedWorksheetId
+    const isExam = pendingFlow === 'exam' && selectedExamResourceId
     const firstFile = files[0]
     const taskName = files.length > 1
       ? `${firstFile.name || '作业'} 等${files.length}页`
@@ -862,7 +873,7 @@ export default function App() {
       student_id: currentStudent.id,
       image_url: URL.createObjectURL(firstFile),
       original_name: taskName,
-      task_type: isWorkbook ? 'workbook' : 'homework',
+      task_type: isWorkbook ? 'workbook' : (isExam ? 'exam' : 'homework'),
       pages: files.map((file, index) => ({
         id: `page-${index + 1}`,
         image_url: URL.createObjectURL(file),
@@ -873,7 +884,8 @@ export default function App() {
       result: { progress: 0 },
       created_at: new Date().toISOString(),
       is_temp: true,
-      ...(isWorkbook && { worksheet_id: selectedWorksheetId })
+      ...(isWorkbook && { worksheet_id: selectedWorksheetId }),
+      ...(isExam && { resource_id: selectedExamResourceId })
     }
     addTask(tempTask)
 
@@ -893,6 +905,10 @@ export default function App() {
       if (isWorkbook) {
         options.worksheetId = selectedWorksheetId
         options.taskType = 'workbook'
+        options.subject = flowSubject
+      } else if (isExam) {
+        options.resourceId = selectedExamResourceId
+        options.taskType = 'exam'
         options.subject = flowSubject
       }
       const result = await taskService.uploadFiles(currentStudent.id, files, options)
@@ -3202,6 +3218,27 @@ export default function App() {
           subject={flowSubject}
         />
 
+        {/* Exam Picker */}
+        <ExamPicker
+          visible={showExamPicker}
+          onClose={() => {
+            setShowExamPicker(false)
+            setPendingFlow(null)
+          }}
+          onSelect={({ resourceId, resourceName }) => {
+            setSelectedExamResourceId(resourceId)
+            setSelectedExamResourceName(resourceName)
+            setShowExamPicker(false)
+            if (resourceId) {
+              setPendingFlow('exam')
+              openStaging('exam')
+            } else {
+              setPendingFlow(null)
+            }
+          }}
+          subject={flowSubject}
+        />
+
         {/* Floating Action Button — Claude style */}
         {currentPage === 'processing' && (
           <motion.button
@@ -3285,7 +3322,26 @@ export default function App() {
                   </div>
                 </button>
 
-                {/* 卡片3: 错题重练 — 拍照上传，自动识别照片中的二维码并定位重练卷 */}
+                {/* 卡片3: 试卷（答案库） */}
+                <button
+                  onClick={() => {
+                    setShowUploadOptions(false)
+                    setPendingFlow('exam')
+                    setShowExamPicker(true)
+                  }}
+                  className="w-full flex items-center gap-4 p-4 rounded-2xl transition-all active:scale-[0.98] tap-scale mb-3"
+                  style={{ background: 'rgba(217, 119, 6, 0.08)' }}
+                >
+                  <div className="w-14 h-14 rounded-2xl flex items-center justify-center shadow-md flex-shrink-0" style={{ background: '#D97706' }}>
+                    <FileText size={28} className="text-white" />
+                  </div>
+                  <div className="text-left">
+                    <span className="block text-[15px] font-semibold" style={{ color: 'var(--text)' }}>试卷（答案库）</span>
+                    <span className="block text-[12px] mt-0.5" style={{ color: 'var(--text-secondary)' }}>已有标准答案的试卷，自动批改</span>
+                  </div>
+                </button>
+
+                {/* 卡片4: 错题重练 — 拍照上传，自动识别照片中的二维码并定位重练卷 */}
                 <button
                   onClick={() => {
                     setShowUploadOptions(false)
@@ -3342,9 +3398,9 @@ export default function App() {
                 <div className="w-8 h-1 rounded-full" style={{ background: 'var(--border)' }} />
               </div>
               <div className="px-6 pt-2 pb-4">
-                <div className="flex items-center justify-between mb-4">
+                <div className="flex items-center justify-between mb-2">
                   <h3 className="text-[17px] font-semibold" style={{ color: 'var(--text)' }}>
-                    {stagingType === 'workbook' ? '练习册作业' : stagingType === 'wrong_retry' ? '错题重练' : '普通试卷'}
+                    {stagingType === 'workbook' ? '练习册作业' : stagingType === 'exam' ? '试卷（答案库）' : stagingType === 'wrong_retry' ? '错题重练' : '普通试卷'}
                   </h3>
                   <button
                     onClick={() => !stagingUploading && clearStaging()}
@@ -3354,6 +3410,13 @@ export default function App() {
                     <X size={14} style={{ color: 'var(--text-tertiary)' }} />
                   </button>
                 </div>
+                {stagingType === 'exam' && selectedExamResourceName && (
+                  <div className="mb-4 px-3 py-2 rounded-xl text-[13px] font-medium flex items-center gap-2"
+                    style={{ background: 'rgba(217, 119, 6, 0.1)', color: '#D97706' }}>
+                    <FileText size={14} />
+                    使用答案库: {selectedExamResourceName}
+                  </div>
+                )}
 
                 {/* 拍照 + 相册按钮 */}
                 <div className="flex gap-2 mb-4">
