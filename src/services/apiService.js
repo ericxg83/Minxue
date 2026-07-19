@@ -98,15 +98,20 @@ const apiRequest = async (path, options = {}, retries = 2) => {
 
   async function executeRequest() {
     const url = `${API_BASE}${path}`
+    // 普通请求 20 秒超时（防 Render 冷启动挂起）；解析类长任务可通过 options.timeout 放宽
+    const timeoutMs = options.timeout || 20000
 
     for (let attempt = 0; attempt < retries; attempt++) {
       try {
-        // 每个请求最多等 20 秒，防止 Render 冷启动时长时间挂起
         const controller = new AbortController()
-        const timeoutId = setTimeout(() => controller.abort(), 20000)
+        const timeoutId = setTimeout(
+          () => controller.abort(new DOMException(`请求超时（${Math.round(timeoutMs / 1000)}秒）`, 'TimeoutError')),
+          timeoutMs
+        )
 
+        const { timeout: _timeout, ...fetchOptions } = options
         const response = await fetch(url, {
-          ...options,
+          ...fetchOptions,
           headers: {
             ...options.headers
           },
@@ -702,8 +707,10 @@ export const uploadPdf = async (id, file, precomputedAnswers = null, isCombined 
   fd.append('is_combined', isCombined ? 'true' : 'false')
   const data = await apiRequest(`/worksheets/${id}/parse-pdf`, {
     method: 'POST',
-    body: fd
-  })
+    body: fd,
+    // PDF 解析走大模型，耗时远超普通请求，放宽到 10 分钟
+    timeout: 10 * 60 * 1000
+  }, 1)
   return data
 }
 
@@ -712,8 +719,9 @@ export const uploadQuestionPdf = async (id, file) => {
   fd.append('file', file)
   const data = await apiRequest(`/worksheets/${id}/question-pdf`, {
     method: 'POST',
-    body: fd
-  })
+    body: fd,
+    timeout: 10 * 60 * 1000
+  }, 1)
   return data
 }
 
@@ -722,8 +730,9 @@ export const uploadImages = async (id, files) => {
   for (const f of files) fd.append('files', f)
   const data = await apiRequest(`/worksheets/${id}/parse-images`, {
     method: 'POST',
-    body: fd
-  })
+    body: fd,
+    timeout: 10 * 60 * 1000
+  }, 1)
   return data
 }
 
