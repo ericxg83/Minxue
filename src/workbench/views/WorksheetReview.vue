@@ -17,7 +17,18 @@
     <div class="review-body">
       <!-- 左栏: PDF预览 -->
       <div class="panel pdf-panel">
-        <div class="panel-title">PDF预览</div>
+        <div class="panel-title">
+          <span>PDF预览</span>
+          <el-button
+            v-if="hasQuestionPdf && hasAnswerPdf"
+            size="small"
+            text
+            @click="pdfMode = pdfMode === 'question' ? 'answer' : 'question'"
+          >
+            <el-icon><View /></el-icon>
+            {{ pdfMode === 'question' ? '查看答案PDF' : '查看题目PDF' }}
+          </el-button>
+        </div>
         <div class="panel-content">
           <iframe v-if="pdfProxyUrl" :src="pdfProxyUrl" class="pdf-preview" frameborder="0"></iframe>
           <el-empty v-else description="无PDF文件" />
@@ -92,7 +103,7 @@
 <script setup>
 import { ref, computed, onMounted } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
-import { ArrowLeft } from '@element-plus/icons-vue'
+import { ArrowLeft, View } from '@element-plus/icons-vue'
 import { ElMessage } from 'element-plus'
 import {
   getWorkbooks, getWorkbookAnswers, updateWorkbookAnswer, updateWorkbookStatus
@@ -110,6 +121,25 @@ const filterMode = ref('all')
 const sectionFilter = ref('all')
 const editForm = ref({ answer: '', answer_type: 'choice' })
 const saving = ref(false)
+const pdfMode = ref('question') // 'question' | 'answer'
+
+const pdfProxyUrl = computed(() => {
+  if (!worksheet.value) return null
+  if (pdfMode.value === 'question' && worksheet.value.question_pdf_url) {
+    return `/api/worksheets/${worksheetId}/question-pdf`
+  }
+  if (worksheet.value.pdf_url) {
+    return `/api/worksheets/${worksheetId}/pdf`
+  }
+  // 有 question_pdf_url 但当前是 answer 模式且没有 pdf_url，回退到 question
+  if (worksheet.value.question_pdf_url) {
+    return `/api/worksheets/${worksheetId}/question-pdf`
+  }
+  return null
+})
+
+const hasQuestionPdf = computed(() => !!worksheet.value?.question_pdf_url)
+const hasAnswerPdf = computed(() => !!worksheet.value?.pdf_url)
 
 const sections = computed(() => {
   const seen = new Set()
@@ -267,6 +297,9 @@ const confProgress = (c) => {
   color: var(--wb-text-secondary);
   border-bottom: 1px solid var(--wb-border);
   flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
 }
 
 .panel-content {

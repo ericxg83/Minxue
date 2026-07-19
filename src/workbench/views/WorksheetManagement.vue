@@ -71,8 +71,31 @@
       </template>
     </el-dialog>
 
-    <el-dialog v-model="showPdfDialog" title="上传答案" width="550px" @close="onPdfDialogClose">
+    <el-dialog v-model="showPdfDialog" title="上传练习册内容" width="580px" @close="onPdfDialogClose">
       <div v-if="parseStatus !== 'parsing' && parseStatus !== 'done'">
+        <!-- 合并/分开模式切换 -->
+        <div style="margin-bottom:16px;display:flex;align-items:center;gap:8px;">
+          <el-checkbox v-model="isCombined" label="答案与题目在同一份PDF中" />
+        </div>
+
+        <!-- 题目PDF上传（分开模式） -->
+        <div v-if="!isCombined" style="margin-bottom:16px;padding:12px;border:1px dashed #dcdfe6;border-radius:6px;">
+          <div style="font-size:13px;font-weight:600;margin-bottom:8px;color:#606266;">题目PDF（学生做题时看到的试卷）</div>
+          <el-upload
+            drag
+            accept=".pdf"
+            :auto-upload="false"
+            :on-change="handleQuestionPdfSelect"
+            :limit="1"
+          >
+            <el-icon class="el-icon--upload" :size="48"><UploadFilled /></el-icon>
+            <div class="el-upload__text">拖拽题目 PDF 到此处，或 <em>点击选择</em></div>
+          </el-upload>
+          <div v-if="selectedQuestionPdf" class="pdf-info">
+            <p>已选择题目: {{ selectedQuestionPdf.name }}</p>
+          </div>
+        </div>
+
         <el-tabs v-model="uploadTab">
           <el-tab-pane label="PDF上传" name="pdf">
             <el-upload
@@ -89,9 +112,9 @@
               </template>
             </el-upload>
             <div v-if="selectedPdf" class="pdf-info">
-              <p>已选择: {{ selectedPdf.name }}</p>
+              <p>已选择答案: {{ selectedPdf.name }}</p>
               <el-button type="primary" @click="startParse" :loading="parsing" class="mt-3">
-                {{ parsing ? '上传中...' : '开始解析' }}
+                {{ parsing ? '上传中...' : (isCombined ? '开始解析（题目+答案）' : '开始解析答案') }}
               </el-button>
             </div>
           </el-tab-pane>
@@ -170,6 +193,7 @@ import {
   uploadPdf,
   uploadImages,
   getWorksheet,
+  uploadQuestionPdf,
 } from '../../services/apiService.js'
 
 const router = useRouter()
@@ -181,6 +205,8 @@ const createForm = ref({ name: '', subject: '', grade: '' })
 
 const showPdfDialog = ref(false)
 const selectedPdf = ref(null)
+const selectedQuestionPdf = ref(null)
+const isCombined = ref(true) // 默认同一份PDF包含答案和题目
 const parsing = ref(false)
 const pdfUploaded = ref(false)
 const parseCount = ref(0)
@@ -276,6 +302,8 @@ const handleUploadPdf = (row) => {
   showPdfDialog.value = true
   pdfUploaded.value = false
   selectedPdf.value = null
+  selectedQuestionPdf.value = null
+  isCombined.value = true
   parseWarning.value = null
   parseCount.value = 0
   parseStatus.value = 'idle'
@@ -292,6 +320,10 @@ const handleUploadPdf = (row) => {
 
 const handlePdfSelect = (uploadFile) => {
   selectedPdf.value = uploadFile.raw
+}
+
+const handleQuestionPdfSelect = (uploadFile) => {
+  selectedQuestionPdf.value = uploadFile.raw
 }
 
 const pollParseStatus = async () => {
@@ -343,7 +375,19 @@ const pollParseStatus = async () => {
 }
 
 const startParse = async () => {
-  if (!selectedPdf.value || !currentWorksheetId.value) return
+  if (!currentWorksheetId.value) return
+
+  // 合并模式：必须上传答案PDF
+  if (isCombined.value && !selectedPdf.value) {
+    ElMessage.warning('请上传PDF文件')
+    return
+  }
+
+  // 分开模式：必须上传题目PDF和答案PDF
+  if (!isCombined.value && (!selectedQuestionPdf.value || !selectedPdf.value)) {
+    ElMessage.warning('请上传题目PDF和答案PDF')
+    return
+  }
 
   parsing.value = true
   parseStatus.value = 'parsing'
@@ -357,7 +401,17 @@ const startParse = async () => {
   }, 15000)
 
   try {
-    await uploadPdf(currentWorksheetId.value, selectedPdf.value)
+    if (isCombined.value) {
+      // 合并模式：一份PDF同时作为题目和答案源
+      await uploadPdf(currentWorksheetId.value, selectedPdf.value, null, true)
+    } else {
+      // 分开模式：先上传题目PDF，再上传答案PDF并解析
+      if (selectedQuestionPdf.value) {
+        await uploadQuestionPdf(currentWorksheetId.value, selectedQuestionPdf.value)
+      }
+      await uploadPdf(currentWorksheetId.value, selectedPdf.value, null, false)
+    }
+
     // 上传成功，立即给用户反馈
     ElMessage.success('上传成功，开始解析...')
 
@@ -381,6 +435,8 @@ const startParse = async () => {
 const resetPdfUpload = () => {
   pdfUploaded.value = false
   selectedPdf.value = null
+  selectedQuestionPdf.value = null
+  isCombined.value = true
   parseWarning.value = null
   parseCount.value = 0
   parseStatus.value = 'idle'

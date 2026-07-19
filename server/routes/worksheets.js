@@ -6,6 +6,7 @@ import {
   getWorksheetById,
   updateWorksheetStatus,
   updateWorksheetPdfUrl,
+  updateWorksheetQuestionPdfUrl,
   updateWorksheetParseStatus,
   updateWorksheetAnswerCount,
   deleteWorksheet,
@@ -109,6 +110,7 @@ router.post('/:id/parse-pdf', pdfUpload.single('file'), async (req, res) => {
 
     const file = req.file
     const precomputedAnswersRaw = req.body.precomputed_answers
+    const isCombined = req.body.is_combined === 'true'
 
     if (!file && !precomputedAnswersRaw) {
       return res.status(400).json({ error: '请上传 PDF 文件或预埋答案' })
@@ -154,7 +156,7 @@ router.post('/:id/parse-pdf', pdfUpload.single('file'), async (req, res) => {
       })
     } else {
       // 需要 PDF 解析（可能同时有预埋答案作为辅助）
-      parsePdfInBackground(worksheetId, file, precomputedAnswers).catch(async (e) => {
+      parsePdfInBackground(worksheetId, file, precomputedAnswers, isCombined).catch(async (e) => {
         console.error('PDF 后台解析失败:', e)
         await updateWorksheetParseStatus(worksheetId, {
           status: 'failed',
@@ -164,6 +166,25 @@ router.post('/:id/parse-pdf', pdfUpload.single('file'), async (req, res) => {
     }
   } catch (e) {
     res.status(500).json({ error: 'PDF 解析失败: ' + e.message })
+  }
+})
+
+// 上传题目PDF（单独上传，不触发解析）
+router.post('/:id/question-pdf', pdfUpload.single('file'), async (req, res) => {
+  try {
+    const worksheetId = req.params.id
+    const worksheet = await getWorksheetById(worksheetId)
+    if (!worksheet) return res.status(404).json({ error: '练习册不存在' })
+
+    const file = req.file
+    if (!file) return res.status(400).json({ error: '请上传 PDF 文件' })
+
+    const pdfUrl = await uploadPDF(file.buffer, file.originalname, 'system')
+    await updateWorksheetQuestionPdfUrl(worksheetId, pdfUrl)
+
+    res.json({ success: true, message: '题目PDF上传成功' })
+  } catch (e) {
+    res.status(500).json({ error: '题目PDF上传失败: ' + e.message })
   }
 })
 
@@ -253,7 +274,7 @@ async function doParseImages(worksheetId, files) {
   })
 }
 
-async function parsePdfInBackground(worksheetId, file, precomputedAnswers = null) {
+async function parsePdfInBackground(worksheetId, file, precomputedAnswers = null, isCombined = false) {
   // 整体超时兜底：OCR 兜底走 AI 单页 2 分钟 * 20 页上限，给 5 分钟防止无限等待
   const OVERALL_TIMEOUT = 10 * 60 * 1000
   let overallTimer
@@ -263,7 +284,7 @@ async function parsePdfInBackground(worksheetId, file, precomputedAnswers = null
 
   try {
     await Promise.race([
-      doParse(worksheetId, file, precomputedAnswers),
+      doParse(worksheetId, file, precomputedAnswers, isCombined),
       timeoutPromise,
     ])
   } catch (e) {
@@ -293,9 +314,14 @@ async function parsePrecomputedInBackground(worksheetId, precomputedAnswers) {
   }
 }
 
-async function doParse(worksheetId, file, precomputedAnswers = null) {
+async function doParse(worksheetId, file, precomputedAnswers = null, isCombined = false) {
   const pdfUrl = await uploadPDF(file.buffer, file.originalname, 'system')
   await updateWorksheetPdfUrl(worksheetId, pdfUrl)
+
+  // 合并模式：同一份 PDF 同时作为题目和答案源
+  if (isCombined) {
+    await updateWorksheetQuestionPdfUrl(worksheetId, pdfUrl)
+  }
 
   let fullText = ''
   try {
@@ -448,6 +474,25 @@ router.get('/:id/pdf', async (req, res) => {
     res.send(result.content)
   } catch (e) {
     res.status(500).json({ error: 'PDF 获取失败: ' + e.message })
+  }
+})
+
+// 获取题目PDF（代理 OSS，绕过 CDN 头限制）
+router.get('/:id/question-pdf', async (req, res) => {
+  try {
+    const worksheet = await getWorksheetById(req.params.id)
+    if (!worksheet || !worksheet.question_pdf_url) {
+      return res.status(404).json({ error: '题目PDF 不存在' })
+    }
+    const url = new URL(worksheet.question_pdf_url)
+    const ossPath = url.pathname.slice(1)
+    const result = await ossClient.get(ossPath)
+    res.setHeader('Content-Type', 'application/pdf')
+    res.setHeader('Content-Disposition', 'inline')
+    res.setHeader('X-Frame-Options', 'SAMEORIGIN')
+    res.send(result.content)
+  } catch (e) {
+    res.status(500).json({ error: '题目PDF 获取失败: ' + e.message })
   }
 })
 

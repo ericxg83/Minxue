@@ -693,13 +693,24 @@ export const updateResourceAnswerStatus = async (resourceId, answerStatus) => {
   return data.answers || []
 }
 
-export const uploadPdf = async (id, file, precomputedAnswers = null) => {
+export const uploadPdf = async (id, file, precomputedAnswers = null, isCombined = false) => {
   const fd = new FormData()
   fd.append('file', file)
   if (precomputedAnswers) {
     fd.append('precomputed_answers', JSON.stringify(precomputedAnswers))
   }
+  fd.append('is_combined', isCombined ? 'true' : 'false')
   const data = await apiRequest(`/worksheets/${id}/parse-pdf`, {
+    method: 'POST',
+    body: fd
+  })
+  return data
+}
+
+export const uploadQuestionPdf = async (id, file) => {
+  const fd = new FormData()
+  fd.append('file', file)
+  const data = await apiRequest(`/worksheets/${id}/question-pdf`, {
     method: 'POST',
     body: fd
   })

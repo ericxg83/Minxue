@@ -747,20 +747,20 @@ export const createWorksheet = async ({ name, subject, grade }) => {
 
 export const getAllWorksheets = async () => {
   const { rows } = await query(
-    `SELECT w.*, COUNT(wa.id)::int AS answer_count
+    `SELECT w.*,
+       (SELECT COUNT(*) FROM ${TABLES.WORKSHEET_ANSWERS} wa WHERE wa.worksheet_id = w.id)::int AS answer_count
      FROM ${TABLES.WORKSHEETS} w
-     LEFT JOIN ${TABLES.WORKSHEET_ANSWERS} wa ON wa.worksheet_id = w.id
-     GROUP BY w.id ORDER BY w.created_at DESC`
+     ORDER BY w.created_at DESC`
   )
   return rows
 }
 
 export const getWorksheetById = async (id) => {
   const { rows } = await query(
-    `SELECT w.*, COUNT(wa.id)::int AS answer_count
+    `SELECT w.*,
+       (SELECT COUNT(*) FROM ${TABLES.WORKSHEET_ANSWERS} wa WHERE wa.worksheet_id = w.id)::int AS answer_count
      FROM ${TABLES.WORKSHEETS} w
-     LEFT JOIN ${TABLES.WORKSHEET_ANSWERS} wa ON wa.worksheet_id = w.id
-     WHERE w.id = $1 GROUP BY w.id`,
+     WHERE w.id = $1`,
     [id]
   )
   return rows[0] || null
@@ -778,6 +778,14 @@ export const updateWorksheetPdfUrl = async (id, pdfUrl) => {
   const { rows } = await query(
     `UPDATE ${TABLES.WORKSHEETS} SET pdf_url = $2 WHERE id = $1 RETURNING *`,
     [id, pdfUrl]
+  )
+  return rows[0] || null
+}
+
+export const updateWorksheetQuestionPdfUrl = async (id, questionPdfUrl) => {
+  const { rows } = await query(
+    `UPDATE ${TABLES.WORKSHEETS} SET question_pdf_url = $2 WHERE id = $1 RETURNING *`,
+    [id, questionPdfUrl]
   )
   return rows[0] || null
 }
