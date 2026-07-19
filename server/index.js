@@ -26,6 +26,7 @@ import { migrateDeduplicateWorksheetAnswers } from './migrations/026_dedupe_work
 import { migrateWorksheetAnswerContent } from './migrations/027_add_worksheet_answer_content.js'
 import { migrateResources } from './migrations/028_add_resources.js'
 import { migrateQuestionPdfUrl } from './migrations/029_add_question_pdf_url.js'
+import { migrateCompleteResources } from './migrations/030_complete_resources_migration.js'
 
 const __dirname = dirname(fileURLToPath(import.meta.url))
 dotenv.config({ path: resolve(__dirname, '.env') })
@@ -2327,6 +2328,7 @@ if (process.argv[1] === __filename || process.argv[1]?.endsWith('server/index.js
       await migrateWorksheetAnswerContent()
       await migrateResources()
       await migrateQuestionPdfUrl()
+      await migrateCompleteResources()
     } catch (err) {
       console.error('数据库迁移失败:', err.message)
     }

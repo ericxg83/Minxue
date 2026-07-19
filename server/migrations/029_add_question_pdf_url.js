@@ -62,9 +62,3 @@ export const migrateQuestionPdfUrl = async () => {
     throw e
   }
 }
-
-// 直接执行
-migrateQuestionPdfUrl().catch(e => {
-  console.error(e)
-  process.exit(1)
-})

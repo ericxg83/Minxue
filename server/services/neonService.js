@@ -738,8 +738,11 @@ export const getFailedGeometryAssets = async (limit = 20) => {
 // ── 练习册 CRUD ──
 
 export const createWorksheet = async ({ name, subject, grade }) => {
+  // 迁移028后 worksheets 是 resources 上的视图，视图不含 resource_type 列，
+  // INSERT 必须落实表并显式给 resource_type
   const { rows } = await query(
-    `INSERT INTO ${TABLES.WORKSHEETS} (name, subject, grade) VALUES ($1, $2, $3) RETURNING *`,
+    `INSERT INTO ${TABLES.RESOURCES} (resource_type, name, subject, grade)
+     VALUES ('worksheet', $1, $2, $3) RETURNING *`,
     [name, subject || null, grade || null]
   )
   return rows[0]
@@ -818,18 +821,21 @@ export const deleteWorksheet = async (id) => {
 
 export const batchInsertAnswers = async (worksheetId, answers) => {
   if (!answers || answers.length === 0) return []
+  // worksheet_answers 是 resource_answers 上的视图（answer_status='official_verified'），
+  // 视图 INSERT 不支持 ON CONFLICT，且默认状态 ai_draft 会让新行从视图中消失，
+  // 故直写实表并显式标记 official_verified
   const values = answers.map((_, i) =>
-    `($1, $${i * 4 + 2}, $${i * 4 + 3}, $${i * 4 + 4}, $${i * 4 + 5})`
+    `($1, $${i * 4 + 2}, $${i * 4 + 3}, $${i * 4 + 4}, $${i * 4 + 5}, 'official_verified')`
   ).join(',')
   const params = [worksheetId]
   for (const a of answers) {
     params.push(a.question_no, a.answer, a.answer_type || 'choice', a.section || null)
   }
   const { rows } = await query(
-    `INSERT INTO ${TABLES.WORKSHEET_ANSWERS} (worksheet_id, question_no, answer, answer_type, section)
+    `INSERT INTO ${TABLES.RESOURCE_ANSWERS} (resource_id, question_no, answer, answer_type, section, answer_status)
      VALUES ${values}
-     ON CONFLICT (worksheet_id, section, question_no)
-     DO UPDATE SET answer = EXCLUDED.answer, answer_type = EXCLUDED.answer_type
+     ON CONFLICT (resource_id, section, question_no)
+     DO UPDATE SET answer = EXCLUDED.answer, answer_type = EXCLUDED.answer_type, answer_status = EXCLUDED.answer_status
      RETURNING *`,
     params
   )
@@ -841,20 +847,22 @@ export const batchInsertAnswers = async (worksheetId, answers) => {
  */
 export const replaceWorksheetAnswers = async (worksheetId, answers) => {
   return transaction(async (client) => {
-    await client.query(`DELETE FROM ${TABLES.WORKSHEET_ANSWERS} WHERE worksheet_id = $1`, [worksheetId])
+    // 直写实表 resource_answers（worksheet_answers 视图不支持 ON CONFLICT），
+    // 状态标 official_verified 使其对旧视图可见
+    await client.query(`DELETE FROM ${TABLES.RESOURCE_ANSWERS} WHERE resource_id = $1`, [worksheetId])
     if (!answers || answers.length === 0) return []
     const values = answers.map((_, i) =>
-      `($1, $${i * 5 + 2}, $${i * 5 + 3}, $${i * 5 + 4}, $${i * 5 + 5}, $${i * 5 + 6})`
+      `($1, $${i * 5 + 2}, $${i * 5 + 3}, $${i * 5 + 4}, $${i * 5 + 5}, $${i * 5 + 6}, 'official_verified')`
     ).join(',')
     const params = [worksheetId]
     for (const a of answers) {
       params.push(a.question_no, a.answer, a.answer_type || 'choice', a.section || null, a.content || null)
     }
     const { rows } = await client.query(
-      `INSERT INTO ${TABLES.WORKSHEET_ANSWERS} (worksheet_id, question_no, answer, answer_type, section, content)
+      `INSERT INTO ${TABLES.RESOURCE_ANSWERS} (resource_id, question_no, answer, answer_type, section, content, answer_status)
        VALUES ${values}
-       ON CONFLICT (worksheet_id, section, question_no)
-       DO UPDATE SET answer = EXCLUDED.answer, answer_type = EXCLUDED.answer_type, content = EXCLUDED.content
+       ON CONFLICT (resource_id, section, question_no)
+       DO UPDATE SET answer = EXCLUDED.answer, answer_type = EXCLUDED.answer_type, content = EXCLUDED.content, answer_status = EXCLUDED.answer_status
        RETURNING *`,
       params
     )
