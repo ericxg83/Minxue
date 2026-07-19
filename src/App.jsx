@@ -247,10 +247,12 @@ export default function App() {
     }))
 
   const handleStagingSelectFiles = (e) => {
-    const files = e.target.files
-    if (!files || files.length === 0) return
-    setStagingFiles((prev) => [...prev, ...toPreviews(files)])
+    // FileList 是活引用，重置 input.value 会将其就地清空；
+    // 必须在清空前同步生成预览，不能留到 setState updater 里再读
+    const previews = toPreviews(e.target.files || [])
     if (e.target && 'value' in e.target) e.target.value = ''
+    if (previews.length === 0) return
+    setStagingFiles((prev) => [...prev, ...previews])
   }
 
   const removeStagingFile = (idx) => {
