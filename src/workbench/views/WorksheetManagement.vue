@@ -172,7 +172,7 @@
               class="parse-warning"
             />
             <el-button type="primary" @click="gotoReview" :disabled="parseCount === 0">审核答案</el-button>
-            <el-button @click="resetUpload">重新上传</el-button>
+            <el-button @click="resetPdfUpload">重新上传</el-button>
           </template>
         </el-result>
       </div>
@@ -422,6 +422,19 @@ const startParse = async () => {
       parsePollTimer = setInterval(pollParseStatus, 2000)
     }, 2000)
   } catch (e) {
+    // 客户端超时/中断不代表后端没收到：后端收到文件即返回并后台解析，
+    // 先查一次真实状态，已在解析就转入轮询，避免误报"上传失败"
+    if (e.name === 'TimeoutError' || /超时|abort/i.test(e.message || '')) {
+      try {
+        const ws = await getWorksheet(currentWorksheetId.value)
+        if (ws && (ws.parse_status === 'parsing' || ws.parse_status === 'done')) {
+          ElMessage.info('文件已到达服务器，继续等待解析结果...')
+          pollParseStatus()
+          parsePollTimer = setInterval(pollParseStatus, 2000)
+          return
+        }
+      } catch { /* 状态查询失败，按上传失败处理 */ }
+    }
     parsing.value = false
     parseStatus.value = 'idle'
     if (parseMessageTimer) {

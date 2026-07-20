@@ -126,7 +126,15 @@ const apiRequest = async (path, options = {}, retries = 2) => {
 
         const data = await response.json()
         return data
-      } catch (error) {
+      } catch (rawError) {
+        // 部分浏览器/WebView 不支持 abort(reason)，中断时只会抛出默认的
+        // 'signal is aborted without reason'，这里统一翻译成可读的超时提示
+        const isAbort = rawError?.name === 'AbortError' || rawError?.name === 'TimeoutError'
+          || /abort/i.test(String(rawError?.message || ''))
+        const error = isAbort
+          ? new Error(`请求超时（${Math.round(timeoutMs / 1000)}秒），请检查网络后重试`)
+          : rawError
+        if (isAbort) error.name = 'TimeoutError'
         // 最后一次尝试失败时抛出错误
         if (attempt === retries - 1) {
           throw error

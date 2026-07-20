@@ -22,3 +22,14 @@ for = "/sw.js"
 [headers.values]
 Cache-Control = "no-cache"
 Service-Worker-Allowed = "/"
+
+# index.html 不缓存，防止浏览器/中间代理拿旧 HTML 引用旧 bundle
+[[headers]]
+for = "/"
+[headers.values]
+Cache-Control = "no-cache"
+
+[[headers]]
+for = "/index.html"
+[headers.values]
+Cache-Control = "no-cache"
