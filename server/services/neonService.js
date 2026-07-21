@@ -803,6 +803,22 @@ export const updateWorksheetParseStatus = async (id, { status, count = null, war
   return rows[0] || null
 }
 
+/**
+ * 更新分批解析进度（大 PDF 的 OCR 分批路径专用）。
+ * 传 null 表示清除进度（重新解析开始时 / 无页级进度的路径）。
+ * 这条 UPDATE 会经由 worksheets 的 BEFORE UPDATE 触发器刷新 updated_at，
+ * 是分批解析期间对"卡死判定"（isParsingStale / scanStuckWorksheetParsing）的心跳。
+ */
+export const updateWorksheetParseProgress = async (id, { totalPages = null, donePages = null } = {}) => {
+  const { rows } = await query(
+    `UPDATE ${TABLES.WORKSHEETS}
+     SET parse_total_pages = $2, parse_done_pages = $3
+     WHERE id = $1 RETURNING *`,
+    [id, totalPages, donePages]
+  )
+  return rows[0] || null
+}
+
 export const updateWorksheetAnswerCount = async (id) => {
   const { rows } = await query(
     `UPDATE ${TABLES.WORKSHEETS} SET answer_count = (
@@ -844,6 +860,8 @@ export const batchInsertAnswers = async (worksheetId, answers) => {
 
 /**
  * 事务性替换练习册答案：先清空后插入，避免并发解析产生重复行
+ * （一次算完的路径专用：文字版 PDF / ≤15 页小文件 / 图片解析。分批路径用
+ * clearWorksheetAnswers + upsertWorksheetAnswers 增量写入。）
  */
 export const replaceWorksheetAnswers = async (worksheetId, answers) => {
   return transaction(async (client) => {
@@ -863,6 +881,52 @@ export const replaceWorksheetAnswers = async (worksheetId, answers) => {
        VALUES ${values}
        ON CONFLICT (resource_id, section, question_no)
        DO UPDATE SET answer = EXCLUDED.answer, answer_type = EXCLUDED.answer_type, content = EXCLUDED.content, answer_status = EXCLUDED.answer_status
+       RETURNING *`,
+      params
+    )
+    return rows
+  })
+}
+
+/**
+ * 清空练习册全部答案（分批解析开始前调用一次，替代 replaceWorksheetAnswers 的 DELETE 半段）
+ */
+export const clearWorksheetAnswers = async (worksheetId) => {
+  await query(`DELETE FROM ${TABLES.RESOURCE_ANSWERS} WHERE resource_id = $1`, [worksheetId])
+}
+
+/**
+ * 增量追加/覆盖练习册答案（分批解析每批调用，不清空已有行）。
+ * 列集与 replaceWorksheetAnswers 的 INSERT 半段一致（含 content）。
+ * 不用 ON CONFLICT：UNIQUE(resource_id, section, question_no) 对 section=NULL 不生效
+ * （Postgres 唯一约束中 NULL 互不相等），无章节的练习册跨批会悄悄产生重复行。
+ * 改为事务内"定向删除同 key 旧行 → 插入"，对 NULL/非 NULL 章节行为一致：后写覆盖先写
+ * （跨批边界续答场景，后批内容更完整）。
+ */
+export const upsertWorksheetAnswers = async (worksheetId, answers) => {
+  if (!answers || answers.length === 0) return []
+  return transaction(async (client) => {
+    const delConds = answers.map((_, i) =>
+      `(section IS NOT DISTINCT FROM $${i * 2 + 2} AND question_no = $${i * 2 + 3})`
+    ).join(' OR ')
+    const delParams = [worksheetId]
+    for (const a of answers) {
+      delParams.push(a.section || null, a.question_no)
+    }
+    await client.query(
+      `DELETE FROM ${TABLES.RESOURCE_ANSWERS} WHERE resource_id = $1 AND (${delConds})`,
+      delParams
+    )
+    const values = answers.map((_, i) =>
+      `($1, $${i * 5 + 2}, $${i * 5 + 3}, $${i * 5 + 4}, $${i * 5 + 5}, $${i * 5 + 6}, 'official_verified')`
+    ).join(',')
+    const params = [worksheetId]
+    for (const a of answers) {
+      params.push(a.question_no, a.answer, a.answer_type || 'choice', a.section || null, a.content || null)
+    }
+    const { rows } = await client.query(
+      `INSERT INTO ${TABLES.RESOURCE_ANSWERS} (resource_id, question_no, answer, answer_type, section, content, answer_status)
+       VALUES ${values}
        RETURNING *`,
       params
     )
@@ -957,11 +1021,6 @@ export const deleteQuestionsByTaskId = async (taskId) => {
     [taskId]
   )
   return rowCount
-}
-
-// ── 重新解析 PDF 前清空旧答案（重复解析 = 整体替换；section 为 NULL 时唯一约束不生效，必须显式清空）──
-export const clearWorksheetAnswers = async (worksheetId) => {
-  await query(`DELETE FROM ${TABLES.WORKSHEET_ANSWERS} WHERE worksheet_id = $1`, [worksheetId])
 }
 
 // ═══════════════════════════════════════════════

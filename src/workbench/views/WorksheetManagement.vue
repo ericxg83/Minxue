@@ -151,10 +151,20 @@
       <div v-else-if="parseStatus === 'parsing'" class="parse-result">
         <el-result icon="info" title="正在解析">
           <template #sub-title>
-            <p>{{ parseMessage }}</p>
-            <el-icon class="is-loading" :size="32" style="margin-top:12px;color:var(--el-color-primary)">
-              <Loading />
-            </el-icon>
+            <!-- 大文件分批解析：有页级进度时显示进度条（后端 parse_total_pages 非空） -->
+            <template v-if="parseTotalPages > 0">
+              <el-progress :percentage="parsePercent" :stroke-width="10" style="margin-bottom: 8px" />
+              <p>{{ parseMessage }}</p>
+              <p style="font-size: 12px; color: var(--el-text-color-secondary)">
+                已完成批次的答案已实时保存，无需守候，可稍后回来查看结果
+              </p>
+            </template>
+            <template v-else>
+              <p>{{ parseMessage }}</p>
+              <el-icon class="is-loading" :size="32" style="margin-top:12px;color:var(--el-color-primary)">
+                <Loading />
+              </el-icon>
+            </template>
           </template>
         </el-result>
       </div>
@@ -215,10 +225,17 @@ const parseCount = ref(0)
 const parseWarning = ref(null)
 const parseStatus = ref('idle')
 const parseMessage = ref('')
+// 大文件分批解析进度（后端 parse_total_pages/parse_done_pages，NULL = 无页级进度走转圈）
+const OCR_BATCH_SIZE = 15 // 与后端 worksheets.js 的 OCR_BATCH_SIZE 保持一致，用于显示当前批次页码范围
+const parseTotalPages = ref(0)
+const parseDonePages = ref(0)
+const parsePercent = ref(0)
 let parsePollTimer = null
 let parseMessageTimer = null
 // 轮询上限：略大于服务端 12 分钟的卡死判定（STALE_PARSING_MS），超时后提示重新上传，
-// 此时服务端已允许绕过"正在解析中"的 409 拦截重新发起解析
+// 此时服务端已允许绕过"正在解析中"的 409 拦截重新发起解析。
+// 分批解析场景下语义是"无进度时长"：只要 parse_done_pages 有推进就重置计时，
+// 大文件总时长可远超 12.5 分钟但不会被误判为卡死
 const POLL_MAX_MS = 12.5 * 60 * 1000
 let pollStartedAt = 0
 const currentWorksheetId = ref(null)
@@ -381,6 +398,28 @@ const pollParseStatus = async () => {
     if (!ws) return
     parseStatus.value = ws.parse_status || 'idle'
 
+    if (ws.parse_status === 'parsing') {
+      // 大文件分批解析：读取页级进度，构造"正在解析第 X-Y 页 / 共 N 页 (P%)"
+      const total = ws.parse_total_pages || 0
+      const done = ws.parse_done_pages || 0
+      if (total > 0) {
+        if (done > parseDonePages.value || total !== parseTotalPages.value) {
+          // 进度有推进 → 重置停滞计时，大文件总时长可超过 POLL_MAX_MS 而不被误判卡死
+          pollStartedAt = Date.now()
+        }
+        parseTotalPages.value = total
+        parseDonePages.value = done
+        parsePercent.value = Math.min(100, Math.round((done / total) * 100))
+        const batchStart = Math.min(done + 1, total)
+        const batchEnd = Math.min(done + OCR_BATCH_SIZE, total)
+        parseMessage.value = done >= total
+          ? `已解析完全部 ${total} 页，正在保存结果...`
+          : `正在解析第 ${batchStart}-${batchEnd} 页 / 共 ${total} 页 (${parsePercent.value}%)`
+      }
+      // total 为空：文字版 PDF / 小文件单趟路径，沿用现有 parseMessage 转圈文案
+      return
+    }
+
     if (ws.parse_status === 'done') {
       parseCount.value = ws.parse_count || 0
       parseWarning.value = ws.parse_warning || null
@@ -440,11 +479,14 @@ const startParse = async () => {
   parsing.value = true
   parseStatus.value = 'parsing'
   parseMessage.value = '已上传 PDF，后台正在解析答案...'
+  parseTotalPages.value = 0
+  parseDonePages.value = 0
+  parsePercent.value = 0
   pollStartedAt = Date.now()
 
-  // 如果超过 15 秒还没解析完，提示用户正在耗时的 OCR 识别中
+  // 如果超过 15 秒还没解析完，提示用户正在耗时的 OCR 识别中（分批进度出现后不再覆盖进度文案）
   parseMessageTimer = setTimeout(() => {
-    if (parseStatus.value === 'parsing') {
+    if (parseStatus.value === 'parsing' && parseTotalPages.value === 0) {
       parseMessage.value = '正在逐页 OCR 识别中（扫描版 PDF 耗时较长，请耐心等待...）'
     }
   }, 15000)
@@ -504,6 +546,9 @@ const startImageParse = async () => {
   parsing.value = true
   parseStatus.value = 'parsing'
   parseMessage.value = '已上传图片，后台正在识别答案...'
+  parseTotalPages.value = 0
+  parseDonePages.value = 0
+  parsePercent.value = 0
   pollStartedAt = Date.now()
 
   parseMessageTimer = setTimeout(() => {

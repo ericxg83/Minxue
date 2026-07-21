@@ -65,11 +65,30 @@ export const extractPdfText = async (fileBuffer, timeoutMs = 30000) => {
   }
 }
 
+// 只读取 PDF 总页数（分批解析前先探明规模）。
+// 注意 new Uint8Array(fileBuffer) 是拷贝：pdfjs 会 transfer/detach 传入的 buffer，
+// 传拷贝保证同一 fileBuffer 可被后续每批的 getDocument 重复使用。
+export const getPdfPageCount = async (fileBuffer, timeoutMs = 15000) => {
+  const pdfjs = await loadPdfjs()
+  const doc = await withTimeout(
+    pdfjs.getDocument({ data: new Uint8Array(fileBuffer) }).promise,
+    timeoutMs,
+    `PDF page count loading (>${Math.round(timeoutMs / 1000)}s)`
+  )
+  try {
+    return doc.numPages
+  } finally {
+    await doc.destroy()
+  }
+}
+
 // 将扫描版 PDF 逐页渲染为 JPEG buffer（供视觉模型 OCR）
 // timeoutMs: 每页渲染超时（默认 30s），避免卡在某页
 // maxEdge: 渲染后最长边像素上限。扫描版 PDF 单页原始尺寸可能极大（高 DPI 扫描），
 // 无条件按 scale 放大会产生数亿像素的 canvas，在 512MB 容器上直接 OOM 打死进程
-export const renderPdfToJpegs = async (fileBuffer, { scale = 2, maxPages = 20, quality = 0.85, timeoutMs = 30000, maxEdge = 2400 } = {}) => {
+// startPage/endPage: 1-based 闭区间，用于大文件分批渲染；不传时从第 1 页起、受 maxPages 截断（与旧行为一致）。
+// 每次调用独立 getDocument/destroy：批间彻底释放 pdfjs 内部字体/图像缓存，内存峰值 = 单批
+export const renderPdfToJpegs = async (fileBuffer, { scale = 2, maxPages = 20, quality = 0.85, timeoutMs = 30000, maxEdge = 2400, startPage = 1, endPage = null } = {}) => {
   const pdfjs = await loadPdfjs()
   const doc = await withTimeout(
     pdfjs.getDocument({
@@ -80,9 +99,10 @@ export const renderPdfToJpegs = async (fileBuffer, { scale = 2, maxPages = 20, q
     `PDF document loading for render (>${Math.round(timeoutMs / 1000)}s)`
   )
   try {
-    const pageCount = Math.min(doc.numPages, maxPages)
+    const first = Math.max(1, startPage)
+    const last = Math.min(endPage ?? (first + maxPages - 1), doc.numPages, first + maxPages - 1)
     const images = []
-    for (let i = 1; i <= pageCount; i++) {
+    for (let i = first; i <= last; i++) {
       const page = await doc.getPage(i)
       const baseViewport = page.getViewport({ scale: 1 })
       const maxBase = Math.max(baseViewport.width, baseViewport.height) || 1
