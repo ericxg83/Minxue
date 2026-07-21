@@ -72,7 +72,16 @@
     </el-dialog>
 
     <el-dialog v-model="showPdfDialog" title="上传练习册内容" width="580px" @close="onPdfDialogClose">
-      <div v-if="parseStatus === 'idle'">
+      <div v-if="parseStatus === 'idle' || parseStatus === 'failed'">
+        <!-- 解析失败时显示错误提示 -->
+        <el-alert
+          v-if="parseStatus === 'failed'"
+          :title="parseError || '解析失败'"
+          type="error"
+          :closable="true"
+          show-icon
+          style="margin-bottom:16px"
+        />
         <!-- 合并/分开模式切换 -->
         <div style="margin-bottom:16px;display:flex;align-items:center;gap:8px;">
           <el-checkbox v-model="isCombined" label="答案与题目在同一份PDF中" />
@@ -165,16 +174,6 @@
                 <Loading />
               </el-icon>
             </template>
-          </template>
-        </el-result>
-      </div>
-      <div v-else-if="parseStatus === 'failed'" class="parse-result">
-        <el-result icon="error" title="解析失败">
-          <template #sub-title>
-            <p>{{ parseError || '未知错误' }}</p>
-          </template>
-          <template #extra>
-            <el-button type="primary" @click="resetPdfUpload">重新上传</el-button>
           </template>
         </el-result>
       </div>
