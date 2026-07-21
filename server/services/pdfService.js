@@ -67,7 +67,9 @@ export const extractPdfText = async (fileBuffer, timeoutMs = 30000) => {
 
 // 将扫描版 PDF 逐页渲染为 JPEG buffer（供视觉模型 OCR）
 // timeoutMs: 每页渲染超时（默认 30s），避免卡在某页
-export const renderPdfToJpegs = async (fileBuffer, { scale = 2, maxPages = 20, quality = 0.85, timeoutMs = 30000 } = {}) => {
+// maxEdge: 渲染后最长边像素上限。扫描版 PDF 单页原始尺寸可能极大（高 DPI 扫描），
+// 无条件按 scale 放大会产生数亿像素的 canvas，在 512MB 容器上直接 OOM 打死进程
+export const renderPdfToJpegs = async (fileBuffer, { scale = 2, maxPages = 20, quality = 0.85, timeoutMs = 30000, maxEdge = 2400 } = {}) => {
   const pdfjs = await loadPdfjs()
   const doc = await withTimeout(
     pdfjs.getDocument({
@@ -82,7 +84,10 @@ export const renderPdfToJpegs = async (fileBuffer, { scale = 2, maxPages = 20, q
     const images = []
     for (let i = 1; i <= pageCount; i++) {
       const page = await doc.getPage(i)
-      const viewport = page.getViewport({ scale })
+      const baseViewport = page.getViewport({ scale: 1 })
+      const maxBase = Math.max(baseViewport.width, baseViewport.height) || 1
+      const effectiveScale = Math.min(scale, maxEdge / maxBase)
+      const viewport = page.getViewport({ scale: effectiveScale })
       const canvas = createCanvas(Math.ceil(viewport.width), Math.ceil(viewport.height))
       const ctx = canvas.getContext('2d')
       ctx.fillStyle = '#ffffff'

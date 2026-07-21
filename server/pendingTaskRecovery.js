@@ -46,12 +46,13 @@ class PendingTaskRecovery {
     this.isRunning = true
 
     try {
-      // ⚡ 并行执行 4 个独立扫描，替代串行 4 次
+      // ⚡ 并行执行 5 个独立扫描，替代串行
       await Promise.allSettled([
         this.scanPendingTasks(),
         this.scanFailedTasks(),
         this.scanProcessingStuck(),
-        this.scanGeometryAssets()
+        this.scanGeometryAssets(),
+        this.scanStuckWorksheetParsing()
       ])
     } catch (err) {
       console.error('[PendingTaskRecovery] ❌ 扫描失败:', err)
@@ -292,6 +293,34 @@ class PendingTaskRecovery {
       console.log(`[PendingTaskRecovery] ✅ 恢复完成: ${recoveredCount}/${rows.length} 个任务`)
     } catch (err) {
       console.error('[PendingTaskRecovery] ❌ pending 任务扫描失败:', err)
+    }
+  }
+
+  /**
+   * 扫描卡死的练习册解析：parse_status='parsing' 但 updated_at 超过 15 分钟。
+   * 练习册解析在路由进程内后台执行，10 分钟超时兜底也是内存态的——服务器重启/OOM
+   * 后状态会永远停在 'parsing'：前端轮询无限转圈，重新上传被 409 拒绝。
+   * 此处兜底重置为 failed 并写明原因，让用户可以重新上传。
+   */
+  async scanStuckWorksheetParsing() {
+    try {
+      const STUCK_MINUTES = parseInt(process.env.WORKSHEET_PARSING_TIMEOUT_MINUTES) || 15
+      const { rows } = await query(
+        `UPDATE ${TABLES.WORKSHEETS}
+         SET parse_status = 'failed',
+             parse_error = '解析进程中断（服务器重启或内存不足），请重新上传'
+         WHERE parse_status = 'parsing'
+           AND updated_at < NOW() - INTERVAL '${STUCK_MINUTES} minutes'
+         RETURNING id, name`,
+        []
+      )
+      if (rows.length > 0) {
+        rows.forEach(w => {
+          console.log(`[PendingTaskRecovery] ⚠️ 练习册解析卡死，已重置为 failed: ${w.name} (${w.id})`)
+        })
+      }
+    } catch (err) {
+      console.error('[PendingTaskRecovery] ❌ 练习册解析扫描失败:', err)
     }
   }
 

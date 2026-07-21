@@ -28,6 +28,16 @@ const pdfUpload = multer({
   limits: { fileSize: 50 * 1024 * 1024 },
 })
 
+// 解析卡死判定：后台解析是路由进程内的内存任务，10 分钟超时兜底也是内存态的，
+// 服务器重启/OOM 后 parse_status 会永远停在 'parsing'，导致重新上传被 409 永久拒绝。
+// 进程内超时为 10 分钟，updated_at 超过 12 分钟仍是 'parsing' 说明解析进程已死，
+// 放行新的解析请求。
+const STALE_PARSING_MS = 12 * 60 * 1000
+const isParsingStale = (worksheet) => {
+  const t = new Date(worksheet.updated_at || 0).getTime()
+  return !t || Date.now() - t > STALE_PARSING_MS
+}
+
 router.get('/', async (req, res) => {
   try {
     const worksheets = await getAllWorksheets()
@@ -116,7 +126,7 @@ router.post('/:id/parse-pdf', pdfUpload.single('file'), async (req, res) => {
       return res.status(400).json({ error: '请上传 PDF 文件或预埋答案' })
     }
 
-    if (worksheet.parse_status === 'parsing') {
+    if (worksheet.parse_status === 'parsing' && !isParsingStale(worksheet)) {
       return res.status(409).json({ error: '该练习册正在解析中，请稍候' })
     }
 
@@ -203,7 +213,7 @@ router.post('/:id/parse-images', imageUpload.array('files', 30), async (req, res
 
     const files = req.files
     if (!files || files.length === 0) return res.status(400).json({ error: '请上传至少一张图片' })
-    if (worksheet.parse_status === 'parsing') {
+    if (worksheet.parse_status === 'parsing' && !isParsingStale(worksheet)) {
       return res.status(409).json({ error: '该练习册正在解析中，请稍候' })
     }
 
@@ -257,9 +267,13 @@ async function doParseImages(worksheetId, files) {
   // OCR 并行执行（AI 并发由 withAiLimit 全局控制），但解析必须按页顺序进行：
   // 章节标题只出现在首页，后续页答案要延续上一页的章节，否则会落到 section=null
   // 与其它章节的同题号互相覆盖。
+  const ocrFailedPages = []
   const ocrContents = await Promise.all(
-    files.map(f => ocrExtractRawText(f.buffer.toString('base64')))
+    files.map((f, i) => ocrExtractSafe(f.buffer.toString('base64'), i, ocrFailedPages))
   )
+  if (ocrFailedPages.length === files.length) {
+    throw new Error(`全部 ${files.length} 页 OCR 识别失败（AI 服务可能暂时不可用），请稍后重试`)
+  }
   const parsedAnswers = []
   let carrySection = null
   for (const content of ocrContents) {
@@ -270,6 +284,7 @@ async function doParseImages(worksheetId, files) {
 
   await processOcrResults(worksheetId, parsedAnswers, {
     lowConfidence,
+    ocrFailedPages,
     sourceLabel: '图片',
   })
 }
@@ -334,6 +349,8 @@ async function doParse(worksheetId, file, precomputedAnswers = null, isCombined 
   const lowConfidence = []
   let markerFound = false
   let ocrTruncatedInfo = null
+  const ocrFailedPages = []
+  let ocrPagesTried = 0
 
   if (fullText && fullText.trim().length > 50) {
     const answerSection = fullText.replace(/[\s\S]*?(参考答案|标准答案|参考解答|答案)/, '')
@@ -354,8 +371,9 @@ async function doParse(worksheetId, file, precomputedAnswers = null, isCombined 
         console.log(`PDF 共 ${totalPages} 页，仅 OCR 前 ${images.length} 页`)
       }
       // OCR 并行，解析按页顺序（章节跨页延续，见 doParseImages 说明）
+      ocrPagesTried = images.length
       const ocrContents = await Promise.all(
-        images.map(img => ocrExtractRawText(img.toString('base64')))
+        images.map((img, i) => ocrExtractSafe(img.toString('base64'), i, ocrFailedPages))
       )
       let carrySection = null
       for (const content of ocrContents) {
@@ -366,6 +384,11 @@ async function doParse(worksheetId, file, precomputedAnswers = null, isCombined 
     } catch (e) {
       console.log('OCR fallback failed:', e.message)
     }
+  }
+
+  // 全部 OCR 页都失败时按解析失败处理（可重试），而不是 done + 0 条误导用户
+  if (parsedAnswers.length === 0 && ocrPagesTried > 0 && ocrFailedPages.length === ocrPagesTried) {
+    throw new Error(`全部 ${ocrPagesTried} 页 OCR 识别失败（AI 服务可能暂时不可用），请稍后重试`)
   }
 
   // 若有预埋答案，以预埋答案为准（置信度最高，覆盖 OCR 结果）
@@ -393,6 +416,7 @@ async function doParse(worksheetId, file, precomputedAnswers = null, isCombined 
     ocrTruncatedInfo,
     markerFound,
     lowConfidence,
+    ocrFailedPages,
     sourceLabel: 'PDF',
   })
 }
@@ -405,10 +429,11 @@ async function doParse(worksheetId, file, precomputedAnswers = null, isCombined 
  * @param {Object} [options.ocrTruncatedInfo] - { totalPages, ocrPages }，有值表示文件被截断
  * @param {boolean} [options.markerFound] - PDF 文本模式是否找到"参考答案"标记
  * @param {Array} [options.lowConfidence] - 低置信度条目列表
+ * @param {Array<number>} [options.ocrFailedPages] - OCR 失败的页码列表（部分失败时生成警告）
  * @param {string} [options.sourceLabel] - 来源标签（"PDF"或"图片"），用于错误提示
  */
 async function processOcrResults(worksheetId, parsedAnswers, options = {}) {
-  const { ocrTruncatedInfo, markerFound, lowConfidence = [], sourceLabel = '文件' } = options
+  const { ocrTruncatedInfo, markerFound, lowConfidence = [], ocrFailedPages = [], sourceLabel = '文件' } = options
 
   // 按 (章节, 题号) 去重：同一章节内保留置信度高的，相同则保留靠后的
   const byKey = new Map()
@@ -435,6 +460,8 @@ async function processOcrResults(worksheetId, parsedAnswers, options = {}) {
   let warning = null
   if (parsedAnswers.length === 0) {
     warning = `未能解析出任何答案，请确认上传的是纯答案页${sourceLabel}。`
+  } else if (ocrFailedPages.length > 0) {
+    warning = `第 ${ocrFailedPages.join('、')} 页 OCR 识别失败，对应页答案缺失，建议重新上传补齐。`
   } else if (ocrTruncatedInfo) {
     warning = `${sourceLabel}共 ${ocrTruncatedInfo.totalPages} 页，仅识别了前 ${ocrTruncatedInfo.ocrPages} 页。若答案位于文件末尾，请裁剪为纯答案页后重新上传。`
   } else if (!markerFound && lowConfidence.length > parsedAnswers.length * 0.5) {
@@ -446,6 +473,17 @@ async function processOcrResults(worksheetId, parsedAnswers, options = {}) {
     count: parsedAnswers.length,
     warning,
   })
+}
+
+// 单页 OCR 容错：一页失败不再连坐整批（此前 Promise.all 一页 reject 即丢弃全部页结果）
+async function ocrExtractSafe(base64Image, pageIndex, failedPages) {
+  try {
+    return await ocrExtractRawText(base64Image)
+  } catch (e) {
+    console.error(`第 ${pageIndex + 1} 页 OCR 失败:`, e.message)
+    failedPages.push(pageIndex + 1)
+    return ''
+  }
 }
 
 async function ocrExtractRawText(base64Image) {

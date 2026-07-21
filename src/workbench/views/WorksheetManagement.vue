@@ -207,6 +207,8 @@ const showPdfDialog = ref(false)
 const selectedPdf = ref(null)
 const selectedQuestionPdf = ref(null)
 const isCombined = ref(true) // 默认同一份PDF包含答案和题目
+const uploadTab = ref('pdf')
+const selectedImages = ref([]) // { raw, name, url }
 const parsing = ref(false)
 const pdfUploaded = ref(false)
 const parseCount = ref(0)
@@ -215,6 +217,10 @@ const parseStatus = ref('idle')
 const parseMessage = ref('')
 let parsePollTimer = null
 let parseMessageTimer = null
+// 轮询上限：略大于服务端 12 分钟的卡死判定（STALE_PARSING_MS），超时后提示重新上传，
+// 此时服务端已允许绕过"正在解析中"的 409 拦截重新发起解析
+const POLL_MAX_MS = 12.5 * 60 * 1000
+let pollStartedAt = 0
 const currentWorksheetId = ref(null)
 
 const loadData = async () => {
@@ -304,6 +310,8 @@ const handleUploadPdf = (row) => {
   selectedPdf.value = null
   selectedQuestionPdf.value = null
   isCombined.value = true
+  clearSelectedImages()
+  uploadTab.value = 'pdf'
   parseWarning.value = null
   parseCount.value = 0
   parseStatus.value = 'idle'
@@ -326,8 +334,48 @@ const handleQuestionPdfSelect = (uploadFile) => {
   selectedQuestionPdf.value = uploadFile.raw
 }
 
+const handleImageSelect = (uploadFile) => {
+  const raw = uploadFile.raw
+  if (!raw) return
+  if (raw.size > 20 * 1024 * 1024) {
+    ElMessage.warning(`${raw.name} 超过 20MB，已跳过`)
+    return
+  }
+  if (selectedImages.value.length >= 30) {
+    ElMessage.warning('最多选择 30 张图片')
+    return
+  }
+  selectedImages.value.push({ raw, name: raw.name, url: URL.createObjectURL(raw) })
+}
+
+const removeImage = (i) => {
+  const [removed] = selectedImages.value.splice(i, 1)
+  if (removed) URL.revokeObjectURL(removed.url)
+}
+
+const clearSelectedImages = () => {
+  selectedImages.value.forEach(img => URL.revokeObjectURL(img.url))
+  selectedImages.value = []
+}
+
 const pollParseStatus = async () => {
   if (!currentWorksheetId.value) return
+  // 后台解析进程若已中断（服务器重启/内存不足），parse_status 会一直停在 'parsing'，
+  // 此前会无限转圈。超过上限则停止轮询并提示重新上传。
+  if (pollStartedAt && Date.now() - pollStartedAt > POLL_MAX_MS) {
+    parsing.value = false
+    parseStatus.value = 'idle'
+    if (parsePollTimer) {
+      clearInterval(parsePollTimer)
+      parsePollTimer = null
+    }
+    if (parseMessageTimer) {
+      clearTimeout(parseMessageTimer)
+      parseMessageTimer = null
+    }
+    ElMessage.error('解析等待超时，后台处理可能已中断，请重新上传重试')
+    return
+  }
   try {
     const ws = await getWorksheet(currentWorksheetId.value)
     if (!ws) return
@@ -392,6 +440,7 @@ const startParse = async () => {
   parsing.value = true
   parseStatus.value = 'parsing'
   parseMessage.value = '已上传 PDF，后台正在解析答案...'
+  pollStartedAt = Date.now()
 
   // 如果超过 15 秒还没解析完，提示用户正在耗时的 OCR 识别中
   parseMessageTimer = setTimeout(() => {
@@ -445,11 +494,61 @@ const startParse = async () => {
   }
 }
 
+const startImageParse = async () => {
+  if (!currentWorksheetId.value) return
+  if (selectedImages.value.length === 0) {
+    ElMessage.warning('请选择图片')
+    return
+  }
+
+  parsing.value = true
+  parseStatus.value = 'parsing'
+  parseMessage.value = '已上传图片，后台正在识别答案...'
+  pollStartedAt = Date.now()
+
+  parseMessageTimer = setTimeout(() => {
+    if (parseStatus.value === 'parsing') {
+      parseMessage.value = '正在逐张 OCR 识别中，请耐心等待...'
+    }
+  }, 15000)
+
+  try {
+    await uploadImages(currentWorksheetId.value, selectedImages.value.map(img => img.raw))
+    ElMessage.success('上传成功，开始解析...')
+    setTimeout(() => {
+      pollParseStatus()
+      parsePollTimer = setInterval(pollParseStatus, 2000)
+    }, 2000)
+  } catch (e) {
+    // 与 startParse 相同：客户端超时不代表后端没收到，先查真实状态再决定是否报错
+    if (e.name === 'TimeoutError' || /超时|abort/i.test(e.message || '')) {
+      try {
+        const ws = await getWorksheet(currentWorksheetId.value)
+        if (ws && (ws.parse_status === 'parsing' || ws.parse_status === 'done')) {
+          ElMessage.info('图片已到达服务器，继续等待解析结果...')
+          pollParseStatus()
+          parsePollTimer = setInterval(pollParseStatus, 2000)
+          return
+        }
+      } catch { /* 状态查询失败，按上传失败处理 */ }
+    }
+    parsing.value = false
+    parseStatus.value = 'idle'
+    if (parseMessageTimer) {
+      clearTimeout(parseMessageTimer)
+      parseMessageTimer = null
+    }
+    ElMessage.error('上传失败: ' + e.message)
+  }
+}
+
 const resetPdfUpload = () => {
   pdfUploaded.value = false
   selectedPdf.value = null
   selectedQuestionPdf.value = null
   isCombined.value = true
+  clearSelectedImages()
+  uploadTab.value = 'pdf'
   parseWarning.value = null
   parseCount.value = 0
   parseStatus.value = 'idle'

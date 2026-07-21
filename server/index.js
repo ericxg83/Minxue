@@ -2031,7 +2031,8 @@ app.use((err, req, res, next) => {
   console.error('服务器错误:', err)
   if (err instanceof multer.MulterError) {
     if (err.code === 'LIMIT_FILE_SIZE') {
-      return res.status(400).json({ error: '文件大小超过限制（最大20MB）' })
+      // 各上传端点限制不同（图片 20MB / 练习册 PDF 50MB），不写死具体数值
+      return res.status(400).json({ error: '文件大小超过服务器限制，请压缩后重试' })
     }
     if (err.code === 'LIMIT_FILE_COUNT') {
       return res.status(400).json({ error: '文件数量超过限制（最多20个）' })
