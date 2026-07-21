@@ -131,9 +131,12 @@ const apiRequest = async (path, options = {}, retries = 2) => {
         // 'signal is aborted without reason'，这里统一翻译成可读的超时提示
         const isAbort = rawError?.name === 'AbortError' || rawError?.name === 'TimeoutError'
           || /abort/i.test(String(rawError?.message || ''))
+        const isNetworkError = rawError?.name === 'TypeError' && /fetch/i.test(String(rawError?.message || ''))
         const error = isAbort
           ? new Error(`请求超时（${Math.round(timeoutMs / 1000)}秒），请检查网络后重试`)
-          : rawError
+          : isNetworkError
+            ? new Error('无法连接到服务器，请确认后端服务已启动')
+            : rawError
         if (isAbort) error.name = 'TimeoutError'
         // 最后一次尝试失败时抛出错误
         if (attempt === retries - 1) {

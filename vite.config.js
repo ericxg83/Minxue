@@ -155,7 +155,11 @@ export default defineConfig(({ mode }) => ({
     proxy: {
       '/api': {
         target: 'http://localhost:4000',
-        changeOrigin: true
+        changeOrigin: true,
+        // 上传PDF/图片等大文件请求可能超过默认2分钟代理超时，
+        // 放宽到20分钟以匹配前端 apiService 的10分钟超时
+        proxyTimeout: 20 * 60 * 1000,
+        timeout: 20 * 60 * 1000,
       }
     },
     // Dev server: serve workbench.html for /workbench and /exam-workbench routes

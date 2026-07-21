@@ -492,7 +492,7 @@ const startParse = async () => {
 
   parsing.value = true
   parseStatus.value = 'parsing'
-  parseMessage.value = '已上传 PDF，后台正在解析答案...'
+  parseMessage.value = '正在上传 PDF...'
   parseTotalPages.value = 0
   parseDonePages.value = 0
   parsePercent.value = 0
@@ -518,6 +518,7 @@ const startParse = async () => {
     }
 
     // 上传成功，立即给用户反馈
+    parseMessage.value = '已上传 PDF，后台正在解析答案...'
     ElMessage.success('上传成功，开始解析...')
 
     // 立即开始轮询解析状态
@@ -560,7 +561,7 @@ const startImageParse = async () => {
 
   parsing.value = true
   parseStatus.value = 'parsing'
-  parseMessage.value = '已上传图片，后台正在识别答案...'
+  parseMessage.value = '正在上传图片...'
   parseTotalPages.value = 0
   parseDonePages.value = 0
   parsePercent.value = 0
@@ -574,6 +575,7 @@ const startImageParse = async () => {
 
   try {
     await uploadImages(currentWorksheetId.value, selectedImages.value.map(img => img.raw))
+    parseMessage.value = '已上传图片，后台正在识别答案...'
     ElMessage.success('上传成功，开始解析...')
     setTimeout(() => {
       pollParseStatus()
