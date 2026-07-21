@@ -72,7 +72,7 @@
     </el-dialog>
 
     <el-dialog v-model="showPdfDialog" title="上传练习册内容" width="580px" @close="onPdfDialogClose">
-      <div v-if="parseStatus === 'idle' || parseStatus === 'failed'">
+      <div v-if="parseStatus !== 'parsing' && parseStatus !== 'done'">
         <!-- 解析失败时显示错误提示 -->
         <el-alert
           v-if="parseStatus === 'failed'"
