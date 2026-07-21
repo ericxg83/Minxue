@@ -72,7 +72,7 @@
     </el-dialog>
 
     <el-dialog v-model="showPdfDialog" title="上传练习册内容" width="580px" @close="onPdfDialogClose">
-      <div v-if="parseStatus !== 'parsing' && parseStatus !== 'done'">
+      <div v-if="parseStatus === 'idle'">
         <!-- 合并/分开模式切换 -->
         <div style="margin-bottom:16px;display:flex;align-items:center;gap:8px;">
           <el-checkbox v-model="isCombined" label="答案与题目在同一份PDF中" />
@@ -168,6 +168,16 @@
           </template>
         </el-result>
       </div>
+      <div v-else-if="parseStatus === 'failed'" class="parse-result">
+        <el-result icon="error" title="解析失败">
+          <template #sub-title>
+            <p>{{ parseError || '未知错误' }}</p>
+          </template>
+          <template #extra>
+            <el-button type="primary" @click="resetPdfUpload">重新上传</el-button>
+          </template>
+        </el-result>
+      </div>
       <div v-else class="parse-result">
         <el-result :icon="parseWarning ? 'warning' : 'success'" title="解析完成">
           <template #sub-title>
@@ -224,6 +234,7 @@ const pdfUploaded = ref(false)
 const parseCount = ref(0)
 const parseWarning = ref(null)
 const parseStatus = ref('idle')
+const parseError = ref('')
 const parseMessage = ref('')
 // 大文件分批解析进度（后端 parse_total_pages/parse_done_pages，NULL = 无页级进度走转圈）
 const OCR_BATCH_SIZE = 15 // 与后端 worksheets.js 的 OCR_BATCH_SIZE 保持一致，用于显示当前批次页码范围
@@ -332,6 +343,7 @@ const handleUploadPdf = (row) => {
   parseWarning.value = null
   parseCount.value = 0
   parseStatus.value = 'idle'
+  parseError.value = ''
   parseMessage.value = ''
   if (parsePollTimer) {
     clearInterval(parsePollTimer)
@@ -382,6 +394,7 @@ const pollParseStatus = async () => {
   if (pollStartedAt && Date.now() - pollStartedAt > POLL_MAX_MS) {
     parsing.value = false
     parseStatus.value = 'idle'
+    parseError.value = ''
     if (parsePollTimer) {
       clearInterval(parsePollTimer)
       parsePollTimer = null
@@ -442,6 +455,7 @@ const pollParseStatus = async () => {
     } else if (ws.parse_status === 'failed') {
       parseCount.value = 0
       parseWarning.value = null
+      parseError.value = ws.parse_error || '未知错误'
       pdfUploaded.value = false
       parsing.value = false
       if (parsePollTimer) {
@@ -528,6 +542,7 @@ const startParse = async () => {
     }
     parsing.value = false
     parseStatus.value = 'idle'
+    parseError.value = ''
     if (parseMessageTimer) {
       clearTimeout(parseMessageTimer)
       parseMessageTimer = null
@@ -579,6 +594,7 @@ const startImageParse = async () => {
     }
     parsing.value = false
     parseStatus.value = 'idle'
+    parseError.value = ''
     if (parseMessageTimer) {
       clearTimeout(parseMessageTimer)
       parseMessageTimer = null
@@ -597,6 +613,7 @@ const resetPdfUpload = () => {
   parseWarning.value = null
   parseCount.value = 0
   parseStatus.value = 'idle'
+  parseError.value = ''
   parseMessage.value = ''
   if (parsePollTimer) {
     clearInterval(parsePollTimer)

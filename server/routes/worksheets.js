@@ -395,6 +395,8 @@ async function doParse(worksheetId, file, precomputedAnswers = null, isCombined 
       }
     } catch (e) {
       console.log('OCR fallback failed:', e.message)
+      // 渲染失败时抛出让上层 catch 设置 parse_status='failed'，避免 silent 走到 done+0 误导用户
+      throw e
     }
   }
 
