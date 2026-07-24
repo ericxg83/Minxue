@@ -72,16 +72,7 @@
     </el-dialog>
 
     <el-dialog v-model="showPdfDialog" title="上传练习册内容" width="580px" @close="onPdfDialogClose">
-      <div v-if="parseStatus !== 'parsing' && parseStatus !== 'done'">
-        <!-- 解析失败时显示错误提示 -->
-        <el-alert
-          v-if="parseStatus === 'failed'"
-          :title="parseError || '解析失败'"
-          type="error"
-          :closable="true"
-          show-icon
-          style="margin-bottom:16px"
-        />
+      <div v-if="parseStatus === 'idle'">
         <!-- 合并/分开模式切换 -->
         <div style="margin-bottom:16px;display:flex;align-items:center;gap:8px;">
           <el-checkbox v-model="isCombined" label="答案与题目在同一份PDF中" />
@@ -94,7 +85,7 @@
             drag
             accept=".pdf"
             :auto-upload="false"
-            :on-change="handleQuestionPdfSelect"
+            @change="handleQuestionPdfSelect"
             :limit="1"
           >
             <el-icon class="el-icon--upload" :size="48"><UploadFilled /></el-icon>
@@ -177,7 +168,35 @@
           </template>
         </el-result>
       </div>
-      <div v-else class="parse-result">
+      <div v-else-if="parseStatus === 'timed_out'" class="parse-result">
+        <el-result icon="warning" title="解析仍未完成">
+          <template #sub-title>
+            <p>{{ parseError || '暂时无法确认解析是否完成，请稍后继续查询。' }}</p>
+            <el-alert
+              v-if="parsePollError"
+              :title="parsePollError"
+              type="warning"
+              :closable="false"
+              style="margin-top: 12px; text-align: left"
+            />
+          </template>
+          <template #extra>
+            <el-button type="primary" @click="continueParsePolling">继续查询</el-button>
+            <el-button @click="resetPdfUpload">重新上传</el-button>
+          </template>
+        </el-result>
+      </div>
+      <div v-else-if="parseStatus === 'failed'" class="parse-result">
+        <el-result icon="error" title="解析失败">
+          <template #sub-title>
+            <p>{{ parseError || '未能完成答案解析，请检查文件或稍后重试。' }}</p>
+          </template>
+          <template #extra>
+            <el-button type="primary" @click="resetPdfUpload">重新上传</el-button>
+          </template>
+        </el-result>
+      </div>
+      <div v-else-if="parseStatus === 'done'" class="parse-result">
         <el-result :icon="parseWarning ? 'warning' : 'success'" title="解析完成">
           <template #sub-title>
             <p>共解析出 <strong>{{ parseCount }}</strong> 条答案</p>
@@ -235,12 +254,15 @@ const parseWarning = ref(null)
 const parseStatus = ref('idle')
 const parseError = ref('')
 const parseMessage = ref('')
+const parsePollError = ref('')
+let parsePollErrorCount = 0
 // 大文件分批解析进度（后端 parse_total_pages/parse_done_pages，NULL = 无页级进度走转圈）
 const OCR_BATCH_SIZE = 15 // 与后端 worksheets.js 的 OCR_BATCH_SIZE 保持一致，用于显示当前批次页码范围
 const parseTotalPages = ref(0)
 const parseDonePages = ref(0)
 const parsePercent = ref(0)
 let parsePollTimer = null
+let parsePollStartTimer = null
 let parseMessageTimer = null
 // 轮询上限：略大于服务端 12 分钟的卡死判定（STALE_PARSING_MS），超时后提示重新上传，
 // 此时服务端已允许绕过"正在解析中"的 409 拦截重新发起解析。
@@ -249,6 +271,38 @@ let parseMessageTimer = null
 const POLL_MAX_MS = 12.5 * 60 * 1000
 let pollStartedAt = 0
 const currentWorksheetId = ref(null)
+
+const stopParsePolling = () => {
+  if (parsePollTimer) {
+    clearInterval(parsePollTimer)
+    parsePollTimer = null
+  }
+  if (parsePollStartTimer) {
+    clearTimeout(parsePollStartTimer)
+    parsePollStartTimer = null
+  }
+}
+
+const startParsePolling = () => {
+  stopParsePolling()
+  parsePollError.value = ''
+  parsePollErrorCount = 0
+  parsePollStartTimer = setTimeout(() => {
+    parsePollStartTimer = null
+    pollParseStatus()
+    parsePollTimer = setInterval(pollParseStatus, 2000)
+  }, 2000)
+}
+
+const continueParsePolling = () => {
+  pollStartedAt = Date.now()
+  parseStatus.value = 'parsing'
+  parseError.value = ''
+  parsePollError.value = ''
+  parsePollErrorCount = 0
+  parsing.value = true
+  startParsePolling()
+}
 
 const loadData = async () => {
   loading.value = true
@@ -344,10 +398,9 @@ const handleUploadPdf = (row) => {
   parseStatus.value = 'idle'
   parseError.value = ''
   parseMessage.value = ''
-  if (parsePollTimer) {
-    clearInterval(parsePollTimer)
-    parsePollTimer = null
-  }
+  parsePollError.value = ''
+  parsePollErrorCount = 0
+  stopParsePolling()
   if (parseMessageTimer) {
     clearTimeout(parseMessageTimer)
     parseMessageTimer = null
@@ -392,17 +445,9 @@ const pollParseStatus = async () => {
   // 此前会无限转圈。超过上限则停止轮询并提示重新上传。
   if (pollStartedAt && Date.now() - pollStartedAt > POLL_MAX_MS) {
     parsing.value = false
-    parseStatus.value = 'idle'
-    parseError.value = ''
-    if (parsePollTimer) {
-      clearInterval(parsePollTimer)
-      parsePollTimer = null
-    }
-    if (parseMessageTimer) {
-      clearTimeout(parseMessageTimer)
-      parseMessageTimer = null
-    }
-    ElMessage.error('解析等待超时，后台处理可能已中断，请重新上传重试')
+    parseStatus.value = 'timed_out'
+    parseError.value = '等待超时，后台处理可能尚未完成，您可以继续查询或重新上传'
+    stopParsePolling()
     return
   }
   try {
@@ -437,10 +482,7 @@ const pollParseStatus = async () => {
       parseWarning.value = ws.parse_warning || null
       pdfUploaded.value = true
       parsing.value = false
-      if (parsePollTimer) {
-        clearInterval(parsePollTimer)
-        parsePollTimer = null
-      }
+      stopParsePolling()
       if (parseMessageTimer) {
         clearTimeout(parseMessageTimer)
         parseMessageTimer = null
@@ -457,10 +499,7 @@ const pollParseStatus = async () => {
       parseError.value = ws.parse_error || '未知错误'
       pdfUploaded.value = false
       parsing.value = false
-      if (parsePollTimer) {
-        clearInterval(parsePollTimer)
-        parsePollTimer = null
-      }
+      stopParsePolling()
       if (parseMessageTimer) {
         clearTimeout(parseMessageTimer)
         parseMessageTimer = null
@@ -520,12 +559,8 @@ const startParse = async () => {
     parseMessage.value = '已上传 PDF，后台正在解析答案...'
     ElMessage.success('上传成功，开始解析...')
 
-    // 立即开始轮询解析状态
-    // 先等 2 秒让后端写上 parse_status='parsing'
-    setTimeout(() => {
-      pollParseStatus()
-      parsePollTimer = setInterval(pollParseStatus, 2000)
-    }, 2000)
+    // 使用统一轮询管理
+    startParsePolling()
   } catch (e) {
     // 客户端超时/中断不代表后端没收到：后端收到文件即返回并后台解析，
     // 先查一次真实状态，已在解析就转入轮询，避免误报"上传失败"
@@ -534,15 +569,14 @@ const startParse = async () => {
         const ws = await getWorksheet(currentWorksheetId.value)
         if (ws && (ws.parse_status === 'parsing' || ws.parse_status === 'done')) {
           ElMessage.info('文件已到达服务器，继续等待解析结果...')
-          pollParseStatus()
-          parsePollTimer = setInterval(pollParseStatus, 2000)
+          startParsePolling()
           return
         }
       } catch { /* 状态查询失败，按上传失败处理 */ }
     }
     parsing.value = false
-    parseStatus.value = 'idle'
-    parseError.value = ''
+    parseStatus.value = 'failed'
+    parseError.value = e.message || '上传失败，请检查网络后重试'
     if (parseMessageTimer) {
       clearTimeout(parseMessageTimer)
       parseMessageTimer = null
@@ -576,10 +610,7 @@ const startImageParse = async () => {
     await uploadImages(currentWorksheetId.value, selectedImages.value.map(img => img.raw))
     parseMessage.value = '已上传图片，后台正在识别答案...'
     ElMessage.success('上传成功，开始解析...')
-    setTimeout(() => {
-      pollParseStatus()
-      parsePollTimer = setInterval(pollParseStatus, 2000)
-    }, 2000)
+    startParsePolling()
   } catch (e) {
     // 与 startParse 相同：客户端超时不代表后端没收到，先查真实状态再决定是否报错
     if (e.name === 'TimeoutError' || /超时|abort/i.test(e.message || '')) {
@@ -587,15 +618,14 @@ const startImageParse = async () => {
         const ws = await getWorksheet(currentWorksheetId.value)
         if (ws && (ws.parse_status === 'parsing' || ws.parse_status === 'done')) {
           ElMessage.info('图片已到达服务器，继续等待解析结果...')
-          pollParseStatus()
-          parsePollTimer = setInterval(pollParseStatus, 2000)
+          startParsePolling()
           return
         }
       } catch { /* 状态查询失败，按上传失败处理 */ }
     }
     parsing.value = false
-    parseStatus.value = 'idle'
-    parseError.value = ''
+    parseStatus.value = 'failed'
+    parseError.value = e.message || '上传失败，请检查网络后重试'
     if (parseMessageTimer) {
       clearTimeout(parseMessageTimer)
       parseMessageTimer = null
@@ -616,10 +646,7 @@ const resetPdfUpload = () => {
   parseStatus.value = 'idle'
   parseError.value = ''
   parseMessage.value = ''
-  if (parsePollTimer) {
-    clearInterval(parsePollTimer)
-    parsePollTimer = null
-  }
+  stopParsePolling()
   if (parseMessageTimer) {
     clearTimeout(parseMessageTimer)
     parseMessageTimer = null
@@ -627,10 +654,7 @@ const resetPdfUpload = () => {
 }
 
 const onPdfDialogClose = () => {
-  if (parsePollTimer) {
-    clearInterval(parsePollTimer)
-    parsePollTimer = null
-  }
+  stopParsePolling()
   if (parseMessageTimer) {
     clearTimeout(parseMessageTimer)
     parseMessageTimer = null
