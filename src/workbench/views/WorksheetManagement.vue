@@ -111,7 +111,7 @@
               drag
               accept=".pdf"
               :auto-upload="false"
-              :on-change="handlePdfSelect"
+              @change="handlePdfSelect"
               :limit="1"
             >
               <el-icon class="el-icon--upload" :size="48"><UploadFilled /></el-icon>
@@ -132,7 +132,7 @@
               multiple
               accept="image/jpeg,image/png,image/webp"
               :auto-upload="false"
-              :on-change="handleImageSelect"
+              @change="handleImageSelect"
               :limit="30"
               :file-list="[]"
             >
