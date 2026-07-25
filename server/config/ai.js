@@ -15,7 +15,7 @@ export const AI_CONFIG = {
 }
 
 export const RETRY_DELAYS_429 = [5000]
-export const RETRY_DELAYS_503 = [5000, 10000, 20000] // 503 服务不可用时最多重试 3 次，间隔递增
+export const RETRY_DELAYS_503 = [5000, 10000, 20000, 30000, 60000] // 503 最多重试 5 次，总等待 125 秒
 
 const sleep = (ms) => new Promise(resolve => setTimeout(resolve, ms))
 
@@ -439,6 +439,8 @@ export async function callVisionCompletion(opts) {
 
   if (MODELSCOPE_BACKUP.ENABLED) {
     providers.push(async () => {
+      // 备份 Key 需要绑定阿里云账号，暂时跳过
+      if (true) throw new Error('Modelscope backup key not configured')
       const content = await requestOpenAIProvider({
         endpoint: MODELSCOPE_BACKUP.ENDPOINT,
         apiKey: MODELSCOPE_BACKUP.API_KEY,
