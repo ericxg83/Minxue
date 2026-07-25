@@ -14,7 +14,7 @@ export const AI_CONFIG = {
   MAX_RETRIES: 2,
 }
 
-export const RETRY_DELAYS_429 = [5000]
+export const RETRY_DELAYS_429 = [5000, 10000, 20000] // 429 限流最多重试 3 次，间隔递增
 export const RETRY_DELAYS_503 = [5000, 10000, 20000, 30000, 60000, 120000] // 503 最多重试 6 次，总等待 245 秒
 
 const sleep = (ms) => new Promise(resolve => setTimeout(resolve, ms))
@@ -435,7 +435,7 @@ export async function callVisionCompletion(opts) {
         temperature,
         maxTokens,
         timeout: AI_CONFIG.TIMEOUT,
-        retry429: false,
+        retry429: true,
       })
       return { content, usedBackup: false }
     })
