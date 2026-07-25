@@ -19,7 +19,7 @@ import {
   getStudentWorksheetSetting,
   upsertStudentWorksheetSetting,
 } from '../services/neonService.js'
-import { uploadPDF } from '../services/ossService.js'
+import { uploadPDF, uploadImage } from '../services/ossService.js'
 import { ossClient } from '../config/oss.js'
 import { extractPdfText, renderPdfToJpegs, getPdfPageCount } from '../services/pdfService.js'
 import { callVisionCompletion } from '../config/ai.js'
@@ -157,7 +157,13 @@ router.post('/:id/parse-pdf', pdfUpload.single('file'), async (req, res) => {
     // 文件已收到：先告知前端上传成功，解析在后台进行，前端轮询 parse_status
     // 进度列同时清零：避免重新解析时上一轮的"45/45 页"残留被前端短暂读到
     await updateWorksheetParseStatus(worksheetId, { status: 'parsing' })
-    await updateWorksheetParseProgress(worksheetId, {})
+    // 进度列清零：避免重新解析时上一轮"45/45 页"残留被前端短暂读到
+    // 若列不存在（迁移未跑）也不阻塞上传，静默跳过
+    try {
+      await updateWorksheetParseProgress(worksheetId, {})
+    } catch (progressErr) {
+      console.warn('⚠️ 清零解析进度列失败（可能是列不存在，不影响上传）:', progressErr.message)
+    }
     res.json({ success: true, parsing: true, message: '上传成功，解析已开始' })
 
     if (precomputedAnswers && !file) {
@@ -230,7 +236,11 @@ router.post('/:id/parse-images', imageUpload.array('files', 30), async (req, res
     }
 
     await updateWorksheetParseStatus(worksheetId, { status: 'parsing' })
-    await updateWorksheetParseProgress(worksheetId, {}) // 清除上一轮 PDF 分批解析的进度残留
+    try {
+      await updateWorksheetParseProgress(worksheetId, {}) // 清除上一轮 PDF 分批解析的进度残留
+    } catch (progressErr) {
+      console.warn('⚠️ 清零解析进度列失败（可能是列不存在，不影响上传）:', progressErr.message)
+    }
     res.json({ success: true, parsing: true, message: '上传成功，解析已开始' })
 
     parseImagesInBackground(worksheetId, files).catch(async (e) => {
@@ -385,7 +395,7 @@ async function doParse(worksheetId, file, precomputedAnswers = null, isCombined 
       // OCR 并行，解析按页顺序（章节跨页延续，见 doParseImages 说明）
       ocrPagesTried = images.length
       const ocrContents = await Promise.all(
-        images.map((img, i) => ocrExtractSafe(img.toString('base64'), i, ocrFailedPages))
+        images.map((img, i) => ocrExtractFromBuffer(img, i, ocrFailedPages))
       )
       let carrySection = null
       for (const content of ocrContents) {
@@ -462,8 +472,8 @@ async function processOcrBatch(fileBuffer, startPage, endPage, carrySection, low
     maxPages: OCR_BATCH_SIZE,
   })
   const ocrContents = await Promise.all(
-    // startPage - 1 + i：ocrExtractSafe 内部 push pageIndex+1，此处换算为真实页号
-    images.map((img, i) => ocrExtractSafe(img.toString('base64'), startPage - 1 + i, ocrFailedPages))
+    // startPage - 1 + i：ocrExtractFromBuffer 内部 push pageIndex+1，此处换算为真实页号
+    images.map((img, i) => ocrExtractFromBuffer(img, startPage - 1 + i, ocrFailedPages))
   )
   images = null // 断引用：JPEG buffer 不与 OCR 文本同时存活到解析阶段，下一批分配大对象时可被回收
 
@@ -617,6 +627,26 @@ async function ocrExtractSafe(base64Image, pageIndex, failedPages) {
     return await ocrExtractRawText(base64Image)
   } catch (e) {
     console.error(`第 ${pageIndex + 1} 页 OCR 失败:`, e.message)
+    failedPages.push(pageIndex + 1)
+    return ''
+  }
+}
+
+// 基于 OSS URL 的 OCR：上传图片到 OSS 后以 HTTP URL 调用 AI，
+// 解决 ModelScope 等 API 不支持 data:image/jpeg;base64 格式的问题
+async function ocrExtractFromBuffer(imgBuffer, pageIndex, failedPages) {
+  try {
+    const url = await uploadImage(imgBuffer, `page_${pageIndex + 1}.jpg`, 'system')
+    const { content } = await callVisionCompletion({
+      imageDataURL: url,
+      systemPrompt: '你是一个作业答案识别助手。请从图片中提取所有题号和对应答案。重要：每行只能输出一个题号和它的答案，绝对不要在一行输出多个答案（如"1. A 2. B 3. C"是错误的）。格式如"1. A"或"13. 2017"。判断题答案请输出 √ 或 ×。如果图片包含章节标题（如"第一章阶段练1"或"第二章评价测试卷"），请在对应答案前单独一行输出完整章节标题，不要省略、不要与答案同行。',
+      userText: '请提取这份练习册答案中的所有题号和对应答案。',
+      temperature: 0.0,
+      maxTokens: 4096,
+    })
+    return content || ''
+  } catch (e) {
+    console.error(`第 ${pageIndex + 1} 页 OCR 失败（OSS URL 模式）:`, e.message)
     failedPages.push(pageIndex + 1)
     return ''
   }

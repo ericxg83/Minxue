@@ -2027,21 +2027,6 @@ app.post('/api/generated-exams/:id/grade', async (req, res) => {
   }
 })
 
-// Error handler
-app.use((err, req, res, next) => {
-  console.error('服务器错误:', err)
-  if (err instanceof multer.MulterError) {
-    if (err.code === 'LIMIT_FILE_SIZE') {
-      // 各上传端点限制不同（图片 20MB / 练习册 PDF 50MB），不写死具体数值
-      return res.status(400).json({ error: '文件大小超过服务器限制，请压缩后重试' })
-    }
-    if (err.code === 'LIMIT_FILE_COUNT') {
-      return res.status(400).json({ error: '文件数量超过限制（最多20个）' })
-    }
-  }
-  res.status(500).json({ error: err.message || '服务器内部错误' })
-})
-
 // 知识点标签回填：为所有已有题目重新生成 AI 知识点标签
 let backfillRunning = false
 let backfillProgress = { total: 0, updated: 0, skipped: 0, failed: 0, done: false, detail: '', remaining: null }
@@ -2276,6 +2261,21 @@ app.get('/api/resources/exam-papers', async (req, res) => {
 app.use('/api/weekly-report', weeklyReportRouter)
 app.use('/api/worksheets', worksheetsRouter)
 app.use('/api/resources', resourcesRouter)
+
+// 错误处理中间件（必须在路由之后，才能捕获路由中的未处理异常）
+app.use((err, req, res, next) => {
+  console.error('服务器错误:', err)
+  if (err instanceof multer.MulterError) {
+    if (err.code === 'LIMIT_FILE_SIZE') {
+      // 各上传端点限制不同（图片 20MB / 练习册 PDF 50MB），不写死具体数值
+      return res.status(400).json({ error: '文件大小超过服务器限制，请压缩后重试' })
+    }
+    if (err.code === 'LIMIT_FILE_COUNT') {
+      return res.status(400).json({ error: '文件数量超过限制（最多20个）' })
+    }
+  }
+  res.status(500).json({ error: err.message || '服务器内部错误' })
+})
 
 const __filename = fileURLToPath(import.meta.url)
 

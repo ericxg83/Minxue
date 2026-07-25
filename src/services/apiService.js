@@ -121,7 +121,7 @@ const apiRequest = async (path, options = {}, retries = 2) => {
 
         if (!response.ok) {
           const error = await response.json().catch(() => ({ error: response.statusText }))
-          throw new Error(error.error || `请求失败: ${response.status}`)
+          throw new Error(error.error || `请求失败: ${response.status}${response.statusText ? ' ' + response.statusText : ''}`)
         }
 
         const data = await response.json()

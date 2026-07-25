@@ -7,7 +7,7 @@ let _cdnDomain = null
 export const getOSSClient = () => {
   if (!_ossClient) {
     const region = process.env.OSS_REGION
-    const bucket = process.env.OSS_BUCKET
+    const bucket = process.env.OSS_BUCKET || process.env.OSS_BUCKET_NAME
     const accessKeyId = process.env.OSS_ACCESS_KEY_ID
     const accessKeySecret = process.env.OSS_ACCESS_KEY_SECRET
     _cdnDomain = process.env.OSS_CDN_DOMAIN
@@ -15,7 +15,7 @@ export const getOSSClient = () => {
     const hasAllConfig = region && bucket && accessKeyId && accessKeySecret
 
     if (!hasAllConfig) {
-      throw new Error('OSS 未配置：缺少环境变量。请检查 OSS_REGION, OSS_BUCKET, OSS_ACCESS_KEY_ID, OSS_ACCESS_KEY_SECRET')
+      throw new Error('OSS 未配置：缺少环境变量。请检查 OSS_REGION, OSS_BUCKET/OSS_BUCKET_NAME, OSS_ACCESS_KEY_ID, OSS_ACCESS_KEY_SECRET')
     }
 
     console.log('[OSS Config] 初始化OSS客户端:')

@@ -88,7 +88,7 @@ export const getPdfPageCount = async (fileBuffer, timeoutMs = 15000) => {
 // 无条件按 scale 放大会产生数亿像素的 canvas，在 512MB 容器上直接 OOM 打死进程
 // startPage/endPage: 1-based 闭区间，用于大文件分批渲染；不传时从第 1 页起、受 maxPages 截断（与旧行为一致）。
 // 每次调用独立 getDocument/destroy：批间彻底释放 pdfjs 内部字体/图像缓存，内存峰值 = 单批
-export const renderPdfToJpegs = async (fileBuffer, { scale = 2, maxPages = 20, quality = 0.85, timeoutMs = 30000, maxEdge = 2400, startPage = 1, endPage = null } = {}) => {
+export const renderPdfToJpegs = async (fileBuffer, { scale = 2, maxPages = 20, quality = 0.85, timeoutMs = 30000, maxEdge = 2048, startPage = 1, endPage = null } = {}) => {
   const pdfjs = await loadPdfjs()
   const doc = await withTimeout(
     pdfjs.getDocument({
