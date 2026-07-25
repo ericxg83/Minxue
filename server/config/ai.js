@@ -49,7 +49,7 @@ export async function withAiLimit(fn) {
   }
 }
 
-async function postWith429Retry(client, endpoint, body, axiosOptions, { retry429 = true } = {}) {
+async function postWith429Retry(client, endpoint, body, axiosOptions, { retry429 = true, retry503 = true } = {}) {
   for (let attempt = 0; ; attempt += 1) {
     try {
       return await withAiLimit(() => client.post(endpoint, body, axiosOptions))
@@ -62,7 +62,7 @@ async function postWith429Retry(client, endpoint, body, axiosOptions, { retry429
         continue
       }
       // 503 Service Unavailable：AI 服务临时过载，等待后重试
-      if (status === 503 && attempt < RETRY_DELAYS_503.length) {
+      if (retry503 && status === 503 && attempt < RETRY_DELAYS_503.length) {
         const delay = RETRY_DELAYS_503[attempt]
         console.warn(`[AI] 503 service unavailable, retrying in ${delay / 1000}s (${attempt + 1}/${RETRY_DELAYS_503.length})`)
         await sleep(delay)
@@ -134,7 +134,7 @@ const BACKUP_VENDOR_DEFS = [
     envKey: 'AGNES_API_KEY',
     endpoint: 'https://apihub.agnes-ai.com/v1/chat/completions',
     textModel: 'agnes-1.5-flash',
-    vlModels: ['agnes-1.5-flash'],
+    vlModels: ['agnes-1.5-flash', 'gpt-4o-mini', 'Qwen/Qwen3-VL-8B-Instruct', 'Qwen2.5-VL-7B-Instruct'],
     referer: null,
   },
 ]
@@ -268,6 +268,7 @@ async function requestOpenAIProvider({
   maxTokens,
   timeout,
   retry429 = true,
+  retry503 = true,
   vendor = null,
 }) {
   const headers = vendor ? buildVendorHeaders(vendor, apiKey) : {
@@ -285,7 +286,7 @@ async function requestOpenAIProvider({
       max_tokens: maxTokens,
     },
     { headers, timeout },
-    { retry429 },
+    { retry429, retry503 },
   )
 
   return extractContent(response.data?.choices?.[0]?.message)
@@ -419,12 +420,13 @@ export async function callVisionCompletion(opts) {
 
   const messages = buildVisionMessages(systemPrompt, userText, imageDataURL)
 
-  let lastError = null
+  // 备份提供商超时：主 ModelScope 失败后快速尝试备选，防止阻塞批次
+  const BACKUP_TIMEOUT = 30000
 
-  // 仅使用主 ModelScope 提供商：备份 Key 需绑定阿里云账号不可用，
-  // Agnes/Gemini 等备份在国内网络环境不可达，移除它们避免浪费 2 分钟超时
+  const providers = []
+
   if (!isMainRateLimitedToday() && AI_CONFIG.API_KEY) {
-    try {
+    providers.push(async () => {
       const content = await requestOpenAIProvider({
         endpoint: AI_CONFIG.ENDPOINT,
         apiKey: AI_CONFIG.API_KEY,
@@ -435,7 +437,52 @@ export async function callVisionCompletion(opts) {
         timeout: AI_CONFIG.TIMEOUT,
         retry429: false,
       })
-      if (content) return { content, usedBackup: false }
+      return { content, usedBackup: false }
+    })
+  }
+
+  // ModelScope 备份 Key（虽然提示需绑定账号，但有些环境可能可用）
+  if (MODELSCOPE_BACKUP.ENABLED) {
+    providers.push(async () => {
+      const content = await requestOpenAIProvider({
+        endpoint: MODELSCOPE_BACKUP.ENDPOINT,
+        apiKey: MODELSCOPE_BACKUP.API_KEY,
+        model: model || MODELSCOPE_BACKUP.MODEL,
+        messages,
+        temperature,
+        maxTokens,
+        timeout: BACKUP_TIMEOUT,
+        retry503: false,
+      })
+      return { content, usedBackup: true }
+    })
+  }
+
+  // Agnes 视觉兜底
+  for (const vendor of BACKUP_CONFIG.VENDORS) {
+    for (const vlModel of vendor.vlModels) {
+      providers.push(async () => {
+        const content = await requestOpenAIProvider({
+          endpoint: vendor.endpoint,
+          apiKey: process.env[vendor.envKey] || '',
+          model: model || vlModel,
+          messages,
+          temperature,
+          maxTokens: Math.min(maxTokens, 4096),
+          timeout: BACKUP_TIMEOUT,
+          retry503: false,
+          vendor,
+        })
+        return { content, usedBackup: true }
+      })
+    }
+  }
+
+  let lastError = null
+  for (const provider of providers) {
+    try {
+      const result = await provider()
+      if (result.content) return result
       lastError = new Error('AI returned empty content')
     } catch (err) {
       if (err.response?.status === 429 && !isMainRateLimitedToday()) {
