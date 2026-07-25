@@ -28,7 +28,7 @@ import { parseAnswerText, normalizeSectionName } from '../services/answerParseSe
 const router = Router()
 const pdfUpload = multer({
   storage: multer.memoryStorage(),
-  limits: { fileSize: 50 * 1024 * 1024 },
+  limits: { fileSize: 500 * 1024 * 1024 }, // 500MB：scanned PDF 可能很大，后台会用 doParseOcrBatched 分批处理
 })
 
 // 解析卡死判定：后台解析是路由进程内的内存任务，10 分钟超时兜底也是内存态的，

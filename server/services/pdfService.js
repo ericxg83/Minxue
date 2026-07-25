@@ -68,7 +68,7 @@ export const extractPdfText = async (fileBuffer, timeoutMs = 30000) => {
 // 只读取 PDF 总页数（分批解析前先探明规模）。
 // 注意 new Uint8Array(fileBuffer) 是拷贝：pdfjs 会 transfer/detach 传入的 buffer，
 // 传拷贝保证同一 fileBuffer 可被后续每批的 getDocument 重复使用。
-export const getPdfPageCount = async (fileBuffer, timeoutMs = 15000) => {
+export const getPdfPageCount = async (fileBuffer, timeoutMs = 30000) => {
   const pdfjs = await loadPdfjs()
   const doc = await withTimeout(
     pdfjs.getDocument({ data: new Uint8Array(fileBuffer) }).promise,
