@@ -451,7 +451,7 @@ async function doParse(worksheetId, file, precomputedAnswers = null, isCombined 
 // 中断（进程崩溃/单批超时）时已写库的批次保留；重新解析会先 clearWorksheetAnswers 重来。
 const OCR_BATCH_SIZE = 15
 const MAX_TOTAL_PAGES = 300 // 安全上限：防误传超大文档导致费用/时长失控，超出部分不解析并警告
-const BATCH_TIMEOUT_MS = 10 * 60 * 1000 // 单批超时：约束单批（工作量恒定 ≤15 页）而非全程，总时长天然有界
+const BATCH_TIMEOUT_MS = 20 * 60 * 1000 // 单批超时：约束单批（工作量恒定 ≤15 页）而非全程，总时长天然有界
 
 const withBatchTimeout = (promise, ms, label) => {
   let timer

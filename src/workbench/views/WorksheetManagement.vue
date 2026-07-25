@@ -268,7 +268,7 @@ let parseMessageTimer = null
 // 此时服务端已允许绕过"正在解析中"的 409 拦截重新发起解析。
 // 分批解析场景下语义是"无进度时长"：只要 parse_done_pages 有推进就重置计时，
 // 大文件总时长可远超 12.5 分钟但不会被误判为卡死
-const POLL_MAX_MS = 12.5 * 60 * 1000
+const POLL_MAX_MS = 25 * 60 * 1000
 let pollStartedAt = 0
 const currentWorksheetId = ref(null)
 

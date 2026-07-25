@@ -15,7 +15,7 @@ export const AI_CONFIG = {
 }
 
 export const RETRY_DELAYS_429 = [5000]
-export const RETRY_DELAYS_503 = [5000, 10000, 20000, 30000, 60000] // 503 最多重试 5 次，总等待 125 秒
+export const RETRY_DELAYS_503 = [5000, 10000, 20000, 30000, 60000, 120000] // 503 最多重试 6 次，总等待 245 秒
 
 const sleep = (ms) => new Promise(resolve => setTimeout(resolve, ms))
 
@@ -419,10 +419,12 @@ export async function callVisionCompletion(opts) {
 
   const messages = buildVisionMessages(systemPrompt, userText, imageDataURL)
 
-  const providers = []
+  let lastError = null
 
+  // 仅使用主 ModelScope 提供商：备份 Key 需绑定阿里云账号不可用，
+  // Agnes/Gemini 等备份在国内网络环境不可达，移除它们避免浪费 2 分钟超时
   if (!isMainRateLimitedToday() && AI_CONFIG.API_KEY) {
-    providers.push(async () => {
+    try {
       const content = await requestOpenAIProvider({
         endpoint: AI_CONFIG.ENDPOINT,
         apiKey: AI_CONFIG.API_KEY,
@@ -433,68 +435,7 @@ export async function callVisionCompletion(opts) {
         timeout: AI_CONFIG.TIMEOUT,
         retry429: false,
       })
-      return { content, usedBackup: false }
-    })
-  }
-
-  if (MODELSCOPE_BACKUP.ENABLED) {
-    providers.push(async () => {
-      // 备份 Key 需要绑定阿里云账号，暂时跳过
-      if (true) throw new Error('Modelscope backup key not configured')
-      const content = await requestOpenAIProvider({
-        endpoint: MODELSCOPE_BACKUP.ENDPOINT,
-        apiKey: MODELSCOPE_BACKUP.API_KEY,
-        model: model || MODELSCOPE_BACKUP.MODEL,
-        messages,
-        temperature,
-        maxTokens,
-        timeout: AI_CONFIG.TIMEOUT,
-      })
-      return { content, usedBackup: true }
-    })
-  }
-
-  for (const vendor of BACKUP_CONFIG.VENDORS) {
-    for (const vlModel of vendor.vlModels) {
-      providers.push(async () => {
-        const content = await requestOpenAIProvider({
-          endpoint: vendor.endpoint,
-          apiKey: process.env[vendor.envKey] || '',
-          model: model || vlModel,
-          messages,
-          temperature,
-          maxTokens,
-          timeout: AI_CONFIG.TIMEOUT,
-          vendor,
-        })
-        return { content, usedBackup: true }
-      })
-    }
-  }
-
-  // Agnes 视觉兜底
-  const AGNES_KEY = process.env.AGNES_API_KEY
-  if (AGNES_KEY) {
-    providers.push(async () => {
-      const content = await requestOpenAIProvider({
-        endpoint: 'https://apihub.agnes-ai.com/v1/chat/completions',
-        apiKey: AGNES_KEY,
-        model: 'agnes-1.5-flash',
-        messages,
-        temperature,
-        maxTokens: Math.min(maxTokens, 4096),
-        timeout: AI_CONFIG.TIMEOUT,
-        vendor: { name: 'Agnes', referer: null },
-      })
-      return { content, usedBackup: true }
-    })
-  }
-
-  let lastError = null
-  for (const provider of providers) {
-    try {
-      const result = await provider()
-      if (result.content) return result
+      if (content) return { content, usedBackup: false }
       lastError = new Error('AI returned empty content')
     } catch (err) {
       if (err.response?.status === 429 && !isMainRateLimitedToday()) {
