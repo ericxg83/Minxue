@@ -15,6 +15,7 @@ export const AI_CONFIG = {
 }
 
 export const RETRY_DELAYS_429 = [5000]
+export const RETRY_DELAYS_503 = [5000, 10000, 20000] // 503 服务不可用时最多重试 3 次，间隔递增
 
 const sleep = (ms) => new Promise(resolve => setTimeout(resolve, ms))
 
@@ -57,6 +58,13 @@ async function postWith429Retry(client, endpoint, body, axiosOptions, { retry429
       if (retry429 && status === 429 && attempt < RETRY_DELAYS_429.length) {
         const delay = RETRY_DELAYS_429[attempt]
         console.warn(`[AI] 429 rate limit, retrying in ${delay / 1000}s (${attempt + 1}/${RETRY_DELAYS_429.length})`)
+        await sleep(delay)
+        continue
+      }
+      // 503 Service Unavailable：AI 服务临时过载，等待后重试
+      if (status === 503 && attempt < RETRY_DELAYS_503.length) {
+        const delay = RETRY_DELAYS_503[attempt]
+        console.warn(`[AI] 503 service unavailable, retrying in ${delay / 1000}s (${attempt + 1}/${RETRY_DELAYS_503.length})`)
         await sleep(delay)
         continue
       }
