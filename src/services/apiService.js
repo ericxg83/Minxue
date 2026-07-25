@@ -110,11 +110,10 @@ const apiRequest = async (path, options = {}, retries = 2) => {
         )
 
         const { timeout: _timeout, ...fetchOptions } = options
+        const fetchHeaders = options.headers ? { ...options.headers } : undefined
         const response = await fetch(url, {
           ...fetchOptions,
-          headers: {
-            ...options.headers
-          },
+          ...(fetchHeaders ? { headers: fetchHeaders } : {}),
           signal: controller.signal
         })
         clearTimeout(timeoutId)

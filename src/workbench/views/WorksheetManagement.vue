@@ -562,9 +562,9 @@ const startParse = async () => {
     // 使用统一轮询管理
     startParsePolling()
   } catch (e) {
-    // 客户端超时/中断不代表后端没收到：后端收到文件即返回并后台解析，
+    // 客户端超时/中断/网络错误不代表后端没收到：后端收到文件即返回并后台解析，
     // 先查一次真实状态，已在解析就转入轮询，避免误报"上传失败"
-    if (e.name === 'TimeoutError' || /超时|abort/i.test(e.message || '')) {
+    if (e.name === 'TimeoutError' || /超时|abort|无法连接到服务器/i.test(e.message || '')) {
       try {
         const ws = await getWorksheet(currentWorksheetId.value)
         if (ws && (ws.parse_status === 'parsing' || ws.parse_status === 'done')) {
@@ -613,7 +613,7 @@ const startImageParse = async () => {
     startParsePolling()
   } catch (e) {
     // 与 startParse 相同：客户端超时不代表后端没收到，先查真实状态再决定是否报错
-    if (e.name === 'TimeoutError' || /超时|abort/i.test(e.message || '')) {
+    if (e.name === 'TimeoutError' || /超时|abort|无法连接到服务器/i.test(e.message || '')) {
       try {
         const ws = await getWorksheet(currentWorksheetId.value)
         if (ws && (ws.parse_status === 'parsing' || ws.parse_status === 'done')) {
