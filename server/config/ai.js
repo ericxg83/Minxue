@@ -73,14 +73,19 @@ async function postWith429Retry(client, endpoint, body, axiosOptions, { retry429
   }
 }
 
-let _mainRateLimitedDate = null
+// 主模型 429 冷却：只在短时间窗口内跳过主模型，绝不整天禁用
+// （历史实现按自然日锁定，一次 429 就会让当天所有请求全部落到坏掉的备份上，
+//   导致「全部 N 页 OCR 识别失败」，务必保持为短窗口）
+const MAIN_RATE_LIMIT_COOLDOWN_MS = 60 * 1000
+let _mainRateLimitedUntil = 0
 
 function markMainRateLimited() {
-  _mainRateLimitedDate = new Date().toISOString().slice(0, 10)
+  _mainRateLimitedUntil = Date.now() + MAIN_RATE_LIMIT_COOLDOWN_MS
+  console.warn(`[AI] 主模型限流，冷却 ${MAIN_RATE_LIMIT_COOLDOWN_MS / 1000}s 后自动恢复`)
 }
 
 export function isMainRateLimitedToday() {
-  return _mainRateLimitedDate === new Date().toISOString().slice(0, 10)
+  return Date.now() < _mainRateLimitedUntil
 }
 
 export const VL_MODELS = [...new Set([
@@ -425,20 +430,24 @@ export async function callVisionCompletion(opts) {
 
   const providers = []
 
-  if (!isMainRateLimitedToday() && AI_CONFIG.API_KEY) {
-    providers.push(async () => {
-      const content = await requestOpenAIProvider({
-        endpoint: AI_CONFIG.ENDPOINT,
-        apiKey: AI_CONFIG.API_KEY,
-        model: model || getCurrentVLModel(),
-        messages,
-        temperature,
-        maxTokens,
-        timeout: AI_CONFIG.TIMEOUT,
-        retry429: true,
-      })
-      return { content, usedBackup: false }
+  const callMainProvider = async () => {
+    const content = await requestOpenAIProvider({
+      endpoint: AI_CONFIG.ENDPOINT,
+      apiKey: AI_CONFIG.API_KEY,
+      model: model || getCurrentVLModel(),
+      messages,
+      temperature,
+      maxTokens,
+      timeout: AI_CONFIG.TIMEOUT,
+      retry429: true,
     })
+    return { content, usedBackup: false }
+  }
+
+  const mainSkippedByCooldown = Boolean(AI_CONFIG.API_KEY) && isMainRateLimitedToday()
+
+  if (!mainSkippedByCooldown && AI_CONFIG.API_KEY) {
+    providers.push(callMainProvider)
   }
 
   // ModelScope 备份 Key（虽然提示需绑定账号，但有些环境可能可用）
@@ -474,6 +483,22 @@ export async function callVisionCompletion(opts) {
           vendor,
         })
         return { content, usedBackup: true }
+      })
+    }
+  }
+
+  // 最后兜底：所有备份都不可用时，等主模型冷却结束再重试主模型（最多 2 轮）。
+  // 备份提供商经常整体不可用（401/503），主模型是唯一出路，绝不能因一次 429 就放弃整页。
+  // 无条件加入：既覆盖「进入时已被冷却跳过」，也覆盖「本次调用中主模型 429 耗尽后才触发冷却」。
+  if (AI_CONFIG.API_KEY) {
+    for (let round = 0; round < 2; round += 1) {
+      providers.push(async () => {
+        const waitMs = Math.max(0, _mainRateLimitedUntil - Date.now())
+        if (waitMs > 0) {
+          console.warn(`[AI] 备份不可用，等待 ${Math.ceil(waitMs / 1000)}s 主模型冷却结束后重试（第 ${round + 1} 轮兜底）`)
+          await sleep(waitMs)
+        }
+        return callMainProvider()
       })
     }
   }
