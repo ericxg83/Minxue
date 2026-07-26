@@ -116,7 +116,11 @@ export default function Home({ onNavigate }) {
 
     try {
       // 先通知 App.jsx 当前上传类型
-      if (stagingType === 'workbook') {
+      if (stagingType === 'homework') {
+        window.dispatchEvent(new CustomEvent('set-workbook-flow', {
+          detail: { flow: 'homework' }
+        }))
+      } else if (stagingType === 'workbook') {
         window.dispatchEvent(new CustomEvent('set-workbook-flow', {
           detail: {
             flow: 'workbook',

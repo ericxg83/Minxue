@@ -25,10 +25,10 @@ export default function UploadTypeSelector({ visible, onClose, onUpload }) {
     }
   }, [visible, studentStore.students])
 
-  const selectWorkbook = async () => {
-    setUploadType('workbook')
-    await loadWorksheets()
-    setShowStudentSelector(true)
+  const selectWorkbook = () => {
+    setUploadType('homework')
+    onUpload({ type: 'homework' })
+    onClose()
   }
 
   const selectRegular = () => {
@@ -122,7 +122,7 @@ export default function UploadTypeSelector({ visible, onClose, onUpload }) {
             </div>
             <div className="text-left">
               <h4 className="font-bold text-base" style={{ color: 'var(--text)' }}>日常作业</h4>
-              <p className="text-sm mt-1" style={{ color: 'var(--text-tertiary)' }}>练习册/同步练习，已有标准答案</p>
+              <p className="text-sm mt-1" style={{ color: 'var(--text-tertiary)' }}>拍照上传，选择练习册或AI批改</p>
             </div>
             <ChevronRight size={20} style={{ color: 'var(--text-tertiary)' }} />
           </button>

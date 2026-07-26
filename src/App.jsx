@@ -236,6 +236,11 @@ export default function App() {
   const [stagingFiles, setStagingFiles] = useState([]) // [{ file, url, name }]
   const [stagingType, setStagingType] = useState(null) // 'regular' | 'workbook' | 'wrong_retry'
   const [stagingUploading, setStagingUploading] = useState(false)
+  const [showHomeworkTypeChoice, setShowHomeworkTypeChoice] = useState(false)
+  const [homeworkChoiceFiles, setHomeworkChoiceFiles] = useState([])
+  const [showExamChoice, setShowExamChoice] = useState(false)
+  const [examChoiceFiles, setExamChoiceFiles] = useState([])
+  const [availableExamResources, setAvailableExamResources] = useState([])
   const cameraInputRef = useRef(null)
   const albumInputRef = useRef(null)
 
@@ -281,6 +286,9 @@ export default function App() {
   stagingRef.current = stagingFiles
   const stagingTypeRef = useRef(null)
   stagingTypeRef.current = stagingType
+  const homeworkChoiceRef = useRef([])
+  homeworkChoiceRef.current = homeworkChoiceFiles
+  const homeworkPendingRef = useRef(false)
 
   // 提交暂存区（构造合成事件传给 handleFileSelect）
   const handleSubmitStaging = async () => {
@@ -288,6 +296,31 @@ export default function App() {
     if (files.length === 0) return
     setStagingUploading(true)
     try {
+      if (stagingTypeRef.current === 'homework') {
+        setShowStaging(false)
+        setHomeworkChoiceFiles(files.map(p => p.file))
+        setShowHomeworkTypeChoice(true)
+        return
+      }
+
+      // 普通试卷：检查是否有已有答案库
+      if (stagingTypeRef.current === 'regular') {
+        try {
+          const resp = await fetch('/api/resources?type=exam')
+          const data = await resp.json()
+          const resources = (data.resources || []).filter(r => r.answer_count > 0)
+          if (resources.length > 0) {
+            setShowStaging(false)
+            setExamChoiceFiles(files.map(p => p.file))
+            setAvailableExamResources(resources)
+            setShowExamChoice(true)
+            return
+          }
+        } catch (e) {
+          console.warn('检测答案库失败，继续普通上传:', e)
+        }
+      }
+
       const dt = new DataTransfer()
       files.forEach((p) => dt.items.add(p.file))
       setShowStaging(false)
@@ -307,6 +340,58 @@ export default function App() {
     setFlowSubject('数学')
   }, [])
 
+  // 日常作业：选择练习册后上传
+  const handleUploadAsWorkbook = async (worksheetId) => {
+    setShowHomeworkTypeChoice(false)
+    setPendingFlow('workbook')
+    setSelectedWorksheetId(worksheetId)
+    const dt = new DataTransfer()
+    homeworkChoiceFiles.forEach(f => dt.items.add(f))
+    setHomeworkChoiceFiles([])
+    await handleFileSelect({ target: { files: dt.files } })
+  }
+
+  // 日常作业：未知来源→AI批改
+  const handleUploadAsRegular = async () => {
+    setShowHomeworkTypeChoice(false)
+    setPendingFlow(null)
+    const dt = new DataTransfer()
+    homeworkChoiceFiles.forEach(f => dt.items.add(f))
+    setHomeworkChoiceFiles([])
+    await handleFileSelect({ target: { files: dt.files } })
+  }
+
+  // 普通试卷：使用已有答案库
+  const handleUploadWithExamResource = async (resourceId, resourceName) => {
+    setShowExamChoice(false)
+    setPendingFlow('exam')
+    setSelectedExamResourceId(resourceId)
+    setSelectedExamResourceName(resourceName)
+    const dt = new DataTransfer()
+    examChoiceFiles.forEach(f => dt.items.add(f))
+    setExamChoiceFiles([])
+    await handleFileSelect({ target: { files: dt.files } })
+  }
+
+  // 普通试卷：全新 AI 批改
+  const handleUploadFreshExam = async () => {
+    setShowExamChoice(false)
+    setPendingFlow(null)
+    setSelectedExamResourceId(null)
+    setSelectedExamResourceName(null)
+    const dt = new DataTransfer()
+    examChoiceFiles.forEach(f => dt.items.add(f))
+    setExamChoiceFiles([])
+    await handleFileSelect({ target: { files: dt.files } })
+  }
+
+  // 从 WorksheetPicker 选择练习册后的回调
+  const handleWorksheetPicked = (worksheetId) => {
+    setShowHomeworkTypeChoice(false)
+    setShowWorksheetPicker(false)
+    handleUploadAsWorkbook(worksheetId)
+  }
+
   // Listen for workbook flow events from Home page
   useEffect(() => {
     const handleWorkbookFlow = (e) => {
@@ -314,6 +399,12 @@ export default function App() {
         setPendingFlow('workbook')
         setSelectedWorksheetId(e.detail.worksheetId || null)
         setFlowSubject(e.detail.subject || '数学')
+        return
+      }
+
+      if (e.detail?.flow === 'homework') {
+        setPendingFlow('homework_choice')
+        homeworkPendingRef.current = true
         return
       }
 
@@ -729,6 +820,14 @@ export default function App() {
         // 试卷答案库：直接上传，不走 QR 检测
         await uploadRegularHomework(newFiles)
         clearPendingUploadFlow()
+      } else if (pendingFlow === 'homework_choice' || homeworkPendingRef.current) {
+        // 来自 Home 页面的日常作业 → 显示选择对话框
+        homeworkPendingRef.current = false
+        setUploading(false)
+        setHomeworkChoiceFiles(newFiles)
+        setShowHomeworkTypeChoice(true)
+        clearPendingUploadFlow()
+        return
       } else {
         const qrToast = Toast.show({ message: '正在检测二维码...', type: 'loading', duration: 0 })
 
@@ -3206,10 +3305,13 @@ export default function App() {
             setShowWorksheetPicker(false)
           }}
           onSelect={({ worksheetId, worksheetName }) => {
-            setSelectedWorksheetId(worksheetId)
             setShowWorksheetPicker(false)
-            if (worksheetId) {
-              // 选完练习册 → 打开暂存区（连拍/多选）
+            if (homeworkChoiceRef.current.length > 0) {
+              // 来自日常作业选择对话框 → 直接上传
+              handleUploadAsWorkbook(worksheetId)
+            } else if (worksheetId) {
+              // 旧 flow：选完练习册 → 打开暂存区（连拍/多选）
+              setSelectedWorksheetId(worksheetId)
               setPendingFlow('workbook')
               openStaging('workbook')
             } else {
@@ -3289,8 +3391,7 @@ export default function App() {
                 <button
                   onClick={() => {
                     setShowUploadOptions(false)
-                    setPendingFlow('workbook')
-                    setShowWorksheetPicker(true)
+                    openStaging('homework')
                   }}
                   className="w-full flex items-center gap-4 p-4 rounded-2xl transition-all active:scale-[0.98] tap-scale mb-3"
                   style={{ background: 'var(--accent-soft)' }}
@@ -3300,7 +3401,7 @@ export default function App() {
                   </div>
                   <div className="text-left">
                     <span className="block text-[15px] font-semibold" style={{ color: 'var(--text)' }}>日常作业</span>
-                    <span className="block text-[12px] mt-0.5" style={{ color: 'var(--text-secondary)' }}>练习册/同步练习，已有标准答案</span>
+                    <span className="block text-[12px] mt-0.5" style={{ color: 'var(--text-secondary)' }}>拍照上传，选择练习册或AI批改</span>
                   </div>
                 </button>
 
@@ -3402,7 +3503,7 @@ export default function App() {
               <div className="px-6 pt-2 pb-4">
                 <div className="flex items-center justify-between mb-2">
                   <h3 className="text-[17px] font-semibold" style={{ color: 'var(--text)' }}>
-                    {stagingType === 'workbook' ? '练习册作业' : stagingType === 'exam' ? '试卷（答案库）' : stagingType === 'wrong_retry' ? '错题重练' : '普通试卷'}
+                    {stagingType === 'workbook' ? '练习册作业' : stagingType === 'homework' ? '日常作业' : stagingType === 'exam' ? '试卷（答案库）' : stagingType === 'wrong_retry' ? '错题重练' : '普通试卷'}
                   </h3>
                   <button
                     onClick={() => !stagingUploading && clearStaging()}
@@ -3485,6 +3586,145 @@ export default function App() {
                     {stagingUploading ? '上传中...' : `上传 ${stagingFiles.length} 张图片${stagingFiles.length > 1 ? '（合并为一个任务）' : ''}`}
                   </button>
                 )}
+              </div>
+            </motion.div>
+          </div>
+        )}
+
+        {/* 日常作业类型选择对话框 */}
+        {showHomeworkTypeChoice && (
+          <div className="absolute inset-0 z-[25000] flex items-end justify-center">
+            <motion.div
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
+              className="absolute inset-0 bg-black/50 backdrop-blur-sm"
+              onClick={() => {
+                setShowHomeworkTypeChoice(false)
+                setHomeworkChoiceFiles([])
+              }}
+            />
+            <motion.div
+              initial={{ opacity: 0, y: 40 }}
+              animate={{ opacity: 1, y: 0 }}
+              transition={{ type: 'spring', damping: 25, stiffness: 300 }}
+              className="relative bg-white rounded-t-3xl w-full max-w-lg mx-auto shadow-xl"
+              style={{ paddingBottom: 'calc(24px + env(safe-area-inset-bottom, 0px))' }}
+            >
+              <div className="flex justify-center pt-3 pb-1">
+                <div className="w-8 h-1 rounded-full" style={{ background: 'var(--border)' }} />
+              </div>
+              <div className="px-6 pt-2 pb-4">
+                <h3 className="text-center text-[17px] font-semibold text-[var(--text)] mb-1">这是什么作业？</h3>
+                <p className="text-center text-[13px] mb-6" style={{ color: 'var(--text-tertiary)' }}>
+                  选择批改方式，共 {homeworkChoiceFiles.length} 张图片
+                </p>
+
+                <button
+                  onClick={() => {
+                    setShowHomeworkTypeChoice(false)
+                    setShowWorksheetPicker(true)
+                  }}
+                  className="w-full flex items-center gap-4 p-4 rounded-2xl transition-all active:scale-[0.98] tap-scale mb-3"
+                  style={{ background: 'var(--accent-soft)' }}
+                >
+                  <div className="w-14 h-14 rounded-2xl flex items-center justify-center shadow-md flex-shrink-0" style={{ background: 'linear-gradient(135deg, var(--accent), #F97316)' }}>
+                    <BookOpen size={28} className="text-white" />
+                  </div>
+                  <div className="text-left">
+                    <span className="block text-[15px] font-semibold" style={{ color: 'var(--text)' }}>练习册</span>
+                    <span className="block text-[12px] mt-0.5" style={{ color: 'var(--text-secondary)' }}>选择已有练习册，使用预埋答案自动批改</span>
+                  </div>
+                </button>
+
+                <button
+                  onClick={handleUploadAsRegular}
+                  className="w-full flex items-center gap-4 p-4 rounded-2xl transition-all active:scale-[0.98] tap-scale"
+                  style={{ background: 'var(--primary-soft)' }}
+                >
+                  <div className="w-14 h-14 rounded-2xl flex items-center justify-center shadow-md flex-shrink-0" style={{ background: 'var(--primary)' }}>
+                    <FileText size={28} className="text-white" />
+                  </div>
+                  <div className="text-left">
+                    <span className="block text-[15px] font-semibold" style={{ color: 'var(--text)' }}>未知来源</span>
+                    <span className="block text-[12px] mt-0.5" style={{ color: 'var(--text-secondary)' }}>普通试卷/临时作业，AI 智能批改</span>
+                  </div>
+                </button>
+              </div>
+            </motion.div>
+          </div>
+        )}
+
+        {/* 普通试卷已有答案库选择对话框 */}
+        {showExamChoice && (
+          <div className="absolute inset-0 z-[25000] flex items-end justify-center">
+            <motion.div
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
+              className="absolute inset-0 bg-black/50 backdrop-blur-sm"
+              onClick={() => {
+                setShowExamChoice(false)
+                setExamChoiceFiles([])
+              }}
+            />
+            <motion.div
+              initial={{ opacity: 0, y: 40 }}
+              animate={{ opacity: 1, y: 0 }}
+              transition={{ type: 'spring', damping: 25, stiffness: 300 }}
+              className="relative bg-white rounded-t-3xl w-full max-w-lg mx-auto shadow-xl"
+              style={{ paddingBottom: 'calc(24px + env(safe-area-inset-bottom, 0px))' }}
+            >
+              <div className="flex justify-center pt-3 pb-1">
+                <div className="w-8 h-1 rounded-full" style={{ background: 'var(--border)' }} />
+              </div>
+              <div className="px-6 pt-2 pb-4">
+                <h3 className="text-center text-[17px] font-semibold text-[var(--text)] mb-1">检测到已有答案库</h3>
+                <p className="text-center text-[13px] mb-6" style={{ color: 'var(--text-tertiary)' }}>
+                  共 {examChoiceFiles.length} 张图片，选择批改方式
+                </p>
+
+                <div className="max-h-[40vh] overflow-y-auto mb-3 -mx-2">
+                  {availableExamResources.map(r => (
+                    <button
+                      key={r.id}
+                      onClick={() => handleUploadWithExamResource(r.id, r.name)}
+                      className="w-full flex items-center gap-3 p-3.5 rounded-2xl transition-all active:scale-[0.98] text-left mb-1"
+                      style={{ background: 'rgba(217, 119, 6, 0.06)' }}
+                    >
+                      <div className="w-10 h-10 rounded-xl flex items-center justify-center flex-shrink-0"
+                        style={{ background: 'rgba(217, 119, 6, 0.1)' }}>
+                        <FileText size={20} style={{ color: '#D97706' }} />
+                      </div>
+                      <div className="flex-1 min-w-0">
+                        <div className="flex items-center gap-2">
+                          <span className="text-[15px] font-medium truncate" style={{ color: 'var(--text)' }}>
+                            {r.name}
+                          </span>
+                          <span className="text-[11px] px-1.5 py-0.5 rounded-full flex-shrink-0"
+                            style={{ background: 'rgba(217, 119, 6, 0.1)', color: '#D97706' }}>
+                            答案库
+                          </span>
+                        </div>
+                        <div className="text-[12px] mt-0.5" style={{ color: 'var(--text-secondary)' }}>
+                          {r.grade || ''} {r.subject || ''} · {r.answer_count || 0} 题
+                        </div>
+                      </div>
+                    </button>
+                  ))}
+                </div>
+
+                <button
+                  onClick={handleUploadFreshExam}
+                  className="w-full flex items-center gap-4 p-4 rounded-2xl transition-all active:scale-[0.98] tap-scale"
+                  style={{ background: 'var(--primary-soft)' }}
+                >
+                  <div className="w-14 h-14 rounded-2xl flex items-center justify-center shadow-md flex-shrink-0" style={{ background: 'var(--primary)' }}>
+                    <Sparkles size={28} className="text-white" />
+                  </div>
+                  <div className="text-left">
+                    <span className="block text-[15px] font-semibold" style={{ color: 'var(--text)' }}>全新批改</span>
+                    <span className="block text-[12px] mt-0.5" style={{ color: 'var(--text-secondary)' }}>不使用已有答案，AI 重新智能批改</span>
+                  </div>
+                </button>
               </div>
             </motion.div>
           </div>

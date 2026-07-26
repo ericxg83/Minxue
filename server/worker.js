@@ -11,8 +11,9 @@ import sharp from 'sharp'
 import { TABLES, TASK_STATUS } from './config/neon.js'
 import { query } from './config/neon.js'
 import { AI_CONFIG, getAIHeaders, buildOCRPrompt, buildAnswerGenerationPrompt, getCurrentTextModel, getCurrentVLModel, rotateTextModel, rotateVLModel, TEXT_MODELS, VL_MODELS, callTextCompletion, callVisionCompletion } from './config/ai.js'
-import { updateTaskStatus, createQuestions, batchUpdateQuestionTags, addWrongQuestions, createJudgement, updateQuestionAnswer, markAnswerException, findCachedQuestionByFingerprint, cacheQuestion, incrementQuestionUseCount, updateQuestionCacheId, createQuestionAsset, lookupWorksheetAnswer, getWorksheetAnswersBySection, deleteQuestionsByTaskId, bulkLookupResourceAnswers, getResourceById } from './services/neonService.js'
+import { updateTaskStatus, createQuestions, batchUpdateQuestionTags, addWrongQuestions, createJudgement, updateQuestionAnswer, markAnswerException, findCachedQuestionByFingerprint, cacheQuestion, incrementQuestionUseCount, updateQuestionCacheId, createQuestionAsset, lookupWorksheetAnswer, getWorksheetAnswersBySection, deleteQuestionsByTaskId, bulkLookupResourceAnswers, getResourceById, addSelfContainedWrongQuestion } from './services/neonService.js'
 import { uploadImage } from './services/ossService.js'
+import { cropAndUploadQuestionRegion } from './utils/cropAndUpload.js'
 import { generateTextFingerprint, generatePHash, PARSER_VERSION, TEXT_SIMILARITY_THRESHOLD } from './utils/questionFingerprint.js'
 import { uploadFilesWithRetry } from './services/uploadRetryManager.js'
 import { judgeAnswer } from './services/judgeService.js'
@@ -1775,29 +1776,54 @@ const processWorkbookGrading = async (job) => {
 
   await createQuestions(questionsWithStudentId)
 
-  // 6. 同步错题本（错误的写入）
-  const wrongQuestionIds = allQuestions
-    .filter(q => q.is_correct === false && q.question_number)
-    .map(q => q.question_number)
-  if (wrongQuestionIds.length > 0) {
-    const questionMap = {}
-    questionsWithStudentId.forEach(q => {
-      if (q.is_correct === false) {
-        questionMap[q.question_number] = q
-      }
-    })
-    const { rows: dbQuestions } = await query(
-      `SELECT id, question_number FROM ${TABLES.QUESTIONS} WHERE task_id = $1`,
-      [taskId]
-    )
-    const wrongIds = dbQuestions
-      .filter(dq => wrongQuestionIds.includes(dq.question_number))
-      .map(dq => dq.id)
-
-    if (wrongIds.length > 0) {
-      await addWrongQuestions(studentId, wrongIds, null, null)
-      console.log(`   [Workbook] 已添加 ${wrongIds.length} 题到错题本`)
+  // 构建题号 → question_id 映射（用于错题本 question_id 回填）
+  const questionIdByNumber = {}
+  for (const q of questionsWithStudentId) {
+    if (q.question_number) {
+      questionIdByNumber[q.question_number] = q.id
     }
+  }
+
+  // 6. 自包含错题本同步：裁剪学生作业图片 + 直接写入 wrong_questions
+  const wrongQuestions = allQuestions.filter(q => q.is_correct === false && q.question_number)
+
+  for (const wq of wrongQuestions) {
+    const pageImageUrl = wq._page_image_url || imageList[0]?.image_url
+    let questionImageUrl = null
+
+    if (pageImageUrl && wq.block_coordinates) {
+      try {
+        questionImageUrl = await cropAndUploadQuestionRegion(
+          pageImageUrl,
+          wq.block_coordinates,
+          studentId,
+          crypto.randomUUID()
+        )
+      } catch (e) {
+        console.warn(`  ⚠️ [Workbook] 错题裁剪失败: question_no=${wq.question_number}, error=${e.message}`)
+      }
+    }
+
+    await addSelfContainedWrongQuestion({
+      studentId,
+      worksheetId,
+      questionNo: wq.question_number,
+      pageNumber: wq._page_number || 1,
+      studentAnswer: wq.student_answer || null,
+      correctAnswer: wq.answer || null,
+      answerType: wq.question_type || 'choice',
+      content: wq.content || null,
+      questionType: wq.question_type || 'choice',
+      blockCoordinates: wq.block_coordinates || null,
+      questionImageUrl,
+      subject: null,
+      sourceType: 'workbook',
+      questionId: questionIdByNumber[wq.question_number] || null
+    })
+  }
+
+  if (wrongQuestions.length > 0) {
+    console.log(`   [Workbook] 已添加 ${wrongQuestions.length} 题到错题本（自包含）`)
   }
 
   // 7. 记录 judgement
@@ -2535,6 +2561,49 @@ await job.updateProgress(80)
 
       await job.updateProgress(90)
       await updateTaskStatus(taskId, TASK_STATUS.PROCESSING, { progress: 90 })
+
+      // ── 自动保存 AI 生成的答案到答案库 ──
+      try {
+        const savableQuestions = questions.filter(q =>
+          q.answer && q.answer.trim()
+          && q.answer !== '待人工补充'
+          && q.answer !== '此为主观题，无唯一标准答案'
+        )
+        if (savableQuestions.length > 0) {
+          const subject = job.data.subject || null
+          const resourceName = originalName || `试卷_${new Date().toISOString().slice(0, 10)}`
+          // 1. 创建 resource
+          const { rows: [newResource] } = await query(
+            `INSERT INTO resources (resource_type, name, subject, answer_status, status, answer_count)
+             VALUES ('exam', $1, $2, 'ai_draft', 'draft', $3) RETURNING *`,
+            [resourceName, subject, savableQuestions.length]
+          )
+          // 2. 逐题保存答案
+          let savedCount = 0
+          for (const q of savableQuestions) {
+            try {
+              await query(
+                `INSERT INTO resource_answers (resource_id, question_no, answer, answer_type, content, answer_status, source)
+                 VALUES ($1, $2, $3, $4, $5, 'ai_draft', 'ai_grading')`,
+                [newResource.id, q.question_number || 0, q.answer, q.question_type || 'choice', q.content || null]
+              )
+              savedCount++
+            } catch (e) {
+              console.error(`   ⚠️ [Auto-save] 保存第 ${q.question_number} 题答案失败:`, e.message)
+            }
+          }
+          // 3. 关联 task → resource
+          await query(
+            `UPDATE tasks SET resource_id = $1 WHERE id = $2`,
+            [newResource.id, taskId]
+          )
+          console.log(`✅ [Auto-save] 答案库已保存: "${resourceName}" (${savedCount}/${savableQuestions.length} 题, resourceId=${newResource.id})`)
+        } else {
+          console.log(`  ℹ️ [Auto-save] 无可用答案，跳过答案库保存`)
+        }
+      } catch (e) {
+        console.error(`  ⚠️ [Auto-save] 保存答案库失败:`, e.message)
+      }
     } else {
       console.log(`⚠️  AI 未识别到任何题目`)
     }
