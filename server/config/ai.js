@@ -19,9 +19,37 @@ export const RETRY_DELAYS_503 = [5000, 10000, 20000, 30000, 60000, 120000] // 50
 
 const sleep = (ms) => new Promise(resolve => setTimeout(resolve, ms))
 
-const _aiLimit = parseInt(process.env.AI_CONCURRENCY || '4', 10)
+// 自适应并发：ModelScope 免费额度对并发敏感，固定高并发会打出 429 风暴，
+// 既大量丢页又因重试等待反而更慢。遇 429 自动降并发，持续成功再缓慢恢复。
+const AI_LIMIT_MAX = Math.max(1, parseInt(process.env.AI_CONCURRENCY || '3', 10))
+const AI_LIMIT_MIN = 1
+const AI_RECOVER_AFTER_SUCCESS = 20
+const AI_RECOVER_QUIET_MS = 30000
+
+let _aiLimit = AI_LIMIT_MAX
 let _aiActive = 0
 const _aiWaiters = []
+let _lastThrottleAt = 0
+let _successSinceThrottle = 0
+
+function notifyAiRateLimited() {
+  _lastThrottleAt = Date.now()
+  _successSinceThrottle = 0
+  if (_aiLimit > AI_LIMIT_MIN) {
+    _aiLimit -= 1
+    console.warn(`[AI] 检测到限流，并发降至 ${_aiLimit}`)
+  }
+}
+
+function notifyAiSuccess() {
+  if (_aiLimit >= AI_LIMIT_MAX) return
+  _successSinceThrottle += 1
+  if (_successSinceThrottle >= AI_RECOVER_AFTER_SUCCESS && Date.now() - _lastThrottleAt > AI_RECOVER_QUIET_MS) {
+    _aiLimit += 1
+    _successSinceThrottle = 0
+    console.log(`[AI] 持续成功，并发恢复至 ${_aiLimit}`)
+  }
+}
 
 function _acquireAiSlot() {
   if (_aiActive < _aiLimit) {
@@ -32,6 +60,12 @@ function _acquireAiSlot() {
 }
 
 function _releaseAiSlot() {
+  // 并发上限被动态下调后，多余槽位直接回收而不唤醒等待者。
+  // 回收后 _aiActive >= _aiLimit >= 1，仍有在途请求会在其结束时唤醒等待者，不会饿死。
+  if (_aiActive > _aiLimit) {
+    _aiActive -= 1
+    return
+  }
   const next = _aiWaiters.shift()
   if (next) {
     next()
@@ -49,12 +83,47 @@ export async function withAiLimit(fn) {
   }
 }
 
+// 429 有两种完全不同的成因，必须区别对待，否则会白等几十分钟还是全页失败：
+//   1) 当日配额用尽（"exceeded today's quota for model X"）——重试到明天也没用，
+//      唯一出路是换一个模型（ModelScope 的报错自己就写着 "consider using other models"）
+//   2) 瞬时并发限流——退避重试有效
+function isQuotaExhaustedError(err) {
+  const data = err?.response?.data
+  const msg = data?.error?.message || data?.message || (typeof data === 'string' ? data : '') || ''
+  return /exceeded[^.]*quota|quota[^.]*exceeded/i.test(msg)
+}
+
+// 按「模型 + 自然日」记录配额耗尽，避免整轮解析反复撞同一个已耗尽的模型
+const _modelExhaustedDate = new Map()
+
+function today() {
+  return new Date().toISOString().slice(0, 10)
+}
+
+function markModelExhaustedToday(model) {
+  if (!model || _modelExhaustedDate.get(model) === today()) return
+  _modelExhaustedDate.set(model, today())
+  console.warn(`[AI] 模型 ${model} 当日配额已用尽，今日不再使用，自动切换其他模型`)
+}
+
+export function isModelExhaustedToday(model) {
+  return Boolean(model) && _modelExhaustedDate.get(model) === today()
+}
+
 async function postWith429Retry(client, endpoint, body, axiosOptions, { retry429 = true, retry503 = true } = {}) {
   for (let attempt = 0; ; attempt += 1) {
     try {
-      return await withAiLimit(() => client.post(endpoint, body, axiosOptions))
+      const response = await withAiLimit(() => client.post(endpoint, body, axiosOptions))
+      notifyAiSuccess()
+      return response
     } catch (err) {
       const status = err.response?.status
+      // 配额耗尽：立刻放弃该模型并上抛，让调用方换模型，绝不浪费时间重试
+      if (status === 429 && isQuotaExhaustedError(err)) {
+        markModelExhaustedToday(body?.model)
+        throw err
+      }
+      if (status === 429) notifyAiRateLimited()
       if (retry429 && status === 429 && attempt < RETRY_DELAYS_429.length) {
         const delay = RETRY_DELAYS_429[attempt]
         console.warn(`[AI] 429 rate limit, retrying in ${delay / 1000}s (${attempt + 1}/${RETRY_DELAYS_429.length})`)
@@ -73,9 +142,10 @@ async function postWith429Retry(client, endpoint, body, axiosOptions, { retry429
   }
 }
 
-// 主模型 429 冷却：只在短时间窗口内跳过主模型，绝不整天禁用
-// （历史实现按自然日锁定，一次 429 就会让当天所有请求全部落到坏掉的备份上，
-//   导致「全部 N 页 OCR 识别失败」，务必保持为短窗口）
+// 主模型瞬时限流冷却：只在短时间窗口内跳过主模型，绝不整天禁用。
+// （历史实现按自然日锁定，一次 429 就让当天所有请求全部落到坏掉的备份上，
+//   导致「全部 N 页 OCR 识别失败」，务必保持为短窗口。配额耗尽由
+//   _modelExhaustedDate 按模型单独处理，不走这里。）
 const MAIN_RATE_LIMIT_COOLDOWN_MS = 60 * 1000
 let _mainRateLimitedUntil = 0
 
@@ -356,22 +426,28 @@ export async function callTextCompletion(opts) {
   const messages = buildOpenAIMessages(systemContent, userContent)
 
   if (!isMainRateLimitedToday() && AI_CONFIG.API_KEY) {
-    try {
-      const content = await requestOpenAIProvider({
-        endpoint: AI_CONFIG.ENDPOINT,
-        apiKey: AI_CONFIG.API_KEY,
-        model: model || getCurrentTextModel(),
-        messages,
-        temperature,
-        maxTokens,
-        timeout: 30000,
-        retry429: false,
-      })
-      if (content) return { content, usedBackup: false }
-    } catch (err) {
-      if (err.response?.status === 429) markMainRateLimited()
-      const status = err.response?.status
-      if (!status && AI_CONFIG.API_KEY) throw err
+    // 与视觉链一致：按 TEXT_MODELS 依次尝试，跳过当日配额已耗尽的模型
+    const textModels = (model ? [model] : TEXT_MODELS).filter(m => !isModelExhaustedToday(m))
+    for (const textModel of textModels) {
+      try {
+        const content = await requestOpenAIProvider({
+          endpoint: AI_CONFIG.ENDPOINT,
+          apiKey: AI_CONFIG.API_KEY,
+          model: textModel,
+          messages,
+          temperature,
+          maxTokens,
+          timeout: 30000,
+          retry429: false,
+        })
+        if (content) return { content, usedBackup: false }
+      } catch (err) {
+        const status = err.response?.status
+        if (status === 429 && !isQuotaExhaustedError(err)) markMainRateLimited()
+        // 配额耗尽/该模型不可用：继续尝试下一个模型
+        if (status) continue
+        throw err
+      }
     }
   }
 
@@ -430,11 +506,11 @@ export async function callVisionCompletion(opts) {
 
   const providers = []
 
-  const callMainProvider = async () => {
+  const callMainProvider = (vlModel) => async () => {
     const content = await requestOpenAIProvider({
       endpoint: AI_CONFIG.ENDPOINT,
       apiKey: AI_CONFIG.API_KEY,
-      model: model || getCurrentVLModel(),
+      model: vlModel,
       messages,
       temperature,
       maxTokens,
@@ -444,10 +520,13 @@ export async function callVisionCompletion(opts) {
     return { content, usedBackup: false }
   }
 
+  // 主站按 VL_MODELS 顺序全部尝试：单个模型当日配额用尽时自动换下一个。
+  // 历史实现只用 getCurrentVLModel()，从不轮换，8B 配额一用尽整册就全灭。
+  const mainModels = (model ? [model] : VL_MODELS).filter(m => !isModelExhaustedToday(m))
   const mainSkippedByCooldown = Boolean(AI_CONFIG.API_KEY) && isMainRateLimitedToday()
 
   if (!mainSkippedByCooldown && AI_CONFIG.API_KEY) {
-    providers.push(callMainProvider)
+    for (const vlModel of mainModels) providers.push(callMainProvider(vlModel))
   }
 
   // ModelScope 备份 Key（虽然提示需绑定账号，但有些环境可能可用）
@@ -487,18 +566,29 @@ export async function callVisionCompletion(opts) {
     }
   }
 
-  // 最后兜底：所有备份都不可用时，等主模型冷却结束再重试主模型（最多 2 轮）。
-  // 备份提供商经常整体不可用（401/503），主模型是唯一出路，绝不能因一次 429 就放弃整页。
+  // 最后兜底：所有备份都不可用时，等主模型冷却结束再重试（最多 2 轮）。
+  // 备份提供商经常整体不可用（401/503），主模型是唯一出路，绝不能因一次瞬时限流就放弃整页。
   // 无条件加入：既覆盖「进入时已被冷却跳过」，也覆盖「本次调用中主模型 429 耗尽后才触发冷却」。
   if (AI_CONFIG.API_KEY) {
     for (let round = 0; round < 2; round += 1) {
       providers.push(async () => {
+        // 重新过滤：本次调用过程中可能又有模型被判定为配额耗尽
+        const usable = (model ? [model] : VL_MODELS).filter(m => !isModelExhaustedToday(m))
+        if (!usable.length) throw new Error('所有视觉模型当日配额均已用尽，请明日再试或配置其他模型')
         const waitMs = Math.max(0, _mainRateLimitedUntil - Date.now())
         if (waitMs > 0) {
           console.warn(`[AI] 备份不可用，等待 ${Math.ceil(waitMs / 1000)}s 主模型冷却结束后重试（第 ${round + 1} 轮兜底）`)
           await sleep(waitMs)
         }
-        return callMainProvider()
+        let err = null
+        for (const vlModel of usable) {
+          try {
+            return await callMainProvider(vlModel)()
+          } catch (e) {
+            err = e
+          }
+        }
+        throw err
       })
     }
   }
@@ -510,7 +600,8 @@ export async function callVisionCompletion(opts) {
       if (result.content) return result
       lastError = new Error('AI returned empty content')
     } catch (err) {
-      if (err.response?.status === 429 && !isMainRateLimitedToday()) {
+      // 仅瞬时限流才进冷却；配额耗尽已按模型单独标记，不应连带冷却整个主站
+      if (err.response?.status === 429 && !isQuotaExhaustedError(err) && !isMainRateLimitedToday()) {
         markMainRateLimited()
       }
       lastError = err
