@@ -211,6 +211,60 @@ export const addWrongQuestions = async (studentId, questionIds, questionConfiden
   return newIds.map(id => ({ question_id: id }))
 }
 
+/**
+ * 添加自包含错题记录（不依赖 questions 表 FK）
+ *
+ * 当 workbook 批改发现学生答错时，裁剪学生作业图片 + 元数据直接存入
+ * wrong_questions 表，使错题本完全自包含。
+ *
+ * 以 (student_id, worksheet_id, question_no) 作为自然键去重：
+ * - 已存在 → 递增 error_count，更新 last_wrong_at
+ * - 不存在 → INSERT 新记录
+ */
+export const addSelfContainedWrongQuestion = async (params) => {
+  const {
+    studentId, worksheetId, questionNo, pageNumber,
+    studentAnswer, correctAnswer, answerType, content,
+    questionType, blockCoordinates, questionImageUrl,
+    subject, sourceType = 'workbook', questionId
+  } = params
+
+  const { rows: existing } = await query(
+    `SELECT id, error_count FROM ${TABLES.WRONG_QUESTIONS}
+     WHERE student_id = $1 AND worksheet_id = $2 AND question_no = $3`,
+    [studentId, worksheetId, questionNo]
+  )
+
+  if (existing.length > 0) {
+    await query(
+      `UPDATE ${TABLES.WRONG_QUESTIONS}
+       SET error_count = error_count + 1,
+           last_wrong_at = NOW(),
+           updated_at = NOW(),
+           student_answer = $2,
+           question_image_url = COALESCE($3, question_image_url)
+       WHERE id = $1`,
+      [existing[0].id, studentAnswer, questionImageUrl]
+    )
+    return existing[0].id
+  }
+
+  const { rows } = await query(
+    `INSERT INTO ${TABLES.WRONG_QUESTIONS}
+     (student_id, question_id, worksheet_id, page_number, question_no,
+      student_answer, correct_answer, answer_type, content,
+      question_type, block_coordinates, question_image_url,
+      subject, source_type, status, error_count, added_at, last_wrong_at, created_at, updated_at)
+     VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, 'pending', 1, NOW(), NOW(), NOW(), NOW())
+     RETURNING id`,
+    [studentId, questionId || null, worksheetId, pageNumber, questionNo,
+     studentAnswer, correctAnswer, answerType, content,
+     questionType, blockCoordinates ? JSON.stringify(blockCoordinates) : null,
+     questionImageUrl, subject, sourceType]
+  )
+  return rows[0].id
+}
+
 export const updateQuestionAnswer = async (questionId, answer, analysis, forceUpdate = false) => {
   if (!answer && !analysis) return
 
@@ -833,7 +887,91 @@ export const deleteWorksheet = async (id) => {
   await query(`DELETE FROM ${TABLES.WORKSHEETS} WHERE id = $1`, [id])
 }
 
+// ── 练习单元 CRUD ──
+
+/**
+ * 批量 upsert 练习单元，返回 Map<unit_key, unit_id>。
+ *
+ * unit_seq 表示单元在书内的出现顺序：分批解析时按批次串行调用，
+ * 新单元续接当前最大 seq，已存在的单元用 COALESCE 保住首次写入的 seq，
+ * 避免续页重复出现同一标题时把顺序打乱。
+ */
+const upsertUnitsWithClient = async (client, resourceId, units) => {
+  const map = new Map()
+  const uniq = []
+  const seen = new Set()
+  for (const u of units || []) {
+    if (!u?.unit_key || seen.has(u.unit_key)) continue
+    seen.add(u.unit_key)
+    uniq.push(u)
+  }
+  if (uniq.length === 0) return map
+
+  const { rows: maxRows } = await client.query(
+    'SELECT COALESCE(MAX(unit_seq), 0) AS m FROM resource_units WHERE resource_id = $1',
+    [resourceId]
+  )
+  let seq = Number(maxRows[0]?.m || 0)
+
+  const values = uniq.map((_, i) =>
+    `($1, $${i * 5 + 2}, $${i * 5 + 3}, $${i * 5 + 4}, $${i * 5 + 5}, $${i * 5 + 6})`
+  ).join(',')
+  const params = [resourceId]
+  for (const u of uniq) {
+    params.push(u.unit_key, u.unit_title || null, ++seq, u.lesson_code || null, u.ordinal ?? null)
+  }
+  const { rows } = await client.query(
+    `INSERT INTO resource_units (resource_id, unit_key, unit_title, unit_seq, lesson_code, ordinal)
+     VALUES ${values}
+     ON CONFLICT (resource_id, unit_key) DO UPDATE SET
+       unit_title  = COALESCE(EXCLUDED.unit_title, resource_units.unit_title),
+       unit_seq    = COALESCE(resource_units.unit_seq, EXCLUDED.unit_seq),
+       lesson_code = COALESCE(EXCLUDED.lesson_code, resource_units.lesson_code),
+       ordinal     = COALESCE(EXCLUDED.ordinal, resource_units.ordinal)
+     RETURNING id, unit_key`,
+    params
+  )
+  for (const r of rows) map.set(r.unit_key, r.id)
+  return map
+}
+
+/** 从答案行里抽出单元并 upsert，返回 Map<unit_key, unit_id> */
+const resolveUnitIds = async (client, resourceId, answers) => {
+  const units = []
+  for (const a of answers) {
+    if (!a.unit_key) continue
+    // 注意不能回退到 a.section：section 现在存的是大题组名（"一、填空题"），不是单元名
+    units.push({
+      unit_key: a.unit_key,
+      unit_title: a.unit_title || null,
+      lesson_code: a.lesson_code || null,
+      ordinal: a.ordinal ?? null,
+    })
+  }
+  return upsertUnitsWithClient(client, resourceId, units)
+}
+
+export const upsertResourceUnits = async (resourceId, units) =>
+  transaction(client => upsertUnitsWithClient(client, resourceId, units))
+
+/** 清空练习册的单元（含级联删除其下答案）。重解析前调用，清掉上一轮的残留单元。 */
+export const clearResourceUnits = async (resourceId) => {
+  await query('DELETE FROM resource_units WHERE resource_id = $1', [resourceId])
+}
+
+export const getResourceUnits = async (resourceId) => {
+  const { rows } = await query(
+    `SELECT * FROM resource_units WHERE resource_id = $1
+     ORDER BY unit_seq NULLS LAST, unit_key`,
+    [resourceId]
+  )
+  return rows
+}
+
 // ── 答案 CRUD ──
+
+// 唯一约束（迁移 032）：UNIQUE NULLS NOT DISTINCT (resource_id, unit_id, section, question_no, sub_no)
+const ANSWER_CONFLICT_TARGET = '(resource_id, unit_id, section, question_no, sub_no)'
 
 export const batchInsertAnswers = async (worksheetId, answers) => {
   if (!answers || answers.length === 0) return []
@@ -850,7 +988,7 @@ export const batchInsertAnswers = async (worksheetId, answers) => {
   const { rows } = await query(
     `INSERT INTO ${TABLES.RESOURCE_ANSWERS} (resource_id, question_no, answer, answer_type, section, answer_status)
      VALUES ${values}
-     ON CONFLICT (resource_id, section, question_no)
+     ON CONFLICT ${ANSWER_CONFLICT_TARGET}
      DO UPDATE SET answer = EXCLUDED.answer, answer_type = EXCLUDED.answer_type, answer_status = EXCLUDED.answer_status
      RETURNING *`,
     params
@@ -869,17 +1007,22 @@ export const replaceWorksheetAnswers = async (worksheetId, answers) => {
     // 状态标 official_verified 使其对旧视图可见
     await client.query(`DELETE FROM ${TABLES.RESOURCE_ANSWERS} WHERE resource_id = $1`, [worksheetId])
     if (!answers || answers.length === 0) return []
+    const unitMap = await resolveUnitIds(client, worksheetId, answers)
     const values = answers.map((_, i) =>
-      `($1, $${i * 5 + 2}, $${i * 5 + 3}, $${i * 5 + 4}, $${i * 5 + 5}, $${i * 5 + 6}, 'official_verified')`
+      `($1, $${i * 7 + 2}, $${i * 7 + 3}, $${i * 7 + 4}, $${i * 7 + 5}, $${i * 7 + 6}, $${i * 7 + 7}, $${i * 7 + 8}, 'official_verified')`
     ).join(',')
     const params = [worksheetId]
     for (const a of answers) {
-      params.push(a.question_no, a.answer, a.answer_type || 'choice', a.section || null, a.content || null)
+      params.push(
+        a.question_no, a.answer, a.answer_type || 'choice', a.section || null, a.content || null,
+        a.unit_key ? (unitMap.get(a.unit_key) || null) : null,
+        a.sub_no || ''
+      )
     }
     const { rows } = await client.query(
-      `INSERT INTO ${TABLES.RESOURCE_ANSWERS} (resource_id, question_no, answer, answer_type, section, content, answer_status)
+      `INSERT INTO ${TABLES.RESOURCE_ANSWERS} (resource_id, question_no, answer, answer_type, section, content, unit_id, sub_no, answer_status)
        VALUES ${values}
-       ON CONFLICT (resource_id, section, question_no)
+       ON CONFLICT ${ANSWER_CONFLICT_TARGET}
        DO UPDATE SET answer = EXCLUDED.answer, answer_type = EXCLUDED.answer_type, content = EXCLUDED.content, answer_status = EXCLUDED.answer_status
        RETURNING *`,
       params
@@ -897,35 +1040,44 @@ export const clearWorksheetAnswers = async (worksheetId) => {
 
 /**
  * 增量追加/覆盖练习册答案（分批解析每批调用，不清空已有行）。
- * 列集与 replaceWorksheetAnswers 的 INSERT 半段一致（含 content）。
- * 不用 ON CONFLICT：UNIQUE(resource_id, section, question_no) 对 section=NULL 不生效
- * （Postgres 唯一约束中 NULL 互不相等），无章节的练习册跨批会悄悄产生重复行。
- * 改为事务内"定向删除同 key 旧行 → 插入"，对 NULL/非 NULL 章节行为一致：后写覆盖先写
- * （跨批边界续答场景，后批内容更完整）。
+ * 列集与 replaceWorksheetAnswers 的 INSERT 半段一致（含 content / unit_id / sub_no）。
+ * 不用 ON CONFLICT：唯一约束里的 unit_id、section 都可能为 NULL，
+ * 而 ON CONFLICT 推断在混入 NULL 时不可靠，无单元的练习册跨批会悄悄产生重复行。
+ * 改为事务内"定向删除同 key 旧行 → 插入"，用 IS NOT DISTINCT FROM 对 NULL/非 NULL 行为一致：
+ * 后写覆盖先写（跨批边界续答场景，后批内容更完整）。
  */
 export const upsertWorksheetAnswers = async (worksheetId, answers) => {
   if (!answers || answers.length === 0) return []
   return transaction(async (client) => {
+    const unitMap = await resolveUnitIds(client, worksheetId, answers)
+    const unitIdOf = a => (a.unit_key ? (unitMap.get(a.unit_key) || null) : null)
+
     const delConds = answers.map((_, i) =>
-      `(section IS NOT DISTINCT FROM $${i * 2 + 2} AND question_no = $${i * 2 + 3})`
+      `(unit_id IS NOT DISTINCT FROM $${i * 4 + 2}
+        AND section IS NOT DISTINCT FROM $${i * 4 + 3}
+        AND question_no = $${i * 4 + 4}
+        AND sub_no = $${i * 4 + 5})`
     ).join(' OR ')
     const delParams = [worksheetId]
     for (const a of answers) {
-      delParams.push(a.section || null, a.question_no)
+      delParams.push(unitIdOf(a), a.section || null, a.question_no, a.sub_no || '')
     }
     await client.query(
       `DELETE FROM ${TABLES.RESOURCE_ANSWERS} WHERE resource_id = $1 AND (${delConds})`,
       delParams
     )
     const values = answers.map((_, i) =>
-      `($1, $${i * 5 + 2}, $${i * 5 + 3}, $${i * 5 + 4}, $${i * 5 + 5}, $${i * 5 + 6}, 'official_verified')`
+      `($1, $${i * 7 + 2}, $${i * 7 + 3}, $${i * 7 + 4}, $${i * 7 + 5}, $${i * 7 + 6}, $${i * 7 + 7}, $${i * 7 + 8}, 'official_verified')`
     ).join(',')
     const params = [worksheetId]
     for (const a of answers) {
-      params.push(a.question_no, a.answer, a.answer_type || 'choice', a.section || null, a.content || null)
+      params.push(
+        a.question_no, a.answer, a.answer_type || 'choice', a.section || null, a.content || null,
+        unitIdOf(a), a.sub_no || ''
+      )
     }
     const { rows } = await client.query(
-      `INSERT INTO ${TABLES.RESOURCE_ANSWERS} (resource_id, question_no, answer, answer_type, section, content, answer_status)
+      `INSERT INTO ${TABLES.RESOURCE_ANSWERS} (resource_id, question_no, answer, answer_type, section, content, unit_id, sub_no, answer_status)
        VALUES ${values}
        RETURNING *`,
       params
@@ -934,10 +1086,20 @@ export const upsertWorksheetAnswers = async (worksheetId, answers) => {
   })
 }
 
+// 审核页按「单元 → 大题组 → 题号 → 子题」的书内顺序展示，故连 resource_units 取 unit_seq。
+// 大题组序取 section 首字在「一二三四五六七八九十」中的位置（"一、填空题"→1），
+// 否则同单元内填空/选择/解答的同题号会穿插。sub_no 按长度再按值比较（'10' 不能排在 '2' 前）。
+// 未归入单元的旧数据 unit_seq 为 NULL，排在最后。
 export const getWorksheetAnswers = async (worksheetId) => {
   const { rows } = await query(
-    `SELECT * FROM ${TABLES.WORKSHEET_ANSWERS}
-     WHERE worksheet_id = $1 ORDER BY question_no ASC`,
+    `SELECT a.*, u.unit_title, u.unit_key, u.lesson_code, u.unit_seq
+     FROM ${TABLES.WORKSHEET_ANSWERS} a
+     LEFT JOIN resource_units u ON u.id = a.unit_id
+     WHERE a.worksheet_id = $1
+     ORDER BY u.unit_seq NULLS LAST,
+              NULLIF(strpos('一二三四五六七八九十', substr(a.section, 1, 1)), 0) NULLS LAST,
+              a.question_no ASC,
+              length(a.sub_no) ASC, a.sub_no ASC`,
     [worksheetId]
   )
   return rows
@@ -1114,8 +1276,9 @@ export const replaceResourceAnswers = async (resourceId, answers) => {
   return transaction(async (client) => {
     await client.query(`DELETE FROM ${TABLES.RESOURCE_ANSWERS} WHERE resource_id = $1`, [resourceId])
     if (!answers || answers.length === 0) return []
+    const unitMap = await resolveUnitIds(client, resourceId, answers)
     const values = answers.map((_, i) =>
-      `($1, $${i * 7 + 2}, $${i * 7 + 3}, $${i * 7 + 4}, $${i * 7 + 5}, $${i * 7 + 6}, $${i * 7 + 7}, $${i * 7 + 8})`
+      `($1, $${i * 9 + 2}, $${i * 9 + 3}, $${i * 9 + 4}, $${i * 9 + 5}, $${i * 9 + 6}, $${i * 9 + 7}, $${i * 9 + 8}, $${i * 9 + 9}, $${i * 9 + 10})`
     ).join(',')
     const params = [resourceId]
     for (const a of answers) {
@@ -1126,14 +1289,16 @@ export const replaceResourceAnswers = async (resourceId, answers) => {
         a.content || null,
         a.section || null,
         a.answer_status || 'ai_draft',
-        a.source || 'ai_parse'
+        a.source || 'ai_parse',
+        a.unit_key ? (unitMap.get(a.unit_key) || null) : null,
+        a.sub_no || ''
       )
     }
     const { rows } = await client.query(
       `INSERT INTO ${TABLES.RESOURCE_ANSWERS}
-       (resource_id, question_no, answer, answer_type, content, section, answer_status, source)
+       (resource_id, question_no, answer, answer_type, content, section, answer_status, source, unit_id, sub_no)
        VALUES ${values}
-       ON CONFLICT (resource_id, section, question_no)
+       ON CONFLICT ${ANSWER_CONFLICT_TARGET}
        DO UPDATE SET
          answer = EXCLUDED.answer,
          answer_type = EXCLUDED.answer_type,

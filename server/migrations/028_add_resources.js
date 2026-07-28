@@ -106,7 +106,16 @@ export const migrateResources = async () => {
       console.log('✅ resource_answers 表已存在，跳过')
     }
 
-    // === 3. 迁移现有 worksheets → resources ===
+    // === 3/4. 迁移现有 worksheets / worksheet_answers → resources / resource_answers ===
+    // 迁移完成后 worksheets 已是 resources 上的视图，此时再执行等于「自己复制自己」，
+    // 且步骤 4 的 ON CONFLICT (resource_id, section, question_no) 在迁移032换约束后已不存在，
+    // 每次启动都会报错。已是视图 → 数据迁移早已完成，跳过。
+    const { rows: wsIsView } = await query(`
+      SELECT 1 FROM information_schema.views WHERE table_name = 'worksheets'
+    `)
+    if (wsIsView.length > 0) {
+      console.log('✅ worksheets 已是视图（数据迁移已完成），跳过 worksheets/worksheet_answers 数据迁移')
+    } else {
     const { rows: wsCount } = await query(`SELECT COUNT(*)::int FROM worksheets`)
     if (wsCount[0].count > 0) {
       const { rows: migrated } = await query(`
@@ -132,6 +141,7 @@ export const migrateResources = async () => {
       console.log(`✅ 已迁移 ${waCount[0].count} 条 worksheet_answers 记录到 resource_answers`)
     } else {
       console.log('✅ worksheet_answers 表无数据，跳过迁移')
+    }
     }
 
     // === 5. tasks 表加 resource_id 列 ===

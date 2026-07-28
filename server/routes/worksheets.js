@@ -13,6 +13,7 @@ import {
   deleteWorksheet,
   replaceWorksheetAnswers,
   clearWorksheetAnswers,
+  clearResourceUnits,
   upsertWorksheetAnswers,
   getWorksheetAnswers,
   updateWorksheetAnswer,
@@ -291,11 +292,11 @@ async function doParseImages(worksheetId, files) {
     throw new Error(`全部 ${files.length} 页 OCR 识别失败（AI 服务可能暂时不可用），请稍后重试`)
   }
   const parsedAnswers = []
-  let carrySection = null
+  let carryState = null
   for (const content of ocrContents) {
-    const { answers, lastSection } = parseAnswerText(content, lowConfidence, carrySection)
+    const { answers, lastState } = parseAnswerText(content, lowConfidence, carryState)
     parsedAnswers.push(...answers)
-    carrySection = lastSection
+    carryState = lastState
   }
 
   await processOcrResults(worksheetId, parsedAnswers, {
@@ -392,16 +393,16 @@ async function doParse(worksheetId, file, precomputedAnswers = null, isCombined 
         ocrTruncatedInfo = { totalPages: renderedTotal, ocrPages: images.length }
         console.log(`PDF 共 ${renderedTotal} 页，仅 OCR 前 ${images.length} 页`)
       }
-      // OCR 并行，解析按页顺序（章节跨页延续，见 doParseImages 说明）
+      // OCR 并行，解析按页顺序（单元跨页延续，见 processOcrBatch 说明）
       ocrPagesTried = images.length
       const ocrContents = await Promise.all(
         images.map((img, i) => ocrExtractFromBuffer(img, i, ocrFailedPages))
       )
-      let carrySection = null
+      let carryState = null
       for (const content of ocrContents) {
-        const { answers, lastSection } = parseAnswerText(content, lowConfidence, carrySection)
+        const { answers, lastState } = parseAnswerText(content, lowConfidence, carryState)
         parsedAnswers.push(...answers)
-        carrySection = lastSection
+        carryState = lastState
       }
     } catch (e) {
       console.log('OCR fallback failed:', e.message)
@@ -417,15 +418,16 @@ async function doParse(worksheetId, file, precomputedAnswers = null, isCombined 
 
   // 若有预埋答案，以预埋答案为准（置信度最高，覆盖 OCR 结果）
   if (precomputedAnswers && precomputedAnswers.length > 0) {
+    // key 与 dedupeAnswers 保持一致：含单元、大题组与子题号，否则跨单元/跨大题同题号会互相覆盖
+    const keyOf = a => `${a.unit_key || ''}|${a.section || ''}|${a.question_no}|${a.sub_no || ''}`
     const precomputedMap = new Map()
     for (const a of precomputedAnswers) {
-      const key = (a.section || '') + '|' + a.question_no
-      precomputedMap.set(key, a)
+      precomputedMap.set(keyOf(a), a)
     }
-    // 用预埋答案替换同题号的 OCR 结果
+    // 用预埋答案替换同 key 的 OCR 结果
     const merged = [...parsedAnswers]
     for (const [key, pa] of precomputedMap) {
-      const idx = merged.findIndex(a => (a.section || '') + '|' + a.question_no === key)
+      const idx = merged.findIndex(a => keyOf(a) === key)
       if (idx >= 0) {
         merged[idx] = { ...merged[idx], ...pa, confidence: 1.0 }
       } else {
@@ -463,8 +465,8 @@ const withBatchTimeout = (promise, ms, label) => {
   ]).finally(() => clearTimeout(timer))
 }
 
-// 渲染并 OCR 一个批次（startPage..endPage，1-based 闭区间），返回解析出的答案与批末章节
-async function processOcrBatch(fileBuffer, startPage, endPage, carrySection, lowConfidence, ocrFailedPages) {
+// 渲染并 OCR 一个批次（startPage..endPage，1-based 闭区间），返回解析出的答案与批末单元
+async function processOcrBatch(fileBuffer, startPage, endPage, carryState, lowConfidence, ocrFailedPages) {
   let { images } = await renderPdfToJpegs(fileBuffer, {
     scale: 3,
     startPage,
@@ -478,25 +480,30 @@ async function processOcrBatch(fileBuffer, startPage, endPage, carrySection, low
   images = null // 断引用：JPEG buffer 不与 OCR 文本同时存活到解析阶段，下一批分配大对象时可被回收
 
   const answers = []
-  let section = carrySection
+  let state = carryState
   for (const content of ocrContents) {
-    const parsed = parseAnswerText(content, lowConfidence, section)
+    // 传递 lastState 对象而非标题字符串：单元标题只印在单元首页、大题标题只印在大题首行，
+    // 续页要继承完整的 {unit, group}，否则同一单元会被拆成两个、大题组会丢失
+    const parsed = parseAnswerText(content, lowConfidence, state)
     answers.push(...parsed.answers)
-    section = parsed.lastSection
+    state = parsed.lastState
   }
-  return { answers, lastSection: section }
+  return { answers, lastState: state }
 }
 
-async function doParseOcrBatched(worksheetId, fileBuffer, totalPages, precomputedAnswers) {
+// 导出供离线重解析脚本复用（scripts/ 下按 worksheetId 直接重跑已存 PDF，无需重新上传）
+export async function doParseOcrBatched(worksheetId, fileBuffer, totalPages, precomputedAnswers) {
   const effectivePages = Math.min(totalPages, MAX_TOTAL_PAGES)
   // 进度初始化在清库之前：这条 UPDATE 同时是"取页数+清库"阶段的 stale 心跳
   await updateWorksheetParseProgress(worksheetId, { totalPages: effectivePages, donePages: 0 })
   // 增量写入前清一次场（替代 replaceWorksheetAnswers 的 DELETE 半段，此后每批只追加）
   await clearWorksheetAnswers(worksheetId)
+  // 单元同样清空：上一轮解析残留的单元若本轮不再出现，会在审核页留下空单元
+  await clearResourceUnits(worksheetId)
 
   const lowConfidence = []
   const ocrFailedPages = [] // 跨批累积，存真实页号
-  let carrySection = null // 章节标题跨批延续（与跨页延续同一机制）
+  let carryState = null // 单元标题跨批延续（与跨页延续同一机制）
   let ocrPagesTried = 0
   let anySaved = false
 
@@ -504,11 +511,11 @@ async function doParseOcrBatched(worksheetId, fileBuffer, totalPages, precompute
     const end = Math.min(start + OCR_BATCH_SIZE - 1, effectivePages)
     console.log(`[分批解析] worksheet=${worksheetId} 第 ${start}-${end} 页 / 共 ${effectivePages} 页`)
     const batch = await withBatchTimeout(
-      processOcrBatch(fileBuffer, start, end, carrySection, lowConfidence, ocrFailedPages),
+      processOcrBatch(fileBuffer, start, end, carryState, lowConfidence, ocrFailedPages),
       BATCH_TIMEOUT_MS,
       `第 ${start}-${end} 页解析超时（单批超过 ${BATCH_TIMEOUT_MS / 60000} 分钟）`
     )
-    carrySection = batch.lastSection
+    carryState = batch.lastState
     ocrPagesTried += end - start + 1
 
     // 增量写库：本批答案立即落库，之后即使中断，已完成批次也不丢失
@@ -573,20 +580,43 @@ async function doParseOcrBatched(worksheetId, fileBuffer, totalPages, precompute
  * @param {Array<number>} [options.ocrFailedPages] - OCR 失败的页码列表（部分失败时生成警告）
  * @param {string} [options.sourceLabel] - 来源标签（"PDF"或"图片"），用于错误提示
  */
-// 按 (章节, 题号) 去重：同一章节内保留置信度高的，相同则保留靠后的；再按章节、题号排序。
-// 单趟路径全量使用；分批路径批内使用（跨批同 key 由 upsert 的 ON CONFLICT 兜住，后批覆盖）
+// 按 (单元, 大题组, 题号, 子题号) 去重：同 key 保留置信度高的，相同则保留靠后的；再按单元、题号排序。
+// key 的三层缺一不可：
+//  - unit_key：几十个「堂堂练」的第 1 题会全部撞成同一个 key（实测 73 页只剩 650 条 / 5 个 section）
+//  - section（大题组）：同一单元内填空题第1题与选择题第1题也会撞（实测 p2「1. 13」被「1. C」覆盖）
+// 单趟路径全量使用；分批路径批内使用（跨批同 key 由 upsertWorksheetAnswers 的定向删除兜住，后批覆盖）
 function dedupeAnswers(parsedAnswers) {
+  const keyOf = a => `${a.unit_key || ''}|${a.section || ''}|${a.question_no}|${a.sub_no || ''}`
   const byKey = new Map()
   for (const a of parsedAnswers) {
-    const key = (a.section || '') + '|' + a.question_no
+    const key = keyOf(a)
     const prev = byKey.get(key)
     if (!prev || a.confidence >= prev.confidence) byKey.set(key, a)
   }
+  // 排序必须用「首次出现顺序」而非字典序：页面按书内顺序解析，首次出现即书内顺序。
+  // 字典序会把「堂堂练10」排到「堂堂练2」前面，且 resolveUnitIds 按此顺序分配
+  // unit_seq，一错全错（实测 seq2 变成了堂堂练⑩）。
+  const unitOrder = new Map()
+  const groupOrder = new Map()
+  for (const a of parsedAnswers) {
+    const u = a.unit_key || ''
+    if (!unitOrder.has(u)) unitOrder.set(u, unitOrder.size)
+    const g = `${u}|${a.section || ''}`
+    if (!groupOrder.has(g)) groupOrder.set(g, groupOrder.size)
+  }
+  const subVal = s => {
+    const n = parseInt(s, 10)
+    return Number.isNaN(n) ? 0 : n
+  }
   return [...byKey.values()].sort((a, b) => {
-    const sa = a.section || ''
-    const sb = b.section || ''
-    if (sa !== sb) return sa.localeCompare(sb, 'zh')
-    return a.question_no - b.question_no
+    const ua = unitOrder.get(a.unit_key || '')
+    const ub = unitOrder.get(b.unit_key || '')
+    if (ua !== ub) return ua - ub
+    const ga = groupOrder.get(`${a.unit_key || ''}|${a.section || ''}`)
+    const gb = groupOrder.get(`${b.unit_key || ''}|${b.section || ''}`)
+    if (ga !== gb) return ga - gb
+    if (a.question_no !== b.question_no) return a.question_no - b.question_no
+    return subVal(a.sub_no) - subVal(b.sub_no)
   })
 }
 
@@ -621,6 +651,39 @@ async function processOcrResults(worksheetId, parsedAnswers, options = {}) {
   })
 }
 
+// 答案页 OCR 的系统提示词（ocrExtractFromBuffer / ocrExtractRawText 共用，务必只保留这一份）
+//
+// 「单元标题」是本方案的地基：练习册的题号作用域是单元（堂堂练① 19.1(1) 算术平方根），
+// 每个单元从 1 重新编号。识别不出单元 → 几十个「第1题」撞同一个 key 被丢弃。
+// 旧提示词只说"章节标题"，模型会把「一、填空题」当章节，也会在无标题的续页上
+// 凭空编一个（实测编出了整本书里根本不存在的「第一章阶段练1」，吞掉 85% 的答案），
+// 故此处必须显式给出正反例，并明令续页不得编造。
+// 导出供离线校验脚本与阶段 2 题目 PDF 解析复用，避免提示词出现第二份副本导致漂移
+export const ANSWER_OCR_SYSTEM_PROMPT = [
+  '你是一个练习册答案识别助手。请从图片中提取所有题号和对应答案。',
+  '',
+  '【答案行】',
+  '- 每行只能输出一个题号和它的答案，绝对不要在一行输出多个答案（如"1. A 2. B 3. C"是错误的）。',
+  '- 格式如"1. A"或"13. 2017"。判断题答案请输出 √ 或 ×。',
+  '- 一道题有多个空时，保留原有的 (1)(2)(3) 编号写在同一行，如"2.(1)7/2 (2)4/3 (3)0.9"。',
+  '',
+  '【单元标题】（最重要）',
+  '- 练习册按「练习单元」分块，每个单元的题号都从 1 重新开始。',
+  '- 若本页出现单元标题，必须在该单元答案之前单独成一行原样输出，不要省略、不要与答案同行。',
+  '- 属于单元标题的例子：「堂堂练① 19.1(1) 算术平方根」「堂堂练⑩ 21.2(3) 一般的一元二次方程的解法」',
+  '  「19.2(1) 二次根式的性质」「第3课时 平方根」「第十九章 单元测试卷」「期中评价测试卷」。',
+  '- 不属于单元标题、绝对不要当作标题输出的：「一、填空题」「二、选择题」「三、解答题」',
+  '  「参考答案」「答案」以及任何题干文字。',
+  '- 若本页没有任何单元标题（属于上一单元的续页），就不要输出任何标题行，直接输出答案。',
+  '  严禁凭空编造或推测一个标题——宁可不输出，也不要猜。',
+  '',
+  '【大题标题】',
+  '- 一个单元内部还会分「一、填空题」「二、选择题」「三、解答题」等大题，每个大题的题号也各自从 1 重新开始。',
+  '- 只要页面上出现这类大题标题，必须在该大题答案之前单独成一行原样输出（如"一、填空题"）。',
+  '- 即使原书把它排在同一行或用较小字号，也要单独成行输出；漏掉它会导致填空题第1题和选择题第1题被混为一题。',
+  '- 大题标题不是单元标题，两者都要输出，顺序为：单元标题在前，大题标题在后。',
+].join('\n')
+
 // 单页 OCR 容错：一页失败不再连坐整批（此前 Promise.all 一页 reject 即丢弃全部页结果）
 async function ocrExtractSafe(base64Image, pageIndex, failedPages) {
   try {
@@ -639,8 +702,8 @@ async function ocrExtractFromBuffer(imgBuffer, pageIndex, failedPages) {
     const url = await uploadImage(imgBuffer, `page_${pageIndex + 1}.jpg`, 'system')
     const { content } = await callVisionCompletion({
       imageDataURL: url,
-      systemPrompt: '你是一个作业答案识别助手。请从图片中提取所有题号和对应答案。重要：每行只能输出一个题号和它的答案，绝对不要在一行输出多个答案（如"1. A 2. B 3. C"是错误的）。格式如"1. A"或"13. 2017"。判断题答案请输出 √ 或 ×。如果图片包含章节标题（如"第一章阶段练1"或"第二章评价测试卷"），请在对应答案前单独一行输出完整章节标题，不要省略、不要与答案同行。',
-      userText: '请提取这份练习册答案中的所有题号和对应答案。',
+      systemPrompt: ANSWER_OCR_SYSTEM_PROMPT,
+      userText: '请提取这份练习册答案中的所有单元标题、题号和对应答案。',
       temperature: 0.0,
       maxTokens: 4096,
     })
@@ -655,8 +718,8 @@ async function ocrExtractFromBuffer(imgBuffer, pageIndex, failedPages) {
 async function ocrExtractRawText(base64Image) {
   const { content } = await callVisionCompletion({
     imageDataURL: `data:image/jpeg;base64,${base64Image}`,
-    systemPrompt: '你是一个作业答案识别助手。请从图片中提取所有题号和对应答案。重要：每行只能输出一个题号和它的答案，绝对不要在一行输出多个答案（如"1. A 2. B 3. C"是错误的）。格式如"1. A"或"13. 2017"。判断题答案请输出 √ 或 ×。如果图片包含章节标题（如"第一章阶段练1"或"第二章评价测试卷"），请在对应答案前单独一行输出完整章节标题，不要省略、不要与答案同行。',
-    userText: '请提取这份练习册答案中的所有题号和对应答案。',
+    systemPrompt: ANSWER_OCR_SYSTEM_PROMPT,
+    userText: '请提取这份练习册答案中的所有单元标题、题号和对应答案。',
     temperature: 0.0,
     maxTokens: 4096,
   })

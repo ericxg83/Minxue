@@ -14,6 +14,19 @@ import { query } from '../config/neon.js'
  */
 export const migrateDeduplicateWorksheetAnswers = async () => {
   try {
+    // 单元化改造（迁移032）后 worksheet_answers 是 resource_answers 上的视图，
+    // 合法数据在 (worksheet_id, question_no, section) 上天然多行（不同 unit_id / sub_no）。
+    // 旧两级 key 会把它们误判为重复、每次启动删掉大半答案（实测一次启动删了 530/788 行）。
+    // 新模型下本迁移历史使命已完成，永久跳过。
+    const { rows: unitCol } = await query(`
+      SELECT 1 FROM information_schema.columns
+      WHERE table_name = 'resource_answers' AND column_name = 'unit_id'
+    `)
+    if (unitCol.length > 0) {
+      console.log('✅ [迁移026] 已进入单元化数据模型，跳过旧版去重')
+      return
+    }
+
     // 仅当表存在且有重复时执行
     const { rows: dupCheck } = await query(`
       SELECT COUNT(*)::int - COUNT(DISTINCT (worksheet_id, question_no, COALESCE(section, '')))::int AS dup_count

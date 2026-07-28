@@ -43,24 +43,26 @@
             <el-radio-button value="all">全部</el-radio-button>
             <el-radio-button value="low">低置信度</el-radio-button>
           </el-radio-group>
-          <el-select v-if="sections.length > 0" v-model="sectionFilter" size="small" style="width:180px;margin-left:8px" placeholder="筛选章节">
-            <el-option label="全部章节" value="all" />
-            <el-option v-for="s in sections" :key="s" :label="s" :value="s" />
+          <el-select v-if="units.length > 0" v-model="unitFilter" size="small" style="width:220px;margin-left:8px" placeholder="筛选单元">
+            <el-option label="全部单元" value="all" />
+            <el-option v-for="u in units" :key="u.key" :label="u.title" :value="u.key" />
           </el-select>
         </div>
         <div class="answer-list">
-          <div
-            v-for="a in filteredAnswers"
-            :key="a.id"
-            class="answer-item"
-            :class="{ active: selectedAnswer?.id === a.id, low: a.confidence < 0.85 }"
-            @click="selectAnswer(a)"
-          >
-            <span v-if="a.section" class="qsection">{{ a.section }}</span>
-            <span class="qno">{{ a.question_no }}</span>
-            <span class="qans">{{ a.answer }}</span>
-            <span class="qconf" :class="confClass(a.confidence)">{{ (a.confidence * 100).toFixed(0) }}%</span>
-          </div>
+          <template v-for="item in displayList" :key="item.type === 'header' ? 'h:' + item.key : item.type === 'section' ? 's:' + item.key : item.a.id">
+            <div v-if="item.type === 'header'" class="unit-header">{{ item.title }}</div>
+            <div v-else-if="item.type === 'section'" class="section-header">{{ item.title }}</div>
+            <div
+              v-else
+              class="answer-item"
+              :class="{ active: selectedAnswer?.id === item.a.id, low: item.a.confidence < 0.85 }"
+              @click="selectAnswer(item.a)"
+            >
+              <span class="qno">{{ item.a.question_no }}{{ item.a.sub_no ? '(' + item.a.sub_no + ')' : '' }}</span>
+              <span class="qans">{{ item.a.answer }}</span>
+              <span class="qconf" :class="confClass(item.a.confidence)">{{ (item.a.confidence * 100).toFixed(0) }}%</span>
+            </div>
+          </template>
         </div>
       </div>
 
@@ -118,7 +120,7 @@ const worksheet = ref(null)
 const answers = ref([])
 const selectedAnswer = ref(null)
 const filterMode = ref('all')
-const sectionFilter = ref('all')
+const unitFilter = ref('all')
 const editForm = ref({ answer: '', answer_type: 'choice' })
 const saving = ref(false)
 const pdfMode = ref('question') // 'question' | 'answer'
@@ -141,23 +143,55 @@ const pdfProxyUrl = computed(() => {
 const hasQuestionPdf = computed(() => !!worksheet.value?.question_pdf_url)
 const hasAnswerPdf = computed(() => !!worksheet.value?.pdf_url)
 
-const sections = computed(() => {
+// 单元列表按接口返回顺序（unit_seq 书内顺序）去重；无 unit 的旧数据归入「未分组」
+const UNGROUPED = '__ungrouped__'
+const unitKeyOf = (a) => a.unit_key || UNGROUPED
+const unitTitleOf = (a) => a.unit_title || '未分组'
+
+const units = computed(() => {
   const seen = new Set()
+  const list = []
   for (const a of answers.value) {
-    if (a.section) seen.add(a.section)
+    const key = unitKeyOf(a)
+    if (seen.has(key)) continue
+    seen.add(key)
+    list.push({ key, title: unitTitleOf(a) })
   }
-  return [...seen].sort((a, b) => a.localeCompare(b, 'zh'))
+  return list
 })
 
 const filteredAnswers = computed(() => {
   let list = answers.value
-  if (sectionFilter.value !== 'all') {
-    list = list.filter(a => a.section === sectionFilter.value)
+  if (unitFilter.value !== 'all') {
+    list = list.filter(a => unitKeyOf(a) === unitFilter.value)
   }
   if (filterMode.value === 'low') {
     list = list.filter(a => a.confidence < 0.85)
   }
   return list
+})
+
+// 列表项：单元变化处插入标题行，大题组变化处插入子标题，与 PDF 排版一致
+const displayList = computed(() => {
+  const items = []
+  let lastUnitKey = null
+  let lastSection = null
+  for (const a of filteredAnswers.value) {
+    const key = unitKeyOf(a)
+    // 单元标题
+    if (key !== lastUnitKey) {
+      items.push({ type: 'header', key, title: unitTitleOf(a) })
+      lastUnitKey = key
+      lastSection = null // 新单元重置大题组
+    }
+    // 大题组子标题（一、填空题 / 二、选择题 / 三、解答题）
+    if (a.section && a.section !== lastSection) {
+      items.push({ type: 'section', key: key + '|' + a.section, title: a.section })
+      lastSection = a.section
+    }
+    items.push({ type: 'answer', a })
+  }
+  return items
 })
 
 const statusType = computed(() => {
@@ -331,10 +365,11 @@ const confProgress = (c) => {
   display: flex;
   align-items: center;
   gap: 8px;
-  padding: 8px 12px;
-  border-radius: 6px;
+  padding: 5px 12px;
+  border-radius: 4px;
   cursor: pointer;
   transition: background 0.15s;
+  font-size: 13px;
 }
 
 .answer-item:hover {
@@ -349,22 +384,36 @@ const confProgress = (c) => {
   border-left: 3px solid var(--el-color-danger);
 }
 
-.qno {
-  width: 32px;
-  font-weight: 600;
+.unit-header {
+  position: sticky;
+  top: 0;
+  z-index: 2;
+  padding: 8px 12px;
+  margin: 8px 0 2px;
   font-size: 13px;
+  font-weight: 700;
+  color: var(--el-color-primary);
+  background: var(--wb-bg-card);
+  border-bottom: 2px solid var(--el-color-primary);
 }
 
-.qsection {
-  font-size: 11px;
-  color: var(--el-color-info);
+.section-header {
+  position: sticky;
+  top: 33px;
+  z-index: 1;
+  padding: 4px 12px;
+  margin: 4px 0 2px;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--wb-text-secondary);
   background: var(--wb-bg-hover);
-  padding: 1px 6px;
-  border-radius: 3px;
-  white-space: nowrap;
-  max-width: 120px;
-  overflow: hidden;
-  text-overflow: ellipsis;
+  border-radius: 4px;
+}
+
+.qno {
+  min-width: 32px;
+  font-weight: 600;
+  font-size: 13px;
 }
 
 .qans {
