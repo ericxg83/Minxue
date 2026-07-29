@@ -782,4 +782,138 @@ router.put('/:id/answers/:answerId', async (req, res) => {
   }
 })
 
+// ── 诊断端点：重跑 PDF 解析，**只读不写** ──
+// 用于排查"答案与 PDF 对不上"类问题：返回每页 OCR 原文、解析后的 (unit, group, qNo, subNo, answer) 树、
+// 当前 DB 中的答案快照。调用方式：
+//   GET /api/worksheets/<id>/parse-debug?pages=1-3      // 只跑前 3 页
+//   GET /api/worksheets/<id>/parse-debug?pages=all     // 跑全本（默认）
+// 注意：调用会消耗 OCR 配额（每页一次 AI 调用），仅排查用，正式解析仍走 POST /:id/parse-pdf
+router.get('/:id/parse-debug', async (req, res) => {
+  try {
+    const worksheet = await getWorksheetById(req.params.id)
+    if (!worksheet) return res.status(404).json({ error: '练习册不存在' })
+    if (!worksheet.pdf_url) return res.status(400).json({ error: '练习册未上传 PDF' })
+
+    // 1. 从 OSS 拉回原 PDF buffer
+    const url = new URL(worksheet.pdf_url)
+    const ossPath = url.pathname.slice(1)
+    const obj = await ossClient.get(ossPath)
+    const fileBuffer = obj.content
+
+    // 2. 选页范围
+    const totalPages = await getPdfPageCount(fileBuffer).catch(() => 0)
+    const pageParam = String(req.query.pages || 'all')
+    let pageRange
+    if (pageParam === 'all' || !pageParam) {
+      pageRange = { from: 1, to: totalPages }
+    } else if (/^\d+-\d+$/.test(pageParam)) {
+      const [a, b] = pageParam.split('-').map(Number)
+      pageRange = { from: Math.max(1, a), to: Math.min(totalPages, b) }
+    } else if (/^\d+$/.test(pageParam)) {
+      const p = Number(pageParam)
+      pageRange = { from: p, to: p }
+    } else {
+      return res.status(400).json({ error: 'pages 参数格式: 数字 / N-M / all' })
+    }
+    if (pageRange.to < pageRange.from || totalPages === 0) {
+      return res.status(400).json({ error: `无效的页范围 (PDF 共 ${totalPages} 页)` })
+    }
+
+    // 3. 渲染 + OCR + 解析（不写库）
+    const { images } = await renderPdfToJpegs(fileBuffer, {
+      scale: 3,
+      startPage: pageRange.from,
+      endPage: pageRange.to,
+      maxPages: OCR_BATCH_SIZE,
+    })
+    const ocrFailedPages = []
+    const pageResults = []
+    let carryState = null
+    for (let i = 0; i < images.length; i++) {
+      const realPage = pageRange.from + i
+      let content = ''
+      let ocrError = null
+      try {
+        content = await ocrExtractFromBuffer(images[i], i, ocrFailedPages)
+      } catch (e) {
+        ocrError = e.message
+      }
+      const parsed = content
+        ? parseAnswerText(content, [], carryState)
+        : { answers: [], lastState: carryState, lastUnit: null, lastSection: null }
+      carryState = parsed.lastState
+      pageResults.push({
+        page: realPage,
+        ocr_ok: !ocrError,
+        ocr_error: ocrError,
+        ocr_text: content,
+        parsed_answers: parsed.answers.map(a => ({
+          unit_key: a.unit_key, unit_title: a.unit_title,
+          section: a.section, question_no: a.question_no,
+          sub_no: a.sub_no, answer: a.answer, answer_type: a.answer_type,
+        })),
+        carry_after: {
+          unit: parsed.lastUnit?.unit_key || null,
+          group: parsed.lastState?.group || null,
+        },
+      })
+    }
+
+    // 4. 当前 DB 中的答案（对账用）
+    const dbAnswers = await getWorksheetAnswers(req.params.id)
+
+    // 5. 对账：按 (unit_key, section, qNo, sub) 分组，比对 parsed 列表与 DB 列表
+    const keyOf = a => `${a.unit_key || ''}|${a.section || ''}|${a.question_no}|${a.sub_no || ''}`
+    const parsedByKey = new Map()
+    for (const a of pageResults.flatMap(p => p.parsed_answers)) {
+      parsedByKey.set(keyOf(a), a)
+    }
+    const dbByKey = new Map()
+    for (const a of dbAnswers) {
+      dbByKey.set(keyOf(a), { ...a, unit_key: a.unit_key, section: a.section })
+    }
+    const allKeys = new Set([...parsedByKey.keys(), ...dbByKey.keys()])
+    const reconcile = []
+    for (const k of allKeys) {
+      const p = parsedByKey.get(k); const d = dbByKey.get(k)
+      let status = 'match'
+      if (p && !d) status = 'parsed_only'
+      else if (!p && d) status = 'db_only'
+      else if (p && d && (p.answer !== d.answer || p.answer_type !== d.answer_type)) status = 'mismatch'
+      reconcile.push({ key: k, parsed: p || null, db: d || null, status })
+    }
+    reconcile.sort((a, b) => {
+      if (a.status === b.status) return a.key.localeCompare(b.key)
+      return ({ parsed_only: 0, mismatch: 1, db_only: 2, match: 3 })[a.status] - ({ parsed_only: 0, mismatch: 1, db_only: 2, match: 3 })[b.status]
+    })
+
+    res.json({
+      success: true,
+      worksheet: {
+        id: worksheet.id, name: worksheet.name, subject: worksheet.subject,
+        parse_status: worksheet.parse_status, parse_count: worksheet.parse_count,
+        pdf_url: worksheet.pdf_url, total_pages: totalPages,
+      },
+      page_range: pageRange,
+      pages: pageResults,
+      ocr_failed_pages: ocrFailedPages,
+      reconcile_count: {
+        match: reconcile.filter(r => r.status === 'match').length,
+        parsed_only: reconcile.filter(r => r.status === 'parsed_only').length,
+        db_only: reconcile.filter(r => r.status === 'db_only').length,
+        mismatch: reconcile.filter(r => r.status === 'mismatch').length,
+      },
+      reconcile: reconcile.slice(0, 200), // 头 200 条，全量看 DB 侧
+      db_snapshot: dbAnswers.map(a => ({
+        unit_key: a.unit_key, section: a.section,
+        question_no: a.question_no, sub_no: a.sub_no,
+        answer: a.answer, answer_type: a.answer_type,
+        unit_title: a.unit_title,
+      })),
+    })
+  } catch (e) {
+    res.status(500).json({ error: e.message, stack: e.stack?.split('\n').slice(0, 5) })
+  }
+})
+
 export default router
