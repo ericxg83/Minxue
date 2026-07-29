@@ -1455,42 +1455,75 @@ const callGradeEndpoint = async ({ id, studentId, results }) => {
 // 答案从 worksheet_answers 表查找，judgeAnswer 对比判定
 
 /**
- * 选择本页作业对应的答案章节。
- * @param {Map<string, Map<number, {answer, answer_type}>>} answersBySection
- * @param {string|null} pageTitle - OCR 识别的页面标题
- * @param {Array} questions - OCR 识别的题目 [{question_number, question_type}]
- * @returns {string|null} 章节 key（'' 表示无章节），null 表示无答案可用
+ * 选单元（不再选 section）：返回 unitKey，对应"本页 OCR 出的题号应到哪一摞答案里查"。
+ *
+ * answersByUnit: Map<unitKey, Map<sectionKey, Map<`qNo|subNo`, row>>>，由 getWorksheetAnswersBySection 返回。
+ * pageTitle:     OCR 出的本页标题（多半是单元标题，如"堂堂练① 19.1(1) 算术平方根"）。
+ * questions:     OCR 出的本页题目 [{question_number, question_type, sub_no?}]
+ *
+ * 匹配策略：
+ *  1) 唯一单元：直接取该单元。
+ *  2) 标题归一化后与 unit_title / unit_key 做精确/包含匹配（处理空格、圈序号）。
+ *  3) 兜底按题号覆盖率打分；要求至少 60% 的题号能在该单元下命中（避免错挂）。
  */
-export function pickAnswerSection(answersBySection, pageTitle, questions) {
-  if (!answersBySection || answersBySection.size === 0) return null
-  // 只有一个章节：直接用
-  if (answersBySection.size === 1) return [...answersBySection.keys()][0]
+export function pickAnswerUnit(answersByUnit, pageTitle, questions) {
+  if (!answersByUnit || answersByUnit.size === 0) return null
+  if (answersByUnit.size === 1) return [...answersByUnit.keys()][0]
 
+  // 从 3D Map 中抽出每单元的展示键（含 unit_title / unit_key）
+  const unitMeta = (unitKey) => {
+    const secMap = answersByUnit.get(unitKey)
+    if (!secMap) return { unitKey, unitTitle: '', unitKeyRaw: '' }
+    for (const qMap of secMap.values()) {
+      const sample = qMap.values().next().value
+      if (sample) return {
+        unitKey,
+        unitTitle: sample.unit_title || '',
+        unitKeyRaw: sample.unit_key || unitKey,
+      }
+    }
+    return { unitKey, unitTitle: '', unitKeyRaw: unitKey }
+  }
+  const candidates = [...answersByUnit.keys()].map(unitMeta)
+
+  // 1) 标题匹配
   const normTitle = normalizeSectionName(pageTitle)
-
-  // 1. 标题精确/包含匹配
   if (normTitle) {
-    for (const key of answersBySection.keys()) {
-      if (key && (key === normTitle || normTitle.includes(key) || key.includes(normTitle))) {
-        return key
+    for (const c of candidates) {
+      if (!c.unitTitle && !c.unitKeyRaw) continue
+      // 优先 unit_title：用户 PDF 上印的就是这个，最稳
+      if (c.unitTitle && (c.unitTitle === normTitle || normTitle.includes(c.unitTitle) || c.unitTitle.includes(normTitle))) {
+        return c.unitKey
+      }
+    }
+    for (const c of candidates) {
+      if (c.unitKeyRaw && (c.unitKeyRaw === normTitle || normTitle.includes(c.unitKeyRaw) || c.unitKeyRaw.includes(normTitle))) {
+        return c.unitKey
       }
     }
   }
 
-  // 2. 按"题号覆盖率 + 题型吻合度"打分
-  const qNos = questions.filter(q => q.question_number).map(q => Number(q.question_number))
+  // 2) 题号覆盖率打分（带题型吻合度加权）
+  const qNos = (questions || []).filter(q => q.question_number != null).map(q => Number(q.question_number))
   if (qNos.length === 0) return null
 
   let bestKey = null
   let bestScore = -1
-  for (const [key, ansMap] of answersBySection) {
+  for (const c of candidates) {
+    const secMap = answersByUnit.get(c.unitKey)
     let covered = 0
     let typeMatch = 0
-    for (const q of questions) {
-      const row = ansMap.get(Number(q.question_number))
+    for (const q of questions || []) {
+      if (q.question_number == null) continue
+      const qNo = Number(q.question_number)
+      const subNo = q.sub_no || ''
+      const qKey = `${qNo}|${subNo}`
+      let row = null
+      for (const qMap of secMap.values()) {
+        if (qMap.has(qKey)) { row = qMap.get(qKey); break }
+      }
       if (!row) continue
       covered++
-      // 题型吻合度：OCR 认为是选择题且答案库也是选择题 → 强信号
       const ocrIsChoice = q.question_type === 'choice' || /^[A-Da-d]$/.test(String(q.student_answer || '').trim())
       const refIsChoice = row.answer_type === 'choice'
       if (ocrIsChoice === refIsChoice) typeMatch++
@@ -1498,17 +1531,36 @@ export function pickAnswerSection(answersBySection, pageTitle, questions) {
     const score = covered / qNos.length + (covered > 0 ? (typeMatch / covered) * 0.5 : 0)
     if (score > bestScore) {
       bestScore = score
-      bestKey = key
+      bestKey = c.unitKey
     }
   }
 
-  // 覆盖率过低（连一半题号都对不上）视为没有可信章节
+  // 3) 覆盖率门槛：60%（旧 50% 偏松，错挂率较高）
   if (bestKey !== null) {
-    const ansMap = answersBySection.get(bestKey)
-    const covered = qNos.filter(no => ansMap.has(no)).length
-    if (covered < qNos.length * 0.5) return null
+    const secMap = answersByUnit.get(bestKey)
+    let covered = 0
+    for (const q of questions || []) {
+      if (q.question_number == null) continue
+      const qNo = Number(q.question_number)
+      const subNo = q.sub_no || ''
+      const qKey = `${qNo}|${subNo}`
+      for (const qMap of secMap.values()) {
+        if (qMap.has(qKey)) { covered++; break }
+      }
+    }
+    if (covered < qNos.length * 0.6) return null
   }
   return bestKey
+}
+
+// 兼容旧调用：pickAnswerSection 已废弃。业务已切到 pickAnswerUnit + getWorksheetAnswersBySection 的 3D 结构。
+// 保留仅为防止外部 import 报错；返回 null 等同"无匹配"，调用方应改用 pickAnswerUnit。
+// eslint-disable-next-line no-unused-vars
+export function pickAnswerSection(_answersBySection, _pageTitle, _questions) {
+  if (typeof console !== 'undefined') {
+    console.warn('[worker] pickAnswerSection 已废弃，请改用 pickAnswerUnit(3D Map)')
+  }
+  return null
 }
 
 const processWorkbookGrading = async (job) => {
@@ -1554,7 +1606,7 @@ const processWorkbookGrading = async (job) => {
 
 只输出 JSON 对象，格式：
 {
-  "page_title": "页面顶部印刷体标题，如'第一章阶段练1'或'第二章评价测试卷'，没有则填 null",
+  "page_title": "页面顶部印刷体标题，如'堂堂练① 19.1(1) 算术平方根'、'第一章阶段练1'、'第十九章 单元测试卷'，没有则填 null",
   "questions": [
     {
       "question_number": 1,
@@ -1566,7 +1618,9 @@ const processWorkbookGrading = async (job) => {
 }
 
 注意：
-- page_title 从页面页眉/大标题的印刷体读取，尽量完整
+- page_title 从页面页眉/大标题的印刷体读取，尽量完整（包括圈序号 ①②③、课时编号 19.1(1) 等关键信息）。
+  它是批改时定位答案库的关键锚点——必须如实输出，绝不要省略或简化。
+  例如：识别到"堂堂练①  19.1(1)  算术平方根"就必须原样输出整串，不要简化为"堂堂练1"。
 - question_number 从印刷体题号读取，必须是数字
 - student_answer 只提取学生手写的内容，如果没有手写迹，填 null；判断题的 √/× 也要提取
 - block_coordinates 是该题在图片中的整体外接矩形框（含题号、题干、学生作答区），
@@ -1666,8 +1720,8 @@ const processWorkbookGrading = async (job) => {
     throw new Error(errorDetail)
   }
 
-  // 3. 逐页章节感知的答案匹配
-  const answersBySection = await getWorksheetAnswersBySection(worksheetId)
+  // 3. 逐页单元感知的答案匹配（3D 结构：unitKey → sectionKey → qNo|subNo → row）
+  const answersByUnit = await getWorksheetAnswersBySection(worksheetId)
 
   // 统计所有页标题（仅用于诊断日志）
   const titleFreq = {}
@@ -1683,26 +1737,39 @@ const processWorkbookGrading = async (job) => {
   for (const { pageTitle, imageUrl, questions } of pageDataList) {
     if (questions.length === 0) continue
 
-    // 每页独立匹配章节：
-    //   - 有 page_title 的用标题匹配
-    //   - 无 page_title 的降级为题号覆盖率打分
-    const matchedSection = pickAnswerSection(answersBySection, pageTitle, questions)
-    const sectionAnswers = matchedSection !== null ? answersBySection.get(matchedSection) : null
+    // 1) 选本页所属单元（unitKey）
+    const matchedUnit = pickAnswerUnit(answersByUnit, pageTitle, questions)
+    const unitAnswers = matchedUnit != null ? answersByUnit.get(matchedUnit) : null
+
+    // 2) 在该单元的"section → qNo|subNo → row"二维索引中，每道题独立查答案。
+    //    同一页可能含"一、填空题 第 1 题"和"二、选择题 第 5 题"，分开存。
+    //    题目归属的 section 未知时，落入"任意 section 能命中即取"的最优 section。
+    const lookupRow = (qNo, subNo) => {
+      if (!unitAnswers) return null
+      const qKey = `${Number(qNo)}|${subNo || ''}`
+      // 命中第一个非空的 section 的 row；若多 section 都命中同题号，优先 answer_type 吻合
+      let best = null
+      for (const qMap of unitAnswers.values()) {
+        const row = qMap.get(qKey)
+        if (row) best = row
+      }
+      return best
+    }
 
     pagesMatchInfo.push({
       has_title: !!pageTitle,
       page_title: pageTitle,
-      matched_section: matchedSection,
+      matched_unit: matchedUnit,
       question_count: questions.length
     })
 
-    console.log(`   [Workbook] 页匹配: title="${pageTitle}" → section="${matchedSection}" (${questions.length} 题)`)
+    console.log(`   [Workbook] 页匹配: title="${pageTitle}" → unit="${matchedUnit}" (${questions.length} 题)`)
 
     // 对该页题目逐题判定
     for (const q of questions) {
-      if (!q.question_number) continue
+      if (q.question_number == null) continue
 
-      const answerRow = sectionAnswers ? sectionAnswers.get(Number(q.question_number)) : null
+      const answerRow = lookupRow(q.question_number, q.sub_no)
       if (answerRow) {
         q.answer = answerRow.answer
         q.answer_source = 'worksheet'
@@ -1732,14 +1799,14 @@ const processWorkbookGrading = async (job) => {
 
   console.log(`   [Workbook] 答案匹配: ${matchedCount}/${allQuestions.length} 题, 错误: ${wrongCount} 题, 空: ${emptyCount} 题`)
 
-  // 章节匹配诊断信息（写入 task metadata 供前端排查）
+  // 单元匹配诊断信息（写入 task metadata 供前端排查）
   const sectionMatchInfo = {
     pages: pagesMatchInfo,
-    total_sections: answersBySection.size
+    total_units: answersByUnit.size
   }
-  const allNoMatch = pagesMatchInfo.every(p => p.matched_section === null)
+  const allNoMatch = pagesMatchInfo.every(p => p.matched_unit == null)
   if (allNoMatch) {
-    sectionMatchInfo.match_fail_reason = '所有页面均无法匹配到所属章节'
+    sectionMatchInfo.match_fail_reason = '所有页面均无法匹配到所属练习单元'
   }
 
   await updateTaskStatus(taskId, TASK_STATUS.PROCESSING, { progress: 75 })

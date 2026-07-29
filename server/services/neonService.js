@@ -1159,21 +1159,48 @@ export const lookupWorksheetAnswer = async (worksheetId, questionNo) => {
 }
 
 // ── Worker 用：整册答案按章节分组（章节感知批改，见 worker processWorkbookGrading）──
+// 取答案时按 (unit_key, section, question_no, sub_no) 三层定位，避免：
+//   1) 多个练习单元（如"堂堂练① 19.1(1)"与"堂堂练② 19.1(2)"）的「第 1 题 = A」互相覆盖
+//   2) 同一单元内"一、填空题 第 1 题"与"二、选择题 第 1 题"被扁平合并
+// sub_no 进入外层 key 字符串：填空题同一题多个空需分别命中。
+// unit_id=NULL 的旧数据归入一个固定的合成 unitKey，保留旧行为以兼容迁移前的答案。
+// 返回：Map<unitKey, Map<sectionKey, Map<`${question_no}|${sub_no}`, row>>>
+//   row 含 answer / answer_type / content / unit_id / unit_key / unit_title / unit_seq / section / sub_no
 export const getWorksheetAnswersBySection = async (worksheetId) => {
   const { rows } = await query(
-    `SELECT section, question_no, answer, answer_type, content FROM ${TABLES.WORKSHEET_ANSWERS}
-     WHERE worksheet_id = $1
-     ORDER BY created_at ASC`,
+    `SELECT ra.section, ra.question_no, ra.answer, ra.answer_type, ra.content,
+            ra.unit_id, ra.sub_no,
+            ru.unit_key, ru.unit_title, ru.unit_seq
+     FROM ${TABLES.WORKSHEET_ANSWERS} ra
+     LEFT JOIN resource_units ru ON ru.id = ra.unit_id
+     WHERE ra.worksheet_id = $1
+     ORDER BY ru.unit_seq NULLS LAST, ra.created_at ASC`,
     [worksheetId]
   )
-  const bySection = new Map()
+  const NO_UNIT = '__no_unit__'
+  const result = new Map()
   for (const r of rows) {
-    const key = r.section || ''
-    if (!bySection.has(key)) bySection.set(key, new Map())
-    // 同章节同题号重复时保留最新（rows 按 created_at 升序，后写覆盖）
-    bySection.get(key).set(r.question_no, { answer: r.answer, answer_type: r.answer_type, content: r.content || null })
+    const unitKey = r.unit_key || NO_UNIT
+    const sectionKey = r.section || ''
+    const subNo = r.sub_no || ''
+    const qKey = `${Number(r.question_no)}|${subNo}`
+    if (!result.has(unitKey)) result.set(unitKey, new Map())
+    const secMap = result.get(unitKey)
+    if (!secMap.has(sectionKey)) secMap.set(sectionKey, new Map())
+    // 同 key 重复时，rows 已按 created_at 升序，后写覆盖前写
+    secMap.get(sectionKey).set(qKey, {
+      answer: r.answer,
+      answer_type: r.answer_type,
+      content: r.content || null,
+      unit_id: r.unit_id,
+      unit_key: r.unit_key,
+      unit_title: r.unit_title,
+      unit_seq: r.unit_seq,
+      section: r.section,
+      sub_no: subNo,
+    })
   }
-  return bySection
+  return result
 }
 
 // ── Worker 用：重跑任务前清空旧题目（幂等，防止恢复链路重复入队产生重复题目行）──
