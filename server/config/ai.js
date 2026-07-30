@@ -564,33 +564,80 @@ export async function callVisionCompletion(opts) {
   const wantedModels = model ? [model] : VL_MODELS
   const mainSkippedByCooldown = MS_KEYS.length > 0 && isMainRateLimitedToday()
 
-  // 第一优先级：魔搭 Key×模型矩阵（体验最好）
-  if (!mainSkippedByCooldown) {
+  // 动态决定优先级：
+  //   默认魔搭优先（体验最好：速度快 + 正确率高）。
+  //   但魔搭当日配额按账号×模型计，6 个组合极易全部耗尽；
+  //   一旦全耗尽就立刻让 Agnes 顶上去，否则今天一张图都跑不通。
+  //   明天魔搭恢复后又会自动切回魔搭优先，不需要手动改。
+  //   MS_KEYS 为空（极端情况）或被主站冷却时，也按"全耗尽"走 Agnes。
+  let allMsExhausted = true
+  if (MS_KEYS.length > 0 && !mainSkippedByCooldown) {
+    outer: for (const vlModel of wantedModels) {
+      for (const apiKey of MS_KEYS) {
+        if (!isModelExhaustedToday(vlModel, apiKey)) {
+          allMsExhausted = false
+          break outer
+        }
+      }
+    }
+  }
+
+  if (allMsExhausted) {
+    console.warn('[AI] 魔搭所有 Key×模型组合今日配额均已耗尽，自动切换为 Agnes 优先')
+    // Agnes 视觉兜底提到最前
+    for (const vendor of BACKUP_CONFIG.VENDORS) {
+      for (const vlModel of vendor.vlModels) {
+        providers.push(async () => {
+          const content = await requestOpenAIProvider({
+            endpoint: vendor.endpoint,
+            apiKey: process.env[vendor.envKey] || '',
+            model: model || vlModel,
+            messages,
+            temperature,
+            maxTokens: Math.min(maxTokens, 4096),
+            timeout: BACKUP_TIMEOUT,
+            retry503: false,
+            vendor,
+          })
+          return { content, usedBackup: true }
+        })
+      }
+    }
+    // 魔搭（如果中途有任何一个组合意外恢复了，仍会兜底试一次）
+    if (!mainSkippedByCooldown) {
+      for (const vlModel of wantedModels) {
+        for (const apiKey of MS_KEYS) {
+          if (isModelExhaustedToday(vlModel, apiKey)) continue
+          providers.push(callMsProvider(apiKey, vlModel))
+        }
+      }
+    }
+  } else {
+    // 第一优先级：魔搭 Key×模型矩阵（体验最好）
     for (const vlModel of wantedModels) {
       for (const apiKey of MS_KEYS) {
         if (isModelExhaustedToday(vlModel, apiKey)) continue
         providers.push(callMsProvider(apiKey, vlModel))
       }
     }
-  }
-
-  // Agnes 视觉兜底（独立供应商，配额与魔搭解耦）
-  for (const vendor of BACKUP_CONFIG.VENDORS) {
-    for (const vlModel of vendor.vlModels) {
-      providers.push(async () => {
-        const content = await requestOpenAIProvider({
-          endpoint: vendor.endpoint,
-          apiKey: process.env[vendor.envKey] || '',
-          model: model || vlModel,
-          messages,
-          temperature,
-          maxTokens: Math.min(maxTokens, 4096),
-          timeout: BACKUP_TIMEOUT,
-          retry503: false,
-          vendor,
+    // Agnes 视觉兜底（独立供应商，配额与魔搭解耦）
+    for (const vendor of BACKUP_CONFIG.VENDORS) {
+      for (const vlModel of vendor.vlModels) {
+        providers.push(async () => {
+          const content = await requestOpenAIProvider({
+            endpoint: vendor.endpoint,
+            apiKey: process.env[vendor.envKey] || '',
+            model: model || vlModel,
+            messages,
+            temperature,
+            maxTokens: Math.min(maxTokens, 4096),
+            timeout: BACKUP_TIMEOUT,
+            retry503: false,
+            vendor,
+          })
+          return { content, usedBackup: true }
         })
-        return { content, usedBackup: true }
-      })
+      }
     }
   }
 
