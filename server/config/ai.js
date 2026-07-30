@@ -93,21 +93,28 @@ function isQuotaExhaustedError(err) {
   return /exceeded[^.]*quota|quota[^.]*exceeded/i.test(msg)
 }
 
-// 按「模型 + 自然日」记录配额耗尽，避免整轮解析反复撞同一个已耗尽的模型
+// 按「Key + 模型 + 自然日」记录配额耗尽，避免整轮解析反复撞同一个已耗尽的组合。
+// 魔搭配额按「账号 × 模型 × 自然日」计：多把 Key 若属同一账号则共享配额
+// （第二把 Key 也会撞 429 然后被独立标记），若属不同账号则是真正的独立配额。
+// 按 Key 细分标记两种情况都正确。
 const _modelExhaustedDate = new Map()
 
 function today() {
   return new Date().toISOString().slice(0, 10)
 }
 
-function markModelExhaustedToday(model) {
-  if (!model || _modelExhaustedDate.get(model) === today()) return
-  _modelExhaustedDate.set(model, today())
-  console.warn(`[AI] 模型 ${model} 当日配额已用尽，今日不再使用，自动切换其他模型`)
+const keyTail = (apiKey) => String(apiKey || '').slice(-8)
+
+function markModelExhaustedToday(apiKey, model) {
+  if (!model) return
+  const scope = `${keyTail(apiKey)}|${model}`
+  if (_modelExhaustedDate.get(scope) === today()) return
+  _modelExhaustedDate.set(scope, today())
+  console.warn(`[AI] 模型 ${model}（Key…${keyTail(apiKey)}）当日配额已用尽，今日不再使用，自动切换`)
 }
 
-export function isModelExhaustedToday(model) {
-  return Boolean(model) && _modelExhaustedDate.get(model) === today()
+export function isModelExhaustedToday(model, apiKey = AI_CONFIG.API_KEY) {
+  return Boolean(model) && _modelExhaustedDate.get(`${keyTail(apiKey)}|${model}`) === today()
 }
 
 async function postWith429Retry(client, endpoint, body, axiosOptions, { retry429 = true, retry503 = true } = {}) {
@@ -118,9 +125,10 @@ async function postWith429Retry(client, endpoint, body, axiosOptions, { retry429
       return response
     } catch (err) {
       const status = err.response?.status
-      // 配额耗尽：立刻放弃该模型并上抛，让调用方换模型，绝不浪费时间重试
+      // 配额耗尽：立刻放弃该 Key×模型组合并上抛，让调用方换组合，绝不浪费时间重试
       if (status === 429 && isQuotaExhaustedError(err)) {
-        markModelExhaustedToday(body?.model)
+        const auth = String(axiosOptions?.headers?.Authorization || '').replace(/^Bearer\s+/i, '')
+        markModelExhaustedToday(auth, body?.model)
         throw err
       }
       if (status === 429) notifyAiRateLimited()
@@ -158,11 +166,16 @@ export function isMainRateLimitedToday() {
   return Date.now() < _mainRateLimitedUntil
 }
 
+// 2026-07 实测魔搭在线推理模型清单：Qwen3-VL-30B-A3B-Instruct 已下架
+// （请求返回 200 但 choices=null，绝不能再放进轮换列表——空响应会拖慢整批），
+// 235B-A22B-Instruct 与 8B-Thinking 在线且各有独立当日配额。
+// 顺序 = 成本优先：8B 便宜量大 → 235B 质量最好 → 8B-Thinking 兜底（推理模型较慢）。
 export const VL_MODELS = [...new Set([
   process.env.AI_MODEL,
   process.env.VL_MODEL,
   'Qwen/Qwen3-VL-8B-Instruct',
-  'Qwen/Qwen3-VL-30B-A3B-Instruct',
+  'Qwen/Qwen3-VL-235B-A22B-Instruct',
+  'Qwen/Qwen3-VL-8B-Thinking',
 ].filter(Boolean))]
 
 export const TEXT_MODELS = [
@@ -506,10 +519,20 @@ export async function callVisionCompletion(opts) {
 
   const providers = []
 
-  const callMainProvider = (vlModel) => async () => {
+  // ModelScope Key 池：主 Key + 备用 Key，与 VL_MODELS 组成「Key×模型」矩阵。
+  // 配额按账号×模型计，同一模型先主 Key 后备用 Key，都耗尽再换下一个模型。
+  const MS_KEYS = [...new Set([
+    AI_CONFIG.API_KEY,
+    MODELSCOPE_BACKUP.ENABLED ? MODELSCOPE_BACKUP.API_KEY : null,
+  ].filter(Boolean))]
+
+  const callMsProvider = (apiKey, vlModel) => async () => {
+    if (isModelExhaustedToday(vlModel, apiKey)) {
+      throw new Error(`模型 ${vlModel} 当日配额已用尽（跳过）`)
+    }
     const content = await requestOpenAIProvider({
       endpoint: AI_CONFIG.ENDPOINT,
-      apiKey: AI_CONFIG.API_KEY,
+      apiKey,
       model: vlModel,
       messages,
       temperature,
@@ -517,33 +540,19 @@ export async function callVisionCompletion(opts) {
       timeout: AI_CONFIG.TIMEOUT,
       retry429: true,
     })
-    return { content, usedBackup: false }
+    return { content, usedBackup: apiKey !== AI_CONFIG.API_KEY }
   }
 
-  // 主站按 VL_MODELS 顺序全部尝试：单个模型当日配额用尽时自动换下一个。
-  // 历史实现只用 getCurrentVLModel()，从不轮换，8B 配额一用尽整册就全灭。
-  const mainModels = (model ? [model] : VL_MODELS).filter(m => !isModelExhaustedToday(m))
-  const mainSkippedByCooldown = Boolean(AI_CONFIG.API_KEY) && isMainRateLimitedToday()
+  const wantedModels = model ? [model] : VL_MODELS
+  const mainSkippedByCooldown = MS_KEYS.length > 0 && isMainRateLimitedToday()
 
-  if (!mainSkippedByCooldown && AI_CONFIG.API_KEY) {
-    for (const vlModel of mainModels) providers.push(callMainProvider(vlModel))
-  }
-
-  // ModelScope 备份 Key（虽然提示需绑定账号，但有些环境可能可用）
-  if (MODELSCOPE_BACKUP.ENABLED) {
-    providers.push(async () => {
-      const content = await requestOpenAIProvider({
-        endpoint: MODELSCOPE_BACKUP.ENDPOINT,
-        apiKey: MODELSCOPE_BACKUP.API_KEY,
-        model: model || MODELSCOPE_BACKUP.MODEL,
-        messages,
-        temperature,
-        maxTokens,
-        timeout: BACKUP_TIMEOUT,
-        retry503: false,
-      })
-      return { content, usedBackup: true }
-    })
+  if (!mainSkippedByCooldown) {
+    for (const vlModel of wantedModels) {
+      for (const apiKey of MS_KEYS) {
+        if (isModelExhaustedToday(vlModel, apiKey)) continue
+        providers.push(callMsProvider(apiKey, vlModel))
+      }
+    }
   }
 
   // Agnes 视觉兜底
@@ -566,24 +575,29 @@ export async function callVisionCompletion(opts) {
     }
   }
 
-  // 最后兜底：所有备份都不可用时，等主模型冷却结束再重试（最多 2 轮）。
-  // 备份提供商经常整体不可用（401/503），主模型是唯一出路，绝不能因一次瞬时限流就放弃整页。
-  // 无条件加入：既覆盖「进入时已被冷却跳过」，也覆盖「本次调用中主模型 429 耗尽后才触发冷却」。
-  if (AI_CONFIG.API_KEY) {
+  // 最后兜底：所有备份都不可用时，等主站冷却结束再把「Key×模型」矩阵全部重试（最多 2 轮）。
+  // 备份提供商经常整体不可用（401/503），ModelScope 是唯一出路，绝不能因一次瞬时限流就放弃整页。
+  // 无条件加入：既覆盖「进入时已被冷却跳过」，也覆盖「本次调用中主站 429 耗尽后才触发冷却」。
+  if (MS_KEYS.length) {
     for (let round = 0; round < 2; round += 1) {
       providers.push(async () => {
-        // 重新过滤：本次调用过程中可能又有模型被判定为配额耗尽
-        const usable = (model ? [model] : VL_MODELS).filter(m => !isModelExhaustedToday(m))
-        if (!usable.length) throw new Error('所有视觉模型当日配额均已用尽，请明日再试或配置其他模型')
+        // 重新过滤：本次调用过程中可能又有 Key×模型组合被判定为配额耗尽
+        const combos = []
+        for (const vlModel of (model ? [model] : VL_MODELS)) {
+          for (const apiKey of MS_KEYS) {
+            if (!isModelExhaustedToday(vlModel, apiKey)) combos.push([apiKey, vlModel])
+          }
+        }
+        if (!combos.length) throw new Error('所有视觉模型当日配额均已用尽，请明日再试或配置其他模型')
         const waitMs = Math.max(0, _mainRateLimitedUntil - Date.now())
         if (waitMs > 0) {
-          console.warn(`[AI] 备份不可用，等待 ${Math.ceil(waitMs / 1000)}s 主模型冷却结束后重试（第 ${round + 1} 轮兜底）`)
+          console.warn(`[AI] 备份不可用，等待 ${Math.ceil(waitMs / 1000)}s 主站冷却结束后重试（第 ${round + 1} 轮兜底）`)
           await sleep(waitMs)
         }
         let err = null
-        for (const vlModel of usable) {
+        for (const [apiKey, vlModel] of combos) {
           try {
-            return await callMainProvider(vlModel)()
+            return await callMsProvider(apiKey, vlModel)()
           } catch (e) {
             err = e
           }

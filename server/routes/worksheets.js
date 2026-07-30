@@ -24,13 +24,21 @@ import { uploadPDF, uploadImage } from '../services/ossService.js'
 import { ossClient } from '../config/oss.js'
 import { extractPdfText, renderPdfToJpegs, getPdfPageCount } from '../services/pdfService.js'
 import { callVisionCompletion } from '../config/ai.js'
-import { parseAnswerText, normalizeSectionName } from '../services/answerParseService.js'
+import { parseAnswerText, normalizeSectionName, parseUnitHeader, normLesson } from '../services/answerParseService.js'
 
 const router = Router()
 const pdfUpload = multer({
   storage: multer.memoryStorage(),
   limits: { fileSize: 500 * 1024 * 1024 }, // 500MB：scanned PDF 可能很大，后台会用 doParseOcrBatched 分批处理
 })
+
+// 课时编号归一化：从 answerParseService 复用（压空白 + 全角→半角括号），
+// 预埋答案 lesson_code 入口用
+const normLessonForPrecomputed = normLesson
+
+// 预埋答案 answer_type 缺省时按答案形态推断：单字母 A-D 视为选择，√× 视为判断。
+// 与 answerParseService.JUDGE_SYMBOL_RE 保持一致
+const JUDGE_SYMBOL_RE = /^[✓√✔✗✘×]$/
 
 // 解析卡死判定：后台解析是路由进程内的内存任务，10 分钟超时兜底也是内存态的，
 // 服务器重启/OOM 后 parse_status 会永远停在 'parsing'，导致重新上传被 409 永久拒绝。
@@ -140,16 +148,56 @@ router.post('/:id/parse-pdf', pdfUpload.single('file'), async (req, res) => {
         const parsed = JSON.parse(precomputedAnswersRaw)
         if (!Array.isArray(parsed)) throw new Error('格式错误')
         // 验证每项结构：{ question_no, answer, answer_type?, section?, content? }
+        // 支持的可选字段：
+        //   unit / unit_title  - 单元标题/全名（如"堂堂练① 19.1(1) 算术平方根"）
+        //   unit_key           - 单元键（如"堂堂练1|19.1(1)"），未提供时按 unit_title 推导
+        //   lesson_code        - 课时编号（如"19.1(1)"），未提供时按 unit_title 推导
+        //   sub_no             - 子题号（多空题），字符串如"1"/"2"
+        // 之前只透传 section + content，预埋答案的 unit_key 恒为 null，
+        // 导致学生页在 pickAnswerUnit 中找不到对应单元，60% 兜底失败则整页判待人工。
         precomputedAnswers = parsed.filter(a =>
           a && typeof a.question_no !== 'undefined' && typeof a.answer !== 'undefined'
-        ).map(a => ({
-          question_no: parseInt(a.question_no, 10),
-          answer: String(a.answer),
-          answer_type: a.answer_type || 'answer',
-          section: normalizeSectionName(a.section),
-          content: (a.content != null && String(a.content).trim()) ? String(a.content).trim() : null, // 题干（若提供）
-          confidence: 1.0, // 预埋答案置信度最高
-        }))
+        ).map(a => {
+          // 1) 优先使用调用方直接给出的 unit_key
+          let unitKey = a.unit_key ? String(a.unit_key).trim() : null
+          let unitTitle = a.unit_title ? normalizeSectionName(a.unit_title) : null
+          let lessonCode = a.lesson_code ? normLessonForPrecomputed(a.lesson_code) : null
+          let ordinal = null
+
+          // 2) 否则按 unit / unit_title 走 parseUnitHeader 推导
+          //    支持"堂堂练① 19.1(1) 算术平方根" / "第3课时 二次根式的加减"等格式
+          if (!unitKey || !unitTitle) {
+            const headerSrc = a.unit || a.unit_title
+            if (headerSrc) {
+              const parsed2 = parseUnitHeader(String(headerSrc))
+              if (parsed2) {
+                if (!unitKey) unitKey = parsed2.unit_key
+                if (!unitTitle) unitTitle = parsed2.unit_title
+                if (!lessonCode && parsed2.lesson_code) lessonCode = parsed2.lesson_code
+                ordinal = parsed2.ordinal ?? null
+              }
+            }
+          }
+
+          return {
+            question_no: parseInt(a.question_no, 10),
+            answer: String(a.answer),
+            // answer_type 缺省时按答案形态推断：单字母 A-D 视为选择（避免下游 judgeService
+            // 走到"数学等价"分支把 'B' vs 'A' 误判为等价：prep 后两表达式都是 0/1，被当成
+            // "同变量不同数值"巧合命中。判断题 √× 也单独处理。其它默认 answer（一般题）。
+            answer_type: a.answer_type || (JUDGE_SYMBOL_RE.test(String(a.answer).trim())
+              ? 'judge'
+              : (/^[A-Da-d]$/.test(String(a.answer).trim()) ? 'choice' : 'answer')),
+            section: normalizeSectionName(a.section),
+            content: (a.content != null && String(a.content).trim()) ? String(a.content).trim() : null,
+            unit_key: unitKey || null,
+            unit_title: unitTitle || null,
+            lesson_code: lessonCode || null,
+            ordinal: ordinal,
+            sub_no: a.sub_no != null ? String(a.sub_no) : '',
+            confidence: 1.0, // 预埋答案置信度最高
+          }
+        })
       } catch (e) {
         return res.status(400).json({ error: '预埋答案格式错误，应为 JSON 数组' })
       }

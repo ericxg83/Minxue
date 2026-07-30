@@ -1006,8 +1006,8 @@ const renderMasteredTag = (wq) => {
                     {question.content}
                   </div>
 
-                  {/* 原试卷已删除提示 */}
-                  {(!question.task_id || wq.task_deleted) && (
+                  {/* 原试卷已删除提示（仅对关联 questions 表的旧记录生效） */}
+                  {(wq.question_id && (!question.task_id || wq.task_deleted)) && (
                     <div className="inline-flex items-center gap-1.5 text-badge mb-2 px-2.5 py-1 rounded-lg" style={{ background: 'var(--warning-soft)', color: 'var(--warning)' }}>
                       <AlertTriangle size={11} />
                       原试卷已删除，但错题保留
@@ -1048,9 +1048,6 @@ const renderMasteredTag = (wq) => {
                     >
                       删除
                     </button>
-                  </div>
-                </div>
-              )
                   </div>
                 </div>
               )

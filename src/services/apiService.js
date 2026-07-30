@@ -453,10 +453,37 @@ export const getWrongQuestionsByStudent = async (studentId, useCache = true) => 
     }
   }
 
-  const result = wrongQuestions.map(wq => ({
-    ...wq,
-    question: questionsMap[wq.question_id] || null
-  }))
+  const result = wrongQuestions.map(wq => {
+    const dbQuestion = questionsMap[wq.question_id] || {}
+
+    // 自包含字段优先：wrong_questions 自身字段覆盖 questions 表字段
+    const hasSelfContained = wq.content || wq.question_image_url || wq.correct_answer
+    if (hasSelfContained || !dbQuestion.id) {
+      return {
+        ...wq,
+        question: {
+          id: dbQuestion.id || wq.id,
+          content: wq.content || dbQuestion.content || null,
+          subject: wq.subject || dbQuestion.subject || null,
+          image_url: wq.question_image_url || dbQuestion.image_url || null,
+          answer: wq.correct_answer || dbQuestion.answer || null,
+          student_answer: wq.student_answer || dbQuestion.student_answer || null,
+          question_type: wq.question_type || dbQuestion.question_type || 'choice',
+          answer_source: dbQuestion.answer_source || 'worksheet',
+          is_correct: dbQuestion.is_correct !== undefined ? dbQuestion.is_correct : false,
+          ai_tags: dbQuestion.ai_tags || [],
+          manual_tags: dbQuestion.manual_tags || [],
+          tags_source: dbQuestion.tags_source || 'ai',
+          wrong_count: wq.error_count || dbQuestion.wrong_count || 1,
+          block_coordinates: wq.block_coordinates || dbQuestion.block_coordinates || null,
+          task_id: dbQuestion.task_id || null,
+        }
+      }
+    }
+
+    // 旧记录：从 questions 表合并
+    return { ...wq, question: dbQuestion || null }
+  })
 
   writeCache(cacheKey, result)
   return result

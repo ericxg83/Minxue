@@ -28,6 +28,9 @@ import { migrateResources } from './migrations/028_add_resources.js'
 import { migrateQuestionPdfUrl } from './migrations/029_add_question_pdf_url.js'
 import { migrateCompleteResources } from './migrations/030_complete_resources_migration.js'
 import { migrateParseProgressColumns } from './migrations/031_add_parse_progress_columns.js'
+import { migrateResourceUnits } from './migrations/032_add_resource_units.js'
+import { migrateWrongQuestionSelfContained } from './migrations/033_add_wrong_question_self_contained.js'
+import { scheduleNightParse } from './services/nightParseService.js'
 
 const __dirname = dirname(fileURLToPath(import.meta.url))
 dotenv.config({ path: resolve(__dirname, '.env') })
@@ -1468,8 +1471,10 @@ app.get('/api/wrong-questions/student/:studentId', async (req, res) => {
     const offset = parseInt(req.query.offset) || 0
     const { rows } = await query(
       `SELECT wq.* FROM ${TABLES.WRONG_QUESTIONS} wq
-       INNER JOIN ${TABLES.QUESTIONS} q ON q.id = wq.question_id AND q.is_complete = TRUE
-       WHERE wq.student_id = $1 ORDER BY wq.added_at DESC LIMIT $2 OFFSET $3`,
+       LEFT JOIN ${TABLES.QUESTIONS} q ON q.id = wq.question_id
+       WHERE wq.student_id = $1
+         AND (q.is_complete = TRUE OR wq.question_id IS NULL)
+       ORDER BY wq.added_at DESC LIMIT $2 OFFSET $3`,
       [studentId, limit, offset]
     )
     res.json({ success: true, wrongQuestions: rows })
@@ -2333,6 +2338,8 @@ if (process.argv[1] === __filename || process.argv[1]?.endsWith('server/index.js
       await migrateQuestionPdfUrl()
       await migrateCompleteResources()
       await migrateParseProgressColumns()
+      await migrateResourceUnits()
+      await migrateWrongQuestionSelfContained()
     } catch (err) {
       console.error('数据库迁移失败:', err.message)
     }
@@ -2351,6 +2358,13 @@ if (process.argv[1] === __filename || process.argv[1]?.endsWith('server/index.js
       console.log(`⏰ 知识点/难度定时回填已启用（每 ${intervalHours} 小时）`)
     } catch (err) {
       console.error('定时回填启动失败:', err.message)
+    }
+
+    // 夜间自动补解析：配额重置后的低峰期自动重跑未解析干净的练习册（程序内定时，随仓库走）
+    try {
+      scheduleNightParse()
+    } catch (err) {
+      console.error('夜间补解析定时器启动失败:', err.message)
     }
 
     console.log(`并发数: ${process.env.CONCURRENCY || 2}`)

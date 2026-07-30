@@ -1466,6 +1466,24 @@ const callGradeEndpoint = async ({ id, studentId, results }) => {
  *  2) 标题归一化后与 unit_title / unit_key 做精确/包含匹配（处理空格、圈序号）。
  *  3) 兜底按题号覆盖率打分；要求至少 60% 的题号能在该单元下命中（避免错挂）。
  */
+// 圈序号 ①..⑳ + 阿拉伯 1..20 双向兼容：OCR 经常把"堂堂练①"识别成"堂堂练1"，
+// 反之亦然。此处把两种字符都压成统一的 ASCII 数字后再做"包含/相等"判断，
+// "堂堂练①"和"堂堂练1"因此被视作同一单元。最多处理 20，常规练习册不会超过。
+const CIRCLED_DIGITS_RE = /[①②③④⑤⑥⑦⑧⑨⑩⑪⑫⑬⑭⑮⑯⑰⑱⑲⑳]/g
+// 用字符串键而不是裸的圈序号：圈序号不在 JS IdentifierName 允许集中，V8 在某些版本
+// 会把 "①:1,②:2,..." 误判为 label 序列并抛 "Invalid or unexpected token"。加引号后稳。
+const circledToAsciiMap = {
+  '①': 1, '②': 2, '③': 3, '④': 4, '⑤': 5, '⑥': 6, '⑦': 7, '⑧': 8, '⑨': 9, '⑩': 10,
+  '⑪': 11, '⑫': 12, '⑬': 13, '⑭': 14, '⑮': 15, '⑯': 16, '⑰': 17, '⑱': 18, '⑲': 19, '⑳': 20,
+}
+const normalizeTitleForMatch = (s) => {
+  if (!s) return ''
+  // 圈序号 → ASCII 数字（"堂堂练①" → "堂堂练1"）
+  return String(s)
+    .replace(CIRCLED_DIGITS_RE, m => circledToAsciiMap[m] || m)
+    .replace(/[\s　]+/g, '') // 空白已经由 normalizeSectionName 压过，此处再兜一次
+}
+
 export function pickAnswerUnit(answersByUnit, pageTitle, questions) {
   if (!answersByUnit || answersByUnit.size === 0) return null
   if (answersByUnit.size === 1) return [...answersByUnit.keys()][0]
@@ -1486,20 +1504,20 @@ export function pickAnswerUnit(answersByUnit, pageTitle, questions) {
   }
   const candidates = [...answersByUnit.keys()].map(unitMeta)
 
-  // 1) 标题匹配
-  const normTitle = normalizeSectionName(pageTitle)
+  // 1) 标题匹配：先把 pageTitle 压空白 + 圈序号→ASCII，再做归一化匹配
+  //    旧版只压空白，OCR 把"堂堂练①"误识别为"堂堂练1"会直接失配，60% 兜底也撞错单元
+  const normTitle = normalizeTitleForMatch(normalizeSectionName(pageTitle))
   if (normTitle) {
+    // 1a) 完全相等 / 包含（按更长侧为锚，防"含子串"误中）
+    //   两侧同长：直接比；否则要求短侧是长侧的「前缀」或「后缀」之一
+    //   杜绝"第十九章 单元测试卷"被"第十九章"单字符错挂（其实同义但置信度应分级）
     for (const c of candidates) {
-      if (!c.unitTitle && !c.unitKeyRaw) continue
-      // 优先 unit_title：用户 PDF 上印的就是这个，最稳
-      if (c.unitTitle && (c.unitTitle === normTitle || normTitle.includes(c.unitTitle) || c.unitTitle.includes(normTitle))) {
-        return c.unitKey
-      }
+      const ct = normalizeTitleForMatch(c.unitTitle)
+      if (ct && titleMatches(normTitle, ct)) return c.unitKey
     }
     for (const c of candidates) {
-      if (c.unitKeyRaw && (c.unitKeyRaw === normTitle || normTitle.includes(c.unitKeyRaw) || c.unitKeyRaw.includes(normTitle))) {
-        return c.unitKey
-      }
+      const ck = normalizeTitleForMatch(c.unitKeyRaw)
+      if (ck && titleMatches(normTitle, ck)) return c.unitKey
     }
   }
 
@@ -1551,6 +1569,27 @@ export function pickAnswerUnit(answersByUnit, pageTitle, questions) {
     if (covered < qNos.length * 0.6) return null
   }
   return bestKey
+}
+
+// 标题匹配策略：
+//  - 完全相等 → 命中
+//  - 一侧是另一侧的子串 → 命中（"堂堂练② 19.1(2)平方根" ∈ "堂堂练② 19.1(2)平方根拓展"）
+//  - 一侧是另一侧的「有效前缀/后缀」→ 命中
+//    例：pageTitle="第十九章 单元测试卷" / unitTitle="第十九章" → 前缀命中
+//    例：pageTitle="第十九章" / unitTitle="第十九章 单元测试卷" → 后缀命中
+//  - 子串匹配要求长侧 ≥ 短侧 2 字符以上，避免单字符"1"误中"19.1(1)"
+function titleMatches(a, b) {
+  if (!a || !b) return false
+  if (a === b) return true
+  if (a.includes(b) || b.includes(a)) {
+    return Math.min(a.length, b.length) >= 2
+  }
+  // 前缀/后缀匹配：仅在长度差 ≤ 2 时启用，避免"第十九章"误中"第十九章阶段练"
+  const lenDiff = Math.abs(a.length - b.length)
+  if (lenDiff > 2) return false
+  if (a.length <= b.length ? b.startsWith(a) : a.startsWith(b)) return true
+  if (a.length <= b.length ? b.endsWith(a) : a.endsWith(b)) return true
+  return false
 }
 
 // 兼容旧调用：pickAnswerSection 已废弃。业务已切到 pickAnswerUnit + getWorksheetAnswersBySection 的 3D 结构。
