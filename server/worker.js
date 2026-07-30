@@ -593,11 +593,28 @@ const downloadImage = async (imageUrl) => {
       responseType: 'arraybuffer',
       timeout: 30000
     })
-    console.log(`   图片下载成功: ${Buffer.from(response.data).length} bytes`)
-    return Buffer.from(response.data)
+    const buf = Buffer.from(response.data)
+    console.log(`   图片下载成功: ${buf.length} bytes`)
+
+    // ── 魔数校验：OSS 404 / 403 / 鉴权失败会返回 XML/HTML 错误页（约 3000-4000 bytes），
+    //    axios 仍按 2xx/3xx 视为成功，AI 拿去调视觉模型会立即被视觉模型拒掉。
+    //    在这里直接拦下，给出明确错误，避免被 AI 误判为"模型问题"反复重试。
+    const magic = buf.slice(0, 4)
+    const isJpeg = magic[0] === 0xFF && magic[1] === 0xD8 && magic[2] === 0xFF
+    const isPng = magic[0] === 0x89 && magic[1] === 0x50 && magic[2] === 0x4E && magic[3] === 0x47
+    const isWebp = magic[0] === 0x52 && magic[1] === 0x49 && magic[2] === 0x46 && magic[3] === 0x46 // RIFF
+    const isHeic = magic.slice(0, 4).toString('ascii') === 'ftyp'
+    const head = buf.slice(0, 200).toString('utf8').trim()
+    const looksLikeXml = head.startsWith('<?xml') || head.startsWith('<Error>') || head.startsWith('<html')
+    if (buf.length < 1024 || (!isJpeg && !isPng && !isWebp && !isHeic) || looksLikeXml) {
+      console.error(`   ❌ 下载内容非图片: 魔数=${magic.toString('hex')}, 前80字符=${head.substring(0, 80)}`)
+      throw new Error(`下载图片失败: 返回内容不是图片（${buf.length} bytes, magic=${magic.toString('hex')}），URL 可能已失效或 OSS 返回了错误页`)
+    }
+
+    return buf
   } catch (error) {
-    console.error('下载图片失败:', error)
-    throw new Error('下载图片失败: ' + error.message)
+    console.error('下载图片失败:', error.message || error)
+    throw new Error('下载图片失败: ' + (error.message || '未知错误'))
   }
 }
 

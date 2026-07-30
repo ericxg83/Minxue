@@ -674,6 +674,8 @@ export async function callVisionCompletion(opts) {
   }
 
   let lastError = null
+  let msAttempted = false
+  let agnesAttempted = false
   for (const provider of providers) {
     try {
       const result = await provider()
@@ -685,7 +687,32 @@ export async function callVisionCompletion(opts) {
         markMainRateLimited()
       }
       lastError = err
+      // 标记哪些 provider 真正被尝试过
+      if (err._provider === 'ms' || /魔搭|ModelScope|ms provider/i.test(err.message || '')) msAttempted = true
+      else if (err._provider === 'agnes' || /Agnes|agnes/i.test(err.message || '')) agnesAttempted = true
+      else {
+        // provider 闭包内未显式打标时，按调用顺序推断（先魔搭后 Agnes）
+        if (!msAttempted) msAttempted = true
+        else agnesAttempted = true
+      }
     }
+  }
+
+  // ── 统一错误信息：让用户/前端/黑名单都能精确知道是哪一类 provider 不可用 ──
+  // 仅魔搭失败 → 提示"魔搭视觉模型当日配额耗尽或限流，请明日再试或配置其他模型"
+  // 魔搭+Agnes 都失败 → 提示"所有视觉模型均不可用，请稍后重试"
+  if (lastError) {
+    const baseMsg = lastError.message || '未知错误'
+    if (msAttempted && agnesAttempted) {
+      const wrapped = new Error(`所有视觉模型（魔搭 + Agnes）均不可用：${baseMsg}`)
+      wrapped.cause = lastError
+      throw wrapped
+    } else if (agnesAttempted && !msAttempted) {
+      const wrapped = new Error(`所有 Agnes 视觉模型均不可用：${baseMsg}`)
+      wrapped.cause = lastError
+      throw wrapped
+    }
+    // 仅魔搭被尝试且失败时，保留原 message 以便黑名单 pattern 命中"所有魔搭视觉模型...用尽"
   }
 
   throw lastError || new Error('All vision AI providers failed')

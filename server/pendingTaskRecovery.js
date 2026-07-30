@@ -11,6 +11,49 @@ const GEOMETRY_RETRY_DELAYS = [
 ]
 const GEOMETRY_MAX_RETRIES = GEOMETRY_RETRY_DELAYS.length
 
+// ── 自动重试黑名单：以下 last_error 子串出现时，任务不应被 PendingTaskRecovery 反复入队 ──
+//
+// 错误按是否"自愈"分类：
+//   1. 配额 / 限流：自愈取决于外部服务（明早重置 / 限流解除），与重试次数无关。
+//   2. 图片下载失败：URL 失效（OSS 404/403）不会自愈，反复入队只会刷日志。
+//   3. 用户输入类：缺少 worksheetId、URL 无效、文件未上传完成等，本身就是数据问题。
+//
+// 命中黑名单 → 直接跳过，不恢复、不入队，让任务停留在 failed 状态等待人工/数据修复。
+const NON_RETRYABLE_ERROR_PATTERNS = [
+  /所有魔搭视觉模型.*配额.*用尽/,
+  /所有视觉模型.*不可用/,
+  /所有视觉模型.*失败/,
+  /quota.*exhaust/i,
+  /rate limit/i,
+  /rate_limit/i,
+  /429/,
+  /下载图片失败/,
+  /返回内容不是图片/,
+  /URL.*失效/,
+  /OSS.*错误页/,
+  /缺少 worksheetId/,
+  /所有图片URL无效/,
+  /文件上传未成功完成/,
+  /UPLOAD_NOT_COMPLETED/,
+  /INVALID_URL/,
+  /AI returned empty content/i,
+]
+
+/**
+ * 判断 last_error 是否命中"不应自动重试"黑名单。
+ * 命中 → 返回 { skip: true, reason }；未命中 → 返回 { skip: false }。
+ */
+function classifyLastError(lastError) {
+  const msg = String(lastError || '').trim()
+  if (!msg) return { skip: false } // 没有错误信息时放行（保守处理）
+  for (const pat of NON_RETRYABLE_ERROR_PATTERNS) {
+    if (pat.test(msg)) {
+      return { skip: true, reason: `命中非重试黑名单 (${pat})` }
+    }
+  }
+  return { skip: false }
+}
+
 class PendingTaskRecovery {
   constructor() {
     this.scanInterval = null
@@ -103,12 +146,22 @@ class PendingTaskRecovery {
       const inFlightTaskIds = new Set(inFlightJobs.map(j => j.data?.taskId).filter(Boolean))
 
       let recoveredCount = 0
+      let skippedCount = 0
       for (const task of rows) {
         try {
           if (inFlightTaskIds.has(task.id)) {
             console.log(`[PendingTaskRecovery] ⏭️ ${task.original_name} 已在队列中`)
             continue
           }
+
+          // ── 黑白名单：配额耗尽 / 限流 / 图片失效 / 数据错误 → 拒绝重试 ──
+          const verdict = classifyLastError(task.last_error)
+          if (verdict.skip) {
+            console.log(`[PendingTaskRecovery] 🚫 跳过 ${task.original_name}: ${verdict.reason}; last_error="${String(task.last_error || '').substring(0, 80)}"`)
+            skippedCount++
+            continue
+          }
+
           await query(
             `UPDATE ${TABLES.TASKS} SET status = 'pending', last_error = NULL, updated_at = NOW() WHERE id = $1`,
             [task.id]
@@ -135,7 +188,7 @@ class PendingTaskRecovery {
           console.error(`[PendingTaskRecovery]  恢复失败 ${task.original_name}:`, err.message)
         }
       }
-      console.log(`[PendingTaskRecovery] ✅ failed 任务恢复完成: ${recoveredCount}/${rows.length}`)
+      console.log(`[PendingTaskRecovery] ✅ failed 任务恢复完成: ${recoveredCount}/${rows.length}（跳过 ${skippedCount}）`)
     } catch (err) {
       console.error('[PendingTaskRecovery] ❌ failed 任务扫描失败:', err)
     }
@@ -152,7 +205,7 @@ class PendingTaskRecovery {
 
       const { rows } = await query(
         `SELECT id, student_id, image_url, images, original_name, status, started_at, retry_count,
-                task_type, worksheet_id, generated_exam_id, subject
+                task_type, worksheet_id, generated_exam_id, subject, last_error
          FROM ${TABLES.TASKS}
          WHERE status = 'processing'
            AND (started_at IS NULL OR started_at < NOW() - INTERVAL '${PROCESSING_TIMEOUT_MS / 1000 / 60} minutes')
@@ -177,12 +230,22 @@ class PendingTaskRecovery {
       const inFlightTaskIds = new Set(inFlightJobs.map(j => j.data?.taskId).filter(Boolean))
 
       let recoveredCount = 0
+      let skippedCount = 0
       for (const task of rows) {
         try {
           if (inFlightTaskIds.has(task.id)) {
             console.log(`[PendingTaskRecovery] ⏭️ ${task.original_name} 已在队列中`)
             continue
           }
+
+          // ── 黑白名单：stuck 前 last_error 已知为配额/限流/图片错误 → 拒绝恢复 ──
+          const verdict = classifyLastError(task.last_error)
+          if (verdict.skip) {
+            console.log(`[PendingTaskRecovery] 🚫 跳过 stuck ${task.original_name}: ${verdict.reason}; last_error="${String(task.last_error || '').substring(0, 80)}"`)
+            skippedCount++
+            continue
+          }
+
           await query(
             `UPDATE ${TABLES.TASKS} SET status = 'pending', updated_at = NOW() WHERE id = $1`,
             [task.id]
@@ -209,7 +272,7 @@ class PendingTaskRecovery {
           console.error(`[PendingTaskRecovery]  恢复失败 ${task.original_name}:`, err.message)
         }
       }
-      console.log(`[PendingTaskRecovery] ✅ stuck processing 恢复完成: ${recoveredCount}/${rows.length}`)
+      console.log(`[PendingTaskRecovery] ✅ stuck processing 恢复完成: ${recoveredCount}/${rows.length}（跳过 ${skippedCount}）`)
     } catch (err) {
       console.error('[PendingTaskRecovery] ❌ stuck processing 扫描失败:', err)
     }
