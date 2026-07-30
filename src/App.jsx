@@ -1,4 +1,4 @@
-﻿import { useEffect, useState, useRef, lazy, Suspense, useCallback, useMemo } from 'react'
+import { useEffect, useState, useRef, lazy, Suspense, useCallback, useMemo } from 'react'
 import {
   Camera,
   ChevronRight,
@@ -227,6 +227,20 @@ export default function App() {
   const [pendingFlow, setPendingFlow] = useState(null) // 'workbook' | 'exam' | null
   const [flowSubject, setFlowSubject] = useState('数学')
   const [selectedExamResourceId, setSelectedExamResourceId] = useState(null)
+
+  // ── 同步镜像：React state 在 setState 后会先入批处理，闭包读到旧值。
+  // 日常作业→选练习册路径上，handleUploadAsWorkbook 里 setPendingFlow('workbook')
+  // 之后立即 await handleFileSelect，handleFileSelect → uploadViaBackend 链路里
+  // 读到的仍是上一次渲染的闭包（旧值 null），导致 isWorkbook 误判为 false、
+  // options 没传 worksheetId，整条上传走通用 8 步流程（跑 AI 生参考答案，慢）。
+  // 用 ref 镜像避免批处理延迟：refs 是可变对象，闭包永远拿到最新值。
+  const pendingFlowRef = useRef(null)
+  const selectedWorksheetIdRef = useRef(null)
+  const selectedExamResourceIdRef = useRef(null)
+  // 每渲染同步：state 变化时 ref 立即跟随。
+  pendingFlowRef.current = pendingFlow
+  selectedWorksheetIdRef.current = selectedWorksheetId
+  selectedExamResourceIdRef.current = selectedExamResourceId
 
   // ── 多图暂存区（拍照+相册连拍/多选）──
   const [showStaging, setShowStaging] = useState(false)
@@ -775,11 +789,14 @@ export default function App() {
       // Step 1: Detect QR codes for all files
       setUploading(true)
 
-      if (pendingFlow === 'workbook') {
+      // 读 ref 而非 state：handleUploadAsWorkbook 同一 tick 内 setState 完立刻 await 进来，
+      // 闭包里的 pendingFlow 还是旧值（null），会误进 else 分支跑 QR 检测 + 通用 8 步流程。
+      const flow = pendingFlowRef.current
+      if (flow === 'workbook') {
         // 多图一任务：整批文件合并为一个任务
         await uploadRegularHomework(newFiles)
         clearPendingUploadFlow()
-      } else if (pendingFlow === 'exam') {
+      } else if (flow === 'exam') {
         // 试卷答案库：直接上传，不走 QR 检测
         await uploadRegularHomework(newFiles)
         clearPendingUploadFlow()
@@ -917,8 +934,8 @@ export default function App() {
     console.debug('📤📤📤 [uploadViaBackend] STARTING with', files.length, 'files')
     console.debug('📤 [uploadViaBackend] currentStudent:', currentStudent?.id, currentStudent?.name)
 
-    const isWorkbook = pendingFlow === 'workbook' && selectedWorksheetId
-    const isExam = pendingFlow === 'exam' && selectedExamResourceId
+    const isWorkbook = pendingFlowRef.current === 'workbook' && selectedWorksheetIdRef.current
+    const isExam = pendingFlowRef.current === 'exam' && selectedExamResourceIdRef.current
     const firstFile = files[0]
     const taskName = files.length > 1
       ? `${firstFile.name || '作业'} 等${files.length}页`
