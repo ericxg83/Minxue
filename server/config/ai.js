@@ -617,23 +617,29 @@ export async function callVisionCompletion(opts) {
   }
 
   if (allMsExhausted) {
-    console.warn('[AI] 魔搭所有 Key×模型组合今日配额均已耗尽，自动切换为 Agnes 优先')
-    // Agnes 视觉兜底提到最前
+    console.warn('[AI] 魔搭所有 Key×模型组合今日配额均已耗尽，自动切换为备份供应商优先')
+    // 备份供应商视觉兜底（SenseNova → Agnes → FreeModel，各自独立配额）
     for (const vendor of BACKUP_CONFIG.VENDORS) {
       for (const vlModel of vendor.vlModels) {
         providers.push(async () => {
-          const content = await requestOpenAIProvider({
-            endpoint: vendor.endpoint,
-            apiKey: process.env[vendor.envKey] || '',
-            model: model || vlModel,
-            messages,
-            temperature,
-            maxTokens: Math.min(maxTokens, 4096),
-            timeout: BACKUP_TIMEOUT,
-            retry503: false,
-            vendor,
-          })
-          return { content, usedBackup: true }
+          try {
+            const content = await requestOpenAIProvider({
+              endpoint: vendor.endpoint,
+              apiKey: process.env[vendor.envKey] || '',
+              model: model || vlModel,
+              messages,
+              temperature,
+              maxTokens: Math.min(maxTokens, 4096),
+              timeout: BACKUP_TIMEOUT,
+              retry503: false,
+              vendor,
+              extraBody: vendor.extraBody || null,
+            })
+            return { content, usedBackup: true }
+          } catch (err) {
+            err._provider = vendor.name.toLowerCase()
+            throw err
+          }
         })
       }
     }
