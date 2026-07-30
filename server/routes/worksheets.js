@@ -26,6 +26,11 @@ import { ossClient } from '../config/oss.js'
 import { extractPdfText, renderPdfToJpegs, getPdfPageCount } from '../services/pdfService.js'
 import { callVisionCompletion } from '../config/ai.js'
 import { parseAnswerText, normalizeSectionName, parseUnitHeader, normLesson } from '../services/answerParseService.js'
+import {
+  diagnoseWorksheet,
+  listSuspectWorksheets,
+  fixWorksheet,
+} from '../services/worksheetFixService.js'
 
 const router = Router()
 const pdfUpload = multer({
@@ -58,6 +63,166 @@ router.get('/', async (req, res) => {
   } catch (e) {
     res.status(500).json({ error: e.message })
   }
+})
+
+// ────────── 修复『试卷①/②/③ 错挂到父章节』一键接口 ──────────
+// ⚠️ 必须放在 /:id/* 路由之前：避免 POST /:id/fix-exam-units 把 /fix-exam-units 抢走
+// 根因：parseUnitHeader 之前漏识别试卷类标题（已 commit 3dc63df 修复）。
+//       本组端点用于重跑 OCR 修正已入库的错挂数据。
+// 调用方：PC 后台 → 练习册管理 → "修复试卷单元" 按钮
+
+// 列出所有真嫌疑 worksheet（GET 同步返回，便于后台直接展示）
+router.get('/fix-exam-units/suspects', async (req, res) => {
+  try {
+    const limit = Math.min(parseInt(req.query.limit || '200', 10) || 200, 500)
+    const suspects = await listSuspectWorksheets(limit)
+    res.json({ success: true, count: suspects.length, suspects })
+  } catch (e) {
+    res.status(500).json({ error: e.message })
+  }
+})
+
+// 批量修复所有真嫌疑 worksheet（异步任务 + 轮询日志）
+//   POST /api/worksheets/fix-exam-units          body: { dryRun?: boolean, limit?: number }
+//   GET  /api/worksheets/fix-exam-units/job/:id  查询任务状态与日志
+//   POST /api/worksheets/fix-exam-units/cancel   取消正在执行的任务
+//
+// 异步原因：单个 worksheet 修复 1-3 分钟，批量 10+ 个会超 HTTP 超时。改为返回 jobId + 轮询。
+const _fixJobs = new Map()  // jobId -> { status, logs, results, startedAt, finishedAt }
+
+router.post('/fix-exam-units', async (req, res) => {
+  const dryRun = req.body?.dryRun === true
+  const limit = Math.min(Math.max(parseInt(req.body?.limit || '20', 10) || 20, 1), 50)
+  const jobId = `fx-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`
+  const job = {
+    id: jobId,
+    status: 'pending',
+    dryRun,
+    limit,
+    logs: [],
+    results: [],
+    suspects: [],
+    startedAt: Date.now(),
+    finishedAt: null,
+  }
+  _fixJobs.set(jobId, job)
+  const onLog = (line) => { job.logs.push(line); console.log(`[${jobId}] ${line}`) }
+  onLog(`📋 创建修复任务 ${jobId} (limit=${limit}, dryRun=${dryRun})`)
+
+  // 立即扫描嫌疑，扫描完才决定要不要进队列
+  let suspects
+  try {
+    suspects = await listSuspectWorksheets(limit)
+  } catch (e) {
+    job.status = 'failed'
+    job.finishedAt = Date.now()
+    onLog(`❌ 扫描失败: ${e.message}`)
+    return res.status(500).json({ success: false, error: e.message, jobId })
+  }
+  job.suspects = suspects
+
+  if (suspects.length === 0) {
+    job.status = 'completed'
+    job.finishedAt = Date.now()
+    onLog('✅ 未发现需要修复的 worksheet')
+    return res.json({ success: true, jobId, status: job.status, count: 0, results: [] })
+  }
+  onLog(`📋 发现 ${suspects.length} 个真嫌疑 worksheet`)
+  for (const s of suspects) onLog(`   - ${s.id}  ${s.name}  (orphan_ans=${s.orphan_ans_count})`)
+
+  if (dryRun) {
+    job.status = 'completed'
+    job.finishedAt = Date.now()
+    onLog('⏸ dry-run 模式：只扫描不修复')
+    return res.json({ success: true, jobId, status: job.status, count: suspects.length, suspects, results: [] })
+  }
+
+  // 启动后台任务，立即返回 jobId
+  job.status = 'running'
+  ;(async () => {
+    try {
+      for (let i = 0; i < suspects.length; i++) {
+        if (job._cancelled) {
+          onLog('⏸ 任务已被取消')
+          break
+        }
+        const s = suspects[i]
+        onLog(`\n${'='.repeat(60)}`)
+        onLog(`[${i + 1}/${suspects.length}] ${s.id}  ${s.name}`)
+        onLog('='.repeat(60))
+        try {
+          const r = await fixWorksheet(s.id, { onLog })
+          job.results.push({ id: s.id, name: s.name, ok: r.ok, error: r.error || null, skipped: r.skipped || false })
+        } catch (e) {
+          onLog(`❌ 异常: ${e.message}`)
+          job.results.push({ id: s.id, name: s.name, ok: false, error: e.message })
+        }
+      }
+      const ok = job.results.filter(r => r.ok).length
+      const failed = job.results.filter(r => !r.ok).length
+      onLog(`\n📊 批量修复总结: 成功 ${ok} / 失败 ${failed} / 总计 ${job.results.length}`)
+      job.status = job._cancelled ? 'cancelled' : 'completed'
+    } catch (e) {
+      onLog(`❌ 任务异常: ${e.message}`)
+      job.status = 'failed'
+    } finally {
+      job.finishedAt = Date.now()
+    }
+  })()
+
+  res.json({ success: true, jobId, status: job.status, count: suspects.length, suspects })
+})
+
+// 查询任务状态
+router.get('/fix-exam-units/job/:jobId', async (req, res) => {
+  const job = _fixJobs.get(req.params.jobId)
+  if (!job) return res.status(404).json({ success: false, error: '任务不存在' })
+  res.json({
+    success: true,
+    jobId: job.id,
+    status: job.status,
+    dryRun: job.dryRun,
+    count: job.suspects.length,
+    results: job.results,
+    logs: job.logs,
+    startedAt: job.startedAt,
+    finishedAt: job.finishedAt,
+  })
+})
+
+// 取消任务（标记位，不强杀正在跑的 fixWorksheet）
+router.post('/fix-exam-units/cancel', async (req, res) => {
+  const { jobId } = req.body || {}
+  if (!jobId) return res.status(400).json({ success: false, error: '缺少 jobId' })
+  const job = _fixJobs.get(jobId)
+  if (!job) return res.status(404).json({ success: false, error: '任务不存在' })
+  job._cancelled = true
+  res.json({ success: true, jobId, status: job.status })
+})
+
+// 单个 worksheet 修复（同样改为异步）
+router.post('/fix-one-async', async (req, res) => {
+  const worksheetId = req.body?.worksheetId
+  if (!worksheetId) return res.status(400).json({ success: false, error: '缺少 worksheetId' })
+  const jobId = `fx1-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`
+  const job = { id: jobId, status: 'running', worksheetId, logs: [], startedAt: Date.now(), finishedAt: null }
+  _fixJobs.set(jobId, job)
+  const onLog = (line) => { job.logs.push(line); console.log(`[${jobId}] ${line}`) }
+  onLog(`📋 启动单 worksheet 修复 ${worksheetId}`)
+  ;(async () => {
+    try {
+      const r = await fixWorksheet(worksheetId, { onLog })
+      job.result = { ok: r.ok, error: r.error || null, skipped: r.skipped || false, before: r.before ? { examUnitCount: r.before.examUnitCount, suspectCount: r.before.suspects.length } : null, after: r.after ? { examUnitCount: r.after.examUnitCount, suspectCount: r.after.suspects.length } : null }
+      job.status = 'completed'
+    } catch (e) {
+      onLog(`❌ 异常: ${e.message}`)
+      job.status = 'failed'
+      job.result = { ok: false, error: e.message }
+    } finally {
+      job.finishedAt = Date.now()
+    }
+  })()
+  res.json({ success: true, jobId, status: job.status })
 })
 
 router.get('/student-settings/:studentId', async (req, res) => {
@@ -1010,6 +1175,39 @@ router.get('/:id/parse-debug', async (req, res) => {
     })
   } catch (e) {
     res.status(500).json({ error: e.message, stack: e.stack?.split('\n').slice(0, 5) })
+  }
+})
+
+// 单 worksheet 修复端点（放在 /:id/* 通用路由区域，与 parse-pdf 等保持一致风格）
+//   GET  /api/worksheets/:id/fix-exam-units/diagnose
+//   POST /api/worksheets/:id/fix-exam-units   body: { dryRun?: boolean }
+router.get('/:id/fix-exam-units/diagnose', async (req, res) => {
+  try {
+    const diag = await diagnoseWorksheet(req.params.id)
+    res.json({ success: true, ...diag })
+  } catch (e) {
+    res.status(404).json({ error: e.message })
+  }
+})
+
+router.post('/:id/fix-exam-units', async (req, res) => {
+  const worksheetId = req.params.id
+  const dryRun = req.body?.dryRun === true
+  const logs = []
+  const onLog = (line) => { logs.push(line); console.log(line) }
+  try {
+    const result = await fixWorksheet(worksheetId, { onLog, skipOcr: dryRun })
+    res.json({
+      success: result.ok,
+      dryRun,
+      skipped: result.skipped || false,
+      error: result.error || null,
+      logs,
+      before: { examUnitCount: result.before.examUnitCount, suspectCount: result.before.suspects.length },
+      after: result.after ? { examUnitCount: result.after.examUnitCount, suspectCount: result.after.suspects.length } : null,
+    })
+  } catch (e) {
+    res.status(500).json({ success: false, error: e.message, logs })
   }
 })
 

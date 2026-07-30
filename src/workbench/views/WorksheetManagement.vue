@@ -2,10 +2,16 @@
   <div class="worksheet-mgr">
     <div class="page-header">
       <h2>练习册管理</h2>
-      <el-button type="primary" @click="showCreateDialog = true">
-        <el-icon><Plus /></el-icon>
-        新建练习册
-      </el-button>
+      <div style="display:flex;gap:8px;">
+        <el-button type="warning" plain @click="showFixDialog = true" :loading="fixing">
+          <el-icon><Tools /></el-icon>
+          修复试卷单元
+        </el-button>
+        <el-button type="primary" @click="showCreateDialog = true">
+          <el-icon><Plus /></el-icon>
+          新建练习册
+        </el-button>
+      </div>
     </div>
 
     <el-table :data="worksheets" v-loading="loading" stripe style="width: 100%">
@@ -25,7 +31,7 @@
       <el-table-column label="创建时间" width="160">
         <template #default="{ row }">{{ formatDate(row.created_at) }}</template>
       </el-table-column>
-      <el-table-column label="操作" width="280" fixed="right">
+      <el-table-column label="操作" width="320" fixed="right">
         <template #default="{ row }">
           <el-button size="small" @click="handleReview(row)" :disabled="row.answer_count === 0">
             审核答案
@@ -37,6 +43,9 @@
             @click="handleToggleStatus(row)"
           >
             {{ row.status === 'published' ? '撤回' : '发布' }}
+          </el-button>
+          <el-button size="small" type="info" plain @click="handleFixSingle(row)">
+            修复
           </el-button>
           <el-popconfirm title="确定删除？" @confirm="handleDelete(row)">
             <template #reference>
@@ -215,14 +224,44 @@
         </el-result>
       </div>
     </el-dialog>
+
+    <!-- 修复试卷单元对话框 -->
+    <el-dialog v-model="showFixDialog" title="修复『试卷①/②/③』错挂" width="780px" :close-on-click-modal="false">
+      <el-alert
+        type="warning" :closable="false" show-icon
+        title="适用场景：已上传答案 PDF，但批改时发现答案错挂到『第十九章实数』等父章节，未正确归到『试卷①/②/③』下"
+        style="margin-bottom:12px;"
+      />
+      <div style="margin-bottom:12px;">
+        <el-button @click="loadFixSuspects" :loading="loadingSuspects">重新扫描嫌疑</el-button>
+        <el-button type="success" :disabled="!suspectWorksheets.length" @click="confirmBatchFix">
+          一键修复全部 ({{ suspectWorksheets.length }})
+        </el-button>
+      </div>
+      <el-table :data="suspectWorksheets" v-loading="loadingSuspects" max-height="300" empty-text="未发现需要修复的练习册 🎉">
+        <el-table-column prop="name" label="名称" min-width="220" />
+        <el-table-column prop="exam_units" label="试卷单元" width="100" />
+        <el-table-column prop="orphan_ans_count" label="错挂答案数" width="120" />
+        <el-table-column label="操作" width="120" fixed="right">
+          <template #default="{ row }">
+            <el-button size="small" type="primary" @click="confirmSingleFix(row)">修复</el-button>
+          </template>
+        </el-table-column>
+      </el-table>
+
+      <div v-if="fixLogs.length" style="margin-top:12px;">
+        <div style="font-weight:600;margin-bottom:4px;">执行日志：</div>
+        <pre class="fix-log">{{ fixLogs.join('\n') }}</pre>
+      </div>
+    </el-dialog>
   </div>
 </template>
 
 <script setup>
-import { ref, onMounted } from 'vue'
+import { ref, onMounted, watch } from 'vue'
 import { useRouter } from 'vue-router'
-import { Plus, UploadFilled, Loading, PictureFilled } from '@element-plus/icons-vue'
-import { ElMessage } from 'element-plus'
+import { Plus, UploadFilled, Loading, PictureFilled, Tools } from '@element-plus/icons-vue'
+import { ElMessage, ElMessageBox } from 'element-plus'
 import {
   getWorksheets,
   createWorksheet,
@@ -665,6 +704,143 @@ const gotoReview = () => {
   showPdfDialog.value = false
   router.push(`/worksheets/${currentWorksheetId.value}/review`)
 }
+
+// ────────── 修复『试卷①/②/③ 错挂到父章节』功能 ──────────
+const showFixDialog = ref(false)
+const loadingSuspects = ref(false)
+const fixing = ref(false)
+const suspectWorksheets = ref([])
+const fixLogs = ref([])
+
+const appendLog = (line) => {
+  fixLogs.value.push(line)
+  if (fixLogs.value.length > 500) fixLogs.value = fixLogs.value.slice(-500)
+}
+
+const fixApi = {
+  listSuspects: () => fetch('/api/worksheets/fix-exam-units/suspects?limit=200').then(r => r.json()),
+  startBatch: (limit = 20) => fetch('/api/worksheets/fix-exam-units', {
+    method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ limit })
+  }).then(r => r.json()),
+  startOne: (worksheetId) => fetch('/api/worksheets/fix-one-async', {
+    method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ worksheetId })
+  }).then(r => r.json()),
+  pollJob: (jobId) => fetch(`/api/worksheets/fix-exam-units/job/${jobId}`).then(r => r.json()),
+  cancelJob: (jobId) => fetch('/api/worksheets/fix-exam-units/cancel', {
+    method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ jobId })
+  }).then(r => r.json()),
+}
+
+let pollTimer = null
+const stopPolling = () => {
+  if (pollTimer) { clearInterval(pollTimer); pollTimer = null }
+}
+const startPolling = (jobId) => {
+  stopPolling()
+  pollTimer = setInterval(async () => {
+    try {
+      const j = await fixApi.pollJob(jobId)
+      if (j.success) {
+        fixLogs.value = j.logs || []
+        if (['completed', 'failed', 'cancelled'].includes(j.status)) {
+          stopPolling()
+          fixing.value = false
+          if (j.status === 'completed') {
+            const ok = (j.results || []).filter(x => x.ok).length
+            const fail = (j.results || []).filter(x => !x.ok).length
+            ElMessage.success(`修复完成: 成功 ${ok} / 失败 ${fail}`)
+            await loadFixSuspects()
+            await loadData()
+          } else if (j.status === 'failed') {
+            ElMessage.error('修复任务失败，请查看日志')
+          } else if (j.status === 'cancelled') {
+            ElMessage.warning('已取消')
+          }
+        }
+      }
+    } catch (e) { /* 忽略轮询错误 */ }
+  }, 2000)
+}
+
+const loadFixSuspects = async () => {
+  loadingSuspects.value = true
+  fixLogs.value = []
+  try {
+    const data = await fixApi.listSuspects()
+    if (!data.success) throw new Error(data.error || '扫描失败')
+    suspectWorksheets.value = data.suspects
+    appendLog(`📋 扫描完成: 发现 ${data.count} 个需要修复的练习册`)
+    if (data.count === 0) {
+      ElMessage.success('未发现需要修复的练习册')
+    }
+  } catch (e) {
+    ElMessage.error('扫描失败: ' + e.message)
+    appendLog(`❌ 扫描失败: ${e.message}`)
+  } finally {
+    loadingSuspects.value = false
+  }
+}
+
+watch(showFixDialog, (v) => {
+  if (v && suspectWorksheets.value.length === 0) loadFixSuspects()
+})
+
+const confirmSingleFix = async (row) => {
+  try {
+    await ElMessageBox.confirm(
+      `确认修复《${row.name}》？\n\n` +
+      `• 试卷单元: ${row.exam_units}\n` +
+      `• 错挂答案数: ${row.orphan_ans_count}\n\n` +
+      `会清空当前答案并重跑 OCR（耗时 1-3 分钟），原答案会备份到 metadata.backup_unit_id。`,
+      '修复确认',
+      { confirmButtonText: '开始修复', cancelButtonText: '取消', type: 'warning' }
+    )
+  } catch { return }
+  fixing.value = true
+  fixLogs.value = [`🚀 启动单 worksheet 修复《${row.name}》(${row.id})`]
+  try {
+    const r = await fixApi.startOne(row.id)
+    if (!r.success) throw new Error(r.error || '启动失败')
+    startPolling(r.jobId)
+  } catch (e) {
+    fixing.value = false
+    ElMessage.error('启动失败: ' + e.message)
+    appendLog(`❌ 启动失败: ${e.message}`)
+  }
+}
+
+const handleFixSingle = (row) => {
+  showFixDialog.value = true
+  setTimeout(() => {
+    suspectWorksheets.value = [{
+      id: row.id, name: row.name, exam_units: 0, orphan_ans_count: row.answer_count || 0,
+    }]
+    appendLog(`ℹ️ 已选中《${row.name}》，建议先点"重新扫描嫌疑"确认`)
+  }, 50)
+}
+
+const confirmBatchFix = async () => {
+  try {
+    await ElMessageBox.confirm(
+      `将批量修复全部 ${suspectWorksheets.value.length} 个练习册，每个耗时 1-3 分钟。\n` +
+      `原答案会备份到 metadata.backup_unit_id。\n\n` +
+      `修复在后台进行，对话框可关，日志会持续更新。`,
+      '批量修复确认',
+      { confirmButtonText: '全部开始', cancelButtonText: '取消', type: 'warning' }
+    )
+  } catch { return }
+  fixing.value = true
+  fixLogs.value = [`🚀 启动批量修复 ${suspectWorksheets.value.length} 个练习册`]
+  try {
+    const r = await fixApi.startBatch(suspectWorksheets.value.length)
+    if (!r.success) throw new Error(r.error || '启动失败')
+    startPolling(r.jobId)
+  } catch (e) {
+    fixing.value = false
+    ElMessage.error('启动失败: ' + e.message)
+    appendLog(`❌ 启动失败: ${e.message}`)
+  }
+}
 </script>
 
 <style scoped>
@@ -698,5 +874,18 @@ const gotoReview = () => {
 .parse-warning {
   margin-bottom: 16px;
   text-align: left;
+}
+
+.fix-log {
+  background: #1e1e1e;
+  color: #d4d4d4;
+  padding: 12px;
+  border-radius: 4px;
+  max-height: 300px;
+  overflow-y: auto;
+  font-size: 12px;
+  line-height: 1.5;
+  white-space: pre-wrap;
+  word-break: break-all;
 }
 </style>
