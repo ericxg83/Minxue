@@ -74,35 +74,87 @@ export async function diagnoseWorksheet(worksheetId) {
 }
 
 /**
- * 列出所有嫌疑 worksheet（父章节错挂答案 >= 1，无论试卷单元数）
- * 之前要求"试卷单元=0"过于严格——很多 worksheet 已有试卷单元但部分答案仍错挂。
- * @returns {Promise<Array<{id, name, exam_units, orphan_ans_count}>>}
+ * 列出所有嫌疑 worksheet
+ *
+ * 嫌疑判据（任一满足即嫌疑）：
+ *  1. orphan_ans: 任何 unit_key 既不是『试卷%』、也不是『第X章』/『堂堂练/课课练/...』
+ *     且挂着 >=1 条答案
+ *  2. big_chapter: 存在『第X章』类型的 unit，但挂的答案数 >= BIG_CHAPTER_ANS_THRESHOLD
+ *     （典型错挂：试卷①②③的答案被父章节吞掉，导致父章节答案数爆表）
+ *  3. exam_exists: 存在『试卷%』单元（说明旧 OCR 曾经漏识别了部分试卷标题，
+ *     重跑后能识别更多试卷）
+ *
+ * 之前只判 orphan_ans，漏掉了挂在『第十九章实数』这种合法章节名上的错挂。
+ *
+ * @returns {Promise<Array<{id, name, exam_units, orphan_ans_count, big_chapter_ans, total_ans, reasons}>>}
  */
+const BIG_CHAPTER_ANS_THRESHOLD = 10
+
 export async function listSuspectWorksheets(limit = 200) {
   const { rows } = await query(
-    `SELECT w.id, w.name,
-            COUNT(u.id) FILTER (WHERE u.unit_key LIKE '试卷%')            AS exam_units,
-            SUM( (SELECT COUNT(*) FROM worksheet_answers wa WHERE wa.unit_id = u.id) )
-              FILTER (
-                WHERE u.unit_key NOT LIKE '试卷%'
-                  AND u.unit_key !~ '^第[一二三四五六七八九十\\d]+[章节]'
-                  AND u.unit_key !~ '^(堂堂练|课课练|课时练|随堂练|同步练|课时作业|课后练)'
-              ) AS orphan_ans_count
+    `WITH unit_stats AS (
+       SELECT u.resource_id AS worksheet_id,
+              u.id           AS unit_id,
+              u.unit_key,
+              (SELECT COUNT(*) FROM worksheet_answers wa WHERE wa.unit_id = u.id)::int AS ans_count
+       FROM resource_units u
+     ),
+     per_worksheet AS (
+       SELECT us.worksheet_id,
+              SUM(CASE WHEN us.unit_key LIKE '试卷%'                                   THEN 1 ELSE 0 END)::int AS exam_unit_count,
+              SUM(CASE
+                    WHEN us.unit_key NOT LIKE '试卷%'
+                     AND us.unit_key !~ '^第[一二三四五六七八九十\\d]+[章节]'
+                     AND us.unit_key !~ '^(堂堂练|课课练|课时练|随堂练|同步练|课时作业|课后练)'
+                    THEN us.ans_count ELSE 0
+                  END)::int AS orphan_ans,
+              SUM(CASE
+                    WHEN us.unit_key ~ '^第[一二三四五六七八九十\\d]+[章节]'
+                    THEN us.ans_count ELSE 0
+                  END)::int AS chapter_ans,
+              MAX(CASE
+                    WHEN us.unit_key ~ '^第[一二三四五六七八九十\\d]+[章节]'
+                    THEN us.ans_count ELSE 0
+                  END)::int AS max_chapter_ans,
+              SUM(us.ans_count)::int AS total_ans
+       FROM unit_stats us
+       GROUP BY us.worksheet_id
+     )
+     SELECT w.id, w.name, w.created_at,
+            COALESCE(p.exam_unit_count, 0)  AS exam_units,
+            COALESCE(p.orphan_ans, 0)        AS orphan_ans_count,
+            COALESCE(p.max_chapter_ans, 0)   AS big_chapter_ans,
+            COALESCE(p.chapter_ans, 0)       AS chapter_ans_count,
+            COALESCE(p.total_ans, 0)         AS total_ans_count
      FROM worksheets w
-     LEFT JOIN ${RESOURCE_UNITS} u ON u.resource_id = w.id
+     LEFT JOIN per_worksheet p ON p.worksheet_id = w.id
      WHERE w.pdf_url IS NOT NULL
-     GROUP BY w.id, w.name, w.created_at
-     HAVING SUM( (SELECT COUNT(*) FROM worksheet_answers wa WHERE wa.unit_id = u.id) )
-            FILTER (
-              WHERE u.unit_key NOT LIKE '试卷%'
-                AND u.unit_key !~ '^第[一二三四五六七八九十\\d]+[章节]'
-                AND u.unit_key !~ '^(堂堂练|课课练|课时练|随堂练|同步练|课时作业|课后练)'
-            ) >= 1
-     ORDER BY orphan_ans_count DESC, w.created_at DESC
+       AND (
+         COALESCE(p.orphan_ans, 0) >= 1
+         OR COALESCE(p.max_chapter_ans, 0) >= $2
+         OR COALESCE(p.exam_unit_count, 0) >= 1
+       )
+     ORDER BY
+       (COALESCE(p.max_chapter_ans, 0) >= $2) DESC,
+       COALESCE(p.max_chapter_ans, 0) DESC,
+       COALESCE(p.orphan_ans, 0) DESC,
+       w.created_at DESC
      LIMIT $1`,
-    [limit]
+    [limit, BIG_CHAPTER_ANS_THRESHOLD]
   )
-  return rows
+
+  // 补 reasons 字段给前端展示
+  return rows.map((r) => {
+    const reasons = []
+    if (r.exam_units > 0) reasons.push(`有${r.exam_units}个试卷单元`)
+    if (r.big_chapter_ans >= BIG_CHAPTER_ANS_THRESHOLD) {
+      reasons.push(`某章节挂${r.big_chapter_ans}条答案(疑似错挂)`)
+    }
+    if (r.orphan_ans_count >= 1) {
+      reasons.push(`非常规单元挂${r.orphan_ans_count}条答案`)
+    }
+    return { ...r, reasons }
+  })
 }
 
 /**

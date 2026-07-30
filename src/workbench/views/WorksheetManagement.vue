@@ -237,6 +237,9 @@
         <el-button type="success" :disabled="!suspectWorksheets.length" @click="confirmBatchFix">
           一键修复全部 ({{ suspectWorksheets.length }})
         </el-button>
+        <el-button type="info" plain @click="showDebug = !showDebug">
+          {{ showDebug ? '收起' : '查看所有 worksheet 分布' }}
+        </el-button>
       </div>
       <el-table :data="suspectWorksheets" v-loading="loadingSuspects" max-height="300" empty-text="未发现需要修复的练习册 🎉">
         <el-table-column prop="name" label="名称" min-width="220" />
@@ -248,6 +251,29 @@
           </template>
         </el-table-column>
       </el-table>
+
+      <div v-if="showDebug" style="margin-top:16px;border-top:1px solid #ebeef5;padding-top:12px;">
+        <div style="font-weight:600;margin-bottom:8px;">📊 所有 worksheet 详细分布（debug）：</div>
+        <div v-loading="loadingDebug" style="max-height:400px;overflow-y:auto;">
+          <div v-for="w in debugWorksheets" :key="w.id" class="debug-card">
+            <div class="debug-head">
+              <strong>{{ w.name }}</strong>
+              <span class="debug-id">{{ w.id }}</span>
+              <el-tag v-if="w.is_suspect" type="danger" size="small">嫌疑（错挂{{ w.orphan_ans_count }}）</el-tag>
+              <el-tag v-else type="success" size="small">正常</el-tag>
+            </div>
+            <div class="debug-stats">
+              试卷单元: {{ w.exam_units }}  |  章节答案: {{ w.chapter_ans_count }}  |  练习单元答案: {{ w.practice_ans_count }}  |  错挂答案: {{ w.orphan_ans_count }}  |  总: {{ w.total_ans_count }}
+            </div>
+            <div v-if="w.orphan_units && w.orphan_units.length" class="debug-orphan">
+              <span style="color:#e6a23c;">⚠️ 错挂的父章节：</span>
+              <span v-for="(u, i) in w.orphan_units" :key="u.unit_id" class="debug-orphan-item">
+                {{ u.unit_key }} (ans={{ u.ans_count }})<span v-if="i < w.orphan_units.length - 1">, </span>
+              </span>
+            </div>
+          </div>
+        </div>
+      </div>
 
       <div v-if="fixLogs.length" style="margin-top:12px;">
         <div style="font-weight:600;margin-bottom:4px;">执行日志：</div>
@@ -719,6 +745,7 @@ const appendLog = (line) => {
 
 const fixApi = {
   listSuspects: () => fetch('/api/worksheets/fix-exam-units/suspects?limit=200').then(r => r.json()),
+  listDebug: () => fetch('/api/worksheets/fix-exam-units/debug?limit=50').then(r => r.json()),
   startBatch: (limit = 20) => fetch('/api/worksheets/fix-exam-units', {
     method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ limit })
   }).then(r => r.json()),
@@ -887,5 +914,41 @@ const confirmBatchFix = async () => {
   line-height: 1.5;
   white-space: pre-wrap;
   word-break: break-all;
+}
+
+.debug-card {
+  border: 1px solid #ebeef5;
+  border-radius: 4px;
+  padding: 8px 12px;
+  margin-bottom: 8px;
+  background: #fafafa;
+}
+.debug-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 4px;
+}
+.debug-id {
+  font-family: monospace;
+  font-size: 11px;
+  color: #909399;
+}
+.debug-stats {
+  font-size: 12px;
+  color: #606266;
+  margin-bottom: 4px;
+}
+.debug-orphan {
+  font-size: 12px;
+  padding: 4px 8px;
+  background: #fdf6ec;
+  border-radius: 3px;
+  margin-top: 4px;
+}
+.debug-orphan-item {
+  font-family: monospace;
+  font-size: 11px;
+  color: #c45656;
 }
 </style>

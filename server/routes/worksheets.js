@@ -31,6 +31,8 @@ import {
   listSuspectWorksheets,
   fixWorksheet,
 } from '../services/worksheetFixService.js'
+import { query as pgQuery } from '../config/neon.js'
+const query = pgQuery
 
 const router = Router()
 const pdfUpload = multer({
@@ -77,6 +79,133 @@ router.get('/fix-exam-units/suspects', async (req, res) => {
     const limit = Math.min(parseInt(req.query.limit || '200', 10) || 200, 500)
     const suspects = await listSuspectWorksheets(limit)
     res.json({ success: true, count: suspects.length, suspects })
+  } catch (e) {
+    res.status(500).json({ error: e.message })
+  }
+})
+
+// 自测：列所有 worksheet 的 unit 分布 + 嫌疑原因（不筛任何东西，调试用）
+//   GET /api/worksheets/fix-exam-units/selftest
+router.get('/fix-exam-units/selftest', async (req, res) => {
+  try {
+    // 1) 跑 listSuspectWorksheets 看返回什么
+    const suspects = await listSuspectWorksheets(200)
+    // 2) raw SQL：列出每个 worksheet 的所有 unit_key（不筛）和每条答案数
+    const { rows: raw } = await query(
+      `SELECT w.id, w.name,
+              u.unit_key,
+              u.unit_title,
+              (SELECT COUNT(*) FROM worksheet_answers wa WHERE wa.unit_id = u.id)::int AS ans_count
+       FROM worksheets w
+       LEFT JOIN resource_units u ON u.resource_id = w.id
+       WHERE w.pdf_url IS NOT NULL
+       ORDER BY w.created_at DESC, u.unit_seq NULLS LAST, u.id ASC`
+    )
+    // 3) 聚合成 worksheet -> units
+    const byWs = new Map()
+    for (const r of raw) {
+      if (!byWs.has(r.id)) byWs.set(r.id, { id: r.id, name: r.name, units: [] })
+      const k = r.unit_key || ''
+      const a = r.ans_count || 0
+      byWs.get(r.id).units.push({ unit_key: k, unit_title: r.unit_title, ans_count: a })
+    }
+    const all = [...byWs.values()].map((w) => {
+      // 分类统计
+      let exam = 0, chapterMax = 0, chapterAns = 0, practiceAns = 0, orphanAns = 0, total = 0
+      const orphanUnitKeys = []
+      const bigChapterUnitKeys = []
+      for (const u of w.units) {
+        const k = u.unit_key || ''
+        total += u.ans_count
+        if (k.startsWith('试卷')) exam++
+        else if (/^第[一二三四五六七八九十\d]+[章节]/.test(k)) {
+          chapterAns += u.ans_count
+          if (u.ans_count > chapterMax) chapterMax = u.ans_count
+          if (u.ans_count >= 10) bigChapterUnitKeys.push(`${k}=${u.ans_count}`)
+        } else if (/^(堂堂练|课课练|课时练|随堂练|同步练|课时作业|课后练)/.test(k)) {
+          practiceAns += u.ans_count
+        } else {
+          orphanAns += u.ans_count
+          if (u.ans_count > 0) orphanUnitKeys.push(`${k}=${u.ans_count}`)
+        }
+      }
+      return {
+        id: w.id, name: w.name,
+        exam, chapterMax, chapterAns, practiceAns, orphanAns, total,
+        big_chapter_units: bigChapterUnitKeys,
+        orphan_unit_keys: orphanUnitKeys,
+        is_suspect: orphanAns >= 1 || chapterMax >= 10 || exam >= 1,
+      }
+    })
+    res.json({
+      success: true,
+      now: new Date().toISOString(),
+      suspects_count: suspects.length,
+      suspects,
+      worksheets_count: all.length,
+      worksheets: all,
+    })
+  } catch (e) {
+    res.status(500).json({ error: e.message, stack: e.stack })
+  }
+})
+
+// 诊断：列出**所有** worksheet 的 unit 分布，便于排查"扫描没结果"的情况
+//   GET /api/worksheets/fix-exam-units/debug
+// 返回每个 worksheet 的所有 unit 及其答案数（不筛嫌疑）
+router.get('/fix-exam-units/debug', async (req, res) => {
+  try {
+    const limit = Math.min(parseInt(req.query.limit || '50', 10) || 50, 200)
+    const { rows } = await query(
+      `SELECT w.id, w.name, w.parse_status, w.pdf_url IS NOT NULL AS has_pdf,
+              u.id AS unit_id, u.unit_key, u.unit_title, u.lesson_code,
+              (SELECT COUNT(*) FROM worksheet_answers wa WHERE wa.unit_id = u.id) AS ans_count
+       FROM worksheets w
+       LEFT JOIN resource_units u ON u.resource_id = w.id
+       WHERE w.pdf_url IS NOT NULL
+       ORDER BY w.created_at DESC, u.unit_seq NULLS LAST, u.created_at ASC
+       LIMIT $1`,
+      [limit * 20]  // 粗略上限：每个 worksheet 平均 20 个 unit
+    )
+    // 按 worksheet 分组
+    const map = new Map()
+    for (const r of rows) {
+      if (!map.has(r.id)) {
+        map.set(r.id, { id: r.id, name: r.name, parse_status: r.parse_status, units: [] })
+      }
+      if (r.unit_id) {
+        map.get(r.id).units.push({
+          unit_id: r.unit_id, unit_key: r.unit_key, unit_title: r.unit_title,
+          lesson_code: r.lesson_code, ans_count: parseInt(r.ans_count, 10)
+        })
+      }
+    }
+    const list = [...map.values()]
+    // 每个 worksheet 标注分类
+    for (const w of list) {
+      let examCount = 0, orphanAns = 0, chapterAns = 0, practiceAns = 0, totalAns = 0
+      const orphanUnits = []
+      for (const u of w.units) {
+        const k = u.unit_key || ''
+        const isExam = k.startsWith('试卷')
+        const isChapter = /^第[一二三四五六七八九十\d]+[章节]/.test(k)
+        const isPractice = /^(堂堂练|课课练|课时练|随堂练|同步练|课时作业|课后练)/.test(k)
+        totalAns += u.ans_count
+        if (isExam) examCount++
+        else if (isChapter) chapterAns += u.ans_count
+        else if (isPractice) practiceAns += u.ans_count
+        else { orphanAns += u.ans_count; if (u.ans_count > 0) orphanUnits.push(u) }
+      }
+      w.exam_units = examCount
+      w.orphan_ans_count = orphanAns
+      w.chapter_ans_count = chapterAns
+      w.practice_ans_count = practiceAns
+      w.total_ans_count = totalAns
+      w.orphan_units = orphanUnits
+      w.is_suspect = orphanAns >= 1
+    }
+    list.sort((a, b) => (b.is_suspect - a.is_suspect) || (b.orphan_ans_count - a.orphan_ans_count))
+    res.json({ success: true, count: list.length, worksheets: list })
   } catch (e) {
     res.status(500).json({ error: e.message })
   }
