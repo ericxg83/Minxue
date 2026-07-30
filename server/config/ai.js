@@ -244,6 +244,17 @@ const BACKUP_VENDOR_DEFS = [
     vlModels: ['agnes-1.5-flash', 'gpt-4o-mini', 'Qwen2.5-VL-7B-Instruct'],
     referer: null,
   },
+  {
+    // FreeModel：多模型聚合网关，OpenAI 兼容格式。
+    // 配额 5 小时重置（非按日），不能作为主 API，仅作 Agnes 之后的最后兜底。
+    // model='auto' 让网关自动路由到最合适的模型，无需手动选模型。
+    name: 'FreeModel',
+    envKey: 'FREEMODEL_API_KEY',
+    endpoint: 'https://api.freemodel.dev/v1/chat/completions',
+    textModel: 'auto',
+    vlModels: ['auto'],
+    referer: null,
+  },
 ]
 
 function resolveBackupVendors() {
@@ -622,22 +633,28 @@ export async function callVisionCompletion(opts) {
         providers.push(callMsProvider(apiKey, vlModel))
       }
     }
-    // Agnes 视觉兜底（独立供应商，配额与魔搭解耦）
+    // 备份供应商视觉兜底（Agnes → FreeModel，各自独立配额）
     for (const vendor of BACKUP_CONFIG.VENDORS) {
       for (const vlModel of vendor.vlModels) {
         providers.push(async () => {
-          const content = await requestOpenAIProvider({
-            endpoint: vendor.endpoint,
-            apiKey: process.env[vendor.envKey] || '',
-            model: model || vlModel,
-            messages,
-            temperature,
-            maxTokens: Math.min(maxTokens, 4096),
-            timeout: BACKUP_TIMEOUT,
-            retry503: false,
-            vendor,
-          })
-          return { content, usedBackup: true }
+          try {
+            const content = await requestOpenAIProvider({
+              endpoint: vendor.endpoint,
+              apiKey: process.env[vendor.envKey] || '',
+              model: model || vlModel,
+              messages,
+              temperature,
+              maxTokens: Math.min(maxTokens, 4096),
+              timeout: BACKUP_TIMEOUT,
+              retry503: false,
+              vendor,
+            })
+            return { content, usedBackup: true }
+          } catch (err) {
+            // 打标记让 wrapVisionError 知道是哪个 vendor 失败
+            err._provider = vendor.name.toLowerCase()
+            throw err
+          }
         })
       }
     }
@@ -678,6 +695,7 @@ export async function callVisionCompletion(opts) {
   let lastError = null
   let msAttempted = false
   let agnesAttempted = false
+  let fmAttempted = false
   for (const provider of providers) {
     try {
       const result = await provider()
@@ -692,10 +710,12 @@ export async function callVisionCompletion(opts) {
       // 标记哪些 provider 真正被尝试过
       if (err._provider === 'ms' || /魔搭|ModelScope|ms provider/i.test(err.message || '')) msAttempted = true
       else if (err._provider === 'agnes' || /Agnes|agnes/i.test(err.message || '')) agnesAttempted = true
+      else if (err._provider === 'freemodel' || /FreeModel|freemodel/i.test(err.message || '')) fmAttempted = true
       else {
-        // provider 闭包内未显式打标时，按调用顺序推断（先魔搭后 Agnes）
+        // provider 闭包内未显式打标时，按调用顺序推断（先魔搭后 Agnes 再 FreeModel）
         if (!msAttempted) msAttempted = true
-        else agnesAttempted = true
+        else if (!agnesAttempted) agnesAttempted = true
+        else fmAttempted = true
       }
     }
   }
@@ -703,7 +723,7 @@ export async function callVisionCompletion(opts) {
   // ── 统一错误信息：让用户/前端/黑名单都能精确知道是哪一类 provider 不可用 ──
   // 仅魔搭失败 → 提示"魔搭视觉模型当日配额耗尽或限流，请明日再试或配置其他模型"
   // 魔搭+Agnes 都失败 → 提示"所有视觉模型均不可用，请稍后重试"
-  throw wrapVisionError(lastError, { msAttempted, agnesAttempted })
+  throw wrapVisionError(lastError, { msAttempted, agnesAttempted, fmAttempted })
 }
 
 /**
@@ -716,14 +736,19 @@ export async function callVisionCompletion(opts) {
  *   - 魔搭 + Agnes 都失败 → "所有视觉模型（魔搭 + Agnes）均不可用：${baseMsg}"
  *   - 都没尝试（理论不可能）→ 抛原 error
  */
-export function wrapVisionError(lastError, { msAttempted = false, agnesAttempted = false } = {}) {
+export function wrapVisionError(lastError, { msAttempted = false, agnesAttempted = false, fmAttempted = false } = {}) {
   if (!lastError) return new Error('All vision AI providers failed')
-  if (msAttempted && agnesAttempted) {
-    const wrapped = new Error(`所有视觉模型（魔搭 + Agnes）均不可用：${lastError.message || '未知错误'}`)
+  // 收集所有尝试过的 provider 名称
+  const tried = []
+  if (msAttempted) tried.push('魔搭')
+  if (agnesAttempted) tried.push('Agnes')
+  if (fmAttempted) tried.push('FreeModel')
+  if (tried.length >= 2) {
+    const wrapped = new Error(`所有视觉模型（${tried.join(' + ')}）均不可用：${lastError.message || '未知错误'}`)
     wrapped.cause = lastError
     return wrapped
   }
-  if (agnesAttempted && !msAttempted) {
+  if (agnesAttempted && !msAttempted && !fmAttempted) {
     const wrapped = new Error(`所有 Agnes 视觉模型均不可用：${lastError.message || '未知错误'}`)
     wrapped.cause = lastError
     return wrapped
