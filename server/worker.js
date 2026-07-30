@@ -1738,9 +1738,10 @@ const processWorkbookGrading = async (job) => {
     }
 
     // 纠偏 + 压缩
+    // ModelScope Qwen3-VL 限制 2048x2048：长边缩放到 1800 留余量，避免报 400
     const compressedBuffer = await sharp(imageBuffer)
       .rotate()
-      .resize(1920, undefined, { fit: 'inside', withoutEnlargement: true })
+      .resize(1800, 1800, { fit: 'inside', withoutEnlargement: true })
       .jpeg({ quality: 85 })
       .toBuffer()
 

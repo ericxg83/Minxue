@@ -125,6 +125,17 @@ async function postWith429Retry(client, endpoint, body, axiosOptions, { retry429
       return response
     } catch (err) {
       const status = err.response?.status
+      // 诊断：详细记录 400 错误（通常提示 prompt 过长 / 图片超限 / 字段格式错误）
+      if (status === 400) {
+        const body = err.response?.data
+        const dataSize = JSON.stringify(body).length
+        const imgSize = body?.messages?.[1]?.content?.find?.(c => c.type === 'image_url')?.image_url?.url?.length || 0
+        console.error(`[AI] 400 bad request:`,
+          `model=${body?.model}`,
+          `dataSize=${dataSize}B`,
+          `imageBase64Size=${imgSize}B`,
+          `errorMsg=${body?.error?.message || JSON.stringify(body)?.substring(0, 300)}`)
+      }
       // 配额耗尽：立刻放弃该 Key×模型组合并上抛，让调用方换组合，绝不浪费时间重试
       if (status === 429 && isQuotaExhaustedError(err)) {
         const auth = String(axiosOptions?.headers?.Authorization || '').replace(/^Bearer\s+/i, '')
