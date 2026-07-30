@@ -90,6 +90,19 @@ class PendingTaskRecovery {
     this.isRunning = true
 
     try {
+      // ── 全局熔断：视觉模型配额耗尽时，所有需要 AI 的任务恢复都是徒劳的 ──
+      // 配额按自然日计，一旦耗尽当天不会恢复。
+      // 检查最近 5 分钟是否有任务因配额耗尽失败 → 有则跳过所有 AI 任务恢复，
+      // 仅运行不依赖 AI 的扫描（如练习册解析卡死重置）。
+      const quotaExhausted = await this.isVisionQuotaExhausted()
+      if (quotaExhausted) {
+        console.warn('[PendingTaskRecovery] 🚫 全局熔断：视觉模型配额耗尽，跳过 AI 任务恢复（仅运行非 AI 扫描）')
+        await Promise.allSettled([
+          this.scanStuckWorksheetParsing()
+        ])
+        return
+      }
+
       // ⚡ 并行执行 5 个独立扫描，替代串行
       await Promise.allSettled([
         this.scanPendingTasks(),
@@ -102,6 +115,34 @@ class PendingTaskRecovery {
       console.error('[PendingTaskRecovery] ❌ 扫描失败:', err)
     } finally {
       this.isRunning = false
+    }
+  }
+
+  /**
+   * 全局熔断检查：最近 5 分钟是否有任务因"视觉模型配额耗尽"失败。
+   * 配额按自然日计，一旦耗尽当天不会恢复，此时恢复任务只是徒劳地
+   * 下载图片 → 调 AI → 失败 → 写 DB → 下次扫描再恢复，形成死循环。
+   *
+   * 命中条件：status=failed AND last_error 包含配额耗尽关键词 AND updated_at > 5 分钟前
+   */
+  async isVisionQuotaExhausted() {
+    try {
+      const { rows } = await query(
+        `SELECT 1 FROM ${TABLES.TASKS}
+         WHERE status = 'failed'
+           AND (
+             last_error ILIKE '%配额%用尽%'
+             OR last_error ILIKE '%视觉模型%不可用%'
+             OR last_error ILIKE '%所有视觉模型%失败%'
+           )
+           AND updated_at > NOW() - INTERVAL '5 minutes'
+         LIMIT 1`,
+        []
+      )
+      return rows.length > 0
+    } catch {
+      // 查询失败时保守放行（不熔断），避免 DB 抖动导致恢复完全停止
+      return false
     }
   }
 
@@ -202,6 +243,7 @@ class PendingTaskRecovery {
   async scanProcessingStuck() {
     try {
       const PROCESSING_TIMEOUT_MS = parseInt(process.env.TASK_PROCESSING_TIMEOUT_MS) || 30 * 60 * 1000 // 30 min
+      const MAX_AUTO_RETRIES = 3
       console.log('[PendingTaskRecovery]  开始扫描 stuck processing 任务...')
 
       const { rows } = await query(
@@ -209,9 +251,10 @@ class PendingTaskRecovery {
                 task_type, worksheet_id, generated_exam_id, subject, last_error
          FROM ${TABLES.TASKS}
          WHERE status = 'processing'
+           AND COALESCE(retry_count, 0) < $1
            AND (started_at IS NULL OR started_at < NOW() - INTERVAL '${PROCESSING_TIMEOUT_MS / 1000 / 60} minutes')
          ORDER BY started_at ASC NULLS FIRST`,
-        []
+        [MAX_AUTO_RETRIES]
       )
 
       if (rows.length === 0) {
