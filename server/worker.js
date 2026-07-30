@@ -1527,7 +1527,35 @@ const normalizeTitleForMatch = (s) => {
     .replace(/[\s　]+/g, '') // 空白已经由 normalizeSectionName 压过，此处再兜一次
 }
 
-export function pickAnswerUnit(answersByUnit, pageTitle, questions, pageNumber) {
+// 内容特征 → 章节关键词：按"特征越具体→匹配越准"排序（命中后立即 return，不继续判）。
+// 用于 pageTitle 缺失时根据题目内容（题干 + 学生答案 + 选项）反推章节。
+// 关键词命中 unitTitle 或 unitKeyRaw 即视为该章节。
+const CONTENT_CHAPTER_RULES = [
+  { chapter: '二次根式', re: /二次根式|平方根|立方根|±\s*√|√[a-zA-Z0-9]|根号/ },
+  { chapter: '一元二次方程', re: /一元二次方程|求根公式|判别式|根与系数|二次三项式/ },
+  { chapter: '直角三角形', re: /直角三角形|勾股定理|角平分线/ },
+  { chapter: '实数', re: /无理数|相反数|绝对值|科学记数法|近似数|算术平方根/ },
+]
+const detectChapterByContent = (questions) => {
+  if (!Array.isArray(questions) || questions.length === 0) return null
+  // 拼所有题目的题干 + 学生答案 + 选项 + question_type 为一个文本
+  // （题目内容里通常会带特征字，如"下列各式中正确的是...√4...±√2..."）
+  const buf = []
+  for (const q of questions) {
+    if (q.content) buf.push(String(q.content))
+    if (q.student_answer) buf.push(String(q.student_answer))
+    if (Array.isArray(q.options)) buf.push(q.options.join(' '))
+    if (typeof q.options === 'string') buf.push(q.options)
+  }
+  const text = buf.join(' ')
+  if (!text) return null
+  for (const rule of CONTENT_CHAPTER_RULES) {
+    if (rule.re.test(text)) return rule.chapter
+  }
+  return null
+}
+
+export function pickAnswerUnit(answersByUnit, pageTitle, questions, pageNumber, chapterHint) {
   if (!answersByUnit || answersByUnit.size === 0) return null
   if (answersByUnit.size === 1) return [...answersByUnit.keys()][0]
 
@@ -1559,6 +1587,24 @@ export function pickAnswerUnit(answersByUnit, pageTitle, questions, pageNumber) 
   }
   const candidates = [...answersByUnit.keys()].map(unitMeta)
 
+  // 0) chapter_hint 兜底（OCR 阶段 AI 看过题目内容后推断的章节名）。
+  //    这是 pageTitle 缺失时最可靠的章节信号——AI 已经看过题目内容
+  //    （含 √、二次根式等关键特征），比单纯"题号覆盖率打分"准得多。
+  //    必须在标题匹配之前尝试，否则 pageTitle=null 会被覆盖率打分抢先命中错误章节。
+  if (chapterHint && typeof chapterHint === 'string') {
+    const normHint = normalizeTitleForMatch(chapterHint)
+    if (normHint) {
+      for (const c of candidates) {
+        const ct = normalizeTitleForMatch(c.unitTitle)
+        if (ct && ct.includes(normHint)) return c.unitKey
+      }
+      for (const c of candidates) {
+        const ck = normalizeTitleForMatch(c.unitKeyRaw)
+        if (ck && ck.includes(normHint)) return c.unitKey
+      }
+    }
+  }
+
   // 1) 标题匹配：先把 pageTitle 压空白 + 圈序号→ASCII，再做归一化匹配
   //    旧版只压空白，OCR 把"堂堂练①"误识别为"堂堂练1"会直接失配，60% 兜底也撞错单元
   const normTitle = normalizeTitleForMatch(normalizeSectionName(pageTitle))
@@ -1573,6 +1619,20 @@ export function pickAnswerUnit(answersByUnit, pageTitle, questions, pageNumber) 
     for (const c of candidates) {
       const ck = normalizeTitleForMatch(c.unitKeyRaw)
       if (ck && titleMatches(normTitle, ck)) return c.unitKey
+    }
+  }
+
+  // 1.5) 内容特征匹配（兜底）——当 pageTitle 缺失/匹配失败且多个章节有相同题号时，
+  //   用题目 OCR 文本中的数学特征（√、二次根式等）反推章节。这能解决：
+  //     - 页面顶部"二、选择题"等无章节标题的排版，OCR 无法识别 page_title
+  //     - 第十九/二十/二十一/二十二章题号都从 1 开始编号，仅靠题号覆盖率会错挂
+  const detectedChapter = detectChapterByContent(questions)
+  if (detectedChapter) {
+    for (const c of candidates) {
+      if (c.unitTitle && c.unitTitle.includes(detectedChapter)) return c.unitKey
+    }
+    for (const c of candidates) {
+      if (c.unitKeyRaw && c.unitKeyRaw.includes(detectedChapter)) return c.unitKey
     }
   }
 
@@ -1734,9 +1794,11 @@ const processWorkbookGrading = async (job) => {
 只输出 JSON 对象，格式：
 {
   "page_title": "页面顶部印刷体标题，如'堂堂练① 19.1(1) 算术平方根'、'第一章阶段练1'、'第十九章 单元测试卷'，没有则填 null",
+  "chapter_hint": "根据题目内容推断的章节名，如'第二十章二次根式'，不确定就填 null",
   "questions": [
     {
       "question_number": 1,
+      "content": "题目原文（印刷体题干，含题号描述，如'与数轴上的点一一对应的是'，选择题可写'下列各式中正确的是'）",
       "student_answer": "学生手写的答案文本，没有则填 null",
       "question_type": "choice",  // choice | fill | judge | answer
       "block_coordinates": { "x": 120, "y": 300, "width": 760, "height": 90 }
@@ -1748,12 +1810,38 @@ const processWorkbookGrading = async (job) => {
 - page_title 从页面页眉/大标题的印刷体读取，尽量完整（包括圈序号 ①②③、课时编号 19.1(1) 等关键信息）。
   它是批改时定位答案库的关键锚点——必须如实输出，绝不要省略或简化。
   例如：识别到"堂堂练①  19.1(1)  算术平方根"就必须原样输出整串，不要简化为"堂堂练1"。
+
+⚠️【关键】如果页面顶部看不到印刷体页眉/标题（被裁掉、模糊、或本就是"二、选择题 + 简答题"这类无章节标题的排版），
+  绝对不能把 page_title 留为 null！必须根据本页【题目内容特征】推断最可能的章节标题并填入：
+  - 题目出现 √、±√、二次根式、根号运算、平方根、立方根 → 填 "第二十章二次根式"
+  - 题目出现实数、无理数、有理数、相反数、绝对值、数轴、科学记数法、近似数 → 填 "第十九章实数"
+  - 题目出现一元二次方程、求根公式、判别式、根与系数 → 填 "第二十一章一元二次方程"
+  - 题目出现直角三角形、勾股定理、角平分线 → 填 "第二十二章直角三角形"
+  - 其他情况：根据题号所在范围 + 内容特征推断；实在判断不出，填 "未知章节"。
+  page_title 缺失会导致后端无法定位答案库而错挂章节，批改结果"一塌糊涂"。
+
+- chapter_hint 必须填！当 page_title 拿不准章节时，chapter_hint 是关键的兜底信号。
+  填法与上面 page_title 的章节推断规则完全一致。
+
+- content 必须填：每道题的题干原文（印刷体），至少包含这道题在问什么。
+  选填题可写"下列各式中正确的是"或"与数轴上的点一一对应的是"等；
+  计算题可写"(1) √12 × √(1/3)"；填空题可写"某数..."。
+  它的作用是：后端会用 content 里的关键数学符号（√、根号等）反推章节归属。
+  content 缺失会导致章节无法反推。
+
 - question_number 从印刷体题号读取，必须是数字
 - student_answer 只提取学生手写的内容，如果没有手写迹，填 null；判断题的 √/× 也要提取
 - block_coordinates 是该题在图片中的整体外接矩形框（含题号、题干、学生作答区），
   用【归一化 0-1000 坐标系】：x/y 为矩形左上角，width/height 为宽高，
   取值范围 0-1000（相对图片宽/高的千分比，与图片实际像素分辨率无关）。
   必须为每道题都返回该框，用于前端在原图上定位题目。
+  ⚠️ 必须按题目【真实位置】返回！x/y/width/height 要反映题目在图片中的实际位置，
+  不能返回均匀递增的"占位"坐标（如 y:150,200,250,300...）。
+  - x：题号最左侧的 x 坐标（0-1000）
+  - y：题号上边缘的 y 坐标（0-1000）
+  - width：题号所在行到题目整体最右侧的宽度
+  - height：题号到题目最后一行（学生作答区下沿）的高度
+  如果实在无法判断某道题的具体边界，至少让 width/height 反映题目的真实占比（计算题比选择题高），不要全部返回相同值。
 - 不要猜测标准答案
 - 只返回 JSON，不要其他文字`
 
@@ -1812,7 +1900,18 @@ const processWorkbookGrading = async (job) => {
         questions = parsed
       } else if (parsed && typeof parsed === 'object') {
         pageTitle = parsed.page_title || null
+        // chapter_hint 是 AI 推断的章节名（"第二十章二次根式"等），用于
+        // pickAnswerUnit 兜底章节匹配。即使 pageTitle 没识别到或无法匹配，
+        // chapter_hint 仍可作为可靠的章节信号（AI 看过题目内容）。
+        // 把它暂存在 pageDataList，下游消费。
+        const chapterHint = parsed.chapter_hint || null
         questions = Array.isArray(parsed.questions) ? parsed.questions : []
+        if (chapterHint) {
+          // 把 chapter_hint 也合并进每个 question 的临时字段，供 pickAnswerUnit 用
+          for (const q of questions) {
+            if (q && typeof q === 'object') q._chapter_hint = chapterHint
+          }
+        }
       }
     } catch (e) {
       console.error(`   [Workbook] 第 ${pageIdx + 1} 页JSON解析失败:`, e.message)
@@ -1836,7 +1935,14 @@ const processWorkbookGrading = async (job) => {
     // pageNumber 一并入 pageDataList，供下游 pickAnswerUnit 走"页码范围兜底"匹配：
     // 答案 PDF 中按页号记录了每个单元的起止页，本页若 OCR 失败或标题失配，
     // 可用页码范围作为辅助信号定位所属单元。
-    pageDataList.push({ pageTitle, imageUrl: url, questions, pageNumber: pageNo })
+    // chapterHint 来自 AI 推断（"第二十章二次根式"等），pickAnswerUnit 内部会消费它。
+    pageDataList.push({
+      pageTitle,
+      imageUrl: url,
+      questions,
+      pageNumber: pageNo,
+      chapterHint: questions.find(q => q && q._chapter_hint)?._chapter_hint || null
+    })
 
     const progress = 5 + Math.round(((pageIdx + 1) / imageList.length) * 60)
     await updateTaskStatus(taskId, TASK_STATUS.PROCESSING, { progress })
@@ -1865,11 +1971,13 @@ const processWorkbookGrading = async (job) => {
   let emptyCount = 0
   const pagesMatchInfo = []
 
-  for (const { pageTitle, imageUrl, questions, pageNumber } of pageDataList) {
+  for (const { pageTitle, imageUrl, questions, pageNumber, chapterHint } of pageDataList) {
     if (questions.length === 0) continue
 
     // 1) 选本页所属单元（unitKey）—— pageNumber 用于"页码范围兜底"
-    const matchedUnit = pickAnswerUnit(answersByUnit, pageTitle, questions, pageNumber)
+    //    chapterHint 来自 OCR 阶段 AI 推断的章节（如"第二十章二次根式"），
+    //    当 pageTitle 缺失/匹配失败时作为强信号兜底。
+    const matchedUnit = pickAnswerUnit(answersByUnit, pageTitle, questions, pageNumber, chapterHint)
     const unitAnswers = matchedUnit != null ? answersByUnit.get(matchedUnit) : null
 
     // 2) 在该单元的"section → qNo|subNo → row"二维索引中，每道题独立查答案。
@@ -1971,7 +2079,7 @@ const processWorkbookGrading = async (job) => {
     source_type: 'workbook'
   }))
   // 清除临时标记字段
-  for (const q of questionsWithStudentId) { delete q._page_image_url; delete q._page_number }
+  for (const q of questionsWithStudentId) { delete q._page_image_url; delete q._page_number; delete q._chapter_hint }
 
   await createQuestions(questionsWithStudentId)
 
