@@ -19,7 +19,7 @@ const GEOMETRY_MAX_RETRIES = GEOMETRY_RETRY_DELAYS.length
 //   3. 用户输入类：缺少 worksheetId、URL 无效、文件未上传完成等，本身就是数据问题。
 //
 // 命中黑名单 → 直接跳过，不恢复、不入队，让任务停留在 failed 状态等待人工/数据修复。
-const NON_RETRYABLE_ERROR_PATTERNS = [
+export const NON_RETRYABLE_ERROR_PATTERNS = [
   /所有魔搭视觉模型.*配额.*用尽/,
   /所有视觉模型.*不可用/,
   /所有视觉模型.*失败/,
@@ -43,7 +43,7 @@ const NON_RETRYABLE_ERROR_PATTERNS = [
  * 判断 last_error 是否命中"不应自动重试"黑名单。
  * 命中 → 返回 { skip: true, reason }；未命中 → 返回 { skip: false }。
  */
-function classifyLastError(lastError) {
+export function classifyLastError(lastError) {
   const msg = String(lastError || '').trim()
   if (!msg) return { skip: false } // 没有错误信息时放行（保守处理）
   for (const pat of NON_RETRYABLE_ERROR_PATTERNS) {

@@ -701,21 +701,32 @@ export async function callVisionCompletion(opts) {
   // ── 统一错误信息：让用户/前端/黑名单都能精确知道是哪一类 provider 不可用 ──
   // 仅魔搭失败 → 提示"魔搭视觉模型当日配额耗尽或限流，请明日再试或配置其他模型"
   // 魔搭+Agnes 都失败 → 提示"所有视觉模型均不可用，请稍后重试"
-  if (lastError) {
-    const baseMsg = lastError.message || '未知错误'
-    if (msAttempted && agnesAttempted) {
-      const wrapped = new Error(`所有视觉模型（魔搭 + Agnes）均不可用：${baseMsg}`)
-      wrapped.cause = lastError
-      throw wrapped
-    } else if (agnesAttempted && !msAttempted) {
-      const wrapped = new Error(`所有 Agnes 视觉模型均不可用：${baseMsg}`)
-      wrapped.cause = lastError
-      throw wrapped
-    }
-    // 仅魔搭被尝试且失败时，保留原 message 以便黑名单 pattern 命中"所有魔搭视觉模型...用尽"
-  }
+  throw wrapVisionError(lastError, { msAttempted, agnesAttempted })
+}
 
-  throw lastError || new Error('All vision AI providers failed')
+/**
+ * 根据已尝试的 provider 类型，把 lastError 包装成精确错误信息。
+ * 纯函数，导出供单测。
+ *
+ * 规则：
+ *   - 仅魔搭失败 → 保留原 message（让黑名单 pattern "所有魔搭视觉模型...用尽" 能命中）
+ *   - 仅 Agnes 失败 → "所有 Agnes 视觉模型均不可用：${baseMsg}"
+ *   - 魔搭 + Agnes 都失败 → "所有视觉模型（魔搭 + Agnes）均不可用：${baseMsg}"
+ *   - 都没尝试（理论不可能）→ 抛原 error
+ */
+export function wrapVisionError(lastError, { msAttempted = false, agnesAttempted = false } = {}) {
+  if (!lastError) return new Error('All vision AI providers failed')
+  if (msAttempted && agnesAttempted) {
+    const wrapped = new Error(`所有视觉模型（魔搭 + Agnes）均不可用：${lastError.message || '未知错误'}`)
+    wrapped.cause = lastError
+    return wrapped
+  }
+  if (agnesAttempted && !msAttempted) {
+    const wrapped = new Error(`所有 Agnes 视觉模型均不可用：${lastError.message || '未知错误'}`)
+    wrapped.cause = lastError
+    return wrapped
+  }
+  return lastError
 }
 
 export const buildOCRPrompt = () => `你是一个专业的作业题目识别助手。请识别图片中的题目，并严格返回 JSON，不要输出任何额外说明。

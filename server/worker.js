@@ -19,6 +19,7 @@ import { uploadFilesWithRetry } from './services/uploadRetryManager.js'
 import { judgeAnswer } from './services/judgeService.js'
 import { normalizeSectionName } from './services/answerParseService.js'
 import { classifyQuestionLocally } from './utils/localTagger.js'
+import { NON_RETRYABLE_ERROR_PATTERNS } from './pendingTaskRecovery.js'
 
 // ── 多模态切题引擎：几何图处理 ──
 // 使用 Sharp 进行裁剪和图像增强（替代浏览器端的 Canvas/OpenCV）
@@ -586,6 +587,8 @@ const bufferToBase64 = (buffer) => {
   return `data:image/jpeg;base64,${buffer.toString('base64')}`
 }
 
+import { isValidImageBuffer } from './utils/imageValidator.js'
+
 const downloadImage = async (imageUrl) => {
   try {
     console.log(`   正在下载图片: ${imageUrl.substring(0, 80)}...`)
@@ -599,16 +602,10 @@ const downloadImage = async (imageUrl) => {
     // ── 魔数校验：OSS 404 / 403 / 鉴权失败会返回 XML/HTML 错误页（约 3000-4000 bytes），
     //    axios 仍按 2xx/3xx 视为成功，AI 拿去调视觉模型会立即被视觉模型拒掉。
     //    在这里直接拦下，给出明确错误，避免被 AI 误判为"模型问题"反复重试。
-    const magic = buf.slice(0, 4)
-    const isJpeg = magic[0] === 0xFF && magic[1] === 0xD8 && magic[2] === 0xFF
-    const isPng = magic[0] === 0x89 && magic[1] === 0x50 && magic[2] === 0x4E && magic[3] === 0x47
-    const isWebp = magic[0] === 0x52 && magic[1] === 0x49 && magic[2] === 0x46 && magic[3] === 0x46 // RIFF
-    const isHeic = magic.slice(0, 4).toString('ascii') === 'ftyp'
-    const head = buf.slice(0, 200).toString('utf8').trim()
-    const looksLikeXml = head.startsWith('<?xml') || head.startsWith('<Error>') || head.startsWith('<html')
-    if (buf.length < 1024 || (!isJpeg && !isPng && !isWebp && !isHeic) || looksLikeXml) {
-      console.error(`   ❌ 下载内容非图片: 魔数=${magic.toString('hex')}, 前80字符=${head.substring(0, 80)}`)
-      throw new Error(`下载图片失败: 返回内容不是图片（${buf.length} bytes, magic=${magic.toString('hex')}），URL 可能已失效或 OSS 返回了错误页`)
+    if (!isValidImageBuffer(buf)) {
+      const head = buf.slice(0, 80).toString('utf8').replace(/[^\x20-\x7E]/g, '?')
+      console.error(`   ❌ 下载内容非图片: ${buf.length} bytes, 头80字符="${head}"`)
+      throw new Error(`下载图片失败: 返回内容不是图片（${buf.length} bytes），URL 可能已失效或 OSS 返回了错误页`)
     }
 
     return buf
@@ -2988,7 +2985,6 @@ await job.updateProgress(80)
     console.error(`💥💥💥 [Worker] 任务处理失败:`)
     console.error(`   taskId: ${taskId}`)
     console.error(`   错误: ${error.message}`)
-    console.error(`   堆栈: ${error.stack}`)
     console.error(`💥💥 ==========================================\n`)
 
     try {
@@ -3017,6 +3013,16 @@ await job.updateProgress(80)
       })
     } catch (updateError) {
       console.error('更新任务失败状态时出错:', updateError)
+    }
+
+    // ── 关键：非可重试错误不抛给 BullMQ ──
+    // 配额耗尽 / 限流 / URL 失效 / 缺少 worksheetId 等属于"自愈失败"，
+    // 抛给 BullMQ 会触发 attempts=3 的内部重试（每次都重复下载图片、调 AI、浪费 30s+）。
+    // 返回 undefined → BullMQ 视为 completed → 不再重试。
+    // 任务在 DB 里已经是 FAILED，PendingTaskRecovery 黑名单会兜底阻止再次入队。
+    if (NON_RETRYABLE_ERROR_PATTERNS.some(pat => pat.test(error.message || ''))) {
+      console.warn(`🚫 [Worker] 任务命中非可重试黑名单，跳过 BullMQ 重试: taskId=${taskId}`)
+      return undefined
     }
 
     throw error
