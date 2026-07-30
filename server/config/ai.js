@@ -233,6 +233,20 @@ export const getAIHeaders = () => ({
 
 const BACKUP_VENDOR_DEFS = [
   {
+    // SenseNova（商汤日日新）：OpenAI 兼容格式，公测期免费。
+    // sensenova-6.7-flash-lite 支持多模态视觉理解，配额 1500 次/5 小时。
+    // 必须传 reasoning_effort:'none' 禁用思考模式，否则思考过程太长（3754+ tokens）
+    // 导致 max_tokens 耗尽在 reasoning 阶段，永远拿不到 content。
+    // 顺序：视觉效果好且配额独立，放备份供应商第一位（魔搭之后）。
+    name: 'SenseNova',
+    envKey: 'SENSENOVA_API_KEY',
+    endpoint: 'https://token.sensenova.cn/v1/chat/completions',
+    textModel: 'sensenova-6.7-flash-lite',
+    vlModels: ['sensenova-6.7-flash-lite'],
+    referer: null,
+    extraBody: { reasoning_effort: 'none' },
+  },
+  {
     name: 'Agnes',
     envKey: 'AGNES_API_KEY',
     endpoint: 'https://apihub.agnes-ai.com/v1/chat/completions',
@@ -246,7 +260,7 @@ const BACKUP_VENDOR_DEFS = [
   },
   {
     // FreeModel：多模型聚合网关，OpenAI 兼容格式。
-    // 配额 5 小时重置（非按日），不能作为主 API，仅作 Agnes 之后的最后兜底。
+    // 配额 5 小时重置（非按日），不能作为主 API，仅作最后兜底。
     // model='auto' 让网关自动路由到最合适的模型，无需手动选模型。
     name: 'FreeModel',
     envKey: 'FREEMODEL_API_KEY',
@@ -388,21 +402,28 @@ async function requestOpenAIProvider({
   retry429 = true,
   retry503 = true,
   vendor = null,
+  extraBody = null,
 }) {
   const headers = vendor ? buildVendorHeaders(vendor, apiKey) : {
     'Content-Type': 'application/json',
     Authorization: `Bearer ${apiKey}`,
   }
 
+  const body = {
+    model,
+    messages,
+    temperature,
+    max_tokens: maxTokens,
+  }
+  // SenseNova 等模型需要额外参数（如 reasoning_effort: 'none' 禁用思考模式）
+  if (extraBody && typeof extraBody === 'object') {
+    Object.assign(body, extraBody)
+  }
+
   const response = await postWith429Retry(
     vendor ? backupAxios : axios,
     endpoint,
-    {
-      model,
-      messages,
-      temperature,
-      max_tokens: maxTokens,
-    },
+    body,
     { headers, timeout },
     { retry429, retry503 },
   )
@@ -633,7 +654,7 @@ export async function callVisionCompletion(opts) {
         providers.push(callMsProvider(apiKey, vlModel))
       }
     }
-    // 备份供应商视觉兜底（Agnes → FreeModel，各自独立配额）
+    // 备份供应商视觉兜底（Agnes → FreeModel → SenseNova，各自独立配额）
     for (const vendor of BACKUP_CONFIG.VENDORS) {
       for (const vlModel of vendor.vlModels) {
         providers.push(async () => {
@@ -648,6 +669,7 @@ export async function callVisionCompletion(opts) {
               timeout: BACKUP_TIMEOUT,
               retry503: false,
               vendor,
+              extraBody: vendor.extraBody || null,
             })
             return { content, usedBackup: true }
           } catch (err) {
@@ -696,6 +718,7 @@ export async function callVisionCompletion(opts) {
   let msAttempted = false
   let agnesAttempted = false
   let fmAttempted = false
+  let snAttempted = false
   for (const provider of providers) {
     try {
       const result = await provider()
@@ -711,11 +734,13 @@ export async function callVisionCompletion(opts) {
       if (err._provider === 'ms' || /魔搭|ModelScope|ms provider/i.test(err.message || '')) msAttempted = true
       else if (err._provider === 'agnes' || /Agnes|agnes/i.test(err.message || '')) agnesAttempted = true
       else if (err._provider === 'freemodel' || /FreeModel|freemodel/i.test(err.message || '')) fmAttempted = true
+      else if (err._provider === 'sensenova' || /SenseNova|sensenova/i.test(err.message || '')) snAttempted = true
       else {
-        // provider 闭包内未显式打标时，按调用顺序推断（先魔搭后 Agnes 再 FreeModel）
+        // provider 闭包内未显式打标时，按调用顺序推断（先魔搭后 Agnes 再 FreeModel 再 SenseNova）
         if (!msAttempted) msAttempted = true
         else if (!agnesAttempted) agnesAttempted = true
-        else fmAttempted = true
+        else if (!fmAttempted) fmAttempted = true
+        else snAttempted = true
       }
     }
   }
@@ -723,7 +748,7 @@ export async function callVisionCompletion(opts) {
   // ── 统一错误信息：让用户/前端/黑名单都能精确知道是哪一类 provider 不可用 ──
   // 仅魔搭失败 → 提示"魔搭视觉模型当日配额耗尽或限流，请明日再试或配置其他模型"
   // 魔搭+Agnes 都失败 → 提示"所有视觉模型均不可用，请稍后重试"
-  throw wrapVisionError(lastError, { msAttempted, agnesAttempted, fmAttempted })
+  throw wrapVisionError(lastError, { msAttempted, agnesAttempted, fmAttempted, snAttempted })
 }
 
 /**
@@ -736,19 +761,20 @@ export async function callVisionCompletion(opts) {
  *   - 魔搭 + Agnes 都失败 → "所有视觉模型（魔搭 + Agnes）均不可用：${baseMsg}"
  *   - 都没尝试（理论不可能）→ 抛原 error
  */
-export function wrapVisionError(lastError, { msAttempted = false, agnesAttempted = false, fmAttempted = false } = {}) {
+export function wrapVisionError(lastError, { msAttempted = false, agnesAttempted = false, fmAttempted = false, snAttempted = false } = {}) {
   if (!lastError) return new Error('All vision AI providers failed')
   // 收集所有尝试过的 provider 名称
   const tried = []
   if (msAttempted) tried.push('魔搭')
   if (agnesAttempted) tried.push('Agnes')
   if (fmAttempted) tried.push('FreeModel')
+  if (snAttempted) tried.push('SenseNova')
   if (tried.length >= 2) {
     const wrapped = new Error(`所有视觉模型（${tried.join(' + ')}）均不可用：${lastError.message || '未知错误'}`)
     wrapped.cause = lastError
     return wrapped
   }
-  if (agnesAttempted && !msAttempted && !fmAttempted) {
+  if (agnesAttempted && !msAttempted && !fmAttempted && !snAttempted) {
     const wrapped = new Error(`所有 Agnes 视觉模型均不可用：${lastError.message || '未知错误'}`)
     wrapped.cause = lastError
     return wrapped
