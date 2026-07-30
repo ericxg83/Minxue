@@ -2418,9 +2418,15 @@ export const processTask = async (job) => {
       console.error(`⚠️ 路由字段回读失败 taskId=${taskId}:`, e.message)
     }
   }
-  // 兜底后仍缺 worksheetId 的 workbook 任务：显式告警（将降级为 general 管线）
+  // 兜底后仍缺 worksheetId 的 workbook 任务：直接抛错，禁止降级到 general 管线
+  // 原因：用户既然选了练习册上传，就明确希望走预埋答案库管线。
+  // 静默降级会让学生试卷被错批/对不上答案库，违背用户意图，必须让用户看到明确的失败原因并重新上传。
+  // 历史上 line 2421-2424 仅为 console.error，导致 fall through 到 general 管道、task_type=workbook
+  // 仍被当成通用卷处理，错挂章节、错判答案。
   if (job.data.taskType === 'workbook' && !job.data.worksheetId) {
-    console.error(`⚠️ [路由] workbook 任务缺少 worksheetId，降级为 general 管线 taskId=${taskId}`)
+    const errMsg = `workbook 任务缺少 worksheetId，无法走预埋答案管线 taskId=${taskId}。请检查：(1) 前端是否正确传递 worksheetId (2) 数据库 tasks.worksheet_id 是否为 null (3) 练习册是否被删除`
+    console.error(`❌ [路由] ${errMsg}`)
+    throw new Error(errMsg)
   }
   const generatedExamId = job.data.generatedExamId
   const resourceId = job.data.resourceId
