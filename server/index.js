@@ -133,6 +133,7 @@ app.post('/api/upload', upload.single('files'), async (req, res) => {
 app.post('/api/tasks/upload', upload.array('files', 20), async (req, res) => {
   try {
     const { studentId, taskType, generatedExamId, worksheetId, subject, resourceId } = req.body
+    console.log(`[Upload] 📥 req.body: studentId=${studentId} taskType=${taskType} worksheetId=${worksheetId} (len=${worksheetId?.length}) subject=${subject} resourceId=${resourceId} generatedExamId=${generatedExamId}`)
     const normalizedTaskType = taskType === 'wrong_retry' ? 'wrong_retry'
       : taskType === 'workbook' ? 'workbook'
       : 'general'

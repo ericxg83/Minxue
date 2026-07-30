@@ -38,7 +38,7 @@ export const taskService = {
     console.debug('📤 [taskService.uploadFiles] studentId:', studentId)
     console.debug('📤 [taskService.uploadFiles] fileCount:', files.length)
     console.debug('📤 [taskService.uploadFiles] files:', files.map(f => ({ name: f.name, size: f.size, type: f.type })))
-    console.debug('📤 [taskService.uploadFiles] options:', options)
+    console.debug('📤🔥 [taskService.uploadFiles] options.worksheetId=', options.worksheetId, 'len=', options.worksheetId?.length, 'taskType=', options.taskType, 'subject=', options.subject, 'resourceId=', options.resourceId)
 
     const formData = new FormData()
     formData.append('studentId', studentId)
@@ -48,6 +48,13 @@ export const taskService = {
     if (options.worksheetId) formData.append('worksheetId', options.worksheetId)
     if (options.resourceId) formData.append('resourceId', options.resourceId)
     if (options.subject) formData.append('subject', options.subject)
+
+    // 诊断：检查 formData 实际内容
+    const formDataEntries = []
+    for (const [k, v] of formData.entries()) {
+      formDataEntries.push(typeof v === 'string' ? `${k}=${v}` : `${k}=<File:${v.name}>`)
+    }
+    console.debug('📤🔥 [taskService.uploadFiles] FormData entries:', formDataEntries)
 
     // Add file names for multi-page papers
     if (options.fileNames) {

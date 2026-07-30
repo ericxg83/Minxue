@@ -1,3 +1,13 @@
+// ── 模块级兜底存储：解决 React 18 setState 批处理 + re-render 时序问题 ──
+// 当 handleUploadAsWorkbook 同 tick 内 setState + await handleFileSelect 时，
+// 第一次 re-render 期间 selectedWorksheetIdRef 会被 React 同步回 state 旧值（null）。
+// 此兜底不受 React 渲染影响，ref 失效时仍能取到 worksheetId。
+const __pendingUploadStore = {
+  worksheetId: null,
+  examResourceId: null,
+  subject: '数学'
+}
+
 import { useEffect, useState, useRef, lazy, Suspense, useCallback, useMemo } from 'react'
 import {
   Camera,
@@ -359,7 +369,11 @@ export default function App() {
     // 同步 ref：避免 setState → 批处理 → await handleFileSelect 期间 ref 还没同步
     pendingFlowRef.current = 'workbook'
     selectedWorksheetIdRef.current = worksheetId
-    console.log('🔥 [handleUploadAsWorkbook] worksheetId=', worksheetId, 'homeworkChoiceFiles.length=', homeworkChoiceFiles.length)
+    // 同步 module 级兜底：避开 React 18 re-render 期间 ref 被同步回 state 旧值的时序问题
+    __pendingUploadStore.worksheetId = worksheetId
+    __pendingUploadStore.examResourceId = null
+    __pendingUploadStore.subject = flowSubject
+    console.log('🔥🔥🔥 [handleUploadAsWorkbook] worksheetId=', worksheetId, '(len=', worksheetId?.length, ') homeworkChoiceFiles.length=', homeworkChoiceFiles.length, 'flowSubject=', flowSubject)
     const dt = new DataTransfer()
     homeworkChoiceFiles.forEach(f => dt.items.add(f))
     setHomeworkChoiceFiles([])
@@ -373,6 +387,9 @@ export default function App() {
     // 同步 ref：避免 setState → 批处理 → await handleFileSelect 期间 ref 还没同步
     pendingFlowRef.current = null
     selectedWorksheetIdRef.current = null
+    // 清空 module 兜底
+    __pendingUploadStore.worksheetId = null
+    __pendingUploadStore.examResourceId = null
     const dt = new DataTransfer()
     homeworkChoiceFiles.forEach(f => dt.items.add(f))
     setHomeworkChoiceFiles([])
@@ -387,6 +404,10 @@ export default function App() {
     // 同步 ref：避免 setState → 批处理 → await handleFileSelect 期间 ref 还没同步
     pendingFlowRef.current = 'exam'
     selectedExamResourceIdRef.current = resourceId
+    // 同步 module 兜底
+    __pendingUploadStore.worksheetId = null
+    __pendingUploadStore.examResourceId = resourceId
+    __pendingUploadStore.subject = flowSubject
     const dt = new DataTransfer()
     examChoiceFiles.forEach(f => dt.items.add(f))
     setExamChoiceFiles([])
@@ -401,6 +422,9 @@ export default function App() {
     // 同步 ref：避免 setState → 批处理 → await handleFileSelect 期间 ref 还没同步
     pendingFlowRef.current = null
     selectedExamResourceIdRef.current = null
+    // 清空 module 兜底
+    __pendingUploadStore.worksheetId = null
+    __pendingUploadStore.examResourceId = null
     const dt = new DataTransfer()
     examChoiceFiles.forEach(f => dt.items.add(f))
     setExamChoiceFiles([])
@@ -950,8 +974,15 @@ export default function App() {
     console.debug('📤📤📤 [uploadViaBackend] STARTING with', files.length, 'files')
     console.debug('📤 [uploadViaBackend] currentStudent:', currentStudent?.id, currentStudent?.name)
 
-    const isWorkbook = pendingFlowRef.current === 'workbook' && selectedWorksheetIdRef.current
-    const isExam = pendingFlowRef.current === 'exam' && selectedExamResourceIdRef.current
+    // 优先 module 兜底（避开 ref 被 re-render 重置），其次 ref，最后 state
+    const pendingFlowEffective = pendingFlowRef.current
+    const worksheetIdEffective = __pendingUploadStore.worksheetId || selectedWorksheetIdRef.current || selectedWorksheetId
+    const examResourceIdEffective = __pendingUploadStore.examResourceId || selectedExamResourceIdRef.current || selectedExamResourceId
+    const subjectEffective = __pendingUploadStore.subject !== '数学' ? __pendingUploadStore.subject : (flowSubjectRef.current || flowSubject)
+    console.log('📤🔥 [uploadViaBackend] pendingFlow=', pendingFlowEffective, 'worksheetId=', worksheetIdEffective, 'len=', worksheetIdEffective?.length, 'examResourceId=', examResourceIdEffective, 'subject=', subjectEffective)
+
+    const isWorkbook = pendingFlowEffective === 'workbook' && worksheetIdEffective
+    const isExam = pendingFlowEffective === 'exam' && examResourceIdEffective
     const firstFile = files[0]
     const taskName = files.length > 1
       ? `${firstFile.name || '作业'} 等${files.length}页`
@@ -973,11 +1004,12 @@ export default function App() {
       result: { progress: 0 },
       created_at: new Date().toISOString(),
       is_temp: true,
-      // 读 ref 而非 state：handleUploadAsWorkbook 同一 tick 内 setState 完立刻 await 进来，
-      // 闭包里的 selectedWorksheetId / selectedExamResourceId 还是旧值 null，
+      // 用兜底/worksheetIdEffective 而非 selectedWorksheetIdRef.current：
+      // handleUploadAsWorkbook 同一 tick 内 setState 完立刻 await 进来，
+      // 闭包里的 selectedWorksheetId 还是旧值 null，
       // 会导致 tempTask.worksheet_id 是空、后续 options.worksheetId 也传不出去。
-      ...(isWorkbook && { worksheet_id: selectedWorksheetIdRef.current }),
-      ...(isExam && { resource_id: selectedExamResourceIdRef.current })
+      ...(isWorkbook && { worksheet_id: worksheetIdEffective }),
+      ...(isExam && { resource_id: examResourceIdEffective })
     }
     addTask(tempTask)
 
@@ -995,20 +1027,21 @@ export default function App() {
     try {
       const options = {}
       if (isWorkbook) {
-        // 读 ref 而非 state：handleUploadAsWorkbook 同一 tick 内 setState 完立刻 await 进来，
+        // 用 worksheetIdEffective 而非 selectedWorksheetIdRef.current：
+        // handleUploadAsWorkbook 同一 tick 内 setState 完立刻 await 进来，
         // 闭包里的 selectedWorksheetId 还是旧值 null，会导致 worksheetId 没传到后端，
         // 后端 INSERT 任务时 worksheet_id=null，worker 收任务时只能降级为 general 管线。
-        options.worksheetId = selectedWorksheetIdRef.current
+        options.worksheetId = worksheetIdEffective
         options.taskType = 'workbook'
-        options.subject = flowSubjectRef.current
+        options.subject = subjectEffective
         console.log('📤 [uploadViaBackend] workbook 上传: worksheetId=', options.worksheetId, 'subject=', options.subject)
       } else if (isExam) {
-        options.resourceId = selectedExamResourceIdRef.current
+        options.resourceId = examResourceIdEffective
         options.taskType = 'exam'
-        options.subject = flowSubjectRef.current
+        options.subject = subjectEffective
         console.log('📤 [uploadViaBackend] exam 上传: resourceId=', options.resourceId, 'subject=', options.subject)
       } else {
-        console.log('📤 [uploadViaBackend] 通用/homework 上传: pendingFlow=', pendingFlowRef.current, 'selectedWorksheetIdRef=', selectedWorksheetIdRef.current)
+        console.log('📤 [uploadViaBackend] 通用/homework 上传: pendingFlow=', pendingFlowEffective, 'selectedWorksheetIdRef=', selectedWorksheetIdRef.current, '__pendingUploadStore.worksheetId=', __pendingUploadStore.worksheetId)
       }
       const result = await taskService.uploadFiles(currentStudent.id, files, options)
       const taskResult = (result.tasks || []).find(t => !t.error) || (result.tasks || [])[0]
@@ -1016,6 +1049,9 @@ export default function App() {
       if (taskResult && !taskResult.error) {
         successCount = 1
         realTaskId = taskResult.id
+        // 上传成功后清空 module 兜底
+        if (isWorkbook) __pendingUploadStore.worksheetId = null
+        if (isExam) __pendingUploadStore.examResourceId = null
         updateTaskInStore(tempTask.id, 'processing', { progress: 0 })
         setTasks(prev => prev.map(t =>
           t.id === tempTask.id ? { ...taskResult, status: 'processing', pages: taskResult.images || tempTask.pages, is_temp: false } : t
