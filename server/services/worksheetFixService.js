@@ -90,7 +90,7 @@ export async function listSuspectWorksheets(limit = 200) {
      FROM worksheets w
      LEFT JOIN ${RESOURCE_UNITS} u ON u.resource_id = w.id
      WHERE w.pdf_url IS NOT NULL
-     GROUP BY w.id
+     GROUP BY w.id, w.name
      HAVING COUNT(u.id) FILTER (WHERE u.unit_key LIKE '试卷%') = 0
         AND SUM( (SELECT COUNT(*) FROM worksheet_answers wa WHERE wa.unit_id = u.id) )
               FILTER (
