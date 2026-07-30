@@ -74,7 +74,8 @@ export async function diagnoseWorksheet(worksheetId) {
 }
 
 /**
- * 列出所有真嫌疑 worksheet（试卷单元=0 且父章节错挂>=10）
+ * 列出所有嫌疑 worksheet（父章节错挂答案 >= 1，无论试卷单元数）
+ * 之前要求"试卷单元=0"过于严格——很多 worksheet 已有试卷单元但部分答案仍错挂。
  * @returns {Promise<Array<{id, name, exam_units, orphan_ans_count}>>}
  */
 export async function listSuspectWorksheets(limit = 200) {
@@ -91,14 +92,13 @@ export async function listSuspectWorksheets(limit = 200) {
      LEFT JOIN ${RESOURCE_UNITS} u ON u.resource_id = w.id
      WHERE w.pdf_url IS NOT NULL
      GROUP BY w.id, w.name, w.created_at
-     HAVING COUNT(u.id) FILTER (WHERE u.unit_key LIKE '试卷%') = 0
-        AND SUM( (SELECT COUNT(*) FROM worksheet_answers wa WHERE wa.unit_id = u.id) )
-              FILTER (
-                WHERE u.unit_key NOT LIKE '试卷%'
-                  AND u.unit_key !~ '^第[一二三四五六七八九十\\d]+[章节]'
-                  AND u.unit_key !~ '^(堂堂练|课课练|课时练|随堂练|同步练|课时作业|课后练)'
-              ) >= 10
-     ORDER BY w.created_at DESC
+     HAVING SUM( (SELECT COUNT(*) FROM worksheet_answers wa WHERE wa.unit_id = u.id) )
+            FILTER (
+              WHERE u.unit_key NOT LIKE '试卷%'
+                AND u.unit_key !~ '^第[一二三四五六七八九十\\d]+[章节]'
+                AND u.unit_key !~ '^(堂堂练|课课练|课时练|随堂练|同步练|课时作业|课后练)'
+            ) >= 1
+     ORDER BY orphan_ans_count DESC, w.created_at DESC
      LIMIT $1`,
     [limit]
   )
