@@ -538,6 +538,7 @@ export async function callVisionCompletion(opts) {
 
   // ModelScope Key 池：主 Key + 备用 Key，与 VL_MODELS 组成「Key×模型」矩阵。
   // 配额按账号×模型计，同一模型先主 Key 后备用 Key，都耗尽再换下一个模型。
+  // ⭐ 摩搭是体验最好的供应商（速度快、正确率高），必须作为第一优先级。
   const MS_KEYS = [...new Set([
     AI_CONFIG.API_KEY,
     MODELSCOPE_BACKUP.ENABLED ? MODELSCOPE_BACKUP.API_KEY : null,
@@ -563,9 +564,17 @@ export async function callVisionCompletion(opts) {
   const wantedModels = model ? [model] : VL_MODELS
   const mainSkippedByCooldown = MS_KEYS.length > 0 && isMainRateLimitedToday()
 
-  // ⭐ 调整：先把独立供应商（Agnes / Gemini）放最前——它们的配额与魔搭完全独立，
-  // 魔搭 8B 当日配额极容易耗尽，再不能让"魔搭全挂"导致整个调用立即挂掉。
-  // Agnes 自家 agnes-1.5-flash / gpt-4o-mini 是真正独立资源，应作为首选。
+  // 第一优先级：魔搭 Key×模型矩阵（体验最好）
+  if (!mainSkippedByCooldown) {
+    for (const vlModel of wantedModels) {
+      for (const apiKey of MS_KEYS) {
+        if (isModelExhaustedToday(vlModel, apiKey)) continue
+        providers.push(callMsProvider(apiKey, vlModel))
+      }
+    }
+  }
+
+  // Agnes 视觉兜底（独立供应商，配额与魔搭解耦）
   for (const vendor of BACKUP_CONFIG.VENDORS) {
     for (const vlModel of vendor.vlModels) {
       providers.push(async () => {
@@ -582,30 +591,6 @@ export async function callVisionCompletion(opts) {
         })
         return { content, usedBackup: true }
       })
-    }
-  }
-
-  // Gemini 走专用调用，不在这里塞进 OpenAI 兼容 providers。
-  if (GEMINI_DIRECT.ENABLED) {
-    providers.push(async () => {
-      const content = await requestGeminiVision({
-        systemPrompt,
-        userText,
-        imageDataURL,
-        temperature,
-        maxTokens: Math.min(maxTokens, 4096),
-      })
-      return { content, usedBackup: true }
-    })
-  }
-
-  // 然后才轮到 ModelScope Key×模型矩阵（魔搭 8B 配额独立但易耗尽，留到 Agnes 之后作为补充）。
-  if (!mainSkippedByCooldown) {
-    for (const vlModel of wantedModels) {
-      for (const apiKey of MS_KEYS) {
-        if (isModelExhaustedToday(vlModel, apiKey)) continue
-        providers.push(callMsProvider(apiKey, vlModel))
-      }
     }
   }
 
