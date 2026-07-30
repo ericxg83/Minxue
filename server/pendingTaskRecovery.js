@@ -37,6 +37,7 @@ export const NON_RETRYABLE_ERROR_PATTERNS = [
   /UPLOAD_NOT_COMPLETED/,
   /INVALID_URL/,
   /AI returned empty content/i,
+  /Invalid model id/i, // 模型被供应商下架（如 Qwen3-8B-Instruct），不会自愈
 ]
 
 /**

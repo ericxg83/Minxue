@@ -20,6 +20,7 @@ import { judgeAnswer } from './services/judgeService.js'
 import { normalizeSectionName } from './services/answerParseService.js'
 import { classifyQuestionLocally } from './utils/localTagger.js'
 import { NON_RETRYABLE_ERROR_PATTERNS } from './pendingTaskRecovery.js'
+import { isValidImageBuffer } from './utils/imageValidator.js'
 
 // ── 多模态切题引擎：几何图处理 ──
 // 使用 Sharp 进行裁剪和图像增强（替代浏览器端的 Canvas/OpenCV）
@@ -586,8 +587,6 @@ const compressImageBuffer = async (imageBuffer) => {
 const bufferToBase64 = (buffer) => {
   return `data:image/jpeg;base64,${buffer.toString('base64')}`
 }
-
-import { isValidImageBuffer } from './utils/imageValidator.js'
 
 const downloadImage = async (imageUrl) => {
   try {
