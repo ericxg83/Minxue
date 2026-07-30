@@ -739,6 +739,24 @@ const recognizeQuestions = async (imageBase64, taskId, retryCount = 0) => {
     }) || []
 
     console.log(`   识别完成: ${questions.length} 道题`)
+
+    // ── 空结果处理：AI 成功但返回 0 题 ──
+    // 真实日志里 Qwen3-VL 偶发返回 {"questions": []}（图模糊 / 文档裁切丢内容 / 模型抽风）。
+    // 重试一次：若仍为空就切换到下一个 VL 模型再试，最后兜底返回空让上层标"未识别"。
+    if (questions.length === 0 && retryCount < AI_CONFIG.MAX_RETRIES) {
+      console.warn(`   ⚠️  本次识别返回 0 道题，准备重试 (${retryCount + 1}/${AI_CONFIG.MAX_RETRIES})...`)
+      await new Promise(resolve => setTimeout(resolve, (retryCount + 1) * 2000))
+      return recognizeQuestions(imageBase64, taskId, retryCount + 1)
+    }
+    if (questions.length === 0) {
+      const nextModel = rotateVLModel()
+      if (nextModel) {
+        console.warn(`   ⚠️  已达重试上限仍为 0 题，轮换到模型 ${nextModel} 兜底...`)
+        return recognizeQuestions(imageBase64, taskId, 0)
+      }
+      console.error(`   ❌ 所有视觉模型均返回 0 道题`)
+    }
+
     return { success: true, questions, duration }
   } catch (error) {
     const duration = Date.now() - startTime
