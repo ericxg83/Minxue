@@ -255,7 +255,7 @@ export const addSelfContainedWrongQuestion = async (params) => {
       student_answer, correct_answer, answer_type, content,
       question_type, block_coordinates, question_image_url,
       subject, source_type, status, error_count, added_at, last_wrong_at, created_at, updated_at)
-     VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, 'pending', 1, NOW(), NOW(), NOW(), NOW())
+     VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, 'pending', 1, NOW(), NOW(), NOW(), NOW())
      RETURNING id`,
     [studentId, questionId || null, worksheetId, pageNumber, questionNo,
      studentAnswer, correctAnswer, answerType, content,

@@ -30,6 +30,7 @@ import { migrateCompleteResources } from './migrations/030_complete_resources_mi
 import { migrateParseProgressColumns } from './migrations/031_add_parse_progress_columns.js'
 import { migrateResourceUnits } from './migrations/032_add_resource_units.js'
 import { migrateWrongQuestionSelfContained } from './migrations/033_add_wrong_question_self_contained.js'
+import { migrateWrongQuestionSubject } from './migrations/034_add_wrong_question_subject.js'
 import { scheduleNightParse } from './services/nightParseService.js'
 
 const __dirname = dirname(fileURLToPath(import.meta.url))
@@ -2341,6 +2342,7 @@ if (process.argv[1] === __filename || process.argv[1]?.endsWith('server/index.js
       await migrateParseProgressColumns()
       await migrateResourceUnits()
       await migrateWrongQuestionSelfContained()
+      await migrateWrongQuestionSubject()
     } catch (err) {
       console.error('数据库迁移失败:', err.message)
     }

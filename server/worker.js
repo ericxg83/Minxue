@@ -466,9 +466,30 @@ const deduplicateTags = (tags) => {
 
 /**
  * JSON 自动修复 — 处理 AI 返回的畸形 JSON
- * 常见问题: 未转义反斜杠(\frac → \\frac)、未转义双引号、字符串内换行
+ * 常见问题: 未转义反斜杠(\frac → \\frac)、未转义双引号、字符串内换行、
+ *           block_coordinates 被 AI 写成裸元组 (60, 200, 650, 27) 或
+ *           半对象半元组 { "x": 60, 200, 650, 27 }
  */
 export function repairAIJson(jsonStr) {
+  // 1) 先处理「裸元组 / 半对象」形式的 block_coordinates。
+  //    模式 A: "block_coordinates": 60, 200, 650, 27          → 4 个裸数字
+  //    模式 B: "block_coordinates": [60, 200, 650, 27]        → 数组形式（合法，但统一转对象更稳）
+  //    模式 C: "block_coordinates": {"x": 60, 200, 650, 27}   → 半对象
+  //    模式 D: "block_coordinates": {"x":60,"y":200,...}      → 正常对象，跳过
+  //    模式 E: "block_coordinates": {"x": 60, "y": 200, "width": 650, "height": 27}  → 正常对象
+  // 统一策略：先做一次宽松匹配（不限定 "x": 前缀），命中 A/B/C 任一形式都转成标准对象。
+  // 注意：不要用 \}? 吞掉闭合大括号 —— 那样会破坏外层对象结构。
+  // 这里用 (?=\s*[\},]) 前瞻，只在接下来是 } 或 , 时才匹配，且不消耗字符。
+  let pre = jsonStr.replace(
+    /"block_coordinates"\s*:\s*\{?(?:\s*"?[a-zA-Z_]+"?\s*:\s*)?(-?\d+(?:\.\d+)?)\s*,\s*(-?\d+(?:\.\d+)?)\s*,\s*(-?\d+(?:\.\d+)?)\s*,\s*(-?\d+(?:\.\d+)?)(?=\s*[\},])/g,
+    (m, x, y, w, h) => `"block_coordinates": {"x": ${x}, "y": ${y}, "width": ${w}, "height": ${h}}`
+  )
+  //    模式 B 数组形式（保险起见再跑一次），数组的 ] 是必需的，所以可以直接匹配。
+  pre = pre.replace(
+    /"block_coordinates"\s*:\s*\[\s*(-?\d+(?:\.\d+)?)\s*,\s*(-?\d+(?:\.\d+)?)\s*,\s*(-?\d+(?:\.\d+)?)\s*,\s*(-?\d+(?:\.\d+)?)\s*\]/g,
+    (m, x, y, w, h) => `"block_coordinates": {"x": ${x}, "y": ${y}, "width": ${w}, "height": ${h}}`
+  )
+
   // 逐字符状态机：只在「字符串内部」做修复，避免破坏结构。
   // 处理三类畸形：
   //   1. 非法反斜杠转义（LaTeX 单反斜杠命令，如 \angle \circ \triangle）→ 双写为 \\
@@ -478,8 +499,8 @@ export function repairAIJson(jsonStr) {
   let out = ''
   let inString = false
 
-  for (let i = 0; i < jsonStr.length; i++) {
-    const ch = jsonStr[i]
+  for (let i = 0; i < pre.length; i++) {
+    const ch = pre[i]
 
     if (!inString) {
       out += ch
@@ -489,16 +510,16 @@ export function repairAIJson(jsonStr) {
 
     // ── 字符串内部 ──
     if (ch === '\\') {
-      const next = jsonStr[i + 1]
+      const next = pre[i + 1]
       if (next === '"' || next === '\\' || next === '/') {
         out += ch + next // 无歧义的合法转义，保留
         i++
-      } else if (next === 'u' && /^[0-9a-fA-F]{4}$/.test(jsonStr.substr(i + 2, 4))) {
+      } else if (next === 'u' && /^[0-9a-fA-F]{4}$/.test(pre.substr(i + 2, 4))) {
         out += ch // 合法 \uXXXX
       } else if (next !== undefined && 'bfnrt'.includes(next)) {
         // \b \f \n \r \t 与 LaTeX 命令(\frac \theta \nu \rho \beta \triangle...)开头冲突。
         // 判据：转义字母后若还跟字母 → LaTeX 命令，双写反斜杠；否则视为真正的 JSON 转义。
-        const after = jsonStr[i + 2]
+        const after = pre[i + 2]
         if (after !== undefined && /[a-zA-Z]/.test(after)) {
           out += '\\\\' // LaTeX 单反斜杠命令 → 字面反斜杠
         } else {
@@ -510,7 +531,7 @@ export function repairAIJson(jsonStr) {
       }
     } else if (ch === '"') {
       // 判断这个引号是「真正的闭合引号」还是「字符串内的字面引号」
-      const rest = jsonStr.slice(i + 1)
+      const rest = pre.slice(i + 1)
       if (/^\s*[,}\]:]/.test(rest) || /^\s*$/.test(rest)) {
         out += ch
         inString = false
