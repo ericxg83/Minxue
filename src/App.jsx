@@ -164,6 +164,44 @@ export default function App() {
     return () => window.removeEventListener('popstate', onPop)
   }, [])
 
+  // H5 移动端上传入口：Home/index.jsx 在用户选完类型后通过 'set-workbook-flow'
+  // 自定义事件把 flow/worksheetId/subject 传过来。这里同步写入 state + ref + module 兜底，
+  // 让随后的 handleFileSelect 链路能正确分流到 workbook/exam/通用 三条管道。
+  // 没有这个监听时，移动端 worksheetId 永远传不到后端，task_type 全部退化成 general。
+  useEffect(() => {
+    const onSetFlow = (e) => {
+      const detail = e?.detail || {}
+      const flow = detail.flow                       // 'workbook' | 'homework' | 'exam' | 'regular' | null
+      const worksheetId = detail.worksheetId || null
+      const examResourceId = detail.examResourceId || null
+      const subject = detail.subject || '数学'
+
+      // ── state 镜像（用于 UI 展示）──
+      setPendingFlow(flow === 'workbook' ? 'workbook' : (flow === 'exam' ? 'exam' : null))
+      setSelectedWorksheetId(flow === 'workbook' ? worksheetId : null)
+      setSelectedExamResourceId(flow === 'exam' ? examResourceId : null)
+      if (subject) setFlowSubject(subject)
+
+      // ── ref 镜像（避开 React 18 批处理时序）──
+      pendingFlowRef.current = flow === 'workbook' ? 'workbook' : (flow === 'exam' ? 'exam' : null)
+      selectedWorksheetIdRef.current = flow === 'workbook' ? worksheetId : null
+      selectedExamResourceIdRef.current = flow === 'exam' ? examResourceId : null
+      flowSubjectRef.current = subject
+
+      // ── module 级兜底（避开 ref 被 re-render 同步回 state 旧值）──
+      __pendingUploadStore.worksheetId = flow === 'workbook' ? worksheetId : null
+      __pendingUploadStore.examResourceId = flow === 'exam' ? examResourceId : null
+      __pendingUploadStore.subject = subject
+
+      console.log('🔥📡 [set-workbook-flow] 收到移动端上传类型:', {
+        flow, worksheetId, examResourceId, subject,
+        worksheetIdLen: worksheetId?.length
+      })
+    }
+    window.addEventListener('set-workbook-flow', onSetFlow)
+    return () => window.removeEventListener('set-workbook-flow', onSetFlow)
+  }, [])
+
   // Processing Page State
   const [processingFilter, setProcessingFilter] = useState('all')
   const [uploading, setUploading] = useState(false)

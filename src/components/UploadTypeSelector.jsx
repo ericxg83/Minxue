@@ -22,13 +22,23 @@ export default function UploadTypeSelector({ visible, onClose, onUpload }) {
       setWorksheets([])
       setShowStudentSelector(false)
       setShowWorksheetPicker(false)
+      // 立即加载练习册列表：避免 checkDefaultWorksheet 在 worksheets=[] 时找不到默认，
+      // 误进入 showWorksheetPicker=true 但列表为空的状态。
+      loadWorksheets()
     }
   }, [visible, studentStore.students])
 
   const selectWorkbook = () => {
-    setUploadType('homework')
-    onUpload({ type: 'homework' })
-    onClose()
+    // 走"日常作业 → 选练习册"流程：
+    // 让用户先选学生+科目，再选/确认练习册，最后才开始拍照。
+    // 走完后通过 confirmUpload 传 { type: 'workbook', worksheetId, subject, ... } 给 Home，
+    // Home 端进入暂存区拍照、提交时 dispatchEvent flow: 'workbook' + worksheetId，
+    // App.jsx 监听 set-workbook-flow 后把 worksheetId 同步到 state/ref/module 兜底，
+    // handleFileSelect 进入 workbook 管道，后端收到正确的 worksheet_id。
+    // 修复前：selectWorkbook 直接 onUpload({ type: 'homework' }) 关闭，
+    // H5 移动端根本没有机会选练习册，导致上传全部退化成 general 管道。
+    setUploadType('workbook')
+    setShowStudentSelector(true)
   }
 
   const selectRegular = () => {
@@ -108,8 +118,11 @@ export default function UploadTypeSelector({ visible, onClose, onUpload }) {
       <div className="w-full bg-white rounded-t-3xl p-5 shadow-xl" onClick={(e) => e.stopPropagation()}>
         <div className="w-12 h-1 rounded-full bg-gray-300 mx-auto mb-6"></div>
 
-        <h3 className="text-xl font-bold text-center mb-6">选择上传方式</h3>
+        <h3 className="text-xl font-bold text-center mb-6">
+          {uploadType === 'workbook' ? '日常作业' : '选择上传方式'}
+        </h3>
 
+        {!uploadType && (
         <div className="space-y-3">
           {/* 日常作业 */}
           <button
@@ -159,6 +172,7 @@ export default function UploadTypeSelector({ visible, onClose, onUpload }) {
             <ChevronRight size={20} style={{ color: 'var(--text-tertiary)' }} />
           </button>
         </div>
+        )}
 
         {/* 学生选择器 */}
         {showStudentSelector && (
