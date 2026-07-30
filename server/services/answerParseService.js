@@ -17,7 +17,11 @@ export function isSectionHeader(line) {
   if (/^第[一二三四五六七八九十\d]+[章节单元部分篇]/.test(line)) return true
   // 中文数字开头的章节/单元
   if (/^[一二三四五六七八九十]+[章节单元]/.test(line)) return true
-  // 常见试卷/练习关键词
+  // 常见试卷/练习关键词。
+  // 之前漏掉『试卷』，导致『试卷① 19.1 平方根与立方根 基础性测试』整行被吞，
+  // 下面所有答案错挂到上一个"第十九章实数"父单元，批改时『试卷① 19.1』卷完全错位。
+  // 但『试卷/考卷』已由更靠前的 EXAM_HEADER_RE 单独精确处理（避免单『试卷』被误识别为
+  // 孤儿单元），故这里关键词表不再列『试卷/考卷』。
   if (/(?:阶段卷|评价测试|阶段练|综合练习|单元测试|测试卷|月考卷|期中卷|期末卷|模拟卷|真题卷|专题练习|专项练习|专项训练|复习卷|巩固卷|提升卷|拓展卷|检测卷|验收卷|达标卷|冲刺卷|押题卷|预测卷|闯关练习|水平测试|能力测试|单元卷|综合卷|练习卷|模拟测试|真题演练)/.test(line)) return true
   return false
 }
@@ -44,13 +48,24 @@ function toOrdinal(token) {
   return null
 }
 
-// 单元标签：练习册里一个「重新从 1 编号」的最小单位
+// 单元标签：练习册里一个「重新从 1 编号」的最小单位。
+// 注意：这里故意不包含『试卷/考卷』——它们由更靠前的 EXAM_HEADER_RE 单独处理，
+// 否则『试卷 19.1 平方根...』会被贪婪吞掉 19 当 ordinal，导致『试卷19』错位。
 const UNIT_LABEL_RE = new RegExp(
-  `^(堂堂练|课课练|课时练|随堂练|同步练|课时作业|课后练)\\s*([${CIRCLED_DIGITS}]|\\d{1,3})?\\s*(.*)$`
+  `^(堂堂练|课课练|课时练|随堂练|同步练|课时作业|课后练)\\s*([${CIRCLED_DIGITS}]|\\d{1,3}|[一二三四五六七八九十]{1,3})?\\s*(.*)$`
 )
 // 课时编号：19.1(1) / 21.2 —— 后面必须跟中文标题，否则可能是答案行
 const LESSON_CODE_RE = /(\d{1,2}\.\d{1,2}(?:\s*[（(]\s*\d{1,2}\s*[）)])?)/
 const LESSON_LINE_RE = /^(\d{1,2}\.\d{1,2}(?:\s*[（(]\s*\d{1,2}\s*[）)])?)\s*[、.．]?\s*([一-龥][^\n]{0,40})$/
+// 试卷标题：试卷① 19.1 平方根与立方根 基础性测试 / 试卷 19.2(1) / 试卷一 19.1 / 试卷1 / 试卷 ...
+// 之前只识别『堂堂练/课课练...』，但『试卷① 19.1 平方根与立方根 基础性测试』是另一类合法单元，
+// 漏识别会让本卷所有题目错挂到上一个『第十九章实数』父单元。
+// 序号允许：圈数字 ①..⑳ / ASCII 数字 1..99 / 中文数字 一..十。
+// 序号组用 (?:...) 非捕获 + 后面强制 \s+ 或 $ 间隔，避开『试卷 19.1』中
+// lesson_code 第一段数字被误当 ordinal。
+const EXAM_HEADER_RE = new RegExp(
+  `^试卷\\s*(?:([${CIRCLED_DIGITS}]|\\d{1,3}|[一二三四五六七八九十]{1,3})(?:\\s+|$))?(.*)$`
+)
 
 // 课时编号归一化：压空白 + 全角括号→半角。导出供 route 层（预埋答案解析）复用。
 export const normLesson = (raw) => (raw ? String(raw).replace(/[\s　]+/g, '').replace(/[（）]/g, c => (c === '（' ? '(' : ')')) : null)
@@ -64,6 +79,23 @@ export const normLesson = (raw) => (raw ? String(raw).replace(/[\s　]+/g, '').r
 export function parseUnitHeader(line) {
   const raw = String(line || '').trim()
   if (!raw || raw.length > 60) return null
+
+  // ①' 试卷标题：试卷① 19.1 平方根与立方根 基础性测试 / 试卷 19.2(1) / 试卷一 19.1 ...
+  //     必须在 UNIT_LABEL_RE 之前：避免『试卷 19.1』里的 19 被 \d{1,3} 贪婪吞掉当 ordinal。
+  //     守卫：必须 em[1] 或 em[2] 至少有一个非空，防止『试卷』单独一行被误识别。
+  const em = raw.match(EXAM_HEADER_RE)
+  if (em && (em[1] || (em[2] && em[2].length >= 1))) {
+    const ordinal = toOrdinal(em[1])
+    const lessonMatch = (em[2] || '').match(LESSON_CODE_RE)
+    const lesson = lessonMatch ? normLesson(lessonMatch[1]) : null
+    const keyHead = ordinal ? `试卷${ordinal}` : '试卷'
+    return {
+      unit_key: lesson ? `${keyHead}|${lesson}` : keyHead,
+      unit_title: normalizeSectionName(raw),
+      lesson_code: lesson,
+      ordinal,
+    }
+  }
 
   // ① 堂堂练① 19.1(1) 算术平方根
   const lm = raw.match(UNIT_LABEL_RE)

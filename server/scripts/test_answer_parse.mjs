@@ -182,6 +182,19 @@ eq(parseUnitHeader('19.1(1) 算术平方根'),
    { unit_key: '19.1(1)', unit_title: '19.1(1)算术平方根', lesson_code: '19.1(1)', ordinal: null }, '纯课时编号行（不被 /^\\d/ 早退吃掉）')
 eq(parseUnitHeader('第十九章实数')?.unit_key, '第十九章实数', '章级标题仍是单元')
 eq(parseUnitHeader('第3课时 二次根式的加减')?.unit_key, '第3课时', '第N课时')
+
+// 试卷标题识别（之前漏识别导致『试卷① 19.1 平方根与立方根 基础性测试』整行被吞，
+//   下面所有题目错挂到上一个『第十九章实数』父单元，批改时『试卷① 19.1』卷完全错位）
+eq(parseUnitHeader('试卷① 19.1 平方根与立方根 基础性测试'),
+   { unit_key: '试卷1|19.1', unit_title: '试卷①19.1平方根与立方根基础性测试', lesson_code: '19.1', ordinal: 1 },
+   '试卷① 19.1 ... 基础性测试作为独立单元')
+eq(parseUnitHeader('试卷② 21.2(1) 解法选择')?.unit_key, '试卷2|21.2(1)', '试卷② + 课时编号 + 标题')
+eq(parseUnitHeader('试卷一 19.1 平方根与立方根 基础性测试')?.unit_key, '试卷1|19.1', '中文序号『一』 → 1')
+eq(parseUnitHeader('试卷三 22.1 勾股定理')?.unit_key, '试卷3|22.1', '中文序号『三』 → 3')
+eq(parseUnitHeader('试卷 19.1 平方根与立方根 基础性测试')?.unit_key, '试卷|19.1', '无序号『试卷 19.1 ...』不吞19当ordinal')
+eq(parseUnitHeader('试卷(1) 19.1 平方根')?.lesson_code, '19.1', '『试卷(1) 19.1 ...』识别lesson_code')
+eq(parseUnitHeader('试卷'), null, '单『试卷』不误识别为单元')
+
 // 不能误判成单元的答案行
 eq(parseUnitHeader('1. 2017 2019'), null, '普通答案行不误判')
 eq(parseUnitHeader('19. 1/10'), null, '带小数答案不误判')
@@ -212,6 +225,32 @@ eq(r6.answers[0].unit_key, '堂堂练1|19.1(1)', '跨页单元延续')
 const r7 = parseAnswerText('堂堂练① 19.1(1) 算术平方根\n1. A\n堂堂练② 19.1(2) 平方根\n1. B', [])
 eq(r7.answers.length, 2, '两单元同题号并存')
 eq(r7.answers.map(a => a.unit_key), ['堂堂练1|19.1(1)', '堂堂练2|19.1(2)'], '单元键区分')
+
+// 试卷① 19.1 单元识别（核心修复）：两张试卷的题目不再互相覆盖、不错挂父单元
+const r8 = parseAnswerText(`第十九章 实数
+试卷① 19.1 平方根与立方根 基础性测试
+一、填空题
+1. 2
+2. ±3/5
+二、选择题
+16. D
+试卷② 19.2 立方根 基础性测试
+一、填空题
+1. 5
+2. -0.5`, [])
+eq(r8.answers.length, 5, '试卷①②条目总数（3+2=5）')
+eq(r8.answers.filter(a => a.unit_key === '试卷1|19.1').length, 3, '试卷①条目数（1,2,16）')
+eq(r8.answers.filter(a => a.unit_key === '试卷2|19.2').length, 2, '试卷②条目数（1,2）')
+eq(r8.answers.filter(a => a.unit_key === '试卷1|19.1').map(a => a.question_no),
+   [1, 2, 16], '试卷①题号1/2/16（不再错挂第十九章实数）')
+eq(r8.answers.filter(a => a.unit_key === '试卷2|19.2').map(a => a.question_no),
+   [1, 2], '试卷②题号1/2')
+eq(r8.answers.filter(a => a.unit_key === '第十九章实数').length,
+   0, '第十九章实数下无任何答案（核心修复：不再被试卷①错挂）')
+eq(r8.answers.filter(a => a.unit_key === '试卷1|19.1').every(a => a.lesson_code === '19.1'),
+   true, '试卷①所有答案带上课时编号19.1')
+eq(r8.answers.filter(a => a.unit_key === '试卷2|19.2').every(a => a.lesson_code === '19.2'),
+   true, '试卷②所有答案带上课时编号19.2')
 
 console.log(`\n${pass} passed, ${fail} failed`)
 process.exit(fail > 0 ? 1 : 0)

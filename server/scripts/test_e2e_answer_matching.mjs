@@ -127,6 +127,61 @@ if (pickAnswerUnit) {
   eq(row1.answer, '2017', '单元 1 第 1 题标准答案 = 2017（学生 2018 → 错）')
   eq(row1.answer_type, 'answer', '填空题 answer_type=answer')
 
+  // 5) 【核心】『试卷① 19.1 平方根与立方根 基础性测试』格式（修复回归测试）
+  //    之前 parseUnitHeader / isSectionHeader 漏识别，导致本卷所有题目错挂到
+  //    上一个『第十九章实数』父单元，批改时『试卷① 19.1』卷完全错位。
+  const examPdfText = `第十九章 实数
+试卷① 19.1 平方根与立方根 基础性测试
+一、填空题
+1. 2
+2. ±3/5
+3. √17
+二、选择题
+16. D
+17. D
+18. C
+试卷② 19.2 立方根 基础性测试
+一、填空题
+1. 5
+2. -0.5
+3. 0.3
+二、选择题
+16. A
+17. B`
+  const rExam = parseAnswerText(examPdfText, [])
+  const examKeys = new Set(rExam.answers.map(a => a.unit_key))
+  eq(examKeys.size, 2, '试卷①②两单元独立（修复前会被并入『第十九章实数』）')
+  eq(rExam.answers.filter(a => a.unit_key === '第十九章实数').length,
+     0, '第十九章实数下无任何答案（核心修复）')
+  eq(rExam.answers.filter(a => a.unit_key === '试卷1|19.1').length,
+     6, '试卷①19.1有6条答案（填空3+选择3）')
+  eq(rExam.answers.filter(a => a.unit_key === '试卷2|19.2').length,
+     5, '试卷②19.2有5条答案（填空3+选择2）')
+
+  // 入库 3D Map + 模拟学生上传试卷后的批改匹配
+  const examByUnit = buildAnswersByUnit(rExam.answers)
+  // 学生拍试卷①（OCR 识别到 "试卷①  19.1  平方根与立方根 基础性测试"）
+  const examStudent1 = pickAnswerUnit(
+    examByUnit,
+    '试卷①  19.1  平方根与立方根 基础性测试',
+    [
+      { question_number: 1,  question_type: 'fill',    student_answer: '2',   sub_no: '' },
+      { question_number: 2,  question_type: 'fill',    student_answer: '3/5', sub_no: '' },
+      { question_number: 16, question_type: 'choice',  student_answer: 'D',   sub_no: '' },
+    ]
+  )
+  eq(examStudent1, '试卷1|19.1', '学生上传试卷① → 命中答案库『试卷1|19.1』')
+  // 学生拍试卷②（OCR 识别到 "试卷② 19.2 立方根 基础性测试"）
+  const examStudent2 = pickAnswerUnit(
+    examByUnit,
+    '试卷② 19.2 立方根 基础性测试',
+    [
+      { question_number: 1,  question_type: 'fill',    student_answer: '5',  sub_no: '' },
+      { question_number: 16, question_type: 'choice',  student_answer: 'A',  sub_no: '' },
+    ]
+  )
+  eq(examStudent2, '试卷2|19.2', '学生上传试卷② → 命中答案库『试卷2|19.2』')
+
   // 5) 模拟：取错单元将导致错位匹配（旧版 bug 复现）
   // 旧版本会把所有 pageTitle 不匹配时退到"覆盖率打分"，
   // 如果第二页 pageTitle 错误识别为"堂堂练① 19.1(1)"，就会被错挂到单元 1。
