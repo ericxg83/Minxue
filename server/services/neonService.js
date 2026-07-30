@@ -954,6 +954,31 @@ const resolveUnitIds = async (client, resourceId, answers) => {
 export const upsertResourceUnits = async (resourceId, units) =>
   transaction(client => upsertUnitsWithClient(client, resourceId, units))
 
+/**
+ * 把解析出的"单元→答案页范围"写回 resource_units（不重建单元，只补页范围）。
+ * 调用方负责先 upsertResourceUnits 保证 unit 已存在；若 unit 不存在则忽略
+ * （解析时漏了标题的题应走预埋答案路径，不会到这里）。
+ */
+export const upsertResourceUnitPageRanges = async (resourceId, ranges) => {
+  if (!ranges || ranges.length === 0) return 0
+  // 用 VALUES 一条 UPDATE：单次 round-trip；未匹配的 unit_key 跳过（LEFT JOIN 形式）
+  const values = ranges.map((_, i) => `($${i * 3 + 2}::text, $${i * 3 + 3}::int, $${i * 3 + 4}::int)`).join(',')
+  const params = [resourceId]
+  for (const r of ranges) {
+    params.push(r.unit_key, r.answer_page_start, r.answer_page_end)
+  }
+  const { rows } = await query(
+    `UPDATE resource_units SET
+       answer_page_start = v.start,
+       answer_page_end   = v.end
+     FROM (VALUES ${values}) AS v(unit_key, start, end)
+     WHERE resource_units.resource_id = $1
+       AND resource_units.unit_key    = v.unit_key`,
+    params
+  )
+  return rows.length || 0
+}
+
 /** 清空练习册的单元（含级联删除其下答案）。重解析前调用，清掉上一轮的残留单元。 */
 export const clearResourceUnits = async (resourceId) => {
   await query('DELETE FROM resource_units WHERE resource_id = $1', [resourceId])
@@ -1170,7 +1195,8 @@ export const getWorksheetAnswersBySection = async (worksheetId) => {
   const { rows } = await query(
     `SELECT ra.section, ra.question_no, ra.answer, ra.answer_type, ra.content,
             ra.unit_id, ra.sub_no,
-            ru.unit_key, ru.unit_title, ru.unit_seq
+            ru.unit_key, ru.unit_title, ru.unit_seq,
+            ru.answer_page_start, ru.answer_page_end
      FROM ${TABLES.WORKSHEET_ANSWERS} ra
      LEFT JOIN resource_units ru ON ru.id = ra.unit_id
      WHERE ra.worksheet_id = $1
@@ -1198,6 +1224,10 @@ export const getWorksheetAnswersBySection = async (worksheetId) => {
       unit_seq: r.unit_seq,
       section: r.section,
       sub_no: subNo,
+      // 单元的答案页范围（answer PDF 中该单元首页/末页号），
+      // 用于 pickAnswerUnit 在标题失配时按页码兜底匹配。
+      answer_page_start: r.answer_page_start ?? null,
+      answer_page_end: r.answer_page_end ?? null,
     })
   }
   return result

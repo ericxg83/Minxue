@@ -1460,11 +1460,15 @@ const callGradeEndpoint = async ({ id, studentId, results }) => {
  * answersByUnit: Map<unitKey, Map<sectionKey, Map<`qNo|subNo`, row>>>，由 getWorksheetAnswersBySection 返回。
  * pageTitle:     OCR 出的本页标题（多半是单元标题，如"堂堂练① 19.1(1) 算术平方根"）。
  * questions:     OCR 出的本页题目 [{question_number, question_type, sub_no?}]
+ * pageNumber:    本页在上传图片中的页号（1-based，可选）。提供后，若标题失配可按单元的
+ *                answer_page_start~answer_page_end 范围做兜底匹配。
  *
  * 匹配策略：
  *  1) 唯一单元：直接取该单元。
  *  2) 标题归一化后与 unit_title / unit_key 做精确/包含匹配（处理空格、圈序号）。
- *  3) 兜底按题号覆盖率打分；要求至少 60% 的题号能在该单元下命中（避免错挂）。
+ *  3) 页码范围兜底：当 1)2) 失配但 pageNumber 在某单元 [start,end] 内，且该单元含本题号，
+ *     则取该单元（解决 OCR 抽不到章节标题但题号仍能唯一定位的页）。
+ *  4) 兜底按题号覆盖率打分；要求至少 60% 的题号能在该单元下命中（避免错挂）。
  */
 // 圈序号 ①..⑳ + 阿拉伯 1..20 双向兼容：OCR 经常把"堂堂练①"识别成"堂堂练1"，
 // 反之亦然。此处把两种字符都压成统一的 ASCII 数字后再做"包含/相等"判断，
@@ -1484,23 +1488,35 @@ const normalizeTitleForMatch = (s) => {
     .replace(/[\s　]+/g, '') // 空白已经由 normalizeSectionName 压过，此处再兜一次
 }
 
-export function pickAnswerUnit(answersByUnit, pageTitle, questions) {
+export function pickAnswerUnit(answersByUnit, pageTitle, questions, pageNumber) {
   if (!answersByUnit || answersByUnit.size === 0) return null
   if (answersByUnit.size === 1) return [...answersByUnit.keys()][0]
 
-  // 从 3D Map 中抽出每单元的展示键（含 unit_title / unit_key）
+  // 从 3D Map 中抽出每单元的展示键（含 unit_title / unit_key / 页码范围）
   const unitMeta = (unitKey) => {
     const secMap = answersByUnit.get(unitKey)
-    if (!secMap) return { unitKey, unitTitle: '', unitKeyRaw: '' }
+    if (!secMap) return { unitKey, unitTitle: '', unitKeyRaw: '', pageStart: null, pageEnd: null }
+    let pageStart = null
+    let pageEnd = null
     for (const qMap of secMap.values()) {
       const sample = qMap.values().next().value
-      if (sample) return {
-        unitKey,
-        unitTitle: sample.unit_title || '',
-        unitKeyRaw: sample.unit_key || unitKey,
+      if (sample) {
+        if (pageStart == null && sample.answer_page_start != null) pageStart = sample.answer_page_start
+        if (pageEnd == null && sample.answer_page_end != null) pageEnd = sample.answer_page_end
+        if (pageStart != null && pageEnd != null) break
       }
     }
-    return { unitKey, unitTitle: '', unitKeyRaw: unitKey }
+    if (!secMap.values().next().value) {
+      return { unitKey, unitTitle: '', unitKeyRaw: unitKey, pageStart, pageEnd }
+    }
+    const sample = [...secMap.values()][0].values().next().value
+    return {
+      unitKey,
+      unitTitle: sample.unit_title || '',
+      unitKeyRaw: sample.unit_key || unitKey,
+      pageStart,
+      pageEnd,
+    }
   }
   const candidates = [...answersByUnit.keys()].map(unitMeta)
 
@@ -1525,9 +1541,42 @@ export function pickAnswerUnit(answersByUnit, pageTitle, questions) {
   const qNos = (questions || []).filter(q => q.question_number != null).map(q => Number(q.question_number))
   if (qNos.length === 0) return null
 
+  // 2.0) 页码范围兜底：标题失配但题号仍可能唯一定位单元。
+  //      答案 PDF 解析时已记录每个单元的 answer_page_start/end，
+  //      当 pageNumber 落在某单元的 [start,end] 区间内时，强信号→直接走该单元。
+  //      多个区间同时命中（区间邻接/重叠时）→ 走题号覆盖率打分，但仅在区间内打分。
+  //      没有任何区间匹配 → 退化为全候选打分（保持旧行为）。
+  let scopedCandidates = candidates
+  if (pageNumber != null && Number.isFinite(Number(pageNumber))) {
+    const page = Number(pageNumber)
+    const inRange = candidates.filter(c =>
+      c.pageStart != null && c.pageEnd != null &&
+      page >= Number(c.pageStart) && page <= Number(c.pageEnd)
+    )
+    if (inRange.length === 1) {
+      // 唯一区间命中：仍需题号覆盖率兜底防错挂（>=1题命中即采用），
+      // 防止邻接单元页号漂移（如 unit A 末页 = unit B 末页错位）
+      const secMap = answersByUnit.get(inRange[0].unitKey)
+      let covered = 0
+      for (const q of questions || []) {
+        if (q.question_number == null) continue
+        const qKey = `${Number(q.question_number)}|${q.sub_no || ''}`
+        for (const qMap of secMap.values()) {
+          if (qMap.has(qKey)) { covered++; break }
+        }
+      }
+      // 唯一命中且任何题号都能在该单元查到 → 直接采用
+      if (covered > 0) return inRange[0].unitKey
+      // 唯一命中但题号完全没匹配 → 不强行采用，退到覆盖率打分
+    } else if (inRange.length > 1) {
+      // 多个区间同时命中：缩窄候选集后再打分，避免跨区错挂
+      scopedCandidates = inRange
+    }
+  }
+
   let bestKey = null
   let bestScore = -1
-  for (const c of candidates) {
+  for (const c of scopedCandidates) {
     const secMap = answersByUnit.get(c.unitKey)
     let covered = 0
     let typeMatch = 0
@@ -1744,7 +1793,10 @@ const processWorkbookGrading = async (job) => {
 
     allQuestions.push(...questions)
     if (pageTitle) allPageTitles.push(pageTitle)
-    pageDataList.push({ pageTitle, imageUrl: url, questions })
+    // pageNumber 一并入 pageDataList，供下游 pickAnswerUnit 走"页码范围兜底"匹配：
+    // 答案 PDF 中按页号记录了每个单元的起止页，本页若 OCR 失败或标题失配，
+    // 可用页码范围作为辅助信号定位所属单元。
+    pageDataList.push({ pageTitle, imageUrl: url, questions, pageNumber: pageNo })
 
     const progress = 5 + Math.round(((pageIdx + 1) / imageList.length) * 60)
     await updateTaskStatus(taskId, TASK_STATUS.PROCESSING, { progress })
@@ -1773,11 +1825,11 @@ const processWorkbookGrading = async (job) => {
   let emptyCount = 0
   const pagesMatchInfo = []
 
-  for (const { pageTitle, imageUrl, questions } of pageDataList) {
+  for (const { pageTitle, imageUrl, questions, pageNumber } of pageDataList) {
     if (questions.length === 0) continue
 
-    // 1) 选本页所属单元（unitKey）
-    const matchedUnit = pickAnswerUnit(answersByUnit, pageTitle, questions)
+    // 1) 选本页所属单元（unitKey）—— pageNumber 用于"页码范围兜底"
+    const matchedUnit = pickAnswerUnit(answersByUnit, pageTitle, questions, pageNumber)
     const unitAnswers = matchedUnit != null ? answersByUnit.get(matchedUnit) : null
 
     // 2) 在该单元的"section → qNo|subNo → row"二维索引中，每道题独立查答案。
@@ -1799,7 +1851,8 @@ const processWorkbookGrading = async (job) => {
       has_title: !!pageTitle,
       page_title: pageTitle,
       matched_unit: matchedUnit,
-      question_count: questions.length
+      question_count: questions.length,
+      page_number: pageNumber || null
     })
 
     console.log(`   [Workbook] 页匹配: title="${pageTitle}" → unit="${matchedUnit}" (${questions.length} 题)`)

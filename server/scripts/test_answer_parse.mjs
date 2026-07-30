@@ -118,6 +118,58 @@ if (pickAnswerUnit) {
      'only', '唯一单元直接命中')
   // 旧 API 已弃用，恒返回 null
   eq(typeof pickAnswerSection, 'function', 'pickAnswerSection 仍导出（兼容旧 import）')
+
+  // ── 页码范围匹配（新功能）──
+  // 场景 1：标题失配（OCR 没抽到章节名），但 pageNumber 落在 unit-B 范围内
+  //         且 unit-B 唯一命中题号 → 应直接采用 unit-B
+  const byUnitWithPage = new Map([
+    ['unit-A', new Map([
+      ['一、填空题', new Map([
+        ['1|', { answer: '2017', answer_type: 'answer', unit_title: '堂堂练①19.1(1)算术平方根', unit_key: '堂堂练1|19.1(1)', answer_page_start: 1, answer_page_end: 5 }],
+        ['13|', { answer: 'D', answer_type: 'choice', unit_title: '堂堂练①19.1(1)算术平方根', unit_key: '堂堂练1|19.1(1)', answer_page_start: 1, answer_page_end: 5 }],
+      ])],
+    ])],
+    ['unit-B', new Map([
+      ['一、填空题', new Map([
+        ['1|', { answer: '63', answer_type: 'answer', unit_title: '堂堂练②19.1(2)平方根', unit_key: '堂堂练2|19.1(2)', answer_page_start: 6, answer_page_end: 12 }],
+        ['13|', { answer: 'A', answer_type: 'choice', unit_title: '堂堂练②19.1(2)平方根', unit_key: '堂堂练2|19.1(2)', answer_page_start: 6, answer_page_end: 12 }],
+      ])],
+    ])],
+  ])
+  // 学生作业第 8 页（无标题），第 13 题 → 唯一命中 unit-B
+  eq(pickAnswerUnit(byUnitWithPage, null, [{ question_number: 13 }], 8),
+     'unit-B', '页码范围唯一命中→unit-B')
+  // 学生作业第 3 页，第 13 题 → 唯一命中 unit-A
+  eq(pickAnswerUnit(byUnitWithPage, null, [{ question_number: 13 }], 3),
+     'unit-A', '页码范围唯一命中→unit-A')
+
+  // 场景 2：多单元页码范围同时命中（区间邻接/重叠）→ 走题号覆盖率打分
+  const byUnitOverlap = new Map([
+    ['unit-A', new Map([
+      ['一、填空题', new Map([
+        ['1|', { answer: '2017', answer_type: 'answer', unit_title: '堂堂练①19.1(1)算术平方根', unit_key: '堂堂练1|19.1(1)', answer_page_start: 1, answer_page_end: 10 }],
+      ])],
+    ])],
+    ['unit-B', new Map([
+      ['一、填空题', new Map([
+        ['1|', { answer: '63', answer_type: 'answer', unit_title: '堂堂练②19.1(2)平方根', unit_key: '堂堂练2|19.1(2)', answer_page_start: 8, answer_page_end: 15 }],
+      ])],
+    ])],
+  ])
+  // 第 9 页（重叠区），第 1 题两单元都有 → 覆盖率都是 100%，按遍历顺序选 unit-A
+  const overlapResult = pickAnswerUnit(byUnitOverlap, null, [{ question_number: 1 }], 9)
+  // 此时 inRange 长度为 2，缩窄到 [unit-A, unit-B]，两个都覆盖第 1 题，
+  // 因 typeMatch 均为 0、covered/qNos=1，score 相同，遍历顺序决定 bestKey=unit-A
+  eq(overlapResult, 'unit-A', '多区间命中按遍历顺序取首个')
+
+  // 场景 3：页码不在任何单元范围内 → 退化为全候选打分（保持旧行为）
+  // 题号 13 只在 unit-A 里有，100% 覆盖率 → 应选 unit-A
+  eq(pickAnswerUnit(byUnitWithPage, null, [{ question_number: 13 }], 999),
+     'unit-A', '页码无匹配→退回全候选题号打分（题号 13 只在 unit-A）')
+
+  // 场景 4：提供 pageNumber=null 应等同未提供（不抛错）
+  eq(pickAnswerUnit(byUnitWithPage, null, [{ question_number: 1 }, { question_number: 13 }], null),
+     'unit-A', 'pageNumber=null 不影响标题失配后的覆盖率打分')
 } else {
   console.log('（跳过 pickAnswerUnit：worker.js 需要环境依赖）')
 }

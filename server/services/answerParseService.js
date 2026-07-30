@@ -206,15 +206,27 @@ function toState(input) {
  * 解析答案文本。
  * @param {string} text - OCR 或 PDF 提取出的答案文本
  * @param {Array} lowConfidence - 低置信度条目收集器（原地 push）
- * @param {string|object|null} initialState - 起始状态 {unit, group}（多页按顺序解析时接续上一页）
+ * @param {string|object|null} initialState - 起始状态 {unit, group, pageRanges}（多页按顺序解析时接续上一页）
+ *                                         pageRanges: Map<unit_key, { start, end }>，由本页号 1-based 持续更新
+ * @param {number} [pageNumber] - 本页在 PDF 中的页号（1-based，可选）。提供后用于
+ *                                记录每个单元的起止页范围，落库到 resource_units.answer_page_start/end。
  * @returns {{ answers: Array, lastState: object, lastUnit: object|null, lastSection: string|null }}
  */
-export function parseAnswerText(text, lowConfidence = [], initialState = null) {
+export function parseAnswerText(text, lowConfidence = [], initialState = null, pageNumber) {
   const results = []
   const lines = String(text || '').split('\n')
   const state = toState(initialState)
   let currentUnit = state.unit
   let currentGroup = state.group
+  // 单元→页范围 记录器：跨页累计，每遇到一个新单元标题，关闭上一个单元的 end 并开启新单元的 start
+  // 共享 state 以便跨函数调用延续（同 processOcrBatch 的 lastState 透传模式）
+  const pageRanges = state.pageRanges || new Map()
+  const pageNoNum = pageNumber != null && Number.isFinite(Number(pageNumber)) ? Number(pageNumber) : null
+  // 关闭"上一页遗留的未关闭单元"：该单元到本页前为止
+  if (pageNoNum != null && currentUnit && currentUnit.unit_key) {
+    const r = pageRanges.get(currentUnit.unit_key)
+    if (r && r.end == null) r.end = pageNoNum - 1
+  }
 
   const processedLines = []
 
@@ -225,6 +237,16 @@ export function parseAnswerText(text, lowConfidence = [], initialState = null) {
     // 单元标题检测（含章级标题，必须先于答案行判断）
     const unit = parseUnitHeader(trimmed)
     if (unit) {
+      // 切换单元：上一个单元的 end = 本页号 - 1；若上一页就出过同一 unit_key 题目，
+      // 则 pageRanges 中已有 start，本次只更新 end（不重置 start）。
+      if (pageNoNum != null && unit.unit_key) {
+        const r = pageRanges.get(unit.unit_key)
+        if (r) {
+          if (r.end == null || pageNoNum - 1 > r.end) r.end = pageNoNum - 1
+        } else {
+          pageRanges.set(unit.unit_key, { start: pageNoNum, end: null })
+        }
+      }
       currentUnit = unit
       currentGroup = null // 换单元 → 大题组重新开始
       continue // 标题行不加入答案解析
@@ -240,6 +262,18 @@ export function parseAnswerText(text, lowConfidence = [], initialState = null) {
     // 行内多题拆分（如 "19. 2 因素；20. 1/10" 或 "13. D 14. C 15. C 16. B"）
     for (const part of splitInlineAnswers(trimmed)) {
       processedLines.push({ line: part, unit: currentUnit, group: currentGroup })
+    }
+  }
+
+  // 本页结束：把 currentUnit 的 end 临时记为本页（最后一页可能 end 仍为 null，
+  // 由调用方在整批跑完后做一次"end = totalPages"收尾；这里只覆盖"非末页"的场景）
+  if (pageNoNum != null && currentUnit && currentUnit.unit_key) {
+    const r = pageRanges.get(currentUnit.unit_key)
+    if (r) {
+      if (r.end == null) r.end = pageNoNum
+    } else {
+      // 跨批/批首可能：从未识别到单元标题但 OCR 出题目了；用 pageNoNum 兜底建一个无 key 的范围
+      // （不会被落库，仅日志提示）
     }
   }
 
@@ -315,7 +349,8 @@ export function parseAnswerText(text, lowConfidence = [], initialState = null) {
 
   return {
     answers: results,
-    lastState: { unit: currentUnit, group: currentGroup },
+    // pageRanges 也透传：跨批 OCR 时，下一批首行的"上一页遗留单元"关闭逻辑靠它接力
+    lastState: { unit: currentUnit, group: currentGroup, pageRanges },
     lastUnit: currentUnit,
     lastSection: currentUnit?.unit_title || null,
   }

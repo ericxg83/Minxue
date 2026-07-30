@@ -15,6 +15,7 @@ import {
   clearWorksheetAnswers,
   clearResourceUnits,
   upsertWorksheetAnswers,
+  upsertResourceUnitPageRanges,
   getWorksheetAnswers,
   updateWorksheetAnswer,
   getStudentWorksheetSetting,
@@ -447,10 +448,33 @@ async function doParse(worksheetId, file, precomputedAnswers = null, isCombined 
         images.map((img, i) => ocrExtractFromBuffer(img, i, ocrFailedPages))
       )
       let carryState = null
-      for (const content of ocrContents) {
-        const { answers, lastState } = parseAnswerText(content, lowConfidence, carryState)
+      for (let i = 0; i < ocrContents.length; i++) {
+        // 真实页号 1-based（与分批路径同语义），用于记录每个单元的起止页范围
+        const realPage = i + 1
+        const { answers, lastState } = parseAnswerText(ocrContents[i], lowConfidence, carryState, realPage)
         parsedAnswers.push(...answers)
         carryState = lastState
+      }
+      // 收尾：把 lastState.pageRanges 落库到 resource_units.answer_page_start/end
+      // 单趟路径末单元 end 兜底为 images.length（OCR 实际页数）
+      const singlePassRanges = carryState?.pageRanges
+      if (singlePassRanges && singlePassRanges.size > 0) {
+        const ranges = []
+        for (const [k, r] of singlePassRanges.entries()) {
+          if (!k) continue
+          const start = r?.start
+          const end = r?.end != null ? r.end : (r?.start != null ? images.length : null)
+          if (start != null && end != null && end >= start) {
+            ranges.push({ unit_key: k, answer_page_start: start, answer_page_end: end })
+          }
+        }
+        if (ranges.length > 0) {
+          try {
+            await upsertResourceUnitPageRanges(worksheetId, ranges)
+          } catch (e) {
+            console.warn(`[单趟解析] 单元页范围落库失败 worksheet=${worksheetId}: ${e.message}`)
+          }
+        }
       }
     } catch (e) {
       console.log('OCR fallback failed:', e.message)
@@ -529,10 +553,13 @@ async function processOcrBatch(fileBuffer, startPage, endPage, carryState, lowCo
 
   const answers = []
   let state = carryState
-  for (const content of ocrContents) {
+  // 按真实页号逐页解析：state.pageRanges 跨批累计，调用方在收尾时再补末单元 end
+  for (let i = 0; i < ocrContents.length; i++) {
+    const realPage = startPage + i
+    const content = ocrContents[i]
     // 传递 lastState 对象而非标题字符串：单元标题只印在单元首页、大题标题只印在大题首行，
-    // 续页要继承完整的 {unit, group}，否则同一单元会被拆成两个、大题组会丢失
-    const parsed = parseAnswerText(content, lowConfidence, state)
+    // 续页要继承完整的 {unit, group, pageRanges}，否则同一单元会被拆成两个、大题组会丢失
+    const parsed = parseAnswerText(content, lowConfidence, state, realPage)
     answers.push(...parsed.answers)
     state = parsed.lastState
   }
@@ -578,6 +605,28 @@ export async function doParseOcrBatched(worksheetId, fileBuffer, totalPages, pre
   // 全部 OCR 页都失败时按解析失败处理（可重试），与单趟路径语义一致
   if (!anySaved && ocrPagesTried > 0 && ocrFailedPages.length === ocrPagesTried) {
     throw new Error(`全部 ${ocrPagesTried} 页 OCR 识别失败（AI 服务可能暂时不可用），请稍后重试`)
+  }
+
+  // 收尾：把 lastState.pageRanges 落库到 resource_units.answer_page_start/end
+  // 末单元（仍 open 的）end 兜底为 effectivePages
+  const pageRanges = carryState?.pageRanges
+  if (pageRanges && pageRanges.size > 0) {
+    const ranges = []
+    for (const [k, r] of pageRanges.entries()) {
+      if (!k) continue
+      const start = r?.start
+      const end = r?.end != null ? r.end : (r?.start != null ? effectivePages : null)
+      if (start != null && end != null && end >= start) {
+        ranges.push({ unit_key: k, answer_page_start: start, answer_page_end: end })
+      }
+    }
+    if (ranges.length > 0) {
+      try {
+        await upsertResourceUnitPageRanges(worksheetId, ranges)
+      } catch (e) {
+        console.warn(`[分批解析] 单元页范围落库失败 worksheet=${worksheetId}: ${e.message}`)
+      }
+    }
   }
 
   // 预埋答案最后统一 upsert：同 (章节|题号) 覆盖 OCR 结果（置信度最高），新题号追加。
