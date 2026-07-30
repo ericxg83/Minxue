@@ -181,6 +181,8 @@ export function isMainRateLimitedToday() {
 // （请求返回 200 但 choices=null，绝不能再放进轮换列表——空响应会拖慢整批），
 // 235B-A22B-Instruct 与 8B-Thinking 在线且各有独立当日配额。
 // 顺序 = 成本优先：8B 便宜量大 → 235B 质量最好 → 8B-Thinking 兜底（推理模型较慢）。
+// ⚠️ 现实里 8B 当日配额极容易耗尽，调用方需要保证 235B / 8B-Thinking 也都被真正试过，
+// 因此下面 callVisionCompletion 不能在 8B 失败时直接抛错。
 export const VL_MODELS = [...new Set([
   process.env.AI_MODEL,
   process.env.VL_MODEL,
@@ -233,7 +235,11 @@ const BACKUP_VENDOR_DEFS = [
     envKey: 'AGNES_API_KEY',
     endpoint: 'https://apihub.agnes-ai.com/v1/chat/completions',
     textModel: 'agnes-1.5-flash',
-    vlModels: ['agnes-1.5-flash', 'gpt-4o-mini', 'Qwen/Qwen3-VL-8B-Instruct', 'Qwen2.5-VL-7B-Instruct'],
+    // 顺序：Agnes 自家独立模型（agnes-1.5-flash / gpt-4o-mini）放最前，独立配额不与魔搭冲突；
+    // 之前在列表里的 'Qwen/Qwen3-VL-8B-Instruct' 实际是通过 Agnes 中转到魔搭，
+    // 一旦魔搭 8B 配额耗尽会再次撞 429 必须被排除，避免阻塞整个视觉链；
+    // 'Qwen2.5-VL-7B-Instruct' 留在末尾作为补充（Agnes 走的是另一组 provider，与 8B 独立）。
+    vlModels: ['agnes-1.5-flash', 'gpt-4o-mini', 'Qwen2.5-VL-7B-Instruct'],
     referer: null,
   },
 ]
@@ -557,16 +563,9 @@ export async function callVisionCompletion(opts) {
   const wantedModels = model ? [model] : VL_MODELS
   const mainSkippedByCooldown = MS_KEYS.length > 0 && isMainRateLimitedToday()
 
-  if (!mainSkippedByCooldown) {
-    for (const vlModel of wantedModels) {
-      for (const apiKey of MS_KEYS) {
-        if (isModelExhaustedToday(vlModel, apiKey)) continue
-        providers.push(callMsProvider(apiKey, vlModel))
-      }
-    }
-  }
-
-  // Agnes 视觉兜底
+  // ⭐ 调整：先把独立供应商（Agnes / Gemini）放最前——它们的配额与魔搭完全独立，
+  // 魔搭 8B 当日配额极容易耗尽，再不能让"魔搭全挂"导致整个调用立即挂掉。
+  // Agnes 自家 agnes-1.5-flash / gpt-4o-mini 是真正独立资源，应作为首选。
   for (const vendor of BACKUP_CONFIG.VENDORS) {
     for (const vlModel of vendor.vlModels) {
       providers.push(async () => {
@@ -586,6 +585,30 @@ export async function callVisionCompletion(opts) {
     }
   }
 
+  // Gemini 走专用调用，不在这里塞进 OpenAI 兼容 providers。
+  if (GEMINI_DIRECT.ENABLED) {
+    providers.push(async () => {
+      const content = await requestGeminiVision({
+        systemPrompt,
+        userText,
+        imageDataURL,
+        temperature,
+        maxTokens: Math.min(maxTokens, 4096),
+      })
+      return { content, usedBackup: true }
+    })
+  }
+
+  // 然后才轮到 ModelScope Key×模型矩阵（魔搭 8B 配额独立但易耗尽，留到 Agnes 之后作为补充）。
+  if (!mainSkippedByCooldown) {
+    for (const vlModel of wantedModels) {
+      for (const apiKey of MS_KEYS) {
+        if (isModelExhaustedToday(vlModel, apiKey)) continue
+        providers.push(callMsProvider(apiKey, vlModel))
+      }
+    }
+  }
+
   // 最后兜底：所有备份都不可用时，等主站冷却结束再把「Key×模型」矩阵全部重试（最多 2 轮）。
   // 备份提供商经常整体不可用（401/503），ModelScope 是唯一出路，绝不能因一次瞬时限流就放弃整页。
   // 无条件加入：既覆盖「进入时已被冷却跳过」，也覆盖「本次调用中主站 429 耗尽后才触发冷却」。
@@ -599,7 +622,7 @@ export async function callVisionCompletion(opts) {
             if (!isModelExhaustedToday(vlModel, apiKey)) combos.push([apiKey, vlModel])
           }
         }
-        if (!combos.length) throw new Error('所有视觉模型当日配额均已用尽，请明日再试或配置其他模型')
+        if (!combos.length) throw new Error('所有魔搭视觉模型当日配额均已用尽，请明日再试或配置其他模型')
         const waitMs = Math.max(0, _mainRateLimitedUntil - Date.now())
         if (waitMs > 0) {
           console.warn(`[AI] 备份不可用，等待 ${Math.ceil(waitMs / 1000)}s 主站冷却结束后重试（第 ${round + 1} 轮兜底）`)
