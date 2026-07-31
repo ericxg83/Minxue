@@ -205,10 +205,10 @@ export async function fixWorksheet(worksheetId, { onLog = () => {}, skipOcr = fa
       `UPDATE worksheet_answers
        SET metadata = COALESCE(metadata, '{}'::jsonb) || jsonb_build_object(
          'backup_unit_id', $2::text,
-         'backup_unit_key', $3,
+         'backup_unit_key', $3::text,
          'backup_at', NOW()::text
        )
-       WHERE unit_id = $1`,
+       WHERE unit_id = $1::uuid`,
       [s.id, s.id, s.unit_key]
     )
     onLog(`   ${s.unit_key} → 已备份 ${rowCount} 条答案`)
