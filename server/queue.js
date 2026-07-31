@@ -11,6 +11,73 @@ let queueInitialized = false
 let initPromise = null
 let currentConnection = null
 
+// ⭐ BullMQ Worker 错误关键词（命中后触发 Redis 实例切换 / 配额熔断）
+// - 'WRONGPASS' / 'ECONNRESET' / 'ETIMEDOUT'：连接级错误，触发整池切换
+// - 'max requests limit'：Upstash 业务级错误（仅真实命令触发），触发配额熔断 + 切到 backup
+const WORKER_RECOVERY_KEYWORDS = [
+  'WRONGPASS',
+  'ECONNRESET',
+  'ETIMEDOUT',
+  'max requests limit', // Upstash monthly quota
+  'max daily requests',  // 防御性：未来可能改成日配额
+  'quota exceeded'
+]
+const shouldTriggerRedisSwitch = (message) => {
+  if (!message) return false
+  return WORKER_RECOVERY_KEYWORDS.some(k => message.includes(k))
+}
+
+/**
+ * 关闭所有 BullMQ Worker/Queue，释放旧 connection。
+ * 必须在 rebuildQueue 之前调用。
+ */
+async function teardownQueues() {
+  console.log('[Queue] 拆解旧 BullMQ Worker/Queue...')
+  const closers = []
+  if (taskWorker) closers.push(taskWorker.close().catch(() => {}))
+  if (tikzWorker) closers.push(tikzWorker.close().catch(() => {}))
+  if (geometryWorker) closers.push(geometryWorker.close().catch(() => {}))
+  if (taskQueue) closers.push(taskQueue.close().catch(() => {}))
+  if (tikzQueue) closers.push(tikzQueue.close().catch(() => {}))
+  if (geometryQueue) closers.push(geometryQueue.close().catch(() => {}))
+  await Promise.all(closers)
+  taskQueue = null
+  taskWorker = null
+  tikzQueue = null
+  tikzWorker = null
+  geometryQueue = null
+  geometryWorker = null
+  currentConnection = null
+  console.log('[Queue] 旧 Worker/Queue 已拆解完成')
+}
+
+/**
+ * 当 Redis 实例被配额熔断 / 切到 backup 时，关闭旧 BullMQ Worker 并用新 connection 重建。
+ * 由 redisManager.onQuotaExhausted 回调触发。
+ */
+let rebuildInProgress = false
+async function rebuildQueue(reason) {
+  if (rebuildInProgress) {
+    console.log(`[Queue] rebuildQueue 已在进行中，跳过本次触发 (reason=${reason})`)
+    return
+  }
+  rebuildInProgress = true
+  try {
+    console.log(`[Queue] 🔄 触发 BullMQ 重建 (reason: ${reason || 'n/a'})`)
+    await teardownQueues()
+    // 重置初始化标志让 initQueue 可以重入
+    queueInitialized = false
+    initPromise = null
+    await initQueue()
+    console.log(`[Queue] ✅ 重建完成 (当前实例: ${redisManager.getStats().current})`)
+  } catch (err) {
+    console.error(`[Queue] ❌ 重建失败: ${err.message}`)
+    console.error(err.stack)
+  } finally {
+    rebuildInProgress = false
+  }
+}
+
 const initQueue = async () => {
   if (initPromise) return initPromise
   if (queueInitialized) return
@@ -19,6 +86,18 @@ const initQueue = async () => {
     try {
       console.log('🔄 [Queue] 开始初始化 Redis 连接池...')
       await redisManager.init()
+
+      // ⭐ 注册配额熔断回调：当 redisManager 标记某实例为 quota exhausted 时，
+      // 关闭旧 BullMQ Worker 并用新 connection 重建，让队列自动切到 backup 实例
+      if (typeof redisManager.onQuotaExhausted !== 'function') {
+        redisManager.onQuotaExhausted = (id, reason) => {
+          console.log(`[Queue] 📡 收到配额熔断通知: instance=${id}, reason=${reason}`)
+          // 异步重建，不阻塞 redisManager 内部流程
+          rebuildQueue(`quota_exhausted:${id}`).catch((e) =>
+            console.error('[Queue] 配额熔断触发的 rebuildQueue 失败:', e.message)
+          )
+        }
+      }
 
       const connection = await redisManager.getAvailableClient()
       if (!connection) {
@@ -95,9 +174,19 @@ const initQueue = async () => {
         console.error(`❌ [TikZ Worker] 失败: questionId=${job?.data?.questionId}, error=${err.message}`)
       })
       tikzWorker.on('error', (err) => {
-        // 复用同一 connection 的切换逻辑，不重复处理
-        if (err.message.includes('WRONGPASS') || err.message.includes('ECONNRESET') || err.message.includes('ETIMEDOUT')) return
-        console.error('⚠️ [TikZ Worker] 错误:', err.message)
+        const msg = err?.message || ''
+        if (!shouldTriggerRedisSwitch(msg)) {
+          console.error('⚠️ [TikZ Worker] 错误:', msg)
+          return
+        }
+        const isQuota = /max requests limit|max daily requests|quota exceeded/i.test(msg)
+        if (isQuota) {
+          const currentId = redisManager.getStats().current
+          console.warn(`[Queue] 🚫 TikZ Worker 检测到 Redis 配额耗尽 (instance=${currentId}): ${msg}`)
+          redisManager.markQuotaExhausted(currentId, msg)
+          return
+        }
+        // 连接级错误：忽略，由 taskWorker 的 error 处理器统一切换连接
       })
 
       // ── 几何图重建队列 ──
@@ -133,8 +222,19 @@ const initQueue = async () => {
         console.error(`❌ [几何Worker] 失败: ${job?.data?.assetId || ''}, error=${err.message}`)
       })
       geometryWorker.on('error', (err) => {
-        if (err.message.includes('WRONGPASS') || err.message.includes('ECONNRESET') || err.message.includes('ETIMEDOUT')) return
-        console.error('⚠️ [几何Worker] 错误:', err.message)
+        const msg = err?.message || ''
+        if (!shouldTriggerRedisSwitch(msg)) {
+          console.error('⚠️ [几何Worker] 错误:', msg)
+          return
+        }
+        const isQuota = /max requests limit|max daily requests|quota exceeded/i.test(msg)
+        if (isQuota) {
+          const currentId = redisManager.getStats().current
+          console.warn(`[Queue] 🚫 几何Worker 检测到 Redis 配额耗尽 (instance=${currentId}): ${msg}`)
+          redisManager.markQuotaExhausted(currentId, msg)
+          return
+        }
+        // 连接级错误：忽略，由 taskWorker 的 error 处理器统一切换连接
       })
 
       taskWorker.on('completed', (job, result) => {
@@ -146,16 +246,31 @@ const initQueue = async () => {
       })
 
       taskWorker.on('error', async (err) => {
-        if (err.message.includes('WRONGPASS') || err.message.includes('ECONNRESET') || err.message.includes('ETIMEDOUT')) {
-          console.warn('[Queue] 连接异常，尝试切换到下一个 Redis 实例...')
-          const newConnection = await redisManager.getAvailableClient()
-          if (newConnection && newConnection !== currentConnection) {
-            console.log(`[Queue] 已切换到新的 Redis 连接`)
-            currentConnection = newConnection
-          }
+        const msg = err?.message || ''
+        if (!shouldTriggerRedisSwitch(msg)) {
+          console.error('⚠️ [Worker] 错误:', msg)
           return
         }
-        console.error('⚠️ [Worker] 错误:', err.message)
+        // 命中 WORKER_RECOVERY_KEYWORDS：
+        // - 连接级错误（WRONGPASS/ECONNRESET/ETIMEDOUT）：立即尝试切换到下一个 pool 实例
+        // - 配额级错误（max requests limit / quota exceeded）：标记熔断 + 触发 rebuildQueue 切到 backup
+        const isQuota = /max requests limit|max daily requests|quota exceeded/i.test(msg)
+        if (isQuota) {
+          // 找到当前 connection 对应的 pool item id，标记熔断
+          const currentId = redisManager.getStats().current
+          console.warn(`[Queue] 🚫 检测到 Redis 配额耗尽 (instance=${currentId}): ${msg}`)
+          redisManager.markQuotaExhausted(currentId, msg)
+          // markQuotaExhausted 已通过 onQuotaExhausted 回调触发 rebuildQueue
+          return
+        }
+        // 连接级错误：尝试切换到下一个 pool 实例
+        console.warn(`[Queue] 连接异常，尝试切换到下一个 Redis 实例: ${msg}`)
+        const newConnection = await redisManager.getAvailableClient()
+        if (newConnection && newConnection !== currentConnection) {
+          console.log(`[Queue] 已切换到新的 Redis 连接`)
+          currentConnection = newConnection
+        }
+        return
       })
 
       taskWorker.on('stalled', (jobId) => {
@@ -175,7 +290,8 @@ const initQueue = async () => {
       console.warn('⚠️ 任务将使用同步处理模式')
       taskQueue = null
       taskWorker = null
-      queueInitialized = true
+      // 注意：这里不要把 queueInitialized 设为 true，否则 rebuildQueue 无法重入。
+      // 留 false 让下次 initQueue() 调用可以重新尝试（被 initPromise 防重入保护）。
     }
   })()
 

@@ -1,5 +1,18 @@
 import Redis from 'ioredis'
 
+// Upstash 业务级错误关键字（ping 不会触发，只在实际命令时返回）
+const QUOTA_EXHAUSTED_PATTERNS = [
+  'max requests limit exceeded',
+  'max daily requests exceeded',
+  'monthly request limit exceeded',
+  'quota exceeded'
+]
+const isQuotaExhaustedError = (message) => {
+  if (!message) return false
+  const lower = String(message).toLowerCase()
+  return QUOTA_EXHAUSTED_PATTERNS.some(p => lower.includes(p.toLowerCase()))
+}
+
 class RedisManager {
   constructor() {
     this.clients = new Map()
@@ -10,6 +23,72 @@ class RedisManager {
     this.healthCheckIntervalMs = 60000 // 60 seconds (reduced from 30s to cut request volume)
     this.reconnectDelayMs = 5000 // 5 seconds
     this.isShuttingDown = false
+    // 配额熔断追踪：被熔断的实例 id 集合
+    this.quotaExhaustedSet = new Set()
+    // 配额熔断通知回调（由 queue.js 注册，触发 BullMQ Worker 重建）
+    this.onQuotaExhausted = null
+  }
+
+  /**
+   * 将一个实例标记为「额度耗尽」，从可用池中临时剔除。
+   * 下一个 getAvailableClient() 会跳过它，强制走 backup。
+   * 下次 resetQuotaExhausted()（默认每月 1 号）会解除熔断。
+   */
+  markQuotaExhausted(id, reason) {
+    if (!id) return
+    if (this.quotaExhaustedSet.has(id)) return
+    this.quotaExhaustedSet.add(id)
+    console.warn(`[Redis:${id}] 🚫 额度熔断: ${reason || 'quota exhausted'}`)
+    // 关闭该 client 释放连接（不删除 pool 成员，保留配置以便后续 reset 后重用）
+    const client = this.clients.get(id)
+    if (client) {
+      try { client.disconnect() } catch (e) { /* ignore */ }
+      this.clients.delete(id)
+    }
+    // 通知 queue 重建 Worker 连接
+    if (typeof this.onQuotaExhausted === 'function') {
+      try {
+        this.onQuotaExhausted(id, reason)
+      } catch (e) {
+        console.error('[Redis] onQuotaExhausted 回调执行失败:', e.message)
+      }
+    }
+  }
+
+  /**
+   * 解除一个实例的熔断标记（每月 1 号 Upstash 额度刷新时调用）。
+   */
+  resetQuotaExhausted(id) {
+    if (!id) {
+      // 不传 id → 清空所有熔断
+      if (this.quotaExhaustedSet.size > 0) {
+        console.log(`[Redis] 🔓 解除所有配额熔断 (${this.quotaExhaustedSet.size} 个实例): ${Array.from(this.quotaExhaustedSet).join(', ')}`)
+        this.quotaExhaustedSet.clear()
+      }
+      return
+    }
+    if (this.quotaExhaustedSet.delete(id)) {
+      console.log(`[Redis:${id}] 🔓 解除配额熔断`)
+    }
+  }
+
+  /**
+   * 安排每月 1 号 00:01（本地时区）自动解除所有熔断。
+   * 与 Upstash 免费额度「每月重置」周期对齐。
+   */
+  scheduleMonthlyReset() {
+    const tick = () => {
+      const now = new Date()
+      // 下个月 1 号 00:01
+      const next = new Date(now.getFullYear(), now.getMonth() + 1, 1, 0, 1, 0, 0)
+      const ms = next.getTime() - now.getTime()
+      setTimeout(() => {
+        this.resetQuotaExhausted()
+        tick() // 排定下一个月
+      }, ms)
+    }
+    tick()
+    console.log('[Redis] ⏰ 已安排每月 1 号自动解除配额熔断')
   }
 
   buildPool() {
@@ -93,7 +172,13 @@ class RedisManager {
       }
 
       client.on('error', (err) => {
-        console.error(`[Redis:${poolItem.id}] 连接错误: ${err.message}`)
+        const msg = err?.message || ''
+        console.error(`[Redis:${poolItem.id}] 连接错误: ${msg}`)
+        // ⭐ 配额熔断：Upstash 业务级错误（ping 不会触发，只有真实命令会触发）
+        // 命中后立即标记该实例为不可用，下次 getAvailableClient 跳过它走 backup
+        if (isQuotaExhaustedError(msg)) {
+          this.markQuotaExhausted(poolItem.id, msg)
+        }
         // Auto-reconnect is handled by ioredis retryStrategy
       })
 
@@ -141,6 +226,9 @@ class RedisManager {
 
     // Start health check
     this.startHealthCheck()
+
+    // 每月 1 号 00:01 自动解除所有配额熔断（与 Upstash 免费额度重置周期对齐）
+    this.scheduleMonthlyReset()
   }
 
   async getAvailableClient() {
@@ -153,6 +241,12 @@ class RedisManager {
     for (let i = 0; i < this.pool.length; i++) {
       const idx = (this.currentIndex + i) % this.pool.length
       const item = this.pool[idx]
+
+      // ⭐ 配额熔断：跳过已被标记为额度耗尽的实例
+      if (this.quotaExhaustedSet.has(item.id)) {
+        continue
+      }
+
       let client = this.clients.get(item.id)
 
       // Try to reconnect if client doesn't exist
@@ -174,8 +268,14 @@ class RedisManager {
           return client
         }
       } catch (err) {
-        console.warn(`[Redis:${item.id}] ping 失败，尝试下一个: ${err.message}`)
-        this.clients.delete(item.id)
+        const msg = err?.message || ''
+        console.warn(`[Redis:${item.id}] ping 失败，尝试下一个: ${msg}`)
+        // ping 失败时也检测配额（理论上不会，但防御性写法）
+        if (isQuotaExhaustedError(msg)) {
+          this.markQuotaExhausted(item.id, msg)
+        } else {
+          this.clients.delete(item.id)
+        }
         continue
       }
     }
@@ -235,10 +335,12 @@ class RedisManager {
       total: this.pool.length,
       connected: this.clients.size,
       current: this.pool[this.currentIndex]?.id || 'none',
+      quotaExhausted: Array.from(this.quotaExhaustedSet),
       pool: this.pool.map(item => ({
         id: item.id,
         priority: item.priority,
-        connected: this.clients.has(item.id)
+        connected: this.clients.has(item.id),
+        quotaExhausted: this.quotaExhaustedSet.has(item.id)
       }))
     }
   }
