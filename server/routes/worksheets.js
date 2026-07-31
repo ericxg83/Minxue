@@ -84,6 +84,34 @@ router.get('/fix-exam-units/suspects', async (req, res) => {
   }
 })
 
+// 单个 worksheet 诊断（不带 OCR 重跑，看 suspect 列表）
+//   GET /api/worksheets/:id/fix-exam-units/diagnose  → 已存在，不动
+// 下面是面向 self-test 的：直接把 diagnoseWorksheet 的结果 JSON 化
+router.get('/fix-exam-units/diagnose/:worksheetId', async (req, res) => {
+  try {
+    const d = await diagnoseWorksheet(req.params.worksheetId)
+    res.json({
+      success: true,
+      name: d.w.name,
+      units_count: d.units.length,
+      exam_unit_count: d.examUnitCount,
+      suspects: d.suspects.map(s => ({
+        unit_id: s.id, unit_key: s.unit_key, unit_title: s.unit_title,
+        lesson_code: s.lesson_code, ans_count: parseInt(s.ans_count, 10),
+      })),
+      big_chapters: (d.bigChapters || []).map(s => ({
+        unit_id: s.id, unit_key: s.unit_key, unit_title: s.unit_title, ans_count: parseInt(s.ans_count, 10),
+      })),
+      units: d.units.map(u => ({
+        unit_id: u.id, unit_key: u.unit_key, unit_title: u.unit_title,
+        lesson_code: u.lesson_code, ans_count: parseInt(u.ans_count, 10),
+      })),
+    })
+  } catch (e) {
+    res.status(500).json({ error: e.message })
+  }
+})
+
 // 自测：列所有 worksheet 的 unit 分布 + 嫌疑原因（不筛任何东西，调试用）
 //   GET /api/worksheets/fix-exam-units/selftest
 router.get('/fix-exam-units/selftest', async (req, res) => {
