@@ -1,35 +1,10 @@
-feat(redis): Upstash 配额熔断 + 双账户自动故障转移
+fix(redis): 冷启动兜底 ensureResetAfterMonthlyBoundary
 
-背景：Upstash 免费额度 50 万/月达到后返回 'ERR max requests limit
-exceeded'，ping 不会触发该错误，因此原 redisManager 的 ping 探活无
-法识别配额耗尽，导致 BullMQ Worker 继续把请求发到已耗尽的主账户，
-所有写入失败。
+Render 免费层会 sleep 闲置实例，setTimeout 在 sleep 期间不触发。
+如果 7/31 部署后实例 sleep 到 8/1，新进程里没有排定的 monthly
+reset timer，quotaExhaustedSet 永远不清空，主实例无法恢复。
 
-改动：
-
-server/redisManager.js
-- 新增 QUOTA_EXHAUSTED_PATTERNS 正则，识别 max requests limit /
-  quota exceeded 等 Upstash 业务级错误
-- 新增 markQuotaExhausted(id) / resetQuotaExhausted() 方法
-- client.on('error') 钩子命中配额关键字时自动 mark + disconnect
-- getAvailableClient() 跳过已熔断实例，下次获取连接走 backup
-- 新增 scheduleMonthlyReset()：每月 1 号 00:01 自动解除所有熔断，
-  对齐 Upstash 免费额度「每月重置」周期
-- getStats() 输出 quotaExhausted 状态供监控
-
-server/queue.js
-- 新增 WORKER_RECOVERY_KEYWORDS 统一连接级 + 配额级错误关键词
-- 三个 Worker (taskWorker/tikzWorker/geometryWorker) 的 error 事件
-  都接入配额熔断路径
-- 新增 teardownQueues() / rebuildQueue()：配额熔断时关闭旧 BullMQ
-  Worker，用新 connection 重建队列
-- redisManager.onQuotaExhausted 回调注册到 rebuildQueue
-- initQueue 失败时不再置 queueInitialized=true，让 rebuildQueue 可
-  以重入
-
-server/.env.example
-- 补充双账户 + 配额熔断机制说明
-- 修正 URL 协议为 rediss:// (Upstash 使用 TLS)
-
-效果：主账户额度耗尽时，系统自动切到 REDIS_POOL_URLS 备用池；
-次月 1 号主账户自动恢复候选。
+在 init() 末尾调用 ensureResetAfterMonthlyBoundary()：
+- 检查当前时间是否已过"本月 1 号 00:01"
+- 是的话立即清空所有熔断标记
+- 覆盖"持续运行"和"冷启动"两种场景

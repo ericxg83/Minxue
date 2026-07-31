@@ -75,6 +75,9 @@ class RedisManager {
   /**
    * 安排每月 1 号 00:01（本地时区）自动解除所有熔断。
    * 与 Upstash 免费额度「每月重置」周期对齐。
+   *
+   * 注意：Render 免费层会 sleep 实例，setTimeout 在 sleep 期间不会触发。
+   * 所以 init() 里同时会调用 ensureResetAfterMonthlyBoundary() 做兜底。
    */
   scheduleMonthlyReset() {
     const tick = () => {
@@ -89,6 +92,21 @@ class RedisManager {
     }
     tick()
     console.log('[Redis] ⏰ 已安排每月 1 号自动解除配额熔断')
+  }
+
+  /**
+   * 兜底：进程冷启动时如果已经过了"本月 1 号 00:01"，
+   * 立即清空所有熔断标记，让主实例重新可用。
+   * 解决 Render 免费层 sleep 后 setTimeout 不会触发的场景。
+   */
+  ensureResetAfterMonthlyBoundary() {
+    if (this.quotaExhaustedSet.size === 0) return
+    const now = new Date()
+    const thisMonthBoundary = new Date(now.getFullYear(), now.getMonth(), 1, 0, 1, 0, 0)
+    if (now.getTime() >= thisMonthBoundary.getTime()) {
+      console.log(`[Redis] 🔓 冷启动兜底：本月 1 号已过，解除 ${this.quotaExhaustedSet.size} 个熔断标记`)
+      this.quotaExhaustedSet.clear()
+    }
   }
 
   buildPool() {
@@ -223,6 +241,9 @@ class RedisManager {
 
     this.initialized = true
     console.log(`[Redis] 连接池初始化完成: ${this.clients.size}/${this.pool.length} 个实例`)
+
+    // 冷启动兜底：解决 Render sleep 后 setTimeout 失效问题
+    this.ensureResetAfterMonthlyBoundary()
 
     // Start health check
     this.startHealthCheck()
