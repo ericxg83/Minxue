@@ -30,6 +30,7 @@ const CHAPTER_PREFIX_RE = /^第[一二三四五六七八九十\d]+[章节]/
 
 /**
  * 父章节错挂嫌疑判定（非试卷/非章/非练习单元，但挂了 >=10 条答案）
+ * 或：第X章类单元挂着 >= BIG_CHAPTER_ANS_THRESHOLD 条答案（典型错挂：试卷①②③的答案被父章节吞）
  */
 function classifyUnit(unit) {
   if (!unit.unit_key) return 'unknown'
@@ -39,9 +40,12 @@ function classifyUnit(unit) {
   return 'orphan'
 }
 
+// 父章节挂着 >= 此值就算嫌疑（典型错挂：试卷①②③答案被吞进『第十九章实数』等父单元）
+const BIG_CHAPTER_ANS_THRESHOLD = 10
+
 /**
  * 诊断单个 worksheet
- * @returns {Promise<{w, units, suspects, examUnitCount}>}
+ * @returns {Promise<{w, units, suspects, examUnitCount, bigChapters}>}
  */
 export async function diagnoseWorksheet(worksheetId) {
   const { rows: wRows } = await query(
@@ -64,13 +68,21 @@ export async function diagnoseWorksheet(worksheetId) {
   )
 
   const suspects = []
+  const bigChapters = []
   let examUnitCount = 0
   for (const u of units) {
     const cls = classifyUnit(u)
+    const ans = parseInt(u.ans_count, 10)
     if (cls === 'exam') examUnitCount++
-    if (cls === 'orphan' && parseInt(u.ans_count, 10) >= 10) suspects.push(u)
+    // 1) 老判据：非常规单元挂 >=10 条
+    if (cls === 'orphan' && ans >= BIG_CHAPTER_ANS_THRESHOLD) suspects.push(u)
+    // 2) 新判据：第X章父单元挂 >=10 条（典型『试卷①②③被吞』错挂）
+    if (cls === 'chapter' && ans >= BIG_CHAPTER_ANS_THRESHOLD) {
+      bigChapters.push(u)
+      suspects.push(u)
+    }
   }
-  return { w, units, suspects, examUnitCount }
+  return { w, units, suspects, examUnitCount, bigChapters }
 }
 
 /**
