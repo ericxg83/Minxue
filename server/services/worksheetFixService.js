@@ -40,7 +40,11 @@ function classifyUnit(unit) {
   return 'orphan'
 }
 
-// 父章节挂着 >= 此值就算嫌疑（典型错挂：试卷①②③答案被吞进『第十九章实数』等父单元）
+/**
+ * 父章节挂着 >= 此值就算嫌疑（典型错挂：试卷①②③答案被吞进『第十九章实数』等父单元）
+ * 提升到文件顶部让 diagnoseWorksheet / listSuspectWorksheets / fixWorksheet 共享，
+ * 避免之前第 44 行 + 第 103 行重复声明导致 Render ESM 部署直接 SyntaxError
+ */
 const BIG_CHAPTER_ANS_THRESHOLD = 10
 
 /**
@@ -100,8 +104,6 @@ export async function diagnoseWorksheet(worksheetId) {
  *
  * @returns {Promise<Array<{id, name, exam_units, orphan_ans_count, big_chapter_ans, total_ans, reasons}>>}
  */
-const BIG_CHAPTER_ANS_THRESHOLD = 10
-
 export async function listSuspectWorksheets(limit = 200) {
   const { rows } = await query(
     `WITH unit_stats AS (
