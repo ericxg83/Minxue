@@ -11,7 +11,7 @@ import sharp from 'sharp'
 import { TABLES, TASK_STATUS } from './config/neon.js'
 import { query } from './config/neon.js'
 import { AI_CONFIG, getAIHeaders, buildOCRPrompt, buildAnswerGenerationPrompt, getCurrentTextModel, getCurrentVLModel, rotateTextModel, rotateVLModel, TEXT_MODELS, VL_MODELS, callTextCompletion, callVisionCompletion } from './config/ai.js'
-import { updateTaskStatus, createQuestions, batchUpdateQuestionTags, addWrongQuestions, createJudgement, updateQuestionAnswer, markAnswerException, findCachedQuestionByFingerprint, cacheQuestion, incrementQuestionUseCount, updateQuestionCacheId, createQuestionAsset, lookupWorksheetAnswer, getWorksheetAnswersBySection, deleteQuestionsByTaskId, bulkLookupResourceAnswers, getResourceById, addSelfContainedWrongQuestion } from './services/neonService.js'
+import { updateTaskStatus, createQuestions, batchUpdateQuestionTags, addWrongQuestions, createJudgement, updateQuestionAnswer, markAnswerException, findCachedQuestionByFingerprint, cacheQuestion, incrementQuestionUseCount, updateQuestionCacheId, createQuestionAsset, lookupWorksheetAnswer, getWorksheetAnswersBySection, deleteQuestionsByTaskId, bulkLookupResourceAnswers, getResourceAnswersBySection, getResourceById, addSelfContainedWrongQuestion } from './services/neonService.js'
 import { uploadImage } from './services/ossService.js'
 import { cropAndUploadQuestionRegion } from './utils/cropAndUpload.js'
 import { generateTextFingerprint, generatePHash, PARSER_VERSION, TEXT_SIMILARITY_THRESHOLD } from './utils/questionFingerprint.js'
@@ -2195,6 +2195,13 @@ const processWorkbookGrading = async (job) => {
 //
 // 流程：OCR 提取学生答案 → resource_answers 查找 → judgeAnswer 比对
 // 跳过 AI 生成答案，大幅节省成本。
+//
+// 关键修复（2026-08-01）：
+// 旧版 bulkLookupResourceAnswers(resourceId, questionNos) 只按 question_no 查，
+// 多 unit 场景下（试卷①/试卷②/试卷③ 题号都从 1 开始）只返回 question_no ASC 第一行，
+// → 学生答对但用错单元的答案比对，批改结果"一塌糊涂"。
+// 改用 getResourceAnswersBySection(resourceId) 返回 3D Map
+// (unitKey → sectionKey → qNo|subNo → row) + pickAnswerUnit 选单元，按 (unit, section, qNo) 精确定位。
 
 const processAnswerBankGrading = async (job) => {
   const { taskId, studentId, imageUrl: rawImageUrl, originalName, resourceId } = job.data
@@ -2264,93 +2271,292 @@ const processAnswerBankGrading = async (job) => {
     await job.updateProgress(20)
     await updateTaskStatus(taskId, TASK_STATUS.PROCESSING, { progress: 20 })
 
-    // OCR 提取学生答案（复用 recognizeQuestions 统一处理 JSON 解析+重试）
-    const allQuestions = []
-    for (const { pageNumber, buffer } of imageBuffers) {
+    // ─────────────────────────────────────────────────────────
+    // 答案库批改的 OCR 提示词（关键修复）
+    // 旧版复用 buildOCRPrompt，prompt 里有"answer 标准答案"字段 + 整体走通用管线，
+    // 实际没有用 AI 生成的 answer，而是和答案库比对；但 prompt 仍诱导 AI 干无用功，
+    // 且**没有 page_title / chapter_hint 输出**，导致多 unit 场景下无法定位单元。
+    //
+    // 这里专门写一个 prompt：
+    //   1) 不让 AI 猜标准答案（答案库已存在）
+    //   2) 强制输出 page_title + chapter_hint（批改时定位单元的锚点）
+    //   3) question_number 从印刷体题号读取
+    // ─────────────────────────────────────────────────────────
+    const answerBankPrompt = `你是一个专业的学生手写答案识别助手。请从试卷/作业图片中提取页面标题和每道题的题号、学生手写答案。
+
+⚠️ 关键：请严格区分印刷体文字和手写文字
+- 印刷体文字（题目、选项、题号数字等）→ 不要作为 student_answer
+- 手写体文字（学生书写的内容）→ 这才是 student_answer
+- 不要猜测或生成标准答案（answer 字段）！答案库已存在，你的任务是仅识别学生作答内容。
+
+只输出 JSON 对象，格式：
+{
+  "page_title": "页面顶部印刷体标题，如'试卷① 19.1 平方根与立方根 基础性测试'、'试卷② 21.2(3) 一般的一元二次方程的解法'、'第十九章 单元测试卷'，没有则填 null",
+  "chapter_hint": "根据题目内容推断的章节名，如'第二十章二次根式'、'第十九章实数'，不确定就填 null",
+  "questions": [
+    {
+      "question_number": 1,
+      "content": "题目原文（印刷体题干）",
+      "student_answer": "学生手写的答案文本，没有则填 null",
+      "question_type": "choice",  // choice | fill | judge | answer
+      "block_coordinates": { "x": 120, "y": 300, "width": 760, "height": 90 }
+    }
+  ]
+}
+
+注意：
+- page_title 从页面页眉/大标题的印刷体读取，尽量完整（包括圈序号 ①②③、试卷序号、课时编号 19.1(1) 等关键信息）。
+  它是批改时定位答案库的关键锚点——必须如实输出，绝不要省略或简化。
+  例如：识别到"试卷①  19.1  平方根与立方根  基础性测试"就必须原样输出整串，不要简化为"试卷1"。
+
+⚠️【关键】如果页面顶部看不到印刷体页眉/标题（被裁掉、模糊、或本就是"二、选择题 + 简答题"这类无章节标题的排版），
+  绝对不能把 page_title 留为 null！必须根据本页【题目内容特征】推断最可能的章节标题并填入：
+  - 题目出现 √、±√、二次根式、根号运算、平方根、立方根 → 填 "第二十章二次根式"
+  - 题目出现实数、无理数、有理数、相反数、绝对值、数轴、科学记数法、近似数 → 填 "第十九章实数"
+  - 题目出现一元二次方程、求根公式、判别式、根与系数 → 填 "第二十一章一元二次方程"
+  - 题目出现直角三角形、勾股定理、角平分线 → 填 "第二十二章直角三角形"
+  - 其他情况：根据题号所在范围 + 内容特征推断；实在判断不出，填 "未知章节"。
+  page_title 缺失会导致后端无法定位答案库而错挂章节，批改结果"一塌糊涂"。
+
+- chapter_hint 必须填！当 page_title 拿不准章节时，chapter_hint 是关键的兜底信号。
+  填法与上面 page_title 的章节推断规则完全一致。
+
+- content 必须填：每道题的题干原文（印刷体），至少包含这道题在问什么。
+  选填题可写"下列各式中正确的是"或"与数轴上的点一一对应的是"等；
+  计算题可写"(1) √12 × √(1/3)"；填空题可写"某数..."。
+  它的作用是：后端会用 content 里的关键数学符号（√、根号等）反推章节归属。
+  content 缺失会导致章节无法反推。
+
+- question_number 从印刷体题号读取，必须是数字。
+  注意：每个试卷单元（如"试卷①"）的题号都从 1 重新开始编号，请按当前页所在单元的局部题号输出。
+  试卷小标题出现在本页时（如"试卷① 19.1..."），该单元下的题号即从 1 开始。
+
+- student_answer 只提取学生手写的内容，如果没有手写迹，填 null；判断题的 √/× 也要提取
+
+- 不要猜测标准答案！不要输出 answer 字段！答案库已存在，不要试图生成。
+
+- 只返回 JSON，不要其他文字`
+
+    // OCR 提取学生答案（按页处理，每页保留 page_title / chapter_hint）
+    const pageDataList = []
+    let ocrErrors = 0
+    let totalQuestions = 0
+
+    for (let pageIdx = 0; pageIdx < imageBuffers.length; pageIdx++) {
+      const { pageNumber, buffer } = imageBuffers[pageIdx]
+      console.log(`   [AnswerBank] 处理第 ${pageIdx + 1}/${imageBuffers.length} 页: pageNumber=${pageNumber}`)
+
       let compressed
       try {
-        compressed = await sharp(buffer).rotate().normalize().resize(1920, 1920, { fit: 'inside' }).jpeg({ quality: 85 }).toBuffer()
+        compressed = await sharp(buffer).rotate().normalize().resize(1800, 1800, { fit: 'inside', withoutEnlargement: true }).jpeg({ quality: 85 }).toBuffer()
       } catch (e) {
-        console.error(`⚠️ [AnswerBank] 第 ${pageNumber} 页压缩失败: ${e.message}`)
+        console.error(`   [AnswerBank] 第 ${pageNumber} 页压缩失败: ${e.message}`)
+        ocrErrors++
         continue
       }
 
-      const imageBase64 = bufferToBase64(compressed)
-      const ocrResult = await recognizeQuestions(imageBase64, taskId).catch(e => {
-        console.error(`⚠️ [AnswerBank] 第 ${pageNumber} 页 OCR 失败: ${e.message}`)
-        return null
-      })
-      if (!ocrResult || !ocrResult.success) continue
-
-      for (const q of (ocrResult.questions || [])) {
-        allQuestions.push({ ...q, page_number: pageNumber })
+      let content
+      try {
+        const result = await callVisionCompletion({
+          imageDataURL: `data:image/jpeg;base64,${bufferToBase64(compressed)}`,
+          systemPrompt: answerBankPrompt,
+          userText: '识别这张作业图片的页面标题和所有题目的学生答案。',
+          temperature: 0.1,
+          maxTokens: 4096
+        })
+        content = result?.content
+      } catch (e) {
+        console.error(`   [AnswerBank] 第 ${pageNumber} 页 OCR 失败: ${e.message}`)
+        ocrErrors++
+        continue
       }
+
+      if (!content) {
+        console.error(`   [AnswerBank] 第 ${pageNumber} 页AI识别返回为空，跳过`)
+        ocrErrors++
+        continue
+      }
+
+      // 解析 JSON
+      let questions = []
+      let pageTitle = null
+      let chapterHint = null
+      try {
+        const jsonMatch = content.match(/```json\n?([\s\S]*?)\n?```/) ||
+                          content.match(/```\n?([\s\S]*?)\n?```/) ||
+                          content.match(/[\[{][\s\S]*[\]}]/)
+        const jsonStr = jsonMatch ? jsonMatch[1] || jsonMatch[0] : content
+        const parsed = JSON.parse(jsonStr)
+        if (Array.isArray(parsed)) {
+          questions = parsed
+        } else if (parsed && typeof parsed === 'object') {
+          pageTitle = parsed.page_title || null
+          chapterHint = parsed.chapter_hint || null
+          questions = Array.isArray(parsed.questions) ? parsed.questions : []
+          if (chapterHint) {
+            for (const q of questions) {
+              if (q && typeof q === 'object') q._chapter_hint = chapterHint
+            }
+          }
+        }
+      } catch (e) {
+        console.error(`   [AnswerBank] 第 ${pageNumber} 页JSON解析失败: ${e.message}`)
+        ocrErrors++
+        continue
+      }
+
+      console.log(`   [AnswerBank] 第 ${pageNumber} 页: 识别到 ${questions.length} 道题, 标题="${pageTitle}"`)
+
+      // 标记每道题来自哪页图片
+      for (const q of questions) {
+        q._page_number = pageNumber
+        q._page_image_url = pages[pageIdx]?.imageUrl || null
+      }
+
+      totalQuestions += questions.length
+      pageDataList.push({
+        pageTitle,
+        pageNumber,
+        imageUrl: pages[pageIdx]?.imageUrl || null,
+        questions,
+        chapterHint: questions.find(q => q && q._chapter_hint)?._chapter_hint || null
+      })
+
+      const progress = 20 + Math.round(((pageIdx + 1) / imageBuffers.length) * 30)
+      await job.updateProgress(progress)
+      await updateTaskStatus(taskId, TASK_STATUS.PROCESSING, { progress })
     }
 
-    if (allQuestions.length === 0) return fail('OCR 未识别到任何题目')
+    if (totalQuestions === 0) {
+      const errorDetail = ocrErrors > 0 ? `${ocrErrors} 页识别失败` : 'OCR 未识别到任何题目'
+      return fail(errorDetail)
+    }
 
-    await job.updateProgress(40)
-    await updateTaskStatus(taskId, TASK_STATUS.PROCESSING, { progress: 40 })
+    await job.updateProgress(50)
+    await updateTaskStatus(taskId, TASK_STATUS.PROCESSING, { progress: 50 })
 
-    // 从答案库批量查询
-    const questionNos = allQuestions.map(q => q.question_number)
-    const cachedAnswers = await bulkLookupResourceAnswers(resourceId, questionNos)
-    const answerMap = new Map(cachedAnswers.map(a => [a.question_no, a]))
+    // ─────────────────────────────────────────────────────────
+    // 单元感知批改（关键修复）
+    // 旧版用 bulkLookupResourceAnswers(resourceId, questionNos) → answerMap = Map<questionNo, row>，
+    // 完全没考虑 unit_id。当答案库有多个 unit（试卷①/试卷②/试卷③），每个 unit 题号都从 1 开始，
+    // answerMap.get(1) 只返回 question_no ASC 排序后的第一行 → 学生答对但批错。
+    //
+    // 新版：getResourceAnswersBySection 返回 3D Map（unitKey → sectionKey → qNo|subNo → row），
+    // 用 pickAnswerUnit 选本页所属 unit，再在 unit 内部按 (section, question_no, sub_no) 精确定位。
+    // ─────────────────────────────────────────────────────────
+    const answersByUnit = await getResourceAnswersBySection(resourceId)
+    const unitCount = answersByUnit.size
+    console.log(`   [AnswerBank] 答案库共 ${unitCount} 个 unit: ${[...answersByUnit.keys()].join(', ')}`)
 
     // 比对并保存
     const savedQuestions = []
     let emptyCount = 0, matchedCount = 0
+    let wrongCount = 0
+    const unitHitMap = new Map()  // unitKey → 命中数（诊断用）
+    // 临时索引：question_number → { matched_unit_key, matched_unit_title }
+    // 供后续 judgement 写入时携带诊断信息（questions 表无此列，故不入表）
+    const matchInfoByQN = new Map()
+    let qnCounter = 0
 
-    for (const q of allQuestions) {
-      const cached = answerMap.get(q.question_number)
-      const studentAnswer = (q.student_answer || '').trim()
-      const isEmpty = !studentAnswer
+    for (const { pageTitle, pageNumber, imageUrl, questions, chapterHint } of pageDataList) {
+      if (questions.length === 0) continue
 
-      let isCorrect = null
-      let judgementSource = 'ai_ocr'
+      // 1) 选本页所属 unit
+      const matchedUnit = unitCount === 1
+        ? [...answersByUnit.keys()][0]   // 唯一 unit 时直接采用，跳过匹配
+        : pickAnswerUnit(answersByUnit, pageTitle, questions, pageNumber, chapterHint)
+      const unitAnswers = matchedUnit != null ? answersByUnit.get(matchedUnit) : null
+      const noUnit = unitCount === 0
 
-      if (cached && !isEmpty) {
-        // 用 cached.answer 作为参考答案
-        const judgement = await judgeAnswer({
-          questionType: q.question_type || cached.answer_type || 'answer',
-          studentAnswer,
-          answer: cached.answer,
-          options: null
-        }).catch(() => ({ isCorrect: false, confidence: 0 }))
+      if (matchedUnit) {
+        unitHitMap.set(matchedUnit, (unitHitMap.get(matchedUnit) || 0) + 1)
+      }
+      console.log(`   [AnswerBank] 页匹配: pageNumber=${pageNumber} title="${pageTitle}" chapterHint="${chapterHint}" → unit="${matchedUnit}" (${questions.length} 题)`)
 
-        isCorrect = judgement.isCorrect
-        matchedCount++
-      } else if (isEmpty) {
-        emptyCount++
-        isCorrect = null
-      } else {
-        // 答案库无此题目，标记为待审核
-        isCorrect = null
+      // 2) 在该 unit 的"section → qNo|subNo → row"二维索引中，每道题独立查答案
+      const lookupRow = (qNo, subNo) => {
+        if (!unitAnswers) return null
+        const qKey = `${Number(qNo)}|${subNo || ''}`
+        let best = null
+        for (const qMap of unitAnswers.values()) {
+          const row = qMap.get(qKey)
+          if (row) best = row
+        }
+        return best
       }
 
-      const questionData = {
-        task_id: taskId,
-        student_id: studentId,
-        content: q.content || `第${q.question_number}题`,
-        question_type: q.question_type || (cached ? cached.answer_type : 'answer'),
-        answer: cached ? cached.answer : null,
-        student_answer: studentAnswer,
-        ai_answer: null,
-        answer_source: isEmpty ? 'blank' : 'recognized',
-        is_correct: isCorrect,
-        status: isCorrect === false ? 'wrong' : 'pending',
-        page_number: q.page_number,
-        question_number: q.question_number,
-        is_suspicious: false,
-        confidence: isEmpty ? 0 : (cached ? 0.85 : 0),
-        source_type: resource.resource_type === 'exam' ? 'exam' : 'homework'
-      }
+      // 取本页代表 unit_title（供本页所有题目的 judgement.metadata 共用）
+      const pageUnitTitle = unitAnswers
+        ? [...unitAnswers.values()][0]?.values().next().value?.unit_title || null
+        : null
 
-      savedQuestions.push(questionData)
+      for (const q of questions) {
+        if (q.question_number == null) continue
+
+        const studentAnswer = (q.student_answer || '').toString().trim()
+        const isEmpty = !studentAnswer
+
+        let answerRow = null
+        if (!noUnit) {
+          answerRow = lookupRow(q.question_number, q.sub_no)
+        }
+
+        let isCorrect = null
+        const refAnswer = answerRow ? answerRow.answer : null
+        const refType = answerRow ? (answerRow.answer_type || q.question_type || 'answer') : (q.question_type || 'answer')
+
+        if (answerRow && !isEmpty) {
+          // judgeAnswer 签名：(studentAnswer, referenceAnswer, questionType)
+          // 是同步函数，无需 catch 兜底（processWorkbookGrading 也按此调用）
+          const judgement = judgeAnswer(studentAnswer, refAnswer, refType)
+          isCorrect = judgement && typeof judgement.isCorrect !== 'undefined' ? judgement.isCorrect : null
+          if (isCorrect === true || isCorrect === false) matchedCount++
+        } else if (isEmpty) {
+          emptyCount++
+          isCorrect = null
+        } else {
+          // 答案库无此题目，标记为待审核
+          isCorrect = null
+        }
+
+        if (isCorrect === false) wrongCount++
+
+        const questionData = {
+          task_id: taskId,
+          student_id: studentId,
+          content: q.content || (answerRow && answerRow.content) || `第${q.question_number}题`,
+          question_type: refType,
+          answer: refAnswer,
+          student_answer: studentAnswer,
+          ai_answer: null,
+          answer_source: isEmpty ? 'blank' : 'recognized',
+          is_correct: isCorrect,
+          status: isCorrect === false ? 'wrong' : 'pending',
+          page_number: q._page_number || pageNumber,
+          question_number: q.question_number,
+          is_suspicious: false,
+          confidence: isEmpty ? 0 : (answerRow ? 0.85 : 0),
+          source_type: resource.resource_type === 'exam' ? 'exam' : 'homework'
+          // 单元匹配结果不写入 questions（表无对应列），仅在 judgement.metadata 记录
+        }
+
+        savedQuestions.push(questionData)
+        // 用全局递增 id 作为临时 key（不依赖 question_number，因多页可能同号）
+        qnCounter++
+        matchInfoByQN.set(qnCounter, {
+          matched_unit_key: matchedUnit,
+          matched_unit_title: answerRow ? answerRow.unit_title : pageUnitTitle
+        })
+      }
     }
 
-    await job.updateProgress(60)
-    await updateTaskStatus(taskId, TASK_STATUS.PROCESSING, { progress: 60 })
+    if (unitCount > 1) {
+      const hitSummary = [...unitHitMap.entries()].map(([k, v]) => `${k}=${v}`).join(', ')
+      console.log(`   [AnswerBank] 多 unit 命中分布: ${hitSummary}（未命中页将答非所问）`)
+    }
+
+    await job.updateProgress(70)
+    await updateTaskStatus(taskId, TASK_STATUS.PROCESSING, { progress: 70 })
 
     // 幂等：先清旧题，再批量写入
     const deletedOld = await deleteQuestionsByTaskId(taskId)
@@ -2369,10 +2575,10 @@ const processAnswerBankGrading = async (job) => {
     await createQuestions(questionsWithIds)
 
     // 同步错题本 + judgement
-    let wrongCount = 0
-    for (const q of questionsWithIds) {
+    for (let idx = 0; idx < questionsWithIds.length; idx++) {
+      const q = questionsWithIds[idx]
+      const matchInfo = matchInfoByQN.get(idx + 1) || {}
       if (q.is_correct === false) {
-        wrongCount++
         await addWrongQuestions(studentId, [q.id], null, null).catch(e =>
           console.error(`⚠️ [AnswerBank] 错题本同步失败 questionId=${q.id}:`, e.message)
         )
@@ -2387,13 +2593,19 @@ const processAnswerBankGrading = async (job) => {
         content: q.content,
         answer: q.answer,
         studentAnswer: q.student_answer,
-        metadata: { resource_id: resourceId, answer_bank: true }
+        metadata: {
+          resource_id: resourceId,
+          answer_bank: true,
+          // 关键诊断字段：错位排查时一眼能看出命中了哪个 unit
+          matched_unit_key: matchInfo.matched_unit_key || null,
+          matched_unit_title: matchInfo.matched_unit_title || null
+        }
       }).catch(e => console.error(`⚠️ [AnswerBank] judgement 写入失败:`, e.message))
     }
 
     const duration = ((Date.now() - startTime) / 1000).toFixed(1)
     await updateTaskStatus(taskId, TASK_STATUS.DONE, {
-      questionCount: createdQuestions.length,
+      questionCount: questionsWithIds.length,
       wrongCount,
       emptyCount,
       matchedCount,
@@ -2402,7 +2614,7 @@ const processAnswerBankGrading = async (job) => {
       resourceType: resource.resource_type
     })
 
-    console.log(`✅ [AnswerBank] 完成: ${createdQuestions.length} 题, ${wrongCount} 错, ${emptyCount} 空, ${matchedCount} 匹配答案库, 耗时 ${duration}s`)
+    console.log(`✅ [AnswerBank] 完成: ${questionsWithIds.length} 题, ${wrongCount} 错, ${emptyCount} 空, ${matchedCount} 匹配答案库, 耗时 ${duration}s`)
   } catch (e) {
     console.error(`💥 [AnswerBank] 异常:`, e.message)
     await updateTaskStatus(taskId, TASK_STATUS.FAILED, { error: e.message, last_error: e.message, failedAt: new Date().toISOString() }).catch(() => {})

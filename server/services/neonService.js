@@ -1390,6 +1390,9 @@ export const updateResourceAnswerStatus = async (resourceId, answerStatus) => {
 
 /**
  * Worker 用：批量查询答案（跳过未 verified 的）
+ * ⚠️ 历史遗留：仅按 question_no IN (...) 查，多 unit 时只返回 question_no ASC 排序后的
+ * 第一行。答案库批改管线（processAnswerBankGrading）已切到 getResourceAnswersBySection
+ * 的 3D 单元感知结构，本函数保留为兼容旧调用方，不要再在批改链路里用。
  */
 export const bulkLookupResourceAnswers = async (resourceId, questionNos) => {
   if (!questionNos || questionNos.length === 0) return []
@@ -1404,4 +1407,60 @@ export const bulkLookupResourceAnswers = async (resourceId, questionNos) => {
     [resourceId, ...questionNos]
   )
   return rows
+}
+
+/**
+ * Worker 用：整册答案按单元分组（单元感知批改，答案库批改专用版）
+ * 参照 getWorksheetAnswersBySection 的 3D Map 结构：unitKey → sectionKey → qNo|subNo → row
+ *
+ * 为什么必须按 (unit_id, section, question_no, sub_no) 四级定位？
+ * 同一份资源（如试卷）下存在多个 unit（试卷①/试卷②/试卷③），每个 unit 的题号都从 1
+ * 重新开始编号。旧 bulkLookupResourceAnswers 只按 question_no 查，多 unit 时只返回
+ * question_no ASC 排序后的第一行，导致学生答对但批错（用错单元的答案比对）。
+ *
+ * 返回 row 含 answer / answer_type / content / unit_id / unit_key / unit_title /
+ * unit_seq / section / sub_no。
+ * 旧数据（unit_id=NULL）归入一个固定的合成 unitKey '__no_unit__'，保留旧行为。
+ */
+export const getResourceAnswersBySection = async (resourceId) => {
+  const { rows } = await query(
+    `SELECT ra.section, ra.question_no, ra.answer, ra.answer_type, ra.content,
+            ra.unit_id, ra.sub_no,
+            ru.unit_key, ru.unit_title, ru.unit_seq,
+            ru.answer_page_start, ru.answer_page_end
+     FROM ${TABLES.RESOURCE_ANSWERS} ra
+     LEFT JOIN resource_units ru ON ru.id = ra.unit_id
+     WHERE ra.resource_id = $1
+       AND ra.answer_status IN ('teacher_verified', 'official_verified')
+     ORDER BY ru.unit_seq NULLS LAST, ra.created_at ASC`,
+    [resourceId]
+  )
+  const NO_UNIT = '__no_unit__'
+  const result = new Map()
+  for (const r of rows) {
+    const unitKey = r.unit_key || NO_UNIT
+    const sectionKey = r.section || ''
+    const subNo = r.sub_no || ''
+    const qKey = `${Number(r.question_no)}|${subNo}`
+    if (!result.has(unitKey)) result.set(unitKey, new Map())
+    const secMap = result.get(unitKey)
+    if (!secMap.has(sectionKey)) secMap.set(sectionKey, new Map())
+    // 同 key 重复时，rows 已按 created_at 升序，后写覆盖前写
+    secMap.get(sectionKey).set(qKey, {
+      answer: r.answer,
+      answer_type: r.answer_type,
+      content: r.content || null,
+      unit_id: r.unit_id,
+      unit_key: r.unit_key,
+      unit_title: r.unit_title,
+      unit_seq: r.unit_seq,
+      section: r.section,
+      sub_no: subNo,
+      // 单元的答案页范围（答案 PDF 中该单元首页/末页号），
+      // 用于 pickAnswerUnit 在标题失配时按页码兜底匹配。
+      answer_page_start: r.answer_page_start ?? null,
+      answer_page_end: r.answer_page_end ?? null,
+    })
+  }
+  return result
 }
