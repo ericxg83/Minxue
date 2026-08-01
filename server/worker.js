@@ -2888,6 +2888,60 @@ const processAnswerBankGrading = async (job) => {
         return best
       }
 
+      // 2.0-pre) 列出答案库中某题号的所有 sub_no 行（如 q21 → [{1, row}, {2, row}]）
+      //   用于 OCR student_answer 合并输出（"(1) 2 (2) 2√10"）但无 sub_no 字段时，
+      //   自动展开 sub 并按段匹配。
+      const findSubRowsForQuestion = (qNo) => {
+        if (!unitAnswers) return []
+        const out = []
+        for (const qMap of unitAnswers.values()) {
+          for (const [qKey, row] of qMap) {
+            const [qnStr, subStr] = qKey.split('|')
+            if (Number(qnStr) === Number(qNo) && subStr) {
+              out.push({ sub: subStr, row })
+            }
+          }
+        }
+        return out
+      }
+
+      // 2.0-pre2) 从 student_answer 字符串中解析 (1) X (2) Y 标记，返回 [{sub, val}]
+      //   支持中英文括号、半角/全角数字、空格；段内允许含括号（如"(3√2-2)²"）
+      //   例："(1) 2 (2) 2√10" → [{sub:'1', val:'2'}, {sub:'2', val:'2√10'}]
+      //   例："（1）√14；2 （2）2√10；√10" → [{sub:'1', val:'2'}, {sub:'2', val:'√10'}]
+      //   例："（1）8-9=-1 （2）..." → [{sub:'1', val:'-1'}, ...]（取最右"="右侧）
+      //   策略：先按 (1)(2)... 标记 split 字符串；段内"过程+结果"型收窄到最终答案
+      const parseSubAnswers = (s) => {
+        if (!s) return []
+        // 找所有 (N) 标记的位置和 N
+        const markerRe = /[（(]\s*(\d+)\s*[)）]/g
+        const markers = []
+        let m
+        while ((m = markerRe.exec(s)) !== null) {
+          markers.push({ sub: String(parseInt(m[1], 10)), start: m.index, contentStart: m.index + m[0].length })
+        }
+        if (markers.length < 1) return []
+
+        const parts = []
+        for (let i = 0; i < markers.length; i++) {
+          const mk = markers[i]
+          const end = i + 1 < markers.length ? markers[i + 1].start : s.length
+          let val = s.slice(mk.contentStart, end)
+          // 收窄到"最终答案"：
+          //   1) 含 "=" 时取最右 "=" 右侧（"8-9=-1" → "-1"，避免"过程"被包含关系阈值过严误判）
+          //   2) 按 ; ； 切分取末段（"√14；2" → "2"）
+          //   3) 按 , ， 切分取末段（"5, 6, 7" → "7"）
+          if (val.includes('=')) {
+            val = val.slice(val.lastIndexOf('=') + 1)
+          }
+          val = val.split(/[;；]/).pop()
+          val = val.split(/[,，]/).pop()
+          val = val.trim()
+          if (val) parts.push({ sub: mk.sub, val })
+        }
+        return parts
+      }
+
       // 取本页代表 unit_title（供本页所有题目的 judgement.metadata 共用）
       const pageUnitTitle = unitAnswers
         ? [...unitAnswers.values()][0]?.values().next().value?.unit_title || null
@@ -2905,15 +2959,73 @@ const processAnswerBankGrading = async (job) => {
         const isEmpty = !studentAnswer
 
         let answerRow = null
+        let subBreakdown = null  // [{sub, row, studentPart, refPart, correct}]，合并 sub 时填充
         if (!noUnit) {
           answerRow = lookupRow(q.question_number, q.sub_no)
+          // 2.0.1) sub_no 缺失 + 答案库有 sub 划分 + OCR 合并输出 → 自动拆分按段匹配
+          //   例：OCR q21 student="(1) 2 (2) 2√10"，sub_no 缺失，答案库有 21|1="2" 21|2="2√10"
+          //   修复前：lookupRow(21, null) 查 "21|" → 找不到 → answer 为空
+          //   修复后：拆 student_answer → 段1查 21|1="2"，段2查 21|2="2√10" → 合并
+          if (!answerRow && !q.sub_no && !isEmpty) {
+            const subRows = findSubRowsForQuestion(q.question_number)
+            if (subRows.length >= 1) {
+              const parsed = parseSubAnswers(studentAnswer)
+              // parsed 段数应 ≥ subRows 段数（或更宽容：≥1）
+              if (parsed.length >= 1) {
+                subBreakdown = []
+                let refParts = []
+                let allCorrect = true
+                let anyMatched = false
+                // 按 sub 数字匹配（OCR 可能漏读 sub 编号）：把 parsed 按 sub 数字查 subRows
+                for (const { sub, val } of parsed) {
+                  const sr = subRows.find(s => s.sub === sub)
+                  if (!sr) {
+                    // sub 编号对不上 → 跳过（保留待人工审核）
+                    continue
+                  }
+                  // 2.0.1.0) sub 段 judge：用答案指纹（sim >= 0.7 对；< 0.5 错；中间 null）
+                  //   judgeAnswer 精确匹配在 OCR 噪声场景下易漏：
+                  //     - "√10" vs "2√10"（"√10" 是 "2√10" 子串，sim=0.85）
+                  //     - "8-9=-1" vs "-1"（"-1" 是 "8-9=-1" 子串，sim=0.85）
+                  //   这些情况学生答案实质正确，应判对。
+                  const sim = calculateAnswerSimilarity(val, sr.row.answer)
+                  let correct = null
+                  if (sim >= 0.7) correct = true
+                  else if (sim < 0.5) correct = false
+                  // 0.5 ≤ sim < 0.7 → correct=null（待人工审核，不判错也不判对）
+                  subBreakdown.push({ sub, row: sr.row, studentPart: val, refPart: sr.row.answer, correct, sim })
+                  refParts.push(sr.row.answer)
+                  anyMatched = true
+                  if (correct === false) allCorrect = false
+                }
+                if (anyMatched) {
+                  // 合成 answerRow（用第 1 个 sub 的元数据 + 合并 ref），主循环后续按聚合处理
+                  answerRow = { ...subRows[0].row, answer: refParts.join('; ') }
+                  q._subBreakdown = subBreakdown
+                }
+              }
+            }
+          }
         }
 
         let isCorrect = null
         const refAnswer = answerRow ? answerRow.answer : null
         const refType = answerRow ? (answerRow.answer_type || q.question_type || 'answer') : (q.question_type || 'answer')
 
-        if (answerRow && !isEmpty) {
+        if (subBreakdown && subBreakdown.length >= 1) {
+          // 2.0.1.1) sub 拆分匹配：按 sub 段分别 judge，全部正确才算对；任一错则整题错
+          //   不再用整段 judgeAnswer（会因 "(1) 2 (2) 2√10" vs "2; 2√10" 字符串相似但语义错位而误判）
+          let allOk = true
+          let anyJudged = false
+          for (const seg of subBreakdown) {
+            if (seg.correct === true) { anyJudged = true; continue }
+            if (seg.correct === false) { allOk = false; anyJudged = true }
+            // null（边界情况）→ 不影响 allOk
+          }
+          isCorrect = anyJudged ? allOk : null
+          if (isCorrect === true || isCorrect === false) matchedCount++
+          console.log(`   [AnswerBank] sub 拆分匹配 q${q.question_number}: ${subBreakdown.map(s => `(${s.sub})${s.correct ? '✓' : '✗'}`).join(' ')} student="${studentAnswer.slice(0, 40)}" ref="${refAnswer.slice(0, 40)}"`)
+        } else if (answerRow && !isEmpty) {
           // judgeAnswer 签名：(studentAnswer, referenceAnswer, questionType)
           // 是同步函数，无需 catch 兜底（processWorkbookGrading 也按此调用）
           const judgement = judgeAnswer(studentAnswer, refAnswer, refType)
@@ -2930,13 +3042,19 @@ const processAnswerBankGrading = async (job) => {
         if (isCorrect === false) wrongCount++
 
         // 标记题号已占用（避免二轮答案指纹搜索重复占用）
-        if (answerRow) {
+        // sub 拆分匹配时，把该题所有 sub 都标为已用
+        if (subBreakdown && subBreakdown.length >= 1) {
+          for (const seg of subBreakdown) {
+            usedQKeys.add(`${Number(q.question_number)}|${seg.sub}`)
+          }
+        } else if (answerRow) {
           usedQKeys.add(`${Number(q.question_number)}|${q.sub_no || ''}`)
         }
 
         // 收集"题号可疑"的题进入二轮（OCR 题号错位兜底）：
         // 条件：题号匹配到 row、答案非空、但答案相似度 < 0.5（基本不匹配）
-        if (answerRow && !isEmpty) {
+        // sub 拆分场景下已按段 judge，跳过整体 suspect 判断（避免 sub 合并 ref 引发误判）
+        if (answerRow && !isEmpty && !subBreakdown) {
           const sim = calculateAnswerSimilarity(studentAnswer, refAnswer)
           if (sim < 0.5) {
             suspectQuestions.push({ q, studentAnswer, qType: q.question_type, currentRef: refAnswer, currentSim: sim })
@@ -2956,8 +3074,8 @@ const processAnswerBankGrading = async (job) => {
           status: isCorrect === false ? 'wrong' : 'pending',
           page_number: q._page_number || pageNumber,
           question_number: q.question_number,
-          is_suspicious: false,
-          confidence: isEmpty ? 0 : (answerRow ? 0.85 : 0),
+          is_suspicious: !!subBreakdown,  // sub 拆分匹配标记为可疑，供 PC 端展示
+          confidence: isEmpty ? 0 : (answerRow ? (subBreakdown ? 0.9 : 0.85) : 0),
           source_type: resource.resource_type === 'exam' ? 'exam' : 'homework'
           // 单元匹配结果不写入 questions（表无对应列），仅在 judgement.metadata 记录
         }
