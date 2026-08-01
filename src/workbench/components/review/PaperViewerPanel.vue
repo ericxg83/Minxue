@@ -251,11 +251,14 @@ const getOverlayStyle = (q) => {
 }
 
 /**
- * 切题定位：让当前 bbox 中心滚动到容器中央。
- * 修复：之前仅渲染 overlay 不动 panX/panY，fitToContainer 把整张高图缩到屏幕，
- * 导致 bbox 在屏幕外（图 1 框在第 1 题位置实际是用户上拖后才显示出来）。
- * 这里保持 zoom：图片比容器大时按 bbox 中心精确对齐；图片比容器小时居中显示，
- * bbox 在图片中相对位置即在屏幕中相对位置（避免反向滚到屏幕外）。
+ * 切题定位：动态调整 zoom + panX/panY，让 bbox 中心在屏幕中央可见。
+ *
+ * 关键修复：之前用 fitToContainer 的 zoom 缩放图片，bbox 中心 y_px * zoom + panY
+ * 经常超过容器高度（panY 居中时 bbox 在屏幕外）。新算法计算 zMin（让 panX/panY 居中
+ * 时在范围内）和 zMax（让 bbox 不超出屏幕），取合适的 zoom 让 bbox 居中且完整可见。
+ *
+ * 边界情况：bbox 在图片边缘时严格居中数学不可能，此时选 zMax 让 bbox 完整可见，
+ * 退而求其次让 bbox 尽量靠中央。
  */
 const jumpToBbox = (q) => {
   const bbox = getDisplayBox(q)
@@ -267,26 +270,70 @@ const jumpToBbox = (q) => {
   const ch = containerRef.value.clientHeight
   if (!cw || !ch) return false
 
-  const z = zoom.value
+  // 归一化坐标 → 像素坐标
+  const bboxLeft = (bbox.x / 1000) * nW
+  const bboxTop = (bbox.y / 1000) * nH
+  const bboxRight = ((bbox.x + bbox.width) / 1000) * nW
+  const bboxBottom = ((bbox.y + bbox.height) / 1000) * nH
+  const bboxCenterX = (bboxLeft + bboxRight) / 2
+  const bboxCenterY = (bboxTop + bboxBottom) / 2
+  const bboxW = bboxRight - bboxLeft
+  const bboxH = bboxBottom - bboxTop
+
+  // z 上界：让 bbox 完整可见（不被裁剪到屏幕外）
+  const zMaxByHeight = ch / bboxH
+  const zMaxByWidth = cw / bboxW
+  const zMax = Math.min(zMaxByHeight, zMaxByWidth, 5)
+
+  // z 下界：让 bbox 居中（panX/panY = cw/2 - bboxCenter*z 在图片偏移范围内）
+  //   panY in [ch - nH*z, 0]  →  z >= ch/(2*bboxCenterY) && z >= ch/(2*(nH-bboxCenterY))
+  //   panX in [cw - nW*z, 0]  →  z >= cw/(2*bboxCenterX) && z >= cw/(2*(nW-bboxCenterX))
+  const lowerY1 = bboxCenterY > 0 ? ch / (2 * bboxCenterY) : 0
+  const lowerY2 = nH > bboxCenterY ? ch / (2 * (nH - bboxCenterY)) : 0
+  const lowerX1 = bboxCenterX > 0 ? cw / (2 * bboxCenterX) : 0
+  const lowerX2 = nW > bboxCenterX ? cw / (2 * (nW - bboxCenterX)) : 0
+  const zMin = Math.max(lowerX1, lowerX2, lowerY1, lowerY2)
+
+  // 选 zoom：bbox 可以居中时取 zMin（精确中央），否则取 zMax（完整可见）
+  let z
+  if (zMin <= zMax) {
+    z = zMin
+  } else {
+    z = zMax
+  }
+  z = Math.max(z, 0.2)  // 最小 zoom 兜底
+
+  // 保留用户主动放大的 zoom（避免 zoom 在切题时跳动让用户迷失），
+  // 但仅当保留后 bbox 仍能完整可见（zoom <= zMax）；否则降级到 zMax 保证可见性。
+  if (zoom.value > z) {
+    z = Math.min(zoom.value, zMax)
+  }
+
+  zoom.value = z
   const imgW = nW * z
   const imgH = nH * z
-  const bboxCenterX = (bbox.x + bbox.width / 2) / 1000 * nW
-  const bboxCenterY = (bbox.y + bbox.height / 2) / 1000 * nH
 
-  // X 轴：图片比容器宽 → 自由调整让 bbox 中心到容器中央；图片比容器窄 → 居中
-  if (imgW > cw) {
-    const targetPanX = cw / 2 - bboxCenterX * z
-    panX.value = Math.min(0, Math.max(cw - imgW, targetPanX))
-  } else {
-    panX.value = (cw - imgW) / 2
-  }
-  // Y 轴同理
-  if (imgH > ch) {
-    const targetPanY = ch / 2 - bboxCenterY * z
-    panY.value = Math.min(0, Math.max(ch - imgH, targetPanY))
-  } else {
-    panY.value = (ch - imgH) / 2
-  }
+  // 目标：bbox 居中
+  let targetPanX = cw / 2 - bboxCenterX * z
+  let targetPanY = ch / 2 - bboxCenterY * z
+
+  // 夹紧到图片偏移范围
+  let newPanX = Math.min(0, Math.max(cw - imgW, targetPanX))
+  let newPanY = Math.min(0, Math.max(ch - imgH, targetPanY))
+
+  // 如果 bbox 被裁剪（zMax 仍不够），调整 panX/panY 让 bbox 完整可见
+  const bboxScreenLeft = newPanX + bboxLeft * z
+  const bboxScreenRight = newPanX + bboxRight * z
+  const bboxScreenTop = newPanY + bboxTop * z
+  const bboxScreenBottom = newPanY + bboxBottom * z
+
+  if (bboxScreenLeft < 0) newPanX = -bboxLeft * z
+  if (bboxScreenRight > cw) newPanX = cw - bboxRight * z
+  if (bboxScreenTop < 0) newPanY = -bboxTop * z
+  if (bboxScreenBottom > ch) newPanY = ch - bboxBottom * z
+
+  panX.value = newPanX
+  panY.value = newPanY
   return true
 }
 

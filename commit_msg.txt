@@ -1,30 +1,21 @@
-fix(ocr): 恢复 size 阈值 + 补齐 workbook 黑名单模式
+fix(paperViewer): 切题定位动态 zoom - 解决 bbox 跑到屏幕外问题
 
-上一版 00edc07 的 4KB 阈值太严，把 3116 bytes 的真实小图也拦下了 —— 用户截图里
-"?????C?????" 的头 80 字符是用 `replace(/[^\x20-\x7E]/g, '?')` 把二进制转成问号显示，
-实际上是合法 JPEG/HEIC 二进制，不是 XML/HTML。
+问题：第13题蓝色定位框仍跑到屏幕下方
+原因：上一版 jumpToBbox 使用 fitToContainer 的小 zoom 缩放图片（2000x3000 → 368x552），
+  当 bbox 在图片中下部（bboxCenterY_px * zoom > ch）时，panY 居中后
+  bbox 屏幕 y = panY + bboxCenterY*zoom > ch，框超出屏幕底部。
+  实测 9 个真实场景中 9/9 都跑出屏幕（偏 451-1987px）。
 
-实际根因：
-1. 3116 bytes = 真实的小图片（学生在 H5 端压缩过狠或原始图本来就小），
-   AI 视觉模型看到 3KB 图必然返回 0 道题，但这属于"内容问题"应在 OCR 层处理，
-   不应在 downloadImage 层硬拦。
-2. workbook 0 道题抛出的 errorDetail 是 "1 页识别失败" / "3 页识别失败"，不在上一版
-   黑名单里 → PendingTaskRecovery 仍然把它重新入队 → 反复 0 道题 → 反复入队。
+修复：jumpToBbox 改为动态计算 zoom：
+  - zMax = min(ch/bboxH, cw/bboxW, 5)：保证 bbox 完整可见
+  - zMin = max(...居中约束...)：保证 bbox 可居中（panX/panY 在图片偏移范围内）
+  - 选 z = (zMin <= zMax) ? zMin : zMax
+    · 可居中时取 zMin（精确中央）
+    · 否则取 zMax（完整可见）
+  - 保留用户主动放大的 zoom（切题时不缩小让用户迷失），但仅当 zoom <= zMax
+  - 兜底裁剪：bbox 仍被裁剪时调整 panX/panY 让 bbox 完整可见
 
-修复：
-1) server/utils/imageValidator.js
-   - size 阈值回退到 1024 bytes（只挡连魔数都不完整的小 buffer）
-   - 4KB+ 真实 JPEG/PNG/WebP/HEIC 一律放行，由 OCR 层用 0 道题重试机制处理
-   - 仍拦 XML/HTML 头部 + 未知魔数
-
-2) server/pendingTaskRecovery.js
-   - 加 /页识别失败/ 模式（workbook "1 页识别失败" / "3 页识别失败"）
-   - 加 /OCR 未识别到任何题目/ 模式（answer bank 流程的同类问题）
-   - 上一版的 /所有页面识别结果为空/ 和 /AI_EMPTY/ 保留
-
-3) server/worker.js#processWorkbookGrading 0 道题时主动 rotateVLModel 切下一个
-   视觉模型（235B / 8B-Thinking）重试 1 次的逻辑保持不变。
-
-测试：
-- imageValidator：3116 bytes 真实 JPEG ok=true；XML/HTML < 1024 拦下；5KB JPEG/PNG/HEIC 全通
-- 黑名单：1 页识别失败 / 3 页识别失败 / OCR 未识别到任何题目 全部 skip=true
+测试：scratchpad/test_bbox_jump.mjs 13/14 通过
+  - 13 个 case bbox 精确居中（合法 y 范围）
+  - 1 个 case (y=0 顶部) 数学不可能严格居中，bbox 在屏但偏顶部
+  - 用户主动 zoom 1.5/2.0 时正常降级到 zMax（避免 bbox 越界）
