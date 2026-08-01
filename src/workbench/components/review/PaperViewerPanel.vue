@@ -138,7 +138,7 @@
 </template>
 
 <script setup>
-import { ref, computed, watch } from 'vue'
+import { ref, computed, watch, nextTick } from 'vue'
 import { useReviewStore } from '../../stores/reviewStore'
 import { Picture, WarningFilled, View, ArrowRight } from '@element-plus/icons-vue'
 
@@ -250,6 +250,46 @@ const getOverlayStyle = (q) => {
   }
 }
 
+/**
+ * 切题定位：让当前 bbox 中心滚动到容器中央。
+ * 修复：之前仅渲染 overlay 不动 panX/panY，fitToContainer 把整张高图缩到屏幕，
+ * 导致 bbox 在屏幕外（图 1 框在第 1 题位置实际是用户上拖后才显示出来）。
+ * 这里保持 zoom：图片比容器大时按 bbox 中心精确对齐；图片比容器小时居中显示，
+ * bbox 在图片中相对位置即在屏幕中相对位置（避免反向滚到屏幕外）。
+ */
+const jumpToBbox = (q) => {
+  const bbox = getDisplayBox(q)
+  if (!bbox) return false
+  if (!containerRef.value) return false
+  const nW = imgNaturalW.value, nH = imgNaturalH.value
+  if (!nW || !nH) return false
+  const cw = containerRef.value.clientWidth
+  const ch = containerRef.value.clientHeight
+  if (!cw || !ch) return false
+
+  const z = zoom.value
+  const imgW = nW * z
+  const imgH = nH * z
+  const bboxCenterX = (bbox.x + bbox.width / 2) / 1000 * nW
+  const bboxCenterY = (bbox.y + bbox.height / 2) / 1000 * nH
+
+  // X 轴：图片比容器宽 → 自由调整让 bbox 中心到容器中央；图片比容器窄 → 居中
+  if (imgW > cw) {
+    const targetPanX = cw / 2 - bboxCenterX * z
+    panX.value = Math.min(0, Math.max(cw - imgW, targetPanX))
+  } else {
+    panX.value = (cw - imgW) / 2
+  }
+  // Y 轴同理
+  if (imgH > ch) {
+    const targetPanY = ch / 2 - bboxCenterY * z
+    panY.value = Math.min(0, Math.max(ch - imgH, targetPanY))
+  } else {
+    panY.value = (ch - imgH) / 2
+  }
+  return true
+}
+
 /** 图片图层样式：scale 前先 translate，保持拖拽在屏幕坐标空间 */
 const imageLayerStyle = computed(() => ({
   transform: `translate(${panX.value}px, ${panY.value}px) scale(${zoom.value})`,
@@ -267,6 +307,10 @@ const onImgLoad = () => {
     imgNaturalH.value = imgRef.value.naturalHeight || 0
   }
   fitToContainer()
+  // 图片就绪后，若当前已选中题目，滚到该题 bbox 中心（首屏 / 切页都生效）
+  if (store.currentReviewQuestion) {
+    nextTick(() => jumpToBbox(store.currentReviewQuestion))
+  }
 }
 
 /** 自适应：将试卷完整显示在容器内 */
@@ -306,6 +350,18 @@ const nextPage = () => store.setPageIndex(store.currentPageIndex + 1)
 // 切换页图后重置自适应（等图片自然尺寸更新由 onImgLoad 处理，这里兜底）
 watch(() => store.currentPageImage, () => {
   imgError.value = false
+})
+
+// 切换选中题目 → 自动滚动：让 bbox 中心到容器中央
+// 依赖 currentReviewQuestion 引用变化（store.jumpToQuestion 改 index 即触发）
+watch(() => store.currentReviewQuestion, async (q) => {
+  if (!q) return
+  // 若图片还没就绪（首次进入 / 切页），等下一帧；onImgLoad 还会再 jump 一次兜底
+  if (!imgNaturalW.value || !imgNaturalH.value) {
+    await nextTick()
+    if (!imgNaturalW.value || !imgNaturalH.value) return
+  }
+  jumpToBbox(q)
 })
 
 // ─── 缩放控制 ─────────────────────────────────────────────
