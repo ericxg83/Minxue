@@ -32,9 +32,58 @@ export function normalizeSectionName(raw) {
   return String(raw).replace(/[：:].*$/, '').replace(/[\s　]+/g, '').trim() || null
 }
 
-// 圈序号 ①..㉚ → 1..30
-const CIRCLED_DIGITS = '①②③④⑤⑥⑦⑧⑨⑩⑪⑫⑬⑭⑮⑯⑰⑱⑲⑳㉑㉒㉓㉔㉕㉖㉗㉘㉙㉚'
+// 圈序号 ①..㊿ → 1..50
+// 范围扩到 50：本套教辅实践已遇到 36+ 的『堂堂练㊱』。
+// 注释：之前的 ①..㉚(30) 在 31+ 时无法解析 ordinal，OCR 又容易把 ㊱ 错识别成『③③③』多字符，
+// 导致 unit_key 错位。本扩展 + 解析时多字符归一化是修复根因。
+const CIRCLED_DIGITS = '①②③④⑤⑥⑦⑧⑨⑩⑪⑫⑬⑭⑮⑯⑰⑱⑲⑳㉑㉒㉓㉔㉕㉖㉗㉘㉙㉚㉛㉜㉝㉞㉟㊱㊲㊳㊴㊵㊶㊷㊸㊹㊺㊻㊼㊽㊾㊿'
 const CN_NUM = { 一: 1, 二: 2, 三: 3, 四: 4, 五: 5, 六: 6, 七: 7, 八: 8, 九: 9, 十: 10 }
+
+// 把 OCR 识别的『堂堂练』后圈序号串做归一化：
+//   - 把连续多字符圈序号（如 ③③③）合并成单个高位圈序号（按对应 ordinal 选字符）
+//   - 阿拉伯数字 (36) 透传
+//   - 返回 { ordinal, circledToken } —— ordinal 1..50
+// 没匹配到返回 null。
+const CIRCLED_DIGITS_FOR_NORM = CIRCLED_DIGITS // 别名
+function normalizeTanglianOrdinal(rawAfterLabel) {
+  if (!rawAfterLabel) return null
+  const s = String(rawAfterLabel).trim()
+  if (!s) return null
+
+  // 1) 纯阿拉伯数字：'36' → 36
+  if (/^\d{1,3}$/.test(s)) {
+    const n = parseInt(s, 10)
+    if (n >= 1 && n <= 50) return { ordinal: n, circledToken: CIRCLED_DIGITS_FOR_NORM[n - 1] }
+    return null
+  }
+
+  // 2) 单个有效圈序号：'㊱' → 36
+  if (s.length === 1) {
+    const idx = CIRCLED_DIGITS_FOR_NORM.indexOf(s)
+    if (idx >= 0) return { ordinal: idx + 1, circledToken: s }
+    return null
+  }
+
+  // 3) 多字符 OCR 错识别：『③③③』 / ③3 / ③③3 / 36㊱ ...
+  // 拆出所有"圈序号字符"和"阿拉伯数字字符"，按出现顺序求和
+  let total = 0
+  for (const ch of s) {
+    const idx = CIRCLED_DIGITS_FOR_NORM.indexOf(ch)
+    if (idx >= 0) {
+      total += idx + 1
+      continue
+    }
+    if (/\d/.test(ch)) {
+      total += parseInt(ch, 10)
+      continue
+    }
+    return null // 含非数字字符，放弃
+  }
+  if (total >= 1 && total <= 50) {
+    return { ordinal: total, circledToken: CIRCLED_DIGITS_FOR_NORM[total - 1] }
+  }
+  return null
+}
 
 function toOrdinal(token) {
   if (!token) return null
@@ -109,6 +158,25 @@ export function parseUnitHeader(line) {
       unit_title: normalizeSectionName(raw),
       lesson_code: lesson,
       ordinal,
+    }
+  }
+
+  // ①.b 兜底：OCR 把 ㊱ 错识别成『③③③』等多字符，UNIT_LABEL_RE 只匹配单字符会漏。
+  // 用宽松 regex 抓"标签+任意非空白串"，再交给 normalizeTanglianOrdinal 求和归一化。
+  const LOOSE_UNIT_LABEL_RE = /^(堂堂练|课课练|课时练|随堂练|同步练|课时作业|课后练)\s*(\S+)?\s*(.*)$/
+  const llm = raw.match(LOOSE_UNIT_LABEL_RE)
+  if (llm && llm[2]) {
+    const norm = normalizeTanglianOrdinal(llm[2])
+    if (norm) {
+      const label = llm[1]
+      const lesson = normLesson((llm[3] || '').match(LESSON_CODE_RE)?.[1])
+      const keyHead = `${label}${norm.ordinal}`
+      return {
+        unit_key: lesson ? `${keyHead}|${lesson}` : keyHead,
+        unit_title: normalizeSectionName(raw),
+        lesson_code: lesson,
+        ordinal: norm.ordinal,
+      }
     }
   }
 
