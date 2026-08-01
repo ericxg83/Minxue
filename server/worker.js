@@ -1569,6 +1569,28 @@ const detectChapterByContent = (questions) => {
   return null
 }
 
+// 从 pageTitle + questions content 推断 lesson_code（如 "19.2" / "21.2(3)"）
+// 用于多试卷单元错位时（如"试卷4|19.2" vs "试卷6"），lesson_code 严格匹配。
+// 优先从 pageTitle 中找"试卷N 19.2"模式的 lesson_code，兜底从题干找"19.2 平方根"模式。
+// 过滤：排除"1.5"这种科学记数法小数（必须 ≥ 4 字符，如 "19.2" / "21.2(3)"）
+const detectLessonCode = (questions, pageTitle) => {
+  if (pageTitle && typeof pageTitle === 'string') {
+    // 匹配 "19.2" / "21.2(3)" / "19.1(1)" 模式（必须带小数点，避免匹配"19"或"21.2"段中的"21"）
+    const m = pageTitle.match(/\b(\d{1,2}\.\d{1,2}(?:\(\d+\))?)\b/)
+    if (m && m[1].length >= 4) return m[1]
+  }
+  // 兜底：从题目 content 找 lesson 模式（必须有"19.2 内容"这种带空格或汉字的连接）
+  if (Array.isArray(questions) && questions.length > 0) {
+    for (const q of questions) {
+      if (q.content && typeof q.content === 'string') {
+        const m = q.content.match(/\b(\d{1,2}\.\d{1,2}(?:\(\d+\))?)\b/)
+        if (m && m[1].length >= 4) return m[1]
+      }
+    }
+  }
+  return null
+}
+
 export function pickAnswerUnit(answersByUnit, pageTitle, questions, pageNumber, chapterHint) {
   if (!answersByUnit || answersByUnit.size === 0) return null
   if (answersByUnit.size === 1) return [...answersByUnit.keys()][0]
@@ -1601,20 +1623,72 @@ export function pickAnswerUnit(answersByUnit, pageTitle, questions, pageNumber, 
   }
   const candidates = [...answersByUnit.keys()].map(unitMeta)
 
-  // 0) chapter_hint 兜底（OCR 阶段 AI 看过题目内容后推断的章节名）。
-  //    这是 pageTitle 缺失时最可靠的章节信号——AI 已经看过题目内容
-  //    （含 √、二次根式等关键特征），比单纯"题号覆盖率打分"准得多。
-  //    必须在标题匹配之前尝试，否则 pageTitle=null 会被覆盖率打分抢先命中错误章节。
-  if (chapterHint && typeof chapterHint === 'string') {
-    const normHint = normalizeTitleForMatch(chapterHint)
-    if (normHint) {
-      for (const c of candidates) {
-        const ct = normalizeTitleForMatch(c.unitTitle)
-        if (ct && ct.includes(normHint)) return c.unitKey
+  // 0) lesson_hint 匹配（最精确：lesson_code 来自 OCR 提示词/题目内容推断）
+  //    候选 unit 的 lesson_code 是结构化字段（如"19.2"），而"试卷4" vs "试卷6" 错位时，
+  //    lesson_code 严格区分（如"19.2" vs null），远胜标题模糊匹配。
+  //    优先从 question content 中检测章节码，再与 candidates 匹配。
+  //    命中多个 candidates 时，缩窄 candidates 给后续评分；唯一命中才直接 return。
+  //    注：candidates 是 const，用 splice 原地缩窄，不能重新赋值。
+  const lessonHint = detectLessonCode(questions, pageTitle)
+  if (lessonHint) {
+    // 从 pageTitle 抽"试卷N"中的 N
+    const pagePaperMatch = pageTitle && typeof pageTitle === 'string'
+      ? pageTitle.match(/试卷\s*([0-9㊀-㊉①-⑩]+)/)
+      : null
+    const pagePaperNum = pagePaperMatch
+      ? (circledToAsciiMap[pagePaperMatch[1]] || Number(pagePaperMatch[1]))
+      : null
+
+    // 收集所有 lesson_code 段严格匹配 lessonHint 的 candidates
+    const lessonMatches = []
+    for (const c of candidates) {
+      const ck = c.unitKeyRaw || ''
+      // unitKey 形如 "试卷4|19.2" → 提取 "19.2" 段做严格匹配
+      const m = ck.match(/\|(\d+(?:\.\d+)?(?:\(\d+\))?)/)
+      if (m && m[1] === lessonHint) {
+        lessonMatches.push(c)
+      } else if (ck.includes(lessonHint)) {
+        // 兜底：unitKeyRaw 任意位置含 lessonHint（如"试卷19"含"19"），
+        // 但 lesson_code 段严格匹配的优先（先填入，模糊匹配的追加在后面）
+        lessonMatches.push({ ...c, _softMatch: true })
       }
-      for (const c of candidates) {
-        const ck = normalizeTitleForMatch(c.unitKeyRaw)
-        if (ck && ck.includes(normHint)) return c.unitKey
+    }
+
+    // 试卷序号锁定：pageTitle 里的"试卷N"必须和 unitKeyRaw 里的"试卷N"一致
+    // OCR 把"试卷④"误识别为"试卷①"时，这个 lock 会失败，回退到 lesson_code 兜底
+    if (pagePaperNum && lessonMatches.length > 1) {
+      const locked = lessonMatches.filter(c => {
+        const ck = c.unitKeyRaw || ''
+        const m = ck.match(/试卷\s*(\d+)\s*\|/i)
+        return m && Number(m[1]) === pagePaperNum
+      })
+      if (locked.length >= 1) lessonMatches.splice(0, lessonMatches.length, ...locked)
+    }
+
+    // 类型关键词锁定（提高性测试/基础性测试）：OCR 不会把这两个词读错
+    if (lessonMatches.length > 1 && pageTitle) {
+      const normP = normalizeTitleForMatch(pageTitle)
+      const hasBasics = /基础性测试/i.test(normP)
+      const hasAdvanced = /提高性测试/i.test(normP)
+      if (hasBasics || hasAdvanced) {
+        const filtered = lessonMatches.filter(c => {
+          const ct = normalizeTitleForMatch(c.unitTitle)
+          if (hasBasics) return ct.includes('基础性测试')
+          if (hasAdvanced) return ct.includes('提高性测试')
+          return true
+        })
+        if (filtered.length >= 1) lessonMatches.splice(0, lessonMatches.length, ...filtered)
+      }
+    }
+
+    if (lessonMatches.length === 1) return lessonMatches[0].unitKey
+    if (lessonMatches.length > 1) {
+      // 多个候选命中：先按严格匹配筛（剔除 softMatch），再交给评分阶段
+      const strictMatches = lessonMatches.filter(c => !c._softMatch)
+      if (strictMatches.length >= 1) {
+        candidates.splice(0, candidates.length, ...strictMatches)
+      } else {
+        candidates.splice(0, candidates.length, ...lessonMatches)
       }
     }
   }
@@ -1640,14 +1714,15 @@ export function pickAnswerUnit(answersByUnit, pageTitle, questions, pageNumber, 
   //   用题目 OCR 文本中的数学特征（√、二次根式等）反推章节。这能解决：
   //     - 页面顶部"二、选择题"等无章节标题的排版，OCR 无法识别 page_title
   //     - 第十九/二十/二十一/二十二章题号都从 1 开始编号，仅靠题号覆盖率会错挂
+  //   **唯一命中才返回**。多个候选都含 detectedChapter 时（说明该特征太宽泛），
+  //   跳过此步，让 chapterHint 缩窄 + 题号覆盖率打分继续处理，避免"二次根式"
+  //   错把 19.2 实数试卷挂到 20.1 二次根式试卷上。
   const detectedChapter = detectChapterByContent(questions)
   if (detectedChapter) {
-    for (const c of candidates) {
-      if (c.unitTitle && c.unitTitle.includes(detectedChapter)) return c.unitKey
-    }
-    for (const c of candidates) {
-      if (c.unitKeyRaw && c.unitKeyRaw.includes(detectedChapter)) return c.unitKey
-    }
+    const titleMatches4 = candidates.filter(c => c.unitTitle && c.unitTitle.includes(detectedChapter))
+    if (titleMatches4.length === 1) return titleMatches4[0].unitKey
+    const keyMatches4 = candidates.filter(c => c.unitKeyRaw && c.unitKeyRaw.includes(detectedChapter))
+    if (keyMatches4.length === 1) return keyMatches4[0].unitKey
   }
 
   // 2) 题号覆盖率打分（带题型吻合度加权）
@@ -1687,6 +1762,46 @@ export function pickAnswerUnit(answersByUnit, pageTitle, questions, pageNumber, 
     }
   }
 
+  // 2.0.5) chapterHint 兜底（最后手段，缩窄候选集）。
+  //   仅在 0/1/1.5 都没命中时启用，且必须**严匹配**：要求 candidates 的 unitKeyRaw 含"|XX.YY"
+  //   这种 lesson_code 段，且 chapterHint 含此 lesson_code，才纳入打分。
+  //   旧版直接把 chapterHint="第十九章实数"扔到所有含此子串的 unitTitle，导致
+  //   "试卷4"（key="试卷4|19.2"）和"试卷6"（key="试卷6"，title 含"第十九章"）双双命中，
+  //   最后由"包含更多"原则（试卷6 title 长）错挂到试卷6。修复：chapterHint 兜底必须
+  //   **配合 lesson_code 段**才能生效，否则视为"无效兜底"、直接用题号覆盖率打分。
+  if (chapterHint && typeof chapterHint === 'string' && scopedCandidates.length > 1) {
+    // 提取 chapterHint 中的 lesson_code 段：支持"19.2"、第19章、第十九章
+    let hintLesson = null
+    const lessonMatch = chapterHint.match(/(\d{1,2}\.\d{1,2}(?:\(\d+\))?)/)
+    if (lessonMatch) {
+      hintLesson = lessonMatch[1]
+    } else {
+      // 中文数字映射
+      const cnDigit = { '零': 0, '一': 1, '二': 2, '三': 3, '四': 4, '五': 5, '六': 6, '七': 7, '八': 8, '九': 9, '十': 10 }
+      const cnChapter = chapterHint.match(/第([零一二三四五六七八九十]+)章/)
+      if (cnChapter) {
+        const s = cnChapter[1]
+        let n = 0
+        if (s === '十') n = 10
+        else if (s.length === 1) n = cnDigit[s] || 0
+        else if (s.length === 2 && s[0] === '十') n = 10 + (cnDigit[s[1]] || 0)
+        else if (s.length === 2 && s[1] === '十') n = (cnDigit[s[0]] || 0) * 10
+        else if (s.length === 3) n = (cnDigit[s[0]] || 0) * 10 + (cnDigit[s[2]] || 0)
+        if (n > 0) hintLesson = String(n)
+      }
+    }
+    if (hintLesson) {
+      const narrowed = scopedCandidates.filter(c => {
+        const ck = c.unitKeyRaw || ''
+        return ck.includes(hintLesson)
+      })
+      // 仅在窄化后候选数 1-N 时采用（至少 1 个，至多不缩为 0）
+      if (narrowed.length >= 1 && narrowed.length < scopedCandidates.length) {
+        scopedCandidates = narrowed
+      }
+    }
+  }
+
   let bestKey = null
   let bestScore = -1
   for (const c of scopedCandidates) {
@@ -1709,7 +1824,9 @@ export function pickAnswerUnit(answersByUnit, pageTitle, questions, pageNumber, 
       if (ocrIsChoice === refIsChoice) typeMatch++
     }
     const score = covered / qNos.length + (covered > 0 ? (typeMatch / covered) * 0.5 : 0)
-    if (score > bestScore) {
+    // 必须严格大于 bestScore，且 covered>0 才更新 bestKey，
+    // 避免遍历顺序导致"第一个 0 分 unit 被误认为最佳"（之前 bestScore=-1 时任何 0 分都会 > -1）
+    if (score > bestScore && covered > 0) {
       bestScore = score
       bestKey = c.unitKey
     }
