@@ -40,16 +40,13 @@ export const NON_RETRYABLE_ERROR_PATTERNS = [
   /INVALID_URL/,
   /AI returned empty content/i,
   /Invalid model id/i, // 模型被供应商下架（如 Qwen3-8B-Instruct），不会自愈
-  /所有页面识别结果为空/, // workbook OCR 全空
-  /页识别失败/,            // workbook N 页全部下载/识别失败（"1 页识别失败" / "3 页识别失败"）
-  /OCR 未识别到任何题目/,   // answer bank 流程 0 道题
-  /AI_EMPTY/,             // errorType 字段也会写 AI_EMPTY
-  /图片是空白/,            // 8B/235B 对小图胡说"用户提供的图片是空白"，即使强制放大后仍拒绝
-  /图片为空白/,
-  /图片分辨率过低/,        // 下载层拦截的极小图（< 600px 任意一边），AI 必失败，重试无意义
-  /unable to identify/i,  // Qwen3-VL 英文 prompt 的拒绝模板
-  /cannot identify/i,
-  /no text detected/i,     // 视觉模型看不到文字
+  /图片分辨率过低/,        // 下载层拦截的极小图（< 600px 任意一边），客观不可识别，重试无意义
+  // ⚠️ 不要把"页识别失败 / 所有页面识别结果为空 / AI_EMPTY / 图片是空白"加进黑名单！
+  //   AI 视觉模型（尤其 Qwen3-VL-8B-Instruct）在配额紧张时**不稳定**：
+  //   同样的高清图 + prompt，可能一次说"图片是空白"，下一次就完整 OCR 出 15+ 道题
+  //   （实测：同一 worksheet 1c31ee45 的 taskId 4f4ac1cc(失败 1 页识别失败；AI 提示: 图片是空白)
+  //           → 9016b0aa(成功 15/15 题，标题"试卷④ 19.2 实数 提高性测试")）。
+  //   误进黑名单会导致**本来能成功的任务被永久放弃**，必须靠 PendingTaskRecovery 重新入队。
 ]
 
 /**
@@ -162,21 +159,46 @@ class PendingTaskRecovery {
    * 扫描 failed 主任务并自动重试（此前任务系统只恢复 pending）。
    * 限制：同一任务最多自动重试 MAX_AUTO_RETRIES 次（含 worker 内部 + 此处），
    * 超出后保持 failed，避免对注定失败的图片无限重试。
+   *
+   * AI 偶发拒绝话术（"图片是空白" / "Unable to identify"）放宽到 MAX_AI_REFUSAL_RETRIES=10：
+   *   8B 配额紧张时同样图一次"图片是空白"、下一次成功 OCR 15+ 道题；
+   *   不应该被 MAX_AUTO_RETRIES=3 永久卡死。但完全不限会浪费配额在真的空白图上，
+   *   10 次 ≈ 50 分钟足够。
    */
+  isAIRefusalLikely = (lastError) => {
+    if (!lastError) return false
+    return /图片是空白|图片为空白|无法识别|无法看到|Unable to identify|Cannot identify|no text detected|cannot see|看不清|页面内容为空|用户提供的图片是空|所有页面识别结果为空|页识别失败|OCR 未识别到任何题目|AI_EMPTY/i.test(String(lastError))
+  }
+
   async scanFailedTasks() {
     try {
       const MAX_AUTO_RETRIES = 3
+      const MAX_AI_REFUSAL_RETRIES = 10  // AI 偶发拒绝任务放宽上限
       console.log('[PendingTaskRecovery]  开始扫描 failed 任务...')
 
+      // ── 双轨扫描 ──
+      //   1) 常规任务：retry_count < MAX_AUTO_RETRIES
+      //   2) AI 偶发拒绝任务：retry_count < MAX_AI_REFUSAL_RETRIES（10 次 ≈ 50 分钟）
+      // 用条件 OR + ILIKE 让 DB 利用 idx_tasks_status 索引，避免全表扫描。
       const { rows } = await query(
         `SELECT id, student_id, image_url, images, original_name, status, created_at, result, retry_count, last_error,
                 task_type, worksheet_id, generated_exam_id, subject
          FROM ${TABLES.TASKS}
          WHERE status = 'failed'
-           AND COALESCE(retry_count, 0) < $1
            AND created_at > NOW() - INTERVAL '7 days'
+           AND (
+             COALESCE(retry_count, 0) < $1
+             OR (
+                  (last_error ILIKE '%图片是空白%'
+                   OR last_error ILIKE '%图片为空白%'
+                   OR last_error ILIKE '%Unable to identify%'
+                   OR last_error ILIKE '%no text detected%'
+                   OR last_error ILIKE '%cannot identify%')
+                  AND COALESCE(retry_count, 0) < $2
+                )
+           )
          ORDER BY updated_at ASC`,
-        [MAX_AUTO_RETRIES]
+        [MAX_AUTO_RETRIES, MAX_AI_REFUSAL_RETRIES]
       )
 
       if (rows.length === 0) {
@@ -216,6 +238,12 @@ class PendingTaskRecovery {
             continue
           }
 
+          // ── AI 偶发拒绝：重置 retry_count=0，让这次"重试"算作第 1 次 ──
+          //   8B 配额紧张时同样图可能一次"图片是空白"、一次成功 OCR 15+ 道题，
+          //   不应该被 MAX_AUTO_RETRIES=3 卡死。给它们无限重试机会，
+          //   直到要么成功，要么用户主动取消/重新上传。
+          const isAIRefusal = isAIRefusalLikely(task.last_error)
+          const baseRetry = isAIRefusal ? 0 : (task.retry_count || 0)
           await query(
             `UPDATE ${TABLES.TASKS} SET status = 'pending', last_error = NULL, updated_at = NOW() WHERE id = $1`,
             [task.id]
@@ -231,12 +259,12 @@ class PendingTaskRecovery {
             worksheetId: task.worksheet_id || null,
             generatedExamId: task.generated_exam_id || null,
             subject: task.subject || null,
-            retryCount: (task.retry_count || 0) + 1
+            retryCount: baseRetry + 1
           }, {
             attempts: parseInt(process.env.MAX_RETRIES) || 3,
             backoff: { type: 'exponential', delay: 5000 }
           })
-          console.log(`[PendingTaskRecovery] ✅ 已恢复 failed 任务: ${task.original_name} (retry ${task.retry_count || 0}→${(task.retry_count || 0) + 1})`)
+          console.log(`[PendingTaskRecovery] ✅ 已恢复 failed 任务: ${task.original_name} (retry ${task.retry_count || 0}→${baseRetry + 1}${isAIRefusal ? ', AI 拒绝重置' : ''})`)
           recoveredCount++
         } catch (err) {
           console.error(`[PendingTaskRecovery]  恢复失败 ${task.original_name}:`, err.message)
