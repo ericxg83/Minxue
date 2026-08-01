@@ -1,21 +1,32 @@
-fix(paperViewer): 切题定位动态 zoom - 解决 bbox 跑到屏幕外问题
+fix(paperViewer): 切题定位保持 zoom 不变 - 只让框换位置，图片不再"跳来跳去"
 
-问题：第13题蓝色定位框仍跑到屏幕下方
-原因：上一版 jumpToBbox 使用 fitToContainer 的小 zoom 缩放图片（2000x3000 → 368x552），
-  当 bbox 在图片中下部（bboxCenterY_px * zoom > ch）时，panY 居中后
-  bbox 屏幕 y = panY + bboxCenterY*zoom > ch，框超出屏幕底部。
-  实测 9 个真实场景中 9/9 都跑出屏幕（偏 451-1987px）。
+问题：用户反馈"中央图位置跳来跳去，我只要框换位置，我手动可以放大"。
 
-修复：jumpToBbox 改为动态计算 zoom：
-  - zMax = min(ch/bboxH, cw/bboxW, 5)：保证 bbox 完整可见
-  - zMin = max(...居中约束...)：保证 bbox 可居中（panX/panY 在图片偏移范围内）
-  - 选 z = (zMin <= zMax) ? zMin : zMax
-    · 可居中时取 zMin（精确中央）
-    · 否则取 zMax（完整可见）
-  - 保留用户主动放大的 zoom（切题时不缩小让用户迷失），但仅当 zoom <= zMax
-  - 兜底裁剪：bbox 仍被裁剪时调整 panX/panY 让 bbox 完整可见
+根因：上一版 jumpToBbox (commit 1e68a55) 动态计算 zMin/zMax 在切题时调整 zoom，
+让 bbox 居中且完整可见。但每次切题 zoom 都会变（13% → 58% → 38% → ...），
+图片在屏幕上"一会放大一会放小"，用户失去方向感。
 
-测试：scratchpad/test_bbox_jump.mjs 13/14 通过
-  - 13 个 case bbox 精确居中（合法 y 范围）
-  - 1 个 case (y=0 顶部) 数学不可能严格居中，bbox 在屏但偏顶部
-  - 用户主动 zoom 1.5/2.0 时正常降级到 zMax（避免 bbox 越界）
+修复：保持当前 zoom（fitToContainer 初始值 / 用户手动值）不变，只调整 panX/panY：
+- 图片比容器宽/高：自由调整 panX/panY 让 bbox 中心到中央；
+- 图片比容器窄/高：图片居中（panX = (cw - imgW) / 2），不强行平移；
+- 边界夹紧到图片偏移范围 [ch - imgH, 0]，避免图片被推出容器。
+
+设计原则：zoom 由用户掌控（fitToContainer 初始 / 手动滚轮 / 缩放按钮），
+切题时只调 panX/panY 让 bbox 出现在屏幕内。bbox 居中数学不可能时
+（如 bbox 靠近图片边缘 + 图片远大于容器），退而求其次让 bbox 在屏内即可。
+
+测试验证：
+- scratchpad/test_bbox_jump.mjs 6/6 通过：
+  * 切题时 zoom 保持稳定（不会跳）
+  * fitToContainer 初始 zoom 不被覆盖
+  * 用户手动 zoom 1.5x 切题后保持 1.5x
+  * bbox 至少出现在屏幕内
+  * 边缘 bbox 完整可见
+  * 小图（图片比容器小）正确居中
+- 浏览器 e2e 验证（截图 d:\Minxue_App_V3\scratchpad\screenshots\）：
+  * 第 1 题：蓝框正确框住"16. 与数轴上的点成"，zoom 13% → 58% 手动放大稳定
+  * 第 2 题：蓝框跟随切题，位置更新
+  * 切题前后 zoom 一致，图片无跳变
+
+注：用户原话"第 10 题定位到 14 题"是上一版动态 zoom 把 bbox 拉到错位位置所致，
+本修复保证 zoom 稳定后 bbox 位置 = 数据库中的真实坐标，不再有"动态 zoom 错位"问题。
