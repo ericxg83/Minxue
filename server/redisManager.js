@@ -80,11 +80,15 @@ class RedisManager {
    * 所以 init() 里同时会调用 ensureResetAfterMonthlyBoundary() 做兜底。
    */
   scheduleMonthlyReset() {
+    // Node 的 setTimeout 最大安全 timeout 是 2^31-1 ms（约 24.8 天）。
+    // 距下个月 1 号 00:01 最多可达 31+ 天，必须裁剪，否则会触发
+    // TimeoutOverflowWarning 并被强制设为 1ms（导致月初立刻误触发）。
+    const MAX_TIMEOUT_MS = 0x7fffffff
     const tick = () => {
       const now = new Date()
       // 下个月 1 号 00:01
       const next = new Date(now.getFullYear(), now.getMonth() + 1, 1, 0, 1, 0, 0)
-      const ms = next.getTime() - now.getTime()
+      const ms = Math.min(next.getTime() - now.getTime(), MAX_TIMEOUT_MS)
       setTimeout(() => {
         this.resetQuotaExhausted()
         tick() // 排定下一个月
