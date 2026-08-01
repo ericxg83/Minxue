@@ -1,32 +1,42 @@
-fix(paperViewer): 切题定位保持 zoom 不变 - 只让框换位置，图片不再"跳来跳去"
+fix(pickAnswerUnit): 修复无 pageTitle 试卷错挂单元 - 三层加固
 
-问题：用户反馈"中央图位置跳来跳去，我只要框换位置，我手动可以放大"。
+用户反馈：试卷中间页（无章节标题）被错挂到 19.1 试卷①，导致批改错误
+（学生答对但答案库用 19.1 的答案 → 整套题错位）
 
-根因：上一版 jumpToBbox (commit 1e68a55) 动态计算 zMin/zMax 在切题时调整 zoom，
-让 bbox 居中且完整可见。但每次切题 zoom 都会变（13% → 58% → 38% → ...），
-图片在屏幕上"一会放大一会放小"，用户失去方向感。
+根因分析：
+1. detectChapterByContent 的"二次根式"规则错误包含"平方根|立方根|根号"，
+   导致 19.1/19.2 章节的"实数"内容被误判为 20.x"二次根式"
+2. chapterHint="第十九章实数" 的缩窄只能到 lesson_code 层级（19），
+   无法区分 19.1（"平方根与立方根"）和 19.2（"实数"）
+3. detectedChapter 多个候选命中时直接跳过、退化到题号覆盖率打分，
+   在 chapterHint=null 时会乱选（19.1 试卷①题号 1-28 覆盖 18-20）
 
-修复：保持当前 zoom（fitToContainer 初始值 / 用户手动值）不变，只调整 panX/panY：
-- 图片比容器宽/高：自由调整 panX/panY 让 bbox 中心到中央；
-- 图片比容器窄/高：图片居中（panX = (cw - imgW) / 2），不强行平移；
-- 边界夹紧到图片偏移范围 [ch - imgH, 0]，避免图片被推出容器。
+三层加固：
+1. CONTENT_CHAPTER_RULES 规则修正：
+   - "二次根式"严格限定为字面"二次根式"或 √± 多项式根号运算
+   - "实数"添加"平方根|立方根"（19.1 概念）
+   - 重新排序：一元二次方程 > 直角三角形 > 二次根式 > 实数（最具体优先）
 
-设计原则：zoom 由用户掌控（fitToContainer 初始 / 手动滚轮 / 缩放按钮），
-切题时只调 panX/panY 让 bbox 出现在屏幕内。bbox 居中数学不可能时
-（如 bbox 靠近图片边缘 + 图片远大于容器），退而求其次让 bbox 在屏内即可。
+2. pickAnswerUnit chapterHint 二次缩窄（章节关键词）：
+   - 提取 chapterHint 中的"实数/二次根式/一元二次方程/直角三角形"
+   - 用它匹配 unitTitle 做二次缩窄，把"19.*"细分为"19.2 实数"vs"19.1 平方根与立方根"
 
-测试验证：
-- scratchpad/test_bbox_jump.mjs 6/6 通过：
-  * 切题时 zoom 保持稳定（不会跳）
-  * fitToContainer 初始 zoom 不被覆盖
-  * 用户手动 zoom 1.5x 切题后保持 1.5x
-  * bbox 至少出现在屏幕内
-  * 边缘 bbox 完整可见
-  * 小图（图片比容器小）正确居中
-- 浏览器 e2e 验证（截图 d:\Minxue_App_V3\scratchpad\screenshots\）：
-  * 第 1 题：蓝框正确框住"16. 与数轴上的点成"，zoom 13% → 58% 手动放大稳定
-  * 第 2 题：蓝框跟随切题，位置更新
-  * 切题前后 zoom 一致，图片无跳变
+3. detectedChapter 多候选时缩窄 candidates 而非跳过：
+   - 例：content 含"无理数"→ detectedChapter=实数 → 缩窄到 试卷3/4/6 → 后续打分只在 19.2 内部选
+   - 避免 19.1 试卷①（题号 1-28 覆盖 18-20）被乱选
 
-注：用户原话"第 10 题定位到 14 题"是上一版动态 zoom 把 bbox 拉到错位位置所致，
-本修复保证 zoom 稳定后 bbox 位置 = 数据库中的真实坐标，不再有"动态 zoom 错位"问题。
+4. 0-pre 过滤：仅看试卷 unit（unitKey 以"试卷"开头）：
+   - pickAnswerUnit 是答案库批改专用，堂堂练题号（1-5）与试卷（1-28）维度不同
+   - chapterHint 缩窄后 堂堂练10|20.1(1) 题号 1-22 也会覆盖学生题号 5-7，导致错选
+   - 过滤掉非试卷 unit 让打分只在试卷内部进行
+
+测试覆盖：
+- test_no_title_scenario.mjs: 用户截图 3 个场景（pageTitle=null + chapterHint=null/大章/有标题）
+  修复前：错挂 试卷1|19.1（错 2 题）→ 修复后：选 试卷3|19.2（对 2/3）
+- test_chapter_keyword_narrow.mjs: 6 个二次缩窄场景
+  二次根式/一元二次方程/直角三角形/混合特征都精准缩窄到对应章节
+- 现有 test_pick_answer_unit_e2e.mjs 6 个测试 + test_answerbank_unit_match.mjs 10 个测试 + test_e2e_answer_matching.mjs 17 个测试 全部通过
+
+实测效果（user 截图 18-20 题）：
+- 修复前：pageTitle=null + chapterHint="第十九章实数" → 选 试卷1|19.1（错 2/3）
+- 修复后：→ 选 试卷3|19.2（对 2/3），不会再错挂到 19.1 或 20.x

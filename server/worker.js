@@ -1557,11 +1557,16 @@ const normalizeTitleForMatch = (s) => {
 // 内容特征 → 章节关键词：按"特征越具体→匹配越准"排序（命中后立即 return，不继续判）。
 // 用于 pageTitle 缺失时根据题目内容（题干 + 学生答案 + 选项）反推章节。
 // 关键词命中 unitTitle 或 unitKeyRaw 即视为该章节。
+//
+// ⚠️ 关键：19 章"实数"包含"平方根/立方根/算术平方根"等概念，绝不能划到 20 章"二次根式"！
+// 旧版"二次根式"规则含 "平方根|立方根|根号"，导致 19.1/19.2 章节被误判为 20.x
+// （用户截图题 18-20 实为 19.2 实数，被规则误判成"二次根式"，错配到 20.x 系列）。
+// "二次根式"严格限定为字面"二次根式"或 √± 形式的多项式根号运算。
 const CONTENT_CHAPTER_RULES = [
-  { chapter: '二次根式', re: /二次根式|平方根|立方根|±\s*√|√[a-zA-Z0-9]|根号/ },
   { chapter: '一元二次方程', re: /一元二次方程|求根公式|判别式|根与系数|二次三项式/ },
   { chapter: '直角三角形', re: /直角三角形|勾股定理|角平分线/ },
-  { chapter: '实数', re: /无理数|相反数|绝对值|科学记数法|近似数|算术平方根/ },
+  { chapter: '二次根式', re: /二次根式|根号下|√[a-zA-Z]\s*[+\-×÷]\s*√/ },
+  { chapter: '实数', re: /无理数|相反数|绝对值|科学记数法|近似数|平方根|立方根|算术平方根/ },
 ]
 const detectChapterByContent = (questions) => {
   if (!Array.isArray(questions) || questions.length === 0) return null
@@ -1635,6 +1640,16 @@ export function pickAnswerUnit(answersByUnit, pageTitle, questions, pageNumber, 
     }
   }
   const candidates = [...answersByUnit.keys()].map(unitMeta)
+
+  // 0-pre) 仅看试卷 unit：pickAnswerUnit 是答案库批改专用（processAnswerBankGrading），
+  //   候选池只考虑"试卷"类 unit（unitKey 以"试卷"开头）。堂堂练/课时练的题号是练习题
+  //   编号（1-5），与试卷的"全卷题号 1-28"不同维度；同时出现会污染打分（实测 chapterHint
+  //   缩窄后，堂堂练10|20.1(1) 题号 1-22 也覆盖学生题号 5-7，被错选）。
+  //   唯一豁免：单 unit 情况（前面已 return）。
+  const paperOnlyCandidates = candidates.filter(c => /^试卷/.test(c.unitKeyRaw || c.unitKey || ''))
+  if (paperOnlyCandidates.length >= 1) {
+    candidates.splice(0, candidates.length, ...paperOnlyCandidates)
+  }
 
   // 0) lesson_hint 匹配（最精确：lesson_code 来自 OCR 提示词/题目内容推断）
   //    候选 unit 的 lesson_code 是结构化字段（如"19.2"），而"试卷4" vs "试卷6" 错位时，
@@ -1727,15 +1742,23 @@ export function pickAnswerUnit(answersByUnit, pageTitle, questions, pageNumber, 
   //   用题目 OCR 文本中的数学特征（√、二次根式等）反推章节。这能解决：
   //     - 页面顶部"二、选择题"等无章节标题的排版，OCR 无法识别 page_title
   //     - 第十九/二十/二十一/二十二章题号都从 1 开始编号，仅靠题号覆盖率会错挂
-  //   **唯一命中才返回**。多个候选都含 detectedChapter 时（说明该特征太宽泛），
-  //   跳过此步，让 chapterHint 缩窄 + 题号覆盖率打分继续处理，避免"二次根式"
-  //   错把 19.2 实数试卷挂到 20.1 二次根式试卷上。
+  //   唯一命中 → 直接采用；多个候选都含 detectedChapter → 缩窄 candidates 给后续打分。
+  //   旧版"多个候选命中就跳过"在 chapterHint=null 时会退化为题号覆盖率乱选（user 截图
+  //   18-20 题是 19.2 实数，但试卷1|19.1 题号 1-28 也覆盖 18-20，会被错挂）。修复：
+  //   缩窄 candidates（而不是跳过）让打分阶段只在 19.2 系列内部选，避免错挂到 19.1。
+  //   二次根式规则已修（不再误中"平方根/立方根"），缩窄安全。
   const detectedChapter = detectChapterByContent(questions)
   if (detectedChapter) {
     const titleMatches4 = candidates.filter(c => c.unitTitle && c.unitTitle.includes(detectedChapter))
     if (titleMatches4.length === 1) return titleMatches4[0].unitKey
     const keyMatches4 = candidates.filter(c => c.unitKeyRaw && c.unitKeyRaw.includes(detectedChapter))
     if (keyMatches4.length === 1) return keyMatches4[0].unitKey
+    // 多个候选命中：用 detectedChapter 缩窄 candidates（不替换为局部变量，透传下去给打分）
+    if (titleMatches4.length > 1) {
+      candidates.splice(0, candidates.length, ...titleMatches4)
+    } else if (keyMatches4.length > 1) {
+      candidates.splice(0, candidates.length, ...keyMatches4)
+    }
   }
 
   // 2) 题号覆盖率打分（带题型吻合度加权）
@@ -1782,6 +1805,12 @@ export function pickAnswerUnit(answersByUnit, pageTitle, questions, pageNumber, 
   //   "试卷4"（key="试卷4|19.2"）和"试卷6"（key="试卷6"，title 含"第十九章"）双双命中，
   //   最后由"包含更多"原则（试卷6 title 长）错挂到试卷6。修复：chapterHint 兜底必须
   //   **配合 lesson_code 段**才能生效，否则视为"无效兜底"、直接用题号覆盖率打分。
+  //
+  //   二次缩窄（章节关键词）：lesson_code 段只能缩窄到 19.* / 21.* 这种大章，区分不出
+  //   19.1（"平方根与立方根"）和 19.2（"实数"）。当 chapterHint 包含"实数/二次根式/
+  //   一元二次方程/直角三角形"这种细分章节词时，用它去匹配 unitTitle 做二次缩窄。
+  //   这能解决无 pageTitle 场景下"19.1 vs 19.2"错挂（实测 user 截图 18-20 题为 19.2
+  //   实数，旧版会被错挂到 19.1 试卷①，因 19.1 也覆盖 18-20 题号）。
   if (chapterHint && typeof chapterHint === 'string' && scopedCandidates.length > 1) {
     // 提取 chapterHint 中的 lesson_code 段：支持"19.2"、第19章、第十九章
     let hintLesson = null
@@ -1811,6 +1840,32 @@ export function pickAnswerUnit(answersByUnit, pageTitle, questions, pageNumber, 
       // 仅在窄化后候选数 1-N 时采用（至少 1 个，至多不缩为 0）
       if (narrowed.length >= 1 && narrowed.length < scopedCandidates.length) {
         scopedCandidates = narrowed
+      }
+    }
+    // 二次缩窄：章节关键词（实数/二次根式/一元二次方程/直角三角形）匹配 unitTitle
+    // 必须等 lesson_code 缩窄后再做，否则 lesson_code 缩窄会因"21"匹配"21.5"把无关 unit 拉进来
+    // 例：chapterHint="第十九章实数" → 实数 → 试卷3/4/6 (而非 19.1 试卷1/2)
+    if (scopedCandidates.length > 1) {
+      const CHAPTER_KEYWORDS = [
+        { kw: '二次根式', mustInTitle: /二次根式|根号下/ },
+        { kw: '一元二次方程', mustInTitle: /一元二次方程/ },
+        { kw: '直角三角形', mustInTitle: /直角三角形|勾股|角平分线/ },
+        { kw: '实数', mustInTitle: /实数/ },
+      ]
+      const hintNorm = String(chapterHint).replace(/[\s　]+/g, '')
+      for (const { kw, mustInTitle } of CHAPTER_KEYWORDS) {
+        if (hintNorm.includes(kw)) {
+          const kwNarrowed = scopedCandidates.filter(c => {
+            const ct = c.unitTitle || ''
+            // 章节关键词必须出现在 unitTitle（避免"含子串"误中，如"实数"误中"实数提高性测试"也算命中）
+            return mustInTitle.test(ct)
+          })
+          // 仅在窄化后候选数 >=1 且确实缩窄了才采用
+          if (kwNarrowed.length >= 1 && kwNarrowed.length < scopedCandidates.length) {
+            scopedCandidates = kwNarrowed
+            break // 一次缩窄足够，避免"实数"+"二次根式"等组合误伤
+          }
+        }
       }
     }
   }
