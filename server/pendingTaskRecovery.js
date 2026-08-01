@@ -17,7 +17,7 @@ const GEOMETRY_MAX_RETRIES = GEOMETRY_RETRY_DELAYS.length
 //   1. 配额 / 限流：自愈取决于外部服务（明早重置 / 限流解除），与重试次数无关。
 //   2. 图片下载失败：URL 失效（OSS 404/403）不会自愈，反复入队只会刷日志。
 //   3. 用户输入类：缺少 worksheetId、URL 无效、文件未上传完成等，本身就是数据问题。
-//   4. 图片质量：太小（<4KB）/ 0 道题 —— 学生拍的就是空白页/模糊页，重复 OCR 不会变好，
+//   4. 图片质量：太小（<1KB）/ 0 道题 —— 学生拍的就是空白页/模糊页，重复 OCR 不会变好，
 //      反复入队只会反复下载 → 调 AI → 0 道题 → 浪费配额 + 触发限流 429 风暴。
 //
 // 命中黑名单 → 直接跳过，不恢复、不入队，让任务停留在 failed 状态等待人工/数据修复。
@@ -40,8 +40,10 @@ export const NON_RETRYABLE_ERROR_PATTERNS = [
   /INVALID_URL/,
   /AI returned empty content/i,
   /Invalid model id/i, // 模型被供应商下架（如 Qwen3-8B-Instruct），不会自愈
-  /所有页面识别结果为空/, // OCR 全空 = 学生图片无内容 / 太小，重复无意义
-  /AI_EMPTY/,             // 同上（errorType 字段也会写 AI_EMPTY）
+  /所有页面识别结果为空/, // workbook OCR 全空
+  /页识别失败/,            // workbook N 页全部下载/识别失败（"1 页识别失败" / "3 页识别失败"）
+  /OCR 未识别到任何题目/,   // answer bank 流程 0 道题
+  /AI_EMPTY/,             // errorType 字段也会写 AI_EMPTY
 ]
 
 /**

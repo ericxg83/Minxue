@@ -3,23 +3,19 @@
  * （约 3000-4000 bytes，axios 仍按 2xx 视为成功）。
  *
  * 判定规则（任一命中即视为非图片）：
- *   1. buffer 长度 < MIN_IMAGE_BYTES（4KB）— 真实作业图片压缩后也至少几十 KB，
- *      几 KB 几乎是空白页 / 缩略图 / 鉴权错误页，AI 拿去也是返回 0 道题浪费配额。
+ *   1. buffer 长度 < 1024 bytes（太小任何图片都装不下，连魔数都不完整）
  *   2. 前 4 字节不是 JPEG / PNG / WebP / HEIC 魔数
  *   3. 前 200 字符是 XML/HTML 文档前缀
  *   4. 命中图片魔数但头部出现 XML/HTML 文本（防御性兜底，理论上不可能）
  *
  * 纯函数，独立可测。
+ *
+ * 注意：不要按 4KB 等大阈值拦真实小图 —— 3116 bytes 的合法 JPEG/PNG 也是合法图片，
+ * 视觉模型看到小图会返回 0 道题，但这属于"内容问题"由 OCR 层降级处理（切模型重试），
+ * 不属于"URL 失效"应在下载层硬拦。
  */
-
-// 真实作业图片（手写答案）sharp 压缩到 1800 长边后也至少 ~10KB；
-// 4KB 是底线，再小就属于"AI 识别必然 0 道题"的废图，不值得继续送 AI。
-export const MIN_IMAGE_BYTES = 4 * 1024
-
 export function isValidImageBuffer(buf) {
-  if (!Buffer.isBuffer(buf) || buf.length < MIN_IMAGE_BYTES) {
-    return { ok: false, reason: buf && buf.length < 1024 ? 'too_small' : 'too_small_or_invalid' }
-  }
+  if (!Buffer.isBuffer(buf) || buf.length < 1024) return { ok: false, reason: 'too_small' }
   const magic = buf.slice(0, 4)
   const isJpeg = magic[0] === 0xFF && magic[1] === 0xD8 && magic[2] === 0xFF
   const isPng = magic[0] === 0x89 && magic[1] === 0x50 && magic[2] === 0x4E && magic[3] === 0x47
