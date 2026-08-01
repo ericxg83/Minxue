@@ -14,7 +14,10 @@ export const AI_CONFIG = {
   MAX_RETRIES: 2,
 }
 
-export const RETRY_DELAYS_429 = [5000, 10000, 20000] // 429 限流最多重试 3 次，间隔递增
+// 429 退避策略：原 [5000, 10000, 20000] 总共 35s 的等待经常白费，因为 8B 配额耗尽时
+// 等再久也是 429；外层 callVisionCompletion 会轮询 MS_KEYS × VL_MODELS（多个 Key×模型），
+// 单个 provider 内重试 1~2 次即可，剩余时间留给其它组合尝试。
+export const RETRY_DELAYS_429 = [3000, 5000] // 429 限流最多重试 2 次，共等 8s
 export const RETRY_DELAYS_503 = [5000, 10000, 20000, 30000, 60000, 120000] // 503 最多重试 6 次，总等待 245 秒
 
 const sleep = (ms) => new Promise(resolve => setTimeout(resolve, ms))

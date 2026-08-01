@@ -601,10 +601,11 @@ const downloadImage = async (imageUrl) => {
     // ── 魔数校验：OSS 404 / 403 / 鉴权失败会返回 XML/HTML 错误页（约 3000-4000 bytes），
     //    axios 仍按 2xx/3xx 视为成功，AI 拿去调视觉模型会立即被视觉模型拒掉。
     //    在这里直接拦下，给出明确错误，避免被 AI 误判为"模型问题"反复重试。
-    if (!isValidImageBuffer(buf)) {
+    const validation = isValidImageBuffer(buf)
+    if (!validation.ok) {
       const head = buf.slice(0, 80).toString('utf8').replace(/[^\x20-\x7E]/g, '?')
-      console.error(`   ❌ 下载内容非图片: ${buf.length} bytes, 头80字符="${head}"`)
-      throw new Error(`下载图片失败: 返回内容不是图片（${buf.length} bytes），URL 可能已失效或 OSS 返回了错误页`)
+      console.error(`   ❌ 下载内容非图片: ${buf.length} bytes, 头80字符="${head}", reason=${validation.reason}`)
+      throw new Error(`下载图片失败: 返回内容不是图片（${buf.length} bytes, ${validation.reason}），URL 可能已失效或 OSS 返回了错误页`)
     }
 
     return buf
@@ -1860,7 +1861,7 @@ const processWorkbookGrading = async (job) => {
 
   let allQuestions = []
   let allPageTitles = []
-  const pageDataList = []   // 逐页数据：{ pageTitle, imageUrl, questions[] }
+  let pageDataList = []   // 逐页数据：{ pageTitle, imageUrl, questions[] }
   let ocrErrors = 0
 
   for (let pageIdx = 0; pageIdx < imageList.length; pageIdx++) {
@@ -1961,7 +1962,80 @@ const processWorkbookGrading = async (job) => {
     await updateTaskStatus(taskId, TASK_STATUS.PROCESSING, { progress })
   }
 
-  // 所有页面都识别失败
+  // 所有页面都识别失败 —— 切下一个视觉模型重试 1 次
+  // 原因：8B 配额耗尽/降智时可能全返回 0 道题，换 235B/8B-Thinking/Agnes 一次就过；
+  // 如果重试仍 0 道题，基本可以确认是图片本身没内容（白页/过小/拍照模糊），放弃。
+  if (allQuestions.length === 0) {
+    const retriedModel = rotateVLModel()
+    if (retriedModel) {
+      console.warn(`🔄 [Workbook] 第 1 轮全 0 道题，切换到下一个视觉模型 (${retriedModel}) 重试 1 次...`)
+      // 重置页级状态
+      let allQuestionsRetry = []
+      let ocrErrorsRetry = 0
+      const pageDataListRetry = []
+      for (let pageIdx = 0; pageIdx < imageList.length; pageIdx++) {
+        const { image_url: url } = imageList[pageIdx]
+        let imageBuffer
+        try {
+          imageBuffer = await downloadImage(url)
+        } catch (e) {
+          console.error(`   [Workbook] 重试第 ${pageIdx + 1} 页下载失败:`, e.message)
+          ocrErrorsRetry++
+          continue
+        }
+        const compressedBuffer = await sharp(imageBuffer)
+          .rotate()
+          .resize(1800, 1800, { fit: 'inside', withoutEnlargement: true })
+          .jpeg({ quality: 85 })
+          .toBuffer()
+        const { content } = await callVisionCompletion({
+          imageDataURL: `data:image/jpeg;base64,${compressedBuffer.toString('base64')}`,
+          systemPrompt: workbookPrompt,
+          userText: '识别这张作业图片的页面标题和所有题目的学生答案。',
+          temperature: 0.1,
+          maxTokens: 4096,
+          model: retriedModel, // 锁定到刚切到的模型，不让它内部再切回
+        })
+        if (!content) { ocrErrorsRetry++; continue }
+        let questions = []
+        let pageTitle = null
+        try {
+          const jsonMatch = content.match(/```json\n?([\s\S]*?)\n?```/) ||
+                            content.match(/```\n?([\s\S]*?)\n?```/) ||
+                            content.match(/[\[{][\s\S]*[\]}]/)
+          const jsonStr = jsonMatch ? jsonMatch[1] || jsonMatch[0] : content
+          const parsed = JSON.parse(jsonStr)
+          if (Array.isArray(parsed)) questions = parsed
+          else if (parsed && typeof parsed === 'object') {
+            pageTitle = parsed.page_title || null
+            questions = Array.isArray(parsed.questions) ? parsed.questions : []
+          }
+        } catch {
+          ocrErrorsRetry++
+          continue
+        }
+        const pageNo = imageList[pageIdx].page_number || (pageIdx + 1)
+        for (const q of questions) {
+          q._page_image_url = url
+          q._page_number = pageNo
+        }
+        allQuestionsRetry.push(...questions)
+        pageDataListRetry.push({ pageTitle, imageUrl: url, questions, pageNumber: pageNo, chapterHint: null })
+        console.log(`   [Workbook] 重试第 ${pageIdx + 1} 页: 识别到 ${questions.length} 道题`)
+      }
+      if (allQuestionsRetry.length > 0) {
+        console.log(`✅ [Workbook] 模型切换重试成功，识别到 ${allQuestionsRetry.length} 道题`)
+        allQuestions = allQuestionsRetry
+        pageDataList = pageDataListRetry
+        ocrErrors = ocrErrorsRetry
+        allPageTitles = pageDataListRetry.map(p => p.pageTitle).filter(Boolean)
+      } else {
+        console.warn(`⚠️ [Workbook] 模型切换重试仍为 0 道题，放弃`)
+      }
+    }
+  }
+
+  // 重试后仍 0 道题 → 标记为 AI_EMPTY 进入黑名单，PendingTaskRecovery 不再反复入队
   if (allQuestions.length === 0) {
     const errorDetail = ocrErrors > 0 ? `${ocrErrors} 页识别失败` : '所有页面识别结果为空'
     await updateTaskStatus(taskId, TASK_STATUS.FAILED, {

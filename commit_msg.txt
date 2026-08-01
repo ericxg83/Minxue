@@ -1,10 +1,37 @@
-fix(redis): 冷启动兜底 ensureResetAfterMonthlyBoundary
+fix(ocr): 拦截 4KB 以下废图 + 0 道题不再反复入队
 
-Render 免费层会 sleep 闲置实例，setTimeout 在 sleep 期间不触发。
-如果 7/31 部署后实例 sleep 到 8/1，新进程里没有排定的 monthly
-reset timer，quotaExhaustedSet 永远不清空，主实例无法恢复。
+根因（用户截图的 jobId 1082 等全部 0 道题 + 反复失败）：
+1. 3116 bytes 的图片在 worksheetId=1c31ee45... 的任务里反复下载 → 反复调 AI → 全部 0 道题。
+   - 老 isValidImageBuffer 只拦 < 1024 bytes + XML/HTML 头部，没拦 4KB 以下的"小图/白图"。
+   - 4KB 以下的图片：AI 拿去必然 0 道题，浪费配额。
+2. workbook 流程 0 道题后只 fail 一次，last_error 落入 DB。
+   - 但 last_error 是 "所有页面识别结果为空"，不在 NON_RETRYABLE_ERROR_PATTERNS 里。
+   - PendingTaskRecovery 5 分钟扫描一次，把这个 failed 任务重新入队。
+   - 重新下载图片（OSS 还是返回 3116 bytes 的废图）→ 再次 0 道题 → 再次 fail。
+   - 反复入队 + 反复调 AI 撞出 429 风暴（"429 rate limit, retrying in 5s/10s"）。
+3. 8B 限流时单个 provider 内 [5s, 10s, 20s]=35s 等待经常白等，因为外层还有多个 Key×模型可试。
 
-在 init() 末尾调用 ensureResetAfterMonthlyBoundary()：
-- 检查当前时间是否已过"本月 1 号 00:01"
-- 是的话立即清空所有熔断标记
-- 覆盖"持续运行"和"冷启动"两种场景
+修复：
+1) server/utils/imageValidator.js
+   - 加 MIN_IMAGE_BYTES=4096 阈值；<4KB 一律视为废图（too_small）。
+   - 返回值改为 { ok, reason } 携带失败原因，便于排查。
+
+2) server/worker.js#downloadImage
+   - 适配新返回值，打印 reason。
+   - 现在 3116 bytes 的图直接 fail 抛错："下载图片失败: 返回内容不是图片（3116 bytes, too_small_or_invalid）"。
+   - workbook 流程 0 道题时主动 rotateVLModel 切下一个视觉模型重试 1 次（235B/8B-Thinking 兜底），
+     仍 0 道题才标记 AI_EMPTY。
+
+3) server/pendingTaskRecovery.js
+   - 把 /所有页面识别结果为空/ 和 /AI_EMPTY/ 加入 NON_RETRYABLE_ERROR_PATTERNS。
+   - 学生拍了空白页/小图，重复入队只是浪费配额 → 立即拒绝重试。
+
+4) server/config/ai.js
+   - RETRY_DELAYS_429 从 [5000, 10000, 20000] 缩短为 [3000, 5000]（共 8s）。
+   - 8B 配额耗尽时不会白等 35s → 快速切下一个 Key×模型。
+
+测试：
+- imageValidator 单测：4KB+ JPEG/PNG 通过；<4KB 一律 too_small_or_invalid。
+- pendingTaskRecovery 黑名单：所有"图片失败/0 道题/限流/配额"类错误命中 skip=true；
+  其他无关错误放行（skip=false）。
+- node --check 4 个改动文件全部通过。
