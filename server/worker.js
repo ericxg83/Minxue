@@ -2911,10 +2911,21 @@ const processAnswerBankGrading = async (job) => {
       //   例："（1）√14；2 （2）2√10；√10" → [{sub:'1', val:'2'}, {sub:'2', val:'√10'}]
       //   例："（1）8-9=-1 （2）..." → [{sub:'1', val:'-1'}, ...]（取最右"="右侧）
       //   策略：先按 (1)(2)... 标记 split 字符串；段内"过程+结果"型收窄到最终答案
+      //
+      //   ️ 关键修复（2026-08-01 22:10）：移除负向断言，回归基础模式
+      //
+      //   根因分析：
+      //   - 负向断言 (?![0-9...]) 会拒绝 "(2)2√10"（因为 ) 后是数字 2）
+      //   - 负向断言 (?![...（...]) 会拒绝 "(1)（2）"（因为 ） 后是 （）
+      //   - 负向断言 (?![...（...]) 会拒绝 "(1)(3√2-2)"（因为 ） 后是 (）
+      //
+      //   最终方案：移除负向断言，只用基础模式 /[（(]\s*(\d{1,2})\s*[)）]/g
+      //   数学表达式如 "(12×1/3)" 中 "12" 后是 "×" 不是 ")"，基础模式已经能区分。
+      //   子题标记如 "(1)2√10" 中 "1" 后是 ")"，基础模式能匹配。
       const parseSubAnswers = (s) => {
         if (!s) return []
-        // 找所有 (N) 标记的位置和 N
-        const markerRe = /[（(]\s*(\d+)\s*[)）]/g
+        // 找所有 (N) 标记的位置和 N，N 为 1-2 位数字
+        const markerRe = /[（(]\s*(\d{1,2})\s*[)）]/g
         const markers = []
         let m
         while ((m = markerRe.exec(s)) !== null) {
@@ -2947,16 +2958,24 @@ const processAnswerBankGrading = async (job) => {
       //   例："9×4=36；8-9=-1" → [{sub:'1', val:'36'}, {sub:'2', val:'-1'}]
       //   触发条件：parseSubAnswers 返回空 + 答案库有 ≥2 个 sub + ；/; 切分后段数匹配
       //   策略：按 ；/; 切分；段内同样收窄到最终答案（= 右侧、末段）
+      //
+      //   关键修复（2026-08-01 22:15）：优先使用此函数（比 parseSubAnswers 更可靠），
+      //   因为数学括号如 "(12×1/3)" 会干扰 parseSubAnswers 的 regex 匹配。
+      //   段数匹配策略：优先精确匹配，其次允许段数 ≥ subCount（多余段合并到末段）。
       const splitBySemicolon = (s, subCount) => {
         if (!s || subCount < 2) return []
         const parts = s.split(/[;；]/).map(p => p.trim()).filter(p => p)
-        if (parts.length !== subCount) return []
-        return parts.map((val, i) => {
-          // 同样收窄到最终答案
+        if (parts.length < subCount) return []  // 段数不够，无法匹配
+        // 段数 ≥ subCount 时，前 subCount-1 段各取一段，剩余全部合并到末段
+        const result = []
+        for (let i = 0; i < subCount; i++) {
+          let val = i < subCount - 1 ? parts[i] : parts.slice(i).join('; ')
+          // 收窄到最终答案
           if (val.includes('=')) val = val.slice(val.lastIndexOf('=') + 1)
           val = val.split(/[,，]/).pop().trim()
-          return val ? { sub: String(i + 1), val } : null
-        }).filter(Boolean)
+          if (val) result.push({ sub: String(i + 1), val })
+        }
+        return result.filter(Boolean)
       }
 
       // 取本页代表 unit_title（供本页所有题目的 judgement.metadata 共用）
@@ -2986,11 +3005,11 @@ const processAnswerBankGrading = async (job) => {
           if (!answerRow && !q.sub_no && !isEmpty) {
             const subRows = findSubRowsForQuestion(q.question_number)
             if (subRows.length >= 1) {
-              let parsed = parseSubAnswers(studentAnswer)
-              // 2.0.1.0) 兜底：parseSubAnswers 返回空（OCR 漏掉 (1)(2) 标记）时，
-              //   按 ；/; 切分，段数与答案库 sub 数对齐
-              if (parsed.length < 1 && subRows.length >= 2) {
-                parsed = splitBySemicolon(studentAnswer, subRows.length)
+              // 优先用 splitBySemicolon（更可靠，不受数学括号干扰）
+              let parsed = splitBySemicolon(studentAnswer, subRows.length)
+              // 兜底：无 ；/; 或段数不匹配时，尝试 parseSubAnswers（有 (1)(2) 标记的场景）
+              if (parsed.length < 1) {
+                parsed = parseSubAnswers(studentAnswer)
               }
               // parsed 段数应 ≥ subRows 段数（或更宽容：≥1）
               if (parsed.length >= 1) {
