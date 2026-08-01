@@ -2942,6 +2942,23 @@ const processAnswerBankGrading = async (job) => {
         return parts
       }
 
+      // 2.0-pre3) 兜底：OCR 漏掉 (1)(2) 标记时，按 ；/; 切分，段数与答案库 sub 数对齐
+      //   例："√(12/3)=√4=2；2√(10)" → [{sub:'1', val:'2'}, {sub:'2', val:'2√(10)'}]
+      //   例："9×4=36；8-9=-1" → [{sub:'1', val:'36'}, {sub:'2', val:'-1'}]
+      //   触发条件：parseSubAnswers 返回空 + 答案库有 ≥2 个 sub + ；/; 切分后段数匹配
+      //   策略：按 ；/; 切分；段内同样收窄到最终答案（= 右侧、末段）
+      const splitBySemicolon = (s, subCount) => {
+        if (!s || subCount < 2) return []
+        const parts = s.split(/[;；]/).map(p => p.trim()).filter(p => p)
+        if (parts.length !== subCount) return []
+        return parts.map((val, i) => {
+          // 同样收窄到最终答案
+          if (val.includes('=')) val = val.slice(val.lastIndexOf('=') + 1)
+          val = val.split(/[,，]/).pop().trim()
+          return val ? { sub: String(i + 1), val } : null
+        }).filter(Boolean)
+      }
+
       // 取本页代表 unit_title（供本页所有题目的 judgement.metadata 共用）
       const pageUnitTitle = unitAnswers
         ? [...unitAnswers.values()][0]?.values().next().value?.unit_title || null
@@ -2969,7 +2986,12 @@ const processAnswerBankGrading = async (job) => {
           if (!answerRow && !q.sub_no && !isEmpty) {
             const subRows = findSubRowsForQuestion(q.question_number)
             if (subRows.length >= 1) {
-              const parsed = parseSubAnswers(studentAnswer)
+              let parsed = parseSubAnswers(studentAnswer)
+              // 2.0.1.0) 兜底：parseSubAnswers 返回空（OCR 漏掉 (1)(2) 标记）时，
+              //   按 ；/; 切分，段数与答案库 sub 数对齐
+              if (parsed.length < 1 && subRows.length >= 2) {
+                parsed = splitBySemicolon(studentAnswer, subRows.length)
+              }
               // parsed 段数应 ≥ subRows 段数（或更宽容：≥1）
               if (parsed.length >= 1) {
                 subBreakdown = []
