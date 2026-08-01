@@ -1928,7 +1928,12 @@ export function pickAnswerUnit(answersByUnit, pageTitle, questions, pageNumber, 
 function titleMatches(a, b) {
   if (!a || !b) return false
   if (a === b) return true
+  // 包含关系：仅在长度差 ≤ 2 字符时接受
+  //   修复前：minLen>=2 即通过 → pageTitle="第十九章实数"(6) 被 unitTitle="试卷⑥第十九章实数提高性测试"(14)
+  //   误中（实测选到试卷6而非试卷3|19.2）。OCR 漏识别试卷小标题只返回大章级标题时，
+  //   "包含"是子串错挂的元凶，必须用"长度差"卡掉大章级 → 完整标题的误中。
   if (a.includes(b) || b.includes(a)) {
+    if (Math.abs(a.length - b.length) > 2) return false
     return Math.min(a.length, b.length) >= 2
   }
   // 前缀/后缀匹配：仅在长度差 ≤ 2 时启用，避免"第十九章"误中"第十九章阶段练"
