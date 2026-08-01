@@ -1428,12 +1428,13 @@ router.post('/:id/fix-tanglian-ordinals', async (req, res) => {
     const lessonPart = u.lesson_code ? `|${u.lesson_code}` : ''
     const newUnitKey = `堂堂练${newOrdinal}${lessonPart}`
     const circled = CIRCLED_DIGITS[newOrdinal - 1] || `${newOrdinal}`
-    // 修正 unit_title：把"堂堂练"后任意圈序号/阿拉伯数字替换成正确圈序号
+    // 修正 unit_title：把"堂堂练"后面所有"圈序号+阿拉伯数字"杂糅串整段替换成正确圈序号
+    // 关键坑：OCR 可能把 ㊱ 错误识别成 "③③③"（3 个圈数字符），
+    // 或 "36" 前缀混在圈序号里，所以字符类要同时包含 \d 和全部圈序号，用 + 匹配整段
     let newUnitTitle = u.unit_title
     if (newUnitTitle) {
       newUnitTitle = String(newUnitTitle)
-        .replace(/^堂堂练[①②③④⑤⑥⑦⑧⑨⑩⑪⑫⑬⑭⑮⑯⑰⑱⑲⑳㉑㉒㉓㉔㉕㉖㉗㉘㉙㉚㉛㉜㉝㉞㉟]?/, `堂堂练${circled}`)
-        .replace(/^堂堂练\d{1,3}/, `堂堂练${circled}`)
+        .replace(/^堂堂练[①②③④⑤⑥⑦⑧⑨⑩⑪⑫⑬⑭⑮⑯⑰⑱⑲⑳㉑㉒㉓㉔㉕㉖㉗㉘㉙㉚㉛㉜㉝㉞㉟㊱㊲㊳㊴㊵\d]+/, `堂堂练${circled}`)
     }
     return {
       id: u.id,
