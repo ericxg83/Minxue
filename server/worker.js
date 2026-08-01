@@ -1949,6 +1949,120 @@ export function pickAnswerSection(_answersBySection, _pageTitle, _questions) {
   return null
 }
 
+// ═══════════════════════════════════════════════
+// 答案指纹匹配（OCR 题号错位兜底）
+// ═══════════════════════════════════════════════
+//
+// ⚠️ 关键洞察：答案库 resource_answers.content 字段全空（虽然表结构有但数据没填），
+// 没办法用"题目 ↔ 题目"匹配。OCR 题号错位时（OCR 读出 22 但答案库 22(1) 是另一道题），
+// 必须用"答案 ↔ 答案"做兜底。
+//
+// 策略：
+// 1) normalizeAnswerFingerprint：把答案字符串归一化（去空格、统一根式、统一分号）
+// 2) calculateAnswerSimilarity：完全相等=1.0；归一化相等=0.95；包含=0.85；数字部分相同=0.7
+// 3) searchByAnswerFingerprint：在同 unit 同 answer_type 内找最相似的题
+
+/**
+ * 答案字符串归一化（用于题号错位时的兜底匹配）
+ * - 去所有空白
+ * - 统一根式：\sqrt / 根号 → √
+ * - 去大括号（LaTeX 残留）
+ * - 中英文标点统一（，→ , ； → ;）
+ * - 大小写不敏感
+ */
+function normalizeAnswerFingerprint(s) {
+  if (s == null) return ''
+  return String(s)
+    .replace(/\s+/g, '')                          // 去所有空白
+    .replace(/\\sqrt\s*\{?/g, '√')                 // \sqrt{ → √；\sqrt → √
+    .replace(/根号/g, '√')                          // 根号 → √
+    .replace(/[{}]/g, '')                            // 去大括号
+    .replace(/，/g, ',')                              // 中文逗号 → ASCII
+    .replace(/；/g, ';')                              // 中文分号 → ASCII
+    .replace(/。/g, '.')                              // 中文句号 → .
+    .replace(/（/g, '(')                              // 中文括号 → ()
+    .replace(/）/g, ')')
+    .toLowerCase()
+    .trim()
+}
+
+/**
+ * 答案相似度评分（0-1）
+ * - 1.0：完全相等
+ * - 0.95：归一化后相等
+ * - 0.85：一方包含另一方（子串）
+ * - 0.7：数字序列相同（应对 √2 → 2√ 等表达差异）
+ * - 0：完全不匹配
+ */
+export function calculateAnswerSimilarity(studentAns, refAns) {
+  if (!studentAns || !refAns) return 0
+  const sRaw = String(studentAns).trim()
+  const rRaw = String(refAns).trim()
+  if (sRaw === rRaw) return 1.0
+  const sNorm = normalizeAnswerFingerprint(sRaw)
+  const rNorm = normalizeAnswerFingerprint(rRaw)
+  if (!sNorm || !rNorm) return 0
+  if (sNorm === rNorm) return 0.95
+  // 包含关系（短的包含在长的中）
+  if (sNorm.includes(rNorm) || rNorm.includes(sNorm)) {
+    const shorter = Math.min(sNorm.length, rNorm.length)
+    const longer = Math.max(sNorm.length, rNorm.length)
+    if (shorter >= 2 && longer / shorter <= 1.5) return 0.85
+  }
+  // 数字序列相同
+  const sNums = (sNorm.match(/-?\d+(?:\.\d+)?/g) || []).join(',')
+  const rNums = (rNorm.match(/-?\d+(?:\.\d+)?/g) || []).join(',')
+  if (sNums && sNums === rNums && sNums.length >= 2) return 0.7
+  return 0
+}
+
+/**
+ * 在同 unit 内按"答案指纹"搜索最相似的题
+ * @param {string} studentAnswer - 学生手写答案（OCR 识别）
+ * @param {string} qType - 题型（choice/fill/answer/judge）
+ * @param {Map} unitAnswers - unit 的 secMap (sectionKey → qKey → row)
+ * @param {Set} usedKeys - 已被其他题占用的 qKey（避免重复匹配）
+ * @returns {{ row, qKey, score } | null}
+ */
+export function searchByAnswerFingerprint(studentAnswer, qType, unitAnswers, usedKeys) {
+  if (!studentAnswer || !unitAnswers) return null
+  const trimmed = String(studentAnswer).trim()
+  if (!trimmed) return null
+
+  // 选择题/判断题答案太短（单字符 A/B/C/D/√/×），
+  // 答案指纹搜索容易误匹配（如学生答 C，答案库有 3 道题答案都是 C），
+  // 而且选择题题干才能确定答案，单字符匹配不能作为批改依据。
+  // 因此选择题/判断题**跳过**答案指纹兜底，避免把真错题改对。
+  const isChoiceLike = (t) => t === 'choice' || t === 'judge'
+  if (isChoiceLike(qType)) return null
+
+  let best = null
+  let bestScore = 0
+  for (const qMap of unitAnswers.values()) {
+    for (const [qKey, row] of qMap) {
+      if (usedKeys.has(qKey)) continue
+      // 答案类型必须一致（选择题不能匹配解答题，除非都是非选择题）
+      const rowType = row.answer_type || 'answer'
+      const ocrType = qType || rowType
+      if (rowType !== ocrType) {
+        // 选择题/判断题跟解答题互不匹配
+        if (isChoiceLike(rowType) !== isChoiceLike(ocrType)) continue
+      }
+      // 选择题/判断题也不参与兜底搜索（答案库端也跳过）
+      if (isChoiceLike(rowType)) continue
+      const refAns = row.answer
+      if (!refAns) continue
+      const score = calculateAnswerSimilarity(trimmed, refAns)
+      if (score > bestScore) {
+        bestScore = score
+        best = { row, qKey, score }
+      }
+    }
+  }
+  // 阈值 0.7 才采用（避免"完全不匹配"反而误用）
+  return bestScore >= 0.7 ? best : null
+}
+
 const processWorkbookGrading = async (job) => {
   const { taskId, studentId, imageUrl: rawImageUrl, worksheetId, images: jobImages } = job.data
   const startTime = Date.now()
@@ -2774,6 +2888,11 @@ const processAnswerBankGrading = async (job) => {
         ? [...unitAnswers.values()][0]?.values().next().value?.unit_title || null
         : null
 
+      // 已通过题号匹配占用的 qKey（一页内 + 历史前页），避免答案指纹搜索时重复匹配
+      const usedQKeys = new Set()
+      // 暂存"题号可疑"的题：第一轮题号匹配时答案完全不对，二轮用答案指纹兜底
+      const suspectQuestions = []
+
       for (const q of questions) {
         if (q.question_number == null) continue
 
@@ -2805,6 +2924,20 @@ const processAnswerBankGrading = async (job) => {
 
         if (isCorrect === false) wrongCount++
 
+        // 标记题号已占用（避免二轮答案指纹搜索重复占用）
+        if (answerRow) {
+          usedQKeys.add(`${Number(q.question_number)}|${q.sub_no || ''}`)
+        }
+
+        // 收集"题号可疑"的题进入二轮（OCR 题号错位兜底）：
+        // 条件：题号匹配到 row、答案非空、但答案相似度 < 0.5（基本不匹配）
+        if (answerRow && !isEmpty) {
+          const sim = calculateAnswerSimilarity(studentAnswer, refAnswer)
+          if (sim < 0.5) {
+            suspectQuestions.push({ q, studentAnswer, qType: q.question_type, currentRef: refAnswer, currentSim: sim })
+          }
+        }
+
         const questionData = {
           task_id: taskId,
           student_id: studentId,
@@ -2831,6 +2964,54 @@ const processAnswerBankGrading = async (job) => {
           matched_unit_key: matchedUnit,
           matched_unit_title: answerRow ? answerRow.unit_title : pageUnitTitle
         })
+      }
+
+      // 2.5) 答案指纹兜底（题号错位场景）
+      //   对第一轮收集的"题号可疑"题，在同 unit 内用"答案 ↔ 答案"找最相似的题
+      //   解决：OCR 错把题号 22 读出来，但答案库 22(1) 是另一道题（用户截图实例）
+      if (suspectQuestions.length > 0 && unitAnswers) {
+        let fingerHit = 0
+        for (const suspect of suspectQuestions) {
+          const found = searchByAnswerFingerprint(suspect.studentAnswer, suspect.qType, unitAnswers, usedQKeys)
+          if (!found) continue
+          // 找到更匹配的题：用 found.row 重批 savedQuestions 里的最后一条 questionData
+          // （注意：suspect 来自 questions 循环，questionData 已在 savedQuestions 末尾，qnCounter 已递增）
+          // 简化做法：定位到对应的 questionData 并原地更新
+          const idx = savedQuestions.length - suspectQuestions.length + suspectQuestions.indexOf(suspect)
+          const qd = savedQuestions[idx]
+          if (!qd) continue
+
+          const oldRef = qd.answer
+          const newRef = found.row.answer
+          const newQKey = found.qKey
+          const newScore = found.score
+
+          // 用新匹配重批
+          const judgement = judgeAnswer(suspect.studentAnswer, newRef, found.row.answer_type || suspect.qType || 'answer')
+          const newIsCorrect = judgement && typeof judgement.isCorrect !== 'undefined' ? judgement.isCorrect : null
+
+          // 还原统计：原题号匹配判"错"时 wrongCount++，新匹配判"对"时不需 wrongCount--
+          // 简化：直接重算 isCorrect 后用最终态更新 wrongCount（仅当状态从 false → true 时 --）
+          if (qd.is_correct === false && newIsCorrect === true) wrongCount--
+          if (qd.is_correct !== false && newIsCorrect === false) wrongCount++
+
+          qd.answer = newRef
+          qd.is_correct = newIsCorrect
+          qd.status = newIsCorrect === false ? 'wrong' : 'pending'
+          qd.confidence = Math.max(0.85, newScore)  // 答案指纹命中，置信度提升
+          qd.is_suspicious = true  // 标记"题号曾错位"供 PC 端展示
+          // 记录原题号 vs 答案指纹匹配的真实题号（仅 console，方便诊断）
+          const newQNo = newQKey.split('|')[0]
+          const oldQNo = String(suspect.q.question_number)
+          if (newQNo !== oldQNo) {
+            console.log(`   [AnswerBank] 答案指纹兜底: OCR题号 ${oldQNo} → 答案库题号 ${newQNo} (score=${newScore.toFixed(2)}) 学生="${suspect.studentAnswer.slice(0, 20)}" 答案库="${newRef.slice(0, 20)}"`)
+            fingerHit++
+          }
+          usedQKeys.add(newQKey)
+        }
+        if (fingerHit > 0) {
+          console.log(`   [AnswerBank] 答案指纹兜底命中: ${fingerHit}/${suspectQuestions.length} 题（OCR 题号错位已修正）`)
+        }
       }
     }
 
