@@ -2607,7 +2607,10 @@ const processWorkbookGrading = async (job) => {
 // (unitKey → sectionKey → qNo|subNo → row) + pickAnswerUnit 选单元，按 (unit, section, qNo) 精确定位。
 
 const processAnswerBankGrading = async (job) => {
-  const { taskId, studentId, imageUrl: rawImageUrl, originalName, resourceId } = job.data
+  const { taskId, studentId, imageUrl: rawImageUrl, originalName, resourceId: _resourceId } = job.data
+  // resource_id 仅在夜间解析答案库时被设置；普通 workbook 任务只有 worksheet_id。
+  // 降级兜底：resourceId 为空时回退到 worksheetId（两者对答案库批改管线等价）
+  const resourceId = _resourceId || job.data.worksheetId || null
   const startTime = Date.now()
 
   const resolveImageUrl = (raw) => {
@@ -3266,7 +3269,7 @@ export const processTask = async (job) => {
         job.data.taskType = rows[0].task_type || 'general'
         if (!job.data.worksheetId) job.data.worksheetId = rows[0].worksheet_id || null
         if (!job.data.generatedExamId) job.data.generatedExamId = rows[0].generated_exam_id || null
-        if (!job.data.resourceId) job.data.resourceId = rows[0].resource_id || null
+        if (!job.data.resourceId) job.data.resourceId = rows[0].resource_id || rows[0].worksheet_id || null
       }
     } catch (e) {
       console.error(`⚠️ 路由字段回读失败 taskId=${taskId}:`, e.message)
