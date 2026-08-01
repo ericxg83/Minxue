@@ -1377,4 +1377,120 @@ router.post('/:id/fix-exam-units', async (req, res) => {
   }
 })
 
+// ── 修复『堂堂练 ordinal 错位』─
+// 背景：OCR 识别圈序号 ≥⑨ 时频繁漏识别，回退为前一个成功 ordinal，导致
+//       unit_key="堂堂练2|19.2(6)" 这类与"堂堂练2|19.1(2)"严重撞 key，
+//       进而批改时把别单元的答案（如 2×10^16）挂到"绝对值"题下。
+//       lesson_code（19.1(1)、19.2(6) 等）OCR 一直认对，所以按
+//       lesson_code 在本 worksheet 内的 chapter/section/lesson 顺序重新派 ordinal。
+// 安全性：答案通过 unit_id (UUID) 关联，改 unit_key / ordinal 不破坏 answer 关联；
+//        唯一约束 UNIQUE(resource_id, unit_key) 失败时单条回滚、整体继续，方便定位。
+// 调用：POST /api/worksheets/:id/fix-tanglian-ordinals   body: { dryRun?: boolean }
+router.post('/:id/fix-tanglian-ordinals', async (req, res) => {
+  const worksheetId = req.params.id
+  const dryRun = req.body?.dryRun !== false // 默认 dryRun=true 防误改，body 显式传 false 才落库
+  const CIRCLED_DIGITS = '①②③④⑤⑥⑦⑧⑨⑩⑪⑫⑬⑭⑮⑯⑰⑱⑲⑳㉑㉒㉓㉔㉕㉖㉗㉘㉙㉚㉛㉜㉝㉞㉟㊱㊲㊳㊴㊵'
+
+  // 1) 拉所有 堂堂练 unit（按 unit_seq）
+  const { rows: units } = await query(
+    `SELECT id, unit_key, unit_title, lesson_code, ordinal, unit_seq
+     FROM resource_units
+     WHERE resource_id = $1
+       AND unit_key LIKE '堂堂练%'
+     ORDER BY unit_seq ASC NULLS LAST, created_at ASC`,
+    [worksheetId]
+  )
+  if (units.length === 0) {
+    return res.json({ success: true, dryRun, changed: 0, message: '该 worksheet 无堂堂练单元' })
+  }
+
+  // 2) 把 lesson_code 解析成可比较的 (chapter, section, lesson, sub) 数字
+  //    19.1(1) → [19, 1, 1, 0]
+  //    21.1    → [21, 1, 0, 0]
+  //    22.3(2) → [22, 3, 2, 0]
+  //    没 lesson_code 的按 (999, 999, 999, seq) 排到末尾
+  const parseLesson = (s) => {
+    if (!s) return [999, 999, 999, 0]
+    const m = s.match(/^(\d+)\.(\d+)(?:\((\d+)\))?$/)
+    if (!m) return [998, 998, 998, 0]
+    return [parseInt(m[1], 10), parseInt(m[2], 10), parseInt(m[3] || '0', 10), 0]
+  }
+  const sorted = [...units].sort((a, b) => {
+    const ka = parseLesson(a.lesson_code)
+    const kb = parseLesson(b.lesson_code)
+    for (let i = 0; i < ka.length; i++) if (ka[i] !== kb[i]) return ka[i] - kb[i]
+    return (a.unit_seq || 0) - (b.unit_seq || 0)
+  })
+
+  // 3) 派 ordinal = 1..N，重新计算 unit_key / unit_title
+  const proposed = sorted.map((u, idx) => {
+    const newOrdinal = idx + 1
+    const lessonPart = u.lesson_code ? `|${u.lesson_code}` : ''
+    const newUnitKey = `堂堂练${newOrdinal}${lessonPart}`
+    const circled = CIRCLED_DIGITS[newOrdinal - 1] || `${newOrdinal}`
+    // 修正 unit_title：把"堂堂练"后任意圈序号/阿拉伯数字替换成正确圈序号
+    let newUnitTitle = u.unit_title
+    if (newUnitTitle) {
+      newUnitTitle = String(newUnitTitle)
+        .replace(/^堂堂练[①②③④⑤⑥⑦⑧⑨⑩⑪⑫⑬⑭⑮⑯⑰⑱⑲⑳㉑㉒㉓㉔㉕㉖㉗㉘㉙㉚㉛㉜㉝㉞㉟]?/, `堂堂练${circled}`)
+        .replace(/^堂堂练\d{1,3}/, `堂堂练${circled}`)
+    }
+    return {
+      id: u.id,
+      old_unit_key: u.unit_key,
+      new_unit_key: newUnitKey,
+      old_ordinal: u.ordinal,
+      new_ordinal: newOrdinal,
+      old_unit_title: u.unit_title,
+      new_unit_title: newUnitTitle,
+      changed: u.unit_key !== newUnitKey || u.ordinal !== newOrdinal || u.unit_title !== newUnitTitle,
+    }
+  })
+
+  // 4) dryRun 时直接返回预览，不落库
+  if (dryRun) {
+    const changedCount = proposed.filter(p => p.changed).length
+    return res.json({
+      success: true,
+      dryRun: true,
+      total: proposed.length,
+      changed: changedCount,
+      preview: proposed,
+    })
+  }
+
+  // 5) 落库：单条 UPDATE，唯一约束冲突会报错并跳过该条
+  const applied = []
+  const errors = []
+  for (const p of proposed) {
+    if (!p.changed) { applied.push({ ...p, applied: true, skipped: 'no_change' }); continue }
+    try {
+      await query(
+        `UPDATE resource_units
+         SET unit_key = $1, ordinal = $2, unit_title = $3
+         WHERE id = $4`,
+        [p.new_unit_key, p.new_ordinal, p.new_unit_title, p.id]
+      )
+      applied.push({ ...p, applied: true })
+    } catch (e) {
+      errors.push({ id: p.id, old_unit_key: p.old_unit_key, new_unit_key: p.new_unit_key, error: e.message })
+    }
+  }
+
+  return res.json({
+    success: errors.length === 0,
+    dryRun: false,
+    total: proposed.length,
+    changed: applied.filter(a => a.applied && !a.skipped).length,
+    unchanged: applied.filter(a => a.skipped === 'no_change').length,
+    errors,
+    applied: applied.map(a => ({
+      id: a.id, old_unit_key: a.old_unit_key, new_unit_key: a.new_unit_key,
+      old_ordinal: a.old_ordinal, new_ordinal: a.new_ordinal,
+      old_unit_title: a.old_unit_title, new_unit_title: a.new_unit_title,
+      applied: a.applied, skipped: a.skipped || null,
+    })),
+  })
+})
+
 export default router

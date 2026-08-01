@@ -7,6 +7,10 @@
           <el-icon><Tools /></el-icon>
           修复试卷单元
         </el-button>
+        <el-button type="danger" plain @click="showOrdinalFixDialog = true">
+          <el-icon><Tools /></el-icon>
+          修复堂堂练 ordinal
+        </el-button>
         <el-button type="primary" @click="showCreateDialog = true">
           <el-icon><Plus /></el-icon>
           新建练习册
@@ -278,6 +282,74 @@
       <div v-if="fixLogs.length" style="margin-top:12px;">
         <div style="font-weight:600;margin-bottom:4px;">执行日志：</div>
         <pre class="fix-log">{{ fixLogs.join('\n') }}</pre>
+      </div>
+    </el-dialog>
+
+    <!-- 修复堂堂练 ordinal 对话框 -->
+    <el-dialog v-model="showOrdinalFixDialog" title="修复堂堂练 ordinal 错位" width="900px" :close-on-click-modal="false">
+      <el-alert
+        type="info" :closable="false" show-icon
+        title="适用场景：OCR 识别『堂堂练⑨』及之后圈序号漏识别、回退成前一个 ordinal，导致整本练习册答案挂错单元（如把『2×10^16』科学记数法答案挂到『绝对值』题下）。本工具按 lesson_code 顺序重派 ordinal 和 unit_key。"
+        style="margin-bottom:12px;"
+      />
+
+      <div style="display:flex;gap:8px;align-items:center;margin-bottom:12px;">
+        <span style="font-size:13px;">练习册：</span>
+        <el-select v-model="ordinalFixWorksheetId" placeholder="选择练习册" style="width:340px;" filterable>
+          <el-option
+            v-for="w in worksheets"
+            :key="w.id"
+            :label="`${w.name}（${w.id.slice(0, 8)}）`"
+            :value="w.id"
+          />
+        </el-select>
+        <el-button type="primary" :disabled="!ordinalFixWorksheetId || ordinalFixLoading" @click="runOrdinalPreview" :loading="ordinalFixLoading">
+          扫描预览
+        </el-button>
+        <el-button type="success" :disabled="!ordinalFixPreview.length || ordinalFixApplying" @click="applyOrdinalFix" :loading="ordinalFixApplying">
+          确认修复 ({{ ordinalFixPreview.filter(p => p.changed).length }})
+        </el-button>
+      </div>
+
+      <el-table
+        :data="ordinalFixPreview"
+        v-loading="ordinalFixLoading"
+        max-height="420"
+        empty-text="先选练习册，点击『扫描预览』"
+        border
+        size="small"
+      >
+        <el-table-column prop="old_unit_key" label="原 unit_key" min-width="180" />
+        <el-table-column prop="new_unit_key" label="新 unit_key" min-width="180">
+          <template #default="{ row }">
+            <span :style="{ color: row.changed ? '#67c23a' : '#909399', fontWeight: row.changed ? 600 : 400 }">
+              {{ row.new_unit_key }}
+            </span>
+          </template>
+        </el-table-column>
+        <el-table-column label="ordinal" width="100" align="center">
+          <template #default="{ row }">
+            <span :style="{ color: row.old_ordinal !== row.new_ordinal ? '#e6a23c' : '#909399' }">
+              {{ row.old_ordinal }} → {{ row.new_ordinal }}
+            </span>
+          </template>
+        </el-table-column>
+        <el-table-column label="状态" width="80" align="center">
+          <template #default="{ row }">
+            <el-tag v-if="row.changed" type="warning" size="small">改</el-tag>
+            <el-tag v-else type="info" size="small">不变</el-tag>
+          </template>
+        </el-table-column>
+      </el-table>
+
+      <div v-if="ordinalFixResult" style="margin-top:12px;">
+        <el-alert
+          :type="ordinalFixResult.success ? 'success' : 'error'"
+          :closable="false"
+          show-icon
+          :title="`执行完成：共 ${ordinalFixResult.total} 个单元，改 ${ordinalFixResult.changed} 个，不变 ${ordinalFixResult.unchanged || 0} 个${ordinalFixResult.errors?.length ? '，错误 ' + ordinalFixResult.errors.length + ' 个' : ''}`"
+        />
+        <pre v-if="ordinalFixResult.errors?.length" class="fix-log" style="margin-top:8px;">{{ ordinalFixResult.errors.map(e => `❌ ${e.old_unit_key} → ${e.new_unit_key} : ${e.error}`).join('\n') }}</pre>
       </div>
     </el-dialog>
   </div>
@@ -867,6 +939,86 @@ const confirmBatchFix = async () => {
     ElMessage.error('启动失败: ' + e.message)
     appendLog(`❌ 启动失败: ${e.message}`)
   }
+}
+
+// ────────── 修复『堂堂练 ordinal 错位』功能 ──────────
+const showOrdinalFixDialog = ref(false)
+const ordinalFixWorksheetId = ref(null)
+const ordinalFixPreview = ref([])
+const ordinalFixLoading = ref(false)
+const ordinalFixApplying = ref(false)
+const ordinalFixResult = ref(null)
+
+const ordinalFixApi = {
+  preview: (worksheetId) => fetch(`/api/worksheets/${worksheetId}/fix-tanglian-ordinals`, {
+    method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ dryRun: true })
+  }).then(r => r.json()),
+  apply: (worksheetId) => fetch(`/api/worksheets/${worksheetId}/fix-tanglian-ordinals`, {
+    method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ dryRun: false })
+  }).then(r => r.json()),
+}
+
+const runOrdinalPreview = async () => {
+  if (!ordinalFixWorksheetId.value) return
+  ordinalFixLoading.value = true
+  ordinalFixPreview.value = []
+  ordinalFixResult.value = null
+  try {
+    const r = await ordinalFixApi.preview(ordinalFixWorksheetId.value)
+    if (!r.success) throw new Error(r.error || '扫描失败')
+    ordinalFixPreview.value = r.preview || []
+    const changed = ordinalFixPreview.value.filter(p => p.changed).length
+    if (r.total === 0) {
+      ElMessage.info('该练习册没有『堂堂练』单元')
+    } else if (changed === 0) {
+      ElMessage.success(`扫描完成：${r.total} 个单元，无需修改`)
+    } else {
+      ElMessage.warning(`扫描完成：${r.total} 个单元，${changed} 个需修改`)
+    }
+  } catch (e) {
+    ElMessage.error('扫描失败: ' + e.message)
+  } finally {
+    ordinalFixLoading.value = false
+  }
+}
+
+const applyOrdinalFix = async () => {
+  if (!ordinalFixWorksheetId.value) return
+  const changed = ordinalFixPreview.value.filter(p => p.changed).length
+  if (changed === 0) {
+    ElMessage.info('没有需要修改的单元')
+    return
+  }
+  try {
+    await ElMessageBox.confirm(
+      `将修改《${worksheetName(ordinalFixWorksheetId.value)}》的 ${changed} 个『堂堂练』单元的 ordinal 和 unit_key。\n\n` +
+      `• 答案通过 unit_id (UUID) 关联，不会被破坏\n` +
+      `• 唯一约束冲突的单条会跳过，其它继续\n\n确认执行？`,
+      '修复确认',
+      { confirmButtonText: '执行修复', cancelButtonText: '取消', type: 'warning' }
+    )
+  } catch { return }
+  ordinalFixApplying.value = true
+  try {
+    const r = await ordinalFixApi.apply(ordinalFixWorksheetId.value)
+    ordinalFixResult.value = r
+    if (r.success) {
+      ElMessage.success(`修复完成：改了 ${r.changed} 个单元`)
+      // 重新扫描看实际结果
+      await runOrdinalPreview()
+    } else {
+      ElMessage.error(`修复完成但有 ${r.errors?.length || 0} 条错误，查看下方详情`)
+    }
+  } catch (e) {
+    ElMessage.error('修复失败: ' + e.message)
+  } finally {
+    ordinalFixApplying.value = false
+  }
+}
+
+const worksheetName = (id) => {
+  const w = worksheets.value.find(x => x.id === id)
+  return w?.name || id
 }
 </script>
 
