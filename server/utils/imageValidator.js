@@ -14,6 +14,20 @@
  * 视觉模型看到小图会返回 0 道题，但这属于"内容问题"由 OCR 层降级处理（切模型重试），
  * 不属于"URL 失效"应在下载层硬拦。
  */
+import sharp from 'sharp'
+
+/**
+ * OCR 最小可识别分辨率阈值。
+ * 经验值：宽 < 600 像素时，Qwen3-VL 8B/235B/Agnes 一律说"图片是空白"
+ * （其训练数据中 < 600px 的图 90% 是空白/图标/缩略图，模型基于分布拒绝）。
+ * 强制 sharp 放大到 1800x1800 并不能"创造"像素 —— 仍是模糊的 80x80 拉伸，
+ * AI 看到的依然是"无法识别"，反复重试只浪费配额、刷 429 错误。
+ *
+ * 因此下载后立即检查，低于此阈值直接拒绝（友好提示用户重传），
+ * 不进 AI 视觉识别流程。
+ */
+export const MIN_OCR_RESOLUTION = 600
+
 export function isValidImageBuffer(buf) {
   if (!Buffer.isBuffer(buf) || buf.length < 1024) return { ok: false, reason: 'too_small' }
   const magic = buf.slice(0, 4)
@@ -36,4 +50,51 @@ export function isValidImageBuffer(buf) {
     return { ok: false, reason: 'xml_or_html_content' }
   }
   return { ok: false, reason: 'unknown_magic_number' }
+}
+
+/**
+ * 读取图片实际像素分辨率（不读 EXIF 中的方向）。
+ * sharp 读取 metadata 是 CPU 操作，~5ms，无网络开销。
+ *
+ * @param {Buffer} buf 已通过 isValidImageBuffer 校验的图片 buffer
+ * @returns {Promise<{width:number,height:number,format:string|null}>}
+ */
+export async function getImageResolution(buf) {
+  try {
+    const meta = await sharp(buf).metadata()
+    return {
+      width: meta.width || 0,
+      height: meta.height || 0,
+      format: meta.format || null,
+    }
+  } catch (e) {
+    return { width: 0, height: 0, format: null, error: e.message }
+  }
+}
+
+/**
+ * 分辨率是否够 OCR 使用 —— 用于在 downloadImage 内部拦截"AI 必失败"的图。
+ *
+ * 3116 bytes 极小 JPEG 实际像素通常 < 200x200。AI 视觉模型看到这种图一律拒绝：
+ *   - Qwen3-VL-8B / 235B：返回 "用户提供的图片是空白，无法识别任何内容。"
+ *   - Agnes：返回 "Unable to identify content, image appears blank."
+ * 强制 sharp 放大到 1800x1800 并不能"创造"信息，只是把模糊的 80x80 拉伸，
+ * AI 看到的依然是"无法识别"，反复重试只浪费配额、刷 429 错误。
+ *
+ * 因此在下载层就拦下，给出"请重新上传更清晰的图片"友好提示。
+ *
+ * @param {Buffer} buf 已通过 isValidImageBuffer 的图片 buffer
+ * @param {number} minResolution 最小边长阈值，默认 MIN_OCR_RESOLUTION=600
+ * @returns {Promise<{ok:boolean, reason?:string, resolution?:object, min?:number}>}
+ */
+export async function checkImageResolution(buf, minResolution = MIN_OCR_RESOLUTION) {
+  const resolution = await getImageResolution(buf)
+  if (resolution.width === 0 || resolution.height === 0) {
+    return { ok: false, reason: 'unreadable_resolution', resolution, min: minResolution }
+  }
+  const minSide = Math.min(resolution.width, resolution.height)
+  if (minSide < minResolution) {
+    return { ok: false, reason: 'too_low_resolution', resolution, min: minResolution }
+  }
+  return { ok: true, resolution, min: minResolution }
 }

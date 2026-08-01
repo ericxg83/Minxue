@@ -20,7 +20,7 @@ import { judgeAnswer } from './services/judgeService.js'
 import { normalizeSectionName } from './services/answerParseService.js'
 import { classifyQuestionLocally } from './utils/localTagger.js'
 import { NON_RETRYABLE_ERROR_PATTERNS } from './pendingTaskRecovery.js'
-import { isValidImageBuffer } from './utils/imageValidator.js'
+import { isValidImageBuffer, checkImageResolution } from './utils/imageValidator.js'
 
 // ── 多模态切题引擎：几何图处理 ──
 // 使用 Sharp 进行裁剪和图像增强（替代浏览器端的 Canvas/OpenCV）
@@ -606,6 +606,19 @@ const downloadImage = async (imageUrl) => {
       const head = buf.slice(0, 80).toString('utf8').replace(/[^\x20-\x7E]/g, '?')
       console.error(`   ❌ 下载内容非图片: ${buf.length} bytes, 头80字符="${head}", reason=${validation.reason}`)
       throw new Error(`下载图片失败: 返回内容不是图片（${buf.length} bytes, ${validation.reason}），URL 可能已失效或 OSS 返回了错误页`)
+    }
+
+    // ── 分辨率校验：拦截"AI 必失败"的极小图。
+    //   3116 bytes 的合法 JPEG 实际像素通常只有 ~80x80，sharp 放大到 1800x1800
+    //   并不能"创造"信息（只是把模糊块拉伸），AI 视觉模型（8B/235B/Agnes）看到
+    //   后一律说"图片是空白 / Unable to identify"，反复重试只浪费配额 + 刷 429。
+    //   在下载层就拦下，给出"请重新上传更清晰的图片"友好提示，
+    //   让 NON_RETRYABLE 黑名单把它永久标记为不可重试。
+    const resCheck = await checkImageResolution(buf)
+    if (!resCheck.ok) {
+      const { width, height } = resCheck.resolution || {}
+      console.error(`   ❌ 图片分辨率过低: ${width}×${height} < ${resCheck.min}, 文件大小 ${buf.length} bytes`)
+      throw new Error(`图片分辨率过低（${width}×${height}），请重新上传更清晰的图片（建议宽度≥1200像素，文件≥100KB）`)
     }
 
     return buf
@@ -1980,6 +1993,14 @@ const processWorkbookGrading = async (job) => {
   let allPageTitles = []
   let pageDataList = []   // 逐页数据：{ pageTitle, imageUrl, questions[] }
   let ocrErrors = 0
+  // 记录最近一次 AI 原始响应（去空白/截断 200 字），0 道题 throw 时拼到 error message，
+  // 让 NON_RETRYABLE_ERROR_PATTERNS 能匹配"图片是空白"等 AI 拒绝模板。
+  let _lastOcrAiHint = null
+  const setLastAiHint = (content) => {
+    if (content && typeof content === 'string') {
+      _lastOcrAiHint = content.substring(0, 200).replace(/\s+/g, ' ').trim()
+    }
+  }
 
   for (let pageIdx = 0; pageIdx < imageList.length; pageIdx++) {
     const { image_url: url } = imageList[pageIdx]
@@ -1997,9 +2018,12 @@ const processWorkbookGrading = async (job) => {
 
     // 纠偏 + 压缩
     // ModelScope Qwen3-VL 限制 2048x2048：长边缩放到 1800 留余量，避免报 400
+    //   ⚠️ 不设 withoutEnlargement：3116 bytes 这类手机缩略图实际只有 800x600，
+    //   AI 看到原尺寸会胡说"图片是空白"（8B/235B 训练数据都是 1024+ 的图）。
+    //   强制放大到 1800x1800 保留视觉信息，AI 才能正确 OCR。
     const compressedBuffer = await sharp(imageBuffer)
       .rotate()
-      .resize(1800, 1800, { fit: 'inside', withoutEnlargement: true })
+      .resize(1800, 1800, { fit: 'inside' })
       .jpeg({ quality: 85 })
       .toBuffer()
 
@@ -2045,7 +2069,13 @@ const processWorkbookGrading = async (job) => {
         }
       }
     } catch (e) {
+      // AI 拒绝返回 JSON 时（如 8B/235B 胡说"用户提供的图片是空白"），
+      // 把原始响应的前 200 字附到日志 + 保存到 _lastOcrAiHint，
+      // 0 道题 throw 时拼到 error message，让 NON_RETRYABLE_ERROR_PATTERNS 匹配。
+      const aiHint = String(content || '').substring(0, 200).replace(/\s+/g, ' ').trim()
+      setLastAiHint(content)
       console.error(`   [Workbook] 第 ${pageIdx + 1} 页JSON解析失败:`, e.message)
+      if (aiHint) console.error(`   AI 原始响应(前200字): ${aiHint}`)
       ocrErrors++
       continue
     }
@@ -2102,7 +2132,7 @@ const processWorkbookGrading = async (job) => {
         }
         const compressedBuffer = await sharp(imageBuffer)
           .rotate()
-          .resize(1800, 1800, { fit: 'inside', withoutEnlargement: true })
+          .resize(1800, 1800, { fit: 'inside' })
           .jpeg({ quality: 85 })
           .toBuffer()
         const { content } = await callVisionCompletion({
@@ -2127,7 +2157,11 @@ const processWorkbookGrading = async (job) => {
             pageTitle = parsed.page_title || null
             questions = Array.isArray(parsed.questions) ? parsed.questions : []
           }
-        } catch {
+        } catch (e) {
+          setLastAiHint(content)
+          const aiHint = String(content || '').substring(0, 200).replace(/\s+/g, ' ').trim()
+          console.error(`   [Workbook] 重试第 ${pageIdx + 1} 页JSON解析失败:`, e.message)
+          if (aiHint) console.error(`   重试 AI 原始响应(前200字): ${aiHint}`)
           ocrErrorsRetry++
           continue
         }
@@ -2153,8 +2187,12 @@ const processWorkbookGrading = async (job) => {
   }
 
   // 重试后仍 0 道题 → 标记为 AI_EMPTY 进入黑名单，PendingTaskRecovery 不再反复入队
+  //   同时把最近一次 AI 原始响应（去空白/截断 200 字）附在 error message 末尾，
+  //   让 NON_RETRYABLE_ERROR_PATTERNS 能匹配"图片是空白"等 AI 拒绝模板。
   if (allQuestions.length === 0) {
-    const errorDetail = ocrErrors > 0 ? `${ocrErrors} 页识别失败` : '所有页面识别结果为空'
+    const baseError = ocrErrors > 0 ? `${ocrErrors} 页识别失败` : '所有页面识别结果为空'
+    const lastAiHint = _lastOcrAiHint ? `；AI 提示: "${_lastOcrAiHint}"` : ''
+    const errorDetail = baseError + lastAiHint
     await updateTaskStatus(taskId, TASK_STATUS.FAILED, {
       error: errorDetail, errorType: 'AI_EMPTY'
     })

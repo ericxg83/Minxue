@@ -44,6 +44,12 @@ export const NON_RETRYABLE_ERROR_PATTERNS = [
   /页识别失败/,            // workbook N 页全部下载/识别失败（"1 页识别失败" / "3 页识别失败"）
   /OCR 未识别到任何题目/,   // answer bank 流程 0 道题
   /AI_EMPTY/,             // errorType 字段也会写 AI_EMPTY
+  /图片是空白/,            // 8B/235B 对小图胡说"用户提供的图片是空白"，即使强制放大后仍拒绝
+  /图片为空白/,
+  /图片分辨率过低/,        // 下载层拦截的极小图（< 600px 任意一边），AI 必失败，重试无意义
+  /unable to identify/i,  // Qwen3-VL 英文 prompt 的拒绝模板
+  /cannot identify/i,
+  /no text detected/i,     // 视觉模型看不到文字
 ]
 
 /**
