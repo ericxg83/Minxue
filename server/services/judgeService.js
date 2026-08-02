@@ -3,6 +3,19 @@
  * Extracted from worker.js so both the worker and the rejudge endpoint can share them.
  */
 
+/**
+ * 收窄过程型答案到最终结果，避免 "=√4=2" 与 "2" 直接比对失败。
+ * 优先级：最右 = 右侧 → 分号末段 → 逗号末段。
+ */
+function narrowToFinalAnswer(s) {
+  if (s == null) return ''
+  let str = String(s).trim()
+  if (str.includes('=')) str = str.slice(str.lastIndexOf('=') + 1).trim()
+  else if (str.includes(';') || str.includes('；')) str = str.split(/[;；]/).pop().trim()
+  else if (str.includes(',') || str.includes('，')) str = str.split(/[,，]/).pop().trim()
+  return str
+}
+
 function normalizeAnswer(str) {
   if (str === null || str === undefined) return ''
   let s = String(str)
@@ -174,7 +187,9 @@ export function judgeAnswer(studentAnswer, referenceAnswer, questionType) {
   }
 
   // Fill / answer / other: normalized comparison with tolerance
-  const normStudent = normalizeAnswer(studentAnswer)
+  // 先收窄过程型答案（如 "=√4=2" → "2"），再与参考答案比对
+  const narrowedStudent = narrowToFinalAnswer(studentAnswer)
+  const normStudent = normalizeAnswer(narrowedStudent)
   const normRef = normalizeAnswer(referenceAnswer)
 
   // String-level match
@@ -184,7 +199,7 @@ export function judgeAnswer(studentAnswer, referenceAnswer, questionType) {
 
   // String mismatch — try mathematical equivalence
   // (handles cases like "2x-4" vs "2(x-2)" which are the same but differ textually)
-  if (isMathEquivalent(studentAnswer, referenceAnswer)) {
+  if (isMathEquivalent(narrowedStudent, referenceAnswer)) {
     return { isCorrect: true, unrecognized: false }
   }
 
