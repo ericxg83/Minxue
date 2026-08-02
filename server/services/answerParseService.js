@@ -447,12 +447,105 @@ export function parseAnswerText(text, lowConfidence = [], initialState = null, p
     }
   }
 
+  // 题号连续性校验：检测答案页 OCR 错位（如试卷类小标题漏识别导致跨单元题号错位）
+  // 异常项带 kind='question_seq_anomaly' 写入 lowConfidence，调用方可按 kind 区分处理
+  validateQuestionNumberSequence(results, lowConfidence)
+
   return {
     answers: results,
     // pageRanges 也透传：跨批 OCR 时，下一批首行的"上一页遗留单元"关闭逻辑靠它接力
     lastState: { unit: currentUnit, group: currentGroup, pageRanges },
     lastUnit: currentUnit,
     lastSection: currentUnit?.unit_title || null,
+  }
+}
+
+/**
+ * 校验同一 (unit, group) 内的题号连续性，检测答案页 OCR 错位。
+ *
+ * 根因场景：AI 漏识别"试卷① 19.1..."这种单元标题行，下面所有题号错挂到上一个父单元，
+ *         或把两个单元的题号混读，导致同 (unit, group) 桶内出现反向/跳号/重置。
+ *
+ * 异常判定（按 (unit_key, section) 分桶，每桶按解析顺序遍历）：
+ *  - reverse: cur.qn < prev.qn → 题号反向（极不可能正常出现，强烈提示跨单元错位）
+ *  - gap: cur.qn - prev.qn > 5 → 跳号过大（OCR 漏读 1-5 个题号）
+ *  - reset: cur.qn === 1 && prev.qn > 1 → 同 section 内题号重置到 1（可能漏识别大题组标题）
+ *
+ * 异常项 push 到 lowConfidence（带 kind: 'question_seq_anomaly'），调用方按 kind 区分处理：
+ *   - 普通 lowConfidence（无 kind）→ 仍按 50% 阈值判断"低置信度偏多"
+ *   - kind === 'question_seq_anomaly' → 单独汇总到"答案页疑似错位"warning，PC 端醒目展示
+ */
+function validateQuestionNumberSequence(answers, lowConfidence) {
+  // 按 (unit_key, section) 分桶；桶内按解析顺序保留首次出现位置（dedupe 后顺序）
+  const buckets = new Map()  // key: `${unit_key || '<null>'}||${section || '<null>'}` → Array<{qn, idx, unit, section}>
+  for (let i = 0; i < answers.length; i++) {
+    const a = answers[i]
+    if (a == null || a.question_no == null) continue
+    const k = `${a.unit_key || '<null>'}||${a.section || '<null>'}`
+    if (!buckets.has(k)) buckets.set(k, [])
+    buckets.get(k).push({
+      qn: a.question_no,
+      idx: i,
+      answer: a.answer,
+      unit: a.unit_key || null,
+      section: a.section || null,
+    })
+  }
+
+  for (const list of buckets.values()) {
+    if (list.length < 2) continue
+    for (let i = 1; i < list.length; i++) {
+      const prev = list[i - 1]
+      const cur = list[i]
+      const diff = cur.qn - prev.qn
+
+      // 判定顺序：reset → reverse → gap
+      //   - reset（cur.qn === 1 && prev.qn > 1）最常见于"漏识别大题组/单元标题"，
+      //     把它放第一优先级避免被反向归类为 reverse。
+      //   - reverse（cur.qn < prev.qn 且 cur.qn !== 1）才算真正的题号反向——
+      //     例如 5 → 1（AI 把试卷②的题 1 错挂到试卷① 5 之后）。
+      //   - gap（diff > 5）只能是"数字上行"才报。
+      if (cur.qn === 1 && prev.qn > 1) {
+        lowConfidence.push({
+          kind: 'question_seq_anomaly',
+          reason: 'reset',
+          question_no: cur.qn,
+          prev_question_no: prev.qn,
+          unit_key: cur.unit,
+          section: cur.section,
+          message: `答案页OCR可能漏识别大题组/单元标题：第${cur.qn}题与第${prev.qn}题在同 section（"${cur.section || '?'}"）内题号重置到 1`,
+        })
+        continue
+      }
+
+      if (cur.qn < prev.qn) {
+        // 真正的题号反向：cur.qn !== 1（1 已被 reset 截胡）
+        lowConfidence.push({
+          kind: 'question_seq_anomaly',
+          reason: 'reverse',
+          question_no: cur.qn,
+          prev_question_no: prev.qn,
+          unit_key: cur.unit,
+          section: cur.section,
+          message: `答案页OCR可能错位：第${cur.qn}题出现在第${prev.qn}题之后（同单元"${cur.unit || '?'}"${cur.section ? ' ' + cur.section : ''}）`,
+        })
+        continue
+      }
+
+      if (diff > 5) {
+        // 跳号过大：可能漏读 1-5 个题号（OCR 噪声或密集排版）
+        lowConfidence.push({
+          kind: 'question_seq_anomaly',
+          reason: 'gap',
+          question_no: cur.qn,
+          prev_question_no: prev.qn,
+          gap: diff - 1,
+          unit_key: cur.unit,
+          section: cur.section,
+          message: `答案页OCR可能漏读：第${prev.qn}题与第${cur.qn}题之间缺 ${diff - 1} 题（unit="${cur.unit || '?'}"）`,
+        })
+      }
+    }
   }
 }
 
