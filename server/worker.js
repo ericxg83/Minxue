@@ -17,7 +17,7 @@ import { cropAndUploadQuestionRegion } from './utils/cropAndUpload.js'
 import { generateTextFingerprint, generatePHash, PARSER_VERSION, TEXT_SIMILARITY_THRESHOLD } from './utils/questionFingerprint.js'
 import { uploadFilesWithRetry } from './services/uploadRetryManager.js'
 import { judgeAnswer } from './services/judgeService.js'
-import { normalizeSectionName } from './services/answerParseService.js'
+import { normalizeSectionName, splitSubAnswers } from './services/answerParseService.js'
 import { classifyQuestionLocally } from './utils/localTagger.js'
 import { NON_RETRYABLE_ERROR_PATTERNS } from './pendingTaskRecovery.js'
 import { isValidImageBuffer, checkImageResolution } from './utils/imageValidator.js'
@@ -3046,6 +3046,49 @@ const processAnswerBankGrading = async (job) => {
                   // 合成 answerRow（用第 1 个 sub 的元数据 + 合并 ref），主循环后续按聚合处理
                   answerRow = { ...subRows[0].row, answer: refParts.join('; ') }
                   q._subBreakdown = subBreakdown
+                }
+              }
+            }
+          }
+          // 2.0.2) 关键修复：主路径 (qNo, subNo) 查不到 + q.sub_no 非空 → fallback 到整题 (qNo, '')
+          //   场景：答案库整题合并存储为 21|'' = "(1)2 (2)2√10"，但 OCR 输出 sub_no='1' / sub_no='2' 两行
+          //   (例如 AI 视觉模型把 (1)(2) 主动拆成 2 条 sub 题目入库)。
+          //   旧版 lookupRow(21, '1') 查 21|1 找不到 → answer 为空，右侧答案显示空。
+          //   修复后：整题 row.answer 用 splitSubAnswers 拆 sub 段，按当前 q.sub_no 命中对应段。
+          //   同时 student_answer 可能不含 (1)(2) 标记（OCR 已拆开），直接整段比对。
+          if (!answerRow && q.sub_no && !isEmpty) {
+            const wholeRow = lookupRow(q.question_number, '')
+            if (wholeRow && wholeRow.answer) {
+              // 整题 row.answer 含 sub 标记？尝试按段匹配
+              const subSegs = splitSubAnswers(wholeRow.answer)
+              if (subSegs && subSegs.length >= 2) {
+                const seg = subSegs.find(s => String(s.sub_no) === String(q.sub_no))
+                if (seg) {
+                  // 找到对应 sub 段：用整段 student_answer 比对 seg.answer
+                  const sim = calculateAnswerSimilarity(studentAnswer, seg.answer)
+                  let correct = null
+                  if (sim >= 0.7) correct = true
+                  else if (sim < 0.5) correct = false
+                  // 0.5 ≤ sim < 0.7 → null（边界情况待人工）
+                  subBreakdown = [{
+                    sub: String(q.sub_no),
+                    row: { ...wholeRow, answer: seg.answer },
+                    studentPart: studentAnswer,
+                    refPart: seg.answer,
+                    correct,
+                    sim
+                  }]
+                  // answerRow 用 seg.answer（让 answer 字段显示子段答案而非整题合并），便于右侧展示
+                  answerRow = { ...wholeRow, answer: seg.answer }
+                  q._subBreakdown = subBreakdown
+                }
+              }
+              // 整题 row.answer 不含 sub 标记（如纯选择题"21. C"）：兜底整段比对
+              if (!answerRow) {
+                const sim = calculateAnswerSimilarity(studentAnswer, wholeRow.answer)
+                if (sim >= 0.5) {
+                  // 整题 row.answer 短或与 student_answer 相似时，按整题采用
+                  answerRow = wholeRow
                 }
               }
             }

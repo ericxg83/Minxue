@@ -157,16 +157,19 @@ export function judgeAnswer(studentAnswer, referenceAnswer, questionType) {
   }
 
   if (questionType === 'choice') {
-    // Choice: exact letter match, case-insensitive
-    const normStudent = String(studentAnswer).trim().toUpperCase()
-    const normRef = String(referenceAnswer).trim().toUpperCase()
-    return { isCorrect: normStudent === normRef, unrecognized: false }
+    // Choice: 严格字母匹配，case-insensitive，并去掉包裹的括号/全角括号
+    //   学生答题 OCR 常把选项识别为 "(C)"/"（C）"/" C "(带括号)，参考答案常是裸 "C"。
+    //   之前未去括号 → "(C)" !== "C" → 选对但判错（用户截图实例：题 17 学生选 C 判错）。
+    //   修复后：(C) / （C） / C / c 都归一为 "C" 严格相等。
+    const cleanChoice = (s) => String(s || '').trim().toUpperCase().replace(/^[（(]|[)）]$/g, '')
+    return { isCorrect: cleanChoice(studentAnswer) === cleanChoice(referenceAnswer), unrecognized: false }
   }
 
   if (questionType === 'judge') {
-    // Judge: normalize both to T/F and compare
-    const normStudent = normalizeJudgeAnswer(studentAnswer)
-    const normRef = normalizeJudgeAnswer(referenceAnswer)
+    // Judge: 同样去括号/全角括号（"（√）" / "(×)" → "√" / "×"），再走 T/F 归一化
+    const cleanJudge = (s) => String(s || '').trim().replace(/^[（(]|[)）]$/g, '')
+    const normStudent = normalizeJudgeAnswer(cleanJudge(studentAnswer))
+    const normRef = normalizeJudgeAnswer(cleanJudge(referenceAnswer))
     return { isCorrect: normStudent === normRef, unrecognized: false }
   }
 

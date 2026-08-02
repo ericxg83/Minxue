@@ -240,27 +240,66 @@ export function splitInlineAnswers(line) {
 }
 
 /**
- * 子题拆分："(1)7/2 (2)4/3 (3)0.9 (4)0.8" → [{sub_no:'1',answer:'7/2'}, ...]
+ * 子题拆分：把答案字符串拆成多空子题，支持 3 种 sub 标记格式：
+ *   1) 圆括号 (1)(2)(3) / 全角括号 （1）（2）（3） —— 主流
+ *   2) 圈数字 ①②③ —— 用户截图实例：答案页"21. ①√12/3 ②2√10"格式
+ *   3) 阿拉伯数字 + 句号（不实现，会误伤"3.14"等小数）
  *
  * 数学答案里括号极多（"(x+1)(x-2)"），误拆代价高，故要求：
- * 必须从 (1) 开始、开头位置靠前、序号严格 +1、每段非空且不超长。任一不满足则整体不拆。
+ * 必须从 (1) / ① 开始、开头位置靠前、序号严格 +1、每段非空且不超长。
+ * 任一不满足则整体不拆（返回 null，由 caller 走整题合并路径）。
+ *
+ * 模式选择：圆括号优先，圈数字作 fallback（避免与圆括号混读出错）。
  */
 export function splitSubAnswers(ans) {
-  const text = String(ans || '')
-  const re = /[（(]\s*(\d{1,2})\s*[）)]/g
-  const marks = []
-  let m
-  while ((m = re.exec(text)) !== null) {
-    marks.push({ no: parseInt(m[1], 10), start: m.index, end: re.lastIndex })
-  }
-  if (marks.length < 2 || marks[0].no !== 1 || marks[0].start > 2) return null
+  const text = String(ans || '').trim()
+  if (!text) return null
 
+  // 模式 1: 圆括号 / 全角括号
+  const re1 = /[（(]\s*(\d{1,2})\s*[）)]/g
+  const marks1 = []
+  let m
+  while ((m = re1.exec(text)) !== null) {
+    marks1.push({ no: parseInt(m[1], 10), start: m.index, end: re1.lastIndex })
+  }
+  let picked = pickStrictSequence(marks1)
+  if (picked) return buildSegments(text, picked)
+
+  // 模式 2: 圈数字 ①②③...⑳（fallback）
+  //   用途：答案页"21. ① 过程 ② 过程"格式，AI 视觉模型常把子题号读成圈数字而非 (1)。
+  //   圆括号没找到 ≥2 个 mark 时再尝试，避免与圆括号混读误拆。
+  const re2 = new RegExp(`([${CIRCLED_DIGITS}])`, 'g')
+  const marks2 = []
+  while ((m = re2.exec(text)) !== null) {
+    const ord = CIRCLED_DIGITS.indexOf(m[1]) + 1
+    if (ord > 0) marks2.push({ no: ord, start: m.index, end: re2.lastIndex })
+  }
+  picked = pickStrictSequence(marks2)
+  if (picked) return buildSegments(text, picked)
+
+  return null
+}
+
+/**
+ * 严格子题序列选择：
+ *   - 至少 2 个 mark
+ *   - 第一个 mark 必须是 1
+ *   - 第一个 mark 开头位置 ≤ 2（避免误把答案中间的数字当 sub 起点）
+ *   - 后续 mark 严格 +1 递增
+ * 满足则返回按顺序的 mark 数组，否则 null。
+ */
+function pickStrictSequence(marks) {
+  if (!marks || marks.length < 2) return null
+  if (marks[0].no !== 1) return null
+  if (marks[0].start > 2) return null
   const picked = [marks[0]]
   for (const k of marks) {
     if (k.no === picked[picked.length - 1].no + 1) picked.push(k)
   }
-  if (picked.length < 2) return null
+  return picked.length >= 2 ? picked : null
+}
 
+function buildSegments(text, picked) {
   const segs = picked.map((k, i) => ({
     sub_no: String(k.no),
     answer: text.slice(k.end, i + 1 < picked.length ? picked[i + 1].start : text.length).trim(),
