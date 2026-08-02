@@ -280,6 +280,70 @@ export function splitSubAnswers(ans) {
   return null
 }
 
+// 子题标记提取：全角/半角圆括号 + 1-2 位数字，如 (1)、（2）
+const OCR_SUB_MARKER_RE = /[（(]\s*(\d{1,2})\s*[)）]/g
+
+/**
+ * 从文本中提取子题分段。
+ * 只处理包含 ≥2 个连续子题标记的情况；否则返回 null。
+ * 返回 [{ sub, text }]，text 已包含题干公共前缀（如“计算：”）。
+ */
+function extractSubSegments(text) {
+  if (!text) return null
+  const markers = []
+  let m
+  while ((m = OCR_SUB_MARKER_RE.exec(text)) !== null) {
+    markers.push({ sub: String(parseInt(m[1], 10)), start: m.index, end: OCR_SUB_MARKER_RE.lastIndex })
+  }
+  if (markers.length < 2) return null
+  const stem = text.slice(0, markers[0].start).trim()
+  return markers.map((mk, i) => {
+    const seg = text.slice(mk.end, i + 1 < markers.length ? markers[i + 1].start : text.length).trim()
+    return { sub: mk.sub, text: stem ? `${stem} ${seg}` : seg }
+  })
+}
+
+/**
+ * 拆分 OCR 识别出的题目：把含多小问的大题拆成独立 question 对象。
+ * 例如：q21 含 (1)(2) 两小问 → 两条记录，分别带 sub_no='1'、sub_no='2'。
+ * 只在学生答案或题干中检测到 ≥2 个子题标记时才拆分，避免误拆普通括号。
+ */
+export function splitOcrQuestionsBySubNo(questions) {
+  if (!Array.isArray(questions)) return questions
+  const out = []
+  for (const q of questions) {
+    if (!q || q.question_number == null) {
+      out.push(q)
+      continue
+    }
+    // AI 已经输出 sub_no，直接保留
+    if (q.sub_no != null && String(q.sub_no).trim() !== '') {
+      out.push(q)
+      continue
+    }
+    const contentSegs = extractSubSegments(String(q.content || ''))
+    const answerSegs = extractSubSegments(String(q.student_answer || ''))
+    // 以学生答案中的子题标记为主（能确定哪条答案对应哪小问）
+    // 题干中也有标记时两边对齐；都没有则不拆
+    if ((!answerSegs || answerSegs.length < 2) && (!contentSegs || contentSegs.length < 2)) {
+      out.push(q)
+      continue
+    }
+    const baseSegs = answerSegs && answerSegs.length >= 2 ? answerSegs : contentSegs
+    for (const seg of baseSegs) {
+      const newQ = { ...q, sub_no: seg.sub }
+      const cSeg = contentSegs ? contentSegs.find(c => c.sub === seg.sub) : null
+      const aSeg = answerSegs ? answerSegs.find(a => a.sub === seg.sub) : null
+      if (cSeg) newQ.content = cSeg.text
+      else if (contentSegs) newQ.content = `${q.content || ''} (${seg.sub})`.trim()
+      if (aSeg) newQ.student_answer = aSeg.text
+      // 否则保持原 student_answer（学生答案未分子问时整体保留）
+      out.push(newQ)
+    }
+  }
+  return out
+}
+
 /**
  * 严格子题序列选择：
  *   - 至少 2 个 mark

@@ -17,7 +17,7 @@ import { cropAndUploadQuestionRegion } from './utils/cropAndUpload.js'
 import { generateTextFingerprint, generatePHash, PARSER_VERSION, TEXT_SIMILARITY_THRESHOLD } from './utils/questionFingerprint.js'
 import { uploadFilesWithRetry } from './services/uploadRetryManager.js'
 import { judgeAnswer } from './services/judgeService.js'
-import { normalizeSectionName, splitSubAnswers } from './services/answerParseService.js'
+import { normalizeSectionName, splitSubAnswers, splitOcrQuestionsBySubNo } from './services/answerParseService.js'
 import { classifyQuestionLocally } from './utils/localTagger.js'
 import { NON_RETRYABLE_ERROR_PATTERNS } from './pendingTaskRecovery.js'
 import { isValidImageBuffer, checkImageResolution } from './utils/imageValidator.js'
@@ -2174,6 +2174,7 @@ const processWorkbookGrading = async (job) => {
   "questions": [
     {
       "question_number": 1,
+      "sub_no": "1",  // 如果该题包含多个小问（如 21.(1)、21.(2)），填写小问号 1/2/3...；否则填 null
       "content": "题目原文（印刷体题干，含题号描述，如'与数轴上的点一一对应的是'，选择题可写'下列各式中正确的是'）",
       "student_answer": "学生手写的答案文本，没有则填 null",
       "question_type": "choice",  // choice | fill | judge | answer
@@ -2206,6 +2207,7 @@ const processWorkbookGrading = async (job) => {
   content 缺失会导致章节无法反推。
 
 - question_number 从印刷体题号读取，必须是数字
+- 如果一道大题包含多个小问（如 21.(1)、21.(2)、22.(1)、22.(2)），必须将每个小问拆成独立的 question 对象输出：question_number 填大题号，sub_no 填小问号，content 只写该小问的题干，student_answer 只写该小问的手写答案。不要把多个小问合并成一道题
 - student_answer 只提取学生手写的内容，如果没有手写迹，填 null；判断题的 √/× 也要提取
 - block_coordinates 是该题在图片中的整体外接矩形框（含题号、题干、学生作答区），
   用【归一化 0-1000 坐标系】：x/y 为矩形左上角，width/height 为宽高，
@@ -2312,8 +2314,6 @@ const processWorkbookGrading = async (job) => {
       continue
     }
 
-    console.log(`   [Workbook] 第 ${pageIdx + 1} 页: 识别到 ${questions.length} 道题, 标题="${pageTitle}"`)
-
     // 标记每道题来自哪页图片（image_url）及页码（page_number），保存时写入。
     // page_number 用于前端分卷排序 / 卷N标注 / 中央页图同步——
     // 缺失会导致多卷任务全部塌缩到"第1页"。用上传顺序页号，兜底 pageIdx+1。
@@ -2322,6 +2322,11 @@ const processWorkbookGrading = async (job) => {
       q._page_image_url = url
       q._page_number = pageNo
     }
+
+    // 把 AI 合并输出的多小问大题拆成独立题目（如 q21(1)、q21(2)）
+    questions = splitOcrQuestionsBySubNo(questions)
+
+    console.log(`   [Workbook] 第 ${pageIdx + 1} 页: 识别到 ${questions.length} 道题, 标题="${pageTitle}"`)
 
     allQuestions.push(...questions)
     if (pageTitle) allPageTitles.push(pageTitle)
@@ -2402,6 +2407,7 @@ const processWorkbookGrading = async (job) => {
           q._page_image_url = url
           q._page_number = pageNo
         }
+        questions = splitOcrQuestionsBySubNo(questions)
         allQuestionsRetry.push(...questions)
         pageDataListRetry.push({ pageTitle, imageUrl: url, questions, pageNumber: pageNo, chapterHint: null })
         console.log(`   [Workbook] 重试第 ${pageIdx + 1} 页: 识别到 ${questions.length} 道题`)
@@ -2760,6 +2766,7 @@ const processAnswerBankGrading = async (job) => {
   "questions": [
     {
       "question_number": 1,
+      "sub_no": "1",  // 如果该题包含多个小问（如 21.(1)、21.(2)），填写小问号 1/2/3...；否则填 null
       "content": "题目原文（印刷体题干）",
       "student_answer": "学生手写的答案文本，没有则填 null",
       "question_type": "choice",  // choice | fill | judge | answer
@@ -2794,6 +2801,7 @@ const processAnswerBankGrading = async (job) => {
 - question_number 从印刷体题号读取，必须是数字。
   注意：每个试卷单元（如"试卷①"）的题号都从 1 重新开始编号，请按当前页所在单元的局部题号输出。
   试卷小标题出现在本页时（如"试卷① 19.1..."），该单元下的题号即从 1 开始。
+- 如果一道大题包含多个小问（如 21.(1)、21.(2)、22.(1)、22.(2)），必须将每个小问拆成独立的 question 对象输出：question_number 填大题号，sub_no 填小问号，content 只写该小问的题干，student_answer 只写该小问的手写答案。不要把多个小问合并成一道题。
 
 - student_answer 只提取学生手写的内容，如果没有手写迹，填 null；判断题的 √/× 也要提取
 
@@ -2869,13 +2877,16 @@ const processAnswerBankGrading = async (job) => {
         continue
       }
 
-      console.log(`   [AnswerBank] 第 ${pageNumber} 页: 识别到 ${questions.length} 道题, 标题="${pageTitle}"`)
-
       // 标记每道题来自哪页图片
       for (const q of questions) {
         q._page_number = pageNumber
         q._page_image_url = pages[pageIdx]?.imageUrl || null
       }
+
+      // 把 AI 合并输出的多小问大题拆成独立题目（如 q21(1)、q21(2)）
+      questions = splitOcrQuestionsBySubNo(questions)
+
+      console.log(`   [AnswerBank] 第 ${pageNumber} 页: 识别到 ${questions.length} 道题, 标题="${pageTitle}"`)
 
       totalQuestions += questions.length
       pageDataList.push({
