@@ -2001,7 +2001,14 @@ function normalizeAnswerFingerprint(s) {
  */
 export function calculateAnswerSimilarity(studentAns, refAns) {
   if (!studentAns || !refAns) return 0
-  const sRaw = String(studentAns).trim()
+  // ★ 收窄 student 到最终答案：过程型 "√(12/3)=√4=2" → "2"；"8-9=-1" → "-1"
+  //   避免过程字符串与参考答案（结果）相似度为 0 被判错。
+  //   收窄是幂等的：已经是最终答案的 "2" 不含 = ；， 收窄后仍为 "2"，无副作用。
+  //   refAns 不收窄（参考答案保持原样，可能含等号表达式）。
+  let sRaw = String(studentAns).trim()
+  if (sRaw.includes('=')) sRaw = sRaw.slice(sRaw.lastIndexOf('=') + 1).trim()
+  if (sRaw.includes(';') || sRaw.includes('；')) sRaw = sRaw.split(/[;；]/).pop().trim()
+  if (sRaw.includes(',') || sRaw.includes('，')) sRaw = sRaw.split(/[,，]/).pop().trim()
   const rRaw = String(refAns).trim()
   if (sRaw === rRaw) return 1.0
   const sNorm = normalizeAnswerFingerprint(sRaw)
@@ -2908,6 +2915,25 @@ const processAnswerBankGrading = async (job) => {
         return out
       }
 
+      // 2.0-pre1a) 列出答案库中某题号的所有行（含整题 + 所有 sub），排除已占用的
+      //   用于 OCR 把多空题拆成多条记录时，按出现顺序或相似度匹配
+      const findAllRowsForQuestion = (qNo) => {
+        if (!unitAnswers) return []
+        const out = []
+        for (const qMap of unitAnswers.values()) {
+          for (const [qKey, row] of qMap) {
+            const [qnStr, subStr] = qKey.split('|')
+            if (Number(qnStr) === Number(qNo)) {
+              const qKeyFull = `${Number(qNo)}|${subStr || ''}`
+              if (!usedQKeys.has(qKeyFull)) {
+                out.push({ sub: subStr || '', row, qKey: qKeyFull })
+              }
+            }
+          }
+        }
+        return out
+      }
+
       // 2.0-pre2) 从 student_answer 字符串中解析 (1) X (2) Y 标记，返回 [{sub, val}]
       //   支持中英文括号、半角/全角数字、空格；段内允许含括号（如"(3√2-2)²"）
       //   例："(1) 2 (2) 2√10" → [{sub:'1', val:'2'}, {sub:'2', val:'2√10'}]
@@ -2991,7 +3017,19 @@ const processAnswerBankGrading = async (job) => {
       // 暂存"题号可疑"的题：第一轮题号匹配时答案完全不对，二轮用答案指纹兜底
       const suspectQuestions = []
 
-      for (const q of questions) {
+      // 2.0-pre3a) 预扫描：检测 OCR 把多空题拆成多条同题号记录的情况
+      //   例：q21 出现 2 次 → [{idx:0, occ:1}, {idx:5, occ:2}]
+      //   用于 fallback 阶段按出现顺序映射到答案库 sub 行
+      const qNoIndicesMap = new Map()  // qNo → [{idx, occ}]
+      for (let qi = 0; qi < questions.length; qi++) {
+        if (questions[qi].question_number == null) continue
+        const qNo = Number(questions[qi].question_number)
+        if (!qNoIndicesMap.has(qNo)) qNoIndicesMap.set(qNo, [])
+        qNoIndicesMap.get(qNo).push(qi)
+      }
+
+      for (let qi = 0; qi < questions.length; qi++) {
+        const q = questions[qi]
         if (q.question_number == null) continue
 
         const studentAnswer = (q.student_answer || '').toString().trim()
@@ -3001,18 +3039,57 @@ const processAnswerBankGrading = async (job) => {
         let subBreakdown = null  // [{sub, row, studentPart, refPart, correct}]，合并 sub 时填充
         if (!noUnit) {
           answerRow = lookupRow(q.question_number, q.sub_no)
+
+          // 2.0.0) ★ 核心修复：OCR 把多空题拆成多条同题号记录 → 按出现顺序映射 sub ★
+          //   场景：OCR 输出两条 q21（student="=√4" 和 "2√(5÷0.5)"），答案库有 21|1="2" 21|2="2√10"
+          //   旧版：每条 q21 的 student_answer 只含一个 sub 答案，splitBySemicolon 拆不出来 → ref 空
+          //   修复：第 1 条 q21 → lookupRow(21, '1')，第 2 条 → lookupRow(21, '2')
+          //   这是"答案对不上"的根因——OCR 拆题但后端不知道该映射哪个 sub
+          if (!answerRow && !isEmpty) {
+            const qNo = Number(q.question_number)
+            const indices = qNoIndicesMap.get(qNo) || []
+            if (indices.length >= 2) {
+              // 多条同题号 → 计算当前是第几条（出现顺序）
+              const occ = indices.indexOf(qi) + 1
+              // 按出现顺序查 sub 行
+              const subRow = lookupRow(qNo, String(occ))
+              if (subRow) {
+                answerRow = subRow
+                // 用相似度判分（学生答案可能是过程"=√4"，参考答案是结果"2"）
+                const sim = calculateAnswerSimilarity(studentAnswer, subRow.answer)
+                let correct = null
+                if (sim >= 0.7) correct = true
+                else if (sim < 0.5) correct = false
+                subBreakdown = [{
+                  sub: String(occ),
+                  row: subRow,
+                  studentPart: studentAnswer,
+                  refPart: subRow.answer,
+                  correct,
+                  sim
+                }]
+                q._subBreakdown = subBreakdown
+                console.log(`   [AnswerBank] OCR拆分映射 q${qNo} occ=${occ} → sub(${occ}) student="${studentAnswer.slice(0, 30)}" ref="${(subRow.answer || '').slice(0, 30)}" sim=${sim.toFixed(2)}`)
+              }
+            }
+          }
+
           // 2.0.1) sub_no 缺失 + 答案库有 sub 划分 + OCR 合并输出 → 自动拆分按段匹配
           //   例：OCR q21 student="(1) 2 (2) 2√10"，sub_no 缺失，答案库有 21|1="2" 21|2="2√10"
           //   修复前：lookupRow(21, null) 查 "21|" → 找不到 → answer 为空
           //   修复后：拆 student_answer → 段1查 21|1="2"，段2查 21|2="2√10" → 合并
+          //   ★ 优先级：在 2.0.0b 相似度兜底之前执行，避免兜底提前消费答案行 ★
           if (!answerRow && !q.sub_no && !isEmpty) {
             const subRows = findSubRowsForQuestion(q.question_number)
             if (subRows.length >= 1) {
-              // 优先用 splitBySemicolon（更可靠，不受数学括号干扰）
-              let parsed = splitBySemicolon(studentAnswer, subRows.length)
-              // 兜底：无 ；/; 或段数不匹配时，尝试 parseSubAnswers（有 (1)(2) 标记的场景）
+              // 优先用 parseSubAnswers（有 (1)(2) 标记时更准确，能按标记正确拆分）
+              //   例："（1）√14；2 （2）2√10；√10" → sub(1)="2" sub(2)="√10" ✅
+              //   splitBySemicolon 按 ；切分会把标记和答案拆开 → sub(1)="（1）√14" ❌
+              let parsed = parseSubAnswers(studentAnswer)
+              // 兜底：无 (1)(2) 标记或数学括号干扰时，用 splitBySemicolon（按 ；切分）
+              //   例："√(12×1/3)=√4=2；2√(5/0.5)=2√10" → parseSubAnswers 返回 [] → splitBySemicolon → sub(1)="2" sub(2)="2√10" ✅
               if (parsed.length < 1) {
-                parsed = parseSubAnswers(studentAnswer)
+                parsed = splitBySemicolon(studentAnswer, subRows.length)
               }
               // parsed 段数应 ≥ subRows 段数（或更宽容：≥1）
               if (parsed.length >= 1) {
@@ -3047,6 +3124,50 @@ const processAnswerBankGrading = async (job) => {
                   answerRow = { ...subRows[0].row, answer: refParts.join('; ') }
                   q._subBreakdown = subBreakdown
                 }
+              }
+            }
+          }
+
+          // 2.0.0b) 答案相似度兜底：主路径 + 拆分映射 + sub 拆分都查不到 → 按 qNo 找最相似行
+          //   覆盖：OCR 拆分但出现顺序与 sub_no 不一致、答案库只有整题行等边界场景
+          //   ★ 在 2.0.1 之后执行，避免提前消费答案行 ★
+          if (!answerRow && !isEmpty) {
+            const allRows = findAllRowsForQuestion(q.question_number)
+            if (allRows.length >= 1) {
+              let bestRow = null
+              let bestSim = 0
+              let bestSub = ''
+              let bestQKey = ''
+              for (const { sub, row, qKey } of allRows) {
+                const sim = calculateAnswerSimilarity(studentAnswer, row.answer)
+                if (sim > bestSim) {
+                  bestSim = sim
+                  bestRow = row
+                  bestSub = sub
+                  bestQKey = qKey
+                }
+              }
+              // 相似度 ≥ 0.3 才采用（避免完全不相关的答案被误匹配）
+              if (bestRow && bestSim >= 0.3) {
+                answerRow = bestRow
+                // 占用该 qKey，避免同题号的其他记录重复匹配到同一行
+                usedQKeys.add(bestQKey)
+                // 如果命中的是 sub 行，设 subBreakdown
+                if (bestSub) {
+                  let correct = null
+                  if (bestSim >= 0.7) correct = true
+                  else if (bestSim < 0.5) correct = false
+                  subBreakdown = [{
+                    sub: bestSub,
+                    row: bestRow,
+                    studentPart: studentAnswer,
+                    refPart: bestRow.answer,
+                    correct,
+                    sim: bestSim
+                  }]
+                  q._subBreakdown = subBreakdown
+                }
+                console.log(`   [AnswerBank] 相似度兜底 q${q.question_number} → sub(${bestSub || 'whole'}) sim=${bestSim.toFixed(2)} student="${studentAnswer.slice(0, 30)}" ref="${(bestRow.answer || '').slice(0, 30)}"`)
               }
             }
           }

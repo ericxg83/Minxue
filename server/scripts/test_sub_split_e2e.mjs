@@ -170,11 +170,11 @@ const run = async () => {
     const subRows = findSubRowsForQuestion(tc.question_number)
     console.log(`  答案库 sub: ${subRows.map(s => s.sub + '=' + s.row.answer).join(', ')}`)
 
-    // 优先用 splitBySemicolon（更可靠，不受数学括号干扰）
-    let parsed = splitBySemicolon(tc.student_answer, subRows.length)
-    // 兜底：无 ；/; 或段数不匹配时，尝试 parseSubAnswers（有 (1)(2) 标记的场景）
+    // 优先用 parseSubAnswers（有 (1)(2) 标记时更准确，能按标记正确拆分）
+    let parsed = parseSubAnswers(tc.student_answer)
+    // 兜底：无 (1)(2) 标记或数学括号干扰时，用 splitBySemicolon（按 ；切分）
     if (parsed.length < 1) {
-      parsed = parseSubAnswers(tc.student_answer)
+      parsed = splitBySemicolon(tc.student_answer, subRows.length)
     }
 
     // 验证拆分结果
