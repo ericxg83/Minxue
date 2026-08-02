@@ -305,6 +305,12 @@ export const updateTaskStatus = async (taskId, status, result = null) => {
   })
 }
 
+export const retryTask = async (taskId) => {
+  const data = await apiRequest(`/tasks/${taskId}/retry`, { method: 'POST' })
+  clearCache(`tasks_cache_${taskId}`)
+  return data
+}
+
 const parseQuestionFields = (q) => {
   const parse = (val, fallback) => {
     if (!val) return fallback

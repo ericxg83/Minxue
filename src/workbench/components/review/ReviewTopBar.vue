@@ -71,6 +71,11 @@
           <span class="chip-count">{{ store.aiStateStats.processing }}</span>
         </span>
       </div>
+      <el-button size="default" type="warning"
+        :disabled="!store.currentTask" :loading="retryLoading"
+        @click="handleRetryTask">
+        ⟳ 重新处理
+      </el-button>
       <el-button size="default" type="success"
         :disabled="store.reviewProgress.confirmed !== store.reviewProgress.total || store.reviewProgress.total === 0"
         @click="handleComplete">
@@ -128,14 +133,16 @@
 
 <script setup>
 import { ref, computed, watch } from 'vue'
-import { ElMessage } from 'element-plus'
+import { ElMessage, ElMessageBox } from 'element-plus'
 import { useReviewStore } from '../../stores/reviewStore'
+import { retryTask } from '../../../services/apiService'
 import StatusIcon from './StatusIcon.vue'
 
 const store = useReviewStore()
 
 const selectedStudentId = ref('')
 const selectedTaskId = ref('')
+const retryLoading = ref(false)
 
 // 当 store 中 currentStudent 变化时同步下拉框（immediate：remount 时 store 为单例，
 // 需立即回填本地选择，避免下拉显示空「选择学生」）
@@ -222,6 +229,33 @@ const handleAddToBook = async (item) => {
     await store.addQuestionToBook(item.questionId)
   } finally {
     item.adding = false
+  }
+}
+
+// 重新处理当前试卷
+const handleRetryTask = async () => {
+  if (!store.currentTask?.id) return
+  try {
+    await ElMessageBox.confirm(
+      '重新处理会清空当前识别结果并重新走 OCR + 批改流程，是否继续？',
+      '确认重新处理',
+      { confirmButtonText: '确认', cancelButtonText: '取消', type: 'warning' }
+    )
+  } catch {
+    return
+  }
+  retryLoading.value = true
+  try {
+    await retryTask(store.currentTask.id)
+    ElMessage.success('已重新提交处理队列，请稍后刷新或重新选择该试卷')
+    if (store.currentStudent?.id) {
+      await store.loadStudentTasks(store.currentStudent.id)
+    }
+  } catch (err) {
+    console.error('重新处理失败:', err)
+    ElMessage.error('重新处理失败: ' + (err.message || '未知错误'))
+  } finally {
+    retryLoading.value = false
   }
 }
 </script>
