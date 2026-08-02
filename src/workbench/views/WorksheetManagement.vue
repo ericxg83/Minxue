@@ -11,6 +11,10 @@
           <el-icon><Tools /></el-icon>
           修复堂堂练 ordinal
         </el-button>
+        <el-button type="info" plain @click="showPageUnitDialog = true">
+          <el-icon><Tools /></el-icon>
+          手动修复任务单页
+        </el-button>
         <el-button type="primary" @click="showCreateDialog = true">
           <el-icon><Plus /></el-icon>
           新建练习册
@@ -285,6 +289,40 @@
       </div>
     </el-dialog>
 
+    <!-- 手动修复任务单页单元对话框 -->
+    <el-dialog v-model="showPageUnitDialog" title="手动修复任务单页单元归属" width="520px" :close-on-click-modal="false">
+      <el-alert
+        type="info" :closable="false" show-icon
+        title="适用场景：单张/无标题页面被 OCR 错挂到其他单元，老师明确知道该页应归属哪个单元时，可手动指定并重跑该页批改。"
+        style="margin-bottom: 16px;"
+      />
+      <el-form :model="pageUnitForm" label-width="110px">
+        <el-form-item label="任务 ID">
+          <el-input v-model="pageUnitForm.taskId" placeholder="如：a1b2c3d4..." />
+        </el-form-item>
+        <el-form-item label="页码">
+          <el-input-number v-model="pageUnitForm.pageNumber" :min="1" :precision="0" style="width: 100%;" />
+        </el-form-item>
+        <el-form-item label="目标单元">
+          <el-input v-model="pageUnitForm.unitKey" placeholder="如：试卷3|19.2 或 堂堂练①|19.1(1)" />
+        </el-form-item>
+      </el-form>
+      <div v-if="pageUnitResult" style="margin-top: 12px;">
+        <el-alert
+          :type="pageUnitResult.success ? 'success' : 'error'"
+          :closable="false"
+          show-icon
+          :title="pageUnitResult.success
+            ? `修复完成：更新 ${pageUnitResult.updated} 题，跳过 ${pageUnitResult.skipped} 题`
+            : `修复失败：${pageUnitResult.error || '未知错误'}`"
+        />
+      </div>
+      <template #footer>
+        <el-button @click="showPageUnitDialog = false">取消</el-button>
+        <el-button type="primary" @click="handlePageUnitFix" :loading="pageUnitLoading">开始修复</el-button>
+      </template>
+    </el-dialog>
+
     <!-- 修复堂堂练 ordinal 对话框 -->
     <el-dialog v-model="showOrdinalFixDialog" title="修复堂堂练 ordinal 错位" width="900px" :close-on-click-modal="false">
       <el-alert
@@ -369,6 +407,7 @@ import {
   uploadImages,
   getWorksheet,
   uploadQuestionPdf,
+  regradeTaskPageWithUnit,
 } from '../../services/apiService.js'
 
 const router = useRouter()
@@ -948,6 +987,36 @@ const ordinalFixPreview = ref([])
 const ordinalFixLoading = ref(false)
 const ordinalFixApplying = ref(false)
 const ordinalFixResult = ref(null)
+
+// ────────── 手动修复任务单页单元归属 ──────────
+const showPageUnitDialog = ref(false)
+const pageUnitForm = ref({ taskId: '', pageNumber: 1, unitKey: '' })
+const pageUnitLoading = ref(false)
+const pageUnitResult = ref(null)
+
+const handlePageUnitFix = async () => {
+  const { taskId, pageNumber, unitKey } = pageUnitForm.value
+  if (!taskId.trim() || !unitKey.trim()) {
+    ElMessage.warning('请填写任务 ID 和目标单元')
+    return
+  }
+  pageUnitLoading.value = true
+  pageUnitResult.value = null
+  try {
+    const r = await regradeTaskPageWithUnit(taskId.trim(), pageNumber, unitKey.trim())
+    pageUnitResult.value = r
+    if (r.success) {
+      ElMessage.success(`修复完成：更新 ${r.updated} 题`)
+    } else {
+      ElMessage.error(`修复失败：${r.error || '未知错误'}`)
+    }
+  } catch (e) {
+    pageUnitResult.value = { success: false, error: e.message }
+    ElMessage.error('请求失败: ' + e.message)
+  } finally {
+    pageUnitLoading.value = false
+  }
+}
 
 const ordinalFixApi = {
   preview: (worksheetId) => fetch(`/api/worksheets/${worksheetId}/fix-tanglian-ordinals`, {

@@ -2075,6 +2075,57 @@ export function searchByAnswerFingerprint(studentAnswer, qType, unitAnswers, use
   return bestScore >= 0.7 ? best : null
 }
 
+/**
+ * 用学生答案反推最可能的 unit（无标题/无章节提示/无继承时兜底）
+ *   对每道非选择/判断题，跨所有 unit 搜索最相似的答案行，
+ *   统计每个 unit 的命中题数和总相似度，取最佳。
+ *   选择题/判断题不参与（答案太短，易误匹配）。
+ * @param {Array} questions - OCR 识别出的题目列表（含 student_answer, question_type）
+ * @param {Map} answersByUnit - unitKey → secMap
+ * @returns {{ unitKey, hits, totalScore } | null}
+ */
+export function searchUnitByStudentAnswers(questions, answersByUnit) {
+  if (!questions || questions.length === 0 || !answersByUnit || answersByUnit.size === 0) return null
+  const isChoiceLike = (t) => t === 'choice' || t === 'judge'
+
+  const unitScores = new Map() // unitKey → { hits, totalScore }
+
+  for (const q of questions) {
+    const studentAnswer = (q.student_answer || '').toString().trim()
+    if (!studentAnswer) continue
+    const qType = q.question_type || 'answer'
+    if (isChoiceLike(qType)) continue
+
+    for (const [unitKey, unitAnswers] of answersByUnit) {
+      const found = searchByAnswerFingerprint(studentAnswer, qType, unitAnswers, new Set())
+      if (found && found.score >= 0.7) {
+        if (!unitScores.has(unitKey)) unitScores.set(unitKey, { hits: 0, totalScore: 0 })
+        const s = unitScores.get(unitKey)
+        s.hits++
+        s.totalScore += found.score
+      }
+    }
+  }
+
+  if (unitScores.size === 0) return null
+
+  let bestUnit = null
+  let bestTotalScore = 0
+  for (const [unitKey, score] of unitScores) {
+    if (score.totalScore > bestTotalScore) {
+      bestTotalScore = score.totalScore
+      bestUnit = unitKey
+    }
+  }
+
+  const best = unitScores.get(bestUnit)
+  // 采用条件：≥2 道题命中，或总相似度 ≥ 1.5（至少 2 道较强匹配）
+  if (best.hits >= 2 || best.totalScore >= 1.5) {
+    return { unitKey: bestUnit, hits: best.hits, totalScore: best.totalScore }
+  }
+  return null
+}
+
 const processWorkbookGrading = async (job) => {
   const { taskId, studentId, imageUrl: rawImageUrl, worksheetId, images: jobImages } = job.data
   const startTime = Date.now()
@@ -2905,7 +2956,17 @@ const processAnswerBankGrading = async (job) => {
         }
       }
 
-      // 更新上一页单元（只有正常匹配/成功继承才传播）
+      // 1b) 学生答案反推单元：无标题/无章节提示/继承也失败时，用学生答案跨单元搜索兜底
+      //   覆盖单张无标题页面场景；选择题/判断题不参与（答案太短易误匹配）
+      if (!matchedUnit && questions.length > 0) {
+        const inferred = searchUnitByStudentAnswers(questions, answersByUnit)
+        if (inferred) {
+          matchedUnit = inferred.unitKey
+          console.log(`   [AnswerBank] 学生答案反推单元: pageNumber=${pageNumber} → unit="${matchedUnit}" hits=${inferred.hits} score=${inferred.totalScore.toFixed(2)}`)
+        }
+      }
+
+      // 更新上一页单元（只有正常匹配/成功继承/学生答案反推成功才传播）
       if (matchedUnit) prevMatchedUnit = matchedUnit
 
       const unitAnswers = matchedUnit != null ? answersByUnit.get(matchedUnit) : null

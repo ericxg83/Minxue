@@ -31,6 +31,7 @@ import {
   listSuspectWorksheets,
   fixWorksheet,
 } from '../services/worksheetFixService.js'
+import { regradeTaskPageWithUnit } from '../services/worksheetPageService.js'
 import { query as pgQuery } from '../config/neon.js'
 const query = pgQuery
 
@@ -1545,6 +1546,32 @@ router.post('/:id/fix-tanglian-ordinals', async (req, res) => {
       applied: a.applied, skipped: a.skipped || null,
     })),
   })
+})
+
+//   POST /api/worksheets/tasks/:taskId/pages/:pageNumber/unit
+//   body: { unitKey: string }
+//   功能：老师手动指定该 task 的某一页应归属到哪个 unit，系统用该 unit 答案库重新批改该页
+router.post('/tasks/:taskId/pages/:pageNumber/unit', async (req, res) => {
+  const { taskId, pageNumber } = req.params
+  const { unitKey } = req.body || {}
+
+  if (!unitKey) {
+    return res.status(400).json({ success: false, error: '缺少 unitKey' })
+  }
+
+  const pageNum = Number(pageNumber)
+  if (!Number.isFinite(pageNum) || pageNum < 1) {
+    return res.status(400).json({ success: false, error: 'pageNumber 必须是正整数' })
+  }
+
+  try {
+    const result = await regradeTaskPageWithUnit(taskId, pageNum, unitKey)
+    const statusCode = result.success ? 200 : (result.error ? 400 : 500)
+    return res.status(statusCode).json(result)
+  } catch (error) {
+    console.error(`[regradeTaskPageWithUnit] taskId=${taskId} page=${pageNumber} unit=${unitKey} error:`, error)
+    return res.status(500).json({ success: false, error: error.message })
+  }
 })
 
 export default router

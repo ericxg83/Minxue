@@ -788,6 +788,16 @@ export const clearAllCache = () => {
   }
 }
 
+// 手动指定 task 的某页归属到某个 unit，并重新批改该页
+export const regradeTaskPageWithUnit = async (taskId, pageNumber, unitKey) => {
+  const data = await apiRequest(`/worksheets/tasks/${taskId}/pages/${pageNumber}/unit`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ unitKey })
+  })
+  return data
+}
+
 export const clearStudentCaches = (studentId) => {
   try {
     const studentCacheKeys = [
