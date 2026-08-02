@@ -2870,14 +2870,44 @@ const processAnswerBankGrading = async (job) => {
     // 供后续 judgement 写入时携带诊断信息（questions 表无此列，故不入表）
     const matchInfoByQN = new Map()
     let qnCounter = 0
+    let prevMatchedUnit = null  // 相邻上一页继承用
 
     for (const { pageTitle, pageNumber, imageUrl, questions, chapterHint } of pageDataList) {
       if (questions.length === 0) continue
 
       // 1) 选本页所属 unit
-      const matchedUnit = unitCount === 1
+      let matchedUnit = unitCount === 1
         ? [...answersByUnit.keys()][0]   // 唯一 unit 时直接采用，跳过匹配
         : pickAnswerUnit(answersByUnit, pageTitle, questions, pageNumber, chapterHint)
+
+      // 1a) 相邻上一页单元继承：当前页无标题/无章节关键词且正常匹配失败时
+      //   只继承相邻上一页；如果继承后题号完全对不上，放弃继承（避免错挂）
+      const hasPageContext = !!pageTitle || !!chapterHint
+      if (!matchedUnit && !hasPageContext && prevMatchedUnit) {
+        const candidateAnswers = answersByUnit.get(prevMatchedUnit)
+        if (candidateAnswers) {
+          let anyMatch = false
+          for (const q of questions) {
+            if (q.question_number == null) continue
+            const qKey = `${Number(q.question_number)}|${q.sub_no || ''}`
+            for (const qMap of candidateAnswers.values()) {
+              if (qMap.has(qKey)) {
+                anyMatch = true
+                break
+              }
+            }
+            if (anyMatch) break
+          }
+          if (anyMatch) {
+            matchedUnit = prevMatchedUnit
+            console.log(`   [AnswerBank] 继承上一页单元: pageNumber=${pageNumber} → unit="${matchedUnit}"`)
+          }
+        }
+      }
+
+      // 更新上一页单元（只有正常匹配/成功继承才传播）
+      if (matchedUnit) prevMatchedUnit = matchedUnit
+
       const unitAnswers = matchedUnit != null ? answersByUnit.get(matchedUnit) : null
       const noUnit = unitCount === 0
 
