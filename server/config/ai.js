@@ -194,14 +194,12 @@ export const VL_MODELS = [...new Set([
   'Qwen/Qwen3-VL-8B-Thinking',
 ].filter(Boolean))]
 
-// 2026-07 实测：Qwen/Qwen3-8B-Instruct（纯文本）在魔搭已下架，
-// 调用会返回 400 "Invalid model id: Qwen/Qwen3-8B-Instruct"，必须从列表中移除。
-// ⚠️ Qwen/Qwen3-VL-8B-Instruct 在魔搭在线接口上要求请求必须含图片，
-//    用于纯文本回填时会报 "invalid image format"，因此只能作为最后兜底。
+// 2026-08 实测：魔搭当前没有可用的纯文本在线模型：
+// - Qwen/Qwen3-8B-Instruct 已下架（Invalid model id）
+// - Qwen/Qwen2.5-7B-Instruct / 14B-Instruct 报 "has no provider supported"
+// - Qwen/Qwen3-VL-8B-Instruct 在线接口要求请求必须含图片，纯文本会报 invalid image format
+// 因此文本回填直接走 Gemini / 备份供应商，不再尝试魔搭主站文本模型。
 export const TEXT_MODELS = [
-  'Qwen/Qwen2.5-7B-Instruct',
-  'Qwen/Qwen2.5-14B-Instruct',
-  'Qwen/Qwen3-VL-8B-Instruct',
 ]
 
 let _textIdx = 0
@@ -532,6 +530,16 @@ export async function callTextCompletion(opts) {
         maxTokens,
         timeout: 30000,
       })
+      if (content) return { content, usedBackup: true }
+    } catch {
+      // fall through
+    }
+  }
+
+  // Gemini 文本兜底：独立配额，与魔搭/备份供应商互不干扰
+  if (GEMINI_DIRECT.ENABLED) {
+    try {
+      const content = await requestGeminiText({ systemContent, userContent, temperature, maxTokens })
       if (content) return { content, usedBackup: true }
     } catch {
       // fall through
