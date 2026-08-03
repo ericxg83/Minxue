@@ -196,8 +196,11 @@ export const VL_MODELS = [...new Set([
 
 // 2026-07 实测：Qwen/Qwen3-8B-Instruct（纯文本）在魔搭已下架，
 // 调用会返回 400 "Invalid model id: Qwen/Qwen3-8B-Instruct"，必须从列表中移除。
-// 视觉模型（如 Qwen3-VL-8B）既能处理图片也能处理纯文本，所以保留它就够了。
+// ⚠️ Qwen/Qwen3-VL-8B-Instruct 在魔搭在线接口上要求请求必须含图片，
+//    用于纯文本回填时会报 "invalid image format"，因此只能作为最后兜底。
 export const TEXT_MODELS = [
+  'Qwen/Qwen2.5-7B-Instruct',
+  'Qwen/Qwen2.5-14B-Instruct',
   'Qwen/Qwen3-VL-8B-Instruct',
 ]
 

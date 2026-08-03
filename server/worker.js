@@ -2968,7 +2968,7 @@ const processAnswerBankGrading = async (job) => {
       let content
       try {
         const result = await callVisionCompletion({
-          imageDataURL: `data:image/jpeg;base64,${bufferToBase64(compressed)}`,
+          imageDataURL: bufferToBase64(compressed),
           systemPrompt: answerBankPrompt,
           userText: '识别这张作业图片的页面标题和所有题目的学生答案。',
           temperature: 0.1,
