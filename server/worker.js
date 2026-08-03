@@ -1648,22 +1648,47 @@ export function pickAnswerUnit(answersByUnit, pageTitle, questions, pageNumber, 
   const candidates = [...answersByUnit.keys()].map(unitMeta)
 
   // 0-pre) 按页面标题区分"试卷"还是"堂堂练/课时练"，避免两类 unit 互相污染。
-  //   标题明确含"堂堂练/课时练"→只保留练习类 unit；明确含"试卷/测试卷"→只保留试卷类 unit；
-  //   标题不明确时保持原逻辑：优先保留试卷类 unit（答案库批改常见场景）。
+  //   关键修正：标题含"测试卷"不等于"试卷N"。
+  //   "第X章评价测试卷"/"单元测试卷"/"期中测试卷"等是章级/综合测试卷，unit_key 通常不以"试卷"开头；
+  //   只有"试卷①/试卷1/试卷一 ..."这种带明确序号的课时测试卷，才过滤到 /^试卷/ 单元。
+  //   之前把"第二章评价测试卷"误判为试卷系列，过滤掉真正的"第二章评价测试卷"单元，
+  //   导致整页答案错挂到"试卷X"单元（题号同样从1开始，覆盖率>60%即错配）。
   const normPageTitle = normalizeTitleForMatch(pageTitle)
   const hasTanglian = /堂堂练|课时练|练习题/.test(normPageTitle)
-  const hasShijuan = /试卷|测试卷/.test(normPageTitle)
+  // 明确含"试卷N"（圈数字/阿拉伯/中文数字）才视为课时测试卷
+  const hasShijuanNumber = /试卷\s*[0-9①-⑩一二三四五六七八九十]+/.test(normPageTitle)
+  // 章级测试卷：第X章...测试卷 / 单元测试卷 / 评价测试卷 / 阶段测试卷 / 综合测试卷
+  const isChapterLevelTest = /第[一二三四五六七八九十\d]+[章节单元].*?(测试卷|评价测试|阶段测试|综合测试|综合练习)|单元测试卷|期中测试卷|期末测试卷|月考卷/.test(normPageTitle)
 
-  if (hasTanglian && !hasShijuan) {
+  if (hasTanglian && !hasShijuanNumber) {
     const practiceOnly = candidates.filter(c => /^堂堂练|^课时练/.test(c.unitKeyRaw || c.unitKey || ''))
     if (practiceOnly.length >= 1) {
       candidates.splice(0, candidates.length, ...practiceOnly)
     }
-  } else if (!hasTanglian && hasShijuan) {
+  } else if (hasShijuanNumber && !isChapterLevelTest) {
+    // 明确是"试卷N"课时测试卷，且不是章级测试卷标题里恰好含"试卷N"
     const paperOnlyCandidates = candidates.filter(c => /^试卷/.test(c.unitKeyRaw || c.unitKey || ''))
     if (paperOnlyCandidates.length >= 1) {
       candidates.splice(0, candidates.length, ...paperOnlyCandidates)
     }
+  } else if (isChapterLevelTest) {
+    // 章级/综合测试卷：优先保留同章节/同类型的单元，不要硬推试卷类
+    const chapterMatch = normPageTitle.match(/^(第[一二三四五六七八九十\d]+[章节单元])/)
+    if (chapterMatch) {
+      const chapterCore = chapterMatch[1]
+      const chapterUnits = candidates.filter(c => {
+        const ck = c.unitKeyRaw || c.unitKey || ''
+        const ct = c.unitTitle || ''
+        return new RegExp(`^${chapterCore}`).test(ck) || new RegExp(`^${chapterCore}`).test(ct)
+      })
+      if (chapterUnits.length >= 1) {
+        candidates.splice(0, candidates.length, ...chapterUnits)
+      }
+    }
+    // 否则不强制过滤，保留所有候选给后续评分
+  } else if (/^第[一二三四五六七八九十\d]+[章节单元]$/.test(normPageTitle)) {
+    // 标题只是 bare 章节核心（如"第二章"/"第十九章"），不要预过滤成试卷类。
+    // 这类标题通常指向章级单元；保留所有候选，交给标题核心匹配或题号覆盖率打分。
   } else {
     // 标题不明确或同时含两类：保持旧行为，优先试卷类 unit
     const paperOnlyCandidates = candidates.filter(c => /^试卷/.test(c.unitKeyRaw || c.unitKey || ''))
@@ -1756,6 +1781,28 @@ export function pickAnswerUnit(answersByUnit, pageTitle, questions, pageNumber, 
     for (const c of candidates) {
       const ck = normalizeTitleForMatch(c.unitKeyRaw)
       if (ck && titleMatches(normTitle, ck)) return c.unitKey
+    }
+
+    // 1a+) 章级标题核心匹配：pageTitle="第X章评价测试卷" 可匹配 unitKey/unitTitle="第X章"
+    //   答案库中章级单元常只存"第X章"为核心 key，而学生页标题是完整"第X章评价测试卷"，
+    //   titleMatches 的长度差限制会拒绝这种包含关系。此处放宽：章级核心前缀相同即命中。
+    const chapterCoreMatch = normTitle.match(/^(第[一二三四五六七八九十\d]+[章节单元])/)
+    if (chapterCoreMatch) {
+      const core = chapterCoreMatch[1]
+      // 优先命中非试卷类的章级单元，避免 bare"第十九章"被试卷类 title 截胡
+      for (const c of candidates) {
+        const ck = normalizeTitleForMatch(c.unitKeyRaw)
+        const ct = normalizeTitleForMatch(c.unitTitle)
+        const matchCore = ck === core || ct === core || ck.startsWith(core) || ct.startsWith(core)
+        if (matchCore && !/^试卷/.test(ck)) return c.unitKey
+      }
+      for (const c of candidates) {
+        const ck = normalizeTitleForMatch(c.unitKeyRaw)
+        const ct = normalizeTitleForMatch(c.unitTitle)
+        if (ck === core || ct === core || ck.startsWith(core) || ct.startsWith(core)) {
+          return c.unitKey
+        }
+      }
     }
   }
 
@@ -2190,7 +2237,7 @@ const processWorkbookGrading = async (job) => {
 
 只输出 JSON 对象，格式：
 {
-  "page_title": "页面顶部印刷体标题，如'堂堂练① 19.1(1) 算术平方根'、'第一章阶段练1'、'第十九章 单元测试卷'，没有则填 null",
+  "page_title": "页面顶部印刷体标题。注意区分层级：'堂堂练① 19.1(1) 算术平方根'（课时练习）、'试卷① 19.1 平方根与立方根 基础性测试'（课时测试卷）、'第二章 评价测试卷'/'第十九章 单元测试卷'（章级/综合测试卷）。'试卷N'与'第X章...测试卷'是不同单元，必须如实区分输出，不要简化或省略，没有则填 null",
   "chapter_hint": "根据题目内容推断的章节名，如'第二十章二次根式'，不确定就填 null",
   "questions": [
     {
@@ -2471,6 +2518,8 @@ const processWorkbookGrading = async (job) => {
   let matchedCount = 0
   let emptyCount = 0
   const pagesMatchInfo = []
+  let prevMatchedUnit = null // 相邻上一页已识别单元，用于无标题页继承
+  const isChoiceLike = (t) => t === 'choice' || t === 'judge'
 
   for (const { pageTitle, imageUrl, questions, pageNumber, chapterHint } of pageDataList) {
     if (questions.length === 0) continue
@@ -2478,7 +2527,42 @@ const processWorkbookGrading = async (job) => {
     // 1) 选本页所属单元（unitKey）—— pageNumber 用于"页码范围兜底"
     //    chapterHint 来自 OCR 阶段 AI 推断的章节（如"第二十章二次根式"），
     //    当 pageTitle 缺失/匹配失败时作为强信号兜底。
-    const matchedUnit = pickAnswerUnit(answersByUnit, pageTitle, questions, pageNumber, chapterHint)
+    let matchedUnit = pickAnswerUnit(answersByUnit, pageTitle, questions, pageNumber, chapterHint)
+
+    // 1a) 相邻上一页单元继承：当前页无标题/无章节提示且匹配失败时，继承相邻上一页
+    const hasPageContext = !!pageTitle || !!chapterHint
+    if (!matchedUnit && !hasPageContext && prevMatchedUnit) {
+      const candidateAnswers = answersByUnit.get(prevMatchedUnit)
+      if (candidateAnswers) {
+        let anyMatch = false
+        for (const q of questions) {
+          if (q.question_number == null) continue
+          const qKey = `${Number(q.question_number)}|${q.sub_no || ''}`
+          for (const qMap of candidateAnswers.values()) {
+            if (qMap.has(qKey)) { anyMatch = true; break }
+          }
+          if (anyMatch) break
+        }
+        if (anyMatch) {
+          matchedUnit = prevMatchedUnit
+          console.log(`   [Workbook] 继承上一页单元: pageNumber=${pageNumber} → unit="${matchedUnit}"`)
+        }
+      }
+    }
+
+    // 1b) 学生答案反推单元：无标题/无章节提示/继承也失败时，跨单元按答案指纹搜索兜底
+    //   选择题/判断题答案太短，不参与（避免误匹配）。
+    if (!matchedUnit && questions.length > 0) {
+      const inferred = searchUnitByStudentAnswers(questions, answersByUnit)
+      if (inferred) {
+        matchedUnit = inferred.unitKey
+        console.log(`   [Workbook] 学生答案反推单元: pageNumber=${pageNumber} → unit="${matchedUnit}" hits=${inferred.hits} score=${inferred.totalScore.toFixed(2)}`)
+      }
+    }
+
+    // 更新上一页单元（只有正常匹配/成功继承/学生答案反推成功才传播）
+    if (matchedUnit) prevMatchedUnit = matchedUnit
+
     const unitAnswers = matchedUnit != null ? answersByUnit.get(matchedUnit) : null
 
     // 2) 在该单元的"section → qNo|subNo → row"二维索引中，每道题独立查答案。
@@ -2512,6 +2596,9 @@ const processWorkbookGrading = async (job) => {
       return best
     }
 
+    // 避免答案指纹兜底时重复占用同一答案行
+    const usedQKeys = new Set()
+
     pagesMatchInfo.push({
       has_title: !!pageTitle,
       page_title: pageTitle,
@@ -2526,8 +2613,22 @@ const processWorkbookGrading = async (job) => {
     for (const q of questions) {
       if (q.question_number == null) continue
 
-      const answerRow = lookupRow(q.question_number, q.sub_no, q.question_type)
+      let answerRow = lookupRow(q.question_number, q.sub_no, q.question_type)
+      let usedKey = `${Number(q.question_number)}|${q.sub_no || ''}`
+
+      // 答案指纹兜底：题号在单元内查不到（OCR 题号错位/漏读）时，按学生答案内容找最相似行
+      // 选择题/判断题答案太短，不参与
+      if (!answerRow && unitAnswers && q.student_answer && !isChoiceLike(q.question_type)) {
+        const found = searchByAnswerFingerprint(q.student_answer, q.question_type, unitAnswers, usedQKeys)
+        if (found) {
+          answerRow = found.row
+          usedKey = found.qKey
+          console.log(`   [Workbook] 答案指纹兜底: 题${q.question_number} → ${usedKey} student="${String(q.student_answer).slice(0, 30)}" ref="${String(found.row.answer).slice(0, 30)}"`)
+        }
+      }
+
       if (answerRow) {
+        usedQKeys.add(usedKey)
         q.answer = answerRow.answer
         q.answer_source = 'worksheet'
         q.question_type = answerRow.answer_type || q.question_type || 'choice'
@@ -2798,7 +2899,7 @@ const processAnswerBankGrading = async (job) => {
 
 只输出 JSON 对象，格式：
 {
-  "page_title": "页面顶部印刷体标题，如'试卷① 19.1 平方根与立方根 基础性测试'、'试卷② 21.2(3) 一般的一元二次方程的解法'、'第十九章 单元测试卷'，没有则填 null",
+  "page_title": "页面顶部印刷体标题，如'试卷① 19.1 平方根与立方根 基础性测试'（课时测试卷）、'试卷② 21.2(3) 一般的一元二次方程的解法'（课时测试卷）、'第二章 评价测试卷'/'第十九章 单元测试卷'（章级测试卷）。注意：'试卷N'与'第X章...测试卷'是不同层级的单元，必须如实区分输出，没有则填 null",
   "chapter_hint": "根据题目内容推断的章节名，如'第二十章二次根式'、'第十九章实数'，不确定就填 null",
   "questions": [
     {
