@@ -55,6 +55,7 @@ import { AI_CONFIG, getAIHeaders, buildTaggingPrompt, resetModelIndex } from './
 import weeklyReportRouter from './routes/weeklyReport.js'
 import worksheetsRouter from './routes/worksheets.js'
 import resourcesRouter from './routes/resources.js'
+import { cleanupStudentData } from './services/dataCleanupService.js'
 
 const app = express()
 const PORT = process.env.PORT || 4000
@@ -2238,6 +2239,23 @@ app.post('/api/admin/backfill-tags', async (req, res) => {
     // 查询回填进度
 app.get('/api/admin/backfill-tags/progress', (req, res) => {
   res.json({ success: true, ...backfillProgress })
+})
+
+// ── 后台数据清理：删除学生试卷、错题本、试卷重练，保留练习册预埋答案 ──
+app.post('/api/admin/data-cleanup', async (req, res) => {
+  try {
+    const { scopes = {}, dryRun = false } = req.body || {}
+    const result = await cleanupStudentData({
+      tasks: scopes.tasks !== false,
+      wrongQuestions: scopes.wrongQuestions !== false,
+      generatedExams: scopes.generatedExams !== false,
+      dryRun: dryRun === true,
+    })
+    res.json(result)
+  } catch (error) {
+    console.error('[Admin] 数据清理失败:', error)
+    res.status(500).json({ success: false, error: error.message })
+  }
 })
 
 // 获取已发布的试卷答案库列表（供移动端选择器）
