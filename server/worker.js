@@ -3215,6 +3215,9 @@ const processAnswerBankGrading = async (job) => {
               const subRow = lookupRow(qNo, String(occ), q.question_type)
               if (subRow) {
                 answerRow = subRow
+                // 占用该 sub 行，避免后续同题号记录通过相似度兜底重复匹配，
+                // 保证“顺序给答案”不跳跃、不重复（即使学生答错也占用）。
+                usedQKeys.add(`${qNo}|${occ}`)
                 // 用相似度判分（学生答案可能是过程"=√4"，参考答案是结果"2"）
                 const sim = calculateAnswerSimilarity(studentAnswer, subRow.answer)
                 let correct = null
