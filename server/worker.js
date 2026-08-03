@@ -2482,16 +2482,32 @@ const processWorkbookGrading = async (job) => {
     const unitAnswers = matchedUnit != null ? answersByUnit.get(matchedUnit) : null
 
     // 2) 在该单元的"section → qNo|subNo → row"二维索引中，每道题独立查答案。
-    //    同一页可能含"一、填空题 第 1 题"和"二、选择题 第 5 题"，分开存。
-    //    题目归属的 section 未知时，落入"任意 section 能命中即取"的最优 section。
-    const lookupRow = (qNo, subNo) => {
+    //    同一 unit 下不同 section 可能有相同题号（如"一、填空题 1"和"三、解答题 1"），
+    //    必须按 question_type 选择对应 section，否则会把填空题答案挂到解答题上。
+    const sectionScoreForType = (section, questionType) => {
+      if (!section) return 50
+      const s = String(section)
+      if (questionType === 'choice') return /选择/.test(s) ? 100 : 0
+      if (questionType === 'judge') return /判断/.test(s) ? 100 : 0
+      if (/填空/.test(s)) return 100
+      if (/解答|计算|证明|简答|作图/.test(s)) return 90
+      if (/选择/.test(s)) return 0
+      if (/判断/.test(s)) return 0
+      return 50
+    }
+    const lookupRow = (qNo, subNo, questionType) => {
       if (!unitAnswers) return null
       const qKey = `${Number(qNo)}|${subNo || ''}`
-      // 命中第一个非空的 section 的 row；若多 section 都命中同题号，优先 answer_type 吻合
       let best = null
-      for (const qMap of unitAnswers.values()) {
+      let bestScore = -1
+      for (const [section, qMap] of unitAnswers) {
         const row = qMap.get(qKey)
-        if (row) best = row
+        if (!row) continue
+        const score = sectionScoreForType(section, questionType)
+        if (score > bestScore) {
+          bestScore = score
+          best = row
+        }
       }
       return best
     }
@@ -2510,7 +2526,7 @@ const processWorkbookGrading = async (job) => {
     for (const q of questions) {
       if (q.question_number == null) continue
 
-      const answerRow = lookupRow(q.question_number, q.sub_no)
+      const answerRow = lookupRow(q.question_number, q.sub_no, q.question_type)
       if (answerRow) {
         q.answer = answerRow.answer
         q.answer_source = 'worksheet'
@@ -3010,13 +3026,34 @@ const processAnswerBankGrading = async (job) => {
       console.log(`   [AnswerBank] 页匹配: pageNumber=${pageNumber} title="${pageTitle}" chapterHint="${chapterHint}" → unit="${matchedUnit}" (${questions.length} 题)`)
 
       // 2) 在该 unit 的"section → qNo|subNo → row"二维索引中，每道题独立查答案
-      const lookupRow = (qNo, subNo) => {
+      //   同一 unit 下不同 section 可能有相同题号（如"一、填空题 1"和"三、解答题 1"），
+      //   必须按 question_type 选择对应 section，否则会把填空题答案挂到解答题上。
+      const sectionScoreForType = (section, questionType) => {
+        if (!section) return 50
+        const s = String(section)
+        if (questionType === 'choice') return /选择/.test(s) ? 100 : 0
+        if (questionType === 'judge') return /判断/.test(s) ? 100 : 0
+        // fill/answer 都可能落在"填空题"或"解答题/计算题/证明题"；
+        // 按 section 在答案库中的出现顺序（填空题通常在前）作为次优先级
+        if (/填空/.test(s)) return 100
+        if (/解答|计算|证明|简答|作图/.test(s)) return 90
+        if (/选择/.test(s)) return 0
+        if (/判断/.test(s)) return 0
+        return 50
+      }
+      const lookupRow = (qNo, subNo, questionType) => {
         if (!unitAnswers) return null
         const qKey = `${Number(qNo)}|${subNo || ''}`
         let best = null
-        for (const qMap of unitAnswers.values()) {
+        let bestScore = -1
+        for (const [section, qMap] of unitAnswers) {
           const row = qMap.get(qKey)
-          if (row) best = row
+          if (!row) continue
+          const score = sectionScoreForType(section, questionType)
+          if (score > bestScore) {
+            bestScore = score
+            best = row
+          }
         }
         return best
       }
@@ -3161,7 +3198,7 @@ const processAnswerBankGrading = async (job) => {
         let answerRow = null
         let subBreakdown = null  // [{sub, row, studentPart, refPart, correct}]，合并 sub 时填充
         if (!noUnit) {
-          answerRow = lookupRow(q.question_number, q.sub_no)
+          answerRow = lookupRow(q.question_number, q.sub_no, q.question_type)
 
           // 2.0.0) ★ 核心修复：OCR 把多空题拆成多条同题号记录 → 按出现顺序映射 sub ★
           //   场景：OCR 输出两条 q21（student="=√4" 和 "2√(5÷0.5)"），答案库有 21|1="2" 21|2="2√10"
@@ -3175,7 +3212,7 @@ const processAnswerBankGrading = async (job) => {
               // 多条同题号 → 计算当前是第几条（出现顺序）
               const occ = indices.indexOf(qi) + 1
               // 按出现顺序查 sub 行
-              const subRow = lookupRow(qNo, String(occ))
+              const subRow = lookupRow(qNo, String(occ), q.question_type)
               if (subRow) {
                 answerRow = subRow
                 // 用相似度判分（学生答案可能是过程"=√4"，参考答案是结果"2"）
@@ -3301,7 +3338,7 @@ const processAnswerBankGrading = async (job) => {
           //   修复后：整题 row.answer 用 splitSubAnswers 拆 sub 段，按当前 q.sub_no 命中对应段。
           //   同时 student_answer 可能不含 (1)(2) 标记（OCR 已拆开），直接整段比对。
           if (!answerRow && q.sub_no && !isEmpty) {
-            const wholeRow = lookupRow(q.question_number, '')
+            const wholeRow = lookupRow(q.question_number, '', q.question_type)
             if (wholeRow && wholeRow.answer) {
               // 整题 row.answer 含 sub 标记？尝试按段匹配
               const subSegs = splitSubAnswers(wholeRow.answer)
