@@ -470,42 +470,79 @@ app.put('/api/tasks/:taskId', async (req, res) => {
   }
 })
 
+async function retryTaskById(taskId) {
+  const { rows } = await query(
+    `SELECT * FROM ${TABLES.TASKS} WHERE id = $1`,
+    [taskId]
+  )
+
+  if (rows.length === 0) throw new Error('任务不存在')
+
+  const task = rows[0]
+  const queue = await getTaskQueue()
+  const result = task.result || {}
+
+  await query(
+    `UPDATE ${TABLES.TASKS} SET status = $1, result = $2, updated_at = NOW() WHERE id = $3`,
+    [TASK_STATUS.PENDING, JSON.stringify({
+      progress: 0,
+      retryCount: (result.retryCount || 0) + 1,
+      previousError: result.error || null
+    }), taskId]
+  )
+
+  if (queue) {
+    await queue.add('process-task', {
+      taskId: task.id,
+      studentId: task.student_id,
+      imageUrl: task.image_url,
+      images: task.images || null,
+      originalName: task.original_name,
+      taskType: task.task_type || null,
+      worksheetId: task.worksheet_id || null,
+      resourceId: task.resource_id || task.worksheet_id || null,
+      generatedExamId: task.generated_exam_id || null
+    }, {
+      attempts: parseInt(process.env.MAX_RETRIES) || 3,
+      backoff: { type: 'exponential', delay: 5000 }
+    })
+  }
+
+  return { taskId: task.id, originalName: task.original_name, status: TASK_STATUS.PENDING }
+}
+
 // Retry task
 app.post('/api/tasks/:taskId/retry', async (req, res) => {
   try {
     const { taskId } = req.params
-
-    const { rows } = await query(
-      `SELECT * FROM ${TABLES.TASKS} WHERE id = $1`,
-      [taskId]
-    )
-
-    if (rows.length === 0) return res.status(404).json({ error: '任务不存在' })
-
-    const task = rows[0]
-    const queue = await getTaskQueue()
-
-    await query(
-      `UPDATE ${TABLES.TASKS} SET status = $1, result = $2, updated_at = NOW() WHERE id = $3`,
-      [TASK_STATUS.PENDING, JSON.stringify({ progress: 0, retryCount: (task.result?.retryCount || 0) + 1, previousError: task.result?.error || null }), taskId]
-    )
-
-    if (queue) {
-      await queue.add('process-task', {
-        taskId: task.id,
-        studentId: task.student_id,
-        imageUrl: task.image_url,
-        images: task.images || null,
-        originalName: task.original_name
-      }, {
-        attempts: parseInt(process.env.MAX_RETRIES) || 3,
-        backoff: { type: 'exponential', delay: 5000 }
-      })
-    }
-
-    res.json({ success: true, message: '任务已重新提交' })
+    const result = await retryTaskById(taskId)
+    res.json({ success: true, message: '任务已重新提交', ...result })
   } catch (error) {
     console.error('重试任务失败:', error)
+    const status = error.message === '任务不存在' ? 404 : 500
+    res.status(status).json({ error: error.message })
+  }
+})
+
+// Admin: retry task by original name (useful when taskId is unknown)
+app.post('/api/admin/tasks/retry-by-name', async (req, res) => {
+  try {
+    const { originalName } = req.body
+    if (!originalName) return res.status(400).json({ error: '缺少 originalName' })
+
+    const { rows } = await query(
+      `SELECT id, original_name, status FROM ${TABLES.TASKS}
+       WHERE deleted_at IS NULL AND original_name ILIKE $1
+       ORDER BY updated_at DESC LIMIT 1`,
+      [`%${originalName}%`]
+    )
+    if (rows.length === 0) return res.status(404).json({ error: '未找到匹配任务' })
+
+    const taskId = rows[0].id
+    const result = await retryTaskById(taskId)
+    res.json({ success: true, message: '任务已重新提交', ...result })
+  } catch (error) {
+    console.error('按名称重试任务失败:', error)
     res.status(500).json({ error: error.message })
   }
 })
