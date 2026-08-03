@@ -1593,16 +1593,22 @@ const detectChapterByContent = (questions) => {
 // 过滤：排除"1.5"这种科学记数法小数（必须 ≥ 4 字符，如 "19.2" / "21.2(3)"）
 const detectLessonCode = (questions, pageTitle) => {
   if (pageTitle && typeof pageTitle === 'string') {
-    // 匹配 "19.2" / "21.2(3)" / "19.1(1)" 模式（必须带小数点，避免匹配"19"或"21.2"段中的"21"）
-    const m = pageTitle.match(/\b(\d{1,2}\.\d{1,2}(?:\(\d+\))?)\b/)
-    if (m && m[1].length >= 4) return m[1]
+    // 优先匹配带括号的形式如 "19.1(1)" / "21.2(3)"（OCR 标题里常见）
+    // 注意：\b 在 '(' 前不成立，所以带括号的模式不能用 \b
+    const m1 = pageTitle.match(/(\d{1,2}\.\d{1,2}(?:\(\d+\)))/)
+    if (m1 && m1[1].length >= 4) return m1[1]
+    // 兜底：匹配不带括号的形式如 "19.1" / "21.2"
+    const m2 = pageTitle.match(/\b(\d{1,2}\.\d{1,2})\b/)
+    if (m2 && m2[1].length >= 4) return m2[1]
   }
-  // 兜底：从题目 content 找 lesson 模式（必须有"19.2 内容"这种带空格或汉字的连接）
+  // 兜底：从题目 content 找 lesson 模式
   if (Array.isArray(questions) && questions.length > 0) {
     for (const q of questions) {
       if (q.content && typeof q.content === 'string') {
-        const m = q.content.match(/\b(\d{1,2}\.\d{1,2}(?:\(\d+\))?)\b/)
-        if (m && m[1].length >= 4) return m[1]
+        const m1 = q.content.match(/(\d{1,2}\.\d{1,2}(?:\(\d+\)))/)
+        if (m1 && m1[1].length >= 4) return m1[1]
+        const m2 = q.content.match(/\b(\d{1,2}\.\d{1,2})\b/)
+        if (m2 && m2[1].length >= 4) return m2[1]
       }
     }
   }
@@ -1641,14 +1647,29 @@ export function pickAnswerUnit(answersByUnit, pageTitle, questions, pageNumber, 
   }
   const candidates = [...answersByUnit.keys()].map(unitMeta)
 
-  // 0-pre) 仅看试卷 unit：pickAnswerUnit 是答案库批改专用（processAnswerBankGrading），
-  //   候选池只考虑"试卷"类 unit（unitKey 以"试卷"开头）。堂堂练/课时练的题号是练习题
-  //   编号（1-5），与试卷的"全卷题号 1-28"不同维度；同时出现会污染打分（实测 chapterHint
-  //   缩窄后，堂堂练10|20.1(1) 题号 1-22 也覆盖学生题号 5-7，被错选）。
-  //   唯一豁免：单 unit 情况（前面已 return）。
-  const paperOnlyCandidates = candidates.filter(c => /^试卷/.test(c.unitKeyRaw || c.unitKey || ''))
-  if (paperOnlyCandidates.length >= 1) {
-    candidates.splice(0, candidates.length, ...paperOnlyCandidates)
+  // 0-pre) 按页面标题区分"试卷"还是"堂堂练/课时练"，避免两类 unit 互相污染。
+  //   标题明确含"堂堂练/课时练"→只保留练习类 unit；明确含"试卷/测试卷"→只保留试卷类 unit；
+  //   标题不明确时保持原逻辑：优先保留试卷类 unit（答案库批改常见场景）。
+  const normPageTitle = normalizeTitleForMatch(pageTitle)
+  const hasTanglian = /堂堂练|课时练|练习题/.test(normPageTitle)
+  const hasShijuan = /试卷|测试卷/.test(normPageTitle)
+
+  if (hasTanglian && !hasShijuan) {
+    const practiceOnly = candidates.filter(c => /^堂堂练|^课时练/.test(c.unitKeyRaw || c.unitKey || ''))
+    if (practiceOnly.length >= 1) {
+      candidates.splice(0, candidates.length, ...practiceOnly)
+    }
+  } else if (!hasTanglian && hasShijuan) {
+    const paperOnlyCandidates = candidates.filter(c => /^试卷/.test(c.unitKeyRaw || c.unitKey || ''))
+    if (paperOnlyCandidates.length >= 1) {
+      candidates.splice(0, candidates.length, ...paperOnlyCandidates)
+    }
+  } else {
+    // 标题不明确或同时含两类：保持旧行为，优先试卷类 unit
+    const paperOnlyCandidates = candidates.filter(c => /^试卷/.test(c.unitKeyRaw || c.unitKey || ''))
+    if (paperOnlyCandidates.length >= 1) {
+      candidates.splice(0, candidates.length, ...paperOnlyCandidates)
+    }
   }
 
   // 0) lesson_hint 匹配（最精确：lesson_code 来自 OCR 提示词/题目内容推断）
