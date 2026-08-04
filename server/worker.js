@@ -3229,8 +3229,13 @@ const processAnswerBankGrading = async (job) => {
           })),
           resolvedUnits: resolvedUnits.map(r => ({ pageNumber: r.pageNumber, unitKey: r.unitKey }))
         }
-        fs.writeFileSync(dumpPath, JSON.stringify(dump, null, 2))
-        console.log(`   [AnswerBank] DEBUG_DUMP_OCR 已落盘 ${dumpPath}`)
+        // 写文件（相对 server 工作目录）
+        try { fs.writeFileSync(dumpPath, JSON.stringify(dump, null, 2)) } catch (e) {
+          console.error(`   [AnswerBank] DEBUG_DUMP_OCR 写文件失败:`, e.message)
+        }
+        // 同时放全局内存，供 /api/debug/ocr-dump 端点读取（免费 Render 无法用 Shell/下载文件）
+        globalThis.__ocrDump = dump
+        console.log(`   [AnswerBank] DEBUG_DUMP_OCR 已落盘(内存+文件) ${dumpPath}`)
       } catch (e) {
         console.error(`   [AnswerBank] DEBUG_DUMP_OCR 落盘失败:`, e.message)
       }

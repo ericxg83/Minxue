@@ -87,6 +87,26 @@ app.get('/api/health', (req, res) => {
   res.json({ status: 'ok', timestamp: new Date().toISOString() })
 })
 
+// 调试：读取最近一次 DEBUG_DUMP_OCR=1 批改落盘的 OCR 输入（内存优先，文件兜底）
+// 用于本地精确复现/调优单元匹配，避免免费 Render 无法访问文件系统。
+app.get('/api/debug/ocr-dump', (req, res) => {
+  try {
+    if (globalThis.__ocrDump) {
+      return res.json({ source: 'memory', data: globalThis.__ocrDump })
+    }
+    const fs = require('fs')
+    const path = require('path')
+    const fp = path.resolve(process.cwd(), 'scripts', 'ocr_dump.json')
+    if (fs.existsSync(fp)) {
+      const parsed = JSON.parse(fs.readFileSync(fp, 'utf8'))
+      return res.json({ source: 'file', data: parsed })
+    }
+    res.status(404).json({ error: '暂无 ocr dump，请确认 DEBUG_DUMP_OCR=1 且已处理过任务' })
+  } catch (e) {
+    res.status(500).json({ error: e.message })
+  }
+})
+
 // Proxy image fetch — avoids CORS issues when drawing cross-origin images to canvas
 app.get('/api/proxy-image', async (req, res) => {
   try {
