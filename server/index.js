@@ -1,5 +1,6 @@
 import dotenv from 'dotenv'
 import { dirname, resolve } from 'path'
+import { readFileSync, existsSync } from 'fs'
 import { fileURLToPath } from 'url'
 import { pendingTaskRecovery } from './pendingTaskRecovery.js'
 import { migrateGeometryImageUrl } from './migrations/addGeometryImageUrl.js'
@@ -94,11 +95,9 @@ app.get('/api/debug/ocr-dump', (req, res) => {
     if (globalThis.__ocrDump) {
       return res.json({ source: 'memory', data: globalThis.__ocrDump })
     }
-    const fs = require('fs')
-    const path = require('path')
-    const fp = path.resolve(process.cwd(), 'scripts', 'ocr_dump.json')
-    if (fs.existsSync(fp)) {
-      const parsed = JSON.parse(fs.readFileSync(fp, 'utf8'))
+    const fp = resolve(process.cwd(), 'scripts', 'ocr_dump.json')
+    if (existsSync(fp)) {
+      const parsed = JSON.parse(readFileSync(fp, 'utf8'))
       return res.json({ source: 'file', data: parsed })
     }
     res.status(404).json({ error: '暂无 ocr dump，请确认 DEBUG_DUMP_OCR=1 且已处理过任务' })
