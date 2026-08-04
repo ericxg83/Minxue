@@ -1619,6 +1619,35 @@ export function pickAnswerUnit(answersByUnit, pageTitle, questions, pageNumber, 
   if (!answersByUnit || answersByUnit.size === 0) return null
   if (answersByUnit.size === 1) return [...answersByUnit.keys()][0]
 
+  // ── 防御 1：pageTitle 自检 ──
+  // OCR 在答卷页经常识别不到「试卷① 19.1 平方根与立方根 基础性测试」这种小标题，
+  // 退而把练习册封面/页眉/页脚里的整体名（如「小初衔接」）当成 pageTitle 报上来。
+  // 这种 pageTitle 显然是错的，**不应当作页标题匹配候选**，否则会一路匹配失败→60% 兜底
+  // → 错挂到题号范围覆盖最广的 unit（实测「小初衔接」练习册里 #14-#22 错挂到 试卷1|19.1）。
+  // 判定：pageTitle 命中**所有候选 unit 的 unitTitle / unitKeyRaw 都不包含** pageTitle 的子串，
+  // 且 pageTitle 长度 ≥ 3 字符（排除单字误识别），则视为不可信，直接置空 pageTitle。
+  let trustedPageTitle = pageTitle
+  if (pageTitle && typeof pageTitle === 'string' && pageTitle.length >= 3) {
+    const candidatesForCheck = [...answersByUnit.keys()]
+    let anyContain = false
+    for (const uk of candidatesForCheck) {
+      const secMap = answersByUnit.get(uk)
+      if (!secMap) continue
+      const sample = [...secMap.values()][0]?.values().next()?.value
+      if (!sample) continue
+      const ck = sample.unit_key || uk
+      const ct = sample.unit_title || ''
+      if (ck.includes(pageTitle) || ct.includes(pageTitle) || pageTitle.includes(ck) || pageTitle.includes(ct)) {
+        anyContain = true
+        break
+      }
+    }
+    if (!anyContain) {
+      console.warn(`[pickAnswerUnit] pageTitle="${pageTitle}" 不与任何 unit 的 title/key 匹配，视为 OCR 误识别，置空`)
+      trustedPageTitle = null
+    }
+  }
+
   // 从 3D Map 中抽出每单元的展示键（含 unit_title / unit_key / 页码范围）
   const unitMeta = (unitKey) => {
     const secMap = answersByUnit.get(unitKey)
@@ -1653,7 +1682,7 @@ export function pickAnswerUnit(answersByUnit, pageTitle, questions, pageNumber, 
   //   只有"试卷①/试卷1/试卷一 ..."这种带明确序号的课时测试卷，才过滤到 /^试卷/ 单元。
   //   之前把"第二章评价测试卷"误判为试卷系列，过滤掉真正的"第二章评价测试卷"单元，
   //   导致整页答案错挂到"试卷X"单元（题号同样从1开始，覆盖率>60%即错配）。
-  const normPageTitle = normalizeTitleForMatch(pageTitle)
+  const normPageTitle = normalizeTitleForMatch(trustedPageTitle)
   const hasTanglian = /堂堂练|课时练|练习题/.test(normPageTitle)
   // 明确含"试卷N"（圈数字/阿拉伯/中文数字）才视为课时测试卷
   const hasShijuanNumber = /试卷\s*[0-9①-⑩一二三四五六七八九十]+/.test(normPageTitle)
@@ -1703,11 +1732,11 @@ export function pickAnswerUnit(answersByUnit, pageTitle, questions, pageNumber, 
   //    优先从 question content 中检测章节码，再与 candidates 匹配。
   //    命中多个 candidates 时，缩窄 candidates 给后续评分；唯一命中才直接 return。
   //    注：candidates 是 const，用 splice 原地缩窄，不能重新赋值。
-  const lessonHint = detectLessonCode(questions, pageTitle)
+  const lessonHint = detectLessonCode(questions, trustedPageTitle)
   if (lessonHint) {
     // 从 pageTitle 抽"试卷N"中的 N
-    const pagePaperMatch = pageTitle && typeof pageTitle === 'string'
-      ? pageTitle.match(/试卷\s*([0-9㊀-㊉①-⑩]+)/)
+    const pagePaperMatch = trustedPageTitle && typeof trustedPageTitle === 'string'
+      ? trustedPageTitle.match(/试卷\s*([0-9㊀-㊉①-⑩]+)/)
       : null
     const pagePaperNum = pagePaperMatch
       ? (circledToAsciiMap[pagePaperMatch[1]] || Number(pagePaperMatch[1]))
@@ -1740,8 +1769,8 @@ export function pickAnswerUnit(answersByUnit, pageTitle, questions, pageNumber, 
     }
 
     // 类型关键词锁定（提高性测试/基础性测试）：OCR 不会把这两个词读错
-    if (lessonMatches.length > 1 && pageTitle) {
-      const normP = normalizeTitleForMatch(pageTitle)
+    if (lessonMatches.length > 1 && trustedPageTitle) {
+      const normP = normalizeTitleForMatch(trustedPageTitle)
       const hasBasics = /基础性测试/i.test(normP)
       const hasAdvanced = /提高性测试/i.test(normP)
       if (hasBasics || hasAdvanced) {
@@ -1769,7 +1798,7 @@ export function pickAnswerUnit(answersByUnit, pageTitle, questions, pageNumber, 
 
   // 1) 标题匹配：先把 pageTitle 压空白 + 圈序号→ASCII，再做归一化匹配
   //    旧版只压空白，OCR 把"堂堂练①"误识别为"堂堂练1"会直接失配，60% 兜底也撞错单元
-  const normTitle = normalizeTitleForMatch(normalizeSectionName(pageTitle))
+  const normTitle = normalizeTitleForMatch(normalizeSectionName(trustedPageTitle))
   if (normTitle) {
     // 1a) 完全相等 / 包含（按更长侧为锚，防"含子串"误中）
     //   两侧同长：直接比；否则要求短侧是长侧的「前缀」或「后缀」之一
@@ -1826,6 +1855,35 @@ export function pickAnswerUnit(answersByUnit, pageTitle, questions, pageNumber, 
       candidates.splice(0, candidates.length, ...titleMatches4)
     } else if (keyMatches4.length > 1) {
       candidates.splice(0, candidates.length, ...keyMatches4)
+    }
+  }
+
+  // ── 防御 2：pageTitle 不可信时，把 OCR 的 chapterHint 注入到题目"内容特征"通道 ──
+  // 触发条件：trustedPageTitle == null（OCR 误识别 pageTitle）+ chapterHint 非空
+  // chapterHint 来自 OCR 阶段 AI 看题目内容推断（如"第二十章二次根式"），
+  // 它的可靠性比 pageTitle 高得多。当 pageTitle 不可信时，
+  // 把 chapterHint 注入到 detectedChapter 通道，让"二次根式/实数/一元二次方程/直角三角形"
+  // 关键词直接参与候选缩窄。
+  if (!trustedPageTitle && chapterHint && typeof chapterHint === 'string') {
+    const hintNorm = chapterHint.replace(/[\s　]+/g, '')
+    const CHAPTER_KEYWORDS = [
+      { kw: '二次根式', mustInTitle: /二次根式|根号下/ },
+      { kw: '一元二次方程', mustInTitle: /一元二次方程/ },
+      { kw: '直角三角形', mustInTitle: /直角三角形|勾股|角平分线/ },
+      { kw: '实数', mustInTitle: /实数/ },
+    ]
+    for (const { kw, mustInTitle } of CHAPTER_KEYWORDS) {
+      if (hintNorm.includes(kw)) {
+        const kwNarrowed = candidates.filter(c => {
+          const ct = c.unitTitle || ''
+          return mustInTitle.test(ct)
+        })
+        if (kwNarrowed.length >= 1 && kwNarrowed.length < candidates.length) {
+          console.log(`[pickAnswerUnit] pageTitle 不可信 + chapterHint="${chapterHint}" 含"${kw}"，缩窄至 ${kwNarrowed.length} 个候选`)
+          candidates.splice(0, candidates.length, ...kwNarrowed)
+        }
+        break
+      }
     }
   }
 
@@ -1969,6 +2027,10 @@ export function pickAnswerUnit(answersByUnit, pageTitle, questions, pageNumber, 
   }
 
   // 3) 覆盖率门槛：60%（旧 50% 偏松，错挂率较高）
+  //    防御 3：pageTitle 不可信（OCR 误识别）时，把门槛提高到 70%，
+  //    避免被「题号范围覆盖广」的非相关 unit 抢走（如试卷1|19.1 题号 1-28 容易覆盖 14-22）。
+  //    同时若 bestKey 与 chapterHint 完全冲突（如 chapterHint=实数但 bestKey 单元是"二次根式"），
+  //    也直接拒绝，防止错挂。
   if (bestKey !== null) {
     const secMap = answersByUnit.get(bestKey)
     let covered = 0
@@ -1981,7 +2043,32 @@ export function pickAnswerUnit(answersByUnit, pageTitle, questions, pageNumber, 
         if (qMap.has(qKey)) { covered++; break }
       }
     }
-    if (covered < qNos.length * 0.6) return null
+    const coverageThreshold = trustedPageTitle ? 0.6 : 0.7
+    if (covered < qNos.length * coverageThreshold) {
+      console.warn(`[pickAnswerUnit] 覆盖率 ${covered}/${qNos.length} < ${Math.round(coverageThreshold*100)}%（pageTitle 不可信），拒绝挂载到 ${bestKey}`)
+      return null
+    }
+    // chapterHint 与 bestKey 单元的标题冲突检测
+    if (!trustedPageTitle && chapterHint && typeof chapterHint === 'string' && bestKey) {
+      const bestUnitTitle = (() => {
+        const secMap2 = answersByUnit.get(bestKey)
+        const sample = [...(secMap2?.values() || [])][0]?.values().next()?.value
+        return sample?.unit_title || ''
+      })()
+      const hintNorm = chapterHint.replace(/[\s　]+/g, '')
+      // 章节关键词反向校验：chapterHint 含 X 但 bestUnitTitle 完全没 X 的痕迹
+      for (const { kw, mustInTitle } of [
+        { kw: '二次根式', mustInTitle: /二次根式|根号下/ },
+        { kw: '一元二次方程', mustInTitle: /一元二次方程/ },
+        { kw: '直角三角形', mustInTitle: /直角三角形|勾股|角平分线/ },
+        { kw: '实数', mustInTitle: /实数/ },
+      ]) {
+        if (hintNorm.includes(kw) && !mustInTitle.test(bestUnitTitle)) {
+          console.warn(`[pickAnswerUnit] chapterHint="${chapterHint}" 含"${kw}"，但 bestKey="${bestKey}" 标题"${bestUnitTitle}" 不含此关键词，拒绝挂载`)
+          return null
+        }
+      }
+    }
   }
   return bestKey
 }
@@ -3124,7 +3211,28 @@ const processAnswerBankGrading = async (job) => {
       if (matchedUnit) {
         unitHitMap.set(matchedUnit, (unitHitMap.get(matchedUnit) || 0) + 1)
       }
-      console.log(`   [AnswerBank] 页匹配: pageNumber=${pageNumber} title="${pageTitle}" chapterHint="${chapterHint}" → unit="${matchedUnit}" (${questions.length} 题)`)
+      // 防御 4：诊断标记——为便于事后审计，用 [suspect] 标记当 pageTitle 不为 null 但
+      // 已被 pickAnswerUnit 内部的 trustedPageTitle 自检置空的页（OCR 误识别场景）。
+      // 因为 trustedPageTitle 是 pickAnswerUnit 局部变量，这里只能根据 pageTitle 与所有候选
+      // unit title/key 都不匹配来近似判定（与 pickAnswerUnit 内部同一规则）。
+      let suspectMount = false
+      if (matchedUnit && pageTitle && typeof pageTitle === 'string' && pageTitle.length >= 3) {
+        let anyContain = false
+        for (const uk of answersByUnit.keys()) {
+          const secMap = answersByUnit.get(uk)
+          if (!secMap) continue
+          const sample = [...secMap.values()][0]?.values().next()?.value
+          if (!sample) continue
+          const ck = sample.unit_key || uk
+          const ct = sample.unit_title || ''
+          if (ck.includes(pageTitle) || ct.includes(pageTitle) || pageTitle.includes(ck) || pageTitle.includes(ct)) {
+            anyContain = true
+            break
+          }
+        }
+        if (!anyContain) suspectMount = true
+      }
+      console.log(`   [AnswerBank] 页匹配: pageNumber=${pageNumber} title="${pageTitle}" chapterHint="${chapterHint}" → unit="${matchedUnit}" (${questions.length} 题)${suspectMount ? ' [suspect]' : ''}`)
 
       // 2) 在该 unit 的"section → qNo|subNo → row"二维索引中，每道题独立查答案
       //   同一 unit 下不同 section 可能有相同题号（如"一、填空题 1"和"三、解答题 1"），
