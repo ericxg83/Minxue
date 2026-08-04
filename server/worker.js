@@ -1887,16 +1887,97 @@ export function pickAnswerUnit(answersByUnit, pageTitle, questions, pageNumber, 
     }
   }
 
-  // 2) 题号覆盖率打分（带题型吻合度加权）
-  const qNos = (questions || []).filter(q => q.question_number != null).map(q => Number(q.question_number))
-  if (qNos.length === 0) return null
+  // 2) 学生答案反推（按题粒度，逻辑收敛在此处，调用方不再重复）
+  //   与下一条"答案覆盖率"的差异：
+  //   - 本策略：按题号粒度逐题搜索，最高总相似度胜出（searchUnitByStudentAnswers）
+  //   - 答案覆盖率：整页学生答案集合 vs unit 整本标准答案集合的命中率
+  //   两者先后执行是冗余安全：任一命中即返回，避免下游错挂
+  const inferredByAnswers = searchUnitByStudentAnswers(questions || [], answersByUnit)
+  if (inferredByAnswers) {
+    console.log(`[pickAnswerUnit] 学生答案反推命中: unit="${inferredByAnswers.unitKey}" hits=${inferredByAnswers.hits} score=${inferredByAnswers.totalScore.toFixed(2)}`)
+    return inferredByAnswers.unitKey
+  }
 
-  // 2.0) 页码范围兜底：标题失配但题号仍可能唯一定位单元。
-  //      答案 PDF 解析时已记录每个单元的 answer_page_start/end，
-  //      当 pageNumber 落在某单元的 [start,end] 区间内时，强信号→直接走该单元。
-  //      多个区间同时命中（区间邻接/重叠时）→ 走题号覆盖率打分，但仅在区间内打分。
-  //      没有任何区间匹配 → 退化为全候选打分（保持旧行为）。
-  let scopedCandidates = candidates
+  // 3) 答案覆盖率兜底（整页粒度：拿本页学生所有非空答案 vs 候选 unit 整本标准答案）
+  //   searchUnitByStudentAnswers 已失败（按题号粒度没匹配上），这里放宽到整页命中率。
+  //   与 searchUnitByStudentAnswers 的差异：
+  //   - searchUnitByStudentAnswers 是按题号粒度逐题匹配，可能多题命中但都集中在某无关 unit
+  //   - 本策略是把整页学生答案作为一个集合，看哪个 unit 的"答案指纹集合"覆盖最广
+  //   阈值：≥ 60% 覆盖率 + ≥ 3 道题命中 才采用
+  //   题号 < 3 不准走答案覆盖率（学生答案太少容易跨章错挂）
+  const studentAnswerList = (questions || []).filter(q => {
+    const sa = (q.student_answer || '').toString().trim()
+    return sa && q.question_type !== 'choice' && q.question_type !== 'judge'
+  })
+  // 仅在学生答案有内容时才启用（纯选择题页走不到这里）
+  if (studentAnswerList.length >= 3) {
+    // 预计算每个 unit 的所有标准答案指纹集合（去重）
+    const unitFingerprints = new Map() // unitKey → Set<normalizedAnswer>
+    for (const c of candidates) {
+      const secMap = answersByUnit.get(c.unitKey)
+      if (!secMap) continue
+      const fp = new Set()
+      for (const qMap of secMap.values()) {
+        for (const row of qMap.values()) {
+          if (!row || !row.standard_answer) continue
+          const sa = String(row.standard_answer).trim()
+          if (!sa) continue
+          // 归一化：去空白、转小写
+          fp.add(sa.replace(/\s+/g, '').toLowerCase())
+        }
+      }
+      unitFingerprints.set(c.unitKey, fp)
+    }
+
+    let bestUnit = null
+    let bestHits = 0
+    let bestTotalScore = 0
+    for (const [unitKey, fp] of unitFingerprints) {
+      let hits = 0
+      let totalScore = 0
+      for (const q of studentAnswerList) {
+        const sa = (q.student_answer || '').toString().trim().replace(/\s+/g, '').toLowerCase()
+        if (!sa) continue
+        // 精确匹配
+        if (fp.has(sa)) {
+          hits++
+          totalScore += 1.0
+          continue
+        }
+        // 相似度匹配（最长公共子串 / 编辑距离简化版）
+        for (const ref of fp) {
+          if (ref === sa) continue // 精确已查
+          if (Math.abs(ref.length - sa.length) > Math.max(2, ref.length * 0.3)) continue // 长度差过大跳过
+          const sim = stringSimilarity(sa, ref)
+          if (sim >= 0.7) {
+            hits++
+            totalScore += sim
+            break
+          }
+        }
+      }
+      const coverage = hits / studentAnswerList.length
+      if (coverage >= 0.6 && hits >= 3) {
+        // 命中率最高优先；并列时取总相似度高
+        if (hits > bestHits || (hits === bestHits && totalScore > bestTotalScore)) {
+          bestHits = hits
+          bestTotalScore = totalScore
+          bestUnit = unitKey
+        }
+      }
+    }
+    if (bestUnit) {
+      console.log(`[pickAnswerUnit] 答案覆盖率兜底命中: unit="${bestUnit}" hits=${bestHits}/${studentAnswerList.length} score=${bestTotalScore.toFixed(2)}`)
+      return bestUnit
+    }
+  } else if (studentAnswerList.length > 0) {
+    console.log(`[pickAnswerUnit] 学生答案 < 3 道（${studentAnswerList.length} 道），拒绝答案覆盖率兜底`)
+  }
+
+  // 3) 页码范围兜底（依赖答案 PDF 元数据 pageStart/pageEnd，**不是题号覆盖率**）
+  //   旧策略在这里还做了"题号覆盖率打分"，但题号覆盖率是纯数字信号，跨章错挂风险高。
+  //   此处只保留"页码唯一命中"和"页码范围缩窄 + 答案覆盖率再打分"两种更可靠信号。
+  //   标题匹配 + 学生答案反推 + 答案覆盖率都失败时，最后用 pageNumber 反查答案 PDF 位置。
   if (pageNumber != null && Number.isFinite(Number(pageNumber))) {
     const page = Number(pageNumber)
     const inRange = candidates.filter(c =>
@@ -1904,173 +1985,73 @@ export function pickAnswerUnit(answersByUnit, pageTitle, questions, pageNumber, 
       page >= Number(c.pageStart) && page <= Number(c.pageEnd)
     )
     if (inRange.length === 1) {
-      // 唯一区间命中：仍需题号覆盖率兜底防错挂（>=1题命中即采用），
-      // 防止邻接单元页号漂移（如 unit A 末页 = unit B 末页错位）
-      const secMap = answersByUnit.get(inRange[0].unitKey)
-      let covered = 0
-      for (const q of questions || []) {
-        if (q.question_number == null) continue
-        const qKey = `${Number(q.question_number)}|${q.sub_no || ''}`
-        for (const qMap of secMap.values()) {
-          if (qMap.has(qKey)) { covered++; break }
+      // 唯一区间命中：
+      //   - 有学生答案（≥1 道非选择题）→ 答案覆盖率 ≥ 30% 才采用
+      //   - 纯选择题页（无学生答案可比对）→ 页码范围兜底直接采用（选择题题号覆盖率已废，
+      //     页码唯一命中是唯一可靠信号）
+      const candidateAnswers = answersByUnit.get(inRange[0].unitKey)
+      if (candidateAnswers) {
+        if (studentAnswerList.length === 0) {
+          // 纯选择题页：直接采用页码唯一命中
+          console.log(`[pickAnswerUnit] 页码范围兜底命中: unit="${inRange[0].unitKey}" pageNumber=${pageNumber}（纯选择题页，无学生答案可比）`)
+          return inRange[0].unitKey
         }
-      }
-      // 唯一命中且任何题号都能在该单元查到 → 直接采用
-      if (covered > 0) return inRange[0].unitKey
-      // 唯一命中但题号完全没匹配 → 不强行采用，退到覆盖率打分
-    } else if (inRange.length > 1) {
-      // 多个区间同时命中：缩窄候选集后再打分，避免跨区错挂
-      scopedCandidates = inRange
-    }
-  }
-
-  // 2.0.5) chapterHint 兜底（最后手段，缩窄候选集）。
-  //   仅在 0/1/1.5 都没命中时启用，且必须**严匹配**：要求 candidates 的 unitKeyRaw 含"|XX.YY"
-  //   这种 lesson_code 段，且 chapterHint 含此 lesson_code，才纳入打分。
-  //   旧版直接把 chapterHint="第十九章实数"扔到所有含此子串的 unitTitle，导致
-  //   "试卷4"（key="试卷4|19.2"）和"试卷6"（key="试卷6"，title 含"第十九章"）双双命中，
-  //   最后由"包含更多"原则（试卷6 title 长）错挂到试卷6。修复：chapterHint 兜底必须
-  //   **配合 lesson_code 段**才能生效，否则视为"无效兜底"、直接用题号覆盖率打分。
-  //
-  //   二次缩窄（章节关键词）：lesson_code 段只能缩窄到 19.* / 21.* 这种大章，区分不出
-  //   19.1（"平方根与立方根"）和 19.2（"实数"）。当 chapterHint 包含"实数/二次根式/
-  //   一元二次方程/直角三角形"这种细分章节词时，用它去匹配 unitTitle 做二次缩窄。
-  //   这能解决无 pageTitle 场景下"19.1 vs 19.2"错挂（实测 user 截图 18-20 题为 19.2
-  //   实数，旧版会被错挂到 19.1 试卷①，因 19.1 也覆盖 18-20 题号）。
-  if (chapterHint && typeof chapterHint === 'string' && scopedCandidates.length > 1) {
-    // 提取 chapterHint 中的 lesson_code 段：支持"19.2"、第19章、第十九章
-    let hintLesson = null
-    const lessonMatch = chapterHint.match(/(\d{1,2}\.\d{1,2}(?:\(\d+\))?)/)
-    if (lessonMatch) {
-      hintLesson = lessonMatch[1]
-    } else {
-      // 中文数字映射
-      const cnDigit = { '零': 0, '一': 1, '二': 2, '三': 3, '四': 4, '五': 5, '六': 6, '七': 7, '八': 8, '九': 9, '十': 10 }
-      const cnChapter = chapterHint.match(/第([零一二三四五六七八九十]+)章/)
-      if (cnChapter) {
-        const s = cnChapter[1]
-        let n = 0
-        if (s === '十') n = 10
-        else if (s.length === 1) n = cnDigit[s] || 0
-        else if (s.length === 2 && s[0] === '十') n = 10 + (cnDigit[s[1]] || 0)
-        else if (s.length === 2 && s[1] === '十') n = (cnDigit[s[0]] || 0) * 10
-        else if (s.length === 3) n = (cnDigit[s[0]] || 0) * 10 + (cnDigit[s[2]] || 0)
-        if (n > 0) hintLesson = String(n)
-      }
-    }
-    if (hintLesson) {
-      const narrowed = scopedCandidates.filter(c => {
-        const ck = c.unitKeyRaw || ''
-        return ck.includes(hintLesson)
-      })
-      // 仅在窄化后候选数 1-N 时采用（至少 1 个，至多不缩为 0）
-      if (narrowed.length >= 1 && narrowed.length < scopedCandidates.length) {
-        scopedCandidates = narrowed
-      }
-    }
-    // 二次缩窄：章节关键词（实数/二次根式/一元二次方程/直角三角形）匹配 unitTitle
-    // 必须等 lesson_code 缩窄后再做，否则 lesson_code 缩窄会因"21"匹配"21.5"把无关 unit 拉进来
-    // 例：chapterHint="第十九章实数" → 实数 → 试卷3/4/6 (而非 19.1 试卷1/2)
-    if (scopedCandidates.length > 1) {
-      const CHAPTER_KEYWORDS = [
-        { kw: '二次根式', mustInTitle: /二次根式|根号下/ },
-        { kw: '一元二次方程', mustInTitle: /一元二次方程/ },
-        { kw: '直角三角形', mustInTitle: /直角三角形|勾股|角平分线/ },
-        { kw: '实数', mustInTitle: /实数/ },
-      ]
-      const hintNorm = String(chapterHint).replace(/[\s　]+/g, '')
-      for (const { kw, mustInTitle } of CHAPTER_KEYWORDS) {
-        if (hintNorm.includes(kw)) {
-          const kwNarrowed = scopedCandidates.filter(c => {
-            const ct = c.unitTitle || ''
-            // 章节关键词必须出现在 unitTitle（避免"含子串"误中，如"实数"误中"实数提高性测试"也算命中）
-            return mustInTitle.test(ct)
-          })
-          // 仅在窄化后候选数 >=1 且确实缩窄了才采用
-          if (kwNarrowed.length >= 1 && kwNarrowed.length < scopedCandidates.length) {
-            scopedCandidates = kwNarrowed
-            break // 一次缩窄足够，避免"实数"+"二次根式"等组合误伤
+        const fp = new Set()
+        for (const qMap of candidateAnswers.values()) {
+          for (const row of qMap.values()) {
+            if (row && row.standard_answer) {
+              fp.add(String(row.standard_answer).trim().replace(/\s+/g, '').toLowerCase())
+            }
           }
         }
-      }
-    }
-  }
-
-  let bestKey = null
-  let bestScore = -1
-  for (const c of scopedCandidates) {
-    const secMap = answersByUnit.get(c.unitKey)
-    let covered = 0
-    let typeMatch = 0
-    for (const q of questions || []) {
-      if (q.question_number == null) continue
-      const qNo = Number(q.question_number)
-      const subNo = q.sub_no || ''
-      const qKey = `${qNo}|${subNo}`
-      let row = null
-      for (const qMap of secMap.values()) {
-        if (qMap.has(qKey)) { row = qMap.get(qKey); break }
-      }
-      if (!row) continue
-      covered++
-      const ocrIsChoice = q.question_type === 'choice' || /^[A-Da-d]$/.test(String(q.student_answer || '').trim())
-      const refIsChoice = row.answer_type === 'choice'
-      if (ocrIsChoice === refIsChoice) typeMatch++
-    }
-    const score = covered / qNos.length + (covered > 0 ? (typeMatch / covered) * 0.5 : 0)
-    // 必须严格大于 bestScore，且 covered>0 才更新 bestKey，
-    // 避免遍历顺序导致"第一个 0 分 unit 被误认为最佳"（之前 bestScore=-1 时任何 0 分都会 > -1）
-    if (score > bestScore && covered > 0) {
-      bestScore = score
-      bestKey = c.unitKey
-    }
-  }
-
-  // 3) 覆盖率门槛：60%（旧 50% 偏松，错挂率较高）
-  //    防御 3：pageTitle 不可信（OCR 误识别）时，把门槛提高到 70%，
-  //    避免被「题号范围覆盖广」的非相关 unit 抢走（如试卷1|19.1 题号 1-28 容易覆盖 14-22）。
-  //    同时若 bestKey 与 chapterHint 完全冲突（如 chapterHint=实数但 bestKey 单元是"二次根式"），
-  //    也直接拒绝，防止错挂。
-  if (bestKey !== null) {
-    const secMap = answersByUnit.get(bestKey)
-    let covered = 0
-    for (const q of questions || []) {
-      if (q.question_number == null) continue
-      const qNo = Number(q.question_number)
-      const subNo = q.sub_no || ''
-      const qKey = `${qNo}|${subNo}`
-      for (const qMap of secMap.values()) {
-        if (qMap.has(qKey)) { covered++; break }
-      }
-    }
-    const coverageThreshold = trustedPageTitle ? 0.6 : 0.7
-    if (covered < qNos.length * coverageThreshold) {
-      console.warn(`[pickAnswerUnit] 覆盖率 ${covered}/${qNos.length} < ${Math.round(coverageThreshold*100)}%（pageTitle 不可信），拒绝挂载到 ${bestKey}`)
-      return null
-    }
-    // chapterHint 与 bestKey 单元的标题冲突检测
-    if (!trustedPageTitle && chapterHint && typeof chapterHint === 'string' && bestKey) {
-      const bestUnitTitle = (() => {
-        const secMap2 = answersByUnit.get(bestKey)
-        const sample = [...(secMap2?.values() || [])][0]?.values().next()?.value
-        return sample?.unit_title || ''
-      })()
-      const hintNorm = chapterHint.replace(/[\s　]+/g, '')
-      // 章节关键词反向校验：chapterHint 含 X 但 bestUnitTitle 完全没 X 的痕迹
-      for (const { kw, mustInTitle } of [
-        { kw: '二次根式', mustInTitle: /二次根式|根号下/ },
-        { kw: '一元二次方程', mustInTitle: /一元二次方程/ },
-        { kw: '直角三角形', mustInTitle: /直角三角形|勾股|角平分线/ },
-        { kw: '实数', mustInTitle: /实数/ },
-      ]) {
-        if (hintNorm.includes(kw) && !mustInTitle.test(bestUnitTitle)) {
-          console.warn(`[pickAnswerUnit] chapterHint="${chapterHint}" 含"${kw}"，但 bestKey="${bestKey}" 标题"${bestUnitTitle}" 不含此关键词，拒绝挂载`)
-          return null
+        let hits = 0
+        for (const q of studentAnswerList) {
+          const sa = (q.student_answer || '').toString().trim().replace(/\s+/g, '').toLowerCase()
+          if (!sa) continue
+          if (fp.has(sa)) { hits++; continue }
+          for (const ref of fp) {
+            if (ref === sa) continue
+            if (Math.abs(ref.length - sa.length) > Math.max(2, ref.length * 0.3)) continue
+            const sim = stringSimilarity(sa, ref)
+            if (sim >= 0.7) { hits++; break }
+          }
+        }
+        const coverage = hits / studentAnswerList.length
+        if (coverage >= 0.3) {
+          console.log(`[pickAnswerUnit] 页码范围兜底命中: unit="${inRange[0].unitKey}" pageNumber=${pageNumber} 答案覆盖率=${(coverage*100).toFixed(0)}%`)
+          return inRange[0].unitKey
         }
       }
     }
   }
-  return bestKey
+
+  // 4) 都没有命中 → 不强行挂载，让数据走"待审"通道
+  return null
+}
+
+// 简单字符串相似度（归一化后基于最长公共子序列 LCS 长度比）
+function stringSimilarity(a, b) {
+  if (!a || !b) return 0
+  if (a === b) return 1
+  const m = a.length, n = b.length
+  if (m === 0 || n === 0) return 0
+  // 优化：长度差过大时直接返回 0
+  if (Math.abs(m - n) > Math.max(2, Math.min(m, n) * 0.3)) return 0
+  // 动态规划 LCS
+  const dp = new Array(n + 1).fill(0)
+  for (let i = 1; i <= m; i++) {
+    let prev = 0
+    for (let j = 1; j <= n; j++) {
+      const tmp = dp[j]
+      if (a[i - 1] === b[j - 1]) {
+        dp[j] = prev + 1
+      } else {
+        dp[j] = Math.max(dp[j], dp[j - 1])
+      }
+      prev = tmp
+    }
+  }
+  return dp[n] / Math.max(m, n)
 }
 
 // 标题匹配策略：
@@ -2617,6 +2598,8 @@ const processWorkbookGrading = async (job) => {
     let matchedUnit = pickAnswerUnit(answersByUnit, pageTitle, questions, pageNumber, chapterHint)
 
     // 1a) 相邻上一页单元继承：当前页无标题/无章节提示且匹配失败时，继承相邻上一页
+    //   pickAnswerUnit 内部已包含：标题匹配 + 学生答案反推 + 答案覆盖率兜底 + 页码范围兜底。
+    //   相邻页继承是调用方独有的"批改流程连续性"信号，留给此处兜底。
     const hasPageContext = !!pageTitle || !!chapterHint
     if (!matchedUnit && !hasPageContext && prevMatchedUnit) {
       const candidateAnswers = answersByUnit.get(prevMatchedUnit)
@@ -2637,17 +2620,7 @@ const processWorkbookGrading = async (job) => {
       }
     }
 
-    // 1b) 学生答案反推单元：无标题/无章节提示/继承也失败时，跨单元按答案指纹搜索兜底
-    //   选择题/判断题答案太短，不参与（避免误匹配）。
-    if (!matchedUnit && questions.length > 0) {
-      const inferred = searchUnitByStudentAnswers(questions, answersByUnit)
-      if (inferred) {
-        matchedUnit = inferred.unitKey
-        console.log(`   [Workbook] 学生答案反推单元: pageNumber=${pageNumber} → unit="${matchedUnit}" hits=${inferred.hits} score=${inferred.totalScore.toFixed(2)}`)
-      }
-    }
-
-    // 更新上一页单元（只有正常匹配/成功继承/学生答案反推成功才传播）
+    // 更新上一页单元（只有正常匹配/成功继承才传播）
     if (matchedUnit) prevMatchedUnit = matchedUnit
 
     const unitAnswers = matchedUnit != null ? answersByUnit.get(matchedUnit) : null
@@ -3167,8 +3140,14 @@ const processAnswerBankGrading = async (job) => {
         ? [...answersByUnit.keys()][0]   // 唯一 unit 时直接采用，跳过匹配
         : pickAnswerUnit(answersByUnit, pageTitle, questions, pageNumber, chapterHint)
 
-      // 1a) 相邻上一页单元继承：当前页无标题/无章节关键词且正常匹配失败时
-      //   只继承相邻上一页；如果继承后题号完全对不上，放弃继承（避免错挂）
+      // 决策链（信息可靠性从高到低，2026-08 重排）：
+      //   1. 标题匹配 (pageTitle+chapterHint+lessonHint+内容特征)  ── 已在 pickAnswerUnit 内部完成
+      //   2. 学生答案反推（按题粒度）                            ── 已在 pickAnswerUnit 内部完成
+      //   3. 答案覆盖率兜底（整页粒度，整页学生答案 vs 整本标准答案）── 已在 pickAnswerUnit 内部完成
+      //   4. 页码范围兜底（依赖答案 PDF 物理位置元数据）          ── 已在 pickAnswerUnit 内部完成
+      //   5. 相邻上一页单元继承（仅在 1-4 都失败时尝试）         ── 在此处完成
+      // 相邻页继承的条件：无标题/无章节提示 + 正常匹配失败 + 上一页是有效挂载
+      // 同时校验继承的 unit 至少能覆盖本页 1 道题（避免把无关页的题号也吸过来）
       const hasPageContext = !!pageTitle || !!chapterHint
       if (!matchedUnit && !hasPageContext && prevMatchedUnit) {
         const candidateAnswers = answersByUnit.get(prevMatchedUnit)
@@ -3192,17 +3171,8 @@ const processAnswerBankGrading = async (job) => {
         }
       }
 
-      // 1b) 学生答案反推单元：无标题/无章节提示/继承也失败时，用学生答案跨单元搜索兜底
-      //   覆盖单张无标题页面场景；选择题/判断题不参与（答案太短易误匹配）
-      if (!matchedUnit && questions.length > 0) {
-        const inferred = searchUnitByStudentAnswers(questions, answersByUnit)
-        if (inferred) {
-          matchedUnit = inferred.unitKey
-          console.log(`   [AnswerBank] 学生答案反推单元: pageNumber=${pageNumber} → unit="${matchedUnit}" hits=${inferred.hits} score=${inferred.totalScore.toFixed(2)}`)
-        }
-      }
-
-      // 更新上一页单元（只有正常匹配/成功继承/学生答案反推成功才传播）
+      // 更新上一页单元（仅在 1/2/3 任一成功时传播；4 题号兜底也算，
+      // 但要明确打 [suspect-coverage] 标记以便审计）
       if (matchedUnit) prevMatchedUnit = matchedUnit
 
       const unitAnswers = matchedUnit != null ? answersByUnit.get(matchedUnit) : null
