@@ -2029,6 +2029,80 @@ export function pickAnswerUnit(answersByUnit, pageTitle, questions, pageNumber, 
   return null
 }
 
+// ═══════════════════════════════════════════════════════════════
+// 两遍扫描 + 双向相邻页继承（2026-08-04）
+//
+// 背景：答案库批改把"每页单元归属"与"批改"耦合在单遍循环里，
+// 且相邻继承只支持"后页继承前页"（prevMatchedUnit）。
+// 实测学生常把练习册【从后往前扫描】——卷子的首页（带"第二章评价测试卷"
+// 等标题、能被 OCR 识别）在扫描序列【末尾】，而其前面的解答题页没有标题，
+// 永远继承不到后面页的单元，导致整页 null。
+//
+// 修复：先对全部页做一轮独立匹配得到"锚点页"（能可靠定位的页），
+// 再从每个锚点向【前后两侧】传播单元，校验相邻页题号确实落在此单元内。
+// 这样无论正扫/倒扫，无标题的解答题页都能挂到同一卷子的单元。
+//
+// 返回：Array<{ pageNumber, unitKey|null }>，按 pageDataList 顺序。
+// ═══════════════════════════════════════════════════════════════
+export function resolveAnswerUnits(answersByUnit, pageDataList) {
+  const unitCount = answersByUnit ? answersByUnit.size : 0
+  if (unitCount === 0) return pageDataList.map(p => ({ pageNumber: p.pageNumber, unitKey: null }))
+  if (unitCount === 1) {
+    const only = [...answersByUnit.keys()][0]
+    return pageDataList.map(p => ({ pageNumber: p.pageNumber, unitKey: only }))
+  }
+
+  // 预扫描：每页独立匹配（含标题匹配/反推/覆盖率/页码兜底），得到锚点
+  const resolved = pageDataList.map(({ pageTitle, pageNumber, questions, chapterHint }, idx) => {
+    const unitKey = pickAnswerUnit(answersByUnit, pageTitle, questions, pageNumber, chapterHint)
+    return { pageNumber, unitKey, idx }
+  })
+
+  // 判断某单元是否能覆盖某页的全部题号（避免把无关页的题号也吸过来）
+  const unitCoversPage = (unitKey, questions) => {
+    if (!unitKey) return false
+    const secMap = answersByUnit.get(unitKey)
+    if (!secMap) return false
+    let covered = 0
+    for (const q of questions) {
+      if (q.question_number == null) continue
+      const qKey = `${Number(q.question_number)}|${q.sub_no || ''}`
+      for (const qMap of secMap.values()) {
+        if (qMap.has(qKey)) { covered++; break }
+      }
+    }
+    if (questions.length === 0) return false
+    // 至少覆盖一半题号才继承（纯选择题页 OCR 题号也可能缺，放宽到 1 道）
+    return covered >= Math.max(1, Math.ceil(questions.length / 2))
+  }
+
+  // 双向传播（BFS 迭代）：锚点向两侧逐页扩展
+  let changed = true
+  while (changed) {
+    changed = false
+    for (let i = 0; i < resolved.length; i++) {
+      if (resolved[i].unitKey) continue
+      // 向两侧找最近的锚点
+      let prevUnit = null, nextUnit = null
+      for (let j = i - 1; j >= 0; j--) { if (resolved[j].unitKey) { prevUnit = resolved[j].unitKey; break } }
+      for (let j = i + 1; j < resolved.length; j++) { if (resolved[j].unitKey) { nextUnit = resolved[j].unitKey; break } }
+      const candidates = [...new Set([prevUnit, nextUnit].filter(Boolean))]
+      if (candidates.length === 0) continue
+      const page = pageDataList[i]
+      const matchable = candidates.filter(u => unitCoversPage(u, page.questions))
+      if (matchable.length === 0) continue
+      // 倒序扫描场景：标题页（锚点）通常在该页【后面】，优先继承向后锚点；
+      // 正序扫描场景则靠向前锚点兜底（与旧版 prevMatchedUnit 行为一致）。
+      const chosen = matchable.includes(nextUnit) ? nextUnit : matchable[0]
+      resolved[i].unitKey = chosen
+      console.log(`   [AnswerBank] 双向相邻继承: pageNumber=${page.pageNumber} → unit="${chosen}"（相邻锚点传播）`)
+      changed = true
+    }
+  }
+
+  return resolved.map(({ pageNumber, unitKey }) => ({ pageNumber, unitKey }))
+}
+
 // 简单字符串相似度（归一化后基于最长公共子序列 LCS 长度比）
 function stringSimilarity(a, b) {
   if (!a || !b) return 0
@@ -2586,8 +2660,12 @@ const processWorkbookGrading = async (job) => {
   let matchedCount = 0
   let emptyCount = 0
   const pagesMatchInfo = []
-  let prevMatchedUnit = null // 相邻上一页已识别单元，用于无标题页继承
   const isChoiceLike = (t) => t === 'choice' || t === 'judge'
+
+  // ★ 两遍扫描：先预识别每页单元（含双向相邻继承，解决学生倒序扫描时
+  //   无标题解答题页永远继承不到后页标题页的问题），批改循环直接采用结果。
+  const resolvedUnits = resolveAnswerUnits(answersByUnit, pageDataList)
+  const unitByPageNumber = new Map(resolvedUnits.map(r => [r.pageNumber, r.unitKey]))
 
   for (const { pageTitle, imageUrl, questions, pageNumber, chapterHint } of pageDataList) {
     if (questions.length === 0) continue
@@ -2595,33 +2673,9 @@ const processWorkbookGrading = async (job) => {
     // 1) 选本页所属单元（unitKey）—— pageNumber 用于"页码范围兜底"
     //    chapterHint 来自 OCR 阶段 AI 推断的章节（如"第二十章二次根式"），
     //    当 pageTitle 缺失/匹配失败时作为强信号兜底。
-    let matchedUnit = pickAnswerUnit(answersByUnit, pageTitle, questions, pageNumber, chapterHint)
-
-    // 1a) 相邻上一页单元继承：当前页无标题/无章节提示且匹配失败时，继承相邻上一页
-    //   pickAnswerUnit 内部已包含：标题匹配 + 学生答案反推 + 答案覆盖率兜底 + 页码范围兜底。
-    //   相邻页继承是调用方独有的"批改流程连续性"信号，留给此处兜底。
-    const hasPageContext = !!pageTitle || !!chapterHint
-    if (!matchedUnit && !hasPageContext && prevMatchedUnit) {
-      const candidateAnswers = answersByUnit.get(prevMatchedUnit)
-      if (candidateAnswers) {
-        let anyMatch = false
-        for (const q of questions) {
-          if (q.question_number == null) continue
-          const qKey = `${Number(q.question_number)}|${q.sub_no || ''}`
-          for (const qMap of candidateAnswers.values()) {
-            if (qMap.has(qKey)) { anyMatch = true; break }
-          }
-          if (anyMatch) break
-        }
-        if (anyMatch) {
-          matchedUnit = prevMatchedUnit
-          console.log(`   [Workbook] 继承上一页单元: pageNumber=${pageNumber} → unit="${matchedUnit}"`)
-        }
-      }
-    }
-
-    // 更新上一页单元（只有正常匹配/成功继承才传播）
-    if (matchedUnit) prevMatchedUnit = matchedUnit
+    //    预扫描 resolveAnswerUnits 已内含：标题匹配 + 学生答案反推 + 答案覆盖率兜底 +
+    //    页码范围兜底 + 双向相邻页继承（含倒序扫描场景）。
+    const matchedUnit = unitByPageNumber.get(pageNumber) ?? null
 
     const unitAnswers = matchedUnit != null ? answersByUnit.get(matchedUnit) : null
 
@@ -3130,50 +3184,23 @@ const processAnswerBankGrading = async (job) => {
     // 供后续 judgement 写入时携带诊断信息（questions 表无此列，故不入表）
     const matchInfoByQN = new Map()
     let qnCounter = 0
-    let prevMatchedUnit = null  // 相邻上一页继承用
+
+    // ★ 两遍扫描：先预识别每页单元（含双向相邻继承，解决学生倒序扫描时
+    //   无标题解答题页永远继承不到后页标题页的问题），批改循环直接采用结果。
+    //   决策链（信息可靠性从高到低，2026-08 重排）：
+    //     1. 标题匹配 (pageTitle+chapterHint+lessonHint+内容特征)  ── pickAnswerUnit 内部
+    //     2. 学生答案反推（按题粒度）                            ── pickAnswerUnit 内部
+    //     3. 答案覆盖率兜底（整页粒度）                          ── pickAnswerUnit 内部
+    //     4. 页码范围兜底（依赖答案 PDF 物理位置元数据）          ── pickAnswerUnit 内部
+    //     5. 双向相邻页继承（锚点向两侧传播，含倒序扫描场景）     ── resolveAnswerUnits
+    const resolvedUnits = resolveAnswerUnits(answersByUnit, pageDataList)
+    const unitByPageNumber = new Map(resolvedUnits.map(r => [r.pageNumber, r.unitKey]))
 
     for (const { pageTitle, pageNumber, imageUrl, questions, chapterHint } of pageDataList) {
       if (questions.length === 0) continue
 
-      // 1) 选本页所属 unit
-      let matchedUnit = unitCount === 1
-        ? [...answersByUnit.keys()][0]   // 唯一 unit 时直接采用，跳过匹配
-        : pickAnswerUnit(answersByUnit, pageTitle, questions, pageNumber, chapterHint)
-
-      // 决策链（信息可靠性从高到低，2026-08 重排）：
-      //   1. 标题匹配 (pageTitle+chapterHint+lessonHint+内容特征)  ── 已在 pickAnswerUnit 内部完成
-      //   2. 学生答案反推（按题粒度）                            ── 已在 pickAnswerUnit 内部完成
-      //   3. 答案覆盖率兜底（整页粒度，整页学生答案 vs 整本标准答案）── 已在 pickAnswerUnit 内部完成
-      //   4. 页码范围兜底（依赖答案 PDF 物理位置元数据）          ── 已在 pickAnswerUnit 内部完成
-      //   5. 相邻上一页单元继承（仅在 1-4 都失败时尝试）         ── 在此处完成
-      // 相邻页继承的条件：无标题/无章节提示 + 正常匹配失败 + 上一页是有效挂载
-      // 同时校验继承的 unit 至少能覆盖本页 1 道题（避免把无关页的题号也吸过来）
-      const hasPageContext = !!pageTitle || !!chapterHint
-      if (!matchedUnit && !hasPageContext && prevMatchedUnit) {
-        const candidateAnswers = answersByUnit.get(prevMatchedUnit)
-        if (candidateAnswers) {
-          let anyMatch = false
-          for (const q of questions) {
-            if (q.question_number == null) continue
-            const qKey = `${Number(q.question_number)}|${q.sub_no || ''}`
-            for (const qMap of candidateAnswers.values()) {
-              if (qMap.has(qKey)) {
-                anyMatch = true
-                break
-              }
-            }
-            if (anyMatch) break
-          }
-          if (anyMatch) {
-            matchedUnit = prevMatchedUnit
-            console.log(`   [AnswerBank] 继承上一页单元: pageNumber=${pageNumber} → unit="${matchedUnit}"`)
-          }
-        }
-      }
-
-      // 更新上一页单元（仅在 1/2/3 任一成功时传播；4 题号兜底也算，
-      // 但要明确打 [suspect-coverage] 标记以便审计）
-      if (matchedUnit) prevMatchedUnit = matchedUnit
+      // 1) 选本页所属 unit（直接用预扫描结果，含双向相邻继承）
+      const matchedUnit = unitByPageNumber.get(pageNumber) ?? null
 
       const unitAnswers = matchedUnit != null ? answersByUnit.get(matchedUnit) : null
       const noUnit = unitCount === 0
@@ -3626,7 +3653,12 @@ const processAnswerBankGrading = async (job) => {
           question_number: q.question_number,
           is_suspicious: !!subBreakdown,  // sub 拆分匹配标记为可疑，供 PC 端展示
           confidence: isEmpty ? 0 : (answerRow ? (subBreakdown ? 0.9 : 0.85) : 0),
-          source_type: resource.resource_type === 'exam' ? 'exam' : 'homework'
+          source_type: resource.resource_type === 'exam' ? 'exam' : 'homework',
+          // 落库学生作答页图 + 归一化 0-1000 坐标，供 PC 后台 PaperViewerPanel
+          // 在中间试卷页定位题目（与 processWorkbookGrading 保持一致的存储策略）。
+          image_url: q._page_image_url || imageUrl || null,
+          block_coordinates: q.block_coordinates || null,
+          text_bbox: q.block_coordinates || null,
           // 单元匹配结果不写入 questions（表无对应列），仅在 judgement.metadata 记录
         }
 

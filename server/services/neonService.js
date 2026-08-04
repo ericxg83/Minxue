@@ -1216,6 +1216,7 @@ export const getWorksheetAnswersBySection = async (worksheetId) => {
     // 同 key 重复时，rows 已按 created_at 升序，后写覆盖前写
     secMap.get(sectionKey).set(qKey, {
       answer: r.answer,
+      standard_answer: r.answer,
       answer_type: r.answer_type,
       content: r.content || null,
       unit_id: r.unit_id,
@@ -1448,6 +1449,7 @@ export const getResourceAnswersBySection = async (resourceId) => {
     // 同 key 重复时，rows 已按 created_at 升序，后写覆盖前写
     secMap.get(sectionKey).set(qKey, {
       answer: r.answer,
+      standard_answer: r.answer,
       answer_type: r.answer_type,
       content: r.content || null,
       unit_id: r.unit_id,
@@ -1456,7 +1458,7 @@ export const getResourceAnswersBySection = async (resourceId) => {
       unit_seq: r.unit_seq,
       section: r.section,
       sub_no: subNo,
-      // 单元的答案页范围（答案 PDF 中该单元首页/末页号），
+      // 单元的答案页范围（answer PDF 中该单元首页/末页号），
       // 用于 pickAnswerUnit 在标题失配时按页码兜底匹配。
       answer_page_start: r.answer_page_start ?? null,
       answer_page_end: r.answer_page_end ?? null,
