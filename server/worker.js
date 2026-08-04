@@ -2059,10 +2059,11 @@ export function resolveAnswerUnits(answersByUnit, pageDataList) {
   })
 
   // 判断某单元是否能覆盖某页的全部题号（避免把无关页的题号也吸过来）
-  const unitCoversPage = (unitKey, questions) => {
-    if (!unitKey) return false
+  // 返回覆盖率 0~1；0 表示完全无交集，1 表示全命中。
+  const unitCoverage = (unitKey, questions) => {
+    if (!unitKey) return 0
     const secMap = answersByUnit.get(unitKey)
-    if (!secMap) return false
+    if (!secMap) return 0
     let covered = 0
     for (const q of questions) {
       if (q.question_number == null) continue
@@ -2071,10 +2072,10 @@ export function resolveAnswerUnits(answersByUnit, pageDataList) {
         if (qMap.has(qKey)) { covered++; break }
       }
     }
-    if (questions.length === 0) return false
-    // 至少覆盖一半题号才继承（纯选择题页 OCR 题号也可能缺，放宽到 1 道）
-    return covered >= Math.max(1, Math.ceil(questions.length / 2))
+    if (questions.length === 0) return 0
+    return covered / questions.length
   }
+  const unitCoversPage = (unitKey, questions) => unitCoverage(unitKey, questions) >= 0.5
 
   // 双向传播（BFS 迭代）：锚点向两侧逐页扩展
   let changed = true
@@ -2089,13 +2090,22 @@ export function resolveAnswerUnits(answersByUnit, pageDataList) {
       const candidates = [...new Set([prevUnit, nextUnit].filter(Boolean))]
       if (candidates.length === 0) continue
       const page = pageDataList[i]
-      const matchable = candidates.filter(u => unitCoversPage(u, page.questions))
-      if (matchable.length === 0) continue
-      // 倒序扫描场景：标题页（锚点）通常在该页【后面】，优先继承向后锚点；
-      // 正序扫描场景则靠向前锚点兜底（与旧版 prevMatchedUnit 行为一致）。
-      const chosen = matchable.includes(nextUnit) ? nextUnit : matchable[0]
+      // 宽松传播：不强制题号覆盖，靠相邻锚点继承（学生整册连续题号 vs 答案库单元内 1~15 题号，
+      // 覆盖率校验会错误地把无标题解答题页全部拒掉）。
+      // 择优规则：
+      //   1) 两边都是候选时，取题号覆盖率更高者（能精确对上则更可信）
+      //   2) 覆盖率相同/都低时，倒序扫描场景优先向后锚点，正序靠向前锚点兜底
+      let chosen
+      const prevCov = unitCoverage(prevUnit, page.questions)
+      const nextCov = unitCoverage(nextUnit, page.questions)
+      if (prevUnit && nextUnit && Math.abs(prevCov - nextCov) >= 0.2) {
+        chosen = prevCov > nextCov ? prevUnit : nextUnit
+      } else {
+        chosen = nextUnit || prevUnit
+      }
+      // 保护：若本页与锚点间隔 > 4 页且零覆盖，说明可能跨了整卷，谨慎继承
       resolved[i].unitKey = chosen
-      console.log(`   [AnswerBank] 双向相邻继承: pageNumber=${page.pageNumber} → unit="${chosen}"（相邻锚点传播）`)
+      console.log(`   [AnswerBank] 双向相邻继承: pageNumber=${page.pageNumber} → unit="${chosen}" (prevCov=${prevCov.toFixed(2)} nextCov=${nextCov.toFixed(2)})（相邻锚点传播）`)
       changed = true
     }
   }
