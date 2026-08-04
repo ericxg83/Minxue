@@ -2075,39 +2075,40 @@ export function resolveAnswerUnits(answersByUnit, pageDataList) {
     if (questions.length === 0) return 0
     return covered / questions.length
   }
-  const unitCoversPage = (unitKey, questions) => unitCoverage(unitKey, questions) >= 0.5
 
-  // 双向传播（BFS 迭代）：锚点向两侧逐页扩展
-  let changed = true
-  while (changed) {
-    changed = false
-    for (let i = 0; i < resolved.length; i++) {
-      if (resolved[i].unitKey) continue
-      // 向两侧找最近的锚点
-      let prevUnit = null, nextUnit = null
-      for (let j = i - 1; j >= 0; j--) { if (resolved[j].unitKey) { prevUnit = resolved[j].unitKey; break } }
-      for (let j = i + 1; j < resolved.length; j++) { if (resolved[j].unitKey) { nextUnit = resolved[j].unitKey; break } }
-      const candidates = [...new Set([prevUnit, nextUnit].filter(Boolean))]
-      if (candidates.length === 0) continue
-      const page = pageDataList[i]
-      // 宽松传播：不强制题号覆盖，靠相邻锚点继承（学生整册连续题号 vs 答案库单元内 1~15 题号，
-      // 覆盖率校验会错误地把无标题解答题页全部拒掉）。
-      // 择优规则：
-      //   1) 两边都是候选时，取题号覆盖率更高者（能精确对上则更可信）
-      //   2) 覆盖率相同/都低时，倒序扫描场景优先向后锚点，正序靠向前锚点兜底
-      let chosen
-      const prevCov = unitCoverage(prevUnit, page.questions)
-      const nextCov = unitCoverage(nextUnit, page.questions)
-      if (prevUnit && nextUnit && Math.abs(prevCov - nextCov) >= 0.2) {
-        chosen = prevCov > nextCov ? prevUnit : nextUnit
-      } else {
-        chosen = nextUnit || prevUnit
-      }
-      // 保护：若本页与锚点间隔 > 4 页且零覆盖，说明可能跨了整卷，谨慎继承
-      resolved[i].unitKey = chosen
-      console.log(`   [AnswerBank] 双向相邻继承: pageNumber=${page.pageNumber} → unit="${chosen}" (prevCov=${prevCov.toFixed(2)} nextCov=${nextCov.toFixed(2)})（相邻锚点传播）`)
-      changed = true
+  // 双向传播：每个无锚点页**独立**寻找最近的锚点页并继承其单元。
+  // 与 BFS 逐轮扩散不同：这里只从"初始锚点"（pre 扫描直接命中）继承，
+  // 绝不从"已传播的中间页"再扩散，避免一页错锚导致后续连环带偏。
+  const anchors = resolved.filter(r => r.unitKey).map(r => r.idx) // 初始锚点索引
+  for (let i = 0; i < resolved.length; i++) {
+    if (resolved[i].unitKey) continue
+    if (anchors.length === 0) continue
+    // 找 i 之前最近、之后最近的初始锚点
+    let prevA = -1, nextA = -1
+    for (const a of anchors) { if (a < i && (prevA === -1 || a > prevA)) prevA = a }
+    for (const a of anchors) { if (a > i && (nextA === -1 || a < nextA)) nextA = a }
+    if (prevA === -1 && nextA === -1) continue
+    const page = pageDataList[i]
+    // 择优：
+    //   1) 两侧都有锚点且距离不同 → 取页距更近者（中间页归属最近的标题页）
+    //   2) 距离相等 → 题号覆盖率裁决
+    //   3) 仅一侧 → 直接继承
+    let chosen
+    const distPrev = prevA >= 0 ? i - prevA : Infinity
+    const distNext = nextA >= 0 ? nextA - i : Infinity
+    const prevUnit = prevA >= 0 ? resolved[prevA].unitKey : null
+    const nextUnit = nextA >= 0 ? resolved[nextA].unitKey : null
+    const prevCov = prevUnit ? unitCoverage(prevUnit, page.questions) : 0
+    const nextCov = nextUnit ? unitCoverage(nextUnit, page.questions) : 0
+    if (prevUnit && nextUnit && distPrev !== distNext) {
+      chosen = distPrev < distNext ? prevUnit : nextUnit
+    } else if (prevUnit && nextUnit) {
+      chosen = prevCov >= nextCov ? prevUnit : nextUnit
+    } else {
+      chosen = nextUnit || prevUnit
     }
+    resolved[i].unitKey = chosen
+    console.log(`   [AnswerBank] 双向相邻继承: pageNumber=${page.pageNumber} → unit="${chosen}" (distPrev=${distPrev} distNext=${distNext} prevCov=${prevCov.toFixed(2)} nextCov=${nextCov.toFixed(2)})（相邻锚点传播）`)
   }
 
   return resolved.map(({ pageNumber, unitKey }) => ({ pageNumber, unitKey }))
@@ -3201,8 +3202,39 @@ const processAnswerBankGrading = async (job) => {
     //     1. 标题匹配 (pageTitle+chapterHint+lessonHint+内容特征)  ── pickAnswerUnit 内部
     //     2. 学生答案反推（按题粒度）                            ── pickAnswerUnit 内部
     //     3. 答案覆盖率兜底（整页粒度）                          ── pickAnswerUnit 内部
-    //     4. 页码范围兜底（依赖答案 PDF 物理位置元数据）          ── pickAnswerUnit 内部
-    //     5. 双向相邻页继承（锚点向两侧传播，含倒序扫描场景）     ── resolveAnswerUnits
+//    4. 页码范围兜底（依赖答案 PDF 物理位置元数据）          ── pickAnswerUnit 内部
+    //    5. 双向相邻页继承（锚点向两侧传播，含倒序扫描场景）     ── resolveAnswerUnits
+    // 调试：当 DEBUG_DUMP_OCR=1 时，把本任务每页 OCR 原始输入 + 单元解析结果落盘，
+    // 便于本地无 OCR 时精确复现（无需再跑 AI 识别）。
+    if (process.env.DEBUG_DUMP_OCR === '1') {
+      try {
+        const dumpPath = 'scripts/ocr_dump.json'
+        const fs = require('fs')
+        const resolvedUnits = resolveAnswerUnits(answersByUnit, pageDataList)
+        const dump = {
+          taskId,
+          resourceId,
+          unitList: [...answersByUnit.keys()],
+          pages: pageDataList.map(pd => ({
+            pageNumber: pd.pageNumber,
+            pageTitle: pd.pageTitle ?? null,
+            chapterHint: pd.chapterHint ?? null,
+            questions: (pd.questions || []).map(q => ({
+              question_number: q.question_number ?? null,
+              question_type: q.question_type ?? null,
+              content: q.content ?? null,
+              student_answer: q.student_answer ?? null,
+              sub_no: q.sub_no ?? null
+            }))
+          })),
+          resolvedUnits: resolvedUnits.map(r => ({ pageNumber: r.pageNumber, unitKey: r.unitKey }))
+        }
+        fs.writeFileSync(dumpPath, JSON.stringify(dump, null, 2))
+        console.log(`   [AnswerBank] DEBUG_DUMP_OCR 已落盘 ${dumpPath}`)
+      } catch (e) {
+        console.error(`   [AnswerBank] DEBUG_DUMP_OCR 落盘失败:`, e.message)
+      }
+    }
     const resolvedUnits = resolveAnswerUnits(answersByUnit, pageDataList)
     const unitByPageNumber = new Map(resolvedUnits.map(r => [r.pageNumber, r.unitKey]))
 
