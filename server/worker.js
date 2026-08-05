@@ -725,20 +725,19 @@ const recognizeQuestions = async (imageBase64, taskId, retryCount = 0) => {
       const aiAnswer = rawStudentAnswer
       const cleanedStudentAnswer = answerSource === 'blank' ? '' : rawStudentAnswer
 
-      // Check if the paper has manual checkmark (✓) — skip AI grading for these
+      // Check if the paper has manual checkmark (✓) from the teacher.
+      // 策略（仅兜底，不覆盖比对结果）：
+      //   - 老师红勾只在答案比对"无法判定"(null，如答案无法识别/无标准答案)时兜底判对；
+      //   - 比对明确判错(false)时，即使识别到红勾也保持判错，
+      //     避免红勾误识别把真正的错题漏收进错题本。
       const hasManualCheckmark = q.has_manual_checkmark === true
 
-      let isCorrect, status
-      if (hasManualCheckmark) {
-        // Paper already has a ✓ mark — mark as correct, no AI grading needed
+      const judgment = judgeAnswer(cleanedStudentAnswer, q.answer, q.question_type)
+      let isCorrect = judgment.isCorrect
+      if (hasManualCheckmark && isCorrect === null) {
         isCorrect = true
-        status = 'correct'
-      } else {
-        // No manual mark — use normal AI judgment
-        const judgment = judgeAnswer(cleanedStudentAnswer, q.answer, q.question_type)
-        isCorrect = judgment.isCorrect
-        status = isCorrect === true ? 'correct' : (isCorrect === false ? 'wrong' : 'pending')
       }
+      const status = isCorrect === true ? 'correct' : (isCorrect === false ? 'wrong' : 'pending')
 
       return {
         id: crypto.randomUUID(),
@@ -2241,6 +2240,14 @@ export function calculateAnswerSimilarity(studentAns, refAns) {
     const shorter = Math.min(sNorm.length, rNorm.length)
     const longer = Math.max(sNorm.length, rNorm.length)
     if (shorter >= 2 && longer / shorter <= 1.5) return 0.85
+    // 应用题最终答案兜底：短串是"最终答案"（数字为主，可带纯单位/括号/标点），
+    // 只要它整体出现在长串（学生答案）中，就视为实质命中。
+    // 覆盖：学生答案 = 计算过程 + 最终答案（"…=1998(个) 答：有1998个。" vs "1998个"），
+    // 纯过程/单位干扰使 longer/shorter 远超 1.5，旧逻辑拒绝 → 单元反推失败挂错单元。
+    // 约束：短串长度 ≤ 12 且必须包含至少一个数字（避免"答："等无实质内容误中）。
+    // 短串即最终答案：sNorm.includes(rNorm) 时 rNorm 更短，否则 sNorm 更短。
+    const shortStr = sNorm.length < rNorm.length ? sNorm : rNorm
+    if (shorter >= 2 && shorter <= 12 && /\d/.test(shortStr)) return 0.8
   }
   // 数字序列相同
   const sNums = (sNorm.match(/-?\d+(?:\.\d+)?/g) || []).join(',')
