@@ -3204,42 +3204,6 @@ const processAnswerBankGrading = async (job) => {
     //     3. 答案覆盖率兜底（整页粒度）                          ── pickAnswerUnit 内部
 //    4. 页码范围兜底（依赖答案 PDF 物理位置元数据）          ── pickAnswerUnit 内部
     //    5. 双向相邻页继承（锚点向两侧传播，含倒序扫描场景）     ── resolveAnswerUnits
-    // 调试：当 DEBUG_DUMP_OCR=1 时，把本任务每页 OCR 原始输入 + 单元解析结果落盘，
-    // 便于本地无 OCR 时精确复现（无需再跑 AI 识别）。
-    if (process.env.DEBUG_DUMP_OCR === '1') {
-      try {
-        const dumpPath = 'scripts/ocr_dump.json'
-        const fs = require('fs')
-        const resolvedUnits = resolveAnswerUnits(answersByUnit, pageDataList)
-        const dump = {
-          taskId,
-          resourceId,
-          unitList: [...answersByUnit.keys()],
-          pages: pageDataList.map(pd => ({
-            pageNumber: pd.pageNumber,
-            pageTitle: pd.pageTitle ?? null,
-            chapterHint: pd.chapterHint ?? null,
-            questions: (pd.questions || []).map(q => ({
-              question_number: q.question_number ?? null,
-              question_type: q.question_type ?? null,
-              content: q.content ?? null,
-              student_answer: q.student_answer ?? null,
-              sub_no: q.sub_no ?? null
-            }))
-          })),
-          resolvedUnits: resolvedUnits.map(r => ({ pageNumber: r.pageNumber, unitKey: r.unitKey }))
-        }
-        // 写文件（相对 server 工作目录）
-        try { fs.writeFileSync(dumpPath, JSON.stringify(dump, null, 2)) } catch (e) {
-          console.error(`   [AnswerBank] DEBUG_DUMP_OCR 写文件失败:`, e.message)
-        }
-        // 同时放全局内存，供 /api/debug/ocr-dump 端点读取（免费 Render 无法用 Shell/下载文件）
-        globalThis.__ocrDump = dump
-        console.log(`   [AnswerBank] DEBUG_DUMP_OCR 已落盘(内存+文件) ${dumpPath}`)
-      } catch (e) {
-        console.error(`   [AnswerBank] DEBUG_DUMP_OCR 落盘失败:`, e.message)
-      }
-    }
     const resolvedUnits = resolveAnswerUnits(answersByUnit, pageDataList)
     const unitByPageNumber = new Map(resolvedUnits.map(r => [r.pageNumber, r.unitKey]))
 
