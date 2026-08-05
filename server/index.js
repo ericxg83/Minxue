@@ -31,6 +31,7 @@ import { migrateParseProgressColumns } from './migrations/031_add_parse_progress
 import { migrateResourceUnits } from './migrations/032_add_resource_units.js'
 import { migrateWrongQuestionSelfContained } from './migrations/033_add_wrong_question_self_contained.js'
 import { migrateWrongQuestionSubject } from './migrations/034_add_wrong_question_subject.js'
+import { migrateErrorAnalysis } from './migrations/035_add_error_analysis.js'
 import { scheduleNightParse } from './services/nightParseService.js'
 
 const __dirname = dirname(fileURLToPath(import.meta.url))
@@ -55,6 +56,8 @@ import { AI_CONFIG, getAIHeaders, buildTaggingPrompt, resetModelIndex } from './
 import weeklyReportRouter from './routes/weeklyReport.js'
 import worksheetsRouter from './routes/worksheets.js'
 import resourcesRouter from './routes/resources.js'
+import teachingRouter from './routes/teaching.js'
+import { runErrorDiagnosis } from './services/diagnosisService.js'
 import { cleanupStudentData } from './services/dataCleanupService.js'
 
 const app = express()
@@ -2273,9 +2276,64 @@ app.post('/api/admin/backfill-tags', async (req, res) => {
   })
 })
 
-    // 查询回填进度
 app.get('/api/admin/backfill-tags/progress', (req, res) => {
   res.json({ success: true, ...backfillProgress })
+})
+
+// ── 教学诊断回填（空题标记 + 做错错因分析，异步小批量自动接力）──
+let diagnosisRunning = false
+let diagnosisProgress = { total: 0, blank: 0, updated: 0, skipped: 0, done: false, detail: '' }
+
+async function runDiagnosisBackfill({ limit = 10, trigger = 'manual', chain = false } = {}) {
+  if (diagnosisRunning) return { started: false, reason: 'running', progress: diagnosisProgress }
+  diagnosisRunning = true
+  diagnosisProgress = { total: 0, blank: 0, updated: 0, skipped: 0, done: false, detail: '' }
+  try {
+    diagnosisProgress.detail = '扫描待分析错题...'
+    const result = await runErrorDiagnosis({ limit, trigger, chain: false })
+    if (result.total > 0) {
+      diagnosisProgress.total = result.total
+      diagnosisProgress.blank = result.blank || 0
+      diagnosisProgress.updated = result.updated || 0
+      diagnosisProgress.skipped = result.skipped || 0
+      // 自链式小批量接力
+      if (chain && result.updated > 0) {
+        setTimeout(() => {
+          runDiagnosisBackfill({ limit, trigger: 'chain', chain: true })
+            .catch(e => console.error('[DiagnosisBackfill] 链式回填异常:', e.message))
+        }, 10000)
+      }
+    }
+    return result
+  } catch (err) {
+    diagnosisProgress.detail = `错误: ${err.message}`
+    console.error('[DiagnosisBackfill] 执行失败:', err)
+    return { started: true, error: err.message }
+  } finally {
+    diagnosisProgress.done = true
+    diagnosisProgress.detail = ''
+    diagnosisRunning = false
+  }
+}
+
+app.post('/api/admin/backfill-diagnosis', async (req, res) => {
+  if (diagnosisRunning) {
+    return res.status(409).json({ error: '诊断回填正在进行中', progress: diagnosisProgress })
+  }
+  const sync = req.query.sync === '1' || req.query.sync === 'true'
+  if (sync) {
+    const limit = Math.min(Math.max(Number(req.query.limit) || 5, 1), 20)
+    const result = await runDiagnosisBackfill({ limit, trigger: 'sync' })
+    return res.json({ success: true, sync: true, ...result, progress: diagnosisProgress })
+  }
+  res.json({ success: true, message: '诊断回填任务已启动（小批量自动接力）' })
+  runDiagnosisBackfill({ trigger: 'manual', chain: true }).catch(err => {
+    console.error('[DiagnosisBackfill] 手动回填异常:', err.message)
+  })
+})
+
+app.get('/api/admin/backfill-diagnosis/progress', (req, res) => {
+  res.json({ success: true, ...diagnosisProgress })
 })
 
 // ── 后台数据清理：删除学生试卷、错题本、试卷重练，保留练习册预埋答案 ──
@@ -2324,6 +2382,7 @@ app.get('/api/resources/exam-papers', async (req, res) => {
 app.use('/api/weekly-report', weeklyReportRouter)
 app.use('/api/worksheets', worksheetsRouter)
 app.use('/api/resources', resourcesRouter)
+app.use('/api/teaching', teachingRouter)
 
 // 错误处理中间件（必须在路由之后，才能捕获路由中的未处理异常）
 app.use((err, req, res, next) => {
@@ -2398,6 +2457,7 @@ if (process.argv[1] === __filename || process.argv[1]?.endsWith('server/index.js
       await migrateResourceUnits()
       await migrateWrongQuestionSelfContained()
       await migrateWrongQuestionSubject()
+      await migrateErrorAnalysis()
     } catch (err) {
       console.error('数据库迁移失败:', err.message)
     }
@@ -2416,6 +2476,21 @@ if (process.argv[1] === __filename || process.argv[1]?.endsWith('server/index.js
       console.log(`⏰ 知识点/难度定时回填已启用（每 ${intervalHours} 小时）`)
     } catch (err) {
       console.error('定时回填启动失败:', err.message)
+    }
+
+    // 定时错因/空题诊断回填（与知识点回填同节奏，异步小批量）
+    try {
+      const intervalHours = Number(process.env.BACKFILL_INTERVAL_HOURS) || 6
+      const intervalMs = intervalHours * 60 * 60 * 1000
+      setTimeout(() => {
+        runDiagnosisBackfill({ trigger: 'auto', chain: true }).catch(e => console.error('[DiagnosisBackfill] 定时回填异常:', e.message))
+      }, 3 * 60 * 1000)
+      setInterval(() => {
+        runDiagnosisBackfill({ trigger: 'auto', chain: true }).catch(e => console.error('[DiagnosisBackfill] 定时回填异常:', e.message))
+      }, intervalMs)
+      console.log(`⏰ 错因/空题诊断回填已启用（每 ${intervalHours} 小时）`)
+    } catch (err) {
+      console.error('诊断定时回填启动失败:', err.message)
     }
 
     // 夜间自动补解析：配额重置后的低峰期自动重跑未解析干净的练习册（程序内定时，随仓库走）

@@ -4,7 +4,9 @@
     <header class="top-bar">
       <div class="top-bar-left">
         <span class="page-title">周学习诊断报告</span>
+        <el-segmented v-model="viewMode" :options="viewModeOptions" style="margin-left: 4px;" />
         <el-select
+          v-if="viewMode === 'single'"
           v-model="selectedStudentId"
           placeholder="选择学生（选填，不选则生成全部）"
           style="width: 260px"
@@ -35,7 +37,7 @@
           <el-option v-for="opt in offsetOptions" :key="opt.value" :label="opt.label" :value="opt.value" />
         </el-select>
       </div>
-      <div class="top-bar-right">
+      <div class="top-bar-right" v-if="viewMode === 'single'">
         <span class="stat-item">{{ periodLabel }}</span>
         <el-button type="primary" :loading="generating" @click="handleGenerateCurrent">
           {{ selectedStudentId ? `生成 ${currentStudentName} 的报告` : '生成本周报告' }}
@@ -203,6 +205,104 @@
         </el-card>
       </section>
 
+      <!-- 全班共性诊断 -->
+      <section v-if="viewMode === 'class'" class="class-section">
+        <div class="section-title">
+          <el-icon><DataAnalysis /></el-icon>
+          全班共性诊断（{{ periodLabel }}）
+          <el-select
+            v-model="diagSubject"
+            size="small"
+            style="width: 120px; margin-left: 12px;"
+            @change="loadClassDiagnosis"
+          >
+            <el-option label="全部学科" value="" />
+            <el-option label="数学" value="数学" />
+            <el-option label="语文" value="语文" />
+            <el-option label="英语" value="英语" />
+          </el-select>
+          <el-tooltip content="空题即「学生没写/写不出」，是最该讲的信号，置顶排序" placement="top">
+            <span class="diag-hint"><el-icon><QuestionFilled /></el-icon> 空题置顶</span>
+          </el-tooltip>
+          <el-button
+            type="primary"
+            size="small"
+            :loading="exportingHandout"
+            :disabled="classDiagnosis.length === 0"
+            style="margin-left: auto"
+            @click="handleExportHandout"
+          >
+            <el-icon v-if="!exportingHandout"><Download /></el-icon>
+            {{ exportingHandout ? '整理中...' : '导出讲义' }}
+          </el-button>
+          <el-button
+            type="success"
+            plain
+            size="small"
+            :disabled="classDiagnosis.length === 0"
+            @click="handleDistributeExam"
+          >
+            <el-icon><EditPen /></el-icon>
+            发错题再测卷
+          </el-button>
+        </div>
+        <el-alert
+          v-if="classDiagnosis.length > 0"
+          type="warning"
+          :closable="false"
+          show-icon
+          style="margin-bottom: 12px;"
+        >
+          <template #title>
+            共 {{ classDiagnosis.length }} 个共性知识点，前 {{ classDiagnosis.filter(t => t.blankCount > 0).length }} 个存在空题（最该讲）。点击任意知识点查看学生与错因详情，或一键导出讲课讲义。
+          </template>
+        </el-alert>
+        <el-table
+          :data="classDiagnosis"
+          stripe
+          size="small"
+          style="width: 100%"
+          :row-class-name="diagRowClass"
+          @row-click="openDrill"
+          v-loading="loadingClassDiagnosis"
+        >
+          <el-table-column prop="subject" label="学科" width="90" align="center">
+            <template #default="{ row }">
+              <el-tag size="small" effect="plain" :type="subjectTagType(row.subject)">{{ row.subject }}</el-tag>
+            </template>
+          </el-table-column>
+          <el-table-column prop="tag" label="知识点" min-width="160">
+            <template #default="{ row }">
+              <span class="diag-tag">{{ row.tag }}</span>
+            </template>
+          </el-table-column>
+          <el-table-column prop="blankCount" label="空题" width="90" align="center">
+            <template #default="{ row }">
+              <span v-if="row.blankCount > 0" class="blank-badge">{{ row.blankCount }}</span>
+              <span v-else class="muted">0</span>
+            </template>
+          </el-table-column>
+          <el-table-column prop="wrongCount" label="做错" width="90" align="center" />
+          <el-table-column prop="studentCount" label="涉及学生" width="100" align="center" />
+          <el-table-column prop="blankRatio" label="空题占比" width="130" align="center">
+            <template #default="{ row }">
+              <el-progress
+                :percentage="row.blankRatio"
+                :color="row.blankRatio > 0 ? 'var(--wb-danger)' : 'var(--wb-border)'"
+                :stroke-width="10"
+                :text-inside="true"
+              />
+            </template>
+          </el-table-column>
+          <el-table-column label="" width="50" align="center">
+            <template #default>
+              <el-icon color="var(--wb-text-tertiary)"><ArrowRight /></el-icon>
+            </template>
+          </el-table-column>
+        </el-table>
+        <el-empty v-if="!loadingClassDiagnosis && classDiagnosis.length === 0" description="该时段暂无共性错题" :image-size="80" />
+      </section>
+
       <!-- 无数据提示 -->
       <section v-else-if="selectedStudentId && !currentStudentDetail?.stats && !generating">
         <el-empty description="该学生本周暂无学习数据" :image-size="80" />
@@ -264,15 +364,99 @@
         </div>
       </section>
     </main>
+
+    <!-- 知识点下钻抽屉 -->
+    <el-drawer
+      v-model="drawerVisible"
+      size="520px"
+      destroy-on-close
+      :show-close="false"
+    >
+      <template #header>
+        <div class="drawer-header">
+          <div>
+            <div class="drawer-title">「{{ drawerTag }}」诊断详情</div>
+            <div class="drawer-sub">{{ periodLabel }}</div>
+          </div>
+          <el-button text @click="drawerVisible = false">
+            <el-icon><Close /></el-icon>
+          </el-button>
+        </div>
+      </template>
+      <div v-loading="loadingDetail" class="drawer-body">
+        <template v-if="drawerDetail">
+          <div class="section-title">
+            <el-icon><PieChart /></el-icon>
+            错因分布（做错题共 {{ drawerDetail.totalWrong }} 道）
+          </div>
+          <div class="error-dist">
+            <div class="error-item" v-for="e in drawerDetail.errorDist" :key="e.errorType">
+              <span class="error-type" :style="{ color: errorTypeColor(e.errorType) }">{{ e.errorType }}</span>
+              <el-progress
+                :percentage="e.ratio"
+                :color="errorTypeColor(e.errorType)"
+                :stroke-width="12"
+                style="flex: 1; margin: 0 12px;"
+              />
+              <span class="error-count">{{ e.count }}次 · {{ e.ratio }}%</span>
+            </div>
+            <div v-if="drawerDetail.errorDist.length === 0" class="muted" style="padding: 8px 0;">
+              暂无做错题（该知识点仅有空题，空题不做错因分析）
+            </div>
+          </div>
+
+          <div class="section-title" style="margin-top: 20px;">
+            <el-icon><User /></el-icon>
+            涉及学生（{{ drawerDetail.students.length }} 人）
+          </div>
+          <el-table :data="drawerDetail.students" stripe size="small" style="width: 100%">
+            <el-table-column prop="name" label="姓名" min-width="100" />
+            <el-table-column prop="grade" label="年级" width="90" align="center" />
+            <el-table-column prop="blankCount" label="空题" width="80" align="center">
+              <template #default="{ row }">
+                <span v-if="row.blankCount > 0" class="blank-badge">{{ row.blankCount }}</span>
+                <span v-else class="muted">0</span>
+              </template>
+            </el-table-column>
+            <el-table-column prop="wrongCount" label="做错" width="80" align="center" />
+          </el-table>
+
+          <div class="section-title" style="margin-top: 20px;">
+            <el-icon><Collection /></el-icon>
+            典型错题（讲义例题）
+          </div>
+          <div v-if="drawerDetail.sampleQuestions?.length" class="sample-list">
+            <div class="sample-item" v-for="(q, qi) in drawerDetail.sampleQuestions" :key="q.id">
+              <div class="sample-q">{{ qi + 1 }}. {{ q.content }}</div>
+              <div class="sample-meta">
+                <span class="sample-stu">{{ q.studentName }}</span>
+                <span v-if="q.isBlank" class="sample-answer sample-answer--blank">空题未作答</span>
+                <span v-else class="sample-answer">作答：{{ q.studentAnswer || '未填写' }}</span>
+                <span class="sample-answer">正确：{{ q.correctAnswer || '—' }}</span>
+              </div>
+              <div class="sample-reason">
+                <el-tag v-if="!q.isBlank" size="small" :type="q.errorType ? 'danger' : 'info'" effect="light">
+                  {{ q.errorType || '未标注' }}{{ q.errorReason ? `：${q.errorReason}` : '' }}
+                </el-tag>
+                <el-tag v-else size="small" type="warning" effect="light">空题（建议当堂提问）</el-tag>
+              </div>
+            </div>
+          </div>
+          <div v-else class="muted" style="padding: 8px 0;">暂未取到该知识点的错题样本</div>
+        </template>
+        <el-empty v-else description="暂无详情数据" :image-size="80" />
+      </div>
+    </el-drawer>
   </div>
 </template>
 
 <script setup>
 import { ref, computed, watch, onMounted } from 'vue'
 import { ElMessage } from 'element-plus'
-import { Download, DataAnalysis, TrendCharts, List, FolderOpened, WarningFilled } from '@element-plus/icons-vue'
-import { getStudents, getAllWeeklyReports } from '../../services/apiService'
+import { Download, DataAnalysis, TrendCharts, List, FolderOpened, WarningFilled, QuestionFilled, ArrowRight, Close, PieChart, User, Collection, EditPen } from '@element-plus/icons-vue'
+import { getStudents, getAllWeeklyReports, getTeachingDiagnosis, getTeachingDiagnosisDetail } from '../../services/apiService'
 import { generateWeeklyReport, generateAllWeeklyReports } from '../../utils/weeklyReportGenerator'
+import { downloadTeachingHandout } from '../../utils/teachingHandout'
 import { saveAs } from 'file-saver'
 import dayjs from 'dayjs'
 import isoWeek from 'dayjs/plugin/isoWeek'
@@ -280,6 +464,7 @@ import isoWeek from 'dayjs/plugin/isoWeek'
 dayjs.extend(isoWeek)
 
 // ── State ──
+const viewMode = ref('single')
 const selectedStudentId = ref('')
 const studentList = ref([])
 const summaryData = ref(null)
@@ -290,6 +475,21 @@ const progressList = ref([])
 const results = ref([])
 const currentStudentDetail = ref(null)
 const checkedIds = ref([])
+
+const viewModeOptions = [
+  { label: '单学生', value: 'single' },
+  { label: '全班共性', value: 'class' }
+]
+
+// ── 全班共性诊断 State ──
+const classDiagnosis = ref([])
+const loadingClassDiagnosis = ref(false)
+const diagSubject = ref('')
+const drawerVisible = ref(false)
+const drawerTag = ref('')
+const drawerDetail = ref(null)
+const loadingDetail = ref(false)
+const exportingHandout = ref(false)
 
 const allChecked = computed(() =>
   summaryData.value?.reports?.length > 0 &&
@@ -379,7 +579,12 @@ const currentStudentName = computed(() => {
 
 watch([periodMode, periodOffset], () => {
   loadSummary()
+  if (viewMode.value === 'class') loadClassDiagnosis()
   if (selectedStudentId.value) handleStudentChange(selectedStudentId.value)
+})
+
+watch(viewMode, (val) => {
+  if (val === 'class') loadClassDiagnosis()
 })
 
 // ── Lifecycle ──
@@ -421,6 +626,109 @@ async function handleStudentChange(id) {
   } catch (e) {
     ElMessage.error('获取学生周统计失败')
   }
+}
+
+async function loadClassDiagnosis() {
+  loadingClassDiagnosis.value = true
+  try {
+    const data = await getTeachingDiagnosis({
+      mode: periodMode.value,
+      offset: periodOffset.value,
+      subject: diagSubject.value || undefined
+    })
+    classDiagnosis.value = data.success ? data.diagnosis : []
+  } catch (e) {
+    ElMessage.error('加载全班共性诊断失败')
+  } finally {
+    loadingClassDiagnosis.value = false
+  }
+}
+
+async function openDrill(row) {
+  if (!row) return
+  drawerTag.value = row.tag
+  drawerVisible.value = true
+  drawerDetail.value = null
+  loadingDetail.value = true
+  try {
+    const data = await getTeachingDiagnosisDetail(row.tag, {
+      mode: periodMode.value,
+      offset: periodOffset.value
+    })
+    drawerDetail.value = data.success ? data : null
+  } catch (e) {
+    ElMessage.error('加载知识点详情失败')
+  } finally {
+    loadingDetail.value = false
+  }
+}
+
+function diagRowClass({ row }) {
+  return row.blankCount > 0 ? 'diag-row--blank' : ''
+}
+
+async function handleExportHandout() {
+  if (classDiagnosis.value.length === 0) return
+  exportingHandout.value = true
+  try {
+    await downloadTeachingHandout({
+      mode: periodMode.value,
+      offset: periodOffset.value,
+      subject: diagSubject.value || '',
+      periodText: periodLabel.value
+    })
+    ElMessage.success(`已生成教学讲义（前 ${classDiagnosis.value.slice(0, 12).length} 个重点知识点）`)
+  } catch (e) {
+    ElMessage.error('讲义生成失败: ' + (e.message || '未知错误'))
+  } finally {
+    exportingHandout.value = false
+  }
+}
+
+async function handleDistributeExam() {
+  try {
+    const { ElMessageBox } = await import('element-plus')
+    await ElMessageBox.confirm(
+      '<div style="line-height: 1.7;">' +
+      '<p style="font-weight: 600; margin: 4px 0;">针对本轮共性错题，有两条发卷路径：</p>' +
+      '<p style="margin: 6px 0;"><b style="color: #409EFF;">路径 A · 每周自动（推荐）</b><br/>' +
+      '「周学习诊断报告」已内含每位学生的错题再测卷，点击下方按钮一键生成全部学生，下载打印即可发卷。</p>' +
+      '<p style="margin: 6px 0;"><b style="color: #67C23A;">路径 B · 移动端临时卷</b><br/>' +
+      '需要针对个别学生或某个知识点单独补练时，打开移动端 App「错题本」，勾选错题（最多 30 题）即可生成临时再测卷。</p>' +
+      '<p style="color: #909399; font-size: 12px; margin: 6px 0;">零组卷开发：两条路径均为系统既有能力，按需选用即可。</p>' +
+      '</div>',
+      '发「错题再测卷」',
+      {
+        confirmButtonText: '一键生成全部学生周报',
+        cancelButtonText: '知道了',
+        type: 'info',
+        dangerouslyUseHTMLString: true
+      }
+    ).then(() => {
+      handleGenerateAll()
+    }).catch(() => {})
+  } catch (e) {
+    ElMessage.warning('发卷入口已取消')
+  }
+}
+
+function subjectTagType(subject) {
+  if (subject === '数学') return 'danger'
+  if (subject === '语文') return 'primary'
+  if (subject === '英语') return 'warning'
+  return 'info'
+}
+
+function errorTypeColor(type) {
+  if (type === '未标注') return 'var(--wb-text-tertiary)'
+  // 运算类 → 红；审题类 → 橙；知识类 → 蓝；过程类 → 紫；方法类 → 绿；习惯类 → 灰
+  if (/计算|运算/.test(type)) return 'var(--wb-danger)'
+  if (/审题/.test(type)) return 'var(--wb-warning)'
+  if (/公式|概念/.test(type)) return 'var(--wb-primary)'
+  if (/步骤|单位/.test(type)) return '#8B5CF6'
+  if (/方法|分析/.test(type)) return 'var(--wb-success)'
+  if (/抄写|粗心/.test(type)) return 'var(--wb-text-secondary)'
+  return 'var(--wb-text-secondary)'
 }
 
 async function handleGenerateCurrent() {
@@ -822,6 +1130,141 @@ const topWeakTags = computed(() => {
   font-size: 14px;
   font-weight: 500;
   color: var(--wb-text);
+}
+
+/* ── 全班共性诊断 ── */
+.class-section {
+  margin-top: 4px;
+}
+
+.diag-hint {
+  font-size: 12px;
+  color: var(--wb-text-tertiary);
+  margin-left: 12px;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  cursor: help;
+}
+
+.diag-tag {
+  font-weight: 500;
+  color: var(--wb-text);
+}
+
+.blank-badge {
+  display: inline-block;
+  min-width: 22px;
+  padding: 1px 7px;
+  border-radius: 10px;
+  background: var(--wb-danger);
+  color: #fff;
+  font-size: 12px;
+  font-weight: 700;
+  line-height: 18px;
+}
+
+.muted {
+  color: var(--wb-text-tertiary);
+}
+
+:deep(.diag-row--blank) {
+  background: var(--wb-danger-mist, rgba(239, 68, 68, 0.06));
+}
+
+:deep(.diag-row--blank:hover) {
+  background: var(--wb-danger-mist, rgba(239, 68, 68, 0.1));
+}
+
+/* ── 下钻抽屉 ── */
+.drawer-header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  width: 100%;
+}
+
+.drawer-title {
+  font-size: 16px;
+  font-weight: 600;
+  color: var(--wb-text);
+}
+
+.drawer-sub {
+  font-size: 12px;
+  color: var(--wb-text-tertiary);
+  margin-top: 2px;
+}
+
+.drawer-body {
+  min-height: 300px;
+}
+
+.error-dist {
+  background: var(--wb-bg-card);
+  border: 1px solid var(--wb-border);
+  border-radius: var(--wb-radius-md);
+  padding: 12px 16px;
+}
+
+.error-item {
+  display: flex;
+  align-items: center;
+  padding: 7px 0;
+}
+
+.error-type {
+  width: 92px;
+  font-size: 13px;
+  font-weight: 500;
+  flex-shrink: 0;
+}
+
+.error-count {
+  width: 80px;
+  text-align: right;
+  font-size: 12px;
+  color: var(--wb-text-secondary);
+  flex-shrink: 0;
+}
+
+.sample-list {
+  background: var(--wb-bg-card);
+  border: 1px solid var(--wb-border);
+  border-radius: var(--wb-radius-md);
+  padding: 4px 16px;
+}
+
+.sample-item {
+  padding: 10px 0;
+  border-bottom: 1px dashed var(--wb-border-light);
+}
+
+.sample-item:last-child {
+  border-bottom: none;
+}
+
+.sample-q {
+  font-size: 14px;
+  color: var(--wb-text);
+  line-height: 1.5;
+}
+
+.sample-meta {
+  margin-top: 6px;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+  font-size: 12px;
+  color: var(--wb-text-secondary);
+}
+
+.sample-answer--blank {
+  color: var(--wb-danger);
+}
+
+.sample-reason {
+  margin-top: 6px;
 }
 
 /* ── Responsive ── */

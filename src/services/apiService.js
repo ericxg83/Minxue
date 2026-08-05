@@ -873,3 +873,24 @@ export const getWeeklyReport = async (studentId, opts = {}) => {
 export const getAllWeeklyReports = async (opts = {}) => {
   return apiRequest(`/weekly-report?${buildPeriodParams(opts)}`)
 }
+
+/**
+ * 获取跨学生共性错题聚合（教学诊断）
+ * @param {Object} opts - { mode, offset, subject? }
+ */
+export const getTeachingDiagnosis = async (opts = {}) => {
+  const { mode = 'week', offset = 0, subject } = opts
+  const params = new URLSearchParams({ mode, offset })
+  if (subject) params.set('subject', subject)
+  return apiRequest(`/teaching/diagnosis?${params.toString()}`)
+}
+
+/**
+ * 单个知识点下钻：涉及学生 + 错因分布
+ * @param {string} tag
+ * @param {Object} opts - { mode, offset }
+ */
+export const getTeachingDiagnosisDetail = async (tag, opts = {}) => {
+  const { mode = 'week', offset = 0 } = opts
+  return apiRequest(`/teaching/diagnosis/${encodeURIComponent(tag)}?mode=${mode}&offset=${offset}`)
+}
