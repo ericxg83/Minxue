@@ -832,7 +832,12 @@ export const buildOCRPrompt = () => `你是一个专业的作业题目识别助�
 1. 只返回合法 JSON。
 2. 没有配图时 image_type 填 "none"，image_bbox 和 geometry_image 填 null。
 3. 坐标统一使用 0-1000 的整数，相对整张图片归一化。
-4. 如果题目无法识别，不要编造内容。`
+4. 如果题目无法识别，不要编造内容。
+5. 识别老师批改痕迹（重要）：
+   - 若某题旁出现老师用红笔（或与印刷/学生墨迹不同的笔）打的"√/✓/✔"，说明该题老师已判对，应将 has_manual_checkmark 设为 true，并且 student_answer 填学生实际笔迹（以学生墨迹为准，剔除老师的红勾）。
+   - 若出现"×/✗/半对半错"等批改，has_manual_checkmark 设为 false，交由答案比对判定。
+   - 只在能明确辨认出独立批改标记时才置 true，否则保持 false，宁可不置也不要误判。
+6. 判断题（对/错）的答案或学生答案若是"√/✗"符号，直接填入对应符号即可。`
 
 export const buildAnswerGenerationPrompt = () => `你是一个中小学题目解答助手。请根据给定题目生成标准答案与解析，只返回 JSON：
 {

@@ -46,6 +46,7 @@ export const buildOCRPrompt = () => `你是一个专业的教育题目识别助�
       "confidence": 0.95,
       "analysis": "题目解析",
       "question_type": "choice/fill/judge/answer",
+      "has_manual_checkmark": false,
       "block_coordinates": {
         "x": 100,
         "y": 200,
@@ -130,7 +131,13 @@ block_coordinates 说明（必填）：
 4. 对于解答题，content 包含完整题目描述
 5. 分析规则（重要）：analysis 必须只讲解题目本身的知识点和解法，绝对不能提及学生答案是什么、学生作答情况或任何关于学生表现的评价。分析文本不参与 is_correct 判定。
 6. geometry_image.bbox 标注时，请确保包围完整的几何图形（包括图形外围的顶点字母如A、B、C、D）
-7. 一图多题：如果同一张配图对应多道题目，每道题都要独立标注该配图的 bbox`
+7. 一图多题：如果同一张配图对应多道题目，每道题都要独立标注该配图的 bbox
+
+识别老师批改痕迹（重要）：
+- 若某题旁出现老师用红笔（或与印刷/学生墨迹不同的笔）打的"√/✓/✔"，说明该题老师已判对，应将 has_manual_checkmark 设为 true，并且 student_answer 填学生实际笔迹（以学生墨迹为准，剔除老师的红勾）。
+- 若出现"×/✗/半对半错"等批改，has_manual_checkmark 设为 false，交由答案比对判定。
+- 只在能明确辨认出独立批改标记时才置 true，否则保持 false，宁可不置也不要误判。
+- 判断题（对/错）的答案或学生答案若是"√/✗"符号，直接填入对应符号即可。`
 
 export const buildTaggingPrompt = () => `你是一个专业的教育知识点标注助手。你的任务是根据题目内容，提取该题目考察的具体知识点标签。
 
