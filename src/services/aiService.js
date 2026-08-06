@@ -177,15 +177,14 @@ function normalizeAnswer(str) {
     s = s.replace(new RegExp(sym, 'g'), frac)
   }
 
-  // LaTeX fraction: \frac{n}{d} → n/d (前后加空格便于混合数规则识别)
-  // (toUpperCase 会把 \frac 变 \FRAC，故用 i 标志)
-  s = s.replace(/\\frac\{([^}]+)\}\{([^}]+)\}/gi, ' $1/$2 ')
   // LaTeX 运算符: \div → /, \times → *, \cdot → *
   s = s.replace(/\\div/gi, '/')
   s = s.replace(/\\times/gi, '*')
   s = s.replace(/\\cdot/gi, '*')
   // LaTeX display markers $ $ \( \) → 移除
   s = s.replace(/\$|\\[()]/g, '')
+  // LaTeX fraction: \FRAC{n}{d} → n/d (must run AFTER toUpperCase)
+  s = s.replace(/\\FRAC\{([^}]+)\}\{([^}]+)\}/gi, '$1/$2')
 
   // Mixed number with space: "146 3/4" → "146+3/4" (before whitespace removal)
   s = s.replace(/(\d+)\s+(\d+\/\d+)/g, '$1+$2')
@@ -370,76 +369,121 @@ function judgeAnswer(studentAnswer, referenceAnswer, questionType) {
   }
 
   // Fill / answer / other: normalized comparison with tolerance
+
+  // Helper: 单个答案片段的归一化比较
+  const normalizeAndCompare = (sAns, rAns) => {
+    const narrowed = narrowToFinalAnswer(sAns)
+    const normS = normalizeAnswer(narrowed)
+    const normR = normalizeAnswer(rAns)
+    if (normS === normR) return true
+    if (isNumericEquivalent(normS, normR)) return true
+    if (isMathEquivalent(narrowed, rAns)) return true
+    return false
+  }
+
+  // Helper: 单个答案片段的数值提取比较
+  const extractAndCompare = (rawS, rawR) => {
+    const extractNumericValues = (raw) => {
+      let s = String(raw || '')
+      s = s.replace(/\\div/gi, '/')
+      s = s.replace(/\\times/gi, '*')
+      s = s.replace(/\\cdot/gi, '*')
+      s = s.replace(/\$|\\[()]/g, '')
+      s = s.replace(/[！-～]/g, ch => String.fromCharCode(ch.charCodeAt(0) - 0xFEE0))
+
+      const vals = []
+
+      // LaTeX 带分数：数字 + \frac{分子}{分母}
+      s = s.replace(/(\d+(?:\.\d+)?)\\frac\{([^}]+)\}\{([^}]+)\}/gi, (match, whole, num, den) => {
+        const wholeNum = parseFloat(whole)
+        const numNum = parseInt(num, 10)
+        const denNum = parseInt(den, 10)
+        if (numNum < denNum) {
+          vals.push(wholeNum + numNum / denNum)
+          return ' '.repeat(match.length)
+        }
+        return match
+      })
+
+      // 普通 \frac{n}{d} → n/d
+      s = s.replace(/\\frac\{([^}]+)\}\{([^}]+)\}/gi, '($1/$2)')
+
+      // 真混合数
+      const mixedRe = /(\d+(?:\.\d+)?)\s+(\d+)\s*\/\s*(\d+)/g
+      let cleaned = s.replace(mixedRe, (match, whole, num, den) => {
+        if (parseInt(num, 10) < parseInt(den, 10)) {
+          vals.push(parseFloat(whole) + parseInt(num, 10) / parseInt(den, 10))
+          return ' '.repeat(match.length)
+        }
+        return match
+      })
+      // 分数
+      cleaned = cleaned.replace(/(\d+(?:\.\d+)?)\s*\/\s*(\d+(?:\.\d+)?)/g, (match, n, d) => {
+        vals.push(parseFloat(n) / parseFloat(d))
+        return ' '.repeat(match.length)
+      })
+      // 数字
+      const numRe = /\d+(?:\.\d+)?/g
+      let nm
+      while ((nm = numRe.exec(cleaned)) !== null) {
+        vals.push(parseFloat(nm[0]))
+      }
+      return vals.filter(v => isFinite(v)).sort((a, b) => a - b)
+    }
+    const sNums = extractNumericValues(rawS)
+    const rNums = extractNumericValues(rawR)
+    return sNums.length > 0 && rNums.length > 0 && sNums.length === rNums.length &&
+      sNums.every((v, i) => Math.abs(v - rNums[i]) < 1e-9)
+  }
+
+  // 检测逗号/分号分隔的多答案
+  const splitAnswers = (s) => {
+    const str = String(s || '').trim()
+    if (str.includes(',') || str.includes('，') || str.includes(';') || str.includes('；')) {
+      return str.split(/[,，;；]/).map(a => a.trim()).filter(a => a)
+    }
+    return [str]
+  }
+
+  const studentParts = splitAnswers(studentAnswer)
+  const refParts = splitAnswers(referenceAnswer)
+
+  // 多答案场景：逐个比较
+  if (refParts.length > 1 && studentParts.length > 1) {
+    if (studentParts.length === refParts.length) {
+      const allCorrect = studentParts.every((sp, i) => {
+        const rp = refParts[i]
+        return normalizeAndCompare(sp, rp) || extractAndCompare(sp, rp)
+      })
+      if (allCorrect) return { isCorrect: true, unrecognized: false }
+    }
+  }
+
+  // 多答案场景：一方有逗号，整体数值比较
+  if (refParts.length > 1 || studentParts.length > 1) {
+    if (extractAndCompare(studentAnswer, referenceAnswer)) {
+      return { isCorrect: true, unrecognized: false }
+    }
+  }
+
+  // 单答案场景：标准比较流程
   const narrowedStudent = narrowToFinalAnswer(studentAnswer)
   const normStudent = normalizeAnswer(narrowedStudent)
   const normRef = normalizeAnswer(referenceAnswer)
 
-  // String-level match
   if (normStudent === normRef) {
     return { isCorrect: true, unrecognized: false }
   }
 
-  // Try numeric equivalence (handles "1/2" vs "0.5", "12.0" vs "12", units)
   if (isNumericEquivalent(normStudent, normRef)) {
     return { isCorrect: true, unrecognized: false }
   }
 
-  // String mismatch — try mathematical equivalence
-  // (handles cases like "2x-4" vs "2(x-2)" which are the same but differ textually)
   if (isMathEquivalent(narrowedStudent, referenceAnswer)) {
     return { isCorrect: true, unrecognized: false }
   }
 
-  // Fallback: compare numeric values from original input.
-  // 先做轻量 LaTeX 转换（保留分隔符），再两遍解析数值。
-  const extractNumericValues = (raw) => {
-    let s = String(raw || '')
-    s = s.replace(/\\div/gi, '/')
-    s = s.replace(/\\times/gi, '*')
-    s = s.replace(/\\cdot/gi, '*')
-    s = s.replace(/\$|\\[()]/g, '')
-    s = s.replace(/[！-～]/g, ch => String.fromCharCode(ch.charCodeAt(0) - 0xFEE0))
-
-    const vals = []
-
-    // Pass 0: LaTeX 带分数：数字 + \frac{分子}{分母} → 混合数 (e.g., 4\frac{2}{3} → 4.666...)
-    s = s.replace(/(\d+(?:\.\d+)?)\\frac\{([^}]+)\}\{([^}]+)\}/gi, (match, whole, num, den) => {
-      const wholeNum = parseFloat(whole)
-      const numNum = parseInt(num, 10)
-      const denNum = parseInt(den, 10)
-      if (numNum < denNum) {
-        vals.push(wholeNum + numNum / denNum)
-        return ' '.repeat(match.length)
-      }
-      return match
-    })
-
-    // Pass 0.5: 普通 \frac{n}{d} → n/d (剩余的 LaTeX 分数)
-    s = s.replace(/\\frac\{([^}]+)\}\{([^}]+)\}/gi, '($1/$2)')
-
-    const mixedRe = /(\d+(?:\.\d+)?)\s+(\d+)\s*\/\s*(\d+)/g
-    let cleaned = s.replace(mixedRe, (match, whole, num, den) => {
-      if (parseInt(num, 10) < parseInt(den, 10)) {
-        vals.push(parseFloat(whole) + parseInt(num, 10) / parseInt(den, 10))
-        return ' '.repeat(match.length)
-      }
-      return match
-    })
-    cleaned = cleaned.replace(/(\d+(?:\.\d+)?)\s*\/\s*(\d+(?:\.\d+)?)/g, (match, n, d) => {
-      vals.push(parseFloat(n) / parseFloat(d))
-      return ' '.repeat(match.length)
-    })
-    const numRe = /\d+(?:\.\d+)?/g
-    let nm
-    while ((nm = numRe.exec(cleaned)) !== null) {
-      vals.push(parseFloat(nm[0]))
-    }
-    return vals.filter(v => isFinite(v)).sort((a, b) => a - b)
-  }
-  const studentNums = extractNumericValues(studentAnswer)
-  const refNums = extractNumericValues(referenceAnswer)
-  if (studentNums.length > 0 && refNums.length > 0 && studentNums.length === refNums.length &&
-      studentNums.every((v, i) => Math.abs(v - refNums[i]) < 1e-9)) {
+  if (extractAndCompare(studentAnswer, referenceAnswer)) {
     return { isCorrect: true, unrecognized: false }
   }
 
