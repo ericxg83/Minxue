@@ -2043,6 +2043,81 @@ export function pickAnswerUnit(answersByUnit, pageTitle, questions, pageNumber, 
 //
 // 返回：Array<{ pageNumber, unitKey|null }>，按 pageDataList 顺序。
 // ═══════════════════════════════════════════════════════════════
+
+/**
+ * 计算一组题目在给定 unit 答案库中的覆盖率（0~1）。
+ * 覆盖键为 `${question_number}|${sub_no||''}`（与答案库 qKey 结构一致），
+ * 保证 sub_no 参与区分，避免"只看题号存在性"导致同号不同小题互相污染。
+ */
+function coverageOfQuestionsInUnit(questions, secMap) {
+  if (!secMap || !questions || questions.length === 0) return 0
+  let covered = 0
+  for (const q of questions) {
+    if (q.question_number == null) continue
+    const qKey = `${Number(q.question_number)}|${q.sub_no || ''}`
+    for (const qMap of secMap.values()) {
+      if (qMap.has(qKey)) { covered++; break }
+    }
+  }
+  return covered / questions.length
+}
+
+/**
+ * 按题号连续性将页面分组为单元组。
+ * 策略：对每页独立匹配最可能的单元（按答案覆盖率），按匹配结果分组。
+ * 连续匹配同一单元的页归为一组。无法匹配/打平的页独立成组。
+ *
+ * 修复（2026-08-06）：
+ *  - 覆盖率键加入 sub_no（旧版只看 `${qn}|`，同号多单元场景必然全部 1.0 打平）。
+ *  - 覆盖率并列最高时【打平即放弃】（unitKey=null），交给后续 pickAnswerUnit 的
+ *    标题/学生答案反推等精细层，绝不取 Map 迭代序第一个（旧版恒取 candidates[0]，
+ *    是本 bug 的直接执行点）。
+ *  - 删除死代码 `ordered[i + 1]?.unitKey`（单趟前向循环里永远读不到下一页，恒 undefined）。
+ *
+ * 返回 Array<{ pages: pageDataList 子集, unitKey: string|null, tie: string[], minQ, maxQ }>
+ */
+function _groupByQuestionContinuity(pageDataList, answersByUnit) {
+  const ordered = []
+  // 先为每页独立匹配最可能的单元
+  for (let i = 0; i < pageDataList.length; i++) {
+    const pg = pageDataList[i]
+    const qnos = (pg.questions || []).map(q => Number(q.question_number)).filter(n => Number.isFinite(n))
+    const minQ = qnos.length ? Math.min(...qnos) : Infinity
+    const maxQ = qnos.length ? Math.max(...qnos) : -Infinity
+    let bestUnit = null
+    let bestCov = 0
+    let tieCandidates = []
+    if (answersByUnit && qnos.length > 0) {
+      // 收集所有 coverage 最高的候选单元
+      const candidates = []
+      for (const [uk, secMap] of answersByUnit) {
+        const cov = coverageOfQuestionsInUnit(pg.questions || [], secMap)
+        if (cov > bestCov) { bestCov = cov; candidates.length = 0; candidates.push(uk) }
+        else if (cov === bestCov && cov > 0) candidates.push(uk)
+      }
+      // 覆盖率唯一最高才采用；多单元并列（同号多单元场景几乎必然）判定"无法区分"，
+      // 打平即放弃，交给后续精细层，绝不取第一个。
+      if (candidates.length === 1) bestUnit = candidates[0]
+      else if (candidates.length > 1) tieCandidates = candidates
+    }
+    ordered.push({ pg, minQ, maxQ, unitKey: bestUnit, tie: tieCandidates, idx: i })
+  }
+
+  const groups = []
+  let curGroup = null
+  for (const item of ordered) {
+    if (!curGroup || item.unitKey !== curGroup.unitKey || item.unitKey == null) {
+      curGroup = { pages: [item.pg], unitKey: item.unitKey, tie: item.tie, minQ: item.minQ, maxQ: item.maxQ }
+      groups.push(curGroup)
+    } else {
+      curGroup.pages.push(item.pg)
+      if (item.minQ < curGroup.minQ) curGroup.minQ = item.minQ
+      if (item.maxQ > curGroup.maxQ) curGroup.maxQ = item.maxQ
+    }
+  }
+  return groups
+}
+
 export function resolveAnswerUnits(answersByUnit, pageDataList) {
   const unitCount = answersByUnit ? answersByUnit.size : 0
   if (unitCount === 0) return pageDataList.map(p => ({ pageNumber: p.pageNumber, unitKey: null }))
@@ -2051,10 +2126,114 @@ export function resolveAnswerUnits(answersByUnit, pageDataList) {
     return pageDataList.map(p => ({ pageNumber: p.pageNumber, unitKey: only }))
   }
 
+  // ═══════════════════════════════════════════════════════════════
+  // 题号连续性分组（前置层，2026-08-05）
+  //
+  // 背景：倒序扫描场景下（学生从练习册末页往首页拍），page_number 顺序
+  // 与练习册物理顺序相反。逐页 pickAnswerUnit 对"非开头页"（q 不从 1 开始）
+  // 匹配不可靠（多单元同题号范围 + 缺标题），而答案 PDF 的 answer_page_start/end
+  // 可能全 NULL（页码兜底失效），导致双向继承被错锚污染。
+  //
+  // 策略：利用每页的 question_number 连续性做分组（单元边界 = 题号不连续处），
+  // 对每组用"题号覆盖最全"的页反推单元，跳过逐页独立匹配的噪声。
+  // 仅在分组成功时覆盖预扫描锚点；分组失败时回退到原有逐页匹配逻辑。
+  //
+  // 修复（2026-08-06）：分组命中结果【不得短路】pickAnswerUnit 的精细决策链，
+  // 只作为其返回 null 时的兜底。组级覆盖率并列最高时用学生答案指纹决胜，
+  // 仍无法区分则放弃（不写 override），绝不取迭代序第一个。
+  // ═══════════════════════════════════════════════════════════════
+  const pageGroups = _groupByQuestionContinuity(pageDataList, answersByUnit)
+  const groupOverrides = new Map() // pageNumber → { unitKey, cov, tieUnits }（分组推断的覆盖值）
+  const groupTieMap = new Map() // pageNumber → string[]（组级覆盖率打平的候选单元，诊断用）
+
+  if (pageGroups.length >= 2) {
+    for (const grp of pageGroups) {
+      const grpQuestions = grp.pages.flatMap(pg => pg.questions || [])
+      if (grpQuestions.length === 0) continue
+      // 组级覆盖率（覆盖键含 sub_no，比单页更可靠）。
+      // 注意：打平组（逐页预匹配 unitKey=null，如 grp.tie 非空）也必须参与组级反推，
+      // 整组题号 + 学生答案样本更足，恰恰是唯一能区分同号多单元的路径。
+      let bestUnit = null
+      let bestCov = 0
+      const candidates = []
+      for (const [uk, secMap] of answersByUnit) {
+        const cov = coverageOfQuestionsInUnit(grpQuestions, secMap)
+        if (cov > bestCov) { bestCov = cov; candidates.length = 0; candidates.push(uk) }
+        else if (cov === bestCov && cov > 0) candidates.push(uk)
+      }
+      if (candidates.length === 0 || bestCov < 0.5) continue // 覆盖不足，放弃
+      let tieUnits = null
+      if (candidates.length === 1) {
+        bestUnit = candidates[0]
+      } else {
+        // 打平（同号多单元，本次 bug 的直接触发点）：用组内学生答案指纹在候选单元内决胜。
+        // 置信门槛：最佳 score ≥ 3 且领先次佳 ≥ 1.0 才采用；否则判定"无法区分"→ 放弃，
+        // 交给逐页 pickAnswerUnit + 双向相邻继承，并记录 tieUnits 供 is_suspicious 审计。
+        tieUnits = candidates
+        const candScores = []
+        for (const uk of candidates) {
+          const unitAnswers = answersByUnit.get(uk)
+          let hits = 0
+          let score = 0
+          if (unitAnswers) {
+            for (const q of grpQuestions) {
+              const sa = (q.student_answer || '').toString().trim()
+              if (!sa) continue
+              if (q.question_type === 'choice' || q.question_type === 'judge') continue
+              const found = searchByAnswerFingerprint(sa, q.question_type || 'answer', unitAnswers, new Set())
+              if (found && found.score >= 0.7) { hits++; score += found.score }
+            }
+          }
+          candScores.push({ uk, hits, score })
+        }
+        candScores.sort((a, b) => b.score - a.score)
+        const best = candScores[0]
+        const second = candScores[1]
+        if (best.score >= 3 && second && best.score >= second.score + 1.0) {
+          bestUnit = best.uk
+          console.log(`   [resolveAnswerUnits] 题号分组 tie 决胜: [${grp.pages.map(p => p.pageNumber).join(',')}] 候选 ${candidates.length} 个 → "${best.uk}" (score=${best.score.toFixed(2)} vs 次佳=${second.score.toFixed(2)})`)
+        } else {
+          console.log(`   [resolveAnswerUnits] 题号分组 tie 无法区分: [${grp.pages.map(p => p.pageNumber).join(',')}] 候选 ${candidates.length} 个（最佳 score=${best.score.toFixed(2)}, 次佳=${second ? second.score.toFixed(2) : '-'}），放弃交回精细层`)
+        }
+      }
+      if (!bestUnit) {
+        // 打平且无法区分：把 tie 候选写入诊断（供 sectionMatch / is_suspicious）
+        if (tieUnits) for (const pg of grp.pages) groupTieMap.set(pg.pageNumber, tieUnits)
+        continue
+      }
+
+      for (const pg of grp.pages) {
+        groupOverrides.set(pg.pageNumber, { unitKey: bestUnit, cov: bestCov, tieUnits })
+      }
+      const pgs = grp.pages.map(p => p.pageNumber).join(',')
+      console.log(`   [resolveAnswerUnits] 题号分组命中: [${pgs}] → unit="${bestUnit}" (cov=${(bestCov*100).toFixed(0)}% minQ=${grp.minQ} maxQ=${grp.maxQ})${tieUnits ? ` 决胜自 tie=${tieUnits.length} 个候选` : ''}`)
+    }
+  }
+
   // 预扫描：每页独立匹配（含标题匹配/反推/覆盖率/页码兜底），得到锚点
+  // ★ 修复：分组覆盖的页【仍然先走 pickAnswerUnit 完整精细链】，分组结果只作
+  //   其返回 null 时的兜底，防止分组打平错锚后静默短路全部精细匹配。
+  //   返回对象携带 method / groupMatched / groupTie 诊断字段，供 sectionMatch 审计。
   const resolved = pageDataList.map(({ pageTitle, pageNumber, questions, chapterHint }, idx) => {
-    const unitKey = pickAnswerUnit(answersByUnit, pageTitle, questions, pageNumber, chapterHint)
-    return { pageNumber, unitKey, idx }
+    const groupInfo = groupOverrides.get(pageNumber)
+    const groupTie = (groupInfo && groupInfo.tieUnits) ? groupInfo.tieUnits : (groupTieMap.get(pageNumber) || null)
+    const preciseUnit = pickAnswerUnit(answersByUnit, pageTitle, questions, pageNumber, chapterHint)
+    if (preciseUnit) {
+      return {
+        pageNumber, unitKey: preciseUnit, idx, method: 'precise',
+        groupMatched: groupInfo ? groupInfo.unitKey : null,
+        groupTie,
+        groupConflict: groupInfo ? groupInfo.unitKey !== preciseUnit : false
+      }
+    }
+    if (groupInfo) {
+      return {
+        pageNumber, unitKey: groupInfo.unitKey, idx, method: 'group-fallback',
+        groupMatched: groupInfo.unitKey,
+        groupTie
+      }
+    }
+    return { pageNumber, unitKey: null, idx, method: null, groupMatched: null, groupTie }
   })
 
   // 判断某单元是否能覆盖某页的全部题号（避免把无关页的题号也吸过来）
@@ -2088,10 +2267,12 @@ export function resolveAnswerUnits(answersByUnit, pageDataList) {
     for (const a of anchors) { if (a > i && (nextA === -1 || a < nextA)) nextA = a }
     if (prevA === -1 && nextA === -1) continue
     const page = pageDataList[i]
-    // 择优：
-    //   1) 两侧都有锚点且距离不同 → 取页距更近者（中间页归属最近的标题页）
-    //   2) 距离相等 → 题号覆盖率裁决
+    //   选择策略（覆盖率优先）：
+    //   1) 覆盖率差异显著（高者 ≥ 低者 + 20%）→ 取覆盖率高者
+    //   2) 覆盖率相同或相近 → 取距离更近者
     //   3) 仅一侧 → 直接继承
+    //   为什么覆盖率优先：倒序扫描场景下物理距离不反映单元归属，
+    //   而题号覆盖率（页的 q 范围与单元答案库 q 范围的交集）是单元归属的最强信号。
     let chosen
     const distPrev = prevA >= 0 ? i - prevA : Infinity
     const distNext = nextA >= 0 ? nextA - i : Infinity
@@ -2099,18 +2280,21 @@ export function resolveAnswerUnits(answersByUnit, pageDataList) {
     const nextUnit = nextA >= 0 ? resolved[nextA].unitKey : null
     const prevCov = prevUnit ? unitCoverage(prevUnit, page.questions) : 0
     const nextCov = nextUnit ? unitCoverage(nextUnit, page.questions) : 0
-    if (prevUnit && nextUnit && distPrev !== distNext) {
-      chosen = distPrev < distNext ? prevUnit : nextUnit
-    } else if (prevUnit && nextUnit) {
-      chosen = prevCov >= nextCov ? prevUnit : nextUnit
+    if (prevUnit && nextUnit) {
+      if (prevCov >= nextCov + 0.2) chosen = prevUnit
+      else if (nextCov >= prevCov + 0.2) chosen = nextUnit
+      else chosen = distPrev <= distNext ? prevUnit : nextUnit
     } else {
       chosen = nextUnit || prevUnit
     }
     resolved[i].unitKey = chosen
+    resolved[i].method = 'propagated'
     console.log(`   [AnswerBank] 双向相邻继承: pageNumber=${page.pageNumber} → unit="${chosen}" (distPrev=${distPrev} distNext=${distNext} prevCov=${prevCov.toFixed(2)} nextCov=${nextCov.toFixed(2)})（相邻锚点传播）`)
   }
 
-  return resolved.map(({ pageNumber, unitKey }) => ({ pageNumber, unitKey }))
+  return resolved.map(({ pageNumber, unitKey, method, groupMatched, groupTie, groupConflict }) => ({
+    pageNumber, unitKey, method, groupMatched, groupTie, groupConflict
+  }))
 }
 
 // 简单字符串相似度（归一化后基于最长公共子序列 LCS 长度比）
@@ -2386,7 +2570,7 @@ const processWorkbookGrading = async (job) => {
     throw new Error('所有图片URL无效')
   }
 
-  await updateTaskStatus(taskId, TASK_STATUS.PROCESSING, { progress: 5 })
+  await updateTaskStatus(taskId, TASK_STATUS.PROCESSING, { progress: 5, startedAt: new Date().toISOString() })
 
   // 2. 逐页处理：下载 → 压缩 → OCR → 解析
   const workbookPrompt = `你是一个专业的学生手写答案识别助手。请从作业图片中提取页面标题和每道题的题号、学生手写答案。
@@ -2684,9 +2868,14 @@ const processWorkbookGrading = async (job) => {
   //   无标题解答题页永远继承不到后页标题页的问题），批改循环直接采用结果。
   const resolvedUnits = resolveAnswerUnits(answersByUnit, pageDataList)
   const unitByPageNumber = new Map(resolvedUnits.map(r => [r.pageNumber, r.unitKey]))
+  const resolvedByPage = new Map(resolvedUnits.map(r => [r.pageNumber, r]))
 
   for (const { pageTitle, imageUrl, questions, pageNumber, chapterHint } of pageDataList) {
     if (questions.length === 0) continue
+    // 页级可疑标记：单元匹配经分组兜底（group-fallback）或同号多单元打平（groupTie），
+    // 说明本页归属置信度低，写 is_suspicious 供 PC 端展示，避免错挂静默无感。
+    const resolvedInfo = resolvedByPage.get(pageNumber) || {}
+    const pageSuspicious = !!(resolvedInfo.groupTie || resolvedInfo.method === 'group-fallback')
 
     // 1) 选本页所属单元（unitKey）—— pageNumber 用于"页码范围兜底"
     //    chapterHint 来自 OCR 阶段 AI 推断的章节（如"第二十章二次根式"），
@@ -2735,15 +2924,19 @@ const processWorkbookGrading = async (job) => {
       has_title: !!pageTitle,
       page_title: pageTitle,
       matched_unit: matchedUnit,
+      matched_method: resolvedInfo.method || null,
+      group_tie_units: resolvedInfo.groupTie || null,
+      suspicious: pageSuspicious,
       question_count: questions.length,
       page_number: pageNumber || null
     })
 
-    console.log(`   [Workbook] 页匹配: title="${pageTitle}" → unit="${matchedUnit}" (${questions.length} 题)`)
+    console.log(`   [Workbook] 页匹配: title="${pageTitle}" → unit="${matchedUnit}" (${questions.length} 题)${pageSuspicious ? ' [suspect]' : ''}`)
 
     // 对该页题目逐题判定
     for (const q of questions) {
       if (q.question_number == null) continue
+      if (pageSuspicious) q.is_suspicious = true
 
       let answerRow = lookupRow(q.question_number, q.sub_no, q.question_type)
       let usedKey = `${Number(q.question_number)}|${q.sub_no || ''}`
@@ -2969,7 +3162,7 @@ const processAnswerBankGrading = async (job) => {
 
   try {
     await job.updateProgress(5)
-    await updateTaskStatus(taskId, TASK_STATUS.PROCESSING, { progress: 5 })
+    await updateTaskStatus(taskId, TASK_STATUS.PROCESSING, { progress: 5, startedAt: new Date().toISOString() })
 
     // 查询资源信息，确认答案状态
     const resource = await getResourceById(resourceId)
@@ -3213,9 +3406,14 @@ const processAnswerBankGrading = async (job) => {
     //    5. 双向相邻页继承（锚点向两侧传播，含倒序扫描场景）     ── resolveAnswerUnits
     const resolvedUnits = resolveAnswerUnits(answersByUnit, pageDataList)
     const unitByPageNumber = new Map(resolvedUnits.map(r => [r.pageNumber, r.unitKey]))
+    const resolvedByPage = new Map(resolvedUnits.map(r => [r.pageNumber, r]))
 
     for (const { pageTitle, pageNumber, imageUrl, questions, chapterHint } of pageDataList) {
       if (questions.length === 0) continue
+      // 页级可疑标记：单元匹配经分组兜底（group-fallback）或同号多单元打平（groupTie），
+      // 说明本页归属置信度低，写 is_suspicious 供 PC 端展示，避免错挂静默无感。
+      const resolvedInfo = resolvedByPage.get(pageNumber) || {}
+      const pageSuspicious = !!(resolvedInfo.groupTie || resolvedInfo.method === 'group-fallback')
 
       // 1) 选本页所属 unit（直接用预扫描结果，含双向相邻继承）
       const matchedUnit = unitByPageNumber.get(pageNumber) ?? null
@@ -3247,7 +3445,7 @@ const processAnswerBankGrading = async (job) => {
         }
         if (!anyContain) suspectMount = true
       }
-      console.log(`   [AnswerBank] 页匹配: pageNumber=${pageNumber} title="${pageTitle}" chapterHint="${chapterHint}" → unit="${matchedUnit}" (${questions.length} 题)${suspectMount ? ' [suspect]' : ''}`)
+      console.log(`   [AnswerBank] 页匹配: pageNumber=${pageNumber} title="${pageTitle}" chapterHint="${chapterHint}" → unit="${matchedUnit}" (${questions.length} 题)${suspectMount || pageSuspicious ? ' [suspect]' : ''}`)
 
       // 2) 在该 unit 的"section → qNo|subNo → row"二维索引中，每道题独立查答案
       //   同一 unit 下不同 section 可能有相同题号（如"一、填空题 1"和"三、解答题 1"），
@@ -3669,7 +3867,7 @@ const processAnswerBankGrading = async (job) => {
           status: isCorrect === false ? 'wrong' : 'pending',
           page_number: q._page_number || pageNumber,
           question_number: q.question_number,
-          is_suspicious: !!subBreakdown,  // sub 拆分匹配标记为可疑，供 PC 端展示
+          is_suspicious: !!subBreakdown || pageSuspicious,  // sub 拆分/页级归属可疑标记，供 PC 端展示
           confidence: isEmpty ? 0 : (answerRow ? (subBreakdown ? 0.9 : 0.85) : 0),
           source_type: resource.resource_type === 'exam' ? 'exam' : 'homework',
           // 落库学生作答页图 + 归一化 0-1000 坐标，供 PC 后台 PaperViewerPanel
@@ -3792,6 +3990,29 @@ const processAnswerBankGrading = async (job) => {
     }
 
     const duration = ((Date.now() - startTime) / 1000).toFixed(1)
+    // 单元匹配诊断信息（写入 task metadata 供前端排查，与 processWorkbookGrading 一致）
+    const pagesMatchInfo = []
+    for (const pgd of pageDataList) {
+      const rInfo = resolvedByPage.get(pgd.pageNumber) || {}
+      pagesMatchInfo.push({
+        has_title: !!pgd.pageTitle,
+        page_title: pgd.pageTitle,
+        matched_unit: unitByPageNumber.get(pgd.pageNumber) ?? null,
+        matched_method: rInfo.method || null,
+        group_tie_units: rInfo.groupTie || null,
+        suspicious: !!(rInfo.groupTie || rInfo.method === 'group-fallback'),
+        question_count: (pgd.questions || []).length,
+        page_number: pgd.pageNumber || null
+      })
+    }
+    const sectionMatchInfo = {
+      pages: pagesMatchInfo,
+      total_units: answersByUnit.size
+    }
+    const allNoMatch = pagesMatchInfo.every(p => p.matched_unit == null)
+    if (allNoMatch) {
+      sectionMatchInfo.match_fail_reason = '所有页面均无法匹配到所属练习单元'
+    }
     await updateTaskStatus(taskId, TASK_STATUS.DONE, {
       questionCount: questionsWithIds.length,
       wrongCount,
@@ -3799,7 +4020,8 @@ const processAnswerBankGrading = async (job) => {
       matchedCount,
       duration: `${duration}s`,
       source: 'answer_bank',
-      resourceType: resource.resource_type
+      resourceType: resource.resource_type,
+      sectionMatch: sectionMatchInfo
     })
 
     console.log(`✅ [AnswerBank] 完成: ${questionsWithIds.length} 题, ${wrongCount} 错, ${emptyCount} 空, ${matchedCount} 匹配答案库, 耗时 ${duration}s`)

@@ -182,7 +182,7 @@ class PendingTaskRecovery {
       // 用条件 OR + ILIKE 让 DB 利用 idx_tasks_status 索引，避免全表扫描。
       const { rows } = await query(
         `SELECT id, student_id, image_url, images, original_name, status, created_at, result, retry_count, last_error,
-                task_type, worksheet_id, generated_exam_id, subject
+                task_type, worksheet_id, generated_exam_id, subject, resource_id
          FROM ${TABLES.TASKS}
          WHERE status = 'failed'
            AND created_at > NOW() - INTERVAL '7 days'
@@ -258,6 +258,7 @@ class PendingTaskRecovery {
             taskType: task.task_type || 'general',
             worksheetId: task.worksheet_id || null,
             generatedExamId: task.generated_exam_id || null,
+            resourceId: task.resource_id || task.worksheet_id || null,
             subject: task.subject || null,
             retryCount: baseRetry + 1
           }, {
@@ -288,7 +289,7 @@ class PendingTaskRecovery {
 
       const { rows } = await query(
         `SELECT id, student_id, image_url, images, original_name, status, started_at, retry_count,
-                task_type, worksheet_id, generated_exam_id, subject, last_error
+                task_type, worksheet_id, generated_exam_id, subject, resource_id, last_error
          FROM ${TABLES.TASKS}
          WHERE status = 'processing'
            AND COALESCE(retry_count, 0) < $1
@@ -344,6 +345,7 @@ class PendingTaskRecovery {
             taskType: task.task_type || 'general',
             worksheetId: task.worksheet_id || null,
             generatedExamId: task.generated_exam_id || null,
+            resourceId: task.resource_id || task.worksheet_id || null,
             subject: task.subject || null,
             retryCount: (task.retry_count || 0) + 1
           }, {
@@ -372,7 +374,7 @@ class PendingTaskRecovery {
       // Find tasks that have been pending for too long
       const { rows } = await query(
         `SELECT id, student_id, image_url, images, original_name, status, created_at, result,
-                task_type, worksheet_id, generated_exam_id, subject
+                task_type, worksheet_id, generated_exam_id, subject, resource_id
          FROM ${TABLES.TASKS}
          WHERE status = 'pending'
          AND created_at < NOW() - INTERVAL '${PENDING_TIMEOUT_MS / 1000 / 60} minutes'
@@ -422,6 +424,7 @@ class PendingTaskRecovery {
             taskType: task.task_type || 'general',
             worksheetId: task.worksheet_id || null,
             generatedExamId: task.generated_exam_id || null,
+            resourceId: task.resource_id || task.worksheet_id || null,
             subject: task.subject || null,
             retryCount,
             recovered: true
