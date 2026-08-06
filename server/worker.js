@@ -2637,7 +2637,11 @@ export function calculateAnswerSimilarity(studentAns, refAns) {
   let sRaw = String(studentAns).trim()
   if (sRaw.includes('=')) sRaw = sRaw.slice(sRaw.lastIndexOf('=') + 1).trim()
   if (sRaw.includes(';') || sRaw.includes('；')) sRaw = sRaw.split(/[;；]/).pop().trim()
-  if (sRaw.includes(',') || sRaw.includes('，')) sRaw = sRaw.split(/[,，]/).pop().trim()
+  // 纯比较符号答案（如 "> , <"）：逗号是多个比较符号的分隔（"3 > , < 5" 类），不是"多空最后答案"，
+  // 不能按逗号收窄成末段，否则 "> , <" 被收窄成 "<" 导致正确答案被误判。直接去逗号整体比较。
+  const isPureSymbolAnswer = /^[<>≥≤≠，, ]+$/.test(sRaw)
+  if (isPureSymbolAnswer) sRaw = sRaw.replace(/[，,]/g, '')
+  else if (sRaw.includes(',') || sRaw.includes('，')) sRaw = sRaw.split(/[,，]/).pop().trim()
   const rRaw = String(refAns).trim()
   if (sRaw === rRaw) return 1.0
   const sNorm = normalizeAnswerFingerprint(sRaw)
