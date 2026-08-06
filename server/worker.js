@@ -2118,6 +2118,136 @@ function _groupByQuestionContinuity(pageDataList, answersByUnit) {
   return groups
 }
 
+/**
+ * 按题号连续性重建物理页序并分组（2026-08-06）。
+ *
+ * 背景：倒序扫描场景下（学生从练习册末页往首页拍，如本任务文件名时间戳
+ * 420→437 对应物理页 p18→p1），page_number 顺序与练习册物理顺序相反。
+ * 用户明确要求"相邻继承应基于卷面印刷页码（拍照时页码一起拍进来），与上传
+ * 时间/顺序无关"。OCR 每题的 question_number 就是从卷面印刷体读取的，
+ * 因此题号范围 (min_q,max_q) 就是卷面页码的可靠等价物。
+ *
+ * 策略：
+ *  1) 首页锚点 = min_q === 1 的页，其单元归属用 pickAnswerUnit 确认。
+ *  2) 每个首页锚点取得所属单元答案库的题号上限 unit_max_q，按上限【降序】
+ *     处理首页（题号上限大的单元先锁定：如评价测试卷 30 题，p2(24-27)/p1(28-30)
+ *     这类 max_q 超过阶段练 26 题的页只有它能容纳，必须优先归位，否则会被
+ *     同范围首页抢走——实测 p4(1-14) 与 p16(1-14) 题号范围完全相同，旧贪心
+ *     按上传顺序先处理 p4，错误抢走了属于阶段练2 的 p15/p14/p13）。
+ *  3) 从首页贪心延伸：候选 = 未使用 且 min_q === 当前链末 max_q + 1 且
+ *     max_q ≤ 单元上限。多候选（同题号竞争，如 p13/p9 都含 Q25-26，纯题号
+ *     无法区分归属阶段练2 还是阶段练3）用【学生答案在首页单元内反推】决胜：
+ *     候选缩窄到单个单元后，反推远比全库可靠。
+ *  4) 链内所有页继承首页单元——这是比逐页学生答案反推强得多的信号
+ *     （分数运算单元间学生答案重叠，全库反推不可靠，实测 p13/p14/p15 被
+ *     错反推为阶段练1 而非阶段练2）。
+ *  5) 无首页可挂的剩余页（如仅拍到某单元的中间页）不强行归链，交回原逻辑。
+ *
+ * 返回 Map<pageNumber, { unitKey, homePage, chainPages }>；无足够首页锚点时
+ * 返回 null（降级走原有逐页匹配 + 双向继承）。
+ */
+export function _groupByPhysicalContinuity(pageDataList, answersByUnit) {
+  if (!pageDataList || pageDataList.length < 2 || !answersByUnit || answersByUnit.size < 2) return null
+
+  // 1. 每页题号范围
+  const meta = pageDataList.map(pg => {
+    const qnos = (pg.questions || [])
+      .map(q => Number(q.question_number))
+      .filter(n => Number.isFinite(n))
+    return {
+      pg,
+      pageNumber: pg.pageNumber,
+      minQ: qnos.length ? Math.min(...qnos) : Infinity,
+      maxQ: qnos.length ? Math.max(...qnos) : -Infinity,
+    }
+  })
+
+  // 单元答案库题号上限
+  const unitMaxQ = (uk) => {
+    const secMap = answersByUnit.get(uk)
+    if (!secMap) return Infinity
+    let m = -Infinity
+    for (const qMap of secMap.values()) {
+      for (const key of qMap.keys()) {
+        const qn = Number(String(key).split('|')[0])
+        if (Number.isFinite(qn) && qn > m) m = qn
+      }
+    }
+    return m === -Infinity ? Infinity : m
+  }
+
+  // 2. 首页锚点 + 归属 + 单元上限
+  const homes = meta.filter(m => m.minQ === 1)
+  if (homes.length < 2) return null
+  const homeUnits = homes.map(h => {
+    const u = pickAnswerUnit(
+      answersByUnit,
+      h.pg.pageTitle,
+      h.pg.questions,
+      h.pg.pageNumber,
+      h.pg.chapterHint
+    )
+    return { h, u, unitMaxQ: u ? unitMaxQ(u) : -Infinity }
+  }).filter(x => x.u)
+  if (homeUnits.length < 2) return null
+
+  // 题号上限降序处理（上限大的单元先锁定，超限页优先归位）
+  homeUnits.sort((a, b) => b.unitMaxQ - a.unitMaxQ)
+
+  const used = new Set()
+  const chains = []
+  for (const { h, u, unitMaxQ: cap } of homeUnits) {
+    if (used.has(h)) continue
+    used.add(h)
+    const chain = [h]
+    let curMax = h.maxQ
+    for (;;) {
+      const cands = meta.filter(m => !used.has(m) && m.minQ === curMax + 1 && m.maxQ <= cap)
+      if (cands.length === 0) break
+      let picked
+      if (cands.length === 1) {
+        picked = cands[0]
+      } else {
+        // 多候选（同题号竞争）：学生答案在首页单元内反推决胜
+        const secMap = answersByUnit.get(u)
+        let best = null
+        let bestScore = -1
+        for (const c of cands) {
+          let s = 0
+          for (const q of c.pg.questions || []) {
+            const sa = (q.student_answer || '').toString().trim()
+            if (!sa) continue
+            if (q.question_type === 'choice' || q.question_type === 'judge') continue
+            const found = searchByAnswerFingerprint(sa, q.question_type || 'answer', secMap, new Set())
+            if (found && found.score >= 0.7) s += found.score
+          }
+          if (s > bestScore) { bestScore = s; best = c }
+        }
+        picked = (best && bestScore > 0) ? best : cands[0]
+      }
+      used.add(picked)
+      chain.push(picked)
+      curMax = picked.maxQ
+    }
+    chains.push({ chain, u, home: h })
+  }
+
+  // 3. 链内全部继承首页单元
+  const overrides = new Map()
+  for (const { chain, u, home } of chains) {
+    const chainPages = chain.map(m => m.pageNumber)
+    for (const m of chain) {
+      overrides.set(m.pageNumber, {
+        unitKey: u,
+        homePage: home.pageNumber,
+        chainPages,
+      })
+    }
+    console.log(`   [resolveAnswerUnits] 物理连续链重建: [${chainPages.join(',')}] → unit="${u}"（首页 p${home.pageNumber} min_q=1 max_q=${home.maxQ} 确定）`)
+  }
+  return overrides.size ? overrides : null
+}
+
 export function resolveAnswerUnits(answersByUnit, pageDataList) {
   const unitCount = answersByUnit ? answersByUnit.size : 0
   if (unitCount === 0) return pageDataList.map(p => ({ pageNumber: p.pageNumber, unitKey: null }))
@@ -2146,6 +2276,18 @@ export function resolveAnswerUnits(answersByUnit, pageDataList) {
   const groupOverrides = new Map() // pageNumber → { unitKey, cov, tieUnits }（分组推断的覆盖值）
   const groupTieMap = new Map() // pageNumber → string[]（组级覆盖率打平的候选单元，诊断用）
 
+  // ═══════════════════════════════════════════════════════════════
+  // 物理页序重建（2026-08-06，本轮修复的核心）
+  //
+  // 背景：倒序扫描（p18→p1）下，逐页学生答案反推会被分数运算单元间的
+  // 答案重叠污染（实测 p13/p14/p15 错反推为阶段练1 而非阶段练2，p7 错反推
+  // 为阶段练3 而非阶段练4）。用户要求相邻继承必须基于卷面印刷页码，
+  // 与上传顺序无关。题号连续性重建物理顺序后，链首页（min_q=1）的单元
+  // 归属经 pickAnswerUnit 确认，整链继承——这是目前最强的单元判别信号。
+  //
+  // 优先级：physicalOverrides > pickAnswerUnit 逐页精确链 > 题号分组兜底。
+  // ═══════════════════════════════════════════════════════════════
+  const physicalOverrides = _groupByPhysicalContinuity(pageDataList, answersByUnit)
   if (pageGroups.length >= 2) {
     for (const grp of pageGroups) {
       const grpQuestions = grp.pages.flatMap(pg => pg.questions || [])
@@ -2217,6 +2359,18 @@ export function resolveAnswerUnits(answersByUnit, pageDataList) {
   const resolved = pageDataList.map(({ pageTitle, pageNumber, questions, chapterHint }, idx) => {
     const groupInfo = groupOverrides.get(pageNumber)
     const groupTie = (groupInfo && groupInfo.tieUnits) ? groupInfo.tieUnits : (groupTieMap.get(pageNumber) || null)
+    const physInfo = physicalOverrides ? physicalOverrides.get(pageNumber) : null
+    // 物理连续链覆盖优先：链首页的单元经 pickAnswerUnit 确认，链内其余页继承，
+    // 不受逐页学生答案反推（分数单元间答案重叠不可靠）干扰。
+    if (physInfo) {
+      return {
+        pageNumber, unitKey: physInfo.unitKey, idx, method: 'physical-chain',
+        groupMatched: groupInfo ? groupInfo.unitKey : null,
+        groupTie,
+        physHomePage: physInfo.homePage,
+        physChainPages: physInfo.chainPages,
+      }
+    }
     const preciseUnit = pickAnswerUnit(answersByUnit, pageTitle, questions, pageNumber, chapterHint)
     if (preciseUnit) {
       return {
@@ -2257,16 +2411,81 @@ export function resolveAnswerUnits(answersByUnit, pageDataList) {
   // 双向传播：每个无锚点页**独立**寻找最近的锚点页并继承其单元。
   // 与 BFS 逐轮扩散不同：这里只从"初始锚点"（pre 扫描直接命中）继承，
   // 绝不从"已传播的中间页"再扩散，避免一页错锚导致后续连环带偏。
+  //
+  // 修复（2026-08-06）：优先用【题号连续性相邻的锚点】继承，回退上传顺序距离。
+  // 倒序扫描下上传顺序距离不反映物理相邻——实测 p17(Q24-26) 物理上紧跟 p18
+  // (Q20-23，阶段练1)，但上传顺序里它夹在 p16(阶段练2) 与 p18(阶段练1) 之间，
+  // 两锚点距离相等、覆盖率相同，旧逻辑取了前者 → p17 错挂阶段练2。
+  // 题号连续性（min_q === 前页 max_q + 1 或 本页 max_q + 1 === 后页 min_q）
+  // 是卷面物理相邻的等价物，优先采用。
   const anchors = resolved.filter(r => r.unitKey).map(r => r.idx) // 初始锚点索引
+  const pageQRange = (i) => {
+    const qnos = (pageDataList[i]?.questions || [])
+      .map(q => Number(q.question_number))
+      .filter(n => Number.isFinite(n))
+    return {
+      minQ: qnos.length ? Math.min(...qnos) : null,
+      maxQ: qnos.length ? Math.max(...qnos) : null,
+    }
+  }
   for (let i = 0; i < resolved.length; i++) {
     if (resolved[i].unitKey) continue
     if (anchors.length === 0) continue
+    const page = pageDataList[i]
+    const { minQ, maxQ } = pageQRange(i)
+
+    // 1) 题号连续性相邻的锚点（物理相邻，最强信号）
+    if (minQ != null || maxQ != null) {
+      const contAnchors = []
+      for (const a of anchors) {
+        const ar = pageQRange(a)
+        let cont = false
+        if (minQ != null && ar.maxQ != null && ar.maxQ + 1 === minQ) cont = true
+        else if (maxQ != null && ar.minQ != null && maxQ + 1 === ar.minQ) cont = true
+        if (!cont) continue
+        const unit = resolved[a].unitKey
+        // 排除：该单元已有【其他】锚点页与本页题号范围重叠。
+        // 实测 p17(Q24-26) 与 p3(评价测试卷 Q15-23) 题号也连续，但评价测试卷
+        // 已有 p2(Q24-27) 覆盖 Q24-26 —— 同一单元内题号不可能重复页，排除 p3。
+        const overlapsOther = anchors.some(b => {
+          if (b === a) return false
+          if (resolved[b].unitKey !== unit) return false
+          const br = pageQRange(b)
+          return br.minQ != null && br.maxQ != null && !(br.maxQ < minQ || br.minQ > maxQ)
+        })
+        if (overlapsOther) continue
+        contAnchors.push({ idx: a, unit })
+      }
+      if (contAnchors.length > 0) {
+        // 前后都连续时取两侧都出现的单元（同单元两侧页夹住本页）；
+        // 否则取唯一候选。极端多候选时取物理距离最近的。
+        let chosen = null
+        const units = [...new Set(contAnchors.map(c => c.unit))]
+        if (units.length === 1) {
+          chosen = units[0]
+        } else if (contAnchors.length === 2) {
+          chosen = contAnchors[0].idx < i ? contAnchors[0].unit : contAnchors[1].unit
+        } else {
+          let best = null, bestDist = Infinity
+          for (const c of contAnchors) {
+            const d = Math.abs(c.idx - i)
+            if (d < bestDist) { bestDist = d; best = c.unit }
+          }
+          chosen = best
+        }
+        resolved[i].unitKey = chosen
+        resolved[i].method = 'propagated'
+        console.log(`   [AnswerBank] 题号连续继承: pageNumber=${page.pageNumber} → unit="${chosen}"（min_q=${minQ} max_q=${maxQ} 与锚点题号相邻，共 ${contAnchors.length} 个候选）`)
+        continue
+      }
+    }
+
+    // 2) 回退：上传顺序距离（覆盖率优先 + 距离兜底）
     // 找 i 之前最近、之后最近的初始锚点
     let prevA = -1, nextA = -1
     for (const a of anchors) { if (a < i && (prevA === -1 || a > prevA)) prevA = a }
     for (const a of anchors) { if (a > i && (nextA === -1 || a < nextA)) nextA = a }
     if (prevA === -1 && nextA === -1) continue
-    const page = pageDataList[i]
     //   选择策略（覆盖率优先）：
     //   1) 覆盖率差异显著（高者 ≥ 低者 + 20%）→ 取覆盖率高者
     //   2) 覆盖率相同或相近 → 取距离更近者
@@ -2373,8 +2592,10 @@ export function pickAnswerSection(_answersBySection, _pageTitle, _questions) {
 
 /**
  * 答案字符串归一化（用于题号错位时的兜底匹配）
- * - 去所有空白
+ * - 去 LaTeX 数学模式符（$...$）
  * - 统一根式：\sqrt / 根号 → √
+ * - 处理 LaTeX 分数命令：\frac{a}{b} → a/b（先于去空白，避免带分数粘连）
+ * - 统一乘除：\times → ×，\div → ÷
  * - 去大括号（LaTeX 残留）
  * - 中英文标点统一（，→ , ； → ;）
  * - 大小写不敏感
@@ -2382,10 +2603,14 @@ export function pickAnswerSection(_answersBySection, _pageTitle, _questions) {
 function normalizeAnswerFingerprint(s) {
   if (s == null) return ''
   return String(s)
-    .replace(/\s+/g, '')                          // 去所有空白
-    .replace(/\\sqrt\s*\{?/g, '√')                 // \sqrt{ → √；\sqrt → √
-    .replace(/根号/g, '√')                          // 根号 → √
+    .replace(/\$/g, '')                              // 去 LaTeX 数学模式符
+    .replace(/\\times/g, '×')                        // \times → ×
+    .replace(/\\div/g, '÷')                          // \div → ÷
+    .replace(/\\frac\s*\{([^}]*)\}\s*\{([^}]*)\}/g, '$1/$2')  // \frac{a}{b} → a/b
+    .replace(/\\sqrt\s*\{?/g, '√')                   // \sqrt{ → √；\sqrt → √
+    .replace(/根号/g, '√')                            // 根号 → √
     .replace(/[{}]/g, '')                            // 去大括号
+    .replace(/\s+/g, '')                             // 去所有空白
     .replace(/，/g, ',')                              // 中文逗号 → ASCII
     .replace(/；/g, ';')                              // 中文分号 → ASCII
     .replace(/。/g, '.')                              // 中文句号 → .
@@ -3290,52 +3515,73 @@ const processAnswerBankGrading = async (job) => {
         continue
       }
 
-      let content
-      try {
-        const result = await callVisionCompletion({
-          imageDataURL: bufferToBase64(compressed),
-          systemPrompt: answerBankPrompt,
-          userText: '识别这张作业图片的页面标题和所有题目的学生答案。',
-          temperature: 0.1,
-          maxTokens: 4096
-        })
-        content = result?.content
-      } catch (e) {
-        console.error(`   [AnswerBank] 第 ${pageNumber} 页 OCR 失败: ${e.message}`)
-        ocrErrors++
-        continue
-      }
-
-      if (!content) {
-        console.error(`   [AnswerBank] 第 ${pageNumber} 页AI识别返回为空，跳过`)
-        ocrErrors++
-        continue
-      }
-
-      // 解析 JSON
+      // OCR 调用 + 解析（2026-08-06 加自动重试）：
+      // 偶发一次失败/空结果就整页丢弃，会破坏题号连续链——实测 p12（阶段练3 首页）
+      // 单次 OCR 失败导致首页锚点缺失，阶段练3 的 p9/p10 被物理链错归阶段练2。
+      // 重试（AI_CONFIG.MAX_RETRIES+1 次，指数退避）显著提升整卷连续链稳定性。
+      let content = null
       let questions = []
       let pageTitle = null
       let chapterHint = null
-      try {
-        const jsonMatch = content.match(/```json\n?([\s\S]*?)\n?```/) ||
-                          content.match(/```\n?([\s\S]*?)\n?```/) ||
-                          content.match(/[\[{][\s\S]*[\]}]/)
-        const jsonStr = jsonMatch ? jsonMatch[1] || jsonMatch[0] : content
-        const parsed = JSON.parse(jsonStr)
-        if (Array.isArray(parsed)) {
-          questions = parsed
-        } else if (parsed && typeof parsed === 'object') {
-          pageTitle = parsed.page_title || null
-          chapterHint = parsed.chapter_hint || null
-          questions = Array.isArray(parsed.questions) ? parsed.questions : []
-          if (chapterHint) {
-            for (const q of questions) {
-              if (q && typeof q === 'object') q._chapter_hint = chapterHint
+      const maxAttempts = (AI_CONFIG.MAX_RETRIES || 0) + 1
+      let ocrLastError = ''
+      for (let attempt = 0; attempt < maxAttempts; attempt++) {
+        try {
+          const result = await callVisionCompletion({
+            imageDataURL: bufferToBase64(compressed),
+            systemPrompt: answerBankPrompt,
+            userText: '识别这张作业图片的页面标题和所有题目的学生答案。',
+            temperature: 0.1,
+            maxTokens: 4096
+          })
+          content = result?.content
+        } catch (e) {
+          ocrLastError = `调用失败: ${e.message}`
+          if (attempt < maxAttempts - 1) { await new Promise(r => setTimeout(r, (attempt + 1) * 2000)); continue }
+          break
+        }
+        if (!content) {
+          ocrLastError = 'AI 返回空内容'
+          if (attempt < maxAttempts - 1) { await new Promise(r => setTimeout(r, (attempt + 1) * 2000)); continue }
+          break
+        }
+        // 解析 JSON
+        try {
+          const jsonMatch = content.match(/```json\n?([\s\S]*?)\n?```/) ||
+                            content.match(/```\n?([\s\S]*?)\n?```/) ||
+                            content.match(/[\[{][\s\S]*[\]}]/)
+          const jsonStr = jsonMatch ? jsonMatch[1] || jsonMatch[0] : content
+          const parsed = JSON.parse(jsonStr)
+          questions = []
+          pageTitle = null
+          chapterHint = null
+          if (Array.isArray(parsed)) {
+            questions = parsed
+          } else if (parsed && typeof parsed === 'object') {
+            pageTitle = parsed.page_title || null
+            chapterHint = parsed.chapter_hint || null
+            questions = Array.isArray(parsed.questions) ? parsed.questions : []
+            if (chapterHint) {
+              for (const q of questions) {
+                if (q && typeof q === 'object') q._chapter_hint = chapterHint
+              }
             }
           }
+        } catch (e) {
+          ocrLastError = `JSON 解析失败: ${e.message}`
+          if (attempt < maxAttempts - 1) { await new Promise(r => setTimeout(r, (attempt + 1) * 2000)); continue }
+          break
         }
-      } catch (e) {
-        console.error(`   [AnswerBank] 第 ${pageNumber} 页JSON解析失败: ${e.message}`)
+        if (questions.length === 0) {
+          ocrLastError = '识别到 0 道题'
+          if (attempt < maxAttempts - 1) { await new Promise(r => setTimeout(r, (attempt + 1) * 2000)); continue }
+          break
+        }
+        break // 成功
+      }
+
+      if (questions.length === 0) {
+        console.error(`   [AnswerBank] 第 ${pageNumber} 页 OCR 失败（重试 ${maxAttempts} 次后放弃）: ${ocrLastError}`)
         ocrErrors++
         continue
       }
