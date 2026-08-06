@@ -394,7 +394,6 @@ function judgeAnswer(studentAnswer, referenceAnswer, questionType) {
   // 先做轻量 LaTeX 转换（保留分隔符），再两遍解析数值。
   const extractNumericValues = (raw) => {
     let s = String(raw || '')
-    s = s.replace(/\\frac\{([^}]+)\}\{([^}]+)\}/gi, '($1/$2)')
     s = s.replace(/\\div/gi, '/')
     s = s.replace(/\\times/gi, '*')
     s = s.replace(/\\cdot/gi, '*')
@@ -402,6 +401,22 @@ function judgeAnswer(studentAnswer, referenceAnswer, questionType) {
     s = s.replace(/[！-～]/g, ch => String.fromCharCode(ch.charCodeAt(0) - 0xFEE0))
 
     const vals = []
+
+    // Pass 0: LaTeX 带分数：数字 + \frac{分子}{分母} → 混合数 (e.g., 4\frac{2}{3} → 4.666...)
+    s = s.replace(/(\d+(?:\.\d+)?)\\frac\{([^}]+)\}\{([^}]+)\}/gi, (match, whole, num, den) => {
+      const wholeNum = parseFloat(whole)
+      const numNum = parseInt(num, 10)
+      const denNum = parseInt(den, 10)
+      if (numNum < denNum) {
+        vals.push(wholeNum + numNum / denNum)
+        return ' '.repeat(match.length)
+      }
+      return match
+    })
+
+    // Pass 0.5: 普通 \frac{n}{d} → n/d (剩余的 LaTeX 分数)
+    s = s.replace(/\\frac\{([^}]+)\}\{([^}]+)\}/gi, '($1/$2)')
+
     const mixedRe = /(\d+(?:\.\d+)?)\s+(\d+)\s*\/\s*(\d+)/g
     let cleaned = s.replace(mixedRe, (match, whole, num, den) => {
       if (parseInt(num, 10) < parseInt(den, 10)) {

@@ -2591,6 +2591,157 @@ export function pickAnswerSection(_answersBySection, _pageTitle, _questions) {
 // 3) searchByAnswerFingerprint：在同 unit 同 answer_type 内找最相似的题
 
 /**
+ * 题干垃圾内容检测：OCR 把印刷体题干识别成"× ×"、"÷ = × ×"这类无意义符号时判定为垃圾。
+ * - 无数字、无汉字、无字母 → 纯符号
+ * - 极短纯符号串（如 "= = ="、"x÷ = × x="、"÷ = × ×."）
+ * 简答题/解答题/计算题的题干几乎必然含汉字描述或数字，纯符号题干基本是识别错误。
+ * 返回 true 表示题干疑似识别错误，应触发重试或标记人工确认。
+ */
+function isGarbageQuestionContent(content) {
+  if (content == null) return false
+  const t = String(content).replace(/\s+/g, '')
+  if (t.length === 0) return false
+  // 无数字、无汉字、无字母 → 纯符号
+  const hasSubstance = /[0-9\u4e00-\u9fa5a-zA-Z]/.test(t)
+  if (!hasSubstance) return true
+  // 极短纯符号串如 "= = ="、"x÷ = × x="、"÷ = × ×."
+  if (t.length <= 12 && /^[=×÷\-+×:.()，。、"'xX]{1,12}$/.test(t)) return true
+  return false
+}
+
+/**
+ * 稀疏题干检测：OCR 只识别出指令词（如"计算："、"解方程："）但丢失了算式主体时判定为稀疏。
+ * 这类题干虽含汉字（不会被 isGarbageQuestionContent 捕获），但对计算/解答题来说算式才是题干核心，
+ * 只有"计算："无法向学生/家长展示题目内容，也影响章节反推。
+ * 返回 true 表示题干缺失算式，应触发"区域聚焦重 OCR"补全。
+ */
+function isSparseQuestionContent(content) {
+  if (content == null) return false
+  const t = String(content).replace(/\s+/g, '').replace(/[：:、]/g, '')
+  if (t.length === 0) return false
+  // 仅含指令词（计算/化简/解方程/求值/口算/算一算等），不含任何算式成分（数字/变量/运算符）
+  if (/^(计算|化简|解方程|求值|口算|算一算|直接写得数|脱式计算|简算|想一想|比一比|估一估|求下列各式的值|求未知数x)$/.test(t)) return true
+  return false
+}
+
+/**
+ * 区域聚焦重 OCR：整页识别对复杂数学题干（分数/带分数/分式方程）易丢失算式主体，
+ * 只输出"计算："这类指令词。用该题的 block_coordinates（归一化 0-1000）从原图裁剪
+ * 题目区域，放大后单独请求 VLM 转录完整算式，用返回内容覆盖稀疏题干。
+ * @param {string} imageUrl - 页面原图 URL
+ * @param {object} normBox - 归一化 0-1000 坐标 {x, y, width, height}
+ * @param {string|number} questionNumber - 题号（用于提示词）
+ * @param {string} userText - 额外识别指引（如"这是计算题，需完整转录算式"）
+ * @returns {Promise<string|null>} 识别到的完整题干，失败返回 null
+ */
+async function reocrQuestionRegion(imageUrl, normBox, questionNumber, userText = '') {
+  if (!imageUrl || !normBox) return null
+  let imageBuffer
+  try {
+    imageBuffer = await downloadImage(imageUrl)
+  } catch (e) {
+    console.warn(`  ⚠️ [区域重OCR] 图片下载失败: ${e.message}`)
+    return null
+  }
+  const meta = await sharp(imageBuffer).metadata()
+  const imgW = meta.width
+  const imgH = meta.height
+  if (!imgW || !imgH) return null
+
+  // 归一化 0-1000 → 像素坐标，加 20% 内边距（与错题裁剪逻辑一致），钳位到图边界
+  const clamp = (v) => Math.max(0, Math.min(1000, Number(v) || 0))
+  const toPx = (v, dim) => Math.round(clamp(v) / 1000 * dim)
+  let left = toPx(normBox.x, imgW)
+  let top = toPx(normBox.y, imgH)
+  let width = toPx(normBox.width, imgW)
+  let height = toPx(normBox.height, imgH)
+  const padX = Math.round(width * 0.20)
+  const padY = Math.round(height * 0.20)
+  left = Math.max(0, left - padX)
+  top = Math.max(0, top - padY)
+  width = Math.min(width + padX * 2, imgW - left)
+  height = Math.min(height + padY * 2, imgH - top)
+  if (width <= 0 || height <= 0) return null
+
+  let cropped
+  try {
+    cropped = await sharp(imageBuffer)
+      .rotate()
+      .extract({ left, top, width, height })
+      .resize(1800, 1800, { fit: 'inside' })
+      .jpeg({ quality: 90 })
+      .toBuffer()
+  } catch (e) {
+    console.warn(`  ⚠️ [区域重OCR] 裁剪失败: ${e.message}`)
+    return null
+  }
+
+  const focusPrompt = `你是专业的数学试卷OCR助手。这张图片是从试卷上裁剪出的【一道题目】的区域。
+
+【任务】识别这道题的【印刷体题干原文】，特别是其中的数学算式，必须完整、准确地转录。
+
+【数学符号识别规范】
+- 题干中的数学式子必须完整转录，禁止漏写、替换或臆造符号。
+- 分数用"a/b"格式（如"17/20"），带分数用"整数 a/b"格式（如"6 2/3"）。
+- 乘号用"×"，除号用"÷"，根号用"√"，小数点"."，百分号"%"必须原样保留。
+- 区分乘号"×"与字母"x/X"：算式中间表示相乘用"×"；方程未知数用"x"。
+- 若题干含"计算""化简""解方程""求值"等指令词，必须完整保留。
+- 若某处印刷体模糊无法辨认，用"□"占位，不要臆造。
+
+只输出 JSON 对象，不要其他文字：
+{
+  "question_number": ${questionNumber},
+  "content": "该题的完整题干原文，含完整算式"
+}`
+
+  try {
+    const { content } = await callVisionCompletion({
+      imageDataURL: `data:image/jpeg;base64,${cropped.toString('base64')}`,
+      systemPrompt: focusPrompt,
+      userText: `请识别这道题（第${questionNumber}题）的完整题干，务必完整转录算式。${userText}`,
+      temperature: 0.05,
+      maxTokens: 1024
+    })
+    if (!content) return null
+    const jsonMatch = content.match(/```json\n?([\s\S]*?)\n?```/) ||
+                      content.match(/```\n?([\s\S]*?)\n?```/) ||
+                      content.match(/[\[{][\s\S]*[\]}]/)
+    const parsed = JSON.parse(jsonMatch ? jsonMatch[1] || jsonMatch[0] : content)
+    const c = (parsed && typeof parsed === 'object') ? (parsed.content || null) : null
+    if (c && typeof c === 'string' && String(c).trim()) {
+      let newContent = String(c).trim()
+      // 归一化 LaTeX/Unicode 数学表示 → 与系统其余部分一致的纯文本算式：
+      //   带分数 \frac 前有整数部分 → "2 \frac{2}{7}" → "2 2/7"（先处理，避免粘连成 22/7）
+      //   纯分数 \frac{2}{7} → 2/7，\times → ×，\div → ÷，\sqrt → √，
+      //   Unicode 乘号变体 ✕✖ → ×，去除 LaTeX 数学模式符 $，去掉句子末尾句号
+      newContent = newContent
+        .replace(/\$/g, '')
+        .replace(/(\d+)\s*\\frac\s*\{([^}]*)\}\s*\{([^}]*)\}/g, '$1 $2/$3')
+        .replace(/\\frac\s*\{([^}]*)\}\s*\{([^}]*)\}/g, '$1/$2')
+        .replace(/\\times/g, '×')
+        .replace(/\\div/g, '÷')
+        .replace(/\\sqrt/g, '√')
+        .replace(/[✕✖]/g, '×')
+        .replace(/\\left|\\right/g, '')
+        .replace(/[{}]/g, '')
+        .replace(/\s+([×÷=])/g, '$1')
+        .replace(/([×÷=])\s+/g, '$1')
+        // 一元/二元加减号保留空格（-17 前无空格是负号，- 17 前后有空格是减号）
+        .replace(/\s+/g, ' ')
+        .replace(/[。.]$/, '')
+        .trim()
+      // 若聚焦识别仍产出稀疏/垃圾题干，视为失败，避免覆盖已有内容
+      if (isSparseQuestionContent(newContent) || isGarbageQuestionContent(newContent)) return null
+      return newContent
+    }
+    return null
+  } catch (e) {
+    console.warn(`  ⚠️ [区域重OCR] 第${questionNumber}题识别失败: ${e.message}`)
+    return null
+  }
+}
+
+/**
  * 答案字符串归一化（用于题号错位时的兜底匹配）
  * - 去 LaTeX 数学模式符（$...$）
  * - 统一根式：\sqrt / 根号 → √
@@ -2606,6 +2757,7 @@ function normalizeAnswerFingerprint(s) {
     .replace(/\$/g, '')                              // 去 LaTeX 数学模式符
     .replace(/\\times/g, '×')                        // \times → ×
     .replace(/\\div/g, '÷')                          // \div → ÷
+    .replace(/[✕✖]/g, '×')                          // Unicode 乘号变体 → ×
     .replace(/\\frac\s*\{([^}]*)\}\s*\{([^}]*)\}/g, '$1/$2')  // \frac{a}{b} → a/b
     .replace(/\\sqrt\s*\{?/g, '√')                   // \sqrt{ → √；\sqrt → √
     .replace(/根号/g, '√')                            // 根号 → √
@@ -2847,6 +2999,21 @@ const processWorkbookGrading = async (job) => {
   它的作用是：后端会用 content 里的关键数学符号（√、根号等）反推章节归属。
   content 缺失会导致章节无法反推。
 
+【数学符号识别规范（印刷体题干，必须严格遵守）】
+- 题干中的数学式子必须完整、准确地转录，禁止漏写、替换或臆造符号。
+- 严格区分三种"叉形"符号：
+  · 算式中间表示相乘的是乘号"×"（如"3×4"、"√12 × √(1/3)"）；
+  · 出现在未知数/方程/代数式里的是字母"x/X"（如"x²-3x+2=0"、"x÷3"）；
+  · 判断题批改标记、或题干里明确是判断结果时才用"√/✗"。
+  绝不要用"×"去替代方程里的字母 x，也不要把题干文字里的打叉当成乘号。
+- 除号"÷"、分数线"/"、根号"√"、平方"²"、立方"³"、指数、小数点"."、百分号"%"必须原样保留。
+- 题干里的填空横线"____"、括号"（ ）"、空格占位要原样保留，不要删掉也不要擅自填写。
+- 若某处印刷体实在模糊无法辨认，用"□"占位，绝不要输出一堆无意义的符号（如"× ×"、"% = %"、"= = ="）。
+- 判断题/简答题题干若含"对/错""下列……正确的是""计算""化简""求值""求证""解方程"等文字，必须完整保留这些文字。
+- ⚠️ 简答题/解答题/计算题的题干一定包含汉字描述或数字（如"计算"、"化简"、"解方程"、"求值"）。
+  如果识别出的 content 全部是符号、不含任何汉字和数字（如"÷ = × ×"），说明识别错误，
+  必须重新仔细查看该题印刷体原图后重新填写真实题干。
+
 - question_number 从印刷体题号读取，必须是数字
 - 如果一道大题包含多个小问（如 21.(1)、21.(2)、22.(1)、22.(2)），必须将每个小问拆成独立的 question 对象输出：question_number 填大题号，sub_no 填小问号，content 只写该小问的题干，student_answer 只写该小问的手写答案。不要把多个小问合并成一道题
 - student_answer 只提取学生手写的内容，如果没有手写迹，填 null；判断题的 √/× 也要提取
@@ -2967,7 +3134,50 @@ const processWorkbookGrading = async (job) => {
     // 把 AI 合并输出的多小问大题拆成独立题目（如 q21(1)、q21(2)）
     questions = splitOcrQuestionsBySubNo(questions)
 
-    console.log(`   [Workbook] 第 ${pageIdx + 1} 页: 识别到 ${questions.length} 道题, 标题="${pageTitle}"`)
+    // 题干垃圾检测：识别出"× ×"这类无意义符号题干时标记，触发整页重试一次。
+    // 根因：模型把印刷体数学题干错误转录成纯符号堆（如"÷ = × ×."）。
+    const garbageCount = questions.filter(q => q && isGarbageQuestionContent(q.content)).length
+    if (garbageCount > 0) {
+      const garbageExamples = questions
+        .filter(q => q && isGarbageQuestionContent(q.content))
+        .map(q => `Q${q.question_number}:"${String(q.content).slice(0, 20)}"`)
+        .slice(0, 3)
+        .join(' ')
+      console.warn(`   ⚠️ [Workbook] 第 ${pageIdx + 1} 页检测到 ${garbageCount} 道题题干为无意义符号（${garbageExamples}），标记重试`)
+      // 若存在可回填的答案库题干，后续匹配时会用真实题干覆盖占位（见下方 answerRow 回填逻辑）；
+      // 无法回填时保留 content 原样，前端可人工修订。
+      for (const q of questions) {
+        if (q && isGarbageQuestionContent(q.content)) {
+          q._content_garbage = true
+        }
+      }
+    }
+
+    // 稀疏题干检测 + 区域聚焦重 OCR：
+    // 整页 OCR 对复杂数学题干（分数/带分数/分式）易只识别出指令词（"计算："、"解方程："），
+    // 算式主体丢失。此时用该题 block_coordinates 从原图裁剪题目区域单独请求 VLM，
+    // 聚焦识别完整算式并覆盖稀疏题干。这是"计算："问题不再复发的关键一环。
+    const sparseCount = questions.filter(q => q && isSparseQuestionContent(q.content)).length
+    if (sparseCount > 0) {
+      console.warn(`   ⚠️ [Workbook] 第 ${pageIdx + 1} 页检测到 ${sparseCount} 道题题干稀疏（仅指令词无算式），触发区域聚焦重OCR`)
+      for (const q of questions) {
+        if (!q || !isSparseQuestionContent(q.content)) continue
+        const fullContent = await reocrQuestionRegion(url, q.block_coordinates, q.question_number,
+          q.question_type === 'answer'
+            ? (q.content.includes('方程') ? '这是解方程题，需完整转录方程算式。' : '这是计算题，需完整转录算式（含分数/带分数）。')
+            : '')
+        if (fullContent) {
+          console.log(`   ✅ [Workbook] 区域聚焦重OCR补全 第${pageIdx + 1}页 Q${q.question_number}: "${q.content}" → "${fullContent}"`)
+          q.content = fullContent
+          q._content_recovered = true
+        } else {
+          console.warn(`   ⚠️ [Workbook] 区域聚焦重OCR未补全 Q${q.question_number}，保留原题干"${q.content}"`)
+          q._content_sparse = true
+        }
+      }
+    }
+
+    console.log(`   [Workbook] 第 ${pageIdx + 1} 页: 识别到 ${questions.length} 道题, 标题="${pageTitle}"${garbageCount > 0 ? `, ${garbageCount} 题题干异常` : ''}${sparseCount > 0 ? `, ${sparseCount} 题题干稀疏` : ''}`)
 
     allQuestions.push(...questions)
     if (pageTitle) allPageTitles.push(pageTitle)
@@ -3251,7 +3461,33 @@ const processWorkbookGrading = async (job) => {
     source_type: 'workbook'
   }))
   // 清除临时标记字段
-  for (const q of questionsWithStudentId) { delete q._page_image_url; delete q._page_number; delete q._chapter_hint }
+  for (const q of questionsWithStudentId) {
+    delete q._page_image_url
+    delete q._page_number
+    delete q._chapter_hint
+    // 题干垃圾检测标记在匹配阶段已可能被答案库真实题干覆盖；
+    // 若仍是垃圾内容（未回填），重置为占位符，避免"× ×"污染题库列表。
+    if (q._content_garbage) {
+      delete q._content_garbage
+      if (q.content && isGarbageQuestionContent(q.content)) {
+        const backup = q.content
+        q.content = `第 ${q.question_number} 题`
+        q._content_garbage_original = backup
+        console.warn(`   [Workbook] 题 ${q.question_number}: 题干识别为无意义符号"${String(backup).slice(0, 30)}"，已重置为占位符，请人工修订`)
+      }
+    }
+    // 稀疏题干（区域聚焦重OCR仍无法补全算式）：若匹配阶段未被答案库题干覆盖，
+    // 重置为占位符，避免"计算："这类无算式题干污染题库列表，同时保留原内容供人工修订。
+    if (q._content_sparse) {
+      delete q._content_sparse
+      if (q.content && isSparseQuestionContent(q.content)) {
+        const backup = q.content
+        q.content = `第 ${q.question_number} 题`
+        q._content_sparse_original = backup
+        console.warn(`   [Workbook] 题 ${q.question_number}: 题干稀疏（仅"${String(backup).slice(0, 30)}"，无算式），已重置为占位符，请人工修订`)
+      }
+    }
+  }
 
   await createQuestions(questionsWithStudentId)
 
@@ -3490,6 +3726,21 @@ const processAnswerBankGrading = async (job) => {
   它的作用是：后端会用 content 里的关键数学符号（√、根号等）反推章节归属。
   content 缺失会导致章节无法反推。
 
+【数学符号识别规范（印刷体题干，必须严格遵守）】
+- 题干中的数学式子必须完整、准确地转录，禁止漏写、替换或臆造符号。
+- 严格区分三种"叉形"符号：
+  · 算式中间表示相乘的是乘号"×"（如"3×4"、"√12 × √(1/3)"）；
+  · 出现在未知数/方程/代数式里的是字母"x/X"（如"x²-3x+2=0"、"x÷3"）；
+  · 判断题批改标记、或题干里明确是判断结果时才用"√/✗"。
+  绝不要用"×"去替代方程里的字母 x，也不要把题干文字里的打叉当成乘号。
+- 除号"÷"、分数线"/"、根号"√"、平方"²"、立方"³"、指数、小数点"."、百分号"%"必须原样保留。
+- 题干里的填空横线"____"、括号"（ ）"、空格占位要原样保留，不要删掉也不要擅自填写。
+- 若某处印刷体实在模糊无法辨认，用"□"占位，绝不要输出一堆无意义的符号（如"× ×"、"% = %"、"= = ="）。
+- 判断题/简答题题干若含"对/错""下列……正确的是""计算""化简""求值""求证""解方程"等文字，必须完整保留这些文字。
+- ⚠️ 简答题/解答题/计算题的题干一定包含汉字描述或数字（如"计算"、"化简"、"解方程"、"求值"）。
+  如果识别出的 content 全部是符号、不含任何汉字和数字（如"÷ = × ×"），说明识别错误，
+  必须重新仔细查看该题印刷体原图后重新填写真实题干。
+
 - question_number 从印刷体题号读取，必须是数字。
   注意：每个试卷单元（如"试卷①"）的题号都从 1 重新开始编号，请按当前页所在单元的局部题号输出。
   试卷小标题出现在本页时（如"试卷① 19.1..."），该单元下的题号即从 1 开始。
@@ -3598,6 +3849,31 @@ const processAnswerBankGrading = async (job) => {
 
       // 把 AI 合并输出的多小问大题拆成独立题目（如 q21(1)、q21(2)）
       questions = splitOcrQuestionsBySubNo(questions)
+
+      // 稀疏/垃圾题干检测 + 区域聚焦重 OCR（与 workbook 管线同一套逻辑）：
+      // 整页 OCR 对复杂数学题干易只识别出"计算："这类指令词而丢失算式，
+      // 或产出"× ×"这类无意义符号；用该题 block_coordinates 从原图裁剪
+      // 题目区域单独请求 VLM 补全算式。
+      const pageImageUrl = pages[pageIdx]?.imageUrl || null
+      const sparseCount = questions.filter(q => q && (isSparseQuestionContent(q.content) || isGarbageQuestionContent(q.content))).length
+      if (sparseCount > 0 && pageImageUrl) {
+        console.warn(`   ⚠️ [AnswerBank] 第 ${pageNumber} 页检测到 ${sparseCount} 道题题干稀疏/垃圾（无算式或纯符号），触发区域聚焦重OCR`)
+        for (const q of questions) {
+          if (!q || !(isSparseQuestionContent(q.content) || isGarbageQuestionContent(q.content))) continue
+          const fullContent = await reocrQuestionRegion(pageImageUrl, q.block_coordinates, q.question_number,
+            q.question_type === 'answer'
+              ? (q.content.includes('方程') ? '这是解方程题，需完整转录方程算式。' : '这是计算题，需完整转录算式（含分数/带分数）。')
+              : '')
+          if (fullContent) {
+            console.log(`   ✅ [AnswerBank] 区域聚焦重OCR补全 第${pageNumber}页 Q${q.question_number}: "${q.content}" → "${fullContent}"`)
+            q.content = fullContent
+            q._content_recovered = true
+          } else {
+            console.warn(`   ⚠️ [AnswerBank] 区域聚焦重OCR未补全 Q${q.question_number}，保留原题干"${q.content}"`)
+            q._content_sparse = true
+          }
+        }
+      }
 
       console.log(`   [AnswerBank] 第 ${pageNumber} 页: 识别到 ${questions.length} 道题, 标题="${pageTitle}"`)
 
@@ -4126,6 +4402,18 @@ const processAnswerBankGrading = async (job) => {
           block_coordinates: q.block_coordinates || null,
           text_bbox: q.block_coordinates || null,
           // 单元匹配结果不写入 questions（表无对应列），仅在 judgement.metadata 记录
+        }
+
+        // 稀疏/垃圾题干（区域聚焦重OCR仍未补全算式）：答案库题干优先覆盖；
+        // 否则重置为占位符，避免"计算："这类无算式题干污染题库列表。
+        if (q._content_sparse) {
+          delete q._content_sparse
+          const rawContent = questionData.content
+          if (rawContent && (isSparseQuestionContent(rawContent) || isGarbageQuestionContent(rawContent))) {
+            questionData.content = `第${q.question_number}题`
+            questionData._content_sparse_original = rawContent
+            console.warn(`   [AnswerBank] 题 ${q.question_number}: 题干异常（"${String(rawContent).slice(0, 30)}"），已重置为占位符，请人工修订`)
+          }
         }
 
         savedQuestions.push(questionData)

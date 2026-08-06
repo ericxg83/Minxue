@@ -101,6 +101,14 @@ function preprocessMath(text) {
   result = result.replace(/([a-zA-Z0-9°]+)\s*\/\s*([a-zA-Z0-9]+)/g, '\\frac{$1}{$2}')
   result = result.replace(/(-[0-9]+)\s*\/\s*([a-zA-Z0-9]+)/g, '\\frac{$1}{$2}')
 
+  // === 1.5 混合数: 数字 空格 分数 → 数字\frac{分子}{分母} (e.g., 1 1/6 → 1\frac{1}{6}) ===
+  result = result.replace(/(\d+(?:\.\d+)?)\s+(\d+)\s*\/\s*(\d+)/g, (match, whole, num, den) => {
+    if (parseInt(num, 10) < parseInt(den, 10)) {
+      return `${whole}\\frac{${num}}{${den}}`
+    }
+    return match
+  })
+
   // === 2. 指数: x^2 → x^{2} ===
   result = result.replace(/([a-zA-Z0-9])\^([a-zA-Z0-9]+)/g, '$1^{$2}')
   result = result.replace(/([a-zA-Z0-9])\^([0-9])/g, '$1^{$2}')
