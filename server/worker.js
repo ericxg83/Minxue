@@ -2225,15 +2225,40 @@ export function _groupByPhysicalContinuity(pageDataList, answersByUnit) {
     for (;;) {
       const cands = meta.filter(m => !used.has(m) && m.minQ === curMax + 1 && m.maxQ <= cap)
       if (cands.length === 0) break
+      // ★ 防护（2026-08-07）：链延伸前校验候选页在首页单元内的题号覆盖率。
+      // 题号连续只说明"页码相邻"，不能证明属于同一单元——若某页题号恰巧连续
+      // 但内容属于下一单元（如上一张卷 Q1-13 尾页 与 下一张卷 Q14-18 首页），
+      // 纯题号延伸会把它错误拉进链。要求候选页 ≥50% 题号在首页单元答案库中
+      // 存在，否则视为不属于该单元、终止延伸（该页交回后续精细匹配）。
+      const covCands = cands.filter(m => {
+        const secMap = answersByUnit.get(u)
+        if (!secMap) return false
+        let covered = 0, total = 0
+        for (const q of m.pg.questions || []) {
+          if (q.question_number == null) continue
+          total++
+          const qKey = `${Number(q.question_number)}|${q.sub_no || ''}`
+          for (const qMap of secMap.values()) {
+            if (qMap.has(qKey)) { covered++; break }
+          }
+        }
+        if (total === 0) return false
+        const cov = covered / total
+        if (cov < 0.5) {
+          console.log(`   [物理链] 候选页 p${m.pageNumber}(Q${m.minQ}-${m.maxQ}) 在首页单元 "${u}" 覆盖率=${(cov * 100).toFixed(0)}% < 50%，视为不属于该单元，终止延伸`)
+        }
+        return cov >= 0.5
+      })
+      if (covCands.length === 0) break
       let picked
-      if (cands.length === 1) {
-        picked = cands[0]
+      if (covCands.length === 1) {
+        picked = covCands[0]
       } else {
         // 多候选（同题号竞争）：学生答案在首页单元内反推决胜
         const secMap = answersByUnit.get(u)
         let best = null
         let bestScore = -1
-        for (const c of cands) {
+        for (const c of covCands) {
           let s = 0
           for (const q of c.pg.questions || []) {
             const sa = (q.student_answer || '').toString().trim()
@@ -2244,7 +2269,7 @@ export function _groupByPhysicalContinuity(pageDataList, answersByUnit) {
           }
           if (s > bestScore) { bestScore = s; best = c }
         }
-        picked = (best && bestScore > 0) ? best : cands[0]
+        picked = (best && bestScore > 0) ? best : covCands[0]
       }
       used.add(picked)
       chain.push(picked)
@@ -2324,9 +2349,36 @@ export function resolveAnswerUnits(answersByUnit, pageDataList) {
         if (cov > bestCov) { bestCov = cov; candidates.length = 0; candidates.push(uk) }
         else if (cov === bestCov && cov > 0) candidates.push(uk)
       }
-      if (candidates.length === 0 || bestCov < 0.5) continue // 覆盖不足，放弃
+      if (candidates.length === 0 || bestCov < 0.6) continue // 覆盖不足，放弃（唯一候选也要求 ≥60%，防止同号跨章以低覆盖率错挂）
       let tieUnits = null
       if (candidates.length === 1) {
+        // ★ 防护（2026-08-07）：唯一覆盖率候选，但若组内某页带标题且标题指向不同单元，
+        // 说明覆盖率命中可能是"题号恰好覆盖"的假象（同号多单元几乎必然打平，唯一候选
+        // 大概率是同章姊妹单元，但标题是更强的信号）。标题能精确匹配到别的单元时，
+        // 放弃组级兜底，交回逐页标题匹配（titleMatches 更强）。
+        let titleConflict = false
+        for (const pg of grp.pages) {
+          const pt = pg.pageTitle
+          if (!pt || typeof pt !== 'string' || pt.length < 3) continue
+          const normPt = normalizeTitleForMatch(normalizeSectionName(pt))
+          if (!normPt) continue
+          for (const c of candidates) {
+            const secMap = answersByUnit.get(c)
+            if (!secMap) continue
+            const sample = [...secMap.values()][0]?.values().next()?.value
+            if (!sample) continue
+            const ck = normalizeTitleForMatch(sample.unit_key || c)
+            const ct = normalizeTitleForMatch(sample.unit_title || '')
+            if (ck && titleMatches(normPt, ck)) titleConflict = true
+            if (ct && titleMatches(normPt, ct)) titleConflict = true
+            if (titleConflict) break
+          }
+          if (titleConflict) break
+        }
+        if (titleConflict) {
+          console.log(`   [resolveAnswerUnits] 题号分组唯一候选但与组内标题冲突，放弃组级兜底，交回逐页标题匹配`)
+          continue
+        }
         bestUnit = candidates[0]
       } else {
         // 打平（同号多单元，本次 bug 的直接触发点）：用组内学生答案指纹在候选单元内决胜。
@@ -2527,9 +2579,38 @@ export function resolveAnswerUnits(answersByUnit, pageDataList) {
     } else {
       chosen = nextUnit || prevUnit
     }
-    resolved[i].unitKey = chosen
-    resolved[i].method = 'propagated'
-    console.log(`   [AnswerBank] 双向相邻继承: pageNumber=${page.pageNumber} → unit="${chosen}" (distPrev=${distPrev} distNext=${distNext} prevCov=${prevCov.toFixed(2)} nextCov=${nextCov.toFixed(2)})（相邻锚点传播）`)
+    // ★ 防护（2026-08-07）：继承后校验本页题号确实被所选单元覆盖（覆盖率下界）。
+    // 双向继承可能把"仅因相邻/距离近"的页错拉进无关单元（本页题号范围与所选单元
+    // 答案库完全无交集时覆盖率=0，继承就是纯错挂）。覆盖率 <0.2 且本页题号不落
+    // 在所选单元 max 范围内 → 拒绝继承，保持 null 交回"待审"通道，而非静默错挂。
+    let inherited = chosen
+    const covOfChosen = chosen ? unitCoverage(chosen, page.questions) : 0
+    if (chosen) {
+      const secMap = answersByUnit.get(chosen)
+      let unitMax = -Infinity
+      if (secMap) {
+        for (const qMap of secMap.values()) {
+          for (const key of qMap.keys()) {
+            const qn = Number(String(key).split('|')[0])
+            if (Number.isFinite(qn) && qn > unitMax) unitMax = qn
+          }
+        }
+      }
+      const pageMaxQ = maxQ
+      const withinUnitRange = pageMaxQ != null && pageMaxQ <= unitMax
+      if (covOfChosen < 0.2 && !withinUnitRange) {
+        console.log(`   [AnswerBank] 双向继承防护: p${page.pageNumber} 在 "${chosen}" 覆盖率=${covOfChosen.toFixed(2)} 且题号超单元范围(${pageMaxQ} > ${unitMax})，拒绝继承，交回待审`)
+        inherited = null
+      }
+    }
+    if (inherited) {
+      resolved[i].unitKey = inherited
+      resolved[i].method = 'propagated'
+      console.log(`   [AnswerBank] 双向相邻继承: pageNumber=${page.pageNumber} → unit="${inherited}" (distPrev=${distPrev} distNext=${distNext} prevCov=${prevCov.toFixed(2)} nextCov=${nextCov.toFixed(2)})（相邻锚点传播）`)
+    } else {
+      resolved[i].unitKey = null
+      resolved[i].method = null
+    }
   }
 
   return resolved.map(({ pageNumber, unitKey, method, groupMatched, groupTie, groupConflict }) => ({
@@ -2945,7 +3026,24 @@ export function searchUnitByStudentAnswers(questions, answersByUnit, candidateUn
   const best = unitScores.get(bestUnit)
   // 采用条件：≥2 道题命中，或总相似度 ≥ 1.5（至少 2 道较强匹配）
   if (best.hits >= 2 || best.totalScore >= 1.5) {
-    return { unitKey: bestUnit, hits: best.hits, totalScore: best.totalScore }
+    // ★ 防护（2026-08-07）：优势检验——最佳必须显著领先次佳才采用。
+    // 姊妹单元（试卷9|20.2 vs 试卷10|20.2、堂堂练24 vs 堂堂练25 等）题号都从 1 开始、
+    // 题型结构相似、部分答案雷同，2 道题弱命中完全可能同时命中多个单元。
+    // 若最佳只比次佳多一点点（差 <0.8 或 命中数相同），说明"无法可靠区分"，
+    // 返回 null 交回标题/物理链/继承等更强信号，绝不靠微弱领先硬选（防再错挂）。
+    const sortedScores = [...unitScores.entries()]
+      .sort((a, b) => b[1].totalScore - a[1].totalScore)
+    const second = sortedScores[1] ? sortedScores[1][1] : null
+    let hasAdvantage = true
+    if (second && second.totalScore > 0) {
+      const gap = best.totalScore - second.totalScore
+      // 绝对差 < 0.8（约 1 道 0.8 相似度的题）且命中数相同 → 无法区分
+      if (gap < 0.8 && best.hits <= second.hits + 1) hasAdvantage = false
+    }
+    if (hasAdvantage) {
+      return { unitKey: bestUnit, hits: best.hits, totalScore: best.totalScore }
+    }
+    console.log(`[searchUnitByStudentAnswers] 最佳 "${bestUnit}" score=${best.totalScore.toFixed(2)}（hits=${best.hits}）与次佳 "${second ? sortedScores[1][0] : '-'}" score=${second ? second.totalScore.toFixed(2) : '-'}（hits=${second ? second.hits : '-'}）差距过小，无法可靠区分，放弃反推`)
   }
   return null
 }
