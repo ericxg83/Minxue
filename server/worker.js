@@ -1627,16 +1627,23 @@ export function pickAnswerUnit(answersByUnit, pageTitle, questions, pageNumber, 
   // 且 pageTitle 长度 ≥ 3 字符（排除单字误识别），则视为不可信，直接置空 pageTitle。
   let trustedPageTitle = pageTitle
   if (pageTitle && typeof pageTitle === 'string' && pageTitle.length >= 3) {
-    const candidatesForCheck = [...answersByUnit.keys()]
+    const candidates = [...answersByUnit.keys()]
+    // 归一化后再做包含判断：OCR 标题里可能带"空白"+"（如"试卷⑨ 20.2 二次根式…"），
+    // 而 unit_title 无空白。统一通过 normalizeTitleForMatch 压空白+圈序号→ASCII 后比较，
+    // 否则明明能精确匹配到"试卷9|20.2"的标题，会被误判为 OCR 误识别而置空，
+    // 退化到学生答案反推而错挂到别的单元。
+    const normPageTitle = normalizeTitleForMatch(pageTitle)
     let anyContain = false
-    for (const uk of candidatesForCheck) {
+    for (const uk of candidates) {
       const secMap = answersByUnit.get(uk)
       if (!secMap) continue
       const sample = [...secMap.values()][0]?.values().next()?.value
       if (!sample) continue
-      const ck = sample.unit_key || uk
-      const ct = sample.unit_title || ''
-      if (ck.includes(pageTitle) || ct.includes(pageTitle) || pageTitle.includes(ck) || pageTitle.includes(ct)) {
+      const ckRaw = sample.unit_key || uk
+      const ctRaw = sample.unit_title || ''
+      const ck = normalizeTitleForMatch(ckRaw)
+      const ct = normalizeTitleForMatch(ctRaw)
+      if (ck && (ck.includes(normPageTitle) || ct.includes(normPageTitle) || normPageTitle.includes(ck) || normPageTitle.includes(ct))) {
         anyContain = true
         break
       }
@@ -1891,7 +1898,11 @@ export function pickAnswerUnit(answersByUnit, pageTitle, questions, pageNumber, 
   //   - 本策略：按题号粒度逐题搜索，最高总相似度胜出（searchUnitByStudentAnswers）
   //   - 答案覆盖率：整页学生答案集合 vs unit 整本标准答案集合的命中率
   //   两者先后执行是冗余安全：任一命中即返回，避免下游错挂
-  const inferredByAnswers = searchUnitByStudentAnswers(questions || [], answersByUnit)
+  //   ★ 修复（2026-08-07）：必须限定在已收窄的 candidates 内反推，不能传全库 answersByUnit！
+  //   旧代码传 answersByUnit（58 个单元），学生答案反推无视前面标题/章节/lesson_code 收窄，
+  //   被题号恰好覆盖的无关单元抢走（实测"二次根式运算"卷第 2 页被 堂堂练24|21.4(2) 抢走，
+  //   第 1 页被 试卷3|19.2（实数）抢走）。传入 candidates 后，反推只在这批候选内比较。
+  const inferredByAnswers = searchUnitByStudentAnswers(questions || [], answersByUnit, candidates)
   if (inferredByAnswers) {
     console.log(`[pickAnswerUnit] 学生答案反推命中: unit="${inferredByAnswers.unitKey}" hits=${inferredByAnswers.hits} score=${inferredByAnswers.totalScore.toFixed(2)}`)
     return inferredByAnswers.unitKey
@@ -2178,7 +2189,7 @@ export function _groupByPhysicalContinuity(pageDataList, answersByUnit) {
 
   // 2. 首页锚点 + 归属 + 单元上限
   const homes = meta.filter(m => m.minQ === 1)
-  if (homes.length < 2) return null
+  if (homes.length === 0) return null
   const homeUnits = homes.map(h => {
     const u = pickAnswerUnit(
       answersByUnit,
@@ -2189,7 +2200,17 @@ export function _groupByPhysicalContinuity(pageDataList, answersByUnit) {
     )
     return { h, u, unitMaxQ: u ? unitMaxQ(u) : -Infinity }
   }).filter(x => x.u)
-  if (homeUnits.length < 2) return null
+  if (homeUnits.length === 0) return null
+
+  // ★ 修复（2026-08-07）：允许【单首页锚点】启动物理连续链。
+  // 旧代码要求 homes.length >= 2，导致「4 页同一张卷、只有第 1 页是首页(min_q=1)」
+  // 的任务（如"试卷⑨ 20.2 二次根式的运算 基础性测试"第 1 页 Q1-13，后续页 Q14-25 连续）
+  // 整条链被短路 return null，无标题的后续页落入逐页学生答案反推，
+  // 在题号都从 1 开始的姊妹单元间（试卷9|20.2 基础 vs 试卷10|20.2 提高）选错，整页答案错挂。
+  // 安全前提：单锚点时要求锚点页【带 pageTitle】——OCR 能读到卷首标题即证明这页确实是
+  // 单元首页（标题匹配是 pickAnswerUnit 里最强的信号），整条题号连续链继承它是可靠的。
+  // 若唯一首页锚点也无标题（仅靠反推命中），仍回退要求 ≥2 锚点，避免单点反推错误传染全链。
+  if (homeUnits.length === 1 && !homeUnits[0].h.pg.pageTitle) return null
 
   // 题号上限降序处理（上限大的单元先锁定，超限页优先归位）
   homeUnits.sort((a, b) => b.unitMaxQ - a.unitMaxQ)
@@ -2875,11 +2896,20 @@ export function searchByAnswerFingerprint(studentAnswer, qType, unitAnswers, use
  *   选择题/判断题不参与（答案太短，易误匹配）。
  * @param {Array} questions - OCR 识别出的题目列表（含 student_answer, question_type）
  * @param {Map} answersByUnit - unitKey → secMap
+ * @param {Array<{unitKey:string}|string>} [candidateUnits] - 候选单元范围（pickAnswerUnit 收窄后）。
+ *   ★ 2026-08-07 修复：必须限定在候选内反推，禁止传全库 answersByUnit——否则学生答案反推
+ *   无视前面标题/章节/lesson_code 收窄，被题号恰好覆盖的无关单元抢走（实测"二次根式运算"
+ *   卷第 2 页被 堂堂练24|21.4(2) 抢走、第 1 页被 试卷3|19.2 实数卷抢走，整页答案错挂）。
  * @returns {{ unitKey, hits, totalScore } | null}
  */
-export function searchUnitByStudentAnswers(questions, answersByUnit) {
+export function searchUnitByStudentAnswers(questions, answersByUnit, candidateUnits) {
   if (!questions || questions.length === 0 || !answersByUnit || answersByUnit.size === 0) return null
   const isChoiceLike = (t) => t === 'choice' || t === 'judge'
+
+  // 候选 unitKey 白名单：收窄后的候选集合；未传则保持全库（旧行为，兼容外部调用）
+  const allowedKeys = Array.isArray(candidateUnits) && candidateUnits.length > 0
+    ? new Set(candidateUnits.map(c => (c && typeof c === 'object' && c.unitKey) ? c.unitKey : c))
+    : null
 
   const unitScores = new Map() // unitKey → { hits, totalScore }
 
@@ -2890,6 +2920,7 @@ export function searchUnitByStudentAnswers(questions, answersByUnit) {
     if (isChoiceLike(qType)) continue
 
     for (const [unitKey, unitAnswers] of answersByUnit) {
+      if (allowedKeys && !allowedKeys.has(unitKey)) continue
       const found = searchByAnswerFingerprint(studentAnswer, qType, unitAnswers, new Set())
       if (found && found.score >= 0.7) {
         if (!unitScores.has(unitKey)) unitScores.set(unitKey, { hits: 0, totalScore: 0 })
