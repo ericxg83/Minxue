@@ -191,6 +191,14 @@ function normalizeJudgeAnswer(str) {
 function isMathEquivalent(expr1, expr2) {
   if (!expr1 || !expr2) return false
 
+  // 两个"单字母"答案（如 "B" vs "D"）不应判为数学等价。
+  // 变量赋值逻辑会对两边代入相同测试值 → 不同字母也会恒等，导致误判相等。
+  // 这类通常是选择题/判断题的选项字母，靠严格匹配，数学等价不该接手。
+  const singleLetter = (s) => /^[a-zA-Z]$/.test(String(s).trim())
+  if (singleLetter(expr1) && singleLetter(expr2) && String(expr1).trim().toUpperCase() !== String(expr2).trim().toUpperCase()) {
+    return false
+  }
+
   try {
     // Prepare expression for JS evaluation
     const prep = (s) => {
@@ -206,6 +214,9 @@ function isMathEquivalent(expr1, expr2) {
       s = s.replace(/√\(([^()]*)\)/g, '(($1))**0.5')
       s = s.replace(/√([0-9]+(?:\.[0-9]+)?)/g, '(($1))**0.5')
       // Insert * for implicit multiplication: "2x" → "2*x", "2(" → "2*(", ")(" → ")*("
+      // 先处理"数字 空格 ( " 的形式（"2 √5"→"2 ((5))**0.5" 后是 "2 ("）：必须在 (\d)([a-zA-Z(]) 之前，
+      // 否则 "2 (" 因中间有空格而漏插 *，生成 "2 ((" 的非法 JS → eval 抛错 → 误判不等。
+      s = s.replace(/(\d)\s+\(/g, '$1*(')
       s = s.replace(/(\d)([a-zA-Z(])/g, '$1*$2')
       s = s.replace(/([a-zA-Z)])(\d)/g, '$1*$2')
       s = s.replace(/\)\(/g, ')*(')

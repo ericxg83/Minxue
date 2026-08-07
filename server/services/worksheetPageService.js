@@ -155,7 +155,7 @@ export async function regradeTaskPageWithUnit(taskId, pageNumber, unitKey) {
       continue
     }
 
-    const judgment = judgeAnswer(q.student_answer, row.answer, q.question_type || row.answer_type || 'answer')
+    const judgment = judgeAnswer(q.student_answer, row.answer, row.answer_type || q.question_type || 'answer')
     let status
     if (judgment.unrecognized) status = 'pending'
     else if (judgment.isCorrect === true) status = 'correct'
