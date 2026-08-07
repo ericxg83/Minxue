@@ -61,7 +61,8 @@ function normalizeAnswer(str) {
 
   // LaTeX fraction MUST run AFTER toUpperCase (because toUpperCase changes \frac to \FRAC)
   // Convert LaTeX fraction back to standard form: \FRAC{n}{d} → n/d (after toUpperCase)
-  s = s.replace(/\\FRAC\{([^}]+)\}\{([^}]+)\}/gi, '$1/$2')
+  // IMPORTANT: must add spaces around the fraction so mixed number rule can match "36 5/14"
+  s = s.replace(/\\FRAC\{([^}]+)\}\{([^}]+)\}/gi, ' $1/$2 ')
 
   // Unit synonym replacement (Chinese → symbolic); longer patterns first
   const unitPairs = [
@@ -372,13 +373,19 @@ export function judgeAnswer(studentAnswer, referenceAnswer, questionType) {
       sNums.every((v, i) => Math.abs(v - rNums[i]) < 1e-9)
   }
 
-  // 检测逗号分隔的多答案
+  // 检测逗号/分号分隔的多答案
   const splitAnswers = (s) => {
     const str = String(s || '').trim()
     if (str.includes(',') || str.includes('，') || str.includes(';') || str.includes('；')) {
       return str.split(/[,，;；]/).map(a => a.trim()).filter(a => a)
     }
     return [str]
+  }
+
+  // 按空格分割（用于比较符号等非数值多答案场景）
+  const splitBySpace = (s) => {
+    const str = String(s || '').trim()
+    return str.split(/\s+/).map(a => a.trim()).filter(a => a)
   }
 
   const studentParts = splitAnswers(studentAnswer)
@@ -400,6 +407,28 @@ export function judgeAnswer(studentAnswer, referenceAnswer, questionType) {
     if (extractAndCompare(studentAnswer, referenceAnswer)) {
       return { isCorrect: true, unrecognized: false }
     }
+  }
+
+  // 多答案场景：空格分隔的比较符号/简单答案（如 "> , <" vs "> <"）
+  const studentSpaceParts = splitBySpace(studentAnswer)
+  const refSpaceParts = splitBySpace(referenceAnswer)
+  if (refSpaceParts.length > 1 && studentSpaceParts.length > 1 &&
+      studentSpaceParts.length === refSpaceParts.length) {
+    const allCorrect = studentSpaceParts.every((sp, i) => {
+      const rp = refSpaceParts[i]
+      return normalizeAndCompare(sp, rp) || extractAndCompare(sp, rp)
+    })
+    if (allCorrect) return { isCorrect: true, unrecognized: false }
+  }
+
+  // 多答案场景：逗号学生 vs 空格标准（如 "> , <" vs "> <"）
+  if (studentParts.length > 1 && refSpaceParts.length > 1 &&
+      studentParts.length === refSpaceParts.length) {
+    const allCorrect = studentParts.every((sp, i) => {
+      const rp = refSpaceParts[i]
+      return normalizeAndCompare(sp, rp) || extractAndCompare(sp, rp)
+    })
+    if (allCorrect) return { isCorrect: true, unrecognized: false }
   }
 
   // 单答案场景：标准比较流程

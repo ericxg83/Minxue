@@ -184,7 +184,8 @@ function normalizeAnswer(str) {
   // LaTeX display markers $ $ \( \) → 移除
   s = s.replace(/\$|\\[()]/g, '')
   // LaTeX fraction: \FRAC{n}{d} → n/d (must run AFTER toUpperCase)
-  s = s.replace(/\\FRAC\{([^}]+)\}\{([^}]+)\}/gi, '$1/$2')
+  // IMPORTANT: must add spaces so mixed number rule can match "36 5/14"
+  s = s.replace(/\\FRAC\{([^}]+)\}\{([^}]+)\}/gi, ' $1/$2 ')
 
   // Mixed number with space: "146 3/4" → "146+3/4" (before whitespace removal)
   s = s.replace(/(\d+)\s+(\d+\/\d+)/g, '$1+$2')
@@ -445,10 +446,16 @@ function judgeAnswer(studentAnswer, referenceAnswer, questionType) {
     return [str]
   }
 
+  // 按空格分割（用于比较符号等非数值多答案场景）
+  const splitBySpace = (s) => {
+    const str = String(s || '').trim()
+    return str.split(/\s+/).map(a => a.trim()).filter(a => a)
+  }
+
   const studentParts = splitAnswers(studentAnswer)
   const refParts = splitAnswers(referenceAnswer)
 
-  // 多答案场景：逐个比较
+  // 多答案场景：逗号/分号分隔，逐个比较
   if (refParts.length > 1 && studentParts.length > 1) {
     if (studentParts.length === refParts.length) {
       const allCorrect = studentParts.every((sp, i) => {
@@ -464,6 +471,28 @@ function judgeAnswer(studentAnswer, referenceAnswer, questionType) {
     if (extractAndCompare(studentAnswer, referenceAnswer)) {
       return { isCorrect: true, unrecognized: false }
     }
+  }
+
+  // 多答案场景：空格分隔的比较符号/简单答案（如 "> , <" vs "> <"）
+  const studentSpaceParts = splitBySpace(studentAnswer)
+  const refSpaceParts = splitBySpace(referenceAnswer)
+  if (refSpaceParts.length > 1 && studentSpaceParts.length > 1 &&
+      studentSpaceParts.length === refSpaceParts.length) {
+    const allCorrect = studentSpaceParts.every((sp, i) => {
+      const rp = refSpaceParts[i]
+      return normalizeAndCompare(sp, rp) || extractAndCompare(sp, rp)
+    })
+    if (allCorrect) return { isCorrect: true, unrecognized: false }
+  }
+
+  // 多答案场景：逗号学生 vs 空格标准（如 "> , <" vs "> <"）
+  if (studentParts.length > 1 && refSpaceParts.length > 1 &&
+      studentParts.length === refSpaceParts.length) {
+    const allCorrect = studentParts.every((sp, i) => {
+      const rp = refSpaceParts[i]
+      return normalizeAndCompare(sp, rp) || extractAndCompare(sp, rp)
+    })
+    if (allCorrect) return { isCorrect: true, unrecognized: false }
   }
 
   // 单答案场景：标准比较流程
