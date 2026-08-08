@@ -10,65 +10,98 @@ const CONTENT_W = 170
 // LaTeX 命令检测：包含这些反斜杠命令说明是 LaTeX 数学内容
 const LATEX_RE = /\\(?:frac|dfrac|tfrac|cfrac|div|times|sqrt|cdot|pm|mp|leq|geq|neq|text|mathrm|left|right|over|begin|end|[a-zA-Z]+)\b/
 
+// 斜杠分数匹配：a/b、3/5、1/(2-√3)、(√3+√2)/(√3-√2)、(9/2)
+// 分子/分母支持：括号表达式 | 数字 | 字母 | √前缀项（<>排除，避免误匹配已生成的 HTML 标签）
+const SLASH_FRAC_RE = /(\([^()]+\)|[0-9]+(?:\.[0-9]+)?|[a-zA-Z][0-9]*|√[^()\/<>\s]*)\s*\/\s*(\([^()]+\)|[0-9]+(?:\.[0-9]+)?|[a-zA-Z][0-9]*|√[^()\/<>\s]*)/g
+
 /**
  * 渲染内容：检测 LaTeX 命令并转为 HTML，否则纯文本转义。
  * - \frac{a}{b} → 上下堆叠分数（含分数线）
+ * - a/b、3/5、1/(2-√3) → 上下堆叠分数（普通斜杠格式，兼容非 LaTeX 数据）
  * - \div → ÷，\times → ×，\cdot → ·
  * - \sqrt{x} → √x
  */
 function renderContent(text) {
   if (!text) return ''
-  if (!LATEX_RE.test(text)) return escapeHtml(text)
-
+  const hasLatex = LATEX_RE.test(text)
   let html = escapeHtml(text)
 
-  // 去掉数学定界符
-  html = html.replace(/\$\$?/g, '')
-  html = html.replace(/\\\(/g, '').replace(/\\\)/g, '')
-  html = html.replace(/\\\[/g, '').replace(/\\\]/g, '')
+  if (hasLatex) {
+    // 去掉数学定界符
+    html = html.replace(/\$\$?/g, '')
+    html = html.replace(/\\\(/g, '').replace(/\\\)/g, '')
+    html = html.replace(/\\\[/g, '').replace(/\\\]/g, '')
 
-  // 去掉 \left \right（自动缩放括号，HTML 无需）
-  html = html.replace(/\\left/g, '').replace(/\\right/g, '')
+    // 去掉 \left \right（自动缩放括号，HTML 无需）
+    html = html.replace(/\\left/g, '').replace(/\\right/g, '')
 
-  // \{ → {，\} → }
-  html = html.replace(/\\\{/g, '{').replace(/\\\}/g, '}')
+    // \{ → {，\} → }
+    html = html.replace(/\\\{/g, '{').replace(/\\\}/g, '}')
 
-  // 统一分数命令
-  html = html.replace(/\\(?:dfrac|tfrac|cfrac)/g, '\\frac')
+    // 统一分数命令
+    html = html.replace(/\\(?:dfrac|tfrac|cfrac)/g, '\\frac')
 
-  // 替换运算符符号
-  html = html.replace(/\\div/g, '÷')
-  html = html.replace(/\\times/g, '×')
-  html = html.replace(/\\cdot/g, '·')
-  html = html.replace(/\\pm/g, '±')
-  html = html.replace(/\\mp/g, '∓')
-  html = html.replace(/\\leq/g, '≤')
-  html = html.replace(/\\geq/g, '≥')
-  html = html.replace(/\\neq/g, '≠')
+    // 替换运算符符号
+    html = html.replace(/\\div/g, '÷')
+    html = html.replace(/\\times/g, '×')
+    html = html.replace(/\\cdot/g, '·')
+    html = html.replace(/\\pm/g, '±')
+    html = html.replace(/\\mp/g, '∓')
+    html = html.replace(/\\leq/g, '≤')
+    html = html.replace(/\\geq/g, '≥')
+    html = html.replace(/\\neq/g, '≠')
 
-  // \text{...} \mathrm{...} → 纯文本
-  html = html.replace(/\\(?:text|mathrm)\{([^}]*)\}/g, '$1')
+    // \text{...} \mathrm{...} → 纯文本
+    html = html.replace(/\\(?:text|mathrm)\{([^}]*)\}/g, '$1')
 
-  // \frac{...}{...} → 上下堆叠分数（多轮处理嵌套）
+    // \frac{...}{...} → 上下堆叠分数（多轮处理嵌套）
+    let prev
+    do {
+      prev = html
+      html = html.replace(
+        /\\frac\{([^{}]+)\}\{([^{}]+)\}/g,
+        '<span class="frac"><span class="frac-num">$1</span><span class="frac-den">$2</span></span>'
+      )
+    } while (html !== prev)
+
+    // \sqrt{...} → 根号
+    let prevSqrt
+    do {
+      prevSqrt = html
+      html = html.replace(
+        /\\sqrt\{([^{}]+)\}/g,
+        '<span class="sqrt-wrap">√<span class="sqrt-body">$1</span></span>'
+      )
+    } while (html !== prevSqrt)
+  }
+
+  // 普通斜杠分数 a/b → 上下堆叠（兼容非 LaTeX 数据：3/5、1/(2-√3)、(√3+√2)/(√3-√2)）
+  html = convertSlashFractions(html)
+
+  // 清理：去掉包裹已转换分数的多余括号 (2/3) → 2/3
+  html = html.replace(
+    /\(<span class="frac"><span class="frac-num">[\s\S]*?<\/span><span class="frac-den">[\s\S]*?<\/span><\/span>\)/g,
+    (m) => m.slice(1, -1)
+  )
+
+  return html
+}
+
+/**
+ * 将普通斜杠分数转为上下堆叠。多轮处理，避免嵌套残留。
+ */
+function convertSlashFractions(html) {
   let prev
+  let guard = 0
   do {
     prev = html
-    html = html.replace(
-      /\\frac\{([^{}]+)\}\{([^{}]+)\}/g,
-      '<span class="frac"><span class="frac-num">$1</span><span class="frac-den">$2</span></span>'
-    )
+    html = html.replace(SLASH_FRAC_RE, (m, num, den) => {
+      const clean = (s) => (s.startsWith('(') && s.endsWith(')') ? s.slice(1, -1) : s)
+      return `<span class="frac"><span class="frac-num">${clean(num)}</span><span class="frac-den">${clean(den)}</span></span>`
+    })
+    guard++
+    if (guard > 20) break
   } while (html !== prev)
-
-  // \sqrt{...} → 根号
-  let prevSqrt
-  do {
-    prevSqrt = html
-    html = html.replace(
-      /\\sqrt\{([^{}]+)\}/g,
-      '<span class="sqrt-wrap">√<span class="sqrt-body">$1</span></span>'
-    )
-  } while (html !== prevSqrt)
-
   return html
 }
 
@@ -204,9 +237,10 @@ function buildExamHTML({ title, studentName, questions, showAnswers }) {
     let html = `<div class="section-header">${label}</div>`
     qs.forEach(q => {
       num++
-      html += `<div class="question">`
+      const typeClass = q.question_type === 'choice' ? 'q-choice' : q.question_type === 'fill' ? 'q-fill' : 'q-answer'
+      html += `<div class="question ${typeClass}">`
       html += `<div class="q-head"><span class="q-num">${num}.</span><span class="q-text">${renderContent(q.content)}</span></div>`
-      const illustration = q._illustration_resolved ?? getQuestionIllustration(q)
+const illustration = q._illustration_resolved ?? getQuestionIllustration(q)
       if (illustration) {
         html += `<div class="q-image"><img src="${illustration}" alt="配图" /></div>`
       }
@@ -225,7 +259,9 @@ function buildExamHTML({ title, studentName, questions, showAnswers }) {
       }
       if (q.question_type === 'answer') {
         html += `<div class="ans-area">`
-        for (let r = 0; r < 3; r++) html += `<div class="ans-line"></div>`
+        // 解答题给足答题空间：行高随文字行数自适应
+        const lineCount = q._answerLines || 3
+        for (let r = 0; r < lineCount; r++) html += `<div class="ans-line"></div>`
         html += `</div>`
       }
       if (showAnswers && q.answer) {
@@ -250,6 +286,9 @@ function buildExamHTML({ title, studentName, questions, showAnswers }) {
     .total-info{font-size:13px;color:#666;margin-bottom:8px}
     .section-header{font-size:15px;font-weight:bold;margin:8px 0 6px;padding:4px 0 4px 10px;border-left:4px solid #2563EB;background:#f8faff}
     .question{margin-bottom:6px;page-break-inside:avoid}
+    .q-choice{margin-bottom:6px}
+    .q-fill{margin-bottom:10px}
+    .q-answer{margin-bottom:14px}
     .q-head{display:flex;gap:6px;font-size:13px;line-height:1.7;margin-bottom:2px}
     .q-num{font-weight:bold;white-space:nowrap;min-width:26px}
     .q-text{flex:1;word-break:break-word}
@@ -260,9 +299,9 @@ function buildExamHTML({ title, studentName, questions, showAnswers }) {
     .opts-2{grid-template-columns:1fr 1fr}
     .opts-4{grid-template-columns:repeat(4,1fr)}
     .opt{font-size:12px;line-height:1.5;word-break:break-word}
-    .fill-line{width:200px;border-bottom:1.5px solid #333;margin:4px 0 4px 32px;height:22px}
-    .ans-area{margin:2px 0 2px 32px}
-    .ans-line{border-bottom:1px solid #d0d0d0;height:26px;margin-bottom:2px}
+    .fill-line{width:200px;border-bottom:1.5px solid #333;margin:5px 0 2px 32px;height:26px}
+    .ans-area{margin:4px 0 2px 32px}
+    .ans-line{border-bottom:1px solid #d0d0d0;height:28px;margin-bottom:3px}
     .answer-key{font-size:12px;color:#2563EB;margin-top:3px;padding-left:32px}
     .footer{text-align:center;font-size:11px;color:#999;margin-top:16px;padding-top:6px;border-top:1px solid #ddd}
     .qr-container{position:absolute;top:20px;right:32px;text-align:center;background:#fff;padding:4px}
