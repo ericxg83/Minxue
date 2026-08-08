@@ -610,7 +610,7 @@ export async function generateAllWeeklyReports({ mode = 'week', offset = 0, onPr
 
     onProgress?.(student.name, 'generating')
     try {
-      const pdfBlob = await generateWeeklyReport(student.id, { weeks })
+      const pdfBlob = await generateWeeklyReport(student.id, { mode, offset })
       results.push({ student, pdfBlob, status: 'done' })
       onProgress?.(student.name, 'done')
     } catch (err) {

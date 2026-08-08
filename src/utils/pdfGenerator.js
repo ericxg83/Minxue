@@ -1,10 +1,39 @@
 import html2canvas from 'html2canvas'
 import jsPDF from 'jspdf'
 import qrcode from 'qrcode-generator'
+import { isSvgCode } from './geometryDisplay'
 
 const A4_W = 210
 const A4_H = 297
 const CONTENT_W = 170
+
+/**
+ * 取题目配图（题干插图）：仅返回可被 <img> 渲染的 URL 或 data URL。
+ * 注意：questions.image_url 是整页试卷扫描图（配合 block_coordinates 用于 PC 端
+ * 在原图上定位），不能作为 PDF 里的题目配图。无配图的题目返回 null（不显示图片）。
+ */
+function getQuestionIllustration(q) {
+  if (!q) return null
+  // 1. clean_geometry_svg 干净 SVG 源码 → 内联 data URL（新主流程）
+  if (isSvgCode(q.clean_geometry_svg)) {
+    return `data:image/svg+xml;charset=utf-8,${encodeURIComponent(q.clean_geometry_svg)}`
+  }
+  // 2. TikZ 渲染结果 URL
+  if (q.tikz_svg_url) return q.tikz_svg_url
+  // 3. clean_geometry_image_url 是 URL（第一阶段旧数据）
+  if (q.clean_geometry_image_url && /^https?:\/\//.test(q.clean_geometry_image_url)) {
+    return q.clean_geometry_image_url
+  }
+  // 4. clean_geometry_image_url 是 SVG 源码（兼容）
+  if (isSvgCode(q.clean_geometry_image_url)) {
+    return `data:image/svg+xml;charset=utf-8,${encodeURIComponent(q.clean_geometry_image_url)}`
+  }
+  // 5. 原始裁剪几何图 URL
+  if (q.geometry_image_url) return q.geometry_image_url
+  return null
+}
+
+const isRemoteUrl = (u) => !!u && !u.startsWith('data:')
 
 function escapeHtml(text) {
   if (!text) return ''
@@ -70,8 +99,9 @@ function buildExamHTML({ title, studentName, questions, showAnswers }) {
       num++
       html += `<div class="question">`
       html += `<div class="q-head"><span class="q-num">${num}.</span><span class="q-text">${escapeHtml(q.content)}</span></div>`
-      if (q.image_url) {
-        html += `<div class="q-image"><img src="${q.image_url}" alt="配图" /></div>`
+      const illustration = q._illustration_resolved ?? getQuestionIllustration(q)
+      if (illustration) {
+        html += `<div class="q-image"><img src="${illustration}" alt="配图" /></div>`
       }
       if (q.options && q.options.length > 0) {
         // 根据选项最大长度决定列数：短则 4 列，中等 2 列，长则 1 列（每项独占一行）
@@ -163,9 +193,9 @@ export async function generateExamPDF({ title, studentName, questions, filename,
     throw new Error('没有题目可生成PDF')
   }
 
-  // Convert cross-origin OSS images to base64 data URLs via backend proxy
+  // Convert cross-origin OSS illustration images to base64 data URLs via backend proxy
   const imageMap = new Map()
-  const imageUrls = [...new Set(questions.map(q => q.image_url).filter(Boolean))]
+  const imageUrls = [...new Set(questions.map(getQuestionIllustration).filter(isRemoteUrl))]
 
   console.log(`开始加载 ${imageUrls.length} 张图片...`)
 
@@ -193,11 +223,16 @@ export async function generateExamPDF({ title, studentName, questions, filename,
 
   console.log(`图片加载完成: ${imageMap.size}/${imageUrls.length}`)
 
-  // Replace image URLs with data URLs in questions
-  const pdfQuestions = questions.map(q => ({
-    ...q,
-    image_url: q.image_url ? (imageMap.get(q.image_url) || q.image_url) : null
-  }))
+  // Replace remote illustration URLs with data URLs in questions
+  const pdfQuestions = questions.map(q => {
+    const illustration = getQuestionIllustration(q)
+    return {
+      ...q,
+      _illustration_resolved: illustration && isRemoteUrl(illustration)
+        ? (imageMap.get(illustration) || illustration)
+        : illustration
+    }
+  })
 
   const html = buildExamHTML({ title, studentName, questions: pdfQuestions, showAnswers })
   const container = document.createElement('div')
