@@ -1,7 +1,6 @@
 ﻿import { defineConfig } from 'vite'
 import react from '@vitejs/plugin-react'
 import vue from '@vitejs/plugin-vue'
-import { VitePWA } from 'vite-plugin-pwa'
 import tailwindcss from '@tailwindcss/vite'
 import { resolve } from 'path'
 import fs from 'fs'
@@ -10,64 +9,7 @@ export default defineConfig(({ mode }) => ({
   plugins: [
     react(),
     vue(),
-    tailwindcss(),
-    VitePWA({
-      registerType: 'prompt',
-      strategies: 'injectManifest',
-      srcDir: 'src',
-      filename: 'sw.js',
-      manifest: {
-        name: '敏学错题本',
-        short_name: '敏学',
-        description: '晚托班老师错题管理系统',
-        theme_color: '#1677ff',
-        background_color: '#ffffff',
-        display: 'standalone',
-        start_url: '/',
-        icons: [
-          {
-            src: '/icon-192x192.png',
-            sizes: '192x192',
-            type: 'image/png'
-          },
-          {
-            src: '/icon-512x512.png',
-            sizes: '512x512',
-            type: 'image/png'
-          }
-        ]
-      },
-      workbox: {
-        globPatterns: ['**/*.{js,css,html,ico,png,svg,woff2}'],
-        cleanupOutdatedCaches: true,
-        skipWaiting: true,
-        clientsClaim: true,
-        runtimeCaching: [
-          {
-            urlPattern: /^https:\/\/cdn\./,
-            handler: 'CacheFirst',
-            options: {
-              cacheName: 'oss-cdn-cache',
-              expiration: {
-                maxEntries: 200,
-                maxAgeSeconds: 30 * 24 * 60 * 60
-              }
-            }
-          },
-          {
-            urlPattern: /\.(?:png|jpg|jpeg|webp|svg)$/,
-            handler: 'CacheFirst',
-            options: {
-              cacheName: 'image-cache',
-              expiration: {
-                maxEntries: 100,
-                maxAgeSeconds: 7 * 24 * 60 * 60
-              }
-            }
-          }
-        ]
-      }
-    })
+    tailwindcss()
   ],
   resolve: {
     alias: {

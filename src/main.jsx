@@ -6,18 +6,21 @@ import ErrorBoundary from './components/ErrorBoundary.jsx'
 import 'katex/dist/katex.min.css'
 import './index.css'
 
-// ── PWA 手动更新检查 (Android WebView 中 autoUpdate 不会自动触发) ──
+// ── 禁用 PWA 缓存：主动注销任何已注册的 Service Worker ──
+// 避免浏览器继续用旧缓存的 JS/CSS，导致线上更新看不到新版本
 if ('serviceWorker' in navigator) {
   window.addEventListener('load', () => {
     navigator.serviceWorker.getRegistrations().then(registrations => {
-      registrations.forEach(registration => {
-        // 检查是否有更新
-        registration.update()
-      })
-    })
-    // 监听更新就绪事件
-    navigator.serviceWorker.addEventListener('controllerchange', () => {
-      window.location.reload()
+      registrations.forEach(registration => registration.unregister())
+    }).then(() => {
+      if (navigator.serviceWorker.controller) {
+        // 清除缓存存储
+        if (window.caches) {
+          caches.keys().then(keys => {
+            keys.forEach(key => caches.delete(key))
+          })
+        }
+      }
     })
   })
 }
