@@ -229,6 +229,13 @@ export const addSelfContainedWrongQuestion = async (params) => {
     subject, sourceType = 'workbook', questionId
   } = params
 
+  // 防垃圾行守卫：既无 question_id 又无 (worksheet_id + question_no) 的错题没有
+  // 任何关联与内容，写入只会污染错题本并虚增报告统计，直接拒绝。
+  if (!questionId && !(worksheetId && questionNo)) {
+    console.warn(`  ⚠️ [WrongBook] 拒绝写入无关联空壳错题: studentId=${studentId}, questionId=${questionId || 'null'}, worksheetId=${worksheetId || 'null'}, questionNo=${questionNo || 'null'}`)
+    return null
+  }
+
   const { rows: existing } = await query(
     `SELECT id, error_count FROM ${TABLES.WRONG_QUESTIONS}
      WHERE student_id = $1 AND worksheet_id = $2 AND question_no = $3`,
@@ -242,9 +249,10 @@ export const addSelfContainedWrongQuestion = async (params) => {
            last_wrong_at = NOW(),
            updated_at = NOW(),
            student_answer = $2,
-           question_image_url = COALESCE($3, question_image_url)
+           question_image_url = COALESCE($3, question_image_url),
+           question_id = COALESCE($4, question_id)
        WHERE id = $1`,
-      [existing[0].id, studentAnswer, questionImageUrl]
+      [existing[0].id, studentAnswer, questionImageUrl, questionId]
     )
     return existing[0].id
   }

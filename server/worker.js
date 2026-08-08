@@ -3620,19 +3620,14 @@ const processWorkbookGrading = async (job) => {
 
   await createQuestions(questionsWithStudentId)
 
-  // 构建题号 → question_id 映射（用于错题本 question_id 回填）
-  const questionIdByNumber = {}
-  for (const q of questionsWithStudentId) {
-    if (q.question_number) {
-      questionIdByNumber[q.question_number] = q.id
-    }
-  }
-
   // 6. 自包含错题本同步：裁剪学生作业图片 + 直接写入 wrong_questions
-  const wrongQuestions = allQuestions.filter(q => q.is_correct === false && q.question_number)
+  // 直接基于 questionsWithStudentId 过滤（自带 id），确保 question_id 一定与
+  // 已落库的题目行一致；不再用"题号 → question_id"映射，避免多页同题号/跨 section
+  // 同题号覆盖导致 question_id 指向错误的题目甚至 NULL。
+  const wrongQuestions = questionsWithStudentId.filter(q => q.is_correct === false && q.question_number)
 
   for (const wq of wrongQuestions) {
-    const pageImageUrl = wq._page_image_url || imageList[0]?.image_url
+    const pageImageUrl = wq.image_url || imageList[0]?.image_url
     let questionImageUrl = null
 
     if (pageImageUrl && wq.block_coordinates) {
@@ -3652,7 +3647,7 @@ const processWorkbookGrading = async (job) => {
       studentId,
       worksheetId,
       questionNo: wq.question_number,
-      pageNumber: wq._page_number || 1,
+      pageNumber: wq.page_number || 1,
       studentAnswer: wq.student_answer || null,
       correctAnswer: wq.answer || null,
       answerType: wq.question_type || 'choice',
@@ -3662,7 +3657,7 @@ const processWorkbookGrading = async (job) => {
       questionImageUrl,
       subject: null,
       sourceType: 'workbook',
-      questionId: questionIdByNumber[wq.question_number] || null
+      questionId: wq.id
     })
   }
 
