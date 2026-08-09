@@ -1,102 +1,118 @@
-# 敏学错题本 - 晚托班老师错题管理系统
+# 敏学成长工作台（Minxue App V3）
 
-## 项目简介
-
-手机端网页应用（PWA），帮助晚托班老师高效批改作业、管理学生错题。
+面向 K12 教师的作业批改与错题管理工具。核心价值：帮助教师从繁琐的作业批改、错题整理、组卷出题中解放出来，学生能收到及时、个性化的学习反馈。
 
 ## 功能特性
 
-- 📸 **拍照上传**：支持相机拍照和相册选择
-- 🤖 **AI识别**：使用 Kimi-2.5 自动识别题目内容
-- ✅ **待确认**：批量查看识别结果，一键加入错题本
-- 📚 **错题本**：管理所有错题，支持编辑和打印
-- 🖨️ **打印功能**：生成精美错题练习卷
-- 📱 **扫码重练**：学生扫码进行错题重练
-- 👨‍🎓 **学生管理**：添加、编辑、切换学生
+- 📸 **拍照/相册上传**：FAB 单击直达暂存区，长按展开类型选择（日常作业/普通试卷/错题重练）
+- 🤖 **AI 识别批改**：多视觉模型（ModelScope Kimi + 备用厂商）自动识别题目并判题
+- ✅ **批改结果**：正确/错误/空题统计，可进入复审面板逐题确认
+- 📚 **错题本**：筛选（科目/时间/错次/标签）、掌握状态管理、批量组卷
+- 🖨️ **组卷打印**：生成 PDF（LaTeX 数学公式渲染）+ 二维码，学生扫码错题重练
+- 📊 **学习报告**：周报告 / 成长曲线（ECharts）生成
+- 🧩 **PC 工作台**：Vue 3 + Element Plus，试卷入库校对、练习册管理、深度批改
 
 ## 技术栈
 
-- **前端**：React 18 + Vite + Ant Design Mobile
-- **状态管理**：Zustand
-- **数据库**：Supabase (PostgreSQL)
-- **AI接口**：魔搭社区 Kimi-2.5
-- **部署**：Render
+| 层 | 技术 |
+|---|---|
+| **移动端前端** | React 18 + Vite + Tailwind CSS + Zustand + Motion + Ant Design Mobile |
+| **PC 工作台** | Vue 3 + Pinia + Element Plus + ECharts（懒加载路由） |
+| **后端** | Express.js + Multer + BullMQ (Redis) |
+| **数据库** | Neon PostgreSQL |
+| **文件存储** | 阿里 OSS（CDN 加速） |
+| **AI 服务** | ModelScope（Kimi）+ 备用厂商自动切换 |
+| **移动端打包** | Capacitor（Android APK，ML Kit 原生扫码） |
+| **部署** | 前端 Cloudflare Pages · 后端 Render · PWA 支持 |
 
 ## 快速开始
 
 ### 本地开发
 
 ```bash
-# 安装依赖
 npm install
-
-# 启动开发服务器
-npm run dev
+npm run dev        # 前端 Vite dev server (port 3000)
 ```
 
-### 数据库配置
+后端需在 `server/` 目录启动：
 
-1. 在 Supabase 创建项目
-2. 执行 `database/schema.sql` 创建表结构
-3. 在 Supabase Storage 创建 `homework-images` bucket
+```bash
+node server/index.js   # 后端 API server（默认 port 4000，自动跑 migrations）
+```
+
+开发环境代理：`vite.config.js` 将 `/api` 代理到 `http://localhost:4000`。
 
 ### 环境变量
 
+见 `.env`（开发）与 `.env.production`。核心变量：
+
 ```env
-VITE_SUPABASE_URL=https://bedphahmxdpnzwvsnjay.supabase.co
-VITE_SUPABASE_KEY=sb_publishable_Az5Yk8dG6elDjm4QWkc1cw_sMLOne4t
-VITE_AI_API_KEY=ms-dae707ae-bcc4-4d7e-aa83-e2165d0cdbf5
+# 数据库（Neon PostgreSQL）
+DATABASE_URL=postgresql://...
+
+# 服务器
+PORT=4000
+ALLOWED_ORIGIN=https://your-domain.com
+
+# 阿里 OSS
+OSS_REGION=oss-cn-shanghai
+OSS_BUCKET_NAME=minxue-app
+OSS_ACCESS_KEY_ID=...
+OSS_ACCESS_KEY_SECRET=...
+
+# AI 服务（ModelScope Kimi）
+AI_API_KEY=...
+AI_ENDPOINT=https://api-inference.modelscope.cn/v1/chat/completions
+AI_VISION_MODEL=...
+AI_TEXT_MODEL=...
+MODELSCOPE_BACKUP_API_KEY=...
+
+# Redis（BullMQ 队列）
+REDIS_URL=...
 ```
 
-### 部署到 Render
+### Android 打包（Capacitor）
 
-1. 推送代码到 GitHub
-2. 在 Render 创建 Web Service
-3. 连接 GitHub 仓库
-4. 配置环境变量
-5. 部署完成
+```bash
+npm run android:build   # 构建 + sync
+npm run android:run     # 打开 Android Studio 运行
+```
 
 ## 项目结构
 
 ```
+server/
+  config/          # neon.js / oss.js / ai.js
+  routes/          # Express 路由（tasks / worksheets / exams / students...）
+  services/        # 业务逻辑（判题、练习册匹配、夜间补解析等）
+  worker.js        # BullMQ 任务处理（AI 识别批改）
+  index.js         # API 入口
+
 src/
-├── components/      # 公共组件
-│   └── Layout/      # 页面布局
-├── pages/           # 页面组件
-│   ├── Home/        # 拍照上传页
-│   ├── Pending/     # 待确认页
-│   ├── WrongBook/   # 错题本页
-│   └── Students/    # 学生管理页
-├── services/        # 服务层
-│   ├── supabaseService.js  # Supabase 操作
-│   └── aiService.js        # AI 识别服务
-├── store/           # 状态管理
-│   └── index.js     # Zustand stores
-├── config/          # 配置文件
-│   ├── supabase.js  # Supabase 配置
-│   └── ai.js        # AI 接口配置
-└── App.jsx          # 应用入口
+  pages/           # 移动端页面（Processing / WrongBook / Exam / ExamReview...）
+  components/      # 公共组件（StagingModal / AppHeader / ImagePreview...）
+  hooks/           # 业务 hooks（useUploadFlow / usePolling / useExamReview...）
+  features/        # 自包含功能模块（PaperBank / upload）
+  services/        # API 层（apiService 带请求去重与超时 abort）
+  workbench/       # PC 端 Vue 工作台（独立入口 workbench.html）
+  store/           # Zustand stores
+  utils/           # 判题、图片、PDF 生成等工具
 ```
 
-## 数据库表结构
+## 部署
 
-| 表名 | 说明 |
-|------|------|
-| students | 学生信息 |
-| tasks | 拍照上传任务 |
-| questions | AI识别的题目 |
-| wrong_questions | 错题本 |
-| training_logs | 练习记录 |
+- **后端**：Render（见 `render.yaml`），Node 22，自动跑 migrations
+- **前端**：Cloudflare Pages（见 `wrangler.toml`），SPA fallback + 静态资源长缓存
+- 详细流程见 `DEPLOYMENT.md` / `DEPLOYMENT_CLOUDFLARE_RENDER.md`
 
-## API 文档
+## 数据库
 
-### AI 接口
+- 表结构：`database_schema.sql`
+- 初始化：`init_database.sql`（后端启动时自动跑 `migrations/`）
 
-- **Endpoint**: `https://api-inference.modelscope.cn/v1/chat/completions`
-- **Method**: POST
-- **Headers**: `Authorization: Bearer <API_KEY>`
-- **Model**: kimi-2.5
+## 核心交互流程
 
-## 许可证
-
-MIT
+1. **上传批改**：FAB 拍照/相册 → 暂存区确认 → 上传（多图合一任务）→ AI 识别 → 结果统计
+2. **复审**：首页已完成任务卡片 → 复审面板逐题核对/修改答案
+3. **错题组卷**：错题本筛选 → 多选 → 生成 PDF（含二维码）→ 学生扫码重练
+4. **扫码重练**：学生扫二维码 → `/retry-task/:id` 上传答卷 → 自动批改入错题本
