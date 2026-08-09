@@ -3,6 +3,7 @@ import { motion, AnimatePresence } from 'motion/react'
 import { Search, BookOpen, Check, X, Star } from 'lucide-react'
 import { getWorksheets, getStudentWorksheetSetting, upsertStudentWorksheetSetting } from '../../services/apiService'
 import { useStudentStore } from '../../store'
+import EmptyState from '../EmptyState'
 
 export default function WorksheetPicker({ visible, onClose, onSelect, subject }) {
   const { currentStudent } = useStudentStore()
@@ -105,7 +106,7 @@ export default function WorksheetPicker({ visible, onClose, onSelect, subject })
 
               {/* 搜索 */}
               <div className="relative mb-4">
-                <Search size={16} className="absolute left-3 top-1/2 -translate-y-1/2" style={{ color: 'var(--text-tertiary)' }} />
+                <Search size={16} className="absolute left-3 top-1/2 -translate-y-1/2" style={{ color: 'var(--text-secondary)' }} />
                 <input
                   type="text"
                   placeholder="搜索练习册..."
@@ -119,19 +120,20 @@ export default function WorksheetPicker({ visible, onClose, onSelect, subject })
               {/* 列表 */}
               <div className="max-h-[50vh] overflow-y-auto -mx-2">
                 {loading ? (
-                  <div className="text-center py-8 text-[14px]" style={{ color: 'var(--text-tertiary)' }}>
+                  <div className="text-center py-8 text-[14px]" style={{ color: 'var(--text-secondary)' }}>
                     加载中...
                   </div>
                 ) : sorted.length === 0 ? (
-                  <div className="text-center py-8">
-                    <BookOpen size={40} className="mx-auto mb-2" style={{ color: 'var(--text-tertiary)' }} />
-                    <div className="text-[14px]" style={{ color: 'var(--text-tertiary)' }}>
-                      {search ? '未找到匹配的练习册' : '暂无已发布的练习册'}
-                    </div>
-                    <div className="text-[12px] mt-1" style={{ color: 'var(--text-tertiary)' }}>
-                      请先在 PC 端上传并发布练习册
-                    </div>
-                  </div>
+                  <EmptyState
+                    icon={BookOpen}
+                    iconSize={40}
+                    title={search ? '未找到匹配的练习册' : '暂无已发布的练习册'}
+                    description="请先在 PC 端上传并发布练习册"
+                    className="py-8"
+                    iconStyle={{ marginBottom: '8px', color: 'var(--text-secondary)' }}
+                    titleStyle={{ fontSize: 'var(--fs-14)', color: 'var(--text-secondary)' }}
+                    descriptionStyle={{ fontSize: 'var(--fs-12)', marginTop: '4px', color: 'var(--text-secondary)' }}
+                  />
                 ) : sorted.map(ws => (
                   <button
                     key={ws.id}
@@ -162,7 +164,7 @@ export default function WorksheetPicker({ visible, onClose, onSelect, subject })
                     <button
                       onClick={(e) => { e.stopPropagation(); handleSetDefault(ws.id) }}
                       className="p-2 rounded-xl flex-shrink-0"
-                      style={{ color: ws.id === defaultId ? 'var(--primary)' : 'var(--text-tertiary)' }}
+                      style={{ color: ws.id === defaultId ? 'var(--primary)' : 'var(--text-secondary)' }}
                       title="设为默认"
                     >
                       <Star size={18} fill={ws.id === defaultId ? 'currentColor' : 'none'} />

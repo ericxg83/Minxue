@@ -3,7 +3,7 @@
     <div class="top-navbar__left">
       <div class="logo">
         <svg viewBox="0 0 24 24" fill="none" class="logo-icon" width="24" height="24">
-          <path d="M12 2L2 7l10 5 10-5-10-5zM2 17l10 5 10-5M2 12l10 5 10-5" stroke="#1677FF" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+          <path d="M12 2L2 7l10 5 10-5-10-5zM2 17l10 5 10-5M2 12l10 5 10-5" stroke="var(--wb-primary)" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
         </svg>
         <span class="logo-text">敏学成长工作台</span>
       </div>
@@ -191,7 +191,7 @@ const handleNavClick = (item) => {
   transform: translateX(-50%);
   width: 24px;
   height: 3px;
-  border-radius: 2px;
+  border-radius: var(--wb-radius-xs);
   background: var(--wb-primary);
 }
 
@@ -253,7 +253,7 @@ const handleNavClick = (item) => {
   font-size: 11px;
   line-height: 16px;
   text-align: center;
-  border-radius: 8px;
+  border-radius: var(--wb-radius-sm);
   font-weight: 600;
 }
 
@@ -293,7 +293,7 @@ const handleNavClick = (item) => {
   background: var(--wb-warning-soft);
   color: var(--wb-warning);
   font-size: 10px;
-  border-radius: 4px;
+  border-radius: var(--wb-radius-xs);
   font-weight: 500;
   flex-shrink: 0;
   border: 1px solid #FDE68A;
@@ -307,8 +307,8 @@ const handleNavClick = (item) => {
   right: 20px;
   z-index: 2000;
   background: #fff;
-  border-radius: 8px;
-  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.12);
+  border-radius: var(--wb-radius-sm);
+  box-shadow: var(--wb-shadow-md);
   overflow: hidden;
 }
 

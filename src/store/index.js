@@ -219,16 +219,13 @@ export const useExamStore = create((set, get) => ({
 }))
 
 // 全局 UI 状态管理
-// currentPage 持久化到 sessionStorage：刷新后停留在当前底部 tab（首页/错题本/组卷历史），
-// 关闭标签页后清空、下次进入回到默认首页。loading/toast 为瞬态，不持久化。
+// loading/toast 为瞬态，不持久化。
+// 注：底部 tab（首页/错题本/组卷历史）已由 App 路由化接管（URL hash），不再存入本 store。
 export const useUIStore = create(
   persist(
     (set) => ({
-      currentPage: 'processing',
       loading: false,
       toast: null,
-
-      setCurrentPage: (page) => set({ currentPage: page }),
 
       setLoading: (loading) => set({ loading }),
 
@@ -238,8 +235,7 @@ export const useUIStore = create(
     }),
     {
       name: 'minxue-ui',
-      storage: createJSONStorage(() => sessionStorage),
-      partialize: (state) => ({ currentPage: state.currentPage })
+      storage: createJSONStorage(() => sessionStorage)
     }
   )
 )

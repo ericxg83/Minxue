@@ -29,18 +29,18 @@ export default class ErrorBoundary extends Component {
           padding: '20px',
           gap: '16px'
         }}>
-          <AlertCircle size={48} color="#EF4444" />
+          <AlertCircle size={48} color="var(--danger)" />
           <h2 style={{
-            fontSize: '16px',
+            fontSize: 'var(--fs-16)',
             fontWeight: 600,
-            color: '#111827',
+            color: 'var(--text)',
             margin: 0
           }}>
             应用出错了
           </h2>
           <p style={{
-            fontSize: '13px',
-            color: '#6B7280',
+            fontSize: 'var(--fs-13)',
+            color: 'var(--text-secondary)',
             textAlign: 'center',
             maxWidth: '300px',
             margin: 0
@@ -57,12 +57,12 @@ export default class ErrorBoundary extends Component {
               alignItems: 'center',
               gap: '6px',
               padding: '10px 24px',
-              background: '#2563EB',
+              background: 'var(--primary-hover)',
               color: '#fff',
-              borderRadius: '8px',
+              borderRadius: 'var(--radius-8)',
               border: 'none',
               cursor: 'pointer',
-              fontSize: '14px',
+              fontSize: 'var(--fs-14)',
               fontWeight: 600
             }}
           >
@@ -78,11 +78,11 @@ export default class ErrorBoundary extends Component {
             style={{
               padding: '8px 16px',
               background: 'transparent',
-              color: '#6B7280',
-              borderRadius: '8px',
-              border: '1px solid #E5E7EB',
+              color: 'var(--text-secondary)',
+              borderRadius: 'var(--radius-8)',
+              border: '1px solid var(--border-light)',
               cursor: 'pointer',
-              fontSize: '12px'
+              fontSize: 'var(--fs-12)'
             }}
           >
             清除缓存并重新加载

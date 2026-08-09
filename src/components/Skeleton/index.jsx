@@ -23,7 +23,7 @@ export function WrongBookSkeleton() {
       <section className="px-5 mb-4">
         <div className="flex gap-2 overflow-x-auto no-scrollbar">
           {Array.from({ length: 4 }).map((_, i) => (
-            <div key={i} className="h-8 bg-gray-200 rounded-full w-16 animate-pulse" />
+            <div key={i} className="h-8 bg-[var(--bg-secondary)] rounded-full w-16 animate-pulse" />
           ))}
         </div>
       </section>

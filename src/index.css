@@ -3,8 +3,8 @@
 :root {
   /* ── Apple iOS · System Colors + shadcn semantics ──
      Token names are unchanged; only values are tuned to the iOS Human
-     Interface Guidelines (systemGroupedBackground, systemBlue, …) so every
-     inline `var(--…)` reference across the app updates at once. */
+     Interface Guidelines (systemGroupedBackground, …). 主色统一为
+     Tailwind blue（#3B82F6），与 PC 工作台 --wb-primary 完全一致。 */
 
   /* ── Surfaces — iOS grouped background over white cards ── */
   --bg: #F2F2F7;             /* systemGroupedBackground */
@@ -14,26 +14,27 @@
   --bg-secondary: #E9E9EF;   /* tertiary fill (segmented track) */
   --bg-mist: #F7F7FA;        /* between bg and card */
 
-  /* ── Primary — systemBlue ── */
-  --primary: #007AFF;         /* systemBlue */
-  --primary-hover: #0062CC;   /* pressed systemBlue */
-  --primary-soft: #E1EFFF;    /* tinted fill */
-  --primary-mist: #F0F7FF;    /* very light tint */
+  /* ── Primary — Tailwind blue (与工作台统一) ── */
+  --primary: #3B82F6;         /* blue-500 */
+  --primary-hover: #2563EB;   /* blue-600 */
+  --primary-light: #60A5FA;   /* blue-400 (渐变端点) */
+  --primary-soft: #DBEAFE;    /* blue-100 */
+  --primary-mist: #EFF6FF;    /* blue-50 */
 
   /* ── Accent — systemOrange ── */
   --accent: #FF9500;          /* systemOrange */
   --accent-hover: #E68600;
   --accent-soft: #FFF4E5;     /* tinted fill */
 
-  /* ── Semantic Colors — iOS system palette ── */
-  --success: #34C759;         /* systemGreen */
-  --success-soft: #E4F8EA;
-  --warning: #FF9F0A;         /* systemOrange (warn) */
-  --warning-soft: #FFF3E0;
-  --danger: #FF3B30;          /* systemRed */
-  --danger-soft: #FFE9E7;
-  --info: #007AFF;            /* systemBlue */
-  --info-soft: #E1EFFF;
+  /* ── Semantic Colors — slate palette (与工作台统一) ── */
+  --success: #16A34A;         /* green-600 */
+  --success-soft: #DCFCE7;    /* green-100 */
+  --warning: #D97706;         /* amber-600 */
+  --warning-soft: #FEF3C7;    /* amber-100 */
+  --danger: #DC2626;          /* red-600 */
+  --danger-soft: #FEE2E2;     /* red-100 */
+  --info: #3B82F6;            /* blue-500 */
+  --info-soft: #DBEAFE;       /* blue-100 */
   --purple: #AF52DE;          /* systemPurple */
   --purple-soft: #F5E9FB;
 
@@ -42,6 +43,19 @@
   --text-secondary: #6C6C70;   /* secondaryLabel (opaque approx) */
   --text-tertiary: #A9A9AE;    /* tertiaryLabel (opaque approx) */
   --text-inverse: #FFFFFF;
+
+  /* ── Type scale (font sizes) ── */
+  --fs-10: 10px;
+  --fs-11: 11px;
+  --fs-12: 12px;
+  --fs-13: 13px;
+  --fs-14: 14px;
+  --fs-15: 15px;
+  --fs-16: 16px;
+  --fs-17: 17px;
+  --fs-18: 18px;
+  --fs-20: 20px;
+  --fs-24: 24px;
 
   /* ── Borders — iOS separators / shadcn border+ring ── */
   --border: #C6C6C8;          /* opaqueSeparator */
@@ -54,13 +68,23 @@
   --radius-xl: 26px;
   --radius-2xl: 32px;
   --radius-full: 9999px;
+  /* numeric aliases for small components (kept 1:1 with current UI) */
+  --radius-2: 2px;
+  --radius-3: 3px;
+  --radius-4: 4px;
+  --radius-5: 5px;
+  --radius-6: 6px;
+  --radius-8: 8px;
+  --radius-12: 12px;
+  --radius-16: 16px;
+  --radius-24: 24px;
 
   /* ── Shadows — iOS: very soft, low-contrast, near-flat ── */
   --shadow-sm: 0 1px 2px rgba(0,0,0,0.04);
   --shadow-md: 0 4px 14px rgba(0,0,0,0.06);
   --shadow-lg: 0 10px 28px rgba(0,0,0,0.08);
   --shadow-xl: 0 18px 44px rgba(0,0,0,0.10);
-  --shadow-primary: 0 4px 14px rgba(0,122,255,0.22);
+  --shadow-primary: 0 4px 14px rgba(59,130,246,0.22);
   --shadow-accent: 0 4px 14px rgba(255,149,0,0.22);
 }
 
@@ -227,14 +251,14 @@ button {
   font-weight: 600;
 }
 
-/* ── CTA Button — iOS filled (systemOrange), flat ── */
+/* ── CTA Button — iOS filled (brand blue), flat ── */
 .btn-cta {
   display: inline-flex;
   align-items: center;
   justify-content: center;
   gap: 6px;
   padding: 12px 24px;
-  background: var(--accent);
+  background: var(--primary);
   color: white;
   border: none;
   border-radius: var(--radius-md);
@@ -242,14 +266,14 @@ button {
   font-weight: 600;
   letter-spacing: -0.01em;
   transition: all 0.2s ease;
-  box-shadow: var(--shadow-accent);
+  box-shadow: var(--shadow-primary);
 }
 .btn-cta:hover {
-  background: var(--accent-hover);
+  background: var(--primary-hover);
 }
 .btn-cta:active {
   transform: scale(0.97);
-  background: var(--accent-hover);
+  background: var(--primary-hover);
 }
 
 /* ── Primary Button — iOS filled (systemBlue), flat ── */

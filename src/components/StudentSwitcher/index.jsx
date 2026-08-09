@@ -155,14 +155,14 @@ export default function StudentSwitcher({ visible, onClose, onSelectStudent }) {
             <div className="relative px-5 pt-5 pb-6">
               {/* Header */}
               <div className="flex items-center justify-between mb-4">
-                <h2 className="text-[16px] font-bold text-slate-900">
+                <h2 className="text-[16px] font-bold text-[var(--text)]">
                   {showForm ? (editingStudent ? '编辑学生' : '添加学生') : '切换学生'}
                 </h2>
                 <button
                   onClick={onClose}
-                  className="p-1.5 rounded-full hover:bg-gray-50 transition-colors"
+                  className="p-1.5 rounded-full hover:bg-[var(--bg-hover)] transition-colors"
                 >
-                  <X size={18} className="text-gray-400" />
+                  <X size={18} className="text-[var(--text-tertiary)]" />
                 </button>
               </div>
 
@@ -186,41 +186,41 @@ export default function StudentSwitcher({ visible, onClose, onSelectStudent }) {
                         }}
                         className={`flex items-center justify-between p-3 rounded-xl border transition-all cursor-pointer active:opacity-80 ${
                           currentStudent?.id === student.id
-                            ? 'border-blue-600 bg-blue-50/50'
-                            : 'border-gray-200 bg-white'
+                            ? 'border-[var(--primary)] bg-[var(--primary-mist)]'
+                            : 'border-[var(--border-light)] bg-white'
                         }`}
                       >
                         <div className="flex items-center gap-3">
                           <div className={`w-10 h-10 rounded-full flex items-center justify-center text-white font-bold text-base flex-shrink-0 ${
-                            currentStudent?.id === student.id ? 'bg-blue-600' : 'bg-gray-300'
+                            currentStudent?.id === student.id ? 'bg-[var(--primary)]' : 'bg-[var(--bg-secondary)]'
                           }`}>
                             {student.name?.charAt(0) || '学'}
                           </div>
                           <div className="min-w-0">
-                            <div className="text-[14px] font-semibold text-slate-900">{student.name}</div>
+                            <div className="text-[14px] font-semibold text-[var(--text)]">{student.name}</div>
                             {student.class && (
-                              <div className="text-[11px] text-gray-400 font-medium">{student.class}</div>
+                              <div className="text-[11px] text-[var(--text-secondary)] font-medium">{student.class}</div>
                             )}
                           </div>
                         </div>
                         <div className="flex items-center gap-1.5 flex-shrink-0">
                           {currentStudent?.id === student.id && (
-                            <CheckCircle2 size={18} className="text-blue-600" />
+                            <CheckCircle2 size={18} className="text-[var(--primary)]" />
                           )}
                           <button
                             onClick={(e) => openEditForm(student, e)}
-                            className="p-1 rounded-full hover:bg-blue-50 transition-colors"
+                            className="p-1 rounded-full hover:bg-[var(--primary-mist)] transition-colors"
                           >
-                            <Pencil size={14} className="text-gray-300 hover:text-blue-600" />
+                            <Pencil size={14} className="text-[var(--text-tertiary)] hover:text-[var(--primary)]" />
                           </button>
                           <button
                             onClick={(e) => {
                               e.stopPropagation()
                               setShowDeleteConfirm(student)
                             }}
-                            className="p-1 rounded-full hover:bg-red-50 transition-colors"
+                            className="p-1 rounded-full hover:bg-[var(--danger-soft)] transition-colors"
                           >
-                            <Trash2 size={14} className="text-gray-300 hover:text-red-500" />
+                            <Trash2 size={14} className="text-[var(--text-tertiary)] hover:text-[var(--danger)]" />
                           </button>
                         </div>
                       </div>
@@ -230,7 +230,7 @@ export default function StudentSwitcher({ visible, onClose, onSelectStudent }) {
                   {/* Add Student Button */}
                   <button
                     onClick={openAddForm}
-                    className="w-full mt-3 p-3 rounded-xl border border-dashed border-gray-300 flex items-center justify-center gap-1.5 text-gray-400 hover:border-blue-400 hover:text-blue-600 transition-all active:opacity-60"
+                    className="w-full mt-3 p-3 rounded-xl border border-dashed border-[var(--border)] flex items-center justify-center gap-1.5 text-[var(--text-secondary)] hover:border-[var(--primary)] hover:text-[var(--primary)] transition-all active:opacity-60"
                   >
                     <Plus size={18} />
                     <span className="text-[13px] font-semibold">添加学生</span>
@@ -241,23 +241,23 @@ export default function StudentSwitcher({ visible, onClose, onSelectStudent }) {
                   {/* Add/Edit Student Form */}
                   <div className="space-y-3">
                     <div>
-                      <label className="block text-[12px] font-medium text-gray-500 mb-1.5">姓名</label>
+                      <label className="block text-[12px] font-medium text-[var(--text-secondary)] mb-1.5">姓名</label>
                       <input
                         ref={nameInputRef}
                         type="text"
                         value={formData.name}
                         onChange={(e) => setFormData({ ...formData, name: e.target.value })}
                         placeholder="请输入学生姓名"
-                        className="w-full p-3 bg-gray-50 rounded-lg border border-gray-200 text-[13px] focus:outline-none focus:border-blue-400 focus:ring-2 focus:ring-blue-100 transition-all"
+                        className="w-full p-3 bg-[var(--bg-secondary)] rounded-lg border border-[var(--border-light)] text-[13px] focus:outline-none focus:border-[var(--primary)] focus:ring-2 focus:ring-[var(--primary-soft)] transition-all"
                       />
                     </div>
                     <div>
-                      <label className="block text-[12px] font-medium text-gray-500 mb-1.5">年级 <span className="text-red-500">*</span></label>
+                      <label className="block text-[12px] font-medium text-[var(--text-secondary)] mb-1.5">年级 <span className="text-[var(--danger)]">*</span></label>
                       <select
                         value={formData.grade}
                         onChange={(e) => setFormData({ ...formData, grade: e.target.value })}
-                        className="w-full p-3 bg-gray-50 rounded-lg border border-gray-200 text-[13px] focus:outline-none focus:border-blue-400 focus:ring-2 focus:ring-blue-100 transition-all appearance-none"
-                        style={{ color: formData.grade ? '#1e293b' : '#9ca3af' }}
+                        className="w-full p-3 bg-[var(--bg-secondary)] rounded-lg border border-[var(--border-light)] text-[13px] focus:outline-none focus:border-[var(--primary)] focus:ring-2 focus:ring-[var(--primary-soft)] transition-all appearance-none"
+                        style={{ color: formData.grade ? 'var(--text)' : 'var(--text-tertiary)' }}
                       >
                         <option value="">请选择年级</option>
                         {GRADE_OPTIONS.map(grade => (
@@ -266,26 +266,26 @@ export default function StudentSwitcher({ visible, onClose, onSelectStudent }) {
                       </select>
                     </div>
                     <div>
-                      <label className="block text-[12px] font-medium text-gray-500 mb-1.5">班级</label>
+                      <label className="block text-[12px] font-medium text-[var(--text-secondary)] mb-1.5">班级</label>
                       <input
                         type="text"
                         value={formData.class}
                         onChange={(e) => setFormData({ ...formData, class: e.target.value })}
                         placeholder="请输入班级（选填）"
-                        className="w-full p-3 bg-gray-50 rounded-lg border border-gray-200 text-[13px] focus:outline-none focus:border-blue-400 focus:ring-2 focus:ring-blue-100 transition-all"
+                        className="w-full p-3 bg-[var(--bg-secondary)] rounded-lg border border-[var(--border-light)] text-[13px] focus:outline-none focus:border-[var(--primary)] focus:ring-2 focus:ring-[var(--primary-soft)] transition-all"
                       />
                     </div>
                     <div className="flex gap-3 pt-3">
                       <button
                         onClick={() => { setShowForm(false); resetForm() }}
-                        className="flex-1 p-3 rounded-lg border border-gray-200 text-[13px] font-semibold text-gray-500 hover:bg-gray-50 transition-all"
+                        className="flex-1 p-3 rounded-lg border border-[var(--border-light)] text-[13px] font-semibold text-[var(--text-secondary)] hover:bg-[var(--bg-hover)] transition-all"
                       >
                         取消
                       </button>
                       <button
                         onClick={handleSave}
                         disabled={submitting || !isFormValid}
-                        className="flex-1 p-3 rounded-lg bg-blue-600 text-white text-[13px] font-semibold hover:bg-blue-500 disabled:opacity-40 disabled:cursor-not-allowed transition-all active:opacity-80"
+                        className="flex-1 p-3 rounded-lg bg-[var(--primary)] text-white text-[13px] font-semibold hover:bg-[var(--primary-hover)] disabled:opacity-40 disabled:cursor-not-allowed transition-all active:opacity-80"
                       >
                         {submitting ? (editingStudent ? '保存中...' : '添加中...') : (editingStudent ? '保存' : '确定')}
                       </button>
@@ -314,24 +314,24 @@ export default function StudentSwitcher({ visible, onClose, onSelectStudent }) {
                   className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 z-[10003] bg-white rounded-xl shadow-lg max-w-[280px] w-[85%] overflow-hidden"
                 >
                   <div className="px-5 pt-5 pb-2">
-                    <h3 className="text-[16px] font-bold text-slate-900 text-center">确认删除</h3>
+                    <h3 className="text-[16px] font-bold text-[var(--text)] text-center">确认删除</h3>
                   </div>
                   <div className="px-5 pb-4">
-                    <p className="text-[13px] text-slate-600 leading-relaxed text-center">
-                      确定要删除学生 <span className="font-semibold text-blue-600">{showDeleteConfirm.name}</span> 吗？此操作不可恢复。
+                    <p className="text-[13px] text-[var(--text-secondary)] leading-relaxed text-center">
+                      确定要删除学生 <span className="font-semibold text-[var(--primary)]">{showDeleteConfirm.name}</span> 吗？此操作不可恢复。
                     </p>
                   </div>
-                  <div className="flex border-t border-gray-200">
+                  <div className="flex border-t border-[var(--border-light)]">
                     <button
                       onClick={() => setShowDeleteConfirm(null)}
-                      className="flex-1 py-3.5 text-[14px] font-medium text-slate-600 active:bg-gray-50 transition-colors"
+                      className="flex-1 py-3.5 text-[14px] font-medium text-[var(--text-secondary)] active:bg-[var(--bg-hover)] transition-colors"
                     >
                       取消
                     </button>
-                    <div className="w-px bg-gray-200" />
+                    <div className="w-px bg-[var(--border-light)]" />
                     <button
                       onClick={() => handleDelete(showDeleteConfirm)}
-                      className="flex-1 py-3.5 text-[14px] font-semibold text-red-600 active:bg-red-50 transition-colors"
+                      className="flex-1 py-3.5 text-[14px] font-semibold text-[var(--danger)] active:bg-[var(--danger-soft)] transition-colors"
                     >
                       删除
                     </button>

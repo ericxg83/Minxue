@@ -609,13 +609,13 @@ const getFullTime = (wq) => {
 
 const getSubjectColor = (subject) => {
   const colorMap = {
-    '数学': '#1677FF',
-    '语文': '#FA8C16',
+    '数学': 'var(--wb-primary)',
+    '语文': 'var(--wb-warning)',
     '英语': '#52C41A',
     '物理': '#722ED1',
     '化学': '#13C2C2',
   }
-  return colorMap[subject] || '#86909C'
+  return colorMap[subject] || 'var(--wb-text-tertiary)'
 }
 
 // ===== 统计数据 =====
@@ -905,7 +905,7 @@ const handleRetryGeometry = async () => {
   height: 100%;
   display: flex;
   flex-direction: column;
-  background: #F5F7FA;
+  background: var(--wb-bg);
   font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
 }
 
@@ -919,8 +919,8 @@ const handleRetryGeometry = async () => {
 /* ===== Question Panel (第一栏: ~320px) ===== */
 .question-panel {
   width: 340px;
-  background: #F5F7FA;
-  border-right: 1px solid #E5E6EB;
+  background: var(--wb-bg);
+  border-right: 1px solid var(--wb-border);
   flex-shrink: 0;
   display: flex;
   flex-direction: column;
@@ -937,17 +937,17 @@ const handleRetryGeometry = async () => {
 .question-panel__title {
   font-size: 15px;
   font-weight: 600;
-  color: #1D2129;
+  color: var(--wb-text);
 }
 
 .question-panel__close {
   font-size: 16px;
-  color: #86909C;
+  color: var(--wb-text-tertiary);
   cursor: pointer;
 }
 
 .question-panel__close:hover {
-  color: #1D2129;
+  color: var(--wb-text);
 }
 
 .question-panel__search {
@@ -963,13 +963,13 @@ const handleRetryGeometry = async () => {
 
 .search-filter-icon {
   font-size: 18px;
-  color: #86909C;
+  color: var(--wb-text-tertiary);
   cursor: pointer;
   flex-shrink: 0;
 }
 
 .search-filter-icon:hover {
-  color: #1677FF;
+  color: var(--wb-primary);
 }
 
 .question-panel__filters {
@@ -986,18 +986,18 @@ const handleRetryGeometry = async () => {
   gap: 2px;
   padding: 4px 10px;
   background: #fff;
-  border: 1px solid #E5E6EB;
-  border-radius: 6px;
+  border: 1px solid var(--wb-border);
+  border-radius: var(--wb-radius-xs);
   font-size: 12px;
-  color: #4E5969;
+  color: var(--wb-text-secondary);
   cursor: pointer;
   transition: all 0.2s;
   white-space: nowrap;
 }
 
 .filter-tag:hover {
-  border-color: #1677FF;
-  color: #1677FF;
+  border-color: var(--wb-primary);
+  color: var(--wb-primary);
 }
 
 .filter-tag .el-icon {
@@ -1007,7 +1007,7 @@ const handleRetryGeometry = async () => {
 .question-panel__count {
   padding: 0 16px 8px;
   font-size: 12px;
-  color: #86909C;
+  color: var(--wb-text-tertiary);
 }
 
 .question-panel__list {
@@ -1023,23 +1023,23 @@ const handleRetryGeometry = async () => {
   gap: 10px;
   padding: 12px;
   background: #fff;
-  border-radius: 12px;
-  border: 1px solid #E5E6EB;
+  border-radius: var(--wb-radius-md);
+  border: 1px solid var(--wb-border);
   cursor: pointer;
   transition: all 0.2s;
   margin-bottom: 8px;
-  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.04);
+  box-shadow: var(--wb-shadow-sm);
 }
 
 .question-card:hover {
-  border-color: #B4D6FF;
-  box-shadow: 0 2px 8px rgba(22, 119, 255, 0.08);
+  border-color: var(--wb-primary-soft);
+  box-shadow: 0 2px 8px rgba(59, 130, 246, 0.08);
 }
 
 .question-card--active {
-  border-color: #1677FF;
-  background: #E8F3FF;
-  box-shadow: 0 2px 8px rgba(22, 119, 255, 0.12);
+  border-color: var(--wb-primary);
+  background: var(--wb-primary-mist);
+  box-shadow: 0 2px 8px rgba(59, 130, 246, 0.12);
 }
 
 .question-card__body {
@@ -1054,7 +1054,7 @@ const handleRetryGeometry = async () => {
 .subject-tag {
   display: inline-block;
   padding: 2px 8px;
-  border-radius: 4px;
+  border-radius: var(--wb-radius-xs);
   font-size: 11px;
   color: #fff;
   font-weight: 500;
@@ -1063,7 +1063,7 @@ const handleRetryGeometry = async () => {
 .question-card__title {
   font-size: 13px;
   font-weight: 500;
-  color: #1D2129;
+  color: var(--wb-text);
   line-height: 1.4;
   margin-bottom: 4px;
   display: -webkit-box;
@@ -1081,12 +1081,12 @@ const handleRetryGeometry = async () => {
 
 .question-card__grade {
   font-size: 11px;
-  color: #86909C;
+  color: var(--wb-text-tertiary);
 }
 
 .question-card__tag {
   font-size: 11px;
-  color: #86909C;
+  color: var(--wb-text-tertiary);
 }
 
 .question-card__bottom {
@@ -1100,7 +1100,7 @@ const handleRetryGeometry = async () => {
   align-items: center;
   gap: 2px;
   font-size: 11px;
-  color: #F53F3F;
+  color: var(--wb-danger);
 }
 
 .error-icon {
@@ -1109,16 +1109,16 @@ const handleRetryGeometry = async () => {
 
 .question-card__time {
   font-size: 11px;
-  color: #C9CDD4;
+  color: var(--wb-text-tertiary);
 }
 
 .question-card__thumb {
   width: 60px;
   height: 60px;
   flex-shrink: 0;
-  border-radius: 8px;
+  border-radius: var(--wb-radius-sm);
   overflow: hidden;
-  background: #F2F3F5;
+  background: var(--wb-bg-hover);
   display: flex;
   align-items: center;
   justify-content: center;
@@ -1136,7 +1136,7 @@ const handleRetryGeometry = async () => {
   justify-content: center;
   width: 100%;
   height: 100%;
-  color: #C9CDD4;
+  color: var(--wb-text-tertiary);
 }
 
 .thumb-placeholder .el-icon {
@@ -1163,7 +1163,7 @@ const handleRetryGeometry = async () => {
   align-items: center;
   justify-content: center;
   padding: 10px 16px;
-  border-top: 1px solid #E5E6EB;
+  border-top: 1px solid var(--wb-border);
   background: #fff;
 }
 
@@ -1177,7 +1177,7 @@ const handleRetryGeometry = async () => {
   display: flex;
   flex-direction: column;
   overflow: hidden;
-  background: #F5F7FA;
+  background: var(--wb-bg);
   overflow-y: auto;
 }
 
@@ -1195,7 +1195,7 @@ const handleRetryGeometry = async () => {
   justify-content: space-between;
   padding: 12px 24px;
   background: #fff;
-  border-bottom: 1px solid #E5E6EB;
+  border-bottom: 1px solid var(--wb-border);
   flex-shrink: 0;
   gap: 16px;
 }
@@ -1211,7 +1211,7 @@ const handleRetryGeometry = async () => {
 .detail-subject-tag {
   display: inline-block;
   padding: 3px 10px;
-  border-radius: 4px;
+  border-radius: var(--wb-radius-xs);
   font-size: 12px;
   color: #fff;
   font-weight: 500;
@@ -1221,7 +1221,7 @@ const handleRetryGeometry = async () => {
 .detail-title {
   font-size: 15px;
   font-weight: 600;
-  color: #1D2129;
+  color: var(--wb-text);
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -1232,7 +1232,7 @@ const handleRetryGeometry = async () => {
   align-items: center;
   gap: 4px;
   font-size: 13px;
-  color: #F53F3F;
+  color: var(--wb-danger);
   flex-shrink: 0;
 }
 
@@ -1246,7 +1246,7 @@ const handleRetryGeometry = async () => {
 
 .detail-meta-text {
   font-size: 12px;
-  color: #86909C;
+  color: var(--wb-text-tertiary);
 }
 
 .detail-header__actions {
@@ -1266,9 +1266,9 @@ const handleRetryGeometry = async () => {
 
 .detail-section {
   background: #fff;
-  border-radius: 12px;
-  border: 1px solid #E5E6EB;
-  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.04);
+  border-radius: var(--wb-radius-md);
+  border: 1px solid var(--wb-border);
+  box-shadow: var(--wb-shadow-sm);
   overflow: hidden;
 }
 
@@ -1276,8 +1276,8 @@ const handleRetryGeometry = async () => {
   padding: 12px 16px;
   font-size: 14px;
   font-weight: 500;
-  color: #1D2129;
-  border-bottom: 1px solid #E5E6EB;
+  color: var(--wb-text);
+  border-bottom: 1px solid var(--wb-border);
 }
 
 .detail-section__content {
@@ -1287,7 +1287,7 @@ const handleRetryGeometry = async () => {
 .question-content-box {
   line-height: 1.8;
   font-size: 15px;
-  color: #1D2129;
+  color: var(--wb-text);
 }
 
 .question-text {
@@ -1306,11 +1306,11 @@ const handleRetryGeometry = async () => {
   align-items: center;
   gap: 8px;
   padding: 10px 12px;
-  background: #F9FAFB;
-  border-radius: 8px;
-  border: 1px solid #E5E6EB;
+  background: var(--wb-bg-hover);
+  border-radius: var(--wb-radius-sm);
+  border: 1px solid var(--wb-border);
   font-size: 14px;
-  color: #1D2129;
+  color: var(--wb-text);
 }
 
 .option-item--correct {
@@ -1332,7 +1332,7 @@ const handleRetryGeometry = async () => {
   max-width: 100%;
   max-height: 300px;
   object-fit: contain;
-  border-radius: 8px;
+  border-radius: var(--wb-radius-sm);
 }
 
 .answer-box {
@@ -1341,7 +1341,7 @@ const handleRetryGeometry = async () => {
   color: #22C55E;
   background: #F0FFF4;
   padding: 10px 14px;
-  border-radius: 8px;
+  border-radius: var(--wb-radius-sm);
   border: 1px solid #B2F5EA;
 }
 
@@ -1352,12 +1352,12 @@ const handleRetryGeometry = async () => {
 
 .empty-text {
   font-size: 13px;
-  color: #C9CDD4;
+  color: var(--wb-text-tertiary);
 }
 
 .analysis-box {
   font-size: 14px;
-  color: #4E5969;
+  color: var(--wb-text-secondary);
   line-height: 1.8;
   white-space: pre-wrap;
 }
@@ -1366,16 +1366,16 @@ const handleRetryGeometry = async () => {
 .detail-stats-area {
   margin: 0 24px 16px;
   background: #fff;
-  border-radius: 12px;
-  border: 1px solid #E5E6EB;
-  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.04);
+  border-radius: var(--wb-radius-md);
+  border: 1px solid var(--wb-border);
+  box-shadow: var(--wb-shadow-sm);
   padding: 16px;
 }
 
 .detail-stats__title {
   font-size: 14px;
   font-weight: 500;
-  color: #1D2129;
+  color: var(--wb-text);
   margin-bottom: 12px;
 }
 
@@ -1387,37 +1387,37 @@ const handleRetryGeometry = async () => {
 
 .stat-box {
   padding: 12px;
-  background: #F9FAFB;
-  border-radius: 8px;
+  background: var(--wb-bg-hover);
+  border-radius: var(--wb-radius-sm);
 }
 
 .stat-box__label {
   font-size: 12px;
-  color: #86909C;
+  color: var(--wb-text-tertiary);
   margin-bottom: 6px;
 }
 
 .stat-box__value {
   font-size: 22px;
   font-weight: 700;
-  color: #1D2129;
+  color: var(--wb-text);
   line-height: 1.2;
 }
 
 .stat-box__unit {
   font-size: 13px;
   font-weight: 400;
-  color: #86909C;
+  color: var(--wb-text-tertiary);
 }
 
 .stat-box__change {
   font-size: 11px;
-  color: #86909C;
+  color: var(--wb-text-tertiary);
   margin-top: 4px;
 }
 
 .change-up {
-  color: #F53F3F;
+  color: var(--wb-danger);
   font-weight: 500;
 }
 
@@ -1430,9 +1430,9 @@ const handleRetryGeometry = async () => {
 .recent-students-area {
   margin: 0 24px 16px;
   background: #fff;
-  border-radius: 12px;
-  border: 1px solid #E5E6EB;
-  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.04);
+  border-radius: var(--wb-radius-md);
+  border: 1px solid var(--wb-border);
+  box-shadow: var(--wb-shadow-sm);
   padding: 16px;
 }
 
@@ -1446,12 +1446,12 @@ const handleRetryGeometry = async () => {
 .recent-students__title {
   font-size: 14px;
   font-weight: 500;
-  color: #1D2129;
+  color: var(--wb-text);
 }
 
 .recent-students__more {
   font-size: 12px;
-  color: #1677FF;
+  color: var(--wb-primary);
   cursor: pointer;
   display: flex;
   align-items: center;
@@ -1486,17 +1486,17 @@ const handleRetryGeometry = async () => {
 .recent-student__name {
   font-size: 12px;
   font-weight: 500;
-  color: #1D2129;
+  color: var(--wb-text);
 }
 
 .recent-student__class {
   font-size: 11px;
-  color: #86909C;
+  color: var(--wb-text-tertiary);
 }
 
 .recent-student__time {
   font-size: 10px;
-  color: #C9CDD4;
+  color: var(--wb-text-tertiary);
 }
 
 /* ===== Scrollbar ===== */
@@ -1512,13 +1512,13 @@ const handleRetryGeometry = async () => {
 
 .question-panel__list::-webkit-scrollbar-thumb,
 .detail-workspace::-webkit-scrollbar-thumb {
-  background: #E5E6EB;
-  border-radius: 3px;
+  background: var(--wb-border);
+  border-radius: var(--wb-radius-xs);
 }
 
 .question-panel__list::-webkit-scrollbar-thumb:hover,
 .detail-workspace::-webkit-scrollbar-thumb:hover {
-  background: #C9CDD4;
+  background: var(--wb-text-tertiary);
 }
 
 .recent-students__list::-webkit-scrollbar {
@@ -1530,15 +1530,15 @@ const handleRetryGeometry = async () => {
 }
 
 .recent-students__list::-webkit-scrollbar-thumb {
-  background: #E5E6EB;
-  border-radius: 2px;
+  background: var(--wb-border);
+  border-radius: var(--wb-radius-xs);
 }
 
 /* ===== Unified Card (题干+配图+选项 一体) ===== */
 .unified-card {
   background: #fff;
-  border: 1px solid #e4e7ed;
-  border-radius: 8px;
+  border: 1px solid var(--wb-border);
+  border-radius: var(--wb-radius-sm);
   padding: 14px 16px;
   display: flex;
   flex-direction: column;
@@ -1550,34 +1550,34 @@ const handleRetryGeometry = async () => {
   gap: 6px;
 }
 .unified-section + .unified-section {
-  border-top: 1px dashed #ebeef5;
+  border-top: 1px dashed var(--wb-border);
   padding-top: 12px;
 }
 .unified-label {
   font-size: 11px;
   font-weight: 600;
-  color: #909399;
+  color: var(--wb-text-tertiary);
   letter-spacing: 0.5px;
 }
 .unified-text {
   font-size: 15px;
   line-height: 1.7;
-  color: #303133;
+  color: var(--wb-text);
   white-space: pre-wrap;
   word-break: break-word;
 }
 .unified-image {
   max-width: 100%;
   max-height: 200px;
-  border-radius: 6px;
-  border: 1px solid #ebeef5;
+  border-radius: var(--wb-radius-xs);
+  border: 1px solid var(--wb-border);
   object-fit: contain;
 }
 .tikz-svg-container {
   max-width: 100%;
   max-height: 240px;
-  border-radius: 6px;
-  border: 1px solid #ebeef5;
+  border-radius: var(--wb-radius-xs);
+  border: 1px solid var(--wb-border);
   background: #fff;
   padding: 8px;
   cursor: zoom-in;
@@ -1597,12 +1597,12 @@ const handleRetryGeometry = async () => {
 }
 .unified-option-row.option-correct .unified-opt-letter,
 .unified-option-row.option-correct .unified-opt-text {
-  color: #67c23a;
+  color: var(--wb-success);
   font-weight: 600;
 }
 .unified-opt-letter {
   font-weight: 700;
-  color: #909399;
+  color: var(--wb-text-tertiary);
   min-width: 20px;
   font-size: 14px;
   flex-shrink: 0;
@@ -1610,7 +1610,7 @@ const handleRetryGeometry = async () => {
 }
 .unified-opt-text {
   font-size: 15px;
-  color: #303133;
+  color: var(--wb-text);
   line-height: 1.6;
 }
 .edit-type-subject-row {
@@ -1645,7 +1645,7 @@ const handleRetryGeometry = async () => {
 
 .option-letter {
   font-weight: 700;
-  color: #909399;
+  color: var(--wb-text-tertiary);
   min-width: 20px;
   font-size: 14px;
   flex-shrink: 0;
@@ -1671,8 +1671,8 @@ const handleRetryGeometry = async () => {
 .preview-image {
   max-width: 100%;
   max-height: 200px;
-  border-radius: 6px;
-  border: 1px solid #ebeef5;
+  border-radius: var(--wb-radius-xs);
+  border: 1px solid var(--wb-border);
   object-fit: contain;
 }
 
@@ -1680,7 +1680,7 @@ const handleRetryGeometry = async () => {
   display: flex;
   align-items: center;
   gap: 6px;
-  color: #c0c4cc;
+  color: var(--wb-text-tertiary);
   font-size: 13px;
   padding: 8px 0;
 }
@@ -1698,24 +1698,24 @@ const handleRetryGeometry = async () => {
 
 .tag-option {
   padding: 6px 14px;
-  border: 1px solid #dcdfe6;
-  border-radius: 16px;
+  border: 1px solid var(--wb-border);
+  border-radius: var(--wb-radius-lg);
   font-size: 13px;
-  color: #606266;
+  color: var(--wb-text-secondary);
   cursor: pointer;
   transition: all 0.2s;
   user-select: none;
 }
 
 .tag-option:hover {
-  border-color: #409eff;
-  color: #409eff;
+  border-color: var(--wb-primary);
+  color: var(--wb-primary);
 }
 
 .tag-selected {
-  background: #ecf5ff;
-  border-color: #409eff;
-  color: #409eff;
+  background: var(--wb-primary-mist);
+  border-color: var(--wb-primary);
+  color: var(--wb-primary);
   font-weight: 500;
 }
 </style>

@@ -1,148 +1,17 @@
 import { useState, useEffect, useMemo, useRef, useCallback } from 'react'
 import {
   ArrowLeft, ChevronLeft, ChevronRight, CheckCircle2, XCircle,
-  Save, Loader2, AlertTriangle, Clock, Trash2,
-  ChevronUp, ChevronDown
+  Save, Loader2, Trash2, ChevronUp, ChevronDown
 } from 'lucide-react'
-import { useWrongQuestionStore } from '../../store'
-import { useToast } from '../../components/ToastProvider'
-import {
-  updateQuestion, addWrongQuestions, deleteWrongQuestion,
-  getQuestionsByTask, invalidateCache, recalculateTaskStats,
-  updateTaskStatus
-} from '../../services/apiService'
 import MathText from '../../components/MathText'
-
-const COLORS = {
-  primary: '#3B82F6',
-  success: '#16A34A',
-  danger: '#DC2626',
-  warning: '#D97706',
-  background: '#EEF2FF',
-  card: '#FFFFFF',
-  text: '#1E293B',
-  textSecondary: '#64748B',
-  border: '#E2E8F0'
-}
-
-// ── 面板边界常量 ──
-const PANEL_MIN_HEIGHT = 220
-const PANEL_TOP_MARGIN = 60
-const PANEL_START_OFFSET = typeof window !== 'undefined' ? window.innerHeight - 80 : 600
-
-const isOptionWithLetterPrefix = (opt) => {
-  if (!opt) return false
-  return /^[A-Da-d][.、)\)]\s/.test(String(opt).trim())
-}
-
-const formatOption = (opt, index) => {
-  if (isOptionWithLetterPrefix(opt)) return <MathText content={opt} />
-  return <>{String.fromCharCode(65 + index)}. <MathText content={opt} /></>
-}
-
-const getStatusInfo = (q) => {
-  if (!q) {
-    return {
-      bg: 'var(--bg-secondary)', color: COLORS.textSecondary,
-      text: '未知', icon: AlertTriangle,
-      isGreyed: false, source: 'unknown'
-    }
-  }
-
-  // 1. 已排除
-  if (q.excluded) {
-    return {
-      bg: 'var(--bg-secondary)', color: COLORS.textSecondary,
-      text: '已排除', icon: XCircle,
-      isGreyed: true, source: 'excluded'
-    }
-  }
-
-  const confidence = q.confidence != null ? q.confidence : 0
-
-  // 2. 紫灰：处理中 — AI任务尚未完成（confidence=0，无 student_answer，非 blank）
-  if (confidence === 0 && !q.student_answer && q.answer_source !== 'blank') {
-    return {
-      bg: '#E5E7EB', color: '#9CA3AF',
-      text: '处理中', icon: Clock,
-      isGreyed: true, source: 'processing'
-    }
-  }
-
-  // 3. 橙色：AI异常 — OCR失败 / 未作答 / 数据缺失
-  if (q.answer_source === 'blank' || q.is_correct === null) {
-    return {
-      bg: '#FFF3E0', color: '#F97316',
-      text: q.answer_source === 'blank' ? '未作答' : 'AI异常',
-      icon: AlertTriangle,
-      isGreyed: false, source: 'error'
-    }
-  }
-
-  // 4. AI 高置信度（>= 90%）— 绿色正确 / 红色错误
-  if (confidence >= 0.9) {
-    if (q.is_correct === true) {
-      return {
-        bg: 'var(--success-soft)', color: COLORS.success,
-        text: 'AI正确', icon: CheckCircle2,
-        isGreyed: false, source: 'ai_correct'
-      }
-    }
-    if (q.is_correct === false) {
-      return {
-        bg: 'var(--danger-soft)', color: COLORS.danger,
-        text: 'AI错误', icon: XCircle,
-        isGreyed: false, source: 'ai_wrong'
-      }
-    }
-  }
-
-  // 5. 黄色：AI不确定 — 置信度不足，需人工复核
-  return {
-    bg: 'var(--warning-soft)', color: COLORS.warning,
-    text: '待人工复核', icon: Clock,
-    isGreyed: false, source: 'uncertain'
-  }
-}
-
-// 圆点颜色映射
-const DOT_COLORS = {
-  ai_correct: COLORS.success,
-  ai_wrong: COLORS.danger,
-  uncertain: COLORS.warning,
-  error: '#F97316',
-  processing: '#9CA3AF',
-  excluded: '#9CA3AF',
-  unknown: '#9CA3AF'
-}
-
-// 统计标签组件
-const StatChip = ({ label, count, color, bg }) => (
-  <div style={{
-    display: 'inline-flex', alignItems: 'center', gap: '3px',
-    padding: '2px 8px', borderRadius: '10px',
-    background: bg, color, fontSize: '11px', fontWeight: 600,
-    whiteSpace: 'nowrap'
-  }}>
-    <span style={{
-      display: 'inline-block', width: 7, height: 7, borderRadius: '50%',
-      background: color
-    }} />
-    {label} {count}
-  </div>
-)
+import { COLORS, PANEL_MIN_HEIGHT, PANEL_TOP_MARGIN, PANEL_START_OFFSET } from './constants'
+import { formatOption, getStatusInfo, DOT_COLORS, StatChip } from './status'
+import { useExamReview } from '../../hooks/useExamReview'
 
 // ── 主组件 ──
 export default function ExamReview({ task, onClose, onSave }) {
-  const { wrongQuestions } = useWrongQuestionStore()
-  const Toast = useToast()
-
   // ── 所有 state hooks (必须在最顶部, 无条件分支) ──
-  const [questions, setQuestions] = useState([])
   const [currentIndex, setCurrentIndex] = useState(0)
-  const [edits, setEdits] = useState({})
-  const [saving, setSaving] = useState(false)
-  const [loading, setLoading] = useState(true)
   const [showAnswer, setShowAnswer] = useState(false)
   const [panelH, setPanelH] = useState(PANEL_START_OFFSET)
   const [screenH, setScreenH] = useState(window.innerHeight)
@@ -150,8 +19,6 @@ export default function ExamReview({ task, onClose, onSave }) {
   const [imgNaturalSize, setImgNaturalSize] = useState({ w: 0, h: 0 })
   const [viewportSize, setViewportSize] = useState({ w: 0, h: 0 })
   const [transform, setTransform] = useState({ x: 0, y: 0, scale: 1 })
-  // 复审操作: 'correct' | 'wrong' | 'excluded' | null
-  const [reviewAction, setReviewAction] = useState(null)
 
   // ── 所有 ref hooks ──
   const draggingRef = useRef(false)
@@ -159,47 +26,25 @@ export default function ExamReview({ task, onClose, onSave }) {
   const startPanelHRef = useRef(0)
   const baseContainerRef = useRef(null)
   const imgRef = useRef(null)
+  const currentIndexRef = useRef(0)
+  currentIndexRef.current = currentIndex
 
-  // ── 派生数据 (useMemo) ──
-  const validQuestions = useMemo(() => questions.filter(Boolean), [questions])
-
-  const wrongIdMap = useMemo(() => {
-    const map = {}
-    ;(Array.isArray(wrongQuestions) ? wrongQuestions : []).forEach(wq => {
-      if (wq.question_id) map[wq.question_id] = wq.id
-    })
-    return map
-  }, [wrongQuestions])
+  // ── 复审核心逻辑 (数据加载 / 人工评判 / 保存) ──
+  const {
+    validQuestions,
+    wrongIdMap,
+    loading,
+    edits,
+    saving,
+    reviewAction,
+    stats,
+    handleSetReviewAction,
+    handleAnswerChange,
+    handleAnswerEdit,
+    handleSaveClick
+  } = useExamReview({ task, onSave, currentIndexRef })
 
   const currentQuestion = validQuestions[currentIndex] || null
-
-  // ── 数据获取 ──
-  useEffect(() => {
-    if (!task?.id) return
-    let cancelled = false
-    const fetchQuestions = async () => {
-      try {
-        setLoading(true)
-        const qs = await getQuestionsByTask(task.id, false)
-        if (!cancelled) {
-          setQuestions(qs.map(q => ({
-            ...q,
-            _ai_graded: q.status !== 'correct' || q._ai_graded === true,
-            excluded: q.excluded || false
-          })))
-        }
-      } catch (e) {
-        console.error('获取题目失败:', e)
-        if (!cancelled) {
-          Toast.show({ message: '获取题目失败', type: 'error' })
-        }
-      } finally {
-        if (!cancelled) setLoading(false)
-      }
-    }
-    fetchQuestions()
-    return () => { cancelled = true }
-  }, [task?.id])
 
   // ── 窗口尺寸监听 ──
   useEffect(() => {
@@ -309,121 +154,6 @@ export default function ExamReview({ task, onClose, onSave }) {
     window.addEventListener('mouseup', onMouseUp)
   }, [panelH, screenH])
 
-  // ── 设置复审操作 ──
-  const handleSetReviewAction = useCallback((action) => {
-    if (!currentQuestion?.id) return
-    const qId = currentQuestion.id
-    
-    setReviewAction(prev => prev === action ? null : action)
-    
-    setEdits(prev => {
-      const existing = prev[qId] || {}
-      let newEdit
-      
-      if (action === 'correct') {
-        newEdit = { ...existing, is_correct: true, excluded: false }
-      } else if (action === 'wrong') {
-        newEdit = { ...existing, is_correct: false, excluded: false }
-      } else if (action === 'excluded') {
-        newEdit = { ...existing, excluded: true }
-      }
-      
-      if (!newEdit) {
-        const { is_correct, excluded, ...rest } = existing
-        return { ...prev, [qId]: rest }
-      }
-      
-      return { ...prev, [qId]: newEdit }
-    })
-  }, [currentQuestion, questions])
-
-  // ── 答案变更 ──
-  const handleAnswerChange = useCallback((qId, value) => {
-    const q = questions.find(x => x.id === qId)
-    const wasBlank = q && (q.answer_source === 'blank')
-    setEdits(prev => ({
-      ...prev,
-      [qId]: {
-        ...(prev[qId] || {}),
-        student_answer: value,
-        ...(wasBlank && value ? { answer_source: 'manual' } : {})
-      }
-    }))
-  }, [questions])
-
-  // ── 参考答案变更 ──
-  const handleAnswerEdit = useCallback((qId, value) => {
-    setEdits(prev => ({
-      ...prev,
-      [qId]: { ...(prev[qId] || {}), answer: value }
-    }))
-  }, [])
-
-  // ── 保存 ──
-  const handleSaveClick = useCallback(async () => {
-    const dirtyIds = Object.keys(edits)
-    if (dirtyIds.length === 0) {
-      Toast.show({ message: '没有需要保存的修改', type: 'info' })
-      return
-    }
-    setSaving(true)
-    let successCount = 0
-    for (const qId of dirtyIds) {
-      try {
-        const edit = edits[qId]
-        const q = questions.find(x => x.id === qId)
-        const wrongId = wrongIdMap[qId]
-
-        // 构建更新数据
-        const updateData = {
-          student_answer: edit.student_answer,
-          answer: edit.answer
-        }
-        if (edit.is_correct !== undefined) updateData.is_correct = edit.is_correct
-        if (edit.excluded !== undefined) updateData.excluded = edit.excluded
-        if (edit.status) updateData.status = edit.status
-
-        await updateQuestion(qId, updateData)
-        successCount++
-
-        // 错题本操作
-        if (edit.excluded && wrongId) {
-          await deleteWrongQuestion(wrongId).catch(e => console.warn(`[ExamReview] 删除错题失败 q=${qId.substring(0,8)}:`, e.message))
-        } else if (edit.is_correct === true && wrongId) {
-          await deleteWrongQuestion(wrongId).catch(e => console.warn(`[ExamReview] 删除错题失败 q=${qId.substring(0,8)}:`, e.message))
-        } else if (edit.is_correct === false && !wrongId && !edit.excluded) {
-          await addWrongQuestions(task.student_id, [qId]).catch(e => console.warn(`[ExamReview] 添加错题失败 q=${qId.substring(0,8)}:`, e.message))
-        }
-      } catch (e) {
-        console.error('保存失败:', qId, e)
-      }
-    }
-    setSaving(false)
-    if (successCount > 0) {
-      setQuestions(prev => prev.map(q => {
-        const edit = edits[q.id]
-        if (!edit) return q
-        return { ...q, ...edit, _ai_graded: true }
-      }))
-      setEdits({})
-      setReviewAction(null)
-      if (task?.student_id) {
-        invalidateCache('generated', task.student_id)
-        invalidateCache('questions', task.student_id)
-        invalidateCache('tasks', task.student_id)
-      }
-      if (task?.id) {
-        await recalculateTaskStats(task.id).catch(e => console.error('刷新统计数据失败:', e))
-        // 复核完成后标记任务为已复核
-        await updateTaskStatus(task.id, 'reviewed').catch(e => console.error('更新任务复核状态失败:', e))
-      }
-      Toast.show({ message: `已保存 ${successCount} 题`, type: 'success' })
-      if (onSave) onSave()
-    } else {
-      Toast.show({ message: '保存失败', type: 'error' })
-    }
-  }, [edits, wrongIdMap, questions, task, Toast, onSave])
-
   // ── 计算派生状态 ──
   const correctness = useMemo(() => {
     if (!currentQuestion) return null
@@ -452,16 +182,6 @@ export default function ExamReview({ task, onClose, onSave }) {
   const statusInfo = useMemo(() => getStatusInfo(currentQuestion), [currentQuestion])
   const geoImageUrl = currentQuestion?.geometry_image_url || currentQuestion?.enhanced_geometry_image
 
-  // ── 统计各状态数量 ──
-  const stats = useMemo(() => {
-    const counts = { uncertain: 0, error: 0, ai_correct: 0, ai_wrong: 0, processing: 0, excluded: 0 }
-    validQuestions.forEach(q => {
-      const info = getStatusInfo(q)
-      if (counts[info.source] !== undefined) counts[info.source]++
-    })
-    return counts
-  }, [validQuestions])
-
   // ── 条件渲染 (所有 hooks 之后) ──
   if (loading) {
     return (
@@ -481,12 +201,12 @@ export default function ExamReview({ task, onClose, onSave }) {
         display: 'flex', alignItems: 'center', justifyContent: 'center',
         zIndex: 10000, flexDirection: 'column', gap: '16px'
       }}>
-        <div style={{ fontSize: '16px', color: COLORS.textSecondary }}>
+        <div style={{ fontSize: 'var(--fs-16)', color: COLORS.textSecondary }}>
           {validQuestions.length === 0 ? '暂无题目数据' : '题目数据加载异常'}
         </div>
         <button onClick={onClose} style={{
           padding: '12px 24px', background: COLORS.primary, color: '#fff',
-          borderRadius: '12px', fontSize: '15px', fontWeight: 600,
+          borderRadius: 'var(--radius-12)', fontSize: 'var(--fs-15)', fontWeight: 600,
           border: 'none', cursor: 'pointer'
         }}>返回</button>
       </div>
@@ -557,7 +277,7 @@ export default function ExamReview({ task, onClose, onSave }) {
                   width: px.width,
                   height: px.height,
                   border: `2.5px solid ${isCurrent ? 'var(--primary)' : 'rgba(255,255,255,0.35)'}`,
-                  borderRadius: '8px',
+                  borderRadius: 'var(--radius-8)',
                   pointerEvents: 'none',
                   zIndex: 2,
                   transition: 'border-color 0.3s, background 0.3s',
@@ -571,7 +291,7 @@ export default function ExamReview({ task, onClose, onSave }) {
                   transform: 'translate(-50%, -50%)',
                   width: isCurrent ? 36 : 28,
                   height: isCurrent ? 36 : 28,
-                  borderRadius: '50%',
+                  borderRadius: 'var(--radius-full)',
                   background: (() => {
                     if (isCurrent) return COLORS.primary
                     const s = getStatusInfo(q)
@@ -605,7 +325,7 @@ export default function ExamReview({ task, onClose, onSave }) {
           zIndex: 10,
           touchAction: 'none',
           transition: 'height 0.3s cubic-bezier(0.25, 0.46, 0.45, 0.94)',
-          borderRadius: '20px 20px 0 0',
+          borderRadius: 'var(--radius-lg) var(--radius-lg) 0 0',
           overflow: 'hidden',
           boxShadow: '0 -4px 24px rgba(0,0,0,0.15)',
           display: 'flex',
@@ -635,7 +355,7 @@ export default function ExamReview({ task, onClose, onSave }) {
             borderBottom: `1px solid ${COLORS.border}`
           }}
         >
-          <div style={{ width: 40, height: 4, borderRadius: 2, background: 'var(--border)' }} />
+          <div style={{ width: 40, height: 4, borderRadius: 'var(--radius-2)', background: 'var(--border)' }} />
         </div>
 
         {/* ── 顶部统计 ── */}
@@ -646,10 +366,10 @@ export default function ExamReview({ task, onClose, onSave }) {
           borderBottom: `1px solid ${COLORS.border}`,
           flexShrink: 0
         }}>
-          <StatChip label="待人工复核" count={stats.uncertain} color={COLORS.warning} bg="#FEF3C7" />
-          <StatChip label="AI异常" count={stats.error} color="#F97316" bg="#FFF3E0" />
-          <StatChip label="AI正确" count={stats.ai_correct} color={COLORS.success} bg="#DCFCE7" />
-          <StatChip label="AI错误" count={stats.ai_wrong} color={COLORS.danger} bg="#FEE2E2" />
+          <StatChip label="待人工复核" count={stats.uncertain} color={COLORS.warning} bg="var(--warning-soft)" />
+          <StatChip label="AI异常" count={stats.error} color="var(--warning)" bg="var(--warning-soft)" />
+          <StatChip label="AI正确" count={stats.ai_correct} color={COLORS.success} bg="var(--success-soft)" />
+          <StatChip label="AI错误" count={stats.ai_wrong} color={COLORS.danger} bg="var(--danger-soft)" />
         </div>
 
         {/* ── 题号导航条 ── */}
@@ -670,10 +390,10 @@ export default function ExamReview({ task, onClose, onSave }) {
                 onClick={() => jumpToQuestion(i)}
                 title={info.text}
                 style={{
-                  minWidth: '32px', height: '32px', borderRadius: '16px',
+                  minWidth: '32px', height: '32px', borderRadius: 'var(--radius-16)',
                   background: isCurrent ? COLORS.primary : dotColor,
                   color: '#fff', border: 'none',
-                  fontSize: '13px', fontWeight: 600, cursor: 'pointer',
+                  fontSize: 'var(--fs-13)', fontWeight: 600, cursor: 'pointer',
                   flexShrink: 0, display: 'flex', alignItems: 'center', justifyContent: 'center',
                   transition: 'transform 0.15s',
                   transform: isCurrent ? 'scale(1.15)' : 'scale(1)',
@@ -698,32 +418,32 @@ export default function ExamReview({ task, onClose, onSave }) {
             marginBottom: '6px', flexWrap: 'wrap', gap: '4px'
           }}>
             <div>
-              <span style={{ fontSize: '14px', fontWeight: 600, color: COLORS.primary, marginRight: '8px' }}>
+              <span style={{ fontSize: 'var(--fs-14)', fontWeight: 600, color: COLORS.primary, marginRight: '8px' }}>
                 第 {currentIndex + 1} 题
               </span>
               {currentQuestion?.question_number && (
                 <span style={{
-                  fontSize: '11px', color: '#fff', background: COLORS.primary,
-                  padding: '1px 6px', borderRadius: '4px', marginRight: '6px'
+                  fontSize: 'var(--fs-11)', color: '#fff', background: COLORS.primary,
+                  padding: '1px 6px', borderRadius: 'var(--radius-4)', marginRight: '6px'
                 }}>
                   原卷题号 {currentQuestion.question_number}
                 </span>
               )}
-              <span style={{ fontSize: '12px', color: COLORS.textSecondary }}>
+              <span style={{ fontSize: 'var(--fs-12)', color: COLORS.textSecondary }}>
                 {currentQuestion?.question_type === 'choice' ? '选择题' :
                  currentQuestion?.question_type === 'fill' ? '填空题' :
                  currentQuestion?.question_type === 'judge' ? '判断题' : '解答题'}
               </span>
             </div>
             <div style={{
-              fontSize: '12px', padding: '3px 10px', borderRadius: '10px',
+              fontSize: 'var(--fs-12)', padding: '3px 10px', borderRadius: 'var(--radius-sm)',
               display: 'flex', alignItems: 'center', gap: '4px', flexShrink: 0,
               background: statusInfo.bg, color: statusInfo.color
             }}>
               <statusInfo.icon size={12} />
               {statusInfo.text}
               {currentQuestion && wrongIdMap[currentQuestion.id] && statusInfo.source !== 'excluded' && (
-                <span style={{ fontSize: '10px', opacity: 0.8 }}>(已加入错题本)</span>
+                <span style={{ fontSize: 'var(--fs-10)', opacity: 0.8 }}>(已加入错题本)</span>
               )}
             </div>
           </div>
@@ -741,8 +461,8 @@ export default function ExamReview({ task, onClose, onSave }) {
             <div style={{ display: 'flex', flexDirection: 'column', gap: '4px', marginBottom: '8px' }}>
               {currentQuestion.options.map((opt, i) => (
                 <div key={i} style={{
-                  fontSize: '13px', color: COLORS.text,
-                  padding: '4px 8px', background: COLORS.background, borderRadius: '6px'
+                  fontSize: 'var(--fs-13)', color: COLORS.text,
+                  padding: '4px 8px', background: COLORS.background, borderRadius: 'var(--radius-6)'
                 }}>
                   {formatOption(opt, i)}
                 </div>
@@ -754,14 +474,14 @@ export default function ExamReview({ task, onClose, onSave }) {
           {geoImageUrl && (
             <div style={{
               marginBottom: '8px', background: '#FAFAFA',
-              borderRadius: '8px', padding: '8px', border: '1px solid #E5E7EB'
+              borderRadius: 'var(--radius-8)', padding: '8px', border: '1px solid var(--border-light)'
             }}>
               <img
                 src={geoImageUrl}
                 alt="几何配图"
                 style={{
                   width: '100%', maxHeight: '20vh',
-                  objectFit: 'contain', borderRadius: '6px', display: 'block'
+                  objectFit: 'contain', borderRadius: 'var(--radius-6)', display: 'block'
                 }}
               />
             </div>
@@ -769,36 +489,36 @@ export default function ExamReview({ task, onClose, onSave }) {
 
           {/* 答案对比区 */}
           <div style={{
-            background: COLORS.background, borderRadius: '8px', padding: '8px 10px',
+            background: COLORS.background, borderRadius: 'var(--radius-8)', padding: '8px 10px',
             marginBottom: '8px'
           }}>
             <div style={{ display: 'flex', gap: '8px', marginBottom: '8px' }}>
               <div style={{ flex: 1 }}>
-                <div style={{ fontSize: '11px', fontWeight: 600, color: COLORS.textSecondary, marginBottom: '2px' }}>学生答案</div>
+                <div style={{ fontSize: 'var(--fs-11)', fontWeight: 600, color: COLORS.textSecondary, marginBottom: '2px' }}>学生答案</div>
                 <input
                   type="text"
                   value={currentStudentAnswer || ''}
                   onChange={(e) => handleAnswerChange(currentQuestion.id, e.target.value)}
                   placeholder={answerStatus === 'not_answered' ? '未作答' : '输入...'}
                   style={{
-                    width: '100%', padding: '6px 8px', borderRadius: '5px',
+                    width: '100%', padding: '6px 8px', borderRadius: 'var(--radius-5)',
                     border: `1px solid ${answerStatus === 'not_answered' ? COLORS.warning : COLORS.border}`,
-                    fontSize: '13px', color: COLORS.text, outline: 'none',
+                    fontSize: 'var(--fs-13)', color: COLORS.text, outline: 'none',
                     boxSizing: 'border-box', background: COLORS.card
                   }}
                 />
               </div>
               <div style={{ flex: 1 }}>
-                <div style={{ fontSize: '11px', fontWeight: 600, color: COLORS.textSecondary, marginBottom: '2px' }}>参考答案</div>
+                <div style={{ fontSize: 'var(--fs-11)', fontWeight: 600, color: COLORS.textSecondary, marginBottom: '2px' }}>参考答案</div>
                 <input
                   type="text"
                   value={edits[currentQuestion?.id]?.answer ?? currentQuestion?.answer ?? ''}
                   onChange={(e) => handleAnswerEdit(currentQuestion?.id, e.target.value)}
                   placeholder="输入..."
                   style={{
-                    width: '100%', padding: '6px 8px', borderRadius: '5px',
+                    width: '100%', padding: '6px 8px', borderRadius: 'var(--radius-5)',
                     border: `1px solid ${COLORS.border}`,
-                    fontSize: '13px', color: COLORS.text,
+                    fontSize: 'var(--fs-13)', color: COLORS.text,
                     outline: 'none', boxSizing: 'border-box', background: COLORS.card
                   }}
                 />
@@ -810,12 +530,12 @@ export default function ExamReview({ task, onClose, onSave }) {
               <button
                 onClick={() => handleSetReviewAction('correct')}
                 style={{
-                  flex: 1, padding: '8px 0', borderRadius: '8px',
-                  border: (reviewAction === 'correct') ? '2px solid #16A34A' : '1px solid #E5E7EB',
-                  cursor: 'pointer', fontSize: '13px', fontWeight: 600,
+                  flex: 1, padding: '8px 0', borderRadius: 'var(--radius-8)',
+                  border: (reviewAction === 'correct') ? '2px solid var(--success)' : '1px solid var(--border-light)',
+                  cursor: 'pointer', fontSize: 'var(--fs-13)', fontWeight: 600,
                   display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '4px',
-                  background: (reviewAction === 'correct') ? '#DCFCE7' : COLORS.card,
-                  color: (reviewAction === 'correct') ? 'var(--success)' : '#15803D',
+                  background: (reviewAction === 'correct') ? 'var(--success-soft)' : COLORS.card,
+                  color: (reviewAction === 'correct') ? 'var(--success)' : 'var(--success)',
                 }}
               >
                 <CheckCircle2 size={14} /> 正确
@@ -823,12 +543,12 @@ export default function ExamReview({ task, onClose, onSave }) {
               <button
                 onClick={() => handleSetReviewAction('wrong')}
                 style={{
-                  flex: 1, padding: '8px 0', borderRadius: '8px',
-                  border: (reviewAction === 'wrong') ? '2px solid #EF4444' : '1px solid #E5E7EB',
-                  cursor: 'pointer', fontSize: '13px', fontWeight: 500,
+                  flex: 1, padding: '8px 0', borderRadius: 'var(--radius-8)',
+                  border: (reviewAction === 'wrong') ? '2px solid var(--danger)' : '1px solid var(--border-light)',
+                  cursor: 'pointer', fontSize: 'var(--fs-13)', fontWeight: 500,
                   display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '4px',
                   background: (reviewAction === 'wrong') ? 'var(--danger-soft)' : COLORS.card,
-                  color: (reviewAction === 'wrong') ? 'var(--danger)' : 'var(--text-tertiary)',
+                  color: (reviewAction === 'wrong') ? 'var(--danger)' : 'var(--text-secondary)',
                 }}
               >
                 <XCircle size={14} /> 错误
@@ -839,12 +559,12 @@ export default function ExamReview({ task, onClose, onSave }) {
               <button
                 onClick={() => handleSetReviewAction('excluded')}
                 style={{
-                  width: '100%', padding: '8px 0', borderRadius: '8px',
-                  border: (reviewAction === 'excluded') ? '2px solid #EF4444' : '1px solid #FEE2E2',
-                  cursor: 'pointer', fontSize: '13px', fontWeight: 600,
+                  width: '100%', padding: '8px 0', borderRadius: 'var(--radius-8)',
+                  border: (reviewAction === 'excluded') ? '2px solid var(--danger)' : '1px solid var(--danger-soft)',
+                  cursor: 'pointer', fontSize: 'var(--fs-13)', fontWeight: 600,
                   display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '6px',
                   background: (reviewAction === 'excluded') ? '#FFF1F0' : '#FFF8F5',
-                  color: (reviewAction === 'excluded') ? 'var(--danger)' : '#DC2626',
+                  color: (reviewAction === 'excluded') ? 'var(--danger)' : 'var(--danger)',
                 }}
               >
                 <Trash2 size={14} /> 排除本题
@@ -859,7 +579,7 @@ export default function ExamReview({ task, onClose, onSave }) {
               style={{
                 background: 'none', border: 'none', cursor: 'pointer',
                 display: 'flex', alignItems: 'center', gap: '4px',
-                fontSize: '12px', color: COLORS.textSecondary, padding: 0, width: '100%',
+                fontSize: 'var(--fs-12)', color: COLORS.textSecondary, padding: 0, width: '100%',
                 justifyContent: 'flex-start'
               }}
             >
@@ -870,8 +590,8 @@ export default function ExamReview({ task, onClose, onSave }) {
             </button>
             {showAnswer && (
               <div style={{ marginTop: '6px' }}>
-                <div style={{ padding: '8px 10px', background: `${COLORS.success}08`, borderRadius: '6px' }}>
-                  <div style={{ fontSize: '13px', color: COLORS.text, lineHeight: '1.6' }}>
+                <div style={{ padding: '8px 10px', background: `${COLORS.success}08`, borderRadius: 'var(--radius-6)' }}>
+                  <div style={{ fontSize: 'var(--fs-13)', color: COLORS.text, lineHeight: '1.6' }}>
                     <MathText content={currentQuestion?.analysis || '暂无解析'} />
                   </div>
                 </div>
@@ -892,10 +612,10 @@ export default function ExamReview({ task, onClose, onSave }) {
             onClick={() => jumpToQuestion(currentIndex - 1)}
             disabled={currentIndex === 0}
             style={{
-              flex: 1, padding: '8px', borderRadius: '8px',
+              flex: 1, padding: '8px', borderRadius: 'var(--radius-8)',
               border: `1px solid ${COLORS.border}`,
               background: COLORS.card, cursor: currentIndex === 0 ? 'not-allowed' : 'pointer',
-              fontSize: '13px', color: currentIndex === 0 ? '#CCC' : COLORS.textSecondary,
+              fontSize: 'var(--fs-13)', color: currentIndex === 0 ? '#CCC' : COLORS.textSecondary,
               display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '4px'
             }}
           >
@@ -905,10 +625,10 @@ export default function ExamReview({ task, onClose, onSave }) {
             onClick={handleSaveClick}
             disabled={saving || Object.keys(edits).length === 0}
             style={{
-              padding: '8px 16px', borderRadius: '8px', border: 'none',
+              padding: '8px 16px', borderRadius: 'var(--radius-8)', border: 'none',
               background: (saving || Object.keys(edits).length === 0) ? 'var(--primary-soft)' : COLORS.primary,
               color: '#fff', cursor: (saving || Object.keys(edits).length === 0) ? 'not-allowed' : 'pointer',
-              fontSize: '13px', fontWeight: 600, display: 'flex', alignItems: 'center', gap: '4px',
+              fontSize: 'var(--fs-13)', fontWeight: 600, display: 'flex', alignItems: 'center', gap: '4px',
               flexShrink: 0
             }}
           >
@@ -919,11 +639,11 @@ export default function ExamReview({ task, onClose, onSave }) {
             onClick={() => jumpToQuestion(currentIndex + 1)}
             disabled={currentIndex >= validQuestions.length - 1}
             style={{
-              flex: 1, padding: '8px', borderRadius: '8px',
+              flex: 1, padding: '8px', borderRadius: 'var(--radius-8)',
               border: `1px solid ${COLORS.border}`,
               background: COLORS.card,
               cursor: currentIndex >= validQuestions.length - 1 ? 'not-allowed' : 'pointer',
-              fontSize: '13px', color: currentIndex >= validQuestions.length - 1 ? '#CCC' : COLORS.textSecondary,
+              fontSize: 'var(--fs-13)', color: currentIndex >= validQuestions.length - 1 ? '#CCC' : COLORS.textSecondary,
               display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '4px'
             }}
           >
@@ -937,7 +657,7 @@ export default function ExamReview({ task, onClose, onSave }) {
         onClick={onClose}
         style={{
           position: 'absolute', top: 12, left: 12, zIndex: 15,
-          background: 'rgba(0,0,0,0.5)', border: 'none', borderRadius: '50%',
+          background: 'rgba(0,0,0,0.5)', border: 'none', borderRadius: 'var(--radius-full)',
           width: 36, height: 36,
           display: 'flex', alignItems: 'center', justifyContent: 'center',
           cursor: 'pointer', color: '#fff', backdropFilter: 'blur(4px)'

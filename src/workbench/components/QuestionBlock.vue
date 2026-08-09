@@ -38,7 +38,7 @@ defineEmits(['edit'])
 .question-block {
   margin-bottom: 12px;
   padding: 8px;
-  border-radius: 4px;
+  border-radius: var(--wb-radius-xs);
   transition: background 0.2s;
 }
 
@@ -77,7 +77,7 @@ defineEmits(['edit'])
   color: #374151;
   cursor: pointer;
   padding: 2px 4px;
-  border-radius: 2px;
+  border-radius: var(--wb-radius-xs);
 }
 
 .option-item:hover {
@@ -93,7 +93,7 @@ defineEmits(['edit'])
 .editable-text {
   cursor: pointer;
   padding: 2px 4px;
-  border-radius: 4px;
+  border-radius: var(--wb-radius-xs);
   transition: background 0.2s;
 }
 

@@ -42,9 +42,9 @@ const COLORS = {
   warning: '#D97706',
   background: '#EEF2FF',
   card: '#FFFFFF',
-  text: '#1E293B',
-  textSecondary: '#64748B',
-  border: '#E2E8F0'
+  text: '#1C1C1E',
+  textSecondary: '#6C6C70',
+  border: '#E5E5EA'
 }
 
 export default function Grading({ paperId, studentId, questionIds, onClose, onComplete, generatedExamId }) {
@@ -220,10 +220,10 @@ export default function Grading({ paperId, studentId, questionIds, onClose, onCo
         zIndex: 10000, flexDirection: 'column', gap: '16px'
       }}>
         <QrCode size={48} style={{ color: COLORS.danger }} />
-        <div style={{ fontSize: '16px', color: COLORS.danger, textAlign: 'center', padding: '0 20px' }}>{error}</div>
+        <div style={{ fontSize: 'var(--fs-16)', color: COLORS.danger, textAlign: 'center', padding: '0 20px' }}>{error}</div>
         <button onClick={onClose} style={{
           padding: '12px 24px', background: COLORS.primary, color: '#fff',
-          borderRadius: '12px', fontSize: '15px', fontWeight: 600, border: 'none', cursor: 'pointer'
+          borderRadius: 'var(--radius-12)', fontSize: 'var(--fs-15)', fontWeight: 600, border: 'none', cursor: 'pointer'
         }}>返回</button>
       </div>
     )
@@ -238,10 +238,10 @@ export default function Grading({ paperId, studentId, questionIds, onClose, onCo
         zIndex: 10000, flexDirection: 'column', gap: '16px'
       }}>
         <QrCode size={48} style={{ color: COLORS.textSecondary }} />
-        <div style={{ fontSize: '16px', color: COLORS.textSecondary }}>暂无题目，请重新扫码</div>
+        <div style={{ fontSize: 'var(--fs-16)', color: COLORS.textSecondary }}>暂无题目，请重新扫码</div>
         <button onClick={onClose} style={{
           padding: '12px 24px', background: COLORS.primary, color: '#fff',
-          borderRadius: '12px', fontSize: '15px', fontWeight: 600, border: 'none', cursor: 'pointer'
+          borderRadius: 'var(--radius-12)', fontSize: 'var(--fs-15)', fontWeight: 600, border: 'none', cursor: 'pointer'
         }}>返回</button>
       </div>
     )
@@ -269,67 +269,67 @@ export default function Grading({ paperId, studentId, questionIds, onClose, onCo
           {/* Header Icon */}
           <div style={{ textAlign: 'center', marginBottom: '24px' }}>
             <div style={{
-              width: '80px', height: '80px', borderRadius: '50%',
+              width: '80px', height: '80px', borderRadius: 'var(--radius-full)',
               background: `linear-gradient(135deg, ${COLORS.success}, ${COLORS.success}dd)`,
               display: 'flex', alignItems: 'center', justifyContent: 'center', margin: '0 auto 12px'
             }}>
               <CircleCheckBig size={40} color="#fff" strokeWidth={2.5} />
             </div>
-            <div style={{ fontSize: '18px', fontWeight: 700, color: COLORS.text, marginBottom: '4px' }}>
+            <div style={{ fontSize: 'var(--fs-18)', fontWeight: 700, color: COLORS.text, marginBottom: '4px' }}>
               批改完成！
             </div>
-            <div style={{ fontSize: '13px', color: COLORS.textSecondary }}>
+            <div style={{ fontSize: 'var(--fs-13)', color: COLORS.textSecondary }}>
               本次共批改 {total} 道题
             </div>
           </div>
 
           {/* Overview Stats */}
-          <div className="card" style={{ padding: '16px', marginBottom: '12px', borderRadius: '12px', border: `1px solid ${COLORS.border}` }}>
+          <div className="card" style={{ padding: '16px', marginBottom: '12px', borderRadius: 'var(--radius-12)', border: `1px solid ${COLORS.border}` }}>
             <div style={{ display: 'flex', justifyContent: 'space-around', marginBottom: '16px' }}>
               <div style={{ textAlign: 'center' }}>
-                <div style={{ fontSize: '24px', fontWeight: 700, color: COLORS.success }}>{masteredCount}</div>
-                <div style={{ fontSize: '12px', color: COLORS.textSecondary, marginTop: '2px' }}>已掌握</div>
+                <div style={{ fontSize: 'var(--fs-24)', fontWeight: 700, color: COLORS.success }}>{masteredCount}</div>
+                <div style={{ fontSize: 'var(--fs-12)', color: COLORS.textSecondary, marginTop: '2px' }}>已掌握</div>
               </div>
               <div style={{ textAlign: 'center' }}>
-                <div style={{ fontSize: '24px', fontWeight: 700, color: COLORS.danger }}>{notMasteredCount}</div>
-                <div style={{ fontSize: '12px', color: COLORS.textSecondary, marginTop: '2px' }}>待复习</div>
+                <div style={{ fontSize: 'var(--fs-24)', fontWeight: 700, color: COLORS.danger }}>{notMasteredCount}</div>
+                <div style={{ fontSize: 'var(--fs-12)', color: COLORS.textSecondary, marginTop: '2px' }}>待复习</div>
               </div>
               <div style={{ textAlign: 'center' }}>
-                <div style={{ fontSize: '24px', fontWeight: 700, color: COLORS.primary }}>{total}</div>
-                <div style={{ fontSize: '12px', color: COLORS.textSecondary, marginTop: '2px' }}>总计</div>
+                <div style={{ fontSize: 'var(--fs-24)', fontWeight: 700, color: COLORS.primary }}>{total}</div>
+                <div style={{ fontSize: 'var(--fs-12)', color: COLORS.textSecondary, marginTop: '2px' }}>总计</div>
               </div>
             </div>
           </div>
 
           {/* Detailed Mastery Progression */}
-          <div className="card" style={{ padding: '16px', marginBottom: '16px', borderRadius: '12px', border: `1px solid ${COLORS.border}` }}>
-            <div style={{ fontSize: '14px', fontWeight: 600, color: COLORS.text, marginBottom: '12px' }}>
+          <div className="card" style={{ padding: '16px', marginBottom: '16px', borderRadius: 'var(--radius-12)', border: `1px solid ${COLORS.border}` }}>
+            <div style={{ fontSize: 'var(--fs-14)', fontWeight: 600, color: COLORS.text, marginBottom: '12px' }}>
               掌握度进阶详情
             </div>
             <div style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
               <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '6px 0' }}>
                 <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-                  <span style={{ fontSize: '11px', padding: '2px 8px', borderRadius: '10px', background: '#FFEBEE', color: COLORS.danger }}>不懂</span>
-                  <span style={{ fontSize: '13px', color: COLORS.textSecondary }}>→ 略懂</span>
+                  <span style={{ fontSize: 'var(--fs-11)', padding: '2px 8px', borderRadius: 'var(--radius-sm)', background: '#FFEBEE', color: COLORS.danger }}>不懂</span>
+                  <span style={{ fontSize: 'var(--fs-13)', color: COLORS.textSecondary }}>→ 略懂</span>
                 </div>
-                <span style={{ fontSize: '15px', fontWeight: 700, color: COLORS.primary }}>{stats.upgradedToReview1}</span>
+                <span style={{ fontSize: 'var(--fs-15)', fontWeight: 700, color: COLORS.primary }}>{stats.upgradedToReview1}</span>
               </div>
               <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '6px 0' }}>
                 <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-                  <span style={{ fontSize: '11px', padding: '2px 8px', borderRadius: '10px', background: '#FFF8E1', color: COLORS.warning }}>略懂</span>
-                  <span style={{ fontSize: '13px', color: COLORS.textSecondary }}>→ 完全懂</span>
+                  <span style={{ fontSize: 'var(--fs-11)', padding: '2px 8px', borderRadius: 'var(--radius-sm)', background: '#FFF8E1', color: COLORS.warning }}>略懂</span>
+                  <span style={{ fontSize: 'var(--fs-13)', color: COLORS.textSecondary }}>→ 完全懂</span>
                 </div>
-                <span style={{ fontSize: '15px', fontWeight: 700, color: COLORS.primary }}>{stats.upgradedToMastered}</span>
+                <span style={{ fontSize: 'var(--fs-15)', fontWeight: 700, color: COLORS.primary }}>{stats.upgradedToMastered}</span>
               </div>
               <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '6px 0', borderTop: `1px solid ${COLORS.border}`, paddingTop: '10px' }}>
-                <span style={{ fontSize: '13px', color: COLORS.textSecondary }}>仍未掌握（重置为不懂）</span>
-                <span style={{ fontSize: '15px', fontWeight: 700, color: COLORS.danger }}>{stats.reset}</span>
+                <span style={{ fontSize: 'var(--fs-13)', color: COLORS.textSecondary }}>仍未掌握（重置为不懂）</span>
+                <span style={{ fontSize: 'var(--fs-15)', fontWeight: 700, color: COLORS.danger }}>{stats.reset}</span>
               </div>
             </div>
           </div>
 
           {/* Student Info */}
-          <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '16px', fontSize: '13px', padding: '0 4px' }}>
+          <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '16px', fontSize: 'var(--fs-13)', padding: '0 4px' }}>
             <span style={{ color: COLORS.textSecondary }}>掌握率</span>
             <span style={{ color: COLORS.success, fontWeight: 600 }}>
               {total > 0 ? Math.round(masteredCount / total * 100) : 0}%
@@ -338,7 +338,7 @@ export default function Grading({ paperId, studentId, questionIds, onClose, onCo
 
           <button onClick={handleComplete} style={{
             width: '100%', padding: '12px', background: COLORS.primary, color: '#fff',
-            borderRadius: '8px', fontSize: '14px', fontWeight: 600, border: 'none', cursor: 'pointer',
+            borderRadius: 'var(--radius-8)', fontSize: 'var(--fs-14)', fontWeight: 600, border: 'none', cursor: 'pointer',
             display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '8px',
             opacity: isSaving ? 0.6 : 1
           }} disabled={isSaving}>
@@ -363,11 +363,11 @@ export default function Grading({ paperId, studentId, questionIds, onClose, onCo
         borderBottom: `1px solid ${COLORS.border}`, flexShrink: 0
       }}>
         <button onClick={onClose} style={{
-          fontSize: '15px', color: COLORS.primary, background: 'none',
+          fontSize: 'var(--fs-15)', color: COLORS.primary, background: 'none',
           border: 'none', cursor: 'pointer', fontWeight: 500
         }}>退出</button>
-        <h2 style={{ margin: 0, fontSize: '17px', fontWeight: 600, color: COLORS.text }}>批改</h2>
-        <div style={{ fontSize: '15px', color: COLORS.textSecondary }}>
+        <h2 style={{ margin: 0, fontSize: 'var(--fs-17)', fontWeight: 600, color: COLORS.text }}>批改</h2>
+        <div style={{ fontSize: 'var(--fs-15)', color: COLORS.textSecondary }}>
           {currentQuestionIndex + 1}/{questions.length}
         </div>
       </div>
@@ -378,16 +378,16 @@ export default function Grading({ paperId, studentId, questionIds, onClose, onCo
         borderBottom: `1px solid ${COLORS.border}`, flexShrink: 0
       }}>
         <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-          <span style={{ fontSize: '12px', color: COLORS.textSecondary, whiteSpace: 'nowrap' }}>掌握度：</span>
+          <span style={{ fontSize: 'var(--fs-12)', color: COLORS.textSecondary, whiteSpace: 'nowrap' }}>掌握度：</span>
           <div style={{ display: 'flex', alignItems: 'center', gap: '4px' }}>
             {LIFECYCLE_ORDER.slice(0, 3).map((step, idx) => {
               const currentLifecycle = currentResult?.newLifecycle || currentQuestion?.lifecycle_status || 'new'
               const isActive = LIFECYCLE_ORDER.indexOf(currentLifecycle) >= LIFECYCLE_ORDER.indexOf(step)
               return (
                 <span key={step} style={{
-                  fontSize: '12px', padding: '2px 8px', borderRadius: '4px',
+                  fontSize: 'var(--fs-12)', padding: '2px 8px', borderRadius: 'var(--radius-4)',
                   background: isActive ? 'var(--primary-soft)' : 'var(--bg)',
-                  color: isActive ? COLORS.primary : 'var(--text-tertiary)',
+                  color: isActive ? COLORS.primary : 'var(--text-secondary)',
                   fontWeight: isActive ? 500 : 400,
                   transition: 'all 0.3s'
                 }}>
@@ -398,7 +398,7 @@ export default function Grading({ paperId, studentId, questionIds, onClose, onCo
           </div>
           {currentQuestion?.error_count > 0 && (
             <span style={{
-              fontSize: '11px', padding: '1px 8px', borderRadius: '10px',
+              fontSize: 'var(--fs-11)', padding: '1px 8px', borderRadius: 'var(--radius-sm)',
               background: '#FFEBEE', color: COLORS.danger, marginLeft: 'auto'
             }}>
               错 {currentQuestion.error_count} 次
@@ -413,10 +413,10 @@ export default function Grading({ paperId, studentId, questionIds, onClose, onCo
         borderBottom: `1px solid ${COLORS.border}`, flexShrink: 0
       }}>
         <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '6px' }}>
-          <span style={{ fontSize: '11px', color: COLORS.textSecondary, whiteSpace: 'nowrap' }}>进度 {gradedCount}/{questions.length}</span>
-          <div style={{ flex: 1, height: '3px', background: `${COLORS.primary}20`, borderRadius: '2px', overflow: 'hidden' }}>
+          <span style={{ fontSize: 'var(--fs-11)', color: COLORS.textSecondary, whiteSpace: 'nowrap' }}>进度 {gradedCount}/{questions.length}</span>
+          <div style={{ flex: 1, height: '3px', background: `${COLORS.primary}20`, borderRadius: 'var(--radius-2)', overflow: 'hidden' }}>
             <motion.div
-              style={{ height: '100%', background: COLORS.primary, borderRadius: '2px' }}
+              style={{ height: '100%', background: COLORS.primary, borderRadius: 'var(--radius-2)' }}
               initial={{ width: 0 }}
               animate={{ width: `${progress}%` }}
               transition={{ duration: 0.3 }}
@@ -431,7 +431,7 @@ export default function Grading({ paperId, studentId, questionIds, onClose, onCo
             const isActive = idx === currentQuestionIndex
             return (
               <span key={q.id} onClick={() => setCurrentQuestionIndex(idx)} style={{
-                width: '10px', height: '10px', borderRadius: '50%',
+                width: '10px', height: '10px', borderRadius: 'var(--radius-full)',
                 background: dotColor, cursor: 'pointer', flexShrink: 0,
                 border: isActive ? `2px solid ${COLORS.primary}` : '2px solid transparent',
                 transform: isActive ? 'scale(1.3)' : 'none',
@@ -446,28 +446,28 @@ export default function Grading({ paperId, studentId, questionIds, onClose, onCo
       <div style={{ flex: 1, overflow: 'auto', padding: '12px 16px' }}>
         {/* Question Card */}
         <div style={{
-          background: COLORS.card, borderRadius: '16px', padding: '20px',
+          background: COLORS.card, borderRadius: 'var(--radius-16)', padding: '20px',
           marginBottom: '12px', boxShadow: '0 2px 8px rgba(0,0,0,0.04)'
         }}>
           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '12px' }}>
             <div>
-              <span style={{ fontSize: '15px', fontWeight: 600, color: COLORS.primary, marginRight: '8px' }}>
+              <span style={{ fontSize: 'var(--fs-15)', fontWeight: 600, color: COLORS.primary, marginRight: '8px' }}>
                 第 {currentQuestionIndex + 1} 题
               </span>
-              <span style={{ fontSize: '13px', color: COLORS.textSecondary }}>
+              <span style={{ fontSize: 'var(--fs-13)', color: COLORS.textSecondary }}>
                 {currentQuestion?.question_type === 'choice' ? '选择题' :
                  currentQuestion?.question_type === 'fill' ? '填空题' :
                  currentQuestion?.question_type === 'judge' ? '判断题' : '解答题'}
               </span>
               {currentQuestion?.subject && (
-                <span style={{ fontSize: '12px', color: COLORS.textSecondary, marginLeft: '8px' }}>
+                <span style={{ fontSize: 'var(--fs-12)', color: COLORS.textSecondary, marginLeft: '8px' }}>
                   · {currentQuestion.subject}
                 </span>
               )}
             </div>
           </div>
 
-          <div style={{ fontSize: '15px', color: COLORS.text, lineHeight: '1.6', marginBottom: '16px', whiteSpace: 'pre-wrap' }}>
+          <div style={{ fontSize: 'var(--fs-15)', color: COLORS.text, lineHeight: '1.6', marginBottom: '16px', whiteSpace: 'pre-wrap' }}>
             {currentQuestion?.content}
           </div>
 
@@ -475,7 +475,7 @@ export default function Grading({ paperId, studentId, questionIds, onClose, onCo
             <div style={{ marginBottom: '16px', textAlign: 'center' }}>
               <img src={currentQuestion.image_url} alt="题目配图" style={{
                 width: '100%', maxHeight: '300px', objectFit: 'contain',
-                borderRadius: '8px', background: COLORS.background
+                borderRadius: 'var(--radius-8)', background: COLORS.background
               }} />
             </div>
           )}
@@ -486,7 +486,7 @@ export default function Grading({ paperId, studentId, questionIds, onClose, onCo
               gap: isShortOptions ? '24px' : '8px', marginBottom: '16px', flexWrap: 'wrap'
             }}>
               {currentQuestion.options.map((opt, i) => (
-                <div key={i} style={{ fontSize: '14px', color: COLORS.text }}>
+                <div key={i} style={{ fontSize: 'var(--fs-14)', color: COLORS.text }}>
                   {formatOption(opt, i)}
                 </div>
               ))}
@@ -496,7 +496,7 @@ export default function Grading({ paperId, studentId, questionIds, onClose, onCo
 
         {/* Answer Card */}
         <div style={{
-          background: COLORS.card, borderRadius: '16px', overflow: 'hidden',
+          background: COLORS.card, borderRadius: 'var(--radius-16)', overflow: 'hidden',
           boxShadow: '0 2px 8px rgba(0,0,0,0.04)'
         }}>
           <button onClick={() => setShowAnswer(!showAnswer)} style={{
@@ -504,7 +504,7 @@ export default function Grading({ paperId, studentId, questionIds, onClose, onCo
             display: 'flex', justifyContent: 'space-between', alignItems: 'center',
             cursor: 'pointer', borderBottom: showAnswer ? `1px solid ${COLORS.border}` : 'none'
           }}>
-            <span style={{ fontSize: '15px', fontWeight: 600, color: COLORS.text }}>
+            <span style={{ fontSize: 'var(--fs-15)', fontWeight: 600, color: COLORS.text }}>
               标准答案与解析
             </span>
             {showAnswer ? <EyeOff size={20} color={COLORS.textSecondary} /> : <Eye size={20} color={COLORS.textSecondary} />}
@@ -520,19 +520,19 @@ export default function Grading({ paperId, studentId, questionIds, onClose, onCo
                 style={{ overflow: 'hidden' }}
               >
                 <div style={{ padding: '16px 20px', background: `${COLORS.primary}08` }}>
-                  <div style={{ fontSize: '14px', fontWeight: 600, color: COLORS.primary, marginBottom: '8px' }}>
+                  <div style={{ fontSize: 'var(--fs-14)', fontWeight: 600, color: COLORS.primary, marginBottom: '8px' }}>
                     参考答案
                   </div>
-                  <div style={{ fontSize: '15px', color: COLORS.text, lineHeight: '1.6' }}>
+                  <div style={{ fontSize: 'var(--fs-15)', color: COLORS.text, lineHeight: '1.6' }}>
                     {currentQuestion?.answer || '暂无答案'}
                   </div>
                 </div>
                 {currentQuestion?.analysis && (
                   <div style={{ padding: '16px 20px', borderTop: `1px solid ${COLORS.border}`, background: `${COLORS.success}08` }}>
-                    <div style={{ fontSize: '14px', fontWeight: 600, color: COLORS.success, marginBottom: '8px' }}>
+                    <div style={{ fontSize: 'var(--fs-14)', fontWeight: 600, color: COLORS.success, marginBottom: '8px' }}>
                       解析
                     </div>
-                    <div style={{ fontSize: '14px', color: COLORS.text, lineHeight: '1.6', whiteSpace: 'pre-wrap' }}>
+                    <div style={{ fontSize: 'var(--fs-14)', color: COLORS.text, lineHeight: '1.6', whiteSpace: 'pre-wrap' }}>
                       {currentQuestion.analysis}
                     </div>
                   </div>
@@ -553,7 +553,7 @@ export default function Grading({ paperId, studentId, questionIds, onClose, onCo
             onClick={() => handleMarkStatus(true)}
             disabled={!!currentResult}
             style={{
-              flex: 1, padding: '14px', borderRadius: '12px', fontSize: '15px',
+              flex: 1, padding: '14px', borderRadius: 'var(--radius-12)', fontSize: 'var(--fs-15)',
               fontWeight: 600, border: 'none', cursor: currentResult ? 'not-allowed' : 'pointer',
               display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '8px',
               background: currentResult?.isCorrect ? COLORS.success : `${COLORS.success}15`,
@@ -567,7 +567,7 @@ export default function Grading({ paperId, studentId, questionIds, onClose, onCo
             onClick={() => handleMarkStatus(false)}
             disabled={!!currentResult}
             style={{
-              flex: 1, padding: '14px', borderRadius: '12px', fontSize: '15px',
+              flex: 1, padding: '14px', borderRadius: 'var(--radius-12)', fontSize: 'var(--fs-15)',
               fontWeight: 600, border: 'none', cursor: currentResult ? 'not-allowed' : 'pointer',
               display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '8px',
               background: currentResult && !currentResult.isCorrect ? COLORS.danger : `${COLORS.danger}15`,
@@ -581,14 +581,14 @@ export default function Grading({ paperId, studentId, questionIds, onClose, onCo
 
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
           <button onClick={handlePrev} disabled={currentQuestionIndex === 0} style={{
-            fontSize: '15px', color: currentQuestionIndex === 0 ? `${COLORS.textSecondary}50` : COLORS.textSecondary,
+            fontSize: 'var(--fs-15)', color: currentQuestionIndex === 0 ? `${COLORS.textSecondary}50` : COLORS.textSecondary,
             background: 'none', border: 'none', cursor: currentQuestionIndex === 0 ? 'not-allowed' : 'pointer',
             display: 'flex', alignItems: 'center', gap: '4px'
           }}>
             <ChevronLeft size={18} /> 上一题
           </button>
           <button onClick={handleNext} disabled={currentQuestionIndex === questions.length - 1} style={{
-            fontSize: '15px', color: currentQuestionIndex === questions.length - 1 ? `${COLORS.textSecondary}50` : COLORS.textSecondary,
+            fontSize: 'var(--fs-15)', color: currentQuestionIndex === questions.length - 1 ? `${COLORS.textSecondary}50` : COLORS.textSecondary,
             background: 'none', border: 'none', cursor: currentQuestionIndex === questions.length - 1 ? 'not-allowed' : 'pointer',
             display: 'flex', alignItems: 'center', gap: '4px'
           }}>

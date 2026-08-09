@@ -112,8 +112,8 @@ function removeTag(tag) {
 
 <style scoped>
 .qef-card {
-  border: 1px solid #e4e7ed;
-  border-radius: 8px;
+  border: 1px solid var(--wb-border);
+  border-radius: var(--wb-radius-sm);
   background: #fff;
 }
 
@@ -122,13 +122,13 @@ function removeTag(tag) {
 }
 
 .qef-section + .qef-section {
-  border-top: 1px dashed #ebeef5;
+  border-top: 1px dashed var(--wb-border);
 }
 
 .qef-label {
   font-size: 13px;
   font-weight: 600;
-  color: #4E5969;
+  color: var(--wb-text-secondary);
   margin-bottom: 8px;
 }
 
@@ -141,8 +141,8 @@ function removeTag(tag) {
 .qef-image {
   max-width: 100%;
   max-height: 200px;
-  border-radius: 6px;
-  border: 1px solid #ebeef5;
+  border-radius: var(--wb-radius-xs);
+  border: 1px solid var(--wb-border);
   object-fit: contain;
 }
 
@@ -150,7 +150,7 @@ function removeTag(tag) {
   display: flex;
   align-items: center;
   gap: 6px;
-  color: #c0c4cc;
+  color: var(--wb-text-tertiary);
   font-size: 13px;
   padding: 8px 0;
 }
@@ -170,7 +170,7 @@ function removeTag(tag) {
 
 .qef-opt-letter {
   font-weight: 700;
-  color: #909399;
+  color: var(--wb-text-tertiary);
   min-width: 20px;
   font-size: 14px;
   flex-shrink: 0;

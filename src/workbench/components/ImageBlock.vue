@@ -31,7 +31,7 @@ defineProps({
   display: inline-block;
   max-width: 100%;
   border: 1px solid #e5e7eb;
-  border-radius: 4px;
+  border-radius: var(--wb-radius-xs);
   overflow: hidden;
   background: #f9fafb;
 }
@@ -52,7 +52,7 @@ defineProps({
   gap: 8px;
   color: #9ca3af;
   border: 2px dashed #e5e7eb;
-  border-radius: 4px;
+  border-radius: var(--wb-radius-xs);
 }
 
 .image-caption {

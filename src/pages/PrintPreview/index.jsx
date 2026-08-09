@@ -102,14 +102,14 @@ export default function PrintPreview({ onClose, questions: propQuestions, existi
     return qrContent
   }
 
-  // 组件挂载时即保存组卷记录，使二维码中包含 generatedExamId
-  // 重打/历史重下场景已带合法 existingExamId，直接复用，无需新建
+  // 不再在挂载时自动建卷：仅"预览"不应产生组卷历史记录。
+  // 重打/历史重下场景已带合法 existingExamId，直接复用，无需新建；
+  // 新建场景推迟到用户点击"下载PDF"/"直接打印"时再 saveGeneratedExamRecord()，
+  // 避免老师只是打开预览就生成一条组卷历史、二维码也被提前占用。
   useEffect(() => {
     if (validExistingId) {
       examRecorded.current = true
-      return
     }
-    saveGeneratedExamRecord()
   }, [])
 
   // 当外部的 questions prop 变化时同步（用于"重打"等异步加载场景）
@@ -413,15 +413,15 @@ export default function PrintPreview({ onClose, questions: propQuestions, existi
   if (previewQuestions.length === 0) {
     return (
       <AnimatePresence>
-        <div className="fixed inset-0 z-[10000] flex flex-col" style={{ background: '#F5F7FA' }}>
-          <div className="flex items-center justify-between px-4 pt-12 pb-3 bg-white border-b" style={{ borderColor: '#E5E7EB' }}>
-            <button onClick={onClose} style={{ fontSize: '13px', color: '#2563EB' }}>
+        <div className="fixed inset-0 z-[10000] flex flex-col" style={{ background: 'var(--bg)' }}>
+          <div className="flex items-center justify-between px-4 pt-12 pb-3 bg-white border-b" style={{ borderColor: 'var(--border-light)' }}>
+            <button onClick={onClose} style={{ fontSize: 'var(--fs-13)', color: 'var(--primary-hover)' }}>
               返回
             </button>
-            <h2 style={{ fontSize: '15px', fontWeight: 600, color: '#111827' }}>打印预览</h2>
+            <h2 style={{ fontSize: 'var(--fs-15)', fontWeight: 600, color: 'var(--text)' }}>打印预览</h2>
             <div className="w-10" />
           </div>
-          <div className="flex-1 flex flex-col items-center justify-center gap-3" style={{ fontSize: '13px', color: '#9CA3AF' }}>
+          <div className="flex-1 flex flex-col items-center justify-center gap-3" style={{ fontSize: 'var(--fs-13)', color: 'var(--text-secondary)' }}>
             {validExistingId ? (
               <>
                 <Loader2 size={28} className="animate-spin" />
@@ -438,14 +438,14 @@ export default function PrintPreview({ onClose, questions: propQuestions, existi
 
   return (
     <AnimatePresence>
-      <div className="fixed inset-0 z-[10000] flex flex-col" style={{ background: '#F5F7FA' }}>
+      <div className="fixed inset-0 z-[10000] flex flex-col" style={{ background: 'var(--bg)' }}>
         {/* Header */}
-        <div className="flex items-center justify-between px-4 pt-12 pb-3 bg-white border-b" style={{ borderColor: '#E5E7EB' }}>
-          <button onClick={onClose} style={{ fontSize: '13px', color: '#2563EB' }}>
+        <div className="flex items-center justify-between px-4 pt-12 pb-3 bg-white border-b" style={{ borderColor: 'var(--border-light)' }}>
+          <button onClick={onClose} style={{ fontSize: 'var(--fs-13)', color: 'var(--primary-hover)' }}>
             返回
           </button>
-          <h2 style={{ fontSize: '15px', fontWeight: 600, color: '#111827' }}>打印预览</h2>
-          <button onClick={handleSimulateScan} style={{ fontSize: '12px', color: '#2563EB' }}>
+          <h2 style={{ fontSize: 'var(--fs-15)', fontWeight: 600, color: 'var(--text)' }}>打印预览</h2>
+          <button onClick={handleSimulateScan} style={{ fontSize: 'var(--fs-12)', color: 'var(--primary-hover)' }}>
             {showGradingModal ? '关闭模拟' : '模拟扫码'}
           </button>
         </div>
@@ -517,7 +517,7 @@ export default function PrintPreview({ onClose, questions: propQuestions, existi
                               <img
                                 src={q.image_url}
                                 alt="配图"
-                                style={{ maxWidth: '100%', maxHeight: '250px', objectFit: 'contain', borderRadius: '4px' }}
+                                style={{ maxWidth: '100%', maxHeight: '250px', objectFit: 'contain', borderRadius: 'var(--radius-4)' }}
                               />
                             </div>
                           )}
@@ -556,16 +556,16 @@ export default function PrintPreview({ onClose, questions: propQuestions, existi
         </div>
 
         {/* Bottom Buttons */}
-        <div className="bg-white px-4 py-3 border-t flex justify-center gap-3" style={{ borderColor: '#E5E7EB' }}>
+        <div className="bg-white px-4 py-3 border-t flex justify-center gap-3" style={{ borderColor: 'var(--border-light)' }}>
           {generatingPdf ? (
-            <div className="flex items-center gap-2 text-[13px]" style={{ color: '#6B7280' }}>
+            <div className="flex items-center gap-2 text-[13px]" style={{ color: 'var(--text-secondary)' }}>
               <span style={{
                 display: 'inline-block',
                 width: 16,
                 height: 16,
-                border: '2px solid #2563EB',
+                border: '2px solid var(--primary-hover)',
                 borderTopColor: 'transparent',
-                borderRadius: '50%',
+                borderRadius: 'var(--radius-full)',
                 animation: 'pdf-spin 0.8s linear infinite'
               }}></span>
               <style>{`@keyframes pdf-spin{to{transform:rotate(360deg)}}`}</style>
@@ -575,12 +575,12 @@ export default function PrintPreview({ onClose, questions: propQuestions, existi
             <>
               <button onClick={handleExportPDF}
                 className="px-5 py-2 rounded-lg text-[13px] font-medium flex items-center gap-1.5"
-                style={{ background: '#10B981', color: 'white' }}>
+                style={{ background: 'var(--success)', color: 'white' }}>
                 <FileDown size={15} />
                 下载PDF
               </button>
               <button onClick={handleDirectPrint}
-                className="px-6 py-2 rounded-lg text-[13px] font-medium flex items-center gap-1.5" style={{ background: '#2563EB', color: 'white' }}>
+                className="px-6 py-2 rounded-lg text-[13px] font-medium flex items-center gap-1.5" style={{ background: 'var(--primary-hover)', color: 'white' }}>
                 <Printer size={15} />
                 直接打印
               </button>

@@ -15,10 +15,10 @@ import isoWeek from 'dayjs/plugin/isoWeek'
 dayjs.extend(isoWeek)
 
 const T = {
-  primary: '#007AFF', primarySoft: '#E1EFFF',
-  success: '#34C759', successSoft: '#E4F8EA',
-  danger: '#FF3B30', dangerSoft: '#FFE9E7',
-  warning: '#FF9F0A', warningSoft: '#FFF3E0',
+  primary: '#3B82F6', primarySoft: '#DBEAFE',
+  success: '#16A34A', successSoft: '#DCFCE7',
+  danger: '#DC2626', dangerSoft: '#FEE2E2',
+  warning: '#D97706', warningSoft: '#FEF3C7',
   accent: '#FF9500',
   text: '#1C1C1E', textSec: '#6C6C70', textTer: '#A9A9AE',
   border: '#C6C6C8', borderLight: '#E5E5EA', bg: '#F2F2F7', card: '#FFFFFF'
@@ -158,13 +158,13 @@ export default function WeeklyReport() {
           onChange={v => { setPeriodMode(v); setPeriodOffset(0) }}
           style={{ '--font-size': '12px', flexShrink: 0 }}
         />
-        <div style={{ fontSize: '12px', color: T.textSec }}>{periodLabel}</div>
+        <div style={{ fontSize: 'var(--fs-12)', color: T.textSec }}>{periodLabel}</div>
         {periodMode !== 'all' && (
           <select
             value={periodOffset}
             onChange={e => setPeriodOffset(Number(e.target.value))}
             style={{
-              fontSize: '12px', padding: '2px 6px', borderRadius: '6px',
+              fontSize: 'var(--fs-12)', padding: '2px 6px', borderRadius: 'var(--radius-6)',
               border: '1px solid ' + T.borderLight, background: T.card, color: T.text, marginLeft: 'auto'
             }}
           >
@@ -194,7 +194,7 @@ export default function WeeklyReport() {
         display: 'flex', alignItems: 'center', gap: '12px'
       }}>
         <div style={{
-          width: '40px', height: '40px', borderRadius: '50%',
+          width: '40px', height: '40px', borderRadius: 'var(--radius-full)',
           background: T.primarySoft, display: 'flex', alignItems: 'center', justifyContent: 'center',
           overflow: 'hidden'
         }}>
@@ -207,10 +207,10 @@ export default function WeeklyReport() {
           )}
         </div>
         <div style={{ flex: 1 }}>
-          <div style={{ fontSize: '16px', fontWeight: 600, color: T.text }}>
+          <div style={{ fontSize: 'var(--fs-16)', fontWeight: 600, color: T.text }}>
             {currentStudent?.name || '未选择学生'}
           </div>
-          <div style={{ fontSize: '12px', color: T.textSec }}>{currentStudent?.grade || currentStudent?.class || ''}</div>
+          <div style={{ fontSize: 'var(--fs-12)', color: T.textSec }}>{currentStudent?.grade || currentStudent?.class || ''}</div>
         </div>
       </div>
 
@@ -218,7 +218,7 @@ export default function WeeklyReport() {
       {loadingSummary && (
         <div style={{ textAlign: 'center', padding: '40px 20px' }}>
           <SpinLoading style={{ '--size': '24px' }} />
-          <div style={{ fontSize: '13px', color: T.textSec, marginTop: '8px' }}>加载中...</div>
+          <div style={{ fontSize: 'var(--fs-13)', color: T.textSec, marginTop: '8px' }}>加载中...</div>
         </div>
       )}
 
@@ -228,70 +228,70 @@ export default function WeeklyReport() {
           {/* KPI 概览卡片 */}
           <div style={{ padding: '12px' }}>
             <div style={{
-              background: T.card, borderRadius: '14px', padding: '16px',
+              background: T.card, borderRadius: 'var(--radius-md)', padding: '16px',
               border: '1px solid ' + T.borderLight
             }}>
               <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '14px' }}>
                 <span style={{
                   display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
-                  minWidth: '22px', height: '22px', padding: '0 6px', borderRadius: '6px',
-                  background: T.primary, color: '#fff', fontSize: '12px', fontWeight: 700
+                  minWidth: '22px', height: '22px', padding: '0 6px', borderRadius: 'var(--radius-6)',
+                  background: T.primary, color: '#fff', fontSize: 'var(--fs-12)', fontWeight: 700
                 }}>01</span>
-                <span style={{ fontSize: '15px', fontWeight: 600, color: T.text }}>本周学习概览</span>
+                <span style={{ fontSize: 'var(--fs-15)', fontWeight: 600, color: T.text }}>本周学习概览</span>
               </div>
               {stats ? (
                 <>
                   {/* 三个核心指标 */}
                   <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: '8px', marginBottom: '16px' }}>
-                    <div style={{ textAlign: 'center', padding: '12px 8px', background: T.primarySoft, borderRadius: '10px' }}>
-                      <div style={{ fontSize: '24px', fontWeight: 700, color: T.primary }}>{stats.completedTasks || 0}</div>
-                      <div style={{ fontSize: '11px', color: T.textSec, marginTop: '2px' }}>完成作业</div>
+                    <div style={{ textAlign: 'center', padding: '12px 8px', background: T.primarySoft, borderRadius: 'var(--radius-sm)' }}>
+                      <div style={{ fontSize: 'var(--fs-24)', fontWeight: 700, color: T.primary }}>{stats.completedTasks || 0}</div>
+                      <div style={{ fontSize: 'var(--fs-11)', color: T.textSec, marginTop: '2px' }}>完成作业</div>
                     </div>
-                    <div style={{ textAlign: 'center', padding: '12px 8px', background: T.successSoft, borderRadius: '10px' }}>
-                      <div style={{ fontSize: '24px', fontWeight: 700, color: stats.accuracy >= 80 ? T.success : T.danger }}>
+                    <div style={{ textAlign: 'center', padding: '12px 8px', background: T.successSoft, borderRadius: 'var(--radius-sm)' }}>
+                      <div style={{ fontSize: 'var(--fs-24)', fontWeight: 700, color: stats.accuracy >= 80 ? T.success : T.danger }}>
                         {stats.accuracy || 0}%
                       </div>
-                      <div style={{ fontSize: '11px', color: T.textSec, marginTop: '2px' }}>正确率</div>
+                      <div style={{ fontSize: 'var(--fs-11)', color: T.textSec, marginTop: '2px' }}>正确率</div>
                     </div>
-                    <div style={{ textAlign: 'center', padding: '12px 8px', background: T.warningSoft, borderRadius: '10px' }}>
-                      <div style={{ fontSize: '24px', fontWeight: 700, color: stats.newWrongCount > 0 ? T.warning : T.success }}>
+                    <div style={{ textAlign: 'center', padding: '12px 8px', background: T.warningSoft, borderRadius: 'var(--radius-sm)' }}>
+                      <div style={{ fontSize: 'var(--fs-24)', fontWeight: 700, color: stats.newWrongCount > 0 ? T.warning : T.success }}>
                         {stats.newWrongCount || 0}
                       </div>
-                      <div style={{ fontSize: '11px', color: T.textSec, marginTop: '2px' }}>新增错题</div>
+                      <div style={{ fontSize: 'var(--fs-11)', color: T.textSec, marginTop: '2px' }}>新增错题</div>
                     </div>
                   </div>
 
                   {/* 第二行微指标 */}
                   <div style={{ display: 'flex', gap: '10px' }}>
-                    <div style={{ flex: 1, background: '#F8F9FA', borderRadius: '8px', padding: '10px 12px', textAlign: 'center' }}>
-                      <div style={{ fontSize: '15px', fontWeight: 600, color: T.text }}>{stats.totalQuestions || 0}</div>
-                      <div style={{ fontSize: '10px', color: T.textSec, marginTop: '1px' }}>批改题量</div>
+                    <div style={{ flex: 1, background: '#F8F9FA', borderRadius: 'var(--radius-8)', padding: '10px 12px', textAlign: 'center' }}>
+                      <div style={{ fontSize: 'var(--fs-15)', fontWeight: 600, color: T.text }}>{stats.totalQuestions || 0}</div>
+                      <div style={{ fontSize: 'var(--fs-10)', color: T.textSec, marginTop: '1px' }}>批改题量</div>
                     </div>
-                    <div style={{ flex: 1, background: '#F8F9FA', borderRadius: '8px', padding: '10px 12px', textAlign: 'center' }}>
-                      <div style={{ fontSize: '15px', fontWeight: 600, color: T.text }}>{stats.masteredCount || 0}</div>
-                      <div style={{ fontSize: '10px', color: T.textSec, marginTop: '1px' }}>已掌握</div>
+                    <div style={{ flex: 1, background: '#F8F9FA', borderRadius: 'var(--radius-8)', padding: '10px 12px', textAlign: 'center' }}>
+                      <div style={{ fontSize: 'var(--fs-15)', fontWeight: 600, color: T.text }}>{stats.masteredCount || 0}</div>
+                      <div style={{ fontSize: 'var(--fs-10)', color: T.textSec, marginTop: '1px' }}>已掌握</div>
                     </div>
-                    <div style={{ flex: 1, background: '#F8F9FA', borderRadius: '8px', padding: '10px 12px', textAlign: 'center' }}>
-                      <div style={{ fontSize: '15px', fontWeight: 600, color: T.text }}>{stats.pendingCount || 0}</div>
-                      <div style={{ fontSize: '10px', color: T.textSec, marginTop: '1px' }}>待提升</div>
+                    <div style={{ flex: 1, background: '#F8F9FA', borderRadius: 'var(--radius-8)', padding: '10px 12px', textAlign: 'center' }}>
+                      <div style={{ fontSize: 'var(--fs-15)', fontWeight: 600, color: T.text }}>{stats.pendingCount || 0}</div>
+                      <div style={{ fontSize: 'var(--fs-10)', color: T.textSec, marginTop: '1px' }}>待提升</div>
                     </div>
                   </div>
 
                   {/* 老师寄语 */}
                   <div style={{
-                    marginTop: '16px', background: T.primarySoft, borderRadius: '10px',
+                    marginTop: '16px', background: T.primarySoft, borderRadius: 'var(--radius-sm)',
                     padding: '14px 16px'
                   }}>
-                    <div style={{ fontSize: '13px', fontWeight: 600, color: T.primary, marginBottom: '6px' }}>
+                    <div style={{ fontSize: 'var(--fs-13)', fontWeight: 600, color: T.primary, marginBottom: '6px' }}>
                       老师寄语
                     </div>
-                    <div style={{ fontSize: '13px', color: T.textSec, lineHeight: 1.6 }}>
+                    <div style={{ fontSize: 'var(--fs-13)', color: T.textSec, lineHeight: 1.6 }}>
                       {teacherComment}
                     </div>
                   </div>
                 </>
               ) : (
-                <div style={{ textAlign: 'center', padding: '20px', color: T.textTer, fontSize: '13px' }}>
+                <div style={{ textAlign: 'center', padding: '20px', color: T.textTer, fontSize: 'var(--fs-13)' }}>
                   {currentStudent ? '暂无学习数据' : '请选择学生'}
                 </div>
               )}
@@ -300,26 +300,26 @@ export default function WeeklyReport() {
             {/* 02 学科诊断分析 */}
             {stats && (subjectDiagnosis.length > 0 || knowledgeDiagnosis.length > 0) && (
               <div style={{
-                background: T.card, borderRadius: '14px', padding: '16px', marginTop: '12px',
+                background: T.card, borderRadius: 'var(--radius-md)', padding: '16px', marginTop: '12px',
                 border: '1px solid ' + T.borderLight
               }}>
                 <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '14px' }}>
                   <span style={{
                     display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
-                    minWidth: '22px', height: '22px', padding: '0 6px', borderRadius: '6px',
-                    background: T.accent, color: '#fff', fontSize: '12px', fontWeight: 700
+                    minWidth: '22px', height: '22px', padding: '0 6px', borderRadius: 'var(--radius-6)',
+                    background: T.accent, color: '#fff', fontSize: 'var(--fs-12)', fontWeight: 700
                   }}>02</span>
-                  <span style={{ fontSize: '15px', fontWeight: 600, color: T.text }}>学科诊断分析</span>
+                  <span style={{ fontSize: 'var(--fs-15)', fontWeight: 600, color: T.text }}>学科诊断分析</span>
                 </div>
 
                 {/* 高频薄弱点提示（与 PC 端一致） */}
                 {topWeakTags.length > 0 && (
                   <div style={{
-                    background: T.warningSoft, borderRadius: '10px', padding: '10px 12px',
+                    background: T.warningSoft, borderRadius: 'var(--radius-sm)', padding: '10px 12px',
                     marginBottom: '14px', display: 'flex', gap: '8px', alignItems: 'flex-start'
                   }}>
-                    <span style={{ fontSize: '14px', lineHeight: '20px' }}>⚠️</span>
-                    <div style={{ fontSize: '12px', color: '#9A3412', lineHeight: 1.6 }}>
+                    <span style={{ fontSize: 'var(--fs-14)', lineHeight: '20px' }}>⚠️</span>
+                    <div style={{ fontSize: 'var(--fs-12)', color: '#9A3412', lineHeight: 1.6 }}>
                       <strong>本周高频薄弱点：</strong>
                       {topWeakTags.map(t => `「${t.tag}」正确率 ${t.accuracy}%`).join('；')}
                     </div>
@@ -330,8 +330,8 @@ export default function WeeklyReport() {
                 {subjectDiagnosis.map((s, i) => (
                   <div key={i} style={{ marginBottom: '12px' }}>
                     <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '8px' }}>
-                      <span style={{ fontSize: '14px', fontWeight: 600, color: T.text }}>{s.subject}</span>
-                      <span style={{ fontSize: '12px', fontWeight: 600, color: colorForAccuracy(s.accuracy) }}>
+                      <span style={{ fontSize: 'var(--fs-14)', fontWeight: 600, color: T.text }}>{s.subject}</span>
+                      <span style={{ fontSize: 'var(--fs-12)', fontWeight: 600, color: colorForAccuracy(s.accuracy) }}>
                         正确率 {s.accuracy != null ? s.accuracy + '%' : '--'}
                       </span>
                     </div>
@@ -340,7 +340,7 @@ export default function WeeklyReport() {
                         {s.topTags.slice(0, 3).map((t, j) => (
                           <span key={j} style={{
                             display: 'inline-flex', alignItems: 'center', gap: '4px',
-                            padding: '3px 10px', borderRadius: '20px', fontSize: '11px',
+                            padding: '3px 10px', borderRadius: 'var(--radius-lg)', fontSize: 'var(--fs-11)',
                             background: t.wrongCount >= 3 ? T.dangerSoft : T.primarySoft,
                             color: t.wrongCount >= 3 ? T.danger : T.primary
                           }}>
@@ -356,29 +356,29 @@ export default function WeeklyReport() {
                 {/* 知识点掌握明细（与 PC 端知识点诊断表同源） */}
                 {knowledgeDiagnosis.length > 0 && (
                   <div style={{ marginTop: subjectDiagnosis.length > 0 ? '8px' : 0 }}>
-                    <div style={{ fontSize: '12px', fontWeight: 600, color: T.textSec, margin: '4px 0 10px' }}>
+                    <div style={{ fontSize: 'var(--fs-12)', fontWeight: 600, color: T.textSec, margin: '4px 0 10px' }}>
                       知识点掌握明细
                     </div>
                     {knowledgeDiagnosis.map((k, i) => (
                       <div key={i} style={{ marginBottom: i < knowledgeDiagnosis.length - 1 ? '12px' : 0 }}>
                         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '4px' }}>
-                          <span style={{ fontSize: '13px', color: T.text, flex: 1, marginRight: '8px', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                          <span style={{ fontSize: 'var(--fs-13)', color: T.text, flex: 1, marginRight: '8px', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
                             {k.tag}
                           </span>
-                          <span style={{ fontSize: '11px', color: T.textTer, marginRight: '8px', flexShrink: 0 }}>
+                          <span style={{ fontSize: 'var(--fs-11)', color: T.textTer, marginRight: '8px', flexShrink: 0 }}>
                             错{k.wrongCount}/{k.totalCount}题
                           </span>
                           <span style={{
-                            fontSize: '11px', fontWeight: 700, flexShrink: 0,
+                            fontSize: 'var(--fs-11)', fontWeight: 700, flexShrink: 0,
                             color: colorForAccuracy(k.accuracy), minWidth: '38px', textAlign: 'right'
                           }}>
                             {k.accuracy}%
                           </span>
                         </div>
-                        <div style={{ height: '6px', borderRadius: '3px', background: T.borderLight, overflow: 'hidden' }}>
+                        <div style={{ height: '6px', borderRadius: 'var(--radius-3)', background: T.borderLight, overflow: 'hidden' }}>
                           <div style={{
                             height: '100%', width: `${Math.max(0, Math.min(100, k.accuracy))}%`,
-                            background: colorForAccuracy(k.accuracy), borderRadius: '3px',
+                            background: colorForAccuracy(k.accuracy), borderRadius: 'var(--radius-3)',
                             transition: 'width 0.3s ease'
                           }} />
                         </div>
@@ -390,13 +390,13 @@ export default function WeeklyReport() {
                 {/* 老师建议 */}
                 {teacherAdvice && (
                   <div style={{
-                    marginTop: '14px', background: '#FFF7ED', borderRadius: '10px',
+                    marginTop: '14px', background: 'var(--accent-soft)', borderRadius: 'var(--radius-sm)',
                     padding: '12px 14px', border: '1px solid #FED7AA'
                   }}>
-                    <div style={{ fontSize: '12px', fontWeight: 600, color: T.accent, marginBottom: '4px' }}>
+                    <div style={{ fontSize: 'var(--fs-12)', fontWeight: 600, color: T.accent, marginBottom: '4px' }}>
                       老师建议
                     </div>
-                    <div style={{ fontSize: '13px', color: '#9A3412', lineHeight: 1.6 }}>
+                    <div style={{ fontSize: 'var(--fs-13)', color: '#9A3412', lineHeight: 1.6 }}>
                       {teacherAdvice}
                     </div>
                   </div>
@@ -411,8 +411,8 @@ export default function WeeklyReport() {
               onClick={handleDownloadPDF}
               disabled={generating || !currentStudent}
               style={{
-                width: '100%', padding: '12px', borderRadius: '10px', border: '1px solid ' + T.borderLight,
-                background: T.card, color: T.textSec, fontSize: '14px', fontWeight: 500,
+                width: '100%', padding: '12px', borderRadius: 'var(--radius-sm)', border: '1px solid ' + T.borderLight,
+                background: T.card, color: T.textSec, fontSize: 'var(--fs-14)', fontWeight: 500,
                 display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '6px',
                 cursor: generating || !currentStudent ? 'not-allowed' : 'pointer', opacity: generating || !currentStudent ? 0.5 : 1
               }}

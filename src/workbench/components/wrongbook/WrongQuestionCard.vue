@@ -197,16 +197,16 @@ const questionContent = computed(() => question.value.content || '')
 <style scoped>
 .wrong-question-card {
   background: #fff;
-  border-radius: 12px;
+  border-radius: var(--wb-radius-md);
   padding: 16px;
-  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.04);
+  box-shadow: var(--wb-shadow-sm);
   transition: box-shadow 0.2s, border-color 0.2s;
   border: 2px solid transparent;
 }
 
 .wrong-question-card.is-selected {
-  border-color: var(--el-color-primary);
-  box-shadow: 0 0 0 1px var(--el-color-primary);
+  border-color: var(--wb-primary);
+  box-shadow: 0 0 0 1px var(--wb-primary);
 }
 
 .card-header {
@@ -230,7 +230,7 @@ const questionContent = computed(() => question.value.content || '')
 
 .meta-text {
   font-size: 14px;
-  color: #8e8e93;
+  color: var(--wb-text-tertiary);
 }
 
 .merged-badge {
@@ -239,13 +239,13 @@ const questionContent = computed(() => question.value.content || '')
 
 .date-text {
   font-size: 12px;
-  color: #8e8e93;
+  color: var(--wb-text-tertiary);
 }
 
 .status-tag {
   font-size: 12px;
   padding: 4px 10px;
-  border-radius: 12px;
+  border-radius: var(--wb-radius-md);
   font-weight: 500;
   cursor: pointer;
   user-select: none;
@@ -273,7 +273,7 @@ const questionContent = computed(() => question.value.content || '')
 
 .question-content {
   font-size: 15px;
-  color: #1c1c1e;
+  color: var(--wb-text);
   line-height: 1.6;
   margin-bottom: 8px;
 }
@@ -283,7 +283,7 @@ const questionContent = computed(() => question.value.content || '')
   color: #ff9500;
   background: #fff8e1;
   padding: 6px 10px;
-  border-radius: 8px;
+  border-radius: var(--wb-radius-sm);
   margin-bottom: 8px;
   display: flex;
   align-items: center;
@@ -302,20 +302,20 @@ const questionContent = computed(() => question.value.content || '')
 }
 
 .tags-container :deep(.el-tag.manual) {
-  background: #fff7e6;
-  color: #fa8c16;
+  background: var(--wb-warning-soft);
+  color: var(--wb-warning);
   border-color: transparent;
 }
 
 .tags-container :deep(.el-tag.ai) {
-  background: #e8f4fd;
-  color: var(--el-color-primary);
+  background: var(--wb-primary-mist);
+  color: var(--wb-primary);
   border-color: transparent;
 }
 
 .card-footer {
   font-size: 13px;
-  color: #8e8e93;
+  color: var(--wb-text-tertiary);
   display: flex;
   justify-content: space-between;
   align-items: center;
@@ -334,7 +334,7 @@ const questionContent = computed(() => question.value.content || '')
 
 .error-count {
   font-size: 13px;
-  color: #8e8e93;
+  color: var(--wb-text-tertiary);
 }
 
 .actions {

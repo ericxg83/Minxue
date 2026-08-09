@@ -116,7 +116,7 @@ export default function UploadTypeSelector({ visible, onClose, onUpload }) {
   return (
     <div className="fixed inset-0 z-50 bg-black/50 flex items-end" onClick={onClose}>
       <div className="w-full bg-white rounded-t-3xl p-5 shadow-xl" onClick={(e) => e.stopPropagation()}>
-        <div className="w-12 h-1 rounded-full bg-gray-300 mx-auto mb-6"></div>
+        <div className="w-12 h-1 rounded-full bg-[var(--bg-secondary)] mx-auto mb-6"></div>
 
         <h3 className="text-xl font-bold text-center mb-6">
           {uploadType === 'workbook' ? '日常作业' : '选择上传方式'}
@@ -135,9 +135,9 @@ export default function UploadTypeSelector({ visible, onClose, onUpload }) {
             </div>
             <div className="text-left">
               <h4 className="font-bold text-base" style={{ color: 'var(--text)' }}>日常作业</h4>
-              <p className="text-sm mt-1" style={{ color: 'var(--text-tertiary)' }}>拍照上传，选择练习册或AI批改</p>
+              <p className="text-sm mt-1" style={{ color: 'var(--text-secondary)' }}>拍照上传，选择练习册或AI批改</p>
             </div>
-            <ChevronRight size={20} style={{ color: 'var(--text-tertiary)' }} />
+            <ChevronRight size={20} style={{ color: 'var(--text-secondary)' }} />
           </button>
 
           {/* 普通试卷 */}
@@ -151,9 +151,9 @@ export default function UploadTypeSelector({ visible, onClose, onUpload }) {
             </div>
             <div className="text-left">
               <h4 className="font-bold text-base" style={{ color: 'var(--text)' }}>普通试卷</h4>
-              <p className="text-sm mt-1" style={{ color: 'var(--text-tertiary)' }}>考试卷/临时卷，AI智能批改</p>
+              <p className="text-sm mt-1" style={{ color: 'var(--text-secondary)' }}>考试卷/临时卷，AI智能批改</p>
             </div>
-            <ChevronRight size={20} style={{ color: 'var(--text-tertiary)' }} />
+            <ChevronRight size={20} style={{ color: 'var(--text-secondary)' }} />
           </button>
 
           {/* 错题重练 */}
@@ -163,13 +163,13 @@ export default function UploadTypeSelector({ visible, onClose, onUpload }) {
             style={{ background: 'var(--card-bg)' }}
           >
             <div className="w-14 h-14 rounded-2xl flex items-center justify-center flex-shrink-0" style={{ background: 'rgba(34, 197, 94, 0.1)' }}>
-              <RotateCcw size={28} style={{ color: '#22C55E' }} />
+              <RotateCcw size={28} style={{ color: 'var(--success)' }} />
             </div>
             <div className="text-left">
               <h4 className="font-bold text-base" style={{ color: 'var(--text)' }}>错题重练</h4>
-              <p className="text-sm mt-1" style={{ color: 'var(--text-tertiary)' }}>拍照上传，自动识别卷上二维码批改</p>
+              <p className="text-sm mt-1" style={{ color: 'var(--text-secondary)' }}>拍照上传，自动识别卷上二维码批改</p>
             </div>
-            <ChevronRight size={20} style={{ color: 'var(--text-tertiary)' }} />
+            <ChevronRight size={20} style={{ color: 'var(--text-secondary)' }} />
           </button>
         </div>
         )}
@@ -177,7 +177,7 @@ export default function UploadTypeSelector({ visible, onClose, onUpload }) {
         {/* 学生选择器 */}
         {showStudentSelector && (
           <div className="mt-6">
-            <p className="text-sm font-semibold mb-3" style={{ color: 'var(--text-tertiary)' }}>选择学生和科目</p>
+            <p className="text-sm font-semibold mb-3" style={{ color: 'var(--text-secondary)' }}>选择学生和科目</p>
             <div className="flex gap-3">
               <select
                 value={selectedStudentId}
@@ -213,20 +213,20 @@ export default function UploadTypeSelector({ visible, onClose, onUpload }) {
         {/* 练习册选择器 */}
         {showWorksheetPicker && (
           <div className="mt-6">
-            <p className="text-sm font-semibold mb-3" style={{ color: 'var(--text-tertiary)' }}>选择练习册</p>
+            <p className="text-sm font-semibold mb-3" style={{ color: 'var(--text-secondary)' }}>选择练习册</p>
             <div className="max-h-48 overflow-y-auto space-y-2">
               {worksheets.map(worksheet => (
                 <div
                   key={worksheet.id}
                   onClick={() => selectWorksheet(worksheet)}
-                  className="rounded-xl p-4 flex items-center justify-between cursor-pointer active:bg-gray-100/50 transition-all"
+                  className="rounded-xl p-4 flex items-center justify-between cursor-pointer active:bg-[var(--bg-hover)] transition-all"
                   style={{ background: 'var(--card-bg)' }}
                 >
                   <div>
                     <h5 className="font-medium" style={{ color: 'var(--text)' }}>{worksheet.name}</h5>
-                    <p className="text-xs mt-1" style={{ color: 'var(--text-tertiary)' }}>{worksheet.subject} · {worksheet.grade}</p>
+                    <p className="text-xs mt-1" style={{ color: 'var(--text-secondary)' }}>{worksheet.subject} · {worksheet.grade}</p>
                   </div>
-                  <ChevronRight size={18} style={{ color: 'var(--text-tertiary)' }} />
+                  <ChevronRight size={18} style={{ color: 'var(--text-secondary)' }} />
                 </div>
               ))}
             </div>
@@ -248,7 +248,7 @@ export default function UploadTypeSelector({ visible, onClose, onUpload }) {
           <button
             onClick={onClose}
             className="text-sm font-medium"
-            style={{ color: 'var(--text-tertiary)' }}
+            style={{ color: 'var(--text-secondary)' }}
           >
             取消
           </button>

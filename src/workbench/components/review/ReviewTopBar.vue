@@ -268,7 +268,7 @@ const handleRetryTask = async () => {
   height: 56px;
   padding: 0 20px;
   background: #fff;
-  border-bottom: 1px solid #e4e7ed;
+  border-bottom: 1px solid var(--wb-border);
   flex-shrink: 0;
 }
 .top-bar-left {
@@ -292,40 +292,40 @@ const handleRetryTask = async () => {
   align-items: center;
   gap: 4px;
   padding: 3px 8px;
-  border-radius: 12px;
+  border-radius: var(--wb-radius-md);
   font-size: 12px;
   font-weight: 500;
   border: 1px solid;
   white-space: nowrap;
 }
-.chip-label { color: #606266; }
+.chip-label { color: var(--wb-text-secondary); }
 .chip-count { font-weight: 700; }
 .chip-correct { background: #f0f9eb; border-color: #c2e7b0; }
-.chip-correct .chip-count { color: #67c23a; }
+.chip-correct .chip-count { color: var(--wb-success); }
 .chip-wrong { background: #fef0f0; border-color: #fbc4c4; }
 .chip-wrong .chip-count { color: #f56c6c; }
 .chip-pending { background: #fdf6ec; border-color: #faecd8; }
-.chip-pending .chip-count { color: #e6a23c; }
+.chip-pending .chip-count { color: var(--wb-warning); }
 .chip-exception { background: #fff4e6; border-color: #ffd8a8; }
-.chip-exception .chip-count { color: #fa8c16; }
+.chip-exception .chip-count { color: var(--wb-warning); }
 .chip-processing { background: #f5effd; border-color: #e3d4fb; }
 .chip-processing .chip-count { color: #9254de; }
 
 .back-btn {
   font-size: 13px;
-  color: #606266 !important;
+  color: var(--wb-text-secondary) !important;
 }
 .exam-mode-name {
   font-size: 15px;
   font-weight: 600;
-  color: #1D2129;
+  color: var(--wb-text);
   margin-left: 4px;
 }
 
 /* ── 错题拦截清单弹窗 ── */
 .wrong-gate-tip {
   font-size: 13px;
-  color: #606266;
+  color: var(--wb-text-secondary);
   margin-bottom: 12px;
   line-height: 1.6;
 }
@@ -342,10 +342,10 @@ const handleRetryTask = async () => {
   justify-content: space-between;
   gap: 12px;
   padding: 10px 12px;
-  border: 1px solid #ebeef5;
-  border-radius: 6px;
+  border: 1px solid var(--wb-border);
+  border-radius: var(--wb-radius-xs);
   margin-bottom: 8px;
-  background: #fafafa;
+  background: var(--wb-bg-hover);
 }
 .wrong-gate-info {
   display: flex;
@@ -356,17 +356,17 @@ const handleRetryTask = async () => {
 .wrong-gate-no {
   font-size: 14px;
   font-weight: 600;
-  color: #303133;
+  color: var(--wb-text);
 }
 .wrong-gate-badge {
   font-size: 12px;
   line-height: 1.5;
 }
 .wrong-gate-badge.warn {
-  color: #e6a23c;
+  color: var(--wb-warning);
 }
 .wrong-gate-badge.done {
-  color: #67c23a;
+  color: var(--wb-success);
   font-weight: 600;
 }
 .wrong-gate-actions {

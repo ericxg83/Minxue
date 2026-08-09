@@ -191,7 +191,7 @@ const sortOptions = [
 
 .section-title {
   font-size: 15px;
-  color: #1c1c1e;
+  color: var(--wb-text);
   margin-bottom: 12px;
   font-weight: 500;
 }
@@ -204,11 +204,11 @@ const sortOptions = [
 
 .option-chip {
   padding: 10px 18px;
-  border-radius: 20px;
+  border-radius: var(--wb-radius-full);
   font-size: 14px;
   cursor: pointer;
-  background: #f2f2f7;
-  color: #8e8e93;
+  background: var(--wb-bg-hover);
+  color: var(--wb-text-tertiary);
   font-weight: 400;
   transition: all 0.2s;
   user-select: none;
@@ -219,13 +219,13 @@ const sortOptions = [
 }
 
 .option-chip.active {
-  background: var(--el-color-primary);
+  background: var(--wb-primary);
   color: #fff;
   font-weight: 500;
 }
 
 .option-chip.tag-chip.active {
-  background: #fa8c16;
+  background: var(--wb-warning);
   color: #fff;
 }
 
@@ -238,10 +238,10 @@ const sortOptions = [
 
 .action-btn {
   flex: 1;
-  border-radius: 10px;
+  border-radius: var(--wb-radius-sm);
 }
 
 .confirm-btn {
-  background: var(--el-color-primary);
+  background: var(--wb-primary);
 }
 </style>

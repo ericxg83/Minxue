@@ -19,7 +19,7 @@
                   <span style="display: flex; align-items: center; gap: 8px;">
                     <el-avatar :size="24" :src="student.avatar" />
                     {{ student.name }}
-                    <span style="font-size: 12px; color: #86909C;">{{ student.class }}</span>
+                    <span style="font-size: 12px; color: var(--wb-text-tertiary);">{{ student.class }}</span>
                   </span>
                 </el-option>
               </el-select>
@@ -139,7 +139,7 @@
                       <td>
                         <div class="mastery-bar-cell">
                           <div class="mastery-bar-bg">
-                            <div class="mastery-bar-fill" :style="{ width: kp.mastery + '%', background: kp.mastery >= 80 ? '#1677FF' : kp.mastery >= 60 ? '#FA8C16' : '#F53F3F' }"></div>
+                            <div class="mastery-bar-fill" :style="{ width: kp.mastery + '%', background: kp.mastery >= 80 ? '#3B82F6' : kp.mastery >= 60 ? 'var(--wb-warning)' : 'var(--wb-danger)' }"></div>
                           </div>
                           <span class="mastery-bar-value">{{ kp.mastery }}%</span>
                         </div>
@@ -307,7 +307,7 @@ const knowledgePointsData = computed(() => [
 
 // ===== 饼图数据 =====
 const pieLegendData = [
-  { name: '概念理解', value: 32, percent: 25, color: '#1677FF' },
+  { name: '概念理解', value: 32, percent: 25, color: '#3B82F6' },
   { name: '计算错误', value: 48, percent: 37, color: '#52C41A' },
   { name: '审题失误', value: 28, percent: 22, color: '#FA8C16' },
   { name: '知识点遗忘', value: 20, percent: 16, color: '#722ED1' },
@@ -493,12 +493,12 @@ const initCharts = () => {
         smooth: true,
         symbol: 'circle',
         symbolSize: 8,
-        lineStyle: { color: '#1677FF', width: 2 },
-        itemStyle: { color: '#1677FF' },
+        lineStyle: { color: '#3B82F6', width: 2 },
+        itemStyle: { color: '#3B82F6' },
         areaStyle: {
           color: new echarts.graphic.LinearGradient(0, 0, 0, 1, [
-            { offset: 0, color: 'rgba(22, 119, 255, 0.15)' },
-            { offset: 1, color: 'rgba(22, 119, 255, 0.01)' },
+            { offset: 0, color: 'rgba(59, 130, 246, 0.15)' },
+            { offset: 1, color: 'rgba(59, 130, 246, 0.01)' },
           ]),
         },
       }],
@@ -551,7 +551,7 @@ const initCharts = () => {
         type: 'bar',
         barWidth: 20,
         itemStyle: {
-          color: '#1677FF',
+          color: '#3B82F6',
           borderRadius: [4, 4, 0, 0],
         },
       }],
@@ -592,7 +592,7 @@ const initCharts = () => {
 // ===== 工具函数 =====
 const getSubjectColor = (subject) => {
   const colorMap = {
-    '数学': '#1677FF',
+    '数学': '#3B82F6',
     '语文': '#FA8C16',
     '英语': '#52C41A',
     '物理': '#722ED1',
@@ -649,7 +649,7 @@ onUnmounted(() => {
   height: 100%;
   display: flex;
   flex-direction: column;
-  background: #F5F7FA;
+  background: var(--wb-bg);
   font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
 }
 
@@ -676,16 +676,16 @@ onUnmounted(() => {
   align-items: center;
   justify-content: space-between;
   background: #fff;
-  border-radius: 12px;
+  border-radius: var(--wb-radius-md);
   padding: 14px 20px;
-  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.04);
+  box-shadow: var(--wb-shadow-sm);
   flex-shrink: 0;
 }
 
 .growth-selector-bar__title {
   font-size: 18px;
   font-weight: 600;
-  color: #1D2129;
+  color: var(--wb-text);
   flex-shrink: 0;
   margin-right: 24px;
 }
@@ -705,7 +705,7 @@ onUnmounted(() => {
 
 .selector-label {
   font-size: 13px;
-  color: #86909C;
+  color: var(--wb-text-tertiary);
   white-space: nowrap;
 }
 
@@ -723,17 +723,17 @@ onUnmounted(() => {
 
 .kpi-card {
   background: #fff;
-  border-radius: 12px;
+  border-radius: var(--wb-radius-md);
   padding: 20px;
   display: flex;
   align-items: center;
   justify-content: space-between;
-  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.04);
+  box-shadow: var(--wb-shadow-sm);
   transition: box-shadow 0.2s;
 }
 
 .kpi-card:hover {
-  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.08);
+  box-shadow: var(--wb-shadow-md);
 }
 
 .kpi-card__left {
@@ -742,31 +742,31 @@ onUnmounted(() => {
 
 .kpi-card__label {
   font-size: 13px;
-  color: #86909C;
+  color: var(--wb-text-tertiary);
   margin-bottom: 8px;
 }
 
 .kpi-card__value {
   font-size: 28px;
   font-weight: 700;
-  color: #1D2129;
+  color: var(--wb-text);
   line-height: 1.2;
 }
 
 .kpi-card__unit {
   font-size: 14px;
   font-weight: 400;
-  color: #86909C;
+  color: var(--wb-text-tertiary);
 }
 
 .kpi-card__trend {
   font-size: 12px;
-  color: #86909C;
+  color: var(--wb-text-tertiary);
   margin-top: 6px;
 }
 
 .trend-up span {
-  color: #F53F3F;
+  color: var(--wb-danger);
   font-weight: 500;
 }
 
@@ -778,7 +778,7 @@ onUnmounted(() => {
 .kpi-card__icon {
   width: 48px;
   height: 48px;
-  border-radius: 12px;
+  border-radius: var(--wb-radius-md);
   display: flex;
   align-items: center;
   justify-content: center;
@@ -790,10 +790,10 @@ onUnmounted(() => {
   color: #fff;
 }
 
-.kpi-card__icon--blue { background: linear-gradient(135deg, #1677FF, #4096FF); }
+.kpi-card__icon--blue { background: linear-gradient(135deg, var(--wb-primary), var(--wb-primary-hover)); }
 .kpi-card__icon--green { background: linear-gradient(135deg, #52C41A, #73D13D); }
 .kpi-card__icon--purple { background: linear-gradient(135deg, #722ED1, #9254DE); }
-.kpi-card__icon--orange { background: linear-gradient(135deg, #FA8C16, #FFC53D); }
+.kpi-card__icon--orange { background: linear-gradient(135deg, var(--wb-warning), #FFC53D); }
 
 /* ===== Charts Row ===== */
 .charts-row {
@@ -804,15 +804,15 @@ onUnmounted(() => {
 
 .chart-card {
   background: #fff;
-  border-radius: 12px;
+  border-radius: var(--wb-radius-md);
   padding: 16px 20px;
-  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.04);
+  box-shadow: var(--wb-shadow-sm);
 }
 
 .chart-card__title {
   font-size: 14px;
   font-weight: 500;
-  color: #1D2129;
+  color: var(--wb-text);
   margin-bottom: 12px;
 }
 
@@ -830,17 +830,17 @@ onUnmounted(() => {
 
 .detail-card {
   background: #fff;
-  border-radius: 12px;
-  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.04);
+  border-radius: var(--wb-radius-md);
+  box-shadow: var(--wb-shadow-sm);
   overflow: hidden;
 }
 
 .detail-card__title {
   font-size: 14px;
   font-weight: 500;
-  color: #1D2129;
+  color: var(--wb-text);
   padding: 16px 20px 12px;
-  border-bottom: 1px solid #F2F3F5;
+  border-bottom: 1px solid var(--wb-bg-hover);
 }
 
 .detail-card__body {
@@ -856,17 +856,17 @@ onUnmounted(() => {
 .knowledge-table th {
   font-size: 12px;
   font-weight: 500;
-  color: #86909C;
+  color: var(--wb-text-tertiary);
   text-align: left;
   padding: 8px 4px;
-  border-bottom: 1px solid #F2F3F5;
+  border-bottom: 1px solid var(--wb-bg-hover);
 }
 
 .knowledge-table td {
   font-size: 13px;
-  color: #1D2129;
+  color: var(--wb-text);
   padding: 10px 4px;
-  border-bottom: 1px solid #F7F8FA;
+  border-bottom: 1px solid var(--wb-bg-hover);
 }
 
 .knowledge-table tr:last-child td {
@@ -882,20 +882,20 @@ onUnmounted(() => {
 .mastery-bar-bg {
   flex: 1;
   height: 8px;
-  background: #F2F3F5;
-  border-radius: 4px;
+  background: var(--wb-bg-hover);
+  border-radius: var(--wb-radius-xs);
   overflow: hidden;
 }
 
 .mastery-bar-fill {
   height: 100%;
-  border-radius: 4px;
+  border-radius: var(--wb-radius-xs);
   transition: width 0.5s ease;
 }
 
 .mastery-bar-value {
   font-size: 12px;
-  color: #86909C;
+  color: var(--wb-text-tertiary);
   flex-shrink: 0;
   width: 36px;
 }
@@ -907,7 +907,7 @@ onUnmounted(() => {
   font-size: 12px;
   font-weight: 500;
   padding: 2px 6px;
-  border-radius: 4px;
+  border-radius: var(--wb-radius-xs);
 }
 
 .trend-badge--up {
@@ -916,7 +916,7 @@ onUnmounted(() => {
 }
 
 .trend-badge--down {
-  color: #F53F3F;
+  color: var(--wb-danger);
   background: #FFF2F0;
 }
 
@@ -945,12 +945,12 @@ onUnmounted(() => {
 .pie-center-value {
   font-size: 24px;
   font-weight: 700;
-  color: #1D2129;
+  color: var(--wb-text);
 }
 
 .pie-center-label {
   font-size: 11px;
-  color: #86909C;
+  color: var(--wb-text-tertiary);
 }
 
 .pie-legend {
@@ -975,28 +975,28 @@ onUnmounted(() => {
 
 .pie-legend-name {
   flex: 1;
-  color: #4E5969;
+  color: var(--wb-text-secondary);
 }
 
 .pie-legend-value {
-  color: #86909C;
+  color: var(--wb-text-tertiary);
   font-size: 12px;
 }
 
 /* ===== Recent Wrong Records ===== */
 .recent-wrong-card {
   background: #fff;
-  border-radius: 12px;
-  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.04);
+  border-radius: var(--wb-radius-md);
+  box-shadow: var(--wb-shadow-sm);
   overflow: hidden;
 }
 
 .recent-wrong-card__title {
   font-size: 14px;
   font-weight: 500;
-  color: #1D2129;
+  color: var(--wb-text);
   padding: 16px 20px 12px;
-  border-bottom: 1px solid #F2F3F5;
+  border-bottom: 1px solid var(--wb-bg-hover);
 }
 
 .recent-wrong-card__body {
@@ -1011,18 +1011,18 @@ onUnmounted(() => {
 .wrong-record-table th {
   font-size: 12px;
   font-weight: 500;
-  color: #86909C;
+  color: var(--wb-text-tertiary);
   text-align: left;
   padding: 10px 12px;
-  border-bottom: 1px solid #F2F3F5;
+  border-bottom: 1px solid var(--wb-bg-hover);
   white-space: nowrap;
 }
 
 .wrong-record-table td {
   font-size: 13px;
-  color: #1D2129;
+  color: var(--wb-text);
   padding: 10px 12px;
-  border-bottom: 1px solid #F7F8FA;
+  border-bottom: 1px solid var(--wb-bg-hover);
 }
 
 .wrong-record-table tr:last-child td {
@@ -1039,7 +1039,7 @@ onUnmounted(() => {
 .record-subject-tag {
   font-size: 11px;
   padding: 1px 6px;
-  border-radius: 3px;
+  border-radius: var(--wb-radius-xs);
   color: #fff;
   flex-shrink: 0;
   font-weight: 500;
@@ -1058,7 +1058,7 @@ onUnmounted(() => {
 }
 
 .record-answer--wrong {
-  color: #F53F3F;
+  color: var(--wb-danger);
 }
 
 .record-answer--correct {
@@ -1070,12 +1070,12 @@ onUnmounted(() => {
   align-items: center;
   justify-content: space-between;
   padding: 12px 20px;
-  border-top: 1px solid #F2F3F5;
+  border-top: 1px solid var(--wb-bg-hover);
 }
 
 .record-count {
   font-size: 12px;
-  color: #86909C;
+  color: var(--wb-text-tertiary);
 }
 
 /* ===== Empty State ===== */
@@ -1097,11 +1097,11 @@ onUnmounted(() => {
 }
 
 .growth-main::-webkit-scrollbar-thumb {
-  background: #E5E6EB;
-  border-radius: 3px;
+  background: var(--wb-border);
+  border-radius: var(--wb-radius-xs);
 }
 
 .growth-main::-webkit-scrollbar-thumb:hover {
-  background: #C9CDD4;
+  background: var(--wb-text-tertiary);
 }
 </style>

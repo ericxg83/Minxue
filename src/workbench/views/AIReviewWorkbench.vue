@@ -461,7 +461,7 @@ onUnmounted(() => {
   height: 100vh;
   display: flex;
   flex-direction: column;
-  background: #f5f7fa;
+  background: var(--wb-bg);
 }
 
 .header {
@@ -470,7 +470,7 @@ onUnmounted(() => {
   display: flex;
   justify-content: space-between;
   align-items: center;
-  box-shadow: 0 2px 8px rgba(0,0,0,0.1);
+  box-shadow: var(--wb-shadow-sm);
   z-index: 10;
 }
 
@@ -514,16 +514,16 @@ onUnmounted(() => {
 
 .task-card {
   background: #fff;
-  border-radius: 8px;
+  border-radius: var(--wb-radius-sm);
   padding: 20px;
   cursor: pointer;
   transition: all 0.3s;
-  box-shadow: 0 2px 8px rgba(0,0,0,0.1);
+  box-shadow: var(--wb-shadow-sm);
 }
 
 .task-card:hover {
   transform: translateY(-4px);
-  box-shadow: 0 4px 16px rgba(0,0,0,0.15);
+  box-shadow: var(--wb-shadow-md);
 }
 
 .task-header {
@@ -624,7 +624,7 @@ onUnmounted(() => {
 .image-viewer {
   flex: 1;
   overflow: hidden;
-  background: #f0f0f0;
+  background: var(--wb-bg-hover);
   display: flex;
   align-items: center;
   justify-content: center;
@@ -668,8 +668,8 @@ onUnmounted(() => {
 
 .answer-display {
   padding: 8px 12px;
-  background: #f5f7fa;
-  border-radius: 4px;
+  background: var(--wb-bg);
+  border-radius: var(--wb-radius-xs);
   font-size: 14px;
 }
 
@@ -709,10 +709,10 @@ onUnmounted(() => {
 
 .completed-card {
   background: #fff;
-  border-radius: 16px;
+  border-radius: var(--wb-radius-lg);
   padding: 48px 64px;
   text-align: center;
-  box-shadow: 0 4px 24px rgba(0,0,0,0.1);
+  box-shadow: var(--wb-shadow-lg);
 }
 
 .completed-icon {
@@ -723,7 +723,7 @@ onUnmounted(() => {
 .completed-card h3 {
   font-size: 24px;
   font-weight: 600;
-  color: #1D2129;
+  color: var(--wb-text);
   margin: 0 0 24px;
 }
 
@@ -743,12 +743,12 @@ onUnmounted(() => {
 .stat-value {
   font-size: 32px;
   font-weight: 700;
-  color: #1677FF;
+  color: var(--wb-primary);
 }
 
 .stat-label {
   font-size: 13px;
-  color: #86909C;
+  color: var(--wb-text-tertiary);
   margin-top: 4px;
 }
 

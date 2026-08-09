@@ -401,11 +401,11 @@ const MathText = ({ content, className = '', plainText = true }) => {
             <code
               key={i}
               style={{
-                background: '#FEE2E2',
+                background: 'var(--danger-soft)',
                 padding: '1px 4px',
-                borderRadius: '4px',
+                borderRadius: 'var(--radius-4)',
                 fontSize: '0.9em',
-                color: '#DC2626'
+                color: 'var(--danger)'
               }}
             >
               {seg.type === 'display' ? `$$${seg.content}$$` : `\\(${seg.content}\\)`}

@@ -22,8 +22,8 @@ defineEmits(['edit'])
   margin: 16px 0 8px;
   padding: 8px;
   background: #f9fafb;
-  border-radius: 4px;
-  border-left: 3px solid #3b82f6;
+  border-radius: var(--wb-radius-xs);
+  border-left: 3px solid var(--wb-primary);
 }
 
 .section-content {
@@ -35,7 +35,7 @@ defineEmits(['edit'])
 .editable-text {
   cursor: pointer;
   padding: 2px 4px;
-  border-radius: 4px;
+  border-radius: var(--wb-radius-xs);
   transition: background 0.2s;
 }
 

@@ -377,7 +377,7 @@ onMounted(() => {
   height: 100vh;
   display: flex;
   flex-direction: column;
-  background: #f5f7fa;
+  background: var(--wb-bg);
 }
 
 .header {
@@ -386,7 +386,7 @@ onMounted(() => {
   display: flex;
   justify-content: space-between;
   align-items: center;
-  box-shadow: 0 2px 8px rgba(0,0,0,0.1);
+  box-shadow: var(--wb-shadow-sm);
   z-index: 10;
 }
 

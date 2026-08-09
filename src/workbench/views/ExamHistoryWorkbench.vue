@@ -398,7 +398,7 @@ onMounted(async () => {
   height: 100%;
   display: flex;
   flex-direction: column;
-  background: #f5f7fa;
+  background: var(--wb-bg);
 }
 
 /* ── Top Bar ── */
@@ -408,7 +408,7 @@ onMounted(async () => {
   justify-content: space-between;
   padding: 12px 20px;
   background: #fff;
-  border-bottom: 1px solid #e4e7ed;
+  border-bottom: 1px solid var(--wb-border);
   flex-shrink: 0;
 }
 
@@ -421,7 +421,7 @@ onMounted(async () => {
 .page-title {
   font-size: 16px;
   font-weight: 600;
-  color: #1D2129;
+  color: var(--wb-text);
   margin-right: 4px;
 }
 
@@ -430,11 +430,11 @@ onMounted(async () => {
   align-items: center;
   gap: 12px;
   font-size: 13px;
-  color: #86909C;
+  color: var(--wb-text-tertiary);
 }
 
-.stat-graded { color: #67C23A; }
-.stat-ungraded { color: #E6A23C; }
+.stat-graded { color: var(--wb-success); }
+.stat-ungraded { color: var(--wb-warning); }
 
 /* ── Main Content ── */
 .main-content {
@@ -473,12 +473,12 @@ onMounted(async () => {
 .detail-header h3 {
   margin: 0;
   font-size: 20px;
-  color: #1D2129;
+  color: var(--wb-text);
 }
 
 .detail-meta {
   font-size: 13px;
-  color: #86909C;
+  color: var(--wb-text-tertiary);
   margin-bottom: 24px;
 }
 
@@ -489,14 +489,14 @@ onMounted(async () => {
   gap: 16px;
   padding: 16px 20px;
   background: #fff;
-  border: 1px solid #e4e7ed;
-  border-radius: 8px;
+  border: 1px solid var(--wb-border);
+  border-radius: var(--wb-radius-sm);
 }
 
 .grade-action__hint {
   flex: 1;
   font-size: 13px;
-  color: #86909C;
+  color: var(--wb-text-tertiary);
 }
 
 /* 已批改统计卡 */
@@ -508,10 +508,10 @@ onMounted(async () => {
 
 .stat-box {
   background: #fff;
-  border-radius: 8px;
+  border-radius: var(--wb-radius-sm);
   padding: 20px;
   text-align: center;
-  border: 1px solid #e4e7ed;
+  border: 1px solid var(--wb-border);
 }
 
 .stat-box__value {
@@ -522,23 +522,23 @@ onMounted(async () => {
 
 .stat-box__label {
   font-size: 13px;
-  color: #86909C;
+  color: var(--wb-text-tertiary);
 }
 
-.stat-box--total .stat-box__value { color: #1D2129; }
-.stat-box--correct .stat-box__value { color: #67C23A; }
+.stat-box--total .stat-box__value { color: var(--wb-text); }
+.stat-box--correct .stat-box__value { color: var(--wb-success); }
 .stat-box--wrong .stat-box__value { color: #F56C6C; }
-.stat-box--rate .stat-box__value { color: #1677FF; }
+.stat-box--rate .stat-box__value { color: var(--wb-primary); }
 
 .detail-subtitle {
   font-size: 15px;
-  color: #1D2129;
+  color: var(--wb-text);
   margin: 0 0 16px 0;
 }
 
 .detail-subtitle__count {
   font-size: 13px;
-  color: #86909C;
+  color: var(--wb-text-tertiary);
   font-weight: 400;
 }
 
@@ -556,8 +556,8 @@ onMounted(async () => {
 
 .q-card {
   background: #fff;
-  border: 1px solid #e4e7ed;
-  border-radius: 8px;
+  border: 1px solid var(--wb-border);
+  border-radius: var(--wb-radius-sm);
   overflow: hidden;
 }
 
@@ -566,24 +566,24 @@ onMounted(async () => {
   align-items: center;
   justify-content: space-between;
   padding: 10px 14px;
-  border-bottom: 1px solid #f2f3f5;
+  border-bottom: 1px solid var(--wb-bg-hover);
 }
 
 .q-index {
   font-size: 14px;
   font-weight: 600;
-  color: #4E5969;
+  color: var(--wb-text-secondary);
 }
 
 .q-status {
   font-size: 12px;
   font-weight: 500;
   padding: 2px 10px;
-  border-radius: 4px;
+  border-radius: var(--wb-radius-xs);
 }
 
 .q-status--correct {
-  color: #67C23A;
+  color: var(--wb-success);
   background: #F0F9EB;
 }
 
@@ -593,7 +593,7 @@ onMounted(async () => {
 }
 
 .q-status--pending {
-  color: #E6A23C;
+  color: var(--wb-warning);
   background: #FDF6EC;
 }
 
@@ -601,7 +601,7 @@ onMounted(async () => {
   display: flex;
   gap: 8px;
   padding: 10px 14px;
-  border-top: 1px solid #f2f3f5;
+  border-top: 1px solid var(--wb-bg-hover);
 }
 
 /* ── 底部保存栏 ── */
@@ -612,13 +612,13 @@ onMounted(async () => {
   gap: 16px;
   padding: 12px 32px;
   background: #fff;
-  border-top: 1px solid #e4e7ed;
+  border-top: 1px solid var(--wb-border);
   flex-shrink: 0;
 }
 
 .save-bar__hint {
   font-size: 13px;
-  color: #86909C;
+  color: var(--wb-text-tertiary);
 }
 
 .q-image {
@@ -632,6 +632,6 @@ onMounted(async () => {
   padding: 24px;
   text-align: center;
   font-size: 13px;
-  color: #c0c4cc;
+  color: var(--wb-text-tertiary);
 }
 </style>

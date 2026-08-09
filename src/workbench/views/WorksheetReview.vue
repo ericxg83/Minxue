@@ -366,7 +366,7 @@ const confProgress = (c) => {
   align-items: center;
   gap: 8px;
   padding: 5px 12px;
-  border-radius: 4px;
+  border-radius: var(--wb-radius-xs);
   cursor: pointer;
   transition: background 0.15s;
   font-size: 13px;
@@ -377,11 +377,11 @@ const confProgress = (c) => {
 }
 
 .answer-item.active {
-  background: var(--el-color-primary-light-9);
+  background: var(--wb-primary-mist);
 }
 
 .answer-item.low {
-  border-left: 3px solid var(--el-color-danger);
+  border-left: 3px solid var(--wb-danger);
 }
 
 .unit-header {
@@ -392,9 +392,9 @@ const confProgress = (c) => {
   margin: 8px 0 2px;
   font-size: 13px;
   font-weight: 700;
-  color: var(--el-color-primary);
+  color: var(--wb-primary);
   background: var(--wb-bg-card);
-  border-bottom: 2px solid var(--el-color-primary);
+  border-bottom: 2px solid var(--wb-primary);
 }
 
 .section-header {
@@ -407,7 +407,7 @@ const confProgress = (c) => {
   font-weight: 600;
   color: var(--wb-text-secondary);
   background: var(--wb-bg-hover);
-  border-radius: 4px;
+  border-radius: var(--wb-radius-xs);
 }
 
 .qno {
@@ -428,9 +428,9 @@ const confProgress = (c) => {
   text-align: right;
 }
 
-.qconf.high { color: var(--el-color-success); }
-.qconf.mid { color: var(--el-color-warning); }
-.qconf.low { color: var(--el-color-danger); }
+.qconf.high { color: var(--wb-success); }
+.qconf.mid { color: var(--wb-warning); }
+.qconf.low { color: var(--wb-danger); }
 
 .edit-form {
   padding: 16px;

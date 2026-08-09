@@ -29,7 +29,7 @@ defineEmits(['edit'])
   gap: 4px;
   margin-bottom: 8px;
   padding: 4px 8px;
-  border-radius: 4px;
+  border-radius: var(--wb-radius-xs);
 }
 
 .text-block.low-conf {
@@ -52,7 +52,7 @@ defineEmits(['edit'])
 .editable-text {
   cursor: pointer;
   padding: 2px 4px;
-  border-radius: 4px;
+  border-radius: var(--wb-radius-xs);
   transition: background 0.2s;
 }
 

@@ -8,9 +8,9 @@ import dayjs from 'dayjs'
 
 // 状态映射（spec：待批改 / 批改中 / 已完成）
 const STATUS_META = {
-  ungraded: { label: '待批改', color: '#F59E0B', bg: '#FEF3C7', icon: Clock },
-  grading: { label: '批改中', color: '#3B82F6', bg: '#DBEAFE', icon: Loader2 },
-  graded: { label: '已完成', color: '#16A34A', bg: '#DCFCE7', icon: CheckCircle2 }
+  ungraded: { label: '待批改', color: 'var(--warning)', bg: 'var(--warning-soft)', icon: Clock },
+  grading: { label: '批改中', color: 'var(--primary)', bg: 'var(--primary-soft)', icon: Loader2 },
+  graded: { label: '已完成', color: 'var(--success)', bg: 'var(--success-soft)', icon: CheckCircle2 }
 }
 
 const REVIEW_WORKBENCH_BASE = import.meta.env.VITE_WORKBENCH_URL || '/workbench'
@@ -125,27 +125,27 @@ export default function RetryTask({ taskId, onBack }) {
   }
 
   return (
-    <div className="min-h-screen flex flex-col" style={{ background: '#F5F7FA' }}>
+    <div className="min-h-screen flex flex-col" style={{ background: 'var(--bg)' }}>
       {/* Header */}
-      <div className="flex items-center justify-between px-4 pt-12 pb-3 bg-white border-b" style={{ borderColor: '#E5E7EB' }}>
+      <div className="flex items-center justify-between px-4 pt-12 pb-3 bg-white border-b" style={{ borderColor: 'var(--border-light)' }}>
         {onBack ? (
-          <button onClick={onBack} style={{ fontSize: '13px', color: '#2563EB' }}>返回</button>
+          <button onClick={onBack} style={{ fontSize: 'var(--fs-13)', color: 'var(--primary-hover)' }}>返回</button>
         ) : (
           <div className="w-10" />
         )}
-        <h2 style={{ fontSize: '15px', fontWeight: 600, color: '#111827' }}>错题重练任务</h2>
+        <h2 style={{ fontSize: 'var(--fs-15)', fontWeight: 600, color: 'var(--text)' }}>错题重练任务</h2>
         <div className="w-10" />
       </div>
 
       {loading ? (
-        <div className="flex-1 flex flex-col items-center justify-center gap-3" style={{ color: '#9CA3AF' }}>
+        <div className="flex-1 flex flex-col items-center justify-center gap-3" style={{ color: 'var(--text-secondary)' }}>
           <Loader2 size={28} className="animate-spin" />
-          <span style={{ fontSize: '13px' }}>正在加载任务...</span>
+          <span style={{ fontSize: 'var(--fs-13)' }}>正在加载任务...</span>
         </div>
       ) : error ? (
         <div className="flex-1 flex flex-col items-center justify-center gap-3 px-8 text-center">
-          <span style={{ fontSize: '14px', color: '#EF4444' }}>{error}</span>
-          <button onClick={loadTask} className="px-5 py-2 rounded-lg text-[13px]" style={{ background: '#2563EB', color: '#fff' }}>重试</button>
+          <span style={{ fontSize: 'var(--fs-14)', color: 'var(--danger)' }}>{error}</span>
+          <button onClick={loadTask} className="px-5 py-2 rounded-lg text-[13px]" style={{ background: 'var(--primary-hover)', color: '#fff' }}>重试</button>
         </div>
       ) : (
         <div className="flex-1 overflow-auto px-4 py-5">
@@ -156,9 +156,9 @@ export default function RetryTask({ taskId, onBack }) {
             className="bg-white rounded-2xl p-5 shadow-sm"
           >
             <div className="flex items-center justify-between mb-4">
-              <div className="flex items-center gap-2" style={{ color: '#2563EB' }}>
+              <div className="flex items-center gap-2" style={{ color: 'var(--primary-hover)' }}>
                 <ClipboardList size={20} />
-                <span style={{ fontSize: '15px', fontWeight: 600 }}>错题重练</span>
+                <span style={{ fontSize: 'var(--fs-15)', fontWeight: 600 }}>错题重练</span>
               </div>
               <span
                 className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-[12px] font-medium"
@@ -180,24 +180,24 @@ export default function RetryTask({ taskId, onBack }) {
           {/* 上传区（仅待批改态可上传） */}
           {!isDone && (
             <div className="mt-4 bg-white rounded-2xl p-5 shadow-sm">
-              <div className="text-[14px] font-medium mb-3" style={{ color: '#111827' }}>上传答案照片</div>
+              <div className="text-[14px] font-medium mb-3" style={{ color: 'var(--text)' }}>上传答案照片</div>
 
               {/* 已选预览 */}
               {pendingFiles.length > 0 && (
                 <div className="grid grid-cols-3 gap-2 mb-3">
                   {pendingFiles.map((p, i) => (
-                    <div key={i} className="relative rounded-lg overflow-hidden" style={{ aspectRatio: '1 / 1', background: '#F3F4F6' }}>
+                    <div key={i} className="relative rounded-lg overflow-hidden" style={{ aspectRatio: '1 / 1', background: 'var(--bg-secondary)' }}>
                       {p.url ? (
                         <img src={p.url} alt={p.name} className="w-full h-full object-cover" />
                       ) : (
-                        <div className="w-full h-full flex items-center justify-center" style={{ color: '#9CA3AF' }}>
+                        <div className="w-full h-full flex items-center justify-center" style={{ color: 'var(--text-secondary)' }}>
                           <ImageIcon size={20} />
                         </div>
                       )}
                       <button
                         onClick={() => removePending(i)}
                         className="absolute top-1 right-1 w-5 h-5 rounded-full flex items-center justify-center"
-                        style={{ background: 'rgba(0,0,0,0.5)', color: '#fff', fontSize: '12px' }}
+                        style={{ background: 'rgba(0,0,0,0.5)', color: '#fff', fontSize: 'var(--fs-12)' }}
                       >×</button>
                     </div>
                   ))}
@@ -208,14 +208,14 @@ export default function RetryTask({ taskId, onBack }) {
                 <button
                   onClick={() => cameraInputRef.current?.click()}
                   className="flex-1 py-2.5 rounded-lg text-[13px] font-medium flex items-center justify-center gap-1.5"
-                  style={{ background: '#EFF6FF', color: '#2563EB' }}
+                  style={{ background: 'var(--primary-mist)', color: 'var(--primary-hover)' }}
                 >
                   <Camera size={16} /> 拍照
                 </button>
                 <button
                   onClick={() => albumInputRef.current?.click()}
                   className="flex-1 py-2.5 rounded-lg text-[13px] font-medium flex items-center justify-center gap-1.5"
-                  style={{ background: '#F1F5F9', color: '#475569' }}
+                  style={{ background: 'var(--bg-secondary)', color: 'var(--text-secondary)' }}
                 >
                   <ImageIcon size={16} /> 相册
                 </button>
@@ -229,7 +229,7 @@ export default function RetryTask({ taskId, onBack }) {
                 disabled={uploading || pendingFiles.length === 0}
                 className="w-full mt-3 py-3 rounded-xl text-[14px] font-semibold flex items-center justify-center gap-2"
                 style={{
-                  background: uploading || pendingFiles.length === 0 ? '#CBD5E1' : '#2563EB',
+                  background: uploading || pendingFiles.length === 0 ? 'var(--bg-secondary)' : 'var(--primary-hover)',
                   color: '#fff'
                 }}
               >
@@ -242,13 +242,13 @@ export default function RetryTask({ taskId, onBack }) {
           {/* 已完成：进入组卷历史查看批改结果 */}
           {isDone && (
             <div className="mt-4 bg-white rounded-2xl p-5 shadow-sm">
-              <div className="text-[14px]" style={{ color: '#16A34A' }}>
+              <div className="text-[14px]" style={{ color: 'var(--success)' }}>
                 本次错题重练已完成批改。
               </div>
               <button
                 onClick={goToWorkbench}
                 className="w-full mt-3 py-3 rounded-xl text-[14px] font-semibold"
-                style={{ background: '#2563EB', color: '#fff' }}
+                style={{ background: 'var(--primary-hover)', color: '#fff' }}
               >
                 查看批改结果
               </button>
@@ -258,8 +258,8 @@ export default function RetryTask({ taskId, onBack }) {
           {/* 批改中：提示等待 */}
           {status === 'grading' && (
             <div className="mt-4 bg-white rounded-2xl p-5 shadow-sm flex items-center gap-3">
-              <Loader2 size={18} className="animate-spin" style={{ color: '#2563EB' }} />
-              <span style={{ fontSize: '13px', color: '#475569' }}>
+              <Loader2 size={18} className="animate-spin" style={{ color: 'var(--primary-hover)' }} />
+              <span style={{ fontSize: 'var(--fs-13)', color: 'var(--text-secondary)' }}>
                 AI 正在批改，完成后可在「组卷历史」查看结果。
               </span>
             </div>
@@ -273,8 +273,8 @@ export default function RetryTask({ taskId, onBack }) {
 function InfoRow({ label, value }) {
   return (
     <div className="flex items-center justify-between">
-      <span style={{ fontSize: '13px', color: '#6B7280' }}>{label}</span>
-      <span style={{ fontSize: '14px', fontWeight: 500, color: '#111827', textAlign: 'right', maxWidth: '60%' }}>{value}</span>
+      <span style={{ fontSize: 'var(--fs-13)', color: 'var(--text-secondary)' }}>{label}</span>
+      <span style={{ fontSize: 'var(--fs-14)', fontWeight: 500, color: 'var(--text)', textAlign: 'right', maxWidth: '60%' }}>{value}</span>
     </div>
   )
 }

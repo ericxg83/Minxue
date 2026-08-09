@@ -391,12 +391,12 @@ export default function ScanQR({ onClose, onScanSuccess }) {
             padding: '48px 16px 12px', position: 'relative', zIndex: 10
           }}>
             <button onClick={onClose} style={{
-              padding: '4px', borderRadius: '50%', background: 'rgba(0,0,0,0.3)', border: 'none', cursor: 'pointer',
+              padding: '4px', borderRadius: 'var(--radius-full)', background: 'rgba(0,0,0,0.3)', border: 'none', cursor: 'pointer',
               width: 36, height: 36, display: 'flex', alignItems: 'center', justifyContent: 'center'
             }}>
               <X size={22} color="#fff" />
             </button>
-            <h2 style={{ margin: 0, fontSize: '15px', fontWeight: 600, color: '#fff', textShadow: '0 1px 4px rgba(0,0,0,0.5)' }}>扫码批改</h2>
+            <h2 style={{ margin: 0, fontSize: 'var(--fs-15)', fontWeight: 600, color: '#fff', textShadow: '0 1px 4px rgba(0,0,0,0.5)' }}>扫码批改</h2>
             <div style={{ width: '36px' }} />
           </div>
 
@@ -415,7 +415,7 @@ export default function ScanQR({ onClose, onScanSuccess }) {
                 flexDirection: 'column', gap: '12px', zIndex: 5
               }}>
                 <Loader2 size={32} color="#fff" className="animate-spin" />
-                <div style={{ color: 'rgba(255,255,255,0.8)', fontSize: '14px', textShadow: '0 1px 4px rgba(0,0,0,0.5)' }}>
+                <div style={{ color: 'rgba(255,255,255,0.8)', fontSize: 'var(--fs-14)', textShadow: '0 1px 4px rgba(0,0,0,0.5)' }}>
                   {initMsg}
                 </div>
               </div>
@@ -426,24 +426,24 @@ export default function ScanQR({ onClose, onScanSuccess }) {
               <div style={{
                 width: '280px', height: '280px',
                 border: '2px solid rgba(255,255,255,0.6)',
-                borderRadius: '20px', position: 'relative', zIndex: 1,
+                borderRadius: 'var(--radius-lg)', position: 'relative', zIndex: 1,
                 boxShadow: '0 0 0 9999px rgba(0,0,0,0.4)'
               }}>
                 <div style={{
                   position: 'absolute', top: '-2px', left: '-2px', width: '30px', height: '30px',
-                  borderTop: '4px solid #2563EB', borderLeft: '4px solid #2563EB', borderTopLeftRadius: '10px'
+                  borderTop: '4px solid var(--primary-hover)', borderLeft: '4px solid var(--primary-hover)', borderTopLeftRadius: '10px'
                 }} />
                 <div style={{
                   position: 'absolute', top: '-2px', right: '-2px', width: '30px', height: '30px',
-                  borderTop: '4px solid #2563EB', borderRight: '4px solid #2563EB', borderTopRightRadius: '10px'
+                  borderTop: '4px solid var(--primary-hover)', borderRight: '4px solid var(--primary-hover)', borderTopRightRadius: '10px'
                 }} />
                 <div style={{
                   position: 'absolute', bottom: '-2px', left: '-2px', width: '30px', height: '30px',
-                  borderBottom: '4px solid #2563EB', borderLeft: '4px solid #2563EB', borderBottomLeftRadius: '10px'
+                  borderBottom: '4px solid var(--primary-hover)', borderLeft: '4px solid var(--primary-hover)', borderBottomLeftRadius: '10px'
                 }} />
                 <div style={{
                   position: 'absolute', bottom: '-2px', right: '-2px', width: '30px', height: '30px',
-                  borderBottom: '4px solid #2563EB', borderRight: '4px solid #2563EB', borderBottomRightRadius: '10px'
+                  borderBottom: '4px solid var(--primary-hover)', borderRight: '4px solid var(--primary-hover)', borderBottomRightRadius: '10px'
                 }} />
                 {cameraReady && (
                   <motion.div
@@ -451,7 +451,7 @@ export default function ScanQR({ onClose, onScanSuccess }) {
                     transition={{ duration: 2, repeat: Infinity, ease: 'linear' }}
                     style={{
                       position: 'absolute', left: 0, right: 0, height: '2px',
-                      background: 'linear-gradient(to right, transparent, #2563EB, transparent)'
+                      background: 'linear-gradient(to right, transparent, var(--primary-hover), transparent)'
                     }}
                   />
                 )}
@@ -461,7 +461,7 @@ export default function ScanQR({ onClose, onScanSuccess }) {
             {/* 提示文字 */}
             {cameraReady && !scanError && !cameraTimeout && (
               <div style={{
-                color: 'rgba(255,255,255,0.9)', fontSize: '14px', marginTop: '24px',
+                color: 'rgba(255,255,255,0.9)', fontSize: 'var(--fs-14)', marginTop: '24px',
                 textAlign: 'center', zIndex: 5, textShadow: '0 1px 4px rgba(0,0,0,0.5)'
               }}>
                 将二维码放入框内，自动识别
@@ -476,10 +476,10 @@ export default function ScanQR({ onClose, onScanSuccess }) {
             <div onClick={handleAlbum} style={{
               textAlign: 'center', cursor: 'pointer',
               display: 'flex', alignItems: 'center', gap: '8px',
-              padding: '10px 20px', borderRadius: '24px', background: 'rgba(0,0,0,0.3)'
+              padding: '10px 20px', borderRadius: 'var(--radius-24)', background: 'rgba(0,0,0,0.3)'
             }}>
               <ImageIcon size={20} color="#fff" />
-              <div style={{ color: '#fff', fontSize: '13px' }}>相册</div>
+              <div style={{ color: '#fff', fontSize: 'var(--fs-13)' }}>相册</div>
             </div>
           </div>
         </>)}
@@ -490,19 +490,19 @@ export default function ScanQR({ onClose, onScanSuccess }) {
             position: 'absolute', inset: 0, display: 'flex', alignItems: 'center', justifyContent: 'center',
             flexDirection: 'column', gap: '16px', zIndex: 9999, background: 'rgba(0,0,0,0.85)', padding: '20px'
           }}>
-            <div style={{ color: '#fff', fontSize: '15px', textAlign: 'center', lineHeight: '1.6' }}>
+            <div style={{ color: '#fff', fontSize: 'var(--fs-15)', textAlign: 'center', lineHeight: '1.6' }}>
               {scanError || '无法启动相机'}
             </div>
             <button onClick={handleAlbum} style={{
-              padding: '12px 32px', background: '#2563EB', color: '#fff', borderRadius: '8px',
-              fontSize: '15px', fontWeight:600, border: 'none', cursor: 'pointer', display: 'flex', alignItems: 'center', gap: '8px'
+              padding: '12px 32px', background: 'var(--primary-hover)', color: '#fff', borderRadius: 'var(--radius-8)',
+              fontSize: 'var(--fs-15)', fontWeight:600, border: 'none', cursor: 'pointer', display: 'flex', alignItems: 'center', gap: '8px'
             }}>
               <ImageIcon size={18} />
               打开相册
             </button>
             <button onClick={() => { setCameraTimeout(false); setScanError(null); if (isNative()) startNativeScan(); else startWebCamera(); }} style={{
-              padding: '12px 32px', background: 'rgba(255,255,255,0.15)', color: '#fff', borderRadius: '8px',
-              fontSize: '15px', fontWeight: 500, border: '1px solid rgba(255,255,255,0.3)', cursor: 'pointer', display: 'flex', alignItems: 'center', gap: '8px'
+              padding: '12px 32px', background: 'rgba(255,255,255,0.15)', color: '#fff', borderRadius: 'var(--radius-8)',
+              fontSize: 'var(--fs-15)', fontWeight: 500, border: '1px solid rgba(255,255,255,0.3)', cursor: 'pointer', display: 'flex', alignItems: 'center', gap: '8px'
             }}>
               重试
             </button>
@@ -516,8 +516,8 @@ export default function ScanQR({ onClose, onScanSuccess }) {
             background: 'rgba(0,0,0,0.6)'
           }}>
             <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '16px' }}>
-              <Loader2 size={40} color="#2563EB" className="animate-spin" />
-              <div style={{ color: '#fff', fontSize: '15px' }}>识别中...</div>
+              <Loader2 size={40} color="var(--primary-hover)" className="animate-spin" />
+              <div style={{ color: '#fff', fontSize: 'var(--fs-15)' }}>识别中...</div>
             </div>
           </div>
         )}
@@ -525,7 +525,7 @@ export default function ScanQR({ onClose, onScanSuccess }) {
         {/* 错误提示（非超时） */}
         {scanError && !cameraTimeout && (
           <div style={{
-            color: '#EF4444', fontSize: '14px', marginTop: '20px', textAlign: 'center',
+            color: 'var(--danger)', fontSize: 'var(--fs-14)', marginTop: '20px', textAlign: 'center',
             padding: '0 20px', zIndex: 5, textShadow: '0 1px 4px rgba(0,0,0,0.5)'
           }}>
             {scanError}

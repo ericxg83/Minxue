@@ -170,7 +170,7 @@ onMounted(loadExams)
   height: 100%;
   display: flex;
   flex-direction: column;
-  background: #F5F7FA;
+  background: var(--wb-bg);
   font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
 }
 
@@ -180,13 +180,13 @@ onMounted(loadExams)
   align-items: center;
   padding: 16px 24px;
   background: #fff;
-  border-bottom: 1px solid #E5E6EB;
+  border-bottom: 1px solid var(--wb-border);
 }
 
 .page-header h2 {
   font-size: 18px;
   font-weight: 600;
-  color: #1D2129;
+  color: var(--wb-text);
   margin: 0;
 }
 

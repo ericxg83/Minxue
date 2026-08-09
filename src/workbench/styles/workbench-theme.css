@@ -100,6 +100,7 @@
   --wb-border-light: #F1F5F9;
 
   /* 圆角（Claymorphism: 略大、有触感） */
+  --wb-radius-xs: 6px;
   --wb-radius-sm: 10px;
   --wb-radius-md: 14px;
   --wb-radius-lg: 18px;
@@ -199,7 +200,7 @@ body {
 }
 ::-webkit-scrollbar-thumb {
   background: #CBD5E1;
-  border-radius: 3px;
+  border-radius: var(--wb-radius-xs);
 }
 ::-webkit-scrollbar-thumb:hover {
   background: #94A3B8;

@@ -27,9 +27,9 @@
 <style scoped>
 .question-card-skeleton {
   background: #fff;
-  border-radius: 12px;
+  border-radius: var(--wb-radius-md);
   padding: 16px;
-  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.04);
+  box-shadow: var(--wb-shadow-sm);
   animation: pulse 1.5s ease-in-out infinite;
 }
 
@@ -52,16 +52,16 @@
 .skeleton-checkbox {
   width: 16px;
   height: 16px;
-  border-radius: 4px;
-  background: linear-gradient(90deg, #f2f3f5 25%, #e5e6eb 50%, #f2f3f5 75%);
+  border-radius: var(--wb-radius-xs);
+  background: linear-gradient(90deg, var(--wb-bg-hover) 25%, var(--wb-border) 50%, var(--wb-bg-hover) 75%);
   background-size: 200% 100%;
   animation: loading 1.5s ease-in-out infinite;
 }
 
 .skeleton-line {
   height: 14px;
-  border-radius: 4px;
-  background: linear-gradient(90deg, #f2f3f5 25%, #e5e6eb 50%, #f2f3f5 75%);
+  border-radius: var(--wb-radius-xs);
+  background: linear-gradient(90deg, var(--wb-bg-hover) 25%, var(--wb-border) 50%, var(--wb-bg-hover) 75%);
   background-size: 200% 100%;
   animation: loading 1.5s ease-in-out infinite;
 }
@@ -81,8 +81,8 @@
 .skeleton-badge {
   width: 60px;
   height: 20px;
-  border-radius: 10px;
-  background: linear-gradient(90deg, #f2f3f5 25%, #e5e6eb 50%, #f2f3f5 75%);
+  border-radius: var(--wb-radius-sm);
+  background: linear-gradient(90deg, var(--wb-bg-hover) 25%, var(--wb-border) 50%, var(--wb-bg-hover) 75%);
   background-size: 200% 100%;
   animation: loading 1.5s ease-in-out infinite;
   margin-left: auto;
@@ -104,8 +104,8 @@
 .skeleton-tag {
   width: 60px;
   height: 22px;
-  border-radius: 4px;
-  background: linear-gradient(90deg, #f2f3f5 25%, #e5e6eb 50%, #f2f3f5 75%);
+  border-radius: var(--wb-radius-xs);
+  background: linear-gradient(90deg, var(--wb-bg-hover) 25%, var(--wb-border) 50%, var(--wb-bg-hover) 75%);
   background-size: 200% 100%;
   animation: loading 1.5s ease-in-out infinite;
 }
@@ -119,8 +119,8 @@
 .skeleton-actions {
   width: 80px;
   height: 14px;
-  border-radius: 4px;
-  background: linear-gradient(90deg, #f2f3f5 25%, #e5e6eb 50%, #f2f3f5 75%);
+  border-radius: var(--wb-radius-xs);
+  background: linear-gradient(90deg, var(--wb-bg-hover) 25%, var(--wb-border) 50%, var(--wb-bg-hover) 75%);
   background-size: 200% 100%;
   animation: loading 1.5s ease-in-out infinite;
 }

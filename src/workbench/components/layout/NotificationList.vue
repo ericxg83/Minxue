@@ -144,7 +144,7 @@ function handleRefresh() {
   width: 380px;
   max-height: 480px;
   background: #fff;
-  border-radius: 8px;
+  border-radius: var(--wb-radius-sm);
   display: flex;
   flex-direction: column;
 }
@@ -160,7 +160,7 @@ function handleRefresh() {
 .panel-title {
   font-size: 15px;
   font-weight: 600;
-  color: #1D2129;
+  color: var(--wb-text);
 }
 
 /* ── Summary Cards ── */
@@ -177,14 +177,14 @@ function handleRefresh() {
   align-items: center;
   gap: 6px;
   padding: 12px 4px;
-  border-radius: 8px;
+  border-radius: var(--wb-radius-sm);
   cursor: pointer;
   transition: background 0.2s;
   user-select: none;
 }
 
 .summary-card:hover {
-  background: #F2F3F5;
+  background: var(--wb-bg-hover);
 }
 
 .card-icon {
@@ -193,13 +193,13 @@ function handleRefresh() {
   justify-content: center;
   width: 32px;
   height: 32px;
-  border-radius: 8px;
+  border-radius: var(--wb-radius-sm);
   color: #fff;
 }
 
-.icon-blue  { background: #1677FF; }
-.icon-red   { background: #F53F3F; }
-.icon-orange { background: #FA8C16; }
+.icon-blue  { background: var(--wb-primary); }
+.icon-red   { background: var(--wb-danger); }
+.icon-orange { background: var(--wb-warning); }
 .icon-green { background: #00B42A; }
 
 .card-body {
@@ -212,20 +212,20 @@ function handleRefresh() {
 .card-num {
   font-size: 18px;
   font-weight: 700;
-  color: #1D2129;
+  color: var(--wb-text);
   line-height: 1.2;
 }
 
 .card-label {
   font-size: 11px;
-  color: #86909C;
+  color: var(--wb-text-tertiary);
   white-space: nowrap;
 }
 
 /* ── Divider ── */
 .section-divider {
   height: 1px;
-  background: #F2F3F5;
+  background: var(--wb-bg-hover);
   margin: 0 12px;
 }
 
@@ -240,7 +240,7 @@ function handleRefresh() {
 .section-title {
   font-size: 13px;
   font-weight: 500;
-  color: #86909C;
+  color: var(--wb-text-tertiary);
   padding: 10px 16px 6px;
 }
 
@@ -250,7 +250,7 @@ function handleRefresh() {
   justify-content: center;
   gap: 6px;
   padding: 24px 0;
-  color: #C9CDD4;
+  color: var(--wb-text-tertiary);
   font-size: 13px;
 }
 
@@ -269,7 +269,7 @@ function handleRefresh() {
 }
 
 .task-row:hover {
-  background: #F7F8FA;
+  background: var(--wb-bg-hover);
 }
 
 .task-dot {
@@ -279,8 +279,8 @@ function handleRefresh() {
   border-radius: 50%;
 }
 
-.dot-warning { background: #FA8C16; }
-.dot-danger  { background: #F53F3F; }
+.dot-warning { background: var(--wb-warning); }
+.dot-danger  { background: var(--wb-danger); }
 
 .task-info {
   flex: 1;
@@ -290,7 +290,7 @@ function handleRefresh() {
 .task-name {
   font-size: 13px;
   font-weight: 500;
-  color: #1D2129;
+  color: var(--wb-text);
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -298,18 +298,18 @@ function handleRefresh() {
 
 .task-meta {
   font-size: 11px;
-  color: #86909C;
+  color: var(--wb-text-tertiary);
   margin-top: 2px;
 }
 
 .task-arrow {
   font-size: 14px;
-  color: #C9CDD4;
+  color: var(--wb-text-tertiary);
   flex-shrink: 0;
 }
 
 .task-row:hover .task-arrow {
-  color: #4E5969;
+  color: var(--wb-text-secondary);
 }
 
 /* ── Footer ── */
@@ -319,15 +319,15 @@ function handleRefresh() {
   justify-content: center;
   gap: 4px;
   padding: 12px 16px;
-  border-top: 1px solid #F2F3F5;
+  border-top: 1px solid var(--wb-bg-hover);
   font-size: 13px;
-  color: #1677FF;
+  color: var(--wb-primary);
   cursor: pointer;
   transition: background 0.2s;
   border-radius: 0 0 8px 8px;
 }
 
 .panel-footer:hover {
-  background: #F7F8FA;
+  background: var(--wb-bg-hover);
 }
 </style>

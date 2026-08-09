@@ -96,8 +96,8 @@
         </div>
 
         <!-- 题目PDF上传（分开模式） -->
-        <div v-if="!isCombined" style="margin-bottom:16px;padding:12px;border:1px dashed #dcdfe6;border-radius:6px;">
-          <div style="font-size:13px;font-weight:600;margin-bottom:8px;color:#606266;">题目PDF（学生做题时看到的试卷）</div>
+        <div v-if="!isCombined" style="margin-bottom:16px;padding:12px;border:1px dashed var(--wb-border);border-radius: var(--wb-radius-xs);">
+          <div style="font-size:13px;font-weight:600;margin-bottom:8px;color:var(--wb-text-secondary);">题目PDF（学生做题时看到的试卷）</div>
           <el-upload
             drag
             accept=".pdf"
@@ -172,13 +172,13 @@
             <template v-if="parseTotalPages > 0">
               <el-progress :percentage="parsePercent" :stroke-width="10" style="margin-bottom: 8px" />
               <p>{{ parseMessage }}</p>
-              <p style="font-size: 12px; color: var(--el-text-color-secondary)">
+              <p style="font-size: 12px; color: var(--wb-text-secondary)">
                 已完成批次的答案已实时保存，无需守候，可稍后回来查看结果
               </p>
             </template>
             <template v-else>
               <p>{{ parseMessage }}</p>
-              <el-icon class="is-loading" :size="32" style="margin-top:12px;color:var(--el-color-primary)">
+              <el-icon class="is-loading" :size="32" style="margin-top:12px;color:var(--wb-primary)">
                 <Loading />
               </el-icon>
             </template>
@@ -260,7 +260,7 @@
         </el-table-column>
       </el-table>
 
-      <div v-if="showDebug" style="margin-top:16px;border-top:1px solid #ebeef5;padding-top:12px;">
+      <div v-if="showDebug" style="margin-top:16px;border-top:1px solid var(--wb-border);padding-top:12px;">
         <div style="font-weight:600;margin-bottom:8px;">📊 所有 worksheet 详细分布（debug）：</div>
         <div v-loading="loadingDebug" style="max-height:400px;overflow-y:auto;">
           <div v-for="w in debugWorksheets" :key="w.id" class="debug-card">
@@ -274,7 +274,7 @@
               试卷单元: {{ w.exam_units }}  |  章节答案: {{ w.chapter_ans_count }}  |  练习单元答案: {{ w.practice_ans_count }}  |  错挂答案: {{ w.orphan_ans_count }}  |  总: {{ w.total_ans_count }}
             </div>
             <div v-if="w.orphan_units && w.orphan_units.length" class="debug-orphan">
-              <span style="color:#e6a23c;">⚠️ 错挂的父章节：</span>
+              <span style="color:var(--wb-warning);">⚠️ 错挂的父章节：</span>
               <span v-for="(u, i) in w.orphan_units" :key="u.unit_id" class="debug-orphan-item">
                 {{ u.unit_key }} (ans={{ u.ans_count }})<span v-if="i < w.orphan_units.length - 1">, </span>
               </span>
@@ -360,14 +360,14 @@
         <el-table-column prop="old_unit_key" label="原 unit_key" min-width="180" />
         <el-table-column prop="new_unit_key" label="新 unit_key" min-width="180">
           <template #default="{ row }">
-            <span :style="{ color: row.changed ? '#67c23a' : '#909399', fontWeight: row.changed ? 600 : 400 }">
+            <span :style="{ color: row.changed ? 'var(--wb-success)' : 'var(--wb-text-tertiary)', fontWeight: row.changed ? 600 : 400 }">
               {{ row.new_unit_key }}
             </span>
           </template>
         </el-table-column>
         <el-table-column label="ordinal" width="100" align="center">
           <template #default="{ row }">
-            <span :style="{ color: row.old_ordinal !== row.new_ordinal ? '#e6a23c' : '#909399' }">
+            <span :style="{ color: row.old_ordinal !== row.new_ordinal ? 'var(--wb-warning)' : 'var(--wb-text-tertiary)' }">
               {{ row.old_ordinal }} → {{ row.new_ordinal }}
             </span>
           </template>
@@ -1128,7 +1128,7 @@ const worksheetName = (id) => {
   background: #1e1e1e;
   color: #d4d4d4;
   padding: 12px;
-  border-radius: 4px;
+  border-radius: var(--wb-radius-xs);
   max-height: 300px;
   overflow-y: auto;
   font-size: 12px;
@@ -1138,11 +1138,11 @@ const worksheetName = (id) => {
 }
 
 .debug-card {
-  border: 1px solid #ebeef5;
-  border-radius: 4px;
+  border: 1px solid var(--wb-border);
+  border-radius: var(--wb-radius-xs);
   padding: 8px 12px;
   margin-bottom: 8px;
-  background: #fafafa;
+  background: var(--wb-bg-hover);
 }
 .debug-head {
   display: flex;
@@ -1153,18 +1153,18 @@ const worksheetName = (id) => {
 .debug-id {
   font-family: monospace;
   font-size: 11px;
-  color: #909399;
+  color: var(--wb-text-tertiary);
 }
 .debug-stats {
   font-size: 12px;
-  color: #606266;
+  color: var(--wb-text-secondary);
   margin-bottom: 4px;
 }
 .debug-orphan {
   font-size: 12px;
   padding: 4px 8px;
   background: #fdf6ec;
-  border-radius: 3px;
+  border-radius: var(--wb-radius-xs);
   margin-top: 4px;
 }
 .debug-orphan-item {

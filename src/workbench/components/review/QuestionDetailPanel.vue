@@ -59,7 +59,7 @@
         <div class="ops-compare-item">
           <span class="ops-cmp-label">
             标准
-            <span v-if="editing" style="color:#e6a23c;font-weight:400;"> 编辑</span>
+            <span v-if="editing" style="color:var(--wb-warning);font-weight:400;"> 编辑</span>
           </span>
           <el-input v-if="editing" v-model="form.answer" size="default" placeholder="标准答案" />
           <span v-else-if="q.answer" class="ops-cmp-value correct-val">
@@ -88,7 +88,7 @@
         <span class="ops-ai-icon" :class="getAiStateClass(q)">{{ getAiStateIcon(q) }}</span>
         <span class="ops-ai-text">{{ getAiStateText(q) }}</span>
         <el-progress v-if="q.confidence != null && getAiState(q) === 'pending'" :percentage="Math.round(q.confidence * 100)"
-          :stroke-width="8" :color="q.confidence >= store.confidenceThreshold ? '#67c23a' : '#e6a23c'"
+          :stroke-width="8" :color="q.confidence >= store.confidenceThreshold ? 'var(--wb-success)' : 'var(--wb-warning)'"
           style="width:100px;margin-left:auto;" />
       </div>
 
@@ -690,7 +690,7 @@ const handleReview = (result) => {
     const blocked = store.reviewQuestion(question.id, result)
     if (blocked?.blocked) {
       ElMessageBox.confirm(
-        `题目不完整，无法加入错题本：<br><span style="color:#e6a23c">${blocked.issues.map(i => '• ' + i).join('<br>')}</span><br><br>是否现在编辑以补充缺失信息？`,
+        `题目不完整，无法加入错题本：<br><span style="color:var(--wb-warning)">${blocked.issues.map(i => '• ' + i).join('<br>')}</span><br><br>是否现在编辑以补充缺失信息？`,
         '题目不完整',
         { confirmButtonText: '去编辑', cancelButtonText: '取消', type: 'warning', dangerouslyUseHTMLString: true }
       ).then(() => {
@@ -791,8 +791,8 @@ const handleRetryGeometry = async () => {
   width: 520px;
   display: flex;
   flex-direction: column;
-  background: #f5f7fa;
-  border-left: 1px solid #e4e7ed;
+  background: var(--wb-bg);
+  border-left: 1px solid var(--wb-border);
   flex-shrink: 0;
   overflow: hidden;
 }
@@ -803,7 +803,7 @@ const handleRetryGeometry = async () => {
   align-items: center;
   justify-content: center;
   gap: 12px;
-  color: #c0c4cc;
+  color: var(--wb-text-tertiary);
   font-size: 14px;
 }
 
@@ -814,7 +814,7 @@ const handleRetryGeometry = async () => {
   justify-content: space-between;
   padding: 10px 16px;
   background: #fff;
-  border-bottom: 1px solid #ebeef5;
+  border-bottom: 1px solid var(--wb-border);
   flex-shrink: 0;
 }
 .ops-header__left, .ops-header__right {
@@ -826,17 +826,17 @@ const handleRetryGeometry = async () => {
 .ops-qnum {
   font-size: 16px;
   font-weight: 700;
-  color: #303133;
+  color: var(--wb-text);
 }
 .ops-confidence {
   font-size: 12px;
   font-weight: 600;
-  color: #67c23a;
+  color: var(--wb-success);
   background: #f0f9eb;
   padding: 2px 10px;
-  border-radius: 12px;
+  border-radius: var(--wb-radius-md);
 }
-.ops-confidence.conf-low { color: #e6a23c; background: #fdf6ec; }
+.ops-confidence.conf-low { color: var(--wb-warning); background: #fdf6ec; }
 
 /* ── 答案对照条 ── */
 .ops-compare-bar {
@@ -845,8 +845,8 @@ const handleRetryGeometry = async () => {
   background: #fff;
   margin: 8px 10px 0;
   padding: 10px 14px;
-  border-radius: 6px;
-  box-shadow: 0 1px 2px rgba(0,0,0,0.04);
+  border-radius: var(--wb-radius-xs);
+  box-shadow: var(--wb-shadow-sm);
   flex-shrink: 0;
 }
 .ops-compare-item {
@@ -859,19 +859,19 @@ const handleRetryGeometry = async () => {
 .ops-cmp-label {
   font-size: 11px;
   font-weight: 600;
-  color: #909399;
+  color: var(--wb-text-tertiary);
   letter-spacing: 0.5px;
 }
 .ops-cmp-value {
   font-size: 16px;
   font-weight: 600;
   padding: 5px 8px;
-  border-radius: 4px;
+  border-radius: var(--wb-radius-xs);
   line-height: 1.4;
   word-break: break-all;
 }
-.student-val { background: #f5f7fa; color: #303133; }
-.correct-val { color: #67c23a; }
+.student-val { background: var(--wb-bg); color: var(--wb-text); }
+.correct-val { color: var(--wb-success); }
 .ref-answer-val {
   font-size: 13px;
   font-weight: 500;
@@ -884,7 +884,7 @@ const handleRetryGeometry = async () => {
 }
 .ops-cmp-divider {
   width: 1px;
-  background: #e4e7ed;
+  background: var(--wb-border);
   margin: 0 12px;
   flex-shrink: 0;
 }
@@ -892,11 +892,11 @@ const handleRetryGeometry = async () => {
 /* ── 快速填写标准答案 ── */
 .quick-answer-wrap { min-height: 32px; display: flex; align-items: center; }
 .missing-val {
-  color: #c0c4cc; cursor: pointer; transition: color 0.15s;
+  color: var(--wb-text-tertiary); cursor: pointer; transition: color 0.15s;
   display: inline-flex; align-items: center; gap: 6px; font-size: 18px;
 }
-.missing-val:hover { color: #409eff; }
-.quick-edit-hint { font-size: 12px; font-weight: 400; color: #409eff; }
+.missing-val:hover { color: var(--wb-primary); }
+.quick-edit-hint { font-size: 12px; font-weight: 400; color: var(--wb-primary); }
 .quick-answer-edit {
   display: flex; flex-direction: column; gap: 6px;
 }
@@ -910,7 +910,7 @@ const handleRetryGeometry = async () => {
   background: #fff;
   margin: 0 10px;
   padding: 8px 14px;
-  border-bottom: 1px solid #f0f0f0;
+  border-bottom: 1px solid var(--wb-bg-hover);
   flex-shrink: 0;
 }
 
@@ -918,7 +918,7 @@ const handleRetryGeometry = async () => {
 .ops-mode-title {
   font-size: 14px;
   font-weight: 600;
-  color: #303133;
+  color: var(--wb-text);
   margin-right: 4px;
 }
 .ops-ai-icon {
@@ -926,12 +926,12 @@ const handleRetryGeometry = async () => {
   display: flex; align-items: center; justify-content: center;
   font-size: 12px; font-weight: 700; color: #fff; flex-shrink: 0;
 }
-.ai-ok { background: #67c23a; }
+.ai-ok { background: var(--wb-success); }
 .ai-fail { background: #f56c6c; }
-.ai-pending { background: #e6a23c; }
-.ai-exception { background: #fa8c16; }
+.ai-pending { background: var(--wb-warning); }
+.ai-exception { background: var(--wb-warning); }
 .ai-processing { background: #9254de; }
-.ops-ai-text { font-size: 13px; color: #606266; }
+.ops-ai-text { font-size: 13px; color: var(--wb-text-secondary); }
 
 /* ═══ 完整题目内容区（可滚动） ═══ */
 .ops-question-body {
@@ -951,14 +951,14 @@ const handleRetryGeometry = async () => {
 .ops-q-label {
   font-size: 11px;
   font-weight: 600;
-  color: #909399;
+  color: var(--wb-text-tertiary);
   letter-spacing: 0.5px;
   flex-shrink: 0;
 }
 .ops-q-text {
   font-size: 15px;
   line-height: 1.7;
-  color: #303133;
+  color: var(--wb-text);
   white-space: pre-wrap;
   word-break: break-word;
 }
@@ -972,7 +972,7 @@ const handleRetryGeometry = async () => {
 }
 .ops-opt-letter {
   font-weight: 700;
-  color: #909399;
+  color: var(--wb-text-tertiary);
   min-width: 20px;
   font-size: 14px;
   flex-shrink: 0;
@@ -980,11 +980,11 @@ const handleRetryGeometry = async () => {
 }
 .ops-opt-text {
   font-size: 15px;
-  color: #303133;
+  color: var(--wb-text);
   line-height: 1.6;
 }
 .option-highlight .ops-opt-letter,
-.option-highlight .ops-opt-text { color: #67c23a; font-weight: 600; }
+.option-highlight .ops-opt-text { color: var(--wb-success); font-weight: 600; }
 
 /* 配图 */
 .ops-image-wrap {
@@ -995,17 +995,17 @@ const handleRetryGeometry = async () => {
 .ops-image {
   max-width: 100%;
   max-height: 240px;
-  border-radius: 6px;
+  border-radius: var(--wb-radius-xs);
   cursor: zoom-in;
-  border: 1px solid #ebeef5;
+  border: 1px solid var(--wb-border);
   object-fit: contain;
 }
 .tikz-svg-container {
   max-width: 100%;
   max-height: 280px;
-  border-radius: 6px;
+  border-radius: var(--wb-radius-xs);
   cursor: zoom-in;
-  border: 1px solid #ebeef5;
+  border: 1px solid var(--wb-border);
   background: #fff;
   padding: 8px;
   display: flex;
@@ -1020,7 +1020,7 @@ const handleRetryGeometry = async () => {
   display: flex;
   align-items: center;
   gap: 6px;
-  color: #c0c4cc;
+  color: var(--wb-text-tertiary);
   font-size: 13px;
   padding: 12px 0;
 }
@@ -1033,7 +1033,7 @@ const handleRetryGeometry = async () => {
 .ops-actions {
   flex-shrink: 0;
   padding: 12px 16px 16px;
-  border-top: 1px solid #e4e7ed;
+  border-top: 1px solid var(--wb-border);
   background: #fff;
   display: flex;
   flex-direction: column;
@@ -1056,7 +1056,7 @@ const handleRetryGeometry = async () => {
   justify-content: center;
   gap: 6px;
   height: 44px;
-  border-radius: 8px;
+  border-radius: var(--wb-radius-sm);
   border: 2px solid;
   font-size: 15px;
   font-weight: 700;
@@ -1066,11 +1066,11 @@ const handleRetryGeometry = async () => {
 }
 .ops-btn-icon { font-size: 18px; }
 
-.ops-btn-correct { color: #67c23a; border-color: #b7eb8f; background: #f0f9eb; }
+.ops-btn-correct { color: var(--wb-success); border-color: #b7eb8f; background: #f0f9eb; }
 .ops-btn-correct:hover { background: #e1f3d8; border-color: #95d475; }
 .ops-btn-wrong { color: #f56c6c; border-color: #fbc4c4; background: #fef0f0; }
 .ops-btn-wrong:hover { background: #fde2e2; border-color: #f89898; }
-.ops-btn-exclude { color: #909399; border-color: #dcdfe6; background: #f4f4f5; }
+.ops-btn-exclude { color: var(--wb-text-tertiary); border-color: var(--wb-border); background: var(--wb-bg-hover); }
 .ops-btn-exclude:hover { background: #e9e9eb; border-color: #c8c9cc; }
 
 /* 复审状态标记 */
@@ -1079,12 +1079,12 @@ const handleRetryGeometry = async () => {
 /* 复审按钮激活状态 */
 .ops-btn-active {
   transform: scale(1.05);
-  box-shadow: 0 0 0 3px rgba(64,158,255,0.3);
-  border-color: #409eff !important;
+  box-shadow: 0 0 0 3px rgba(59,130,246,0.3);
+  border-color: var(--wb-primary) !important;
 }
-.ops-btn-active.ops-btn-correct { border-color: #67c23a !important; box-shadow: 0 0 0 3px rgba(103,194,58,0.3); }
+.ops-btn-active.ops-btn-correct { border-color: var(--wb-success) !important; box-shadow: 0 0 0 3px rgba(103,194,58,0.3); }
 .ops-btn-active.ops-btn-wrong { border-color: #f56c6c !important; box-shadow: 0 0 0 3px rgba(245,108,108,0.3); }
-.ops-btn-active.ops-btn-exclude { border-color: #909399 !important; box-shadow: 0 0 0 3px rgba(144,147,153,0.3); }
+.ops-btn-active.ops-btn-exclude { border-color: var(--wb-text-tertiary) !important; box-shadow: 0 0 0 3px rgba(148,163,184,0.3); }
 
 /* 按钮点击脉冲动画 */
 .ops-btn.animate {
@@ -1100,25 +1100,25 @@ const handleRetryGeometry = async () => {
 
 .tag-grid { display: flex; flex-wrap: wrap; gap: 8px; }
 .tag-option {
-  padding: 6px 14px; border: 1px solid #dcdfe6; border-radius: 16px;
-  font-size: 13px; color: #606266; cursor: pointer; transition: all 0.2s; user-select: none;
+  padding: 6px 14px; border: 1px solid var(--wb-border); border-radius: var(--wb-radius-lg);
+  font-size: 13px; color: var(--wb-text-secondary); cursor: pointer; transition: all 0.2s; user-select: none;
 }
-.tag-option:hover { border-color: #409eff; color: #409eff; }
-.tag-selected { background: #ecf5ff; border-color: #409eff; color: #409eff; font-weight: 500; }
+.tag-option:hover { border-color: var(--wb-primary); color: var(--wb-primary); }
+.tag-selected { background: var(--wb-primary-mist); border-color: var(--wb-primary); color: var(--wb-primary); font-weight: 500; }
 
 /* ═══ 题干+配图+选项 统一卡片 ═══ */
 .ops-content-card {
   background: #fff;
-  border: 1px solid #e4e7ed;
-  border-radius: 8px;
+  border: 1px solid var(--wb-border);
+  border-radius: var(--wb-radius-sm);
   padding: 14px 16px;
   display: flex;
   flex-direction: column;
   gap: 14px;
 }
 .ops-image-section {
-  border-top: 1px dashed #ebeef5;
-  border-bottom: 1px dashed #ebeef5;
+  border-top: 1px dashed var(--wb-border);
+  border-bottom: 1px dashed var(--wb-border);
   padding: 10px 0;
   margin: 2px 0;
 }
@@ -1144,8 +1144,8 @@ const handleRetryGeometry = async () => {
 }
 .crop-selection {
   position: absolute;
-  border: 2px dashed #409eff;
-  background: rgba(64, 158, 255, 0.12);
+  border: 2px dashed var(--wb-primary);
+  background: rgba(59, 130, 246, 0.12);
   pointer-events: none;
   z-index: 10;
 }
@@ -1155,11 +1155,11 @@ const handleRetryGeometry = async () => {
   left: 50%;
   transform: translateX(-50%);
   font-size: 13px;
-  color: #409eff;
+  color: var(--wb-primary);
   font-weight: 600;
   background: rgba(255,255,255,0.9);
   padding: 2px 10px;
-  border-radius: 4px;
+  border-radius: var(--wb-radius-xs);
   white-space: nowrap;
   pointer-events: none;
   z-index: 11;
@@ -1170,18 +1170,18 @@ const handleRetryGeometry = async () => {
   gap: 12px;
   margin-top: 32px;
   padding-top: 12px;
-  border-top: 1px solid #e4e7ed;
+  border-top: 1px solid var(--wb-border);
 }
 .crop-preview-label {
   font-size: 13px;
   font-weight: 600;
-  color: #909399;
+  color: var(--wb-text-tertiary);
   flex-shrink: 0;
 }
 .crop-preview-img {
   max-height: 100px;
-  border: 1px solid #e4e7ed;
-  border-radius: 4px;
+  border: 1px solid var(--wb-border);
+  border-radius: var(--wb-radius-xs);
   object-fit: contain;
 }
 </style>

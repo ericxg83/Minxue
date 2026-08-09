@@ -30,7 +30,7 @@ const props = defineProps({
 defineEmits(['change-status'])
 
 const tabs = [
-  { key: 'all', label: '全部', color: '#007aff' },
+  { key: 'all', label: '全部', color: '#3B82F6' },
   { key: 'pending', label: '未掌握', color: '#ff3b30' },
   { key: 'partial', label: '有点掌握', color: '#ff9500' },
   { key: 'mastered', label: '完全掌握', color: '#34c759' }
@@ -38,10 +38,10 @@ const tabs = [
 
 function tabStyle(key) {
   const isActive = props.activeStatus === key
-  const color = tabs.find(t => t.key === key)?.color || '#007aff'
+  const color = tabs.find(t => t.key === key)?.color || '#3B82F6'
   return {
-    background: isActive ? color : '#f2f2f7',
-    color: isActive ? '#fff' : '#8e8e93',
+    background: isActive ? color : 'var(--wb-bg-hover)',
+    color: isActive ? '#fff' : 'var(--wb-text-tertiary)',
     fontWeight: isActive ? 600 : 400,
     boxShadow: isActive ? `0 2px 8px ${color}40` : 'none'
   }
@@ -60,7 +60,7 @@ function tabStyle(key) {
 
 .status-tab {
   padding: 8px 14px;
-  border-radius: 20px;
+  border-radius: var(--wb-radius-full);
   font-size: 14px;
   white-space: nowrap;
   cursor: pointer;

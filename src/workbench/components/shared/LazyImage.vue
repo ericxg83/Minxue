@@ -115,7 +115,7 @@ onUnmounted(() => {
 .lazy-image-container {
   position: relative;
   overflow: hidden;
-  background: #f5f7fa;
+  background: var(--wb-bg);
   display: flex;
   align-items: center;
   justify-content: center;
@@ -143,7 +143,7 @@ onUnmounted(() => {
   display: flex;
   align-items: center;
   justify-content: center;
-  color: #c0c4cc;
+  color: var(--wb-text-tertiary);
   font-size: 24px;
 }
 

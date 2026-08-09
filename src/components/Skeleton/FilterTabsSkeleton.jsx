@@ -5,7 +5,7 @@ export default function FilterTabsSkeleton({ count = 4 }) {
         {Array.from({ length: count }).map((_, i) => (
           <div
             key={i}
-            className="h-10 bg-gray-200 rounded-full animate-pulse"
+            className="h-10 bg-[var(--bg-secondary)] rounded-full animate-pulse"
             style={{ width: `${80 + Math.random() * 40}px` }}
           />
         ))}

@@ -115,12 +115,12 @@ function handleSwitchStudent(student) {
   width: 48px;
   height: 48px;
   border-radius: 50%;
-  background: linear-gradient(135deg, #e8f4fd 0%, #d6ebfa 100%);
+  background: linear-gradient(135deg, var(--wb-primary-mist) 0%, var(--wb-primary-soft) 100%);
   display: flex;
   align-items: center;
   justify-content: center;
   overflow: hidden;
-  box-shadow: 0 2px 8px rgba(0, 122, 255, 0.15);
+  box-shadow: 0 2px 8px rgba(59, 130, 246, 0.15);
   flex-shrink: 0;
 }
 
@@ -137,7 +137,7 @@ function handleSwitchStudent(student) {
 
 .avatar-icon {
   font-size: 28px;
-  color: #007aff;
+  color: var(--wb-primary);
 }
 
 .avatar-wrapper.small .avatar-icon {
@@ -152,18 +152,18 @@ function handleSwitchStudent(student) {
 .student-name {
   font-size: 17px;
   font-weight: 600;
-  color: #1c1c1e;
+  color: var(--wb-text);
 }
 
 .student-class {
   font-size: 13px;
-  color: #8e8e93;
+  color: var(--wb-text-tertiary);
   margin-top: 2px;
 }
 
 .switch-arrow .el-icon {
   font-size: 20px;
-  color: #007aff;
+  color: var(--wb-primary);
 }
 
 .student-list {
@@ -178,21 +178,21 @@ function handleSwitchStudent(student) {
   display: flex;
   align-items: center;
   padding: 12px;
-  border-radius: 12px;
+  border-radius: var(--wb-radius-md);
   cursor: pointer;
   transition: background 0.2s;
 }
 
 .student-item:hover {
-  background: #f2f2f7;
+  background: var(--wb-bg-hover);
 }
 
 .student-item.active {
-  background: #e8f4fd;
+  background: var(--wb-primary-mist);
 }
 
 .check-icon {
   font-size: 20px;
-  color: #007aff;
+  color: var(--wb-primary);
 }
 </style>

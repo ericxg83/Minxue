@@ -84,7 +84,7 @@ const handleQuickReview = async (result) => {
     if (blocked?.blocked) {
       const { ElMessageBox } = await import('element-plus')
       ElMessageBox.confirm(
-        `题目不完整，无法加入错题本：<br><span style="color:#e6a23c">${blocked.issues.map(i => '• ' + i).join('<br>')}</span><br><br>请先在右侧面板中编辑补充缺失信息。`,
+        `题目不完整，无法加入错题本：<br><span style="color:var(--wb-warning)">${blocked.issues.map(i => '• ' + i).join('<br>')}</span><br><br>请先在右侧面板中编辑补充缺失信息。`,
         '题目不完整',
         { confirmButtonText: '知道了', cancelButtonText: '取消', type: 'warning', dangerouslyUseHTMLString: true }
       ).catch(() => {})
@@ -100,7 +100,7 @@ const handleQuickReview = async (result) => {
   display: flex;
   flex-direction: column;
   height: 100vh;
-  background: #f5f7fa;
+  background: var(--wb-bg);
   overflow: hidden;
 }
 
@@ -117,20 +117,20 @@ const handleQuickReview = async (result) => {
   align-items: center;
   justify-content: center;
   gap: 12px;
-  color: #909399;
+  color: var(--wb-text-tertiary);
 }
 .all-done-title {
   font-size: 18px;
   font-weight: 600;
-  color: #303133;
+  color: var(--wb-text);
 }
 .all-done-sub {
   font-size: 14px;
-  color: #67c23a;
+  color: var(--wb-success);
 }
 .all-done-hint {
   font-size: 13px;
-  color: #c0c4cc;
+  color: var(--wb-text-tertiary);
   margin-top: 4px;
 }
 
@@ -152,12 +152,12 @@ const handleQuickReview = async (result) => {
   display: flex;
   justify-content: space-between;
   padding: 8px 16px;
-  border-radius: 8px;
-  background: #f5f7fa;
+  border-radius: var(--wb-radius-sm);
+  background: var(--wb-bg);
 }
-.stat-label { font-size: 14px; color: #86909C; }
-.stat-value { font-size: 14px; font-weight: 600; color: #1D2129; }
-.stat-value--success { color: #67C23A; }
-.stat-value--primary { color: #1677FF; }
+.stat-label { font-size: 14px; color: var(--wb-text-tertiary); }
+.stat-value { font-size: 14px; font-weight: 600; color: var(--wb-text); }
+.stat-value--success { color: var(--wb-success); }
+.stat-value--primary { color: var(--wb-primary); }
 .stat-value--danger { color: #F56C6C; }
 </style>

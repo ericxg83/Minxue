@@ -474,8 +474,8 @@ export default function RectCropper({ image, onConfirm, onCancel, theme = 'light
                 background: colors.instructionBg,
                 color: colors.instructionText,
                 padding: '8px 18px',
-                borderRadius: '20px',
-                fontSize: '14px',
+                borderRadius: 'var(--radius-lg)',
+                fontSize: 'var(--fs-14)',
                 fontWeight: 500,
                 zIndex: 10,
                 pointerEvents: 'none',
@@ -545,7 +545,7 @@ export default function RectCropper({ image, onConfirm, onCancel, theme = 'light
                         padding: HANDLE_HIT_PAD,
                         backgroundClip: 'content-box',
                         background: 'transparent',
-                        borderRadius: '2px',
+                        borderRadius: 'var(--radius-2)',
                         zIndex: 3,
                         cursor: h.key === 'n' || h.key === 's' ? 'ns-resize' :
                                 h.key === 'e' || h.key === 'w' ? 'ew-resize' :
@@ -584,7 +584,7 @@ export default function RectCropper({ image, onConfirm, onCancel, theme = 'light
               gap: 12, marginBottom: 12
             }}>
               <div style={{
-                border: `2px solid ${colors.accent}`, borderRadius: '6px',
+                border: `2px solid ${colors.accent}`, borderRadius: 'var(--radius-6)',
                 overflow: 'hidden', background: '#f0f0f0',
                 display: 'inline-flex', alignItems: 'center', justifyContent: 'center'
               }}>
@@ -595,12 +595,12 @@ export default function RectCropper({ image, onConfirm, onCancel, theme = 'light
               </div>
               <div style={{
                 display: 'flex', flexDirection: 'column', alignItems: 'center',
-                gap: 2, fontSize: '11px', color: colors.textSecondary
+                gap: 2, fontSize: 'var(--fs-11)', color: colors.textSecondary
               }}>
                 <span style={{ fontWeight: 600, whiteSpace: 'nowrap' }}>
                   {naturalCropWidth} × {naturalCropHeight}
                 </span>
-                <span style={{ fontSize: '10px' }}>px</span>
+                <span style={{ fontSize: 'var(--fs-10)' }}>px</span>
               </div>
             </div>
 
@@ -611,11 +611,11 @@ export default function RectCropper({ image, onConfirm, onCancel, theme = 'light
                   style={{
                     width: '100%',
                     padding: '10px',
-                    borderRadius: 8,
+                    borderRadius: 'var(--radius-8)',
                     border: `1px solid ${colors.accent}30`,
                     background: showOptions ? `${colors.accent}10` : 'transparent',
                     color: colors.accent,
-                    fontSize: 13,
+                    fontSize: 'var(--fs-13)',
                     fontWeight: 500,
                     cursor: 'pointer',
                     display: 'flex',
@@ -635,7 +635,7 @@ export default function RectCropper({ image, onConfirm, onCancel, theme = 'light
                   <div style={{
                     marginTop: 12,
                     padding: 12,
-                    borderRadius: 8,
+                    borderRadius: 'var(--radius-8)',
                     background: theme === 'light' ? '#F9FAFB' : '#2A2A2A',
                     border: `1px solid ${colors.accent}20`
                   }}>
@@ -644,7 +644,7 @@ export default function RectCropper({ image, onConfirm, onCancel, theme = 'light
                         display: 'flex',
                         alignItems: 'center',
                         gap: 8,
-                        fontSize: 13,
+                        fontSize: 'var(--fs-13)',
                         color: colors.textPrimary,
                         cursor: 'pointer'
                       }}>
@@ -660,7 +660,7 @@ export default function RectCropper({ image, onConfirm, onCancel, theme = 'light
 
                     {optimizationOptions.removeBlack && (
                       <div style={{ marginBottom: 10, paddingLeft: 24 }}>
-                        <div style={{ fontSize: 11, color: colors.textSecondary, marginBottom: 4 }}>
+                        <div style={{ fontSize: 'var(--fs-11)', color: colors.textSecondary, marginBottom: 4 }}>
                           去黑阈值: {optimizationOptions.blackThreshold}
                         </div>
                         <input
@@ -676,7 +676,7 @@ export default function RectCropper({ image, onConfirm, onCancel, theme = 'light
                     )}
 
                     <div style={{ marginBottom: 10 }}>
-                      <div style={{ fontSize: 11, color: colors.textSecondary, marginBottom: 4 }}>
+                      <div style={{ fontSize: 'var(--fs-11)', color: colors.textSecondary, marginBottom: 4 }}>
                         对比度: {optimizationOptions.contrastFactor.toFixed(1)}
                       </div>
                       <input
@@ -691,7 +691,7 @@ export default function RectCropper({ image, onConfirm, onCancel, theme = 'light
                     </div>
 
                     <div style={{ marginBottom: 10 }}>
-                      <div style={{ fontSize: 11, color: colors.textSecondary, marginBottom: 4 }}>
+                      <div style={{ fontSize: 'var(--fs-11)', color: colors.textSecondary, marginBottom: 4 }}>
                         锐化强度: {optimizationOptions.sharpenAmount.toFixed(1)}
                       </div>
                       <input
@@ -706,7 +706,7 @@ export default function RectCropper({ image, onConfirm, onCancel, theme = 'light
                     </div>
 
                     <div>
-                      <div style={{ fontSize: 11, color: colors.textSecondary, marginBottom: 4 }}>输出格式</div>
+                      <div style={{ fontSize: 'var(--fs-11)', color: colors.textSecondary, marginBottom: 4 }}>输出格式</div>
                       <div style={{ display: 'flex', gap: 8 }}>
                         {['image/png', 'image/jpeg'].map(format => (
                           <button
@@ -715,11 +715,11 @@ export default function RectCropper({ image, onConfirm, onCancel, theme = 'light
                             style={{
                               flex: 1,
                               padding: '6px 8px',
-                              borderRadius: 6,
+                              borderRadius: 'var(--radius-6)',
                               border: `1px solid ${optimizationOptions.outputFormat === format ? colors.accent : '#D1D5DB'}`,
                               background: optimizationOptions.outputFormat === format ? `${colors.accent}15` : 'transparent',
                               color: optimizationOptions.outputFormat === format ? colors.accent : colors.textSecondary,
-                              fontSize: 12,
+                              fontSize: 'var(--fs-12)',
                               cursor: 'pointer'
                             }}
                           >
@@ -738,11 +738,11 @@ export default function RectCropper({ image, onConfirm, onCancel, theme = 'light
                 onClick={handleResetCrop}
                 style={{
                   padding: '14px 12px',
-                  borderRadius: 10,
+                  borderRadius: 'var(--radius-sm)',
                   border: '1px solid #D1D5DB',
                   background: '#fff',
                   color: '#6B7280',
-                  fontSize: 13,
+                  fontSize: 'var(--fs-13)',
                   fontWeight: 500,
                   cursor: 'pointer',
                   whiteSpace: 'nowrap',
@@ -757,11 +757,11 @@ export default function RectCropper({ image, onConfirm, onCancel, theme = 'light
                 style={{
                   flex: 1,
                   padding: '14px',
-                  borderRadius: 10,
+                  borderRadius: 'var(--radius-sm)',
                   border: colors.cancelBorder !== 'transparent' ? `1px solid ${colors.cancelBorder}` : 'none',
                   background: colors.cancelBg,
                   color: colors.cancelText,
-                  fontSize: 15,
+                  fontSize: 'var(--fs-15)',
                   fontWeight: 500,
                   cursor: 'pointer',
                   WebkitTapHighlightColor: 'transparent',
@@ -776,11 +776,11 @@ export default function RectCropper({ image, onConfirm, onCancel, theme = 'light
                 style={{
                   flex: 1,
                   padding: '14px',
-                  borderRadius: 10,
+                  borderRadius: 'var(--radius-sm)',
                   border: 'none',
                   background: hasValidCrop && !processing ? colors.confirmBg : '#D1D5DB',
                   color: hasValidCrop && !processing ? colors.confirmText : '#9CA3AF',
-                  fontSize: 15,
+                  fontSize: 'var(--fs-15)',
                   fontWeight: 600,
                   cursor: hasValidCrop && !processing ? 'pointer' : 'not-allowed',
                   opacity: hasValidCrop && !processing ? 1 : 0.6,
@@ -807,11 +807,11 @@ export default function RectCropper({ image, onConfirm, onCancel, theme = 'light
               style={{
                 flex: 1,
                 padding: '14px',
-                borderRadius: 10,
+                borderRadius: 'var(--radius-sm)',
                 border: colors.cancelBorder !== 'transparent' ? `1px solid ${colors.cancelBorder}` : 'none',
                 background: colors.cancelBg,
                 color: colors.cancelText,
-                fontSize: 15,
+                fontSize: 'var(--fs-15)',
                 fontWeight: 500,
                 cursor: 'pointer'
               }}
@@ -823,11 +823,11 @@ export default function RectCropper({ image, onConfirm, onCancel, theme = 'light
               style={{
                 flex: 1,
                 padding: '14px',
-                borderRadius: 10,
+                borderRadius: 'var(--radius-sm)',
                 border: 'none',
                 background: '#D1D5DB',
                 color: '#9CA3AF',
-                fontSize: 15,
+                fontSize: 'var(--fs-15)',
                 fontWeight: 600,
                 cursor: 'not-allowed',
                 opacity: 0.6

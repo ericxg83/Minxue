@@ -466,7 +466,7 @@ const switchToPage = (page) => {
   flex: 1;
   min-width: 0;
   height: 100%;
-  background: #f0f2f5;
+  background: var(--wb-bg-hover);
   position: relative;
   overflow: hidden;
 }
@@ -501,7 +501,7 @@ const switchToPage = (page) => {
 /* ── 题目定位框 ── */
 .question-overlay {
   position: absolute;
-  border-radius: 4px;
+  border-radius: var(--wb-radius-xs);
   cursor: pointer;
   transition: border-color 0.2s, background 0.2s;
   pointer-events: auto;
@@ -510,19 +510,19 @@ const switchToPage = (page) => {
 }
 
 .overlay-current {
-  border: 2.5px solid #409eff;
-  background: rgba(64, 158, 255, 0.10);
-  box-shadow: 0 0 0 1.5px rgba(64, 158, 255, 0.25), 0 0 12px rgba(64, 158, 255, 0.15);
+  border: 2.5px solid var(--wb-primary);
+  background: rgba(59, 130, 246, 0.10);
+  box-shadow: 0 0 0 1.5px rgba(59, 130, 246, 0.25), 0 0 12px rgba(59, 130, 246, 0.15);
   z-index: 3;
 }
 
 .overlay-confirmed {
-  border: 2px solid #67c23a;
+  border: 2px solid var(--wb-success);
   background: rgba(103, 194, 58, 0.07);
 }
 
 .overlay-unconfirmed {
-  border: 2px dashed #e6a23c;
+  border: 2px dashed var(--wb-warning);
   background: rgba(230, 162, 60, 0.04);
 }
 
@@ -531,7 +531,7 @@ const switchToPage = (page) => {
 }
 
 @keyframes pulse-warn {
-  0%, 100% { border-color: #e6a23c; opacity: 0.9; }
+  0%, 100% { border-color: var(--wb-warning); opacity: 0.9; }
   50% { border-color: #f56c6c; opacity: 0.6; }
 }
 
@@ -544,13 +544,13 @@ const switchToPage = (page) => {
   font-size: 11px;
   font-weight: 600;
   padding: 1px 7px 1px 6px;
-  border-radius: 3px;
+  border-radius: var(--wb-radius-xs);
   line-height: 1.6;
   margin: 3px;
 }
 
 .overlay-current .overlay-number {
-  background: #409eff;
+  background: var(--wb-primary);
 }
 
 .overlay-icon {
@@ -577,14 +577,14 @@ const switchToPage = (page) => {
   gap: 6px;
   background: rgba(255, 255, 255, 0.92);
   padding: 6px 12px;
-  border-radius: 8px;
-  box-shadow: 0 2px 10px rgba(0, 0, 0, 0.12);
+  border-radius: var(--wb-radius-sm);
+  box-shadow: var(--wb-shadow-md);
   z-index: 10;
 }
 
 .zoom-value {
   font-size: 13px;
-  color: #606266;
+  color: var(--wb-text-secondary);
   min-width: 48px;
   text-align: center;
   font-variant-numeric: tabular-nums;
@@ -597,10 +597,10 @@ const switchToPage = (page) => {
   left: 50%;
   transform: translateX(-50%);
   font-size: 11px;
-  color: #909399;
+  color: var(--wb-text-tertiary);
   background: rgba(255, 255, 255, 0.85);
   padding: 3px 12px;
-  border-radius: 10px;
+  border-radius: var(--wb-radius-sm);
   pointer-events: none;
   white-space: nowrap;
   z-index: 9;
@@ -616,7 +616,7 @@ const switchToPage = (page) => {
   justify-content: center;
   gap: 8px;
   background: rgba(255, 255, 255, 0.85);
-  color: #909399;
+  color: var(--wb-text-tertiary);
   font-size: 14px;
   z-index: 5;
 }
@@ -628,27 +628,27 @@ const switchToPage = (page) => {
   justify-content: center;
   height: 40px;
   background: #fff;
-  border-top: 1px solid #e4e7ed;
+  border-top: 1px solid var(--wb-border);
   flex-shrink: 0;
 }
 
 .page-indicator {
   font-size: 13px;
-  color: #909399;
+  color: var(--wb-text-tertiary);
 }
 
 /* ── 待复核试卷缩略图 ── */
 .pending-thumbnails {
   flex-shrink: 0;
   background: #fff;
-  border-top: 1px solid #e4e7ed;
+  border-top: 1px solid var(--wb-border);
   padding: 8px 12px;
 }
 
 .thumbnails-header {
   font-size: 12px;
   font-weight: 600;
-  color: #909399;
+  color: var(--wb-text-tertiary);
   margin-bottom: 8px;
 }
 
@@ -663,15 +663,15 @@ const switchToPage = (page) => {
   flex-shrink: 0;
   width: 120px;
   cursor: pointer;
-  border-radius: 6px;
+  border-radius: var(--wb-radius-xs);
   overflow: hidden;
   transition: transform 0.2s, box-shadow 0.2s;
-  border: 1px solid #ebeef5;
+  border: 1px solid var(--wb-border);
 }
 
 .thumbnail-card:hover {
   transform: translateY(-2px);
-  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.1);
+  box-shadow: var(--wb-shadow-md);
 }
 
 .thumbnail-img-wrap {
@@ -679,7 +679,7 @@ const switchToPage = (page) => {
   width: 120px;
   height: 80px;
   overflow: hidden;
-  background: #f5f7fa;
+  background: var(--wb-bg);
 }
 
 .thumbnail-img {
@@ -711,7 +711,7 @@ const switchToPage = (page) => {
   display: block;
   padding: 4px 6px;
   font-size: 11px;
-  color: #606266;
+  color: var(--wb-text-secondary);
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -720,8 +720,8 @@ const switchToPage = (page) => {
 /* ── 已复核试卷缩略图（可折叠） ── */
 .reviewed-thumbnails {
   flex-shrink: 0;
-  background: #fafafa;
-  border-top: 1px dashed #e4e7ed;
+  background: var(--wb-bg-hover);
+  border-top: 1px dashed var(--wb-border);
   padding: 6px 12px;
 }
 
@@ -732,11 +732,11 @@ const switchToPage = (page) => {
   align-items: center;
   gap: 6px;
   padding: 4px 0;
-  color: #909399;
+  color: var(--wb-text-tertiary);
 }
 
 .toggle-header:hover {
-  color: #606266;
+  color: var(--wb-text-secondary);
 }
 
 .toggle-arrow {

@@ -174,7 +174,7 @@ export default function SwipeableRow({
           justifyContent: 'center',
           gap: '3px',
           border: 'none',
-          background: 'var(--danger, #DC2626)',
+          background: 'var(--danger, var(--danger))',
           color: '#fff',
           cursor: 'pointer',
           opacity: revealed ? 1 : 0,
@@ -183,7 +183,7 @@ export default function SwipeableRow({
         }}
       >
         <Trash2 size={18} strokeWidth={2} />
-        <span style={{ fontSize: '11px', fontWeight: 600, lineHeight: 1 }}>{actionLabel}</span>
+        <span style={{ fontSize: 'var(--fs-11)', fontWeight: 600, lineHeight: 1 }}>{actionLabel}</span>
       </button>
 
       {/* 上层可滑动内容 */}

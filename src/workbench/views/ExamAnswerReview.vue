@@ -287,7 +287,7 @@ onMounted(loadData)
   height: 100%;
   display: flex;
   flex-direction: column;
-  background: #F5F7FA;
+  background: var(--wb-bg);
   font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
 }
 
@@ -296,7 +296,7 @@ onMounted(loadData)
   align-items: center;
   padding: 12px 24px;
   background: #fff;
-  border-bottom: 1px solid #E5E6EB;
+  border-bottom: 1px solid var(--wb-border);
   gap: 16px;
   flex-shrink: 0;
 }
@@ -305,7 +305,7 @@ onMounted(loadData)
   flex: 1;
   font-size: 16px;
   font-weight: 600;
-  color: #1D2129;
+  color: var(--wb-text);
   margin: 0;
 }
 
@@ -326,7 +326,7 @@ onMounted(loadData)
 
 .panel {
   background: #fff;
-  border-radius: 8px;
+  border-radius: var(--wb-radius-sm);
   display: flex;
   flex-direction: column;
   overflow: hidden;
@@ -336,8 +336,8 @@ onMounted(loadData)
   padding: 12px 16px;
   font-size: 13px;
   font-weight: 600;
-  color: #4E5969;
-  border-bottom: 1px solid #E5E6EB;
+  color: var(--wb-text-secondary);
+  border-bottom: 1px solid var(--wb-border);
   flex-shrink: 0;
 }
 
@@ -359,26 +359,26 @@ onMounted(loadData)
 
 .usage-item {
   padding: 10px 12px;
-  border-radius: 6px;
+  border-radius: var(--wb-radius-xs);
   margin-bottom: 4px;
-  background: #F9FAFB;
+  background: var(--wb-bg-hover);
 }
 
 .usage-student {
   font-size: 13px;
   font-weight: 500;
-  color: #1D2129;
+  color: var(--wb-text);
 }
 
 .usage-meta {
   font-size: 12px;
-  color: #86909C;
+  color: var(--wb-text-tertiary);
   margin-top: 4px;
 }
 
 .empty-hint {
   text-align: center;
-  color: #86909C;
+  color: var(--wb-text-tertiary);
   font-size: 13px;
   padding: 40px 0;
 }
@@ -390,7 +390,7 @@ onMounted(loadData)
 
 .list-filters {
   padding: 8px 12px;
-  border-bottom: 1px solid #E5E6EB;
+  border-bottom: 1px solid var(--wb-border);
   flex-shrink: 0;
 }
 
@@ -407,11 +407,11 @@ onMounted(loadData)
   padding: 10px 16px;
   cursor: pointer;
   transition: background 0.15s;
-  border-bottom: 1px solid #F5F7FA;
+  border-bottom: 1px solid var(--wb-bg);
 }
 
 .answer-item:hover {
-  background: #F5F7FA;
+  background: var(--wb-bg);
 }
 
 .answer-item.active {
@@ -425,14 +425,14 @@ onMounted(loadData)
 .qno {
   font-size: 13px;
   font-weight: 600;
-  color: #1D2129;
+  color: var(--wb-text);
   min-width: 28px;
 }
 
 .qans {
   flex: 1;
   font-size: 13px;
-  color: #4E5969;
+  color: var(--wb-text-secondary);
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -464,7 +464,7 @@ onMounted(loadData)
   align-items: center;
   padding: 12px 24px;
   background: #fff;
-  border-top: 1px solid #E5E6EB;
+  border-top: 1px solid var(--wb-border);
   flex-shrink: 0;
 }
 </style>
