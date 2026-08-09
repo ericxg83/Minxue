@@ -48,6 +48,7 @@ export default function StagingModal({
               onClick={onClose}
               className="w-7 h-7 rounded-full flex items-center justify-center active:scale-90"
               style={{ background: 'var(--bg-mist)' }}
+              aria-label="关闭暂存区"
             >
               <X size={14} style={{ color: 'var(--text-secondary)' }} />
             </button>

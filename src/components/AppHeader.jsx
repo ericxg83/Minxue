@@ -32,6 +32,7 @@ export default function AppHeader({
             className="w-8 h-8 rounded-xl flex items-center justify-center transition-colors"
             style={{ background: 'var(--bg-secondary)' }}
             title="学习报告"
+            aria-label="学习报告"
           >
             <BarChart3 size={16} style={{ color: 'var(--text-secondary)' }} />
           </button>

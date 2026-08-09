@@ -60,6 +60,7 @@ export default function NotificationsPanel({ onClose }) {
             onClick={onClose}
             className="w-7 h-7 rounded-lg flex items-center justify-center"
             style={{ background: 'var(--bg-hover)' }}
+            aria-label="关闭通知"
           >
             <X size={14} style={{ color: 'var(--text-secondary)' }} />
           </button>
