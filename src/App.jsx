@@ -1108,7 +1108,7 @@ export default function App() {
                               className="mt-3 w-full rounded-xl overflow-hidden block"
                               style={{ background: 'var(--bg-secondary)' }}
                             >
-                              <img src={q.image_url} alt="配图" className="w-full object-cover" style={{ maxHeight: '260px' }} />
+                              <img src={q.image_url} alt="配图" loading="lazy" className="w-full object-cover" style={{ maxHeight: '260px' }} />
                             </button>
                           )}
 

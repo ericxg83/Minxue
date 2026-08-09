@@ -473,7 +473,7 @@ export default function Grading({ paperId, studentId, questionIds, onClose, onCo
 
           {currentQuestion?.image_url && (
             <div style={{ marginBottom: '16px', textAlign: 'center' }}>
-              <img src={currentQuestion.image_url} alt="题目配图" style={{
+              <img src={currentQuestion.image_url} alt="题目配图" loading="lazy" style={{
                 width: '100%', maxHeight: '300px', objectFit: 'contain',
                 borderRadius: 'var(--radius-8)', background: COLORS.background
               }} />

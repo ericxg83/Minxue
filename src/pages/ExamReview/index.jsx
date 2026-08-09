@@ -479,6 +479,7 @@ export default function ExamReview({ task, onClose, onSave }) {
               <img
                 src={geoImageUrl}
                 alt="几何配图"
+                loading="lazy"
                 style={{
                   width: '100%', maxHeight: '20vh',
                   objectFit: 'contain', borderRadius: 'var(--radius-6)', display: 'block'

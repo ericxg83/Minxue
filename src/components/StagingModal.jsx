@@ -80,7 +80,7 @@ export default function StagingModal({
               {stagingFiles.map((p, i) => (
                 <div key={i} className="relative rounded-lg overflow-hidden" style={{ aspectRatio: '1 / 1', background: 'var(--bg-secondary)' }}>
                   {p.url ? (
-                    <img src={p.url} alt={p.name} className="w-full h-full object-cover" />
+                    <img src={p.url} alt={p.name} loading="lazy" className="w-full h-full object-cover" />
                   ) : (
                     <div className="w-full h-full flex items-center justify-center" style={{ color: 'var(--text-secondary)' }}>
                       <ImageIcon size={20} />

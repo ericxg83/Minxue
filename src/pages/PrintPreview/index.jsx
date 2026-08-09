@@ -5,10 +5,12 @@ import { QRCodeSVG } from 'qrcode.react'
 import { Toast } from 'antd-mobile'
 import { useStudentStore, useWrongQuestionStore, useUIStore, useExamStore } from '../../store'
 import { mockWrongQuestions } from '../../data/mockData'
-import { createGeneratedExam } from '../../services/apiService'
+import { createGeneratedExam, getQuestionsByIds } from '../../services/apiService'
 import dayjs from 'dayjs'
 import { saveAs } from 'file-saver'
 import { generateExamPDF } from '../../utils/pdfGenerator'
+import { getGeometryDisplayUrl } from '../../utils/geometryDisplay'
+import MathText from '../../components/MathText'
 
 const USE_MOCK_DATA = false
 
@@ -71,6 +73,43 @@ export default function PrintPreview({ onClose, questions: propQuestions, existi
   const [generatedExamId, setGeneratedExamId] = useState(validExistingId || '')
   const examIdRef = useRef(validExistingId || '') // 同步保存组卷ID，避免导出时 state 未刷新
   const [savedExamName, setSavedExamName] = useState('') // 保存后的带序号最终名，供展示/文件名统一使用
+
+  // 实时题目引用：异步补齐题目数据后，导出/打印始终使用最新题目列表，避免闭包读到旧数据
+  const previewRef = useRef(previewQuestions)
+  useEffect(() => { previewRef.current = previewQuestions }, [previewQuestions])
+
+  // 错题本返回的题目缺少 options / 几何配图等完整字段，直接生成会丢选项、丢图。
+  // 参照周报告「错题再测卷」的生成方式（getQuestionsByIds 拉取完整题目），
+  // 在预览与导出前补齐，保证移动端重练卷与报告中的再测卷格式一致。
+  const needsFullData = (qs) => qs.length > 0 && qs.some(q => !Array.isArray(q.options))
+
+  const ensureEnriched = async () => {
+    const qs = previewRef.current
+    if (!qs || qs.length === 0) return qs
+    if (!needsFullData(qs)) return qs
+    const ids = qs.map(q => q && q.id).filter(Boolean)
+    if (ids.length === 0) return qs
+    try {
+      const fullQs = await getQuestionsByIds(ids)
+      if (fullQs && fullQs.length > 0) {
+        const map = {}
+        fullQs.forEach(q => { map[q.id] = q })
+        const merged = qs.map(q => (map[q.id] ? map[q.id] : q))
+        setPreviewQuestions(merged)
+        previewRef.current = merged
+        return merged
+      }
+    } catch (err) {
+      console.warn('加载题目完整数据失败，使用错题本原始数据:', err.message)
+    }
+    return qs
+  }
+
+  // 打开即补齐，保证预览页就能看到选项 / 几何图，与 PDF 一致
+  useEffect(() => {
+    ensureEnriched()
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [])
 
   // A4 页面按真实宽度(794px)渲染，再缩放适配视口宽度（手机端完整呈现，不再挤压变形）
   const A4_PX = 794
@@ -175,7 +214,8 @@ export default function PrintPreview({ onClose, questions: propQuestions, existi
   // 计算 base 试卷名（不含序号）：重打模式用原始名，新建模式按学科 + 日期
   const getBaseExamName = () => {
     if (examName) return examName
-    const subjects = [...new Set(previewQuestions.map(q => q.subject).filter(Boolean))]
+    const qs = previewRef.current || previewQuestions
+    const subjects = [...new Set(qs.map(q => q.subject).filter(Boolean))]
     if (subjects.length === 0) return `错题重练-${dayjs().format('MMDD')}`
     if (subjects.length <= 2) return `${subjects.join('')}-${dayjs().format('MMDD')}`
     return `综合-${dayjs().format('MMDD')}`
@@ -284,17 +324,18 @@ export default function PrintPreview({ onClose, questions: propQuestions, existi
     await handleExportPDF()
   }
 
-  const generatePDF = async () => {
+  const generatePDF = async (questionsOverride) => {
     if (generatingPdf) return
     setGeneratingPdf(true)
     setPdfBlobUrl('')
     setPdfBlob(null)
     const examName = getExamName()
+    const questions = questionsOverride || previewRef.current || previewQuestions
     try {
       const result = await generateExamPDF({
         title: `${currentStudent?.name || '学生'} - ${examName}`,
         studentName: currentStudent?.name || '',
-        questions: previewQuestions,
+        questions,
         filename: `${currentStudent?.name || 'student'}_${examName}_${dayjs().format('YYYYMMDD_HHmm')}`,
         showAnswers: false,
         qrContent: getQrContent(),
@@ -315,7 +356,8 @@ export default function PrintPreview({ onClose, questions: propQuestions, existi
 
   const saveGeneratedExamRecord = async () => {
     if (examRecorded.current) return false
-    const questionIds = previewQuestions.map(q => q.id).filter(Boolean)
+    const qs = previewRef.current || previewQuestions
+    const questionIds = qs.map(q => q.id).filter(Boolean)
     if (currentStudent && questionIds.length > 0) {
       try {
         // 计算 base 名（科目+日期），再追加当天序号
@@ -357,7 +399,8 @@ export default function PrintPreview({ onClose, questions: propQuestions, existi
   const handleExportPDF = async () => {
     if (generatingPdf) return
     const saved = await saveGeneratedExamRecord()
-    const result = await generatePDF()
+    const questions = await ensureEnriched()
+    const result = await generatePDF(questions)
     if (result && result.pdfBlob) {
       const examName = getExamName()
       const filename = `${currentStudent?.name || 'student'}_${examName}_${dayjs().format('YYYYMMDD_HHmm')}.pdf`
@@ -370,6 +413,7 @@ export default function PrintPreview({ onClose, questions: propQuestions, existi
     if (generatingPdf || pdfDownloading) return
     const doPrint = async () => {
       const saved = await saveGeneratedExamRecord()
+      const questions = await ensureEnriched()
       let blobUrl = pdfBlobUrl
       if (!blobUrl) {
         setGeneratingPdf(true)
@@ -378,7 +422,7 @@ export default function PrintPreview({ onClose, questions: propQuestions, existi
           const result = await generateExamPDF({
             title: `${currentStudent?.name || '学生'} - ${examName}`,
             studentName: currentStudent?.name || '',
-            questions: previewQuestions,
+            questions,
             filename: `${currentStudent?.name || 'student'}_${examName}_${dayjs().format('YYYYMMDD_HHmm')}`,
             showAnswers: false,
             qrContent: getQrContent(),
@@ -507,30 +551,50 @@ export default function PrintPreview({ onClose, questions: propQuestions, existi
                         ? Math.max(...q.options.map(o => String(o || '').length))
                         : 0
                       const colClass = maxLen <= 8 ? 'grid-cols-4' : maxLen <= 20 ? 'grid-cols-2' : 'grid-cols-1'
-                      let content = q.content || ''
-                      if (q.question_type === 'fill') {
-                        content = content.replace(/_____/g, '__________')
-                      }
+                      // 与周报告再测卷一致：使用题干几何配图（clean_geometry_svg/tikz_svg_url...），
+                      // 而非整页试卷扫描图 image_url。tikz_code（原始 TikZ 源码）PDF 无法直接渲染，此处同样跳过。
+                      const illustration = getGeometryDisplayUrl(q)
+                      const isInlineSvg = illustration.type === 'svg_code'
+                      const showIllustration = isInlineSvg
+                        ? !!illustration.url
+                        : (illustration.type === 'tikz' || illustration.type === 'clean' || illustration.type === 'raw') && !!illustration.url
                       return (
                         <div key={q.id} className="mb-4" style={{ pageBreakInside: 'avoid' }}>
                           <div className="flex gap-2 text-[14px] leading-[1.8] mb-2">
                             <span className="font-bold min-w-[28px] whitespace-nowrap">{num}.</span>
-                            <span className="flex-1 break-words">{content}</span>
+                            <span className="flex-1 break-words">
+                              <MathText content={q.content || '无内容'} />
+                            </span>
                           </div>
-                          {q.image_url && (
+                          {showIllustration && (
                             <div className="my-2 ml-9" style={{ textAlign: 'center' }}>
-                              <img
-                                src={q.image_url}
-                                alt="配图"
-                                style={{ maxWidth: '100%', maxHeight: '250px', objectFit: 'contain', borderRadius: 'var(--radius-4)' }}
-                              />
+                              {isInlineSvg ? (
+                                <div
+                                  style={{ display: 'flex', justifyContent: 'center' }}
+                                  dangerouslySetInnerHTML={{ __html: illustration.url }}
+                                />
+                              ) : (
+                                <img
+                                  src={illustration.url}
+                                  alt="配图"
+                                  loading="lazy"
+                                  style={{ maxWidth: '100%', maxHeight: '250px', objectFit: 'contain', borderRadius: 'var(--radius-4)' }}
+                                />
+                              )}
                             </div>
                           )}
                           {q.options && q.options.length > 0 && (
                             <div className={`grid ${colClass} gap-x-4 gap-y-2 pl-9 mb-1`}>
                               {q.options.map((opt, i) => (
                                 <div key={i} className="text-[13px] leading-relaxed break-words">
-                                  {formatOption(opt, i)}
+                                  {isOptionWithLetterPrefix(opt) ? (
+                                    <MathText content={opt} />
+                                  ) : (
+                                    <>
+                                      <span className="mr-1">{String.fromCharCode(65 + i)}.</span>
+                                      <MathText content={opt} />
+                                    </>
+                                  )}
                                 </div>
                               ))}
                             </div>

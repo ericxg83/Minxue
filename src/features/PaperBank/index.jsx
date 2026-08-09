@@ -368,6 +368,7 @@ export function usePaperBank() {
                 <img
                   src={block.src}
                   alt={block.caption || '题目配图'}
+                  loading="lazy"
                   className="rounded border border-[var(--border-light)] max-w-full"
                   style={{ maxHeight: '220px', objectFit: 'contain' }}
                 />
@@ -490,7 +491,7 @@ export function usePaperBank() {
             return `<div class="block-text">${escapeHtml(block.content)}</div>`
           case 'image': {
             if (block.src) {
-              return `<div class="block-image" style="text-align:center;"><img src="${block.src}" alt="${escapeHtml(block.caption || '')}" style="max-width:100%;display:block;margin:8px auto;" />${block.caption ? `<div style="font-size:10px;color:#666;">${escapeHtml(block.caption)}</div>` : ''}</div>`
+              return `<div class="block-image" style="text-align:center;"><img src="${block.src}" alt="${escapeHtml(block.caption || '')}" loading="lazy" style="max-width:100%;display:block;margin:8px auto;" />${block.caption ? `<div style="font-size:10px;color:#666;">${escapeHtml(block.caption)}</div>` : ''}</div>`
             }
             return `<div class="block-image" style="text-align:center;color:#999;font-style:italic;">[图: ${escapeHtml(block.caption || '待插入')}]</div>`
           }

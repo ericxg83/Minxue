@@ -139,6 +139,7 @@ export default function ProcessingPage({
                                 <img
                                   src={page.image_url || task.image_url}
                                   alt={`Page ${page.page_number}`}
+                                  loading="lazy"
                                   className="w-full h-full object-cover"
                                 />
                               </div>
@@ -151,7 +152,7 @@ export default function ProcessingPage({
                           </div>
                         )
                       }
-                      return <img src={task.image_url} alt="" className="w-full h-full object-cover" />
+                      return <img src={task.image_url} alt="" loading="lazy" className="w-full h-full object-cover" />
                     })()
                   ) : (
                     <div className="w-full h-full flex items-center justify-center">
