@@ -894,3 +894,98 @@ export const getTeachingDiagnosisDetail = async (tag, opts = {}) => {
   const { mode = 'week', offset = 0 } = opts
   return apiRequest(`/teaching/diagnosis/${encodeURIComponent(tag)}?mode=${mode}&offset=${offset}`)
 }
+
+// ─────────────────────────────────────────────
+// 知识点驱动学习数据层（成长中心 / 讲义引擎）
+// ─────────────────────────────────────────────
+
+/**
+ * 获取学生的知识点掌握度列表
+ * @param {string} studentId
+ * @param {string} [subject] 学科过滤（如 '数学'）
+ */
+export const getKnowledgeMastery = async (studentId, subject) => {
+  const params = new URLSearchParams({ studentId })
+  if (subject) params.set('subject', subject)
+  const data = await apiRequest(`/knowledge/mastery?${params.toString()}`)
+  return data.mastery || []
+}
+
+/**
+ * 获取知识树（嵌套结构）
+ * @param {string} [subject]
+ */
+export const getKnowledgeTree = async (subject) => {
+  const params = new URLSearchParams()
+  if (subject) params.set('subject', subject)
+  const data = await apiRequest(`/knowledge/tree?${params.toString()}`)
+  return data.tree || []
+}
+
+/**
+ * 获取单题关联的知识点
+ * @param {string} questionId
+ */
+export const getQuestionKnowledge = async (questionId) => {
+  const data = await apiRequest(`/questions/${questionId}/knowledge`)
+  return data.knowledge || []
+}
+
+// ─────────────────────────────────────────────
+// 变式题 API
+// ─────────────────────────────────────────────
+
+/**
+ * 获取某题的所有变式题（按策略分组）
+ * @param {string} questionId
+ */
+export const getQuestionVariants = async (questionId) => {
+  const data = await apiRequest(`/variants/${questionId}`)
+  return data.variants || {}
+}
+
+/**
+ * 为某题生成 4 种变式题（AI 在线生成）
+ * @param {string} questionId
+ * @param {string} [kpName]
+ * @returns {Promise<{generated: number, variants: Array}>}
+ */
+export const generateQuestionVariants = async (questionId, kpName = null) => {
+  return apiRequest(`/variants/${questionId}/generate`, {
+    method: 'POST',
+    body: JSON.stringify({ kpName }),
+  })
+}
+
+// ─────────────────────────────────────────────
+// 薄弱点推荐 API
+// ─────────────────────────────────────────────
+
+/**
+ * 获取单个学生的薄弱知识点
+ * @param {string} studentId
+ * @param {Object} [opts]
+ */
+export const getStudentWeakness = async (studentId, opts = {}) => {
+  const params = new URLSearchParams()
+  if (opts.limit) params.set('limit', String(opts.limit))
+  if (opts.threshold) params.set('threshold', String(opts.threshold))
+  const q = params.toString()
+  const data = await apiRequest(`/weakness/student/${studentId}${q ? '?' + q : ''}`)
+  return data.weakness || []
+}
+
+/**
+ * 获取「本周最该讲」推荐列表（按优先级排序）
+ * @param {Object} [opts]
+ * @param {number} [opts.limit]
+ * @param {string} [opts.subject]
+ */
+export const getRecommendedTopics = async (opts = {}) => {
+  const params = new URLSearchParams()
+  if (opts.limit) params.set('limit', String(opts.limit))
+  if (opts.subject) params.set('subject', opts.subject)
+  const q = params.toString()
+  const data = await apiRequest(`/weakness/recommend${q ? '?' + q : ''}`)
+  return data.topics || []
+}

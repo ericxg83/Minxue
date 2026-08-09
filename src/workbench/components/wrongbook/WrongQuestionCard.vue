@@ -59,6 +59,44 @@
       </el-tag>
     </div>
 
+    <!-- Variants section (按需展开) -->
+    <div v-if="showVariants && questionId" class="variants-container">
+      <div class="variants-header">
+        <span class="variants-title">变式题练习</span>
+        <el-button
+          type="primary"
+          link
+          size="small"
+          :loading="generatingVariants"
+          @click.stop="handleGenerateVariants"
+        >
+          {{ variantsList.length > 0 ? '重新生成' : '生成变式题（AI）' }}
+        </el-button>
+      </div>
+      <div v-if="variantsList.length === 0" class="variants-empty">
+        <span v-if="generatingVariants">AI 正在生成 4 道变式题（改数字/改条件/逆命题/情境迁移）...</span>
+        <span v-else>点击右上角"生成变式题"按钮，AI 会基于原题考点生成 4 道同类型题</span>
+      </div>
+      <div v-else class="variants-list">
+        <div v-for="(v, idx) in variantsList" :key="v.id || idx" class="variant-item">
+          <div class="variant-strategy">{{ strategyLabel(v.strategy) }}</div>
+          <div class="variant-content">{{ v.content }}</div>
+          <div v-if="Array.isArray(v.options) && v.options.length > 0" class="variant-options">
+            <div v-for="(opt, oIdx) in v.options" :key="oIdx" class="variant-option-item">
+              {{ String.fromCharCode(65 + oIdx) }}. {{ opt }}
+            </div>
+          </div>
+          <details v-if="v.answer" class="variant-answer-details">
+            <summary>查看答案</summary>
+            <div class="variant-answer-body">
+              <div><strong>答案：</strong>{{ v.answer }}</div>
+              <div v-if="v.analysis"><strong>解析：</strong>{{ v.analysis }}</div>
+            </div>
+          </details>
+        </div>
+      </div>
+    </div>
+
     <!-- Footer: error count, edit, delete -->
     <div class="card-footer">
       <div class="footer-left">
@@ -70,6 +108,9 @@
         </template>
       </div>
       <div class="actions">
+        <el-button type="info" link size="small" @click="showVariants = !showVariants">
+          {{ showVariants ? '收起变式' : '变式题' }}
+        </el-button>
         <el-button type="primary" link size="small" @click="$emit('edit', wrongQuestion)">
           编辑
         </el-button>
@@ -82,10 +123,20 @@
 </template>
 
 <script setup>
-import { computed } from 'vue'
+import { computed, ref, watch } from 'vue'
 import { WarningFilled } from '@element-plus/icons-vue'
+import { ElMessage } from 'element-plus'
 import dayjs from 'dayjs'
 import LazyImage from '../shared/LazyImage.vue'
+import { getQuestionVariants, generateQuestionVariants, getQuestionKnowledge } from '../../../services/apiService'
+
+const STRATEGY_LABELS = {
+  change_number: '改数字',
+  change_condition: '改条件',
+  inverse: '逆命题',
+  context_shift: '情境迁移',
+}
+const strategyLabel = (s) => STRATEGY_LABELS[s] || s || '变式'
 
 const props = defineProps({
   wrongQuestion: {
@@ -137,11 +188,31 @@ const isTaskDeleted = computed(() => {
 })
 
 // Knowledge tags with source type
+// 优先级：1. 手动标签 → 2. 后端归一化知识树（/questions/:id/knowledge）→ 3. ai_tags 兜底
+const normalizedKnowledge = ref([])
+watch(questionId, async (qid) => {
+  if (!qid) { normalizedKnowledge.value = []; return }
+  try {
+    const rows = await getQuestionKnowledge(qid)
+    normalizedKnowledge.value = Array.isArray(rows) ? rows : []
+  } catch (e) {
+    normalizedKnowledge.value = []
+  }
+}, { immediate: true })
+
 const knowledgeTags = computed(() => {
   const q = question.value
   if (q.tags_source === 'manual') {
     return (q.manual_tags || []).map(name => ({ name, sourceType: 'manual' }))
   }
+  // 优先用归一化后的知识树节点
+  if (normalizedKnowledge.value.length > 0) {
+    return normalizedKnowledge.value.map(kp => ({
+      name: kp.name,
+      sourceType: kp.role === 'primary' ? 'kp-primary' : 'kp-secondary',
+    }))
+  }
+  // 兜底用 AI 标签
   return (q.ai_tags || []).map(name => ({ name, sourceType: 'ai' }))
 })
 
@@ -192,6 +263,57 @@ function handleToggleStatus() {
 
 // Question content text
 const questionContent = computed(() => question.value.content || '')
+
+// ===================== 变式题（按需展开） =====================
+const questionId = computed(() => question.value.id || props.wrongQuestion.question_id || props.wrongQuestion.id)
+const showVariants = ref(false)
+const variantsList = ref([])
+const generatingVariants = ref(false)
+
+// 展开时自动拉一次（不强制覆盖本地已有的）
+async function ensureVariantsLoaded() {
+  if (!questionId.value || variantsList.value.length > 0) return
+  try {
+    const grouped = await getQuestionVariants(questionId.value)
+    // grouped 是 { change_number: [], ... }；摊平
+    variantsList.value = [
+      ...(grouped.change_number || []),
+      ...(grouped.change_condition || []),
+      ...(grouped.inverse || []),
+      ...(grouped.context_shift || []),
+    ]
+  } catch (e) {
+    // 拉取失败不阻塞，只是不显示
+    console.warn('拉取变式题失败:', e.message)
+  }
+}
+
+watch(showVariants, (val) => {
+  if (val) ensureVariantsLoaded()
+})
+
+async function handleGenerateVariants() {
+  if (!questionId.value) {
+    ElMessage.warning('该题未关联原题 ID，无法生成变式题')
+    return
+  }
+  if (generatingVariants.value) return
+  generatingVariants.value = true
+  try {
+    const kpName = (question.value.ai_tags || [])[0] || null
+    const res = await generateQuestionVariants(questionId.value, kpName)
+    if (res && Array.isArray(res.variants) && res.variants.length > 0) {
+      variantsList.value = res.variants
+      ElMessage.success(`已生成 ${res.generated || res.variants.length} 道变式题`)
+    } else {
+      ElMessage.warning('AI 暂未生成出变式题，请稍后再试')
+    }
+  } catch (e) {
+    ElMessage.error('生成变式题失败：' + (e?.message || '未知错误'))
+  } finally {
+    generatingVariants.value = false
+  }
+}
 </script>
 
 <style scoped>
@@ -312,6 +434,17 @@ const questionContent = computed(() => question.value.content || '')
   color: var(--wb-primary);
   border-color: transparent;
 }
+.tags-container :deep(.el-tag.kp-primary) {
+  background: linear-gradient(135deg, #6366F1, #8B5CF6);
+  color: #fff;
+  border-color: transparent;
+  font-weight: 500;
+}
+.tags-container :deep(.el-tag.kp-secondary) {
+  background: #F0F5FF;
+  color: #3B82F6;
+  border-color: transparent;
+}
 
 .card-footer {
   font-size: 13px;
@@ -329,7 +462,7 @@ const questionContent = computed(() => question.value.content || '')
 
 .time-range {
   font-size: 11px;
-  color: #ff9500;
+  color: #8B5CF6;
 }
 
 .error-count {
@@ -340,5 +473,91 @@ const questionContent = computed(() => question.value.content || '')
 .actions {
   display: flex;
   gap: 16px;
+}
+
+/* 变式题区 */
+.variants-container {
+  margin-top: 8px;
+  padding: 12px 14px;
+  background: #F0F5FF;
+  border: 1px solid #D6E4FF;
+  border-radius: 8px;
+}
+.variants-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 8px;
+}
+.variants-title {
+  font-size: 13px;
+  font-weight: 600;
+  color: #1D2129;
+}
+.variants-empty {
+  font-size: 12px;
+  color: #86909C;
+  padding: 6px 0;
+}
+.variants-list {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+.variant-item {
+  background: #fff;
+  border: 1px solid #E5E6EB;
+  border-radius: 6px;
+  padding: 10px 12px;
+}
+.variant-strategy {
+  display: inline-block;
+  font-size: 11px;
+  padding: 1px 8px;
+  background: #3B82F6;
+  color: #fff;
+  border-radius: 4px;
+  margin-bottom: 6px;
+}
+.variant-content {
+  font-size: 13px;
+  line-height: 1.6;
+  color: #1D2129;
+  margin-bottom: 6px;
+}
+.variant-options {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 2px 16px;
+  font-size: 12px;
+  color: #4E5969;
+  margin-bottom: 6px;
+}
+.variant-option-item {
+  padding: 2px 0;
+}
+.variant-answer-details {
+  font-size: 12px;
+  margin-top: 4px;
+}
+.variant-answer-details summary {
+  cursor: pointer;
+  color: #3B82F6;
+  user-select: none;
+}
+.variant-answer-body {
+  background: #F7F8FA;
+  padding: 8px 10px;
+  border-radius: 4px;
+  margin-top: 6px;
+  font-size: 12px;
+  line-height: 1.6;
+  color: #4E5969;
+}
+.variant-answer-body > div {
+  margin-bottom: 4px;
+}
+.variant-answer-body > div:last-child {
+  margin-bottom: 0;
 }
 </style>

@@ -134,12 +134,17 @@
                     </tr>
                   </thead>
                   <tbody>
+                    <tr v-if="knowledgePointsData.length === 0">
+                      <td colspan="5" style="text-align:center;color:var(--wb-text-tertiary);padding:24px 0;">
+                        暂无掌握度数据 —— 学生上传作业批改后自动生成
+                      </td>
+                    </tr>
                     <tr v-for="kp in knowledgePointsData" :key="kp.name">
                       <td>{{ kp.name }}</td>
                       <td>
                         <div class="mastery-bar-cell">
                           <div class="mastery-bar-bg">
-                            <div class="mastery-bar-fill" :style="{ width: kp.mastery + '%', background: kp.mastery >= 80 ? '#3B82F6' : kp.mastery >= 60 ? 'var(--wb-warning)' : 'var(--wb-danger)' }"></div>
+                            <div class="mastery-bar-fill" :style="{ width: kp.mastery + '%', background: kp.mastery >= 80 ? '#6366F1' : kp.mastery >= 60 ? 'var(--wb-warning)' : 'var(--wb-danger)' }"></div>
                           </div>
                           <span class="mastery-bar-value">{{ kp.mastery }}%</span>
                         </div>
@@ -175,6 +180,57 @@
                     <span class="pie-legend-dot" :style="{ background: item.color }"></span>
                     <span class="pie-legend-name">{{ item.name }}</span>
                     <span class="pie-legend-value">{{ item.value }} ({{ item.percent }}%)</span>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <!-- 薄弱知识点推荐 -->
+          <div class="recommend-card">
+            <div class="recommend-card__header">
+              <div>
+                <div class="recommend-card__title">薄弱知识点推荐</div>
+                <div class="recommend-card__sub">综合全班/全年级掌握度，按紧急程度排序</div>
+              </div>
+              <el-button type="primary" link size="small" @click="handleGenerateHandout" :loading="generatingHandout">
+                <el-icon><Document /></el-icon>
+                一键生成讲义
+              </el-button>
+            </div>
+            <div class="recommend-card__body" v-loading="loadingRecommend">
+              <div v-if="recommendedTopics.length === 0" class="recommend-empty">
+                暂无推荐 —— 学生数据不足以生成推荐
+              </div>
+              <div v-else class="recommend-list">
+                <div
+                  v-for="(topic, idx) in recommendedTopics"
+                  :key="topic.kpId || idx"
+                  class="recommend-item"
+                  :class="{ 'is-urgent': topic.isUrgent }"
+                >
+                  <div class="recommend-rank">{{ idx + 1 }}</div>
+                  <div class="recommend-main">
+                    <div class="recommend-name">
+                      <el-tag size="small" :type="topic.isUrgent ? 'danger' : 'warning'" effect="dark">
+                        {{ topic.subject }}
+                      </el-tag>
+                      <span class="recommend-name-text">{{ topic.name }}</span>
+                    </div>
+                    <div class="recommend-meta">
+                      <span>平均掌握度 <strong>{{ topic.avgMastery }}%</strong></span>
+                      <span class="dot">·</span>
+                      <span>{{ topic.studentCount }} 人共性薄弱</span>
+                      <span class="dot">·</span>
+                      <span>优先级 {{ topic.priority }}</span>
+                    </div>
+                    <div v-if="topic.reason" class="recommend-reason">📌 {{ topic.reason }}</div>
+                  </div>
+                  <div class="recommend-bar">
+                    <div
+                      class="recommend-bar-fill"
+                      :style="{ width: topic.avgMastery + '%', background: topic.isUrgent ? '#F5222D' : topic.avgMastery < 50 ? '#FA8C16' : '#3B82F6' }"
+                    ></div>
                   </div>
                 </div>
               </div>
@@ -242,6 +298,7 @@
 
 <script setup>
 import { ref, computed, onMounted, onUnmounted, watch, nextTick } from 'vue'
+import { useRouter } from 'vue-router'
 import { ElMessage } from 'element-plus'
 import {
   ArrowDown, Download, Document, TrendCharts,
@@ -249,6 +306,7 @@ import {
 } from '@element-plus/icons-vue'
 import { useGrowthStore } from '../stores/growthStore'
 import { getStudents } from '../../services/apiService'
+import { getRecommendedTopics } from '../../services/apiService'
 import * as echarts from 'echarts/core'
 import { LineChart, BarChart, PieChart as EChartsPieChart } from 'echarts/charts'
 import { GridComponent, TooltipComponent, LegendComponent, TitleComponent } from 'echarts/components'
@@ -259,6 +317,7 @@ echarts.use([LineChart, BarChart, EChartsPieChart, GridComponent, TooltipCompone
 import dayjs from 'dayjs'
 
 const growthStore = useGrowthStore()
+const router = useRouter()
 
 // ===== 学生列表 =====
 const students = ref([])
@@ -290,146 +349,72 @@ const subjectFilter = ref('all')
 
 // ===== KPI 数据 =====
 const kpiData = computed(() => {
+  const masteryRate = growthStore.averageMasteryRate || growthStore.masteryRate || 0
   return {
-    totalWrong: growthStore.totalWrongQuestions || 128,
-    totalWrongTrend: -12,
-    accuracy: growthStore.masteryRate || 72,
-    accuracyTrend: 8,
-    masteryRate: 68,
-    masteryTrend: 6,
-    studyHours: 8.5,
-    studyHoursTrend: 1.2,
+    totalWrong: growthStore.totalWrongQuestions || 0,
+    totalWrongTrend: 0,
+    accuracy: growthStore.masteryRate || 0,
+    accuracyTrend: 0,
+    masteryRate,
+    masteryTrend: 0,
+    studyHours: 0,
+    studyHoursTrend: 0,
   }
 })
 
-// ===== 知识点掌握数据 =====
-const knowledgePointsData = computed(() => [
-  { name: '勾股定理', mastery: 80, accuracy: 80, wrongCount: 16, trend: 12 },
-  { name: '一元一次方程', mastery: 60, accuracy: 60, wrongCount: 28, trend: 5 },
-  { name: '平行四边形', mastery: 70, accuracy: 70, wrongCount: 18, trend: -3 },
-  { name: '二次函数', mastery: 50, accuracy: 50, wrongCount: 34, trend: -8 },
-  { name: '相似三角形', mastery: 90, accuracy: 90, wrongCount: 6, trend: 15 },
-])
+// ===== 知识点掌握数据（真实 knowledge_mastery 数据，无记录时降级为本地字典展示空态） =====
+const knowledgePointsData = computed(() => {
+  const real = growthStore.masteryPoints
+  if (real.length > 0) return real
+  // 无掌握度记录时展示空态占位（不再使用假数据）
+  return []
+})
 
-// ===== 饼图数据 =====
-const pieLegendData = [
-  { name: '概念理解', value: 32, percent: 25, color: '#3B82F6' },
-  { name: '计算错误', value: 48, percent: 37, color: '#52C41A' },
-  { name: '审题失误', value: 28, percent: 22, color: '#FA8C16' },
-  { name: '知识点遗忘', value: 20, percent: 16, color: '#722ED1' },
-]
+// ===== 饼图数据（真实 error_type 分布） =====
+const pieLegendData = computed(() => {
+  const list = growthStore.wrongQuestions
+    .filter(wq => wq.student_id === growthStore.currentStudentId)
+  const counts = {}
+  list.forEach(wq => {
+    const t = wq.error_type || wq.question?.error_type || '未标注'
+    counts[t] = (counts[t] || 0) + 1
+  })
+  const colors = ['#6366F1', '#52C41A', '#FA8C16', '#722ED1', '#13C2C2', '#F5222D']
+  const total = list.length
+  const entries = Object.entries(counts)
+    .sort((a, b) => b[1] - a[1])
+  if (entries.length === 0) {
+    return [{ name: '暂无数据', value: 1, percent: 100, color: '#D9D9D9' }]
+  }
+  return entries.map(([name, value], i) => ({
+    name,
+    value,
+    percent: total > 0 ? Math.round((value / total) * 100) : 0,
+    color: colors[i % colors.length],
+  }))
+})
 
-// ===== 最近错题记录 =====
-const recentWrongRecords = [
-  {
-    id: 1,
-    subject: '数学',
-    question: '如图，在△ABC中，∠A = 90°，AB = 6，AC = 8，则BC的长度为（ ）',
-    knowledgePoint: '勾股定理',
-    time: '05-18 17:20',
-    studentAnswer: '12',
-    correctAnswer: '10',
-  },
-  {
-    id: 2,
-    subject: '数学',
-    question: '解方程：2x + 5 = 17',
-    knowledgePoint: '一元一次方程',
-    time: '05-17 16:35',
-    studentAnswer: '6',
-    correctAnswer: '6',
-  },
-  {
-    id: 3,
-    subject: '数学',
-    question: '如图，平行四边形ABCD中，AD = 5，AB = 6，则周长为（ ）',
-    knowledgePoint: '平行四边形',
-    time: '05-16 15:40',
-    studentAnswer: '22',
-    correctAnswer: '22',
-  },
-  {
-    id: 4,
-    subject: '数学',
-    question: '已知二次函数 y = ax² + bx + c 的图象经过点(1, 3)和(2, 5)，求函数解析式',
-    knowledgePoint: '二次函数',
-    time: '05-15 14:20',
-    studentAnswer: 'y = x² + 1',
-    correctAnswer: 'y = 2x² - 3x + 4',
-  },
-  {
-    id: 5,
-    subject: '数学',
-    question: '若两个相似三角形的面积比为 4:9，则它们的周长比为（ ）',
-    knowledgePoint: '相似三角形',
-    time: '05-14 11:30',
-    studentAnswer: '4:9',
-    correctAnswer: '2:3',
-  },
-  {
-    id: 6,
-    subject: '数学',
-    question: '计算：(-3)² - 2 × (-4) + 5',
-    knowledgePoint: '计算错误',
-    time: '05-13 09:45',
-    studentAnswer: '12',
-    correctAnswer: '22',
-  },
-  {
-    id: 7,
-    subject: '数学',
-    question: '在直角坐标系中，点A(2, 3)关于x轴的对称点坐标为（ ）',
-    knowledgePoint: '概念理解',
-    time: '05-12 16:10',
-    studentAnswer: '(-2, 3)',
-    correctAnswer: '(2, -3)',
-  },
-  {
-    id: 8,
-    subject: '数学',
-    question: '一个等腰三角形的两边长分别为3和7，则周长为（ ）',
-    knowledgePoint: '勾股定理',
-    time: '05-12 10:20',
-    studentAnswer: '13',
-    correctAnswer: '17',
-  },
-  {
-    id: 9,
-    subject: '数学',
-    question: '已知一元二次方程 x² - 5x + 6 = 0 的两根为 x₁, x₂，则 x₁ + x₂ = （ ）',
-    knowledgePoint: '一元一次方程',
-    time: '05-11 14:50',
-    studentAnswer: '6',
-    correctAnswer: '5',
-  },
-  {
-    id: 10,
-    subject: '数学',
-    question: '抛物线 y = x² - 4x + 3 的顶点坐标为（ ）',
-    knowledgePoint: '二次函数',
-    time: '05-11 09:30',
-    studentAnswer: '(2, 1)',
-    correctAnswer: '(2, -1)',
-  },
-  {
-    id: 11,
-    subject: '数学',
-    question: '若△ABC ∽ △DEF，且 AB:DE = 2:3，则面积比为（ ）',
-    knowledgePoint: '相似三角形',
-    time: '05-10 15:20',
-    studentAnswer: '2:3',
-    correctAnswer: '4:9',
-  },
-  {
-    id: 12,
-    subject: '数学',
-    question: '计算：√16 + ∛(-27) + |−5|',
-    knowledgePoint: '计算错误',
-    time: '05-10 11:00',
-    studentAnswer: '6',
-    correctAnswer: '6',
-  },
-]
+// ===== 最近错题记录（真实 wrong_questions 数据） =====
+const recentWrongRecords = computed(() => {
+  const list = growthStore.wrongQuestions
+    .filter(wq => wq.student_id === growthStore.currentStudentId)
+    .slice(0, 12)
+  return list.map(wq => {
+    const q = wq.question || {}
+    const content = q.content || wq.content || ''
+    const subject = q.subject || wq.subject || '数学'
+    const tags = q.ai_tags || wq.ai_tags || []
+    return {
+      id: wq.id,
+      subject,
+      question: content.length > 60 ? content.slice(0, 60) + '…' : content,
+      knowledgePoint: Array.isArray(tags) && tags[0] && tags[0] !== '未分类' ? tags[0] : '-',
+      time: dayjs(wq.added_at || wq.created_at).format('MM-DD HH:mm'),
+      studentAnswer: wq.student_answer || q.student_answer || '-',
+      correctAnswer: wq.correct_answer || q.answer || '-',
+    }
+  })
+})
 
 // ===== 分页 =====
 const PAGE_SIZE = 5
@@ -437,7 +422,7 @@ const currentPage = ref(1)
 
 const paginatedRecords = computed(() => {
   const start = (currentPage.value - 1) * PAGE_SIZE
-  return recentWrongRecords.slice(start, start + PAGE_SIZE)
+  return recentWrongRecords.value.slice(start, start + PAGE_SIZE)
 })
 
 // ===== 图表引用 =====
@@ -499,12 +484,12 @@ const initCharts = () => {
         smooth: true,
         symbol: 'circle',
         symbolSize: 8,
-        lineStyle: { color: '#3B82F6', width: 2 },
-        itemStyle: { color: '#3B82F6' },
+        lineStyle: { color: '#6366F1', width: 2 },
+        itemStyle: { color: '#6366F1' },
         areaStyle: {
           color: new LinearGradient(0, 0, 0, 1, [
-            { offset: 0, color: 'rgba(59, 130, 246, 0.15)' },
-            { offset: 1, color: 'rgba(59, 130, 246, 0.01)' },
+            { offset: 0, color: 'rgba(99, 102, 241, 0.15)' },
+            { offset: 1, color: 'rgba(99, 102, 241, 0.01)' },
           ]),
         },
       }],
@@ -557,7 +542,7 @@ const initCharts = () => {
         type: 'bar',
         barWidth: 20,
         itemStyle: {
-          color: '#3B82F6',
+          color: '#6366F1',
           borderRadius: [4, 4, 0, 0],
         },
       }],
@@ -585,7 +570,7 @@ const initCharts = () => {
         avoidLabelOverlap: false,
         itemStyle: { borderRadius: 6, borderColor: '#fff', borderWidth: 2 },
         label: { show: false },
-        data: pieLegendData.map(item => ({
+        data: pieLegendData.value.map(item => ({
           name: item.name,
           value: item.value,
           itemStyle: { color: item.color },
@@ -598,7 +583,7 @@ const initCharts = () => {
 // ===== 工具函数 =====
 const getSubjectColor = (subject) => {
   const colorMap = {
-    '数学': '#3B82F6',
+    '数学': '#6366F1',
     '语文': '#FA8C16',
     '英语': '#52C41A',
     '物理': '#722ED1',
@@ -609,6 +594,43 @@ const getSubjectColor = (subject) => {
 
 const handleViewDetail = (record) => {
   ElMessage.info(`查看题目详情：${record.question.substring(0, 30)}...`)
+}
+
+// ===== 薄弱知识点推荐 =====
+const recommendedTopics = ref([])
+const loadingRecommend = ref(false)
+const generatingHandout = ref(false)
+
+const loadRecommend = async () => {
+  loadingRecommend.value = true
+  try {
+    recommendedTopics.value = await getRecommendedTopics({
+      limit: 8,
+      subject: subjectFilter.value === 'all' ? undefined : subjectFilter.value,
+    })
+  } catch (e) {
+    console.warn('拉取薄弱知识点推荐失败:', e.message)
+    recommendedTopics.value = []
+  } finally {
+    loadingRecommend.value = false
+  }
+}
+
+watch([selectedStudentId, subjectFilter], () => {
+  loadRecommend()
+})
+
+// 一键生成讲义：跳转到讲义预览页（HandoutPreview 走 /handout/from-diagnosis）
+const handleGenerateHandout = () => {
+  if (generatingHandout.value) return
+  generatingHandout.value = true
+  try {
+    const subj = subjectFilter.value === 'all' ? '' : subjectFilter.value
+    const route = router.resolve({ path: '/handout', query: { subject: subj } })
+    window.open(route.href, '_blank')
+  } finally {
+    setTimeout(() => { generatingHandout.value = false }, 500)
+  }
 }
 
 // ===== 窗口resize =====
@@ -633,6 +655,9 @@ onMounted(async () => {
   } catch (e) {
     console.error('加载学生列表失败:', e)
   }
+
+  // 加载薄弱知识点推荐
+  loadRecommend()
 
   nextTick(() => {
     initCharts()
@@ -1082,6 +1107,116 @@ onUnmounted(() => {
 .record-count {
   font-size: 12px;
   color: var(--wb-text-tertiary);
+}
+
+/* 薄弱知识点推荐卡片 */
+.recommend-card {
+  background: #fff;
+  border-radius: var(--wb-radius-md);
+  box-shadow: var(--wb-shadow-sm);
+  padding: 16px 20px;
+}
+.recommend-card__header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  margin-bottom: 12px;
+}
+.recommend-card__title {
+  font-size: 14px;
+  font-weight: 500;
+  color: var(--wb-text);
+  margin-bottom: 4px;
+}
+.recommend-card__sub {
+  font-size: 12px;
+  color: var(--wb-text-tertiary);
+}
+.recommend-card__body {
+  min-height: 60px;
+}
+.recommend-empty {
+  text-align: center;
+  font-size: 13px;
+  color: var(--wb-text-tertiary);
+  padding: 24px 0;
+}
+.recommend-list {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+.recommend-item {
+  display: grid;
+  grid-template-columns: 32px 1fr 120px;
+  align-items: center;
+  gap: 12px;
+  padding: 10px 12px;
+  background: #F7F8FA;
+  border-radius: 6px;
+  border-left: 3px solid #3B82F6;
+  transition: background 0.2s;
+}
+.recommend-item:hover {
+  background: #F0F5FF;
+}
+.recommend-item.is-urgent {
+  border-left-color: #F5222D;
+  background: #FFF2F0;
+}
+.recommend-item.is-urgent:hover {
+  background: #FFE7E5;
+}
+.recommend-rank {
+  font-size: 16px;
+  font-weight: 700;
+  color: var(--wb-text-tertiary);
+  text-align: center;
+}
+.recommend-item.is-urgent .recommend-rank {
+  color: #F5222D;
+}
+.recommend-name {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-bottom: 4px;
+}
+.recommend-name-text {
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--wb-text);
+}
+.recommend-meta {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 12px;
+  color: var(--wb-text-tertiary);
+}
+.recommend-meta strong {
+  color: var(--wb-text);
+  font-weight: 600;
+}
+.recommend-meta .dot {
+  color: var(--wb-text-tertiary);
+}
+.recommend-reason {
+  margin-top: 4px;
+  font-size: 11px;
+  color: #FA8C16;
+}
+.recommend-bar {
+  width: 120px;
+  height: 8px;
+  background: var(--wb-bg-hover);
+  border-radius: 4px;
+  overflow: hidden;
+}
+.recommend-bar-fill {
+  height: 100%;
+  border-radius: 4px;
+  transition: width 0.5s ease;
 }
 
 /* ===== Empty State ===== */
