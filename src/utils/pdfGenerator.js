@@ -43,11 +43,11 @@ const SYMBOL_MAP = {
   '≠': '\\ne ',
 }
 
-// Unicode 上标 → LaTeX 上标命令
-const SUP_MAP = {
-  '⁰': '^{0}', '¹': '^{1}', '²': '^{2}', '³': '^{3}', '⁴': '^{4}',
-  '⁵': '^{5}', '⁶': '^{6}', '⁷': '^{7}', '⁸': '^{8}', '⁹': '^{9}',
-  '⁺': '^{+}', '⁻': '^{-}',
+// Unicode 上标 → 对应基准字符（用于合并为整体指数）
+const SUP_BASE = {
+  '⁰': '0', '¹': '1', '²': '2', '³': '3', '⁴': '4',
+  '⁵': '5', '⁶': '6', '⁷': '7', '⁸': '8', '⁹': '9',
+  '⁺': '+', '⁻': '-',
 }
 
 /**
@@ -70,10 +70,12 @@ function preprocessMath(text) {
   s = s.replace(/\\\(/g, '').replace(/\\\)/g, '')
   s = s.replace(/\\\{/g, '{').replace(/\\\}/g, '}')
 
-  // 0.5 Unicode 上标 → LaTeX 上标
-  for (const [ch, rep] of Object.entries(SUP_MAP)) {
-    if (s.includes(ch)) s = s.split(ch).join(rep)
-  }
+  // 0.5 Unicode 上标 → 单个整体指数（²⁰²¹ → ^{2021}，严禁拆成 ^{2}^{0}^{2}^{1}）
+  s = s.replace(/[⁰¹²³⁴⁵⁶⁷⁸⁹⁺⁻]+/g, (run) => {
+    let inner = ''
+    for (const ch of run) inner += SUP_BASE[ch] || ch
+    return '^{' + inner + '}'
+  })
 
   // 1. √ → \sqrt{...}（平衡括号、混合数、负号、数字字母都支持）
   s = convertSqrt(s)

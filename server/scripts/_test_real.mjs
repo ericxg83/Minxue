@@ -12,10 +12,10 @@ const SYMBOL_MAP = {
   '≥': '\\ge ', '≤': '\\le ', '≠': '\\ne ',
 }
 
-const SUP_MAP = {
-  '⁰': '^{0}', '¹': '^{1}', '²': '^{2}', '³': '^{3}', '⁴': '^{4}',
-  '⁵': '^{5}', '⁶': '^{6}', '⁷': '^{7}', '⁸': '^{8}', '⁹': '^{9}',
-  '⁺': '^{+}', '⁻': '^{-}',
+const SUP_BASE = {
+  '⁰': '0', '¹': '1', '²': '2', '³': '3', '⁴': '4',
+  '⁵': '5', '⁶': '6', '⁷': '7', '⁸': '8', '⁹': '9',
+  '⁺': '+', '⁻': '-',
 }
 
 function convertSqrt(s) {
@@ -78,9 +78,11 @@ function preprocessMath(text) {
   s = s.replace(/\$\$?/g, '')
   s = s.replace(/\\\(/g, '').replace(/\\\)/g, '')
   s = s.replace(/\\\{/g, '{').replace(/\\\}/g, '}')
-  for (const [ch, rep] of Object.entries(SUP_MAP)) {
-    if (s.includes(ch)) s = s.split(ch).join(rep)
-  }
+  s = s.replace(/[⁰¹²³⁴⁵⁶⁷⁸⁹⁺⁻]+/g, (run) => {
+    let inner = ''
+    for (const ch of run) inner += SUP_BASE[ch] || ch
+    return '^{' + inner + '}'
+  })
   s = convertSqrt(s)
   s = s.replace(/(\d+(?:\.\d+)?)\s+(\d+)\s*\/\s*(\d+)/g, (m, whole, num, den) =>
     parseInt(num, 10) < parseInt(den, 10) ? `${whole}\\frac{${num}}{${den}}` : m
@@ -247,6 +249,8 @@ const tests = [
   '用递等式计算.(2)16/3÷4/5-1/3×3/5.',
   '用递等式计算.(1)2.5×(2/5-1/3)+2;',
   '小明在做分数计算题时，把一个数“÷3/4”错看成“-3/4”，得到的计算结果为2 5/8，这道题的正确答案应该是多少？',
+  '计算:(√15-4)²⁰²¹(√15+4)²⁰²²= .',
+  '计算:x²⁺³ - y⁻¹ = 10⁸, 求 a¹²⁰²³',
 ]
 
 let failTotal = 0
