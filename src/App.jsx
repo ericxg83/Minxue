@@ -283,13 +283,9 @@ export default function App() {
     }
   }, [currentStudent?.id])
 
-  // Clear data when student changes
-  useEffect(() => {
-    setTasks([])
-    setWrongQuestions([])
-    setGeneratedExams([])
-    setExams([])
-  }, [currentStudent?.id])
+  // 切换学生：不手动清空列表——各页面 load 函数按 studentId 走「先缓存后刷新」，
+  // 立即用新学生缓存覆盖旧数据，避免先清空导致的空屏闪烁。
+  // (缓存键 tasks_cache_{studentId} / wrong_questions_cache_{studentId} 已按学生隔离)
 
   // Load tasks when student changes
   useEffect(() => {
