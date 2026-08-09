@@ -18,6 +18,7 @@ import { taskService } from './services/taskService'
 import { usePaperBank } from './features/PaperBank/index.jsx'
 import { useUploadFlow } from './hooks/useUploadFlow'
 import { useQuestionEditor } from './hooks/useQuestionEditor'
+import { usePolling } from './hooks/usePolling'
 import { __pendingUploadStore } from './features/upload/pendingUploadStore'
 import { mockTasks, mockWrongQuestions, mockGeneratedExams, mockStudents } from './data/mockData'
 import StudentSwitcher from './components/StudentSwitcher'
@@ -300,21 +301,16 @@ export default function App() {
     }
   }, [currentStudent?.id, currentPage])
 
-  // Auto-refresh pending tasks every 30 seconds
-  useEffect(() => {
-    if (!currentStudent || currentPage !== 'processing') return
-
-    const interval = setInterval(() => {
-      const pendingTasks = (Array.isArray(tasks) ? tasks : []).filter(t => !isTaskCompleted(t))
-      if (pendingTasks.length > 0) {
-        // Only refresh if there are pending/processing tasks
-        invalidateCache('tasks', currentStudent.id)
-        loadTasks()
-      }
-    }, 30000) // 30 seconds
-
-    return () => clearInterval(interval)
-  }, [currentStudent?.id, currentPage, tasks])
+  // Auto-refresh pending tasks every 30 seconds（页面隐藏时暂停）
+  const tasksRef = useRef(tasks)
+  tasksRef.current = tasks
+  usePolling(() => {
+    const pendingTasks = (Array.isArray(tasksRef.current) ? tasksRef.current : []).filter(t => !isTaskCompleted(t))
+    if (pendingTasks.length > 0) {
+      invalidateCache('tasks', currentStudent?.id)
+      loadTasks()
+    }
+  }, 30000, currentStudent && currentPage === 'processing', [currentStudent?.id, currentPage])
 
 
   // Load wrong questions
@@ -325,30 +321,24 @@ export default function App() {
   }, [currentStudent?.id, currentPage])
 
   // Load exams（合并原 App.jsx 3s 轮询与 Exam/index.jsx 3s 轮询，统一由 App 层调度）
+  usePolling(() => {
+    loadGeneratedExams(false)
+  }, 15000, currentStudent && currentPage === 'exam', [currentStudent?.id, currentPage])
+  // 首次进入：先展示缓存再后台刷新（enabled 打开时 usePolling 立即执行一次 loadGeneratedExams(false)，
+  // 这里额外触发一次 showCachedFirst 版本让缓存先上屏）
   useEffect(() => {
     if (currentStudent && currentPage === 'exam') {
-      loadGeneratedExams(false, true) // 首次进入：先展示缓存再后台刷新
-      const interval = setInterval(() => {
-        if (document.visibilityState === 'visible') loadGeneratedExams(false)
-      }, 15000) // ⚡ 3s→15s，exams 状态变化慢，无需高频轮询
-      return () => clearInterval(interval)
+      loadGeneratedExams(false, true)
     }
   }, [currentStudent?.id, currentPage])
 
   // 通知摘要（铃铛红点）：低频率后台刷新，仅在需要时（页面可见）拉取
-  useEffect(() => {
-    const loadNotif = async () => {
-      try {
-        const data = await getTasksSummary(false)
-        if (data?.success) setNotifSummary(data.summary)
-      } catch { /* 忽略通知摘要失败 */ }
-    }
-    loadNotif()
-    const interval = setInterval(() => {
-      if (document.visibilityState === 'visible') loadNotif()
-    }, 30000)
-    return () => clearInterval(interval)
-  }, [])
+  usePolling(async () => {
+    try {
+      const data = await getTasksSummary(false)
+      if (data?.success) setNotifSummary(data.summary)
+    } catch { /* 忽略通知摘要失败 */ }
+  }, 30000, true, [])
 
   // Load questions for reprint — 始终从服务端获取最新 question_ids，防止缓存/列表数据过期
   useEffect(() => {
