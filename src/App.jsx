@@ -13,7 +13,7 @@ import {
 import { motion, AnimatePresence } from 'motion/react'
 import { useLocation, useNavigate } from 'react-router-dom'
 import { useStudentStore, useTaskStore, useWrongQuestionStore, useExamStore } from './store'
-import { getStudents, getTasksByStudent, getQuestionsByTask, getWrongQuestionsByStudent, getExamsByStudent, getGeneratedExamsByStudent, getGeneratedExamById, updateTaskStatus, updateQuestion, updateQuestionTags, invalidateCache, createStudent, updateWrongQuestionStatus, getQuestionsByIds, deleteTask, deleteGeneratedExam, deleteWrongQuestion, getTaskById, recalculateTaskStats, clearStudentCaches, peekCache } from './services/apiService'
+import { getStudents, getTasksByStudent, getQuestionsByTask, getWrongQuestionsByStudent, getExamsByStudent, getGeneratedExamsByStudent, getGeneratedExamById, updateTaskStatus, updateQuestion, updateQuestionTags, invalidateCache, createStudent, updateWrongQuestionStatus, getQuestionsByIds, deleteTask, deleteGeneratedExam, deleteWrongQuestion, getTaskById, recalculateTaskStats, clearStudentCaches, peekCache, getTasksSummary } from './services/apiService'
 import { taskService } from './services/taskService'
 import { usePaperBank } from './features/PaperBank/index.jsx'
 import { useUploadFlow } from './hooks/useUploadFlow'
@@ -184,6 +184,7 @@ export default function App() {
   // 从 WorksheetPicker 选择练习册后的回调
   const [showNotifications, setShowNotifications] = useState(false)
   const [showLearningReport, setShowLearningReport] = useState(false)
+  const [notifSummary, setNotifSummary] = useState(null) // 通知摘要（铃铛红点）
 
   // QR Detection State
   const [qrDetectionResults, setQrDetectionResults] = useState({})
@@ -329,6 +330,21 @@ export default function App() {
       return () => clearInterval(interval)
     }
   }, [currentStudent?.id, currentPage])
+
+  // 通知摘要（铃铛红点）：低频率后台刷新，仅在需要时（页面可见）拉取
+  useEffect(() => {
+    const loadNotif = async () => {
+      try {
+        const data = await getTasksSummary(false)
+        if (data?.success) setNotifSummary(data.summary)
+      } catch { /* 忽略通知摘要失败 */ }
+    }
+    loadNotif()
+    const interval = setInterval(() => {
+      if (document.visibilityState === 'visible') loadNotif()
+    }, 30000)
+    return () => clearInterval(interval)
+  }, [])
 
   // Load questions for reprint — 始终从服务端获取最新 question_ids，防止缓存/列表数据过期
   useEffect(() => {
@@ -957,6 +973,7 @@ export default function App() {
           onOpenStudentSwitcher={() => setShowStudentSwitcher(true)}
           onOpenLearningReport={() => setShowLearningReport(true)}
           onOpenNotifications={() => setShowNotifications(true)}
+          notificationCount={notifSummary?.totalNotifications || 0}
         />
 
         {/* Main Content */}

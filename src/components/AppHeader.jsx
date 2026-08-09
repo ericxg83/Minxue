@@ -5,7 +5,8 @@ export default function AppHeader({
   isInitializing,
   onOpenStudentSwitcher,
   onOpenLearningReport,
-  onOpenNotifications
+  onOpenNotifications,
+  notificationCount = 0
 }) {
   return (
     <header className="sticky top-0 z-50 glass border-b" style={{ borderColor: 'rgba(232,229,224,0.5)', paddingTop: 'env(safe-area-inset-top, 0px)' }}>
@@ -36,11 +37,35 @@ export default function AppHeader({
           </button>
           <button
             onClick={onOpenNotifications}
-            className="w-8 h-8 rounded-xl flex items-center justify-center transition-colors"
+            className="relative w-8 h-8 rounded-xl flex items-center justify-center transition-colors"
             style={{ background: 'var(--bg-secondary)' }}
             title="通知"
+            aria-label="通知"
           >
             <Bell size={16} style={{ color: 'var(--text-secondary)' }} />
+            {notificationCount > 0 && (
+              <span
+                style={{
+                  position: 'absolute',
+                  top: '-2px',
+                  right: '-2px',
+                  minWidth: '15px',
+                  height: '15px',
+                  padding: '0 3px',
+                  borderRadius: 'var(--radius-full)',
+                  background: 'var(--danger)',
+                  color: '#fff',
+                  fontSize: '9px',
+                  fontWeight: 600,
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  border: '1.5px solid #fff'
+                }}
+              >
+                {notificationCount > 99 ? '99+' : notificationCount}
+              </span>
+            )}
           </button>
         </div>
       </div>
