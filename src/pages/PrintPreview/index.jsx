@@ -558,12 +558,14 @@ export default function PrintPreview({ onClose, questions: propQuestions, existi
                       const showIllustration = isInlineSvg
                         ? !!illustration.url
                         : (illustration.type === 'tikz' || illustration.type === 'clean' || illustration.type === 'raw') && !!illustration.url
+                      // 与 PDF 一致：连续下划线填空线转 \underline{\quad}，避免裸 _ 触发 KaTeX 下标报错
+                      const displayContent = (q.content || '无内容').replace(/_{2,}/g, '\\underline{\\quad}')
                       return (
                         <div key={q.id} className="mb-4" style={{ pageBreakInside: 'avoid' }}>
                           <div className="flex gap-2 text-[14px] leading-[1.8] mb-2">
                             <span className="font-bold min-w-[28px] whitespace-nowrap">{num}.</span>
                             <span className="flex-1 break-words">
-                              <MathText content={q.content || '无内容'} />
+                              <MathText content={displayContent} />
                             </span>
                           </div>
                           {showIllustration && (
