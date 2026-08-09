@@ -28,6 +28,7 @@ import StagingModal from './components/StagingModal'
 import ExamChoiceModal from './components/ExamChoiceModal'
 import NotificationsPanel from './components/NotificationsPanel'
 import LearningReportPanel from './components/LearningReportPanel'
+import ImagePreview from './components/ImagePreview'
 import ProcessingPage from './pages/ProcessingPage'
 import WrongBookPage from './pages/WrongBookPage'
 import ExamPage from './pages/ExamPage'
@@ -1136,18 +1137,19 @@ export default function App() {
               </div>
             )}
 
-            {/* 全屏图片查看器 */}
+            {/* 全屏图片查看器 — 支持单击放大/双击复位/双指捏合/滚轮缩放 */}
             {showImageViewer && selectedImage && (
-              <div className="absolute inset-0 z-[30000] bg-black/95 flex flex-col" onClick={() => setShowImageViewer(false)}>
+              <div className="absolute inset-0 z-[30000] bg-black/95 flex flex-col">
                 <div className="flex items-center justify-between px-4 py-3 text-white">
-                  <span style={{ fontSize: 'var(--fs-13)', color: 'rgba(255,255,255,0.7)' }}>点击任意位置关闭</span>
-                  <button className="w-8 h-8 rounded-full flex items-center justify-center" style={{ background: 'rgba(255,255,255,0.15)' }}>
+                  <span style={{ fontSize: 'var(--fs-13)', color: 'rgba(255,255,255,0.7)' }}>双击放大 · 双指缩放 · 滚轮缩放</span>
+                  <button className="w-8 h-8 rounded-full flex items-center justify-center" style={{ background: 'rgba(255,255,255,0.15)' }} onClick={() => setShowImageViewer(false)} aria-label="关闭预览">
                     <X size={18} />
                   </button>
                 </div>
-                <div className="flex-1 flex items-center justify-center overflow-auto p-2">
-                  <img src={selectedImage} alt="预览" className="max-w-full max-h-full object-contain" />
-                </div>
+                <ImagePreview
+                  src={selectedImage}
+                  onClose={() => setShowImageViewer(false)}
+                />
               </div>
             )}
 
