@@ -1,25 +1,41 @@
 import { Router } from 'express'
 import { query, TABLES } from '../config/neon.js'
 import { getQuestionKnowledge } from '../services/knowledgeService.js'
-import { generateKnowledgeExplanation, buildHandout, buildKnowledgeSection } from '../services/handoutService.js'
+import { generateKnowledgeExplanation, buildHandout, buildKnowledgeSection, listHandoutTemplates } from '../services/handoutService.js'
 import { buildHandoutDocx } from '../services/handoutDocxService.js'
 import { parsePeriod } from '../utils/period.js'
 
 const router = Router()
 
 /**
+ * GET /api/handout/templates
+ * 列出可用讲义模板，前端下拉用
+ * Query: ?subject=英语
+ */
+router.get('/templates', (req, res) => {
+  try {
+    const subject = req.query.subject || null
+    const list = listHandoutTemplates(subject)
+    res.json({ success: true, templates: list })
+  } catch (error) {
+    console.error('列出讲义模板失败:', error)
+    res.status(500).json({ error: error.message })
+  }
+})
+
+/**
  * POST /api/handout/build
  * 组装讲义数据（供 Web 预览页和 Word 导出共用）
- * Body: { title, subject, periodText, knowledgeSections: [{kpName, subject, sampleQuestions, explanation}] }
+ * Body: { title, subject, periodText, knowledgeSections: [{kpName, subject, sampleQuestions, explanation}], template? }
  */
 router.post('/build', async (req, res) => {
   try {
-    const { title, subject, periodText, knowledgeSections } = req.body
+    const { title, subject, periodText, knowledgeSections, template } = req.body
     if (!title || !Array.isArray(knowledgeSections) || knowledgeSections.length === 0) {
       return res.status(400).json({ error: '缺少必要参数：title, knowledgeSections' })
     }
 
-    const handout = await buildHandout({ title, subject, periodText, knowledgeSections })
+    const handout = await buildHandout({ title, subject, periodText, knowledgeSections, template })
     res.json({ success: true, handout })
   } catch (error) {
     console.error('组装讲义失败:', error)
@@ -47,11 +63,11 @@ router.post('/explain', async (req, res) => {
 /**
  * POST /api/handout/from-diagnosis
  * 从教学诊断数据生成讲义预览
- * Body: { mode, offset, subject, periodText, maxItems }
+ * Body: { mode, offset, subject, periodText, maxItems, template? }
  */
 router.post('/from-diagnosis', async (req, res) => {
   try {
-    const { mode = 'week', offset = 0, subject = '', periodText = '', maxItems = 12 } = req.body
+    const { mode = 'week', offset = 0, subject = '', periodText = '', maxItems = 12, template = null } = req.body
     const p = parsePeriod({ mode, offset })
 
     // 获取诊断数据
@@ -141,6 +157,7 @@ router.post('/from-diagnosis', async (req, res) => {
       subject: subject || '全部',
       periodText: periodText || `${p.periodStart.toISOString().slice(0, 10)} ~ ${p.periodEnd.toISOString().slice(0, 10)}`,
       knowledgeSections,
+      template,
     })
 
     res.json({ success: true, handout })

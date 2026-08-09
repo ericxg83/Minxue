@@ -5,12 +5,36 @@
       <div class="toolbar-left">
         <el-button @click="goBack" :icon="ArrowLeft" text>返回</el-button>
         <span class="toolbar-title">{{ handout?.title || '讲义预览' }}</span>
+        <el-tag v-if="handout?.templateLabel" size="small" type="info" effect="plain" class="template-tag">
+          {{ handout.templateLabel }}
+        </el-tag>
       </div>
       <div class="toolbar-right">
+        <!-- 模板下拉（P3/P8） -->
+        <el-select
+          v-model="selectedTemplate"
+          @change="handleTemplateChange"
+          placeholder="选择模板"
+          size="small"
+          style="width: 160px;"
+          :loading="templatesLoading"
+        >
+          <el-option
+            v-for="t in availableTemplates"
+            :key="t.id"
+            :label="t.label"
+            :value="t.id"
+          >
+            <div class="template-option">
+              <span class="template-option-label">{{ t.label }}</span>
+              <span class="template-option-desc">{{ t.description }}</span>
+            </div>
+          </el-option>
+        </el-select>
         <el-button @click="handleExportWord" type="primary" :loading="exporting">
           <el-icon><Download /></el-icon> 导出 Word
         </el-button>
-        <el-button @click="handlePrint">{{/* 打印 */}}<el-icon><Printer /></el-icon> 打印</el-button>
+        <el-button @click="handlePrint"><el-icon><Printer /></el-icon> 打印</el-button>
       </div>
     </div>
 
@@ -35,7 +59,7 @@
               <h1 class="cover-title">{{ getBlockContent(page.blocks, 'cover-title') }}</h1>
               <div class="cover-divider"></div>
               <div class="cover-info">{{ getBlockContent(page.blocks, 'cover-subtitle') }}</div>
-              <div class="cover-info">{{ getBlockContent(page.blocks, 'cover-info') }}</div>
+              <div v-for="(b, i) in page.blocks.filter(x => x.type === 'cover-info')" :key="'ci'+i" class="cover-info">{{ b.content }}</div>
               <div class="cover-date">{{ getBlockContent(page.blocks, 'cover-date') }}</div>
             </div>
           </div>
@@ -65,7 +89,7 @@
 
             <div v-for="(block, bIdx) in page.blocks" :key="bIdx" class="handout-block">
               <!-- 知识讲解 -->
-              <div v-if="block.type === 'explanation'" class="block-explanation" v-html="renderMarkdown(block.content)"></div>
+              <div v-if="block.type === 'explanation'" class="block-explanation" :class="{ 'block-explanation-en': block.lang === 'en' }" v-html="renderMarkdown(block.content)"></div>
 
               <!-- 小标题（典型例题、变式练习等） -->
               <h3 v-else-if="block.type === 'section'" class="block-section">{{ block.content }}</h3>
@@ -93,9 +117,12 @@
                 {{ block.content }}
               </div>
 
-              <!-- 变式题 -->
+              <!-- 变式题（含题型标签） -->
               <div v-else-if="block.type === 'variant'" class="block-variant">
-                <div class="variant-badge">变式</div>
+                <div class="variant-badges">
+                  <span class="variant-badge">变式</span>
+                  <span v-if="block.questionType" class="variant-qtype">{{ englishTypeLabel(block.questionType) }}</span>
+                </div>
                 <div class="variant-content" v-html="renderMath(block.content)"></div>
                 <div v-if="block.options?.length" class="question-options">
                   <div v-for="(opt, oIdx) in block.options" :key="oIdx" class="option-item">
@@ -110,8 +137,8 @@
                 </div>
               </div>
 
-              <!-- 普通文本 -->
-              <div v-else-if="block.type === 'text'" class="block-text">{{ block.content }}</div>
+              <!-- 普通文本（写作范文 / 学生原文 / 复习建议等） -->
+              <div v-else-if="block.type === 'text'" class="block-text" v-html="renderMarkdown(block.content)"></div>
             </div>
           </div>
         </template>
@@ -121,7 +148,7 @@
 </template>
 
 <script setup>
-import { ref, computed, onMounted, nextTick } from 'vue'
+import { ref, computed, onMounted, nextTick, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { ElMessage } from 'element-plus'
 import { ArrowLeft, Download, Printer } from '@element-plus/icons-vue'
@@ -137,6 +164,27 @@ const exporting = ref(false)
 const handout = ref(null)
 const handoutContentRef = ref(null)
 
+// 模板相关（P3/P8）
+const availableTemplates = ref([])
+const templatesLoading = ref(false)
+const selectedTemplate = ref(null)
+const currentSubject = ref('')
+
+// 英语题型标签映射（与后端 englishAnalyzer.ENGLISH_QUESTION_TYPE_LABELS 保持一致）
+const ENGLISH_TYPE_LABELS = {
+  cloze: '完形填空',
+  grammar_blank: '语法填空',
+  error_correction: '短文改错',
+  translation: '翻译',
+  writing: '书面表达',
+  reading: '阅读理解',
+  choice: '选择题',
+  fill_blank: '填空',
+  sentence_pattern: '句型转换',
+  other: '其他',
+}
+function englishTypeLabel(t) { return ENGLISH_TYPE_LABELS[t] || t || '' }
+
 function getBlockContent(blocks, type) {
   const block = blocks.find(b => b.type === type)
   return block?.content || ''
@@ -144,13 +192,14 @@ function getBlockContent(blocks, type) {
 
 function renderMarkdown(text) {
   if (!text) return ''
-  // 简单 Markdown 渲染：处理标题、粗体、列表
+  // 简单 Markdown 渲染：处理标题、粗体、列表、换行
   return text
     .replace(/^### (.+)$/gm, '<h4>$1</h4>')
     .replace(/^## (.+)$/gm, '<h3>$1</h3>')
     .replace(/^# (.+)$/gm, '<h2>$1</h2>')
     .replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>')
     .replace(/^\* (.+)$/gm, '<li>$1</li>')
+    .replace(/(<li>.*<\/li>\n?)+/g, m => `<ul>${m}</ul>`)
     .replace(/\n/g, '<br>')
 }
 
@@ -218,13 +267,67 @@ function handlePrint() {
   window.print()
 }
 
+// ── 模板加载/切换 ──
+async function loadTemplates(subject) {
+  templatesLoading.value = true
+  try {
+    const q = subject ? `?subject=${encodeURIComponent(subject)}` : ''
+    const resp = await apiRequest(`/handout/templates${q}`, { method: 'GET' })
+    if (resp && resp.success) {
+      availableTemplates.value = resp.templates || []
+    }
+  } catch (e) {
+    console.warn('加载讲义模板失败:', e)
+    availableTemplates.value = []
+  } finally {
+    templatesLoading.value = false
+  }
+}
+
+async function handleTemplateChange(newId) {
+  // 切换模板时重新请求讲义数据
+  if (!newId) return
+  if (newId === handout.value?.template) return
+  loading.value = true
+  try {
+    const subj = currentSubject.value || (route.query.subject || '')
+    const response = await apiRequest('/handout/from-diagnosis', {
+      method: 'POST',
+      body: JSON.stringify({
+        mode: 'week',
+        offset: 0,
+        maxItems: 12,
+        subject: subj,
+        template: newId,
+      }),
+    })
+    if (response.success && response.handout) {
+      handout.value = response.handout
+      ElMessage.success('已切换模板')
+    } else if (response.success) {
+      ElMessage.info('该时段暂无共性错题数据')
+    }
+  } catch (e) {
+    console.error('切换模板失败:', e)
+    ElMessage.error('切换模板失败: ' + e.message)
+  } finally {
+    loading.value = false
+  }
+}
+
 onMounted(async () => {
   try {
+    currentSubject.value = String(route.query.subject || '')
+    // 先按学科加载模板列表
+    await loadTemplates(currentSubject.value)
     // 从路由参数获取讲义数据，或从诊断生成
     const handoutData = route.query.data
     if (handoutData) {
       try {
-        handout.value = JSON.parse(decodeURIComponent(handoutData))
+        const parsed = JSON.parse(decodeURIComponent(handoutData))
+        handout.value = parsed
+        // 已直接传 data 时，把 selectedTemplate 同步到讲义的 template
+        if (parsed?.template) selectedTemplate.value = parsed.template
       } catch {
         // 解析失败，尝试从诊断生成
         await loadFromDiagnosis()
@@ -232,6 +335,8 @@ onMounted(async () => {
     } else {
       await loadFromDiagnosis()
     }
+    // 兜底：把 selectedTemplate 与讲义实际 template 对齐
+    if (handout.value?.template) selectedTemplate.value = handout.value.template
   } catch (e) {
     console.error('加载讲义失败:', e)
     ElMessage.error('加载讲义失败')
@@ -242,12 +347,15 @@ onMounted(async () => {
 
 async function loadFromDiagnosis() {
   try {
+    const subj = currentSubject.value
     const response = await apiRequest('/handout/from-diagnosis', {
       method: 'POST',
       body: JSON.stringify({
         mode: 'week',
         offset: 0,
         maxItems: 12,
+        subject: subj,
+        template: selectedTemplate.value || null,
       }),
     })
     if (response.success && response.handout) {
@@ -292,6 +400,26 @@ async function loadFromDiagnosis() {
 .toolbar-right {
   display: flex;
   gap: 8px;
+}
+
+/* 模板下拉 */
+.template-tag {
+  margin-left: 8px;
+}
+.template-option {
+  display: flex;
+  flex-direction: column;
+  padding: 2px 0;
+}
+.template-option-label {
+  font-size: 13px;
+  color: #1D2129;
+  font-weight: 500;
+}
+.template-option-desc {
+  font-size: 11px;
+  color: #86909C;
+  margin-top: 2px;
 }
 
 /* 加载 & 空态 */
@@ -420,6 +548,13 @@ async function loadFromDiagnosis() {
   background: #F7F8FA;
   border-radius: 8px;
 }
+/* 英语讲解：英文为主、稍宽留白 */
+.block-explanation-en {
+  font-family: 'Georgia', 'Times New Roman', serif;
+  background: #F0F7FF;
+  border-left: 3px solid #4F46E5;
+  line-height: 1.9;
+}
 .block-question {
   padding: 12px 16px;
   background: #FAFBFC;
@@ -468,6 +603,12 @@ async function loadFromDiagnosis() {
   border-radius: 8px;
   position: relative;
 }
+.variant-badges {
+  display: flex;
+  gap: 6px;
+  margin-bottom: 8px;
+  flex-wrap: wrap;
+}
 .variant-badge {
   display: inline-block;
   padding: 2px 8px;
@@ -475,7 +616,16 @@ async function loadFromDiagnosis() {
   color: #fff;
   font-size: 12px;
   border-radius: 4px;
-  margin-bottom: 8px;
+}
+/* 英语题型标签（完形/语法填空/翻译 等） */
+.variant-qtype {
+  display: inline-block;
+  padding: 2px 8px;
+  background: #ECFDF5;
+  color: #047857;
+  font-size: 12px;
+  border-radius: 4px;
+  border: 1px solid #A7F3D0;
 }
 .variant-answer {
   margin-top: 8px;

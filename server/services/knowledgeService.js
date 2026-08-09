@@ -1,5 +1,6 @@
 import { query, TABLES } from '../config/neon.js'
 import { classifyQuestionLocally } from '../utils/localTagger.js'
+import { classifyEnglishLocally } from './englishAnalyzer.js'
 
 // ============================================================
 // 知识点服务（knowledgeService）
@@ -131,7 +132,10 @@ export async function normalizeQuestionTags({ content, subject = null, options =
     const fullContent = Array.isArray(options) && options.length > 0
       ? `${content || ''}\n选项：${options.join('；')}`
       : (content || '')
-    const local = classifyQuestionLocally(fullContent, resolvedSubject)
+    // 英语走英语分析器（题型识别 + 细粒度语法点匹配）
+    const local = resolvedSubject === '英语'
+      ? classifyEnglishLocally(fullContent, '英语', options)
+      : classifyQuestionLocally(fullContent, resolvedSubject)
     tags = local.tags.filter(t => t !== '未分类')
     tagSource = 'local'
   }
