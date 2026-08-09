@@ -196,6 +196,10 @@ export default function App() {
   // Toast
   const Toast = useToast()
 
+  // FAB 长按计时
+  const fabPressRef = useRef(0)
+  const fabLongPressRef = useRef(false)
+
   // Paper Bank 自包含模块
   const paperBank = usePaperBank()
 
@@ -1277,14 +1281,28 @@ export default function App() {
           subject={flowSubject}
         />
 
-        {/* Floating Action Button — Claude style */}
+        {/* Floating Action Button — Claude style
+            单击：直达暂存区（拍照/相册，零菜单）
+            长按(>450ms)：展开上传类型选择（日常作业/普通试卷/错题重练） */}
         {currentPage === 'processing' && (
           <motion.button
             initial={{ scale: 0, opacity: 0 }}
             animate={{ scale: 1, opacity: 1 }}
             whileTap={{ scale: 0.9 }}
             whileHover={{ scale: 1.05 }}
-            onClick={() => setShowUploadOptions(true)}
+            onClick={() => {
+              if (fabLongPressRef.current) { fabLongPressRef.current = false; return }
+              setPendingFlow(null); setSelectedWorksheetId(null); openStaging('regular')
+            }}
+            onPointerDown={() => { fabPressRef.current = Date.now() }}
+            onPointerUp={() => {
+              if (Date.now() - fabPressRef.current > 450) {
+                fabLongPressRef.current = true
+                setShowUploadOptions(true)
+              }
+            }}
+            onPointerCancel={() => { fabPressRef.current = 0 }}
+            onContextMenu={(e) => e.preventDefault()}
             className="absolute right-5 z-50 flex items-center justify-center shadow-lg tap-scale"
             style={{
               width: '54px',
