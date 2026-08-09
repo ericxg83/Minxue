@@ -63,7 +63,7 @@ function renderToHtml(text) {
       const rawMath = displayMatch[1].trim()
       if (rawMath) {
         try {
-          htmlParts.push(katex.renderToString(rawMath, { displayMode: true, throwOnError: false }))
+          htmlParts.push(katex.renderToString(decodeHtml(rawMath), { displayMode: true, throwOnError: false }))
         } catch (e) {
           htmlParts.push(fallbackErrorHtml('$$' + rawMath + '$$'))
         }
@@ -80,7 +80,7 @@ function renderToHtml(text) {
       const rawMath = inlineMatch[1].trim()
       if (rawMath) {
         try {
-          htmlParts.push(katex.renderToString(rawMath, { displayMode: false, throwOnError: false }))
+          htmlParts.push(katex.renderToString(decodeHtml(rawMath), { displayMode: false, throwOnError: false }))
         } catch (e) {
           htmlParts.push(fallbackErrorHtml('$' + rawMath + '$'))
         }
@@ -118,6 +118,19 @@ function escapeHtml(str) {
     .replace(/</g, '&lt;')
     .replace(/>/g, '&gt;')
     .replace(/"/g, '&quot;')
+}
+
+/**
+ * 还原 HTML 实体（仅用于从数学片段中取回原始 LaTeX 字符，如 &gt; → >）。
+ * 数学段在 renderContent 里被 escapeHtml 转义，KaTeX 需要原始字符。
+ */
+function decodeHtml(str) {
+  if (!str) return str
+  return String(str)
+    .replace(/&amp;/g, '&')
+    .replace(/&lt;/g, '<')
+    .replace(/&gt;/g, '>')
+    .replace(/&quot;/g, '"')
 }
 
 /**

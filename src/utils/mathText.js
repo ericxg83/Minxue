@@ -69,6 +69,10 @@ function preprocessMath(text) {
     return '^{' + inner + '}'
   })
 
+  // 0.6 填空线：连续下划线 ____ → \underline{\quad}（禁止裸 _，否则 KaTeX 当作下标报错）
+  // 单个 _ 保留（可能用于下标，如 x_1；x_1 会在步骤 5 转 x_{1}）
+  s = s.replace(/_{2,}/g, '\\underline{\\quad}')
+
   // 1. √ → \sqrt{...}
   s = convertSqrt(s)
 
