@@ -1,107 +1,242 @@
 import html2canvas from 'html2canvas'
 import jsPDF from 'jspdf'
 import qrcode from 'qrcode-generator'
+import katex from 'katex'
 import { isSvgCode } from './geometryDisplay'
 
 const A4_W = 210
 const A4_H = 297
 const CONTENT_W = 170
 
-// LaTeX 命令检测：包含这些反斜杠命令说明是 LaTeX 数学内容
-const LATEX_RE = /\\(?:frac|dfrac|tfrac|cfrac|div|times|sqrt|cdot|pm|mp|leq|geq|neq|text|mathrm|left|right|over|begin|end|[a-zA-Z]+)\b/
-
-// 斜杠分数匹配：a/b、3/5、1/(2-√3)、(√3+√2)/(√3-√2)、(9/2)
-// 分子/分母支持：括号表达式 | 数字 | 字母 | √前缀项（<>排除，避免误匹配已生成的 HTML 标签）
-const SLASH_FRAC_RE = /(\([^()]+\)|[0-9]+(?:\.[0-9]+)?|[a-zA-Z][0-9]*|√[^()\/<>\s]*)\s*\/\s*(\([^()]+\)|[0-9]+(?:\.[0-9]+)?|[a-zA-Z][0-9]*|√[^()\/<>\s]*)/g
-
-/**
- * 渲染内容：检测 LaTeX 命令并转为 HTML，否则纯文本转义。
- * - \frac{a}{b} → 上下堆叠分数（含分数线）
- * - a/b、3/5、1/(2-√3) → 上下堆叠分数（普通斜杠格式，兼容非 LaTeX 数据）
- * - \div → ÷，\times → ×，\cdot → ·
- * - \sqrt{x} → √x
- */
-function renderContent(text) {
-  if (!text) return ''
-  const hasLatex = LATEX_RE.test(text)
-  let html = escapeHtml(text)
-
-  if (hasLatex) {
-    // 去掉数学定界符
-    html = html.replace(/\$\$?/g, '')
-    html = html.replace(/\\\(/g, '').replace(/\\\)/g, '')
-    html = html.replace(/\\\[/g, '').replace(/\\\]/g, '')
-
-    // 去掉 \left \right（自动缩放括号，HTML 无需）
-    html = html.replace(/\\left/g, '').replace(/\\right/g, '')
-
-    // \{ → {，\} → }
-    html = html.replace(/\\\{/g, '{').replace(/\\\}/g, '}')
-
-    // 统一分数命令
-    html = html.replace(/\\(?:dfrac|tfrac|cfrac)/g, '\\frac')
-
-    // 替换运算符符号
-    html = html.replace(/\\div/g, '÷')
-    html = html.replace(/\\times/g, '×')
-    html = html.replace(/\\cdot/g, '·')
-    html = html.replace(/\\pm/g, '±')
-    html = html.replace(/\\mp/g, '∓')
-    html = html.replace(/\\leq/g, '≤')
-    html = html.replace(/\\geq/g, '≥')
-    html = html.replace(/\\neq/g, '≠')
-
-    // \text{...} \mathrm{...} → 纯文本
-    html = html.replace(/\\(?:text|mathrm)\{([^}]*)\}/g, '$1')
-
-    // \frac{...}{...} → 上下堆叠分数（多轮处理嵌套）
-    let prev
-    do {
-      prev = html
-      html = html.replace(
-        /\\frac\{([^{}]+)\}\{([^{}]+)\}/g,
-        '<span class="frac"><span class="frac-num">$1</span><span class="frac-den">$2</span></span>'
-      )
-    } while (html !== prev)
-
-    // \sqrt{...} → 根号
-    let prevSqrt
-    do {
-      prevSqrt = html
-      html = html.replace(
-        /\\sqrt\{([^{}]+)\}/g,
-        '<span class="sqrt-wrap">√<span class="sqrt-body">$1</span></span>'
-      )
-    } while (html !== prevSqrt)
-  }
-
-  // 普通斜杠分数 a/b → 上下堆叠（兼容非 LaTeX 数据：3/5、1/(2-√3)、(√3+√2)/(√3-√2)）
-  html = convertSlashFractions(html)
-
-  // 清理：去掉包裹已转换分数的多余括号 (2/3) → 2/3
-  html = html.replace(
-    /\(<span class="frac"><span class="frac-num">[\s\S]*?<\/span><span class="frac-den">[\s\S]*?<\/span><\/span>\)/g,
-    (m) => m.slice(1, -1)
-  )
-
-  return html
+// Unicode 数学符号 → 标准 LaTeX 命令
+const SYMBOL_MAP = {
+  '∠': '\\angle ',
+  '△': '\\triangle ',
+  '°': '^{\\circ}',
+  '≈': '\\approx ',
+  '∞': '\\infty ',
+  'π': '\\pi ',
+  'α': '\\alpha ',
+  'β': '\\beta ',
+  'γ': '\\gamma ',
+  'δ': '\\delta ',
+  'θ': '\\theta ',
+  'λ': '\\lambda ',
+  'μ': '\\mu ',
+  'σ': '\\sigma ',
+  '∈': '\\in ',
+  '∉': '\\notin ',
+  '⊂': '\\subset ',
+  '⊃': '\\supset ',
+  '∪': '\\cup ',
+  '∩': '\\cap ',
+  '→': '\\rightarrow ',
+  '←': '\\leftarrow ',
+  '⇒': '\\Rightarrow ',
+  '⇔': '\\Leftrightarrow ',
+  '×': '\\times ',
+  '÷': '\\div ',
+  '±': '\\pm ',
+  '·': '\\cdot ',
+  '≥': '\\ge ',
+  '≤': '\\le ',
+  '≠': '\\ne ',
 }
 
 /**
- * 将普通斜杠分数转为上下堆叠。多轮处理，避免嵌套残留。
+ * 将普通文本/非规范 LaTeX 规范化为标准 LaTeX 数学片段。
+ * 规则：
+ * - 保留已有 \frac{a}{b} 上下结构（统一 dfrac/tfrac/cfrac → \frac）
+ * - 斜杠 a/b、3/5、1/(2-√3)、(√3+√2)/(√3-√2) → \frac{a}{b}（禁止斜杠）
+ * - √x、√(x) → \sqrt{x}（横线完整覆盖）
+ * - × ÷ ≥ ≤ ≠ ± → \times \div \ge \le \ne \pm
+ * - x^2 → x^{2}，x_1 → x_{1}
+ * 中文与标点保持不变（splitToSegments 会拆为纯文本片段）。
  */
-function convertSlashFractions(html) {
-  let prev
-  let guard = 0
-  do {
-    prev = html
-    html = html.replace(SLASH_FRAC_RE, (m, num, den) => {
-      const clean = (s) => (s.startsWith('(') && s.endsWith(')') ? s.slice(1, -1) : s)
-      return `<span class="frac"><span class="frac-num">${clean(num)}</span><span class="frac-den">${clean(den)}</span></span>`
-    })
-    guard++
-    if (guard > 20) break
-  } while (html !== prev)
+function preprocessMath(text) {
+  let s = String(text || '')
+
+  // 0. 规范化已有 LaTeX 命令
+  s = s.replace(/\\left/g, '').replace(/\\right/g, '')
+  s = s.replace(/\\(?:dfrac|tfrac|cfrac)/g, '\\frac')
+  s = s.replace(/\$\$?/g, '')
+  s = s.replace(/\\\(/g, '').replace(/\\\)/g, '')
+  s = s.replace(/\\\{/g, '{').replace(/\\\}/g, '}')
+
+  // 1. √ → \sqrt{...}（横线完整覆盖）
+  s = s.replace(/√\s*\(([^()]*)\)/g, '\\sqrt{$1}')
+  s = s.replace(/√\s*([0-9]+(?:\.[0-9]+)?)/g, '\\sqrt{$1}')
+  s = s.replace(/√\s*([a-zA-Z])/g, '\\sqrt{$1}')
+
+  // 2. 混合数：1 1/3 → 1\frac{1}{3}
+  s = s.replace(/(\d+(?:\.\d+)?)\s+(\d+)\s*\/\s*(\d+)/g, (m, whole, num, den) =>
+    parseInt(num, 10) < parseInt(den, 10) ? `${whole}\\frac{${num}}{${den}}` : m
+  )
+
+  // 3. 斜杠除法 a/b → \frac{a}{b}
+  s = s.replace(
+    /(\([^()]*\)|\\sqrt\{[^}]*\}|[a-zA-Z0-9]+(?:\.[0-9]+)?)\s*\/\s*(\([^()]*\)|\\sqrt\{[^}]*\}|[a-zA-Z0-9]+(?:\.[0-9]+)?)/g,
+    '\\frac{$1}{$2}'
+  )
+
+  // 4. 清理分数多余括号：\frac{(a)}{(b)} → \frac{a}{b}；(a/b) → a/b
+  s = s.replace(/\\frac\{\(([^{}]*)\)\}\{\(([^{}]*)\)\}/g, '\\frac{$1}{$2}')
+  s = s.replace(/\(\\frac\{([^{}]*)\}\{([^{}]*)\}\)/g, '\\frac{$1}{$2}')
+
+  // 5. 指数/下标：x^2 → x^{2}
+  s = s.replace(/([a-zA-Z0-9])\^([a-zA-Z0-9]+)/g, '$1^{$2}')
+  s = s.replace(/([a-zA-Z])_([a-zA-Z0-9]+)/g, '$1_{$2}')
+
+  // 6. Unicode 数学符号 → LaTeX 命令
+  for (const [ch, latex] of Object.entries(SYMBOL_MAP)) {
+    if (s.includes(ch)) s = s.split(ch).join(latex)
+  }
+
+  return s
+}
+
+/**
+ * 将处理后的字符串拆分为 [纯文本, 纯LaTeX] 片段。
+ * 数学字符（拉丁字母/数字/运算符/命令）归为 isMath:true，
+ * 中文与标点归为 isMath:false。
+ */
+function splitToSegments(text) {
+  const segments = []
+  let mathBuffer = ''
+  let textBuffer = ''
+
+  function flushMath() {
+    if (mathBuffer.trim()) segments.push({ text: mathBuffer.trim(), isMath: true })
+    mathBuffer = ''
+  }
+  function flushText() {
+    if (textBuffer) segments.push({ text: textBuffer, isMath: false })
+    textBuffer = ''
+  }
+
+  let i = 0
+  while (i < text.length) {
+    const char = text[i]
+
+    // 1. LaTeX 命令: \xxx{...}{...}
+    if (char === '\\' && i + 1 < text.length && /[a-zA-Z]/.test(text[i + 1])) {
+      flushText()
+      let cmd = '\\'
+      i++
+      while (i < text.length && /[a-zA-Z]/.test(text[i])) {
+        cmd += text[i]
+        i++
+      }
+      while (i < text.length && text[i] === '{') {
+        let depth = 0
+        while (i < text.length) {
+          cmd += text[i]
+          if (text[i] === '{') depth++
+          if (text[i] === '}') {
+            depth--
+            if (depth === 0) { i++; break }
+          }
+          i++
+        }
+      }
+      mathBuffer += cmd
+      continue
+    }
+
+    // 2. ^{...} 或 _{...} 结构
+    if ((char === '^' || char === '_') && i + 1 < text.length && text[i + 1] === '{') {
+      flushText()
+      let expr = char + '{'
+      i += 2
+      let depth = 1
+      while (i < text.length && depth > 0) {
+        expr += text[i]
+        if (text[i] === '{') depth++
+        if (text[i] === '}') depth--
+        i++
+      }
+      mathBuffer += expr
+      continue
+    }
+
+    // 3. 单个 ^ 或 _（简单上标/下标）
+    if ((char === '^' || char === '_') && /[a-zA-Z0-9]/.test(textBuffer.slice(-1))) {
+      const lastChar = textBuffer.slice(-1)
+      textBuffer = textBuffer.slice(0, -1)
+      if (textBuffer) flushText()
+      mathBuffer = lastChar + char
+      i++
+      while (i < text.length && /[a-zA-Z0-9]/.test(text[i])) {
+        mathBuffer += text[i]
+        i++
+      }
+      flushMath()
+      continue
+    }
+
+    // 4. 普通字符 — 判断是数学还是文本
+    if (isMathChar(char)) {
+      if (textBuffer) flushText()
+      mathBuffer += char
+      i++
+    } else {
+      if (mathBuffer) flushMath()
+      textBuffer += char
+      i++
+    }
+  }
+
+  if (mathBuffer.trim()) flushMath()
+  if (textBuffer) flushText()
+
+  const merged = []
+  for (const seg of segments) {
+    if (!seg.text) continue
+    if (merged.length > 0 && merged[merged.length - 1].isMath === seg.isMath) {
+      merged[merged.length - 1].text += seg.text
+    } else {
+      merged.push({ ...seg })
+    }
+  }
+  return merged.length > 0 ? merged : [{ text, isMath: false }]
+}
+
+/** 判断单个字符是否为数学字符 */
+function isMathChar(char) {
+  if (/[a-zA-Z0-9.]/.test(char)) return true
+  if ('+-*/=^_(){}[]<>|'.includes(char)) return true
+  if ('αβγδεζηθικλμνξοπρστυφχψωΑΒΓΔΕΖΗΘΙΚΛΜΝΞΟΠΡΣΤΥΦΧΨΩ'.includes(char)) return true
+  if ('≥≤≈∞π∥⊥'.includes(char)) return true
+  return false
+}
+
+/**
+ * 渲染内容：中文保持纯文本，数学片段用 KaTeX 渲染标准 LaTeX。
+ * - \frac{分子}{分母} → 上下结构真分数
+ * - \sqrt{...} → 标准根式（横线完整覆盖）
+ * - \times \ge x^{2} 等标准符号
+ */
+function renderContent(text) {
+  if (!text) return ''
+  const segments = splitToSegments(preprocessMath(String(text)))
+  let html = ''
+  for (const seg of segments) {
+    if (seg.isMath && seg.text) {
+      try {
+        html += katex.renderToString(seg.text, {
+          throwOnError: false,
+          displayMode: false,
+          maxSize: 10,
+          maxExpand: 20,
+          strict: false,
+        })
+      } catch (e) {
+        html += escapeHtml(seg.text)
+      }
+    } else {
+      html += escapeHtml(seg.text)
+    }
+  }
   return html
 }
 
@@ -307,13 +442,6 @@ const illustration = q._illustration_resolved ?? getQuestionIllustration(q)
     .qr-container{position:absolute;top:20px;right:32px;text-align:center;background:#fff;padding:4px}
     .qr-canvas{width:130px;height:130px;display:block}
     .qr-text{font-size:10px;color:#333;margin-top:3px;font-weight:bold;letter-spacing:1px}
-    /* LaTeX 分数渲染 */
-    .frac{display:inline-block;vertical-align:middle;text-align:center;margin:0 2px}
-    .frac-num{display:block;border-bottom:1.5px solid #1a1a1a;padding:0 4px;line-height:1.2}
-    .frac-den{display:block;padding:0 4px;line-height:1.2}
-    /* LaTeX 根号渲染 */
-    .sqrt-wrap{display:inline-block;position:relative}
-    .sqrt-body{border-top:1.5px solid #1a1a1a;padding:1px 3px}
   </style></head><body>
   <div class="page">
     <div id="qr-container" class="qr-container" style="display:none;">
@@ -404,6 +532,11 @@ export async function generateExamPDF({ title, studentName, questions, filename,
           qrContainer.style.display = 'block'
         }
       }
+    }
+
+    // 等待 KaTeX 数学字体加载完成，确保 html2canvas 捕获时公式渲染正确
+    if (document.fonts && document.fonts.ready) {
+      try { await document.fonts.ready } catch (e) { /* ignore */ }
     }
 
     const canvas = await html2canvas(container, {
