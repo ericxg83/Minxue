@@ -314,7 +314,7 @@ export default function PrintPreview({ onClose, questions: propQuestions, existi
   }
 
   const saveGeneratedExamRecord = async () => {
-    if (examRecorded.current) return
+    if (examRecorded.current) return false
     const questionIds = previewQuestions.map(q => q.id).filter(Boolean)
     if (currentStudent && questionIds.length > 0) {
       try {
@@ -343,29 +343,33 @@ export default function PrintPreview({ onClose, questions: propQuestions, existi
               source: 'generated',
             })
           }
+          examRecorded.current = true
+          return true
         }
-        examRecorded.current = true
       } catch (e) {
         console.error('保存组卷记录失败:', e)
+        Toast.show({ icon: 'fail', content: '保存组卷记录失败' })
       }
     }
+    return false
   }
 
   const handleExportPDF = async () => {
     if (generatingPdf) return
-    await saveGeneratedExamRecord()
+    const saved = await saveGeneratedExamRecord()
     const result = await generatePDF()
     if (result && result.pdfBlob) {
       const examName = getExamName()
       const filename = `${currentStudent?.name || 'student'}_${examName}_${dayjs().format('YYYYMMDD_HHmm')}.pdf`
       saveAs(result.pdfBlob, filename)
+      if (saved) Toast.show({ icon: 'success', content: '已保存到组卷历史' })
     }
   }
 
   const handleDirectPrint = () => {
     if (generatingPdf || pdfDownloading) return
     const doPrint = async () => {
-      await saveGeneratedExamRecord()
+      const saved = await saveGeneratedExamRecord()
       let blobUrl = pdfBlobUrl
       if (!blobUrl) {
         setGeneratingPdf(true)
@@ -394,6 +398,7 @@ export default function PrintPreview({ onClose, questions: propQuestions, existi
       }
       if (blobUrl) {
         window.open(blobUrl, '_blank')
+        if (saved) Toast.show({ icon: 'success', content: '已保存到组卷历史' })
       }
     }
     doPrint()
