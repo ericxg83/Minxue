@@ -96,3 +96,21 @@ _routes.json
 report_data.json
 server/scripts/diag_*.mjs
 server/scripts/test_workbook_e2e_full.mjs
+# Ad-hoc test/debug scripts at repo root
+test_*.js
+test_*.mjs
+test_*.cjs
+sample_diff.*
+auto_debug.*
+backfill_*.mjs
+backfill_*.js
+migrate_*.mjs
+fix_messy_*.mjs
+simple_test.*
+test-qr.*
+preview-*.png
+preview-*.pdf
+real_geometry_*.png
+temp_original.vue
+temp_restore.vue
+debug-react-*.md
