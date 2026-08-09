@@ -32,6 +32,8 @@ import { migrateResourceUnits } from './migrations/032_add_resource_units.js'
 import { migrateWrongQuestionSelfContained } from './migrations/033_add_wrong_question_self_contained.js'
 import { migrateWrongQuestionSubject } from './migrations/034_add_wrong_question_subject.js'
 import { migrateErrorAnalysis } from './migrations/035_add_error_analysis.js'
+import { migrateKnowledgeTables } from './migrations/036_add_knowledge_tables.js'
+import { migrateVariantQuestions } from './migrations/037_add_variant_questions.js'
 import { scheduleNightParse } from './services/nightParseService.js'
 
 const __dirname = dirname(fileURLToPath(import.meta.url))
@@ -57,8 +59,13 @@ import weeklyReportRouter from './routes/weeklyReport.js'
 import worksheetsRouter from './routes/worksheets.js'
 import resourcesRouter from './routes/resources.js'
 import teachingRouter from './routes/teaching.js'
+import variantsRouter from './routes/variants.js'
+import handoutRouter from './routes/handout.js'
+import weaknessRouter from './routes/weakness.js'
 import { runErrorDiagnosis } from './services/diagnosisService.js'
 import { cleanupStudentData } from './services/dataCleanupService.js'
+import { syncReviewResultsMastery, getStudentMastery } from './services/knowledgeMasteryService.js'
+import { getKnowledgeTree, getQuestionKnowledge, clearKnowledgeCache } from './services/knowledgeService.js'
 
 const app = express()
 const PORT = process.env.PORT || 4000
@@ -1142,6 +1149,12 @@ app.post('/api/questions/:id/rejudge', async (req, res) => {
       }
     }
 
+    // 重批改闭环：按新判定同步知识点掌握度（非阻塞，失败不影响改判结果）
+    if (student_id) {
+      syncReviewResultsMastery({ studentId: student_id, results: [{ questionId: id, isCorrect }] })
+        .catch(e => console.error('  ⚠️ [Mastery] 重批改掌握度同步失败:', e.message))
+    }
+
     res.json({ success: true, is_correct: isCorrect })
   } catch (error) {
     console.error('重批改失败:', error)
@@ -2060,6 +2073,11 @@ app.post('/api/generated-exams/:id/grade', async (req, res) => {
       [id]
     )
 
+    // 组卷重练闭环：按本次正/错结果更新知识点掌握度（非阻塞，失败不影响批改结果）
+    syncReviewResultsMastery({ studentId, results }).catch(e =>
+      console.error('  ⚠️ [Mastery] 组卷掌握度同步失败:', e.message)
+    )
+
     res.json({
       success: true,
       stats: {
@@ -2383,6 +2401,9 @@ app.use('/api/weekly-report', weeklyReportRouter)
 app.use('/api/worksheets', worksheetsRouter)
 app.use('/api/resources', resourcesRouter)
 app.use('/api/teaching', teachingRouter)
+app.use('/api/variants', variantsRouter)
+app.use('/api/handout', handoutRouter)
+app.use('/api/weakness', weaknessRouter)
 
 // 错误处理中间件（必须在路由之后，才能捕获路由中的未处理异常）
 app.use((err, req, res, next) => {
@@ -2458,6 +2479,8 @@ if (process.argv[1] === __filename || process.argv[1]?.endsWith('server/index.js
       await migrateWrongQuestionSelfContained()
       await migrateWrongQuestionSubject()
       await migrateErrorAnalysis()
+      await migrateKnowledgeTables()
+      await migrateVariantQuestions()
     } catch (err) {
       console.error('数据库迁移失败:', err.message)
     }
@@ -2504,6 +2527,58 @@ if (process.argv[1] === __filename || process.argv[1]?.endsWith('server/index.js
     console.log(`数据库: Neon PostgreSQL`)
   })
 }
+
+// ─────────────────────────────────────────────
+// 知识点驱动学习数据层 API（成长中心 / 讲义引擎数据源）
+// ─────────────────────────────────────────────
+
+// 学生知识点掌握度列表（成长中心核心数据）
+app.get('/api/knowledge/mastery', async (req, res) => {
+  try {
+    const { studentId, subject } = req.query
+    if (!studentId) return res.status(400).json({ error: '缺少 studentId' })
+    const rows = await getStudentMastery(studentId, subject || null)
+    res.json({ success: true, mastery: rows })
+  } catch (error) {
+    console.error('获取知识点掌握度失败:', error)
+    res.status(500).json({ error: error.message })
+  }
+})
+
+// 知识树（嵌套结构，供成长中心/讲义下钻）
+app.get('/api/knowledge/tree', async (req, res) => {
+  try {
+    const subject = req.query.subject || '数学'
+    const tree = await getKnowledgeTree(subject)
+    res.json({ success: true, subject, tree })
+  } catch (error) {
+    console.error('获取知识树失败:', error)
+    res.status(500).json({ error: error.message })
+  }
+})
+
+// 单题知识点（供题目详情展示"这题考什么"）
+app.get('/api/questions/:id/knowledge', async (req, res) => {
+  try {
+    const { id } = req.params
+    const rows = await getQuestionKnowledge(id)
+    res.json({ success: true, knowledge: rows })
+  } catch (error) {
+    console.error('获取题目知识点失败:', error)
+    res.status(500).json({ error: error.message })
+  }
+})
+
+// 运维：清除进程内的知识树缓存。
+// 知识树修改后调用一次，下一次 API 请求会从 DB 重新加载。
+app.post('/api/knowledge/cache/clear', async (req, res) => {
+  try {
+    clearKnowledgeCache()
+    res.json({ success: true, message: '知识树缓存已清空' })
+  } catch (error) {
+    res.status(500).json({ error: error.message })
+  }
+})
 
 export { app }
 
