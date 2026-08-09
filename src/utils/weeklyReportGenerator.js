@@ -398,6 +398,7 @@ function buildDiagnosisHTML(reportData) {
     <div class="pf"><span>${BRAND.nameCn} · ${BRAND.slogan}</span><span>- 02 -</span></div>
   </div>
 
+  ${subjectDiagnosis.length > 0 ? `
   <!-- ═══ 学科诊断页 ═══ -->
   <div class="page">
     <div class="pad">
@@ -417,6 +418,7 @@ function buildDiagnosisHTML(reportData) {
     </div>
     <div class="pf"><span>${BRAND.nameCn} · ${BRAND.slogan}</span><span>- 03 -</span></div>
   </div>
+  ` : ''}
 
 </body></html>`
 }
