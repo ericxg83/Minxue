@@ -75,6 +75,10 @@ export default defineConfig(({ mode }) => ({
           }
           
           // Other vendor
+          if (id.includes('node_modules/echarts')) {
+            return 'echarts'
+          }
+
           if (id.includes('node_modules/dayjs/') || 
               id.includes('node_modules/axios/') || 
               id.includes('node_modules/zustand/')) {

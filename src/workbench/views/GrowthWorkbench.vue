@@ -249,7 +249,13 @@ import {
 } from '@element-plus/icons-vue'
 import { useGrowthStore } from '../stores/growthStore'
 import { getStudents } from '../../services/apiService'
-import * as echarts from 'echarts'
+import * as echarts from 'echarts/core'
+import { LineChart, BarChart, PieChart as EChartsPieChart } from 'echarts/charts'
+import { GridComponent, TooltipComponent, LegendComponent, TitleComponent } from 'echarts/components'
+import { CanvasRenderer } from 'echarts/renderers'
+import { LinearGradient } from 'echarts/lib/util/graphic'
+
+echarts.use([LineChart, BarChart, EChartsPieChart, GridComponent, TooltipComponent, LegendComponent, TitleComponent, CanvasRenderer])
 import dayjs from 'dayjs'
 
 const growthStore = useGrowthStore()
@@ -496,7 +502,7 @@ const initCharts = () => {
         lineStyle: { color: '#3B82F6', width: 2 },
         itemStyle: { color: '#3B82F6' },
         areaStyle: {
-          color: new echarts.graphic.LinearGradient(0, 0, 0, 1, [
+          color: new LinearGradient(0, 0, 0, 1, [
             { offset: 0, color: 'rgba(59, 130, 246, 0.15)' },
             { offset: 1, color: 'rgba(59, 130, 246, 0.01)' },
           ]),
