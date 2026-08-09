@@ -104,6 +104,7 @@ export default function ProcessingPage({
                 className={`card ${isTaskCompleted(task) ? 'cursor-pointer hover:shadow-md' : ''}`}
                 style={{
                   padding: '12px',
+                  ...(task.status === 'failed' ? { border: '1px solid var(--danger)', background: 'var(--danger-soft)' } : {}),
                 }}
                 onClick={() => {
                   if (isTaskCompleted(task)) {
@@ -285,9 +286,11 @@ export default function ProcessingPage({
                     </div>
                   ) : null}
                   {task.status === 'failed' && task.result?.error && (
-                    <p className="text-meta mt-0.5" style={{ color: 'var(--danger)' }}>
-                      {task.result.error}
-                    </p>
+                    <div className="mt-2 rounded-lg px-2.5 py-2" style={{ background: 'var(--danger-soft)', border: '1px solid rgba(220,38,38,0.2)' }}>
+                      <p className="text-meta" style={{ color: 'var(--danger)', fontSize: 'var(--fs-11)', lineHeight: 1.5 }}>
+                        {task.result.error}
+                      </p>
+                    </div>
                   )}
                 </div>
               </div>
