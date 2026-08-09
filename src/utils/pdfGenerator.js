@@ -1,7 +1,7 @@
 import html2canvas from 'html2canvas'
 import jsPDF from 'jspdf'
 import qrcode from 'qrcode-generator'
-import katex from 'katex'
+import renderMathInElement from 'katex/dist/contrib/auto-render.mjs'
 import { isSvgCode } from './geometryDisplay'
 
 const A4_W = 210
@@ -43,14 +43,21 @@ const SYMBOL_MAP = {
   '≠': '\\ne ',
 }
 
+// Unicode 上标 → LaTeX 上标命令
+const SUP_MAP = {
+  '⁰': '^{0}', '¹': '^{1}', '²': '^{2}', '³': '^{3}', '⁴': '^{4}',
+  '⁵': '^{5}', '⁶': '^{6}', '⁷': '^{7}', '⁸': '^{8}', '⁹': '^{9}',
+  '⁺': '^{+}', '⁻': '^{-}',
+}
+
 /**
  * 将普通文本/非规范 LaTeX 规范化为标准 LaTeX 数学片段。
  * 规则：
  * - 保留已有 \frac{a}{b} 上下结构（统一 dfrac/tfrac/cfrac → \frac）
  * - 斜杠 a/b、3/5、1/(2-√3)、(√3+√2)/(√3-√2) → \frac{a}{b}（禁止斜杠）
- * - √x、√(x) → \sqrt{x}（横线完整覆盖）
+ * - √x、√(x)、√2 1/2、√17(a²+b²) → \sqrt{...}（横线完整覆盖）
  * - × ÷ ≥ ≤ ≠ ± → \times \div \ge \le \ne \pm
- * - x^2 → x^{2}，x_1 → x_{1}
+ * - x² → x^{2}，x^2 → x^{2}，x_1 → x_{1}
  * 中文与标点保持不变（splitToSegments 会拆为纯文本片段）。
  */
 function preprocessMath(text) {
@@ -63,21 +70,31 @@ function preprocessMath(text) {
   s = s.replace(/\\\(/g, '').replace(/\\\)/g, '')
   s = s.replace(/\\\{/g, '{').replace(/\\\}/g, '}')
 
-  // 1. √ → \sqrt{...}（横线完整覆盖）
-  s = s.replace(/√\s*\(([^()]*)\)/g, '\\sqrt{$1}')
-  s = s.replace(/√\s*([0-9]+(?:\.[0-9]+)?)/g, '\\sqrt{$1}')
-  s = s.replace(/√\s*([a-zA-Z])/g, '\\sqrt{$1}')
+  // 0.5 Unicode 上标 → LaTeX 上标
+  for (const [ch, rep] of Object.entries(SUP_MAP)) {
+    if (s.includes(ch)) s = s.split(ch).join(rep)
+  }
+
+  // 1. √ → \sqrt{...}（平衡括号、混合数、负号、数字字母都支持）
+  s = convertSqrt(s)
 
   // 2. 混合数：1 1/3 → 1\frac{1}{3}
   s = s.replace(/(\d+(?:\.\d+)?)\s+(\d+)\s*\/\s*(\d+)/g, (m, whole, num, den) =>
     parseInt(num, 10) < parseInt(den, 10) ? `${whole}\\frac{${num}}{${den}}` : m
   )
 
-  // 3. 斜杠除法 a/b → \frac{a}{b}
-  s = s.replace(
-    /(\([^()]*\)|\\sqrt\{[^}]*\}|[a-zA-Z0-9]+(?:\.[0-9]+)?)\s*\/\s*(\([^()]*\)|\\sqrt\{[^}]*\}|[a-zA-Z0-9]+(?:\.[0-9]+)?)/g,
-    '\\frac{$1}{$2}'
-  )
+  // 3. 斜杠除法 a/b → \frac{a}{b}（多轮处理嵌套）
+  let prev
+  let guard = 0
+  do {
+    prev = s
+    s = s.replace(
+      /(\([^()]*\)|\\sqrt\{[^{}]*\}|[a-zA-Z0-9]+(?:\.[0-9]+)?)\s*\/\s*(\([^()]*\)|\\sqrt\{[^{}]*\}|[a-zA-Z0-9]+(?:\.[0-9]+)?)/g,
+      '\\frac{$1}{$2}'
+    )
+    guard++
+    if (guard > 20) break
+  } while (s !== prev)
 
   // 4. 清理分数多余括号：\frac{(a)}{(b)} → \frac{a}{b}；(a/b) → a/b
   s = s.replace(/\\frac\{\(([^{}]*)\)\}\{\(([^{}]*)\)\}/g, '\\frac{$1}{$2}')
@@ -93,6 +110,78 @@ function preprocessMath(text) {
   }
 
   return s
+}
+
+/**
+ * 将 Unicode √ 转为标准 \sqrt{...}，支持：
+ * - √(...)         平衡括号（含嵌套、内含 a/b）
+ * - √2 1/2         混合数
+ * - √-5a、√3.5     负数/小数
+ * - √17(a²+b²)    数字+括号
+ * - √x、√2x       字母/数字
+ */
+function convertSqrt(s) {
+  let out = ''
+  let i = 0
+  while (i < s.length) {
+    const c = s[i]
+    if (c === '√') {
+      let j = i + 1
+      // 跳过空格
+      while (j < s.length && (s[j] === ' ' || s[j] === '\u00A0')) j++
+
+      // A. 括号形式：√(...) → \sqrt{...}（平衡括号）
+      if (s[j] === '(') {
+        let depth = 0
+        let k = j
+        let inner = ''
+        while (k < s.length) {
+          const ch = s[k]
+          inner += ch
+          if (ch === '(') depth++
+          else if (ch === ')') {
+            depth--
+            if (depth === 0) { k++; break }
+          }
+          k++
+        }
+        out += '\\sqrt{' + inner + '}'
+        i = k
+        continue
+      }
+
+      // B. 混合数：√2 1/2 → \sqrt{2\frac{1}{2}}
+      const mixed = s.slice(j).match(/^(\d+(?:\.\d+)?)\s+(\d+)\s*\/\s*(\d+)/)
+      if (mixed) {
+        out += '\\sqrt{' + mixed[1] + '\\frac{' + mixed[2] + '}{' + mixed[3] + '}}'
+        i = j + mixed[0].length
+        continue
+      }
+
+      // C. 数字/负号/小数/字母组合：√30、√-5a、√3.5、√17(a²+b²)、√2x
+      const num = s.slice(j).match(/^(-?[0-9]+(?:\.[0-9]+)?[a-zA-Z]*(?:\([^()]*\))?)/)
+      if (num && num[1].length > 0) {
+        out += '\\sqrt{' + num[1] + '}'
+        i = j + num[1].length
+        continue
+      }
+
+      // D. 字母：√x
+      if (/[a-zA-Z]/.test(s[j])) {
+        out += '\\sqrt{' + s[j] + '}'
+        i = j + 1
+        continue
+      }
+
+      // E. 无法识别，保留原样
+      out += c
+      i++
+    } else {
+      out += c
+      i++
+    }
+  }
+  return out
 }
 
 /**
@@ -211,28 +300,22 @@ function isMathChar(char) {
 }
 
 /**
- * 渲染内容：中文保持纯文本，数学片段用 KaTeX 渲染标准 LaTeX。
- * - \frac{分子}{分母} → 上下结构真分数
- * - \sqrt{...} → 标准根式（横线完整覆盖）
- * - \times \ge x^{2} 等标准符号
+ * 渲染内容：中文保持纯文本，数学片段用严格 $...$（行内）或 $$...$$（独立）定界符包裹，
+ * 之后由 renderMathInElement (KaTeX auto-render) 在 DOM 中统一解析渲染。
+ * 保证 \frac、\sqrt 等 LaTeX 指令绝不出现在定界符之外。
  */
 function renderContent(text) {
   if (!text) return ''
-  const segments = splitToSegments(preprocessMath(String(text)))
+  const processed = preprocessMath(String(text))
+  const segments = splitToSegments(processed)
+  const mathSegs = segments.filter(s => s.isMath && s.text)
+  const hasRealText = segments.some(s => !s.isMath && s.text.trim().length > 0)
+  const standalone = mathSegs.length === 1 && !hasRealText
   let html = ''
   for (const seg of segments) {
     if (seg.isMath && seg.text) {
-      try {
-        html += katex.renderToString(seg.text, {
-          throwOnError: false,
-          displayMode: false,
-          maxSize: 10,
-          maxExpand: 20,
-          strict: false,
-        })
-      } catch (e) {
-        html += escapeHtml(seg.text)
-      }
+      const dl = standalone ? '$$' : '$'
+      html += dl + escapeHtml(seg.text) + dl
     } else {
       html += escapeHtml(seg.text)
     }
@@ -532,6 +615,25 @@ export async function generateExamPDF({ title, studentName, questions, filename,
           qrContainer.style.display = 'block'
         }
       }
+    }
+
+    // 用 KaTeX auto-render 解析 $...$ / $$...$$ 定界符，渲染标准 LaTeX
+    try {
+      renderMathInElement(container, {
+        delimiters: [
+          { left: '$$', right: '$$', display: true },
+          { left: '$', right: '$', display: false },
+        ],
+        throwOnError: false,
+        strict: false,
+        maxSize: 10,
+        maxExpand: 20,
+        errorCallback: (err) => {
+          console.warn('KaTeX auto-render error:', err)
+        },
+      })
+    } catch (e) {
+      console.warn('KaTeX auto-render failed:', e)
     }
 
     // 等待 KaTeX 数学字体加载完成，确保 html2canvas 捕获时公式渲染正确
