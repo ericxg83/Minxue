@@ -317,7 +317,7 @@ const illustration = q._illustration_resolved ?? getQuestionIllustration(q)
   </style></head><body>
   <div class="page">
     <div id="qr-container" class="qr-container" style="display:none;">
-      <canvas id="qr-canvas" class="qr-canvas" width="440" height="440"></canvas>
+      <img id="qr-img" class="qr-canvas" />
       <div class="qr-text">扫码批改</div>
     </div>
     <div class="head-area">
@@ -395,40 +395,14 @@ export async function generateExamPDF({ title, studentName, questions, filename,
 
   try {
     if (qrContent) {
-      const qrCanvas = container.querySelector('#qr-canvas')
+      const qrImg = container.querySelector('#qr-img')
       const qrContainer = container.querySelector('#qr-container')
-      if (qrCanvas && qrContainer) {
-        const qr = qrcode(0, 'M')
-        qr.addData(qrContent)
-        qr.make()
-
-        const size = 440
-        qrCanvas.width = size
-        qrCanvas.height = size
-        const ctx = qrCanvas.getContext('2d')
-
-        // 四周留 4 模块静区（QR 规范要求），提高打印后识别率
-        const quietModules = 4
-        const cellSize = size / (qr.getModuleCount() + quietModules * 2)
-        const offset = cellSize * quietModules
-        ctx.fillStyle = '#ffffff'
-        ctx.fillRect(0, 0, size, size)
-        ctx.fillStyle = '#000000'
-
-        for (let row = 0; row < qr.getModuleCount(); row++) {
-          for (let col = 0; col < qr.getModuleCount(); col++) {
-            if (qr.isDark(row, col)) {
-              ctx.fillRect(
-                Math.floor(offset + col * cellSize),
-                Math.floor(offset + row * cellSize),
-                Math.ceil(cellSize),
-                Math.ceil(cellSize)
-              )
-            }
-          }
+      if (qrImg && qrContainer) {
+        const qrDataUrl = generateQRDataUrl(qrContent, 260)
+        if (qrDataUrl) {
+          qrImg.src = qrDataUrl
+          qrContainer.style.display = 'block'
         }
-
-        qrContainer.style.display = 'block'
       }
     }
 
