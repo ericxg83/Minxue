@@ -1,0 +1,18 @@
+# 全站不缓存：本应用频繁更新，必须保证每次部署的最新版立即可见
+# （含 CDN 边缘缓存控制，避免 SW / 旧 bundle 长期驻留导致看不到新版本）
+/*
+  Cache-Control: no-cache, must-revalidate
+  X-Content-Type-Options: nosniff
+  X-Frame-Options: DENY
+
+/assets/*
+  Cache-Control: no-cache, must-revalidate
+
+/sw.js
+  Cache-Control: no-store
+
+/manifest.webmanifest
+  Cache-Control: no-cache
+
+/registerSW.js
+  Cache-Control: no-cache

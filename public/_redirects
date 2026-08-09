@@ -1,9 +1,5 @@
 # Static assets - serve directly with correct MIME types (must come BEFORE catch-all)
 /assets/*    /assets/:splat    200
-/sw.js       /sw.js            200
-/manifest.webmanifest  /manifest.webmanifest  200
-/registerSW.js  /registerSW.js  200
-/workbox-*.js  /workbox-*.js  200
 
 # Image and font assets
 /*.png       /:splat           200
