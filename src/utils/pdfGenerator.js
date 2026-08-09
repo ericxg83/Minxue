@@ -100,6 +100,8 @@ function getPageSlices(scrollHeight, cssPageH, elementBounds) {
     let lastFitBottom = null
     // 找到在这一页范围内、底部超出页边界的第一个元素（整题移至下一页）
     let firstOverfitTop = null
+    // 从 y 起剩余的所有元素是否都能放进当前页
+    let allRemainingFit = true
 
     for (const b of elementBounds) {
       if (b.top >= y && b.top < pageBottom) {
@@ -109,10 +111,20 @@ function getPageSlices(scrollHeight, cssPageH, elementBounds) {
           firstOverfitTop = b.top
         }
       }
+      // 还有元素在当前页之后（顶部 >= 当前页底部）→ 剩余未耗尽
+      if (b.top >= pageBottom && b.top < scrollHeight) {
+        allRemainingFit = false
+      }
     }
 
+    // 有元素底部超出当前页 → 剩余内容未耗尽，不能直接吞掉
+    if (firstOverfitTop !== null) allRemainingFit = false
+
     let sliceEnd
-    if (lastFitBottom !== null) {
+    if (allRemainingFit) {
+      // 剩余所有元素都能放入当前页 → 直接覆盖到内容末尾，避免产生空白残页
+      sliceEnd = scrollHeight
+    } else if (lastFitBottom !== null) {
       sliceEnd = lastFitBottom
     } else if (firstOverfitTop !== null) {
       sliceEnd = firstOverfitTop
@@ -123,8 +135,14 @@ function getPageSlices(scrollHeight, cssPageH, elementBounds) {
     // 防止死循环：保证至少前进 1px
     if (sliceEnd <= y) sliceEnd = Math.min(y + cssPageH, scrollHeight)
 
+    // 防止越界：slice 不能超过内容总高度，否则 drawImage 取到 canvas 外像素会渲染成黑页
+    sliceEnd = Math.min(sliceEnd, scrollHeight)
+
     slices.push({ start: y, end: sliceEnd })
     y = sliceEnd
+
+    // 内容已耗尽则停止（防止生成空白残页）
+    if (y >= scrollHeight) break
   }
 
   return slices
@@ -395,7 +413,14 @@ export async function generateExamPDF({ title, studentName, questions, filename,
       pageCanvas.width = canvas.width
       pageCanvas.height = sliceH
       const ctx = pageCanvas.getContext('2d')
-      ctx.drawImage(canvas, 0, srcY, canvas.width, sliceH, 0, 0, canvas.width, sliceH)
+      // 先铺白底，防止 drawImage 源区域越界(取到 canvas 外透明像素)时渲染成黑页
+      ctx.fillStyle = '#ffffff'
+      ctx.fillRect(0, 0, pageCanvas.width, pageCanvas.height)
+      // 裁剪源区域到 canvas 实际高度内，避免取到越界像素
+      const srcH = Math.min(sliceH, Math.max(0, canvas.height - srcY))
+      if (srcH > 0) {
+        ctx.drawImage(canvas, 0, srcY, canvas.width, srcH, 0, 0, canvas.width, srcH)
+      }
 
       const pageImg = pageCanvas.toDataURL('image/jpeg', 0.92)
       const sliceH_css = sliceH / scale
