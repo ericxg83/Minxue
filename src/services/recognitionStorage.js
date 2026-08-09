@@ -51,7 +51,7 @@ export const saveRecognitionResult = (taskId, studentId, questions) => {
         answer: q.answer,
         student_answer: q.student_answer,
         is_correct: q.is_correct,
-        status: q.is_correct ? '识别成功' : '识别成功',
+        status: q.is_correct ? '正确' : '错误',
         exam_date: new Date().toISOString()
       })),
       created_at: new Date().toISOString()

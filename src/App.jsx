@@ -414,7 +414,6 @@ export default function App() {
     showEditSourcePicker, setShowEditSourcePicker,
     loadingTaskImage,
     showImageCrop, cropImage,
-    handleOpenEditor,
     handleOpenEditSourcePicker,
     handleEditFileSelected,
     handleCropFromTask, handleCropFromUpload,
@@ -1305,6 +1304,7 @@ export default function App() {
             onClose={() => { if (!stagingUploading) clearStaging() }}
             onCamera={() => cameraInputRef.current?.click()}
             onAlbum={() => albumInputRef.current?.click()}
+            onFilesSelected={handleStagingSelectFiles}
             onRemoveFile={removeStagingFile}
             onSubmit={handleSubmitStaging}
           />

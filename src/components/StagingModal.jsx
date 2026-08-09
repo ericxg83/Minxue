@@ -12,6 +12,7 @@ export default function StagingModal({
   onClose,
   onCamera,
   onAlbum,
+  onFilesSelected,
   onRemoveFile,
   onSubmit
 }) {
@@ -32,8 +33,8 @@ export default function StagingModal({
         className="relative bg-white rounded-t-3xl w-full max-w-lg mx-auto shadow-xl"
         style={{ paddingBottom: 'calc(24px + env(safe-area-inset-bottom, 0px))' }}
       >
-        <input ref={cameraInputRef} type="file" accept="image/*" capture="environment" multiple style={{ display: 'none' }} onChange={onCamera} />
-        <input ref={albumInputRef} type="file" accept="image/*" multiple style={{ display: 'none' }} onChange={onAlbum} />
+        <input ref={cameraInputRef} type="file" accept="image/*" capture="environment" multiple style={{ display: 'none' }} onChange={onFilesSelected} />
+        <input ref={albumInputRef} type="file" accept="image/*" multiple style={{ display: 'none' }} onChange={onFilesSelected} />
 
         <div className="flex justify-center pt-3 pb-1">
           <div className="w-8 h-1 rounded-full" style={{ background: 'var(--border)' }} />

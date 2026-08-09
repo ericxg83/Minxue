@@ -527,7 +527,7 @@ export function useUploadFlow({ loadTasks, isInitializing }) {
           tags_source: 'ai'
         }))
 
-        await saveRecognitionResult(task.id, result)
+        await saveRecognitionResult(task.id, currentStudent.id, questions)
         updateTaskInStore(task.id, 'done', result)
 
         const wrongQuestions = questions.filter(q => !q.is_correct)
