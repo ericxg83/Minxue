@@ -1,4 +1,4 @@
-import { Camera, FileText, Check, X, AlertCircle } from 'lucide-react'
+import { Camera, FileText, Check, X, AlertCircle, Loader2 } from 'lucide-react'
 import { motion } from 'motion/react'
 import dayjs from 'dayjs'
 import SwipeableRow from '../components/SwipeableRow'
@@ -207,6 +207,16 @@ export default function ProcessingPage({
                         {(() => {
                           const pendingMinutes = dayjs().diff(dayjs(task.created_at), 'minute')
 
+                          // 上传中的临时任务：明确的"上传中"状态（区别于排队/批改）
+                          if (task.is_temp) {
+                            return (
+                              <span className="inline-flex items-center gap-1 text-meta" style={{ color: 'var(--primary)' }}>
+                                <Loader2 size={11} className="animate-spin" style={{ color: 'var(--primary)' }} />
+                                上传中...
+                              </span>
+                            )
+                          }
+
                           if (task.status === 'processing') {
                             return (
                               <span className="inline-flex items-center gap-1 text-meta" style={{ color: 'var(--primary)' }}>
@@ -246,6 +256,16 @@ export default function ProcessingPage({
                       </>
                     )}
                   </div>
+                  {!isTaskCompleted(task) && (task.is_temp || task.status === 'processing') && (
+                    <div className="relative mt-2 h-1 overflow-hidden rounded-full" style={{ background: 'var(--bg-secondary)' }}>
+                      <motion.div
+                        className="absolute inset-y-0 rounded-full"
+                        style={{ background: 'var(--primary)' }}
+                        animate={{ left: ['-30%', '100%'] }}
+                        transition={{ duration: 1.6, repeat: Infinity, ease: 'linear' }}
+                      />
+                    </div>
+                  )}
                   {isTaskCompleted(task) && task.result?.questionCount ? (
                     <div className="flex items-center gap-2 mt-1.5">
                       <span className="stat-pill" style={{ background: 'var(--success-soft)', color: 'var(--success)' }}>
