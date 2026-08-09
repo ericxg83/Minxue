@@ -17,7 +17,6 @@ import { getStudents, getTasksByStudent, getQuestionsByTask, getWrongQuestionsBy
 import { taskService } from './services/taskService'
 import { usePaperBank } from './features/PaperBank/index.jsx'
 import { useUploadFlow } from './hooks/useUploadFlow'
-import { useQuestionEditor } from './hooks/useQuestionEditor'
 import { usePolling } from './hooks/usePolling'
 import { __pendingUploadStore } from './features/upload/pendingUploadStore'
 import { mockTasks, mockWrongQuestions, mockGeneratedExams, mockStudents } from './data/mockData'
@@ -29,7 +28,6 @@ import StagingModal from './components/StagingModal'
 import ExamChoiceModal from './components/ExamChoiceModal'
 import NotificationsPanel from './components/NotificationsPanel'
 import LearningReportPanel from './components/LearningReportPanel'
-import QuestionEditorModal from './components/QuestionEditorModal'
 import ProcessingPage from './pages/ProcessingPage'
 import WrongBookPage from './pages/WrongBookPage'
 import ExamPage from './pages/ExamPage'
@@ -37,7 +35,6 @@ import WorksheetPicker from './components/WorksheetPicker'
 
 import { useToast, ToastProvider } from './components/ToastProvider'
 import dayjs from 'dayjs'
-import RectCropper from './components/RectCropper'
 
 // Lazy load non-critical pages with error handling
 const lazyWithRetry = (factory) => {
@@ -412,25 +409,6 @@ export default function App() {
     availableExamResources,
     handleUploadWithExamResource, handleUploadFreshExam
   } = useUploadFlow({ loadTasks, isInitializing })
-
-  // 错题编辑器（自包含 hook：题干/选项/答案/解析/标签编辑 + 图片裁剪来源选择）
-  const {
-    showQuestionEditor, setShowQuestionEditor,
-    editingQuestionItem,
-    editTab, setEditTab,
-    editForm, updateEditForm,
-    editTags, editNewTag, setEditNewTag,
-    handleAddEditTag, handleRemoveEditTag,
-    showEditSourcePicker, setShowEditSourcePicker,
-    loadingTaskImage,
-    showImageCrop, cropImage,
-    handleOpenEditSourcePicker,
-    handleEditFileSelected,
-    handleCropFromTask, handleCropFromUpload,
-    handleCropConfirm, handleCropCancel,
-    addEditOption, updateEditOption, removeEditOption,
-    handleSaveEdit
-  } = useQuestionEditor({ wrongQuestions, setWrongQuestions })
 
   // H5 移动端上传入口：Home/index.jsx 在用户选完类型后通过 'set-workbook-flow'
   // 自定义事件把 flow/worksheetId/subject 传过来。这里同步写入 state + module 兜底，
@@ -1361,39 +1339,6 @@ export default function App() {
           <DeleteConfirmModal
             onCancel={() => setShowDeleteConfirm(false)}
             onConfirm={handleConfirmDelete}
-          />
-        )}
-
-        {/* Question Editor Dialog — Claude style */}
-        {showQuestionEditor && editingQuestionItem && (
-          <QuestionEditorModal
-            editingQuestionItem={editingQuestionItem}
-            editTab={editTab}
-            onTabChange={setEditTab}
-            editForm={editForm}
-            onUpdateForm={updateEditForm}
-            onAddOption={addEditOption}
-            onRemoveOption={removeEditOption}
-            onUpdateOption={updateEditOption}
-            onFileSelected={handleEditFileSelected}
-            onOpenSourcePicker={handleOpenEditSourcePicker}
-            onRemoveImage={() => updateEditForm('image_url', '')}
-            editTags={editTags}
-            onRemoveTag={handleRemoveEditTag}
-            editNewTag={editNewTag}
-            onNewTagChange={setEditNewTag}
-            onAddTag={handleAddEditTag}
-            onCancel={() => setShowQuestionEditor(false)}
-            onSave={handleSaveEdit}
-            showEditSourcePicker={showEditSourcePicker}
-            onCloseSourcePicker={() => setShowEditSourcePicker(false)}
-            onCropFromTask={handleCropFromTask}
-            onCropFromUpload={handleCropFromUpload}
-            loadingTaskImage={loadingTaskImage}
-            showImageCrop={showImageCrop}
-            cropImage={cropImage}
-            onCropConfirm={handleCropConfirm}
-            onCropCancel={handleCropCancel}
           />
         )}
 
