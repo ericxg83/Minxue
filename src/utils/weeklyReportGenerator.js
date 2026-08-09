@@ -1,8 +1,8 @@
 import html2canvas from 'html2canvas'
 import jsPDF from 'jspdf'
 import { PDFDocument } from 'pdf-lib'
-import { generateExamPDF } from './pdfGenerator'
-import { getQuestionsByIds, createGeneratedExam } from '../services/apiService'
+import { createGeneratedExam } from '../services/apiService'
+import { exportWrongBookPDF } from './wrongBookPdfExporter'
 import dayjs from 'dayjs'
 import isoWeek from 'dayjs/plugin/isoWeek'
 
@@ -520,21 +520,18 @@ async function generateExamPDFForReport(studentId, studentName, wrongQuestionIds
       question_ids: wrongQuestionIds
     })
 
-    // 获取题目详情
-    const questions = await getQuestionsByIds(wrongQuestionIds, studentId)
-    if (!questions || questions.length === 0) return null
-
-    // 复用现有 PDF 生成器生成试卷（showAnswers=false，保持空白卷风格）
-    const result = await generateExamPDF({
-      title: `${studentName} - 本周错题再测`,
+    // 统一走公共导出引擎：内部拉取完整题目 + 唯一渲染出口，与移动端重练卷/后台重练卷 100% 一致
+    const result = await exportWrongBookPDF({
+      studentId,
       studentName,
-      questions,
+      questionIds: wrongQuestionIds,
+      title: `${studentName} - 本周错题再测`,
       filename: `${studentName}_错题再测_${dayjs().format('YYYYMMDD')}`,
       showAnswers: false,
       qrContent: examRecord?.id ? `MXG:${examRecord.id.toUpperCase()}` : undefined
     })
 
-    return result.pdfBlob
+    return result ? result.pdfBlob : null
   } catch (error) {
     console.warn('生成错题再测卷失败:', error)
     return null

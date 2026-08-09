@@ -8,7 +8,7 @@ import { mockWrongQuestions } from '../../data/mockData'
 import { createGeneratedExam, getQuestionsByIds } from '../../services/apiService'
 import dayjs from 'dayjs'
 import { saveAs } from 'file-saver'
-import { generateExamPDF } from '../../utils/pdfGenerator'
+import { exportWrongBookPDF } from '../../utils/wrongBookPdfExporter'
 import { getGeometryDisplayUrl } from '../../utils/geometryDisplay'
 import MathText from '../../components/MathText'
 
@@ -21,14 +21,6 @@ const isOptionWithLetterPrefix = (opt) => {
   if (!opt) return false
   const trimmed = String(opt).trim()
   return /^[A-Da-d][.、)\)]\s/.test(trimmed)
-}
-
-/**
- * 如果选项已带字母前缀，则直接使用；否则自动添加
- */
-const formatOption = (opt, index) => {
-  if (isOptionWithLetterPrefix(opt)) return opt
-  return `${String.fromCharCode(65 + index)}. ${opt}`
 }
 
 const isMobile = /Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(navigator.userAgent)
@@ -332,10 +324,12 @@ export default function PrintPreview({ onClose, questions: propQuestions, existi
     const examName = getExamName()
     const questions = questionsOverride || previewRef.current || previewQuestions
     try {
-      const result = await generateExamPDF({
-        title: `${currentStudent?.name || '学生'} - ${examName}`,
+      // 统一走公共导出引擎（数据标准化 + 唯一渲染出口），与周报告再测卷/后台重练卷一致
+      const result = await exportWrongBookPDF({
+        studentId: currentStudent?.id,
         studentName: currentStudent?.name || '',
         questions,
+        title: `${currentStudent?.name || '学生'} - ${examName}`,
         filename: `${currentStudent?.name || 'student'}_${examName}_${dayjs().format('YYYYMMDD_HHmm')}`,
         showAnswers: false,
         qrContent: getQrContent(),
@@ -419,10 +413,11 @@ export default function PrintPreview({ onClose, questions: propQuestions, existi
         setGeneratingPdf(true)
         const examName = getExamName()
         try {
-          const result = await generateExamPDF({
-            title: `${currentStudent?.name || '学生'} - ${examName}`,
+          const result = await exportWrongBookPDF({
+            studentId: currentStudent?.id,
             studentName: currentStudent?.name || '',
             questions,
+            title: `${currentStudent?.name || '学生'} - ${examName}`,
             filename: `${currentStudent?.name || 'student'}_${examName}_${dayjs().format('YYYYMMDD_HHmm')}`,
             showAnswers: false,
             qrContent: getQrContent(),

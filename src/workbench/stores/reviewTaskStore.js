@@ -2,7 +2,7 @@ import { defineStore } from 'pinia'
 import { ref, computed } from 'vue'
 import dayjs from 'dayjs'
 import { getGeneratedExamsByStudent, getStudents, getQuestionsByIds } from '../../services/apiService'
-import { generateExamPDF } from '../../utils/pdfGenerator'
+import { exportWrongBookPDF } from '../../utils/wrongBookPdfExporter'
 import { ElMessage } from 'element-plus'
 
 export const useReviewTaskStore = defineStore('reviewTask', () => {
@@ -109,15 +109,20 @@ export const useReviewTaskStore = defineStore('reviewTask', () => {
     const filename = `${student.name}-${task.review_date}-重练卷`
 
     try {
-      // 生成PDF并下载
-      await generateExamPDF({
-        title,
-        studentName: student.class,
+      // 统一走公共导出引擎（数据标准化 + 唯一渲染出口），与周报告再测卷/移动端重练卷一致
+      const result = await exportWrongBookPDF({
+        studentId: task.student_id,
+        studentName: student.name,
         questions,
+        title,
         filename,
         showAnswers: false,
         qrContent: `review-task:${task.id}`
       })
+      if (!result) {
+        ElMessage.error('无法生成重练卷：题目数据为空')
+        return false
+      }
       
       // 模拟生成PDF URL
       task.pdf_url = `https://example.com/pdfs/${filename}.pdf`
