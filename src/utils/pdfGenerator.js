@@ -410,13 +410,39 @@ export async function generateExamPDF({ title, studentName, questions, filename,
       try { await document.fonts.ready } catch (e) { /* ignore */ }
     }
 
+    // ⚠️ 不要直接用 container.scrollHeight 作为渲染高度。
+    // 实测在 KaTeX 渲染后某些题目会被换行/撑高，但 container.scrollHeight 在某些边缘
+    // 情况下测得的值小于真实内容底部（例如 .question 的 page-break-inside:avoid 让
+    // 元素在打印布局下被推到下一页，但浏览器在屏幕布局下又没有完整包含它），
+    // 导致 html2canvas 渲染高度不够 → 后端题目被截掉，且 getPageSlices 的 sliceEnd
+    // 也会被截短 → 最后一页大量空白、前面页内容错位。
+    //
+    // 修复：用所有题目元素 rect.bottom 的最大值（相对 container 顶部）作为内容真实高度，
+    // 取 container.scrollHeight 与之的较大值，确保 html2canvas 完整渲染所有题目。
+    const containerRect0 = container.getBoundingClientRect()
+    const _questionEls0 = Array.from(container.querySelectorAll('.question'))
+    const _sectionEls0 = Array.from(container.querySelectorAll('.section-header'))
+    const _footerEl0 = container.querySelector('.footer')
+    let maxBottom = container.scrollHeight
+    for (const el of [..._questionEls0, ..._sectionEls0]) {
+      const r = el.getBoundingClientRect()
+      const bottomRel = r.bottom - containerRect0.top
+      if (bottomRel > maxBottom) maxBottom = bottomRel
+    }
+    if (_footerEl0) {
+      const r = _footerEl0.getBoundingClientRect()
+      const bottomRel = r.bottom - containerRect0.top
+      if (bottomRel > maxBottom) maxBottom = bottomRel
+    }
+    const renderH = Math.ceil(maxBottom + 8) // +8px 兜底，避免下边框被裁
+
     const canvas = await html2canvas(container, {
       scale: 2,
       useCORS: true,
       logging: false,
       backgroundColor: '#ffffff',
       width: 794,
-      height: container.scrollHeight,
+      height: renderH,
       // 在克隆文档中也触发 KaTeX 字体加载，确保测量布局用的字体度量一致
       onclone: (cloneDoc) => {
         try {
@@ -449,7 +475,31 @@ export async function generateExamPDF({ title, studentName, questions, filename,
       }
     }).sort((a, b) => a.top - b.top)
 
-    const slices = getPageSlices(container.scrollHeight, cssPageH, elementBounds)
+    // 扫描 canvas 底部，找出实际有内容的最后一行（防止 html2canvas 返回的 canvas 末尾
+    // 全是白像素导致最后一页变成大片空白）。从底部往上扫，找到第一个非白行。
+    const ctx0 = canvas.getContext('2d')
+    const pxData = ctx0.getImageData(0, 0, canvas.width, canvas.height).data
+    let contentBottomPx = canvas.height
+    for (let py = canvas.height - 1; py >= 0; py--) {
+      let rowHasContent = false
+      // 每 4 像素采样一次，加速扫描
+      for (let px = 0; px < canvas.width; px += 4) {
+        const idx = (py * canvas.width + px) * 4
+        const r = pxData[idx], g = pxData[idx + 1], b = pxData[idx + 2]
+        if (r < 250 || g < 250 || b < 250) {
+          rowHasContent = true
+          break
+        }
+      }
+      if (rowHasContent) {
+        contentBottomPx = py + 1
+        break
+      }
+    }
+    // 实际内容高度（CSS px），用作 getPageSlices 的 scrollHeight
+    const contentH = Math.min(canvas.height / scale, contentBottomPx / scale)
+
+    const slices = getPageSlices(contentH, cssPageH, elementBounds)
 
     const doc = new jsPDF('p', 'mm', 'a4')
 
@@ -489,6 +539,15 @@ export async function generateExamPDF({ title, studentName, questions, filename,
         const qrSize = 28
         doc.addImage(qrImgData, 'PNG', A4_W - qrSize - 6, A4_H - qrSize - 6, qrSize, qrSize)
       }
+
+      // 在每一页左下角添加页码 + 卷名，避免用户翻到第 2/3 页时不知道是哪份卷子
+      // 这是"格式错乱"的另一根因：第 2/3 页直接从题目开始，没有页眉信息，
+      // 用户视觉上感觉"内容错位、不知道是哪份卷子的题目"
+      doc.setFontSize(9)
+      doc.setTextColor(120, 120, 120)
+      const pageNoText = `${title}  第 ${p + 1} 页 / 共 ${slices.length} 页`
+      doc.text(pageNoText, 6, A4_H - 4)
+      doc.setTextColor(0, 0, 0)
     }
 
     // 生成 blob URL 和 blob，由调用方决定如何处理（预览/下载/打印）
