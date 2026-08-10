@@ -29,7 +29,7 @@ defineEmits(['edit'])
 .section-content {
   font-size: 14px;
   font-weight: 600;
-  color: #1e40af;
+  color: var(--wb-primary);
 }
 
 .editable-text {

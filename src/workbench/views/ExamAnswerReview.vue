@@ -415,7 +415,7 @@ onMounted(loadData)
 }
 
 .answer-item.active {
-  background: #E8F4FF;
+  background: var(--wb-primary-mist);
 }
 
 .answer-item.draft {

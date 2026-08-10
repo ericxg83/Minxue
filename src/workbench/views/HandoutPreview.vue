@@ -551,7 +551,7 @@ async function loadFromDiagnosis() {
 /* 英语讲解：英文为主、稍宽留白 */
 .block-explanation-en {
   font-family: 'Georgia', 'Times New Roman', serif;
-  background: #F0F7FF;
+  background: #EEF2FF;
   border-left: 3px solid #4F46E5;
   line-height: 1.9;
 }

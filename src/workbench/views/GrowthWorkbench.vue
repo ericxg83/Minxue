@@ -229,7 +229,7 @@
                   <div class="recommend-bar">
                     <div
                       class="recommend-bar-fill"
-                      :style="{ width: topic.avgMastery + '%', background: topic.isUrgent ? '#F5222D' : topic.avgMastery < 50 ? '#FA8C16' : '#3B82F6' }"
+                      :style="{ width: topic.avgMastery + '%', background: topic.isUrgent ? '#F5222D' : topic.avgMastery < 50 ? '#FA8C16' : '#6366F1' }"
                     ></div>
                   </div>
                 </div>
@@ -1154,11 +1154,11 @@ onUnmounted(() => {
   padding: 10px 12px;
   background: #F7F8FA;
   border-radius: 6px;
-  border-left: 3px solid #3B82F6;
+  border-left: 3px solid var(--wb-primary);
   transition: background 0.2s;
 }
 .recommend-item:hover {
-  background: #F0F5FF;
+  background: var(--wb-primary-mist);
 }
 .recommend-item.is-urgent {
   border-left-color: #F5222D;

@@ -20,7 +20,7 @@ function ToastContainer({ toasts }) {
             className={`px-4 py-2.5 rounded-xl shadow-lg backdrop-blur-md flex items-center gap-2 pointer-events-auto ${
               toast.type === 'success' ? 'bg-green-600/90 text-white' :
               toast.type === 'error' ? 'bg-red-500/90 text-white' :
-              toast.type === 'loading' ? 'bg-blue-600/90 text-white' :
+              toast.type === 'loading' ? 'bg-indigo-600/90 text-white' :
               'bg-gray-900/90 text-white'
             }`}
           >

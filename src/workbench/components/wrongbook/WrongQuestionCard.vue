@@ -441,8 +441,8 @@ async function handleGenerateVariants() {
   font-weight: 500;
 }
 .tags-container :deep(.el-tag.kp-secondary) {
-  background: #F0F5FF;
-  color: #3B82F6;
+  background: var(--wb-primary-mist);
+  color: var(--wb-primary);
   border-color: transparent;
 }
 
@@ -479,8 +479,8 @@ async function handleGenerateVariants() {
 .variants-container {
   margin-top: 8px;
   padding: 12px 14px;
-  background: #F0F5FF;
-  border: 1px solid #D6E4FF;
+  background: var(--wb-primary-mist);
+  border: 1px solid #C7D2FE;
   border-radius: 8px;
 }
 .variants-header {
@@ -514,7 +514,7 @@ async function handleGenerateVariants() {
   display: inline-block;
   font-size: 11px;
   padding: 1px 8px;
-  background: #3B82F6;
+  background: var(--wb-primary);
   color: #fff;
   border-radius: 4px;
   margin-bottom: 6px;
@@ -542,7 +542,7 @@ async function handleGenerateVariants() {
 }
 .variant-answer-details summary {
   cursor: pointer;
-  color: #3B82F6;
+  color: var(--wb-primary);
   user-select: none;
 }
 .variant-answer-body {

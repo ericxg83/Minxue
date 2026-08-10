@@ -39,7 +39,7 @@ export default function ImageCropper({ image, onCropComplete, onCancel }) {
             取消
           </button>
           <h2 className="text-[17px] font-bold text-white">裁剪头像</h2>
-          <button onClick={handleConfirm} className="text-[15px] font-medium text-blue-500">
+          <button onClick={handleConfirm} className="text-[15px] font-medium text-indigo-500">
             确定
           </button>
         </div>
