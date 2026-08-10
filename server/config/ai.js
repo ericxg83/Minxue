@@ -817,7 +817,7 @@ export const buildOCRPrompt = () => `你是一个专业的作业题目识别助�
       "is_correct": true,
       "confidence": 0.95,
       "analysis": "解析",
-      "question_type": "choice/fill/judge/answer",
+      "question_type": "choice",  // 必须是下列之一: "choice"(选择题) | "fill"(填空题) | "judge"(判断题) | "answer"(解答题)
       "has_manual_checkmark": false,
       "block_coordinates": { "x": 0, "y": 0, "width": 1000, "height": 1000 },
       "text_bbox": { "x": 0, "y": 0, "width": 1000, "height": 600 },
@@ -838,6 +838,11 @@ export const buildOCRPrompt = () => `你是一个专业的作业题目识别助�
    - 若出现"×/✗/半对半错"等批改，has_manual_checkmark 设为 false，交由答案比对判定。
    - 只在能明确辨认出独立批改标记时才置 true，否则保持 false，宁可不置也不要误判。
 6. 判断题（对/错）的答案或学生答案若是"√/✗"符号，直接填入对应符号即可。
+7. question_type 必须从四个值中选一个填空，每题只能填一个值，绝不能填 "choice/fill/judge/answer" 这种枚举字符串：
+   - "choice" 选择题（有 A/B/C/D 选项的）
+   - "fill" 填空题（横线/方框让学生填空的）
+   - "judge" 判断题（对/错、√/×）
+   - "answer" 解答题（需要写过程或计算的简答/计算题）
 
 【数学符号识别规范（必须严格遵守）】
 - content（题干）、answer（答案）、student_answer（学生答案）中的数学式子必须完整、准确地转录，禁止漏写、替换或臆造符号。

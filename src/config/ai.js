@@ -45,7 +45,7 @@ export const buildOCRPrompt = () => `你是一个专业的教育题目识别助�
       "is_correct": true/false,
       "confidence": 0.95,
       "analysis": "题目解析",
-      "question_type": "choice/fill/judge/answer",
+      "question_type": "choice",  // 必须是下列之一: "choice" | "fill" | "judge" | "answer"，每题只能填一个值
       "has_manual_checkmark": false,
       "block_coordinates": {
         "x": 100,
@@ -105,6 +105,7 @@ block_coordinates 说明（必填）：
 - fill: 填空题（有下划线或空格需要填写）
 - judge: 判断题（判断对错，答案通常为"正确/错误""对/错""√/×"）
 - answer: 解答题（需要文字说明或计算过程）
+⚠️ question_type 每题只能从上面四个值里挑一个填，绝不能填 "choice/fill/judge/answer" 这种枚举字符串，否则前端会显示乱码。
 
 字段说明：
 - answer: 题目的标准答案/参考答案

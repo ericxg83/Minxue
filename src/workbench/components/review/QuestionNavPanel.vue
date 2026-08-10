@@ -19,7 +19,7 @@
         @click="onSelect(idx)"
       >
         <StatusIcon :state="store.getAiState(q)" :size="18" />
-        <span class="item-label">{{ idx + 1 }}. {{ typeLabel(q.question_type) }}</span>
+        <span class="item-label">{{ idx + 1 }}. {{ typeLabel(q) }}</span>
         <span
           v-if="paperLabels[idx]"
           class="item-paper-tag"
@@ -111,9 +111,31 @@ const paperLabels = computed(() => {
   return []
 })
 
-const typeLabel = (type) => {
-  const map = { choice: '选择题', fill: '填空题', answer: '解答题', judge: '判断题' }
-  return map[type] || '?'
+// 题型中文映射表（question_type 字段合法值）
+const TYPE_MAP = { choice: '选择题', fill: '填空题', answer: '解答题', judge: '判断题' }
+
+// 把 question_type 归一为合法值。AI 老 prompt 偶发会把整个枚举字符串
+// "choice/fill/judge/answer" 整段塞进 question_type，导致前端显示为 "1.?"
+// 乱码。出现这种"枚举字符串"或含 '/' 的值时，按题目内容启发式兜底：
+//   有 options → choice；含"对/错/√/×"或判断题标记 → judge；含"____"空格 → fill；其它 → answer
+const normalizeType = (q) => {
+  const t = String(q?.question_type || '').trim().toLowerCase()
+  if (TYPE_MAP[t]) return t
+  // 旧脏数据：整个枚举字符串 / 多个值拼接 / 空 / null
+  const isEnumString = t.includes('/') || t.includes('|') || t.includes(',')
+  if (isEnumString || !t) {
+    if (Array.isArray(q?.options) && q.options.length > 0) return 'choice'
+    const content = String(q?.content || '')
+    if (/_{2,}|（\s*）|\(\s*\)|□/.test(content)) return 'fill'
+    if (/(对|错|正确|错误|√|×|✓|✗)/.test(content) && content.length < 60) return 'judge'
+    return 'answer'
+  }
+  return t
+}
+
+const typeLabel = (q) => {
+  // 兼容老数据：把"choice/fill/judge/answer"这种枚举串也走一遍归一
+  return TYPE_MAP[normalizeType(q)] || '?'
 }
 
 // 难度等级（1-5）简短标签

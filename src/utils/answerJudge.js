@@ -340,8 +340,31 @@ export function judgeAnswer(studentAnswer, referenceAnswer, questionType) {
     }
     const sNums = extractNumericValues(rawS)
     const rNums = extractNumericValues(rawR)
-    return sNums.length > 0 && rNums.length > 0 && sNums.length === rNums.length &&
-      sNums.every((v, i) => Math.abs(v - rNums[i]) < 1e-9)
+    if (sNums.length === 0 || rNums.length === 0) return false
+
+    // 快速路径：严格长度匹配（保留原行为，避免误判）
+    if (sNums.length === rNums.length &&
+        sNums.every((v, i) => Math.abs(v - rNums[i]) < 1e-9)) {
+      return true
+    }
+
+    // 集合语义兜底：解决"学生答 4.8 vs 参考 24/5 小时（即 4.8）"被误判为错的问题。
+    // 参考答案常同时给出"分数+小数"两种等价写法（如 24/5 和 4.8 同一道题），
+    // 提取后 rNums 会有重复值，sNums 只有 1 个，长度不一致判错。
+    // 兜底条件（必须同时满足，避免误判）：
+    //   1) 去重后学生答案的每个数字都在参考答案里
+    //   2) 参考答案去重后种类数不超过学生答案种类数 + 1
+    //      （允许参考答案多 1 个"换算小尾巴"，如 4.8 小时 = 4.8×60=288 分钟，
+    //      阻挡"3" vs "2,3,4,5" 这种全枚举的误判）
+    const key = (v) => Math.round(v * 1e6) / 1e6
+    const sSet = new Set(sNums.map(key))
+    const rSet = new Set(rNums.map(key))
+    if (sSet.size > 0 && rSet.size > 0 &&
+        [...sSet].every(v => rSet.has(v)) &&
+        rSet.size <= sSet.size + 1) {
+      return true
+    }
+    return false
   }
 
   // 检测逗号/分号分隔的多答案

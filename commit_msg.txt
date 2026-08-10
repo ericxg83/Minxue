@@ -1,42 +1,21 @@
-fix(pickAnswerUnit): 修复无 pageTitle 试卷错挂单元 - 三层加固
+fix(批改): 修复 question_type 枚举串乱码 + 分数+小数等价答案误判
 
-用户反馈：试卷中间页（无章节标题）被错挂到 19.1 试卷①，导致批改错误
-（学生答对但答案库用 19.1 的答案 → 整套题错位）
+三个用户截图问题：
+1) 题目列表显示 "1.?" 乱码 → AI 把 prompt 中示例 "choice/fill/judge/answer"
+   整个枚举串原样回填到 question_type 字段
+2) 详情页题型标签显示 "choice/fill/judge/answer" 字面字符串
+3) 学生答 "用了4.8时"，参考 "姐姐录入用了 24/5 小时（即4.8时）"
+   被判错：参考同时给出分数和小数两种等价写法，提取后 rNums 长度=2，
+   学生 sNums 长度=1，extractAndCompare 严格要求长度一致而判 false
 
-根因分析：
-1. detectChapterByContent 的"二次根式"规则错误包含"平方根|立方根|根号"，
-   导致 19.1/19.2 章节的"实数"内容被误判为 20.x"二次根式"
-2. chapterHint="第十九章实数" 的缩窄只能到 lesson_code 层级（19），
-   无法区分 19.1（"平方根与立方根"）和 19.2（"实数"）
-3. detectedChapter 多个候选命中时直接跳过、退化到题号覆盖率打分，
-   在 chapterHint=null 时会乱选（19.1 试卷①题号 1-28 覆盖 18-20）
-
-三层加固：
-1. CONTENT_CHAPTER_RULES 规则修正：
-   - "二次根式"严格限定为字面"二次根式"或 √± 多项式根号运算
-   - "实数"添加"平方根|立方根"（19.1 概念）
-   - 重新排序：一元二次方程 > 直角三角形 > 二次根式 > 实数（最具体优先）
-
-2. pickAnswerUnit chapterHint 二次缩窄（章节关键词）：
-   - 提取 chapterHint 中的"实数/二次根式/一元二次方程/直角三角形"
-   - 用它匹配 unitTitle 做二次缩窄，把"19.*"细分为"19.2 实数"vs"19.1 平方根与立方根"
-
-3. detectedChapter 多候选时缩窄 candidates 而非跳过：
-   - 例：content 含"无理数"→ detectedChapter=实数 → 缩窄到 试卷3/4/6 → 后续打分只在 19.2 内部选
-   - 避免 19.1 试卷①（题号 1-28 覆盖 18-20）被乱选
-
-4. 0-pre 过滤：仅看试卷 unit（unitKey 以"试卷"开头）：
-   - pickAnswerUnit 是答案库批改专用，堂堂练题号（1-5）与试卷（1-28）维度不同
-   - chapterHint 缩窄后 堂堂练10|20.1(1) 题号 1-22 也会覆盖学生题号 5-7，导致错选
-   - 过滤掉非试卷 unit 让打分只在试卷内部进行
-
-测试覆盖：
-- test_no_title_scenario.mjs: 用户截图 3 个场景（pageTitle=null + chapterHint=null/大章/有标题）
-  修复前：错挂 试卷1|19.1（错 2 题）→ 修复后：选 试卷3|19.2（对 2/3）
-- test_chapter_keyword_narrow.mjs: 6 个二次缩窄场景
-  二次根式/一元二次方程/直角三角形/混合特征都精准缩窄到对应章节
-- 现有 test_pick_answer_unit_e2e.mjs 6 个测试 + test_answerbank_unit_match.mjs 10 个测试 + test_e2e_answer_matching.mjs 17 个测试 全部通过
-
-实测效果（user 截图 18-20 题）：
-- 修复前：pageTitle=null + chapterHint="第十九章实数" → 选 试卷1|19.1（错 2/3）
-- 修复后：→ 选 试卷3|19.2（对 2/3），不会再错挂到 19.1 或 20.x
+修复：
+- server/src 双份 OCR prompt 把 question_type 示例值从
+  "choice/fill/judge/answer" 改成 "choice" 单值，并加第 7 条要求强调
+  "必须从四个值里挑一个填，绝不能填枚举字符串"
+- QuestionNavPanel / QuestionDetailPanel 加 normalizeType 兜底：
+  检测到 question_type 含 / | , 或为空时，按 options/content 启发式归类
+  （有 options → choice；含"____" → fill；含对错 → judge；其它 → answer）
+- judgeService / answerJudge 的 extractAndCompare 增加"集合语义兜底"：
+  去重后学生数字集合是参考答案的子集，且参考答案数字种类数不超过
+  学生种类数 + 1，判等。修复 "4.8 vs 24/5+4.8" 被误判为错的 bug
+  （同时保留原严格长度匹配作为快速路径，避免 "3" vs "2,3,4,5" 误判）

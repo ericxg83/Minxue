@@ -282,14 +282,32 @@ import QuestionEditForm from './QuestionEditForm.vue'
 const store = useReviewStore()
 const q = computed(() => store.currentReviewQuestion)
 
+// 题型中文映射表（question_type 字段合法值）
+const TYPE_MAP = { choice: '选择题', fill: '填空题', answer: '解答题', judge: '判断题' }
+
+// 归一题型：把"choice/fill/judge/answer"这种枚举字符串或非法值按题目内容兜底
+//   有 options → choice；含"对/错/√/×"或判断题标记 → judge；含"____"空格 → fill；其它 → answer
+const normalizeType = (q) => {
+  const t = String(q?.question_type || '').trim().toLowerCase()
+  if (TYPE_MAP[t]) return t
+  const isEnumString = t.includes('/') || t.includes('|') || t.includes(',')
+  if (isEnumString || !t) {
+    if (Array.isArray(q?.options) && q.options.length > 0) return 'choice'
+    const content = String(q?.content || '')
+    if (/_{2,}|（\s*）|\(\s*\)|□/.test(content)) return 'fill'
+    if (/(对|错|正确|错误|√|×|✓|✗)/.test(content) && content.length < 60) return 'judge'
+    return 'answer'
+  }
+  return t
+}
+
 const typeLabel = computed(() => {
   if (!q.value) return ''
-  const map = { choice: '选择题', fill: '填空题', answer: '解答题', judge: '判断题' }
-  return map[q.value.question_type] || q.value.question_type || '未知题型'
+  return TYPE_MAP[normalizeType(q.value)] || '未知题型'
 })
 const typeTagType = computed(() => {
   const map = { choice: '', fill: 'success', answer: 'warning', judge: 'primary' }
-  return map[q.value?.question_type] || 'info'
+  return map[normalizeType(q.value)] || 'info'
 })
 const optionsList = computed(() => q.value?.options || [])
 
