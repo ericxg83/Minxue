@@ -35,6 +35,7 @@ import { migrateErrorAnalysis } from './migrations/035_add_error_analysis.js'
 import { migrateKnowledgeTables } from './migrations/036_add_knowledge_tables.js'
 import { migrateVariantQuestions } from './migrations/037_add_variant_questions.js'
 import { migrateVariantQuestionType } from './migrations/042_add_variant_question_type.js'
+import { migrateRelaxQuestionTypeCheck } from './migrations/043_relax_question_type_check.js'
 import { scheduleNightParse } from './services/nightParseService.js'
 
 const __dirname = dirname(fileURLToPath(import.meta.url))
@@ -2483,6 +2484,7 @@ if (process.argv[1] === __filename || process.argv[1]?.endsWith('server/index.js
       await migrateKnowledgeTables()
       await migrateVariantQuestions()
       await migrateVariantQuestionType()
+      await migrateRelaxQuestionTypeCheck()
     } catch (err) {
       console.error('数据库迁移失败:', err.message)
     }

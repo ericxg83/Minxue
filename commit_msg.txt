@@ -1,21 +1,24 @@
-fix(批改): 修复 question_type 枚举串乱码 + 分数+小数等价答案误判
+feat(脏数据): 修复题目类型后台扫描+修复按钮
 
-三个用户截图问题：
-1) 题目列表显示 "1.?" 乱码 → AI 把 prompt 中示例 "choice/fill/judge/answer"
-   整个枚举串原样回填到 question_type 字段
-2) 详情页题型标签显示 "choice/fill/judge/answer" 字面字符串
-3) 学生答 "用了4.8时"，参考 "姐姐录入用了 24/5 小时（即4.8时）"
-   被判错：参考同时给出分数和小数两种等价写法，提取后 rNums 长度=2，
-   学生 sNums 长度=1，extractAndCompare 严格要求长度一致而判 false
+新增「修复题目类型」按钮（WorksheetManagement 顶部），供老师一键清洗
+老 prompt 上传时残留的 question_type 脏数据（"choice/fill/judge/answer"
+整个枚举串 / null / OCR 错字）。
 
-修复：
-- server/src 双份 OCR prompt 把 question_type 示例值从
-  "choice/fill/judge/answer" 改成 "choice" 单值，并加第 7 条要求强调
-  "必须从四个值里挑一个填，绝不能填枚举字符串"
-- QuestionNavPanel / QuestionDetailPanel 加 normalizeType 兜底：
-  检测到 question_type 含 / | , 或为空时，按 options/content 启发式归类
-  （有 options → choice；含"____" → fill；含对错 → judge；其它 → answer）
-- judgeService / answerJudge 的 extractAndCompare 增加"集合语义兜底"：
-  去重后学生数字集合是参考答案的子集，且参考答案数字种类数不超过
-  学生种类数 + 1，判等。修复 "4.8 vs 24/5+4.8" 被误判为错的 bug
-  （同时保留原严格长度匹配作为快速路径，避免 "3" vs "2,3,4,5" 误判）
+流程：
+1. 点击"修复题目类型"打开对话框
+2. 选择范围（全部练习册 / 单本），先"扫描脏数据"预览
+3. 确认后批量按启发式归一：options 非空→choice，含____→fill，
+   含对/错→judge，其它→answer
+
+后端：
+- worksheetFixService.js 新增 scanDirtyQuestionTypes / fixDirtyQuestionTypes
+  启发式规则与前端 normalizeType 保持完全一致（避免双端漂移）
+- routes/worksheets.js 新增 POST /fix-question-types/scan + /fix-question-types
+  路径固定在 :id 通配前，避免被吞掉
+- 迁移 043 放宽 questions.question_type CHECK 约束，允许 'judge'
+  （之前 schema 仅 IN ('choice','fill','answer')，会拒绝判断题写入）
+
+UI：
+- WorksheetManagement.vue 顶部加绿色"修复题目类型"按钮
+- 对话框支持范围选择、扫描预览（前 20 条样例）、确认执行、
+  结果分布统计（choice/fill/answer/judge 各几条）+ 错误列表

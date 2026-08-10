@@ -30,6 +30,8 @@ import {
   diagnoseWorksheet,
   listSuspectWorksheets,
   fixWorksheet,
+  scanDirtyQuestionTypes,
+  fixDirtyQuestionTypes,
 } from '../services/worksheetFixService.js'
 import { regradeTaskPageWithUnit } from '../services/worksheetPageService.js'
 import { query as pgQuery } from '../config/neon.js'
@@ -237,6 +239,37 @@ router.get('/fix-exam-units/debug', async (req, res) => {
     res.json({ success: true, count: list.length, worksheets: list })
   } catch (e) {
     res.status(500).json({ error: e.message })
+  }
+})
+
+// 修复 question_type 脏数据（OCR 老 prompt 残留"choice/fill/judge/answer"枚举串）
+//   POST /api/worksheets/fix-question-types/scan     body: { worksheetId?, limit? }
+//   POST /api/worksheets/fix-question-types          body: { worksheetId?, limit?, dryRun? }
+//
+// 启发式归一（与前端 normalizeType 保持完全一致）：
+//   有 options → choice；含 ____ → fill；含对错 → judge；其它 → answer
+router.post('/fix-question-types/scan', async (req, res) => {
+  try {
+    const worksheetId = req.body?.worksheetId || null
+    const limit = Math.min(Math.max(parseInt(req.body?.limit || '500', 10) || 500, 1), 5000)
+    const data = await scanDirtyQuestionTypes({ worksheetId, limit })
+    res.json(data)
+  } catch (e) {
+    console.error('[fix-question-types/scan] error:', e)
+    res.status(500).json({ success: false, error: e.message })
+  }
+})
+
+router.post('/fix-question-types', async (req, res) => {
+  try {
+    const worksheetId = req.body?.worksheetId || null
+    const limit = Math.min(Math.max(parseInt(req.body?.limit || '1000', 10) || 1000, 1), 10000)
+    const dryRun = req.body?.dryRun === true
+    const data = await fixDirtyQuestionTypes({ worksheetId, limit, dryRun })
+    res.json(data)
+  } catch (e) {
+    console.error('[fix-question-types] error:', e)
+    res.status(500).json({ success: false, error: e.message })
   }
 })
 

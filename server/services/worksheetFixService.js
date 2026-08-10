@@ -266,3 +266,154 @@ export async function fixWorksheet(worksheetId, { onLog = () => {}, skipOcr = fa
   onLog(`📊 试卷单元: ${before.examUnitCount} → ${newExamCount}  | 父章节错挂: ${before.suspects.length} → ${newSuspectCount}`)
   return { ok: true, before, after }
 }
+
+// ────────── 修复 question_type 脏数据（OCR 老 prompt 残留） ──────────
+//
+// 背景：旧 OCR prompt 的 question_type 示例值是 "choice/fill/judge/answer"，
+// 8B 模型偶发把整个枚举串原样塞进 question_type 字段。前端 normalizeType 已做
+// 启发式兜底显示（按 options/content 归类），但脏数据仍在数据库里：
+//   - 详情页"题型"标签偶尔显示原始串
+//   - 答案比对走模糊分支（fill/answer），选择题/判断题该走的 cleanChoice/normalizeJudge
+//     不会触发，可能误判
+//   - 服务端 processWorkbookGrading 等用 q.question_type 路由时也会兜底为 fill
+//
+// 入口：
+//   - scanDirtyQuestionTypes({ worksheetId?, limit })  扫描脏数据，dry-run
+//   - fixDirtyQuestionTypes({ worksheetId?, limit, dryRun })  修复并 UPDATE
+//
+// 启发式归一（与前端 src/workbench/components/review/QuestionNavPanel.vue
+// 的 normalizeType 保持完全一致，避免双端规则漂移）：
+//   - 已是合法值（choice/fill/answer/judge）→ 跳过
+//   - 含 / | , → 整个枚举串
+//   - 有 options（非空数组）→ 'choice'
+//   - 含 ____ / （） / □  → 'fill'
+//   - 含 对/错/正确/错误/√/×/✓/✗（且 content < 60 字符）→ 'judge'
+//   - 其它 → 'answer'
+
+const VALID_TYPES = new Set(['choice', 'fill', 'answer', 'judge'])
+
+function isDirtyType(rawType) {
+  const t = String(rawType || '').trim().toLowerCase()
+  if (!t) return true
+  if (VALID_TYPES.has(t)) return false
+  if (t.includes('/') || t.includes('|') || t.includes(',')) return true
+  // 其它非合法字符串（如 'choise'/'panding' 等 OCR 错字）也算脏
+  return true
+}
+
+function inferQuestionType(q) {
+  const content = String(q.content || '')
+  const options = q.options
+  if (Array.isArray(options) && options.length > 0) return 'choice'
+  if (/_{2,}|（\s*）|\(\s*\)|□/.test(content)) return 'fill'
+  if (/(对|错|正确|错误|√|×|✓|✗)/.test(content) && content.length < 60) return 'judge'
+  return 'answer'
+}
+
+/**
+ * 扫描 question_type 脏数据
+ * @param {{ worksheetId?: string, limit?: number }} opts
+ * @returns {Promise<{ success: boolean, total: number, sample: Array }>}
+ */
+export async function scanDirtyQuestionTypes({ worksheetId, limit = 500 } = {}) {
+  const params = []
+  let where = `WHERE (
+    question_type IS NULL
+    OR question_type = ''
+    OR question_type NOT IN ('choice', 'fill', 'answer', 'judge')
+  )`
+  if (worksheetId) {
+    params.push(worksheetId)
+    where += ` AND worksheet_id = $${params.length}`
+  }
+  params.push(limit)
+  const sql = `
+    SELECT id, worksheet_id, question_type, content, options
+    FROM questions
+    ${where}
+    ORDER BY created_at DESC
+    LIMIT $${params.length}
+  `
+  const { rows } = await query(sql, params)
+  return {
+    success: true,
+    total: rows.length,
+    sample: rows.slice(0, 20).map(r => ({
+      id: r.id,
+      worksheet_id: r.worksheet_id,
+      raw_type: r.question_type,
+      inferred: inferQuestionType(r),
+    })),
+  }
+}
+
+/**
+ * 修复 question_type 脏数据：把非合法值（空/null/枚举串/错字）按启发式归一
+ * @param {{ worksheetId?: string, limit?: number, dryRun?: boolean }} opts
+ * @returns {Promise<{
+ *   success: boolean, dryRun: boolean, scanned: number,
+ *   fixed: number, unchanged: number, byTarget: { choice: number, fill: number, answer: number, judge: number },
+ *   errors: Array<{id: string, error: string}>
+ * }>}
+ */
+export async function fixDirtyQuestionTypes({ worksheetId, limit = 1000, dryRun = false } = {}) {
+  const params = []
+  let where = `WHERE (
+    question_type IS NULL
+    OR question_type = ''
+    OR question_type NOT IN ('choice', 'fill', 'answer', 'judge')
+  )`
+  if (worksheetId) {
+    params.push(worksheetId)
+    where += ` AND worksheet_id = $${params.length}`
+  }
+  params.push(limit)
+  const sql = `
+    SELECT id, question_type, content, options
+    FROM questions
+    ${where}
+    ORDER BY created_at DESC
+    LIMIT $${params.length}
+  `
+  const { rows } = await query(sql, params)
+
+  const byTarget = { choice: 0, fill: 0, answer: 0, judge: 0 }
+  const errors = []
+  let fixed = 0
+  let unchanged = 0
+
+  for (const r of rows) {
+    if (!isDirtyType(r.question_type)) {
+      unchanged++
+      continue
+    }
+    const target = inferQuestionType(r)
+    if (dryRun) {
+      byTarget[target] = (byTarget[target] || 0) + 1
+      fixed++
+      continue
+    }
+    try {
+      await query(
+        `UPDATE questions SET question_type = $1 WHERE id = $2 AND (
+          question_type IS NULL OR question_type = '' OR question_type NOT IN ('choice','fill','answer','judge')
+        )`,
+        [target, r.id]
+      )
+      byTarget[target] = (byTarget[target] || 0) + 1
+      fixed++
+    } catch (e) {
+      errors.push({ id: r.id, error: e.message })
+    }
+  }
+
+  return {
+    success: true,
+    dryRun: !!dryRun,
+    scanned: rows.length,
+    fixed,
+    unchanged,
+    byTarget,
+    errors,
+  }
+}

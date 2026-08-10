@@ -15,6 +15,10 @@
           <el-icon><Tools /></el-icon>
           手动修复任务单页
         </el-button>
+        <el-button type="success" plain @click="showTypeFixDialog = true" :loading="typeFixLoading">
+          <el-icon><MagicStick /></el-icon>
+          修复题目类型
+        </el-button>
         <el-button type="primary" @click="showCreateDialog = true">
           <el-icon><Plus /></el-icon>
           新建练习册
@@ -390,13 +394,96 @@
         <pre v-if="ordinalFixResult.errors?.length" class="fix-log" style="margin-top:8px;">{{ ordinalFixResult.errors.map(e => `❌ ${e.old_unit_key} → ${e.new_unit_key} : ${e.error}`).join('\n') }}</pre>
       </div>
     </el-dialog>
+
+    <!-- 修复题目类型脏数据对话框 -->
+    <el-dialog v-model="showTypeFixDialog" title="修复『题目类型』脏数据" width="780px" :close-on-click-modal="false">
+      <el-alert
+        type="warning" :closable="false" show-icon
+        title="适用场景：之前用老 prompt 上传过图片，question_type 被 AI 错误填写成『choice/fill/judge/answer』整个枚举串（题目列表显示『1.?』乱码）。按题目内容启发式归一：options 非空→选择题，含____→填空题，含对/错→判断题，其它→解答题。"
+        style="margin-bottom:12px;"
+      />
+
+      <div style="display:flex;gap:8px;align-items:center;margin-bottom:12px;flex-wrap:wrap;">
+        <span style="font-size:13px;">范围：</span>
+        <el-select v-model="typeFixScope" style="width:280px;">
+          <el-option label="全部练习册" value="all" />
+          <el-option
+            v-for="w in worksheets"
+            :key="w.id"
+            :label="`${w.name}（${w.id.slice(0, 8)}）`"
+            :value="w.id"
+          />
+        </el-select>
+        <el-button @click="scanTypeFix" :loading="typeFixLoading" :disabled="typeFixApplying">
+          扫描脏数据
+        </el-button>
+        <el-button
+          type="success"
+          :disabled="!typeFixScan || typeFixScan.total === 0 || typeFixApplying"
+          :loading="typeFixApplying"
+          @click="runTypeFix"
+        >
+          确认修复 ({{ typeFixScan?.total || 0 }})
+        </el-button>
+      </div>
+
+      <el-alert
+        v-if="typeFixScan"
+        :type="typeFixScan.total === 0 ? 'success' : 'info'"
+        :closable="false"
+        :title="typeFixScan.total === 0
+          ? '✅ 未发现脏数据'
+          : `扫描到 ${typeFixScan.total} 条脏 question_type（最多展示前 20 条）`"
+        style="margin-bottom:12px;text-align:left;"
+      />
+
+      <el-table
+        v-if="typeFixScan && typeFixScan.sample.length"
+        :data="typeFixScan.sample"
+        max-height="300"
+        border
+        size="small"
+      >
+        <el-table-column prop="id" label="question_id" min-width="160">
+          <template #default="{ row }">
+            <code style="font-size:11px;">{{ row.id.slice(0, 8) }}…</code>
+          </template>
+        </el-table-column>
+        <el-table-column prop="raw_type" label="原 question_type" min-width="180">
+          <template #default="{ row }">
+            <el-tag type="danger" size="small" effect="plain">{{ row.raw_type || '(空)' }}</el-tag>
+          </template>
+        </el-table-column>
+        <el-table-column prop="inferred" label="推断类型" width="100">
+          <template #default="{ row }">
+            <el-tag type="success" size="small">{{ row.inferred }}</el-tag>
+          </template>
+        </el-table-column>
+      </el-table>
+
+      <div v-if="typeFixResult" style="margin-top:12px;">
+        <el-alert
+          :type="typeFixResult.errors?.length ? 'warning' : 'success'"
+          :closable="false"
+          show-icon
+          :title="`执行完成：扫描 ${typeFixResult.scanned} 条，修复 ${typeFixResult.fixed} 条（不变 ${typeFixResult.unchanged} 条）${typeFixResult.dryRun ? '（dryRun，未真实写入）' : ''}`"
+        />
+        <div v-if="typeFixResult.byTarget" style="margin-top:8px;font-size:13px;color:var(--wb-text-secondary);">
+          <span style="margin-right:12px;">分布：</span>
+          <el-tag v-for="(cnt, k) in typeFixResult.byTarget" :key="k" size="small" style="margin-right:6px;">
+            {{ k }} × {{ cnt }}
+          </el-tag>
+        </div>
+        <pre v-if="typeFixResult.errors?.length" class="fix-log" style="margin-top:8px;">{{ typeFixResult.errors.map(e => `❌ ${e.id}: ${e.error}`).join('\n') }}</pre>
+      </div>
+    </el-dialog>
   </div>
 </template>
 
 <script setup>
 import { ref, onMounted, watch } from 'vue'
 import { useRouter } from 'vue-router'
-import { Plus, UploadFilled, Loading, PictureFilled, Tools } from '@element-plus/icons-vue'
+import { Plus, UploadFilled, Loading, PictureFilled, Tools, MagicStick } from '@element-plus/icons-vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import {
   getWorksheets,
@@ -1089,6 +1176,89 @@ const worksheetName = (id) => {
   const w = worksheets.value.find(x => x.id === id)
   return w?.name || id
 }
+
+// ────────── 修复 question_type 脏数据 ──────────
+const showTypeFixDialog = ref(false)
+const typeFixScope = ref('all') // 'all' 或 worksheetId
+const typeFixScan = ref(null)  // scanDirtyQuestionTypes 返回
+const typeFixResult = ref(null) // fixDirtyQuestionTypes 返回
+const typeFixLoading = ref(false) // 扫描中
+const typeFixApplying = ref(false) // 修复中
+
+const typeFixApi = {
+  scan: (worksheetId) => fetch('/api/worksheets/fix-question-types/scan', {
+    method: 'POST', headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(worksheetId ? { worksheetId } : {}),
+  }).then(r => r.json()),
+  fix: (worksheetId) => fetch('/api/worksheets/fix-question-types', {
+    method: 'POST', headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(worksheetId ? { worksheetId, limit: 5000 } : { limit: 5000 }),
+  }).then(r => r.json()),
+}
+
+const scanTypeFix = async () => {
+  typeFixLoading.value = true
+  typeFixResult.value = null
+  try {
+    const worksheetId = typeFixScope.value === 'all' ? null : typeFixScope.value
+    const data = await typeFixApi.scan(worksheetId)
+    if (!data.success) throw new Error(data.error || '扫描失败')
+    typeFixScan.value = data
+    if (data.total === 0) {
+      ElMessage.success('未发现脏数据 🎉')
+    } else {
+      ElMessage.warning(`扫描到 ${data.total} 条脏 question_type，请确认后修复`)
+    }
+  } catch (e) {
+    ElMessage.error('扫描失败: ' + e.message)
+  } finally {
+    typeFixLoading.value = false
+  }
+}
+
+const runTypeFix = async () => {
+  if (!typeFixScan.value || typeFixScan.value.total === 0) return
+  try {
+    await ElMessageBox.confirm(
+      `将根据题目内容启发式归一 question_type 字段：\n\n` +
+      `• 扫描范围：${typeFixScope.value === 'all' ? '全部练习册' : worksheetName(typeFixScope.value)}\n` +
+      `• 待修复条数：${typeFixScan.value.total}\n\n` +
+      `归一规则：\n` +
+      `  - options 非空 → choice\n` +
+      `  - content 含 ____ / （）/ □ → fill\n` +
+      `  - content 含 对/错/正确/错误/√/× → judge\n` +
+      `  - 其它 → answer\n\n确认执行？`,
+      '修复确认',
+      { confirmButtonText: '开始修复', cancelButtonText: '取消', type: 'warning' }
+    )
+  } catch { return }
+  typeFixApplying.value = true
+  try {
+    const worksheetId = typeFixScope.value === 'all' ? null : typeFixScope.value
+    const r = await typeFixApi.fix(worksheetId)
+    if (!r.success) throw new Error(r.error || '修复失败')
+    typeFixResult.value = r
+    if (r.errors?.length) {
+      ElMessage.warning(`修复完成：改了 ${r.fixed} 条，${r.errors.length} 条失败，查看详情`)
+    } else {
+      ElMessage.success(`修复完成：改了 ${r.fixed} 条 question_type`)
+    }
+    // 重新扫描一次，把脏数据清空提示
+    await scanTypeFix()
+  } catch (e) {
+    ElMessage.error('修复失败: ' + e.message)
+  } finally {
+    typeFixApplying.value = false
+  }
+}
+
+watch(showTypeFixDialog, (v) => {
+  if (v) {
+    typeFixScope.value = 'all'
+    typeFixScan.value = null
+    typeFixResult.value = null
+  }
+})
 </script>
 
 <style scoped>
