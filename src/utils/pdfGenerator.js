@@ -379,24 +379,21 @@ export async function generateExamPDF({ title, studentName, questions, filename,
     }
   })
 
-  const html = buildExamHTML({ title, studentName, questions: pdfQuestions, showAnswers })
   const container = document.createElement('div')
-  container.innerHTML = html
+  // 直接构建 DOM，而非用 innerHTML 设置完整 HTML 文档字符串。
+  // buildExamHTML 返回的 <!DOCTYPE> / <html> / <head> / <body> 在 div 内会被浏览器
+  // 异常解析（style 标签可能不生效、meta 标签可能占位），导致渲染不一致。
+  const styleEl = document.createElement('style')
+  styleEl.textContent = katexCss + '\n' + buildPaperCSS()
+  container.appendChild(styleEl)
+  const bodyWrapper = document.createElement('div')
+  bodyWrapper.innerHTML = buildPaperBody({ title, studentName, questions: pdfQuestions, showAnswers })
+  container.appendChild(bodyWrapper)
   container.style.position = 'absolute'
   container.style.left = '-9999px'
   container.style.top = '0'
   container.style.width = '794px'
   document.body.appendChild(container)
-
-  // 双重保险：把 KaTeX CSS 直接 inline 注入到 container 内部。
-  // html2canvas 把元素复制到 clone 文档时，主文档的 <link rel="stylesheet"> 不会
-  // 复制过去；buildExamHTML 的 <style> 在某些极端情况下也未必被 clone 文档解析到。
-  // 显式 prepend 一份 <style> 保证 KaTeX 渲染出来的 .katex/.mord/.sqrt 等
-  // 绝对定位/字体规则在 clone 文档中也能生效——这是"预览正常、PDF 散架"的根因。
-  const katexStyleEl = document.createElement('style')
-  katexStyleEl.setAttribute('data-katex-inline', 'true')
-  katexStyleEl.textContent = katexCss
-  container.insertBefore(katexStyleEl, container.firstChild)
 
   try {
     // 头部模板二维码在这条 PDF 渲染路径中保持隐藏：改为在下方「每一页右上角」叠加二维码，
@@ -417,6 +414,7 @@ export async function generateExamPDF({ title, studentName, questions, filename,
       scale: 2,
       useCORS: true,
       logging: false,
+      backgroundColor: '#ffffff',
       width: 794,
       height: container.scrollHeight,
       // 在克隆文档中也触发 KaTeX 字体加载，确保测量布局用的字体度量一致
@@ -437,12 +435,19 @@ export async function generateExamPDF({ title, studentName, questions, filename,
     const cssPageH = (cssW / A4_W) * A4_H          // ~1123 CSS pixels
 
     // 收集所有需要保持完整的元素边界（题目 + 小节标题），用于智能分页
+    // ⚠️ 必须用 getBoundingClientRect 相对 container，而非 offsetTop。
+    // offsetTop 相对于 offsetParent（.page 有 position:relative → offsetParent = .page），
+    // 不是 container，导致分页裁剪 Y 坐标偏移——这是"预览正常、PDF 错位"的根因。
+    const containerRect = container.getBoundingClientRect()
     const questionEls = Array.from(container.querySelectorAll('.question'))
     const sectionEls = Array.from(container.querySelectorAll('.section-header'))
-    const elementBounds = [...sectionEls, ...questionEls].map(el => ({
-      top: el.offsetTop,
-      bottom: el.offsetTop + el.offsetHeight
-    })).sort((a, b) => a.top - b.top)
+    const elementBounds = [...sectionEls, ...questionEls].map(el => {
+      const rect = el.getBoundingClientRect()
+      return {
+        top: rect.top - containerRect.top,
+        bottom: rect.bottom - containerRect.top
+      }
+    }).sort((a, b) => a.top - b.top)
 
     const slices = getPageSlices(container.scrollHeight, cssPageH, elementBounds)
 
@@ -473,15 +478,16 @@ export async function generateExamPDF({ title, studentName, questions, filename,
         ctx.drawImage(canvas, 0, srcY, canvas.width, srcH, 0, 0, canvas.width, srcH)
       }
 
-      const pageImg = pageCanvas.toDataURL('image/jpeg', 0.92)
+      const pageImg = pageCanvas.toDataURL('image/jpeg', 0.95)
       const sliceH_css = sliceH / scale
       const mmH = (sliceH_css / cssW) * A4_W
       doc.addImage(pageImg, 'JPEG', 0, 0, A4_W, mmH)
 
-      // 在每一页右上角添加二维码（小尺寸），确保多页试卷每页都能扫码
+      // 在每一页右下角添加二维码（小尺寸），避免与第 2 页起的内容重叠
+      // （第 1 页 header 有 padding-right 保护，但第 2 页起没有 → 右上角会遮住题干）
       if (qrImgData) {
-        const qrSize = 35
-        doc.addImage(qrImgData, 'PNG', A4_W - qrSize - 8, 8, qrSize, qrSize)
+        const qrSize = 28
+        doc.addImage(qrImgData, 'PNG', A4_W - qrSize - 6, A4_H - qrSize - 6, qrSize, qrSize)
       }
     }
 
