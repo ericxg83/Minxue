@@ -2,6 +2,7 @@ import html2canvas from 'html2canvas'
 import jsPDF from 'jspdf'
 import qrcode from 'qrcode-generator'
 import renderMathInElement from 'katex/dist/contrib/auto-render.mjs'
+import katexCss from 'katex/dist/katex.min.css?inline'
 import { isSvgCode } from './geometryDisplay'
 import { renderContent } from './mathText'
 
@@ -323,9 +324,13 @@ export function buildPaperBody({ title, studentName, questions, showAnswers }) {
   <div class="footer">敏学错题本 · 智能学习助手</div>`
 }
 
-/** 生成完整 HTML 文档（PDF 光栅化用） */
+/** 生成完整 HTML 文档（PDF 光栅化用）
+ * 关键：必须在 <style> 中内联 KaTeX CSS，否则 html2canvas 把元素复制到
+ * clone 文档时，主文档的全局 katex.min.css 不会被复制过去，导致
+ * 根号横线、分数线、上下标全部"散架"——预览页正常但 PDF 错乱的根因。
+ */
 export function buildExamHTML({ title, studentName, questions, showAnswers }) {
-  return `<!DOCTYPE html><html><head><meta charset="utf-8"><style>${buildPaperCSS()}</style></head><body>${buildPaperBody({ title, studentName, questions, showAnswers })}</body></html>`
+  return `<!DOCTYPE html><html><head><meta charset="utf-8"><style>${katexCss}\n${buildPaperCSS()}</style></head><body>${buildPaperBody({ title, studentName, questions, showAnswers })}</body></html>`
 }
 
 export async function generateExamPDF({ title, studentName, questions, filename, showAnswers = false, qrContent }) {
@@ -382,6 +387,16 @@ export async function generateExamPDF({ title, studentName, questions, filename,
   container.style.top = '0'
   container.style.width = '794px'
   document.body.appendChild(container)
+
+  // 双重保险：把 KaTeX CSS 直接 inline 注入到 container 内部。
+  // html2canvas 把元素复制到 clone 文档时，主文档的 <link rel="stylesheet"> 不会
+  // 复制过去；buildExamHTML 的 <style> 在某些极端情况下也未必被 clone 文档解析到。
+  // 显式 prepend 一份 <style> 保证 KaTeX 渲染出来的 .katex/.mord/.sqrt 等
+  // 绝对定位/字体规则在 clone 文档中也能生效——这是"预览正常、PDF 散架"的根因。
+  const katexStyleEl = document.createElement('style')
+  katexStyleEl.setAttribute('data-katex-inline', 'true')
+  katexStyleEl.textContent = katexCss
+  container.insertBefore(katexStyleEl, container.firstChild)
 
   try {
     // 头部模板二维码在这条 PDF 渲染路径中保持隐藏：改为在下方「每一页右上角」叠加二维码，

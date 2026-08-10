@@ -97,7 +97,7 @@ router.post('/from-diagnosis', async (req, res) => {
         CASE WHEN jsonb_typeof(q.ai_tags::jsonb) = 'array' THEN q.ai_tags::jsonb ELSE '[]'::jsonb END
       ) AS tag
       WHERE ${conditions.join(' AND ')}${subjectClause}
-      GROUP BY subject, tag
+      GROUP BY q.subject, tag
       ORDER BY blank_count DESC, wrong_count DESC, student_count DESC
       LIMIT ${Math.min(maxItems, 20)}`,
       params
