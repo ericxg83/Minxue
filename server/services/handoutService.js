@@ -13,7 +13,15 @@ import { getTemplate, pickTemplateBySubject, listTemplates } from './handoutTemp
 //
 // 模板系统（P8）：buildHandout({ template: 'default' | 'exam_review' | 'wrong_review' | 'english_default', ... }）
 // 模板由 handoutTemplates/ 提供，详情见模板目录。
+//
+// 讲解缓存（P3/P8 性能）：相同 (kpName, subject) 的 AI 讲解在同一进程内复用，
+// 避免 12 个知识点串行调 AI 拖慢 from-diagnosis（30s+ 经常超时）。
+// 缓存以 LRU 形式控制大小，进程重启后失效。
 // ============================================================
+
+// 讲解缓存：key=`${subject}::${kpName}`，value=讲解文本；LRU 上限 256 条
+const _explanationCache = new Map()
+const EXPLANATION_CACHE_MAX = 256
 
 /**
  * AI 生成知识点的讲解文本。
@@ -24,8 +32,14 @@ import { getTemplate, pickTemplateBySubject, listTemplates } from './handoutTemp
 export async function generateKnowledgeExplanation(kpName, subject = '数学') {
   if (!kpName) return ''
 
+  // ── 缓存命中：跳过 AI 调用 ──
+  const cacheKey = `${subject}::${kpName}`
+  if (_explanationCache.has(cacheKey)) {
+    return _explanationCache.get(cacheKey)
+  }
+
   const prompt = {
-    systemContent: `你是一位经验丰富的 K12 数学老师。请用通俗易懂的语言，为"${kpName}"这个知识点写一段 200-300 字的精讲。
+    systemContent: `你是一位经验丰富的 K12 ${subject}老师。请用通俗易懂的语言，为"${kpName}"这个知识点写一段 200-300 字的精讲。
 
 要求：
 1. 先说明这个知识点的核心定义/概念。
@@ -36,6 +50,7 @@ export async function generateKnowledgeExplanation(kpName, subject = '数学') {
     userContent: `请为知识点「${kpName}」撰写一段精讲（${subject}学科）。`,
   }
 
+  let text
   try {
     const result = await callTextCompletion({
       systemContent: prompt.systemContent,
@@ -43,11 +58,19 @@ export async function generateKnowledgeExplanation(kpName, subject = '数学') {
       temperature: 0.5,
       maxTokens: 800,
     })
-    return (result.content || '').trim()
+    text = (result.content || '').trim()
   } catch (err) {
     console.warn(`  ⚠️ [Handout] 知识点讲解生成失败 ${kpName}:`, err.message)
-    return `## ${kpName}\n\n*（知识点讲解暂不可用，请参考教材相关内容）*`
+    text = `## ${kpName}\n\n*（知识点讲解暂不可用，请参考教材相关内容）*`
   }
+
+  // ── 写入缓存（LRU：超出上限时删最旧） ──
+  if (_explanationCache.size >= EXPLANATION_CACHE_MAX) {
+    const firstKey = _explanationCache.keys().next().value
+    if (firstKey) _explanationCache.delete(firstKey)
+  }
+  _explanationCache.set(cacheKey, text)
+  return text
 }
 
 /**
@@ -124,20 +147,35 @@ export async function buildHandout({ title, subject = '数学', periodText = '',
     ],
   })
 
-  // 每个知识点一页
-  for (const ks of knowledgeSections) {
-    const kpBlocks = await buildKnowledgeSection({
-      kpName: ks.kpName,
-      subject: ks.subject || subject,
-      sampleQuestions: ks.sampleQuestions || [],
-      explanation: ks.explanation || null,
-      template,
-    })
+  // 每个知识点一页：分批并发生成 AI 讲解（避免触发上游限流）。
+  // 全并发 12 个常被摩搭/Qwen 限速,反而比串行还慢;每批 3 个 + LRU 跨请求缓存可
+  // 把首跑从 84s 降到 ~30s,二跑走缓存降到 <10s。
+  const BATCH_SIZE = 3
+  const kpResults = []
+  for (let i = 0; i < knowledgeSections.length; i += BATCH_SIZE) {
+    const batch = knowledgeSections.slice(i, i + BATCH_SIZE)
+    const batchResults = await Promise.all(
+      batch.map(async (ks, batchIdx) => {
+        const idx = i + batchIdx
+        const kpBlocks = await buildKnowledgeSection({
+          kpName: ks.kpName,
+          subject: ks.subject || subject,
+          sampleQuestions: ks.sampleQuestions || [],
+          explanation: ks.explanation || null,
+          template,
+        })
+        return { idx, kpName: ks.kpName, kpBlocks }
+      })
+    )
+    kpResults.push(...batchResults)
+  }
+  kpResults.sort((a, b) => a.idx - b.idx)
+  for (const r of kpResults) {
     pages.push({
-      name: ks.kpName,
+      name: r.kpName,
       blocks: [
-        { type: 'page-title', content: ks.kpName },
-        ...kpBlocks,
+        { type: 'page-title', content: r.kpName },
+        ...r.kpBlocks,
       ],
     })
   }

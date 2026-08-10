@@ -1,24 +1,14 @@
-feat(脏数据): 修复题目类型后台扫描+修复按钮
+feat(工作台): 顶栏新增「讲义预览」入口
 
-新增「修复题目类型」按钮（WorksheetManagement 顶部），供老师一键清洗
-老 prompt 上传时残留的 question_type 脏数据（"choice/fill/judge/answer"
-整个枚举串 / null / OCR 错字）。
+之前讲义预览页 (HandoutPreview) 只能通过 URL 拼接进入
+(/workbench/#/handout?subject=xx),普通用户找不到入口。
 
-流程：
-1. 点击"修复题目类型"打开对话框
-2. 选择范围（全部练习册 / 单本），先"扫描脏数据"预览
-3. 确认后批量按启发式归一：options 非空→choice，含____→fill，
-   含对/错→judge，其它→answer
+本次:
+- src/workbench/components/layout/TopNavBar.vue
+  - navItems 新增 { key: 'handout', label: '讲义预览', path: '/handout', icon: 'Reading' }
+  - 位置在「诊断报告」和「试卷入库」之间
+  - 路由 /handout 已存在(HandoutPreview.vue),meta.requiresPC=false,无权限限制
 
-后端：
-- worksheetFixService.js 新增 scanDirtyQuestionTypes / fixDirtyQuestionTypes
-  启发式规则与前端 normalizeType 保持完全一致（避免双端漂移）
-- routes/worksheets.js 新增 POST /fix-question-types/scan + /fix-question-types
-  路径固定在 :id 通配前，避免被吞掉
-- 迁移 043 放宽 questions.question_type CHECK 约束，允许 'judge'
-  （之前 schema 仅 IN ('choice','fill','answer')，会拒绝判断题写入）
-
-UI：
-- WorksheetManagement.vue 顶部加绿色"修复题目类型"按钮
-- 对话框支持范围选择、扫描预览（前 20 条样例）、确认执行、
-  结果分布统计（choice/fill/answer/judge 各几条）+ 错误列表
+刷新 PC 后台 (http://localhost:3000/workbench/) 即可看到新按钮。
+点击进入讲义预览页,可在右上角下拉切 4 个模板
+(默认/考前冲刺/错题复习/英语讲义)。

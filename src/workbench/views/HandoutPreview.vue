@@ -350,6 +350,7 @@ async function loadFromDiagnosis() {
     const subj = currentSubject.value
     const response = await apiRequest('/handout/from-diagnosis', {
       method: 'POST',
+      timeout: 180000, // 讲义组装会串行调 12 次 AI 讲解放讲解,放宽到 3 分钟
       body: JSON.stringify({
         mode: 'week',
         offset: 0,

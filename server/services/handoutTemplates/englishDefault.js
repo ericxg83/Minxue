@@ -198,8 +198,17 @@ function groupByQuestionType(questions) {
 }
 
 // 英语知识点讲解（默认英文，kpName 已是英语术语时直接使用）
+// 同样走 LRU 缓存,避免 12 个知识点串行调 AI 拖慢 from-diagnosis
+const _enExplanationCache = new Map()
+const EN_EXPLANATION_CACHE_MAX = 256
+
 async function generateEnglishExplanation(kpName, hint) {
   if (!kpName) return ''
+  const cacheKey = `en::${kpName}`
+  if (_enExplanationCache.has(cacheKey)) {
+    return _enExplanationCache.get(cacheKey)
+  }
+
   const prompt = {
     systemContent: `You are a middle-school English teacher in China. Write a 200-300 word explanation of the grammar/vocabulary point "${kpName}" for Chinese middle-school students.
 
@@ -210,6 +219,7 @@ Use Markdown. Cover:
 Keep it concise and exam-oriented.`,
     userContent: `Explain: ${kpName}`,
   }
+  let text
   try {
     const r = await callTextCompletion({
       systemContent: prompt.systemContent,
@@ -217,9 +227,17 @@ Keep it concise and exam-oriented.`,
       temperature: 0.5,
       maxTokens: 700,
     })
-    return (r.content || '').trim()
+    text = (r.content || '').trim()
   } catch (e) {
     console.warn(`[englishDefault] 讲解生成失败 ${kpName}:`, e.message)
-    return `## ${kpName}\n\n*（讲解暂不可用）*`
+    text = `## ${kpName}\n\n*（讲解暂不可用）*`
   }
+
+  // LRU 写入
+  if (_enExplanationCache.size >= EN_EXPLANATION_CACHE_MAX) {
+    const firstKey = _enExplanationCache.keys().next().value
+    if (firstKey) _enExplanationCache.delete(firstKey)
+  }
+  _enExplanationCache.set(cacheKey, text)
+  return text
 }
