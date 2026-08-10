@@ -691,7 +691,7 @@ async function handleDistributeExam() {
     await ElMessageBox.confirm(
       '<div style="line-height: 1.7;">' +
       '<p style="font-weight: 600; margin: 4px 0;">针对本轮共性错题，有两条发卷路径：</p>' +
-      '<p style="margin: 6px 0;"><b style="color: #3B82F6;">路径 A · 每周自动（推荐）</b><br/>' +
+      '<p style="margin: 6px 0;"><b style="color: #6366F1;">路径 A · 每周自动（推荐）</b><br/>' +
       '「周学习诊断报告」已内含每位学生的错题再测卷，点击下方按钮一键生成全部学生，下载打印即可发卷。</p>' +
       '<p style="margin: 6px 0;"><b style="color: var(--wb-success);">路径 B · 移动端临时卷</b><br/>' +
       '需要针对个别学生或某个知识点单独补练时，打开移动端 App「错题本」，勾选错题（最多 30 题）即可生成临时再测卷。</p>' +

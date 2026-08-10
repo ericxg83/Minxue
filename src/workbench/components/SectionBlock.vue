@@ -40,6 +40,6 @@ defineEmits(['edit'])
 }
 
 .editable-text:hover {
-  background: #eff6ff;
+  background: #eef2ff;
 }
 </style>

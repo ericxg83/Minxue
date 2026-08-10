@@ -61,7 +61,7 @@ export default function ImageCropper({ image, onCropComplete, onCancel }) {
                 background: '#000'
               },
               cropAreaStyle: {
-                border: '2px solid #3b82f6'
+                border: '2px solid #6366f1'
               }
             }}
           />

@@ -73,7 +73,11 @@ export const TABLES = {
   STUDENT_WORKSHEET_SETTINGS: 'student_worksheet_settings',
   RESOURCES: 'resources',
   RESOURCE_ANSWERS: 'resource_answers',
-  ERROR_TYPES: 'error_types'
+  ERROR_TYPES: 'error_types',
+  KNOWLEDGE_POINTS: 'knowledge_points',
+  QUESTION_KNOWLEDGE: 'question_knowledge',
+  KNOWLEDGE_MASTERY: 'knowledge_mastery',
+  VARIANT_QUESTIONS: 'variant_questions'
 }
 
 export const TASK_STATUS = {

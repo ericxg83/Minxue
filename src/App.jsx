@@ -961,7 +961,7 @@ export default function App() {
 
           {/* 正在上传提示 — Claude style */}
           {isUploading && (
-            <div className="sticky top-11 z-40 px-4 py-2.5 animate-fade-in" style={{ background: 'var(--primary-soft)', borderBottom: '1px solid rgba(59,130,246,0.15)' }}>
+            <div className="sticky top-11 z-40 px-4 py-2.5 animate-fade-in" style={{ background: 'var(--primary-soft)', borderBottom: '1px solid rgba(99,102,241,0.15)' }}>
               <div className="flex items-center gap-2.5">
                 <div className="w-2 h-2 rounded-full animate-pulse" style={{ background: 'var(--primary)' }} />
                 <span style={{ fontSize: 'var(--fs-12)', fontWeight: 500, color: 'var(--primary-hover)' }}>

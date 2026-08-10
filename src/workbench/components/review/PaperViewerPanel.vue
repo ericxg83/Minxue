@@ -511,8 +511,8 @@ const switchToPage = (page) => {
 
 .overlay-current {
   border: 2.5px solid var(--wb-primary);
-  background: rgba(59, 130, 246, 0.10);
-  box-shadow: 0 0 0 1.5px rgba(59, 130, 246, 0.25), 0 0 12px rgba(59, 130, 246, 0.15);
+  background: rgba(99, 102, 241, 0.10);
+  box-shadow: 0 0 0 1.5px rgba(99, 102, 241, 0.25), 0 0 12px rgba(99, 102, 241, 0.15);
   z-index: 3;
 }
 

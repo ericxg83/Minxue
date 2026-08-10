@@ -120,7 +120,7 @@ function handleSwitchStudent(student) {
   align-items: center;
   justify-content: center;
   overflow: hidden;
-  box-shadow: 0 2px 8px rgba(59, 130, 246, 0.15);
+  box-shadow: 0 2px 8px rgba(99, 102, 241, 0.15);
   flex-shrink: 0;
 }
 

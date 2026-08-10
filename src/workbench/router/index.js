@@ -66,6 +66,12 @@ const routes = [
     name: 'ExamAnswerReview',
     component: () => import('../views/ExamAnswerReview.vue'),
     meta: { requiresPC: true }
+  },
+  {
+    path: '/handout',
+    name: 'HandoutPreview',
+    component: () => import('../views/HandoutPreview.vue'),
+    meta: { requiresPC: false }
   }
 ]
 

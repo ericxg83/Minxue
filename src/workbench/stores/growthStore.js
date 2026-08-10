@@ -14,7 +14,7 @@
 
 import { defineStore } from 'pinia'
 import { ref, computed } from 'vue'
-import { getTasksByStudent, getWrongQuestionsByStudent, getQuestionsByTask } from '../../services/apiService'
+import { getTasksByStudent, getWrongQuestionsByStudent, getQuestionsByTask, getKnowledgeMastery } from '../../services/apiService'
 import { useLifecycleStore, LIFECYCLE_STATUS } from './lifecycleStore'
 import { deduplicateWrongQuestions } from '../../utils/questionDedup'
 import dayjs from 'dayjs'
@@ -27,6 +27,8 @@ export const useGrowthStore = defineStore('growth', () => {
   const tasks = ref([])
   const wrongQuestions = ref([])
   const questions = ref([])
+  // 知识点掌握度（来自 knowledge_mastery 表，真实数据）
+  const knowledgeMastery = ref([])
   const loading = ref(false)
 
   // ===================== 数据加载 =====================
@@ -36,15 +38,17 @@ export const useGrowthStore = defineStore('growth', () => {
     currentStudentId.value = studentId
     loading.value = true
     try {
-      const [taskList, wqList] = await Promise.all([
+      const [taskList, wqList, masteryList] = await Promise.all([
         getTasksByStudent(studentId, false),
-        getWrongQuestionsByStudent(studentId, false)
+        getWrongQuestionsByStudent(studentId, false),
+        getKnowledgeMastery(studentId).catch(() => [])
       ])
       tasks.value = Array.isArray(taskList) ? taskList : []
       wrongQuestions.value = (Array.isArray(wqList) ? wqList : []).map(wq => ({
         ...wq,
         lifecycle_status: wq.lifecycle_status || LIFECYCLE_STATUS.NEW
       }))
+      knowledgeMastery.value = Array.isArray(masteryList) ? masteryList : []
       // 按需加载题目
       const questionIds = new Set()
       tasks.value.forEach(t => {
@@ -63,6 +67,7 @@ export const useGrowthStore = defineStore('growth', () => {
       tasks.value = []
       wrongQuestions.value = []
       questions.value = []
+      knowledgeMastery.value = []
     } finally {
       loading.value = false
     }
@@ -231,6 +236,33 @@ export const useGrowthStore = defineStore('growth', () => {
     }))
   })
 
+  // ===================== 知识点掌握度（knowledge_mastery 真实数据） =====================
+
+  // 掌握度列表（按掌握度从低到高，弱项在前）
+  const masteryPoints = computed(() => {
+    const list = knowledgeMastery.value
+      .filter(m => m.mastery !== undefined && m.mastery !== null)
+      .map(m => ({
+        name: m.name,
+        mastery: Math.round(m.mastery),
+        accuracy: m.total_questions > 0 ? Math.round((m.correct_questions / m.total_questions) * 100) : 0,
+        wrongCount: m.wrong_questions || 0,
+        total: m.total_questions || 0,
+        level: m.level,
+        // 变化趋势：无历史快照，先以"掌握度是否低于60"作为弱项信号（0=持平）
+        trend: 0
+      }))
+      .sort((a, b) => a.mastery - b.mastery)
+    return list
+  })
+
+  // 平均掌握率（0-100）
+  const averageMasteryRate = computed(() => {
+    const list = masteryPoints.value
+    if (list.length === 0) return 0
+    return Math.round(list.reduce((s, m) => s + m.mastery, 0) / list.length)
+  })
+
   // ===================== 方法 =====================
 
   const setCurrentStudent = (studentId) => {
@@ -256,6 +288,10 @@ export const useGrowthStore = defineStore('growth', () => {
     wrongQuestionTrend,
     reviewCompletionRate,
     // 科目统计
-    subjectStats
+    subjectStats,
+    // 知识点掌握度
+    knowledgeMastery,
+    masteryPoints,
+    averageMasteryRate
   }
 })

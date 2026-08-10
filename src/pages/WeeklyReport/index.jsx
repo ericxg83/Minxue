@@ -15,11 +15,11 @@ import isoWeek from 'dayjs/plugin/isoWeek'
 dayjs.extend(isoWeek)
 
 const T = {
-  primary: '#3B82F6', primarySoft: '#DBEAFE',
+  primary: '#6366F1', primarySoft: '#E0E7FF',
   success: '#16A34A', successSoft: '#DCFCE7',
   danger: '#DC2626', dangerSoft: '#FEE2E2',
   warning: '#D97706', warningSoft: '#FEF3C7',
-  accent: '#FF9500',
+  accent: '#8B5CF6',
   text: '#1C1C1E', textSec: '#6C6C70', textTer: '#A9A9AE',
   border: '#C6C6C8', borderLight: '#E5E5EA', bg: '#F2F2F7', card: '#FFFFFF'
 }
@@ -391,12 +391,12 @@ export default function WeeklyReport() {
                 {teacherAdvice && (
                   <div style={{
                     marginTop: '14px', background: 'var(--accent-soft)', borderRadius: 'var(--radius-sm)',
-                    padding: '12px 14px', border: '1px solid #FED7AA'
+                    padding: '12px 14px', border: '1px solid #C4B5FD'
                   }}>
                     <div style={{ fontSize: 'var(--fs-12)', fontWeight: 600, color: T.accent, marginBottom: '4px' }}>
                       老师建议
                     </div>
-                    <div style={{ fontSize: 'var(--fs-13)', color: '#9A3412', lineHeight: 1.6 }}>
+                    <div style={{ fontSize: 'var(--fs-13)', color: '#6D28D9', lineHeight: 1.6 }}>
                       {teacherAdvice}
                     </div>
                   </div>

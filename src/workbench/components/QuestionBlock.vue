@@ -81,7 +81,7 @@ defineEmits(['edit'])
 }
 
 .option-item:hover {
-  background: #eff6ff;
+  background: #eef2ff;
 }
 
 .warning-icon {
@@ -98,6 +98,6 @@ defineEmits(['edit'])
 }
 
 .editable-text:hover {
-  background: #eff6ff;
+  background: #eef2ff;
 }
 </style>

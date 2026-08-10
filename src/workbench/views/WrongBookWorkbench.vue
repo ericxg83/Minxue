@@ -1033,13 +1033,13 @@ const handleRetryGeometry = async () => {
 
 .question-card:hover {
   border-color: var(--wb-primary-soft);
-  box-shadow: 0 2px 8px rgba(59, 130, 246, 0.08);
+  box-shadow: 0 2px 8px rgba(99, 102, 241, 0.08);
 }
 
 .question-card--active {
   border-color: var(--wb-primary);
   background: var(--wb-primary-mist);
-  box-shadow: 0 2px 8px rgba(59, 130, 246, 0.12);
+  box-shadow: 0 2px 8px rgba(99, 102, 241, 0.12);
 }
 
 .question-card__body {

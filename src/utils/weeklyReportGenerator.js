@@ -13,16 +13,16 @@ const A4_H = 297
 
 /**
  * 设计 token（PDF HTML 无法引用 CSS 变量，写死等值 hex）
- * 对齐「敏学成长中心」品牌视觉：蓝→青渐变主色、橙色强调、清爽留白
+ * 对齐「敏学成长中心」品牌视觉：靛蓝→紫渐变主色、蓝紫强调、清爽留白
  */
 const T = {
-  primary: '#2E7CF6', primaryDark: '#1D5FD6', primarySoft: '#D6E6FF', primaryMist: '#EEF5FF',
-  teal: '#22C7A9', tealSoft: '#D8F7EF',
+  primary: '#6366F1', primaryDark: '#4F46E5', primarySoft: '#E0E7FF', primaryMist: '#EEF2FF',
+  teal: '#A78BFA', tealSoft: '#F5F3FF',
   success: '#16A34A', successSoft: '#DCFCE7',
   warning: '#D97706', warningSoft: '#FEF3C7',
   danger: '#F0564D', dangerSoft: '#FDECEC',
-  accent: '#F97316', accentSoft: '#FFF3E8',
-  purple: '#8B5CF6', purpleSoft: '#EFE9FF',
+  accent: '#7C3AED', accentSoft: '#EDE9FE',
+  purple: '#8B5CF6', purpleSoft: '#F5F3FF',
   text: '#1E293B', textSec: '#64748B', textTer: '#9AA6B8',
   border: '#E7EDF5', borderLight: '#F1F5FB', bg: '#F6F9FE'
 }

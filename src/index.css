@@ -4,7 +4,7 @@
   /* ── Apple iOS · System Colors + shadcn semantics ──
      Token names are unchanged; only values are tuned to the iOS Human
      Interface Guidelines (systemGroupedBackground, …). 主色统一为
-     Tailwind blue（#3B82F6），与 PC 工作台 --wb-primary 完全一致。 */
+     Indigo（#6366F1），与 PC 工作台 --wb-primary 完全一致。 */
 
   /* ── Surfaces — iOS grouped background over white cards ── */
   --bg: #F2F2F7;             /* systemGroupedBackground */
@@ -14,17 +14,17 @@
   --bg-secondary: #E9E9EF;   /* tertiary fill (segmented track) */
   --bg-mist: #F7F7FA;        /* between bg and card */
 
-  /* ── Primary — Tailwind blue (与工作台统一) ── */
-  --primary: #3B82F6;         /* blue-500 */
-  --primary-hover: #2563EB;   /* blue-600 */
-  --primary-light: #60A5FA;   /* blue-400 (渐变端点) */
-  --primary-soft: #DBEAFE;    /* blue-100 */
-  --primary-mist: #EFF6FF;    /* blue-50 */
+  /* ── Primary — Indigo (与工作台统一) ── */
+  --primary: #6366F1;         /* indigo-500 */
+  --primary-hover: #4F46E5;   /* indigo-600 */
+  --primary-light: #818CF8;   /* indigo-400 (渐变端点) */
+  --primary-soft: #E0E7FF;    /* indigo-100 */
+  --primary-mist: #EEF2FF;    /* indigo-50 */
 
-  /* ── Accent — systemOrange ── */
-  --accent: #FF9500;          /* systemOrange */
-  --accent-hover: #E68600;
-  --accent-soft: #FFF4E5;     /* tinted fill */
+  /* ── Accent — Violet ── */
+  --accent: #8B5CF6;          /* violet-500 */
+  --accent-hover: #7C3AED;    /* violet-600 */
+  --accent-soft: #EDE9FE;     /* tinted fill */
 
   /* ── Semantic Colors — slate palette (与工作台统一) ── */
   --success: #16A34A;         /* green-600 */
@@ -33,10 +33,10 @@
   --warning-soft: #FEF3C7;    /* amber-100 */
   --danger: #DC2626;          /* red-600 */
   --danger-soft: #FEE2E2;     /* red-100 */
-  --info: #3B82F6;            /* blue-500 */
-  --info-soft: #DBEAFE;       /* blue-100 */
-  --purple: #AF52DE;          /* systemPurple */
-  --purple-soft: #F5E9FB;
+  --info: #6366F1;            /* indigo-500 */
+  --info-soft: #E0E7FF;       /* indigo-100 */
+  --purple: #8B5CF6;          /* violet-500 */
+  --purple-soft: #F5F3FF;     /* violet-50 */
 
   /* ── Text — iOS label hierarchy ── */
   --text: #1C1C1E;             /* label */
@@ -84,8 +84,16 @@
   --shadow-md: 0 4px 14px rgba(0,0,0,0.06);
   --shadow-lg: 0 10px 28px rgba(0,0,0,0.08);
   --shadow-xl: 0 18px 44px rgba(0,0,0,0.10);
-  --shadow-primary: 0 4px 14px rgba(59,130,246,0.22);
-  --shadow-accent: 0 4px 14px rgba(255,149,0,0.22);
+  --shadow-primary: 0 4px 14px rgba(99,102,241,0.22);
+  --shadow-accent: 0 4px 14px rgba(139,92,246,0.22);
+}
+
+/* ── antd-mobile 主题色覆盖（跟随主色 #6366F1）── */
+:root {
+  --adm-color-primary: #6366F1;
+  --adm-color-primary-light: #4F46E5;
+  --adm-color-wathet: #EEF2FF;
+  --adm-color-primary-dark: #4F46E5;
 }
 
 html, body, #root {

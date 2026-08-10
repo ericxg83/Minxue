@@ -9,6 +9,35 @@ const A4_W = 210
 const A4_H = 297
 const CONTENT_W = 170
 
+// KaTeX 全部字体族。html2canvas 光栅化前必须显式预加载，否则会回退到
+// 系统字体、度量错误，导致根号横线、分数线、上下标错位。
+export const KATEX_FONT_FAMILIES = [
+  'KaTeX_AMS',
+  'KaTeX_Caligraphic',
+  'KaTeX_Fraktur',
+  'KaTeX_Main',
+  'KaTeX_Math',
+  'KaTeX_SansSerif',
+  'KaTeX_Script',
+  'KaTeX_Size1',
+  'KaTeX_Size2',
+  'KaTeX_Size3',
+  'KaTeX_Size4',
+  'KaTeX_Typewriter',
+]
+
+/** 显式加载 KaTeX 全部数学字体，确保捕获时字形与度量就绪 */
+export async function preloadKatexFonts() {
+  if (typeof document === 'undefined' || !document.fonts || !document.fonts.load) return
+  try {
+    await Promise.all(KATEX_FONT_FAMILIES.map(fam =>
+      document.fonts.load(`14px "${fam}"`).then(() => {}).catch(() => {})
+    ))
+  } catch (e) {
+    console.warn('[pdfGenerator] KaTeX 字体预加载失败:', e)
+  }
+}
+
 /**
  * 取题目配图（题干插图）：仅返回可被 <img> 渲染的 URL 或 data URL。
  * 注意：questions.image_url 是整页试卷扫描图（配合 block_coordinates 用于 PC 端
@@ -83,6 +112,44 @@ function generateQRDataUrl(text, size = 140) {
 }
 
 /**
+ * 用 KaTeX auto-render 解析容器内的 $...$ / $$...$$ 定界符，渲染标准 LaTeX。
+ * 与预览（PrintPreview）共用同一个渲染入口，保证 PDF 与预览公式完全一致。
+ */
+export function renderMathInContainer(container) {
+  try {
+    renderMathInElement(container, {
+      delimiters: [
+        { left: '$$', right: '$$', display: true },
+        { left: '$', right: '$', display: false },
+      ],
+      throwOnError: false,
+      strict: false,
+      maxSize: 10,
+      maxExpand: 20,
+      errorCallback: (err) => {
+        console.warn('KaTeX auto-render error:', err)
+      },
+    })
+  } catch (e) {
+    console.warn('KaTeX auto-render failed:', e)
+  }
+}
+
+/** 把二维码注入模板头部（与预览共用），避免每页叠加二维码造成的错位 */
+export function applyQRToContainer(container, qrContent) {
+  if (!qrContent) return
+  const qrImg = container.querySelector('#qr-img')
+  const qrContainer = container.querySelector('#qr-container')
+  if (qrImg && qrContainer) {
+    const qrDataUrl = generateQRDataUrl(qrContent, 260)
+    if (qrDataUrl) {
+      qrImg.src = qrDataUrl
+      qrContainer.style.display = 'block'
+    }
+  }
+}
+
+/**
  * 智能分页：按元素边界切分，不拆分题目和小节标题。
  * @param {number} scrollHeight - 内容总高度（CSS px）
  * @param {number} cssPageH - 每页高度（CSS px）
@@ -148,7 +215,46 @@ function getPageSlices(scrollHeight, cssPageH, elementBounds) {
   return slices
 }
 
-function buildExamHTML({ title, studentName, questions, showAnswers }) {
+/** PDF 与预览共用的试卷样式（模板 CSS） */
+export function buildPaperCSS() {
+  return `*{margin:0;padding:0;box-sizing:border-box}
+body{font-family:'Microsoft YaHei','PingFang SC','Noto Sans SC','SimSun',sans-serif;color:#1a1a1a}
+.page{width:794px;padding:24px 36px;position:relative}
+.head-area{min-height:100px;padding-right:170px}
+.title{font-size:20px;font-weight:bold;margin-bottom:4px;letter-spacing:1px}
+.sub-title{font-size:13px;color:#555;margin-bottom:8px}
+.info{display:flex;gap:40px;font-size:14px;margin-bottom:4px}
+.info span{display:inline-block}
+.info .blank{display:inline-block;width:100px;border-bottom:1px solid #333;margin-left:4px}
+.divider{border-top:2px solid #333;margin:4px 0 8px}
+.total-info{font-size:13px;color:#666;margin-bottom:8px}
+.section-header{font-size:15px;font-weight:bold;margin:8px 0 6px;padding:4px 0 4px 10px;border-left:4px solid #4F46E5;background:#F5F6FF}
+.question{margin-bottom:6px;page-break-inside:avoid}
+.q-choice{margin-bottom:6px}
+.q-fill{margin-bottom:10px}
+.q-answer{margin-bottom:14px}
+.q-head{display:flex;gap:6px;font-size:13px;line-height:1.7;margin-bottom:2px}
+.q-num{font-weight:bold;white-space:nowrap;min-width:26px}
+.q-text{flex:1;word-break:break-word}
+.q-image{text-align:center;margin:4px 0 4px 32px}
+.q-image img{max-width:100%;max-height:180px;object-fit:contain;border-radius:4px}
+.opts{display:grid;gap:4px 14px;padding-left:32px;margin-bottom:2px}
+.opts-1{grid-template-columns:1fr}
+.opts-2{grid-template-columns:1fr 1fr}
+.opts-4{grid-template-columns:repeat(4,1fr)}
+.opt{font-size:12px;line-height:1.5;word-break:break-word}
+.fill-line{width:200px;border-bottom:1.5px solid #333;margin:5px 0 2px 32px;height:26px}
+.ans-area{margin:4px 0 2px 32px}
+.ans-line{border-bottom:1px solid #d0d0d0;height:28px;margin-bottom:3px}
+.answer-key{font-size:12px;color:#4F46E5;margin-top:3px;padding-left:32px}
+.footer{text-align:center;font-size:11px;color:#999;margin-top:16px;padding-top:6px;border-top:1px solid #ddd}
+.qr-container{position:absolute;top:20px;right:32px;text-align:center;background:#fff;padding:4px}
+.qr-canvas{width:130px;height:130px;display:block}
+.qr-text{font-size:10px;color:#333;margin-top:3px;font-weight:bold;letter-spacing:1px}`
+}
+
+/** 试卷主体 HTML（.page 内容），PDF 与预览共用 */
+export function buildPaperBody({ title, studentName, questions, showAnswers }) {
   const choiceQs = questions.filter(q => q.question_type === 'choice')
   const fillQs = questions.filter(q => q.question_type === 'fill')
   const answerQs = questions.filter(q => q.question_type === 'answer')
@@ -162,7 +268,7 @@ function buildExamHTML({ title, studentName, questions, showAnswers }) {
       const typeClass = q.question_type === 'choice' ? 'q-choice' : q.question_type === 'fill' ? 'q-fill' : 'q-answer'
       html += `<div class="question ${typeClass}">`
       html += `<div class="q-head"><span class="q-num">${num}.</span><span class="q-text">${renderContent(q.content)}</span></div>`
-const illustration = q._illustration_resolved ?? getQuestionIllustration(q)
+      const illustration = q._illustration_resolved ?? getQuestionIllustration(q)
       if (illustration) {
         html += `<div class="q-image"><img src="${illustration}" alt="配图" /></div>`
       }
@@ -194,43 +300,7 @@ const illustration = q._illustration_resolved ?? getQuestionIllustration(q)
     return html
   }
 
-  return `<!DOCTYPE html><html><head><meta charset="utf-8"><style>
-    *{margin:0;padding:0;box-sizing:border-box}
-    body{font-family:'Microsoft YaHei','PingFang SC','Noto Sans SC','SimSun',sans-serif;color:#1a1a1a}
-    .page{width:794px;padding:24px 36px;position:relative}
-    .head-area{min-height:100px;padding-right:170px}
-    .title{font-size:20px;font-weight:bold;margin-bottom:4px;letter-spacing:1px}
-    .sub-title{font-size:13px;color:#555;margin-bottom:8px}
-    .info{display:flex;gap:40px;font-size:14px;margin-bottom:4px}
-    .info span{display:inline-block}
-    .info .blank{display:inline-block;width:100px;border-bottom:1px solid #333;margin-left:4px}
-    .divider{border-top:2px solid #333;margin:4px 0 8px}
-    .total-info{font-size:13px;color:#666;margin-bottom:8px}
-    .section-header{font-size:15px;font-weight:bold;margin:8px 0 6px;padding:4px 0 4px 10px;border-left:4px solid #2563EB;background:#f8faff}
-    .question{margin-bottom:6px;page-break-inside:avoid}
-    .q-choice{margin-bottom:6px}
-    .q-fill{margin-bottom:10px}
-    .q-answer{margin-bottom:14px}
-    .q-head{display:flex;gap:6px;font-size:13px;line-height:1.7;margin-bottom:2px}
-    .q-num{font-weight:bold;white-space:nowrap;min-width:26px}
-    .q-text{flex:1;word-break:break-word}
-    .q-image{text-align:center;margin:4px 0 4px 32px}
-    .q-image img{max-width:100%;max-height:180px;object-fit:contain;border-radius:4px}
-    .opts{display:grid;gap:4px 14px;padding-left:32px;margin-bottom:2px}
-    .opts-1{grid-template-columns:1fr}
-    .opts-2{grid-template-columns:1fr 1fr}
-    .opts-4{grid-template-columns:repeat(4,1fr)}
-    .opt{font-size:12px;line-height:1.5;word-break:break-word}
-    .fill-line{width:200px;border-bottom:1.5px solid #333;margin:5px 0 2px 32px;height:26px}
-    .ans-area{margin:4px 0 2px 32px}
-    .ans-line{border-bottom:1px solid #d0d0d0;height:28px;margin-bottom:3px}
-    .answer-key{font-size:12px;color:#2563EB;margin-top:3px;padding-left:32px}
-    .footer{text-align:center;font-size:11px;color:#999;margin-top:16px;padding-top:6px;border-top:1px solid #ddd}
-    .qr-container{position:absolute;top:20px;right:32px;text-align:center;background:#fff;padding:4px}
-    .qr-canvas{width:130px;height:130px;display:block}
-    .qr-text{font-size:10px;color:#333;margin-top:3px;font-weight:bold;letter-spacing:1px}
-  </style></head><body>
-  <div class="page">
+  return `<div class="page">
     <div id="qr-container" class="qr-container" style="display:none;">
       <img id="qr-img" class="qr-canvas" />
       <div class="qr-text">扫码批改</div>
@@ -250,7 +320,12 @@ const illustration = q._illustration_resolved ?? getQuestionIllustration(q)
     ${renderSection(fillQs, '二、填空题')}
     ${renderSection(answerQs, '三、解答题')}
   </div>
-  </body></html>`
+  <div class="footer">敏学错题本 · 智能学习助手</div>`
+}
+
+/** 生成完整 HTML 文档（PDF 光栅化用） */
+export function buildExamHTML({ title, studentName, questions, showAnswers }) {
+  return `<!DOCTYPE html><html><head><meta charset="utf-8"><style>${buildPaperCSS()}</style></head><body>${buildPaperBody({ title, studentName, questions, showAnswers })}</body></html>`
 }
 
 export async function generateExamPDF({ title, studentName, questions, filename, showAnswers = false, qrContent }) {
@@ -309,38 +384,16 @@ export async function generateExamPDF({ title, studentName, questions, filename,
   document.body.appendChild(container)
 
   try {
-    if (qrContent) {
-      const qrImg = container.querySelector('#qr-img')
-      const qrContainer = container.querySelector('#qr-container')
-      if (qrImg && qrContainer) {
-        const qrDataUrl = generateQRDataUrl(qrContent, 260)
-        if (qrDataUrl) {
-          qrImg.src = qrDataUrl
-          qrContainer.style.display = 'block'
-        }
-      }
-    }
+    // 头部模板二维码在这条 PDF 渲染路径中保持隐藏：改为在下方「每一页右上角」叠加二维码，
+    // 使多页试卷每一页都可随时扫码；移动端预览（PrintPreview）仍用 applyQRToContainer 在头部展示。
+    // 注：这里不再调用 applyQRToContainer，避免第 1 页出现「头部 + 角标」两份二维码。
 
-    // 用 KaTeX auto-render 解析 $...$ / $$...$$ 定界符，渲染标准 LaTeX
-    try {
-      renderMathInElement(container, {
-        delimiters: [
-          { left: '$$', right: '$$', display: true },
-          { left: '$', right: '$', display: false },
-        ],
-        throwOnError: false,
-        strict: false,
-        maxSize: 10,
-        maxExpand: 20,
-        errorCallback: (err) => {
-          console.warn('KaTeX auto-render error:', err)
-        },
-      })
-    } catch (e) {
-      console.warn('KaTeX auto-render failed:', e)
-    }
+    // 用 KaTeX auto-render 解析 $...$ / $$...$$ 定界符，渲染标准 LaTeX（与预览共用）
+    renderMathInContainer(container)
 
-    // 等待 KaTeX 数学字体加载完成，确保 html2canvas 捕获时公式渲染正确
+    // 显式预加载 KaTeX 全部数学字体，确保 html2canvas 捕获时字形与度量正确，
+    // 避免根号横线、分数线、上下标错位
+    await preloadKatexFonts()
     if (document.fonts && document.fonts.ready) {
       try { await document.fonts.ready } catch (e) { /* ignore */ }
     }
@@ -351,6 +404,16 @@ export async function generateExamPDF({ title, studentName, questions, filename,
       logging: false,
       width: 794,
       height: container.scrollHeight,
+      // 在克隆文档中也触发 KaTeX 字体加载，确保测量布局用的字体度量一致
+      onclone: (cloneDoc) => {
+        try {
+          if (cloneDoc && cloneDoc.fonts && cloneDoc.fonts.load) {
+            KATEX_FONT_FAMILIES.forEach(fam =>
+              cloneDoc.fonts.load(`14px "${fam}"`).catch(() => {})
+            )
+          }
+        } catch (e) { /* ignore */ }
+      },
     })
 
     // html2canvas scale 参数导致的像素倍率
@@ -370,37 +433,10 @@ export async function generateExamPDF({ title, studentName, questions, filename,
 
     const doc = new jsPDF('p', 'mm', 'a4')
 
-    // 生成二维码图片 data URL（每页都需要）
+    // 生成二维码图片 data URL（用于在每一页右上角叠加，多页随时可扫码）
     let qrImgData = null
     if (qrContent) {
-      const qr = qrcode(0, 'M')
-      qr.addData(qrContent)
-      qr.make()
-
-      const size = 120
-      const qrCanvas = document.createElement('canvas')
-      qrCanvas.width = size
-      qrCanvas.height = size
-      const ctx = qrCanvas.getContext('2d')
-
-      const cellSize = size / qr.getModuleCount()
-      ctx.fillStyle = '#ffffff'
-      ctx.fillRect(0, 0, size, size)
-      ctx.fillStyle = '#000000'
-
-      for (let row = 0; row < qr.getModuleCount(); row++) {
-        for (let col = 0; col < qr.getModuleCount(); col++) {
-          if (qr.isDark(row, col)) {
-            ctx.fillRect(
-              Math.floor(col * cellSize),
-              Math.floor(row * cellSize),
-              Math.ceil(cellSize),
-              Math.ceil(cellSize)
-            )
-          }
-        }
-      }
-      qrImgData = qrCanvas.toDataURL('image/png')
+      qrImgData = generateQRDataUrl(qrContent, 120)
     }
 
     for (let p = 0; p < slices.length; p++) {
@@ -427,7 +463,7 @@ export async function generateExamPDF({ title, studentName, questions, filename,
       const mmH = (sliceH_css / cssW) * A4_W
       doc.addImage(pageImg, 'JPEG', 0, 0, A4_W, mmH)
 
-      // 在每页右上角添加二维码（小尺寸）
+      // 在每一页右上角添加二维码（小尺寸），确保多页试卷每页都能扫码
       if (qrImgData) {
         const qrSize = 35
         doc.addImage(qrImgData, 'PNG', A4_W - qrSize - 8, 8, qrSize, qrSize)

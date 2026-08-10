@@ -87,7 +87,7 @@ export function tikzToSvg(tikzCode, strict = false) {
     const parseStyle = (styleStr) => {
       const s = styleStr || ''
       return {
-        strokeColor: s.includes('red') ? '#DC2626' : s.includes('blue') ? '#3B82F6' : '#333',
+        strokeColor: s.includes('red') ? '#DC2626' : s.includes('blue') ? '#6366F1' : '#333',
         strokeWidth: s.includes('thick') ? '2' : s.includes('ultra thick') ? '2.5' : s.includes('very thick') ? '2' : '1.5',
         dash: s.includes('dashed') ? 'stroke-dasharray="6,3"' : s.includes('dotted') ? 'stroke-dasharray="2,3"' : s.includes('dash pattern') ? 'stroke-dasharray="3,2"' : '',
         fill: s.includes('fill') ? (s.includes('gray!') || s.includes('lightgray') ? '#E5E7EB' : '#F3F4F6') : null,
@@ -512,7 +512,7 @@ function functionParamsToSvg(params, width, height) {
       const sy = cy - y * 40
       return `${sx},${sy}`
     }).join(' ')
-    svgElements.push(`<polyline points="${points}" fill="none" stroke="#3B82F6" stroke-width="2" stroke-linecap="round"/>`)
+    svgElements.push(`<polyline points="${points}" fill="none" stroke="#6366F1" stroke-width="2" stroke-linecap="round"/>`)
   }
   
   // 标签

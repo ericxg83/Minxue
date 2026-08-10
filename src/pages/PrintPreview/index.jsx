@@ -1,7 +1,6 @@
 import { useState, useRef, useEffect } from 'react'
 import { AnimatePresence } from 'motion/react'
 import { Printer, FileDown, Loader2 } from 'lucide-react'
-import { QRCodeSVG } from 'qrcode.react'
 import { Toast } from 'antd-mobile'
 import { useStudentStore, useWrongQuestionStore, useUIStore, useExamStore } from '../../store'
 import { mockWrongQuestions } from '../../data/mockData'
@@ -9,8 +8,14 @@ import { createGeneratedExam, getQuestionsByIds } from '../../services/apiServic
 import dayjs from 'dayjs'
 import { saveAs } from 'file-saver'
 import { exportWrongBookPDF } from '../../utils/wrongBookPdfExporter'
-import { getGeometryDisplayUrl } from '../../utils/geometryDisplay'
-import MathText from '../../components/MathText'
+import {
+  buildPaperBody,
+  buildPaperCSS,
+  renderMathInContainer,
+  applyQRToContainer,
+  preloadKatexFonts,
+} from '../../utils/pdfGenerator'
+import katexCss from 'katex/dist/katex.min.css?inline'
 
 const USE_MOCK_DATA = false
 
@@ -106,6 +111,7 @@ export default function PrintPreview({ onClose, questions: propQuestions, existi
   // A4 页面按真实宽度(794px)渲染，再缩放适配视口宽度（手机端完整呈现，不再挤压变形）
   const A4_PX = 794
   const previewWrapRef = useRef(null)
+  const paperMountRef = useRef(null)
   const [previewScale, setPreviewScale] = useState(1)
   useEffect(() => {
     const compute = () => {
@@ -118,6 +124,37 @@ export default function PrintPreview({ onClose, questions: propQuestions, existi
     window.addEventListener('resize', compute)
     return () => window.removeEventListener('resize', compute)
   }, [previewQuestions.length])
+
+  // 用与 PDF 完全一致的模板（buildPaperBody + buildPaperCSS + 同一 KaTeX auto-render + 二维码）
+  // 渲染到 Shadow DOM，保证「预览 = PDF 格式」。
+  useEffect(() => {
+    const host = paperMountRef.current
+    const qs = previewQuestions
+    if (!host || !qs || qs.length === 0) return
+
+    let shadow = host.shadowRoot
+    if (!shadow) shadow = host.attachShadow({ mode: 'open' })
+
+    try {
+      const name = currentStudent?.name || '学生'
+      const title = `${name} - ${getExamName()}`
+      shadow.innerHTML = `<style>${katexCss}\n${buildPaperCSS()}</style>${buildPaperBody({
+        title,
+        studentName: name,
+        questions: qs,
+        showAnswers: false,
+      })}`
+      // 等 DOM 插入后再渲染公式与二维码，保证与 PDF 生成时一致
+      requestAnimationFrame(() => {
+        renderMathInContainer(shadow)
+        applyQRToContainer(shadow, qrContent || getQrContent())
+        preloadKatexFonts()
+      })
+    } catch (err) {
+      console.warn('试卷预览渲染失败:', err)
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [previewQuestions, qrContent, generatedExamId])
 
   // 二维码内容：错题重练任务入口 URL（/retry-task/{id}），任意相机可扫
   // 二维码只承载唯一 task 定位，不再绑定具体批改页面
@@ -183,25 +220,6 @@ export default function PrintPreview({ onClose, questions: propQuestions, existi
       setPreviewQuestions(questions)
     }
   }, [selectedQuestions, currentStudent])
-
-  const totalPages = Math.ceil(previewQuestions.length / 5) || 1
-
-  // 按题型分组，与 PDF 排版一致：选择题 / 填空题 / 解答题
-  const questionSections = (() => {
-    const choice = previewQuestions.filter(q => q.question_type === 'choice')
-    const fill = previewQuestions.filter(q => q.question_type === 'fill')
-    const answer = previewQuestions.filter(q => q.question_type === 'answer')
-    const other = previewQuestions.filter(
-      q => !['choice', 'fill', 'answer'].includes(q.question_type)
-    )
-    const sections = []
-    let num = 0
-    if (choice.length) sections.push({ label: '一、选择题', items: choice.map(q => ({ q, num: ++num })) })
-    if (fill.length) sections.push({ label: '二、填空题', items: fill.map(q => ({ q, num: ++num })) })
-    if (answer.length) sections.push({ label: '三、解答题', items: answer.map(q => ({ q, num: ++num })) })
-    if (other.length) sections.push({ label: '四、其他', items: other.map(q => ({ q, num: ++num })) })
-    return sections
-  })()
 
   // 计算 base 试卷名（不含序号）：重打模式用原始名，新建模式按学科 + 日期
   const getBaseExamName = () => {
@@ -510,113 +528,11 @@ export default function PrintPreview({ onClose, questions: propQuestions, existi
                 transformOrigin: 'top left',
               }}
             >
-              <div className="bg-white shadow-lg relative" style={{ padding: '30px 40px' }}>
-                {/* QR Code — 顶部右侧固定，标题区已预留空间避免重叠 */}
-                <div className="absolute text-center" style={{ top: 24, right: 36 }}>
-                  <QRCodeSVG
-                    value={qrContent || 'https://minxue.app/retry-task'}
-                    size={150}
-                    level="H"
-                    includeMargin={true}
-                  />
-                  <div className="text-[11px] text-gray-500 mt-1 font-bold tracking-wider">扫码批改</div>
-                </div>
-
-                {/* Header — 右侧留出 170px 给二维码 */}
-                <div style={{ minHeight: 150, paddingRight: 170 }}>
-                  <div className="text-[22px] font-bold mb-1.5 tracking-wide">{currentStudent?.name || '学生'} - {getExamName()}</div>
-                  <div className="text-[13px] text-gray-500 mb-3">{currentStudent?.name || '学生'}</div>
-                  <div className="flex gap-10 text-[14px] mb-1">
-                    <span>姓名：<span className="inline-block w-[100px] border-b border-gray-800 ml-1"></span></span>
-                    <span>班级：<span className="inline-block w-[100px] border-b border-gray-800 ml-1"></span></span>
-                    <span>得分：<span className="inline-block w-[100px] border-b border-gray-800 ml-1"></span></span>
-                  </div>
-                  <div className="border-t-2 border-gray-800 mt-1.5 mb-2.5"></div>
-                  <div className="text-[13px] text-gray-500 mb-2.5">共 {previewQuestions.length} 题</div>
-                </div>
-
-                {/* Questions — 按题型分节，与 PDF 一致 */}
-                {questionSections.map((section) => (
-                  <div key={section.label}>
-                    <div className="text-[16px] font-bold my-3 py-1.5 pl-3 border-l-4 border-blue-600 bg-blue-50">
-                      {section.label}
-                    </div>
-                    {section.items.map(({ q, num }) => {
-                      const maxLen = q.options && q.options.length
-                        ? Math.max(...q.options.map(o => String(o || '').length))
-                        : 0
-                      const colClass = maxLen <= 8 ? 'grid-cols-4' : maxLen <= 20 ? 'grid-cols-2' : 'grid-cols-1'
-                      // 与周报告再测卷一致：使用题干几何配图（clean_geometry_svg/tikz_svg_url...），
-                      // 而非整页试卷扫描图 image_url。tikz_code（原始 TikZ 源码）PDF 无法直接渲染，此处同样跳过。
-                      const illustration = getGeometryDisplayUrl(q)
-                      const isInlineSvg = illustration.type === 'svg_code'
-                      const showIllustration = isInlineSvg
-                        ? !!illustration.url
-                        : (illustration.type === 'tikz' || illustration.type === 'clean' || illustration.type === 'raw') && !!illustration.url
-                      // 与 PDF 一致：连续下划线填空线转 \underline{\quad}，避免裸 _ 触发 KaTeX 下标报错
-                      const displayContent = (q.content || '无内容').replace(/_{2,}/g, '\\underline{\\quad}')
-                      return (
-                        <div key={q.id} className="mb-4" style={{ pageBreakInside: 'avoid' }}>
-                          <div className="flex gap-2 text-[14px] leading-[1.8] mb-2">
-                            <span className="font-bold min-w-[28px] whitespace-nowrap">{num}.</span>
-                            <span className="flex-1 break-words">
-                              <MathText content={displayContent} />
-                            </span>
-                          </div>
-                          {showIllustration && (
-                            <div className="my-2 ml-9" style={{ textAlign: 'center' }}>
-                              {isInlineSvg ? (
-                                <div
-                                  style={{ display: 'flex', justifyContent: 'center' }}
-                                  dangerouslySetInnerHTML={{ __html: illustration.url }}
-                                />
-                              ) : (
-                                <img
-                                  src={illustration.url}
-                                  alt="配图"
-                                  loading="lazy"
-                                  style={{ maxWidth: '100%', maxHeight: '250px', objectFit: 'contain', borderRadius: 'var(--radius-4)' }}
-                                />
-                              )}
-                            </div>
-                          )}
-                          {q.options && q.options.length > 0 && (
-                            <div className={`grid ${colClass} gap-x-4 gap-y-2 pl-9 mb-1`}>
-                              {q.options.map((opt, i) => (
-                                <div key={i} className="text-[13px] leading-relaxed break-words">
-                                  {isOptionWithLetterPrefix(opt) ? (
-                                    <MathText content={opt} />
-                                  ) : (
-                                    <>
-                                      <span className="mr-1">{String.fromCharCode(65 + i)}.</span>
-                                      <MathText content={opt} />
-                                    </>
-                                  )}
-                                </div>
-                              ))}
-                            </div>
-                          )}
-                          {q.question_type === 'fill' && (
-                            <div className="ml-9 mt-2 mb-1.5 border-b-[1.5px] border-gray-800" style={{ width: 220, height: 24 }}></div>
-                          )}
-                          {q.question_type === 'answer' && (
-                            <div className="ml-9 mt-1.5">
-                              {[0, 1, 2, 3, 4].map(r => (
-                                <div key={r} className="border-b border-gray-300" style={{ height: 32, marginBottom: 4 }}></div>
-                              ))}
-                            </div>
-                          )}
-                        </div>
-                      )
-                    })}
-                  </div>
-                ))}
-
-                {/* Footer */}
-                <div className="mt-5 text-center text-[11px] text-gray-400 border-t border-gray-200 pt-2">
-                  敏学错题本 - 智能学习助手
-                </div>
-              </div>
+              <div
+                ref={paperMountRef}
+                className="bg-white shadow-lg relative"
+                style={{ padding: 0, minHeight: 1123, width: A4_PX, background: '#fff' }}
+              />
             </div>
           </div>
         </div>

@@ -36,7 +36,7 @@ const getNextLifecycle = (current) => {
 }
 
 const COLORS = {
-  primary: '#3B82F6',
+  primary: '#6366F1',
   success: '#16A34A',
   danger: '#DC2626',
   warning: '#D97706',

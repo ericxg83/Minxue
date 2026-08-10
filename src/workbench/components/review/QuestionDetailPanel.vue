@@ -1079,7 +1079,7 @@ const handleRetryGeometry = async () => {
 /* 复审按钮激活状态 */
 .ops-btn-active {
   transform: scale(1.05);
-  box-shadow: 0 0 0 3px rgba(59,130,246,0.3);
+  box-shadow: 0 0 0 3px rgba(99,102,241,0.3);
   border-color: var(--wb-primary) !important;
 }
 .ops-btn-active.ops-btn-correct { border-color: var(--wb-success) !important; box-shadow: 0 0 0 3px rgba(103,194,58,0.3); }
@@ -1145,7 +1145,7 @@ const handleRetryGeometry = async () => {
 .crop-selection {
   position: absolute;
   border: 2px dashed var(--wb-primary);
-  background: rgba(59, 130, 246, 0.12);
+  background: rgba(99, 102, 241, 0.12);
   pointer-events: none;
   z-index: 10;
 }

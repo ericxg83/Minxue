@@ -19,6 +19,7 @@ import { uploadFilesWithRetry } from './services/uploadRetryManager.js'
 import { judgeAnswer } from './services/judgeService.js'
 import { normalizeSectionName, splitSubAnswers, splitOcrQuestionsBySubNo } from './services/answerParseService.js'
 import { classifyQuestionLocally } from './utils/localTagger.js'
+import { syncQuestionsKnowledgeAndMastery } from './services/knowledgeMasteryService.js'
 import { NON_RETRYABLE_ERROR_PATTERNS } from './pendingTaskRecovery.js'
 import { isValidImageBuffer, checkImageResolution } from './utils/imageValidator.js'
 
@@ -5216,6 +5217,22 @@ await job.updateProgress(80)
       }
     } else {
       console.log(`⚠️  AI 未识别到任何题目`)
+    }
+
+    // ── 知识点归一化 + 掌握度更新（数据闭环最后一段，非阻塞）──
+    // 在批改 pipeline 末尾追加：标签已生成（Step 8）且判定完成，
+    // 把扁平标签归一化到知识树节点（question_knowledge），
+    // 并按 正/错 更新各知识点掌握度（knowledge_mastery）。
+    // 不 await：批改主流程尽快落库 done，同步在后台推进；
+    // 内部全部 try-catch，失败不影响任务完成状态。
+    try {
+      syncQuestionsKnowledgeAndMastery({ studentId, questions })
+        .then(stats => {
+          console.log(`📌 [Knowledge] 知识点归一化+掌握度同步: 关联 ${stats.linked} 题, 掌握度更新 ${stats.mastery} 题, 跳过 ${stats.skipped} 题`)
+        })
+        .catch(e => console.error(`  ⚠️ [Knowledge] 知识点/掌握度同步异常:`, e.message))
+    } catch (e) {
+      console.error(`  ⚠️ [Knowledge] 知识点/掌握度同步异常:`, e.message)
     }
 
     await job.updateProgress(100)

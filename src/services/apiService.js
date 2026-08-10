@@ -78,7 +78,7 @@ checkCacheVersion()
 // ── 请求去重：相同并发请求只发一次 ──
 const inFlightRequests = new Map()
 
-const apiRequest = async (path, options = {}, retries = 2) => {
+export const apiRequest = async (path, options = {}, retries = 2) => {
   const method = (options.method || 'GET').toUpperCase()
 
   // 仅对 GET 请求做去重（POST/PUT/DELETE 有副作用，不做去重）
@@ -110,10 +110,19 @@ const apiRequest = async (path, options = {}, retries = 2) => {
         )
 
         const { timeout: _timeout, ...fetchOptions } = options
-        const fetchHeaders = options.headers ? { ...options.headers } : undefined
+        const fetchHeaders = options.headers ? { ...options.headers } : {}
+        // body 为普通字符串时默认按 JSON 发送（兼容调用方未显式设置 Content-Type，
+        // 例如 workbench/HandoutPreview.vue 的 POST）
+        if (
+          fetchOptions.body != null &&
+          !(fetchOptions.body instanceof FormData) &&
+          !fetchHeaders['Content-Type']
+        ) {
+          fetchHeaders['Content-Type'] = 'application/json'
+        }
         const response = await fetch(url, {
           ...fetchOptions,
-          ...(fetchHeaders ? { headers: fetchHeaders } : {}),
+          ...(Object.keys(fetchHeaders).length > 0 ? { headers: fetchHeaders } : {}),
           signal: controller.signal
         })
         clearTimeout(timeoutId)
