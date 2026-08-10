@@ -1,0 +1,10 @@
+fix(部署): 补齐 server/package.json 缺失的 docx 依赖
+
+根因：handoutDocxService.js 用 import 'docx'，但 docx 只在根
+package.json（前端）里，未加到 server/package.json。
+Render 部署服务端时只在 server/ 跑 npm install，导致
+'Cannot find package docx imported from handoutDocxService.js'，
+服务无法启动。
+
+修复：把 docx@^9.7.1 加到 server/package.json dependencies。
+本地 node -e "import('docx')" 验证通过。

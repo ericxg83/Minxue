@@ -28,12 +28,30 @@ export const KATEX_FONT_FAMILIES = [
 ]
 
 /** 显式加载 KaTeX 全部数学字体，确保捕获时字形与度量就绪 */
-export async function preloadKatexFonts() {
-  if (typeof document === 'undefined' || !document.fonts || !document.fonts.load) return
+export async function preloadKatexFonts(targetDocument = document) {
+  if (!targetDocument) return
+  const fonts = targetDocument.fonts
+  if (!fonts || !fonts.load) return
   try {
-    await Promise.all(KATEX_FONT_FAMILIES.map(fam =>
-      document.fonts.load(`14px "${fam}"`).then(() => {}).catch(() => {})
-    ))
+    // 不同字号会让 KaTeX 选用 Size1~Size4 不同字体族，必须多个字号一起 load
+    const sizes = [12, 14, 16, 20, 24]
+    const promises = sizes.flatMap(size =>
+      KATEX_FONT_FAMILIES.map(fam => {
+        try {
+          const p = fonts.load(`${size}px "${fam}"`)
+          return Promise.resolve(p).then(() => {}).catch(() => {})
+        } catch (e) {
+          return Promise.resolve()
+        }
+      })
+    )
+    await Promise.all(promises)
+    // 再等一轮字体状态确认"已就绪"
+    try {
+      if (fonts.ready && typeof fonts.ready.then === 'function') {
+        await fonts.ready
+      }
+    } catch (e) {}
   } catch (e) {
     console.warn('[pdfGenerator] KaTeX 字体预加载失败:', e)
   }
@@ -379,86 +397,138 @@ export async function generateExamPDF({ title, studentName, questions, filename,
     }
   })
 
-  const container = document.createElement('div')
-  // 直接构建 DOM，而非用 innerHTML 设置完整 HTML 文档字符串。
-  // buildExamHTML 返回的 <!DOCTYPE> / <html> / <head> / <body> 在 div 内会被浏览器
-  // 异常解析（style 标签可能不生效、meta 标签可能占位），导致渲染不一致。
-  const styleEl = document.createElement('style')
-  styleEl.textContent = katexCss + '\n' + buildPaperCSS()
-  container.appendChild(styleEl)
-  const bodyWrapper = document.createElement('div')
-  bodyWrapper.innerHTML = buildPaperBody({ title, studentName, questions: pdfQuestions, showAnswers })
-  container.appendChild(bodyWrapper)
-  container.style.position = 'absolute'
-  container.style.left = '-9999px'
-  container.style.top = '0'
-  container.style.width = '794px'
-  document.body.appendChild(container)
+  //
+  // ⚠️ 用隐藏 iframe 做 PDF 渲染容器（不用 Shadow DOM + 主文档）
+  //
+  // 之前两种方式都出问题：
+  //   1) 普通 div 挂主文档 body：页面已有的全局 KaTeX CSS 与注入的
+  //      katexCss 发生冲突，两份 @font-face 触发 ERR_ABORTED，所有 KaTeX 数学
+  //      符号 fallback 到系统字体 → 分子分母挤在 baseline 上、分数线消失、
+  //      √3 变 ³（用户截图症状）。
+  //   2) Shadow DOM 挂主文档：html2canvas 对 Shadow DOM host 元素的克隆
+  //      会清空 shadow root，克隆文档抓不到任何内容 → PDF 白纸。
+  //
+  // 解决：用 iframe 的独立 document（contentDocument），<style> 和 @font-face
+  // 是独立文档 scope，不受主文档 CSS/字体缓存影响。html2canvas 显式传
+  // iframe.contentWindow 作为 owner window，确保"Document attached to Window"。
+  // iframe 本身不放到 -9999px（Chromium 的 html2canvas 把脱屏窗口当 detached），
+  // 而是用 1px × 1px + clip-path 裁剪的最小可见 wrapper 藏在 viewport 边缘。
+  const holder = document.createElement('div')
+  holder.style.position = 'fixed'
+  holder.style.left = '0'
+  holder.style.top = '0'
+  holder.style.width = '1px'
+  holder.style.height = '1px'
+  holder.style.overflow = 'hidden'
+  holder.style.clipPath = 'inset(0)'
+  holder.style.zIndex = '-2147483647'
+  holder.style.opacity = '0'
+  holder.style.pointerEvents = 'none'
+
+  const iframe = document.createElement('iframe')
+  iframe.style.position = 'absolute'
+  iframe.style.left = '0'
+  iframe.style.top = '0'
+  iframe.style.width = '794px'
+  iframe.style.height = '0'   // 先给 0，等内容渲染完再根据真实高度撑开
+  iframe.style.border = '0'
+  iframe.style.overflow = 'hidden'
+  iframe.setAttribute('sandbox', 'allow-same-origin allow-scripts allow-popups allow-forms')
+  holder.appendChild(iframe)
+  document.body.appendChild(holder)
 
   try {
-    // 调用 applyQRToContainer 让头部 #qr-container 显示并填充二维码。
-    // 与预览共用同一入口，保证 PDF 第 1 页头部右上角二维码与预览完全一致。
-    //
-    // ⚠️ 不再用 jsPDF addImage 在每页叠加二维码——jsPDF 2.5.1 的 addImage Y 坐标用
-    // PDF 标准 bottom-left origin（Y 向上），而我们代码假设是 top-left origin（Y 向下），
-    // 导致 Y=A4_H-qrSize-6=263mm 被解释为"距底部 263mm"，实际显示在距顶部 6mm 处（页面顶部），
-    // 遮挡了第 2/3 页顶部的题目内容——这是"格式错乱"的根因。
-    // 改为头部 #qr-container 中渲染二维码（仅第 1 页有），第 2/3 页不叠加，避免遮挡题目。
-    applyQRToContainer(container, qrContent)
+    // about:blank 同步打开 iframe，保证 contentWindow 先 attach 好再写
+    // DOM（比 srcdoc 更稳妥，避开某些 Chromium 版本 srcdoc 触发后
+    // contentDocument === null 的时序问题）
+    const iwin = iframe.contentWindow
+    const iframeDoc = iwin.document
+    iframeDoc.open()
+    iframeDoc.write(buildExamHTML({ title, studentName, questions: pdfQuestions, showAnswers }))
+    iframeDoc.close()
 
-    // 用 KaTeX auto-render 解析 $...$ / $$...$$ 定界符，渲染标准 LaTeX（与预览共用）
-    renderMathInContainer(container)
-
-    // 显式预加载 KaTeX 全部数学字体，确保 html2canvas 捕获时字形与度量正确，
-    // 避免根号横线、分数线、上下标错位
-    await preloadKatexFonts()
-    if (document.fonts && document.fonts.ready) {
-      try { await document.fonts.ready } catch (e) { /* ignore */ }
+    // 等 document ready（document.write close 同步触发 DOMContentLoaded）
+    if (iframeDoc.readyState === 'loading') {
+      await new Promise(resolve => {
+        const onReady = () => resolve()
+        iframeDoc.addEventListener('DOMContentLoaded', onReady, { once: true })
+        // 兜底：最多等 1s
+        setTimeout(resolve, 1000)
+      })
     }
 
-    // ⚠️ 不要直接用 container.scrollHeight 作为渲染高度。
-    // 实测在 KaTeX 渲染后某些题目会被换行/撑高，但 container.scrollHeight 在某些边缘
-    // 情况下测得的值小于真实内容底部（例如 .question 的 page-break-inside:avoid 让
-    // 元素在打印布局下被推到下一页，但浏览器在屏幕布局下又没有完整包含它），
-    // 导致 html2canvas 渲染高度不够 → 后端题目被截掉，且 getPageSlices 的 sliceEnd
-    // 也会被截短 → 最后一页大量空白、前面页内容错位。
-    //
-    // 修复：用所有题目元素 rect.bottom 的最大值（相对 container 顶部）作为内容真实高度，
-    // 取 container.scrollHeight 与之的较大值，确保 html2canvas 完整渲染所有题目。
-    const containerRect0 = container.getBoundingClientRect()
-    const _questionEls0 = Array.from(container.querySelectorAll('.question'))
-    const _sectionEls0 = Array.from(container.querySelectorAll('.section-header'))
-    const _footerEl0 = container.querySelector('.footer')
-    let maxBottom = container.scrollHeight
+    // 调用 applyQRToContainer 让头部 #qr-container 显示并填充二维码
+    applyQRToContainer(iframeDoc, qrContent)
+
+    // 用 KaTeX auto-render 解析 $...$ / $$...$$ 定界符，渲染标准 LaTeX（与预览共用）
+    renderMathInContainer(iframeDoc)
+
+    // 关键：在 iframe 独立文档中预加载所有字号 KaTeX 字体（iframe document
+    // 有独立的 FontFaceSet，和主文档 document.fonts 不共享）。
+    await preloadKatexFonts(iframeDoc)
+
+    // iframe 等高自适应：根据真实内容高度把 iframe.height 撑开，
+    // 避免 html2canvas 把超出视口高度的部分裁剪掉。
+    const iframeBody = iframeDoc.body
+    const iframeHtml = iframeDoc.documentElement
+    // 等 2 帧 + 一次手动重排，保证 KaTeX 把字体度量真正写进 layout
+    await new Promise(r => requestAnimationFrame(() => requestAnimationFrame(r)))
+    const initialH = Math.max(
+      iframeBody.scrollHeight,
+      iframeBody.offsetHeight,
+      iframeHtml.scrollHeight,
+      iframeHtml.offsetHeight
+    )
+    iframe.style.height = (initialH + 16) + 'px'
+    // 强制浏览器重跑一次 iframe 内的 reflow，确保字体度量和行高最终稳定
+    void iframeDoc.querySelector('.page')?.offsetWidth
+    await new Promise(r => requestAnimationFrame(() => requestAnimationFrame(r)))
+
+    // ⚠️ 用所有题目/标题/页脚元素的 getBoundingClientRect 再确认一次真实
+    // 内容高度，避免 html2canvas 渲染高度不够 → 内容截短、分页错位。
+    // iframe 内元素的 getBoundingClientRect 是相对 iframe 的 viewport，
+    // 需要把 holder/iframe 的偏移去掉（我们把 iframe 放 holder 0,0 所以
+    // 可以直接用 holderRect.top 做基准差）。
+    const holderRect = holder.getBoundingClientRect()
+    const _questionEls0 = Array.from(iframeDoc.querySelectorAll('.question'))
+    const _sectionEls0 = Array.from(iframeDoc.querySelectorAll('.section-header'))
+    const _footerEl0 = iframeDoc.querySelector('.footer')
+    let maxBottom = Math.max(
+      iframeBody.scrollHeight,
+      iframeHtml.scrollHeight
+    )
     for (const el of [..._questionEls0, ..._sectionEls0]) {
       const r = el.getBoundingClientRect()
-      const bottomRel = r.bottom - containerRect0.top
+      const bottomRel = r.bottom - holderRect.top
       if (bottomRel > maxBottom) maxBottom = bottomRel
     }
     if (_footerEl0) {
       const r = _footerEl0.getBoundingClientRect()
-      const bottomRel = r.bottom - containerRect0.top
+      const bottomRel = r.bottom - holderRect.top
       if (bottomRel > maxBottom) maxBottom = bottomRel
     }
-    const renderH = Math.ceil(maxBottom + 8) // +8px 兜底，避免下边框被裁
+    const renderH = Math.ceil(maxBottom + 8)
+    if (parseInt(iframe.style.height || '0', 10) < renderH) {
+      iframe.style.height = renderH + 'px'
+      // 再等一帧让 iframe 高度变更触发的 layout 走完
+      await new Promise(r => requestAnimationFrame(r))
+    }
 
-    const canvas = await html2canvas(container, {
+    const canvas = await html2canvas(iframeBody, {
       scale: 2,
       useCORS: true,
       logging: false,
       backgroundColor: '#ffffff',
       width: 794,
       height: renderH,
-      // 在克隆文档中也触发 KaTeX 字体加载，确保测量布局用的字体度量一致
-      onclone: (cloneDoc) => {
-        try {
-          if (cloneDoc && cloneDoc.fonts && cloneDoc.fonts.load) {
-            KATEX_FONT_FAMILIES.forEach(fam =>
-              cloneDoc.fonts.load(`14px "${fam}"`).catch(() => {})
-            )
-          }
-        } catch (e) { /* ignore */ }
-      },
+      // ⚠️ 关键：显式指定 owner window = iframe.contentWindow。
+      // html2canvas 默认拿 body.ownerDocument.defaultView，但 about:blank
+      // 在某些 Chrome 版本里会有 detached window 的问题，显式指定保证
+      // getComputedStyle / getBoundingClientRect 能拿到真实样式和度量。
+      window: iwin,
+      // 字体：直接忽略 onclone 操作。iframe 内部 document 已经把样式和
+      // 字体准备好，onclone 不需要再二次 load（clone doc 的字体加载会
+      // 和 iframe doc 抢同一 woff2 文件导致 ERR_ABORTED）。
     })
 
     // html2canvas scale 参数导致的像素倍率
@@ -467,17 +537,20 @@ export async function generateExamPDF({ title, studentName, questions, filename,
     const cssPageH = (cssW / A4_W) * A4_H          // ~1123 CSS pixels
 
     // 收集所有需要保持完整的元素边界（题目 + 小节标题），用于智能分页
-    // ⚠️ 必须用 getBoundingClientRect 相对 container，而非 offsetTop。
+    // ⚠️ 必须用 getBoundingClientRect 相对内容起始 top，而非 offsetTop。
     // offsetTop 相对于 offsetParent（.page 有 position:relative → offsetParent = .page），
-    // 不是 container，导致分页裁剪 Y 坐标偏移——这是"预览正常、PDF 错位"的根因。
-    const containerRect = container.getBoundingClientRect()
-    const questionEls = Array.from(container.querySelectorAll('.question'))
-    const sectionEls = Array.from(container.querySelectorAll('.section-header'))
+    // 不是 holder 的 viewport 原点，导致分页裁剪 Y 坐标偏移。
+    //
+    // ⚠️ iframe 内元素 getBoundingClientRect 是相对浏览器 viewport，减
+    // 去 holderRect.top 才能得到元素相对内容顶部（iframe 顶部）的真实位置。
+    const baseRect = holder.getBoundingClientRect()
+    const questionEls = Array.from(iframeDoc.querySelectorAll('.question'))
+    const sectionEls = Array.from(iframeDoc.querySelectorAll('.section-header'))
     const elementBounds = [...sectionEls, ...questionEls].map(el => {
       const rect = el.getBoundingClientRect()
       return {
-        top: rect.top - containerRect.top,
-        bottom: rect.bottom - containerRect.top
+        top: rect.top - baseRect.top,
+        bottom: rect.bottom - baseRect.top
       }
     }).sort((a, b) => a.top - b.top)
 
@@ -540,6 +613,6 @@ export async function generateExamPDF({ title, studentName, questions, filename,
 
     return { blobUrl, pdfBlob }
   } finally {
-    document.body.removeChild(container)
+    document.body.removeChild(holder)
   }
 }

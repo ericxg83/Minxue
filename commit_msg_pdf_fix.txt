@@ -1,0 +1,18 @@
+fix(错题PDF): 修内容被截断+最后一页顶部大量空白
+
+根因:
+container.scrollHeight 在 KaTeX 渲染后测得的值小于真实内容底部
+(.question 的 page-break-inside:avoid 让元素被推到打印布局的下一页,
+但浏览器屏幕布局下没完整包含它)。导致:
+1. html2canvas 用 scrollHeight 作 height 参数 → 后端题目被截掉
+2. getPageSlices 的 sliceEnd = scrollHeight 偏小 → 最后一页内容只占 65% A4 高度
+3. jsPDF 把图像画在 (0,0) 但图像本身高度不够 → 顶部 102mm 空白, 题号 18-20 丢失
+
+修复 (src/utils/pdfGenerator.js):
+1. 计算 maxBottom = max(scrollHeight, 所有 .question/.section-header/.footer 的 rect.bottom)
+   用 maxBottom 作为 html2canvas 的 height 参数, 确保所有题目都被完整渲染
+2. canvas 渲染后扫描底部, 找出实际有内容的最后一行 (contentBottomPx)
+   用 min(canvas.height, contentBottomPx) 作为 getPageSlices 的 scrollHeight,
+   避免末尾白像素导致最后一页变成大片空白
+3. 每页左下角加 "卷名 第 X 页 / 共 Y 页" 页码标识,
+   避免用户翻到第 2/3 页时因无页眉信息觉得"内容错位"

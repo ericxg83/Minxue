@@ -1,0 +1,19 @@
+fix(错题PDF): 修二维码遮挡第2/3页题目——jsPDF addImage Y坐标用bottom-left
+
+根因：jsPDF 2.5.1 的 addImage Y 坐标用 PDF 标准 bottom-left origin
+(Y向上)，而代码假设是 top-left origin (Y向下)。
+原代码: doc.addImage(qr, 'PNG', A4_W-qrSize-6, A4_H-qrSize-6, qrSize, qrSize)
+       = doc.addImage(qr, 'PNG', 176, 263, 28, 28)
+预期: 二维码在右下角 (176,263)-(204,291) mm
+实际: Y=263 被解释为"距底部263mm", 实际显示在距顶部6mm处 (167,8)-(202,43) mm
+     每页顶部右侧都有二维码, 遮挡第2/3页顶部的题目内容 -> 用户感知"格式错乱"
+
+修复:
+- 移除每页循环中的 jsPDF addImage 二维码叠加
+- 改为在 generateExamPDF 中调用 applyQRToContainer 让头部 #qr-container
+  显示并填充二维码 (与预览共用同一入口, 仅第1页有二维码, 第2/3页不叠加)
+- 同步移除每页页码 (doc.text Y 坐标同样用 bottom-left, Y=A4_H-4=293mm
+  被解释为"距底部293mm", 实际显示在顶部遮挡内容)
+
+验证: 通过 PyMuPDF 检查 PDF 内 image rect 确认 xref=24 (120x120px PNG)
+     在每页 (167,8)-(202,43)mm 顶部位置, 而非预期的 (176,263)-(204,291)mm 底部
