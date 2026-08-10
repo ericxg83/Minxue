@@ -396,9 +396,15 @@ export async function generateExamPDF({ title, studentName, questions, filename,
   document.body.appendChild(container)
 
   try {
-    // 头部模板二维码在这条 PDF 渲染路径中保持隐藏：改为在下方「每一页右上角」叠加二维码，
-    // 使多页试卷每一页都可随时扫码；移动端预览（PrintPreview）仍用 applyQRToContainer 在头部展示。
-    // 注：这里不再调用 applyQRToContainer，避免第 1 页出现「头部 + 角标」两份二维码。
+    // 调用 applyQRToContainer 让头部 #qr-container 显示并填充二维码。
+    // 与预览共用同一入口，保证 PDF 第 1 页头部右上角二维码与预览完全一致。
+    //
+    // ⚠️ 不再用 jsPDF addImage 在每页叠加二维码——jsPDF 2.5.1 的 addImage Y 坐标用
+    // PDF 标准 bottom-left origin（Y 向上），而我们代码假设是 top-left origin（Y 向下），
+    // 导致 Y=A4_H-qrSize-6=263mm 被解释为"距底部 263mm"，实际显示在距顶部 6mm 处（页面顶部），
+    // 遮挡了第 2/3 页顶部的题目内容——这是"格式错乱"的根因。
+    // 改为头部 #qr-container 中渲染二维码（仅第 1 页有），第 2/3 页不叠加，避免遮挡题目。
+    applyQRToContainer(container, qrContent)
 
     // 用 KaTeX auto-render 解析 $...$ / $$...$$ 定界符，渲染标准 LaTeX（与预览共用）
     renderMathInContainer(container)
@@ -503,12 +509,6 @@ export async function generateExamPDF({ title, studentName, questions, filename,
 
     const doc = new jsPDF('p', 'mm', 'a4')
 
-    // 生成二维码图片 data URL（用于在每一页右上角叠加，多页随时可扫码）
-    let qrImgData = null
-    if (qrContent) {
-      qrImgData = generateQRDataUrl(qrContent, 120)
-    }
-
     for (let p = 0; p < slices.length; p++) {
       if (p > 0) doc.addPage()
       const { start, end } = slices[p]
@@ -532,22 +532,6 @@ export async function generateExamPDF({ title, studentName, questions, filename,
       const sliceH_css = sliceH / scale
       const mmH = (sliceH_css / cssW) * A4_W
       doc.addImage(pageImg, 'JPEG', 0, 0, A4_W, mmH)
-
-      // 在每一页右下角添加二维码（小尺寸），避免与第 2 页起的内容重叠
-      // （第 1 页 header 有 padding-right 保护，但第 2 页起没有 → 右上角会遮住题干）
-      if (qrImgData) {
-        const qrSize = 28
-        doc.addImage(qrImgData, 'PNG', A4_W - qrSize - 6, A4_H - qrSize - 6, qrSize, qrSize)
-      }
-
-      // 在每一页左下角添加页码 + 卷名，避免用户翻到第 2/3 页时不知道是哪份卷子
-      // 这是"格式错乱"的另一根因：第 2/3 页直接从题目开始，没有页眉信息，
-      // 用户视觉上感觉"内容错位、不知道是哪份卷子的题目"
-      doc.setFontSize(9)
-      doc.setTextColor(120, 120, 120)
-      const pageNoText = `${title}  第 ${p + 1} 页 / 共 ${slices.length} 页`
-      doc.text(pageNoText, 6, A4_H - 4)
-      doc.setTextColor(0, 0, 0)
     }
 
     // 生成 blob URL 和 blob，由调用方决定如何处理（预览/下载/打印）
