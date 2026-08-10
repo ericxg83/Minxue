@@ -134,7 +134,10 @@ function convertSqrt(s) {
           }
           k++
         }
-        out += '\\sqrt{' + inner + '}'
+        // 递归处理 inner 里可能嵌套的 √：避免 √(2-√3) → \sqrt{(2-√3)}
+        // 这种 inner 还含 Unicode 根号的半成品送进 KaTeX 后部分渲染失败，
+        // 表现为"已知a=√√ ... 求b的值"这种散架（错题本 PDF 错乱根因之一）
+        out += '\\sqrt{' + convertSqrt(inner) + '}'
         i = k
         continue
       }
@@ -150,7 +153,9 @@ function convertSqrt(s) {
       // C. 数字/负号/小数/字母组合：√30、√-5a、√3.5、√17(a²+b²)、√2x
       const num = s.slice(j).match(/^(-?[0-9]+(?:\.[0-9]+)?[a-zA-Z]*(?:\([^()]*\))?)/)
       if (num && num[1].length > 0) {
-        out += '\\sqrt{' + num[1] + '}'
+        // 递归：num 内部可能含 √(...) 嵌套（如 √17(a²+b²) 的 num="17" 不嵌套，
+        // 但 √(x²+1) 等含括号变体经 convertSqrt 走 A 路径之后内部不会再剩 √）
+        out += '\\sqrt{' + convertSqrt(num[1]) + '}'
         i = j + num[1].length
         continue
       }
