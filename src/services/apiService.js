@@ -481,6 +481,8 @@ export const getWrongQuestionsByStudent = async (studentId, useCache = true) => 
           content: wq.content || dbQuestion.content || null,
           subject: wq.subject || dbQuestion.subject || null,
           image_url: wq.question_image_url || dbQuestion.image_url || null,
+          // 整页原图（一定包含本题），供错题详情“查看原图”兜底使用
+          full_image_url: dbQuestion.image_url || wq.page_image_url || null,
           answer: wq.correct_answer || dbQuestion.answer || null,
           student_answer: wq.student_answer || dbQuestion.student_answer || null,
           question_type: wq.question_type || dbQuestion.question_type || 'choice',
@@ -497,7 +499,7 @@ export const getWrongQuestionsByStudent = async (studentId, useCache = true) => 
     }
 
     // 旧记录：从 questions 表合并
-    return { ...wq, question: dbQuestion || null }
+    return { ...wq, question: dbQuestion ? { ...dbQuestion, full_image_url: dbQuestion.image_url || null } : null }
   })
 
   writeCache(cacheKey, result)

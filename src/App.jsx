@@ -1103,13 +1103,39 @@ export default function App() {
 
                           {/* 配图 */}
                           {q.image_url && (
-                            <button
-                              onClick={() => handleViewImage(q.image_url)}
-                              className="mt-3 w-full rounded-xl overflow-hidden block"
-                              style={{ background: 'var(--bg-secondary)' }}
-                            >
-                              <img src={q.image_url} alt="配图" loading="lazy" className="w-full object-cover" style={{ maxHeight: '260px' }} />
-                            </button>
+                            <div className="mt-3">
+                              <button
+                                onClick={() => handleViewImage(q.image_url)}
+                                className="w-full rounded-xl overflow-hidden block"
+                                style={{ background: 'var(--bg-secondary)' }}
+                              >
+                                <img
+                                  src={q.image_url}
+                                  alt="配图"
+                                  loading="lazy"
+                                  className="w-full object-cover"
+                                  style={{ maxHeight: '260px' }}
+                                  onError={(e) => {
+                                    // 图片加载失败（如历史错误截图）→ 自动回退到整页原图，保证能看到本题
+                                    const full = q.full_image_url
+                                    if (full && e.currentTarget.src !== full) {
+                                      e.currentTarget.src = full
+                                    } else {
+                                      e.currentTarget.style.display = 'none'
+                                    }
+                                  }}
+                                />
+                              </button>
+                              {q.full_image_url && q.full_image_url !== q.image_url && (
+                                <button
+                                  onClick={() => handleViewImage(q.full_image_url)}
+                                  className="mt-2 w-full py-2 rounded-lg text-[12px] font-medium"
+                                  style={{ background: 'var(--primary-soft)', color: 'var(--primary-hover)' }}
+                                >
+                                  查看完整原图（含本题）
+                                </button>
+                              )}
+                            </div>
                           )}
 
                           {/* 标签 */}
