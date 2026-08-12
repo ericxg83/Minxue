@@ -160,10 +160,34 @@ export default function ProcessingPage({
                     </div>
                   )}
 
+                  {/* 批改中：在缩略图上叠加一条上下扫描的高亮线 */}
+                  {task.status === 'processing' && !task.is_temp && (
+                    <div
+                      className="absolute inset-0 pointer-events-none"
+                      style={{ zIndex: 9 }}
+                      aria-hidden
+                    >
+                      <motion.div
+                        className="absolute left-0 right-0"
+                        style={{
+                          top: 0,
+                          height: 2,
+                          background: 'linear-gradient(to bottom, rgba(99,102,241,0) 0%, rgba(99,102,241,0.95) 50%, rgba(99,102,241,0) 100%)',
+                          boxShadow: '0 0 6px 1px rgba(99,102,241,0.55), 0 0 14px 2px rgba(99,102,241,0.25)',
+                        }}
+                        animate={{ top: ['0%', 'calc(100% - 2px)', '0%'] }}
+                        transition={{ duration: 2.2, repeat: Infinity, ease: 'easeInOut' }}
+                      />
+                    </div>
+                  )}
+
                   {(() => {
                     const taskPages = task.pages || (task.images ? task.images.map((img, i) => ({ ...img, id: img.id || `page-${i}` })) : null)
                     return taskPages && taskPages.length > 1 ? (
-                      <div className="absolute -top-1 -right-1 bg-purple-500 text-white text-xs rounded-full w-5 h-5 flex items-center justify-center font-medium border-2 border-white shadow-sm">
+                      <div
+                        className="absolute -top-1 -right-1 bg-purple-500 text-white text-[10px] leading-none rounded-full min-w-[18px] h-[18px] px-1 flex items-center justify-center font-semibold border-2 border-white"
+                        style={{ zIndex: 10, boxShadow: '0 1px 3px rgba(0,0,0,0.25)' }}
+                      >
                         {taskPages.length}
                       </div>
                     ) : null
