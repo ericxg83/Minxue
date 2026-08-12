@@ -1,7 +1,6 @@
 import dayjs from 'dayjs'
 import { getQuestionsByIds } from '../services/apiService'
 import { triggerBrowserPrint } from './browserPrint'
-import { captureBeforeGenerateExamPDF } from './pdfDiagCapture'
 import { exportServerPDF } from './serverPdfExporter'
 
 /**
@@ -124,16 +123,7 @@ export async function exportWrongBookPDF({
   const baseTitle = title || (name ? `${name} - 错题重练` : '错题重练')
   const baseFile = filename || (name ? `${name}_错题重练_${dayjs().format('YYYYMMDD_HHmm')}` : `错题重练_${dayjs().format('YYYYMMDD_HHmm')}`)
 
-  // 3. 诊断抓取（保留以兼容旧诊断逻辑）
-  captureBeforeGenerateExamPDF({
-    title: baseTitle,
-    studentName: name,
-    questions: qs,
-    showAnswers,
-    qrContent,
-  })
-
-  // 4. 按环境分流选择路径
+  // 3. 按环境分流选择路径
   if (useServer) {
     // 开发环境：主路径 = 服务端 Playwright；失败 fallback 到浏览器原生打印
     try {
