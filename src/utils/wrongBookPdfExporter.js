@@ -10,20 +10,27 @@ import { exportServerPDF } from './serverPdfExporter'
  * 统一「周诊断报告·错题再测卷」「移动端错题本·重练卷」「后台自动重练卷」三处生成：
  *   数据源可以不同（周报自动拉取 / 用户手动勾选），但渲染模板、公式解析、样式组件 100% 一致。
  *
- * 【本轮改造：html2canvas + jsPDF → 服务端 Playwright + page.pdf()】
- * 之前 generateExamPDF 走 html2canvas 光栅化路径，KaTeX 的负 margin 越界 SVG
- * 会被 bbox 截断，导致"根号对勾飘出""\frac 分子丢失"等系列视觉错位。
- * 即使在 print() 路径下完美，下载 PDF 走的也是错位的 html2canvas 链路。
+ * 【本轮改造：双路径方案 —— 服务端 Playwright + 浏览器原生打印】
  *
- * 新方案：
- *   主路径 → 服务端 Playwright（exportServerPDF）：客户端跑 KaTeX + QR 渲染出
- *   完整 HTML，POST 给后端 /api/exam-pdf，后端用 Chromium 矢量渲染 page.pdf()。
- *   视觉与 PrintPreview 100% 一致（同一份 HTML 序列化结果）。
- *   fallback → 浏览器原生 print()（triggerBrowserPrint）：当服务端不可达时降级。
+ *   之前 html2canvas 是光栅化（PNG/JPEG），KaTeX 用 vlist + 负 margin 渲染的
+ *   根号对勾 SVG 实际绘制范围越出 .katex bbox，导致"对勾飘出""\frac 分子丢失"等
+ *   系列视觉错位。本轮彻底弃用 html2canvas/jsPDF。
+ *
+ *   新方案（按环境分流）：
+ *     - 开发环境（localhost / import.meta.env.PROD=false）：
+ *       主路径 → 服务端 Playwright（exportServerPDF）：客户端跑 KaTeX + QR，
+ *       POST HTML 给后端 /api/exam-pdf，后端 Chromium page.pdf() 矢量保留。
+ *       fallback → 浏览器原生打印（triggerBrowserPrint）。
+ *
+ *     - 生产环境（minxue.pages.dev 等线上环境）：
+ *       直接走浏览器原生打印（triggerBrowserPrint），避免依赖服务端 Chromium 部署。
+ *       浏览器原生 print() 走 Chromium 内置 PDF 引擎，矢量保留，与 PrintPreview 100% 一致。
+ *
+ *   关键：所有路径都明确选择，不静默 fallback —— 生产环境不会调 exportServerPDF。
  *
  * 职责：
  *   1. 数据标准化 —— 若传入的题目缺 options/几何配图等字段，自动用 getQuestionsByIds 拉取完整数据；
- *   2. 双路径调度 —— 主走服务端 Playwright，失败时降级到浏览器原生打印；
+ *   2. 环境分流 —— 开发/生产不同路径，避免生产前端 fetch 不存在的 /api/exam-pdf；
  *   3. 标题/文件名兜底 —— 未传时按「学生 + 错题重练 + 日期」自动生成。
  *
  * @param {Object} opt
@@ -36,10 +43,40 @@ import { exportServerPDF } from './serverPdfExporter'
  * @param {boolean} [opt.showAnswers] 是否附带参考答案（错题卷默认 false）
  * @param {string} [opt.qrContent]   二维码内容（扫码入口/组卷定位）
  * @param {string} [opt.orientation] 'portrait' | 'landscape'（保留以兼容旧调用，实际由 PDF 引擎决定）
- * @returns {Promise<{downloaded|printed: true, filename: string, message?: string} | null>}
- *   - 成功：返回 { downloaded/printed: true, filename, message }
+ * @param {boolean} [opt.forceServer]  强制走服务端 Playwright（仅开发/测试用）
+ * @param {boolean} [opt.forceBrowser] 强制走浏览器原生打印（仅开发/测试用）
+ * @returns {Promise<{downloaded|printed: true, filename: string, message?: string, mode: string} | null>}
+ *   - 成功：返回 { downloaded/printed: true, filename, message, mode: 'server'|'browser' }
  *   - 失败：返回 null
  */
+
+/**
+ * 判断当前是否生产环境
+ * - Vite 内置：import.meta.env.PROD（生产 build=true，dev=false）
+ * - 用户配置：VITE_APP_ENV === 'production'（在 .env.production 里配了）
+ * - 兜底：hostname 不在 localhost/127.0.0.1 内网段 → 生产
+ */
+function detectProductionEnv() {
+  if (import.meta.env?.PROD === true) return true
+  if (import.meta.env?.VITE_APP_ENV === 'production') return true
+  if (typeof window !== 'undefined') {
+    const h = window.location?.hostname || ''
+    // 内网/本地 host 不算生产
+    if (
+      h === 'localhost' ||
+      h === '127.0.0.1' ||
+      h.startsWith('192.168.') ||
+      h.startsWith('10.') ||
+      h === '::1' ||
+      h === ''
+    ) {
+      return false
+    }
+  }
+  // 其他情况默认生产（更安全：避免线上 fetch 不存在的端点）
+  return true
+}
+
 export async function exportWrongBookPDF({
   studentId,
   studentName,
@@ -50,7 +87,15 @@ export async function exportWrongBookPDF({
   showAnswers = false,
   qrContent,
   orientation = 'portrait',
+  forceServer = false,
+  forceBrowser = false,
 }) {
+  // 0. 环境检测
+  const isProd = detectProductionEnv()
+  const useServer = (forceServer || (!isProd && !forceBrowser))
+
+  console.log(`[WrongBookPdfExporter] 环境检测 isProd=${isProd} useServer=${useServer} (forceServer=${forceServer} forceBrowser=${forceBrowser})`)
+
   // 1. 归一化题目列表：优先直接用调用方传入的 JSON，缺完整字段时按 id 拉取
   let qs = Array.isArray(questions) && questions.length > 0 ? questions.slice() : null
   const ids = (
@@ -88,35 +133,42 @@ export async function exportWrongBookPDF({
     qrContent,
   })
 
-  // 4. 主路径：服务端 Playwright 渲染 + 直接下载
-  try {
-    const result = await exportServerPDF({
-      studentId,
-      studentName: name,
-      questions: qs,
-      showAnswers,
-      qrContent,
-      filename: baseFile,
-    })
-    return { ...result, filename: baseFile, message: '服务端 Playwright 渲染完成，已下载 PDF' }
-  } catch (serverErr) {
-    // 主路径失败：详细日志 + Toast 提示用户
-    console.error('[WrongBookPdfExporter] ❌ 服务端 Playwright 渲染失败:', serverErr)
-    console.error('[WrongBookPdfExporter] 错误堆栈:', serverErr?.stack)
+  // 4. 按环境分流选择路径
+  if (useServer) {
+    // 开发环境：主路径 = 服务端 Playwright；失败 fallback 到浏览器原生打印
     try {
-      const { Toast } = await import('antd-mobile')
-      Toast.show({
-        icon: 'fail',
-        content: `服务端 PDF 失败：${serverErr?.message || '未知错误'}，已降级到浏览器打印`,
-        duration: 5000,
+      console.log('[WrongBookPdfExporter] 主路径：服务端 Playwright 渲染')
+      const result = await exportServerPDF({
+        studentId,
+        studentName: name,
+        questions: qs,
+        showAnswers,
+        qrContent,
+        filename: baseFile,
       })
-    } catch { /* 静默忽略 toast 失败 */ }
+      return { ...result, filename: baseFile, mode: 'server', message: '服务端 Playwright 渲染完成，已下载 PDF' }
+    } catch (serverErr) {
+      console.error('[WrongBookPdfExporter] ❌ 服务端 Playwright 渲染失败:', serverErr?.message || serverErr)
+      try {
+        const { Toast } = await import('antd-mobile')
+        Toast.show({
+          icon: 'fail',
+          content: `服务端 PDF 失败：${serverErr?.message || '未知错误'}，已降级到浏览器打印`,
+          duration: 4000,
+        })
+      } catch { /* 静默忽略 toast 失败 */ }
+      // 继续走下面的浏览器原生打印（开发环境允许 fallback）
+    }
+  } else {
+    // 生产环境：明确告知走浏览器原生打印
+    console.log('[WrongBookPdfExporter] 生产环境：直接走浏览器原生打印（iframe + window.print，浏览器内置 PDF 引擎，矢量保留）')
   }
 
-  // 5. fallback：浏览器原生打印（让用户在打印对话框"另存为 PDF"）
-  // 仅在主路径失败时降级，避免前端打开打印对话框干扰体验
+  // 5. 浏览器原生打印：走 iframe + window.print()，由浏览器内置 PDF 引擎矢量输出
+  //    - 不经过 html2canvas/jsPDF（彻底避免光栅化问题）
+  //    - KaTeX 渲染在 iframe 内由浏览器原生 KaTeX + 字体完成
+  //    - 用户在打印对话框选"另存为 PDF"即获得与 PrintPreview 100% 一致的 PDF
   try {
-    console.warn('[WrongBookPdfExporter] ⚠️ 降级到浏览器原生打印（主路径服务端失败）')
     const result = await triggerBrowserPrint({
       title: baseTitle,
       studentName: name,
@@ -125,7 +177,7 @@ export async function exportWrongBookPDF({
       qrContent,
       orientation,
     })
-    return { ...result, filename: baseFile, fallback: true, message: '已降级到浏览器打印（服务端失败）' }
+    return { ...result, filename: baseFile, mode: 'browser', message: useServer ? '服务端失败，已降级到浏览器原生打印' : '浏览器原生打印（生产环境方案）' }
   } catch (printErr) {
     console.error('[WrongBookPdfExporter] 浏览器打印也失败:', printErr.message)
     return null
@@ -135,7 +187,7 @@ export async function exportWrongBookPDF({
 /**
  * 按题目 ID 直接导出一份错题卷（快捷入口）。
  */
-export async function exportWrongBookPDFByIds({ studentId, studentName, questionIds, title, filename, showAnswers, qrContent, orientation }) {
+export async function exportWrongBookPDFByIds({ studentId, studentName, questionIds, title, filename, showAnswers, qrContent, orientation, forceServer, forceBrowser }) {
   return exportWrongBookPDF({
     studentId,
     studentName,
@@ -145,5 +197,7 @@ export async function exportWrongBookPDFByIds({ studentId, studentName, question
     showAnswers,
     qrContent,
     orientation,
+    forceServer,
+    forceBrowser,
   })
 }
