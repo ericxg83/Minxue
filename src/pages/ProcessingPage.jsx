@@ -185,8 +185,13 @@ export default function ProcessingPage({
                     const taskPages = task.pages || (task.images ? task.images.map((img, i) => ({ ...img, id: img.id || `page-${i}` })) : null)
                     return taskPages && taskPages.length > 1 ? (
                       <div
-                        className="absolute -top-1 -right-1 bg-purple-500 text-white text-[10px] leading-none rounded-full min-w-[18px] h-[18px] px-1 flex items-center justify-center font-semibold border-2 border-white"
-                        style={{ zIndex: 10, boxShadow: '0 1px 3px rgba(0,0,0,0.25)' }}
+                        className="absolute -top-1 -right-1 text-white text-[10px] leading-none rounded-full min-w-[18px] h-[18px] px-1 flex items-center justify-center font-semibold tabular-nums"
+                        style={{
+                          zIndex: 10,
+                          background: 'var(--primary)',
+                          boxShadow: 'var(--shadow-primary)',
+                        }}
+                        aria-label={`共 ${taskPages.length} 页`}
                       >
                         {taskPages.length}
                       </div>
