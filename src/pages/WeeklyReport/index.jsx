@@ -108,13 +108,24 @@ export default function WeeklyReport() {
     if (generating) return
     setGenerating(true)
     try {
-      const pdfBlob = await generateWeeklyReport(currentStudent.id, { mode: periodMode, offset: periodOffset })
-      if (pdfBlob) {
+      // 返回值：{ mode: 'print' | 'download', pdfBlob?, message? }
+      // - 生产环境：mode='print'（弹打印框让用户另存为 PDF），无 pdfBlob
+      // - 开发环境：mode='download'，含 pdfBlob（直接 saveAs 下载）
+      const result = await generateWeeklyReport(currentStudent.id, { mode: periodMode, offset: periodOffset })
+      if (!result) {
+        Toast.show({ icon: 'fail', content: '本周暂无学习数据' })
+        return
+      }
+      if (result.mode === 'print') {
+        // 生产环境：弹打印框（iframe + window.print）
+        Toast.show({ icon: 'success', content: result.message || '请在打印对话框另存为 PDF', duration: 4000 })
+      } else if (result.mode === 'download' && result.pdfBlob) {
+        // 开发环境：直接下载
         const suffix = periodMode === 'all' ? '全部时间' : (periodMode === 'month' ? dayjs().subtract(periodOffset, 'month').format('M月') : `第${dayjs().isoWeek()}周`)
-        saveAs(pdfBlob, `${currentStudent.name}_周学习诊断报告_${suffix}_${dayjs().format('YYYYMMDD')}.pdf`)
+        saveAs(result.pdfBlob, `${currentStudent.name}_周学习诊断报告_${suffix}_${dayjs().format('YYYYMMDD')}.pdf`)
         Toast.show({ icon: 'success', content: '报告已生成' })
       } else {
-        Toast.show({ icon: 'fail', content: '本周暂无学习数据' })
+        Toast.show({ icon: 'fail', content: '生成失败：未拿到 PDF' })
       }
     } catch (err) {
       Toast.show({ icon: 'fail', content: '生成失败: ' + (err.message || '未知错误') })

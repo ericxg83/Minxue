@@ -55,7 +55,7 @@ import { exportServerPDF } from './serverPdfExporter'
  * - 用户配置：VITE_APP_ENV === 'production'（在 .env.production 里配了）
  * - 兜底：hostname 不在 localhost/127.0.0.1 内网段 → 生产
  */
-function detectProductionEnv() {
+export function detectProductionEnv() {
   if (import.meta.env?.PROD === true) return true
   if (import.meta.env?.VITE_APP_ENV === 'production') return true
   if (typeof window !== 'undefined') {

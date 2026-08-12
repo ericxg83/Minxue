@@ -738,15 +738,24 @@ async function handleGenerateCurrent() {
   }
   generating.value = true
   try {
-    const pdfBlob = await generateWeeklyReport(selectedStudentId.value, { mode: periodMode.value, offset: periodOffset.value })
-    if (pdfBlob) {
+    // 返回值：{ mode: 'print' | 'download', pdfBlob?, message? }
+    // - 生产环境：mode='print'（弹打印框另存为 PDF）
+    // - 开发环境：mode='download'，含 pdfBlob（直接 saveAs）
+    const result = await generateWeeklyReport(selectedStudentId.value, { mode: periodMode.value, offset: periodOffset.value })
+    if (!result) {
+      ElMessage.warning('该时段暂无学习数据')
+      return
+    }
+    if (result.mode === 'print') {
+      ElMessage.success(result.message || '请在打印对话框另存为 PDF')
+    } else if (result.mode === 'download' && result.pdfBlob) {
       const name = currentStudentName.value
       const suffix = periodMode.value === 'all' ? '全部时间' : (periodMode.value === 'month' ? dayjs().subtract(periodOffset.value, 'month').format('M月') : `第${weekNum.value}周`)
       const filename = `${name}_周学习诊断报告_${suffix}_${dayjs().format('YYYYMMDD')}.pdf`
-      saveAs(pdfBlob, filename)
+      saveAs(result.pdfBlob, filename)
       ElMessage.success('报告已生成')
     } else {
-      ElMessage.warning('该时段暂无学习数据')
+      ElMessage.error('生成失败：未拿到 PDF')
     }
   } catch (e) {
     ElMessage.error('生成失败: ' + (e.message || '未知错误'))

@@ -1,9 +1,9 @@
-import html2canvas from 'html2canvas'
-import jsPDF from 'jspdf'
-import { PDFDocument } from 'pdf-lib'
-import { createGeneratedExam } from '../services/apiService'
-import { exportWrongBookPDF } from './wrongBookPdfExporter'
-import { fixFractionLineInCloneDoc, preloadKatexFonts } from './pdfGenerator'
+import { createGeneratedExam, getQuestionsByIds } from '../services/apiService'
+import { triggerBrowserPrint } from './browserPrint'
+import { renderFullHTML } from './serverPdfExporter'
+import { exportServerPDF } from './serverPdfExporter'
+import { detectProductionEnv } from './wrongBookPdfExporter'
+import { buildPaperCSS, renderMathInContainer, preloadKatexFonts } from './pdfGenerator'
 import dayjs from 'dayjs'
 import isoWeek from 'dayjs/plugin/isoWeek'
 
@@ -439,115 +439,118 @@ function escapeHtml(text) {
  * @param {Object} reportData - 周统计数据
  * @returns {Blob} 诊断报告 PDF blob
  */
-async function generateDiagnosisPDF(reportData) {
-  const html = buildDiagnosisHTML(reportData)
-  const container = document.createElement('div')
-  container.innerHTML = html
-  container.style.position = 'absolute'
-  container.style.left = '-9999px'
-  container.style.top = '0'
-  container.style.width = '794px'
-  document.body.appendChild(container)
+/**
+ * 渲染诊断报告完整 HTML（KaTeX 公式 + 字体 inline + 二维码）
+ * 在 hidden iframe 里 buildDiagnosisHTML → renderMathInContainer → preloadKatexFonts → outerHTML
+ * 复用 serverPdfExporter 的隐藏 iframe 渲染模式
+ */
+async function renderDiagnosisFullHTML(reportData) {
+  const { getKatexCssWithInlineFonts } = await import('./serverPdfExporter.js')
+  const inlinedCss = await getKatexCssWithInlineFonts()
+
+  // 隐藏 iframe（与错题卷渲染保持一致）
+  const holder = document.createElement('div')
+  holder.style.cssText = 'position:fixed;left:-9999px;top:0;width:794px;background:#fff;'
+  document.body.appendChild(holder)
+
+  const iframe = document.createElement('iframe')
+  iframe.style.cssText = 'width:794px;height:1200px;border:0;background:#fff;display:block;'
+  iframe.setAttribute('sandbox', 'allow-same-origin allow-scripts')
+  holder.appendChild(iframe)
 
   try {
-    const pageEls = Array.from(container.querySelectorAll('.page'))
-    const doc = new jsPDF('p', 'mm', 'a4')
+    const iwin = iframe.contentWindow
+    const idoc = iwin.document
 
-    for (let p = 0; p < pageEls.length; p++) {
-      const el = pageEls[p]
-      const canvas = await html2canvas(el, {
-        scale: 2,
-        useCORS: true,
-        allowTaint: true,
-        logging: false,
-        backgroundColor: '#ffffff',
-        width: 794,
-        height: 1123,
-        // ⚠️ 与 generateExamPDF / PaperBank 保持一致：注入 onclone 修复 KaTeX \frac 分子 + 分式线丢失。
-        onclone: async (cloneDoc) => {
-          if (!cloneDoc) return
-          try {
-            await Promise.race([
-              preloadKatexFonts(cloneDoc),
-              new Promise((r) => setTimeout(r, 2000)),
-            ])
-          } catch (e) { /* ignore */ }
-          try { fixFractionLineInCloneDoc(cloneDoc) } catch (e) { console.warn('[weeklyReport] frac-line 修复失败:', e) }
-        },
+    // 写入诊断报告 HTML（CSS 已 inline 字体）
+    idoc.open()
+    idoc.write('<!DOCTYPE html><html><head><meta charset="utf-8"><style>' + inlinedCss + '</style></head><body>' + buildDiagnosisHTML(reportData) + '</body></html>')
+    idoc.close()
+
+    // 等 DOM ready
+    if (idoc.readyState === 'loading') {
+      await new Promise((resolve) => {
+        const onReady = () => resolve()
+        idoc.addEventListener('DOMContentLoaded', onReady, { once: true })
+        setTimeout(resolve, 1000)
       })
-      const img = canvas.toDataURL('image/jpeg', 0.92)
-      if (p > 0) doc.addPage()
-      // 每页铺满整张 A4
-      doc.addImage(img, 'JPEG', 0, 0, A4_W, A4_H)
     }
 
-    return doc.output('blob')
+    // KaTeX 渲染
+    try {
+      renderMathInContainer(idoc)
+    } catch (e) {
+      console.warn('[weeklyReport] KaTeX 渲染失败:', e)
+    }
+
+    // 字体预加载
+    try {
+      await preloadKatexFonts(idoc)
+    } catch (e) {
+      console.warn('[weeklyReport] 字体预加载失败:', e)
+    }
+
+    // 等 KaTeX 完成所有度量：2 帧 + 兜底 400ms
+    await new Promise((r) => requestAnimationFrame(() => requestAnimationFrame(r)))
+    void idoc.body?.offsetWidth
+    await new Promise((r) => requestAnimationFrame(() => requestAnimationFrame(r)))
+    await new Promise((r) => setTimeout(r, 400))
+
+    return idoc.documentElement.outerHTML
   } finally {
-    document.body.removeChild(container)
+    setTimeout(() => {
+      try { document.body.removeChild(holder) } catch (e) { /* ignore */ }
+    }, 100)
   }
 }
 
 /**
- * 合并两个 PDF Blob 为一个
- * @param {Blob} firstBlob - 诊断报告 PDF
- * @param {Blob} secondBlob - 错题再测卷 PDF
- * @returns {Blob} 合并后的 PDF
+ * 渲染错题再测卷完整 HTML
+ * 复用 serverPdfExporter.renderFullHTML（与错题卷主路径同一渲染器）
  */
-async function mergePDFs(firstBlob, secondBlob) {
-  const firstArr = await firstBlob.arrayBuffer()
-  const secondArr = await secondBlob.arrayBuffer()
+async function renderExamFullHTMLForReport(studentId, studentName, wrongQuestionIds, examName) {
+  if (!wrongQuestionIds || wrongQuestionIds.length === 0) return ''
 
-  const mergedPdf = await PDFDocument.create()
+  // 拉取完整题目数据
+  const fullQs = await getQuestionsByIds(wrongQuestionIds, studentId)
+  if (!fullQs || fullQs.length === 0) return ''
 
-  const firstDoc = await PDFDocument.load(firstArr)
-  const secondDoc = await PDFDocument.load(secondArr)
+  // 创建组卷记录（拿 examId 用于二维码）
+  const examRecord = await createGeneratedExam({
+    student_id: studentId,
+    name: examName,
+    question_ids: wrongQuestionIds,
+  })
 
-  const firstPages = await mergedPdf.copyPages(firstDoc, firstDoc.getPageIndices())
-  firstPages.forEach(page => mergedPdf.addPage(page))
-
-  const secondPages = await mergedPdf.copyPages(secondDoc, secondDoc.getPageIndices())
-  secondPages.forEach(page => mergedPdf.addPage(page))
-
-  const mergedBytes = await mergedPdf.save()
-  return new Blob([mergedBytes], { type: 'application/pdf' })
+  return await renderFullHTML({
+    title: studentName + ' - 本周错题再测',
+    studentName,
+    questions: fullQs,
+    showAnswers: false,
+    qrContent: examRecord?.id ? 'MXG:' + examRecord.id.toUpperCase() : undefined,
+  })
 }
 
 /**
- * 为某个学生生成本周错题再测卷 PDF
- * @param {string} studentId
- * @param {string} studentName
- * @param {string[]} wrongQuestionIds
- * @param {Object} stats
- * @returns {Blob} 试卷 PDF blob
+ * 合并诊断报告 HTML + 错题再测卷 HTML 为一份完整 HTML
+ * 把 examHTML 的 body 节点追加到 diagnosisHTML 的 body 后面
  */
-async function generateExamPDFForReport(studentId, studentName, wrongQuestionIds, stats) {
-  if (!wrongQuestionIds || wrongQuestionIds.length === 0) return null
+function mergeReportHTML(diagnosisHTML, examHTML) {
+  if (!examHTML) return diagnosisHTML
+  if (!diagnosisHTML) return examHTML
 
-  try {
-    // 复用现有组卷流程：创建组卷记录
-    const examName = `错题再测-${dayjs().format('MMDD')}`
-    const examRecord = await createGeneratedExam({
-      student_id: studentId,
-      name: examName,
-      question_ids: wrongQuestionIds
-    })
+  // 用 DOMParser 解析两份 HTML
+  const parser = new DOMParser()
+  const diagDoc = parser.parseFromString(diagnosisHTML, 'text/html')
+  const examDoc = parser.parseFromString(examHTML, 'text/html')
 
-    // 统一走公共导出引擎：内部拉取完整题目 + 唯一渲染出口，与移动端重练卷/后台重练卷 100% 一致
-    const result = await exportWrongBookPDF({
-      studentId,
-      studentName,
-      questionIds: wrongQuestionIds,
-      title: `${studentName} - 本周错题再测`,
-      filename: `${studentName}_错题再测_${dayjs().format('YYYYMMDD')}`,
-      showAnswers: false,
-      qrContent: examRecord?.id ? `MXG:${examRecord.id.toUpperCase()}` : undefined
-    })
+  // 把 examDoc.body 的所有子节点搬到 diagDoc.body 后面
+  const examBodyChildren = Array.from(examDoc.body.childNodes)
+  examBodyChildren.forEach((node) => {
+    diagDoc.body.appendChild(diagDoc.importNode(node, true))
+  })
 
-    return result ? result.pdfBlob : null
-  } catch (error) {
-    console.warn('生成错题再测卷失败:', error)
-    return null
-  }
+  return diagDoc.documentElement.outerHTML
 }
 
 /**
@@ -558,7 +561,28 @@ async function generateExamPDFForReport(studentId, studentName, wrongQuestionIds
  * @param {number} options.offset - 偏移量
  * @returns {Blob} 合并后的 PDF blob
  */
-export async function generateWeeklyReport(studentId, { mode = 'week', offset = 0 } = {}) {
+/**
+ * 生成完整的周学习诊断报告（按环境分流）
+ *
+ * 生产环境（Render 部署 / 用户线上访问）：
+ *   1. 渲染诊断报告 HTML（KaTeX 公式矢量）
+ *   2. 渲染错题再测卷 HTML（与错题卷主路径 100% 一致）
+ *   3. 合并为一份完整 HTML
+ *   4. 调 triggerBrowserPrint → 弹打印框 → 用户另存为 PDF（1 个 PDF，含全部内容）
+ *   5. 返回 { mode: 'print', message: '...' }
+ *
+ * 开发环境（localhost）：
+ *   1-3 同上
+ *   4. 调 exportServerPDF → 服务端 Playwright → 浏览器下载 PDF
+ *   5. 返回 { mode: 'download', pdfBlob, filename }
+ *
+ * @param {string} studentId
+ * @param {Object} options
+ * @param {string} options.mode - 'week' | 'month' | 'all'
+ * @param {number} options.offset - 偏移量
+ * @returns {Promise<{mode: 'print'|'download', pdfBlob?: Blob, message?: string}>}
+ */
+export async function generateWeeklyReport(studentId, { mode = 'week', offset = 0, forceMode } = {}) {
   // 1. 获取周期统计数据
   const API_BASE = import.meta.env.VITE_API_URL || '/api'
   const resp = await fetch(`${API_BASE}/weekly-report/${studentId}?mode=${mode}&offset=${offset}`)
@@ -566,23 +590,59 @@ export async function generateWeeklyReport(studentId, { mode = 'week', offset = 
   const reportData = await resp.json()
   if (!reportData.success) throw new Error(reportData.error || '获取周统计数据失败')
 
-  // 2. 生成诊断报告 PDF
-  const diagnosisBlob = await generateDiagnosisPDF(reportData)
+  // 2. 渲染诊断报告 HTML（含 KaTeX 渲染）
+  const diagnosisHTML = await renderDiagnosisFullHTML(reportData)
 
-  // 3. 生成错题再测卷 PDF
-  const examBlob = await generateExamPDFForReport(
-    studentId,
-    reportData.student.name,
-    reportData.stats.wrongQuestionIds,
-    reportData.stats
-  )
+  // 3. 渲染错题再测卷 HTML
+  const studentName = reportData.student?.name || '学生'
+  const wrongIds = reportData.stats?.wrongQuestionIds || []
+  let examHTML = ''
+  if (wrongIds.length > 0) {
+    const examName = `错题再测-${dayjs().format('MMDD')}`
+    try {
+      examHTML = await renderExamFullHTMLForReport(studentId, studentName, wrongIds, examName)
+    } catch (e) {
+      console.warn('[weeklyReport] 错题再测卷渲染失败，仅返回诊断报告:', e)
+    }
+  }
 
-  // 4. 如果没有错题，只返回诊断报告
-  if (!examBlob) return diagnosisBlob
+  // 4. 合并为一份完整 HTML
+  const mergedHTML = mergeReportHTML(diagnosisHTML, examHTML)
 
-  // 5. 合并两个 PDF
-  const mergedBlob = await mergePDFs(diagnosisBlob, examBlob)
-  return mergedBlob
+  // 5. 按环境分流
+  // forceMode: 'download' 强制走开发路径（直接拿 blob），用于批量生成场景
+  const isProd = forceMode === 'download' ? false : detectProductionEnv()
+  const studentSuffix = `${studentName}_周学习诊断报告_${dayjs().format('YYYYMMDD')}`
+  const filename = `${studentSuffix}.pdf`
+
+  if (isProd) {
+    // 生产：浏览器原生打印（弹打印框另存为 PDF，矢量保真）
+    try {
+      await triggerBrowserPrint({
+        html: mergedHTML,
+        renderMath: false,  // 已经在 iframe 里渲染过 KaTeX
+        title: '周学习诊断报告',
+      })
+      return { mode: 'print', message: '请在打印对话框中"另存为 PDF"获得完整周报（含诊断报告 + 错题再测卷）' }
+    } catch (e) {
+      console.error('[weeklyReport] 浏览器打印失败:', e)
+      throw e
+    }
+  } else {
+    // 开发：服务端 Playwright（矢量 PDF 直接下载）
+    // 把合并后的完整 HTML（含诊断报告 + 错题再测卷）直接 POST 给后端，
+    // 返回 Blob 给调用方由前端 saveAs，避免「下载了 PDF 但再测卷走打印框」的分离问题。
+    const result = await exportServerPDF({
+      html: mergedHTML,                 // 模式 B：直接传已构造好的完整 HTML
+      filename,
+      title: '周学习诊断报告',
+      studentName,
+      questions: [],                    // 已合并到 html，传空数组避免被当成模式 A
+      showAnswers: false,
+      returnPdfBlob: true,              // 返回 blob，由调用方 saveAs 触发下载
+    })
+    return { mode: 'download', pdfBlob: result.pdfBlob, filename }
+  }
 }
 
 /**
@@ -621,9 +681,12 @@ export async function generateAllWeeklyReports({ mode = 'week', offset = 0, onPr
 
     onProgress?.(student.name, 'generating')
     try {
-      const pdfBlob = await generateWeeklyReport(student.id, { mode, offset })
-      results.push({ student, pdfBlob, status: 'done' })
-      onProgress?.(student.name, 'done')
+      // 批量生成：永远走"开发环境"路径（即直接拿 PDF blob），
+      // 因为 triggerBrowserPrint 弹打印框不适合批量场景（每个学生都弹一次）
+      // 批量生成是教师/管理员开发工具，不面向普通用户
+      const result = await generateWeeklyReport(student.id, { mode, offset, forceMode: 'download' })
+      results.push({ student, pdfBlob: result?.pdfBlob || null, status: result?.pdfBlob ? 'done' : 'failed' })
+      onProgress?.(student.name, result?.pdfBlob ? 'done' : 'failed')
     } catch (err) {
       console.error(`生成 ${student.name} 的报告失败:`, err)
       results.push({ student, pdfBlob: null, status: 'failed', error: err.message })
