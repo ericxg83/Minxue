@@ -100,11 +100,23 @@ export async function exportWrongBookPDF({
     })
     return { ...result, filename: baseFile, message: '服务端 Playwright 渲染完成，已下载 PDF' }
   } catch (serverErr) {
-    console.warn('[WrongBookPdfExporter] 服务端 PDF 失败，fallback 到浏览器打印:', serverErr.message)
+    // 主路径失败：详细日志 + Toast 提示用户
+    console.error('[WrongBookPdfExporter] ❌ 服务端 Playwright 渲染失败:', serverErr)
+    console.error('[WrongBookPdfExporter] 错误堆栈:', serverErr?.stack)
+    try {
+      const { Toast } = await import('antd-mobile')
+      Toast.show({
+        icon: 'fail',
+        content: `服务端 PDF 失败：${serverErr?.message || '未知错误'}，已降级到浏览器打印`,
+        duration: 5000,
+      })
+    } catch { /* 静默忽略 toast 失败 */ }
   }
 
   // 5. fallback：浏览器原生打印（让用户在打印对话框"另存为 PDF"）
+  // 仅在主路径失败时降级，避免前端打开打印对话框干扰体验
   try {
+    console.warn('[WrongBookPdfExporter] ⚠️ 降级到浏览器原生打印（主路径服务端失败）')
     const result = await triggerBrowserPrint({
       title: baseTitle,
       studentName: name,
@@ -113,7 +125,7 @@ export async function exportWrongBookPDF({
       qrContent,
       orientation,
     })
-    return { ...result, filename: baseFile }
+    return { ...result, filename: baseFile, fallback: true, message: '已降级到浏览器打印（服务端失败）' }
   } catch (printErr) {
     console.error('[WrongBookPdfExporter] 浏览器打印也失败:', printErr.message)
     return null
