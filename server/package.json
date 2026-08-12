@@ -15,14 +15,15 @@
     "axios": "^1.7.5",
     "bullmq": "^5.34.8",
     "cors": "^2.8.5",
-    "dotenv": "^16.4.7",
     "docx": "^9.7.1",
+    "dotenv": "^16.4.7",
     "express": "^4.21.1",
     "file-type": "^22.0.1",
     "ioredis": "^5.10.1",
     "multer": "^1.4.5-lts.1",
     "pdfjs-dist": "^4.10.38",
     "pg": "^8.13.1",
+    "playwright": "^1.62.1",
     "sharp": "^0.33.2"
   }
 }

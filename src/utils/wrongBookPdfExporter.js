@@ -1,18 +1,30 @@
 import dayjs from 'dayjs'
 import { getQuestionsByIds } from '../services/apiService'
-import { generateExamPDF } from './pdfGenerator'
+import { triggerBrowserPrint } from './browserPrint'
 import { captureBeforeGenerateExamPDF } from './pdfDiagCapture'
+import { exportServerPDF } from './serverPdfExporter'
 
 /**
  * 错题卷 PDF 公共导出引擎（WrongBookPdfExporter）
  *
  * 统一「周诊断报告·错题再测卷」「移动端错题本·重练卷」「后台自动重练卷」三处生成：
- *   数据源可以不同（周报自动拉取 / 用户手动勾选），但 PDF 渲染模板、公式解析、样式组件 100% 一致。
+ *   数据源可以不同（周报自动拉取 / 用户手动勾选），但渲染模板、公式解析、样式组件 100% 一致。
+ *
+ * 【本轮改造：html2canvas + jsPDF → 服务端 Playwright + page.pdf()】
+ * 之前 generateExamPDF 走 html2canvas 光栅化路径，KaTeX 的负 margin 越界 SVG
+ * 会被 bbox 截断，导致"根号对勾飘出""\frac 分子丢失"等系列视觉错位。
+ * 即使在 print() 路径下完美，下载 PDF 走的也是错位的 html2canvas 链路。
+ *
+ * 新方案：
+ *   主路径 → 服务端 Playwright（exportServerPDF）：客户端跑 KaTeX + QR 渲染出
+ *   完整 HTML，POST 给后端 /api/exam-pdf，后端用 Chromium 矢量渲染 page.pdf()。
+ *   视觉与 PrintPreview 100% 一致（同一份 HTML 序列化结果）。
+ *   fallback → 浏览器原生 print()（triggerBrowserPrint）：当服务端不可达时降级。
  *
  * 职责：
- *   1. 数据标准化 —— 若传入的题目缺 options/几何配图等字段，自动用 getQuestionsByIds 拉取完整数据（与周报告同源）；
- *   2. 唯一渲染出口 —— 全部走 pdfGenerator.generateExamPDF（含 KaTeX 公式解析、智能分页、二维码）；
- *   3. 标题/文件名兜底 —— 未传时按「学生 + 错题重练 + 日期」自动生成，避免各处命名分叉。
+ *   1. 数据标准化 —— 若传入的题目缺 options/几何配图等字段，自动用 getQuestionsByIds 拉取完整数据；
+ *   2. 双路径调度 —— 主走服务端 Playwright，失败时降级到浏览器原生打印；
+ *   3. 标题/文件名兜底 —— 未传时按「学生 + 错题重练 + 日期」自动生成。
  *
  * @param {Object} opt
  * @param {string} [opt.studentId]   学生 ID（拉取完整题目时用于带出掌握度信息，可选）
@@ -23,7 +35,10 @@ import { captureBeforeGenerateExamPDF } from './pdfDiagCapture'
  * @param {string} [opt.filename]    导出文件名（不含 .pdf）
  * @param {boolean} [opt.showAnswers] 是否附带参考答案（错题卷默认 false）
  * @param {string} [opt.qrContent]   二维码内容（扫码入口/组卷定位）
- * @returns {Promise<{blobUrl: string, pdfBlob: Blob}|null>} 生成失败返回 null
+ * @param {string} [opt.orientation] 'portrait' | 'landscape'（保留以兼容旧调用，实际由 PDF 引擎决定）
+ * @returns {Promise<{downloaded|printed: true, filename: string, message?: string} | null>}
+ *   - 成功：返回 { downloaded/printed: true, filename, message }
+ *   - 失败：返回 null
  */
 export async function exportWrongBookPDF({
   studentId,
@@ -34,6 +49,7 @@ export async function exportWrongBookPDF({
   filename,
   showAnswers = false,
   qrContent,
+  orientation = 'portrait',
 }) {
   // 1. 归一化题目列表：优先直接用调用方传入的 JSON，缺完整字段时按 id 拉取
   let qs = Array.isArray(questions) && questions.length > 0 ? questions.slice() : null
@@ -58,13 +74,12 @@ export async function exportWrongBookPDF({
 
   if (!qs || qs.length === 0) return null
 
-  // 2. 统一标题/文件名兜底，避免各入口命名/样式分叉
+  // 2. 统一标题/文件名兜底
   const name = studentName || ''
   const baseTitle = title || (name ? `${name} - 错题重练` : '错题重练')
   const baseFile = filename || (name ? `${name}_错题重练_${dayjs().format('YYYYMMDD_HHmm')}` : `错题重练_${dayjs().format('YYYYMMDD_HHmm')}`)
 
-  // 3. 唯一渲染出口
-  // ── 纯诊断（仅日志，不改任何生产逻辑）：在真实调用点前抓取实际传入的题目数据 ──
+  // 3. 诊断抓取（保留以兼容旧诊断逻辑）
   captureBeforeGenerateExamPDF({
     title: baseTitle,
     studentName: name,
@@ -73,21 +88,42 @@ export async function exportWrongBookPDF({
     qrContent,
   })
 
-  return generateExamPDF({
-    title: baseTitle,
-    studentName: name,
-    questions: qs,
-    filename: baseFile,
-    showAnswers,
-    qrContent,
-  })
+  // 4. 主路径：服务端 Playwright 渲染 + 直接下载
+  try {
+    const result = await exportServerPDF({
+      studentId,
+      studentName: name,
+      questions: qs,
+      showAnswers,
+      qrContent,
+      filename: baseFile,
+    })
+    return { ...result, filename: baseFile, message: '服务端 Playwright 渲染完成，已下载 PDF' }
+  } catch (serverErr) {
+    console.warn('[WrongBookPdfExporter] 服务端 PDF 失败，fallback 到浏览器打印:', serverErr.message)
+  }
+
+  // 5. fallback：浏览器原生打印（让用户在打印对话框"另存为 PDF"）
+  try {
+    const result = await triggerBrowserPrint({
+      title: baseTitle,
+      studentName: name,
+      questions: qs,
+      showAnswers,
+      qrContent,
+      orientation,
+    })
+    return { ...result, filename: baseFile }
+  } catch (printErr) {
+    console.error('[WrongBookPdfExporter] 浏览器打印也失败:', printErr.message)
+    return null
+  }
 }
 
 /**
  * 按题目 ID 直接导出一份错题卷（快捷入口）。
- * @param {Object} opt 同 exportWrongBookPDF，但以 questionIds 为准
  */
-export async function exportWrongBookPDFByIds({ studentId, studentName, questionIds, title, filename, showAnswers, qrContent }) {
+export async function exportWrongBookPDFByIds({ studentId, studentName, questionIds, title, filename, showAnswers, qrContent, orientation }) {
   return exportWrongBookPDF({
     studentId,
     studentName,
@@ -96,5 +132,6 @@ export async function exportWrongBookPDFByIds({ studentId, studentName, question
     filename,
     showAnswers,
     qrContent,
+    orientation,
   })
 }

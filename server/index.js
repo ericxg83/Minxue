@@ -64,6 +64,7 @@ import teachingRouter from './routes/teaching.js'
 import variantsRouter from './routes/variants.js'
 import handoutRouter from './routes/handout.js'
 import weaknessRouter from './routes/weakness.js'
+import examPdfRouter from './routes/examPdf.js'
 import { runErrorDiagnosis } from './services/diagnosisService.js'
 import { cleanupStudentData } from './services/dataCleanupService.js'
 import { syncReviewResultsMastery, getStudentMastery } from './services/knowledgeMasteryService.js'
@@ -384,10 +385,11 @@ app.get('/api/tasks/summary', async (req, res) => {
     }
 
     // 单次查询：用子查询合并 3 个 COUNT，避免 3 次 DB 往返
+    // 铃铛计数只统计「未读」的 done/failed 任务（notification_read_at IS NULL）
     const { rows } = await query(
       `SELECT
-         COALESCE((SELECT COUNT(*)::int FROM ${TABLES.TASKS} WHERE status = $1 AND deleted_at IS NULL), 0) AS pending_review,
-         COALESCE((SELECT COUNT(*)::int FROM ${TABLES.TASKS} WHERE status = $2 AND deleted_at IS NULL), 0) AS failed_tasks,
+         COALESCE((SELECT COUNT(*)::int FROM ${TABLES.TASKS} WHERE status = $1 AND deleted_at IS NULL AND notification_read_at IS NULL), 0) AS pending_review,
+         COALESCE((SELECT COUNT(*)::int FROM ${TABLES.TASKS} WHERE status = $2 AND deleted_at IS NULL AND notification_read_at IS NULL), 0) AS failed_tasks,
          COALESCE((SELECT COUNT(*)::int FROM ${TABLES.WRONG_QUESTIONS} WHERE lifecycle_status = $3 AND added_at::date = CURRENT_DATE), 0) AS today_new_wrong,
          (SELECT COALESCE(json_agg(row_to_json(t)), '[]'::json) FROM (
            SELECT t.id, t.original_name, t.status, t.created_at, t.updated_at, s.name AS student_name
@@ -423,6 +425,26 @@ app.get('/api/tasks/summary', async (req, res) => {
     res.json(data)
   } catch (error) {
     console.error('获取通知摘要失败:', error)
+    res.status(500).json({ error: error.message })
+  }
+})
+
+// ─────────────────────────────────────────────
+// 通知全部已读：将批改完成/识别失败的任务标记为已读，铃铛数字归零
+// ─────────────────────────────────────────────
+app.post('/api/tasks/notifications/read', async (req, res) => {
+  try {
+    await query(
+      `UPDATE ${TABLES.TASKS}
+       SET notification_read_at = NOW()
+       WHERE status IN ($1, $2) AND deleted_at IS NULL AND notification_read_at IS NULL`,
+      [TASK_STATUS.DONE, 'failed']
+    )
+    // 使 summary 缓存失效，下次拉取立即反映新数字
+    summaryCache = { data: null, timestamp: 0 }
+    res.json({ success: true })
+  } catch (error) {
+    console.error('标记通知已读失败:', error)
     res.status(500).json({ error: error.message })
   }
 })
@@ -2406,6 +2428,7 @@ app.use('/api/teaching', teachingRouter)
 app.use('/api/variants', variantsRouter)
 app.use('/api/handout', handoutRouter)
 app.use('/api/weakness', weaknessRouter)
+app.use('/api/exam-pdf', examPdfRouter)
 
 // 错误处理中间件（必须在路由之后，才能捕获路由中的未处理异常）
 app.use((err, req, res, next) => {
