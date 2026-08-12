@@ -48,6 +48,8 @@ export default function ExamPage({
               layout
               initial={{ opacity: 0, y: 10 }}
               animate={{ opacity: 1, y: 0 }}
+              data-exam-id={exam.id}
+              data-exam-card="true"
               className="card"
               style={{ padding: '12px' }}
             >

@@ -1028,9 +1028,11 @@ export default function App() {
               />
             )}
 
-            {/* 错题详情弹窗（轻量查看，编辑请去 PC 后台） */}
+            {/* 错题详情弹窗（轻量查看，编辑请去 PC 后台）
+                修复：改为居中弹出（之前 items-end 从底部弹出 75vh，用户在 main 中间看错题时视线在屏幕中央，
+                弹窗在屏幕下方容易看不到）。maxHeight 限 720px + 圆角，居中显示更显眼 */}
             {wrongBookDetail && (
-              <div className="absolute inset-0 z-[20000] flex items-end justify-center">
+              <div className="absolute inset-0 z-[20000] flex items-center justify-center px-4">
                 <motion.div
                   initial={{ opacity: 0 }}
                   animate={{ opacity: 1 }}
@@ -1038,11 +1040,16 @@ export default function App() {
                   onClick={() => setWrongBookDetail(null)}
                 />
                 <motion.div
-                  initial={{ opacity: 0, y: 40 }}
-                  animate={{ opacity: 1, y: 0 }}
+                  initial={{ opacity: 0, scale: 0.95, y: 20 }}
+                  animate={{ opacity: 1, scale: 1, y: 0 }}
                   transition={{ type: 'spring', damping: 25, stiffness: 300 }}
-                  className="relative bg-white rounded-t-3xl w-full max-w-lg mx-auto shadow-xl"
-                  style={{ maxHeight: '75vh', display: 'flex', flexDirection: 'column', paddingBottom: 'calc(16px + env(safe-area-inset-bottom, 0px))' }}
+                  className="relative bg-white rounded-3xl w-full max-w-lg mx-auto shadow-xl"
+                  style={{
+                    maxHeight: 'min(85vh, 720px)',
+                    display: 'flex',
+                    flexDirection: 'column',
+                    paddingBottom: 'calc(16px + env(safe-area-inset-bottom, 0px))'
+                  }}
                 >
                   <div className="flex justify-center pt-3 pb-1">
                     <div className="w-8 h-1 rounded-full" style={{ background: 'var(--border)' }} />

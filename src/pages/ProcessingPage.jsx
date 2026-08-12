@@ -101,6 +101,8 @@ export default function ProcessingPage({
                 layout
                 initial={{ opacity: 0, y: 10 }}
                 animate={{ opacity: 1, y: 0 }}
+                data-task-id={task.id}
+                data-task-card="true"
                 className={`card ${isTaskCompleted(task) ? 'cursor-pointer hover:shadow-md' : ''}`}
                 style={{
                   padding: '12px',

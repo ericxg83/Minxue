@@ -401,17 +401,39 @@ button {
   border-bottom: 0.5px solid rgba(0,0,0,0.12);
 }
 
-/* ── Phone frame — desktop browser simulates iPhone ── */
+/* ── Phone frame — desktop browser simulates iPhone ──
+   关键约束（修复"长列表+弹窗找不到"问题）：
+   1) phone-frame 必须固定高度 + overflow: hidden，所有设备一致
+   2) main 是 phone-frame 的唯一滚动容器，body 不滚动
+   3) 所有 absolute inset-0 弹窗相对 phone-frame 定位 → 位置永远稳定
+   这样不管用户在 main 中间/底部点击什么，弹窗都不会"跑到屏幕外" */
 .phone-frame {
   width: 100%;
   max-width: 430px;
   margin: 0 auto;
-  min-height: 100vh;
-  min-height: 100dvh;
+  height: 100vh;
+  height: 100dvh;
   background: var(--bg);
   position: relative;
   display: flex;
   flex-direction: column;
+  overflow: hidden;
+}
+
+/* main 内部滚动容器：移动端 + PC 端统一行为 */
+.phone-frame .overflow-scroll-area {
+  flex: 1 1 0;
+  min-height: 0;  /* 关键：flex item 默认 min-height: auto 会撑高父元素 */
+  overflow-y: auto;
+  -webkit-overflow-scrolling: touch;
+  overscroll-behavior-y: contain;  /* 防止滚到顶部/底部时整页跟着弹跳 */
+}
+
+/* Android 软键盘弹起时收缩高度，避免弹窗错位 */
+@supports (height: 100dvh) {
+  .phone-frame {
+    height: 100dvh;
+  }
 }
 
 @media (min-width: 500px) {
@@ -439,10 +461,5 @@ button {
     min-height: auto;
     height: calc(100vh - 36px);
     height: calc(100dvh - 36px);
-  }
-  .phone-frame .overflow-scroll-area {
-    flex: 1;
-    overflow-y: auto;
-    -webkit-overflow-scrolling: touch;
   }
 }

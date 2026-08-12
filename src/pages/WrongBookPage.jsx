@@ -321,6 +321,8 @@ export default function WrongBookPage({
                   layout
                   initial={{ opacity: 0, y: 10 }}
                   animate={{ opacity: 1, y: 0 }}
+                  data-wq-id={wq.id}
+                  data-wq-card="true"
                   className="card"
                   style={{ padding: '12px' }}
                 >
