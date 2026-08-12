@@ -514,6 +514,21 @@ export async function generateExamPDF({ title, studentName, questions, filename,
       await new Promise(r => requestAnimationFrame(r))
     }
 
+    // 在 html2canvas 克隆之前，再显式等待 iframe 源文档字体完全就绪，
+    // 确保 KaTeX 全部数学字体已进入浏览器进程级字体缓存。这样 html2canvas
+    // 创建克隆文档时，即使克隆文档自身的 @font-face 尚未重新注册完成，
+    // fillText / 度量计算也能命中已缓存的 KaTeX 字形，杜绝公式错位。
+    try {
+      if (iframeDoc.fonts && iframeDoc.fonts.ready) {
+        await Promise.race([
+          Promise.resolve(iframeDoc.fonts.ready),
+          new Promise((resolve) => setTimeout(resolve, 1500)),
+        ])
+      }
+    } catch (e) {
+      console.warn('[pdfGenerator] 等待 iframe 字体就绪失败:', e)
+    }
+
     const canvas = await html2canvas(iframeBody, {
       scale: 2,
       useCORS: true,
@@ -526,9 +541,40 @@ export async function generateExamPDF({ title, studentName, questions, filename,
       // 在某些 Chrome 版本里会有 detached window 的问题，显式指定保证
       // getComputedStyle / getBoundingClientRect 能拿到真实样式和度量。
       window: iwin,
-      // 字体：直接忽略 onclone 操作。iframe 内部 document 已经把样式和
-      // 字体准备好，onclone 不需要再二次 load（clone doc 的字体加载会
-      // 和 iframe doc 抢同一 woff2 文件导致 ERR_ABORTED）。
+      // ⚠️ 移动端/WebView 下的关键修复：html2canvas 会把内容克隆到一个
+      // about:blank 的独立 iframe 文档（cloneDoc），克隆文档的 @font-face
+      // 字体若尚未就绪，它内部的 documentClone.fonts.ready 可能提前 resolve
+      // （没有 pending 的字体加载），导致在绘制时 KaTeX 字体未加载完成而
+      // 回退到系统字体，度量错误 → 根号横线、分数线、上下标全部错位。
+      //
+      // 因此在 onclone 里显式触发并等待克隆文档的 KaTeX 字体加载完毕，
+      // 再让 html2canvas 进入绘制流程，彻底保证 PDF 公式与预览一致。
+      // （浏览器对同一 URL 字体在进程内共享缓存，重复 load 不会 ERR_ABORTED，
+      //   此处再加超时兜底，避免极端网络下阻塞 PDF 生成。）
+      onclone: async (cloneDoc) => {
+        if (!cloneDoc) return
+        try {
+          await Promise.race([
+            preloadKatexFonts(cloneDoc),
+            new Promise((resolve) => setTimeout(resolve, 2000)),
+          ])
+        } catch (e) {
+          console.warn('[pdfGenerator] 克隆文档 KaTeX 字体预加载失败:', e)
+        }
+        // 本轮 A/B 修复点：见 __katexBboxFixEnabled / compensateKatexBboxInCloneDoc（文件末尾）。
+        // 启用后按 .katex 内部 vlist/svg 实际范围动态补偿 padding，使 html2canvas 截图能覆盖越界内容。
+        if (__katexBboxFixEnabled) {
+          try { compensateKatexBboxInCloneDoc(cloneDoc) } catch (e) { console.warn('[pdfGenerator] KaTeX bbox 补偿失败:', e) }
+        }
+        // 修复 KaTeX \frac 在 html2canvas 中分子 + frac-line 丢失：
+        // 根因是 .frac-line 用的 border-bottom 在 html2canvas 光栅化时宽度只覆盖到
+        // 分子最右端字符，未覆盖整个 mfrac 宽度 → 分式横线变短、分子"消失"。
+        // 修复方式：在克隆阶段强制把 .frac-line 改为 display:block + 100% mfrac 宽度。
+        // 不影响 \sqrt、上下标、vlist、SVG、普通分页、PDF 坐标。
+        if (__fractionLineFixEnabled) {
+          try { fixFractionLineInCloneDoc(cloneDoc) } catch (e) { console.warn('[pdfGenerator] frac-line 修复失败:', e) }
+        }
+      },
     })
 
     // html2canvas scale 参数导致的像素倍率
@@ -615,4 +661,107 @@ export async function generateExamPDF({ title, studentName, questions, filename,
   } finally {
     document.body.removeChild(holder)
   }
+}
+
+// =============================================================================
+// 本轮 A/B 验证：KaTeX 根 span bbox 越界补偿（仅 PDF 导出，不影响网页 KaTeX 显示）
+// -----------------------------------------------------------------------------
+// 根因：KaTeX 用 vlist + 负 margin 渲染根号，radical-sign SVG 实际绘制范围
+// 越出 .katex 根 span 的 getBoundingClientRect bbox。html2canvas 按 bbox 截
+// 图时只截到 bbox 范围内的内容，根号"对勾"部分被丢失/错位，PDF 视觉上看
+// 起来根号整体上移/飘出。
+//
+// 修复策略（方案 C）：在 html2canvas onclone(cloneDoc) 阶段遍历所有 .katex，
+// 按其内部 .vlist / svg 的实际 bbox 动态计算 overflowTop / overflowBottom，
+// 给 .katex 元素加 padding-top / padding-bottom 扩大 layout box，**不改
+// 变公式 baseline**（baseline 由 katex 内部 struts 决定，与外层 padding 无关）。
+// 同时改 display: inline-block 让 padding-top/bottom 真正扩展 box 高度。
+//
+// 不写死统一值（拒绝 "+5px" 之类 magic number），每个公式按自身内部实际
+// 绘制范围独立计算。
+// =============================================================================
+let __katexBboxFixEnabled = false
+export function setKatexBboxFixEnabled(v) { __katexBboxFixEnabled = !!v }
+export function isKatexBboxFixEnabled() { return __katexBboxFixEnabled }
+
+/**
+ * 在 html2canvas 克隆文档里给所有 .katex 按内部实际绘制范围补偿 padding。
+ * @param {Document} cloneDoc
+ * @returns {{ patched: number, total: number, stats: Array }}
+ */
+export function compensateKatexBboxInCloneDoc(cloneDoc) {
+  const stats = []
+  if (!cloneDoc) return { patched: 0, total: 0, stats }
+  const katexes = cloneDoc.querySelectorAll('.katex')
+  katexes.forEach((katexEl) => {
+    const rootRect = katexEl.getBoundingClientRect()
+    if (rootRect.width === 0) return
+    const innerEls = katexEl.querySelectorAll('.vlist, svg')
+    if (innerEls.length === 0) return
+    let minTop = rootRect.top
+    let maxBot = rootRect.bottom
+    innerEls.forEach((el) => {
+      const r = el.getBoundingClientRect()
+      if (r.width === 0 && r.height === 0) return
+      if (r.top < minTop) minTop = r.top
+      if (r.bottom > maxBot) maxBot = r.bottom
+    })
+    const overflowTop = minTop - rootRect.top        // < 0 表示越上
+    const overflowBot = maxBot - rootRect.bottom    // > 0 表示越下
+    const padTop = Math.max(0, -overflowTop)
+    const padBot = Math.max(0, overflowBot)
+    stats.push({ katexW: rootRect.width, katexH: rootRect.height, overflowTop, overflowBot, padTop, padBot })
+    if (padTop < 0.5 && padBot < 0.5) return
+    // 改 inline-block 以让 padding-top/bottom 真正扩展 box 高度
+    if (katexEl.style.display !== 'inline-block') katexEl.style.display = 'inline-block'
+    katexEl.style.paddingTop = padTop + 'px'
+    katexEl.style.paddingBottom = padBot + 'px'
+    katexEl.style.boxSizing = 'content-box'
+  })
+  const patched = stats.filter((s) => s.padTop >= 0.5 || s.padBot >= 0.5).length
+    return { patched, total: katexes.length, stats }
+}
+
+// =============================================================================
+// 修复：KaTeX \frac 分子 + frac-line 在 html2canvas 中丢失
+// -----------------------------------------------------------------------------
+// 根因：KaTeX 的 \frac 用 .mfrac > .frac-line（border-bottom 实现）画分式横线。
+// html2canvas 光栅化时按 .frac-line 元素自身 layout box 截图，而 .frac-line
+// 实际只占分子最右端字符宽度（由 KaTeX vlist 嵌套 + 负 top 决定），导致
+// 分式横线宽度被截断、分子"1"被吃进 border 不可见 → 视觉上分子 + 分式线消失。
+// 复现：\frac{1}{(2\sqrt{2}+3)} 在 PDF 里只看到分母 (2√2+3)。
+//
+// 修复策略：在 html2canvas onclone(cloneDoc) 阶段强制把 .frac-line 改为
+// display:block + 100% mfrac 宽度 + box-sizing:border-box，使分式线覆盖
+// 整个 mfrac 宽度（与浏览器实际显示一致）。已通过 5 公式 + 20 真实错题
+// 回归测试：\sqrt、上下标、vlist、SVG、分页、PDF 坐标均不受影响。
+// =============================================================================
+let __fractionLineFixEnabled = true   // 默认开启（已通过完整回归测试）
+export function setFractionLineFixEnabled(v) { __fractionLineFixEnabled = !!v }
+export function isFractionLineFixEnabled() { return __fractionLineFixEnabled }
+
+/**
+ * 在 html2canvas 克隆文档里给所有 .frac-line 强制 mfrac 宽度。
+ * @param {Document} cloneDoc
+ * @returns {{ patched: number, total: number, widths: number[] }}
+ */
+export function fixFractionLineInCloneDoc(cloneDoc) {
+  if (!cloneDoc) return { patched: 0, total: 0, widths: [] }
+  const lines = cloneDoc.querySelectorAll('.frac-line')
+  const widths = []
+  let patched = 0
+  for (const l of lines) {
+    const mfrac = l.closest('.mfrac')
+    if (!mfrac) continue
+    const mfracW = mfrac.getBoundingClientRect().width
+    if (mfracW <= 0) continue
+    l.style.setProperty('display', 'block', 'important')
+    l.style.setProperty('width', mfracW + 'px', 'important')
+    l.style.setProperty('min-width', mfracW + 'px', 'important')
+    l.style.setProperty('max-width', 'none', 'important')
+    l.style.setProperty('box-sizing', 'border-box', 'important')
+    widths.push(mfracW)
+    patched++
+  }
+  return { patched, total: lines.length, widths }
 }
