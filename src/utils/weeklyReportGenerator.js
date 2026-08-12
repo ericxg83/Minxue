@@ -3,6 +3,7 @@ import jsPDF from 'jspdf'
 import { PDFDocument } from 'pdf-lib'
 import { createGeneratedExam } from '../services/apiService'
 import { exportWrongBookPDF } from './wrongBookPdfExporter'
+import { fixFractionLineInCloneDoc, preloadKatexFonts } from './pdfGenerator'
 import dayjs from 'dayjs'
 import isoWeek from 'dayjs/plugin/isoWeek'
 
@@ -462,6 +463,17 @@ async function generateDiagnosisPDF(reportData) {
         backgroundColor: '#ffffff',
         width: 794,
         height: 1123,
+        // ⚠️ 与 generateExamPDF / PaperBank 保持一致：注入 onclone 修复 KaTeX \frac 分子 + 分式线丢失。
+        onclone: async (cloneDoc) => {
+          if (!cloneDoc) return
+          try {
+            await Promise.race([
+              preloadKatexFonts(cloneDoc),
+              new Promise((r) => setTimeout(r, 2000)),
+            ])
+          } catch (e) { /* ignore */ }
+          try { fixFractionLineInCloneDoc(cloneDoc) } catch (e) { console.warn('[weeklyReport] frac-line 修复失败:', e) }
+        },
       })
       const img = canvas.toDataURL('image/jpeg', 0.92)
       if (p > 0) doc.addPage()

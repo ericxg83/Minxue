@@ -4,6 +4,7 @@ import dayjs from 'dayjs'
 import { processMultiPagePaperLayout } from '../../services/paperBankAIService'
 import { downloadPaperWord } from '../../utils/docxGenerator'
 import { useToast } from '../../components/ToastProvider'
+import { fixFractionLineInCloneDoc, preloadKatexFonts } from '../../utils/pdfGenerator'
 
 // 试卷资源库（Paper Bank）自包含模块。
 // 从 App.jsx 拆出：仅含 state + handlers + 渲染辅助函数，无 UI 挂载点（UI 尚未接入）。
@@ -582,6 +583,18 @@ export function usePaperBank() {
           logging: false,
           width: 794,
           height: container.scrollHeight,
+          // ⚠️ 与 generateExamPDF 保持一致：注入 onclone 修复 KaTeX \frac 分子 + 分式线丢失。
+          // 此前独立 html2canvas 路径未走 fixFractionLineInCloneDoc，导致下载 PDF 错位。
+          onclone: async (cloneDoc) => {
+            if (!cloneDoc) return
+            try {
+              await Promise.race([
+                preloadKatexFonts(cloneDoc),
+                new Promise((r) => setTimeout(r, 2000)),
+              ])
+            } catch (e) { /* ignore */ }
+            try { fixFractionLineInCloneDoc(cloneDoc) } catch (e) { console.warn('[PaperBank] frac-line 修复失败:', e) }
+          },
         })
 
         const imgData = canvas.toDataURL('image/jpeg', 0.92)
