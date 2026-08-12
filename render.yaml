@@ -3,12 +3,10 @@ services:
     name: minxue-api
     rootDir: server
     plan: free
-    # Docker 部署：让 Chromium binary 随镜像发布，避免 server/node 环境缺系统库
-    # 镜像来源：mcr.microsoft.com/playwright 官方镜像（已装好 Chromium + 全部系统依赖）
-    # 改 docker 部署后，Render UI 会提示 "Service Type: Docker" 切换确认
-    runtime: docker
-    dockerfilePath: ./Dockerfile
-    dockerContext: .
+    env: node
+    nodeVersion: "22"
+    buildCommand: npm install
+    startCommand: node index.js
     envVars:
       - key: NODE_ENV
         value: production
