@@ -680,7 +680,7 @@ export async function generateExamPDF({ title, studentName, questions, filename,
 // 不写死统一值（拒绝 "+5px" 之类 magic number），每个公式按自身内部实际
 // 绘制范围独立计算。
 // =============================================================================
-let __katexBboxFixEnabled = false
+let __katexBboxFixEnabled = true   // 本轮开启：修复根号"对勾"/SVG 越界（独立于 \frac 修复）
 export function setKatexBboxFixEnabled(v) { __katexBboxFixEnabled = !!v }
 export function isKatexBboxFixEnabled() { return __katexBboxFixEnabled }
 
