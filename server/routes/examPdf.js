@@ -27,8 +27,9 @@ router.post('/', async (req, res) => {
     if (html.length < 100) {
       return res.status(400).json({ error: 'html 长度过短（< 100 字符），可能不包含 buildPaperBody' })
     }
-    if (html.length > 1024 * 1024) {
-      return res.status(413).json({ error: 'html 长度超过 1MB' })
+    if (html.length > 2 * 1024 * 1024) {
+      // 放宽到 2MB：周报合并 HTML（诊断报告 + 50+ 道错题 + KaTeX 字体 base64 inline）可能接近 1MB
+      return res.status(413).json({ error: 'html 长度超过 2MB，请减少题目数量或拆分周报' })
     }
 
     console.log(`[examPdf] 收到渲染请求 html=${html.length} 字符`)

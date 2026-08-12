@@ -507,27 +507,40 @@ async function renderDiagnosisFullHTML(reportData) {
 /**
  * 渲染错题再测卷完整 HTML
  * 复用 serverPdfExporter.renderFullHTML（与错题卷主路径同一渲染器）
+ *
+ * 【数据一致性】先渲染 HTML，再创建 exam 记录 + 注入二维码内容。
+ * 若渲染过程中抛错，exam 记录不会被写入数据库，避免脏数据。
+ * 若 createGeneratedExam 失败（极端情况），仍返回已渲染的 HTML（无二维码），
+ * 不阻塞周报生成 —— 二维码缺失不影响周报核心内容。
  */
 async function renderExamFullHTMLForReport(studentId, studentName, wrongQuestionIds, examName) {
   if (!wrongQuestionIds || wrongQuestionIds.length === 0) return ''
 
-  // 拉取完整题目数据
+  // 1. 拉取完整题目数据
   const fullQs = await getQuestionsByIds(wrongQuestionIds, studentId)
   if (!fullQs || fullQs.length === 0) return ''
 
-  // 创建组卷记录（拿 examId 用于二维码）
-  const examRecord = await createGeneratedExam({
-    student_id: studentId,
-    name: examName,
-    question_ids: wrongQuestionIds,
-  })
+  // 2. 先尝试创建 exam 记录（拿 examId 用于二维码）
+  let qrContent = undefined
+  try {
+    const examRecord = await createGeneratedExam({
+      student_id: studentId,
+      name: examName,
+      question_ids: wrongQuestionIds,
+    })
+    if (examRecord?.id) qrContent = 'MXG:' + examRecord.id.toUpperCase()
+  } catch (e) {
+    // 失败不阻塞周报生成 —— 没有二维码也能用
+    console.warn('[weeklyReport] createGeneratedExam 失败，将跳过二维码:', e?.message || e)
+  }
 
+  // 3. 渲染 HTML（含可选二维码）
   return await renderFullHTML({
     title: studentName + ' - 本周错题再测',
     studentName,
     questions: fullQs,
     showAnswers: false,
-    qrContent: examRecord?.id ? 'MXG:' + examRecord.id.toUpperCase() : undefined,
+    qrContent,
   })
 }
 
@@ -590,21 +603,21 @@ export async function generateWeeklyReport(studentId, { mode = 'week', offset = 
   const reportData = await resp.json()
   if (!reportData.success) throw new Error(reportData.error || '获取周统计数据失败')
 
-  // 2. 渲染诊断报告 HTML（含 KaTeX 渲染）
-  const diagnosisHTML = await renderDiagnosisFullHTML(reportData)
-
-  // 3. 渲染错题再测卷 HTML
+  // 2 & 3. 并行渲染：诊断报告 + 错题再测卷（两个都要建 hidden iframe + 跑 KaTeX + 等字体，可并行）
   const studentName = reportData.student?.name || '学生'
   const wrongIds = reportData.stats?.wrongQuestionIds || []
-  let examHTML = ''
-  if (wrongIds.length > 0) {
-    const examName = `错题再测-${dayjs().format('MMDD')}`
-    try {
-      examHTML = await renderExamFullHTMLForReport(studentId, studentName, wrongIds, examName)
-    } catch (e) {
-      console.warn('[weeklyReport] 错题再测卷渲染失败，仅返回诊断报告:', e)
-    }
-  }
+  const examName = `错题再测-${dayjs().format('MMDD')}`
+
+  const [diagnosisHTML, examHTML] = await Promise.all([
+    renderDiagnosisFullHTML(reportData),
+    wrongIds.length > 0
+      ? renderExamFullHTMLForReport(studentId, studentName, wrongIds, examName)
+          .catch((e) => {
+            console.warn('[weeklyReport] 错题再测卷渲染失败，仅返回诊断报告:', e)
+            return ''
+          })
+      : Promise.resolve(''),
+  ])
 
   // 4. 合并为一份完整 HTML
   const mergedHTML = mergeReportHTML(diagnosisHTML, examHTML)

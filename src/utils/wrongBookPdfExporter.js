@@ -53,27 +53,36 @@ import { exportServerPDF } from './serverPdfExporter'
  * 判断当前是否生产环境
  * - Vite 内置：import.meta.env.PROD（生产 build=true，dev=false）
  * - 用户配置：VITE_APP_ENV === 'production'（在 .env.production 里配了）
- * - 兜底：hostname 不在 localhost/127.0.0.1 内网段 → 生产
+ * - 兜底：hostname 不在 localhost/127.0.0.1/常见内网段 → 生产
+ *   - 完整覆盖 RFC1918 私有地址段：10.x / 172.16-31.x / 192.168.x
+ *   - IPv6 回环 ::1
  */
 export function detectProductionEnv() {
   if (import.meta.env?.PROD === true) return true
   if (import.meta.env?.VITE_APP_ENV === 'production') return true
   if (typeof window !== 'undefined') {
     const h = window.location?.hostname || ''
-    // 内网/本地 host 不算生产
-    if (
-      h === 'localhost' ||
-      h === '127.0.0.1' ||
-      h.startsWith('192.168.') ||
-      h.startsWith('10.') ||
-      h === '::1' ||
-      h === ''
-    ) {
-      return false
-    }
+    if (isLocalHostname(h)) return false
   }
   // 其他情况默认生产（更安全：避免线上 fetch 不存在的端点）
   return true
+}
+
+/**
+ * 判断 hostname 是否属于本地/内网（开发环境）。
+ * RFC1918 私有地址：10.0.0.0/8、172.16.0.0/12、192.168.0.0/16
+ * 链路本地：169.254.0.0/16
+ * 回环：127.0.0.0/8、::1
+ */
+export function isLocalHostname(h) {
+  if (!h) return true // 空字符串（如 file://）按本地处理
+  if (h === 'localhost' || h === '127.0.0.1' || h === '::1') return true
+  if (h.startsWith('192.168.') || h.startsWith('10.')) return true
+  // 172.16.0.0/12 = 172.16.0.0 ~ 172.31.255.255
+  if (/^172\.(1[6-9]|2\d|3[01])\./.test(h)) return true
+  // 链路本地地址（云服务元数据接口等）
+  if (h.startsWith('169.254.')) return true
+  return false
 }
 
 export async function exportWrongBookPDF({

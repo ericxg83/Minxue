@@ -274,8 +274,8 @@ export async function exportServerPDF({ studentId, studentName, questions, html,
     setTimeout(() => URL.revokeObjectURL(url), 2000)
   }
 
-  const dt = Date.now() - Date.now() // 简化，不影响功能
-  console.log(`[serverPdfExporter] PDF 下载完成, ${(blob.size / 1024).toFixed(1)}KB`)
+  const tDownload = Date.now()
+  console.log(`[serverPdfExporter] PDF 下载完成 ${Date.now() - tDownload}ms, ${(blob.size / 1024).toFixed(1)}KB`)
 
   return { downloaded: true, pdfBytes: blob.size, filename }
 }
