@@ -100,6 +100,7 @@ const navItems = [
   { key: 'exam-history',    label: '重练批改', path: '/exam-history',     icon: 'Clock' },
   { key: 'weekly-report',   label: '诊断报告', path: '/weekly-report',    icon: 'DataAnalysis' },
   { key: 'handout',         label: '讲义预览', path: '/handout',          icon: 'Reading' },
+  { key: 'handouts',        label: '我的讲义', path: '/handouts',         icon: 'Notebook' },
   { key: 'exam-import',     label: '试卷入库', path: '/paper',            icon: 'UploadFilled',disabled: true },
 ]
 

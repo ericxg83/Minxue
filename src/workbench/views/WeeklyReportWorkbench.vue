@@ -227,13 +227,12 @@
           <el-button
             type="primary"
             size="small"
-            :loading="exportingHandout"
             :disabled="classDiagnosis.length === 0"
             style="margin-left: auto"
             @click="handleExportHandout"
           >
-            <el-icon v-if="!exportingHandout"><Download /></el-icon>
-            {{ exportingHandout ? '整理中...' : '导出讲义' }}
+            <el-icon><EditPen /></el-icon>
+            备课讲义
           </el-button>
           <el-button
             type="success"
@@ -456,7 +455,6 @@ import { ElMessage } from 'element-plus'
 import { Download, DataAnalysis, TrendCharts, List, FolderOpened, WarningFilled, QuestionFilled, ArrowRight, Close, PieChart, User, Collection, EditPen } from '@element-plus/icons-vue'
 import { getStudents, getAllWeeklyReports, getTeachingDiagnosis, getTeachingDiagnosisDetail } from '../../services/apiService'
 import { generateWeeklyReport, generateAllWeeklyReports } from '../../utils/weeklyReportGenerator'
-import { downloadTeachingHandout } from '../../utils/teachingHandout'
 import { saveAs } from 'file-saver'
 import dayjs from 'dayjs'
 import isoWeek from 'dayjs/plugin/isoWeek'
@@ -669,20 +667,17 @@ function diagRowClass({ row }) {
 
 async function handleExportHandout() {
   if (classDiagnosis.value.length === 0) return
-  exportingHandout.value = true
-  try {
-    await downloadTeachingHandout({
-      mode: periodMode.value,
-      offset: periodOffset.value,
+  // P0-P4 重塑：跳转到 HandoutPreview 备课工作台（不再直接下载 docx）。
+  // 老师可以在工作台切换模板、查看错题、编辑笔记、导 docx。
+  exportingHandout.value = false
+  router.push({
+    name: 'HandoutPreview',
+    query: {
       subject: diagSubject.value || '',
-      periodText: periodLabel.value
-    })
-    ElMessage.success(`已生成教学讲义（前 ${classDiagnosis.value.slice(0, 12).length} 个重点知识点）`)
-  } catch (e) {
-    ElMessage.error('讲义生成失败: ' + (e.message || '未知错误'))
-  } finally {
-    exportingHandout.value = false
-  }
+      periodMode: periodMode.value,
+      periodOffset: periodOffset.value,
+    },
+  })
 }
 
 async function handleDistributeExam() {

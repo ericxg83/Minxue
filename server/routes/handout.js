@@ -3,6 +3,7 @@ import { query, TABLES } from '../config/neon.js'
 import { getQuestionKnowledge } from '../services/knowledgeService.js'
 import { generateKnowledgeExplanation, buildHandout, buildKnowledgeSection, listHandoutTemplates } from '../services/handoutService.js'
 import { buildHandoutDocx } from '../services/handoutDocxService.js'
+import { generateLectureScript } from '../services/handoutScriptService.js'
 import { parsePeriod } from '../utils/period.js'
 
 const router = Router()
@@ -111,10 +112,14 @@ router.post('/from-diagnosis', async (req, res) => {
     const knowledgeSections = []
     for (const d of diagnosis) {
       const tagParams = [d.tag, p.periodStart, p.periodEnd]
+      // P0 改造：错题按 question_type 排序（题型内空题优先），
+      // 并把 question_type / imageUrls 带回，让模板能按题型分组
       const { rows: samples } = await query(
         `SELECT
           wq.id, wq.question_id,
           q.content, q.options, q.answer AS correct_answer,
+          q.question_type,
+          q.pdf_url, q.image_url,
           wq.student_answer, wq.is_blank, wq.error_type, wq.error_reason,
           COALESCE(s.name, '未知学生') AS student_name
         FROM ${TABLES.WRONG_QUESTIONS} wq
@@ -126,8 +131,12 @@ router.post('/from-diagnosis', async (req, res) => {
           )
         LEFT JOIN ${TABLES.STUDENTS} s ON s.id = wq.student_id
         WHERE wq.added_at >= $2 AND wq.added_at < $3
-        ORDER BY (wq.error_type IS NULL) ASC, (wq.is_blank IS TRUE) ASC, wq.updated_at DESC
-        LIMIT 3`,
+        ORDER BY
+          -- 同题型聚拢 + 空题优先
+          COALESCE(NULLIF(q.question_type, ''), '其他') ASC,
+          (wq.is_blank IS NOT TRUE) ASC,
+          wq.updated_at DESC
+        LIMIT 10`,
         tagParams
       )
 
@@ -138,6 +147,8 @@ router.post('/from-diagnosis', async (req, res) => {
           questionId: q.question_id,
           content: q.content,
           options: q.options,
+          questionType: q.question_type || '其他',
+          imageUrls: [q.pdf_url, q.image_url].filter(Boolean),
           studentAnswer: q.student_answer,
           correctAnswer: q.correct_answer,
           isBlank: q.is_blank === true,
@@ -192,6 +203,31 @@ router.post('/export-word', async (req, res) => {
   } catch (error) {
     console.error('讲义导出 Word 失败:', error)
     res.status(500).json({ error: error.message })
+  }
+})
+
+/**
+ * POST /api/handout/lecture-script
+ * P4 讲课提词器：基于"知识点 + 错题"AI 生成按时间分块的讲课脚本。
+ * Body: { kpName, subject?, sampleQuestions?: [{questionId, content, studentAnswer, isBlank, errorType, errorReason, questionType}], minutes?: 15 }
+ * Response: { success, script: [{time, title, detail, points[], board, interaction}] }
+ */
+router.post('/lecture-script', async (req, res) => {
+  try {
+    const { kpName, subject, sampleQuestions, minutes } = req.body || {}
+    if (!kpName) {
+      return res.status(400).json({ success: false, error: 'kpName 必填' })
+    }
+    const script = await generateLectureScript({
+      kpName,
+      subject: subject || '数学',
+      sampleQuestions: Array.isArray(sampleQuestions) ? sampleQuestions : [],
+      minutes: Math.max(5, Math.min(45, Number(minutes) || 15)),
+    })
+    res.json({ success: true, script })
+  } catch (e) {
+    console.error('讲课提词器生成失败:', e)
+    res.status(500).json({ success: false, error: e.message })
   }
 })
 

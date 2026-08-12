@@ -72,6 +72,12 @@ const routes = [
     name: 'HandoutPreview',
     component: () => import('../views/HandoutPreview.vue'),
     meta: { requiresPC: false }
+  },
+  {
+    path: '/handouts',
+    name: 'HandoutList',
+    component: () => import('../views/HandoutList.vue'),
+    meta: { requiresPC: false }
   }
 ]
 

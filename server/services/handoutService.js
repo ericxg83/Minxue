@@ -1,5 +1,4 @@
 import { callTextCompletion } from '../config/ai.js'
-import { getVariantsForQuestion } from './variantService.js'
 import { getQuestionKnowledge } from './knowledgeService.js'
 import { getTemplate, pickTemplateBySubject, listTemplates } from './handoutTemplates/index.js'
 
@@ -83,17 +82,19 @@ export function listHandoutTemplates(subjectFilter = null) {
 
 /**
  * 为单个知识点组装讲义内容块。
+ * P0 之后讲义定位为"老师备课用"，模板内部已完成"页内按题型分组"，
+ * 本函数只负责调模板生成 blocks（不再生成变式题）。
  * @param {Object} params
  * @param {string} params.kpName 知识点名称
  * @param {string} params.subject 学科
- * @param {Array} params.sampleQuestions 典型错题 [{content, studentAnswer, correctAnswer, errorType, errorReason, studentName}]
+ * @param {Array} params.sampleQuestions 典型错题 [{content, options, imageUrls, studentAnswer, correctAnswer, isBlank, errorType, errorReason, studentName, questionType}]
  * @param {string} params.explanation 可选，若已提前生成则传入
  * @param {string} [params.template] 模板 id；缺省走学科兜底
  * @returns {Promise<Array<{type, content}>>} 讲义区块列表
  */
 export async function buildKnowledgeSection({ kpName, subject = '数学', sampleQuestions = [], explanation = null, template = null }) {
-  // 选模板：显式传入 > 学科兜底 > default
-  const tpl = getTemplate(template) || pickTemplateBySubject(subject) || getTemplate('default')
+  // 选模板：显式传入 > 学科兜底 > lecture_prep
+  const tpl = getTemplate(template) || pickTemplateBySubject(subject) || getTemplate('lecture_prep')
   if (!tpl) {
     // 极端兜底：模板系统坏了返回空数组
     console.warn(`[Handout] 未找到任何讲义模板 (template=${template}, subject=${subject})`)
@@ -116,8 +117,8 @@ export async function buildHandout({ title, subject = '数学', periodText = '',
   const pages = []
 
   // 选模板（封面也会用模板 label）
-  const tpl = getTemplate(template) || pickTemplateBySubject(subject) || getTemplate('default')
-  const templateLabel = tpl ? tpl.label : '默认讲义'
+  const tpl = getTemplate(template) || pickTemplateBySubject(subject) || getTemplate('lecture_prep')
+  const templateLabel = tpl ? tpl.label : '备课讲义'
 
   // 封面
   pages.push({

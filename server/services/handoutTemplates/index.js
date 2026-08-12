@@ -1,30 +1,12 @@
 // ============================================================
 // 讲义模板系统 — 注册中心（handoutTemplates）
 //
-// 设计目标：
-//   1. 不同场景（默认 / 考前冲刺 / 错题复习）+ 不同学科（数学 / 英语）
-//      用不同的页面布局，避免「把错题复习模板套在英语讲义上」这种串台。
-//   2. 模板独立可插拔：新增一种模板只需要在 templates/ 下加一个文件并 register 即可。
-//   3. 模板只负责"如何把样本/变式/讲解拼成页面 blocks"，数据获取（错题样本、变式题）
-//      仍然由 handoutService 统一调度。
-//
-// 模板接口（每个 .js 文件必须 export）：
-//   {
-//     id:        string,        // 唯一 id：'default' | 'exam_review' | 'wrong_review' | 'english_default'
-//     label:     string,        // 前端展示名：「默认讲义」「考前冲刺」「错题复习」「英语讲义」
-//     description: string,      // 模板简介，UI 鼠标悬停用
-//     supportsSubject: string[] | 'all',  // 支持的学科，如 ['数学'] / ['英语'] / 'all'
-//     buildSections: async (ctx) => Block[],  // 拼装一个知识点的页面 blocks
-//   }
-//
-// 调用方：handoutService.buildHandout() 接收 { template } 参数，
-// 通过 getTemplate(template) 获取模板实例。
+// P0 定位重塑后：只保留"备课讲义"用途的模板，去掉所有"练习卷"型模板。
+// 模板由 templates/ 提供，详情见模板目录。
 // ============================================================
 
-import defaultTemplate from './default.js'
-import examReviewTemplate from './examReview.js'
-import wrongReviewTemplate from './wrongReview.js'
-import englishDefaultTemplate from './englishDefault.js'
+import lecturePrepTemplate from './lecturePrep.js'
+import englishLecturePrepTemplate from './englishLecturePrep.js'
 
 const TEMPLATES = new Map()
 
@@ -39,10 +21,8 @@ const register = (template) => {
 }
 
 // 内置模板注册
-register(defaultTemplate)
-register(examReviewTemplate)
-register(wrongReviewTemplate)
-register(englishDefaultTemplate)
+register(lecturePrepTemplate)
+register(englishLecturePrepTemplate)
 
 /**
  * 通过 id 获取模板
@@ -78,11 +58,11 @@ export const registerTemplate = (template) => register(template)
 
 /**
  * 兜底：若传入未知 template id，自动按学科挑选合适模板。
- * 数学 → default，英语 → english_default，否则 default。
+ * 英语 → english_lecture_prep，否则 lecture_prep。
  */
 export const pickTemplateBySubject = (subject) => {
-  if (subject === '英语') return getTemplate('english_default') || getTemplate('default')
-  return getTemplate('default')
+  if (subject === '英语') return getTemplate('english_lecture_prep') || getTemplate('lecture_prep')
+  return getTemplate('lecture_prep')
 }
 
-export { defaultTemplate, examReviewTemplate, wrongReviewTemplate, englishDefaultTemplate }
+export { lecturePrepTemplate, englishLecturePrepTemplate }
