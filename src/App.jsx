@@ -13,7 +13,7 @@ import {
 import { motion, AnimatePresence } from 'motion/react'
 import { useLocation, useNavigate } from 'react-router-dom'
 import { useStudentStore, useTaskStore, useWrongQuestionStore, useExamStore } from './store'
-import { getStudents, getTasksByStudent, getQuestionsByTask, getWrongQuestionsByStudent, getExamsByStudent, getGeneratedExamsByStudent, getGeneratedExamById, updateTaskStatus, updateQuestion, updateQuestionTags, invalidateCache, createStudent, updateWrongQuestionStatus, getQuestionsByIds, deleteTask, deleteGeneratedExam, deleteWrongQuestion, getTaskById, recalculateTaskStats, clearStudentCaches, peekCache, getTasksSummary } from './services/apiService'
+import { getStudents, getTasksByStudent, getQuestionsByTask, getWrongQuestionsByStudent, getExamsByStudent, getGeneratedExamsByStudent, getGeneratedExamById, updateTaskStatus, updateQuestion, updateQuestionTags, invalidateCache, createStudent, updateWrongQuestionStatus, getQuestionsByIds, deleteTask, deleteGeneratedExam, deleteWrongQuestion, getTaskById, recalculateTaskStats, clearStudentCaches, peekCache, getTasksSummary, markNotificationsRead } from './services/apiService'
 import { taskService } from './services/taskService'
 import { usePaperBank } from './features/PaperBank/index.jsx'
 import { useUploadFlow } from './hooks/useUploadFlow'
@@ -333,6 +333,18 @@ export default function App() {
       if (data?.success) setNotifSummary(data.summary)
     } catch { /* 忽略通知摘要失败 */ }
   }, 30000, true, [])
+
+  // 打开通知面板：先标记全部已读（铃铛数字归零），再展示面板与最新摘要
+  const handleOpenNotifications = async () => {
+    try {
+      await markNotificationsRead()
+    } catch { /* 标记失败不阻塞打开面板 */ }
+    setShowNotifications(true)
+    try {
+      const data = await getTasksSummary(false)
+      if (data?.success) setNotifSummary(data.summary)
+    } catch { /* 忽略 */ }
+  }
 
   // Load questions for reprint — 始终从服务端获取最新 question_ids，防止缓存/列表数据过期
   useEffect(() => {
@@ -941,7 +953,7 @@ export default function App() {
           isInitializing={isInitializing}
           onOpenStudentSwitcher={() => setShowStudentSwitcher(true)}
           onOpenLearningReport={() => setShowLearningReport(true)}
-          onOpenNotifications={() => setShowNotifications(true)}
+          onOpenNotifications={handleOpenNotifications}
           notificationCount={notifSummary?.totalNotifications || 0}
         />
 

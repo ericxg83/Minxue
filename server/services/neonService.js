@@ -40,7 +40,8 @@ export const updateTaskStatus = async (taskId, status, result = null) => {
          retry_count = COALESCE($4, retry_count),
          last_error = COALESCE($5, last_error),
          started_at = COALESCE($6::timestamptz, started_at),
-         failed_at = COALESCE($7::timestamptz, failed_at)
+         failed_at = COALESCE($7::timestamptz, failed_at),
+         notification_read_at = CASE WHEN $1 IN ('done', 'failed') THEN NULL ELSE notification_read_at END
      WHERE id = $8`,
     [status, updateData.result, updateData.updated_at,
      retryCount, lastError, startedAt, failedAt, taskId]

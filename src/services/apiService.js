@@ -245,6 +245,13 @@ export const getTasksSummary = async (useCache = true) => {
   return data
 }
 
+// 标记通知全部已读（批改完成/识别失败任务 → notification_read_at = NOW），铃铛数字归零
+export const markNotificationsRead = async () => {
+  const data = await apiRequest('/tasks/notifications/read', { method: 'POST' })
+  if (data?.success) clearCache('tasks_summary_cache')
+  return data
+}
+
 export const getExamsByStudent = async (studentId, useCache = true) => {
   const cacheKey = `exams_cache_${studentId}`
 
@@ -844,7 +851,8 @@ export const invalidateCache = (type, studentId) => {
     exams: `exams_cache_${studentId}`,
     wrong: `wrong_questions_cache_${studentId}`,
     questions: null,
-    generated: `generated_exams_cache_${studentId}`
+    generated: `generated_exams_cache_${studentId}`,
+    summary: 'tasks_summary_cache'
   }
 
   const key = keyMap[type]

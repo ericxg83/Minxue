@@ -39,7 +39,11 @@ export default function NotificationsPanel({ onClose }) {
     { key: 'todayNewWrongQuestions', label: '今日新增错题', value: summary?.todayNewWrongQuestions ?? 0, icon: Sparkles, color: 'var(--primary)' }
   ]
 
-  const hasContent = !loading && summary && (summary.totalNotifications > 0 || summary.todayNewWrongQuestions > 0)
+  const hasContent = !loading && summary && (
+    summary.totalNotifications > 0 ||
+    summary.todayNewWrongQuestions > 0 ||
+    (summary.recentTasks || []).length > 0
+  )
 
   return (
     <div className="absolute inset-0 z-[100] animate-fade-in" style={{ background: 'rgba(0,0,0,0.3)' }}>

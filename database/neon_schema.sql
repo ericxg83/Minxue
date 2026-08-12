@@ -27,6 +27,7 @@ CREATE TABLE IF NOT EXISTS tasks (
     last_error TEXT,
     started_at TIMESTAMP WITH TIME ZONE,
     failed_at TIMESTAMP WITH TIME ZONE,
+    notification_read_at TIMESTAMP WITH TIME ZONE, -- 通知已读时间（NULL=未读；done/failed 才参与铃铛计数）
     created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
     updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
 );

@@ -21,6 +21,7 @@ CREATE TABLE IF NOT EXISTS tasks (
   original_name TEXT,
   status TEXT DEFAULT 'pending', -- pending, processing, done, failed
   result JSONB,
+  notification_read_at TIMESTAMPTZ, -- 通知已读时间（NULL=未读）
   created_at TIMESTAMPTZ DEFAULT NOW(),
   updated_at TIMESTAMPTZ DEFAULT NOW()
 );
