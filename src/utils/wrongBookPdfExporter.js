@@ -1,6 +1,7 @@
 import dayjs from 'dayjs'
 import { getQuestionsByIds } from '../services/apiService'
 import { generateExamPDF } from './pdfGenerator'
+import { captureBeforeGenerateExamPDF } from './pdfDiagCapture'
 
 /**
  * 错题卷 PDF 公共导出引擎（WrongBookPdfExporter）
@@ -63,6 +64,15 @@ export async function exportWrongBookPDF({
   const baseFile = filename || (name ? `${name}_错题重练_${dayjs().format('YYYYMMDD_HHmm')}` : `错题重练_${dayjs().format('YYYYMMDD_HHmm')}`)
 
   // 3. 唯一渲染出口
+  // ── 纯诊断（仅日志，不改任何生产逻辑）：在真实调用点前抓取实际传入的题目数据 ──
+  captureBeforeGenerateExamPDF({
+    title: baseTitle,
+    studentName: name,
+    questions: qs,
+    showAnswers,
+    qrContent,
+  })
+
   return generateExamPDF({
     title: baseTitle,
     studentName: name,

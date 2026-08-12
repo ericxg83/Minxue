@@ -1,0 +1,10 @@
+﻿fixture: 错题再测-0812 | 蔡怡希 | 20题
+打开 http://localhost:3000 ...
+✅ A PDF 已保存: D:\Minxue_App_V3\e2e\_ab_out\ab-a.pdf 458705 bytes
+
+========== A vs B PDF 对比 ==========
+A size: 458705 bytes
+B size: 458705 bytes
+A sha256: bb71cc065d2f451a
+B sha256: 450042e49b5a2b7d
+→ 字节数完全相同，可能是同一份 PDF（一致）

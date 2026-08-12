@@ -1,0 +1,99 @@
+﻿测 91 个 katex，overflowTop/Bottom > 0.5px 的: 36
+q0.k0  katex=199×18  vlist×6  无越界  svg×2 top172.1 h17
+q0.k1  katex=4×18  vlist×0  无越界  no-svg
+q1.k0  katex=120×18  vlist×5   ↓-4.5越下  svg×1 top313.7 h12
+q1.k1  katex=9×18  vlist×0  无越界  no-svg
+q1.k2  katex=4×18  vlist×0  无越界  no-svg
+q2.k0  katex=30×18  vlist×0  无越界  no-svg
+q2.k1  katex=8×18  vlist×0  无越界  no-svg
+q2.k2  katex=50×18  vlist×3  ↑-1.8越上  svg×1 top436.3 h17
+q2.k3  katex=43×18  vlist×0  无越界  no-svg
+q2.k4  katex=50×18  vlist×3  ↑-1.8越上  svg×1 top436.3 h17
+q2.k5  katex=4×18  vlist×0  无越界  no-svg
+q3.k0  katex=29×18  vlist×2  无越界  svg×1 top564.8 h17
+q3.k1  katex=12×18  vlist×0  无越界  no-svg
+q3.k2  katex=30×18  vlist×4   ↓-1.4越下  svg×1 top564.8 h17
+q3.k3  katex=12×18  vlist×0  无越界  no-svg
+q4.k0  katex=20×18  vlist×0  无越界  no-svg
+q4.k1  katex=70×18  vlist×4   ↓-5.8越下  svg×1 top706.3 h12
+q4.k2  katex=8×18  vlist×0  无越界  no-svg
+q4.k3  katex=7×18  vlist×0  无越界  no-svg
+q4.k4  katex=84×18  vlist×2  无越界  svg×1 top694.8 h17
+q4.k5  katex=7×18  vlist×0  无越界  no-svg
+q5.k0  katex=8×18  vlist×0  无越界  no-svg
+q5.k1  katex=12×18  vlist×0  无越界  no-svg
+q5.k2  katex=50×18  vlist×10  ↑-3.7越上 ↓-5.8越下  svg×4 top841.8 h12
+q5.k3  katex=7×18  vlist×0  无越界  no-svg
+q5.k4  katex=12×18  vlist×0  无越界  no-svg
+q5.k5  katex=50×18  vlist×10  ↑-3.7越上 ↓-5.8越下  svg×4 top841.8 h12
+q5.k6  katex=124×18  vlist×2  无越界  no-svg
+q6.k0  katex=47×18  vlist×6  ↑-3.7越上 ↓-4.5越下  svg×2 top979.0 h12
+q6.k1  katex=12×18  vlist×0  无越界  no-svg
+q6.k2  katex=21×18  vlist×2  无越界  svg×1 top967.6 h17
+q6.k3  katex=12×18  vlist×0  无越界  no-svg
+q6.k4  katex=30×18  vlist×2  无越界  svg×1 top967.6 h17
+q6.k5  katex=12×18  vlist×0  无越界  no-svg
+q6.k6  katex=25×18  vlist×4  ↑-5.4越上 ↓-5.5越下  svg×1 top962.4 h30
+q7.k0  katex=20×18  vlist×0  无越界  no-svg
+q7.k1  katex=8×18  vlist×0  无越界  no-svg
+q7.k2  katex=7×18  vlist×0  无越界  no-svg
+q7.k3  katex=14×18  vlist×0  无越界  no-svg
+q7.k4  katex=9×18  vlist×0  无越界  no-svg
+q7.k5  katex=183×18  vlist×13  无越界  svg×2 top1101.1 h17
+q8.k0  katex=114×18  vlist×3  ↑-0.7越上 ↓-0.8越下  svg×1 top1230.7 h20
+q8.k1  katex=12×18  vlist×0  无越界  no-svg
+q8.k2  katex=118×18  vlist×3  ↑-0.7越上 ↓-0.8越下  svg×1 top1230.7 h20
+q9.k0  katex=20×18  vlist×0  无越界  no-svg
+q9.k1  katex=35×18  vlist×4  ↑-5.4越上 ↓-5.5越下  svg×1 top1359.5 h30
+q9.k2  katex=48×18  vlist×0  无越界  no-svg
+q10.k0  katex=20×18  vlist×0  无越界  no-svg
+q10.k1  katex=49×18  vlist×0  无越界  no-svg
+q11.k0  katex=34×18  vlist×0  无越界  no-svg
+
+异常样本:
+q0.k0: katex top=173.0 bot=191.0 h=18.0
+   vlist[0] top=172.7 bot=187.0 h=14.3
+   vlist[1] top=187.0 bot=189.1 h=2.1
+   vlist[2] top=174.2 bot=187.0 h=12.8
+   vlist[3] top=172.7 bot=187.0 h=14.3
+   vlist[4] top=187.0 bot=189.1 h=2.1
+   vlist[5] top=174.2 bot=187.0 h=12.8
+   svg[0] top=172.1 h=17.0
+   svg[1] top=172.1 h=17.0
+q1.k0: katex top=303.1 bot=321.1 h=18.0
+   vlist[0] top=304.3 bot=317.1 h=12.8
+   vlist[1] top=303.8 bot=317.1 h=13.3
+   vlist[2] top=314.1 bot=323.0 h=8.9
+   vlist[3] top=323.0 bot=325.5 h=2.6
+   vlist[4] top=317.1 bot=325.5 h=8.5
+   svg[0] top=313.7 h=11.9
+q2.k2: katex top=435.5 bot=453.5 h=18.0
+   vlist[0] top=437.0 bot=449.5 h=12.6
+   vlist[1] top=449.5 bot=453.3 h=3.8
+   vlist[2] top=433.8 bot=449.5 h=15.8
+   svg[0] top=436.3 h=17.0
+q2.k4: katex top=435.5 bot=453.5 h=18.0
+   vlist[0] top=437.0 bot=449.5 h=12.6
+   vlist[1] top=449.5 bot=453.3 h=3.8
+   vlist[2] top=433.8 bot=449.5 h=15.8
+   svg[0] top=436.3 h=17.0
+q3.k0: katex top=565.6 bot=583.6 h=18.0
+   vlist[0] top=565.4 bot=579.6 h=14.3
+   vlist[1] top=579.6 bot=581.7 h=2.1
+   svg[0] top=564.8 h=17.0
+q3.k2: katex top=565.6 bot=583.6 h=18.0
+   vlist[0] top=566.4 bot=579.6 h=13.3
+   vlist[1] top=579.6 bot=585.1 h=5.4
+   vlist[2] top=565.4 bot=579.6 h=14.3
+   vlist[3] top=579.6 bot=581.7 h=2.1
+   svg[0] top=564.8 h=17.0
+q4.k1: katex top=695.7 bot=713.7 h=18.0
+   vlist[0] top=696.5 bot=709.7 h=13.3
+   vlist[1] top=706.8 bot=716.8 h=10.0
+   vlist[2] top=716.8 bot=718.2 h=1.4
+   vlist[3] top=709.7 bot=719.5 h=9.8
+   svg[0] top=706.3 h=11.9
+q4.k4: katex top=695.7 bot=713.7 h=18.0
+   vlist[0] top=695.5 bot=709.7 h=14.3
+   vlist[1] top=709.7 bot=711.8 h=2.1
+   svg[0] top=694.8 h=17.0
