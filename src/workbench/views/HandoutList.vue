@@ -6,8 +6,12 @@
         <span class="page-subtitle">保存的备课讲义、笔记、可继续编辑</span>
       </div>
       <div class="header-right">
-        <el-button type="primary" :icon="EditPen" @click="goNewHandout">
-          <el-icon><Plus /></el-icon>
+        <el-button @click="cleanupOldBlocks" plain :loading="cleaning">
+          <el-icon><Brush /></el-icon>
+          清理旧数据
+        </el-button>
+        <el-button type="primary" @click="goNewHandout">
+          <el-icon><EditPen /></el-icon>
           新建讲义
         </el-button>
       </div>
@@ -89,7 +93,7 @@
 import { ref, onMounted, watch } from 'vue'
 import { useRouter } from 'vue-router'
 import { ElMessage, ElMessageBox } from 'element-plus'
-import { EditPen, Plus, Search, Document, Files, Edit, CopyDocument, Delete } from '@element-plus/icons-vue'
+import { EditPen, Search, Document, Files, Edit, CopyDocument, Delete, Brush } from '@element-plus/icons-vue'
 import { apiRequest } from '../../services/apiService'
 
 const router = useRouter()
@@ -98,6 +102,7 @@ const lectures = ref([])
 const total = ref(0)
 const search = ref('')
 const subjectFilter = ref(null)
+const cleaning = ref(false)
 let searchTimer = null
 
 function formatTime(t) {
@@ -171,6 +176,33 @@ async function confirmDelete(lec) {
   } catch (e) {
     if (e === 'cancel' || e?.message?.includes('cancel')) return
     ElMessage.error('删除失败: ' + e.message)
+  }
+}
+
+async function cleanupOldBlocks() {
+  try {
+    await ElMessageBox.confirm(
+      '将扫描所有讲义，删除含"变式改写 / 强化训练 / 变式练习 / 错题重练"等老版关键词的 block。\n\n清空整页的讲义会被整份删除。此操作不可恢复，是否继续？',
+      '清理旧数据',
+      { type: 'warning', confirmButtonText: '开始清理', cancelButtonText: '取消' }
+    )
+  } catch {
+    return
+  }
+  cleaning.value = true
+  try {
+    const resp = await apiRequest('/handout/lectures/cleanup-old-blocks', { method: 'POST' })
+    if (resp.success) {
+      const { removedLectures, sanitizedLectures, removedBlocks } = resp
+      ElMessage.success(
+        `清理完成：删除 ${removedLectures} 份、清理 ${sanitizedLectures} 份、共 ${removedBlocks} 个 block`
+      )
+      loadList()
+    }
+  } catch (e) {
+    ElMessage.error('清理失败: ' + e.message)
+  } finally {
+    cleaning.value = false
   }
 }
 

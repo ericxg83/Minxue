@@ -53,7 +53,10 @@ export default {
 
     let qIdx = 0
     for (const [qType, qs] of typeGroups) {
-      const typeLabel = ENGLISH_QUESTION_TYPE_LABELS[qType] || qType
+      // 归一化显示：'other' / 'unknown' / '' 统一显示"其他"（不要让原始 key 漏出到 UI）
+      const typeLabel = (qType === 'other' || qType === 'unknown' || !qType)
+        ? '其他'
+        : (ENGLISH_QUESTION_TYPE_LABELS[qType] || qType)
       blocks.push({
         type: 'type-section',
         content: `题型：${typeLabel}（${qs.length} 道）`,
@@ -187,7 +190,7 @@ function groupByQuestionType(questions) {
     if (!type) {
       type = detectEnglishQuestionType(content, opts).type
     }
-    if (!type || type === 'unknown') type = 'other'
+    if (!type || type === 'unknown' || type === 'other') type = 'other' // 'other' 也归入 fallback group
     if (!groups.has(type)) groups.set(type, [])
     groups.get(type).push(q)
   }

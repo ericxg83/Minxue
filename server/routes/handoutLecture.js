@@ -316,6 +316,62 @@ router.post('/lectures/:id/duplicate', async (req, res) => {
   }
 })
 
+// ── 清理老版讲义（blocks 含禁用关键词） ──
+//
+// 用途：用户在升级到 P0-P4 讲义系统后，可能还残留着老版本（"变式改写 / 强化训练"）
+// 保存的讲义。模板已删，本端点清掉 DB 中 blocks 含禁用关键词的讲义。
+router.post('/lectures/cleanup-old-blocks', async (req, res) => {
+  try {
+    const { rows } = await query(
+      `SELECT id, title, blocks FROM handout_lectures`
+    )
+    const FORBIDDEN = [
+      '变式改写', '强化训练', '变式题与', '以下变式题', '建议独立完成',
+      '同类题练习', '同考点变式', '变式练习', '举一反三', '拓展训练',
+      '强化提升', '错题重练', '再做一遍', '巩固练习',
+    ]
+    let removedLectures = 0
+    let sanitizedLectures = 0
+    let removedBlocks = 0
+
+    for (const lec of rows) {
+      const blocks = lec.blocks
+      if (!Array.isArray(blocks)) continue
+      let changed = false
+      const cleaned = blocks.map(p => {
+        if (!p || !Array.isArray(p.blocks)) return p
+        const before = p.blocks.length
+        const kept = p.blocks.filter(b => {
+          if (!b) return false
+          const text = [b.content, b.title, b.subtitle].filter(Boolean).join(' ')
+          const hit = FORBIDDEN.some(kw => String(text).includes(kw))
+          if (hit) { changed = true; return false }
+          return true
+        })
+        removedBlocks += before - kept.length
+        return { ...p, blocks: kept }
+      })
+      if (!changed) continue
+      // 全部页都空了 → 删除整份讲义；否则更新
+      const totalBlocks = cleaned.reduce((s, p) => s + (p.blocks?.length || 0), 0)
+      if (totalBlocks === 0) {
+        await query(`DELETE FROM handout_lectures WHERE id = $1`, [lec.id])
+        removedLectures += 1
+      } else {
+        await query(
+          `UPDATE handout_lectures SET blocks = $2::jsonb, updated_at = now() WHERE id = $1`,
+          [lec.id, JSON.stringify(cleaned)]
+        )
+        sanitizedLectures += 1
+      }
+    }
+    res.json({ success: true, removedLectures, sanitizedLectures, removedBlocks })
+  } catch (e) {
+    console.error('[handoutLecture] 清理旧讲义失败:', e)
+    res.status(500).json({ success: false, error: e.message })
+  }
+})
+
 // ── P4 提词器脚本更新 ──
 router.put('/lectures/:id/lecture-script', async (req, res) => {
   try {

@@ -187,7 +187,39 @@ export async function buildHandout({ title, subject = '数学', periodText = '',
     periodText,
     template: tpl ? tpl.id : 'default',
     templateLabel,
-    pages,
+    pages: pages.map(p => ({ ...p, blocks: sanitizeBlocks(p.blocks) })),
     generatedAt: new Date().toISOString(),
   }
+}
+
+// ============================================================
+// 防御性过滤：去掉任何含老版字样（变式改写/强化训练/独立完成 等）的 block
+//
+// 历史背景：旧版讲义模板会输出"变式改写 / 强化训练"块，用户已明确表示
+// 不要变式题、不要题库化训练。模板已删除这些 block，但以下两种情况仍会漏出：
+//   1. Render 还在跑旧版代码（部署延迟）
+//   2. AI 讲解中输出了"建议独立完成"等变式题相关字样
+// 本函数做最后一道兜底——所有 block.content / block.title 包含禁用关键词时丢弃。
+// 涉及块类型：section、type-section、question、analysis、lecture-guidance、text、note
+// ============================================================
+const FORBIDDEN_BLOCK_KEYWORDS = [
+  '变式改写', '强化训练', '变式题与', '以下变式题', '建议独立完成',
+  '同类题练习', '同考点变式', '变式练习', '举一反三', '拓展训练',
+  '强化提升', '错题重练', '再做一遍', '巩固练习',
+]
+
+function blockText(b) {
+  if (!b) return ''
+  return [b.content, b.title, b.subtitle].filter(Boolean).join(' ').toString()
+}
+
+function blockHasForbiddenKeyword(b) {
+  const text = blockText(b)
+  if (!text) return false
+  return FORBIDDEN_BLOCK_KEYWORDS.some(kw => text.includes(kw))
+}
+
+export function sanitizeBlocks(blocks) {
+  if (!Array.isArray(blocks)) return blocks
+  return blocks.filter(b => !blockHasForbiddenKeyword(b))
 }
