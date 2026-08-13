@@ -33,6 +33,13 @@ services:
         sync: false
       - key: BACKUP_VL_MODEL
         sync: false
+      # 2026-08 实验：第二备用供应商 ZenMux（多模型聚合网关，OpenAI 兼容）。
+      # pay-as-you-go：deepseek 文本免费、mino 视觉免费。
+      # 需用户从 Render Dashboard 手动填入 Key（默认空，BACKUP_VENDOR_DEFS 自动按 keyPrefix 过滤）。
+      # 在 WorksheetManagement 顶部"AI 供应商预览"按钮里在线测试效果。
+      # 注意：zenmux.ai 在中国大陆被墙，Render（Oregon）出站正常。
+      - key: ZENMUX_API_KEY
+        sync: false
       - key: OSS_REGION
         value: oss-cn-shanghai
       - key: OSS_BUCKET
