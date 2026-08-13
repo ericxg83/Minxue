@@ -2512,6 +2512,7 @@ if (process.argv[1] === __filename || process.argv[1]?.endsWith('server/index.js
       await migrateVariantQuestionType()
       await migrateRelaxQuestionTypeCheck()
       await migrateHandoutLectures()
+      await migrateTaskNotificationRead()
     } catch (err) {
       console.error('数据库迁移失败:', err.message)
     }
