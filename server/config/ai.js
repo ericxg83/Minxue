@@ -237,11 +237,28 @@ export const getAIHeaders = () => ({
 
 export const BACKUP_VENDOR_DEFS = [
   {
+    // ZenMux (https://zenmux.ai)：多模型聚合网关，OpenAI 兼容。
+    // 2026-08-13 用户临时放到第一位测试：pay-as-you-go key（sk-ai-v1-...）
+    //   deepseek 文本免费、mino 视觉免费，独立配额不影响魔搭。
+    // 仅当 ZENMUX_API_KEY=sk-ai-v1-... 时加载（keyPrefix 自动过滤），未配则自动跳过。
+    // 注意：zenmux.ai 在中国大陆被 GFW 墙（GFW reset），必须从 Render (Oregon) 出站；
+    //      本地开发机调试时无法访问。
+    // 实际效果待 Render 实际跑一次后调整位置和模型名。
+    name: 'ZenMux',
+    envKey: 'ZENMUX_API_KEY',
+    endpoint: 'https://zenmux.ai/api/v1/chat/completions',
+    modelsEndpoint: 'https://zenmux.ai/api/v1/models',
+    textModel: 'deepseek-chat',
+    vlModels: ['mino/mino-1.5', 'qwen/qwen2.5-vl-72b-instruct', 'google/gemini-2.5-flash'],
+    keyPrefix: 'sk-ai-v1-',
+    referer: null,
+  },
+  {
     // SenseNova（商汤日日新）：OpenAI 兼容格式，公测期免费。
     // sensenova-6.7-flash-lite 支持多模态视觉理解，配额 1500 次/5 小时。
     // 必须传 reasoning_effort:'none' 禁用思考模式，否则思考过程太长（3754+ tokens）
     // 导致 max_tokens 耗尽在 reasoning 阶段，永远拿不到 content。
-    // 顺序：视觉效果好且配额独立，放备份供应商第一位（魔搭之后）。
+    // 顺序：视觉效果好且配额独立。2026-08-13 因 ZenMux 测试临时让出第一位。
     name: 'SenseNova',
     envKey: 'SENSENOVA_API_KEY',
     endpoint: 'https://token.sensenova.cn/v1/chat/completions',
@@ -271,23 +288,6 @@ export const BACKUP_VENDOR_DEFS = [
     endpoint: 'https://api.freemodel.dev/v1/chat/completions',
     textModel: 'auto',
     vlModels: ['auto'],
-    referer: null,
-  },
-  {
-    // ZenMux (https://zenmux.ai)：多模型聚合网关，OpenAI 兼容。
-    // 2026-08 用户提供的 pay-as-you-go key（sk-ai-v1-...）：
-    //   deepseek 文本免费、mino 视觉免费，按"独立配额"原则放在最后兜底。
-    // 默认 disable：必须显式 ZENMUX_API_KEY=sk-ai-v1-... 才加载（keyPrefix 自动过滤）。
-    // 注意：zenmux.ai 在中国大陆被墙（GFW reset），必须从 Render（Oregon）出站；
-    //      本地开发机调试时无法访问。
-    // 实际效果待 Render 实际跑一次后调整位置和模型名。
-    name: 'ZenMux',
-    envKey: 'ZENMUX_API_KEY',
-    endpoint: 'https://zenmux.ai/api/v1/chat/completions',
-    modelsEndpoint: 'https://zenmux.ai/api/v1/models',
-    textModel: 'deepseek-chat',
-    vlModels: ['mino/mino-1.5', 'qwen/qwen2.5-vl-72b-instruct', 'google/gemini-2.5-flash'],
-    keyPrefix: 'sk-ai-v1-',
     referer: null,
   },
 ]
