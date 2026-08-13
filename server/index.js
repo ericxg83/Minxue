@@ -37,6 +37,7 @@ import { migrateVariantQuestions } from './migrations/037_add_variant_questions.
 import { migrateVariantQuestionType } from './migrations/042_add_variant_question_type.js'
 import { migrateRelaxQuestionTypeCheck } from './migrations/043_relax_question_type_check.js'
 import { migrateHandoutLectures } from './migrations/045_handout_lectures.js'
+import { migrateTaskNotificationRead } from './migrations/046_add_task_notification_read.js'
 import { scheduleNightParse } from './services/nightParseService.js'
 
 const __dirname = dirname(fileURLToPath(import.meta.url))
