@@ -71,6 +71,7 @@ const ENGLISH_QUESTION_TYPE_PATTERNS = [
     /—\s*[A-D][\.\)]/,
     /下列.{0,12}中.{0,12}(?:正确|错误|符合|是|不是)/,
     /which\s+of\s+the\s+following/i,
+    /从.{0,8}中?选出.{0,8}(?:正确|最佳|最适当|最合适的)/i,
   ]},
 ]
 
@@ -82,8 +83,22 @@ const ENGLISH_QUESTION_TYPE_PATTERNS = [
  */
 export function detectEnglishQuestionType(content, options = null) {
   const text = String(content || '')
-  const optText = Array.isArray(options) ? options.join('；') : (options || '')
+  const optArr = Array.isArray(options) ? options : (options ? [options] : [])
+  const optText = optArr.join('；')
   const haystack = `${text}\n${optText}`
+
+  // 兜底：如果有 4 个独立选项（OCR 出来的选择题/语法选择题几乎都是这个结构），
+  // 即使题干/选项文本都不命中上面的 pattern，也判定为"选择题"。
+  // 典型样例：if it ___ tomorrow, A.rains B.rain C.will rain D.rained
+  if (optArr.length === 4) {
+    const looksLikeChoice = optArr.every(o => {
+      const s = String(o || '').trim()
+      return s.length > 0 && s.length < 60  // 短答案 → 选择题；长文段 → 阅读
+    })
+    if (looksLikeChoice) {
+      return { type: 'choice', label: '选择题' }
+    }
+  }
 
   for (const { type, label, patterns } of ENGLISH_QUESTION_TYPE_PATTERNS) {
     if (patterns.some(p => p.test(haystack))) {
