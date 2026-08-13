@@ -15,7 +15,7 @@
 //   - 按知识点为主（诊断的根），页内按题型分组（同一知识点下的不同考法）
 // ============================================================
 
-import { generateKnowledgeExplanation } from '../handoutService.js'
+import { generateKnowledgeExplanation, generateQuestionTypeSummary } from '../handoutService.js'
 
 export default {
   id: 'lecture_prep',
@@ -31,22 +31,25 @@ export default {
    *        每条: { questionId, content, options, imageUrls, studentAnswer, correctAnswer,
    *                isBlank, errorType, errorReason, studentName, questionType }
    * @param {string} [ctx.explanation] - 预生成讲解
-   * @returns {Promise<Array>} blocks
+   * @returns {Promise<{pages: Array<{name, blocks}>}>} 三页结构：知识点 → 例题 → 题型归纳
    */
   buildSections: async ({ kpName, subject = '数学', sampleQuestions = [], explanation = null }) => {
-    const blocks = []
+    const pages = []
 
-    // 1. 知识点速览（AI 科普讲解，保持现状 200-300 字）
+    // ─── Page 1: 知识点速览（AI 详讲 500-800 字 → 1-2 页） ───
     const text = explanation || await generateKnowledgeExplanation(kpName, subject)
-    if (text) {
-      blocks.push({ type: 'kp-overview', content: text })
-    }
+    pages.push({
+      name: `${kpName} · 知识点`,
+      blocks: [
+        { type: 'kp-overview', content: text || `*（${kpName} 讲解暂不可用）*` },
+      ],
+    })
 
     if (sampleQuestions.length === 0) {
-      return blocks
+      return { pages }
     }
 
-    // 2. 错题概况统计
+    // ─── Page 2: 例题（本周典型错题，按题型分组） ───
     const blankCount = sampleQuestions.filter(q => q.isBlank).length
     const wrongCount = sampleQuestions.length - blankCount
     const typeGroups = groupByType(sampleQuestions)
@@ -54,34 +57,25 @@ export default {
       type: t,
       count: qs.length,
     }))
-    blocks.push({
-      type: 'kp-stats',
-      content: {
-        total: sampleQuestions.length,
-        blankCount,
-        wrongCount,
-        typeCount: typeGroups.size,
-        types: typeSummary,
+
+    const exBlocks = [
+      {
+        type: 'kp-stats',
+        content: { total: sampleQuestions.length, blankCount, wrongCount, typeCount: typeGroups.size, types: typeSummary },
       },
-    })
-
-    // 3. 本周典型错题（按题型分组）
-    blocks.push({ type: 'section', content: '本周典型错题' })
-
+      { type: 'section', content: '本周典型错题' },
+    ]
     let qIdx = 0
     for (const [qType, qs] of typeGroups) {
-      // 题型小标题
-      blocks.push({
+      exBlocks.push({
         type: 'type-section',
         content: `题型：${qType}（${qs.length} 道${qs.some(q => q.isBlank) ? `，含空题 ${qs.filter(q => q.isBlank).length}` : ''}）`,
         questionType: qType,
         count: qs.length,
       })
-
-      // 该题型下的错题
       for (const q of qs) {
         qIdx += 1
-        blocks.push({
+        exBlocks.push({
           type: 'question',
           content: `错题 ${qIdx}. ${q.content || '(题干缺失)'}`,
           options: q.options,
@@ -89,33 +83,41 @@ export default {
           questionType: qType,
           questionId: q.questionId,
         })
-        blocks.push({
+        exBlocks.push({
           type: 'answer',
           content: `【${q.studentName || '学生'}】作答：${q.isBlank ? '（空题，未作答）' : (q.studentAnswer || '—')}`,
           correctAnswer: q.correctAnswer || '—',
           isCorrect: q.isBlank ? false : (q.studentAnswer === q.correctAnswer),
         })
         if (q.errorType) {
-          blocks.push({
+          exBlocks.push({
             type: 'analysis',
             content: `错因：${q.errorType}${q.errorReason ? `：${q.errorReason}` : ''}`,
           })
         }
-        // 讲解引导（P0 暂为简单模板，P4 由提词器生成更详细脚本）
-        blocks.push({
+        exBlocks.push({
           type: 'lecture-guidance',
           content: buildLectureGuidance(q),
         })
       }
     }
+    pages.push({
+      name: `${kpName} · 例题（本周错题）`,
+      blocks: exBlocks,
+    })
 
-    // 4. 相关知识点（从其他 sampleQuestions 提取，兜底为空）
-    blocks.push({ type: 'related-kp', content: [] })
+    // ─── Page 3: 题型归纳（AI 归纳"换着样考的题型"） ───
+    const typeSummaryList = await generateQuestionTypeSummary(kpName, subject, sampleQuestions)
+    pages.push({
+      name: `${kpName} · 题型归纳`,
+      blocks: [
+        { type: 'section', content: '本知识点"换着样考"的题型' },
+        { type: 'type-summary', content: typeSummaryList || [] },
+        { type: 'note', content: '' },
+      ],
+    })
 
-    // 5. 📝 老师笔记（P0 占位，P2 激活可编辑）
-    blocks.push({ type: 'note', content: '' })
-
-    return blocks
+    return { pages }
   },
 }
 

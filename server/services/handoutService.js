@@ -23,7 +23,8 @@ const _explanationCache = new Map()
 const EXPLANATION_CACHE_MAX = 256
 
 /**
- * AI 生成知识点的讲解文本。
+ * AI 生成知识点的讲解文本（详讲版，500-800 字 → 1-2 页）。
+ * 覆盖：核心定义 / 关键概念 / 常见错误 / 考点 / 解题思路 / 记忆技巧。
  * @param {string} kpName 知识点名称（如"相似三角形"）
  * @param {string} subject 学科
  * @returns {Promise<string>} 讲解 Markdown 文本
@@ -32,21 +33,24 @@ export async function generateKnowledgeExplanation(kpName, subject = '数学') {
   if (!kpName) return ''
 
   // ── 缓存命中：跳过 AI 调用 ──
-  const cacheKey = `${subject}::${kpName}`
+  const cacheKey = `${subject}::${kpName}::detailed`
   if (_explanationCache.has(cacheKey)) {
     return _explanationCache.get(cacheKey)
   }
 
   const prompt = {
-    systemContent: `你是一位经验丰富的 K12 ${subject}老师。请用通俗易懂的语言，为"${kpName}"这个知识点写一段 200-300 字的精讲。
+    systemContent: `你是一位经验丰富的 K12 ${subject}老师。请为"${kpName}"这个知识点写一段**详讲**，目标长度 500-800 字（约 1-2 页讲义）。
 
-要求：
-1. 先说明这个知识点的核心定义/概念。
-2. 然后指出学生最容易出错的地方。
-3. 最后给出一个简单实用的记忆技巧或解题口诀。
-4. 内容要适合初中生理解，不要过于学术化。
-5. 使用 Markdown 格式输出。`,
-    userContent: `请为知识点「${kpName}」撰写一段精讲（${subject}学科）。`,
+要求结构（用 Markdown 标题分层）：
+1. **核心定义**：用 1-2 句话说清这个知识点是什么。
+2. **关键概念/要素**：列出 3-5 个关键概念或判断准则（用列表）。
+3. **常见错误/易错点**：列出 3 个学生最常犯的错误（用列表，每项简短说明）。
+4. **典型考法/考点**：列出 2-3 个常见考法方向。
+5. **解题思路/步骤**：用 1-2 段说明遇到这类题时怎么思考、怎么落笔。
+6. **记忆技巧**：给 1 个口诀或记忆方法。
+
+内容要适合初中生理解，不要过于学术化。可用 Markdown 加粗/列表。`,
+    userContent: `请为知识点「${kpName}」撰写一段详讲（${subject}学科），500-800 字。`,
   }
 
   let text
@@ -55,7 +59,7 @@ export async function generateKnowledgeExplanation(kpName, subject = '数学') {
       systemContent: prompt.systemContent,
       userContent: prompt.userContent,
       temperature: 0.5,
-      maxTokens: 800,
+      maxTokens: 1500,
     })
     text = (result.content || '').trim()
   } catch (err) {
@@ -70,6 +74,93 @@ export async function generateKnowledgeExplanation(kpName, subject = '数学') {
   }
   _explanationCache.set(cacheKey, text)
   return text
+}
+
+/**
+ * AI 归纳"本知识点换着样考的题型"（题型归纳页用）。
+ * 基于本周错题样本，让 AI 反推出本知识点还会怎么考。
+ * @param {string} kpName
+ * @param {string} subject
+ * @param {Array} sampleQuestions 错题样本（按题型聚合）
+ * @returns {Promise<Array<{type, description, example, tip}>>}
+ */
+export async function generateQuestionTypeSummary(kpName, subject = '数学', sampleQuestions = []) {
+  if (!kpName) return []
+
+  const cacheKey = `${subject}::${kpName}::types::${sampleQuestions.length}`
+  if (_explanationCache.has(cacheKey)) {
+    return _explanationCache.get(cacheKey)
+  }
+
+  // 压缩错题样本为提示词（只取题型 + 错因 + 内容前 30 字）
+  const questionDigest = sampleQuestions.slice(0, 8).map((q, i) =>
+    `${i + 1}. [${q.questionType || '其他'}] ${(q.content || '').slice(0, 60)}${q.content && q.content.length > 60 ? '...' : ''} (${q.isBlank ? '空题' : '错题'})`
+  ).join('\n')
+
+  const prompt = {
+    systemContent: `你是一位 K12 ${subject}老师，正在备课。基于"${kpName}"这个知识点的本周错题样本，请归纳这个知识点"换着样考"的所有题型（3-5 种），帮老师提前预判学生会怎么错。
+
+输出 JSON 数组（不要任何额外说明文字），每条结构：
+[
+  {
+    "type": "题型名（如：一般现在时 - 否定句 / 一元一次方程 - 应用题 / 选择题 - 动词时态辨析）",
+    "description": "一句话说这种题怎么考、考什么",
+    "example": "用 1 句话给个典型例子的题干（不要给答案）",
+    "tip": "一句话给学生/老师的应对建议"
+  }
+]
+
+要求：
+- 至少 3 种，至多 5 种
+- type 命名要"知识点 + 题型"组合，便于老师快速定位
+- 必须覆盖：错题样本里出现过的题型 + 同知识点下老师没讲到但常考的延伸题型
+- 不要重复列出相同题型`,
+    userContent: `知识点：${kpName}（${subject}）
+
+本周错题样本：
+${questionDigest || '（暂无错题样本，请基于该知识点常见考法推断）'}
+
+请输出 JSON 数组。`,
+  }
+
+  let types = []
+  try {
+    const result = await callTextCompletion({
+      systemContent: prompt.systemContent,
+      userContent: prompt.userContent,
+      temperature: 0.6,
+      maxTokens: 800,
+    })
+    let raw = (result.content || '').trim()
+    // 兜底：AI 偶发包成 ```json ... ```
+    const jsonMatch = raw.match(/```(?:json)?\s*([\s\S]*?)```/) || raw.match(/\[[\s\S]*\]/)
+    if (jsonMatch) raw = jsonMatch[1] || jsonMatch[0]
+    const parsed = JSON.parse(raw)
+    if (Array.isArray(parsed)) {
+      types = parsed.filter(t => t && t.type).slice(0, 5)
+    }
+  } catch (err) {
+    console.warn(`  ⚠️ [Handout] 题型归纳生成失败 ${kpName}:`, err.message)
+    // 兜底：基于错题样本中实际出现过的题型回退
+    const seen = new Map()
+    for (const q of sampleQuestions) {
+      const t = q.questionType || '其他'
+      seen.set(t, (seen.get(t) || 0) + 1)
+    }
+    types = Array.from(seen.entries()).slice(0, 3).map(([type, count]) => ({
+      type,
+      description: `本周出现 ${count} 次错题`,
+      example: '',
+      tip: '',
+    }))
+  }
+
+  if (_explanationCache.size >= EXPLANATION_CACHE_MAX) {
+    const firstKey = _explanationCache.keys().next().value
+    if (firstKey) _explanationCache.delete(firstKey)
+  }
+  _explanationCache.set(cacheKey, types)
+  return types
 }
 
 /**
@@ -90,7 +181,8 @@ export function listHandoutTemplates(subjectFilter = null) {
  * @param {Array} params.sampleQuestions 典型错题 [{content, options, imageUrls, studentAnswer, correctAnswer, isBlank, errorType, errorReason, studentName, questionType}]
  * @param {string} params.explanation 可选，若已提前生成则传入
  * @param {string} [params.template] 模板 id；缺省走学科兜底
- * @returns {Promise<Array<{type, content}>>} 讲义区块列表
+ * @returns {Promise<Array<{name, blocks}>>} 讲义页面列表（多页：知识点 / 例题 / 题型归纳）
+ *          兼容老格式：若模板返回 blocks 数组则包装成单页 [{ name: kpName, blocks }]
  */
 export async function buildKnowledgeSection({ kpName, subject = '数学', sampleQuestions = [], explanation = null, template = null }) {
   // 选模板：显式传入 > 学科兜底 > lecture_prep
@@ -100,7 +192,16 @@ export async function buildKnowledgeSection({ kpName, subject = '数学', sample
     console.warn(`[Handout] 未找到任何讲义模板 (template=${template}, subject=${subject})`)
     return []
   }
-  return await tpl.buildSections({ kpName, subject, sampleQuestions, explanation })
+  const result = await tpl.buildSections({ kpName, subject, sampleQuestions, explanation })
+  // 新格式：{ pages: [{ name, blocks }] }，多页结构（知识点 / 例题 / 题型归纳）
+  if (result && Array.isArray(result.pages)) {
+    return result.pages
+  }
+  // 老格式：blocks 数组，包装成单页
+  if (Array.isArray(result)) {
+    return [{ name: kpName, blocks: result }]
+  }
+  return []
 }
 
 /**
@@ -132,11 +233,15 @@ export async function buildHandout({ title, subject = '数学', periodText = '',
     ],
   })
 
-  // 目录页
-  const tocItems = knowledgeSections.map((ks, idx) => ({
-    index: idx + 1,
-    name: ks.kpName,
-  }))
+  // 目录页：每个知识点展开 3 个子项（知识点 / 例题 / 题型归纳）
+  const tocItems = []
+  knowledgeSections.forEach((ks, idx) => {
+    const base = idx + 1
+    tocItems.push({ index: base, name: ks.kpName, sub: null })
+    tocItems.push({ index: `${base}.1`, name: '知识点', sub: true })
+    tocItems.push({ index: `${base}.2`, name: '例题（本周错题）', sub: true })
+    tocItems.push({ index: `${base}.3`, name: '题型归纳', sub: true })
+  })
   pages.push({
     name: 'toc',
     blocks: [
@@ -144,11 +249,13 @@ export async function buildHandout({ title, subject = '数学', periodText = '',
       ...tocItems.map(item => ({
         type: 'toc-item',
         content: `${item.index}. ${item.name}`,
+        sub: !!item.sub,
       })),
     ],
   })
 
-  // 每个知识点一页：分批并发生成 AI 讲解（避免触发上游限流）。
+  // 每个知识点可能生成多页（知识点 / 例题 / 题型归纳）。
+  // 分批并发生成 AI 讲解（避免触发上游限流）。
   // 全并发 12 个常被摩搭/Qwen 限速,反而比串行还慢;每批 3 个 + LRU 跨请求缓存可
   // 把首跑从 84s 降到 ~30s,二跑走缓存降到 <10s。
   const BATCH_SIZE = 3
@@ -158,27 +265,28 @@ export async function buildHandout({ title, subject = '数学', periodText = '',
     const batchResults = await Promise.all(
       batch.map(async (ks, batchIdx) => {
         const idx = i + batchIdx
-        const kpBlocks = await buildKnowledgeSection({
+        const kpPages = await buildKnowledgeSection({
           kpName: ks.kpName,
           subject: ks.subject || subject,
           sampleQuestions: ks.sampleQuestions || [],
           explanation: ks.explanation || null,
           template,
         })
-        return { idx, kpName: ks.kpName, kpBlocks }
+        return { idx, kpName: ks.kpName, kpPages }
       })
     )
     kpResults.push(...batchResults)
   }
   kpResults.sort((a, b) => a.idx - b.idx)
   for (const r of kpResults) {
-    pages.push({
-      name: r.kpName,
-      blocks: [
-        { type: 'page-title', content: r.kpName },
-        ...r.kpBlocks,
-      ],
-    })
+    // 模板可返回 0-N 页：每页直接追加到主 pages 数组。
+    // page.name 已经会通过 HandoutPreview 的 <h2 class="page-title"> 渲染，无需再加 page-title block。
+    for (const p of (r.kpPages || [])) {
+      pages.push({
+        name: p.name || r.kpName,
+        blocks: p.blocks || [],
+      })
+    }
   }
 
   return {

@@ -13,6 +13,7 @@
 
 import { callTextCompletion } from '../../config/ai.js'
 import { detectEnglishQuestionType, classifyEnglishErrorType, ENGLISH_QUESTION_TYPE_LABELS } from '../englishAnalyzer.js'
+import { generateQuestionTypeSummary } from '../handoutService.js'
 
 export default {
   id: 'english_lecture_prep',
@@ -21,163 +22,182 @@ export default {
   supportsSubject: ['英语'],
 
   buildSections: async ({ kpName, subject = '英语', sampleQuestions = [], explanation = null }) => {
-    const blocks = []
+    const pages = []
 
-    // 1. 知识讲解（英文为主）
+    // ─── Page 1: 知识点速览（AI 讲解） ───
     const text = explanation || await generateEnglishExplanation(kpName)
-    if (text) {
-      blocks.push({ type: 'kp-overview', content: text, lang: 'en' })
-    }
-
-    if (sampleQuestions.length === 0) {
-      return blocks
-    }
-
-    // 2. 错题概况
-    const blankCount = sampleQuestions.filter(q => q.isBlank).length
-    const wrongCount = sampleQuestions.length - blankCount
-    const typeGroups = groupByQuestionType(sampleQuestions)
-    blocks.push({
-      type: 'kp-stats',
-      content: {
-        total: sampleQuestions.length,
-        blankCount,
-        wrongCount,
-        typeCount: typeGroups.size,
-        types: Array.from(typeGroups.keys()),
-      },
+    pages.push({
+      name: `${kpName} · 知识点`,
+      blocks: [
+        { type: 'kp-overview', content: text || `*（${kpName} 讲解暂不可用）*`, lang: 'en' },
+      ],
     })
 
-    // 3. 本周典型错题（按题型分组）
-    blocks.push({ type: 'section', content: '本周典型错题' })
+    if (sampleQuestions.length === 0) {
+      return { pages }
+    }
 
-    let qIdx = 0
-    for (const [qType, qs] of typeGroups) {
-      // 归一化显示：'other' / 'unknown' / '' 统一显示"其他"（不要让原始 key 漏出到 UI）
-      const typeLabel = (qType === 'other' || qType === 'unknown' || !qType)
-        ? '其他'
-        : (ENGLISH_QUESTION_TYPE_LABELS[qType] || qType)
-      blocks.push({
-        type: 'type-section',
-        content: `题型：${typeLabel}（${qs.length} 道）`,
-        questionType: typeLabel,
-        count: qs.length,
-      })
+    // ─── Page 2: 例题（按英语题型分组） ───
+    pages.push({
+      name: `${kpName} · 例题（本周错题）`,
+      blocks: buildEnglishExampleBlocks(sampleQuestions),
+    })
 
-      // 写作题：特殊展示
-      if (qType === 'writing') {
-        for (const q of qs) {
-          qIdx += 1
-          blocks.push({
-            type: 'question',
-            content: `错题 ${qIdx}. ${q.content || '(题目缺失)'}`,
-            options: q.options,
-            imageUrls: q.imageUrls || [],
-            questionType: typeLabel,
-            questionId: q.questionId,
-          })
-          if (q.studentAnswer) {
-            blocks.push({ type: 'text', content: `✍️ 学生原文：\n${q.studentAnswer}` })
-          }
-          if (q.correctAnswer) {
-            blocks.push({ type: 'text', content: `✅ 参考范文：\n${q.correctAnswer}` })
-          }
-          const err = classifyEnglishErrorType(q.errorType, q.errorReason)
-          if (err) {
-            blocks.push({ type: 'analysis', content: `错因：${err.label}${q.errorReason ? `（${q.errorReason}）` : ''}` })
-          } else if (q.errorType) {
-            blocks.push({ type: 'analysis', content: `错因：${q.errorType}${q.errorReason ? `（${q.errorReason}）` : ''}` })
-          }
-          blocks.push({ type: 'lecture-guidance', content: buildLectureGuidance(q) })
-        }
-        continue
-      }
+    // ─── Page 3: 题型归纳 ───
+    const typeSummaryList = await generateQuestionTypeSummary(kpName, subject, sampleQuestions)
+    pages.push({
+      name: `${kpName} · 题型归纳`,
+      blocks: [
+        { type: 'section', content: '本知识点"换着样考"的题型' },
+        { type: 'type-summary', content: typeSummaryList || [] },
+        { type: 'note', content: '' },
+      ],
+    })
 
-      // 翻译题
-      if (qType === 'translation') {
-        for (const q of qs) {
-          qIdx += 1
-          blocks.push({
-            type: 'question',
-            content: `错题 ${qIdx}. ${q.content || '(题目缺失)'}`,
-            options: q.options,
-            imageUrls: q.imageUrls || [],
-            questionType: typeLabel,
-            questionId: q.questionId,
-          })
-          if (q.studentAnswer) {
-            blocks.push({ type: 'text', content: `📝 学生译文：\n${q.studentAnswer}` })
-          }
-          if (q.correctAnswer) {
-            blocks.push({ type: 'text', content: `✅ 参考译文：\n${q.correctAnswer}` })
-          }
-          const err = classifyEnglishErrorType(q.errorType, q.errorReason)
-          if (err) {
-            blocks.push({ type: 'analysis', content: `错因：${err.label}` })
-          }
-          blocks.push({ type: 'lecture-guidance', content: buildLectureGuidance(q) })
-        }
-        continue
-      }
+    return { pages }
+  },
+}
 
-      // 短文改错
-      if (qType === 'error_correction') {
-        for (const q of qs) {
-          qIdx += 1
-          blocks.push({
-            type: 'question',
-            content: `错题 ${qIdx}. ${q.content || '(题目缺失)'}`,
-            options: q.options,
-            imageUrls: q.imageUrls || [],
-            questionType: typeLabel,
-            questionId: q.questionId,
-          })
-          if (q.studentAnswer) {
-            blocks.push({ type: 'text', content: `📝 学生改正：\n${q.studentAnswer}` })
-          }
-          if (q.correctAnswer) {
-            blocks.push({ type: 'text', content: `✅ 标准改正：\n${q.correctAnswer}` })
-          }
-          blocks.push({ type: 'lecture-guidance', content: buildLectureGuidance(q) })
-        }
-        continue
-      }
+/**
+ * 把"按英语题型分组的错题展示"封装成可复用的 blocks 数组。
+ * 写在前置函数里，让 buildSections 主体只关心 page 编排。
+ */
+function buildEnglishExampleBlocks(sampleQuestions) {
+  const blocks = []
+  const blankCount = sampleQuestions.filter(q => q.isBlank).length
+  const wrongCount = sampleQuestions.length - blankCount
+  const typeGroups = groupByQuestionType(sampleQuestions)
+  blocks.push({
+    type: 'kp-stats',
+    content: {
+      total: sampleQuestions.length,
+      blankCount,
+      wrongCount,
+      typeCount: typeGroups.size,
+      types: Array.from(typeGroups.keys()),
+    },
+  })
+  blocks.push({ type: 'section', content: '本周典型错题' })
 
-      // 完形/语法填空/阅读/选择/句型转换：标准三段式
+  let qIdx = 0
+  for (const [qType, qs] of typeGroups) {
+    // 归一化显示：'other' / 'unknown' / '' 统一显示"其他"（不要让原始 key 漏出到 UI）
+    const typeLabel = (qType === 'other' || qType === 'unknown' || !qType)
+      ? '其他'
+      : (ENGLISH_QUESTION_TYPE_LABELS[qType] || qType)
+    blocks.push({
+      type: 'type-section',
+      content: `题型：${typeLabel}（${qs.length} 道）`,
+      questionType: typeLabel,
+      count: qs.length,
+    })
+
+    // 写作题：特殊展示
+    if (qType === 'writing') {
       for (const q of qs) {
         qIdx += 1
         blocks.push({
           type: 'question',
-          content: `错题 ${qIdx}. ${q.content || '(题干缺失)'}`,
+          content: `错题 ${qIdx}. ${q.content || '(题目缺失)'}`,
           options: q.options,
           imageUrls: q.imageUrls || [],
           questionType: typeLabel,
           questionId: q.questionId,
         })
-        blocks.push({
-          type: 'answer',
-          content: `【${q.studentName || '学生'}】作答：${q.isBlank ? '（空题）' : (q.studentAnswer || '—')}`,
-          correctAnswer: q.correctAnswer || '—',
-          isCorrect: q.isBlank ? false : (q.studentAnswer === q.correctAnswer),
-        })
+        if (q.studentAnswer) {
+          blocks.push({ type: 'text', content: `✍️ 学生原文：\n${q.studentAnswer}` })
+        }
+        if (q.correctAnswer) {
+          blocks.push({ type: 'text', content: `✅ 参考范文：\n${q.correctAnswer}` })
+        }
         const err = classifyEnglishErrorType(q.errorType, q.errorReason)
         if (err) {
-          blocks.push({ type: 'analysis', content: `错因：${err.label}${q.errorReason ? `：${q.errorReason}` : ''}` })
+          blocks.push({ type: 'analysis', content: `错因：${err.label}${q.errorReason ? `（${q.errorReason}）` : ''}` })
         } else if (q.errorType) {
-          blocks.push({ type: 'analysis', content: `错因：${q.errorType}${q.errorReason ? `：${q.errorReason}` : ''}` })
+          blocks.push({ type: 'analysis', content: `错因：${q.errorType}${q.errorReason ? `（${q.errorReason}）` : ''}` })
         }
         blocks.push({ type: 'lecture-guidance', content: buildLectureGuidance(q) })
       }
+      continue
     }
 
-    // 4. 相关知识点
-    blocks.push({ type: 'related-kp', content: [] })
+    // 翻译题
+    if (qType === 'translation') {
+      for (const q of qs) {
+        qIdx += 1
+        blocks.push({
+          type: 'question',
+          content: `错题 ${qIdx}. ${q.content || '(题目缺失)'}`,
+          options: q.options,
+          imageUrls: q.imageUrls || [],
+          questionType: typeLabel,
+          questionId: q.questionId,
+        })
+        if (q.studentAnswer) {
+          blocks.push({ type: 'text', content: `📝 学生译文：\n${q.studentAnswer}` })
+        }
+        if (q.correctAnswer) {
+          blocks.push({ type: 'text', content: `✅ 参考译文：\n${q.correctAnswer}` })
+        }
+        const err = classifyEnglishErrorType(q.errorType, q.errorReason)
+        if (err) {
+          blocks.push({ type: 'analysis', content: `错因：${err.label}` })
+        }
+        blocks.push({ type: 'lecture-guidance', content: buildLectureGuidance(q) })
+      }
+      continue
+    }
 
-    // 5. 老师笔记占位
-    blocks.push({ type: 'note', content: '' })
+    // 短文改错
+    if (qType === 'error_correction') {
+      for (const q of qs) {
+        qIdx += 1
+        blocks.push({
+          type: 'question',
+          content: `错题 ${qIdx}. ${q.content || '(题目缺失)'}`,
+          options: q.options,
+          imageUrls: q.imageUrls || [],
+          questionType: typeLabel,
+          questionId: q.questionId,
+        })
+        if (q.studentAnswer) {
+          blocks.push({ type: 'text', content: `📝 学生改正：\n${q.studentAnswer}` })
+        }
+        if (q.correctAnswer) {
+          blocks.push({ type: 'text', content: `✅ 标准改正：\n${q.correctAnswer}` })
+        }
+        blocks.push({ type: 'lecture-guidance', content: buildLectureGuidance(q) })
+      }
+      continue
+    }
 
-    return blocks
-  },
+    // 完形/语法填空/阅读/选择/句型转换：标准三段式
+    for (const q of qs) {
+      qIdx += 1
+      blocks.push({
+        type: 'question',
+        content: `错题 ${qIdx}. ${q.content || '(题干缺失)'}`,
+        options: q.options,
+        imageUrls: q.imageUrls || [],
+        questionType: typeLabel,
+        questionId: q.questionId,
+      })
+      blocks.push({
+        type: 'answer',
+        content: `【${q.studentName || '学生'}】作答：${q.isBlank ? '（空题）' : (q.studentAnswer || '—')}`,
+        correctAnswer: q.correctAnswer || '—',
+        isCorrect: q.isBlank ? false : (q.studentAnswer === q.correctAnswer),
+      })
+      const err = classifyEnglishErrorType(q.errorType, q.errorReason)
+      if (err) {
+        blocks.push({ type: 'analysis', content: `错因：${err.label}${q.errorReason ? `：${q.errorReason}` : ''}` })
+      } else if (q.errorType) {
+        blocks.push({ type: 'analysis', content: `错因：${q.errorType}${q.errorReason ? `：${q.errorReason}` : ''}` })
+      }
+      blocks.push({ type: 'lecture-guidance', content: buildLectureGuidance(q) })
+    }
+  }
+  return blocks
 }
 
 function groupByQuestionType(questions) {

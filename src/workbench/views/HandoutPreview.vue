@@ -85,6 +85,7 @@
                 v-for="(block, bIdx) in page.blocks.filter(b => b.type === 'toc-item')"
                 :key="bIdx"
                 class="toc-item"
+                :class="{ 'toc-item-sub': block.sub }"
               >
                 <span class="toc-dot"></span>
                 {{ block.content }}
@@ -230,7 +231,35 @@
                 ></textarea>
               </div>
 
-              <!-- 讲课提词器（P4） -->
+              <!-- 题型归纳（AI 归纳"换着样考的题型"） -->
+              <div v-else-if="block.type === 'type-summary'" class="block-type-summary">
+                <div v-if="!block.content || block.content.length === 0" class="type-summary-empty">
+                  *（题型归纳暂不可用）*
+                </div>
+                <div v-else class="type-summary-list">
+                  <div
+                    v-for="(t, tIdx) in block.content"
+                    :key="tIdx"
+                    class="type-summary-item"
+                  >
+                    <div class="type-summary-header">
+                      <span class="type-summary-num">{{ tIdx + 1 }}</span>
+                      <span class="type-summary-type">{{ t.type }}</span>
+                    </div>
+                    <div v-if="t.description" class="type-summary-desc">
+                      <span class="type-summary-label">怎么考：</span>{{ t.description }}
+                    </div>
+                    <div v-if="t.example" class="type-summary-example">
+                      <span class="type-summary-label">典型例：</span>{{ t.example }}
+                    </div>
+                    <div v-if="t.tip" class="type-summary-tip">
+                      <span class="type-summary-label">应对：</span>{{ t.tip }}
+                    </div>
+                  </div>
+                </div>
+              </div>
+
+              <!-- 讲课提词器（按时间分块） -->
               <div v-else-if="block.type === 'lecture-script'" class="block-lecture-script">
                 <div v-for="(step, sIdx) in block.content" :key="sIdx" class="script-step">
                   <div class="script-step-header">
@@ -859,6 +888,18 @@ async function loadFromDiagnosis() {
   background: #6366F1;
   flex-shrink: 0;
 }
+.toc-item-sub {
+  padding: 6px 0 6px 24px;
+  font-size: 13px;
+  color: #4B5563;
+  border-bottom: none;
+  font-weight: 400;
+}
+.toc-item-sub .toc-dot {
+  width: 4px;
+  height: 4px;
+  background: #D1D5DB;
+}
 
 /* 页面标题 */
 .page-title {
@@ -962,6 +1003,70 @@ async function loadFromDiagnosis() {
   gap: 8px;
 }
 .type-icon { font-size: 16px; }
+
+/* 题型归纳 */
+.block-type-summary {
+  margin: 12px 0 20px;
+}
+.type-summary-empty {
+  padding: 16px;
+  background: #F9FAFB;
+  border: 1px dashed #E5E7EB;
+  border-radius: 6px;
+  color: #9CA3AF;
+  font-size: 13px;
+  text-align: center;
+}
+.type-summary-list {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+.type-summary-item {
+  padding: 12px 16px;
+  background: linear-gradient(135deg, #FFFBEB 0%, #FEF3C7 100%);
+  border-left: 4px solid #F59E0B;
+  border-radius: 6px;
+  transition: transform 0.15s ease;
+}
+.type-summary-item:hover { transform: translateX(2px); }
+.type-summary-header {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 6px;
+}
+.type-summary-num {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 22px;
+  height: 22px;
+  padding: 0 6px;
+  background: #F59E0B;
+  color: white;
+  font-size: 12px;
+  font-weight: 600;
+  border-radius: 4px;
+}
+.type-summary-type {
+  font-size: 14px;
+  font-weight: 600;
+  color: #92400E;
+}
+.type-summary-desc,
+.type-summary-example,
+.type-summary-tip {
+  font-size: 13px;
+  line-height: 1.6;
+  color: #4B5563;
+  margin-top: 4px;
+}
+.type-summary-label {
+  font-weight: 600;
+  color: #B45309;
+  margin-right: 4px;
+}
 
 /* 错题 */
 .block-question {
