@@ -4,6 +4,8 @@ import { getQuestionKnowledge } from '../services/knowledgeService.js'
 import { generateKnowledgeExplanation, buildHandout, buildKnowledgeSection, listHandoutTemplates } from '../services/handoutService.js'
 import { buildHandoutDocx } from '../services/handoutDocxService.js'
 import { generateLectureScript } from '../services/handoutScriptService.js'
+import { normalizeTagToKnowledgeName, groupByCanonical } from '../services/handoutDiagnosisService.js'
+import { collectKnowledgeSections } from '../services/handoutByKnowledgeService.js'
 import { parsePeriod } from '../utils/period.js'
 
 const router = Router()
@@ -108,9 +110,13 @@ router.post('/from-diagnosis', async (req, res) => {
       return res.json({ success: true, handout: null, message: '该时段暂无共性错题数据' })
     }
 
-    // 为每个知识点取样本错题和变式题
-    const knowledgeSections = []
+    // 为每个知识点取样本错题
+    // 规范知识点分组：把 ai_tags 自由标签归一化到知识树节点名（如"一元一次方程的解法"→"一元一次方程"），
+    // 再把同规范点的标签合并、样本去重，让"一元一次方程"这类规范知识点稳定出现。
+    const rawSections = []
     for (const d of diagnosis) {
+      const kpName = await normalizeTagToKnowledgeName(d.tag, d.subject)
+
       const tagParams = [d.tag, p.periodStart, p.periodEnd]
       // P0 改造：错题按 question_type 排序（题型内空题优先），
       // 并把 question_type / imageUrls 带回，让模板能按题型分组
@@ -140,10 +146,13 @@ router.post('/from-diagnosis', async (req, res) => {
         tagParams
       )
 
-      knowledgeSections.push({
-        kpName: d.tag,
+      rawSections.push({
+        kpName,
         subject: d.subject,
-        sampleQuestions: samples.map(q => ({
+        blank_count: d.blank_count,
+        wrong_count: d.wrong_count,
+        student_count: d.student_count,
+        samples: samples.map(q => ({
           questionId: q.question_id,
           content: q.content,
           options: q.options,
@@ -158,6 +167,14 @@ router.post('/from-diagnosis', async (req, res) => {
         })),
       })
     }
+
+    const grouped = groupByCanonical(rawSections, Math.min(maxItems, 20))
+    const knowledgeSections = grouped.map(g => ({
+      kpName: g.kpName,
+      subject: g.subject,
+      sampleQuestions: g.samples,
+    }))
+
 
     const title = periodText
       ? `${periodText}教学讲义`
@@ -174,6 +191,53 @@ router.post('/from-diagnosis', async (req, res) => {
     res.json({ success: true, handout })
   } catch (error) {
     console.error('从诊断生成讲义失败:', error)
+    res.status(500).json({ error: error.message })
+  }
+})
+
+/**
+ * POST /api/handout/by-knowledge
+ * 知识点驱动生成讲义：老师手动选规范知识点（如"一元一次方程"），
+ * 从错题库取该知识点样本，组装"知识点 → 例题(错题) → 题型归纳"讲义。
+ * Body: { knowledge: [{name, subject?}], subject?, periodText?, periodStart?, periodEnd?, template? }
+ */
+router.post('/by-knowledge', async (req, res) => {
+  try {
+    const { knowledge, subject = '', periodText = '', periodStart, periodEnd, template = null } = req.body || {}
+    if (!Array.isArray(knowledge) || knowledge.length === 0) {
+      return res.status(400).json({ error: 'knowledge 必填（知识点数组）' })
+    }
+    const names = knowledge.map(k => k && k.name).filter(Boolean)
+    if (names.length === 0) {
+      return res.status(400).json({ error: 'knowledge 中缺少有效的 name' })
+    }
+
+    // 时段：传了就用；否则回退最近 90 天
+    const p = (periodStart && periodEnd)
+      ? { periodStart: new Date(periodStart), periodEnd: new Date(periodEnd) }
+      : { periodStart: new Date(Date.now() - 90 * 24 * 3600 * 1000), periodEnd: new Date() }
+
+    const knowledgeSections = await collectKnowledgeSections({
+      knowledge,
+      subject,
+      periodStart: p.periodStart,
+      periodEnd: p.periodEnd,
+    })
+
+    const effectiveSubject = subject || knowledgeSections[0]?.subject || '数学'
+    const title = periodText || `《${names.slice(0, 3).join('、')}》重点讲义`
+
+    const handout = await buildHandout({
+      title,
+      subject: effectiveSubject,
+      periodText: periodText || '近 90 天',
+      knowledgeSections,
+      template,
+    })
+
+    res.json({ success: true, handout })
+  } catch (error) {
+    console.error('按知识点生成讲义失败:', error)
     res.status(500).json({ error: error.message })
   }
 })

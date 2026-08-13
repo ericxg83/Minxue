@@ -378,6 +378,60 @@ function buildBlockParagraphs(block) {
     }
 
     // === 旧兼容 block ===
+    case 'type-summary': {
+      const list = Array.isArray(block.content) ? block.content : []
+      if (list.length === 0) {
+        paragraphs.push(
+          new Paragraph({
+            spacing: { before: 60, after: 60 },
+            children: [new TextRun({ text: '*（题型归纳暂不可用）*', size: 20, color: '86909C', font: FONT_SONG, italics: true })],
+          })
+        )
+        break
+      }
+      for (let i = 0; i < list.length; i++) {
+        const t = list[i] || {}
+        const type = escText(t.type)
+        const desc = escText(t.description)
+        const example = escText(t.example)
+        const tip = escText(t.tip)
+        paragraphs.push(
+          new Paragraph({
+            spacing: { before: 120, after: 40 },
+            children: [
+              new TextRun({ text: `${i + 1}. `, size: 22, bold: true, color: 'B45309', font: FONT_HEI }),
+              new TextRun({ text: type, size: 22, bold: true, color: '92400E', font: FONT_HEI }),
+            ],
+          })
+        )
+        if (desc) {
+          paragraphs.push(
+            new Paragraph({
+              indent: { left: 360 }, spacing: { after: 20 },
+              children: [new TextRun({ text: `怎么考：${desc}`, size: 20, font: FONT_SONG })],
+            })
+          )
+        }
+        if (example) {
+          paragraphs.push(
+            new Paragraph({
+              indent: { left: 360 }, spacing: { after: 20 },
+              children: [new TextRun({ text: `典型例：${example}`, size: 20, font: FONT_SONG })],
+            })
+          )
+        }
+        if (tip) {
+          paragraphs.push(
+            new Paragraph({
+              indent: { left: 360 }, spacing: { after: 60 },
+              children: [new TextRun({ text: `应对：${tip}`, size: 20, font: FONT_SONG })],
+            })
+          )
+        }
+      }
+      break
+    }
+
     case 'explanation':
       paragraphs.push(
         new Paragraph({

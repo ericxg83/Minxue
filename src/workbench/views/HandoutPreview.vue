@@ -37,6 +37,9 @@
             </div>
           </el-option>
         </el-select>
+        <el-button @click="openKnowledgeDialog" type="primary" plain :icon="Collection" :loading="knowledgeGenerating">
+          按知识点
+        </el-button>
         <el-button @click="generateScriptForAll" type="warning" plain :loading="scriptLoading" :icon="MagicStick">
           生成讲课提词器
         </el-button>
@@ -288,6 +291,36 @@
         </template>
       </div>
     </div>
+
+    <!-- 按知识点生成对话框 -->
+    <el-dialog
+      v-model="knowledgeDialogVisible"
+      title="选择知识点生成讲义"
+      width="520px"
+      :close-on-click-modal="false"
+    >
+      <div class="knowledge-dialog-hint">
+        从知识树勾选要讲的知识点（如「一元一次方程」），系统会取该知识点下的错题作为例题，
+        生成「知识点 → 例题 → 考试题型」讲义。
+      </div>
+      <div v-loading="knowledgeLoading" class="knowledge-tree-wrap">
+        <el-tree
+          ref="knowledgeTreeRef"
+          :data="knowledgeTree"
+          show-checkbox
+          node-key="id"
+          default-expand-all
+          :props="{ label: 'name', children: 'children' }"
+          empty-text="暂无知识点"
+        />
+      </div>
+      <template #footer>
+        <el-button @click="knowledgeDialogVisible = false">取消</el-button>
+        <el-button type="primary" :loading="knowledgeGenerating" @click="confirmKnowledgeGenerate">
+          生成讲义
+        </el-button>
+      </template>
+    </el-dialog>
   </div>
 </template>
 
@@ -295,8 +328,8 @@
 import { ref, computed, onMounted, onBeforeUnmount, nextTick, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { ElMessage, ElMessageBox } from 'element-plus'
-import { ArrowLeft, Download, Printer, Document, CopyDocument, MagicStick } from '@element-plus/icons-vue'
-import { apiRequest } from '../../services/apiService'
+import { ArrowLeft, Download, Printer, Document, CopyDocument, MagicStick, Collection } from '@element-plus/icons-vue'
+import { apiRequest, getKnowledgeTree } from '../../services/apiService'
 import katex from 'katex'
 import 'katex/dist/katex.min.css'
 
@@ -324,6 +357,14 @@ const noteText = ref('')           // 当前页笔记（一个知识点页对应
 const noteSaving = ref(false)
 const lastSavedAt = ref('')
 let noteSaveTimer = null
+
+// 按知识点生成（P9：老师手动选规范知识点，如"一元一次方程"）
+const knowledgeDialogVisible = ref(false)
+const knowledgeTree = ref([])
+const knowledgeLoading = ref(false)
+const knowledgeGenerating = ref(false)
+const knowledgeTreeRef = ref(null)
+
 
 // 英语题型标签映射
 const ENGLISH_TYPE_LABELS = {
@@ -509,6 +550,67 @@ async function loadTemplates(subject) {
     templatesLoading.value = false
   }
 }
+
+// ── 按知识点生成（P9） ──
+async function openKnowledgeDialog() {
+  knowledgeDialogVisible.value = true
+  if (knowledgeTree.value.length > 0) return
+  knowledgeLoading.value = true
+  try {
+    const subject = currentSubject.value || '数学'
+    knowledgeTree.value = await getKnowledgeTree(subject)
+  } catch (e) {
+    console.warn('加载知识树失败:', e)
+    ElMessage.warning('加载知识点失败，请重试')
+  } finally {
+    knowledgeLoading.value = false
+  }
+}
+
+// 收集勾选的具体知识点（仅叶子节点，父级板块/章节不作为讲义主题）
+function collectCheckedKnowledge() {
+  const nodes = knowledgeTreeRef.value ? knowledgeTreeRef.value.getCheckedNodes(true) : []
+  const leaves = nodes.filter(n => !n.children || n.children.length === 0)
+  return leaves.map(n => ({ name: n.name, subject: n.subject || currentSubject.value || '数学' }))
+}
+
+async function confirmKnowledgeGenerate() {
+  const kps = collectCheckedKnowledge()
+  if (kps.length === 0) {
+    ElMessage.warning('请至少勾选一个具体知识点')
+    return
+  }
+  knowledgeGenerating.value = true
+  try {
+    const resp = await apiRequest('/handout/by-knowledge', {
+      method: 'POST',
+      timeout: 180000,
+      body: JSON.stringify({
+        knowledge: kps,
+        subject: currentSubject.value || '数学',
+        template: selectedTemplate.value || null,
+      }),
+    })
+    if (resp.success && resp.handout) {
+      handout.value = resp.handout
+      selectedTemplate.value = resp.handout.template || selectedTemplate.value
+      currentSubject.value = resp.handout.subject || currentSubject.value
+      lectureId.value = null
+      dirty.value = true
+      noteText.value = ''
+      knowledgeDialogVisible.value = false
+      ElMessage.success(`已生成《${kps.slice(0, 3).map(k => k.name).join('、')}》讲义`)
+    } else {
+      ElMessage.warning(resp.message || '未能生成讲义')
+    }
+  } catch (e) {
+    console.error('按知识点生成失败:', e)
+    ElMessage.error('生成失败: ' + e.message)
+  } finally {
+    knowledgeGenerating.value = false
+  }
+}
+
 
 async function handleTemplateChange(newId) {
   if (!newId) return
@@ -771,6 +873,25 @@ async function loadFromDiagnosis() {
 .toolbar-right {
   display: flex;
   gap: 8px;
+}
+
+/* 按知识点生成 */
+.knowledge-dialog-hint {
+  font-size: 13px;
+  color: #86909C;
+  background: #F7F8FA;
+  border: 1px solid #E5E6EB;
+  border-radius: 6px;
+  padding: 10px 12px;
+  margin-bottom: 12px;
+  line-height: 1.6;
+}
+.knowledge-tree-wrap {
+  max-height: 420px;
+  overflow-y: auto;
+  border: 1px solid #E5E6EB;
+  border-radius: 6px;
+  padding: 8px;
 }
 
 /* 模板下拉 */
