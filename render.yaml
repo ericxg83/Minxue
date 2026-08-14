@@ -19,7 +19,10 @@ services:
       - key: AI_ENDPOINT
         value: https://api-inference.modelscope.cn/v1/chat/completions
       - key: AI_MODEL
-        sync: false
+        # 魔搭视觉主模型：用 Qwen3-VL-235B（质量明显优于 8B，且魔搭有独立免费日配额）为主力，
+        # 代码 VL_MODELS 里 8B / 8B-Thinking 依次作第一/最深兜底。若已在 Render Dashboard 填过，
+        # 请把该值同步改为 Qwen/Qwen3-VL-235B-A22B-Instruct 后重新部署。
+        value: Qwen/Qwen3-VL-235B-A22B-Instruct
       - key: MODELSCOPE_BACKUP_API_KEY
         sync: false
       # 备用 API：仅 TackleKey 一个厂商兜底（视觉/文本统一用 gemini-2.5-flash-nothink）

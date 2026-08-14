@@ -183,14 +183,14 @@ export function isMainRateLimitedToday() {
 // 2026-07 实测魔搭在线推理模型清单：Qwen3-VL-30B-A3B-Instruct 已下架
 // （请求返回 200 但 choices=null，绝不能再放进轮换列表——空响应会拖慢整批），
 // 235B-A22B-Instruct 与 8B-Thinking 在线且各有独立当日配额。
-// 顺序 = 成本优先：8B 便宜量大 → 235B 质量最好 → 8B-Thinking 兜底（推理模型较慢）。
-// ⚠️ 现实里 8B 当日配额极容易耗尽，调用方需要保证 235B / 8B-Thinking 也都被真正试过，
-// 因此下面 callVisionCompletion 不能在 8B 失败时直接抛错。
+// 顺序（2026-08-14 调优）= 质量优先：235B 主力（质量明显优于 8B，另有独立免费日配额）
+// → 8B 第一备份（便宜、量大、兜底）→ 8B-Thinking 最深兜底（推理模型较慢）。
+// AI_MODEL 环境变量作为队首；以下硬编码保证 235B/8B/8B-Thinking 始终可轮换。
 export const VL_MODELS = [...new Set([
   process.env.AI_MODEL,
   process.env.VL_MODEL,
-  'Qwen/Qwen3-VL-8B-Instruct',
   'Qwen/Qwen3-VL-235B-A22B-Instruct',
+  'Qwen/Qwen3-VL-8B-Instruct',
   'Qwen/Qwen3-VL-8B-Thinking',
 ].filter(Boolean))]
 
