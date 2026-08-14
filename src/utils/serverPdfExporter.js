@@ -95,7 +95,7 @@ export async function getKatexCssWithInlineFonts() {
  *
  * @returns {Promise<string>} 完整 HTML 字符串
  */
-export async function renderFullHTML({ title, studentName, questions, showAnswers, qrContent }) {
+export async function renderFullHTML({ title, studentName, questions, showAnswers, qrContent, embedPaperCssInBody = false }) {
   const inlinedCss = await getKatexCssWithInlineFonts()
 
   // 创建 hidden iframe（不能用 display:none，否则 KaTeX 渲染不出来）
@@ -113,8 +113,15 @@ export async function renderFullHTML({ title, studentName, questions, showAnswer
     const idoc = iwin.document
 
     // 写入完整 HTML（CSS 已内联字体）
+    // embedPaperCssInBody：把 buildPaperCSS 以 .minxue-exam 作用域形式内嵌进 body，
+    // 用于周报合并场景——mergeReportHTML 只搬 body 子节点，head 里的 CSS 会被丢弃；
+    // 内嵌 scoped 样式既保证再测卷排版与移动端「生成试卷」一致，又不会污染诊断报告的同名类。
     idoc.open()
-    idoc.write(`<!DOCTYPE html><html><head><meta charset="utf-8"><style>${inlinedCss}\n${buildPaperCSS()}</style></head><body>${buildPaperBody({ title, studentName, questions, showAnswers })}</body></html>`)
+    const paperBody = buildPaperBody({ title, studentName, questions, showAnswers })
+    const scopedBody = embedPaperCssInBody
+      ? `<div class="minxue-exam"><style>${buildPaperCSS('.minxue-exam')}</style>${paperBody}</div>`
+      : paperBody
+    idoc.write(`<!DOCTYPE html><html><head><meta charset="utf-8"><style>${inlinedCss}\n${buildPaperCSS()}</style></head><body>${scopedBody}</body></html>`)
     idoc.close()
 
     // 等 DOM ready

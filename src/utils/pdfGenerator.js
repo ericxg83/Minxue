@@ -234,42 +234,47 @@ function getPageSlices(scrollHeight, cssPageH, elementBounds) {
   return slices
 }
 
-/** PDF 与预览共用的试卷样式（模板 CSS） */
-export function buildPaperCSS() {
-  return `*{margin:0;padding:0;box-sizing:border-box}
-body{font-family:'Microsoft YaHei','PingFang SC','Noto Sans SC','SimSun',sans-serif;color:#1a1a1a}
-.page{width:794px;padding:24px 36px;position:relative}
-.head-area{min-height:100px;padding-right:170px}
-.title{font-size:20px;font-weight:bold;margin-bottom:4px;letter-spacing:1px}
-.sub-title{font-size:13px;color:#555;margin-bottom:8px}
-.info{display:flex;gap:40px;font-size:14px;margin-bottom:4px}
-.info span{display:inline-block}
-.info .blank{display:inline-block;width:100px;border-bottom:1px solid #333;margin-left:4px}
-.divider{border-top:2px solid #333;margin:4px 0 8px}
-.total-info{font-size:13px;color:#666;margin-bottom:8px}
-.section-header{font-size:15px;font-weight:bold;margin:8px 0 6px;padding:4px 0 4px 10px;border-left:4px solid #4F46E5;background:#F5F6FF}
-.question{margin-bottom:6px;page-break-inside:avoid}
-.q-choice{margin-bottom:6px}
-.q-fill{margin-bottom:10px}
-.q-answer{margin-bottom:14px}
-.q-head{display:flex;gap:6px;font-size:13px;line-height:1.7;margin-bottom:2px}
-.q-num{font-weight:bold;white-space:nowrap;min-width:26px}
-.q-text{flex:1;word-break:break-word}
-.q-image{text-align:center;margin:4px 0 4px 32px}
-.q-image img{max-width:100%;max-height:180px;object-fit:contain;border-radius:4px}
-.opts{display:grid;gap:4px 14px;padding-left:32px;margin-bottom:2px}
-.opts-1{grid-template-columns:1fr}
-.opts-2{grid-template-columns:1fr 1fr}
-.opts-4{grid-template-columns:repeat(4,1fr)}
-.opt{font-size:12px;line-height:1.5;word-break:break-word}
-.fill-line{width:200px;border-bottom:1.5px solid #333;margin:5px 0 2px 32px;height:26px}
-.ans-area{margin:4px 0 2px 32px}
-.ans-line{border-bottom:1px solid #d0d0d0;height:28px;margin-bottom:3px}
-.answer-key{font-size:12px;color:#4F46E5;margin-top:3px;padding-left:32px}
-.footer{text-align:center;font-size:11px;color:#999;margin-top:16px;padding-top:6px;border-top:1px solid #ddd}
-.qr-container{position:absolute;top:20px;right:32px;text-align:center;background:#fff;padding:4px}
-.qr-canvas{width:130px;height:130px;display:block}
-.qr-text{font-size:10px;color:#333;margin-top:3px;font-weight:bold;letter-spacing:1px}`
+/** PDF 与预览共用的试卷样式（模板 CSS）
+ * @param {string} [scope=''] 作用域类名（如 '.minxue-exam'）。传入时所有选择器加前缀，
+ *   用于把再测卷样式隔离到指定容器内（周报合并场景），避免与诊断报告同名类冲突。
+ */
+export function buildPaperCSS(scope = '') {
+  const s = scope ? `${scope} ` : ''
+  const root = scope || 'body'
+  return `${scope ? `${scope} *` : '*'} {margin:0;padding:0;box-sizing:border-box}
+${root}{font-family:'Microsoft YaHei','PingFang SC','Noto Sans SC','SimSun',sans-serif;color:#1a1a1a}
+${s}.page{width:794px;padding:24px 36px;position:relative}
+${s}.head-area{min-height:100px;padding-right:170px}
+${s}.title{font-size:20px;font-weight:bold;margin-bottom:4px;letter-spacing:1px}
+${s}.sub-title{font-size:13px;color:#555;margin-bottom:8px}
+${s}.info{display:flex;gap:40px;font-size:14px;margin-bottom:4px}
+${s}.info span{display:inline-block}
+${s}.info .blank{display:inline-block;width:100px;border-bottom:1px solid #333;margin-left:4px}
+${s}.divider{border-top:2px solid #333;margin:4px 0 8px}
+${s}.total-info{font-size:13px;color:#666;margin-bottom:8px}
+${s}.section-header{font-size:15px;font-weight:bold;margin:8px 0 6px;padding:4px 0 4px 10px;border-left:4px solid #4F46E5;background:#F5F6FF}
+${s}.question{margin-bottom:6px;page-break-inside:avoid}
+${s}.q-choice{margin-bottom:6px}
+${s}.q-fill{margin-bottom:10px}
+${s}.q-answer{margin-bottom:14px}
+${s}.q-head{display:flex;gap:6px;font-size:13px;line-height:1.7;margin-bottom:2px}
+${s}.q-num{font-weight:bold;white-space:nowrap;min-width:26px}
+${s}.q-text{flex:1;word-break:break-word}
+${s}.q-image{text-align:center;margin:4px 0 4px 32px}
+${s}.q-image img{max-width:100%;max-height:180px;object-fit:contain;border-radius:4px}
+${s}.opts{display:grid;gap:4px 14px;padding-left:32px;margin-bottom:2px}
+${s}.opts-1{grid-template-columns:1fr}
+${s}.opts-2{grid-template-columns:1fr 1fr}
+${s}.opts-4{grid-template-columns:repeat(4,1fr)}
+${s}.opt{font-size:12px;line-height:1.5;word-break:break-word}
+${s}.fill-line{width:200px;border-bottom:1.5px solid #333;margin:5px 0 2px 32px;height:26px}
+${s}.ans-area{margin:4px 0 2px 32px}
+${s}.ans-line{border-bottom:1px solid #d0d0d0;height:28px;margin-bottom:3px}
+${s}.answer-key{font-size:12px;color:#4F46E5;margin-top:3px;padding-left:32px}
+${s}.footer{text-align:center;font-size:11px;color:#999;margin-top:16px;padding-top:6px;border-top:1px solid #ddd}
+${s}.qr-container{position:absolute;top:20px;right:32px;text-align:center;background:#fff;padding:4px}
+${s}.qr-canvas{width:130px;height:130px;display:block}
+${s}.qr-text{font-size:10px;color:#333;margin-top:3px;font-weight:bold;letter-spacing:1px}`
 }
 
 /** 试卷主体 HTML（.page 内容），PDF 与预览共用 */

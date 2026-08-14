@@ -533,12 +533,15 @@ async function renderExamFullHTMLForReport(studentId, studentName, wrongQuestion
   }
 
   // 3. 渲染 HTML（含可选二维码）
+  // embedPaperCssInBody：把 buildPaperCSS scoped 内嵌到 body，合并周报时样式随 body 保留，
+  // 排版与移动端「生成试卷」（PrintPreview）完全一致
   return await renderFullHTML({
     title: studentName + ' - 本周错题再测',
     studentName,
     questions: fullQs,
     showAnswers: false,
     qrContent,
+    embedPaperCssInBody: true,
   })
 }
 
