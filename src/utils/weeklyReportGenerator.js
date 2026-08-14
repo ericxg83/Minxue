@@ -1,5 +1,5 @@
 import { createGeneratedExam, getQuestionsByIds } from '../services/apiService'
-import { triggerBrowserPrint } from './browserPrint'
+import { triggerCustomHTMLPrint } from './browserPrint'
 import { renderFullHTML, exportServerPDF, getKatexCssWithInlineFonts } from './serverPdfExporter'
 import { detectProductionEnv } from './wrongBookPdfExporter'
 import { buildPaperCSS, renderMathInContainer, preloadKatexFonts } from './pdfGenerator'
@@ -579,7 +579,7 @@ function mergeReportHTML(diagnosisHTML, examHTML) {
  *   1. 渲染诊断报告 HTML（KaTeX 公式矢量）
  *   2. 渲染错题再测卷 HTML（与错题卷主路径 100% 一致）
  *   3. 合并为一份完整 HTML
- *   4. 调 triggerBrowserPrint → 弹打印框 → 用户另存为 PDF（1 个 PDF，含全部内容）
+ *   4. 调 triggerCustomHTMLPrint → 弹打印框 → 用户另存为 PDF（1 个 PDF，含全部内容）
  *   5. 返回 { mode: 'print', message: '...' }
  *
  * 开发环境（localhost）：
@@ -629,7 +629,7 @@ export async function generateWeeklyReport(studentId, { mode = 'week', offset = 
   if (isProd) {
     // 生产：浏览器原生打印（弹打印框另存为 PDF，矢量保真）
     try {
-      await triggerBrowserPrint({
+      await triggerCustomHTMLPrint({
         html: mergedHTML,
         renderMath: false,  // 已经在 iframe 里渲染过 KaTeX
         title: '周学习诊断报告',
@@ -693,7 +693,7 @@ export async function generateAllWeeklyReports({ mode = 'week', offset = 0, onPr
     onProgress?.(student.name, 'generating')
     try {
       // 批量生成：永远走"开发环境"路径（即直接拿 PDF blob），
-      // 因为 triggerBrowserPrint 弹打印框不适合批量场景（每个学生都弹一次）
+      // 因为 triggerCustomHTMLPrint 弹打印框不适合批量场景（每个学生都弹一次）
       // 批量生成是教师/管理员开发工具，不面向普通用户
       const result = await generateWeeklyReport(student.id, { mode, offset, forceMode: 'download' })
       results.push({ student, pdfBlob: result?.pdfBlob || null, status: result?.pdfBlob ? 'done' : 'failed' })
