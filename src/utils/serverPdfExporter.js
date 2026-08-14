@@ -41,7 +41,7 @@ let _katexFontsCssCache = null
  *
  * 性能：20 个 woff2 × ~13KB 平均 = 254KB，base64 后 ~338KB，一次性 fetch + atob + btoa。
  */
-async function getKatexCssWithInlineFonts() {
+export async function getKatexCssWithInlineFonts() {
   if (_katexFontsCssCache) return _katexFontsCssCache
 
   // 匹配 url(fonts/KaTeX_*.woff2)

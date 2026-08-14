@@ -1,7 +1,6 @@
 import { createGeneratedExam, getQuestionsByIds } from '../services/apiService'
 import { triggerBrowserPrint } from './browserPrint'
-import { renderFullHTML } from './serverPdfExporter'
-import { exportServerPDF } from './serverPdfExporter'
+import { renderFullHTML, exportServerPDF, getKatexCssWithInlineFonts } from './serverPdfExporter'
 import { detectProductionEnv } from './wrongBookPdfExporter'
 import { buildPaperCSS, renderMathInContainer, preloadKatexFonts } from './pdfGenerator'
 import dayjs from 'dayjs'
@@ -445,7 +444,6 @@ function escapeHtml(text) {
  * 复用 serverPdfExporter 的隐藏 iframe 渲染模式
  */
 async function renderDiagnosisFullHTML(reportData) {
-  const { getKatexCssWithInlineFonts } = await import('./serverPdfExporter.js')
   const inlinedCss = await getKatexCssWithInlineFonts()
 
   // 隐藏 iframe（与错题卷渲染保持一致）

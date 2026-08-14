@@ -8,6 +8,9 @@ import { COLORS, PANEL_MIN_HEIGHT, PANEL_TOP_MARGIN, PANEL_START_OFFSET } from '
 import { formatOption, getStatusInfo, DOT_COLORS, StatChip } from './status'
 import { useExamReview } from '../../hooks/useExamReview'
 
+// 预览模式：批改结朅后查看题目时，只显示题目预览面板，不渲染底层原卷大图（"试卷层"）
+const PREVIEW_MODE = true
+
 // ── 主组件 ──
 export default function ExamReview({ task, onClose, onSave }) {
   // ── 所有 state hooks (必须在最顶部, 无条件分支) ──
@@ -216,7 +219,7 @@ export default function ExamReview({ task, onClose, onSave }) {
   return (
     <div style={{
       position: 'fixed', inset: 0, overflow: 'hidden', zIndex: 10000,
-      background: '#1a1a1a',
+      background: PREVIEW_MODE ? COLORS.card : '#1a1a1a',
       display: 'flex', justifyContent: 'center'
     }}>
       <div style={{
@@ -226,7 +229,8 @@ export default function ExamReview({ task, onClose, onSave }) {
         height: '100%',
         overflow: 'hidden'
       }}>
-      {/* ══════════════ 底层: 原卷大图画布 ═══════════════ */}
+      {/* ══════════════ 底层: 原卷大图画布（预览模式不渲染）═══════════════ */}
+      {!PREVIEW_MODE && (
       <div
         ref={baseContainerRef}
         style={{ position: 'absolute', inset: 0, overflow: 'hidden' }}
@@ -313,6 +317,7 @@ export default function ExamReview({ task, onClose, onSave }) {
           })}
         </div>
       </div>
+      )}
 
       {/* ═══════════════ 顶层: AI结果悬浮面板 ═══════════════ */}
       <div
@@ -321,11 +326,11 @@ export default function ExamReview({ task, onClose, onSave }) {
           left: 0,
           right: 0,
           bottom: 0,
-          height: panelH,
+          height: PREVIEW_MODE ? '100%' : panelH,
           zIndex: 10,
           touchAction: 'none',
-          transition: 'height 0.3s cubic-bezier(0.25, 0.46, 0.45, 0.94)',
-          borderRadius: 'var(--radius-lg) var(--radius-lg) 0 0',
+          transition: PREVIEW_MODE ? 'none' : 'height 0.3s cubic-bezier(0.25, 0.46, 0.45, 0.94)',
+          borderRadius: PREVIEW_MODE ? 0 : 'var(--radius-lg) var(--radius-lg) 0 0',
           overflow: 'hidden',
           boxShadow: '0 -4px 24px rgba(0,0,0,0.15)',
           display: 'flex',
@@ -337,7 +342,8 @@ export default function ExamReview({ task, onClose, onSave }) {
           position: 'absolute', inset: 0, background: COLORS.card, zIndex: 0
         }} />
 
-        {/* ─ 拖拽手柄 ── */}
+        {/* ─ 拖拽手柄（预览模式隐藏）─ */}
+        {!PREVIEW_MODE && (
         <div
           onTouchStart={handleTouchStart}
           onTouchMove={handleTouchMove}
@@ -357,11 +363,12 @@ export default function ExamReview({ task, onClose, onSave }) {
         >
           <div style={{ width: 40, height: 4, borderRadius: 'var(--radius-2)', background: 'var(--border)' }} />
         </div>
+        )}
 
         {/* ── 顶部统计 ── */}
         <div style={{
           position: 'relative', zIndex: 1,
-          padding: '6px 12px',
+          padding: PREVIEW_MODE ? '52px 12px 6px' : '6px 12px',
           display: 'flex', flexWrap: 'wrap', gap: '6px',
           borderBottom: `1px solid ${COLORS.border}`,
           flexShrink: 0
