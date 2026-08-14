@@ -238,19 +238,49 @@ export const getAIHeaders = () => ({
 export const BACKUP_VENDOR_DEFS = [
   {
     // ZenMux (https://zenmux.ai)：多模型聚合网关，OpenAI 兼容。
-    // 2026-08-13 用户临时放到第一位测试：pay-as-you-go key（sk-ai-v1-...）
-    //   deepseek 文本免费、mino 视觉免费，独立配额不影响魔搭。
-    // 仅当 ZENMUX_API_KEY=sk-ai-v1-... 时加载（keyPrefix 自动过滤），未配则自动跳过。
-    // 注意：zenmux.ai 在中国大陆被 GFW 墙（GFW reset），必须从 Render (Oregon) 出站；
-    //      本地开发机调试时无法访问。
-    // 实际效果待 Render 实际跑一次后调整位置和模型名。
+    // 2026-08-13 用户 Key 实测结论（sk-ai-v1- 前缀，账户余额 = 0）：
+    //   - 付费视觉模型（xiaomi/mimo-v2.5、qwen/qwen3-vl-plus、google/gemini-2.5-flash）
+    //     全部 402 reject_no_credit：账户余额必须 > 0 才可用（反滥用保护，非扣费）。
+    //   - 免费视觉 z-ai/glm-4.6v-flash-free：零余额可用、能真正看图（有 429 限流）。
+    //   - 免费视觉 sapiens-ai/agnes-2.0-flash：零余额可用、能看图但识别质量差一截。
+    //   - 免费文本 z-ai/glm-4.7-flash-free：可用；deepseek/deepseek-v4-flash-free 也要求余额>0。
+    // vlModels 顺序：免费 GLM 视觉放最前（零余额即可测）→ 充值后 MIMO/Qwen/Gemini 自动生效。
+    // 注意：zenmux.ai 在中国大陆被 GFW 墙（DNS 污染），必须从 Render (Oregon) 出站；
+    //      本地开发机若走系统代理可测（curl 需显式 -x 代理）。
     name: 'ZenMux',
     envKey: 'ZENMUX_API_KEY',
     endpoint: 'https://zenmux.ai/api/v1/chat/completions',
     modelsEndpoint: 'https://zenmux.ai/api/v1/models',
-    textModel: 'deepseek-chat',
-    vlModels: ['mino/mino-1.5', 'qwen/qwen2.5-vl-72b-instruct', 'google/gemini-2.5-flash'],
+    textModel: 'z-ai/glm-4.7-flash-free',
+    vlModels: [
+      'z-ai/glm-4.6v-flash-free',   // 免费：零余额可用、能看图（限流较凶）
+      'xiaomi/mimo-v2.5',           // 需余额>0：用户想试的 MIMO 视觉
+      'xiaomi/mimo-v2.5-pro',
+      'qwen/qwen3-vl-plus',
+      'google/gemini-2.5-flash',
+      'sapiens-ai/agnes-2.0-flash', // 免费：能看图，识别质量一般，作最后兜底
+    ],
     keyPrefix: 'sk-ai-v1-',
+    referer: null,
+  },
+  {
+    // 智谱 BigModel (https://open.bigmodel.cn)：OpenAI 兼容，国内直连（无 GFW 问题）。
+    // 2026-08-13 用户 Key 实测结论（账户余额 = 0）：
+    //   - 免费文本 glm-4-flash / glm-4.5-flash：可用 ✅（文本兜底首选）
+    //   - 免费视觉 glm-4v-flash：可用，但 max_tokens 硬上限 1024 → 长答案页会被截断。
+    //     为不触发 1210，本供应商整体 maxTokens 取 1024（见下方 maxTokens 字段）。
+    //   - 新品 GLM-5V-Turbo（glm-5v-turbo）：视觉模型存在，但需余额>0（1113），
+    //     充值后自动作为首个视觉模型生效；届时 quality 若优于魔搭，可再把
+    //     maxTokens 提到 4096（glm-5v-turbo 无 1024 限制），并把魔搭降为第一备用。
+    //   - 付费文本 glm-4.5/4.6/4.7/5/5.1/5.2 及视觉 glm-4.5v/glm-4v-plus：需余额（1113）。
+    name: 'BigModel',
+    envKey: 'BIGMODEL_API_KEY',
+    endpoint: 'https://open.bigmodel.cn/api/paas/v4/chat/completions',
+    modelsEndpoint: 'https://open.bigmodel.cn/api/paas/v4/models',
+    textModel: 'glm-4-flash',
+    vlModels: ['glm-5v-turbo', 'glm-4v-flash'],
+    maxTokens: 1024, // glm-4v-flash 硬上限；充值后想用 glm-5v-turbo 完整输出可提到 4096
+    keyPrefix: null, // 智谱 Key 形如 <id>.<secret>，无统一前缀，有 Key 即启用
     referer: null,
   },
   {
@@ -629,6 +659,11 @@ export async function callVisionCompletion(opts) {
   const wantedModels = model ? [model] : VL_MODELS
   const mainSkippedByCooldown = MS_KEYS.length > 0 && isMainRateLimitedToday()
 
+  // 测试开关：BACKUP_FIRST=1（或 ZENMUX_FIRST=1）时，把备份供应商（ZenMux 等）排到魔搭前面，
+  // 用于「现在就测 ZenMux 效果」而不必等魔搭当日配额耗尽。魔搭仍会作为兜底被尝试，
+  // 因此日常识别不会被阻塞。测完置空/改 0 即恢复默认「魔搭优先」。
+  const forceBackupFirst = process.env.BACKUP_FIRST === '1' || process.env.ZENMUX_FIRST === '1'
+
   // 动态决定优先级：
   //   默认魔搭优先（体验最好：速度快 + 正确率高）。
   //   但魔搭当日配额按账号×模型计，6 个组合极易全部耗尽；
@@ -647,8 +682,12 @@ export async function callVisionCompletion(opts) {
     }
   }
 
-  if (allMsExhausted) {
-    console.warn('[AI] 魔搭所有 Key×模型组合今日配额均已耗尽，自动切换为备份供应商优先')
+  if (allMsExhausted || forceBackupFirst) {
+    if (forceBackupFirst) {
+      console.warn('[AI] BACKUP_FIRST=1 已开启，备份供应商优先（ZenMux 等先于魔搭被尝试）')
+    } else {
+      console.warn('[AI] 魔搭所有 Key×模型组合今日配额均已耗尽，自动切换为备份供应商优先')
+    }
     // 备份供应商视觉兜底（SenseNova → Agnes → FreeModel，各自独立配额）
     for (const vendor of BACKUP_CONFIG.VENDORS) {
       for (const vlModel of vendor.vlModels) {
@@ -660,7 +699,7 @@ export async function callVisionCompletion(opts) {
               model: model || vlModel,
               messages,
               temperature,
-              maxTokens: Math.min(maxTokens, 4096),
+              maxTokens: Math.min(maxTokens, vendor.maxTokens || 4096),
               timeout: BACKUP_TIMEOUT,
               retry503: false,
               vendor,
@@ -702,7 +741,7 @@ export async function callVisionCompletion(opts) {
               model: model || vlModel,
               messages,
               temperature,
-              maxTokens: Math.min(maxTokens, 4096),
+              maxTokens: Math.min(maxTokens, vendor.maxTokens || 4096),
               timeout: BACKUP_TIMEOUT,
               retry503: false,
               vendor,

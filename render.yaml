@@ -40,6 +40,11 @@ services:
       # 注意：zenmux.ai 在中国大陆被墙，Render（Oregon）出站正常。
       - key: ZENMUX_API_KEY
         sync: false
+      # 2026-08 实验：智谱 BigModel（OpenAI 兼容，国内直连无 GFW 问题）。
+      # 免费模型即零余额可用（文本 glm-4-flash/glm-4.5-flash、视觉 glm-4v-flash）；
+      # 新品 GLM-5V-Turbo（glm-5v-turbo）需余额>0，充值后自动生效。Key 形如 <id>.<secret>。
+      - key: BIGMODEL_API_KEY
+        sync: false
       - key: OSS_REGION
         value: oss-cn-shanghai
       - key: OSS_BUCKET
