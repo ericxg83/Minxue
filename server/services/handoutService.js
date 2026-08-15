@@ -58,6 +58,26 @@ function isPromptEcho(text, kpName) {
     '关键公式用 $',
     '难点突破',
     '易错警示',
+    // 新增：增强对改进后 prompt 的回显检测
+    '适合初中生阅读',
+    '通俗语言解释',
+    '通俗易懂的语言',
+    '不要回显提示词',
+    '不要写开场白',
+    '不要写结束语',
+    '直接输出正文',
+    '五段式',
+    '每段必须有实质性',
+    '朗朗上口',
+    'do not echo',
+    'no extra text',
+    'output directly',
+    'no opening',
+    'no closing',
+    '不是通用模板',
+    '具体解题步骤',
+    'KaTeX 格式',
+    'solutionSteps',
   ]
   // 如果文本包含多个 prompt 特征词，极可能是回显
   const matchCount = echoPatterns.filter(p => lower.includes(p.toLowerCase())).length
@@ -131,8 +151,25 @@ export async function generateKnowledgeExplanation(kpName, subject = '数学') {
           ? ''
           : `你是${subject}老师。直接输出知识点讲解，用 Markdown 格式。`,
         userContent: isRetry
-          ? `用中文写一段关于「${kpName}」的${subject}知识点讲解（500-800字），包含：核心定义、重点内容（关键公式用 $...$ 包裹）、难点突破、易错警示、记忆口诀。直接输出正文，不要写任何开场白或结束语。`
-          : `请为「${kpName}」写一段${subject}知识点讲解（500-800字），用 Markdown 组织，包含：## 核心定义（正文）、## 重点内容（加粗标记，关键公式用 $...$ 包裹）、## 难点突破（需要特别注意的内容）、## 易错警示（常见错误列表）、## 记忆口诀。直接输出正文。`,
+          ? `用中文为「${kpName}」写一段${subject}知识点讲解（500-800字），适合初中生理解。严格按以下五段式 Markdown 输出，每段必须有实质性内容：
+
+## 核心定义
+准确的概念定义，用通俗语言解释。
+
+## 重点内容
+关键公式用 $...$ 包裹，**加粗**标记重点。
+
+## 难点突破
+需要特别注意的难点，给出具体突破方法。
+
+## 易错警示
+列出 3-5 个常见错误案例，每项一行。
+
+## 记忆口诀
+朗朗上口的记忆口诀。
+
+直接输出正文，不要回显提示词。`
+          : `请为知识点「${kpName}」写一段${subject}知识讲解，适合初中生阅读，500-800字。严格按以下五段式 Markdown 输出，每段必须有实质性内容：## 核心定义（准确的概念定义，用通俗易懂的语言解释）、## 重点内容（核心公式用 $...$ 包裹，**加粗**标记重点概念和结论）、## 难点突破（需要特别注意的难点，给出具体突破方法）、## 易错警示（列出 3-5 个常见错误案例，每项一行）、## 记忆口诀（朗朗上口的记忆口诀）。直接输出正文，不要回显提示词，不要写开场白或结束语。`,
         temperature: 0.5,
         maxTokens: 1500,
       })
@@ -170,7 +207,7 @@ export async function generateKnowledgeExplanation(kpName, subject = '数学') {
  * @param {string} kpName
  * @param {string} subject
  * @param {Array} sampleQuestions 错题样本（按题型聚合）
- * @returns {Promise<Array<{type, description, example, tip}>>}
+ * @returns {Promise<Array<{type, example, solutionSteps, tip}>>}
  */
 export async function generateQuestionTypeSummary(kpName, subject = '数学', sampleQuestions = []) {
   if (!kpName) return []
@@ -186,32 +223,28 @@ export async function generateQuestionTypeSummary(kpName, subject = '数学', sa
   ).join('\n')
 
   const prompt = {
-    systemContent: `你是一位经验丰富的 K12 ${subject}老师，正在备课。基于"${kpName}"这个知识点的本周错题样本，请归纳这个知识点在**真实考试里会怎么考**的题型（3-5 种），帮老师提前预判考试方向与学生易错点。
+    systemContent: `你是一位经验丰富的 K12 ${subject}老师，正在备课。基于"${kpName}"这个知识点的本周错题样本，请归纳这个知识点在真实考试里会怎么考的题型（3-6 种），帮老师提前预判考试方向与学生易错点。
 
 输出 JSON 数组（不要任何额外说明文字），每条结构：
 [
   {
-    "type": "题型名，用「知识点 + 具体考法」命名（如：一元一次方程 - 应用题）",
-    "description": "一句话说这种题型在考试里怎么出、考什么、通常出现在选择/填空/解答哪一类",
-    "example": "用 1 句话给一道贴合中考难度的典型题干（只给题干，不要给答案）",
+    "type": "题型名（如：一元一次方程 - 行程问题）",
+    "example": "典型例题题干（只给题干，不要给答案）",
     "solutionSteps": [
-      {"step": 1, "text": "审题：明确已知条件与求解目标", "formula": ""},
-      {"step": 2, "text": "列式：写出关键公式或表达式", "formula": "$关键公式$"},
-      {"step": 3, "text": "计算求解", "formula": "$答案$"},
-      {"step": 4, "text": "验证：检查结果合理性", "formula": ""}
+      {"step": 1, "text": "具体解题步骤说明", "formula": "$公式$"},
+      {"step": 2, "text": "具体解题步骤说明", "formula": "$公式$"}
     ],
-    "tip": "一句话给学生的解题策略 / 给老师的讲解要点"
+    "tip": "解题策略或技巧"
   }
 ]
 
 要求（考试导向，务必遵守）：
-- 至少 3 种，至多 5 种；按「考试出现频率/重要性」排序（最常考的排最前）。
-- type 命名必须"知识点 + 题型/考法"组合，让老师一眼定位（如"一元一次方程 - 移项去括号"而非笼统的"方程题"）。
-- 必须覆盖：① 错题样本里实际出现过的题型；② 该知识点在中考/升学考试里常考、但样本里没有的延伸题型（这是最该补的）。
-- description 要落到具体考法（怎么变形、怎么设问、常见坑），不要泛泛而谈。
-- example 用于老师课堂举例，难度贴合该学段真实考试。
-- solutionSteps 必须是 3-5 步的完整解题过程，每步包含 text（说明文字）和 formula（用 $...$ 包裹的数学公式，无公式则留空字符串）。
-- 严禁编造题目无法成立的考法；严格按该知识点真实考纲范围。`,
+- 至少 3 种，至多 6 种；按考试出现频率/重要性排序。
+- type 命名必须为"知识点 + 具体考法"组合（如"一元一次方程 - 移项去括号"）。
+- 必须覆盖：① 错题样本里实际出现过的题型；② 该知识点在中考/升学考试里常考、但样本里没有的延伸题型。
+- example 用于课堂举例，难度贴合该学段真实考试。
+- solutionSteps 必须是针对该题型的具体解题步骤（不是通用模板），3-5 步，每步包含 step（编号）、text（说明文字）、formula（KaTeX 格式，用 $...$ 包裹，无公式则留空字符串 ""）。
+- 严禁编造无法成立的考法；严格按该知识点真实考纲范围。`,
     userContent: `知识点：${kpName}（${subject}）
 
 本周错题样本：
@@ -234,7 +267,7 @@ ${questionDigest || '（暂无错题样本，请基于该知识点中考/升学�
     if (jsonMatch) raw = jsonMatch[1] || jsonMatch[0]
     const parsed = JSON.parse(raw)
     if (Array.isArray(parsed)) {
-      types = parsed.filter(t => t && t.type).slice(0, 5)
+      types = parsed.filter(t => t && t.type).slice(0, 6)
     }
   } catch (err) {
     console.warn(`  ⚠️ [Handout] 题型归纳生成失败 ${kpName}:`, err.message)
