@@ -1226,8 +1226,8 @@ async function loadFromDiagnosis() {
 
 /* 题型小标题 */
 .block-type-section {
-  font-size: 15px;
-  font-weight: 600;
+  font-size: 20px;
+  font-weight: 700;
   color: #4F46E5;
   margin: 20px 0 12px;
   padding: 8px 12px;
@@ -1716,8 +1716,8 @@ async function loadFromDiagnosis() {
   margin-bottom: 20px;
 }
 .block-kp-key-points .kp-list li {
-  font-size: 18px;
-  font-weight: 600;
+  font-size: 20px;
+  font-weight: 700;
   color: #1D2129;
 }
 .block-kp-difficult-points {
@@ -1738,7 +1738,7 @@ async function loadFromDiagnosis() {
   margin-bottom: 20px;
 }
 .kp-mnemonic-text {
-  font-size: 17px;
+  font-size: 18px;
   color: #047857;
   font-style: italic;
   line-height: 1.7;
@@ -1807,7 +1807,7 @@ async function loadFromDiagnosis() {
   margin: 8px 0;
   background: #FFF5F5;
   border-radius: 4px;
-  font-size: 14px;
+  font-size: 16px;
   color: #DC2626;
 }
 .error-cause-tag {
@@ -1838,7 +1838,7 @@ async function loadFromDiagnosis() {
   margin: 8px 0;
   background: #F0FFF4;
   border-radius: 6px;
-  font-size: 14px;
+  font-size: 16px;
   color: #047857;
 }
 .type-tip-label {
