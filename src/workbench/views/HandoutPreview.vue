@@ -100,6 +100,12 @@
         <!-- 知识点页面 -->
         <template v-else>
           <div class="handout-section">
+            <!-- 页眉：学科/知识点 -->
+            <div class="page-header">
+              <span class="page-header-subject">{{ handout?.subject || '数学' }}</span>
+              <span class="page-header-sep">|</span>
+              <span class="page-header-kp">{{ page.name }}</span>
+            </div>
             <h2 class="page-title">{{ page.name }}</h2>
 
             <div v-for="(block, bIdx) in page.blocks" :key="bIdx" class="handout-block">
@@ -262,6 +268,98 @@
                 </div>
               </div>
 
+              <!-- 知识点标题 -->
+              <div v-else-if="block.type === 'kp-section'" class="block-kp-section">
+                {{ block.content }}
+              </div>
+
+              <!-- 核心定义 -->
+              <div v-else-if="block.type === 'kp-definition'" class="block-kp-definition">
+                <div class="kp-label">核心定义</div>
+                <div class="kp-text" v-html="renderMarkdown(block.content)"></div>
+              </div>
+
+              <!-- 重点内容 -->
+              <div v-else-if="block.type === 'kp-key-points'" class="block-kp-key-points">
+                <div class="kp-label kp-label-key">重点</div>
+                <ul class="kp-list">
+                  <li v-for="(p, pi) in (Array.isArray(block.content) ? block.content : [block.content])" :key="pi" v-html="renderMarkdown(p)"></li>
+                </ul>
+              </div>
+
+              <!-- 难点内容 -->
+              <div v-else-if="block.type === 'kp-difficult-points'" class="block-kp-difficult-points">
+                <div class="kp-label kp-label-difficult">难点</div>
+                <ul class="kp-list">
+                  <li v-for="(p, pi) in (Array.isArray(block.content) ? block.content : [block.content])" :key="pi" v-html="renderMarkdown(p)"></li>
+                </ul>
+              </div>
+
+              <!-- 易错点 -->
+              <div v-else-if="block.type === 'kp-mistakes'" class="block-kp-mistakes">
+                <div class="kp-label kp-label-mistake">易错警示</div>
+                <ul class="kp-list">
+                  <li v-for="(m, mi) in (Array.isArray(block.content) ? block.content : [block.content])" :key="mi" v-html="renderMarkdown(m)"></li>
+                </ul>
+              </div>
+
+              <!-- 记忆口诀 -->
+              <div v-else-if="block.type === 'kp-mnemonic'" class="block-kp-mnemonic">
+                <div class="kp-label">记忆口诀</div>
+                <div class="kp-mnemonic-text" v-html="renderMarkdown(block.content)"></div>
+              </div>
+
+              <!-- 🆕 对比卡片（投屏版：学生作答 vs 正确答案） -->
+              <div v-else-if="block.type === 'compare-card'" class="block-compare-card">
+                <div class="compare-grid">
+                  <div class="compare-side compare-student">
+                    <div class="compare-header">✍️ {{ block.content.studentName || '学生' }}作答</div>
+                    <div class="compare-body">{{ block.content.studentAnswer }}</div>
+                  </div>
+                  <div class="compare-vs">VS</div>
+                  <div class="compare-side compare-correct">
+                    <div class="compare-header">✅ 正确答案</div>
+                    <div class="compare-body">{{ block.content.correctAnswer }}</div>
+                  </div>
+                </div>
+              </div>
+
+              <!-- 分步作答过程 -->
+              <div v-else-if="block.type === 'solution-steps'" class="block-solution-steps">
+                <div class="solution-title">📝 完整作答过程</div>
+                <div v-for="(step, si) in block.content" :key="si" class="solution-step">
+                  <div class="solution-step-num">{{ step.step }}</div>
+                  <div class="solution-step-body">
+                    <div class="solution-step-text">{{ step.text }}</div>
+                    <div v-if="step.formula" class="solution-step-formula" v-html="renderMath(step.formula)"></div>
+                  </div>
+                </div>
+              </div>
+
+              <!-- 🆕 时间建议（投屏版） -->
+              <div v-else-if="block.type === 'time-hint'" class="block-time-hint">
+                <span class="time-hint-icon">⏱️</span>
+                <span class="time-hint-text">{{ block.content }}</span>
+              </div>
+
+              <!-- 错因简析 -->
+              <div v-else-if="block.type === 'error-cause'" class="block-error-cause">
+                <span class="error-cause-tag">错因</span>
+                <span>{{ block.content }}</span>
+              </div>
+
+              <!-- 典型例题 -->
+              <div v-else-if="block.type === 'type-example'" class="block-type-example">
+                <span class="type-example-label">例题</span>
+                <span v-html="renderMarkdown(block.content)"></span>
+              </div>
+
+              <!-- 关键技巧 -->
+              <div v-else-if="block.type === 'type-tip'" class="block-type-tip">
+                <span class="type-tip-label">技巧</span>
+                <span v-html="renderMarkdown(block.content)"></span>
+              </div>
+
               <!-- 讲课提词器（按时间分块） -->
               <div v-else-if="block.type === 'lecture-script'" class="block-lecture-script">
                 <div v-for="(step, sIdx) in block.content" :key="sIdx" class="script-step">
@@ -286,6 +384,11 @@
 
               <!-- 普通文本（写作范文 / 学生原文 / 复习建议等） -->
               <div v-else-if="block.type === 'text'" class="block-text" v-html="renderMarkdown(block.content)"></div>
+            </div>
+
+            <!-- 页脚：页码 -->
+            <div class="page-footer">
+              <span class="page-footer-text">敏学 · 备课讲义 | 第 {{ pIdx + 1 }} 页</span>
             </div>
           </div>
         </template>
@@ -388,7 +491,7 @@ function getBlockContent(blocks, type) {
 
 function renderMarkdown(text) {
   if (!text) return ''
-  return text
+  let result = text
     .replace(/^### (.+)$/gm, '<h4>$1</h4>')
     .replace(/^## (.+)$/gm, '<h3>$1</h3>')
     .replace(/^# (.+)$/gm, '<h2>$1</h2>')
@@ -396,6 +499,8 @@ function renderMarkdown(text) {
     .replace(/^\* (.+)$/gm, '<li>$1</li>')
     .replace(/(<li>.*<\/li>\n?)+/g, m => `<ul>${m}</ul>`)
     .replace(/\n/g, '<br>')
+  // 最后渲染数学公式，确保 $...$ 和 $$...$$ 被 KaTeX 处理
+  return renderMath(result)
 }
 
 function katexHtml(tex, displayMode) {
@@ -954,7 +1059,16 @@ async function loadFromDiagnosis() {
   justify-content: center;
   min-height: 500px;
   text-align: center;
+  background: #fff;
+  border: 1px solid #E5E6EB;
+  border-radius: 8px;
+  padding: 60px 48px;
+  position: relative;
+  overflow: hidden;
 }
+/* 移除装饰伪元素 */
+.handout-cover::before,
+.handout-cover::after { display: none; }
 .cover-label {
   font-size: 14px;
   color: #86909C;
@@ -1450,6 +1564,101 @@ async function loadFromDiagnosis() {
   flex: 1;
 }
 
+/* ========== 极简投屏样式 ========== */
+
+/* 页眉 */
+.page-header {
+  padding: 8px 0;
+  margin-bottom: 16px;
+  border-bottom: 1px solid #E5E6EB;
+  font-size: 12px;
+  color: #86909C;
+}
+
+/* 页脚 */
+.page-footer {
+  padding: 8px 0;
+  margin-top: 16px;
+  border-top: 1px solid #E5E6EB;
+  font-size: 12px;
+  color: #86909C;
+  text-align: center;
+}
+
+/* 对比卡片（学生作答 vs 正确答案） */
+.block-compare-card {
+  margin: 10px 0;
+}
+.compare-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 0;
+  border-radius: 6px;
+  overflow: hidden;
+  border: 1px solid #E5E6EB;
+}
+.compare-side {
+  padding: 14px 18px;
+}
+.compare-student {
+  background: #FFF5F5;
+  border-right: 1px solid #FECACA;
+}
+.compare-correct {
+  background: #F0FFF4;
+}
+.compare-header {
+  font-size: 12px;
+  font-weight: 700;
+  margin-bottom: 6px;
+}
+.compare-student .compare-header { color: #DC2626; }
+.compare-correct .compare-header { color: #16A34A; }
+.compare-body {
+  font-size: 16px;
+  line-height: 1.6;
+  color: #1D2129;
+  word-break: break-word;
+}
+/* 移除 VS 竖条 */
+.compare-vs { display: none; }
+
+/* 时间建议 */
+.block-time-hint {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 16px;
+  margin-bottom: 16px;
+  background: #F9FAFB;
+  border: 1px solid #E5E6EB;
+  border-radius: 4px;
+  font-size: 13px;
+  font-weight: 500;
+  color: #6B7280;
+}
+.time-hint-icon {
+  font-size: 22px;
+}
+.time-hint-text {
+  flex: 1;
+}
+
+/* 保持投屏可读性 */
+.handout-page {
+  font-size: 16px;
+}
+.handout-page .page-title {
+  font-size: 26px;
+}
+.handout-page .block-section {
+  font-size: 20px;
+}
+.handout-page .question-content {
+  font-size: 16px;
+  line-height: 1.8;
+}
+
 /* 打印样式 */
 @media print {
   .handout-toolbar { display: none; }
@@ -1460,5 +1669,180 @@ async function loadFromDiagnosis() {
     page-break-after: always;
   }
   .block-note { display: none; } /* 打印时隐藏笔记 */
+}
+
+/* === 知识点纵向结构 === */
+.block-kp-section {
+  font-size: 26px;
+  font-weight: 700;
+  color: #1D2129;
+  padding: 0 0 16px;
+  margin-bottom: 20px;
+  border-bottom: 2px solid #E5E6EB;
+}
+.kp-label {
+  font-size: 14px;
+  font-weight: 700;
+  color: #86909C;
+  margin-bottom: 8px;
+  text-transform: uppercase;
+  letter-spacing: 1px;
+}
+.kp-label-key { color: #6366F1; }
+.kp-label-difficult { color: #F59E0B; }
+.kp-label-mistake { color: #DC2626; }
+.kp-text {
+  font-size: 16px;
+  line-height: 1.8;
+  color: #1D2129;
+}
+.kp-list {
+  margin: 0;
+  padding-left: 20px;
+  font-size: 16px;
+  line-height: 1.9;
+  color: #4E5969;
+}
+.kp-list li { margin-bottom: 6px; }
+
+.block-kp-definition {
+  margin-bottom: 24px;
+  padding: 16px 20px;
+  background: #F9FAFB;
+  border-radius: 6px;
+  border-left: 3px solid #6366F1;
+}
+.block-kp-key-points {
+  margin-bottom: 20px;
+}
+.block-kp-key-points .kp-list li {
+  font-size: 18px;
+  font-weight: 600;
+  color: #1D2129;
+}
+.block-kp-difficult-points {
+  margin-bottom: 20px;
+  padding: 14px 18px;
+  background: #FFFBEB;
+  border-radius: 6px;
+  border-left: 3px solid #F59E0B;
+}
+.block-kp-mistakes {
+  margin-bottom: 20px;
+}
+.block-kp-mnemonic {
+  padding: 14px 18px;
+  background: #F0FFF4;
+  border-radius: 6px;
+  border: 1px solid #BBF7D0;
+  margin-bottom: 20px;
+}
+.kp-mnemonic-text {
+  font-size: 17px;
+  color: #047857;
+  font-style: italic;
+  line-height: 1.7;
+}
+
+/* === 分步作答过程 === */
+.block-solution-steps {
+  margin: 16px 0;
+  padding: 20px 24px;
+  background: #fff;
+  border: 1px solid #E5E6EB;
+  border-radius: 8px;
+}
+.solution-title {
+  font-size: 15px;
+  font-weight: 700;
+  color: #6366F1;
+  margin-bottom: 14px;
+  padding-bottom: 10px;
+  border-bottom: 1px solid #E5E6EB;
+}
+.solution-step {
+  display: flex;
+  gap: 14px;
+  margin-bottom: 12px;
+  align-items: flex-start;
+}
+.solution-step:last-child { margin-bottom: 0; }
+.solution-step-num {
+  flex-shrink: 0;
+  width: 28px;
+  height: 28px;
+  border-radius: 50%;
+  background: #6366F1;
+  color: #fff;
+  font-size: 13px;
+  font-weight: 700;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  margin-top: 2px;
+}
+.solution-step-body {
+  flex: 1;
+}
+.solution-step-text {
+  font-size: 15px;
+  line-height: 1.7;
+  color: #1D2129;
+}
+.solution-step-formula {
+  margin-top: 6px;
+  padding: 8px 14px;
+  background: #F9FAFB;
+  border-radius: 4px;
+  font-size: 16px;
+  overflow-x: auto;
+}
+
+/* === 错因简析 === */
+.block-error-cause {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 8px 14px;
+  margin: 8px 0;
+  background: #FFF5F5;
+  border-radius: 4px;
+  font-size: 14px;
+  color: #DC2626;
+}
+.error-cause-tag {
+  font-weight: 700;
+  flex-shrink: 0;
+}
+
+/* === 题型相关 === */
+.block-type-example {
+  display: flex;
+  gap: 10px;
+  padding: 12px 16px;
+  margin: 8px 0;
+  background: #F9FAFB;
+  border-radius: 6px;
+  font-size: 15px;
+  line-height: 1.7;
+}
+.type-example-label {
+  font-weight: 700;
+  color: #6366F1;
+  flex-shrink: 0;
+}
+.block-type-tip {
+  display: flex;
+  gap: 10px;
+  padding: 10px 16px;
+  margin: 8px 0;
+  background: #F0FFF4;
+  border-radius: 6px;
+  font-size: 14px;
+  color: #047857;
+}
+.type-tip-label {
+  font-weight: 700;
+  flex-shrink: 0;
 }
 </style>
