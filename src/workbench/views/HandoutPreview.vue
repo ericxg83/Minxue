@@ -1085,7 +1085,7 @@ async function loadFromDiagnosis() {
 .cover-divider {
   width: 60px;
   height: 3px;
-  background: linear-gradient(90deg, #6366F1, #4F46E5);
+  background: #6366F1;
   border-radius: 2px;
   margin: 0 auto 32px;
 }
@@ -1259,7 +1259,7 @@ async function loadFromDiagnosis() {
 }
 .type-summary-item {
   padding: 12px 16px;
-  background: linear-gradient(135deg, #FFFBEB 0%, #FEF3C7 100%);
+  background: #FFFBEB;
   border-left: 4px solid #F59E0B;
   border-radius: 6px;
   transition: transform 0.15s ease;
@@ -1326,9 +1326,9 @@ async function loadFromDiagnosis() {
   border: 1px solid #A7F3D0;
 }
 .question-content {
-  font-size: 14px;
+  font-size: 18px;
   color: #1D2129;
-  line-height: 1.6;
+  line-height: 1.8;
   margin-bottom: 8px;
 }
 .question-images {
@@ -1397,7 +1397,7 @@ async function loadFromDiagnosis() {
 /* 讲解引导 */
 .block-guidance {
   padding: 10px 14px;
-  background: linear-gradient(135deg, #FEF3C7 0%, #FDE68A 100%);
+  background: #FEF3C7;
   border-left: 3px solid #F59E0B;
   border-radius: 6px;
   font-size: 13px;
@@ -1484,7 +1484,7 @@ async function loadFromDiagnosis() {
 /* 讲课提词器（P4） */
 .block-lecture-script {
   margin: 16px 0;
-  background: linear-gradient(180deg, #FAF5FF 0%, #F5F3FF 100%);
+  background: #FAF5FF;
   border: 1px solid #DDD6FE;
   border-radius: 8px;
   padding: 16px 20px;

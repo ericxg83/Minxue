@@ -33,13 +33,14 @@ function isPromptEcho(text, kpName) {
   if (!text) return true
   const lower = text.toLowerCase()
   // 检测 AI 回显 prompt 指令的关键特征
+  // 注意：不要包含 AI 正常输出应有的章节标题（如"核心定义""重点内容"等），
+  // 否则会把合法输出误判为回显。
   const echoPatterns = [
+    // 旧版 prompt 回显特征
     '你是一位经验丰富的',
     '请为"',
     '请为「',
     '要求结构',
-    '核心定义',
-    '重点内容',
     '关键概念/要素',
     '常见错误/易错点',
     '典型考法/考点',
@@ -55,28 +56,19 @@ function isPromptEcho(text, kpName) {
     'core definition',
     'common mistakes',
     'memory trick',
-    '关键公式用 $',
-    '难点突破',
-    '易错警示',
-    // 新增：增强对改进后 prompt 的回显检测
-    '适合初中生阅读',
-    '通俗语言解释',
-    '通俗易懂的语言',
+    // 新版 prompt 回显特征（仅匹配 prompt 指令文本，不匹配 AI 正常输出）
     '不要回显提示词',
     '不要写开场白',
     '不要写结束语',
     '直接输出正文',
     '五段式',
     '每段必须有实质性',
-    '朗朗上口',
     'do not echo',
     'no extra text',
     'output directly',
     'no opening',
     'no closing',
     '不是通用模板',
-    '具体解题步骤',
-    'KaTeX 格式',
     'solutionSteps',
   ]
   // 如果文本包含多个 prompt 特征词，极可能是回显
