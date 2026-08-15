@@ -270,28 +270,242 @@ function normalizeType(t) {
 }
 
 /**
+ * 从题干中提取一句话摘要（去掉选项标记，截取前80字）。
+ * @param {string} content - 题目原始内容
+ * @returns {string} 摘要文本
+ */
+function extractQuestionSummary(content) {
+  if (!content) return '题目'
+  let cleaned = content
+    .replace(/[A-D][.、．]\s*[^\n]*/g, '')    // 去掉选项行 "A. xxx"
+    .replace(/[A-D]\s*[.、．]/g, '')          // 去掉残留选项标记
+    .replace(/\n+/g, ' ')                      // 换行合并为空格
+    .trim()
+  if (cleaned.length > 80) {
+    cleaned = cleaned.slice(0, 80) + '…'
+  }
+  return cleaned || '题目'
+}
+
+/**
+ * 从题干中提取所有数字。
+ * @param {string} content
+ * @returns {number[]}
+ */
+function extractNumbers(content) {
+  if (!content) return []
+  const matches = content.match(/-?\d+(?:\.\d+)?/g)
+  return matches ? matches.map(Number) : []
+}
+
+/**
+ * 尝试解析一元一次方程：ax + b = c 或 ax - b = c。
+ * @param {string} content - 题干文本
+ * @returns {null|{a: number, op: string, b: number, c: number}}
+ */
+function parseLinearEquation(content) {
+  if (!content) return null
+  // 匹配: ax + b = c 或 ax - b = c（系数a可为空，默认为1）
+  const m = content.match(/(\d*\.?\d*)\s*x\s*([+\-])\s*(\d+\.?\d*)\s*[=＝]\s*(\d+\.?\d*)/)
+  if (m) {
+    return {
+      a: m[1] === '' ? 1 : parseFloat(m[1]),
+      op: m[2],
+      b: parseFloat(m[3]),
+      c: parseFloat(m[4]),
+    }
+  }
+  // 匹配: b + ax = c
+  const m2 = content.match(/(\d+\.?\d*)\s*([+\-])\s*(\d*\.?\d*)\s*x\s*[=＝]\s*(\d+\.?\d*)/)
+  if (m2) {
+    return {
+      a: m2[3] === '' ? 1 : parseFloat(m2[3]),
+      op: m2[2],
+      b: parseFloat(m2[1]),
+      c: parseFloat(m2[4]),
+    }
+  }
+  return null
+}
+
+/**
+ * 根据题目内容和答案构建具体公式表达式（KaTeX 格式）。
+ * @param {string} correctAnswer - 正确答案
+ * @param {string} content - 题干文本
+ * @returns {string} KaTeX 公式字符串
+ */
+function buildFormulaFromAnswer(correctAnswer, content) {
+  if (!correctAnswer || !content) return ''
+  const answer = String(correctAnswer).trim()
+  if (!answer) return ''
+
+  // 尝试从题干中提取等式片段
+  const eqMatch = content.match(/([^，,;\n]{3,60}?[=＝]\s*[^，,;\n]{1,30})/)
+  if (eqMatch) {
+    return `$${eqMatch[1].trim()}$`
+  }
+
+  // 有数字则构建计算式
+  const nums = extractNumbers(content)
+  if (nums.length >= 2) {
+    return `$\\text{计算得} = ${answer}$`
+  }
+
+  return `$\\text{答案} = ${answer}$`
+}
+
+/**
+ * 为一元一次方程生成移项→化简→求解的具体步骤。
+ * @param {{a: number, op: string, b: number, c: number}} eq - 解析后的方程
+ * @returns {Array<{text: string, formula: string}>}
+ */
+function buildEquationSteps(eq) {
+  const steps = []
+  const rhs = eq.op === '+' ? eq.c - eq.b : eq.c + eq.b
+
+  steps.push({
+    text: `移项：把常数项移到等号右边`,
+    formula: `$${eq.a}x = ${eq.c} ${eq.op === '+' ? '-' : '+'} ${eq.b}$`,
+  })
+
+  if (eq.a !== 1) {
+    const result = rhs / eq.a
+    const resultStr = Number.isInteger(result)
+      ? result.toString()
+      : parseFloat(result.toFixed(4)).toString()
+    steps.push({
+      text: `化简得 $${eq.a}x = ${rhs}$，两边同时除以 ${eq.a}，求出 x`,
+      formula: `$${eq.a}x = ${rhs}$，$x = ${rhs} \\div ${eq.a} = ${resultStr}$`,
+    })
+  } else {
+    steps.push({
+      text: `化简得 $x = ${rhs}$，得出结果`,
+      formula: `$x = ${rhs}$`,
+    })
+  }
+
+  return steps
+}
+
+/**
  * 生成分步作答过程。
- * 每道错题生成编号步骤列表，每步有说明文字和公式字段。
+ * 基于题目具体内容（q.content、q.correctAnswer、q.errorType、q.errorReason）
+ * 生成针对性解题步骤，每步包含具体说明文字和 KaTeX 公式。
+ *
+ * 错题流程：读题 → 分析错因 → 正确解法 → 具体计算 → 验证
+ * 空题流程：读题 → 回顾知识点 → 列式代入 → 计算求解 → 检验
+ *
+ * @param {Object} q - 题目对象
+ * @param {string} q.content - 题干
+ * @param {string} q.correctAnswer - 正确答案
+ * @param {string} [q.errorType] - 错误类型
+ * @param {string} [q.errorReason] - 错误原因
+ * @param {boolean} q.isBlank - 是否为空题
+ * @param {string} kpName - 知识点名称
  * @returns {Array<{step: number, text: string, formula: string}>}
  */
 function buildSolutionSteps(q, kpName) {
   const steps = []
+  const summary = extractQuestionSummary(q.content)
+  const answer = String(q.correctAnswer || '').trim()
+  const isBlank = q.isBlank
   let n = 0
 
-  steps.push({ step: ++n, text: '审题：明确已知条件和求解目标', formula: '' })
+  // ── 步骤 1：读题 ──
+  steps.push({
+    step: ++n,
+    text: `读题：${summary}，明确已知条件和求解目标`,
+    formula: '',
+  })
 
-  if (q.isBlank) {
-    steps.push({ step: ++n, text: `回顾「${kpName}」相关概念与公式，确认适用条件`, formula: '' })
-    steps.push({ step: ++n, text: '将已知条件代入公式，逐步推导', formula: q.correctAnswer ? `$\\text{答案} = ${q.correctAnswer}$` : '' })
-  } else {
-    if (q.errorType) {
-      steps.push({ step: ++n, text: `注意避坑：${q.errorType}${q.errorReason ? `（${q.errorReason}）` : ''}`, formula: '' })
+  if (isBlank) {
+    // ══════════════════════════════════════════════
+    // 空题：从零开始完整解题
+    // ══════════════════════════════════════════════
+
+    // 步骤 2：回顾知识点
+    steps.push({
+      step: ++n,
+      text: `回顾「${kpName}」相关知识点，回忆公式和解题方法`,
+      formula: '',
+    })
+
+    // 尝试解析方程，生成具体计算步骤
+    const eq = parseLinearEquation(q.content)
+    if (eq) {
+      for (const s of buildEquationSteps(eq)) {
+        steps.push({ step: ++n, ...s })
+      }
+    } else {
+      // 通用情况：列式代入 + 计算
+      const formula = buildFormulaFromAnswer(answer, q.content)
+      steps.push({
+        step: ++n,
+        text: `列式：把已知条件代入公式，写出表达式`,
+        formula: formula,
+      })
+      if (answer) {
+        steps.push({
+          step: ++n,
+          text: `计算求解，得出结果`,
+          formula: `$\\text{结果} = ${answer}$`,
+        })
+      }
     }
-    steps.push({ step: ++n, text: '列式：根据题意和公式写出正确表达式', formula: '' })
-    steps.push({ step: ++n, text: '计算求解，得出最终结果', formula: q.correctAnswer ? `$\\text{正确答案} = ${q.correctAnswer}$` : '' })
-  }
 
-  steps.push({ step: ++n, text: '验证：检查结果是否合理，回顾关键步骤', formula: '' })
+    // 最后一步：检验
+    steps.push({
+      step: ++n,
+      text: `检验：把结果代回原题，检查是否满足条件`,
+      formula: '',
+    })
+  } else {
+    // ══════════════════════════════════════════════
+    // 错题：分析错因 → 纠正 → 求解
+    // ══════════════════════════════════════════════
+
+    // 步骤 2：分析错因
+    if (q.errorType) {
+      const errDesc = q.errorReason
+        ? `${q.errorType}（${q.errorReason}）`
+        : q.errorType
+      steps.push({
+        step: ++n,
+        text: `分析错因：我之前的错误是${errDesc}，需要重新理解题意`,
+        formula: '',
+      })
+    }
+
+    // 尝试解析方程
+    const eq = parseLinearEquation(q.content)
+    if (eq) {
+      for (const s of buildEquationSteps(eq)) {
+        steps.push({ step: ++n, ...s })
+      }
+    } else {
+      // 通用情况
+      const formula = buildFormulaFromAnswer(answer, q.content)
+      steps.push({
+        step: ++n,
+        text: `正确解法：理清思路，确定正确的解题路径`,
+        formula: formula,
+      })
+      if (answer) {
+        steps.push({
+          step: ++n,
+          text: `计算求解，得出最终结果`,
+          formula: `$\\text{正确答案} = ${answer}$`,
+        })
+      }
+    }
+
+    // 最后一步：验证
+    steps.push({
+      step: ++n,
+      text: `验证：检查结果是否合理，回顾关键步骤，避免再次出错`,
+      formula: '',
+    })
+  }
 
   return steps
 }
