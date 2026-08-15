@@ -39,6 +39,7 @@ function isPromptEcho(text, kpName) {
     '请为「',
     '要求结构',
     '核心定义',
+    '重点内容',
     '关键概念/要素',
     '常见错误/易错点',
     '典型考法/考点',
@@ -54,6 +55,9 @@ function isPromptEcho(text, kpName) {
     'core definition',
     'common mistakes',
     'memory trick',
+    '关键公式用 $',
+    '难点突破',
+    '易错警示',
   ]
   // 如果文本包含多个 prompt 特征词，极可能是回显
   const matchCount = echoPatterns.filter(p => lower.includes(p.toLowerCase())).length
@@ -71,37 +75,32 @@ function isPromptEcho(text, kpName) {
  * @returns {string}
  */
 function buildFallbackExplanation(kpName, subject = '数学') {
-  return `## ${kpName}
-
-### 核心定义
+  return `## 核心定义
 ${kpName}是${subject}学科中的重要知识点，是后续学习的基础。
 
-### 关键概念
+## 重点内容
 - 理解${kpName}的基本定义和适用条件
 - 掌握${kpName}的核心公式与变形
 - 能区分${kpName}与相关概念的异同
 - 熟悉${kpName}的常见题型和解题套路
 
-### 常见错误
+## 难点突破
+- ${kpName}的公式变形与灵活运用
+- 将实际问题转化为${kpName}模型的抽象能力
+- 综合题中${kpName}与其他知识点的衔接
+
+## 易错警示
 - 混淆${kpName}的定义条件，导致公式用错
 - 计算过程中忽略单位换算或符号处理
 - 解题步骤跳跃，缺少必要的中间推导
 
-### 典型考法
-- 选择题：考查${kpName}的基本概念辨析
-- 填空题：考查${kpName}的公式直接应用
-- 解答题：考查${kpName}的综合运用与实际问题
-
-### 解题思路
-遇到${kpName}相关题目时，先审题明确已知条件和求解目标，再选择对应的公式或方法，分步计算并验算结果。注意书写规范，每一步都要有依据。
-
-### 记忆口诀
+## 记忆口诀
 > 理解定义是根本，公式变形要记准，分步计算不跳步，验算检查防粗心。`
 }
 
 /**
  * AI 生成知识点的讲解文本（详讲版，500-800 字 → 1-2 页）。
- * 覆盖：核心定义 / 关键概念 / 常见错误 / 考点 / 解题思路 / 记忆技巧。
+ * 覆盖：核心定义 / 重点内容 / 难点突破 / 易错警示 / 记忆口诀。
  *
  * 防回显策略：先用简化 prompt 请求，检测回显后用更简洁的 prompt 重试一次，
  * 两次都失败则用兜底模板生成正式文档。
@@ -132,8 +131,8 @@ export async function generateKnowledgeExplanation(kpName, subject = '数学') {
           ? ''
           : `你是${subject}老师。直接输出知识点讲解，用 Markdown 格式。`,
         userContent: isRetry
-          ? `用中文写一段关于「${kpName}」的${subject}知识点讲解（500-800字），包含：定义、关键概念、常见错误、典型考法、解题思路、记忆口诀。直接输出正文，不要写任何开场白或结束语。`
-          : `请为「${kpName}」写一段${subject}知识点讲解（500-800字），用 Markdown 组织，包含：## 核心定义、## 关键概念、## 常见错误、## 典型考法、## 解题思路、## 记忆口诀。直接输出正文。`,
+          ? `用中文写一段关于「${kpName}」的${subject}知识点讲解（500-800字），包含：核心定义、重点内容（关键公式用 $...$ 包裹）、难点突破、易错警示、记忆口诀。直接输出正文，不要写任何开场白或结束语。`
+          : `请为「${kpName}」写一段${subject}知识点讲解（500-800字），用 Markdown 组织，包含：## 核心定义（正文）、## 重点内容（加粗标记，关键公式用 $...$ 包裹）、## 难点突破（需要特别注意的内容）、## 易错警示（常见错误列表）、## 记忆口诀。直接输出正文。`,
         temperature: 0.5,
         maxTokens: 1500,
       })
@@ -192,9 +191,15 @@ export async function generateQuestionTypeSummary(kpName, subject = '数学', sa
 输出 JSON 数组（不要任何额外说明文字），每条结构：
 [
   {
-    "type": "题型名，用「知识点 + 具体考法」命名（如：一元一次方程 - 应用题 / 一元一次方程 - 含参方程求根 / 一元一次方程 - 配套问题）",
+    "type": "题型名，用「知识点 + 具体考法」命名（如：一元一次方程 - 应用题）",
     "description": "一句话说这种题型在考试里怎么出、考什么、通常出现在选择/填空/解答哪一类",
     "example": "用 1 句话给一道贴合中考难度的典型题干（只给题干，不要给答案）",
+    "solutionSteps": [
+      {"step": 1, "text": "审题：明确已知条件与求解目标", "formula": ""},
+      {"step": 2, "text": "列式：写出关键公式或表达式", "formula": "$关键公式$"},
+      {"step": 3, "text": "计算求解", "formula": "$答案$"},
+      {"step": 4, "text": "验证：检查结果合理性", "formula": ""}
+    ],
     "tip": "一句话给学生的解题策略 / 给老师的讲解要点"
   }
 ]
@@ -205,6 +210,7 @@ export async function generateQuestionTypeSummary(kpName, subject = '数学', sa
 - 必须覆盖：① 错题样本里实际出现过的题型；② 该知识点在中考/升学考试里常考、但样本里没有的延伸题型（这是最该补的）。
 - description 要落到具体考法（怎么变形、怎么设问、常见坑），不要泛泛而谈。
 - example 用于老师课堂举例，难度贴合该学段真实考试。
+- solutionSteps 必须是 3-5 步的完整解题过程，每步包含 text（说明文字）和 formula（用 $...$ 包裹的数学公式，无公式则留空字符串）。
 - 严禁编造题目无法成立的考法；严格按该知识点真实考纲范围。`,
     userContent: `知识点：${kpName}（${subject}）
 
@@ -220,7 +226,7 @@ ${questionDigest || '（暂无错题样本，请基于该知识点中考/升学�
       systemContent: prompt.systemContent,
       userContent: prompt.userContent,
       temperature: 0.6,
-      maxTokens: 800,
+      maxTokens: 1500,
     })
     let raw = (result.content || '').trim()
     // 兜底：AI 偶发包成 ```json ... ```
@@ -242,6 +248,7 @@ ${questionDigest || '（暂无错题样本，请基于该知识点中考/升学�
       type,
       description: `本周出现 ${count} 次错题`,
       example: '',
+      solutionSteps: [],
       tip: '',
     }))
   }
