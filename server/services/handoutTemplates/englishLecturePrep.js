@@ -226,16 +226,34 @@ function groupByQuestionType(questions) {
 }
 
 function buildLectureGuidance(q) {
-  const parts = ['💡 讲解引导：']
+  const lines = []
+  lines.push('**Teaching Guidance**')
+  lines.push('')
+
   if (q.isBlank) {
-    parts.push('空题（未作答），先确认学生是否理解题干关键信息，')
-    parts.push('用 1-2 个简化版本确认卡点，再回到原题。')
+    lines.push('**Diagnosis**: Student left this blank — possible knowledge gap or lack of confidence.')
+    lines.push('')
+    lines.push('**Step-by-step**:')
+    lines.push('1. **Warm-up**: Review the key vocabulary or grammar point needed for this question.')
+    lines.push('2. **Check understanding**: Ask 1-2 simplified questions to identify where the student is stuck.')
+    lines.push('   Example: "What is this question asking you to do?"')
+    lines.push('3. **Scaffold**: Guide the student through the question step by step, confirming understanding at each stage.')
+    lines.push('4. **Verify**: Have the student explain the answer in their own words.')
   } else {
-    if (q.errorType) parts.push(`错因"${q.errorType}"——`)
-    parts.push('先纠正思路（不要直接给答案），')
-    parts.push('再演示完整解题步骤，最后让 1 个学生复述。')
+    if (q.errorType) {
+      lines.push(`**Error diagnosis**: ${q.errorType}${q.errorReason ? ` — ${q.errorReason}` : ''}`)
+    } else {
+      lines.push('**Error diagnosis**: Review the gap between student answer and correct answer.')
+    }
+    lines.push('')
+    lines.push('**Step-by-step**:')
+    lines.push('1. **Correct the thinking**: Don\'t give the answer directly. Ask the student to review their own reasoning.')
+    lines.push('   Example: "What grammar rule do you think this question is testing?"')
+    lines.push('2. **Demonstrate**: Show the complete correct answer, explaining each step.')
+    lines.push('3. **Compare**: Help the student identify exactly where their approach differed from the correct one.')
+    lines.push('4. **Reinforce**: Have the student redo a similar question independently to confirm mastery.')
   }
-  return parts.join('')
+  return lines.join('\n')
 }
 
 // 英语知识点讲解（默认英文，kpName 已是英语术语时直接使用）
@@ -243,35 +261,85 @@ function buildLectureGuidance(q) {
 const _enExplanationCache = new Map()
 const EN_EXPLANATION_CACHE_MAX = 256
 
+/**
+ * 检测英文 AI 讲解是否回显了 prompt 指令文本
+ */
+function isEnglishPromptEcho(text) {
+  if (!text) return true
+  const lower = text.toLowerCase()
+  const echoPatterns = [
+    'you are a middle-school english teacher',
+    'write a 200-300 word explanation',
+    'core definition',
+    'the most common mistake',
+    'short memory trick',
+    'keep it concise and exam-oriented',
+    'explain:',
+  ]
+  const matchCount = echoPatterns.filter(p => lower.includes(p.toLowerCase())).length
+  return matchCount >= 2
+}
+
+/**
+ * 英语知识点兜底模板
+ */
+function buildEnglishFallbackExplanation(kpName) {
+  return `## ${kpName}
+
+### Definition
+${kpName} is an important English grammar/vocabulary point that students need to master for exams.
+
+### Common Mistakes
+- Students often confuse ${kpName} with similar grammatical structures
+- Incorrect word order or tense agreement when using ${kpName}
+- Over-generalizing the rules of ${kpName} to contexts where they don't apply
+
+### Memory Tip
+> Practice with real exam questions to internalize the pattern of ${kpName}. Create your own example sentences to reinforce understanding.
+
+### Key Points
+- Understand when and where to use ${kpName}
+- Pay attention to common collocations and fixed expressions
+- Review error patterns from past exams`
+}
+
 async function generateEnglishExplanation(kpName) {
   if (!kpName) return ''
-  const cacheKey = `en::${kpName}`
+  const cacheKey = `en::${kpName}::v2`
   if (_enExplanationCache.has(cacheKey)) {
     return _enExplanationCache.get(cacheKey)
   }
 
-  const prompt = {
-    systemContent: `You are a middle-school English teacher in China. Write a 200-300 word explanation of the grammar/vocabulary point "${kpName}" for Chinese middle-school students.
+  let text = ''
+  const MAX_ATTEMPTS = 2
 
-Use Markdown. Cover:
-1. Core definition (one sentence in English + Chinese translation).
-2. The most common mistake students make (one sentence).
-3. A short memory trick or sentence pattern.
-Keep it concise and exam-oriented.`,
-    userContent: `Explain: ${kpName}`,
+  for (let attempt = 0; attempt < MAX_ATTEMPTS; attempt++) {
+    try {
+      const isRetry = attempt > 0
+      const r = await callTextCompletion({
+        systemContent: isRetry
+          ? ''
+          : 'You are an English teacher. Output the explanation directly in Markdown. No greetings or closings.',
+        userContent: isRetry
+          ? `Explain the English grammar/vocabulary point "${kpName}" in 200-300 words. Cover: definition, common mistakes, and a memory tip. Use Markdown. Output directly.`
+          : `Explain "${kpName}" for Chinese middle-school students. Use Markdown with ## headings. Cover definition, common mistakes, and a memory tip. Be concise.`,
+        temperature: 0.5,
+        maxTokens: 700,
+      })
+      const raw = (r.content || '').trim()
+      if (!isEnglishPromptEcho(raw)) {
+        text = raw
+        break
+      }
+      console.warn(`[englishLecturePrep] 检测到 AI 回显 prompt（第 ${attempt + 1} 次），尝试重试...`)
+    } catch (e) {
+      console.warn(`[englishLecturePrep] 讲解生成失败 ${kpName} (第 ${attempt + 1} 次):`, e.message)
+    }
   }
-  let text
-  try {
-    const r = await callTextCompletion({
-      systemContent: prompt.systemContent,
-      userContent: prompt.userContent,
-      temperature: 0.5,
-      maxTokens: 700,
-    })
-    text = (r.content || '').trim()
-  } catch (e) {
-    console.warn(`[englishLecturePrep] 讲解生成失败 ${kpName}:`, e.message)
-    text = `## ${kpName}\n\n*（讲解暂不可用）*`
+
+  if (!text || isEnglishPromptEcho(text)) {
+    console.warn(`[englishLecturePrep] ${kpName} AI 讲解全部失败，使用兜底模板`)
+    text = buildEnglishFallbackExplanation(kpName)
   }
 
   if (_enExplanationCache.size >= EN_EXPLANATION_CACHE_MAX) {

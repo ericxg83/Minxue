@@ -559,7 +559,7 @@ export async function buildHandoutDocx(handout) {
   }
 
   const doc = new Document({
-    creator: '明学 · 备课讲义',
+    creator: '敏学 · 备课讲义',
     title: escText(handout.title) || '备课讲义',
     description: '由 handoutService 自动生成',
     sections: [

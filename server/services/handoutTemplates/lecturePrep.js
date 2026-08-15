@@ -161,23 +161,39 @@ function normalizeType(t) {
 }
 
 /**
- * 简单讲解引导（P4 由提词器增强）
- * 输入错题，输出一句"先讲什么、再讲什么"的引导语。
+ * 讲解引导（生成正式备课文档中的讲解引导段落）。
+ * 输入错题，输出一段结构化的教学引导，包含"提问示例"和"解题思路拆解"。
+ * 让老师拿到讲义后可以直接照着讲，而不是看一段提示词。
  */
 function buildLectureGuidance(q) {
-  const parts = []
-  parts.push(`💡 讲解引导：`)
+  const lines = []
+  lines.push(`**讲解引导**`)
+  lines.push('')
+
   if (q.isBlank) {
-    parts.push(`空题（未作答），先从基础概念铺垫，`)
-    parts.push(`问 1-2 个相关小问题确认学生卡点，`)
-    parts.push(`再回到原题逐步拆解。`)
+    // 空题：从未作答到逐步引导
+    lines.push(`**诊断**：学生未作答，可能存在知识盲区或畏难情绪。`)
+    lines.push('')
+    lines.push(`**引导步骤**：`)
+    lines.push(`1. **铺垫**：先回顾相关基础概念，确保学生理解题目在问什么。`)
+    lines.push(`2. **试探**：问 1-2 个简化版问题，确认学生卡在哪个环节。`)
+    lines.push(`    示例："这道题的条件是什么？要求的是什么？"`)
+    lines.push(`3. **拆解**：回到原题，从第一步开始逐步引导，每步确认学生跟上后再推进。`)
+    lines.push(`4. **验证**：让学生用自己的话复述解题过程，确保真正理解。`)
   } else {
+    // 错题：先纠正思路，再演示正确解法
     if (q.errorType) {
-      parts.push(`错因"${q.errorType}"——`)
+      lines.push(`**错因诊断**：${q.errorType}${q.errorReason ? `——${q.errorReason}` : ''}`)
+    } else {
+      lines.push(`**错因诊断**：待分析（可参考学生作答与正确答案的差异）`)
     }
-    parts.push(`先纠正思路（不要急着给答案），`)
-    parts.push(`再演示完整解题步骤，`)
-    parts.push(`最后让 1 个学生复述。`)
+    lines.push('')
+    lines.push(`**引导步骤**：`)
+    lines.push(`1. **纠错**：不要直接给答案。先让学生回顾自己的作答过程，找出想法和正确答案之间的偏差。`)
+    lines.push(`    提问示例："你觉得这道题考的是什么？你的思路是什么？"`)
+    lines.push(`2. **示范**：演示完整的正确解题步骤，边写边讲，每一步说明依据。`)
+    lines.push(`3. **对比**：让学生对比正确解法与自己解法的差异，明确错在哪里。`)
+    lines.push(`4. **巩固**：让学生独立复述一遍解题过程，或用同类题验证是否掌握。`)
   }
-  return parts.join('')
+  return lines.join('\n')
 }

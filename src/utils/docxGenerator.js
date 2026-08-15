@@ -450,7 +450,7 @@ export async function generatePaperWord(paper) {
   
   const doc = new Document({
     sections,
-    creator: '明学试卷入库系统',
+    creator: '敏学试卷入库系统',
     title: paper.name || '试卷',
     description: `科目: ${paper.subject || ''}, 年级: ${paper.grade || ''}`
   })

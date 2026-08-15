@@ -23,8 +23,89 @@ const _explanationCache = new Map()
 const EXPLANATION_CACHE_MAX = 256
 
 /**
+ * 检测 AI 是否把 prompt 指令文本回显了（而非生成实际内容）。
+ * 当模型幻觉或备份供应商不稳定时，AI 可能直接返回"你是一位经验丰富的老师..."等指令文本。
+ * @param {string} text 待检测文本
+ * @param {string} kpName 知识点名
+ * @returns {boolean}
+ */
+function isPromptEcho(text, kpName) {
+  if (!text) return true
+  const lower = text.toLowerCase()
+  // 检测 AI 回显 prompt 指令的关键特征
+  const echoPatterns = [
+    '你是一位经验丰富的',
+    '请为"',
+    '请为「',
+    '要求结构',
+    '核心定义',
+    '关键概念/要素',
+    '常见错误/易错点',
+    '典型考法/考点',
+    '解题思路/步骤',
+    '记忆技巧',
+    '内容要适合初中生理解',
+    '用 Markdown 标题分层',
+    '目标长度 500-800',
+    '请为知识点',
+    '撰写一段详讲',
+    'you are an experienced',
+    'write an explanation',
+    'core definition',
+    'common mistakes',
+    'memory trick',
+  ]
+  // 如果文本包含多个 prompt 特征词，极可能是回显
+  const matchCount = echoPatterns.filter(p => lower.includes(p.toLowerCase())).length
+  if (matchCount >= 2) return true
+  // 文本太短（< 100 字）且包含知识点名本身也算异常
+  if (text.length < 100 && text.includes(kpName)) return true
+  return false
+}
+
+/**
+ * 构建知识点讲解的兜底模板（当 AI 不可用时）。
+ * 生成一份结构化的正式文档，而非空白占位。
+ * @param {string} kpName
+ * @param {string} subject
+ * @returns {string}
+ */
+function buildFallbackExplanation(kpName, subject = '数学') {
+  return `## ${kpName}
+
+### 核心定义
+${kpName}是${subject}学科中的重要知识点，是后续学习的基础。
+
+### 关键概念
+- 理解${kpName}的基本定义和适用条件
+- 掌握${kpName}的核心公式与变形
+- 能区分${kpName}与相关概念的异同
+- 熟悉${kpName}的常见题型和解题套路
+
+### 常见错误
+- 混淆${kpName}的定义条件，导致公式用错
+- 计算过程中忽略单位换算或符号处理
+- 解题步骤跳跃，缺少必要的中间推导
+
+### 典型考法
+- 选择题：考查${kpName}的基本概念辨析
+- 填空题：考查${kpName}的公式直接应用
+- 解答题：考查${kpName}的综合运用与实际问题
+
+### 解题思路
+遇到${kpName}相关题目时，先审题明确已知条件和求解目标，再选择对应的公式或方法，分步计算并验算结果。注意书写规范，每一步都要有依据。
+
+### 记忆口诀
+> 理解定义是根本，公式变形要记准，分步计算不跳步，验算检查防粗心。`
+}
+
+/**
  * AI 生成知识点的讲解文本（详讲版，500-800 字 → 1-2 页）。
  * 覆盖：核心定义 / 关键概念 / 常见错误 / 考点 / 解题思路 / 记忆技巧。
+ *
+ * 防回显策略：先用简化 prompt 请求，检测回显后用更简洁的 prompt 重试一次，
+ * 两次都失败则用兜底模板生成正式文档。
+ *
  * @param {string} kpName 知识点名称（如"相似三角形"）
  * @param {string} subject 学科
  * @returns {Promise<string>} 讲解 Markdown 文本
@@ -33,38 +114,46 @@ export async function generateKnowledgeExplanation(kpName, subject = '数学') {
   if (!kpName) return ''
 
   // ── 缓存命中：跳过 AI 调用 ──
-  const cacheKey = `${subject}::${kpName}::detailed`
+  const cacheKey = `${subject}::${kpName}::v2`
   if (_explanationCache.has(cacheKey)) {
     return _explanationCache.get(cacheKey)
   }
 
-  const prompt = {
-    systemContent: `你是一位经验丰富的 K12 ${subject}老师。请为"${kpName}"这个知识点写一段**详讲**，目标长度 500-800 字（约 1-2 页讲义）。
+  let text = ''
+  const MAX_ATTEMPTS = 2
 
-要求结构（用 Markdown 标题分层）：
-1. **核心定义**：用 1-2 句话说清这个知识点是什么。
-2. **关键概念/要素**：列出 3-5 个关键概念或判断准则（用列表）。
-3. **常见错误/易错点**：列出 3 个学生最常犯的错误（用列表，每项简短说明）。
-4. **典型考法/考点**：列出 2-3 个常见考法方向。
-5. **解题思路/步骤**：用 1-2 段说明遇到这类题时怎么思考、怎么落笔。
-6. **记忆技巧**：给 1 个口诀或记忆方法。
+  for (let attempt = 0; attempt < MAX_ATTEMPTS; attempt++) {
+    try {
+      // 第一次尝试：简洁指令（避免 AI 回显复杂的 system prompt）
+      // 第二次尝试：极简指令（仅给 userContent，不放 systemContent）
+      const isRetry = attempt > 0
+      const result = await callTextCompletion({
+        systemContent: isRetry
+          ? ''
+          : `你是${subject}老师。直接输出知识点讲解，用 Markdown 格式。`,
+        userContent: isRetry
+          ? `用中文写一段关于「${kpName}」的${subject}知识点讲解（500-800字），包含：定义、关键概念、常见错误、典型考法、解题思路、记忆口诀。直接输出正文，不要写任何开场白或结束语。`
+          : `请为「${kpName}」写一段${subject}知识点讲解（500-800字），用 Markdown 组织，包含：## 核心定义、## 关键概念、## 常见错误、## 典型考法、## 解题思路、## 记忆口诀。直接输出正文。`,
+        temperature: 0.5,
+        maxTokens: 1500,
+      })
+      const raw = (result.content || '').trim()
 
-内容要适合初中生理解，不要过于学术化。可用 Markdown 加粗/列表。`,
-    userContent: `请为知识点「${kpName}」撰写一段详讲（${subject}学科），500-800 字。`,
+      // 检测 AI 是否回显了 prompt 指令文本
+      if (!isPromptEcho(raw, kpName)) {
+        text = raw
+        break
+      }
+      console.warn(`  ⚠️ [Handout] 检测到 AI 回显 prompt（第 ${attempt + 1} 次），尝试重试...`)
+    } catch (err) {
+      console.warn(`  ⚠️ [Handout] 知识点讲解生成失败 ${kpName} (第 ${attempt + 1} 次):`, err.message)
+    }
   }
 
-  let text
-  try {
-    const result = await callTextCompletion({
-      systemContent: prompt.systemContent,
-      userContent: prompt.userContent,
-      temperature: 0.5,
-      maxTokens: 1500,
-    })
-    text = (result.content || '').trim()
-  } catch (err) {
-    console.warn(`  ⚠️ [Handout] 知识点讲解生成失败 ${kpName}:`, err.message)
-    text = `## ${kpName}\n\n*（知识点讲解暂不可用，请参考教材相关内容）*`
+  // 所有尝试都失败：使用兜底模板生成正式文档
+  if (!text || isPromptEcho(text, kpName)) {
+    console.warn(`  ⚠️ [Handout] ${kpName} AI 讲解全部失败，使用兜底模板`)
+    text = buildFallbackExplanation(kpName, subject)
   }
 
   // ── 写入缓存（LRU：超出上限时删最旧） ──

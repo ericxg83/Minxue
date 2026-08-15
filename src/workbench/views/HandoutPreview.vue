@@ -69,7 +69,7 @@
         <template v-if="page.name === 'cover'">
           <div class="handout-cover">
             <div class="cover-content">
-              <div class="cover-label">明学 · 备课讲义</div>
+              <div class="cover-label">敏学 · 备课讲义</div>
               <h1 class="cover-title">{{ getBlockContent(page.blocks, 'cover-title') }}</h1>
               <div class="cover-divider"></div>
               <div class="cover-info">{{ getBlockContent(page.blocks, 'cover-subtitle') }}</div>
