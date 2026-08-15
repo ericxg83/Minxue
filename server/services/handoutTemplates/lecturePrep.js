@@ -45,76 +45,92 @@ export default {
       ],
     })
 
-    if (sampleQuestions.length === 0) {
-      return { pages }
-    }
+    const hasWrongQuestions = sampleQuestions.length > 0
 
-    // ─── Page 2: 例题（本周典型错题，按题型分组） ───
-    const blankCount = sampleQuestions.filter(q => q.isBlank).length
-    const wrongCount = sampleQuestions.length - blankCount
-    const typeGroups = groupByType(sampleQuestions)
-    const typeSummary = Array.from(typeGroups.entries()).map(([t, qs]) => ({
-      type: t,
-      count: qs.length,
-    }))
-
-    const exBlocks = [
-      {
-        type: 'kp-stats',
-        content: { total: sampleQuestions.length, blankCount, wrongCount, typeCount: typeGroups.size, types: typeSummary },
-      },
-      { type: 'section', content: '本周典型错题' },
-    ]
-    let qIdx = 0
-    for (const [qType, qs] of typeGroups) {
-      exBlocks.push({
-        type: 'type-section',
-        content: `题型：${qType}（${qs.length} 道${qs.some(q => q.isBlank) ? `，含空题 ${qs.filter(q => q.isBlank).length}` : ''}）`,
-        questionType: qType,
+    // ─── Page 2: 例题（本周典型错题，按题型分组）—— 仅当有错题时生成 ───
+    if (hasWrongQuestions) {
+      const blankCount = sampleQuestions.filter(q => q.isBlank).length
+      const wrongCount = sampleQuestions.length - blankCount
+      const typeGroups = groupByType(sampleQuestions)
+      const typeSummary = Array.from(typeGroups.entries()).map(([t, qs]) => ({
+        type: t,
         count: qs.length,
-      })
-      for (const q of qs) {
-        qIdx += 1
+      }))
+
+      const exBlocks = [
+        {
+          type: 'kp-stats',
+          content: { total: sampleQuestions.length, blankCount, wrongCount, typeCount: typeGroups.size, types: typeSummary },
+        },
+        { type: 'section', content: '本周典型错题' },
+      ]
+      let qIdx = 0
+      for (const [qType, qs] of typeGroups) {
         exBlocks.push({
-          type: 'question',
-          content: `错题 ${qIdx}. ${q.content || '(题干缺失)'}`,
-          options: q.options,
-          imageUrls: q.imageUrls || [],
+          type: 'type-section',
+          content: `题型：${qType}（${qs.length} 道${qs.some(q => q.isBlank) ? `，含空题 ${qs.filter(q => q.isBlank).length}` : ''}）`,
           questionType: qType,
-          questionId: q.questionId,
+          count: qs.length,
         })
-        exBlocks.push({
-          type: 'answer',
-          content: `【${q.studentName || '学生'}】作答：${q.isBlank ? '（空题，未作答）' : (q.studentAnswer || '—')}`,
-          correctAnswer: q.correctAnswer || '—',
-          isCorrect: q.isBlank ? false : (q.studentAnswer === q.correctAnswer),
-        })
-        if (q.errorType) {
+        for (const q of qs) {
+          qIdx += 1
           exBlocks.push({
-            type: 'analysis',
-            content: `错因：${q.errorType}${q.errorReason ? `：${q.errorReason}` : ''}`,
+            type: 'question',
+            content: `错题 ${qIdx}. ${q.content || '(题干缺失)'}`,
+            options: q.options,
+            imageUrls: q.imageUrls || [],
+            questionType: qType,
+            questionId: q.questionId,
+          })
+          exBlocks.push({
+            type: 'answer',
+            content: `【${q.studentName || '学生'}】作答：${q.isBlank ? '（空题，未作答）' : (q.studentAnswer || '—')}`,
+            correctAnswer: q.correctAnswer || '—',
+            isCorrect: q.isBlank ? false : (q.studentAnswer === q.correctAnswer),
+          })
+          if (q.errorType) {
+            exBlocks.push({
+              type: 'analysis',
+              content: `错因：${q.errorType}${q.errorReason ? `：${q.errorReason}` : ''}`,
+            })
+          }
+          exBlocks.push({
+            type: 'lecture-guidance',
+            content: buildLectureGuidance(q),
           })
         }
-        exBlocks.push({
-          type: 'lecture-guidance',
-          content: buildLectureGuidance(q),
-        })
       }
+      pages.push({
+        name: `${kpName} · 例题（本周错题）`,
+        blocks: exBlocks,
+      })
+    }
+
+    // ─── Page 3: 题型归纳（AI 归纳"换着样考的题型"）—— 始终生成 ───
+    const typeSummaryList = await generateQuestionTypeSummary(kpName, subject, sampleQuestions)
+    const typeBlocks = [
+      { type: 'section', content: hasWrongQuestions ? '本知识点"换着样考"的题型' : '本知识点常考题型' },
+    ]
+    if (!hasWrongQuestions) {
+      typeBlocks.push({
+        type: 'edu-note',
+        content: '本周暂无该知识点的错题记录，以下题型基于中考/升学考试大纲整理，供课堂讲解参考。',
+      })
+    }
+    if (Array.isArray(typeSummaryList) && typeSummaryList.length > 0) {
+      typeBlocks.push({
+        type: 'type-summary',
+        content: typeSummaryList,
+      })
+    } else {
+      typeBlocks.push({
+        type: 'edu-note',
+        content: '题型归纳生成中，请稍后重试。',
+      })
     }
     pages.push({
-      name: `${kpName} · 例题（本周错题）`,
-      blocks: exBlocks,
-    })
-
-    // ─── Page 3: 题型归纳（AI 归纳"换着样考的题型"） ───
-    const typeSummaryList = await generateQuestionTypeSummary(kpName, subject, sampleQuestions)
-    pages.push({
       name: `${kpName} · 题型归纳`,
-      blocks: [
-        { type: 'section', content: '本知识点"换着样考"的题型' },
-        { type: 'type-summary', content: typeSummaryList || [] },
-        { type: 'note', content: '' },
-      ],
+      blocks: typeBlocks,
     })
 
     return { pages }

@@ -1,17 +1,17 @@
 // ============================================================
 // 投屏备课讲义模板（classroomProjection）
 //
-// 定位：极简投屏，老师课堂投屏使用。
-// 结构（一知识点 = 三页）：
-//   1. 知识点精讲页 — 纵向结构，定义/重点/难点/易错/口诀
-//   2. 错题精讲页 — 对比卡片 + 分步作答过程
-//   3. 题型全览页 — 题型+例题+解题过程+技巧
+// 定位：教育类专业投屏讲义，老师课堂投屏使用。
+// 结构（一知识点 = 2~3 页）：
+//   1. 知识点精讲页 — 卡片式布局，定义/重点/难点/易错/口诀
+//   2. 错题精讲页 — 对比卡片 + 分步作答过程（仅当有本周错题时生成）
+//   3. 常考题型页 — 题型+例题+解题过程+技巧（始终生成，含中考常考题型）
 //
 // 关键设计：
-//   - 纯白背景，无多余装饰
-//   - 大字体、高对比度，适配投影仪
+//   - 卡片式布局，清晰的信息层级
+//   - 专业教育配色（蓝紫主色调），适配投影仪
 //   - 知识点讲细，字号区分重难点
-//   - 错题包含完整分步作答过程
+//   - 无本周错题时自动生成常考题型（基于中考考纲）
 // ============================================================
 
 import { generateKnowledgeExplanation, generateQuestionTypeSummary } from '../handoutService.js'
@@ -19,7 +19,7 @@ import { generateKnowledgeExplanation, generateQuestionTypeSummary } from '../ha
 export default {
   id: 'classroom_projection',
   label: '投屏备课讲义',
-  description: '极简投屏：纯白背景、纵向结构、知识点精讲+错题分步作答+题型全览',
+  description: '教育专业投屏：卡片式布局、知识点精讲+错题分析+常考题型全览',
   supportsSubject: 'all',
 
   /**
@@ -32,8 +32,11 @@ export default {
    */
   buildSections: async ({ kpName, subject = '数学', sampleQuestions = [], explanation = null }) => {
     const pages = []
+    const hasWrongQuestions = sampleQuestions.length > 0
 
-    // ─── Page 1: 知识点精讲（纵向结构） ───
+    // ══════════════════════════════════════════════
+    // Page 1: 知识点精讲（始终生成）
+    // ══════════════════════════════════════════════
     const text = explanation || await generateKnowledgeExplanation(kpName, subject)
     const kpBlocks = parseKpSections(text, kpName, subject)
     pages.push({
@@ -41,83 +44,92 @@ export default {
       blocks: [
         { type: 'time-hint', content: estimateTeachingTime(kpName, sampleQuestions) },
         { type: 'kp-section', content: kpName },
+        { type: 'edu-divider', content: '' },
         ...kpBlocks,
       ],
     })
 
-    if (sampleQuestions.length === 0) {
-      return { pages }
-    }
-
-    // ─── Page 2: 错题精讲 ───
-    const blankCount = sampleQuestions.filter(q => q.isBlank).length
-    const wrongCount = sampleQuestions.length - blankCount
-    const typeGroups = groupByType(sampleQuestions)
-    const typeSummary = Array.from(typeGroups.entries()).map(([t, qs]) => ({
-      type: t,
-      count: qs.length,
-    }))
-
-    const exBlocks = [
-      {
-        type: 'kp-stats',
-        content: { total: sampleQuestions.length, blankCount, wrongCount, typeCount: typeGroups.size, types: typeSummary },
-      },
-      { type: 'section', content: '📋 本周典型错题' },
-    ]
-
-    let qIdx = 0
-    for (const [qType, qs] of typeGroups) {
-      exBlocks.push({
-        type: 'type-section',
-        content: `${qType}（${qs.length} 道${qs.some(q => q.isBlank) ? `，含空题 ${qs.filter(q => q.isBlank).length}` : ''}）`,
-        questionType: qType,
+    // ══════════════════════════════════════════════
+    // Page 2: 错题精讲（仅当有本周错题时生成）
+    // ══════════════════════════════════════════════
+    if (hasWrongQuestions) {
+      const blankCount = sampleQuestions.filter(q => q.isBlank).length
+      const wrongCount = sampleQuestions.length - blankCount
+      const typeGroups = groupByType(sampleQuestions)
+      const typeSummary = Array.from(typeGroups.entries()).map(([t, qs]) => ({
+        type: t,
         count: qs.length,
-      })
-      for (const q of qs) {
-        qIdx += 1
-        // 题干
+      }))
+
+      const exBlocks = [
+        {
+          type: 'kp-stats',
+          content: { total: sampleQuestions.length, blankCount, wrongCount, typeCount: typeGroups.size, types: typeSummary },
+        },
+        { type: 'edu-divider', content: '' },
+        { type: 'section', content: '本周典型错题' },
+      ]
+
+      let qIdx = 0
+      for (const [qType, qs] of typeGroups) {
         exBlocks.push({
-          type: 'question',
-          content: `第 ${qIdx} 题 · ${q.content || '(题干缺失)'}`,
-          options: q.options,
-          imageUrls: q.imageUrls || [],
+          type: 'type-section',
+          content: `${qType}（${qs.length} 道${qs.some(q => q.isBlank) ? `，含空题 ${qs.filter(q => q.isBlank).length}` : ''}）`,
           questionType: qType,
-          questionId: q.questionId,
+          count: qs.length,
         })
-        // 对比卡片：学生作答 vs 正确答案（简洁左右对比）
-        exBlocks.push({
-          type: 'compare-card',
-          content: {
-            studentAnswer: q.isBlank ? '（空题，未作答）' : (q.studentAnswer || '—'),
-            correctAnswer: q.correctAnswer || '—',
-            isBlank: q.isBlank,
-            studentName: q.studentName || '学生',
-          },
-        })
-        // 错因简析
-        if (q.errorType) {
+        for (const q of qs) {
+          qIdx += 1
           exBlocks.push({
-            type: 'error-cause',
-            content: `错因：${q.errorType}${q.errorReason ? `——${q.errorReason}` : ''}`,
+            type: 'question',
+            content: `第 ${qIdx} 题 · ${q.content || '(题干缺失)'}`,
+            options: q.options,
+            imageUrls: q.imageUrls || [],
+            questionType: qType,
+            questionId: q.questionId,
+          })
+          exBlocks.push({
+            type: 'compare-card',
+            content: {
+              studentAnswer: q.isBlank ? '（空题，未作答）' : (q.studentAnswer || '—'),
+              correctAnswer: q.correctAnswer || '—',
+              isBlank: q.isBlank,
+              studentName: q.studentName || '学生',
+            },
+          })
+          if (q.errorType) {
+            exBlocks.push({
+              type: 'error-cause',
+              content: `错因：${q.errorType}${q.errorReason ? `——${q.errorReason}` : ''}`,
+            })
+          }
+          exBlocks.push({
+            type: 'solution-steps',
+            content: buildSolutionSteps(q, kpName),
           })
         }
-        // 分步作答过程
-        exBlocks.push({
-          type: 'solution-steps',
-          content: buildSolutionSteps(q, kpName),
-        })
       }
+      pages.push({
+        name: `${kpName} · 错题精讲`,
+        blocks: exBlocks,
+      })
     }
-    pages.push({
-      name: `${kpName} · 错题精讲`,
-      blocks: exBlocks,
-    })
 
-    // ─── Page 3: 题型全览 ───
+    // ══════════════════════════════════════════════
+    // Page 3: 常考题型（始终生成，无论有无错题）
+    // ══════════════════════════════════════════════
     const typeSummaryList = await generateQuestionTypeSummary(kpName, subject, sampleQuestions)
-    const typeBlocks = [{ type: 'section', content: '🎯 本知识点考试题型全览' }]
-    if (Array.isArray(typeSummaryList)) {
+    const typeBlocks = [
+      { type: 'section', content: hasWrongQuestions ? '本知识点考试题型全览' : '本知识点常考题型' },
+      { type: 'edu-divider', content: '' },
+    ]
+    if (!hasWrongQuestions) {
+      typeBlocks.push({
+        type: 'edu-note',
+        content: '本周暂无该知识点的错题记录，以下题型基于中考/升学考试大纲整理，供课堂讲解参考。',
+      })
+    }
+    if (Array.isArray(typeSummaryList) && typeSummaryList.length > 0) {
       typeSummaryList.forEach((t, i) => {
         typeBlocks.push({
           type: 'type-section',
@@ -142,9 +154,14 @@ export default {
           })
         }
       })
+    } else {
+      typeBlocks.push({
+        type: 'edu-note',
+        content: '题型归纳生成中，请稍后重试。',
+      })
     }
     pages.push({
-      name: `${kpName} · 题型全览`,
+      name: `${kpName} · 常考题型`,
       blocks: typeBlocks,
     })
 

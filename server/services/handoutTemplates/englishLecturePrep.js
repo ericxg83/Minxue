@@ -33,25 +33,38 @@ export default {
       ],
     })
 
-    if (sampleQuestions.length === 0) {
-      return { pages }
+    const hasWrongQuestions = sampleQuestions.length > 0
+
+    // ─── Page 2: 例题（按英语题型分组）—— 仅当有错题时生成 ───
+    if (hasWrongQuestions) {
+      pages.push({
+        name: `${kpName} · 例题（本周错题）`,
+        blocks: buildEnglishExampleBlocks(sampleQuestions),
+      })
     }
 
-    // ─── Page 2: 例题（按英语题型分组） ───
-    pages.push({
-      name: `${kpName} · 例题（本周错题）`,
-      blocks: buildEnglishExampleBlocks(sampleQuestions),
-    })
-
-    // ─── Page 3: 题型归纳 ───
+    // ─── Page 3: 题型归纳 —— 始终生成 ───
     const typeSummaryList = await generateQuestionTypeSummary(kpName, subject, sampleQuestions)
+    const typeBlocks = [
+      { type: 'section', content: hasWrongQuestions ? '本知识点"换着样考"的题型' : '本知识点常考题型' },
+    ]
+    if (!hasWrongQuestions) {
+      typeBlocks.push({
+        type: 'edu-note',
+        content: '本周暂无该知识点的错题记录，以下题型基于中考/升学考试大纲整理，供课堂讲解参考。',
+      })
+    }
+    if (Array.isArray(typeSummaryList) && typeSummaryList.length > 0) {
+      typeBlocks.push({ type: 'type-summary', content: typeSummaryList })
+    } else {
+      typeBlocks.push({
+        type: 'edu-note',
+        content: '题型归纳生成中，请稍后重试。',
+      })
+    }
     pages.push({
       name: `${kpName} · 题型归纳`,
-      blocks: [
-        { type: 'section', content: '本知识点"换着样考"的题型' },
-        { type: 'type-summary', content: typeSummaryList || [] },
-        { type: 'note', content: '' },
-      ],
+      blocks: typeBlocks,
     })
 
     return { pages }

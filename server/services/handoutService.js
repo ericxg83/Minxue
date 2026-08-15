@@ -111,6 +111,79 @@ ${kpName}是${subject}学科中的重要知识点，是后续学习的基础。
 }
 
 /**
+ * 修复 AI 生成的题型归纳 JSON 中的常见错误：
+ * - 坏转义字符（如 \\x, \\u 不完整）
+ * - 字符串内的换行符
+ * - 尾部多余逗号
+ * - 未闭合的引号
+ */
+function repairTypeSummaryJson(raw) {
+  let fixed = raw
+  // 1. 移除控制字符（保留 \n \t \r）
+  fixed = fixed.replace(/[\x00-\x08\x0B\x0C\x0E-\x1F\x7F]/g, '')
+  // 2. 修复坏转义：将单个反斜杠后跟非合法转义字符的情况修复
+  fixed = fixed.replace(/\\(?!["\\/bfnrtu])/g, '\\\\')
+  // 3. 修复字符串内的未转义换行
+  fixed = fixed.replace(/(?<="text":\s*")([^"]*?)(?=")/g, (m) => m.replace(/\n/g, '\\n'))
+  // 4. 移除尾部多余逗号（在 ] 或 } 之前）
+  fixed = fixed.replace(/,(\s*[}\]])/g, '$1')
+  // 5. 尝试用正则提取完整的 JSON 数组
+  const arrayMatch = fixed.match(/\[[\s\S]*\]/)
+  if (arrayMatch) {
+    let arr = arrayMatch[0]
+    const openBrackets = (arr.match(/\[/g) || []).length
+    const closeBrackets = (arr.match(/\]/g) || []).length
+    if (openBrackets > closeBrackets) {
+      arr += ']'.repeat(openBrackets - closeBrackets)
+    }
+    fixed = arr
+  }
+  return fixed
+}
+
+/**
+ * 无错题样本时，基于知识点名称生成基础题型兜底。
+ * 确保即使 AI 调用失败、也没有错题样本时，仍然能展示有意义的常考题型。
+ */
+function buildFallbackTypeSummary(kpName, subject = '数学') {
+  const mathTemplates = {
+    '方程': [
+      { type: `${kpName} - 概念理解`, example: `下列关于${kpName}的说法中，正确的是（ ）`, solutionSteps: [{ step: 1, text: '回顾定义，逐项判断选项是否符合', formula: '' }, { step: 2, text: '排除明显错误的选项', formula: '' }, { step: 3, text: '确认最终答案', formula: '' }], tip: '牢记定义，注意细节区分' },
+      { type: `${kpName} - 计算求解`, example: `解下列${kpName}相关的题目`, solutionSteps: [{ step: 1, text: '分析题目条件', formula: '' }, { step: 2, text: '套用公式或方法计算', formula: '' }, { step: 3, text: '检验结果是否符合题意', formula: '' }], tip: '规范书写步骤，避免跳步' },
+      { type: `${kpName} - 实际应用`, example: `某实际问题中涉及${kpName}，请列式求解`, solutionSteps: [{ step: 1, text: '设未知数，建立等量关系', formula: '' }, { step: 2, text: '列出方程并求解', formula: '' }, { step: 3, text: '检验解的合理性并作答', formula: '' }], tip: '注意单位统一和实际意义检验' },
+    ],
+    '函数': [
+      { type: `${kpName} - 图像与性质`, example: `画出${kpName}的图像，并描述其性质`, solutionSteps: [{ step: 1, text: '确定关键点坐标', formula: '' }, { step: 2, text: '描点连线画出图像', formula: '' }, { step: 3, text: '根据图像归纳性质', formula: '' }], tip: '数形结合，图像辅助理解' },
+      { type: `${kpName} - 解析式求解`, example: `根据条件求${kpName}的解析式`, solutionSteps: [{ step: 1, text: '设出解析式的一般形式', formula: '' }, { step: 2, text: '代入已知条件列方程', formula: '' }, { step: 3, text: '解出参数并写出解析式', formula: '' }], tip: '待定系数法是核心方法' },
+      { type: `${kpName} - 综合应用`, example: `${kpName}与几何/方程的综合题`, solutionSteps: [{ step: 1, text: '分析条件，确定解题方向', formula: '' }, { step: 2, text: '分步求解各子问题', formula: '' }, { step: 3, text: '整合结果，写出最终答案', formula: '' }], tip: '分解问题，逐一击破' },
+    ],
+    '几何': [
+      { type: `${kpName} - 性质判定`, example: `根据条件判断${kpName}的相关性质`, solutionSteps: [{ step: 1, text: '回顾相关定理和性质', formula: '' }, { step: 2, text: '结合已知条件推理', formula: '' }, { step: 3, text: '得出结论并验证', formula: '' }], tip: '熟记定理，规范推理' },
+      { type: `${kpName} - 计算求值`, example: `在${kpName}中，求相关线段长度或角度`, solutionSteps: [{ step: 1, text: '标出已知条件', formula: '' }, { step: 2, text: '选择合适定理列式', formula: '' }, { step: 3, text: '计算并检验', formula: '' }], tip: '画图辅助，标注清晰' },
+      { type: `${kpName} - 证明题`, example: `求证：${kpName}相关的结论`, solutionSteps: [{ step: 1, text: '明确已知和求证', formula: '' }, { step: 2, text: '寻找中间条件', formula: '' }, { step: 3, text: '写出完整证明过程', formula: '' }], tip: '从结论倒推，寻找证明路径' },
+    ],
+  }
+
+  let matched = null
+  for (const [key, templates] of Object.entries(mathTemplates)) {
+    if (kpName.includes(key)) {
+      matched = templates
+      break
+    }
+  }
+
+  if (!matched) {
+    matched = [
+      { type: `${kpName} - 基础概念`, example: `关于${kpName}的基本概念辨析`, solutionSteps: [{ step: 1, text: '回顾核心定义', formula: '' }, { step: 2, text: '分析选项或条件', formula: '' }, { step: 3, text: '选择正确答案', formula: '' }], tip: '理解概念本质，区分易混点' },
+      { type: `${kpName} - 典型计算`, example: `${kpName}相关的计算题`, solutionSteps: [{ step: 1, text: '分析题目类型', formula: '' }, { step: 2, text: '选择适当方法', formula: '' }, { step: 3, text: '完成计算并检验', formula: '' }], tip: '掌握通法，灵活运用' },
+      { type: `${kpName} - 综合运用`, example: `${kpName}在实际问题中的应用`, solutionSteps: [{ step: 1, text: '理解问题背景', formula: '' }, { step: 2, text: '转化为数学模型', formula: '' }, { step: 3, text: '求解并解释结果', formula: '' }], tip: '建模能力是关键' },
+    ]
+  }
+
+  return matched
+}
+
+/**
  * AI 生成知识点的讲解文本（详讲版，500-800 字 → 1-2 页）。
  * 覆盖：核心定义 / 重点内容 / 难点突破 / 易错警示 / 记忆口诀。
  *
@@ -257,9 +330,32 @@ ${questionDigest || '（暂无错题样本，请基于该知识点中考/升学�
     // 兜底：AI 偶发包成 ```json ... ```
     const jsonMatch = raw.match(/```(?:json)?\s*([\s\S]*?)```/) || raw.match(/\[[\s\S]*\]/)
     if (jsonMatch) raw = jsonMatch[1] || jsonMatch[0]
+    // 修复 AI 常见 JSON 错误
+    raw = repairTypeSummaryJson(raw)
     const parsed = JSON.parse(raw)
     if (Array.isArray(parsed)) {
       types = parsed.filter(t => t && t.type).slice(0, 6)
+    }
+    // AI 成功返回但数组为空（常见于无错题样本时模型返回 []），
+    // 此时也要走兜底逻辑，确保常考题型页有内容
+    if (types.length === 0) {
+      console.warn(`  ⚠️ [Handout] AI 题型归纳返回空数组 ${kpName}，使用兜底题型`)
+      if (sampleQuestions.length > 0) {
+        const seen = new Map()
+        for (const q of sampleQuestions) {
+          const t = q.questionType || '其他'
+          seen.set(t, (seen.get(t) || 0) + 1)
+        }
+        types = Array.from(seen.entries()).slice(0, 3).map(([type, count]) => ({
+          type,
+          description: `本周出现 ${count} 次错题`,
+          example: '',
+          solutionSteps: [],
+          tip: '',
+        }))
+      } else {
+        types = buildFallbackTypeSummary(kpName, subject)
+      }
     }
   } catch (err) {
     console.warn(`  ⚠️ [Handout] 题型归纳生成失败 ${kpName}:`, err.message)
@@ -269,13 +365,18 @@ ${questionDigest || '（暂无错题样本，请基于该知识点中考/升学�
       const t = q.questionType || '其他'
       seen.set(t, (seen.get(t) || 0) + 1)
     }
-    types = Array.from(seen.entries()).slice(0, 3).map(([type, count]) => ({
-      type,
-      description: `本周出现 ${count} 次错题`,
-      example: '',
-      solutionSteps: [],
-      tip: '',
-    }))
+    if (seen.size > 0) {
+      types = Array.from(seen.entries()).slice(0, 3).map(([type, count]) => ({
+        type,
+        description: `本周出现 ${count} 次错题`,
+        example: '',
+        solutionSteps: [],
+        tip: '',
+      }))
+    } else {
+      // 无错题样本时，基于知识点名称生成基础题型兜底
+      types = buildFallbackTypeSummary(kpName, subject)
+    }
   }
 
   if (_explanationCache.size >= EXPLANATION_CACHE_MAX) {
@@ -356,14 +457,17 @@ export async function buildHandout({ title, subject = '数学', periodText = '',
     ],
   })
 
-  // 目录页：每个知识点展开 3 个子项（知识点 / 例题 / 题型归纳）
+  // 目录页：每个知识点展开 2~3 个子项（知识点 / 例题(如有) / 题型归纳）
   const tocItems = []
   knowledgeSections.forEach((ks, idx) => {
     const base = idx + 1
+    const hasWrong = Array.isArray(ks.sampleQuestions) && ks.sampleQuestions.length > 0
     tocItems.push({ index: base, name: ks.kpName, sub: null })
-    tocItems.push({ index: `${base}.1`, name: '知识点', sub: true })
-    tocItems.push({ index: `${base}.2`, name: '例题（本周错题）', sub: true })
-    tocItems.push({ index: `${base}.3`, name: '题型归纳', sub: true })
+    tocItems.push({ index: `${base}.1`, name: '知识点精讲', sub: true })
+    if (hasWrong) {
+      tocItems.push({ index: `${base}.2`, name: '本周错题分析', sub: true })
+    }
+    tocItems.push({ index: `${base}.${hasWrong ? 3 : 2}`, name: '常考题型', sub: true })
   })
   pages.push({
     name: 'toc',

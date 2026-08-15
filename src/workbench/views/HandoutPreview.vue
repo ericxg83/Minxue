@@ -382,6 +382,15 @@
                 </div>
               </div>
 
+              <!-- 教育分隔线 -->
+              <div v-else-if="block.type === 'edu-divider'" class="block-edu-divider"></div>
+
+              <!-- 教育提示卡片 -->
+              <div v-else-if="block.type === 'edu-note'" class="block-edu-note">
+                <span class="edu-note-icon">💡</span>
+                <span class="edu-note-text">{{ block.content }}</span>
+              </div>
+
               <!-- 普通文本（写作范文 / 学生原文 / 复习建议等） -->
               <div v-else-if="block.type === 'text'" class="block-text" v-html="renderMarkdown(block.content)"></div>
             </div>
@@ -1138,12 +1147,12 @@ async function loadFromDiagnosis() {
 
 /* 页面标题 */
 .page-title {
-  font-size: 22px;
-  font-weight: 700;
-  color: #1D2129;
+  font-size: 24px;
+  font-weight: 800;
+  color: #1E1B4B;
   margin: 0 0 24px;
-  padding-bottom: 12px;
-  border-bottom: 2px solid #6366F1;
+  padding-bottom: 14px;
+  border-bottom: 3px solid #6366F1;
 }
 
 /* 区块 */
@@ -1170,28 +1179,32 @@ async function loadFromDiagnosis() {
 
 /* 错题概况 */
 .block-kp-stats {
-  margin: 16px 0;
+  margin: 16px 0 24px;
 }
 .stat-card {
   text-align: center;
-  padding: 16px 8px;
-  background: #F7F8FA;
-  border-radius: 8px;
-  border: 1px solid #E5E6EB;
+  padding: 18px 8px;
+  background: #FFFFFF;
+  border-radius: 10px;
+  border: 1px solid #E5E7EB;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.04);
+  transition: transform 0.15s ease;
 }
+.stat-card:hover { transform: translateY(-2px); }
 .stat-value {
-  font-size: 28px;
-  font-weight: 700;
-  color: #1D2129;
+  font-size: 30px;
+  font-weight: 800;
+  color: #1F2937;
   line-height: 1.2;
 }
 .stat-label {
-  font-size: 12px;
-  color: #86909C;
-  margin-top: 4px;
+  font-size: 13px;
+  color: #6B7280;
+  margin-top: 6px;
+  font-weight: 500;
 }
-.stat-blank .stat-value { color: #F5222D; }
-.stat-wrong .stat-value { color: #FA8C16; }
+.stat-blank .stat-value { color: #DC2626; }
+.stat-wrong .stat-value { color: #F59E0B; }
 .stat-type .stat-value { color: #6366F1; }
 .type-chips {
   margin-top: 12px;
@@ -1216,12 +1229,13 @@ async function loadFromDiagnosis() {
 
 /* 小标题 */
 .block-section {
-  font-size: 17px;
-  font-weight: 600;
-  color: #1D2129;
-  margin: 24px 0 12px;
-  padding-left: 12px;
-  border-left: 3px solid #6366F1;
+  font-size: 20px;
+  font-weight: 700;
+  color: #1E1B4B;
+  margin: 28px 0 16px;
+  padding-left: 16px;
+  border-left: 4px solid #6366F1;
+  letter-spacing: 0.5px;
 }
 
 /* 题型小标题 */
@@ -1230,14 +1244,15 @@ async function loadFromDiagnosis() {
   font-weight: 700;
   color: #4F46E5;
   margin: 20px 0 12px;
-  padding: 8px 12px;
-  background: #EEF2FF;
-  border-radius: 6px;
+  padding: 10px 16px;
+  background: linear-gradient(135deg, #EEF2FF 0%, #E0E7FF 100%);
+  border-radius: 8px;
+  border: 1px solid #C7D2FE;
   display: flex;
   align-items: center;
   gap: 8px;
 }
-.type-icon { font-size: 16px; }
+.type-icon { font-size: 18px; }
 
 /* 题型归纳 */
 .block-type-summary {
@@ -1305,11 +1320,12 @@ async function loadFromDiagnosis() {
 
 /* 错题 */
 .block-question {
-  padding: 12px 16px;
-  background: #FAFBFC;
-  border: 1px solid #E5E6EB;
-  border-radius: 8px;
-  margin-bottom: 8px;
+  padding: 16px 20px;
+  background: #FFFFFF;
+  border: 1px solid #E5E7EB;
+  border-radius: 10px;
+  margin-bottom: 12px;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.04);
 }
 .question-header {
   display: flex;
@@ -1568,77 +1584,92 @@ async function loadFromDiagnosis() {
 
 /* 页眉 */
 .page-header {
-  padding: 8px 0;
-  margin-bottom: 16px;
-  border-bottom: 1px solid #E5E6EB;
-  font-size: 12px;
-  color: #86909C;
+  padding: 10px 0;
+  margin-bottom: 20px;
+  border-bottom: 1px solid #E5E7EB;
+  font-size: 13px;
+  color: #9CA3AF;
+  display: flex;
+  gap: 8px;
 }
+.page-header-subject { font-weight: 600; color: #6366F1; }
+.page-header-sep { color: #D1D5DB; }
+.page-header-kp { color: #6B7280; }
 
 /* 页脚 */
 .page-footer {
-  padding: 8px 0;
-  margin-top: 16px;
-  border-top: 1px solid #E5E6EB;
+  padding: 12px 0;
+  margin-top: 24px;
+  border-top: 1px solid #E5E7EB;
   font-size: 12px;
-  color: #86909C;
+  color: #9CA3AF;
   text-align: center;
 }
 
 /* 对比卡片（学生作答 vs 正确答案） */
 .block-compare-card {
-  margin: 10px 0;
+  margin: 12px 0;
 }
 .compare-grid {
   display: grid;
-  grid-template-columns: 1fr 1fr;
+  grid-template-columns: 1fr auto 1fr;
   gap: 0;
-  border-radius: 6px;
+  border-radius: 10px;
   overflow: hidden;
-  border: 1px solid #E5E6EB;
+  border: 1px solid #E5E7EB;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.04);
 }
 .compare-side {
-  padding: 14px 18px;
+  padding: 16px 20px;
 }
 .compare-student {
-  background: #FFF5F5;
-  border-right: 1px solid #FECACA;
+  background: linear-gradient(135deg, #FEF2F2 0%, #FFF5F5 100%);
 }
 .compare-correct {
-  background: #F0FFF4;
+  background: linear-gradient(135deg, #F0FDF4 0%, #ECFDF5 100%);
 }
 .compare-header {
-  font-size: 12px;
+  font-size: 13px;
   font-weight: 700;
-  margin-bottom: 6px;
+  margin-bottom: 8px;
 }
 .compare-student .compare-header { color: #DC2626; }
 .compare-correct .compare-header { color: #16A34A; }
 .compare-body {
   font-size: 18px;
-  line-height: 1.6;
-  color: #1D2129;
+  line-height: 1.7;
+  color: #1F2937;
   word-break: break-word;
 }
-/* 移除 VS 竖条 */
-.compare-vs { display: none; }
+.compare-vs {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0 12px;
+  font-size: 14px;
+  font-weight: 800;
+  color: #9CA3AF;
+  background: #F9FAFB;
+  writing-mode: vertical-lr;
+  letter-spacing: 2px;
+}
 
 /* 时间建议 */
 .block-time-hint {
   display: flex;
   align-items: center;
-  gap: 8px;
-  padding: 8px 16px;
-  margin-bottom: 16px;
-  background: #F9FAFB;
-  border: 1px solid #E5E6EB;
-  border-radius: 4px;
-  font-size: 13px;
+  gap: 10px;
+  padding: 10px 18px;
+  margin-bottom: 20px;
+  background: linear-gradient(135deg, #F9FAFB 0%, #F3F4F6 100%);
+  border: 1px solid #E5E7EB;
+  border-radius: 8px;
+  font-size: 14px;
   font-weight: 500;
   color: #6B7280;
 }
 .time-hint-icon {
-  font-size: 22px;
+  font-size: 24px;
 }
 .time-hint-text {
   flex: 1;
@@ -1671,115 +1702,180 @@ async function loadFromDiagnosis() {
   .block-note { display: none; } /* 打印时隐藏笔记 */
 }
 
-/* === 知识点纵向结构 === */
+/* === 教育分隔线 === */
+.block-edu-divider {
+  height: 2px;
+  background: linear-gradient(90deg, #6366F1 0%, #A5B4FC 50%, transparent 100%);
+  margin: 20px 0 24px;
+  border-radius: 1px;
+}
+
+/* === 教育提示卡片 === */
+.block-edu-note {
+  display: flex;
+  align-items: flex-start;
+  gap: 12px;
+  padding: 14px 18px;
+  margin: 16px 0;
+  background: linear-gradient(135deg, #EEF2FF 0%, #F5F3FF 100%);
+  border: 1px solid #C7D2FE;
+  border-radius: 8px;
+  font-size: 16px;
+  color: #4338CA;
+  line-height: 1.7;
+}
+.edu-note-icon {
+  font-size: 20px;
+  flex-shrink: 0;
+  margin-top: 2px;
+}
+.edu-note-text {
+  flex: 1;
+}
+
+/* === 知识点纵向结构（教育专业版） === */
 .block-kp-section {
-  font-size: 26px;
-  font-weight: 700;
-  color: #1D2129;
-  padding: 0 0 16px;
-  margin-bottom: 20px;
-  border-bottom: 2px solid #E5E6EB;
+  font-size: 28px;
+  font-weight: 800;
+  color: #1E1B4B;
+  padding: 0 0 20px;
+  margin-bottom: 24px;
+  border-bottom: 3px solid #6366F1;
+  letter-spacing: 1px;
 }
 .kp-label {
   font-size: 18px;
   font-weight: 700;
-  color: #86909C;
-  margin-bottom: 8px;
-  text-transform: uppercase;
-  letter-spacing: 1px;
+  color: #6B7280;
+  margin-bottom: 10px;
+  letter-spacing: 0.5px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
 }
-.kp-label-key { color: #6366F1; }
-.kp-label-difficult { color: #F59E0B; }
+.kp-label::before {
+  content: '';
+  display: inline-block;
+  width: 4px;
+  height: 18px;
+  background: #6366F1;
+  border-radius: 2px;
+}
+.kp-label-key { color: #4F46E5; }
+.kp-label-key::before { background: #4F46E5; }
+.kp-label-difficult { color: #D97706; }
+.kp-label-difficult::before { background: #F59E0B; }
 .kp-label-mistake { color: #DC2626; }
+.kp-label-mistake::before { background: #EF4444; }
 .kp-text {
   font-size: 18px;
-  line-height: 1.8;
-  color: #1D2129;
+  line-height: 1.9;
+  color: #1F2937;
 }
 .kp-list {
   margin: 0;
-  padding-left: 20px;
+  padding-left: 24px;
   font-size: 18px;
-  line-height: 1.9;
-  color: #4E5969;
+  line-height: 2.0;
+  color: #374151;
 }
-.kp-list li { margin-bottom: 6px; }
+.kp-list li { margin-bottom: 8px; }
 
 .block-kp-definition {
-  margin-bottom: 24px;
-  padding: 16px 20px;
-  background: #F9FAFB;
-  border-radius: 6px;
-  border-left: 3px solid #6366F1;
+  margin-bottom: 28px;
+  padding: 20px 24px;
+  background: linear-gradient(135deg, #F5F7FF 0%, #EEF2FF 100%);
+  border-radius: 10px;
+  border-left: 4px solid #6366F1;
+  box-shadow: 0 1px 3px rgba(99, 102, 241, 0.08);
 }
 .block-kp-key-points {
-  margin-bottom: 20px;
+  margin-bottom: 24px;
+  padding: 20px 24px;
+  background: #FFFFFF;
+  border-radius: 10px;
+  border: 1px solid #E0E7FF;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.04);
 }
 .block-kp-key-points .kp-list li {
   font-size: 20px;
   font-weight: 700;
-  color: #1D2129;
+  color: #1E1B4B;
 }
 .block-kp-difficult-points {
-  margin-bottom: 20px;
-  padding: 14px 18px;
-  background: #FFFBEB;
-  border-radius: 6px;
-  border-left: 3px solid #F59E0B;
+  margin-bottom: 24px;
+  padding: 20px 24px;
+  background: linear-gradient(135deg, #FFFBEB 0%, #FEF3C7 100%);
+  border-radius: 10px;
+  border-left: 4px solid #F59E0B;
+  box-shadow: 0 1px 3px rgba(245, 158, 11, 0.08);
 }
 .block-kp-difficult-points .kp-list li {
   font-size: 20px;
   font-weight: 600;
+  color: #92400E;
 }
 .block-kp-mistakes {
-  margin-bottom: 20px;
+  margin-bottom: 24px;
+  padding: 20px 24px;
+  background: linear-gradient(135deg, #FEF2F2 0%, #FEE2E2 100%);
+  border-radius: 10px;
+  border-left: 4px solid #EF4444;
+  box-shadow: 0 1px 3px rgba(239, 68, 68, 0.08);
 }
 .block-kp-mistakes .kp-list li {
   font-size: 18px;
+  color: #991B1B;
 }
 .block-kp-mnemonic {
-  padding: 14px 18px;
-  background: #F0FFF4;
-  border-radius: 6px;
-  border: 1px solid #BBF7D0;
-  margin-bottom: 20px;
+  padding: 20px 24px;
+  background: linear-gradient(135deg, #ECFDF5 0%, #D1FAE5 100%);
+  border-radius: 10px;
+  border: 2px solid #6EE7B7;
+  margin-bottom: 24px;
+  box-shadow: 0 1px 3px rgba(16, 185, 129, 0.08);
 }
 .kp-mnemonic-text {
-  font-size: 18px;
+  font-size: 20px;
   color: #047857;
   font-style: italic;
-  line-height: 1.7;
+  line-height: 1.8;
+  font-weight: 500;
 }
 
 /* === 分步作答过程 === */
 .block-solution-steps {
-  margin: 16px 0;
-  padding: 20px 24px;
-  background: #fff;
-  border: 1px solid #E5E6EB;
-  border-radius: 8px;
+  margin: 20px 0;
+  padding: 24px 28px;
+  background: #FFFFFF;
+  border: 1px solid #E5E7EB;
+  border-radius: 10px;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.04);
 }
 .solution-title {
-  font-size: 15px;
+  font-size: 16px;
   font-weight: 700;
-  color: #6366F1;
-  margin-bottom: 14px;
-  padding-bottom: 10px;
-  border-bottom: 1px solid #E5E6EB;
+  color: #4F46E5;
+  margin-bottom: 16px;
+  padding-bottom: 12px;
+  border-bottom: 2px solid #EEF2FF;
+  display: flex;
+  align-items: center;
+  gap: 8px;
 }
 .solution-step {
   display: flex;
-  gap: 14px;
-  margin-bottom: 12px;
+  gap: 16px;
+  margin-bottom: 14px;
   align-items: flex-start;
 }
 .solution-step:last-child { margin-bottom: 0; }
 .solution-step-num {
   flex-shrink: 0;
-  width: 32px;
-  height: 32px;
+  width: 34px;
+  height: 34px;
   border-radius: 50%;
-  background: #6366F1;
+  background: linear-gradient(135deg, #6366F1 0%, #8B5CF6 100%);
   color: #fff;
   font-size: 14px;
   font-weight: 700;
@@ -1787,6 +1883,7 @@ async function loadFromDiagnosis() {
   align-items: center;
   justify-content: center;
   margin-top: 2px;
+  box-shadow: 0 2px 4px rgba(99, 102, 241, 0.2);
 }
 .solution-step-body {
   flex: 1;
@@ -1794,13 +1891,14 @@ async function loadFromDiagnosis() {
 .solution-step-text {
   font-size: 18px;
   line-height: 1.7;
-  color: #1D2129;
+  color: #1F2937;
 }
 .solution-step-formula {
-  margin-top: 6px;
-  padding: 8px 14px;
+  margin-top: 8px;
+  padding: 10px 16px;
   background: #F9FAFB;
-  border-radius: 4px;
+  border-radius: 6px;
+  border: 1px solid #E5E7EB;
   font-size: 16px;
   overflow-x: auto;
 }
@@ -1809,47 +1907,66 @@ async function loadFromDiagnosis() {
 .block-error-cause {
   display: flex;
   align-items: center;
-  gap: 10px;
-  padding: 8px 14px;
-  margin: 8px 0;
-  background: #FFF5F5;
-  border-radius: 4px;
+  gap: 12px;
+  padding: 10px 16px;
+  margin: 10px 0;
+  background: #FEF2F2;
+  border-radius: 6px;
+  border: 1px solid #FECACA;
   font-size: 16px;
   color: #DC2626;
 }
 .error-cause-tag {
   font-weight: 700;
   flex-shrink: 0;
+  background: #DC2626;
+  color: #fff;
+  padding: 2px 10px;
+  border-radius: 4px;
+  font-size: 13px;
 }
 
 /* === 题型相关 === */
 .block-type-example {
   display: flex;
-  gap: 10px;
-  padding: 12px 16px;
-  margin: 8px 0;
+  gap: 12px;
+  padding: 14px 18px;
+  margin: 10px 0;
   background: #F9FAFB;
-  border-radius: 6px;
+  border-radius: 8px;
+  border: 1px solid #E5E7EB;
   font-size: 18px;
-  line-height: 1.7;
+  line-height: 1.8;
+  color: #1F2937;
 }
 .type-example-label {
   font-weight: 700;
-  color: #6366F1;
+  color: #4F46E5;
   flex-shrink: 0;
+  background: #EEF2FF;
+  padding: 2px 10px;
+  border-radius: 4px;
+  font-size: 14px;
 }
 .block-type-tip {
   display: flex;
-  gap: 10px;
-  padding: 10px 16px;
-  margin: 8px 0;
-  background: #F0FFF4;
-  border-radius: 6px;
+  gap: 12px;
+  padding: 12px 18px;
+  margin: 10px 0;
+  background: linear-gradient(135deg, #ECFDF5 0%, #F0FDF4 100%);
+  border-radius: 8px;
+  border: 1px solid #A7F3D0;
   font-size: 16px;
   color: #047857;
+  line-height: 1.7;
 }
 .type-tip-label {
   font-weight: 700;
   flex-shrink: 0;
+  background: #D1FAE5;
+  padding: 2px 10px;
+  border-radius: 4px;
+  font-size: 14px;
+  color: #047857;
 }
 </style>
