@@ -1615,7 +1615,7 @@ async function loadFromDiagnosis() {
 .compare-student .compare-header { color: #DC2626; }
 .compare-correct .compare-header { color: #16A34A; }
 .compare-body {
-  font-size: 16px;
+  font-size: 18px;
   line-height: 1.6;
   color: #1D2129;
   word-break: break-word;
@@ -1655,7 +1655,7 @@ async function loadFromDiagnosis() {
   font-size: 20px;
 }
 .handout-page .question-content {
-  font-size: 16px;
+  font-size: 18px;
   line-height: 1.8;
 }
 
@@ -1681,7 +1681,7 @@ async function loadFromDiagnosis() {
   border-bottom: 2px solid #E5E6EB;
 }
 .kp-label {
-  font-size: 14px;
+  font-size: 18px;
   font-weight: 700;
   color: #86909C;
   margin-bottom: 8px;
@@ -1692,14 +1692,14 @@ async function loadFromDiagnosis() {
 .kp-label-difficult { color: #F59E0B; }
 .kp-label-mistake { color: #DC2626; }
 .kp-text {
-  font-size: 16px;
+  font-size: 18px;
   line-height: 1.8;
   color: #1D2129;
 }
 .kp-list {
   margin: 0;
   padding-left: 20px;
-  font-size: 16px;
+  font-size: 18px;
   line-height: 1.9;
   color: #4E5969;
 }
@@ -1727,8 +1727,15 @@ async function loadFromDiagnosis() {
   border-radius: 6px;
   border-left: 3px solid #F59E0B;
 }
+.block-kp-difficult-points .kp-list li {
+  font-size: 20px;
+  font-weight: 600;
+}
 .block-kp-mistakes {
   margin-bottom: 20px;
+}
+.block-kp-mistakes .kp-list li {
+  font-size: 18px;
 }
 .block-kp-mnemonic {
   padding: 14px 18px;
@@ -1769,12 +1776,12 @@ async function loadFromDiagnosis() {
 .solution-step:last-child { margin-bottom: 0; }
 .solution-step-num {
   flex-shrink: 0;
-  width: 28px;
-  height: 28px;
+  width: 32px;
+  height: 32px;
   border-radius: 50%;
   background: #6366F1;
   color: #fff;
-  font-size: 13px;
+  font-size: 14px;
   font-weight: 700;
   display: flex;
   align-items: center;
@@ -1785,7 +1792,7 @@ async function loadFromDiagnosis() {
   flex: 1;
 }
 .solution-step-text {
-  font-size: 15px;
+  font-size: 18px;
   line-height: 1.7;
   color: #1D2129;
 }
@@ -1823,7 +1830,7 @@ async function loadFromDiagnosis() {
   margin: 8px 0;
   background: #F9FAFB;
   border-radius: 6px;
-  font-size: 15px;
+  font-size: 18px;
   line-height: 1.7;
 }
 .type-example-label {

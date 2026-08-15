@@ -7,6 +7,7 @@
 
 import lecturePrepTemplate from './lecturePrep.js'
 import englishLecturePrepTemplate from './englishLecturePrep.js'
+import classroomProjectionTemplate from './classroomProjection.js'
 
 const TEMPLATES = new Map()
 
@@ -23,6 +24,7 @@ const register = (template) => {
 // 内置模板注册
 register(lecturePrepTemplate)
 register(englishLecturePrepTemplate)
+register(classroomProjectionTemplate)
 
 /**
  * 通过 id 获取模板
@@ -65,4 +67,4 @@ export const pickTemplateBySubject = (subject) => {
   return getTemplate('lecture_prep')
 }
 
-export { lecturePrepTemplate, englishLecturePrepTemplate }
+export { lecturePrepTemplate, englishLecturePrepTemplate, classroomProjectionTemplate }

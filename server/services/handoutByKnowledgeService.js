@@ -60,7 +60,7 @@ export function mapWrongRowsToSamples(rows) {
     content: q.content,
     options: q.options,
     questionType: q.question_type || '其他',
-    imageUrls: [q.pdf_url, q.image_url].filter(Boolean),
+    imageUrls: [q.image_url].filter(Boolean),
     studentAnswer: q.student_answer,
     correctAnswer: q.correct_answer,
     isBlank: q.is_blank === true,
@@ -83,7 +83,9 @@ export function mapWrongRowsToSamples(rows) {
  */
 export async function fetchWrongSamplesForKp({ words, periodStart, periodEnd, subject = '', limit = 10 }) {
   if (!Array.isArray(words) || words.length === 0) return []
-  const params = [JSON.stringify(words), periodStart, periodEnd]
+  // Convert to PostgreSQL array literal: {word1,word2,word3}
+  const pgArray = '{' + words.map(w => JSON.stringify(String(w))).join(',') + '}'
+  const params = [pgArray, periodStart, periodEnd]
   let subjectClause = ''
   if (subject) {
     params.push(subject)
@@ -95,7 +97,7 @@ export async function fetchWrongSamplesForKp({ words, periodStart, periodEnd, su
       wq.id, wq.question_id,
       q.content, q.options, q.answer AS correct_answer,
       q.question_type,
-      q.pdf_url, q.image_url,
+      q.image_url,
       wq.student_answer, wq.is_blank, wq.error_type, wq.error_reason,
       COALESCE(s.name, '未知学生') AS student_name
     FROM ${TABLES.WRONG_QUESTIONS} wq

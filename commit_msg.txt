@@ -1,32 +1,17 @@
-perf(讲义): from-diagnosis AI 讲解改分批并发 + LRU 缓存,前端放宽到 3 分钟
+fix(讲义): 修复品牌名"明学"→"敏学" + AI讲解防回显prompt
 
-问题:
-- /api/handout/from-diagnosis 给 12 个知识点串行调 AI 讲解,每个 7s+,合计 84s+
-  经常超过前端默认 20s timeout,讲义页直接报错
-- englishDefault 模板自带 generateEnglishExplanation 函数(不走 handoutService
-  的 generateKnowledgeExplanation),所以之前的缓存方案对英语讲义完全无效
+1. 品牌名修正（3处）：
+   - HandoutPreview.vue 封面标签
+   - handoutDocxService.js docx元数据
+   - docxGenerator.js 通用docx生成器
 
-修复:
-1. server/services/handoutService.js
-   - buildHandout 内 12 个知识点讲解改分批并发(BATCH_SIZE=3),既利用并发
-     又避免摩搭/Qwen 限速触发 429
-   - 保留讲解 LRU 缓存(同进程内 (subject,kpName) 复用,首跑 60-80s,二跑 <5s)
+2. AI讲解防回显（核心修复）：
+   - 新增 isPromptEcho() 检测AI是否回显了prompt指令文本
+   - 新增 buildFallbackExplanation() 生成结构化兜底文档
+   - generateKnowledgeExplanation 改为2次重试+兜底模板
+   - generateEnglishExplanation 同样增加防回显+兜底
 
-2. server/services/handoutTemplates/englishDefault.js
-   - 给模板自带的 generateEnglishExplanation 也加 LRU 缓存,key='en::' 前缀
-     区分中英文讲解
-
-3. src/workbench/views/HandoutPreview.vue
-   - loadFromDiagnosis 和 handleTemplateChange 调用 /handout/from-diagnosis
-     时显式传 timeout: 180000(3 分钟),绕开 apiService 默认 20s
-   - 加注释说明 12 个讲解的串行/并发特性
-
-实测 (test 学生 5 道英语错题,12 个 tag):
-- 首跑 ~60s,12 个讲解全部生成
-- 二跑 <5s,全部走缓存
-- 14 页(封面+目录+12 知识点页)正常返回
-
-用户操作:
-- 刷新 http://localhost:3000/workbench/#/handout
-- 第一次加载等 1-2 分钟,看到 loading
-- 切换模板/学科后第二次进入 <5s
+3. 讲解引导升级：
+   - buildLectureGuidance 从简单提示词改为结构化教学引导
+   - 包含诊断、引导步骤、提问示例、验证环节
+   - 英文模板同步升级

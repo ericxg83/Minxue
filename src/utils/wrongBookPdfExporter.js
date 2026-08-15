@@ -1,4 +1,5 @@
 import dayjs from 'dayjs'
+import { saveAs } from 'file-saver'
 import { getQuestionsByIds } from '../services/apiService'
 import { triggerBrowserPrint } from './browserPrint'
 import { exportServerPDF } from './serverPdfExporter'
@@ -100,7 +101,8 @@ export async function exportWrongBookPDF({
 }) {
   // 0. 环境检测
   const isProd = detectProductionEnv()
-  const useServer = (forceServer || (!isProd && !forceBrowser))
+  // 生产/开发统一优先走服务端 Playwright 下载 PDF（不再弹浏览器打印框）
+  const useServer = (forceServer || !forceBrowser)
 
   console.log(`[WrongBookPdfExporter] 环境检测 isProd=${isProd} useServer=${useServer} (forceServer=${forceServer} forceBrowser=${forceBrowser})`)
 
@@ -134,7 +136,7 @@ export async function exportWrongBookPDF({
 
   // 3. 按环境分流选择路径
   if (useServer) {
-    // 开发环境：主路径 = 服务端 Playwright；失败 fallback 到浏览器原生打印
+    // 主路径 = 服务端 Playwright（开发/生产统一）
     try {
       console.log('[WrongBookPdfExporter] 主路径：服务端 Playwright 渲染')
       const result = await exportServerPDF({
@@ -144,8 +146,11 @@ export async function exportWrongBookPDF({
         showAnswers,
         qrContent,
         filename: baseFile,
+        returnPdfBlob: true,       // 拿到 blob，自行 saveAs 触发下载
       })
-      return { ...result, filename: baseFile, mode: 'server', message: '服务端 Playwright 渲染完成，已下载 PDF' }
+      // 触发浏览器下载
+      saveAs(result.pdfBlob, `${baseFile}.pdf`)
+      return { ...result, pdfBlob: result.pdfBlob, filename: baseFile, mode: 'server', message: '服务端 Playwright 渲染完成，已下载 PDF' }
     } catch (serverErr) {
       console.error('[WrongBookPdfExporter] ❌ 服务端 Playwright 渲染失败:', serverErr?.message || serverErr)
       try {
@@ -156,11 +161,11 @@ export async function exportWrongBookPDF({
           duration: 4000,
         })
       } catch { /* 静默忽略 toast 失败 */ }
-      // 继续走下面的浏览器原生打印（开发环境允许 fallback）
+      // 继续走下面的浏览器原生打印（兜底降级）
     }
   } else {
-    // 生产环境：明确告知走浏览器原生打印
-    console.log('[WrongBookPdfExporter] 生产环境：直接走浏览器原生打印（iframe + window.print，浏览器内置 PDF 引擎，矢量保留）')
+    // 强制走浏览器打印（仅 forceBrowser=true 时进入）
+    console.log('[WrongBookPdfExporter] 强制浏览器原生打印（iframe + window.print）')
   }
 
   // 5. 浏览器原生打印：走 iframe + window.print()，由浏览器内置 PDF 引擎矢量输出

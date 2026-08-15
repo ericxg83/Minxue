@@ -624,28 +624,15 @@ export async function generateWeeklyReport(studentId, { mode = 'week', offset = 
   const mergedHTML = mergeReportHTML(diagnosisHTML, examHTML)
 
   // 5. 按环境分流
-  // forceMode: 'download' 强制走开发路径（直接拿 blob），用于批量生成场景
+  // forceMode: 'download' 强制走服务端下载路径，用于批量生成场景
   const isProd = forceMode === 'download' ? false : detectProductionEnv()
   const studentSuffix = `${studentName}_周学习诊断报告_${dayjs().format('YYYYMMDD')}`
   const filename = `${studentSuffix}.pdf`
 
-  if (isProd) {
-    // 生产：浏览器原生打印（弹打印框另存为 PDF，矢量保真）
-    try {
-      await triggerCustomHTMLPrint({
-        html: mergedHTML,
-        renderMath: false,  // 已经在 iframe 里渲染过 KaTeX
-        title: '周学习诊断报告',
-      })
-      return { mode: 'print', message: '请在打印对话框中"另存为 PDF"获得完整周报（含诊断报告 + 错题再测卷）' }
-    } catch (e) {
-      console.error('[weeklyReport] 浏览器打印失败:', e)
-      throw e
-    }
-  } else {
-    // 开发：服务端 Playwright（矢量 PDF 直接下载）
-    // 把合并后的完整 HTML（含诊断报告 + 错题再测卷）直接 POST 给后端，
-    // 返回 Blob 给调用方由前端 saveAs，避免「下载了 PDF 但再测卷走打印框」的分离问题。
+  // 生产/开发统一优先走服务端 Playwright 下载（不再弹浏览器打印框）
+  // 将合并后的完整 HTML（含诊断报告 + 错题再测卷）POST 给后端，
+  // 返回 Blob 由调用方 saveAs 触发下载。
+  try {
     const result = await exportServerPDF({
       html: mergedHTML,                 // 模式 B：直接传已构造好的完整 HTML
       filename,
@@ -656,6 +643,20 @@ export async function generateWeeklyReport(studentId, { mode = 'week', offset = 
       returnPdfBlob: true,              // 返回 blob，由调用方 saveAs 触发下载
     })
     return { mode: 'download', pdfBlob: result.pdfBlob, filename }
+  } catch (e) {
+    console.error('[weeklyReport] 服务端 PDF 渲染失败，降级到浏览器打印:', e)
+    // 服务端不可用时降级到浏览器原生打印（弹打印框另存为 PDF，矢量保真）
+    try {
+      await triggerCustomHTMLPrint({
+        html: mergedHTML,
+        renderMath: false,
+        title: '周学习诊断报告',
+      })
+      return { mode: 'print', message: '服务端 PDF 不可用，请在打印对话框中"另存为 PDF"获得完整周报（含诊断报告 + 错题再测卷）' }
+    } catch (printErr) {
+      console.error('[weeklyReport] 浏览器打印也失败:', printErr)
+      throw printErr
+    }
   }
 }
 

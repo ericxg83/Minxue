@@ -125,7 +125,7 @@ router.post('/from-diagnosis', async (req, res) => {
           wq.id, wq.question_id,
           q.content, q.options, q.answer AS correct_answer,
           q.question_type,
-          q.pdf_url, q.image_url,
+          q.image_url,
           wq.student_answer, wq.is_blank, wq.error_type, wq.error_reason,
           COALESCE(s.name, '未知学生') AS student_name
         FROM ${TABLES.WRONG_QUESTIONS} wq
@@ -157,7 +157,7 @@ router.post('/from-diagnosis', async (req, res) => {
           content: q.content,
           options: q.options,
           questionType: q.question_type || '其他',
-          imageUrls: [q.pdf_url, q.image_url].filter(Boolean),
+          imageUrls: [q.image_url].filter(Boolean),
           studentAnswer: q.student_answer,
           correctAnswer: q.correct_answer,
           isBlank: q.is_blank === true,
