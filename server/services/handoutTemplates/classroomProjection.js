@@ -305,26 +305,89 @@ function extractNumbers(content) {
  */
 function parseLinearEquation(content) {
   if (!content) return null
-  // 匹配: ax + b = c 或 ax - b = c（系数a可为空，默认为1）
-  const m = content.match(/(\d*\.?\d*)\s*x\s*([+\-])\s*(\d+\.?\d*)\s*[=＝]\s*(\d+\.?\d*)/)
+
+  // 1. 带括号的方程：(x + a) * b = c 或 (x - a) * b = c
+  let m = content.match(/\(\s*x\s*([+\-])\s*(\d+\.?\d*)\s*\)\s*\*\s*(\d+\.?\d*)\s*[=＝]\s*(\d+\.?\d*)/)
   if (m) {
     return {
+      type: 'bracket',
+      a: parseFloat(m[3]),
+      op: m[1],
+      b: parseFloat(m[2]),
+      c: parseFloat(m[4]),
+    }
+  }
+  // 也支持 b * (x + a) = c
+  m = content.match(/(\d+\.?\d*)\s*\*\s*\(\s*x\s*([+\-])\s*(\d+\.?\d*)\s*\)\s*[=＝]\s*(\d+\.?\d*)/)
+  if (m) {
+    return {
+      type: 'bracket',
+      a: parseFloat(m[1]),
+      op: m[2],
+      b: parseFloat(m[3]),
+      c: parseFloat(m[4]),
+    }
+  }
+
+  // 2. 分式方程：a/x = b
+  m = content.match(/(\d+\.?\d*)\s*\/\s*x\s*[=＝]\s*(\d+\.?\d*)/)
+  if (m) {
+    return {
+      type: 'fraction',
+      a: parseFloat(m[1]),
+      b: parseFloat(m[2]),
+    }
+  }
+
+  // 3. 不等式：ax + b > c, ax + b < c, ax + b ≥ c, ax + b ≤ c
+  m = content.match(/(\d*\.?\d*)\s*x\s*([+\-])\s*(\d+\.?\d*)\s*([><≥≤])\s*(\d+\.?\d*)/)
+  if (m) {
+    return {
+      type: 'inequality',
+      a: m[1] === '' ? 1 : parseFloat(m[1]),
+      op: m[2],
+      b: parseFloat(m[3]),
+      cmp: m[4],
+      c: parseFloat(m[5]),
+    }
+  }
+
+  // 4. 简单二元一次方程：ax + by = c
+  m = content.match(/(\d*\.?\d*)\s*x\s*([+\-])\s*(\d*\.?\d*)\s*y\s*[=＝]\s*(\d+\.?\d*)/)
+  if (m) {
+    return {
+      type: 'two_var',
+      a: m[1] === '' ? 1 : parseFloat(m[1]),
+      op: m[2],
+      b: m[3] === '' ? 1 : parseFloat(m[3]),
+      c: parseFloat(m[4]),
+    }
+  }
+
+  // 5. 标准一元一次方程：ax + b = c 或 ax - b = c（系数a可为空，默认为1）
+  m = content.match(/(\d*\.?\d*)\s*x\s*([+\-])\s*(\d+\.?\d*)\s*[=＝]\s*(\d+\.?\d*)/)
+  if (m) {
+    return {
+      type: 'standard',
       a: m[1] === '' ? 1 : parseFloat(m[1]),
       op: m[2],
       b: parseFloat(m[3]),
       c: parseFloat(m[4]),
     }
   }
-  // 匹配: b + ax = c
-  const m2 = content.match(/(\d+\.?\d*)\s*([+\-])\s*(\d*\.?\d*)\s*x\s*[=＝]\s*(\d+\.?\d*)/)
-  if (m2) {
+
+  // 6. b + ax = c
+  m = content.match(/(\d+\.?\d*)\s*([+\-])\s*(\d*\.?\d*)\s*x\s*[=＝]\s*(\d+\.?\d*)/)
+  if (m) {
     return {
-      a: m2[3] === '' ? 1 : parseFloat(m2[3]),
-      op: m2[2],
-      b: parseFloat(m2[1]),
-      c: parseFloat(m2[4]),
+      type: 'standard',
+      a: m[3] === '' ? 1 : parseFloat(m[3]),
+      op: m[2],
+      b: parseFloat(m[1]),
+      c: parseFloat(m[4]),
     }
   }
+
   return null
 }
 
@@ -345,43 +408,241 @@ function buildFormulaFromAnswer(correctAnswer, content) {
     return `$${eqMatch[1].trim()}$`
   }
 
-  // 有数字则构建计算式
+  // 有数字则尝试构建具体计算式
   const nums = extractNumbers(content)
   if (nums.length >= 2) {
-    return `$\\text{计算得} = ${answer}$`
+    // 尝试从题干中提取运算符
+    const opMatch = content.match(/[+\-×÷\*\/]/)
+    if (opMatch) {
+      const op = opMatch[0]
+      let katexOp = op
+      if (op === '×' || op === '*') katexOp = '\\times'
+      if (op === '÷' || op === '/') katexOp = '\\div'
+      return `$${nums[0]} ${katexOp} ${nums[1]} = ${answer}$`
+    }
+    return `$${nums[0]} \\times ${nums[1]} = ${answer}$`
   }
 
-  return `$\\text{答案} = ${answer}$`
+  return `$= ${answer}$`
 }
 
 /**
- * 为一元一次方程生成移项→化简→求解的具体步骤。
- * @param {{a: number, op: string, b: number, c: number}} eq - 解析后的方程
+ * 为各类方程/不等式生成具体解题步骤。
+ * 支持标准型、括号型、分式型、不等式、二元一次方程。
+ * @param {Object} eq - 解析后的方程对象，包含 type 字段
  * @returns {Array<{text: string, formula: string}>}
  */
 function buildEquationSteps(eq) {
   const steps = []
-  const rhs = eq.op === '+' ? eq.c - eq.b : eq.c + eq.b
 
-  steps.push({
-    text: `移项：把常数项移到等号右边`,
-    formula: `$${eq.a}x = ${eq.c} ${eq.op === '+' ? '-' : '+'} ${eq.b}$`,
-  })
+  if (eq.type === 'bracket') {
+    // (x + a) * b = c → x + a = c / b → x = c/b - a
+    const divided = eq.c / eq.a
+    const dividedStr = Number.isInteger(divided) ? divided.toString() : parseFloat(divided.toFixed(4)).toString()
+    const result = eq.op === '+' ? divided - eq.b : divided + eq.b
+    const resultStr = Number.isInteger(result) ? result.toString() : parseFloat(result.toFixed(4)).toString()
 
-  if (eq.a !== 1) {
-    const result = rhs / eq.a
-    const resultStr = Number.isInteger(result)
-      ? result.toString()
-      : parseFloat(result.toFixed(4)).toString()
     steps.push({
-      text: `化简得 $${eq.a}x = ${rhs}$，两边同时除以 ${eq.a}，求出 x`,
-      formula: `$${eq.a}x = ${rhs}$，$x = ${rhs} \\div ${eq.a} = ${resultStr}$`,
+      text: `我先把括号外的系数 ${eq.a} 移到右边，两边同时除以 ${eq.a}`,
+      formula: `$x ${eq.op} ${eq.b} = ${eq.c} \\div ${eq.a} = ${dividedStr}$`,
+    })
+    steps.push({
+      text: `再把常数项 ${eq.b} 移到右边`,
+      formula: `$x = ${dividedStr} ${eq.op === '+' ? '-' : '+'} ${eq.b} = ${resultStr}$`,
+    })
+  } else if (eq.type === 'fraction') {
+    // a/x = b → x = a/b
+    const result = eq.a / eq.b
+    const resultStr = Number.isInteger(result) ? result.toString() : parseFloat(result.toFixed(4)).toString()
+
+    steps.push({
+      text: `我两边同时乘以 x，把分式化为整式`,
+      formula: `$${eq.a} = ${eq.b} \\times x$`,
+    })
+    steps.push({
+      text: `两边同时除以 ${eq.b}，求出 x`,
+      formula: `$x = ${eq.a} \\div ${eq.b} = ${resultStr}$`,
+    })
+  } else if (eq.type === 'inequality') {
+    const rhs = eq.op === '+' ? eq.c - eq.b : eq.c + eq.b
+    const result = rhs / eq.a
+    const resultStr = Number.isInteger(result) ? result.toString() : parseFloat(result.toFixed(4)).toString()
+
+    steps.push({
+      text: `我先把常数项 ${eq.b} 移到不等号右边`,
+      formula: `$${eq.a}x ${eq.cmp} ${eq.c} ${eq.op === '+' ? '-' : '+'} ${eq.b}$`,
+    })
+    steps.push({
+      text: `化简后两边同时除以 ${eq.a}，求出 x 的范围`,
+      formula: `$${eq.a}x ${eq.cmp} ${rhs}$，$x ${eq.cmp} ${resultStr}$`,
+    })
+  } else if (eq.type === 'two_var') {
+    steps.push({
+      text: `这是一个二元一次方程，需要联立另一个方程才能求出唯一解`,
+      formula: `$${eq.a}x ${eq.op} ${eq.b}y = ${eq.c}$`,
     })
   } else {
+    // standard 类型：ax + b = c
+    const rhs = eq.op === '+' ? eq.c - eq.b : eq.c + eq.b
+
     steps.push({
-      text: `化简得 $x = ${rhs}$，得出结果`,
-      formula: `$x = ${rhs}$`,
+      text: `我把常数项 ${eq.b} 移到等号右边`,
+      formula: `$${eq.a}x = ${eq.c} ${eq.op === '+' ? '-' : '+'} ${eq.b}$`,
     })
+
+    if (eq.a !== 1) {
+      const result = rhs / eq.a
+      const resultStr = Number.isInteger(result) ? result.toString() : parseFloat(result.toFixed(4)).toString()
+      steps.push({
+        text: `化简得 $${eq.a}x = ${rhs}$，两边同时除以 ${eq.a}`,
+        formula: `$x = ${rhs} \\div ${eq.a} = ${resultStr}$`,
+      })
+    } else {
+      steps.push({
+        text: `化简得 $x = ${rhs}$，得出结果`,
+        formula: `$x = ${rhs}$`,
+      })
+    }
+  }
+
+  return steps
+}
+
+/**
+ * 处理算术/计算类题目（非方程类）的分步计算。
+ * 从题干中提取数字和运算符，生成逐步计算步骤。
+ * @param {string} content - 题干文本
+ * @param {string} answer - 正确答案
+ * @returns {Array<{text: string, formula: string}>}
+ */
+function buildArithmeticSteps(content, answer) {
+  const steps = []
+  const nums = extractNumbers(content)
+  if (nums.length < 2) return steps
+
+  // 尝试识别运算模式
+  if (/[＋+加]/.test(content) || /[－\-减]/.test(content)) {
+    // 加减混合运算
+    const expr = nums.map((n, i) => i === 0 ? n : (n >= 0 ? `+ ${n}` : `- ${Math.abs(n)}`)).join(' ')
+    steps.push({
+      text: `我按题目中的运算顺序，列出算式`,
+      formula: `$${expr}$`,
+    })
+    if (answer) {
+      steps.push({
+        text: `逐步计算，求出结果`,
+        formula: `$= ${answer}$`,
+      })
+    }
+  } else if (/[×\*乘]/.test(content) || /[÷\/除]/.test(content)) {
+    // 乘除运算
+    const katexOp = /[÷\/除]/.test(content) ? '\\div' : '\\times'
+    steps.push({
+      text: `我按运算规则进行计算`,
+      formula: `$${nums[0]} ${katexOp} ${nums[1]} = ${answer}$`,
+    })
+  } else {
+    // 默认：按顺序列出
+    steps.push({
+      text: `我把已知数字代入计算`,
+      formula: `$${nums.slice(0, 3).join(' \\times ')}${nums.length > 3 ? ' \\times \\cdots' : ''} = ${answer}$`,
+    })
+  }
+
+  return steps
+}
+
+/**
+ * 处理几何类题目的分步推理。
+ * 识别几何题型（面积、周长、体积、三角形、圆等），生成公式代入→计算步骤。
+ * @param {string} content - 题干文本
+ * @param {string} answer - 正确答案
+ * @returns {Array<{text: string, formula: string}>}
+ */
+function buildGeometrySteps(content, answer) {
+  const steps = []
+  const nums = extractNumbers(content)
+  if (nums.length < 1) return steps
+
+  const isArea = /面积|平方/.test(content)
+  const isPerimeter = /周长|周/.test(content)
+  const isTriangle = /三角形/.test(content)
+  const isCircle = /圆/.test(content)
+  const isRectangle = /长方形|矩形/.test(content)
+  const isSquare = /正方形/.test(content)
+  const isVolume = /体积|容积/.test(content)
+  const isTrapezoid = /梯形/.test(content)
+
+  if (isCircle && (isArea || isPerimeter)) {
+    const r = nums[0]
+    if (isArea) {
+      steps.push({
+        text: `圆的面积公式是 $S = \\pi r^2$，我把半径 $r = ${r}$ 代入`,
+        formula: `$S = \\pi \\times ${r}^2 = \\pi \\times ${r * r}$`,
+      })
+      if (answer) {
+        steps.push({
+          text: `计算得出面积`,
+          formula: `$S = ${answer}$`,
+        })
+      }
+    } else {
+      steps.push({
+        text: `圆的周长公式是 $C = 2\\pi r$，我把半径 $r = ${r}$ 代入`,
+        formula: `$C = 2 \\times \\pi \\times ${r}$`,
+      })
+      if (answer) {
+        steps.push({
+          text: `计算得出周长`,
+          formula: `$C = ${answer}$`,
+        })
+      }
+    }
+  } else if (isTriangle && isArea) {
+    if (nums.length >= 2) {
+      const [base, height] = [nums[0], nums[1]]
+      steps.push({
+        text: `三角形面积公式 $S = \\frac{1}{2} \\times 底 \\times 高$，我把底=${base}、高=${height} 代入`,
+        formula: `$S = \\frac{1}{2} \\times ${base} \\times ${height}$`,
+      })
+      if (answer) {
+        steps.push({
+          text: `计算得出面积`,
+          formula: `$S = ${answer}$`,
+        })
+      }
+    }
+  } else if (isSquare && isArea) {
+    const side = nums[0]
+    steps.push({
+      text: `正方形面积公式 $S = a^2$，我把边长 $a = ${side}$ 代入`,
+      formula: `$S = ${side}^2 = ${answer}$`,
+    })
+  } else if (isRectangle && isArea) {
+    if (nums.length >= 2) {
+      steps.push({
+        text: `长方形面积公式 $S = 长 \\times 宽$，我把长=${nums[0]}、宽=${nums[1]} 代入`,
+        formula: `$S = ${nums[0]} \\times ${nums[1]} = ${answer}$`,
+      })
+    }
+  } else if (isTrapezoid && isArea && nums.length >= 3) {
+    steps.push({
+      text: `梯形面积公式 $S = \\frac{(上底 + 下底) \\times 高}{2}$，我把上底=${nums[0]}、下底=${nums[1]}、高=${nums[2]} 代入`,
+      formula: `$S = \\frac{(${nums[0]} + ${nums[1]}) \\times ${nums[2]}}{2} = ${answer}$`,
+    })
+  } else if (isVolume && nums.length >= 3) {
+    steps.push({
+      text: `体积公式代入长=${nums[0]}、宽=${nums[1]}、高=${nums[2]}`,
+      formula: `$V = ${nums[0]} \\times ${nums[1]} \\times ${nums[2]} = ${answer}$`,
+    })
+  } else {
+    // 通用几何：用数字构建公式
+    if (nums.length >= 2) {
+      steps.push({
+        text: `我根据几何公式，把已知数据代入`,
+        formula: `$${nums.join(' \\times ')} = ${answer}$`,
+      })
+    }
   }
 
   return steps
@@ -392,8 +653,8 @@ function buildEquationSteps(eq) {
  * 基于题目具体内容（q.content、q.correctAnswer、q.errorType、q.errorReason）
  * 生成针对性解题步骤，每步包含具体说明文字和 KaTeX 公式。
  *
- * 错题流程：读题 → 分析错因 → 正确解法 → 具体计算 → 验证
- * 空题流程：读题 → 回顾知识点 → 列式代入 → 计算求解 → 检验
+ * 错题流程：分析错因 → 正确解法 → 具体计算 → 得结果
+ * 空题流程：回顾知识点 → 具体列式 → 逐步计算 → 得结果 → 检验
  *
  * @param {Object} q - 题目对象
  * @param {string} q.content - 题干
@@ -411,100 +672,150 @@ function buildSolutionSteps(q, kpName) {
   const isBlank = q.isBlank
   let n = 0
 
-  // ── 步骤 1：读题 ──
-  steps.push({
-    step: ++n,
-    text: `读题：${summary}，明确已知条件和求解目标`,
-    formula: '',
-  })
+  const eq = parseLinearEquation(q.content)
+  const isGeometry = /面积|周长|体积|三角形|圆|正方形|长方形|矩形|梯形|平行四边形|扇形|角度|边长|半径|直径/.test(q.content || '')
+  const isArithmetic = !eq && !isGeometry && extractNumbers(q.content).length >= 2
 
   if (isBlank) {
     // ══════════════════════════════════════════════
     // 空题：从零开始完整解题
     // ══════════════════════════════════════════════
 
-    // 步骤 2：回顾知识点
     steps.push({
       step: ++n,
-      text: `回顾「${kpName}」相关知识点，回忆公式和解题方法`,
+      text: `回顾「${kpName}」的知识点，回忆相关公式和解题方法`,
       formula: '',
     })
 
-    // 尝试解析方程，生成具体计算步骤
-    const eq = parseLinearEquation(q.content)
     if (eq) {
+      const eqTypeDesc = eq.type === 'bracket' ? '带括号的' : eq.type === 'fraction' ? '分式' : eq.type === 'inequality' ? '不等' : eq.type === 'two_var' ? '二元一次' : '一元一次'
+      steps.push({
+        step: ++n,
+        text: `我仔细读题：「${summary}」，确定这是一个${eqTypeDesc}方程`,
+        formula: '',
+      })
       for (const s of buildEquationSteps(eq)) {
         steps.push({ step: ++n, ...s })
       }
+    } else if (isGeometry) {
+      steps.push({
+        step: ++n,
+        text: `我仔细读题：「${summary}」，分析图形的已知条件和求解目标`,
+        formula: '',
+      })
+      const geoSteps = buildGeometrySteps(q.content, answer)
+      for (const s of geoSteps) {
+        steps.push({ step: ++n, ...s })
+      }
+    } else if (isArithmetic) {
+      steps.push({
+        step: ++n,
+        text: `我仔细读题：「${summary}」，提取题目中的数字和运算关系`,
+        formula: '',
+      })
+      const arithSteps = buildArithmeticSteps(q.content, answer)
+      for (const s of arithSteps) {
+        steps.push({ step: ++n, ...s })
+      }
     } else {
-      // 通用情况：列式代入 + 计算
       const formula = buildFormulaFromAnswer(answer, q.content)
       steps.push({
         step: ++n,
-        text: `列式：把已知条件代入公式，写出表达式`,
+        text: `我仔细读题：「${summary}」，把已知条件代入计算`,
         formula: formula,
       })
       if (answer) {
         steps.push({
           step: ++n,
-          text: `计算求解，得出结果`,
-          formula: `$\\text{结果} = ${answer}$`,
+          text: `逐步计算，得出最终结果`,
+          formula: `$= ${answer}$`,
         })
       }
     }
 
-    // 最后一步：检验
-    steps.push({
-      step: ++n,
-      text: `检验：把结果代回原题，检查是否满足条件`,
-      formula: '',
-    })
+    if (answer) {
+      steps.push({
+        step: ++n,
+        text: `我把结果 $${answer}$ 代回原题检验，确保计算正确`,
+        formula: '',
+      })
+    }
   } else {
     // ══════════════════════════════════════════════
     // 错题：分析错因 → 纠正 → 求解
     // ══════════════════════════════════════════════
 
-    // 步骤 2：分析错因
     if (q.errorType) {
       const errDesc = q.errorReason
         ? `${q.errorType}（${q.errorReason}）`
         : q.errorType
       steps.push({
         step: ++n,
-        text: `分析错因：我之前的错误是${errDesc}，需要重新理解题意`,
+        text: `我之前的错误是${errDesc}，现在重新分析这道题`,
+        formula: '',
+      })
+    } else {
+      steps.push({
+        step: ++n,
+        text: `我上次答错了，现在重新审题：「${summary}」`,
         formula: '',
       })
     }
 
-    // 尝试解析方程
-    const eq = parseLinearEquation(q.content)
     if (eq) {
+      const eqTypeDesc = eq.type === 'bracket' ? '带括号的' : eq.type === 'fraction' ? '分式' : eq.type === 'inequality' ? '不等' : eq.type === 'two_var' ? '二元一次' : '一元一次'
+      const solveMethod = eq.type === 'bracket' ? '先去括号再移项' : eq.type === 'fraction' ? '去分母后求解' : eq.type === 'inequality' ? '移项求解（注意不等号方向）' : eq.type === 'two_var' ? '需要联立方程组' : '移项化简求解'
+      steps.push({
+        step: ++n,
+        text: `确定正确的解题思路：这是一个${eqTypeDesc}方程，${solveMethod}`,
+        formula: '',
+      })
       for (const s of buildEquationSteps(eq)) {
         steps.push({ step: ++n, ...s })
       }
+    } else if (isGeometry) {
+      steps.push({
+        step: ++n,
+        text: `确定正确的解题思路：分析图形特征，选择正确的几何公式`,
+        formula: '',
+      })
+      const geoSteps = buildGeometrySteps(q.content, answer)
+      for (const s of geoSteps) {
+        steps.push({ step: ++n, ...s })
+      }
+    } else if (isArithmetic) {
+      steps.push({
+        step: ++n,
+        text: `确定正确的解题思路：理清运算顺序，逐步计算`,
+        formula: '',
+      })
+      const arithSteps = buildArithmeticSteps(q.content, answer)
+      for (const s of arithSteps) {
+        steps.push({ step: ++n, ...s })
+      }
     } else {
-      // 通用情况
       const formula = buildFormulaFromAnswer(answer, q.content)
       steps.push({
         step: ++n,
-        text: `正确解法：理清思路，确定正确的解题路径`,
+        text: `我重新理清思路，把已知条件代入正确的公式计算`,
         formula: formula,
       })
       if (answer) {
         steps.push({
           step: ++n,
-          text: `计算求解，得出最终结果`,
-          formula: `$\\text{正确答案} = ${answer}$`,
+          text: `计算出正确答案`,
+          formula: `$= ${answer}$`,
         })
       }
     }
 
-    // 最后一步：验证
-    steps.push({
-      step: ++n,
-      text: `验证：检查结果是否合理，回顾关键步骤，避免再次出错`,
-      formula: '',
-    })
+    if (answer) {
+      steps.push({
+        step: ++n,
+        text: `正确答案是 $${answer}$，我记住这个解法，下次不再出错`,
+        formula: '',
+      })
+    }
   }
 
   return steps
