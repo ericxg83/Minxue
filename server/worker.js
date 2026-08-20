@@ -19,7 +19,7 @@ import { uploadFilesWithRetry } from './services/uploadRetryManager.js'
 import { judgeAnswer } from './services/judgeService.js'
 import { normalizeSectionName, splitSubAnswers, splitOcrQuestionsBySubNo } from './services/answerParseService.js'
 import { classifyQuestionLocally } from './utils/localTagger.js'
-import { syncQuestionsKnowledgeAndMastery } from './services/knowledgeMasteryService.js'
+import { finalizeGradingBatch } from './services/gradingFinalizer.js'
 import { NON_RETRYABLE_ERROR_PATTERNS } from './pendingTaskRecovery.js'
 import { isValidImageBuffer, checkImageResolution } from './utils/imageValidator.js'
 
@@ -4990,20 +4990,7 @@ export const processTask = async (job) => {
       // 异步调用 Vision API 完成结构识别 + SVG 渲染。
       // 详见 geometryWorker.js 和 pendingTaskRecovery.js。
 
-      // [P0-1] 初始错题同步 — 仅当 OCR 有参考答案且判错时才同步
-      const ocrWrongIds = questionsWithStudentId.filter(q => q.is_correct === false && q.answer).map(q => q.id)
-      if (ocrWrongIds.length > 0) {
-        try {
-          const confidenceMap = new Map(questionsWithStudentId.map(q => [q.id, q.confidence]))
-          const questionMap = new Map(questionsWithStudentId.map(q => [q.id, q]))
-          await addWrongQuestions(studentId, ocrWrongIds, confidenceMap, questionMap)
-          console.log(`  ✅ 错题本初始同步: ${ocrWrongIds.length} 道错题 (OCR后)`)
-        } catch (e) {
-          console.error('  ⚠️ 错题本初始同步失败:', e.message)
-        }
-      } else {
-        console.log('  ℹ️ 无错题需要初始同步')
-      }
+      // OCR 结果只作为过程证据；错题、掌握度和最终判题记录统一在答案生成后结算。
 
       // [Shadow Mode] 追加写入 AI OCR 判定记录
       try {
@@ -5089,39 +5076,6 @@ await job.updateProgress(80)
               }
               if (judgment.isCorrect === false) rejudgedWrong++
             }
-        }
-        const wrongIds = questions.filter(q => q.is_correct === false && q.answer && q.answer.trim() && q.answer !== '待人工补充' && q.answer !== '此为主观题，无唯一标准答案').map(q => q.id)
-        if (wrongIds.length > 0) {
-          try {
-            const confidenceMap = new Map(questions.map(q => [q.id, q.confidence]))
-            const questionMap = new Map(questions.map(q => [q.id, q]))
-            await addWrongQuestions(studentId, wrongIds, confidenceMap, questionMap)
-            console.log(`  ✅ 错题本同步: ${wrongIds.length} 道错题（其中 ${rejudgedWrong} 道由AI答案生成判定）`)
-          } catch (e) {
-            console.error('错题本同步失败:', e.message)
-          }
-        }
-                // [Shadow Mode] 追加写入 AI 答案生成判定记录
-        try {
-          const rejudgePromises = questions.map(q =>
-            createJudgement({
-              questionId: q.id,
-              studentId: studentId,
-              source: 'ai_answer_gen',
-              confidence: q.confidence ?? null,
-              isCorrect: q.is_correct ?? null,
-              content: q.content ?? null,
-              answer: q.answer ?? null,
-              studentAnswer: q.student_answer ?? null,
-              aiAnswer: q.ai_answer ?? null,
-              analysis: q.analysis ?? null,
-              metadata: { question_type: q.question_type }
-            }).catch(e => console.error(`[Shadow] judgements写入失败 (AI答案) q=${q.id?.substring(0,8)}:`, e.message))
-          )
-          await Promise.allSettled(rejudgePromises)
-          console.log(`  [Shadow] AI答案生成判定记录已追加: ${questions.length} 条`)
-        } catch (e) {
-          console.error('  [Shadow] AI答案生成判定记录写入异常:', e.message)
         }
         wrongCount = questions.filter(q => q.is_correct === false).length
         console.log(`✅ [Step 7/8] AI答案生成完成: 生成了 ${answerGenResult.updated}/${answerGenResult.total} 道题的答案, 解析异常 ${answerGenResult.exceptions} 道, 重新判定 ${rejudgedWrong} 道错题, 当前错题数: ${wrongCount}`)
@@ -5226,9 +5180,15 @@ await job.updateProgress(80)
     // 不 await：批改主流程尽快落库 done，同步在后台推进；
     // 内部全部 try-catch，失败不影响任务完成状态。
     try {
-      syncQuestionsKnowledgeAndMastery({ studentId, questions })
+      finalizeGradingBatch({
+        taskId,
+        studentId,
+        questions,
+        source: 'ai_answer_gen',
+        settlementMode: 'initial_grading'
+      })
         .then(stats => {
-          console.log(`📌 [Knowledge] 知识点归一化+掌握度同步: 关联 ${stats.linked} 题, 掌握度更新 ${stats.mastery} 题, 跳过 ${stats.skipped} 题`)
+          console.log(`📌 [Knowledge] 最终结算完成: ${stats.settled} 题, 错题 ${stats.wrongQuestions} 题, 掌握度更新 ${stats.mastery} 题, 跳过 ${stats.skipped} 题`)
         })
         .catch(e => console.error(`  ⚠️ [Knowledge] 知识点/掌握度同步异常:`, e.message))
     } catch (e) {

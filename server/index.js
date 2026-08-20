@@ -46,7 +46,7 @@ dotenv.config({ path: resolve(__dirname, '.env') })
 import express from 'express'
 import cors from 'cors'
 import multer from 'multer'
-import { query, TABLES, TASK_STATUS, QUESTION_STATUS, WRONG_STATUS, LIFECYCLE_STATUS } from './config/neon.js'
+import { query, TABLES, TASK_STATUS, QUESTION_STATUS } from './config/neon.js'
 import { uploadFilesWithRetry } from './services/uploadRetryManager.js'
 import { createUploadReport, logUploadReport } from './services/uploadReportLogger.js'
 import { createJudgement, batchUpdateQuestionTags, getQuestionAssets, getQuestionAssetsByType, createResource, replaceResourceAnswers } from './services/neonService.js'
@@ -70,8 +70,9 @@ import weaknessRouter from './routes/weakness.js'
 import examPdfRouter from './routes/examPdf.js'
 import { runErrorDiagnosis } from './services/diagnosisService.js'
 import { cleanupStudentData } from './services/dataCleanupService.js'
-import { syncReviewResultsMastery, getStudentMastery } from './services/knowledgeMasteryService.js'
+import { getStudentMastery } from './services/knowledgeMasteryService.js'
 import { getKnowledgeTree, getQuestionKnowledge, clearKnowledgeCache } from './services/knowledgeService.js'
+import { finalizeRejudgeResult, finalizeGeneratedExamResults } from './services/gradingFinalizer.js'
 
 const app = express()
 const PORT = process.env.PORT || 4000
@@ -1101,7 +1102,8 @@ app.post('/api/questions/:id/rejudge', async (req, res) => {
     const { id } = req.params
 
     const { rows } = await query(
-      `SELECT id, student_id, student_answer, answer, question_type, is_correct
+      `SELECT id, student_id, student_answer, answer, question_type, is_correct,
+              content, geometry_image_url, options
        FROM ${TABLES.QUESTIONS} WHERE id = $1 AND deleted_at IS NULL`,
       [id]
     )
@@ -1112,6 +1114,19 @@ app.post('/api/questions/:id/rejudge', async (req, res) => {
 
     // Re-judge using pure logic (no AI)
     const { isCorrect } = judgeAnswer(student_answer, answer, question_type)
+
+    if (student_id) {
+      const settlement = await finalizeRejudgeResult({
+        question: q,
+        isCorrect,
+        oldIsCorrect
+      })
+      return res.json({
+        success: true,
+        is_correct: isCorrect,
+        idempotent: settlement.skipped
+      })
+    }
 
     // Update is_correct in questions table
     await query(
@@ -1129,58 +1144,6 @@ app.post('/api/questions/:id/rejudge', async (req, res) => {
       studentAnswer: student_answer,
       metadata: { oldIsCorrect, questionType: question_type }
     }).catch(e => console.error('[Shadow] judgements写入失败 (pc_rejudge):', e.message))
-
-    // Sync wrong_questions table
-    if (student_id && answer && answer.trim() !== '') {
-      if (isCorrect === false) {
-        // 完整性检查 — 不完整的题目不进错题本
-        const { rows: qRows } = await query(
-          `SELECT content, geometry_image_url, question_type, options, answer
-           FROM ${TABLES.QUESTIONS} WHERE id = $1`,
-          [id]
-        )
-        if (qRows.length > 0) {
-          const { isComplete, issues } = checkQuestionCompleteness(qRows[0])
-          if (!isComplete) {
-            console.log(`  ⚠️ [rejudge] 题目不完整，未加入错题本: ${issues.join('; ')} (q=${id.substring(0, 8)})`)
-            return res.json({
-              success: true,
-              is_correct: isCorrect,
-              warning: `题目不完整，未加入错题本: ${issues.join('; ')}`
-            })
-          }
-        }
-        // Wrong answer — ensure it's in the wrong book
-        const { rows: existing } = await query(
-          `SELECT id FROM ${TABLES.WRONG_QUESTIONS}
-           WHERE student_id = $1 AND question_id = $2`,
-          [student_id, id]
-        )
-        if (existing.length === 0) {
-          await query(
-            `INSERT INTO ${TABLES.WRONG_QUESTIONS}
-             (student_id, question_id, status, error_count, added_at, last_wrong_at, created_at)
-             VALUES ($1, $2, 'pending', 1, NOW(), NOW(), NOW())
-             ON CONFLICT DO NOTHING`,
-            [student_id, id]
-          )
-        }
-      } else if (isCorrect === true) {
-        // Now correct — mark as mastered in wrong book if exists
-        await query(
-          `UPDATE ${TABLES.WRONG_QUESTIONS}
-           SET status = 'mastered', mastered_at = NOW(), updated_at = NOW()
-           WHERE student_id = $1 AND question_id = $2 AND status != 'mastered'`,
-          [student_id, id]
-        )
-      }
-    }
-
-    // 重批改闭环：按新判定同步知识点掌握度（非阻塞，失败不影响改判结果）
-    if (student_id) {
-      syncReviewResultsMastery({ studentId: student_id, results: [{ questionId: id, isCorrect }] })
-        .catch(e => console.error('  ⚠️ [Mastery] 重批改掌握度同步失败:', e.message))
-    }
 
     res.json({ success: true, is_correct: isCorrect })
   } catch (error) {
@@ -1977,144 +1940,23 @@ app.post('/api/generated-exams/:id/grade', async (req, res) => {
     }
 
     // 掌握度进阶：new → review_1 → review_2 → mastered
-    const getNextLifecycle = (current) => {
-      switch (current) {
-        case LIFECYCLE_STATUS.NEW: return LIFECYCLE_STATUS.REVIEW_1
-        case LIFECYCLE_STATUS.REVIEW_1: return LIFECYCLE_STATUS.REVIEW_2
-        case LIFECYCLE_STATUS.REVIEW_2: return LIFECYCLE_STATUS.MASTERED
-        default: return LIFECYCLE_STATUS.REVIEW_1
-      }
-    }
-
-    const lifecycleChanges = []
-    let masteredCount = 0
-    let upgradedCount = 0
-    let resetCount = 0
-
-    // ── 批量获取现有 wrong_questions 记录，只需 1 次查询 ──
-    const questionIds = results.map(r => r.questionId).filter(Boolean)
-    const { rows: existingWqRows } = await query(
-      `SELECT id, question_id, lifecycle_status, error_count FROM ${TABLES.WRONG_QUESTIONS}
-       WHERE student_id = $1 AND question_id = ANY($2::uuid[])`,
-      [studentId, questionIds]
-    )
-    const wqByQuestionId = new Map()
-    for (const row of existingWqRows) {
-      wqByQuestionId.set(row.question_id, row)
-    }
-
-    // ── 批量计算并构建 INSERT / UPDATE 参数 ──
-    const insertRows = [] // 需要 INSERT 的新记录
-    const updateWqRows = [] // 需要 UPDATE 的现有记录（按 id）
-    const updateQIds = [] // 需要更新 questions.is_correct
-    const updateQValues = []
-
-    for (const result of results) {
-      const { questionId, isCorrect } = result
-      if (!questionId) continue
-
-      const existing = wqByQuestionId.get(questionId)
-      const currentLifecycle = existing ? (existing.lifecycle_status || 'new') : 'new'
-      let newLifecycle
-      let errorCountDelta = 0
-
-      if (isCorrect) {
-        newLifecycle = getNextLifecycle(currentLifecycle)
-        if (newLifecycle === LIFECYCLE_STATUS.MASTERED && currentLifecycle !== LIFECYCLE_STATUS.MASTERED) {
-          masteredCount++
-        } else if (newLifecycle !== currentLifecycle) {
-          upgradedCount++
-        }
-      } else {
-        newLifecycle = LIFECYCLE_STATUS.NEW
-        errorCountDelta = 1
-        if (currentLifecycle !== LIFECYCLE_STATUS.NEW) {
-          resetCount++
-        }
-      }
-
-      const newStatus = newLifecycle === LIFECYCLE_STATUS.MASTERED ? WRONG_STATUS.MASTERED : WRONG_STATUS.PENDING
-
-      if (!existing) {
-        insertRows.push({ studentId, questionId, newStatus, newLifecycle, isCorrect })
-      } else {
-        updateWqRows.push({ wqId: existing.id, currentErrorCount: existing.error_count || 1, newStatus, newLifecycle, errorCountDelta })
-      }
-
-      updateQIds.push(questionId)
-      updateQValues.push(isCorrect ? true : false)
-
-      lifecycleChanges.push({
-        questionId,
-        previous: currentLifecycle,
-        current: newLifecycle
-      })
-    }
-
-    // ── 批量 INSERT 新 wrong_questions ──
-    if (insertRows.length > 0) {
-      const insertPlaceholders = insertRows.map((_, i) => {
-        const base = i * 7
-        return `($${base + 1}, $${base + 2}, $${base + 3}, $${base + 4}, $${base + 5}, $${base + 6}, $${base + 7})`
-      }).join(', ')
-      const insertParams = insertRows.flatMap(r => [
-        r.studentId, r.questionId, r.newStatus, r.newLifecycle,
-        r.isCorrect ? 0 : 1, new Date().toISOString(), new Date().toISOString()
-      ])
-      await query(
-        `INSERT INTO ${TABLES.WRONG_QUESTIONS}
-         (student_id, question_id, status, lifecycle_status, error_count, created_at, updated_at)
-         VALUES ${insertPlaceholders}`,
-        insertParams
-      )
-    }
-
-    // ── 批量 UPDATE 现有 wrong_questions ──
-    for (const wq of updateWqRows) {
-      await query(
-        `UPDATE ${TABLES.WRONG_QUESTIONS}
-         SET status = $1, lifecycle_status = $2, error_count = $3, practice_count = practice_count + 1, updated_at = NOW()
-         WHERE id = $4`,
-        [wq.newStatus, wq.newLifecycle, wq.currentErrorCount + wq.errorCountDelta, wq.wqId]
-      )
-    }
-
-    // ── 批量 UPDATE questions.is_correct（1 条 SQL 替代 N 条）──
-    if (updateQIds.length > 0) {
-      const caseClauses = updateQIds.map((_, i) =>
-        `WHEN $${i * 2 + 1}::uuid THEN $${i * 2 + 2}`
-      ).join(' ')
-      const caseParams = updateQIds.flatMap((id, i) => [id, updateQValues[i]])
-      // 参数索引靠后，补 PARAMS_OFFSET
-      const idsParamIdx = caseParams.length + 1
-      await query(
-        `UPDATE ${TABLES.QUESTIONS} SET is_correct = CASE id ${caseClauses} END, updated_at = NOW()
-         WHERE id = ANY($${idsParamIdx}::uuid[])`,
-        [...caseParams, updateQIds]
-      )
-    }
-
-    // 标记组卷为已批改
-    await query(
-      `UPDATE ${TABLES.GENERATED_EXAMS} SET status = 'graded', updated_at = NOW() WHERE id = $1`,
-      [id]
-    )
-
-    // 组卷重练闭环：按本次正/错结果更新知识点掌握度（非阻塞，失败不影响批改结果）
-    syncReviewResultsMastery({ studentId, results }).catch(e =>
-      console.error('  ⚠️ [Mastery] 组卷掌握度同步失败:', e.message)
-    )
-
-    res.json({
+    const gradingResult = await finalizeGeneratedExamResults({
+      generatedExamId: id,
+      studentId,
+      results
+    })
+    return res.json({
       success: true,
       stats: {
-        total: results.length,
-        masteredCount,
-        upgradedCount,
-        resetCount
+        total: gradingResult.total,
+        masteredCount: gradingResult.masteredCount,
+        upgradedCount: gradingResult.upgradedCount,
+        resetCount: gradingResult.resetCount
       },
-      lifecycleChanges
+      lifecycleChanges: gradingResult.lifecycleChanges,
+      idempotent: gradingResult.skipped > 0 && gradingResult.settled === 0
     })
+
   } catch (error) {
     console.error('组卷批改失败:', error)
     res.status(500).json({ error: error.message })
