@@ -54,7 +54,9 @@ debug_images/
 temp_*.vue
 
 # Local development artifacts (Claude sessions, ad-hoc test scripts, APKs, dumps)
-.claude/
+.claude/*
+!.claude/skills/
+!.claude/skills/**
 test_imgs/
 test_*.jpg
 test_*.pdf

@@ -28,7 +28,7 @@ const readCache = (key, maxAge) => {
   return null
 }
 
-const writeCache = (key, data) => {
+export const writeCache = (key, data) => {
   try {
     localStorage.setItem(key, JSON.stringify(data))
     localStorage.setItem(key + '_ts', String(Date.now()))
@@ -511,6 +511,17 @@ export const getWrongQuestionsByStudent = async (studentId, useCache = true) => 
 
   writeCache(cacheKey, result)
   return result
+}
+
+// 分页拉取错题（移动端错题本滚动加载）。返回值含 total / counts 生命周期计数。
+// 免缓存：由调用方自行 writeCache 合并已加载数组，避免与 getWrongQuestionsByStudent 的整段缓存互相覆盖。
+export const fetchWrongQuestionsPage = async (studentId, { limit = 100, offset = 0 } = {}) => {
+  const data = await apiRequest(`/wrong-questions/student/${studentId}?limit=${limit}&offset=${offset}`)
+  return {
+    wrongQuestions: data.wrongQuestions || [],
+    total: data.total ?? 0,
+    counts: data.counts || null
+  }
 }
 
 export const getLatestJudgements = async (studentId, questionIds) => {

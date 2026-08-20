@@ -1,47 +1,58 @@
 /**
- * examPdfRenderer.js — 服务端 Playwright 渲染 PDF
+ * examPdfRenderer.js — 服务端 PDF 渲染
  *
- * 【本轮改造根因】
- * 客户端 html2canvas 是光栅化（PNG/JPEG），KaTeX 用 vlist + 负 margin 渲染的
- * 根号（特别是嵌套 \sqrt 内的 radical-sign SVG）实际绘制范围会越出
- * .katex 根 span 的 getBoundingClientRect bbox。html2canvas 按 bbox
- * 截图时，对勾/分式线/嵌套元素被丢失或错位，导致 PDF 中"根号对勾飘出"
- * "\frac 分子丢失""嵌套 vlist 错位"等系列问题。
+ * 用 Chromium 的 page.pdf() 输出 A4 PDF（矢量保留 + 完美保真，KaTeX 数学符号 100% 还原），
+ * 与 PrintPreview 视觉 100% 一致，跳过 html2canvas 光栅化（避免根号对勾飘出/分子丢失等错位）。
  *
- * Playwright + Chromium 用 page.pdf() 直接走 Chromium 自带 PDF 引擎，
- * 矢量保留 + 完美保真（与 PrintPreview 100% 一致），跳过光栅化：
- *  - 根号对勾位置正确
- *  - \frac 分子+分式线完整
- *  - 嵌套 vlist、上下标、多层 \sqrt 全部正常
- *
- * 【接口设计】
- * 前端用 buildExamHTML 构造完整 HTML（含 katexCss + buildPaperCSS + buildPaperBody），
- * POST 给后端。后端只负责 Playwright 渲染，不重新生成 HTML（避免重复实现模板）。
- *
- * 【部署要求】
- * 1) server 安装 playwright + puppeteer-core（带 chromium binary 体积大）
- * 2) 部署环境需要 chromium binary：
- *    - 本地：`npx playwright install chromium`（已完成，~150MB）
- *    - Render：需要 Dockerfile 用 `mcr.microsoft.com/playwright` 镜像
- *    - Vercel/Fly.io：serverless + @sparticuz/chromium
+ * 【执行器策略 · 生产优先用打包 Chromium】
+ *  - 主执行器：puppeteer-core + @sparticuz/chromium
+ *       @sparticuz/chromium 把 Chromium 二进制随 npm 打包进 node_modules，
+ *       部署时 npm install 即自动获得，无需在 Render 手动安装浏览器 / 配置环境变量，
+ *       也不存在构建(root,HOME=/root) 与运行(HOME=/opt/render) 缓存路径不一致的问题。
+ *  - 降级：playwright（本地开发若已 `npx playwright install chromium` 也能跑）。
  */
-import { chromium } from 'playwright'
+import puppeteer from 'puppeteer-core'
+import chromium from '@sparticuz/chromium'
 
-/**
- * 单次渲染：复用 Playwright browser 实例（避免每次启动 5-10 秒）
- */
 let _browser = null
-async function getBrowser() {
-  if (_browser && _browser.isConnected()) return _browser
-  _browser = await chromium.launch({
+
+/** 主执行器：puppeteer-core + @sparticuz/chromium（Chromium 随 npm 打包） */
+async function launchBundled() {
+  const executablePath = await chromium.executablePath()
+  return puppeteer.launch({
+    args: chromium.args,
+    executablePath,
+    headless: true,
+  })
+}
+
+/** 降级执行器：Playwright（本地开发已手动 `npx playwright install chromium`） */
+async function launchPlaywright() {
+  const { chromium: pw } = await import('playwright')
+  return pw.launch({
     headless: true,
     args: [
       '--no-sandbox',
       '--disable-setuid-sandbox',
-      '--disable-dev-shm-usage',  // 减小 /dev/shm 占用，serverless 友好
+      '--disable-dev-shm-usage',
     ],
   })
-  return _browser
+}
+
+/** 单次渲染：复用已启动的 browser 实例（避免每次启动 5-10 秒） */
+async function getBrowser() {
+  if (_browser && _browser.isConnected()) return _browser
+  for (const launcher of [launchBundled, launchPlaywright]) {
+    try {
+      _browser = await launcher()
+      if (_browser && _browser.isConnected()) return _browser
+      _browser = null
+    } catch (err) {
+      console.warn('[examPdfRenderer] 浏览器启动失败，尝试下一个执行器:', err?.message)
+      _browser = null
+    }
+  }
+  throw new Error('无法启动 Chromium（puppeteer-core 与 playwright 均失败）')
 }
 
 /**
@@ -59,7 +70,9 @@ export async function renderExamPDF({ html, filename = 'exam.pdf', pdfOptions = 
   const browser = await getBrowser()
   const page = await browser.newPage()
   try {
-    await page.setViewportSize(viewport)
+    // puppeteer 用 setViewport，playwright 用 setViewportSize —— 按执行器兼容调用
+    if (typeof page.setViewport === 'function') await page.setViewport(viewport)
+    else if (typeof page.setViewportSize === 'function') await page.setViewportSize(viewport)
     await page.setContent(html, { waitUntil: 'load' })
 
     // 等 KaTeX 完成所有度量：fonts.ready + 一帧 + 200ms 兜底

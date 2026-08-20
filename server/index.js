@@ -1516,14 +1516,42 @@ app.get('/api/wrong-questions/student/:studentId', async (req, res) => {
     const limit = Math.min(parseInt(req.query.limit) || 100, 500)
     const offset = parseInt(req.query.offset) || 0
     const { rows } = await query(
-      `SELECT wq.* FROM ${TABLES.WRONG_QUESTIONS} wq
+      `SELECT wq.*,
+         CASE WHEN q.id IS NULL THEN NULL ELSE
+           jsonb_build_object(
+             'id', q.id, 'content', q.content, 'subject', q.subject, 'question_type', q.question_type,
+             'options', q.options, 'answer', q.answer, 'analysis', q.analysis,
+             'ai_tags', CASE WHEN q.ai_tags IS NULL OR q.ai_tags = '' THEN '[]'::jsonb ELSE q.ai_tags::jsonb END,
+             'manual_tags', CASE WHEN q.manual_tags IS NULL OR q.manual_tags = '' THEN '[]'::jsonb ELSE q.manual_tags::jsonb END,
+             'image_url', q.image_url, 'images', q.images, 'geometry_image_url', q.geometry_image_url
+           )
+         END AS question
+       FROM ${TABLES.WRONG_QUESTIONS} wq
        LEFT JOIN ${TABLES.QUESTIONS} q ON q.id = wq.question_id
        WHERE wq.student_id = $1
          AND (q.is_complete = TRUE OR wq.question_id IS NULL)
        ORDER BY wq.added_at DESC LIMIT $2 OFFSET $3`,
       [studentId, limit, offset]
     )
-    res.json({ success: true, wrongQuestions: rows })
+    // 总条数与生命周期计数：移动端 Tab 计数不再受分页截断影响（兼容旧调用方，忽略即可）
+    const { rows: countRows } = await query(
+      `SELECT
+         COUNT(*)::int AS total,
+         COUNT(*) FILTER (WHERE COALESCE(wq.lifecycle_status, 'new') = 'new')::int AS "new",
+         COUNT(*) FILTER (WHERE wq.lifecycle_status IN ('review_1', 'review_2'))::int AS review,
+         COUNT(*) FILTER (WHERE COALESCE(wq.lifecycle_status, 'new') = 'mastered')::int AS mastered
+       FROM ${TABLES.WRONG_QUESTIONS} wq
+       LEFT JOIN ${TABLES.QUESTIONS} q ON q.id = wq.question_id
+       WHERE wq.student_id = $1
+         AND (q.is_complete = TRUE OR wq.question_id IS NULL)`,
+      [studentId]
+    )
+    res.json({
+      success: true,
+      wrongQuestions: rows,
+      total: countRows[0]?.total ?? rows.length,
+      counts: countRows[0] || null
+    })
   } catch (error) {
     console.error('获取错题失败:', error)
     res.status(500).json({ error: error.message })

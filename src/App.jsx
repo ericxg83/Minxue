@@ -1,4 +1,4 @@
-import { useEffect, useState, useRef, lazy, Suspense, useMemo } from 'react'
+import { useCallback, useEffect, useState, useRef, lazy, Suspense, useMemo } from 'react'
 import {
   Camera,
   Loader2,
@@ -8,12 +8,13 @@ import {
   Upload,
   X,
   Tag,
-  Download
+  Download,
+  RotateCcw
 } from 'lucide-react'
 import { motion, AnimatePresence } from 'motion/react'
 import { useLocation, useNavigate } from 'react-router-dom'
 import { useStudentStore, useTaskStore, useWrongQuestionStore, useExamStore } from './store'
-import { getStudents, getTasksByStudent, getQuestionsByTask, getWrongQuestionsByStudent, getExamsByStudent, getGeneratedExamsByStudent, getGeneratedExamById, updateTaskStatus, updateQuestion, updateQuestionTags, invalidateCache, createStudent, updateWrongQuestionStatus, getQuestionsByIds, deleteTask, deleteGeneratedExam, deleteWrongQuestion, getTaskById, recalculateTaskStats, clearStudentCaches, peekCache, getTasksSummary, markNotificationsRead } from './services/apiService'
+import { getStudents, getTasksByStudent, getQuestionsByTask, getExamsByStudent, getGeneratedExamsByStudent, getGeneratedExamById, updateTaskStatus, updateQuestion, updateQuestionTags, invalidateCache, createStudent, getQuestionsByIds, deleteTask, deleteGeneratedExam, deleteWrongQuestion, getTaskById, recalculateTaskStats, clearStudentCaches, peekCache, writeCache, fetchWrongQuestionsPage, getTasksSummary, markNotificationsRead } from './services/apiService'
 import { taskService } from './services/taskService'
 import { usePaperBank } from './features/PaperBank/index.jsx'
 import { useUploadFlow } from './hooks/useUploadFlow'
@@ -36,6 +37,28 @@ import WorksheetPicker from './components/WorksheetPicker'
 
 import { useToast, ToastProvider } from './components/ToastProvider'
 import dayjs from 'dayjs'
+
+// 错题本分页大小（与服务端 limit 保持一致）
+const WRONG_PAGE_SIZE = 100
+
+// 错题去重兜底：有 question_id 按 id 去重（后端已按 (student_id, question_id) 唯一）；
+// question_id 为空的自包含错题按题干去重；保留时间最新的一条；不合并不同 question_id 的同题干题目。
+const dedupWrongQuestions = (rawList) => {
+  const dedupMap = new Map()
+  for (const wq of rawList) {
+    const question = wq.question || wq
+    const qContent = (question.content || '').trim()
+    const key = wq.question_id ? `q:${wq.question_id}` : (qContent ? `c:${qContent}` : null)
+    if (!key) continue
+    const existing = dedupMap.get(key)
+    const curDate = wq.added_at || wq.created_at || ''
+    const existDate = existing ? (existing.added_at || existing.created_at || '') : ''
+    if (!existing || curDate > existDate) {
+      dedupMap.set(key, wq)
+    }
+  }
+  return Array.from(dedupMap.values())
+}
 
 // Lazy load non-critical pages with error handling
 const lazyWithRetry = (factory) => {
@@ -136,6 +159,9 @@ export default function App() {
   const [selectedTimeRange, setSelectedTimeRange] = useState('all')
   const [selectedErrorCount, setSelectedErrorCount] = useState('all')
   const [selectedTags, setSelectedTags] = useState([])
+  const [selectedErrorType, setSelectedErrorType] = useState('all')
+  const [selectedRecentWrongRange, setSelectedRecentWrongRange] = useState('all')
+  const [selectedMasteryStage, setSelectedMasteryStage] = useState('all')
   const [showFilterPanel, setShowFilterPanel] = useState(false)
   const [showQRCode, setShowQRCode] = useState(false)
   const [showPrintOptions, setShowPrintOptions] = useState(false)
@@ -177,6 +203,11 @@ export default function App() {
   const [selectedImage, setSelectedImage] = useState(null)
   const [showImageViewer, setShowImageViewer] = useState(false)
   const [wrongBookDetail, setWrongBookDetail] = useState(null) // 错题详情弹窗数据
+  // 错题本分页与计数状态：服务端 total/counts 驱动，计数器不再被首批 100 条截断
+  const [bankCounts, setBankCounts] = useState(null)
+  const [wrongBookOffset, setWrongBookOffset] = useState(0)
+  const [wrongBookLoading, setWrongBookLoading] = useState(false)
+  const [wrongBookHasMore, setWrongBookHasMore] = useState(false)
   const [showExamReview, setShowExamReview] = useState(false)
   const [reviewTask, setReviewTask] = useState(null)
 
@@ -450,27 +481,10 @@ export default function App() {
     return () => window.removeEventListener('set-workbook-flow', onSetFlow)
   }, [setPendingFlow, setSelectedWorksheetId, setSelectedExamResourceId, setFlowSubject])
 
-  // WrongBook: Load data（秒开策略：先展示本地缓存，再后台刷新）
+  // WrongBook: Load data（秒开策略：先展示本地缓存，再后台刷新；总数与生命周期计数来自服务端，不再被首批 100 条截断）
   const loadWrongBookData = async () => {
     if (!currentStudent) return
     const studentId = currentStudent.id
-
-    // 同一题目内容去重：保留上传时间最晚的一条
-    const dedupByContent = (rawList) => {
-      const contentDedupMap = new Map()
-      for (const wq of rawList) {
-        const question = wq.question || wq
-        const content = (question.content || '').trim()
-        if (!content) continue
-        const existing = contentDedupMap.get(content)
-        const curDate = wq.added_at || wq.created_at || ''
-        const existDate = existing ? (existing.added_at || existing.created_at || '') : ''
-        if (!existing || curDate > existDate) {
-          contentDedupMap.set(content, wq)
-        }
-      }
-      return Array.from(contentDedupMap.values())
-    }
 
     if (USE_MOCK_DATA) {
       setWrongQuestions(mockWrongQuestions.filter(wq => wq.student_id === studentId))
@@ -480,22 +494,47 @@ export default function App() {
     // 1) 先用缓存立即上屏
     const cached = peekCache(`wrong_questions_cache_${studentId}`)
     if (Array.isArray(cached) && cached.length > 0) {
-      setWrongQuestions(dedupByContent(cached))
+      setWrongQuestions(dedupWrongQuestions(cached))
     }
-    // 2) 后台拉取最新数据覆盖
+    // 2) 后台拉取第一页（含 total / counts），后续页面由滚动触底加载
     try {
-      const data = await getWrongQuestionsByStudent(studentId, false)
-      const rawList = Array.isArray(data) ? data : []
-      const deduped = dedupByContent(rawList)
-      if (deduped.length < rawList.length) {
-        console.log('wrong questions deduped:', rawList.length, '->', deduped.length)
-      }
+      const { wrongQuestions: rawList, total, counts } = await fetchWrongQuestionsPage(studentId, { limit: WRONG_PAGE_SIZE, offset: 0 })
+      const deduped = dedupWrongQuestions(rawList)
       setWrongQuestions(deduped)
+      setBankCounts(counts)
+      setWrongBookOffset(rawList.length)
+      setWrongBookHasMore(rawList.length < total)
+      writeCache(`wrong_questions_cache_${studentId}`, deduped)
     } catch (error) {
       console.error('加载错题失败:', error)
       // 网络失败时保留已展示的缓存数据
     }
   }
+
+  // 滚动触底加载下一页错题，跨页按 question_id / 题干去重合并，并保持秒开缓存
+  const loadMoreWrongQuestions = useCallback(async () => {
+    if (!currentStudent || wrongBookLoading || !wrongBookHasMore) return
+    const studentId = currentStudent.id
+    setWrongBookLoading(true)
+    try {
+      const { wrongQuestions: rawList, total, counts } = await fetchWrongQuestionsPage(studentId, { limit: WRONG_PAGE_SIZE, offset: wrongBookOffset })
+      if (!Array.isArray(rawList) || rawList.length === 0) {
+        setWrongBookHasMore(false)
+        return
+      }
+      const merged = dedupWrongQuestions([...(Array.isArray(wrongQuestions) ? wrongQuestions : []), ...rawList])
+      setWrongQuestions(merged)
+      setBankCounts(counts)
+      const nextOffset = wrongBookOffset + rawList.length
+      setWrongBookOffset(nextOffset)
+      setWrongBookHasMore(nextOffset < total)
+      writeCache(`wrong_questions_cache_${studentId}`, merged)
+    } catch (error) {
+      console.error('加载更多错题失败:', error)
+    } finally {
+      setWrongBookLoading(false)
+    }
+  }, [currentStudent, wrongBookLoading, wrongBookHasMore, wrongBookOffset, wrongQuestions, setWrongQuestions])
 
   // Exam: Load generated exams（秒开策略：先展示本地缓存，再后台刷新）
   const loadGeneratedExams = async (useCache = false, showCachedFirst = false) => {
@@ -568,6 +607,16 @@ export default function App() {
     return Array.from(tagSet)
   }, [wrongQuestions, currentStudent?.id])
 
+  const allAvailableErrorTypes = useMemo(() => {
+    const typeSet = new Set()
+    wrongQuestions
+      .filter(wq => wq.student_id === currentStudent?.id)
+      .forEach(wq => {
+        if (wq.error_type) typeSet.add(wq.error_type)
+      })
+    return Array.from(typeSet)
+  }, [wrongQuestions, currentStudent?.id])
+
   const filteredWrongQuestions = useMemo(() => (Array.isArray(wrongQuestions) ? wrongQuestions : []).filter(wq => {
     if (wq.student_id !== currentStudent?.id) return false
     if (bankFilter !== 'all') {
@@ -576,9 +625,24 @@ export default function App() {
       if (bankFilter === 'review' && ls !== 'review_1' && ls !== 'review_2') return false
       if (bankFilter === 'mastered' && ls !== 'mastered') return false
     }
-    if (selectedSubject !== 'all' && wq.subject !== selectedSubject) return false
+    if (selectedSubject !== 'all') {
+      // wrong_questions.subject 历史数据大多缺失，回退到 question.subject 兜底
+      const subj = wq.subject || (wq.question && wq.question.subject)
+      if (subj !== selectedSubject) return false
+    }
     if (selectedTimeRange !== 'all' && !isWithinTimeRange(wq.added_at || wq.created_at, selectedTimeRange)) return false
     if (selectedErrorCount !== 'all' && !matchErrorCount(wq.error_count || 1, selectedErrorCount)) return false
+    if (selectedErrorType !== 'all' && (wq.error_type || '') !== selectedErrorType) return false
+    if (selectedRecentWrongRange !== 'all' && !wq.last_wrong_at) return false
+    if (selectedRecentWrongRange !== 'all' && !isWithinTimeRange(wq.last_wrong_at, selectedRecentWrongRange)) return false
+    if (selectedMasteryStage !== 'all') {
+      const ls = wq.lifecycle_status || 'new'
+      if (selectedMasteryStage === 'reviewing') {
+        if (ls !== 'review_1' && ls !== 'review_2') return false
+      } else if (ls !== selectedMasteryStage) {
+        return false
+      }
+    }
     if (selectedTags.length > 0) {
       const question = wq.question || wq
       const qTags = question.tags_source === 'manual'
@@ -587,7 +651,22 @@ export default function App() {
       if (!selectedTags.some(t => qTags.includes(t))) return false
     }
     return true
-  }), [wrongQuestions, currentStudent?.id, bankFilter, selectedSubject, selectedTimeRange, selectedErrorCount, selectedTags])
+  }), [wrongQuestions, currentStudent?.id, bankFilter, selectedSubject, selectedTimeRange, selectedErrorCount, selectedErrorType, selectedRecentWrongRange, selectedMasteryStage, selectedTags])
+
+  // Mobile wrong-book action: prioritize unresolved items without creating a second retry flow.
+  const pendingWrongQuestions = useMemo(() => (Array.isArray(wrongQuestions) ? wrongQuestions : [])
+    .filter(wq => wq.student_id === currentStudent?.id && (wq.lifecycle_status || 'new') !== 'mastered'), [wrongQuestions, currentStudent?.id])
+
+  const priorityWrongQuestions = useMemo(() => [...pendingWrongQuestions]
+    .sort((a, b) => {
+      const statusRank = { new: 0, review_1: 1, review_2: 2 }
+      const rankDiff = (statusRank[a.lifecycle_status || 'new'] ?? 3) - (statusRank[b.lifecycle_status || 'new'] ?? 3)
+      if (rankDiff !== 0) return rankDiff
+      const errorDiff = (b.error_count || 1) - (a.error_count || 1)
+      if (errorDiff !== 0) return errorDiff
+      return dayjs(b.added_at || b.created_at).valueOf() - dayjs(a.added_at || a.created_at).valueOf()
+    })
+    .slice(0, 5), [pendingWrongQuestions])
 
   // Filter generated exams
   const studentExams = useMemo(() => (Array.isArray(generatedExams) ? generatedExams : []).filter(e => e.student_id === currentStudent?.id),
@@ -735,44 +814,27 @@ export default function App() {
     setWrongBookDetail(wq)
   }
 
-  // Toggle mastery
-  const handleToggleMastery = async (wq) => {
-    const currentLs = wq.lifecycle_status || 'new'
-    let nextLs
-    switch (currentLs) {
-      case 'new':
-        nextLs = 'review_1'
-        break
-      case 'review_1':
-        nextLs = 'review_2'
-        break
-      case 'review_2':
-        nextLs = 'mastered'
-        break
-      case 'mastered':
-        nextLs = 'new'
-        break
-      default:
-        nextLs = 'new'
-    }
-    const nextStatus = nextLs === 'mastered' ? 'mastered' : 'pending'
-
-    try {
-      await updateWrongQuestionStatus(wq.id, nextStatus, { lifecycle_status: nextLs })
-      loadWrongBookData()
-      const statusText = { new: '不懂', review_1: '略懂', review_2: '略懂', mastered: '完全懂' }
-      Toast.show({ message: `已标记为${statusText[nextLs]}`, type: 'success' })
-    } catch (error) {
-      Toast.show({ message: '操作失败', type: 'error' })
-    }
-  }
-
   // 打印预览/组卷
   const handlePrintPreview = () => {
     if (selectedQuestions.length === 0) {
       Toast.show({ message: '请先选择要组卷的错题', type: 'error' })
       return
     }
+    setShowPrintPreview(true)
+  }
+
+  const handleStartPriorityRetry = () => {
+    if (priorityWrongQuestions.length === 0) {
+      Toast.show({ message: '暂无待重练错题', type: 'info' })
+      return
+    }
+    setSelectedQuestions(priorityWrongQuestions)
+    setShowPrintPreview(true)
+  }
+
+  const handleRetrySingleWrongQuestion = (wq) => {
+    setSelectedQuestions([wq])
+    setWrongBookDetail(null)
     setShowPrintPreview(true)
   }
 
@@ -787,6 +849,26 @@ export default function App() {
       const toAdd = filteredWrongQuestions.filter(wq => !existingIds.has(wq.id))
       setSelectedQuestions([...selectedQuestions, ...toAdd])
     }
+  }
+
+  // 一键将当前筛选结果全部纳入重练（P2：知识点筛选→组卷重练）
+  const handleRetryFiltered = () => {
+    if (filteredWrongQuestions.length === 0) {
+      Toast.show({ message: '当前筛选下没有可重练的错题', type: 'info' })
+      return
+    }
+    setSelectedQuestions(filteredWrongQuestions)
+    setShowPrintPreview(true)
+  }
+
+  const handleResetWrongBookFilters = () => {
+    setSelectedSubject('all')
+    setSelectedTimeRange('all')
+    setSelectedErrorCount('all')
+    setSelectedTags([])
+    setSelectedErrorType('all')
+    setSelectedRecentWrongRange('all')
+    setSelectedMasteryStage('all')
   }
 
   // Toggle selection for wrong questions
@@ -847,6 +929,7 @@ export default function App() {
       try {
         await deleteWrongQuestion(deleteTarget.id)
         setWrongQuestions(wrongQuestions.filter(wq => wq.id !== deleteTarget.id))
+        setSelectedQuestions(selectedQuestions.filter(q => q.id !== deleteTarget.id))
         Toast.show({ message: '已从错题本移除', type: 'success' })
       } catch (error) {
         console.error('删除失败:', error)
@@ -1019,12 +1102,27 @@ export default function App() {
                 onTagsChange={setSelectedTags}
                 allAvailableTags={allAvailableTags}
                 selectedQuestions={selectedQuestions}
+                priorityQuestions={priorityWrongQuestions}
+                pendingWrongQuestionCount={pendingWrongQuestions.length}
                 onToggleSelection={toggleSelection}
                 onOpenDetail={handleOpenWrongBookDetail}
                 onDelete={handleDeleteWrongQuestion}
-                onToggleMastery={handleToggleMastery}
+                onStartPriorityRetry={handleStartPriorityRetry}
                 onSelectAll={handleSelectAll}
                 onPrintPreview={handlePrintPreview}
+                selectedErrorType={selectedErrorType}
+                onErrorTypeChange={setSelectedErrorType}
+                selectedRecentWrongRange={selectedRecentWrongRange}
+                onRecentWrongRangeChange={setSelectedRecentWrongRange}
+                selectedMasteryStage={selectedMasteryStage}
+                onMasteryStageChange={setSelectedMasteryStage}
+                allAvailableErrorTypes={allAvailableErrorTypes}
+                onRetryFiltered={handleRetryFiltered}
+                onResetFilters={handleResetWrongBookFilters}
+                bankCounts={bankCounts}
+                hasMore={wrongBookHasMore}
+                loadingMore={wrongBookLoading}
+                onLoadMore={loadMoreWrongQuestions}
               />
             )}
 
@@ -1070,7 +1168,7 @@ export default function App() {
                       const q = wq.question || wq
                       const tags = q.tags_source === 'manual' ? (q.manual_tags || []) : (q.ai_tags || [])
                       const ls = wq.lifecycle_status || 'new'
-                      const statusMap = { new: { text: '不懂', color: 'var(--warning)' }, review_1: { text: '略懂', color: 'var(--primary-hover)' }, review_2: { text: '略懂', color: 'var(--primary-hover)' }, mastered: { text: '完全懂', color: 'var(--success)' } }
+                      const statusMap = { new: { text: '不懂', color: 'var(--warning)' }, review_1: { text: '复习1轮', color: 'var(--primary-hover)' }, review_2: { text: '复习2轮', color: 'var(--primary-hover)' }, mastered: { text: '完全懂', color: 'var(--success)' } }
                       const status = statusMap[ls] || statusMap.new
                       return (
                         <>
@@ -1167,6 +1265,17 @@ export default function App() {
                               ))}
                             </div>
                           )}
+
+                          <div className="mt-4 pt-3 flex gap-2" style={{ borderTop: '1px solid var(--border-light)' }}>
+                            <button
+                              onClick={() => handleRetrySingleWrongQuestion(wq)}
+                              className="flex-1 flex items-center justify-center gap-1.5 py-2.5 rounded-xl text-[13px] font-medium"
+                              style={{ background: 'var(--primary)', color: 'var(--text-inverse)' }}
+                            >
+                              <RotateCcw size={15} />
+                              只练这道题
+                            </button>
+                          </div>
 
                           {/* 编辑提示 */}
                           <div className="mt-4 rounded-xl px-4 py-3 flex items-center gap-2" style={{ background: 'var(--primary-soft)' }}>

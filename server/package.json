@@ -11,6 +11,7 @@
   },
   "dependencies": {
     "@napi-rs/canvas": "^1.0.2",
+    "@sparticuz/chromium": "^132.0.0",
     "ali-oss": "^6.20.0",
     "axios": "^1.7.5",
     "bullmq": "^5.34.8",
@@ -25,6 +26,7 @@
     "pdfjs-dist": "^4.10.38",
     "pg": "^8.13.1",
     "playwright": "^1.62.1",
+    "puppeteer-core": "^23.11.1",
     "sharp": "^0.33.2"
   }
 }

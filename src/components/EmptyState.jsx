@@ -8,6 +8,7 @@ export default function EmptyState({
   titleStyle,
   descriptionStyle,
   className = '',
+  children,
 }) {
   return (
     <div className={`flex flex-col items-center justify-center text-center ${className}`}>
@@ -36,6 +37,7 @@ export default function EmptyState({
           {description}
         </p>
       )}
+      {children}
     </div>
   )
 }
