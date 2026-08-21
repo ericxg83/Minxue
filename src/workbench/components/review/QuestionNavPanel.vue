@@ -47,6 +47,17 @@
       <span>请选择学生和试卷</span>
     </div>
 
+    <!-- 快捷键提示（纯展示，不参与判定） -->
+    <div v-if="store.allQuestions.length > 0" class="nav-shortcuts">
+      <span class="shortcut-row">
+        <span class="key">←</span><span class="key">→</span> 切换
+        <span class="key">C</span>正确
+        <span class="key">W</span>错误
+        <span class="key">E</span>排除
+        <span class="key">Z</span>撤销
+      </span>
+    </div>
+
     <div class="nav-footer">
       <span class="threshold-label">置信阈值</span>
       <el-slider
@@ -179,7 +190,7 @@ const onThresholdChange = (val) => {
   font-size: 13px;
 }
 .stat-attention {
-  color: #f56c6c;
+  color: var(--wb-danger);
   font-weight: 600;
   white-space: nowrap;
 }
@@ -228,15 +239,15 @@ const onThresholdChange = (val) => {
 }
 .item-confidence.low {
   color: var(--wb-warning);
-  background: #fdf6ec;
+  background: var(--wb-warning-soft);
 }
 .item-confidence.exception {
-  color: var(--wb-warning);
-  background: #fff4e6;
+  color: var(--wb-accent);
+  background: var(--wb-accent-soft);
 }
 .item-confidence.processing {
-  color: #9254de;
-  background: #f5effd;
+  color: var(--wb-processing);
+  background: var(--wb-processing-soft);
 }
 .item-difficulty {
   font-size: 11px;
@@ -244,7 +255,7 @@ const onThresholdChange = (val) => {
   border-radius: var(--wb-radius-sm);
   white-space: nowrap;
   color: var(--wb-success);
-  background: #f0f9eb;
+  background: var(--wb-success-soft);
 }
 .item-paper-tag {
   font-size: 10px;
@@ -258,12 +269,12 @@ const onThresholdChange = (val) => {
 }
 .item-difficulty.diff-3 {
   color: var(--wb-warning);
-  background: #fdf6ec;
+  background: var(--wb-warning-soft);
 }
 .item-difficulty.diff-4,
 .item-difficulty.diff-5 {
-  color: #f56c6c;
-  background: #fef0f0;
+  color: var(--wb-danger);
+  background: var(--wb-danger-soft);
 }
 .nav-empty {
   flex: 1;
@@ -280,6 +291,36 @@ const onThresholdChange = (val) => {
   padding: 12px 16px;
   border-top: 1px solid var(--wb-border);
   flex-shrink: 0;
+}
+
+/* ── 快捷键提示条 ── */
+.nav-shortcuts {
+  padding: 4px 12px 2px;
+  border-top: 1px solid var(--wb-border-light);
+  flex-shrink: 0;
+}
+.nav-shortcuts .shortcut-row {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 6px;
+  font-size: 11px;
+  color: var(--wb-text-tertiary);
+}
+.nav-shortcuts .key {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 16px;
+  height: 16px;
+  padding: 0 4px;
+  border: 1px solid var(--wb-border);
+  border-radius: var(--wb-radius-xs);
+  background: var(--wb-bg-elevated);
+  color: var(--wb-text-secondary);
+  font-size: 10px;
+  font-weight: 600;
+  line-height: 1;
 }
 .threshold-label {
   font-size: 12px;

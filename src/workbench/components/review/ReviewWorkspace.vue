@@ -72,6 +72,9 @@ const onKeydown = (e) => {
     case 'e':
     case 'E':
       if (cfg.shortcuts.exclude) handleQuickReview('exclude'); break
+    case 'z':
+    case 'Z':
+      if (e.shiftKey) store.undoLastReview(); break
   }
 }
 
@@ -159,5 +162,5 @@ const handleQuickReview = async (result) => {
 .stat-value { font-size: 14px; font-weight: 600; color: var(--wb-text); }
 .stat-value--success { color: var(--wb-success); }
 .stat-value--primary { color: var(--wb-primary); }
-.stat-value--danger { color: #F56C6C; }
+.stat-value--danger { color: var(--wb-danger); }
 </style>

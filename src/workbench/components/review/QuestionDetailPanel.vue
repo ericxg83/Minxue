@@ -850,11 +850,11 @@ const handleRetryGeometry = async () => {
   font-size: 12px;
   font-weight: 600;
   color: var(--wb-success);
-  background: #f0f9eb;
+  background: var(--wb-success-soft);
   padding: 2px 10px;
   border-radius: var(--wb-radius-md);
 }
-.ops-confidence.conf-low { color: var(--wb-warning); background: #fdf6ec; }
+.ops-confidence.conf-low { color: var(--wb-warning); background: var(--wb-warning-soft); }
 
 /* ── 答案对照条 ── */
 .ops-compare-bar {
@@ -945,10 +945,10 @@ const handleRetryGeometry = async () => {
   font-size: 12px; font-weight: 700; color: #fff; flex-shrink: 0;
 }
 .ai-ok { background: var(--wb-success); }
-.ai-fail { background: #f56c6c; }
+.ai-fail { background: var(--wb-danger); }
 .ai-pending { background: var(--wb-warning); }
-.ai-exception { background: var(--wb-warning); }
-.ai-processing { background: #9254de; }
+.ai-exception { background: var(--wb-accent); }
+.ai-processing { background: var(--wb-processing); }
 .ops-ai-text { font-size: 13px; color: var(--wb-text-secondary); }
 
 /* ═══ 完整题目内容区（可滚动） ═══ */
@@ -1084,12 +1084,12 @@ const handleRetryGeometry = async () => {
 }
 .ops-btn-icon { font-size: 18px; }
 
-.ops-btn-correct { color: var(--wb-success); border-color: #b7eb8f; background: #f0f9eb; }
-.ops-btn-correct:hover { background: #e1f3d8; border-color: #95d475; }
-.ops-btn-wrong { color: #f56c6c; border-color: #fbc4c4; background: #fef0f0; }
-.ops-btn-wrong:hover { background: #fde2e2; border-color: #f89898; }
+.ops-btn-correct { color: var(--wb-success); border-color: var(--wb-success-soft); background: var(--wb-success-soft); }
+.ops-btn-correct:hover { background: var(--wb-success-soft); border-color: var(--wb-success); }
+.ops-btn-wrong { color: var(--wb-danger); border-color: var(--wb-danger-soft); background: var(--wb-danger-soft); }
+.ops-btn-wrong:hover { background: var(--wb-danger-soft); border-color: var(--wb-danger); }
 .ops-btn-exclude { color: var(--wb-text-tertiary); border-color: var(--wb-border); background: var(--wb-bg-hover); }
-.ops-btn-exclude:hover { background: #e9e9eb; border-color: #c8c9cc; }
+.ops-btn-exclude:hover { background: var(--wb-bg-mist); border-color: var(--wb-border); }
 
 /* 复审状态标记 */
 .ops-review-badge { margin-left: 4px; }
@@ -1100,8 +1100,8 @@ const handleRetryGeometry = async () => {
   box-shadow: 0 0 0 3px rgba(99,102,241,0.3);
   border-color: var(--wb-primary) !important;
 }
-.ops-btn-active.ops-btn-correct { border-color: var(--wb-success) !important; box-shadow: 0 0 0 3px rgba(103,194,58,0.3); }
-.ops-btn-active.ops-btn-wrong { border-color: #f56c6c !important; box-shadow: 0 0 0 3px rgba(245,108,108,0.3); }
+.ops-btn-active.ops-btn-correct { border-color: var(--wb-success) !important; box-shadow: 0 0 0 3px rgba(22,163,74,0.3); }
+.ops-btn-active.ops-btn-wrong { border-color: var(--wb-danger) !important; box-shadow: 0 0 0 3px rgba(220,38,38,0.3); }
 .ops-btn-active.ops-btn-exclude { border-color: var(--wb-text-tertiary) !important; box-shadow: 0 0 0 3px rgba(148,163,184,0.3); }
 
 /* 按钮点击脉冲动画 */

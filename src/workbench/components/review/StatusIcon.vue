@@ -73,11 +73,12 @@ const props = defineProps({
 })
 
 const COLORS = {
-  correct: '#67c23a',
-  wrong: '#f56c6c',
-  pending: '#e6a23c',
-  exception: '#fa8c16',
-  processing: '#9254de'
+  // 语义色收敛到 --wb-* token（一类事实一个主要来源）
+  correct: 'var(--wb-success)',
+  wrong: 'var(--wb-danger)',
+  pending: 'var(--wb-warning)',
+  exception: 'var(--wb-accent)',
+  processing: 'var(--wb-processing)'
 }
 
 const LABELS = {

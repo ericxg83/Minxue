@@ -71,6 +71,19 @@
           <span class="chip-count">{{ store.aiStateStats.processing }}</span>
         </span>
       </div>
+      <!-- 置信阈值全局提示：与左栏 slider 相同一变量（store.confidenceThreshold），
+           提升"AI 正确免复核"判定的可见性；不改判定来源 -->
+      <el-tooltip
+        content="AI 置信度 ≥ 该阈值时自动判定为「正确」无需复核；低于阈值的自动判定将进入待复核。拖动左栏下方滑块可即时调整。"
+        placement="bottom"
+      >
+        <span class="threshold-badge" :class="{ 'threshold-warn': store.confidenceThreshold >= 0.85 }">
+          AI置信 ≥ {{ (store.confidenceThreshold * 100).toFixed(0) }}% 免复核
+        </span>
+      </el-tooltip>
+      <el-button size="default" :disabled="!store.canUndo" @click="handleUndoLast">
+        ↩ 撤销上一笔
+      </el-button>
       <el-button size="default" type="warning"
         :disabled="!store.currentTask" :loading="retryLoading"
         @click="handleRetryTask">
@@ -232,6 +245,14 @@ const handleAddToBook = async (item) => {
   }
 }
 
+// 撤销最近一次人工判定（仅回退前端状态，不反向写库）
+const handleUndoLast = () => {
+  const prev = store.undoLastReview()
+  if (prev) {
+    ElMessage({ type: 'info', message: '已撤销上一笔判定（当前页面状态已回退，不影响已保存记录）', duration: 2200 })
+  }
+}
+
 // 重新处理当前试卷
 const handleRetryTask = async () => {
   if (!store.currentTask?.id) return
@@ -300,16 +321,42 @@ const handleRetryTask = async () => {
 }
 .chip-label { color: var(--wb-text-secondary); }
 .chip-count { font-weight: 700; }
-.chip-correct { background: #f0f9eb; border-color: #c2e7b0; }
+.chip-correct { background: var(--wb-success-soft); border-color: var(--wb-success-soft); }
 .chip-correct .chip-count { color: var(--wb-success); }
-.chip-wrong { background: #fef0f0; border-color: #fbc4c4; }
-.chip-wrong .chip-count { color: #f56c6c; }
-.chip-pending { background: #fdf6ec; border-color: #faecd8; }
+.chip-wrong { background: var(--wb-danger-soft); border-color: var(--wb-danger-soft); }
+.chip-wrong .chip-count { color: var(--wb-danger); }
+.chip-pending { background: var(--wb-warning-soft); border-color: var(--wb-warning-soft); }
 .chip-pending .chip-count { color: var(--wb-warning); }
-.chip-exception { background: #fff4e6; border-color: #ffd8a8; }
-.chip-exception .chip-count { color: var(--wb-warning); }
-.chip-processing { background: #f5effd; border-color: #e3d4fb; }
-.chip-processing .chip-count { color: #9254de; }
+.chip-exception { background: var(--wb-accent-soft); border-color: var(--wb-accent-soft); }
+.chip-exception .chip-count { color: var(--wb-accent); }
+.chip-processing { background: var(--wb-processing-soft); border-color: var(--wb-processing-soft); }
+.chip-processing .chip-count { color: var(--wb-processing); }
+
+/* 置信阈值全局提示 */
+.threshold-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 3px 10px;
+  border-radius: var(--wb-radius-md);
+  font-size: 12px;
+  font-weight: 500;
+  white-space: nowrap;
+  color: var(--wb-text-secondary);
+  background: var(--wb-bg-hover);
+  border: 1px solid var(--wb-border);
+  cursor: help;
+  transition: all 0.2s;
+}
+.threshold-badge:hover {
+  border-color: var(--wb-primary-soft);
+  color: var(--wb-primary);
+}
+.threshold-badge.threshold-warn {
+  color: var(--wb-warning);
+  background: var(--wb-warning-soft);
+  border-color: var(--wb-warning-soft);
+}
 
 .back-btn {
   font-size: 13px;

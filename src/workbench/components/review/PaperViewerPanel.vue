@@ -532,7 +532,7 @@ const switchToPage = (page) => {
 
 @keyframes pulse-warn {
   0%, 100% { border-color: var(--wb-warning); opacity: 0.9; }
-  50% { border-color: #f56c6c; opacity: 0.6; }
+  50% { border-color: var(--wb-danger); opacity: 0.6; }
 }
 
 .overlay-number {
@@ -560,11 +560,11 @@ const switchToPage = (page) => {
 }
 
 .overlay-icon.correct {
-  color: #a0f0a0;
+  color: var(--wb-success);
 }
 
 .overlay-icon.wrong {
-  color: #faa0a0;
+  color: var(--wb-danger);
 }
 
 /* ── 缩放控制 ── */

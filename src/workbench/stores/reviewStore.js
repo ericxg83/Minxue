@@ -1,6 +1,5 @@
 import { defineStore } from 'pinia'
 import { ref, computed } from 'vue'
-import dayjs from 'dayjs'
 import { getStudents, getWrongQuestionsByStudent, getQuestionsByTask, getTasksByStudent, updateWrongQuestionStatus, updateTaskStatus, recalculateTaskStats, getLatestJudgements, clearStudentCaches, updateQuestionReviewStatus, addWrongQuestions, getGeneratedExamsByStudent, getQuestionsByIds, gradeGeneratedExam } from '../../services/apiService'
 import { useLifecycleStore, LIFECYCLE_STATUS } from './lifecycleStore'
 import { checkQuestionCompleteness } from '../../utils/questionCompleteness.js'
@@ -47,6 +46,30 @@ export const useReviewStore = defineStore('review', () => {
   // ReviewTopBar 触发「去编辑」时记录的待编辑题目，QuestionDetailPanel 监听后打开编辑面板
   const pendingEditQuestionId = ref(null)
 
+  // ── 撤销上一笔：仅回退前端内存状态，不反向写库 ──
+  // 元素：{ questionId, prevStatus, wqSnapshot }
+  const reviewUndoStack = ref([])
+  const canUndo = computed(() => reviewUndoStack.value.length > 0)
+
+  // 撤销最近一次人工判定（正确/错误/排除）
+  // - 恢复该题的 review_status（原为空则清空）
+  // - 恢复该题对应错题记录的上一生命周期状态
+  // - 不调用任何 API：避免产生反向写库，保证「撤销不改变已落库事实」
+  const undoLastReview = () => {
+    const last = reviewUndoStack.value.pop()
+    if (!last) return false
+    const q = allQuestions.value.find(item => item.id === last.questionId)
+    if (q) {
+      if (last.prevStatus) q.review_status = last.prevStatus
+      else delete q.review_status
+    }
+    if (last.wqSnapshot) {
+      const idx = wrongQuestions.value.findIndex(w => w.id === last.wqSnapshot.id)
+      if (idx >= 0) wrongQuestions.value[idx] = { ...last.wqSnapshot }
+    }
+    return true
+  }
+
   // ── 批改工作台：场景模式（homework 题目校对 / paper 错题重练）──
   const taskType = ref(TASK_TYPE.HOMEWORK)
   const reviewConfig = computed(() => getReviewConfig(taskType.value))
@@ -89,14 +112,6 @@ export const useReviewStore = defineStore('review', () => {
     }
   }
   
-  // 今日统计数据
-  const todayStats = ref({
-    pendingReview: 0,       // 今日待审核错题数量
-    pendingStudents: 0,     // 今日待处理学生数量
-    newWrongQuestions: 0,   // 今日新增错题数量
-    pendingPrintExams: 0    // 已生成待打印重练卷数量
-  })
-
   // 所有题目（用于显示完整题号导航 1~N）
   const studentAllQuestions = computed(() => {
     return allQuestions.value
@@ -148,66 +163,6 @@ export const useReviewStore = defineStore('review', () => {
         }
       })
   })
-
-  // 获取学生待审核题目数（优化：单次遍历）
-  const getStudentPendingCount = (studentId) => {
-    let count = 0
-    for (const wq of wrongQuestions.value) {
-      if (wq.student_id === studentId && wq.lifecycle_status !== LIFECYCLE_STATUS.MASTERED) {
-        count++
-      }
-    }
-    return count
-  }
-
-  // 获取学生今日新增错题数（优化：单次遍历）
-  const getStudentTodayNewCount = (studentId) => {
-    const today = dayjs().format('YYYY-MM-DD')
-    let count = 0
-    for (const wq of wrongQuestions.value) {
-      if (wq.student_id === studentId) {
-        const addedDate = dayjs(wq.added_at).format('YYYY-MM-DD')
-        if (addedDate === today) {
-          count++
-        }
-      }
-    }
-    return count
-  }
-
-  // 获取今日统计数据（优化：单次遍历）
-  const calculateTodayStats = () => {
-    const today = dayjs().format('YYYY-MM-DD')
-
-    let pendingReview = 0
-    let newWrongQuestions = 0
-    let pendingPrintExams = 0
-    const studentIds = new Set()
-
-    // 单次遍历计算所有统计
-    for (const wq of wrongQuestions.value) {
-      if (wq.lifecycle_status !== LIFECYCLE_STATUS.MASTERED) {
-        pendingReview++
-        studentIds.add(wq.student_id)
-      }
-
-      const addedDate = dayjs(wq.added_at).format('YYYY-MM-DD')
-      if (addedDate === today && wq.lifecycle_status === LIFECYCLE_STATUS.NEW) {
-        newWrongQuestions++
-      }
-
-      if (wq.lifecycle_status === LIFECYCLE_STATUS.NEW) {
-        pendingPrintExams++
-      }
-    }
-
-    todayStats.value = {
-      pendingReview,
-      pendingStudents: studentIds.size,
-      newWrongQuestions,
-      pendingPrintExams
-    }
-  }
 
   // 加载学生列表
   const loadStudents = async () => {
@@ -308,9 +263,6 @@ export const useReviewStore = defineStore('review', () => {
       // 自动选择第一份待复核试卷；无则展示空状态
       await autoSelectPendingTask()
     }
-
-    // 计算今日统计
-    calculateTodayStats()
   }
 
   // 自动选择第一份「待复核」试卷（status === 'done'）。
@@ -393,6 +345,17 @@ export const useReviewStore = defineStore('review', () => {
       }
     }
 
+    // 撤销快照：在变更前记录该题与错题记录的上一状态。
+    // 撤销仅回退前端内存状态，不产生反向写库。
+    const wq = wrongQuestions.value.find(w => w.question_id === questionId)
+    reviewUndoStack.value.push({
+      questionId,
+      prevStatus: question.review_status || null,
+      wqSnapshot: wq ? { ...wq } : null
+    })
+    // 限制栈深度，避免长时间批改无界增长
+    if (reviewUndoStack.value.length > 20) reviewUndoStack.value.shift()
+
     // Store manual review status on the question
     question.review_status = result
 
@@ -402,7 +365,6 @@ export const useReviewStore = defineStore('review', () => {
     )
 
     // Also update the wrong question if it exists
-    const wq = wrongQuestions.value.find(w => w.question_id === questionId)
     if (wq) {
       const currentStatus = wq.lifecycle_status || LIFECYCLE_STATUS.NEW
 
@@ -429,9 +391,6 @@ export const useReviewStore = defineStore('review', () => {
         lifecycle_status: wq.lifecycle_status
       }).catch(e => console.error(`[P0-3c] 审核结果持久化失败 wq=${wq.id.substring(0, 8)}:`, e.message))
     }
-
-    // 重新计算统计
-    calculateTodayStats()
 
     // 自动进入下一题
     if (!nextQuestion()) {
@@ -569,31 +528,6 @@ export const useReviewStore = defineStore('review', () => {
     if (pages.length <= 1) return []
     return pages.filter((_, i) => i !== currentPageIndex.value)
   })
-
-  // 加载所有待复核试卷的题目（image 模式：多试卷聚合）
-  const loadAllPendingQuestions = async () => {
-    const pending = studentTasks.value.filter(t => t.status === 'done')
-    const allQs = []
-    const map = {}
-    for (const task of pending) {
-      try {
-        const questions = await getQuestionsByTask(task.id, false)
-        const sorted = (Array.isArray(questions) ? questions : []).sort((a, b) => {
-          const aOrder = a.sort_order || a.sequence || 0
-          const bOrder = b.sort_order || b.sequence || 0
-          return aOrder - bOrder
-        })
-        for (const q of sorted) {
-          map[q.id] = task.id
-        }
-        allQs.push(...sorted)
-      } catch (e) {
-        console.error(`loadAllPendingQuestions: task ${task.id} 加载题目失败:`, e)
-      }
-    }
-    allQuestions.value = allQs
-    questionToTaskMap.value = map
-  }
 
   // 选择试卷 → 加载题目 + 判定数据 + 错题数据
   const selectTask = async (task) => {
@@ -883,12 +817,8 @@ export const useReviewStore = defineStore('review', () => {
     currentReviewIndex,
     currentTaskId,
     reviewStatus,
-    todayStats,
     studentAllQuestions,
     currentReviewQuestion,
-    getStudentPendingCount,
-    getStudentTodayNewCount,
-    calculateTodayStats,
     loadStudents,
     loadWrongQuestions,
     loadQuestions,
@@ -941,8 +871,10 @@ export const useReviewStore = defineStore('review', () => {
     currentPaperPages,
     currentPageImage,
     setPageIndex,
-    // 多试卷聚合
-    questionToTaskMap,
-    loadAllPendingQuestions
+    // 撤销上一笔（仅回退前端内存状态，不反向写库）
+    canUndo,
+    undoLastReview,
+    // 多试卷聚合映射（左栏卷标签使用；当前由 selectTask 清空置空）
+    questionToTaskMap
   }
 })

@@ -88,6 +88,9 @@
   --wb-danger: #DC2626;
   --wb-danger-soft: #FEE2E2;
   --wb-info: #6366F1;
+  /* 处理中（AI 尚未出判定）专属语义色，与 exception(accent) 区分 */
+  --wb-processing: #7C3AED;
+  --wb-processing-soft: #F5E8FF;
 
   /* 文字 */
   --wb-text: #1E293B;

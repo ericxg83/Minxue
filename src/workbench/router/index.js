@@ -8,6 +8,12 @@ const routes = [
     meta: { requiresPC: true }
   },
   {
+    path: '/review',
+    name: 'Review',
+    component: () => import('../views/ReviewWorkbench.vue'),
+    meta: { requiresPC: true }
+  },
+  {
     path: '/wrongbook',
     name: 'WrongBook',
     component: () => import('../views/WrongBookWorkbench.vue'),
@@ -29,12 +35,6 @@ const routes = [
     path: '/exam-history',
     name: 'ExamHistory',
     component: () => import('../views/PracticeReviewWorkbench.vue'),
-    meta: { requiresPC: true }
-  },
-  {
-    path: '/ai-review',
-    name: 'AIReview',
-    component: () => import('../views/AIReviewWorkbench.vue'),
     meta: { requiresPC: true }
   },
   {

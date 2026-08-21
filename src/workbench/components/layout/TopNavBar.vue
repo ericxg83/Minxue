@@ -94,14 +94,15 @@ onUnmounted(() => {
 })
 
 const navItems = [
-  { key: 'proofread',       label: '作业批改', path: '/',                icon: 'DocumentChecked' },
-{ key: 'wrong-book',      label: '错题本',   path: '/wrongbook',        icon: 'Collection' },
-  { key: 'worksheets',      label: '练习册管理', path: '/worksheets',      icon: 'Notebook' },
-  { key: 'exam-history',    label: '重练批改', path: '/exam-history',     icon: 'Clock' },
-  { key: 'weekly-report',   label: '诊断报告', path: '/weekly-report',    icon: 'DataAnalysis' },
-  { key: 'handout',         label: '讲义预览', path: '/handout',          icon: 'Reading' },
-  { key: 'handouts',        label: '我的讲义', path: '/handouts',         icon: 'Notebook' },
-  { key: 'exam-import',     label: '试卷入库', path: '/paper',            icon: 'UploadFilled',disabled: true },
+  { key: 'dashboard',      label: '工作台',   path: '/',                icon: 'HomeFilled' },
+  { key: 'review',         label: '作业批改', path: '/review',          icon: 'DocumentChecked' },
+  { key: 'wrong-book',     label: '错题本',   path: '/wrongbook',       icon: 'Collection' },
+  { key: 'worksheets',     label: '练习册管理', path: '/worksheets',    icon: 'Notebook' },
+  { key: 'exam-history',   label: '重练批改', path: '/exam-history',    icon: 'Clock' },
+  { key: 'weekly-report',  label: '诊断报告', path: '/weekly-report',   icon: 'DataAnalysis' },
+  { key: 'handout',        label: '讲义预览', path: '/handout',         icon: 'Reading' },
+  { key: 'handouts',       label: '我的讲义', path: '/handouts',        icon: 'Notebook' },
+  { key: 'exam-import',    label: '试卷入库', path: '/paper',           icon: 'UploadFilled', disabled: true },
 ]
 
 const isActive = (item) => {
