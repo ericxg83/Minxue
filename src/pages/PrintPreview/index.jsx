@@ -513,6 +513,10 @@ export default function PrintPreview({ onClose, questions: propQuestions, existi
         </div>
 
         {/* Preview Area — A4 真实宽度渲染后按视口缩放，手机端完整呈现 */}
+        <div className="px-4 py-2 bg-white border-b text-center" style={{ borderColor: 'var(--border-light)', fontSize: 'var(--fs-12)', color: 'var(--text-secondary)' }}>
+          本次重练 {previewQuestions.length} 道题，完成后可继续处理剩余错题
+        </div>
+
         <div ref={previewWrapRef} className="flex-1 bg-gray-200 p-3 sm:p-5 overflow-auto">
           <div
             style={{

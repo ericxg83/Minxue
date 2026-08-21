@@ -171,7 +171,7 @@ export default function WrongBookPage({
                   优先处理
                 </div>
                 <div className="truncate" style={{ fontSize: 'var(--fs-12)', color: 'var(--text-secondary)', marginTop: '2px' }}>
-                  {pendingWrongQuestionCount} 道错题等待重练
+                  {pendingWrongQuestionCount} 道错题待处理，本次重练 {priorityQuestions.length} 道
                 </div>
               </div>
             </div>
@@ -190,7 +190,7 @@ export default function WrongBookPage({
                 fontWeight: 600
               }}
             >
-              开始重练
+              开始本次重练（{priorityQuestions.length} 道）
               <ArrowRight size={14} />
             </button>
           </div>
