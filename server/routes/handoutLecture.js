@@ -237,14 +237,15 @@ router.delete('/lectures/:id', async (req, res) => {
 router.put('/lectures/:id/notes', async (req, res) => {
   try {
     const { id } = req.params
+    const userId = userOrDefault(req)
     const { pageName, content } = req.body || {}
     if (!pageName || typeof content !== 'string') {
       return res.status(400).json({ success: false, error: 'pageName 和 content 必填' })
     }
     // 校验讲义存在
     const { rows: exist } = await query(
-      `SELECT 1 FROM handout_lectures WHERE id = $1`,
-      [id]
+      `SELECT 1 FROM handout_lectures WHERE id = $1 AND user_id = $2`,
+      [id, userId]
     )
     if (exist.length === 0) {
       return res.status(404).json({ success: false, error: '讲义不存在' })
@@ -260,7 +261,7 @@ router.put('/lectures/:id/notes', async (req, res) => {
         [id, pageName, content]
       )
     }
-    await query(`UPDATE handout_lectures SET updated_at = now() WHERE id = $1`, [id])
+    await query(`UPDATE handout_lectures SET updated_at = now() WHERE id = $1 AND user_id = $2`, [id, userId])
     res.json({ success: true, pageName, content })
   } catch (e) {
     res.status(500).json({ success: false, error: e.message })
@@ -326,8 +327,9 @@ router.post('/lectures/:id/duplicate', async (req, res) => {
 // 保存的讲义。模板已删，本端点清掉 DB 中 blocks 含禁用关键词的讲义。
 router.post('/lectures/cleanup-old-blocks', async (req, res) => {
   try {
+    const userId = userOrDefault(req)
     const { rows } = await query(
-      `SELECT id, title, blocks FROM handout_lectures`
+      `SELECT id, title, blocks FROM handout_lectures WHERE user_id = $1`, [userId]
     )
     const FORBIDDEN = [
       '变式改写', '强化训练', '变式题与', '以下变式题', '建议独立完成',
@@ -380,13 +382,14 @@ router.post('/lectures/cleanup-old-blocks', async (req, res) => {
 router.put('/lectures/:id/lecture-script', async (req, res) => {
   try {
     const { id } = req.params
+    const userId = userOrDefault(req)
     const { lectureScript } = req.body || {}
     if (lectureScript === undefined) {
       return res.status(400).json({ success: false, error: 'lectureScript 必填（可 null）' })
     }
     const { rowCount } = await query(
-      `UPDATE handout_lectures SET lecture_script = $2::jsonb, updated_at = now() WHERE id = $1`,
-      [id, lectureScript === null ? null : JSON.stringify(lectureScript)]
+      `UPDATE handout_lectures SET lecture_script = $2::jsonb, updated_at = now() WHERE id = $1 AND user_id = $3`,
+      [id, lectureScript === null ? null : JSON.stringify(lectureScript), userId]
     )
     if (rowCount === 0) {
       return res.status(404).json({ success: false, error: '讲义不存在' })

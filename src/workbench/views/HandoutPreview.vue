@@ -458,6 +458,8 @@
           <div class="present-kp">{{ presentTitle }}</div>
           <div class="present-counter">第 {{ presentIndex + 1 }} / {{ pagesCount }} 页</div>
           <div class="present-toolbar">
+            <el-button size="small" @click="togglePresentAnswers">{{ showAnswers ? '\u9690\u85cf\u7b54\u6848' : '\u663e\u793a\u7b54\u6848' }}</el-button>
+            <el-button size="small" @click="togglePresentScript">{{ showPresentScript ? '\u9690\u85cf\u63d0\u8bcd\u5668' : '\u663e\u793a\u63d0\u8bcd\u5668' }}</el-button>
             <el-button size="small" @click="handlePrint">
               <el-icon><Printer /></el-icon> 打印
             </el-button>
@@ -704,6 +706,16 @@
         </div>
 
         <!-- 底栏：翻页 / 跳转目录 -->
+        <aside v-if="showPresentScript && presentScript.length" class="present-script-panel">
+          <div class="present-script-title">&#25945;&#24072;&#25552;&#35789;&#22120;</div>
+          <div v-for="(step, i) in presentScript" :key="i" class="present-script-step">
+            <div class="present-script-step-head"><span>{{ step.time }}</span><strong>{{ step.title }}</strong></div>
+            <div v-if="step.detail" class="present-script-detail">{{ step.detail }}</div>
+            <ul v-if="step.points?.length"><li v-for="(point, pi) in step.points" :key="pi">{{ point }}</li></ul>
+            <div v-if="step.interaction" class="present-script-interaction">&#20114;&#21160;&#65306;{{ step.interaction }}</div>
+          </div>
+        </aside>
+
         <div class="present-bottombar">
           <el-button size="large" :disabled="presentIndex === 0" @click="prevPresentPage">← 上一页</el-button>
           <el-select size="large" v-model="presentIndex" placeholder="跳转目录" style="width: 220px">
@@ -760,14 +772,21 @@ const knowledgeTreeRef = ref(null)
 // ── 课堂展示模式（P0：只读全屏，不修改讲义数据）──
 const presentMode = ref(false)   // 默认备课模式；切换展示时置 true
 const presentIndex = ref(0)
+const showAnswers = ref(false)
+const showPresentScript = ref(false)
 // 展示模式下隐藏"备课/诊断"私有块（统计、笔记、提词器）
 const PRESENT_HIDE_TYPES = ['kp-stats', 'note', 'lecture-script']
+const PRESENT_ANSWER_TYPES = ['answer', 'analysis', 'solution-steps', 'error-cause']
 const pagesCount = computed(() => handout.value?.pages?.length || 0)
 const presentPage = computed(() => handout.value?.pages?.[presentIndex.value] ?? null)
 const presentBlocks = computed(() => {
   const page = presentPage.value
   if (!page || !Array.isArray(page.blocks)) return []
-  return page.blocks.filter(b => !PRESENT_HIDE_TYPES.includes(b.type))
+  return page.blocks.filter(b => !PRESENT_HIDE_TYPES.includes(b.type) && (showAnswers.value || !PRESENT_ANSWER_TYPES.includes(b.type)))
+})
+const presentScript = computed(() => {
+  const script = (presentPage.value?.blocks || []).find(block => block.type === 'lecture-script')?.content
+  return Array.isArray(script) ? script : []
 })
 const presentTitle = computed(() => {
   const p = presentPage.value
@@ -792,17 +811,27 @@ function pageLabel(p, i) {
   if (name === 'toc') return '目录'
   return name
 }
-function enterPresentMode() {
+function togglePresentAnswers() {
+  showAnswers.value = !showAnswers.value
+}
+function togglePresentScript() {
+  showPresentScript.value = !showPresentScript.value
+}
+async function enterPresentMode() {
   if (!handout.value?.pages?.length) {
     ElMessage.warning('暂无讲义数据')
     return
   }
   presentIndex.value = 0
+  showAnswers.value = false
+  showPresentScript.value = false
   presentMode.value = true
+  try { await document.documentElement.requestFullscreen?.() } catch (e) { console.warn('????????:', e) }
   if (typeof window !== 'undefined') window.addEventListener('keydown', onPresentKeydown)
 }
-function exitPresentMode() {
+async function exitPresentMode() {
   presentMode.value = false
+  if (document.fullscreenElement) { try { await document.exitFullscreen() } catch (e) { console.warn('??????:', e) } }
   if (typeof window !== 'undefined') window.removeEventListener('keydown', onPresentKeydown)
 }
 function nextPresentPage() {
@@ -813,6 +842,7 @@ function prevPresentPage() {
 }
 function onPresentKeydown(e) {
   if (!presentMode.value) return
+  if (['INPUT', 'TEXTAREA', 'SELECT'].includes(document.activeElement?.tagName)) return
   if (e.key === 'Escape') { e.preventDefault(); exitPresentMode(); return }
   if (e.key === 'ArrowRight' || e.key === 'PageDown' || e.key === ' ') { e.preventDefault(); nextPresentPage(); return }
   if (e.key === 'ArrowLeft' || e.key === 'PageUp') { e.preventDefault(); prevPresentPage(); return }
@@ -1234,16 +1264,18 @@ async function loadLectureFromDb(id) {
     handout.value = {
       title: lec.title,
       subject: lec.subject,
-      periodText: lec.periodText,
+      periodText: lec.period_text ?? lec.periodText ?? '',
       template: lec.template,
-      pages: lec.blocks,
-      generatedAt: lec.createdAt,
+      pages: Array.isArray(lec.blocks) ? lec.blocks : [],
+      generatedAt: lec.created_at ?? lec.createdAt,
+      baseQuery: lec.base_query ?? lec.baseQuery ?? {},
+      baseDiagnosis: lec.base_diagnosis ?? lec.baseDiagnosis ?? [],
     }
     lectureId.value = lec.id
     noteText.value = lec.notes?._default || ''
     selectedTemplate.value = lec.template
     currentSubject.value = lec.subject || ''
-    lastSavedAt.value = lec.updatedAt ? new Date(lec.updatedAt).toLocaleTimeString('zh-CN') : ''
+    lastSavedAt.value = (lec.updated_at ?? lec.updatedAt) ? new Date(lec.updated_at ?? lec.updatedAt).toLocaleTimeString('zh-CN') : ''
     dirty.value = false
     return true
   }
@@ -1288,6 +1320,7 @@ onMounted(async () => {
 onBeforeUnmount(() => {
   if (noteSaveTimer) clearTimeout(noteSaveTimer)
   if (typeof window !== 'undefined') window.removeEventListener('keydown', onPresentKeydown)
+  if (document.fullscreenElement) document.exitFullscreen().catch(() => {})
 })
 
 async function loadFromDiagnosis() {
@@ -2486,6 +2519,19 @@ async function loadFromDiagnosis() {
   font-weight: 700;
   flex-shrink: 0;
 }
+.present-script-panel {
+  position: absolute; right: 24px; top: 70px; bottom: 78px; width: 320px; overflow: auto;
+  padding: 16px; background: rgba(15, 23, 42, 0.96); color: #E5E7EB;
+  border: 1px solid #334155; border-radius: 10px; z-index: 2;
+}
+.present-script-title { font-size: 16px; font-weight: 700; color: #A5B4FC; margin-bottom: 14px; }
+.present-script-step { padding: 10px 0; border-bottom: 1px solid #334155; line-height: 1.6; }
+.present-script-step-head { display: flex; gap: 8px; align-items: baseline; }
+.present-script-step-head span { color: #93C5FD; font-size: 12px; }
+.present-script-detail, .present-script-step li, .present-script-interaction { margin-top: 6px; font-size: 13px; color: #CBD5E1; }
+.present-script-step ul { margin: 6px 0 0; padding-left: 18px; }
+.present-script-interaction { color: #86EFAC; }
+
 .present-bottombar {
   display: flex;
   align-items: center;
