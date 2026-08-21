@@ -50,8 +50,10 @@ router.get('/lectures', async (req, res) => {
       const { rows } = await query(
         `SELECT id, title, subject, period_text, template, created_at, updated_at,
                 jsonb_array_length(blocks) AS page_count,
-                (SELECT count(*)::int FROM jsonb_array_elements(blocks) p WHERE p->>'name' NOT IN ('cover','toc')) AS kp_count
-         FROM handout_lectures
+                (SELECT count(*)::int FROM jsonb_array_elements(blocks) p WHERE p->>'name' NOT IN ('cover','toc')) AS kp_count,
+                (EXISTS (SELECT 1 FROM handout_lecture_notes n WHERE n.lecture_id = hl.id AND n.content <> '')) AS has_notes,
+                (lecture_script IS NOT NULL AND jsonb_array_length(lecture_script) > 0) AS has_script
+         FROM handout_lectures hl
          WHERE ${where} AND (title ILIKE $${params.length - 3} OR period_text ILIKE $${params.length - 2})
          ORDER BY created_at DESC
          LIMIT $${params.length - 1} OFFSET $${params.length}`,
@@ -63,8 +65,10 @@ router.get('/lectures', async (req, res) => {
     const { rows } = await query(
       `SELECT id, title, subject, period_text, template, created_at, updated_at,
               jsonb_array_length(blocks) AS page_count,
-              (SELECT count(*)::int FROM jsonb_array_elements(blocks) p WHERE p->>'name' NOT IN ('cover','toc')) AS kp_count
-       FROM handout_lectures
+              (SELECT count(*)::int FROM jsonb_array_elements(blocks) p WHERE p->>'name' NOT IN ('cover','toc')) AS kp_count,
+              (EXISTS (SELECT 1 FROM handout_lecture_notes n WHERE n.lecture_id = hl.id AND n.content <> '')) AS has_notes,
+              (lecture_script IS NOT NULL AND jsonb_array_length(lecture_script) > 0) AS has_script
+       FROM handout_lectures hl
        WHERE ${where}
        ORDER BY created_at DESC
        LIMIT $${params.length - 1} OFFSET $${params.length}`,

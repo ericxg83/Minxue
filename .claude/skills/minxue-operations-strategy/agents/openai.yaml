@@ -1,0 +1,7 @@
+﻿interface:
+  display_name: "敏学晚托运营策略"
+  short_description: "围绕晚托招生、转化、续费与增长做真实业务诊断"
+  default_prompt: "使用 $minxue-operations-strategy 分析这个敏学晚托班运营问题，先判断增长漏斗环节，再结合真实业务和敏学能力给出最小测试与验证指标。"
+
+policy:
+  allow_implicit_invocation: true

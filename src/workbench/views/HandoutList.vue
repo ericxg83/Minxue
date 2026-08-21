@@ -69,7 +69,9 @@
           <span class="card-title">{{ lec.title }}</span>
           <el-tag v-if="lec.subject" size="small" :type="subjectTagType(lec.subject)" effect="plain">{{ lec.subject }}</el-tag>
         </div>
-        <div class="card-period" v-if="lec.period_text">{{ lec.period_text }}</div>
+        <div class="card-period" v-if="lec.period_text">
+          <el-icon><Clock /></el-icon> {{ lec.period_text }}
+        </div>
         <div class="card-meta">
           <span class="meta-item">
             <el-icon><Document /></el-icon> {{ lec.kp_count || 0 }} 知识点
@@ -77,8 +79,11 @@
           <span class="meta-item">
             <el-icon><Files /></el-icon> {{ lec.page_count || 0 }} 页
           </span>
+          <el-tag v-if="templateLabel(lec.template)" size="small" type="info" effect="plain" class="template-tag">{{ templateLabel(lec.template) }}</el-tag>
+          <el-tag v-if="lec.has_notes" size="small" type="success" effect="plain">📝 有笔记</el-tag>
+          <el-tag v-if="lec.has_script" size="small" type="warning" effect="plain">🎙️ 有提词器</el-tag>
         </div>
-        <div class="card-time">{{ formatTime(lec.updated_at || lec.created_at) }}</div>
+        <div class="card-time">上次维护 {{ formatTime(lec.updated_at || lec.created_at) }}</div>
         <div class="card-actions" @click.stop>
           <el-button size="small" text type="primary" :icon="Edit" @click="openLecture(lec)">打开</el-button>
           <el-button size="small" text :icon="CopyDocument" @click="duplicate(lec)">复制</el-button>
@@ -93,7 +98,7 @@
 import { ref, onMounted, watch } from 'vue'
 import { useRouter } from 'vue-router'
 import { ElMessage, ElMessageBox } from 'element-plus'
-import { EditPen, Search, Document, Files, Edit, CopyDocument, Delete, Brush } from '@element-plus/icons-vue'
+import { EditPen, Search, Document, Files, Edit, CopyDocument, Delete, Brush, Clock } from '@element-plus/icons-vue'
 import { apiRequest } from '../../services/apiService'
 
 const router = useRouter()
@@ -115,6 +120,15 @@ function formatTime(t) {
 function subjectTagType(s) {
   const map = { 数学: 'primary', 英语: 'success', 语文: 'warning', 物理: 'info', 化学: 'danger', 生物: '' }
   return map[s] || 'info'
+}
+
+function templateLabel(t) {
+  const map = {
+    lecture_prep: '备课讲义',
+    classroom_projection: '投屏备课讲义',
+    english_lecture_prep: '英语备课讲义',
+  }
+  return map[t] || ''
 }
 
 async function loadList() {
@@ -299,6 +313,7 @@ onMounted(loadList)
   margin-bottom: 8px;
 }
 .meta-item { display: flex; align-items: center; gap: 4px; }
+.template-tag { margin-left: 4px; }
 .card-time {
   font-size: 11px;
   color: #C9CDD4;

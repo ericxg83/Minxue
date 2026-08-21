@@ -14,8 +14,22 @@
         <el-tag v-else-if="handout && dirty" size="small" type="warning" effect="plain" class="template-tag">
           未保存
         </el-tag>
+        <el-tag v-if="sourceSummary.subject" size="small" type="info" effect="plain" class="template-tag">
+          来源：{{ sourceSummary.subject }}{{ sourceSummary.period ? ' · ' + sourceSummary.period : '' }}{{ sourceSummary.total ? ' · ' + sourceSummary.total + ' 道错题' : '' }}
+        </el-tag>
       </div>
       <div class="toolbar-right">
+        <!-- 目录跳转 -->
+        <el-select
+          v-model="pageJumpIndex"
+          @change="gotoPage"
+          size="small"
+          clearable
+          placeholder="📑 跳转目录"
+          style="width: 170px;"
+        >
+          <el-option v-for="(p, i) in (handout?.pages || [])" :key="i" :value="i" :label="pageLabel(p, i)" />
+        </el-select>
         <!-- 模板下拉 -->
         <el-select
           v-model="selectedTemplate"
@@ -49,6 +63,7 @@
           <el-icon><Download /></el-icon> 导出 Word
         </el-button>
         <el-button @click="handlePrint"><el-icon><Printer /></el-icon> 打印</el-button>
+        <el-button type="primary" plain :disabled="!handout" @click="enterPresentMode">课堂展示</el-button>
       </div>
     </div>
 
@@ -64,7 +79,7 @@
 
     <!-- 讲义内容 -->
     <div v-else class="handout-content" ref="handoutContentRef">
-      <div v-for="(page, pIdx) in handout.pages" :key="pIdx" class="handout-page">
+      <div v-for="(page, pIdx) in handout.pages" :key="pIdx" :ref="el => setPageRef(pIdx, el)" class="handout-page">
         <!-- 封面 -->
         <template v-if="page.name === 'cover'">
           <div class="handout-cover">
@@ -433,6 +448,271 @@
         </el-button>
       </template>
     </el-dialog>
+
+    <!-- 课堂展示模式（只读全屏） -->
+    <transition name="present-fade">
+      <div v-if="presentMode" class="present-overlay">
+        <!-- 顶栏 -->
+        <div class="present-topbar">
+          <div class="present-brand">敏学 · 课堂展示</div>
+          <div class="present-kp">{{ presentTitle }}</div>
+          <div class="present-counter">第 {{ presentIndex + 1 }} / {{ pagesCount }} 页</div>
+          <div class="present-toolbar">
+            <el-button size="small" @click="handlePrint">
+              <el-icon><Printer /></el-icon> 打印
+            </el-button>
+            <el-button size="small" type="danger" plain @click="exitPresentMode">退出展示</el-button>
+          </div>
+        </div>
+
+        <!-- 舞台：一次只展示一页 -->
+        <div class="present-stage">
+          <div class="present-page" v-if="presentPage">
+            <template v-if="presentPage.name === 'cover'">
+              <div class="present-cover">
+                <div class="present-cover-label">敏学 · 课堂展示</div>
+                <h1 class="present-cover-title">{{ getBlockContent(presentPage.blocks, 'cover-title') }}</h1>
+                <div class="present-cover-divider"></div>
+                <div class="present-cover-info">{{ getBlockContent(presentPage.blocks, 'cover-subtitle') }}</div>
+                <div v-for="(b, i) in presentPage.blocks.filter(x => x.type === 'cover-info')" :key="'ci' + i" class="present-cover-info">{{ b.content }}</div>
+                <div class="present-cover-date">{{ getBlockContent(presentPage.blocks, 'cover-date') }}</div>
+              </div>
+            </template>
+
+            <template v-else-if="presentPage.name === 'toc'">
+              <div class="present-toc">
+                <div class="present-page-header">
+                  <span>{{ handout?.subject || '教学讲义' }}</span>
+                  <span class="present-page-header-sep">·</span>
+                  <span>目录</span>
+                </div>
+                <h1 class="present-page-title">📖 目录</h1>
+                <div class="present-toc-list">
+                  <div v-for="(b, i) in presentPage.blocks.filter(x => x.type === 'toc-item')" :key="i" class="present-toc-item">
+                    <span class="present-toc-num">{{ i + 1 }}</span>
+                    <span>{{ b.content }}</span>
+                  </div>
+                </div>
+              </div>
+            </template>
+
+            <template v-else>
+              <div class="present-page-header">
+                <span>{{ handout?.subject || '' }}</span>
+                <span class="present-page-header-sep">·</span>
+                <span>{{ presentSectionName }}</span>
+              </div>
+              <h1 class="present-page-title">{{ presentPage.name }}</h1>
+              <div v-for="(block, bi) in presentBlocks" :key="bi" class="handout-block">
+    <!-- 知识点速览 -->
+                <div v-if="block.type === 'kp-overview'" class="block-kp-overview" v-html="renderMarkdown(block.content)"></div>
+                <div v-else-if="block.type === 'kp-overview-en'" class="block-kp-overview-en" v-html="renderMarkdown(block.content)"></div>
+
+                <!-- 小标题 -->
+                <div v-else-if="block.type === 'section'" class="block-section">{{ block.content }}</div>
+
+                <!-- 题型小标题 -->
+                <div v-else-if="block.type === 'type-section'" class="block-type-section">
+                  <span class="type-section-num">{{ presentBlockIndex(bi) }}</span>
+                  <span>{{ block.content }}</span>
+                </div>
+
+                <!-- 错题 -->
+                <div v-else-if="block.type === 'question'" class="block-question">
+                  <div class="question-header">
+                    <span v-if="block.questionType" class="question-qtype">{{ block.questionType }}</span>
+                  </div>
+                  <div class="question-content" v-html="renderMath(block.content)"></div>
+                  <div v-if="block.imageUrls?.length" class="question-images">
+                    <el-image
+                      v-for="(img, iIdx) in block.imageUrls"
+                      :key="iIdx"
+                      :src="img"
+                      :zoom-rate="1.2"
+                      :max-scale="7"
+                      :min-scale="0.5"
+                      :preview-src-list="block.imageUrls"
+                      :initial-index="iIdx"
+                      fit="contain"
+                      class="question-image"
+                      loading="lazy"
+                    >
+                      <template #error>
+                        <div class="image-error">📷 加载失败</div>
+                      </template>
+                    </el-image>
+                  </div>
+                  <div v-if="block.options?.length" class="question-options">
+                    <div v-for="(opt, oIdx) in block.options" :key="oIdx" class="option-item">
+                      {{ String.fromCharCode(65 + oIdx) }}. {{ opt }}
+                    </div>
+                  </div>
+                </div>
+
+                <!-- 答案 -->
+                <div v-else-if="block.type === 'answer'" class="block-answer">
+                  <span class="answer-label">学生作答：</span>
+                  <span class="answer-value">{{ block.content }}</span>
+                  <span class="answer-correct">正确答案：{{ block.correctAnswer }}</span>
+                </div>
+
+                <!-- 错因分析 -->
+                <div v-else-if="block.type === 'analysis'" class="block-analysis">
+                  <span class="analysis-label">错因分析：</span>
+                  {{ block.content }}
+                </div>
+
+                <!-- 讲解引导 -->
+                <div v-else-if="block.type === 'lecture-guidance'" class="block-guidance" v-html="renderMarkdown(block.content)"></div>
+
+                <!-- 相关知识点 -->
+                <div v-else-if="block.type === 'related-kp'" class="block-related-kp">
+                  <span class="related-kp-label">🔗 相关知识点：</span>
+                  <span v-if="!block.content?.length" class="related-kp-empty">暂无</span>
+                  <el-tag v-for="(rk, rkIdx) in block.content" :key="rkIdx" size="small" type="info" effect="plain" class="related-kp-tag">{{ rk }}</el-tag>
+                </div>
+
+                <!-- 题型归纳 -->
+                <div v-else-if="block.type === 'type-summary'" class="block-type-summary">
+                  <div v-if="!block.content || block.content.length === 0" class="type-summary-empty">*（题型归纳暂不可用）*</div>
+                  <div v-else class="type-summary-list">
+                    <div v-for="(t, tIdx) in block.content" :key="tIdx" class="type-summary-item">
+                      <div class="type-summary-header">
+                        <span class="type-summary-num">{{ tIdx + 1 }}</span>
+                        <span class="type-summary-type">{{ t.type }}</span>
+                      </div>
+                      <div v-if="t.description" class="type-summary-desc">
+                        <span class="type-summary-label">怎么考：</span>{{ t.description }}
+                      </div>
+                      <div v-if="t.example" class="type-summary-example">
+                        <span class="type-summary-label">典型例：</span>{{ t.example }}
+                      </div>
+                      <div v-if="t.tip" class="type-summary-tip">
+                        <span class="type-summary-label">应对：</span>{{ t.tip }}
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              <!-- 知识点标题 -->
+                <div v-else-if="block.type === 'kp-section'" class="block-kp-section">{{ block.content }}</div>
+
+                <!-- 核心定义 -->
+                <div v-else-if="block.type === 'kp-definition'" class="block-kp-definition">
+                  <div class="kp-label">核心定义</div>
+                  <div class="kp-text" v-html="renderMarkdown(block.content)"></div>
+                </div>
+
+                <!-- 重点内容 -->
+                <div v-else-if="block.type === 'kp-key-points'" class="block-kp-key-points">
+                  <div class="kp-label kp-label-key">重点</div>
+                  <ul class="kp-list">
+                    <li v-for="(p, pi) in (Array.isArray(block.content) ? block.content : [block.content])" :key="pi" v-html="renderMarkdown(p)"></li>
+                  </ul>
+                </div>
+
+                <!-- 难点内容 -->
+                <div v-else-if="block.type === 'kp-difficult-points'" class="block-kp-difficult-points">
+                  <div class="kp-label kp-label-difficult">难点</div>
+                  <ul class="kp-list">
+                    <li v-for="(p, pi) in (Array.isArray(block.content) ? block.content : [block.content])" :key="pi" v-html="renderMarkdown(p)"></li>
+                  </ul>
+                </div>
+
+                <!-- 易错点 -->
+                <div v-else-if="block.type === 'kp-mistakes'" class="block-kp-mistakes">
+                  <div class="kp-label kp-label-mistake">易错警示</div>
+                  <ul class="kp-list">
+                    <li v-for="(m, mi) in (Array.isArray(block.content) ? block.content : [block.content])" :key="mi" v-html="renderMarkdown(m)"></li>
+                  </ul>
+                </div>
+
+                <!-- 记忆口诀 -->
+                <div v-else-if="block.type === 'kp-mnemonic'" class="block-kp-mnemonic">
+                  <div class="kp-label">记忆口诀</div>
+                  <div class="kp-mnemonic-text" v-html="renderMarkdown(block.content)"></div>
+                </div>
+
+                <!-- 对比卡片（学生作答 vs 正确答案） -->
+                <div v-else-if="block.type === 'compare-card'" class="block-compare-card">
+                  <div class="compare-grid">
+                    <div class="compare-side compare-student">
+                      <div class="compare-header">✍️ {{ block.content.studentName || '学生' }}作答</div>
+                      <div class="compare-body">{{ block.content.studentAnswer }}</div>
+                    </div>
+                    <div class="compare-vs">VS</div>
+                    <div class="compare-side compare-correct">
+                      <div class="compare-header">✅ 正确答案</div>
+                      <div class="compare-body">{{ block.content.correctAnswer }}</div>
+                    </div>
+                  </div>
+                </div>
+
+                <!-- 分步作答过程 -->
+                <div v-else-if="block.type === 'solution-steps'" class="block-solution-steps">
+                  <div class="solution-title">📝 完整作答过程</div>
+                  <div v-for="(step, si) in block.content" :key="si" class="solution-step">
+                    <div class="solution-step-num">{{ step.step }}</div>
+                    <div class="solution-step-body">
+                      <div class="solution-step-text">{{ step.text }}</div>
+                      <div v-if="step.formula" class="solution-step-formula" v-html="renderMath(step.formula)"></div>
+                    </div>
+                  </div>
+                </div>
+              <!-- 时间建议 -->
+                <div v-else-if="block.type === 'time-hint'" class="block-time-hint">
+                  <span class="time-hint-icon">⏱️</span>
+                  <span class="time-hint-text">{{ block.content }}</span>
+                </div>
+
+                <!-- 错因简析 -->
+                <div v-else-if="block.type === 'error-cause'" class="block-error-cause">
+                  <span class="error-cause-tag">错因</span>
+                  <span>{{ block.content }}</span>
+                </div>
+
+                <!-- 典型例题 -->
+                <div v-else-if="block.type === 'type-example'" class="block-type-example">
+                  <span class="type-example-label">例题</span>
+                  <span v-html="renderMarkdown(block.content)"></span>
+                </div>
+
+                <!-- 关键技巧 -->
+                <div v-else-if="block.type === 'type-tip'" class="block-type-tip">
+                  <span class="type-tip-label">技巧</span>
+                  <span v-html="renderMarkdown(block.content)"></span>
+                </div>
+
+                <!-- 教育分隔线 -->
+                <div v-else-if="block.type === 'edu-divider'" class="block-edu-divider"></div>
+
+                <!-- 教育提示卡片 -->
+                <div v-else-if="block.type === 'edu-note'" class="block-edu-note">
+                  <span class="edu-note-icon">💡</span>
+                  <span class="edu-note-text">{{ block.content }}</span>
+                </div>
+
+                <!-- 讲解（旧结构兼容） -->
+                <div v-else-if="block.type === 'explanation'" class="block-explanation" v-html="renderMarkdown(block.content)"></div>
+
+                <!-- 普通文本 -->
+                <div v-else-if="block.type === 'text'" class="block-text" v-html="renderMarkdown(block.content)"></div>
+              </div>
+
+              <div class="present-page-footer">敏学 · 课堂展示 | 第 {{ presentIndex + 1 }} 页</div>
+            </template>
+          </div>
+        </div>
+
+        <!-- 底栏：翻页 / 跳转目录 -->
+        <div class="present-bottombar">
+          <el-button size="large" :disabled="presentIndex === 0" @click="prevPresentPage">← 上一页</el-button>
+          <el-select size="large" v-model="presentIndex" placeholder="跳转目录" style="width: 220px">
+            <el-option v-for="(p, i) in (handout?.pages || [])" :key="i" :value="i" :label="pageLabel(p, i)" />
+          </el-select>
+          <el-button size="large" type="primary" :disabled="presentIndex >= pagesCount - 1" @click="nextPresentPage">下一页 →</el-button>
+        </div>
+      </div>
+    </transition>
   </div>
 </template>
 
@@ -476,6 +756,86 @@ const knowledgeTree = ref([])
 const knowledgeLoading = ref(false)
 const knowledgeGenerating = ref(false)
 const knowledgeTreeRef = ref(null)
+
+// ── 课堂展示模式（P0：只读全屏，不修改讲义数据）──
+const presentMode = ref(false)   // 默认备课模式；切换展示时置 true
+const presentIndex = ref(0)
+// 展示模式下隐藏"备课/诊断"私有块（统计、笔记、提词器）
+const PRESENT_HIDE_TYPES = ['kp-stats', 'note', 'lecture-script']
+const pagesCount = computed(() => handout.value?.pages?.length || 0)
+const presentPage = computed(() => handout.value?.pages?.[presentIndex.value] ?? null)
+const presentBlocks = computed(() => {
+  const page = presentPage.value
+  if (!page || !Array.isArray(page.blocks)) return []
+  return page.blocks.filter(b => !PRESENT_HIDE_TYPES.includes(b.type))
+})
+const presentTitle = computed(() => {
+  const p = presentPage.value
+  if (!p) return ''
+  if (p.name === 'cover') return handout.value?.title || '封面'
+  return p.name
+})
+// 知识点页名：去掉"· 知识点精讲"等后缀，保留短标题用于页眉
+const presentSectionName = computed(() => {
+  const p = presentPage.value
+  if (!p || p.name === 'cover' || p.name === 'toc') return ''
+  const seg = String(p.name).split('·')[0]?.trim()
+  return seg || p.name
+})
+function presentBlockIndex(bi) {
+  // 用于题型小节编号（展示顺序）
+  return bi + 1
+}
+function pageLabel(p, i) {
+  const name = p?.name || ''
+  if (name === 'cover') return '封面'
+  if (name === 'toc') return '目录'
+  return name
+}
+function enterPresentMode() {
+  if (!handout.value?.pages?.length) {
+    ElMessage.warning('暂无讲义数据')
+    return
+  }
+  presentIndex.value = 0
+  presentMode.value = true
+  if (typeof window !== 'undefined') window.addEventListener('keydown', onPresentKeydown)
+}
+function exitPresentMode() {
+  presentMode.value = false
+  if (typeof window !== 'undefined') window.removeEventListener('keydown', onPresentKeydown)
+}
+function nextPresentPage() {
+  if (presentIndex.value < pagesCount.value - 1) presentIndex.value += 1
+}
+function prevPresentPage() {
+  if (presentIndex.value > 0) presentIndex.value -= 1
+}
+function onPresentKeydown(e) {
+  if (!presentMode.value) return
+  if (e.key === 'Escape') { e.preventDefault(); exitPresentMode(); return }
+  if (e.key === 'ArrowRight' || e.key === 'PageDown' || e.key === ' ') { e.preventDefault(); nextPresentPage(); return }
+  if (e.key === 'ArrowLeft' || e.key === 'PageUp') { e.preventDefault(); prevPresentPage(); return }
+}
+
+// ── 备课模式：目录跳转 + 生成来源摘要（P1）──
+const pageJumpIndex = ref(null)
+const pageRefs = []
+function setPageRef(idx, el) { pageRefs[idx] = el }
+function gotoPage(idx) {
+  if (idx == null) return
+  const el = pageRefs[idx]
+  if (el) el.scrollIntoView({ behavior: 'smooth', block: 'start' })
+  pageJumpIndex.value = null
+}
+const sourceSummary = computed(() => {
+  const h = handout.value
+  const subject = h?.subject || currentSubject.value || ''
+  const period = h?.periodText || ''
+  const diag = Array.isArray(h?.baseDiagnosis) ? h.baseDiagnosis : []
+  const total = diag.reduce((acc, d) => acc + (Number(d.total) || 0), 0)
+  return { subject, period, total }
+})
 
 
 // 英语题型标签映射
@@ -927,6 +1287,7 @@ onMounted(async () => {
 
 onBeforeUnmount(() => {
   if (noteSaveTimer) clearTimeout(noteSaveTimer)
+  if (typeof window !== 'undefined') window.removeEventListener('keydown', onPresentKeydown)
 })
 
 async function loadFromDiagnosis() {
@@ -1969,4 +2330,227 @@ async function loadFromDiagnosis() {
   font-size: 14px;
   color: #047857;
 }
+/* ── 课堂展示模式（只读全屏）── */
+.present-overlay {
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  z-index: 9997;
+  display: flex;
+  flex-direction: column;
+  background: radial-gradient(circle at 50% 0%, #101828 0%, #0a101d 70%);
+  overflow: hidden;
+}
+.present-topbar {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 10px 20px;
+  background: rgba(15, 23, 42, 0.94);
+  border-bottom: 1px solid #1E293B;
+  flex-shrink: 0;
+}
+.present-brand {
+  font-size: 15px;
+  font-weight: 700;
+  color: #A5B4FC;
+  letter-spacing: 1px;
+  flex-shrink: 0;
+}
+.present-kp {
+  font-size: 15px;
+  color: #E5E7EB;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  min-width: 0;
+}
+.present-counter {
+  font-size: 14px;
+  color: #94A3B8;
+  white-space: nowrap;
+}
+.present-toolbar {
+  display: flex;
+  gap: 8px;
+}
+.present-stage {
+  flex: 1;
+  overflow: auto;
+  display: flex;
+  justify-content: center;
+  align-items: flex-start;
+  padding: 20px 24px;
+}
+.present-page {
+  width: 100%;
+  max-width: 1280px;
+  min-height: calc(100vh - 170px);
+  background: #ffffff;
+  border-radius: 14px;
+  box-shadow: 0 18px 40px rgba(15, 23, 42, 0.55);
+  padding: 56px 68px;
+  color: #1F2937;
+}
+.present-page-header {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 6px 0 10px 16px;
+  border-left: 14px solid #6366F1;
+  border-bottom: 1px solid #EEF2FF;
+  font-size: 14px;
+  color: #6B7280;
+}
+.present-page-header-sep { color: #94A3B8; }
+.present-page-title {
+  font-size: 38px;
+  font-weight: 800;
+  color: #1E1B4B;
+  margin: 20px 0 26px;
+  border-bottom: 3px solid #6366F1;
+  padding-bottom: 10px;
+  line-height: 1.3;
+}
+.present-page-footer {
+  margin-top: 28px;
+  text-align: right;
+  font-size: 13px;
+  color: #94A3B8;
+  border-top: 1px solid #F1F5F9;
+  padding-top: 12px;
+}
+.present-cover {
+  min-height: calc(100vh - 320px);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 18px;
+  text-align: center;
+}
+.present-cover-label {
+  font-size: 20px;
+  letter-spacing: 6px;
+  color: #6366F1;
+  font-weight: 600;
+  border: 1px solid #C7D2FE;
+  background: #EEF2FF;
+  padding: 6px 22px;
+  border-radius: 999px;
+}
+.present-cover-title {
+  font-size: 52px;
+  font-weight: 800;
+  color: #1E1B4B;
+  line-height: 1.3;
+}
+.present-cover-divider {
+  width: 80px;
+  height: 4px;
+  background: #6366F1;
+  border-radius: 2px;
+}
+.present-cover-info {
+  font-size: 22px;
+  color: #4E5969;
+  line-height: 1.8;
+}
+.present-cover-date {
+  font-size: 18px;
+  color: #86909C;
+}
+.present-toc { padding: 40px 20px; }
+.present-toc-list { margin-top: 26px; }
+.present-toc-item {
+  display: flex;
+  align-items: center;
+  gap: 18px;
+  padding: 18px 16px;
+  margin-bottom: 8px;
+  font-size: 24px;
+  color: #1F2937;
+  border-bottom: 1px dashed #E2E8F0;
+}
+.present-toc-num {
+  display: inline-flex;
+  width: 40px;
+  height: 40px;
+  align-items: center;
+  justify-content: center;
+  background: #EEF2FF;
+  color: #4F46E5;
+  border-radius: 50%;
+  font-weight: 700;
+  flex-shrink: 0;
+}
+.present-bottombar {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 14px;
+  padding: 12px 16px;
+  flex-shrink: 0;
+  background: rgba(15, 23, 42, 0.96);
+  border-top: 1px solid #1E293B;
+}
+
+/* 展示模式内正文放大字号 */
+.present-page .block-section { font-size: 30px; }
+.present-page .block-type-section { font-size: 30px; }
+.present-page .block-kp-section { font-size: 34px; }
+.present-page .block-kp-overview,
+.present-page .block-kp-overview-en { font-size: 22px; line-height: 1.8; }
+.present-page .block-kp-definition,
+.present-page .block-kp-key-points,
+.present-page .block-kp-difficult-points,
+.present-page .block-kp-mistakes { font-size: 22px; }
+.present-page .block-kp-mnemonic { font-size: 22px; }
+.present-page .kp-label { font-size: 22px; }
+.present-page .kp-text,
+.present-page .kp-mnemonic-text { font-size: 22px; line-height: 1.8; }
+.present-page .kp-list { font-size: 22px; line-height: 1.7; }
+.present-page .question-content { font-size: 24px; line-height: 1.7; }
+.present-page .option-item { font-size: 20px; }
+.present-page .question-qtype { font-size: 16px; }
+.present-page .block-answer,
+.present-page .answer-value,
+.present-page .answer-correct { font-size: 22px; }
+.present-page .analysis-label,
+.present-page .block-analysis { font-size: 22px; }
+.present-page .block-guidance { font-size: 22px; line-height: 1.8; }
+.present-page .block-related-kp { font-size: 22px; }
+.present-page .type-summary-item { font-size: 20px; }
+.present-page .type-summary-desc,
+.present-page .type-summary-example,
+.present-page .type-summary-tip,
+.present-page .type-summary-label { font-size: 20px; }
+.present-page .compare-header { font-size: 20px; }
+.present-page .compare-side,
+.present-page .compare-body { font-size: 22px; line-height: 1.7; }
+.present-page .solution-step-text,
+.present-page .solution-step-formula { font-size: 22px; }
+.present-page .solution-title { font-size: 24px; }
+.present-page .time-hint-icon,
+.present-page .time-hint-text { font-size: 20px; }
+.present-page .error-cause-tag,
+.present-page .block-error-cause { font-size: 20px; }
+.present-page .type-example-label,
+.present-page .block-type-example,
+.present-page .type-tip-label,
+.present-page .block-type-tip { font-size: 20px; }
+.present-page .block-edu-note,
+.present-page .edu-note-icon,
+.present-page .edu-note-text { font-size: 20px; }
+.present-page .block-text,
+.present-page .block-explanation { font-size: 22px; line-height: 1.8; }
+.present-page .question-image { max-height: 420px; }
+
+/* 淡入淡出 */
+.present-fade-enter-active,
+.present-fade-leave-active { transition: opacity 0.25s ease; }
+.present-fade-enter-from,
+.present-fade-leave-to { opacity: 0; }
 </style>
