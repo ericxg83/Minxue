@@ -9,19 +9,32 @@
       </div>
     </div>
 
-    <div class="top-navbar__center">
+    <nav class="top-navbar__center" aria-label="主导航">
       <div
         v-for="item in navItems"
         :key="item.key"
         class="nav-item"
-        :class="{ 'nav-item--active': isActive(item), 'nav-item--disabled': item.disabled }"
+        :class="{ 'nav-item--active': isActive(item), 'nav-item--group': item.children }"
         @click="handleNavClick(item)"
       >
         <el-icon class="nav-item__icon"><component :is="item.icon" /></el-icon>
         <span class="nav-item__text">{{ item.label }}</span>
-        <span v-if="item.disabled" class="dev-badge">开发中</span>
+        <el-icon v-if="item.children" class="nav-item__arrow"><ArrowDown /></el-icon>
+        <div v-if="item.children" class="nav-menu" @click.stop>
+          <button
+            v-for="child in item.children"
+            :key="child.key"
+            type="button"
+            class="nav-menu__item"
+            :class="{ 'nav-menu__item--active': isActive(child) }"
+            @click="handleNavClick(child)"
+          >
+            <el-icon><component :is="child.icon" /></el-icon>
+            <span>{{ child.label }}</span>
+          </button>
+        </div>
       </div>
-    </div>
+    </nav>
 
     <div class="top-navbar__right">
       <div id="bell-btn" class="header-icon-btn" title="通知" @click.stop="toggleNotifications">
@@ -53,7 +66,7 @@ import { computed, ref, onMounted, onUnmounted } from 'vue'
 import { useRouter, useRoute } from 'vue-router'
 import {
   Bell, QuestionFilled, ArrowDown,
-  DocumentChecked, Collection, Clock, UploadFilled, DataAnalysis, Notebook
+  DocumentChecked, Collection, Clock, DataAnalysis, Notebook, Reading, HomeFilled
 } from '@element-plus/icons-vue'
 import { useNotificationStore } from '../../stores/notificationStore'
 import NotificationList from './NotificationList.vue'
@@ -94,24 +107,36 @@ onUnmounted(() => {
 })
 
 const navItems = [
-  { key: 'dashboard',      label: '工作台',   path: '/',                icon: 'HomeFilled' },
-  { key: 'review',         label: '作业批改', path: '/review',          icon: 'DocumentChecked' },
-  { key: 'wrong-book',     label: '错题本',   path: '/wrongbook',       icon: 'Collection' },
-  { key: 'worksheets',     label: '练习册管理', path: '/worksheets',    icon: 'Notebook' },
-  { key: 'exam-history',   label: '重练批改', path: '/exam-history',    icon: 'Clock' },
-  { key: 'weekly-report',  label: '诊断报告', path: '/weekly-report',   icon: 'DataAnalysis' },
-  { key: 'handout',        label: '讲义预览', path: '/handout',         icon: 'Reading' },
-  { key: 'handouts',       label: '我的讲义', path: '/handouts',        icon: 'Notebook' },
-  { key: 'exam-import',    label: '试卷入库', path: '/paper',           icon: 'UploadFilled', disabled: true },
+  { key: 'dashboard', label: '工作台', path: '/', icon: 'HomeFilled' },
+  {
+    key: 'teaching', label: '批改作业', icon: 'DocumentChecked', children: [
+      { key: 'review', label: '作业批改', path: '/review', icon: 'DocumentChecked' },
+      { key: 'exam-history', label: '重练批改', path: '/exam-history', icon: 'Clock' }
+    ]
+  },
+  {
+    key: 'learning', label: '学生学习', icon: 'Collection', children: [
+      { key: 'weekly-report', label: '学习诊断', path: '/weekly-report', icon: 'DataAnalysis' },
+      { key: 'wrong-book', label: '错题', path: '/wrongbook', icon: 'Collection' },
+      { key: 'growth', label: '成长报告', path: '/growth', icon: 'DataAnalysis' }
+    ]
+  },
+  {
+    key: 'resources', label: '教学资源', icon: 'Notebook', children: [
+      { key: 'handouts', label: '我的讲义', path: '/handouts', icon: 'Reading' },
+      { key: 'worksheets', label: '练习册', path: '/worksheets', icon: 'Notebook' },
+      { key: 'question-bank', label: '题库', path: '/question-bank', icon: 'Collection' }
+    ]
+  }
 ]
-
 const isActive = (item) => {
   if (item.path === '/') return route.path === '/'
-  return route.path.startsWith(item.path)
+  if (item.path) return route.path.startsWith(item.path)
+  return item.children?.some(child => isActive(child)) ?? false
 }
 
 const handleNavClick = (item) => {
-  if (item.disabled) return
+  if (item.children) return
   if (route.path !== item.path) {
     router.push(item.path)
   }

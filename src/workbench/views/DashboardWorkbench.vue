@@ -30,7 +30,7 @@
           <div class="stat-value">{{ notiStore.summary.todayNewWrongQuestions }}</div>
           <div class="stat-label">今日新增错题</div>
         </div>
-        <span class="stat-card__link">去错题本 ›</span>
+        <span class="stat-card__link">去错题 ›</span>
       </div>
 
       <div class="stat-card" @click="goExamHistory">
@@ -141,12 +141,10 @@ const greeting = computed(() => {
 const shortcuts = [
   { key: 'review', label: '作业批改', path: '/review', icon: 'DocumentChecked', color: '#6366F1' },
   { key: 'retry', label: '重练批改', path: '/exam-history', icon: 'Clock', color: '#8B5CF6' },
-  { key: 'wrongbook', label: '错题本', path: '/wrongbook', icon: 'Collection', color: '#DC2626' },
-  { key: 'worksheet', label: '练习册管理', path: '/worksheets', icon: 'Notebook', color: '#059669' },
-  { key: 'diag', label: '诊断报告', path: '/weekly-report', icon: 'DataAnalysis', color: '#D97706' },
-  { key: 'handout', label: '讲义预览', path: '/handout', icon: 'Reading', color: '#4F46E5' },
+  { key: 'wrongbook', label: '错题', path: '/wrongbook', icon: 'Collection', color: '#DC2626' },
+  { key: 'worksheet', label: '练习册', path: '/worksheets', icon: 'Notebook', color: '#059669' },
+  { key: 'diag', label: '学习诊断', path: '/weekly-report', icon: 'DataAnalysis', color: '#D97706' },
   { key: 'handouts', label: '我的讲义', path: '/handouts', icon: 'Notebook', color: '#0EA5E9' },
-  { key: 'paper', label: '试卷入库', path: '/paper', icon: 'Download', color: '#94A3B8', disabled: true },
 ]
 
 const iconStyle = (color) => ({ background: color + '1A', color })
