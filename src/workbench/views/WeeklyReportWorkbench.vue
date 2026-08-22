@@ -156,6 +156,29 @@
           </div>
         </div>
 
+        <el-card class="teaching-summary-card" v-if="currentStudentDetail.stats">
+          <template #header>
+            <div class="card-header">
+              <span><el-icon><DataAnalysis /></el-icon> 本周教学判断</span>
+              <el-tag size="small" type="info" effect="plain">给老师的下一步</el-tag>
+            </div>
+          </template>
+          <div class="teaching-summary-grid">
+            <div class="teaching-summary-item">
+              <div class="teaching-summary-label">已经看到</div>
+              <div class="teaching-summary-value">{{ studentProgressText }}</div>
+            </div>
+            <div class="teaching-summary-item teaching-summary-item--focus">
+              <div class="teaching-summary-label">优先处理</div>
+              <div class="teaching-summary-value">{{ topWeakTags || '本周期暂无明确薄弱知识点，继续观察' }}</div>
+            </div>
+            <div class="teaching-summary-item">
+              <div class="teaching-summary-label">下一步验证</div>
+              <div class="teaching-summary-value">{{ nextActionText }}</div>
+            </div>
+          </div>
+        </el-card>
+
         <!-- 知识点诊断表 -->
         <el-card class="knowledge-card" v-if="currentStudentDetail.knowledgeDiagnosis?.length > 0">
           <template #header>
@@ -180,14 +203,9 @@
                 </el-tag>
               </template>
             </el-table-column>
-            <el-table-column label="掌握程度" min-width="160">
+            <el-table-column label="教学处理建议" min-width="190">
               <template #default="{ row }">
-                <el-progress
-                  :percentage="row.accuracy"
-                  :color="getAccuracyColor(row.accuracy)"
-                  :stroke-width="12"
-                  :text-inside="true"
-                />
+                <span class="diagnosis-action">{{ getDiagnosisAction(row) }}</span>
               </template>
             </el-table-column>
           </el-table>
@@ -866,9 +884,35 @@ function getStatusLabel(status) {
 
 const topWeakTags = computed(() => {
   if (!currentStudentDetail.value?.knowledgeDiagnosis?.length) return ''
-  const top3 = currentStudentDetail.value.knowledgeDiagnosis.slice(0, 3)
-  return top3.map(k => `「${k.tag}」正确率 ${k.accuracy}%`).join('；')
+  const top3 = [...currentStudentDetail.value.knowledgeDiagnosis]
+    .sort((a, b) => b.wrongCount - a.wrongCount || a.accuracy - b.accuracy)
+    .slice(0, 3)
+  return top3.map(k => `「${k.tag}」${k.wrongCount}次错误，正确率${k.accuracy}%`).join('；')
 })
+
+const studentProgressText = computed(() => {
+  const stats = currentStudentDetail.value?.stats
+  if (!stats) return '暂无足够数据'
+  if (stats.masteredCount > 0 && stats.pendingCount > 0) return `已有${stats.masteredCount}题完成掌握验证，仍有${stats.pendingCount}题需要继续跟进`
+  if (stats.masteredCount > 0) return `已有${stats.masteredCount}题完成掌握验证`
+  if (stats.pendingCount > 0) return `本周期记录${stats.pendingCount}题待提升错题，先处理高频问题`
+  return '本周期暂未形成可验证的错题掌握记录'
+})
+
+const nextActionText = computed(() => {
+  const diagnosis = currentStudentDetail.value?.knowledgeDiagnosis || []
+  if (!diagnosis.length) return '保持观察，出现重复错误后再安排针对训练'
+  const focus = [...diagnosis].sort((a, b) => b.wrongCount - a.wrongCount || a.accuracy - b.accuracy)[0]
+  if (focus.accuracy < 60) return `先讲清「${focus.tag}」的解题方法，再用相近变式独立复测`
+  if (focus.wrongCount >= 2) return `安排「${focus.tag}」错题重练，重点观察是否还需要提示`
+  return `安排「${focus.tag}」相近题复测，确认能否迁移`
+})
+
+function getDiagnosisAction(row) {
+  if (row.accuracy < 60 || row.wrongCount >= 3) return '优先讲解，次日重练'
+  if (row.accuracy < 80 || row.wrongCount >= 2) return '安排变式，观察独立完成'
+  return '暂不加题，后续复测巩固'
+}
 </script>
 
 <style scoped>
@@ -1054,7 +1098,8 @@ const topWeakTags = computed(() => {
 
 /* ── Cards ── */
 .knowledge-card,
-.warning-card {
+.warning-card,
+.teaching-summary-card {
   margin-top: 12px;
 }
 
@@ -1063,6 +1108,41 @@ const topWeakTags = computed(() => {
   align-items: center;
   gap: 6px;
   font-weight: 600;
+}
+
+.teaching-summary-card {
+  margin-top: 12px;
+}
+
+.teaching-summary-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 12px;
+}
+
+.teaching-summary-item {
+  padding: 12px;
+  background: var(--wb-bg);
+  border: 1px solid var(--wb-border-light);
+  border-radius: var(--wb-radius-sm);
+}
+
+.teaching-summary-item--focus {
+  background: var(--wb-warning-mist, #fffaf0);
+  border-color: var(--wb-warning-soft, #fde68a);
+}
+
+.teaching-summary-label {
+  color: var(--wb-text-tertiary);
+  font-size: 12px;
+  margin-bottom: 6px;
+}
+
+.teaching-summary-value,
+.diagnosis-action {
+  color: var(--wb-text);
+  font-size: 13px;
+  line-height: 1.6;
 }
 
 .warning-card__content {
@@ -1273,6 +1353,10 @@ const topWeakTags = computed(() => {
 
 /* ── Responsive ── */
 @media (max-width: 768px) {
+  .teaching-summary-grid {
+    grid-template-columns: 1fr;
+  }
+
   .top-bar {
     padding: 10px 12px;
   }

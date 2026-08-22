@@ -100,14 +100,30 @@ function buildTeacherComment(stats, weakestTag) {
 /** 学习建议（按薄弱学科自动生成） */
 function buildTeacherAdvice(subjectDiagnosis) {
   if (!subjectDiagnosis || subjectDiagnosis.length === 0) {
-    return '本周暂无明显薄弱知识点，建议保持练习节奏，适当拓展提高题型。'
+    return '本周暂无明确薄弱知识点，暂不增加题量，保持观察并在出现重复错误时安排针对训练。'
   }
   const tips = subjectDiagnosis.slice(0, 2).map(s => {
     const top = s.topTags && s.topTags[0]
-    if (top) return `${s.subject}重点加强「${top.tag}」类型题训练`
-    return `${s.subject}保持巩固练习`
+    if (!top) return `${s.subject}保持巩固练习`
+    if (top.accuracy < 60 || top.wrongCount >= 3) return `${s.subject}先讲清「${top.tag}」的方法，再安排次日重练`
+    if (top.wrongCount >= 2) return `${s.subject}安排「${top.tag}」相近变式，观察能否独立完成`
+    return `${s.subject}复测「${top.tag}」，确认是否能够迁移`
   })
-  return `建议周末${tips.join('，')}；多做变式练习，及时复盘错题，提升举一反三能力。`
+  return tips.join('；') + '。'
+}
+
+function buildTeachingSummary(stats, subjectDiagnosis) {
+  const focus = subjectDiagnosis?.flatMap(s => s.topTags || [])
+    .sort((a, b) => b.wrongCount - a.wrongCount || a.accuracy - b.accuracy)[0]
+  const seen = stats.masteredCount > 0
+    ? `已有 ${stats.masteredCount} 题完成掌握验证`
+    : stats.pendingCount > 0 ? `本周期记录 ${stats.pendingCount} 题待提升错题` : '本周期暂未形成可验证的掌握记录'
+  const action = !focus
+    ? '保持观察，出现重复错误后再安排针对训练'
+    : focus.accuracy < 60 || focus.wrongCount >= 3
+      ? `先讲解「${focus.tag}」，次日用相近变式独立复测`
+      : `安排「${focus.tag}」重练，观察是否还需要提示`
+  return { seen, focus: focus ? `「${focus.tag}」${focus.wrongCount}次错误，正确率${focus.accuracy}%` : '暂无明确薄弱知识点', action }
 }
 
 /** 内联 SVG 折线趋势图（本周每日正确率） */
@@ -196,6 +212,7 @@ function buildDiagnosisHTML(reportData) {
 
   const teacherComment = buildTeacherComment(stats, weakestTag)
   const teacherAdvice = buildTeacherAdvice(subjectDiagnosis)
+  const teachingSummary = buildTeachingSummary(stats, subjectDiagnosis)
 
   // 品牌 Logo Lockup
   const logoFull = renderLogo({ compact: false })
@@ -213,6 +230,7 @@ function buildDiagnosisHTML(reportData) {
         <td class="kt-c" style="color:${t.wrongCount >= 3 ? T.danger : T.text};font-weight:${t.wrongCount >= 3 ? 600 : 400}">${t.wrongCount}</td>
         <td class="kt-c">${t.ratio}%</td>
         <td class="kt-c"><span class="mastery" style="background:${ms.bg};color:${ms.color}">${t.masteryLabel}</span></td>
+        <td class="kt-action">${escapeHtml(t.accuracy < 60 || t.wrongCount >= 3 ? '优先讲解，次日重练' : t.wrongCount >= 2 ? '安排变式，观察独立完成' : '暂不加题，后续复测')}</td>
       </tr>`
     }).join('')
     const sAcc = s.accuracy != null ? s.accuracy : '—'
@@ -223,11 +241,11 @@ function buildDiagnosisHTML(reportData) {
         <div class="subj-acc">正确率：<b style="color:${sAccColor}">${sAcc}${s.accuracy != null ? '%' : ''}</b></div>
       </div>
       <table class="kt-table">
-        <thead><tr><th style="width:40%">知识点</th><th>错误次数</th><th>占比</th><th>掌握情况</th></tr></thead>
+        <thead><tr><th style="width:34%">知识点</th><th>错误次数</th><th>占比</th><th>掌握情况</th><th>下一步</th></tr></thead>
         <tbody>${rows}</tbody>
       </table>
     </div>`
-  }).join('') : `<div class="empty-state"><div class="empty-icon" style="font-size:32px;margin-bottom:8px">--</div><div>本周暂无薄弱知识点</div><div class="empty-sub" style="font-size:13px;color:${T.textTer};margin-top:6px">AI 将持续识别学习中的薄弱环节</div></div>`
+  }).join('') : `<div class="empty-state"><div class="empty-icon" style="font-size:32px;margin-bottom:8px">--</div><div>本周暂无薄弱知识点</div><div class="empty-sub" style="font-size:13px;color:${T.textTer};margin-top:6px">当前没有形成明确薄弱点，老师可继续观察后再安排训练</div></div>`
 
   return `<!DOCTYPE html>
 <html><head><meta charset="utf-8"><style>
@@ -302,6 +320,13 @@ function buildDiagnosisHTML(reportData) {
   .chart-card{background:#fff;border:1px solid ${T.border};border-radius:14px;padding:18px 16px 8px;margin-bottom:22px}
   .chart-card svg{display:block;width:100%;height:auto}
 
+  /* 教学判断卡 */
+  .teaching-summary{background:#fffaf0;border:1px solid #FDE68A;border-radius:14px;padding:16px 18px;margin-bottom:16px}
+  .summary-grid{display:grid;grid-template-columns:repeat(3,1fr);gap:12px}
+  .summary-grid>div{background:#fff;border:1px solid ${T.borderLight};border-radius:10px;padding:11px 12px}
+  .summary-label{font-size:11px;color:${T.textSec};margin-bottom:5px}
+  .summary-value{font-size:12px;color:${T.text};line-height:1.6}
+
   /* 寄语卡 */
   .comment{background:${T.primaryMist};border:1px solid ${T.primarySoft};border-radius:14px;padding:18px 20px;display:flex;gap:12px;align-items:flex-start}
   .comment-icon{flex-shrink:0;width:32px;height:32px;border-radius:10px;background:linear-gradient(135deg,${T.primary},${T.teal});display:flex;align-items:center;justify-content:center}
@@ -318,7 +343,7 @@ function buildDiagnosisHTML(reportData) {
   .kt-table th{background:${T.bg};padding:10px 12px;text-align:center;font-weight:600;color:${T.textSec};border-bottom:1px solid ${T.border}}
   .kt-table th:first-child{text-align:left;border-top-left-radius:8px;border-bottom-left-radius:8px}
   .kt-table th:last-child{border-top-right-radius:8px;border-bottom-right-radius:8px}
-  .kt-table td{padding:11px 12px;border-bottom:1px solid ${T.borderLight};color:${T.text}}
+  .kt-table td{padding:11px 12px;border-bottom:1px solid ${T.borderLight};color:${T.text}}\n  .kt-action{font-size:11px;color:${T.primaryDark};line-height:1.5}
   .kt-table tr:last-child td{border-bottom:none}
   .kt-tag{font-weight:500}
   .kt-tag-wrap{display:flex;align-items:center;gap:10px}
@@ -371,10 +396,10 @@ function buildDiagnosisHTML(reportData) {
       <div class="sec-title"><span class="sec-num">01</span>本周学习概览</div>
       <div class="sec-sub">整体表现速览</div>
 
-      <div class="sub-label">核心数据</div>
+      <div class="sub-label">本周学习概览</div>
       <div class="kpi-row">
         <div class="kpi"><div class="kpi-v">${stats.completedTasks}<span class="u">次</span></div><div class="kpi-l">完成作业</div></div>
-        <div class="kpi"><div class="kpi-v">${stats.totalQuestions}<span class="u">题</span></div><div class="kpi-l">AI 批改题量</div></div>
+        <div class="kpi"><div class="kpi-v">${stats.totalQuestions}<span class="u">题</span></div><div class="kpi-l">本周记录题量</div></div>
         <div class="kpi ring-kpi">
           <div class="ring"><div class="ring-t">${stats.accuracy}%</div></div>
           <div class="ring-side"><div class="rl">整体正确率</div><div class="rv">${stats.correctCount}/${stats.totalQuestions} 题</div></div>
@@ -389,6 +414,15 @@ function buildDiagnosisHTML(reportData) {
 
       <div class="sub-label">正确率趋势（本周）</div>
       <div class="chart-card">${renderTrendChart(dailyTrend.length ? dailyTrend : [])}</div>
+
+      <div class="teaching-summary">
+        <div class="sub-label">老师的教学判断</div>
+        <div class="summary-grid">
+          <div><div class="summary-label">已经看到</div><div class="summary-value">${escapeHtml(teachingSummary.seen)}</div></div>
+          <div><div class="summary-label">优先处理</div><div class="summary-value">${escapeHtml(teachingSummary.focus)}</div></div>
+          <div><div class="summary-label">下一步验证</div><div class="summary-value">${escapeHtml(teachingSummary.action)}</div></div>
+        </div>
+      </div>
 
       <div class="comment">
         <div class="comment-icon"><svg width="18" height="18" viewBox="0 0 24 24" fill="none"><path d="M4 5h16v11H8l-4 4V5z" stroke="#fff" stroke-width="2" stroke-linejoin="round"/></svg></div>
