@@ -46,7 +46,7 @@ export default function ExamPage({
   const totalQuestions = exams.reduce((total, exam) => total + getTotalQuestions(exam), 0)
 
   return (
-    <motion.div key="retry-page" initial={{ opacity: 0, x: 20 }} animate={{ opacity: 1, x: 0 }} exit={{ opacity: 0, x: -20 }} className="mx-auto w-full max-w-lg px-4 pb-8 pt-5">
+    <motion.div key="retry-page" initial={{ opacity: 0, x: 20 }} animate={{ opacity: 1, x: 0 }} exit={{ opacity: 0, x: -20 }} className="mobile-page mx-auto w-full max-w-lg px-4 pb-4 pt-4">
       <div className="mb-5 flex items-start justify-between"><div><p className="mb-1 text-[13px] font-medium" style={{ color: 'var(--text-secondary)' }}>训练验证</p><h1 className="text-[25px] font-semibold tracking-[-0.04em]" style={{ color: 'var(--text)' }}>重练卷</h1><p className="mt-1 text-[13px]" style={{ color: 'var(--text-secondary)' }}>跟进已安排的错题练习，看结果是否改善</p></div><div className="flex h-10 w-10 items-center justify-center rounded-xl" style={{ background: 'var(--primary-soft)', color: 'var(--primary)' }}><FileText size={19} /></div></div>
 
       <div className="mb-6 grid grid-cols-3 divide-x overflow-hidden rounded-2xl border" style={{ borderColor: 'var(--border-light)', background: 'var(--bg-card)' }}><SummaryItem value={pendingExams.length} label="待完成" tone={pendingExams.length ? 'var(--warning)' : 'var(--text)'} /><SummaryItem value={inProgressExams.length} label="处理中" tone={inProgressExams.length ? 'var(--primary)' : 'var(--text)'} /><SummaryItem value={completedExams.length} label="已完成" tone="var(--success)" /></div>

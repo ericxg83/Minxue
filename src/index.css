@@ -518,3 +518,20 @@ button {
   body [style*="font-size: var(--fs-24)"] { font-size: var(--fs-20) !important; }
   body [style*="font-size: var(--fs-20)"] { font-size: var(--fs-18) !important; }
 }
+/* Main mobile routes share the Home dashboard's compact work-surface rhythm. */
+@media (max-width: 499px) {
+  .mobile-page { padding-top: 16px !important; padding-bottom: 16px !important; }
+  .mobile-page > :first-child { margin-bottom: 14px !important; }
+  .mobile-page .mb-6 { margin-bottom: 16px !important; }
+  .mobile-page .mb-5 { margin-bottom: 14px !important; }
+  .mobile-page .mb-4 { margin-bottom: 12px !important; }
+  .mobile-page .mt-6 { margin-top: 16px !important; }
+  .mobile-page .mt-4 { margin-top: 12px !important; }
+  .mobile-page .py-4 { padding-top: 12px !important; padding-bottom: 12px !important; }
+  .mobile-page .py-3\.5 { padding-top: 10px !important; padding-bottom: 10px !important; }
+  .mobile-page .p-4 { padding: 12px !important; }
+  .mobile-page [role="tablist"] { padding: 3px !important; }
+  .mobile-page [role="tablist"] [role="tab"] { padding-top: 7px !important; padding-bottom: 7px !important; }
+  .mobile-page .empty-state { padding-top: 24px !important; padding-bottom: 24px !important; }
+  .mobile-page-wrongbook { padding-bottom: 128px !important; }
+}
