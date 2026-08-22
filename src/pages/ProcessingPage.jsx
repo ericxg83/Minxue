@@ -56,7 +56,7 @@ export default function ProcessingPage({
 
   return (
     <motion.div key="tasks-page" initial={{ opacity: 0, x: 16 }} animate={{ opacity: 1, x: 0 }} exit={{ opacity: 0, x: -16 }} className="mobile-page mx-auto w-full max-w-lg px-4 pb-4 pt-4">
-      <MobilePageHeader eyebrow="学习证据" title="作业" description="查看上传、批改和需要确认的任务" icon={UploadCloud} />
+      <MobilePageHeader title="作业" description={`${visibleTasks.length} 项任务`} icon={UploadCloud} />
 
       <MobileStatGrid items={[{ value: failedTasks.length, label: '需重试', color: failedTasks.length ? 'var(--danger)' : 'var(--text)' }, { value: processingTasks.length, label: '批改中', color: processingTasks.length ? 'var(--primary)' : 'var(--text)' }, { value: completedTasks.length, label: '已完成', color: 'var(--success)' }]} className="mb-4" />
 

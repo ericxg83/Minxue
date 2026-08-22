@@ -18,9 +18,9 @@ export function MobilePageHeader({ eyebrow, title, description, action, icon: Ic
   return (
     <header className="mobile-page-header mb-4 flex items-start justify-between">
       <div className="min-w-0">
-        {eyebrow && <p className={`${MOBILE_TOKENS.eyebrow} mb-0.5 text-[var(--text-secondary)]`}>{eyebrow}</p>}
+        {eyebrow && <p className={`${MOBILE_TOKENS.eyebrow} mb-1 text-[var(--text-secondary)]`}>{eyebrow}</p>}
         <h1 className={MOBILE_TOKENS.title} style={{ color: 'var(--text)' }}>{title}</h1>
-        {description && <p className={`${MOBILE_TOKENS.description} mt-0.5 text-[var(--text-secondary)]`}>{description}</p>}
+        {description && <p className={`${MOBILE_TOKENS.description} mt-1 text-[var(--text-secondary)]`}>{description}</p>}
       </div>
       {action || (Icon && <div className="mobile-page-header-icon flex h-9 w-9 flex-shrink-0 items-center justify-center rounded-lg" style={{ background: 'var(--primary-soft)', color: 'var(--primary)' }}><Icon size={18} /></div>)}
     </header>
@@ -28,7 +28,7 @@ export function MobilePageHeader({ eyebrow, title, description, action, icon: Ic
 }
 
 export function MobileStatGrid({ items, className = '' }) {
-  return <div className={`mobile-stat-grid grid grid-cols-3 divide-x overflow-hidden rounded-xl border ${className}`} style={{ borderColor: 'var(--border-light)', background: 'var(--bg-card)' }}>{items.map((item) => <div key={item.label} className="mobile-stat-item px-3 py-2.5"><p className="text-[18px] leading-6 font-semibold" style={{ color: item.color || 'var(--text)' }}>{item.value}</p><p className="mt-0.5 text-[11px] leading-4" style={{ color: 'var(--text-secondary)' }}>{item.label}</p></div>)}</div>
+  return <div className={`mobile-stat-grid flex flex-wrap items-center gap-x-4 gap-y-1 ${className}`}>{items.map((item) => <span key={item.label} className="inline-flex items-center gap-1.5 text-[12px]" style={{ color: item.color || 'var(--text-secondary)' }}><b className="font-semibold" style={{ color: item.valueColor || item.color || 'var(--text)' }}>{item.value}</b>{item.label}</span>)}</div>
 }
 
 export function MobileSegmentedTabs({ items, value, onChange, ariaLabel }) {
@@ -36,7 +36,7 @@ export function MobileSegmentedTabs({ items, value, onChange, ariaLabel }) {
 }
 
 export function MobileList({ children, className = '' }) {
-  return <div className={`mobile-list overflow-hidden rounded-xl border ${className}`} style={{ borderColor: 'var(--border-light)', background: 'var(--bg-card)' }}>{children}</div>
+  return <div className={`mobile-list overflow-hidden rounded-xl ${className}`} style={{ background: 'var(--bg-card)' }}>{children}</div>
 }
 
 export function MobileSectionHeading({ title, description, action, onAction }) {
