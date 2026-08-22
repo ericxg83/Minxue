@@ -1,108 +1,115 @@
-<template>
+﻿<template>
   <div class="dashboard">
-    <!-- 顶部欢迎区 -->
-    <header class="dash-header">
+    <header class="page-header">
       <div>
-        <h1 class="dash-title">工作台</h1>
-        <p class="dash-date">{{ greeting }}，欢迎使用敏学成长工作台</p>
+        <div class="eyebrow">{{ todayLabel }}</div>
+        <h1>早上好，老师</h1>
+        <p>今天还有 {{ totalTodo }} 项工作需要处理。</p>
       </div>
-      <div class="dash-header-actions">
-        <el-button type="primary" size="large" @click="goReview">
-          <el-icon><DocumentChecked /></el-icon> 开始批改
-        </el-button>
-      </div>
+      <el-button type="primary" size="large" @click="go('/review')">
+        <el-icon><Upload /></el-icon>
+        开始批改
+      </el-button>
     </header>
 
-    <!-- 统计卡片 -->
-    <section class="stat-grid">
-      <div class="stat-card" @click="goReview">
-        <div class="stat-card__icon stat-icon--pending"><el-icon><Files /></el-icon></div>
-        <div class="stat-card__body">
-          <div class="stat-value">{{ notiStore.summary.pendingReview }}</div>
-          <div class="stat-label">待复核试卷</div>
-        </div>
-        <span class="stat-card__link">去批改 ›</span>
-      </div>
-
-      <div class="stat-card" @click="goWrongBook">
-        <div class="stat-card__icon stat-icon--wrong"><el-icon><Collection /></el-icon></div>
-        <div class="stat-card__body">
-          <div class="stat-value">{{ notiStore.summary.todayNewWrongQuestions }}</div>
-          <div class="stat-label">今日新增错题</div>
-        </div>
-        <span class="stat-card__link">去错题 ›</span>
-      </div>
-
-      <div class="stat-card" @click="goExamHistory">
-        <div class="stat-card__icon stat-icon--retry"><el-icon><Clock /></el-icon></div>
-        <div class="stat-card__body">
-          <div class="stat-value">{{ pendingPrintCount }}</div>
-          <div class="stat-label">待打印重练卷</div>
-        </div>
-        <span class="stat-card__link">去重练批改 ›</span>
-      </div>
-
-      <div class="stat-card" @click="goStudents">
-        <div class="stat-card__icon stat-icon--student"><el-icon><User /></el-icon></div>
-        <div class="stat-card__body">
-          <div class="stat-value">{{ students.length }}</div>
-          <div class="stat-label">本班学生</div>
-        </div>
-        <span class="stat-card__link">切换学生 ›</span>
-      </div>
+    <section class="summary-strip" aria-label="今日摘要">
+      <button class="summary-item" @click="go('/todo')">
+        <span class="summary-value">{{ notiStore.summary.pendingReview || 0 }}</span>
+        <span class="summary-label">待人工复核</span>
+        <span class="summary-action">去处理 <el-icon><ArrowRight /></el-icon></span>
+      </button>
+      <button class="summary-item" @click="go('/todo')">
+        <span class="summary-value summary-value--danger">{{ notiStore.summary.failedTasks || 0 }}</span>
+        <span class="summary-label">识别异常</span>
+        <span class="summary-action">查看异常 <el-icon><ArrowRight /></el-icon></span>
+      </button>
+      <button class="summary-item" @click="go('/exam-history')">
+        <span class="summary-value summary-value--accent">{{ notiStore.summary.todayNewWrongQuestions || 0 }}</span>
+        <span class="summary-label">今日新增错题</span>
+        <span class="summary-action">看错题池 <el-icon><ArrowRight /></el-icon></span>
+      </button>
+      <button class="summary-item" @click="go('/growth')">
+        <span class="summary-value">{{ students.length }}</span>
+        <span class="summary-label">当前学生</span>
+        <span class="summary-action">查看学生 <el-icon><ArrowRight /></el-icon></span>
+      </button>
     </section>
 
-    <!-- 失败任务警示 -->
     <el-alert
       v-if="notiStore.summary.failedTasks > 0"
-      :title="`${notiStore.summary.failedTasks} 份试卷处理失败（识别或批改异常），可在通知中查看`"
+      class="failure-alert"
       type="error"
       :closable="false"
       show-icon
-      class="dash-alert"
+      :title="`${notiStore.summary.failedTasks} 份作业处理异常，原始图片已保留，可从待办中重新处理。`"
+      @click="go('/todo')"
     />
 
-    <!-- 主体双栏 -->
-    <section class="dash-main">
-      <div class="card recent-card">
-        <div class="card-header">
-          <h2>最近的试卷</h2>
-          <el-button text type="primary" @click="goExamHistory">查看全部</el-button>
-        </div>
-        <div v-if="recentTasks.length === 0" class="card-empty">
-          <el-icon size="36"><Document /></el-icon>
-          <span>暂无任务记录</span>
-        </div>
-        <div v-else class="recent-list">
-          <div v-for="t in recentTasks" :key="t.id" class="recent-item" @click="goReview">
-            <el-tag :type="taskStatusType(t.status)" size="small" effect="light">
-              {{ taskStatusLabel(t.status) }}
-            </el-tag>
-            <span class="recent-name">{{ t.originalName || '未命名试卷' }}</span>
-            <span class="recent-student">{{ t.studentName }}</span>
-            <span class="recent-time">{{ formatTime(t.createdAt) }}</span>
+    <section class="dashboard-grid">
+      <section class="surface surface--todo">
+        <div class="surface-header">
+          <div>
+            <h2>今日待办</h2>
+            <p>先处理会影响错题沉淀和学生反馈的事项</p>
           </div>
+          <el-button text type="primary" @click="go('/todo')">查看全部</el-button>
         </div>
-      </div>
+        <div v-if="todoItems.length" class="todo-list">
+          <button v-for="item in todoItems" :key="item.id" class="todo-row" @click="go(item.path)">
+            <span class="priority-dot" :class="`priority-dot--${item.priority}`"></span>
+            <span class="todo-content">
+              <strong>{{ item.title }}</strong>
+              <small>{{ item.description }}</small>
+            </span>
+            <span class="todo-time">{{ formatTime(item.createdAt) }}</span>
+            <el-icon class="row-arrow"><ArrowRight /></el-icon>
+          </button>
+        </div>
+        <div v-else class="empty-state">
+          <el-icon><CircleCheck /></el-icon>
+          <strong>今天没有待处理事项</strong>
+          <span>作业处理完成后，新的任务会出现在这里。</span>
+        </div>
+      </section>
 
-      <div class="card shortcut-card">
-        <div class="card-header">
-          <h2>快捷功能</h2>
-        </div>
-        <div class="shortcut-grid">
-          <div
-            v-for="s in shortcuts"
-            :key="s.key"
-            class="shortcut-item"
-            :class="{ 'shortcut-item--disabled': s.disabled }"
-            @click="!s.disabled && go(s.path)"
-          >
-            <div class="shortcut-icon" :style="iconStyle(s.color)">
-              <el-icon><component :is="s.icon" /></el-icon>
-            </div>
-            <span class="shortcut-label">{{ s.label }}</span>
-            <span v-if="s.disabled" class="shortcut-badge">开发中</span>
+      <section class="surface">
+        <div class="surface-header">
+          <div>
+            <h2>学生风险</h2>
+            <p>从最近任务中识别需要关注的学生</p>
           </div>
+          <el-button text type="primary" @click="go('/growth')">查看学生</el-button>
+        </div>
+        <div v-if="studentSignals.length" class="student-list">
+          <button v-for="student in studentSignals" :key="student.name" class="student-row" @click="go('/growth')">
+            <el-avatar :size="34">{{ student.name.slice(0, 1) }}</el-avatar>
+            <span class="student-copy">
+              <strong>{{ student.name }}</strong>
+              <small>{{ student.note }}</small>
+            </span>
+            <el-tag :type="student.type" size="small" effect="plain">{{ student.status }}</el-tag>
+          </button>
+        </div>
+        <div v-else class="empty-state empty-state--compact">
+          <el-icon><User /></el-icon>
+          <span>暂无需要优先关注的学生</span>
+        </div>
+      </section>
+    </section>
+
+    <section class="surface progress-surface">
+      <div class="surface-header">
+        <div>
+          <h2>今日处理进度</h2>
+          <p>从作业提交到学习结果确认</p>
+        </div>
+        <span class="progress-note">{{ recentTasks.length ? `最近有 ${recentTasks.length} 项任务更新` : '等待新的任务' }}</span>
+      </div>
+      <div class="workflow-progress">
+        <div v-for="(step, index) in workflowSteps" :key="step.label" class="workflow-step">
+          <span class="workflow-index" :class="{ 'workflow-index--active': index === 0 && notiStore.summary.pendingReview > 0 }">{{ index + 1 }}</span>
+          <span>{{ step.label }}</span>
+          <el-icon v-if="index < workflowSteps.length - 1"><ArrowRight /></el-icon>
         </div>
       </div>
     </section>
@@ -110,273 +117,113 @@
 </template>
 
 <script setup>
-import { ref, computed, onMounted } from 'vue'
+import { computed, onMounted, ref } from 'vue'
 import { useRouter } from 'vue-router'
-import { useNotificationStore } from '../stores/notificationStore'
+import { ArrowRight, CircleCheck, Upload, User } from '@element-plus/icons-vue'
 import { getStudents } from '../../services/apiService'
-import {
-  DocumentChecked, Files, Collection, Clock, User, Document,
-  Notebook, DataAnalysis, Download, Reading
-} from '@element-plus/icons-vue'
+import { useNotificationStore } from '../stores/notificationStore'
 
 const router = useRouter()
 const notiStore = useNotificationStore()
-
 const students = ref([])
-
-// 待打印重练卷：summary 暂无该字段，用通知口径的待复核作为展示兜底
-const pendingPrintCount = computed(() => 0)
-
 const recentTasks = computed(() => notiStore.summary.recentTasks || [])
+const totalTodo = computed(() => (notiStore.summary.pendingReview || 0) + (notiStore.summary.failedTasks || 0) + (notiStore.summary.todayNewWrongQuestions || 0))
+const todayLabel = computed(() => new Intl.DateTimeFormat('zh-CN', { year: 'numeric', month: 'long', day: 'numeric', weekday: 'long' }).format(new Date()))
+const workflowSteps = [{ label: '作业提交' }, { label: 'AI 批改' }, { label: '教师复核' }, { label: '错题沉淀' }, { label: '重练验证' }]
 
-const greeting = computed(() => {
-  const h = new Date().getHours()
-  if (h < 6) return '夜深了'
-  if (h < 12) return '早上好'
-  if (h < 14) return '中午好'
-  if (h < 18) return '下午好'
-  return '晚上好'
+const todoItems = computed(() => {
+  const items = []
+  recentTasks.value.slice(0, 4).forEach((task, index) => {
+    const failed = task.status === 'failed'
+    items.push({
+      id: task.id || index,
+      title: failed ? `${task.studentName || '学生'}的作业处理异常` : `${task.studentName || '学生'}的作业等待复核`,
+      description: failed ? '识别没有完成，建议重新处理或查看原图' : (task.originalName || '近期上传的作业'),
+      priority: failed ? 'high' : 'normal',
+      createdAt: task.createdAt,
+      path: failed ? '/todo' : '/review'
+    })
+  })
+  return items
 })
 
-const shortcuts = [
-  { key: 'review', label: '作业批改', path: '/review', icon: 'DocumentChecked', color: '#6366F1' },
-  { key: 'retry', label: '重练批改', path: '/exam-history', icon: 'Clock', color: '#8B5CF6' },
-  { key: 'wrongbook', label: '错题', path: '/wrongbook', icon: 'Collection', color: '#DC2626' },
-  { key: 'worksheet', label: '练习册', path: '/worksheets', icon: 'Notebook', color: '#059669' },
-  { key: 'diag', label: '学习诊断', path: '/weekly-report', icon: 'DataAnalysis', color: '#D97706' },
-  { key: 'handouts', label: '我的讲义', path: '/handouts', icon: 'Notebook', color: '#0EA5E9' },
-]
+const studentSignals = computed(() => {
+  const names = [...new Set(recentTasks.value.map(task => task.studentName).filter(Boolean))]
+  return names.slice(0, 3).map((name, index) => ({
+    name,
+    note: index === 0 && notiStore.summary.todayNewWrongQuestions > 0 ? '今天有新的错题记录' : '最近有作业任务更新',
+    status: index === 0 && notiStore.summary.todayNewWrongQuestions > 0 ? '需关注' : '有更新',
+    type: index === 0 && notiStore.summary.todayNewWrongQuestions > 0 ? 'warning' : 'info'
+  }))
+})
 
-const iconStyle = (color) => ({ background: color + '1A', color })
-
-const taskStatusMap = { done: { label: '待复核', type: 'warning' }, failed: { label: '失败', type: 'danger' }, reviewed: { label: '已复核', type: 'success' } }
-const taskStatusLabel = (s) => taskStatusMap[s]?.label || s
-const taskStatusType = (s) => taskStatusMap[s]?.type || 'info'
-
-const formatTime = (iso) => {
-  if (!iso) return ''
-  const d = new Date(iso)
-  if (Number.isNaN(d.getTime())) return ''
-  const pad = (n) => String(n).padStart(2, '0')
-  return `${d.getMonth() + 1}/${d.getDate()} ${pad(d.getHours())}:${pad(d.getMinutes())}`
+const go = (path) => router.push(path)
+const formatTime = (value) => {
+  if (!value) return '刚刚'
+  const date = new Date(value)
+  if (Number.isNaN(date.getTime())) return '刚刚'
+  return `${String(date.getHours()).padStart(2, '0')}:${String(date.getMinutes()).padStart(2, '0')}`
 }
 
-const go = (path) => { if (path !== router.currentRoute.value.path) router.push(path) }
-const goReview = () => go('/review')
-const goWrongBook = () => go('/wrongbook')
-const goExamHistory = () => go('/exam-history')
-const goStudents = () => go('/review')
-
 onMounted(async () => {
-  // 复用铃铛轮询的全局汇总数据，无需额外后端请求
   notiStore.fetchSummary()
   try {
     const result = await getStudents(false)
     const list = result.data || result || []
     students.value = Array.isArray(list) ? list : []
-  } catch (e) {
-    console.error('加载学生列表失败:', e)
+  } catch (error) {
     students.value = []
   }
 })
 </script>
 
 <style scoped>
-.dashboard {
-  height: 100vh;
-  overflow-y: auto;
-  padding: 24px 28px 40px;
-  background: var(--wb-bg);
-  box-sizing: border-box;
-}
-
-.dash-header {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-}
-.dash-title {
-  margin: 0;
-  font-size: 24px;
-  font-weight: 700;
-  color: var(--wb-text);
-}
-.dash-date {
-  margin: 6px 0 0;
-  font-size: 14px;
-  color: var(--wb-text-tertiary);
-}
-
-.stat-grid {
-  display: grid;
-  grid-template-columns: repeat(4, 1fr);
-  gap: 16px;
-  margin-top: 22px;
-}
-.stat-card {
-  display: flex;
-  align-items: center;
-  gap: 14px;
-  padding: 18px 20px;
-  background: var(--wb-bg-card);
-  border: 1px solid var(--wb-border-light);
-  border-radius: var(--wb-radius-md);
-  box-shadow: var(--wb-shadow-sm);
-  cursor: pointer;
-  transition: box-shadow 0.25s, transform 0.2s;
-}
-.stat-card:hover {
-  box-shadow: var(--wb-shadow-lg);
-  transform: translateY(-2px);
-}
-.stat-card__icon {
-  width: 46px;
-  height: 46px;
-  border-radius: var(--wb-radius-md);
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  font-size: 22px;
-  flex-shrink: 0;
-}
-.stat-icon--pending { background: #EEF2FF; color: var(--wb-primary); }
-.stat-icon--wrong { background: #FEE2E2; color: var(--wb-danger); }
-.stat-icon--retry { background: #EDE9FE; color: var(--wb-accent); }
-.stat-icon--student { background: #DCFCE7; color: var(--wb-success); }
-
-.stat-card__body { flex: 1; min-width: 0; }
-.stat-value {
-  font-size: 28px;
-  font-weight: 700;
-  color: var(--wb-text);
-  line-height: 1.2;
-  font-variant-numeric: tabular-nums;
-}
-.stat-label {
-  font-size: 13px;
-  color: var(--wb-text-secondary);
-  margin-top: 2px;
-}
-.stat-card__link {
-  font-size: 12px;
-  color: var(--wb-text-tertiary);
-  white-space: nowrap;
-  align-self: flex-end;
-}
-
-.dash-alert { margin-top: 16px; }
-
-.dash-main {
-  display: grid;
-  grid-template-columns: 1.4fr 1fr;
-  gap: 16px;
-  margin-top: 16px;
-}
-.card {
-  background: var(--wb-bg-card);
-  border: 1px solid var(--wb-border-light);
-  border-radius: var(--wb-radius-md);
-  box-shadow: var(--wb-shadow-sm);
-  padding: 18px 20px;
-}
-.card-header {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  margin-bottom: 12px;
-}
-.card-header h2 {
-  margin: 0;
-  font-size: 15px;
-  font-weight: 600;
-  color: var(--wb-text);
-}
-.card-empty {
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  justify-content: center;
-  gap: 8px;
-  padding: 36px 0;
-  color: var(--wb-text-tertiary);
-  font-size: 13px;
-}
-
-.recent-list { display: flex; flex-direction: column; }
-.recent-item {
-  display: flex;
-  align-items: center;
-  gap: 12px;
-  padding: 10px 8px;
-  border-radius: var(--wb-radius-sm);
-  cursor: pointer;
-  transition: background 0.15s;
-}
-.recent-item:hover { background: var(--wb-bg-hover); }
-.recent-name {
-  flex: 1;
-  min-width: 0;
-  font-size: 14px;
-  color: var(--wb-text);
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-.recent-student {
-  font-size: 12px;
-  color: var(--wb-text-secondary);
-}
-.recent-time {
-  font-size: 12px;
-  color: var(--wb-text-tertiary);
-  font-variant-numeric: tabular-nums;
-  white-space: nowrap;
-}
-
-.shortcut-grid {
-  display: grid;
-  grid-template-columns: repeat(2, 1fr);
-  gap: 10px;
-}
-.shortcut-item {
-  position: relative;
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  padding: 12px 14px;
-  border: 1px solid var(--wb-border-light);
-  border-radius: var(--wb-radius-sm);
-  cursor: pointer;
-  transition: all 0.15s;
-  background: var(--wb-bg-elevated);
-}
-.shortcut-item:hover {
-  border-color: var(--wb-primary-soft);
-  background: var(--wb-primary-mist);
-}
-.shortcut-item--disabled { cursor: not-allowed; opacity: 0.5; }
-.shortcut-item--disabled:hover { background: var(--wb-bg-elevated); border-color: var(--wb-border-light); }
-.shortcut-icon {
-  width: 34px;
-  height: 34px;
-  border-radius: var(--wb-radius-sm);
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  font-size: 17px;
-  flex-shrink: 0;
-}
-.shortcut-label { font-size: 14px; color: var(--wb-text); font-weight: 500; }
-.shortcut-badge {
-  position: absolute;
-  top: -6px;
-  right: -6px;
-  padding: 0 6px;
-  font-size: 10px;
-  line-height: 16px;
-  border-radius: var(--wb-radius-xs);
-  background: var(--wb-warning-soft);
-  color: var(--wb-warning);
-  border: 1px solid #FDE68A;
-}
+.dashboard { height: 100%; overflow-y: auto; box-sizing: border-box; padding: 32px 36px 48px; background: var(--wb-bg); }
+.page-header, .surface-header { display: flex; align-items: center; justify-content: space-between; gap: 24px; }
+.page-header { margin-bottom: 28px; }
+.page-header h1 { margin: 5px 0 4px; color: var(--wb-text); font-size: 25px; font-weight: 650; letter-spacing: -0.02em; }
+.page-header p, .eyebrow, .surface-header p { margin: 0; color: var(--wb-text-secondary); font-size: 13px; }
+.eyebrow { color: var(--wb-text-tertiary); }
+.summary-strip { display: grid; grid-template-columns: repeat(4, 1fr); background: var(--wb-bg-card); border: 1px solid var(--wb-border); border-radius: 10px; overflow: hidden; }
+.summary-item { display: grid; grid-template-columns: auto 1fr; align-items: center; column-gap: 12px; row-gap: 2px; min-height: 82px; padding: 14px 20px; color: inherit; text-align: left; background: transparent; border: 0; border-right: 1px solid var(--wb-border-light); cursor: pointer; }
+.summary-item:last-child { border-right: 0; }
+.summary-item:hover { background: var(--wb-primary-mist); }
+.summary-value { grid-row: span 2; color: var(--wb-text); font-size: 27px; line-height: 1; font-variant-numeric: tabular-nums; }
+.summary-value--danger { color: var(--wb-danger); }
+.summary-value--accent { color: var(--wb-accent); }
+.summary-label { color: var(--wb-text); font-size: 13px; font-weight: 600; }
+.summary-action { display: inline-flex; align-items: center; gap: 3px; color: var(--wb-text-tertiary); font-size: 12px; }
+.failure-alert { margin-top: 16px; cursor: pointer; }
+.dashboard-grid { display: grid; grid-template-columns: minmax(0, 1.35fr) minmax(360px, 0.85fr); gap: 16px; margin-top: 16px; }
+.surface { min-width: 0; background: var(--wb-bg-card); border: 1px solid var(--wb-border); border-radius: 10px; }
+.surface-header { padding: 20px 22px 16px; border-bottom: 1px solid var(--wb-border-light); }
+.surface-header h2 { margin: 0 0 5px; color: var(--wb-text); font-size: 15px; font-weight: 650; }
+.todo-list, .student-list { padding: 4px 10px 10px; }
+.todo-row, .student-row { display: flex; align-items: center; width: 100%; gap: 12px; padding: 13px 12px; color: inherit; text-align: left; background: transparent; border: 0; border-bottom: 1px solid var(--wb-border-light); cursor: pointer; }
+.todo-row:last-child, .student-row:last-child { border-bottom: 0; }
+.todo-row:hover, .student-row:hover { background: var(--wb-bg); }
+.priority-dot { width: 7px; height: 7px; flex: 0 0 7px; border-radius: 50%; background: var(--wb-primary); }
+.priority-dot--high { background: var(--wb-danger); }
+.todo-content, .student-copy { display: flex; flex: 1; min-width: 0; flex-direction: column; gap: 4px; }
+.todo-content strong, .student-copy strong { overflow: hidden; color: var(--wb-text); font-size: 13px; font-weight: 600; text-overflow: ellipsis; white-space: nowrap; }
+.todo-content small, .student-copy small { overflow: hidden; color: var(--wb-text-secondary); font-size: 12px; text-overflow: ellipsis; white-space: nowrap; }
+.todo-time { color: var(--wb-text-tertiary); font-size: 12px; font-variant-numeric: tabular-nums; }
+.row-arrow { color: var(--wb-text-tertiary); }
+.student-row { padding: 14px 12px; }
+.student-row :deep(.el-avatar) { flex: 0 0 auto; color: var(--wb-primary); background: var(--wb-primary-soft); }
+.empty-state { display: flex; align-items: center; justify-content: center; min-height: 180px; flex-direction: column; gap: 8px; color: var(--wb-text-tertiary); font-size: 13px; text-align: center; }
+.empty-state .el-icon { color: var(--wb-success); font-size: 32px; }
+.empty-state strong { color: var(--wb-text); font-size: 14px; }
+.empty-state--compact { min-height: 150px; }
+.empty-state--compact .el-icon { color: var(--wb-text-tertiary); font-size: 26px; }
+.progress-surface { margin-top: 16px; }
+.progress-note { color: var(--wb-text-tertiary); font-size: 12px; }
+.workflow-progress { display: flex; align-items: center; padding: 22px; }
+.workflow-step { display: flex; flex: 1; align-items: center; gap: 8px; color: var(--wb-text-secondary); font-size: 12px; white-space: nowrap; }
+.workflow-step:last-child { flex: 0 0 auto; }
+.workflow-step > .el-icon { flex: 1; color: var(--wb-border); }
+.workflow-index { display: inline-flex; align-items: center; justify-content: center; width: 23px; height: 23px; flex: 0 0 23px; color: var(--wb-text-tertiary); font-size: 11px; border: 1px solid var(--wb-border); border-radius: 50%; }
+.workflow-index--active { color: white; background: var(--wb-primary); border-color: var(--wb-primary); }
+@media (max-width: 1000px) { .dashboard { padding: 24px; } .summary-strip { grid-template-columns: repeat(2, 1fr); } .summary-item:nth-child(2) { border-right: 0; } .summary-item:nth-child(-n+2) { border-bottom: 1px solid var(--wb-border-light); } .dashboard-grid { grid-template-columns: 1fr; } }
+@media (max-width: 640px) { .dashboard { padding: 20px 16px 32px; } .page-header { align-items: flex-start; flex-direction: column; } .page-header .el-button { width: 100%; } .summary-strip { grid-template-columns: 1fr; } .summary-item, .summary-item:nth-child(2) { border-right: 0; border-bottom: 1px solid var(--wb-border-light); } .summary-item:last-child { border-bottom: 0; } .workflow-progress { align-items: flex-start; flex-direction: column; gap: 12px; } .workflow-step, .workflow-step:last-child { flex: initial; } .workflow-step > .el-icon { display: none; } }
 </style>

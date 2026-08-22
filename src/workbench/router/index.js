@@ -1,4 +1,4 @@
-import { createRouter, createWebHashHistory } from 'vue-router'
+﻿import { createRouter, createWebHashHistory } from 'vue-router'
 
 const routes = [
   {
@@ -14,6 +14,12 @@ const routes = [
     meta: { requiresPC: true }
   },
   {
+    path: '/todo',
+    name: 'Todo',
+    component: () => import('../views/TodoWorkbench.vue'),
+    meta: { requiresPC: true }
+  },
+  {
     path: '/wrongbook',
     name: 'WrongBook',
     component: () => import('../views/WrongBookWorkbench.vue'),
@@ -26,6 +32,18 @@ const routes = [
     meta: { requiresPC: true }
   },
   {
+    path: '/students',
+    name: 'Students',
+    component: () => import('../views/StudentsWorkbench.vue'),
+    meta: { requiresPC: true }
+  },
+  {
+    path: '/students/:id',
+    name: 'StudentDetail',
+    component: () => import('../views/StudentDetailWorkbench.vue'),
+    meta: { requiresPC: true }
+  },
+  {
     path: '/growth',
     name: 'Growth',
     component: () => import('../views/GrowthWorkbench.vue'),
@@ -34,6 +52,12 @@ const routes = [
   {
     path: '/exam-history',
     name: 'ExamHistory',
+    component: () => import('../views/RetryTasksWorkbench.vue'),
+    meta: { requiresPC: true }
+  },
+  {
+    path: '/exam-history/review',
+    name: 'ExamHistoryReview',
     component: () => import('../views/PracticeReviewWorkbench.vue'),
     meta: { requiresPC: true }
   },
@@ -97,3 +121,7 @@ router.beforeEach((to, from, next) => {
 })
 
 export default router
+
+
+
+

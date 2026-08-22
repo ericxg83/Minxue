@@ -1,7 +1,20 @@
-<template>
+﻿<template>
   <div class="review-workspace">
     <ReviewTopBar />
 
+
+    <div v-if="store.currentTask && store.allQuestions.length > 0" class="review-context-bar">
+      <div class="review-context-main">
+        <span class="review-context-label">当前复核</span>
+        <strong>{{ store.currentTask.original_name || '当前试卷' }}</strong>
+        <span class="review-context-meta">{{ store.currentStudent?.name || '未选择学生' }}</span>
+      </div>
+      <div class="review-progress-summary">
+        <span>已确认 {{ store.reviewProgress.confirmed }} / {{ store.reviewProgress.total }}</span>
+        <el-progress :percentage="reviewProgressPercent" :stroke-width="6" :show-text="false" status="success" style="width: 120px" />
+        <span class="review-progress-percent">{{ reviewProgressPercent }}%</span>
+      </div>
+    </div>
     <!-- 全部复核完成（空状态） -->
     <div v-if="store.reviewAllDone && store.currentStudent" class="all-done-state">
       <el-icon size="56"><CircleCheck /></el-icon>
@@ -10,6 +23,11 @@
         {{ store.reviewedTasks.length }} 份试卷已完成复核
       </div>
       <div class="all-done-hint">可在上方切换其他学生继续处理</div>
+      <div class="all-done-actions">
+        <el-button type="primary" @click="goToTodo">查看待办</el-button>
+        <el-button plain @click="goToWrongBook">查看错题池</el-button>
+        <el-button text @click="goToStudents">切换学生</el-button>
+      </div>
     </div>
 
     <!-- 三栏主体 -->
@@ -22,7 +40,8 @@
 </template>
 
 <script setup>
-import { onMounted, onUnmounted } from 'vue'
+import { computed, onMounted, onUnmounted } from 'vue'
+import { useRoute, useRouter } from 'vue-router'
 import { CircleCheck } from '@element-plus/icons-vue'
 import { useReviewStore } from '../../stores/reviewStore'
 import ReviewTopBar from './ReviewTopBar.vue'
@@ -36,6 +55,16 @@ const props = defineProps({
 })
 
 const store = useReviewStore()
+const route = useRoute()
+const router = useRouter()
+const reviewProgressPercent = computed(() => {
+  const total = Number(store.reviewProgress.total) || 0
+  const confirmed = Number(store.reviewProgress.confirmed) || 0
+  return total > 0 ? Math.min(100, Math.round((confirmed / total) * 100)) : 0
+})
+const goToTodo = () => router.push('/todo')
+const goToWrongBook = () => router.push({ path: '/wrongbook', query: { studentId: store.currentStudent?.id } })
+const goToStudents = () => router.push('/students')
 
 // ── 初始化：加载数据 ──
 onMounted(async () => {
@@ -43,6 +72,21 @@ onMounted(async () => {
   document.addEventListener('keydown', onKeydown)
   store.setTaskType(props.taskType)
   await store.initData()
+  const requestedStudentId = route.query.studentId
+  if (requestedStudentId) {
+    const student = store.students.find(item => String(item.id) === String(requestedStudentId))
+    if (student && student.id !== store.currentStudent?.id) {
+      store.setCurrentStudent(student)
+      await store.loadStudentTasks(student.id)
+      await store.loadWrongQuestions(student.id)
+      await store.autoSelectPendingTask?.()
+    }
+  }
+  const requestedExamId = route.query.examId
+  if (requestedExamId) {
+    const task = store.studentTasks.find(item => String(item.id) === String(requestedExamId))
+    if (task) await store.selectTask(task)
+  }
 })
 
 onUnmounted(() => {
@@ -137,6 +181,7 @@ const handleQuickReview = async (result) => {
   margin-top: 4px;
 }
 
+.all-done-actions { display: flex; align-items: center; gap: 8px; margin-top: 12px; }
 /* ── 完成汇总弹窗 ── */
 .completion-content {
   display: flex;
@@ -164,3 +209,7 @@ const handleQuickReview = async (result) => {
 .stat-value--primary { color: var(--wb-primary); }
 .stat-value--danger { color: var(--wb-danger); }
 </style>
+
+
+
+
