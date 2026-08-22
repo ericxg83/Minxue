@@ -31,6 +31,7 @@ import NotificationsPanel from './components/NotificationsPanel'
 import LearningReportPanel from './components/LearningReportPanel'
 import ImagePreview from './components/ImagePreview'
 import ProcessingPage from './pages/ProcessingPage'
+import HomeDashboard from './components/HomeDashboard'
 import WrongBookPage from './pages/WrongBookPage'
 import ExamPage from './pages/ExamPage'
 import WorksheetPicker from './components/WorksheetPicker'
@@ -135,7 +136,7 @@ export default function App() {
   const navigate = useNavigate()
   const location = useLocation()
   const routePage = location.pathname.replace(/^\/+/, '').split('/')[0]
-  const currentPage = ['processing', 'wrongbook', 'exam'].includes(routePage) ? routePage : 'processing'
+  const currentPage = ['processing', 'tasks', 'wrongbook', 'exam'].includes(routePage) ? routePage : 'processing'
   const setCurrentPage = (page) => navigate('/' + page)
 
   // Store hooks
@@ -321,7 +322,7 @@ export default function App() {
 
   // Load tasks when student changes
   useEffect(() => {
-    if (currentStudent && currentPage === 'processing') {
+    if (currentStudent && (currentPage === 'processing' || currentPage === 'tasks')) {
       loadTasks()
     }
   }, [currentStudent?.id, currentPage])
@@ -335,7 +336,7 @@ export default function App() {
       invalidateCache('tasks', currentStudent?.id)
       loadTasks()
     }
-  }, 30000, currentStudent && currentPage === 'processing', [currentStudent?.id, currentPage])
+  }, 30000, currentStudent && (currentPage === 'processing' || currentPage === 'tasks'), [currentStudent?.id, currentPage])
 
 
   // Load wrong questions
@@ -1068,6 +1069,23 @@ export default function App() {
 
           <AnimatePresence>
             {currentPage === 'processing' && (
+              <HomeDashboard
+                currentStudent={currentStudent}
+                tasks={tasks}
+                isLoadingTasks={isLoadingTasks}
+                isInitializing={isInitializing}
+                wrongCount={wrongQuestions.length}
+                pendingWrongCount={pendingWrongQuestions.length}
+                onStartUpload={() => setShowUploadOptions(true)}
+                onOpenTasks={() => { setCurrentPage('tasks'); clearSelection() }}
+                onOpenWrongBook={() => { setCurrentPage('wrongbook'); clearSelection() }}
+                onOpenExam={() => { setCurrentPage('exam'); clearSelection() }}
+                onOpenReview={(task) => { setReviewTask(task); setShowExamReview(true) }}
+                onRetryTask={handleRetryTask}
+              />
+            )}
+
+            {currentPage === 'tasks' && (
               <ProcessingPage
                 currentStudent={currentStudent}
                 tasks={tasks}
@@ -1326,9 +1344,10 @@ export default function App() {
         <nav className="sticky bottom-0 z-50 glass border-t" style={{ borderColor: 'rgba(232,229,224,0.6)' }}>
           <div className="max-w-lg mx-auto flex items-center justify-around" style={{ padding: '6px 0', paddingBottom: 'calc(6px + env(safe-area-inset-bottom, 0px))' }}>
             {[
-              { id: 'processing', icon: Camera, label: '首页' },
-              { id: 'wrongbook', icon: LayoutGrid, label: '错题本' },
-              { id: 'exam', icon: FileText, label: '组卷历史' },
+              { id: 'processing', icon: Camera, label: '???' },
+              { id: 'tasks', icon: Upload, label: '??' },
+              { id: 'wrongbook', icon: LayoutGrid, label: '??' },
+              { id: 'exam', icon: FileText, label: '??' },
             ].map((tab) => {
               const isActive = currentPage === tab.id
               return (

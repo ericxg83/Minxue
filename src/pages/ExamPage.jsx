@@ -1,9 +1,27 @@
-import { useMemo, useState } from 'react'
-import { CheckCircle2, ClipboardList, FileDown, FileText, Loader2, Upload } from 'lucide-react'
+﻿import { useMemo, useState } from 'react'
+import { CheckCircle2, ChevronRight, ClipboardCheck, FileDown, FileText, Loader2, UploadCloud } from 'lucide-react'
 import { motion } from 'motion/react'
 import dayjs from 'dayjs'
 import SwipeableRow from '../components/SwipeableRow'
 import EmptyState from '../components/EmptyState'
+
+const getTotalQuestions = (exam) => exam.question_ids?.length || exam.total_count || 0
+
+const getExamStage = (exam) => {
+  if (exam.status === 'graded') return 'completed'
+  if (exam.status === 'submitted' || exam.status === 'grading') return 'in_progress'
+  return 'pending'
+}
+
+const stageConfig = {
+  pending: { label: '待学生完成', color: 'var(--warning)', background: 'var(--warning-soft)', icon: ClipboardCheck },
+  in_progress: { label: '批改中', color: 'var(--primary)', background: 'var(--primary-soft)', icon: Loader2 },
+  completed: { label: '已完成', color: 'var(--success)', background: 'var(--success-soft)', icon: CheckCircle2 },
+}
+
+function SummaryItem({ value, label, tone = 'var(--text)' }) {
+  return <div className="px-3 py-3"><p className="text-[20px] font-semibold leading-none" style={{ color: tone }}>{value}</p><p className="mt-1.5 text-[11px]" style={{ color: 'var(--text-secondary)' }}>{label}</p></div>
+}
 
 export default function ExamPage({
   studentExams,
@@ -12,181 +30,38 @@ export default function ExamPage({
   onDeleteExam,
   onDownloadPdf,
   onSubmitExam,
-  onSubmitFilesSelected
+  onSubmitFilesSelected,
 }) {
-  const [filter, setFilter] = useState('all')
+  const [filter, setFilter] = useState('pending')
   const exams = Array.isArray(studentExams) ? studentExams : []
-  const gradedCount = exams.filter((exam) => exam.status === 'graded').length
-  const questionCount = exams.reduce((total, exam) => total + (exam.question_ids?.length || exam.total_count || 0), 0)
+  const pendingExams = exams.filter((exam) => getExamStage(exam) === 'pending')
+  const inProgressExams = exams.filter((exam) => getExamStage(exam) === 'in_progress')
+  const completedExams = exams.filter((exam) => getExamStage(exam) === 'completed')
   const visibleExams = useMemo(() => {
-    if (filter === 'graded') return exams.filter((exam) => exam.status === 'graded')
-    if (filter === 'pending') return exams.filter((exam) => exam.status !== 'graded')
+    if (filter === 'pending') return pendingExams
+    if (filter === 'in_progress') return inProgressExams
+    if (filter === 'completed') return completedExams
     return exams
-  }, [exams, filter])
-
-  const getExamStatus = (exam) => exam.status === 'graded'
-    ? { label: '已批改', color: 'var(--success)', background: 'var(--success-soft)', icon: CheckCircle2 }
-    : { label: '待提交', color: 'var(--warning)', background: 'var(--warning-soft)', icon: ClipboardList }
-
-  const getScoreSummary = (exam) => {
-    const total = exam.total_count || exam.question_ids?.length || 0
-    if (exam.status !== 'graded' || !total) return null
-    return `${exam.correct_count || 0}/${total} 题正确`
-  }
+  }, [completedExams, exams, filter, inProgressExams, pendingExams])
+  const totalQuestions = exams.reduce((total, exam) => total + getTotalQuestions(exam), 0)
 
   return (
-    <motion.div
-      key="exam-page"
-      initial={{ opacity: 0, x: 20 }}
-      animate={{ opacity: 1, x: 0 }}
-      exit={{ opacity: 0, x: -20 }}
-      className="w-full"
-    >
-      <section className="px-4 pt-4 mb-3">
-        <div className="flex items-start justify-between gap-3">
-          <div>
-            <h2 style={{ fontSize: 'var(--fs-20)', fontWeight: 750, color: 'var(--text)', letterSpacing: '-0.02em' }}>组卷历史</h2>
-            <p style={{ fontSize: 'var(--fs-11)', color: 'var(--text-secondary)', marginTop: '3px' }}>
-              查看试卷、提交答卷并追踪批改结果
-            </p>
-          </div>
-          <div className="flex items-center justify-center rounded-2xl" style={{ width: 44, height: 44, background: 'var(--primary-soft)', color: 'var(--primary)' }}>
-            <FileText size={21} strokeWidth={2.2} />
-          </div>
-        </div>
+    <motion.div key="retry-page" initial={{ opacity: 0, x: 20 }} animate={{ opacity: 1, x: 0 }} exit={{ opacity: 0, x: -20 }} className="mx-auto w-full max-w-lg px-4 pb-8 pt-5">
+      <div className="mb-5 flex items-start justify-between"><div><p className="mb-1 text-[13px] font-medium" style={{ color: 'var(--text-secondary)' }}>训练验证</p><h1 className="text-[25px] font-semibold tracking-[-0.04em]" style={{ color: 'var(--text)' }}>重练卷</h1><p className="mt-1 text-[13px]" style={{ color: 'var(--text-secondary)' }}>跟进已安排的错题练习，看结果是否改善</p></div><div className="flex h-10 w-10 items-center justify-center rounded-xl" style={{ background: 'var(--primary-soft)', color: 'var(--primary)' }}><FileText size={19} /></div></div>
 
-        <div className="grid grid-cols-3 gap-2 mt-4">
-          {[
-            { label: '试卷', value: exams.length },
-            { label: '题目', value: questionCount },
-            { label: '已批改', value: gradedCount },
-          ].map((item) => (
-            <div key={item.label} className="rounded-xl px-3 py-2.5" style={{ background: 'var(--bg-secondary)' }}>
-              <p style={{ fontSize: 'var(--fs-18)', lineHeight: 1.1, fontWeight: 750, color: 'var(--text)' }}>{item.value}</p>
-              <p style={{ fontSize: 'var(--fs-10)', color: 'var(--text-secondary)', marginTop: 4 }}>{item.label}</p>
-            </div>
-          ))}
-        </div>
-      </section>
+      <div className="mb-6 grid grid-cols-3 divide-x overflow-hidden rounded-2xl border" style={{ borderColor: 'var(--border-light)', background: 'var(--bg-card)' }}><SummaryItem value={pendingExams.length} label="待完成" tone={pendingExams.length ? 'var(--warning)' : 'var(--text)'} /><SummaryItem value={inProgressExams.length} label="处理中" tone={inProgressExams.length ? 'var(--primary)' : 'var(--text)'} /><SummaryItem value={completedExams.length} label="已完成" tone="var(--success)" /></div>
 
-      <section className="px-4 pb-4">
-        {exams.length > 0 && (
-          <div className="flex gap-1.5 mb-3 p-1 rounded-xl" style={{ background: 'var(--bg-secondary)' }} role="tablist" aria-label="组卷历史筛选">
-            {[
-              { key: 'all', label: '全部' },
-              { key: 'pending', label: '待提交' },
-              { key: 'graded', label: '已批改' },
-            ].map((item) => (
-              <button
-                key={item.key}
-                type="button"
-                role="tab"
-                aria-selected={filter === item.key}
-                onClick={() => setFilter(item.key)}
-                className="flex-1 rounded-lg py-1.5 transition-all active:scale-95"
-                style={{
-                  border: 0,
-                  background: filter === item.key ? 'var(--bg)' : 'transparent',
-                  color: filter === item.key ? 'var(--text)' : 'var(--text-secondary)',
-                  boxShadow: filter === item.key ? '0 1px 4px rgba(31, 35, 41, 0.08)' : 'none',
-                  fontSize: 'var(--fs-11)',
-                  fontWeight: filter === item.key ? 650 : 500,
-                }}
-              >
-                {item.label}
-              </button>
-            ))}
-          </div>
-        )}
+      {pendingExams.length > 0 && <div className="mb-6 flex items-center gap-3 rounded-2xl border px-4 py-3.5" style={{ borderColor: 'rgba(250,140,22,0.24)', background: 'var(--warning-soft)' }}><div className="flex h-9 w-9 flex-shrink-0 items-center justify-center rounded-full" style={{ background: 'rgba(250,140,22,0.18)', color: 'var(--warning)' }}><ClipboardCheck size={17} /></div><div className="min-w-0 flex-1"><p className="text-[14px] font-semibold" style={{ color: 'var(--text)' }}>有 {pendingExams.length} 份重练待完成</p><p className="mt-0.5 text-[12px]" style={{ color: 'var(--text-secondary)' }}>学生完成后上传答案，系统会继续更新错题状态</p></div></div>}
 
-        {exams.length === 0 ? (
-          <EmptyState
-            icon={FileText}
-            title="暂无组卷历史"
-            description={'在错题本选择题目后点击"生成试卷"'}
-            className="py-16"
-          />
-        ) : visibleExams.length === 0 ? (
-          <EmptyState
-            icon={ClipboardList}
-            title="暂无符合条件的试卷"
-            description="可以切换上方筛选条件查看全部"
-            className="py-12"
-          />
-        ) : (
-          <div className="space-y-2.5">
-            {visibleExams.map((exam) => {
-              const status = getExamStatus(exam)
-              const StatusIcon = status.icon
-              const scoreSummary = getScoreSummary(exam)
-              const totalQuestions = exam.question_ids?.length || exam.total_count || 0
-              return (
-                <SwipeableRow key={exam.id} onDelete={() => onDeleteExam(exam.id)}>
-                  <motion.div
-                    layout
-                    initial={{ opacity: 0, y: 10 }}
-                    animate={{ opacity: 1, y: 0 }}
-                    data-exam-id={exam.id}
-                    data-exam-card="true"
-                    className="card"
-                    style={{ padding: '14px' }}
-                  >
-                    <div className="flex items-start justify-between gap-2">
-                      <div className="flex-1 min-w-0">
-                        <div className="flex items-center gap-2 min-w-0">
-                          <h3 style={{ fontSize: 'var(--fs-14)', fontWeight: 650, color: 'var(--text)' }} className="truncate">{exam.name}</h3>
-                          <span className="badge flex-shrink-0" style={{ background: status.background, color: status.color, display: 'inline-flex', alignItems: 'center', gap: 3 }}>
-                            <StatusIcon size={11} strokeWidth={2.5} />
-                            {status.label}
-                          </span>
-                        </div>
-                        <p style={{ fontSize: 'var(--fs-11)', color: 'var(--text-secondary)', marginTop: '5px' }}>
-                          {dayjs(exam.created_at).format('YYYY/MM/DD HH:mm')}
-                        </p>
-                        <p style={{ fontSize: 'var(--fs-11)', color: 'var(--text-secondary)', marginTop: '2px' }}>
-                          共 {totalQuestions} 道题{scoreSummary ? ` · ${scoreSummary}` : ''}
-                        </p>
-                      </div>
-                      <div className="flex gap-1.5 flex-shrink-0">
-                        <button
-                          type="button"
-                          onClick={() => onDownloadPdf(exam)}
-                          className="flex items-center gap-1 px-2 py-1.5 rounded-lg"
-                          style={{ background: 'var(--bg-secondary)', color: 'var(--primary-hover)', fontSize: 'var(--fs-10)', fontWeight: 600 }}
-                          aria-label="下载 PDF"
-                        >
-                          <FileDown size={13} />
-                          下载
-                        </button>
-                        <button
-                          type="button"
-                          onClick={() => onSubmitExam(exam)}
-                          disabled={submitExamId === exam.id}
-                          className="flex items-center gap-1 px-2 py-1.5 rounded-lg"
-                          style={{ background: submitExamId === exam.id ? '#EDE9FE' : 'var(--bg-secondary)', color: '#7C3AED', fontSize: 'var(--fs-10)', fontWeight: 600 }}
-                          aria-label="提交答卷"
-                        >
-                          {submitExamId === exam.id ? <Loader2 size={13} className="animate-spin" /> : <Upload size={13} />}
-                          提交
-                        </button>
-                      </div>
-                    </div>
-                  </motion.div>
-                </SwipeableRow>
-              )
-            })}
-          </div>
-        )}
-      </section>
+      <div className="mb-4 flex gap-1 rounded-xl p-1" style={{ background: 'var(--bg-secondary)' }} role="tablist" aria-label="重练卷状态"><button type="button" role="tab" aria-selected={filter === 'pending'} onClick={() => setFilter('pending')} className="flex-1 rounded-lg py-2 text-[12px] font-medium" style={{ background: filter === 'pending' ? 'var(--bg-card)' : 'transparent', color: filter === 'pending' ? 'var(--text)' : 'var(--text-secondary)', boxShadow: filter === 'pending' ? 'var(--shadow-sm)' : 'none' }}>待完成 {pendingExams.length}</button><button type="button" role="tab" aria-selected={filter === 'in_progress'} onClick={() => setFilter('in_progress')} className="flex-1 rounded-lg py-2 text-[12px] font-medium" style={{ background: filter === 'in_progress' ? 'var(--bg-card)' : 'transparent', color: filter === 'in_progress' ? 'var(--text)' : 'var(--text-secondary)', boxShadow: filter === 'in_progress' ? 'var(--shadow-sm)' : 'none' }}>进行中 {inProgressExams.length}</button><button type="button" role="tab" aria-selected={filter === 'completed'} onClick={() => setFilter('completed')} className="flex-1 rounded-lg py-2 text-[12px] font-medium" style={{ background: filter === 'completed' ? 'var(--bg-card)' : 'transparent', color: filter === 'completed' ? 'var(--text)' : 'var(--text-secondary)', boxShadow: filter === 'completed' ? 'var(--shadow-sm)' : 'none' }}>已完成 {completedExams.length}</button></div>
 
-      <input
-        ref={submitFileInputRef}
-        type="file"
-        accept="image/*"
-        multiple
-        style={{ display: 'none' }}
-        onChange={onSubmitFilesSelected}
-      />
+      <div className="mb-3 flex items-end justify-between px-1"><div><h2 className="text-[17px] font-semibold" style={{ color: 'var(--text)' }}>{filter === 'pending' ? '待完成的重练' : filter === 'in_progress' ? '正在处理' : '最近结果'}</h2><p className="mt-0.5 text-[12px]" style={{ color: 'var(--text-secondary)' }}>{visibleExams.length ? `${visibleExams.length} 份重练卷 · 共 ${visibleExams.reduce((total, exam) => total + getTotalQuestions(exam), 0)} 道题` : '没有符合条件的重练卷'}</p></div><span className="text-[12px]" style={{ color: 'var(--text-tertiary)' }}>全部 {exams.length}</span></div>
+
+      {exams.length === 0 ? <EmptyState icon={FileText} title="还没有重练卷" description="在错题本选择题目后，可以快速安排一次重练" className="rounded-2xl border py-16" /> : visibleExams.length === 0 ? <EmptyState icon={ClipboardCheck} title="这里还没有记录" description="切换其他状态查看重练卷" className="rounded-2xl border py-12" /> : <div className="overflow-hidden rounded-2xl border" style={{ borderColor: 'var(--border-light)', background: 'var(--bg-card)' }}>{visibleExams.map((exam, index) => { const stage = getExamStage(exam); const config = stageConfig[stage]; const StatusIcon = config.icon; const total = getTotalQuestions(exam); const isSubmitting = submitExamId === exam.id; const isCompleted = stage === 'completed'; const score = isCompleted && total ? `${exam.correct_count || 0}/${total} 题正确` : null; return <SwipeableRow key={exam.id || index} onDelete={() => onDeleteExam(exam.id)}><motion.div layout initial={{ opacity: 0, y: 6 }} animate={{ opacity: 1, y: 0 }} className="border-b px-4 py-4 last:border-b-0" style={{ borderColor: 'var(--border-light)' }}><div className="flex items-start gap-3"><div className="flex h-9 w-9 flex-shrink-0 items-center justify-center rounded-xl" style={{ background: config.background, color: config.color }}><StatusIcon size={17} className={stage === 'in_progress' ? 'animate-spin' : ''} /></div><div className="min-w-0 flex-1"><div className="flex items-center gap-2"><h3 className="truncate text-[14px] font-semibold" style={{ color: 'var(--text)' }}>{exam.name || '错题重练'}</h3><span className="flex-shrink-0 rounded-full px-2 py-0.5 text-[11px] font-medium" style={{ background: config.background, color: config.color }}>{config.label}</span></div><p className="mt-1 text-[12px]" style={{ color: 'var(--text-secondary)' }}>{dayjs(exam.created_at).isValid() ? dayjs(exam.created_at).format('MM/DD HH:mm') : '最近创建'} · {total} 道题</p>{score ? <p className="mt-2 text-[13px] font-medium" style={{ color: 'var(--success)' }}>{score} · 可以查看仍需关注的题目</p> : <p className="mt-2 text-[12px]" style={{ color: 'var(--text-secondary)' }}>{stage === 'pending' ? '学生完成后上传答案' : '系统正在整理本次结果'}</p>}</div></div><div className="mt-3 flex items-center justify-end gap-2"><button type="button" onClick={() => onDownloadPdf(exam)} className="inline-flex items-center gap-1.5 rounded-lg px-3 py-2 text-[12px] font-medium" style={{ background: 'var(--bg-secondary)', color: 'var(--primary)' }}><FileDown size={14} />查看题目</button><button type="button" onClick={() => onSubmitExam(exam)} disabled={isSubmitting || isCompleted} className="inline-flex items-center gap-1.5 rounded-lg px-3 py-2 text-[12px] font-semibold" style={{ background: isCompleted ? 'var(--bg-secondary)' : isSubmitting ? 'var(--accent-soft)' : 'var(--primary)', color: isCompleted ? 'var(--text-tertiary)' : isSubmitting ? 'var(--accent)' : '#fff' }}>{isSubmitting ? <Loader2 size={14} className="animate-spin" /> : <UploadCloud size={14} />}{isCompleted ? '已完成' : isSubmitting ? '上传中' : '上传答案'}</button><ChevronRight size={15} className="hidden sm:block" style={{ color: 'var(--text-tertiary)' }} /></div></motion.div></SwipeableRow> })}</div>}
+
+      <div className="mt-6 border-t px-1 pt-4" style={{ borderColor: 'var(--border-light)' }}><p className="text-[12px]" style={{ color: 'var(--text-secondary)' }}>共管理 {exams.length} 份重练卷 · {totalQuestions} 道题</p><p className="mt-1 text-[11px]" style={{ color: 'var(--text-tertiary)' }}>已完成不代表所有错题已解决，仍需关注的题目会回到错题本</p></div>
+
+      <input ref={submitFileInputRef} type="file" accept="image/*" multiple className="hidden" onChange={onSubmitFilesSelected} />
     </motion.div>
   )
 }
