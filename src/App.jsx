@@ -1344,10 +1344,10 @@ export default function App() {
         <nav className="sticky bottom-0 z-50 glass border-t" style={{ borderColor: 'rgba(232,229,224,0.6)' }}>
           <div className="max-w-lg mx-auto flex items-center justify-around" style={{ padding: '6px 0', paddingBottom: 'calc(6px + env(safe-area-inset-bottom, 0px))' }}>
             {[
-              { id: 'processing', icon: Camera, label: '???' },
-              { id: 'tasks', icon: Upload, label: '??' },
-              { id: 'wrongbook', icon: LayoutGrid, label: '??' },
-              { id: 'exam', icon: FileText, label: '??' },
+              { id: 'processing', icon: Camera, label: '首页' },
+              { id: 'tasks', icon: Upload, label: '作业' },
+              { id: 'wrongbook', icon: LayoutGrid, label: '错题本' },
+              { id: 'exam', icon: FileText, label: '重练卷' },
             ].map((tab) => {
               const isActive = currentPage === tab.id
               return (

@@ -20,8 +20,8 @@ export default function AppHeader({
             <div className="w-7 h-7 rounded-lg flex items-center justify-center" style={{ background: 'var(--primary-soft)' }}>
               <User size={14} style={{ color: 'var(--primary)' }} />
             </div>
-            <span style={{ fontSize: 'var(--fs-15)', fontWeight: 600, letterSpacing: '-0.01em' }}>
-              {isInitializing ? '加载中...' : (currentStudent?.name || '选择学生')}
+            <span style={{ fontSize: 'var(--fs-14)', fontWeight: 600, letterSpacing: '-0.01em' }}>
+              {isInitializing ? '加载中…' : (currentStudent?.name || '选择学生')}
             </span>
             <ChevronDown size={14} style={{ color: 'var(--text-secondary)' }} />
           </button>
