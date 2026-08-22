@@ -2,19 +2,19 @@ import { ChevronRight } from 'lucide-react'
 
 export const MOBILE_TOKENS = {
   pageX: 'px-4',
-  pageY: 'pt-4 pb-4',
-  title: 'text-[21px] leading-[1.25] font-semibold tracking-[-0.04em]',
-  eyebrow: 'text-[13px] leading-5 font-medium',
+  pageY: 'pt-5 pb-6',
+  title: 'text-[24px] leading-[1.2] font-semibold tracking-[-0.04em]',
+  eyebrow: 'text-[12px] leading-5 font-medium',
   description: 'text-[13px] leading-5',
   sectionTitle: 'text-[16px] leading-[1.4] font-semibold',
-  meta: 'text-[12px] leading-[1.45]',
+  meta: 'text-[12px] leading-[1.5]',
 }
 
 export function MobilePage({ children, className = '', ...props }) {
   return <div className={`mobile-page mx-auto w-full max-w-lg ${MOBILE_TOKENS.pageX} ${MOBILE_TOKENS.pageY} ${className}`} {...props}>{children}</div>
 }
 
-export function MobilePageHeader({ eyebrow, title, description, action, icon: Icon }) {
+export function MobilePageHeader({ eyebrow, title, description, action }) {
   return (
     <header className="mobile-page-header mb-4 flex items-start justify-between">
       <div className="min-w-0">
@@ -36,7 +36,7 @@ export function MobileSegmentedTabs({ items, value, onChange, ariaLabel }) {
 }
 
 export function MobileList({ children, className = '' }) {
-  return <div className={`mobile-list overflow-hidden rounded-xl ${className}`} style={{ background: 'var(--bg-card)' }}>{children}</div>
+  return <div className={`mobile-list overflow-hidden border-y ${className}`} style={{ borderColor: 'var(--border-light)' }}>{children}</div>
 }
 
 export function MobileSectionHeading({ title, description, action, onAction }) {

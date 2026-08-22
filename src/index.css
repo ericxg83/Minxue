@@ -7,19 +7,19 @@
      Indigo（#6366F1），与 PC 工作台 --wb-primary 完全一致。 */
 
   /* ── Surfaces — iOS grouped background over white cards ── */
-  --bg: #F2F2F7;             /* systemGroupedBackground */
+  --bg: #F7F6F2;
   --bg-card: #FFFFFF;        /* secondarySystemGroupedBackground (card) */
   --bg-hover: #EBEBF0;       /* subtle press / hover fill */
   --bg-elevated: #FFFFFF;    /* elevated surface = white on iOS */
-  --bg-secondary: #E9E9EF;   /* tertiary fill (segmented track) */
+  --bg-secondary: #EFEEE9;
   --bg-mist: #F7F7FA;        /* between bg and card */
 
   /* ── Primary — Indigo (与工作台统一) ── */
-  --primary: #6366F1;         /* indigo-500 */
-  --primary-hover: #4F46E5;   /* indigo-600 */
+  --primary: #3157D5;
+  --primary-hover: #2445B4;
   --primary-light: #818CF8;   /* indigo-400 (渐变端点) */
-  --primary-soft: #E0E7FF;    /* indigo-100 */
-  --primary-mist: #EEF2FF;    /* indigo-50 */
+  --primary-soft: #E8EDFF;
+  --primary-mist: #F3F5FF;
 
   /* ── Accent — Violet ── */
   --accent: #8B5CF6;          /* violet-500 */

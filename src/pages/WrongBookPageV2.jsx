@@ -1,0 +1,24 @@
+import { useState } from 'react'
+import { Check, ChevronRight, Filter, Search } from 'lucide-react'
+import { motion } from 'motion/react'
+import EmptyState from '../components/EmptyState'
+import SwipeableRow from '../components/SwipeableRow'
+import { MobileList, MobileSegmentedTabs } from '../features/mobile/MobilePrimitives'
+
+const labels = { new: '待复习', review_1: '复习中', review_2: '再次复习', mastered: '已掌握' }
+const lifecycle = (item) => item.lifecycle_status || item.status || 'new'
+const text = (item) => (item.question || item).content || item.content || '题目内容暂不可用'
+
+export default function WrongBookPageV2({ wrongQuestions, filteredWrongQuestions, selectedSubject, selectedTags, showFilterPanel, onCloseFilterPanel, selectedQuestions, pendingWrongQuestionCount, onToggleSelection, onOpenDetail, onDelete, onStartPriorityRetry, onSelectAll, onPrintPreview, allAvailableTags, onSubjectChange, onTagsChange, onResetFilters, hasMore, loadingMore, onLoadMore, bankCounts }) {
+  const questions = Array.isArray(filteredWrongQuestions) ? filteredWrongQuestions : []
+  const counts = bankCounts || { new: pendingWrongQuestionCount || 0, review: 0, mastered: 0 }
+  const [filter, setFilter] = useState('new')
+  const tabs = [{ id: 'new', label: '待复习', count: counts.new || 0 }, { id: 'review', label: '复习中', count: counts.review || 0 }, { id: 'mastered', label: '已掌握', count: counts.mastered || 0 }]
+  const visible = questions.filter((item) => filter === 'review' ? ['review_1', 'review_2'].includes(lifecycle(item)) : lifecycle(item) === filter)
+  return <motion.div initial={{ opacity: 0, x: 16 }} animate={{ opacity: 1, x: 0 }} className='mobile-page mobile-page-wrongbook mx-auto w-full max-w-lg px-4 pb-28 pt-5'><header className='mb-5 flex items-start justify-between gap-4'><div><p className='mb-1 text-[12px] font-medium' style={{ color: 'var(--text-secondary)' }}>今天先复习这些题</p><h1 className='text-[24px] font-semibold tracking-[-0.04em]' style={{ color: 'var(--text)' }}>错题本</h1><p className='mt-1.5 text-[13px]' style={{ color: 'var(--text-secondary)' }}>{pendingWrongQuestionCount || questions.length} 道题等待关注</p></div><button type='button' onClick={() => onCloseFilterPanel(!showFilterPanel)} className='inline-flex items-center gap-1.5 border-b pb-1 text-[12px] font-medium' style={{ color: 'var(--text-secondary)', borderColor: 'var(--border)' }}><Filter size={14} />筛选</button></header>
+  <section className='mb-6 border-y py-4' style={{ borderColor: 'var(--border-light)' }}><p className='text-[13px] font-medium' style={{ color: 'var(--text)' }}>{pendingWrongQuestionCount ? String(pendingWrongQuestionCount) + ' 道题建议优先复习' : '从最近一次批改中开始复习'}</p><button type='button' onClick={onStartPriorityRetry} className='mt-3 inline-flex items-center gap-1.5 rounded-lg px-3 py-2 text-[12px] font-semibold text-white' style={{ background: 'var(--primary)' }}>开始复习<ChevronRight size={14} /></button></section>
+  <MobileSegmentedTabs items={tabs} value={filter} onChange={setFilter} ariaLabel='错题复习状态' />
+  {!visible.length ? <EmptyState icon={Search} title={showFilterPanel ? '没有符合条件的题目' : '这里还没有错题'} description={showFilterPanel ? '调整筛选条件后再试' : '完成作业批改后，错题会自动进入这里'} className='py-16' /> : <MobileList>{visible.map((item, index) => { const selected = selectedQuestions.some((entry) => entry.id === item.id); const status = lifecycle(item); return <SwipeableRow key={item.id || index} onDelete={() => onDelete(item)}><div className='flex items-center gap-3 px-0.5 py-3.5'><button type='button' onClick={() => onToggleSelection(item)} className='flex h-5 w-5 flex-shrink-0 items-center justify-center rounded-full border' style={{ borderColor: selected ? 'var(--primary)' : 'var(--border)', background: selected ? 'var(--primary)' : '#fff', color: '#fff' }} aria-label={selected ? '取消选择' : '选择错题'}>{selected && <Check size={12} />}</button><button type='button' onClick={() => onOpenDetail(item)} className='min-w-0 flex-1 text-left'><span className='block truncate text-[14px] font-medium' style={{ color: 'var(--text)' }}>{text(item)}</span><span className='mt-1 block text-[12px]' style={{ color: status === 'mastered' ? 'var(--success)' : 'var(--text-secondary)' }}>{labels[status] || '待复习'} · {item.error_type || '需要关注'}</span></button><ChevronRight size={16} style={{ color: 'var(--text-tertiary)' }} /></div></SwipeableRow>})}</MobileList>}
+  {selectedQuestions.length > 0 && <div className='fixed inset-x-0 z-40 mx-auto max-w-lg px-4' style={{ bottom: 'calc(60px + env(safe-area-inset-bottom, 0px))' }}><div className='flex items-center gap-3 border bg-white px-3 py-2.5 shadow-lg' style={{ borderColor: 'var(--border-light)' }}><span className='text-[12px]' style={{ color: 'var(--text-secondary)' }}>已选 {selectedQuestions.length} 道</span><button type='button' onClick={onPrintPreview} className='ml-auto rounded-lg px-3.5 py-2 text-[12px] font-semibold text-white' style={{ background: 'var(--primary)' }}>生成重练</button></div></div>}
+  </motion.div>
+}

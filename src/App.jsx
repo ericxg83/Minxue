@@ -30,10 +30,10 @@ import ExamChoiceModal from './components/ExamChoiceModal'
 import NotificationsPanel from './components/NotificationsPanel'
 import LearningReportPanel from './components/LearningReportPanel'
 import ImagePreview from './components/ImagePreview'
-import ProcessingPage from './pages/ProcessingPage'
-import HomeDashboard from './components/HomeDashboard'
-import WrongBookPage from './pages/WrongBookPage'
-import ExamPage from './pages/ExamPage'
+import ProcessingPage from './pages/ProcessingPageV2'
+import HomeDashboard from './components/HomeDashboardV2'
+import WrongBookPage from './pages/WrongBookPageV2'
+import ExamPage from './pages/ExamPageV2'
 import WorksheetPicker from './components/WorksheetPicker'
 
 import { useToast, ToastProvider } from './components/ToastProvider'
@@ -1347,7 +1347,7 @@ export default function App() {
               { id: 'processing', icon: Camera, label: '首页' },
               { id: 'tasks', icon: Upload, label: '作业' },
               { id: 'wrongbook', icon: LayoutGrid, label: '错题本' },
-              { id: 'exam', icon: FileText, label: '重练卷' },
+              { id: 'exam', icon: FileText, label: '重练' },
             ].map((tab) => {
               const isActive = currentPage === tab.id
               return (
