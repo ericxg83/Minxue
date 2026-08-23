@@ -1,4 +1,4 @@
-﻿<template>
+<template>
   <div class="dashboard">
     <header class="page-header">
       <div>
@@ -44,6 +44,8 @@
       :title="`${notiStore.summary.failedTasks} 份作业处理异常，原始图片已保留，可从待办中重新处理。`"
       @click="go('/todo')"
     />
+
+    <section class="section-heading"><div><span class="section-kicker">工作节奏</span><h2>先处理重要的，再记录变化</h2></div><span class="section-note">实时同步最近任务</span></section>
 
     <section class="dashboard-grid">
       <section class="surface surface--todo">
@@ -178,28 +180,29 @@ onMounted(async () => {
 </script>
 
 <style scoped>
-.dashboard { height: 100%; overflow-y: auto; box-sizing: border-box; padding: 32px 36px 48px; background: var(--wb-bg); }
+.dashboard { height: calc(100vh - 64px); overflow-y: auto; box-sizing: border-box; padding: 34px clamp(22px, 4vw, 52px) 56px; background: var(--wb-bg); }
 .page-header, .surface-header { display: flex; align-items: center; justify-content: space-between; gap: 24px; }
-.page-header { margin-bottom: 28px; }
-.page-header h1 { margin: 5px 0 4px; color: var(--wb-text); font-size: 25px; font-weight: 650; letter-spacing: -0.02em; }
+.page-header { margin-bottom: 26px; max-width: 980px; }
+.page-header h1 { margin: 8px 0 5px; color: var(--wb-text); font-size: clamp(24px, 3vw, 32px); font-weight: 700; letter-spacing: -0.04em; }
 .page-header p, .eyebrow, .surface-header p { margin: 0; color: var(--wb-text-secondary); font-size: 13px; }
 .eyebrow { color: var(--wb-text-tertiary); }
-.summary-strip { display: grid; grid-template-columns: repeat(4, 1fr); background: var(--wb-bg-card); border: 1px solid var(--wb-border); border-radius: 10px; overflow: hidden; }
-.summary-item { display: grid; grid-template-columns: auto 1fr; align-items: center; column-gap: 12px; row-gap: 2px; min-height: 82px; padding: 14px 20px; color: inherit; text-align: left; background: transparent; border: 0; border-right: 1px solid var(--wb-border-light); cursor: pointer; }
+.summary-strip { display: grid; grid-template-columns: repeat(4, 1fr); background: var(--wb-bg-card); border: 1px solid var(--wb-border-light); border-radius: 16px; overflow: hidden; box-shadow: var(--wb-shadow-sm); }
+.summary-item { display: grid; grid-template-columns: auto 1fr; align-items: center; column-gap: 12px; row-gap: 2px; min-height: 86px; padding: 14px 20px; color: inherit; text-align: left; background: transparent; border: 0; border-right: 1px solid var(--wb-border-light); cursor: pointer; }
 .summary-item:last-child { border-right: 0; }
 .summary-item:hover { background: var(--wb-primary-mist); }
-.summary-value { grid-row: span 2; color: var(--wb-text); font-size: 27px; line-height: 1; font-variant-numeric: tabular-nums; }
+.summary-value { grid-row: span 2; color: var(--wb-text); font-size: 29px; line-height: 1; font-variant-numeric: tabular-nums; }
 .summary-value--danger { color: var(--wb-danger); }
 .summary-value--accent { color: var(--wb-accent); }
 .summary-label { color: var(--wb-text); font-size: 13px; font-weight: 600; }
 .summary-action { display: inline-flex; align-items: center; gap: 3px; color: var(--wb-text-tertiary); font-size: 12px; }
-.failure-alert { margin-top: 16px; cursor: pointer; }
-.dashboard-grid { display: grid; grid-template-columns: minmax(0, 1.35fr) minmax(360px, 0.85fr); gap: 16px; margin-top: 16px; }
-.surface { min-width: 0; background: var(--wb-bg-card); border: 1px solid var(--wb-border); border-radius: 10px; }
-.surface-header { padding: 20px 22px 16px; border-bottom: 1px solid var(--wb-border-light); }
+.failure-alert { margin-top: 14px; cursor: pointer; border-radius: 12px; }
+.section-heading { display: flex; align-items: end; justify-content: space-between; gap: 16px; margin: 30px 0 12px; }.section-heading h2 { margin: 4px 0 0; color: var(--wb-text); font-size: 17px; letter-spacing: -.02em; }.section-kicker { color: var(--wb-primary); font-size: 11px; font-weight: 700; letter-spacing: .08em; }.section-note { color: var(--wb-text-tertiary); font-size: 12px; }
+.dashboard-grid { display: grid; grid-template-columns: minmax(0, 1.35fr) minmax(320px, .85fr); gap: 14px; }
+.surface { min-width: 0; background: var(--wb-bg-card); border: 1px solid var(--wb-border-light); border-radius: 14px; box-shadow: var(--wb-shadow-sm); }
+.surface-header { padding: 17px 18px 14px; border-bottom: 1px solid var(--wb-border-light); }
 .surface-header h2 { margin: 0 0 5px; color: var(--wb-text); font-size: 15px; font-weight: 650; }
 .todo-list, .student-list { padding: 4px 10px 10px; }
-.todo-row, .student-row { display: flex; align-items: center; width: 100%; gap: 12px; padding: 13px 12px; color: inherit; text-align: left; background: transparent; border: 0; border-bottom: 1px solid var(--wb-border-light); cursor: pointer; }
+.todo-row, .student-row { display: flex; align-items: center; width: 100%; gap: 12px; padding: 13px 10px; color: inherit; text-align: left; background: transparent; border: 0; border-bottom: 1px solid var(--wb-border-light); cursor: pointer; }
 .todo-row:last-child, .student-row:last-child { border-bottom: 0; }
 .todo-row:hover, .student-row:hover { background: var(--wb-bg); }
 .priority-dot { width: 7px; height: 7px; flex: 0 0 7px; border-radius: 50%; background: var(--wb-primary); }
@@ -216,7 +219,7 @@ onMounted(async () => {
 .empty-state strong { color: var(--wb-text); font-size: 14px; }
 .empty-state--compact { min-height: 150px; }
 .empty-state--compact .el-icon { color: var(--wb-text-tertiary); font-size: 26px; }
-.progress-surface { margin-top: 16px; }
+.progress-surface { margin-top: 14px; }
 .progress-note { color: var(--wb-text-tertiary); font-size: 12px; }
 .workflow-progress { display: flex; align-items: center; padding: 22px; }
 .workflow-step { display: flex; flex: 1; align-items: center; gap: 8px; color: var(--wb-text-secondary); font-size: 12px; white-space: nowrap; }
@@ -224,6 +227,6 @@ onMounted(async () => {
 .workflow-step > .el-icon { flex: 1; color: var(--wb-border); }
 .workflow-index { display: inline-flex; align-items: center; justify-content: center; width: 23px; height: 23px; flex: 0 0 23px; color: var(--wb-text-tertiary); font-size: 11px; border: 1px solid var(--wb-border); border-radius: 50%; }
 .workflow-index--active { color: white; background: var(--wb-primary); border-color: var(--wb-primary); }
-@media (max-width: 1000px) { .dashboard { padding: 24px; } .summary-strip { grid-template-columns: repeat(2, 1fr); } .summary-item:nth-child(2) { border-right: 0; } .summary-item:nth-child(-n+2) { border-bottom: 1px solid var(--wb-border-light); } .dashboard-grid { grid-template-columns: 1fr; } }
+@media (max-width: 1000px) { .dashboard { padding: 28px 24px 44px; } .summary-strip { grid-template-columns: repeat(2, 1fr); } .summary-item:nth-child(2) { border-right: 0; } .summary-item:nth-child(-n+2) { border-bottom: 1px solid var(--wb-border-light); } .dashboard-grid { grid-template-columns: 1fr; } }
 @media (max-width: 640px) { .dashboard { padding: 20px 16px 32px; } .page-header { align-items: flex-start; flex-direction: column; } .page-header .el-button { width: 100%; } .summary-strip { grid-template-columns: 1fr; } .summary-item, .summary-item:nth-child(2) { border-right: 0; border-bottom: 1px solid var(--wb-border-light); } .summary-item:last-child { border-bottom: 0; } .workflow-progress { align-items: flex-start; flex-direction: column; gap: 12px; } .workflow-step, .workflow-step:last-child { flex: initial; } .workflow-step > .el-icon { display: none; } }
 </style>

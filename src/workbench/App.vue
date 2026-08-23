@@ -1,4 +1,4 @@
-﻿<template>
+<template>
   <div id="workbench-app">
     <TopNavBar />
     <div class="workbench-content">
@@ -41,14 +41,15 @@ html, body {
 .desktop-notice p { margin: 0 0 18px; color: var(--wb-text-secondary); font-size: 13px; line-height: 1.7; }
 
 #workbench-app {
-  height: 100vh;
-  overflow: hidden;
-  display: flex;
-  flex-direction: column;
+  min-height: 100vh;
+  background: var(--wb-bg);
 }
 
+
 .workbench-content {
-  flex: 1;
-  overflow: hidden;
+  min-height: 100vh;
+  padding-left: 232px;
+  padding-top: 64px;
 }
+@media (max-width: 900px) { .workbench-content { padding-left: 68px; } }
 </style>

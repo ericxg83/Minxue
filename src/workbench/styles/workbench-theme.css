@@ -1,12 +1,10 @@
-/* ═══════════════════════════════════════════
-   敏学成长工作台 · 主题覆盖
-   统一 Element Plus 主题色与移动端一致
-   并建立全局设计 token 体系
-   ═══════════════════════════════════════════ */
+/* 鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺?   鏁忓鎴愰暱宸ヤ綔鍙?路 涓婚瑕嗙洊
+   缁熶竴 Element Plus 涓婚鑹蹭笌绉诲姩绔竴鑷?   骞跺缓绔嬪叏灞€璁捐 token 浣撶郴
+   鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺?*/
 
-/* ── Element Plus CSS 变量覆盖 ── */
+/* 鈹€鈹€ Element Plus CSS 鍙橀噺瑕嗙洊 鈹€鈹€ */
 :root {
-  /* 主色 → 与移动端一致 (#6366F1 = Indigo-500) */
+  /* 涓昏壊 鈫?涓庣Щ鍔ㄧ涓€鑷?(#6366F1 = Indigo-500) */
   --el-color-primary: #6366F1;
   --el-color-primary-light-3: #A5B4FC;
   --el-color-primary-light-5: #C7D2FE;
@@ -15,13 +13,13 @@
   --el-color-primary-light-9: #F5F6FF;
   --el-color-primary-dark-2: #4F46E5;
 
-  /* 成功/警告/危险 与移动端语义色一致 */
+  /* 鎴愬姛/璀﹀憡/鍗遍櫓 涓庣Щ鍔ㄧ璇箟鑹蹭竴鑷?*/
   --el-color-success: #16A34A;
   --el-color-warning: #D97706;
   --el-color-danger: #DC2626;
   --el-color-info: #6366F1;
 
-  /* 边框 */
+  /* 杈规 */
   --el-border-color: #E2E8F0;
   --el-border-color-light: #F1F5F9;
   --el-border-color-lighter: #F8FAFC;
@@ -30,7 +28,7 @@
   --el-border-radius-round: 20px;
   --el-border-radius-circle: 100%;
 
-  /* 字体 */
+  /* 瀛椾綋 */
   --el-font-size-base: 14px;
   --el-font-size-small: 13px;
   --el-font-size-extra-small: 12px;
@@ -38,7 +36,7 @@
   --el-font-size-large: 18px;
   --el-font-weight-primary: 500;
 
-  /* 背景 */
+  /* 鑳屾櫙 */
   --el-bg-color: #F8FAFC;
   --el-bg-color-overlay: #FFFFFF;
   --el-bg-color-page: #F1F5F9;
@@ -46,41 +44,41 @@
   --el-fill-color-light: #F8FAFC;
   --el-fill-color-lighter: #FCFCFD;
 
-  /* 文字 */
+  /* 鏂囧瓧 */
   --el-text-color-primary: #1E293B;
   --el-text-color-regular: #334155;
   --el-text-color-secondary: #64748B;
   --el-text-color-placeholder: #94A3B8;
   --el-text-color-disabled: #CBD5E1;
 
-  /* 阴影 */
+  /* 闃村奖 */
   --el-box-shadow: 0 1px 3px rgba(0, 0, 0, 0.06);
   --el-box-shadow-light: 0 1px 2px rgba(0, 0, 0, 0.04);
   --el-box-shadow-lighter: 0 0 1px rgba(0, 0, 0, 0.02);
   --el-box-shadow-dark: 0 3px 10px rgba(0, 0, 0, 0.08);
 }
 
-/* ── 工作台全局设计 token（复用移动端 index.css 的设计）─── */
+/* 鈹€鈹€ 宸ヤ綔鍙板叏灞€璁捐 token锛堝鐢ㄧЩ鍔ㄧ index.css 鐨勮璁★級鈹€鈹€鈹€ */
 :root {
-  /* 背景 */
+  /* 鑳屾櫙 */
   --wb-bg: #F1F5F9;
   --wb-bg-card: #FFFFFF;
   --wb-bg-hover: #F1F5F9;
   --wb-bg-elevated: #F8FAFC;
   --wb-bg-mist: #F8FAFC;
 
-  /* 主色 */
+  /* 涓昏壊 */
   --wb-primary: #6366F1;
   --wb-primary-hover: #4F46E5;
   --wb-primary-soft: #E0E7FF;
   --wb-primary-mist: #EEF2FF;
 
-  /* 强调色（教育类 CTA） */
+  /* 寮鸿皟鑹诧紙鏁欒偛绫?CTA锛?*/
   --wb-accent: #8B5CF6;
   --wb-accent-hover: #7C3AED;
   --wb-accent-soft: #EDE9FE;
 
-  /* 语义色 */
+  /* 璇箟鑹?*/
   --wb-success: #16A34A;
   --wb-success-soft: #DCFCE7;
   --wb-warning: #D97706;
@@ -88,34 +86,34 @@
   --wb-danger: #DC2626;
   --wb-danger-soft: #FEE2E2;
   --wb-info: #6366F1;
-  /* 处理中（AI 尚未出判定）专属语义色，与 exception(accent) 区分 */
+  /* 澶勭悊涓紙AI 灏氭湭鍑哄垽瀹氾級涓撳睘璇箟鑹诧紝涓?exception(accent) 鍖哄垎 */
   --wb-processing: #7C3AED;
   --wb-processing-soft: #F5E8FF;
 
-  /* 文字 */
+  /* 鏂囧瓧 */
   --wb-text: #1E293B;
   --wb-text-secondary: #64748B;
   --wb-text-tertiary: #94A3B8;
   --wb-text-inverse: #FFFFFF;
 
-  /* 边框 */
+  /* 杈规 */
   --wb-border: #E2E8F0;
   --wb-border-light: #F1F5F9;
 
-  /* 圆角（Claymorphism: 略大、有触感） */
+  /* 鍦嗚锛圕laymorphism: 鐣ュぇ銆佹湁瑙︽劅锛?*/
   --wb-radius-xs: 6px;
   --wb-radius-sm: 10px;
   --wb-radius-md: 14px;
   --wb-radius-lg: 18px;
   --wb-radius-full: 9999px;
 
-  /* 阴影（柔和、有触感深度） */
+  /* 闃村奖锛堟煍鍜屻€佹湁瑙︽劅娣卞害锛?*/
   --wb-shadow-sm: 0 1px 3px rgba(0, 0, 0, 0.06);
   --wb-shadow-md: 0 3px 10px rgba(0, 0, 0, 0.08);
   --wb-shadow-lg: 0 6px 20px rgba(0, 0, 0, 0.10);
 }
 
-/* ── 全局样式重置 ── */
+/* 鈹€鈹€ 鍏ㄥ眬鏍峰紡閲嶇疆 鈹€鈹€ */
 html, body {
   margin: 0;
   padding: 0;
@@ -132,7 +130,7 @@ body {
   -moz-osx-font-smoothing: grayscale;
 }
 
-/* ── Card 基础样式 ── */
+/* 鈹€鈹€ Card 鍩虹鏍峰紡 鈹€鈹€ */
 .wb-card {
   background: var(--wb-bg-card);
   border: 1px solid var(--wb-border-light);
@@ -145,7 +143,7 @@ body {
   box-shadow: var(--wb-shadow-md);
 }
 
-/* ── 按钮基础（和 Element Plus 互补）── */
+/* 鈹€鈹€ 鎸夐挳鍩虹锛堝拰 Element Plus 浜掕ˉ锛夆攢鈹€ */
 .wb-btn {
   display: inline-flex;
   align-items: center;
@@ -176,7 +174,7 @@ body {
   background: var(--wb-border);
 }
 
-/* ── 动画 ── */
+/* 鈹€鈹€ 鍔ㄧ敾 鈹€鈹€ */
 @keyframes wb-fade-up {
   from { opacity: 0; transform: translateY(8px); }
   to { opacity: 1; transform: translateY(0); }
@@ -193,7 +191,7 @@ body {
   animation: wb-fade-in 0.2s ease-out;
 }
 
-/* ── Scrollbar ── */
+/* 鈹€鈹€ Scrollbar 鈹€鈹€ */
 ::-webkit-scrollbar {
   width: 6px;
   height: 6px;
@@ -223,3 +221,426 @@ body {
 .review-workspace .el-tag { border-radius: 5px; font-weight: 550; }
 .review-workspace .el-progress-bar__outer { background: var(--wb-border-light); }
 .review-workspace .el-progress-bar__inner { background: var(--wb-primary); }
+
+:root {
+  --wb-bg: #F7F6F2;
+  --wb-bg-hover: #EFEEE9;
+  --wb-bg-elevated: #FFFFFF;
+  --wb-bg-mist: #F7F7FA;
+  --wb-primary: #3157D5;
+  --wb-primary-hover: #2445B4;
+  --wb-primary-soft: #E8EDFF;
+  --wb-primary-mist: #F3F5FF;
+  --wb-text: #1C1C1E;
+  --wb-text-secondary: #6C6C70;
+  --wb-text-tertiary: #A9A9AE;
+  --wb-border: #C6C6C8;
+  --wb-border-light: #E5E5EA;
+  --wb-shadow-sm: 0 1px 2px rgba(0, 0, 0, .04);
+}
+
+/* 鈹€鈹€ P1鈥揚3 shared workbench surface 鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€ */
+:root {
+  --el-color-primary: #3157D5;
+  --el-color-primary-light-3: #8198E6;
+  --el-color-primary-light-5: #A9B8EF;
+  --el-color-primary-light-7: #D7DFFF;
+  --el-color-primary-light-8: #E8EDFF;
+  --el-color-primary-light-9: #F3F5FF;
+  --el-color-primary-dark-2: #2445B4;
+  --el-color-info: #3157D5;
+  --el-border-color: #C6C6C8;
+  --el-border-color-light: #E5E5EA;
+  --el-border-color-lighter: #F0F0F2;
+  --el-bg-color: #FFFFFF;
+  --el-bg-color-page: #F7F6F2;
+  --el-fill-color: #EFEEE9;
+  --el-fill-color-light: #F7F7FA;
+  --el-text-color-primary: #1C1C1E;
+  --el-text-color-regular: #3A3A3C;
+  --el-text-color-secondary: #6C6C70;
+  --el-text-color-placeholder: #A9A9AE;
+}
+
+button:focus-visible,
+[role='button']:focus-visible,
+.el-button:focus-visible,
+.el-input__wrapper:focus-within,
+.el-select__wrapper:focus-within {
+  outline: 2px solid rgba(49, 87, 213, .28);
+  outline-offset: 2px;
+}
+
+.workbench-content > * {
+  min-height: calc(100vh - 64px);
+}
+
+.workbench-content .el-button {
+  border-radius: 9px;
+  font-weight: 600;
+  transition: background .18s ease, border-color .18s ease, color .18s ease, box-shadow .18s ease;
+}
+.workbench-content .el-button--primary {
+  box-shadow: 0 3px 8px rgba(49, 87, 213, .16);
+}
+.workbench-content .el-button--primary:hover {
+  box-shadow: 0 5px 12px rgba(49, 87, 213, .2);
+}
+.workbench-content .el-button.is-text,
+.workbench-content .el-button.is-link {
+  box-shadow: none;
+}
+.workbench-content .el-input__wrapper,
+.workbench-content .el-select__wrapper,
+.workbench-content .el-textarea__inner {
+  border-radius: 9px;
+  box-shadow: 0 0 0 1px var(--wb-border-light) inset;
+  background: var(--wb-bg-card);
+}
+.workbench-content .el-input__wrapper:hover,
+.workbench-content .el-select__wrapper:hover,
+.workbench-content .el-textarea__inner:hover {
+  box-shadow: 0 0 0 1px var(--wb-border) inset;
+}
+.workbench-content .el-tag {
+  border-radius: 6px;
+  font-weight: 600;
+}
+.workbench-content .el-table {
+  --el-table-border-color: var(--wb-border-light);
+  --el-table-header-bg-color: var(--wb-bg-mist);
+  --el-table-row-hover-bg-color: var(--wb-primary-mist);
+  color: var(--wb-text);
+}
+.workbench-content .el-table th.el-table__cell {
+  color: var(--wb-text-secondary);
+  font-size: 12px;
+  font-weight: 600;
+}
+.workbench-content .el-table td.el-table__cell,
+.workbench-content .el-table th.el-table__cell {
+  padding: 11px 0;
+}
+.workbench-content .el-pagination {
+  --el-pagination-button-bg-color: transparent;
+  --el-pagination-hover-color: var(--wb-primary);
+}
+.workbench-content .el-dialog,
+.workbench-content .el-drawer {
+  border-radius: 16px;
+  box-shadow: 0 18px 48px rgba(28, 28, 30, .16);
+}
+.workbench-content .el-dialog__header,
+.workbench-content .el-drawer__header {
+  margin-bottom: 0;
+  padding: 20px 22px 14px;
+  border-bottom: 1px solid var(--wb-border-light);
+}
+.workbench-content .el-dialog__body,
+.workbench-content .el-drawer__body {
+  padding: 20px 22px;
+}
+.workbench-content .el-alert {
+  border-radius: 12px;
+  border: 1px solid transparent;
+}
+
+/* Page shells from the existing workbench views */
+.grade-center,
+.todo-workbench,
+.students-workbench,
+.student-detail-workbench,
+.growth-workbench,
+.weekly-report-workbench,
+.question-bank-workbench,
+.handout-list,
+.worksheet-mgr,
+.worksheet-review,
+.exam-workbench,
+.exam-answer-review,
+.review-workbench-page,
+.wrong-center {
+  background: var(--wb-bg) !important;
+  color: var(--wb-text);
+}
+
+.grade-center,
+.todo-workbench,
+.students-workbench,
+.student-detail-workbench,
+.growth-workbench,
+.weekly-report-workbench,
+.question-bank-workbench,
+.handout-list,
+.worksheet-mgr,
+.worksheet-review,
+.exam-workbench,
+.exam-answer-review,
+.review-workbench-page,
+.wrong-center {
+  font-family: -apple-system, BlinkMacSystemFont, "PingFang SC", "SF Pro Text", "SF Pro Display", "Inter", sans-serif;
+}
+
+.grade-center .page-header,
+.todo-workbench .page-header,
+.students-workbench .page-header,
+.student-detail-workbench .page-header,
+.question-bank-workbench .page-header,
+.handout-list .page-header,
+.worksheet-mgr .page-header,
+.exam-workbench .page-header,
+.exam-answer-review .page-header,
+.wrong-center .page-header {
+  background: var(--wb-bg-card) !important;
+  border-color: var(--wb-border-light) !important;
+}
+
+.grade-center .toolbar,
+.todo-workbench .toolbar,
+.students-workbench .toolbar,
+.question-bank-workbench .toolbar,
+.handout-list .toolbar,
+.worksheet-mgr .toolbar,
+.wrong-center .toolbar,
+.wrong-center .advanced,
+.wrong-center .selection-bar {
+  border-color: var(--wb-border-light) !important;
+  border-radius: 12px !important;
+  box-shadow: var(--wb-shadow-sm);
+}
+
+.wrong-center .page-content,
+.weekly-report-workbench .main-content,
+.growth-workbench,
+.worksheet-mgr,
+.question-bank-workbench {
+  scrollbar-color: #C6C6C8 transparent;
+}
+
+.wrong-center .list-panel,
+.wrong-center .detail-panel,
+.wrong-center .detail-placeholder,
+.wrong-center .summary-strip,
+.weekly-report-workbench .kpi-card,
+.weekly-report-workbench .kpi-card-big,
+.growth-workbench .surface,
+.growth-workbench .panel,
+.question-bank-workbench .panel,
+.handout-list .list-panel,
+.worksheet-mgr .debug-card {
+  border-color: var(--wb-border-light) !important;
+  border-radius: 14px !important;
+  box-shadow: var(--wb-shadow-sm);
+}
+
+.wrong-center .question-row:hover,
+.wrong-center .student-row:hover,
+.wrong-center .summary-item:hover {
+  background: var(--wb-primary-mist) !important;
+}
+.wrong-center .question-row.selected,
+.wrong-center .summary-item.active {
+  background: var(--wb-primary-mist) !important;
+  box-shadow: inset 2px 0 var(--wb-primary) !important;
+}
+.wrong-center .subject,
+.wrong-center .tag,
+.wrong-center .scope-chip {
+  color: var(--wb-primary) !important;
+  background: var(--wb-primary-soft) !important;
+}
+.wrong-center .status.danger { color: var(--wb-danger) !important; background: var(--wb-danger-soft) !important; }
+.wrong-center .status.warning { color: var(--wb-warning) !important; background: var(--wb-warning-soft) !important; }
+.wrong-center .status.success { color: var(--wb-success) !important; background: var(--wb-success-soft) !important; }
+.wrong-center .status.info { color: var(--wb-primary) !important; background: var(--wb-primary-soft) !important; }
+
+.weekly-report-workbench .top-bar,
+.weekly-report-workbench .section-title,
+.growth-workbench .page-header {
+  border-color: var(--wb-border-light) !important;
+}
+.weekly-report-workbench .kpi-card:hover,
+.weekly-report-workbench .kpi-card-big:hover {
+  border-color: var(--wb-primary) !important;
+  box-shadow: 0 5px 14px rgba(49, 87, 213, .1) !important;
+}
+.weekly-report-workbench .kpi-card--checked {
+  border-color: var(--wb-primary) !important;
+  background: var(--wb-primary-mist) !important;
+}
+
+@media (max-width: 900px) {
+  .workbench-content > * { min-height: calc(100vh - 64px); }
+  .workbench-content .el-dialog { width: calc(100vw - 32px) !important; }
+}
+
+/* Actual view root mapping kept separate so legacy view styles can migrate safely. */
+.todo-page,
+.students-page,
+.student-detail-page,
+.exam-mgr,
+.question-bank-container,
+.handout-list-page,
+.handout-preview,
+.review-page,
+.review-task-page,
+.retry-page,
+.unified-review-page,
+.practice-review-page,
+.growth-workbench,
+.weekly-report-workbench,
+.worksheet-mgr,
+.wrong-center {
+  background: var(--wb-bg) !important;
+  color: var(--wb-text);
+  font-family: -apple-system, BlinkMacSystemFont, "PingFang SC", "SF Pro Text", "SF Pro Display", "Inter", sans-serif;
+}
+
+.todo-page,
+.students-page,
+.student-detail-page,
+.exam-mgr,
+.question-bank-container,
+.handout-list-page,
+.handout-preview,
+.review-page,
+.review-task-page,
+.retry-page,
+.unified-review-page,
+.practice-review-page,
+.growth-workbench,
+.weekly-report-workbench,
+.worksheet-mgr,
+.wrong-center {
+  border-color: var(--wb-border-light) !important;
+}
+
+.todo-page .todo-summary,
+.todo-page .todo-surface,
+.students-page .students-surface,
+.student-detail-page .summary-grid,
+.student-detail-page .surface,
+.exam-mgr .el-table,
+.question-bank-container .question-table,
+.question-bank-container .stats-bar,
+.handout-list-page .lecture-card,
+.review-page .panel,
+.review-task-page .panel,
+.retry-page .panel,
+.growth-workbench .kpi-card,
+.growth-workbench .kpi-card-big,
+.weekly-report-workbench .kpi-card,
+.weekly-report-workbench .kpi-card-big {
+  border-color: var(--wb-border-light) !important;
+  border-radius: 14px !important;
+  box-shadow: var(--wb-shadow-sm);
+}
+
+.todo-page .todo-summary,
+.todo-page .todo-surface,
+.students-page .students-surface,
+.student-detail-page .summary-grid,
+.student-detail-page .surface,
+.question-bank-container .stats-bar,
+.handout-list-page .lecture-card,
+.review-page .panel,
+.review-task-page .panel,
+.retry-page .panel {
+  background: var(--wb-bg-card) !important;
+}
+
+.todo-page .filter-tabs button.active,
+.students-page .filter-tabs button.active,
+.student-detail-page .detail-tabs button.active,
+.question-bank-container .el-tabs__item.is-active,
+.handout-list-page .el-button.is-text:hover,
+.wrong-center .advanced button.active {
+  color: var(--wb-primary) !important;
+  background: var(--wb-primary-mist) !important;
+  border-color: var(--wb-primary) !important;
+}
+
+.todo-page .todo-table-head,
+.students-page .table-head,
+.question-bank-container .stats-bar,
+.exam-mgr .el-table th.el-table__cell {
+  background: var(--wb-bg-mist) !important;
+  color: var(--wb-text-secondary) !important;
+}
+
+.todo-page .todo-table-row:hover,
+.students-page .student-row:hover,
+.student-detail-page .focus-row:hover,
+.student-detail-page .task-row:hover,
+.question-bank-container .el-table__row:hover {
+  background: var(--wb-primary-mist) !important;
+}
+
+.handout-list-page .lecture-card:hover,
+.growth-workbench .kpi-card:hover,
+.growth-workbench .kpi-card-big:hover {
+  border-color: var(--wb-primary) !important;
+  box-shadow: 0 5px 14px rgba(49, 87, 213, .10) !important;
+}
+
+.handout-list-page .page-title,
+.question-bank-container h2,
+.exam-mgr h2,
+.worksheet-mgr h2,
+.review-page h3,
+.student-detail-page h1,
+.students-page h1 {
+  color: var(--wb-text) !important;
+  letter-spacing: -.03em;
+}
+
+.handout-list-page .page-subtitle,
+.question-bank-container .muted,
+.exam-mgr .el-empty__description,
+.review-page .panel-title,
+.student-detail-page .detail-tabs button,
+.students-page .student-count {
+  color: var(--wb-text-secondary) !important;
+}
+
+.handout-preview .handout-toolbar,
+.review-page .review-header,
+.review-task-page .review-header,
+.retry-page .review-header,
+.unified-review-page .review-header {
+  background: rgba(255, 255, 255, .94) !important;
+  border-color: var(--wb-border-light) !important;
+  backdrop-filter: blur(12px);
+}
+
+.handout-preview .handout-toolbar,
+.review-page .review-header,
+.review-task-page .review-header,
+.retry-page .review-header {
+  box-shadow: 0 1px 0 rgba(28, 28, 30, .03);
+}
+
+@media (max-width: 1000px) {
+  .todo-page,
+  .students-page,
+  .student-detail-page,
+  .exam-mgr,
+  .question-bank-container,
+  .handout-list-page,
+  .growth-workbench,
+  .weekly-report-workbench,
+  .worksheet-mgr,
+  .wrong-center { padding-left: 24px !important; padding-right: 24px !important; }
+}
+@media (max-width: 640px) {
+  .todo-page,
+  .students-page,
+  .student-detail-page,
+  .exam-mgr,
+  .question-bank-container,
+  .handout-list-page,
+  .growth-workbench,
+  .weekly-report-workbench,
+  .worksheet-mgr,
+  .wrong-center { padding-left: 16px !important; padding-right: 16px !important; }
+}
