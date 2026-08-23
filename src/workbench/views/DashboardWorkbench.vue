@@ -65,11 +65,7 @@
             <el-icon class="row-arrow"><ArrowRight /></el-icon>
           </button>
         </div>
-        <div v-else class="empty-state">
-          <el-icon><CircleCheck /></el-icon>
-          <strong>今天没有待处理事项</strong>
-          <span>作业处理完成后，新的任务会出现在这里。</span>
-        </div>
+        <EmptyState v-else compact :icon="CircleCheck" title="今天没有待处理事项" description="作业处理完成后，新的任务会出现在这里。" />
       </section>
 
       <section class="surface">
@@ -90,10 +86,7 @@
             <el-tag :type="student.type" size="small" effect="plain">{{ student.status }}</el-tag>
           </button>
         </div>
-        <div v-else class="empty-state empty-state--compact">
-          <el-icon><User /></el-icon>
-          <span>暂无需要优先关注的学生</span>
-        </div>
+        <EmptyState v-else compact :icon="User" title="暂无需要优先关注的学生" description="学生出现新的错题或任务变化后，会在这里提示。" />
       </section>
     </section>
 
@@ -124,6 +117,7 @@ import { ArrowRight, CircleCheck, Upload, User } from '@element-plus/icons-vue'
 import { getStudents } from '../../services/apiService'
 import { useNotificationStore } from '../stores/notificationStore'
 import ActionButton from '../components/ui/ActionButton.vue'
+import EmptyState from '../components/ui/EmptyState.vue'
 import PageHeader from '../components/ui/PageHeader.vue'
 
 const router = useRouter()
@@ -190,14 +184,14 @@ onMounted(async () => {
 .summary-item:hover { background: var(--wb-primary-mist); }
 .summary-value { grid-row: span 2; color: var(--wb-text); font-size: 29px; line-height: 1; font-variant-numeric: tabular-nums; }
 .summary-value--danger { color: var(--wb-danger); }
-.summary-value--accent { color: var(--wb-accent); }
+.summary-value--accent { color: var(--wb-warning); }
 .summary-label { color: var(--wb-text); font-size: 13px; font-weight: 600; }
 .summary-action { display: inline-flex; align-items: center; gap: 3px; color: var(--wb-text-tertiary); font-size: 12px; }
-.failure-alert { margin-top: 14px; cursor: pointer; border-radius: 12px; }
+.failure-alert { margin-top: 16px; cursor: pointer; border-radius: var(--wb-radius-panel); }
 .section-heading { display: flex; align-items: end; justify-content: space-between; gap: 16px; margin: 30px 0 12px; }.section-heading h2 { margin: 4px 0 0; color: var(--wb-text); font-size: 17px; letter-spacing: -.02em; }.section-kicker { color: var(--wb-primary); font-size: 11px; font-weight: 700; letter-spacing: .08em; }.section-note { color: var(--wb-text-tertiary); font-size: 12px; }
-.dashboard-grid { display: grid; grid-template-columns: minmax(0, 1.35fr) minmax(320px, .85fr); gap: 14px; }
-.surface { min-width: 0; background: var(--wb-bg-card); border: 1px solid var(--wb-border-light); border-radius: 14px; box-shadow: var(--wb-shadow-sm); }
-.surface-header { padding: 17px 18px 14px; border-bottom: 1px solid var(--wb-border-light); }
+.dashboard-grid { display: grid; grid-template-columns: minmax(0, 1.35fr) minmax(320px, .85fr); gap: 16px; }
+.surface { min-width: 0; background: var(--wb-bg-card); border: 1px solid var(--wb-border); border-radius: var(--wb-radius-panel); box-shadow: none; }
+.surface-header { padding: 18px 20px; border-bottom: 1px solid var(--wb-border-light); }
 .surface-header h2 { margin: 0 0 5px; color: var(--wb-text); font-size: 15px; font-weight: 650; }
 .todo-list, .student-list { padding: 4px 10px 10px; }
 .todo-row, .student-row { display: flex; align-items: center; width: 100%; gap: 12px; padding: 13px 10px; color: inherit; text-align: left; background: transparent; border: 0; border-bottom: 1px solid var(--wb-border-light); cursor: pointer; }
@@ -212,12 +206,7 @@ onMounted(async () => {
 .row-arrow { color: var(--wb-text-tertiary); }
 .student-row { padding: 14px 12px; }
 .student-row :deep(.el-avatar) { flex: 0 0 auto; color: var(--wb-primary); background: var(--wb-primary-soft); }
-.empty-state { display: flex; align-items: center; justify-content: center; min-height: 180px; flex-direction: column; gap: 8px; color: var(--wb-text-tertiary); font-size: 13px; text-align: center; }
-.empty-state .el-icon { color: var(--wb-success); font-size: 32px; }
-.empty-state strong { color: var(--wb-text); font-size: 14px; }
-.empty-state--compact { min-height: 150px; }
-.empty-state--compact .el-icon { color: var(--wb-text-tertiary); font-size: 26px; }
-.progress-surface { margin-top: 14px; }
+.progress-surface { margin-top: 16px; }
 .progress-note { color: var(--wb-text-tertiary); font-size: 12px; }
 .workflow-progress { display: flex; align-items: center; padding: 22px; }
 .workflow-step { display: flex; flex: 1; align-items: center; gap: 8px; color: var(--wb-text-secondary); font-size: 12px; white-space: nowrap; }
