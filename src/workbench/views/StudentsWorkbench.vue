@@ -1,48 +1,82 @@
-﻿<template>
-  <div class="students-page">
-    <header class="page-header">
-      <div>
-        <div class="eyebrow">学生 / 学生列表</div>
-        <h1>学生</h1>
-        <p>从学生的当前状态开始，进入错题、重练和成长记录。</p>
-      </div>
-      <span class="student-count">共 {{ filteredStudents.length }} 名学生</span>
-    </header>
+<template>
+  <div class="wb-page students-page">
+    <div class="wb-page__inner">
+      <PageHeader eyebrow="学生学习 / 学生管理" title="学生管理" description="集中查看学生当前学习状态，快速进入错题、重练和成长记录。">
+        <template #badge><span class="header-count">{{ enrichedStudents.length }} 名学生</span></template>
+      </PageHeader>
 
-    <section class="students-surface">
-      <div class="toolbar">
-        <el-input v-model="search" clearable placeholder="搜索学生姓名" style="width: 240px">
+      <section class="stats-grid" aria-label="学生状态概览">
+        <StatsCard label="学生总数" :value="enrichedStudents.length" unit="人" description="当前学生范围" />
+        <StatsCard label="需关注" :value="summary.risk" unit="人" description="存在错题或待重练" tone="warning" />
+        <StatsCard label="有新增错题" :value="summary.withWrong" unit="人" description="仍有未掌握错题" tone="danger" />
+        <StatsCard label="待重练" :value="summary.withRetry" unit="人" description="有待完成重练任务" tone="primary" />
+      </section>
+
+      <FilterBar>
+        <template #leading><span class="result-label">当前显示</span><strong>{{ filteredStudents.length }} 名学生</strong></template>
+        <el-input v-model="search" clearable placeholder="搜索学生姓名" class="student-search">
           <template #prefix><el-icon><Search /></el-icon></template>
         </el-input>
         <div class="filter-tabs" role="tablist" aria-label="学生状态筛选">
-          <button v-for="filter in filters" :key="filter.key" :class="{ active: activeFilter === filter.key }" @click="activeFilter = filter.key">
+          <button v-for="filter in filters" :key="filter.key" type="button" :class="{ active: activeFilter === filter.key }" :aria-selected="activeFilter === filter.key" @click="activeFilter = filter.key">
             {{ filter.label }}<span>{{ filter.count }}</span>
           </button>
         </div>
-      </div>
+      </FilterBar>
 
-      <div v-if="loading" class="state"><el-icon class="is-loading"><Loading /></el-icon><span>正在加载学生…</span></div>
-      <div v-else-if="filteredStudents.length" class="student-table">
-        <div class="table-head"><span>学生</span><span>今日作业</span><span>新增错题</span><span>待重练</span><span>状态</span><span></span></div>
-        <button v-for="student in filteredStudents" :key="student.id" class="student-row" @click="openStudent(student.id)">
-          <span class="student-cell"><el-avatar :size="34" :src="student.avatar">{{ initial(student.name) }}</el-avatar><span><strong>{{ student.name || '未命名学生' }}</strong><small>{{ student.grade || student.class || '暂无年级信息' }}</small></span></span>
-          <span class="muted">{{ student.taskCount }} 份</span>
-          <span :class="{ danger: student.wrongCount > 0 }">{{ student.wrongCount }}</span>
-          <span :class="{ warning: student.retryCount > 0 }">{{ student.retryCount }}</span>
-          <span><el-tag :type="student.statusType" size="small" effect="plain">{{ student.status }}</el-tag></span>
-          <el-icon class="row-arrow"><ArrowRight /></el-icon>
-        </button>
-      </div>
-      <div v-else class="state"><el-icon><User /></el-icon><strong>没有找到匹配的学生</strong><span>可以换一个姓名或清除筛选条件。</span></div>
-    </section>
+      <ContentCard title="学生学习状态" description="优先处理有新增错题或待重练任务的学生" flush class="student-workspace">
+        <div v-if="loading" class="student-skeleton" aria-label="正在加载学生">
+          <div v-for="index in 5" :key="index" class="skeleton-row">
+            <el-skeleton animated>
+              <template #template>
+                <div class="skeleton-content">
+                  <el-skeleton-item variant="circle" class="skeleton-avatar" />
+                  <el-skeleton-item variant="text" class="skeleton-name" />
+                  <el-skeleton-item variant="text" class="skeleton-metric" />
+                  <el-skeleton-item variant="text" class="skeleton-metric" />
+                  <el-skeleton-item variant="text" class="skeleton-metric" />
+                  <el-skeleton-item variant="button" class="skeleton-status" />
+                </div>
+              </template>
+            </el-skeleton>
+          </div>
+        </div>
+
+        <div v-else-if="filteredStudents.length" class="student-table">
+          <div class="table-head" aria-hidden="true"><span>学生</span><span>作业记录</span><span>未掌握错题</span><span>待重练</span><span>当前状态</span><span></span></div>
+          <button v-for="student in filteredStudents" :key="student.id" type="button" class="student-row" :aria-label="`查看${student.name || '未命名学生'}的学习记录`" @click="openStudent(student.id)">
+            <span class="student-cell">
+              <el-avatar :size="38" :src="student.avatar">{{ initial(student.name) }}</el-avatar>
+              <span class="student-identity"><strong>{{ student.name || '未命名学生' }}</strong><small>{{ student.grade || student.class || '暂无年级信息' }}</small></span>
+            </span>
+            <span class="metric-cell"><small>作业记录</small><strong>{{ student.taskCount }}</strong><em>份</em></span>
+            <span class="metric-cell" :class="{ danger: student.wrongCount > 0 }"><small>未掌握错题</small><strong>{{ student.wrongCount }}</strong><em>道</em></span>
+            <span class="metric-cell" :class="{ warning: student.retryCount > 0 }"><small>待重练</small><strong>{{ student.retryCount }}</strong><em>份</em></span>
+            <span class="status-cell"><StatusTag :label="student.status" :tone="student.statusTone" /></span>
+            <span class="row-action">查看学生<el-icon><ArrowRight /></el-icon></span>
+          </button>
+        </div>
+
+        <EmptyState v-else :icon="User" :title="hasActiveFilters ? '没有找到匹配的学生' : '暂无学生'" :description="hasActiveFilters ? '可以更换学生姓名或查看其他状态。' : '学生加入后，可在这里查看学习状态和后续任务。'">
+          <template v-if="hasActiveFilters" #actions><ActionButton @click="resetFilters">清除筛选</ActionButton></template>
+        </EmptyState>
+      </ContentCard>
+    </div>
   </div>
 </template>
 
 <script setup>
 import { computed, onMounted, ref } from 'vue'
-import { ArrowRight, Loading, Search, User } from '@element-plus/icons-vue'
+import { ArrowRight, Search, User } from '@element-plus/icons-vue'
 import { useRouter } from 'vue-router'
 import { getStudents, getTasksByStudent, getWrongQuestionsByStudent, getGeneratedExamsByStudent } from '../../services/apiService'
+import ActionButton from '../components/ui/ActionButton.vue'
+import ContentCard from '../components/ui/ContentCard.vue'
+import EmptyState from '../components/ui/EmptyState.vue'
+import FilterBar from '../components/ui/FilterBar.vue'
+import PageHeader from '../components/ui/PageHeader.vue'
+import StatsCard from '../components/ui/StatsCard.vue'
+import StatusTag from '../components/ui/StatusTag.vue'
 
 const router = useRouter()
 const students = ref([])
@@ -55,11 +89,16 @@ const enrichedStudents = computed(() => students.value.map(student => {
   const retryCount = student.retryCount || 0
   const taskCount = student.taskCount || 0
   const hasRisk = wrongCount > 0 || retryCount > 0
-  return { ...student, wrongCount, retryCount, taskCount, status: hasRisk ? '需关注' : '正常', statusType: hasRisk ? 'warning' : 'success' }
+  return { ...student, wrongCount, retryCount, taskCount, status: hasRisk ? '需关注' : '正常', statusTone: hasRisk ? 'warning' : 'success' }
+}))
+const summary = computed(() => ({
+  risk: enrichedStudents.value.filter(student => student.status === '需关注').length,
+  withWrong: enrichedStudents.value.filter(student => student.wrongCount > 0).length,
+  withRetry: enrichedStudents.value.filter(student => student.retryCount > 0).length
 }))
 const filters = computed(() => [
   { key: 'all', label: '全部', count: enrichedStudents.value.length },
-  { key: 'risk', label: '需关注', count: enrichedStudents.value.filter(student => student.status === '需关注').length },
+  { key: 'risk', label: '需关注', count: summary.value.risk },
   { key: 'normal', label: '状态正常', count: enrichedStudents.value.filter(student => student.status === '正常').length }
 ])
 const filteredStudents = computed(() => enrichedStudents.value.filter(student => {
@@ -67,8 +106,10 @@ const filteredStudents = computed(() => enrichedStudents.value.filter(student =>
   const matchesFilter = activeFilter.value === 'all' || (activeFilter.value === 'risk' && student.status === '需关注') || (activeFilter.value === 'normal' && student.status === '正常')
   return matchesSearch && matchesFilter
 }))
-const initial = (name) => (name || '?').slice(0, 1)
-const openStudent = (id) => router.push(`/students/${id}`)
+const hasActiveFilters = computed(() => Boolean(search.value) || activeFilter.value !== 'all')
+const initial = name => (name || '?').slice(0, 1)
+const openStudent = id => router.push(`/students/${id}`)
+const resetFilters = () => { search.value = ''; activeFilter.value = 'all' }
 
 onMounted(async () => {
   try {
@@ -94,10 +135,46 @@ onMounted(async () => {
 </script>
 
 <style scoped>
-.students-page { height: 100%; overflow-y: auto; box-sizing: border-box; padding: 32px 36px 48px; background: var(--wb-bg); }
-.page-header { display: flex; align-items: flex-end; justify-content: space-between; margin-bottom: 24px; }.eyebrow { color: var(--wb-text-tertiary); font-size: 12px; }h1 { margin: 6px 0 4px; color: var(--wb-text); font-size: 25px; font-weight: 650; }.page-header p { margin: 0; color: var(--wb-text-secondary); font-size: 13px; }.student-count { color: var(--wb-text-tertiary); font-size: 13px; }
-.students-surface { background: var(--wb-bg-card); border: 1px solid var(--wb-border); border-radius: 10px; overflow: hidden; }.toolbar { display: flex; align-items: center; gap: 24px; padding: 14px 20px; border-bottom: 1px solid var(--wb-border-light); }.filter-tabs { display: flex; gap: 4px; }.filter-tabs button { padding: 7px 10px; color: var(--wb-text-secondary); background: transparent; border: 0; border-radius: 6px; cursor: pointer; }.filter-tabs button:hover { background: var(--wb-bg); }.filter-tabs button.active { color: var(--wb-primary); font-weight: 600; background: var(--wb-primary-mist); }.filter-tabs span { margin-left: 5px; color: var(--wb-text-tertiary); font-size: 11px; }.table-head, .student-row { display: grid; grid-template-columns: minmax(280px, 1.5fr) 150px 130px 130px 120px 24px; align-items: center; gap: 16px; padding: 0 20px; }.table-head { min-height: 38px; color: var(--wb-text-tertiary); font-size: 12px; background: var(--wb-bg); }.student-row { width: 100%; min-height: 70px; color: inherit; text-align: left; background: transparent; border: 0; border-bottom: 1px solid var(--wb-border-light); cursor: pointer; }.student-row:hover { background: #FBFBFE; }.student-cell { display: flex; align-items: center; min-width: 0; gap: 12px; }.student-cell :deep(.el-avatar) { flex: 0 0 auto; color: var(--wb-primary); background: var(--wb-primary-soft); }.student-cell > span { display: flex; min-width: 0; flex-direction: column; gap: 4px; }.student-cell strong { overflow: hidden; color: var(--wb-text); font-size: 13px; text-overflow: ellipsis; white-space: nowrap; }.student-cell small, .muted { color: var(--wb-text-secondary); font-size: 12px; }.danger { color: var(--wb-danger); }.warning { color: var(--wb-warning); }.row-arrow { color: var(--wb-text-tertiary); }.state { display: flex; align-items: center; justify-content: center; min-height: 280px; flex-direction: column; gap: 8px; color: var(--wb-text-tertiary); font-size: 13px; }.state .el-icon { font-size: 32px; }.state strong { color: var(--wb-text); font-size: 14px; }
-@media (max-width: 900px) { .students-page { padding: 24px; }.toolbar { align-items: stretch; flex-direction: column; gap: 12px; }.table-head { display: none; }.student-row { grid-template-columns: 1fr auto; gap: 8px 12px; padding: 14px 16px; }.student-cell { grid-row: span 2; }.student-row > span:nth-child(2), .student-row > span:nth-child(3), .student-row > span:nth-child(4), .student-row > span:nth-child(5) { text-align: right; }.student-row > span:nth-child(5) { grid-column: 2; } }
-@media (max-width: 560px) { .students-page { padding: 20px 16px 32px; }.page-header { align-items: flex-start; flex-direction: column; gap: 8px; }.filter-tabs { overflow-x: auto; } }
+.students-page { overflow-y: auto; }
+.stats-grid { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 16px; margin-bottom: 16px; }
+.header-count { display: inline-flex; align-items: center; height: 24px; padding: 0 9px; color: var(--wb-primary); font-size: 11px; font-weight: 600; background: var(--wb-primary-soft); border-radius: 6px; }
+.result-label { color: var(--wb-text-tertiary); font-size: 12px; }
+.ds-filter-bar strong { color: var(--wb-text); font-size: 12px; white-space: nowrap; }
+.student-search { width: 230px; }
+.filter-tabs { display: flex; align-items: center; gap: 4px; }
+.filter-tabs button { height: 32px; padding: 0 10px; color: var(--wb-text-secondary); font-size: 12px; background: transparent; border: 0; border-radius: 7px; cursor: pointer; }
+.filter-tabs button:hover { color: var(--wb-text); background: var(--wb-bg-hover); }
+.filter-tabs button.active { color: var(--wb-primary); font-weight: 600; background: var(--wb-primary-soft); }
+.filter-tabs span { margin-left: 5px; color: var(--wb-text-tertiary); font-size: 10px; }
+.student-workspace { margin-top: 16px; overflow: hidden; }
+.table-head, .student-row { display: grid; grid-template-columns: minmax(250px, 1.5fr) minmax(100px, .65fr) minmax(110px, .7fr) minmax(100px, .65fr) minmax(100px, .65fr) 86px; align-items: center; gap: 16px; padding: 0 20px; }
+.table-head { min-height: 40px; color: var(--wb-text-tertiary); font-size: 11px; background: var(--wb-bg-elevated); border-bottom: 1px solid var(--wb-border-light); }
+.student-row { width: 100%; min-height: 72px; box-sizing: border-box; color: inherit; text-align: left; background: transparent; border: 0; border-bottom: 1px solid var(--wb-border-light); cursor: pointer; transition: background-color .16s ease; }
+.student-row:last-child { border-bottom: 0; }
+.student-row:hover { background: var(--wb-bg-hover); }
+.student-row:focus-visible { position: relative; z-index: 1; outline: 2px solid var(--wb-primary); outline-offset: -2px; }
+.student-cell { display: flex; align-items: center; min-width: 0; gap: 12px; }
+.student-cell :deep(.el-avatar) { flex: 0 0 auto; color: var(--wb-primary); font-weight: 650; background: var(--wb-primary-soft); }
+.student-identity { display: flex; min-width: 0; flex-direction: column; gap: 5px; }
+.student-identity strong { overflow: hidden; color: var(--wb-text); font-size: 13px; font-weight: 650; text-overflow: ellipsis; white-space: nowrap; }
+.student-identity small { color: var(--wb-text-tertiary); font-size: 11px; }
+.metric-cell { color: var(--wb-text-secondary); font-size: 12px; font-variant-numeric: tabular-nums; }
+.metric-cell small { display: none; }
+.metric-cell strong { color: var(--wb-text); font-size: 14px; font-weight: 650; }
+.metric-cell em { margin-left: 3px; color: var(--wb-text-tertiary); font-size: 10px; font-style: normal; }
+.metric-cell.danger strong { color: var(--wb-danger); }
+.metric-cell.warning strong { color: var(--wb-warning); }
+.status-cell { display: flex; align-items: center; }
+.row-action { display: inline-flex; align-items: center; justify-content: flex-end; gap: 4px; color: var(--wb-text-tertiary); font-size: 11px; white-space: nowrap; }
+.student-row:hover .row-action { color: var(--wb-primary); }
+.skeleton-row { padding: 17px 20px; border-bottom: 1px solid var(--wb-border-light); }
+.skeleton-row:last-child { border-bottom: 0; }
+.skeleton-content { display: grid; grid-template-columns: 38px minmax(160px, 1.5fr) repeat(3, minmax(80px, .65fr)) 90px; align-items: center; gap: 16px; }
+.skeleton-avatar { width: 38px; height: 38px; }
+.skeleton-name { width: 50%; }
+.skeleton-metric { width: 38px; }
+.skeleton-status { width: 64px; height: 24px; }
+@media (max-width: 1000px) { .stats-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); } .table-head { display: none; } .student-row { grid-template-columns: minmax(220px, 1fr) repeat(3, minmax(72px, auto)) auto; gap: 12px; padding: 14px 16px; } .row-action { display: none; } .metric-cell small { display: block; margin-bottom: 5px; color: var(--wb-text-tertiary); font-size: 10px; } }
+@media (max-width: 720px) { .stats-grid { grid-template-columns: 1fr 1fr; } .student-search { width: 100%; } .filter-tabs { overflow-x: auto; width: 100%; } .filter-tabs button { flex: 0 0 auto; } .student-row { grid-template-columns: 1fr repeat(3, auto); } .status-cell { grid-column: 1 / -1; padding-left: 50px; } }
+@media (max-width: 520px) { .stats-grid { grid-template-columns: 1fr; } .student-row { grid-template-columns: 1fr auto auto; } .metric-cell:nth-of-type(2) { display: none; } }
 </style>
-
