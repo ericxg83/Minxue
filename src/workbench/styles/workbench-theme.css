@@ -208,3 +208,18 @@ body {
 ::-webkit-scrollbar-thumb:hover {
   background: #94A3B8;
 }
+
+/* ????? Design System */
+:root {
+  --review-surface: #FFFFFF;
+  --review-surface-subtle: #F8FAFC;
+  --review-border-strong: #CBD5E1;
+  --review-focus: rgba(79, 70, 229, .18);
+}
+
+.review-workspace .el-button:focus-visible,
+.review-task-page .el-button:focus-visible,
+.review-task-page button:focus-visible { outline: 3px solid var(--review-focus); outline-offset: 2px; }
+.review-workspace .el-tag { border-radius: 5px; font-weight: 550; }
+.review-workspace .el-progress-bar__outer { background: var(--wb-border-light); }
+.review-workspace .el-progress-bar__inner { background: var(--wb-primary); }

@@ -419,4 +419,20 @@ const handleRetryTask = async () => {
 .wrong-gate-actions {
   flex-shrink: 0;
 }
+
+
+.top-bar { height: 58px; padding: 0 20px; background: var(--wb-bg-card); border-bottom: 1px solid var(--wb-border); }
+.top-bar-left { gap: 8px; min-width: 0; }
+.top-bar-left :deep(.el-select:first-child) { width: 150px !important; }
+.top-bar-left :deep(.el-select:nth-child(2)) { width: 260px !important; margin-left: 0 !important; }
+.top-bar-right { gap: 6px; }
+.status-chips { gap: 4px; }
+.status-chip { padding: 3px 7px; border-radius: 5px; font-size: 11px; }
+.threshold-badge { padding: 4px 8px; border-radius: 5px; font-size: 11px; }
+.top-bar-right :deep(.el-button) { min-height: 30px; padding: 6px 10px; border-radius: 6px; font-size: 12px; }
+.top-bar-right :deep(.el-button--success) { color: #fff; background: var(--wb-success); border-color: var(--wb-success); }
+.top-bar-right :deep(.el-button--primary) { color: #fff; background: var(--wb-primary); border-color: var(--wb-primary); }
+.top-bar-right :deep(.el-button--warning) { color: var(--wb-warning); background: var(--wb-warning-soft); border-color: var(--wb-warning-soft); }
+@media (max-width: 1200px) { .status-chips .status-chip:nth-child(n+4), .threshold-badge { display: none; } .top-bar-right :deep(.el-button) { padding: 6px 8px; } }
+@media (max-width: 900px) { .top-bar { align-items: flex-start; height: auto; min-height: 58px; flex-direction: column; gap: 8px; padding: 10px 14px; } .top-bar-right { width: 100%; overflow-x: auto; padding-bottom: 2px; } }
 </style>

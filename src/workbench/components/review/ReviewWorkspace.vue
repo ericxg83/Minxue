@@ -1,5 +1,13 @@
-﻿<template>
+<template>
   <div class="review-workspace">
+    <div class="review-identity-bar">
+      <div class="review-identity">
+        <span class="review-kicker">教师工作台</span>
+        <strong>{{ store.reviewConfig.topTitle }}</strong>
+        <span class="review-mode-pill">{{ store.reviewConfig.modeLabel }}</span>
+      </div>
+      <div class="review-shortcuts">左右键切题 · C 正确 · W 错误 · Shift + Z 撤销</div>
+    </div>
     <ReviewTopBar />
 
 
@@ -208,6 +216,25 @@ const handleQuickReview = async (result) => {
 .stat-value--success { color: var(--wb-success); }
 .stat-value--primary { color: var(--wb-primary); }
 .stat-value--danger { color: var(--wb-danger); }
+
+
+.review-identity-bar { display: flex; align-items: center; justify-content: space-between; min-height: 40px; padding: 0 20px; background: #172033; color: #fff; }
+.review-identity { display: flex; align-items: center; gap: 10px; min-width: 0; }
+.review-kicker { color: #AAB4C5; font-size: 11px; }
+.review-identity strong { font-size: 14px; font-weight: 650; }
+.review-mode-pill { padding: 3px 8px; border: 1px solid rgba(255,255,255,.2); border-radius: 999px; color: #DCE3F1; font-size: 11px; }
+.review-shortcuts { color: #AAB4C5; font-size: 11px; }
+.review-context-bar { display: flex; align-items: center; justify-content: space-between; min-height: 54px; padding: 0 20px; background: var(--wb-bg-card); border-bottom: 1px solid var(--wb-border); }
+.review-context-main { display: flex; align-items: baseline; gap: 10px; min-width: 0; }
+.review-context-label { color: var(--wb-text-tertiary); font-size: 11px; }
+.review-context-main strong { overflow: hidden; color: var(--wb-text); font-size: 14px; text-overflow: ellipsis; white-space: nowrap; }
+.review-context-meta { color: var(--wb-text-secondary); font-size: 12px; }
+.review-progress-summary { display: flex; align-items: center; gap: 10px; color: var(--wb-text-secondary); font-size: 12px; }
+.review-progress-percent { color: var(--wb-text); font-weight: 650; font-variant-numeric: tabular-nums; }
+.review-progress-alert { padding-left: 10px; border-left: 1px solid var(--wb-border); color: var(--wb-warning); font-size: 12px; }
+.three-panel { min-height: 0; }
+@media (max-width: 1100px) { .review-shortcuts { display: none; } .review-identity-bar { padding: 0 14px; } .review-context-bar { padding: 0 14px; } }
+@media (max-width: 720px) { .review-context-bar { align-items: flex-start; flex-direction: column; gap: 8px; padding: 10px 14px; } .review-progress-summary { width: 100%; } }
 </style>
 
 
