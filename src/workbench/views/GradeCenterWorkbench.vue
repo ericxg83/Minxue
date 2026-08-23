@@ -2,9 +2,9 @@
   <div class="grade-center wb-page">
     <div class="wb-page__inner grade-workbench">
       <PageHeader
-        eyebrow="教学工作 / AI 批改工作台"
-        title="批改中心"
-        :description="`今天还有 ${pendingCount} 项任务需要处理，优先完成待教师复核与异常任务。`"
+        eyebrow="教学工作 / 批改中心"
+        title="作业批改"
+        :description="`集中处理学生作业与错题重练，当前有 ${pendingCount} 项待处理。`"
       >
         <template #badge>
           <span class="pending-pill">{{ pendingCount }} 项待处理</span>
@@ -16,12 +16,7 @@
         </template>
       </PageHeader>
 
-      <section class="wb-stats-grid" aria-label="AI 批改任务统计">
-        <StatsCard label="待处理" :value="pendingCount" description="今日任务队列" tone="warning" />
-        <StatsCard label="AI 处理中" :value="processingCount" description="识别与判题进行中" tone="primary" />
-        <StatsCard label="待教师复核" :value="reviewCount" description="AI 已完成，等待确认" tone="warning" />
-        <StatsCard label="待重练验证" :value="retryVerifyCount" description="学生已完成重练" tone="danger" />
-      </section>
+
 
       <FilterBar class="task-filters">
         <template #leading>
@@ -43,8 +38,8 @@
         </div>
       </FilterBar>
 
-      <section class="workspace-grid">
-        <ContentCard class="task-queue" title="学生任务" description="按异常、待复核、待验证和处理中排序" flush>
+      <section class="workspace-grid" aria-label="批改任务工作区">
+        <ContentCard class="task-queue" title="待处理任务" description="按优先级排列，选择任务查看上下文" flush>
           <div v-if="loading" class="loading-state">
             <el-icon class="is-loading"><Loading /></el-icon>
             <strong>正在同步 AI 批改任务</strong>
@@ -63,7 +58,8 @@
               :class="['task-item', { active: selectedTask?.key === task.key }]"
               tabindex="0"
               @click="selectTask(task)"
-              @keydown.enter="openTask(task)"
+              @keydown.enter="selectTask(task)"
+              @keydown.space.prevent="selectTask(task)"
             >
               <el-avatar :size="38" :src="task.studentAvatar">{{ task.studentName.slice(0, 1) }}</el-avatar>
               <div class="task-copy">
@@ -80,25 +76,15 @@
               </div>
               <div class="task-state">
                 <span :class="['status-badge', `status-badge--${task.tone}`]"><i />{{ task.statusLabel }}</span>
-                <el-button type="primary" text @click.stop="openTask(task)">{{ task.actionLabel }}</el-button>
+                <el-button type="primary" text @click.stop="openTask(task)">{{ task.actionLabel }}<el-icon><ArrowRight /></el-icon></el-button>
               </div>
             </article>
           </div>
           <EmptyState v-else title="当前筛选下没有任务" description="新上传的作业和完成的重练任务会出现在这里。" />
         </ContentCard>
 
-        <ContentCard class="task-inspector" title="任务预览" description="确认 AI 处理结果后进入审核工作区" flush>
+        <ContentCard class="task-inspector" title="任务摘要" description="确认任务状态后进入批改工作区" flush>
           <template v-if="selectedTask">
-            <div class="preview-media">
-              <img v-if="selectedTask.imageUrl" :src="selectedTask.imageUrl" :alt="selectedTask.name" />
-              <div v-else class="preview-placeholder">
-                <el-icon><DocumentChecked /></el-icon>
-                <strong>{{ selectedTask.source === 'retry' ? '错题重练任务' : '作业图片暂不可预览' }}</strong>
-                <span>{{ selectedTask.source === 'retry' ? '进入审核工作区查看题目与学生作答' : '原始任务未返回可用图片' }}</span>
-              </div>
-              <span class="preview-type">{{ selectedTask.sourceLabel }}</span>
-            </div>
-
             <div class="preview-content">
               <div class="preview-heading">
                 <div>
@@ -116,9 +102,9 @@
               </div>
 
               <dl class="preview-stats">
-                <div><dt>题目数量</dt><dd>{{ selectedTask.questionCount }}</dd></div>
-                <div><dt>AI 识别状态</dt><dd>{{ selectedTask.aiStatusLabel }}</dd></div>
-                <div><dt>错题数量</dt><dd :class="{ danger: selectedTask.wrongCount > 0 }">{{ selectedTask.wrongCount }}</dd></div>
+                <div><dt>题目</dt><dd>{{ selectedTask.questionCount }} 题</dd></div>
+                <div><dt>处理状态</dt><dd>{{ selectedTask.aiStatusLabel }}</dd></div>
+                <div><dt>错题</dt><dd :class="{ danger: selectedTask.wrongCount > 0 }">{{ selectedTask.wrongCount }} 题</dd></div>
               </dl>
 
               <div v-if="selectedTask.tone === 'danger'" class="task-alert">
@@ -130,7 +116,7 @@
                 <ActionButton variant="primary" @click="openTask(selectedTask)">
                   {{ selectedTask.actionLabel }}<el-icon><ArrowRight /></el-icon>
                 </ActionButton>
-                <span>将打开现有 Review Workspace</span>
+                <span>进入批改工作区处理</span>
               </div>
             </div>
           </template>
@@ -144,13 +130,12 @@
 <script setup>
 import { computed, onMounted, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
-import { ArrowRight, Check, DocumentChecked, Loading, Refresh, WarningFilled } from '@element-plus/icons-vue'
+import { ArrowRight, Check, Loading, Refresh, WarningFilled } from '@element-plus/icons-vue'
 import ActionButton from '../components/ui/ActionButton.vue'
 import ContentCard from '../components/ui/ContentCard.vue'
 import EmptyState from '../components/ui/EmptyState.vue'
 import FilterBar from '../components/ui/FilterBar.vue'
 import PageHeader from '../components/ui/PageHeader.vue'
-import StatsCard from '../components/ui/StatsCard.vue'
 import { getGeneratedExamsByStudent, getStudents, getTasksByStudent } from '../../services/apiService'
 
 const route = useRoute()
@@ -166,9 +151,6 @@ const statusFilter = ref('active')
 
 const activeStatuses = new Set(['pending', 'processing', 'review', 'retry', 'failed'])
 const pendingCount = computed(() => allTasks.value.filter(item => activeStatuses.has(item.workflowStatus)).length)
-const processingCount = computed(() => allTasks.value.filter(item => item.workflowStatus === 'processing').length)
-const reviewCount = computed(() => allTasks.value.filter(item => item.workflowStatus === 'review').length)
-const retryVerifyCount = computed(() => allTasks.value.filter(item => item.workflowStatus === 'retry').length)
 const visibleTasks = computed(() => allTasks.value.filter(item => {
   const sourceMatches = sourceFilter.value === 'all' || item.source === sourceFilter.value
   const statusMatches = statusFilter.value === 'all' || (statusFilter.value === 'active' ? activeStatuses.has(item.workflowStatus) : item.workflowStatus === 'completed')
