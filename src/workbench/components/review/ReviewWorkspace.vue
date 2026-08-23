@@ -90,9 +90,9 @@ onMounted(async () => {
       await store.autoSelectPendingTask?.()
     }
   }
-  const requestedExamId = route.query.examId
-  if (requestedExamId) {
-    const task = store.studentTasks.find(item => String(item.id) === String(requestedExamId))
+  const requestedTaskId = route.query.taskId || route.query.examId
+  if (requestedTaskId) {
+    const task = store.studentTasks.find(item => String(item.id) === String(requestedTaskId))
     if (task) await store.selectTask(task)
   }
 })

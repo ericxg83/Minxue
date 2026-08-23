@@ -1,4 +1,4 @@
-﻿import { createRouter, createWebHashHistory } from 'vue-router'
+import { createRouter, createWebHashHistory } from 'vue-router'
 
 const routes = [
   {
@@ -8,9 +8,15 @@ const routes = [
     meta: { requiresPC: true }
   },
   {
+    path: '/grade',
+    name: 'GradeCenter',
+    component: () => import('../views/GradeCenterWorkbench.vue'),
+    meta: { requiresPC: true }
+  },
+  {
     path: '/review',
     name: 'Review',
-    component: () => import('../views/ReviewWorkbench.vue'),
+    redirect: to => ({ path: '/grade', query: { ...to.query, source: 'homework' } }),
     meta: { requiresPC: true }
   },
   {
@@ -52,13 +58,20 @@ const routes = [
   {
     path: '/exam-history',
     name: 'ExamHistory',
-    component: () => import('../views/RetryTasksWorkbench.vue'),
+    redirect: to => ({ path: '/grade', query: { ...to.query, source: 'retry' } }),
     meta: { requiresPC: true }
   },
   {
     path: '/exam-history/review',
     name: 'ExamHistoryReview',
-    component: () => import('../views/PracticeReviewWorkbench.vue'),
+    component: () => import('../views/UnifiedReviewWorkbench.vue'),
+    props: { legacySource: 'retry' },
+    meta: { requiresPC: true }
+  },
+  {
+    path: '/grade/task',
+    name: 'GradeTaskReview',
+    component: () => import('../views/UnifiedReviewWorkbench.vue'),
     meta: { requiresPC: true }
   },
   {

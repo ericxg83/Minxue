@@ -109,9 +109,8 @@ onUnmounted(() => {
 const navItems = [
   { key: 'dashboard', label: '工作台', path: '/', icon: 'HomeFilled' },
   {
-    key: 'teaching', label: '批改作业', icon: 'DocumentChecked', children: [
-      { key: 'review', label: '作业批改', path: '/review', icon: 'DocumentChecked' },
-      { key: 'exam-history', label: '重练批改', path: '/exam-history', icon: 'Clock' }
+    key: 'teaching', label: '批改中心', icon: 'DocumentChecked', children: [
+      { key: 'grade', label: '批改中心', path: '/grade', icon: 'DocumentChecked' }
     ]
   },
   {
