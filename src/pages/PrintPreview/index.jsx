@@ -351,6 +351,7 @@ export default function PrintPreview({ onClose, questions: propQuestions, existi
         filename: `${currentStudent?.name || 'student'}_${examName}_${dayjs().format('YYYYMMDD_HHmm')}`,
         showAnswers: false,
         qrContent: getQrContent(),
+        returnPdfBlob: true,
       })
       if (result) {
         setPdfBlobUrl(result.blobUrl)
@@ -439,10 +440,11 @@ export default function PrintPreview({ onClose, questions: propQuestions, existi
             filename: `${currentStudent?.name || 'student'}_${examName}_${dayjs().format('YYYYMMDD_HHmm')}`,
             showAnswers: false,
             qrContent: getQrContent(),
+            returnPdfBlob: true,
           })
           if (result) {
-            blobUrl = result.blobUrl
-            setPdfBlobUrl(result.blobUrl)
+            blobUrl = result.blobUrl || (result.pdfBlob ? URL.createObjectURL(result.pdfBlob) : "")
+            setPdfBlobUrl(blobUrl)
             setPdfBlob(result.pdfBlob)
           }
         } catch (e) {

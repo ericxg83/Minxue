@@ -256,11 +256,16 @@ export async function exportServerPDF({ studentId, studentName, questions, html,
 
   if (!resp.ok) {
     const errText = await resp.text().catch(() => '')
-    throw new Error(`服务端 PDF 渲染失败 (${resp.status}): ${errText.slice(0, 200)}`)
+    throw new Error(`??????????? PDF (Content-Type: ${resp.headers.get('content-type') || 'unknown'})`)
   }
 
   // 3. 拿到 PDF blob
-  const blob = await resp.blob()
+  const pdfBytes = new Uint8Array(await resp.arrayBuffer())
+  const pdfHeader = new TextDecoder().decode(pdfBytes.subarray(0, 5))
+  if (pdfHeader !== '%PDF-') {
+    throw new Error(`Server response is not a valid PDF (Content-Type: ${resp.headers.get('content-type') || 'unknown'})`)
+  }
+  const blob = new Blob([pdfBytes], { type: 'application/pdf' })
 
   // 4. returnPdfBlob: true → 直接返回 blob（用于周报合并下载）
   if (returnPdfBlob) {

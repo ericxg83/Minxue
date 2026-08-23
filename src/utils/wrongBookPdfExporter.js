@@ -98,6 +98,7 @@ export async function exportWrongBookPDF({
   orientation = 'portrait',
   forceServer = false,
   forceBrowser = false,
+  returnPdfBlob = false,
 }) {
   // 0. 环境检测
   const isProd = detectProductionEnv()
@@ -149,7 +150,7 @@ export async function exportWrongBookPDF({
         returnPdfBlob: true,       // 拿到 blob，自行 saveAs 触发下载
       })
       // 触发浏览器下载
-      saveAs(result.pdfBlob, `${baseFile}.pdf`)
+      if (!returnPdfBlob) saveAs(result.pdfBlob, `${baseFile}.pdf`)
       return { ...result, pdfBlob: result.pdfBlob, filename: baseFile, mode: 'server', message: '服务端 Playwright 渲染完成，已下载 PDF' }
     } catch (serverErr) {
       console.error('[WrongBookPdfExporter] ❌ 服务端 Playwright 渲染失败:', serverErr?.message || serverErr)
