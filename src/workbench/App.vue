@@ -1,8 +1,9 @@
 <template>
-  <div id="workbench-app">
-    <TopNavBar />
-    <div class="workbench-content">
-      <router-view />
+  <div class="app-shell">
+    <AppSidebar />
+    <div class="app-main">
+      <AppHeader />
+      <main class="workbench-content"><router-view /></main>
     </div>
     <div v-if="showDesktopNotice" class="desktop-notice" role="status">
       <div class="desktop-notice__panel">
@@ -23,7 +24,8 @@ const showDesktopNotice = ref(false)
 const updateViewportNotice = () => { showDesktopNotice.value = Boolean(route.meta.requiresPC && window.innerWidth < 1200) }
 onMounted(() => { updateViewportNotice(); window.addEventListener("resize", updateViewportNotice) })
 onUnmounted(() => window.removeEventListener("resize", updateViewportNotice))
-import TopNavBar from './components/layout/TopNavBar.vue'
+import AppHeader from './components/layout/AppHeader.vue'
+import AppSidebar from './components/layout/AppSidebar.vue'
 </script>
 
 <style>
@@ -40,16 +42,19 @@ html, body {
 .desktop-notice h2 { margin: 8px 0; color: var(--wb-text); font-size: 20px; }
 .desktop-notice p { margin: 0 0 18px; color: var(--wb-text-secondary); font-size: 13px; line-height: 1.7; }
 
-#workbench-app {
-  min-height: 100vh;
-  background: var(--wb-bg);
-}
+#workbench-app { width: 100%; height: 100%; }
 
+.app-shell {
+  width: 100%;
+  height: 100vh;
+  overflow: hidden;
+  display: flex;
+}
+.app-main { display: flex; min-width: 0; flex: 1; flex-direction: column; }
 
 .workbench-content {
-  min-height: 100vh;
-  padding-left: 232px;
-  padding-top: 64px;
+  flex: 1;
+  min-height: 0;
+  overflow: hidden;
 }
-@media (max-width: 900px) { .workbench-content { padding-left: 68px; } }
 </style>

@@ -1,16 +1,14 @@
 <template>
-  <div class="dashboard">
-    <header class="page-header">
-      <div>
-        <div class="eyebrow">{{ todayLabel }}</div>
-        <h1>早上好，老师</h1>
-        <p>今天还有 {{ totalTodo }} 项工作需要处理。</p>
-      </div>
-      <el-button type="primary" size="large" @click="go('/review')">
-        <el-icon><Upload /></el-icon>
-        开始批改
-      </el-button>
-    </header>
+  <div class="dashboard wb-page">
+    <div class="wb-page__inner">
+      <PageHeader :eyebrow="todayLabel" title="早上好，老师" :description="`今天还有 ${totalTodo} 项工作需要处理。`">
+        <template #actions>
+          <ActionButton variant="primary" @click="go('/review')">
+            <el-icon><Upload /></el-icon>
+            开始批改
+          </ActionButton>
+        </template>
+      </PageHeader>
 
     <section class="summary-strip" aria-label="今日摘要">
       <button class="summary-item" @click="go('/todo')">
@@ -115,6 +113,7 @@
         </div>
       </div>
     </section>
+    </div>
   </div>
 </template>
 
@@ -124,6 +123,8 @@ import { useRouter } from 'vue-router'
 import { ArrowRight, CircleCheck, Upload, User } from '@element-plus/icons-vue'
 import { getStudents } from '../../services/apiService'
 import { useNotificationStore } from '../stores/notificationStore'
+import ActionButton from '../components/ui/ActionButton.vue'
+import PageHeader from '../components/ui/PageHeader.vue'
 
 const router = useRouter()
 const notiStore = useNotificationStore()
@@ -180,14 +181,11 @@ onMounted(async () => {
 </script>
 
 <style scoped>
-.dashboard { height: calc(100vh - 64px); overflow-y: auto; box-sizing: border-box; padding: 34px clamp(22px, 4vw, 52px) 56px; background: var(--wb-bg); }
-.page-header, .surface-header { display: flex; align-items: center; justify-content: space-between; gap: 24px; }
-.page-header { margin-bottom: 26px; max-width: 980px; }
-.page-header h1 { margin: 8px 0 5px; color: var(--wb-text); font-size: clamp(24px, 3vw, 32px); font-weight: 700; letter-spacing: -0.04em; }
-.page-header p, .eyebrow, .surface-header p { margin: 0; color: var(--wb-text-secondary); font-size: 13px; }
-.eyebrow { color: var(--wb-text-tertiary); }
-.summary-strip { display: grid; grid-template-columns: repeat(4, 1fr); background: var(--wb-bg-card); border: 1px solid var(--wb-border-light); border-radius: 16px; overflow: hidden; box-shadow: var(--wb-shadow-sm); }
-.summary-item { display: grid; grid-template-columns: auto 1fr; align-items: center; column-gap: 12px; row-gap: 2px; min-height: 86px; padding: 14px 20px; color: inherit; text-align: left; background: transparent; border: 0; border-right: 1px solid var(--wb-border-light); cursor: pointer; }
+.dashboard { color: var(--wb-text); }
+.surface-header { display: flex; align-items: center; justify-content: space-between; gap: 24px; }
+.surface-header p { margin: 0; color: var(--wb-text-secondary); font-size: 13px; }
+.summary-strip { display: grid; grid-template-columns: repeat(4, 1fr); background: var(--wb-bg-card); border: 1px solid var(--wb-border); border-radius: 10px; overflow: hidden; }
+.summary-item { display: grid; grid-template-columns: auto 1fr; align-items: center; column-gap: 12px; row-gap: 2px; min-height: 82px; padding: 14px 20px; color: inherit; text-align: left; background: transparent; border: 0; border-right: 1px solid var(--wb-border-light); cursor: pointer; }
 .summary-item:last-child { border-right: 0; }
 .summary-item:hover { background: var(--wb-primary-mist); }
 .summary-value { grid-row: span 2; color: var(--wb-text); font-size: 29px; line-height: 1; font-variant-numeric: tabular-nums; }
@@ -227,6 +225,6 @@ onMounted(async () => {
 .workflow-step > .el-icon { flex: 1; color: var(--wb-border); }
 .workflow-index { display: inline-flex; align-items: center; justify-content: center; width: 23px; height: 23px; flex: 0 0 23px; color: var(--wb-text-tertiary); font-size: 11px; border: 1px solid var(--wb-border); border-radius: 50%; }
 .workflow-index--active { color: white; background: var(--wb-primary); border-color: var(--wb-primary); }
-@media (max-width: 1000px) { .dashboard { padding: 28px 24px 44px; } .summary-strip { grid-template-columns: repeat(2, 1fr); } .summary-item:nth-child(2) { border-right: 0; } .summary-item:nth-child(-n+2) { border-bottom: 1px solid var(--wb-border-light); } .dashboard-grid { grid-template-columns: 1fr; } }
-@media (max-width: 640px) { .dashboard { padding: 20px 16px 32px; } .page-header { align-items: flex-start; flex-direction: column; } .page-header .el-button { width: 100%; } .summary-strip { grid-template-columns: 1fr; } .summary-item, .summary-item:nth-child(2) { border-right: 0; border-bottom: 1px solid var(--wb-border-light); } .summary-item:last-child { border-bottom: 0; } .workflow-progress { align-items: flex-start; flex-direction: column; gap: 12px; } .workflow-step, .workflow-step:last-child { flex: initial; } .workflow-step > .el-icon { display: none; } }
+@media (max-width: 1000px) { .summary-strip { grid-template-columns: repeat(2, 1fr); } .summary-item:nth-child(2) { border-right: 0; } .summary-item:nth-child(-n+2) { border-bottom: 1px solid var(--wb-border-light); } .dashboard-grid { grid-template-columns: 1fr; } }
+@media (max-width: 640px) { .summary-strip { grid-template-columns: 1fr; } .summary-item, .summary-item:nth-child(2) { border-right: 0; border-bottom: 1px solid var(--wb-border-light); } .summary-item:last-child { border-bottom: 0; } .workflow-progress { align-items: flex-start; flex-direction: column; gap: 12px; } .workflow-step, .workflow-step:last-child { flex: initial; } .workflow-step > .el-icon { display: none; } }
 </style>

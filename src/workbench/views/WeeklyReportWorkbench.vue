@@ -1,387 +1,122 @@
 <template>
-  <div class="weekly-report-workbench">
-    <!-- Top Bar -->
-    <header class="top-bar">
-      <div class="top-bar-left">
-        <span class="page-title">周学习诊断报告</span>
-        <el-segmented v-model="viewMode" :options="viewModeOptions" style="margin-left: 4px;" />
-        <el-select
-          v-if="viewMode === 'single'"
-          v-model="selectedStudentId"
-          placeholder="选择学生（选填，不选则生成全部）"
-          style="width: 260px"
-          filterable
-          clearable
-          @change="handleStudentChange"
-        >
-          <el-option
-            v-for="s in studentList"
-            :key="s.id"
-            :label="s.name"
-            :value="s.id"
-          >
-            <span style="display: flex; align-items: center; gap: 8px;">
-              <el-avatar :size="22" :src="s.avatar" />
-              {{ s.name }}
-              <span style="font-size: 12px; color: var(--wb-text-tertiary);">{{ s.grade }}</span>
-            </span>
-          </el-option>
+  <div class="diagnosis-page wb-page">
+    <div class="wb-page__inner">
+      <PageHeader eyebrow="学生学习 / 诊断决策" title="学习诊断" description="发现学生学习问题，判断优先级，并直接安排下一步教学。">
+        <template #badge><span class="period-badge">{{ periodLabel }}</span></template>
+        <template #actions><ActionButton v-if="viewMode === 'single'" :disabled="!selectedStudentId" :loading="generating" @click="handleGenerateCurrent">生成报告</ActionButton></template>
+      </PageHeader>
+
+      <FilterBar class="diagnosis-filter">
+        <template #leading><el-segmented v-model="viewMode" :options="viewModeOptions" /></template>
+        <el-select v-if="viewMode === 'single'" v-model="selectedStudentId" class="student-select" placeholder="选择学生" filterable clearable @change="handleStudentChange">
+          <el-option v-for="student in studentList" :key="student.id" :label="student.name" :value="student.id"><span class="student-option"><el-avatar :size="22" :src="student.avatar" />{{ student.name }}<small>{{ student.grade }}</small></span></el-option>
         </el-select>
-        <el-segmented v-model="periodMode" :options="periodModeOptions" style="margin-left: 4px;" />
-        <el-select
-          v-if="periodMode !== 'all'"
-          v-model="periodOffset"
-          style="width: 110px"
-          size="small"
-        >
-          <el-option v-for="opt in offsetOptions" :key="opt.value" :label="opt.label" :value="opt.value" />
-        </el-select>
-      </div>
-      <div class="top-bar-right" v-if="viewMode === 'single'">
-        <span class="stat-item">{{ periodLabel }}</span>
-        <el-button type="primary" :loading="generating" @click="handleGenerateCurrent">
-          {{ selectedStudentId ? `生成 ${currentStudentName} 的报告` : '生成本周报告' }}
-        </el-button>
-        <el-button
-          type="primary"
-          plain
-          :loading="generatingAll"
-          @click="handleGenerateAll"
-          class="btn-generate-all"
-        >
-          一键生成全部学生
-        </el-button>
-        <el-button
-          type="success"
-          plain
-          :loading="generatingAll"
-          :disabled="checkedIds.length === 0"
-          @click="handleGenerateSelected"
-        >
-          生成勾选学生{{ checkedIds.length ? ` (${checkedIds.length})` : '' }}
-        </el-button>
-      </div>
-    </header>
+        <el-segmented v-model="periodMode" :options="periodModeOptions" />
+        <el-select v-if="periodMode !== 'all'" v-model="periodOffset" class="offset-select"><el-option v-for="option in offsetOptions" :key="option.value" :label="option.label" :value="option.value" /></el-select>
+        <template #actions><span class="filter-note">{{ selectedStudentId ? currentStudentName : `${reportsWithData.length} 名学生有数据` }}</span></template>
+      </FilterBar>
 
-    <!-- Main Content -->
-    <main class="main-content">
-      <!-- 本周概览 -->
-      <section class="summary-section" v-if="summaryData && !loadingSummary && !selectedStudentId">
-        <div class="section-title">
-          <el-icon><DataAnalysis /></el-icon>
-          本周学习概览（{{ summaryData.reports.filter(r => r.stats?.totalQuestions > 0).length }}/{{ summaryData.reports.length }} 人有数据）
-          <el-checkbox
-            :model-value="allChecked"
-            :indeterminate="isIndeterminate"
-            @change="toggleCheckAll"
-            style="margin-left: 16px;"
-          >全选</el-checkbox>
-        </div>
-        <div class="kpi-grid">
-          <div
-            v-for="r in summaryData.reports"
-            :key="r.student.id"
-            class="kpi-card"
-            :class="{ 'kpi-card--checked': checkedIds.includes(r.student.id) }"
-          >
-            <div class="kpi-card__header">
-              <el-checkbox
-                :model-value="checkedIds.includes(r.student.id)"
-                @change="(v) => toggleCheck(r.student.id, v)"
-                @click.stop
-              />
-              <div class="kpi-card__name" @click="selectedStudentId = r.student.id" style="cursor: pointer;">{{ r.student.name }}</div>
+      <section class="diagnosis-stats" aria-label="学习诊断概览">
+        <StatsCard label="本周期正确率" :value="`${overviewStats.accuracy || 0}%`" :description="selectedStudentId ? `${overviewStats.correctCount || 0} / ${overviewStats.totalQuestions || 0} 题正确` : `${overviewStats.studentCount || 0} 名学生纳入统计`" :tone="(overviewStats.accuracy || 0) < 60 ? 'danger' : (overviewStats.accuracy || 0) < 80 ? 'warning' : 'success'" />
+        <StatsCard label="新增错题" :value="overviewStats.newWrongCount || 0" unit="题" description="本周期新进入错题记录" tone="danger" />
+        <StatsCard label="待重练" :value="overviewStats.pendingCount || 0" unit="题" description="尚未完成掌握验证" tone="warning" />
+        <StatsCard label="已掌握" :value="overviewStats.masteredCount || 0" unit="题" description="已完成重练验证" tone="success" />
+        <StatsCard label="学习趋势" :value="selectedStudentId ? trendSummary.label : '选择学生后查看'" :description="selectedStudentId ? trendSummary.description : '趋势仅使用真实分日学习数据'" :tone="selectedStudentId ? trendSummary.tone : 'default'" />
+      </section>
+
+      <template v-if="viewMode === 'single'">
+        <section v-if="!selectedStudentId" class="diagnosis-layout">
+          <ContentCard class="student-attention" title="发现问题" description="按真实正确率、错题与待重练数量排列需要关注的学生" flush>
+            <template #actions><el-checkbox :model-value="allChecked" :indeterminate="isIndeterminate" @change="toggleCheckAll">全选</el-checkbox></template>
+            <div v-if="loadingSummary" class="loading-stack"><el-skeleton v-for="index in 5" :key="index" :rows="2" animated /></div>
+            <EmptyState v-else-if="!attentionReports.length" title="暂无可诊断的学生数据" description="当前周期还没有已完成的批改数据，可以切换时间范围后重试。" />
+            <div v-else class="student-diagnosis-list">
+              <article v-for="report in attentionReports" :key="report.student.id" class="student-diagnosis-row" @click="focusStudent(report)">
+                <el-checkbox :model-value="checkedIds.includes(report.student.id)" @click.stop @change="value => toggleCheck(report.student.id, value)" />
+                <el-avatar :size="34">{{ report.student.name?.slice(0, 1) }}</el-avatar>
+                <div class="student-identity"><strong>{{ report.student.name }}</strong><small>{{ report.student.grade || '暂无年级' }}</small></div>
+                <span :class="['risk-status', studentRiskLevel(report).key]">{{ studentRiskLevel(report).label }}</span>
+                <div class="student-metrics"><span><b>{{ report.stats ? `${report.stats.accuracy}%` : '-' }}</b>正确率</span><span><b>{{ report.stats?.newWrongCount ?? '-' }}</b>新增错题</span><span><b>{{ report.stats?.pendingCount ?? '-' }}</b>待重练</span></div>
+                <div class="student-next"><span>建议动作</span><strong>{{ !report.stats ? '等待有效学习数据' : studentRiskLevel(report).key === 'critical' ? '优先查看错题并安排重练' : studentRiskLevel(report).key === 'attention' ? '检查薄弱知识点' : '保持观察' }}</strong></div>
+                <el-icon class="row-arrow"><ArrowRight /></el-icon>
+              </article>
             </div>
-            <div class="kpi-card__row" @click="selectedStudentId = r.student.id" style="cursor: pointer;">
-              <div class="kpi-item">
-                <div class="kpi-value" :style="{ color: getAccuracyColor(r.stats?.accuracy) }">
-                  {{ r.stats ? r.stats.accuracy + '%' : '-' }}
-                </div>
-                <div class="kpi-label">正确率</div>
+          </ContentCard>
+
+          <div class="action-column">
+            <ContentCard title="解决方案" description="把诊断结果直接转化为下一步">
+              <div class="solution-list">
+                <div class="solution-item"><span class="solution-icon danger"><el-icon><WarningFilled /></el-icon></span><div><strong>{{ aggregateStats.pendingCount || 0 }} 道题待完成重练验证</strong><p>优先选择重点关注学生处理</p></div><ActionButton :disabled="!selectedStudentId" @click="openWrongBook">查看错题</ActionButton></div>
+                <div class="solution-item"><span class="solution-icon primary"><el-icon><EditPen /></el-icon></span><div><strong>生成针对性学习任务</strong><p>先选择学生，再基于错题安排重练</p></div><ActionButton :disabled="!selectedStudentId" variant="primary" @click="openWrongBook">进入错题中心</ActionButton></div>
               </div>
-              <div class="kpi-item">
-                <div class="kpi-value" style="color: var(--wb-danger);">
-                  {{ r.stats ? r.stats.newWrongCount : '-' }}
-                </div>
-                <div class="kpi-label">新增错题</div>
+            </ContentCard>
+            <ContentCard title="跨周期观察" description="长期改善需要连续周期数据">
+              <div class="honest-state"><el-icon><TrendCharts /></el-icon><strong>暂不提供长期改善结论</strong><p>当前接口只返回所选周期数据，不展示未经验证的同比变化。</p></div>
+            </ContentCard>
+          </div>
+        </section>
+
+        <template v-else>
+          <section v-if="currentStudentDetail?.stats" class="diagnosis-layout student-detail-layout">
+            <ContentCard title="发现问题" :description="`${currentStudentName} · ${periodLabel}`">
+              <div class="teaching-judgement">
+                <div><span>已经看到</span><strong>{{ studentProgressText }}</strong></div>
+                <div class="focus"><span>优先处理</span><strong>{{ topWeakTags || '本周期暂无明确薄弱知识点，继续观察' }}</strong></div>
+                <div><span>下一步验证</span><strong>{{ nextActionText }}</strong></div>
               </div>
-              <div class="kpi-item">
-                <div class="kpi-value" style="color: var(--wb-primary);">
-                  {{ r.stats ? r.stats.totalTasks : '-' }}
-                </div>
-                <div class="kpi-label">作业(份)</div>
+              <div v-if="periodMode === 'week'" class="trend-panel">
+                <div class="trend-heading"><div><strong>周期内学习趋势</strong><span>只对比有答题记录的学习日</span></div><span :class="['trend-result', trendSummary.tone]">{{ trendSummary.label }}</span></div>
+                <div v-if="currentStudentDetail.dailyTrend?.length" class="trend-bars"><div v-for="point in currentStudentDetail.dailyTrend" :key="point.day" class="trend-day"><div class="trend-track"><span :style="{ height: `${Math.max(4, point.accuracy || 0)}%` }" /></div><b>{{ point.total ? `${point.accuracy}%` : '-' }}</b><small>{{ point.day }}</small></div></div>
+                <div v-else class="trend-empty">暂无分日学习数据</div>
               </div>
-            </div>
-            <div v-if="!r.stats" class="no-data">本周无学习数据</div>
-          </div>
-        </div>
+            </ContentCard>
+
+            <ContentCard title="解决方案" description="基于当前诊断直接行动">
+              <div class="solution-list single-solutions">
+                <div class="solution-item"><span class="solution-icon danger"><el-icon><Collection /></el-icon></span><div><strong>{{ overviewStats.pendingCount || 0 }} 道待重练错题</strong><p>查看重复错误与题目详情</p></div><ActionButton @click="openWrongBook">查看错题</ActionButton></div>
+                <div class="solution-item"><span class="solution-icon primary"><el-icon><EditPen /></el-icon></span><div><strong>发现 {{ weakKnowledgeCount }} 个薄弱知识点</strong><p>加入下一次针对性重练</p></div><ActionButton variant="primary" @click="openWrongBook">生成针对性重练</ActionButton></div>
+              </div>
+            </ContentCard>
+          </section>
+
+          <ContentCard v-if="currentStudentDetail?.knowledgeDiagnosis?.length" class="knowledge-diagnosis" title="知识点诊断" description="从掌握情况、错题表现到建议动作，帮助老师完成教学判断" flush>
+            <DataTable :data="weakKnowledge" size="small" empty-text=" ">
+              <el-table-column prop="tag" label="知识点" min-width="180"><template #default="{ row }"><div class="knowledge-name"><strong>{{ row.tag }}</strong><small>{{ row.subject || '其他' }}</small></div></template></el-table-column>
+              <el-table-column label="当前掌握" width="130"><template #default="{ row }"><span :class="['mastery-status', knowledgeLevel(row).key]">{{ knowledgeLevel(row).label }} · {{ row.accuracy }}%</span></template></el-table-column>
+              <el-table-column label="错题表现" width="130"><template #default="{ row }"><strong :class="{ 'danger-text': row.wrongCount >= 3 }">最近错误 {{ row.wrongCount }} 次</strong><small class="table-sub">共 {{ row.totalCount }} 题</small></template></el-table-column>
+              <el-table-column label="最近变化" width="130"><template #default><span class="no-comparison">本周期累计</span><small class="table-sub">暂无知识点分日对比</small></template></el-table-column>
+              <el-table-column label="建议动作" min-width="220"><template #default="{ row }"><div class="table-action"><span>{{ getDiagnosisAction(row) }}</span><el-button text type="primary" @click.stop="openWrongBook">加入重练</el-button></div></template></el-table-column>
+            </DataTable>
+          </ContentCard>
+          <EmptyState v-else-if="!generating && currentStudentDetail" title="该学生当前周期暂无知识点诊断" description="可以切换周期，或等待新的批改数据进入诊断。" />
+        </template>
+      </template>
+
+      <section v-else class="class-diagnosis-section">
+        <ContentCard title="全班共性问题" :description="`${periodLabel} · 点击知识点查看涉及学生和典型错题`" flush>
+          <template #actions><el-select v-model="diagSubject" class="subject-select" @change="loadClassDiagnosis"><el-option label="全部学科" value="" /><el-option label="数学" value="数学" /><el-option label="语文" value="语文" /><el-option label="英语" value="英语" /></el-select></template>
+          <DataTable v-loading="loadingClassDiagnosis" :data="classDiagnosis" empty-text=" " :row-class-name="diagRowClass" @row-click="openDrill">
+            <el-table-column prop="subject" label="学科" width="90" /><el-table-column prop="tag" label="知识点" min-width="180" />
+            <el-table-column label="当前状态" width="130"><template #default="{ row }"><span :class="['mastery-status', row.blankCount > 0 || row.wrongCount >= 3 ? 'critical' : 'attention']">{{ row.blankCount > 0 ? '重点关注' : '需要关注' }}</span></template></el-table-column>
+            <el-table-column label="错题表现" width="150"><template #default="{ row }"><strong>{{ row.wrongCount }} 次错误</strong><small class="table-sub">{{ row.blankCount }} 次空题</small></template></el-table-column>
+            <el-table-column prop="studentCount" label="涉及学生" width="100" align="center" />
+            <el-table-column label="建议动作" min-width="220"><template #default="{ row }"><span>{{ row.blankCount > 0 ? '优先讲解并当堂提问' : '安排共性错题重练' }}</span></template></el-table-column>
+            <el-table-column width="50"><template #default><el-icon><ArrowRight /></el-icon></template></el-table-column>
+          </DataTable>
+          <EmptyState v-if="!loadingClassDiagnosis && !classDiagnosis.length" title="该时段暂无全班共性问题" description="可以切换时间范围或学科继续查看。" />
+          <template #footer><div class="class-actions"><ActionButton :disabled="!classDiagnosis.length" @click="handleExportHandout">备课讲义</ActionButton><ActionButton variant="primary" :disabled="!classDiagnosis.length" @click="handleDistributeExam">生成共性错题再测</ActionButton></div></template>
+        </ContentCard>
       </section>
 
-      <!-- 当前学生统计详情 -->
-      <section class="detail-section" v-if="currentStudentDetail && !generatingAll">
-        <!-- KPI Cards -->
-        <div class="kpi-cards" v-if="currentStudentDetail.stats">
-          <div class="kpi-card-big">
-            <div class="kpi-card-big__label">本周作业</div>
-            <div class="kpi-card-big__value">{{ currentStudentDetail.stats.totalTasks }}<span class="unit"> 份</span></div>
-            <div class="kpi-card-big__sub">已完成 {{ currentStudentDetail.stats.completedTasks }} 份</div>
-          </div>
-          <div class="kpi-card-big">
-            <div class="kpi-card-big__label">批改题量</div>
-            <div class="kpi-card-big__value">{{ currentStudentDetail.stats.totalQuestions }}<span class="unit"> 题</span></div>
-            <div class="kpi-card-big__sub">正确 {{ currentStudentDetail.stats.correctCount }} 题 / 错误 {{ currentStudentDetail.stats.wrongCount }} 题</div>
-          </div>
-          <div class="kpi-card-big">
-            <div class="kpi-card-big__label">正确率</div>
-            <div class="kpi-card-big__value" :style="{ color: getAccuracyColor(currentStudentDetail.stats.accuracy) }">
-              {{ currentStudentDetail.stats.accuracy }}<span class="unit">%</span>
-            </div>
-            <el-progress
-              :percentage="currentStudentDetail.stats.accuracy"
-              :color="getAccuracyColor(currentStudentDetail.stats.accuracy)"
-              :stroke-width="8"
-              style="margin-top: 6px;"
-            />
-          </div>
-          <div class="kpi-card-big">
-            <div class="kpi-card-big__label">错题掌握</div>
-            <div class="kpi-card-big__value">
-              <span style="color: var(--wb-success);">{{ currentStudentDetail.stats.masteredCount }}</span>
-              <span class="unit"> / </span>
-              <span style="color: var(--wb-danger);">{{ currentStudentDetail.stats.pendingCount }}</span>
-            </div>
-            <div class="kpi-card-big__sub">
-              已掌握 {{ currentStudentDetail.stats.masteredCount }} 题 · 待提升 {{ currentStudentDetail.stats.pendingCount }} 题
-            </div>
-          </div>
+      <ContentCard class="report-output" title="诊断报告" description="报告是完成诊断与教学安排后的最终输出，不影响当前页面继续分析。">
+        <div class="report-options">
+          <div><span class="report-icon"><el-icon><FolderOpened /></el-icon></span><div><strong>学生诊断报告</strong><p>包含周期表现、知识点诊断与错题再测内容</p></div></div>
+          <div class="report-actions"><ActionButton :disabled="!selectedStudentId" :loading="generating" @click="generatePeriodReport('week')">生成本周报告</ActionButton><ActionButton :disabled="!selectedStudentId" :loading="generating" @click="generatePeriodReport('month')">生成本月报告</ActionButton><el-dropdown v-if="viewMode === 'single'" trigger="click"><el-button text>批量报告 <el-icon><ArrowRight /></el-icon></el-button><template #dropdown><el-dropdown-menu><el-dropdown-item @click="handleGenerateAll">生成全部学生</el-dropdown-item><el-dropdown-item :disabled="!checkedIds.length" @click="handleGenerateSelected">生成勾选学生{{ checkedIds.length ? `（${checkedIds.length}）` : '' }}</el-dropdown-item></el-dropdown-menu></template></el-dropdown></div>
         </div>
-
-        <el-card class="teaching-summary-card" v-if="currentStudentDetail.stats">
-          <template #header>
-            <div class="card-header">
-              <span><el-icon><DataAnalysis /></el-icon> 本周教学判断</span>
-              <el-tag size="small" type="info" effect="plain">给老师的下一步</el-tag>
-            </div>
-          </template>
-          <div class="teaching-summary-grid">
-            <div class="teaching-summary-item">
-              <div class="teaching-summary-label">已经看到</div>
-              <div class="teaching-summary-value">{{ studentProgressText }}</div>
-            </div>
-            <div class="teaching-summary-item teaching-summary-item--focus">
-              <div class="teaching-summary-label">优先处理</div>
-              <div class="teaching-summary-value">{{ topWeakTags || '本周期暂无明确薄弱知识点，继续观察' }}</div>
-            </div>
-            <div class="teaching-summary-item">
-              <div class="teaching-summary-label">下一步验证</div>
-              <div class="teaching-summary-value">{{ nextActionText }}</div>
-            </div>
-          </div>
-        </el-card>
-
-        <!-- 知识点诊断表 -->
-        <el-card class="knowledge-card" v-if="currentStudentDetail.knowledgeDiagnosis?.length > 0">
-          <template #header>
-            <div class="card-header">
-              <span><el-icon><TrendCharts /></el-icon> 知识点诊断</span>
-            </div>
-          </template>
-          <el-table :data="currentStudentDetail.knowledgeDiagnosis" stripe style="width: 100%" size="small">
-            <el-table-column prop="tag" label="知识点" min-width="160" />
-            <el-table-column prop="totalCount" label="总题数" width="80" align="center" />
-            <el-table-column prop="wrongCount" label="错误次数" width="90" align="center">
-              <template #default="{ row }">
-                <span :style="{ color: row.wrongCount >= 3 ? 'var(--wb-danger)' : 'var(--wb-text-secondary)', fontWeight: row.wrongCount >= 3 ? 600 : 400 }">
-                  {{ row.wrongCount }}
-                </span>
-              </template>
-            </el-table-column>
-            <el-table-column prop="accuracy" label="正确率" width="90" align="center">
-              <template #default="{ row }">
-                <el-tag :type="row.accuracy >= 80 ? 'success' : row.accuracy >= 60 ? 'warning' : 'danger'" size="small" effect="light">
-                  {{ row.accuracy }}%
-                </el-tag>
-              </template>
-            </el-table-column>
-            <el-table-column label="教学处理建议" min-width="190">
-              <template #default="{ row }">
-                <span class="diagnosis-action">{{ getDiagnosisAction(row) }}</span>
-              </template>
-            </el-table-column>
-          </el-table>
-        </el-card>
-
-        <!-- 高频薄弱点提示 -->
-        <el-card class="warning-card" v-if="currentStudentDetail.knowledgeDiagnosis?.length > 0" style="margin-top: 12px;">
-          <div class="warning-card__content">
-            <el-icon style="color: var(--wb-warning); margin-right: 8px;"><WarningFilled /></el-icon>
-            <span>
-              <strong>本周高频薄弱点：</strong>
-              {{ topWeakTags }}
-            </span>
-          </div>
-        </el-card>
-      </section>
-
-      <!-- 全班共性诊断 -->
-      <section v-if="viewMode === 'class'" class="class-section">
-        <div class="section-title">
-          <el-icon><DataAnalysis /></el-icon>
-          全班共性诊断（{{ periodLabel }}）
-          <el-select
-            v-model="diagSubject"
-            size="small"
-            style="width: 120px; margin-left: 12px;"
-            @change="loadClassDiagnosis"
-          >
-            <el-option label="全部学科" value="" />
-            <el-option label="数学" value="数学" />
-            <el-option label="语文" value="语文" />
-            <el-option label="英语" value="英语" />
-          </el-select>
-          <el-tooltip content="空题即「学生没写/写不出」，是最该讲的信号，置顶排序" placement="top">
-            <span class="diag-hint"><el-icon><QuestionFilled /></el-icon> 空题置顶</span>
-          </el-tooltip>
-          <el-button
-            type="primary"
-            size="small"
-            :disabled="classDiagnosis.length === 0"
-            style="margin-left: auto"
-            @click="handleExportHandout"
-          >
-            <el-icon><EditPen /></el-icon>
-            备课讲义
-          </el-button>
-          <el-button
-            type="success"
-            plain
-            size="small"
-            :disabled="classDiagnosis.length === 0"
-            @click="handleDistributeExam"
-          >
-            <el-icon><EditPen /></el-icon>
-            发错题再测卷
-          </el-button>
-        </div>
-        <el-alert
-          v-if="classDiagnosis.length > 0"
-          type="warning"
-          :closable="false"
-          show-icon
-          style="margin-bottom: 12px;"
-        >
-          <template #title>
-            共 {{ classDiagnosis.length }} 个共性知识点，前 {{ classDiagnosis.filter(t => t.blankCount > 0).length }} 个存在空题（最该讲）。点击任意知识点查看学生与错因详情，或一键导出讲课讲义。
-          </template>
-        </el-alert>
-        <el-table
-          :data="classDiagnosis"
-          stripe
-          size="small"
-          style="width: 100%"
-          :row-class-name="diagRowClass"
-          @row-click="openDrill"
-          v-loading="loadingClassDiagnosis"
-        >
-          <el-table-column prop="subject" label="学科" width="90" align="center">
-            <template #default="{ row }">
-              <el-tag size="small" effect="plain" :type="subjectTagType(row.subject)">{{ row.subject }}</el-tag>
-            </template>
-          </el-table-column>
-          <el-table-column prop="tag" label="知识点" min-width="160">
-            <template #default="{ row }">
-              <span class="diag-tag">{{ row.tag }}</span>
-            </template>
-          </el-table-column>
-          <el-table-column prop="blankCount" label="空题" width="90" align="center">
-            <template #default="{ row }">
-              <span v-if="row.blankCount > 0" class="blank-badge">{{ row.blankCount }}</span>
-              <span v-else class="muted">0</span>
-            </template>
-          </el-table-column>
-          <el-table-column prop="wrongCount" label="做错" width="90" align="center" />
-          <el-table-column prop="studentCount" label="涉及学生" width="100" align="center" />
-          <el-table-column prop="blankRatio" label="空题占比" width="130" align="center">
-            <template #default="{ row }">
-              <el-progress
-                :percentage="row.blankRatio"
-                :color="row.blankRatio > 0 ? 'var(--wb-danger)' : 'var(--wb-border)'"
-                :stroke-width="10"
-                :text-inside="true"
-              />
-            </template>
-          </el-table-column>
-          <el-table-column label="" width="50" align="center">
-            <template #default>
-              <el-icon color="var(--wb-text-tertiary)"><ArrowRight /></el-icon>
-            </template>
-          </el-table-column>
-        </el-table>
-        <el-empty v-if="!loadingClassDiagnosis && classDiagnosis.length === 0" description="该时段暂无共性错题" :image-size="80" />
-      </section>
-
-      <!-- 无数据提示 -->
-      <section v-else-if="selectedStudentId && !currentStudentDetail?.stats && !generating">
-        <el-empty description="该学生本周暂无学习数据" :image-size="80" />
-      </section>
-
-      <!-- 生成进度 -->
-      <section class="progress-section" v-if="progressList.length > 0">
-        <div class="section-title">
-          <el-icon><List /></el-icon>
-          生成进度
-        </div>
-        <div class="progress-list">
-          <div class="progress-item" v-for="(item, idx) in progressList" :key="idx">
-            <span class="progress-name">{{ item.name }}</span>
-            <el-tag
-              :type="getStatusType(item.status)"
-              :icon="getStatusIcon(item.status)"
-              size="small"
-            >
-              {{ getStatusLabel(item.status) }}
-            </el-tag>
-          </div>
-        </div>
-      </section>
-
-      <!-- 生成结果 -->
-      <section class="result-section" v-if="results.length > 0 && !generatingAll">
-        <div class="section-title">
-          <el-icon><FolderOpened /></el-icon>
-          生成结果
-          <el-button text type="primary" size="small" @click="handleDownloadAll" style="margin-left: 12px;">
-            <el-icon><Download /></el-icon> 全部下载
-          </el-button>
-        </div>
-        <div class="result-list">
-          <div class="result-item" v-for="(r, idx) in results" :key="idx">
-            <div class="result-left">
-              <span class="result-name">{{ r.student.name }}</span>
-              <el-tag
-                :type="getStatusType(r.status)"
-                size="small"
-                effect="light"
-              >
-                {{ getStatusLabel(r.status) }}
-              </el-tag>
-            </div>
-            <div class="result-right">
-              <el-button
-                v-if="r.status === 'done' && r.pdfBlob"
-                text
-                type="primary"
-                size="small"
-                @click="handleDownload(r)"
-              >
-                <el-icon><Download /></el-icon> 下载
-              </el-button>
-            </div>
-          </div>
-        </div>
-      </section>
-    </main>
-
+        <div v-if="progressList.length" class="progress-list"><div v-for="(item,index) in progressList" :key="index" class="progress-item"><span>{{ item.name }}</span><el-tag :type="getStatusType(item.status)" size="small">{{ getStatusLabel(item.status) }}</el-tag></div></div>
+        <div v-if="results.length && !generatingAll" class="result-list"><div v-for="(result,index) in results" :key="index" class="result-item"><span><strong>{{ result.student.name }}</strong><el-tag :type="getStatusType(result.status)" size="small">{{ getStatusLabel(result.status) }}</el-tag></span><el-button v-if="result.status === 'done' && result.pdfBlob" text type="primary" @click="handleDownload(result)"><el-icon><Download /></el-icon>下载</el-button></div><el-button text type="primary" @click="handleDownloadAll">全部下载</el-button></div>
+      </ContentCard>
+    </div>
     <!-- 知识点下钻抽屉 -->
     <el-drawer
       v-model="drawerVisible"
@@ -468,9 +203,17 @@
 </template>
 
 <script setup>
-import { ref, computed, watch, onMounted } from 'vue'
+import { ref, computed, watch, onMounted, nextTick } from 'vue'
+import { useRouter } from 'vue-router'
 import { ElMessage } from 'element-plus'
 import { Download, DataAnalysis, TrendCharts, List, FolderOpened, WarningFilled, QuestionFilled, ArrowRight, Close, PieChart, User, Collection, EditPen } from '@element-plus/icons-vue'
+import ActionButton from '../components/ui/ActionButton.vue'
+import ContentCard from '../components/ui/ContentCard.vue'
+import DataTable from '../components/ui/DataTable.vue'
+import EmptyState from '../components/ui/EmptyState.vue'
+import FilterBar from '../components/ui/FilterBar.vue'
+import PageHeader from '../components/ui/PageHeader.vue'
+import StatsCard from '../components/ui/StatsCard.vue'
 import { getStudents, getAllWeeklyReports, getTeachingDiagnosis, getTeachingDiagnosisDetail } from '../../services/apiService'
 import { generateWeeklyReport, generateAllWeeklyReports } from '../../utils/weeklyReportGenerator'
 import { saveAs } from 'file-saver'
@@ -478,6 +221,8 @@ import dayjs from 'dayjs'
 import isoWeek from 'dayjs/plugin/isoWeek'
 
 dayjs.extend(isoWeek)
+
+const router = useRouter()
 
 // ── State ──
 const viewMode = ref('single')
@@ -913,495 +658,76 @@ function getDiagnosisAction(row) {
   if (row.accuracy < 80 || row.wrongCount >= 2) return '安排变式，观察独立完成'
   return '暂不加题，后续复测巩固'
 }
+
+const reportsWithData = computed(() => (summaryData.value?.reports || []).filter(r => r.stats?.totalQuestions > 0))
+const aggregateStats = computed(() => {
+  const reports = reportsWithData.value
+  const totals = reports.reduce((acc, report) => {
+    const stats = report.stats || {}
+    acc.questions += stats.totalQuestions || 0
+    acc.correct += stats.correctCount || 0
+    acc.newWrong += stats.newWrongCount || 0
+    acc.pending += stats.pendingCount || 0
+    acc.mastered += stats.masteredCount || 0
+    return acc
+  }, { questions: 0, correct: 0, newWrong: 0, pending: 0, mastered: 0 })
+  return {
+    accuracy: totals.questions ? Math.round((totals.correct / totals.questions) * 1000) / 10 : 0,
+    newWrongCount: totals.newWrong,
+    pendingCount: totals.pending,
+    masteredCount: totals.mastered,
+    studentCount: reports.length
+  }
+})
+const overviewStats = computed(() => selectedStudentId.value && currentStudentDetail.value?.stats ? currentStudentDetail.value.stats : aggregateStats.value)
+const attentionReports = computed(() => [...(summaryData.value?.reports || [])].sort((a, b) => studentRiskScore(b) - studentRiskScore(a)))
+const weakKnowledge = computed(() => [...(currentStudentDetail.value?.knowledgeDiagnosis || [])].sort((a, b) => b.wrongCount - a.wrongCount || a.accuracy - b.accuracy))
+const weakKnowledgeCount = computed(() => weakKnowledge.value.filter(row => row.accuracy < 80 || row.wrongCount >= 2).length)
+const dailyTrendPoints = computed(() => (currentStudentDetail.value?.dailyTrend || []).filter(point => point.total > 0))
+const trendSummary = computed(() => {
+  const points = dailyTrendPoints.value
+  if (periodMode.value !== 'week') return { label: '暂无周期趋势', description: '月度与全部时间暂不提供分日趋势', tone: 'default' }
+  if (points.length < 2) return { label: '数据不足', description: '至少需要 2 天有效数据', tone: 'default' }
+  const change = Math.round((points[points.length - 1].accuracy - points[0].accuracy) * 10) / 10
+  if (change > 0) return { label: `上升 ${change}%`, description: '周期内首末有效学习日对比', tone: 'success' }
+  if (change < 0) return { label: `下降 ${Math.abs(change)}%`, description: '周期内首末有效学习日对比', tone: 'danger' }
+  return { label: '保持平稳', description: '周期内首末有效学习日持平', tone: 'primary' }
+})
+function studentRiskLevel(report) {
+  const stats = report?.stats
+  if (!stats || !stats.totalQuestions) return { key: 'normal', label: '暂无数据' }
+  if (stats.accuracy < 60 || stats.pendingCount >= 5 || stats.newWrongCount >= 5) return { key: 'critical', label: '重点关注' }
+  if (stats.accuracy < 80 || stats.pendingCount > 0 || stats.newWrongCount > 0) return { key: 'attention', label: '需要关注' }
+  return { key: 'normal', label: '正常' }
+}
+function studentRiskScore(report) {
+  const level = studentRiskLevel(report).key
+  const stats = report?.stats || {}
+  return (level === 'critical' ? 200 : level === 'attention' ? 100 : 0) + (stats.pendingCount || 0) * 3 + (stats.newWrongCount || 0) + (100 - (stats.accuracy || 0))
+}
+function focusStudent(report) {
+  if (!report?.student?.id) return
+  selectedStudentId.value = report.student.id
+  handleStudentChange(report.student.id)
+}
+function openWrongBook() {
+  if (!selectedStudentId.value) return ElMessage.info('请先选择学生')
+  router.push({ path: '/wrongbook', query: { studentId: selectedStudentId.value } })
+}
+async function generatePeriodReport(mode) {
+  if (!selectedStudentId.value) return ElMessage.info('请先选择学生')
+  periodMode.value = mode
+  periodOffset.value = 0
+  await nextTick()
+  handleGenerateCurrent()
+}
+function knowledgeLevel(row) {
+  if (row.accuracy < 60 || row.wrongCount >= 3) return { key: 'critical', label: '较弱' }
+  if (row.accuracy < 80 || row.wrongCount >= 2) return { key: 'attention', label: '待巩固' }
+  return { key: 'normal', label: '稳定' }
+}
 </script>
 
 <style scoped>
-.weekly-report-workbench {
-  height: 100%;
-  display: flex;
-  flex-direction: column;
-  background: var(--wb-bg);
-}
-
-/* ── Top Bar ── */
-.top-bar {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  padding: 12px 24px;
-  background: var(--wb-bg-card);
-  border-bottom: 1px solid var(--wb-border);
-  flex-shrink: 0;
-  flex-wrap: wrap;
-  gap: 8px;
-}
-
-.top-bar-left {
-  display: flex;
-  align-items: center;
-  gap: 16px;
-  flex-wrap: wrap;
-}
-
-.page-title {
-  font-size: 18px;
-  font-weight: 600;
-  color: var(--wb-text);
-  white-space: nowrap;
-}
-
-.top-bar-right {
-  display: flex;
-  align-items: center;
-  gap: 12px;
-  flex-wrap: wrap;
-}
-
-.stat-item {
-  font-size: 13px;
-  color: var(--wb-text-tertiary);
-  white-space: nowrap;
-}
-
-/* ── Main Content ── */
-.main-content {
-  flex: 1;
-  overflow-y: auto;
-  padding: 16px 24px;
-}
-
-.section-title {
-  font-size: 15px;
-  font-weight: 600;
-  color: var(--wb-text);
-  margin-bottom: 12px;
-  display: flex;
-  align-items: center;
-  gap: 6px;
-}
-
-/* ── KPI Grid ── */
-.kpi-grid {
-  display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(240px, 1fr));
-  gap: 12px;
-  margin-bottom: 20px;
-}
-
-.kpi-card {
-  background: var(--wb-bg-card);
-  border-radius: var(--wb-radius-md);
-  padding: 16px;
-  border: 1px solid var(--wb-border);
-  transition: box-shadow 0.25s ease, transform 0.2s ease;
-}
-
-.kpi-card:hover {
-  box-shadow: var(--wb-shadow-md);
-  transform: translateY(-1px);
-}
-
-.kpi-card--checked {
-  border-color: var(--wb-primary);
-  background: var(--wb-primary-mist);
-}
-
-.kpi-card__header {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  margin-bottom: 10px;
-}
-
-.kpi-card__header .kpi-card__name {
-  margin-bottom: 0;
-}
-
-.kpi-card__name {
-  font-size: 14px;
-  font-weight: 600;
-  color: var(--wb-text);
-  margin-bottom: 10px;
-}
-
-.kpi-card__row {
-  display: flex;
-  gap: 16px;
-}
-
-.kpi-item {
-  flex: 1;
-  text-align: center;
-}
-
-.kpi-value {
-  font-size: 22px;
-  font-weight: 700;
-}
-
-.kpi-label {
-  font-size: 11px;
-  color: var(--wb-text-tertiary);
-  margin-top: 2px;
-}
-
-.no-data {
-  font-size: 12px;
-  color: var(--wb-text-tertiary);
-  text-align: center;
-  padding: 8px;
-}
-
-/* ── KPI Cards (detail) ── */
-.kpi-cards {
-  display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
-  gap: 12px;
-  margin-bottom: 16px;
-}
-
-.kpi-card-big {
-  background: var(--wb-bg-card);
-  border-radius: var(--wb-radius-md);
-  padding: 16px 20px;
-  border: 1px solid var(--wb-border);
-  transition: box-shadow 0.25s ease;
-}
-
-.kpi-card-big:hover {
-  box-shadow: var(--wb-shadow-sm);
-}
-
-.kpi-card-big__label {
-  font-size: 13px;
-  color: var(--wb-text-tertiary);
-  margin-bottom: 4px;
-}
-
-.kpi-card-big__value {
-  font-size: 28px;
-  font-weight: 700;
-  color: var(--wb-text);
-}
-
-.kpi-card-big__value .unit {
-  font-size: 14px;
-  font-weight: 400;
-  color: var(--wb-text-tertiary);
-}
-
-.kpi-card-big__sub {
-  font-size: 12px;
-  color: var(--wb-text-tertiary);
-  margin-top: 4px;
-}
-
-/* ── Cards ── */
-.knowledge-card,
-.warning-card,
-.teaching-summary-card {
-  margin-top: 12px;
-}
-
-.card-header {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  font-weight: 600;
-}
-
-.teaching-summary-card {
-  margin-top: 12px;
-}
-
-.teaching-summary-grid {
-  display: grid;
-  grid-template-columns: repeat(3, minmax(0, 1fr));
-  gap: 12px;
-}
-
-.teaching-summary-item {
-  padding: 12px;
-  background: var(--wb-bg);
-  border: 1px solid var(--wb-border-light);
-  border-radius: var(--wb-radius-sm);
-}
-
-.teaching-summary-item--focus {
-  background: var(--wb-warning-mist, #fffaf0);
-  border-color: var(--wb-warning-soft, #fde68a);
-}
-
-.teaching-summary-label {
-  color: var(--wb-text-tertiary);
-  font-size: 12px;
-  margin-bottom: 6px;
-}
-
-.teaching-summary-value,
-.diagnosis-action {
-  color: var(--wb-text);
-  font-size: 13px;
-  line-height: 1.6;
-}
-
-.warning-card__content {
-  display: flex;
-  align-items: center;
-  font-size: 14px;
-  color: #9A3412;
-  line-height: 1.6;
-}
-
-/* ── Progress ── */
-.progress-section {
-  margin-top: 16px;
-}
-
-.progress-list {
-  background: var(--wb-bg-card);
-  border-radius: var(--wb-radius-md);
-  border: 1px solid var(--wb-border);
-}
-
-.progress-item {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  padding: 10px 16px;
-  border-bottom: 1px solid var(--wb-border-light);
-}
-
-.progress-item:last-child {
-  border-bottom: none;
-}
-
-.progress-name {
-  font-size: 14px;
-  color: var(--wb-text);
-}
-
-/* ── Results ── */
-.result-section {
-  margin-top: 16px;
-}
-
-.result-list {
-  background: var(--wb-bg-card);
-  border-radius: var(--wb-radius-md);
-  border: 1px solid var(--wb-border);
-}
-
-.result-item {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  padding: 12px 16px;
-  border-bottom: 1px solid var(--wb-border-light);
-}
-
-.result-item:last-child {
-  border-bottom: none;
-}
-
-.result-left {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-}
-
-.result-name {
-  font-size: 14px;
-  font-weight: 500;
-  color: var(--wb-text);
-}
-
-/* ── 全班共性诊断 ── */
-.class-section {
-  margin-top: 4px;
-}
-
-.diag-hint {
-  font-size: 12px;
-  color: var(--wb-text-tertiary);
-  margin-left: 12px;
-  display: inline-flex;
-  align-items: center;
-  gap: 4px;
-  cursor: help;
-}
-
-.diag-tag {
-  font-weight: 500;
-  color: var(--wb-text);
-}
-
-.blank-badge {
-  display: inline-block;
-  min-width: 22px;
-  padding: 1px 7px;
-  border-radius: var(--wb-radius-sm);
-  background: var(--wb-danger);
-  color: #fff;
-  font-size: 12px;
-  font-weight: 700;
-  line-height: 18px;
-}
-
-.muted {
-  color: var(--wb-text-tertiary);
-}
-
-:deep(.diag-row--blank) {
-  background: var(--wb-danger-mist, rgba(239, 68, 68, 0.06));
-}
-
-:deep(.diag-row--blank:hover) {
-  background: var(--wb-danger-mist, rgba(239, 68, 68, 0.1));
-}
-
-/* ── 下钻抽屉 ── */
-.drawer-header {
-  display: flex;
-  align-items: flex-start;
-  justify-content: space-between;
-  width: 100%;
-}
-
-.drawer-title {
-  font-size: 16px;
-  font-weight: 600;
-  color: var(--wb-text);
-}
-
-.drawer-sub {
-  font-size: 12px;
-  color: var(--wb-text-tertiary);
-  margin-top: 2px;
-}
-
-.drawer-body {
-  min-height: 300px;
-}
-
-.error-dist {
-  background: var(--wb-bg-card);
-  border: 1px solid var(--wb-border);
-  border-radius: var(--wb-radius-md);
-  padding: 12px 16px;
-}
-
-.error-item {
-  display: flex;
-  align-items: center;
-  padding: 7px 0;
-}
-
-.error-type {
-  width: 92px;
-  font-size: 13px;
-  font-weight: 500;
-  flex-shrink: 0;
-}
-
-.error-count {
-  width: 80px;
-  text-align: right;
-  font-size: 12px;
-  color: var(--wb-text-secondary);
-  flex-shrink: 0;
-}
-
-.sample-list {
-  background: var(--wb-bg-card);
-  border: 1px solid var(--wb-border);
-  border-radius: var(--wb-radius-md);
-  padding: 4px 16px;
-}
-
-.sample-item {
-  padding: 10px 0;
-  border-bottom: 1px dashed var(--wb-border-light);
-}
-
-.sample-item:last-child {
-  border-bottom: none;
-}
-
-.sample-q {
-  font-size: 14px;
-  color: var(--wb-text);
-  line-height: 1.5;
-}
-
-.sample-meta {
-  margin-top: 6px;
-  display: flex;
-  flex-wrap: wrap;
-  gap: 12px;
-  font-size: 12px;
-  color: var(--wb-text-secondary);
-}
-
-.sample-answer--blank {
-  color: var(--wb-danger);
-}
-
-.sample-reason {
-  margin-top: 6px;
-}
-
-/* ── Responsive ── */
-@media (max-width: 768px) {
-  .teaching-summary-grid {
-    grid-template-columns: 1fr;
-  }
-
-  .top-bar {
-    padding: 10px 12px;
-  }
-
-  .top-bar-left {
-    width: 100%;
-  }
-
-  .page-title {
-    font-size: 16px;
-  }
-
-  .top-bar-right {
-    width: 100%;
-    justify-content: stretch;
-  }
-
-  .top-bar-right .el-button {
-    flex: 1;
-  }
-
-  .main-content {
-    padding: 12px;
-  }
-
-  .kpi-grid {
-    grid-template-columns: 1fr;
-  }
-
-  .kpi-cards {
-    grid-template-columns: 1fr 1fr;
-  }
-
-  .stat-item {
-    font-size: 12px;
-  }
-}
-
-@media (max-width: 480px) {
-  .kpi-cards {
-    grid-template-columns: 1fr;
-  }
-
-  .btn-generate-all {
-    width: 100%;
-  }
-}
+.diagnosis-page{color:var(--wb-text)}.period-badge{display:inline-flex;align-items:center;height:24px;padding:0 9px;color:var(--wb-primary);font-size:11px;font-weight:600;background:var(--wb-primary-soft);border-radius:999px}.diagnosis-filter{margin-bottom:16px}.student-select{width:220px}.offset-select,.subject-select{width:120px}.student-option{display:flex;align-items:center;gap:8px}.student-option small{margin-left:auto;color:var(--wb-text-tertiary)}.filter-note{color:var(--wb-text-tertiary);font-size:11px;white-space:nowrap}.diagnosis-stats{display:grid;grid-template-columns:repeat(5,minmax(0,1fr));gap:12px;margin-bottom:16px}.diagnosis-layout{display:grid;grid-template-columns:minmax(0,1.65fr) minmax(320px,.75fr);align-items:start;gap:16px;margin-bottom:16px}.action-column{display:grid;gap:16px}.loading-stack{display:grid;gap:18px;padding:20px}.student-diagnosis-list{min-height:360px}.student-diagnosis-row{display:flex;align-items:center;gap:12px;min-height:82px;padding:12px 16px;box-sizing:border-box;border-bottom:1px solid var(--wb-border-light);cursor:pointer}.student-diagnosis-row:last-child{border-bottom:0}.student-diagnosis-row:hover{background:var(--wb-bg-elevated)}.student-identity{display:flex;width:110px;min-width:0;flex-direction:column;gap:3px}.student-identity strong{font-size:13px}.student-identity small{color:var(--wb-text-tertiary);font-size:10px}.risk-status,.mastery-status{display:inline-flex;align-items:center;height:23px;padding:0 8px;font-size:10px;font-weight:600;border-radius:5px;white-space:nowrap}.risk-status.normal,.mastery-status.normal{color:var(--wb-success);background:var(--wb-success-soft)}.risk-status.attention,.mastery-status.attention{color:var(--wb-warning);background:var(--wb-warning-soft)}.risk-status.critical,.mastery-status.critical{color:var(--wb-danger);background:var(--wb-danger-soft)}.student-metrics{display:grid;grid-template-columns:repeat(3,72px);gap:6px}.student-metrics span{display:flex;color:var(--wb-text-tertiary);font-size:9px;flex-direction:column;gap:3px}.student-metrics b{color:var(--wb-text);font-size:12px}.student-next{display:flex;min-width:170px;flex:1;flex-direction:column;gap:4px}.student-next span{color:var(--wb-text-tertiary);font-size:9px}.student-next strong{font-size:11px;font-weight:550}.row-arrow{color:var(--wb-text-tertiary)}.solution-list{display:grid;gap:0}.solution-item{display:grid;grid-template-columns:34px minmax(0,1fr) auto;align-items:center;gap:10px;padding:14px 0;border-bottom:1px solid var(--wb-border-light)}.solution-item:first-child{padding-top:0}.solution-item:last-child{padding-bottom:0;border-bottom:0}.solution-item div{min-width:0}.solution-item strong{font-size:12px}.solution-item p,.honest-state p,.report-options p{margin:4px 0 0;color:var(--wb-text-secondary);font-size:10px;line-height:1.5}.solution-icon,.report-icon{display:grid;width:32px;height:32px;place-items:center;border-radius:8px}.solution-icon.danger{color:var(--wb-danger);background:var(--wb-danger-soft)}.solution-icon.primary,.report-icon{color:var(--wb-primary);background:var(--wb-primary-soft)}.honest-state{display:flex;align-items:center;flex-direction:column;color:var(--wb-text-tertiary);text-align:center}.honest-state>.el-icon{margin-bottom:10px;font-size:26px}.honest-state strong{color:var(--wb-text);font-size:12px}.student-detail-layout{grid-template-columns:minmax(0,1.35fr) minmax(330px,.65fr)}.teaching-judgement{display:grid;grid-template-columns:repeat(3,1fr);border:1px solid var(--wb-border-light);border-radius:8px}.teaching-judgement>div{min-height:88px;padding:14px;border-right:1px solid var(--wb-border-light)}.teaching-judgement>div:last-child{border-right:0}.teaching-judgement .focus{background:#fffaf2}.teaching-judgement span{display:block;margin-bottom:7px;color:var(--wb-text-tertiary);font-size:10px}.teaching-judgement strong{font-size:11px;line-height:1.65}.trend-panel{margin-top:16px;padding-top:16px;border-top:1px solid var(--wb-border-light)}.trend-heading{display:flex;align-items:center;justify-content:space-between}.trend-heading>div{display:flex;flex-direction:column;gap:4px}.trend-heading strong{font-size:12px}.trend-heading span{color:var(--wb-text-tertiary);font-size:10px}.trend-result{font-size:11px;font-weight:600}.trend-result.success{color:var(--wb-success)}.trend-result.danger{color:var(--wb-danger)}.trend-result.primary{color:var(--wb-primary)}.trend-bars{display:grid;grid-template-columns:repeat(7,1fr);gap:10px;height:120px;margin-top:14px}.trend-day{display:flex;align-items:center;min-width:0;flex-direction:column;gap:4px}.trend-track{display:flex;width:100%;height:72px;align-items:flex-end;justify-content:center;background:var(--wb-bg-elevated);border-radius:5px;overflow:hidden}.trend-track span{display:block;width:100%;background:var(--wb-primary-soft);border-top:2px solid var(--wb-primary)}.trend-day b{font-size:9px}.trend-day small{color:var(--wb-text-tertiary);font-size:8px}.trend-empty{padding:30px;color:var(--wb-text-tertiary);font-size:11px;text-align:center}.knowledge-diagnosis,.class-diagnosis-section{margin-bottom:16px}.knowledge-name{display:flex;flex-direction:column;gap:3px}.knowledge-name strong{font-size:12px}.knowledge-name small,.table-sub{display:block;color:var(--wb-text-tertiary);font-size:9px}.danger-text{color:var(--wb-danger)}.no-comparison{font-size:11px;color:var(--wb-text-secondary)}.table-action{display:flex;align-items:center;justify-content:space-between;gap:10px}.class-actions{display:flex;justify-content:flex-end;gap:8px}.report-output{margin-top:16px}.report-options{display:flex;align-items:center;justify-content:space-between;gap:20px}.report-options>div:first-child{display:flex;align-items:center;gap:10px}.report-options strong{font-size:12px}.report-actions{display:flex;align-items:center;gap:8px;flex-wrap:wrap}.progress-list,.result-list{display:grid;gap:8px;margin-top:16px;padding-top:16px;border-top:1px solid var(--wb-border-light)}.progress-item,.result-item{display:flex;align-items:center;justify-content:space-between;min-height:36px}.result-item>span{display:flex;align-items:center;gap:8px}.drawer-header{display:flex;align-items:flex-start;justify-content:space-between}.drawer-title{font-size:16px;font-weight:650}.drawer-sub{margin-top:4px;color:var(--wb-text-tertiary);font-size:11px}.drawer-body{min-height:300px}.error-dist{display:grid;gap:12px}.error-item{display:flex;align-items:center}.error-type{width:90px;font-size:11px}.error-count{color:var(--wb-text-tertiary);font-size:10px}.sample-list{display:grid;gap:10px}.sample-item{padding:12px;background:var(--wb-bg-elevated);border-radius:8px}.sample-q{font-size:12px;line-height:1.6}.sample-meta,.sample-reason{display:flex;gap:8px;margin-top:8px;flex-wrap:wrap}.sample-meta{color:var(--wb-text-secondary);font-size:10px}.blank-badge{color:var(--wb-danger);font-weight:600}.muted{color:var(--wb-text-tertiary)}.diagnosis-page :deep(.el-input__wrapper),.diagnosis-page :deep(.el-select__wrapper){min-height:34px;border-radius:8px;box-shadow:0 0 0 1px var(--wb-border) inset}.diagnosis-page :deep(.el-segmented){--el-segmented-item-selected-bg-color:#fff;--el-segmented-item-selected-color:var(--wb-primary)}.diagnosis-page :deep(.diag-row--blank td){background:#fffaf2!important}.diagnosis-page :deep(button:focus-visible){outline:2px solid var(--wb-primary);outline-offset:2px}@media(max-width:1180px){.diagnosis-stats{grid-template-columns:repeat(3,1fr)}.diagnosis-layout,.student-detail-layout{grid-template-columns:1fr}.student-next{display:none}}@media(max-width:760px){.diagnosis-stats{grid-template-columns:repeat(2,1fr)}.student-select,.offset-select{width:100%}.student-diagnosis-row{align-items:flex-start;flex-wrap:wrap}.student-metrics{width:100%;padding-left:58px}.teaching-judgement{grid-template-columns:1fr}.teaching-judgement>div{border-right:0;border-bottom:1px solid var(--wb-border-light)}.report-options{align-items:flex-start;flex-direction:column}.report-actions{width:100%}}
 </style>

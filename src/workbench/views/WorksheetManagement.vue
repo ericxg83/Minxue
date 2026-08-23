@@ -1,75 +1,47 @@
 <template>
-  <div class="worksheet-mgr">
-    <div class="page-header">
-      <h2>练习册管理</h2>
-      <div style="display:flex;gap:8px;">
-        <el-button type="warning" plain @click="showFixDialog = true" :loading="fixing">
-          <el-icon><Tools /></el-icon>
-          修复试卷单元
-        </el-button>
-        <el-button type="danger" plain @click="showOrdinalFixDialog = true">
-          <el-icon><Tools /></el-icon>
-          修复堂堂练 ordinal
-        </el-button>
-        <el-button type="info" plain @click="showPageUnitDialog = true">
-          <el-icon><Tools /></el-icon>
-          手动修复任务单页
-        </el-button>
-        <el-button type="success" plain @click="showTypeFixDialog = true" :loading="typeFixLoading">
-          <el-icon><MagicStick /></el-icon>
-          修复题目类型
-        </el-button>
-        <el-button type="primary" @click="showCreateDialog = true">
-          <el-icon><Plus /></el-icon>
-          新建练习册
-        </el-button>
-      </div>
+  <div class="worksheet-mgr wb-page">
+    <div class="wb-page__inner">
+      <PageHeader eyebrow="教学资源 / 内容管理" title="练习册" description="管理已创建的练习册和学生练习任务">
+        <template #actions><ActionButton variant="primary" @click="showCreateDialog = true"><el-icon><Plus /></el-icon>新建练习册</ActionButton></template>
+      </PageHeader>
+
+      <FilterBar class="worksheet-filter">
+        <template #leading><div class="resource-summary"><strong>{{ filteredWorksheets.length }} 本练习册</strong><span>{{ publishedCount }} 本已发布 · {{ draftCount }} 本待完善</span></div></template>
+        <el-input v-model="searchQuery" class="worksheet-search" clearable placeholder="搜索练习册名称" aria-label="搜索练习册名称"><template #prefix><el-icon><Search /></el-icon></template></el-input>
+        <el-select v-model="subjectFilter" class="compact-select"><el-option label="全部科目" value="all" /><el-option v-for="subject in subjectOptions" :key="subject" :label="subject" :value="subject" /></el-select>
+        <el-select v-model="gradeFilter" class="compact-select"><el-option label="全部年级" value="all" /><el-option v-for="grade in gradeOptions" :key="grade" :label="grade" :value="grade" /></el-select>
+        <el-select v-model="statusFilter" class="compact-select"><el-option label="全部状态" value="all" /><el-option label="已发布" value="published" /><el-option label="审核中" value="reviewing" /><el-option label="草稿" value="draft" /></el-select>
+        <template #actions><el-button text @click="resetFilters">重置</el-button></template>
+      </FilterBar>
+
+      <ContentCard class="worksheet-library" title="练习册列表" description="查看内容完整度、发布状态和最近使用情况" flush>
+        <div v-if="loading" class="worksheet-loading"><el-skeleton v-for="index in 5" :key="index" :rows="2" animated /></div>
+        <EmptyState v-else-if="!worksheets.length" :icon="Document" title="没有练习册" description="创建第一本练习册，开始为学生生成针对性练习。"><template #actions><ActionButton variant="primary" @click="showCreateDialog = true"><el-icon><Plus /></el-icon>新建练习册</ActionButton></template></EmptyState>
+        <EmptyState v-else-if="!filteredWorksheets.length" title="没有符合筛选条件的练习册" description="可以调整搜索词或重置筛选条件。"><template #actions><ActionButton @click="resetFilters">重置筛选</ActionButton></template></EmptyState>
+        <div v-else class="worksheet-records">
+          <article v-for="worksheet in filteredWorksheets" :key="worksheet.id" class="worksheet-record">
+            <div class="worksheet-cover"><el-icon><Document /></el-icon><span>{{ worksheet.subject || '练习' }}</span></div>
+            <div class="worksheet-primary">
+              <div class="worksheet-title-row"><h3>{{ worksheet.name }}</h3><StatusTag :label="statusLabel(worksheet.status)" :tone="worksheetStatusTone(worksheet.status)" /></div>
+              <div class="worksheet-meta"><span>{{ worksheet.grade || '未设置年级' }}</span><i /> <span>{{ worksheet.subject || '未设置科目' }}</span><i /> <span>{{ worksheet.answer_count || 0 }} 道题</span></div>
+              <div class="worksheet-dates"><span>创建于 {{ formatDate(worksheet.created_at) || '-' }}</span><span>{{ recentUsageText(worksheet) }}</span></div>
+            </div>
+            <div class="worksheet-readiness">
+              <span>内容状态</span>
+              <strong>{{ worksheet.answer_count > 0 ? '内容已录入' : '等待录入内容' }}</strong>
+              <small>{{ worksheet.answer_count > 0 ? `${worksheet.answer_count} 道题可用于练习` : '编辑后上传题目与答案' }}</small>
+            </div>
+            <div class="worksheet-actions">
+              <el-button text :disabled="worksheet.answer_count === 0" @click="handleReview(worksheet)">查看</el-button>
+              <el-button text type="primary" @click="handleUploadPdf(worksheet)">编辑</el-button>
+              <ActionButton :variant="worksheet.status === 'published' ? 'secondary' : 'primary'" @click="handleToggleStatus(worksheet)">{{ worksheet.status === 'published' ? '撤回' : '发布' }}</ActionButton>
+              <el-popconfirm title="确定删除这本练习册？" confirm-button-text="删除" cancel-button-text="取消" @confirm="handleDelete(worksheet)"><template #reference><el-button text type="danger">删除</el-button></template></el-popconfirm>
+            </div>
+            <el-icon class="record-arrow"><ArrowRight /></el-icon>
+          </article>
+        </div>
+      </ContentCard>
     </div>
-
-    <el-table :data="worksheets" v-loading="loading" stripe style="width: 100%">
-      <el-table-column prop="name" label="名称" min-width="180" />
-      <el-table-column prop="grade" label="年级" width="100" />
-      <el-table-column prop="subject" label="科目" width="100" />
-      <el-table-column label="答案数" width="90">
-        <template #default="{ row }">{{ row.answer_count || 0 }} 题</template>
-      </el-table-column>
-      <el-table-column label="状态" width="100">
-        <template #default="{ row }">
-          <el-tag :type="statusType(row.status)" size="small">
-            {{ statusLabel(row.status) }}
-          </el-tag>
-        </template>
-      </el-table-column>
-      <el-table-column label="创建时间" width="160">
-        <template #default="{ row }">{{ formatDate(row.created_at) }}</template>
-      </el-table-column>
-      <el-table-column label="操作" width="320" fixed="right">
-        <template #default="{ row }">
-          <el-button size="small" @click="handleReview(row)" :disabled="row.answer_count === 0">
-            审核答案
-          </el-button>
-          <el-button size="small" @click="handleUploadPdf(row)">上传 PDF</el-button>
-          <el-button
-            size="small"
-            :type="row.status === 'published' ? 'warning' : 'success'"
-            @click="handleToggleStatus(row)"
-          >
-            {{ row.status === 'published' ? '撤回' : '发布' }}
-          </el-button>
-          <el-button size="small" type="info" plain @click="handleFixSingle(row)">
-            修复
-          </el-button>
-          <el-popconfirm title="确定删除？" @confirm="handleDelete(row)">
-            <template #reference>
-              <el-button size="small" type="danger">删除</el-button>
-            </template>
-          </el-popconfirm>
-        </template>
-      </el-table-column>
-    </el-table>
-
-    <el-empty v-if="!loading && worksheets.length === 0" description="暂无练习册，点击右上角新建" />
-
     <el-dialog v-model="showCreateDialog" title="新建练习册" width="420px">
       <el-form :model="createForm" label-width="60px">
         <el-form-item label="名称">
@@ -237,253 +209,19 @@
       </div>
     </el-dialog>
 
-    <!-- 修复试卷单元对话框 -->
-    <el-dialog v-model="showFixDialog" title="修复『试卷①/②/③』错挂" width="780px" :close-on-click-modal="false">
-      <el-alert
-        type="warning" :closable="false" show-icon
-        title="适用场景：已上传答案 PDF，但批改时发现答案错挂到『第十九章实数』等父章节，未正确归到『试卷①/②/③』下"
-        style="margin-bottom:12px;"
-      />
-      <div style="margin-bottom:12px;">
-        <el-button @click="loadFixSuspects" :loading="loadingSuspects">重新扫描嫌疑</el-button>
-        <el-button type="success" :disabled="!suspectWorksheets.length" @click="confirmBatchFix">
-          一键修复全部 ({{ suspectWorksheets.length }})
-        </el-button>
-        <el-button type="info" plain @click="showDebug = !showDebug">
-          {{ showDebug ? '收起' : '查看所有 worksheet 分布' }}
-        </el-button>
-      </div>
-      <el-table :data="suspectWorksheets" v-loading="loadingSuspects" max-height="300" empty-text="未发现需要修复的练习册 🎉">
-        <el-table-column prop="name" label="名称" min-width="220" />
-        <el-table-column prop="exam_units" label="试卷单元" width="100" />
-        <el-table-column prop="orphan_ans_count" label="错挂答案数" width="120" />
-        <el-table-column label="操作" width="120" fixed="right">
-          <template #default="{ row }">
-            <el-button size="small" type="primary" @click="confirmSingleFix(row)">修复</el-button>
-          </template>
-        </el-table-column>
-      </el-table>
-
-      <div v-if="showDebug" style="margin-top:16px;border-top:1px solid var(--wb-border);padding-top:12px;">
-        <div style="font-weight:600;margin-bottom:8px;">📊 所有 worksheet 详细分布（debug）：</div>
-        <div v-loading="loadingDebug" style="max-height:400px;overflow-y:auto;">
-          <div v-for="w in debugWorksheets" :key="w.id" class="debug-card">
-            <div class="debug-head">
-              <strong>{{ w.name }}</strong>
-              <span class="debug-id">{{ w.id }}</span>
-              <el-tag v-if="w.is_suspect" type="danger" size="small">嫌疑（错挂{{ w.orphan_ans_count }}）</el-tag>
-              <el-tag v-else type="success" size="small">正常</el-tag>
-            </div>
-            <div class="debug-stats">
-              试卷单元: {{ w.exam_units }}  |  章节答案: {{ w.chapter_ans_count }}  |  练习单元答案: {{ w.practice_ans_count }}  |  错挂答案: {{ w.orphan_ans_count }}  |  总: {{ w.total_ans_count }}
-            </div>
-            <div v-if="w.orphan_units && w.orphan_units.length" class="debug-orphan">
-              <span style="color:var(--wb-warning);">⚠️ 错挂的父章节：</span>
-              <span v-for="(u, i) in w.orphan_units" :key="u.unit_id" class="debug-orphan-item">
-                {{ u.unit_key }} (ans={{ u.ans_count }})<span v-if="i < w.orphan_units.length - 1">, </span>
-              </span>
-            </div>
-          </div>
-        </div>
-      </div>
-
-      <div v-if="fixLogs.length" style="margin-top:12px;">
-        <div style="font-weight:600;margin-bottom:4px;">执行日志：</div>
-        <pre class="fix-log">{{ fixLogs.join('\n') }}</pre>
-      </div>
-    </el-dialog>
-
-    <!-- 手动修复任务单页单元对话框 -->
-    <el-dialog v-model="showPageUnitDialog" title="手动修复任务单页单元归属" width="520px" :close-on-click-modal="false">
-      <el-alert
-        type="info" :closable="false" show-icon
-        title="适用场景：单张/无标题页面被 OCR 错挂到其他单元，老师明确知道该页应归属哪个单元时，可手动指定并重跑该页批改。"
-        style="margin-bottom: 16px;"
-      />
-      <el-form :model="pageUnitForm" label-width="110px">
-        <el-form-item label="任务 ID">
-          <el-input v-model="pageUnitForm.taskId" placeholder="如：a1b2c3d4..." />
-        </el-form-item>
-        <el-form-item label="页码">
-          <el-input-number v-model="pageUnitForm.pageNumber" :min="1" :precision="0" style="width: 100%;" />
-        </el-form-item>
-        <el-form-item label="目标单元">
-          <el-input v-model="pageUnitForm.unitKey" placeholder="如：试卷3|19.2 或 堂堂练①|19.1(1)" />
-        </el-form-item>
-      </el-form>
-      <div v-if="pageUnitResult" style="margin-top: 12px;">
-        <el-alert
-          :type="pageUnitResult.success ? 'success' : 'error'"
-          :closable="false"
-          show-icon
-          :title="pageUnitResult.success
-            ? `修复完成：更新 ${pageUnitResult.updated} 题，跳过 ${pageUnitResult.skipped} 题`
-            : `修复失败：${pageUnitResult.error || '未知错误'}`"
-        />
-      </div>
-      <template #footer>
-        <el-button @click="showPageUnitDialog = false">取消</el-button>
-        <el-button type="primary" @click="handlePageUnitFix" :loading="pageUnitLoading">开始修复</el-button>
-      </template>
-    </el-dialog>
-
-    <!-- 修复堂堂练 ordinal 对话框 -->
-    <el-dialog v-model="showOrdinalFixDialog" title="修复堂堂练 ordinal 错位" width="900px" :close-on-click-modal="false">
-      <el-alert
-        type="info" :closable="false" show-icon
-        title="适用场景：OCR 识别『堂堂练⑨』及之后圈序号漏识别、回退成前一个 ordinal，导致整本练习册答案挂错单元（如把『2×10^16』科学记数法答案挂到『绝对值』题下）。本工具按 lesson_code 顺序重派 ordinal 和 unit_key。"
-        style="margin-bottom:12px;"
-      />
-
-      <div style="display:flex;gap:8px;align-items:center;margin-bottom:12px;">
-        <span style="font-size:13px;">练习册：</span>
-        <el-select v-model="ordinalFixWorksheetId" placeholder="选择练习册" style="width:340px;" filterable>
-          <el-option
-            v-for="w in worksheets"
-            :key="w.id"
-            :label="`${w.name}（${w.id.slice(0, 8)}）`"
-            :value="w.id"
-          />
-        </el-select>
-        <el-button type="primary" :disabled="!ordinalFixWorksheetId || ordinalFixLoading" @click="runOrdinalPreview" :loading="ordinalFixLoading">
-          扫描预览
-        </el-button>
-        <el-button type="success" :disabled="!ordinalFixPreview.length || ordinalFixApplying" @click="applyOrdinalFix" :loading="ordinalFixApplying">
-          确认修复 ({{ ordinalFixPreview.filter(p => p.changed).length }})
-        </el-button>
-      </div>
-
-      <el-table
-        :data="ordinalFixPreview"
-        v-loading="ordinalFixLoading"
-        max-height="420"
-        empty-text="先选练习册，点击『扫描预览』"
-        border
-        size="small"
-      >
-        <el-table-column prop="old_unit_key" label="原 unit_key" min-width="180" />
-        <el-table-column prop="new_unit_key" label="新 unit_key" min-width="180">
-          <template #default="{ row }">
-            <span :style="{ color: row.changed ? 'var(--wb-success)' : 'var(--wb-text-tertiary)', fontWeight: row.changed ? 600 : 400 }">
-              {{ row.new_unit_key }}
-            </span>
-          </template>
-        </el-table-column>
-        <el-table-column label="ordinal" width="100" align="center">
-          <template #default="{ row }">
-            <span :style="{ color: row.old_ordinal !== row.new_ordinal ? 'var(--wb-warning)' : 'var(--wb-text-tertiary)' }">
-              {{ row.old_ordinal }} → {{ row.new_ordinal }}
-            </span>
-          </template>
-        </el-table-column>
-        <el-table-column label="状态" width="80" align="center">
-          <template #default="{ row }">
-            <el-tag v-if="row.changed" type="warning" size="small">改</el-tag>
-            <el-tag v-else type="info" size="small">不变</el-tag>
-          </template>
-        </el-table-column>
-      </el-table>
-
-      <div v-if="ordinalFixResult" style="margin-top:12px;">
-        <el-alert
-          :type="ordinalFixResult.success ? 'success' : 'error'"
-          :closable="false"
-          show-icon
-          :title="`执行完成：共 ${ordinalFixResult.total} 个单元，改 ${ordinalFixResult.changed} 个，不变 ${ordinalFixResult.unchanged || 0} 个${ordinalFixResult.errors?.length ? '，错误 ' + ordinalFixResult.errors.length + ' 个' : ''}`"
-        />
-        <pre v-if="ordinalFixResult.errors?.length" class="fix-log" style="margin-top:8px;">{{ ordinalFixResult.errors.map(e => `❌ ${e.old_unit_key} → ${e.new_unit_key} : ${e.error}`).join('\n') }}</pre>
-      </div>
-    </el-dialog>
-
-    <!-- 修复题目类型脏数据对话框 -->
-    <el-dialog v-model="showTypeFixDialog" title="修复『题目类型』脏数据" width="780px" :close-on-click-modal="false">
-      <el-alert
-        type="warning" :closable="false" show-icon
-        title="适用场景：之前用老 prompt 上传过图片，question_type 被 AI 错误填写成『choice/fill/judge/answer』整个枚举串（题目列表显示『1.?』乱码）。按题目内容启发式归一：options 非空→选择题，含____→填空题，含对/错→判断题，其它→解答题。"
-        style="margin-bottom:12px;"
-      />
-
-      <div style="display:flex;gap:8px;align-items:center;margin-bottom:12px;flex-wrap:wrap;">
-        <span style="font-size:13px;">范围：</span>
-        <el-select v-model="typeFixScope" style="width:280px;">
-          <el-option label="全部练习册" value="all" />
-          <el-option
-            v-for="w in worksheets"
-            :key="w.id"
-            :label="`${w.name}（${w.id.slice(0, 8)}）`"
-            :value="w.id"
-          />
-        </el-select>
-        <el-button @click="scanTypeFix" :loading="typeFixLoading" :disabled="typeFixApplying">
-          扫描脏数据
-        </el-button>
-        <el-button
-          type="success"
-          :disabled="!typeFixScan || typeFixScan.total === 0 || typeFixApplying"
-          :loading="typeFixApplying"
-          @click="runTypeFix"
-        >
-          确认修复 ({{ typeFixScan?.total || 0 }})
-        </el-button>
-      </div>
-
-      <el-alert
-        v-if="typeFixScan"
-        :type="typeFixScan.total === 0 ? 'success' : 'info'"
-        :closable="false"
-        :title="typeFixScan.total === 0
-          ? '✅ 未发现脏数据'
-          : `扫描到 ${typeFixScan.total} 条脏 question_type（最多展示前 20 条）`"
-        style="margin-bottom:12px;text-align:left;"
-      />
-
-      <el-table
-        v-if="typeFixScan && typeFixScan.sample.length"
-        :data="typeFixScan.sample"
-        max-height="300"
-        border
-        size="small"
-      >
-        <el-table-column prop="id" label="question_id" min-width="160">
-          <template #default="{ row }">
-            <code style="font-size:11px;">{{ row.id.slice(0, 8) }}…</code>
-          </template>
-        </el-table-column>
-        <el-table-column prop="raw_type" label="原 question_type" min-width="180">
-          <template #default="{ row }">
-            <el-tag type="danger" size="small" effect="plain">{{ row.raw_type || '(空)' }}</el-tag>
-          </template>
-        </el-table-column>
-        <el-table-column prop="inferred" label="推断类型" width="100">
-          <template #default="{ row }">
-            <el-tag type="success" size="small">{{ row.inferred }}</el-tag>
-          </template>
-        </el-table-column>
-      </el-table>
-
-      <div v-if="typeFixResult" style="margin-top:12px;">
-        <el-alert
-          :type="typeFixResult.errors?.length ? 'warning' : 'success'"
-          :closable="false"
-          show-icon
-          :title="`执行完成：扫描 ${typeFixResult.scanned} 条，修复 ${typeFixResult.fixed} 条（不变 ${typeFixResult.unchanged} 条）${typeFixResult.dryRun ? '（dryRun，未真实写入）' : ''}`"
-        />
-        <div v-if="typeFixResult.byTarget" style="margin-top:8px;font-size:13px;color:var(--wb-text-secondary);">
-          <span style="margin-right:12px;">分布：</span>
-          <el-tag v-for="(cnt, k) in typeFixResult.byTarget" :key="k" size="small" style="margin-right:6px;">
-            {{ k }} × {{ cnt }}
-          </el-tag>
-        </div>
-        <pre v-if="typeFixResult.errors?.length" class="fix-log" style="margin-top:8px;">{{ typeFixResult.errors.map(e => `❌ ${e.id}: ${e.error}`).join('\n') }}</pre>
-      </div>
-    </el-dialog>
   </div>
 </template>
 
 <script setup>
-import { ref, onMounted, watch } from 'vue'
+import { ref, computed, onMounted, watch } from 'vue'
 import { useRouter } from 'vue-router'
-import { Plus, UploadFilled, Loading, PictureFilled, Tools, MagicStick } from '@element-plus/icons-vue'
+import { Plus, UploadFilled, Loading, PictureFilled, Search, Document, ArrowRight } from '@element-plus/icons-vue'
+import ActionButton from '../components/ui/ActionButton.vue'
+import ContentCard from '../components/ui/ContentCard.vue'
+import EmptyState from '../components/ui/EmptyState.vue'
+import FilterBar from '../components/ui/FilterBar.vue'
+import PageHeader from '../components/ui/PageHeader.vue'
+import StatusTag from '../components/ui/StatusTag.vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import {
   getWorksheets,
@@ -500,6 +238,33 @@ import {
 const router = useRouter()
 const worksheets = ref([])
 const loading = ref(false)
+const searchQuery = ref('')
+const subjectFilter = ref('all')
+const gradeFilter = ref('all')
+const statusFilter = ref('all')
+const subjectOptions = computed(() => [...new Set(worksheets.value.map(item => item.subject).filter(Boolean))])
+const gradeOptions = computed(() => [...new Set(worksheets.value.map(item => item.grade).filter(Boolean))])
+const filteredWorksheets = computed(() => worksheets.value.filter(item => {
+  const keyword = searchQuery.value.trim().toLowerCase()
+  const matchesSearch = !keyword || `${item.name || ''} ${item.subject || ''} ${item.grade || ''}`.toLowerCase().includes(keyword)
+  const matchesSubject = subjectFilter.value === 'all' || item.subject === subjectFilter.value
+  const matchesGrade = gradeFilter.value === 'all' || item.grade === gradeFilter.value
+  const matchesStatus = statusFilter.value === 'all' || item.status === statusFilter.value
+  return matchesSearch && matchesSubject && matchesGrade && matchesStatus
+}))
+const publishedCount = computed(() => worksheets.value.filter(item => item.status === 'published').length)
+const draftCount = computed(() => worksheets.value.filter(item => item.status !== 'published').length)
+const worksheetStatusTone = status => status === 'published' ? 'success' : status === 'reviewing' ? 'warning' : 'default'
+const recentUsageText = worksheet => {
+  const value = worksheet.last_used_at || worksheet.last_used || worksheet.updated_at
+  return value ? `最近更新 ${formatDate(value)}` : '暂无使用记录'
+}
+const resetFilters = () => {
+  searchQuery.value = ''
+  subjectFilter.value = 'all'
+  gradeFilter.value = 'all'
+  statusFilter.value = 'all'
+}
 const showCreateDialog = ref(false)
 const creating = ref(false)
 const createForm = ref({ name: '', subject: '', grade: '' })
@@ -1342,4 +1107,5 @@ watch(showTypeFixDialog, (v) => {
   font-size: 11px;
   color: #c45656;
 }
-</style>
+
+.worksheet-mgr{color:var(--wb-text)}.worksheet-filter{margin-bottom:16px}.resource-summary{display:flex;flex-direction:column;gap:4px;white-space:nowrap}.resource-summary strong{font-size:12px}.resource-summary span{color:var(--wb-text-tertiary);font-size:10px}.worksheet-search{width:260px}.compact-select{width:126px}.worksheet-library{min-height:430px}.worksheet-loading{display:grid;gap:18px;padding:20px}.worksheet-records{min-height:360px}.worksheet-record{display:grid;grid-template-columns:64px minmax(260px,1fr) minmax(180px,.55fr) auto 16px;align-items:center;gap:16px;min-height:104px;padding:14px 18px;box-sizing:border-box;border-bottom:1px solid var(--wb-border-light);transition:background .15s ease}.worksheet-record:last-child{border-bottom:0}.worksheet-record:hover{background:var(--wb-bg-elevated)}.worksheet-cover{display:flex;align-items:center;justify-content:center;width:56px;height:72px;flex-direction:column;gap:8px;color:var(--wb-primary);background:linear-gradient(145deg,#f8f9ff,#eef0ff);border:1px solid #dfe3ff;border-radius:8px}.worksheet-cover .el-icon{font-size:24px}.worksheet-cover span{font-size:9px;font-weight:600}.worksheet-primary{min-width:0}.worksheet-title-row{display:flex;align-items:center;gap:9px}.worksheet-title-row h3{max-width:420px;margin:0;font-size:14px;font-weight:650;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}.worksheet-meta,.worksheet-dates{display:flex;align-items:center;gap:8px;margin-top:9px;color:var(--wb-text-secondary);font-size:10px}.worksheet-meta i{width:3px;height:3px;background:var(--wb-text-tertiary);border-radius:50%}.worksheet-dates{color:var(--wb-text-tertiary)}.worksheet-dates span+span{padding-left:8px;border-left:1px solid var(--wb-border-light)}.worksheet-readiness{display:flex;min-width:0;flex-direction:column;gap:4px}.worksheet-readiness>span{color:var(--wb-text-tertiary);font-size:9px}.worksheet-readiness strong{font-size:11px}.worksheet-readiness small{color:var(--wb-text-secondary);font-size:9px;line-height:1.5}.worksheet-actions{display:flex;align-items:center;justify-content:flex-end;gap:2px;white-space:nowrap}.worksheet-actions :deep(.el-button+.el-button){margin-left:0}.record-arrow{display:none;color:var(--wb-text-tertiary)}.worksheet-mgr :deep(.el-input__wrapper),.worksheet-mgr :deep(.el-select__wrapper){min-height:34px;border-radius:8px;box-shadow:0 0 0 1px var(--wb-border) inset}.worksheet-mgr :deep(button:focus-visible){outline:2px solid var(--wb-primary);outline-offset:2px}@media(max-width:1120px){.worksheet-record{grid-template-columns:56px minmax(220px,1fr) auto 16px}.worksheet-readiness{display:none}.worksheet-actions .el-button--danger{display:none}.record-arrow{display:block}}@media(max-width:760px){.worksheet-search,.compact-select{width:100%}.worksheet-record{grid-template-columns:48px minmax(0,1fr);gap:12px;padding:14px}.worksheet-cover{width:44px;height:58px}.worksheet-cover .el-icon{font-size:20px}.worksheet-actions{grid-column:1/-1;justify-content:flex-end}.record-arrow{display:none}.worksheet-dates{align-items:flex-start;flex-direction:column;gap:4px}.worksheet-dates span+span{padding-left:0;border-left:0}}</style>
