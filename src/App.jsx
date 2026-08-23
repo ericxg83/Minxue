@@ -1120,12 +1120,10 @@ export default function App() {
                 onTagsChange={setSelectedTags}
                 allAvailableTags={allAvailableTags}
                 selectedQuestions={selectedQuestions}
-                priorityQuestions={priorityWrongQuestions}
                 pendingWrongQuestionCount={pendingWrongQuestions.length}
                 onToggleSelection={toggleSelection}
                 onOpenDetail={handleOpenWrongBookDetail}
                 onDelete={handleDeleteWrongQuestion}
-                onStartPriorityRetry={handleStartPriorityRetry}
                 onSelectAll={handleSelectAll}
                 onPrintPreview={handlePrintPreview}
                 selectedErrorType={selectedErrorType}
