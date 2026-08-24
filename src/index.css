@@ -537,10 +537,8 @@ button {
 }
 
 /* The bottom tabs already identify the four primary mobile destinations. */
-@media (max-width: 499px) {
-  .phone-frame .mobile-page { padding-top: 8px !important; }
-  .phone-frame .mobile-page-header { display: none !important; }
-  .phone-frame .mobile-page > header:not(.mobile-page-header) { margin-bottom: 14px !important; }
-  .phone-frame .mobile-page > header:not(.mobile-page-header) h1 { font-size: 18px !important; line-height: 1.35 !important; }
-  .phone-frame .mobile-page > header:not(.mobile-page-header) p { font-size: 11px !important; line-height: 1.35 !important; }
-}
+.phone-frame .mobile-page { padding-top: 8px !important; }
+.phone-frame .mobile-page-header { display: none !important; }
+.phone-frame .mobile-page > header:not(.mobile-page-header) { margin-bottom: 14px !important; }
+.phone-frame .mobile-page > header:not(.mobile-page-header) h1 { font-size: 18px !important; line-height: 1.35 !important; }
+.phone-frame .mobile-page > header:not(.mobile-page-header) p { font-size: 11px !important; line-height: 1.35 !important; }
