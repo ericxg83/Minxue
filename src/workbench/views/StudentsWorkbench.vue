@@ -3,6 +3,7 @@
     <div class="wb-page__inner">
       <PageHeader eyebrow="学生学习 / 学生管理" title="学生管理" description="集中查看学生当前学习状态，快速进入错题、重练和成长记录。">
         <template #badge><span class="header-count">{{ enrichedStudents.length }} 名学生</span></template>
+        <template #actions><ActionButton variant="primary" @click="openCreateDialog">添加学生</ActionButton></template>
       </PageHeader>
 
       <section class="stats-grid" aria-label="学生状态概览">
@@ -62,14 +63,30 @@
         </EmptyState>
       </ContentCard>
     </div>
+
+    <el-dialog v-model="createDialogVisible" title="添加学生" width="420px" destroy-on-close @closed="resetCreateForm">
+      <el-form ref="createFormRef" :model="createForm" :rules="createRules" label-position="top" @submit.prevent="submitCreateStudent">
+        <el-form-item label="学生姓名" prop="name">
+          <el-input v-model="createForm.name" maxlength="30" show-word-limit placeholder="请输入学生姓名" @keyup.enter="submitCreateStudent" />
+        </el-form-item>
+        <el-form-item label="年级" prop="grade">
+          <el-input v-model="createForm.grade" maxlength="30" placeholder="例如：五年级（选填）" @keyup.enter="submitCreateStudent" />
+        </el-form-item>
+      </el-form>
+      <template #footer>
+        <el-button @click="createDialogVisible = false">取消</el-button>
+        <el-button type="primary" :loading="creating" @click="submitCreateStudent">添加学生</el-button>
+      </template>
+    </el-dialog>
   </div>
 </template>
 
 <script setup>
 import { computed, onMounted, ref } from 'vue'
+import { ElMessage } from 'element-plus'
 import { ArrowRight, Search, User } from '@element-plus/icons-vue'
 import { useRouter } from 'vue-router'
-import { getStudents, getTasksByStudent, getWrongQuestionsByStudent, getGeneratedExamsByStudent } from '../../services/apiService'
+import { createStudent, getStudents, getTasksByStudent, getWrongQuestionsByStudent, getGeneratedExamsByStudent } from '../../services/apiService'
 import ActionButton from '../components/ui/ActionButton.vue'
 import ContentCard from '../components/ui/ContentCard.vue'
 import EmptyState from '../components/ui/EmptyState.vue'
@@ -83,6 +100,16 @@ const students = ref([])
 const loading = ref(true)
 const search = ref('')
 const activeFilter = ref('all')
+const createDialogVisible = ref(false)
+const creating = ref(false)
+const createFormRef = ref()
+const createForm = ref({ name: '', grade: '' })
+const createRules = {
+  name: [
+    { required: true, message: '请输入学生姓名', trigger: 'blur' },
+    { min: 1, max: 30, message: '学生姓名长度应为 1-30 个字符', trigger: 'blur' }
+  ]
+}
 
 const enrichedStudents = computed(() => students.value.map(student => {
   const wrongCount = student.wrongCount || 0
@@ -110,8 +137,34 @@ const hasActiveFilters = computed(() => Boolean(search.value) || activeFilter.va
 const initial = name => (name || '?').slice(0, 1)
 const openStudent = id => router.push(`/students/${id}`)
 const resetFilters = () => { search.value = ''; activeFilter.value = 'all' }
+const openCreateDialog = () => { createDialogVisible.value = true }
+const resetCreateForm = () => {
+  createForm.value = { name: '', grade: '' }
+  createFormRef.value?.clearValidate()
+}
+const submitCreateStudent = async () => {
+  if (creating.value) return
+  const valid = await createFormRef.value?.validate().catch(() => false)
+  if (!valid) return
 
-onMounted(async () => {
+  creating.value = true
+  try {
+    await createStudent({
+      name: createForm.value.name.trim(),
+      grade: createForm.value.grade.trim()
+    })
+    createDialogVisible.value = false
+    ElMessage.success('学生添加成功')
+    await loadStudents()
+  } catch (error) {
+    ElMessage.error(error.message || '学生添加失败，请稍后重试')
+  } finally {
+    creating.value = false
+  }
+}
+
+const loadStudents = async () => {
+  loading.value = true
   try {
     const result = await getStudents(false)
     const list = result.data || result || []
@@ -128,10 +181,13 @@ onMounted(async () => {
     }))
   } catch (error) {
     students.value = []
+    ElMessage.error(error.message || '学生列表加载失败，请刷新重试')
   } finally {
     loading.value = false
   }
-})
+}
+
+onMounted(loadStudents)
 </script>
 
 <style scoped>
