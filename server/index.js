@@ -38,6 +38,7 @@ import { migrateVariantQuestionType } from './migrations/042_add_variant_questio
 import { migrateRelaxQuestionTypeCheck } from './migrations/043_relax_question_type_check.js'
 import { migrateHandoutLectures } from './migrations/045_handout_lectures.js'
 import { migrateTaskNotificationRead } from './migrations/046_add_task_notification_read.js'
+import { migrateTeachingQuestionTypes } from './migrations/047_teaching_question_types.js'
 import { scheduleNightParse } from './services/nightParseService.js'
 
 const __dirname = dirname(fileURLToPath(import.meta.url))
@@ -66,6 +67,7 @@ import teachingRouter from './routes/teaching.js'
 import variantsRouter from './routes/variants.js'
 import handoutRouter from './routes/handout.js'
 import handoutLectureRouter from './routes/handoutLecture.js'
+import teachingQuestionTypesRouter from './routes/teachingQuestionTypes.js'
 import weaknessRouter from './routes/weakness.js'
 import examPdfRouter from './routes/examPdf.js'
 import { runErrorDiagnosis } from './services/diagnosisService.js'
@@ -2301,6 +2303,7 @@ app.use('/api/teaching', teachingRouter)
 app.use('/api/variants', variantsRouter)
 app.use('/api/handout', handoutRouter)
 app.use('/api/handout', handoutLectureRouter)
+app.use('/api/teaching-question-types', teachingQuestionTypesRouter)
 app.use('/api/weakness', weaknessRouter)
 app.use('/api/exam-pdf', examPdfRouter)
 
@@ -2384,6 +2387,7 @@ if (process.argv[1] === __filename || process.argv[1]?.endsWith('server/index.js
       await migrateRelaxQuestionTypeCheck()
       await migrateHandoutLectures()
       await migrateTaskNotificationRead()
+      await migrateTeachingQuestionTypes()
     } catch (err) {
       console.error('数据库迁移失败:', err.message)
     }
@@ -2502,10 +2506,3 @@ export const createServer = (port = PORT) => {
     })
   })
 }
-
-
-
-
-
-
-

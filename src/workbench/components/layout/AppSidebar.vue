@@ -3,7 +3,7 @@
 import {useRoute,useRouter} from 'vue-router'
 import {Collection,DataAnalysis,DocumentChecked,HomeFilled,MoreFilled,Notebook,Reading,User} from '@element-plus/icons-vue'
 const route=useRoute(),router=useRouter()
-const navGroups=[{label:'',items:[{label:'工作台',path:'/',icon:HomeFilled}]},{label:'教学工作',items:[{label:'批改中心',path:'/grade',icon:DocumentChecked},{label:'学习诊断',path:'/weekly-report',icon:DataAnalysis},{label:'错题中心',path:'/wrongbook',icon:Collection},{label:'学生管理',path:'/students',icon:User}]},{label:'教学资源',items:[{label:'练习册管理',path:'/worksheets',icon:Notebook},{label:'我的讲义',path:'/handouts',icon:Reading},{label:'题库',path:'/question-bank',icon:Collection}]}]
+const navGroups=[{label:'',items:[{label:'工作台',path:'/',icon:HomeFilled}]},{label:'教学工作',items:[{label:'批改中心',path:'/grade',icon:DocumentChecked},{label:'学习诊断',path:'/weekly-report',icon:DataAnalysis},{label:'错题中心',path:'/wrongbook',icon:Collection},{label:'学生管理',path:'/students',icon:User}]},{label:'教学资源',items:[{label:'练习册管理',path:'/worksheets',icon:Notebook},{label:'我的讲义',path:'/handouts',icon:Reading},{label:'我的题型库',path:'/question-bank',icon:Collection}]}]
 const isActive=path=>path==='/'?route.path==='/':route.path.startsWith(path)
 const go=path=>{if(route.path!==path)router.push(path)}
 </script>

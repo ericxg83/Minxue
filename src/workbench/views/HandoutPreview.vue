@@ -54,6 +54,9 @@
         <el-button @click="openKnowledgeDialog" type="primary" plain :icon="Collection" :loading="knowledgeGenerating">
           按知识点
         </el-button>
+        <el-button @click="openTypeLibrary" plain :icon="Collection" :loading="typeLibraryLoading">
+          插入题型
+        </el-button>
         <el-button @click="generateScriptForAll" type="warning" plain :loading="scriptLoading" :icon="MagicStick">
           生成讲课提词器
         </el-button>
@@ -449,6 +452,17 @@
       </template>
     </el-dialog>
 
+    <el-drawer v-model="typeLibraryVisible" title="从我的题型库插入" size="min(520px, 100%)">
+      <div class="type-library-drawer">
+        <p>选择一个知识点下已确认的题型。插入后会保存代表题与讲法快照，不会修改原题。</p>
+        <el-input v-model="typeLibraryKeyword" clearable placeholder="搜索题型" :prefix-icon="Collection" />
+        <div v-if="typeLibraryLoading" class="type-library-loading"><el-skeleton animated :rows="8" /></div>
+        <el-empty v-else-if="!filteredLibraryTypes.length" description="没有可插入的题型" />
+        <button v-for="item in filteredLibraryTypes" :key="item.id" type="button" class="type-library-item" @click="insertTeachingType(item)">
+          <span><strong>{{ item.name }}</strong><small>{{ item.knowledge_name }} · {{ item.example_count }} 道代表题</small></span><el-icon><ArrowRight /></el-icon>
+        </button>
+      </div>
+    </el-drawer>
     <!-- 课堂展示模式（只读全屏） -->
     <transition name="present-fade">
       <div v-if="presentMode" class="present-overlay">
@@ -732,7 +746,7 @@
 import { ref, computed, onMounted, onBeforeUnmount, nextTick, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { ElMessage, ElMessageBox } from 'element-plus'
-import { ArrowLeft, Download, Printer, Document, CopyDocument, MagicStick, Collection } from '@element-plus/icons-vue'
+import { ArrowLeft, ArrowRight, Download, Printer, Document, CopyDocument, MagicStick, Collection } from '@element-plus/icons-vue'
 import { apiRequest, getKnowledgeTree } from '../../services/apiService'
 import katex from 'katex'
 import 'katex/dist/katex.min.css'
@@ -768,6 +782,15 @@ const knowledgeTree = ref([])
 const knowledgeLoading = ref(false)
 const knowledgeGenerating = ref(false)
 const knowledgeTreeRef = ref(null)
+const typeLibraryVisible = ref(false)
+const typeLibraryLoading = ref(false)
+const typeLibraryKeyword = ref('')
+const teachingTypes = ref([])
+const filteredLibraryTypes = computed(() => {
+  const keyword = typeLibraryKeyword.value.trim().toLowerCase()
+  if (!keyword) return teachingTypes.value
+  return teachingTypes.value.filter(item => `${item.name} ${item.knowledge_name} ${item.teaching_notes || ''}`.toLowerCase().includes(keyword))
+})
 
 // ── 课堂展示模式（P0：只读全屏，不修改讲义数据）──
 const presentMode = ref(false)   // 默认备课模式；切换展示时置 true
@@ -1056,6 +1079,48 @@ async function loadTemplates(subject) {
 }
 
 // ── 按知识点生成（P9） ──
+async function openTypeLibrary() {
+  typeLibraryVisible.value = true
+  if (teachingTypes.value.length > 0) return
+  typeLibraryLoading.value = true
+  try {
+    const response = await apiRequest('/teaching-question-types')
+    teachingTypes.value = response.types || []
+  } catch (error) {
+    ElMessage.error('加载题型库失败: ' + error.message)
+  } finally {
+    typeLibraryLoading.value = false
+  }
+}
+
+async function insertTeachingType(item) {
+  try {
+    const response = await apiRequest(`/teaching-question-types/${item.id}`)
+    const type = response.type
+    if (!type || !handout.value) return ElMessage.warning('题型或讲义不可用')
+    const blocks = [
+      { type: 'section', content: `题型 · ${type.name}`, sourceTypeId: type.id, knowledgePointId: type.kp_id },
+      { type: 'related-kp', content: [type.knowledge_name] },
+      ...(type.teaching_notes ? [{ type: 'lecture-guidance', content: type.teaching_notes }] : []),
+      ...(type.common_mistakes ? [{ type: 'error-cause', content: type.common_mistakes }] : []),
+    ]
+    for (const example of type.examples || []) {
+      const snapshot = example.snapshot || {}
+      blocks.push({ type: 'question', content: snapshot.content || '题目内容不可用', options: snapshot.options || [], questionType: snapshot.questionType || '代表题', imageUrls: [snapshot.imageUrl].filter(Boolean), sourceTypeId: type.id, sourceExampleId: example.id })
+      if (snapshot.answer) blocks.push({ type: 'answer', content: '课堂作答后揭晓', correctAnswer: snapshot.answer })
+      if (snapshot.analysis) blocks.push({ type: 'analysis', content: snapshot.analysis })
+    }
+    const page = { name: `${type.knowledge_name} · ${type.name}`, blocks }
+    const tocIndex = handout.value.pages.findIndex(pageItem => pageItem.name === 'toc')
+    handout.value.pages.push(page)
+    if (tocIndex >= 0) handout.value.pages[tocIndex].blocks.push({ type: 'toc-item', content: `题型：${type.knowledge_name} · ${type.name}`, sub: true })
+    dirty.value = true
+    typeLibraryVisible.value = false
+    ElMessage.success('已插入题型讲解与代表题')
+  } catch (error) {
+    ElMessage.error('插入题型失败: ' + error.message)
+  }
+}
 async function openKnowledgeDialog() {
   knowledgeDialogVisible.value = true
   if (knowledgeTree.value.length > 0) return
@@ -2599,4 +2664,4 @@ async function loadFromDiagnosis() {
 .present-fade-leave-active { transition: opacity 0.25s ease; }
 .present-fade-enter-from,
 .present-fade-leave-to { opacity: 0; }
-</style>
+.type-library-drawer{display:grid;gap:12px}.type-library-drawer>p{margin:0;color:var(--wb-text-secondary);font-size:13px;line-height:1.65}.type-library-loading{padding:12px 0}.type-library-item{display:flex;align-items:center;justify-content:space-between;gap:12px;width:100%;padding:13px;border:1px solid var(--wb-border-light);border-radius:8px;background:var(--wb-bg-card);color:inherit;text-align:left;cursor:pointer}.type-library-item:hover{border-color:var(--wb-primary);background:var(--wb-primary-soft)}.type-library-item span{display:grid;gap:4px;min-width:0}.type-library-item strong{overflow:hidden;font-size:13px;text-overflow:ellipsis;white-space:nowrap}.type-library-item small{color:var(--wb-text-tertiary);font-size:11px}</style>

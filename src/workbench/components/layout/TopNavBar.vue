@@ -1,4 +1,4 @@
-﻿<template>
+<template>
   <aside class="workbench-sidebar">
     <div class="brand-lockup">
       <span class="brand-mark">敏</span>
@@ -55,7 +55,7 @@ const navItems = [
   { key: 'dashboard', label: '工作台', path: '/', icon: 'HomeFilled' },
   { key: 'teaching', label: '批改中心', icon: 'DocumentChecked', children: [{ key: 'grade', label: '批改中心', path: '/grade', icon: 'DocumentChecked' }] },
   { key: 'learning', label: '学生学习', icon: 'Collection', children: [{ key: 'weekly-report', label: '学习诊断', path: '/weekly-report', icon: 'DataAnalysis' }, { key: 'wrong-book', label: '错题', path: '/wrongbook', icon: 'Collection' }, { key: 'growth', label: '成长报告', path: '/growth', icon: 'DataAnalysis' }] },
-  { key: 'resources', label: '教学资源', icon: 'Notebook', children: [{ key: 'handouts', label: '我的讲义', path: '/handouts', icon: 'Reading' }, { key: 'worksheets', label: '练习册', path: '/worksheets', icon: 'Notebook' }, { key: 'question-bank', label: '题库', path: '/question-bank', icon: 'Collection' }] }
+  { key: 'resources', label: '教学资源', icon: 'Notebook', children: [{ key: 'handouts', label: '我的讲义', path: '/handouts', icon: 'Reading' }, { key: 'worksheets', label: '练习册', path: '/worksheets', icon: 'Notebook' }, { key: 'question-bank', label: '我的题型库', path: '/question-bank', icon: 'Collection' }] }
 ]
 const isActive = (item) => { if (item.path === '/') return route.path === '/'; if (item.path) return route.path.startsWith(item.path); return item.children?.some(child => isActive(child)) ?? false }
 const currentSection = computed(() => { const active = navItems.flatMap(item => item.children || item).find(item => isActive(item)); return active?.label || '工作台' })
