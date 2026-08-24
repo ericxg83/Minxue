@@ -16,7 +16,7 @@ import { uploadImage } from './services/ossService.js'
 import { cropAndUploadQuestionRegion } from './utils/cropAndUpload.js'
 import { generateTextFingerprint, generatePHash, PARSER_VERSION, TEXT_SIMILARITY_THRESHOLD } from './utils/questionFingerprint.js'
 import { uploadFilesWithRetry } from './services/uploadRetryManager.js'
-import { judgeAnswer } from './services/judgeService.js'
+import { judgeAnswer, normalizeQuestionType, normalizeChoiceAnswer } from './services/judgeService.js'
 import { normalizeSectionName, splitSubAnswers, splitOcrQuestionsBySubNo } from './services/answerParseService.js'
 import { classifyQuestionLocally } from './utils/localTagger.js'
 import { finalizeGradingBatch } from './services/gradingFinalizer.js'
@@ -971,6 +971,15 @@ export function extractAnswerFromAnalysis(answer, analysis, options) {
   return answer
 }
 
+function preserveChoiceAnswer(question, candidateAnswer) {
+  const existing = normalizeChoiceAnswer(question.answer)
+  if (existing) return existing
+  const questionType = normalizeQuestionType(question.question_type, question.options)
+  if (questionType !== 'choice') return candidateAnswer
+  const candidate = normalizeChoiceAnswer(candidateAnswer)
+  return candidate || candidateAnswer
+}
+
 /**
  * Generate a single answer for a question via text-only AI call.
  */
@@ -1157,6 +1166,7 @@ const generateMissingAnswers = async (questions, imageBuffer = null) => {
           console.log(`     题目 ${q.id.substring(0, 8)}: ✅ 缓存命中 - 复用AI解析结果`)
 
           let finalAnswer = extractAnswerFromAnalysis(cached.answer, cached.analysis, q.options)
+          finalAnswer = preserveChoiceAnswer(q, finalAnswer)
           try {
             await updateQuestionAnswer(q.id, finalAnswer, cached.analysis)
             q.answer = finalAnswer
@@ -1194,8 +1204,9 @@ const generateMissingAnswers = async (questions, imageBuffer = null) => {
           const extracted = extractAnswerFromAnalysis(result.answer, result.analysis, q.options)
           if (extracted && extracted !== '-' && extracted !== result.answer) {
             try {
-              await updateQuestionAnswer(q.id, extracted, result.analysis, true)
-              q.answer = extracted
+              const safeExtracted = preserveChoiceAnswer(q, extracted)
+              await updateQuestionAnswer(q.id, safeExtracted, result.analysis, true)
+              q.answer = safeExtracted
               q.analysis = result.analysis
               updatedCount++
               fireForget(() => saveQuestionSubject(q, result.subject), `学科 q=${q.id.substring(0, 8)}`)
@@ -1219,6 +1230,7 @@ const generateMissingAnswers = async (questions, imageBuffer = null) => {
       if (result.answer && result.answer !== '待人工补充' && result.answer !== '此为主观题，无唯一标准答案') {
         const oldAnswer = q.answer
         let finalAnswer = extractAnswerFromAnalysis(result.answer, result.analysis, q.options)
+        finalAnswer = preserveChoiceAnswer(q, finalAnswer)
         try {
           await updateQuestionAnswer(q.id, finalAnswer, result.analysis, true)
           q.answer = finalAnswer

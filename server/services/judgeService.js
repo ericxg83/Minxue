@@ -32,6 +32,39 @@ function narrowToFinalAnswer(s) {
   return str
 }
 
+export function normalizeQuestionType(rawType, options = []) {
+  const type = String(rawType || '').trim().toLowerCase()
+  if (['choice', 'select', 'multiple_choice', 'single_choice', '\u9009\u62e9', '\u9009\u62e9\u9898', '\u5355\u9009', '\u5355\u9009\u9898', '\u591a\u9009', '\u591a\u9009\u9898'].includes(type)) return 'choice'
+  if (['judge', '\u5224\u65ad', '\u5224\u65ad\u9898', 'true_false', 'true/false'].includes(type)) return 'judge'
+  if (['fill', 'blank', '\u586b\u7a7a', '\u586b\u7a7a\u9898'].includes(type)) return 'fill'
+  if (['answer', 'solution', '\u89e3\u7b54', '\u89e3\u7b54\u9898', '\u8ba1\u7b97', '\u8ba1\u7b97\u9898'].includes(type)) return 'answer'
+  if (Array.isArray(options) && options.length >= 2) return 'choice'
+  return type || 'answer'
+}
+
+export function normalizeChoiceAnswer(value) {
+  let answer = String(value ?? '').trim()
+    .replace(/[\uFF01-\uFF5E]/g, ch => String.fromCharCode(ch.charCodeAt(0) - 0xFEE0))
+    .toUpperCase()
+    .replace(/^[\s\uFF08(\[\u3010\u300C\u300E]+|[\s\uFF09)\]\u3011\u300D\u300F]+$/g, '')
+    .replace(/[.\uFF0E\u3001,\uFF0C;\uFF1B:\uFF1A\s]+/g, '')
+
+  const prefixes = ['ANSWER', 'SELECT', 'OPTION', '\u7B54\u6848', '\u9009\u62E9', '\u9009', '\u4E3A', '\u662F']
+  let changed = true
+  while (changed) {
+    changed = false
+    for (const prefix of prefixes) {
+      if (answer.startsWith(prefix)) {
+        answer = answer.slice(prefix.length).replace(/^[?:]/, '')
+        changed = true
+        break
+      }
+    }
+  }
+  if (!/^[A-H]+$/.test(answer)) return ''
+  return [...new Set(answer)].sort().join('')
+}
+
 function normalizeAnswer(str) {
   if (str === null || str === undefined) return ''
   let s = String(str)
@@ -298,7 +331,14 @@ export function judgeAnswer(studentAnswer, referenceAnswer, questionType) {
     return { isCorrect: null, unrecognized: true }
   }
 
-  if (questionType === 'choice') {
+  const normalizedType = normalizeQuestionType(questionType)
+  const studentChoice = normalizeChoiceAnswer(studentAnswer)
+  const referenceChoice = normalizeChoiceAnswer(referenceAnswer)
+  if (studentChoice && referenceChoice) {
+    return { isCorrect: studentChoice === referenceChoice, unrecognized: false }
+  }
+
+  if (normalizedType === 'choice') {
     // Choice: 严格字母匹配，case-insensitive，并去掉包裹的括号/全角括号
     //   学生答题 OCR 常把选项识别为 "(C)"/"（C）"/" C "(带括号)，参考答案常是裸 "C"。
     //   之前未去括号 → "(C)" !== "C" → 选对但判错（用户截图实例：题 17 学生选 C 判错）。
@@ -307,7 +347,7 @@ export function judgeAnswer(studentAnswer, referenceAnswer, questionType) {
     return { isCorrect: cleanChoice(studentAnswer) === cleanChoice(referenceAnswer), unrecognized: false }
   }
 
-  if (questionType === 'judge') {
+  if (normalizedType === 'judge') {
     // Judge: 同样去括号/全角括号（"（√）" / "(×)" → "√" / "×"），再走 T/F 归一化
     const cleanJudge = (s) => String(s || '').trim().replace(/^[（(]|[)）]$/g, '')
     const normStudent = normalizeJudgeAnswer(cleanJudge(studentAnswer))
