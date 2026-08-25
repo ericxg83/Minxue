@@ -39,6 +39,7 @@ import { migrateRelaxQuestionTypeCheck } from './migrations/043_relax_question_t
 import { migrateHandoutLectures } from './migrations/045_handout_lectures.js'
 import { migrateTaskNotificationRead } from './migrations/046_add_task_notification_read.js'
 import { migrateTeachingQuestionTypes } from './migrations/047_teaching_question_types.js'
+import { migrateTeachingQuestionTypeAuto } from './migrations/048_teaching_question_type_auto.js'
 import { scheduleNightParse } from './services/nightParseService.js'
 
 const __dirname = dirname(fileURLToPath(import.meta.url))
@@ -2388,6 +2389,7 @@ if (process.argv[1] === __filename || process.argv[1]?.endsWith('server/index.js
       await migrateHandoutLectures()
       await migrateTaskNotificationRead()
       await migrateTeachingQuestionTypes()
+      await migrateTeachingQuestionTypeAuto()
     } catch (err) {
       console.error('数据库迁移失败:', err.message)
     }
