@@ -22,6 +22,7 @@ import { classifyQuestionLocally } from './utils/localTagger.js'
 import { finalizeGradingBatch } from './services/gradingFinalizer.js'
 import { NON_RETRYABLE_ERROR_PATTERNS } from './pendingTaskRecovery.js'
 import { isValidImageBuffer, checkImageResolution } from './utils/imageValidator.js'
+import { validateArithmeticAnswer } from './utils/arithmeticAnswerValidator.js'
 
 // ── 多模态切题引擎：几何图处理 ──
 // 使用 Sharp 进行裁剪和图像增强（替代浏览器端的 Canvas/OpenCV）
@@ -1170,6 +1171,15 @@ const generateMissingAnswers = async (questions, imageBuffer = null) => {
     fn().catch(err => console.error(`     [fire-forget] ${label}: ${err.message}`))
   }
 
+  const rejectArithmeticMismatch = async (q, analysis, validation) => {
+    await updateQuestionAnswer(q.id, '', analysis, true)
+    q.answer = ''
+    if (analysis) q.analysis = analysis
+    exceptionCount++
+    await markAnswerException(q.id, validation.reason)
+    console.warn(`     题目 ${q.id.substring(0, 8)}: ${validation.reason}，已转人工复核`)
+  }
+
   for (let i = 0; i < needAnswer.length; i += batchSize) {
     const batch = needAnswer.slice(i, i + batchSize)
     const promises = batch.map(async (q) => {
@@ -1188,6 +1198,11 @@ const generateMissingAnswers = async (questions, imageBuffer = null) => {
 
           let finalAnswer = extractAnswerFromAnalysis(cached.answer, cached.analysis, q.options)
           finalAnswer = normalizeGeneratedAnswer(q, finalAnswer)
+          const arithmeticValidation = validateArithmeticAnswer(content, finalAnswer)
+          if (!arithmeticValidation.isValid) {
+            await rejectArithmeticMismatch(q, cached.analysis, arithmeticValidation)
+            return
+          }
           try {
             await updateQuestionAnswer(q.id, finalAnswer, cached.analysis)
             q.answer = finalAnswer
@@ -1252,6 +1267,11 @@ const generateMissingAnswers = async (questions, imageBuffer = null) => {
         const oldAnswer = q.answer
         let finalAnswer = extractAnswerFromAnalysis(result.answer, result.analysis, q.options)
         finalAnswer = normalizeGeneratedAnswer(q, finalAnswer)
+        const arithmeticValidation = validateArithmeticAnswer(content, finalAnswer)
+        if (!arithmeticValidation.isValid) {
+          await rejectArithmeticMismatch(q, result.analysis, arithmeticValidation)
+          return
+        }
         try {
           await updateQuestionAnswer(q.id, finalAnswer, result.analysis, true)
           q.answer = finalAnswer
