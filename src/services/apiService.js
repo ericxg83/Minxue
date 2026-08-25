@@ -426,11 +426,11 @@ export const retryGeometry = async (questionId) => {
   })
 }
 
-export const updateQuestionReviewStatus = async (questionId, reviewStatus) => {
+export const updateQuestionReviewStatus = async (questionId, reviewStatus, metadata = {}) => {
   return apiRequest(`/questions/${questionId}`, {
     method: 'PUT',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ review_status: reviewStatus })
+    body: JSON.stringify({ review_status: reviewStatus, review_metadata: metadata })
   })
 }
 
@@ -653,7 +653,13 @@ export const gradeGeneratedExam = async (examId, studentId, results) => {
   const data = await apiRequest(`/generated-exams/${examId}/grade`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ studentId, results })
+    body: JSON.stringify({
+      studentId,
+      results: results.map(result => ({
+        ...result,
+        skipWrongBook: result.skipWrongBook === true
+      }))
+    })
   })
   return data
 }

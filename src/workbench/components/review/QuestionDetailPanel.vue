@@ -325,11 +325,11 @@ const difficultyTagType = computed(() => {
 
 const reviewStatusLabel = computed(() => {
   if (!q.value?.review_status) return ''
-  const map = { correct: '已标记正确', wrong: '已标记错误', exclude: '已排除' }
+  const map = { correct: '已标记正确', wrong: '已标记错误', wrong_no_book: '错误，本次不入册', exclude: '已排除' }
   return map[q.value.review_status] || ''
 })
 const reviewStatusTagType = computed(() => {
-  const map = { correct: 'success', wrong: 'danger', exclude: 'info' }
+  const map = { correct: 'success', wrong: 'danger', wrong_no_book: 'warning', exclude: 'info' }
   return map[q.value?.review_status] || 'info'
 })
 

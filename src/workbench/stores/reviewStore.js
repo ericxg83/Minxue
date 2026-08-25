@@ -4,6 +4,7 @@ import { getStudents, getWrongQuestionsByStudent, getQuestionsByTask, getTasksBy
 import { useLifecycleStore, LIFECYCLE_STATUS } from './lifecycleStore'
 import { checkQuestionCompleteness } from '../../utils/questionCompleteness.js'
 import { TASK_TYPE, getReviewConfig } from '../config/reviewConfig'
+import { REVIEW_STATUS, needsWrongBookDecision, effectiveIsCorrect as resolveEffectiveIsCorrect } from '../utils/reviewDecision'
 
 export const useReviewStore = defineStore('review', () => {
   const lifecycleStore = useLifecycleStore()
@@ -149,9 +150,7 @@ export const useReviewStore = defineStore('review', () => {
     return allQuestions.value
       .map((q, idx) => ({ question: q, index: idx }))
       .filter(({ question: q }) => {
-        const isWrong = q.review_status === 'wrong' ||
-          (q.review_status == null && q.is_correct === false)
-        return isWrong && !inBook.has(q.id)
+        return needsWrongBookDecision(q, inBook.has(q.id))
       })
       .map(({ question: q, index }) => {
         const { isComplete, issues } = checkQuestionCompleteness(q)
@@ -332,13 +331,13 @@ export const useReviewStore = defineStore('review', () => {
   }
 
   // 审核错题（统一入口，按 taskType 分支业务逻辑）
-  const reviewQuestion = (questionId, result) => {
+  const reviewQuestion = (questionId, result, metadata = {}) => {
     const question = allQuestions.value.find(q => q.id === questionId)
     if (!question) return
 
     // ── 完整逻辑（完整性校验 + 错题本同步） ──
     // 完整性检查 — 标记"错误"时，不完整的题目不进错题本
-    if (result === 'wrong') {
+    if (result === REVIEW_STATUS.WRONG) {
       const { isComplete, issues } = checkQuestionCompleteness(question)
       if (!isComplete) {
         return { blocked: true, issues, questionId }
@@ -360,7 +359,7 @@ export const useReviewStore = defineStore('review', () => {
     question.review_status = result
 
     // 持久化 review_status 到数据库
-    updateQuestionReviewStatus(questionId, result).catch(e =>
+    updateQuestionReviewStatus(questionId, result, metadata).catch(e =>
       console.error(`review_status 持久化失败 q=${questionId.substring(0, 8)}:`, e.message)
     )
 
@@ -644,7 +643,7 @@ export const useReviewStore = defineStore('review', () => {
 
     // 人工已复核 → 以人工结论为最高优先级
     if (q.review_status === 'correct') return 'correct'
-    if (q.review_status === 'wrong') return 'wrong'
+    if (q.review_status === REVIEW_STATUS.WRONG || q.review_status === REVIEW_STATUS.WRONG_NO_BOOK) return 'wrong'
 
     // AI 异常：未识别答案 / OCR 失败
     if (q.answer_source === 'blank') return 'exception'
@@ -696,7 +695,11 @@ export const useReviewStore = defineStore('review', () => {
     if (!task) return
     if (source.value === 'paper') {
       const results = allQuestions.value
-        .map(q => ({ questionId: q.id, isCorrect: effectiveIsCorrect(q) }))
+        .map(q => ({
+          questionId: q.id,
+          isCorrect: effectiveIsCorrect(q),
+          skipWrongBook: q.review_status === REVIEW_STATUS.WRONG_NO_BOOK
+        }))
         .filter(r => r.isCorrect != null)
       if (results.length > 0 && currentStudent.value?.id) {
         await gradeGeneratedExam(task.id, currentStudent.value.id, results).catch(e =>
@@ -715,12 +718,7 @@ export const useReviewStore = defineStore('review', () => {
   }
 
   // 结合人工复核结果得到每题最终正误（供 paper 提交）
-  const effectiveIsCorrect = (q) => {
-    if (q.review_status === 'correct') return true
-    if (q.review_status === 'wrong') return false
-    if (q.review_status === 'exclude') return null // 排除不计入
-    return q.is_correct ?? null
-  }
+  const effectiveIsCorrect = (q) => resolveEffectiveIsCorrect(q)
 
   // 完成任务复核：将试卷标记为 reviewed，清理缓存
   const completeTaskReview = async () => {
@@ -786,13 +784,29 @@ export const useReviewStore = defineStore('review', () => {
   const isQuestionInBook = (questionId) =>
     wrongQuestions.value.some(wq => wq.question_id === questionId)
 
+  // 保留错误事实，但明确记录本次不进入错题本
+  const markWrongNoBook = async (questionId, reason) => {
+    const question = allQuestions.value.find(q => q.id === questionId)
+    if (!question) return false
+    const previousStatus = question.review_status ?? null
+    question.review_status = REVIEW_STATUS.WRONG_NO_BOOK
+    try {
+      await updateQuestionReviewStatus(questionId, REVIEW_STATUS.WRONG_NO_BOOK, {
+        wrongBookAction: 'skip',
+        skipReason: reason || 'other'
+      })
+      return true
+    } catch (error) {
+      question.review_status = previousStatus
+      throw error
+    }
+  }
+
   // 将一道题加入错题本（仅对完整题有效；不完整题服务端会跳过）
   const addQuestionToBook = async (questionId) => {
     const studentId = currentStudent.value?.id
     if (!studentId || !questionId) return
-    await addWrongQuestions(studentId, [questionId]).catch(e =>
-      console.error('加入错题本失败:', e.message)
-    )
+    await addWrongQuestions(studentId, [questionId])
     if (studentId) {
       clearStudentCaches(studentId)
       await loadWrongQuestions(studentId)
@@ -858,6 +872,7 @@ export const useReviewStore = defineStore('review', () => {
     getUnresolvedWrong,
     openWrongGate,
     addQuestionToBook,
+    markWrongNoBook,
     focusQuestionForEdit,
     isQuestionInBook,
     // 批改工作台：场景模式

@@ -594,15 +594,19 @@ app.post('/api/tasks/:taskId/recalculate-stats', async (req, res) => {
     const { taskId } = req.params
 
     const { rows } = await query(
-      `SELECT is_correct, answer_source FROM ${TABLES.QUESTIONS} WHERE task_id = $1`,
+      `SELECT is_correct, answer_source, review_status FROM ${TABLES.QUESTIONS} WHERE task_id = $1`,
       [taskId]
     )
 
-    let questionCount = rows.length
+    const includedRows = rows.filter(q => q.review_status !== 'exclude')
+    const questionCount = includedRows.length
     let wrongCount = 0
     let emptyCount = 0
-    rows.forEach(q => {
-      if (q.is_correct === false) wrongCount++
+    includedRows.forEach(q => {
+      const isWrong = q.review_status === 'wrong' ||
+        q.review_status === 'wrong_no_book' ||
+        (q.review_status == null && q.is_correct === false)
+      if (isWrong) wrongCount++
       if (q.answer_source === 'blank') emptyCount++
     })
 
@@ -983,24 +987,23 @@ app.post('/api/questions', async (req, res) => {
 app.put('/api/questions/:id', async (req, res) => {
   try {
     const { id } = req.params
-    const { content, options, answer, analysis, status, question_type, subject, is_correct, student_answer, image_url, ai_answer, answer_source, geometry_image_url, review_status, display_image_type, source_type } = req.body
+    const { content, options, answer, analysis, status, question_type, subject, is_correct, student_answer, image_url, ai_answer, answer_source, geometry_image_url, review_status, review_metadata, display_image_type, source_type } = req.body
     const hasIsCorrect = 'is_correct' in req.body
     const hasAnswerSource = 'answer_source' in req.body && answer_source !== undefined
     const hasReviewStatus = 'review_status' in req.body
     const hasDisplayImageType = 'display_image_type' in req.body
     const hasSourceType = 'source_type' in req.body && source_type !== undefined
 
-    // [P1-4b] is_correct 变更前读取旧值，用于 judgement 记录
-    let oldIsCorrect = null
-    if (hasIsCorrect) {
+    // 复核或改判前读取旧值，用于 judgement 审计
+    let oldQuestion = null
+    if (hasIsCorrect || hasReviewStatus) {
       const { rows: oldRows } = await query(
-        `SELECT is_correct, task_id FROM ${TABLES.QUESTIONS} WHERE id = $1`,
+        `SELECT is_correct, task_id, student_id, review_status FROM ${TABLES.QUESTIONS} WHERE id = $1`,
         [id]
       )
-      if (oldRows.length > 0) {
-        oldIsCorrect = oldRows[0].is_correct
-      }
+      oldQuestion = oldRows[0] || null
     }
+    const oldIsCorrect = oldQuestion?.is_correct ?? null
 
     // PostgreSQL pg 驱动无法推断 undefined 的类型，统一转 null
     const n = (v) => v === undefined ? null : v
@@ -1030,8 +1033,6 @@ app.put('/api/questions/:id', async (req, res) => {
     )
 
     if (rows.length === 0) return res.status(404).json({ error: '题目不存在' })
-
-    res.json({ success: true, question: rows[0] })
 
     // [cache_id] 如果题目关联了 question_cache 且更新了权威字段，同步写入缓存
     const updatedQuestion = rows[0]
@@ -1076,6 +1077,23 @@ app.put('/api/questions/:id', async (req, res) => {
         metadata: { oldIsCorrect, editedFields: Object.keys(req.body).filter(k => k !== 'id') }
       }).catch(e => console.error('[Shadow] judgements写入失败 (pc_edit):', e.message))
     }
+
+    if (hasReviewStatus) {
+      await createJudgement({
+        questionId: id,
+        studentId: updatedQuestion.student_id || oldQuestion?.student_id || null,
+        source: 'manual_review',
+        isCorrect: review_status === 'correct' ? true : review_status === 'exclude' ? null : false,
+        metadata: {
+          oldReviewStatus: oldQuestion?.review_status ?? null,
+          reviewDecision: review_status,
+          wrongBookAction: review_status === 'wrong_no_book' ? 'skip' : review_status === 'wrong' ? 'add' : null,
+          ...(review_metadata && typeof review_metadata === 'object' ? review_metadata : {})
+        }
+      })
+    }
+
+    res.json({ success: true, question: updatedQuestion })
 
     // 重算 is_complete（非阻塞）
     ;(async () => {

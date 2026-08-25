@@ -240,7 +240,11 @@ export const finalizeGeneratedExamResults = async ({
 }) => {
   const normalizedResults = Array.isArray(results)
     ? results.filter(r => r?.questionId && UUID_RE.test(r.questionId))
-      .map(r => ({ questionId: r.questionId, isCorrect: r.isCorrect === true }))
+      .map(r => ({
+        questionId: r.questionId,
+        isCorrect: r.isCorrect === true,
+        skipWrongBook: r.skipWrongBook === true
+      }))
     : []
 
   if (!studentId || normalizedResults.length === 0) {
@@ -283,49 +287,54 @@ export const finalizeGeneratedExamResults = async ({
   for (const result of pendingResults) {
     const existing = wqByQuestionId.get(result.questionId)
     const currentLifecycle = existing?.lifecycle_status || LIFECYCLE_STATUS.NEW
-    let nextLifecycle
-    let errorCountDelta = 0
+    const skipWrongBook = result.skipWrongBook && !result.isCorrect
 
-    if (result.isCorrect) {
-      nextLifecycle = getNextLifecycle(currentLifecycle)
-      if (nextLifecycle === LIFECYCLE_STATUS.MASTERED && currentLifecycle !== LIFECYCLE_STATUS.MASTERED) {
-        masteredCount++
-      } else if (nextLifecycle !== currentLifecycle) {
-        upgradedCount++
+    if (!skipWrongBook) {
+      let nextLifecycle
+      let errorCountDelta = 0
+
+      if (result.isCorrect) {
+        nextLifecycle = getNextLifecycle(currentLifecycle)
+        if (nextLifecycle === LIFECYCLE_STATUS.MASTERED && currentLifecycle !== LIFECYCLE_STATUS.MASTERED) {
+          masteredCount++
+        } else if (nextLifecycle !== currentLifecycle) {
+          upgradedCount++
+        }
+      } else {
+        nextLifecycle = LIFECYCLE_STATUS.NEW
+        errorCountDelta = 1
+        if (currentLifecycle !== LIFECYCLE_STATUS.NEW) resetCount++
       }
-    } else {
-      nextLifecycle = LIFECYCLE_STATUS.NEW
-      errorCountDelta = 1
-      if (currentLifecycle !== LIFECYCLE_STATUS.NEW) resetCount++
-    }
 
-    const status = nextLifecycle === LIFECYCLE_STATUS.MASTERED
-      ? WRONG_STATUS.MASTERED
-      : WRONG_STATUS.PENDING
+      const status = nextLifecycle === LIFECYCLE_STATUS.MASTERED
+        ? WRONG_STATUS.MASTERED
+        : WRONG_STATUS.PENDING
 
-    if (!existing) {
-      insertedRows.push({
+      if (!existing) {
+        insertedRows.push({
+          questionId: result.questionId,
+          status,
+          lifecycleStatus: nextLifecycle,
+          errorCount: result.isCorrect ? 0 : 1
+        })
+      } else {
+        updatedRows.push({
+          id: existing.id,
+          status,
+          lifecycleStatus: nextLifecycle,
+          errorCount: (existing.error_count || 1) + errorCountDelta
+        })
+      }
+
+      lifecycleChanges.push({
         questionId: result.questionId,
-        status,
-        lifecycleStatus: nextLifecycle,
-        errorCount: result.isCorrect ? 0 : 1
-      })
-    } else {
-      updatedRows.push({
-        id: existing.id,
-        status,
-        lifecycleStatus: nextLifecycle,
-        errorCount: (existing.error_count || 1) + errorCountDelta
+        previous: currentLifecycle,
+        current: nextLifecycle
       })
     }
 
     updateQuestionIds.push(result.questionId)
     updateQuestionValues.push(result.isCorrect)
-    lifecycleChanges.push({
-      questionId: result.questionId,
-      previous: currentLifecycle,
-      current: nextLifecycle
-    })
   }
 
   if (insertedRows.length > 0) {
@@ -396,7 +405,8 @@ export const finalizeGeneratedExamResults = async ({
       metadata: {
         generated_exam_id: generatedExamId,
         settlement_key: settlementKey,
-        settlement_mode: 'retry'
+        settlement_mode: 'retry',
+        wrong_book_action: result.skipWrongBook ? 'skip' : 'settle'
       }
     })
   }

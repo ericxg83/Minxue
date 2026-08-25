@@ -100,46 +100,33 @@
     </div>
   </div>
 
-  <!-- 错题未入册拦截清单 -->
-  <el-dialog
-    v-model="store.wrongGateVisible"
-    title="有错题尚未进入错题本，无法完成复核"
-    width="560px"
-    :close-on-click-modal="false"
-  >
-    <div class="wrong-gate-tip">
-      以下标记为错误的题目必须成功加入错题本后，才能完成复核：
-    </div>
+  <!-- 错题处理决策门禁 -->
+  <el-dialog v-model="store.wrongGateVisible" title="请确认错题处理方式" width="640px" :close-on-click-modal="false">
+    <div class="wrong-gate-tip">以下题目已判定为错误，但尚未完成错题处理。请选择加入错题本，或说明本次不加入。</div>
+    <div class="wrong-gate-note">“本次不加入”仍会保留做错记录；如果题目本身无效，请返回题目并使用“排除”。</div>
     <ul class="wrong-gate-list">
       <li v-for="item in store.wrongGateList" :key="item.questionId" class="wrong-gate-item">
         <div class="wrong-gate-info">
           <span class="wrong-gate-no">第 {{ item.index + 1 }} 题</span>
-          <span
-            v-if="store.isQuestionInBook(item.questionId)"
-            class="wrong-gate-badge done">已加入 ✓</span>
-          <span v-else-if="item.reason === 'incomplete'" class="wrong-gate-badge warn">
-            题目元素不完整：{{ item.issues.join('；') }}，请先编辑并保存
-          </span>
-          <span v-else class="wrong-gate-badge warn">尚未加入错题本</span>
+          <span v-if="store.isQuestionInBook(item.questionId)" class="wrong-gate-badge done">已加入错题本</span>
+          <span v-else-if="item.reason === 'incomplete'" class="wrong-gate-badge warn">题目元素不完整：{{ item.issues.join('、') }}</span>
+          <span v-else class="wrong-gate-badge warn">等待处理决定</span>
+          <el-select v-if="item.showSkipReasons" v-model="item.skipReason" class="wrong-gate-reason" size="small" placeholder="选择不加入原因" @change="handleSkipBook(item)">
+            <el-option v-for="reason in skipReasonOptions" :key="reason.value" :label="reason.label" :value="reason.value" />
+          </el-select>
         </div>
         <div class="wrong-gate-actions">
-          <el-button
-            v-if="!store.isQuestionInBook(item.questionId) && item.reason === 'complete'"
-            size="small" type="primary" :loading="item.adding"
-            @click="handleAddToBook(item)">加入错题本</el-button>
-          <el-button
-            v-if="!store.isQuestionInBook(item.questionId) && item.reason === 'incomplete'"
-            size="small" type="warning"
-            @click="store.focusQuestionForEdit(item.questionId)">去编辑</el-button>
+          <template v-if="!store.isQuestionInBook(item.questionId) && item.reason === 'complete'">
+            <el-button size="small" type="primary" :loading="item.adding" @click="handleAddToBook(item)">加入错题本</el-button>
+            <el-button size="small" :loading="item.skipping" @click="showSkipReasons(item)">本次不加入</el-button>
+          </template>
+          <el-button v-if="!store.isQuestionInBook(item.questionId) && item.reason === 'incomplete'" size="small" type="warning" @click="store.focusQuestionForEdit(item.questionId)">去编辑或排除</el-button>
         </div>
       </li>
     </ul>
     <template #footer>
-      <el-button @click="store.wrongGateVisible = false">稍后再说</el-button>
-      <el-button
-        type="success"
-        :disabled="store.unresolvedWrongQuestions.length > 0"
-        @click="handleGateComplete">完成复核</el-button>
+      <el-button @click="store.wrongGateVisible = false">稍后处理</el-button>
+      <el-button type="success" :disabled="store.unresolvedWrongQuestions.length > 0" @click="handleGateComplete">完成复核</el-button>
     </template>
   </el-dialog>
 </template>
@@ -150,12 +137,14 @@ import { ElMessage, ElMessageBox } from 'element-plus'
 import { useReviewStore } from '../../stores/reviewStore'
 import { retryTask } from '../../../services/apiService'
 import StatusIcon from './StatusIcon.vue'
+import { WRONG_BOOK_SKIP_REASONS } from '../../utils/reviewDecision'
 
 const store = useReviewStore()
 
 const selectedStudentId = ref('')
 const selectedTaskId = ref('')
 const retryLoading = ref(false)
+const skipReasonOptions = WRONG_BOOK_SKIP_REASONS
 
 // 当 store 中 currentStudent 变化时同步下拉框（immediate：remount 时 store 为单例，
 // 需立即回填本地选择，避免下拉显示空「选择学生」）
@@ -228,21 +217,42 @@ const doComplete = async () => {
   }
 }
 
-// 错题清单弹窗中「完成复核」
-const handleGateComplete = async () => {
-  if (store.unresolvedWrongQuestions.length > 0) return
-  store.wrongGateVisible = false
-  await doComplete()
-}
-
 // 错题清单弹窗中「加入错题本」
 const handleAddToBook = async (item) => {
   item.adding = true
   try {
     await store.addQuestionToBook(item.questionId)
+  } catch (error) {
+    ElMessage.error(error.message || '加入错题本失败，请重试')
   } finally {
     item.adding = false
   }
+}
+
+const showSkipReasons = (item) => {
+  item.showSkipReasons = !item.showSkipReasons
+  if (!item.showSkipReasons) item.skipReason = ''
+}
+
+const handleSkipBook = async (item) => {
+  if (!item.skipReason || item.skipping) return
+  item.skipping = true
+  try {
+    await store.markWrongNoBook(item.questionId, item.skipReason)
+    item.showSkipReasons = false
+    ElMessage.success('已记录本次不加入错题本')
+  } catch (error) {
+    item.skipReason = ''
+    ElMessage.error(error.message || '保存处理决定失败，请重试')
+  } finally {
+    item.skipping = false
+  }
+}
+
+const handleGateComplete = async () => {
+  if (store.unresolvedWrongQuestions.length > 0) return
+  store.wrongGateVisible = false
+  await doComplete()
 }
 
 // 撤销最近一次人工判定（仅回退前端状态，不反向写库）
@@ -376,7 +386,16 @@ const handleRetryTask = async () => {
   margin-bottom: 12px;
   line-height: 1.6;
 }
-.wrong-gate-list {
+.wrong-gate-note {
+  margin-bottom: 14px;
+  padding: 9px 11px;
+  color: var(--wb-text-secondary);
+  font-size: 12px;
+  line-height: 1.55;
+  background: var(--wb-warning-soft);
+  border-left: 3px solid var(--wb-warning);
+  border-radius: var(--wb-radius-xs);
+}.wrong-gate-list {
   list-style: none;
   margin: 0;
   padding: 0;
@@ -417,7 +436,15 @@ const handleRetryTask = async () => {
   font-weight: 600;
 }
 .wrong-gate-actions {
+  display: flex;
   flex-shrink: 0;
+  gap: 8px;
+}
+.wrong-gate-reason { width: 220px; margin-top: 4px; }
+@media (max-width: 640px) {
+  .wrong-gate-item { align-items: stretch; flex-direction: column; }
+  .wrong-gate-actions { justify-content: flex-end; }
+  .wrong-gate-reason { width: 100%; }
 }
 
 
