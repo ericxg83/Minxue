@@ -104,7 +104,7 @@ router.get('/', async (req, res) => {
        LEFT JOIN teaching_question_type_examples e ON e.type_id = t.id
        WHERE ${clauses.join(' AND ')}
        GROUP BY t.id, kp.name
-       ORDER BY CASE WHEN t.status = 'draft' THEN 0 ELSE 1 END, kp.sort_order, t.sort_order, t.updated_at DESC`, params)
+       ORDER BY CASE WHEN t.status = 'draft' THEN 0 ELSE 1 END, MIN(kp.sort_order), t.sort_order, t.updated_at DESC`, params)
     res.json({ success: true, types: rows })
   } catch (error) { res.status(500).json({ success: false, error: error.message }) }
 })
