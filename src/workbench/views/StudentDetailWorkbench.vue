@@ -5,7 +5,7 @@
     <template v-else>
       <header class="detail-header">
         <div class="detail-heading"><el-button text class="back-button" @click="go('/students')"><el-icon><ArrowLeft /></el-icon>学生</el-button><div class="student-identity"><el-avatar :size="46" :src="student.avatar">{{ initial(student.name) }}</el-avatar><div><div class="eyebrow">学生详情</div><h1>{{ student.name || '未命名学生' }}</h1><p>{{ student.grade || student.class || '暂无年级信息' }}</p></div></div></div>
-        <div class="header-actions"><el-button @click="go('/wrongbook', { studentId: student.id })">查看错题</el-button><el-button type="primary" @click="go('/growth', { studentId: student.id })">查看成长报告</el-button></div>
+        <div class="header-actions"><el-button @click="openEditDialog">编辑信息</el-button><el-button @click="go('/wrongbook', { studentId: student.id })">查看错题</el-button><el-button type="primary" @click="go('/growth', { studentId: student.id })">查看成长报告</el-button></div>
       </header>
 
       <nav class="detail-tabs" aria-label="学生详情导航"><button class="active">概览</button><button @click="go('/wrongbook', { studentId: student.id })">错题</button><button @click="go('/exam-history', { studentId: student.id })">重练</button><button @click="go('/growth', { studentId: student.id })">成长</button></nav>
@@ -32,22 +32,68 @@
 
       <section class="surface mastery-surface"><div class="surface-header"><div><h2>知识点掌握</h2><p>掌握度较低的知识点优先显示</p></div><el-button text type="primary" @click="go('/growth', { studentId: student.id })">查看完整成长</el-button></div><div v-if="weakPoints.length" class="mastery-list"><div v-for="point in weakPoints" :key="point.name" class="mastery-row"><span>{{ point.name }}</span><div class="bar"><i :style="{ width: `${point.mastery}%` }"></i></div><strong>{{ point.mastery }}%</strong></div></div><div v-else class="inline-empty"><span>暂无知识点掌握数据，完成作业批改后会逐步生成。</span></div></section>
     </template>
+
+    <el-dialog v-model="editDialogVisible" title="编辑学生信息" width="420px" destroy-on-close @closed="resetEditForm">
+      <el-form ref="editFormRef" :model="editForm" :rules="editRules" label-position="top" @submit.prevent="saveStudent">
+        <el-form-item label="学生姓名" prop="name">
+          <el-input v-model="editForm.name" maxlength="30" show-word-limit placeholder="请输入学生姓名" @keyup.enter="saveStudent" />
+        </el-form-item>
+        <el-form-item label="年级" prop="grade">
+          <el-input v-model="editForm.grade" maxlength="30" placeholder="例如：五年级（选填）" @keyup.enter="saveStudent" />
+        </el-form-item>
+      </el-form>
+      <template #footer>
+        <el-button @click="editDialogVisible = false">取消</el-button>
+        <el-button type="primary" :loading="saving" @click="saveStudent">保存</el-button>
+      </template>
+    </el-dialog>
   </div>
 </template>
 
 <script setup>
 import { computed, onMounted, ref } from 'vue'
+import { ElMessage } from 'element-plus'
 import { useRoute, useRouter } from 'vue-router'
 import { ArrowLeft, CircleCheck, Loading, User } from '@element-plus/icons-vue'
-import { getStudentById, getTasksByStudent, getWrongQuestionsByStudent, getGeneratedExamsByStudent, getKnowledgeMastery } from '../../services/apiService'
+import { getStudentById, getTasksByStudent, getWrongQuestionsByStudent, getGeneratedExamsByStudent, getKnowledgeMastery, updateStudent } from '../../services/apiService'
 
 const route = useRoute(); const router = useRouter(); const loading = ref(true); const student = ref(null); const tasks = ref([]); const wrongQuestions = ref([]); const exams = ref([]); const mastery = ref([])
+const editDialogVisible = ref(false)
+const saving = ref(false)
+const editFormRef = ref()
+const editForm = ref({ name: '', grade: '' })
+const editRules = { name: [{ required: true, message: '请输入学生姓名', trigger: 'blur' }, { min: 1, max: 30, message: '学生姓名长度应为 1-30 个字符', trigger: 'blur' }] }
 const pendingWrongCount = computed(() => wrongQuestions.value.filter(item => item.lifecycle_status !== 'mastered').length)
 const weakPoints = computed(() => mastery.value.map(item => ({ name: item.name || item.knowledge_name || '未命名知识点', mastery: Math.round(item.mastery || 0), wrongCount: item.wrong_questions || 0 })).sort((a, b) => a.mastery - b.mastery).slice(0, 5))
 const recentTasks = computed(() => tasks.value.slice(0, 5))
 const initial = (name) => (name || '?').slice(0, 1); const go = (path, query = {}) => router.push({ path, query })
 const formatDate = (value) => { if (!value) return '时间未知'; const date = new Date(value); return Number.isNaN(date.getTime()) ? '时间未知' : `${date.getMonth() + 1}月${date.getDate()}日` }
 const taskLabel = (status) => ({ done: '已完成', failed: '处理异常', reviewed: '已复核' }[status] || '处理中')
+
+const openEditDialog = () => {
+  editForm.value = { name: student.value?.name || '', grade: student.value?.grade || student.value?.class || '' }
+  editDialogVisible.value = true
+}
+const resetEditForm = () => {
+  editForm.value = { name: '', grade: '' }
+  editFormRef.value?.clearValidate()
+}
+const saveStudent = async () => {
+  if (saving.value || !student.value) return
+  const valid = await editFormRef.value?.validate().catch(() => false)
+  if (!valid) return
+  saving.value = true
+  try {
+    const updated = await updateStudent(student.value.id, { name: editForm.value.name.trim(), grade: editForm.value.grade.trim() })
+    student.value = { ...student.value, ...updated }
+    editDialogVisible.value = false
+    ElMessage.success('学生信息已保存')
+  } catch (error) {
+    ElMessage.error(error.message || '保存失败，请稍后重试')
+  } finally {
+    saving.value = false
+  }
+}
 onMounted(async () => { try { const id = route.params.id; const [studentData, taskList, wrongList, examList, masteryList] = await Promise.all([getStudentById(id), getTasksByStudent(id, false), getWrongQuestionsByStudent(id, false), getGeneratedExamsByStudent(id, false), getKnowledgeMastery(id).catch(() => [])]); student.value = studentData; tasks.value = Array.isArray(taskList) ? taskList : []; wrongQuestions.value = Array.isArray(wrongList) ? wrongList : []; exams.value = Array.isArray(examList) ? examList : []; mastery.value = Array.isArray(masteryList) ? masteryList : [] } catch (error) { student.value = null } finally { loading.value = false } })
 </script>
 

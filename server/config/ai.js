@@ -93,7 +93,7 @@ export async function withAiLimit(fn) {
 function isQuotaExhaustedError(err) {
   const data = err?.response?.data
   const msg = data?.error?.message || data?.message || (typeof data === 'string' ? data : '') || ''
-  return /exceeded[^.]*quota|quota[^.]*exceeded/i.test(msg)
+  return /exceeded[^.]*quota|quota[^.]*exceeded|quota.*limit|limit.*reached|daily.*limit|out of quota|insufficient.*quota|balance.*insufficient|insufficient.*balance|rate.*limit.*(reached|exceeded)/i.test(msg)
 }
 
 // 按「Key + 模型 + 自然日」记录配额耗尽，避免整轮解析反复撞同一个已耗尽的组合。
@@ -237,6 +237,23 @@ export const getAIHeaders = () => ({
 
 export const BACKUP_VENDOR_DEFS = [
   {
+    // SenseNova（商汤科技日日新，OpenAI 兼容）：第一备用供应商（2026-08 起排第二，仅次于魔搭）。
+    // 2026-08 用户 Key 实测（token.sensenova.cn 端点有效）：
+    //   - sensenova-6.8-flash-lite / sensenova-6.7-flash-lite：多模态（text+image → text），0 计费，均匀可作视觉 OCR
+    //   - deepseek-v4-flash / glm-5.2：纯文本，0 计费（文本兜底）
+    //   - sensenova-u1-fast / sensenova-u1.5-lite：text→image（文生图），勿用于 OCR
+    //   - 该端点与 ZenMux/BigModel/Agnes 独立配额，天然适合作为魔搭耗尽后的首选兜底
+    // 必须传 reasoning_effort:'none' 禁用思考模式，否则思考过程太长（3754+ tokens）
+    // 导致 max_tokens 耗尽在 reasoning 阶段，永远拿不到 content。
+    name: 'SenseNova',
+    envKey: 'SENSENOVA_API_KEY',
+    endpoint: 'https://token.sensenova.cn/v1/chat/completions',
+    textModel: 'sensenova-6.7-flash-lite',
+    vlModels: ['sensenova-6.8-flash-lite', 'sensenova-6.7-flash-lite'],
+    referer: null,
+    extraBody: { reasoning_effort: 'none' },
+  },
+  {
     // ZenMux (https://zenmux.ai)：多模型聚合网关，OpenAI 兼容。
     // 2026-08-13 用户 Key 实测结论（sk-ai-v1- 前缀，账户余额 = 0）：
     //   - 付费视觉模型（xiaomi/mimo-v2.5、qwen/qwen3-vl-plus、google/gemini-2.5-flash）
@@ -284,20 +301,6 @@ export const BACKUP_VENDOR_DEFS = [
     referer: null,
   },
   {
-    // SenseNova（商汤日日新）：OpenAI 兼容格式，公测期免费。
-    // sensenova-6.7-flash-lite 支持多模态视觉理解，配额 1500 次/5 小时。
-    // 必须传 reasoning_effort:'none' 禁用思考模式，否则思考过程太长（3754+ tokens）
-    // 导致 max_tokens 耗尽在 reasoning 阶段，永远拿不到 content。
-    // 顺序：视觉效果好且配额独立。2026-08-13 因 ZenMux 测试临时让出第一位。
-    name: 'SenseNova',
-    envKey: 'SENSENOVA_API_KEY',
-    endpoint: 'https://token.sensenova.cn/v1/chat/completions',
-    textModel: 'sensenova-6.7-flash-lite',
-    vlModels: ['sensenova-6.7-flash-lite'],
-    referer: null,
-    extraBody: { reasoning_effort: 'none' },
-  },
-  {
     name: 'Agnes',
     envKey: 'AGNES_API_KEY',
     endpoint: 'https://apihub.agnes-ai.com/v1/chat/completions',
@@ -319,6 +322,21 @@ export const BACKUP_VENDOR_DEFS = [
     textModel: 'auto',
     vlModels: ['auto'],
     referer: null,
+  },
+  {
+    // AgentRouter（付费中转网关，OpenAI 兼容）：最最最后的付费兜底。
+    // 2026-08 用户提供：OPENAI_BASE_URL=https://agentrouter.org/v1，模型 gpt-5.6-sol（付费，质量高）。
+    // 放在 BACKUP_VENDOR_DEFS 末位 = 仅在魔搭 + 全部免费备用都不可用时才触发，
+    // 避免昂贵的付费调用抢占免费额度。
+    // 注：该域名本地直连可能不稳定（fetch failed），生产 Render (Oregon) 出站已验证可配置，
+    // 启动时即用环境变量 key，无需 keyPrefix（sk-... 直接启用）。
+    name: 'AgentRouter',
+    envKey: 'AGENTROUTER_API_KEY',
+    endpoint: 'https://agentrouter.org/v1/chat/completions',
+    textModel: 'gpt-5.6-sol',
+    vlModels: ['gpt-5.6-sol'],
+    referer: null,
+    extraBody: null,
   },
 ]
 
@@ -626,8 +644,9 @@ export async function callVisionCompletion(opts) {
 
   const messages = buildVisionMessages(systemPrompt, userText, imageDataURL)
 
-  // 备份提供商超时：主 ModelScope 失败后快速尝试备选，防止阻塞批次
-  const BACKUP_TIMEOUT = 30000
+  // 备份提供商超时：主 ModelScope 失败后快速尝试备选，防止阻塞批次。
+  // 20s 足够覆盖国内直连（商汤/智谱）与 ZenMux 正常响应，超时就换下一个备用。
+  const BACKUP_TIMEOUT = 20000
 
   const providers = []
 
@@ -650,8 +669,11 @@ export async function callVisionCompletion(opts) {
       messages,
       temperature,
       maxTokens,
-      timeout: AI_CONFIG.TIMEOUT,
+      // 魔搭额度/服务不可用时应尽快失败并轮到备用供应商，绝不长时间卡在 503 重试
+      // 503 的重试延迟累计 245s，会导致整轮解析被单个魔搭 provider 阻塞。
+      timeout: Math.min(AI_CONFIG.TIMEOUT, 45000),
       retry429: true,
+      retry503: false,
     })
     return { content, usedBackup: apiKey !== AI_CONFIG.API_KEY }
   }
@@ -702,6 +724,8 @@ export async function callVisionCompletion(opts) {
               maxTokens: Math.min(maxTokens, vendor.maxTokens || 4096),
               timeout: BACKUP_TIMEOUT,
               retry503: false,
+              // 备用供应商 429 直接失败，让下一个备用顶上来，避免每个备用都等 8s 重试
+              retry429: false,
               vendor,
               extraBody: vendor.extraBody || null,
             })
@@ -744,6 +768,8 @@ export async function callVisionCompletion(opts) {
               maxTokens: Math.min(maxTokens, vendor.maxTokens || 4096),
               timeout: BACKUP_TIMEOUT,
               retry503: false,
+              // 备用供应商 429 直接失败，让下一个备用顶上来
+              retry429: false,
               vendor,
               extraBody: vendor.extraBody || null,
             })

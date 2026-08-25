@@ -48,6 +48,15 @@ services:
       # 新品 GLM-5V-Turbo（glm-5v-turbo）需余额>0，充值后自动生效。Key 形如 <id>.<secret>。
       - key: BIGMODEL_API_KEY
         sync: false
+      # 第一备用供应商：商汤 SenseNova（OpenAI 兼容，国内直连，token.sensenova.cn）。
+      # 2026-08 实测：sensenova-6.8-flash-lite / sensenova-6.7-flash-lite 为多模态视觉、0 计费；
+      # deepseek-v4-flash / glm-5.2 为纯文本、0 计费。Key 无前缀要求，直接填 sk-... 即可。
+      - key: SENSENOVA_API_KEY
+        sync: false
+      # 最最后兜底（付费）：AgentRouter 中转网关，OpenAI 兼容，模型 gpt-5.6-sol。
+      # endpoint=https://agentrouter.org/v1，仅当前面魔搭+全部免费备用都失败时才触发。
+      - key: AGENTROUTER_API_KEY
+        sync: false
       - key: OSS_REGION
         value: oss-cn-shanghai
       - key: OSS_BUCKET
