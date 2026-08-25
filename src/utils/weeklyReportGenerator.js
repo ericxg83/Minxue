@@ -13,41 +13,37 @@ const A4_H = 297
 
 /**
  * 设计 token（PDF HTML 无法引用 CSS 变量，写死等值 hex）
- * 对齐「敏学成长中心」品牌视觉：靛蓝→紫渐变主色、蓝紫强调、清爽留白
+ * 对齐「敏学成长中心」品牌视觉：暖白留白、专业蓝绿结构、成长绿小面积强调
  */
 const T = {
-  primary: '#6366F1', primaryDark: '#4F46E5', primarySoft: '#E0E7FF', primaryMist: '#EEF2FF',
-  teal: '#A78BFA', tealSoft: '#F5F3FF',
-  success: '#16A34A', successSoft: '#DCFCE7',
-  warning: '#D97706', warningSoft: '#FEF3C7',
-  danger: '#F0564D', dangerSoft: '#FDECEC',
-  accent: '#7C3AED', accentSoft: '#EDE9FE',
-  purple: '#8B5CF6', purpleSoft: '#F5F3FF',
-  text: '#1E293B', textSec: '#64748B', textTer: '#9AA6B8',
-  border: '#E7EDF5', borderLight: '#F1F5FB', bg: '#F6F9FE'
+  primary: '#0F6B6D', primaryDark: '#0A5052', primarySoft: '#D9ECE9', primaryMist: '#EEF7F5',
+  teal: '#287E7C', tealSoft: '#E5F1EF',
+  success: '#4CAF50', successSoft: '#EAF6EA',
+  warning: '#A66A24', warningSoft: '#FBF4E8',
+  danger: '#B85A4F', dangerSoft: '#F9ECEA',
+  accent: '#26797A', accentSoft: '#E5F1EF',
+  purple: '#5A8581', purpleSoft: '#EFF5F3',
+  text: '#203836', textSec: '#60726F', textTer: '#91A09E',
+  border: '#DCE6E2', borderLight: '#EAF0ED', bg: '#F6F7F5'
 }
 
 /** 品牌信息（统一维护，便于替换） */
 const BRAND = {
   nameCn: '敏学成长中心',
   nameEn: 'MINXUE GROWTH CENTER',
-  slogan: '用数据记录学习，用训练帮助成长'
+  slogan: '让孩子的成长，看得见'
 }
 
 /**
- * 品牌 Logo Lockup：渐变「M」标 + 中英文字号
+ * 品牌 Logo Lockup：蓝绿色牵手路径标 + 中英文字号
  * @param {Object} opt
  * @param {boolean} opt.compact - 内页紧凑版（较小字号）
  */
 function renderLogo({ compact = false } = {}) {
   const mark = `<svg class="brand-mark" width="${compact ? 30 : 40}" height="${compact ? 30 : 40}" viewBox="0 0 40 40" fill="none" xmlns="http://www.w3.org/2000/svg">
-    <defs>
-      <linearGradient id="mxg" x1="0" y1="0" x2="40" y2="40" gradientUnits="userSpaceOnUse">
-        <stop stop-color="${T.primary}"/><stop offset="1" stop-color="${T.teal}"/>
-      </linearGradient>
-    </defs>
-    <rect x="1" y="1" width="38" height="38" rx="11" fill="url(#mxg)"/>
-    <path d="M11 28V13.5c0-.6.75-.9 1.16-.45L20 21l7.84-7.95c.41-.45 1.16-.16 1.16.45V28" stroke="#fff" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"/>
+    <rect x="1" y="1" width="38" height="38" rx="11" fill="${T.primary}"/>
+    <path d="M10.5 27V14.5c0-.7.86-1.04 1.35-.53L20 22l8.15-8.03c.49-.51 1.35-.17 1.35.53V27" stroke="#fff" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"/>
+    <circle cx="20" cy="22" r="2.3" fill="${T.success}"/>
   </svg>`
   return `<div class="brand ${compact ? 'brand-sm' : ''}">${mark}<div class="brand-tx"><div class="brand-cn">${BRAND.nameCn}</div><div class="brand-en">${BRAND.nameEn}</div></div></div>`
 }
@@ -359,6 +355,51 @@ function buildDiagnosisHTML(reportData) {
   .empty-state{text-align:center;padding:80px 40px;color:${T.textTer}}
   .empty-icon{font-size:52px;margin-bottom:14px}
   .empty-sub{margin-top:8px;font-size:12px}
+
+  /* Brand report layout: structure first, decoration second. */
+  body{background:${T.bg};color:${T.text};font-family:'Microsoft YaHei','PingFang SC','Noto Sans SC',sans-serif}
+  .page{background:#fff;border-top:8px solid ${T.primary}}
+  .pad{padding:42px 48px}
+  .brand-mark{border-radius:11px}
+  .brand-cn{color:${T.primary};font-weight:800;letter-spacing:.5px}
+  .brand-en{color:${T.textTer};font-size:8px;letter-spacing:1.2px}
+  .ph{padding-bottom:16px;margin-bottom:27px;border-bottom:1px solid ${T.borderLight}}
+  .week-badge{background:${T.primary};border-radius:4px;padding:6px 11px;font-size:10px;letter-spacing:1.2px}
+  .ph-cap{font-size:10px;color:${T.textTer}}
+  .sec-num{font-size:14px;color:${T.success};border:1px solid ${T.success};border-radius:50%;width:26px;height:26px;display:inline-flex;align-items:center;justify-content:center;margin-right:10px}
+  .sec-title{font-size:23px;color:${T.primary};letter-spacing:.4px}
+  .sec-sub{font-size:12px;color:${T.textSec};margin-left:36px}
+  .sub-label{color:${T.primary};font-size:12px;letter-spacing:.5px;margin-bottom:11px}
+  .sub-label::before{width:3px;background:${T.success}}
+  .pf{border-top-color:${T.border};color:${T.textTer};font-size:10px}
+  .cover{background:${T.bg};border-top:8px solid ${T.primary}}
+  .cover-top{padding:40px 48px 0}
+  .cover-body{align-items:flex-start;text-align:left;padding:35px 78px}
+  .cover-title{font-size:42px;color:${T.primary};letter-spacing:2px;margin-top:22px}
+  .cover-sub{font-size:15px;color:${T.textSec};letter-spacing:.5px}
+  .cover .avatar{width:78px;height:78px;margin-top:38px;border:3px solid ${T.successSoft};background:${T.primary};box-shadow:none}
+  .cover .avatar span{font-size:30px}
+  .cover-name{font-size:25px;color:${T.text};margin-top:13px}
+  .class-badge{color:${T.primary};background:${T.primaryMist};border-radius:3px;margin-top:10px}
+  .period-line{color:${T.textSec};margin-top:12px}
+  .values{gap:10px;max-width:none;margin-top:45px}
+  .value-item{background:#fff;border-color:${T.border};border-radius:4px;padding:17px 12px;text-align:left}
+  .value-icon{width:36px;height:36px;border-radius:50%;background:${T.primaryMist};margin:0 0 9px}
+  .value-t{font-size:14px;color:${T.primary}}
+  .value-d{font-size:11px;color:${T.textSec}}
+  .slogan{color:${T.primary};font-size:14px;margin-top:33px;letter-spacing:.5px}
+  .wave{display:none}
+  .kpi,.tri,.chart-card,.teaching-summary,.subj-card{border-radius:4px;box-shadow:none;border-color:${T.border}}
+  .kpi{border-top:3px solid ${T.primary};padding:16px}
+  .kpi-v{color:${T.primary}}
+  .ring{background:conic-gradient(${accColor} ${stats.accuracy * 3.6}deg, ${T.borderLight} 0)}
+  .tri{border-top-width:3px}
+  .comment,.advice{border-radius:4px;background:${T.primary};box-shadow:none}
+  .comment-icon,.advice-icon{background:${T.success};border-radius:50%}
+  .subj-head{background:${T.primaryMist}}
+  .subj-badge{background:#fff;border-radius:50%}
+  .mastery{border-radius:3px}
+  .kt-table th{background:${T.bg};color:${T.textSec}}
 </style></head><body>
 
   <!-- ═══ 封面页 ═══ -->
@@ -366,21 +407,21 @@ function buildDiagnosisHTML(reportData) {
     <div class="cover">
       <div class="cover-top">
         ${logoFull}
-        <div class="ph-right"><div class="week-badge">${badgeLabel}</div><div class="ph-cap">每周学习报告</div></div>
+        <div class="ph-right"><div class="week-badge">${badgeLabel}</div><div class="ph-cap">学习成长记录</div></div>
       </div>
       <div class="cover-body">
-        <div class="cover-title">成长诊断报告</div>
+        <div class="cover-title">学习诊断报告</div>
         <div class="cover-sub">${BRAND.slogan}</div>
         ${renderAvatar(student)}
         <div class="cover-name">${escapeHtml(student.name)}<span class="tag">同学</span></div>
         <div class="class-badge">${escapeHtml(student.grade || '')}</div>
         <div class="period-line">学习周期：${period.start} ~ ${period.end}</div>
         <div class="values">
-          <div class="value-item"><div class="value-icon">${VALUE_ICONS.find}</div><div class="value-t">发现问题</div><div class="value-d">精准定位学习薄弱点</div></div>
-          <div class="value-item"><div class="value-icon">${VALUE_ICONS.train}</div><div class="value-t">针对训练</div><div class="value-d">错题重练强化提升</div></div>
-          <div class="value-item"><div class="value-icon">${VALUE_ICONS.grow}</div><div class="value-t">持续进步</div><div class="value-d">每周追踪看得见</div></div>
+          <div class="value-item"><div class="value-icon">${VALUE_ICONS.find}</div><div class="value-t">发现问题</div><div class="value-d">从学习记录中发现需要关注的内容</div></div>
+          <div class="value-item"><div class="value-icon">${VALUE_ICONS.train}</div><div class="value-t">针对训练</div><div class="value-d">围绕关键问题安排针对性训练</div></div>
+          <div class="value-item"><div class="value-icon">${VALUE_ICONS.grow}</div><div class="value-t">持续进步</div><div class="value-d">在过程记录中观察学习变化</div></div>
         </div>
-        <div class="slogan">每一次努力，都是成长的脚印！</div>
+        <div class="slogan">发现问题 · 提供支持 · 记录变化</div>
       </div>
       <div class="wave">${waveSvg}</div>
     </div>
@@ -391,10 +432,10 @@ function buildDiagnosisHTML(reportData) {
     <div class="pad">
       <div class="ph">
         ${logoSm}
-        <div class="ph-right"><div class="week-badge">${badgeLabel}</div><div class="ph-cap">每周学习报告</div></div>
+        <div class="ph-right"><div class="week-badge">${badgeLabel}</div><div class="ph-cap">学习成长记录</div></div>
       </div>
       <div class="sec-title"><span class="sec-num">01</span>本周学习概览</div>
-      <div class="sec-sub">整体表现速览</div>
+      <div class="sec-sub">从本周期学习记录中提炼的观察结果</div>
 
       <div class="sub-label">本周学习概览</div>
       <div class="kpi-row">
@@ -438,10 +479,10 @@ function buildDiagnosisHTML(reportData) {
     <div class="pad">
       <div class="ph">
         ${logoSm}
-        <div class="ph-right"><div class="week-badge">${badgeLabel}</div><div class="ph-cap">每周学习报告</div></div>
+        <div class="ph-right"><div class="week-badge">${badgeLabel}</div><div class="ph-cap">学习成长记录</div></div>
       </div>
       <div class="sec-title"><span class="sec-num">02</span>学科诊断分析</div>
-      <div class="sec-sub">薄弱知识点 TOP 5</div>
+      <div class="sec-sub">聚焦需要优先支持的知识点</div>
 
       ${subjectCards}
 
