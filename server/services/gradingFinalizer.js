@@ -115,6 +115,8 @@ export const finalizeGradingBatch = async ({
       analysis: question.analysis ?? null,
       metadata: {
         question_type: question.question_type,
+        manual_mark: question.manual_mark || 'none',
+        grading_source: question.grading_source || 'answer_comparison',
         settlement_key: settlementKey,
         settlement_mode: settlementMode,
         task_id: taskId

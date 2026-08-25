@@ -874,6 +874,7 @@ export const buildOCRPrompt = () => `你是一个专业的作业题目识别助�
       "confidence": 0.95,
       "analysis": "解析",
       "question_type": "choice",  // 必须是下列之一: "choice"(选择题) | "fill"(填空题) | "judge"(判断题) | "answer"(解答题)
+      "manual_mark": "none", // "correct" | "wrong" | "partial" | "none" | "uncertain"
       "has_manual_checkmark": false,
       "block_coordinates": { "x": 0, "y": 0, "width": 1000, "height": 1000 },
       "text_bbox": { "x": 0, "y": 0, "width": 1000, "height": 600 },
@@ -890,9 +891,10 @@ export const buildOCRPrompt = () => `你是一个专业的作业题目识别助�
 3. 坐标统一使用 0-1000 的整数，相对整张图片归一化。
 4. 如果题目无法识别，不要编造内容。
 5. 识别老师批改痕迹（重要）：
-   - 若某题旁出现老师用红笔（或与印刷/学生墨迹不同的笔）打的"√/✓/✔"，说明该题老师已判对，应将 has_manual_checkmark 设为 true，并且 student_answer 填学生实际笔迹（以学生墨迹为准，剔除老师的红勾）。
-   - 若出现"×/✗/半对半错"等批改，has_manual_checkmark 设为 false，交由答案比对判定。
-   - 只在能明确辨认出独立批改标记时才置 true，否则保持 false，宁可不置也不要误判。
+   - 若某题旁出现老师用红笔（或与印刷/学生墨迹不同的笔）打的"√/✓/✔"，manual_mark 填 "correct"，has_manual_checkmark 设为 true；student_answer 必须填学生实际笔迹（以学生墨迹为准，剔除老师的红勾）。
+   - 若出现老师打的"×/✗/圈错/错号"，manual_mark 必须填 "wrong"；这表示老师已判错，绝不能当作学生答案或忽略。
+   - 若出现"半对/部分正确"，manual_mark 填 "partial"；看不清或无法确定属于当前题时填 "uncertain"；没有教师批改痕迹填 "none"。
+   - 只在能明确辨认出独立批改标记时才输出 correct/wrong/partial，宁可填 uncertain 也不要猜测。
 6. 判断题（对/错）的答案或学生答案若是"√/✗"符号，直接填入对应符号即可。
 7. question_type 必须从四个值中选一个填空，每题只能填一个值，绝不能填 "choice/fill/judge/answer" 这种枚举字符串：
    - "choice" 选择题（有 A/B/C/D 选项的）

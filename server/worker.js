@@ -644,6 +644,30 @@ function determineAnswerSource(rawStudentAnswer) {
   return 'recognized'
 }
 
+const MANUAL_MARKS = new Set(['correct', 'wrong', 'partial', 'none', 'uncertain'])
+
+export function normalizeManualMark(manualMark, hasManualCheckmark = false) {
+  const normalized = String(manualMark || '').trim().toLowerCase()
+  if (MANUAL_MARKS.has(normalized)) return normalized
+  return hasManualCheckmark === true ? 'correct' : 'none'
+}
+
+export function resolveGradingResult({ studentAnswer, answer, questionType, manualMark }) {
+  const normalizedManualMark = normalizeManualMark(manualMark)
+  if (normalizedManualMark === 'correct') {
+    return { isCorrect: true, source: 'teacher_annotation', manualMark: normalizedManualMark }
+  }
+  if (normalizedManualMark === 'wrong') {
+    return { isCorrect: false, source: 'teacher_annotation', manualMark: normalizedManualMark }
+  }
+  if (normalizedManualMark === 'partial') {
+    return { isCorrect: false, source: 'teacher_annotation', manualMark: normalizedManualMark }
+  }
+
+  const judgment = judgeAnswer(studentAnswer, answer, questionType)
+  return { isCorrect: judgment.isCorrect, source: 'answer_comparison', manualMark: normalizedManualMark }
+}
+
 const recognizeQuestions = async (imageBase64, taskId, retryCount = 0) => {
   const prompt = buildOCRPrompt()
   const startTime = Date.now()
@@ -726,18 +750,15 @@ const recognizeQuestions = async (imageBase64, taskId, retryCount = 0) => {
       const aiAnswer = rawStudentAnswer
       const cleanedStudentAnswer = answerSource === 'blank' ? '' : rawStudentAnswer
 
-      // Check if the paper has manual checkmark (✓) from the teacher.
-      // 策略（仅兜底，不覆盖比对结果）：
-      //   - 老师红勾只在答案比对"无法判定"(null，如答案无法识别/无标准答案)时兜底判对；
-      //   - 比对明确判错(false)时，即使识别到红勾也保持判错，
-      //     避免红勾误识别把真正的错题漏收进错题本。
       const hasManualCheckmark = q.has_manual_checkmark === true
-
-      const judgment = judgeAnswer(cleanedStudentAnswer, q.answer, q.question_type)
-      let isCorrect = judgment.isCorrect
-      if (hasManualCheckmark && isCorrect === null) {
-        isCorrect = true
-      }
+      const manualMark = normalizeManualMark(q.manual_mark, hasManualCheckmark)
+      const gradingResult = resolveGradingResult({
+        studentAnswer: cleanedStudentAnswer,
+        answer: q.answer,
+        questionType: q.question_type,
+        manualMark
+      })
+      const isCorrect = gradingResult.isCorrect
       const status = isCorrect === true ? 'correct' : (isCorrect === false ? 'wrong' : 'pending')
 
       return {
@@ -755,6 +776,8 @@ const recognizeQuestions = async (imageBase64, taskId, retryCount = 0) => {
         status: status,
         confidence: q.confidence || 0,
         analysis: q.analysis || '',
+        manual_mark: manualMark,
+        grading_source: gradingResult.source,
         block_coordinates: q.block_coordinates || null,
         question_number: q.question_number || null,
         text_bbox: q.text_bbox || null,
@@ -971,9 +994,7 @@ export function extractAnswerFromAnalysis(answer, analysis, options) {
   return answer
 }
 
-function preserveChoiceAnswer(question, candidateAnswer) {
-  const existing = normalizeChoiceAnswer(question.answer)
-  if (existing) return existing
+function normalizeGeneratedAnswer(question, candidateAnswer) {
   const questionType = normalizeQuestionType(question.question_type, question.options)
   if (questionType !== 'choice') return candidateAnswer
   const candidate = normalizeChoiceAnswer(candidateAnswer)
@@ -1166,7 +1187,7 @@ const generateMissingAnswers = async (questions, imageBuffer = null) => {
           console.log(`     题目 ${q.id.substring(0, 8)}: ✅ 缓存命中 - 复用AI解析结果`)
 
           let finalAnswer = extractAnswerFromAnalysis(cached.answer, cached.analysis, q.options)
-          finalAnswer = preserveChoiceAnswer(q, finalAnswer)
+          finalAnswer = normalizeGeneratedAnswer(q, finalAnswer)
           try {
             await updateQuestionAnswer(q.id, finalAnswer, cached.analysis)
             q.answer = finalAnswer
@@ -1204,7 +1225,7 @@ const generateMissingAnswers = async (questions, imageBuffer = null) => {
           const extracted = extractAnswerFromAnalysis(result.answer, result.analysis, q.options)
           if (extracted && extracted !== '-' && extracted !== result.answer) {
             try {
-              const safeExtracted = preserveChoiceAnswer(q, extracted)
+              const safeExtracted = normalizeGeneratedAnswer(q, extracted)
               await updateQuestionAnswer(q.id, safeExtracted, result.analysis, true)
               q.answer = safeExtracted
               q.analysis = result.analysis
@@ -1230,7 +1251,7 @@ const generateMissingAnswers = async (questions, imageBuffer = null) => {
       if (result.answer && result.answer !== '待人工补充' && result.answer !== '此为主观题，无唯一标准答案') {
         const oldAnswer = q.answer
         let finalAnswer = extractAnswerFromAnalysis(result.answer, result.analysis, q.options)
-        finalAnswer = preserveChoiceAnswer(q, finalAnswer)
+        finalAnswer = normalizeGeneratedAnswer(q, finalAnswer)
         try {
           await updateQuestionAnswer(q.id, finalAnswer, result.analysis, true)
           q.answer = finalAnswer
@@ -5017,7 +5038,12 @@ export const processTask = async (job) => {
             answer: q.answer ?? null,
             studentAnswer: q.student_answer ?? null,
             analysis: q.analysis ?? null,
-            metadata: { question_type: q.question_type, originalIsCorrect: q.is_correct }
+            metadata: {
+              question_type: q.question_type,
+              originalIsCorrect: q.is_correct,
+              manual_mark: q.manual_mark || 'none',
+              grading_source: q.grading_source || 'answer_comparison'
+            }
           }).catch(e => console.error(`[Shadow] judgements写入失败 (OCR) q=${q.id?.substring(0,8)}:`, e.message))
         )
         await Promise.allSettled(judgementPromises)
@@ -5075,18 +5101,24 @@ await job.updateProgress(80)
             }
 
             const originalCorrect = q.is_correct
-            const judgment = judgeAnswer(q.student_answer, q.answer, q.question_type)
-            if (judgment.isCorrect !== originalCorrect) {
-              q.is_correct = judgment.isCorrect
+            const gradingResult = resolveGradingResult({
+              studentAnswer: q.student_answer,
+              answer: q.answer,
+              questionType: q.question_type,
+              manualMark: q.manual_mark
+            })
+            q.grading_source = gradingResult.source
+            if (gradingResult.isCorrect !== originalCorrect) {
+              q.is_correct = gradingResult.isCorrect
               try {
                 await query(
                   `UPDATE questions SET is_correct = $1, updated_at = NOW() WHERE id = $2`,
-                  [judgment.isCorrect, q.id]
+                  [gradingResult.isCorrect, q.id]
                 )
               } catch (e) {
                 console.error(`      更新题目 ${q.id.substring(0, 8)} is_correct 失败:`, e.message)
               }
-              if (judgment.isCorrect === false) rejudgedWrong++
+              if (gradingResult.isCorrect === false) rejudgedWrong++
             }
         }
         wrongCount = questions.filter(q => q.is_correct === false).length
