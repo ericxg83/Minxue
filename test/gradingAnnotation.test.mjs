@@ -2,7 +2,7 @@ import test from 'node:test'
 import assert from 'node:assert/strict'
 import { normalizeManualMark, resolveGradingResult } from '../server/worker.js'
 
-test('teacher wrong annotation overrides an OCR answer that matches the student answer', () => {
+test('conflicting teacher annotation sends a question to manual review', () => {
   const result = resolveGradingResult({
     studentAnswer: 'D',
     answer: 'D',
@@ -11,13 +11,13 @@ test('teacher wrong annotation overrides an OCR answer that matches the student 
   })
 
   assert.deepEqual(result, {
-    isCorrect: false,
-    source: 'teacher_annotation',
+    isCorrect: null,
+    source: 'annotation_conflict_review',
     manualMark: 'wrong'
   })
 })
 
-test('teacher correct annotation remains compatible with legacy checkmark output', () => {
+test('conflicting legacy checkmark sends a question to manual review', () => {
   assert.equal(normalizeManualMark(null, true), 'correct')
   assert.deepEqual(resolveGradingResult({
     studentAnswer: 'D',
@@ -25,21 +25,21 @@ test('teacher correct annotation remains compatible with legacy checkmark output
     questionType: 'choice',
     manualMark: 'correct'
   }), {
-    isCorrect: true,
-    source: 'teacher_annotation',
+    isCorrect: null,
+    source: 'annotation_conflict_review',
     manualMark: 'correct'
   })
 })
 
-test('teacher partial annotation never promotes a question to correct', () => {
+test('conflicting partial annotation sends a question to manual review', () => {
   assert.deepEqual(resolveGradingResult({
     studentAnswer: 'D',
     answer: 'D',
     questionType: 'choice',
     manualMark: 'partial'
   }), {
-    isCorrect: false,
-    source: 'teacher_annotation',
+    isCorrect: null,
+    source: 'annotation_conflict_review',
     manualMark: 'partial'
   })
 })
@@ -54,5 +54,17 @@ test('no annotation keeps deterministic answer comparison', () => {
     isCorrect: false,
     source: 'answer_comparison',
     manualMark: 'none'
+  })
+})
+test('matching teacher annotation does not bypass deterministic comparison', () => {
+  assert.deepEqual(resolveGradingResult({
+    studentAnswer: 'D',
+    answer: 'D',
+    questionType: 'choice',
+    manualMark: 'correct'
+  }), {
+    isCorrect: true,
+    source: 'answer_comparison',
+    manualMark: 'correct'
   })
 })

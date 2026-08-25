@@ -655,17 +655,22 @@ export function normalizeManualMark(manualMark, hasManualCheckmark = false) {
 
 export function resolveGradingResult({ studentAnswer, answer, questionType, manualMark }) {
   const normalizedManualMark = normalizeManualMark(manualMark)
-  if (normalizedManualMark === 'correct') {
-    return { isCorrect: true, source: 'teacher_annotation', manualMark: normalizedManualMark }
-  }
-  if (normalizedManualMark === 'wrong') {
-    return { isCorrect: false, source: 'teacher_annotation', manualMark: normalizedManualMark }
-  }
-  if (normalizedManualMark === 'partial') {
-    return { isCorrect: false, source: 'teacher_annotation', manualMark: normalizedManualMark }
+  const judgment = judgeAnswer(studentAnswer, answer, questionType)
+
+  // 视觉模型识别的教师批改痕迹只是证据，不能覆盖确定性的答案比较。
+  // 一旦两者冲突，结果必须交给教师复核，避免幻觉勾选直接把错题判对。
+  const annotationResult = normalizedManualMark === 'correct'
+    ? true
+    : (normalizedManualMark === 'wrong' || normalizedManualMark === 'partial' ? false : null)
+  if (annotationResult !== null && judgment.isCorrect !== null && annotationResult !== judgment.isCorrect) {
+    return { isCorrect: null, source: 'annotation_conflict_review', manualMark: normalizedManualMark }
   }
 
-  const judgment = judgeAnswer(studentAnswer, answer, questionType)
+  // 教师标记无法与答案比较形成确定结论时，也不能自动结算。
+  if (annotationResult !== null && judgment.isCorrect === null) {
+    return { isCorrect: null, source: 'teacher_annotation_review', manualMark: normalizedManualMark }
+  }
+
   return { isCorrect: judgment.isCorrect, source: 'answer_comparison', manualMark: normalizedManualMark }
 }
 
