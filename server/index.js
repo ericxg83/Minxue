@@ -130,8 +130,20 @@ const upload = multer({
 })
 
 // Health check
+// 附带版本信息：Render 自动部署时无法从外部确认"我刚推的修复到底上线了没有"，
+// 只能靠盲等。这里回显 Render 注入的 git commit 与进程启动时间，
+// 部署是否生效变成一次 curl 就能确认的事。
+const BOOT_AT = new Date().toISOString()
 app.get('/api/health', (req, res) => {
-  res.json({ status: 'ok', timestamp: new Date().toISOString() })
+  res.json({
+    status: 'ok',
+    timestamp: new Date().toISOString(),
+    commit: (process.env.RENDER_GIT_COMMIT || 'local').slice(0, 7),
+    branch: process.env.RENDER_GIT_BRANCH || null,
+    bootAt: BOOT_AT,
+    uptimeSec: Math.round(process.uptime()),
+    visionTimeoutMs: parseInt(process.env.VISION_TIMEOUT_MS) || 180000,
+  })
 })
 
 // Proxy image fetch — avoids CORS issues when drawing cross-origin images to canvas
