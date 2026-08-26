@@ -61,7 +61,10 @@ export const groupFilesByQRCode = (filesWithQR) => {
     const normalizedQR = isRetryPaperQRCode(qrContent) ? qrContent : null
 
     if (!normalizedQR) {
-      const key = `no_qr_${Date.now()}_${Math.random().toString(36).slice(2, 11)}`
+      // 无二维码 = 普通多页作业，全部归入同一组，交由后端「多图一任务」合并。
+      // 旧代码用带 Math.random 的唯一 key 让每张图各成一组，导致一次选多张普通作业
+      // 会被拆成多个单图任务，前后端都看不到「共N页」，合并逻辑形同虚设。
+      const key = 'no_qr'
       if (!groups.has(key)) {
         groups.set(key, [])
       }
