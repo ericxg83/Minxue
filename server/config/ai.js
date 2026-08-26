@@ -408,6 +408,14 @@ const GEMINI_DIRECT = {
 
 const backupAxios = axios.create({ timeout: 60000 })
 
+// ⚠️ 绝不要在 content 为空时回退到 message.reasoning / reasoning_content。
+// 思考模型（如 Qwen/Qwen3-VL-8B-Thinking）在 max_tokens 耗尽于推理阶段时，
+// content 为空而 reasoning 里是思维链原文（"用户现在需要识别作业……"）。
+// 把它当正文返回会造成两个后果：
+//   1. 下游 JSON.parse 必然失败；
+//   2. 更糟的是把「AI 返回内容为空」（在非重试黑名单内，会被正确放弃）
+//      伪装成「JSON 格式错误」（不在黑名单内，会被反复重试到 retry_count 耗尽）。
+// content 为空就返回空，让上层 callVisionCompletion 换下一个 provider。
 export function extractContent(message) {
   if (!message) return ''
 
@@ -421,9 +429,6 @@ export function extractContent(message) {
     }).join('').trim()
     if (text) return text
   }
-
-  const reasoning = message.reasoning || message.reasoning_content
-  if (typeof reasoning === 'string' && reasoning.trim()) return reasoning
 
   return ''
 }

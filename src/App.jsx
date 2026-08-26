@@ -14,7 +14,7 @@ import {
 import { motion, AnimatePresence } from 'motion/react'
 import { useLocation, useNavigate } from 'react-router-dom'
 import { useStudentStore, useTaskStore, useWrongQuestionStore, useExamStore } from './store'
-import { getStudents, getTasksByStudent, getQuestionsByTask, getExamsByStudent, getGeneratedExamsByStudent, getGeneratedExamById, updateTaskStatus, updateQuestion, updateQuestionTags, invalidateCache, createStudent, getQuestionsByIds, deleteTask, deleteGeneratedExam, deleteWrongQuestion, getTaskById, recalculateTaskStats, clearStudentCaches, peekCache, writeCache, fetchWrongQuestionsPage, getTasksSummary, markNotificationsRead } from './services/apiService'
+import { getStudents, getTasksByStudent, getQuestionsByTask, getExamsByStudent, getGeneratedExamsByStudent, getGeneratedExamById, updateTaskStatus, updateQuestion, updateQuestionTags, invalidateCache, createStudent, getQuestionsByIds, deleteTask, deleteGeneratedExam, deleteWrongQuestion, recalculateTaskStats, clearStudentCaches, peekCache, writeCache, fetchWrongQuestionsPage, getTasksSummary, markNotificationsRead } from './services/apiService'
 import { taskService } from './services/taskService'
 import { usePaperBank } from './features/PaperBank/index.jsx'
 import { useUploadFlow } from './hooks/useUploadFlow'
@@ -998,23 +998,18 @@ export default function App() {
 
     try {
       Toast.show({ message: '正在重新处理...', type: 'info', duration: 2000 })
-      
-      // Fetch the task info
-      const task = await getTaskById(taskId, false)
-      if (!task) {
-        Toast.show({ message: '任务不存在', type: 'error', duration: 2000 })
-        return
-      }
 
-      // Re-add to queue via server endpoint
+      // 服务端从库里读取全部路由字段（taskType / worksheetId / resourceId / images），
+      // 这里只传 taskId，避免前端缺字段导致 workbook 任务被降级为通用 AI 管线。
       const response = await fetch('/api/tasks/retry', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ taskId: task.id, imageUrl: task.image_url, studentId: task.student_id, originalName: task.original_name })
+        body: JSON.stringify({ taskId })
       })
 
       if (!response.ok) {
-        throw new Error('重新处理失败')
+        const data = await response.json().catch(() => ({}))
+        throw new Error(data.error || '重新处理失败')
       }
 
       Toast.show({ message: '已重新加入处理队列', type: 'success', duration: 2000 })

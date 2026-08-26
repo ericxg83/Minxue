@@ -482,7 +482,8 @@ app.get('/api/tasks/student/:studentId', async (req, res) => {
     const offset = parseInt(req.query.offset) || 0
     const { rows } = await query(
       `SELECT id, student_id, status, original_name, image_url, images, result,
-              created_at, updated_at, task_type, worksheet_id, subject, generated_exam_id
+              created_at, updated_at, task_type, worksheet_id, subject, generated_exam_id,
+              started_at, last_error, retry_count
        FROM ${TABLES.TASKS} WHERE student_id = $1 AND deleted_at IS NULL
        ORDER BY created_at DESC LIMIT $2 OFFSET $3`,
       [studentId, limit, offset]
@@ -523,8 +524,14 @@ async function retryTaskById(taskId) {
   const queue = await getTaskQueue()
   const result = task.result || {}
 
+  // 用户主动重试 → 重置 retry_count 与 last_error，给一份全新的自动重试额度。
+  // 否则 retry_count 已撞上 MAX_AUTO_RETRIES 的任务即使这次又失败，
+  // 也再不会被 PendingTaskRecovery 接管；残留的 last_error 还会命中非重试黑名单，
+  // 让 stuck 扫描直接跳过它。
   await query(
-    `UPDATE ${TABLES.TASKS} SET status = $1, result = $2, updated_at = NOW() WHERE id = $3`,
+    `UPDATE ${TABLES.TASKS}
+     SET status = $1, result = $2, retry_count = 0, last_error = NULL, updated_at = NOW()
+     WHERE id = $3`,
     [TASK_STATUS.PENDING, JSON.stringify({
       progress: 0,
       retryCount: (result.retryCount || 0) + 1,
@@ -753,40 +760,20 @@ app.get('/api/queue/stats', async (req, res) => {
 // Retry a pending/failed task
 app.post('/api/tasks/retry', async (req, res) => {
   try {
-    const { taskId, imageUrl, studentId, originalName } = req.body
+    const { taskId } = req.body
+    if (!taskId) return res.status(400).json({ error: '缺少 taskId' })
 
-    if (!taskId || !imageUrl || !studentId) {
-      return res.status(400).json({ error: '缺少必要参数' })
-    }
-
-    // Update task status back to pending
-    await query(
-      `UPDATE ${TABLES.TASKS} SET status = 'pending', updated_at = NOW() WHERE id = $1`,
-      [taskId]
-    )
-
-    // Re-add to queue
-    const queue = await getTaskQueue()
-    if (!queue) {
-      return res.status(503).json({ error: '队列不可用，请检查 Redis 连接' })
-    }
-
-    await queue.add('process-task', {
-      taskId,
-      studentId,
-      imageUrl,
-      originalName: originalName || '重试任务',
-      retryCount: 1
-    }, {
-      attempts: parseInt(process.env.MAX_RETRIES) || 3,
-      backoff: { type: 'exponential', delay: 5000 }
-    })
-
-    console.log(`[API] 任务已重新加入队列: ${originalName || taskId}`)
-    res.json({ success: true, message: '任务已重新加入队列' })
+    // 委托给 retryTaskById：它会从库里读全 taskType / worksheetId / resourceId /
+    // generatedExamId / images 等路由字段。此前这里只转发 body 里的 imageUrl，
+    // workbook 和错题重练任务重试时会丢失路由信息，被静默降级为完整 AI 管线，
+    // 多页任务还会只重跑第一页。
+    const result = await retryTaskById(taskId)
+    console.log(`[API] 任务已重新加入队列: ${result.originalName || taskId}`)
+    res.json({ success: true, message: '任务已重新加入队列', ...result })
   } catch (error) {
     console.error('重试任务失败:', error)
-    res.status(500).json({ error: error.message })
+    const status = error.message === '任务不存在' ? 404 : 500
+    res.status(status).json({ error: error.message })
   }
 })
 

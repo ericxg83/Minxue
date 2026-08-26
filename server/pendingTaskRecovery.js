@@ -167,7 +167,7 @@ class PendingTaskRecovery {
    */
   isAIRefusalLikely = (lastError) => {
     if (!lastError) return false
-    return /图片是空白|图片为空白|无法识别|无法看到|Unable to identify|Cannot identify|no text detected|cannot see|看不清|页面内容为空|用户提供的图片是空|所有页面识别结果为空|页识别失败|OCR 未识别到任何题目|AI_EMPTY/i.test(String(lastError))
+    return /图片是空白|图片为空白|无法识别|无法看到|Unable to identify|Cannot identify|no text detected|cannot see|看不清|页面内容为空|用户提供的图片是空|所有页面识别结果为空|页识别失败|OCR 未识别到任何题目|AI_EMPTY|很抱歉|抱歉[，,]|对不起|由于您提供的|I'm sorry|I am sorry|I cannot|unable to process/i.test(String(lastError))
   }
 
   async scanFailedTasks() {
@@ -178,8 +178,15 @@ class PendingTaskRecovery {
 
       // ── 双轨扫描 ──
       //   1) 常规任务：retry_count < MAX_AUTO_RETRIES
-      //   2) AI 偶发拒绝任务：retry_count < MAX_AI_REFUSAL_RETRIES（10 次 ≈ 50 分钟）
+      //   2) AI 偶发拒绝 / 输出格式异常任务：retry_count < MAX_AI_REFUSAL_RETRIES
+      // 两者都是「换个模型或换一次就好」的模型个体行为，不该被 3 次卡死。
       // 用条件 OR + ILIKE 让 DB 利用 idx_tasks_status 索引，避免全表扫描。
+      //
+      // ⚠️ 本列表比 isAIRefusalLikely 的正则多一项 'JSON 格式错误'，是有意的：
+      //   拒绝话术类 → 命中 isAIRefusalLikely，retry_count 重置为 0（额度实际无上限）；
+      //   JSON 格式错误 → 不重置，止步于 MAX_AI_REFUSAL_RETRIES=10。
+      //   因为 recognizeQuestions 内部每次已自带一次换模型重试，10 次 = 试过 20 次模型组合，
+      //   仍失败说明不是模型抽风，无限重试只会烧配额。
       const { rows } = await query(
         `SELECT id, student_id, image_url, images, original_name, status, created_at, result, retry_count, last_error,
                 task_type, worksheet_id, generated_exam_id, subject, resource_id
@@ -193,7 +200,11 @@ class PendingTaskRecovery {
                    OR last_error ILIKE '%图片为空白%'
                    OR last_error ILIKE '%Unable to identify%'
                    OR last_error ILIKE '%no text detected%'
-                   OR last_error ILIKE '%cannot identify%')
+                   OR last_error ILIKE '%cannot identify%'
+                   OR last_error ILIKE '%很抱歉%'
+                   OR last_error ILIKE '%对不起%'
+                   OR last_error ILIKE '%由于您提供的%'
+                   OR last_error ILIKE '%JSON 格式错误%')
                   AND COALESCE(retry_count, 0) < $2
                 )
            )
@@ -242,7 +253,7 @@ class PendingTaskRecovery {
           //   8B 配额紧张时同样图可能一次"图片是空白"、一次成功 OCR 15+ 道题，
           //   不应该被 MAX_AUTO_RETRIES=3 卡死。给它们无限重试机会，
           //   直到要么成功，要么用户主动取消/重新上传。
-          const isAIRefusal = isAIRefusalLikely(task.last_error)
+          const isAIRefusal = this.isAIRefusalLikely(task.last_error)
           const baseRetry = isAIRefusal ? 0 : (task.retry_count || 0)
           await query(
             `UPDATE ${TABLES.TASKS} SET status = 'pending', last_error = NULL, updated_at = NOW() WHERE id = $1`,

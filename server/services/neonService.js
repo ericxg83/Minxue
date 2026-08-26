@@ -9,7 +9,10 @@ export const updateTaskStatus = async (taskId, status, result = null) => {
   }
 
   // 运维字段：从 result 提取并写入独立列（补齐前仅存于 result JSON 内）。
-  // retry_count / last_error / started_at / failed_at 任一缺失则保留原值（COALESCE）。
+  // retry_count / started_at / failed_at 任一缺失则保留原值（COALESCE）。
+  // last_error 例外：status 转为 done 时必须清空，否则中途失败过、最终成功的任务
+  // 会一直带着旧错误 —— 前端会据此显示误导性的失败原因，
+  // PendingTaskRecovery 的非重试黑名单也会因残留错误而跳过它后续的恢复。
   const retryCount = (result && typeof result.retry_count === 'number') ? result.retry_count : null
   const lastError = (result && typeof result.last_error === 'string') ? result.last_error : null
   const startedAt = (result && result.startedAt) ? result.startedAt : null
@@ -38,7 +41,7 @@ export const updateTaskStatus = async (taskId, status, result = null) => {
     `UPDATE ${TABLES.TASKS}
      SET status = $1, result = $2, updated_at = $3,
          retry_count = COALESCE($4, retry_count),
-         last_error = COALESCE($5, last_error),
+         last_error = CASE WHEN $1 = 'done' THEN NULL ELSE COALESCE($5, last_error) END,
          started_at = COALESCE($6::timestamptz, started_at),
          failed_at = COALESCE($7::timestamptz, failed_at),
          notification_read_at = CASE WHEN $1 IN ('done', 'failed') THEN NULL ELSE notification_read_at END

@@ -468,31 +468,43 @@ const deduplicateTags = (tags) => {
   return unique.length > 0 ? unique : ['未分类']
 }
 
+// 坐标类字段：AI 经常把它们写成畸形结构，需要统一修复成 {x,y,width,height} 对象。
+const BBOX_KEYS = 'block_coordinates|text_bbox|image_bbox'
+const BBOX_NUM = '-?\\d+(?:\\.\\d+)?'
+// 值区域允许「标签: 数字」与「裸数字」任意混排，共 4 个数字。
+// ⚠️ 必须写成 4 个独立分组：JS 的重复量词只保留最后一次迭代的捕获值。
+// 只允许标签/数字/逗号/冒号/引号出现，因此不可能跨越 } 吃到别的字段。
+const BBOX_ITEM = `(?:"?[a-zA-Z_]+"?\\s*:\\s*)?(${BBOX_NUM})`
+const BBOX_RE = new RegExp(
+  `"(${BBOX_KEYS})"\\s*:\\s*([\\{\\[])?\\s*` +
+  `${BBOX_ITEM}\\s*,\\s*${BBOX_ITEM}\\s*,\\s*${BBOX_ITEM}\\s*,\\s*${BBOX_ITEM}` +
+  `\\s*([\\}\\]])?`,
+  'g'
+)
+
 /**
  * JSON 自动修复 — 处理 AI 返回的畸形 JSON
  * 常见问题: 未转义反斜杠(\frac → \\frac)、未转义双引号、字符串内换行、
- *           block_coordinates 被 AI 写成裸元组 (60, 200, 650, 27) 或
- *           半对象半元组 { "x": 60, 200, 650, 27 }
+ *           坐标字段被写成裸元组 (60, 200, 650, 27)、半对象 {"x": 60, 200, 650, 27}
+ *           或裸大括号 {60, 200, 650, 27}
  */
 export function repairAIJson(jsonStr) {
-  // 1) 先处理「裸元组 / 半对象」形式的 block_coordinates。
-  //    模式 A: "block_coordinates": 60, 200, 650, 27          → 4 个裸数字
-  //    模式 B: "block_coordinates": [60, 200, 650, 27]        → 数组形式（合法，但统一转对象更稳）
-  //    模式 C: "block_coordinates": {"x": 60, 200, 650, 27}   → 半对象
-  //    模式 D: "block_coordinates": {"x":60,"y":200,...}      → 正常对象，跳过
-  //    模式 E: "block_coordinates": {"x": 60, "y": 200, "width": 650, "height": 27}  → 正常对象
-  // 统一策略：先做一次宽松匹配（不限定 "x": 前缀），命中 A/B/C 任一形式都转成标准对象。
-  // 注意：不要用 \}? 吞掉闭合大括号 —— 那样会破坏外层对象结构。
-  // 这里用 (?=\s*[\},]) 前瞻，只在接下来是 } 或 , 时才匹配，且不消耗字符。
-  let pre = jsonStr.replace(
-    /"block_coordinates"\s*:\s*\{?(?:\s*"?[a-zA-Z_]+"?\s*:\s*)?(-?\d+(?:\.\d+)?)\s*,\s*(-?\d+(?:\.\d+)?)\s*,\s*(-?\d+(?:\.\d+)?)\s*,\s*(-?\d+(?:\.\d+)?)(?=\s*[\},])/g,
-    (m, x, y, w, h) => `"block_coordinates": {"x": ${x}, "y": ${y}, "width": ${w}, "height": ${h}}`
-  )
-  //    模式 B 数组形式（保险起见再跑一次），数组的 ] 是必需的，所以可以直接匹配。
-  pre = pre.replace(
-    /"block_coordinates"\s*:\s*\[\s*(-?\d+(?:\.\d+)?)\s*,\s*(-?\d+(?:\.\d+)?)\s*,\s*(-?\d+(?:\.\d+)?)\s*,\s*(-?\d+(?:\.\d+)?)\s*\]/g,
-    (m, x, y, w, h) => `"block_coordinates": {"x": ${x}, "y": ${y}, "width": ${w}, "height": ${h}}`
-  )
+  // 1) 统一修复坐标字段（block_coordinates / text_bbox / image_bbox）的畸形形态：
+  //    A 裸元组     "block_coordinates": 60, 200, 650, 27
+  //    B 数组       "block_coordinates": [60, 200, 650, 27]
+  //    C 半对象     "block_coordinates": {"x": 60, 200, 650, 27}        ← 线上最高频
+  //    C2/C3 部分标签 {"x": 60, "y": 200, 650, 27} / {..., "width": 650, 27}
+  //    C4 裸大括号  "block_coordinates": {60, 200, 650, 27}
+  //    D 正常对象   {"x":60,"y":200,"width":650,"height":27}            ← 幂等，原样归一
+  //
+  // ⚠️ 括号必须成对处理：开括号缺失时（模式 A），正则会顺带吃掉「外层对象」的闭合括号，
+  //    此时必须把它原样吐回去，否则会破坏 JSON 结构。
+  let pre = jsonStr.replace(BBOX_RE, (m, key, opener, x, y, w, h, closer) => {
+    const normalized = `"${key}": {"x": ${x}, "y": ${y}, "width": ${w}, "height": ${h}}`
+    // 有开括号 → 闭括号属于本字段，已被我们自己的 } 取代，不需要吐回。
+    // 无开括号 → 吃到的闭括号属于外层结构，必须归还。
+    return opener ? normalized : normalized + (closer || '')
+  })
 
   // 逐字符状态机：只在「字符串内部」做修复，避免破坏结构。
   // 处理三类畸形：
@@ -553,6 +565,56 @@ export function repairAIJson(jsonStr) {
     }
   }
 
+  return out
+}
+
+/**
+ * 截断 JSON 抢救 — AI 响应被 max_tokens 截断时，保住已经收到的完整元素。
+ *
+ * 旧做法是「补一个引号 + 补齐所有缺失的括号」，但截断点常落在半个键名或半个数字上，
+ * 补括号只会得到另一种畸形；即使补成功，最后那道题也是字段残缺的。
+ * 这里改为回退到「最后一个完整闭合的嵌套值」之后再收口，
+ * 于是 15 道题截断在第 12 道时，前 11 道能正常入库，而不是整页丢掉。
+ *
+ * 只在括号闭合处切，不在逗号/字符串结束处切 —— 后者可能停在
+ * 「有键无值」（{"a":1,"content"）上，反而制造新的畸形。
+ * 纯函数，导出供单测。
+ */
+export function salvageTruncatedJson(jsonStr) {
+  const stack = []
+  let inString = false
+  let escaped = false
+  let cutAt = -1          // 安全切点（不含该下标）
+  let cutStack = null     // 切点处仍未闭合的容器
+
+  for (let i = 0; i < jsonStr.length; i++) {
+    const ch = jsonStr[i]
+
+    if (inString) {
+      if (escaped) escaped = false
+      else if (ch === '\\') escaped = true
+      else if (ch === '"') inString = false
+      continue
+    }
+
+    if (ch === '"') inString = true
+    else if (ch === '{' || ch === '[') stack.push(ch)
+    else if (ch === '}' || ch === ']') {
+      stack.pop()
+      // 刚闭合了一个嵌套值，且它仍处于某个父容器内 → 这里可以安全收口
+      if (stack.length) {
+        cutAt = i + 1
+        cutStack = [...stack]
+      }
+    }
+  }
+
+  if (cutAt < 0) return null // 一个完整元素都没收到，无从抢救
+
+  let out = jsonStr.slice(0, cutAt).replace(/[\s,]+$/, '')
+  for (let i = cutStack.length - 1; i >= 0; i--) {
+    out += cutStack[i] === '{' ? '}' : ']'
+  }
   return out
 }
 
@@ -674,7 +736,10 @@ export function resolveGradingResult({ studentAnswer, answer, questionType, manu
   return { isCorrect: judgment.isCorrect, source: 'answer_comparison', manualMark: normalizedManualMark }
 }
 
-const recognizeQuestions = async (imageBase64, taskId, retryCount = 0) => {
+// forceModel: 锁定到指定视觉模型。JSON 修复失败时由本函数自己传入下一个模型重试，
+//   因为 callVisionCompletion 不传 model 时会按 VL_MODELS 顺序轮询，
+//   直接递归重试只会再次命中同一个模型、拿到同样畸形的输出。
+const recognizeQuestions = async (imageBase64, taskId, retryCount = 0, forceModel = null) => {
   const prompt = buildOCRPrompt()
   const startTime = Date.now()
 
@@ -686,14 +751,16 @@ const recognizeQuestions = async (imageBase64, taskId, retryCount = 0) => {
     : `data:image/jpeg;base64,${imageBase64}`
 
   try {
-    console.log(`   发送请求到: ${AI_CONFIG.ENDPOINT} (model=${getCurrentVLModel()})`)
+    const activeModel = forceModel || getCurrentVLModel()
+    console.log(`   发送请求到: ${AI_CONFIG.ENDPOINT} (model=${activeModel})`)
     // 主 API（ModelScope）→ 配额耗尽(429)时内置回退到备用视觉 API
     const { content, usedBackup } = await callVisionCompletion({
       imageDataURL: imageUrl,
       systemPrompt: prompt,
       userText: '请识别这张作业图片中的所有题目，并返回JSON格式结果。',
       temperature: 0.3,
-      maxTokens: 8192
+      maxTokens: 8192,
+      ...(forceModel ? { model: forceModel } : {})
     })
 
     const duration = Date.now() - startTime
@@ -716,27 +783,43 @@ const recognizeQuestions = async (imageBase64, taskId, retryCount = 0) => {
       console.warn(`⚠️  AI JSON 解析失败，尝试自动修复...`)
       console.warn(`   原始错误: ${parseError.message}`)
 
-      // 尝试截断修复：如果 JSON 末尾被截断，尝试闭合未完成的字符串和结构
-      let repaired = repairAIJson(jsonStr)
-      // 如果错误是 "Unterminated string"，尝试在末尾补上闭合引号
-      if (parseError.message.includes('Unterminated string')) {
-        repaired = repaired.replace(/("[^"]*)$/, '$1"')
-        // 尝试闭合未闭合的花括号和方括号
-        const openBraces = (repaired.match(/\{/g) || []).length
-        const closeBraces = (repaired.match(/\}/g) || []).length
-        const openBrackets = (repaired.match(/\[/g) || []).length
-        const closeBrackets = (repaired.match(/\]/g) || []).length
-        for (let i = 0; i < openBraces - closeBraces; i++) repaired += '}'
-        for (let i = 0; i < openBrackets - closeBrackets; i++) repaired += ']'
+      // ① 先修畸形（坐标半对象、LaTeX 反斜杠、字符串内裸引号/换行）
+      const repaired = repairAIJson(jsonStr)
+      // ② 再修截断。maxTokens=8192 对满页试卷经常不够，截断是高频形态。
+      //    抢救优先于补括号：宁可少最后一道题，也要保住前面已识别的题目。
+      const candidates = [repaired]
+      const salvaged = salvageTruncatedJson(repaired)
+      if (salvaged) candidates.push(salvaged)
+
+      let lastRepairError = null
+      for (const candidate of candidates) {
+        try {
+          result = JSON.parse(candidate)
+          const salvageNote = candidate === salvaged ? '（截断抢救，末尾不完整题目已丢弃）' : ''
+          console.log(`✅ JSON 自动修复成功！${salvageNote}`)
+          lastRepairError = null
+          break
+        } catch (e) {
+          lastRepairError = e
+        }
       }
 
-      console.log(`   修复后 JSON (前200字): ${repaired.substring(0, 200)}...`)
-      try {
-        result = JSON.parse(repaired)
-        console.log(`✅ JSON 自动修复成功！`)
-      } catch (repairError) {
-        console.error(`❌ JSON 自动修复仍然失败: ${repairError.message}`)
+      if (lastRepairError) {
+        console.error(`❌ JSON 自动修复仍然失败: ${lastRepairError.message}`)
         console.error(`   原始 JSON (前500字): ${jsonStr.substring(0, 500)}`)
+
+        // ── 换模型再试一轮 ──
+        // JSON 畸形是模型个体行为（某些模型偏爱把坐标写成半对象），换一个模型
+        // 往往一次就过。这里复用 rotateVLModel()（processWorkbookGrading 的
+        // "全 0 道题" 分支已在用同一机制），不新增重试逻辑。
+        // 只在本次任务内换一次，避免对真正无法识别的图片轮遍所有模型烧配额。
+        if (!forceModel) {
+          const nextModel = rotateVLModel()
+          if (nextModel) {
+            console.warn(`🔄 JSON 修复失败，切换到 ${nextModel} 重试 1 次...`)
+            return recognizeQuestions(imageBase64, taskId, retryCount, nextModel)
+          }
+        }
         throw new Error(`AI 返回的 JSON 格式错误，无法解析。原始错误: ${parseError.message}`)
       }
     }
@@ -5017,6 +5100,15 @@ export const processTask = async (job) => {
         ...q,
         student_id: studentId
       }))
+
+      // 幂等：恢复链路 / 用户重试 / 队列重投可能对同一 task 重复执行本管线。
+      // workbook 与答案库管线早已在写入前清旧题，通用 AI 管线此前漏了，
+      // 导致同一任务跑两次就产生成倍的 questions 行（实测 3 道题 → 6 行），
+      // 进而污染 wrong_questions 与知识点掌握度。
+      const deletedOld = await deleteQuestionsByTaskId(taskId)
+      if (deletedOld > 0) {
+        console.log(`   幂等清理: 删除旧题目 ${deletedOld} 行 (taskId=${taskId})`)
+      }
 
       await createQuestions(questionsWithStudentId)
       console.log(`✅ [Step 6/8] 题目保存成功 (含 ${geometryImageCache.size} 张几何配图)`)
