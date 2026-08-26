@@ -104,7 +104,9 @@ const paperLabels = computed(() => {
     }
     return labels
   }
-  // 单任务多图：每页（每张上传的试卷）首题标注 卷N，按上传顺序（page_number）编号
+  // 单任务多图：同一个任务里的多页（一次上传的多张图片），每页首题标注「第N页」，
+  // 按上传顺序（page_number）编号。注意与 case 1 的「卷N」区分——
+  // 这些是同一个任务的页，不是多份独立试卷，用「第N页」避免让人误以为被拆成多份。
   const pages = store.currentPaperPages
   if (pages.length > 1) {
     const pageOrder = pages.map(p => p.page_number)
@@ -115,7 +117,7 @@ const paperLabels = computed(() => {
       const isFirst = pn !== currentPage
       if (isFirst) currentPage = pn
       const pageIdx = pageOrder.indexOf(pn)
-      labels.push(isFirst && pageIdx >= 0 ? `卷${pageIdx + 1}` : '')
+      labels.push(isFirst && pageIdx >= 0 ? `第${pageIdx + 1}页` : '')
     }
     return labels
   }

@@ -48,6 +48,8 @@ export default function ExamReview({ task, onClose, onSave }) {
   } = useExamReview({ task, onSave, currentIndexRef })
 
   const currentQuestion = validQuestions[currentIndex] || null
+  // 多图一任务：同一份作业上传的页数，用于在复核界面显式提示"这是一份 N 页作业"
+  const pageCount = Array.isArray(task?.images) ? task.images.length : 0
 
   // ── 窗口尺寸监听 ──
   useEffect(() => {
@@ -434,6 +436,14 @@ export default function ExamReview({ task, onClose, onSave }) {
                   padding: '1px 6px', borderRadius: 'var(--radius-4)', marginRight: '6px'
                 }}>
                   原卷题号 {currentQuestion.question_number}
+                </span>
+              )}
+              {pageCount > 1 && (
+                <span style={{
+                  fontSize: 'var(--fs-11)', color: COLORS.primary, background: 'var(--primary-soft)',
+                  padding: '1px 6px', borderRadius: 'var(--radius-4)', marginRight: '6px'
+                }}>
+                  {currentQuestion?.page_number ? `第${currentQuestion.page_number}页` : '本题'} / 共{pageCount}页
                 </span>
               )}
               <span style={{ fontSize: 'var(--fs-12)', color: COLORS.textSecondary }}>
