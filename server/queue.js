@@ -281,6 +281,33 @@ const initQueue = async () => {
         console.log(`▶️ [Worker] 任务开始处理: jobId=${job.id}, taskId=${job.data.taskId}`)
       })
 
+      // ── Queue 级 error 监听（必须有，否则进程会被 Redis 错误直接杀掉）──
+      // 三个 Worker 都注册了 'error'，但 Queue 各自持有独立的 BullMQ RedisConnection。
+      // Upstash 当月请求配额耗尽时连接被关闭，Queue 的连接会 emit 'error'；
+      // 没有监听器 → Node 按未捕获异常处理 → **整个服务进程崩溃**。
+      // 实测崩溃栈：Emitted 'error' event on RedisConnection instance
+      //   at bullmq/dist/cjs/classes/redis-connection.js:75
+      // 这正是"任务永久停在 processing、前端一直转圈"的成因：
+      // 服务在批改中途死掉，没有任何东西再去推进那条任务。
+      const attachQueueErrorHandler = (q, label) => {
+        if (!q) return
+        q.on('error', (err) => {
+          const msg = err?.message || ''
+          if (/max requests limit|max daily requests|quota exceeded/i.test(msg)) {
+            const currentId = redisManager.getStats().current
+            console.warn(`[Queue] 🚫 ${label} 检测到 Redis 配额耗尽 (instance=${currentId}): ${msg}`)
+            redisManager.markQuotaExhausted(currentId, msg)
+            return
+          }
+          // 连接级错误：taskWorker 的 error 处理器负责统一切换实例，这里只记录，
+          // 关键是别让它冒泡成未捕获异常。
+          console.error(`⚠️ [${label}] Redis 连接错误: ${msg}`)
+        })
+      }
+      attachQueueErrorHandler(taskQueue, 'TaskQueue')
+      attachQueueErrorHandler(tikzQueue, 'TikzQueue')
+      attachQueueErrorHandler(geometryQueue, 'GeometryQueue')
+
       queueInitialized = true
       console.log(`✅ [Queue] Redis 队列已连接并就绪 (实例: ${redisManager.getStats().current})`)
       console.log(`[Queue] 连接池状态: ${JSON.stringify(redisManager.getStats())}`)

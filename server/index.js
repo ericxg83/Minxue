@@ -80,6 +80,33 @@ import { finalizeRejudgeResult, finalizeGeneratedExamResults } from './services/
 const app = express()
 const PORT = process.env.PORT || 4000
 
+// ── 兜底：Redis/连接类异常不得杀掉批改服务 ──
+// 服务进程死亡的代价特别高：所有正在批改的任务会永久停在 processing，
+// 前端只能一直转圈（这正是 2026-08-25 夜间那批试卷卡住的成因）。
+// BullMQ 的 Queue/Worker 各自持有 RedisConnection，任何一处漏了 'error' 监听
+// 都会让 Upstash 配额耗尽演变成进程崩溃。queue.js 里已逐个补齐监听，
+// 这里再加一层兜底，只吞连接类错误，其余未捕获异常仍按原样崩溃暴露问题。
+const CONNECTION_ERROR_RE = /Connection is closed|max requests limit|max daily requests|quota exceeded|ECONNRESET|ETIMEDOUT|EPIPE|Stream isn't writeable|Command timed out|WRONGPASS/i
+
+process.on('uncaughtException', (err) => {
+  const msg = err?.message || String(err)
+  if (CONNECTION_ERROR_RE.test(msg)) {
+    console.error(`⚠️ [兜底] 已拦截连接类未捕获异常，服务继续运行: ${msg}`)
+    return
+  }
+  console.error('❌ [兜底] 未捕获异常，进程退出:', err)
+  process.exit(1)
+})
+
+process.on('unhandledRejection', (reason) => {
+  const msg = reason?.message || String(reason)
+  if (CONNECTION_ERROR_RE.test(msg)) {
+    console.error(`⚠️ [兜底] 已拦截连接类未处理拒绝: ${msg}`)
+    return
+  }
+  console.error('❌ [兜底] 未处理的 Promise 拒绝:', reason)
+})
+
 const allowedOrigins = process.env.ALLOWED_ORIGIN 
   ? process.env.ALLOWED_ORIGIN.split(',')
   : ['http://localhost:3000', 'http://localhost:5173', 'http://localhost:4173', 'http://localhost:3001', 'http://localhost:3002', 'http://192.168.71.9:3001']
