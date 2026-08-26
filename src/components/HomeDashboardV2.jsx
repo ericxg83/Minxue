@@ -1,47 +1,80 @@
-import { AlertCircle, Camera, ChevronRight, CircleCheck, Clock3, FileCheck2 } from 'lucide-react'
+import { AlertCircle, BookOpen, Camera, ChevronRight, Clock3, FileCheck2 } from 'lucide-react'
 import { motion } from 'motion/react'
-import { MobileList, MobileSectionHeading } from '../features/mobile/MobilePrimitives'
+import { MobileSectionHeading } from '../features/mobile/MobilePrimitives'
 
 const done = new Set(['done', 'graded', 'completed', 'reviewed'])
 const complete = (task) => done.has(task.status) || Boolean(task.result?.questionCount)
 const failed = (task) => task.status === 'failed'
 const processing = (task) => !complete(task) && !failed(task)
 
-function Row({ title, detail, icon, onClick }) {
-  return <button type='button' onClick={onClick} className='flex w-full items-center gap-3 border-b px-0.5 py-3.5 text-left last:border-b-0 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-[var(--primary)]' style={{ borderColor: 'var(--border-light)' }}><span className='flex h-8 w-8 items-center justify-center rounded-full' style={{ background: 'var(--primary-soft)', color: 'var(--primary)' }}>{icon}</span><span className='min-w-0 flex-1'><span className='block truncate text-[14px] font-medium' style={{ color: 'var(--text)' }}>{title}</span><span className='mt-0.5 block truncate text-[12px]' style={{ color: 'var(--text-secondary)' }}>{detail}</span></span><ChevronRight size={16} style={{ color: 'var(--text-tertiary)' }} /></button>
+// 主行动：永远存在、视觉权重最高，无论有没有错题/失败都不会被挤掉
+function PrimaryAction({ onClick }) {
+  return <button type='button' onClick={onClick} className='flex w-full items-center gap-4 rounded-2xl px-4 py-4 text-left shadow-sm transition-transform active:scale-[0.985] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--primary)] focus-visible:ring-offset-2' style={{ background: 'var(--primary)', color: '#fff' }}>
+    <span className='flex h-11 w-11 shrink-0 items-center justify-center rounded-xl' style={{ background: 'rgba(255,255,255,.16)' }}><Camera size={22} aria-hidden='true' /></span>
+    <span className='min-w-0 flex-1'><span className='block text-[16px] font-semibold'>上传今天的作业</span><span className='mt-0.5 block text-[12px] opacity-80'>拍照或选图，AI 批改后自动整理错题</span></span>
+    <ChevronRight size={20} aria-hidden='true' />
+  </button>
 }
 
-function ActionCard({ icon, eyebrow, title, detail, onClick, tone = 'primary' }) {
-  const colors = tone === 'warning'
-    ? { background: 'var(--warning-soft)', color: 'var(--warning)', iconBackground: 'rgba(217,119,6,.12)' }
-    : { background: 'var(--primary)', color: '#fff', iconBackground: 'rgba(255,255,255,.16)' }
-  return <button type='button' onClick={onClick} className='flex w-full items-center gap-3 rounded-2xl px-4 py-4 text-left shadow-sm transition-transform active:scale-[0.985] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--primary)] focus-visible:ring-offset-2' style={{ background: colors.background, color: colors.color }}><span className='flex h-10 w-10 shrink-0 items-center justify-center rounded-xl' style={{ background: colors.iconBackground }}>{icon}</span><span className='min-w-0 flex-1'><span className='mb-0.5 block text-[11px] font-medium opacity-75'>{eyebrow}</span><span className='block text-[15px] font-semibold'>{title}</span><span className='mt-0.5 block truncate text-[12px] opacity-80'>{detail}</span></span><ChevronRight size={18} aria-hidden='true' /></button>
+// 状态提醒卡：整行可点 + 右侧箭头，颜色区分紧急度
+function ReminderCard({ icon, tone = 'neutral', title, detail, onClick }) {
+  const tones = {
+    neutral: { chipBg: 'var(--primary-soft)', chipColor: 'var(--primary)' },
+    info: { chipBg: 'var(--info-soft)', chipColor: 'var(--info)' },
+    success: { chipBg: 'var(--success-soft)', chipColor: 'var(--success)' },
+  }
+  const t = tones[tone] || tones.neutral
+  return <button type='button' onClick={onClick} className='flex w-full items-center gap-3 rounded-2xl border px-4 py-3.5 text-left transition-transform active:scale-[0.99] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-[var(--primary)]' style={{ background: 'var(--bg-card)', borderColor: 'var(--border-light)' }}>
+    <span className='flex h-9 w-9 shrink-0 items-center justify-center rounded-xl' style={{ background: t.chipBg, color: t.chipColor }}>{icon}</span>
+    <span className='min-w-0 flex-1'><span className='block truncate text-[14px] font-medium' style={{ color: 'var(--text)' }}>{title}</span><span className='mt-0.5 block truncate text-[12px]' style={{ color: 'var(--text-secondary)' }}>{detail}</span></span>
+    <ChevronRight size={16} aria-hidden='true' style={{ color: 'var(--text-tertiary)' }} />
+  </button>
 }
 
-export default function HomeDashboardV2({ currentStudent, tasks, isInitializing, pendingWrongCount = 0, onStartUpload, onOpenTasks, onOpenWrongBook, onOpenReview, onRetryTask }) {
+// 失败卡：双出口——重新提交 / 忽略，不再是"必须处理"的死胡同
+function FailedCard({ onRetry, onDismiss }) {
+  return <div className='rounded-2xl border px-4 py-3.5' style={{ background: 'var(--warning-soft)', borderColor: 'rgba(217,119,6,.25)' }}>
+    <div className='flex items-start gap-3'>
+      <span className='flex h-9 w-9 shrink-0 items-center justify-center rounded-xl' style={{ background: 'rgba(217,119,6,.14)', color: 'var(--warning)' }}><AlertCircle size={18} aria-hidden='true' /></span>
+      <div className='min-w-0 flex-1'><p className='text-[14px] font-medium' style={{ color: 'var(--text)' }}>上次作业没能批改完成</p><p className='mt-0.5 text-[12px]' style={{ color: 'var(--text-secondary)' }}>可以重新提交再试一次，或先忽略这份</p></div>
+    </div>
+    <div className='mt-3 flex gap-2'>
+      <button type='button' onClick={onRetry} className='flex-1 rounded-xl py-2 text-[13px] font-semibold text-white transition-transform active:scale-[0.98] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--primary)]' style={{ background: 'var(--warning)' }}>重新提交</button>
+      <button type='button' onClick={onDismiss} className='rounded-xl px-4 py-2 text-[13px] font-medium transition-transform active:scale-[0.98] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--primary)]' style={{ background: 'rgba(0,0,0,.04)', color: 'var(--text-secondary)' }}>忽略</button>
+    </div>
+  </div>
+}
+
+export default function HomeDashboardV2({ currentStudent, tasks, isInitializing, pendingWrongCount = 0, onStartUpload, onOpenTasks, onOpenWrongBook, onOpenReview, onRetryTask, onDismissTask }) {
   const list = (Array.isArray(tasks) ? tasks : []).filter((task) => task.student_id === currentStudent?.id).sort((left, right) => new Date(right.created_at || 0) - new Date(left.created_at || 0))
   const failedTask = list.find(failed)
   const activeTask = list.find(processing)
   const latest = list.find(complete)
-  const priorityAction = pendingWrongCount > 0
-    ? { icon: <FileCheck2 size={20} />, eyebrow: '今日重点', title: `复习 ${pendingWrongCount} 道错题`, detail: '巩固还不熟练的内容', onClick: onOpenWrongBook }
-    : failedTask
-      ? { icon: <AlertCircle size={20} />, eyebrow: '需要处理', title: '重新提交这份作业', detail: '上次上传未能完成批改', onClick: () => onRetryTask?.(failedTask.id) || onOpenTasks(), tone: 'warning' }
-      : activeTask
-        ? { icon: <Clock3 size={20} />, eyebrow: '正在进行', title: '作业批改中', detail: '完成后会自动整理错题', onClick: onOpenTasks }
-        : { icon: <Camera size={20} />, eyebrow: '开始学习', title: '拍一份作业', detail: '上传图片，开始批改', onClick: onStartUpload }
+
+  // 状态提醒，按紧急度排序：批改中 > 结果就绪 > 待复习（失败单独用 FailedCard 置顶）
+  const reminders = []
+  if (!isInitializing && activeTask) reminders.push({ key: 'active', icon: <Clock3 size={18} />, tone: 'info', title: '作业批改中', detail: '完成后会自动归入错题本', onClick: onOpenTasks })
+  if (!isInitializing && latest) {
+    const wrong = latest.result?.wrongCount
+    reminders.push({ key: 'latest', icon: <FileCheck2 size={18} />, tone: wrong ? 'neutral' : 'success', title: wrong ? `上次作业已批改 · ${wrong} 道错题` : '上次作业已批改，表现不错', detail: wrong ? '查看被标出的题目和讲解' : `${latest.result?.questionCount || '全部'} 题已完成，继续保持`, onClick: () => onOpenReview(latest) })
+  }
+  if (!isInitializing && pendingWrongCount > 0) reminders.push({ key: 'wrong', icon: <BookOpen size={18} />, tone: 'neutral', title: `${pendingWrongCount} 道错题待复习`, detail: '完成重练，验证是否真正掌握', onClick: onOpenWrongBook })
+
+  const empty = !isInitializing && !failedTask && reminders.length === 0
 
   return <motion.main initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} className='mobile-page mx-auto w-full max-w-lg px-4 pb-6 pt-5'>
-    <header className='mb-5'><p className='mb-1 text-[12px] font-medium' style={{ color: 'var(--text-secondary)' }}>今天</p><h1 className='text-[24px] font-semibold tracking-[-0.04em]' style={{ color: 'var(--text)' }}>{isInitializing ? '正在准备学习数据…' : `${currentStudent?.name || '同学'}，从一件重要的事开始`}</h1></header>
-    <section aria-label='今日重点' className='mb-7'><ActionCard {...priorityAction} /></section>
-    <section className='mb-7'><MobileSectionHeading title='学习动态' description={isInitializing ? '正在同步最新记录' : '作业和错题的最新进展'} action='查看作业' onAction={onOpenTasks} />
-      <MobileList>
-        {isInitializing && <Row icon={<Clock3 size={16} />} title='正在同步学习记录' detail='稍后会显示最新状态' onClick={onOpenTasks} />}
-        {!isInitializing && activeTask && <Row icon={<Clock3 size={16} />} title='有一份作业正在批改' detail='完成后会自动归入错题本' onClick={onOpenTasks} />}
-        {!isInitializing && pendingWrongCount > 0 && <Row icon={<FileCheck2 size={16} />} title={`${pendingWrongCount} 道错题等待复习`} detail='完成重练，验证是否真正掌握' onClick={onOpenWrongBook} />}
-        {!isInitializing && !activeTask && pendingWrongCount === 0 && <Row icon={<CircleCheck size={16} />} title='当前没有待处理内容' detail='拍一份作业，记录今天的学习' onClick={onStartUpload} />}
-      </MobileList>
+    <header className='mb-5'><p className='mb-1 text-[12px] font-medium' style={{ color: 'var(--text-secondary)' }}>今天</p><h1 className='truncate text-[24px] font-semibold tracking-[-0.04em]' style={{ color: 'var(--text)' }}>{isInitializing ? '正在准备学习数据…' : `${currentStudent?.name || '同学'}，今天也来学一会儿`}</h1></header>
+
+    <section aria-label='上传作业' className='mb-6'><PrimaryAction onClick={onStartUpload} /></section>
+
+    <section aria-label='待处理事项'>
+      <MobileSectionHeading title='待处理' description={isInitializing ? '正在同步最新记录' : undefined} action='查看作业' onAction={onOpenTasks} />
+      <div className='flex flex-col gap-2.5'>
+        {isInitializing && <ReminderCard icon={<Clock3 size={18} />} tone='info' title='正在同步学习记录' detail='稍后会显示最新状态' onClick={onOpenTasks} />}
+        {!isInitializing && failedTask && <FailedCard onRetry={() => onRetryTask?.(failedTask.id)} onDismiss={() => onDismissTask?.(failedTask.id)} />}
+        {reminders.map((r) => <ReminderCard key={r.key} icon={r.icon} tone={r.tone} title={r.title} detail={r.detail} onClick={r.onClick} />)}
+        {empty && <div className='rounded-2xl border border-dashed px-4 py-5 text-center' style={{ borderColor: 'var(--border-light)' }}><p className='text-[13px] font-medium' style={{ color: 'var(--text-secondary)' }}>今天还没有待处理的作业</p><p className='mt-0.5 text-[12px]' style={{ color: 'var(--text-tertiary)' }}>上传一份作业，就从这里开始</p></div>}
+      </div>
     </section>
-    {latest && <section><MobileSectionHeading title='最近一次作业' action='查看结果' onAction={() => onOpenReview(latest)} /><button type='button' onClick={() => onOpenReview(latest)} className='flex w-full items-center justify-between border-y py-3.5 text-left focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-[var(--primary)]' style={{ borderColor: 'var(--border-light)' }}><span><span className='block text-[14px] font-medium' style={{ color: 'var(--text)' }}>{latest.result?.questionCount || '本次'} 题已完成批改</span><span className='mt-0.5 block text-[12px]' style={{ color: 'var(--text-secondary)' }}>{latest.result?.wrongCount ? `${latest.result.wrongCount} 道题已加入后续复习` : '这次作业表现不错，继续保持'}</span></span><ChevronRight size={16} style={{ color: 'var(--text-tertiary)' }} /></button></section>}
   </motion.main>
 }

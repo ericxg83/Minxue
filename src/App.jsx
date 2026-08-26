@@ -1077,6 +1077,7 @@ export default function App() {
                 onOpenExam={() => { setCurrentPage('exam'); clearSelection() }}
                 onOpenReview={(task) => { setReviewTask(task); setShowExamReview(true) }}
                 onRetryTask={handleRetryTask}
+                onDismissTask={(taskId) => { setDeleteTarget({ type: 'task', id: taskId }); setShowDeleteConfirm(true) }}
               />
             )}
 
