@@ -650,8 +650,9 @@ export async function callVisionCompletion(opts) {
   const messages = buildVisionMessages(systemPrompt, userText, imageDataURL)
 
   // 备份提供商超时：主 ModelScope 失败后快速尝试备选，防止阻塞批次。
-  // 20s 足够覆盖国内直连（商汤/智谱）与 ZenMux 正常响应，超时就换下一个备用。
-  const BACKUP_TIMEOUT = 20000
+  // 视觉请求整体比文本慢得多，20s 对大图会把本来能成功的备用也误杀，
+  // 因此按 env 可调，默认放宽到 60s。
+  const BACKUP_TIMEOUT = parseInt(process.env.BACKUP_VISION_TIMEOUT_MS) || 60000
 
   const providers = []
 
@@ -674,9 +675,13 @@ export async function callVisionCompletion(opts) {
       messages,
       temperature,
       maxTokens,
-      // 魔搭额度/服务不可用时应尽快失败并轮到备用供应商，绝不长时间卡在 503 重试
-      // 503 的重试延迟累计 245s，会导致整轮解析被单个魔搭 provider 阻塞。
-      timeout: Math.min(AI_CONFIG.TIMEOUT, 45000),
+      // ⚠️ 超时必须大于模型真实延迟，否则主模型永远失败、每张图都被判成
+      // "所有视觉模型均不可用：timeout of 45000ms exceeded"。
+      // 2026-08-26 实测（Qwen3-VL-235B + 本 OCR 提示词，同一张 733KB 压缩图连测 3 次）：
+      //   107935ms / 90119ms / 111313ms，三次都 finish_reason=stop、结果完整。
+      // 此前硬上限 45s 低于正常延迟，大图（>600KB）注定超时。
+      // 原注释担心的"卡在 503 重试累计 245s"由 retry503:false 兜住，与超时值无关。
+      timeout: parseInt(process.env.VISION_TIMEOUT_MS) || 180000,
       retry429: true,
       retry503: false,
     })
