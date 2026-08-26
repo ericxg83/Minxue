@@ -1,4 +1,4 @@
-import { repairAIJson, salvageTruncatedJson } from '../worker.js'
+import { repairAIJson, salvageTruncatedJson, stripCodeFence } from '../worker.js'
 
 // 覆盖线上实际出现过的坐标畸形形态。
 // 线上最高频是 C 系列（半对象）：报错定位在 buildOCRPrompt 模板第 16 行、第 39~40 列，
@@ -97,6 +97,40 @@ try {
     pass++; console.log('✅ 字符串内的括号未被误判')
   } else { fail++; console.log(`❌ 字符串内括号处理错误: ${bracketInStr}`) }
 } catch (e) { fail++; console.log(`❌ 字符串内括号导致不合法: ${e.message.slice(0, 50)}`) }
+
+// ── stripCodeFence：markdown 围栏剥离 ──
+// 线上 30483.jpg 连续 5 次重试都死在这里：响应被截断，只有开头的 ```json
+// 没有收尾的 ```，旧的成对正则匹配失败 → 反引号被当成 JSON → Unexpected token '`'
+console.log('\n── 围栏剥离 ──')
+
+const fenceCases = [
+  ['成对 ```json', '```json\n{"a":1}\n```', '{"a":1}'],
+  ['成对 ```', '```\n{"a":1}\n```', '{"a":1}'],
+  ['只有开头围栏(截断)', '```json\n{"questions":[{"a":1}', '{"questions":[{"a":1}'],
+  ['只有结尾围栏', '{"a":1}\n```', '{"a":1}'],
+  ['无围栏', '{"a":1}', '{"a":1}'],
+  ['前缀寒暄', '好的，识别结果如下：\n{"a":1}', '{"a":1}'],
+  ['围栏+前缀寒暄', '```json\n好的：{"a":1}', '{"a":1}'],
+  ['数组顶层', '```json\n[{"a":1}]\n```', '[{"a":1}]'],
+  ['拒绝话术(无 JSON)', '很抱歉，图片较模糊', '很抱歉，图片较模糊'],
+  ['围栏内含反引号文本', '```json\n{"c":"用 `x` 表示"}\n```', '{"c":"用 `x` 表示"}'],
+]
+
+for (const [name, raw, expect] of fenceCases) {
+  const got = stripCodeFence(raw)
+  if (got === expect) { pass++; console.log(`✅ ${name.padEnd(22)} → ${got.slice(0, 40)}`) }
+  else { fail++; console.log(`❌ ${name.padEnd(22)} 期望 ${JSON.stringify(expect)}，实际 ${JSON.stringify(got)}`) }
+}
+
+// 端到端：截断 + 只有开头围栏 + 坐标畸形，三重叠加也要能救出题目
+const worst = '```json\n{"questions":[{"question_number":1,"block_coordinates":{"x":10,20,30,40},"content":"甲"},{"question_number":2,"content":"乙截断'
+const e2e = salvageTruncatedJson(repairAIJson(stripCodeFence(worst)))
+try {
+  const p = JSON.parse(e2e)
+  if (p.questions.length === 1 && p.questions[0].block_coordinates.width === 30) {
+    pass++; console.log('✅ 三重叠加(围栏+畸形+截断) 救出 1 道题')
+  } else { fail++; console.log(`❌ 三重叠加结果异常: ${e2e}`) }
+} catch (e) { fail++; console.log(`❌ 三重叠加仍不合法: ${e.message.slice(0, 60)}`) }
 
 console.log(`\n结果: ${pass} 通过 / ${fail} 失败`)
 process.exit(fail > 0 ? 1 : 0)

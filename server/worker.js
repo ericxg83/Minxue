@@ -618,6 +618,39 @@ export function salvageTruncatedJson(jsonStr) {
   return out
 }
 
+/**
+ * 剥离 AI 回复外层的 markdown 代码围栏。
+ *
+ * 旧写法 content.match(/```json\n?([\s\S]*?)\n?```/) 要求围栏**成对**出现。
+ * 响应被截断时只会有开头的 ```json 而没有收尾的 ```，匹配失败 → 整段原文
+ * （含反引号）被丢给 JSON.parse → 报 Unexpected token '`', "```json ...
+ * 这种情况 repairAIJson 和 salvageTruncatedJson 都救不了：前者不动结构外的
+ * 反引号，后者抢救出来的片段仍带着围栏前缀。
+ * 线上实测 30483.jpg 连续 5 次重试都死在这里。
+ *
+ * 因此改为：成对围栏优先取内容，否则单独剥掉开头/结尾的残缺围栏。
+ * 纯函数，导出供单测。
+ */
+export function stripCodeFence(content) {
+  const text = String(content || '').trim()
+  const paired = text.match(/```(?:json)?[ \t]*\n?([\s\S]*?)\n?```/)
+  let out = paired
+    ? paired[1].trim()
+    : text
+      .replace(/^```(?:json)?[ \t]*\n?/, '')
+      .replace(/\n?```[ \t]*$/, '')
+      .trim()
+
+  // 前缀寒暄（"好的，识别结果如下："）也要剥掉：从第一个 { 或 [ 开始。
+  // 注意只切前缀、不切尾部 —— 截断响应的尾部残缺交给 salvageTruncatedJson 处理，
+  // 若在这里贪婪匹配到"最后一个 }"会把已收到的完整题目一起丢掉。
+  if (out && !/^[{[]/.test(out)) {
+    const firstBrace = out.search(/[{[]/)
+    if (firstBrace > 0) out = out.slice(firstBrace).trim()
+  }
+  return out
+}
+
 const deskewImage = async (imageBuffer) => {
   try {
     const metadata = await sharp(imageBuffer).metadata()
@@ -771,10 +804,9 @@ const recognizeQuestions = async (imageBase64, taskId, retryCount = 0, forceMode
     console.log(`   AI 原始响应 (前300字): ${content.substring(0, 300)}...`)
     console.log(`   AI 响应总长度: ${content.length} 字符`)
 
-    let jsonStr = content
-    const jsonMatch = content.match(/```json\n?([\s\S]*?)\n?```/) ||
-                      content.match(/```\n?([\s\S]*?)\n?```/)
-    if (jsonMatch) jsonStr = jsonMatch[1]
+    // 围栏剥离必须容忍"只有开头 ```json、没有收尾 ```"的截断响应，
+    // 否则反引号会被当成 JSON 内容，报 Unexpected token '`'（线上 30483 连挂 5 次）
+    const jsonStr = stripCodeFence(content)
 
     let result
     let ocrTruncated = false
@@ -1108,10 +1140,7 @@ export const generateAnswerForQuestion = async (questionContent, retryCount = 0)
       maxTokens: 2048
     })
 
-    let jsonStr = content
-    const jsonMatch = content.match(/```json\n?([\s\S]*?)\n?```/) ||
-                      content.match(/```\n?([\s\S]*?)\n?```/)
-    if (jsonMatch) jsonStr = jsonMatch[1]
+    const jsonStr = stripCodeFence(content)
 
     let result
     try {
@@ -2947,10 +2976,7 @@ async function reocrQuestionRegion(imageUrl, normBox, questionNumber, userText =
       maxTokens: 1024
     })
     if (!content) return null
-    const jsonMatch = content.match(/```json\n?([\s\S]*?)\n?```/) ||
-                      content.match(/```\n?([\s\S]*?)\n?```/) ||
-                      content.match(/[\[{][\s\S]*[\]}]/)
-    const parsed = JSON.parse(jsonMatch ? jsonMatch[1] || jsonMatch[0] : content)
+    const parsed = JSON.parse(stripCodeFence(content))
     const c = (parsed && typeof parsed === 'object') ? (parsed.content || null) : null
     if (c && typeof c === 'string' && String(c).trim()) {
       let newContent = String(c).trim()
@@ -3359,10 +3385,7 @@ const processWorkbookGrading = async (job) => {
     let questions = []
     let pageTitle = null
     try {
-      const jsonMatch = content.match(/```json\n?([\s\S]*?)\n?```/) ||
-                        content.match(/```\n?([\s\S]*?)\n?```/) ||
-                        content.match(/[\[{][\s\S]*[\]}]/)
-      const jsonStr = jsonMatch ? jsonMatch[1] || jsonMatch[0] : content
+      const jsonStr = stripCodeFence(content)
       const parsed = JSON.parse(jsonStr)
       if (Array.isArray(parsed)) {
         questions = parsed
@@ -3506,10 +3529,7 @@ const processWorkbookGrading = async (job) => {
         let questions = []
         let pageTitle = null
         try {
-          const jsonMatch = content.match(/```json\n?([\s\S]*?)\n?```/) ||
-                            content.match(/```\n?([\s\S]*?)\n?```/) ||
-                            content.match(/[\[{][\s\S]*[\]}]/)
-          const jsonStr = jsonMatch ? jsonMatch[1] || jsonMatch[0] : content
+          const jsonStr = stripCodeFence(content)
           const parsed = JSON.parse(jsonStr)
           if (Array.isArray(parsed)) questions = parsed
           else if (parsed && typeof parsed === 'object') {
@@ -4068,10 +4088,7 @@ const processAnswerBankGrading = async (job) => {
         }
         // 解析 JSON
         try {
-          const jsonMatch = content.match(/```json\n?([\s\S]*?)\n?```/) ||
-                            content.match(/```\n?([\s\S]*?)\n?```/) ||
-                            content.match(/[\[{][\s\S]*[\]}]/)
-          const jsonStr = jsonMatch ? jsonMatch[1] || jsonMatch[0] : content
+          const jsonStr = stripCodeFence(content)
           const parsed = JSON.parse(jsonStr)
           questions = []
           pageTitle = null
@@ -4838,6 +4855,31 @@ const processAnswerBankGrading = async (job) => {
 export const processTask = async (job) => {
   const { taskId, studentId, imageUrl: rawImageUrl, originalName } = job.data
   const startTime = Date.now()
+
+  // ── 幂等闸门：已完成的任务不得被重复批改 ──
+  // BullMQ 在 worker 进程被杀 / lock 过期时会把 active job 判为 stalled 并重新投递。
+  // 这些"僵尸 job"对应的任务往往早已 done，重跑一遍不但白烧 AI 配额，还会
+  // 长时间占满 concurrency 槽位 —— 用户新上传的任务排在后面迟迟不被处理，
+  // 表现就是"传上去很久没反应"。实测：jobId=165 对应的 30483 已 done，
+  // 仍被 stalled 机制重新投递并真的开始跑。
+  // 这里直接放行返回，让槽位立刻交给真正待处理的任务。
+  if (taskId) {
+    try {
+      const { rows } = await query(
+        `SELECT status, (SELECT COUNT(*)::int FROM ${TABLES.QUESTIONS} WHERE task_id = $1) AS q_rows
+         FROM ${TABLES.TASKS} WHERE id = $1`,
+        [taskId]
+      )
+      const row = rows[0]
+      if (row && ['done', 'reviewed'].includes(row.status) && row.q_rows > 0) {
+        console.log(`⏭️ [Worker] 跳过重复投递: taskId=${taskId} 已是 ${row.status}（${row.q_rows} 道题），不重复批改`)
+        return { taskId, skipped: true, reason: `already_${row.status}`, questionCount: row.q_rows }
+      }
+    } catch (e) {
+      // 查询失败时不阻塞正常处理（宁可多跑一次，也不能因 DB 抖动卡住批改）
+      console.error(`⚠️ [Worker] 幂等闸门查询失败 taskId=${taskId}:`, e.message)
+    }
+  }
 
   // ── 路由字段兜底：恢复链路重新入队的 job 可能缺 taskType/worksheetId/generatedExamId，
   // 从 tasks 行回读，防止 workbook/错题重练任务被静默降级为完整 AI 管线 ──
