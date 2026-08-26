@@ -777,6 +777,7 @@ const recognizeQuestions = async (imageBase64, taskId, retryCount = 0, forceMode
     if (jsonMatch) jsonStr = jsonMatch[1]
 
     let result
+    let ocrTruncated = false
     try {
       result = JSON.parse(jsonStr)
     } catch (parseError) {
@@ -785,34 +786,18 @@ const recognizeQuestions = async (imageBase64, taskId, retryCount = 0, forceMode
 
       // ① 先修畸形（坐标半对象、LaTeX 反斜杠、字符串内裸引号/换行）
       const repaired = repairAIJson(jsonStr)
-      // ② 再修截断。maxTokens=8192 对满页试卷经常不够，截断是高频形态。
-      //    抢救优先于补括号：宁可少最后一道题，也要保住前面已识别的题目。
-      const candidates = [repaired]
-      const salvaged = salvageTruncatedJson(repaired)
-      if (salvaged) candidates.push(salvaged)
-
-      let lastRepairError = null
-      for (const candidate of candidates) {
-        try {
-          result = JSON.parse(candidate)
-          const salvageNote = candidate === salvaged ? '（截断抢救，末尾不完整题目已丢弃）' : ''
-          console.log(`✅ JSON 自动修复成功！${salvageNote}`)
-          lastRepairError = null
-          break
-        } catch (e) {
-          lastRepairError = e
-        }
-      }
-
-      if (lastRepairError) {
-        console.error(`❌ JSON 自动修复仍然失败: ${lastRepairError.message}`)
+      try {
+        result = JSON.parse(repaired)
+        console.log(`✅ JSON 自动修复成功！`)
+      } catch (repairError) {
+        console.error(`❌ JSON 自动修复仍然失败: ${repairError.message}`)
         console.error(`   原始 JSON (前500字): ${jsonStr.substring(0, 500)}`)
 
-        // ── 换模型再试一轮 ──
-        // JSON 畸形是模型个体行为（某些模型偏爱把坐标写成半对象），换一个模型
-        // 往往一次就过。这里复用 rotateVLModel()（processWorkbookGrading 的
-        // "全 0 道题" 分支已在用同一机制），不新增重试逻辑。
-        // 只在本次任务内换一次，避免对真正无法识别的图片轮遍所有模型烧配额。
+        // ② 换模型重试优先于截断抢救。
+        // 实测（235B + 本 OCR 提示词，max_tokens=8192）：正常一次响应 11208 字符 /
+        // 4601 completion_tokens，finish_reason=stop —— 上限用掉不到 6 成，
+        // 所以响应只有 2250 字符就断掉属于偶发（供应商/网络侧），重来一次通常就完整了。
+        // 因此绝不能一截断就拿半页结果收工：那会静默丢题。
         if (!forceModel) {
           const nextModel = rotateVLModel()
           if (nextModel) {
@@ -820,7 +805,20 @@ const recognizeQuestions = async (imageBase64, taskId, retryCount = 0, forceMode
             return recognizeQuestions(imageBase64, taskId, retryCount, nextModel)
           }
         }
-        throw new Error(`AI 返回的 JSON 格式错误，无法解析。原始错误: ${parseError.message}`)
+
+        // ③ 已经换过模型仍失败 → 抢救已收到的完整题目，避免整页归零
+        const salvaged = salvageTruncatedJson(repaired)
+        if (salvaged) {
+          try {
+            result = JSON.parse(salvaged)
+            ocrTruncated = true
+            console.warn(`⚠️  换模型后仍不可解析，启用截断抢救：末尾不完整题目已丢弃，本页可能缺题`)
+          } catch {
+            throw new Error(`AI 返回的 JSON 格式错误，无法解析。原始错误: ${parseError.message}`)
+          }
+        } else {
+          throw new Error(`AI 返回的 JSON 格式错误，无法解析。原始错误: ${parseError.message}`)
+        }
       }
     }
 
@@ -896,7 +894,9 @@ const recognizeQuestions = async (imageBase64, taskId, retryCount = 0, forceMode
       console.error(`   ❌ 所有视觉模型均返回 0 道题`)
     }
 
-    return { success: true, questions, duration }
+    // truncated=true 表示本页是靠截断抢救出来的，可能缺题 —— 上层需记录到任务结果，
+    // 否则"少了几道题"对用户是完全静默的。
+    return { success: true, questions, duration, truncated: ocrTruncated }
   } catch (error) {
     const duration = Date.now() - startTime
     const errorMessage = error.response?.data?.message || error.message || '未知错误'
@@ -4957,6 +4957,7 @@ export const processTask = async (job) => {
     const pageBuffers = new Map() // pageNumber → 压缩后 buffer（几何裁剪按页取图）
     const questions = []
     let totalOcrDuration = 0
+    let ocrTruncatedPages = 0 // 靠截断抢救才出结果的页数，用于在任务结果里标记"可能缺题"
 
     const pageTasks = pages.map(async (page, pageIdx) => {
       const pageLabel = pages.length > 1 ? `第 ${page.pageNumber}/${pages.length} 页 ` : ''
@@ -5003,7 +5004,7 @@ export const processTask = async (job) => {
       }))
 
       console.log(`✅ [Step 5/8] ${pageLabel}识别 ${pageQuestions.length} 道题`)
-      return { pageNumber: page.pageNumber, compressedBuffer, ocrDuration: ocrResult.duration || 0, pageQuestions }
+      return { pageNumber: page.pageNumber, compressedBuffer, ocrDuration: ocrResult.duration || 0, pageQuestions, truncated: Boolean(ocrResult.truncated) }
     })
 
     const pageResults = await Promise.all(pageTasks)
@@ -5011,6 +5012,10 @@ export const processTask = async (job) => {
       pageBuffers.set(r.pageNumber, r.compressedBuffer)
       questions.push(...r.pageQuestions)
       totalOcrDuration += r.ocrDuration
+      if (r.truncated) ocrTruncatedPages += 1
+    }
+    if (ocrTruncatedPages > 0) {
+      console.warn(`⚠️  ${ocrTruncatedPages} 页是截断抢救的结果，可能缺题（已记入任务结果 ocrTruncated）`)
     }
 
     await job.updateProgress(70)
@@ -5379,7 +5384,9 @@ await job.updateProgress(80)
       completedAt: new Date().toISOString(),
       answerExceptions: answerGenResult.exceptions || 0,
       cacheHits: answerGenResult.cacheHits || 0,
-      cacheMisses: answerGenResult.cacheMisses || 0
+      cacheMisses: answerGenResult.cacheMisses || 0,
+      // 有页面靠截断抢救才出结果 → 本次批改可能缺题，前端据此提示用户核对
+      ocrTruncated: ocrTruncatedPages > 0 ? ocrTruncatedPages : undefined
     })
 
     console.log(`\n🎉🎉 [Worker] ==========================================`)
