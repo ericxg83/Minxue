@@ -5,6 +5,7 @@ import { processMultiPagePaperLayout } from '../../services/paperBankAIService'
 import { downloadPaperWord } from '../../utils/docxGenerator'
 import { useToast } from '../../components/ToastProvider'
 import { fixFractionLineInCloneDoc, preloadKatexFonts } from '../../utils/pdfGenerator'
+import { normalizeOptions } from '../../utils/optionText'
 
 // 试卷资源库（Paper Bank）自包含模块。
 // 从 App.jsx 拆出：仅含 state + handlers + 渲染辅助函数，无 UI 挂载点（UI 尚未接入）。
@@ -334,7 +335,7 @@ export function usePaperBank() {
             </div>
             {block.options && block.options.length > 0 && (
               <div className="mt-2 ml-4">
-                {block.options.map((opt, optIdx) => (
+                {normalizeOptions(block.options).map((opt, optIdx) => (
                   <div
                     key={optIdx}
                     className="cursor-pointer rounded px-1 py-0.5 hover:bg-[var(--primary-mist)]/50"
@@ -345,7 +346,7 @@ export function usePaperBank() {
                     }}
                   >
                     <span style={{ fontSize: 'var(--fs-13)', lineHeight: '1.6', color: 'var(--text)' }}>
-                      {opt}
+                      {String.fromCharCode(65 + optIdx)}. {opt}
                     </span>
                   </div>
                 ))}
@@ -481,8 +482,8 @@ export function usePaperBank() {
             let qHTML = `<div class="block-question">${escapeHtml(block.content)}`
             if (block.options && block.options.length > 0) {
               qHTML += `<div class="block-options">`
-              block.options.forEach(opt => {
-                qHTML += `<div class="block-option">${escapeHtml(opt)}</div>`
+              normalizeOptions(block.options).forEach((opt, optIdx) => {
+                qHTML += `<div class="block-option">${String.fromCharCode(65 + optIdx)}. ${escapeHtml(opt)}</div>`
               })
               qHTML += `</div>`
             }

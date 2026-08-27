@@ -173,7 +173,7 @@
             <div v-for="(opt, idx) in optionsList" :key="idx" class="ops-option-row"
               :class="{ 'option-highlight': opt === q.answer }">
               <span class="ops-opt-letter">{{ String.fromCharCode(65 + idx) }}.</span>
-              <span class="ops-opt-text"><MathRender :content="cleanOptPrefix(opt)" autoDetect tag="span" /></span>
+              <span class="ops-opt-text"><MathRender :content="opt" autoDetect tag="span" /></span>
             </div>
           </div>
         </div>
@@ -274,6 +274,7 @@ import { updateQuestion, rejudgeQuestion, retryGeometry, clearStudentCaches, upl
 import { processExamImage } from '../../../utils/imageProcessor'
 import { getGeometryDisplayUrl, getTikzStatus } from '../../../utils/geometryDisplay'
 import { tikzToSvg } from '../../../utils/tikzGenerator'
+import { normalizeOptions } from '../../../utils/optionText'
 import { ElMessage, ElMessageBox, ElLoading } from 'element-plus'
 import { DocumentChecked, Delete, Plus, Upload, Picture, EditPen, ArrowLeft, ArrowRight, RefreshLeft, Crop } from '@element-plus/icons-vue'
 import MathRender from '../MathRender.vue'
@@ -309,7 +310,7 @@ const typeTagType = computed(() => {
   const map = { choice: '', fill: 'success', answer: 'warning', judge: 'primary' }
   return map[normalizeType(q.value)] || 'info'
 })
-const optionsList = computed(() => q.value?.options || [])
+const optionsList = computed(() => normalizeOptions(q.value?.options || []))
 
 // 难度系数（1-5）显示
 const difficultyLabel = computed(() => {
@@ -394,12 +395,6 @@ const getAiStateText = (q) => {
     processing: '处理中'
   }
   return map[state] || 'AI判定中'
-}
-
-/** 去掉选项文本中已有的字母前缀（如 "A."、"A)"、"A、"），避免显示为 "A.A. 内容" */
-const cleanOptPrefix = (text) => {
-  if (!text || typeof text !== 'string') return text
-  return text.replace(/^[A-Da-d][.、)）\s]?\s*/, '')
 }
 
 const displayImageUrl = computed(() => getGeometryDisplayUrl(q.value).url)
@@ -586,7 +581,7 @@ watch(q, (newQ) => {
   if (newQ) {
     form.value = {
       content: newQ.content || '',
-      options: JSON.parse(JSON.stringify(newQ.options || [])),
+      options: normalizeOptions(JSON.parse(JSON.stringify(newQ.options || []))),
       answer: newQ.answer || '',
       analysis: newQ.analysis || '',
       tags: JSON.parse(JSON.stringify(newQ.ai_tags || newQ.knowledge_points || [])),

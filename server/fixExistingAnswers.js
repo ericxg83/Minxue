@@ -12,6 +12,7 @@ dotenv.config({ path: resolve(__dirname, '.env') })
 
 import { query } from './config/neon.js'
 import { updateQuestionAnswer, markAnswerException } from './services/neonService.js'
+import { formatOptionsForPrompt } from './utils/optionText.js'
 import {
   generateAnswerForQuestion,
   extractAnswerFromAnalysis,
@@ -56,7 +57,7 @@ async function fixExistingAnswers() {
 
     const content = q.content || ''
     const fullContent = options.length > 0
-      ? `${content}\n选项：${options.join('；')}`
+      ? `${content}\n选项：${formatOptionsForPrompt(options)}`
       : content
 
     if (!content.trim()) {

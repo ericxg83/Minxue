@@ -54,6 +54,7 @@ import { createUploadReport, logUploadReport } from './services/uploadReportLogg
 import { createJudgement, batchUpdateQuestionTags, getQuestionAssets, getQuestionAssetsByType, createResource, replaceResourceAnswers } from './services/neonService.js'
 import { judgeAnswer } from './services/judgeService.js'
 import { checkQuestionCompleteness } from './utils/questionCompleteness.js'
+import { normalizeOptions } from './utils/optionText.js'
 import { uploadImage, deleteFile } from './services/ossService.js'
 import { getTaskQueue, getGeometryQueue, getQueueStats, taskWorker } from './queue.js'
 import { processTask } from './worker.js'
@@ -1000,7 +1001,7 @@ app.post('/api/questions', async (req, res) => {
     const { rows } = await query(
       `INSERT INTO ${TABLES.QUESTIONS} (task_id, student_id, content, options, answer, status, question_type, subject, analysis, image_url, geometry_image_url, is_complete)
        VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12) RETURNING *`,
-      [task_id, student_id, content, JSON.stringify(options || []), answer || null, status || 'pending', question_type || 'answer', subject || '数学', analysis || '', image_url || null, geometry_image_url || null, checkQuestionCompleteness({ content, options, answer, question_type, geometry_image_url }).isComplete]
+      [task_id, student_id, content, JSON.stringify(normalizeOptions(options || [])), answer || null, status || 'pending', question_type || 'answer', subject || '数学', analysis || '', image_url || null, geometry_image_url || null, checkQuestionCompleteness({ content, options, answer, question_type, geometry_image_url }).isComplete]
     )
 
     res.status(201).json({ success: true, question: rows[0] })
@@ -1033,6 +1034,8 @@ app.put('/api/questions/:id', async (req, res) => {
 
     // PostgreSQL pg 驱动无法推断 undefined 的类型，统一转 null
     const n = (v) => v === undefined ? null : v
+    // options 是 jsonb 列：数组必须序列化后再进参数，否则 pg 会按 Postgres 数组字面量发送导致 jsonb 解析失败
+    const optionsJson = options == null ? null : JSON.stringify(normalizeOptions(options))
 
     const { rows } = await query(
       `UPDATE ${TABLES.QUESTIONS}
@@ -1055,7 +1058,7 @@ app.put('/api/questions/:id', async (req, res) => {
            updated_at = NOW()
        WHERE id = $13
        RETURNING *`,
-      [n(content), n(options), n(answer), n(analysis), n(status), n(question_type), n(subject), n(is_correct), n(student_answer), n(image_url), n(ai_answer), n(answer_source), id, hasIsCorrect, hasAnswerSource, n(geometry_image_url), hasReviewStatus, n(review_status), n(display_image_type), hasDisplayImageType, hasSourceType, n(source_type)]
+      [n(content), optionsJson, n(answer), n(analysis), n(status), n(question_type), n(subject), n(is_correct), n(student_answer), n(image_url), n(ai_answer), n(answer_source), id, hasIsCorrect, hasAnswerSource, n(geometry_image_url), hasReviewStatus, n(review_status), n(display_image_type), hasDisplayImageType, hasSourceType, n(source_type)]
     )
 
     if (rows.length === 0) return res.status(404).json({ error: '题目不存在' })
@@ -1075,7 +1078,7 @@ app.put('/api/questions/:id', async (req, res) => {
             if (val !== undefined) {
               // JSONB 字段需要序列化
               if (field === 'options') {
-                val = JSON.stringify(val)
+                val = JSON.stringify(normalizeOptions(val))
               }
               cacheUpdates.push(`${field} = $${paramIdx++}`)
               cacheParams.push(val)

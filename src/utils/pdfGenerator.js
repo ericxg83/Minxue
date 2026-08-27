@@ -5,6 +5,7 @@ import renderMathInElement from 'katex/dist/contrib/auto-render.mjs'
 import katexCss from 'katex/dist/katex.min.css?inline'
 import { isSvgCode } from './geometryDisplay'
 import { renderContent } from './mathText'
+import { normalizeOptions } from './optionText'
 
 const A4_W = 210
 const A4_H = 297
@@ -87,11 +88,6 @@ function escapeHtml(text) {
     .replace(/</g, '&lt;')
     .replace(/>/g, '&gt;')
     .replace(/"/g, '&quot;')
-}
-
-function hasLetterPrefix(opt) {
-  if (!opt) return false
-  return /^[A-Da-d][.、)）]\s*/.test(String(opt).trim())
 }
 
 function generateQRDataUrl(text, size = 140) {
@@ -297,12 +293,12 @@ export function buildPaperBody({ title, studentName, questions, showAnswers }) {
         html += `<div class="q-image"><img src="${illustration}" alt="配图" /></div>`
       }
       if (q.options && q.options.length > 0) {
-        const maxLen = Math.max(...q.options.map(o => String(o || '').length))
+        const opts = normalizeOptions(q.options)
+        const maxLen = Math.max(...opts.map(o => String(o || '').length))
         const cols = maxLen <= 8 ? 4 : maxLen <= 20 ? 2 : 1
         html += `<div class="opts opts-${cols}">`
-        q.options.forEach((opt, i) => {
-          const label = hasLetterPrefix(opt) ? '' : `${String.fromCharCode(65 + i)}. `
-          html += `<span class="opt">${label}${renderContent(opt)}</span>`
+        opts.forEach((opt, i) => {
+          html += `<span class="opt">${String.fromCharCode(65 + i)}. ${renderContent(opt)}</span>`
         })
         html += `</div>`
       }

@@ -10,13 +10,13 @@
       </el-tooltip>
     </div>
     <div v-if="block.options && block.options.length > 0" class="options-grid">
-      <div 
-        v-for="(opt, i) in block.options" 
-        :key="i" 
+      <div
+        v-for="(opt, i) in normalizeOptions(block.options)"
+        :key="i"
         class="option-item"
         @click="$emit('edit', block, { field: 'options', index: i })"
       >
-        {{ opt }}
+        {{ String.fromCharCode(65 + i) }}. {{ opt }}
       </div>
     </div>
   </div>
@@ -24,6 +24,7 @@
 
 <script setup>
 import { WarningFilled } from '@element-plus/icons-vue'
+import { normalizeOptions } from '../../utils/optionText'
 
 defineProps({
   block: { type: Object, required: true },

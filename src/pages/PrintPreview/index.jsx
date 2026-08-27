@@ -15,18 +15,10 @@ import {
   applyQRToContainer,
   preloadKatexFonts,
 } from '../../utils/pdfGenerator'
+import { normalizeOptions } from '../../utils/optionText'
 import katexCss from 'katex/dist/katex.min.css?inline'
 
 const USE_MOCK_DATA = false
-
-/**
- * 判断选项内容是否已经自带字母前缀（如 "A. xxx"），避免显示 "A. A. xxx"
- */
-const isOptionWithLetterPrefix = (opt) => {
-  if (!opt) return false
-  const trimmed = String(opt).trim()
-  return /^[A-Da-d][.、)\)]\s/.test(trimmed)
-}
 
 const isMobile = /Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(navigator.userAgent)
 
@@ -310,8 +302,8 @@ export default function PrintPreview({ onClose, questions: propQuestions, existi
                 ${q.image_url ? `<div style="text-align:center;margin-bottom:8px;"><img src="${q.image_url}" alt="配图" style="max-width:100%;max-height:200px;object-fit:contain;border-radius:4px;" /></div>` : ''}
                 ${q.options && q.options.length > 0 ? `
                   <div class="options ${isShortOptions ? 'options-inline' : 'options-grid'}">
-                    ${q.options.map((opt, i) => {
-                      const formatted = isOptionWithLetterPrefix(opt) ? opt : String.fromCharCode(65 + i) + '. ' + opt
+                    ${normalizeOptions(q.options).map((opt, i) => {
+                      const formatted = String.fromCharCode(65 + i) + '. ' + opt
                       return `<div class="option"><span style="display:inline-block;width:14px;height:14px;border:1px solid #999;border-radius:50%;margin-right:6px;vertical-align:middle;"></span>${formatted}</div>`
                     }).join('')}
                   </div>

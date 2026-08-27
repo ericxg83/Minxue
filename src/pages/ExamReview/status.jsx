@@ -2,15 +2,9 @@ import { AlertTriangle, Clock, CheckCircle2, XCircle } from 'lucide-react'
 import MathText from '../../components/MathText'
 import { COLORS } from './constants'
 
-const isOptionWithLetterPrefix = (opt) => {
-  if (!opt) return false
-  return /^[A-Da-d][.、)\)]\s/.test(String(opt).trim())
-}
-
-export const formatOption = (opt, index) => {
-  if (isOptionWithLetterPrefix(opt)) return <MathText content={opt} />
-  return <>{String.fromCharCode(65 + index)}. <MathText content={opt} /></>
-}
+export const formatOption = (opt, index) => (
+  <>{String.fromCharCode(65 + index)}. <MathText content={opt} /></>
+)
 
 export const getStatusInfo = (q) => {
   if (!q) {

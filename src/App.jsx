@@ -37,6 +37,7 @@ import ExamPage from './pages/ExamPageV2'
 import WorksheetPicker from './components/WorksheetPicker'
 
 import { useToast, ToastProvider } from './components/ToastProvider'
+import { normalizeOptions } from './utils/optionText'
 import dayjs from 'dayjs'
 
 // 错题本分页大小（与服务端 limit 保持一致）
@@ -1202,7 +1203,7 @@ export default function App() {
                           {/* 选项 */}
                           {Array.isArray(q.options) && q.options.length > 0 && (
                             <div className="mt-3 space-y-1.5">
-                              {q.options.map((opt, i) => {
+                              {normalizeOptions(q.options).map((opt, i) => {
                                 const letter = String.fromCharCode(65 + i)
                                 return (
                                   <div key={i} className="flex items-start gap-2 text-[13px]" style={{ color: 'var(--text)' }}>

@@ -1,6 +1,7 @@
 import { query, TABLES } from '../config/neon.js'
 import { callTextCompletion } from '../config/ai.js'
 import { detectEnglishQuestionType, ENGLISH_QUESTION_TYPE_LABELS } from './englishAnalyzer.js'
+import { normalizeOptions, formatOptionsForPrompt } from '../utils/optionText.js'
 
 // ============================================================
 // 变式题生成服务（variantService）
@@ -50,7 +51,7 @@ const STRATEGY_DESCRIPTIONS = {
  */
 function buildVariantPrompt({ content, options, answer, subject, kpName, englishType }) {
   const optionText = Array.isArray(options) && options.length > 0
-    ? `\n选项：${options.join('；')}`
+    ? `\n选项：${formatOptionsForPrompt(options)}`
     : ''
 
   const subj = subject || '数学'
@@ -117,7 +118,7 @@ Return a JSON array (4 elements, one per strategy). Each item:
   {
     "strategy": "change_number" | "change_condition" | "inverse" | "context_shift",
     "content": "the new English question stem",
-    "options": ["A. ...", "B. ...", "C. ...", "D. ..."],   // empty [] for fill-in / short-answer
+    "options": ["option A text", "option B text", "option C text", "option D text"],   // plain text only, NO "A."/"(A)" labels; empty [] for fill-in / short-answer
     "answer": "the correct answer (option letter for choice, full text otherwise)",
     "analysis": "brief English explanation of the key point",
     "difficulty": 3${questionTypeField}
@@ -134,7 +135,7 @@ Return a JSON array (4 elements, one per strategy). Each item:
   {
     "strategy": "change_number",
     "content": "变式题题干",
-    "options": ["A选项", "B选项", "C选项", "D选项"],
+    "options": ["A选项正文", "B选项正文", "C选项正文", "D选项正文"],
     "answer": "正确答案",
     "analysis": "简要解析",
     "difficulty": 3
@@ -143,6 +144,7 @@ Return a JSON array (4 elements, one per strategy). Each item:
 ]
 
 注意：
+- options 只填选项正文，不要带 "A."、"（A）"、"A、" 这类标号，标号由界面按顺序生成。
 - 若原题是解答题/计算题，options 可留空数组。
 - 若原题是判断题，options 填 ["正确", "错误"]（或 ["T", "F"]）。
 - analysis 是可选字段，可以为空字符串。`
@@ -260,7 +262,7 @@ export async function generateVariantsForQuestion(question, kpName = null) {
           question.id,
           v.strategy,
           v.content.trim(),
-          Array.isArray(v.options) ? JSON.stringify(v.options) : null,
+          Array.isArray(v.options) ? JSON.stringify(normalizeOptions(v.options)) : null,
           v.answer.trim(),
           (v.analysis || '').trim(),
           Math.max(1, Math.min(5, v.difficulty || 3)),

@@ -23,6 +23,7 @@ import { classifyQuestionLocally } from './utils/localTagger.js'
 import { finalizeGradingBatch } from './services/gradingFinalizer.js'
 import { NON_RETRYABLE_ERROR_PATTERNS } from './pendingTaskRecovery.js'
 import { isValidImageBuffer, checkImageResolution } from './utils/imageValidator.js'
+import { formatOptionsForPrompt } from './utils/optionText.js'
 import { validateArithmeticAnswer } from './utils/arithmeticAnswerValidator.js'
 
 // ── 多模态切题引擎：几何图处理 ──
@@ -1443,7 +1444,7 @@ const generateMissingAnswers = async (questions, imageBuffer = null) => {
     const promises = batch.map(async (q) => {
       const content = q.content || ''
       const options = q.options || []
-      const fullContent = options.length > 0 ? `${content}\n选项：${options.join('；')}` : content
+      const fullContent = options.length > 0 ? `${content}\n选项：${formatOptionsForPrompt(options)}` : content
       const fingerprint = generateTextFingerprint(content, options, q.question_type)
 
       // 缓存查找

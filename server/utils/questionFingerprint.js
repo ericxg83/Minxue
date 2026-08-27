@@ -1,5 +1,6 @@
 import crypto from 'crypto'
 import sharp from 'sharp'
+import { normalizeOptions } from './optionText.js'
 
 export const PARSER_VERSION = 'v1'
 
@@ -33,8 +34,11 @@ export const generateTextFingerprint = (content, options = [], questionType = 'c
   try {
     const normalizedContent = normalizeQuestionContent(content)
     
-    const sortedOptions = Array.isArray(options) 
-      ? [...options].map(opt => normalizeQuestionContent(opt)).sort() 
+    // 先剥选项标号再规范化：带标号的 ["(A) 3/4"] 与干净的 ["3/4"] 必须落到同一指纹，
+    // 否则同一道题会因识别时是否带标号而重复解析、缓存命中不了
+    const cleanOptions = normalizeOptions(Array.isArray(options) ? options : [])
+    const sortedOptions = Array.isArray(cleanOptions)
+      ? [...cleanOptions].map(opt => normalizeQuestionContent(opt)).sort()
       : []
     
     const fingerprintInput = JSON.stringify({

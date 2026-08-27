@@ -903,7 +903,7 @@ export const buildOCRPrompt = () => `你是一个专业的作业题目识别助�
       "question_id": "唯一标识",
       "question_number": 1,
       "content": "题目内容",
-      "options": ["A", "B", "C", "D"],
+      "options": ["选项A的正文", "选项B的正文", "选项C的正文", "选项D的正文"],
       "answer": "标准答案",
       "student_answer": "学生答案",
       "is_correct": true,
@@ -948,6 +948,11 @@ export const buildOCRPrompt = () => `你是一个专业的作业题目识别助�
    - "fill" 填空题（横线/方框让学生填空的）
    - "judge" 判断题（对/错、√/×）
    - "answer" 解答题（需要写过程或计算的简答/计算题）
+9. options 只填【选项正文】，绝不能带 A/B/C/D 标号。
+   试卷上印的 "（A）3/4"、"(B) 4/3"、"A. apple"、"B、SAS" 等标号必须去掉，
+   只留 ["3/4", "4/3"]、["apple", "SAS"] 这样的正文，按 A、B、C、D 顺序排列。
+   标号由界面按顺序自动生成，options 里再带一遍会显示成 "A. （A）3/4"。
+   判断题的 options 填 ["正确", "错误"]；非选择题 options 填 []。
 
 【数学符号识别规范（必须严格遵守）】
 - content（题干）、answer（答案）、student_answer（学生答案）中的数学式子必须完整、准确地转录，禁止漏写、替换或臆造符号。

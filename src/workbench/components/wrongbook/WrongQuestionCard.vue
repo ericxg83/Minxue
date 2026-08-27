@@ -82,7 +82,7 @@
           <div class="variant-strategy">{{ strategyLabel(v.strategy) }}</div>
           <div class="variant-content">{{ v.content }}</div>
           <div v-if="Array.isArray(v.options) && v.options.length > 0" class="variant-options">
-            <div v-for="(opt, oIdx) in v.options" :key="oIdx" class="variant-option-item">
+            <div v-for="(opt, oIdx) in normalizeOptions(v.options)" :key="oIdx" class="variant-option-item">
               {{ String.fromCharCode(65 + oIdx) }}. {{ opt }}
             </div>
           </div>
@@ -129,6 +129,7 @@ import { ElMessage } from 'element-plus'
 import dayjs from 'dayjs'
 import LazyImage from '../shared/LazyImage.vue'
 import { getQuestionVariants, generateQuestionVariants, getQuestionKnowledge } from '../../../services/apiService'
+import { normalizeOptions } from '../../../utils/optionText'
 
 const STRATEGY_LABELS = {
   change_number: '改数字',

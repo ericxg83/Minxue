@@ -3,18 +3,10 @@ import { motion, AnimatePresence } from 'motion/react'
 import { CheckCircle2, XCircle, ChevronLeft, ChevronRight, Loader2, QrCode, Eye, EyeOff, CircleCheckBig } from 'lucide-react'
 import { getQuestionsByIds, gradeGeneratedExam, batchUpsertWrongQuestionStatus, markGeneratedExamGraded } from '../../services/apiService'
 import { useStudentStore } from '../../store'
+import { normalizeOptions } from '../../utils/optionText'
 import dayjs from 'dayjs'
 
-const isOptionWithLetterPrefix = (opt) => {
-  if (!opt) return false
-  const trimmed = String(opt).trim()
-  return /^[A-Da-d][.、)\)]\s/.test(trimmed)
-}
-
-const formatOption = (opt, index) => {
-  if (isOptionWithLetterPrefix(opt)) return opt
-  return `${String.fromCharCode(65 + index)}. ${opt}`
-}
+const formatOption = (opt, index) => `${String.fromCharCode(65 + index)}. ${opt}`
 
 // 掌握度生命周期映射
 const LIFECYCLE_LABELS = {
@@ -485,7 +477,7 @@ export default function Grading({ paperId, studentId, questionIds, onClose, onCo
               display: 'flex', flexDirection: isShortOptions ? 'row' : 'column',
               gap: isShortOptions ? '24px' : '8px', marginBottom: '16px', flexWrap: 'wrap'
             }}>
-              {currentQuestion.options.map((opt, i) => (
+              {normalizeOptions(currentQuestion.options).map((opt, i) => (
                 <div key={i} style={{ fontSize: 'var(--fs-14)', color: COLORS.text }}>
                   {formatOption(opt, i)}
                 </div>

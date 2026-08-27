@@ -1,6 +1,7 @@
 import { randomUUID } from 'node:crypto'
 import { query, TABLES, transaction } from '../config/neon.js'
 import { checkQuestionCompleteness } from '../utils/questionCompleteness.js'
+import { normalizeOptions } from '../utils/optionText.js'
 
 export const updateTaskStatus = async (taskId, status, result = null) => {
   const updateData = {
@@ -66,7 +67,7 @@ export const createQuestions = async (questions) => {
       task_id: q.task_id,
       student_id: q.student_id,
       content: q.content || null,
-      options: JSON.stringify(q.options || []),
+      options: JSON.stringify(normalizeOptions(q.options || [])),
       answer: q.answer || null,
       student_answer: q.student_answer || null,
       ai_answer: q.ai_answer || null,
@@ -489,7 +490,7 @@ export const cacheQuestion = async (questionData, fingerprint, phash = null, par
         fingerprint,
         questionData.content_type || 'text',
         questionData.content || null,
-        JSON.stringify(questionData.options || []),
+        JSON.stringify(normalizeOptions(questionData.options || [])),
         questionData.answer || null,
         questionData.analysis || null,
         questionData.question_type || 'choice',

@@ -7,6 +7,7 @@ import MathText from '../../components/MathText'
 import { COLORS, PANEL_MIN_HEIGHT, PANEL_TOP_MARGIN, PANEL_START_OFFSET } from './constants'
 import { formatOption, getStatusInfo, DOT_COLORS, StatChip } from './status'
 import { useExamReview } from '../../hooks/useExamReview'
+import { normalizeOptions } from '../../utils/optionText'
 
 // 预览模式：批改结朅后查看题目时，只显示题目预览面板，不渲染底层原卷大图（"试卷层"）
 const PREVIEW_MODE = true
@@ -476,7 +477,7 @@ export default function ExamReview({ task, onClose, onSave }) {
           {/* 选项 */}
           {currentQuestion?.options?.length > 0 && (
             <div style={{ display: 'flex', flexDirection: 'column', gap: '4px', marginBottom: '8px' }}>
-              {currentQuestion.options.map((opt, i) => (
+              {normalizeOptions(currentQuestion.options).map((opt, i) => (
                 <div key={i} style={{
                   fontSize: 'var(--fs-13)', color: COLORS.text,
                   padding: '4px 8px', background: COLORS.background, borderRadius: 'var(--radius-6)'

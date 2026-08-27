@@ -10,6 +10,7 @@ import {
   ShadingType,
 } from 'docx'
 import { LRUCache } from 'lru-cache'
+import { normalizeOptions } from '../utils/optionText.js'
 
 // ============================================================
 // 讲义 Word 导出服务（handoutDocxService）
@@ -211,7 +212,7 @@ function buildBlockParagraphs(block) {
         })
       )
       if (Array.isArray(block.options) && block.options.length > 0) {
-        block.options.forEach((opt, idx) => {
+        normalizeOptions(block.options).forEach((opt, idx) => {
           paragraphs.push(
             new Paragraph({
               indent: { left: 360 },

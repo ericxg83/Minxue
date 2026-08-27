@@ -15,6 +15,7 @@ import {
   TabStopType,
 } from 'docx'
 import { saveAs } from 'file-saver'
+import { normalizeOptions } from './optionText'
 
 /**
  * 将base64图片数据转换为Uint8Array
@@ -45,15 +46,17 @@ function emptyParagraph(spacing = 80) {
  */
 function createOptionsParagraphs(options) {
   if (!options || options.length === 0) return []
-  
+
   const paragraphs = []
   const pairs = []
-  
-  for (let i = 0; i < options.length; i += 2) {
-    if (i + 1 < options.length) {
-      pairs.push([options[i], options[i + 1]])
+  // options 只存正文，标号按顺序生成
+  const labeled = normalizeOptions(options).map((opt, i) => `${String.fromCharCode(65 + i)}. ${opt}`)
+
+  for (let i = 0; i < labeled.length; i += 2) {
+    if (i + 1 < labeled.length) {
+      pairs.push([labeled[i], labeled[i + 1]])
     } else {
-      pairs.push([options[i]])
+      pairs.push([labeled[i]])
     }
   }
   

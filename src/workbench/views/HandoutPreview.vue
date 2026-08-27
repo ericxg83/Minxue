@@ -205,7 +205,7 @@
                   </el-image>
                 </div>
                 <div v-if="block.options?.length" class="question-options">
-                  <div v-for="(opt, oIdx) in block.options" :key="oIdx" class="option-item">
+                  <div v-for="(opt, oIdx) in normalizeOptions(block.options)" :key="oIdx" class="option-item">
                     {{ String.fromCharCode(65 + oIdx) }}. {{ opt }}
                   </div>
                 </div>
@@ -559,7 +559,7 @@
                     </el-image>
                   </div>
                   <div v-if="block.options?.length" class="question-options">
-                    <div v-for="(opt, oIdx) in block.options" :key="oIdx" class="option-item">
+                    <div v-for="(opt, oIdx) in normalizeOptions(block.options)" :key="oIdx" class="option-item">
                       {{ String.fromCharCode(65 + oIdx) }}. {{ opt }}
                     </div>
                   </div>
@@ -748,6 +748,7 @@ import { useRoute, useRouter } from 'vue-router'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { ArrowLeft, ArrowRight, Download, Printer, Document, CopyDocument, MagicStick, Collection } from '@element-plus/icons-vue'
 import { apiRequest, getKnowledgeTree } from '../../services/apiService'
+import { normalizeOptions } from '../../utils/optionText'
 import katex from 'katex'
 import 'katex/dist/katex.min.css'
 
