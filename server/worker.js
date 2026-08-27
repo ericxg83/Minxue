@@ -258,7 +258,7 @@ async function cleanGeometryCrop(buffer) {
  * @param {string} studentId - 学生ID
  * @returns {Promise<string|null>} OSS URL 或 null
  */
-async function cropAndUploadGeometryImage(imageBuffer, bbox, studentId, questionId) {
+export async function cropAndUploadGeometryImage(imageBuffer, bbox, studentId, questionId) {
   try {
     if (!bbox || bbox.width <= 0 || bbox.height <= 0) return null
 
@@ -357,68 +357,135 @@ function denormalizeBbox(bbox, imgW, imgH) {
 }
 
 /**
- * 修正整页 block_coordinates 的「角点形态」——模型把右下角 (x2, y2) 写进了 width/height。
+ * 修正坐标字段的「角点形态」——模型把右下角 (x2, y2) 写进了 width/height。
  *
- * 线上实例（20 题的解直角三角形练习页）：
+ * 线上实例一（block_coordinates，20 题的解直角三角形练习页）：
  *   #1 {x:70,y:140,width:730,height:210}  #2 {x:70,y:210,…,height:280}  #3 …height:350
  * 每题的 height 恰好等于下一题的 y，说明模型输出的是 [x1,y1,x2,y2]。
  * 按宽高解读，第 5 题的框就从 y=420 一路拉到 910（大半页），前端题号框会把
- * 相邻题目和网格配图一起圈进来，裁剪题图同样跟着框错整块。
+ * 相邻题目和网格配图一起圈进来。
  *
- * 单个框无法判别（y+height ≤ 1000 时两种解读都成立），所以按【整页】表决：
- *  必要条件：本页每个框都满足 width>x && height>y（角点解读能成立）；
- *  触发条件（任一）：
- *    a) 有框在宽高解读下越界（x+width>1000 或 y+height>1000，归一化坐标不可能）；
- *    b) 按 y 排序后，多数相邻框满足 height_i ≈ y_(i+1)（角点形态的指纹）。
- * 条件不足就原样保留，避免把正常的宽高框改坏。
+ * 线上实例二（image_bbox，「复习七 三角形(2)」）：
+ *   #10 {x:620,y:25,width:850,height:150} → 按宽高解读 x+width=1470 早已冲出页面，
+ *   按角点解读 (620,25)-(850,150) 恰好精准框住右上角的配图。整页配图全部错位，
+ *   前端「配图」显示的是隔壁题的选项文字。
+ * 同一次输出里 block_coordinates 可能是规范宽高、image_bbox 却是角点形态，
+ * 所以每个字段必须【独立】表决，不能靠 block 的结论推断配图框。
  */
-export function normalizeBlockBoxSemantics(questions) {
-  const boxes = []
-  for (const q of questions || []) {
-    const box = q && q.block_coordinates
-    if (!box || typeof box !== 'object' || Array.isArray(box)) continue
-    const x = Number(box.x), y = Number(box.y), w = Number(box.width), h = Number(box.height)
-    if (![x, y, w, h].every(Number.isFinite)) continue
-    boxes.push({ box, x, y, w, h })
+const BOX_SEMANTIC_ACCESSORS = [
+  ['block_coordinates', (q) => q?.block_coordinates],
+  ['text_bbox', (q) => q?.text_bbox],
+  ['image_bbox', (q) => q?.image_bbox],
+  ['geometry_image.bbox', (q) => q?.geometry_image?.bbox],
+]
+
+/**
+ * 单组同名坐标框的角点形态判别与换算，返回被换算的框数。
+ *
+ * 逐框确定性判据：宽高解读下越界（x+width>1000 或 y+height>1000）在归一化 0-1000
+ * 坐标系里不可能成立，而角点解读自洽 → 该框必是 [x1,y1,x2,y2]，无需表决。
+ *
+ * 整页表决：不越界的框两种解读都成立（如 {x:150,y:150,width:850,height:240}），
+ * 单看无法判别，只能借同页其它框的形态。必要条件是本页每个框角点解读都自洽，
+ * 触发条件是同页出现了确定性越界框，或按 y 排序后多数相邻框满足
+ * height_i ≈ y_(i+1)（角点形态的链式指纹）。条件不足就原样保留，避免改坏正常框。
+ */
+function normalizeBoxGroup(boxes) {
+  if (boxes.length === 0) return 0
+
+  const cornerSelfConsistent = ({ x, y, w, h }) => w - x >= 1 && h - y >= 1
+  const certain = boxes.filter(b => cornerSelfConsistent(b) && (b.x + b.w > 1000 || b.y + b.h > 1000))
+
+  let targets = certain
+  if (boxes.every(cornerSelfConsistent)) {
+    const sorted = [...boxes].sort((a, b) => a.y - b.y)
+    let chained = 0
+    for (let i = 0; i + 1 < sorted.length; i++) {
+      if (Math.abs(sorted[i].h - sorted[i + 1].y) <= 2) chained++
+    }
+    const pairs = sorted.length - 1
+    const chainedForm = pairs >= 3 && chained / pairs >= 0.6
+    if (certain.length > 0 || chainedForm) targets = boxes
   }
-  if (boxes.length === 0) return questions
 
-  const cornerFormValid = boxes.every(({ x, y, w, h }) => w - x >= 1 && h - y >= 1)
-  if (!cornerFormValid) return questions
-
-  const overflows = boxes.some(({ x, y, w, h }) => x + w > 1000 || y + h > 1000)
-
-  const sorted = [...boxes].sort((a, b) => a.y - b.y)
-  let chained = 0
-  for (let i = 0; i + 1 < sorted.length; i++) {
-    if (Math.abs(sorted[i].h - sorted[i + 1].y) <= 2) chained++
-  }
-  const pairs = sorted.length - 1
-  const chainedForm = pairs >= 3 && chained / pairs >= 0.6
-
-  if (!overflows && !chainedForm) return questions
-
-  for (const { box, x, y, w, h } of boxes) {
+  for (const { box, x, y, w, h } of targets) {
     box.width = w - x
     box.height = h - y
   }
-  console.warn(`   ⚠️ [bbox] 本页 ${boxes.length} 个题目框为角点形态(x2/y2 写进 width/height)，已换算为宽高`)
+  return targets.length
+}
+
+export function normalizeBlockBoxSemantics(questions) {
+  const list = Array.isArray(questions) ? questions : []
+  for (const [label, get] of BOX_SEMANTIC_ACCESSORS) {
+    const boxes = []
+    for (const q of list) {
+      let box
+      try { box = get(q) } catch { continue }
+      if (!box || typeof box !== 'object' || Array.isArray(box)) continue
+      const x = Number(box.x), y = Number(box.y), w = Number(box.width), h = Number(box.height)
+      if (![x, y, w, h].every(Number.isFinite)) continue
+      boxes.push({ box, x, y, w, h })
+    }
+    const fixed = normalizeBoxGroup(boxes)
+    if (fixed > 0) {
+      console.warn(`   ⚠️ [bbox] 本页 ${fixed}/${boxes.length} 个 ${label} 为角点形态(x2/y2 写进 width/height)，已换算为宽高`)
+    }
+  }
   return questions
 }
 
 /**
- * 将几何配图 bbox 收紧到本题范围内，避免 AI 把相邻题目（题号/题干/下一道配图）圈进来。
+ * 配图框体检：AI 没真正定位到配图时，会拿题目框机械推一个「题干下方的一条」交差。
+ * 这种框裁出来是纯文字（题干续行 / 选项行），当配图展示等于把错东西端给用户看，
+ * 宁可不显示配图。判据只看归一化 0-1000 坐标，零成本、无需下载原图。
  *
- * 常见错误：AI 返回的 image_bbox 高度过大，纵向跨越到下一题。此处用本题 block_coordinates
- * 作为硬边界做交集裁剪，并对明显异常（高度过大）的框做保守收缩。全部使用 0-1000 归一化坐标。
+ * 线上实例（「复习七 三角形(2)」第 1 页 9 道题，配图集中排成两行、图下标注"第N题图"）：
+ *   #2 block{x:150,y:240,w:700,h:70} → image_bbox{x:150,y:280,w:700,h:30}
+ *   #9 block{x:150,y:750,w:700,h:40} → image_bbox{x:150,y:790,w:700,h:40}
+ * 9 个配图框的左边界和宽度全部与题目框一字不差、且都压在题目框里或紧贴其下方——
+ * 这是从 block 算出来的，不是看着图框出来的。真正定位到的配图框不会有这种巧合
+ * （同任务第 2 页三道题的配图框 x 都与 block 相差数百）。
+ *
+ * 刻意不拿「宽高比过大」当判据：数轴、长条示意图这类合法配图本就极扁，会被连带误杀。
+ */
+export function isDegenerateFigureBox(box, blockBox) {
+  if (!box || typeof box !== 'object') return true
+  const x = Number(box.x), y = Number(box.y)
+  const w = Number(box.width), h = Number(box.height)
+  if (![x, y, w, h].every(Number.isFinite)) return true
+  // 任一边不足页面 2.5%：几何图不可能这么小，属退化框
+  if (w < 25 || h < 25) return true
+
+  if (blockBox && typeof blockBox === 'object') {
+    const bx = Number(blockBox.x), by = Number(blockBox.y)
+    const bw = Number(blockBox.width), bh = Number(blockBox.height)
+    if ([bx, by, bw, bh].every(Number.isFinite) && bw > 0 && bh > 0
+      && Math.abs(x - bx) <= 2 && Math.abs(w - bw) <= 2 && y >= by - 2) {
+      return true
+    }
+  }
+  return false
+}
+
+/**
+ * 配图 bbox 收紧：只在框大得异常时用本题 block_coordinates 兜边界。
+ *
+ * 早先这里是无条件与 block 求交集，代价太大：
+ *  - 「多题配图集中排成一行」的版式（图下标注"第N题图"）里，配图本就落在题目
+ *    block 之外，甚至比题干起始位置更靠上（右上角配图）。无条件求交会把配图切掉
+ *    大半，或交集为空。
+ *  - 交集为空时旧代码退回 block 自身范围，而 block 是题干文字区——等于把选项文字
+ *    裁出来当「配图」展示，比不给配图更误导人。
+ * 角点形态修正（normalizeBlockBoxSemantics）落地后，"配图框纵向跨到下一题"的主因
+ * 已经消失，所以这里只保留对超大框的兜底。
  *
  * @param {Object} imageBbox - 配图 bbox（归一化 0-1000）
- * @param {Object|null} blockBox - 本题 block_coordinates（归一化 0-1000），无则返回原值
- * @returns {Object} 收紧后的 bbox（归一化 0-1000）
+ * @param {Object|null} blockBox - 本题 block_coordinates（归一化 0-1000）
+ * @returns {Object|null} 收紧后的 bbox；无法定位配图时返回 null
  */
-function clampImageBboxToBlock(imageBbox, blockBox) {
-  if (!imageBbox || typeof imageBbox !== 'object') return imageBbox
-  if (!blockBox || typeof blockBox !== 'object') return imageBbox
+export function clampImageBboxToBlock(imageBbox, blockBox) {
+  if (!imageBbox || typeof imageBbox !== 'object') return null
 
   const num = (v, d = 0) => (typeof v === 'number' && isFinite(v) ? v : d)
 
@@ -426,47 +493,39 @@ function clampImageBboxToBlock(imageBbox, blockBox) {
   const iy = num(imageBbox.y)
   const iw = num(imageBbox.width)
   const ih = num(imageBbox.height)
-  if (iw <= 0 || ih <= 0) return imageBbox
+  if (iw <= 0 || ih <= 0) return null
+
+  // 只有明显失控的框才需要 block 兜边界：纵向过半页，或面积超过页面 40%
+  const oversized = ih > 500 || iw * ih > 400000
+  if (!oversized || !blockBox || typeof blockBox !== 'object') return { ...imageBbox }
 
   const bx = num(blockBox.x)
   const by = num(blockBox.y)
   const bw = num(blockBox.width)
   const bh = num(blockBox.height)
-  if (bw <= 0 || bh <= 0) return imageBbox
+  if (bw <= 0 || bh <= 0) return { ...imageBbox }
 
-  // 与本题 block 求交集（本题 block 略放宽一点，避免把贴边的顶点字母裁掉）
+  // 与本题 block 求交集（block 略放宽，避免把贴边的顶点字母裁掉）
   const pad = 10 // 归一化 0-1000 下约 1%
-  const blkLeft = bx - pad
-  const blkTop = by - pad
-  const blkRight = bx + bw + pad
-  const blkBottom = by + bh + pad
+  const left = Math.max(ix, bx - pad)
+  const top = Math.max(iy, by - pad)
+  const right = Math.min(ix + iw, bx + bw + pad)
+  const bottom = Math.min(iy + ih, by + bh + pad)
 
-  const left = Math.max(ix, blkLeft)
-  const top = Math.max(iy, blkTop)
-  const right = Math.min(ix + iw, blkRight)
-  const bottom = Math.min(iy + ih, blkBottom)
-
-  let nx = left
-  let ny = top
-  let nw = right - left
-  let nh = bottom - top
-
-  // 交集无效（AI 框完全在 block 之外）→ 保底用 block 自身范围，避免裁到别处
-  if (nw <= 0 || nh <= 0) {
-    nx = bx; ny = by; nw = bw; nh = bh
-  }
+  // 交集无效说明 AI 的框和本题完全对不上 → 判为未定位到配图，绝不退回 block 自身
+  if (right - left <= 0 || bottom - top <= 0) return null
 
   const clamp01000 = (v) => Math.max(0, Math.min(1000, Math.round(v)))
   const result = {
     ...imageBbox,
-    x: clamp01000(nx),
-    y: clamp01000(ny),
-    width: clamp01000(nw),
-    height: clamp01000(nh),
+    x: clamp01000(left),
+    y: clamp01000(top),
+    width: clamp01000(right - left),
+    height: clamp01000(bottom - top),
   }
 
   if (result.x !== ix || result.y !== iy || result.width !== iw || result.height !== ih) {
-    console.log(`   [几何图] bbox 越界收紧: ${JSON.stringify({ x: ix, y: iy, width: iw, height: ih })} → ${JSON.stringify({ x: result.x, y: result.y, width: result.width, height: result.height })}`)
+    console.log(`   [几何图] 超大 bbox 按题目框收紧: ${JSON.stringify({ x: ix, y: iy, width: iw, height: ih })} → ${JSON.stringify({ x: result.x, y: result.y, width: result.width, height: result.height })}`)
   }
   return result
 }
@@ -5171,7 +5230,17 @@ export const processTask = async (job) => {
           }
           const pageNo = q.page_number || pages[0].pageNumber
           const dims = pageDims.get(pageNo)
+          // 退化框（从题目框机械推出来的"题干下方一条"）裁出来是选项/题干文字，
+          // 当配图展示纯属误导 → 宁可不给配图
+          if (isDegenerateFigureBox(bbox, q.block_coordinates)) {
+            console.log(`   ⚠️ [几何图] 第 ${q.question_number} 题配图框未定位到图形(${JSON.stringify(bbox)})，跳过裁剪`)
+            return null
+          }
           const safeBbox = clampImageBboxToBlock(bbox, q.block_coordinates)
+          if (!safeBbox) {
+            console.log(`   ⚠️ [几何图] 第 ${q.question_number} 题配图框与题目完全对不上(${JSON.stringify(bbox)})，跳过裁剪`)
+            return null
+          }
           const pixelBbox = dims ? denormalizeBbox(safeBbox, dims.w, dims.h) : safeBbox
           const cacheKey = `${pageNo}:${JSON.stringify(safeBbox)}`
           return { q, safeBbox, pixelBbox, cacheKey, imageType, imageBbox, pageNo }

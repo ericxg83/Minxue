@@ -915,7 +915,7 @@ export const buildOCRPrompt = () => `你是一个专业的作业题目识别助�
       "block_coordinates": { "x": 0, "y": 0, "width": 1000, "height": 1000 },
       "text_bbox": { "x": 0, "y": 0, "width": 1000, "height": 600 },
       "image_type": "geometry/chart/none",
-      "image_bbox": null,
+      "image_bbox": null,  // 有配图时填 { "x": 640, "y": 180, "width": 200, "height": 130 }（只框图形本身）
       "geometry_image": null
     }
   ]
@@ -925,14 +925,25 @@ export const buildOCRPrompt = () => `你是一个专业的作业题目识别助�
 1. 只返回合法 JSON。
 2. 没有配图时 image_type 填 "none"，image_bbox 和 geometry_image 填 null。
 3. 坐标统一使用 0-1000 的整数，相对整张图片归一化。
-4. 如果题目无法识别，不要编造内容。
-5. 识别老师批改痕迹（重要）：
+   ⚠️ block_coordinates / text_bbox / image_bbox 三个框的 width/height 都必须是【宽和高】，
+   不是右下角坐标。右下角 = x+width、y+height。把右下角的 x2/y2 填进 width/height，
+   会让框整体拉伸出页面，前端定位和配图裁剪全部错位。
+4. image_bbox 是【配图本身】的外接矩形，只框图形（几何图、函数图、统计图表、示意图），
+   不要把题干文字、选项文字、答题横线框进去。
+   ⚠️ 常见排版陷阱：很多试卷把好几道题的配图集中排成一行，图的正下方标注"第1题图"
+   "第2题图"…，而不是把图放在各自题目的正下方。遇到这种排版，必须按下方标注找到
+   属于本题的那一格图，只框那一格（例如第2题就框标注"第2题图"的那一张），
+   绝不能框题干下面的那条文字，也不要把整行图全框进来。
+   如果确实找不到本题的配图，image_type 填 "none"、image_bbox 填 null，
+   不要用题干区域的坐标凑一个框——凑出来的框裁出的是文字，会被当成配图展示给学生。
+5. 如果题目无法识别，不要编造内容。
+6. 识别老师批改痕迹（重要）：
    - 若某题旁出现老师用红笔（或与印刷/学生墨迹不同的笔）打的"√/✓/✔"，manual_mark 填 "correct"，has_manual_checkmark 设为 true；student_answer 必须填学生实际笔迹（以学生墨迹为准，剔除老师的红勾）。
    - 若出现老师打的"×/✗/圈错/错号"，manual_mark 必须填 "wrong"；这表示老师已判错，绝不能当作学生答案或忽略。
    - 若出现"半对/部分正确"，manual_mark 填 "partial"；看不清或无法确定属于当前题时填 "uncertain"；没有教师批改痕迹填 "none"。
    - 只在能明确辨认出独立批改标记时才输出 correct/wrong/partial，宁可填 uncertain 也不要猜测。
-6. 判断题（对/错）的答案或学生答案若是"√/✗"符号，直接填入对应符号即可。
-7. question_type 必须从四个值中选一个填空，每题只能填一个值，绝不能填 "choice/fill/judge/answer" 这种枚举字符串：
+7. 判断题（对/错）的答案或学生答案若是"√/✗"符号，直接填入对应符号即可。
+8. question_type 必须从四个值中选一个填空，每题只能填一个值，绝不能填 "choice/fill/judge/answer" 这种枚举字符串：
    - "choice" 选择题（有 A/B/C/D 选项的）
    - "fill" 填空题（横线/方框让学生填空的）
    - "judge" 判断题（对/错、√/×）
