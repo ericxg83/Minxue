@@ -1,13 +1,18 @@
 import { useState } from 'react'
-import { CheckCircle2, ChevronRight, ClipboardCheck, FileText, Loader2 } from 'lucide-react'
+import { CheckCircle2, ChevronRight, ClipboardCheck, FileText, Loader2, Search } from 'lucide-react'
 import { motion } from 'motion/react'
 import dayjs from 'dayjs'
 import EmptyState from '../components/EmptyState'
 import ExamDetailModal from '../components/ExamDetailModal'
-import { MobileList } from '../features/mobile/MobilePrimitives'
+import { MobileList, MobileSegmentedTabs, MobileTextAction } from '../features/mobile/MobilePrimitives'
 
 const stage = e => e.status === 'graded' ? 'completed' : ['submitted', 'grading'].includes(e.status) ? 'in_progress' : 'pending'
 const labels = { pending: '待完成', in_progress: '正在整理结果', completed: '已完成' }
+const filterMatch = {
+  all: () => true,
+  pending: e => stage(e) !== 'completed',
+  completed: e => stage(e) === 'completed',
+}
 const total = e => e.question_ids?.length || e.total_count || 0
 const time = v => dayjs(v).isValid() ? dayjs(v).format('MM/DD HH:mm') : '最近创建'
 
@@ -40,9 +45,16 @@ function ExamRow({ exam, onOpen }) {
 
 export default function ExamPageV2({ studentExams, onReprint, onDelete, onOpenResult, onOpenWrongBook }) {
   const [detailExam, setDetailExam] = useState(null)
+  const [filter, setFilter] = useState('all')
   const exams = (Array.isArray(studentExams) ? studentExams : [])
     .slice()
     .sort((a, b) => new Date(b.created_at || 0) - new Date(a.created_at || 0))
+  const tabs = [
+    { id: 'all', label: '全部', count: exams.length },
+    { id: 'pending', label: '待完成', count: exams.filter(e => stage(e) !== 'completed').length },
+    { id: 'completed', label: '已完成', count: exams.filter(e => stage(e) === 'completed').length },
+  ]
+  const visible = exams.filter(filterMatch[filter])
   return <motion.div initial={{ opacity: 0, x: 16 }} animate={{ opacity: 1, x: 0 }} className='mobile-page mx-auto w-full max-w-lg px-4 pb-6 pt-5'>
     {!exams.length
       ? <EmptyState icon={FileText} title='还没有组卷记录' description='在错题本挑选错题，或一键生成重点重练卷' className='py-16'>
@@ -55,11 +67,20 @@ export default function ExamPageV2({ studentExams, onReprint, onDelete, onOpenRe
             >去错题本挑题</button>
           )}
         </EmptyState>
-      : <MobileList>
-          {exams.map((exam, index) => (
-            <ExamRow key={exam.id || index} exam={exam} onOpen={setDetailExam} />
-          ))}
-        </MobileList>}
+      : <>
+        <MobileSegmentedTabs items={tabs} value={filter} onChange={setFilter} ariaLabel='组卷完成状态' />
+        {!visible.length
+          ? <EmptyState icon={filter === 'completed' ? CheckCircle2 : Search} className='py-16'
+              title={filter === 'completed' ? '还没有已完成的试卷' : '没有待完成的试卷'}
+              description={filter === 'completed' ? '重练卷批改完成后会显示在这里' : '所有试卷都已批改完成'}>
+            <MobileTextAction className='mt-3' onClick={() => setFilter('all')}>查看全部试卷</MobileTextAction>
+          </EmptyState>
+          : <MobileList>
+              {visible.map((exam, index) => (
+                <ExamRow key={exam.id || index} exam={exam} onOpen={setDetailExam} />
+              ))}
+            </MobileList>}
+      </>}
     {detailExam && (
       <ExamDetailModal
         exam={detailExam}
