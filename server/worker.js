@@ -14,6 +14,7 @@ import { AI_CONFIG, getAIHeaders, buildOCRPrompt, buildAnswerGenerationPrompt, g
 import { updateTaskStatus, createQuestions, batchUpdateQuestionTags, addWrongQuestions, createJudgement, updateQuestionAnswer, markAnswerException, findCachedQuestionByFingerprint, cacheQuestion, incrementQuestionUseCount, updateQuestionCacheId, createQuestionAsset, lookupWorksheetAnswer, getWorksheetAnswersBySection, deleteQuestionsByTaskId, bulkLookupResourceAnswers, getResourceAnswersBySection, getResourceById, addSelfContainedWrongQuestion } from './services/neonService.js'
 import { uploadImage } from './services/ossService.js'
 import { cropAndUploadQuestionRegion } from './utils/cropAndUpload.js'
+import { refineFigureBoxOnPage } from './utils/figureRegionRefiner.js'
 import { generateTextFingerprint, generatePHash, PARSER_VERSION, TEXT_SIMILARITY_THRESHOLD } from './utils/questionFingerprint.js'
 import { uploadFilesWithRetry } from './services/uploadRetryManager.js'
 import { judgeAnswer, normalizeQuestionType, normalizeChoiceAnswer } from './services/judgeService.js'
@@ -88,7 +89,7 @@ function estimateSkewAngle(grayRaw, w, h, maxDeg = 6, step = 0.5) {
  * @param {number} h
  * @returns {Uint8Array}
  */
-function estimatePaperBackground(grayRaw, w, h) {
+export function estimatePaperBackground(grayRaw, w, h) {
   const GRID = 32 // 背景网格分辨率（cell 越大越宽容线条，越平滑阴影）
   const cw = Math.ceil(w / GRID)
   const ch = Math.ceil(h / GRID)
@@ -253,6 +254,14 @@ async function cleanGeometryCrop(buffer) {
 
 /**
  * 裁剪几何图并上传到 OSS
+ *
+ * 模型给的 bbox 只是"大概在这一块"：并排排版的配图行里它会横向压到隔壁题的图，
+ * 纵向拖进图注（"第N题图"）和题干文字。所以先用像素分割把框收紧到单张配图
+ * （refineFigureBoxOnPage），收紧后不再需要原来那 20% padding —— 那个 padding
+ * 正是把图注和隔壁配图一起圈进来的元凶。
+ * 收紧失败说明这块根本不是图形（模型把题干当配图了），此时不给配图：
+ * 展示一张纯文字的"配图"比不展示更误导人。FIGURE_REFINE=0 可退回旧行为。
+ *
  * @param {Buffer} imageBuffer - 原始试卷图片 buffer
  * @param {Object} bbox - {x, y, width, height}
  * @param {string} studentId - 学生ID
@@ -262,20 +271,38 @@ export async function cropAndUploadGeometryImage(imageBuffer, bbox, studentId, q
   try {
     if (!bbox || bbox.width <= 0 || bbox.height <= 0) return null
 
-    // ── 1. padding 20% ──
-    // 原始固定 padding=25px 在小图（~200px）上不够 → AI 识别困难。
-    // 改为按 bbox 尺寸动态计算 20% padding，保证小图有足够上下文。
     const imgW = await getImageWidth(imageBuffer)
     const imgH = await getImageHeight(imageBuffer)
-    const padX = Math.round(bbox.width * 0.20)
-    const padY = Math.round(bbox.height * 0.20)
 
-    const left = Math.max(0, bbox.x - padX)
-    const top = Math.max(0, bbox.y - padY)
-    const right = Math.min(bbox.x + bbox.width + padX, imgW)
-    const bottom = Math.min(bbox.y + bbox.height + padY, imgH)
-    let width = right - left
-    let height = bottom - top
+    let left, top, width, height
+    let refined = null
+    if (process.env.FIGURE_REFINE !== '0') {
+      try {
+        refined = await refineFigureBoxOnPage(imageBuffer, bbox, estimatePaperBackground)
+      } catch (e) {
+        console.warn(`  ⚠️ [几何图] 区域收紧异常，回退模型框: ${e.message}`)
+      }
+      if (!refined) {
+        console.log(`   ⚠️ [几何图] ${questionId}: 该区域分不出图形（多为把题干/选项当配图），不给配图`)
+        return null
+      }
+    }
+
+    if (refined) {
+      // 收紧结果已含 3% 内边距，直接用
+      left = refined.x
+      top = refined.y
+      width = refined.width
+      height = refined.height
+    } else {
+      // 旧行为：按 bbox 尺寸动态计算 20% padding（小图给 Vision 模型留上下文）
+      const padX = Math.round(bbox.width * 0.20)
+      const padY = Math.round(bbox.height * 0.20)
+      left = Math.max(0, bbox.x - padX)
+      top = Math.max(0, bbox.y - padY)
+      width = Math.min(bbox.x + bbox.width + padX, imgW) - left
+      height = Math.min(bbox.y + bbox.height + padY, imgH) - top
+    }
 
     if (width <= 0 || height <= 0) return null
 
