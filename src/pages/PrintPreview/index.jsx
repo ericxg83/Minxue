@@ -6,7 +6,7 @@ import { useStudentStore, useWrongQuestionStore, useUIStore, useExamStore } from
 import { mockWrongQuestions } from '../../data/mockData'
 import { createGeneratedExam, getGeneratedExamsByStudent, getQuestionsByIds } from '../../services/apiService'
 import dayjs from 'dayjs'
-import { saveAs } from 'file-saver'
+import { saveFileToDevice } from '../../utils/nativeDownload'
 import { exportWrongBookPDF } from '../../utils/wrongBookPdfExporter'
 import {
   buildPaperBody,
@@ -59,6 +59,7 @@ export default function PrintPreview({ onClose, questions: propQuestions, existi
   const [generatingPdf, setGeneratingPdf] = useState(false)
   const [pdfBlob, setPdfBlob] = useState(null)
   const [pdfDownloading, setPdfDownloading] = useState(false)
+  const [pdfStage, setPdfStage] = useState('') // 下载/打印过程中的阶段文案，消除"以为卡住"
   const [generatedExamId, setGeneratedExamId] = useState(validExistingId || '')
   const examIdRef = useRef(validExistingId || '') // 同步保存组卷ID，避免导出时 state 未刷新
   const [savedExamName, setSavedExamName] = useState('') // 保存后的带序号最终名，供展示/文件名统一使用
@@ -98,6 +99,15 @@ export default function PrintPreview({ onClose, questions: propQuestions, existi
   useEffect(() => {
     ensureEnriched()
     // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [])
+
+  // 预热渲染服务：Render 免费实例会休眠、Chromium 冷启动需数秒。进预览页即后台打一次
+  // 健康检查，趁用户还在看预览时把它唤醒，真正点"下载 PDF"时就不用等冷启动。
+  useEffect(() => {
+    const API_BASE = import.meta.env.VITE_API_URL || '/api'
+    const ctl = new AbortController()
+    fetch(`${API_BASE}/exam-pdf/health`, { signal: ctl.signal }).catch(() => {})
+    return () => ctl.abort()
   }, [])
 
   // A4 页面按真实宽度(794px)渲染，再缩放适配视口宽度（手机端完整呈现，不再挤压变形）
@@ -326,35 +336,28 @@ export default function PrintPreview({ onClose, questions: propQuestions, existi
     await handleExportPDF()
   }
 
+  // 只负责"渲染并返回 blob"，加载态与错误提示由调用方统一编排（保证从点击第一刻就有反馈）
   const generatePDF = async (questionsOverride) => {
-    if (generatingPdf) return
-    setGeneratingPdf(true)
     setPdfBlobUrl('')
     setPdfBlob(null)
     const examName = getExamName()
     const questions = questionsOverride || previewRef.current || previewQuestions
-    try {
-      // 统一走公共导出引擎（数据标准化 + 唯一渲染出口），与周报告再测卷/后台重练卷一致
-      const result = await exportWrongBookPDF({
-        studentId: currentStudent?.id,
-        studentName: currentStudent?.name || '',
-        questions,
-        title: `${currentStudent?.name || '学生'} - ${examName}`,
-        filename: `${currentStudent?.name || 'student'}_${examName}_${dayjs().format('YYYYMMDD_HHmm')}`,
-        showAnswers: false,
-        qrContent: getQrContent(),
-        returnPdfBlob: true,
-      })
-      if (result) {
-        setPdfBlobUrl(result.blobUrl)
-        setPdfBlob(result.pdfBlob)
-        return result
-      }
-    } catch (error) {
-      console.error('PDF生成失败:', error)
-      Toast.show({ icon: 'fail', content: 'PDF生成失败，请重试' })
-    } finally {
-      setGeneratingPdf(false)
+    // 统一走公共导出引擎（数据标准化 + 唯一渲染出口），与周报告再测卷/后台重练卷一致
+    const result = await exportWrongBookPDF({
+      studentId: currentStudent?.id,
+      studentName: currentStudent?.name || '',
+      questions,
+      title: `${currentStudent?.name || '学生'} - ${examName}`,
+      filename: `${currentStudent?.name || 'student'}_${examName}_${dayjs().format('YYYYMMDD_HHmm')}`,
+      showAnswers: false,
+      qrContent: getQrContent(),
+      returnPdfBlob: true,
+    })
+    if (result) {
+      const url = result.blobUrl || (result.pdfBlob ? URL.createObjectURL(result.pdfBlob) : '')
+      setPdfBlobUrl(url)
+      setPdfBlob(result.pdfBlob)
+      return { ...result, blobUrl: url }
     }
     return null
   }
@@ -411,56 +414,58 @@ export default function PrintPreview({ onClose, questions: propQuestions, existi
 
   const handleExportPDF = async () => {
     if (generatingPdf) return
-    const saved = await saveGeneratedExamRecord()
-    const questions = await ensureEnriched()
-    const result = await generatePDF(questions)
-    if (result && result.pdfBlob) {
-      const examName = getExamName()
-      const filename = `${currentStudent?.name || 'student'}_${examName}_${dayjs().format('YYYYMMDD_HHmm')}.pdf`
-      saveAs(result.pdfBlob, filename)
-      if (saved) Toast.show({ icon: 'success', content: '已保存到组卷历史' })
+    setGeneratingPdf(true)
+    setPdfStage('正在整理题目…')
+    let saved = false
+    let questions
+    try {
+      saved = await saveGeneratedExamRecord()
+      setPdfStage('正在加载试卷数据…')
+      questions = await ensureEnriched()
+      setPdfStage('正在生成 PDF，请稍候…')
+      const result = await generatePDF(questions)
+      if (result && result.pdfBlob) {
+        setPdfStage('正在保存到文件…')
+        const examName = getExamName()
+        const filename = `${currentStudent?.name || 'student'}_${examName}_${dayjs().format('YYYYMMDD_HHmm')}.pdf`
+        const { savedTo } = await saveFileToDevice(result.pdfBlob, filename)
+        Toast.show({ icon: 'success', content: saved ? '已下载，并存入组卷历史' : '已下载到设备文件', duration: 2600 })
+      }
+    } catch (error) {
+      console.error('PDF生成失败:', error)
+      Toast.show({ icon: 'fail', content: error?.message || 'PDF生成失败，请重试', duration: 3200 })
+    } finally {
+      setGeneratingPdf(false)
+      setPdfStage('')
     }
   }
 
-  const handleDirectPrint = () => {
+  const handleDirectPrint = async () => {
     if (generatingPdf || pdfDownloading) return
-    const doPrint = async () => {
-      const saved = await saveGeneratedExamRecord()
+    setGeneratingPdf(true)
+    setPdfStage('正在整理题目…')
+    let saved = false
+    try {
+      saved = await saveGeneratedExamRecord()
+      setPdfStage('正在加载试卷数据…')
       const questions = await ensureEnriched()
       let blobUrl = pdfBlobUrl
       if (!blobUrl) {
-        setGeneratingPdf(true)
-        const examName = getExamName()
-        try {
-          const result = await exportWrongBookPDF({
-            studentId: currentStudent?.id,
-            studentName: currentStudent?.name || '',
-            questions,
-            title: `${currentStudent?.name || '学生'} - ${examName}`,
-            filename: `${currentStudent?.name || 'student'}_${examName}_${dayjs().format('YYYYMMDD_HHmm')}`,
-            showAnswers: false,
-            qrContent: getQrContent(),
-            returnPdfBlob: true,
-          })
-          if (result) {
-            blobUrl = result.blobUrl || (result.pdfBlob ? URL.createObjectURL(result.pdfBlob) : "")
-            setPdfBlobUrl(blobUrl)
-            setPdfBlob(result.pdfBlob)
-          }
-        } catch (e) {
-          console.error('PDF生成失败:', e)
-          Toast.show({ icon: 'fail', content: 'PDF生成失败' })
-          setGeneratingPdf(false)
-          return
-        }
-        setGeneratingPdf(false)
+        setPdfStage('正在生成 PDF，请稍候…')
+        const result = await generatePDF(questions)
+        blobUrl = result?.blobUrl
       }
       if (blobUrl) {
         window.open(blobUrl, '_blank')
         if (saved) Toast.show({ icon: 'success', content: '已保存到组卷历史' })
       }
+    } catch (error) {
+      console.error('PDF生成失败:', error)
+      Toast.show({ icon: 'fail', content: error?.message || 'PDF生成失败，请重试', duration: 3200 })
+    } finally {
+      setGeneratingPdf(false)
+      setPdfStage('')
     }
-    doPrint()
   }
 
   // 组件卸载时清理 blob URL 防止内存泄漏
@@ -557,7 +562,7 @@ export default function PrintPreview({ onClose, questions: propQuestions, existi
                 animation: 'pdf-spin 0.8s linear infinite'
               }}></span>
               <style>{`@keyframes pdf-spin{to{transform:rotate(360deg)}}`}</style>
-              PDF 生成中...
+              {pdfStage || 'PDF 生成中...'}
             </div>
           ) : (
             <>

@@ -238,21 +238,34 @@ export async function exportServerPDF({ studentId, studentName, questions, html,
     console.log(`[serverPdfExporter] 使用调用方传入的 HTML（模式 B），${(finalHtml.length / 1024).toFixed(1)}KB`)
   }
 
-  // 2. POST 给后端 Playwright
+  // 2. POST 给后端 Playwright（带超时：后端冷启动过慢时快速失败，交上层提示重试，
+  //    而不是无限挂着让用户以为"卡住了"）
   const API_BASE = import.meta.env.VITE_API_URL || '/api'
-  const resp = await fetch(`${API_BASE}/exam-pdf`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({
-      html: finalHtml,
-      filename: `${filename || '错题重练'}.pdf`,
-      pdfOptions: {
-        format: 'A4',
-        printBackground: true,
-        margin: { top: '12mm', bottom: '12mm', left: '12mm', right: '12mm' },
-      },
-    }),
-  })
+  const PDF_RENDER_TIMEOUT_MS = 60000
+  const abort = new AbortController()
+  const timer = setTimeout(() => abort.abort(), PDF_RENDER_TIMEOUT_MS)
+  let resp
+  try {
+    resp = await fetch(`${API_BASE}/exam-pdf`, {
+      method: 'POST',
+      signal: abort.signal,
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        html: finalHtml,
+        filename: `${filename || '错题重练'}.pdf`,
+        pdfOptions: {
+          format: 'A4',
+          printBackground: true,
+          margin: { top: '12mm', bottom: '12mm', left: '12mm', right: '12mm' },
+        },
+      }),
+    })
+  } catch (e) {
+    if (e?.name === 'AbortError') throw new Error('PDF 服务响应超时，请稍后重试')
+    throw e
+  } finally {
+    clearTimeout(timer)
+  }
 
   if (!resp.ok) {
     const errText = await resp.text().catch(() => '')

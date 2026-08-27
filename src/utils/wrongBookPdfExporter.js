@@ -154,6 +154,10 @@ export async function exportWrongBookPDF({
       return { ...result, pdfBlob: result.pdfBlob, filename: baseFile, mode: 'server', message: '服务端 Playwright 渲染完成，已下载 PDF' }
     } catch (serverErr) {
       console.error('[WrongBookPdfExporter] ❌ 服务端 Playwright 渲染失败:', serverErr?.message || serverErr)
+      // 「下载 PDF」路径（调用方拿 blob 自行存盘）不降级到浏览器打印：
+      // window.print() 在 Capacitor WebView 里会弹出系统打印框，被用户误当成"下载却弹窗"。
+      // 直接抛出，由调用方 Toast 提示重试。只有"就是要打印"的场景才走下面的打印兜底。
+      if (returnPdfBlob) throw serverErr
       try {
         const { Toast } = await import('antd-mobile')
         Toast.show({
