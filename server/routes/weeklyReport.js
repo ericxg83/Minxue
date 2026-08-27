@@ -76,6 +76,11 @@ router.get('/:studentId', async (req, res) => {
     )
 
     // 5b. 获取可用于组卷的错题 question_id（仅含已完成题目，排除已掌握）
+    //     排序=学习价值优先，供前端截断为「本周重点重练卷」：
+    //       1) 学科轮转（各学科错得最多的先入选），避免单科题海霸屏其它薄弱科；
+    //       2) 同一轮内错误次数（error_count）多的优先；
+    //       3) 最后按最近错题。
+    //     返回全量有序列表（ID 体积极小），由前端只取前 N 道生成再测卷。
     const { rows: wrongIdRows } = await query(
       `SELECT wq.question_id
       FROM ${TABLES.WRONG_QUESTIONS} wq
@@ -84,7 +89,13 @@ router.get('/:studentId', async (req, res) => {
         AND wq.added_at >= $2
         AND wq.added_at < $3
         AND (wq.lifecycle_status IS NULL OR wq.lifecycle_status != 'mastered')
-      ORDER BY wq.added_at DESC`,
+      ORDER BY
+        ROW_NUMBER() OVER (
+          PARTITION BY COALESCE(NULLIF(q.subject, ''), '其他')
+          ORDER BY COALESCE(wq.error_count, 1) DESC, wq.added_at DESC
+        ) ASC,
+        COALESCE(wq.error_count, 1) DESC,
+        wq.added_at DESC`,
       [studentId, periodStart, periodEnd]
     )
 

@@ -35,6 +35,13 @@ const BRAND = {
 }
 
 /**
+ * 本周重点重练卷题量上限。
+ * 一份报告不该把本周全部错题（重周可能 100+ 道）都塞进重练卷——学生做不完、无重点、无效果。
+ * 后端已按「学科均衡 + 错误次数」排序，这里只取最该重练的前 N 道；其余仍在错题本可日常安排。
+ */
+const RETRY_CAP = 20
+
+/**
  * 品牌 Logo Lockup：蓝绿色牵手路径标 + 中英文字号
  * @param {Object} opt
  * @param {boolean} opt.compact - 内页紧凑版（较小字号）
@@ -586,7 +593,7 @@ async function renderDiagnosisFullHTML(reportData) {
  * 若 createGeneratedExam 失败（极端情况），仍返回已渲染的 HTML（无二维码），
  * 不阻塞周报生成 —— 二维码缺失不影响周报核心内容。
  */
-async function renderExamFullHTMLForReport(studentId, studentName, wrongQuestionIds, examName) {
+async function renderExamFullHTMLForReport(studentId, studentName, wrongQuestionIds, examName, totalCount = 0) {
   if (!wrongQuestionIds || wrongQuestionIds.length === 0) return ''
 
   // 1. 拉取完整题目数据
@@ -610,8 +617,13 @@ async function renderExamFullHTMLForReport(studentId, studentName, wrongQuestion
   // 3. 渲染 HTML（含可选二维码）
   // embedPaperCssInBody：把 buildPaperCSS scoped 内嵌到 body，合并周报时样式随 body 保留，
   // 排版与移动端「生成试卷」（PrintPreview）完全一致
+  // 标题如实标注「精选 N / 本周共 M」，让家长知道这是优先重练的一小批、其余在错题本。
+  const shown = fullQs.length
+  const titleSuffix = totalCount > shown
+    ? `（精选 ${shown} 题 · 本周共 ${totalCount} 题）`
+    : `（${shown} 题）`
   return await renderFullHTML({
-    title: studentName + ' - 本周错题再测',
+    title: studentName + ' - 本周错题再测' + titleSuffix,
     studentName,
     questions: fullQs,
     showAnswers: false,
@@ -681,13 +693,17 @@ export async function generateWeeklyReport(studentId, { mode = 'week', offset = 
 
   // 2 & 3. 并行渲染：诊断报告 + 错题再测卷（两个都要建 hidden iframe + 跑 KaTeX + 等字体，可并行）
   const studentName = reportData.student?.name || '学生'
-  const wrongIds = reportData.stats?.wrongQuestionIds || []
+  // 错题再测卷只取「本周最该重练」的前 RETRY_CAP 道（后端已按学科均衡 + 错误次数排序）。
+  // retryTotal 保留本周可重练错题总数，用于报告里如实标注「精选 N / 本周共 M」。
+  const allWrongIds = reportData.stats?.wrongQuestionIds || []
+  const retryTotal = allWrongIds.length
+  const wrongIds = allWrongIds.slice(0, RETRY_CAP)
   const examName = `错题再测-${dayjs().format('MMDD')}`
 
   const [diagnosisHTML, examHTML] = await Promise.all([
     renderDiagnosisFullHTML(reportData),
     wrongIds.length > 0
-      ? renderExamFullHTMLForReport(studentId, studentName, wrongIds, examName)
+      ? renderExamFullHTMLForReport(studentId, studentName, wrongIds, examName, retryTotal)
           .catch((e) => {
             console.warn('[weeklyReport] 错题再测卷渲染失败，仅返回诊断报告:', e)
             return ''
