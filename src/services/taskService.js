@@ -48,6 +48,7 @@ export const taskService = {
     if (options.worksheetId) formData.append('worksheetId', options.worksheetId)
     if (options.resourceId) formData.append('resourceId', options.resourceId)
     if (options.subject) formData.append('subject', options.subject)
+    if (options.taskName) formData.append('taskName', options.taskName)
 
     // 诊断：检查 formData 实际内容
     const formDataEntries = []

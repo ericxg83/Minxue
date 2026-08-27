@@ -194,8 +194,8 @@ app.post('/api/upload', upload.single('files'), async (req, res) => {
 // Upload images and create tasks (with validation + retry pipeline)
 app.post('/api/tasks/upload', upload.array('files', 20), async (req, res) => {
   try {
-    const { studentId, taskType, generatedExamId, worksheetId, subject, resourceId } = req.body
-    console.log(`[Upload] 📥 req.body: studentId=${studentId} taskType=${taskType} worksheetId=${worksheetId} (len=${worksheetId?.length}) subject=${subject} resourceId=${resourceId} generatedExamId=${generatedExamId}`)
+    const { studentId, taskType, generatedExamId, worksheetId, subject, resourceId, taskName } = req.body
+    console.log(`[Upload] 📥 req.body: studentId=${studentId} taskType=${taskType} worksheetId=${worksheetId} (len=${worksheetId?.length}) subject=${subject} resourceId=${resourceId} generatedExamId=${generatedExamId} taskName=${taskName || '(由文件名生成)'}`)
     const normalizedTaskType = taskType === 'wrong_retry' ? 'wrong_retry'
       : taskType === 'workbook' ? 'workbook'
       : 'general'
@@ -282,9 +282,11 @@ app.post('/api/tasks/upload', upload.array('files', 20), async (req, res) => {
         file_name: result.filename,
       }))
       const firstUrl = images[0].image_url
-      const taskName = succeeded.length > 1
+      // 客户端在内页选过名字（练习册/答案库/科目+时间）时优先使用，避免落库成相机文件名
+      const clientTaskName = typeof taskName === 'string' && taskName.trim() ? taskName.trim().slice(0, 100) : null
+      const taskNameResolved = clientTaskName || (succeeded.length > 1
         ? `${succeeded[0].filename} 等${succeeded.length}页`
-        : succeeded[0].filename
+        : succeeded[0].filename)
 
       try {
         for (const img of images) {
@@ -294,7 +296,7 @@ app.post('/api/tasks/upload', upload.array('files', 20), async (req, res) => {
         const { rows } = await query(
           `INSERT INTO ${TABLES.TASKS} (student_id, image_url, images, original_name, status, result, task_type, generated_exam_id, worksheet_id, subject, resource_id)
            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11) RETURNING *`,
-          [resolvedStudentId, firstUrl, JSON.stringify(images), taskName, TASK_STATUS.PROCESSING, JSON.stringify({ progress: 0 }), normalizedTaskType, normalizedGeneratedExamId, worksheetId || null, subject || null, normalizedResourceId]
+          [resolvedStudentId, firstUrl, JSON.stringify(images), taskNameResolved, TASK_STATUS.PROCESSING, JSON.stringify({ progress: 0 }), normalizedTaskType, normalizedGeneratedExamId, worksheetId || null, subject || null, normalizedResourceId]
         )
 
         const savedTask = rows[0]
@@ -305,7 +307,7 @@ app.post('/api/tasks/upload', upload.array('files', 20), async (req, res) => {
           studentId: resolvedStudentId,
           imageUrl: firstUrl,
           images,
-          originalName: taskName,
+          originalName: taskNameResolved,
           generatedExamId: normalizedGeneratedExamId,
           taskType: normalizedTaskType,
           worksheetId: worksheetId || null,

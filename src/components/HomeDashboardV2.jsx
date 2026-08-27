@@ -1,4 +1,4 @@
-import { AlertCircle, BookOpen, Camera, ChevronRight, Clock3, FileCheck2 } from 'lucide-react'
+import { AlertCircle, Camera, ChevronRight, Clock3, FileCheck2, Wand2 } from 'lucide-react'
 import { motion } from 'motion/react'
 import { MobileSectionHeading } from '../features/mobile/MobilePrimitives'
 
@@ -45,20 +45,21 @@ function FailedCard({ onRetry, onDismiss }) {
   </div>
 }
 
-export default function HomeDashboardV2({ currentStudent, tasks, isInitializing, pendingWrongCount = 0, onStartUpload, onOpenTasks, onOpenWrongBook, onOpenReview, onRetryTask, onDismissTask }) {
+export default function HomeDashboardV2({ currentStudent, tasks, isInitializing, pendingWrongCount = 0, onStartUpload, onOpenTasks, onStartPriorityRetry, onRetryTask, onDismissTask }) {
   const list = (Array.isArray(tasks) ? tasks : []).filter((task) => task.student_id === currentStudent?.id).sort((left, right) => new Date(right.created_at || 0) - new Date(left.created_at || 0))
   const failedTask = list.find(failed)
   const activeTask = list.find(processing)
   const latest = list.find(complete)
 
-  // 状态提醒，按紧急度排序：批改中 > 结果就绪 > 待复习（失败单独用 FailedCard 置顶）
+  // 状态提醒，按紧急度排序：批改中 > 结果就绪 > 智能推荐重练（失败单独用 FailedCard 置顶）。
+  // 首页是决策层：提醒卡只导航或发起流程，打开批改结果的动作归作业页列表行。
   const reminders = []
   if (!isInitializing && activeTask) reminders.push({ key: 'active', icon: <Clock3 size={18} />, tone: 'info', title: '作业批改中', detail: '完成后会自动归入错题本', onClick: onOpenTasks })
   if (!isInitializing && latest) {
     const wrong = latest.result?.wrongCount
-    reminders.push({ key: 'latest', icon: <FileCheck2 size={18} />, tone: wrong ? 'neutral' : 'success', title: wrong ? `上次作业已批改 · ${wrong} 道错题` : '上次作业已批改，表现不错', detail: wrong ? '查看被标出的题目和讲解' : `${latest.result?.questionCount || '全部'} 题已完成，继续保持`, onClick: () => onOpenReview(latest) })
+    reminders.push({ key: 'latest', icon: <FileCheck2 size={18} />, tone: wrong ? 'neutral' : 'success', title: wrong ? `上次作业已批改 · ${wrong} 道错题` : '上次作业已批改，表现不错', detail: wrong ? '去作业页查看被标出的题目和讲解' : `${latest.result?.questionCount || '全部'} 题已完成，继续保持`, onClick: onOpenTasks })
   }
-  if (!isInitializing && pendingWrongCount > 0) reminders.push({ key: 'wrong', icon: <BookOpen size={18} />, tone: 'neutral', title: `${pendingWrongCount} 道错题待复习`, detail: '完成重练，验证是否真正掌握', onClick: onOpenWrongBook })
+  if (!isInitializing && pendingWrongCount > 0) reminders.push({ key: 'priorityRetry', icon: <Wand2 size={18} />, tone: 'neutral', title: `重点重练 · ${pendingWrongCount} 道错题待巩固`, detail: 'AI 挑选最需要巩固的错题，一键生成重练卷', onClick: onStartPriorityRetry })
 
   const empty = !isInitializing && !failedTask && reminders.length === 0
   const hour = new Date().getHours()

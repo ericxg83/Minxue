@@ -163,9 +163,6 @@ export default function App() {
   const [showReprint, setShowReprint] = useState(false)
   const [reprintExam, setReprintExam] = useState(null)
   const [reprintQuestions, setReprintQuestions] = useState([])
-  const [submitExamId, setSubmitExamId] = useState(null) // 正在上传答卷的组卷 id
-  const submitFileInputRef = useRef(null)
-  const submitTargetExamRef = useRef(null)
 
   // Exam Page State
   const [showScanQR, setShowScanQR] = useState(false) // QR scan trigger
@@ -388,6 +385,15 @@ export default function App() {
   }, [reprintExam])
 
   // Processing: Load tasks（秒开策略：先展示本地缓存，再后台刷新）
+  // 整体替换会冲掉"正在上传/上传失败"的本地 temp 任务（服务端还没有该记录），
+  // 用户切页期间上传中的任务会凭空消失、失败也无从落地——这里始终把它们合并回来。
+  const mergeTempTasks = (list, studentId) => {
+    const temps = (Array.isArray(tasksRef.current) ? tasksRef.current : [])
+      .filter(t => typeof t.id === 'string' && t.id.startsWith('temp-') && t.student_id === studentId)
+    if (temps.length === 0) return Array.isArray(list) ? list : []
+    const serverIds = new Set((Array.isArray(list) ? list : []).map(t => t.id))
+    return [...temps.filter(t => !serverIds.has(t.id)), ...(Array.isArray(list) ? list : [])]
+  }
   const loadTasks = async (showSkeleton = true) => {
     if (!currentStudent) return
     const studentId = currentStudent.id
@@ -398,12 +404,12 @@ export default function App() {
     // 1) 无视 TTL 先读缓存立即上屏（避免白屏等待网络）
     const cached = peekCache(`tasks_cache_${studentId}`)
     const hasCache = Array.isArray(cached) && cached.length > 0
-    if (hasCache) setTasks(cached)
+    if (hasCache) setTasks(mergeTempTasks(cached, studentId))
     if (showSkeleton && !hasCache) setIsLoadingTasks(true)
     // 2) 后台拉取最新数据覆盖
     try {
       const taskList = await getTasksByStudent(studentId, false)
-      if (Array.isArray(taskList)) setTasks(taskList)
+      setTasks(mergeTempTasks(taskList, studentId))
     } catch (error) {
       console.error('加载任务失败:', error)
       // Don't clear tasks on failure — keep showing existing data
@@ -423,6 +429,7 @@ export default function App() {
     showWorksheetPicker, setShowWorksheetPicker,
     triggerUpload,
     handleFileSelect,
+    retryTempUpload,
     uploading, uploadingTasks,
     uploadQueue, isUploading,
     showStaging, stagingFiles, stagingType, stagingUploading,
@@ -613,13 +620,6 @@ export default function App() {
     }
   }
 
-  // Download exam as PDF — 改用 PrintPreview 组件
-  const handleDownloadPdf = async (exam) => {
-    handleReprintExam(exam)
-  }
-
-  // Duplicate exam
-
   // Duplicate exam
   const handleDuplicateExam = (exam) => {
     const newName = `${exam.name} (副本)`
@@ -671,44 +671,6 @@ export default function App() {
     }
     setReviewTask(linked)
     setShowExamReview(true)
-  }
-
-  // 提交作业：上传该组卷的答卷图，走错题重练批改流程（与二维码入口一致）
-  const handleSubmitExam = (exam) => {
-    submitTargetExamRef.current = exam
-    submitFileInputRef.current?.click()
-  }
-
-  const handleSubmitFilesSelected = async (e) => {
-    const files = Array.from(e.target.files || [])
-    if (e.target && 'value' in e.target) e.target.value = ''
-    const exam = submitTargetExamRef.current
-    if (!exam || files.length === 0) return
-    const studentId = exam.student_id || currentStudent?.id
-    if (!studentId) {
-      Toast.show({ message: '缺少学生信息，无法提交', type: 'error' })
-      return
-    }
-    setSubmitExamId(exam.id)
-    const loadingToast = Toast.show({ message: '正在上传答卷...', type: 'loading', duration: 0 })
-    try {
-      const res = await taskService.uploadFiles(studentId, files, {
-        generatedExamId: exam.id,
-        taskType: 'wrong_retry'
-      })
-      const created = (res?.tasks || []).filter(t => !t.error)
-      if (created.length === 0) throw new Error(res?.report?.summary || '上传失败')
-      loadingToast?.dismiss?.()
-      Toast.show({ message: '答卷已提交，开始批改', type: 'success', duration: 2000 })
-      loadGeneratedExams(false)
-    } catch (error) {
-      console.error('提交作业失败:', error)
-      loadingToast?.dismiss?.()
-      Toast.show({ message: error.message || '提交失败，请重试', type: 'error', duration: 3000 })
-    } finally {
-      setSubmitExamId(null)
-      submitTargetExamRef.current = null
-    }
   }
 
   // Delete exam
@@ -860,7 +822,7 @@ export default function App() {
         setTasks(doneTasks.length > 0 ? taskList : [])
         // 重新从服务器获取以获取更新后的 result
         const freshTasks = await getTasksByStudent(currentStudent.id, false)
-        setTasks(Array.isArray(freshTasks) ? freshTasks : [])
+        setTasks(mergeTempTasks(freshTasks, currentStudent.id))
       } else if (currentPage === 'wrongbook') {
         await loadWrongBookData()
       } else if (currentPage === 'exam') {
@@ -879,6 +841,12 @@ export default function App() {
   const handleRetryTask = async (taskId) => {
     if (!currentStudent) {
       Toast.show({ message: '请先选择学生', type: 'error', duration: 1500 })
+      return
+    }
+
+    // 本地上传失败的任务：服务端没有记录，走客户端原样重传
+    if (typeof taskId === 'string' && taskId.startsWith('temp-')) {
+      await retryTempUpload(taskId)
       return
     }
 
@@ -955,13 +923,10 @@ export default function App() {
                 tasks={tasks}
                 isLoadingTasks={isLoadingTasks}
                 isInitializing={isInitializing}
-                wrongCount={wrongQuestions.length}
                 pendingWrongCount={pendingWrongQuestions.length}
                 onStartUpload={() => setShowUploadOptions(true)}
                 onOpenTasks={() => { setCurrentPage('tasks'); clearSelection() }}
-                onOpenWrongBook={() => { setCurrentPage('wrongbook'); clearSelection() }}
-                onOpenExam={() => { setCurrentPage('exam'); clearSelection() }}
-                onOpenReview={(task) => { setReviewTask(task); setShowExamReview(true) }}
+                onStartPriorityRetry={handleStartPriorityRetry}
                 onRetryTask={handleRetryTask}
                 onDismissTask={(taskId) => { setDeleteTarget({ type: 'task', id: taskId }); setShowDeleteConfirm(true) }}
               />
@@ -992,7 +957,6 @@ export default function App() {
                 onOpenDetail={handleOpenWrongBookDetail}
                 onDelete={handleDeleteWrongQuestion}
                 onPrintPreview={handlePrintPreview}
-                onStartPriorityRetry={handleStartPriorityRetry}
                 hasMore={wrongBookHasMore}
                 loadingMore={wrongBookLoading}
                 onLoadMore={loadMoreWrongQuestions}
@@ -1183,12 +1147,9 @@ export default function App() {
             {currentPage === 'exam' && (
               <ExamPage key='page-exam'
                 studentExams={studentExams}
-                submitExamId={submitExamId}
-                submitFileInputRef={submitFileInputRef}
-                onDownloadPdf={handleDownloadPdf}
-                onSubmitExam={handleSubmitExam}
-                onSubmitFilesSelected={handleSubmitFilesSelected}
-                onOpenExamResult={handleOpenExamResult}
+                onReprint={handleReprintExam}
+                onDelete={(exam) => { setDeleteTarget({ type: 'exam', id: exam.id }); setShowDeleteConfirm(true) }}
+                onOpenResult={handleOpenExamResult}
                 onOpenWrongBook={() => setCurrentPage('wrongbook')}
               />
             )}
@@ -1203,7 +1164,7 @@ export default function App() {
               { id: 'processing', icon: Camera, label: '首页' },
               { id: 'tasks', icon: Upload, label: '作业' },
               { id: 'wrongbook', icon: LayoutGrid, label: '错题本' },
-              { id: 'exam', icon: FileText, label: '重练' },
+              { id: 'exam', icon: FileText, label: '组卷历史' },
             ].map((tab) => {
               const isActive = currentPage === tab.id
               return (
@@ -1259,7 +1220,7 @@ export default function App() {
             if (homeworkChoiceRef.current.length > 0) {
               // 来自暂存区：有练习册 → 走练习册批改；"不使用练习册" → 未知来源 AI 批改
               if (worksheetId) {
-                handleUploadAsWorkbook(worksheetId)
+                handleUploadAsWorkbook(worksheetId, worksheetName)
               } else {
                 handleUploadAsRegular()
               }
@@ -1267,6 +1228,8 @@ export default function App() {
               // 旧 flow：选完练习册 → 打开暂存区（连拍/多选）
               setSelectedWorksheetId(worksheetId)
               setPendingFlow('workbook')
+              __pendingUploadStore.worksheetId = worksheetId
+              __pendingUploadStore.worksheetName = worksheetName || null
               openStaging('workbook')
             } else {
               // 用户点击"不使用练习册" → 清除 workbook 流程

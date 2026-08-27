@@ -40,9 +40,12 @@ function TaskRow({ task, onRetryTask, onOpenReview }) {
   const clickable = current === 'completed'
   const Icon = bad ? AlertCircle : current === 'processing' ? Loader2 : current === 'completed' ? CheckCircle2 : Clock3
   const pageCount = (Array.isArray(task.images) ? task.images.length : 0) || (Array.isArray(task.pages) ? task.pages.length : 0) || 0
-  const name = retry(task) ? '错题重练' : '日常作业'
+  const isTemp = Boolean(task.is_temp) || (typeof task.id === 'string' && task.id.startsWith('temp-'))
+  // 服务端任务显示落库的任务名（练习册名/科目+时间），重练卷保持固定名；旧数据回退"日常作业"
+  const name = retry(task) ? '错题重练' : (task.original_name || '日常作业')
   const detail = current === 'failed' ? failReason(task)
     : current === 'stalled' ? '处理超时，可重试'
+    : current === 'processing' && isTemp ? '正在上传图片'
     : current === 'processing' ? '正在整理批改结果'
     : current === 'completed'
       ? (truncated

@@ -1067,7 +1067,11 @@ const recognizeQuestions = async (imageBase64, taskId, retryCount = 0, forceMode
 
     // truncated=true 表示本页是靠截断抢救出来的，可能缺题 —— 上层需记录到任务结果，
     // 否则"少了几道题"对用户是完全静默的。
-    return { success: true, questions, duration, truncated: ocrTruncated }
+    // pageTitle：卷面印刷标题，上层用它给任务命名（列表里全是"日常作业"分不清哪份）
+    const pageTitle = (!Array.isArray(result) && typeof result?.page_title === 'string')
+      ? result.page_title.trim() || null
+      : null
+    return { success: true, questions, duration, truncated: ocrTruncated, pageTitle }
   } catch (error) {
     const duration = Date.now() - startTime
     const errorMessage = error.response?.data?.message || error.message || '未知错误'
@@ -5194,18 +5198,37 @@ export const processTask = async (job) => {
       }))
 
       console.log(`✅ [Step 5/8] ${pageLabel}识别 ${pageQuestions.length} 道题`)
-      return { pageNumber: page.pageNumber, compressedBuffer, ocrDuration: ocrResult.duration || 0, pageQuestions, truncated: Boolean(ocrResult.truncated) }
+      return { pageNumber: page.pageNumber, compressedBuffer, ocrDuration: ocrResult.duration || 0, pageQuestions, truncated: Boolean(ocrResult.truncated), pageTitle: ocrResult.pageTitle || null }
     })
 
     const pageResults = await Promise.all(pageTasks)
+    let ocrPageTitle = null
     for (const r of pageResults) {
       pageBuffers.set(r.pageNumber, r.compressedBuffer)
       questions.push(...r.pageQuestions)
       totalOcrDuration += r.ocrDuration
       if (r.truncated) ocrTruncatedPages += 1
+      if (!ocrPageTitle && r.pageTitle) ocrPageTitle = r.pageTitle
     }
     if (ocrTruncatedPages > 0) {
       console.warn(`⚠️  ${ocrTruncatedPages} 页是截断抢救的结果，可能缺题（已记入任务结果 ocrTruncated）`)
+    }
+
+    // 用卷面印刷标题给任务改名：客户端只能给出"数学作业 08/27 21:58"或相机文件名，
+    // 列表里一排同名任务用户分不清哪份。只覆盖这类自动名，用户选过练习册/答案库的名字不动。
+    if (ocrPageTitle) {
+      const auto = !originalName
+        || /作业\s+\d{2}\/\d{2}\s+\d{2}:\d{2}$/.test(originalName)
+        || /\.(jpe?g|png|heic|heif|webp|bmp)(\s|$)/i.test(originalName)
+      if (auto) {
+        const cleaned = ocrPageTitle.replace(/\s+/g, ' ').trim().slice(0, 100)
+        try {
+          await query(`UPDATE ${TABLES.TASKS} SET original_name = $1 WHERE id = $2`, [cleaned, taskId])
+          console.log(`   📝 任务改名: "${originalName}" → "${cleaned}"（来自卷面标题）`)
+        } catch (e) {
+          console.warn(`   ⚠️ 任务改名失败: ${e.message}`)
+        }
+      }
     }
 
     await job.updateProgress(70)

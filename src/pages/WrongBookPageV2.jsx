@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react'
-import { Check, ChevronRight, Search, Wand2 } from 'lucide-react'
+import { Check, ChevronRight, Search } from 'lucide-react'
 import { motion } from 'motion/react'
 import dayjs from 'dayjs'
 import EmptyState from '../components/EmptyState'
@@ -11,24 +11,6 @@ const labels = { new: '待复习', review_1: '复习中', review_2: '再次复�
 const lifecycle = i => i.lifecycle_status || i.status || 'new'
 const text = i => (i.question || i).content || i.content || '题目内容暂不可用'
 
-// 本页唯一主行动：自动优选最需要巩固的错题生成重练卷（排序逻辑在 App 的 priorityWrongQuestions）。
-// 手动勾选 → 底部"生成重练"保留为次路径。
-function PriorityRetryCard({ count, onClick }) {
-  return <button
-    type='button'
-    onClick={onClick}
-    className='mb-3 flex w-full items-center gap-3 rounded-2xl px-4 py-3.5 text-left shadow-sm transition-transform active:scale-[0.99] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--primary)]'
-    style={{ background: 'var(--primary)', color: '#fff' }}
-  >
-    <span className='flex h-9 w-9 shrink-0 items-center justify-center rounded-xl' style={{ background: 'rgba(255,255,255,.16)' }}><Wand2 size={18} aria-hidden='true' /></span>
-    <span className='min-w-0 flex-1'>
-      <span className='block text-[14px] font-semibold'>生成重点重练卷</span>
-      <span className='mt-0.5 block text-[12px] opacity-80'>自动挑选 {Math.min(count, 5)} 道最需要巩固的错题</span>
-    </span>
-    <ChevronRight size={16} aria-hidden='true' />
-  </button>
-}
-
 export default function WrongBookPageV2({
   filteredWrongQuestions,
   bankCounts,
@@ -38,7 +20,6 @@ export default function WrongBookPageV2({
   onOpenDetail,
   onDelete,
   onPrintPreview,
-  onStartPriorityRetry,
   hasMore,
   loadingMore,
   onLoadMore
@@ -67,7 +48,6 @@ export default function WrongBookPageV2({
   }, [hasMore, loadingMore, onLoadMore])
 
   return <motion.div initial={{ opacity: 0, x: 16 }} animate={{ opacity: 1, x: 0 }} className='mobile-page mobile-page-wrongbook mx-auto w-full max-w-lg px-4 pb-28 pt-5'>
-    {pendingWrongQuestionCount > 0 && <PriorityRetryCard count={pendingWrongQuestionCount} onClick={onStartPriorityRetry} />}
     <MobileSegmentedTabs items={tabs} value={filter} onChange={setFilter} ariaLabel='错题复习状态' />
     {!questions.length
       ? <EmptyState icon={Search} title='这里还没有错题' description='完成作业批改后，错题会自动进入这里' className='py-16' />

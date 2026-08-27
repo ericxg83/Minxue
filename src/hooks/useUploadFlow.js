@@ -11,7 +11,7 @@ import { __pendingUploadStore } from '../features/upload/pendingUploadStore'
 export function useUploadFlow({ loadTasks, isInitializing }) {
   const Toast = useToast()
   const { currentStudent } = useStudentStore()
-  const { tasks, addTask, updateTaskStatus: updateTaskInStore, setTasks } = useTaskStore()
+  const { tasks, addTask, updateTaskStatus: updateTaskInStore, updateTaskFromServer, setTasks } = useTaskStore()
 
   // loadTasks 每次渲染都是新引用，用 ref 存储避免上传队列 effect 反复触发
   const loadTasksRef = useRef(loadTasks)
@@ -141,16 +141,22 @@ export function useUploadFlow({ loadTasks, isInitializing }) {
     setSelectedWorksheetId(null)
     setSelectedExamResourceId(null)
     setFlowSubject('数学')
+    __pendingUploadStore.worksheetId = null
+    __pendingUploadStore.worksheetName = null
+    __pendingUploadStore.examResourceId = null
+    __pendingUploadStore.examResourceName = null
   }, [])
 
   // 日常作业：选择练习册后上传
-  const handleUploadAsWorkbook = async (worksheetId) => {
+  const handleUploadAsWorkbook = async (worksheetId, worksheetName) => {
     setPendingFlow('workbook')
     setSelectedWorksheetId(worksheetId)
     pendingFlowRef.current = 'workbook'
     selectedWorksheetIdRef.current = worksheetId
     __pendingUploadStore.worksheetId = worksheetId
+    __pendingUploadStore.worksheetName = worksheetName || null
     __pendingUploadStore.examResourceId = null
+    __pendingUploadStore.examResourceName = null
     __pendingUploadStore.subject = flowSubject
     const dt = new DataTransfer()
     homeworkChoiceFiles.forEach(f => dt.items.add(f))
@@ -164,7 +170,9 @@ export function useUploadFlow({ loadTasks, isInitializing }) {
     pendingFlowRef.current = null
     selectedWorksheetIdRef.current = null
     __pendingUploadStore.worksheetId = null
+    __pendingUploadStore.worksheetName = null
     __pendingUploadStore.examResourceId = null
+    __pendingUploadStore.examResourceName = null
     const dt = new DataTransfer()
     homeworkChoiceFiles.forEach(f => dt.items.add(f))
     setHomeworkChoiceFiles([])
@@ -179,7 +187,9 @@ export function useUploadFlow({ loadTasks, isInitializing }) {
     pendingFlowRef.current = 'exam'
     selectedExamResourceIdRef.current = resourceId
     __pendingUploadStore.worksheetId = null
+    __pendingUploadStore.worksheetName = null
     __pendingUploadStore.examResourceId = resourceId
+    __pendingUploadStore.examResourceName = resourceName || null
     __pendingUploadStore.subject = flowSubject
     const dt = new DataTransfer()
     examChoiceFiles.forEach(f => dt.items.add(f))
@@ -195,7 +205,9 @@ export function useUploadFlow({ loadTasks, isInitializing }) {
     pendingFlowRef.current = null
     selectedExamResourceIdRef.current = null
     __pendingUploadStore.worksheetId = null
+    __pendingUploadStore.worksheetName = null
     __pendingUploadStore.examResourceId = null
+    __pendingUploadStore.examResourceName = null
     const dt = new DataTransfer()
     examChoiceFiles.forEach(f => dt.items.add(f))
     setExamChoiceFiles([])
@@ -249,9 +261,12 @@ export function useUploadFlow({ loadTasks, isInitializing }) {
       const safeTasks = tasks || []
 
       for (const file of files) {
+        // 任务名已改为练习册名/科目+时间，不再含文件名，去重按任务内的图片文件名匹配
         const localDuplicate = safeTasks.find(t =>
-          t.original_name === file.name &&
-          t.student_id === currentStudent?.id
+          t.student_id === currentStudent?.id &&
+          (t.original_name === file.name ||
+            (Array.isArray(t.images) && t.images.some(img => img.file_name === file.name)) ||
+            (Array.isArray(t.pages) && t.pages.some(p => p.file_name === file.name)))
         )
         if (localDuplicate) {
           duplicateFiles.push(file)
@@ -381,24 +396,72 @@ export function useUploadFlow({ loadTasks, isInitializing }) {
     }
   }
 
+  // 失败行 upsert：保证"上传失败"一定在列表里可见、可重试，
+  // 而不是只剩一个几秒后消失的 toast（图片此时已无从找回入口）。
+  const upsertFailedTemp = (tempTask, errorMsg) => {
+    updateTaskFromServer({ ...tempTask, status: 'failed', error: errorMsg, result: { error: errorMsg } })
+  }
+
+  // 客户端重传：temp 任务服务端没有记录，/api/tasks/retry 无从下手；
+  // 靠 temp 上保留的 File 引用原样重走一次上传管道。
+  const retryTempUpload = async (taskId) => {
+    const temp = (Array.isArray(tasks) ? tasks : []).find(t => t.id === taskId)
+    const files = temp?.__files
+    if (!temp || !Array.isArray(files) || files.length === 0) {
+      Toast.show({ message: '原图片已丢失，请重新拍照上传', type: 'error', duration: 3000 })
+      setTasks(prev => prev.filter(t => t.id !== taskId))
+      return
+    }
+    const opts = temp.__options || {}
+    if (opts.worksheetId) {
+      setPendingFlow('workbook')
+      pendingFlowRef.current = 'workbook'
+      setSelectedWorksheetId(opts.worksheetId)
+      selectedWorksheetIdRef.current = opts.worksheetId
+      __pendingUploadStore.worksheetId = opts.worksheetId
+      __pendingUploadStore.worksheetName = opts.worksheetName || null
+      __pendingUploadStore.subject = opts.subject || '数学'
+    } else if (opts.resourceId) {
+      setPendingFlow('exam')
+      pendingFlowRef.current = 'exam'
+      setSelectedExamResourceId(opts.resourceId)
+      selectedExamResourceIdRef.current = opts.resourceId
+      __pendingUploadStore.examResourceId = opts.resourceId
+      __pendingUploadStore.subject = opts.subject || '数学'
+    } else {
+      setPendingFlow(null)
+      pendingFlowRef.current = null
+    }
+    // 先移除旧行，重传会生成新的 temp 任务
+    setTasks(prev => prev.filter(t => t.id !== taskId))
+    await uploadViaBackend(files)
+  }
+
   // Upload via backend API — 多图一任务
   const uploadViaBackend = async (files) => {
     const pendingFlowEffective = pendingFlowRef.current
     const worksheetIdEffective = __pendingUploadStore.worksheetId || selectedWorksheetIdRef.current || selectedWorksheetId
+    const worksheetNameEffective = __pendingUploadStore.worksheetName
     const examResourceIdEffective = __pendingUploadStore.examResourceId || selectedExamResourceIdRef.current || selectedExamResourceId
+    const examResourceNameEffective = __pendingUploadStore.examResourceName
     const subjectEffective = __pendingUploadStore.subject !== '数学' ? __pendingUploadStore.subject : (flowSubjectRef.current || flowSubject)
 
     const isWorkbook = pendingFlowEffective === 'workbook' && worksheetIdEffective
     const isExam = pendingFlowEffective === 'exam' && examResourceIdEffective
-    const firstFile = files[0]
-    const taskName = files.length > 1
-      ? `${firstFile.name || '作业'} 等${files.length}页`
-      : (firstFile.name || `照片_${dayjs().format('YYYY-MM-DD_HH-mm-ss')}.jpg`)
+
+    // 任务名用用户在内页选的名字（练习册/答案库），无名可取时用 科目+时间；
+    // 相机文件名（IMG_xxx.jpg）对用户没有辨识度，列表里全靠它分不清是哪份作业。
+    const timeLabel = dayjs().format('MM/DD HH:mm')
+    const taskName = isWorkbook && worksheetNameEffective
+      ? `${subjectEffective} · ${worksheetNameEffective}`
+      : isExam && examResourceNameEffective
+        ? examResourceNameEffective
+        : `${subjectEffective || '数学'}作业 ${timeLabel}`
 
     const tempTask = {
       id: `temp-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`,
       student_id: currentStudent.id,
-      image_url: URL.createObjectURL(firstFile),
+      image_url: URL.createObjectURL(files[0]),
       original_name: taskName,
       task_type: isWorkbook ? 'workbook' : (isExam ? 'exam' : 'homework'),
       pages: files.map((file, index) => ({
@@ -411,20 +474,29 @@ export function useUploadFlow({ loadTasks, isInitializing }) {
       result: { progress: 0 },
       created_at: new Date().toISOString(),
       is_temp: true,
+      // 客户端重传所需：File 引用 + 上传通道上下文（服务端没有该记录，服务端 retry 用不了）
+      __files: files,
+      __options: {
+        worksheetId: isWorkbook ? worksheetIdEffective : null,
+        worksheetName: isWorkbook ? worksheetNameEffective : null,
+        resourceId: isExam ? examResourceIdEffective : null,
+        subject: subjectEffective
+      },
       ...(isWorkbook && { worksheet_id: worksheetIdEffective }),
       ...(isExam && { resource_id: examResourceIdEffective })
     }
     addTask(tempTask)
 
     clearStudentCaches(currentStudent.id)
-    Toast.show({ message: files.length > 1 ? `已添加 ${files.length} 张图片，正在上传...` : '已添加 1 个文件，正在上传...', type: 'success', duration: 2000 })
+    // 不再用 success 样式提示"正在上传"——用户会把绿色的"已添加"误读成上传成功
+    const uploadToast = Toast.show({ message: files.length > 1 ? `正在上传 ${files.length} 张图片...` : '正在上传...', type: 'loading', duration: 0 })
 
     let successCount = 0
     let failedCount = 0
     let realTaskId = null
 
     try {
-      const options = {}
+      const options = { taskName }
       if (isWorkbook) {
         options.worksheetId = worksheetIdEffective
         options.taskType = 'workbook'
@@ -440,8 +512,8 @@ export function useUploadFlow({ loadTasks, isInitializing }) {
       if (taskResult && !taskResult.error) {
         successCount = 1
         realTaskId = taskResult.id
-        if (isWorkbook) __pendingUploadStore.worksheetId = null
-        if (isExam) __pendingUploadStore.examResourceId = null
+        if (isWorkbook) { __pendingUploadStore.worksheetId = null; __pendingUploadStore.worksheetName = null }
+        if (isExam) { __pendingUploadStore.examResourceId = null; __pendingUploadStore.examResourceName = null }
         updateTaskInStore(tempTask.id, 'processing', { progress: 0 })
         setTasks(prev => prev.map(t =>
           t.id === tempTask.id ? { ...taskResult, status: 'processing', pages: taskResult.images || tempTask.pages, is_temp: false } : t
@@ -449,12 +521,12 @@ export function useUploadFlow({ loadTasks, isInitializing }) {
       } else {
         failedCount = 1
         const errorMsg = taskResult?.message || taskResult?.error || '上传失败'
-        updateTaskInStore(tempTask.id, 'failed', { error: errorMsg })
+        upsertFailedTemp(tempTask, errorMsg)
       }
     } catch (error) {
       console.error('uploadViaBackend exception:', error)
       failedCount = 1
-      updateTaskInStore(tempTask.id, 'failed', { error: error.message || '上传失败' })
+      upsertFailedTemp(tempTask, error.message || '上传失败')
     }
 
     if (successCount > 0) {
@@ -467,8 +539,10 @@ export function useUploadFlow({ loadTasks, isInitializing }) {
     }
 
     if (failedCount > 0) {
+      uploadToast.dismiss()
       Toast.show({ message: '上传失败', type: 'error', duration: 3000 })
     } else if (successCount > 0) {
+      uploadToast.dismiss()
       Toast.show({ message: files.length > 1 ? `${files.length} 张图片已合并为一个任务` : '上传成功', type: 'success', duration: 2000 })
     }
   }
@@ -563,6 +637,7 @@ export function useUploadFlow({ loadTasks, isInitializing }) {
     showWorksheetPicker, setShowWorksheetPicker,
     triggerUpload,
     handleFileSelect,
+    retryTempUpload,
     uploading, uploadingTasks,
     uploadQueue, isUploading,
 

@@ -6,6 +6,8 @@
 // 由 App.jsx 与 useUploadFlow hook 共享同一个模块实例。
 export const __pendingUploadStore = {
   worksheetId: null,
+  worksheetName: null,
   examResourceId: null,
+  examResourceName: null,
   subject: '数学'
 }

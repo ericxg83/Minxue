@@ -34,7 +34,10 @@ export const useTaskStore = create((set, get) => ({
   
   setCurrentTask: (task) => set({ currentTask: task }),
   
-  setTasks: (tasks) => set({ tasks: Array.isArray(tasks) ? tasks : [] }),
+  // 支持传入数组或 updater 函数；否则调用方传函数时会被判非数组而清空整个列表
+  setTasks: (tasksOrFn) => set((state) => ({
+    tasks: Array.isArray(tasksOrFn) ? tasksOrFn : tasksOrFn(state.tasks)
+  })),
   
   addTask: (task) => set((state) => ({
     tasks: [task, ...state.tasks]
