@@ -641,6 +641,17 @@ export const createGeneratedExam = async (examData) => {
   return data.exam
 }
 
+// 更新组卷题单/名称（服务端守卫：已批改或已有答卷任务引用时返回 409）
+// 仅供周报再测卷幂等复用，普通组卷不走此接口
+export const updateGeneratedExam = async (examId, { name, questionIds } = {}) => {
+  const data = await apiRequest(`/generated-exams/${examId}`, {
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ name, questionIds })
+  })
+  return data.exam
+}
+
 export const markGeneratedExamGraded = async (examId) => {
   const data = await apiRequest(`/generated-exams/${examId}/graded`, {
     method: 'PUT'

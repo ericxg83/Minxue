@@ -4,7 +4,7 @@ import { Printer, FileDown, Loader2 } from 'lucide-react'
 import { Toast } from 'antd-mobile'
 import { useStudentStore, useWrongQuestionStore, useUIStore, useExamStore } from '../../store'
 import { mockWrongQuestions } from '../../data/mockData'
-import { createGeneratedExam, getQuestionsByIds } from '../../services/apiService'
+import { createGeneratedExam, getGeneratedExamsByStudent, getQuestionsByIds } from '../../services/apiService'
 import dayjs from 'dayjs'
 import { saveAs } from 'file-saver'
 import { exportWrongBookPDF } from '../../utils/wrongBookPdfExporter'
@@ -228,10 +228,10 @@ export default function PrintPreview({ onClose, questions: propQuestions, existi
 
   // 生成带序号的组卷名：同一学生、同一 base 名（科目+日期）当天第几张 → -01/-02...
   // 例："数学-0708-01"、"数学-0708-02"，避免同天多张重名难以区分
-  const buildExamNameWithSeq = (baseName) => {
+  const buildExamNameWithSeq = (baseName, list = generatedExams) => {
     const today = dayjs().format('YYYY-MM-DD')
     // 统计当前学生今天已存在、且 base 名相同的组卷数量
-    const sameBaseToday = (generatedExams || []).filter(e => {
+    const sameBaseToday = (list || []).filter(e => {
       if (e.student_id !== currentStudent?.id) return false
       const createdDay = e.created_at ? dayjs(e.created_at).format('YYYY-MM-DD') : null
       if (createdDay !== today) return false
@@ -360,14 +360,22 @@ export default function PrintPreview({ onClose, questions: propQuestions, existi
   }
 
   const saveGeneratedExamRecord = async () => {
+    // 重打已有组卷（查看题目→下载/打印）：记录早已存在，再建就是重复卷
+    if (validExistingId) return false
     if (examRecorded.current) return false
     const qs = previewRef.current || previewQuestions
     const questionIds = qs.map(q => q.id).filter(Boolean)
     if (currentStudent && questionIds.length > 0) {
       try {
+        // 序号必须基于全量列表计算：store 只在访问过"重练"页后才有数据，
+        // 空 store 会让每次组卷都算出 -01（实测一名学生同名 -01 堆了 15 份）
+        let seqSource = generatedExams
+        if (!(seqSource || []).some(e => e.student_id === currentStudent.id)) {
+          try { seqSource = await getGeneratedExamsByStudent(currentStudent.id, false) } catch { /* 拉取失败时用 store 兜底 */ }
+        }
         // 计算 base 名（科目+日期），再追加当天序号
         const baseName = getBaseExamName()
-        const examName = buildExamNameWithSeq(baseName)
+        const examName = buildExamNameWithSeq(baseName, seqSource)
         setSavedExamName(examName)
 
         const exam = await createGeneratedExam({

@@ -1929,6 +1929,51 @@ app.delete('/api/generated-exams/:id', async (req, res) => {
   }
 })
 
+// 更新组卷题单/名称 —— 仅供「周报再测卷幂等复用」使用。
+// 守卫：已批改的卷判题结果挂在 question_ids 上，禁止改；已有答卷任务（tasks.generated_exam_id）
+// 引用的卷正在批改链路中，改了会导致 worker 判错题单，禁止改。
+app.put('/api/generated-exams/:id', async (req, res) => {
+  try {
+    const { id } = req.params
+    const uuidRegex = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
+    if (!uuidRegex.test(id)) {
+      return res.status(400).json({ error: '无效的试卷ID' })
+    }
+    const { rows } = await query(`SELECT id, status FROM ${TABLES.GENERATED_EXAMS} WHERE id = $1`, [id])
+    if (rows.length === 0) return res.status(404).json({ error: '试卷不存在' })
+    if (rows[0].status === 'graded') {
+      return res.status(409).json({ error: '该卷已批改，不能修改题单' })
+    }
+    const { rows: linked } = await query(
+      `SELECT id FROM ${TABLES.TASKS} WHERE generated_exam_id = $1 LIMIT 1`,
+      [id]
+    )
+    if (linked.length > 0) {
+      return res.status(409).json({ error: '该卷已有答卷任务引用，不能修改题单' })
+    }
+    const sets = []
+    const params = []
+    if (Array.isArray(req.body.questionIds)) {
+      params.push(JSON.stringify(req.body.questionIds))
+      sets.push(`question_ids = $${params.length}`)
+    }
+    if (typeof req.body.name === 'string' && req.body.name.trim()) {
+      params.push(req.body.name.trim())
+      sets.push(`name = $${params.length}`)
+    }
+    if (sets.length === 0) return res.status(400).json({ error: '没有需要更新的字段' })
+    params.push(id)
+    const { rows: updated } = await query(
+      `UPDATE ${TABLES.GENERATED_EXAMS} SET ${sets.join(', ')}, updated_at = NOW() WHERE id = $${params.length} RETURNING *`,
+      params
+    )
+    res.json({ success: true, exam: updated[0] })
+  } catch (error) {
+    console.error('更新组卷失败:', error)
+    res.status(500).json({ error: error.message })
+  }
+})
+
 // 标记错题卷为已批改
 app.put('/api/generated-exams/:id/graded', async (req, res) => {
   try {

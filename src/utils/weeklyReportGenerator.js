@@ -1,4 +1,4 @@
-import { createGeneratedExam, getQuestionsByIds } from '../services/apiService'
+import { createGeneratedExam, getGeneratedExamsByStudent, getQuestionsByIds, getTasksByStudent, updateGeneratedExam } from '../services/apiService'
 import { triggerCustomHTMLPrint } from './browserPrint'
 import { renderFullHTML, exportServerPDF, getKatexCssWithInlineFonts } from './serverPdfExporter'
 import { detectProductionEnv } from './wrongBookPdfExporter'
@@ -593,6 +593,38 @@ async function renderDiagnosisFullHTML(reportData) {
  * 若 createGeneratedExam 失败（极端情况），仍返回已渲染的 HTML（无二维码），
  * 不阻塞周报生成 —— 二维码缺失不影响周报核心内容。
  */
+/**
+ * 为再测卷找一个可复用的组卷 ID（幂等）：
+ * 此前每次渲染周报 PDF 都 createGeneratedExam，多次下载会堆积大量同名重复卷
+ * （实测一名学生 50 份，同名"错题再测-0814"×8）。复用规则：
+ *   1. 同学生 + 同名（错题再测-MMDD）+ 未批改；
+ *   2. 该卷没有任何答卷任务引用（tasks.generated_exam_id），否则它已在批改链路中；
+ *   3. 题单有变化时经 PUT 刷新 question_ids（服务端守卫同样校验 1/2），
+ *      保证打印的题与扫码批改的判题基准一致。
+ * 找不到可复用的才新建。
+ */
+async function resolveReusableExamId(studentId, examName, wrongQuestionIds) {
+  let exams = []
+  let tasks = []
+  try { exams = await getGeneratedExamsByStudent(studentId, false) || [] } catch { return null }
+  const candidate = exams.find(e => e.name === examName && e.status !== 'graded')
+  if (!candidate) return null
+  try { tasks = await getTasksByStudent(studentId, false) || [] } catch { tasks = [] }
+  if (tasks.some(t => t.generatedExamId === candidate.id || t.generated_exam_id === candidate.id)) return null
+
+  const normalize = (ids) => Array.isArray(ids) ? [...ids].map(String).sort() : []
+  const sameIds = normalize(candidate.question_ids).join() === normalize(wrongQuestionIds).join()
+  if (sameIds) return candidate.id
+  try {
+    const updated = await updateGeneratedExam(candidate.id, { questionIds: wrongQuestionIds })
+    return updated?.id || candidate.id
+  } catch (e) {
+    // 409（已批改/已被引用）等场景：放弃复用，走新建
+    console.warn('[weeklyReport] 复用组卷刷新题单失败，改为新建:', e?.message || e)
+    return null
+  }
+}
+
 async function renderExamFullHTMLForReport(studentId, studentName, wrongQuestionIds, examName, totalCount = 0) {
   if (!wrongQuestionIds || wrongQuestionIds.length === 0) return ''
 
@@ -600,18 +632,22 @@ async function renderExamFullHTMLForReport(studentId, studentName, wrongQuestion
   const fullQs = await getQuestionsByIds(wrongQuestionIds, studentId)
   if (!fullQs || fullQs.length === 0) return ''
 
-  // 2. 先尝试创建 exam 记录（拿 examId 用于二维码）
+  // 2. 先拿到 exam 记录（幂等复用优先，否则新建；examId 用于二维码）
   let qrContent = undefined
   try {
-    const examRecord = await createGeneratedExam({
-      student_id: studentId,
-      name: examName,
-      question_ids: wrongQuestionIds,
-    })
-    if (examRecord?.id) qrContent = 'MXG:' + examRecord.id.toUpperCase()
+    let examId = await resolveReusableExamId(studentId, examName, wrongQuestionIds)
+    if (!examId) {
+      const examRecord = await createGeneratedExam({
+        student_id: studentId,
+        name: examName,
+        question_ids: wrongQuestionIds,
+      })
+      examId = examRecord?.id
+    }
+    if (examId) qrContent = 'MXG:' + examId.toUpperCase()
   } catch (e) {
     // 失败不阻塞周报生成 —— 没有二维码也能用
-    console.warn('[weeklyReport] createGeneratedExam 失败，将跳过二维码:', e?.message || e)
+    console.warn('[weeklyReport] 获取组卷ID失败，将跳过二维码:', e?.message || e)
   }
 
   // 3. 渲染 HTML（含可选二维码）
