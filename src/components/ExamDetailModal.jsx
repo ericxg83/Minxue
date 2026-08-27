@@ -1,6 +1,6 @@
-import { AlertCircle, CheckCircle2, ClipboardCheck, FileDown, Loader2, X } from 'lucide-react'
-import { motion } from 'motion/react'
+import { AlertCircle, CheckCircle2, ClipboardCheck, FileDown, Loader2 } from 'lucide-react'
 import dayjs from 'dayjs'
+import BottomSheet from './BottomSheet'
 
 const stage = e => e.status === 'graded' ? 'completed' : ['submitted', 'grading'].includes(e.status) ? 'in_progress' : 'pending'
 const total = e => e.question_ids?.length || e.total_count || 0
@@ -14,36 +14,8 @@ export default function ExamDetailModal({ exam, onClose, onReprint, onDelete, on
   const count = total(exam)
   const score = completed && count ? `${exam.correct_count || 0}/${count} 题正确` : null
 
-  return <div className='absolute inset-0 z-[20000] flex items-center justify-center px-4'>
-    <motion.div
-      initial={{ opacity: 0 }}
-      animate={{ opacity: 1 }}
-      className='absolute inset-0 bg-black/50 backdrop-blur-sm'
-      onClick={onClose}
-    />
-    <motion.div
-      initial={{ opacity: 0, scale: 0.95, y: 20 }}
-      animate={{ opacity: 1, scale: 1, y: 0 }}
-      transition={{ type: 'spring', damping: 25, stiffness: 300 }}
-      className='relative w-full max-w-lg mx-auto rounded-3xl bg-white shadow-xl'
-      style={{ maxHeight: 'min(85vh, 720px)', display: 'flex', flexDirection: 'column', paddingBottom: 'calc(16px + env(safe-area-inset-bottom, 0px))' }}
-    >
-      <div className='flex justify-center pt-3 pb-1'>
-        <div className='h-1 w-8 rounded-full' style={{ background: 'var(--border)' }} />
-      </div>
-      <div className='flex items-center justify-between px-5 pt-1 pb-2'>
-        <h3 className='text-[16px] font-semibold' style={{ color: 'var(--text)' }}>组卷详情</h3>
-        <button
-          onClick={onClose}
-          className='flex h-7 w-7 items-center justify-center rounded-full'
-          style={{ background: 'var(--bg-mist)' }}
-          aria-label='关闭'
-        >
-          <X size={14} style={{ color: 'var(--text-secondary)' }} />
-        </button>
-      </div>
-      <div className='overflow-y-auto px-5 pb-4'>
-        <div className='flex items-start gap-3'>
+  return <BottomSheet title='组卷详情' onClose={onClose}>
+    <div className='flex items-start gap-3'>
           <span className='flex h-10 w-10 shrink-0 items-center justify-center rounded-xl' style={{ background: completed ? 'var(--success-soft)' : 'var(--primary-soft)', color: completed ? 'var(--success)' : 'var(--primary)' }}>
             {current === 'in_progress' ? <Loader2 size={18} className='animate-spin' /> : completed ? <CheckCircle2 size={18} /> : <ClipboardCheck size={18} />}
           </span>
@@ -95,7 +67,5 @@ export default function ExamDetailModal({ exam, onClose, onReprint, onDelete, on
             删除这份卷
           </button>
         </div>
-      </div>
-    </motion.div>
-  </div>
+  </BottomSheet>
 }

@@ -1,7 +1,7 @@
-import { AlertCircle, CheckCircle2, RotateCcw, X } from 'lucide-react'
-import { motion } from 'motion/react'
+import { AlertCircle, CheckCircle2, RotateCcw } from 'lucide-react'
 import dayjs from 'dayjs'
 import MathText from './MathText'
+import BottomSheet from './BottomSheet'
 import { normalizeOptions } from '../utils/optionText'
 
 // 状态词汇与错题本列表 Tab 对齐：待复习 / 复习中 / 已掌握
@@ -23,35 +23,7 @@ export default function WrongQuestionDetailModal({ wrongQuestion, onClose, onRet
   const date = dayjs(wq.added_at || wq.created_at)
   const wrongTimes = (wq.error_count || 1) > 1 ? `错过${wq.error_count}次` : (wq.error_type || '需要关注')
 
-  return <div className='absolute inset-0 z-[20000] flex items-center justify-center px-4'>
-    <motion.div
-      initial={{ opacity: 0 }}
-      animate={{ opacity: 1 }}
-      className='absolute inset-0 bg-black/50 backdrop-blur-sm'
-      onClick={onClose}
-    />
-    <motion.div
-      initial={{ opacity: 0, scale: 0.95, y: 20 }}
-      animate={{ opacity: 1, scale: 1, y: 0 }}
-      transition={{ type: 'spring', damping: 25, stiffness: 300 }}
-      className='relative w-full max-w-lg mx-auto rounded-3xl bg-white shadow-xl'
-      style={{ maxHeight: 'min(85vh, 720px)', display: 'flex', flexDirection: 'column', paddingBottom: 'calc(16px + env(safe-area-inset-bottom, 0px))' }}
-    >
-      <div className='flex justify-center pt-3 pb-1'>
-        <div className='h-1 w-8 rounded-full' style={{ background: 'var(--border)' }} />
-      </div>
-      <div className='flex items-center justify-between px-5 pt-1 pb-2'>
-        <h3 className='text-[16px] font-semibold' style={{ color: 'var(--text)' }}>错题详情</h3>
-        <button
-          onClick={onClose}
-          className='flex h-7 w-7 items-center justify-center rounded-full'
-          style={{ background: 'var(--bg-mist)' }}
-          aria-label='关闭'
-        >
-          <X size={14} style={{ color: 'var(--text-secondary)' }} />
-        </button>
-      </div>
-      <div className='overflow-y-auto px-5 pb-4'>
+  return <BottomSheet title='错题详情' onClose={onClose}>
         {/* 档案身份块（对齐组卷详情） */}
         <div className='flex items-start gap-3'>
           <span className='flex h-10 w-10 shrink-0 items-center justify-center rounded-xl' style={{ background: status.soft, color: status.color }}>
@@ -168,7 +140,5 @@ export default function WrongQuestionDetailModal({ wrongQuestion, onClose, onRet
             <RotateCcw size={16} />只练这道题
           </button>
         </div>
-      </div>
-    </motion.div>
-  </div>
+  </BottomSheet>
 }
