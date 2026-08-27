@@ -68,13 +68,15 @@ export function normalizeChoiceAnswer(value) {
 /**
  * 选择题选项字母的宽松提取。
  *
- * 答案库里的选择题答案常带着选项内容和 markdown 残留（AI 解析答案页留下的）：
- *   "A（21/2）**" / "(D) 2√5/5" / "**B**" / "答案：C（3/4）"
+ * 参考答案里的选项字母被各种噪声包着，两个来源都脏：
+ *  · 答案库（AI 解析答案页）："A（21/2）**" / "(D) 2√5/5" / "**B**" / "B选项"
+ *  · AI 现场生成答案（答案库没命中时）："选项 C" / "为选项D" / "sin∠CAB = 3/5，选(B)"
  * normalizeChoiceAnswer 对这些一律返回空串，于是退化成整串字面比较——
- * 学生写 "A"、参考答案存成 "A（21/2）**"，选对了却判错。
+ * 学生写 "D"、参考答案存成 "为选项D"，选对了却判错。
  *
- * 三级降级：严格归一 → 去 markdown 后严格归一 → 取开头的选项字母。
- * 第三级要求字母后紧跟括号/分隔符/空白，"AC = 8" 这类填空答案不会被误读成选项。
+ * 五级降级：严格归一 → 去 markdown 后严格归一 → 取开头的选项字母 →
+ * 找"选/答案为"这类选项标记词后面的字母 → 全串只有一个被括号括起来的字母。
+ * 每级都要求字母不与其它字母数字相连，"AC = 8" 这类填空答案不会被误读成选项。
  */
 export function extractChoiceLetters(value) {
   const strict = normalizeChoiceAnswer(value)
@@ -87,11 +89,22 @@ export function extractChoiceLetters(value) {
   const relaxed = normalizeChoiceAnswer(cleaned)
   if (relaxed) return relaxed
 
-  const head = cleaned.toUpperCase().replace(/^(?:ANSWER|答案|答|选择|选|为|是)\s*[:：]?\s*/, '')
-  const m = head.match(/^[(\[【]?\s*([A-H])\s*[)\]】]?/)
-  if (!m) return ''
-  if (/^[A-Z0-9]/.test(head.slice(m[0].length))) return ''
-  return m[1]
+  const upper = cleaned.toUpperCase()
+  const head = upper.replace(/^(?:ANSWER|正确答案|答案|答|选择|选项|选|为|是)\s*[:：]?\s*/, '')
+  const headMatch = head.match(/^[(\[【]?\s*([A-H])\s*[)\]】]?/)
+  if (headMatch && !/^[A-Z0-9]/.test(head.slice(headMatch[0].length))) return headMatch[1]
+
+  // "……，选(B)" / "答案为 D" / "应选 C 项"：标记词后面紧跟的字母
+  const marked = upper.match(
+    /(?:正确答案|答案|应选|故选|选项|选)\s*(?:为|是)?\s*[:：]?\s*[(\[【]?\s*([A-H])\s*[)\]】]?(?![A-Z0-9])/)
+  if (marked) return marked[1]
+
+  // 全串只有一个被括号括起来的字母："(A) 12米"
+  const bracketed = [...upper.matchAll(/[(\[【]\s*([A-H])\s*[)\]】]/g)].map(m => m[1])
+  const uniq = [...new Set(bracketed)]
+  if (uniq.length === 1) return uniq[0]
+
+  return ''
 }
 
 function normalizeAnswer(str) {

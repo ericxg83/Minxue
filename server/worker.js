@@ -17,7 +17,7 @@ import { cropAndUploadQuestionRegion } from './utils/cropAndUpload.js'
 import { refineFigureBoxOnPage } from './utils/figureRegionRefiner.js'
 import { generateTextFingerprint, generatePHash, PARSER_VERSION, TEXT_SIMILARITY_THRESHOLD } from './utils/questionFingerprint.js'
 import { uploadFilesWithRetry } from './services/uploadRetryManager.js'
-import { judgeAnswer, normalizeQuestionType, normalizeChoiceAnswer } from './services/judgeService.js'
+import { judgeAnswer, normalizeQuestionType, normalizeChoiceAnswer, extractChoiceLetters } from './services/judgeService.js'
 import { normalizeSectionName, splitSubAnswers, splitOcrQuestionsBySubNo } from './services/answerParseService.js'
 import { classifyQuestionLocally } from './utils/localTagger.js'
 import { finalizeGradingBatch } from './services/gradingFinalizer.js'
@@ -1256,7 +1256,10 @@ export function extractAnswerFromAnalysis(answer, analysis, options) {
 function normalizeGeneratedAnswer(question, candidateAnswer) {
   const questionType = normalizeQuestionType(question.question_type, question.options)
   if (questionType !== 'choice') return candidateAnswer
-  const candidate = normalizeChoiceAnswer(candidateAnswer)
+  // AI 现场生成的选择题答案常是整句话（"选项 C"、"为选项D"、"sin∠CAB = 3/5，选(B)"）。
+  // 严格归一（normalizeChoiceAnswer）对这些返回空串，原样入库就会让"学生选对却判错"，
+  // 所以这里用宽松提取，取到字母就只存字母——与答案库里的 "B"/"D" 保持同一形态。
+  const candidate = extractChoiceLetters(candidateAnswer)
   return candidate || candidateAnswer
 }
 

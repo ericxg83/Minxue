@@ -50,7 +50,8 @@ for (const r of rows) {
   if (normalizeChoiceAnswer(r.answer)) continue
   if (!extractChoiceLetters(r.answer)) continue
 
-  const cleanAnswer = stripMd(r.answer)
+  // 选择题统一收敛成裸字母，与答案库里的 "B"/"D" 同形态；选项内容仍在 options 里
+  const cleanAnswer = type === 'choice' ? extractChoiceLetters(r.answer) : stripMd(r.answer)
   const rejudged = judgeAnswer(r.student_answer, cleanAnswer, r.question_type).isCorrect
   const rescue = r.is_correct === false && rejudged === true
   if (cleanAnswer === r.answer && !rescue) continue
