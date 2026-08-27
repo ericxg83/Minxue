@@ -65,6 +65,35 @@ export function normalizeChoiceAnswer(value) {
   return [...new Set(answer)].sort().join('')
 }
 
+/**
+ * 选择题选项字母的宽松提取。
+ *
+ * 答案库里的选择题答案常带着选项内容和 markdown 残留（AI 解析答案页留下的）：
+ *   "A（21/2）**" / "(D) 2√5/5" / "**B**" / "答案：C（3/4）"
+ * normalizeChoiceAnswer 对这些一律返回空串，于是退化成整串字面比较——
+ * 学生写 "A"、参考答案存成 "A（21/2）**"，选对了却判错。
+ *
+ * 三级降级：严格归一 → 去 markdown 后严格归一 → 取开头的选项字母。
+ * 第三级要求字母后紧跟括号/分隔符/空白，"AC = 8" 这类填空答案不会被误读成选项。
+ */
+export function extractChoiceLetters(value) {
+  const strict = normalizeChoiceAnswer(value)
+  if (strict) return strict
+
+  const cleaned = String(value ?? '')
+    .replace(/[！-～]/g, ch => String.fromCharCode(ch.charCodeAt(0) - 0xFEE0))
+    .replace(/[*_`~]/g, '')
+    .trim()
+  const relaxed = normalizeChoiceAnswer(cleaned)
+  if (relaxed) return relaxed
+
+  const head = cleaned.toUpperCase().replace(/^(?:ANSWER|答案|答|选择|选|为|是)\s*[:：]?\s*/, '')
+  const m = head.match(/^[(\[【]?\s*([A-H])\s*[)\]】]?/)
+  if (!m) return ''
+  if (/^[A-Z0-9]/.test(head.slice(m[0].length))) return ''
+  return m[1]
+}
+
 function normalizeAnswer(str) {
   if (str === null || str === undefined) return ''
   let s = String(str)
@@ -343,6 +372,13 @@ export function judgeAnswer(studentAnswer, referenceAnswer, questionType) {
     //   学生答题 OCR 常把选项识别为 "(C)"/"（C）"/" C "(带括号)，参考答案常是裸 "C"。
     //   之前未去括号 → "(C)" !== "C" → 选对但判错（用户截图实例：题 17 学生选 C 判错）。
     //   修复后：(C) / （C） / C / c 都归一为 "C" 严格相等。
+    // 参考答案带选项内容/markdown 残留时（"A（21/2）**"）先提取选项字母再比，
+    // 否则 "A" vs "A（21/2）**" 会把选对判成错。
+    const studentLetters = extractChoiceLetters(studentAnswer)
+    const referenceLetters = extractChoiceLetters(referenceAnswer)
+    if (studentLetters && referenceLetters) {
+      return { isCorrect: studentLetters === referenceLetters, unrecognized: false }
+    }
     const cleanChoice = (s) => String(s || '').trim().toUpperCase().replace(/^[（(]|[)）]$/g, '')
     return { isCorrect: cleanChoice(studentAnswer) === cleanChoice(referenceAnswer), unrecognized: false }
   }

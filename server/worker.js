@@ -357,6 +357,56 @@ function denormalizeBbox(bbox, imgW, imgH) {
 }
 
 /**
+ * 修正整页 block_coordinates 的「角点形态」——模型把右下角 (x2, y2) 写进了 width/height。
+ *
+ * 线上实例（20 题的解直角三角形练习页）：
+ *   #1 {x:70,y:140,width:730,height:210}  #2 {x:70,y:210,…,height:280}  #3 …height:350
+ * 每题的 height 恰好等于下一题的 y，说明模型输出的是 [x1,y1,x2,y2]。
+ * 按宽高解读，第 5 题的框就从 y=420 一路拉到 910（大半页），前端题号框会把
+ * 相邻题目和网格配图一起圈进来，裁剪题图同样跟着框错整块。
+ *
+ * 单个框无法判别（y+height ≤ 1000 时两种解读都成立），所以按【整页】表决：
+ *  必要条件：本页每个框都满足 width>x && height>y（角点解读能成立）；
+ *  触发条件（任一）：
+ *    a) 有框在宽高解读下越界（x+width>1000 或 y+height>1000，归一化坐标不可能）；
+ *    b) 按 y 排序后，多数相邻框满足 height_i ≈ y_(i+1)（角点形态的指纹）。
+ * 条件不足就原样保留，避免把正常的宽高框改坏。
+ */
+export function normalizeBlockBoxSemantics(questions) {
+  const boxes = []
+  for (const q of questions || []) {
+    const box = q && q.block_coordinates
+    if (!box || typeof box !== 'object' || Array.isArray(box)) continue
+    const x = Number(box.x), y = Number(box.y), w = Number(box.width), h = Number(box.height)
+    if (![x, y, w, h].every(Number.isFinite)) continue
+    boxes.push({ box, x, y, w, h })
+  }
+  if (boxes.length === 0) return questions
+
+  const cornerFormValid = boxes.every(({ x, y, w, h }) => w - x >= 1 && h - y >= 1)
+  if (!cornerFormValid) return questions
+
+  const overflows = boxes.some(({ x, y, w, h }) => x + w > 1000 || y + h > 1000)
+
+  const sorted = [...boxes].sort((a, b) => a.y - b.y)
+  let chained = 0
+  for (let i = 0; i + 1 < sorted.length; i++) {
+    if (Math.abs(sorted[i].h - sorted[i + 1].y) <= 2) chained++
+  }
+  const pairs = sorted.length - 1
+  const chainedForm = pairs >= 3 && chained / pairs >= 0.6
+
+  if (!overflows && !chainedForm) return questions
+
+  for (const { box, x, y, w, h } of boxes) {
+    box.width = w - x
+    box.height = h - y
+  }
+  console.warn(`   ⚠️ [bbox] 本页 ${boxes.length} 个题目框为角点形态(x2/y2 写进 width/height)，已换算为宽高`)
+  return questions
+}
+
+/**
  * 将几何配图 bbox 收紧到本题范围内，避免 AI 把相邻题目（题号/题干/下一道配图）圈进来。
  *
  * 常见错误：AI 返回的 image_bbox 高度过大，纵向跨越到下一题。此处用本题 block_coordinates
@@ -862,6 +912,8 @@ const recognizeQuestions = async (imageBase64, taskId, retryCount = 0, forceMode
     if (questionsArray.length === 0) {
       console.warn(`⚠️  解析出 0 道题（result 类型: ${Array.isArray(result) ? 'array' : typeof result}，keys: ${result && !Array.isArray(result) ? Object.keys(result).join(',') : 'N/A'}）`)
     }
+
+    normalizeBlockBoxSemantics(questionsArray)
 
     const questions = questionsArray.map((q, index) => {
       const rawStudentAnswer = q.student_answer || ''
@@ -3324,6 +3376,8 @@ const processWorkbookGrading = async (job) => {
   - y：题号上边缘的 y 坐标（0-1000）
   - width：题号所在行到题目整体最右侧的宽度
   - height：题号到题目最后一行（学生作答区下沿）的高度
+  ⚠️ width/height 必须是【宽和高】，不是右下角坐标。右下角 = x+width、y+height。
+     不要把右下角的 x2/y2 填进 width/height（那会让每道题的框纵向拉到下一题，圈住整块页面）。
   如果实在无法判断某道题的具体边界，至少让 width/height 反映题目的真实占比（计算题比选择题高），不要全部返回相同值。
 - 不要猜测标准答案
 - 只返回 JSON，不要其他文字`
@@ -3415,6 +3469,8 @@ const processWorkbookGrading = async (job) => {
       ocrErrors++
       continue
     }
+
+    normalizeBlockBoxSemantics(questions)
 
     // 标记每道题来自哪页图片（image_url）及页码（page_number），保存时写入。
     // page_number 用于前端分卷排序 / 卷N标注 / 中央页图同步——
@@ -4123,6 +4179,8 @@ const processAnswerBankGrading = async (job) => {
         ocrErrors++
         continue
       }
+
+      normalizeBlockBoxSemantics(questions)
 
       // 标记每道题来自哪页图片
       for (const q of questions) {
