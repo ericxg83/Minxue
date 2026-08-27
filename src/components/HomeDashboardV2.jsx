@@ -5,7 +5,11 @@ import { MobileSectionHeading } from '../features/mobile/MobilePrimitives'
 const done = new Set(['done', 'graded', 'completed', 'reviewed'])
 const complete = (task) => done.has(task.status) || Boolean(task.result?.questionCount)
 const failed = (task) => task.status === 'failed'
-const processing = (task) => !complete(task) && !failed(task)
+// 服务重启/worker 崩溃会让任务永久停在 processing，仅看 status 首页会永远挂"批改中"
+// 且每次进首页都复活这个提醒。与作业页同一口径：超过 30 分钟即判超时，引导去重试。
+const STALL_MS = 30 * 60 * 1000
+const stalled = (task) => !complete(task) && !failed(task) && (Date.now() - new Date(task.started_at || task.created_at || 0).getTime() > STALL_MS)
+const processing = (task) => !complete(task) && !failed(task) && !stalled(task)
 
 // 主行动：永远存在、视觉权重最高，无论有没有错题/失败都不会被挤掉
 function PrimaryAction({ onClick }) {
@@ -49,11 +53,13 @@ export default function HomeDashboardV2({ currentStudent, tasks, isInitializing,
   const list = (Array.isArray(tasks) ? tasks : []).filter((task) => task.student_id === currentStudent?.id).sort((left, right) => new Date(right.created_at || 0) - new Date(left.created_at || 0))
   const failedTask = list.find(failed)
   const activeTask = list.find(processing)
+  const stalledTask = list.find(stalled)
   const latest = list.find(complete)
 
   // 状态提醒，按紧急度排序：批改中 > 结果就绪 > 智能推荐重练（失败单独用 FailedCard 置顶）。
   // 首页是决策层：提醒卡只导航或发起流程，打开批改结果的动作归作业页列表行。
   const reminders = []
+  if (!isInitializing && stalledTask) reminders.push({ key: 'stalled', icon: <AlertCircle size={18} />, tone: 'info', title: '上次作业处理超时', detail: 'AI 没有按时完成批改，去作业页重新处理', onClick: onOpenTasks })
   if (!isInitializing && activeTask) reminders.push({ key: 'active', icon: <Clock3 size={18} />, tone: 'info', title: '作业批改中', detail: '完成后会自动归入错题本', onClick: onOpenTasks })
   if (!isInitializing && latest) {
     const wrong = latest.result?.wrongCount
