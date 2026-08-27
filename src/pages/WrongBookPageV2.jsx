@@ -71,7 +71,7 @@ export default function WrongBookPageV2({
                     {selected && <Check size={12} />}
                   </button>
                   <button type='button' onClick={() => onOpenDetail(item)} className='min-w-0 flex-1 text-left'>
-                    <span className='line-clamp-2 block text-[13px] font-medium leading-5' style={{ color: 'var(--text)' }}>
+                    <span className='line-clamp-2 text-[13px] font-medium leading-5' style={{ color: 'var(--text)' }}>
                       <MathText content={text(item)} />
                     </span>
                     <span className='mt-0.5 block truncate text-[11px]' style={{ color: status === 'mastered' ? 'var(--success)' : 'var(--text-secondary)' }}>

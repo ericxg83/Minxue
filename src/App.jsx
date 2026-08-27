@@ -7,8 +7,7 @@ import {
   Upload,
   X,
   Tag,
-  Download,
-  RotateCcw
+  Download
 } from 'lucide-react'
 import { motion, AnimatePresence } from 'motion/react'
 import { useLocation, useNavigate } from 'react-router-dom'
@@ -29,7 +28,7 @@ import ExamChoiceModal from './components/ExamChoiceModal'
 import NotificationsPanel from './components/NotificationsPanel'
 import LearningReportPanel from './components/LearningReportPanel'
 import ImagePreview from './components/ImagePreview'
-import MathText from './components/MathText'
+import WrongQuestionDetailModal from './components/WrongQuestionDetailModal'
 import ProcessingPage from './pages/ProcessingPageV2'
 import HomeDashboard from './components/HomeDashboardV2'
 import WrongBookPage from './pages/WrongBookPageV2'
@@ -37,7 +36,6 @@ import ExamPage from './pages/ExamPageV2'
 import WorksheetPicker from './components/WorksheetPicker'
 
 import { useToast, ToastProvider } from './components/ToastProvider'
-import { normalizeOptions } from './utils/optionText'
 import dayjs from 'dayjs'
 
 // 错题本分页大小（与服务端 limit 保持一致）
@@ -963,169 +961,15 @@ export default function App() {
               />
             )}
 
-            {/* 错题详情弹窗（轻量查看，编辑请去 PC 后台）
-                修复：改为居中弹出（之前 items-end 从底部弹出 75vh，用户在 main 中间看错题时视线在屏幕中央，
-                弹窗在屏幕下方容易看不到）。maxHeight 限 720px + 圆角，居中显示更显眼 */}
+            {/* 错题详情弹窗（轻量查看，编辑请去 PC 后台），结构对齐组卷详情 ExamDetailModal */}
             {wrongBookDetail && (
-              <div key='wrong-detail' className="absolute inset-0 z-[20000] flex items-center justify-center px-4">
-                <motion.div
-                  initial={{ opacity: 0 }}
-                  animate={{ opacity: 1 }}
-                  className="absolute inset-0 bg-black/50 backdrop-blur-sm"
-                  onClick={() => setWrongBookDetail(null)}
-                />
-                <motion.div
-                  initial={{ opacity: 0, scale: 0.95, y: 20 }}
-                  animate={{ opacity: 1, scale: 1, y: 0 }}
-                  transition={{ type: 'spring', damping: 25, stiffness: 300 }}
-                  className="relative bg-white rounded-3xl w-full max-w-lg mx-auto shadow-xl"
-                  style={{
-                    maxHeight: 'min(85vh, 720px)',
-                    display: 'flex',
-                    flexDirection: 'column',
-                    paddingBottom: 'calc(16px + env(safe-area-inset-bottom, 0px))'
-                  }}
-                >
-                  <div className="flex justify-center pt-3 pb-1">
-                    <div className="w-8 h-1 rounded-full" style={{ background: 'var(--border)' }} />
-                  </div>
-                  <div className="flex items-center justify-between px-5 pt-1 pb-2">
-                    <h3 style={{ fontSize: 'var(--fs-16)', fontWeight: 600, color: 'var(--text)' }}>错题详情</h3>
-                    <button
-                      onClick={() => setWrongBookDetail(null)}
-                      className="w-7 h-7 rounded-full flex items-center justify-center"
-                      style={{ background: 'var(--bg-mist)' }}
-                    >
-                      <X size={14} style={{ color: 'var(--text-secondary)' }} />
-                    </button>
-                  </div>
-                  <div className="overflow-y-auto px-5 pb-4">
-                    {(() => {
-                      const wq = wrongBookDetail
-                      const q = wq.question || wq
-                      const tags = q.tags_source === 'manual' ? (q.manual_tags || []) : (q.ai_tags || [])
-                      const ls = wq.lifecycle_status || 'new'
-                      const statusMap = { new: { text: '不懂', color: 'var(--warning)' }, review_1: { text: '复习1轮', color: 'var(--primary-hover)' }, review_2: { text: '复习2轮', color: 'var(--primary-hover)' }, mastered: { text: '完全懂', color: 'var(--success)' } }
-                      const status = statusMap[ls] || statusMap.new
-                      return (
-                        <>
-                          {/* 掌握状态 */}
-                          <div className="flex items-center justify-between mb-3">
-                            <span className="text-[11px]" style={{ color: 'var(--text-secondary)' }}>
-                              {dayjs(wq.added_at || wq.created_at).format('YYYY/MM/DD')}
-                            </span>
-                            <span style={{ fontSize: 'var(--fs-11)', padding: '2px 10px', borderRadius: 'var(--radius-sm)', background: status.color + '1A', color: status.color, fontWeight: 500 }}>
-                              {status.text}
-                            </span>
-                          </div>
-
-                          {/* 题目内容 */}
-                          <div style={{ fontSize: 'var(--fs-14)', lineHeight: 1.7, color: 'var(--text)' }}>
-                            <MathText content={q.content || '（无题干）'} />
-                          </div>
-
-                          {/* 选项 */}
-                          {Array.isArray(q.options) && q.options.length > 0 && (
-                            <div className="mt-3 space-y-1.5">
-                              {normalizeOptions(q.options).map((opt, i) => {
-                                const letter = String.fromCharCode(65 + i)
-                                return (
-                                  <div key={i} className="flex items-start gap-2 text-[13px]" style={{ color: 'var(--text)' }}>
-                                    <span className="font-medium flex-shrink-0">{letter}.</span>
-                                    <span className="flex-1"><MathText content={opt} /></span>
-                                  </div>
-                                )
-                              })}
-                            </div>
-                          )}
-
-                          {/* 答案 */}
-                          {q.answer && (
-                            <div className="mt-3 rounded-lg px-3 py-2" style={{ background: 'var(--success-soft)' }}>
-                              <span style={{ fontSize: 'var(--fs-12)', color: 'var(--success)', fontWeight: 600 }}>答案 </span>
-                              <span style={{ fontSize: 'var(--fs-13)', color: 'var(--success)' }}>{q.answer}</span>
-                            </div>
-                          )}
-
-                          {/* 解析 */}
-                          {q.analysis && (
-                            <div className="mt-2 rounded-lg px-3 py-2" style={{ background: 'var(--bg-mist)' }}>
-                              <span style={{ fontSize: 'var(--fs-12)', color: 'var(--text-secondary)', fontWeight: 600 }}>解析 </span>
-                              <span style={{ fontSize: 'var(--fs-13)', color: 'var(--text)' }}><MathText content={q.analysis} /></span>
-                            </div>
-                          )}
-
-                          {/* 配图 */}
-                          {q.image_url && (
-                            <div className="mt-3">
-                              <button
-                                onClick={() => handleViewImage(q.image_url)}
-                                className="w-full rounded-xl overflow-hidden block"
-                                style={{ background: 'var(--bg-secondary)' }}
-                              >
-                                <img
-                                  src={q.image_url}
-                                  alt="配图"
-                                  loading="lazy"
-                                  className="w-full object-cover"
-                                  style={{ maxHeight: '260px' }}
-                                  onError={(e) => {
-                                    // 图片加载失败（如历史错误截图）→ 自动回退到整页原图，保证能看到本题
-                                    const full = q.full_image_url
-                                    if (full && e.currentTarget.src !== full) {
-                                      e.currentTarget.src = full
-                                    } else {
-                                      e.currentTarget.style.display = 'none'
-                                    }
-                                  }}
-                                />
-                              </button>
-                              {q.full_image_url && q.full_image_url !== q.image_url && (
-                                <button
-                                  onClick={() => handleViewImage(q.full_image_url)}
-                                  className="mt-2 w-full py-2 rounded-lg text-[12px] font-medium"
-                                  style={{ background: 'var(--primary-soft)', color: 'var(--primary-hover)' }}
-                                >
-                                  查看完整原图（含本题）
-                                </button>
-                              )}
-                            </div>
-                          )}
-
-                          {/* 标签 */}
-                          {tags.length > 0 && (
-                            <div className="flex flex-wrap gap-1.5 mt-3">
-                              {tags.map((tag, idx) => (
-                                <span key={idx} style={{ fontSize: 'var(--fs-11)', padding: '2px 8px', borderRadius: 'var(--radius-8)', background: 'var(--bg-secondary)', color: 'var(--text-secondary)' }}>
-                                  {tag}
-                                </span>
-                              ))}
-                            </div>
-                          )}
-
-                          <div className="mt-4 pt-3 flex gap-2" style={{ borderTop: '1px solid var(--border-light)' }}>
-                            <button
-                              onClick={() => handleRetrySingleWrongQuestion(wq)}
-                              className="flex-1 flex items-center justify-center gap-1.5 py-2.5 rounded-xl text-[13px] font-medium"
-                              style={{ background: 'var(--primary)', color: 'var(--text-inverse)' }}
-                            >
-                              <RotateCcw size={15} />
-                              只练这道题
-                            </button>
-                          </div>
-
-                          {/* 编辑提示 */}
-                          <div className="mt-4 rounded-xl px-4 py-3 flex items-center gap-2" style={{ background: 'var(--primary-soft)' }}>
-                            <span style={{ fontSize: 'var(--fs-12)', color: 'var(--text-secondary)' }}>
-                              需要修改题干 / 答案 / 标签？请到 <b>PC 端工作台 · 错题本</b> 中编辑
-                            </span>
-                          </div>
-                        </>
-                      )
-                    })()}
-                  </div>
-                </motion.div>
-              </div>
+              <WrongQuestionDetailModal
+                key='wrong-detail'
+                wrongQuestion={wrongBookDetail}
+                onClose={() => setWrongBookDetail(null)}
+                onRetry={handleRetrySingleWrongQuestion}
+                onViewImage={handleViewImage}
+              />
             )}
 
             {/* 全屏图片查看器 — 支持单击放大/双击复位/双指捏合/滚轮缩放 */}
