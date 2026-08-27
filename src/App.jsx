@@ -4,7 +4,6 @@ import {
   Loader2,
   LayoutGrid,
   FileText,
-  Plus,
   Upload,
   X,
   Tag,
@@ -30,6 +29,7 @@ import ExamChoiceModal from './components/ExamChoiceModal'
 import NotificationsPanel from './components/NotificationsPanel'
 import LearningReportPanel from './components/LearningReportPanel'
 import ImagePreview from './components/ImagePreview'
+import MathText from './components/MathText'
 import ProcessingPage from './pages/ProcessingPageV2'
 import HomeDashboard from './components/HomeDashboardV2'
 import WrongBookPage from './pages/WrongBookPageV2'
@@ -155,18 +155,8 @@ export default function App() {
   const [processingFilter, setProcessingFilter] = useState('all')
   const [previewImage, setPreviewImage] = useState(null)
 
-  // Bank Page State
-  const [bankFilter, setBankFilter] = useState('all')
-  const [selectedSubject, setSelectedSubject] = useState('all')
-  const [selectedTimeRange, setSelectedTimeRange] = useState('all')
-  const [selectedErrorCount, setSelectedErrorCount] = useState('all')
-  const [selectedTags, setSelectedTags] = useState([])
-  const [selectedErrorType, setSelectedErrorType] = useState('all')
-  const [selectedRecentWrongRange, setSelectedRecentWrongRange] = useState('all')
-  const [selectedMasteryStage, setSelectedMasteryStage] = useState('all')
-  const [showFilterPanel, setShowFilterPanel] = useState(false)
+  // Bank Page State — 筛选面板已随移动端重构移除，错题本只保留生命周期 Tab + 优选组卷
   const [showQRCode, setShowQRCode] = useState(false)
-  const [showPrintOptions, setShowPrintOptions] = useState(false)
   const [printMode, setPrintMode] = useState('all')
   const [printSize, setPrintSize] = useState('a4')
   const [showGrading, setShowGrading] = useState(false)
@@ -227,10 +217,6 @@ export default function App() {
 
   // Toast
   const Toast = useToast()
-
-  // FAB 长按计时
-  const fabPressRef = useRef(0)
-  const fabLongPressRef = useRef(false)
 
   // Paper Bank 自包含模块
   const paperBank = usePaperBank()
@@ -321,9 +307,9 @@ export default function App() {
   // 立即用新学生缓存覆盖旧数据，避免先清空导致的空屏闪烁。
   // (缓存键 tasks_cache_{studentId} / wrong_questions_cache_{studentId} 已按学生隔离)
 
-  // Load tasks when student changes
+  // Load tasks when student changes（重练页需要 tasks 通过 generated_exam_id 关联批改结果）
   useEffect(() => {
-    if (currentStudent && (currentPage === 'processing' || currentPage === 'tasks')) {
+    if (currentStudent && ['processing', 'tasks', 'exam'].includes(currentPage)) {
       loadTasks()
     }
   }, [currentStudent?.id, currentPage])
@@ -340,9 +326,9 @@ export default function App() {
   }, 30000, currentStudent && (currentPage === 'processing' || currentPage === 'tasks'), [currentStudent?.id, currentPage])
 
 
-  // Load wrong questions
+  // Load wrong questions（错题本计数供首页"待复习"卡片使用，首页也需预热；秒开缓存使其成本极低）
   useEffect(() => {
-    if (currentStudent && currentPage === 'wrongbook') {
+    if (currentStudent && (currentPage === 'wrongbook' || currentPage === 'processing')) {
       loadWrongBookData()
     }
   }, [currentStudent?.id, currentPage])
@@ -570,90 +556,9 @@ export default function App() {
     return t.status === processingFilter
   }), [tasks, currentStudent?.id, processingFilter])
 
-  // Filter wrong questions
-  const isWithinTimeRange = (dateStr, timeKey) => {
-    if (timeKey === 'all') return true
-    const date = dayjs(dateStr)
-    const now = dayjs()
-    switch (timeKey) {
-      case 'today': return date.isSame(now, 'day')
-      case 'week': return date.isAfter(now.subtract(7, 'day'))
-      case 'month': return date.isAfter(now.subtract(30, 'day'))
-      case 'quarter': return date.isAfter(now.subtract(90, 'day'))
-      default: return true
-    }
-  }
-
-  const matchErrorCount = (count, filterKey) => {
-    if (filterKey === 'all') return true
-    switch (filterKey) {
-      case '1': return count === 1
-      case '2-3': return count >= 2 && count <= 3
-      case '4-5': return count >= 4 && count <= 5
-      case '5+': return count > 5
-      default: return true
-    }
-  }
-
-  const allAvailableTags = useMemo(() => {
-    const tagSet = new Set()
-    wrongQuestions
-      .filter(wq => wq.student_id === currentStudent?.id)
-      .forEach(wq => {
-        const question = wq.question || wq
-        const tags = question.tags_source === 'manual'
-          ? (question.manual_tags || [])
-          : (question.ai_tags || [])
-        tags.forEach(tag => tagSet.add(tag))
-      })
-    return Array.from(tagSet)
-  }, [wrongQuestions, currentStudent?.id])
-
-  const allAvailableErrorTypes = useMemo(() => {
-    const typeSet = new Set()
-    wrongQuestions
-      .filter(wq => wq.student_id === currentStudent?.id)
-      .forEach(wq => {
-        if (wq.error_type) typeSet.add(wq.error_type)
-      })
-    return Array.from(typeSet)
-  }, [wrongQuestions, currentStudent?.id])
-
-  const filteredWrongQuestions = useMemo(() => (Array.isArray(wrongQuestions) ? wrongQuestions : []).filter(wq => {
-    if (wq.student_id !== currentStudent?.id) return false
-    if (bankFilter !== 'all') {
-      const ls = wq.lifecycle_status || 'new'
-      if (bankFilter === 'new' && ls !== 'new') return false
-      if (bankFilter === 'review' && ls !== 'review_1' && ls !== 'review_2') return false
-      if (bankFilter === 'mastered' && ls !== 'mastered') return false
-    }
-    if (selectedSubject !== 'all') {
-      // wrong_questions.subject 历史数据大多缺失，回退到 question.subject 兜底
-      const subj = wq.subject || (wq.question && wq.question.subject)
-      if (subj !== selectedSubject) return false
-    }
-    if (selectedTimeRange !== 'all' && !isWithinTimeRange(wq.added_at || wq.created_at, selectedTimeRange)) return false
-    if (selectedErrorCount !== 'all' && !matchErrorCount(wq.error_count || 1, selectedErrorCount)) return false
-    if (selectedErrorType !== 'all' && (wq.error_type || '') !== selectedErrorType) return false
-    if (selectedRecentWrongRange !== 'all' && !wq.last_wrong_at) return false
-    if (selectedRecentWrongRange !== 'all' && !isWithinTimeRange(wq.last_wrong_at, selectedRecentWrongRange)) return false
-    if (selectedMasteryStage !== 'all') {
-      const ls = wq.lifecycle_status || 'new'
-      if (selectedMasteryStage === 'reviewing') {
-        if (ls !== 'review_1' && ls !== 'review_2') return false
-      } else if (ls !== selectedMasteryStage) {
-        return false
-      }
-    }
-    if (selectedTags.length > 0) {
-      const question = wq.question || wq
-      const qTags = question.tags_source === 'manual'
-        ? (question.manual_tags || [])
-        : (question.ai_tags || [])
-      if (!selectedTags.some(t => qTags.includes(t))) return false
-    }
-    return true
-  }), [wrongQuestions, currentStudent?.id, bankFilter, selectedSubject, selectedTimeRange, selectedErrorCount, selectedErrorType, selectedRecentWrongRange, selectedMasteryStage, selectedTags])
+  // Filter wrong questions — 筛选面板移除后只保留学生维度过滤，生命周期筛选由错题本页内 Tab 完成
+  const filteredWrongQuestions = useMemo(() => (Array.isArray(wrongQuestions) ? wrongQuestions : []).filter(wq => wq.student_id === currentStudent?.id),
+    [wrongQuestions, currentStudent?.id])
 
   // Mobile wrong-book action: prioritize unresolved items without creating a second retry flow.
   const pendingWrongQuestions = useMemo(() => (Array.isArray(wrongQuestions) ? wrongQuestions : [])
@@ -755,6 +660,19 @@ export default function App() {
     setShowReprint(true)
   }
 
+  // 重练卷完成态 → 经 generated_exam_id 找回关联批改任务，复用作业页的复核界面
+  const handleOpenExamResult = (exam) => {
+    const all = Array.isArray(tasks) ? tasks : []
+    const linked = all.find(t => t.generated_exam_id === exam.id && isTaskCompleted(t))
+      || all.find(t => t.generated_exam_id === exam.id)
+    if (!linked) {
+      Toast.show({ message: '未找到这份卷的批改记录', type: 'info' })
+      return
+    }
+    setReviewTask(linked)
+    setShowExamReview(true)
+  }
+
   // 提交作业：上传该组卷的答卷图，走错题重练批改流程（与二维码入口一致）
   const handleSubmitExam = (exam) => {
     submitTargetExamRef.current = exam
@@ -838,39 +756,6 @@ export default function App() {
     setSelectedQuestions([wq])
     setWrongBookDetail(null)
     setShowPrintPreview(true)
-  }
-
-  // 全选/取消全选当前筛选出的题目
-  const handleSelectAll = () => {
-    const filteredIds = filteredWrongQuestions.map(wq => wq.id)
-    const allSelected = filteredWrongQuestions.length > 0 && filteredWrongQuestions.every(wq => selectedQuestions.find(sq => sq.id === wq.id))
-    if (allSelected) {
-      setSelectedQuestions(selectedQuestions.filter(sq => !filteredIds.includes(sq.id)))
-    } else {
-      const existingIds = new Set(selectedQuestions.map(sq => sq.id))
-      const toAdd = filteredWrongQuestions.filter(wq => !existingIds.has(wq.id))
-      setSelectedQuestions([...selectedQuestions, ...toAdd])
-    }
-  }
-
-  // 一键将当前筛选结果全部纳入重练（P2：知识点筛选→组卷重练）
-  const handleRetryFiltered = () => {
-    if (filteredWrongQuestions.length === 0) {
-      Toast.show({ message: '当前筛选下没有可重练的错题', type: 'info' })
-      return
-    }
-    setSelectedQuestions(filteredWrongQuestions)
-    setShowPrintPreview(true)
-  }
-
-  const handleResetWrongBookFilters = () => {
-    setSelectedSubject('all')
-    setSelectedTimeRange('all')
-    setSelectedErrorCount('all')
-    setSelectedTags([])
-    setSelectedErrorType('all')
-    setSelectedRecentWrongRange('all')
-    setSelectedMasteryStage('all')
   }
 
   // Toggle selection for wrong questions
@@ -1065,7 +950,7 @@ export default function App() {
 
           <AnimatePresence>
             {currentPage === 'processing' && (
-              <HomeDashboard
+              <HomeDashboard key='page-processing'
                 currentStudent={currentStudent}
                 tasks={tasks}
                 isLoadingTasks={isLoadingTasks}
@@ -1083,7 +968,7 @@ export default function App() {
             )}
 
             {currentPage === 'tasks' && (
-              <ProcessingPage
+              <ProcessingPage key='page-tasks'
                 currentStudent={currentStudent}
                 tasks={tasks}
                 filteredTasks={filteredTasks}
@@ -1091,7 +976,6 @@ export default function App() {
                 isInitializing={isInitializing}
                 processingFilter={processingFilter}
                 onFilterChange={setProcessingFilter}
-                onViewImage={handleViewImage}
                 onRetryTask={handleRetryTask}
                 onDeleteTask={(taskId) => { setDeleteTarget({ type: 'task', id: taskId }); setShowDeleteConfirm(true) }}
                 onOpenReview={(task) => { setReviewTask(task); setShowExamReview(true) }}
@@ -1099,40 +983,16 @@ export default function App() {
             )}
 
             {currentPage === 'wrongbook' && (
-              <WrongBookPage
-                currentStudent={currentStudent}
-                wrongQuestions={wrongQuestions}
+              <WrongBookPage key='page-wrongbook'
                 filteredWrongQuestions={filteredWrongQuestions}
-                bankFilter={bankFilter}
-                onFilterChange={setBankFilter}
-                showFilterPanel={showFilterPanel}
-                onCloseFilterPanel={setShowFilterPanel}
-                selectedSubject={selectedSubject}
-                onSubjectChange={setSelectedSubject}
-                selectedTimeRange={selectedTimeRange}
-                onTimeRangeChange={setSelectedTimeRange}
-                selectedErrorCount={selectedErrorCount}
-                onErrorCountChange={setSelectedErrorCount}
-                selectedTags={selectedTags}
-                onTagsChange={setSelectedTags}
-                allAvailableTags={allAvailableTags}
+                bankCounts={bankCounts}
                 selectedQuestions={selectedQuestions}
                 pendingWrongQuestionCount={pendingWrongQuestions.length}
                 onToggleSelection={toggleSelection}
                 onOpenDetail={handleOpenWrongBookDetail}
                 onDelete={handleDeleteWrongQuestion}
-                onSelectAll={handleSelectAll}
                 onPrintPreview={handlePrintPreview}
-                selectedErrorType={selectedErrorType}
-                onErrorTypeChange={setSelectedErrorType}
-                selectedRecentWrongRange={selectedRecentWrongRange}
-                onRecentWrongRangeChange={setSelectedRecentWrongRange}
-                selectedMasteryStage={selectedMasteryStage}
-                onMasteryStageChange={setSelectedMasteryStage}
-                allAvailableErrorTypes={allAvailableErrorTypes}
-                onRetryFiltered={handleRetryFiltered}
-                onResetFilters={handleResetWrongBookFilters}
-                bankCounts={bankCounts}
+                onStartPriorityRetry={handleStartPriorityRetry}
                 hasMore={wrongBookHasMore}
                 loadingMore={wrongBookLoading}
                 onLoadMore={loadMoreWrongQuestions}
@@ -1143,7 +1003,7 @@ export default function App() {
                 修复：改为居中弹出（之前 items-end 从底部弹出 75vh，用户在 main 中间看错题时视线在屏幕中央，
                 弹窗在屏幕下方容易看不到）。maxHeight 限 720px + 圆角，居中显示更显眼 */}
             {wrongBookDetail && (
-              <div className="absolute inset-0 z-[20000] flex items-center justify-center px-4">
+              <div key='wrong-detail' className="absolute inset-0 z-[20000] flex items-center justify-center px-4">
                 <motion.div
                   initial={{ opacity: 0 }}
                   animate={{ opacity: 1 }}
@@ -1196,9 +1056,9 @@ export default function App() {
                           </div>
 
                           {/* 题目内容 */}
-                          <p style={{ fontSize: 'var(--fs-14)', lineHeight: 1.7, color: 'var(--text)', whiteSpace: 'pre-wrap' }}>
-                            {q.content || '（无题干）'}
-                          </p>
+                          <div style={{ fontSize: 'var(--fs-14)', lineHeight: 1.7, color: 'var(--text)' }}>
+                            <MathText content={q.content || '（无题干）'} />
+                          </div>
 
                           {/* 选项 */}
                           {Array.isArray(q.options) && q.options.length > 0 && (
@@ -1208,7 +1068,7 @@ export default function App() {
                                 return (
                                   <div key={i} className="flex items-start gap-2 text-[13px]" style={{ color: 'var(--text)' }}>
                                     <span className="font-medium flex-shrink-0">{letter}.</span>
-                                    <span className="flex-1">{opt}</span>
+                                    <span className="flex-1"><MathText content={opt} /></span>
                                   </div>
                                 )
                               })}
@@ -1227,7 +1087,7 @@ export default function App() {
                           {q.analysis && (
                             <div className="mt-2 rounded-lg px-3 py-2" style={{ background: 'var(--bg-mist)' }}>
                               <span style={{ fontSize: 'var(--fs-12)', color: 'var(--text-secondary)', fontWeight: 600 }}>解析 </span>
-                              <span style={{ fontSize: 'var(--fs-13)', color: 'var(--text)' }}>{q.analysis}</span>
+                              <span style={{ fontSize: 'var(--fs-13)', color: 'var(--text)' }}><MathText content={q.analysis} /></span>
                             </div>
                           )}
 
@@ -1306,7 +1166,7 @@ export default function App() {
 
             {/* 全屏图片查看器 — 支持单击放大/双击复位/双指捏合/滚轮缩放 */}
             {showImageViewer && selectedImage && (
-              <div className="absolute inset-0 z-[30000] bg-black/95 flex flex-col">
+              <div key='image-viewer' className="absolute inset-0 z-[30000] bg-black/95 flex flex-col">
                 <div className="flex items-center justify-between px-4 py-3 text-white">
                   <span style={{ fontSize: 'var(--fs-13)', color: 'rgba(255,255,255,0.7)' }}>双击放大 · 双指缩放 · 滚轮缩放</span>
                   <button className="w-8 h-8 rounded-full flex items-center justify-center" style={{ background: 'rgba(255,255,255,0.15)' }} onClick={() => setShowImageViewer(false)} aria-label="关闭预览">
@@ -1321,14 +1181,15 @@ export default function App() {
             )}
 
             {currentPage === 'exam' && (
-              <ExamPage
+              <ExamPage key='page-exam'
                 studentExams={studentExams}
                 submitExamId={submitExamId}
                 submitFileInputRef={submitFileInputRef}
-                onDeleteExam={(examId) => { setDeleteTarget({ type: 'exam', id: examId }); setShowDeleteConfirm(true) }}
                 onDownloadPdf={handleDownloadPdf}
                 onSubmitExam={handleSubmitExam}
                 onSubmitFilesSelected={handleSubmitFilesSelected}
+                onOpenExamResult={handleOpenExamResult}
+                onOpenWrongBook={() => setCurrentPage('wrongbook')}
               />
             )}
 
@@ -1414,42 +1275,6 @@ export default function App() {
           }}
           subject={flowSubject}
         />
-
-        {/* Floating Action Button — Claude style
-            单击：直达暂存区（拍照/相册，零菜单）
-            长按(>450ms)：展开上传类型选择（日常作业/普通试卷/错题重练） */}
-        {currentPage === 'processing' && (
-          <motion.button
-            initial={{ scale: 0, opacity: 0 }}
-            animate={{ scale: 1, opacity: 1 }}
-            whileTap={{ scale: 0.9 }}
-            whileHover={{ scale: 1.05 }}
-            onClick={() => {
-              if (fabLongPressRef.current) { fabLongPressRef.current = false; return }
-              setPendingFlow(null); setSelectedWorksheetId(null); openStaging('regular')
-            }}
-            onPointerDown={() => { fabPressRef.current = Date.now() }}
-            onPointerUp={() => {
-              if (Date.now() - fabPressRef.current > 450) {
-                fabLongPressRef.current = true
-                setShowUploadOptions(true)
-              }
-            }}
-            onPointerCancel={() => { fabPressRef.current = 0 }}
-            onContextMenu={(e) => e.preventDefault()}
-            className="absolute right-5 z-50 flex items-center justify-center shadow-lg tap-scale"
-            style={{
-              width: '54px',
-              height: '54px',
-              borderRadius: 'var(--radius-16)',
-              background: 'linear-gradient(135deg, var(--primary) 0%, var(--primary-light) 100%)',
-              boxShadow: 'var(--shadow-primary)',
-              bottom: 'calc(80px + env(safe-area-inset-bottom, 0px))',
-            }}
-          >
-            <Plus size={24} strokeWidth={3} className="text-white" />
-          </motion.button>
-        )}
 
         {/* Upload Options Menu — Three cards */}
         {showUploadOptions && (

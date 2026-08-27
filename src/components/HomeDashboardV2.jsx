@@ -61,9 +61,11 @@ export default function HomeDashboardV2({ currentStudent, tasks, isInitializing,
   if (!isInitializing && pendingWrongCount > 0) reminders.push({ key: 'wrong', icon: <BookOpen size={18} />, tone: 'neutral', title: `${pendingWrongCount} 道错题待复习`, detail: '完成重练，验证是否真正掌握', onClick: onOpenWrongBook })
 
   const empty = !isInitializing && !failedTask && reminders.length === 0
+  const hour = new Date().getHours()
+  const greeting = hour < 12 ? '早上好' : hour < 18 ? '下午好' : '晚上好'
 
   return <motion.main initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} className='mobile-page mx-auto w-full max-w-lg px-4 pb-6 pt-5'>
-    <header className='mb-5'><p className='mb-1 text-[12px] font-medium' style={{ color: 'var(--text-secondary)' }}>今天</p><h1 className='truncate text-[24px] font-semibold tracking-[-0.04em]' style={{ color: 'var(--text)' }}>{isInitializing ? '正在准备学习数据…' : `${currentStudent?.name || '同学'}，今天也来学一会儿`}</h1></header>
+    <header className='mb-5'><h1 className='truncate text-[24px] font-semibold tracking-[-0.04em]' style={{ color: 'var(--text)' }}>{isInitializing ? '正在准备学习数据…' : `${greeting}，${currentStudent?.name || '同学'}`}</h1></header>
 
     <section aria-label='上传作业' className='mb-6'><PrimaryAction onClick={onStartUpload} /></section>
 

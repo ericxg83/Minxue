@@ -1,16 +1,110 @@
-import{AlertCircle,Camera,CheckCircle2,ChevronRight,Clock3,Loader2,RotateCcw}from'lucide-react';import{motion}from'motion/react';import dayjs from'dayjs';import EmptyState from'../components/EmptyState';import{MobileList,MobilePageHeader,MobileSegmentedTabs,MobileTextAction}from'../features/mobile/MobilePrimitives';
-const done=new Set(['done','graded','completed','reviewed']),active=new Set(['processing','queued','pending']),complete=t=>done.has(t.status)||Boolean(t.result?.questionCount),retry=t=>t.task_type==='retry_paper'||t.task_type==='wrong_retry',time=v=>dayjs(v).isValid()?dayjs(v).format('MM/DD HH:mm'):'刚刚';
+import { AlertCircle, Camera, CheckCircle2, ChevronRight, Clock3, Loader2, RotateCcw } from 'lucide-react'
+import { motion } from 'motion/react'
+import dayjs from 'dayjs'
+import EmptyState from '../components/EmptyState'
+import { MobileList, MobileSegmentedTabs, MobileTextAction } from '../features/mobile/MobilePrimitives'
+
+const done = new Set(['done', 'graded', 'completed', 'reviewed'])
+const active = new Set(['processing', 'queued', 'pending'])
+const complete = t => done.has(t.status) || Boolean(t.result?.questionCount)
+const retry = t => t.task_type === 'retry_paper' || t.task_type === 'wrong_retry'
+const time = v => dayjs(v).isValid() ? dayjs(v).format('MM/DD HH:mm') : '刚刚'
+
 // 服务重启/worker 崩溃会让任务永久停在 processing，仅看 status 会一直转圈且无重试入口。
 // 用 started_at 实时判定超时，不落库——避免为此新增第五种任务状态。
-const STALL_MS=30*60*1000,stage=t=>t.status==='failed'?'failed':active.has(t.status)?(Date.now()-new Date(t.started_at||t.created_at).getTime()>STALL_MS?'stalled':'processing'):complete(t)?'completed':'waiting';
+const STALL_MS = 30 * 60 * 1000
+const stage = t => t.status === 'failed' ? 'failed'
+  : active.has(t.status) ? (Date.now() - new Date(t.started_at || t.created_at).getTime() > STALL_MS ? 'stalled' : 'processing')
+  : complete(t) ? 'completed' : 'waiting'
+
 // 失败原因分类：旧文案一律写「图片处理没有完成」，会把 AI 输出格式问题误导成图片问题，
 // 用户照着重拍会走同一条路再次失败。
-const failReason=t=>{const e=String(t.last_error||t.result?.error||'');
-  if(/JSON|格式错误/.test(e))return 'AI 识别结果格式异常，可重试';
-  if(/配额|quota|限流|rate.?limit|429/i.test(e))return 'AI 服务配额不足，稍后重试';
-  if(/超时|timeout/i.test(e))return 'AI 服务响应超时，可重试';
-  if(/分辨率|空白|无法识别|看不清|很抱歉/.test(e))return '图片不够清晰，建议重拍';
-  if(/下载图片失败|URL|OSS|上传未成功|未成功完成/.test(e))return '图片上传未完成，请重新上传';
-  return '处理未完成，可重试'};
-function TaskRow({task,onViewImage,onRetryTask,onOpenReview}){const current=stage(task),wrong=task.result?.wrongCount||0,bad=current==='failed'||current==='stalled',truncated=Number(task.result?.ocrTruncated)>0,Icon=bad?AlertCircle:current==='processing'?Loader2:current==='completed'?CheckCircle2:Clock3,detail=current==='failed'?failReason(task):current==='stalled'?'处理超时，可重试':current==='processing'?'正在整理批改结果':current==='completed'?(truncated?`${wrong} 道题需要关注 · 可能有漏题`:`${wrong} 道题需要关注`):'等待系统开始处理',questionCount=task.result?.questionCount||task.question_count||0,pageCount=(Array.isArray(task.images)?task.images.length:0)||(Array.isArray(task.pages)?task.pages.length:0)||0,name=task.original_name||task.name||(retry(task)?'错题重练':'日常作业');return <div className='border-b px-0.5 py-3 last:border-b-0' style={{borderColor:'var(--border-light)'}}><button type='button' onClick={()=>current==='completed'?onOpenReview(task):onViewImage(task)} className='flex w-full items-start gap-2.5 text-left'><span className='flex h-8 w-8 flex-shrink-0 items-center justify-center rounded-lg' style={{background:bad?'var(--danger-soft)':'var(--primary-soft)',color:bad?'var(--danger)':'var(--primary)'}}><Icon size={16} className={current==='processing'?'animate-spin':''}/></span><span className='min-w-0 flex-1'><span className='flex items-center gap-1.5 min-w-0'><span className='block truncate text-[14px] font-semibold'>{name}</span>{pageCount>1&&<span className='flex-shrink-0 rounded px-1.5 py-0.5 text-[11px] font-medium' style={{background:'var(--primary-soft)',color:'var(--primary)'}}>共{pageCount}页</span>}</span><span className='mt-0.5 block truncate text-[12px]' style={{color:bad?'var(--danger)':truncated&&current==='completed'?'var(--warning, #b45309)':'var(--text-secondary)'}}>{time(task.created_at)}{pageCount>1?` · ${pageCount} 页合并`:''}{questionCount?` · ${questionCount} 道题`:''} · {detail}</span></span><ChevronRight size={15} className='mt-1' style={{color:'var(--text-tertiary)'}}/></button>{bad&&<div className='mt-1 pl-10'><MobileTextAction onClick={()=>onRetryTask(task.id)}><RotateCcw size={13}/>{current==='stalled'?'重新处理':'重新上传'}</MobileTextAction></div>}{current==='completed'&&truncated&&<div className='mt-1 pl-10'><MobileTextAction onClick={()=>onRetryTask(task.id)}><RotateCcw size={13}/>重新识别</MobileTextAction></div>}{current==='completed'&&wrong>0&&<div className='mt-1 pl-10'><MobileTextAction onClick={()=>onOpenReview(task)}>查看批改结果<ChevronRight size={13}/></MobileTextAction></div>}</div>}
-export default function ProcessingPageV2({currentStudent,tasks,filteredTasks,isLoadingTasks,isInitializing,processingFilter,onFilterChange,onViewImage,onRetryTask,onOpenReview}){const all=(Array.isArray(tasks)?tasks:[]).filter(t=>t.student_id===currentStudent?.id),visible=Array.isArray(filteredTasks)?filteredTasks:[],tabs=[{id:'all',label:'全部',count:all.length},{id:'homework',label:'作业',count:all.filter(t=>!retry(t)).length},{id:'retry',label:'重练',count:all.filter(retry).length}];return <motion.div initial={{opacity:0,x:16}} animate={{opacity:1,x:0}} className='mobile-page mx-auto w-full max-w-lg px-4 pb-6 pt-5'><MobilePageHeader title='作业'/><MobileSegmentedTabs items={tabs} value={processingFilter} onChange={onFilterChange} ariaLabel='作业类型'/>{isLoadingTasks||isInitializing?<div className='space-y-3'><div className='h-20 animate-pulse border-y' style={{background:'var(--bg-secondary)'}}/><div className='h-20 animate-pulse border-y' style={{background:'var(--bg-secondary)'}}/></div>:visible.length===0?<EmptyState icon={Camera} title='还没有作业记录' description='拍一份作业后，批改进度会显示在这里' className='py-16'/>:<MobileList>{visible.map((task,index)=><TaskRow key={task.id||index} task={task} onViewImage={onViewImage} onRetryTask={onRetryTask} onOpenReview={onOpenReview}/>)}</MobileList>}<p className='mt-4 text-[12px]' style={{color:'var(--text-tertiary)'}}>批改完成后，错题会自动进入错题本</p></motion.div>}
+const failReason = t => {
+  const e = String(t.last_error || t.result?.error || '')
+  if (/JSON|格式错误/.test(e)) return 'AI 识别结果格式异常，可重试'
+  if (/配额|quota|限流|rate.?limit|429/i.test(e)) return 'AI 服务配额不足，稍后重试'
+  if (/超时|timeout/i.test(e)) return 'AI 服务响应超时，可重试'
+  if (/分辨率|空白|无法识别|看不清|很抱歉/.test(e)) return '图片不够清晰，建议重拍'
+  if (/下载图片失败|URL|OSS|上传未成功|未成功完成/.test(e)) return '图片上传未完成，请重新上传'
+  return '处理未完成，可重试'
+}
+
+// 一行一动作：完成行整行可点开批改结果；失败/卡住行只保留"重新处理"；
+// 处理中/等待行是纯状态展示，不可点（避免点开黑屏或无效跳转）。
+function TaskRow({ task, onRetryTask, onOpenReview }) {
+  const current = stage(task)
+  const wrong = task.result?.wrongCount || 0
+  const questionCount = task.result?.questionCount || task.question_count || 0
+  const truncated = Number(task.result?.ocrTruncated) > 0
+  const bad = current === 'failed' || current === 'stalled'
+  const clickable = current === 'completed'
+  const Icon = bad ? AlertCircle : current === 'processing' ? Loader2 : current === 'completed' ? CheckCircle2 : Clock3
+  const pageCount = (Array.isArray(task.images) ? task.images.length : 0) || (Array.isArray(task.pages) ? task.pages.length : 0) || 0
+  const name = retry(task) ? '错题重练' : '日常作业'
+  const detail = current === 'failed' ? failReason(task)
+    : current === 'stalled' ? '处理超时，可重试'
+    : current === 'processing' ? '正在整理批改结果'
+    : current === 'completed'
+      ? (truncated
+        ? `${wrong} 道需要关注 · 可能有漏题`
+        : wrong > 0
+          ? (questionCount ? `${wrong}/${questionCount} 道需要关注` : `${wrong} 道需要关注`)
+          : (questionCount ? `${questionCount} 道题全部正确` : '批改完成'))
+    : '等待系统开始处理'
+
+  const body = (
+    <>
+      <span className='flex h-8 w-8 flex-shrink-0 items-center justify-center rounded-lg' style={{ background: bad ? 'var(--danger-soft)' : 'var(--primary-soft)', color: bad ? 'var(--danger)' : 'var(--primary)' }}>
+        <Icon size={16} className={current === 'processing' ? 'animate-spin' : ''} />
+      </span>
+      <span className='min-w-0 flex-1'>
+        <span className='flex items-center gap-1.5 min-w-0'>
+          <span className='block truncate text-[14px] font-semibold'>{name}</span>
+          {pageCount > 1 && <span className='flex-shrink-0 rounded px-1.5 py-0.5 text-[11px] font-medium' style={{ background: 'var(--primary-soft)', color: 'var(--primary)' }}>共{pageCount}页</span>}
+        </span>
+        <span className='mt-0.5 block truncate text-[12px]' style={{ color: bad ? 'var(--danger)' : truncated && current === 'completed' ? 'var(--warning, #b45309)' : 'var(--text-secondary)' }}>
+          {time(task.created_at)} · {detail}
+        </span>
+      </span>
+      {clickable && <ChevronRight size={15} className='mt-1' style={{ color: 'var(--text-tertiary)' }} />}
+    </>
+  )
+
+  return <div className='border-b px-0.5 py-3 last:border-b-0' style={{ borderColor: 'var(--border-light)' }}>
+    {clickable ? (
+      <button type='button' onClick={() => onOpenReview(task)} className='flex w-full items-start gap-2.5 text-left'>
+        {body}
+      </button>
+    ) : (
+      <div className='flex items-start gap-2.5'>{body}</div>
+    )}
+    {bad && <div className='mt-1 pl-10'>
+      <MobileTextAction onClick={() => onRetryTask(task.id)}><RotateCcw size={13} />{current === 'stalled' ? '重新处理' : '重新上传'}</MobileTextAction>
+    </div>}
+    {clickable && truncated && <div className='mt-1 pl-10'>
+      <MobileTextAction onClick={() => onRetryTask(task.id)}><RotateCcw size={13} />重新识别</MobileTextAction>
+    </div>}
+  </div>
+}
+
+export default function ProcessingPageV2({ currentStudent, tasks, filteredTasks, isLoadingTasks, isInitializing, processingFilter, onFilterChange, onRetryTask, onOpenReview }) {
+  const all = (Array.isArray(tasks) ? tasks : []).filter(t => t.student_id === currentStudent?.id)
+  const visible = Array.isArray(filteredTasks) ? filteredTasks : []
+  const tabs = [
+    { id: 'all', label: '全部', count: all.length },
+    { id: 'homework', label: '作业', count: all.filter(t => !retry(t)).length },
+    { id: 'retry', label: '重练', count: all.filter(retry).length }
+  ]
+  return <motion.div initial={{ opacity: 0, x: 16 }} animate={{ opacity: 1, x: 0 }} className='mobile-page mx-auto w-full max-w-lg px-4 pb-6 pt-5'>
+    <MobileSegmentedTabs items={tabs} value={processingFilter} onChange={onFilterChange} ariaLabel='作业类型' />
+    {isLoadingTasks || isInitializing
+      ? <div className='space-y-3'>
+          <div className='h-20 animate-pulse border-y' style={{ background: 'var(--bg-secondary)' }} />
+          <div className='h-20 animate-pulse border-y' style={{ background: 'var(--bg-secondary)' }} />
+        </div>
+      : visible.length === 0
+        ? <EmptyState icon={Camera} title='还没有作业记录' description='拍一份作业后，批改进度会显示在这里' className='py-16' />
+        : <MobileList>{visible.map((task, index) => <TaskRow key={task.id || index} task={task} onRetryTask={onRetryTask} onOpenReview={onOpenReview} />)}</MobileList>}
+    <p className='mt-4 text-[12px]' style={{ color: 'var(--text-tertiary)' }}>批改完成后，错题会自动进入错题本</p>
+  </motion.div>
+}

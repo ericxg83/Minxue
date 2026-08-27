@@ -536,9 +536,9 @@ button {
   .mobile-page-wrongbook { padding-bottom: 128px !important; }
 }
 
-/* The bottom tabs already identify the four primary mobile destinations. */
+/* 移动端页面模型：底部 Tab 即功能页（作业/错题本/重练）的标题，功能页不渲染页标题头，
+   进入即内容；首页是唯一带大标题的情境页（header 非 .mobile-page-header，不受此约束）。 */
 .phone-frame .mobile-page { padding-top: 8px !important; }
-.phone-frame .mobile-page-header { display: none !important; }
 .phone-frame .mobile-page > header:not(.mobile-page-header) { margin-bottom: 14px !important; }
 .phone-frame .mobile-page > header:not(.mobile-page-header) h1 { font-size: 18px !important; line-height: 1.35 !important; }
 .phone-frame .mobile-page > header:not(.mobile-page-header) p { font-size: 11px !important; line-height: 1.35 !important; }
