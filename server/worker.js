@@ -17,7 +17,7 @@ import { cropAndUploadQuestionRegion } from './utils/cropAndUpload.js'
 import { refineFigureBoxOnPage } from './utils/figureRegionRefiner.js'
 import { generateTextFingerprint, generatePHash, PARSER_VERSION, TEXT_SIMILARITY_THRESHOLD } from './utils/questionFingerprint.js'
 import { uploadFilesWithRetry } from './services/uploadRetryManager.js'
-import { judgeAnswer, normalizeQuestionType, normalizeChoiceAnswer, extractChoiceLetters, isGradingCommentAnswer } from './services/judgeService.js'
+import { judgeAnswer, normalizeQuestionType, normalizeChoiceAnswer, extractChoiceLetters, isGradingCommentAnswer, stripAnswerScaffolding } from './services/judgeService.js'
 import { normalizeSectionName, splitSubAnswers, splitOcrQuestionsBySubNo } from './services/answerParseService.js'
 import { classifyQuestionLocally } from './utils/localTagger.js'
 import { finalizeGradingBatch } from './services/gradingFinalizer.js'
@@ -1285,7 +1285,8 @@ function normalizeGeneratedAnswer(question, candidateAnswer) {
     // 教材要求的最简形式是 "√6:2"。学生写了规范答案反而对不上标准答案，
     // 这个不规范的答案还会沉淀进答案库和讲义。只改写能完整解析且数值自检通过的形态。
     // 注意只作用于 AI 现场生成的答案；答案库/OCR 抄来的印刷答案不经过这里。
-    return rationalizeAnswer(candidateAnswer)
+    // 先剥掉"答案为""为 …"这类叙述脚手架，再有理化 —— 否则前缀会随答案沉淀进答案库。
+    return rationalizeAnswer(stripAnswerScaffolding(candidateAnswer))
   }
   // AI 现场生成的选择题答案常是整句话（"选项 C"、"为选项D"、"sin∠CAB = 3/5，选(B)"）。
   // 严格归一（normalizeChoiceAnswer）对这些返回空串，原样入库就会让"学生选对却判错"，

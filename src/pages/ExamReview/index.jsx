@@ -1,6 +1,6 @@
-import { useState, useMemo, useRef, useCallback } from 'react'
+import { useState, useMemo, useRef, useCallback, useEffect } from 'react'
 import {
-  ChevronLeft, ChevronRight, CheckCircle2, XCircle, Ban,
+  ChevronLeft, ChevronRight, CheckCircle2, XCircle,
   Loader2, Trash2, ChevronUp, ChevronDown, Image as ImageIcon,
   AlertTriangle, Clock, Pencil
 } from 'lucide-react'
@@ -15,81 +15,172 @@ import { REVIEW_STATUS } from '../../utils/reviewDecision'
 // 需要老师人工介入的状态（与 PC 端 needsAttentionCount 同口径）
 const ATTENTION_SOURCES = ['uncertain', 'error', 'processing']
 
-// 复核状态小标签：彩色文字 + 图标，无底色块（颜色只做强调，不铺背景）
-function StatusTag({ Icon, text, color, note }) {
+// 答案超过这个字符数就不再挤两列：136px 的列宽塞长答案比整宽单列更费高度
+const ANSWER_STACK_THRESHOLD = 14
+
+// 编辑态是否值得显示渲染预览（纯数字/字母不需要）
+const hasMathMarkup = (s) => /[\\^_${}]/.test(String(s || ''))
+
+// AI 判定小标签：只表达 AI 的原始结论；人工结论由页脚判定按钮的选中态表达，不再单独占一行
+function AiJudgeTag({ Icon, text, color, note }) {
   return (
     <span style={{ display: 'inline-flex', alignItems: 'center', gap: 3, flexShrink: 0 }}>
-      <span style={{ display: 'inline-flex', alignItems: 'center', gap: 3, fontSize: 'var(--fs-12)', fontWeight: 600, color }}>
-        <Icon size={13} />
-        {text}
-      </span>
-      {note && <span style={{ fontSize: 'var(--fs-10)', color: 'var(--text-tertiary)' }}>{note}</span>}
+      <Icon size={12} style={{ color }} />
+      <span style={{ fontSize: 'var(--fs-11)', fontWeight: 600, color }}>{text}</span>
+      {note && <span style={{ fontSize: 'var(--fs-10)', color: 'var(--text-tertiary)' }}>· {note}</span>}
     </span>
   )
 }
 
-// 轻量筛选 chip：文字 + 状态点，选中才出现浅色底
-function FilterChip({ label, count, dot, active, onClick }) {
+// 复核范围下拉：原先是一整行 6 个统计 chip（其中三个常年为 0）占掉 34px 首屏高度，
+// 收进标题行后只剩一个按钮，且零值范围直接不列出。
+function RangeMenu({ options, value, onChange }) {
+  const [open, setOpen] = useState(false)
+  const current = options.find(o => o.key === value) || options[0]
+
+  useEffect(() => {
+    if (!open) return
+    const onKey = (e) => { if (e.key === 'Escape') setOpen(false) }
+    document.addEventListener('keydown', onKey)
+    return () => document.removeEventListener('keydown', onKey)
+  }, [open])
+
+  if (!current) return null
+
   return (
-    <button
-      type="button"
-      onClick={onClick}
-      style={{
-        display: 'inline-flex', alignItems: 'center', gap: 4, flexShrink: 0,
-        padding: '3px 8px', borderRadius: 'var(--radius-full)',
-        border: 'none', cursor: 'pointer', whiteSpace: 'nowrap',
-        background: active ? 'var(--primary-soft)' : 'transparent',
-        color: active ? COLORS.primary : COLORS.textSecondary,
-        fontSize: 'var(--fs-11)', fontWeight: active ? 600 : 500
-      }}
-    >
-      <span style={{ width: 6, height: 6, borderRadius: 'var(--radius-full)', background: dot, flexShrink: 0 }} />
-      {label} {count}
-    </button>
+    <div style={{ position: 'relative', flexShrink: 0 }}>
+      <button
+        type="button"
+        onClick={() => setOpen(v => !v)}
+        aria-haspopup="listbox"
+        aria-expanded={open}
+        style={{
+          display: 'inline-flex', alignItems: 'center', gap: 4,
+          height: 26, padding: '0 8px', borderRadius: 'var(--radius-full)',
+          border: `1px solid ${COLORS.border}`, background: COLORS.card, cursor: 'pointer',
+          fontSize: 'var(--fs-12)', fontWeight: 600, color: COLORS.text, whiteSpace: 'nowrap'
+        }}
+      >
+        <span style={{ width: 6, height: 6, borderRadius: 'var(--radius-full)', background: current.dot, flexShrink: 0 }} />
+        {current.label} {current.count}
+        <ChevronDown size={12} style={{ color: 'var(--text-tertiary)' }} />
+      </button>
+      {open && (
+        <>
+          <div onClick={() => setOpen(false)} style={{ position: 'fixed', inset: 0, zIndex: 1 }} />
+          <div
+            role="listbox"
+            style={{
+              position: 'absolute', top: '100%', right: 0, marginTop: 4, zIndex: 2,
+              minWidth: 150, padding: 4, background: COLORS.card,
+              border: `1px solid ${COLORS.border}`, borderRadius: 'var(--radius-8)',
+              boxShadow: '0 8px 24px rgba(0,0,0,0.12)'
+            }}
+          >
+            {options.map(o => (
+              <button
+                key={o.key}
+                type="button"
+                role="option"
+                aria-selected={o.key === value}
+                onClick={() => { setOpen(false); onChange(o.key) }}
+                style={{
+                  display: 'flex', width: '100%', alignItems: 'center', gap: 6,
+                  padding: '7px 8px', border: 'none', borderRadius: 'var(--radius-6)',
+                  background: o.key === value ? 'var(--primary-soft)' : 'transparent',
+                  color: o.key === value ? COLORS.primary : COLORS.text,
+                  fontSize: 'var(--fs-13)', fontWeight: o.key === value ? 600 : 500,
+                  cursor: 'pointer', textAlign: 'left'
+                }}
+              >
+                <span style={{ width: 6, height: 6, borderRadius: 'var(--radius-full)', background: o.dot, flexShrink: 0 }} />
+                <span style={{ flex: 1 }}>{o.label}</span>
+                <span style={{ fontSize: 'var(--fs-12)', color: 'var(--text-tertiary)' }}>{o.count}</span>
+              </button>
+            ))}
+          </div>
+        </>
+      )}
+    </div>
   )
 }
 
-// 答案对比的单列：默认纯文本展示（点击进编辑态），不是常驻输入框
-function AnswerCell({ label, value, placeholder, warn, editing, onStartEdit, onChange, onDone }) {
+// 答案对比的单列：默认纯文本展示，不是常驻输入框。
+// 学生答案那一列的主点击是"看原卷"——复核最常做的动作是核对 AI 抄的字对不对，
+// 改字是次要动作，所以改字收进旁边的铅笔按钮。参考答案没有原卷可对，整格即编辑。
+function AnswerCell({
+  label, value, placeholder, warn, editing,
+  onStartEdit, onChange, onDone, onViewPaper
+}) {
+  const textStyle = {
+    fontSize: 'var(--fs-16)', fontWeight: 600, lineHeight: 1.45,
+    color: warn ? 'var(--warning)' : (value ? COLORS.text : 'var(--text-tertiary)'),
+    overflowWrap: 'anywhere', textAlign: 'left'
+  }
+
   return (
     <div style={{ flex: 1, minWidth: 0 }}>
-      <div style={{ fontSize: 'var(--fs-11)', color: COLORS.textSecondary, marginBottom: 2 }}>
+      <div style={{
+        display: 'flex', alignItems: 'center', gap: 4, marginBottom: 2,
+        fontSize: 'var(--fs-11)', color: COLORS.textSecondary
+      }}>
         {label}
+        {onViewPaper && (
+          <span style={{ display: 'inline-flex', alignItems: 'center', gap: 2, color: COLORS.primary }}>
+            <ImageIcon size={11} />原卷
+          </span>
+        )}
       </div>
       {editing ? (
-        <input
-          type="text"
-          autoFocus
-          value={value}
-          onChange={(e) => onChange(e.target.value)}
-          onBlur={onDone}
-          onKeyDown={(e) => { if (e.key === 'Enter') onDone() }}
-          placeholder={placeholder}
-          style={{
-            width: '100%', padding: '4px 6px', borderRadius: 'var(--radius-5)',
-            border: `1px solid ${COLORS.primary}`,
-            fontSize: 'var(--fs-14)', color: COLORS.text, outline: 'none',
-            boxSizing: 'border-box', background: COLORS.card
-          }}
-        />
+        <>
+          <input
+            type="text"
+            autoFocus
+            aria-label={label}
+            value={value}
+            onChange={(e) => onChange(e.target.value)}
+            onBlur={onDone}
+            onKeyDown={(e) => { if (e.key === 'Enter') onDone() }}
+            placeholder={placeholder}
+            style={{
+              width: '100%', padding: '4px 6px', borderRadius: 'var(--radius-5)',
+              border: `1px solid ${COLORS.primary}`,
+              fontSize: 'var(--fs-14)', color: COLORS.text, outline: 'none',
+              boxSizing: 'border-box', background: COLORS.card
+            }}
+          />
+          {hasMathMarkup(value) && (
+            <div style={{
+              display: 'flex', alignItems: 'baseline', gap: 4, marginTop: 3,
+              fontSize: 'var(--fs-11)', color: 'var(--text-tertiary)'
+            }}>
+              预览<span style={{ color: COLORS.text }}><MathText content={value} /></span>
+            </div>
+          )}
+        </>
       ) : (
-        <button
-          onClick={onStartEdit}
-          style={{
-            width: '100%', background: 'none', border: 'none', padding: 0,
-            cursor: 'pointer', textAlign: 'left',
-            display: 'flex', alignItems: 'flex-start', gap: 5
-          }}
-        >
-          <span style={{
-            fontSize: 'var(--fs-16)', fontWeight: 600, lineHeight: 1.45,
-            color: warn ? 'var(--warning)' : (value ? COLORS.text : 'var(--text-tertiary)'),
-            overflowWrap: 'anywhere'
-          }}>
+        <div style={{ display: 'flex', alignItems: 'flex-start', gap: 4 }}>
+          <button
+            onClick={onViewPaper || onStartEdit}
+            aria-label={onViewPaper ? `${label}：查看原卷核对` : `${label}：点击编辑`}
+            style={{
+              flex: 1, minWidth: 0, background: 'none', border: 'none', padding: 0,
+              cursor: 'pointer', ...textStyle
+            }}
+          >
             {value ? <MathText content={value} /> : placeholder}
-          </span>
-          <Pencil size={11} style={{ flexShrink: 0, color: 'var(--text-tertiary)', marginTop: 5 }} />
-        </button>
+          </button>
+          <button
+            onClick={onStartEdit}
+            aria-label={`编辑${label}`}
+            style={{
+              flexShrink: 0, background: 'none', border: 'none', padding: '2px 0 0',
+              cursor: 'pointer', lineHeight: 1
+            }}
+          >
+            <Pencil size={11} style={{ color: 'var(--text-tertiary)' }} />
+          </button>
+        </div>
       )}
     </div>
   )
@@ -146,22 +237,44 @@ export default function ExamReview({ task, onClose, onSave, onViewImage }) {
   const pageCount = Array.isArray(task?.images) ? task.images.length : 0
 
   // ── 题号切换 ──
+  // 手动翻页要撤掉待执行的自动前进，否则刚跳过去又被 250ms 前的定时器带走
+  const advanceTimerRef = useRef(null)
+  const clearAdvance = useCallback(() => {
+    if (advanceTimerRef.current) {
+      clearTimeout(advanceTimerRef.current)
+      advanceTimerRef.current = null
+    }
+  }, [])
+  useEffect(() => clearAdvance, [clearAdvance])
+
   const jumpToQuestion = useCallback((index) => {
     if (index < 0 || index >= displayQuestions.length) return
+    clearAdvance()
     setCurrentIndex(index)
     setShowAnswer(false)
     setConfirmComplete(false)
     setEditingField(null)
-  }, [displayQuestions.length])
+  }, [displayQuestions.length, clearAdvance])
 
-  // 切换筛选范围：再次点击同一范围回到「需处理」
+  // 切换复核范围（下拉选择，不再有"再点一次退回"的隐含语义）
   const applyFilter = useCallback((next) => {
-    setFilter(prev => (next === 'attention' ? 'attention' : (prev === next ? 'attention' : next)))
+    clearAdvance()
+    setFilter(next)
     setCurrentIndex(0)
     setShowAnswer(false)
     setConfirmComplete(false)
     setEditingField(null)
-  }, [])
+  }, [clearAdvance])
+
+  // 整份作业都没有要人工介入的题时，默认落到「全部」——否则打开就是空态，
+  // 想抽查还得多点一次「查看全部 N 题」。只在首次拿到题目时判一次，之后尊重手动选择。
+  const autoRangeRef = useRef(false)
+  useEffect(() => {
+    if (autoRangeRef.current || validQuestions.length === 0) return
+    autoRangeRef.current = true
+    const hasAttention = validQuestions.some(q => ATTENTION_SOURCES.includes(getStatusInfo(q).source))
+    if (!hasAttention) setFilter('all')
+  }, [validQuestions])
 
   // ── 关闭：自动落盘未保存的修改（弱化"保存"概念），失败则留在页面避免丢改动 ──
   const handleClose = useCallback(async () => {
@@ -192,6 +305,23 @@ export default function ExamReview({ task, onClose, onSave, onViewImage }) {
     return null
   }, [currentQuestion, edits])
 
+  // 判定即前进：点完正确/错误先显示 250ms 选中态再自动跳下一题，
+  // 11 题卷的点击数从 22 降到 11。再点同一判定是"撤回结论"，不前进；「上一题」可回退。
+  const judgeAndAdvance = useCallback((action) => {
+    if (!currentQuestion) return
+    const isUndo = reviewAction === action
+    handleSetReviewAction(action, currentQuestion.id)
+    if (isUndo || currentIndex >= displayQuestions.length - 1) return
+    clearAdvance()
+    advanceTimerRef.current = setTimeout(() => {
+      advanceTimerRef.current = null
+      jumpToQuestion(currentIndex + 1)
+    }, 250)
+  }, [
+    currentQuestion, reviewAction, currentIndex, displayQuestions.length,
+    handleSetReviewAction, jumpToQuestion, clearAdvance
+  ])
+
   const handleCompleteClick = useCallback(() => {
     if (needsAttentionCount > 0 && !confirmComplete) {
       setConfirmComplete(true)
@@ -221,6 +351,11 @@ export default function ExamReview({ task, onClose, onSave, onViewImage }) {
 
   const currentReferenceAnswer = edits[currentQuestion?.id]?.answer ?? currentQuestion?.answer ?? ''
 
+  // 长答案不挤两列：136px 的列宽下「底角的余弦值等于 3/4 或 1/3」这类整句答案会折成一堆碎行，
+  // 比整宽上下两行更费高度。超阈值就退回单列。
+  const stackAnswers = String(currentStudentAnswer || '').length > ANSWER_STACK_THRESHOLD
+    || String(currentReferenceAnswer || '').length > ANSWER_STACK_THRESHOLD
+
   // 当前题所在页的原卷图：复核要核对 AI 抄的学生答案是否等于纸上写的，必须能看到原图。
   // questions.image_url 存的是整页图而非题目切图，因此按 page_number 从 task.images 定位。
   const paperImage = useMemo(() => {
@@ -239,31 +374,24 @@ export default function ExamReview({ task, onClose, onSave, onViewImage }) {
     [validQuestions, currentQuestion]
   )
 
-  // AI 对这道题的原始判定（不含本次人工修改；人工结论单独显示在「复核结果」）
+  // AI 对这道题的原始判定（不含本次人工修改）。人工结论不再单独占一行，
+  // 由页脚「正确 / 错误」按钮的选中态表达 —— 同一件事只说一次。
   const aiJudge = useMemo(() => {
     if (!currentQuestion) return null
     if (currentQuestion.answer_source === 'blank') {
       return { text: '未作答', color: 'var(--warning)', Icon: AlertTriangle }
     }
     if (currentQuestion.is_correct === true) {
-      return { text: '判对', color: 'var(--success)', Icon: CheckCircle2 }
+      return { text: 'AI判对', color: 'var(--success)', Icon: CheckCircle2 }
     }
     if (currentQuestion.is_correct === false) {
-      return { text: '判错', color: 'var(--danger)', Icon: XCircle }
+      return { text: 'AI判错', color: 'var(--danger)', Icon: XCircle }
     }
     if (currentQuestion.confidence == null) {
       return { text: '处理中', color: COLORS.textSecondary, Icon: Clock }
     }
-    return { text: '异常', color: 'var(--warning)', Icon: AlertTriangle }
+    return { text: 'AI异常', color: 'var(--warning)', Icon: AlertTriangle }
   }, [currentQuestion])
-
-  // 统一的「当前复核状态」：人工结论优先，未判定则待确认
-  const reviewResult = useMemo(() => {
-    if (reviewAction === 'correct') return { text: '正确', color: 'var(--success)', Icon: CheckCircle2, decided: true }
-    if (reviewAction === 'wrong') return { text: '错误', color: 'var(--danger)', Icon: XCircle, decided: true }
-    if (reviewAction === 'excluded') return { text: '已排除', color: COLORS.textSecondary, Icon: Ban, decided: true }
-    return { text: '待确认', color: 'var(--warning)', Icon: Clock, decided: false }
-  }, [reviewAction])
 
   // 题型文案
   const typeText = currentQuestion?.question_type === 'choice' ? '选择题'
@@ -318,138 +446,154 @@ export default function ExamReview({ task, onClose, onSave, onViewImage }) {
     )
   }
 
-  // ── 弹窗固定页眉：题号导航 + 轻量状态筛选 ──
+  // ── 复核范围下拉的选项：零值范围不列出（三个常年为 0 的 chip 原先白占一行） ──
+  const rangeOptions = [
+    { key: 'attention', label: '需处理', count: needsAttentionCount, dot: COLORS.warning },
+    { key: 'uncertain', label: '待复核', count: stats.uncertain, dot: COLORS.warning },
+    { key: 'error', label: 'AI异常', count: stats.error, dot: 'var(--warning)' },
+    { key: 'ai_correct', label: 'AI正确', count: stats.ai_correct, dot: COLORS.success },
+    { key: 'ai_wrong', label: 'AI错误', count: stats.ai_wrong, dot: COLORS.danger },
+    { key: 'all', label: '全部', count: validQuestions.length, dot: 'var(--text-tertiary)' }
+  ].filter(o => o.count > 0 || o.key === 'all' || o.key === filter)
+
+  // ── 弹窗固定页眉：只剩题号导航一行（筛选已收进标题行） ──
   const header = (
-    <div style={{ borderBottom: `1px solid ${COLORS.border}` }}>
-      {/* 题号快速导航：当前题实心主色，其余靠右上角状态点表达，不整圈铺色 */}
-      <div style={{
-        display: 'flex', gap: 8, padding: '6px 16px', overflowX: 'auto', scrollbarWidth: 'none'
-      }}>
-        {displayQuestions.map((q, i) => {
-          const info = getStatusInfo({ ...q, ...(edits[q.id] || {}) })
-          const dotColor = DOT_COLORS[info.source] || COLORS.warning
-          const isCurrent = i === currentIndex
-          // 圆点上是全卷序号，与题目标题的「第 N 题」一致
-          const absNo = validQuestions.findIndex(x => x.id === q.id) + 1
-          return (
-            <button
-              key={q.id}
-              onClick={() => jumpToQuestion(i)}
-              title={info.text}
-              style={{
-                position: 'relative', width: 30, height: 30, borderRadius: '50%', flexShrink: 0,
-                border: 'none', cursor: 'pointer',
-                background: isCurrent ? COLORS.primary : 'var(--bg-secondary)',
-                color: isCurrent ? '#fff' : COLORS.text,
-                fontSize: 'var(--fs-12)', fontWeight: 600,
-                display: 'flex', alignItems: 'center', justifyContent: 'center',
-                opacity: info.isGreyed ? 0.45 : 1,
-                transition: 'background 0.15s'
-              }}
-            >
-              {absNo}
-              {!isCurrent && (
-                <span style={{
-                  position: 'absolute', top: -1, right: -1, width: 9, height: 9,
-                  borderRadius: '50%', background: dotColor, border: '1.5px solid #fff'
-                }} />
-              )}
-            </button>
-          )
-        })}
-      </div>
-      {/* 统计降级为轻量筛选入口，不再占据首屏主视觉 */}
-      <div style={{
-        display: 'flex', gap: 4, padding: '0 16px 6px', overflowX: 'auto', scrollbarWidth: 'none'
-      }}>
-        <FilterChip label="需处理" count={needsAttentionCount} dot={COLORS.warning}
-          active={filter === 'attention'} onClick={() => applyFilter('attention')} />
-        <FilterChip label="待复核" count={stats.uncertain} dot={COLORS.warning}
-          active={filter === 'uncertain'} onClick={() => applyFilter('uncertain')} />
-        <FilterChip label="AI异常" count={stats.error} dot="var(--warning)"
-          active={filter === 'error'} onClick={() => applyFilter('error')} />
-        <FilterChip label="AI正确" count={stats.ai_correct} dot={COLORS.success}
-          active={filter === 'ai_correct'} onClick={() => applyFilter('ai_correct')} />
-        <FilterChip label="AI错误" count={stats.ai_wrong} dot={COLORS.danger}
-          active={filter === 'ai_wrong'} onClick={() => applyFilter('ai_wrong')} />
-        <FilterChip label="全部" count={validQuestions.length} dot="var(--text-tertiary)"
-          active={filter === 'all'} onClick={() => applyFilter('all')} />
-      </div>
+    <div style={{
+      display: 'flex', gap: 6, padding: '2px 16px 6px', overflowX: 'auto', scrollbarWidth: 'none',
+      borderBottom: `1px solid ${COLORS.border}`
+    }}>
+      {displayQuestions.map((q, i) => {
+        const info = getStatusInfo({ ...q, ...(edits[q.id] || {}) })
+        const dotColor = DOT_COLORS[info.source] || COLORS.warning
+        const isCurrent = i === currentIndex
+        // 圆点上是全卷序号，与题目标题的「第 N 题」一致
+        const absNo = validQuestions.findIndex(x => x.id === q.id) + 1
+        return (
+          <button
+            key={q.id}
+            onClick={() => jumpToQuestion(i)}
+            title={info.text}
+            aria-label={`第 ${absNo} 题 · ${info.text}`}
+            aria-current={isCurrent ? 'true' : undefined}
+            style={{
+              position: 'relative', width: 27, height: 27, borderRadius: '50%', flexShrink: 0,
+              border: 'none', cursor: 'pointer',
+              background: isCurrent ? COLORS.primary : 'var(--bg-secondary)',
+              color: isCurrent ? '#fff' : COLORS.text,
+              fontSize: 'var(--fs-12)', fontWeight: 600,
+              display: 'flex', alignItems: 'center', justifyContent: 'center',
+              opacity: info.isGreyed ? 0.45 : 1,
+              transition: 'background 0.15s'
+            }}
+          >
+            {absNo}
+            {!isCurrent && (
+              <span style={{
+                position: 'absolute', top: -1, right: -1, width: 8, height: 8,
+                borderRadius: '50%', background: dotColor, border: '1.5px solid #fff'
+              }} />
+            )}
+          </button>
+        )
+      })}
     </div>
   )
 
   // ── 弹窗固定页脚：上一题 / 下一题 + 完成复核（唯一主 CTA） ──
+  // ── 弹窗固定页脚：主判定（高频）常驻，翻页降为箭头，「完成复核」（一次性）延后升起 ──
+  // 原先固定页脚给了翻页 + 完成复核共 100px，而真正高频的「正确 / 错误」在滚动区里，
+  // 长题要先滚到底才点得到。现在反过来：判定永远在拇指位置。
+  const atFirst = currentIndex === 0
+  const atLast = currentIndex >= displayQuestions.length - 1
+  const showComplete = needsAttentionCount === 0 || atLast
+
+  const navBtnStyle = (disabled) => ({
+    width: 38, height: 40, flexShrink: 0, borderRadius: 'var(--radius-8)', border: 'none',
+    background: 'var(--bg-secondary)', cursor: disabled ? 'default' : 'pointer',
+    color: disabled ? 'var(--text-tertiary)' : COLORS.text,
+    display: 'flex', alignItems: 'center', justifyContent: 'center'
+  })
+
+  const judgeBtnStyle = (active, tone) => ({
+    flex: 1, minWidth: 0, height: 40, borderRadius: 'var(--radius-8)', cursor: 'pointer',
+    border: active ? `1.5px solid var(--${tone})` : `1px solid ${COLORS.border}`,
+    background: active ? `var(--${tone}-soft)` : COLORS.card,
+    color: active ? `var(--${tone})` : COLORS.textSecondary,
+    fontSize: 'var(--fs-14)', fontWeight: 600,
+    display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 5
+  })
+
   const footer = (
     <div style={{
-      display: 'flex', flexDirection: 'column', gap: 8, padding: '10px 16px',
+      display: 'flex', flexDirection: 'column', gap: 6, padding: '6px 16px 8px',
       borderTop: `1px solid ${COLORS.border}`, background: COLORS.card
     }}>
-      <div style={{ display: 'flex', gap: 10 }}>
+      {showComplete && (
         <button
-          onClick={() => jumpToQuestion(currentIndex - 1)}
-          disabled={currentIndex === 0}
+          onClick={handleCompleteClick}
+          disabled={saving}
           style={{
-            flex: 1, height: 36, borderRadius: 'var(--radius-8)', border: 'none',
-            background: 'var(--bg-secondary)', cursor: currentIndex === 0 ? 'default' : 'pointer',
-            fontSize: 'var(--fs-13)', fontWeight: 500,
-            color: currentIndex === 0 ? 'var(--text-tertiary)' : COLORS.text,
-            display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 2
+            width: '100%', height: 36, borderRadius: 'var(--radius-8)', border: 'none',
+            background: confirmComplete ? 'var(--warning)' : (saving ? 'var(--primary-soft)' : COLORS.primary),
+            color: '#fff', cursor: saving ? 'not-allowed' : 'pointer',
+            fontSize: 'var(--fs-14)', fontWeight: 600,
+            display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 6
           }}
         >
-          <ChevronLeft size={15} /> 上一题
+          {saving ? <Loader2 size={14} className="animate-spin" /> : <CheckCircle2 size={15} />}
+          {confirmComplete
+            ? `还有 ${needsAttentionCount} 题未确认，仍要完成？`
+            : needsAttentionCount > 0
+              ? `完成复核（${needsAttentionCount} 题待确认）`
+              : '完成复核'}
+        </button>
+      )}
+      <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+        <button
+          onClick={() => jumpToQuestion(currentIndex - 1)}
+          disabled={atFirst}
+          aria-label="上一题"
+          style={navBtnStyle(atFirst)}
+        >
+          <ChevronLeft size={17} />
+        </button>
+        <button
+          onClick={() => judgeAndAdvance('correct')}
+          aria-pressed={reviewAction === 'correct'}
+          style={judgeBtnStyle(reviewAction === 'correct', 'success')}
+        >
+          <CheckCircle2 size={15} /> 正确
+        </button>
+        <button
+          onClick={() => judgeAndAdvance('wrong')}
+          aria-pressed={reviewAction === 'wrong'}
+          style={judgeBtnStyle(reviewAction === 'wrong', 'danger')}
+        >
+          <XCircle size={15} /> 错误
         </button>
         <button
           onClick={() => jumpToQuestion(currentIndex + 1)}
-          disabled={currentIndex >= displayQuestions.length - 1}
-          style={{
-            flex: 1, height: 36, borderRadius: 'var(--radius-8)', border: 'none',
-            background: 'var(--bg-secondary)',
-            cursor: currentIndex >= displayQuestions.length - 1 ? 'default' : 'pointer',
-            fontSize: 'var(--fs-13)', fontWeight: 500,
-            color: currentIndex >= displayQuestions.length - 1 ? 'var(--text-tertiary)' : COLORS.text,
-            display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 2
-          }}
+          disabled={atLast}
+          aria-label="下一题"
+          style={navBtnStyle(atLast)}
         >
-          下一题 <ChevronRight size={15} />
+          <ChevronRight size={17} />
         </button>
       </div>
-      <button
-        onClick={handleCompleteClick}
-        disabled={saving}
-        style={{
-          width: '100%', height: 40, borderRadius: 'var(--radius-8)', border: 'none',
-          background: confirmComplete ? 'var(--warning)' : (saving ? 'var(--primary-soft)' : COLORS.primary),
-          color: '#fff', cursor: saving ? 'not-allowed' : 'pointer',
-          fontSize: 'var(--fs-15)', fontWeight: 600,
-          display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 6
-        }}
-      >
-        {saving ? <Loader2 size={14} className="animate-spin" /> : <CheckCircle2 size={15} />}
-        {confirmComplete
-          ? `还有 ${needsAttentionCount} 题未确认，仍要完成？`
-          : needsAttentionCount > 0
-            ? `完成复核（${needsAttentionCount} 题待确认）`
-            : '完成复核'}
-      </button>
     </div>
   )
 
   return (
     <BottomSheet
-      title={(
-        <>
-          批改复核
-          <span style={{ marginLeft: 8, fontSize: 'var(--fs-12)', fontWeight: 500, color: 'var(--text-tertiary)' }}>
-            {absoluteIndex + 1}/{validQuestions.length}
-          </span>
-        </>
-      )}
+      title='批改复核'
+      titleAction={<RangeMenu options={rangeOptions} value={filter} onChange={applyFilter} />}
       onClose={handleClose}
       header={header}
       footer={footer}
-      bodyClassName='px-4 pt-2.5 pb-3'
+      showHandle={false}
+      bodyClassName='px-4 pt-2 pb-3'
     >
-      {/* ① 题目头：第几题 / 原卷题号 / 题型，「查看原卷」只作右上角轻量入口 */}
+      {/* ① 题目头：第几题 / 原卷题号 / 题型 + AI 判定（人工结论看页脚按钮的选中态） */}
       <div style={{
         display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between',
         gap: 8, marginBottom: 6
@@ -470,18 +614,11 @@ export default function ExamReview({ task, onClose, onSave, onViewImage }) {
             </span>
           )}
         </div>
-        {paperImage && onViewImage && (
-          <button
-            onClick={() => onViewImage(paperImage)}
-            style={{
-              flexShrink: 0, display: 'flex', alignItems: 'center', gap: 3,
-              background: 'none', border: 'none', padding: '2px 4px', cursor: 'pointer',
-              fontSize: 'var(--fs-12)', fontWeight: 500, color: COLORS.primary
-            }}
-          >
-            <ImageIcon size={13} />
-            原卷
-          </button>
+        {aiJudge && (
+          <AiJudgeTag
+            {...aiJudge}
+            note={wrongIdMap[currentQuestion.id] && reviewAction !== 'excluded' ? '已入错题本' : null}
+          />
         )}
       </div>
 
@@ -523,11 +660,13 @@ export default function ExamReview({ task, onClose, onSave, onViewImage }) {
         </div>
       )}
 
-      {/* ④ 答案对比：一屏两列直接对照，点击才进编辑态，不再占两个大输入框 */}
+      {/* ④ 答案对比：短答案两列直接对照；长答案退回整宽单列。
+          学生答案那格主点击 = 弹原卷图（核对 AI 抄的字），铅笔才是改字。 */}
       <div style={{
-        display: 'flex', gap: 12,
+        display: 'flex', flexDirection: stackAnswers ? 'column' : 'row',
+        gap: stackAnswers ? 8 : 12,
         borderTop: `1px solid ${COLORS.border}`, borderBottom: `1px solid ${COLORS.border}`,
-        padding: '9px 0', marginBottom: 10
+        padding: '9px 0', marginBottom: 8
       }}>
         <AnswerCell
           label="学生答案"
@@ -538,8 +677,11 @@ export default function ExamReview({ task, onClose, onSave, onViewImage }) {
           onStartEdit={() => setEditingField('student')}
           onChange={(v) => handleAnswerChange(currentQuestion.id, v)}
           onDone={() => setEditingField(null)}
+          onViewPaper={paperImage && onViewImage ? () => onViewImage(paperImage) : undefined}
         />
-        <div style={{ width: 1, background: COLORS.border, flexShrink: 0 }} />
+        <div style={stackAnswers
+          ? { height: 1, background: COLORS.border }
+          : { width: 1, background: COLORS.border, flexShrink: 0 }} />
         <AnswerCell
           label="参考答案"
           value={currentReferenceAnswer}
@@ -551,50 +693,8 @@ export default function ExamReview({ task, onClose, onSave, onViewImage }) {
         />
       </div>
 
-      {/* ⑤ AI判定 + 复核结果 + 人工确认：状态只在这里统一表达一次 */}
-      <div style={{ marginBottom: 4 }}>
-        <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap', marginBottom: 8 }}>
-          <span style={{ fontSize: 'var(--fs-11)', color: COLORS.textSecondary }}>AI判定</span>
-          {aiJudge && <StatusTag {...aiJudge} />}
-          <span style={{ width: 1, height: 10, background: COLORS.border }} />
-          <span style={{ fontSize: 'var(--fs-11)', color: COLORS.textSecondary }}>复核结果</span>
-          <StatusTag
-            {...reviewResult}
-            text={reviewResult.decided ? `${reviewResult.text} ✓` : reviewResult.text}
-            note={wrongIdMap[currentQuestion.id] && reviewAction !== 'excluded' ? '已入错题本' : null}
-          />
-        </div>
-        <div style={{ display: 'flex', gap: 8 }}>
-          <button
-            onClick={() => handleSetReviewAction('correct', currentQuestion.id)}
-            style={{
-              flex: 1, height: 36, borderRadius: 'var(--radius-8)', cursor: 'pointer',
-              border: reviewAction === 'correct' ? '1.5px solid var(--success)' : `1px solid ${COLORS.border}`,
-              background: reviewAction === 'correct' ? 'var(--success-soft)' : COLORS.card,
-              color: reviewAction === 'correct' ? 'var(--success)' : COLORS.textSecondary,
-              fontSize: 'var(--fs-14)', fontWeight: 600,
-              display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 5
-            }}
-          >
-            <CheckCircle2 size={15} /> 正确
-          </button>
-          <button
-            onClick={() => handleSetReviewAction('wrong', currentQuestion.id)}
-            style={{
-              flex: 1, height: 36, borderRadius: 'var(--radius-8)', cursor: 'pointer',
-              border: reviewAction === 'wrong' ? '1.5px solid var(--danger)' : `1px solid ${COLORS.border}`,
-              background: reviewAction === 'wrong' ? 'var(--danger-soft)' : COLORS.card,
-              color: reviewAction === 'wrong' ? 'var(--danger)' : COLORS.textSecondary,
-              fontSize: 'var(--fs-14)', fontWeight: 600,
-              display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 5
-            }}
-          >
-            <XCircle size={15} /> 错误
-          </button>
-        </div>
-      </div>
-
-      {/* ⑥ 辅助操作：解析（怀疑判错时的证据）与排除（低频异常），均为轻量文字链接 */}
+      {/* ⑤ 辅助操作：解析（怀疑判错时的证据）与排除（低频异常），均为轻量文字链接。
+          判定按钮已移到固定页脚 —— 长题不必滚到底才点得到。 */}
       <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
         <button
           onClick={() => setShowAnswer(!showAnswer)}

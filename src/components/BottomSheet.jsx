@@ -5,12 +5,14 @@ import { motion } from 'motion/react'
 // 组卷详情 / 错题详情 / 批改复核三处共用，保证「详情→就地动作」形态一致。
 export default function BottomSheet({
   title,
+  titleAction,
   onClose,
   header,
   footer,
   children,
   bodyClassName = 'px-5 pb-4',
   maxWidth = 512,
+  showHandle = true,
 }) {
   return (
     <div className='fixed inset-0 z-[20000] flex items-center justify-center px-4'>
@@ -31,22 +33,27 @@ export default function BottomSheet({
           paddingBottom: footer ? 'env(safe-area-inset-bottom, 0px)' : 'calc(16px + env(safe-area-inset-bottom, 0px))',
         }}
       >
-        {/* 把手条 */}
-        <div className='flex shrink-0 justify-center pt-3 pb-1'>
-          <div className='h-1 w-8 rounded-full' style={{ background: 'var(--border)' }} />
-        </div>
+        {/* 把手条：纯装饰，复核这类"寸土寸金"的弹窗可关掉换 19px 内容高度 */}
+        {showHandle && (
+          <div className='flex shrink-0 justify-center pt-3 pb-1'>
+            <div className='h-1 w-8 rounded-full' style={{ background: 'var(--border)' }} />
+          </div>
+        )}
 
         {/* 标题行 */}
-        <div className='flex shrink-0 items-center justify-between px-5 pt-1 pb-2'>
+        <div className={`flex shrink-0 items-center justify-between px-5 pb-2 ${showHandle ? 'pt-1' : 'pt-3'}`}>
           <h3 className='text-[16px] font-semibold' style={{ color: 'var(--text)' }}>{title}</h3>
-          <button
-            onClick={onClose}
-            aria-label='关闭'
-            className='flex h-7 w-7 items-center justify-center rounded-full'
-            style={{ background: 'var(--bg-mist)' }}
-          >
-            <X size={14} style={{ color: 'var(--text-secondary)' }} />
-          </button>
+          <div className='flex shrink-0 items-center gap-2'>
+            {titleAction}
+            <button
+              onClick={onClose}
+              aria-label='关闭'
+              className='flex h-7 w-7 items-center justify-center rounded-full'
+              style={{ background: 'var(--bg-mist)' }}
+            >
+              <X size={14} style={{ color: 'var(--text-secondary)' }} />
+            </button>
+          </div>
         </div>
 
         {header && <div className='shrink-0'>{header}</div>}

@@ -1,6 +1,6 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
-import { judgeAnswer, normalizeChoiceAnswer, normalizeQuestionType } from '../server/services/judgeService.js'
+import { judgeAnswer, normalizeChoiceAnswer, normalizeQuestionType, stripAnswerScaffolding } from '../server/services/judgeService.js'
 
 test('normalizes explicit choice answer variants globally', () => {
   assert.equal(normalizeChoiceAnswer('D'), 'D')
@@ -77,4 +77,27 @@ test('ratio answers compare by value, not by digit set', () => {
   assert.deepEqual(judgeAnswer('3:2', '6:4', 'fill'), { isCorrect: true, unrecognized: false })
   assert.deepEqual(judgeAnswer('2:3', '3:2', 'fill'), { isCorrect: false, unrecognized: false })
   assert.deepEqual(judgeAnswer(`${SQRT}6:2`, `${SQRT}3:2`, 'fill'), { isCorrect: false, unrecognized: false })
+})
+
+// 答案脚手架剥离：只吃行首闭集词，绝不误伤句中同形词或纯叙述答案
+test('stripAnswerScaffolding removes only leading narrative shells', () => {
+  const CN = (s) => s
+  // 行首闭集词 + 冒号/为/是
+  assert.equal(stripAnswerScaffolding(CN('答案为 512/125')), '512/125')
+  assert.equal(stripAnswerScaffolding(CN('答：512/125')), '512/125')
+  assert.equal(stripAnswerScaffolding(CN('解：x = 3')), 'x = 3')
+  assert.equal(stripAnswerScaffolding(CN('正确答案是 D')), 'D')
+  assert.equal(stripAnswerScaffolding(CN('结果为') + `3${SQRT}2`), `3${SQRT}2`)
+  // 裸引导词 + 数学字符
+  assert.equal(stripAnswerScaffolding(CN('为 512/125')), '512/125')
+  assert.equal(stripAnswerScaffolding(CN('即 ') + `${SQRT}6/2`), `${SQRT}6/2`)
+  // 句中同形词绝不动："底角的余弦值等于 3/4 或 1/3" 整体是真答案
+  assert.equal(stripAnswerScaffolding(CN('底角的余弦值等于 3/4 或 1/3')), CN('底角的余弦值等于 3/4 或 1/3'))
+  // 纯叙述答案（剥完不含数学内容）原样返回，不被削成半句
+  assert.equal(stripAnswerScaffolding(CN('答案是对的')), CN('答案是对的'))
+  assert.equal(stripAnswerScaffolding(CN('为难')), CN('为难'))
+  // 无前缀答案不动
+  assert.equal(stripAnswerScaffolding(`3${SQRT}2`), `3${SQRT}2`)
+  assert.equal(stripAnswerScaffolding('D'), 'D')
+  assert.equal(stripAnswerScaffolding(''), '')
 })

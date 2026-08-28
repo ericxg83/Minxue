@@ -495,6 +495,31 @@ function stripBlankLabel(value) {
   return String(value ?? '').trim().replace(BLANK_LABEL_RE, '').trim()
 }
 
+// 答案开头的叙述性脚手架："答案为"/"答:"/"解："/"结果是" 等，AI 现场生成填空/解答答案时爱加。
+// 只吃「行首」的闭集词 —— "底角的余弦值等于 3/4" 这类把"等于"用在句中的真答案不受影响（正则锚定 ^）。
+const ANSWER_SCAFFOLD_RE = /^\s*(?:正确答案|标准答案|答案|答|解|结果)\s*(?:为|是|应为|应该是|等于)?\s*[:：]?\s*/
+// 裸引导词（"为 512/125"、"即 √6/2"）：仅当其后紧跟数学形态字符时才剥，避免误伤"为难"这类正文。
+const BARE_LEAD_RE = /^\s*(?:为|即|应为|故得|故|所以)\s+?(?=[\d\-+.（(√\\a-zA-Z])/
+// 剥完必须仍含数字/字母/数学符号，否则视为纯叙述答案（如"答案是对的"），原样返回不动。
+const HAS_MEANINGFUL_RE = /[\d a-zA-Z√\\/^_(){}.]/
+
+/**
+ * 剥掉 AI 生成答案开头的叙述脚手架，只保留答案本体。保守策略：
+ *   · 只吃行首闭集词，句中同形词不动（"底角的余弦值等于 3/4 或 1/3" 保持原样）；
+ *   · 裸引导词需其后紧跟数学字符才剥；
+ *   · 结果为空或不含任何数学/字母内容时，判定为纯叙述答案，原样返回。
+ * 仅用于写入端（normalizeGeneratedAnswer），不改动存量答案。
+ */
+export function stripAnswerScaffolding(value) {
+  const original = String(value ?? '').trim()
+  if (!original) return original
+  let out = original.replace(ANSWER_SCAFFOLD_RE, '')
+  if (out === original) out = original.replace(BARE_LEAD_RE, '')
+  out = out.trim()
+  if (!out || !HAS_MEANINGFUL_RE.test(out)) return original
+  return out
+}
+
 /**
  * Compare student answer against reference answer with tolerance.
  * Returns { isCorrect: boolean, unrecognized: boolean }
