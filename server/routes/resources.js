@@ -9,6 +9,7 @@ import {
   replaceResourceAnswers,
   updateResourceAnswerStatus,
 } from '../services/neonService.js'
+import { findDirtyAnswers } from '../services/judgeService.js'
 
 const router = Router()
 
@@ -96,6 +97,20 @@ router.patch('/:id/answers/status', async (req, res) => {
   try {
     const { answerStatus } = req.body
     if (!answerStatus) return res.status(400).json({ error: '缺少 answerStatus' })
+
+    // 提升为可信答案源 = 授权它去判全班同类题，脏答案会放大成成片误判。
+    // 与 /api/tasks/:id/save-as-answer-key 共用同一道闸门，避免绕道这个接口盖章。
+    if (answerStatus === 'teacher_verified' || answerStatus === 'official_verified') {
+      const existing = await getResourceAnswers(req.params.id)
+      const dirty = findDirtyAnswers(existing)
+      if (dirty.length > 0) {
+        return res.status(400).json({
+          error: '部分答案疑似批语、被截断或为空，请先核对后再提升为可信答案源',
+          suspect: dirty,
+        })
+      }
+    }
+
     const answers = await updateResourceAnswerStatus(req.params.id, answerStatus)
     res.json({ success: true, answers })
   } catch (e) {

@@ -48,6 +48,27 @@ export function isGradingCommentAnswer(answer, questionType) {
   return true
 }
 
+/**
+ * 扫描一批"标准答案"里的脏值，供所有"把答案提升为可信答案源"的入口共用。
+ * 答案源一旦盖章 teacher_verified，会去判全班同类题，脏答案将放大成成片误判。
+ * rows 兼容 questions(question_number/question_type) 与 resource_answers(question_no/answer_type)。
+ */
+export function findDirtyAnswers(rows) {
+  const dirty = []
+  for (const row of rows || []) {
+    const raw = (row.answer ?? '').toString().trim()
+    const type = row.question_type ?? row.answer_type
+    let reason = null
+    if (raw === '') reason = '空答案'
+    else if (isGradingCommentAnswer(raw, type)) reason = '疑似批改文字'
+    else if (/=\s*$/.test(raw)) reason = '答案疑似被截断'
+    if (reason) {
+      dirty.push({ question_no: row.question_no ?? row.question_number ?? null, answer: raw, reason })
+    }
+  }
+  return dirty
+}
+
 export function normalizeQuestionType(rawType, options = []) {
   const type = String(rawType || '').trim().toLowerCase()
   if (['choice', 'select', 'multiple_choice', 'single_choice', '\u9009\u62e9', '\u9009\u62e9\u9898', '\u5355\u9009', '\u5355\u9009\u9898', '\u591a\u9009', '\u591a\u9009\u9898'].includes(type)) return 'choice'
@@ -173,6 +194,23 @@ function normalizeAnswer(str) {
   for (const [cn, sym] of unitPairs) {
     s = s.replace(new RegExp(cn, 'g'), sym)
   }
+
+  // 上/下标数字分数（OCR 对手写分数的实际输出形态）：¹⁴/₁₅ → 14/15、1¹¹/₁₂ → 1 11/12、
+  // 5¹/₅₀ → 5 1/50。此前只认 ½¼¾ 这类单字符分数，导致学生用上下标写对了也判错。
+  // 只在出现上标或下标数字时改写，纯 ASCII 分数交给下面既有规则；
+  // 且要求必须带分数线，避免误伤 "2³"、"x²" 这类指数（把 2³ 变成 23 会造成假判对）。
+  const SUP_DIGITS = '⁰¹²³⁴⁵⁶⁷⁸⁹'
+  const SUB_DIGITS = '₀₁₂₃₄₅₆₇₈₉'
+  s = s.replace(
+    /(\d*)\s*([⁰¹²³⁴⁵⁶⁷⁸⁹]+|\d+)\s*[/⁄]\s*([₀₁₂₃₄₅₆₇₈₉]+|\d+)/g,
+    (matched, whole, num, den) => {
+      const hasSpecial = [...num].some(c => SUP_DIGITS.includes(c)) || [...den].some(c => SUB_DIGITS.includes(c))
+      if (!hasSpecial) return matched
+      const n = [...num].map(c => (SUP_DIGITS.includes(c) ? SUP_DIGITS.indexOf(c) : c)).join('')
+      const d = [...den].map(c => (SUB_DIGITS.includes(c) ? SUB_DIGITS.indexOf(c) : c)).join('')
+      return whole ? ` ${whole} ${n}/${d} ` : ` ${n}/${d} `
+    }
+  )
 
   // Unicode fraction symbols → /n form (must run BEFORE mixed-fraction rules)
   // ½→1/2, ⅓→1/3, ⅔→2/3, ¼→1/4, ¾→3/4, ⅕→1/5, ⅖→2/5, ⅗→3/5, ⅘→4/5,
