@@ -32,6 +32,22 @@ function narrowToFinalAnswer(s) {
   return str
 }
 
+/**
+ * OCR 模型有时把老师红笔批语（"计算错误""正确""×"…）当成"标准答案"抄进 answer 字段。
+ * 这类值不是答案，是批改痕迹。写库前用它判定，命中就当脏答案丢弃、交给 AI 重解。
+ * 判断题(judge)的"正确/错误/√/×"是合法答案，白名单排除，不误伤。
+ */
+const GRADING_COMMENT_WORDS = ['计算错误', '解答错误', '错误', '正确', '对', '错', '×', 'x', 'X', '√', '✓', '略', '过程略', '见解析', '不唯一']
+export function isGradingCommentAnswer(answer, questionType) {
+  const raw = String(answer ?? '').trim()
+  if (raw === '') return false // 空值交给下游生成，不在此判
+  if (!GRADING_COMMENT_WORDS.includes(raw)) return false
+  const qt = String(questionType || '').toLowerCase()
+  const isJudge = qt === 'judge' || qt.includes('判断')
+  if (isJudge && ['正确', '错误', '对', '√', '×'].includes(raw)) return false
+  return true
+}
+
 export function normalizeQuestionType(rawType, options = []) {
   const type = String(rawType || '').trim().toLowerCase()
   if (['choice', 'select', 'multiple_choice', 'single_choice', '\u9009\u62e9', '\u9009\u62e9\u9898', '\u5355\u9009', '\u5355\u9009\u9898', '\u591a\u9009', '\u591a\u9009\u9898'].includes(type)) return 'choice'

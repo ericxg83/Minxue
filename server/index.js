@@ -52,7 +52,7 @@ import { query, TABLES, TASK_STATUS, QUESTION_STATUS } from './config/neon.js'
 import { uploadFilesWithRetry } from './services/uploadRetryManager.js'
 import { createUploadReport, logUploadReport } from './services/uploadReportLogger.js'
 import { createJudgement, batchUpdateQuestionTags, getQuestionAssets, getQuestionAssetsByType, createResource, replaceResourceAnswers } from './services/neonService.js'
-import { judgeAnswer } from './services/judgeService.js'
+import { judgeAnswer, isGradingCommentAnswer } from './services/judgeService.js'
 import { checkQuestionCompleteness } from './utils/questionCompleteness.js'
 import { normalizeOptions } from './utils/optionText.js'
 import { uploadImage, deleteFile } from './services/ossService.js'
@@ -702,6 +702,25 @@ app.delete('/api/tasks/:taskId', async (req, res) => {
   }
 })
 
+// P1 闸门辅助：识别"疑似批改文字/被截断/空"的脏标准答案。
+// 判卷题(判断题)的"正确/错误/√/×"是合法答案，不误伤；其余题型的纯批语词一律标脏。
+function badAnswerQuestions(questions) {
+  const suspects = []
+  for (const q of questions) {
+    const raw = (q.answer ?? '').toString().trim()
+    let reason = null
+    if (raw === '') {
+      reason = '空答案'
+    } else if (isGradingCommentAnswer(raw, q.question_type)) {
+      reason = '疑似批改文字'
+    } else if (/=\s*$/.test(raw)) {
+      reason = '答案疑似被截断'
+    }
+    if (reason) suspects.push({ question_no: q.question_number, answer: raw, reason })
+  }
+  return suspects
+}
+
 // Save task answers as exam answer key (存档为答案库)
 app.post('/api/tasks/:taskId/save-as-answer-key', async (req, res) => {
   try {
@@ -726,6 +745,17 @@ app.post('/api/tasks/:taskId/save-as-answer-key', async (req, res) => {
       [taskId]
     )
     if (questions.length === 0) return res.status(400).json({ error: '该任务没有题目答案数据' })
+
+    // P1 闸门：存档 = 把这份答案作为"全班共享答案源"授权盖章（teacher_verified）。
+    // 一旦脏答案（老师红笔批语、被截断的残值、空值）混进来，会去判每一个学生同类题，
+    // 误判成片。这里在盖章前拦一道：命中明显非答案的，直接拒绝并回题号，让老师先核对。
+    const BAD_ANSWER = badAnswerQuestions(questions)
+    if (BAD_ANSWER.length > 0) {
+      return res.status(400).json({
+        error: '部分题目的标准答案疑似批语或被截断，请先在复核页核对后再存档为答案源',
+        suspect: BAD_ANSWER,
+      })
+    }
 
     // 3. Create resource
     const resource = await createResource({

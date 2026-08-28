@@ -17,7 +17,7 @@ import { cropAndUploadQuestionRegion } from './utils/cropAndUpload.js'
 import { refineFigureBoxOnPage } from './utils/figureRegionRefiner.js'
 import { generateTextFingerprint, generatePHash, PARSER_VERSION, TEXT_SIMILARITY_THRESHOLD } from './utils/questionFingerprint.js'
 import { uploadFilesWithRetry } from './services/uploadRetryManager.js'
-import { judgeAnswer, normalizeQuestionType, normalizeChoiceAnswer, extractChoiceLetters } from './services/judgeService.js'
+import { judgeAnswer, normalizeQuestionType, normalizeChoiceAnswer, extractChoiceLetters, isGradingCommentAnswer } from './services/judgeService.js'
 import { normalizeSectionName, splitSubAnswers, splitOcrQuestionsBySubNo } from './services/answerParseService.js'
 import { classifyQuestionLocally } from './utils/localTagger.js'
 import { finalizeGradingBatch } from './services/gradingFinalizer.js'
@@ -1008,11 +1008,19 @@ const recognizeQuestions = async (imageBase64, taskId, retryCount = 0, forceMode
       const aiAnswer = rawStudentAnswer
       const cleanedStudentAnswer = answerSource === 'blank' ? '' : rawStudentAnswer
 
+      // P2 硬闸门：OCR 模型可能把老师红笔批语("计算错误"等)当成标准答案抄进 answer。
+      // 这类值不是答案，命中即丢弃置空，交给后续 AI 生成路径从题目本身重解出参考答案。
+      let standardAnswer = q.answer || ''
+      if (isGradingCommentAnswer(standardAnswer, q.question_type)) {
+        console.log(`   [P2] 丢弃疑似批改痕迹的OCR答案: "${standardAnswer}" → 转AI重解`)
+        standardAnswer = ''
+      }
+
       const hasManualCheckmark = q.has_manual_checkmark === true
       const manualMark = normalizeManualMark(q.manual_mark, hasManualCheckmark)
       const gradingResult = resolveGradingResult({
         studentAnswer: cleanedStudentAnswer,
-        answer: q.answer,
+        answer: standardAnswer,
         questionType: q.question_type,
         manualMark
       })
@@ -1024,7 +1032,7 @@ const recognizeQuestions = async (imageBase64, taskId, retryCount = 0, forceMode
         task_id: taskId,
         content: q.content || '',
         options: q.options || [],
-        answer: q.answer || '',
+        answer: standardAnswer,
         student_answer: cleanedStudentAnswer,
         ai_answer: aiAnswer,
         answer_source: answerSource,
@@ -1222,24 +1230,32 @@ export function extractAnswerFromAnalysis(answer, analysis, options) {
   // Note: do NOT use commas (，,) as delimiters — multi-part answers like
   // "每个盲盒50元，每个杯子30元" contain commas within the answer itself.
   // Only sentence-ending punctuation (。！？.!? + newline) should terminate the capture.
+  // 小数点/千分位不能当句子终止符：AI 写 "正确答案：3.25" 时，旧捕获类把 `.` 当句尾，
+  // 抠出 "3" → 下游判题拿残缺答案判错全班。终止符只认真正的句子结束（换行、中文句读、
+  // 后接非数字的 `.`）；小数点（`8` 或 `5.1` 里 `.` 前后是数字）保留在答案内。
+  // 末尾的悬空句点再单独 trim 掉，避免 "3。" 之后紧跟英文句点被一并吃进。
   const tail = analysis.length > 800 ? analysis.substring(analysis.length - 800) : analysis
+  const CAP = '((?:[^\\n。！？]|\\.(?=[0-9]))+)'
+  // 分隔符要吞掉可能"泄漏"进捕获组的系词：AI 常写 "最终答案是14/15"，旧 pattern 里
+  // "是" 没被分隔符吃掉，捕获组从 "是" 起 → 存成脏答案 "是14/15" → 全班误判。
+  const SEP = '[：:]?\\s*(?:[是为]\\s*[：:]?)?\\s*'
   const answerMarkerPatterns = [
     // "所以正确答案：14和2310" (no "是" after "正确答案")
-    /(?:所以|因此|故)正确答案[：:]?\s*([^\n。！？.!?]+)/i,
+    new RegExp(`(?:所以|因此|故)正确答案${SEP}${CAP}`, 'i'),
     // "因此正确答案是：14和2310"
-    /因此正确答案是[：:]?\s*([^\n。！？.!?]+)/i,
+    new RegExp(`因此正确答案是${SEP}${CAP}`, 'i'),
     // "正确答案是：14和2310"
-    /正确答案是[：:]?\s*([^\n。！？.!?]+)/i,
+    new RegExp(`正确答案是${SEP}${CAP}`, 'i'),
     // "正确答案：14和2310" (no "是")
-    /正确答案[：:]?\s*([^\n。！？.!?]+)/i,
+    new RegExp(`正确答案${SEP}${CAP}`, 'i'),
     // "答案为：14和2310"
-    /答案为[：:]?\s*([^\n。！？.!?]+)/i,
+    new RegExp(`答案为${SEP}${CAP}`, 'i'),
     // "故答案为：14和2310"
-    /故答案为[：:]?\s*([^\n。！？.!?]+)/i,
+    new RegExp(`故答案为${SEP}${CAP}`, 'i'),
     // "答案是：14和2310" (with or without colon)
-    /答案是[：:]?\s*([^\n。！？.!?]+)/i,
+    new RegExp(`答案是${SEP}${CAP}`, 'i'),
     // "最终答案：14和2310"
-    /最终答案[：:]?\s*([^\n。！？.!?]+)/i,
+    new RegExp(`最终答案${SEP}${CAP}`, 'i'),
   ]
 
   for (const pattern of answerMarkerPatterns) {
@@ -1247,7 +1263,7 @@ export function extractAnswerFromAnalysis(answer, analysis, options) {
     if (match) {
       let extracted = match[1].trim()
       // Trim trailing commas/punctuation that may remain after removing them from delimiters
-      extracted = extracted.replace(/[，,；;、]+$/, '').trim()
+      extracted = extracted.replace(/[，,；;、.]+$/, '').trim()
       if (extracted && extracted !== answer) {
         console.log(`   [AnswerExtraction] 答案标记匹配: ${extracted} (原: ${answer})`)
         return extracted
