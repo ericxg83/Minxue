@@ -137,7 +137,7 @@ import { ElMessage, ElMessageBox } from 'element-plus'
 import { useReviewStore } from '../../stores/reviewStore'
 import { retryTask } from '../../../services/apiService'
 import StatusIcon from './StatusIcon.vue'
-import { WRONG_BOOK_SKIP_REASONS } from '../../utils/reviewDecision'
+import { WRONG_BOOK_SKIP_REASONS } from '../../../utils/reviewDecision'
 
 const store = useReviewStore()
 

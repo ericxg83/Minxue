@@ -7,9 +7,11 @@ import {
   updateTaskStatus
 } from '../services/apiService'
 import { getStatusInfo } from '../pages/ExamReview/status.jsx'
+import { REVIEW_STATUS, getReviewState } from '../utils/reviewDecision'
+import { checkQuestionCompleteness } from '../utils/questionCompleteness.js'
 
 // 复审核心逻辑：题目数据加载、人工评判 edits 管理、保存
-export function useExamReview({ task, onSave, currentIndexRef }) {
+export function useExamReview({ task, onSave }) {
   const { wrongQuestions } = useWrongQuestionStore()
   const Toast = useToast()
 
@@ -17,7 +19,6 @@ export function useExamReview({ task, onSave, currentIndexRef }) {
   const [edits, setEdits] = useState({})
   const [saving, setSaving] = useState(false)
   const [loading, setLoading] = useState(true)
-  const [reviewAction, setReviewAction] = useState(null)
 
   // ── 派生数据 ──
   const validQuestions = useMemo(() => questions.filter(Boolean), [questions])
@@ -41,8 +42,7 @@ export function useExamReview({ task, onSave, currentIndexRef }) {
         if (!cancelled) {
           setQuestions(qs.map(q => ({
             ...q,
-            _ai_graded: q.status !== 'correct' || q._ai_graded === true,
-            excluded: q.excluded || false
+            _ai_graded: q.status !== 'correct' || q._ai_graded === true
           })))
         }
       } catch (e) {
@@ -59,33 +59,38 @@ export function useExamReview({ task, onSave, currentIndexRef }) {
   }, [task?.id])
 
   // ── 设置复审操作 ──
-  const handleSetReviewAction = useCallback((action) => {
-    const idx = currentIndexRef.current
-    if (!validQuestions[idx]?.id) return
-    const qId = validQuestions[idx].id
-
-    setReviewAction(prev => prev === action ? null : action)
+  // 判定结论写入 edits（review_status = 人工复核审计事实，两端同一字段）。
+  // 再次点击同一判定 = 撤回本次结论，答案文本修改保留。
+  const handleSetReviewAction = useCallback((action, qId) => {
+    if (!qId) return
+    const target = action === 'correct' ? REVIEW_STATUS.CORRECT
+      : action === 'wrong' ? REVIEW_STATUS.WRONG
+      : REVIEW_STATUS.EXCLUDE
 
     setEdits(prev => {
       const existing = prev[qId] || {}
-      let newEdit
 
-      if (action === 'correct') {
-        newEdit = { ...existing, is_correct: true, excluded: false }
-      } else if (action === 'wrong') {
-        newEdit = { ...existing, is_correct: false, excluded: false }
-      } else if (action === 'excluded') {
-        newEdit = { ...existing, excluded: true }
-      }
-
-      if (!newEdit) {
-        const { is_correct, excluded, ...rest } = existing
+      if (existing.review_status === target) {
+        const { is_correct, review_status, ...rest } = existing
         return { ...prev, [qId]: rest }
       }
 
-      return { ...prev, [qId]: newEdit }
+      // 排除：只落 review_status，不改 is_correct（与 PC 端一致）
+      if (target === REVIEW_STATUS.EXCLUDE) {
+        const { is_correct, ...rest } = existing
+        return { ...prev, [qId]: { ...rest, review_status: target } }
+      }
+
+      return {
+        ...prev,
+        [qId]: {
+          ...existing,
+          is_correct: target === REVIEW_STATUS.CORRECT,
+          review_status: target
+        }
+      }
     })
-  }, [validQuestions, currentIndexRef])
+  }, [])
 
   // ── 答案变更 ──
   const handleAnswerChange = useCallback((qId, value) => {
@@ -114,10 +119,11 @@ export function useExamReview({ task, onSave, currentIndexRef }) {
     const dirtyIds = Object.keys(edits)
     if (dirtyIds.length === 0) {
       Toast.show({ message: '没有需要保存的修改', type: 'info' })
-      return
+      return false
     }
     setSaving(true)
     let successCount = 0
+    const skippedWrongBook = []
     for (const qId of dirtyIds) {
       try {
         const edit = edits[qId]
@@ -130,19 +136,28 @@ export function useExamReview({ task, onSave, currentIndexRef }) {
           answer: edit.answer
         }
         if (edit.is_correct !== undefined) updateData.is_correct = edit.is_correct
-        if (edit.excluded !== undefined) updateData.excluded = edit.excluded
+        if (edit.review_status !== undefined) updateData.review_status = edit.review_status
         if (edit.status) updateData.status = edit.status
 
         await updateQuestion(qId, updateData)
         successCount++
 
+        const isExcludedEdit = edit.review_status === REVIEW_STATUS.EXCLUDE
+
         // 错题本操作
-        if (edit.excluded && wrongId) {
+        if (isExcludedEdit && wrongId) {
           await deleteWrongQuestion(wrongId).catch(e => console.warn(`[ExamReview] 删除错题失败 q=${qId.substring(0,8)}:`, e.message))
         } else if (edit.is_correct === true && wrongId) {
           await deleteWrongQuestion(wrongId).catch(e => console.warn(`[ExamReview] 删除错题失败 q=${qId.substring(0,8)}:`, e.message))
-        } else if (edit.is_correct === false && !wrongId && !edit.excluded) {
-          await addWrongQuestions(task.student_id, [qId]).catch(e => console.warn(`[ExamReview] 添加错题失败 q=${qId.substring(0,8)}:`, e.message))
+        } else if (edit.is_correct === false && !wrongId && !isExcludedEdit) {
+          // 不完整的题不入错题本，否则会成为 PC 端按 is_complete 过滤后看不见的隐形错题。
+          // 手机上无法补全题目元素，因此不阻断判定，只跳过入册并在保存后汇总告知。
+          const { isComplete } = checkQuestionCompleteness({ ...(q || {}), ...edit })
+          if (isComplete) {
+            await addWrongQuestions(task.student_id, [qId]).catch(e => console.warn(`[ExamReview] 添加错题失败 q=${qId.substring(0,8)}:`, e.message))
+          } else {
+            skippedWrongBook.push(qId)
+          }
         }
       } catch (e) {
         console.error('保存失败:', qId, e)
@@ -156,7 +171,6 @@ export function useExamReview({ task, onSave, currentIndexRef }) {
         return { ...q, ...edit, _ai_graded: true }
       }))
       setEdits({})
-      setReviewAction(null)
       if (task?.student_id) {
         invalidateCache('generated', task.student_id)
         invalidateCache('questions', task.student_id)
@@ -164,25 +178,64 @@ export function useExamReview({ task, onSave, currentIndexRef }) {
       }
       if (task?.id) {
         await recalculateTaskStats(task.id).catch(e => console.error('刷新统计数据失败:', e))
-        // 复核完成后标记任务为已复核
-        await updateTaskStatus(task.id, 'reviewed').catch(e => console.error('更新任务复核状态失败:', e))
       }
       Toast.show({ message: `已保存 ${successCount} 题`, type: 'success' })
+      if (skippedWrongBook.length > 0) {
+        Toast.show({
+          message: `${skippedWrongBook.length} 题因缺少参考答案等信息未加入错题本，请在电脑端补全`,
+          duration: 4000
+        })
+      }
       if (onSave) onSave()
+      return true
     } else {
       Toast.show({ message: '保存失败', type: 'error' })
+      return false
     }
   }, [edits, wrongIdMap, questions, task, Toast, onSave])
 
-  // ── 各状态数量统计 ──
+  // ── 需老师处理的题数（与 PC 端 needsAttentionCount 同定义；本次已判的不计入） ──
+  const needsAttentionCount = useMemo(() => {
+    return validQuestions.filter(q => {
+      const edit = edits[q.id]
+      if (edit?.review_status) return false
+      const state = getReviewState({ ...q, ...(edit || {}) })
+      return state === 'pending' || state === 'exception' || state === 'processing'
+    }).length
+  }, [validQuestions, edits])
+
+  // ── 完成复核：先落盘未保存修改，再把任务标记为已复核 ──
+  // 与"保存"分开：保存过一题不等于整份作业复核完毕，否则这份作业会从 PC 端待复核列表消失
+  const handleCompleteReview = useCallback(async () => {
+    if (Object.keys(edits).length > 0) {
+      const saved = await handleSaveClick()
+      if (!saved) return false
+    }
+    if (!task?.id) return false
+    setSaving(true)
+    try {
+      await updateTaskStatus(task.id, 'reviewed')
+      Toast.show({ message: '已标记复核完成', type: 'success' })
+      if (onSave) onSave()
+      return true
+    } catch (e) {
+      console.error('更新任务复核状态失败:', e)
+      Toast.show({ message: '标记复核完成失败', type: 'error' })
+      return false
+    } finally {
+      setSaving(false)
+    }
+  }, [edits, handleSaveClick, task, Toast, onSave])
+
+  // ── 各状态数量统计（含本次未保存的判定） ──
   const stats = useMemo(() => {
     const counts = { uncertain: 0, error: 0, ai_correct: 0, ai_wrong: 0, processing: 0, excluded: 0 }
     validQuestions.forEach(q => {
-      const info = getStatusInfo(q)
+      const info = getStatusInfo({ ...q, ...(edits[q.id] || {}) })
       if (counts[info.source] !== undefined) counts[info.source]++
     })
     return counts
-  }, [validQuestions])
+  }, [validQuestions, edits])
 
   return {
     questions, setQuestions,
@@ -191,11 +244,12 @@ export function useExamReview({ task, onSave, currentIndexRef }) {
     loading,
     edits, setEdits,
     saving,
-    reviewAction, setReviewAction,
     stats,
+    needsAttentionCount,
     handleSetReviewAction,
     handleAnswerChange,
     handleAnswerEdit,
-    handleSaveClick
+    handleSaveClick,
+    handleCompleteReview
   }
 }

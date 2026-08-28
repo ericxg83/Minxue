@@ -1145,6 +1145,7 @@ export default function App() {
           <Suspense fallback={<LazyFallback />}>
             <ExamReview
               task={reviewTask}
+              onViewImage={handleViewImage}
               onClose={() => { setShowExamReview(false); setReviewTask(null); loadTasks() }}
               onSave={() => {
                 // 保存后重新计算统计并刷新首页

@@ -1,11 +1,14 @@
 import { AlertTriangle, Clock, CheckCircle2, XCircle } from 'lucide-react'
 import MathText from '../../components/MathText'
 import { COLORS } from './constants'
+import { getReviewState, isExcluded } from '../../utils/reviewDecision'
 
 export const formatOption = (opt, index) => (
   <>{String.fromCharCode(65 + index)}. <MathText content={opt} /></>
 )
 
+// 复核状态的视觉映射。状态判定本身由 src/utils/reviewDecision.js 决定（与 PC 端同源），
+// 这里只负责把 5 态翻译成移动端的颜色/文案/图标。
 export const getStatusInfo = (q) => {
   if (!q) {
     return {
@@ -15,8 +18,8 @@ export const getStatusInfo = (q) => {
     }
   }
 
-  // 1. 已排除
-  if (q.excluded) {
+  // 已排除（人工复核结论，PC 端与移动端都写 review_status='exclude'）
+  if (isExcluded(q)) {
     return {
       bg: 'var(--bg-secondary)', color: COLORS.textSecondary,
       text: '已排除', icon: XCircle,
@@ -24,50 +27,38 @@ export const getStatusInfo = (q) => {
     }
   }
 
-  const confidence = q.confidence != null ? q.confidence : 0
-
-  // 2. 紫灰：处理中 — AI任务尚未完成（confidence=0，无 student_answer，非 blank）
-  if (confidence === 0 && !q.student_answer && q.answer_source !== 'blank') {
-    return {
-      bg: 'var(--border-light)', color: 'var(--text-secondary)',
-      text: '处理中', icon: Clock,
-      isGreyed: true, source: 'processing'
-    }
-  }
-
-  // 3. 橙色：AI异常 — OCR失败 / 未作答 / 数据缺失
-  if (q.answer_source === 'blank' || q.is_correct === null) {
-    return {
-      bg: 'var(--warning-soft)', color: 'var(--warning)',
-      text: q.answer_source === 'blank' ? '未作答' : 'AI异常',
-      icon: AlertTriangle,
-      isGreyed: false, source: 'error'
-    }
-  }
-
-  // 4. AI 高置信度（>= 90%）— 绿色正确 / 红色错误
-  if (confidence >= 0.9) {
-    if (q.is_correct === true) {
+  switch (getReviewState(q)) {
+    case 'correct':
       return {
         bg: 'var(--success-soft)', color: COLORS.success,
         text: 'AI正确', icon: CheckCircle2,
         isGreyed: false, source: 'ai_correct'
       }
-    }
-    if (q.is_correct === false) {
+    case 'wrong':
       return {
         bg: 'var(--danger-soft)', color: COLORS.danger,
         text: 'AI错误', icon: XCircle,
         isGreyed: false, source: 'ai_wrong'
       }
-    }
-  }
-
-  // 5. 黄色：AI不确定 — 置信度不足，需人工复核
-  return {
-    bg: 'var(--warning-soft)', color: COLORS.warning,
-    text: '待人工复核', icon: Clock,
-    isGreyed: false, source: 'uncertain'
+    case 'exception':
+      return {
+        bg: 'var(--warning-soft)', color: 'var(--warning)',
+        text: q.answer_source === 'blank' ? '未作答' : 'AI异常',
+        icon: AlertTriangle,
+        isGreyed: false, source: 'error'
+      }
+    case 'processing':
+      return {
+        bg: 'var(--border-light)', color: 'var(--text-secondary)',
+        text: '处理中', icon: Clock,
+        isGreyed: true, source: 'processing'
+      }
+    default:
+      return {
+        bg: 'var(--warning-soft)', color: COLORS.warning,
+        text: '待人工复核', icon: Clock,
+        isGreyed: false, source: 'uncertain'
+      }
   }
 }
 
@@ -82,18 +73,25 @@ export const DOT_COLORS = {
   unknown: 'var(--text-secondary)'
 }
 
-// 统计标签组件
-export const StatChip = ({ label, count, color, bg }) => (
-  <div style={{
-    display: 'inline-flex', alignItems: 'center', gap: '3px',
-    padding: '2px 8px', borderRadius: 'var(--radius-sm)',
-    background: bg, color, fontSize: 'var(--fs-11)', fontWeight: 600,
-    whiteSpace: 'nowrap'
-  }}>
+// 统计标签组件（可点击时作为筛选入口）
+export const StatChip = ({ label, count, color, bg, onClick, active = false }) => (
+  <button
+    type="button"
+    onClick={onClick}
+    disabled={!onClick}
+    style={{
+      display: 'inline-flex', alignItems: 'center', gap: '3px',
+      padding: '2px 8px', borderRadius: 'var(--radius-sm)',
+      background: bg, color, fontSize: 'var(--fs-11)', fontWeight: 600,
+      whiteSpace: 'nowrap',
+      border: active ? `1.5px solid ${color}` : '1.5px solid transparent',
+      cursor: onClick ? 'pointer' : 'default'
+    }}
+  >
     <span style={{
       display: 'inline-block', width: 7, height: 7, borderRadius: 'var(--radius-full)',
       background: color
     }} />
     {label} {count}
-  </div>
+  </button>
 )

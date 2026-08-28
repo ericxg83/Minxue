@@ -4,7 +4,7 @@ import { getStudents, getWrongQuestionsByStudent, getQuestionsByTask, getTasksBy
 import { useLifecycleStore, LIFECYCLE_STATUS } from './lifecycleStore'
 import { checkQuestionCompleteness } from '../../utils/questionCompleteness.js'
 import { TASK_TYPE, getReviewConfig } from '../config/reviewConfig'
-import { REVIEW_STATUS, needsWrongBookDecision, effectiveIsCorrect as resolveEffectiveIsCorrect } from '../utils/reviewDecision'
+import { REVIEW_STATUS, DEFAULT_CONFIDENCE_THRESHOLD, getReviewState, needsWrongBookDecision, effectiveIsCorrect as resolveEffectiveIsCorrect } from '../../utils/reviewDecision'
 
 export const useReviewStore = defineStore('review', () => {
   const lifecycleStore = useLifecycleStore()
@@ -23,8 +23,8 @@ export const useReviewStore = defineStore('review', () => {
   // 当前选中的试卷（task 对象，含 image_url）
   const currentTask = ref(null)
 
-  // AI 置信度阈值（低于此值标记为"待确认"）
-  const confidenceThreshold = ref(0.5)
+  // AI 置信度阈值（低于此值标记为"待确认"）—— 与移动端同源
+  const confidenceThreshold = ref(DEFAULT_CONFIDENCE_THRESHOLD)
 
   // 当前学生的已完成任务列表
   const studentTasks = ref([])
@@ -638,30 +638,8 @@ export const useReviewStore = defineStore('review', () => {
   // ── 5 态语义判定（用于左侧图标 / 顶部统计）──────────────────────
   // 返回：correct（AI正确）| wrong（AI错误）| pending（待复核）| exception（AI异常）| processing（处理中）
   // 优先用既有人工复核结果，其次 AI 判定字段。
-  const getAiState = (q) => {
-    if (!q) return 'processing'
-
-    // 人工已复核 → 以人工结论为最高优先级
-    if (q.review_status === 'correct') return 'correct'
-    if (q.review_status === REVIEW_STATUS.WRONG || q.review_status === REVIEW_STATUS.WRONG_NO_BOOK) return 'wrong'
-
-    // AI 异常：未识别答案 / OCR 失败
-    if (q.answer_source === 'blank') return 'exception'
-
-    // 处理中：AI 尚未出任何判定
-    if (q.is_correct == null && q.confidence == null) return 'processing'
-
-    // AI 错误：判定学生答案错误
-    if (q.is_correct === false) return 'wrong'
-
-    // AI 正确 + 已确认（人工复核 或 置信度达标）
-    const manual = !!q.review_status
-    const confirmed = manual || (q.confidence != null && q.confidence >= confidenceThreshold.value)
-    if (q.is_correct === true && confirmed) return 'correct'
-
-    // 其余 → 待复核（置信度不足 / AI 不确定）
-    return 'pending'
-  }
+  // 题目的 5 态判定 —— 实现见 src/utils/reviewDecision.js，移动端复核页共用同一函数
+  const getAiState = (q) => getReviewState(q, confidenceThreshold.value)
 
   // 5 态数量汇总（用于顶部统计）
   const aiStateStats = computed(() => {
