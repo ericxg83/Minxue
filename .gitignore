@@ -82,6 +82,11 @@ server/simple-server.js
 server/routes/tasks.js
 minxue-app-debug-*.apk
 *-debug-*.apk
+*-debug.apk
+# 全盘 PDF 路径扫描输出：含本机用户目录与 SID，不入库
+pdf_scan_all.txt
+# 数据修复脚本留下的回滚备份（库里原值快照）
+server/_*_backup.json
 CLAUDE.md
 # PowerShell mangled paths dumped as filenames (C:UsersAdministrator...*)
 C:Users*
