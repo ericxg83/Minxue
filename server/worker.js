@@ -26,6 +26,7 @@ import { isValidImageBuffer, checkImageResolution } from './utils/imageValidator
 import { formatOptionsForPrompt } from './utils/optionText.js'
 import { validateArithmeticAnswer } from './utils/arithmeticAnswerValidator.js'
 import { coerceAIText } from './utils/aiTextCoerce.js'
+import { rationalizeAnswer } from './utils/radicalSimplify.js'
 
 // ── 多模态切题引擎：几何图处理 ──
 // 使用 Sharp 进行裁剪和图像增强（替代浏览器端的 Canvas/OpenCV）
@@ -1279,7 +1280,13 @@ export function extractAnswerFromAnalysis(answer, analysis, options) {
 
 function normalizeGeneratedAnswer(question, candidateAnswer) {
   const questionType = normalizeQuestionType(question.question_type, question.options)
-  if (questionType !== 'choice') return candidateAnswer
+  if (questionType !== 'choice') {
+    // AI 算到中间形态就收手："圆面积比 3:2 求半径比"给的是 "√3:√2"，
+    // 教材要求的最简形式是 "√6:2"。学生写了规范答案反而对不上标准答案，
+    // 这个不规范的答案还会沉淀进答案库和讲义。只改写能完整解析且数值自检通过的形态。
+    // 注意只作用于 AI 现场生成的答案；答案库/OCR 抄来的印刷答案不经过这里。
+    return rationalizeAnswer(candidateAnswer)
+  }
   // AI 现场生成的选择题答案常是整句话（"选项 C"、"为选项D"、"sin∠CAB = 3/5，选(B)"）。
   // 严格归一（normalizeChoiceAnswer）对这些返回空串，原样入库就会让"学生选对却判错"，
   // 所以这里用宽松提取，取到字母就只存字母——与答案库里的 "B"/"D" 保持同一形态。
