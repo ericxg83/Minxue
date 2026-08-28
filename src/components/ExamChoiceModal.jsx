@@ -51,7 +51,7 @@ export default function ExamChoiceModal({
                     </span>
                     <span className="text-[11px] px-1.5 py-0.5 rounded-full flex-shrink-0"
                       style={{ background: 'rgba(217, 119, 6, 0.1)', color: 'var(--warning)' }}>
-                      答案库
+                      {r.answer_status === 'official_verified' ? '官方审核' : '已审核'}
                     </span>
                   </div>
                   <div className="text-[12px] mt-0.5" style={{ color: 'var(--text-secondary)' }}>

@@ -50,6 +50,20 @@ router.get('/:id', async (req, res) => {
 // 更新资源
 router.put('/:id', async (req, res) => {
   try {
+    // "确认发布"按钮走的是这条 PUT，会把 answerStatus 直接写进 resources 表。
+    // 若不在此设闸，它就成了绕过 PATCH /answers/status 闸门给脏答案库盖章的后门。
+    const promoting = req.body?.answerStatus === 'teacher_verified' || req.body?.answerStatus === 'official_verified'
+    if (promoting) {
+      const existing = await getResourceAnswers(req.params.id)
+      const dirty = findDirtyAnswers(existing)
+      if (dirty.length > 0) {
+        return res.status(400).json({
+          error: '部分答案疑似批语、被截断或为空，请先核对后再提升为可信答案源',
+          suspect: dirty,
+        })
+      }
+    }
+
     const resource = await updateResource(req.params.id, req.body)
     if (!resource) return res.status(404).json({ error: '资源不存在' })
     res.json({ success: true, resource })

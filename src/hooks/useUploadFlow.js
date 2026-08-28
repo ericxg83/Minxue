@@ -110,7 +110,10 @@ export function useUploadFlow({ loadTasks, isInitializing }) {
 
       if (stagingTypeRef.current === 'regular') {
         try {
-          const resp = await fetch('/api/resources?type=exam')
+          // 必须用 exam-papers：它只返回 teacher_verified/official_verified 的答案库。
+          // 旧的 /api/resources?type=exam 不过滤审核状态，会把 AI 批改自动沉淀的 ai_draft
+          // 草稿（可能含"计算错误"这类脏答案）也列进选择器，绕过 PC 后台的人工确认。
+          const resp = await fetch('/api/resources/exam-papers')
           const data = await resp.json()
           const resources = (data.resources || []).filter(r => r.answer_count > 0)
           if (resources.length > 0) {
