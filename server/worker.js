@@ -26,6 +26,7 @@ import { isValidImageBuffer, checkImageResolution } from './utils/imageValidator
 import { formatOptionsForPrompt } from './utils/optionText.js'
 import { validateArithmeticAnswer } from './utils/arithmeticAnswerValidator.js'
 import { coerceAIText } from './utils/aiTextCoerce.js'
+import { computeTaskStats } from './utils/taskStats.js'
 import { rationalizeAnswer } from './utils/radicalSimplify.js'
 
 // ── 多模态切题引擎：几何图处理 ──
@@ -1813,16 +1814,19 @@ const processSlimGrading = async (job) => {
 
     await job.updateProgress(100)
 
-    // 统计空白题数（学生未作答）
+    // 统计空白题数（学生未作答）+ 待人工题数（无参考答案 / 主观题 / 置信度不足）
     let emptyCount = 0
+    let pendingCount = 0
     try {
-      const { rows: blankRows } = await query(
-        `SELECT COUNT(*) AS cnt FROM ${TABLES.QUESTIONS} WHERE task_id = $1 AND answer_source = 'blank'`,
+      const { rows: gradedRows } = await query(
+        `SELECT is_correct, answer_source, review_status, confidence FROM ${TABLES.QUESTIONS} WHERE task_id = $1`,
         [taskId]
       )
-      emptyCount = parseInt(blankRows[0]?.cnt || 0)
+      const stats = computeTaskStats(gradedRows)
+      emptyCount = stats.emptyCount
+      pendingCount = stats.pendingCount
     } catch (e) {
-      console.error('   [Slim] 统计空白题数失败:', e.message)
+      console.error('   [Slim] 统计空白/待人工题数失败:', e.message)
     }
 
     await updateTaskStatus(taskId, TASK_STATUS.DONE, {
@@ -1830,6 +1834,7 @@ const processSlimGrading = async (job) => {
       autoCount,
       manualCount,
       emptyCount,
+      pendingCount,
       duration: Date.now() - startTime,
       completedAt: new Date().toISOString()
     })
@@ -3877,6 +3882,9 @@ const processWorkbookGrading = async (job) => {
           if (q.is_correct === false) wrongCount++
         } else {
           q.is_correct = null // 未作答
+          // 必须显式标 blank：本管线原先只把 is_correct 置 null，未作答题与"AI 判不出"
+          // 在库里长得一样，列表页的"空"和"待复核"两桶就分不开（复核页也只能显示"处理中"）。
+          q.answer_source = 'blank'
           emptyCount++
         }
         console.log(`   [Workbook] 题 ${q.question_number}: 学生="${q.student_answer}" 标准="${q.answer}" → ${q.is_correct === true ? '正确' : q.is_correct === false ? '错误' : '待人工'}`)
@@ -4028,18 +4036,22 @@ const processWorkbookGrading = async (job) => {
 
   // 8. 完成
   const duration = ((Date.now() - startTime) / 1000).toFixed(1)
+  // 待人工题数（答案库无匹配等）：不进 wrongCount 也不进 emptyCount，
+  // 必须单独下发，否则列表页"无错无空"会写成"全部正确"。
+  const { pendingCount } = computeTaskStats(questionsWithStudentId)
   await updateTaskStatus(taskId, TASK_STATUS.DONE, {
     progress: 100,
     questionCount: allQuestions.length,
     wrongCount,
     matchedCount,
     emptyCount,
+    pendingCount,
     duration: `${duration}s`,
     source: 'workbook',
     sectionMatch: sectionMatchInfo
   })
 
-  console.log(`✅ [Workbook] 完成: ${allQuestions.length} 题, ${wrongCount} 错, ${emptyCount} 空, 共 ${imageList.length} 页, 耗时 ${duration}s`)
+  console.log(`✅ [Workbook] 完成: ${allQuestions.length} 题, ${wrongCount} 错, ${emptyCount} 空, ${pendingCount} 待人工, 共 ${imageList.length} 页, 耗时 ${duration}s`)
 }
 
 // ═══════════════════════════════════════════════
@@ -5013,10 +5025,12 @@ const processAnswerBankGrading = async (job) => {
     if (allNoMatch) {
       sectionMatchInfo.match_fail_reason = '所有页面均无法匹配到所属练习单元'
     }
+    const { pendingCount } = computeTaskStats(questionsWithIds)
     await updateTaskStatus(taskId, TASK_STATUS.DONE, {
       questionCount: questionsWithIds.length,
       wrongCount,
       emptyCount,
+      pendingCount,
       matchedCount,
       duration: `${duration}s`,
       source: 'answer_bank',
@@ -5024,7 +5038,7 @@ const processAnswerBankGrading = async (job) => {
       sectionMatch: sectionMatchInfo
     })
 
-    console.log(`✅ [AnswerBank] 完成: ${questionsWithIds.length} 题, ${wrongCount} 错, ${emptyCount} 空, ${matchedCount} 匹配答案库, 耗时 ${duration}s`)
+    console.log(`✅ [AnswerBank] 完成: ${questionsWithIds.length} 题, ${wrongCount} 错, ${emptyCount} 空, ${pendingCount} 待人工, ${matchedCount} 匹配答案库, 耗时 ${duration}s`)
   } catch (e) {
     console.error(`💥 [AnswerBank] 异常:`, e.message)
     await updateTaskStatus(taskId, TASK_STATUS.FAILED, { error: e.message, last_error: e.message, failedAt: new Date().toISOString() }).catch(() => {})
@@ -5396,33 +5410,10 @@ export const processTask = async (job) => {
       // 详见 geometryWorker.js 和 pendingTaskRecovery.js。
 
       // OCR 结果只作为过程证据；错题、掌握度和最终判题记录统一在答案生成后结算。
-
-      // [Shadow Mode] 追加写入 AI OCR 判定记录
-      try {
-        const judgementPromises = questionsWithStudentId.map(q =>
-          createJudgement({
-            questionId: q.id,
-            studentId: q.student_id,
-            source: 'ai_ocr',
-            confidence: q.confidence ?? null,
-            isCorrect: q.is_correct ?? null,
-            content: q.content ?? null,
-            answer: q.answer ?? null,
-            studentAnswer: q.student_answer ?? null,
-            analysis: q.analysis ?? null,
-            metadata: {
-              question_type: q.question_type,
-              originalIsCorrect: q.is_correct,
-              manual_mark: q.manual_mark || 'none',
-              grading_source: q.grading_source || 'answer_comparison'
-            }
-          }).catch(e => console.error(`[Shadow] judgements写入失败 (OCR) q=${q.id?.substring(0,8)}:`, e.message))
-        )
-        await Promise.allSettled(judgementPromises)
-        console.log(`  [Shadow] AI OCR判定记录已追加: ${questionsWithStudentId.length} 条`)
-      } catch (e) {
-        console.error('  [Shadow] AI OCR判定记录写入异常:', e.message)
-      }
+      // ⚠️ 判题审计记录（judgements）必须等 Step 7 生成参考答案 + 重判之后再写，
+      //    否则此刻 q.answer 仍为空/等于学生答案，会把"待判定"错记成"判定正确"，
+      //    前端 mergeJudgements 再用这条脏记录兜底覆盖题目状态 → 错题显示判定正确。
+      //    统一移动到 Step 7 重判之后写入（见下方 [Shadow Mode]）。
 await job.updateProgress(80)
       await updateTaskStatus(taskId, TASK_STATUS.PROCESSING, { progress: 80 })
 
@@ -5510,6 +5501,35 @@ await job.updateProgress(80)
             }
           }
         }
+
+      // [Shadow Mode] 判题审计记录：在参考答案生成 + 重判之后写入，反映最终判定。
+      // 关键顺序修复：此前该写入放在 Step 6（答案尚未生成），会把"待判定/错题"错记为
+      // 判定正确，前端 mergeJudgements 再用其兜底覆盖题目状态，导致错题显示"AI 判定正确"。
+      try {
+        const judgementPromises = questions.map(q =>
+          createJudgement({
+            questionId: q.id,
+            studentId: studentId,
+            source: 'ai_ocr',
+            confidence: q.confidence ?? null,
+            isCorrect: q.is_correct ?? null,
+            content: q.content ?? null,
+            answer: q.answer ?? null,
+            studentAnswer: q.student_answer ?? null,
+            analysis: q.analysis ?? null,
+            metadata: {
+              question_type: q.question_type,
+              originalIsCorrect: q.is_correct,
+              manual_mark: q.manual_mark || 'none',
+              grading_source: q.grading_source || 'answer_comparison'
+            }
+          }).catch(e => console.error(`[Shadow] judgements写入失败 (OCR) q=${q.id?.substring(0,8)}:`, e.message))
+        )
+        await Promise.allSettled(judgementPromises)
+        console.log(`  [Shadow] AI 判定记录已追加(答案生成后): ${questions.length} 条`)
+      } catch (e) {
+        console.error('  [Shadow] AI 判定记录写入异常:', e.message)
+      }
 
       await job.updateProgress(85)
       await updateTaskStatus(taskId, TASK_STATUS.PROCESSING, { progress: 85 })
@@ -5614,22 +5634,28 @@ await job.updateProgress(80)
     await job.updateProgress(100)
     const duration = Date.now() - startTime
 
-    // 统计空白题数（学生未作答）
+    // 空白题数（学生未作答）与待人工题数（AI 给不出结论 / 置信度不足）。
+    // 两者都从落库后的题目行统一分桶，避免"非空但判不出"的题两边都不进、
+    // 被列表页的"无错无空 ⇒ 全部正确"文案吞掉。
     let emptyCount = 0
+    let pendingCount = 0
     try {
-      const { rows: blankRows } = await query(
-        `SELECT COUNT(*) AS cnt FROM ${TABLES.QUESTIONS} WHERE task_id = $1 AND answer_source = 'blank'`,
+      const { rows: gradedRows } = await query(
+        `SELECT is_correct, answer_source, review_status, confidence FROM ${TABLES.QUESTIONS} WHERE task_id = $1`,
         [taskId]
       )
-      emptyCount = parseInt(blankRows[0]?.cnt || 0)
+      const stats = computeTaskStats(gradedRows)
+      emptyCount = stats.emptyCount
+      pendingCount = stats.pendingCount
     } catch (e) {
-      console.error('   统计空白题数失败:', e.message)
+      console.error('   统计空白/待人工题数失败:', e.message)
     }
 
     await updateTaskStatus(taskId, TASK_STATUS.DONE, {
       questionCount: questions.length,
       wrongCount: wrongCount,
       emptyCount: emptyCount,
+      pendingCount: pendingCount,
       duration: duration,
       completedAt: new Date().toISOString(),
       answerExceptions: answerGenResult.exceptions || 0,
@@ -5644,6 +5670,7 @@ await job.updateProgress(80)
     console.log(`   taskId: ${taskId}`)
     console.log(`   题目数: ${questions.length}`)
     console.log(`   错题数: ${wrongCount}`)
+    console.log(`   待人工: ${pendingCount}`)
     console.log(`   缓存命中: ${answerGenResult.cacheHits || 0} 次`)
     console.log(`   总耗时: ${Math.round(duration / 1000)}s`)
     console.log(`🎉🎉🎉 ==========================================\n`)

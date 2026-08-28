@@ -598,10 +598,10 @@ export const useReviewStore = defineStore('review', () => {
         const j = judgeMap[q.id]
         if (j) {
           q.confidence = j.confidence
-          // 若 question 本身没有 is_correct，从 judgement 补充
-          if (q.is_correct == null && j.is_correct != null) {
-            q.is_correct = j.is_correct
-          }
+          // ⚠️ 不再用 judgement.is_correct 兜底覆盖题目状态：
+          //    questions 表才是最终判题权威（Step 7 重判后写回），judgements 是审计流水，
+          //    历史上还存在"答案生成前写早了的脏 ai_ocr 记录"。用它兜底会把错题显示成判定正确。
+          //    这里只合并 confidence，is_correct 一律以 questions 表为准。
         }
       }
     } catch (e) {

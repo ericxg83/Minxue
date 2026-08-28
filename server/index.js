@@ -55,6 +55,7 @@ import { createJudgement, batchUpdateQuestionTags, getQuestionAssets, getQuestio
 import { judgeAnswer, findDirtyAnswers } from './services/judgeService.js'
 import { checkQuestionCompleteness } from './utils/questionCompleteness.js'
 import { normalizeOptions } from './utils/optionText.js'
+import { computeTaskStats } from './utils/taskStats.js'
 import { uploadImage, deleteFile } from './services/ossService.js'
 import { getTaskQueue, getGeometryQueue, getQueueStats, taskWorker } from './queue.js'
 import { processTask } from './worker.js'
@@ -516,6 +517,39 @@ app.get('/api/tasks/:taskId', async (req, res) => {
   }
 })
 
+// pendingCount（待复核）是后加的第三桶。历史任务的 result 里没有这个字段，若前端按 0 兜底，
+// 旧作业会继续显示「N 道题全部正确」——正是本次要修掉的错觉。首次读列表时按题目行补算并
+// 回写，之后有字段直接跳过，不必为此写一次全表迁移。
+const backfillPendingCount = async (tasks) => {
+  const stale = tasks.filter(t => t.result && t.result.questionCount && t.result.pendingCount == null)
+  if (stale.length === 0) return
+
+  const ids = stale.map(t => t.id)
+  const { rows } = await query(
+    `SELECT task_id, is_correct, answer_source, review_status, confidence
+     FROM ${TABLES.QUESTIONS} WHERE task_id = ANY($1)`,
+    [ids]
+  )
+  const byTask = new Map()
+  for (const r of rows) {
+    if (!byTask.has(r.task_id)) byTask.set(r.task_id, [])
+    byTask.get(r.task_id).push(r)
+  }
+
+  const patches = stale.map(t => {
+    const { pendingCount } = computeTaskStats(byTask.get(t.id) || [])
+    t.result = { ...t.result, pendingCount }
+    return JSON.stringify({ pendingCount })
+  })
+  await query(
+    `UPDATE ${TABLES.TASKS} t
+     SET result = COALESCE(t.result, '{}'::jsonb) || v.patch::jsonb
+     FROM (SELECT unnest($1::uuid[]) AS id, unnest($2::text[]) AS patch) v
+     WHERE t.id = v.id`,
+    [ids, patches]
+  )
+}
+
 // Get tasks by student
 app.get('/api/tasks/student/:studentId', async (req, res) => {
   try {
@@ -530,6 +564,8 @@ app.get('/api/tasks/student/:studentId', async (req, res) => {
        ORDER BY created_at DESC LIMIT $2 OFFSET $3`,
       [studentId, limit, offset]
     )
+    // 回填失败不能拖垮列表：摘要退化成旧口径，但作业列表照常返回
+    await backfillPendingCount(rows).catch(e => console.error('回填 pendingCount 失败:', e.message))
     res.json({ success: true, tasks: rows })
   } catch (error) {
     console.error('获取学生任务失败:', error)
@@ -643,21 +679,13 @@ app.post('/api/tasks/:taskId/recalculate-stats', async (req, res) => {
     const { taskId } = req.params
 
     const { rows } = await query(
-      `SELECT is_correct, answer_source, review_status FROM ${TABLES.QUESTIONS} WHERE task_id = $1`,
+      `SELECT is_correct, answer_source, review_status, confidence FROM ${TABLES.QUESTIONS} WHERE task_id = $1`,
       [taskId]
     )
 
-    const includedRows = rows.filter(q => q.review_status !== 'exclude')
-    const questionCount = includedRows.length
-    let wrongCount = 0
-    let emptyCount = 0
-    includedRows.forEach(q => {
-      const isWrong = q.review_status === 'wrong' ||
-        q.review_status === 'wrong_no_book' ||
-        (q.review_status == null && q.is_correct === false)
-      if (isWrong) wrongCount++
-      if (q.answer_source === 'blank') emptyCount++
-    })
+    // 与复核页「需处理」同一套分桶：四桶互斥，未作答不再与"改判为错"同时命中，
+    // 非空但判不出的题进 pendingCount 而不是凭空消失。
+    const { questionCount, wrongCount, emptyCount, pendingCount } = computeTaskStats(rows)
 
     const { rows: taskRows } = await query(
       `UPDATE ${TABLES.TASKS}
@@ -665,7 +693,7 @@ app.post('/api/tasks/:taskId/recalculate-stats', async (req, res) => {
            updated_at = NOW()
        WHERE id = $2
        RETURNING *`,
-      [JSON.stringify({ questionCount, wrongCount, emptyCount, progress: 100 }), taskId]
+      [JSON.stringify({ questionCount, wrongCount, emptyCount, pendingCount, progress: 100 }), taskId]
     )
 
     if (taskRows.length === 0) {

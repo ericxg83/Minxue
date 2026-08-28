@@ -50,7 +50,7 @@
       <!-- ═══ 答案对照（紧凑） ═══ -->
       <div class="ops-compare-bar">
         <div class="ops-compare-item">
-          <span class="ops-cmp-label">学生</span>
+          <span class="ops-cmp-label">学生答案</span>
           <span class="ops-cmp-value student-val">
             <MathRender :content="q.student_answer || '—'" autoDetect tag="span" />
           </span>
@@ -58,7 +58,7 @@
         <div class="ops-cmp-divider"></div>
         <div class="ops-compare-item">
           <span class="ops-cmp-label">
-            标准
+            参考答案
             <span v-if="editing" style="color:var(--wb-warning);font-weight:400;"> 编辑</span>
           </span>
           <el-input v-if="editing" v-model="form.answer" size="default" placeholder="标准答案" />

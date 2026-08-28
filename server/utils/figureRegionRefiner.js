@@ -22,17 +22,17 @@ const ROW_MIN_INK_RATIO = 0.015 // 一行的墨迹占比下限；太低会被纸
 const COL_MIN_INK_RATIO = 0.02  // 一列的墨迹占比下限（相对带高）
 const ROW_BRIDGE_RATIO = 0.004 // 纵向桥接间隙（相对页高），小于它的空白不切带
 const COL_BRIDGE_RATIO = 0.010 // 横向桥接间隙（相对页宽），用于切开并排的多张配图
-const STOP_GAP_RATIO = 0.010   // 沿列扩张时，连续空白超过页高这个比例就停（图内断裂跨得过去）
+const STOP_GAP_RATIO = 0.025   // 沿列扩张时，连续空白超过页高这个比例就停（图内断裂跨得过去）
 const GROW_MIN_INK_RATIO = 0.010 // 扩张时一行至少这么多墨（相对列宽）才算"有内容"，挡住descender
 const TRIM_BRIDGE_RATIO = 0.0015 // 收尾修边用的细桥接：图注与图形只隔十几像素，粗桥接分不开
 const TRIM_MIN_INK_RATIO = 0.008 // 收尾修边的行墨量下限（相对列宽）
 const WIN_EXPAND_X = 0.25      // 搜索窗横向放宽（放宽后靠列分组切回来）
 const WIN_EXPAND_Y = 0.80      // 搜索窗纵向放宽（要看到配图上下的空白才分得出带）
-const PAD_RATIO = 0.03
+const PAD_RATIO = 0.05
 const MIN_SIDE_RATIO = 0.02    // 结果任一边不足页面 2% → 判失败
 // 收紧结果比模型框大出这么多倍 → 说明分带没咬住图形边界（横格作业本的印刷横线会
 // 冒充"图形的长横线"，把题干和手写一起并进来）→ 判失败，不给配图。
-const MAX_GROWTH_H = 1.6
+const MAX_GROWTH_H = 2.0
 const MAX_GROWTH_W = 1.7
 
 // ── 图形带体检阈值（数值来自线上样本实测，见 tests/figureRegionRefiner.test.mjs）──

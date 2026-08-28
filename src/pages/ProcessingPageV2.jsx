@@ -29,19 +29,28 @@ const failReason = t => {
   return '处理未完成，可重试'
 }
 
-// 一行摘要：错/空 是批改 result 里的权威计数，直接展示、各配状态色。
-// 刻意不显示"对题数"——result 未落库 correctCount，前端相减会把"无法判定的非空题"
-// 和"被复核改判为错的空题"误算进去（详见 DEVLOG.md 待办）。家长在列表页只关心问题项。
-function ResultSummary({ questionCount, wrong, empty, truncated }) {
-  if (wrong === 0 && empty === 0 && !truncated) {
+// 一行摘要：错/空/待复核 三桶互斥，都是批改 result 里的权威计数，各配状态色。
+// 「待复核」必须单独成桶——非空但 AI 判不出的题（答案库无匹配 / 置信度不足）既不进
+// wrongCount 也不进 emptyCount，早期只看这两个数会把它们静默归入"全对"，
+// 出现列表写「7 道题全部正确」、点进复核页却显示「需处理 4」的自相矛盾。
+// 仍刻意不显示"对题数"——result 未落库 correctCount，前端相减不可靠（详见 DEVLOG.md 待办）。
+function ResultSummary({ questionCount, wrong, empty, pending, truncated }) {
+  if (wrong === 0 && empty === 0 && pending === 0 && !truncated) {
     return <>{questionCount ? `${questionCount} 道题全部正确` : '批改完成'}</>
   }
-  return <>
-    {questionCount ? `共${questionCount}题` : ''}
-    {wrong > 0 && <>{questionCount ? ' · ' : ''}<span style={{ color: 'var(--danger)' }}>错{wrong}</span></>}
-    {empty > 0 && <>{(questionCount || wrong > 0) ? ' · ' : ''}<span style={{ color: 'var(--warning, #b45309)' }}>空{empty}</span></>}
-    {truncated && <> · <span style={{ color: 'var(--warning, #b45309)' }}>可能有漏题</span></>}
-  </>
+  const warning = 'var(--warning, #b45309)'
+  const parts = []
+  if (questionCount) parts.push(`共${questionCount}题`)
+  if (wrong > 0) parts.push(<span key='wrong' style={{ color: 'var(--danger)' }}>错{wrong}</span>)
+  if (empty > 0) parts.push(<span key='empty' style={{ color: warning }}>空{empty}</span>)
+  if (pending > 0) parts.push(<span key='pending' style={{ color: warning }}>待复核{pending}</span>)
+  if (truncated) parts.push(<span key='truncated' style={{ color: warning }}>可能有漏题</span>)
+  const nodes = []
+  parts.forEach((part, i) => {
+    if (i > 0) nodes.push(' · ')
+    nodes.push(part)
+  })
+  return <>{nodes}</>
 }
 
 // 一行一动作：完成行整行可点开批改结果；失败/卡住行只保留"重新处理"；
@@ -50,6 +59,7 @@ function TaskRow({ task, onRetryTask, onOpenReview }) {
   const current = stage(task)
   const wrong = task.result?.wrongCount || 0
   const empty = task.result?.emptyCount || 0
+  const pending = task.result?.pendingCount || 0
   const questionCount = task.result?.questionCount || task.question_count || 0
   const truncated = Number(task.result?.ocrTruncated) > 0
   const bad = current === 'failed' || current === 'stalled'
@@ -64,7 +74,7 @@ function TaskRow({ task, onRetryTask, onOpenReview }) {
     : current === 'processing' && isTemp ? '正在上传图片'
     : current === 'processing' ? '正在整理批改结果'
     : current === 'completed'
-      ? <ResultSummary questionCount={questionCount} wrong={wrong} empty={empty} truncated={truncated} />
+      ? <ResultSummary questionCount={questionCount} wrong={wrong} empty={empty} pending={pending} truncated={truncated} />
     : '等待系统开始处理'
 
   const body = (
