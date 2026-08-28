@@ -44,6 +44,14 @@ export const effectiveIsCorrect = question => {
   return question?.is_correct ?? null
 }
 
+// 错题记录的生命周期终态。与 PC 端 lifecycleStore 的同名取值保持一致——
+// 人工复核「其实做对了」必须是标记已掌握、保留错误次数与练习次数，
+// 而不是把记录删掉：删掉等于这题从没错过，学习轨迹消失且再也不会进重练池。
+export const WRONG_BOOK_LIFECYCLE = Object.freeze({
+  MASTERED: 'mastered',
+  EXCLUDED: 'excluded'
+})
+
 /**
  * 题目的复核状态（5 态，两端同源）
  * @returns {'correct'|'wrong'|'pending'|'exception'|'processing'}

@@ -1,35 +1,46 @@
 import { useState, useEffect, useMemo, useCallback } from 'react'
-import { useWrongQuestionStore } from '../store'
 import { useToast } from '../components/ToastProvider'
 import {
-  updateQuestion, addWrongQuestions, deleteWrongQuestion,
-  getQuestionsByTask, invalidateCache, recalculateTaskStats,
+  updateQuestion, addWrongQuestions, deleteWrongQuestion, updateWrongQuestionStatus,
+  getQuestionsByTask, getWrongQuestionsByStudent, invalidateCache, recalculateTaskStats,
   updateTaskStatus
 } from '../services/apiService'
 import { getStatusInfo } from '../pages/ExamReview/status.jsx'
-import { REVIEW_STATUS, getReviewState } from '../utils/reviewDecision'
+import { REVIEW_STATUS, getReviewState, WRONG_BOOK_LIFECYCLE } from '../utils/reviewDecision'
 import { checkQuestionCompleteness } from '../utils/questionCompleteness.js'
 
 // 复审核心逻辑：题目数据加载、人工评判 edits 管理、保存
 export function useExamReview({ task, onSave }) {
-  const { wrongQuestions } = useWrongQuestionStore()
   const Toast = useToast()
 
   const [questions, setQuestions] = useState([])
   const [edits, setEdits] = useState({})
   const [saving, setSaving] = useState(false)
   const [loading, setLoading] = useState(true)
+  // 错题记录要自己拉：全局 store 只在错题本页填充，从作业页直接进复核时它是空的，
+  // 会让「改判后同步错题本」整段静默不执行（与 PC 端复核台同一做法）
+  const [bankRecords, setBankRecords] = useState([])
 
   // ── 派生数据 ──
   const validQuestions = useMemo(() => questions.filter(Boolean), [questions])
 
   const wrongIdMap = useMemo(() => {
     const map = {}
-    ;(Array.isArray(wrongQuestions) ? wrongQuestions : []).forEach(wq => {
+    bankRecords.forEach(wq => {
       if (wq.question_id) map[wq.question_id] = wq.id
     })
     return map
-  }, [wrongQuestions])
+  }, [bankRecords])
+
+  // ── 错题本记录：复核页自己拉，不依赖错题本页的懒加载 ──
+  useEffect(() => {
+    if (!task?.student_id) return
+    let cancelled = false
+    getWrongQuestionsByStudent(task.student_id)
+      .then(list => { if (!cancelled) setBankRecords(Array.isArray(list) ? list : []) })
+      .catch(e => console.warn('[ExamReview] 错题本记录加载失败，改判后错题本同步将跳过:', e.message))
+    return () => { cancelled = true }
+  }, [task?.student_id])
 
   // ── 数据获取 ──
   useEffect(() => {
@@ -144,11 +155,12 @@ export function useExamReview({ task, onSave }) {
 
         const isExcludedEdit = edit.review_status === REVIEW_STATUS.EXCLUDE
 
-        // 错题本操作
+        // 错题本：与 PC 端同一策略——改判做对是「已掌握」，不是删记录
         if (isExcludedEdit && wrongId) {
-          await deleteWrongQuestion(wrongId).catch(e => console.warn(`[ExamReview] 删除错题失败 q=${qId.substring(0,8)}:`, e.message))
+          await deleteWrongQuestion(wrongId).catch(e => console.warn(`[ExamReview] 移除错题失败 q=${qId.substring(0,8)}:`, e.message))
         } else if (edit.is_correct === true && wrongId) {
-          await deleteWrongQuestion(wrongId).catch(e => console.warn(`[ExamReview] 删除错题失败 q=${qId.substring(0,8)}:`, e.message))
+          await updateWrongQuestionStatus(wrongId, 'mastered', { lifecycle_status: WRONG_BOOK_LIFECYCLE.MASTERED })
+            .catch(e => console.warn(`[ExamReview] 标记已掌握失败 q=${qId.substring(0,8)}:`, e.message))
         } else if (edit.is_correct === false && !wrongId && !isExcludedEdit) {
           // 不完整的题不入错题本，否则会成为 PC 端按 is_complete 过滤后看不见的隐形错题。
           // 手机上无法补全题目元素，因此不阻断判定，只跳过入册并在保存后汇总告知。
