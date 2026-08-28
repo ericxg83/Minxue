@@ -461,9 +461,22 @@ export function judgeAnswer(studentAnswer, referenceAnswer, questionType) {
   // Fill / answer / other: normalized comparison with tolerance
   // 先收窄过程型答案（如 "=√4=2" → "2"），再与参考答案比对
 
+  // 学生答案与参考答案归一化后字面完全一致 → 必然正确，必须在任何收窄之前判。
+  // narrowToFinalAnswer 只作用于学生侧（取最后一个 "=" 右侧），参考答案不收窄，
+  // 于是 "x = -m ± √n" 与一模一样的参考答案会被比成 "-m±√n" vs "x=-m±√n" 而判错
+  // （用户截图实例：填空题"(x+m)²=n 的解为"，学生与标准逐字符相同却报"AI 判定错误"）。
+  // ± 这类符号无法数值化，下游 isMathEquivalent / extractAndCompare 也救不回来。
+  // 归一化后为空串的不算（"。" 与 "，" 都会被 strip 成空串，不能因此判对）。
+  const normStudentWhole = normalizeAnswer(studentAnswer)
+  if (normStudentWhole && normStudentWhole === normalizeAnswer(referenceAnswer)) {
+    return { isCorrect: true, unrecognized: false }
+  }
+
   // Helper: 单个答案片段的归一化比较
   const normalizeAndCompare = (sAns, rAns) => {
-    const narrowed = narrowToFinalAnswer(sAns)
+    // 收窄后为空（片段本身就是 "=" 或以 "=" 结尾）时退回原片段，
+    // 否则空格分片比较里的 "=" 片段永远与参考侧的 "=" 不等，整题被拖成错。
+    const narrowed = narrowToFinalAnswer(sAns) || String(sAns ?? '').trim()
     const normS = normalizeAnswer(narrowed)
     const normR = normalizeAnswer(rAns)
     if (normS === normR) return true
@@ -613,8 +626,9 @@ export function judgeAnswer(studentAnswer, referenceAnswer, questionType) {
   const normStudent = normalizeAnswer(narrowedStudent)
   const normRef = normalizeAnswer(referenceAnswer)
 
-  // String-level match
-  if (normStudent === normRef) {
+  // String-level match（两边归一化后都为空不算命中：学生只写了标点/括号时
+  // normalizeAnswer 会 strip 成空串，和同样被 strip 成空串的参考答案"相等"而误判为对）
+  if (normStudent && normStudent === normRef) {
     return { isCorrect: true, unrecognized: false }
   }
 

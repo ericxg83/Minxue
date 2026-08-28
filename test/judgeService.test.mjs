@@ -24,3 +24,23 @@ test('keeps existing mathematical equivalence behavior', () => {
   assert.deepEqual(judgeAnswer('1/2', '0.5', 'fill'), { isCorrect: true, unrecognized: false })
   assert.deepEqual(judgeAnswer(String.fromCharCode(0x221A) + '4', '2', 'answer'), { isCorrect: true, unrecognized: false })
 })
+
+// 学生答案与标准答案逐字符相同却判错的回归：
+// narrowToFinalAnswer 只收窄学生侧（取最后一个 "=" 右侧），参考答案不收窄，
+// "x = -m ± √n" 被比成 "-m±√n" vs "x=-m±√n"；± 无法数值化，下游兜底也救不回来。
+test('identical student and reference answers are always correct', () => {
+  const pm = '±'      // ±
+  const sqrt = '√'    // √
+  const ang = '∠'     // ∠
+  const same = `x = -m ${pm} ${sqrt}n`
+  assert.deepEqual(judgeAnswer(same, same, 'fill'), { isCorrect: true, unrecognized: false })
+  assert.deepEqual(judgeAnswer(`x=-m${pm}${sqrt}n`, same, 'fill'), { isCorrect: true, unrecognized: false })
+  assert.deepEqual(judgeAnswer(`${ang}A=${ang}D`, `${ang}A=${ang}D`, 'fill'), { isCorrect: true, unrecognized: false })
+  // 仍要能判错：变量前缀相同、答案本体不同
+  assert.deepEqual(judgeAnswer(`x = -m ${pm} ${sqrt}k`, same, 'fill'), { isCorrect: false, unrecognized: false })
+  // 归一化后都成空串（学生只写了标点）不能算命中
+  const ju = String.fromCharCode(0x3002)  // 。
+  const dou = String.fromCharCode(0xFF0C) // ，
+  assert.deepEqual(judgeAnswer(ju, dou, 'fill'), { isCorrect: false, unrecognized: false })
+  assert.deepEqual(judgeAnswer(ju, ju, 'fill'), { isCorrect: false, unrecognized: false })
+})
