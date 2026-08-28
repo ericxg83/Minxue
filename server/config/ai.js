@@ -1008,24 +1008,47 @@ ${subject ? `已知学科：${subject}\n` : ''}
 
 export const buildGeometryExtractionPrompt = () => `你是一个几何图提取助手。请识别图片中的纯几何元素并输出 TikZ 代码，只返回完整 tikzpicture 代码，不要解释。`
 
-export const buildGeometryReconstructionPrompt = () => `你是一个几何图结构识别助手。请从图片中提取几何结构，只返回 JSON。
+export const buildGeometryReconstructionPrompt = () => `你是几何图结构识别助手。看印刷的几何示意图，提取其结构，只返回 JSON。
+
+坐标约定（必须严格遵守）：
+- 每个顶点都要给出平面坐标 x、y。以图形最低最左处为参考，x 向右增大，y 向上增大（数学坐标，不是屏幕坐标）。
+- 坐标落在 0~100 区间，保留 1 位小数。只需相对位置准确，绝对尺度不限。
+- 顶点的高低、左右、远近关系必须与原图一致：原图左上方的点，y 要大且 x 要小。
+- 角度与边长比例贴近原图。原图不是正三角形就不要画成正三角形。
 
 返回格式：
 {
   "figure_type": "geometry",
-  "points": [],
-  "segments": [],
-  "circles": [],
+  "points": [ { "label": "A", "x": 12.5, "y": 88.0, "type": "vertex" } ],
+  "segments": [ { "from": "A", "to": "B", "style": "solid", "relation": "normal" } ],
+  "circles": [ { "cx": 50.0, "cy": 50.0, "r": 20.0, "style": "solid" } ],
+  "rightAngles": [ { "vertex": "C", "from": "A", "to": "B" } ],
   "coordinate_system": { "exists": false, "origin": "", "x_axis": false, "y_axis": false },
   "constraints": [],
-  "geometry_labels": [],
-  "ignored_labels": [],
-  "rightAngles": []
+  "labels": []
 }
 
-要求：
-1. 只返回 JSON。
+字段规则：
+- figure_type：纯几何示意图填 "geometry"；坐标系/函数图象填 "coordinate"；画在坐标背景里的几何图填 "geometry_with_coords"。
+- points：图上的顶点、交点、圆心。label 用原图字母，必须含 x、y。
+- segments：端点必须引用 points 里存在的 label。style 取 solid|dashed|dotted；relation 取 normal|perpendicular|parallel。
+- rightAngles：原图上有直角小方块标记时填写，vertex 是直角所在顶点。
+- labels：见下方"标注纪律"，通常应为空数组。
+- constraints：原图明确给出的等量/平行/垂直关系，如 { "type": "parallel", "segments": ["AB","CD"] }。
+
+标注纪律（重要）：
+这张图会被重绘成干净的教材插图供学生答题使用，所以 labels 只允许收录**题干里不太可能出现的符号名**，例如角标记 α、β、θ，或线名 l、m。
+除此之外一律留空，具体禁止收录：
+- 任何数字、长度值、角度值（如 4、5/2、2、√18、90°、30、6cm）——学生常把已知条件和算出的答案手写在图旁，抄进来会让答案伪装成题设。
+- 顶点的字母（A、B、C 由 points 自动标注，不要重复放进 labels）。
+- 题号、页码、"第11题"、"图3"、水印、答题区文字。
+若拿不准某条标注是否该收录，就不收录。
+
+其它纪律：
+1. 只输出 JSON，不要任何解释文字。
 2. 不要补画原图中不存在的点、线、圆、坐标轴。
-3. 无法识别时返回空结构。`
+3. 若该点是由作图关系定义的派生点（垂足、中点、两线交点、线段上的动点），在该点上追加 "derived" 字段说明其来源，例如 { "label": "D", "x": 30.0, "y": 55.0, "derived": { "on_segment": "AB" } }。宁可标注 derived，也不要把位置猜成一个自由点。
+4. 忽略一切手写笔迹：解题演算、涂画、勾选、红笔批改。
+5. 若图中没有任何可定位的印刷几何结构（实物照片、统计图表、纯文字示意），返回 {"figure_type":"geometry","points":[],"segments":[],"circles":[]}。`
 
 export const buildTikzGenerationPrompt = () => `你是一个 TikZ 代码生成助手。请根据输入几何图输出完整的 tikzpicture 代码，不要附加任何解释。`

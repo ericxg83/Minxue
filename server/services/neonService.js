@@ -738,7 +738,7 @@ export const updateGeometryReconstructionStatus = async (assetId, upd) => {
       tikz_json != null ? JSON.stringify(tikz_json) : null,
       tikz_url || null,
       tikz_code || null,
-      last_error || null,
+      last_error ?? null,
       retry_count != null ? retry_count : null,
       processed_at || null,
       assetId

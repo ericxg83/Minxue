@@ -51,6 +51,22 @@ export function parseGeometryStructure(content) {
 }
 
 /** 规范化结构：确保各字段为数组，兼容新旧格式 */
+/**
+ * 是否为可保留的符号型标注（α、β、l 这类角名/线名）。
+ *
+ * 数字、长度、角度值一律剔除：学生习惯把已知条件和算出的答案手写在图旁，
+ * 视觉模型会把这些手写当成图形标注抄进 labels，重绘成整齐字体后
+ * 学生答案会伪装成题设。遵循"宁愿少显示，也不显示错误信息"。
+ */
+export function isSymbolLabel(text) {
+  const t = String(text ?? '').trim()
+  if (!t || t.length > 4) return false
+  if (/[0-9０-９]/.test(t)) return false
+  if (/[√°′″π]/.test(t)) return false
+  if (/[一-鿿]/.test(t)) return false
+  return /^[A-Za-zα-ωΑ-Ω]/.test(t)
+}
+
 function normalizeStructure(obj) {
   // 兼容新旧 points 格式
   let points = Array.isArray(obj.points) ? obj.points : []
@@ -62,7 +78,8 @@ function normalizeStructure(obj) {
         label: p.label ?? '',
         type: p.type || 'vertex',
         x: p.position.x,
-        y: p.position.y
+        y: p.position.y,
+        ...(p.derived && typeof p.derived === 'object' ? { derived: p.derived } : {})
       }
     }
     // 旧格式：{ label, x, y }
@@ -71,7 +88,8 @@ function normalizeStructure(obj) {
         label: p.label ?? '',
         type: p.type || 'vertex',
         x: p.x,
-        y: p.y
+        y: p.y,
+        ...(p.derived && typeof p.derived === 'object' ? { derived: p.derived } : {})
       }
     }
     return null
@@ -112,8 +130,8 @@ function normalizeStructure(obj) {
     segments,
     circles: Array.isArray(obj.circles) ? obj.circles : [],
     // 优先用分类后的 geometry_labels；旧结构无该字段时回退到 labels（向后兼容已渲染的题）
-    labels: Array.isArray(obj.geometry_labels) ? obj.geometry_labels
-          : Array.isArray(obj.labels) ? obj.labels : [],
+    labels: (Array.isArray(obj.geometry_labels) ? obj.geometry_labels
+          : Array.isArray(obj.labels) ? obj.labels : []).filter(l => isSymbolLabel(l?.text)),
     rightAngles: Array.isArray(obj.rightAngles) ? obj.rightAngles : [],
     figure_type,
     coordinate_system,
@@ -135,13 +153,33 @@ function normalizeFigureType(raw, cs) {
   return cs && cs.exists ? 'coordinate' : 'geometry'
 }
 
-/** 结构是否为空（无任何可渲染几何元素） */
-export function isEmptyStructure(s) {
+/** 模型未识别到任何几何元素——该题本就没有可重画的配图，不该重试 */
+export function isRawEmptyStructure(s) {
   if (!s) return true
   return (
     (s.points?.length || 0) === 0 &&
     (s.segments?.length || 0) === 0 &&
     (s.circles?.length || 0) === 0
+  )
+}
+
+/**
+ * 是否存在可渲染元素。
+ * 线段两端必须能在 points 里定位，否则画出来就是一条指向虚空的红线。
+ */
+export function isEmptyStructure(s) {
+  if (!s) return true
+  const pts = (s.points || []).filter(p => p && isNum(p.x) && isNum(p.y))
+  const named = new Set(pts.map(p => p.label).filter(Boolean))
+  const segs = (s.segments || []).filter(g => named.has(g?.from) && named.has(g?.to))
+  const circles = (s.circles || []).filter(c => isNum(c?.cx) && isNum(c?.cy) && isNum(c?.r))
+  return pts.length === 0 && segs.length === 0 && circles.length === 0
+}
+
+/** 是否有靠作图关系定义的派生点（垂足/中点/交点/线上动点） */
+export function hasDerivedPoints(s) {
+  return (s?.points || []).some(
+    p => p && p.derived && typeof p.derived === 'object' && Object.keys(p.derived).length > 0
   )
 }
 

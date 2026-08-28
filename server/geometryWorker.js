@@ -27,7 +27,7 @@ dotenv.config({ path: resolve(__dirname, '.env') })
 import axios from 'axios'
 import { query, TABLES } from './config/neon.js'
 import { callVisionCompletion, buildGeometryReconstructionPrompt } from './config/ai.js'
-import { parseGeometryStructure, renderGeometrySvg, isEmptyStructure } from './utils/geometrySvg.js'
+import { parseGeometryStructure, renderGeometrySvg, isEmptyStructure, isRawEmptyStructure, hasDerivedPoints } from './utils/geometrySvg.js'
 import { validateGeometryLabels } from './utils/geometryLabelValidator.js'
 import {
   updateGeometryReconstructionStatus,
@@ -56,47 +56,55 @@ async function downloadImageBuffer(url) {
 
 /**
  * 几何重建核心：原始裁剪图 → Vision API 识别结构 → 服务端渲染干净 SVG
+ *
+ * @returns {Promise<{ok:true,svg:string,structure:object}|{ok:false,reason:string,retriable:boolean}>}
+ *   reason 决定后续处置：no_figure / derived_deferred 是确定性结论（标 none，不重试）；
+ *   parse_fail / unrenderable 是模型没遵守格式（重试有意义，不能永久锁死）。
  */
 async function reconstructGeometrySvg(imageBuffer, questionId) {
   const shortId = (questionId || '').substring(0, 8)
-  try {
-    const base64 = imageBuffer.toString('base64')
-    const dataURL = `data:image/png;base64,${base64}`
+  const base64 = imageBuffer.toString('base64')
+  const dataURL = `data:image/png;base64,${base64}`
 
-    const result = await callVisionCompletion({
-      imageDataURL: dataURL,
-      systemPrompt: buildGeometryReconstructionPrompt(),
-      userText: '请识别这张几何图中的纯几何结构（点/线/圆/标注），只输出结构化 JSON。',
-      temperature: 0.1,
-      maxTokens: 2048
-    })
+  const result = await callVisionCompletion({
+    imageDataURL: dataURL,
+    systemPrompt: buildGeometryReconstructionPrompt(),
+    userText: '请识别这张几何图中的纯几何结构（点/线/圆/标注），只输出结构化 JSON。',
+    temperature: 0.1,
+    maxTokens: 3072
+  })
 
-    const structure = parseGeometryStructure(result.content)
-    if (!structure) {
-      console.warn(`   ⚠️ [几何Worker] ${shortId}: 未能解析出几何结构 JSON`)
-      return null
-    }
-    if (isEmptyStructure(structure)) {
-      console.warn(`   ⚠️ [几何Worker] ${shortId}: 未识别到有效几何结构（空）`)
-      return null
-    }
-
-    // 服务端二次整理：把模型 labels 按空间规则拆成 geometry_labels / ignored_labels
-    const validated = validateGeometryLabels(structure)
-    const nGeo = validated.geometry_labels.length
-    const nIgn = validated.ignored_labels.length
-    console.log(`   [几何Worker] ${shortId}: 标注二次整理 ${nGeo} 几何 / ${nIgn} 忽略`)
-
-    const svg = renderGeometrySvg(validated)
-    if (!svg) {
-      console.warn(`   ⚠️ [几何Worker] ${shortId}: 结构渲染 SVG 失败`)
-      return null
-    }
-    return { svg, structure: validated }
-  } catch (error) {
-    console.error(`   ⚠️ [几何Worker] ${shortId} 失败:`, error.message)
-    throw error // 由调用方处理重试逻辑
+  const structure = parseGeometryStructure(result.content)
+  if (!structure) {
+    console.warn(`   ⚠️ [几何Worker] ${shortId}: 未能解析出几何结构 JSON`)
+    return { ok: false, reason: 'parse_fail', retriable: true }
   }
+  if (isRawEmptyStructure(structure)) {
+    console.log(`   [几何Worker] ${shortId}: 图中无几何结构（数轴/实物/统计图），保留裁剪原图`)
+    return { ok: false, reason: 'no_figure', retriable: false }
+  }
+  if (isEmptyStructure(structure)) {
+    console.warn(`   ⚠️ [几何Worker] ${shortId}: 有元素但顶点缺坐标，渲染不出`)
+    return { ok: false, reason: 'unrenderable', retriable: true }
+  }
+
+  // 服务端二次整理：把模型 labels 按空间规则拆成 geometry_labels / ignored_labels
+  const validated = validateGeometryLabels(structure)
+  const nGeo = validated.geometry_labels.length
+  const nIgn = validated.ignored_labels.length
+  console.log(`   [几何Worker] ${shortId}: 标注二次整理 ${nGeo} 几何 / ${nIgn} 忽略`)
+
+  if (hasDerivedPoints(validated)) {
+    console.log(`   [几何Worker] ${shortId}: 含派生点（垂足/中点/线上点），待约束求解器，暂不重绘`)
+    return { ok: false, reason: 'derived_deferred', retriable: false }
+  }
+
+  const svg = renderGeometrySvg(validated)
+  if (!svg) {
+    console.warn(`   ⚠️ [几何Worker] ${shortId}: 结构渲染 SVG 失败`)
+    return { ok: false, reason: 'unrenderable', retriable: true }
+  }
+  return { ok: true, svg, structure: validated }
 }
 
 /**
@@ -122,15 +130,15 @@ async function processSingleAsset(asset) {
   // 2. 下载裁剪好的几何图
   const imageUrl = asset.cropped_image_url || asset.geometry_image_url
   if (!imageUrl) {
-    console.warn(`   ⚠️ [几何Worker] ${shortId}: 无图片 URL，标记失败`)
-    await handleFailure(asset, '无图片 URL')
+    console.warn(`   ⚠️ [几何Worker] ${shortId}: 无配图 URL，标记 none`)
+    await markNotReconstructable(asset, 'no_figure')
     return false
   }
 
   const rawBuffer = await downloadImageBuffer(imageUrl)
   if (!rawBuffer) {
-    console.warn(`   ⚠️ [几何Worker] ${shortId}: 下载失败，标记失败`)
-    await handleFailure(asset, '图片下载失败')
+    console.warn(`   ⚠️ [几何Worker] ${shortId}: 下载失败，稍后重试`)
+    await handleRetry(asset, '图片下载失败')
     return false
   }
 
@@ -138,9 +146,14 @@ async function processSingleAsset(asset) {
   let svg, structure
   try {
     const result = await reconstructGeometrySvg(rawBuffer, asset.question_id)
-    if (!result) {
-      // 结构解析失败（非 API 异常）→ 算失败但不重试（结构数据本身有问题）
-      await handleFailure(asset, '无法识别有效几何结构')
+    if (!result.ok) {
+      if (result.retriable) {
+        // 模型没遵守输出格式：重试有意义，绝不能锁死成永久 failed
+        await handleRetry(asset, `结构不可渲染: ${result.reason}`)
+      } else {
+        // 确定性结论：这题没有可重画的图，或需等约束求解器 → 退回裁剪原图
+        await markNotReconstructable(asset, result.reason)
+      }
       return false
     }
     svg = result.svg
@@ -164,6 +177,7 @@ async function processSingleAsset(asset) {
       tikz_status: 'completed',
       tikz_json: structure,
       tikz_code: svg,    // SVG 源码存入 tikz_code 字段（兼容旧字段名）
+      last_error: '',    // 清空历史错误，避免成功记录仍带着旧的失败原因
       processed_at: new Date().toISOString()
     })
 
@@ -174,7 +188,7 @@ async function processSingleAsset(asset) {
     return true
   } catch (error) {
     console.error(`   ⚠️ [几何Worker] ${shortId}: 入库失败:`, error.message)
-    await handleFailure(asset, `入库失败: ${error.message}`)
+    await handleRetry(asset, `入库失败: ${error.message}`)
     return false
   }
 }
@@ -210,13 +224,18 @@ async function handleRetry(asset, errorMessage) {
 }
 
 /**
- * 处理不可重试的失败（如无效图片、无结构数据）
+ * 确定性结论：这张图不需要或暂时不能重绘 → 标 'none'，不重试，前端回退裁剪原图。
+ * 与 'failed' 的区别是它不该被 pendingTaskRecovery 反复捞起，也不该显示成错误。
  */
-async function handleFailure(asset, errorMessage) {
+const NOT_RECONSTRUCTABLE = {
+  no_figure: '图中无可重绘的几何结构（数轴/实物/统计图）',
+  derived_deferred: '含派生点（垂足/中点/线上点），待约束求解器接入'
+}
+
+async function markNotReconstructable(asset, reason) {
   await updateGeometryReconstructionStatus(asset.id, {
-    tikz_status: 'failed',
-    last_error: errorMessage,
-    retry_count: asset.retry_count || 0,
+    tikz_status: 'none',
+    last_error: NOT_RECONSTRUCTABLE[reason] || reason,
     processed_at: new Date().toISOString()
   })
 }
