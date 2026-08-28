@@ -29,6 +29,7 @@ import { query, TABLES } from './config/neon.js'
 import { callVisionCompletion, buildGeometryReconstructionPrompt } from './config/ai.js'
 import { parseGeometryStructure, renderGeometrySvg, isEmptyStructure, isRawEmptyStructure, hasDerivedPoints } from './utils/geometrySvg.js'
 import { validateGeometryLabels } from './utils/geometryLabelValidator.js'
+import { validateStructureAgainstContent } from './utils/geometryContentGate.js'
 import {
   updateGeometryReconstructionStatus,
   updateQuestionDenormalizedSvg
@@ -61,7 +62,7 @@ async function downloadImageBuffer(url) {
  *   reason 决定后续处置：no_figure / derived_deferred 是确定性结论（标 none，不重试）；
  *   parse_fail / unrenderable 是模型没遵守格式（重试有意义，不能永久锁死）。
  */
-async function reconstructGeometrySvg(imageBuffer, questionId) {
+async function reconstructGeometrySvg(imageBuffer, questionId, content) {
   const shortId = (questionId || '').substring(0, 8)
   const base64 = imageBuffer.toString('base64')
   const dataURL = `data:image/png;base64,${base64}`
@@ -97,6 +98,16 @@ async function reconstructGeometrySvg(imageBuffer, questionId) {
   if (hasDerivedPoints(validated)) {
     console.log(`   [几何Worker] ${shortId}: 含派生点（垂足/中点/线上点），待约束求解器，暂不重绘`)
     return { ok: false, reason: 'derived_deferred', retriable: false }
+  }
+
+  // 题干交叉核对：模型画出的边/点在题干里找不到出处，或折叠派生点缺失 → 拒绝入库。
+  // 这是独立证据校验，不依赖模型自我验证。
+  if (content) {
+    const gate = validateStructureAgainstContent(validated, content)
+    if (!gate.ok) {
+      console.warn(`   ⚠️ [几何Worker] ${shortId}: 题干核对未过 → ${gate.reasons.join('；')}`)
+      return { ok: false, reason: 'content_mismatch', retriable: false, detail: gate.reasons }
+    }
   }
 
   const svg = renderGeometrySvg(validated)
@@ -142,17 +153,32 @@ async function processSingleAsset(asset) {
     return false
   }
 
+  // 题干文本：题干交叉核对闸门的独立证据源
+  let content = asset.content
+  if (content == null) {
+    try {
+      const { rows } = await query(
+        `SELECT content FROM ${TABLES.QUESTIONS} WHERE id = $1 LIMIT 1`,
+        [asset.question_id]
+      )
+      content = rows[0]?.content || ''
+    } catch (e) {
+      console.warn(`   ⚠️ [几何Worker] ${shortId}: 题干读取失败，跳过交叉核对:`, e.message)
+      content = ''
+    }
+  }
+
   // 3. Vision API 识别几何结构 → 服务端渲染干净 SVG
   let svg, structure
   try {
-    const result = await reconstructGeometrySvg(rawBuffer, asset.question_id)
+    const result = await reconstructGeometrySvg(rawBuffer, asset.question_id, content)
     if (!result.ok) {
       if (result.retriable) {
         // 模型没遵守输出格式：重试有意义，绝不能锁死成永久 failed
         await handleRetry(asset, `结构不可渲染: ${result.reason}`)
       } else {
-        // 确定性结论：这题没有可重画的图，或需等约束求解器 → 退回裁剪原图
-        await markNotReconstructable(asset, result.reason)
+        // 确定性结论：这题没有可重画的图，或题干核对未过 → 退回裁剪原图
+        await markNotReconstructable(asset, result.reason, result.detail?.join('；'))
       }
       return false
     }
@@ -229,13 +255,14 @@ async function handleRetry(asset, errorMessage) {
  */
 const NOT_RECONSTRUCTABLE = {
   no_figure: '图中无可重绘的几何结构（数轴/实物/统计图）',
-  derived_deferred: '含派生点（垂足/中点/线上点），待约束求解器接入'
+  derived_deferred: '含派生点（垂足/中点/线上点），待约束求解器接入',
+  content_mismatch: '重绘结构与题干引用不符（多画/漏画），回退裁剪原图'
 }
 
-async function markNotReconstructable(asset, reason) {
+async function markNotReconstructable(asset, reason, detail) {
   await updateGeometryReconstructionStatus(asset.id, {
     tikz_status: 'none',
-    last_error: NOT_RECONSTRUCTABLE[reason] || reason,
+    last_error: detail ? `${NOT_RECONSTRUCTABLE[reason] || reason}: ${detail}` : (NOT_RECONSTRUCTABLE[reason] || reason),
     processed_at: new Date().toISOString()
   })
 }
