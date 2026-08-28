@@ -1228,9 +1228,17 @@ app.post('/api/questions/:id/rejudge', async (req, res) => {
       })
     }
 
-    // Update is_correct in questions table
+    // Update is_correct in questions table（status 同步翻，理由同 finalizeRejudgeResult）
     await query(
-      `UPDATE ${TABLES.QUESTIONS} SET is_correct = $1, updated_at = NOW() WHERE id = $2`,
+      `UPDATE ${TABLES.QUESTIONS}
+       SET is_correct = $1,
+           status = CASE
+             WHEN status = 'mastered' THEN status
+             WHEN $1 IS FALSE THEN 'wrong'
+             WHEN status = 'wrong' THEN 'pending'
+             ELSE status END,
+           updated_at = NOW()
+       WHERE id = $2`,
       [isCorrect, id]
     )
 

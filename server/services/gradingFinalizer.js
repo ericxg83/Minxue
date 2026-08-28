@@ -9,13 +9,16 @@ const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/
 const getSettlementRows = async ({ questionIds, studentId, settlementKey }) => {
   if (!studentId || !settlementKey || questionIds.length === 0) return []
 
+  // judgements.question_id / student_id 是 TEXT 列（见 010 迁移），
+  // 按 uuid[] 转换会让 PG 报 "operator does not exist: text = uuid"，
+  // 整个重判结算（POST /api/questions/:id/rejudge）直接 500。
   const { rows } = await query(
     `SELECT question_id
      FROM ${TABLES.JUDGEMENTS}
      WHERE student_id = $1
-       AND question_id = ANY($2::uuid[])
+       AND question_id = ANY($2::text[])
        AND metadata->>'settlement_key' = $3`,
-    [studentId, questionIds, settlementKey]
+    [String(studentId), questionIds.map(String), settlementKey]
   )
   return rows
 }
@@ -167,8 +170,21 @@ export const finalizeRejudgeResult = async ({
     return { settled: false, skipped: true, isCorrect }
   }
 
+  // status 必须跟着 is_correct 一起翻：GET /api/questions?status=wrong 按它筛错题，
+  // 只改 is_correct 会让重判为对的题继续挂在错题筛选里。
+  // 翻对时退回 'pending' 而不是 'correct'——createQuestions 对判对的题落的就是 'pending'，
+  // 前端 useExamReview 用 status !== 'correct' 判"AI 判过"，写 'correct' 会造成新旧数据两种形态。
+  // 'mastered' 是错题本掌握态，不在此覆盖。
   await query(
-    `UPDATE ${TABLES.QUESTIONS} SET is_correct = $1, updated_at = NOW() WHERE id = $2`,
+    `UPDATE ${TABLES.QUESTIONS}
+     SET is_correct = $1,
+         status = CASE
+           WHEN status = 'mastered' THEN status
+           WHEN $1 IS FALSE THEN 'wrong'
+           WHEN status = 'wrong' THEN 'pending'
+           ELSE status END,
+         updated_at = NOW()
+     WHERE id = $2`,
     [isCorrect, question.id]
   )
 
