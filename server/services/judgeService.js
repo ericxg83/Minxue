@@ -313,6 +313,67 @@ function normalizeJudgeAnswer(str) {
 }
 
 /**
+ * √ → **0.5。支持嵌套括号：√(7(a-b)) → ((7*(a-b)))**0.5。
+ * 原先用 /√\(([^()]*)\)/ 只能吃不含括号的内容，√(7(a-b)) 整个留着 √ 字符，
+ * eval 必然抛错 → 判"不等"，学生把二次根式化简对了也算错。
+ * 语义保持不变：√ 后面不带括号时只吃数字（"√2m" 仍是 √2·m，不是 √(2m)）。
+ */
+function convertSqrtToPower(s) {
+  let out = ''
+  let i = 0
+  while (i < s.length) {
+    if (s[i] !== '√') { out += s[i]; i++; continue }
+    let j = i + 1
+    while (j < s.length && /\s/.test(s[j])) j++
+    if (s[j] === '(') {
+      let depth = 0
+      let k = j
+      for (; k < s.length; k++) {
+        if (s[k] === '(') depth++
+        else if (s[k] === ')' && --depth === 0) break
+      }
+      if (k < s.length) {
+        out += '((' + convertSqrtToPower(s.slice(j + 1, k)) + '))**0.5'
+        i = k + 1
+        continue
+      }
+    }
+    const num = /^[0-9]+(?:\.[0-9]+)?/.exec(s.slice(j))
+    if (num) {
+      out += '((' + num[0] + '))**0.5'
+      i = j + num[0].length
+      continue
+    }
+    out += s[i]
+    i++
+  }
+  return out
+}
+
+/**
+ * 把数学表达式改写成可被 JS eval 的形式（去等式左边、^→**、√→**0.5、补隐式乘号）。
+ */
+function prepareMathExpr(input) {
+  let s = String(input ?? '')
+  // Strip equation prefix: "y = 2x - 4" → "2x - 4", "f(x)=..." → "..."
+  const eqIdx = s.indexOf('=')
+  if (eqIdx > 0) s = s.substring(eqIdx + 1)
+  s = s.trim()
+  // ^ → **  (exponentiation)
+  s = s.replace(/\^/g, '**')
+  // 用 **0.5 而非 Math.sqrt，避免后续 toLowerCase 把 Math 变成 math 导致 ReferenceError。
+  s = convertSqrtToPower(s)
+  // Insert * for implicit multiplication: "2x" → "2*x", "2(" → "2*(", ")(" → ")*("
+  // 先处理"数字 空格 ( " 的形式（"2 √5"→"2 ((5))**0.5" 后是 "2 ("）：必须在 (\d)([a-zA-Z(]) 之前，
+  // 否则 "2 (" 因中间有空格而漏插 *，生成 "2 ((" 的非法 JS → eval 抛错 → 误判不等。
+  s = s.replace(/(\d)\s+\(/g, '$1*(')
+  s = s.replace(/(\d)([a-zA-Z(])/g, '$1*$2')
+  s = s.replace(/([a-zA-Z)])(\d)/g, '$1*$2')
+  s = s.replace(/\)\(/g, ')*(')
+  return s
+}
+
+/**
  * Check if two math expressions are numerically equivalent
  * by substituting test values for variables and comparing results.
  * Handles implicit multiplication, ^ exponentiation, and equation prefix.
@@ -329,31 +390,8 @@ function isMathEquivalent(expr1, expr2) {
   }
 
   try {
-    // Prepare expression for JS evaluation
-    const prep = (s) => {
-      // Strip equation prefix: "y = 2x - 4" → "2x - 4", "f(x)=..." → "..."
-      const eqIdx = s.indexOf('=')
-      if (eqIdx > 0) s = s.substring(eqIdx + 1)
-      s = s.trim()
-      // ^ → **  (exponentiation)
-      s = s.replace(/\^/g, '**')
-      // √ 开方 → **0.5：√4 → (4)**0.5，√(1/3) → ((1/3))**0.5
-      // 用 **0.5 而非 Math.sqrt，避免后续 toLowerCase 把 Math 变成 math 导致 ReferenceError。
-      // 先处理括号形式（内容可含运算符），再处理纯数字。
-      s = s.replace(/√\(([^()]*)\)/g, '(($1))**0.5')
-      s = s.replace(/√([0-9]+(?:\.[0-9]+)?)/g, '(($1))**0.5')
-      // Insert * for implicit multiplication: "2x" → "2*x", "2(" → "2*(", ")(" → ")*("
-      // 先处理"数字 空格 ( " 的形式（"2 √5"→"2 ((5))**0.5" 后是 "2 ("）：必须在 (\d)([a-zA-Z(]) 之前，
-      // 否则 "2 (" 因中间有空格而漏插 *，生成 "2 ((" 的非法 JS → eval 抛错 → 误判不等。
-      s = s.replace(/(\d)\s+\(/g, '$1*(')
-      s = s.replace(/(\d)([a-zA-Z(])/g, '$1*$2')
-      s = s.replace(/([a-zA-Z)])(\d)/g, '$1*$2')
-      s = s.replace(/\)\(/g, ')*(')
-      return s
-    }
-
-    let e1 = prep(expr1).toLowerCase()
-    let e2 = prep(expr2).toLowerCase()
+    let e1 = prepareMathExpr(expr1).toLowerCase()
+    let e2 = prepareMathExpr(expr2).toLowerCase()
 
     // Extract single-letter variables (not adjacent to another letter, exclude e/pi)
     const allText = e1 + ' ' + e2
@@ -408,6 +446,53 @@ function isMathEquivalent(expr1, expr2) {
   } catch {
     return false
   }
+}
+
+/**
+ * 求表达式的数值；含变量或求不出来返回 null。
+ */
+function evalMathValue(input) {
+  const expr = prepareMathExpr(input).toLowerCase()
+  if (!expr) return null
+  // 只接受纯数值表达式：留有字母说明含变量/函数名，比例判定不该猜
+  if (/[a-z]/.test(expr.replace(/\*\*/g, ''))) return null
+  try {
+    const v = new Function(`"use strict"; return (${expr})`)()
+    return typeof v === 'number' && isFinite(v) ? v : null
+  } catch {
+    return null
+  }
+}
+
+/**
+ * 把 "√3:√2" 这类比例逐段求值；段数不足或有一段求不出数值返回 null。
+ */
+function parseRatioValues(input) {
+  const parts = String(input ?? '').split(/[:：]/).map(x => x.trim()).filter(Boolean)
+  if (parts.length < 2) return null
+  const vals = parts.map(evalMathValue)
+  return vals.some(v => v == null) ? null : vals
+}
+
+/**
+ * 比例答案的等值判定："√6:2" 与 "√3:√2" 是同一个比。
+ * 逐段求值后按首项归一再比，段数必须相等且都能求出数值。
+ * 之前这类答案只能整串字面比较，学生把比化简成另一种等价写法就判错。
+ */
+function isRatioEquivalent(a, b) {
+  const va = parseRatioValues(a)
+  const vb = parseRatioValues(b)
+  if (!va || !vb || va.length !== vb.length || !va[0] || !vb[0]) return false
+  return va.every((v, i) => Math.abs(v / va[0] - vb[i] / vb[0]) < 1e-9)
+}
+
+/**
+ * 剥掉参考答案里的空位叙述壳："第一空为 (7√(2m))/4" → "(7√(2m))/4"。
+ * AI 生成多空填空题答案时爱加这层前缀，逐项比对时它会让每一项都对不上。
+ */
+const BLANK_LABEL_RE = /^第\s*[一二三四五六七八九十百\d]+\s*(?:个)?\s*(?:空格|空|题|问)\s*(?:为|是|填|应填)?\s*[:：]?\s*/
+function stripBlankLabel(value) {
+  return String(value ?? '').trim().replace(BLANK_LABEL_RE, '').trim()
 }
 
 /**
@@ -474,14 +559,17 @@ export function judgeAnswer(studentAnswer, referenceAnswer, questionType) {
 
   // Helper: 单个答案片段的归一化比较
   const normalizeAndCompare = (sAns, rAns) => {
+    const sClean = stripBlankLabel(sAns)
+    const rClean = stripBlankLabel(rAns)
     // 收窄后为空（片段本身就是 "=" 或以 "=" 结尾）时退回原片段，
     // 否则空格分片比较里的 "=" 片段永远与参考侧的 "=" 不等，整题被拖成错。
-    const narrowed = narrowToFinalAnswer(sAns) || String(sAns ?? '').trim()
+    const narrowed = narrowToFinalAnswer(sClean) || sClean
     const normS = normalizeAnswer(narrowed)
-    const normR = normalizeAnswer(rAns)
+    const normR = normalizeAnswer(rClean)
     if (normS === normR) return true
     if (isNumericEquivalent(normS, normR)) return true
-    if (isMathEquivalent(narrowed, rAns)) return true
+    if (isMathEquivalent(narrowed, rClean)) return true
+    if (isRatioEquivalent(narrowed, rClean)) return true
     return false
   }
 
@@ -572,6 +660,13 @@ export function judgeAnswer(studentAnswer, referenceAnswer, questionType) {
     return [str]
   }
 
+  // 宽松切分：把"和/与/及"也当分隔符。
+  // AI 生成的多空答案常写成 "5√3 和 (5√6)/2"，学生写成 "5√3, (5/2)√6"——
+  // 标点切分只能把参考答案切成 1 段，逐项比对根本进不去，整题判错。
+  // 只在标准切分全部失败后当额外一轮，且要求两边段数相等、每段都等价，避免"和为12"这类被切坏。
+  const splitAnswersLoose = (s) => String(s || '').trim()
+    .split(/[,，;；]|和|与|及/).map(a => a.trim()).filter(a => a)
+
   // 按空格分割（用于比较符号等非数值多答案场景）
   const splitBySpace = (s) => {
     const str = String(s || '').trim()
@@ -621,6 +716,17 @@ export function judgeAnswer(studentAnswer, referenceAnswer, questionType) {
     if (allCorrect) return { isCorrect: true, unrecognized: false }
   }
 
+  // 多答案场景：一侧用"和/与/及"连接（"5√3 和 (5√6)/2" vs "5√3, (5/2)√6"）。
+  // 只用 normalizeAndCompare 逐项比，不接 extractAndCompare 的数字集合兜底——
+  // 切分本身已经放宽了，再叠一层宽松兜底会把答错的题判对。
+  const studentLooseParts = splitAnswersLoose(studentAnswer)
+  const refLooseParts = splitAnswersLoose(referenceAnswer)
+  if (refLooseParts.length > 1 && studentLooseParts.length === refLooseParts.length) {
+    if (studentLooseParts.every((sp, i) => normalizeAndCompare(sp, refLooseParts[i]))) {
+      return { isCorrect: true, unrecognized: false }
+    }
+  }
+
   // 单答案场景：标准比较流程
   const narrowedStudent = narrowToFinalAnswer(studentAnswer)
   const normStudent = normalizeAnswer(narrowedStudent)
@@ -640,6 +746,16 @@ export function judgeAnswer(studentAnswer, referenceAnswer, questionType) {
   // String mismatch — try mathematical equivalence
   if (isMathEquivalent(narrowedStudent, referenceAnswer)) {
     return { isCorrect: true, unrecognized: false }
+  }
+
+  // 比例答案（"√6:2" vs "√3:√2"）：整串是一个比，比里各项的顺序有意义，
+  // 两边都能逐段求出数值时以比例判定为最终结果——不能落到下面
+  // extractAndCompare 的"排序后数字集合"兜底，那会把 2:3 和 3:2 判成对。
+  if (parseRatioValues(studentAnswer) && parseRatioValues(referenceAnswer)) {
+    return {
+      isCorrect: isRatioEquivalent(studentAnswer, referenceAnswer),
+      unrecognized: false
+    }
   }
 
   // Fallback: compare numeric values from original input

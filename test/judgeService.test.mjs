@@ -44,3 +44,37 @@ test('identical student and reference answers are always correct', () => {
   assert.deepEqual(judgeAnswer(ju, dou, 'fill'), { isCorrect: false, unrecognized: false })
   assert.deepEqual(judgeAnswer(ju, ju, 'fill'), { isCorrect: false, unrecognized: false })
 })
+
+const SQRT = '√'
+const CN_AND = '和'                    // 和
+const CN_COMMA = '，'                  // ，
+const BLANK1 = '第一空为'  // 第一空为
+const BLANK2 = '第二空为'  // 第二空为
+
+// 二次根式化简题：系数在根号外还是写成分数、两空用"和"还是逗号连接，都是同一个答案
+test('multi-blank radical answers survive separator and wording differences', () => {
+  assert.deepEqual(
+    judgeAnswer(`5${SQRT}3, (5/2)${SQRT}6`, `5${SQRT}3 ${CN_AND} (5${SQRT}6)/2`, 'fill'),
+    { isCorrect: true, unrecognized: false })
+  assert.deepEqual(
+    judgeAnswer(
+      `(7/4)${SQRT}(2m), (13/7)${SQRT}(7(a-b))`,
+      `${BLANK1} (7${SQRT}(2m))/4${CN_COMMA}${BLANK2} (13${SQRT}(7(a-b)))/7`, 'fill'),
+    { isCorrect: true, unrecognized: false })
+  // 嵌套括号的根号必须真的参与求值，不能因为解析失败就判错
+  assert.deepEqual(
+    judgeAnswer(`(13/7)${SQRT}(7(a-b))`, `(13${SQRT}(7(a-b)))/7`, 'fill'),
+    { isCorrect: true, unrecognized: false })
+  // 其中一空答错，整题仍判错
+  assert.deepEqual(
+    judgeAnswer(`5${SQRT}3, (5/2)${SQRT}6`, `5${SQRT}3 ${CN_AND} (7${SQRT}6)/2`, 'fill'),
+    { isCorrect: false, unrecognized: false })
+})
+
+// 比例答案：同一个比的不同写法算对，但比里各项的顺序不能乱
+test('ratio answers compare by value, not by digit set', () => {
+  assert.deepEqual(judgeAnswer(`${SQRT}6:2`, `${SQRT}3:${SQRT}2`, 'fill'), { isCorrect: true, unrecognized: false })
+  assert.deepEqual(judgeAnswer('3:2', '6:4', 'fill'), { isCorrect: true, unrecognized: false })
+  assert.deepEqual(judgeAnswer('2:3', '3:2', 'fill'), { isCorrect: false, unrecognized: false })
+  assert.deepEqual(judgeAnswer(`${SQRT}6:2`, `${SQRT}3:2`, 'fill'), { isCorrect: false, unrecognized: false })
+})
