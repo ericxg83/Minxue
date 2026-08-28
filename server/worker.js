@@ -25,6 +25,7 @@ import { NON_RETRYABLE_ERROR_PATTERNS } from './pendingTaskRecovery.js'
 import { isValidImageBuffer, checkImageResolution } from './utils/imageValidator.js'
 import { formatOptionsForPrompt } from './utils/optionText.js'
 import { validateArithmeticAnswer } from './utils/arithmeticAnswerValidator.js'
+import { coerceAIText } from './utils/aiTextCoerce.js'
 
 // ── 多模态切题引擎：几何图处理 ──
 // 使用 Sharp 进行裁剪和图像增强（替代浏览器端的 Canvas/OpenCV）
@@ -1003,14 +1004,16 @@ const recognizeQuestions = async (imageBase64, taskId, retryCount = 0, forceMode
     normalizeBlockBoxSemantics(questionsArray)
 
     const questions = questionsArray.map((q, index) => {
-      const rawStudentAnswer = q.student_answer || ''
+      // 模型对多解题会把 student_answer 输出成数组，原样传给 pg 会被序列化成
+      // PG 数组字面量 {"x₁ = -1/2","x₂ = 5/2"} 存进 text 列 → 页面乱码 + 判题拿错串比对。
+      const rawStudentAnswer = coerceAIText(q.student_answer)
       const answerSource = determineAnswerSource(rawStudentAnswer)
       const aiAnswer = rawStudentAnswer
       const cleanedStudentAnswer = answerSource === 'blank' ? '' : rawStudentAnswer
 
       // P2 硬闸门：OCR 模型可能把老师红笔批语("计算错误"等)当成标准答案抄进 answer。
       // 这类值不是答案，命中即丢弃置空，交给后续 AI 生成路径从题目本身重解出参考答案。
-      let standardAnswer = q.answer || ''
+      let standardAnswer = coerceAIText(q.answer)
       if (isGradingCommentAnswer(standardAnswer, q.question_type)) {
         console.log(`   [P2] 丢弃疑似批改痕迹的OCR答案: "${standardAnswer}" → 转AI重解`)
         standardAnswer = ''
@@ -1030,7 +1033,7 @@ const recognizeQuestions = async (imageBase64, taskId, retryCount = 0, forceMode
       return {
         id: crypto.randomUUID(),
         task_id: taskId,
-        content: q.content || '',
+        content: coerceAIText(q.content),
         options: q.options || [],
         answer: standardAnswer,
         student_answer: cleanedStudentAnswer,
@@ -1041,7 +1044,7 @@ const recognizeQuestions = async (imageBase64, taskId, retryCount = 0, forceMode
         subject: q.subject || '数学',
         status: status,
         confidence: q.confidence || 0,
-        analysis: q.analysis || '',
+        analysis: coerceAIText(q.analysis),
         manual_mark: manualMark,
         grading_source: gradingResult.source,
         block_coordinates: q.block_coordinates || null,
@@ -1352,8 +1355,8 @@ export const generateAnswerForQuestion = async (questionContent, retryCount = 0)
 
     return {
       success: true,
-      answer: result.answer || '',
-      analysis: result.analysis || '',
+      answer: coerceAIText(result.answer),
+      analysis: coerceAIText(result.analysis),
       subject: result.subject || null
     }
   } catch (error) {
@@ -3901,10 +3904,10 @@ const processWorkbookGrading = async (job) => {
     id: crypto.randomUUID(),
     student_id: studentId,
     task_id: taskId,
-    content: q.content || `第 ${q.question_number} 题`,
+    content: coerceAIText(q.content) || `第 ${q.question_number} 题`,
     options: q.options || [],
-    analysis: q.analysis || '',
-    student_answer: q.student_answer || null,
+    analysis: coerceAIText(q.analysis),
+    student_answer: coerceAIText(q.student_answer) || null,
     ai_answer: null,
     is_complete: true,
     confidence: q.is_correct !== null ? 0.95 : null,

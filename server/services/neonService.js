@@ -2,6 +2,7 @@ import { randomUUID } from 'node:crypto'
 import { query, TABLES, transaction } from '../config/neon.js'
 import { checkQuestionCompleteness } from '../utils/questionCompleteness.js'
 import { normalizeOptions } from '../utils/optionText.js'
+import { coerceAIText } from '../utils/aiTextCoerce.js'
 
 export const updateTaskStatus = async (taskId, status, result = null) => {
   const updateData = {
@@ -66,13 +67,15 @@ export const createQuestions = async (questions) => {
       id: q.id || randomUUID(),
       task_id: q.task_id,
       student_id: q.student_id,
-      content: q.content || null,
+      // 文本列的最后一道闸门：上游任一识别路径把数组/对象传进来，
+      // node-postgres 会按 PG 数组字面量序列化（{"x₁ = -1/2","x₂ = 5/2"}）写进 text 列。
+      content: coerceAIText(q.content) || null,
       options: JSON.stringify(normalizeOptions(q.options || [])),
-      answer: q.answer || null,
-      student_answer: q.student_answer || null,
-      ai_answer: q.ai_answer || null,
+      answer: coerceAIText(q.answer) || null,
+      student_answer: coerceAIText(q.student_answer) || null,
+      ai_answer: coerceAIText(q.ai_answer) || null,
       answer_source: q.answer_source || 'recognized',
-      analysis: q.analysis || null,
+      analysis: coerceAIText(q.analysis) || null,
       question_type: q.question_type || 'choice',
       subject: q.subject || null,
       is_correct: q.is_correct !== undefined ? q.is_correct : true,

@@ -92,12 +92,14 @@ function renderToHtml(text) {
     }
 
     // --- Plain text (no $ found or text before next $) ---
+    // renderContent 已对文本段做过 HTML 转义，这里必须原样输出。
+    // 再转一次会把 &quot; 变成 &amp;quot;，页面上就出现 `{&quot;x₁ = a + 1&quot;}` 这种字面实体。
     const nextDollar = remaining.indexOf('$')
     if (nextDollar === -1) {
-      htmlParts.push(escapeHtml(remaining))
+      htmlParts.push(remaining)
       remaining = ''
     } else if (nextDollar > 0) {
-      htmlParts.push(escapeHtml(remaining.slice(0, nextDollar)))
+      htmlParts.push(remaining.slice(0, nextDollar))
       remaining = remaining.slice(nextDollar)
     } else {
       htmlParts.push('$')
@@ -106,18 +108,6 @@ function renderToHtml(text) {
   }
 
   return htmlParts.join('')
-}
-
-/**
- * Escape HTML special characters for safe text rendering.
- * Only called on plain text fragments - NEVER on KaTeX output.
- */
-function escapeHtml(str) {
-  return str
-    .replace(/&/g, '&amp;')
-    .replace(/</g, '&lt;')
-    .replace(/>/g, '&gt;')
-    .replace(/"/g, '&quot;')
 }
 
 /**
@@ -134,11 +124,11 @@ function decodeHtml(str) {
 }
 
 /**
- * Fallback rendering when KaTeX fails.
+ * Fallback rendering when KaTeX fails. content 来自已转义的 normalized 串，直接内联。
  */
 function fallbackErrorHtml(content) {
   return '<code style="background:#FEE2E2;padding:1px 4px;border-radius: var(--wb-radius-xs);font-size:0.9em;color:#DC2626">'
-    + escapeHtml(content)
+    + content
     + '</code>'
 }
 
