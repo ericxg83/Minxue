@@ -30,7 +30,8 @@ export const getOSSClient = () => {
       accessKeyId,
       accessKeySecret,
       secure: true,
-      timeout: 60000
+      // 60s 对跨境链路太紧（Render 美区 → 上海 OSS），一次抖动就整单失败
+      timeout: parseInt(process.env.OSS_TIMEOUT_MS) || 120000
     })
   }
   return _ossClient

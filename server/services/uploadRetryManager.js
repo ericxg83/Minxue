@@ -14,6 +14,18 @@ const RETRYABLE_ERROR_CODES = new Set([
   'ConnectionTimeout',
   'RequestTimeTooSkewed',
 ])
+// ali-oss/urllib 的超时系列错误名。这些错误没有 status/code，
+// 只能靠 name 或 message 识别（见 OSS_TIMEOUT_PATTERNS）。
+const OSS_TIMEOUT_NAMES = new Set([
+  'ResponseTimeoutError',
+  'ConnectionTimeoutError',
+  'ConnectTimeoutError',
+  'SocketTimeoutError',
+  'SocketAssignTimeoutError',
+  'TimeoutError',
+  'RequestTimeoutError',
+])
+const OSS_TIMEOUT_PATTERNS = /response timeout|connect ?timeout|socket timeout|timed? ?out|timeout for \d+ms|ETIMEDOUT/i
 
 export const classifyError = (error) => {
   if (!error) return { type: 'UNKNOWN', retryable: false, label: '未知错误' }
@@ -38,20 +50,24 @@ export const classifyError = (error) => {
     }
   }
 
-  if (error.name === 'TimeoutError' || error.code === 'ECONNABORTED') {
+  if (
+    OSS_TIMEOUT_NAMES.has(error.name) ||
+    error.code === 'ECONNABORTED' ||
+    error.message?.match(OSS_TIMEOUT_PATTERNS)
+  ) {
     return {
       type: 'TIMEOUT',
       retryable: true,
-      label: '请求超时',
+      label: 'OSS 请求超时',
       action: '自动重试',
     }
   }
 
-  if (RETRYABLE_ERROR_CODES.has(error.code)) {
+  if (RETRYABLE_ERROR_CODES.has(error.code) || error.status === -1 || error.status === -2) {
     return {
       type: 'NETWORK_ERROR',
       retryable: true,
-      label: `网络错误 (${error.code})`,
+      label: `网络错误 (${error.code || error.name || error.status})`,
       action: '自动重试',
     }
   }

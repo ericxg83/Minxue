@@ -5,6 +5,7 @@ import { useToast } from '../components/ToastProvider'
 import { taskService } from '../services/taskService'
 import { recognizeQuestions, compressImage, saveRecognitionResult } from '../services/aiService'
 import { detectQRCode, groupFilesByQRCode, isRetryPaperQRCode } from '../services/qrDetectionService'
+import { compressImagesForUpload, describeUploadFailure } from '../utils/imageUtils'
 import { uploadImage, createTask, addWrongQuestions, clearStudentCaches, invalidateCache } from '../services/apiService'
 import { __pendingUploadStore } from '../features/upload/pendingUploadStore'
 
@@ -395,14 +396,16 @@ export function useUploadFlow({ loadTasks, isInitializing }) {
       await uploadViaBackend(files)
     } catch (error) {
       console.error('uploadRegularHomework Error:', error)
-      Toast.show({ message: `作业上传失败: ${error.message}`, type: 'error', duration: 3000 })
+      Toast.show({ message: describeUploadFailure(error.message), type: 'error', duration: 4000 })
     }
   }
 
   // 失败行 upsert：保证"上传失败"一定在列表里可见、可重试，
   // 而不是只剩一个几秒后消失的 toast（图片此时已无从找回入口）。
+  // 落库文案用人类可读版本：列表的失败分类会把 "timeout" 误判成"AI 服务响应超时"。
   const upsertFailedTemp = (tempTask, errorMsg) => {
-    updateTaskFromServer({ ...tempTask, status: 'failed', error: errorMsg, result: { error: errorMsg } })
+    const readable = describeUploadFailure(errorMsg)
+    updateTaskFromServer({ ...tempTask, status: 'failed', error: readable, result: { error: readable, rawError: errorMsg } })
   }
 
   // 客户端重传：temp 任务服务端没有记录，/api/tasks/retry 无从下手；
@@ -441,7 +444,7 @@ export function useUploadFlow({ loadTasks, isInitializing }) {
   }
 
   // Upload via backend API — 多图一任务
-  const uploadViaBackend = async (files) => {
+  const uploadViaBackend = async (rawFiles) => {
     const pendingFlowEffective = pendingFlowRef.current
     const worksheetIdEffective = __pendingUploadStore.worksheetId || selectedWorksheetIdRef.current || selectedWorksheetId
     const worksheetNameEffective = __pendingUploadStore.worksheetName
@@ -451,6 +454,18 @@ export function useUploadFlow({ loadTasks, isInitializing }) {
 
     const isWorkbook = pendingFlowEffective === 'workbook' && worksheetIdEffective
     const isExam = pendingFlowEffective === 'exam' && examResourceIdEffective
+
+    // 上传前压缩：压缩失败一律回退原图，绝不因为压缩环节丢用户的作业
+    let files = rawFiles
+    try {
+      const packed = await compressImagesForUpload(rawFiles)
+      if (packed.savedBytes > 0) {
+        console.debug(`[Upload] 图片压缩：减少 ${(packed.savedBytes / 1024 / 1024).toFixed(1)}MB`)
+        files = packed.files
+      }
+    } catch (e) {
+      console.warn('[Upload] 图片压缩跳过:', e?.message)
+    }
 
     // 任务名用用户在内页选的名字（练习册/答案库），无名可取时用 科目+时间；
     // 相机文件名（IMG_xxx.jpg）对用户没有辨识度，列表里全靠它分不清是哪份作业。
@@ -497,6 +512,7 @@ export function useUploadFlow({ loadTasks, isInitializing }) {
     let successCount = 0
     let failedCount = 0
     let realTaskId = null
+    let failureText = '上传失败'
 
     try {
       const options = { taskName }
@@ -524,11 +540,13 @@ export function useUploadFlow({ loadTasks, isInitializing }) {
       } else {
         failedCount = 1
         const errorMsg = taskResult?.message || taskResult?.error || '上传失败'
+        failureText = describeUploadFailure(errorMsg)
         upsertFailedTemp(tempTask, errorMsg)
       }
     } catch (error) {
       console.error('uploadViaBackend exception:', error)
       failedCount = 1
+      failureText = describeUploadFailure(error.message)
       upsertFailedTemp(tempTask, error.message || '上传失败')
     }
 
@@ -543,7 +561,7 @@ export function useUploadFlow({ loadTasks, isInitializing }) {
 
     if (failedCount > 0) {
       uploadToast.dismiss()
-      Toast.show({ message: '上传失败', type: 'error', duration: 3000 })
+      Toast.show({ message: failureText, type: 'error', duration: 4000 })
     } else if (successCount > 0) {
       uploadToast.dismiss()
       Toast.show({ message: files.length > 1 ? `${files.length} 张图片已合并为一个任务` : '上传成功', type: 'success', duration: 2000 })
