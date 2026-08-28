@@ -1,0 +1,43 @@
+﻿<svg xmlns="http://www.w3.org/2000/svg" width="1400" height="1680" viewBox="0 0 1400 1680">
+<defs>
+ <linearGradient id="wall" x1="0" y1="0" x2="1" y2="1"><stop stop-color="#f5f1e9"/><stop offset="1" stop-color="#e8e2d7"/></linearGradient>
+ <linearGradient id="floor" x1="0" y1="0" x2="0" y2="1"><stop stop-color="#d6c7b4"/><stop offset="1" stop-color="#bba58d"/></linearGradient>
+ <linearGradient id="wood" x1="0" y1="0" x2="1" y2="1"><stop stop-color="#2f5149"/><stop offset="1" stop-color="#19352f"/></linearGradient>
+ <filter id="shadow" x="-20%" y="-20%" width="140%" height="160%"><feDropShadow dx="0" dy="14" stdDeviation="18" flood-color="#4b443a" flood-opacity=".25"/></filter>
+ <filter id="soft"><feGaussianBlur stdDeviation="28"/></filter>
+</defs>
+<!-- room -->
+<rect width="1400" height="1680" fill="url(#wall)"/>
+<rect y="1430" width="1400" height="250" fill="url(#floor)"/>
+<path d="M0 1430H1400" stroke="#9f8b75" stroke-width="4" opacity=".45"/>
+<!-- ambient light -->
+<ellipse cx="700" cy="370" rx="500" ry="190" fill="#fff8dc" opacity=".35" filter="url(#soft)"/>
+<!-- wall panel -->
+<rect x="135" y="100" width="1130" height="1250" rx="34" fill="#f9f7f2" stroke="#e1d9cb" stroke-width="3" filter="url(#shadow)"/>
+<path d="M205 1010 C205 550 320 270 700 270 C1080 270 1195 550 1195 1010" fill="none" stroke="#dce7df" stroke-width="28" opacity=".8"/>
+<!-- logo -->
+<g transform="translate(655 190)">
+ <circle cx="45" cy="45" r="45" fill="#2f5149"/>
+ <path d="M25 48 L44 29 L64 39 L48 55 L68 66 L47 79 L25 67 L41 55 Z" fill="#f5f1e9"/>
+ <text x="105" y="40" font-family="Arial,Microsoft YaHei,sans-serif" font-size="28" font-weight="700" fill="#2f5149">敏学</text>
+ <text x="105" y="70" font-family="Arial,sans-serif" font-size="13" letter-spacing="3" fill="#78877d">MINXUE LEARNING</text>
+</g>
+<!-- headline -->
+<text x="700" y="430" text-anchor="middle" font-family="Arial,Microsoft YaHei,sans-serif" font-size="66" font-weight="700" fill="#1d332f">看见问题</text>
+<text x="700" y="520" text-anchor="middle" font-family="Arial,Microsoft YaHei,sans-serif" font-size="66" font-weight="700" fill="#1d332f">解决问题 · 见证成长</text>
+<path d="M500 585 H900" stroke="#d4a85c" stroke-width="5"/>
+<text x="700" y="655" text-anchor="middle" font-family="Arial,Microsoft YaHei,sans-serif" font-size="27" fill="#64736c">从完成作业，到真正掌握，我们陪孩子把每一步走扎实。</text>
+<!-- three pillars -->
+<g font-family="Arial,Microsoft YaHei,sans-serif">
+ <g transform="translate(250 790)"><circle cx="80" cy="80" r="80" fill="#e4eee8"/><text x="80" y="98" text-anchor="middle" font-size="50" font-weight="700" fill="#2f5149">01</text><text x="80" y="205" text-anchor="middle" font-size="29" font-weight="700" fill="#1d332f">认真检查</text><text x="80" y="250" text-anchor="middle" font-size="21" fill="#6b756f">不只看完成</text><text x="80" y="283" text-anchor="middle" font-size="21" fill="#6b756f">更看错在哪里</text></g>
+ <g transform="translate(580 790)"><circle cx="80" cy="80" r="80" fill="#f4ead8"/><text x="80" y="98" text-anchor="middle" font-size="50" font-weight="700" fill="#a27436">02</text><text x="80" y="205" text-anchor="middle" font-size="29" font-weight="700" fill="#1d332f">针对辅导</text><text x="80" y="250" text-anchor="middle" font-size="21" fill="#6b756f">找到真实原因</text><text x="80" y="283" text-anchor="middle" font-size="21" fill="#6b756f">再安排训练</text></g>
+ <g transform="translate(910 790)"><circle cx="80" cy="80" r="80" fill="#e5e9ef"/><text x="80" y="98" text-anchor="middle" font-size="50" font-weight="700" fill="#506783">03</text><text x="80" y="205" text-anchor="middle" font-size="29" font-weight="700" fill="#1d332f">再次检测</text><text x="80" y="250" text-anchor="middle" font-size="21" fill="#6b756f">讲过不等于会了</text><text x="80" y="283" text-anchor="middle" font-size="21" fill="#6b756f">结果需要验证</text></g>
+</g>
+<text x="700" y="1190" text-anchor="middle" font-family="Arial,Microsoft YaHei,sans-serif" font-size="31" font-weight="700" fill="#2f5149">陪伴不止于守着，教育贵在看见。</text>
+<text x="700" y="1250" text-anchor="middle" font-family="Arial,Microsoft YaHei,sans-serif" font-size="18" letter-spacing="5" fill="#9b8a70">敏学晚托 · 认真看见每个孩子的学习问题</text>
+<!-- reception desk foreground -->
+<g filter="url(#shadow)"><path d="M300 1435 L300 1320 Q300 1280 340 1280 H1060 Q1100 1280 1100 1320 V1435 Z" fill="url(#wood)"/><path d="M300 1320 Q300 1280 340 1280 H1060 Q1100 1280 1100 1320" fill="none" stroke="#d8b46c" stroke-width="4"/><text x="700" y="1387" text-anchor="middle" font-family="Arial,Microsoft YaHei,sans-serif" font-size="28" font-weight="700" fill="#f7f1e7">敏学晚托</text></g>
+<!-- plants -->
+<g opacity=".9"><path d="M1130 1430 q10-170 45-255 M1145 1300 q-75-80-112-40 M1155 1250 q80-100 110-63 M1150 1360 q-55-45-90-20" stroke="#315648" stroke-width="14" fill="none"/><path d="M1120 1435h100l-18 45h-65z" fill="#9e785d"/></g>
+<text x="90" y="1615" font-family="Arial,sans-serif" font-size="18" fill="#6d6258">FRONT DESK WALL · 2.5m W × 3m H · CONCEPT VISUAL</text>
+</svg>
