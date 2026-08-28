@@ -1024,6 +1024,37 @@ app.post('/api/questions', async (req, res) => {
   }
 })
 
+// 复核页改了标准答案 → 回写到批改时自动沉淀的那份草稿答案库。
+// 两张表(questions / resource_answers)此前无任何同步，导致同一个答案要在复核页和
+// 答案审核页各改一遍，且审核页看到的始终是批改瞬间的旧快照。
+// 三重限制确保只动"属于这份作业自己的草稿"：
+//   1. answer_status='ai_draft' —— 已审核(teacher/official)的是全班共享权威答案源，
+//      只能经答案审核页改动，不能被单个学生的复核顺手改写；
+//   2. source='ai_grading' —— 只认自动沉淀产生的行，不碰 PDF 解析/教师录入的答案；
+//   3. 该答案库没有被别的任务共用 —— 共用时它已是多人参照物，同样只能走审核页。
+async function syncDraftAnswerBank(question, newAnswer) {
+  if (!question?.task_id || question.question_number == null) return
+  const { rowCount } = await query(
+    `UPDATE ${TABLES.RESOURCE_ANSWERS} ra
+     SET answer = $1, updated_at = NOW()
+     FROM ${TABLES.TASKS} t
+     WHERE t.id = $2
+       AND ra.resource_id = t.resource_id
+       AND ra.question_no = $3
+       AND (ra.sub_no IS NULL OR ra.sub_no = '')
+       AND ra.answer_status = 'ai_draft'
+       AND ra.source = 'ai_grading'
+       AND NOT EXISTS (
+         SELECT 1 FROM ${TABLES.TASKS} t2
+         WHERE t2.resource_id = t.resource_id AND t2.id <> t.id AND t2.deleted_at IS NULL
+       )`,
+    [newAnswer, question.task_id, question.question_number]
+  )
+  if (rowCount > 0) {
+    console.log(`[草稿答案库同步] task=${question.task_id.slice(0, 8)} 第${question.question_number}题 → "${newAnswer}"`)
+  }
+}
+
 app.put('/api/questions/:id', async (req, res) => {
   try {
     const { id } = req.params
@@ -1108,6 +1139,12 @@ app.put('/api/questions/:id', async (req, res) => {
           ).catch(e => console.error(`[cache_id] 同步写入缓存失败 cache=${updatedQuestion.cache_id.substring(0, 8)}:`, e.message))
         }
       }
+    }
+
+    // 标准答案被改动时，同步回写自动沉淀的草稿答案库（不阻塞响应）
+    if ('answer' in req.body && answer != null && String(answer).trim()) {
+      syncDraftAnswerBank(updatedQuestion, String(answer).trim())
+        .catch(e => console.error('[草稿答案库同步] 失败:', e.message))
     }
 
     // [P1-4b] is_correct 变更时追加写入 PC 编辑判定记录
