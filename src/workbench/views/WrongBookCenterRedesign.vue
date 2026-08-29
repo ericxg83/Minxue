@@ -1,7 +1,7 @@
 <template>
   <div class="wrong-center wb-page">
     <div class="wb-page__inner">
-      <PageHeader eyebrow="学生学习 / 长期学习数据" title="错题中心" description="从学生维度管理错题状态，优先安排重复出错与尚未重练的题目。">
+      <PageHeader v-if="!embedded" eyebrow="学生学习 / 长期学习数据" title="错题中心" description="从学生维度管理错题状态，优先安排重复出错与尚未重练的题目。">
         <template #badge><span class="scope-chip">{{ currentStudent?.name || '未选择学生' }}</span></template>
         <template #actions>
           <ActionButton @click="wrongBookStore.refreshData">刷新</ActionButton>
@@ -9,7 +9,7 @@
         </template>
       </PageHeader>
 
-      <ContentCard class="student-overview" flush>
+      <ContentCard v-if="!embedded" class="student-overview" flush>
         <div class="student-profile">
           <button class="student-switcher" type="button" @click="showStudentDialog = true">
             <el-avatar :size="42" :src="currentStudent?.avatar">{{ currentStudent?.name?.slice(0, 1) || '?' }}</el-avatar>
@@ -87,7 +87,7 @@
   </div>
 </template>
 <script setup>
-import { computed, onMounted, ref } from 'vue'
+import { computed, onMounted, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { ArrowDown, ArrowRight, CircleCheck, Reading, Search } from '@element-plus/icons-vue'
@@ -97,16 +97,85 @@ import EmptyState from '../components/ui/EmptyState.vue'
 import FilterBar from '../components/ui/FilterBar.vue'
 import PageHeader from '../components/ui/PageHeader.vue'
 import StatsCard from '../components/ui/StatsCard.vue'
-import { getStudents } from '../../services/apiService'
+import { getStudents, createGeneratedExam, getGeneratedExamsByStudent } from '../../services/apiService'
+import { buildExamBaseName, buildExamNameWithSeq } from '../../domain/examNaming'
 import { useWrongBookStore } from '../stores/wrongBookStore'
 import dayjs from 'dayjs'
 
+// embedded：嵌在学生档案页的「错题」tab 里，学生上下文由父页给定，
+// 因此隐藏自己的页头与学生切换器，创卷后由父页负责切到「重练」tab。
+const props = defineProps({
+  embedded: { type: Boolean, default: false },
+  studentId: { type: String, default: '' }
+})
+const emit = defineEmits(['exam-created'])
+
 const wrongBookStore = useWrongBookStore(); const router = useRouter(); const route = useRoute(); const PAGE_SIZE = 17
+const embedded = computed(() => props.embedded)
+const creatingExam = ref(false)
 const currentPage = computed({ get: () => wrongBookStore.currentPage, set: value => { wrongBookStore.currentPage = value } }); const currentStudent = computed(() => wrongBookStore.currentStudent); const selectedQuestions = computed(() => wrongBookStore.selectedQuestions); const filteredQuestions = computed(() => wrongBookStore.filteredQuestions); const paginatedQuestions = computed(() => wrongBookStore.paginatedQuestions); const stats = computed(() => wrongBookStore.stats); const subjects = computed(() => [...new Set(wrongBookStore.wrongQuestions.map(item => item.subject || item.question?.subject).filter(Boolean))]); const selectedQuestion = ref(null); const students = ref([]); const showStudentDialog = ref(false); const showAdvanced = ref(false); const activeSummary = ref('pending'); const searchInput = ref(wrongBookStore.searchQuery); const subjectFilter = ref(wrongBookStore.filters.subject || 'all'); const timeFilter = ref(wrongBookStore.filters.time || 'all'); const categoryFilter = ref(wrongBookStore.filters.category || 'all'); const sortLabel = ref('优先处理')
 const categoryOptions = [{ key: 'all', label: '全部问题' }, { key: 'wrong', label: '答错' }, { key: 'unanswered', label: '未作答' }]; const summaryItems = computed(() => [{ key: 'pending', label: '待处理', value: stats.value.pendingMaster, note: '需要教师安排下一步', tone: 'danger' }, { key: 'repeat', label: '重复出错', value: wrongBookStore.wrongQuestions.filter(item => (item.error_count || 1) >= 2).length, note: '优先关注', tone: 'warning' }, { key: 'unpracticed', label: '尚未重练', value: wrongBookStore.wrongQuestions.filter(item => !(item.practice_count > 0)).length, note: '还没有后续练习', tone: 'primary' }, { key: 'mastered', label: '已掌握', value: stats.value.mastered, note: '通过重练验证', tone: 'success' }]); const activeSummaryLabel = computed(() => summaryItems.value.find(item => item.key === activeSummary.value)?.label || '待处理')
 const getQuestion = item => item?.question || item || {}; const titleOf = item => { const text = contentOf(item); return text.length > 72 ? `${text.slice(0, 72)}…` : text }; const contentOf = item => getQuestion(item).content || item?.content || ''; const subjectOf = item => item?.subject || getQuestion(item).subject || '未分类'; const tagsOf = item => { const q = getQuestion(item); return (q.tags_source === 'manual' ? q.manual_tags : (q.ai_tags || q.tags)) || [] }; const answerOf = (item, key) => getQuestion(item)[key] || item?.[key] || ''; const analysisOf = item => getQuestion(item).analysis || item?.analysis || ''; const imageOf = item => getQuestion(item).image_url || item?.question_image_url || ''; const formatTime = item => { const value = item?.added_at || item?.created_at; if (!value) return '-'; const date = dayjs(value); if (date.isSame(dayjs(), 'day')) return `今天 ${date.format('HH:mm')}`; if (date.isSame(dayjs().subtract(1, 'day'), 'day')) return `昨天 ${date.format('HH:mm')}`; return date.format('MM-DD HH:mm') }; const fullTime = item => item?.added_at ? dayjs(item.added_at).format('YYYY-MM-DD HH:mm') : '-'; const isSelected = item => selectedQuestions.value.some(selected => selected.id === item.id); const toneOf = item => item.lifecycle_status === 'mastered' || item.status === 'mastered' ? 'success' : (item.error_count >= 2 ? 'warning' : 'danger'); const labelOf = item => item.lifecycle_status === 'mastered' || item.status === 'mastered' ? '已掌握' : (item.error_count >= 2 ? '重复出错' : (item.practice_count > 0 ? '待重练' : '新错题'))
-function updateSearch() { wrongBookStore.setSearchQuery(searchInput.value) }; function setSummary(key) { activeSummary.value = key; wrongBookStore.setFilter('status', key === 'mastered' ? 'mastered' : key === 'pending' ? 'pending' : 'all'); if (key === 'repeat') wrongBookStore.setFilter('errorCount', '2-3') }; function applySubject(value) { wrongBookStore.setFilter('subject', value || 'all') }; function applyTime(value) { wrongBookStore.setFilter('time', value || 'all') }; function applyCategory(value) { categoryFilter.value = value; wrongBookStore.setFilter('category', value) }; function resetFilters() { wrongBookStore.resetFilters(); activeSummary.value = 'pending'; subjectFilter.value = 'all'; timeFilter.value = 'all'; categoryFilter.value = 'all'; searchInput.value = ''; sortLabel.value = '优先处理' }; function handleSort(command) { sortLabel.value = command === 'time_desc' ? '最近新增' : command === 'error_desc' ? '错误次数最多' : '优先处理'; wrongBookStore.sortBy = command === 'priority' ? 'error_desc' : command }; function switchStudent(student) { wrongBookStore.setCurrentStudent(student); wrongBookStore.loadWrongQuestions(student.id); selectedQuestion.value = null; showStudentDialog.value = false }; function createRetry() { if (!selectedQuestions.value.length) { ElMessage.info('请先选择需要重练的题目'); return }; router.push({ path: '/exam-history', query: { studentId: currentStudent.value?.id } }) }; function createRetryFor(item) { wrongBookStore.clearSelection(); wrongBookStore.toggleSelection(item); createRetry() }; async function markMastered(item) { await wrongBookStore.updateLifecycleStatus(item.id, 'mastered'); ElMessage.success('已标记为已掌握') }; async function removeQuestion(item) { try { await ElMessageBox.confirm('移除后，这道题将不再出现在当前学生的错题列表中。', '移除错题', { confirmButtonText: '确认移除', cancelButtonText: '取消', type: 'warning' }); if (await wrongBookStore.deleteQuestion(item.id)) { selectedQuestion.value = null; ElMessage.success('错题已移除') } } catch {} }
-onMounted(async () => { try { const result = await getStudents(false); students.value = result.data || result || []; const requestedStudentId = route.query.studentId; const requestedStudent = students.value.find(student => String(student.id) === String(requestedStudentId)); if (requestedStudent) switchStudent(requestedStudent); else if (students.value.length && !currentStudent.value) switchStudent(students.value[0]); else if (currentStudent.value) await wrongBookStore.loadWrongQuestions(currentStudent.value.id) } catch { ElMessage.error('学生列表加载失败，请刷新重试') } })
+function updateSearch() { wrongBookStore.setSearchQuery(searchInput.value) }; function setSummary(key) { activeSummary.value = key; wrongBookStore.setFilter('status', key === 'mastered' ? 'mastered' : key === 'pending' ? 'pending' : 'all'); if (key === 'repeat') wrongBookStore.setFilter('errorCount', '2-3') }; function applySubject(value) { wrongBookStore.setFilter('subject', value || 'all') }; function applyTime(value) { wrongBookStore.setFilter('time', value || 'all') }; function applyCategory(value) { categoryFilter.value = value; wrongBookStore.setFilter('category', value) }; function resetFilters() { wrongBookStore.resetFilters(); activeSummary.value = 'pending'; subjectFilter.value = 'all'; timeFilter.value = 'all'; categoryFilter.value = 'all'; searchInput.value = ''; sortLabel.value = '优先处理' }; function handleSort(command) { sortLabel.value = command === 'time_desc' ? '最近新增' : command === 'error_desc' ? '错误次数最多' : '优先处理'; wrongBookStore.sortBy = command === 'priority' ? 'error_desc' : command }; function switchStudent(student) { wrongBookStore.setCurrentStudent(student); wrongBookStore.loadWrongQuestions(student.id); selectedQuestion.value = null; showStudentDialog.value = false }; async function createRetry() {
+  const student = currentStudent.value
+  if (!student) { ElMessage.warning('请先选择学生'); return }
+  if (!selectedQuestions.value.length) { ElMessage.info('请先选择需要重练的题目'); return }
+  // 重练卷 question_ids 必须是题库题目 ID（wrong_questions.question_id）；
+  // 练习册自包含错题若未关联到题库题目（question_id 为空），其 ID 无法进入重练批改链路，需剔除并提示。
+  const validItems = selectedQuestions.value.filter(item => item.question_id)
+  const droppedCount = selectedQuestions.value.length - validItems.length
+  if (!validItems.length) {
+    ElMessage.warning('所选错题暂无可组卷的题目（部分练习册自包含错题尚未关联到题库题目）')
+    return
+  }
+  const questionIds = validItems.map(item => item.question_id)
+  creatingExam.value = true
+  try {
+    const existing = await getGeneratedExamsByStudent(student.id, false).catch(() => [])
+    const baseName = buildExamBaseName(validItems)
+    const examName = buildExamNameWithSeq(baseName, existing, student.id)
+    const exam = await createGeneratedExam({ student_id: student.id, name: examName, question_ids: questionIds })
+    if (!exam?.id) throw new Error('创建重练卷失败')
+    const suffix = droppedCount ? `（${droppedCount} 道练习册自包含错题未纳入重练）` : ''
+    ElMessage.success(`已生成重练卷「${exam.name}」，共 ${questionIds.length} 题${suffix}`)
+    wrongBookStore.clearSelection()
+    emit('exam-created', exam)
+    if (!embedded.value) router.push({ path: '/students/' + student.id, query: { tab: 'retry' } })
+  } catch (error) {
+    ElMessage.error(error.message || '创建重练卷失败，请稍后重试')
+  } finally {
+    creatingExam.value = false
+  }
+}
+function createRetryFor(item) { wrongBookStore.clearSelection(); wrongBookStore.toggleSelection(item); createRetry() }; async function markMastered(item) { await wrongBookStore.updateLifecycleStatus(item.id, 'mastered'); ElMessage.success('已标记为已掌握') }; async function removeQuestion(item) { try { await ElMessageBox.confirm('移除后，这道题将不再出现在当前学生的错题列表中。', '移除错题', { confirmButtonText: '确认移除', cancelButtonText: '取消', type: 'warning' }); if (await wrongBookStore.deleteQuestion(item.id)) { selectedQuestion.value = null; ElMessage.success('错题已移除') } } catch {} }
+onMounted(async () => {
+  try {
+    if (embedded.value && props.studentId) {
+      const result = await getStudents(false)
+      students.value = result.data || result || []
+      const target = students.value.find(s => String(s.id) === String(props.studentId))
+      if (target) switchStudent(target)
+      else ElMessage.error('未找到指定学生')
+      return
+    }
+    const result = await getStudents(false)
+    students.value = result.data || result || []
+    const requestedStudentId = route.query.studentId
+    const requestedStudent = students.value.find(student => String(student.id) === String(requestedStudentId))
+    if (requestedStudent) switchStudent(requestedStudent)
+    else if (students.value.length && !currentStudent.value) switchStudent(students.value[0])
+    else if (currentStudent.value) await wrongBookStore.loadWrongQuestions(currentStudent.value.id)
+  } catch { ElMessage.error('学生列表加载失败，请刷新重试') }
+})
+watch(() => props.studentId, async (id) => {
+  if (!embedded.value || !id) return
+  if (currentStudent.value && String(currentStudent.value.id) === String(id)) return
+  if (!students.value.length) {
+    try { const r = await getStudents(false); students.value = r.data || r || [] } catch {}
+  }
+  const target = students.value.find(s => String(s.id) === String(id))
+  if (target) switchStudent(target)
+})
 </script>
 
 <style scoped>

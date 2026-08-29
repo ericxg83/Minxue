@@ -40,6 +40,7 @@ import { migrateHandoutLectures } from './migrations/045_handout_lectures.js'
 import { migrateTaskNotificationRead } from './migrations/046_add_task_notification_read.js'
 import { migrateTeachingQuestionTypes } from './migrations/047_teaching_question_types.js'
 import { migrateTeachingQuestionTypeAuto } from './migrations/048_teaching_question_type_auto.js'
+import { migrateStudentEnrollmentStatus } from './migrations/049_add_student_enrollment_status.js'
 import { scheduleNightParse } from './services/nightParseService.js'
 
 const __dirname = dirname(fileURLToPath(import.meta.url))
@@ -981,7 +982,8 @@ app.get('/api/students', async (req, res) => {
       return res.json(studentsCache.data)
     }
     const { rows } = await query(
-      `SELECT id, name, grade, avatar, created_at FROM ${TABLES.STUDENTS} ORDER BY created_at DESC`
+      `SELECT id, name, grade, avatar, enrollment_status, paused_at, created_at
+       FROM ${TABLES.STUDENTS} ORDER BY created_at DESC`
     )
     const data = { success: true, students: rows }
     studentsCache = { data, timestamp: now }
@@ -992,20 +994,47 @@ app.get('/api/students', async (req, res) => {
   }
 })
 
+app.get('/api/students/:id', async (req, res) => {
+  try {
+    const { id } = req.params
+    const { rows } = await query(
+      `SELECT id, name, grade, avatar, enrollment_status, paused_at, created_at
+       FROM ${TABLES.STUDENTS} WHERE id = $1`,
+      [id]
+    )
+    if (rows.length === 0) return res.status(404).json({ error: '学生不存在' })
+    res.json({ success: true, student: rows[0] })
+  } catch (error) {
+    console.error('获取学生失败:', error)
+    res.status(500).json({ error: error.message })
+  }
+})
+
 app.put('/api/students/:id', async (req, res) => {
     try {
       const { id } = req.params
-      const { name, grade, avatar } = req.body
+      const { name, grade, avatar, enrollmentStatus } = req.body
 
+      if (enrollmentStatus !== undefined && !['active', 'paused'].includes(enrollmentStatus)) {
+        return res.status(400).json({ error: 'enrollmentStatus 只能是 active 或 paused' })
+      }
+
+      // paused_at 跟随 enrollment_status：停课记时间，恢复清空；不传该字段则原样保留
       const { rows } = await query(
         `UPDATE ${TABLES.STUDENTS}
          SET name = COALESCE($1, name),
              grade = COALESCE($2, grade),
              avatar = COALESCE($3, avatar),
+             enrollment_status = COALESCE($4, enrollment_status),
+             paused_at = CASE
+               WHEN $4::text IS NULL THEN paused_at
+               WHEN $4::text = 'paused' THEN COALESCE(paused_at, NOW())
+               ELSE NULL
+             END,
              updated_at = NOW()
-         WHERE id = $4
+         WHERE id = $5
          RETURNING *`,
-        [name, grade, avatar, id]
+        [name, grade, avatar, enrollmentStatus ?? null, id]
       )
 
       if (rows.length === 0) return res.status(404).json({ error: '学生不存在' })
@@ -2568,6 +2597,7 @@ if (process.argv[1] === __filename || process.argv[1]?.endsWith('server/index.js
       await migrateTaskNotificationRead()
       await migrateTeachingQuestionTypes()
       await migrateTeachingQuestionTypeAuto()
+      await migrateStudentEnrollmentStatus()
     } catch (err) {
       console.error('数据库迁移失败:', err.message)
     }

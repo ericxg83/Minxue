@@ -172,8 +172,8 @@ export const getStudents = async (useCache = true) => {
 }
 
 export const getStudentById = async (id) => {
-  const data = await apiRequest('/students')
-  return (data.students || []).find(s => s.id === id)
+  const data = await apiRequest(`/students/${id}`)
+  return data.student
 }
 
 export const createStudent = async (studentData) => {
@@ -197,7 +197,8 @@ export const updateStudent = async (id, updates) => {
     body: JSON.stringify({
       name: updates.name,
       grade: updates.grade,
-      avatar: updates.avatar
+      avatar: updates.avatar,
+      enrollmentStatus: updates.enrollmentStatus
     })
   })
   clearCache('students_cache')
