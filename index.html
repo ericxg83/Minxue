@@ -8,14 +8,18 @@
     <meta name="apple-mobile-web-app-capable" content="yes" />
     <meta name="apple-mobile-web-app-status-bar-style" content="default" />
     <title>敏学成长工作台</title>
+    <!-- workbench-redirect:start -->
     <script>
       // PC工作台路由：直接跳转到Vue3入口（在React加载前执行）
+      // App 构建不打 workbench.html，这段会被 vite.config.js 的
+      // stripWorkbenchRedirect 插件整段移除，避免跳到不存在的页面。
       const path = window.location.pathname
       if (path === '/exam-workbench' || path.startsWith('/exam-workbench/') ||
           path === '/workbench' || path.startsWith('/workbench/')) {
         window.location.href = '/workbench.html' + window.location.hash;
       }
     </script>
+    <!-- workbench-redirect:end -->
   </head>
   <body>
     <div id="root"></div>

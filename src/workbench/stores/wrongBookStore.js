@@ -2,7 +2,7 @@ import { defineStore } from 'pinia'
 import { ref, computed } from 'vue'
 import { getWrongQuestionsByStudent, deleteWrongQuestion, updateWrongQuestionStatus, batchUpsertWrongQuestionStatus } from '../../services/apiService'
 import { useLifecycleStore, LIFECYCLE_STATUS } from './lifecycleStore'
-import { deduplicateWrongQuestions } from '../../utils/questionDedup'
+import { dedupeWrongQuestions } from '../../domain/questionIdentity'
 import { debounce } from '../utils/performance'
 import dayjs from 'dayjs'
 
@@ -177,7 +177,7 @@ export const useWrongBookStore = defineStore('wrongBook', () => {
         questions = dedupCache.value
       } else {
         // 缓存失效，重新去重
-        questions = deduplicateWrongQuestions(base)
+        questions = dedupeWrongQuestions(base)
         dedupCache.value = questions
         dedupCacheKey.value = cacheKey
       }
@@ -229,7 +229,7 @@ export const useWrongBookStore = defineStore('wrongBook', () => {
 
     // 去重后的数据
     const dedupedQuestions = dedupEnabled.value
-      ? deduplicateWrongQuestions(studentQuestions)
+      ? dedupeWrongQuestions(studentQuestions)
       : studentQuestions
 
     const total = dedupedQuestions.length

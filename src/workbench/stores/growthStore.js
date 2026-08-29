@@ -16,7 +16,7 @@ import { defineStore } from 'pinia'
 import { ref, computed } from 'vue'
 import { getTasksByStudent, getWrongQuestionsByStudent, getQuestionsByTask, getKnowledgeMastery } from '../../services/apiService'
 import { useLifecycleStore, LIFECYCLE_STATUS } from './lifecycleStore'
-import { deduplicateWrongQuestions } from '../../utils/questionDedup'
+import { dedupeWrongQuestions } from '../../domain/questionIdentity'
 import dayjs from 'dayjs'
 
 export const useGrowthStore = defineStore('growth', () => {
@@ -90,7 +90,7 @@ export const useGrowthStore = defineStore('growth', () => {
   const dedupedWrongQuestions = computed(() => {
     if (!currentStudentId.value) return []
     const studentWrong = wrongQuestions.value.filter(wq => wq.student_id === currentStudentId.value)
-    return deduplicateWrongQuestions(studentWrong)
+    return dedupeWrongQuestions(studentWrong)
   })
 
   // 累计错题（去重后，知识漏洞数量）
@@ -158,7 +158,7 @@ export const useGrowthStore = defineStore('growth', () => {
         return !addedAt.isAfter(date.endOf('day'))
       })
 
-      const dedupedUntilDate = deduplicateWrongQuestions(wrongUntilDate)
+      const dedupedUntilDate = dedupeWrongQuestions(wrongUntilDate)
       const total = dedupedUntilDate.length
       const mastered = dedupedUntilDate.filter(wq => wq.lifecycle_status === LIFECYCLE_STATUS.MASTERED).length
       const rate = total > 0 ? Math.round((mastered / total) * 100) : 0
@@ -204,7 +204,7 @@ export const useGrowthStore = defineStore('growth', () => {
   const reviewCompletionRate = computed(() => {
     if (!currentStudentId.value) return 0
     const studentWrong = wrongQuestions.value.filter(wq => wq.student_id === currentStudentId.value)
-    const deduped = deduplicateWrongQuestions(studentWrong)
+    const deduped = dedupeWrongQuestions(studentWrong)
     const withPractice = deduped.filter(wq => (wq.practice_count || 0) > 0).length
     if (deduped.length === 0) return 0
     return Math.round((withPractice / deduped.length) * 100)
@@ -215,7 +215,7 @@ export const useGrowthStore = defineStore('growth', () => {
   const subjectStats = computed(() => {
     if (!currentStudentId.value) return []
     const studentWrong = wrongQuestions.value.filter(wq => wq.student_id === currentStudentId.value)
-    const deduped = deduplicateWrongQuestions(studentWrong)
+    const deduped = dedupeWrongQuestions(studentWrong)
 
     const subjectMap = {}
     deduped.forEach(wq => {

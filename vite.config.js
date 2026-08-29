@@ -5,11 +5,32 @@ import tailwindcss from '@tailwindcss/vite'
 import { resolve } from 'path'
 import fs from 'fs'
 
+// App（Capacitor）构建：只打移动端入口。
+// PC 工作台的 Vue + Element Plus + ECharts 链约占 dist 的 2.4MB，
+// 手机 App 里永远不会打开这些页面（workbench/router/index.js 绝大多数路由
+// 标了 requiresPC），没必要随 APK 分发。由 scripts/build-app.mjs 设置该标记；
+// mode 仍为 production，因此 .env.production 照常生效。
+const isAppBuild = process.env.BUILD_TARGET === 'app'
+
+// App 构建时移除 index.html 里的 /workbench 重定向脚本：
+// 该构建不打 workbench.html，留着这段只会把用户送到 404。
+const stripWorkbenchRedirect = () => ({
+  name: 'strip-workbench-redirect',
+  transformIndexHtml(html) {
+    if (!isAppBuild) return html
+    return html.replace(
+      /[ \t]*<!-- workbench-redirect:start -->[\s\S]*?<!-- workbench-redirect:end -->\n?/,
+      ''
+    )
+  }
+})
+
 export default defineConfig(({ mode }) => ({
   plugins: [
     react(),
     vue(),
-    tailwindcss()
+    tailwindcss(),
+    stripWorkbenchRedirect()
   ],
   resolve: {
     alias: {
@@ -17,12 +38,23 @@ export default defineConfig(({ mode }) => ({
       '@workbench': resolve(__dirname, 'src/workbench')
     }
   },
+  define: {
+    // 移动端里「跳转 PC 工作台」的入口需要知道 workbench.html 是否随本次构建分发。
+    // App 构建不打 workbench 入口，此时必须由 VITE_WORKBENCH_URL 指向线上 Web 工作台，
+    // 否则相关入口应提示而不是跳到 404。
+    __WORKBENCH_BUNDLED__: JSON.stringify(!isAppBuild)
+  },
   build: {
+    // App 构建输出到独立目录，避免与 Web 构建产物互相覆盖；
+    // capacitor.config.json 的 webDir 指向此目录。
+    outDir: isAppBuild ? 'dist-app' : 'dist',
     rollupOptions: {
-      input: {
-        main: resolve(__dirname, 'index.html'),
-        workbench: resolve(__dirname, 'workbench.html')
-      },
+      input: isAppBuild
+        ? { main: resolve(__dirname, 'index.html') }
+        : {
+            main: resolve(__dirname, 'index.html'),
+            workbench: resolve(__dirname, 'workbench.html')
+          },
       output: {
         manualChunks: (id) => {
           // Vue framework

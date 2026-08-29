@@ -14,6 +14,7 @@ import { useLocation, useNavigate } from 'react-router-dom'
 import { useStudentStore, useTaskStore, useWrongQuestionStore, useExamStore } from './store'
 import { getStudents, getTasksByStudent, getQuestionsByTask, getExamsByStudent, getGeneratedExamsByStudent, getGeneratedExamById, updateTaskStatus, updateQuestion, updateQuestionTags, invalidateCache, createStudent, getQuestionsByIds, deleteTask, deleteGeneratedExam, deleteWrongQuestion, recalculateTaskStats, clearStudentCaches, peekCache, writeCache, fetchWrongQuestionsPage, getTasksSummary, markNotificationsRead } from './services/apiService'
 import { taskService } from './services/taskService'
+import { dedupeWrongQuestions } from './domain/questionIdentity'
 import { usePaperBank } from './features/PaperBank/index.jsx'
 import { useUploadFlow } from './hooks/useUploadFlow'
 import { usePolling } from './hooks/usePolling'
@@ -40,25 +41,6 @@ import dayjs from 'dayjs'
 
 // 错题本分页大小（与服务端 limit 保持一致）
 const WRONG_PAGE_SIZE = 100
-
-// 错题去重兜底：有 question_id 按 id 去重（后端已按 (student_id, question_id) 唯一）；
-// question_id 为空的自包含错题按题干去重；保留时间最新的一条；不合并不同 question_id 的同题干题目。
-const dedupWrongQuestions = (rawList) => {
-  const dedupMap = new Map()
-  for (const wq of rawList) {
-    const question = wq.question || wq
-    const qContent = (question.content || '').trim()
-    const key = wq.question_id ? `q:${wq.question_id}` : (qContent ? `c:${qContent}` : null)
-    if (!key) continue
-    const existing = dedupMap.get(key)
-    const curDate = wq.added_at || wq.created_at || ''
-    const existDate = existing ? (existing.added_at || existing.created_at || '') : ''
-    if (!existing || curDate > existDate) {
-      dedupMap.set(key, wq)
-    }
-  }
-  return Array.from(dedupMap.values())
-}
 
 // Lazy load non-critical pages with error handling
 const lazyWithRetry = (factory) => {
@@ -487,12 +469,12 @@ export default function App() {
     // 1) 先用缓存立即上屏
     const cached = peekCache(`wrong_questions_cache_${studentId}`)
     if (Array.isArray(cached) && cached.length > 0) {
-      setWrongQuestions(dedupWrongQuestions(cached))
+      setWrongQuestions(dedupeWrongQuestions(cached))
     }
     // 2) 后台拉取第一页（含 total / counts），后续页面由滚动触底加载
     try {
       const { wrongQuestions: rawList, total, counts } = await fetchWrongQuestionsPage(studentId, { limit: WRONG_PAGE_SIZE, offset: 0 })
-      const deduped = dedupWrongQuestions(rawList)
+      const deduped = dedupeWrongQuestions(rawList)
       setWrongQuestions(deduped)
       setBankCounts(counts)
       setWrongBookOffset(rawList.length)
@@ -504,7 +486,7 @@ export default function App() {
     }
   }
 
-  // 滚动触底加载下一页错题，跨页按 question_id / 题干去重合并，并保持秒开缓存
+  // 滚动触底加载下一页错题，跨页按 src/domain/questionIdentity 的统一身份键去重合并，并保持秒开缓存
   const loadMoreWrongQuestions = useCallback(async () => {
     if (!currentStudent || wrongBookLoading || !wrongBookHasMore) return
     const studentId = currentStudent.id
@@ -515,7 +497,7 @@ export default function App() {
         setWrongBookHasMore(false)
         return
       }
-      const merged = dedupWrongQuestions([...(Array.isArray(wrongQuestions) ? wrongQuestions : []), ...rawList])
+      const merged = dedupeWrongQuestions([...(Array.isArray(wrongQuestions) ? wrongQuestions : []), ...rawList])
       setWrongQuestions(merged)
       setBankCounts(counts)
       const nextOffset = wrongBookOffset + rawList.length

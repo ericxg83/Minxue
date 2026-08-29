@@ -13,7 +13,10 @@ const STATUS_META = {
   graded: { label: '已完成', color: 'var(--success)', bg: 'var(--success-soft)', icon: CheckCircle2 }
 }
 
-const REVIEW_WORKBENCH_BASE = import.meta.env.VITE_WORKBENCH_URL || '/workbench'
+// PC 工作台地址。App 构建不打 workbench 入口（见 vite.config.js 的 isAppBuild），
+// 此时必须由 VITE_WORKBENCH_URL 指向线上 Web 工作台，否则跳转会落到 404。
+const REVIEW_WORKBENCH_BASE = import.meta.env.VITE_WORKBENCH_URL
+  || (__WORKBENCH_BUNDLED__ ? '/workbench' : null)
 
 /**
  * 错题重练任务入口页（二维码 = /retry-task/:id）
@@ -120,6 +123,10 @@ export default function RetryTask({ taskId, onBack }) {
 
   const goToWorkbench = () => {
     // 批改结果在「组卷历史」查看/改判（低置信度题回退人工判定）
+    if (!REVIEW_WORKBENCH_BASE) {
+      Toast.show({ icon: 'fail', content: '请在电脑端工作台查看批改结果' })
+      return
+    }
     const url = `${REVIEW_WORKBENCH_BASE}#/exam-history`
     window.location.href = url
   }

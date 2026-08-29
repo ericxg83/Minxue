@@ -1,10 +1,16 @@
 /**
- * 题目去重工具函数
- * 
- * 核心功能：
- * - 题目指纹生成
- * - 文本相似度计算（阈值90%）
- * - 重复错题合并
+ * 题目相似度工具函数
+ *
+ * 用途：给人工判断提供「这两题可能是同一题」的候选提示。
+ *
+ * 注意：错题本的自动去重已迁出本文件，统一由
+ * src/domain/questionIdentity.js 按「归一化后精确匹配」执行。
+ * 原先基于 90% 相似度的 deduplicateWrongQuestions 会把只改数字/改角度的
+ * 变式题、以及「最小 vs 最大」这类语义相反的题误合并（实测相似度
+ * 90.5%~97.5%，题干越长越严重），且合并时取组内最高 lifecycle，
+ * 会让未掌握的错题从错题本消失，因此已移除，不要重新引入到自动路径。
+ *
+ * 本文件剩余函数只做只读的相似度计算，不产生业务状态。
  */
 
 /**
@@ -81,102 +87,17 @@ export const generateQuestionFingerprint = (question) => {
 }
 
 /**
- * 判断两道题是否为同一道题
- * 相似度超过90%视为同一题
+ * 判断两道题在文本上是否高度相似。
+ *
+ * 这不是「同一题」的业务判定 —— 业务判定见
+ * src/domain/questionIdentity.js 的 isSameWrongQuestion。
+ * 本函数仅用于给人工复核提供候选提示。
  */
 export const isSameQuestion = (q1, q2, threshold = 0.9) => {
   const content1 = q1.content || q1.question?.content || ''
   const content2 = q2.content || q2.question?.content || ''
   
   return calculateSimilarity(content1, content2) >= threshold
-}
-
-/**
- * 为错题列表去重
- * 返回去重后的错题列表，合并重复项的统计信息
- */
-export const deduplicateWrongQuestions = (questions, threshold = 0.9) => {
-  if (!Array.isArray(questions) || questions.length === 0) return []
-
-  const grouped = []
-  const used = new Set()
-
-  for (let i = 0; i < questions.length; i++) {
-    if (used.has(i)) continue
-
-    const current = questions[i]
-    const group = [current]
-    used.add(i)
-
-    for (let j = i + 1; j < questions.length; j++) {
-      if (used.has(j)) continue
-
-      const other = questions[j]
-      if (isSameQuestion(current, other, threshold)) {
-        group.push(other)
-        used.add(j)
-      }
-    }
-
-    // 合并为一题
-    const merged = mergeWrongQuestions(group)
-    grouped.push(merged)
-  }
-
-  return grouped
-}
-
-/**
- * 合并重复错题
- * 保留最新记录，累加统计信息
- */
-const mergeWrongQuestions = (duplicates) => {
-  if (duplicates.length === 1) return { ...duplicates[0], wrong_count: 1 }
-
-  // 按最后错误时间排序
-  const sorted = [...duplicates].sort((a, b) => {
-    const timeA = new Date(a.last_wrong_at || a.added_at || 0)
-    const timeB = new Date(b.last_wrong_at || b.added_at || 0)
-    return timeB - timeA // 最新的在前
-  })
-
-  const latest = sorted[0]
-  const earliest = sorted[sorted.length - 1]
-
-  // 累加错误次数和练习次数
-  const totalErrorCount = duplicates.reduce((sum, wq) => sum + (wq.error_count || 1), 0)
-  const totalPracticeCount = duplicates.reduce((sum, wq) => sum + (wq.practice_count || 0), 0)
-
-  // 合并生命周期状态（取最高阶段）
-  const lifecycleOrder = ['new', 'review_1', 'review_2', 'mastered']
-  let highestLifecycle = 'new'
-  duplicates.forEach(wq => {
-    const current = wq.lifecycle_status || 'new'
-    const currentIndex = lifecycleOrder.indexOf(current)
-    const highestIndex = lifecycleOrder.indexOf(highestLifecycle)
-    if (currentIndex > highestIndex) {
-      highestLifecycle = current
-    }
-  })
-
-  return {
-    ...latest,
-    // 保留最新的记录
-    id: latest.id,
-    // 累加统计
-    wrong_count: duplicates.length,  // 重复次数
-    error_count: totalErrorCount,    // 累计错误次数
-    practice_count: totalPracticeCount,
-    // 时间范围
-    first_wrong_time: earliest.added_at || earliest.created_at,
-    last_wrong_time: latest.last_wrong_at || latest.added_at || latest.created_at,
-    // 生命周期状态（取最高阶段）
-    lifecycle_status: highestLifecycle,
-    // 标记为合并记录
-    is_merged: true,
-    // 原始记录ID列表
-    original_ids: duplicates.map(wq => wq.id)
-  }
 }
 
 /**

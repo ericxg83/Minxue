@@ -108,8 +108,13 @@
 import { ref, computed, onMounted } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { ArrowLeft, View } from '@element-plus/icons-vue'
-import { getExamAnswers, updateExamAnswerStatus, updateExamResource } from '../api/examApi.js'
-import axios from 'axios'
+import {
+  getResource,
+  getResourceAnswers,
+  updateResourceAnswers,
+  updateResource,
+  getTasksByResource
+} from '../../services/apiService.js'
 
 const route = useRoute()
 const router = useRouter()
@@ -161,15 +166,14 @@ const loadData = async () => {
   loading.value = true
   try {
     // Load resource info
-    const res = await axios.get(`/api/resources/${resourceId}`)
-    resource.value = res.data.resource
+    resource.value = await getResource(resourceId)
 
     // Load answers
-    answers.value = await getExamAnswers(resourceId)
+    answers.value = await getResourceAnswers(resourceId)
 
     // Load tasks that used this resource
-    const taskRes = await axios.get(`/api/tasks/resource/${resourceId}`)
-    tasks.value = (taskRes.data.tasks || []).map(t => ({
+    const taskRes = await getTasksByResource(resourceId)
+    tasks.value = (taskRes.tasks || []).map(t => ({
       id: t.id,
       student_name: t.student_name || '未知',
       created_at: t.created_at
@@ -195,15 +199,13 @@ const handleSaveAnswer = async () => {
   try {
     const { answer, answer_type, content } = editForm.value
     // Update via resource answers PUT endpoint
-    await axios.put(`/api/resources/${resourceId}/answers`, {
-      answers: answers.value.map(a =>
-        a.id === selectedAnswer.value.id
-          ? { ...a, answer, answer_type, content }
-          : a
-      )
-    })
+    await updateResourceAnswers(resourceId, answers.value.map(a =>
+      a.id === selectedAnswer.value.id
+        ? { ...a, answer, answer_type, content }
+        : a
+    ))
     // Reload
-    answers.value = await getExamAnswers(resourceId)
+    answers.value = await getResourceAnswers(resourceId)
     selectedAnswer.value = answers.value.find(a => a.id === selectedAnswer.value.id)
   } catch (e) {
     console.error('保存失败:', e)
@@ -220,8 +222,8 @@ const handleMarkVerified = async () => {
         ? { ...a, answer_status: 'teacher_verified' }
         : a
     )
-    await axios.put(`/api/resources/${resourceId}/answers`, { answers: updated })
-    answers.value = await getExamAnswers(resourceId)
+    await updateResourceAnswers(resourceId, updated)
+    answers.value = await getResourceAnswers(resourceId)
     selectedAnswer.value = answers.value.find(a => a.id === selectedAnswer.value.id)
   } catch (e) {
     console.error('标记失败:', e)
@@ -236,8 +238,8 @@ const handleBatchVerify = async () => {
         ? { ...a, answer_status: 'teacher_verified' }
         : a
     )
-    await axios.put(`/api/resources/${resourceId}/answers`, { answers: updated })
-    answers.value = await getExamAnswers(resourceId)
+    await updateResourceAnswers(resourceId, updated)
+    answers.value = await getResourceAnswers(resourceId)
   } catch (e) {
     console.error('批量标记失败:', e)
   }
@@ -247,7 +249,7 @@ const handleBatchVerify = async () => {
 const handlePublish = async () => {
   try {
     // Update resource status to published
-    await updateExamResource(resourceId, { status: 'published', answerStatus: 'teacher_verified' })
+    await updateResource(resourceId, { status: 'published', answerStatus: 'teacher_verified' })
     resource.value = { ...resource.value, status: 'published', answer_status: 'teacher_verified' }
   } catch (e) {
     console.error('发布失败:', e)

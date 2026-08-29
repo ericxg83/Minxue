@@ -83,7 +83,7 @@
 import { ref, onMounted } from 'vue'
 import { useRouter } from 'vue-router'
 import { Plus } from '@element-plus/icons-vue'
-import { getExamResources, createExamResource, deleteExamResource, updateExamResource } from '../api/examApi.js'
+import { getResources, createResource, deleteResource, updateResource } from '../../services/apiService.js'
 
 const router = useRouter()
 const exams = ref([])
@@ -95,7 +95,7 @@ const createForm = ref({ name: '', subject: '', grade: '' })
 const loadExams = async () => {
   loading.value = true
   try {
-    exams.value = await getExamResources()
+    exams.value = await getResources({ type: 'exam' })
   } catch (e) {
     console.error('加载试卷答案库失败:', e)
   }
@@ -106,7 +106,7 @@ const handleCreate = async () => {
   if (!createForm.value.name) return
   creating.value = true
   try {
-    await createExamResource(createForm.value)
+    await createResource({ ...createForm.value, type: 'exam' })
     showCreateDialog.value = false
     createForm.value = { name: '', subject: '', grade: '' }
     loadExams()
@@ -123,7 +123,7 @@ const handleReview = (row) => {
 const handleToggleStatus = async (row) => {
   try {
     const newStatus = row.status === 'published' ? 'draft' : 'published'
-    await updateExamResource(row.id, { status: newStatus })
+    await updateResource(row.id, { status: newStatus })
     loadExams()
   } catch (e) {
     console.error('切换状态失败:', e)
@@ -132,7 +132,7 @@ const handleToggleStatus = async (row) => {
 
 const handleDelete = async (row) => {
   try {
-    await deleteExamResource(row.id)
+    await deleteResource(row.id)
     loadExams()
   } catch (e) {
     console.error('删除失败:', e)

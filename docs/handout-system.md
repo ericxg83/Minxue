@@ -77,6 +77,8 @@ inverse
 context_shift
 ```
 
+**变式题仅作为讲义教学素材，不进入错题重练与组卷。** 当前产品口径是「只练错题」：`generated_exams.question_ids` 必须来自 `wrong_questions` 指向的真实做错题目，不得混入 `variant_questions` 的内容。详见 `docs/wrong-question-system.md` 的「重练范围限制」。
+
 ## 组卷和重练
 
 组卷接口包括：

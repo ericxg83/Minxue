@@ -10,9 +10,11 @@
     "lint": "eslint .",
     "preview": "vite preview --host --port $PORT",
     "android": "npx cap open android",
-    "android:build": "npm run build && npx cap sync android",
+    "android:build": "npm run build:app && npx cap sync android",
     "android:run": "npm run android:build && npx cap run android",
-    "postinstall": "patch-package"
+    "postinstall": "patch-package",
+    "build:app": "node scripts/build-app.mjs",
+    "test": "node --test \"test/*.test.mjs\""
   },
   "dependencies": {
     "@capacitor-mlkit/barcode-scanning": "^8.1.0",

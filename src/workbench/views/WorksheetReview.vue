@@ -108,8 +108,8 @@ import { useRoute, useRouter } from 'vue-router'
 import { ArrowLeft, View } from '@element-plus/icons-vue'
 import { ElMessage } from 'element-plus'
 import {
-  getWorkbooks, getWorkbookAnswers, updateWorkbookAnswer, updateWorkbookStatus
-} from '../api/worksheetApi.js'
+  getWorksheets, getWorksheetAnswers, updateWorksheetAnswer, updateWorksheetStatus
+} from '../../services/apiService.js'
 
 const route = useRoute()
 const router = useRouter()
@@ -213,9 +213,9 @@ const canPublish = computed(() => {
 onMounted(async () => {
   loading.value = true
   try {
-    const all = await getWorkbooks()
+    const all = await getWorksheets()
     worksheet.value = all.find(w => w.id === worksheetId)
-    answers.value = await getWorkbookAnswers(worksheetId)
+    answers.value = await getWorksheetAnswers(worksheetId)
   } catch (e) {
     ElMessage.error('加载失败: ' + e.message)
   }
@@ -242,7 +242,7 @@ const saveAnswer = async () => {
   if (!selectedAnswer.value) return
   saving.value = true
   try {
-    await updateWorkbookAnswer(worksheetId, selectedAnswer.value.id, editForm.value)
+    await updateWorksheetAnswer(worksheetId, selectedAnswer.value.id, editForm.value)
     selectedAnswer.value.answer = editForm.value.answer
     selectedAnswer.value.answer_type = editForm.value.answer_type
     ElMessage.success('已保存')
@@ -254,7 +254,7 @@ const saveAnswer = async () => {
 
 const handlePublish = async () => {
   try {
-    await updateWorkbookStatus(worksheetId, 'published')
+    await updateWorksheetStatus(worksheetId, 'published')
     worksheet.value.status = 'published'
     ElMessage.success('已发布')
   } catch (e) {
