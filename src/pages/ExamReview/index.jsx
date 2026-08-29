@@ -18,6 +18,17 @@ const ATTENTION_SOURCES = ['uncertain', 'error', 'processing']
 // 答案超过这个字符数就不再挤两列：136px 的列宽塞长答案比整宽单列更费高度
 const ANSWER_STACK_THRESHOLD = 14
 
+// ── 左右滑动切题的手感参数 ──
+// 方向按翻页/轮播的通用心智：向左滑 = 把当前题推走 = 下一题，向右滑 = 上一题。
+// 要对调只需改 SWIPE_FORWARD_SIGN。
+const SWIPE_FORWARD_SIGN = -1       // 手指位移为负（向左）时前进
+const SWIPE_AXIS_LOCK_PX = 8        // 定主轴前允许的抖动：小于此值先不判方向
+const SWIPE_COMMIT_PX = 44          // 慢拖时触发切题的位移
+const SWIPE_FLICK_PX = 24           // 快速轻扫的最小位移
+const SWIPE_FLICK_MS = 260          // 快速轻扫的时间上限
+const SWIPE_FOLLOW_RATIO = 0.32     // 跟手位移的阻尼：跟手但不整页跑
+const SWIPE_EDGE_RATIO = 0.1        // 已在首/末题时的阻尼，做出"撞墙"手感
+
 // 编辑态是否值得显示渲染预览（纯数字/字母不需要）
 const hasMathMarkup = (s) => /[\\^_${}]/.test(String(s || ''))
 
@@ -193,6 +204,8 @@ export default function ExamReview({ task, onClose, onSave, onViewImage }) {
   const [confirmComplete, setConfirmComplete] = useState(false)
   const [filter, setFilter] = useState('attention')
   const [editingField, setEditingField] = useState(null)
+  // 滑动切题时内容跟手的水平位移（px）；0 = 静止
+  const [dragX, setDragX] = useState(0)
 
   // ── 复审核心逻辑 (数据加载 / 人工评判 / 保存) ──
   const {
@@ -233,6 +246,8 @@ export default function ExamReview({ task, onClose, onSave, onViewImage }) {
   }, [validQuestions, filter])
 
   const currentQuestion = displayQuestions[currentIndex] || null
+  const atFirst = currentIndex === 0
+  const atLast = currentIndex >= displayQuestions.length - 1
   // 多图一任务：同一份作业上传的页数，用于在复核界面显式提示"这是一份 N 页作业"
   const pageCount = Array.isArray(task?.images) ? task.images.length : 0
 
@@ -255,6 +270,58 @@ export default function ExamReview({ task, onClose, onSave, onViewImage }) {
     setConfirmComplete(false)
     setEditingField(null)
   }, [displayQuestions.length, clearAdvance])
+
+  // ── 左右滑动切题 ──
+  // 页脚箭头仍是明示入口，手势只是加速器：拇指停在屏幕中部就能翻题，长题不必先滚回页脚。
+  // 三条约束：纵向滚动优先（长题要能滚）、编辑答案时让位给文本选择、首末题只给阻尼不切题。
+  const swipeRef = useRef(null)
+  const swallowClickRef = useRef(false)
+
+  const handleTouchStart = useCallback((e) => {
+    swallowClickRef.current = false
+    // 编辑答案时手势让位给光标与选词；多指是缩放，不是翻题
+    if (editingField || e.touches.length !== 1) {
+      swipeRef.current = null
+      return
+    }
+    const t = e.touches[0]
+    swipeRef.current = { x0: t.clientX, y0: t.clientY, t0: Date.now(), axis: null, dx: 0 }
+  }, [editingField])
+
+  const handleTouchMove = useCallback((e) => {
+    const s = swipeRef.current
+    if (!s || e.touches.length !== 1) return
+    const dx = e.touches[0].clientX - s.x0
+    const dy = e.touches[0].clientY - s.y0
+    if (s.axis === null) {
+      if (Math.abs(dx) < SWIPE_AXIS_LOCK_PX && Math.abs(dy) < SWIPE_AXIS_LOCK_PX) return
+      // 主轴一旦定为纵向就整程不再翻题，避免滚长题时被斜向抖动带走
+      s.axis = Math.abs(dx) > Math.abs(dy) ? 'x' : 'y'
+    }
+    if (s.axis !== 'x') return
+    s.dx = dx
+    const blocked = dx * SWIPE_FORWARD_SIGN > 0 ? atLast : atFirst
+    setDragX(dx * (blocked ? SWIPE_EDGE_RATIO : SWIPE_FOLLOW_RATIO))
+  }, [atFirst, atLast])
+
+  const handleTouchEnd = useCallback(() => {
+    const s = swipeRef.current
+    swipeRef.current = null
+    setDragX(0)
+    if (!s || s.axis !== 'x') return
+    const flick = Date.now() - s.t0 < SWIPE_FLICK_MS && Math.abs(s.dx) >= SWIPE_FLICK_PX
+    if (Math.abs(s.dx) < SWIPE_COMMIT_PX && !flick) return
+    // 手势结束后浏览器仍会补发一次 click：不吞掉的话，横扫过「学生答案」会顺手弹出原卷图
+    swallowClickRef.current = true
+    jumpToQuestion(currentIndex + (s.dx * SWIPE_FORWARD_SIGN > 0 ? 1 : -1))
+  }, [currentIndex, jumpToQuestion])
+
+  const handleClickCapture = useCallback((e) => {
+    if (!swallowClickRef.current) return
+    swallowClickRef.current = false
+    e.preventDefault()
+    e.stopPropagation()
+  }, [])
 
   // 切换复核范围（下拉选择，不再有"再点一次退回"的隐含语义）
   const applyFilter = useCallback((next) => {
@@ -505,8 +572,7 @@ export default function ExamReview({ task, onClose, onSave, onViewImage }) {
   // ── 弹窗固定页脚：主判定（高频）常驻，翻页降为箭头，「完成复核」（一次性）延后升起 ──
   // 原先固定页脚给了翻页 + 完成复核共 100px，而真正高频的「正确 / 错误」在滚动区里，
   // 长题要先滚到底才点得到。现在反过来：判定永远在拇指位置。
-  const atFirst = currentIndex === 0
-  const atLast = currentIndex >= displayQuestions.length - 1
+  // atFirst / atLast 在滑动手势里也要用，已提到 hooks 区一并计算
   const showComplete = needsAttentionCount === 0 || atLast
 
   const navBtnStyle = (disabled) => ({
@@ -594,6 +660,19 @@ export default function ExamReview({ task, onClose, onSave, onViewImage }) {
       footer={footer}
       showHandle={false}
       bodyClassName='px-4 pt-2 pb-3'
+      bodyProps={{
+        onTouchStart: handleTouchStart,
+        onTouchMove: handleTouchMove,
+        onTouchEnd: handleTouchEnd,
+        onTouchCancel: handleTouchEnd,
+        onClickCapture: handleClickCapture,
+        style: {
+          // pan-y：纵向滚动仍交给浏览器，横向手势归本组件，也不会触发页面级横向滚动
+          touchAction: 'pan-y',
+          transform: dragX ? `translateX(${dragX}px)` : undefined,
+          transition: dragX ? 'none' : 'transform 0.18s ease-out'
+        }
+      }}
     >
       {/* ① 题目头：第几题 / 原卷题号 / 题型 + AI 判定（人工结论看页脚按钮的选中态） */}
       <div style={{
@@ -619,14 +698,20 @@ export default function ExamReview({ task, onClose, onSave, onViewImage }) {
         {aiJudge && (
           <AiJudgeTag
             {...aiJudge}
-            note={
-              wrongIdMap[currentQuestion.id] && reviewAction !== 'excluded'
-                ? '已入错题本'
-                : unjudgedReason || null
-            }
+            note={wrongIdMap[currentQuestion.id] && reviewAction !== 'excluded' ? '已入错题本' : null}
           />
         )}
       </div>
+
+      {/* 「AI未判定」的原因单独占一行：跟在状态标签后面会把「第 N 题」挤成竖排单字（343px 宽塞不下两段） */}
+      {unjudgedReason && (
+        <div style={{
+          marginBottom: 6, fontSize: 'var(--fs-11)', lineHeight: 1.45,
+          color: 'var(--warning)'
+        }}>
+          {unjudgedReason}
+        </div>
+      )}
 
       {/* ② 题干：先看题目问了什么，再看答案 */}
       <div style={{ fontSize: 15, lineHeight: 1.7, color: COLORS.text, marginBottom: optionList.length > 0 || geoImageUrl ? 6 : 10 }}>

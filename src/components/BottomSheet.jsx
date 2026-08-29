@@ -11,6 +11,7 @@ export default function BottomSheet({
   footer,
   children,
   bodyClassName = 'px-5 pb-4',
+  bodyProps,
   maxWidth = 512,
   showHandle = true,
 }) {
@@ -58,7 +59,13 @@ export default function BottomSheet({
 
         {header && <div className='shrink-0'>{header}</div>}
 
-        <div className={bodyClassName} style={{ flex: '1 1 auto', minHeight: 0, overflowY: 'auto' }}>
+        {/* 主体滚动区。bodyProps 供调用方挂手势/样式（复核页用它做左右滑动切题），
+            布局相关的 style 仍由本组件兜底，不允许被覆盖掉滚动能力 */}
+        <div
+          className={bodyClassName}
+          {...bodyProps}
+          style={{ flex: '1 1 auto', minHeight: 0, overflowY: 'auto', ...bodyProps?.style }}
+        >
           {children}
         </div>
 
