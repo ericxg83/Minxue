@@ -860,7 +860,9 @@ const handleRetryGeometry = async () => {
   padding: 10px 14px;
   border-radius: var(--wb-radius-xs);
   box-shadow: var(--wb-shadow-sm);
-  flex-shrink: 0;
+  flex: 0 1 auto;
+  min-height: 0;
+  max-height: 38vh;
 }
 .ops-compare-item {
   flex: 1;
@@ -868,6 +870,7 @@ const handleRetryGeometry = async () => {
   flex-direction: column;
   gap: 4px;
   min-width: 0;
+  min-height: 0;
 }
 .ops-cmp-label {
   font-size: 11px;
@@ -876,13 +879,27 @@ const handleRetryGeometry = async () => {
   letter-spacing: 0.5px;
 }
 .ops-cmp-value {
+  display: block;
   font-size: 16px;
   font-weight: 600;
   padding: 5px 8px;
   border-radius: var(--wb-radius-xs);
   line-height: 1.4;
-  word-break: break-all;
+  word-break: break-word;
+  overflow-wrap: anywhere;
+  flex: 1 1 auto;
+  min-height: 0;
+  max-height: 30vh;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  scrollbar-gutter: stable;
 }
+.ops-cmp-value::-webkit-scrollbar { width: 8px; }
+.ops-cmp-value::-webkit-scrollbar-thumb {
+  background: #B6C2D2;
+  border-radius: var(--wb-radius-xs);
+}
+.ops-cmp-value::-webkit-scrollbar-thumb:hover { background: #8E9DB2; }
 .student-val { background: var(--wb-bg); color: var(--wb-text); }
 .correct-val { color: var(--wb-success); }
 .ref-answer-val {
@@ -892,8 +909,6 @@ const handleRetryGeometry = async () => {
   word-break: normal;
   overflow-wrap: anywhere;
   white-space: pre-wrap;
-  max-height: 160px;
-  overflow-y: auto;
 }
 .ops-cmp-divider {
   width: 1px;
@@ -948,9 +963,9 @@ const handleRetryGeometry = async () => {
 
 /* ═══ 完整题目内容区（可滚动） ═══ */
 .ops-question-body {
-  flex: 1;
+  flex: 1 1 auto;
   overflow-y: auto;
-  min-height: 0;
+  min-height: 120px;
   padding: 12px 16px;
   display: flex;
   flex-direction: column;
