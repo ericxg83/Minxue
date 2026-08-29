@@ -66,6 +66,7 @@
 
 <script setup>
 import { computed } from 'vue'
+import { REVIEW_STATE_LABELS } from '../../../utils/reviewDecision'
 
 const props = defineProps({
   state: { type: String, default: 'pending' }, // correct | wrong | pending | exception | processing
@@ -81,16 +82,9 @@ const COLORS = {
   processing: 'var(--wb-processing)'
 }
 
-const LABELS = {
-  correct: 'AI正确',
-  wrong: 'AI错误',
-  pending: '待复核',
-  exception: 'AI异常',
-  processing: '处理中'
-}
-
 const color = computed(() => COLORS[props.state] || COLORS.pending)
-const label = computed(() => LABELS[props.state] || '')
+// 文案表同源：src/utils/reviewDecision.js 的 REVIEW_STATE_LABELS
+const label = computed(() => REVIEW_STATE_LABELS[props.state] || '')
 const shape = computed(() => (props.state === 'exception' ? 'triangle' : 'circle'))
 const viewBox = computed(() => `0 0 ${props.size} ${props.size}`)
 

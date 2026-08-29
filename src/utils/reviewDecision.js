@@ -66,7 +66,8 @@ export const getReviewState = (question, threshold = DEFAULT_CONFIDENCE_THRESHOL
     question.review_status === REVIEW_STATUS.WRONG_NO_BOOK
   ) return 'wrong'
 
-  // AI 异常：未识别答案 / OCR 失败
+  // exception 桶：AI 没有给出正误结论。两种来源——学生未作答（answer_source='blank'）
+  // 与"答案已识别但 AI 判不出"。文案必须按 answer_source 区分，见 getReviewStateLabel。
   if (question.answer_source === 'blank') return 'exception'
 
   // 处理中：AI 尚未出任何判定
@@ -88,3 +89,39 @@ export const getReviewState = (question, threshold = DEFAULT_CONFIDENCE_THRESHOL
 }
 
 export const isExcluded = question => question?.review_status === REVIEW_STATUS.EXCLUDE
+
+// 5 态的展示文案唯一真相来源（移动端 React + PC 端 Vue 共用）。
+// exception 只是"AI 没给出正误结论"，不代表 OCR 失败——旧文案「未识别答案」会让老师
+// 在学生答案明明已识别出来时误判为识别故障，因此聚合桶统一叫「AI未判定」。
+export const REVIEW_STATE_LABELS = Object.freeze({
+  correct: 'AI正确',
+  wrong: 'AI错误',
+  pending: '待复核',
+  exception: 'AI未判定',
+  processing: '处理中'
+})
+
+/**
+ * 单题的展示文案。exception 按 answer_source 细分：
+ *   · blank      → 未作答（学生没写，OCR 没有可判内容）
+ *   · 其他       → AI未判定（答案已识别，AI 拒绝给结论，需老师定）
+ */
+export const getReviewStateLabel = (question, threshold = DEFAULT_CONFIDENCE_THRESHOLD) => {
+  const state = getReviewState(question, threshold)
+  if (state === 'exception' && question?.answer_source === 'blank') return '未作答'
+  return REVIEW_STATE_LABELS[state] || REVIEW_STATE_LABELS.pending
+}
+
+/**
+ * 「AI未判定」的原因说明，供老师知道为什么这题要自己定。
+ *
+ * 原因由后端判题管线写入 questions.answer_exception_reason（复用既有列），
+ * 是纯观测标注：展示层只读它，绝不用它推断正误 —— 正误只看 is_correct。
+ * 只在 exception 状态且学生确实作答了的题上显示；未作答本身已经说明了一切。
+ */
+export const getUnjudgedReasonText = (question, threshold = DEFAULT_CONFIDENCE_THRESHOLD) => {
+  if (getReviewState(question, threshold) !== 'exception') return ''
+  if (question?.answer_source === 'blank') return ''
+  const reason = question?.answer_exception_reason
+  return typeof reason === 'string' ? reason.trim() : ''
+}

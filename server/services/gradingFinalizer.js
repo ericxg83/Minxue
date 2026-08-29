@@ -69,6 +69,10 @@ export const finalizeGradingBatch = async ({
 
   const questionMap = toQuestionMap(pendingQuestions)
   const confidenceMap = new Map(pendingQuestions.map(q => [q.id, q.confidence]))
+  // 判题域契约：只有 is_correct === false（明确判错）才入错题本。
+  // is_correct === null 是"AI 未判定"，不是错 —— 缺参考答案、参考答案无法核对
+  // （"证明略""答案不唯一"）都会落 null，这类题必须等老师复核给结论，
+  // 自动入册会让错题本混入系统噪音，重练在浪费学生时间。请勿"顺手修好"这个过滤。
   const wrongIds = pendingQuestions
     .filter(q => q.is_correct === false && q.answer && q.answer.trim())
     .map(q => q.id)
@@ -118,8 +122,6 @@ export const finalizeGradingBatch = async ({
       analysis: question.analysis ?? null,
       metadata: {
         question_type: question.question_type,
-        manual_mark: question.manual_mark || 'none',
-        grading_source: question.grading_source || 'answer_comparison',
         settlement_key: settlementKey,
         settlement_mode: settlementMode,
         task_id: taskId

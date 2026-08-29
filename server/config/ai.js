@@ -911,8 +911,6 @@ export const buildOCRPrompt = () => `你是一个专业的作业题目识别助�
       "confidence": 0.95,
       "analysis": "解析",
       "question_type": "choice",  // 必须是下列之一: "choice"(选择题) | "fill"(填空题) | "judge"(判断题) | "answer"(解答题)
-      "manual_mark": "none", // "correct" | "wrong" | "partial" | "none" | "uncertain"
-      "has_manual_checkmark": false,
       "block_coordinates": { "x": 0, "y": 0, "width": 1000, "height": 1000 },
       "text_bbox": { "x": 0, "y": 0, "width": 1000, "height": 600 },
       "image_type": "geometry/chart/none",
@@ -938,11 +936,12 @@ export const buildOCRPrompt = () => `你是一个专业的作业题目识别助�
    如果确实找不到本题的配图，image_type 填 "none"、image_bbox 填 null，
    不要用题干区域的坐标凑一个框——凑出来的框裁出的是文字，会被当成配图展示给学生。
 5. 如果题目无法识别，不要编造内容。
-6. 识别老师批改痕迹（重要）：
-   - 若某题旁出现老师用红笔（或与印刷/学生墨迹不同的笔）打的"√/✓/✔"，manual_mark 填 "correct"，has_manual_checkmark 设为 true；student_answer 必须填学生实际笔迹（以学生墨迹为准，剔除老师的红勾）。
-   - 若出现老师打的"×/✗/圈错/错号"，manual_mark 必须填 "wrong"；这表示老师已判错，绝不能当作学生答案或忽略。
-   - 若出现"半对/部分正确"，manual_mark 填 "partial"；看不清或无法确定属于当前题时填 "uncertain"；没有教师批改痕迹填 "none"。
-   - 只在能明确辨认出独立批改标记时才输出 correct/wrong/partial，宁可填 uncertain 也不要猜测。
+6. 剔除卷面批改痕迹（重要）：
+   - 卷面上的"√/✓/✔/×/✗/圈错/半对/分数/批语"都是批改痕迹，不是学生作答内容。
+     识别出来的作用只有一个：把它们从 student_answer 里剔除干净。
+   - student_answer 只填学生本人的作答笔迹。批改痕迹与学生笔迹重叠时以学生笔迹为准。
+   - 不要输出任何表示"老师判对/判错"的字段，也不要因为看到红勾就把 is_correct 填 true。
+     正误由服务端按 student_answer 与 answer 的比对决定，卷面痕迹不参与判定。
 7. 判断题（对/错）的答案或学生答案若是"√/✗"符号，直接填入对应符号即可。
 8. question_type 必须从四个值中选一个填空，每题只能填一个值，绝不能填 "choice/fill/judge/answer" 这种枚举字符串：
    - "choice" 选择题（有 A/B/C/D 选项的）
@@ -957,7 +956,7 @@ export const buildOCRPrompt = () => `你是一个专业的作业题目识别助�
 10. page_title 只读【页面顶部/页眉的印刷体标题】，用于给这份作业命名，尽量完整（含"第X章"、圈序号 ①②③、课时号 19.1(1) 等）。
    不要把题号、题干、学生姓名、班级、页码、"一、选择题"这类栏目名当标题。整页没有印刷标题就填 null，不要编造。
 11. answer（标准答案）的来源【必须是你自己解题得到的参考答案】，与卷面笔迹无关：
-   - 绝不能把老师红笔写的批语、分数、对错符号、订正内容（如"计算错误""正确""×""√""-1分"等）填进 answer——这些是批改痕迹，只进 manual_mark。
+   - 绝不能把老师红笔写的批语、分数、对错符号、订正内容（如"计算错误""正确""×""√""-1分"等）填进 answer——这些是批改痕迹，一律丢弃。
    - 也绝不能把学生手写的答案抄成 answer；学生笔迹只进 student_answer。
    - 你要【独立解出本题】再填 answer。题目已印了标准答案（如练习册答案栏）时可照抄印刷体答案，但仍不得抄红笔/学生笔迹。
    - 若确实无法解出，answer 填 null，不要用卷面上的批改文字或学生答案凑一个假答案。

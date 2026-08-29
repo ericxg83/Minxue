@@ -172,6 +172,10 @@ export async function syncQuestionsKnowledgeAndMastery({ studentId, questions })
   if (!studentId || !Array.isArray(questions) || questions.length === 0) return stats
 
   // 1) 归一化（每题跑一次，纯本地匹配，无 DB IO）
+  //
+  // 判题域契约：is_correct === null（AI 未判定）与 answer_source='blank'（未作答）
+  // 都不参与掌握度。判不出来不等于答错，把它算进正确率会让诊断结论建立在
+  // 系统噪音上。这两个跳过条件是设计而非漏洞，请勿放宽。
   const entries = []
   for (const q of questions) {
     if (!q || !q.id) continue
@@ -257,10 +261,15 @@ export async function syncReviewResultsMastery({ studentId, results }) {
   }
 
   const resultMap = new Map(results.map(r => [r.questionId, r.isCorrect]))
-  const questions = rows.map(r => ({
-    ...r,
-    // 以本次批改结果为准（覆盖 questions 表旧值）
-    is_correct: resultMap.has(r.id) ? resultMap.get(r.id) === true : r.is_correct
-  }))
+  const questions = rows.map(r => {
+    // 以本次批改结果为准（覆盖 questions 表旧值）。
+    // 注意 null 必须原样透传：`=== true` 会把"判不出来"压成 false，
+    // 下游的 is_correct === null 跳过条件就失效，未判定的题会被当答错算进掌握度。
+    const settled = resultMap.has(r.id) ? resultMap.get(r.id) : r.is_correct
+    return {
+      ...r,
+      is_correct: settled == null ? null : settled === true
+    }
+  })
   return syncQuestionsKnowledgeAndMastery({ studentId, questions })
 }

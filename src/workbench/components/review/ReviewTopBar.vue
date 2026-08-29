@@ -62,7 +62,7 @@
         </span>
         <span class="status-chip chip-exception">
           <StatusIcon state="exception" :size="16" />
-          <span class="chip-label">AI异常</span>
+          <span class="chip-label">AI未判定</span>
           <span class="chip-count">{{ store.aiStateStats.exception }}</span>
         </span>
         <span class="status-chip chip-processing">

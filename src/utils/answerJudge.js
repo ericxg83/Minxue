@@ -247,8 +247,31 @@ function normalizeJudgeAnswer(str) {
 }
 
 /**
+ * 识别"无法自动核对"的参考答案。与后端 judgeService.js 的同名函数保持同一套规则：
+ * "(1)证明略；(2)70°""答案不唯一""见解析" 这类参考答案拿去逐串比对，
+ * 结论既可能假错（学生写了另一个合法解）也可能假对（碰巧命中后半段数值）。
+ */
+const UNVERIFIABLE_REFERENCE_PATTERNS = [
+  /(?:过程|证明|解答|步骤|作图|画图|推导|说明|计算)略/,
+  /^\s*略\s*[。.；;]?\s*$/,
+  /见(?:解析|答案|课本|详解|教材|上文|下文)/,
+  /不唯一/,
+  /^\s*证明[:：]/,
+  /[；;，,]\s*证明[:：]/
+]
+
+export function detectUnverifiableReference(referenceAnswer) {
+  const raw = String(referenceAnswer ?? '').trim()
+  if (!raw) return null
+  return UNVERIFIABLE_REFERENCE_PATTERNS.some(re => re.test(raw))
+    ? 'unverifiable_reference'
+    : null
+}
+
+/**
  * Compare student answer against reference answer with tolerance.
- * Returns { isCorrect: boolean, unrecognized: boolean }
+ * Returns { isCorrect: boolean|null, unrecognized: boolean }
+ * isCorrect === null 表示"判不出来"，绝不代表正确。
  */
 export function judgeAnswer(studentAnswer, referenceAnswer, questionType) {
   const rawAnswer = String(studentAnswer || '').trim()
@@ -258,8 +281,18 @@ export function judgeAnswer(studentAnswer, referenceAnswer, questionType) {
     return { isCorrect: null, unrecognized: true }
   }
 
+  // 判题域硬规则：判不出来一律 null，绝不写 false，更不能写 true。
+  // 这里原先在"没有参考答案"时直接判对 —— 等于把无从核对的题当成学生做对了，
+  // 真错题会从复核视野里消失，掌握度还会被记上一次正确。
   if (!referenceAnswer) {
-    return { isCorrect: true, unrecognized: false }
+    return { isCorrect: null, unrecognized: true }
+  }
+
+  // 参考答案本身无从核对（"证明略""见解析""答案不唯一"…）→ 判不出，交人工。
+  // 与后端 judgeService.detectUnverifiableReference 同语义，两端必须一致，
+  // 否则同一道题在手机上判错、在 PC 上待人工。
+  if (detectUnverifiableReference(referenceAnswer)) {
+    return { isCorrect: null, unrecognized: true }
   }
 
   if (questionType === 'choice') {

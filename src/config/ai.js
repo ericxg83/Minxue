@@ -46,7 +46,6 @@ export const buildOCRPrompt = () => `你是一个专业的教育题目识别助�
       "confidence": 0.95,
       "analysis": "题目解析",
       "question_type": "choice",  // 必须是下列之一: "choice" | "fill" | "judge" | "answer"，每题只能填一个值
-      "has_manual_checkmark": false,
       "block_coordinates": {
         "x": 100,
         "y": 200,
@@ -134,11 +133,11 @@ block_coordinates 说明（必填）：
 6. geometry_image.bbox 标注时，请确保包围完整的几何图形（包括图形外围的顶点字母如A、B、C、D）
 7. 一图多题：如果同一张配图对应多道题目，每道题都要独立标注该配图的 bbox
 
-识别老师批改痕迹（重要）：
-- 若某题旁出现老师用红笔（或与印刷/学生墨迹不同的笔）打的"√/✓/✔"，说明该题老师已判对，应将 has_manual_checkmark 设为 true，并且 student_answer 填学生实际笔迹（以学生墨迹为准，剔除老师的红勾）。
-- 若出现"×/✗/半对半错"等批改，has_manual_checkmark 设为 false，交由答案比对判定。
-- 只在能明确辨认出独立批改标记时才置 true，否则保持 false，宁可不置也不要误判。
-- 判断题（对/错）的答案或学生答案若是"√/✗"符号，直接填入对应符号即可。`
+剔除卷面批改痕迹（重要）：
+- 卷面上的"√/✓/✔/×/✗/圈错/半对/分数/批语"都是批改痕迹，不是学生作答内容。识别出来的作用只有一个：把它们从 student_answer 里剔除干净。
+- student_answer 只填学生本人的作答笔迹。批改痕迹与学生笔迹重叠时以学生笔迹为准。
+- 不要输出任何表示"老师判对/判错"的字段，也不要因为看到红勾就把 is_correct 填 true。正误由服务端按 student_answer 与 answer 的比对决定，卷面痕迹不参与判定。
+- 判断题（对/错）的题目本身若以"√/✗"作为答案，直接填入对应符号即可——这是题目答案，不是批改痕迹。`
 
 export const buildTaggingPrompt = () => `你是一个专业的教育知识点标注助手。你的任务是根据题目内容，提取该题目考察的具体知识点标签。
 

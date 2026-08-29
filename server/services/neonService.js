@@ -78,7 +78,9 @@ export const createQuestions = async (questions) => {
       analysis: coerceAIText(q.analysis) || null,
       question_type: q.question_type || 'choice',
       subject: q.subject || null,
-      is_correct: q.is_correct !== undefined ? q.is_correct : true,
+      // 判题域硬规则：判不出来一律 null。调用方没给 is_correct 时默认 true
+      // 等于"没判过就算对"，会让未判定的题绕过复核直接算成正确结果。
+      is_correct: q.is_correct !== undefined ? q.is_correct : null,
       status: statusValue,
       image_url: q.image_url || null,
       geometry_image_url: q.geometry_image_url || null,

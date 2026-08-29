@@ -49,6 +49,51 @@ export function isGradingCommentAnswer(answer, questionType) {
 }
 
 /**
+ * 判题域硬规则的第一道闸门：识别"无法自动核对"的参考答案。
+ *
+ * isGradingCommentAnswer 只拦整串就是批改痕迹的脏答案（answer === '略'），
+ * 但真实答案里这类内容多半是嵌在正常答案中间的：
+ *   · "(1)证明略；(2)70°"          —— 第 1 小题无从核对
+ *   · "$\frac{31}{15}$ (答案不唯一)" —— 参考值只是其中一个合法解
+ *   · "证明：∠BDC=∠BDE…；, 8"      —— 证明过程 + 一个数值混在一串里
+ * 这些答案拿去逐串比对，结论既可能假错（学生写了另一个合法解）也可能假对
+ * （学生只碰巧命中了后半段的数值）。判不出就必须判不出，不能落 true/false：
+ * false 会把题送进错题本与掌握度，true 会让真错题从复核视野里消失。
+ *
+ * @returns {string|null} 命中时返回原因码（见 UNJUDGED_REASONS），否则 null
+ */
+const UNVERIFIABLE_REFERENCE_PATTERNS = [
+  /(?:过程|证明|解答|步骤|作图|画图|推导|说明|计算)略/,
+  /^\s*略\s*[。.；;]?\s*$/,
+  /见(?:解析|答案|课本|详解|教材|上文|下文)/,
+  /不唯一/,
+  /^\s*证明[:：]/,
+  /[；;，,]\s*证明[:：]/
+]
+
+export function detectUnverifiableReference(referenceAnswer) {
+  const raw = String(referenceAnswer ?? '').trim()
+  if (!raw) return null
+  return UNVERIFIABLE_REFERENCE_PATTERNS.some(re => re.test(raw))
+    ? 'unverifiable_reference'
+    : null
+}
+
+/**
+ * "AI 未判定"的原因码与展示文案。写入 questions.answer_exception_reason，
+ * 直接给老师看，因此存的是可读中文而不是裸码。
+ *
+ * 这些原因只是判题域的可观测标注，不构成第二套判定依据 ——
+ * 错题本、掌握度、诊断一律只看 is_correct，不得读原因反推正误。
+ */
+export const UNJUDGED_REASONS = Object.freeze({
+  no_reference_answer: '缺少参考答案，无法自动判定',
+  unverifiable_reference: '参考答案无法自动核对（含略/见解析/答案不唯一）',
+  subjective: '主观题需人工判定',
+  low_confidence: '识别置信度不足，需人工确认'
+})
+
+/**
  * 扫描一批"标准答案"里的脏值，供所有"把答案提升为可信答案源"的入口共用。
  * 答案源一旦盖章 teacher_verified，会去判全班同类题，脏答案将放大成成片误判。
  * rows 兼容 questions(question_number/question_type) 与 resource_answers(question_no/answer_type)。
@@ -534,6 +579,12 @@ export function judgeAnswer(studentAnswer, referenceAnswer, questionType) {
 
   if (!referenceAnswer) {
     // No reference answer: mark as pending for manual review instead of assuming correct
+    return { isCorrect: null, unrecognized: true }
+  }
+
+  // 参考答案本身无法自动核对（"证明略""见解析""答案不唯一"…）→ 判不出，交人工。
+  // 必须在任何比对之前拦下：往下走只会得到一个没有依据的 true/false。
+  if (detectUnverifiableReference(referenceAnswer)) {
     return { isCorrect: null, unrecognized: true }
   }
 

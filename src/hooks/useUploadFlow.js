@@ -616,7 +616,9 @@ export function useUploadFlow({ loadTasks, isInitializing }) {
           question_type: q.question_type || 'choice',
           subject: q.subject,
           is_correct: q.is_correct,
-          status: q.is_correct ? 'pending' : 'wrong',
+          // 判题域硬规则：is_correct === null 是"AI 未判定"，不是错。
+          // 原先用 q.is_correct 的真值性分桶，null 会被当成 wrong 送进错题本。
+          status: q.is_correct === false ? 'wrong' : 'pending',
           image_url: q.image_url,
           ai_tags: q.ai_tags || [],
           tags_source: 'ai'
@@ -625,7 +627,8 @@ export function useUploadFlow({ loadTasks, isInitializing }) {
         await saveRecognitionResult(task.id, currentStudent.id, questions)
         updateTaskInStore(task.id, 'done', result)
 
-        const wrongQuestions = questions.filter(q => !q.is_correct)
+        // 只有明确判错的题进错题本；判不出来的题等老师复核，不能自动入册
+        const wrongQuestions = questions.filter(q => q.is_correct === false)
         if (wrongQuestions.length > 0) {
           await addWrongQuestions(currentStudent.id, wrongQuestions.map(q => q.id))
         }

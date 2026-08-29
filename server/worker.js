@@ -17,7 +17,7 @@ import { cropAndUploadQuestionRegion } from './utils/cropAndUpload.js'
 import { refineFigureBoxOnPage } from './utils/figureRegionRefiner.js'
 import { generateTextFingerprint, generatePHash, PARSER_VERSION, TEXT_SIMILARITY_THRESHOLD } from './utils/questionFingerprint.js'
 import { uploadFilesWithRetry } from './services/uploadRetryManager.js'
-import { judgeAnswer, normalizeQuestionType, normalizeChoiceAnswer, extractChoiceLetters, isGradingCommentAnswer, stripAnswerScaffolding } from './services/judgeService.js'
+import { judgeAnswer, normalizeQuestionType, normalizeChoiceAnswer, extractChoiceLetters, isGradingCommentAnswer, stripAnswerScaffolding, detectUnverifiableReference, UNJUDGED_REASONS } from './services/judgeService.js'
 import { normalizeSectionName, splitSubAnswers, splitOcrQuestionsBySubNo } from './services/answerParseService.js'
 import { classifyQuestionLocally } from './utils/localTagger.js'
 import { finalizeGradingBatch } from './services/gradingFinalizer.js'
@@ -880,33 +880,70 @@ function determineAnswerSource(rawStudentAnswer) {
   return 'recognized'
 }
 
-const MANUAL_MARKS = new Set(['correct', 'wrong', 'partial', 'none', 'uncertain'])
-
-export function normalizeManualMark(manualMark, hasManualCheckmark = false) {
-  const normalized = String(manualMark || '').trim().toLowerCase()
-  if (MANUAL_MARKS.has(normalized)) return normalized
-  return hasManualCheckmark === true ? 'correct' : 'none'
+/**
+ * 批改判定的唯一入口：正误只由「学生答案 vs 参考答案」的确定性比较决定。
+ *
+ * 卷面上的批改痕迹（红笔勾/叉/半对）不再参与判定，也不再落任何字段：
+ *   · 红笔不是教师专属，学生订正同样用红笔，单张照片无法可靠区分笔迹归属；
+ *   · 晚托场景下要面对各个学校老师的不同批法，同一个"√"在不同人手里语义不同；
+ *   · 卷面痕迹是他人的结论，不是学生的学习事实，把它当判据会污染错题与掌握度。
+ * 教师的结论走复核页的「正确 / 错误」按钮（review_status），那是可信的人工入口。
+ *
+ * 注意：OCR 仍需识别并剔除教师笔迹 —— 那是为了让 student_answer / answer 只包含
+ * 学生笔迹与参考答案，属于识别阶段的防污染闸门，与判定无关，不可一并删除。
+ */
+export function resolveGradingResult({ studentAnswer, answer, questionType }) {
+  const judgment = judgeAnswer(studentAnswer, answer, questionType)
+  return {
+    isCorrect: judgment.isCorrect,
+    unjudgedReason: judgment.isCorrect === null
+      ? detectUnjudgedReason({ studentAnswer, answer })
+      : null
+  }
 }
 
-export function resolveGradingResult({ studentAnswer, answer, questionType, manualMark }) {
-  const normalizedManualMark = normalizeManualMark(manualMark)
-  const judgment = judgeAnswer(studentAnswer, answer, questionType)
+/**
+ * 判不出来时的原因归类。只在 isCorrect === null 时有意义，纯观测用途。
+ *
+ * "学生未作答"不在这里出原因 —— 那已经由 answer_source='blank' 表达，
+ * 复核页据此显示「未作答」，再叠一条异常原因只会让老师以为系统出错了。
+ */
+function detectUnjudgedReason({ studentAnswer, answer }) {
+  const raw = String(studentAnswer ?? '').trim()
+  if (raw === '' || raw === '未作答') return null
+  if (String(answer ?? '').trim() === '') return 'no_reference_answer'
+  return detectUnverifiableReference(answer)
+}
 
-  // 视觉模型识别的教师批改痕迹只是证据，不能覆盖确定性的答案比较。
-  // 一旦两者冲突，结果必须交给教师复核，避免幻觉勾选直接把错题判对。
-  const annotationResult = normalizedManualMark === 'correct'
-    ? true
-    : (normalizedManualMark === 'wrong' || normalizedManualMark === 'partial' ? false : null)
-  if (annotationResult !== null && judgment.isCorrect !== null && annotationResult !== judgment.isCorrect) {
-    return { isCorrect: null, source: 'annotation_conflict_review', manualMark: normalizedManualMark }
+/**
+ * 把"判不出来的原因"落库到 questions.answer_exception_reason（复用既有列，不新增字段）。
+ *
+ * 只处理 is_correct === null 且带原因的题：
+ *   · 未作答已由 answer_source='blank' 表达，不在此列；
+ *   · 已判出正误的题不写，也不清空既有的答案解析异常（那是另一条链路的观测值）。
+ * 失败只记日志：这是观测信息，绝不能反过来打断批改主流程。
+ */
+const markUnjudgedReasons = async (questions) => {
+  const targets = []
+  for (const q of questions || []) {
+    if (!q?.id || q.is_correct !== null) continue
+    const reason = q._unjudged_reason || detectUnjudgedReason({
+      studentAnswer: q.student_answer,
+      answer: q.answer
+    })
+    if (reason) targets.push({ q, reason })
   }
-
-  // 教师标记无法与答案比较形成确定结论时，也不能自动结算。
-  if (annotationResult !== null && judgment.isCorrect === null) {
-    return { isCorrect: null, source: 'teacher_annotation_review', manualMark: normalizedManualMark }
+  for (const { q, reason } of targets) {
+    const reasonText = UNJUDGED_REASONS[reason] || reason
+    try {
+      await markAnswerException(q.id, reasonText)
+      console.log(`  [Unjudged] q=${String(q.id).substring(0, 8)} 判不出 → ${reasonText}`)
+    } catch (e) {
+      console.error(`  [Unjudged] 原因标注失败 q=${String(q.id).substring(0, 8)}:`, e.message)
+    }
   }
-
-  return { isCorrect: judgment.isCorrect, source: 'answer_comparison', manualMark: normalizedManualMark }
+  for (const q of questions || []) delete q._unjudged_reason
+  return targets.length
 }
 
 // forceModel: 锁定到指定视觉模型。JSON 修复失败时由本函数自己传入下一个模型重试，
@@ -1021,13 +1058,10 @@ const recognizeQuestions = async (imageBase64, taskId, retryCount = 0, forceMode
         standardAnswer = ''
       }
 
-      const hasManualCheckmark = q.has_manual_checkmark === true
-      const manualMark = normalizeManualMark(q.manual_mark, hasManualCheckmark)
       const gradingResult = resolveGradingResult({
         studentAnswer: cleanedStudentAnswer,
         answer: standardAnswer,
-        questionType: q.question_type,
-        manualMark
+        questionType: q.question_type
       })
       const isCorrect = gradingResult.isCorrect
       const status = isCorrect === true ? 'correct' : (isCorrect === false ? 'wrong' : 'pending')
@@ -1047,8 +1081,6 @@ const recognizeQuestions = async (imageBase64, taskId, retryCount = 0, forceMode
         status: status,
         confidence: q.confidence || 0,
         analysis: coerceAIText(q.analysis),
-        manual_mark: manualMark,
-        grading_source: gradingResult.source,
         block_coordinates: q.block_coordinates || null,
         question_number: q.question_number || null,
         text_bbox: q.text_bbox || null,
@@ -1791,6 +1823,18 @@ const processSlimGrading = async (job) => {
           [r.isCorrect, r.confidence ?? null, r.questionId]
         ).catch((e) => console.error(`[Slim] 预填 is_correct 失败 q=${r.questionId?.substring(0, 8)}:`, e.message))
       }
+    }
+
+    // 判不出来的题：本管线早就分好了原因（主观题 / 缺参考答案 / 置信度不足），
+    // 但此前只留在内存里，老师在复核页只看到"AI未判定"却不知道为什么。
+    // 落到 answer_exception_reason（复用既有列），与主 OCR 管线同一套原因词表。
+    for (const r of results) {
+      if (r.isCorrect !== null || !r.reason) continue
+      const reasonText = UNJUDGED_REASONS[r.reason]
+      if (!reasonText) continue
+      await markAnswerException(r.questionId, reasonText).catch((e) =>
+        console.error(`[Slim] 原因标注失败 q=${r.questionId?.substring(0, 8)}:`, e.message)
+      )
     }
 
     await job.updateProgress(90)
@@ -3880,6 +3924,11 @@ const processWorkbookGrading = async (job) => {
           const judgment = judgeAnswer(q.student_answer, q.answer, q.question_type)
           q.is_correct = judgment.isCorrect
           if (q.is_correct === false) wrongCount++
+          // 答案库给的参考答案也可能是"证明略""答案不唯一"这类无从核对的值，
+          // judgeAnswer 会返回 null；记下原因，落库后统一标注给老师看。
+          if (q.is_correct === null) {
+            q._unjudged_reason = detectUnverifiableReference(q.answer) || 'no_reference_answer'
+          }
         } else {
           q.is_correct = null // 未作答
           // 必须显式标 blank：本管线原先只把 is_correct 置 null，未作答题与"AI 判不出"
@@ -3891,6 +3940,7 @@ const processWorkbookGrading = async (job) => {
       } else {
         console.log(`   [Workbook] 题 ${q.question_number}: 答案库无匹配（页标题="${pageTitle}"），标记待人工`)
         q.is_correct = null
+        q._unjudged_reason = 'no_reference_answer'
       }
     }
   }
@@ -3966,6 +4016,9 @@ const processWorkbookGrading = async (job) => {
   }
 
   await createQuestions(questionsWithStudentId)
+
+  // 判不出来的题：把原因落到 answer_exception_reason（观测用，不参与判定）
+  await markUnjudgedReasons(questionsWithStudentId)
 
   // 6. 自包含错题本同步：裁剪学生作业图片 + 直接写入 wrong_questions
   // 直接基于 questionsWithStudentId 过滤（自带 id），确保 question_id 一定与
@@ -4972,6 +5025,9 @@ const processAnswerBankGrading = async (job) => {
 
     await createQuestions(questionsWithIds)
 
+    // 判不出来的题：把原因落到 answer_exception_reason（观测用，不参与判定）
+    await markUnjudgedReasons(questionsWithIds)
+
     // 同步错题本 + judgement
     for (let idx = 0; idx < questionsWithIds.length; idx++) {
       const q = questionsWithIds[idx]
@@ -5467,10 +5523,8 @@ await job.updateProgress(80)
             const gradingResult = resolveGradingResult({
               studentAnswer: q.student_answer,
               answer: q.answer,
-              questionType: q.question_type,
-              manualMark: q.manual_mark
+              questionType: q.question_type
             })
-            q.grading_source = gradingResult.source
             if (gradingResult.isCorrect !== originalCorrect) {
               q.is_correct = gradingResult.isCorrect
               try {
@@ -5483,7 +5537,14 @@ await job.updateProgress(80)
               }
               if (gradingResult.isCorrect === false) rejudgedWrong++
             }
+            q._unjudged_reason = gradingResult.unjudgedReason
         }
+
+        // 判不出来的题：把原因落到 answer_exception_reason，供复核页告诉老师"为什么要我来定"。
+        // 原因只是观测标注，判定结果仍只由 is_correct 表达（null = AI 未判定）。
+        // 学生未作答（answer_source='blank'）不在此列：那由 answer_source 表达，
+        // 再叠一条异常原因会让老师误以为系统故障。
+        await markUnjudgedReasons(questions)
         wrongCount = questions.filter(q => q.is_correct === false).length
         console.log(`✅ [Step 7/8] AI答案生成完成: 生成了 ${answerGenResult.updated}/${answerGenResult.total} 道题的答案, 解析异常 ${answerGenResult.exceptions} 道, 重新判定 ${rejudgedWrong} 道错题, 当前错题数: ${wrongCount}`)
         console.log(`📦 [Cache] 缓存命中: ${answerGenResult.cacheHits} 次, 缓存未命中: ${answerGenResult.cacheMisses} 次`)
@@ -5519,9 +5580,7 @@ await job.updateProgress(80)
             analysis: q.analysis ?? null,
             metadata: {
               question_type: q.question_type,
-              originalIsCorrect: q.is_correct,
-              manual_mark: q.manual_mark || 'none',
-              grading_source: q.grading_source || 'answer_comparison'
+              originalIsCorrect: q.is_correct
             }
           }).catch(e => console.error(`[Shadow] judgements写入失败 (OCR) q=${q.id?.substring(0,8)}:`, e.message))
         )

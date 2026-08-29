@@ -87,15 +87,11 @@ export const recognizeQuestions = async (imageBase64, studentId, taskId, retryCo
 
     // 为每个题目添加额外信息，并用标准化比对校验答案正确性
     const questions = result.questions?.map((q, index) => {
+      // 正误只由答案比对决定。卷面红勾不再作为判据——红笔不是教师专属（学生订正
+      // 同样用红笔），且各校老师批法不统一，把它当兜底会把判不出的题误结成"对"。
       const judgment = judgeAnswer(q.student_answer, q.answer, q.question_type)
-      let isCorrect = judgment.isCorrect
+      const isCorrect = judgment.isCorrect
       const unrecognized = judgment.unrecognized
-
-      // 老师红勾仅兜底：比对无法判定(null)时判对，不覆盖比对判错的结果
-      const hasManualCheckmark = q.has_manual_checkmark === true
-      if (hasManualCheckmark && isCorrect === null) {
-        isCorrect = true
-      }
 
       return {
         id: `q-${taskId}-${index}`,
@@ -107,7 +103,6 @@ export const recognizeQuestions = async (imageBase64, studentId, taskId, retryCo
         student_answer: q.student_answer || '',
         is_correct: isCorrect,
         unrecognized: unrecognized,
-        has_manual_checkmark: hasManualCheckmark,
         question_type: q.question_type || 'answer',
         subject: q.subject || '数学',
         status: isCorrect === true ? 'correct' : (isCorrect === false ? 'wrong' : 'pending'),

@@ -1,7 +1,7 @@
 import { AlertTriangle, Clock, CheckCircle2, XCircle } from 'lucide-react'
 import MathText from '../../components/MathText'
 import { COLORS } from './constants'
-import { getReviewState, isExcluded } from '../../utils/reviewDecision'
+import { getReviewState, getReviewStateLabel, isExcluded } from '../../utils/reviewDecision'
 
 export const formatOption = (opt, index) => (
   <>{String.fromCharCode(65 + index)}. <MathText content={opt} /></>
@@ -43,7 +43,7 @@ export const getStatusInfo = (q) => {
     case 'exception':
       return {
         bg: 'var(--warning-soft)', color: 'var(--warning)',
-        text: q.answer_source === 'blank' ? '未作答' : 'AI异常',
+        text: getReviewStateLabel(q),
         icon: AlertTriangle,
         isGreyed: false, source: 'error'
       }

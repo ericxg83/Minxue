@@ -84,9 +84,11 @@
       </div>
 
       <!-- AI 判定 -->
-      <div class="ops-ai-row" v-if="q.is_correct != null || q.review_status">
+      <div class="ops-ai-row" v-if="q.is_correct != null || q.review_status || getAiState(q) === 'exception'">
         <span class="ops-ai-icon" :class="getAiStateClass(q)">{{ getAiStateIcon(q) }}</span>
         <span class="ops-ai-text">{{ getAiStateText(q) }}</span>
+        <!-- 判不出的原因：让老师知道为什么这题要自己定，而不是以为系统坏了 -->
+        <span v-if="unjudgedReason" class="ops-ai-reason">{{ unjudgedReason }}</span>
         <el-progress v-if="q.confidence != null && getAiState(q) === 'pending'" :percentage="Math.round(q.confidence * 100)"
           :stroke-width="8" :color="q.confidence >= store.confidenceThreshold ? 'var(--wb-success)' : 'var(--wb-warning)'"
           style="width:100px;margin-left:auto;" />
@@ -275,6 +277,7 @@ import { processExamImage } from '../../../utils/imageProcessor'
 import { getGeometryDisplayUrl, getTikzStatus } from '../../../utils/geometryDisplay'
 import { tikzToSvg } from '../../../utils/tikzGenerator'
 import { normalizeOptions } from '../../../utils/optionText'
+import { getReviewStateLabel, getUnjudgedReasonText } from '../../../utils/reviewDecision'
 import { ElMessage, ElMessageBox, ElLoading } from 'element-plus'
 import { DocumentChecked, Delete, Plus, Upload, Picture, EditPen, ArrowLeft, ArrowRight, RefreshLeft, Crop } from '@element-plus/icons-vue'
 import MathRender from '../MathRender.vue'
@@ -334,32 +337,9 @@ const reviewStatusTagType = computed(() => {
   return map[q.value?.review_status] || 'info'
 })
 
-//AI状态相关方法（与store保持一致）
-const getAiState = (q) => {
-  if (!q) return 'processing'
-
-  // 人工已复核 → 以人工结论为最高优先级
-  if (q.review_status === 'correct') return 'correct'
-  if (q.review_status === 'wrong') return 'wrong'
-
-  // AI 异常：未识别答案 / OCR 失败
-  if (q.answer_source === 'blank') return 'exception'
-
-  // 处理中：AI 尚未出任何判定
-  if (q.is_correct == null && q.confidence == null) return 'processing'
-
-  // AI 错误：判定学生答案错误
-  if (q.is_correct === false) return 'wrong'
-
-  // AI 正确 + 已确认（人工复核 或 置信度达标）
-  const manual = !!q.review_status
-  // 注意：Pinia 自动解包 ref，store.confidenceThreshold 已是数字，不能加 .value
-  const confirmed = manual || (q.confidence != null && q.confidence >= store.confidenceThreshold)
-  if (q.is_correct === true && confirmed) return 'correct'
-
-  // 其余 → 待复核（置信度不足 / AI 不确定）
-  return 'pending'
-}
+// AI 状态判定不在本组件重复实现：直接用 store.getAiState（内部即 src/utils/reviewDecision.js）。
+// 此前本地抄了一份同样的分支，两处一改一漏就会出现"左栏与详情说法不一致"。
+const getAiState = (q) => store.getAiState(q)
 
 const getAiStateClass = (q) => {
   const state = getAiState(q)
@@ -385,17 +365,10 @@ const getAiStateIcon = (q) => {
   return map[state] || '!'
 }
 
-const getAiStateText = (q) => {
-  const state = getAiState(q)
-  const map = {
-    correct: 'AI 判定正确',
-    wrong: 'AI 判定错误',
-    pending: '待复核',
-    exception: 'AI异常',
-    processing: '处理中'
-  }
-  return map[state] || 'AI判定中'
-}
+// 文案同源：exception 桶按 answer_source 细分为「未作答」/「AI未判定」
+const getAiStateText = (q) => getReviewStateLabel(q, store.confidenceThreshold)
+// 「AI未判定」的原因（缺参考答案 / 参考答案无法核对）。纯展示，不参与判定。
+const unjudgedReason = computed(() => getUnjudgedReasonText(q.value, store.confidenceThreshold))
 
 const displayImageUrl = computed(() => getGeometryDisplayUrl(q.value).url)
 const displayType = computed(() => getGeometryDisplayUrl(q.value).type)
@@ -960,6 +933,7 @@ const handleRetryGeometry = async () => {
 .ai-exception { background: var(--wb-accent); }
 .ai-processing { background: var(--wb-processing); }
 .ops-ai-text { font-size: 13px; color: var(--wb-text-secondary); }
+.ops-ai-reason { font-size: 12px; color: var(--wb-warning); }
 
 /* ═══ 完整题目内容区（可滚动） ═══ */
 .ops-question-body {

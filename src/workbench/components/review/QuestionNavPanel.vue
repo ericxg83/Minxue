@@ -31,7 +31,7 @@
         >{{ difficultyText(q.difficulty) }}</span>
         <span
           v-if="store.getAiState(q) === 'exception'"
-          class="item-confidence exception">未识别答案</span>
+          class="item-confidence exception">{{ stateLabel(q) }}</span>
         <span
           v-else-if="store.getAiState(q) === 'processing'"
           class="item-confidence processing">处理中</span>
@@ -78,9 +78,14 @@
 import { ref, computed } from 'vue'
 import { useReviewStore } from '../../stores/reviewStore'
 import StatusIcon from './StatusIcon.vue'
+import { getReviewStateLabel } from '../../../utils/reviewDecision'
 
 const store = useReviewStore()
 const threshold = ref(store.confidenceThreshold)
+
+// 状态文案走同源函数：exception 桶里"学生未作答"与"AI 判不出"是两回事，
+// 旧版一律写死「未识别答案」，会让答案明明已识别的题看着像 OCR 故障。
+const stateLabel = (q) => getReviewStateLabel(q, store.confidenceThreshold)
 
 // 题目归属试卷序号标签（仅每卷首题显示）
 // 两种来源：

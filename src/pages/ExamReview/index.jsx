@@ -10,7 +10,7 @@ import { COLORS } from './constants'
 import { formatOption, getStatusInfo, DOT_COLORS } from './status'
 import { useExamReview } from '../../hooks/useExamReview'
 import { normalizeOptions } from '../../utils/optionText'
-import { REVIEW_STATUS } from '../../utils/reviewDecision'
+import { REVIEW_STATUS, getReviewState, getReviewStateLabel, getUnjudgedReasonText } from '../../utils/reviewDecision'
 
 // 需要老师人工介入的状态（与 PC 端 needsAttentionCount 同口径）
 const ATTENTION_SOURCES = ['uncertain', 'error', 'processing']
@@ -378,20 +378,22 @@ export default function ExamReview({ task, onClose, onSave, onViewImage }) {
   // 由页脚「正确 / 错误」按钮的选中态表达 —— 同一件事只说一次。
   const aiJudge = useMemo(() => {
     if (!currentQuestion) return null
-    if (currentQuestion.answer_source === 'blank') {
-      return { text: '未作答', color: 'var(--warning)', Icon: AlertTriangle }
-    }
-    if (currentQuestion.is_correct === true) {
-      return { text: 'AI判对', color: 'var(--success)', Icon: CheckCircle2 }
-    }
-    if (currentQuestion.is_correct === false) {
-      return { text: 'AI判错', color: 'var(--danger)', Icon: XCircle }
-    }
-    if (currentQuestion.confidence == null) {
-      return { text: '处理中', color: COLORS.textSecondary, Icon: Clock }
-    }
-    return { text: 'AI异常', color: 'var(--warning)', Icon: AlertTriangle }
+    // 判定与文案都取同源实现，避免这里与列表 chip、PC 端各说一套
+    const state = getReviewState(currentQuestion)
+    const text = getReviewStateLabel(currentQuestion)
+    if (state === 'correct') return { text: 'AI判对', color: 'var(--success)', Icon: CheckCircle2 }
+    if (state === 'wrong') return { text: 'AI判错', color: 'var(--danger)', Icon: XCircle }
+    if (state === 'processing') return { text, color: COLORS.textSecondary, Icon: Clock }
+    if (state === 'exception') return { text, color: 'var(--warning)', Icon: AlertTriangle }
+    return { text, color: COLORS.warning, Icon: Clock }
   }, [currentQuestion])
+
+  // 「AI未判定」的原因（缺参考答案 / 参考答案无法核对）。老师看到原因才知道
+  // 这题需要自己定，而不是系统坏了。纯展示，不参与判定。
+  const unjudgedReason = useMemo(
+    () => getUnjudgedReasonText(currentQuestion),
+    [currentQuestion]
+  )
 
   // 题型文案
   const typeText = currentQuestion?.question_type === 'choice' ? '选择题'
@@ -450,7 +452,7 @@ export default function ExamReview({ task, onClose, onSave, onViewImage }) {
   const rangeOptions = [
     { key: 'attention', label: '需处理', count: needsAttentionCount, dot: COLORS.warning },
     { key: 'uncertain', label: '待复核', count: stats.uncertain, dot: COLORS.warning },
-    { key: 'error', label: 'AI异常', count: stats.error, dot: 'var(--warning)' },
+    { key: 'error', label: 'AI未判定', count: stats.error, dot: 'var(--warning)' },
     { key: 'ai_correct', label: 'AI正确', count: stats.ai_correct, dot: COLORS.success },
     { key: 'ai_wrong', label: 'AI错误', count: stats.ai_wrong, dot: COLORS.danger },
     { key: 'all', label: '全部', count: validQuestions.length, dot: 'var(--text-tertiary)' }
@@ -617,7 +619,11 @@ export default function ExamReview({ task, onClose, onSave, onViewImage }) {
         {aiJudge && (
           <AiJudgeTag
             {...aiJudge}
-            note={wrongIdMap[currentQuestion.id] && reviewAction !== 'excluded' ? '已入错题本' : null}
+            note={
+              wrongIdMap[currentQuestion.id] && reviewAction !== 'excluded'
+                ? '已入错题本'
+                : unjudgedReason || null
+            }
           />
         )}
       </div>
