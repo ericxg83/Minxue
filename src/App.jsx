@@ -924,7 +924,6 @@ export default function App() {
                 onRetryTask={handleRetryTask}
                 onDeleteTask={(taskId) => { setDeleteTarget({ type: 'task', id: taskId }); setShowDeleteConfirm(true) }}
                 onOpenReview={(task) => { setReviewTask(task); setShowExamReview(true) }}
-                onRefresh={() => loadTasks(false)}
               />
             )}
 

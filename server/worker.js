@@ -1544,11 +1544,6 @@ const generateMissingAnswers = async (questions, imageBuffer = null) => {
     console.warn(`     题目 ${q.id.substring(0, 8)}: ${validation.reason}，已转人工复核`)
   }
 
-  // 进度条中间状态：80% 打在这里后会跑这个循环，单 batch 可能耗分钟级，
-  // 期间 result.progress 一直停在 80，前端"批改中"看着像卡死。
-  // 按 batch 完成度把 80→85 拆细，让前端能看到推进。
-  const total = needAnswer.length
-  let processedBatches = 0
   for (let i = 0; i < needAnswer.length; i += batchSize) {
     const batch = needAnswer.slice(i, i + batchSize)
     const promises = batch.map(async (q) => {
@@ -1705,12 +1700,6 @@ const generateMissingAnswers = async (questions, imageBuffer = null) => {
     })
 
     await Promise.allSettled(promises)
-    processedBatches += 1
-    const subProgress = total > 0 ? 80 + Math.min(4, Math.floor((processedBatches * batchSize / total) * 5)) : 85
-    const cappedSub = Math.min(84, subProgress)
-    // 修正：generateMissingAnswers 不持有 job，不能 job.updateProgress；这里只更新 DB 进度即可，
-    // 前端轮询读 tasks.result.progress，不依赖 BullMQ 仪表盘。
-    await updateTaskStatus(taskId, TASK_STATUS.PROCESSING, { progress: cappedSub }).catch(() => {})
   }
 
   return { updated: updatedCount, total: needAnswer.length, empty: emptyCount, placeholder: placeholderCount, exceptions: exceptionCount, cacheHits: cacheHitCount, cacheMisses: cacheMissCount }
@@ -5682,9 +5671,6 @@ await job.updateProgress(80)
       await batchUpdateQuestionTags(tagUpdates)
       console.log(`✅ [Step 8/8] 本地标签保存成功`)
 
-      await job.updateProgress(87).catch(() => {})
-      await updateTaskStatus(taskId, TASK_STATUS.PROCESSING, { progress: 87 }).catch(() => {})
-
       await job.updateProgress(90)
       await updateTaskStatus(taskId, TASK_STATUS.PROCESSING, { progress: 90 })
 
@@ -5727,8 +5713,6 @@ await job.updateProgress(80)
         } else {
           console.log(`  ℹ️ [Auto-save] 无可用答案，跳过答案库保存`)
         }
-        await job.updateProgress(95).catch(() => {})
-        await updateTaskStatus(taskId, TASK_STATUS.PROCESSING, { progress: 95 }).catch(() => {})
       } catch (e) {
         console.error(`  ⚠️ [Auto-save] 保存答案库失败:`, e.message)
       }
@@ -5757,9 +5741,6 @@ await job.updateProgress(80)
     } catch (e) {
       console.error(`  ⚠️ [Knowledge] 知识点/掌握度同步异常:`, e.message)
     }
-
-    await job.updateProgress(98).catch(() => {})
-    await updateTaskStatus(taskId, TASK_STATUS.PROCESSING, { progress: 98 }).catch(() => {})
 
     await job.updateProgress(100)
     const duration = Date.now() - startTime
