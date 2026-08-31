@@ -4,6 +4,7 @@ import { CheckCircle2, XCircle, ChevronLeft, ChevronRight, Loader2, QrCode, Eye,
 import { getQuestionsByIds, gradeGeneratedExam, batchUpsertWrongQuestionStatus, markGeneratedExamGraded } from '../../services/apiService'
 import { useStudentStore } from '../../store'
 import { normalizeOptions } from '../../utils/optionText'
+import MathText from '../../components/MathText'
 import dayjs from 'dayjs'
 
 const formatOption = (opt, index) => `${String.fromCharCode(65 + index)}. ${opt}`
@@ -460,7 +461,7 @@ export default function Grading({ paperId, studentId, questionIds, onClose, onCo
           </div>
 
           <div style={{ fontSize: 'var(--fs-15)', color: COLORS.text, lineHeight: '1.6', marginBottom: '16px', whiteSpace: 'pre-wrap' }}>
-            {currentQuestion?.content}
+            <MathText content={currentQuestion?.content || ''} />
           </div>
 
           {currentQuestion?.image_url && (
@@ -516,7 +517,7 @@ export default function Grading({ paperId, studentId, questionIds, onClose, onCo
                     参考答案
                   </div>
                   <div style={{ fontSize: 'var(--fs-15)', color: COLORS.text, lineHeight: '1.6' }}>
-                    {currentQuestion?.answer || '暂无答案'}
+                    <MathText content={currentQuestion?.answer || '暂无答案'} />
                   </div>
                 </div>
                 {currentQuestion?.analysis && (
@@ -525,7 +526,7 @@ export default function Grading({ paperId, studentId, questionIds, onClose, onCo
                       解析
                     </div>
                     <div style={{ fontSize: 'var(--fs-14)', color: COLORS.text, lineHeight: '1.6', whiteSpace: 'pre-wrap' }}>
-                      {currentQuestion.analysis}
+                      <MathText content={currentQuestion.analysis || ''} />
                     </div>
                   </div>
                 )}
