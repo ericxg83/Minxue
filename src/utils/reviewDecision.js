@@ -125,3 +125,16 @@ export const getUnjudgedReasonText = (question, threshold = DEFAULT_CONFIDENCE_T
   const reason = question?.answer_exception_reason
   return typeof reason === 'string' ? reason.trim() : ''
 }
+
+/**
+ * 「AI 答案存疑」提示 —— 与 exception 不同：AI 已给出正误，但参考本身
+ * 可能不可靠（图题视觉推理不擅长等）。
+ *
+ * 后端判题管线把 reason 写入 questions.ai_answer_risk_reason（独立列）。
+ * 即使在 wrong 状态也展示给老师，避免老师把"AI 错误"信以为真。
+ * 纯观测标注，不参与任何判定。
+ */
+export const getAiAnswerRiskText = (question) => {
+  const reason = question?.ai_answer_risk_reason
+  return typeof reason === 'string' ? reason.trim() : ''
+}

@@ -1,5 +1,10 @@
 @import "tailwindcss";
 
+/* ═══════════════════════════════════════════
+   敏学 Design Tokens · 移动端
+   与 PC 工作台 workbench-theme.css 对齐的关键 token，
+   跨端共用同一组语义色与状态色数值。
+   ═══════════════════════════════════════════ */
 :root {
   /* ── Apple iOS · System Colors + shadcn semantics ──
      Token names are unchanged; only values are tuned to the iOS Human
@@ -38,6 +43,14 @@
   --purple: #8B5CF6;          /* violet-500 */
   --purple-soft: #F5F3FF;     /* violet-50 */
 
+  /* ── 跨端对齐的 5 档状态 token（与 PC 端同名同值）── */
+  --status-success-fg: #16A34A;   --status-success-bg: #DCFCE7;
+  --status-info-fg: #6366F1;      --status-info-bg: #EEF2FF;
+  --status-warning-fg: #D97706;   --status-warning-bg: #FEF3C7;
+  --status-danger-fg: #DC2626;    --status-danger-bg: #FEE2E2;
+  --status-processing-fg: #7C3AED; --status-processing-bg: #F5E8FF;
+  --status-neutral-fg: #64748B;   --status-neutral-bg: #F1F5F9;
+
   /* ── Text — iOS label hierarchy ── */
   --text: #1C1C1E;             /* label */
   --text-secondary: #6C6C70;   /* secondaryLabel (opaque approx) */
@@ -60,8 +73,10 @@
   /* ── Borders — iOS separators / shadcn border+ring ── */
   --border: #C6C6C8;          /* opaqueSeparator */
   --border-light: #E5E5EA;    /* systemGray5 hairline */
+  --border-strong: #8E8E93;   /* 强分隔 */
+  --border-subtle: #F2F2F7;   /* 几乎不可见 */
 
-  /* ── Radius — iOS continuous-corner scale (larger, rounder) ── */
+  /* ── Radius — iOS continuous-corner scale (与 PC 端刻意不同) ── */
   --radius-sm: 10px;
   --radius-md: 14px;
   --radius-lg: 20px;
@@ -86,6 +101,24 @@
   --shadow-xl: 0 18px 44px rgba(0,0,0,0.10);
   --shadow-primary: 0 4px 14px rgba(99,102,241,0.22);
   --shadow-accent: 0 4px 14px rgba(139,92,246,0.22);
+
+  /* ── Spacing scale（与 PC 端保持同一组倍数）── */
+  --space-1: 4px;
+  --space-2: 8px;
+  --space-3: 12px;
+  --space-4: 16px;
+  --space-5: 20px;
+  --space-6: 24px;
+  --space-8: 32px;
+  --space-10: 40px;
+  --space-12: 48px;
+
+  /* ── Motion（与 PC 端保持同一组节奏）── */
+  --motion-fast: 120ms;
+  --motion-base: 180ms;
+  --motion-slow: 240ms;
+  --motion-ease: cubic-bezier(0.4, 0, 0.2, 1);
+  --motion-ease-out: cubic-bezier(0, 0, 0.2, 1);
 }
 
 /* ── antd-mobile 主题色覆盖（跟随主色 #6366F1）── */

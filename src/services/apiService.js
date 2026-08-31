@@ -253,6 +253,36 @@ export const markNotificationsRead = async () => {
   return data
 }
 
+// Dashboard 聚合：班级薄弱知识点 Top N（含跨年级标签）
+export const getDashboardWeakness = async (limit = 5) => {
+  const cacheKey = 'dashboard_weakness_cache'
+  const cached = readCache(cacheKey, 90 * 1000)
+  if (cached) return cached
+  const data = await apiRequest(`/dashboard/weakness?limit=${limit}`)
+  if (data?.success) writeCache(cacheKey, data)
+  return data
+}
+
+// Dashboard 聚合：本周重练效果（已掌握率 / 进行中 / 待重练学生）
+export const getDashboardRetryOverview = async () => {
+  const cacheKey = 'dashboard_retry_overview_cache'
+  const cached = readCache(cacheKey, 90 * 1000)
+  if (cached) return cached
+  const data = await apiRequest('/dashboard/retry-overview')
+  if (data?.success) writeCache(cacheKey, data)
+  return data
+}
+
+// Dashboard 聚合：班级 actionable 学生 Top N（待关注升级版）
+export const getDashboardAttentionStudents = async (limit = 5) => {
+  const cacheKey = 'dashboard_attention_students_cache'
+  const cached = readCache(cacheKey, 90 * 1000)
+  if (cached) return cached
+  const data = await apiRequest(`/dashboard/attention-students?limit=${limit}`)
+  if (data?.success) writeCache(cacheKey, data)
+  return data
+}
+
 export const getExamsByStudent = async (studentId, useCache = true) => {
   const cacheKey = `exams_cache_${studentId}`
 
@@ -987,6 +1017,37 @@ export const getTeachingDiagnosisDetail = async (tag, opts = {}) => {
   return apiRequest(`/teaching/diagnosis/${encodeURIComponent(tag)}?mode=${mode}&offset=${offset}`)
 }
 
+/**
+ * 周末讲题错题卷：按年级按题维度聚合（学生数口径错误率）
+ * @param {Object} opts - { grade, mode, offset, subject? }
+ */
+export const getTeachingWrongPaper = async (opts = {}) => {
+  const { grade, mode = 'week', offset = 0, subject } = opts
+  const params = new URLSearchParams({ grade, mode, offset: String(offset) })
+  if (subject) params.set('subject', subject)
+  return apiRequest(`/teaching/wrong-paper?${params.toString()}`)
+}
+
+/**
+ * 导出错题卷为 Word 文件（流式下载）。
+ * 后端直接返回 docx 二进制，所以这里不走 apiRequest 走 fetch + Blob。
+ * @param {Object} body - { grade, mode, studentId?, studentName?, subject?, periodMode?, periodOffset?, periodStart?, periodEnd? }
+ * @returns {Promise<Blob>}
+ */
+export const exportWrongPaper = async (body) => {
+  const url = `${API_BASE}/handout/export-wrong-paper`
+  const resp = await fetch(url, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(body || {}),
+  })
+  if (!resp.ok) {
+    const err = await resp.json().catch(() => ({ error: resp.statusText }))
+    throw new Error(err.error || `导出失败: ${resp.status}`)
+  }
+  return resp.blob()
+}
+
 // ─────────────────────────────────────────────
 // 知识点驱动学习数据层（成长中心 / 讲义引擎）
 // ─────────────────────────────────────────────
@@ -1080,4 +1141,10 @@ export const getRecommendedTopics = async (opts = {}) => {
   const q = params.toString()
   const data = await apiRequest(`/weakness/recommend${q ? '?' + q : ''}`)
   return data.topics || []
+}
+
+export const getQuestionAssets = async (questionId, type = null) => {
+  const qs = type ? `?type=${encodeURIComponent(type)}` : ''
+  const data = await apiRequest(`/questions/${questionId}/assets${qs}`)
+  return data?.assets || []
 }
