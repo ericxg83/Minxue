@@ -500,13 +500,16 @@ class PendingTaskRecovery {
       }
 
       // ── 1. 扫描需要重试的 failed 资产 ──
+      // 包含 retry_count=0 的资产：旧代码路径（早期版本 handleRetry 未递增 retry_count
+      // 或绕开 handleRetry 直接写库）会让资产停在 failed/0，这批卡住 3+ 天的资产永远
+      // 不会被重试。统一当作"第 1 次重试"对待，按 GEOMETRY_RETRY_DELAYS[0]=5min 兜底。
+      // 真正"未尝试"的资产 tikz_status 还是 pending，不会被这条 SQL 命中。
       const { rows: failedRows } = await query(
         `SELECT a.id, a.question_id, a.retry_count, a.updated_at, a.last_error
          FROM ${TABLES.QUESTION_ASSETS} a
          WHERE a.asset_type = 'geometry_image'
            AND a.tikz_status = 'failed'
            AND a.retry_count < $1
-           AND a.retry_count > 0
          ORDER BY a.updated_at ASC`,
         [GEOMETRY_MAX_RETRIES]
       )
@@ -516,7 +519,9 @@ class PendingTaskRecovery {
         let retryCount = 0
         for (const asset of failedRows) {
           const retries = asset.retry_count || 0
-          const delay = GEOMETRY_RETRY_DELAYS[Math.min(retries - 1, GEOMETRY_RETRY_DELAYS.length - 1)]
+          // retry_count=0 时用 GEOMETRY_RETRY_DELAYS[0]=5min，否则按 retries-1 索引
+          const delayIdx = retries === 0 ? 0 : Math.min(retries - 1, GEOMETRY_RETRY_DELAYS.length - 1)
+          const delay = GEOMETRY_RETRY_DELAYS[delayIdx]
           const elapsed = now - new Date(asset.updated_at).getTime()
           if (elapsed >= delay) {
             // 重试时间已到 → 重新入队

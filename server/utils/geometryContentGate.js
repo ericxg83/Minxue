@@ -18,10 +18,32 @@ const GREEK = 'αβγδεζηθικλμνξοπρστυφχψω'
 const PT = /[A-Z][′'’]?(?![a-z])/g
 
 /**
+ * 把题干里的 \frac{...}{...} 还原成"分子 / 分母"的可读形态，便于后续提取
+ * 字母引用。原来直接整段替换成空格，会把 \frac{AB}{BC} 这种比例里的 AB/BC
+ * 引用一起擦掉——切线、相似、平行截比题几乎都用比例写法，于是闸门误报
+ * "重绘线段 AB 在题干中无引用"。
+ *
+ * 处理：保留分子分母内部字母，仅把 LaTeX 包裹层替换为"分子/分母"中间夹 /
+ * （带前后空格，避免拼到相邻字母上）。不能匹配（嵌套 / 非法 LaTeX）的
+ * 片段退化为空字符串。
+ */
+function unfoldFractions(content) {
+  const s = String(content || '')
+  // 单层 \frac{...}{...}，允许内部含空格、字母、数字、撇。
+  // 嵌套的（如 \frac{\frac{a}{b}}{c}）先由外到里逐层替换；本正则只匹配当前层。
+  return s.replace(/\\frac\s*\{([^{}]*)\}\s*\{([^{}]*)\}/g, (_m, num, den) => {
+    const n = String(num).trim()
+    const d = String(den).trim()
+    if (!n && !d) return ' '
+    return ` ${n} / ${d} `
+  })
+}
+
+/**
  * 提取题干中被引用的"点"（大写字母，含带撇派生点 C′/A'）。
  */
 export function extractReferencedPoints(content) {
-  const s = String(content || '').replace(/\\frac\{[^{}]*\}\{[^{}]*\}/g, ' ')
+  const s = unfoldFractions(content)
   const pts = new Set()
   for (const m of s.matchAll(PT)) {
     pts.add(m[0].replace(/[′'’]/g, '′'))
@@ -34,7 +56,7 @@ export function extractReferencedPoints(content) {
  * 线段在题干中几乎总是连写，单字母上下文不足为凭，这里只取连写对。
  */
 export function extractReferencedSegments(content) {
-  const s = String(content || '').replace(/\\frac\{[^{}]*\}\{[^{}]*\}/g, ' ')
+  const s = unfoldFractions(content)
   const segs = new Set()
   for (const m of s.matchAll(/([A-Z][′'’]?)([A-Z][′'’]?)(?![a-z])/g)) {
     const a = m[1].replace(/[′'’]/g, '′')
@@ -51,7 +73,7 @@ export function extractReferencedSegments(content) {
  * 不含对角线 AC/BD。对角线要么题干显式连写（"连接AC"），要么就是模型凭空加的。
  */
 export function extractLetterRuns(content) {
-  const s = String(content || '').replace(/\\frac\{[^{}]*\}\{[^{}]*\}/g, ' ')
+  const s = unfoldFractions(content)
   const runs = []
   for (const m of s.matchAll(/[A-Z][′'’]?(?:[A-Z][′'’]?)+/g)) {
     const letters = [...m[0].matchAll(/[A-Z][′'’]?/g)].map(x => x[0].replace(/[′'’]/g, '′'))

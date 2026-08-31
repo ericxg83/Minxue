@@ -37,9 +37,21 @@ export function isTikzCode(str) {
  *
  * 注意：不回退到 image_url——该字段是题目所在的整页试卷图（多页任务按页存储），
  * 不是题干配图。无配图的题目应返回 none，由试卷查看面板展示整页图。
+ *
+ * ⚠️ 当 tikz_status === 'none' 且 last_error 是"无可重绘"（实物/统计图/数轴）
+ * 时，回退到原始裁剪图几乎一定是 bbox 错位裁到了别处题目或题干文字——
+ * 服务端已经在裁剪原图上判不出几何结构，再展示出来只会把错东西端给用户。
+ * 其他 'none' 原因（派生点未解 / 题干引用不符）保留裁剪原图展示，让用户至少能看到图。
  */
 export function getGeometryDisplayUrl(question) {
   if (!question) return { url: null, type: 'none' }
+
+  // 服务端已结论：原图根本不是几何结构（实物/统计图/数轴），裁剪图不可信
+  if (question.tikz_status === 'none'
+    && typeof question.asset_last_error === 'string'
+    && /无可重绘的几何结构/.test(question.asset_last_error)) {
+    return { url: null, type: 'none' }
+  }
 
   // 1. clean_geometry_svg 是干净 SVG 源码 → 内联渲染（新主流程）
   if (isSvgCode(question.clean_geometry_svg)) {
@@ -66,7 +78,7 @@ export function getGeometryDisplayUrl(question) {
     return { url: question.clean_geometry_image_url, type: 'clean' }
   }
 
-  // 6. 回退到原始裁剪几何图
+  // 6. 回退到原始裁剪几何图（仅当 tikz_status 不是"无可重绘"时；上面已拦）
   if (question.geometry_image_url) {
     return { url: question.geometry_image_url, type: 'raw' }
   }

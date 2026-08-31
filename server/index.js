@@ -1384,13 +1384,22 @@ app.post('/api/questions/batch', async (req, res) => {
       qc.options AS _cache_options,
       qc.answer AS _cache_answer,
       qc.analysis AS _cache_analysis,
-      qc.ai_tags AS _cache_ai_tags`
+      qc.ai_tags AS _cache_ai_tags,
+      a.tikz_status,
+      a.processed_at AS asset_processed_at,
+      a.last_error AS asset_last_error`
     // 当提供 studentId 时，LEFT JOIN wrong_questions 带出掌握度信息
     if (studentId) {
       queryStr += `, wq.error_count, wq.lifecycle_status, wq.status AS wq_status`
     }
     queryStr += ` FROM ${TABLES.QUESTIONS} q
-       LEFT JOIN ${TABLES.QUESTION_CACHE} qc ON q.cache_id = qc.id`
+       LEFT JOIN ${TABLES.QUESTION_CACHE} qc ON q.cache_id = qc.id
+       LEFT JOIN LATERAL (
+         SELECT tikz_status, processed_at, last_error
+         FROM ${TABLES.QUESTION_ASSETS}
+         WHERE question_id = q.id AND asset_type = 'geometry_image'
+         ORDER BY created_at DESC LIMIT 1
+       ) a ON TRUE`
     if (studentId) {
       queryStr += ` LEFT JOIN ${TABLES.WRONG_QUESTIONS} wq ON wq.question_id = q.id AND wq.student_id = $${validIds.length + 1}`
     }
@@ -1437,6 +1446,8 @@ app.post('/api/questions/batch', async (req, res) => {
 app.get('/api/questions/task/:taskId', async (req, res) => {
   try {
     const { taskId } = req.params
+    // LATERAL 取最新一条 geometry_image 资产的 tikz_status（前端需要它来判断
+    // 「几何图重建中…」标签，没它就会把"none/失败"的题误判为 pending 一直转圈）
     const { rows } = await query(
       `SELECT q.*,
               qc.content AS _cache_content,
@@ -1445,9 +1456,18 @@ app.get('/api/questions/task/:taskId', async (req, res) => {
               qc.analysis AS _cache_analysis,
               qc.question_type AS _cache_question_type,
               qc.subject AS _cache_subject,
-              qc.ai_tags AS _cache_ai_tags
+              qc.ai_tags AS _cache_ai_tags,
+              a.tikz_status,
+              a.processed_at AS asset_processed_at,
+              a.last_error AS asset_last_error
        FROM ${TABLES.QUESTIONS} q
        LEFT JOIN ${TABLES.QUESTION_CACHE} qc ON q.cache_id = qc.id
+       LEFT JOIN LATERAL (
+         SELECT tikz_status, processed_at, last_error
+         FROM ${TABLES.QUESTION_ASSETS}
+         WHERE question_id = q.id AND asset_type = 'geometry_image'
+         ORDER BY created_at DESC LIMIT 1
+       ) a ON TRUE
        WHERE q.task_id = $1
        ORDER BY COALESCE(q.page_number, 1),
                 COALESCE((q.block_coordinates->>'y')::float, 99999), q.created_at`,
@@ -1563,9 +1583,18 @@ app.get('/api/questions/search', async (req, res) => {
               qc.options AS _cache_options,
               qc.answer AS _cache_answer,
               qc.analysis AS _cache_analysis,
-              qc.ai_tags AS _cache_ai_tags
+              qc.ai_tags AS _cache_ai_tags,
+              a.tikz_status,
+              a.processed_at AS asset_processed_at,
+              a.last_error AS asset_last_error
        FROM ${TABLES.QUESTIONS} q
        LEFT JOIN ${TABLES.QUESTION_CACHE} qc ON q.cache_id = qc.id
+       LEFT JOIN LATERAL (
+         SELECT tikz_status, processed_at, last_error
+         FROM ${TABLES.QUESTION_ASSETS}
+         WHERE question_id = q.id AND asset_type = 'geometry_image'
+         ORDER BY created_at DESC LIMIT 1
+       ) a ON TRUE
        ${whereClause}
        ORDER BY q.updated_at DESC
        LIMIT $${limitIdx} OFFSET $${offsetIdx}`,
