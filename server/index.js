@@ -41,7 +41,7 @@ import { migrateTaskNotificationRead } from './migrations/046_add_task_notificat
 import { migrateTeachingQuestionTypes } from './migrations/047_teaching_question_types.js'
 import { migrateTeachingQuestionTypeAuto } from './migrations/048_teaching_question_type_auto.js'
 import { migrateStudentEnrollmentStatus } from './migrations/049_add_student_enrollment_status.js'
-import { scheduleNightParse } from './services/nightParseService.js'
+import { scheduleNightParse, scheduleWeeklyDiagnosis } from './services/nightParseService.js'
 
 const __dirname = dirname(fileURLToPath(import.meta.url))
 dotenv.config({ path: resolve(__dirname, '.env') })
@@ -74,6 +74,7 @@ import handoutLectureRouter from './routes/handoutLecture.js'
 import teachingQuestionTypesRouter from './routes/teachingQuestionTypes.js'
 import weaknessRouter from './routes/weakness.js'
 import examPdfRouter from './routes/examPdf.js'
+import dashboardRouter from './routes/dashboard.js'
 import { runErrorDiagnosis } from './services/diagnosisService.js'
 import { cleanupStudentData } from './services/dataCleanupService.js'
 import { getStudentMastery } from './services/knowledgeMasteryService.js'
@@ -437,20 +438,46 @@ app.get('/api/tasks/summary', async (req, res) => {
 
     // 单次查询：用子查询合并 3 个 COUNT，避免 3 次 DB 往返
     // 铃铛计数只统计「未读」的 done/failed 任务（notification_read_at IS NULL）
+    // recent_tasks（PC 铃铛清单）：教师已读（notification_read_at IS NOT NULL）的 done 任务 + failed 任务
+    // pending_tasks（Dashboard Layer 2）：教师未读（notification_read_at IS NULL）的 done 任务
+    //   与 briefing 铃铛桶（未读 done）保持口径一致，点击直达对应 task 复核页
     const { rows } = await query(
       `SELECT
          COALESCE((SELECT COUNT(*)::int FROM ${TABLES.TASKS} WHERE status = $1 AND deleted_at IS NULL AND notification_read_at IS NULL), 0) AS pending_review,
          COALESCE((SELECT COUNT(*)::int FROM ${TABLES.TASKS} WHERE status = $2 AND deleted_at IS NULL AND notification_read_at IS NULL), 0) AS failed_tasks,
          COALESCE((SELECT COUNT(*)::int FROM ${TABLES.WRONG_QUESTIONS} WHERE lifecycle_status = $3 AND added_at::date = CURRENT_DATE), 0) AS today_new_wrong,
          (SELECT COALESCE(json_agg(row_to_json(t)), '[]'::json) FROM (
-           SELECT t.id, t.original_name, t.status, t.created_at, t.updated_at, s.name AS student_name
+           SELECT t.id, t.original_name, t.status, t.created_at, t.updated_at,
+                  t.notification_read_at, s.name AS student_name,
+                  COALESCE((t.result->>'wrong_count')::int, 0) AS wrong_count
            FROM ${TABLES.TASKS} t
            LEFT JOIN ${TABLES.STUDENTS} s ON s.id = t.student_id
-           WHERE t.deleted_at IS NULL AND (t.status = $1 OR t.status = $2)
+           WHERE t.deleted_at IS NULL
+             AND t.status = $1 AND t.notification_read_at IS NULL
            ORDER BY t.updated_at DESC LIMIT 5
+         ) t) AS pending_tasks,
+         (SELECT COALESCE(json_agg(row_to_json(t)), '[]'::json) FROM (
+           SELECT t.id, t.original_name, t.status, t.created_at, t.updated_at,
+                  t.notification_read_at, s.name AS student_name,
+                  COALESCE((t.result->>'wrong_count')::int, 0) AS wrong_count
+           FROM ${TABLES.TASKS} t
+           LEFT JOIN ${TABLES.STUDENTS} s ON s.id = t.student_id
+           WHERE t.deleted_at IS NULL
+             AND ((t.status = $1 AND t.notification_read_at IS NOT NULL) OR t.status = $2)
+           ORDER BY COALESCE(t.notification_read_at, t.updated_at) DESC LIMIT 5
          ) t) AS recent_tasks`,
       [TASK_STATUS.DONE, 'failed', 'new']
     )
+
+    const mapTask = (t) => ({
+      id: t.id,
+      originalName: t.original_name,
+      status: t.status,
+      createdAt: t.created_at,
+      notificationReadAt: t.notification_read_at,
+      studentName: t.student_name,
+      wrongCount: t.wrong_count
+    })
 
     const r = rows[0]
     const data = {
@@ -460,13 +487,8 @@ app.get('/api/tasks/summary', async (req, res) => {
         failedTasks: r.failed_tasks,
         todayNewWrongQuestions: r.today_new_wrong,
         totalNotifications: r.pending_review + r.failed_tasks,
-        recentTasks: (r.recent_tasks || []).map(t => ({
-          id: t.id,
-          originalName: t.original_name,
-          status: t.status,
-          createdAt: t.created_at,
-          studentName: t.student_name
-        }))
+        pendingTasks: (r.pending_tasks || []).map(mapTask),
+        recentTasks: (r.recent_tasks || []).map(mapTask)
       }
     }
 
@@ -981,9 +1003,18 @@ app.get('/api/students', async (req, res) => {
     if (studentsCache.data && (now - studentsCache.timestamp) < STUDENTS_TTL) {
       return res.json(studentsCache.data)
     }
+    // 派生字段：last_task_at（最近作业）、last_wrong_at（最近错题）、
+// total_error_count（累计错题错误数）、recent_wrong_count（近 7 天新错题数）
+    // 供 PC 工作台 Layer 3 「待关注学生」排序使用；学生无任务/无错题时对应字段为 NULL/0
+    // 子查询版本：避免 LEFT JOIN tasks × wrong_questions 笛卡尔积
     const { rows } = await query(
-      `SELECT id, name, grade, avatar, enrollment_status, paused_at, created_at
-       FROM ${TABLES.STUDENTS} ORDER BY created_at DESC`
+      `SELECT s.id, s.name, s.grade, s.avatar, s.enrollment_status, s.paused_at, s.created_at,
+              (SELECT MAX(t.created_at) FROM ${TABLES.TASKS} t WHERE t.student_id = s.id AND t.deleted_at IS NULL) AS last_task_at,
+              (SELECT MAX(w.last_wrong_at) FROM ${TABLES.WRONG_QUESTIONS} w WHERE w.student_id = s.id) AS last_wrong_at,
+              (SELECT COALESCE(SUM(w.error_count), 0)::int FROM ${TABLES.WRONG_QUESTIONS} w WHERE w.student_id = s.id) AS total_error_count,
+              (SELECT COUNT(*)::int FROM ${TABLES.WRONG_QUESTIONS} w WHERE w.student_id = s.id AND w.last_wrong_at >= NOW() - INTERVAL '7 days') AS recent_wrong_count
+       FROM ${TABLES.STUDENTS} s
+       ORDER BY s.created_at DESC`
     )
     const data = { success: true, students: rows }
     studentsCache = { data, timestamp: now }
@@ -2514,6 +2545,7 @@ app.use('/api/handout', handoutLectureRouter)
 app.use('/api/teaching-question-types', teachingQuestionTypesRouter)
 app.use('/api/weakness', weaknessRouter)
 app.use('/api/exam-pdf', examPdfRouter)
+app.use('/api/dashboard', dashboardRouter)
 
 // 错误处理中间件（必须在路由之后，才能捕获路由中的未处理异常）
 app.use((err, req, res, next) => {
@@ -2638,6 +2670,14 @@ if (process.argv[1] === __filename || process.argv[1]?.endsWith('server/index.js
       scheduleNightParse()
     } catch (err) {
       console.error('夜间补解析定时器启动失败:', err.message)
+    }
+
+    // 周维度错因诊断：每周一 02:00 自动回填本周新增错题的 error_type / error_reason，
+    // 保证老师周一打开「学习诊断」时所有错题已有错因。
+    try {
+      scheduleWeeklyDiagnosis()
+    } catch (err) {
+      console.error('周维度错因诊断定时器启动失败:', err.message)
     }
 
     console.log(`并发数: ${process.env.CONCURRENCY || 2}`)

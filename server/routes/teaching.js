@@ -1,6 +1,12 @@
 import { Router } from 'express'
 import { query, TABLES } from '../config/neon.js'
 import { parsePeriod } from '../utils/period.js'
+import {
+  aggregateKnowledgeSuggestions,
+  fillTeachingAdvice,
+  listGrades,
+  listStudentIdsByGrade
+} from '../services/teachingSuggestionsService.js'
 
 const router = Router()
 
@@ -185,6 +191,129 @@ router.get('/error-types', async (req, res) => {
     res.json({ success: true, errorTypes: rows })
   } catch (error) {
     res.status(500).json({ error: error.message })
+  }
+})
+
+/**
+ * GET /api/teaching/grades
+ * 晚托班所有年级列表（年级选择器下拉数据源）
+ */
+router.get('/grades', async (req, res) => {
+  try {
+    const grades = await listGrades()
+    res.json({ success: true, grades })
+  } catch (error) {
+    console.error('获取年级列表失败:', error)
+    res.status(500).json({ error: error.message })
+  }
+})
+
+/**
+ * GET /api/teaching/grade-suggestions
+ * 年级视图备课建议清单
+ * Query: grade=四年级, mode=week, offset, subject=数学, periodStart?, periodEnd?
+ */
+router.get('/grade-suggestions', async (req, res) => {
+  try {
+    const { grade, subject = '数学' } = req.query
+    if (!grade) {
+      return res.status(400).json({ success: false, error: 'grade 必填' })
+    }
+
+    let periodStart, periodEnd, mode, offset
+    if (req.query.periodStart && req.query.periodEnd) {
+      periodStart = new Date(req.query.periodStart)
+      periodEnd = new Date(req.query.periodEnd)
+      mode = req.query.mode || 'custom'
+      offset = parseInt(req.query.offset || 0)
+    } else {
+      const p = parsePeriod(req.query)
+      periodStart = p.periodStart
+      periodEnd = p.periodEnd
+      mode = p.mode
+      offset = p.offset
+    }
+
+    const studentIds = await listStudentIdsByGrade(grade)
+    if (studentIds.length === 0) {
+      return res.json({
+        success: true,
+        grade,
+        period: { start: periodStart.toISOString().split('T')[0], end: periodEnd.toISOString().split('T')[0], mode, offset },
+        studentCount: 0,
+        suggestions: [],
+        message: '该年级暂无学生'
+      })
+    }
+
+    const raw = await aggregateKnowledgeSuggestions({ studentIds, periodStart, periodEnd, subject })
+    const suggestions = await fillTeachingAdvice(raw, 'grade')
+
+    res.json({
+      success: true,
+      grade,
+      period: {
+        start: periodStart.toISOString().split('T')[0],
+        end: periodEnd.toISOString().split('T')[0],
+        mode,
+        offset
+      },
+      studentCount: studentIds.length,
+      suggestions
+    })
+  } catch (error) {
+    console.error('获取年级备课建议失败:', error)
+    res.status(500).json({ success: false, error: error.message })
+  }
+})
+
+/**
+ * GET /api/teaching/student-suggestions
+ * 单生视图备课建议清单
+ * Query: studentId, mode=week, offset, periodStart?, periodEnd?
+ */
+router.get('/student-suggestions', async (req, res) => {
+  try {
+    const { studentId } = req.query
+    if (!studentId) {
+      return res.status(400).json({ success: false, error: 'studentId 必填' })
+    }
+
+    let periodStart, periodEnd, mode, offset
+    if (req.query.periodStart && req.query.periodEnd) {
+      periodStart = new Date(req.query.periodStart)
+      periodEnd = new Date(req.query.periodEnd)
+      mode = req.query.mode || 'custom'
+      offset = parseInt(req.query.offset || 0)
+    } else {
+      const p = parsePeriod(req.query)
+      periodStart = p.periodStart
+      periodEnd = p.periodEnd
+      mode = p.mode
+      offset = p.offset
+    }
+
+    const raw = await aggregateKnowledgeSuggestions({
+      studentIds: [studentId],
+      periodStart,
+      periodEnd
+    })
+    const suggestions = await fillTeachingAdvice(raw, 'single')
+
+    res.json({
+      success: true,
+      studentId,
+      period: {
+        start: periodStart.toISOString().split('T')[0],
+        end: periodEnd.toISOString().split('T')[0],
+        mode,
+        offset
+      },
+      suggestions
+    })
+  } catch (error) {
+    console.error('获取单生备课建议失败:', error)
+    res.status(500).json({ success: false, error: error.message })
   }
 })
 

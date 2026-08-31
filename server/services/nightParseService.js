@@ -234,3 +234,89 @@ export function scheduleNightParse() {
   }
   arm()
 }
+
+// ============================================================
+// 周维度错因诊断（新增于「教学备课建议」功能）
+//
+// 动机：老师周一打开学习诊断时，本周错题应已有 error_type / error_reason。
+// 复用 diagnosisService.runErrorDiagnosis 现有回填能力，仅加调度触发。
+//
+// 设计：
+//  - 时间：每周一 02:00（环境变量 WEEKLY_DIAGNOSIS_TIME，默认 '02:00'；WEEKLY_DIAGNOSIS_DAY=1 表示周一）
+//  - 与夜间补解析（每日 01:23）错开 37 分钟，不撞配额
+//  - 单实例锁：_weeklyDiagnosisRunning，防止同批重复跑
+//  - 失败隔离：try/catch 包住，单点失败不影响其他夜间步骤
+// ============================================================
+
+let _weeklyDiagnosisRunning = false
+
+/**
+ * 执行一轮周维度错因诊断。可被定时器调用，也可被外部手动调用。
+ * @param {{ trigger?: string }} opts
+ */
+export async function runWeeklyDiagnosis({ trigger = 'weekly-scheduler' } = {}) {
+  if (_weeklyDiagnosisRunning) {
+    log(`[WeeklyDiagnosis] (${trigger}) 上一轮仍在进行，跳过本次触发`)
+    return { skipped: true }
+  }
+  _weeklyDiagnosisRunning = true
+  try {
+    log(`[WeeklyDiagnosis] (${trigger}) 启动`)
+    const { runErrorDiagnosis } = await import('./diagnosisService.js')
+    const result = await runErrorDiagnosis({ limit: 200, trigger: 'weekly' })
+    log(`[WeeklyDiagnosis] (${trigger}) 完成 total=${result.total} blank=${result.blank} updated=${result.updated} skipped=${result.skipped}`)
+    return result
+  } catch (e) {
+    log(`[WeeklyDiagnosis] (${trigger}) 异常退出: ${e.message}`)
+    throw e
+  } finally {
+    _weeklyDiagnosisRunning = false
+  }
+}
+
+/**
+ * 计算距离下一次「周X HH:mm」（本地时区）还有多少毫秒。
+ * @param {number} targetDay 0=周日, 1=周一, ..., 6=周六
+ * @param {string} timeStr 'HH:mm'
+ */
+function msUntilNextWeekday(targetDay, timeStr) {
+  const m = String(timeStr || '').match(/^(\d{1,2}):(\d{2})$/)
+  const hour = m ? parseInt(m[1], 10) : 2
+  const minute = m ? parseInt(m[2], 10) : 0
+  const now = new Date()
+  const next = new Date(now.getFullYear(), now.getMonth(), now.getDate(), hour, minute, 0, 0)
+  let diffDay = (targetDay - now.getDay() + 7) % 7
+  if (diffDay === 0 && next <= now) diffDay = 7 // 今天已过
+  next.setDate(next.getDate() + diffDay)
+  return next - now
+}
+
+/**
+ * 注册周维度错因诊断定时器（在 index.js 启动时调用一次）。
+ * 与 scheduleNightParse 并存，互不影响。
+ */
+export function scheduleWeeklyDiagnosis() {
+  const enabled = !/^(0|false|off)$/i.test(String(process.env.WEEKLY_DIAGNOSIS_ENABLED || ''))
+  if (!enabled) {
+    console.log('🗓️ 周维度错因诊断：已通过 WEEKLY_DIAGNOSIS_ENABLED 关闭')
+    return
+  }
+  const timeStr = process.env.WEEKLY_DIAGNOSIS_TIME || '02:00'
+  const targetDay = parseInt(process.env.WEEKLY_DIAGNOSIS_DAY || '1', 10) // 1=周一
+
+  const arm = () => {
+    const delay = msUntilNextWeekday(targetDay, timeStr)
+    const timer = setTimeout(async () => {
+      try {
+        await runWeeklyDiagnosis()
+      } catch (e) {
+        log(`[WeeklyDiagnosis] 本轮异常退出: ${e.message}`)
+      }
+      arm() // 跑完再排下周
+    }, delay)
+    timer.unref?.()
+    const dayLabel = ['周日', '周一', '周二', '周三', '周四', '周五', '周六'][targetDay]
+    console.log(`🗓️ 周维度错因诊断：下一次将在 ${new Date(Date.now() + delay).toLocaleString('zh-CN')} 触发（每${dayLabel} ${timeStr}）`)
+  }
+  arm()
+}
