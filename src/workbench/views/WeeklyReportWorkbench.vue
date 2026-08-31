@@ -170,6 +170,148 @@
         </ContentCard>
       </section>
 
+      <!-- 周末讲题错题卷：按"具体题"维度聚合，错误率排序 -->
+      <section v-if="viewMode === 'grade'" class="wrong-paper-section">
+        <ContentCard
+          class="wrong-paper-card"
+          :title="`「${selectedGrade || '年级'}」本周错题卷清单`"
+          :description="wrongPaperDescription"
+          flush
+        >
+          <template #actions>
+            <ActionButton :loading="exportingWrongPaper" :disabled="wrongPaperItems.length === 0" @click="handleExportWrongPaperAll">
+              <el-icon><Download /></el-icon>导出全班讲义卷
+            </ActionButton>
+            <ActionButton :loading="loadingWrongPaper" @click="loadWrongPaper">
+              <el-icon><Refresh /></el-icon>刷新
+            </ActionButton>
+          </template>
+
+          <div v-if="loadingWrongPaper" class="loading-stack">
+            <el-skeleton v-for="i in 4" :key="i" :rows="2" animated />
+          </div>
+          <EmptyState
+            v-else-if="!wrongPaperItems.length"
+            :icon="Reading"
+            title="该年级本周暂无错题"
+            description="切换时间范围或学科继续查看，或等待新批改数据进入。"
+          />
+          <DataTable
+            v-else
+            :data="wrongPaperItems"
+            row-key="identityKey"
+            :expand-row-keys="Array.from(expandedWrongRows)"
+            :default-expand-all="false"
+            size="small"
+            empty-text=" "
+            class="wrong-paper-table"
+          >
+            <el-table-column type="expand">
+              <template #default="{ row }">
+                <div class="wrong-paper-expand">
+                  <div class="expand-row">
+                    <span class="expand-label">正确答案</span>
+                    <strong>{{ row.correctAnswer || '—' }}</strong>
+                  </div>
+                  <div v-if="row.involvedStudents?.length" class="expand-row">
+                    <span class="expand-label">错的学生（{{ row.involvedStudents.length }} 人）</span>
+                    <div class="student-chips">
+                      <el-tag
+                        v-for="s in row.involvedStudents"
+                        :key="s.id"
+                        :type="s.wrongTimes > 1 ? 'danger' : 'info'"
+                        effect="plain"
+                        size="small"
+                      >
+                        {{ s.name }}{{ s.wrongTimes > 1 ? ` ×${s.wrongTimes}` : '' }}
+                      </el-tag>
+                    </div>
+                  </div>
+                  <div v-if="row.errorDistribution?.length" class="expand-row">
+                    <span class="expand-label">错因分布</span>
+                    <div class="error-mini">
+                      <span v-for="e in row.errorDistribution" :key="e.errorType" :style="{ color: errorTypeColor(e.errorType) }">
+                        {{ e.errorType }} {{ e.count }}次 · {{ e.ratio }}%
+                      </span>
+                    </div>
+                  </div>
+                  <div v-if="row.knowledgeTags?.length" class="expand-row">
+                    <span class="expand-label">知识点</span>
+                    <span>
+                      <el-tag v-for="t in row.knowledgeTags.slice(0, 4)" :key="t" type="info" effect="plain" size="small" style="margin-right: 4px;">
+                        {{ t }}
+                      </el-tag>
+                    </span>
+                  </div>
+                </div>
+              </template>
+            </el-table-column>
+            <el-table-column label="row" width="48" align="center">
+              <template #default="{ row, $index }">
+                <span :class="['rank-num', { 'is-top': $index < 3 }]">{{ $index + 1 }}</span>
+              </template>
+            </el-table-column>
+            <el-table-column label="题目" min-width="280">
+              <template #default="{ row }">
+                <div class="wrong-q-cell">
+                  <span class="wrong-q-content">{{ row.content }}</span>
+                  <span v-if="row.knowledgeTags?.length" class="wrong-q-tags">
+                    <el-tag
+                      v-for="t in row.knowledgeTags.slice(0, 2)"
+                      :key="t"
+                      type="info"
+                      effect="plain"
+                      size="small"
+                    >{{ t }}</el-tag>
+                  </span>
+                </div>
+              </template>
+            </el-table-column>
+            <el-table-column label="错误率" width="110" align="center" sortable :sort-method="(a, b) => a.errorRate - b.errorRate">
+              <template #default="{ row }">
+                <div :class="['error-rate', errorRateTone(row.errorRate)]">
+                  <strong>{{ row.errorRate }}%</strong>
+                  <small>{{ row.studentCount }}/{{ wrongPaperMeta?.totalStudentCount || '-' }}</small>
+                </div>
+              </template>
+            </el-table-column>
+            <el-table-column label="错题次数" width="86" align="center">
+              <template #default="{ row }"><span>{{ row.wrongCount }}</span></template>
+            </el-table-column>
+            <el-table-column label="错因" min-width="160">
+              <template #default="{ row }">
+                <div v-if="row.errorDistribution?.length" class="error-tags">
+                  <StatusTag
+                    v-for="e in row.errorDistribution.slice(0, 2)"
+                    :key="e.errorType"
+                    :tone="errorTypeToTone(e.errorType)"
+                    size="small"
+                  >{{ e.errorType }} {{ e.ratio }}%</StatusTag>
+                  <span v-if="row.errorDistribution.length > 2" class="muted">+{{ row.errorDistribution.length - 2 }}</span>
+                </div>
+                <span v-else class="muted">—</span>
+              </template>
+            </el-table-column>
+            <el-table-column label="操作" width="140" align="center" fixed="right">
+              <template #default="{ row }">
+                <div class="row-actions">
+                  <el-button text size="small" @click="toggleWrongRow(wrongPaperRowKey(row))">
+                    {{ isWrongRowExpanded(wrongPaperRowKey(row)) ? '收起' : '详情' }}
+                  </el-button>
+                  <el-button
+                    text
+                    type="primary"
+                    size="small"
+                    :disabled="!row.involvedStudents?.length"
+                    @click="handleExportWrongPaperStudent(row)"
+                  >个人卷</el-button>
+                </div>
+              </template>
+            </el-table-column>
+          </DataTable>
+        </ContentCard>
+      </section>
+
       <!-- 底部输出条：把诊断结论直接转化为下一步教学动作（替代原 report-output 大面板） -->
       <section class="output-bar" aria-label="诊断输出">
         <span class="output-bar__label">输出</span>
@@ -268,7 +410,7 @@
 import { ref, computed, watch, onMounted, nextTick } from 'vue'
 import { useRouter } from 'vue-router'
 import { ElMessage } from 'element-plus'
-import { ArrowRight, Close, PieChart, User, Collection, Reading } from '@element-plus/icons-vue'
+import { ArrowRight, Close, PieChart, User, Collection, Reading, Download } from '@element-plus/icons-vue'
 import ActionButton from '../components/ui/ActionButton.vue'
 import ContentCard from '../components/ui/ContentCard.vue'
 import DataTable from '../components/ui/DataTable.vue'
@@ -277,7 +419,7 @@ import FilterBar from '../components/ui/FilterBar.vue'
 import PageHeader from '../components/ui/PageHeader.vue'
 import StatusTag from '../components/ui/StatusTag.vue'
 import WorkbenchSelect from '../components/ui/WorkbenchSelect.vue'
-import { getStudents, getAllWeeklyReports, getTeachingDiagnosis, getTeachingDiagnosisDetail } from '../../services/apiService'
+import { getStudents, getAllWeeklyReports, getTeachingDiagnosis, getTeachingDiagnosisDetail, getTeachingWrongPaper, exportWrongPaper } from '../../services/apiService'
 import { generateWeeklyReport } from '../../utils/weeklyReportGenerator'
 import { saveAs } from 'file-saver'
 import dayjs from 'dayjs'
@@ -328,6 +470,14 @@ const drawerVisible = ref(false)
 const drawerTag = ref('')
 const drawerDetail = ref(null)
 const loadingDetail = ref(false)
+
+// ── 周末讲题错题卷 State（年级视图） ──
+const wrongPaperItems = ref([])
+const wrongPaperMeta = ref(null) // {totalStudentCount, wrongStudentCount, period}
+const loadingWrongPaper = ref(false)
+const wrongPaperError = ref('')
+const exportingWrongPaper = ref(false)
+const expandedWrongRows = ref(new Set()) // Set<identityKey>
 
 const allChecked = computed(() =>
   summaryData.value?.reports?.length > 0 &&
@@ -427,21 +577,59 @@ const filterNoteText = computed(() => {
     : `${reportsWithData.value.length} 名学生有数据`
 })
 
+// 错题卷区块描述：年级 · 时段 · 学科 · 总人数 · 本周错题学生数 · 加载失败原因
+const wrongPaperDescription = computed(() => {
+  if (!selectedGrade.value) return '请选择年级'
+  const meta = wrongPaperMeta.value
+  const total = meta?.totalStudentCount ?? '-'
+  const wrongStu = meta?.wrongStudentCount ?? '-'
+  return `${selectedGrade.value} · ${periodLabel.value} · ${diagSubject.value || '数学'} · 共 ${total} 名学生 · ${wrongStu} 人本周错题${wrongPaperError.value ? ` · 加载失败：${wrongPaperError.value}` : ''}`
+})
+
+// 错误率档位（视觉强化）
+function errorRateTone(rate) {
+  if (rate >= 40) return 'is-critical'
+  if (rate >= 20) return 'is-warning'
+  if (rate >= 10) return 'is-info'
+  return 'is-normal'
+}
+
+// 错因 → StatusTag tone（与已有 errorTypeColor 视觉一致）
+function errorTypeToTone(type) {
+  if (!type || type === '未标注') return 'default'
+  if (/计算|运算/.test(type)) return 'danger'
+  if (/审题/.test(type)) return 'warning'
+  if (/公式|概念/.test(type)) return 'primary'
+  if (/步骤|单位/.test(type)) return 'info'
+  if (/方法|分析/.test(type)) return 'success'
+  if (/抄写|粗心/.test(type)) return 'default'
+  return 'default'
+}
+
 // ── Watch period changes to refresh data ──
 
 watch([periodMode, periodOffset], () => {
   loadSummary()
-  if (viewMode.value === 'grade' && selectedGrade.value) loadGradeSuggestions()
+  if (viewMode.value === 'grade' && selectedGrade.value) {
+    loadGradeSuggestions()
+    loadWrongPaper()
+  }
   if (selectedStudentId.value) handleStudentChange(selectedStudentId.value)
 })
 
 watch(viewMode, (val) => {
-  if (val === 'grade' && selectedGrade.value) loadGradeSuggestions()
+  if (val === 'grade' && selectedGrade.value) {
+    loadGradeSuggestions()
+    loadWrongPaper()
+  }
   if (val === 'single' && selectedStudentId.value) loadStudentSuggestions()
 })
 
 watch(selectedGrade, () => {
-  if (viewMode.value === 'grade' && selectedGrade.value) loadGradeSuggestions()
+  if (viewMode.value === 'grade' && selectedGrade.value) {
+    loadGradeSuggestions()
+    loadWrongPaper()
+  }
 })
 
 watch(selectedStudentId, (id) => {
@@ -573,6 +761,97 @@ async function loadStudentSuggestions() {
 
 async function retryGradeSuggestions() {
   await loadGradeSuggestions()
+}
+
+// ── 错题卷（年级视图） ──
+async function loadWrongPaper() {
+  if (!selectedGrade.value) return
+  loadingWrongPaper.value = true
+  wrongPaperError.value = ''
+  try {
+    const data = await getTeachingWrongPaper({
+      grade: selectedGrade.value,
+      mode: periodMode.value,
+      offset: periodOffset.value,
+      subject: diagSubject.value || undefined,
+    })
+    if (data.success) {
+      wrongPaperItems.value = data.items || []
+      wrongPaperMeta.value = data
+    } else {
+      wrongPaperError.value = data.error || '获取错题卷失败'
+      wrongPaperItems.value = []
+      wrongPaperMeta.value = null
+    }
+  } catch (e) {
+    wrongPaperError.value = e.message || '获取错题卷失败'
+    console.error('loadWrongPaper 异常:', e)
+  } finally {
+    loadingWrongPaper.value = false
+  }
+}
+
+function toggleWrongRow(key) {
+  const set = expandedWrongRows.value
+  if (set.has(key)) set.delete(key)
+  else set.add(key)
+}
+
+function isWrongRowExpanded(key) {
+  return expandedWrongRows.value.has(key)
+}
+
+function wrongPaperRowKey(row) {
+  return row.identityKey || row.questionId || row.content
+}
+
+async function handleExportWrongPaperAll() {
+  if (!selectedGrade.value || wrongPaperItems.value.length === 0) return
+  exportingWrongPaper.value = true
+  try {
+    const blob = await exportWrongPaper({
+      grade: selectedGrade.value,
+      mode: 'all',
+      subject: diagSubject.value || '数学',
+      periodMode: periodMode.value,
+      periodOffset: periodOffset.value,
+    })
+    const ymd = dayjs().format('YYYYMMDD')
+    const safeGrade = String(selectedGrade.value).replace(/[\\/:*?"<>|\s]/g, '_')
+    saveAs(blob, `${ymd}_${safeGrade}_全班错题卷.docx`)
+    ElMessage.success('全班错题卷已生成')
+  } catch (e) {
+    ElMessage.error('导出失败：' + (e.message || '未知错误'))
+  } finally {
+    exportingWrongPaper.value = false
+  }
+}
+
+async function handleExportWrongPaperStudent(row) {
+  if (!selectedGrade.value || !row?.involvedStudents?.length) return
+  exportingWrongPaper.value = true
+  try {
+    // 选第一个学生作为默认导出对象（个人卷：每次只生成一个学生的卷）
+    // 真实场景中老师通常会逐个学生点导出，所以这里一次只导一个
+    const stu = row.involvedStudents[0]
+    const blob = await exportWrongPaper({
+      grade: selectedGrade.value,
+      mode: 'student',
+      studentId: stu.id,
+      studentName: stu.name,
+      subject: diagSubject.value || '数学',
+      periodMode: periodMode.value,
+      periodOffset: periodOffset.value,
+    })
+    const ymd = dayjs().format('YYYYMMDD')
+    const safeName = String(stu.name || '学生').replace(/[\\/:*?"<>|\s]/g, '_')
+    saveAs(blob, `${ymd}_${safeName}_错题卷.docx`)
+    ElMessage.success(`${stu.name}的错题卷已生成`)
+  } catch (e) {
+    ElMessage.error('导出失败：' + (e.message || '未知错误'))
+  } finally {
+    exportingWrongPaper.value = false
+  }
 }
 
 async function openDrill(row) {
@@ -794,6 +1073,34 @@ function knowledgeLevel(row) {
 
 <style scoped>
 .diagnosis-page{color:var(--wb-text)}.diagnosis-filter{margin-bottom:16px}.student-select{width:220px}.offset-select,.subject-select{width:120px}.student-option{display:flex;align-items:center;gap:8px}.student-option small{margin-left:auto;color:var(--wb-text-tertiary)}.filter-note{color:var(--wb-text-tertiary);font-size:11px;white-space:nowrap}.diagnosis-layout{display:grid;grid-template-columns:minmax(0,1.65fr) minmax(320px,.75fr);align-items:start;gap:16px;margin-bottom:16px}.loading-stack{display:grid;gap:18px;padding:20px}.student-diagnosis-list{min-height:360px}.student-diagnosis-row{display:flex;align-items:center;gap:12px;min-height:82px;padding:12px 16px;box-sizing:border-box;border-bottom:1px solid var(--wb-border-light);cursor:pointer}.student-diagnosis-row:last-child{border-bottom:0}.student-diagnosis-row:hover{background:var(--wb-bg-elevated)}.student-identity{display:flex;width:110px;min-width:0;flex-direction:column;gap:3px}.student-identity strong{font-size:13px}.student-identity small{color:var(--wb-text-tertiary);font-size:10px}.student-metrics{display:grid;grid-template-columns:repeat(3,72px);gap:6px}.student-metrics span{display:flex;color:var(--wb-text-tertiary);font-size:9px;flex-direction:column;gap:3px}.student-metrics b{color:var(--wb-text);font-size:12px}.student-next{display:flex;min-width:170px;flex:1;flex-direction:column;gap:4px}.student-next span{color:var(--wb-text-tertiary);font-size:9px}.student-next strong{font-size:11px;font-weight:550}.row-arrow{color:var(--wb-text-tertiary)}.student-detail-layout{grid-template-columns:minmax(0,1.35fr) minmax(330px,.65fr)}.teaching-judgement{display:grid;grid-template-columns:repeat(3,1fr);border:1px solid var(--wb-border-light);border-radius:8px}.teaching-judgement>div{min-height:88px;padding:14px;border-right:1px solid var(--wb-border-light)}.teaching-judgement>div:last-child{border-right:0}.teaching-judgement .focus{background:#fffaf2}.teaching-judgement span{display:block;margin-bottom:7px;color:var(--wb-text-tertiary);font-size:10px}.teaching-judgement strong{font-size:11px;line-height:1.65}.trend-panel{margin-top:16px;padding-top:16px;border-top:1px solid var(--wb-border-light)}.trend-heading{display:flex;align-items:center;justify-content:space-between}.trend-heading>div{display:flex;flex-direction:column;gap:4px}.trend-heading strong{font-size:12px}.trend-heading span{color:var(--wb-text-tertiary);font-size:10px}.trend-result{font-size:11px;font-weight:600}.trend-result.success{color:var(--wb-success)}.trend-result.danger{color:var(--wb-danger)}.trend-result.primary{color:var(--wb-primary)}.trend-bars{display:grid;grid-template-columns:repeat(7,1fr);gap:10px;height:120px;margin-top:14px}.trend-day{display:flex;align-items:center;min-width:0;flex-direction:column;gap:4px}.trend-track{display:flex;width:100%;height:72px;align-items:flex-end;justify-content:center;background:var(--wb-bg-elevated);border-radius:5px;overflow:hidden}.trend-track span{display:block;width:100%;background:var(--wb-primary-soft);border-top:2px solid var(--wb-primary)}.trend-day b{font-size:9px}.trend-day small{color:var(--wb-text-tertiary);font-size:8px}.trend-empty{padding:30px;color:var(--wb-text-tertiary);font-size:11px;text-align:center}.knowledge-diagnosis,.class-diagnosis-section{margin-bottom:16px}.knowledge-name{display:flex;flex-direction:column;gap:3px}.knowledge-name strong{font-size:12px}.knowledge-name small,.table-sub{display:block;color:var(--wb-text-tertiary);font-size:9px}.danger-text{color:var(--wb-danger)}.no-comparison{font-size:11px;color:var(--wb-text-secondary)}.table-action{display:flex;align-items:center;justify-content:space-between;gap:10px}.drawer-header{display:flex;align-items:flex-start;justify-content:space-between}.drawer-title{font-size:16px;font-weight:650}.drawer-sub{margin-top:4px;color:var(--wb-text-tertiary);font-size:11px}.drawer-body{min-height:300px}.error-dist{display:grid;gap:12px}.error-item{display:flex;align-items:center}.error-type{width:90px;font-size:11px}.error-count{color:var(--wb-text-tertiary);font-size:10px}.sample-list{display:grid;gap:10px}.sample-item{padding:12px;background:var(--wb-bg-elevated);border-radius:8px}.sample-q{font-size:12px;line-height:1.6}.sample-meta,.sample-reason{display:flex;gap:8px;margin-top:8px;flex-wrap:wrap}.sample-meta{color:var(--wb-text-secondary);font-size:10px}.blank-badge{color:var(--wb-danger);font-weight:600}.muted{color:var(--wb-text-tertiary)}.diagnosis-page :deep(.el-input__wrapper),.diagnosis-page :deep(.el-select__wrapper){min-height:34px;border-radius:8px;box-shadow:0 0 0 1px var(--wb-border) inset}.diagnosis-page :deep(.el-segmented){--el-segmented-item-selected-bg-color:#fff;--el-segmented-item-selected-color:var(--wb-primary)}.diagnosis-page :deep(.diag-row--blank td){background:#fffaf2!important}.diagnosis-page :deep(button:focus-visible){outline:2px solid var(--wb-primary);outline-offset:2px}.output-bar{display:flex;align-items:center;gap:var(--wb-space-3);margin-top:var(--wb-space-4);padding:var(--wb-space-3) var(--wb-space-4);border:1px solid var(--wb-border-light);border-radius:var(--wb-radius-md);background:var(--wb-bg-card)}.output-bar__label{color:var(--wb-text-tertiary);font-size:var(--wb-fs-meta);font-weight:var(--wb-fw-semibold)}@media(max-width:1180px){.diagnosis-layout,.student-detail-layout{grid-template-columns:1fr}.student-next{display:none}}@media(max-width:760px){.student-select,.offset-select{width:100%}.student-diagnosis-row{align-items:flex-start;flex-wrap:wrap}.student-metrics{width:100%;padding-left:58px}.teaching-judgement{grid-template-columns:1fr}.teaching-judgement>div{border-right:0;border-bottom:1px solid var(--wb-border-light)}.output-bar{flex-wrap:wrap}}
+
+/* ── 周末讲题错题卷（grade view） ── */
+.wrong-paper-section{margin-bottom:16px}
+.wrong-paper-card :deep(.el-button.is-text){font-size:11px}
+.wrong-paper-table{margin-top:8px}
+.wrong-paper-table :deep(.cell){padding:8px 6px}
+.wrong-q-cell{display:flex;flex-direction:column;gap:4px;min-width:0}
+.wrong-q-content{display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden;font-size:12px;line-height:1.5;word-break:break-word}
+.wrong-q-tags{display:flex;flex-wrap:wrap;gap:4px}
+.error-rate{display:flex;flex-direction:column;align-items:center;line-height:1.2}
+.error-rate strong{font-size:14px;font-weight:700}
+.error-rate small{font-size:9px;color:var(--wb-text-tertiary);margin-top:2px}
+.error-rate.is-critical strong{color:var(--wb-danger)}
+.error-rate.is-critical{background:#fef2f2;border-radius:6px;padding:4px 0}
+.error-rate.is-warning strong{color:var(--wb-warning)}
+.error-rate.is-info strong{color:var(--wb-primary)}
+.error-rate.is-normal strong{color:var(--wb-text-secondary)}
+.rank-num{display:inline-block;min-width:24px;padding:2px 8px;border-radius:10px;background:var(--wb-bg-elevated);color:var(--wb-text-secondary);font-size:11px;font-weight:600}
+.rank-num.is-top{background:var(--wb-primary-soft);color:var(--wb-primary)}
+.error-tags{display:flex;flex-wrap:wrap;gap:4px;align-items:center}
+.row-actions{display:flex;gap:4px;justify-content:center}
+.muted{color:var(--wb-text-tertiary);font-size:11px}
+.wrong-paper-expand{padding:8px 12px;background:var(--wb-bg-elevated);border-radius:8px;margin:4px 0}
+.expand-row{display:flex;gap:12px;align-items:flex-start;padding:6px 0;font-size:12px;border-bottom:1px dashed var(--wb-border-light)}
+.expand-row:last-child{border-bottom:0}
+.expand-label{flex-shrink:0;width:96px;color:var(--wb-text-tertiary);font-size:11px}
+.student-chips{display:flex;flex-wrap:wrap;gap:4px}
+.error-mini{display:flex;flex-wrap:wrap;gap:8px;font-size:11px}
 
 /* ── 年级备课建议（grade view） ── */
 .grade-suggestions-section{margin-bottom:16px}
