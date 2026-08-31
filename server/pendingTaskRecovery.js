@@ -118,6 +118,7 @@ class PendingTaskRecovery {
         this.scanFailedTasks(),
         this.scanProcessingStuck(),
         this.scanGeometryAssets(),
+        this.scanOverdueGeometry(),
         this.scanStuckWorksheetParsing()
       ])
     } catch (err) {
@@ -571,6 +572,79 @@ class PendingTaskRecovery {
       }
     } catch (err) {
       console.error('[PendingTaskRecovery] ❌ 几何资产扫描失败:', err)
+    }
+  }
+
+  /**
+   * 24h watchdog：扫描仍未收尾的几何资产,做长期兜底。
+   *
+   * 业务约束：上传后 24h 内任何题都必须有结论(completed / none),否则视为 bug。
+   * 此扫描覆盖 scanGeometryAssets 漏掉的两类死角:
+   *   1. pending/processing 卡死超过 24h（worker 进程被 SIGTERM / 队列假死 / Redis 断连）:
+   *      强制重置为 pending + 重新入队,给最后一次翻身机会。
+   *   2. failed 且 retry_count>=3 超过 24h:人工复核不会来,直接标 none 让前端回退裁剪原图。
+   */
+  async scanOverdueGeometry() {
+    try {
+      const geometryQueue = await getGeometryQueue()
+      if (!geometryQueue) {
+        console.log('[PendingTaskRecovery] ⏭️  geometry 队列不可用,跳过 24h watchdog')
+        return
+      }
+      const OVERDUE_HOURS = parseInt(process.env.GEOMETRY_OVERDUE_HOURS) || 24
+      const { rows } = await query(
+        `SELECT id, question_id, tikz_status, retry_count,
+                EXTRACT(EPOCH FROM (NOW() - created_at))::int AS age_sec
+         FROM ${TABLES.QUESTION_ASSETS}
+         WHERE asset_type = 'geometry_image'
+           AND created_at < NOW() - ($1 || ' hours')::interval
+           AND (
+             tikz_status IN ('pending','processing')
+             OR (tikz_status = 'failed' AND COALESCE(retry_count, 0) >= $2)
+           )
+         ORDER BY created_at ASC
+         LIMIT 50`,
+        [OVERDUE_HOURS, GEOMETRY_MAX_RETRIES]
+      )
+
+      let reEnqueued = 0
+      let abandoned = 0
+      for (const a of rows) {
+        const ageH = Math.round(a.age_sec / 3600)
+        try {
+          if (a.tikz_status === 'failed') {
+            // 24h+ 且已重试 3 次:放弃 Vision,前端回退裁剪原图
+            await query(
+              `UPDATE ${TABLES.QUESTION_ASSETS}
+               SET tikz_status = 'none',
+                   last_error = COALESCE(last_error, '') ||
+                                ' [24h watchdog] 已超过 24h 且重试 >= ' || $1 || ' 次,放弃 Vision 回退原图'
+               WHERE id = $2`,
+              [GEOMETRY_MAX_RETRIES, a.id]
+            )
+            console.warn(`[PendingTaskRecovery] 🛑 24h watchdog 回退原图: ${a.question_id?.substring(0, 8)} (age=${ageH}h, retries=${a.retry_count})`)
+            abandoned++
+          } else {
+            // pending/processing 卡死 24h+:重置状态 + 重新入队
+            await query(
+              `UPDATE ${TABLES.QUESTION_ASSETS}
+               SET tikz_status = 'pending', processed_at = NULL
+               WHERE id = $1`,
+              [a.id]
+            )
+            await geometryQueue.add('reconstruct', { assetId: a.id }, { attempts: 1 })
+            console.warn(`[PendingTaskRecovery] ⏰ 24h watchdog 强制入队: ${a.question_id?.substring(0, 8)} (age=${ageH}h, prev=${a.tikz_status})`)
+            reEnqueued++
+          }
+        } catch (err) {
+          console.error(`[PendingTaskRecovery]  24h watchdog 处理失败 ${a.id?.substring(0, 8)}:`, err.message)
+        }
+      }
+      if (rows.length > 0) {
+        console.log(`[PendingTaskRecovery] 🐕 24h watchdog 完成: 入队 ${reEnqueued}, 回退原图 ${abandoned}`)
+      }
+    } catch (err) {
+      console.error('[PendingTaskRecovery] ❌ 24h watchdog 扫描失败:', err.message)
     }
   }
 }

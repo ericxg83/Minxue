@@ -91,6 +91,18 @@ export function getTikzStatus(question) {
 
   // 异步重建管道：tikz_status 由 API 返回（新流程）
   if (question.tikz_status) {
+    // 前端 24h watchdog：pending/processing 超过 24h 直接视为 none,
+    // 让前端无感回退裁剪原图,不再转圈。服务端 scanOverdueGeometry 同步在跑兜底,
+    // 这里只是最后一道体验防线——即便服务端兜底还没到,前端也不卡用户。
+    if (
+      (question.tikz_status === 'pending' || question.tikz_status === 'processing') &&
+      question.created_at
+    ) {
+      const ageMs = Date.now() - new Date(question.created_at).getTime()
+      if (Number.isFinite(ageMs) && ageMs > 24 * 60 * 60 * 1000) {
+        return 'none'
+      }
+    }
     if (question.tikz_status === 'completed') return 'done'
     if (question.tikz_status === 'processing') return 'processing'
     if (question.tikz_status === 'failed') return 'failed'

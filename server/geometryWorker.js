@@ -30,6 +30,8 @@ import { callVisionCompletion, buildGeometryReconstructionPrompt } from './confi
 import { parseGeometryStructure, renderGeometrySvg, isEmptyStructure, isRawEmptyStructure, hasDerivedPoints } from './utils/geometrySvg.js'
 import { validateGeometryLabels } from './utils/geometryLabelValidator.js'
 import { validateStructureAgainstContent } from './utils/geometryContentGate.js'
+import { computeGeometryConsistency } from './utils/geom/consistency.js'
+import { correctGeometryFigure } from './utils/geom/correctedRender.js'
 import {
   updateGeometryReconstructionStatus,
   updateQuestionDenormalizedSvg
@@ -184,6 +186,33 @@ async function processSingleAsset(asset) {
     }
     svg = result.svg
     structure = result.structure
+
+    // [P4 影子模式] 几何自洽性审计：抽取约束→求解→闸门，仅产出审计字段，绝不阻断重建
+    try {
+      structure.consistency = computeGeometryConsistency(structure, content)
+    } catch (consistencyErr) {
+      console.warn(`   [几何Worker] ${shortId}: 自洽性审计异常（已忽略，不影响重建）:`, consistencyErr?.message)
+      structure.consistency = { skipped: true, reason: 'audit_error' }
+    }
+
+    // [P5 回灌修正渲染] 用求解后一致坐标重渲修正图；安全闸门不过则保留原图，交人工复核
+    const rawSvg = svg
+    try {
+      const corrected = correctGeometryFigure(structure, content)
+      if (corrected.ok) {
+        structure.solved = { ...corrected.solved, svg: corrected.svg }
+        structure.raw_svg = rawSvg
+        svg = corrected.svg
+        console.log(`   [几何Worker] ${shortId}: 已回灌修正渲染（displacement=${corrected.solved.displacement}）`)
+      } else {
+        structure.solved = { skipped: true, reason: corrected.reason }
+        console.log(`   [几何Worker] ${shortId}: 未回灌修正渲染（${corrected.reason}），保留原图`)
+      }
+    } catch (corrErr) {
+      console.warn(`   [几何Worker] ${shortId}: 修正渲染异常（保留原图）:`, corrErr?.message)
+      structure.solved = { skipped: true, reason: 'correct_error' }
+    }
+
     const nP = structure.points.length
     const nS = structure.segments.length
     const nC = structure.circles.length
@@ -238,14 +267,15 @@ async function handleRetry(asset, errorMessage) {
     })
     console.log(`   [几何Worker] ${shortId}: 已标记失败，将在 ${RETRY_DELAYS[currentRetry - 1] / 60000} 分钟后自动重试`)
   } else {
-    // 超过最大重试次数，保持 failed 等待人工处理
+    // 超过最大重试次数：放弃 Vision 重建,标 none 让前端回退裁剪原图。
+    // 长期兜底：避免 failed 状态无限期挂着,24h watchdog 会再次强制收尾。
     await updateGeometryReconstructionStatus(asset.id, {
-      tikz_status: 'failed',
+      tikz_status: 'none',
       retry_count: currentRetry,
-      last_error: `已超过最大重试次数 (${MAX_RETRIES})，最后一次错误: ${errorMessage}`,
+      last_error: `Vision 重建超过最大重试 (${MAX_RETRIES}),已回退裁剪原图。最后一次错误: ${errorMessage}`,
       processed_at: new Date().toISOString()
     })
-    console.warn(`   [几何Worker] ${shortId}: 已超过最大重试次数 (${MAX_RETRIES})，保持 failed 状态，等待人工重新触发`)
+    console.warn(`   ⚠️ [几何Worker] ${shortId}: 超过最大重试 (${MAX_RETRIES}),放弃 Vision,前端回退裁剪原图`)
   }
 }
 
