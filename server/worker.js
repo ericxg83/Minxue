@@ -1499,7 +1499,7 @@ const saveQuestionSubject = async (q, subject) => {
  * OCR may confuse student's selected answer with the reference answer,
  * so reference answers should always come from AI calculation based on question content.
  */
-const generateMissingAnswers = async (questions, imageBuffer = null) => {
+const generateMissingAnswers = async (questions, imageBuffer = null, taskId = null) => {
   if (!questions || questions.length === 0) return { updated: 0, total: 0, exceptions: 0, cacheHits: 0, cacheMisses: 0 }
 
   const needAnswer = questions.filter(q => true)
@@ -1543,6 +1543,14 @@ const generateMissingAnswers = async (questions, imageBuffer = null) => {
     await markAnswerException(q.id, validation.reason)
     console.warn(`     题目 ${q.id.substring(0, 8)}: ${validation.reason}，已转人工复核`)
   }
+
+  // ⏳ 进度条中间状态：80% 打在这里后会跑这个批次循环，单个 batch 可能耗时分钟级
+  // （AI 生成答案 / 缓存回填），期间 result.progress 一直停 80 → 前端"批改中"看着像卡死。
+  // 按 batch 完成度把 80→84 拆细，让前端能看到推进。
+  // ⚠️ 本函数不持有 job 也没 taskId，只能通过调用方传入的 taskId 走 updateTaskStatus 写库，
+  //    绝不能在函数体内引用 job / taskId 的 undefined 全局变量（历史 ReferenceError 根因）。
+  const answerTotal = needAnswer.length
+  let processedAnswerBatches = 0
 
   for (let i = 0; i < needAnswer.length; i += batchSize) {
     const batch = needAnswer.slice(i, i + batchSize)
@@ -1700,6 +1708,14 @@ const generateMissingAnswers = async (questions, imageBuffer = null) => {
     })
 
     await Promise.allSettled(promises)
+    processedAnswerBatches += 1
+    if (taskId) {
+      const subProgress = answerTotal > 0
+        ? 80 + Math.min(4, Math.floor((processedAnswerBatches * batchSize / answerTotal) * 5))
+        : 85
+      const cappedSub = Math.min(84, subProgress)
+      await updateTaskStatus(taskId, TASK_STATUS.PROCESSING, { progress: cappedSub }).catch(() => {})
+    }
   }
 
   return { updated: updatedCount, total: needAnswer.length, empty: emptyCount, placeholder: placeholderCount, exceptions: exceptionCount, cacheHits: cacheHitCount, cacheMisses: cacheMissCount }
@@ -5523,7 +5539,7 @@ await job.updateProgress(80)
       await updateTaskStatus(taskId, TASK_STATUS.PROCESSING, { progress: 80 })
 
       console.log(`📊 [Step 7/8] 生成AI参考答案...`)
-      answerGenResult = await generateMissingAnswers(questions, compressedBuffer)
+      answerGenResult = await generateMissingAnswers(questions, compressedBuffer, taskId)
       
       let rejudgedWrong = 0
       // 始终执行重判定，确保 OCR 阶段错误的 is_correct 可以被纠正
@@ -5671,6 +5687,9 @@ await job.updateProgress(80)
       await batchUpdateQuestionTags(tagUpdates)
       console.log(`✅ [Step 8/8] 本地标签保存成功`)
 
+      await job.updateProgress(87).catch(() => {})
+      await updateTaskStatus(taskId, TASK_STATUS.PROCESSING, { progress: 87 }).catch(() => {})
+
       await job.updateProgress(90)
       await updateTaskStatus(taskId, TASK_STATUS.PROCESSING, { progress: 90 })
 
@@ -5716,6 +5735,8 @@ await job.updateProgress(80)
       } catch (e) {
         console.error(`  ⚠️ [Auto-save] 保存答案库失败:`, e.message)
       }
+      await job.updateProgress(95).catch(() => {})
+      await updateTaskStatus(taskId, TASK_STATUS.PROCESSING, { progress: 95 }).catch(() => {})
     } else {
       console.log(`⚠️  AI 未识别到任何题目`)
     }
@@ -5741,6 +5762,9 @@ await job.updateProgress(80)
     } catch (e) {
       console.error(`  ⚠️ [Knowledge] 知识点/掌握度同步异常:`, e.message)
     }
+
+    await job.updateProgress(98).catch(() => {})
+    await updateTaskStatus(taskId, TASK_STATUS.PROCESSING, { progress: 98 }).catch(() => {})
 
     await job.updateProgress(100)
     const duration = Date.now() - startTime

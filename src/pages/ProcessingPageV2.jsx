@@ -1,5 +1,6 @@
 import { AlertCircle, Camera, CheckCircle2, ChevronRight, Clock3, Loader2, RotateCcw } from 'lucide-react'
 import { motion } from 'motion/react'
+import { useEffect, useRef } from 'react'
 import dayjs from 'dayjs'
 import EmptyState from '../components/EmptyState'
 import { MobileList, MobileSegmentedTabs, MobileTextAction } from '../features/mobile/MobilePrimitives'
@@ -12,9 +13,11 @@ const time = v => dayjs(v).isValid() ? dayjs(v).format('MM/DD HH:mm') : '刚刚'
 
 // 服务重启/worker 崩溃会让任务永久停在 processing，仅看 status 会一直转圈且无重试入口。
 // 用 started_at 实时判定超时，不落库——避免为此新增第五种任务状态。
+// 排队期（还没被 worker 接手、started_at 为空）给更长缓冲，避免攒在队列里就被误判超时。
 const STALL_MS = 30 * 60 * 1000
+const QUEUE_STALL_MS = 60 * 60 * 1000
 const stage = t => t.status === 'failed' ? 'failed'
-  : active.has(t.status) ? (Date.now() - new Date(t.started_at || t.created_at).getTime() > STALL_MS ? 'stalled' : 'processing')
+  : active.has(t.status) ? (Date.now() - new Date(t.started_at || t.created_at).getTime() > (t.started_at ? STALL_MS : QUEUE_STALL_MS) ? 'stalled' : 'processing')
   : complete(t) ? 'completed' : 'waiting'
 
 // 失败原因分类：旧文案一律写「图片处理没有完成」，会把 AI 输出格式问题误导成图片问题，
@@ -67,12 +70,16 @@ function TaskRow({ task, onRetryTask, onOpenReview }) {
   const Icon = bad ? AlertCircle : current === 'processing' ? Loader2 : current === 'completed' ? CheckCircle2 : Clock3
   const pageCount = (Array.isArray(task.images) ? task.images.length : 0) || (Array.isArray(task.pages) ? task.pages.length : 0) || 0
   const isTemp = Boolean(task.is_temp) || (typeof task.id === 'string' && task.id.startsWith('temp-'))
+  // 后端 result.progress 是 0-100 的真实批改进度；只有处理中且非 0/100 时显示百分比，
+  // 避免把"刚创建/已结束"的任务也渲染成进度条。配合 5s 轮询实时刷新。
+  const progress = Number(task.result?.progress)
+  const showProgress = current === 'processing' && Number.isFinite(progress) && progress > 0 && progress < 100
   // 服务端任务显示落库的任务名（练习册名/科目+时间），重练卷保持固定名；旧数据回退"日常作业"
   const name = retry(task) ? '错题重练' : (task.original_name || '日常作业')
   const detail = current === 'failed' ? failReason(task)
     : current === 'stalled' ? '处理超时，可重试'
     : current === 'processing' && isTemp ? '正在上传图片'
-    : current === 'processing' ? '正在整理批改结果'
+    : current === 'processing' ? (showProgress ? `正在整理批改结果 · ${Math.round(progress)}%` : '正在整理批改结果')
     : current === 'completed'
       ? <ResultSummary questionCount={questionCount} wrong={wrong} empty={empty} pending={pending} truncated={truncated} />
     : '等待系统开始处理'
@@ -112,7 +119,7 @@ function TaskRow({ task, onRetryTask, onOpenReview }) {
   </div>
 }
 
-export default function ProcessingPageV2({ currentStudent, tasks, filteredTasks, isLoadingTasks, isInitializing, processingFilter, onFilterChange, onRetryTask, onOpenReview }) {
+export default function ProcessingPageV2({ currentStudent, tasks, filteredTasks, isLoadingTasks, isInitializing, processingFilter, onFilterChange, onRetryTask, onOpenReview, onRefresh }) {
   const all = (Array.isArray(tasks) ? tasks : []).filter(t => t.student_id === currentStudent?.id)
   const visible = Array.isArray(filteredTasks) ? filteredTasks : []
   const tabs = [
@@ -120,6 +127,16 @@ export default function ProcessingPageV2({ currentStudent, tasks, filteredTasks,
     { id: 'homework', label: '作业', count: all.filter(t => !retry(t)).length },
     { id: 'retry', label: '重练', count: all.filter(retry).length }
   ]
+  // 有处理中任务时每 5s 拉一次最新进度（result.progress），让百分比实时上屏；
+  // 全部任务都结束（done / failed / 无等待）就停轮询，避免无效请求。
+  const hasInFlight = all.some(t => active.has(t.status) && stage(t) === 'processing')
+  const onRefreshRef = useRef(onRefresh)
+  onRefreshRef.current = onRefresh
+  useEffect(() => {
+    if (!hasInFlight || typeof onRefreshRef.current !== 'function') return
+    const id = setInterval(() => { onRefreshRef.current(false) }, 5000)
+    return () => clearInterval(id)
+  }, [hasInFlight])
   return <motion.div initial={{ opacity: 0, x: 16 }} animate={{ opacity: 1, x: 0 }} className='mobile-page mx-auto w-full max-w-lg px-4 pb-6 pt-5'>
     <MobileSegmentedTabs items={tabs} value={processingFilter} onChange={onFilterChange} ariaLabel='作业类型' />
     {isLoadingTasks || isInitializing
