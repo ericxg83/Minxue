@@ -40,7 +40,7 @@ function FailedCard({ onRetry, onDismiss }) {
   return <div className='rounded-2xl border px-4 py-3.5' style={{ background: 'var(--warning-soft)', borderColor: 'rgba(217,119,6,.25)' }}>
     <div className='flex items-start gap-3'>
       <span className='flex h-9 w-9 shrink-0 items-center justify-center rounded-xl' style={{ background: 'rgba(217,119,6,.14)', color: 'var(--warning)' }}><AlertCircle size={18} aria-hidden='true' /></span>
-      <div className='min-w-0 flex-1'><p className='text-[14px] font-medium' style={{ color: 'var(--text)' }}>上次作业没能批改完成</p><p className='mt-0.5 text-[12px]' style={{ color: 'var(--text-secondary)' }}>可以重新提交再试一次，或先忽略这份</p></div>
+      <div className='min-w-0 flex-1'><p className='text-[14px] font-medium' style={{ color: 'var(--text)' }}>有 1 份历史作业未能批改完成</p><p className='mt-0.5 text-[12px]' style={{ color: 'var(--text-secondary)' }}>可以重新提交再试一次，或先忽略这份</p></div>
     </div>
     <div className='mt-3 flex gap-2'>
       <button type='button' onClick={onRetry} className='flex-1 rounded-xl py-2 text-[13px] font-semibold text-white transition-transform active:scale-[0.98] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--primary)]' style={{ background: 'var(--warning)' }}>重新提交</button>
@@ -56,6 +56,13 @@ export default function HomeDashboardV2({ currentStudent, tasks, isInitializing,
   const stalledTask = list.find(stalled)
   const latest = list.find(complete)
 
+  // 收窄失败卡显示条件：若这条失败之后用户已有成功批改或正在批改的新任务，
+  // "上次作业"已不指代它，避免老 failed 一直被误读成"刚才那次失败了"
+  const newerThanFailed = failedTask
+    ? list.some((t) => t !== failedTask && (complete(t) || processing(t)) && new Date(t.created_at || 0).getTime() > new Date(failedTask.created_at || 0).getTime())
+    : false
+  const shouldShowFailed = failedTask && !newerThanFailed
+
   // 状态提醒，按紧急度排序：批改中 > 结果就绪 > 智能推荐重练（失败单独用 FailedCard 置顶）。
   // 首页是决策层：提醒卡只导航或发起流程，打开批改结果的动作归作业页列表行。
   const reminders = []
@@ -67,7 +74,7 @@ export default function HomeDashboardV2({ currentStudent, tasks, isInitializing,
   }
   if (!isInitializing && pendingWrongCount > 0) reminders.push({ key: 'priorityRetry', icon: <Wand2 size={18} />, tone: 'neutral', title: `重点重练 · ${pendingWrongCount} 道错题待巩固`, detail: 'AI 挑选最需要巩固的错题，一键生成重练卷', onClick: onStartPriorityRetry })
 
-  const empty = !isInitializing && !failedTask && reminders.length === 0
+  const empty = !isInitializing && !shouldShowFailed && reminders.length === 0
   const hour = new Date().getHours()
   const greeting = hour < 12 ? '早上好' : hour < 18 ? '下午好' : '晚上好'
 
@@ -80,7 +87,7 @@ export default function HomeDashboardV2({ currentStudent, tasks, isInitializing,
       <MobileSectionHeading title='待处理' description={isInitializing ? '正在同步最新记录' : undefined} action='查看作业' onAction={onOpenTasks} />
       <div className='flex flex-col gap-2.5'>
         {isInitializing && <ReminderCard icon={<Clock3 size={18} />} tone='info' title='正在同步学习记录' detail='稍后会显示最新状态' onClick={onOpenTasks} />}
-        {!isInitializing && failedTask && <FailedCard onRetry={() => onRetryTask?.(failedTask.id)} onDismiss={() => onDismissTask?.(failedTask.id)} />}
+        {!isInitializing && shouldShowFailed && <FailedCard onRetry={() => onRetryTask?.(failedTask.id)} onDismiss={() => onDismissTask?.(failedTask.id)} />}
         {reminders.map((r) => <ReminderCard key={r.key} icon={r.icon} tone={r.tone} title={r.title} detail={r.detail} onClick={r.onClick} />)}
         {empty && <div className='rounded-2xl border border-dashed px-4 py-5 text-center' style={{ borderColor: 'var(--border-light)' }}><p className='text-[13px] font-medium' style={{ color: 'var(--text-secondary)' }}>今天还没有待处理的作业</p><p className='mt-0.5 text-[12px]' style={{ color: 'var(--text-tertiary)' }}>上传一份作业，就从这里开始</p></div>}
       </div>
