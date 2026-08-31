@@ -1708,7 +1708,8 @@ const generateMissingAnswers = async (questions, imageBuffer = null) => {
     processedBatches += 1
     const subProgress = total > 0 ? 80 + Math.min(4, Math.floor((processedBatches * batchSize / total) * 5)) : 85
     const cappedSub = Math.min(84, subProgress)
-    await job.updateProgress(cappedSub).catch(() => {})
+    // 修正：generateMissingAnswers 不持有 job，不能 job.updateProgress；这里只更新 DB 进度即可，
+    // 前端轮询读 tasks.result.progress，不依赖 BullMQ 仪表盘。
     await updateTaskStatus(taskId, TASK_STATUS.PROCESSING, { progress: cappedSub }).catch(() => {})
   }
 
