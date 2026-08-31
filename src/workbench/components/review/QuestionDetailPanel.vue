@@ -94,6 +94,17 @@
           style="width:100px;margin-left:auto;" />
       </div>
 
+      <!-- 图题风险提示：客观题 + 配图（geometry/chart）时 AI 视觉推理不擅长，
+           软提示老师核对参考答案。wrong/correct 状态都展示，避免把"AI 错误"信以为真。 -->
+      <el-alert
+        v-if="aiAnswerRiskReason"
+        :title="aiAnswerRiskReason"
+        type="warning"
+        show-icon
+        :closable="false"
+        class="ops-image-risk"
+      />
+
       <!-- ═══ 完整题目内容（始终可见，不折叠） ═══ -->
       <div class="ops-question-body">
         <!-- 题型 & 学科（仅在编辑时显示） -->
@@ -292,7 +303,7 @@ import { processExamImage } from '../../../utils/imageProcessor'
 import { getGeometryDisplayUrl, getTikzStatus } from '../../../utils/geometryDisplay'
 import { tikzToSvg } from '../../../utils/tikzGenerator'
 import { normalizeOptions } from '../../../utils/optionText'
-import { getReviewStateLabel, getUnjudgedReasonText } from '../../../utils/reviewDecision'
+import { getReviewStateLabel, getUnjudgedReasonText, getAiAnswerRiskText } from '../../../utils/reviewDecision'
 import { ElMessage, ElMessageBox, ElLoading } from 'element-plus'
 import { DocumentChecked, Delete, Plus, Upload, Picture, EditPen, ArrowLeft, ArrowRight, RefreshLeft, Crop } from '@element-plus/icons-vue'
 import MathRender from '../MathRender.vue'
@@ -384,6 +395,10 @@ const getAiStateIcon = (q) => {
 const getAiStateText = (q) => getReviewStateLabel(q, store.confidenceThreshold)
 // 「AI未判定」的原因（缺参考答案 / 参考答案无法核对）。纯展示，不参与判定。
 const unjudgedReason = computed(() => getUnjudgedReasonText(q.value, store.confidenceThreshold))
+
+// 「AI 答案存疑」原因 —— AI 已给出正误，但参考本身可能不可靠（图题视觉推理）。
+// 即使在 wrong 状态也展示，避免老师把"AI 错误"信以为真。纯展示，不参与判定。
+const aiAnswerRiskReason = computed(() => getAiAnswerRiskText(q.value))
 
 const displayImageUrl = computed(() => getGeometryDisplayUrl(q.value).url)
 const displayType = computed(() => getGeometryDisplayUrl(q.value).type)
@@ -488,7 +503,7 @@ const handleCropFromPaper = () => {
     ElMessage.warning('当前试卷无原图')
     return
   }
-  // 直接用原图 URL 加载显示（<img> 标签支持跨域）
+  // 直接用原图 URL 加载显示（img 标签支持跨域）
   cropImageSource.value = task.image_url
   cropSelection.value = null
   cropPreviewUrl.value = ''
@@ -986,6 +1001,18 @@ const handleRetryGeometry = async () => {
 .ai-processing { background: var(--wb-processing); }
 .ops-ai-text { font-size: 13px; color: var(--wb-text-secondary); }
 .ops-ai-reason { font-size: 12px; color: var(--wb-warning); }
+
+/* 图题风险提示：客观题 + 几何/图表配图时，软提示老师核对参考答案 */
+.ops-image-risk {
+  flex-shrink: 0;
+  margin: 8px 10px 0;
+  padding: 6px 10px;
+}
+.ops-image-risk :deep(.el-alert__title) {
+  font-size: 12px;
+  font-weight: 500;
+  color: var(--wb-warning);
+}
 
 /* ═══ 完整题目内容区（可滚动） ═══ */
 .ops-question-body {
