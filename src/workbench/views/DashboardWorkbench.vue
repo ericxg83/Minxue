@@ -22,42 +22,68 @@
         <button class="dashboard-note__retry" type="button" @click="notiStore.fetchSummary()">重试</button>
       </div>
 
-      <!-- Briefing 加载骨架：与最终 briefing-row 形状一致，避免 layout shift -->
+      <!-- Briefing 加载骨架：与最终 summary-strip 形状一致，避免 layout shift -->
       <section v-if="initialLoading" class="briefing" aria-busy="true" aria-label="加载今日待办">
-        <ul class="briefing-list" aria-hidden="true">
-          <li v-for="i in 3" :key="i" class="briefing-skeleton-row">
-            <span class="briefing-skeleton-row__count" />
-            <span class="briefing-skeleton-row__copy">
-              <span class="briefing-skeleton-row__title" />
-              <span class="briefing-skeleton-row__description" />
+        <div class="summary-strip" aria-hidden="true">
+          <div v-for="i in 3" :key="i" class="summary-cell">
+            <span class="summary-cell__copy">
+              <span class="summary-skeleton summary-skeleton--title" />
+              <span class="summary-skeleton summary-skeleton--description" />
             </span>
-            <span class="briefing-skeleton-row__arrow" />
-          </li>
-        </ul>
+            <span class="summary-skeleton summary-skeleton--count" />
+          </div>
+        </div>
+        <div class="summary-anomaly" aria-hidden="true">
+          <span class="summary-anomaly__copy">
+            <span class="summary-skeleton summary-skeleton--title" />
+            <span class="summary-skeleton summary-skeleton--description" />
+          </span>
+          <span class="summary-skeleton summary-skeleton--count summary-skeleton--count--anomaly" />
+        </div>
       </section>
 
-      <!-- Briefing：今日行动流（Layer 1） -->
-      <section v-else-if="briefingActions.length" class="briefing" aria-label="今日待办">
-        <ul class="briefing-list">
-          <li v-for="action in briefingActions" :key="action.key">
-            <router-link
-              :to="action.to"
-              class="briefing-row"
-              :class="`is-${action.tone}`"
-              :aria-label="`${action.title}，共 ${action.count} 项`"
-            >
-              <span class="briefing-row__count">
-                <strong>{{ action.count }}</strong>
-                <small>{{ action.unit }}</small>
-              </span>
-              <span class="briefing-row__copy">
-                <strong class="briefing-row__title">{{ action.title }}</strong>
-                <small class="briefing-row__description">{{ action.description }}</small>
-              </span>
-              <el-icon class="briefing-row__arrow" aria-hidden="true"><ArrowRight /></el-icon>
-            </router-link>
-          </li>
-        </ul>
+      <!-- Briefing：今日行动流（Layer 1）—— 3 列 summary-strip + 识别异常行 -->
+      <section v-if="!initialLoading && (briefingStrip.length || failedAction)" class="briefing" aria-label="今日待办">
+        <!-- 顶部 3 列固定槽位（待复核 / 今日新增错题 / 待重练），0 值也展示 -->
+        <div v-if="briefingStrip.length" class="summary-strip">
+          <router-link
+            v-for="cell in briefingStrip"
+            :key="cell.key"
+            :to="cell.to"
+            class="summary-cell"
+            :class="`is-${cell.tone}`"
+            :aria-label="`${cell.title}，${cell.count} ${cell.unit}`"
+          >
+            <span class="summary-cell__copy">
+              <strong class="summary-cell__title">{{ cell.title }}</strong>
+              <small class="summary-cell__description">{{ cell.description }}</small>
+            </span>
+            <span class="summary-cell__count">
+              <strong>{{ cell.count }}</strong>
+              <small>{{ cell.unit }}</small>
+            </span>
+            <el-icon class="summary-cell__arrow" aria-hidden="true"><ArrowRight /></el-icon>
+          </router-link>
+        </div>
+
+        <!-- 识别异常：单独 row（0 值也展示，方便老师看到状态） -->
+        <router-link
+          v-if="failedAction"
+          :to="failedAction.to"
+          class="summary-anomaly"
+          :class="{ 'is-danger': failedCount > 0 }"
+          :aria-label="`${failedAction.title}，${failedCount} ${failedAction.unit}`"
+        >
+          <span class="summary-anomaly__copy">
+            <strong class="summary-anomaly__title">{{ failedAction.title }}</strong>
+            <small class="summary-anomaly__description">{{ failedAction.description }}</small>
+          </span>
+          <span class="summary-anomaly__count">
+            <strong>{{ failedCount }}</strong>
+            <small>{{ failedAction.unit }}</small>
+          </span>
+          <el-icon class="summary-anomaly__arrow" aria-hidden="true"><ArrowRight /></el-icon>
+        </router-link>
       </section>
 
       <!-- 空态：今天没有行动 -->
@@ -95,7 +121,7 @@
                 <span class="activity-avatar is-primary">{{ act.studentName.slice(0, 1) }}</span>
               </template>
               <template #trailing>
-                <StatusTag tone="primary" label="待复核" />
+                <StatusTag tone="info" label="待复核" />
               </template>
             </ListRow>
           </li>
@@ -116,7 +142,7 @@
         <div class="diagnostic-training__card">
           <header class="diagnostic-training__card-head">
             <h3 class="diagnostic-training__card-title">班级薄弱知识点</h3>
-            <router-link to="/knowledge" class="section-header__link">
+            <router-link to="/question-bank" class="section-header__link">
               去知识中心
               <el-icon aria-hidden="true"><ArrowRight /></el-icon>
             </router-link>
@@ -153,7 +179,7 @@
         <div class="diagnostic-training__card">
           <header class="diagnostic-training__card-head">
             <h3 class="diagnostic-training__card-title">本周重练效果</h3>
-            <router-link to="/retry" class="section-header__link">
+            <router-link to="/students?filter=retry" class="section-header__link">
               去重练中心
               <el-icon aria-hidden="true"><ArrowRight /></el-icon>
             </router-link>
@@ -257,55 +283,73 @@ const todayLabel = computed(() =>
 const pendingCount = computed(() => notiStore.summary.pendingReview || 0)
 const failedCount = computed(() => notiStore.summary.failedTasks || 0)
 const wrongCount = computed(() => notiStore.summary.todayNewWrongQuestions || 0)
+const retryCount = computed(() => retryOverview.value?.awaitingRetryStudents || 0)
 
-const totalCount = computed(() => pendingCount.value + failedCount.value + wrongCount.value)
+// 总"件事"：以"行"为单位（>0 才算 1 件），不再把数字叠加，避免「5 件事」和「5 道错题」混淆
+const totalCount = computed(() =>
+  (pendingCount.value > 0 ? 1 : 0) +
+  (failedCount.value > 0 ? 1 : 0) +
+  (wrongCount.value > 0 ? 1 : 0) +
+  (retryCount.value > 0 ? 1 : 0)
+)
 
 const briefHeadline = computed(() => {
   if (totalCount.value === 0) return '今天没有待处理事项'
-  if (totalCount.value === 1) return '今天有 1 件事需要处理'
-  return `今天有 ${totalCount.value} 件事需要处理`
+  return `今日 ${totalCount.value} 件事需要处理`
 })
 
-const briefingActions = computed(() => {
-  const actions = []
-  if (pendingCount.value > 0) {
-    actions.push({
-      key: 'pending',
-      count: pendingCount.value,
-      unit: '份',
-      title: '作业等待复核',
-      description: 'AI 已批改完，建议优先处理影响错题沉淀的作业。',
-      tone: 'primary',
-      to: '/grade'
-    })
+// 顶部 3 列固定 summary-strip（待复核 / 今日新增错题 / 待重练），0 值也展示，0 时降为 default tone
+const briefingStrip = computed(() => [
+  {
+    key: 'pending',
+    count: pendingCount.value,
+    unit: '份',
+    title: '待复核',
+    description: pendingCount.value > 0
+      ? 'AI 批改完成，等待老师确认正误与判分。'
+      : '今日没有待复核的作业。',
+    tone: pendingCount.value > 0 ? 'primary' : 'default',
+    to: '/grade'
+  },
+  {
+    key: 'wrong',
+    count: wrongCount.value,
+    unit: '道',
+    title: '今日新增错题',
+    description: wrongCount.value > 0
+      ? '来自近期学生作业，进入错题中心安排重练与掌握验证。'
+      : '今日暂无新增错题。',
+    tone: wrongCount.value > 0 ? 'warning' : 'default',
+    to: '/wrongbook'
+  },
+  {
+    key: 'retry',
+    count: retryCount.value,
+    unit: '人',
+    title: '待重练',
+    description: retryCount.value > 0
+      ? '错题在错题池里尚未消化，可组卷下发让学生重练。'
+      : '今天没有需要安排的重练任务。',
+    tone: retryCount.value > 0 ? 'success' : 'default',
+    to: { path: '/students', query: { filter: 'retry' } }
   }
-  if (failedCount.value > 0) {
-    actions.push({
-      key: 'failed',
-      count: failedCount.value,
-      unit: '份',
-      title: '作业处理异常',
-      description: 'AI 识别失败，可进入批改中心重新处理或查看原图。',
-      tone: 'danger',
-      to: { path: '/grade', query: { status: 'failed' } }
-    })
-  }
-  if (wrongCount.value > 0) {
-    actions.push({
-      key: 'wrong',
-      count: wrongCount.value,
-      unit: '道',
-      title: '今日新增错题',
-      description: '来自近期学生作业，进入错题中心安排重练与掌握验证。',
-      tone: 'warning',
-      to: '/wrongbook'
-    })
-  }
-  return actions
-})
+])
+
+// 识别异常：单独 row，0 时也展示
+const failedAction = computed(() => ({
+  key: 'failed',
+  count: failedCount.value,
+  unit: '份',
+  title: '识别异常',
+  description: failedCount.value > 0
+    ? 'AI 识别失败，可进入批改中心重新处理或查看原图。'
+    : '今日没有识别异常的作业。',
+  tone: failedCount.value > 0 ? 'danger' : 'default',
+  to: { path: '/grade', query: { status: 'failed' } }
+}))
 
 const hasAnyData = computed(() =>
-  briefingActions.value.length > 0 || pendingActivities.value.length > 0 || students.value.length > 0
+  briefingStrip.value.length > 0 || !!failedAction.value || pendingActivities.value.length > 0 || students.value.length > 0
 )
 
 const formatRelativeTime = (iso) => {
@@ -409,7 +453,7 @@ const goActivity = (act) => {
 }
 const goStudent = (id) => router.push({ path: `/students/${id}` })
 const goAttentionStudent = (s) => router.push({ path: `/students/${s.id}` })
-const goWeakness = (kp) => router.push({ path: '/knowledge', query: { kpId: kp.kpId } })
+const goWeakness = (kp) => router.push({ path: '/question-bank', query: { kpId: kp.kpId } })
 const weaknessDescription = (kp) => {
   const span = kp.gradeSpan > 1 ? `跨 ${kp.gradeSpan} 个年级` : '单一学段'
   return `${kp.studentCount} 人未掌握 · ${span}`
@@ -531,80 +575,143 @@ onMounted(async () => {
 }
 .dashboard-note__retry:hover { color: var(--wb-text); }
 
-/* ── Briefing 列表：行级信息流，不用 Card（Layer 1 · 已有） ── */
+/* ── Briefing 列表：3 列 summary-strip + 识别异常行（Layer 1 · 已有） ── */
 .briefing { margin-bottom: var(--wb-space-5); }
 
-.briefing-list {
-  list-style: none;
-  margin: 0;
-  padding: 0;
-  background: var(--wb-bg-card);
+/* 顶部 3 列固定槽位（待复核 / 今日新增错题 / 待重练），0 值也展示 */
+.summary-strip {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 1px;
+  background: var(--wb-border-light);
   border: 1px solid var(--wb-border-light);
   border-radius: var(--wb-radius-md);
+  overflow: hidden;
 }
 
-.briefing-row {
-  display: grid;
-  grid-template-columns: 88px minmax(0, 1fr) 20px;
-  align-items: center;
-  gap: var(--wb-space-4);
-  min-height: 88px;
+.summary-cell {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  gap: var(--wb-space-2);
+  min-height: 96px;
   padding: var(--wb-space-3) var(--wb-space-4);
   color: inherit;
   text-decoration: none;
-  border-top: 1px solid var(--wb-border-light);
+  background: var(--wb-bg-card);
   box-shadow: inset 3px 0 0 transparent;
   transition: background var(--wb-motion-fast) var(--wb-motion-ease);
 }
-.briefing-list li:first-child .briefing-row { border-top: 0; }
-.briefing-row:hover { background: var(--wb-bg-hover); }
-.briefing-row:focus-visible {
+.summary-cell:hover { background: var(--wb-bg-hover); }
+.summary-cell:focus-visible {
   outline: 2px solid var(--wb-primary);
   outline-offset: -2px;
-  position: relative;
   z-index: 1;
 }
+.summary-cell.is-primary { box-shadow: inset 3px 0 0 var(--wb-primary); }
+.summary-cell.is-warning { box-shadow: inset 3px 0 0 var(--wb-status-warning-fg); }
+.summary-cell.is-danger { box-shadow: inset 3px 0 0 var(--wb-status-danger-fg); }
+.summary-cell.is-success { box-shadow: inset 3px 0 0 var(--wb-status-success-fg); }
+.summary-cell.is-default { box-shadow: inset 3px 0 0 transparent; }
 
-.briefing-row.is-primary { box-shadow: inset 3px 0 0 var(--wb-primary); }
-.briefing-row.is-danger { box-shadow: inset 3px 0 0 var(--wb-status-danger-fg); }
-.briefing-row.is-warning { box-shadow: inset 3px 0 0 var(--wb-status-warning-fg); }
-
-.briefing-row__count {
-  display: flex;
-  align-items: baseline;
-  gap: var(--wb-space-1);
-  min-width: 0;
-  color: var(--wb-text);
-  font-variant-numeric: tabular-nums;
-}
-.briefing-row__count strong {
-  font-size: var(--wb-fs-stat);
-  font-weight: var(--wb-fw-bold);
-  line-height: var(--wb-lh-tight);
-  letter-spacing: -0.01em;
-}
-.briefing-row__count small {
-  color: var(--wb-text-tertiary);
-  font-size: var(--wb-fs-meta);
-  font-weight: var(--wb-fw-regular);
-}
-.briefing-row.is-primary .briefing-row__count strong { color: var(--wb-primary); }
-.briefing-row.is-danger .briefing-row__count strong { color: var(--wb-status-danger-fg); }
-.briefing-row.is-warning .briefing-row__count strong { color: var(--wb-status-warning-fg); }
-
-.briefing-row__copy {
+.summary-cell__copy {
   display: flex;
   min-width: 0;
   flex-direction: column;
   gap: var(--wb-space-1);
+  padding-right: 24px;
 }
-.briefing-row__title {
+.summary-cell__title {
   color: var(--wb-text);
   font-size: var(--wb-fs-card-title);
   font-weight: var(--wb-fw-semibold);
   line-height: var(--wb-lh-tight);
 }
-.briefing-row__description {
+.summary-cell__description {
+  overflow: hidden;
+  color: var(--wb-text-secondary);
+  font-size: var(--wb-fs-meta);
+  line-height: var(--wb-lh-normal);
+  text-overflow: ellipsis;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  white-space: normal;
+}
+
+.summary-cell__count {
+  display: flex;
+  align-items: baseline;
+  gap: var(--wb-space-1);
+  min-width: 0;
+  margin-top: auto;
+  font-variant-numeric: tabular-nums;
+}
+.summary-cell__count strong {
+  color: var(--wb-text);
+  font-size: var(--wb-fs-stat);
+  font-weight: var(--wb-fw-bold);
+  line-height: var(--wb-lh-tight);
+  letter-spacing: -0.01em;
+}
+.summary-cell__count small {
+  color: var(--wb-text-tertiary);
+  font-size: var(--wb-fs-meta);
+  font-weight: var(--wb-fw-regular);
+}
+.summary-cell.is-primary .summary-cell__count strong { color: var(--wb-primary); }
+.summary-cell.is-warning .summary-cell__count strong { color: var(--wb-status-warning-fg); }
+.summary-cell.is-danger .summary-cell__count strong { color: var(--wb-status-danger-fg); }
+.summary-cell.is-success .summary-cell__count strong { color: var(--wb-status-success-fg); }
+.summary-cell.is-default .summary-cell__count strong { color: var(--wb-text-tertiary); }
+
+.summary-cell__arrow {
+  position: absolute;
+  top: var(--wb-space-3);
+  right: var(--wb-space-4);
+  color: var(--wb-text-tertiary);
+  font-size: 16px;
+  transition: transform var(--wb-motion-fast) var(--wb-motion-ease),
+              color var(--wb-motion-fast) var(--wb-motion-ease);
+}
+.summary-cell:hover .summary-cell__arrow {
+  color: var(--wb-primary);
+  transform: translateX(2px);
+}
+
+/* 识别异常：单独一整行（0 值也展示，让老师能看到状态） */
+.summary-anomaly {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto 20px;
+  align-items: center;
+  gap: var(--wb-space-4);
+  min-height: 72px;
+  margin-top: var(--wb-space-3);
+  padding: var(--wb-space-3) var(--wb-space-4);
+  color: inherit;
+  text-decoration: none;
+  background: var(--wb-bg-card);
+  border: 1px solid var(--wb-border-light);
+  border-radius: var(--wb-radius-md);
+  box-shadow: inset 3px 0 0 transparent;
+  transition: background var(--wb-motion-fast) var(--wb-motion-ease);
+}
+.summary-anomaly:hover { background: var(--wb-bg-hover); }
+.summary-anomaly.is-danger { box-shadow: inset 3px 0 0 var(--wb-status-danger-fg); }
+
+.summary-anomaly__copy {
+  display: flex;
+  min-width: 0;
+  flex-direction: column;
+  gap: var(--wb-space-1);
+}
+.summary-anomaly__title {
+  color: var(--wb-text);
+  font-size: var(--wb-fs-card-title);
+  font-weight: var(--wb-fw-semibold);
+  line-height: var(--wb-lh-tight);
+}
+.summary-anomaly__description {
   overflow: hidden;
   color: var(--wb-text-secondary);
   font-size: var(--wb-fs-meta);
@@ -613,67 +720,56 @@ onMounted(async () => {
   white-space: nowrap;
 }
 
-.briefing-row__arrow {
+.summary-anomaly__count {
+  display: flex;
+  align-items: baseline;
+  gap: var(--wb-space-1);
+  min-width: 0;
+  font-variant-numeric: tabular-nums;
+}
+.summary-anomaly__count strong {
+  color: var(--wb-text);
+  font-size: var(--wb-fs-stat);
+  font-weight: var(--wb-fw-bold);
+  line-height: var(--wb-lh-tight);
+}
+.summary-anomaly.is-danger .summary-anomaly__count strong { color: var(--wb-status-danger-fg); }
+.summary-anomaly__count small {
+  color: var(--wb-text-tertiary);
+  font-size: var(--wb-fs-meta);
+}
+
+.summary-anomaly__arrow {
   color: var(--wb-text-tertiary);
   font-size: 16px;
   transition: transform var(--wb-motion-fast) var(--wb-motion-ease),
               color var(--wb-motion-fast) var(--wb-motion-ease);
 }
-.briefing-row:hover .briefing-row__arrow {
+.summary-anomaly:hover .summary-anomaly__arrow {
   color: var(--wb-primary);
   transform: translateX(2px);
 }
 
-/* ── Briefing 骨架行 ── */
+@media (max-width: 720px) {
+  .summary-strip { grid-template-columns: 1fr; }
+}
+
+/* ── Briefing 骨架：summary-strip / summary-anomaly 形状的骨架，避免 layout shift ── */
 @keyframes briefing-skeleton-shimmer {
   0% { background-position: 200% 0; }
   100% { background-position: -200% 0; }
 }
-.briefing-skeleton-row {
-  display: grid;
-  grid-template-columns: 88px minmax(0, 1fr) 20px;
-  align-items: center;
-  gap: var(--wb-space-4);
-  min-height: 88px;
-  padding: var(--wb-space-3) var(--wb-space-4);
-  border-top: 1px solid var(--wb-border-light);
-}
-.briefing-skeleton-row:first-child { border-top: 0; }
-.briefing-skeleton-row__count {
-  width: 56px;
-  height: 28px;
+.summary-skeleton {
+  display: block;
   background: linear-gradient(90deg, var(--wb-bg-hover), var(--wb-border-light), var(--wb-bg-hover));
   background-size: 200% 100%;
   animation: briefing-skeleton-shimmer 1.4s linear infinite;
   border-radius: var(--wb-radius-sm);
 }
-.briefing-skeleton-row__copy {
-  display: flex;
-  flex-direction: column;
-  gap: var(--wb-space-2);
-}
-.briefing-skeleton-row__title {
-  width: 32%;
-  height: 16px;
-  background: linear-gradient(90deg, var(--wb-bg-hover), var(--wb-border-light), var(--wb-bg-hover));
-  background-size: 200% 100%;
-  animation: briefing-skeleton-shimmer 1.4s linear infinite;
-  border-radius: var(--wb-radius-xs);
-}
-.briefing-skeleton-row__description {
-  width: 60%;
-  height: 14px;
-  background: linear-gradient(90deg, var(--wb-bg-hover), var(--wb-border-light), var(--wb-bg-hover));
-  background-size: 200% 100%;
-  animation: briefing-skeleton-shimmer 1.4s linear infinite;
-  border-radius: var(--wb-radius-xs);
-}
-.briefing-skeleton-row__arrow {
-  width: 14px;
-  height: 14px;
-  background: var(--wb-bg-hover);
-  border-radius: var(--wb-radius-xs);
-}
+.summary-skeleton--title { width: 32%; height: 14px; }
+.summary-skeleton--description { width: 70%; height: 12px; margin-top: 6px; }
+.summary-skeleton--count { width: 56px; height: 24px; margin-top: auto; }
+.summary-skeleton--count--anomaly { width: 48px; height: 22px; }
 
 /* ── Section Header：4 层结构统一节奏，--wb-fs-card-title + semibold ── */
 .section-header {
@@ -813,29 +909,17 @@ onMounted(async () => {
 
 /* ── 响应式 ── */
 @media (max-width: 720px) {
-  .briefing-row,
-  .briefing-skeleton-row {
-    grid-template-columns: 64px minmax(0, 1fr) 18px;
-    min-height: 76px;
-    padding: var(--wb-space-3);
-    gap: var(--wb-space-3);
-  }
-  .briefing-row__count strong,
-  .briefing-skeleton-row__count { font-size: var(--wb-fs-card-title); }
-  .briefing-row__description { white-space: normal; }
+  .summary-strip { grid-template-columns: 1fr; }
 }
 
 /* ── reduced-motion ── */
 @media (prefers-reduced-motion: reduce) {
-  .briefing-row,
-  .briefing-row__arrow,
-  .briefing-skeleton-row__count,
-  .briefing-skeleton-row__title,
-  .briefing-skeleton-row__description,
-  .student-overview { transition: none !important; animation: none !important; }
-  .briefing-row:hover .briefing-row__arrow { transform: none; }
-  .briefing-skeleton-row__count,
-  .briefing-skeleton-row__title,
-  .briefing-skeleton-row__description { background: var(--wb-bg-hover); }
+  .summary-cell,
+  .summary-cell__arrow,
+  .summary-anomaly,
+  .summary-anomaly__arrow,
+  .summary-skeleton { transition: none !important; animation: none !important; }
+  .summary-cell:hover .summary-cell__arrow,
+  .summary-anomaly:hover .summary-anomaly__arrow { transform: none; }
 }
 </style>

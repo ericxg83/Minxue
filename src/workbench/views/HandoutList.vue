@@ -59,7 +59,7 @@
             <div class="lecture-primary">
               <div class="lecture-title-row">
                 <h3>{{ lecture.title || '未命名讲义' }}</h3>
-                <StatusTag v-if="templateLabel(lecture.template)" :label="templateLabel(lecture.template)" tone="primary" />
+                <StatusTag v-if="templateLabel(lecture.template)" :label="templateLabel(lecture.template)" tone="info" />
               </div>
               <div class="lecture-context">
                 <span class="subject-chip">{{ lecture.subject || '未设置学科' }}</span>

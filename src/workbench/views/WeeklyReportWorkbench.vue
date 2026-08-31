@@ -123,7 +123,7 @@
                 <div class="kp-name-block">
                   <h3>{{ s.kpName }}</h3>
                   <div class="kp-meta">
-                    <StatusTag :label="s.subject || '其他'" tone="primary" />
+                    <StatusTag :label="s.subject || '其他'" tone="neutral" />
                     <span class="meta-item"><b>{{ s.wrongCount }}</b> 道错题</span>
                     <span class="meta-item"><b>{{ s.blankCount }}</b> 道空题</span>
                     <span class="meta-item"><b>{{ s.studentCount }}</b> 名学生</span>
