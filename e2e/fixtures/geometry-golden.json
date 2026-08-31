@@ -1,0 +1,760 @@
+{
+  "generatedAt": "2026-08-29T09:38:08.312Z",
+  "note": "几何配图重建黄金集（Phase 0）。仅含带结构的存量资产（tikz_json，9 条），结构与题干 content、裁剪图 URL 一起冻结，供离线回归与 before/after 对照。零视觉调用、零库写入。",
+  "baseline": {
+    "total": 57,
+    "byStatus": {
+      "completed": 7,
+      "failed": 41,
+      "none": 9
+    }
+  },
+  "figureGateEstimate": {
+    "failedTotal": 41,
+    "eligible": 31,
+    "number_line": 9,
+    "no_figure_reference": 1
+  },
+  "items": [
+    {
+      "assetId": "eda36eba-b683-4964-a540-fec4dee8b4ce",
+      "questionId": "04733cc4-df49-4024-bd31-bfdff56c3b4c",
+      "shortId": "04733cc4",
+      "tikzStatus": "completed",
+      "lastError": "无法识别有效几何结构",
+      "retryCount": 0,
+      "content": "如图是商场一楼与二楼之间的手扶电梯示意图。其中AB、CD分别表示一楼、二楼地面的水平线，∠ABC=150°，BC的长是8m，则乘电梯从点B到点C上升的高度h是( )。",
+      "croppedImageUrl": "https://minxue-app-oss.oss-cn-shanghai.aliyuncs.com/images/02d73792-6cff-402b-9dad-bacd734c569a/20260827/48763ac6-1db2-440f-99ba-5581f5aa3d85.png",
+      "geometryImageUrl": "https://minxue-app-oss.oss-cn-shanghai.aliyuncs.com/images/02d73792-6cff-402b-9dad-bacd734c569a/20260827/59d04ccf-e874-48bc-9225-88c39b233bbb.png",
+      "structure": {
+        "labels": [],
+        "points": [
+          {
+            "x": 0,
+            "y": 0,
+            "type": "vertex",
+            "label": "A"
+          },
+          {
+            "x": 150,
+            "y": 0,
+            "type": "vertex",
+            "label": "B"
+          },
+          {
+            "x": 180,
+            "y": 60,
+            "type": "vertex",
+            "label": "C"
+          },
+          {
+            "x": 240,
+            "y": 60,
+            "type": "vertex",
+            "label": "D"
+          }
+        ],
+        "circles": [],
+        "segments": [
+          {
+            "to": "B",
+            "from": "A",
+            "style": "solid",
+            "relation": "normal"
+          },
+          {
+            "to": "C",
+            "from": "B",
+            "style": "solid",
+            "relation": "normal"
+          },
+          {
+            "to": "D",
+            "from": "C",
+            "style": "solid",
+            "relation": "normal"
+          }
+        ],
+        "constraints": [],
+        "figure_type": "geometry",
+        "rightAngles": [],
+        "ignored_labels": [],
+        "geometry_labels": [],
+        "coordinate_system": {
+          "exists": false,
+          "origin": "",
+          "x_axis": false,
+          "y_axis": false
+        }
+      },
+      "structureColumn": "tikz_json"
+    },
+    {
+      "assetId": "4f4856d8-d76c-4be6-8bb7-55efe77ba0d5",
+      "questionId": "266e9cda-de7e-41d3-a167-c38b9f7a1c81",
+      "shortId": "266e9cda",
+      "tikzStatus": "completed",
+      "lastError": "",
+      "retryCount": 0,
+      "content": "（2021·江干区模拟）如图，在△ABC中，BD⊥AC于点D，DE⊥AB于点E，BD·DE=BE·CD。（1）求证：△BCD∽△BDE；（2）若BC=10，AD=6，求AE的长。",
+      "croppedImageUrl": "https://minxue-app-oss.oss-cn-shanghai.aliyuncs.com/images/02d73792-6cff-402b-9dad-bacd734c569a/20260828/c4e5ff00-9f22-4fb7-bdc2-23774dfaad5f.png",
+      "geometryImageUrl": "https://minxue-app-oss.oss-cn-shanghai.aliyuncs.com/images/02d73792-6cff-402b-9dad-bacd734c569a/20260828/c4e5ff00-9f22-4fb7-bdc2-23774dfaad5f.png",
+      "structure": {
+        "labels": [],
+        "points": [
+          {
+            "x": 45,
+            "y": 90,
+            "type": "vertex",
+            "label": "A"
+          },
+          {
+            "x": 10,
+            "y": 20,
+            "type": "vertex",
+            "label": "B"
+          },
+          {
+            "x": 80,
+            "y": 20,
+            "type": "vertex",
+            "label": "C"
+          },
+          {
+            "x": 65,
+            "y": 55,
+            "type": "vertex",
+            "label": "D"
+          },
+          {
+            "x": 30,
+            "y": 65,
+            "type": "vertex",
+            "label": "E"
+          }
+        ],
+        "circles": [],
+        "segments": [
+          {
+            "to": "B",
+            "from": "A",
+            "style": "solid",
+            "relation": "normal"
+          },
+          {
+            "to": "C",
+            "from": "B",
+            "style": "solid",
+            "relation": "normal"
+          },
+          {
+            "to": "A",
+            "from": "C",
+            "style": "solid",
+            "relation": "normal"
+          },
+          {
+            "to": "D",
+            "from": "B",
+            "style": "solid",
+            "relation": "normal"
+          },
+          {
+            "to": "D",
+            "from": "E",
+            "style": "solid",
+            "relation": "normal"
+          }
+        ],
+        "constraints": [],
+        "figure_type": "geometry",
+        "rightAngles": [],
+        "ignored_labels": [],
+        "geometry_labels": [],
+        "coordinate_system": {
+          "exists": false,
+          "origin": "",
+          "x_axis": false,
+          "y_axis": false
+        }
+      },
+      "structureColumn": "tikz_json"
+    },
+    {
+      "assetId": "af0da6e2-885d-4415-9844-c1d83950cbec",
+      "questionId": "334e7ded-3548-42f0-83ae-7626ac002dbc",
+      "shortId": "334e7ded",
+      "tikzStatus": "completed",
+      "lastError": "无法识别有效几何结构",
+      "retryCount": 0,
+      "content": "如图，A、B、C 是正方形网格的格点，连接 AC、BC，则 tan ∠BAC 的值是( )。",
+      "croppedImageUrl": "https://minxue-app-oss.oss-cn-shanghai.aliyuncs.com/images/02d73792-6cff-402b-9dad-bacd734c569a/20260827/2a2e7925-8ace-4301-9506-6d4183323988.png",
+      "geometryImageUrl": "https://minxue-app-oss.oss-cn-shanghai.aliyuncs.com/images/02d73792-6cff-402b-9dad-bacd734c569a/20260827/b6823a67-012a-4b6c-a4a1-6dfe0044af60.png",
+      "structure": {
+        "labels": [],
+        "points": [
+          {
+            "x": 10,
+            "y": 10,
+            "type": "vertex",
+            "label": "A"
+          },
+          {
+            "x": 40,
+            "y": 70,
+            "type": "vertex",
+            "label": "B"
+          },
+          {
+            "x": 30,
+            "y": 60,
+            "type": "vertex",
+            "label": "C"
+          }
+        ],
+        "circles": [],
+        "segments": [
+          {
+            "to": "B",
+            "from": "A",
+            "style": "solid",
+            "relation": "normal"
+          },
+          {
+            "to": "C",
+            "from": "A",
+            "style": "solid",
+            "relation": "normal"
+          }
+        ],
+        "constraints": [],
+        "figure_type": "geometry",
+        "rightAngles": [],
+        "ignored_labels": [],
+        "geometry_labels": [],
+        "coordinate_system": {
+          "exists": false,
+          "origin": "",
+          "x_axis": false,
+          "y_axis": false
+        }
+      },
+      "structureColumn": "tikz_json"
+    },
+    {
+      "assetId": "0ed31403-6368-4de9-ae52-97f2b3fc63b3",
+      "questionId": "b9034833-55ab-4422-b7eb-28c9202f627b",
+      "shortId": "b9034833",
+      "tikzStatus": "completed",
+      "lastError": null,
+      "retryCount": 0,
+      "content": "如图，数轴上原点为点O，且OA=6，线段OA上是否存在两个点X和Y，使得在1、2、3、4、5、6中任取一个数字a，总可以找到由O、X、Y、A中某两点为端点的线段长为a？若存在，请在数轴上标出来；若不存在，请说明理由。",
+      "croppedImageUrl": "https://minxue-app-oss.oss-cn-shanghai.aliyuncs.com/images/02d73792-6cff-402b-9dad-bacd734c569a/20260827/0c8d8e24-6926-4fd6-be12-73ac3d4264f3.png",
+      "geometryImageUrl": "https://minxue-app-oss.oss-cn-shanghai.aliyuncs.com/images/02d73792-6cff-402b-9dad-bacd734c569a/20260827/c0b500a3-6715-445d-9e05-7726b855e0ab.png",
+      "structure": {
+        "labels": [
+          {
+            "text": "O",
+            "point": "O"
+          },
+          {
+            "text": "A",
+            "point": "A"
+          },
+          {
+            "text": "6",
+            "point": "A"
+          }
+        ],
+        "points": [
+          {
+            "x": 278,
+            "y": 259,
+            "type": "vertex",
+            "label": "O"
+          },
+          {
+            "x": 590,
+            "y": 261,
+            "type": "vertex",
+            "label": "A"
+          }
+        ],
+        "circles": [],
+        "segments": [
+          {
+            "to": "A",
+            "from": "O",
+            "style": "solid",
+            "relation": "normal"
+          }
+        ],
+        "constraints": [],
+        "figure_type": "geometry",
+        "rightAngles": [],
+        "ignored_labels": [
+          {
+            "text": "O",
+            "point": "O",
+            "reason": "no_coord"
+          },
+          {
+            "text": "A",
+            "point": "A",
+            "reason": "no_coord"
+          },
+          {
+            "text": "6",
+            "point": "A",
+            "reason": "no_coord"
+          }
+        ],
+        "geometry_labels": [],
+        "coordinate_system": {
+          "exists": false,
+          "origin": "",
+          "x_axis": false,
+          "y_axis": false
+        }
+      },
+      "structureColumn": "tikz_json"
+    },
+    {
+      "assetId": "c67e004f-bb65-4b73-8f95-4f8967343600",
+      "questionId": "b959a966-d4a8-4632-8c9b-596787ea4224",
+      "shortId": "b959a966",
+      "tikzStatus": "completed",
+      "lastError": "无法识别有效几何结构",
+      "retryCount": 0,
+      "content": "如图，A、B、C是正方形网格的格点，连接AC、BC，则tan∠BAC的值是（）。",
+      "croppedImageUrl": "https://minxue-app-oss.oss-cn-shanghai.aliyuncs.com/images/02d73792-6cff-402b-9dad-bacd734c569a/20260827/6583f739-46d0-4e7c-bb55-50b1705125c2.png",
+      "geometryImageUrl": "https://minxue-app-oss.oss-cn-shanghai.aliyuncs.com/images/02d73792-6cff-402b-9dad-bacd734c569a/20260827/efe94c1a-ad50-4ed4-9184-8fa67229cb2a.png",
+      "structure": {
+        "labels": [],
+        "points": [
+          {
+            "x": 10,
+            "y": 10,
+            "type": "vertex",
+            "label": "A"
+          },
+          {
+            "x": 60,
+            "y": 80,
+            "type": "vertex",
+            "label": "B"
+          },
+          {
+            "x": 40,
+            "y": 70,
+            "type": "vertex",
+            "label": "C"
+          }
+        ],
+        "circles": [],
+        "segments": [
+          {
+            "to": "B",
+            "from": "A",
+            "style": "solid",
+            "relation": "normal"
+          },
+          {
+            "to": "C",
+            "from": "A",
+            "style": "solid",
+            "relation": "normal"
+          }
+        ],
+        "constraints": [],
+        "figure_type": "geometry",
+        "rightAngles": [],
+        "ignored_labels": [],
+        "geometry_labels": [],
+        "coordinate_system": {
+          "exists": false,
+          "origin": "",
+          "x_axis": false,
+          "y_axis": false
+        }
+      },
+      "structureColumn": "tikz_json"
+    },
+    {
+      "assetId": "745acd88-7dd1-4b00-9eb3-67244338f13f",
+      "questionId": "c627a497-082f-4f44-b839-9da2a328089a",
+      "shortId": "c627a497",
+      "tikzStatus": "completed",
+      "lastError": "无法识别有效几何结构",
+      "retryCount": 0,
+      "content": "如图是商场一楼与二楼之间的手扶电梯示意图。其中AB、CD分别表示一楼、二楼地面的水平线，∠ABC=150°，BC的长是8m，则乘电梯从点B到点C上升的高度h是（）。",
+      "croppedImageUrl": "https://minxue-app-oss.oss-cn-shanghai.aliyuncs.com/images/02d73792-6cff-402b-9dad-bacd734c569a/20260828/323e9613-57e0-490c-a7cd-7115d8180e82.png",
+      "geometryImageUrl": "https://minxue-app-oss.oss-cn-shanghai.aliyuncs.com/images/02d73792-6cff-402b-9dad-bacd734c569a/20260828/323e9613-57e0-490c-a7cd-7115d8180e82.png",
+      "structure": {
+        "labels": [],
+        "points": [
+          {
+            "x": 0,
+            "y": 0,
+            "type": "vertex",
+            "label": "A"
+          },
+          {
+            "x": 10,
+            "y": 0,
+            "type": "vertex",
+            "label": "B"
+          },
+          {
+            "x": 40,
+            "y": 80,
+            "type": "vertex",
+            "label": "C"
+          },
+          {
+            "x": 60,
+            "y": 80,
+            "type": "vertex",
+            "label": "D"
+          }
+        ],
+        "circles": [],
+        "segments": [
+          {
+            "to": "B",
+            "from": "A",
+            "style": "solid",
+            "relation": "normal"
+          },
+          {
+            "to": "C",
+            "from": "B",
+            "style": "solid",
+            "relation": "normal"
+          },
+          {
+            "to": "D",
+            "from": "C",
+            "style": "solid",
+            "relation": "normal"
+          }
+        ],
+        "constraints": [],
+        "figure_type": "geometry",
+        "rightAngles": [],
+        "ignored_labels": [],
+        "geometry_labels": [],
+        "coordinate_system": {
+          "exists": false,
+          "origin": "",
+          "x_axis": false,
+          "y_axis": false
+        }
+      },
+      "structureColumn": "tikz_json"
+    },
+    {
+      "assetId": "e3423fab-9d45-4d40-b89b-b9e6bb58954d",
+      "questionId": "fdc78dd3-06ac-4f1c-9a0d-0a43beecf2c6",
+      "shortId": "fdc78dd3",
+      "tikzStatus": "completed",
+      "lastError": "无法识别有效几何结构",
+      "retryCount": 0,
+      "content": "在△ABC和△DEF中，如果∠A=45°，AB=12cm，AC=15cm，∠D=45°，DE=16cm，那么DF=______时，△ABC与△DEF相似。",
+      "croppedImageUrl": "https://minxue-app-oss.oss-cn-shanghai.aliyuncs.com/images/02d73792-6cff-402b-9dad-bacd734c569a/20260827/142d4641-86f9-4dca-9b90-7c449ed5f1d9.png",
+      "geometryImageUrl": "https://minxue-app-oss.oss-cn-shanghai.aliyuncs.com/images/02d73792-6cff-402b-9dad-bacd734c569a/20260827/f959d37f-bfe1-469f-9623-b4ba814f0019.png",
+      "structure": {
+        "labels": [],
+        "points": [
+          {
+            "x": 30,
+            "y": 85,
+            "type": "vertex",
+            "label": "A"
+          },
+          {
+            "x": 60,
+            "y": 50,
+            "type": "vertex",
+            "label": "B"
+          },
+          {
+            "x": 10,
+            "y": 50,
+            "type": "vertex",
+            "label": "C"
+          },
+          {
+            "x": 75,
+            "y": 85,
+            "type": "vertex",
+            "label": "D"
+          },
+          {
+            "x": 95,
+            "y": 50,
+            "type": "vertex",
+            "label": "E"
+          },
+          {
+            "x": 55,
+            "y": 50,
+            "type": "vertex",
+            "label": "F"
+          }
+        ],
+        "circles": [],
+        "segments": [
+          {
+            "to": "B",
+            "from": "A",
+            "style": "solid",
+            "relation": "normal"
+          },
+          {
+            "to": "C",
+            "from": "A",
+            "style": "solid",
+            "relation": "normal"
+          },
+          {
+            "to": "C",
+            "from": "B",
+            "style": "solid",
+            "relation": "normal"
+          },
+          {
+            "to": "E",
+            "from": "D",
+            "style": "solid",
+            "relation": "normal"
+          },
+          {
+            "to": "F",
+            "from": "D",
+            "style": "solid",
+            "relation": "normal"
+          },
+          {
+            "to": "F",
+            "from": "E",
+            "style": "solid",
+            "relation": "normal"
+          }
+        ],
+        "constraints": [],
+        "figure_type": "geometry",
+        "rightAngles": [],
+        "ignored_labels": [],
+        "geometry_labels": [],
+        "coordinate_system": {
+          "exists": false,
+          "origin": "",
+          "x_axis": false,
+          "y_axis": false
+        }
+      },
+      "structureColumn": "tikz_json"
+    },
+    {
+      "assetId": "cb2cb325-e482-458f-b9ad-a9e7fc6ca99e",
+      "questionId": "3b05e732-a9ab-4588-9cbb-74c877d9a88a",
+      "shortId": "3b05e732",
+      "tikzStatus": "none",
+      "lastError": "结构校验未过：题干引用与重绘元素不符，回退裁剪原图",
+      "retryCount": 0,
+      "content": "作图，(1)过△ABC的顶点C作直线CD，使得CD//AB；(2)作点B到直线CD的垂线，垂足为点E；(3)若BE=3，AB=4，则△ABC的面积是______。",
+      "croppedImageUrl": "https://minxue-app-oss.oss-cn-shanghai.aliyuncs.com/images/02d73792-6cff-402b-9dad-bacd734c569a/20260827/9ae49ea5-d03b-4c52-a28f-6fd57422c9c7.png",
+      "geometryImageUrl": "https://minxue-app-oss.oss-cn-shanghai.aliyuncs.com/images/02d73792-6cff-402b-9dad-bacd734c569a/20260827/0695166c-a744-4d95-b587-79c8aebc5a20.png",
+      "structure": {
+        "labels": [],
+        "points": [
+          {
+            "x": 30,
+            "y": 20,
+            "type": "vertex",
+            "label": "A"
+          },
+          {
+            "x": 75,
+            "y": 20,
+            "type": "vertex",
+            "label": "B"
+          },
+          {
+            "x": 40,
+            "y": 65,
+            "type": "vertex",
+            "label": "C"
+          },
+          {
+            "x": 75,
+            "y": 65,
+            "type": "vertex",
+            "label": "E"
+          }
+        ],
+        "circles": [],
+        "segments": [
+          {
+            "to": "B",
+            "from": "A",
+            "style": "solid",
+            "relation": "normal"
+          },
+          {
+            "to": "C",
+            "from": "B",
+            "style": "solid",
+            "relation": "normal"
+          },
+          {
+            "to": "A",
+            "from": "C",
+            "style": "solid",
+            "relation": "normal"
+          },
+          {
+            "to": "E",
+            "from": "B",
+            "style": "solid",
+            "relation": "normal"
+          },
+          {
+            "to": "E",
+            "from": "C",
+            "style": "solid",
+            "relation": "normal"
+          }
+        ],
+        "constraints": [],
+        "figure_type": "geometry",
+        "rightAngles": [
+          {
+            "to": "E",
+            "from": "A",
+            "vertex": "B"
+          }
+        ],
+        "ignored_labels": [],
+        "geometry_labels": [],
+        "coordinate_system": {
+          "exists": false,
+          "origin": "",
+          "x_axis": false,
+          "y_axis": false
+        }
+      },
+      "structureColumn": "tikz_json"
+    },
+    {
+      "assetId": "c2e66e95-e5d7-4b60-afdf-03e8bf45673f",
+      "questionId": "a6d65c96-b149-4398-8e24-de17202c2a55",
+      "shortId": "a6d65c96",
+      "tikzStatus": "none",
+      "lastError": "结构校验未过：题干引用与重绘元素不符，回退裁剪原图",
+      "retryCount": 0,
+      "content": "在边长为5的正方形ABCD中，点E为CD上一点，连接BE，将△BCE沿着BE折叠得到△BC′E，连接AC′、DC′，若∠CDC′=∠DAC′，且tan∠DAC′=1/2，则CE=______。",
+      "croppedImageUrl": "https://minxue-app-oss.oss-cn-shanghai.aliyuncs.com/images/02d73792-6cff-402b-9dad-bacd734c569a/20260827/2885c973-cb43-4c1d-a9e7-377ac3d92491.png",
+      "geometryImageUrl": "https://minxue-app-oss.oss-cn-shanghai.aliyuncs.com/images/02d73792-6cff-402b-9dad-bacd734c569a/20260827/43829ce4-6fae-4cf1-84a9-25e906be83ff.png",
+      "structure": {
+        "labels": [],
+        "points": [
+          {
+            "x": 10,
+            "y": 85,
+            "type": "vertex",
+            "label": "A"
+          },
+          {
+            "x": 10,
+            "y": 65,
+            "type": "vertex",
+            "label": "B"
+          },
+          {
+            "x": 40,
+            "y": 65,
+            "type": "vertex",
+            "label": "C"
+          },
+          {
+            "x": 40,
+            "y": 85,
+            "type": "vertex",
+            "label": "D"
+          },
+          {
+            "x": 40,
+            "y": 75,
+            "type": "vertex",
+            "label": "E"
+          }
+        ],
+        "circles": [],
+        "segments": [
+          {
+            "to": "B",
+            "from": "A",
+            "style": "solid",
+            "relation": "normal"
+          },
+          {
+            "to": "C",
+            "from": "B",
+            "style": "solid",
+            "relation": "normal"
+          },
+          {
+            "to": "D",
+            "from": "C",
+            "style": "solid",
+            "relation": "normal"
+          },
+          {
+            "to": "A",
+            "from": "D",
+            "style": "solid",
+            "relation": "normal"
+          },
+          {
+            "to": "C",
+            "from": "A",
+            "style": "solid",
+            "relation": "normal"
+          },
+          {
+            "to": "D",
+            "from": "B",
+            "style": "solid",
+            "relation": "normal"
+          },
+          {
+            "to": "E",
+            "from": "C",
+            "style": "solid",
+            "relation": "normal"
+          },
+          {
+            "to": "E",
+            "from": "D",
+            "style": "solid",
+            "relation": "normal"
+          }
+        ],
+        "constraints": [],
+        "figure_type": "geometry",
+        "rightAngles": [],
+        "ignored_labels": [],
+        "geometry_labels": [],
+        "coordinate_system": {
+          "exists": false,
+          "origin": "",
+          "x_axis": false,
+          "y_axis": false
+        }
+      },
+      "structureColumn": "tikz_json"
+    }
+  ]
+}
