@@ -19,6 +19,8 @@
  * 本模块只在模型坐标空间内做几何计算，无需像素/图片。
  */
 
+import { pointToSegmentDist as segDist } from './geom/vec.js'
+
 const isNum = (v) => typeof v === 'number' && isFinite(v)
 
 // 阈值（相对图形尺度 extent = max(包围盒宽, 高)，自动适配不同缩放）
@@ -47,17 +49,10 @@ function dedupeLabels(arr) {
 
 /**
  * 点到线段的最短距离（模型坐标空间，坐标系无关）。
+ * 实现在 geom/vec.js，这里只做散开坐标 → 点对象的适配。
  */
-function pointToSegmentDist(px, py, ax, ay, bx, by) {
-  const dx = bx - ax
-  const dy = by - ay
-  const lenSq = dx * dx + dy * dy
-  let t = lenSq < 1e-9 ? 0 : ((px - ax) * dx + (py - ay) * dy) / lenSq
-  t = Math.max(0, Math.min(1, t))
-  const cx = ax + t * dx
-  const cy = ay + t * dy
-  return Math.hypot(px - cx, py - cy)
-}
+const pointToSegmentDist = (px, py, ax, ay, bx, by) =>
+  segDist({ x: px, y: py }, { x: ax, y: ay }, { x: bx, y: by })
 
 /**
  * 从 constraints（模型输出的几何约束文本数组，如 "∠BAD = 50°"、"BD = DC"）

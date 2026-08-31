@@ -7,6 +7,7 @@ import {
   listGrades,
   listStudentIdsByGrade
 } from '../services/teachingSuggestionsService.js'
+import { aggregateWrongPaper } from '../services/wrongPaperService.js'
 
 const router = Router()
 
@@ -313,6 +314,82 @@ router.get('/student-suggestions', async (req, res) => {
     })
   } catch (error) {
     console.error('获取单生备课建议失败:', error)
+    res.status(500).json({ success: false, error: error.message })
+  }
+})
+
+/**
+ * GET /api/teaching/wrong-paper
+ * 周末讲题场景：按年级聚合本周错题，按"具体题"维度（不是 KP）聚合 + 学生数口径错误率。
+ *
+ * 与 /diagnosis 的区别：/diagnosis 按 KP 聚合（"哪些知识点最该讲"），
+ * /wrong-paper 按题聚合（"哪些题被多数人错"），用于周末讲题/错题卷导出。
+ *
+ * 题身份键：与 src/domain/questionIdentity.js 同口径，由 buildWrongQuestionIdentityKey 生成：
+ *   qid:{question_id} > ws:{worksheet_id}|p{page}|n{question_no} > stem:{归一化题干}
+ * 禁止相似度合并。
+ *
+ * 错误率：错该题的学生数 ÷ 该年级学生总数（学生数口径，与用户原话"共错 4 个学生"对应）。
+ *
+ * 默认排除 lifecycle_status='mastered'（与 /diagnosis 一致）。
+ *
+ * Query: grade, mode=week|month|all, offset, subject（可选）, periodStart?, periodEnd?
+ * Response: { success, grade, period, totalStudentCount, items: [...] }
+ */
+router.get('/wrong-paper', async (req, res) => {
+  try {
+    const { grade, subject = '' } = req.query
+    if (!grade) {
+      return res.status(400).json({ success: false, error: 'grade 必填' })
+    }
+
+    let periodStart, periodEnd, mode, offset
+    if (req.query.periodStart && req.query.periodEnd) {
+      periodStart = new Date(req.query.periodStart)
+      periodEnd = new Date(req.query.periodEnd)
+      mode = req.query.mode || 'custom'
+      offset = parseInt(req.query.offset || 0)
+    } else {
+      const p = parsePeriod(req.query)
+      periodStart = p.periodStart
+      periodEnd = p.periodEnd
+      mode = p.mode
+      offset = p.offset
+    }
+
+    const { totalStudentCount, wrongStudentCount, items } = await aggregateWrongPaper({
+      grade,
+      periodStart,
+      periodEnd,
+      subject,
+    })
+
+    if (totalStudentCount === 0) {
+      return res.json({
+        success: true,
+        grade,
+        period: { start: periodStart.toISOString().split('T')[0], end: periodEnd.toISOString().split('T')[0], mode, offset },
+        totalStudentCount: 0,
+        items: [],
+        message: '该年级暂无学生'
+      })
+    }
+
+    res.json({
+      success: true,
+      grade,
+      period: {
+        start: periodStart.toISOString().split('T')[0],
+        end: periodEnd.toISOString().split('T')[0],
+        mode,
+        offset
+      },
+      totalStudentCount,
+      wrongStudentCount,
+      items,
+    })
+  } catch (error) {
+    console.error('获取错题卷失败:', error)
     res.status(500).json({ success: false, error: error.message })
   }
 })

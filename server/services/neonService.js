@@ -327,6 +327,29 @@ export const markAnswerException = async (questionId, reason) => {
   }
 }
 
+/**
+ * 标注「AI 视觉推理不擅长」的图题风险提示。
+ *
+ * 与 markAnswerException 区别：
+ *   · markAnswerException           → AI 没给出正误结论（is_correct=null）
+ *   · markAiAnswerRisk              → AI 给出了正误结论，但参考本身可能不可靠
+ * 写入 ai_answer_risk_reason 列，与 answer_exception_reason 语义不混。
+ * 失败只记日志：这是观测信息，绝不能反过来打断批改主流程。
+ */
+export const markAiAnswerRisk = async (questionId, reason) => {
+  try {
+    await query(
+      `UPDATE ${TABLES.QUESTIONS}
+       SET ai_answer_risk_reason = $1,
+               updated_at = NOW()
+       WHERE id = $2`,
+      [reason, questionId]
+    )
+  } catch (err) {
+    console.error(`标记题目 ${questionId} 图题风险失败:`, err.message)
+  }
+}
+
 export const findCachedQuestionByFingerprint = async (fingerprint, parserVersion = 'v1') => {
   try {
     console.log(`[QuestionCache] 按指纹查找缓存: fingerprint=${fingerprint.substring(0, 16)}..., version=${parserVersion}`)

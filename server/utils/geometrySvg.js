@@ -11,177 +11,30 @@
  *   新格式：points[i].position.{x, y}（含 type 字段）
  */
 
+import {
+  parseGeometryStructure,
+  normalizeStructure,
+  isSymbolLabel,
+  isRawEmptyStructure,
+  isEmptyStructure,
+  hasDerivedPoints
+} from './geom/structure.js'
+import { unit } from './geom/vec.js'
+
+// 再导出，保持 geometryWorker / rerunGeometry / 测试既有的 import 路径不变
+export {
+  parseGeometryStructure,
+  isSymbolLabel,
+  isRawEmptyStructure,
+  isEmptyStructure,
+  hasDerivedPoints
+}
+
 const SVG_W = 400
 const SVG_H = 300
 const MARGIN = 36
 
 const isNum = (v) => typeof v === 'number' && isFinite(v)
-
-/**
- * 从模型返回的文本中解析出几何结构 JSON。
- * 兼容：纯 JSON、```json 代码块、前后夹带说明文字的情况。
- */
-export function parseGeometryStructure(content) {
-  if (!content || typeof content !== 'string') return null
-
-  // 1. 尝试 ```json ... ``` 代码块
-  const block = content.match(/```(?:json)?\s*\n?([\s\S]*?)\n?```/)
-  const candidates = []
-  if (block) candidates.push(block[1].trim())
-
-  // 2. 尝试截取第一个 { 到最后一个 }
-  const first = content.indexOf('{')
-  const last = content.lastIndexOf('}')
-  if (first !== -1 && last !== -1 && last > first) {
-    candidates.push(content.slice(first, last + 1))
-  }
-
-  // 3. 整段
-  candidates.push(content.trim())
-
-  for (const c of candidates) {
-    try {
-      const obj = JSON.parse(c)
-      if (obj && typeof obj === 'object') return normalizeStructure(obj)
-    } catch {
-      // 继续尝试下一个候选
-    }
-  }
-  return null
-}
-
-/** 规范化结构：确保各字段为数组，兼容新旧格式 */
-/**
- * 是否为可保留的符号型标注（α、β、l 这类角名/线名）。
- *
- * 数字、长度、角度值一律剔除：学生习惯把已知条件和算出的答案手写在图旁，
- * 视觉模型会把这些手写当成图形标注抄进 labels，重绘成整齐字体后
- * 学生答案会伪装成题设。遵循"宁愿少显示，也不显示错误信息"。
- */
-export function isSymbolLabel(text) {
-  const t = String(text ?? '').trim()
-  if (!t || t.length > 4) return false
-  if (/[0-9０-９]/.test(t)) return false
-  if (/[√°′″π]/.test(t)) return false
-  if (/[一-鿿]/.test(t)) return false
-  return /^[A-Za-zα-ωΑ-Ω]/.test(t)
-}
-
-function normalizeStructure(obj) {
-  // 兼容新旧 points 格式
-  let points = Array.isArray(obj.points) ? obj.points : []
-  points = points.map(p => {
-    if (p == null) return null
-    // 新格式：{ label, type, position: { x, y } }
-    if (p.position && isNum(p.position.x) && isNum(p.position.y)) {
-      return {
-        label: p.label ?? '',
-        type: p.type || 'vertex',
-        x: p.position.x,
-        y: p.position.y,
-        ...(p.derived && typeof p.derived === 'object' ? { derived: p.derived } : {})
-      }
-    }
-    // 旧格式：{ label, x, y }
-    if (isNum(p.x) && isNum(p.y)) {
-      return {
-        label: p.label ?? '',
-        type: p.type || 'vertex',
-        x: p.x,
-        y: p.y,
-        ...(p.derived && typeof p.derived === 'object' ? { derived: p.derived } : {})
-      }
-    }
-    return null
-  }).filter(Boolean)
-
-  // segments 兼容新老格式
-  let segments = Array.isArray(obj.segments) ? obj.segments : []
-  segments = segments.map(seg => {
-    if (seg == null) return null
-    return {
-      from: seg.from ?? seg.start ?? '',
-      to: seg.to ?? seg.end ?? '',
-      style: seg.style || 'solid',
-      relation: seg.relation || 'normal'
-    }
-  }).filter(s => s.from && s.to)
-
-  // ── 图形类型判断层 ──
-  // figure_type: 'coordinate'(A 坐标/函数图) | 'geometry'(B 纯几何示意图) | 'geometry_with_coords'(C 带坐标背景的几何图)
-  // 缺省时（旧结构无该字段）按坐标系存在性回退推断，保持向后兼容。
-  const rawCs = obj.coordinate_system && typeof obj.coordinate_system === 'object'
-    ? {
-        exists: !!obj.coordinate_system.exists,
-        origin: obj.coordinate_system.origin || '',
-        x_axis: !!obj.coordinate_system.x_axis,
-        y_axis: !!obj.coordinate_system.y_axis
-      }
-    : { exists: false, origin: '', x_axis: false, y_axis: false }
-  const figure_type = normalizeFigureType(obj.figure_type, rawCs)
-  // 服务端硬性保护：纯几何示意图（类型 B）绝不绘制坐标轴，
-  // 即使模型误判 coordinate_system.exists=true 也强制关闭，避免给几何题凭空加坐标系。
-  const coordinate_system = figure_type === 'geometry'
-    ? { exists: false, origin: '', x_axis: false, y_axis: false }
-    : rawCs
-
-  return {
-    points,
-    segments,
-    circles: Array.isArray(obj.circles) ? obj.circles : [],
-    // 优先用分类后的 geometry_labels；旧结构无该字段时回退到 labels（向后兼容已渲染的题）
-    labels: (Array.isArray(obj.geometry_labels) ? obj.geometry_labels
-          : Array.isArray(obj.labels) ? obj.labels : []).filter(l => isSymbolLabel(l?.text)),
-    rightAngles: Array.isArray(obj.rightAngles) ? obj.rightAngles : [],
-    figure_type,
-    coordinate_system,
-    constraints: Array.isArray(obj.constraints) ? obj.constraints : [],
-  }
-}
-
-/**
- * 归一化图形类型。
- * A 坐标/函数图 → 'coordinate'；B 纯几何示意图 → 'geometry'；C 带坐标背景的几何图 → 'geometry_with_coords'。
- * 模型未给出 figure_type 时按坐标系存在性回退：有坐标轴 → coordinate，否则 → geometry。
- */
-function normalizeFigureType(raw, cs) {
-  const t = typeof raw === 'string' ? raw.trim().toLowerCase() : ''
-  if (t === 'coordinate' || t === 'function' || t === 'a') return 'coordinate'
-  if (t === 'geometry' || t === 'b') return 'geometry'
-  if (t === 'geometry_with_coords' || t === 'geometry_with_coordinates' || t === 'c') return 'geometry_with_coords'
-  // 回退推断
-  return cs && cs.exists ? 'coordinate' : 'geometry'
-}
-
-/** 模型未识别到任何几何元素——该题本就没有可重画的配图，不该重试 */
-export function isRawEmptyStructure(s) {
-  if (!s) return true
-  return (
-    (s.points?.length || 0) === 0 &&
-    (s.segments?.length || 0) === 0 &&
-    (s.circles?.length || 0) === 0
-  )
-}
-
-/**
- * 是否存在可渲染元素。
- * 线段两端必须能在 points 里定位，否则画出来就是一条指向虚空的红线。
- */
-export function isEmptyStructure(s) {
-  if (!s) return true
-  const pts = (s.points || []).filter(p => p && isNum(p.x) && isNum(p.y))
-  const named = new Set(pts.map(p => p.label).filter(Boolean))
-  const segs = (s.segments || []).filter(g => named.has(g?.from) && named.has(g?.to))
-  const circles = (s.circles || []).filter(c => isNum(c?.cx) && isNum(c?.cy) && isNum(c?.r))
-  return pts.length === 0 && segs.length === 0 && circles.length === 0
-}
-
-/** 是否有靠作图关系定义的派生点（垂足/中点/交点/线上动点） */
-export function hasDerivedPoints(s) {
-  return (s?.points || []).some(
-    p => p && p.derived && typeof p.derived === 'object' && Object.keys(p.derived).length > 0
-  )
-}
 
 const esc = (str) =>
   String(str)
@@ -463,12 +316,4 @@ function rightAngleSquare(v, a, b, size) {
   const p3 = { x: v.x + ub.x * size, y: v.y + ub.y * size }
   const p2 = { x: v.x + (ua.x + ub.x) * size, y: v.y + (ua.y + ub.y) * size }
   return `${fmt(p1.x)},${fmt(p1.y)} ${fmt(p2.x)},${fmt(p2.y)} ${fmt(p3.x)},${fmt(p3.y)}`
-}
-
-function unit(from, to) {
-  const dx = to.x - from.x
-  const dy = to.y - from.y
-  const len = Math.hypot(dx, dy)
-  if (len < 0.0001) return null
-  return { x: dx / len, y: dy / len }
 }

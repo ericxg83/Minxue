@@ -11,7 +11,7 @@ import sharp from 'sharp'
 import { TABLES, TASK_STATUS } from './config/neon.js'
 import { query } from './config/neon.js'
 import { AI_CONFIG, getAIHeaders, buildOCRPrompt, buildAnswerGenerationPrompt, getCurrentTextModel, getCurrentVLModel, rotateTextModel, rotateVLModel, TEXT_MODELS, VL_MODELS, callTextCompletion, callVisionCompletion } from './config/ai.js'
-import { updateTaskStatus, createQuestions, batchUpdateQuestionTags, addWrongQuestions, createJudgement, updateQuestionAnswer, markAnswerException, findCachedQuestionByFingerprint, cacheQuestion, incrementQuestionUseCount, updateQuestionCacheId, createQuestionAsset, lookupWorksheetAnswer, getWorksheetAnswersBySection, deleteQuestionsByTaskId, bulkLookupResourceAnswers, getResourceAnswersBySection, getResourceById, addSelfContainedWrongQuestion } from './services/neonService.js'
+import { updateTaskStatus, createQuestions, batchUpdateQuestionTags, addWrongQuestions, createJudgement, updateQuestionAnswer, markAnswerException, markAiAnswerRisk, findCachedQuestionByFingerprint, cacheQuestion, incrementQuestionUseCount, updateQuestionCacheId, createQuestionAsset, lookupWorksheetAnswer, getWorksheetAnswersBySection, deleteQuestionsByTaskId, bulkLookupResourceAnswers, getResourceAnswersBySection, getResourceById, addSelfContainedWrongQuestion } from './services/neonService.js'
 import { uploadImage } from './services/ossService.js'
 import { cropAndUploadQuestionRegion } from './utils/cropAndUpload.js'
 import { refineFigureBoxOnPage } from './utils/figureRegionRefiner.js'
@@ -943,6 +943,47 @@ const markUnjudgedReasons = async (questions) => {
     }
   }
   for (const q of questions || []) delete q._unjudged_reason
+  return targets.length
+}
+
+/**
+ * 客观题 + 配图（geometry/chart）→ AI 视觉推理不擅长，建议人工核对参考答案。
+ *
+ * 与 markUnjudgedReasons 区别：
+ *   · markUnjudgedReasons → AI 没给出正误结论（is_correct=null）
+ *   · markImageReasoningRisk → AI 给出了正误结论，但参考本身可能不可靠
+ *
+ * 仅在以下同时满足时触发：
+ *   1) 客观题（choice/fill/judge）—— 解答题本来就转人工，不重复提示
+ *   2) 配图 image_type 是 'geometry' 或 'chart'  —— 「看图推结论」类
+ *   3) AI 已判过（is_correct !== null）  —— 否则落 markUnjudgedReasons 那条链
+ *   4) 参考答案非空  —— 无参考是另一回事
+ *   5) 学生确实作答  —— 纯未作答不该被这种提示污染
+ *
+ * 失败只记日志：观测信息，绝不能反过来打断批改主流程。
+ */
+const IMAGE_RISK_REASON = 'AI 视觉推理不擅长，建议核对参考答案'
+const markImageReasoningRisk = async (questions) => {
+  const targets = []
+  for (const q of questions || []) {
+    if (!q?.id) continue
+    if (q.is_correct === null || q.is_correct === undefined) continue
+    if (!q.answer || !String(q.answer).trim()) continue
+    if (q.answer_source === 'blank') continue
+    const imageType = String(q.image_type || '').toLowerCase()
+    if (imageType !== 'geometry' && imageType !== 'chart') continue
+    const qt = String(q.question_type || '').toLowerCase()
+    if (!['choice', 'fill', 'judge'].includes(qt)) continue
+    targets.push({ q })
+  }
+  for (const { q } of targets) {
+    try {
+      await markAiAnswerRisk(q.id, IMAGE_RISK_REASON)
+      console.log(`  [ImageRisk] q=${String(q.id).substring(0, 8)} ${q.image_type}/${q.question_type} → ${IMAGE_RISK_REASON}`)
+    } catch (e) {
+      console.error(`  [ImageRisk] 标注失败 q=${String(q.id).substring(0, 8)}:`, e.message)
+    }
+  }
   return targets.length
 }
 
@@ -4020,6 +4061,11 @@ const processWorkbookGrading = async (job) => {
   // 判不出来的题：把原因落到 answer_exception_reason（观测用，不参与判定）
   await markUnjudgedReasons(questionsWithStudentId)
 
+  // 图题风险标注：客观题 + 配图 → 软提示"AI 视觉推理不擅长，建议核对参考答案"
+  // 与 markUnjudgedReasons 不冲突：前者写 is_correct=null 的"AI 未判定"原因列，
+  // 本函数写 is_correct 已给但可能不可靠的"AI 答案存疑"提示列，两套语义分开。
+  await markImageReasoningRisk(questionsWithStudentId)
+
   // 6. 自包含错题本同步：裁剪学生作业图片 + 直接写入 wrong_questions
   // 直接基于 questionsWithStudentId 过滤（自带 id），确保 question_id 一定与
   // 已落库的题目行一致；不再用"题号 → question_id"映射，避免多页同题号/跨 section
@@ -5028,6 +5074,9 @@ const processAnswerBankGrading = async (job) => {
     // 判不出来的题：把原因落到 answer_exception_reason（观测用，不参与判定）
     await markUnjudgedReasons(questionsWithIds)
 
+    // 图题风险标注：客观题 + 配图 → 软提示"AI 视觉推理不擅长，建议核对参考答案"
+    await markImageReasoningRisk(questionsWithIds)
+
     // 同步错题本 + judgement
     for (let idx = 0; idx < questionsWithIds.length; idx++) {
       const q = questionsWithIds[idx]
@@ -5545,6 +5594,9 @@ await job.updateProgress(80)
         // 学生未作答（answer_source='blank'）不在此列：那由 answer_source 表达，
         // 再叠一条异常原因会让老师误以为系统故障。
         await markUnjudgedReasons(questions)
+
+        // 图题风险标注：客观题 + 配图 → 软提示"AI 视觉推理不擅长，建议核对参考答案"
+        await markImageReasoningRisk(questions)
         wrongCount = questions.filter(q => q.is_correct === false).length
         console.log(`✅ [Step 7/8] AI答案生成完成: 生成了 ${answerGenResult.updated}/${answerGenResult.total} 道题的答案, 解析异常 ${answerGenResult.exceptions} 道, 重新判定 ${rejudgedWrong} 道错题, 当前错题数: ${wrongCount}`)
         console.log(`📦 [Cache] 缓存命中: ${answerGenResult.cacheHits} 次, 缓存未命中: ${answerGenResult.cacheMisses} 次`)

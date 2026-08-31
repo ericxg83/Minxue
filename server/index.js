@@ -41,6 +41,7 @@ import { migrateTaskNotificationRead } from './migrations/046_add_task_notificat
 import { migrateTeachingQuestionTypes } from './migrations/047_teaching_question_types.js'
 import { migrateTeachingQuestionTypeAuto } from './migrations/048_teaching_question_type_auto.js'
 import { migrateStudentEnrollmentStatus } from './migrations/049_add_student_enrollment_status.js'
+import { migrateAiAnswerRiskReason } from './migrations/050_add_ai_answer_risk_reason.js'
 import { scheduleNightParse, scheduleWeeklyDiagnosis } from './services/nightParseService.js'
 
 const __dirname = dirname(fileURLToPath(import.meta.url))
@@ -2630,6 +2631,7 @@ if (process.argv[1] === __filename || process.argv[1]?.endsWith('server/index.js
       await migrateTeachingQuestionTypes()
       await migrateTeachingQuestionTypeAuto()
       await migrateStudentEnrollmentStatus()
+      await migrateAiAnswerRiskReason()
     } catch (err) {
       console.error('数据库迁移失败:', err.message)
     }

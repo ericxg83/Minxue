@@ -79,9 +79,11 @@ export async function getClassWeakness(opts = {}) {
       km.kp_id, kp.name, kp.level, kp.subject,
       ROUND(AVG(km.mastery))::int AS avg_mastery,
       COUNT(DISTINCT km.student_id)::int AS student_count,
+      COUNT(DISTINCT s.grade) FILTER (WHERE s.grade IS NOT NULL AND s.grade <> '')::int AS grade_span,
       ROUND(AVG(km.wrong_questions))::int AS avg_wrong_count
     FROM ${TABLES.KNOWLEDGE_MASTERY} km
     JOIN ${TABLES.KNOWLEDGE_POINTS} kp ON kp.id = km.kp_id
+    JOIN ${TABLES.STUDENTS} s ON s.id = km.student_id
     WHERE km.mastery < $1
       AND km.total_questions > 0
       ${subjectClause}
@@ -98,9 +100,112 @@ export async function getClassWeakness(opts = {}) {
     subject: r.subject,
     avgMastery: r.avg_mastery,
     studentCount: r.student_count,
+    gradeSpan: r.grade_span,
     avgWrongCount: r.avg_wrong_count,
     isUrgent: r.avg_mastery < URGENT_THRESHOLD,
   }))
+}
+
+/**
+ * Dashboard 专用：班级薄弱知识点 Top N，按「未掌握人数」优先排序。
+ *
+ * 与 getClassWeakness 的差别：
+ *   - 排序：未掌握人数 DESC → 跨年级数 DESC → 平均掌握度 ASC
+ *     （getClassWeakness 偏"最薄弱"，本函数偏"今天优先讲什么"）
+ *   - limit：默认 5（Dashboard 摘要卡片用）
+ *   - 必返回 gradeSpan（Dashboard 行内展示"跨 N 个年级"标签用）
+ *
+ * @param {Object} [opts]
+ * @param {number} [opts.limit] 返回条数，默认 5
+ * @param {string} [opts.subject] 学科过滤
+ * @returns {Promise<Array<{kpId, name, level, subject, avgMastery, studentCount, gradeSpan, isUrgent}>>}
+ */
+export async function getDashboardClassWeakness(opts = {}) {
+  const { limit = 5, subject = null } = opts
+
+  // $1 固定为 WEAK_THRESHOLD；subject / limit 用递增位置避免占位符冲突
+  let nextIdx = 1
+  let subjectClause = ''
+  const params = []
+  if (subject) {
+    nextIdx++
+    params.push(subject)
+    subjectClause = ` AND kp.subject = $${nextIdx}`
+  }
+  nextIdx++
+  params.push(limit)
+
+  const { rows } = await query(
+    `SELECT
+      km.kp_id, kp.name, kp.level, kp.subject,
+      ROUND(AVG(km.mastery))::int AS avg_mastery,
+      COUNT(DISTINCT km.student_id)::int AS student_count,
+      COUNT(DISTINCT s.grade) FILTER (WHERE s.grade IS NOT NULL AND s.grade <> '')::int AS grade_span
+    FROM ${TABLES.KNOWLEDGE_MASTERY} km
+    JOIN ${TABLES.KNOWLEDGE_POINTS} kp ON kp.id = km.kp_id
+    JOIN ${TABLES.STUDENTS} s ON s.id = km.student_id
+    WHERE km.mastery < $1
+      AND km.total_questions >= 2
+      ${subjectClause}
+    GROUP BY km.kp_id, kp.name, kp.level, kp.subject
+    ORDER BY student_count DESC, grade_span DESC, avg_mastery ASC
+    LIMIT $${nextIdx}`,
+    [WEAK_THRESHOLD, ...params]
+  )
+
+  return rows.map(r => ({
+    kpId: r.kp_id,
+    name: r.name,
+    level: r.level,
+    subject: r.subject,
+    avgMastery: r.avg_mastery,
+    studentCount: r.student_count,
+    gradeSpan: r.grade_span,
+    isUrgent: r.avg_mastery < URGENT_THRESHOLD,
+  }))
+}
+
+/**
+ * Dashboard 专用：本周重练效果 3 个数字（已掌握率 / 进行中 / 待重练学生）。
+ *
+ * 口径（已确认，无需时间窗对比）：
+ *   - 已掌握率 %：班级错题中 lifecycle_status IN ('review_2', 'mastered') 的比例
+ *   - 进行中 N：已批改待教师处理的重练卷数（generated_exams 关联的 task 仍在批改/批改完未读）
+ *   - 待重练学生 M：lifecycle_status IN ('new', 'review_1') 的去重学生数
+ *
+ * @returns {Promise<{masteryRate: number, inProgress: number, awaitingRetryStudents: number}>}
+ */
+export async function getRetryOverview() {
+  const [{ rows: masteryRows }, { rows: inProgressRows }, { rows: awaitingRows }] = await Promise.all([
+    query(
+      `SELECT
+        COUNT(*)::int AS total,
+        COUNT(*) FILTER (WHERE lifecycle_status IN ('review_2', 'mastered'))::int AS mastered
+       FROM ${TABLES.WRONG_QUESTIONS}`
+    ),
+    query(
+      `SELECT COUNT(*)::int AS n
+       FROM ${TABLES.GENERATED_EXAMS} ge
+       JOIN ${TABLES.TASKS} t ON t.generated_exam_id = ge.id
+       WHERE t.deleted_at IS NULL
+         AND t.status = 'graded'`
+    ),
+    query(
+      `SELECT COUNT(DISTINCT student_id)::int AS n
+       FROM ${TABLES.WRONG_QUESTIONS}
+       WHERE lifecycle_status IN ('new', 'review_1')`
+    )
+  ])
+
+  const total = masteryRows[0]?.total ?? 0
+  const mastered = masteryRows[0]?.mastered ?? 0
+  const masteryRate = total > 0 ? Math.round((mastered * 100) / total) : 0
+
+  return {
+    masteryRate,
+    inProgress: inProgressRows[0]?.n ?? 0,
+    awaitingRetryStudents: awaitingRows[0]?.n ?? 0
+  }
 }
 
 /**

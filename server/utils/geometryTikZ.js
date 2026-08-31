@@ -7,116 +7,17 @@
  * 坐标系：模型输出的是数学平面坐标（y 向上为正），TikZ 坐标系直接对应（y 向上为正）。
  */
 
+import {
+  parseGeometryStructure,
+  normalizeStructure,
+  isEmptyStructure
+} from './geom/structure.js'
+import { unit } from './geom/vec.js'
+
+// 再导出，保持 tikzWorker 既有的 import 路径不变
+export { parseGeometryStructure, isEmptyStructure }
+
 const isNum = (v) => typeof v === 'number' && isFinite(v)
-
-/**
- * 从模型返回的文本中解析出几何结构 JSON（复用 geometrySvg 的解析逻辑）。
- * 兼容：纯 JSON、```json 代码块、前后夹带说明文字的情况。
- */
-export function parseGeometryStructure(content) {
-  if (!content || typeof content !== 'string') return null
-
-  const block = content.match(/```(?:json)?\s*\n?([\s\S]*?)\n?```/)
-  const candidates = []
-  if (block) candidates.push(block[1].trim())
-
-  const first = content.indexOf('{')
-  const last = content.lastIndexOf('}')
-  if (first !== -1 && last !== -1 && last > first) {
-    candidates.push(content.slice(first, last + 1))
-  }
-
-  candidates.push(content.trim())
-
-  for (const c of candidates) {
-    try {
-      const obj = JSON.parse(c)
-      if (obj && typeof obj === 'object') return normalizeStructure(obj)
-    } catch {
-      // 继续尝试下一个候选
-    }
-  }
-  return null
-}
-
-/** 规范化结构：确保各字段为数组，兼容新旧格式 */
-function normalizeStructure(obj) {
-  let points = Array.isArray(obj.points) ? obj.points : []
-  points = points.map(p => {
-    if (p == null) return null
-    // 兼容 points[].name 与 points[].label 两种字段名
-    const pointLabel = p.label ?? p.name ?? ''
-    if (p.position && isNum(p.position.x) && isNum(p.position.y)) {
-      return { label: pointLabel, type: p.type || 'vertex', x: p.position.x, y: p.position.y }
-    }
-    if (isNum(p.x) && isNum(p.y)) {
-      return { label: pointLabel, type: p.type || 'vertex', x: p.x, y: p.y }
-    }
-    return null
-  }).filter(Boolean)
-
-  let segments = Array.isArray(obj.segments) ? obj.segments : []
-  segments = segments.map(seg => {
-    if (seg == null) return null
-    return {
-      from: seg.from ?? seg.start ?? '',
-      to: seg.to ?? seg.end ?? '',
-      style: seg.style || 'solid',
-      relation: seg.relation || 'normal'
-    }
-  }).filter(s => s.from && s.to)
-
-  // ── 图形类型判断层 ──
-  // figure_type: 'coordinate'(A 坐标/函数图) | 'geometry'(B 纯几何示意图) | 'geometry_with_coords'(C 带坐标背景的几何图)
-  const rawCs = obj.coordinate_system && typeof obj.coordinate_system === 'object'
-    ? {
-        exists: !!obj.coordinate_system.exists,
-        origin: obj.coordinate_system.origin || '',
-        x_axis: !!obj.coordinate_system.x_axis,
-        y_axis: !!obj.coordinate_system.y_axis
-      }
-    : { exists: false, origin: '', x_axis: false, y_axis: false }
-  const figure_type = normalizeFigureType(obj.figure_type, rawCs)
-  // 服务端硬性保护：纯几何示意图（类型 B）绝不绘制坐标轴。
-  const coordinate_system = figure_type === 'geometry'
-    ? { exists: false, origin: '', x_axis: false, y_axis: false }
-    : rawCs
-
-  return {
-    points,
-    segments,
-    circles: Array.isArray(obj.circles) ? obj.circles : [],
-    // 优先用分类后的 geometry_labels；旧结构无该字段时回退到 labels（向后兼容已渲染的题）
-    labels: Array.isArray(obj.geometry_labels) ? obj.geometry_labels
-          : Array.isArray(obj.labels) ? obj.labels : [],
-    rightAngles: Array.isArray(obj.rightAngles) ? obj.rightAngles : [],
-    figure_type,
-    coordinate_system,
-    constraints: Array.isArray(obj.constraints) ? obj.constraints : [],
-  }
-}
-
-/**
- * 归一化图形类型（与 geometrySvg.js 保持一致）。
- * A 坐标/函数图 → 'coordinate'；B 纯几何示意图 → 'geometry'；C 带坐标背景的几何图 → 'geometry_with_coords'。
- */
-function normalizeFigureType(raw, cs) {
-  const t = typeof raw === 'string' ? raw.trim().toLowerCase() : ''
-  if (t === 'coordinate' || t === 'function' || t === 'a') return 'coordinate'
-  if (t === 'geometry' || t === 'b') return 'geometry'
-  if (t === 'geometry_with_coords' || t === 'geometry_with_coordinates' || t === 'c') return 'geometry_with_coords'
-  return cs && cs.exists ? 'coordinate' : 'geometry'
-}
-
-/** 结构是否为空（无任何可渲染几何元素） */
-export function isEmptyStructure(s) {
-  if (!s) return true
-  return (
-    (s.points?.length || 0) === 0 &&
-    (s.segments?.length || 0) === 0 &&
-    (s.circles?.length || 0) === 0
-  )
-}
 
 const fmt = (n) => Math.round(n * 100) / 100
 
@@ -300,12 +201,4 @@ function labelOffset(point, allPoints) {
   else if (vy < -0.4) anchor = 'below'
   else anchor = 'right'
   return { dx, dy, anchor }
-}
-
-function unit(from, to) {
-  const dx = to.x - from.x
-  const dy = to.y - from.y
-  const len = Math.hypot(dx, dy)
-  if (len < 0.0001) return null
-  return { x: dx / len, y: dy / len }
 }

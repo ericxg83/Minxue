@@ -3,6 +3,8 @@ import { query, TABLES } from '../config/neon.js'
 import { getQuestionKnowledge } from '../services/knowledgeService.js'
 import { generateKnowledgeExplanation, buildHandout, buildKnowledgeSection, listHandoutTemplates } from '../services/handoutService.js'
 import { buildHandoutDocx } from '../services/handoutDocxService.js'
+import { buildWrongPaperDocx } from '../services/wrongPaperDocxService.js'
+import { aggregateWrongPaper } from '../services/wrongPaperService.js'
 import { generateLectureScript } from '../services/handoutScriptService.js'
 import { normalizeTagToKnowledgeName, groupByCanonical } from '../services/handoutDiagnosisService.js'
 import { collectKnowledgeSections } from '../services/handoutByKnowledgeService.js'
@@ -292,6 +294,123 @@ router.post('/lecture-script', async (req, res) => {
   } catch (e) {
     console.error('讲课提词器生成失败:', e)
     res.status(500).json({ success: false, error: e.message })
+  }
+})
+
+/**
+ * POST /api/handout/export-wrong-paper
+ * 周末讲题错题卷导出（Word）
+ *
+ * 两档：
+ *   - mode='all'：全班卷。含题目 + 正确答案 + 错的学生名单 + 错误率。讲题用。
+ *   - mode='student'：个人卷。仅题目 + 学生自己的错答 + 错因（不含正确答案），
+ *     末尾附"答案附录页"（教师版），尊重"先练后看"产品口径。
+ *
+ * Body:
+ *   - grade: 必填，年级
+ *   - mode: 'all' | 'student'，必填
+ *   - studentId: mode='student' 时必填
+ *   - studentName: mode='student' 时建议填，用于封面与文件名
+ *   - subject?: 学科过滤，默认 '数学'
+ *   - mode?: 'week' | 'month' | 'all'，默认 'week'
+ *   - offset?: 时间偏移，默认 0
+ *   - periodStart?: 自定义时段起点（ISO 字符串）
+ *   - periodEnd?: 自定义时段终点
+ */
+router.post('/export-wrong-paper', async (req, res) => {
+  try {
+    const {
+      grade,
+      mode = 'all',
+      studentId,
+      studentName: studentNameInput,
+      subject = '数学',
+    } = req.body || {}
+
+    if (!grade) return res.status(400).json({ success: false, error: 'grade 必填' })
+    if (mode !== 'all' && mode !== 'student') {
+      return res.status(400).json({ success: false, error: "mode 必须为 'all' 或 'student'" })
+    }
+    if (mode === 'student' && !studentId) {
+      return res.status(400).json({ success: false, error: 'mode=student 时 studentId 必填' })
+    }
+
+    // 解析时段（与 /api/teaching/wrong-paper 同口径）
+    let periodStart, periodEnd, periodMode, periodOffset
+    if (req.body.periodStart && req.body.periodEnd) {
+      periodStart = new Date(req.body.periodStart)
+      periodEnd = new Date(req.body.periodEnd)
+      periodMode = req.body.periodMode || 'custom'
+      periodOffset = parseInt(req.body.periodOffset || 0)
+    } else {
+      const p = parsePeriod({
+        mode: req.body.periodMode || 'week',
+        offset: req.body.periodOffset || 0,
+      })
+      periodStart = p.periodStart
+      periodEnd = p.periodEnd
+      periodMode = p.mode
+      periodOffset = p.offset
+    }
+
+    const { totalStudentCount, items } = await aggregateWrongPaper({
+      grade,
+      periodStart,
+      periodEnd,
+      subject,
+    })
+
+    if (items.length === 0) {
+      return res.status(404).json({ success: false, error: '该年级当前时段暂无错题，无法生成错题卷' })
+    }
+
+    // 个人卷：解析学生姓名（如果未传）
+    let studentName = studentNameInput || ''
+    if (mode === 'student' && !studentName) {
+      try {
+        const { rows } = await query(`SELECT name FROM ${TABLES.STUDENTS} WHERE id = $1 LIMIT 1`, [studentId])
+        studentName = rows[0]?.name || ''
+      } catch (e) {
+        console.warn('[export-wrong-paper] 读取学生姓名失败:', e.message)
+      }
+    }
+
+    const title = mode === 'all'
+      ? `${grade}${subject === '数学' ? '' : '·' + subject}本周错题卷（讲义版）`
+      : `${grade}·${studentName || '个人'}错题卷（重练版）`
+
+    const buffer = await buildWrongPaperDocx({
+      title,
+      grade,
+      period: {
+        start: periodStart.toISOString().split('T')[0],
+        end: periodEnd.toISOString().split('T')[0],
+        mode: periodMode,
+        offset: periodOffset,
+      },
+      subject,
+      totalStudentCount,
+      items,
+      mode,
+      studentName,
+      studentId,
+    })
+
+    // 文件名：`YYYYMMDD_年级_全班错题卷.docx` 或 `YYYYMMDD_姓名_错题卷.docx`
+    const now = new Date()
+    const ymd = `${now.getFullYear()}${String(now.getMonth() + 1).padStart(2, '0')}${String(now.getDate()).padStart(2, '0')}`
+    const safeName = mode === 'all'
+      ? `${ymd}_${grade}_全班错题卷`
+      : `${ymd}_${(studentName || '个人').replace(/[\\/:*?"<>|\s]/g, '_')}_错题卷`
+    const finalName = `${safeName}.docx`
+
+    res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.wordprocessingml.document')
+    res.setHeader('Content-Disposition', `attachment; filename="${encodeURIComponent(finalName)}"`)
+    res.setHeader('Content-Length', buffer.length)
+    res.send(buffer)
+  } catch (error) {
+    console.error('导出错题卷失败:', error)
+    res.status(500).json({ success: false, error: error.message })
   }
 })
 
