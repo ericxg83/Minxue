@@ -1,5 +1,6 @@
 import { AlertCircle, Camera, CheckCircle2, ChevronRight, Clock3, Loader2, RotateCcw } from 'lucide-react'
 import { motion } from 'motion/react'
+import { useEffect, useRef } from 'react'
 import dayjs from 'dayjs'
 import EmptyState from '../components/EmptyState'
 import { MobileList, MobileSegmentedTabs, MobileTextAction } from '../features/mobile/MobilePrimitives'
@@ -62,6 +63,8 @@ function TaskRow({ task, onRetryTask, onOpenReview }) {
   const pending = task.result?.pendingCount || 0
   const questionCount = task.result?.questionCount || task.question_count || 0
   const truncated = Number(task.result?.ocrTruncated) > 0
+  const progress = Number(task.result?.progress)
+  const showProgress = current === 'processing' && Number.isFinite(progress) && progress > 0 && progress < 100
   const bad = current === 'failed' || current === 'stalled'
   const clickable = current === 'completed'
   const Icon = bad ? AlertCircle : current === 'processing' ? Loader2 : current === 'completed' ? CheckCircle2 : Clock3
@@ -72,7 +75,8 @@ function TaskRow({ task, onRetryTask, onOpenReview }) {
   const detail = current === 'failed' ? failReason(task)
     : current === 'stalled' ? '处理超时，可重试'
     : current === 'processing' && isTemp ? '正在上传图片'
-    : current === 'processing' ? '正在整理批改结果'
+    : current === 'processing'
+      ? (showProgress ? `正在整理批改结果 · ${Math.round(progress)}%` : '正在整理批改结果')
     : current === 'completed'
       ? <ResultSummary questionCount={questionCount} wrong={wrong} empty={empty} pending={pending} truncated={truncated} />
     : '等待系统开始处理'
