@@ -167,6 +167,12 @@
             重新生成
           </el-button>
         </template>
+        <el-tag v-if="geometryConsistency && !geometryConsistency.skipped" size="small" :type="geometryConsistency.pass ? 'success' : 'danger'" effect="dark">
+          几何自洽{{ geometryConsistency.pass ? '通过' : '存疑' }}
+        </el-tag>
+        <el-tag v-else-if="geometryConsistency && geometryConsistency.skipped" size="small" type="info" effect="plain">
+          几何无需校验
+        </el-tag>
       </div>
     </div>
   </div>
@@ -184,6 +190,15 @@
       <!-- ═══ 底部操作区（固定） ═══ -->
       <div class="ops-actions">
         <template v-if="!editing">
+          <!-- [P5] 几何自洽性审计 → 复核结论提示 -->
+          <el-alert
+            v-if="geometryReviewHint"
+            :title="geometryReviewHint.text"
+            :type="geometryReviewHint.level"
+            show-icon
+            :closable="false"
+            class="ops-geom-hint"
+          />
           <div class="ops-buttons-primary">
             <button class="ops-btn ops-btn-correct"
               :class="{ 'ops-btn-active': q.review_status === 'correct', 'animate': animatingBtn === 'correct' }"
@@ -272,7 +287,7 @@
 <script setup>
 import { ref, computed, watch, nextTick } from 'vue'
 import { useReviewStore } from '../../stores/reviewStore'
-import { updateQuestion, rejudgeQuestion, retryGeometry, clearStudentCaches, uploadImage } from '../../../services/apiService'
+import { updateQuestion, rejudgeQuestion, retryGeometry, clearStudentCaches, uploadImage, getQuestionAssets } from '../../../services/apiService'
 import { processExamImage } from '../../../utils/imageProcessor'
 import { getGeometryDisplayUrl, getTikzStatus } from '../../../utils/geometryDisplay'
 import { tikzToSvg } from '../../../utils/tikzGenerator'
@@ -377,6 +392,43 @@ const isTikzActive = computed(() => q.value?.display_image_type === 'tikz')
 const fullscreenImage = ref('')
 const fullscreenSvg = ref('')
 const showFullscreenSvg = ref(false)
+
+// [P4 影子模式] 几何自洽性审计字段展示：拉取该题的几何资产生成记录，读取 tikz_json.consistency
+const geometryConsistency = ref(null)
+watch(
+  () => q.value?.id,
+  async (id) => {
+    geometryConsistency.value = null
+    if (!id) return
+    try {
+      const assets = await getQuestionAssets(id, 'geometry_image')
+      const hit = (assets || []).find((a) => a && a.tikz_json && a.tikz_json.consistency)
+      geometryConsistency.value = hit ? hit.tikz_json.consistency : null
+    } catch (e) {
+      geometryConsistency.value = null
+    }
+  },
+  { immediate: true }
+)
+
+// [P5] 把几何自洽性审计信号接到「复核结论提示」：在复核操作区给出结论性提示，提示人工核对而非自动拦截
+const geometryReviewHint = computed(() => {
+  const c = geometryConsistency.value
+  if (!c || c.skipped) return null
+  // 求解后仍不自洽：图与题设存在不可调和的矛盾，强提示
+  if (!c.pass) {
+    return { level: 'error', text: '图与题设不符，建议人工核对图形及标注' }
+  }
+  // 原图不自洽但可解出自洽解：原图标注可能有误，求解已校正
+  if (c.rawPass === false) {
+    return { level: 'warning', text: '原图与题设存在偏差，求解已校正，建议核对图形标注' }
+  }
+  // 退化几何（共线/重合等）
+  if (c.degenerate) {
+    return { level: 'warning', text: '检测到退化几何（共线/重合等），建议人工核对' }
+  }
+  return null
+})
 
 /** 将 TikZ 代码渲染为 SVG 字符串 */
 const renderTikzSvg = (code) => {
@@ -1041,6 +1093,7 @@ const handleRetryGeometry = async () => {
   flex-direction: column;
   gap: 8px;
 }
+.ops-geom-hint { margin: 0; }
 .ops-buttons-primary {
   display: flex;
   gap: 8px;

@@ -1,5 +1,5 @@
 <template>
-  <div class="exam-mgr">
+  <div class="exam-mgr wb-page wb-page--bleed">
     <div class="page-header">
       <h2>试卷答案库管理</h2>
       <el-button type="primary" @click="showCreateDialog = true">
@@ -58,17 +58,13 @@
     <el-dialog v-model="showCreateDialog" title="新建试卷答案库" width="420px">
       <el-form :model="createForm" label-width="60px">
         <el-form-item label="名称">
-          <el-input v-model="createForm.name" placeholder="如：2024期末数学试卷" />
+          <WorkbenchInput v-model="createForm.name" placeholder="如：2024期末数学试卷" aria-label="试卷名称" />
         </el-form-item>
         <el-form-item label="科目">
-          <el-select v-model="createForm.subject" placeholder="选择科目" style="width: 100%">
-            <el-option label="数学" value="数学" />
-            <el-option label="英语" value="英语" />
-            <el-option label="语文" value="语文" />
-          </el-select>
+          <WorkbenchSelect v-model="createForm.subject" :options="subjectOptions" placeholder="选择科目" aria-label="选择科目" />
         </el-form-item>
         <el-form-item label="年级">
-          <el-input v-model="createForm.grade" placeholder="如：六年级" />
+          <WorkbenchInput v-model="createForm.grade" placeholder="如：六年级" aria-label="年级" />
         </el-form-item>
       </el-form>
       <template #footer>
@@ -80,10 +76,12 @@
 </template>
 
 <script setup>
-import { ref, onMounted } from 'vue'
+import { ref, onMounted, computed } from 'vue'
 import { useRouter } from 'vue-router'
 import { Plus } from '@element-plus/icons-vue'
 import { getResources, createResource, deleteResource, updateResource } from '../../services/apiService.js'
+import WorkbenchInput from '../components/ui/WorkbenchInput.vue'
+import WorkbenchSelect from '../components/ui/WorkbenchSelect.vue'
 
 const router = useRouter()
 const exams = ref([])
@@ -91,6 +89,11 @@ const loading = ref(false)
 const creating = ref(false)
 const showCreateDialog = ref(false)
 const createForm = ref({ name: '', subject: '', grade: '' })
+const subjectOptions = [
+  { label: '数学', value: '数学' },
+  { label: '英语', value: '英语' },
+  { label: '语文', value: '语文' }
+]
 
 const loadExams = async () => {
   loading.value = true

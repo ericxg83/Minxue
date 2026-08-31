@@ -7,10 +7,12 @@
 
       <FilterBar class="worksheet-filter">
         <template #leading><div class="resource-summary"><strong>{{ filteredWorksheets.length }} 本练习册</strong><span>{{ publishedCount }} 本已发布 · {{ draftCount }} 本待完善</span></div></template>
-        <el-input v-model="searchQuery" class="worksheet-search" clearable placeholder="搜索练习册名称" aria-label="搜索练习册名称"><template #prefix><el-icon><Search /></el-icon></template></el-input>
-        <el-select v-model="subjectFilter" class="compact-select"><el-option label="全部科目" value="all" /><el-option v-for="subject in subjectOptions" :key="subject" :label="subject" :value="subject" /></el-select>
-        <el-select v-model="gradeFilter" class="compact-select"><el-option label="全部年级" value="all" /><el-option v-for="grade in gradeOptions" :key="grade" :label="grade" :value="grade" /></el-select>
-        <el-select v-model="statusFilter" class="compact-select"><el-option label="全部状态" value="all" /><el-option label="已发布" value="published" /><el-option label="审核中" value="reviewing" /><el-option label="草稿" value="draft" /></el-select>
+        <WorkbenchInput v-model="searchQuery" clearable placeholder="搜索练习册名称" width="260px" aria-label="搜索练习册名称">
+          <template #prefix><el-icon><Search /></el-icon></template>
+        </WorkbenchInput>
+        <WorkbenchSelect v-model="subjectFilter" :options="subjectFilterOptions" width="126px" aria-label="按科目筛选" />
+        <WorkbenchSelect v-model="gradeFilter" :options="gradeFilterOptions" width="126px" aria-label="按年级筛选" />
+        <WorkbenchSelect v-model="statusFilter" :options="statusFilterOptions" width="126px" aria-label="按状态筛选" />
         <template #actions><el-button text @click="resetFilters">重置</el-button></template>
       </FilterBar>
 
@@ -45,17 +47,13 @@
     <el-dialog v-model="showCreateDialog" title="新建练习册" width="420px">
       <el-form :model="createForm" label-width="60px">
         <el-form-item label="名称">
-          <el-input v-model="createForm.name" placeholder="如：六上数学小初衔接" />
+          <WorkbenchInput v-model="createForm.name" placeholder="如：六上数学小初衔接" aria-label="练习册名称" />
         </el-form-item>
         <el-form-item label="科目">
-          <el-select v-model="createForm.subject" placeholder="选择科目" style="width: 100%">
-            <el-option label="数学" value="数学" />
-            <el-option label="英语" value="英语" />
-            <el-option label="语文" value="语文" />
-          </el-select>
+          <WorkbenchSelect v-model="createForm.subject" :options="createSubjectOptions" placeholder="选择科目" aria-label="选择科目" />
         </el-form-item>
         <el-form-item label="年级">
-          <el-input v-model="createForm.grade" placeholder="如：六年级" />
+          <WorkbenchInput v-model="createForm.grade" placeholder="如：六年级" aria-label="年级" />
         </el-form-item>
       </el-form>
       <template #footer>
@@ -222,6 +220,8 @@ import EmptyState from '../components/ui/EmptyState.vue'
 import FilterBar from '../components/ui/FilterBar.vue'
 import PageHeader from '../components/ui/PageHeader.vue'
 import StatusTag from '../components/ui/StatusTag.vue'
+import WorkbenchInput from '../components/ui/WorkbenchInput.vue'
+import WorkbenchSelect from '../components/ui/WorkbenchSelect.vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import {
   getWorksheets,
@@ -244,6 +244,19 @@ const gradeFilter = ref('all')
 const statusFilter = ref('all')
 const subjectOptions = computed(() => [...new Set(worksheets.value.map(item => item.subject).filter(Boolean))])
 const gradeOptions = computed(() => [...new Set(worksheets.value.map(item => item.grade).filter(Boolean))])
+const subjectFilterOptions = computed(() => [{ label: '全部科目', value: 'all' }, ...subjectOptions.value.map(s => ({ label: s, value: s }))])
+const gradeFilterOptions = computed(() => [{ label: '全部年级', value: 'all' }, ...gradeOptions.value.map(g => ({ label: g, value: g }))])
+const statusFilterOptions = [
+  { label: '全部状态', value: 'all' },
+  { label: '已发布', value: 'published' },
+  { label: '审核中', value: 'reviewing' },
+  { label: '草稿', value: 'draft' }
+]
+const createSubjectOptions = [
+  { label: '数学', value: '数学' },
+  { label: '英语', value: '英语' },
+  { label: '语文', value: '语文' }
+]
 const filteredWorksheets = computed(() => worksheets.value.filter(item => {
   const keyword = searchQuery.value.trim().toLowerCase()
   const matchesSearch = !keyword || `${item.name || ''} ${item.subject || ''} ${item.grade || ''}`.toLowerCase().includes(keyword)

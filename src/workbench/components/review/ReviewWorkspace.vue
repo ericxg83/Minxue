@@ -80,6 +80,15 @@ onMounted(async () => {
   document.addEventListener('keydown', onKeydown)
   store.setTaskType(props.taskType)
   await store.initData()
+
+  // taskId 优先：Dashboard 等入口只传 taskId 时，必须先反查学生并切换，
+  // 否则会落到默认第一个学生 + 选错任务的 BUG（详见 reviewStore.loadTaskById）
+  const requestedTaskId = route.query.taskId || route.query.examId
+  if (requestedTaskId) {
+    await store.loadTaskById(requestedTaskId)
+    return
+  }
+
   const requestedStudentId = route.query.studentId
   if (requestedStudentId) {
     const student = store.students.find(item => String(item.id) === String(requestedStudentId))
@@ -89,11 +98,6 @@ onMounted(async () => {
       await store.loadWrongQuestions(student.id)
       await store.autoSelectPendingTask?.()
     }
-  }
-  const requestedTaskId = route.query.taskId || route.query.examId
-  if (requestedTaskId) {
-    const task = store.studentTasks.find(item => String(item.id) === String(requestedTaskId))
-    if (task) await store.selectTask(task)
   }
 })
 

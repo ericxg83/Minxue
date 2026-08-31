@@ -1,6 +1,6 @@
 import { defineStore } from 'pinia'
 import { ref, computed } from 'vue'
-import { getStudents, getWrongQuestionsByStudent, getQuestionsByTask, getTasksByStudent, updateWrongQuestionStatus, updateTaskStatus, recalculateTaskStats, getLatestJudgements, clearStudentCaches, updateQuestionReviewStatus, addWrongQuestions, getGeneratedExamsByStudent, getQuestionsByIds, gradeGeneratedExam } from '../../services/apiService'
+import { getStudents, getWrongQuestionsByStudent, getQuestionsByTask, getTasksByStudent, getTaskById, updateWrongQuestionStatus, updateTaskStatus, recalculateTaskStats, getLatestJudgements, clearStudentCaches, updateQuestionReviewStatus, addWrongQuestions, getGeneratedExamsByStudent, getQuestionsByIds, gradeGeneratedExam } from '../../services/apiService'
 import { useLifecycleStore, LIFECYCLE_STATUS } from './lifecycleStore'
 import { checkQuestionCompleteness } from '../../utils/questionCompleteness.js'
 import { TASK_TYPE, getReviewConfig } from '../config/reviewConfig'
@@ -470,6 +470,38 @@ export const useReviewStore = defineStore('review', () => {
     }
   }
 
+  // 按 taskId 直接定位：先 fetch task 详情反查 student_id，再切换学生并选中 task。
+  // 用于 Dashboard / 其他入口只传 taskId 不传 studentId 的场景：
+  // 老逻辑默认选第一个学生并从其 studentTasks 里 find(taskId)，task 在其他学生下时找不到，
+  // 会落到 autoSelectPendingTask 选错学生的任务——这就是 Dashboard 圈出的 BUG 根因。
+  const loadTaskById = async (taskId) => {
+    try {
+      const task = await getTaskById(taskId)
+      if (!task) return false
+
+      if (students.value.length === 0) {
+        await loadStudents()
+      }
+
+      const targetStudentId = task.student_id || task.studentId
+      const student = students.value.find(s => String(s.id) === String(targetStudentId))
+
+      if (student && (!currentStudent.value || String(currentStudent.value.id) !== String(student.id))) {
+        setCurrentStudent(student)
+        await Promise.all([
+          loadStudentTasks(student.id),
+          loadWrongQuestions(student.id)
+        ])
+      }
+
+      await selectTask(task)
+      return true
+    } catch (e) {
+      console.error('[reviewStore] loadTaskById 失败:', e)
+      return false
+    }
+  }
+
   // paper 模式：加载练习卷（generated_exams），映射为统一 task 结构
   // status: ungraded/grading → 'done'(待复核) ; graded → 'reviewed'(已复核)
   const loadStudentPapers = async (studentId) => {
@@ -834,6 +866,7 @@ export const useReviewStore = defineStore('review', () => {
     reviewProgress,
     loadStudentTasks,
     selectTask,
+    loadTaskById,
     autoSelectPendingTask,
     nextTask,
     completeTaskReview,

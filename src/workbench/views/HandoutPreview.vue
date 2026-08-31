@@ -1,5 +1,5 @@
 <template>
-  <div class="handout-preview">
+  <div class="handout-preview wb-page wb-page--bleed">
     <!-- 顶部工具栏 -->
     <div class="handout-toolbar">
       <div class="toolbar-left">
@@ -20,37 +20,34 @@
       </div>
       <div class="toolbar-right">
         <!-- 目录跳转 -->
-        <el-select
+        <WorkbenchSelect
           v-model="pageJumpIndex"
-          @change="gotoPage"
+          :options="pageJumpOptions"
           size="small"
           clearable
           placeholder="📑 跳转目录"
-          style="width: 170px;"
-        >
-          <el-option v-for="(p, i) in (handout?.pages || [])" :key="i" :value="i" :label="pageLabel(p, i)" />
-        </el-select>
+          width="170px"
+          aria-label="跳转到指定页"
+          @change="gotoPage"
+        />
         <!-- 模板下拉 -->
-        <el-select
+        <WorkbenchSelect
           v-model="selectedTemplate"
-          @change="handleTemplateChange"
-          placeholder="选择模板"
-          size="small"
-          style="width: 180px;"
+          :options="availableTemplates"
           :loading="templatesLoading"
+          size="small"
+          placeholder="选择模板"
+          width="180px"
+          aria-label="选择讲义模板"
+          @change="handleTemplateChange"
         >
-          <el-option
-            v-for="t in availableTemplates"
-            :key="t.id"
-            :label="t.label"
-            :value="t.id"
-          >
+          <template #option="{ opt }">
             <div class="template-option">
-              <span class="template-option-label">{{ t.label }}</span>
-              <span class="template-option-desc">{{ t.description }}</span>
+              <span class="template-option-label">{{ opt.label }}</span>
+              <span class="template-option-desc">{{ opt.description }}</span>
             </div>
-          </el-option>
-        </el-select>
+          </template>
+        </WorkbenchSelect>
         <el-button @click="openKnowledgeDialog" type="primary" plain :icon="Collection" :loading="knowledgeGenerating">
           按知识点
         </el-button>
@@ -455,7 +452,9 @@
     <el-drawer v-model="typeLibraryVisible" title="从我的题型库插入" size="min(520px, 100%)">
       <div class="type-library-drawer">
         <p>选择一个知识点下已确认的题型。插入后会保存代表题与讲法快照，不会修改原题。</p>
-        <el-input v-model="typeLibraryKeyword" clearable placeholder="搜索题型" :prefix-icon="Collection" />
+        <WorkbenchInput v-model="typeLibraryKeyword" clearable placeholder="搜索题型" width="220px" aria-label="搜索题型">
+          <template #prefix><el-icon><Collection /></el-icon></template>
+        </WorkbenchInput>
         <div v-if="typeLibraryLoading" class="type-library-loading"><el-skeleton animated :rows="8" /></div>
         <el-empty v-else-if="!filteredLibraryTypes.length" description="没有可插入的题型" />
         <button v-for="item in filteredLibraryTypes" :key="item.id" type="button" class="type-library-item" @click="insertTeachingType(item)">
@@ -732,9 +731,7 @@
 
         <div class="present-bottombar">
           <el-button size="large" :disabled="presentIndex === 0" @click="prevPresentPage">← 上一页</el-button>
-          <el-select size="large" v-model="presentIndex" placeholder="跳转目录" style="width: 220px">
-            <el-option v-for="(p, i) in (handout?.pages || [])" :key="i" :value="i" :label="pageLabel(p, i)" />
-          </el-select>
+          <WorkbenchSelect v-model="presentIndex" :options="presentOptions" size="large" placeholder="跳转目录" width="220px" aria-label="跳转目录" />
           <el-button size="large" type="primary" :disabled="presentIndex >= pagesCount - 1" @click="nextPresentPage">下一页 →</el-button>
         </div>
       </div>
@@ -751,6 +748,8 @@ import { apiRequest, getKnowledgeTree } from '../../services/apiService'
 import { normalizeOptions } from '../../utils/optionText'
 import katex from 'katex'
 import 'katex/dist/katex.min.css'
+import WorkbenchInput from '../components/ui/WorkbenchInput.vue'
+import WorkbenchSelect from '../components/ui/WorkbenchSelect.vue'
 
 const route = useRoute()
 const router = useRouter()
@@ -835,6 +834,8 @@ function pageLabel(p, i) {
   if (name === 'toc') return '目录'
   return name
 }
+const pageJumpOptions = computed(() => (handout.value?.pages || []).map((p, i) => ({ label: pageLabel(p, i), value: i })))
+const presentOptions = computed(() => (handout.value?.pages || []).map((p, i) => ({ label: `${i + 1}. ${pageLabel(p, i)}`, value: i })))
 function togglePresentAnswers() {
   showAnswers.value = !showAnswers.value
 }

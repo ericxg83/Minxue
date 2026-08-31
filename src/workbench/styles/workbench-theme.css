@@ -66,9 +66,121 @@
   --el-box-shadow-dark: 0 3px 10px rgba(0, 0, 0, 0.08);
 }
 
-/* ── 工作台全局设计 token（复用移动端 index.css 的设计）─── */
+/* ═══════════════════════════════════════════
+   敏学 Design Tokens · 官方标准（PC 工作台）
+   新增与现有 token 共存：现有 token（--wb-*）继续工作，
+   这里是统一、命名规范、可跨页面对照的"唯一权威"。
+   ═══════════════════════════════════════════ */
 :root {
-  /* 背景 */
+  /* ── Layout · 容器最大宽度（三档） ── */
+  /* Standard  默认 · 列表/表单/设置/对象详情
+     Workspace 任务工作台 · 批改/学生/数据/对比
+     两者统一为 1520px，让整个工作台所有内容页共享同一容器档位与居中留白。
+     Wide      复杂双/三栏/表格/对比/编辑 */
+  --wb-container-standard: 1520px;
+  --wb-container-workspace: 1520px;
+  --wb-container-wide: 1680px;
+  /* 旧 token 兼容：--wb-content-max 与 --wb-container-standard 同值 */
+  --wb-content-max: var(--wb-container-standard);
+
+  /* ── Layout · 页面级 padding（统一 24–32px） ── */
+  --wb-page-padding-x: 24px;       /* 之前 clamp(24,3vw,40) 容易在中间屏产生 36–40px 偏大留白 */
+  --wb-page-padding-y: 24px;
+  --wb-page-padding-bottom: 48px;
+
+  /* Sidebar / Header（不动，向下兼容） */
+  --wb-sidebar-width: 220px;
+  --wb-header-height: 52px;
+
+  /* ── Spacing scale（4 倍数） ── */
+  --wb-space-0: 0;
+  --wb-space-1: 4px;
+  --wb-space-2: 8px;
+  --wb-space-3: 12px;
+  --wb-space-4: 16px;   /* 默认卡间距、section gap */
+  --wb-space-5: 20px;
+  --wb-space-6: 24px;   /* 默认页面内 padding、卡内 padding */
+  --wb-space-8: 32px;
+  --wb-space-10: 40px;
+  --wb-space-12: 48px;
+
+  /* ── Typography · 字号 ramp ── */
+  --wb-fs-eyebrow: 11px;     /* kicker / 全大写小标 */
+  --wb-fs-caption: 11px;     /* 辅助说明、tooltip、字段标签 */
+  --wb-fs-meta: 12px;        /* 二级文字、表头、行内 tag */
+  --wb-fs-body: 13px;        /* 正文、行内数据 */
+  --wb-fs-card-title: 15px;  /* 卡片标题、ContentCard h2 */
+  --wb-fs-section: 17px;     /* section heading */
+  --wb-fs-page: 22px;        /* 页面标题 PageHeader h1 */
+  --wb-fs-stat: 25px;        /* 数字、指标 */
+  --wb-fs-display: 32px;     /* 极少使用 · 仅 1–2 处 hero 数字 */
+
+  /* Font weight（PC 工作台使用 4 档） */
+  --wb-fw-regular: 400;
+  --wb-fw-medium: 500;
+  --wb-fw-semibold: 600;
+  --wb-fw-bold: 650;          /* 与 Element Plus 默认一致，PC 端不用 700 */
+
+  /* Line height */
+  --wb-lh-tight: 1.25;        /* 标题、统计数字 */
+  --wb-lh-normal: 1.5;        /* 默认 */
+  --wb-lh-relaxed: 1.65;      /* 段落正文 */
+
+  /* ── Radius（PC 端克制体系） ── */
+  --wb-radius-xs: 6px;        /* 状态 tag、mini chip */
+  --wb-radius-sm: 8px;        /* 按钮、输入框 */
+  --wb-radius-md: 10px;       /* 卡片、面板 */
+  --wb-radius-lg: 12px;       /* 弹层、dialog */
+  --wb-radius-xl: 16px;       /* 仅 Hero 卡片 */
+  --wb-radius-pill: 9999px;   /* pill、状态点 */
+  /* 旧 token 兼容 */
+  --wb-radius-panel: var(--wb-radius-md);
+  --wb-radius-full: var(--wb-radius-pill);
+
+  /* ── Border ── */
+  --wb-border: #E2E8F0;         /* 默认 1px */
+  --wb-border-light: #F1F5F9;   /* 行内分隔、更弱 */
+  --wb-border-strong: #CBD5E1;  /* 强调、强分隔 */
+  --wb-border-subtle: #F8FAFC;  /* 几乎不可见 */
+  /* Border radius hairline（移动端用 0.5px） */
+  --wb-border-hairline: 1px;
+
+  /* ── Elevation / Shadow ──
+     核心原则：PC 工作台默认无阴影，靠 border 分层。
+     只有浮层（popover / dialog / drawer）才使用阴影。 */
+  --wb-elev-flat: none;
+  --wb-elev-card: 0 1px 2px rgba(15, 23, 42, 0.04);     /* 几乎不可见 · 仅可浮起的 KPI 卡 */
+  --wb-elev-overlay: 0 8px 24px rgba(15, 23, 42, 0.10);  /* 下拉、tooltip、popover */
+  --wb-elev-modal: 0 16px 40px rgba(15, 23, 42, 0.14);   /* dialog、drawer */
+  /* 旧 token 兼容 */
+  --wb-shadow-sm: var(--wb-elev-card);
+  --wb-shadow-md: var(--wb-elev-overlay);
+  --wb-shadow-lg: var(--wb-elev-modal);
+
+  /* ── Status（5 档标准状态 · 唯一权威） ── */
+  --wb-status-success-fg: #16A34A;
+  --wb-status-success-bg: #DCFCE7;
+  --wb-status-info-fg: #6366F1;
+  --wb-status-info-bg: #EEF2FF;
+  --wb-status-warning-fg: #D97706;
+  --wb-status-warning-bg: #FEF3C7;
+  --wb-status-danger-fg: #DC2626;
+  --wb-status-danger-bg: #FEE2E2;
+  --wb-status-processing-fg: #7C3AED;
+  --wb-status-processing-bg: #F5E8FF;
+  --wb-status-neutral-fg: #64748B;
+  --wb-status-neutral-bg: #F1F5F9;
+
+  /* Status tag 统一尺寸（StatusTag 组件遵守） */
+  --wb-tag-height: 22px;
+  --wb-tag-padding: 0 8px;
+  --wb-tag-radius: 5px;
+  --wb-tag-fs: 11px;
+  --wb-tag-fw: 600;
+  --wb-tag-dot-size: 6px;
+  --wb-tag-gap: 5px;
+
+  /* ── Color · 已有 token 保留并对齐 ── */
   --wb-bg: #F5F6F8;
   --wb-bg-card: #FFFFFF;
   --wb-bg-hover: #F1F5F9;
@@ -76,50 +188,66 @@
   --wb-bg-subtle: #F8FAFC;
   --wb-bg-mist: #F8FAFC;
 
-  /* 主色 */
   --wb-primary: #6366F1;
   --wb-primary-hover: #4F46E5;
   --wb-primary-soft: #E0E7FF;
   --wb-primary-mist: #EEF2FF;
+  --wb-primary-light-7: #E0E7FF;
+  --wb-primary-light-8: #EEF2FF;
+  --wb-primary-light-9: #F5F6FF;
 
-  /* 强调色（教育类 CTA） */
   --wb-accent: #8B5CF6;
   --wb-accent-hover: #7C3AED;
   --wb-accent-soft: #EDE9FE;
 
-  /* 语义色 */
-  --wb-success: #16A34A;
-  --wb-success-soft: #DCFCE7;
-  --wb-warning: #D97706;
-  --wb-warning-soft: #FEF3C7;
-  --wb-danger: #DC2626;
-  --wb-danger-soft: #FEE2E2;
-  --wb-info: #6366F1;
-  /* 处理中（AI 尚未出判定）专属语义色，与 exception(accent) 区分 */
-  --wb-processing: #7C3AED;
-  --wb-processing-soft: #F5E8FF;
+  /* 语义色（兼容旧名） */
+  --wb-success: var(--wb-status-success-fg);
+  --wb-success-soft: var(--wb-status-success-bg);
+  --wb-info: var(--wb-status-info-fg);
+  --wb-info-soft: var(--wb-status-info-bg);
+  --wb-warning: var(--wb-status-warning-fg);
+  --wb-warning-soft: var(--wb-status-warning-bg);
+  --wb-danger: var(--wb-status-danger-fg);
+  --wb-danger-soft: var(--wb-status-danger-bg);
+  --wb-processing: var(--wb-status-processing-fg);
+  --wb-processing-soft: var(--wb-status-processing-bg);
 
-  /* 文字 */
+  /* Text 层级 */
   --wb-text: #1E293B;
   --wb-text-secondary: #64748B;
   --wb-text-tertiary: #94A3B8;
+  --wb-text-disabled: #CBD5E1;
   --wb-text-inverse: #FFFFFF;
 
-  /* 边框 */
-  --wb-border: #E2E8F0;
-  --wb-border-light: #F1F5F9;
+  /* ── Motion · 动效统一 ── */
+  --wb-motion-fast: 120ms;     /* hover、focus */
+  --wb-motion-base: 180ms;     /* 默认 */
+  --wb-motion-slow: 240ms;     /* 弹层进出 */
+  --wb-motion-ease: cubic-bezier(0.4, 0, 0.2, 1);
+  --wb-motion-ease-out: cubic-bezier(0, 0, 0.2, 1);
+  --wb-motion-ease-in: cubic-bezier(0.4, 0, 1, 1);
 
-  /* 圆角：工作台面板统一为克制的 10px */
-  --wb-radius-xs: 6px;
-  --wb-radius-sm: 8px;
-  --wb-radius-md: 10px;
-  --wb-radius-lg: 12px;
-  --wb-radius-full: 9999px;
+  /* ── Avatar 尺寸 · Phase 5 DashboardWorkbench 重构引入 ── */
+  --wb-avatar-sm: 28px;
+  --wb-avatar-md: 36px;   /* 学生风险卡头像 */
+  --wb-avatar-lg: 48px;
 
-  /* 阴影：普通内容依靠边框分层，浮层才使用阴影 */
-  --wb-shadow-sm: 0 1px 2px rgba(15, 23, 42, 0.04);
-  --wb-shadow-md: 0 8px 24px rgba(15, 23, 42, 0.10);
-  --wb-shadow-lg: 0 16px 40px rgba(15, 23, 42, 0.14);
+  /* ── Row 列表行 · 触控目标 / 整行可点击 ── */
+  --wb-row-min-height: 56px;        /* PC 默认 */
+  --wb-row-min-height-touch: 44px;  /* 移动端最低（WCAG） */
+
+  /* ── Focus ring · 全局键盘可达 ── */
+  --wb-focus-ring: 0 0 0 2px var(--wb-bg-card), 0 0 0 4px var(--wb-primary);
+  --wb-focus-ring-offset: 2px;
+
+  /* ── Sparkline · 折线微图（Phase 5 临时引入） ── */
+  --wb-sparkline-stroke: var(--wb-primary);
+  --wb-sparkline-fill: var(--wb-primary-soft);
+  --wb-sparkline-height: 28px;
+  --wb-sparkline-width: 88px;
+
+  /* ── Hover elevation · Phase 5 临时引入（覆盖 DS 3.5.7） ── */
+  --wb-elev-hover: 0 6px 16px rgba(15, 23, 42, 0.08);
 }
 
 /* ── 全局样式重置 ── */
@@ -139,27 +267,29 @@ body {
   -moz-osx-font-smoothing: grayscale;
 }
 
-.wb-page { height: 100%; overflow-y: auto; box-sizing: border-box; padding: var(--wb-page-padding-y) var(--wb-page-padding-x) 48px; background: var(--wb-bg); }
-.wb-page__inner { width: min(100%, var(--wb-content-max)); margin: 0 auto; }
-.wb-stats-grid { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 12px; margin-bottom: 16px; }
-.wb-section-stack { display: grid; gap: 16px; }
-@media (max-width: 1100px) { :root { --wb-sidebar-width: 196px; --wb-page-padding-x: 24px; } .wb-stats-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
+.wb-page { height: 100%; overflow-y: auto; box-sizing: border-box; padding: var(--wb-page-padding-y) var(--wb-page-padding-x) var(--wb-page-padding-bottom); background: var(--wb-bg); }
+.wb-page__inner { width: 100%; max-width: var(--wb-container-standard); margin: 0 auto; }
+.wb-stats-grid { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: var(--wb-space-3); margin-bottom: var(--wb-space-4); }
+.wb-section-stack { display: grid; gap: var(--wb-space-4); }
+@media (max-width: 1100px) { :root { --wb-sidebar-width: 196px; } .wb-stats-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
 
-/* Unified workbench page architecture */
-.workbench-content > * { background: var(--wb-bg); }
-.workbench-content .page-header,
-.workbench-content .grade-header { max-width: var(--wb-content-max); margin-left: auto; margin-right: auto; }
-.workbench-content .task-surface,
-.workbench-content .context-bar,
-.workbench-content .page-content,
-.workbench-content .main-content { max-width: var(--wb-content-max); margin-left: auto; margin-right: auto; }
+/* ── Page Layout · 三档容器（Phase 2） ──
+   Standard  默认 · 列表/表单/设置/对象详情     ≤ 1320px
+   Workspace 任务工作台 · 批改/学生/数据/对比   ≤ 1520px
+   Wide      复杂双/三栏/表格/对比/编辑         ≤ 1680px
+   Bleed     不约束（弹层覆盖、独立编辑器等）   100%
+   使用方式：在 .wb-page 上叠加对应 modifier 类即可 */
+.wb-page--workspace .wb-page__inner { max-width: var(--wb-container-workspace); }
+.wb-page--wide .wb-page__inner { max-width: var(--wb-container-wide); }
+.wb-page--bleed .wb-page__inner { max-width: none; }
+/* bleed 页面（工具栏/沉浸式编辑器/全宽表格）垂直 padding 归零，让贴顶工具栏不被推开 */
+.wb-page--bleed { padding-top: 0; padding-bottom: 0; }
+
+/* Element Plus 组件样式覆盖（在 workbench-content 容器内生效） */
 .workbench-content .el-card { border-color: var(--wb-border); border-radius: var(--wb-radius-panel); box-shadow: none; }
 .workbench-content .el-table { --el-table-header-bg-color: var(--wb-bg-elevated); --el-table-row-hover-bg-color: #f8faff; --el-table-border-color: var(--wb-border-light); }
 .workbench-content .el-table th.el-table__cell { color: var(--wb-text-tertiary); font-size: 11px; font-weight: 600; }
 .workbench-content .el-table td.el-table__cell { color: var(--wb-text-secondary); font-size: 12px; }
-.legacy-page-header { display: none !important; }
-.grade-center.wb-page { padding: var(--wb-page-padding-y) var(--wb-page-padding-x) 48px; }
-.grade-center.wb-page .grade-summary,.grade-center.wb-page .task-surface { max-width: none; }
 
 /* Element Plus 基础控件与状态统一 */
 .workbench-content .el-button { min-height: 34px; border-radius: 8px; font-weight: 550; }
@@ -267,3 +397,36 @@ body {
 .review-workspace .el-tag { border-radius: 5px; font-weight: 550; }
 .review-workspace .el-progress-bar__outer { background: var(--wb-border-light); }
 .review-workspace .el-progress-bar__inner { background: var(--wb-primary); }
+
+/* ═══════════════════════════════════════════
+   Phase 5 · DashboardWorkbench 重构引入（评审 B21 / B20 / A30 / A9 / A10）
+   这些是评审后落地的全局规范，与原 CSS 共存
+   ═══════════════════════════════════════════ */
+
+/* B21 · 全局 :focus-visible 键盘可达描边（统一 brand 色） */
+.workbench-content :focus-visible {
+  outline: 2px solid var(--wb-primary);
+  outline-offset: 2px;
+  border-radius: var(--wb-radius-sm);
+}
+/* 已经在 0.5px hairline 上的小元素不要被 outline 撑变形 */
+.workbench-content .ds-status-tag:focus-visible,
+.workbench-content .kpi-action:focus-visible { outline-offset: 1px; }
+
+/* A30 · ActionButton 自身 focus-visible（与全局协调） */
+.workbench-content .ds-action-button:focus-visible {
+  outline: 2px solid var(--wb-primary);
+  outline-offset: 2px;
+}
+
+/* B20 · prefers-reduced-motion · 全局降级动效 */
+@media (prefers-reduced-motion: reduce) {
+  .workbench-content *,
+  .workbench-content *::before,
+  .workbench-content *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
+}

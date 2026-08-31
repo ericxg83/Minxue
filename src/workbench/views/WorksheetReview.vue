@@ -1,5 +1,5 @@
 <template>
-  <div class="review-page" v-loading="loading">
+  <div class="review-page wb-page wb-page--bleed" v-loading="loading">
     <!-- 顶部栏 -->
     <div class="review-header">
       <el-button text @click="goBack">
@@ -7,7 +7,7 @@
       </el-button>
       <h3>{{ worksheet?.name || '答案审核' }}</h3>
       <div class="header-actions">
-        <el-tag :type="statusType" size="small">{{ statusLabel }}</el-tag>
+        <StatusTag :tone="statusType">{{ statusLabel }}</StatusTag>
         <el-button type="primary" @click="handlePublish" :disabled="!canPublish">
           {{ worksheet?.status === 'published' ? '已发布' : '确认发布' }}
         </el-button>
@@ -43,10 +43,14 @@
             <el-radio-button value="all">全部</el-radio-button>
             <el-radio-button value="low">低置信度</el-radio-button>
           </el-radio-group>
-          <el-select v-if="units.length > 0" v-model="unitFilter" size="small" style="width:220px;margin-left:8px" placeholder="筛选单元">
-            <el-option label="全部单元" value="all" />
-            <el-option v-for="u in units" :key="u.key" :label="u.title" :value="u.key" />
-          </el-select>
+          <WorkbenchSelect
+            v-if="units.length > 0"
+            v-model="unitFilter"
+            :options="unitFilterOptions"
+            size="small"
+            width="220px"
+            aria-label="按单元筛选"
+          />
         </div>
         <div class="answer-list">
           <template v-for="item in displayList" :key="item.type === 'header' ? 'h:' + item.key : item.type === 'section' ? 's:' + item.key : item.a.id">
@@ -72,17 +76,13 @@
         <div v-if="selectedAnswer" class="edit-form">
           <el-form label-width="60px">
             <el-form-item label="题号">
-              <el-input :model-value="selectedAnswer.question_no" disabled />
+              <WorkbenchInput :model-value="selectedAnswer.question_no" disabled aria-label="题号" />
             </el-form-item>
             <el-form-item label="答案">
-              <el-input v-model="editForm.answer" />
+              <WorkbenchInput v-model="editForm.answer" aria-label="答案" />
             </el-form-item>
             <el-form-item label="题型">
-              <el-select v-model="editForm.answer_type">
-                <el-option label="选择题" value="choice" />
-                <el-option label="填空题" value="fill" />
-                <el-option label="简答题" value="answer" />
-              </el-select>
+              <WorkbenchSelect v-model="editForm.answer_type" :options="answerTypeOptions" aria-label="题型" />
             </el-form-item>
             <el-form-item label="来源">
               <el-tag size="small">{{ selectedAnswer.source }}</el-tag>
@@ -110,6 +110,9 @@ import { ElMessage } from 'element-plus'
 import {
   getWorksheets, getWorksheetAnswers, updateWorksheetAnswer, updateWorksheetStatus
 } from '../../services/apiService.js'
+import StatusTag from '../components/ui/StatusTag.vue'
+import WorkbenchInput from '../components/ui/WorkbenchInput.vue'
+import WorkbenchSelect from '../components/ui/WorkbenchSelect.vue'
 
 const route = useRoute()
 const router = useRouter()
@@ -209,6 +212,16 @@ const statusLabel = computed(() => {
 const canPublish = computed(() => {
   return worksheet.value && worksheet.value.status !== 'published'
 })
+
+const unitFilterOptions = computed(() => [
+  { label: '全部单元', value: 'all' },
+  ...units.value.map(u => ({ label: u.title, value: u.key }))
+])
+const answerTypeOptions = [
+  { label: '选择题', value: 'choice' },
+  { label: '填空题', value: 'fill' },
+  { label: '简答题', value: 'answer' }
+]
 
 onMounted(async () => {
   loading.value = true

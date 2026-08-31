@@ -15,11 +15,18 @@
         <template #leading>
           <div class="resource-summary"><strong>{{ total }} 份讲义</strong><span>已保存的备课内容</span></div>
         </template>
-        <el-input v-model="search" class="handout-search" clearable placeholder="搜索讲义标题或课时" :prefix-icon="Search" @input="onSearch" />
-        <el-select v-model="subjectFilter" class="subject-select" clearable placeholder="全部学科" @change="loadList">
-          <el-option label="全部学科" :value="null" />
-          <el-option v-for="subject in subjects" :key="subject" :label="subject" :value="subject" />
-        </el-select>
+        <WorkbenchInput v-model="search" clearable placeholder="搜索讲义标题或课时" width="240px" aria-label="搜索讲义" @input="onSearch">
+          <template #prefix><el-icon><Search /></el-icon></template>
+        </WorkbenchInput>
+        <WorkbenchSelect
+          v-model="subjectFilter"
+          :options="subjectOptions"
+          clearable
+          placeholder="全部学科"
+          width="140px"
+          aria-label="按学科筛选"
+          @change="loadList"
+        />
         <template v-if="hasActiveFilters" #actions><el-button text @click="resetFilters">重置</el-button></template>
       </FilterBar>
 
@@ -94,6 +101,8 @@ import EmptyState from '../components/ui/EmptyState.vue'
 import FilterBar from '../components/ui/FilterBar.vue'
 import PageHeader from '../components/ui/PageHeader.vue'
 import StatusTag from '../components/ui/StatusTag.vue'
+import WorkbenchInput from '../components/ui/WorkbenchInput.vue'
+import WorkbenchSelect from '../components/ui/WorkbenchSelect.vue'
 
 const router = useRouter()
 const loading = ref(false)
@@ -102,6 +111,7 @@ const total = ref(0)
 const search = ref('')
 const subjectFilter = ref(null)
 const subjects = ['数学', '语文', '英语', '物理', '化学', '生物']
+const subjectOptions = computed(() => subjects.map(s => ({ label: s, value: s })))
 const hasActiveFilters = computed(() => Boolean(search.value || subjectFilter.value))
 let searchTimer = null
 
