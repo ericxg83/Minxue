@@ -65,7 +65,7 @@ export async function buildWrongPaperDocx(args) {
     }))
   } else {
     filteredItems.forEach((item, idx) => {
-      children.push(...buildQuestionSection({ idx: idx + 1, item, mode, studentName }))
+      children.push(...buildQuestionSection({ idx: idx + 1, item, mode, studentName, totalStudentCount }))
       // 题间分隔
       if (idx < filteredItems.length - 1) {
         children.push(new Paragraph({
@@ -181,7 +181,7 @@ function buildCoverPage({ title, gradeName, period, subject, totalStudentCount, 
  * 全班卷：题干 / 正确答案 / 错的学生名单 / 错因分布 / 错误率
  * 个人卷：题干 / 学生自己的错答 / 错因（**不含正确答案**）
  */
-function buildQuestionSection({ idx, item, mode, studentName }) {
+function buildQuestionSection({ idx, item, mode, studentName, totalStudentCount }) {
   const paragraphs = []
 
   // 题号 + 知识点标签
