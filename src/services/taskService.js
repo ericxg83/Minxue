@@ -1,5 +1,28 @@
 const API_BASE = import.meta.env.VITE_API_URL || '/api'
 
+// 计算单个文件的 SHA-256，返回 64 字符 hex
+// 用于服务端去重（X-Content-Hashes 头），同图重传直接复用旧 task。
+// crypto.subtle 在 HTTPS / localhost 下可用，失败时返回 null，服务端按无 hash 走原逻辑。
+const sha256Hex = async (blob) => {
+  try {
+    const buf = await blob.arrayBuffer()
+    const hashBuf = await crypto.subtle.digest('SHA-256', buf)
+    return Array.from(new Uint8Array(hashBuf))
+      .map(b => b.toString(16).padStart(2, '0'))
+      .join('')
+  } catch (e) {
+    console.warn('[taskService] SHA-256 计算失败，跳过去重:', e.message)
+    return null
+  }
+}
+
+// 多文件并行算 hash，按顺序返回 hex 数组；任一失败整组返回 null
+const computeContentHashes = async (files) => {
+  const results = await Promise.all(files.map(f => sha256Hex(f)))
+  if (results.some(r => !r)) return null
+  return results
+}
+
 const apiRequest = async (path, options = {}) => {
   const url = `${API_BASE}${path}`
   console.debug('📡📡📡 [API] === REQUEST START ===')
@@ -67,11 +90,20 @@ export const taskService = {
     for (const file of files) {
       formData.append('files', file)
     }
+
+    // 内容 hash 去重：算每张图 SHA-256 拼成 X-Content-Hashes 头，
+    // 服务端 student_id+content_hash 命中时直接返回旧 task。
+    // 算失败（老浏览器/无 subtle）则服务端按无 hash 走原逻辑，不影响功能。
+    const contentHashes = await computeContentHashes(files)
+    const headers = {}
+    if (contentHashes) headers['X-Content-Hashes'] = contentHashes.join(',')
+
     console.debug('📤 [taskService.uploadFiles] FormData constructed, calling apiRequest...')
 
     return apiRequest('/tasks/upload', {
       method: 'POST',
-      body: formData
+      body: formData,
+      headers
     })
   },
 
@@ -85,9 +117,15 @@ export const taskService = {
     for (const file of files) {
       formData.append('files', file)
     }
+
+    const contentHashes = await computeContentHashes(files)
+    const headers = {}
+    if (contentHashes) headers['X-Content-Hashes'] = contentHashes.join(',')
+
     return apiRequest('/tasks/upload', {
       method: 'POST',
-      body: formData
+      body: formData,
+      headers
     })
   },
 
@@ -104,9 +142,15 @@ export const taskService = {
     for (const file of files) {
       formData.append('files', file)
     }
+
+    const contentHashes = await computeContentHashes(files)
+    const headers = {}
+    if (contentHashes) headers['X-Content-Hashes'] = contentHashes.join(',')
+
     return apiRequest('/tasks/upload', {
       method: 'POST',
-      body: formData
+      body: formData,
+      headers
     })
   },
 
