@@ -697,6 +697,60 @@ app.post('/api/admin/tasks/retry-by-name', async (req, res) => {
   }
 })
 
+// Admin: 手动触发单条 geometry_image 资产重建。
+// watchdog 之外的逃生通道：scanGeometryAssets / scanOverdueGeometry 都没动
+// 它（队列不通 / 进程不在），人工强制 add 进 geometry-reconstruction 队列。
+app.post('/api/admin/geometry/retry/:assetId', async (req, res) => {
+  try {
+    const { assetId } = req.params
+    if (!assetId || !/^[0-9a-f-]{36}$/i.test(assetId)) {
+      return res.status(400).json({ error: '无效的 assetId' })
+    }
+
+    const { rows } = await query(
+      `SELECT id, question_id, tikz_status, retry_count,
+              LEFT(COALESCE(last_error, ''), 200) AS last_error,
+              created_at, updated_at
+       FROM ${TABLES.QUESTION_ASSETS}
+       WHERE id = $1 AND asset_type = 'geometry_image'`,
+      [assetId]
+    )
+    if (rows.length === 0) {
+      return res.status(404).json({ error: 'asset 不存在或类型不是 geometry_image' })
+    }
+    const asset = rows[0]
+
+    const geometryQueue = await getGeometryQueue()
+    if (!geometryQueue) {
+      return res.status(503).json({
+        error: 'geometry 队列不可用（Redis 断开 / 配额耗尽 / Worker 未运行）',
+        asset
+      })
+    }
+
+    const job = await geometryQueue.add('reconstruct', {
+      assetId: asset.id,
+      retryCount: (asset.retry_count || 0) + 1,
+      source: 'admin-manual-retry'
+    }, {
+      attempts: 1,
+      removeOnComplete: { count: 50 },
+      removeOnFail: { count: 20 }
+    })
+
+    console.log(`[admin/geometry/retry] 入队 assetId=${assetId} jobId=${job.id} prev_status=${asset.tikz_status} retry=${asset.retry_count || 0}`)
+    res.json({
+      success: true,
+      message: '已加入 geometry-reconstruction 队列',
+      jobId: job.id,
+      asset
+    })
+  } catch (error) {
+    console.error('[admin/geometry/retry] 失败:', error)
+    res.status(500).json({ error: error.message })
+  }
+})
+
 // Recalculate task statistics from questions
 app.post('/api/tasks/:taskId/recalculate-stats', async (req, res) => {
   try {
