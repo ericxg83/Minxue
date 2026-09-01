@@ -797,7 +797,7 @@ export const getPendingGeometryAssets = async (limit = 10) => {
     `SELECT a.id, a.question_id, a.cropped_image_url,
             a.retry_count, a.last_error, a.tikz_status,
             q.geometry_image_url, q.image_type,
-            q.student_id
+            q.student_id, q.content, q.options
      FROM ${TABLES.QUESTION_ASSETS} a
      JOIN ${TABLES.QUESTIONS} q ON q.id = a.question_id
      WHERE a.asset_type = 'geometry_image'

@@ -178,6 +178,10 @@
             重新生成
           </el-button>
         </template>
+        <el-tag v-else-if="tikzStatus === 'none'" size="small" type="info" effect="plain"
+                :title="q.asset_last_error || '视觉模型判定此图无法重建，已回退到裁剪原图'">
+          使用原图
+        </el-tag>
         <el-tag v-if="geometryConsistency && !geometryConsistency.skipped" size="small" :type="geometryConsistency.pass ? 'success' : 'danger'" effect="dark">
           几何自洽{{ geometryConsistency.pass ? '通过' : '存疑' }}
         </el-tag>

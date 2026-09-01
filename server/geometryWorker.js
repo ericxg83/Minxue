@@ -64,7 +64,7 @@ async function downloadImageBuffer(url) {
  *   reason 决定后续处置：no_figure / derived_deferred 是确定性结论（标 none，不重试）；
  *   parse_fail / unrenderable 是模型没遵守格式（重试有意义，不能永久锁死）。
  */
-async function reconstructGeometrySvg(imageBuffer, questionId, content) {
+async function reconstructGeometrySvg(imageBuffer, questionId, content, options) {
   const shortId = (questionId || '').substring(0, 8)
   const base64 = imageBuffer.toString('base64')
   const dataURL = `data:image/png;base64,${base64}`
@@ -102,10 +102,11 @@ async function reconstructGeometrySvg(imageBuffer, questionId, content) {
     return { ok: false, reason: 'derived_deferred', retriable: false }
   }
 
-  // 题干交叉核对：模型画出的边/点在题干里找不到出处，或折叠派生点缺失 → 拒绝入库。
-  // 这是独立证据校验，不依赖模型自我验证。
-  if (content) {
-    const gate = validateStructureAgainstContent(validated, content)
+  // 题干交叉核对：模型画出的边/点在题干/选项里找不到出处，或折叠派生点缺失 → 拒绝入库。
+  // 这是独立证据校验，不依赖模型自我验证。选项里的字母引用也算合法出处
+  // （选择题题干"如图X, [条件1], [条件2]" 几乎不直接引用图上字母）。
+  if (content || (Array.isArray(options) && options.length > 0)) {
+    const gate = validateStructureAgainstContent(validated, content, options)
     if (!gate.ok) {
       console.warn(`   ⚠️ [几何Worker] ${shortId}: 题干核对未过 → ${gate.reasons.join('；')}`)
       return { ok: false, reason: 'content_mismatch', retriable: false, detail: gate.reasons }
@@ -155,25 +156,29 @@ async function processSingleAsset(asset) {
     return false
   }
 
-  // 题干文本：题干交叉核对闸门的独立证据源
+  // 题干文本 + 选项：题干交叉核对闸门的独立证据源。
+  // 选择题的字母引用几乎全在选项里，必须一起传入闸门，否则标准几何图会被误判"凭空多画"。
   let content = asset.content
-  if (content == null) {
+  let options = asset.options
+  if (content == null || options == null) {
     try {
       const { rows } = await query(
-        `SELECT content FROM ${TABLES.QUESTIONS} WHERE id = $1 LIMIT 1`,
+        `SELECT content, options FROM ${TABLES.QUESTIONS} WHERE id = $1 LIMIT 1`,
         [asset.question_id]
       )
-      content = rows[0]?.content || ''
+      content = rows[0]?.content ?? ''
+      options = rows[0]?.options ?? []
     } catch (e) {
-      console.warn(`   ⚠️ [几何Worker] ${shortId}: 题干读取失败，跳过交叉核对:`, e.message)
-      content = ''
+      console.warn(`   ⚠️ [几何Worker] ${shortId}: 题干/选项读取失败，跳过交叉核对:`, e.message)
+      content = content ?? ''
+      options = options ?? []
     }
   }
 
   // 3. Vision API 识别几何结构 → 服务端渲染干净 SVG
   let svg, structure
   try {
-    const result = await reconstructGeometrySvg(rawBuffer, asset.question_id, content)
+    const result = await reconstructGeometrySvg(rawBuffer, asset.question_id, content, options)
     if (!result.ok) {
       if (result.retriable) {
         // 模型没遵守输出格式：重试有意义，绝不能锁死成永久 failed
@@ -312,7 +317,8 @@ export async function processGeometryReconstruction(job) {
     const { rows } = await query(
       `SELECT a.id, a.question_id, a.cropped_image_url,
               a.retry_count, a.last_error, a.tikz_status,
-              q.geometry_image_url
+              q.geometry_image_url,
+              q.content, q.options
        FROM ${TABLES.QUESTION_ASSETS} a
        JOIN ${TABLES.QUESTIONS} q ON q.id = a.question_id
        WHERE a.id = $1`,
@@ -347,7 +353,8 @@ export async function processGeometryReconstruction(job) {
     const { rows } = await query(
       `SELECT a.id, a.question_id, a.cropped_image_url,
               a.retry_count, a.last_error, a.tikz_status,
-              q.geometry_image_url, q.image_type
+              q.geometry_image_url, q.image_type,
+              q.content, q.options
        FROM ${TABLES.QUESTION_ASSETS} a
        JOIN ${TABLES.QUESTIONS} q ON q.id = a.question_id
        WHERE a.question_id = $1 AND a.asset_type = 'geometry_image'

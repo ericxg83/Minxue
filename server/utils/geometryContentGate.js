@@ -127,20 +127,34 @@ function checkShapeConstraints(structure, content, reasons) {
  *
  * @param {object} structure - normalize 后的几何结构（points/segments）
  * @param {string} content - 题干文本
+ * @param {string[]} [options] - 选项文本数组（每项一条）。选择题最常见：
+ *   题干只列已知条件（"如图2，DF//AC，DE//BC"），所有字母引用都藏在选项里
+ *   （"BD/CE = AB/AC"）。把 options 也作为合法引用来源，避免把"标准 ABC 三角
+ *   形图"误判为多画 AB 边。
  * @returns {{ ok: boolean, reasons: string[] }} ok=false 时 reasons 给出可读原因
  */
-export function validateStructureAgainstContent(structure, content) {
+export function validateStructureAgainstContent(structure, content, options) {
   const reasons = []
   const pts = (structure?.points || []).map(p => p.label).filter(Boolean)
   const segs = (structure?.segments || []).map(g => segKey(g.from, g.to))
   const drawnPts = new Set(pts)
   const drawnSegs = new Set(segs)
 
-  // 空题干 = 无证据，不拦（避免把无题干的记录全部误杀）
-  if (!String(content || '').trim()) return { ok: true, reasons }
+  const optionsArr = Array.isArray(options) ? options.filter(Boolean) : []
+  const hasOptions = optionsArr.length > 0
 
-  const refPts = extractReferencedPoints(content)
-  const refSegs = extractReferencedSegments(content)
+  // 题干 + 选项拼成单一文本用于提取引用。
+  // 选择题（题干"如图X，[已知1]，[已知2]"）的字母引用全在选项里；只看题干
+  // 会把标准几何图（必然带 AB/BC 等基础边）误判为"凭空多画"。
+  const allText = hasOptions
+    ? [content || '', ...optionsArr].join('\n')
+    : content
+
+  // 空题干 + 无选项 = 无证据，不拦（避免把无题干的记录全部误杀）
+  if (!String(allText || '').trim()) return { ok: true, reasons }
+
+  const refPts = extractReferencedPoints(allText)
+  const refSegs = extractReferencedSegments(allText)
 
   // ── 硬规则 1：题干提到带撇的派生点（折叠/对称产物），图上必须有 ──
   // 折叠、轴对称题的 C′/A′ 是结构主体，画不出它整张图就是错的。
@@ -151,13 +165,13 @@ export function validateStructureAgainstContent(structure, content) {
     }
   }
 
-  // ── 硬规则 2：画出的线段在题干里找不到出处 → 凭空造边 ──
+  // ── 硬规则 2：画出的线段在题干/选项里找不到出处 → 凭空造边 ──
   // 出处的认定（从严到宽）：
-  //   a. 这条边曾在题干里连写过（AB、BA）
-  //   b. 两端字母在题干某个连写串里相邻，或是该串的首尾（△BCE 给出 BC/CE/EB）
+  //   a. 这条边曾在题干或选项里连写过（AB、BA）
+  //   b. 两端字母在题干/选项某个连写串里相邻，或是该串的首尾（△BCE 给出 BC/CE/EB）
   // 不含对角线：四边形ABCD 不隐含 AC/BD。折叠题里被凭空画出的两条对角线正是这么被抓到的。
   const runPairs = new Set()
-  for (const letters of extractLetterRuns(content)) {
+  for (const letters of extractLetterRuns(allText)) {
     for (let i = 0; i + 1 < letters.length; i++) {
       runPairs.add(segKey(letters[i], letters[i + 1]))
     }
@@ -171,9 +185,9 @@ export function validateStructureAgainstContent(structure, content) {
     reasons.push(`重绘图上的线段 ${a}${b} 在题干中无引用`)
   }
 
-  // ── 硬规则 3：点字母凭空出现（题干完全没提的点） ──
+  // ── 硬规则 3：点字母凭空出现（题干/选项完全没提的点） ──
   const refLetters = new Set(refPts)
-  for (const letters of extractLetterRuns(content)) {
+  for (const letters of extractLetterRuns(allText)) {
     letters.forEach(l => refLetters.add(l))
   }
   for (const p of pts) {
@@ -184,6 +198,7 @@ export function validateStructureAgainstContent(structure, content) {
   }
 
   // ── 硬规则 4：题干给出的形状约束（正方形/菱形/等边）与坐标比例不符 ──
+  // 形状约束只看 content（"题干说正方形..."），不混入选项。
   checkShapeConstraints(structure, content, reasons)
 
   return { ok: reasons.length === 0, reasons }
