@@ -53,6 +53,12 @@ export function useUploadFlow({ loadTasks, isInitializing }) {
   const cameraInputRef = useRef(null)
   const albumInputRef = useRef(null)
 
+  // 2026-09-02 修复：handleFileSelect 路径连点上传的并发锁。
+  // setUploading/setIsUploading 都是 React state，在事件回调里连点两次时
+  // 第二次读到的是上一次闭包里的旧值（仍是 false），无法拦住。改用 ref 持锁，
+  // 同步立即可见，第二次直接 return。
+  const uploadLockRef = useRef(false)
+
   const stagingRef = useRef([])
   stagingRef.current = stagingFiles
   const stagingTypeRef = useRef(null)
@@ -253,9 +259,20 @@ export function useUploadFlow({ loadTasks, isInitializing }) {
 
   // Upload file handler with QR detection
   const handleFileSelect = async (e) => {
+    // 2026-09-02：ref-based 并发锁，挡住"连点上传"导致的重复任务 + 重复错题。
+    // setUploading 是 React state，连点时第二次读到的还是 false → 拦不住。
+    if (uploadLockRef.current) {
+      console.warn('[Upload] 已有上传任务进行中，忽略本次点击')
+      if (e.target && 'value' in e.target) e.target.value = ''
+      return
+    }
+    uploadLockRef.current = true
     try {
       const files = Array.from(e.target.files)
-      if (files.length === 0) return
+      if (files.length === 0) {
+        uploadLockRef.current = false
+        return
+      }
       if (e.target && 'value' in e.target) e.target.value = ''
 
       setShowUploadOptions(false)
@@ -333,6 +350,8 @@ export function useUploadFlow({ loadTasks, isInitializing }) {
       console.error('上传出错:', err)
       Toast.show({ message: `上传出错: ${err.message}`, type: 'error', duration: 5000 })
       setUploading(false)
+    } finally {
+      uploadLockRef.current = false
     }
   }
 
@@ -513,6 +532,7 @@ export function useUploadFlow({ loadTasks, isInitializing }) {
     let failedCount = 0
     let realTaskId = null
     let failureText = '上传失败'
+    let wasDedup = false  // 2026-09-02：服务端命中已有 task 时弹"已上传过"提示
 
     try {
       const options = { taskName }
@@ -531,12 +551,21 @@ export function useUploadFlow({ loadTasks, isInitializing }) {
       if (taskResult && !taskResult.error) {
         successCount = 1
         realTaskId = taskResult.id
+        if (taskResult._dedup) wasDedup = true
         if (isWorkbook) { __pendingUploadStore.worksheetId = null; __pendingUploadStore.worksheetName = null }
         if (isExam) { __pendingUploadStore.examResourceId = null; __pendingUploadStore.examResourceName = null }
-        updateTaskInStore(tempTask.id, 'processing', { progress: 0 })
-        setTasks(prev => prev.map(t =>
-          t.id === tempTask.id ? { ...taskResult, status: 'processing', pages: taskResult.images || tempTask.pages, is_temp: false } : t
-        ))
+        // 2026-09-02：服务端命中同 hash 已有 task（_dedup=true）时，让 store 把 tempTask
+        // 直接合并到旧 task，而不是当作新批改处理——避免重复触发 UI 动效和误以为再次批改。
+        if (taskResult._dedup) {
+          setTasks(prev => prev.map(t =>
+            t.id === tempTask.id ? { ...taskResult, status: taskResult.status || 'done', pages: taskResult.images || tempTask.pages, is_temp: false, _reusedFromExisting: true } : t
+          ))
+        } else {
+          updateTaskInStore(tempTask.id, 'processing', { progress: 0 })
+          setTasks(prev => prev.map(t =>
+            t.id === tempTask.id ? { ...taskResult, status: 'processing', pages: taskResult.images || tempTask.pages, is_temp: false } : t
+          ))
+        }
       } else {
         failedCount = 1
         const errorMsg = taskResult?.message || taskResult?.error || '上传失败'
@@ -546,7 +575,13 @@ export function useUploadFlow({ loadTasks, isInitializing }) {
     } catch (error) {
       console.error('uploadViaBackend exception:', error)
       failedCount = 1
-      failureText = describeUploadFailure(error.message)
+      // 2026-09-02：409 EXISTING_FAILED_TASK — 用户上传的试卷已有同 hash 的失败任务，
+      // 直接弹"已上传过"提示，不要把它当通用网络错误处理。
+      if (error.code === 'EXISTING_FAILED_TASK') {
+        failureText = error.message || '这份试卷之前上传过但批改失败，请到任务列表重试上次任务'
+      } else {
+        failureText = describeUploadFailure(error.message)
+      }
       upsertFailedTemp(tempTask, error.message || '上传失败')
     }
 
@@ -564,7 +599,13 @@ export function useUploadFlow({ loadTasks, isInitializing }) {
       Toast.show({ message: failureText, type: 'error', duration: 4000 })
     } else if (successCount > 0) {
       uploadToast.dismiss()
-      Toast.show({ message: files.length > 1 ? `${files.length} 张图片已合并为一个任务` : '上传成功', type: 'success', duration: 2000 })
+      // 2026-09-02：服务端命中已有 task（_dedup=true）时弹"已上传过"提示，
+      // 避免用户以为又批了一次；非 dedup 走原来的"上传成功"提示。
+      if (wasDedup) {
+        Toast.show({ message: '已上传过相同的试卷，已复用上次批改结果', type: 'success', duration: 2500 })
+      } else {
+        Toast.show({ message: files.length > 1 ? `${files.length} 张图片已合并为一个任务` : '上传成功', type: 'success', duration: 2000 })
+      }
     }
   }
 

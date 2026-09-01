@@ -40,9 +40,18 @@ const apiRequest = async (path, options = {}) => {
     console.debug('📡 [API] Response OK:', response.ok)
     
     if (!response.ok) {
-      const error = await response.json().catch(() => ({ error: response.statusText }))
-      console.error('💥💥💥 [API] ERROR RESPONSE:', error)
-      throw new Error(error.error || `请求失败: ${response.status}`)
+      const errorBody = await response.json().catch(() => ({ error: response.statusText }))
+      console.error('💥💥💥 [API] ERROR RESPONSE:', errorBody)
+      // 2026-09-02：409 EXISTING_FAILED_TASK 是"已上传过相同内容、上次批改失败"的
+      // 去重信号，需要让上层弹"已上传过"提示而不是"请求失败"。
+      // 抛带 code 的 Error 让 uploadViaBackend 识别。
+      if (response.status === 409 && errorBody.error === 'EXISTING_FAILED_TASK') {
+        const conflictErr = new Error(errorBody.message || '已上传过相同内容试卷，上次批改失败')
+        conflictErr.code = 'EXISTING_FAILED_TASK'
+        conflictErr.existingTask = errorBody.existingTask || null
+        throw conflictErr
+      }
+      throw new Error(errorBody.error || `请求失败: ${response.status}`)
     }
     const data = await response.json()
     console.debug('📡 [API] Response data (first 300 chars):', JSON.stringify(data).substring(0, 300))

@@ -43,6 +43,7 @@ import { migrateTeachingQuestionTypeAuto } from './migrations/048_teaching_quest
 import { migrateStudentEnrollmentStatus } from './migrations/049_add_student_enrollment_status.js'
 import { migrateAiAnswerRiskReason } from './migrations/050_add_ai_answer_risk_reason.js'
 import { migrateTaskContentHash } from './migrations/051_add_task_content_hash.js'
+import { migrateWrongQuestionsUniqueIndex } from './migrations/052_dedupe_wrong_questions_unique_index.js'
 import { scheduleNightParse, scheduleWeeklyDiagnosis } from './services/nightParseService.js'
 
 const __dirname = dirname(fileURLToPath(import.meta.url))
@@ -363,13 +364,18 @@ app.post('/api/tasks/upload', upload.array('files', 20), async (req, res) => {
         ? `${succeeded[0].filename} 等${succeeded.length}页`
         : succeeded[0].filename)
 
+      // content_hash 取第一张图（多图任务以首页为主）。空数组 = 老版本/算 hash 失败 → 写 NULL。
+      // 2026-09-02：提到 try 外层声明，让下方 catch 块的 23505 兜底能访问到
+      // （之前写在 try 内，TDZ 让 catch 拿不到，会抛 ReferenceError）
+      const primaryHash = contentHashes[0] || null
+
       try {
         for (const img of images) {
           console.log(`  OSS 上传成功: ${img.file_name} → ${img.image_url}`)
         }
 
         // content_hash 取第一张图（多图任务以首页为主）。空数组 = 老版本/算 hash 失败 → 写 NULL。
-        const primaryHash = contentHashes[0] || null
+        // 已提到 try 外的上一层声明，catch 块可直接访问
 
         const { rows } = await query(
           `INSERT INTO ${TABLES.TASKS} (student_id, image_url, images, original_name, status, result, task_type, generated_exam_id, worksheet_id, subject, resource_id, content_hash)
@@ -2959,6 +2965,7 @@ if (process.argv[1] === __filename || process.argv[1]?.endsWith('server/index.js
       await migrateStudentEnrollmentStatus()
       await migrateAiAnswerRiskReason()
       await migrateTaskContentHash()
+      await migrateWrongQuestionsUniqueIndex()
     } catch (err) {
       console.error('数据库迁移失败:', err.message)
     }

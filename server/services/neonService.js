@@ -210,11 +210,17 @@ export const addWrongQuestions = async (studentId, questionIds, questionConfiden
 
   if (newIds.length === 0) return []
 
+  // 2026-09-02：依赖迁移 052 的 uq_wrong_questions_student_question_id，
+  // INSERT ON CONFLICT DO NOTHING 在并发场景下也能兜底（即使前置 SELECT
+  // 漏了对方未提交的行，UNIQUE 索引也会把第二个 INSERT 静默吞掉）。
   const values = newIds.map((_, i) => `($1, $${i + 2}, 'pending', 1, NOW(), NOW(), NOW())`).join(',')
   const params = [studentId, ...newIds]
 
   await query(
-    `INSERT INTO ${TABLES.WRONG_QUESTIONS} (student_id, question_id, status, error_count, added_at, last_wrong_at, created_at) VALUES ${values} ON CONFLICT DO NOTHING`,
+    `INSERT INTO ${TABLES.WRONG_QUESTIONS} (student_id, question_id, status, error_count, added_at, last_wrong_at, created_at) VALUES ${values}
+     ON CONFLICT (student_id, question_id)
+       WHERE question_id IS NOT NULL
+     DO NOTHING`,
     params
   )
 
@@ -227,9 +233,13 @@ export const addWrongQuestions = async (studentId, questionIds, questionConfiden
  * 当 workbook 批改发现学生答错时，裁剪学生作业图片 + 元数据直接存入
  * wrong_questions 表，使错题本完全自包含。
  *
- * 以 (student_id, worksheet_id, question_no) 作为自然键去重：
- * - 已存在 → 递增 error_count，更新 last_wrong_at
- * - 不存在 → INSERT 新记录
+ * 去重（2026-09-02 修复并发双写）：
+ *   依赖迁移 052 的部分 UNIQUE 索引 uq_wrong_questions_student_ws_qno，
+ *   走 INSERT ... ON CONFLICT DO UPDATE，单条 SQL 原子完成：
+ *     - 命中 (student_id, worksheet_id, question_no) → error_count + 1，
+ *       顺便刷新 student_answer / correct_answer / question_id 等字段
+ *     - 未命中 → INSERT 新记录
+ *   并发场景下 SELECT+INSERT 双步会被 UNIQUE 索引兜底，杜绝双写。
  */
 export const addSelfContainedWrongQuestion = async (params) => {
   const {
@@ -246,27 +256,6 @@ export const addSelfContainedWrongQuestion = async (params) => {
     return null
   }
 
-  const { rows: existing } = await query(
-    `SELECT id, error_count FROM ${TABLES.WRONG_QUESTIONS}
-     WHERE student_id = $1 AND worksheet_id = $2 AND question_no = $3`,
-    [studentId, worksheetId, questionNo]
-  )
-
-  if (existing.length > 0) {
-    await query(
-      `UPDATE ${TABLES.WRONG_QUESTIONS}
-       SET error_count = error_count + 1,
-           last_wrong_at = NOW(),
-           updated_at = NOW(),
-           student_answer = $2,
-           question_image_url = COALESCE($3, question_image_url),
-           question_id = COALESCE($4, question_id)
-       WHERE id = $1`,
-      [existing[0].id, studentAnswer, questionImageUrl, questionId]
-    )
-    return existing[0].id
-  }
-
   const { rows } = await query(
     `INSERT INTO ${TABLES.WRONG_QUESTIONS}
      (student_id, question_id, worksheet_id, page_number, question_no,
@@ -274,6 +263,17 @@ export const addSelfContainedWrongQuestion = async (params) => {
       question_type, block_coordinates, question_image_url,
       subject, source_type, status, error_count, added_at, last_wrong_at, created_at, updated_at)
      VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, 'pending', 1, NOW(), NOW(), NOW(), NOW())
+     ON CONFLICT (student_id, worksheet_id, question_no)
+       WHERE worksheet_id IS NOT NULL AND question_no IS NOT NULL
+     DO UPDATE SET
+       error_count = ${TABLES.WRONG_QUESTIONS}.error_count + 1,
+       last_wrong_at = NOW(),
+       updated_at = NOW(),
+       student_answer = EXCLUDED.student_answer,
+       correct_answer = EXCLUDED.correct_answer,
+       question_id = COALESCE(${TABLES.WRONG_QUESTIONS}.question_id, EXCLUDED.question_id),
+       question_image_url = COALESCE(EXCLUDED.question_image_url, ${TABLES.WRONG_QUESTIONS}.question_image_url),
+       content = COALESCE(EXCLUDED.content, ${TABLES.WRONG_QUESTIONS}.content)
      RETURNING id`,
     [studentId, questionId || null, worksheetId, pageNumber, questionNo,
      studentAnswer, correctAnswer, answerType, content,
