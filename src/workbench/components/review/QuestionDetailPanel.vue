@@ -158,6 +158,14 @@
       <!-- URL → <img> 标签 -->
       <img v-else :src="displayImageUrl" class="ops-image" @click="fullscreenImage = displayImageUrl" />
       <div style="display:flex; gap:6px; margin-top:4px;">
+        <template v-if="tikzStatus === 'done'">
+          <el-button v-if="!showOriginal && q.geometry_image_url" size="small" plain @click="showOriginal = true">
+            显示原图
+          </el-button>
+          <el-button v-else-if="showOriginal" size="small" type="primary" plain @click="showOriginal = false">
+            采用TikZ图
+          </el-button>
+        </template>
         <el-tag v-else-if="tikzStatus === 'pending'" size="small" type="warning" effect="dark">
           几何图重建中...
         </el-tag>
@@ -396,8 +404,24 @@ const unjudgedReason = computed(() => getUnjudgedReasonText(q.value, store.confi
 // 即使在 wrong 状态也展示，避免老师把"AI 错误"信以为真。纯展示，不参与判定。
 const aiAnswerRiskReason = computed(() => getAiAnswerRiskText(q.value))
 
-const displayImageUrl = computed(() => getGeometryDisplayUrl(q.value).url)
-const displayType = computed(() => getGeometryDisplayUrl(q.value).type)
+// 用户手动覆盖：默认 false → 显示 TikZ（AI 重画的 clean_geometry_svg）；
+// true → 显示原图（geometry_image_url 裁剪原图）。这是临时 UI 状态，
+// 不写回 DB；切换题目自动重置。
+const showOriginal = ref(false)
+watch(() => q.value?.id, () => { showOriginal.value = false })
+
+const displayImageUrl = computed(() => {
+  if (showOriginal.value && q.value?.geometry_image_url) {
+    return q.value.geometry_image_url
+  }
+  return getGeometryDisplayUrl(q.value).url
+})
+const displayType = computed(() => {
+  if (showOriginal.value && q.value?.geometry_image_url) {
+    return 'raw'
+  }
+  return getGeometryDisplayUrl(q.value).type
+})
 const tikzStatus = computed(() => getTikzStatus(q.value))
 const fullscreenImage = ref('')
 const fullscreenSvg = ref('')
