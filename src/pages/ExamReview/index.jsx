@@ -8,6 +8,7 @@ import MathText from '../../components/MathText'
 import BottomSheet from '../../components/BottomSheet'
 import { COLORS } from './constants'
 import { formatOption, getStatusInfo, DOT_COLORS } from './status'
+import { getGeometryDisplayUrl } from '../../utils/geometryDisplay'
 import { useExamReview } from '../../hooks/useExamReview'
 import { normalizeOptions } from '../../utils/optionText'
 import { REVIEW_STATUS, getReviewState, getReviewStateLabel, getUnjudgedReasonText } from '../../utils/reviewDecision'
@@ -414,7 +415,14 @@ export default function ExamReview({ task, onClose, onSave, onViewImage }) {
     return correctness ? 'correct' : 'wrong'
   }, [currentQuestion, correctness])
 
-  const geoImageUrl = currentQuestion?.geometry_image_url || currentQuestion?.enhanced_geometry_image
+  // 几何图：统一走 getGeometryDisplayUrl() 拿最终展示内容。
+  // - clean_geometry_svg 是 SVG 源码 → type='svg_code'，内联渲染
+  // - 旧 TikZ 代码 → type='tikz_code'，用 tikzToSvg 转换后内联
+  // - 裁剪原图 URL → type='raw' 或 'clean'，<img> 渲染
+  // 与 PC 端共用一套判断逻辑，避免再出现"移动端只看得见原图"的死角。
+  const geoDisplay = currentQuestion ? getGeometryDisplayUrl(currentQuestion) : { url: null, type: 'none' }
+  const geoImageUrl = geoDisplay.url
+  const geoIsSvgCode = geoDisplay.type === 'svg_code' || geoDisplay.type === 'tikz_code'
 
   const currentReferenceAnswer = edits[currentQuestion?.id]?.answer ?? currentQuestion?.answer ?? ''
 
@@ -739,15 +747,27 @@ export default function ExamReview({ task, onClose, onSave, onViewImage }) {
           marginBottom: 10, background: '#FAFAFA',
           borderRadius: 'var(--radius-8)', padding: 8, border: '1px solid var(--border-light)'
         }}>
-          <img
-            src={geoImageUrl}
-            alt="几何配图"
-            loading="lazy"
-            style={{
-              width: '100%', maxHeight: '20vh',
-              objectFit: 'contain', borderRadius: 'var(--radius-6)', display: 'block'
-            }}
-          />
+          {geoIsSvgCode ? (
+            <div
+              className="tikz-svg-container"
+              // 移动端 SVG 来自服务端确定性渲染或视觉模型识别，信任源
+              dangerouslySetInnerHTML={{ __html: geoImageUrl }}
+              style={{
+                width: '100%', maxHeight: '20vh',
+                display: 'flex', justifyContent: 'center', alignItems: 'center'
+              }}
+            />
+          ) : (
+            <img
+              src={geoImageUrl}
+              alt="几何配图"
+              loading="lazy"
+              style={{
+                width: '100%', maxHeight: '20vh',
+                objectFit: 'contain', borderRadius: 'var(--radius-6)', display: 'block'
+              }}
+            />
+          )}
         </div>
       )}
 

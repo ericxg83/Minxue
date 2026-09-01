@@ -158,14 +158,6 @@
       <!-- URL → <img> 标签 -->
       <img v-else :src="displayImageUrl" class="ops-image" @click="fullscreenImage = displayImageUrl" />
       <div style="display:flex; gap:6px; margin-top:4px;">
-        <template v-if="tikzStatus === 'done'">
-          <el-button v-if="!isTikzActive" size="small" type="primary" plain @click="handleUseTikz">
-            采用TikZ图
-          </el-button>
-          <el-button v-else size="small" plain @click="handleUseClean">
-            显示原图
-          </el-button>
-        </template>
         <el-tag v-else-if="tikzStatus === 'pending'" size="small" type="warning" effect="dark">
           几何图重建中...
         </el-tag>
@@ -407,7 +399,6 @@ const aiAnswerRiskReason = computed(() => getAiAnswerRiskText(q.value))
 const displayImageUrl = computed(() => getGeometryDisplayUrl(q.value).url)
 const displayType = computed(() => getGeometryDisplayUrl(q.value).type)
 const tikzStatus = computed(() => getTikzStatus(q.value))
-const isTikzActive = computed(() => q.value?.display_image_type === 'tikz')
 const fullscreenImage = ref('')
 const fullscreenSvg = ref('')
 const showFullscreenSvg = ref(false)
@@ -791,32 +782,6 @@ const deleteImage = () => {
   localImageUrl.value = displayImageUrl.value = ''
   if (q.value) q.value.geometry_image_url = ''
   ElMessage.success('配图已删除')
-}
-
-const handleUseTikz = async () => {
-  const question = q.value
-  if (!question?.id) return
-  try {
-    await updateQuestion(question.id, { display_image_type: 'tikz' })
-    question.display_image_type = 'tikz'
-    ElMessage.success('已切换为TikZ图显示')
-  } catch (err) {
-    console.error('切换TikZ图失败:', err)
-    ElMessage.error('切换失败，请重试')
-  }
-}
-
-const handleUseClean = async () => {
-  const question = q.value
-  if (!question?.id) return
-  try {
-    await updateQuestion(question.id, { display_image_type: 'clean' })
-    question.display_image_type = 'clean'
-    ElMessage.success('已切换为净化图显示')
-  } catch (err) {
-    console.error('切换净化图失败:', err)
-    ElMessage.error('切换失败，请重试')
-  }
 }
 
 const retryGeometryLoading = ref(false)
