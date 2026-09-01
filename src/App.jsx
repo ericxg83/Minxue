@@ -13,6 +13,7 @@ import { motion, AnimatePresence } from 'motion/react'
 import { useLocation, useNavigate } from 'react-router-dom'
 import { useStudentStore, useTaskStore, useWrongQuestionStore, useExamStore } from './store'
 import { getStudents, getTasksByStudent, getQuestionsByTask, getExamsByStudent, getGeneratedExamsByStudent, getGeneratedExamById, updateTaskStatus, updateQuestion, updateQuestionTags, invalidateCache, createStudent, getQuestionsByIds, deleteTask, deleteGeneratedExam, deleteWrongQuestion, recalculateTaskStats, clearStudentCaches, peekCache, writeCache, fetchWrongQuestionsPage, getTasksSummary, markNotificationsRead } from './services/apiService'
+import { initNotifications, startNotificationPolling, onNotificationTap } from './services/notificationService'
 import { taskService } from './services/taskService'
 import { dedupeWrongQuestions } from './domain/questionIdentity'
 import { usePaperBank } from './features/PaperBank/index.jsx'
@@ -329,6 +330,25 @@ export default function App() {
       if (data?.success) setNotifSummary(data.summary)
     } catch { /* 忽略通知摘要失败 */ }
   }, 30000, true, [])
+
+  // OS 级本地通知：App 启动时初始化权限+channel；
+  // 独立 setInterval（不判断 document.hidden）让 App 在后台时仍能轮询，
+  // 批改完成后调度系统通知。点击通知 → 标记已读 + 打开通知面板。
+  useEffect(() => {
+    let cleanupPolling = null
+    let cleanupTap = null
+    initNotifications().then(() => {
+      cleanupPolling = startNotificationPolling((summary) => setNotifSummary(summary))
+    })
+    cleanupTap = onNotificationTap(() => {
+      handleOpenNotifications()
+    })
+    return () => {
+      if (cleanupPolling) cleanupPolling()
+      if (cleanupTap) cleanupTap()
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [])
 
   // 打开通知面板：先标记全部已读（铃铛数字归零），再展示面板与最新摘要
   const handleOpenNotifications = async () => {
