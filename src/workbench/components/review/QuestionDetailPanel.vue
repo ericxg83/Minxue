@@ -83,6 +83,29 @@
         </div>
       </div>
 
+      <!-- ═══ 解析（折叠，默认收起；与移动端 ExamReview 对齐，2026-09-01）═══
+           渲染 q.analysis（AI 批改时生成的解题过程 + 标准答案推导），
+           老师展开看 AI 是怎么判的，怀疑判错时有据可依。 -->
+      <div v-if="q.analysis || true" class="ops-analysis">
+        <button
+          type="button"
+          class="ops-analysis__toggle"
+          :aria-expanded="showAnalysis"
+          @click="showAnalysis = !showAnalysis"
+        >
+          <el-icon :size="14"><component :is="showAnalysis ? 'ArrowDown' : 'ArrowRight'" /></el-icon>
+          <span>{{ showAnalysis ? '收起解析' : '查看解析' }}</span>
+        </button>
+        <div v-if="showAnalysis" class="ops-analysis__body">
+          <MathRender
+            v-if="q.analysis"
+            :content="q.analysis"
+            autoDetect
+          />
+          <span v-else class="ops-analysis__empty">暂无解析</span>
+        </div>
+      </div>
+
       <!-- AI 判定 -->
       <div class="ops-ai-row" v-if="q.is_correct != null || q.review_status || getAiState(q) === 'exception'">
         <span class="ops-ai-icon" :class="getAiStateClass(q)">{{ getAiStateIcon(q) }}</span>
@@ -309,7 +332,7 @@ import { tikzToSvg } from '../../../utils/tikzGenerator'
 import { normalizeOptions } from '../../../utils/optionText'
 import { getReviewStateLabel, getUnjudgedReasonText, getAiAnswerRiskText } from '../../../utils/reviewDecision'
 import { ElMessage, ElMessageBox, ElLoading } from 'element-plus'
-import { DocumentChecked, Delete, Plus, Upload, Picture, EditPen, ArrowLeft, ArrowRight, RefreshLeft, Crop } from '@element-plus/icons-vue'
+import { DocumentChecked, Delete, Plus, Upload, Picture, EditPen, ArrowLeft, ArrowRight, ArrowDown, RefreshLeft, Crop } from '@element-plus/icons-vue'
 import MathRender from '../MathRender.vue'
 import QuestionEditForm from './QuestionEditForm.vue'
 
@@ -498,6 +521,8 @@ const quickAnswerEditing = ref(false)
 const quickAnswerText = ref('')
 const quickAnswerSaving = ref(false)
 const quickInputRef = ref(null)
+// 解析展开（默认收起；与移动端 ExamReview 同款）
+const showAnalysis = ref(false)
 const form = ref({ content: '', options: [], answer: '', analysis: '', tags: [], question_type: 'choice', subject: '' })
 const originalData = ref(null)
 const localImageUrl = ref('')
@@ -748,7 +773,7 @@ const handleSave = async () => {
   }
 }
 
-const handleReview = (result) => {
+const handleReview = async (result) => {
   const question = q.value
   if (!question) return
   const btn = store.reviewConfig.buttons
@@ -771,7 +796,35 @@ const handleReview = (result) => {
       return
     }
   } else {
-    store.reviewQuestion(question.id, result)
+    // wrong→correct 时弹"误判类型"下拉，便于事后统计 AI 误判归因（2026-09-01 上线问题 6）
+    // 老师可跳过；跳过则 misjudgeType 留空，admin 统计归为 'unset'。
+    if (result === 'correct' && question.is_correct === false) {
+      try {
+        const { value } = await ElMessageBox({
+          title: '这是什么类型的误判？',
+          message: 'AI 把这题判错了。请选择原因（帮助我们改进判题规则）：',
+          showInput: true,
+          inputOptions: [
+            { value: 'equivalent_form', label: '等价形式（如 x²、分数顺序、约分）' },
+            { value: 'parse_error', label: 'AI 提取学生答案错误' },
+            { value: 'typo', label: '学生笔误/小计算错误' },
+            { value: 'wrong_rule', label: '判题规则本身有误' },
+            { value: 'other', label: '其他' }
+          ],
+          inputPlaceholder: '请选择',
+          showCancelButton: true,
+          confirmButtonText: '确定',
+          cancelButtonText: '跳过',
+          inputValidator: (val) => !!val || '请选择一项'
+        })
+        store.reviewQuestion(question.id, result, { misjudgeType: value })
+      } catch {
+        // 老师跳过，照常标 correct
+        store.reviewQuestion(question.id, result)
+      }
+    } else {
+      store.reviewQuestion(question.id, result)
+    }
   }
   // 按钮动画反馈
   animatingBtn.value = result
@@ -973,6 +1026,50 @@ const handleRetryGeometry = async () => {
   padding: 8px 14px;
   border-bottom: 1px solid var(--wb-bg-hover);
   flex-shrink: 0;
+}
+
+/* ── 解析（折叠式，与移动端 ExamReview 对齐）── */
+.ops-analysis {
+  background: #fff;
+  margin: 0 10px;
+  padding: 8px 14px;
+  border-bottom: 1px solid var(--wb-bg-hover);
+  flex-shrink: 0;
+}
+.ops-analysis__toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  background: none;
+  border: 0;
+  padding: 4px 0;
+  color: var(--wb-text-secondary);
+  font-size: var(--wb-fs-meta);
+  font-weight: 500;
+  cursor: pointer;
+  transition: color var(--wb-motion-fast) var(--wb-motion-ease);
+}
+.ops-analysis__toggle:hover { color: var(--wb-primary); }
+.ops-analysis__toggle:focus-visible {
+  outline: 2px solid var(--wb-primary);
+  outline-offset: 2px;
+  border-radius: var(--wb-radius-sm);
+}
+.ops-analysis__body {
+  margin-top: 6px;
+  padding: 10px 12px;
+  background: var(--wb-bg-hover);
+  border-radius: var(--wb-radius-sm);
+  color: var(--wb-text);
+  font-size: var(--wb-fs-body);
+  line-height: 1.6;
+  /* 长解析限高+滚动，避免详情面板被撑得很长，老师 ctrl+F 时容易跳过其他题 */
+  max-height: 280px;
+  overflow-y: auto;
+}
+.ops-analysis__empty {
+  color: var(--wb-text-tertiary);
+  font-style: italic;
 }
 
 /* ── 顶栏模式标题 ── */

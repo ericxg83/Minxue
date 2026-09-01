@@ -42,6 +42,7 @@ import { migrateTeachingQuestionTypes } from './migrations/047_teaching_question
 import { migrateTeachingQuestionTypeAuto } from './migrations/048_teaching_question_type_auto.js'
 import { migrateStudentEnrollmentStatus } from './migrations/049_add_student_enrollment_status.js'
 import { migrateAiAnswerRiskReason } from './migrations/050_add_ai_answer_risk_reason.js'
+import { migrateTaskContentHash } from './migrations/051_add_task_content_hash.js'
 import { scheduleNightParse, scheduleWeeklyDiagnosis } from './services/nightParseService.js'
 
 const __dirname = dirname(fileURLToPath(import.meta.url))
@@ -238,6 +239,76 @@ app.post('/api/tasks/upload', upload.array('files', 20), async (req, res) => {
       }
     }
 
+    // ── 内容 hash 去重（2026-09-01 上线事故）──
+    // 客户端在压缩后对每张图算 SHA-256，多张图用逗号拼成 X-Content-Hashes 头。
+    // 命中同一学生已有 task 时直接复用，跳过 OSS / 队列。
+    // 没传 header（老版本/算 hash 失败）则跳过本段，走原流程。
+    const rawHashes = req.headers['x-content-hashes']
+    const contentHashes = typeof rawHashes === 'string'
+      ? rawHashes.split(',').map(s => s.trim().toLowerCase()).filter(s => /^[0-9a-f]{64}$/.test(s))
+      : []
+    if (contentHashes.length > 0) {
+      try {
+        const { rows: existing } = await query(
+          `SELECT id, status, created_at, original_name
+           FROM ${TABLES.TASKS}
+           WHERE student_id = $1
+             AND content_hash = ANY($2::text[])
+             AND deleted_at IS NULL
+             AND status IN ('pending', 'processing', 'done', 'reviewed')
+           ORDER BY created_at DESC
+           LIMIT 1`,
+          [resolvedStudentId, contentHashes]
+        )
+        if (existing.length > 0) {
+          const existingTask = existing[0]
+          console.log(`[Upload Dedup] ♻️  命中已有 task: id=${existingTask.id} status=${existingTask.status} studentId=${resolvedStudentId}`)
+          return res.json({
+            success: true,
+            count: 1,
+            failed: 0,
+            dedup: true,
+            reportId: null,
+            tasks: [{
+              ...existingTask,
+              originalName: existingTask.original_name,
+              _dedup: true,
+              _dedupMessage: '已检测到相同内容试卷，直接复用上次批改任务',
+            }],
+            summary: { dedup: true, reusedTaskId: existingTask.id },
+          })
+        }
+        // 命中但状态是 failed：让前端知道，避免静默重提
+        const { rows: failedExisting } = await query(
+          `SELECT id, status, last_error, created_at
+           FROM ${TABLES.TASKS}
+           WHERE student_id = $1
+             AND content_hash = ANY($2::text[])
+             AND deleted_at IS NULL
+             AND status = 'failed'
+           ORDER BY created_at DESC
+           LIMIT 1`,
+          [resolvedStudentId, contentHashes]
+        )
+        if (failedExisting.length > 0) {
+          console.log(`[Upload Dedup] ⚠️  命中失败 task: id=${failedExisting[0].id} studentId=${resolvedStudentId}`)
+          return res.status(409).json({
+            error: 'EXISTING_FAILED_TASK',
+            message: '相同内容试卷上次批改失败，请重试上次任务或换张照片',
+            existingTask: {
+              id: failedExisting[0].id,
+              status: failedExisting[0].status,
+              lastError: failedExisting[0].last_error,
+              createdAt: failedExisting[0].created_at,
+            },
+          })
+        }
+      } catch (dedupErr) {
+        // 去重查询失败不阻塞主流程：降级到原逻辑，记日志便于排查
+        console.warn('[Upload Dedup] 查询失败，降级到原逻辑:', dedupErr.message)
+      }
+    }
+
     const queue = await getTaskQueue()
     console.log(`[Upload Pipeline] 收到 ${files.length} 个文件, studentId=${resolvedStudentId}`)
 
@@ -297,10 +368,13 @@ app.post('/api/tasks/upload', upload.array('files', 20), async (req, res) => {
           console.log(`  OSS 上传成功: ${img.file_name} → ${img.image_url}`)
         }
 
+        // content_hash 取第一张图（多图任务以首页为主）。空数组 = 老版本/算 hash 失败 → 写 NULL。
+        const primaryHash = contentHashes[0] || null
+
         const { rows } = await query(
-          `INSERT INTO ${TABLES.TASKS} (student_id, image_url, images, original_name, status, result, task_type, generated_exam_id, worksheet_id, subject, resource_id)
-           VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11) RETURNING *`,
-          [resolvedStudentId, firstUrl, JSON.stringify(images), taskNameResolved, TASK_STATUS.PROCESSING, JSON.stringify({ progress: 0 }), normalizedTaskType, normalizedGeneratedExamId, worksheetId || null, subject || null, normalizedResourceId]
+          `INSERT INTO ${TABLES.TASKS} (student_id, image_url, images, original_name, status, result, task_type, generated_exam_id, worksheet_id, subject, resource_id, content_hash)
+           VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12) RETURNING *`,
+          [resolvedStudentId, firstUrl, JSON.stringify(images), taskNameResolved, TASK_STATUS.PROCESSING, JSON.stringify({ progress: 0 }), normalizedTaskType, normalizedGeneratedExamId, worksheetId || null, subject || null, normalizedResourceId, primaryHash]
         )
 
         const savedTask = rows[0]
@@ -350,6 +424,42 @@ app.post('/api/tasks/upload', upload.array('files', 20), async (req, res) => {
         }
       } catch (dbError) {
         console.error(`? [Upload] 数据库创建任务失败:`, dbError)
+        // UNIQUE 23505 兜底：并发同图上传，前置查询都返回空、INSERT 撞唯一索引。
+        // 此时 DB 已有同 hash 任务，直接复用并清掉这次孤儿 OSS 文件。
+        if (dbError.code === '23505' && primaryHash) {
+          try {
+            const { rows: dup } = await query(
+              `SELECT id, status, original_name, created_at FROM ${TABLES.TASKS}
+               WHERE student_id = $1 AND content_hash = $2 AND deleted_at IS NULL
+               ORDER BY created_at DESC LIMIT 1`,
+              [resolvedStudentId, primaryHash]
+            )
+            if (dup.length > 0) {
+              console.log(`[Upload Dedup] 23505 兜底命中: 新上传被合并到 taskId=${dup[0].id}`)
+              for (const img of images) {
+                try { const urlObj = new URL(img.image_url); const ossPath = urlObj.pathname.replace(/^\//, ''); await deleteFile(ossPath) } catch (e) { /* ignore */ }
+              }
+              tasks.push({
+                ...dup[0],
+                originalName: dup[0].original_name,
+                _dedup: true,
+                _dedupMessage: '并发上传已合并',
+              })
+              // 跳过后续报错推送，直接走正常返回
+              return res.json({
+                success: true,
+                count: 1,
+                failed: 0,
+                dedup: true,
+                reportId: null,
+                tasks,
+                summary: { dedup: true, reusedTaskId: dup[0].id },
+              })
+            }
+          } catch (recoveryErr) {
+            console.error('[Upload Dedup] 23505 兜底查询失败:', recoveryErr.message)
+          }
+        }
         tasks.push({
           error: true,
           originalName: taskName,
@@ -447,6 +557,7 @@ app.get('/api/tasks/summary', async (req, res) => {
          COALESCE((SELECT COUNT(*)::int FROM ${TABLES.TASKS} WHERE status = $1 AND deleted_at IS NULL AND notification_read_at IS NULL), 0) AS pending_review,
          COALESCE((SELECT COUNT(*)::int FROM ${TABLES.TASKS} WHERE status = $2 AND deleted_at IS NULL AND notification_read_at IS NULL), 0) AS failed_tasks,
          COALESCE((SELECT COUNT(*)::int FROM ${TABLES.WRONG_QUESTIONS} WHERE lifecycle_status = $3 AND added_at::date = CURRENT_DATE), 0) AS today_new_wrong,
+         COALESCE((SELECT COUNT(*)::int FROM ${TABLES.TASKS} WHERE status = $4 AND deleted_at IS NULL), 0) AS in_progress_count,
          (SELECT COALESCE(json_agg(row_to_json(t)), '[]'::json) FROM (
            SELECT t.id, t.original_name, t.status, t.created_at, t.updated_at,
                   t.notification_read_at, s.name AS student_name,
@@ -467,7 +578,7 @@ app.get('/api/tasks/summary', async (req, res) => {
              AND ((t.status = $1 AND t.notification_read_at IS NOT NULL) OR t.status = $2)
            ORDER BY COALESCE(t.notification_read_at, t.updated_at) DESC LIMIT 5
          ) t) AS recent_tasks`,
-      [TASK_STATUS.DONE, 'failed', 'new']
+      [TASK_STATUS.DONE, 'failed', 'new', TASK_STATUS.PROCESSING]
     )
 
     const mapTask = (t) => ({
@@ -487,6 +598,7 @@ app.get('/api/tasks/summary', async (req, res) => {
         pendingReview: r.pending_review,
         failedTasks: r.failed_tasks,
         todayNewWrongQuestions: r.today_new_wrong,
+        inProgressCount: r.in_progress_count,
         totalNotifications: r.pending_review + r.failed_tasks,
         pendingTasks: (r.pending_tasks || []).map(mapTask),
         recentTasks: (r.recent_tasks || []).map(mapTask)
@@ -519,6 +631,60 @@ app.post('/api/tasks/notifications/read', async (req, res) => {
     res.json({ success: true })
   } catch (error) {
     console.error('标记通知已读失败:', error)
+    res.status(500).json({ error: error.message })
+  }
+})
+
+// ── 批改中看板缓存（10s TTL，独立于 summary）──
+let inProgressCache = { data: null, timestamp: 0 }
+
+// ─────────────────────────────────────────────
+// 批改中任务列表：老师 PC 工作台"批改中"看板 + 移动端铃铛分两态的数据源
+// 返回按 started_at DESC 最近 50 条 processing 任务；含卡死判定（5 分钟无更新）
+// ─────────────────────────────────────────────
+app.get('/api/tasks/in-progress', async (req, res) => {
+  try {
+    const now = Date.now()
+    if (inProgressCache.data && (now - inProgressCache.timestamp) < SUMMARY_TTL) {
+      return res.json(inProgressCache.data)
+    }
+    const limit = Math.min(parseInt(req.query.limit) || 50, 200)
+    const { rows } = await query(
+      `SELECT
+         t.id, t.student_id, t.original_name, t.task_type, t.subject,
+         t.started_at, t.updated_at, t.retry_count, t.last_error,
+         s.name AS student_name,
+         EXTRACT(EPOCH FROM (NOW() - COALESCE(t.started_at, t.updated_at, t.created_at)))::int AS elapsed_sec,
+         (COALESCE(t.updated_at, t.started_at, t.created_at) < NOW() - INTERVAL '300 seconds') AS is_stalled
+       FROM ${TABLES.TASKS} t
+       LEFT JOIN ${TABLES.STUDENTS} s ON s.id = t.student_id
+       WHERE t.status = $1 AND t.deleted_at IS NULL
+       ORDER BY COALESCE(t.started_at, t.updated_at, t.created_at) DESC
+       LIMIT $2`,
+      [TASK_STATUS.PROCESSING, limit]
+    )
+    const data = {
+      success: true,
+      count: rows.length,
+      tasks: rows.map(t => ({
+        id: t.id,
+        studentId: t.student_id,
+        studentName: t.student_name,
+        originalName: t.original_name,
+        taskType: t.task_type,
+        subject: t.subject,
+        startedAt: t.started_at,
+        updatedAt: t.updated_at,
+        retryCount: t.retry_count,
+        lastError: t.last_error,
+        elapsedSec: t.elapsed_sec,
+        isStalled: t.is_stalled,
+      }))
+    }
+    inProgressCache = { data, timestamp: now }
+    res.json(data)
+  } catch (error) {
+    console.error('获取批改中任务失败:', error)
     res.status(500).json({ error: error.message })
   }
 })
@@ -1291,12 +1457,31 @@ app.put('/api/questions/:id', async (req, res) => {
     }
 
     // [P1-4b] is_correct 变更时追加写入 PC 编辑判定记录
+    // misjudgeType 由前端在 review_metadata.misjudgeType 传入（wrong→correct 时老师选的"误判类型"），
+    // 透传到 judgements.metadata 用于事后分析"AI 判错样本归因"。
+    const reviewMetadataIn = (review_metadata && typeof review_metadata === 'object') ? review_metadata : null
+    const misjudgeType = reviewMetadataIn?.misjudgeType || null
     if (hasIsCorrect && oldIsCorrect !== is_correct) {
+      // [问题4 修复 2026-09-01] PUT 改 is_correct 时必须走 settle 流程，
+      // 否则 wrong_questions.status / questions.status 不同步——移动端只调 PUT
+      // 不调 /rejudge，错题本永远不 mastered。finalizeRejudgeResult 内部按
+      // (studentAnswer, answer, questionType, isCorrect) 算 fingerprint 做幂等，
+      // 与 /rejudge 共用同一 settle 路径，错题本 + judgement + questions.status 一次同步。
+      try {
+        await finalizeRejudgeResult({
+          question: { ...updatedQuestion, is_correct },
+          isCorrect: is_correct,
+          oldIsCorrect,
+          source: 'review_edit'
+        })
+      } catch (settleErr) {
+        console.error('[settle] review_edit finalizeRejudgeResult 失败:', settleErr.message)
+      }
       createJudgement({
         questionId: id,
         source: 'pc_edit',
         isCorrect: is_correct,
-        metadata: { oldIsCorrect, editedFields: Object.keys(req.body).filter(k => k !== 'id') }
+        metadata: { oldIsCorrect, editedFields: Object.keys(req.body).filter(k => k !== 'id'), misjudgeType }
       }).catch(e => console.error('[Shadow] judgements写入失败 (pc_edit):', e.message))
     }
 
@@ -2520,6 +2705,64 @@ app.get('/api/admin/backfill-tags/progress', (req, res) => {
   res.json({ success: true, ...backfillProgress })
 })
 
+// ── 误判类型归因统计（2026-09-01 上线问题 6）──
+// 按 metadata.misjudgeType 聚合 judgements 表的 PC 改判记录（source='pc_edit' 且 is_correct 由 false→true），
+// 让产品/算法能看出"AI 误判主要发生在哪类题型"以指导后续 prompt/规则调优。
+app.get('/api/admin/judgements/misjudge-stats', async (req, res) => {
+  try {
+    const since = req.query.since || new Date(Date.now() - 30 * 24 * 3600 * 1000).toISOString().slice(0, 10)
+    const { rows: byType } = await query(
+      `SELECT
+         COALESCE(metadata->>'misjudgeType', 'unset') AS misjudge_type,
+         COUNT(*)::int AS count
+       FROM judgements
+       WHERE source = 'pc_edit'
+         AND is_correct = true
+         AND (metadata->>'oldIsCorrect')::boolean = false
+         AND created_at >= $1::date
+       GROUP BY misjudge_type
+       ORDER BY count DESC`,
+      [since]
+    )
+    const { rows: total } = await query(
+      `SELECT COUNT(*)::int AS total
+       FROM judgements
+       WHERE source = 'pc_edit'
+         AND is_correct = true
+         AND (metadata->>'oldIsCorrect')::boolean = false
+         AND created_at >= $1::date`,
+      [since]
+    )
+    const { rows: recent } = await query(
+      `SELECT id, question_id, metadata, created_at
+       FROM judgements
+       WHERE source = 'pc_edit'
+         AND is_correct = true
+         AND (metadata->>'oldIsCorrect')::boolean = false
+         AND metadata->>'misjudgeType' IS NOT NULL
+         AND created_at >= $1::date
+       ORDER BY created_at DESC
+       LIMIT 20`,
+      [since]
+    )
+    res.json({
+      success: true,
+      since,
+      totalOverrides: total[0]?.total || 0,
+      byType: byType.map(r => ({ type: r.misjudge_type, count: r.count })),
+      recent: recent.map(r => ({
+        id: r.id,
+        questionId: r.question_id,
+        misjudgeType: r.metadata?.misjudgeType,
+        createdAt: r.created_at
+      }))
+    })
+  } catch (error) {
+    console.error('获取误判统计失败:', error)
+    res.status(500).json({ error: error.message })
+  }
+})
+
 // ── 教学诊断回填（空题标记 + 做错错因分析，异步小批量自动接力）──
 let diagnosisRunning = false
 let diagnosisProgress = { total: 0, blank: 0, updated: 0, skipped: 0, done: false, detail: '' }
@@ -2715,6 +2958,7 @@ if (process.argv[1] === __filename || process.argv[1]?.endsWith('server/index.js
       await migrateTeachingQuestionTypeAuto()
       await migrateStudentEnrollmentStatus()
       await migrateAiAnswerRiskReason()
+      await migrateTaskContentHash()
     } catch (err) {
       console.error('数据库迁移失败:', err.message)
     }

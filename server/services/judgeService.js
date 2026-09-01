@@ -406,6 +406,15 @@ function prepareMathExpr(input) {
   s = s.trim()
   // ^ → **  (exponentiation)
   s = s.replace(/\^/g, '**')
+  // Unicode 上标数字 → **N（OCR 常见 x² y³ 这类手写形态；否则 ² 不是合法 JS 标识符 → eval 抛错 → 数学等价失败）
+  // 2026-09-01 用户截图：题#11 答案含 "x²" 上标，原 prepareMathExpr 不处理，
+  //   isMathEquivalent 走 eval 抛错 → 整个数学等价分支 false。
+  s = s.replace(/([a-zA-Z\)])[⁰¹²³⁴⁵⁶⁷⁸⁹]+/g, (_, base) => {
+    const supMap = { '⁰': '0', '¹': '1', '²': '2', '³': '3', '⁴': '4', '⁵': '5', '⁶': '6', '⁷': '7', '⁸': '8', '⁹': '9' }
+    let n = ''
+    for (const c of _.slice(1)) n += supMap[c] || c
+    return `${base}**${n}`
+  })
   // 用 **0.5 而非 Math.sqrt，避免后续 toLowerCase 把 Math 变成 math 导致 ReferenceError。
   s = convertSqrtToPower(s)
   // Insert * for implicit multiplication: "2x" → "2*x", "2(" → "2*(", ")(" → ")*("
@@ -804,9 +813,14 @@ export function judgeAnswer(studentAnswer, referenceAnswer, questionType) {
   }
 
   // 单答案场景：标准比较流程
+  // 双侧收窄：参考答案也走 narrowToFinalAnswer，去掉"a = ..., y = ..."这种过程噪声
+  // 仅收窄到最后一个 "=" 右侧；收窄后为空时退回原串，避免误伤。
+  // 2026-09-01 用户截图：题#11 学生"代入得 -1/4 = a, ∴函数表达式为 y = -1/4 x²"
+  // 与参考"a = -1/4, y = -1/4 x²" 收窄到同段 "-1/4 x²" 才能字面相等判对。
   const narrowedStudent = narrowToFinalAnswer(studentAnswer)
+  const narrowedRef = narrowToFinalAnswer(referenceAnswer) || referenceAnswer
   const normStudent = normalizeAnswer(narrowedStudent)
-  const normRef = normalizeAnswer(referenceAnswer)
+  const normRef = normalizeAnswer(narrowedRef)
 
   // String-level match（两边归一化后都为空不算命中：学生只写了标点/括号时
   // normalizeAnswer 会 strip 成空串，和同样被 strip 成空串的参考答案"相等"而误判为对）

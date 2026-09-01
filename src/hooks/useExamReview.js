@@ -153,14 +153,14 @@ export function useExamReview({ task, onSave }) {
         await updateQuestion(qId, updateData)
         successCount++
 
+        // 错题本同步已统一移到后端 PUT /api/questions/:id 的 settle 流程（2026-09-01 修复）：
+        // 改判时后端调 finalizeRejudgeResult，自动把 wrong_questions.status=mastered /
+        // questions.status 翻对 / judgement 审计一次写齐。移动端原本在 line 161-173
+        // 手写的 updateWrongQuestionStatus / addWrongQuestions 已删，避免双写不一致。
+        // 唯一保留的是 exclude 路径的"删错题记录"——settle 流程不删 wrong_questions 行。
         const isExcludedEdit = edit.review_status === REVIEW_STATUS.EXCLUDE
-
-        // 错题本：与 PC 端同一策略——改判做对是「已掌握」，不是删记录
         if (isExcludedEdit && wrongId) {
           await deleteWrongQuestion(wrongId).catch(e => console.warn(`[ExamReview] 移除错题失败 q=${qId.substring(0,8)}:`, e.message))
-        } else if (edit.is_correct === true && wrongId) {
-          await updateWrongQuestionStatus(wrongId, 'mastered', { lifecycle_status: WRONG_BOOK_LIFECYCLE.MASTERED })
-            .catch(e => console.warn(`[ExamReview] 标记已掌握失败 q=${qId.substring(0,8)}:`, e.message))
         } else if (edit.is_correct === false && !wrongId && !isExcludedEdit) {
           // 不完整的题不入错题本，否则会成为 PC 端按 is_complete 过滤后看不见的隐形错题。
           // 手机上无法补全题目元素，因此不阻断判定，只跳过入册并在保存后汇总告知。
