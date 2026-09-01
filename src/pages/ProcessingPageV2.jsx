@@ -11,6 +11,21 @@ const complete = t => done.has(t.status) || Boolean(t.result?.questionCount)
 const retry = t => t.task_type === 'retry_paper' || t.task_type === 'wrong_retry'
 const time = v => dayjs(v).isValid() ? dayjs(v).format('MM/DD HH:mm') : '刚刚'
 
+// 已耗时 mm:ss（processing 用）；卡死时显示"已卡 N 分钟"
+const formatElapsed = (start) => {
+  const t = start ? new Date(start).getTime() : Date.now()
+  const sec = Math.max(0, Math.floor((Date.now() - t) / 1000))
+  if (sec < 60) return `${sec} 秒`
+  const m = Math.floor(sec / 60)
+  if (m < 60) return `${m} 分${sec % 60} 秒`
+  return `${m} 分钟`
+}
+const formatStalled = (start) => {
+  const t = start ? new Date(start).getTime() : Date.now()
+  const m = Math.floor((Date.now() - t) / 60000)
+  return m >= 1 ? `已卡 ${m} 分钟` : '处理超时'
+}
+
 // 服务重启/worker 崩溃会让任务永久停在 processing，仅看 status 会一直转圈且无重试入口。
 // 用 started_at 实时判定超时，不落库——避免为此新增第五种任务状态。
 // 排队期（还没被 worker 接手、started_at 为空）给更长缓冲，避免攒在队列里就被误判超时。
@@ -77,9 +92,9 @@ function TaskRow({ task, onRetryTask, onOpenReview }) {
   // 服务端任务显示落库的任务名（练习册名/科目+时间），重练卷保持固定名；旧数据回退"日常作业"
   const name = retry(task) ? '错题重练' : (task.original_name || '日常作业')
   const detail = current === 'failed' ? failReason(task)
-    : current === 'stalled' ? '处理超时，可重试'
+    : current === 'stalled' ? formatStalled(task.started_at || task.created_at)
     : current === 'processing' && isTemp ? '正在上传图片'
-    : current === 'processing' ? (showProgress ? `正在整理批改结果 · ${Math.round(progress)}%` : '正在整理批改结果')
+    : current === 'processing' ? (showProgress ? `已耗时 ${formatElapsed(task.started_at || task.created_at)} · ${Math.round(progress)}%` : `已耗时 ${formatElapsed(task.started_at || task.created_at)}`)
     : current === 'completed'
       ? <ResultSummary questionCount={questionCount} wrong={wrong} empty={empty} pending={pending} truncated={truncated} />
     : '等待系统开始处理'

@@ -1,8 +1,8 @@
 import { useEffect, useState } from 'react'
-import { Bell, X, CheckCircle2, AlertCircle, Clock, Sparkles } from 'lucide-react'
+import { Bell, X, CheckCircle2, AlertCircle, Clock, Sparkles, Loader2 } from 'lucide-react'
 import { useNavigate } from 'react-router-dom'
 import EmptyState from './EmptyState'
-import { getTasksSummary } from '../services/apiService'
+import { getTasksSummary, getInProgressTasks } from '../services/apiService'
 import dayjs from 'dayjs'
 
 const statusCfg = {
@@ -12,17 +12,31 @@ const statusCfg = {
   pending: { text: '排队中', color: 'var(--warning)', bg: 'var(--warning-soft)' }
 }
 
+const formatElapsed = (sec) => {
+  const s = Number(sec) || 0
+  if (s < 60) return `${s} 秒`
+  const m = Math.floor(s / 60)
+  if (m < 60) return `${m} 分${s % 60} 秒`
+  const h = Math.floor(m / 60)
+  return `${h} 小时${m % 60} 分`
+}
+
 export default function NotificationsPanel({ onClose }) {
   const navigate = useNavigate()
   const [summary, setSummary] = useState(null)
+  const [inProgress, setInProgress] = useState([])
   const [loading, setLoading] = useState(true)
 
   useEffect(() => {
     let active = true
     const load = async () => {
       try {
-        const data = await getTasksSummary(false)
-        if (active && data?.success) setSummary(data.summary)
+        const [sum, prog] = await Promise.all([
+          getTasksSummary(false),
+          getInProgressTasks(10).catch(() => ({ success: false, tasks: [] }))
+        ])
+        if (active && sum?.success) setSummary(sum.summary)
+        if (active && prog?.success) setInProgress(prog.tasks || [])
       } catch (e) {
         console.error('加载通知失败:', e)
       } finally {
@@ -30,19 +44,23 @@ export default function NotificationsPanel({ onClose }) {
       }
     }
     load()
-    return () => { active = false }
+    // 15s 轮询，与 PC Dashboard 看板同节奏
+    const id = setInterval(load, 15000)
+    return () => { active = false; clearInterval(id) }
   }, [])
 
   const statCards = [
     { key: 'pendingReview', label: '待确认', value: summary?.pendingReview ?? 0, icon: Clock, color: 'var(--warning)' },
-    { key: 'failedTasks', label: '识别失败', value: summary?.failedTasks ?? 0, icon: AlertCircle, color: 'var(--danger)' },
+    { key: 'inProgressCount', label: '批改中', value: summary?.inProgressCount ?? 0, icon: Loader2, color: 'var(--primary)' },
     { key: 'todayNewWrongQuestions', label: '今日新增错题', value: summary?.todayNewWrongQuestions ?? 0, icon: Sparkles, color: 'var(--primary)' }
   ]
 
   const hasContent = !loading && summary && (
     summary.totalNotifications > 0 ||
+    summary.inProgressCount > 0 ||
     summary.todayNewWrongQuestions > 0 ||
-    (summary.recentTasks || []).length > 0
+    (summary.recentTasks || []).length > 0 ||
+    inProgress.length > 0
   )
 
   return (
@@ -100,6 +118,53 @@ export default function NotificationsPanel({ onClose }) {
                   </div>
                 ))}
               </div>
+
+              {/* 批改中（2026-09-01 上线：让老师看到正在批改的进度，不止完成时才知道） */}
+              {inProgress.length > 0 && (
+                <div className="space-y-2 mb-4">
+                  <span style={{ fontSize: 'var(--fs-12)', fontWeight: 500, color: 'var(--text-secondary)' }}>
+                    批改中（{inProgress.length}）
+                  </span>
+                  {inProgress.map((t) => (
+                    <button
+                      key={t.id}
+                      onClick={() => { onClose(); navigate('/') }}
+                      className="w-full flex items-center gap-3 rounded-xl px-3 py-2.5 text-left transition-colors"
+                      style={{ background: 'var(--bg)' }}
+                    >
+                      <div
+                        className="w-8 h-8 rounded-lg flex items-center justify-center flex-shrink-0"
+                        style={{
+                          background: t.isStalled ? 'var(--danger-soft)' : 'var(--primary-soft)',
+                          color: t.isStalled ? 'var(--danger)' : 'var(--primary)'
+                        }}
+                      >
+                        {t.isStalled ? <AlertCircle size={16} /> : <Loader2 size={16} className="animate-spin" />}
+                      </div>
+                      <div className="flex-1 min-w-0">
+                        <div className="flex items-center gap-1.5">
+                          <span style={{ fontSize: 'var(--fs-13)', fontWeight: 500, color: 'var(--text)' }} className="truncate">
+                            {t.originalName || '未命名试卷'}
+                          </span>
+                          <span style={{
+                            fontSize: 'var(--fs-10)', padding: '1px 6px', borderRadius: 'var(--radius-8)',
+                            background: t.isStalled ? 'var(--danger-soft)' : 'var(--primary-soft)',
+                            color: t.isStalled ? 'var(--danger)' : 'var(--primary)',
+                            whiteSpace: 'nowrap', flexShrink: 0
+                          }}>
+                            {t.isStalled ? '已卡 5 分钟' : '批改中'}
+                          </span>
+                        </div>
+                        <div className="flex items-center gap-1.5 mt-0.5" style={{ fontSize: 'var(--fs-11)', color: 'var(--text-secondary)' }}>
+                          {t.studentName && <span>{t.studentName}</span>}
+                          {t.studentName && <span>·</span>}
+                          <span>已耗时 {formatElapsed(t.elapsedSec)}</span>
+                        </div>
+                      </div>
+                    </button>
+                  ))}
+                </div>
+              )}
 
               {/* 最近任务 */}
               {(summary.recentTasks || []).length > 0 && (

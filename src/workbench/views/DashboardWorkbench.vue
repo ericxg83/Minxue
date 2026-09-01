@@ -94,6 +94,46 @@
         description="新上传的作业和重练任务出现后，会自动列在这里。"
       />
 
+      <!-- Layer 1.5 · 批改中看板：有 processing 任务时显示，让老师看到实时批改进度
+        数据源：notiStore.inProgressTasks（15s 轮询），卡死标红 -->
+      <section
+        v-if="!initialLoading && notiStore.hasInProgress"
+        class="in-progress"
+        aria-label="批改中"
+      >
+        <header class="section-header">
+          <h2 class="section-header__title">批改中</h2>
+          <span class="in-progress__count">
+            <strong>{{ notiStore.inProgressCount }}</strong>
+            <small>份正在批改</small>
+          </span>
+        </header>
+        <ul class="activity-list">
+          <li v-for="t in notiStore.inProgressTasks.slice(0, 5)" :key="t.id">
+            <ListRow
+              variant="generic"
+              :title="`${t.studentName || '学生'} · ${t.originalName || '未命名作业'}`"
+              :description="`${t.subject || '未分类'} · ${formatElapsed(t.elapsedSec)}${t.isStalled ? ' · 已卡 5 分钟' : ''}`"
+              :aria-label="`${t.studentName || '学生'} 的 ${t.originalName || '未命名作业'} · ${formatElapsed(t.elapsedSec)}${t.isStalled ? ' · 已卡 5 分钟' : ''}`"
+              @click="goInProgress(t)"
+            >
+              <template #leading>
+                <span class="activity-avatar is-primary">
+                  <el-icon v-if="!t.isStalled" :size="16" class="is-spinning"><Loading /></el-icon>
+                  <el-icon v-else :size="16"><WarningFilled /></el-icon>
+                </span>
+              </template>
+              <template #trailing>
+                <StatusTag
+                  :tone="t.isStalled ? 'danger' : 'info'"
+                  :label="t.isStalled ? '已卡 5 分钟' : '批改中'"
+                />
+              </template>
+            </ListRow>
+          </li>
+        </ul>
+      </section>
+
       <!-- Layer 2 · 待复核作业：教师未读 done 任务，与上方 briefing "作业等待复核" 同口径
         入口直达具体 task 复核页（/grade/task?taskId=...） -->
       <section
@@ -250,9 +290,9 @@
 </template>
 
 <script setup>
-import { computed, onMounted, ref } from 'vue'
+import { computed, onMounted, onBeforeUnmount, ref } from 'vue'
 import { useRouter } from 'vue-router'
-import { ArrowRight } from '@element-plus/icons-vue'
+import { ArrowRight, Loading, WarningFilled } from '@element-plus/icons-vue'
 import {
   getStudents,
   getDashboardWeakness,
@@ -454,13 +494,28 @@ const goActivity = (act) => {
 const goStudent = (id) => router.push({ path: `/students/${id}` })
 const goAttentionStudent = (s) => router.push({ path: `/students/${s.id}` })
 const goWeakness = (kp) => router.push({ path: '/question-bank', query: { kpId: kp.kpId } })
+const goInProgress = (t) => {
+  // 批改中任务点进去直接跳批改中心（无 taskId 直达，列表里找）
+  router.push({ path: '/grade' })
+}
 const weaknessDescription = (kp) => {
   const span = kp.gradeSpan > 1 ? `跨 ${kp.gradeSpan} 个年级` : '单一学段'
   return `${kp.studentCount} 人未掌握 · ${span}`
 }
 
+const formatElapsed = (sec) => {
+  const s = Number(sec) || 0
+  if (s < 60) return `已耗时 ${s} 秒`
+  const m = Math.floor(s / 60)
+  if (m < 60) return `已耗时 ${m} 分钟`
+  const h = Math.floor(m / 60)
+  return `已耗时 ${h} 小时 ${m % 60} 分`
+}
+
 onMounted(async () => {
   notiStore.fetchSummary()
+  notiStore.fetchInProgress()
+  notiStore.startInProgressPolling()
   // Dashboard 三个聚合 API 并行加载（失败互不影响）
   Promise.allSettled([
     getDashboardWeakness(5).then((d) => { dashboardWeakness.value = d?.weakness || [] }),
@@ -478,6 +533,10 @@ onMounted(async () => {
   } finally {
     initialLoading.value = false
   }
+})
+
+onBeforeUnmount(() => {
+  notiStore.stopInProgressPolling()
 })
 </script>
 
@@ -801,6 +860,42 @@ onMounted(async () => {
   outline: 2px solid var(--wb-primary);
   outline-offset: 2px;
   border-radius: var(--wb-radius-sm);
+}
+
+/* ── Layer 1.5 · 批改中看板 ── */
+.in-progress {
+  margin-bottom: var(--wb-space-5);
+  padding: var(--wb-space-3) var(--wb-space-4);
+  background: var(--wb-bg-card);
+  border: 1px solid var(--wb-border-light);
+  border-left: 3px solid var(--wb-primary);
+  border-radius: var(--wb-radius-md);
+}
+.in-progress__count {
+  display: inline-flex;
+  align-items: baseline;
+  gap: var(--wb-space-1);
+  color: var(--wb-text-secondary);
+  font-variant-numeric: tabular-nums;
+}
+.in-progress__count strong {
+  color: var(--wb-primary);
+  font-size: var(--wb-fs-card-title);
+  font-weight: var(--wb-fw-semibold);
+}
+.in-progress__count small {
+  color: var(--wb-text-tertiary);
+  font-size: var(--wb-fs-meta);
+}
+.is-spinning {
+  animation: in-progress-spin 1.4s linear infinite;
+}
+@keyframes in-progress-spin {
+  from { transform: rotate(0deg); }
+  to { transform: rotate(360deg); }
+}
+@media (prefers-reduced-motion: reduce) {
+  .is-spinning { animation: none; }
 }
 
 /* ── Layer 2 · 最近批改完成 ── */

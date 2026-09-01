@@ -253,6 +253,12 @@ export const markNotificationsRead = async () => {
   return data
 }
 
+// 批改中任务看板：含卡死判定（5 分钟无更新），10s 服务端缓存。
+// 老师 PC Dashboard "批改中"卡片和移动端铃铛分两态共用。
+export const getInProgressTasks = async (limit = 50) => {
+  return apiRequest(`/tasks/in-progress?limit=${limit}`)
+}
+
 // Dashboard 聚合：班级薄弱知识点 Top N（含跨年级标签）
 export const getDashboardWeakness = async (limit = 5) => {
   const cacheKey = 'dashboard_weakness_cache'
