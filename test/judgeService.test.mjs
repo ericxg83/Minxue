@@ -101,3 +101,53 @@ test('stripAnswerScaffolding removes only leading narrative shells', () => {
   assert.equal(stripAnswerScaffolding('D'), 'D')
   assert.equal(stripAnswerScaffolding(''), '')
 })
+
+// 2026-09-02 用户截图：填空题"用 > < = 填空"两个空
+// 参考答案 AI 解析成 "(1) =; (2) <"，学生写 "=, <"。
+// 序号壳不剥掉 → 逐项比对变成 "=" vs "(1) =" 永不等，符号无数字给兜底，整题判错。
+test('multi-blank compare-symbol answers strip sequence labels', () => {
+  // 主路径：参考答案带 (N) 序号壳 + 学生裸符号
+  assert.deepEqual(
+    judgeAnswer('=, <', '(1) =; (2) <', 'fill'),
+    { isCorrect: true, unrecognized: false })
+  // 学生用空格分隔也能命中（splitBySpace 路径）
+  assert.deepEqual(
+    judgeAnswer('= <', '(1) =; (2) <', 'fill'),
+    { isCorrect: true, unrecognized: false })
+  // 全角括号也支持
+  assert.deepEqual(
+    judgeAnswer('=, <', '（1）=;（2）<', 'fill'),
+    { isCorrect: true, unrecognized: false })
+  // 一空答错仍要判错（不要宽松兜底）
+  assert.deepEqual(
+    judgeAnswer('=, >', '(1) =; (2) <', 'fill'),
+    { isCorrect: false, unrecognized: false })
+  // 单空填错也判错
+  assert.deepEqual(
+    judgeAnswer('=, =', '(1) =; (2) <', 'fill'),
+    { isCorrect: false, unrecognized: false })
+})
+
+// 2026-09-02 用户截图：解答题"列点作答"型
+// 学生答案 "当x=0时, y=3; 当x=-1时, y=0"，参考 "3, 0"。
+// 之前 splitAnswers 按 ,; 切成 4 段、参考 2 段、段数不等跳过；
+// extractAndCompare 把 x=0/y=3/x=-1/y=0 全数字抽出得 [-1,0,0,3] vs [0,3]，
+// -1 多出来 + 集合不对等 → 整题判错。
+test('solve-by-points answer matches reference value list', () => {
+  // 主路径：键值叙述 vs 裸数字列表
+  assert.deepEqual(
+    judgeAnswer('当x=0时, y=3; 当x=-1时, y=0', '3, 0', 'answer'),
+    { isCorrect: true, unrecognized: false })
+  // 紧凑写法（无"当""时"，逗号分隔）
+  assert.deepEqual(
+    judgeAnswer('x=0, y=3; x=-1, y=0', '3, 0', 'answer'),
+    { isCorrect: true, unrecognized: false })
+  // 两边都是键值叙述，按顺序比对
+  assert.deepEqual(
+    judgeAnswer('当x=0时, y=3; 当x=-1时, y=0', '当x=0时, y=3; 当x=-1时, y=0', 'answer'),
+    { isCorrect: true, unrecognized: false })
+  // 一组答错仍判错（不要宽松兜底）
+  assert.deepEqual(
+    judgeAnswer('当x=0时, y=4; 当x=-1时, y=0', '3, 0', 'answer'),
+    { isCorrect: false, unrecognized: false })
+})

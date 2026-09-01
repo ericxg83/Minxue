@@ -549,6 +549,18 @@ function stripBlankLabel(value) {
   return String(value ?? '').trim().replace(BLANK_LABEL_RE, '').trim()
 }
 
+/**
+ * 剥掉多空答案前的序号壳："(1) ="/"（2）<"/"1) "/"② "/"一、"。
+ * AI 解析多空填空题（"用 > < = 填空"的两个空）常写成 "(1) =; (2) <"，
+ * 学生端直接填 "=, <" —— 序号壳不剥掉，逐项比对必失败，且符号答案
+ * 没数字给 extractAndCompare 兜底，整题直接判错。
+ * 与 stripBlankLabel 互补：前者剥"第N空为"叙述壳，本函数剥"(N)"序号壳。
+ */
+const SEQUENCE_LABEL_RE = /^\s*(?:[（(\[【]\s*)?(?:[①-⑨]|[一二三四五六七八九十]|\d+)\s*[)）\]】.,。、]\s*/
+function stripSequenceLabel(value) {
+  return String(value ?? '').replace(SEQUENCE_LABEL_RE, '').trim()
+}
+
 // 答案开头的叙述性脚手架："答案为"/"答:"/"解："/"结果是" 等，AI 现场生成填空/解答答案时爱加。
 // 只吃「行首」的闭集词 —— "底角的余弦值等于 3/4" 这类把"等于"用在句中的真答案不受影响（正则锚定 ^）。
 const ANSWER_SCAFFOLD_RE = /^\s*(?:正确答案|标准答案|答案|答|解|结果)\s*(?:为|是|应为|应该是|等于)?\s*[:：]?\s*/
@@ -644,8 +656,8 @@ export function judgeAnswer(studentAnswer, referenceAnswer, questionType) {
 
   // Helper: 单个答案片段的归一化比较
   const normalizeAndCompare = (sAns, rAns) => {
-    const sClean = stripBlankLabel(sAns)
-    const rClean = stripBlankLabel(rAns)
+    const sClean = stripSequenceLabel(stripBlankLabel(sAns))
+    const rClean = stripSequenceLabel(stripBlankLabel(rAns))
     // 收窄后为空（片段本身就是 "=" 或以 "=" 结尾）时退回原片段，
     // 否则空格分片比较里的 "=" 片段永远与参考侧的 "=" 不等，整题被拖成错。
     const narrowed = narrowToFinalAnswer(sClean) || sClean
@@ -758,6 +770,67 @@ export function judgeAnswer(studentAnswer, referenceAnswer, questionType) {
     return str.split(/\s+/).map(a => a.trim()).filter(a => a)
   }
 
+  // 解答题"列点作答"型：学生答案写成 "当x=0时, y=3; 当x=-1时, y=0" 这种
+  // 键值叙述形态，参考却是裸数字列表 "3, 0"。
+  // 按 ; 拆组，每组找所有 key=value（key 是字母/汉字），取最后一个 value 作为
+  // 该组的结果（通常 y=xxx 是结果），组成 value 序列。
+  // 必须 ≥2 组才触发，避免误伤学生只是顺手写了 "x=2" 的单点题。
+  const extractKvGroupLastValues = (s) => {
+    const groups = String(s || '').split(/[;；]/)
+    const values = []
+    for (const g of groups) {
+      const trimmed = g.trim()
+      if (!trimmed) continue
+      const matches = [...trimmed.matchAll(/([a-zA-Z一-龥])\s*=\s*([^=;,，;；]+)/g)]
+      if (matches.length === 0) continue
+      values.push(matches[matches.length - 1][2].trim())
+    }
+    return values
+  }
+
+  // 键值叙述桥接：必须在 splitAnswers 多空分支之前插入——
+  // "当x=0时, y=3; 当x=-1时, y=0" 走 splitAnswers 按 ,; 会切成 4 段
+  // ("当x=0时", "y=3", "当x=-1时", "y=0")，参考 "3, 0" 是 2 段，
+  // 段数不等直接跳过逐项比对 + 数字集合兜底多出 -1、x=… 等数字 → 全错。
+  const studentKvValues = extractKvGroupLastValues(studentAnswer)
+  const refKvValues = extractKvGroupLastValues(referenceAnswer)
+
+  // 两边都是键值叙述 → 按顺序比对 value
+  if (studentKvValues.length >= 2 && refKvValues.length >= 2 &&
+      studentKvValues.length === refKvValues.length) {
+    let allMatch = true
+    for (let i = 0; i < studentKvValues.length; i++) {
+      const sV = studentKvValues[i]
+      const rV = refKvValues[i]
+      const ns = normalizeAnswer(sV)
+      const nr = normalizeAnswer(rV)
+      if (ns !== nr && !isNumericEquivalent(ns, nr) && !isMathEquivalent(sV, rV)) {
+        allMatch = false
+        break
+      }
+    }
+    if (allMatch) return { isCorrect: true, unrecognized: false }
+  }
+
+  // 学生是键值叙述、参考是裸数字列表（最常见："3, 0"）
+  if (studentKvValues.length >= 2 && refKvValues.length === 0) {
+    const refSegments = splitAnswers(referenceAnswer)
+    if (refSegments.length === studentKvValues.length) {
+      let allMatch = true
+      for (let i = 0; i < studentKvValues.length; i++) {
+        const sV = studentKvValues[i]
+        const rV = refSegments[i].trim()
+        const ns = normalizeAnswer(sV)
+        const nr = normalizeAnswer(rV)
+        if (ns !== nr && !isNumericEquivalent(ns, nr) && !isMathEquivalent(sV, rV)) {
+          allMatch = false
+          break
+        }
+      }
+      if (allMatch) return { isCorrect: true, unrecognized: false }
+    }
+  }
+
   const studentParts = splitAnswers(studentAnswer)
   const refParts = splitAnswers(referenceAnswer)
 
@@ -801,6 +874,18 @@ export function judgeAnswer(studentAnswer, referenceAnswer, questionType) {
     if (allCorrect) return { isCorrect: true, unrecognized: false }
   }
 
+  // 多答案场景：学生用空格分隔、参考用 ; 或 , 分隔（如 "= <" vs "(1) =; (2) <"）。
+  // splitBySpace 拆参考会把 "(1) =; (2) <" 拆成 5 段，与学生 2 段对不上；
+  // splitAnswers 拆学生空格答案只出 1 段，与参考 2 段也对不上——两边互换才能命中。
+  if (studentSpaceParts.length > 1 && refParts.length > 1 &&
+      studentSpaceParts.length === refParts.length) {
+    const allCorrect = studentSpaceParts.every((sp, i) => {
+      const rp = refParts[i]
+      return normalizeAndCompare(sp, rp) || extractAndCompare(sp, rp)
+    })
+    if (allCorrect) return { isCorrect: true, unrecognized: false }
+  }
+
   // 多答案场景：一侧用"和/与/及"连接（"5√3 和 (5√6)/2" vs "5√3, (5/2)√6"）。
   // 只用 normalizeAndCompare 逐项比，不接 extractAndCompare 的数字集合兜底——
   // 切分本身已经放宽了，再叠一层宽松兜底会把答错的题判对。
@@ -817,7 +902,13 @@ export function judgeAnswer(studentAnswer, referenceAnswer, questionType) {
   // 仅收窄到最后一个 "=" 右侧；收窄后为空时退回原串，避免误伤。
   // 2026-09-01 用户截图：题#11 学生"代入得 -1/4 = a, ∴函数表达式为 y = -1/4 x²"
   // 与参考"a = -1/4, y = -1/4 x²" 收窄到同段 "-1/4 x²" 才能字面相等判对。
-  const narrowedStudent = narrowToFinalAnswer(studentAnswer)
+  //
+  // 键值叙述保护：学生答案是"列点作答"形态（"当x=0时, y=3; 当x=-1时, y=0"）
+  // 时不要收窄，会把所有点压到最后 `=` 之后那个值，与参考答案按 "," 取末段
+  // 偶然相等造成假判对（如 y=4 vs 3, 0 → 都收窄到 "0" → 字面相等判对）。
+  // kv bridge 已经在 splitAnswers 之前尝试匹配过，未命中说明答错，直接判错更安全。
+  const isKvNarrative = studentKvValues.length >= 2
+  const narrowedStudent = isKvNarrative ? studentAnswer : narrowToFinalAnswer(studentAnswer)
   const narrowedRef = narrowToFinalAnswer(referenceAnswer) || referenceAnswer
   const normStudent = normalizeAnswer(narrowedStudent)
   const normRef = normalizeAnswer(narrowedRef)
