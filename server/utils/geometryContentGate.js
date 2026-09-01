@@ -186,13 +186,31 @@ export function validateStructureAgainstContent(structure, content, options) {
   }
 
   // ── 硬规则 3：点字母凭空出现（题干/选项完全没提的点） ──
+  // 端点对端豁免：模型画了某个字母 P，且 P 在某条 segment 的某一端，
+  // 该 segment 的另一端是题干/选项已引用的字母 → P 作为"必然端点对端"豁免。
+  //   例：「传送带 + A + B」+ 图上 A-B-C，segment B-C 中 B 已引用 → C 豁免。
+  //   例：「线段 AB 上取点 C」+ 图上 A-B-C，A/B 已引用 → C 豁免。
+  // 不豁免：
+  //   - 孤立字母点（不在任何 segment 上）— 模型幻觉字母
+  //   - 对角线 AC 两端都在题干/选项里的 case — 硬规则 3 本就放过，硬规则 2 拦
+  //   - 模型标了 ∠1 → A1 这类伪字母 — 既不在 refLetters 也不在任何 segment 邻接 refLetter
+  // refLetters 在 C 方案下空集（题干/选项完全没字母）时本规则按旧逻辑全拒；
+  // 这种纯图题罕见，且原代码也是同样处理，行为不变。
   const refLetters = new Set(refPts)
   for (const letters of extractLetterRuns(allText)) {
     letters.forEach(l => refLetters.add(l))
   }
+  const exemptByAdjacency = new Set()
+  for (const seg of drawnSegs) {
+    const [a, b] = seg.split('|')
+    const aBare = a.replace(/′/g, '')
+    const bBare = b.replace(/′/g, '')
+    if (refLetters.has(aBare) && !refLetters.has(bBare)) exemptByAdjacency.add(bBare)
+    if (refLetters.has(bBare) && !refLetters.has(aBare)) exemptByAdjacency.add(aBare)
+  }
   for (const p of pts) {
     const bare = p.replace(/′/g, '')
-    if (!refLetters.has(bare)) {
+    if (!refLetters.has(bare) && !exemptByAdjacency.has(bare)) {
       reasons.push(`重绘图上的点 ${p} 在题干中未出现`)
     }
   }
