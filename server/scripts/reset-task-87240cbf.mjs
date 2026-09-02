@@ -13,6 +13,7 @@ import dotenv from 'dotenv'
 import { fileURLToPath } from 'url'
 import { dirname, join } from 'path'
 import pg from 'pg'
+const { Pool } = pg
 
 const __dirname = dirname(fileURLToPath(import.meta.url))
 dotenv.config({ path: join(__dirname, '../.env') })
@@ -100,8 +101,8 @@ async function main() {
          last_error = NULL,
          result = jsonb_set(
            COALESCE(result, '{}'::jsonb),
-           '{previousError}',
-           to_jsonb($2)
+           ARRAY['previousError']::text[],
+           to_jsonb($2::text)
          ),
          updated_at = NOW()
      WHERE id = $1`,
