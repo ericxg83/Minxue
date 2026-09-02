@@ -1328,7 +1328,9 @@ app.get('/api/students', async (req, res) => {
               (SELECT MAX(t.created_at) FROM ${TABLES.TASKS} t WHERE t.student_id = s.id AND t.deleted_at IS NULL) AS last_task_at,
               (SELECT MAX(w.last_wrong_at) FROM ${TABLES.WRONG_QUESTIONS} w WHERE w.student_id = s.id) AS last_wrong_at,
               (SELECT COUNT(*)::int FROM ${TABLES.WRONG_QUESTIONS} w WHERE w.student_id = s.id) AS total_error_count,
-              (SELECT COUNT(*)::int FROM ${TABLES.WRONG_QUESTIONS} w WHERE w.student_id = s.id AND w.last_wrong_at >= NOW() - INTERVAL '7 days') AS recent_wrong_count
+              (SELECT COUNT(*)::int FROM ${TABLES.WRONG_QUESTIONS} w WHERE w.student_id = s.id AND w.last_wrong_at >= NOW() - INTERVAL '7 days') AS recent_wrong_count,
+              (SELECT COALESCE(SUM(w.practice_count), 0)::int FROM ${TABLES.WRONG_QUESTIONS} w WHERE w.student_id = s.id) AS practice_count,
+              (SELECT COUNT(*)::int FROM ${TABLES.WRONG_QUESTIONS} w WHERE w.student_id = s.id AND COALESCE(w.lifecycle_status, 'new') = 'mastered') AS mastered_count
        FROM ${TABLES.STUDENTS} s
        ORDER BY s.created_at DESC`
     )

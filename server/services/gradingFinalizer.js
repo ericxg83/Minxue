@@ -203,10 +203,13 @@ export const finalizeRejudgeResult = async ({
       wrongQuestionAdded = added.length > 0
     }
   } else if (isCorrect === true) {
+    // rejudge 答对 = 误判（AI 判错但学生其实答对了），从错题本移除整行
+    // 与 worksheetPageService.syncWrongQuestions 行为一致。
+    // 真正的「已掌握」走 finalizeGeneratedExamResults 状态机（lifecycle_status='mastered'），
+    // 不是 PC rejudge 路径。
     await query(
-      `UPDATE ${TABLES.WRONG_QUESTIONS}
-       SET status = 'mastered', mastered_at = NOW(), updated_at = NOW()
-       WHERE student_id = $1 AND question_id = $2 AND status != 'mastered'`,
+      `DELETE FROM ${TABLES.WRONG_QUESTIONS}
+       WHERE student_id = $1 AND question_id = $2`,
       [question.student_id, question.id]
     )
   }
@@ -357,16 +360,17 @@ export const finalizeGeneratedExamResults = async ({
 
   if (insertedRows.length > 0) {
     const placeholders = insertedRows.map((_, index) => {
-      const base = index * 4
-      return `($1, $${base + 2}, $${base + 3}, $${base + 4}, $${base + 5}, NOW())`
+      const base = index * 5
+      return `($1, $${base + 2}, $${base + 3}, $${base + 4}, $${base + 5}, $${base + 6}, NOW())`
     }).join(', ')
     const params = [studentId]
     for (const row of insertedRows) {
-      params.push(row.questionId, row.status, row.lifecycleStatus, row.errorCount)
+      // practice_count 起始为 1：本次是第一次重练；UPDATE 路径后续每次 +1
+      params.push(row.questionId, row.status, row.lifecycleStatus, row.errorCount, 1)
     }
     await query(
       `INSERT INTO ${TABLES.WRONG_QUESTIONS}
-       (student_id, question_id, status, lifecycle_status, error_count, created_at)
+       (student_id, question_id, status, lifecycle_status, error_count, practice_count, created_at)
        VALUES ${placeholders}
        ON CONFLICT DO NOTHING`,
       params

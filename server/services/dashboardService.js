@@ -19,7 +19,7 @@ export async function getAttentionStudents(limit = 5) {
       s.id, s.name, s.grade,
       COALESCE(km.weak_count, 0)::int AS weak_count,
       COALESCE(wq.repeat_count, 0)::int AS repeat_count,
-      COALESCE((SELECT SUM(error_count)::int FROM ${TABLES.WRONG_QUESTIONS} WHERE student_id = s.id), 0) AS total_error_count,
+      COALESCE((SELECT COUNT(*)::int FROM ${TABLES.WRONG_QUESTIONS} WHERE student_id = s.id), 0) AS total_error_count,
       COALESCE((SELECT COUNT(*)::int FROM ${TABLES.WRONG_QUESTIONS} WHERE student_id = s.id AND last_wrong_at >= NOW() - INTERVAL '7 days'), 0) AS recent_wrong_count
     FROM ${TABLES.STUDENTS} s
     LEFT JOIN (
