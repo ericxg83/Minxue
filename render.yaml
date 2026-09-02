@@ -5,7 +5,7 @@ services:
     plan: free
     env: node
     nodeVersion: "22"
-    buildCommand: npm install
+    buildCommand: npm ci
     startCommand: node index.js
     envVars:
       - key: NODE_ENV
