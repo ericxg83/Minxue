@@ -133,6 +133,12 @@ function AnswerCell({
     margin: '-4px -6px'
   } : null
 
+  const textStyle = {
+    fontSize: 'var(--fs-16)', fontWeight: 600, lineHeight: 1.45,
+    color: warn ? 'var(--warning)' : (value ? COLORS.text : 'var(--text-tertiary)'),
+    overflowWrap: 'anywhere', textAlign: 'left'
+  }
+
   return (
     <div style={{ flex: 1, minWidth: 0, ...dimStyle }}>
       <div style={{
