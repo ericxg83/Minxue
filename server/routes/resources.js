@@ -14,10 +14,11 @@ import { findDirtyAnswers } from '../services/judgeService.js'
 const router = Router()
 
 // 资源列表
+// v4 增 status 过滤：移动端 ExamResourcePicker 只看 published 资源
 router.get('/', async (req, res) => {
   try {
-    const { type, subject } = req.query
-    const resources = await getAllResources({ type, subject })
+    const { type, subject, status } = req.query
+    const resources = await getAllResources({ type, subject, status })
     res.json({ success: true, resources })
   } catch (e) {
     res.status(500).json({ error: e.message })

@@ -1302,7 +1302,7 @@ export const createResource = async ({ name, type, subject, grade, examDate }) =
   return rows[0]
 }
 
-export const getAllResources = async ({ type, subject } = {}) => {
+export const getAllResources = async ({ type, subject, status } = {}) => {
   const conditions = []
   const params = []
   let idx = 1
@@ -1313,6 +1313,10 @@ export const getAllResources = async ({ type, subject } = {}) => {
   if (subject) {
     conditions.push(`subject = $${idx++}`)
     params.push(subject)
+  }
+  if (status) {
+    conditions.push(`status = $${idx++}`)
+    params.push(status)
   }
   const where = conditions.length > 0 ? `WHERE ${conditions.join(' AND ')}` : ''
   const { rows } = await query(

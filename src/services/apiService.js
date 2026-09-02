@@ -790,10 +790,11 @@ export const upsertStudentWorksheetSetting = async (studentId, subject, workshee
 
 // ── 统一资源 API ──
 
-export const getResources = async ({ type, subject } = {}) => {
+export const getResources = async ({ type, subject, status } = {}) => {
   const params = new URLSearchParams()
   if (type) params.set('type', type)
   if (subject) params.set('subject', subject)
+  if (status) params.set('status', status)
   const qs = params.toString()
   const data = await apiRequest(`/resources${qs ? '?' + qs : ''}`)
   return data.resources || []

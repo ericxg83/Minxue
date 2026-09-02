@@ -9,7 +9,23 @@
     </div>
 
     <el-table :data="exams" v-loading="loading" stripe style="width: 100%">
-      <el-table-column prop="name" label="名称" min-width="180" />
+      <el-table-column label="名称" min-width="220">
+        <template #default="{ row }">
+          <div class="name-cell">
+            <span class="name-cell__text">{{ row.name }}</span>
+            <el-button
+              size="small"
+              link
+              type="primary"
+              class="name-cell__edit"
+              @click="openRename(row)"
+              aria-label="重命名"
+            >
+              <el-icon><Edit /></el-icon>
+            </el-button>
+          </div>
+        </template>
+      </el-table-column>
       <el-table-column prop="grade" label="年级" width="100" />
       <el-table-column prop="subject" label="科目" width="100" />
       <el-table-column label="答案数" width="90">
@@ -32,8 +48,11 @@
       <el-table-column label="创建时间" width="160">
         <template #default="{ row }">{{ formatDate(row.created_at) }}</template>
       </el-table-column>
-      <el-table-column label="操作" width="280" fixed="right">
+      <el-table-column label="操作" width="340" fixed="right">
         <template #default="{ row }">
+          <el-button size="small" @click="handleReReview(row)" :disabled="row.answer_count === 0">
+            复核
+          </el-button>
           <el-button size="small" @click="handleReview(row)" :disabled="row.answer_count === 0">
             审核答案
           </el-button>
@@ -72,14 +91,56 @@
         <el-button type="primary" @click="handleCreate" :loading="creating">创建</el-button>
       </template>
     </el-dialog>
+
+    <el-dialog v-model="showRenameDialog" title="重命名试卷答案库" width="420px">
+      <el-form :model="renameForm" label-width="60px">
+        <el-form-item label="名称">
+          <WorkbenchInput v-model="renameForm.name" placeholder="新名称" aria-label="试卷名称" @keydown.enter="handleRename" />
+        </el-form-item>
+      </el-form>
+      <template #footer>
+        <el-button @click="showRenameDialog = false">取消</el-button>
+        <el-button type="primary" @click="handleRename" :loading="renaming">保存</el-button>
+      </template>
+    </el-dialog>
+
+    <el-dialog v-model="showTaskPicker" title="选择批改任务" width="520px">
+      <div class="task-picker-tip">
+        该资源关联了多个批改任务。选择一份进入 PC 复核页；改题后将通过 <code>syncDraftAnswerBank</code> 实时同步到本资源。
+      </div>
+      <div v-if="taskPickerLoading" class="task-picker-loading">加载中...</div>
+      <div v-else-if="taskPickerList.length === 0" class="task-picker-empty">
+        该资源暂无可用任务（可能被清理过）。可以删除此资源后重新批改。
+      </div>
+      <ul v-else class="task-picker-list">
+        <li
+          v-for="t in taskPickerList"
+          :key="t.id"
+          class="task-picker-item"
+          @click="enterTaskReview(t)"
+        >
+          <div class="task-picker-main">
+            <strong>{{ t.student_name || '未知学生' }}</strong>
+            <span class="task-picker-name">{{ t.original_name || '未命名' }}</span>
+          </div>
+          <div class="task-picker-meta">
+            <el-tag size="small" :type="t.status === 'reviewed' ? 'success' : 'warning'">
+              {{ t.status === 'reviewed' ? '已复核' : t.status === 'done' ? '已完成' : t.status }}
+            </el-tag>
+            <span>{{ formatDate(t.created_at) }}</span>
+          </div>
+        </li>
+      </ul>
+    </el-dialog>
   </div>
 </template>
 
 <script setup>
 import { ref, onMounted, computed } from 'vue'
 import { useRouter } from 'vue-router'
-import { Plus } from '@element-plus/icons-vue'
-import { getResources, createResource, deleteResource, updateResource } from '../../services/apiService.js'
+import { Edit, Plus } from '@element-plus/icons-vue'
+import { ElMessage } from 'element-plus'
+import { getResources, getTasksByResource, createResource, deleteResource, updateResource } from '../../services/apiService.js'
 import WorkbenchInput from '../components/ui/WorkbenchInput.vue'
 import WorkbenchSelect from '../components/ui/WorkbenchSelect.vue'
 
@@ -89,6 +150,12 @@ const loading = ref(false)
 const creating = ref(false)
 const showCreateDialog = ref(false)
 const createForm = ref({ name: '', subject: '', grade: '' })
+const showRenameDialog = ref(false)
+const renameForm = ref({ id: null, name: '' })
+const renaming = ref(false)
+const showTaskPicker = ref(false)
+const taskPickerLoading = ref(false)
+const taskPickerList = ref([])
 const subjectOptions = [
   { label: '数学', value: '数学' },
   { label: '英语', value: '英语' },
@@ -119,8 +186,67 @@ const handleCreate = async () => {
   creating.value = false
 }
 
+const openRename = (row) => {
+  renameForm.value = { id: row.id, name: row.name || '' }
+  showRenameDialog.value = true
+}
+
+const handleRename = async () => {
+  const newName = (renameForm.value.name || '').trim()
+  if (!newName) return
+  renaming.value = true
+  try {
+    const updated = await updateResource(renameForm.value.id, { name: newName })
+    const idx = exams.value.findIndex(e => e.id === renameForm.value.id)
+    if (idx >= 0 && updated) {
+      exams.value[idx] = { ...exams.value[idx], ...updated, name: updated.name || newName }
+    }
+    showRenameDialog.value = false
+    ElMessage.success('已重命名')
+  } catch (e) {
+    console.error('重命名失败:', e)
+    ElMessage.error(e.message || '重命名失败')
+  }
+  renaming.value = false
+}
+
 const handleReview = (row) => {
   router.push(`/paper/${row.id}/review`)
+}
+
+// P1-A：进入 task 复核页（v4：老师改题 → syncDraftAnswerBank 实时同步资源答案）
+// 单 task 直接跳；多 task 弹选择器让老师选；0 task 提示清理资源
+const handleReReview = async (row) => {
+  taskPickerLoading.value = true
+  showTaskPicker.value = true
+  taskPickerList.value = []
+  try {
+    const res = await getTasksByResource(row.id)
+    const tasks = (res && res.tasks) || []
+    if (tasks.length === 0) {
+      taskPickerList.value = []
+      return
+    }
+    if (tasks.length === 1) {
+      enterTaskReview(tasks[0])
+      return
+    }
+    taskPickerList.value = tasks
+  } catch (e) {
+    console.error('加载任务列表失败:', e)
+    ElMessage.error('加载任务列表失败')
+    showTaskPicker.value = false
+  } finally {
+    taskPickerLoading.value = false
+  }
+}
+
+const enterTaskReview = (task) => {
+  showTaskPicker.value = false
+  router.push({
+    path: '/grade/task',
+    query: { studentId: task.student_id, taskId: task.id, source: 'homework' }
+  })
 }
 
 const handleToggleStatus = async (row) => {
@@ -207,5 +333,105 @@ onMounted(loadExams)
 
 .el-empty {
   margin-top: 80px;
+}
+
+.name-cell {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+}
+
+.name-cell__text {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--wb-text);
+}
+
+.name-cell__edit {
+  flex-shrink: 0;
+  opacity: 0.55;
+  transition: opacity 0.15s;
+}
+
+.name-cell:hover .name-cell__edit {
+  opacity: 1;
+}
+
+.task-picker-tip {
+  font-size: 13px;
+  color: var(--wb-text-secondary);
+  line-height: 1.6;
+  margin-bottom: 12px;
+  padding: 10px 12px;
+  background: var(--wb-bg-hover);
+  border-left: 3px solid var(--wb-primary);
+  border-radius: var(--wb-radius-xs);
+}
+.task-picker-tip code {
+  background: rgba(0, 0, 0, 0.05);
+  padding: 1px 4px;
+  border-radius: 3px;
+  font-size: 12px;
+}
+.task-picker-loading,
+.task-picker-empty {
+  text-align: center;
+  color: var(--wb-text-tertiary);
+  font-size: 13px;
+  padding: 30px 0;
+}
+.task-picker-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  max-height: 50vh;
+  overflow-y: auto;
+}
+.task-picker-item {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 12px 14px;
+  border: 1px solid var(--wb-border);
+  border-radius: var(--wb-radius-xs);
+  margin-bottom: 8px;
+  background: var(--wb-bg-card);
+  cursor: pointer;
+  transition: all 0.15s;
+}
+.task-picker-item:hover {
+  border-color: var(--wb-primary);
+  background: var(--wb-primary-mist);
+}
+.task-picker-main {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+  flex: 1;
+}
+.task-picker-main strong {
+  font-size: 14px;
+  color: var(--wb-text);
+}
+.task-picker-name {
+  font-size: 12px;
+  color: var(--wb-text-tertiary);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.task-picker-meta {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 12px;
+  color: var(--wb-text-tertiary);
+  flex-shrink: 0;
 }
 </style>

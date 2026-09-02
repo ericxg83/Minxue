@@ -22,6 +22,16 @@
         <el-progress :percentage="reviewProgressPercent" :stroke-width="6" :show-text="false" status="success" style="width: 120px" />
         <span class="review-progress-percent">{{ reviewProgressPercent }}%</span>
       </div>
+      <div class="review-context-actions">
+        <el-tag v-if="archiveState === 'published'" type="success" size="small" effect="plain">
+          <el-icon><Check /></el-icon>
+          <span style="margin-left: 4px">已发布到答案库</span>
+        </el-tag>
+        <el-tag v-else-if="archiveState === 'draft'" type="warning" size="small" effect="plain">
+          <el-icon><Document /></el-icon>
+          <span style="margin-left: 4px">草稿（完成复核后自动发布）</span>
+        </el-tag>
+      </div>
     </div>
     <!-- 全部复核完成（空状态） -->
     <div v-if="store.reviewAllDone && store.currentStudent" class="all-done-state">
@@ -48,9 +58,9 @@
 </template>
 
 <script setup>
-import { computed, onMounted, onUnmounted } from 'vue'
+import { computed, onMounted, onUnmounted, ref } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
-import { CircleCheck } from '@element-plus/icons-vue'
+import { Check, CircleCheck, Document } from '@element-plus/icons-vue'
 import { useReviewStore } from '../../stores/reviewStore'
 import ReviewTopBar from './ReviewTopBar.vue'
 import QuestionNavPanel from './QuestionNavPanel.vue'
@@ -67,12 +77,24 @@ const route = useRoute()
 const router = useRouter()
 const reviewProgressPercent = computed(() => {
   const total = Number(store.reviewProgress.total) || 0
-  const confirmed = Number(store.reviewProgress.confirmed) || 0
-  return total > 0 ? Math.min(100, Math.round((confirmed / total) * 100)) : 0
+  const count = Number(store.reviewProgress.confirmed) || 0
+  return total > 0 ? Math.min(100, Math.round((count / total) * 100)) : 0
 })
 const goToTodo = () => router.push('/todo')
 const goToWrongBook = () => router.push({ path: '/wrongbook', query: { studentId: store.currentStudent?.id } })
 const goToStudents = () => router.push('/students')
+
+// v4 答案库状态展示：
+//   hidden    → 非 exam 任务，不展示
+//   draft     → exam 任务且 task.resource_id 已建（worker 已建草稿），但 task.status 还未到 reviewed
+//   published → task.status === 'reviewed' → 后端已自动推 published
+const archiveState = computed(() => {
+  const t = store.currentTask
+  if (!t) return 'hidden'
+  if (t.task_type !== 'exam') return 'hidden'
+  if (!t.resource_id) return 'hidden'
+  return t.status === 'reviewed' ? 'published' : 'draft'
+})
 
 // ── 初始化：加载数据 ──
 onMounted(async () => {
@@ -236,6 +258,8 @@ const handleQuickReview = async (result) => {
 .review-progress-summary { display: flex; align-items: center; gap: 10px; color: var(--wb-text-secondary); font-size: 12px; }
 .review-progress-percent { color: var(--wb-text); font-weight: 650; font-variant-numeric: tabular-nums; }
 .review-progress-alert { padding-left: 10px; border-left: 1px solid var(--wb-border); color: var(--wb-warning); font-size: 12px; }
+.review-context-actions { display: flex; align-items: center; gap: 8px; margin-left: 12px; flex-shrink: 0; }
+.review-context-actions :deep(.el-button) { display: inline-flex; align-items: center; gap: 4px; }
 .three-panel { min-height: 0; }
 @media (max-width: 1100px) { .review-shortcuts { display: none; } .review-identity-bar { padding: 0 14px; } .review-context-bar { padding: 0 14px; } }
 @media (max-width: 720px) { .review-context-bar { align-items: flex-start; flex-direction: column; gap: 8px; padding: 10px 14px; } .review-progress-summary { width: 100%; } }

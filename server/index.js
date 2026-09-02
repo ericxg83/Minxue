@@ -45,6 +45,7 @@ import { migrateAiAnswerRiskReason } from './migrations/050_add_ai_answer_risk_r
 import { migrateTaskContentHash } from './migrations/051_add_task_content_hash.js'
 import { migrateWrongQuestionsUniqueIndex } from './migrations/052_dedupe_wrong_questions_unique_index.js'
 import { migrateAiSelfCheck } from './migrations/053_ai_self_check.js'
+import { migrateTaskTypeEnum } from './migrations/054_task_type_enum.js'
 import { scheduleNightParse, scheduleWeeklyDiagnosis } from './services/nightParseService.js'
 
 const __dirname = dirname(fileURLToPath(import.meta.url))
@@ -203,8 +204,12 @@ app.post('/api/tasks/upload', upload.array('files', 20), async (req, res) => {
   try {
     const { studentId, taskType, generatedExamId, worksheetId, subject, resourceId, taskName } = req.body
     console.log(`[Upload] 📥 req.body: studentId=${studentId} taskType=${taskType} worksheetId=${worksheetId} (len=${worksheetId?.length}) subject=${subject} resourceId=${resourceId} generatedExamId=${generatedExamId} taskName=${taskName || '(由文件名生成)'}`)
+    // 业务类型枚举：'general' / 'wrong_retry' / 'retry_paper' / 'workbook' / 'exam' / 'homework'
+    // 移动端 useUploadFlow.js 实际上传 exam/homework，原样落库；其他类型归一到 'general'。
     const normalizedTaskType = taskType === 'wrong_retry' ? 'wrong_retry'
       : taskType === 'workbook' ? 'workbook'
+      : taskType === 'exam' ? 'exam'
+      : taskType === 'homework' ? 'homework'
       : 'general'
     const normalizedGeneratedExamId = generatedExamId && /^[0-9a-f-]{36}$/i.test(generatedExamId) ? generatedExamId : null
     const normalizedResourceId = resourceId && /^[0-9a-f-]{36}$/i.test(resourceId) ? resourceId : null
@@ -780,6 +785,26 @@ app.put('/api/tasks/:taskId', async (req, res) => {
       [status, taskId]
     )
     if (rows.length === 0) return res.status(404).json({ error: '任务不存在' })
+
+    // v4 自动发布：老师"完成复核"（status→reviewed））→ 草稿资源自动升 published。
+    // 语义：老师点完成复核 = 整份 task 已被审过 → 资源可信度升 teacher_verified。
+    // 即便某些单题仍是 ai_draft（老师没改 AI 答案），整体已可信。
+    if (status === 'reviewed') {
+      try {
+        await query(
+          `UPDATE ${TABLES.RESOURCES}
+           SET status = 'published', answer_status = 'teacher_verified', updated_at = NOW()
+           WHERE id = (SELECT resource_id FROM ${TABLES.TASKS} WHERE id = $1)
+             AND resource_type = 'exam'
+             AND status = 'draft'`,
+          [taskId]
+        )
+        console.log(`✅ [Auto-publish] 老师完成复核 task=${taskId.slice(0, 8)} → 关联草稿资源已升 published`)
+      } catch (publishErr) {
+        console.error('[Auto-publish] 失败:', publishErr.message)
+      }
+    }
+
     res.json({ success: true, task: rows[0] })
   } catch (error) {
     console.error('更新任务失败:', error)
@@ -982,13 +1007,16 @@ app.delete('/api/tasks/:taskId', async (req, res) => {
 })
 
 // Save task answers as exam answer key (存档为答案库)
+// v4 适配：老师"完成复核"已自动 publish（见 PUT /api/tasks/:taskId）。
+// 此接口保留给 P1 "再次复核修正" 场景：老师从 PC 答案库列表点"复核"进入 task 复核页，
+// 改题后走 PUT /api/questions/:id + syncDraftAnswerBank 升级答案；资源已 published 状态下
+// 此接口仍可调用做"重命名 + 整体再升级"（v2 矩阵复用）。
 app.post('/api/tasks/:taskId/save-as-answer-key', async (req, res) => {
   try {
     const { taskId } = req.params
     const { name, subject, grade } = req.body
     if (!name) return res.status(400).json({ error: '缺少资源名称' })
 
-    // 1. Fetch task
     const { rows: tasks } = await query(
       `SELECT * FROM ${TABLES.TASKS} WHERE id = $1`,
       [taskId]
@@ -998,17 +1026,22 @@ app.post('/api/tasks/:taskId/save-as-answer-key', async (req, res) => {
     if (task.status !== 'done' && task.status !== 'reviewed') {
       return res.status(400).json({ error: '任务状态必须是 done 或 reviewed' })
     }
+    if (task.task_type !== 'exam') {
+      return res.status(400).json({ error: '仅 exam 类型任务支持存档为答案库' })
+    }
 
-    // 2. Fetch questions from this task
+    // 拉题目（含 ai_answer 用于判断"是否被老师改过"）
     const { rows: questions } = await query(
-      `SELECT * FROM ${TABLES.QUESTIONS} WHERE task_id = $1 AND answer IS NOT NULL ORDER BY question_number ASC`,
+      `SELECT id, question_number, answer, ai_answer, student_answer, is_correct,
+              review_status, question_type, content, sub_no
+       FROM ${TABLES.QUESTIONS}
+       WHERE task_id = $1 AND answer IS NOT NULL
+       ORDER BY question_number ASC, sub_no ASC NULLS LAST`,
       [taskId]
     )
     if (questions.length === 0) return res.status(400).json({ error: '该任务没有题目答案数据' })
 
-    // P1 闸门：存档 = 把这份答案作为"全班共享答案源"授权盖章（teacher_verified）。
-    // 一旦脏答案（老师红笔批语、被截断的残值、空值）混进来，会去判每一个学生同类题，
-    // 误判成片。这里在盖章前拦一道：命中明显非答案的，直接拒绝并回题号，让老师先核对。
+    // P1 闸门
     const BAD_ANSWER = findDirtyAnswers(questions)
     if (BAD_ANSWER.length > 0) {
       return res.status(400).json({
@@ -1017,41 +1050,93 @@ app.post('/api/tasks/:taskId/save-as-answer-key', async (req, res) => {
       })
     }
 
-    // 3. Create resource
-    const resource = await createResource({
-      name,
-      type: 'exam',
-      subject: subject || task.subject || null,
-      grade: grade || null
-    })
+    // 复用 task.resource_id（worker 自动建的草稿）；为空则新建。
+    let resourceId = task.resource_id
+    if (!resourceId) {
+      const { rows: [created] } = await query(
+        `INSERT INTO resources (resource_type, name, subject, grade, answer_status, status)
+         VALUES ('exam', $1, $2, $3, 'teacher_verified', 'published') RETURNING id`,
+        [name, subject || task.subject || null, grade || null]
+      )
+      resourceId = created.id
+    } else {
+      await query(
+        `UPDATE resources SET name = $1, subject = COALESCE($2, subject), grade = COALESCE($3, grade),
+                              status = 'published', updated_at = NOW()
+         WHERE id = $4`,
+        [name, subject || task.subject || null, grade || null, resourceId]
+      )
+    }
 
-    // 4. Build answers from questions
-    const answers = questions.map(q => ({
-      question_no: q.question_number,
-      answer: q.answer || '',
-      answer_type: q.question_type || 'answer',
-      content: q.content || null,
-      section: null,
-      answer_status: 'teacher_verified',
-      source: 'teacher_approve'
-    }))
+    // v2 矩阵构造每题 answers
+    const answers = []
+    for (const q of questions) {
+      const teacherAnswer = String(q.answer || '').trim()
+      const aiAnswer = String(q.ai_answer || '').trim()
+      const isAnswerModified = teacherAnswer && teacherAnswer !== aiAnswer
+      const studentAnswer = String(q.student_answer || '').trim()
+      const reviewStatus = q.review_status
+      const isCorrect = q.is_correct
 
-    // 5. Save answers via replaceResourceAnswers (transactional)
-    await replaceResourceAnswers(resource.id, answers)
+      let nextAnswer = null
+      let nextStatus = 'ai_draft'
+      if (reviewStatus === 'excluded') {
+        nextStatus = 'excluded'
+        nextAnswer = teacherAnswer
+      } else if (reviewStatus === 'reviewed' && isCorrect === true) {
+        nextStatus = 'teacher_verified'
+        nextAnswer = studentAnswer
+          && studentAnswer !== 'null'
+          && studentAnswer !== '未作答'
+          && studentAnswer !== '此为主观题，无唯一标准答案'
+          ? studentAnswer
+          : teacherAnswer
+      } else if (reviewStatus === 'reviewed' && isCorrect === false) {
+        if (isAnswerModified) {
+          nextStatus = 'teacher_verified'
+          nextAnswer = teacherAnswer
+        } else {
+          continue  // 错题且答案未修 → 不入库
+        }
+      } else if (reviewStatus === 'reviewed' && (isCorrect === null || isCorrect === undefined)) {
+        nextStatus = 'ai_draft'
+        nextAnswer = teacherAnswer
+      } else {
+        nextStatus = 'ai_draft'
+        nextAnswer = teacherAnswer
+      }
+      if (!nextAnswer) continue
 
-    // 6. Update resource answer_count and status
+      answers.push({
+        question_no: q.question_number,
+        sub_no: q.sub_no || '',
+        answer: nextAnswer,
+        answer_type: q.question_type || 'answer',
+        content: q.content || null,
+        section: null,
+        answer_status: nextStatus,
+        source: 'teacher_approve'
+      })
+    }
+
+    await replaceResourceAnswers(resourceId, answers)
+
+    // 更新 resource 元信息
+    const teacherVerifiedCount = answers.filter(a => a.answer_status === 'teacher_verified').length
+    const finalAnswerStatus = teacherVerifiedCount > 0 ? 'teacher_verified' : 'ai_draft'
     await query(
-      `UPDATE ${TABLES.RESOURCES} SET answer_count = $2, answer_status = 'teacher_verified', status = 'published' WHERE id = $1`,
-      [resource.id, answers.length]
+      `UPDATE resources SET answer_count = $1, answer_status = $2, status = 'published', updated_at = NOW()
+       WHERE id = $3`,
+      [answers.length, finalAnswerStatus, resourceId]
     )
 
-    // 7. Update task resource_id
     await query(
-      `UPDATE ${TABLES.TASKS} SET resource_id = $2, updated_at = NOW() WHERE id = $1`,
-      [taskId, resource.id]
+      `UPDATE tasks SET resource_id = $1, updated_at = NOW() WHERE id = $2`,
+      [resourceId, taskId]
     )
 
-    res.json({ success: true, resource })
+    const { rows: [updatedResource] } = await query(`SELECT * FROM resources WHERE id = $1`, [resourceId])
+    res.json({ success: true, resource: updatedResource })
   } catch (error) {
     console.error('存档答案库失败:', error)
     res.status(500).json({ error: error.message })
@@ -1232,14 +1317,16 @@ app.get('/api/students', async (req, res) => {
       return res.json(studentsCache.data)
     }
     // 派生字段：last_task_at（最近作业）、last_wrong_at（最近错题）、
-// total_error_count（累计错题错误数）、recent_wrong_count（近 7 天新错题数）
+    // total_error_count（错题条数）、recent_wrong_count（近 7 天新错题数）
+    // total_error_count 用 COUNT(*)（错题条数），不是 SUM(error_count)：同题多次错只算 1 条，
+    // 与「已掌握 N 题 = COUNT(lifecycle_status='mastered')」口径一致（已掌握是子集而非叠加）。
     // 供 PC 工作台 Layer 3 「待关注学生」排序使用；学生无任务/无错题时对应字段为 NULL/0
     // 子查询版本：避免 LEFT JOIN tasks × wrong_questions 笛卡尔积
     const { rows } = await query(
       `SELECT s.id, s.name, s.grade, s.avatar, s.enrollment_status, s.paused_at, s.created_at,
               (SELECT MAX(t.created_at) FROM ${TABLES.TASKS} t WHERE t.student_id = s.id AND t.deleted_at IS NULL) AS last_task_at,
               (SELECT MAX(w.last_wrong_at) FROM ${TABLES.WRONG_QUESTIONS} w WHERE w.student_id = s.id) AS last_wrong_at,
-              (SELECT COALESCE(SUM(w.error_count), 0)::int FROM ${TABLES.WRONG_QUESTIONS} w WHERE w.student_id = s.id) AS total_error_count,
+              (SELECT COUNT(*)::int FROM ${TABLES.WRONG_QUESTIONS} w WHERE w.student_id = s.id) AS total_error_count,
               (SELECT COUNT(*)::int FROM ${TABLES.WRONG_QUESTIONS} w WHERE w.student_id = s.id AND w.last_wrong_at >= NOW() - INTERVAL '7 days') AS recent_wrong_count
        FROM ${TABLES.STUDENTS} s
        ORDER BY s.created_at DESC`
@@ -1340,35 +1427,88 @@ app.post('/api/questions', async (req, res) => {
   }
 })
 
-// 复核页改了标准答案 → 回写到批改时自动沉淀的那份草稿答案库。
-// 两张表(questions / resource_answers)此前无任何同步，导致同一个答案要在复核页和
-// 答案审核页各改一遍，且审核页看到的始终是批改瞬间的旧快照。
+// 复核页改题 → 回写到批改时自动沉淀的那份草稿答案库。
+// 触发源（PUT /api/questions/:id）：answer / student_answer / is_correct / review_status 任一变化。
+//
+// v2 矩阵决定每题在 resource_answers 中的最终态：
+//   review_status='excluded'                       → answer_status='excluded'（保留行，AnswerBank 管线跳过）
+//   review_status=NULL（未复核）                   → answer=q.answer，answer_status='ai_draft'
+//   review_status='reviewed' && is_correct=true    → answer=student_answer（若非占位）否则 q.answer；answer_status='teacher_verified'
+//   review_status='reviewed' && is_correct=false   → 若 q.answer 被老师改过（≠ ai_answer）则用 q.answer + teacher_verified；否则 DELETE 行（错题且答案未修不入库）
+//   review_status='reviewed' && is_correct=null    → answer=q.answer，answer_status='ai_draft'
+//
 // 三重限制确保只动"属于这份作业自己的草稿"：
-//   1. answer_status='ai_draft' —— 已审核(teacher/official)的是全班共享权威答案源，
-//      只能经答案审核页改动，不能被单个学生的复核顺手改写；
-//   2. source='ai_grading' —— 只认自动沉淀产生的行，不碰 PDF 解析/教师录入的答案；
-//   3. 该答案库没有被别的任务共用 —— 共用时它已是多人参照物，同样只能走审核页。
-async function syncDraftAnswerBank(question, newAnswer) {
+//   1. resource.status='draft' —— 已发布的资源不能被单次复核偷偷改写；
+//   2. resource_answers.source='auto_sediment' —— 不碰 PDF 解析/教师录入的答案；
+//   3. 该答案库没有被别的任务共用 —— 共用时它已是多人参照物，只能走 PC 答案库详情页改。
+async function syncDraftAnswerBank(question) {
   if (!question?.task_id || question.question_number == null) return
-  const { rowCount } = await query(
-    `UPDATE ${TABLES.RESOURCE_ANSWERS} ra
-     SET answer = $1, updated_at = NOW()
-     FROM ${TABLES.TASKS} t
-     WHERE t.id = $2
-       AND ra.resource_id = t.resource_id
-       AND ra.question_no = $3
-       AND (ra.sub_no IS NULL OR ra.sub_no = '')
-       AND ra.answer_status = 'ai_draft'
-       AND ra.source = 'ai_grading'
+  const { rows: matchRows } = await query(
+    `SELECT ra.id, ra.answer, ra.answer_status,
+            q.ai_answer, q.student_answer, q.is_correct, q.review_status
+     FROM ${TABLES.RESOURCE_ANSWERS} ra
+     JOIN ${TABLES.TASKS} t ON t.resource_id = ra.resource_id
+     JOIN ${TABLES.QUESTIONS} q ON q.task_id = t.id AND q.question_number = ra.question_no
+                              AND (ra.sub_no IS NULL OR ra.sub_no = '' OR ra.sub_no = q.sub_no)
+     WHERE t.id = $1
+       AND ra.question_no = $2
+       AND ra.answer_status IN ('ai_draft', 'excluded')
+       AND ra.source = 'auto_sediment'
+       AND EXISTS (SELECT 1 FROM ${TABLES.RESOURCES} r WHERE r.id = ra.resource_id AND r.status = 'draft')
        AND NOT EXISTS (
          SELECT 1 FROM ${TABLES.TASKS} t2
-         WHERE t2.resource_id = t.resource_id AND t2.id <> t.id AND t2.deleted_at IS NULL
-       )`,
-    [newAnswer, question.task_id, question.question_number]
+         WHERE t2.resource_id = ra.resource_id AND t2.id <> t.id AND t2.deleted_at IS NULL
+       )
+     LIMIT 1`,
+    [question.task_id, question.question_number]
   )
-  if (rowCount > 0) {
-    console.log(`[草稿答案库同步] task=${question.task_id.slice(0, 8)} 第${question.question_number}题 → "${newAnswer}"`)
+  if (matchRows.length === 0) return
+  const row = matchRows[0]
+  const aiAnswer = String(row.ai_answer || '').trim()
+  const teacherAnswer = String(question.answer || '').trim()
+  const studentAnswer = String(question.student_answer || '').trim()
+  const isAnswerModified = teacherAnswer && teacherAnswer !== aiAnswer
+  const reviewStatus = question.review_status
+  const isCorrect = question.is_correct
+
+  // 决策
+  let nextAnswer = null
+  let nextStatus = 'ai_draft'
+
+  if (reviewStatus === 'excluded') {
+    nextStatus = 'excluded'
+    nextAnswer = teacherAnswer || row.answer || null
+  } else if (reviewStatus === 'reviewed' && isCorrect === true) {
+    nextStatus = 'teacher_verified'
+    nextAnswer = studentAnswer && studentAnswer !== 'null' && studentAnswer !== '未作答' && studentAnswer !== '此为主观题，无唯一标准答案'
+      ? studentAnswer
+      : teacherAnswer || row.answer
+  } else if (reviewStatus === 'reviewed' && isCorrect === false) {
+    if (isAnswerModified) {
+      nextStatus = 'teacher_verified'
+      nextAnswer = teacherAnswer
+    } else {
+      // 错题且答案未修 → 不入答案库
+      await query(`DELETE FROM ${TABLES.RESOURCE_ANSWERS} WHERE id = $1`, [row.id])
+      console.log(`[草稿答案库同步] task=${question.task_id.slice(0, 8)} 第${question.question_number}题 → 删除（错题且答案未修）`)
+      return
+    }
+  } else if (reviewStatus === 'reviewed' && (isCorrect === null || isCorrect === undefined)) {
+    nextStatus = 'ai_draft'
+    nextAnswer = teacherAnswer || row.answer
+  } else {
+    // review_status=NULL（未复核）→ 维持 ai_draft；answer 取最新 q.answer（已被 syncDraftAnswerBank 写过）
+    nextStatus = 'ai_draft'
+    nextAnswer = teacherAnswer || row.answer
   }
+
+  await query(
+    `UPDATE ${TABLES.RESOURCE_ANSWERS}
+     SET answer = $1, answer_status = $2, updated_at = NOW()
+     WHERE id = $3`,
+    [nextAnswer, nextStatus, row.id]
+  )
+  console.log(`[草稿答案库同步] task=${question.task_id.slice(0, 8)} 第${question.question_number}题 → status=${nextStatus}`)
 }
 
 app.put('/api/questions/:id', async (req, res) => {
@@ -1457,9 +1597,13 @@ app.put('/api/questions/:id', async (req, res) => {
       }
     }
 
-    // 标准答案被改动时，同步回写自动沉淀的草稿答案库（不阻塞响应）
-    if ('answer' in req.body && answer != null && String(answer).trim()) {
-      syncDraftAnswerBank(updatedQuestion, String(answer).trim())
+    // 复核页改题 → 同步回写自动沉淀的草稿答案库（不阻塞响应）
+    // v4：监听 answer / student_answer / is_correct / review_status 任一变化
+    // 任一触发都会让 syncDraftAnswerBank 按 v2 矩阵重算该题的 answer_status
+    const triggeredByAnswerChange = 'answer' in req.body && answer != null && String(answer).trim()
+    const triggeredByStudentAnswerChange = req.body.student_answer !== undefined && String(req.body.student_answer || '').trim()
+    if (triggeredByAnswerChange || triggeredByStudentAnswerChange || hasIsCorrect || hasReviewStatus) {
+      syncDraftAnswerBank(updatedQuestion)
         .catch(e => console.error('[草稿答案库同步] 失败:', e.message))
     }
 
@@ -2848,7 +2992,13 @@ app.post('/api/admin/data-cleanup', async (req, res) => {
 app.get('/api/resources/exam-papers', async (req, res) => {
   try {
     const { subject } = req.query
-    const conditions = ["resource_type = 'exam'", "answer_status IN ('teacher_verified', 'official_verified')"]
+    // v4：必须 status='published' 才能被其他任务复用判题（仅'已发布'才被其他学生答案库管线用）。
+    // 草稿资源（status='draft'，老师还没完成复核）不应该被选择器列出。
+    const conditions = [
+      "resource_type = 'exam'",
+      "status = 'published'",
+      "answer_status IN ('teacher_verified', 'official_verified')"
+    ]
     const params = []
     let idx = 1
     if (subject) {
@@ -2968,6 +3118,7 @@ if (process.argv[1] === __filename || process.argv[1]?.endsWith('server/index.js
       await migrateAiAnswerRiskReason()
       await migrateTaskContentHash()
       await migrateWrongQuestionsUniqueIndex()
+      await migrateTaskTypeEnum()
       await migrateAiSelfCheck()
     } catch (err) {
       console.error('数据库迁移失败:', err.message)

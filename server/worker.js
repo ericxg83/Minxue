@@ -4197,6 +4197,13 @@ const processAnswerBankGrading = async (job) => {
     // 查询资源信息，确认答案状态
     const resource = await getResourceById(resourceId)
     if (!resource) return fail('资源不存在')
+    // v4：草稿资源（status='draft'）不能被其他任务复用判题，必须 published 才走 AnswerBank。
+    // answer_status 仅作辅助判定（兜底）。
+    if (resource.status !== 'published') {
+      console.warn(`⚠️ [AnswerBank] 资源未发布 (status=${resource.status})，降级为 general 管线`)
+      job.data.resourceId = null
+      return processTask(job)
+    }
     if (resource.answer_status === 'none' || resource.answer_status === 'ai_draft') {
       console.warn(`⚠️ [AnswerBank] 资源答案未审核 (${resource.answer_status})，降级为 general 管线`)
       // 清除 resource_id 后重新走 general 管线
@@ -5707,50 +5714,78 @@ await job.updateProgress(80)
       await job.updateProgress(90)
       await updateTaskStatus(taskId, TASK_STATUS.PROCESSING, { progress: 90 })
 
-      // ── 自动保存 AI 生成的答案到答案库 ──
-      try {
-        const savableQuestions = questions.filter(q =>
-          q.answer && q.answer.trim()
-          && q.answer !== '待人工补充'
-          && q.answer !== '此为主观题，无唯一标准答案'
-        )
-        if (savableQuestions.length > 0) {
-          const subject = job.data.subject || null
-          const resourceName = originalName || `试卷_${new Date().toISOString().slice(0, 10)}`
-          // 1. 创建 resource
-          const { rows: [newResource] } = await query(
-            `INSERT INTO resources (resource_type, name, subject, answer_status, status, answer_count)
-             VALUES ('exam', $1, $2, 'ai_draft', 'draft', $3) RETURNING *`,
-            [resourceName, subject, savableQuestions.length]
-          )
-          // 2. 逐题保存答案
-          let savedCount = 0
-          for (const q of savableQuestions) {
-            try {
-              await query(
-                `INSERT INTO resource_answers (resource_id, question_no, answer, answer_type, content, answer_status, source)
-                 VALUES ($1, $2, $3, $4, $5, 'ai_draft', 'ai_grading')`,
-                [newResource.id, q.question_number || 0, q.answer, q.question_type || 'choice', q.content || null]
-              )
-              savedCount++
-            } catch (e) {
-              console.error(`   ⚠️ [Auto-save] 保存第 ${q.question_number} 题答案失败:`, e.message)
-            }
-          }
-          // 3. 关联 task → resource
+      // ── 自动沉淀答案库（v4 策略）──
+// 仅在以下条件建草稿：
+//   1. task_type === 'exam'（晚托班试卷场景；workbook / homework / wrong_retry 不进）
+//   2. task.resource_id 为空（避免重复建）
+//   3. AI 至少识别到 1 道有 answer 的题
+//
+// 状态：
+//   resources.status='draft'（不可见，不被其他学生复用）
+//   resource_answers.answer_status='ai_draft'（暂存，等老师复核）
+//
+// 后续：
+//   - 老师 PC 复核改题 → syncDraftAnswerBank（server/index.js:1351）按 v2 矩阵升级
+//   - 老师点"完成复核" → server completeTaskReview 自动推 resources.status='published'
+//   - 已发布才被 PC 答案库列表、移动端 ExamResourcePicker、其他学生 AnswerBank 管线复用
+try {
+  const { rows: taskMetaRows } = await query(
+    `SELECT task_type, resource_id, subject FROM ${TABLES.TASKS} WHERE id = $1`,
+    [taskId]
+  )
+  const taskMeta = taskMetaRows[0] || {}
+  if (taskMeta.task_type !== 'exam') {
+    console.log(`ℹ️  [Auto-sediment] 跳过：task_type=${taskMeta.task_type}（仅 exam 触发）`)
+  } else if (taskMeta.resource_id) {
+    console.log(`ℹ️  [Auto-sediment] 跳过：已关联 resource_id=${taskMeta.resource_id.slice(0, 8)}`)
+  } else {
+    const sedimentable = questions.filter(q =>
+      q.answer && String(q.answer).trim()
+        && q.answer !== '待人工补充'
+        && q.answer !== '此为主观题，无唯一标准答案'
+    )
+    if (sedimentable.length === 0) {
+      console.log(`ℹ️  [Auto-sediment] 无可用答案，跳过沉淀`)
+    } else {
+      const subject = job.data.subject || taskMeta.subject || null
+      // 默认用 task.original_name（worker 已在 line 5373 清洗过卷面标题）；
+      // 老师可在 PC 答案库列表点重命名修正
+      const resourceName = originalName || `试卷_${new Date().toISOString().slice(0, 10)}`
+
+      const { rows: [newResource] } = await query(
+        `INSERT INTO resources (resource_type, name, subject, answer_status, status, answer_count)
+         VALUES ('exam', $1, $2, 'ai_draft', 'draft', $3) RETURNING *`,
+        [resourceName, subject, sedimentable.length]
+      )
+
+      // 全部打 ai_draft；answer 取 q.answer。
+      // 后续 syncDraftAnswerBank 会在老师复核时按 v2 矩阵升级（review_status='reviewed' + is_correct=true → student_answer，错误且未改 answer → 跳过，等等）。
+      let savedCount = 0
+      for (const q of sedimentable) {
+        try {
           await query(
-            `UPDATE tasks SET resource_id = $1 WHERE id = $2`,
-            [newResource.id, taskId]
+            `INSERT INTO resource_answers (resource_id, question_no, answer, answer_type, content, answer_status, source)
+             VALUES ($1, $2, $3, $4, $5, 'ai_draft', 'auto_sediment')`,
+            [newResource.id, q.question_number || 0, q.answer, q.question_type || 'choice', q.content || null]
           )
-          console.log(`✅ [Auto-save] 答案库已保存: "${resourceName}" (${savedCount}/${savableQuestions.length} 题, resourceId=${newResource.id})`)
-        } else {
-          console.log(`  ℹ️ [Auto-save] 无可用答案，跳过答案库保存`)
+          savedCount++
+        } catch (e) {
+          console.error(`   ⚠️ [Auto-sediment] 保存第 ${q.question_number} 题答案失败:`, e.message)
         }
-      } catch (e) {
-        console.error(`  ⚠️ [Auto-save] 保存答案库失败:`, e.message)
       }
-      await job.updateProgress(95).catch(() => {})
-      await updateTaskStatus(taskId, TASK_STATUS.PROCESSING, { progress: 95 }).catch(() => {})
+
+      await query(
+        `UPDATE tasks SET resource_id = $1 WHERE id = $2`,
+        [newResource.id, taskId]
+      )
+      console.log(`✅ [Auto-sediment] 草稿资源已建: "${resourceName}" (${savedCount}/${sedimentable.length} 题, status=draft, resourceId=${newResource.id.slice(0, 8)})`)
+    }
+  }
+} catch (e) {
+  console.error(`  ⚠️ [Auto-sediment] 沉淀异常:`, e.message)
+}
+await job.updateProgress(95).catch(() => {})
+await updateTaskStatus(taskId, TASK_STATUS.PROCESSING, { progress: 95 }).catch(() => {})
     } else {
       console.log(`⚠️  AI 未识别到任何题目`)
     }
