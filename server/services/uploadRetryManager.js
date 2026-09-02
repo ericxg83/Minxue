@@ -174,6 +174,29 @@ export const uploadWithRetry = async (fileBuffer, originalName, studentId, optio
       report.totalDurationMs = Date.now() - startTime
       return report
     }
+  } else {
+    // 验证通过但可能是 HEIC passthrough（validateFileHeader 对 image/heic 返回 valid:true + heicPassthrough:true，
+    // 0de51c6 起的 fixFileIfNeeded 不会自动被调）。这种情况 buffer 仍是 HEIC，到 ossService.uploadImage 会被
+    // 白名单拒。需要在调 uploadImage 前主动转码成 jpg。
+    const headerStep = (validationReport.steps || []).find((s) => s.name === 'header_check')
+    if (headerStep?.heicPassthrough) {
+      log(`[Step 1.6] 检测到 HEIC/HEIF passthrough，主动转码为 JPEG...`)
+      const fixResult = await fixFileIfNeeded(fileBuffer, originalName)
+      report.logs.push(...(fixResult.logs || []))
+      if (fixResult.fixed) {
+        fileBuffer = fixResult.fixedBuffer
+        if (fixResult.fixedName) originalName = fixResult.fixedName
+        report.fixed = true
+        report.heicTranscoded = true
+        report.fixedAttempts++
+        log(`✅ HEIC 转码成功 → ${originalName}，继续上传`)
+      } else {
+        report.error = fixResult.logs?.slice(-1)[0] || 'HEIC 转码失败'
+        report.errorType = 'CORRUPTED_FILE_UNFIXABLE'
+        report.totalDurationMs = Date.now() - startTime
+        return report
+      }
+    }
   }
 
   // Step 2: Upload with retry

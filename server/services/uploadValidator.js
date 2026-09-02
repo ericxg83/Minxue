@@ -177,6 +177,7 @@ export const validateFile = async (fileBuffer, originalName, fileMeta = {}) => {
     error: headerResult.error,
     detectedMime: headerResult.detectedMime,
     detectedExt: headerResult.detectedExt,
+    heicPassthrough: headerResult.heicPassthrough,
   })
   if (!headerResult.valid) {
     console.log(`[Validate] ❌ 验证失败: ${headerResult.error}`)
@@ -219,6 +220,7 @@ export const fixFileIfNeeded = async (fileBuffer, originalName) => {
   const filename = originalName || 'unknown'
   let fixedBuffer = fileBuffer
   let fixed = false
+  let fixedName = null
   let fixDescription = ''
 
   try {
@@ -251,7 +253,9 @@ export const fixFileIfNeeded = async (fileBuffer, originalName) => {
         if (recheck.valid && !recheck.heicPassthrough) {
           fixed = true
           fixDescription = 'HEIC 已自动转码为 JPEG'
-          logs.push(`[Fix] [${filename}] ✅ HEIC 转码成功`)
+          // 同步把文件名后缀改成 .jpg，让 ossService.uploadImage 走正确的 OSS key
+          fixedName = filename.replace(/\.heic$|\.heif$/i, '.jpg')
+          logs.push(`[Fix] [${filename}] ✅ HEIC 转码成功 → ${fixedName}`)
         } else {
           logs.push(`[Fix] [${filename}] ❌ HEIC 转码后仍非 JPEG`)
         }
@@ -284,6 +288,7 @@ export const fixFileIfNeeded = async (fileBuffer, originalName) => {
   return {
     fixedBuffer,
     fixed,
+    fixedName,
     fixDescription,
     logs,
   }
