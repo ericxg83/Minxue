@@ -33,6 +33,8 @@
               <div role="row" class="list-head__row" aria-hidden="true">
                 <div role="columnheader">学生</div>
                 <div role="columnheader">累计错题</div>
+                <div role="columnheader">重练数</div>
+                <div role="columnheader">已掌握</div>
                 <div role="columnheader">最近错题</div>
                 <div role="columnheader" class="op-col"><span class="sr-only">操作</span></div>
               </div>
@@ -55,6 +57,12 @@
                   <strong>{{ student.total_error_count || 0 }}</strong><em>道</em>
                 </div>
                 <div role="cell" class="metric-cell">
+                  <strong>{{ student.practice_count || 0 }}</strong><em>次</em>
+                </div>
+                <div role="cell" :class="['metric-cell', { 'is-success': (student.mastered_count || 0) > 0 }]">
+                  <strong>{{ student.mastered_count || 0 }}</strong><em>道</em>
+                </div>
+                <div role="cell" class="metric-cell">
                   <span v-if="student.last_wrong_at" class="last-wrong">{{ formatRelative(student.last_wrong_at) }}</span>
                   <span v-else class="muted">暂无</span>
                 </div>
@@ -71,7 +79,6 @@
         <template #badge><span class="scope-chip">{{ currentStudent?.name || '未选择学生' }}</span></template>
         <template #actions>
           <ActionButton @click="wrongBookStore.refreshData">刷新</ActionButton>
-          <ActionButton variant="primary" :disabled="!selectedQuestions.length" @click="createRetry">创建重练{{ selectedQuestions.length ? `（${selectedQuestions.length}）` : '' }}</ActionButton>
         </template>
       </PageHeader>
 
@@ -109,11 +116,6 @@
       </FilterBar>
 
       <div v-if="showAdvanced" class="advanced-filters"><span>问题类型</span><button v-for="item in categoryOptions" :key="item.key" type="button" :class="{ active: categoryFilter === item.key }" @click="applyCategory(item.key)">{{ item.label }}</button><el-button text size="small" @click="resetFilters">重置筛选</el-button></div>
-
-      <section v-if="selectedQuestions.length" class="retry-basket" aria-live="polite">
-        <div class="basket-summary"><span class="basket-icon"><el-icon><Reading /></el-icon></span><span><strong>重练题篮已选择 {{ selectedQuestions.length }} 道题</strong><small>将为 {{ currentStudent?.name || '当前学生' }} 创建针对性重练</small></span></div>
-        <div class="basket-actions"><el-button text @click="wrongBookStore.clearSelection">清空选择</el-button><ActionButton variant="primary" @click="createRetry">创建重练任务</ActionButton></div>
-      </section>
 
       <section class="management-workspace">
         <ContentCard class="question-manager" flush>
@@ -159,7 +161,7 @@
             </section>
             <section v-else-if="analysisOf(selectedQuestion)" class="detail-section"><label>解析</label><p class="analysis">{{ analysisOf(selectedQuestion) }}</p></section>
           </div>
-          <template #footer><div class="detail-actions"><ActionButton variant="primary" @click="createRetryFor(selectedQuestion)">加入重练</ActionButton><ActionButton :disabled="labelOf(selectedQuestion) === '已掌握'" @click="markMastered(selectedQuestion)">标记已掌握</ActionButton><el-button text type="danger" @click="removeQuestion(selectedQuestion)">移除</el-button></div></template>
+          <template #footer><div class="detail-actions"><ActionButton :disabled="labelOf(selectedQuestion) === '已掌握'" @click="markMastered(selectedQuestion)">标记已掌握</ActionButton><el-button text type="danger" @click="removeQuestion(selectedQuestion)">移除</el-button></div></template>
         </ContentCard>
         <ContentCard v-else class="learning-record detail-empty" flush><EmptyState :icon="Reading" title="选择一道错题查看学习记录" description="这里会展示题目、答案、知识点、错误频次和重练状态，帮助判断下一步处理方式。" /></ContentCard>
       </section>
@@ -314,9 +316,9 @@ watch(() => props.studentId, async (id) => {
 
 /* 所有学生列表：与 StudentsWorkbench student-row 风格一致 */
 .student-list{display:block}
-.list-head__row{display:grid;grid-template-columns:minmax(280px,2fr) minmax(110px,.75fr) minmax(110px,.75fr) 44px;align-items:center;gap:var(--wb-space-4);padding:0 var(--wb-space-5);min-height:40px;box-sizing:border-box;background:var(--wb-bg-elevated);border-bottom:1px solid var(--wb-border-light);color:var(--wb-text-secondary);font-size:var(--wb-fs-eyebrow);font-weight:var(--wb-fw-semibold);letter-spacing:.01em}
+.list-head__row{display:grid;grid-template-columns:minmax(220px,1.5fr) minmax(86px,.65fr) minmax(76px,.55fr) minmax(76px,.55fr) minmax(86px,.65fr) 36px;align-items:center;gap:var(--wb-space-3);padding:0 var(--wb-space-5);min-height:40px;box-sizing:border-box;background:var(--wb-bg-elevated);border-bottom:1px solid var(--wb-border-light);color:var(--wb-text-secondary);font-size:var(--wb-fs-eyebrow);font-weight:var(--wb-fw-semibold);letter-spacing:.01em}
 .op-col{display:flex;justify-content:flex-end}
-.student-row{display:grid;grid-template-columns:minmax(280px,2fr) minmax(110px,.75fr) minmax(110px,.75fr) 44px;align-items:center;gap:var(--wb-space-4);width:100%;min-height:76px;padding:0 var(--wb-space-5);box-sizing:border-box;color:inherit;background:transparent;border:0;border-bottom:1px solid var(--wb-border-light);text-align:left;cursor:pointer;transition:background var(--wb-motion-fast) var(--wb-motion-ease)}
+.student-row{display:grid;grid-template-columns:minmax(220px,1.5fr) minmax(86px,.65fr) minmax(76px,.55fr) minmax(76px,.55fr) minmax(86px,.65fr) 36px;align-items:center;gap:var(--wb-space-3);width:100%;min-height:76px;padding:0 var(--wb-space-5);box-sizing:border-box;color:inherit;background:transparent;border:0;border-bottom:1px solid var(--wb-border-light);text-align:left;cursor:pointer;transition:background var(--wb-motion-fast) var(--wb-motion-ease)}
 .student-row:last-child{border-bottom:0}
 .student-row:hover{background:var(--wb-bg-hover)}
 .student-row:focus-visible{position:relative;z-index:1;outline:2px solid var(--wb-primary);outline-offset:-2px}
@@ -334,6 +336,6 @@ watch(() => props.studentId, async (id) => {
 
 .sr-only{position:absolute;width:1px;height:1px;padding:0;margin:-1px;overflow:hidden;clip:rect(0,0,0,0);white-space:nowrap;border:0}
 
-@media(max-width:1000px){.list-head__row,.student-row{grid-template-columns:minmax(220px,1.6fr) minmax(90px,.7fr) minmax(90px,.7fr) 32px;padding:0 var(--wb-space-4)}}
-@media(max-width:720px){.list-head__row,.student-row{grid-template-columns:minmax(0,1.5fr) auto auto 32px;padding:0 var(--wb-space-3)}.student-cell{gap:var(--wb-space-2)}}
+@media(max-width:1000px){.list-head__row,.student-row{grid-template-columns:minmax(200px,1.5fr) minmax(74px,.6fr) minmax(66px,.5fr) minmax(66px,.5fr) minmax(74px,.6fr) 32px;gap:var(--wb-space-2);padding:0 var(--wb-space-4)}}
+@media(max-width:720px){.list-head__row,.student-row{grid-template-columns:minmax(0,1.4fr) minmax(64px,.55fr) minmax(58px,.45fr) minmax(58px,.45fr) minmax(64px,.55fr) 28px;gap:var(--wb-space-2);padding:0 var(--wb-space-3)}.student-cell{gap:var(--wb-space-2)}}
 </style>
