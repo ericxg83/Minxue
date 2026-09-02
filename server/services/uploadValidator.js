@@ -1,7 +1,8 @@
 import { fileTypeFromBuffer } from 'file-type'
 
 const ALLOWED_IMAGE_TYPES = new Set(['image/jpeg', 'image/png', 'image/webp'])
-const ALLOWED_EXTENSIONS = new Set(['jpg', 'jpeg', 'png', 'webp'])
+const HEIC_PASSTHROUGH_TYPES = new Set(['image/heic', 'image/heif'])
+const ALLOWED_EXTENSIONS = new Set(['jpg', 'jpeg', 'png', 'webp', 'heic', 'heif'])
 const MAGIC_BYTES = {
   jpg: [
     { offset: 0, bytes: [0xFF, 0xD8, 0xFF] },
@@ -65,6 +66,15 @@ export const validateFileHeader = async (buffer) => {
 
     const detectedMime = fileType.mime
     const detectedExt = fileType.ext
+
+    if (HEIC_PASSTHROUGH_TYPES.has(detectedMime)) {
+      return {
+        valid: true,
+        detectedMime,
+        detectedExt,
+        heicPassthrough: true,
+      }
+    }
 
     if (!ALLOWED_IMAGE_TYPES.has(detectedMime)) {
       return {
@@ -214,6 +224,7 @@ export const fixFileIfNeeded = async (fileBuffer, originalName) => {
   try {
     const { default: sharp } = await import('sharp')
     const headerCheck = await validateFileHeader(fixedBuffer)
+    const needsHeicTranscode = headerCheck.heicPassthrough === true
 
     if (!headerCheck.valid) {
       logs.push(`[Fix] [${filename}] 尝试重新编码文件...`)
@@ -228,6 +239,24 @@ export const fixFileIfNeeded = async (fileBuffer, originalName) => {
         logs.push(`[Fix] [${filename}] ✅ 重新编码成功`)
       } else {
         logs.push(`[Fix] [${filename}] ❌ 重新编码后仍无法识别`)
+      }
+    } else if (needsHeicTranscode) {
+      logs.push(`[Fix] [${filename}] 检测到 HEIC/HEIF，主动归一化为 JPEG...`)
+      try {
+        fixedBuffer = await sharp(fileBuffer)
+          .rotate()
+          .jpeg({ quality: 85, progressive: true })
+          .toBuffer()
+        const recheck = await validateFileHeader(fixedBuffer)
+        if (recheck.valid && !recheck.heicPassthrough) {
+          fixed = true
+          fixDescription = 'HEIC 已自动转码为 JPEG'
+          logs.push(`[Fix] [${filename}] ✅ HEIC 转码成功`)
+        } else {
+          logs.push(`[Fix] [${filename}] ❌ HEIC 转码后仍非 JPEG`)
+        }
+      } catch (heicErr) {
+        logs.push(`[Fix] [${filename}] ❌ HEIC 转码失败: ${heicErr.message}`)
       }
     } else {
       const integrityCheck = await validateImageIntegrity(fixedBuffer)

@@ -158,6 +158,7 @@ export const uploadWithRetry = async (fileBuffer, originalName, studentId, optio
     if (fixResult.fixed) {
       log(`✅ 文件修复成功，使用修复后的缓冲区重新上传`)
       fileBuffer = fixResult.fixedBuffer
+      report.heicTranscoded = /HEIC|HEIF|heic|heif/i.test(fixResult.fixDescription || '')
 
       const revalidation = await validateFile(fileBuffer, originalName, { size: fileBuffer.length })
       if (!revalidation.valid) {

@@ -27,6 +27,9 @@ const COMPRESS_MAX_EDGE = 2200
 
 export const compressImageForUpload = (file) =>
   new Promise((resolve) => {
+    const isHeic = (file?.type || '').match(/^image\/(heic|heif)$/i)
+      || /\.heic$|\.heif$/i.test(file?.name || '')
+    if (isHeic) return resolve(file)
     if (!file?.type?.startsWith('image/') || file.size <= COMPRESS_TRIGGER_BYTES) {
       return resolve(file)
     }

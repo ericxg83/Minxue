@@ -228,8 +228,8 @@ export default function RetryTask({ taskId, onBack }) {
                 </button>
               </div>
 
-              <input ref={cameraInputRef} type="file" accept="image/*" capture="environment" multiple style={{ display: 'none' }} onChange={handleSelectFiles} />
-              <input ref={albumInputRef} type="file" accept="image/*" multiple style={{ display: 'none' }} onChange={handleSelectFiles} />
+              <input ref={cameraInputRef} type="file" accept="image/jpeg,image/png,image/webp,image/heic,image/heif" capture="environment" multiple style={{ display: 'none' }} onChange={handleSelectFiles} />
+              <input ref={albumInputRef} type="file" accept="image/jpeg,image/png,image/webp,image/heic,image/heif" multiple style={{ display: 'none' }} onChange={handleSelectFiles} />
 
               <button
                 onClick={handleUpload}

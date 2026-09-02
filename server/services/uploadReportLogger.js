@@ -30,6 +30,7 @@ export const createUploadReport = (studentId, uploadSummary, boundingBoxResults 
       errorMessage: result.error || null,
       uploadUrl: result.url,
       wasAutoFixed: result.fixed,
+      autoTranscoded: !!result.heicTranscoded,
       attemptCount: result.attempts.length,
       totalDurationMs: result.totalDurationMs,
       attempts: result.attempts.map((a) => ({
@@ -94,6 +95,9 @@ export const formatReportConsole = (report) => {
       lines.push(`     OSS URL:     ${file.uploadUrl.substring(0, 80)}...`)
     }
     lines.push(`     自动修复:    ${file.wasAutoFixed ? '是' : '否'}`)
+    if (file.autoTranscoded) {
+      lines.push(`     自动转码:    是 (HEIC/HEIF → JPEG)`)
+    }
     lines.push(`     尝试次数:    ${file.attemptCount}`)
     lines.push(`     总耗时:      ${file.totalDurationMs}ms`)
     if (file.boundingBoxStatus) {
