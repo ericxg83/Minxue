@@ -25,6 +25,8 @@ import { NON_RETRYABLE_ERROR_PATTERNS } from './pendingTaskRecovery.js'
 import { isValidImageBuffer, checkImageResolution } from './utils/imageValidator.js'
 import { formatOptionsForPrompt } from './utils/optionText.js'
 import { validateArithmeticAnswer } from './utils/arithmeticAnswerValidator.js'
+import { aiParseSelfCheck } from './utils/aiParseSelfCheck.js'
+import { extractFinalAnswerFromAnalysis } from './utils/aiParseSelfCheck.js'
 import { coerceAIText } from './utils/aiTextCoerce.js'
 import { computeTaskStats } from './utils/taskStats.js'
 import { rationalizeAnswer } from './utils/radicalSimplify.js'
@@ -1302,51 +1304,15 @@ export function extractAnswerFromAnalysis(answer, analysis, options) {
   }
 
   // ── Non-choice / general: extract from explicit answer markers ──
-  // AI sometimes puts unsimplified LaTeX (e.g. \\frac{30}{\\sqrt{3}}) in answer field
-  // while analysis has the correct simplified result (e.g. "15").
-  // Look only in tail (last 800 chars) to favor final result over intermediate steps.
-  // Note: do NOT use commas (，,) as delimiters — multi-part answers like
-  // "每个盲盒50元，每个杯子30元" contain commas within the answer itself.
-  // Only sentence-ending punctuation (。！？.!? + newline) should terminate the capture.
-  // 小数点/千分位不能当句子终止符：AI 写 "正确答案：3.25" 时，旧捕获类把 `.` 当句尾，
-  // 抠出 "3" → 下游判题拿残缺答案判错全班。终止符只认真正的句子结束（换行、中文句读、
-  // 后接非数字的 `.`）；小数点（`8` 或 `5.1` 里 `.` 前后是数字）保留在答案内。
-  // 末尾的悬空句点再单独 trim 掉，避免 "3。" 之后紧跟英文句点被一并吃进。
-  const tail = analysis.length > 800 ? analysis.substring(analysis.length - 800) : analysis
-  const CAP = '((?:[^\\n。！？]|\\.(?=[0-9]))+)'
-  // 分隔符要吞掉可能"泄漏"进捕获组的系词：AI 常写 "最终答案是14/15"，旧 pattern 里
-  // "是" 没被分隔符吃掉，捕获组从 "是" 起 → 存成脏答案 "是14/15" → 全班误判。
-  const SEP = '[：:]?\\s*(?:[是为]\\s*[：:]?)?\\s*'
-  const answerMarkerPatterns = [
-    // "所以正确答案：14和2310" (no "是" after "正确答案")
-    new RegExp(`(?:所以|因此|故)正确答案${SEP}${CAP}`, 'i'),
-    // "因此正确答案是：14和2310"
-    new RegExp(`因此正确答案是${SEP}${CAP}`, 'i'),
-    // "正确答案是：14和2310"
-    new RegExp(`正确答案是${SEP}${CAP}`, 'i'),
-    // "正确答案：14和2310" (no "是")
-    new RegExp(`正确答案${SEP}${CAP}`, 'i'),
-    // "答案为：14和2310"
-    new RegExp(`答案为${SEP}${CAP}`, 'i'),
-    // "故答案为：14和2310"
-    new RegExp(`故答案为${SEP}${CAP}`, 'i'),
-    // "答案是：14和2310" (with or without colon)
-    new RegExp(`答案是${SEP}${CAP}`, 'i'),
-    // "最终答案：14和2310"
-    new RegExp(`最终答案${SEP}${CAP}`, 'i'),
-  ]
-
-  for (const pattern of answerMarkerPatterns) {
-    const match = tail.match(pattern)
-    if (match) {
-      let extracted = match[1].trim()
-      // Trim trailing commas/punctuation that may remain after removing them from delimiters
-      extracted = extracted.replace(/[，,；;、.]+$/, '').trim()
-      if (extracted && extracted !== answer) {
-        console.log(`   [AnswerExtraction] 答案标记匹配: ${extracted} (原: ${answer})`)
-        return extracted
-      }
-    }
+  // 8 条答案标记正则（含 CAP/SEP 模板避小数点误切）与 tail(800) 截断逻辑
+  // 都已抽到 utils/aiParseSelfCheck.js 的 extractFinalAnswerFromAnalysis，
+  // 这里直接复用，避免两处正则漂移。
+  // 行为兼容：原逻辑是"匹配到且与 answer 不同才覆盖"，helper 返回 null 时
+  // 走回原 answer，等价于"无标记"分支。
+  const extracted = extractFinalAnswerFromAnalysis(analysis)
+  if (extracted && extracted !== answer) {
+    console.log(`   [AnswerExtraction] 答案标记匹配: ${extracted} (原: ${answer})`)
+    return extracted
   }
 
   return answer
@@ -3589,6 +3555,15 @@ const processWorkbookGrading = async (job) => {
 - ⚠️ 简答题/解答题/计算题的题干一定包含汉字描述或数字（如"计算"、"化简"、"解方程"、"求值"）。
   如果识别出的 content 全部是符号、不含任何汉字和数字（如"÷ = × ×"），说明识别错误，
   必须重新仔细查看该题印刷体原图后重新填写真实题干。
+- 分数与紧邻自变量字符的边界（易错点，必须严格遵守）：
+  · 当分数 1/3、2/5、a/b 后面紧接独立自变量（x²、y³、t、z^n），必须理解为「系数 × 自变量」
+    ——分母是该分数的分母，自变量是该字符和它后面的指数，两者各自独立。
+  · 正例：y = -1/3 x² 表示 -(1/3)·x² = -x²/3，分母是 3、自变量是 x²。
+  · 反例：写成 y = -1/(3x)² 是错的——分母变成 3x²，等价于 -1/(9x²)，原题没有这个意思。
+    除非原题明确把分母用括号括起来（如 1/(3x)），否则不要把分母和紧邻自变量合并。
+  · 紧凑排版的视觉错觉：印刷体里分数 -1/3 和紧邻 x² 之间只有很窄的视觉间隙，
+    模型容易把分母 3 和自变量 x 合并为 3x——必须警惕。
+  · 同样适用于所有「分数 + 自变量 + 指数」组合：1/2 y³、2/5 t、a/b z^n、1/4 x、3/5 sinθ 等。
 
 - question_number 从印刷体题号读取，必须是数字
 - 如果一道大题包含多个小问（如 21.(1)、21.(2)、22.(1)、22.(2)），必须将每个小问拆成独立的 question 对象输出：question_number 填大题号，sub_no 填小问号，content 只写该小问的题干，student_answer 只写该小问的手写答案。不要把多个小问合并成一道题
@@ -4330,6 +4305,15 @@ const processAnswerBankGrading = async (job) => {
 - ⚠️ 简答题/解答题/计算题的题干一定包含汉字描述或数字（如"计算"、"化简"、"解方程"、"求值"）。
   如果识别出的 content 全部是符号、不含任何汉字和数字（如"÷ = × ×"），说明识别错误，
   必须重新仔细查看该题印刷体原图后重新填写真实题干。
+- 分数与紧邻自变量字符的边界（易错点，必须严格遵守）：
+  · 当分数 1/3、2/5、a/b 后面紧接独立自变量（x²、y³、t、z^n），必须理解为「系数 × 自变量」
+    ——分母是该分数的分母，自变量是该字符和它后面的指数，两者各自独立。
+  · 正例：y = -1/3 x² 表示 -(1/3)·x² = -x²/3，分母是 3、自变量是 x²。
+  · 反例：写成 y = -1/(3x)² 是错的——分母变成 3x²，等价于 -1/(9x²)，原题没有这个意思。
+    除非原题明确把分母用括号括起来（如 1/(3x)），否则不要把分母和紧邻自变量合并。
+  · 紧凑排版的视觉错觉：印刷体里分数 -1/3 和紧邻 x² 之间只有很窄的视觉间隙，
+    模型容易把分母 3 和自变量 x 合并为 3x——必须警惕。
+  · 同样适用于所有「分数 + 自变量 + 指数」组合：1/2 y³、2/5 t、a/b z^n、1/4 x、3/5 sinθ 等。
 
 - question_number 从印刷体题号读取，必须是数字。
   注意：每个试卷单元（如"试卷①"）的题号都从 1 重新开始编号，请按当前页所在单元的局部题号输出。
@@ -5490,6 +5474,36 @@ export const processTask = async (job) => {
         ...q,
         student_id: studentId
       }))
+
+      // AI 解析自检：抽 answer/analysis/answer 三字段做一致性校验，
+      // 把"步骤对结论错"算术幻觉 + answer 串行污染两路都标出来。
+      // 2026-09-02 截图案例（y=3(x-1)²+2 代入 x=6，AI 写"最终答案 83"实际应为 77）
+      // 就是这两路都中招。光靠 prompt 改措辞治不了，必须在落库前做硬校验。
+      // 不重试 OCR：单题失败重跑整页 OCR 太重，靠 prompt 升级 + 红色横幅兜底。
+      let selfCheckFailed = 0
+      const selfCheckIssueCounts = {}
+      for (const q of questionsWithStudentId) {
+        const check = aiParseSelfCheck({
+          answer: q.answer,
+          student_answer: q.student_answer,
+          analysis: q.analysis
+        })
+        q.ai_self_check_passed = check.pass
+        q.ai_self_check_issues = check.issues
+        if (!check.pass) {
+          selfCheckFailed += 1
+          for (const issue of check.issues) {
+            selfCheckIssueCounts[issue] = (selfCheckIssueCounts[issue] || 0) + 1
+          }
+        }
+      }
+      if (selfCheckFailed > 0) {
+        const issueSummary = Object.entries(selfCheckIssueCounts)
+          .map(([k, v]) => `${k}=${v}`).join(', ')
+        console.warn(`   [AI自检] ${selfCheckFailed}/${questionsWithStudentId.length} 道题自检失败 (${issueSummary})，前端会标红横幅`)
+      } else {
+        console.log(`   [AI自检] ${questionsWithStudentId.length} 道题全部通过`)
+      }
 
       // 幂等：恢复链路 / 用户重试 / 队列重投可能对同一 task 重复执行本管线。
       // workbook 与答案库管线早已在写入前清旧题，通用 AI 管线此前漏了，
