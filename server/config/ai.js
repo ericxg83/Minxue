@@ -237,6 +237,29 @@ export const getAIHeaders = () => ({
 
 export const BACKUP_VENDOR_DEFS = [
   {
+    // GMI Cloud (https://api.gmi-serving.com/v1)：OpenAI 兼容，2026-09 用户提供的"免费 10 天 Key"。
+    // 端点与魔搭/其它供应商独立，配额独立。视觉模型实测：MiniMaxAI/MiniMax-M3 是支持
+    // 多模态的（可看图识别作业题，235KB 高清作业图 13s 返回完整 JSON），速度比魔搭快 6-8 倍。
+    // 接入策略：插在 BACKUP_VENDOR_DEFS 第 0 位是默认位置（魔搭耗尽时第一个兜底）；
+    // 设 GMI_FIRST=1 可把它顶到魔搭前面作为"主 KEY"（10 天免费期内的临时切换，失效后改回 0 即可）。
+    name: 'GMI',
+    envKey: 'GMI_API_KEY',
+    endpoint: process.env.GMI_BASE_URL
+      ? `${process.env.GMI_BASE_URL.replace(/\/+$/, '')}/chat/completions`
+      : 'https://api.gmi-serving.com/v1/chat/completions',
+    modelsEndpoint: process.env.GMI_BASE_URL
+      ? `${process.env.GMI_BASE_URL.replace(/\/+$/, '')}/models`
+      : 'https://api.gmi-serving.com/v1/models',
+    textModel: process.env.GMI_TEXT_MODEL || 'MiniMaxAI/MiniMax-M3',
+    // 默认视觉模型：M3 既是文本也是视觉，2026-09-03 实测可识别作业题。
+    // 备用再列一个 8B VL，魔搭耗尽且 M3 撞限流时作为兜底。
+    vlModels: process.env.GMI_VL_MODELS
+      ? process.env.GMI_VL_MODELS.split(',').map(s => s.trim()).filter(Boolean)
+      : ['MiniMaxAI/MiniMax-M3', 'Qwen/Qwen3-VL-8B-Instruct'],
+    keyPrefix: null,
+    referer: null,
+  },
+  {
     // SenseNova（商汤科技日日新，OpenAI 兼容）：第一备用供应商（2026-08 起排第二，仅次于魔搭）。
     // 2026-08 用户 Key 实测（token.sensenova.cn 端点有效）：
     //   - sensenova-6.8-flash-lite / sensenova-6.7-flash-lite：多模态（text+image → text），0 计费，均匀可作视觉 OCR
@@ -563,6 +586,30 @@ export async function callTextCompletion(opts) {
   const { systemContent, userContent, temperature = 0.2, maxTokens = 500, model } = opts
   const messages = buildOpenAIMessages(systemContent, userContent)
 
+  // GMI_FIRST=1 时把 GMI 顶到最前作为"主 KEY"。
+  // 10 天免费期内避免触发魔搭限流；失效后改 0 即可回落，与视觉链共用同一开关。
+  const gmiFirst = process.env.GMI_FIRST === '1'
+  const gmiVendor = gmiFirst ? BACKUP_CONFIG.VENDORS.find(v => v.name === 'GMI' && process.env[v.envKey]) : null
+  if (gmiVendor) {
+    try {
+      const content = await requestOpenAIProvider({
+        endpoint: gmiVendor.endpoint,
+        apiKey: process.env[gmiVendor.envKey] || '',
+        model: model || gmiVendor.textModel,
+        messages,
+        temperature,
+        maxTokens,
+        timeout: 30000,
+        retry429: false,
+        vendor: gmiVendor,
+        extraBody: gmiVendor.extraBody || null,
+      })
+      if (content) return { content, usedBackup: true }
+    } catch {
+      // GMI 失败回落到下方魔搭 / 其它供应商
+    }
+  }
+
   if (!isMainRateLimitedToday() && AI_CONFIG.API_KEY) {
     // 与视觉链一致：按 TEXT_MODELS 依次尝试，跳过当日配额已耗尽的模型
     const textModels = (model ? [model] : TEXT_MODELS).filter(m => !isModelExhaustedToday(m))
@@ -696,6 +743,14 @@ export async function callVisionCompletion(opts) {
   // 因此日常识别不会被阻塞。测完置空/改 0 即恢复默认「魔搭优先」。
   const forceBackupFirst = process.env.BACKUP_FIRST === '1' || process.env.ZENMUX_FIRST === '1'
 
+  // GMI_FIRST=1 时把 GMI Cloud 顶到魔搭之前作为「主 KEY」。
+  // 2026-09 用户场景：gmi-serving 提供「免费 10 天」Key，端点与魔搭独立、配额独立。
+  // 10 天内用 GMI_FIRST=1 顶替魔搭避免限流，Key 失效后改 0/删 env 自动回落到魔搭。
+  // 这里只对"魔搭优先分支"做插队；BACKUP_FIRST 路径里 BACKUP 已经在魔搭前面，GMI 自然排第一。
+  const gmiFirst = process.env.GMI_FIRST === '1'
+  // 提前取出 GMI 供应商对象（没配置 Key 时为 undefined，自动回落到原流程）
+  const gmiVendor = gmiFirst ? BACKUP_CONFIG.VENDORS.find(v => v.name === 'GMI' && process.env[v.envKey]) : null
+
   // 动态决定优先级：
   //   默认魔搭优先（体验最好：速度快 + 正确率高）。
   //   但魔搭当日配额按账号×模型计，6 个组合极易全部耗尽；
@@ -757,6 +812,35 @@ export async function callVisionCompletion(opts) {
       }
     }
   } else {
+    // GMI_FIRST=1 时，把 GMI 插到最前作为"主 KEY"；
+    // 魔搭仍保留在后面兜底，10 天 Key 失效后只需去掉 GMI_FIRST=1 即可自动回落到魔搭。
+    if (gmiFirst && gmiVendor) {
+      console.log(`[AI] GMI_FIRST=1 开启，GMI 顶替魔搭作为首选视觉供应商（端点=${gmiVendor.endpoint}）`)
+      for (const vlModel of gmiVendor.vlModels) {
+        providers.push(async () => {
+          try {
+            const content = await requestOpenAIProvider({
+              endpoint: gmiVendor.endpoint,
+              apiKey: process.env[gmiVendor.envKey] || '',
+              model: model || vlModel,
+              messages,
+              temperature,
+              maxTokens: Math.min(maxTokens, gmiVendor.maxTokens || 4096),
+              timeout: BACKUP_TIMEOUT,
+              retry503: false,
+              // 备用供应商 429 直接失败，让下一个供应商顶上来
+              retry429: false,
+              vendor: gmiVendor,
+              extraBody: gmiVendor.extraBody || null,
+            })
+            return { content, usedBackup: true }
+          } catch (err) {
+            err._provider = gmiVendor.name.toLowerCase()
+            throw err
+          }
+        })
+      }
+    }
     // 第一优先级：魔搭 Key×模型矩阵（体验最好）
     for (const vlModel of wantedModels) {
       for (const apiKey of MS_KEYS) {
