@@ -75,3 +75,34 @@ test('未作答与已判定的题不显示原因', () => {
   // 没有原因时返回空串而不是 undefined
   assert.equal(getUnjudgedReasonText({ is_correct: null, confidence: 0.9, answer_source: 'recognized' }), '')
 })
+
+// 2026-09-02 用户报 #18/#25/#26 等多道填空题学生答案与参考答案字面一致却显示红 X。
+// 根因：review_status='wrong'（老师之前复核过）会盖过 is_correct=true，原文案统一显示
+// 「AI 错误」让老师误以为是判题逻辑 bug。要把 wrong state 拆出三种文案，让老师分清
+// 「已复核（错误）」/「已复核·AI 翻案」/「AI 错误」。
+test('wrong 状态文案细分：老师复核 vs AI 自动判错', () => {
+  // 老师复核过标错 + AI 也判错 → 「已复核」（一致）
+  assert.equal(getReviewStateLabel({
+    review_status: REVIEW_STATUS.WRONG, is_correct: false, confidence: 0.95
+  }), '已复核')
+  // 老师复核过标错 + AI 现在判对 → 「已复核·AI 翻案」（冲突，老师应重新审视）
+  assert.equal(getReviewStateLabel({
+    review_status: REVIEW_STATUS.WRONG, is_correct: true, confidence: 0.95
+  }), '已复核·AI 翻案')
+  // 老师标记「不入错题本」 + AI 也判错 → 「已复核」
+  assert.equal(getReviewStateLabel({
+    review_status: REVIEW_STATUS.WRONG_NO_BOOK, is_correct: false, confidence: 0.95
+  }), '已复核')
+  // 老师标记「不入错题本」 + AI 现在判对 → 「已复核·AI 翻案」
+  assert.equal(getReviewStateLabel({
+    review_status: REVIEW_STATUS.WRONG_NO_BOOK, is_correct: true, confidence: 0.95
+  }), '已复核·AI 翻案')
+  // AI 自动判错 + 老师没复核 → 「AI 错误」（保留原语义）
+  assert.equal(getReviewStateLabel({
+    review_status: null, is_correct: false, confidence: 0.95
+  }), 'AI错误')
+  // AI 自动判错 + 老师标 correct → 走 correct 分支（wrong state 不命中）
+  assert.equal(getReviewStateLabel({
+    review_status: REVIEW_STATUS.CORRECT, is_correct: false, confidence: 0.95
+  }), 'AI正确')
+})

@@ -109,6 +109,17 @@ export const REVIEW_STATE_LABELS = Object.freeze({
 export const getReviewStateLabel = (question, threshold = DEFAULT_CONFIDENCE_THRESHOLD) => {
   const state = getReviewState(question, threshold)
   if (state === 'exception' && question?.answer_source === 'blank') return '未作答'
+  // wrong 状态细分：老师已复核 vs AI 自动判错。两种来源共用 'wrong' state 但语义不同，
+  // 红 X 仍显示，但文案要让老师分清"这是历史结论（已复核）"还是"AI 当前判错"。
+  // 2026-09-02：用户报 #18/#25/#26 填空题学生/参考字面一致却红 X，根因是 review_status='wrong'
+  // 历史脏值（fix 判题函数不会重算 review_status），原"AI错误"文案让老师误以为是判题逻辑 bug。
+  if (state === 'wrong') {
+    const hasManualReview = question?.review_status === REVIEW_STATUS.WRONG ||
+                            question?.review_status === REVIEW_STATUS.WRONG_NO_BOOK
+    if (hasManualReview) {
+      return question?.is_correct === true ? '已复核·AI 翻案' : '已复核'
+    }
+  }
   return REVIEW_STATE_LABELS[state] || REVIEW_STATE_LABELS.pending
 }
 
