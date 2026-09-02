@@ -512,13 +512,44 @@ export default function Grading({ paperId, studentId, questionIds, onClose, onCo
                 transition={{ duration: 0.2 }}
                 style={{ overflow: 'hidden' }}
               >
-                <div style={{ padding: '16px 20px', background: `${COLORS.primary}08` }}>
-                  <div style={{ fontSize: 'var(--fs-14)', fontWeight: 600, color: COLORS.primary, marginBottom: '8px' }}>
+                <div style={{
+                  padding: '16px 20px',
+                  background: `${COLORS.primary}08`,
+                  // AI 自检失败时降权：橙边 + 浅橙底 + "⚠ AI 不可信" 角标
+                  border: currentQuestion?.ai_self_check_passed === false
+                    ? '1px solid rgba(255, 122, 0, 0.45)'
+                    : 'none',
+                  borderRadius: 'var(--radius-5)'
+                }}>
+                  <div style={{
+                    fontSize: 'var(--fs-14)', fontWeight: 600,
+                    color: currentQuestion?.ai_self_check_passed === false ? 'rgb(255, 122, 0)' : COLORS.primary,
+                    marginBottom: '8px',
+                    display: 'flex', alignItems: 'center', gap: 6
+                  }}>
                     参考答案
+                    {currentQuestion?.ai_self_check_passed === false && (
+                      <span style={{ fontSize: 'var(--fs-12)' }}>⚠ AI 不可信</span>
+                    )}
                   </div>
                   <div style={{ fontSize: 'var(--fs-15)', color: COLORS.text, lineHeight: '1.6' }}>
                     <MathText content={currentQuestion?.answer || '暂无答案'} />
                   </div>
+                  {currentQuestion?.ai_self_check_passed === false && (
+                    // 红色横幅：AI 解析可能不准确。issues 来自 worker.js 调
+                    // aiParseSelfCheck 写入 questions.ai_self_check_issues。
+                    <div style={{
+                      marginTop: 10, padding: '8px 12px',
+                      background: '#fef2f2', border: '1px solid #dc2626',
+                      borderRadius: 'var(--radius-5)',
+                      color: '#dc2626', fontSize: 'var(--fs-13)', lineHeight: 1.5
+                    }}>
+                      <strong>⚠ AI 解析可能不准确</strong>
+                      <span style={{ marginLeft: 6, color: 'var(--text-secondary)' }}>
+                        （{(currentQuestion.ai_self_check_issues || []).join(' / ')}），请人工核对
+                      </span>
+                    </div>
+                  )}
                 </div>
                 {currentQuestion?.analysis && (
                   <div style={{ padding: '16px 20px', borderTop: `1px solid ${COLORS.border}`, background: `${COLORS.success}08` }}>

@@ -121,22 +121,28 @@ function RangeMenu({ options, value, onChange }) {
 // 学生答案那一列的主点击是"看原卷"——复核最常做的动作是核对 AI 抄的字对不对，
 // 改字是次要动作，所以改字收进旁边的铅笔按钮。参考答案没有原卷可对，整格即编辑。
 function AnswerCell({
-  label, value, placeholder, warn, editing,
-  onStartEdit, onChange, onDone, onViewPaper
+  label, value, placeholder, warn, editing, dim, onStartEdit, onChange, onDone, onViewPaper
 }) {
-  const textStyle = {
-    fontSize: 'var(--fs-16)', fontWeight: 600, lineHeight: 1.45,
-    color: warn ? 'var(--warning)' : (value ? COLORS.text : 'var(--text-tertiary)'),
-    overflowWrap: 'anywhere', textAlign: 'left'
-  }
+  // 视觉降权：AI 自检失败时给整格加橙边 + 半透明背景，
+  // 让老师/家长"知道这个答案不可信"，不要无脑照抄。
+  const dimStyle = dim ? {
+    background: 'rgba(255, 122, 0, 0.06)',
+    border: '1px solid rgba(255, 122, 0, 0.45)',
+    borderRadius: 'var(--radius-5)',
+    padding: '4px 6px',
+    margin: '-4px -6px'
+  } : null
 
   return (
-    <div style={{ flex: 1, minWidth: 0 }}>
+    <div style={{ flex: 1, minWidth: 0, ...dimStyle }}>
       <div style={{
         display: 'flex', alignItems: 'center', gap: 4, marginBottom: 2,
         fontSize: 'var(--fs-11)', color: COLORS.textSecondary
       }}>
         {label}
+        {dim && (
+          <span style={{ color: 'rgb(255, 122, 0)', fontWeight: 600 }}>⚠ AI 不可信</span>
+        )}
         {onViewPaper && (
           <span style={{ display: 'inline-flex', alignItems: 'center', gap: 2, color: COLORS.primary }}>
             <ImageIcon size={11} />原卷
@@ -798,6 +804,9 @@ export default function ExamReview({ task, onClose, onSave, onViewImage }) {
           value={currentReferenceAnswer}
           placeholder="点击填写"
           editing={editingField === 'answer'}
+          // AI 自检失败时整格降权：橙边 + 半透明 + "⚠ AI 不可信" 角标，
+          // 视觉上明确这个答案需要人工核对，不要无脑照抄。
+          dim={currentQuestion?.ai_self_check_passed === false}
           onStartEdit={() => setEditingField('answer')}
           onChange={(v) => handleAnswerEdit(currentQuestion.id, v)}
           onDone={() => setEditingField(null)}
@@ -838,6 +847,25 @@ export default function ExamReview({ task, onClose, onSave, onViewImage }) {
           background: 'var(--bg-mist)', borderRadius: 'var(--radius-6)',
           fontSize: 'var(--fs-13)', color: COLORS.text, lineHeight: 1.6
         }}>
+          {currentQuestion?.ai_self_check_passed === false && (
+            // 红色横幅：AI 解析可能不准确。issues 来自 worker.js 调
+            // aiParseSelfCheck 写入 questions.ai_self_check_issues 数组。
+            // 2026-09-02 截图中案例：arithmetic_mismatch（步骤对结论错）
+            // + serial_pollution（answer 抄了学生答案）就是在这条横幅上暴露。
+            <div style={{
+              marginBottom: 8, padding: '6px 10px',
+              background: 'var(--danger-bg, #fef2f2)',
+              border: '1px solid var(--danger, #dc2626)',
+              borderRadius: 'var(--radius-5)',
+              color: 'var(--danger, #dc2626)',
+              fontSize: 'var(--fs-12)', lineHeight: 1.5
+            }}>
+              <strong>⚠ AI 解析可能不准确</strong>
+              <span style={{ marginLeft: 6, color: 'var(--text-secondary)' }}>
+                （{(currentQuestion.ai_self_check_issues || []).join(' / ')}），请人工核对
+              </span>
+            </div>
+          )}
           <MathText content={currentQuestion?.analysis || '暂无解析'} />
         </div>
       )}

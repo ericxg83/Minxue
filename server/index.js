@@ -44,6 +44,7 @@ import { migrateStudentEnrollmentStatus } from './migrations/049_add_student_enr
 import { migrateAiAnswerRiskReason } from './migrations/050_add_ai_answer_risk_reason.js'
 import { migrateTaskContentHash } from './migrations/051_add_task_content_hash.js'
 import { migrateWrongQuestionsUniqueIndex } from './migrations/052_dedupe_wrong_questions_unique_index.js'
+import { migrateAiSelfCheck } from './migrations/053_ai_self_check.js'
 import { scheduleNightParse, scheduleWeeklyDiagnosis } from './services/nightParseService.js'
 
 const __dirname = dirname(fileURLToPath(import.meta.url))
@@ -2967,6 +2968,7 @@ if (process.argv[1] === __filename || process.argv[1]?.endsWith('server/index.js
       await migrateAiAnswerRiskReason()
       await migrateTaskContentHash()
       await migrateWrongQuestionsUniqueIndex()
+      await migrateAiSelfCheck()
     } catch (err) {
       console.error('数据库迁移失败:', err.message)
     }

@@ -76,6 +76,11 @@ export const createQuestions = async (questions) => {
       ai_answer: coerceAIText(q.ai_answer) || null,
       answer_source: q.answer_source || 'recognized',
       analysis: coerceAIText(q.analysis) || null,
+      // AI 解析自检：worker.js 在 createQuestions 前对每题调 aiParseSelfCheck，
+      // 把"是否通过"和"具体 issues"两路都写进 questions 表，前端据此给红色横幅。
+      // 历史数据（迁移前已存在的行）保持默认 true（视作"未自检"），不重算。
+      ai_self_check_passed: q.ai_self_check_passed !== undefined ? q.ai_self_check_passed : true,
+      ai_self_check_issues: q.ai_self_check_issues || null,
       question_type: q.question_type || 'choice',
       subject: q.subject || null,
       // 判题域硬规则：判不出来一律 null。调用方没给 is_correct 时默认 true
