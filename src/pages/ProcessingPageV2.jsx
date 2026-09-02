@@ -3,6 +3,7 @@ import { motion } from 'motion/react'
 import { useEffect, useRef } from 'react'
 import dayjs from 'dayjs'
 import EmptyState from '../components/EmptyState'
+import SwipeableRow from '../components/SwipeableRow'
 import { MobileList, MobileSegmentedTabs, MobileTextAction } from '../features/mobile/MobilePrimitives'
 
 const done = new Set(['done', 'graded', 'completed', 'reviewed'])
@@ -134,7 +135,7 @@ function TaskRow({ task, onRetryTask, onOpenReview }) {
   </div>
 }
 
-export default function ProcessingPageV2({ currentStudent, tasks, filteredTasks, isLoadingTasks, isInitializing, processingFilter, onFilterChange, onRetryTask, onOpenReview, onRefresh }) {
+export default function ProcessingPageV2({ currentStudent, tasks, filteredTasks, isLoadingTasks, isInitializing, processingFilter, onFilterChange, onRetryTask, onOpenReview, onRefresh, onDeleteTask }) {
   const all = (Array.isArray(tasks) ? tasks : []).filter(t => t.student_id === currentStudent?.id)
   const visible = Array.isArray(filteredTasks) ? filteredTasks : []
   const tabs = [
@@ -161,7 +162,7 @@ export default function ProcessingPageV2({ currentStudent, tasks, filteredTasks,
         </div>
       : visible.length === 0
         ? <EmptyState icon={Camera} title='还没有作业记录' description='拍一份作业后，批改进度会显示在这里' className='py-16' />
-        : <MobileList>{visible.map((task, index) => <TaskRow key={task.id || index} task={task} onRetryTask={onRetryTask} onOpenReview={onOpenReview} />)}</MobileList>}
+        : <MobileList>{visible.map((task, index) => <SwipeableRow key={task.id || index} onDelete={onDeleteTask ? () => onDeleteTask(task.id) : undefined}><TaskRow task={task} onRetryTask={onRetryTask} onOpenReview={onOpenReview} /></SwipeableRow>)}</MobileList>}
     <p className='mt-4 text-[12px]' style={{ color: 'var(--text-tertiary)' }}>批改完成后，错题会自动进入错题本</p>
   </motion.div>
 }
