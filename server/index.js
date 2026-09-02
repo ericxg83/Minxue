@@ -79,6 +79,7 @@ import handoutLectureRouter from './routes/handoutLecture.js'
 import teachingQuestionTypesRouter from './routes/teachingQuestionTypes.js'
 import weaknessRouter from './routes/weakness.js'
 import examPdfRouter from './routes/examPdf.js'
+import wrongQuestionsExportRouter from './routes/wrongQuestionsExport.js'
 import dashboardRouter from './routes/dashboard.js'
 import { runErrorDiagnosis } from './services/diagnosisService.js'
 import { cleanupStudentData } from './services/dataCleanupService.js'
@@ -2389,6 +2390,9 @@ app.delete('/api/wrong-questions/:id', async (req, res) => {
     res.status(500).json({ error: error.message })
   }
 })
+
+// 错题篮导出重练卷 PDF（router 自带绝对路径，不与上方 inline 路由冲突）
+app.use(wrongQuestionsExportRouter)
 
 // Generated Exams
 app.post('/api/generated-exams', async (req, res) => {
