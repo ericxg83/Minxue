@@ -8,6 +8,12 @@
  * 安全策略（避免把正文误当标号剥掉）：
  * 整组表决 —— 只有当【每一项都能解析出标号】且【标号恰好是 A、B、C… 的连续升序】时才剥。
  * 任一项没有标号（如 ["正确","错误"]）或标号乱序，整组原样返回。
+ *
+ * 输入容错：AI 偶尔把 options 字段返回成 JSON 字符串（而非数组），
+ * 历史事件 2026-09-02 朱思诺作业整条 task 因 options 字符串写入 jsonb 列而失败
+ * （"invalid input syntax for type json"，retry_count=3 全部失败）。
+ * 此处先尝试 JSON.parse：能解析为数组就走剥标号，不能解析原样返回（让 createQuestions
+ * 的数组兜底把它当空数组处理，避免炸 PG jsonb）。
  */
 
 // 带括号：(A) （A） [A] 【A】 「A」 ；裸字母：A. A． A、 A) A）
@@ -33,6 +39,17 @@ const parseLabeled = (raw) => {
  * @returns {any}
  */
 export const normalizeOptions = (options) => {
+  // 字符串场景：AI 偶尔把 options 返回成 JSON 字符串而不是数组。
+  // 尝试解析为数组，解析失败保持原样（createQuestions 那一层还会再用 Array.isArray 兜底，
+  // 避免 PG jsonb 列报 "invalid input syntax for type json"）。
+  if (typeof options === 'string') {
+    try {
+      const parsed = JSON.parse(options)
+      if (Array.isArray(parsed)) options = parsed
+    } catch (e) {
+      // 保留原字符串，让调用方兜底成 []
+    }
+  }
   if (!Array.isArray(options) || options.length === 0) return options
   const parsed = options.map(parseLabeled)
   if (parsed.some(p => p === null)) return options

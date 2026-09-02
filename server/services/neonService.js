@@ -61,6 +61,8 @@ export const createQuestions = async (questions) => {
     } else if (q.status === 'mastered') {
       statusValue = 'mastered'
     }
+    // 先把 q.options 处理成数组（剥标号或兜底 []），下面的对象字面量里直接引用
+    const normalizedOptions = normalizeOptions(q.options)
 
     return {
       // 防御：questions.id 无数据库默认值，调用方未提供时在此兜底生成
@@ -70,7 +72,16 @@ export const createQuestions = async (questions) => {
       // 文本列的最后一道闸门：上游任一识别路径把数组/对象传进来，
       // node-postgres 会按 PG 数组字面量序列化（{"x₁ = -1/2","x₂ = 5/2"}）写进 text 列。
       content: coerceAIText(q.content) || null,
-      options: JSON.stringify(normalizeOptions(q.options || [])),
+      // jsonb 列的最后一道闸门：上游把 AI 返回的 JSON 字符串/对象/数字直接透传时，
+      // JSON.stringify 会把它们当成 JSON 字面量序列化（带双引号的字符串），PG jsonb 列不接受。
+      // 历史事件 2026-09-02 朱思诺作业：q.options 是 AI 返回的字符串，
+      //   → normalizeOptions 原样返回字符串
+      //   → JSON.stringify('["A","B"]') 得到 '"[\"A\",\"B\"]"' 写进 jsonb 列
+      //   → PG 报 "invalid input syntax for type json"，整条任务 retry 3 次全失败
+      // 兜底策略：normalizeOptions 内部已处理字符串（JSON.parse 后剥标号）/ 数组 / 其他形态，
+      // 若解析失败（非数组、剥标号失败）原样返回；这里再保险一层——只要不是数组就强制 []，
+      // 确保写进 jsonb 的是合法 JSON 数组而不是被 stringify 的字符串字面量。
+      options: JSON.stringify(Array.isArray(normalizedOptions) ? normalizedOptions : []),
       answer: coerceAIText(q.answer) || null,
       student_answer: coerceAIText(q.student_answer) || null,
       ai_answer: coerceAIText(q.ai_answer) || null,
@@ -89,14 +100,18 @@ export const createQuestions = async (questions) => {
       status: statusValue,
       image_url: q.image_url || null,
       geometry_image_url: q.geometry_image_url || null,
-      ai_tags: JSON.stringify(q.ai_tags || []),
-      manual_tags: JSON.stringify(q.manual_tags || []),
+      // 同样的 jsonb 列兜底：AI 偶尔把 ai_tags/manual_tags 返回成字符串/对象。
+      ai_tags: JSON.stringify(Array.isArray(q.ai_tags) ? q.ai_tags : []),
+      manual_tags: JSON.stringify(Array.isArray(q.manual_tags) ? q.manual_tags : []),
       tags_source: q.tags_source || 'ai',
       difficulty: q.difficulty ?? null,
-      block_coordinates: q.block_coordinates ? JSON.stringify(q.block_coordinates) : null,
+      block_coordinates: (q.block_coordinates && typeof q.block_coordinates === 'object') ? JSON.stringify(q.block_coordinates) : null,
       question_number: q.question_number ?? null,
-      text_bbox: q.text_bbox ? JSON.stringify(q.text_bbox) : null,
-      image_bbox: (q.image_bbox || q.geometry_image?.bbox) ? JSON.stringify(q.image_bbox || q.geometry_image.bbox) : null,
+      text_bbox: (q.text_bbox && typeof q.text_bbox === 'object') ? JSON.stringify(q.text_bbox) : null,
+      image_bbox: (() => {
+        const ib = q.image_bbox || q.geometry_image?.bbox
+        return (ib && typeof ib === 'object') ? JSON.stringify(ib) : null
+      })(),
       image_type: q.image_type || null,
       page_number: q.page_number ?? null,
       confidence: q.confidence ?? 0,

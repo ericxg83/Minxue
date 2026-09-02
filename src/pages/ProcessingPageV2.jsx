@@ -38,13 +38,16 @@ const stage = t => t.status === 'failed' ? 'failed'
 
 // 失败原因分类：旧文案一律写「图片处理没有完成」，会把 AI 输出格式问题误导成图片问题，
 // 用户照着重拍会走同一条路再次失败。
+// 2026-09-02 朱思诺事故：worker 写 jsonb 列失败，PG 报小写 "invalid input syntax for type json"，
+// `/JSON|格式错误/` 是大小写敏感的，没匹配 → 走兜底文案「处理未完成，可重试」误导用户。
+// 所有正则都加 /i 标志容忍大小写，并补 PG/数据库错误关键词。
 const failReason = t => {
   const e = String(t.last_error || t.result?.error || '')
-  if (/JSON|格式错误/.test(e)) return 'AI 识别结果格式异常，可重试'
+  if (/json|格式错误|syntax error|invalid input/i.test(e)) return 'AI 识别结果格式异常，可重试'
   if (/配额|quota|限流|rate.?limit|429/i.test(e)) return 'AI 服务配额不足，稍后重试'
   if (/超时|timeout/i.test(e)) return 'AI 服务响应超时，可重试'
-  if (/分辨率|空白|无法识别|看不清|很抱歉/.test(e)) return '图片不够清晰，建议重拍'
-  if (/下载图片失败|URL|OSS|上传未成功|未成功完成/.test(e)) return '图片上传未完成，请重新上传'
+  if (/分辨率|空白|无法识别|看不清|很抱歉/i.test(e)) return '图片不够清晰，建议重拍'
+  if (/下载图片失败|URL|OSS|上传未成功|未成功完成/i.test(e)) return '图片上传未完成，请重新上传'
   return '处理未完成，可重试'
 }
 
