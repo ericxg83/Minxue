@@ -543,20 +543,105 @@ const cropLoading = ref(false)
 
 const handleCropFromPaper = () => {
   const task = store.currentTask
-  if (!task?.image_url) {
+  if (!task) {
     ElMessage.warning('当前试卷无原图')
     return
   }
-  // 直接用原图 URL 加载显示（img 标签支持跨域）
-  cropImageSource.value = task.image_url
+  // 多页试卷：按当前题目的 page_number 找到对应页的原图；
+  // 单页/找不到页图时兜底用首页或 task.image_url。
+  const question = store.currentReviewQuestion
+  const pageNum = question?.page_number
+  const pages = store.currentPaperPages
+  let pageImage = ''
+  if (pageNum != null && pages.length > 0) {
+    const page = pages.find(p => p.page_number === pageNum)
+    pageImage = page?.image_url || ''
+  }
+  if (!pageImage) pageImage = pages[0]?.image_url || task.image_url || ''
+  if (!pageImage) {
+    ElMessage.warning('当前试卷无原图')
+    return
+  }
+  cropImageSource.value = pageImage
   cropSelection.value = null
   cropPreviewUrl.value = ''
   cropSizeLabel.value = ''
   cropDialogVisible.value = true
 }
 
+const parseBbox = (b) => {
+  if (!b) return null
+  if (typeof b === 'string') { try { b = JSON.parse(b) } catch { return null } }
+  if (!b || typeof b !== 'object') return null
+  const x = b.x ?? b.x_min ?? b.left
+  const y = b.y ?? b.y_min ?? b.top
+  const width = b.width ?? b.w ?? (b.x_max != null && x != null ? b.x_max - x : 0)
+  const height = b.height ?? b.h ?? (b.y_max != null && y != null ? b.y_max - y : 0)
+  if ([x, y, width, height].some(v => typeof v !== 'number' || Number.isNaN(v))) return null
+  if (width <= 0 || height <= 0) return null
+  return { x, y, width, height }
+}
+
+const unionBbox = (a, b) => {
+  if (!a) return b
+  if (!b) return a
+  return {
+    x: Math.min(a.x, b.x),
+    y: Math.min(a.y, b.y),
+    width: Math.max(a.x + a.width, b.x + b.width) - Math.min(a.x, b.x),
+    height: Math.max(a.y + a.height, b.y + b.height) - Math.min(a.y, b.y)
+  }
+}
+
+const generateCropPreview = () => {
+  const sel = cropSelection.value
+  if (!sel || sel.w < 5 || sel.h < 5) return
+  const proxyUrl = `/api/proxy-image?url=${encodeURIComponent(cropImageSource.value)}`
+  const loadImg = new Image()
+  loadImg.crossOrigin = 'anonymous'
+  loadImg.onload = () => {
+    const cr = getCropRect()
+    if (!cr) return
+    const canvas = document.createElement('canvas')
+    canvas.width = cr.sw
+    canvas.height = cr.sh
+    const ctx = canvas.getContext('2d')
+    // 先填充白色背景，确保裁剪图在试卷上完美融合
+    ctx.fillStyle = '#ffffff'
+    ctx.fillRect(0, 0, canvas.width, canvas.height)
+    ctx.drawImage(loadImg, cr.sx, cr.sy, cr.sw, cr.sh, 0, 0, cr.sw, cr.sh)
+    cropPreviewUrl.value = canvas.toDataURL('image/png')
+  }
+  loadImg.onerror = () => {
+    console.error('代理加载原图失败')
+    ElMessage.warning('裁剪预览生成失败（原图加载异常）')
+  }
+  loadImg.src = proxyUrl
+}
+
 const cropImageLoaded = () => {
-  // 原图加载完成，可以裁剪
+  // 按题目 bbox（text_bbox ∪ image_bbox）自动预选裁剪框，省去老师手动框
+  const img = cropImageRef.value
+  if (!img) return
+  const rect = img.getBoundingClientRect()
+  if (!rect.width || !rect.height) return
+  const box = unionBbox(parseBbox(q.value?.text_bbox), parseBbox(q.value?.image_bbox))
+  if (!box) return
+  // 归一化 0-1000 坐标 → 显示像素
+  let x = (box.x / 1000) * rect.width
+  let y = (box.y / 1000) * rect.height
+  let w = (box.width / 1000) * rect.width
+  let h = (box.height / 1000) * rect.height
+  // 外扩一圈 padding（8px），让裁出来的图比 bbox 略大（保住题号/解题过程）
+  const PAD = 8
+  x = Math.max(0, x - PAD)
+  y = Math.max(0, y - PAD)
+  w = Math.min(rect.width - x, w + 2 * PAD)
+  h = Math.min(rect.height - y, h + 2 * PAD)
+  if (w < 20 || h < 20) return // bbox 太小或缺数据则不强预选
+  cropSelection.value = { x, y, w, h }
+  cropSizeLabel.value = `${Math.round(w)} × ${Math.round(h)}`
+  generateCropPreview()
 }
 const cropImageError = () => {
   console.error('原卷图片加载失败:', cropImageSource.value)
@@ -609,28 +694,7 @@ const onCropMouseUp = () => {
     cropSizeLabel.value = ''
     return
   }
-  // 通过 /api/proxy-image 加载原图（同源，canvas 不跨域）
-  const proxyUrl = `/api/proxy-image?url=${encodeURIComponent(cropImageSource.value)}`
-  const loadImg = new Image()
-  loadImg.crossOrigin = 'anonymous'
-  loadImg.onload = () => {
-    const cr = getCropRect()
-    if (!cr) return
-    const canvas = document.createElement('canvas')
-    canvas.width = cr.sw
-    canvas.height = cr.sh
-    const ctx = canvas.getContext('2d')
-    // 先填充白色背景，确保裁剪图在试卷上完美融合
-    ctx.fillStyle = '#ffffff'
-    ctx.fillRect(0, 0, canvas.width, canvas.height)
-    ctx.drawImage(loadImg, cr.sx, cr.sy, cr.sw, cr.sh, 0, 0, cr.sw, cr.sh)
-    cropPreviewUrl.value = canvas.toDataURL('image/png')
-  }
-  loadImg.onerror = () => {
-    console.error('代理加载原图失败')
-    ElMessage.warning('裁剪预览生成失败（原图加载异常）')
-  }
-  loadImg.src = proxyUrl
+  generateCropPreview()
 }
 
 const confirmCrop = async () => {
