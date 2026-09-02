@@ -245,7 +245,13 @@ export const fixFileIfNeeded = async (fileBuffer, originalName) => {
     } else if (needsHeicTranscode) {
       logs.push(`[Fix] [${filename}] 检测到 HEIC/HEIF，主动归一化为 JPEG...`)
       try {
-        fixedBuffer = await sharp(fileBuffer)
+        // Render sharp 0.33 prebuilt 不带 libde265（GPL）→ 不能直接 sharp(buf).jpeg()。
+        // 改走 heic-decode (WASM libheif 内置 libde265) → raw RGBA → sharp raw() → JPEG。
+        const heicDecode = (await import('heic-decode')).default
+        const decoded = await heicDecode({ buffer: fileBuffer })
+        fixedBuffer = await sharp(decoded.data, {
+          raw: { width: decoded.width, height: decoded.height, channels: 4 },
+        })
           .rotate()
           .jpeg({ quality: 85, progressive: true })
           .toBuffer()
