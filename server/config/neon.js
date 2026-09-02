@@ -106,7 +106,12 @@ export const LIFECYCLE_STATUS = {
 }
 
 export const getQuestionsByTask = async (taskId) => {
-  const { rows } = await query(`SELECT * FROM ${TABLES.QUESTIONS} WHERE task_id = $1 ORDER BY created_at`, [taskId])
+  // 过滤掉被老师「排除」的题（review_status='exclude'），与前端 reviewStore.js
+  // splice 语义一致：老师点了排除这题就从本份试卷里消失，下次进入也不再出现。
+  const { rows } = await query(
+    `SELECT * FROM ${TABLES.QUESTIONS} WHERE task_id = $1 AND (review_status IS NULL OR review_status != 'exclude') ORDER BY created_at`,
+    [taskId]
+  )
   return rows
 }
 

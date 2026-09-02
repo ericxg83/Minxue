@@ -358,6 +358,24 @@ export const useReviewStore = defineStore('review', () => {
     // Store manual review status on the question
     question.review_status = result
 
+    // 「排除」语义：老师认为这题不该出现在本份试卷里（OCR 错把一行识别成两行、
+    // 两道题识别成同一道、识别失败的残段等）。前端从 allQuestions 中立即移除，
+    // 后端 getQuestionsByTask 也会过滤掉，下一次进入该任务这题不再出现。
+    // review_status 仍写库为 'exclude'，作为软删除标记并让 taskStats 不计入总数。
+    if (result === REVIEW_STATUS.EXCLUDE) {
+      const idx = allQuestions.value.findIndex(q => q.id === questionId)
+      if (idx >= 0) {
+        allQuestions.value.splice(idx, 1)
+        // 删除前面的题 → 索引回退；删除的就是当前题 → 保持不变（nextQuestion 会跳）；
+        // 删除后面的题 → 不变
+        if (idx < currentReviewIndex.value) currentReviewIndex.value--
+        // 数组变空 / currentReviewIndex 越界 → clamp 到合法区间
+        if (currentReviewIndex.value >= allQuestions.value.length) {
+          currentReviewIndex.value = Math.max(0, allQuestions.value.length - 1)
+        }
+      }
+    }
+
     // 持久化 review_status 到数据库
     updateQuestionReviewStatus(questionId, result, metadata).catch(e =>
       console.error(`review_status 持久化失败 q=${questionId.substring(0, 8)}:`, e.message)

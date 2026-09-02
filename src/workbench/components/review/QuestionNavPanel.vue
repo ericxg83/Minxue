@@ -53,7 +53,7 @@
         <span class="key">←</span><span class="key">→</span> 切换
         <span class="key">C</span>正确
         <span class="key">W</span>错误
-        <span class="key">E</span>排除
+        <span class="key">E</span>删除
         <span class="key">Z</span>撤销
       </span>
     </div>

@@ -1714,6 +1714,7 @@ app.get('/api/questions/task/:taskId', async (req, res) => {
          ORDER BY created_at DESC LIMIT 1
        ) a ON TRUE
        WHERE q.task_id = $1
+         AND (q.review_status IS NULL OR q.review_status != 'exclude')
        ORDER BY COALESCE(q.page_number, 1),
                 COALESCE((q.block_coordinates->>'y')::float, 99999), q.created_at`,
       [taskId]

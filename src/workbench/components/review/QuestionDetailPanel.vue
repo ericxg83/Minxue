@@ -253,8 +253,8 @@
             <button v-if="store.reviewConfig.showExclude" class="ops-btn ops-btn-exclude"
               :class="{ 'ops-btn-active': q.review_status === 'exclude', 'animate': animatingBtn === 'exclude' }"
               @click="handleReview('exclude')">
-              <span class="ops-btn-icon">⊘</span>
-              <span>排除</span>
+              <span class="ops-btn-icon">✕</span>
+              <span>删除</span>
             </button>
           </div>
           <div class="ops-buttons-secondary">
@@ -382,7 +382,7 @@ const difficultyTagType = computed(() => {
 
 const reviewStatusLabel = computed(() => {
   if (!q.value?.review_status) return ''
-  const map = { correct: '已标记正确', wrong: '已标记错误', wrong_no_book: '错误，本次不入册', exclude: '已排除' }
+  const map = { correct: '已标记正确', wrong: '已标记错误', wrong_no_book: '错误，本次不入册', exclude: '已删除' }
   return map[q.value.review_status] || ''
 })
 const reviewStatusTagType = computed(() => {
@@ -780,7 +780,7 @@ const handleReview = async (result) => {
   const resultText = {
     correct: `已标记为${btn.correct}`,
     wrong: `已标记为${btn.wrong}`,
-    exclude: '已排除本题'
+    exclude: '已删除本题'
   }
   // 标记"错误"需完整性检查（错误题要入错题本）
   if (result === 'wrong') {

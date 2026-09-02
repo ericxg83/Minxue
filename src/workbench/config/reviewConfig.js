@@ -24,7 +24,7 @@ export const REVIEW_CONFIG = {
     buttons: {
       correct: '正确',
       wrong: '错误',
-      exclude: '排除',
+      exclude: '删除',
     },
     // 是否显示「排除」按钮
     showExclude: true,
@@ -51,7 +51,7 @@ export const REVIEW_CONFIG = {
     buttons: {
       correct: '正确',
       wrong: '错误',
-      exclude: '排除',
+      exclude: '删除',
     },
     showExclude: true,
     showWrongGate: true,
