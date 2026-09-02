@@ -122,3 +122,9 @@ real_geometry_*.png
 temp_original.vue
 temp_restore.vue
 debug-react-*.md
+
+# 调试/工具产物（不入 git）
+# audit.csv:OCR 自检审计数据,110 行含 task_id/issues 等调试字段
+audit.csv
+# .impeccable/:工具运行产物(config.json + hook.cache.json 缓存),不源码化
+.impeccable/
