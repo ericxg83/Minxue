@@ -588,12 +588,11 @@ export default function ExamReview({ task, onClose, onSave, onViewImage }) {
     </div>
   )
 
-  // ── 弹窗固定页脚：上一题 / 下一题 + 完成复核（唯一主 CTA） ──
-  // ── 弹窗固定页脚：主判定（高频）常驻，翻页降为箭头，「完成复核」（一次性）延后升起 ──
-  // 原先固定页脚给了翻页 + 完成复核共 100px，而真正高频的「正确 / 错误」在滚动区里，
-  // 长题要先滚到底才点得到。现在反过来：判定永远在拇指位置。
-  // atFirst / atLast 在滑动手势里也要用，已提到 hooks 区一并计算
-  const showComplete = needsAttentionCount === 0 || atLast
+  // ── 弹窗固定页脚：主判定（高频）常驻，翻页降为箭头 ──
+  // 「完成复核」是收尾动作，不再常驻：只在「需处理」队列全部判完时才升起，
+  // 避免在底部主 CTA 区与高频的「正确 / 错误」争位造成误触。点过一次的二次确认
+  // 仍保留：用户切到「全部」范围后也可能误触，多一道保险。
+  const showComplete = needsAttentionCount === 0
 
   const navBtnStyle = (disabled) => ({
     width: 38, height: 40, flexShrink: 0, borderRadius: 'var(--radius-8)', border: 'none',
@@ -629,11 +628,7 @@ export default function ExamReview({ task, onClose, onSave, onViewImage }) {
           }}
         >
           {saving ? <Loader2 size={14} className="animate-spin" /> : <CheckCircle2 size={15} />}
-          {confirmComplete
-            ? `还有 ${needsAttentionCount} 题未确认，仍要完成？`
-            : needsAttentionCount > 0
-              ? `完成复核（${needsAttentionCount} 题待确认）`
-              : '完成复核'}
+          {confirmComplete ? '再次点击以确认完成' : '完成复核'}
         </button>
       )}
       <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
