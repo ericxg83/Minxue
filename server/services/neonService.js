@@ -90,8 +90,11 @@ export const createQuestions = async (questions) => {
       // AI 解析自检：worker.js 在 createQuestions 前对每题调 aiParseSelfCheck，
       // 把"是否通过"和"具体 issues"两路都写进 questions 表，前端据此给红色横幅。
       // 历史数据（迁移前已存在的行）保持默认 true（视作"未自检"），不重算。
+      // ai_self_check_issues 是 jsonb 列：check.issues 是数组，必须 JSON.stringify，
+      // 直接传数组会被 node-postgres 序列化成 PG 数组字面量 {"a","b"}，jsonb 不接受
+      // → "invalid input syntax for type json"（朱思诺 09/02 第三次失败就是漏了这个）。
       ai_self_check_passed: q.ai_self_check_passed !== undefined ? q.ai_self_check_passed : true,
-      ai_self_check_issues: q.ai_self_check_issues || null,
+      ai_self_check_issues: q.ai_self_check_issues != null ? JSON.stringify(q.ai_self_check_issues) : null,
       question_type: q.question_type || 'choice',
       subject: q.subject || null,
       // 判题域硬规则：判不出来一律 null。调用方没给 is_correct 时默认 true

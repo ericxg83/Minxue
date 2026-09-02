@@ -63,12 +63,14 @@ async function main() {
   const studentId = await findOrCreateTestStudent()
   const taskId = await findOrCreateTestTask(studentId)
 
-  // 测试三组：options 是字符串、数组、缺失
+  // 测试四组：options 是字符串、数组、缺失
   const cases = [
     { label: 'options 是 JSON 字符串（朱思诺事故的根因）', options: '["A. 3/4","B. 4/3"]' },
     { label: 'options 是对象（防御）', options: { a: 'A. 3/4', b: 'B. 4/3' } },
     { label: 'options 是 undefined（防御）', options: undefined },
     { label: 'options 是数组（正常情况，必须成功）', options: ['A. 3/4', 'B. 4/3'] },
+    // 2026-09-02 二次事故：ai_self_check_issues 是数组，未 JSON.stringify 写进 jsonb 列
+    { label: 'ai_self_check_issues 是数组（第二次事故根因）', options: ['A. 3/4'], ai_self_check_issues: ['算术幻觉', 'answer 串行污染'] },
   ]
 
   let allPassed = true
