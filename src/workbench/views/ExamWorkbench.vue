@@ -59,6 +59,7 @@
           <el-button
             size="small"
             :type="row.status === 'published' ? 'warning' : 'success'"
+            :disabled="row.status !== 'published' && row.answer_status === 'ai_draft'"
             @click="handleToggleStatus(row)"
           >
             {{ row.status === 'published' ? '撤回' : '发布' }}
