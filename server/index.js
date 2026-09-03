@@ -46,6 +46,7 @@ import { migrateTaskContentHash } from './migrations/051_add_task_content_hash.j
 import { migrateWrongQuestionsUniqueIndex } from './migrations/052_dedupe_wrong_questions_unique_index.js'
 import { migrateAiSelfCheck } from './migrations/053_ai_self_check.js'
 import { migrateTaskTypeEnum } from './migrations/054_task_type_enum.js'
+import { migrateFixExamPublishedInconsistency } from './migrations/055_fix_exam_published_inconsistency.js'
 import { scheduleNightParse, scheduleWeeklyDiagnosis } from './services/nightParseService.js'
 
 const __dirname = dirname(fileURLToPath(import.meta.url))
@@ -1068,14 +1069,9 @@ app.post('/api/tasks/:taskId/save-as-answer-key', async (req, res) => {
         [name, subject || task.subject || null, grade || null]
       )
       resourceId = created.id
-    } else {
-      await query(
-        `UPDATE resources SET name = $1, subject = COALESCE($2, subject), grade = COALESCE($3, grade),
-                              status = 'published', updated_at = NOW()
-         WHERE id = $4`,
-        [name, subject || task.subject || null, grade || null, resourceId]
-      )
     }
+    // name/subject/grade 的更新并入最后一段 UPDATE，避免「status=published 但 answer_status
+    // 还是 ai_draft」的中间态窗口（旧逻辑把 status 推到 published 后，若请求中断会留下脏数据）。
 
     // v2 矩阵构造每题 answers
     const answers = []
@@ -1134,11 +1130,20 @@ app.post('/api/tasks/:taskId/save-as-answer-key', async (req, res) => {
     // 资源级 answer_status 强制 teacher_verified：老师主动点"留底为答案库"
     // = 整张试卷已确认，无需再依赖每题是否被标 teacher_verified。
     // 题目级颗粒度仍保留 ai_draft / teacher_verified，供后续追溯。
+    // 合并写入 name/subject/grade：旧 else 分支先 UPDATE name/subject/grade + status='published'
+    // 再 UPDATE status/answer_status，中断会留 status='published' + answer_status='ai_draft' 脏数据。
     const finalAnswerStatus = 'teacher_verified'
     await query(
-      `UPDATE resources SET answer_count = $1, answer_status = $2, status = 'published', updated_at = NOW()
-       WHERE id = $3`,
-      [answers.length, finalAnswerStatus, resourceId]
+      `UPDATE resources
+         SET name = $1,
+             subject = COALESCE($2, subject),
+             grade = COALESCE($3, grade),
+             answer_count = $4,
+             answer_status = $5,
+             status = 'published',
+             updated_at = NOW()
+       WHERE id = $6`,
+      [name, subject || task.subject || null, grade || null, answers.length, finalAnswerStatus, resourceId]
     )
 
     await query(
@@ -3164,6 +3169,7 @@ if (process.argv[1] === __filename || process.argv[1]?.endsWith('server/index.js
       await migrateWrongQuestionsUniqueIndex()
       await migrateTaskTypeEnum()
       await migrateAiSelfCheck()
+      await migrateFixExamPublishedInconsistency()
     } catch (err) {
       console.error('数据库迁移失败:', err.message)
     }
