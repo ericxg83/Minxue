@@ -274,11 +274,12 @@ const handleGateComplete = async () => {
 
 // 「📌 留底为答案库」手动按钮：调 save-as-answer-key 把当前 task 的答案沉淀到资源。
 // 与"完成复核"解耦——后者只更新 task.status，前者显式触发答案库覆写。
-// task 来源用 store.lastArchivableTask：复核中拿 currentTask；reviewAllDone 时 fallback 到最新已复核 exam 任务。
+// task 来源用 store.lastArchivableTask：复核中拿 currentTask；reviewAllDone 时 fallback 到最新已复核任务。
 // 复用 task.original_name 作为资源名，老师可在弹窗里修改。
+// resource_id 允许为 null：server 在 save-as-answer-key 内部会自动新建 resource_type='exam' 资源。
 const handleArchive = async () => {
   const t = store.lastArchivableTask
-  if (!t?.id || !t.resource_id) return
+  if (!t?.id) return
   let name = t.original_name || '未命名试卷'
   try {
     const { value } = await ElMessageBox.prompt(

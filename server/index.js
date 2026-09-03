@@ -1027,17 +1027,20 @@ app.post('/api/tasks/:taskId/save-as-answer-key', async (req, res) => {
     if (task.status !== 'done' && task.status !== 'reviewed') {
       return res.status(400).json({ error: '任务状态必须是 done 或 reviewed' })
     }
-    if (task.task_type !== 'exam') {
-      return res.status(400).json({ error: '仅 exam 类型任务支持存档为答案库' })
-    }
+    // 任务类型不限：原本只允许 exam（P1 二次复核），现在 manual 留底也覆盖 workbook / general，
+    // 让老师对任何已复核任务都能"留底为答案库"，复用给后续学生。
+    // resource_type 固定 'exam'：保持 ExamResourcePicker 单一查询面；task_type 与 resource_type
+    // 解耦不污染 picker 列表（picker 只看 resource_type=exam）。
 
     // 拉题目（含 ai_answer 用于判断"是否被老师改过"）
+    // 注：questions 表本身没 sub_no 列（sub_no 只在 resource_answers 上，032 迁移）；
+    // 留底时把 sub_no 留作 ''，与 resource_answers.sub_no 语义对齐（空串=整题）。
     const { rows: questions } = await query(
       `SELECT id, question_number, answer, ai_answer, student_answer, is_correct,
-              review_status, question_type, content, sub_no
+              review_status, question_type, content
        FROM ${TABLES.QUESTIONS}
        WHERE task_id = $1 AND answer IS NOT NULL
-       ORDER BY question_number ASC, sub_no ASC NULLS LAST`,
+       ORDER BY question_number ASC`,
       [taskId]
     )
     if (questions.length === 0) return res.status(400).json({ error: '该任务没有题目答案数据' })

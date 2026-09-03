@@ -570,15 +570,16 @@ export const useReviewStore = defineStore('review', () => {
   )
 
   // 「留底」目标 task：优先 currentTask；为空时（全部复核完的 empty state）回退到
-  // 最新一份已复核的 exam 任务，确保老师即便把当前 task 清掉后仍能对"刚复核完的
+  // 最新一份已复核的任务，确保老师即便把当前 task 清掉后仍能对"刚复核完的
   // 那份"做留底。只看当前学生的 studentTasks，跨学生不串。
+  // 不限 task_type：server 已放开 save-as-answer-key 的 exam-only 限制，
+  // 任何已复核的 task（workbook / general / exam）都能留底。
   const lastArchivableTask = computed(() => {
     const cur = currentTask.value
-    if (cur && cur.status === 'reviewed' && cur.task_type === 'exam' && cur.resource_id) {
+    if (cur && cur.status === 'reviewed') {
       return cur
     }
     return reviewedTasks.value
-      .filter(t => t.task_type === 'exam' && t.resource_id)
       .slice()
       .sort((a, b) => new Date(b.updated_at || 0) - new Date(a.updated_at || 0))[0] || null
   })
