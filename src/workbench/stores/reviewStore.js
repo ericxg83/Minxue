@@ -569,6 +569,20 @@ export const useReviewStore = defineStore('review', () => {
     studentTasks.value.filter(t => t.status === 'reviewed')
   )
 
+  // 「留底」目标 task：优先 currentTask；为空时（全部复核完的 empty state）回退到
+  // 最新一份已复核的 exam 任务，确保老师即便把当前 task 清掉后仍能对"刚复核完的
+  // 那份"做留底。只看当前学生的 studentTasks，跨学生不串。
+  const lastArchivableTask = computed(() => {
+    const cur = currentTask.value
+    if (cur && cur.status === 'reviewed' && cur.task_type === 'exam' && cur.resource_id) {
+      return cur
+    }
+    return reviewedTasks.value
+      .filter(t => t.task_type === 'exam' && t.resource_id)
+      .slice()
+      .sort((a, b) => new Date(b.updated_at || 0) - new Date(a.updated_at || 0))[0] || null
+  })
+
   // 其他待复核页（同一份练习卷的其他答题卡页图，不是其他试卷）
   const otherPendingPages = computed(() => {
     const t = currentTask.value
@@ -892,6 +906,7 @@ export const useReviewStore = defineStore('review', () => {
     otherPendingPages,
     pendingTasks,
     reviewedTasks,
+    lastArchivableTask,
     // 复核完成门禁 / 空状态
     reviewAllDone,
     wrongGateVisible,

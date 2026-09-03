@@ -175,10 +175,9 @@ const canNextTask = computed(() => {
 
 // 「留底为答案库」按钮启用条件：仅 exam 任务 + 已完成复核（status='reviewed'）+ 当前 task 有 resource_id。
 // 留底是把 task 答案沉淀进答案库资源的动作，复核完成才有可信答案可沉淀。
-const canArchive = computed(() => {
-  const t = store.currentTask
-  return !!(t && t.task_type === 'exam' && t.resource_id && t.status === 'reviewed')
-})
+// reviewAllDone 时 currentTask 已被清空，store.lastArchivableTask 会 fallback 到当前学生最新一份已复核 exam 任务，
+// 保证老师"刚复核完"的那份还能操作。
+const canArchive = computed(() => !!store.lastArchivableTask)
 const archiveLoading = ref(false)
 
 const onStudentChange = async (studentId) => {
@@ -275,9 +274,10 @@ const handleGateComplete = async () => {
 
 // 「📌 留底为答案库」手动按钮：调 save-as-answer-key 把当前 task 的答案沉淀到资源。
 // 与"完成复核"解耦——后者只更新 task.status，前者显式触发答案库覆写。
+// task 来源用 store.lastArchivableTask：复核中拿 currentTask；reviewAllDone 时 fallback 到最新已复核 exam 任务。
 // 复用 task.original_name 作为资源名，老师可在弹窗里修改。
 const handleArchive = async () => {
-  const t = store.currentTask
+  const t = store.lastArchivableTask
   if (!t?.id || !t.resource_id) return
   let name = t.original_name || '未命名试卷'
   try {
