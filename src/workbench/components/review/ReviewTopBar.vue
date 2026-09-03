@@ -132,7 +132,7 @@
 </template>
 
 <script setup>
-import { ref, computed, watch } from 'vue'
+import { ref, computed, watch, inject } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { useReviewStore } from '../../stores/reviewStore'
 import { retryTask } from '../../../services/apiService'
@@ -140,6 +140,11 @@ import StatusIcon from './StatusIcon.vue'
 import { WRONG_BOOK_SKIP_REASONS } from '../../../utils/reviewDecision'
 
 const store = useReviewStore()
+
+// ReviewWorkspace 提供的 archiveState：hidden / draft / published
+//   draft → 首次复核（resource 还是 draft），点"完成复核"会触发留底确认
+//   published → 已留底，直接提交
+const archiveState = inject('archiveState', ref('hidden'))
 
 const selectedStudentId = ref('')
 const selectedTaskId = ref('')
@@ -189,6 +194,21 @@ const goNextTask = async () => {
   }
 }
 
+// 首次复核前弹"留底"确认；非首次（archiveState='published'）直接走
+const confirmArchiveIfFirstReview = async () => {
+  if (archiveState.value !== 'draft') return
+  try {
+    await ElMessageBox.confirm(
+      '📌 这份试卷将作为答案库留底保存。\n\n完成后将自动发布到答案库，所有后续学生可复用此份答案。',
+      '首次复核',
+      { confirmButtonText: '确认留底', cancelButtonText: '取消', type: 'info' }
+    )
+  } catch {
+    return false  // 老师点取消，啥也不做
+  }
+  return true
+}
+
 // 完成批改
 const handleComplete = async () => {
   // 门禁 → 完成复核 → 自动跳下一份
@@ -197,6 +217,7 @@ const handleComplete = async () => {
     store.openWrongGate(list)
     return
   }
+  if (!(await confirmArchiveIfFirstReview())) return
   await doComplete()
 }
 
@@ -252,6 +273,7 @@ const handleSkipBook = async (item) => {
 const handleGateComplete = async () => {
   if (store.unresolvedWrongQuestions.length > 0) return
   store.wrongGateVisible = false
+  if (!(await confirmArchiveIfFirstReview())) return
   await doComplete()
 }
 

@@ -58,10 +58,11 @@
 </template>
 
 <script setup>
-import { computed, onMounted, onUnmounted, ref } from 'vue'
+import { computed, onMounted, onUnmounted, provide, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { Check, CircleCheck, Document } from '@element-plus/icons-vue'
 import { useReviewStore } from '../../stores/reviewStore'
+import { getResource } from '../../../services/apiService'
 import ReviewTopBar from './ReviewTopBar.vue'
 import QuestionNavPanel from './QuestionNavPanel.vue'
 import PaperViewerPanel from './PaperViewerPanel.vue'
@@ -84,17 +85,41 @@ const goToTodo = () => router.push('/todo')
 const goToWrongBook = () => router.push({ path: '/wrongbook', query: { studentId: store.currentStudent?.id } })
 const goToStudents = () => router.push('/students')
 
+// 当前 task 关联 resource 的实际 status。
+// 必须用 GET /resources/:id 拿真实状态，不能从 task.status 推（B 学生复用 A 答案库时
+// task.status 仍是 done，会被误判为 draft，触发错误的"首次留底"弹窗）。
+const currentResourceStatus = ref(null)
+const loadResourceStatus = async (resourceId) => {
+  if (!resourceId) {
+    currentResourceStatus.value = null
+    return
+  }
+  try {
+    const r = await getResource(resourceId)
+    currentResourceStatus.value = r?.status || null
+  } catch (e) {
+    console.warn('[archive] 加载 resource 状态失败:', e?.message)
+    currentResourceStatus.value = null
+  }
+}
+watch(() => store.currentTask?.resource_id, (rid) => {
+  loadResourceStatus(rid)
+}, { immediate: true })
+
 // v4 答案库状态展示：
-//   hidden    → 非 exam 任务，不展示
-//   draft     → exam 任务且 task.resource_id 已建（worker 已建草稿），但 task.status 还未到 reviewed
-//   published → task.status === 'reviewed' → 后端已自动推 published
+//   hidden    → 非 exam 任务 / 没关联 resource，不展示
+//   draft     → exam 任务且 resource.status === 'draft'（首次复核，会触发留底确认）
+//   published → resource.status === 'published'（已留底，B/C/D 学生复核时）
 const archiveState = computed(() => {
   const t = store.currentTask
   if (!t) return 'hidden'
   if (t.task_type !== 'exam') return 'hidden'
   if (!t.resource_id) return 'hidden'
-  return t.status === 'reviewed' ? 'published' : 'draft'
+  return currentResourceStatus.value === 'published' ? 'published' : 'draft'
 })
+
+// 暴露给 ReviewTopBar.handleComplete 弹"留底"确认用
+provide('archiveState', archiveState)
 
 // ── 初始化：加载数据 ──
 onMounted(async () => {

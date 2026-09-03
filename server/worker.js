@@ -5748,9 +5748,20 @@ try {
       console.log(`ℹ️  [Auto-sediment] 无可用答案，跳过沉淀`)
     } else {
       const subject = job.data.subject || taskMeta.subject || null
-      // 默认用 task.original_name（worker 已在 line 5373 清洗过卷面标题）；
-      // 老师可在 PC 答案库列表点重命名修正
-      const resourceName = originalName || `试卷_${new Date().toISOString().slice(0, 10)}`
+      // 命名回落链：OCR 抽到的卷面大标题 → 首页首道题题干前 20 字（去题号）→ 任务原名 → 试卷_日期
+      // 第二档接受"1. 下列说法正确的是"这种题目开头，老师可在 PC 答案库列表点重命名修正
+      const firstLineFromContent = (() => {
+        const firstQ = questions.find(q => q && q.content && String(q.content).trim())
+        if (!firstQ) return null
+        const cleaned = String(firstQ.content).trim()
+          .replace(/^[\s\d.、．)\]）]+/, '')
+          .slice(0, 20)
+        return cleaned || null
+      })()
+      const resourceName = ocrPageTitle
+        || firstLineFromContent
+        || originalName
+        || `试卷_${new Date().toISOString().slice(0, 10)}`
 
       const { rows: [newResource] } = await query(
         `INSERT INTO resources (resource_type, name, subject, answer_status, status, answer_count)
