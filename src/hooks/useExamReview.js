@@ -3,7 +3,7 @@ import { useToast } from '../components/ToastProvider'
 import {
   updateQuestion, addWrongQuestions, deleteWrongQuestion, updateWrongQuestionStatus,
   getQuestionsByTask, getWrongQuestionsByStudent, invalidateCache, recalculateTaskStats,
-  updateTaskStatus
+  updateTaskStatus, getResource
 } from '../services/apiService'
 import { getStatusInfo } from '../pages/ExamReview/status.jsx'
 import { REVIEW_STATUS, getReviewState, WRONG_BOOK_LIFECYCLE } from '../utils/reviewDecision'
@@ -224,6 +224,18 @@ export function useExamReview({ task, onSave }) {
       if (!saved) return false
     }
     if (!task?.id) return false
+    // 首次复核（exam 任务 + resource 还是 draft）→ 弹"留底"确认，与 PC 端 ReviewTopBar 对齐。
+    // 拿不到 resource 状态不阻断流程；非 exam 任务或 resource 已 published 直接走。
+    if (task.task_type === 'exam' && task.resource_id) {
+      try {
+        const r = await getResource(task.resource_id)
+        if (r?.status === 'draft' && !window.confirm('📌 这份试卷将作为答案库留底保存。\n\n完成后将自动发布到答案库，所有后续学生可复用此份答案。\n\n确认留底？')) {
+          return false
+        }
+      } catch (e) {
+        console.warn('[mobile-archive-confirm] 加载 resource 状态失败:', e?.message)
+      }
+    }
     setSaving(true)
     try {
       await updateTaskStatus(task.id, 'reviewed')
