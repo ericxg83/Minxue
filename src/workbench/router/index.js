@@ -37,6 +37,12 @@ const routes = [
     component: () => import('../views/ExamWorkbench.vue'),
     meta: { requiresPC: true }
   },
+  // 2026-09-03 简化：删了 /paper/:id/review（ExamAnswerReview）。
+  // 历史书签/链接落到 /paper 列表，避免空页。
+  {
+    path: '/paper/:catchAll(.*)',
+    redirect: '/paper'
+  },
   {
     path: '/students',
     name: 'Students',
@@ -96,12 +102,6 @@ const routes = [
     path: '/worksheets/:id/review',
     name: 'WorksheetReview',
     component: () => import('../views/WorksheetReview.vue'),
-    meta: { requiresPC: true }
-  },
-  {
-    path: '/paper/:id/review',
-    name: 'ExamAnswerReview',
-    component: () => import('../views/ExamAnswerReview.vue'),
     meta: { requiresPC: true }
   },
   {

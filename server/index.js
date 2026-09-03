@@ -787,20 +787,23 @@ app.put('/api/tasks/:taskId', async (req, res) => {
     )
     if (rows.length === 0) return res.status(404).json({ error: '任务不存在' })
 
-    // v4 自动发布：老师"完成复核"（status→reviewed））→ 草稿资源自动升 published。
+    // v4 自动发布：老师"完成复核"（status→reviewed））→ 资源自动升 teacher_verified。
     // 语义：老师点完成复核 = 整份 task 已被审过 → 资源可信度升 teacher_verified。
     // 即便某些单题仍是 ai_draft（老师没改 AI 答案），整体已可信。
+    // 2026-09-03 简化：去掉 AND status='draft' 限制，让任何 exam 资源在 reviewed 时
+    // 都刷新 answer_status。已 published + ai_draft 的旧资源（新闵学校这条）现在也能
+    // 通过老师完成任一次复核 → 一键背书，不再需要简陋的 ExamAnswerReview 逐题审。
     if (status === 'reviewed') {
       try {
         await query(
           `UPDATE ${TABLES.RESOURCES}
-           SET status = 'published', answer_status = 'teacher_verified', updated_at = NOW()
+           SET answer_status = 'teacher_verified', updated_at = NOW()
            WHERE id = (SELECT resource_id FROM ${TABLES.TASKS} WHERE id = $1)
              AND resource_type = 'exam'
-             AND status = 'draft'`,
+             AND answer_status != 'teacher_verified'`,
           [taskId]
         )
-        console.log(`✅ [Auto-publish] 老师完成复核 task=${taskId.slice(0, 8)} → 关联草稿资源已升 published`)
+        console.log(`✅ [Auto-publish] 老师完成复核 task=${taskId.slice(0, 8)} → 关联资源已升 teacher_verified`)
       } catch (publishErr) {
         console.error('[Auto-publish] 失败:', publishErr.message)
       }

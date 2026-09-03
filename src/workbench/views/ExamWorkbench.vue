@@ -48,13 +48,10 @@
       <el-table-column label="创建时间" width="160">
         <template #default="{ row }">{{ formatDate(row.created_at) }}</template>
       </el-table-column>
-      <el-table-column label="操作" width="340" fixed="right">
+      <el-table-column label="操作" width="240" fixed="right">
         <template #default="{ row }">
           <el-button size="small" @click="handleReReview(row)" :disabled="row.answer_count === 0">
             复核
-          </el-button>
-          <el-button size="small" @click="handleReview(row)" :disabled="row.answer_count === 0">
-            审核答案
           </el-button>
           <el-button
             size="small"
@@ -211,12 +208,6 @@ const handleRename = async () => {
   renaming.value = false
 }
 
-const handleReview = (row) => {
-  router.push(`/paper/${row.id}/review`)
-}
-
-// P1-A：进入 task 复核页（v4：老师改题 → syncDraftAnswerBank 实时同步资源答案）
-// 单 task 直接跳；多 task 弹选择器让老师选；0 task 提示清理资源
 const handleReReview = async (row) => {
   taskPickerLoading.value = true
   showTaskPicker.value = true
