@@ -563,9 +563,10 @@ const startParse = async () => {
     return
   }
 
-  // 分开模式：必须上传题目PDF和答案PDF
-  if (!isCombined.value && (!selectedQuestionPdf.value || !selectedPdf.value)) {
-    ElMessage.warning('请上传题目PDF和答案PDF')
+  // 分开模式：必须上传答案 PDF；题目 PDF 可选——只上传答案也能解析（纯答案入库），
+  // 有题目 PDF 则同时上传，question_pdf_url 保持为 null/旧值，审核页由 pdf_url 兜底展示
+  if (!isCombined.value && !selectedPdf.value) {
+    ElMessage.warning('请上传答案 PDF')
     return
   }
 
