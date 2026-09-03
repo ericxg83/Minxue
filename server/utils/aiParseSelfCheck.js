@@ -29,6 +29,11 @@ const ANSWER_MARKER_PATTERNS = [
  * 从 analysis 文本中抽"最终答案"字段。
  * 直接复用 worker.js 现有逻辑（CAP/SEP 模板避小数点误切 + tail(800) 截断）。
  * 返回的字符串是模型声称的最终答案，可包含逗号/分号分隔的多空答案。
+ *
+ * 2026-09-03 增 fallback：AI 在 analysis 末尾以"= 数/根式/分数"形式给答案，
+ * 但 answer 字段写错（典型如题 14：analysis 末尾 "= 11/5"，answer 写 "√5"）。
+ * 抓不到会导致自检全套通过、answer 字段悄悄错。fallback 限定取末行末段，避免
+ * 误抓 analysis 中间步骤的等式右边。
  */
 export function extractFinalAnswerFromAnalysis(analysis) {
   if (!analysis || typeof analysis !== 'string') return null
@@ -39,6 +44,14 @@ export function extractFinalAnswerFromAnalysis(analysis) {
       const extracted = match[1].trim().replace(/[，,；;、.]+$/, '').trim()
       if (extracted) return extracted
     }
+  }
+  // Fallback：analysis 末行以"= X"结尾，X 含数字/根号/字母/分数。
+  // 取末行（按换行/句号切），避免抓到中间步骤的等式右边。
+  const lastLine = tail.split(/[\n。]/).filter(s => s.trim()).pop() || tail
+  const m = lastLine.match(/=\s*([^=\n]+\S)\s*[.。]?\s*$/)
+  if (m && m[1]) {
+    const extracted = m[1].trim()
+    if (extracted) return extracted
   }
   return null
 }
@@ -179,6 +192,36 @@ export function aiParseSelfCheck(aiResult) {
     const sOnly = sNums.filter(x => !aNums.includes(x))
     if (jac > 0.6 && aOnly.length === 0 && sOnly.length > 0) {
       issues.push('serial_pollution')
+    }
+  }
+
+  // 2026-09-03 新增：answer 末段 = 右侧 与 analysis 抽出的最终答案不一致。
+  // 典型场景：题 14 answer="a = ±1；√(b+√c) = √5"，analysis 末尾 "= 11/5"，
+  // AI 把第 (2) 题的最终答案算对了，但 answer 字段抄错成 √5。光改
+  // extractFinalAnswerFromAnalysis 让它能抽出 11/5 不够——还要比对答案字段自己
+  // 写的最后子答案和分析算出的答案是否一致。
+  // 限制：answer 含 = 才检测（无 = 的纯数值答案靠 arithmetic_mismatch 覆盖），
+  // 两侧都是纯数值才走这条路（函数表达式如 y=½(x-2)² 让位给 arithmetic_mismatch）。
+  // 用数字串集合比对——规范化字符串会把"√5"归到"5"被"11/5"包含，掩盖 bug。
+  if (typeof answer === 'string' && answer.trim() && /=/.test(answer)) {
+    const extractedFromAnalysis = extractFinalAnswerFromAnalysis(analysis)
+    const lastEqMatch = answer.match(/=\s*([^=]+?)\s*[.。;；]?\s*$/)
+    const answerLast = lastEqMatch ? lastEqMatch[1].trim() : null
+    // 纯数值判断：只允许数字、空格、+/-/*/÷、/、√、±、(小数点/等号等基础算符)
+    const isPureNumerical = (s) => /^[\d\s.+\-/(×÷)]*[\d/√±][\d\s.+\-/(×÷)]*$/.test((s || '').replace(/^=/, '').trim())
+    if (extractedFromAnalysis && answerLast && answerLast.length <= 20 && extractedFromAnalysis.length <= 20
+        && isPureNumerical(extractedFromAnalysis) && isPureNumerical(answerLast)) {
+      const answerNums = extractNumericTokens(answerLast)
+      const extractedNums = extractNumericTokens(extractedFromAnalysis)
+      if (answerNums.length > 0 && extractedNums.length > 0) {
+        const ansSet = new Set(answerNums)
+        const extSet = new Set(extractedNums)
+        const sameNums = answerNums.length === extractedNums.length && answerNums.every((n, i) => n === extractedNums[i])
+        const sameSet = ansSet.size === extSet.size && [...ansSet].every(x => extSet.has(x))
+        if (!sameNums && !sameSet) {
+          issues.push('answer_extracted_mismatch')
+        }
+      }
     }
   }
 
