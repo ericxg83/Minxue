@@ -94,6 +94,11 @@
         @click="handleComplete">
         ✓ {{ store.reviewConfig.completeLabel }}
       </el-button>
+      <el-button size="default" plain
+        :disabled="!canArchive" :loading="archiveLoading"
+        @click="handleArchive">
+        📌 留底为答案库
+      </el-button>
       <el-button size="default" type="primary" :disabled="!canNextTask" @click="goNextTask">
         ▶ 下一份
       </el-button>
@@ -135,7 +140,7 @@
 import { ref, computed, watch, inject } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { useReviewStore } from '../../stores/reviewStore'
-import { retryTask } from '../../../services/apiService'
+import { retryTask, saveTaskAsAnswerKey } from '../../../services/apiService'
 import StatusIcon from './StatusIcon.vue'
 import { WRONG_BOOK_SKIP_REASONS } from '../../../utils/reviewDecision'
 
@@ -168,6 +173,14 @@ const canNextTask = computed(() => {
   return idx >= 0 && idx < store.pendingTasks.length - 1
 })
 
+// 「留底为答案库」按钮启用条件：仅 exam 任务 + 已完成复核（status='reviewed'）+ 当前 task 有 resource_id。
+// 留底是把 task 答案沉淀进答案库资源的动作，复核完成才有可信答案可沉淀。
+const canArchive = computed(() => {
+  const t = store.currentTask
+  return !!(t && t.task_type === 'exam' && t.resource_id && t.status === 'reviewed')
+})
+const archiveLoading = ref(false)
+
 const onStudentChange = async (studentId) => {
   const student = store.students.find(s => s.id === studentId)
   if (!student) return
@@ -194,21 +207,6 @@ const goNextTask = async () => {
   }
 }
 
-// 首次复核前弹"留底"确认；非首次（archiveState='published'）直接走
-const confirmArchiveIfFirstReview = async () => {
-  if (archiveState.value !== 'draft') return
-  try {
-    await ElMessageBox.confirm(
-      '📌 这份试卷将作为答案库留底保存。\n\n完成后将自动发布到答案库，所有后续学生可复用此份答案。',
-      '首次复核',
-      { confirmButtonText: '确认留底', cancelButtonText: '取消', type: 'info' }
-    )
-  } catch {
-    return false  // 老师点取消，啥也不做
-  }
-  return true
-}
-
 // 完成批改
 const handleComplete = async () => {
   // 门禁 → 完成复核 → 自动跳下一份
@@ -217,7 +215,6 @@ const handleComplete = async () => {
     store.openWrongGate(list)
     return
   }
-  if (!(await confirmArchiveIfFirstReview())) return
   await doComplete()
 }
 
@@ -273,8 +270,46 @@ const handleSkipBook = async (item) => {
 const handleGateComplete = async () => {
   if (store.unresolvedWrongQuestions.length > 0) return
   store.wrongGateVisible = false
-  if (!(await confirmArchiveIfFirstReview())) return
   await doComplete()
+}
+
+// 「📌 留底为答案库」手动按钮：调 save-as-answer-key 把当前 task 的答案沉淀到资源。
+// 与"完成复核"解耦——后者只更新 task.status，前者显式触发答案库覆写。
+// 复用 task.original_name 作为资源名，老师可在弹窗里修改。
+const handleArchive = async () => {
+  const t = store.currentTask
+  if (!t?.id || !t.resource_id) return
+  let name = t.original_name || '未命名试卷'
+  try {
+    const { value } = await ElMessageBox.prompt(
+      '将当前这份试卷的答案写入答案库，可修改资源名称。',
+      '📌 留底为答案库',
+      {
+        inputValue: name,
+        inputPlaceholder: '资源名称',
+        confirmButtonText: '确认留底',
+        cancelButtonText: '取消',
+        inputValidator: (val) => (val && val.trim() ? true : '资源名不能为空'),
+      }
+    )
+    name = (value || '').trim() || name
+  } catch {
+    return
+  }
+  archiveLoading.value = true
+  try {
+    await saveTaskAsAnswerKey(t.id, {
+      name,
+      subject: t.subject || null,
+      grade: t.grade || null,
+    })
+    ElMessage.success(`已留底：${name}`)
+  } catch (err) {
+    const msg = err?.response?.data?.error || err?.message || '留底失败，请重试'
+    ElMessage.error(msg)
+  } finally {
+    archiveLoading.value = false
+  }
 }
 
 // 撤销最近一次人工判定（仅回退前端状态，不反向写库）
