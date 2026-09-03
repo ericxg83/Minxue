@@ -1131,8 +1131,10 @@ app.post('/api/tasks/:taskId/save-as-answer-key', async (req, res) => {
     await replaceResourceAnswers(resourceId, answers)
 
     // 更新 resource 元信息
-    const teacherVerifiedCount = answers.filter(a => a.answer_status === 'teacher_verified').length
-    const finalAnswerStatus = teacherVerifiedCount > 0 ? 'teacher_verified' : 'ai_draft'
+    // 资源级 answer_status 强制 teacher_verified：老师主动点"留底为答案库"
+    // = 整张试卷已确认，无需再依赖每题是否被标 teacher_verified。
+    // 题目级颗粒度仍保留 ai_draft / teacher_verified，供后续追溯。
+    const finalAnswerStatus = 'teacher_verified'
     await query(
       `UPDATE resources SET answer_count = $1, answer_status = $2, status = 'published', updated_at = NOW()
        WHERE id = $3`,
