@@ -4,6 +4,7 @@ import { ArrowLeft, Camera, Image as ImageIcon, Loader2, Upload, ClipboardList, 
 import { Toast } from 'antd-mobile'
 import { getRetryTask } from '../../services/apiService'
 import { taskService } from '../../services/taskService'
+import { getPreviewUrl } from '../../utils/heicPreview'
 import dayjs from 'dayjs'
 
 // 状态映射（spec：待批改 / 批改中 / 已完成）
@@ -64,17 +65,21 @@ export default function RetryTask({ taskId, onBack }) {
   const isDone = status === 'graded'
 
   // 把 File 列表转为预览对象（保留 File 引用用于上传）
-  const toPreviews = (files) =>
-    Array.from(files).map((f) => ({
-      file: f,
-      url: f.type?.startsWith('image/') ? URL.createObjectURL(f) : null,
-      name: f.name
-    }))
+  // HEIC 走 heicPreview.getPreviewUrl 异步转 jpg 给 <img> 显示。
+  const toPreviews = async (files) =>
+    await Promise.all(
+      Array.from(files).map(async (f) => ({
+        file: f,
+        url: await getPreviewUrl(f),
+        name: f.name
+      }))
+    )
 
-  const handleSelectFiles = (e) => {
+  const handleSelectFiles = async (e) => {
     const files = e.target.files
     if (!files || files.length === 0) return
-    setPendingFiles((prev) => [...prev, ...toPreviews(files)])
+    const previews = await toPreviews(files)
+    setPendingFiles((prev) => [...prev, ...previews])
     e.target.value = ''
   }
 

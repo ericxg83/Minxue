@@ -6,6 +6,7 @@ import { taskService } from '../services/taskService'
 import { recognizeQuestions, compressImage, saveRecognitionResult } from '../services/aiService'
 import { detectQRCode, groupFilesByQRCode, isRetryPaperQRCode } from '../services/qrDetectionService'
 import { compressImagesForUpload, describeUploadFailure } from '../utils/imageUtils'
+import { getPreviewUrl } from '../utils/heicPreview'
 import { uploadImage, createTask, addWrongQuestions, clearStudentCaches, invalidateCache } from '../services/apiService'
 import { __pendingUploadStore } from '../features/upload/pendingUploadStore'
 
@@ -66,15 +67,17 @@ export function useUploadFlow({ loadTasks, isInitializing }) {
   const homeworkChoiceRef = useRef([])
   homeworkChoiceRef.current = homeworkChoiceFiles
 
-  const toPreviews = (files) =>
-    Array.from(files).map((f) => ({
-      file: f,
-      url: f.type?.startsWith('image/') ? URL.createObjectURL(f) : null,
-      name: f.name
-    }))
+  const toPreviews = async (files) =>
+    await Promise.all(
+      Array.from(files).map(async (f) => ({
+        file: f,
+        url: await getPreviewUrl(f),
+        name: f.name
+      }))
+    )
 
-  const handleStagingSelectFiles = (e) => {
-    const previews = toPreviews(e.target.files || [])
+  const handleStagingSelectFiles = async (e) => {
+    const previews = await toPreviews(e.target.files || [])
     if (e.target && 'value' in e.target) e.target.value = ''
     if (previews.length === 0) return
     setStagingFiles((prev) => [...prev, ...previews])
