@@ -57,29 +57,32 @@
         </div>
         <div class="ops-cmp-divider"></div>
         <div class="ops-compare-item">
-          <span class="ops-cmp-label">
-            参考答案
-            <span v-if="editing" style="color:var(--wb-warning);font-weight:400;"> 编辑</span>
-          </span>
+          <div class="ops-cmp-label-row">
+            <span class="ops-cmp-label">
+              参考答案
+              <span v-if="editing" style="color:var(--wb-warning);font-weight:400;"> 编辑</span>
+            </span>
+            <!-- 截图/拍照 → 后端视觉模型识别 → 弹窗预览 → 一键填入。
+                 老师手敲 \frac、\sqrt 等 KaTeX 命令极易出错，这个按钮直接解决。 -->
+            <el-upload v-if="editing"
+              :show-file-list="false"
+              :before-upload="handleRecognizeAnswerBeforeUpload"
+              accept=".jpg,.jpeg,.png,.webp,.heic,.heif,image/jpeg,image/png,image/webp,image/heic,image/heif">
+              <el-button type="default" :loading="recognizeLoading" class="ops-ans-recognize-btn">
+                <el-icon><Camera /></el-icon> 📷 截图识别答案
+              </el-button>
+            </el-upload>
+          </div>
           <!-- AI 解析自检未通过时标红 + 给老师"答案可能错"的红色横幅。
                数据来自 worker.js 调 aiParseSelfCheck 写入 questions.ai_self_check_issues。
-               移动端 Grading/index.jsx:538 已对齐同样 UX，避免老师改题无据可依。 -->
+               移动端 Grading\index.jsx:538 已对齐相同 UX，避免老师改题无据可依。 -->
           <span v-if="q.ai_self_check_passed === false"
                 class="ops-self-check-tag"
                 :title="`AI 解析可能不准确：${(q.ai_self_check_issues || []).join(' / ')}`">
             ⚠ AI 不可信
           </span>
-          <div v-if="editing" class="ops-ans-edit-wrap">
+          <div v-if="editing">
             <el-input v-model="form.answer" type="textarea" :autosize="{ minRows: 1, maxRows: 4 }" placeholder="标准答案（支持从 AI 解答页面粘贴特殊字符 ± √ 等）" />
-            <!-- 截图/拍照 → 后端视觉模型识别 → 弹窗预览 → 一键填入。
-                 老师手敲 \frac、\sqrt 等 KaTeX 命令极易出错，这个按钮直接解决。 -->
-            <el-upload :show-file-list="false"
-              :before-upload="handleRecognizeAnswerBeforeUpload"
-              accept=".jpg,.jpeg,.png,.webp,.heic,.heif,image/jpeg,image/png,image/webp,image/heic,image/heif">
-              <el-button size="small" type="primary" plain :loading="recognizeLoading" class="ops-ans-recognize-btn">
-                  <el-icon><Camera /></el-icon> 截图识别答案
-                </el-button>
-            </el-upload>
           </div>
           <span v-else-if="q.answer" class="ops-cmp-value correct-val">
             <MathRender :content="q.answer" autoDetect tag="span" />
@@ -1109,15 +1112,16 @@ const handleRetryGeometry = async () => {
   color: var(--wb-text-tertiary);
   letter-spacing: 0.5px;
 }
-.ops-ans-edit-wrap {
+.ops-cmp-label-row {
   display: flex;
-  flex-direction: column;
-  align-items: flex-start;
-  gap: 6px;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
 }
 .ops-ans-recognize-btn {
   font-size: 12px !important;
-  padding: 4px 10px !important;
+  padding: 5px 12px !important;
+  height: 30px !important;
 }
 
 .ops-cmp-value {
