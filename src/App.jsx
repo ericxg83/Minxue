@@ -36,6 +36,7 @@ import HomeDashboard from './components/HomeDashboardV2'
 import WrongBookPage from './pages/WrongBookPageV2'
 import ExamPage from './pages/ExamPageV2'
 import WorksheetPicker from './components/WorksheetPicker'
+import ConfirmDialogHost from './components/ConfirmDialog'
 
 import { useToast, ToastProvider } from './components/ToastProvider'
 import dayjs from 'dayjs'
@@ -1142,6 +1143,9 @@ export default function App() {
             onConfirm={handleConfirmDelete}
           />
         )}
+
+        {/* 全局 Promise-based 确认弹窗宿主（无 visible 时不渲染内容，仅注册 setState） */}
+        <ConfirmDialogHost />
 
         {/* Exam Review / 复审 */}
         {showExamReview && reviewTask && (
