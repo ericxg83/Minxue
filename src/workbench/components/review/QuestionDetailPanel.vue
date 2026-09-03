@@ -61,7 +61,7 @@
             参考答案
             <span v-if="editing" style="color:var(--wb-warning);font-weight:400;"> 编辑</span>
           </span>
-          <el-input v-if="editing" v-model="form.answer" size="default" placeholder="标准答案" />
+          <el-input v-if="editing" v-model="form.answer" type="textarea" :autosize="{ minRows: 1, maxRows: 4 }" placeholder="标准答案（支持从 AI 解答页面粘贴特殊字符 ± √ 等）" />
           <span v-else-if="q.answer" class="ops-cmp-value correct-val">
             <MathRender :content="q.answer" autoDetect tag="span" />
           </span>
