@@ -357,7 +357,6 @@ import { getGeometryDisplayUrl, getTikzStatus } from '../../../utils/geometryDis
 import { tikzToSvg } from '../../../utils/tikzGenerator'
 import { normalizeOptions } from '../../../utils/optionText'
 import { getReviewStateLabel, getUnjudgedReasonText, getAiAnswerRiskText } from '../../../utils/reviewDecision'
-import { isHeicFile, getPreviewUrl } from '../../../utils/heicPreview'
 import { ElMessage, ElMessageBox, ElLoading } from 'element-plus'
 import { DocumentChecked, Delete, Plus, Upload, Picture, EditPen, ArrowLeft, ArrowRight, ArrowDown, RefreshLeft, Crop, Camera } from '@element-plus/icons-vue'
 import MathRender from '../MathRender.vue'
@@ -843,16 +842,10 @@ const handleRecognizeAnswerBeforeUpload = async (file) => {
     URL.revokeObjectURL(recognizePreviewUrlToRevoke)
     recognizePreviewUrlToRevoke = ''
   }
-  try {
-    if (isHeicFile(file)) {
-      recognizePreviewUrl.value = await getPreviewUrl(file)
-      recognizePreviewUrlToRevoke = recognizePreviewUrl.value
-    } else {
-      recognizePreviewUrl.value = URL.createObjectURL(file)
-    }
-  } catch {
-    recognizePreviewUrl.value = ''
-  }
+  // 直接走原生 URL.createObjectURL 给预览；HEIC 由后端 fixFileIfNeeded 转码，
+  // 前端 heicPreview 依赖 heic-decode 包会拖垮批改中心 bundle（vite 解析失败）。
+  recognizePreviewUrl.value = URL.createObjectURL(file)
+  recognizePreviewUrlToRevoke = recognizePreviewUrl.value
 
   recognizeLoading.value = true
   try {
