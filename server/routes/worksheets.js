@@ -1011,7 +1011,9 @@ export async function doParseOcrBatched(worksheetId, fileBuffer, totalPages, pre
       warnings.push(`PDF 共 ${totalPages} 页，超过 ${MAX_TOTAL_PAGES} 页解析上限，仅解析了前 ${MAX_TOTAL_PAGES} 页。`)
     }
     if (warnings.length === 0 && lowConfidence.length > count * 0.5) {
-      warnings.push('低置信度条目偏多，可能混入了题干内容。建议裁剪为纯答案页后重新上传。')
+      // 与单趟路径同步：低置信度是 OCR 质量问题，不是 PDF 内容问题，
+      // 不再建议用户去"裁剪"——对纯答案 PDF 用户无意义。
+      warnings.push('OCR 识别置信度偏低，建议在审核页复核若干条答案。')
     }
   }
 
@@ -1100,7 +1102,11 @@ async function processOcrResults(worksheetId, parsedAnswers, options = {}) {
   } else if (ocrTruncatedInfo) {
     warning = `${sourceLabel}共 ${ocrTruncatedInfo.totalPages} 页，仅识别了前 ${ocrTruncatedInfo.ocrPages} 页。若答案位于文件末尾，请裁剪为纯答案页后重新上传。`
   } else if (!markerFound && realLowConfidence.length > parsedAnswers.length * 0.5) {
-    warning = `未检测到"参考答案"标记，且低置信度条目偏多，可能混入了题干内容。建议裁剪为纯答案页后重新上传。`
+    // 旧文案"可能混入题干内容/建议裁剪为纯答案页"对纯答案 PDF 用户是误导：
+    // marker regex 不匹配只能说明排版用词与硬编码不一致（如"答案与解析"、
+    // 纯题号开头等），不代表 PDF 不纯；低置信度来自 OCR 视觉识别，与 PDF
+    // 内容无关。改为只陈述客观事实并指向可执行的复核入口。
+    warning = `未在首页找到"参考答案/答案"标题，且 OCR 识别置信度偏低，建议在审核页复核前若干条归属（不影响入库）。`
   }
 
   // 题号连续性异常：每条都列出来（前 5 条 + 总数），便于老师/运维定位具体单元
