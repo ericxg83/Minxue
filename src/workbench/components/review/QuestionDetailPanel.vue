@@ -61,6 +61,14 @@
             参考答案
             <span v-if="editing" style="color:var(--wb-warning);font-weight:400;"> 编辑</span>
           </span>
+          <!-- AI 解析自检未通过时标红 + 给老师"答案可能错"的红色横幅。
+               数据来自 worker.js 调 aiParseSelfCheck 写入 questions.ai_self_check_issues。
+               移动端 Grading/index.jsx:538 已对齐同样 UX，避免老师改题无据可依。 -->
+          <span v-if="q.ai_self_check_passed === false"
+                class="ops-self-check-tag"
+                :title="`AI 解析可能不准确：${(q.ai_self_check_issues || []).join(' / ')}`">
+            ⚠ AI 不可信
+          </span>
           <el-input v-if="editing" v-model="form.answer" type="textarea" :autosize="{ minRows: 1, maxRows: 4 }" placeholder="标准答案（支持从 AI 解答页面粘贴特殊字符 ± √ 等）" />
           <span v-else-if="q.answer" class="ops-cmp-value correct-val">
             <MathRender :content="q.answer" autoDetect tag="span" />
@@ -1000,6 +1008,19 @@ const handleRetryGeometry = async () => {
   border-radius: var(--wb-radius-md);
 }
 .ops-confidence.conf-low { color: var(--wb-warning); background: var(--wb-warning-soft); }
+
+/* AI 自检未通过红色标签（题 14 案：answer 写 √5，分析算 11/5） */
+.ops-self-check-tag {
+  margin-left: 6px;
+  padding: 1px 6px;
+  border-radius: 4px;
+  font-size: var(--fs-10);
+  font-weight: 600;
+  color: #dc2626;
+  background: #fef2f2;
+  border: 1px solid #fca5a5;
+  cursor: help;
+}
 
 /* ── 答案对照条 ── */
 .ops-compare-bar {
