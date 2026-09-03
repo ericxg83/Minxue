@@ -50,7 +50,7 @@ const BATCH_SIZE = 500
 
 async function main() {
   const start = Date.now()
-  const counts = { total: 0, serial_pollution: 0, arithmetic_mismatch: 0, self_check_skipped: 0, multi: 0 }
+  const counts = { total: 0, serial_pollution: 0, arithmetic_mismatch: 0, self_check_skipped: 0, answer_sign_mismatch: 0, multi: 0 }
   const csvLines = ['task_id,question_number,answer,student_answer,issues,is_correct,ai_self_check_passed']
 
   // 全表扫：OCR 阶段所有 question 都可能中招，is_correct 不是筛选条件
@@ -116,6 +116,7 @@ async function main() {
   console.log(`  serial_pollution:  ${counts.serial_pollution}`)
   console.log(`  arithmetic_mismatch: ${counts.arithmetic_mismatch}`)
   console.log(`  self_check_skipped: ${counts.self_check_skipped}`)
+  console.log(`  answer_sign_mismatch: ${counts.answer_sign_mismatch}`)
   console.log(`  多 issue 同时中招:  ${counts.multi}`)
   console.log(`  耗时:              ${((Date.now() - start) / 1000).toFixed(1)}s`)
 

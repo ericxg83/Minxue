@@ -136,10 +136,13 @@ export function extractExprCandidates(analysis) {
 }
 
 /**
- * 主入口。对 AI 返回的单题结果做三项自检：
+ * 主入口。对 AI 返回的单题结果做四项自检：
  *   - serial_pollution: answer 与 student_answer 数字串高度重叠且 answer 无独立数字
  *   - arithmetic_mismatch: analysis 末尾 X 没法从任一算式候选回算
  *   - self_check_skipped: analysis 末尾显式【未自检】
+ *   - answer_sign_mismatch: 学生答案含 ± 但 AI answer 完全不含 ±（典型：
+  *   "√81 的平方根是____" 学生写 ±3，AI 给 9；把"平方根"当"算术平方根"
+  *   答非所问）。仅判"学生写了 ± 而 AI 没写"方向，避免对 AI 多写 ± 误报。
  *
  * 返回 { pass: boolean, issues: string[] }。
  * 调用方拿到 false 时不要直接拒绝入库 —— 见 worker.js createQuestions 的重试 + 标记策略。
@@ -151,6 +154,18 @@ export function aiParseSelfCheck(aiResult) {
   }
 
   const { answer, student_answer, analysis } = aiResult
+
+  // 0. 符号集合冲突：学生答案含 ± 但 AI answer 完全不含
+  // 触发场景：题目问"平方根"（x²=a 的所有解，可正可负）但 AI 误答"算术平方根"（默认非负）。
+  // 仅判"学生写了 ± AI 没写"——反向（学生漏写 ±）保守不报，避免误伤多空填空。
+  // 排除 answer 为 null / 空字符串（无标准答案时不参与判定）。
+  if (typeof student_answer === 'string' && typeof answer === 'string' && answer.trim()) {
+    const sPlusMinus = (student_answer.match(/±/g) || []).length
+    const aPlusMinus = (answer.match(/±/g) || []).length
+    if (sPlusMinus > 0 && aPlusMinus === 0) {
+      issues.push('answer_sign_mismatch')
+    }
+  }
 
   // 1. 串行污染：answer 的数字串集合几乎被 student_answer 覆盖，且 answer 自身没新数字
   // 排除"合法答对"：当 answer 与 student_answer 数字完全相同（jaccard=1 且 sOnly=[]），
