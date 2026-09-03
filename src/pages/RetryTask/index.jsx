@@ -3,8 +3,37 @@ import { motion } from 'motion/react'
 import { ArrowLeft, Camera, Image as ImageIcon, Loader2, Upload, ClipboardList, CheckCircle2, Clock } from 'lucide-react'
 import { Toast } from 'antd-mobile'
 import { getRetryTask } from '../../services/apiService'
+
+// HEIC 预览格：浏览器解不开 HEIC 时 onError 切占位（不白屏）。
+// HEIC 上传由后端 fixFileIfNeeded needsHeicTranscode 用 heic-decode 转 jpg。
+function HeicPreviewCell({ p, onRemove }) {
+  const [errored, setErrored] = useState(false)
+  const showPlaceholder = errored || !p.url
+  return (
+    <div className="relative rounded-lg overflow-hidden" style={{ aspectRatio: '1 / 1', background: 'var(--bg-secondary)' }}>
+      {showPlaceholder ? (
+        <div className="w-full h-full flex flex-col items-center justify-center gap-1" style={{ color: 'var(--text-secondary)' }}>
+          <ImageIcon size={20} />
+          {p.isHeic && <span style={{ fontSize: 'var(--fs-10)' }}>HEIC</span>}
+        </div>
+      ) : (
+        <img
+          src={p.url}
+          alt={p.name}
+          loading="lazy"
+          className="w-full h-full object-cover"
+          onError={() => setErrored(true)}
+        />
+      )}
+      <button
+        onClick={onRemove}
+        className="absolute top-1 right-1 w-5 h-5 rounded-full flex items-center justify-center"
+        style={{ background: 'rgba(0,0,0,0.5)', color: '#fff', fontSize: 'var(--fs-12)' }}
+      >×</button>
+    </div>
+  )
+}
 import { taskService } from '../../services/taskService'
-import { getPreviewUrl } from '../../utils/heicPreview'
 import dayjs from 'dayjs'
 
 // 状态映射（spec：待批改 / 批改中 / 已完成）
@@ -64,22 +93,25 @@ export default function RetryTask({ taskId, onBack }) {
   const questionCount = Array.isArray(task?.question_ids) ? task.question_ids.length : 0
   const isDone = status === 'graded'
 
-  // 把 File 列表转为预览对象（保留 File 引用用于上传）
-  // HEIC 走 heicPreview.getPreviewUrl 异步转 jpg 给 <img> 显示。
-  const toPreviews = async (files) =>
-    await Promise.all(
-      Array.from(files).map(async (f) => ({
-        file: f,
-        url: await getPreviewUrl(f),
-        name: f.name
-      }))
-    )
+  // HEIC 预览：Android WebView file.type 经常是空 → 退化靠扩展名判断。
+  // 浏览器原 <img> 解不开 HEIC 会显示 broken image（onError 兜底），但不至于白屏。
+  // 真 HEIC 上传给后端，fixFileIfNeeded needsHeicTranscode 走 heic-decode 转 jpg。
+  const isHeic = (f) =>
+    (f?.type || '').match(/^image\/(heic|heif)$/i) || /\.(heic|heif)$/i.test(f?.name || '')
 
-  const handleSelectFiles = async (e) => {
+  // 把 File 列表转为预览对象（保留 File 引用用于上传）
+  const toPreviews = (files) =>
+    Array.from(files).map((f) => ({
+      file: f,
+      url: URL.createObjectURL(f),
+      isHeic: isHeic(f),
+      name: f.name
+    }))
+
+  const handleSelectFiles = (e) => {
     const files = e.target.files
     if (!files || files.length === 0) return
-    const previews = await toPreviews(files)
-    setPendingFiles((prev) => [...prev, ...previews])
+    setPendingFiles((prev) => [...prev, ...toPreviews(files)])
     e.target.value = ''
   }
 
@@ -198,20 +230,7 @@ export default function RetryTask({ taskId, onBack }) {
               {pendingFiles.length > 0 && (
                 <div className="grid grid-cols-3 gap-2 mb-3">
                   {pendingFiles.map((p, i) => (
-                    <div key={i} className="relative rounded-lg overflow-hidden" style={{ aspectRatio: '1 / 1', background: 'var(--bg-secondary)' }}>
-                      {p.url ? (
-                        <img src={p.url} alt={p.name} loading="lazy" className="w-full h-full object-cover" />
-                      ) : (
-                        <div className="w-full h-full flex items-center justify-center" style={{ color: 'var(--text-secondary)' }}>
-                          <ImageIcon size={20} />
-                        </div>
-                      )}
-                      <button
-                        onClick={() => removePending(i)}
-                        className="absolute top-1 right-1 w-5 h-5 rounded-full flex items-center justify-center"
-                        style={{ background: 'rgba(0,0,0,0.5)', color: '#fff', fontSize: 'var(--fs-12)' }}
-                      >×</button>
-                    </div>
+                    <HeicPreviewCell key={i} p={p} onRemove={() => removePending(i)} />
                   ))}
                 </div>
               )}

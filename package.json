@@ -40,7 +40,6 @@
     "element-plus": "^2.14.1",
     "express": "^4.21.1",
     "file-saver": "^2.0.5",
-    "heic-decode": "^2.1.0",
     "html2canvas": "^1.4.1",
     "jspdf": "^2.5.1",
     "jsqr": "^1.4.0",

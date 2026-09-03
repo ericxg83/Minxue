@@ -1,6 +1,37 @@
 import { Camera, X, Upload, Loader2, Image as ImageIcon } from 'lucide-react'
+import { useState } from 'react'
 import { motion } from 'motion/react'
 import EmptyState from './EmptyState'
+
+// HEIC 预览格：浏览器解不开 HEIC 时 onError 切占位（不白屏）。
+// HEIC 上传由后端 fixFileIfNeeded needsHeicTranscode 用 heic-decode 转 jpg。
+function HeicPreviewCell({ p, onRemove }) {
+  const [errored, setErrored] = useState(false)
+  const showPlaceholder = errored || !p.url
+  return (
+    <div className="relative rounded-lg overflow-hidden" style={{ aspectRatio: '1 / 1', background: 'var(--bg-secondary)' }}>
+      {showPlaceholder ? (
+        <div className="w-full h-full flex flex-col items-center justify-center gap-1" style={{ color: 'var(--text-secondary)' }}>
+          <ImageIcon size={20} />
+          {p.isHeic && <span style={{ fontSize: 'var(--fs-10)' }}>HEIC</span>}
+        </div>
+      ) : (
+        <img
+          src={p.url}
+          alt={p.name}
+          loading="lazy"
+          className="w-full h-full object-cover"
+          onError={() => setErrored(true)}
+        />
+      )}
+      <button
+        onClick={onRemove}
+        className="absolute top-1 right-1 w-5 h-5 rounded-full flex items-center justify-center"
+        style={{ background: 'rgba(0,0,0,0.5)', color: '#fff', fontSize: 'var(--fs-12)' }}
+      >x</button>
+    </div>
+  )
+}
 
 export default function StagingModal({
   stagingType,
@@ -78,20 +109,7 @@ export default function StagingModal({
           {stagingFiles.length > 0 && (
             <div className="grid grid-cols-3 gap-2 mb-4">
               {stagingFiles.map((p, i) => (
-                <div key={i} className="relative rounded-lg overflow-hidden" style={{ aspectRatio: '1 / 1', background: 'var(--bg-secondary)' }}>
-                  {p.url ? (
-                    <img src={p.url} alt={p.name} loading="lazy" className="w-full h-full object-cover" />
-                  ) : (
-                    <div className="w-full h-full flex items-center justify-center" style={{ color: 'var(--text-secondary)' }}>
-                      <ImageIcon size={20} />
-                    </div>
-                  )}
-                  <button
-                    onClick={() => onRemoveFile(i)}
-                    className="absolute top-1 right-1 w-5 h-5 rounded-full flex items-center justify-center"
-                    style={{ background: 'rgba(0,0,0,0.5)', color: '#fff', fontSize: 'var(--fs-12)' }}
-                  >x</button>
-                </div>
+                <HeicPreviewCell key={i} p={p} onRemove={() => onRemoveFile(i)} />
               ))}
             </div>
           )}

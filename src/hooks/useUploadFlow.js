@@ -6,7 +6,6 @@ import { taskService } from '../services/taskService'
 import { recognizeQuestions, compressImage, saveRecognitionResult } from '../services/aiService'
 import { detectQRCode, groupFilesByQRCode, isRetryPaperQRCode } from '../services/qrDetectionService'
 import { compressImagesForUpload, describeUploadFailure } from '../utils/imageUtils'
-import { getPreviewUrl } from '../utils/heicPreview'
 import { uploadImage, createTask, addWrongQuestions, clearStudentCaches, invalidateCache } from '../services/apiService'
 import { __pendingUploadStore } from '../features/upload/pendingUploadStore'
 
@@ -67,17 +66,22 @@ export function useUploadFlow({ loadTasks, isInitializing }) {
   const homeworkChoiceRef = useRef([])
   homeworkChoiceRef.current = homeworkChoiceFiles
 
-  const toPreviews = async (files) =>
-    await Promise.all(
-      Array.from(files).map(async (f) => ({
-        file: f,
-        url: await getPreviewUrl(f),
-        name: f.name
-      }))
-    )
+  // HEIC 预览：Android WebView file.type 经常是空 → 退化靠扩展名判断。
+  // 浏览器原 <img> 解不开 HEIC 会显示 broken image（onError 兜底），但不至于白屏。
+  // 真 HEIC 上传给后端，fixFileIfNeeded needsHeicTranscode 走 heic-decode 转 jpg。
+  const isHeic = (f) =>
+    (f?.type || '').match(/^image\/(heic|heif)$/i) || /\.(heic|heif)$/i.test(f?.name || '')
 
-  const handleStagingSelectFiles = async (e) => {
-    const previews = await toPreviews(e.target.files || [])
+  const toPreviews = (files) =>
+    Array.from(files).map((f) => ({
+      file: f,
+      url: URL.createObjectURL(f),
+      isHeic: isHeic(f),
+      name: f.name
+    }))
+
+  const handleStagingSelectFiles = (e) => {
+    const previews = toPreviews(e.target.files || [])
     if (e.target && 'value' in e.target) e.target.value = ''
     if (previews.length === 0) return
     setStagingFiles((prev) => [...prev, ...previews])
