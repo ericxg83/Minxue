@@ -62,6 +62,8 @@ import { judgeAnswer, findDirtyAnswers } from './services/judgeService.js'
 import { checkQuestionCompleteness } from './utils/questionCompleteness.js'
 import { normalizeOptions } from './utils/optionText.js'
 import { computeTaskStats } from './utils/taskStats.js'
+import { fixFileIfNeeded } from './services/uploadValidator.js'
+import { recognizeAnswerImage } from './services/answerOCRService.js'
 import { uploadImage, deleteFile } from './services/ossService.js'
 import { getTaskQueue, getGeometryQueue, getQueueStats, taskWorker } from './queue.js'
 import { processTask } from './worker.js'
@@ -1679,6 +1681,34 @@ app.put('/api/questions/:id', async (req, res) => {
   } catch (error) {
     console.error('更新题目失败:', error)
     res.status(500).json({ error: error.message })
+  }
+})
+
+// 上传一张「参考答案图片」→ 视觉模型识别 → 返回 {answer, analysis}，不写库。
+// 仅在 PC 批改工作台「编辑参考答案」时使用：老师截图/拍照后一键 OCR 填进 textarea，
+// 避免手敲 \frac、\sqrt 等 KaTeX 命令。识别后前端会弹窗预览让老师确认再覆盖。
+app.post('/api/questions/:id/recognize-answer', upload.single('image'), async (req, res) => {
+  try {
+    const { id } = req.params
+    if (!req.file || !req.file.buffer || req.file.buffer.length === 0) {
+      return res.status(400).json({ ok: false, error: '未收到图片' })
+    }
+    const { rows } = await query(
+      `SELECT id FROM ${TABLES.QUESTIONS} WHERE id = $1 AND deleted_at IS NULL`,
+      [id]
+    )
+    if (rows.length === 0) {
+      return res.status(404).json({ ok: false, error: '题目不存在' })
+    }
+    const { fixedBuffer } = await fixFileIfNeeded(
+      req.file.buffer,
+      req.file.originalname || 'answer.jpg'
+    )
+    const result = await recognizeAnswerImage(fixedBuffer, 'image/jpeg')
+    res.json({ ok: true, answer: result.answer, analysis: result.analysis })
+  } catch (error) {
+    console.error(`[recognize-answer] q=${req.params.id?.slice(0, 8)}:`, error.message)
+    res.status(500).json({ ok: false, error: error.message || '识别失败' })
   }
 })
 

@@ -69,7 +69,18 @@
                 :title="`AI 解析可能不准确：${(q.ai_self_check_issues || []).join(' / ')}`">
             ⚠ AI 不可信
           </span>
-          <el-input v-if="editing" v-model="form.answer" type="textarea" :autosize="{ minRows: 1, maxRows: 4 }" placeholder="标准答案（支持从 AI 解答页面粘贴特殊字符 ± √ 等）" />
+          <div v-if="editing" class="ops-ans-edit-wrap">
+            <el-input v-model="form.answer" type="textarea" :autosize="{ minRows: 1, maxRows: 4 }" placeholder="标准答案（支持从 AI 解答页面粘贴特殊字符 ± √ 等）" />
+            <!-- 截图/拍照 → 后端视觉模型识别 → 弹窗预览 → 一键填入。
+                 老师手敲 \frac、\sqrt 等 KaTeX 命令极易出错，这个按钮直接解决。 -->
+            <el-upload :show-file-list="false"
+              :before-upload="handleRecognizeAnswerBeforeUpload"
+              accept=".jpg,.jpeg,.png,.webp,.heic,.heif,image/jpeg,image/png,image/webp,image/heic,image/heif">
+              <el-button size="small" type="primary" plain :loading="recognizeLoading" class="ops-ans-recognize-btn">
+                  <el-icon><Camera /></el-icon> 截图识别答案
+                </el-button>
+            </el-upload>
+          </div>
           <span v-else-if="q.answer" class="ops-cmp-value correct-val">
             <MathRender :content="q.answer" autoDetect tag="span" />
           </span>
@@ -327,6 +338,12 @@
       </div>
       <template #footer><el-button @click="showTagSelector = false">关闭</el-button></template>
     </el-dialog>
+
+    <!-- 答案 OCR 识别弹窗：识别结果预览，确认后一键填入答案框 -->
+    <AnswerRecognizeDialog v-model="recognizeDialogVisible"
+      :result="recognizeResult"
+      :preview-url="recognizePreviewUrl"
+      @apply="handleApplyRecognized" />
   </div>
 </template>
 
@@ -334,15 +351,18 @@
 import { ref, computed, watch, nextTick } from 'vue'
 import { useReviewStore } from '../../stores/reviewStore'
 import { updateQuestion, rejudgeQuestion, retryGeometry, clearStudentCaches, uploadImage, getQuestionAssets } from '../../../services/apiService'
+import { recognizeAnswer } from '../../../api/answerOCR'
 import { processExamImage } from '../../../utils/imageProcessor'
 import { getGeometryDisplayUrl, getTikzStatus } from '../../../utils/geometryDisplay'
 import { tikzToSvg } from '../../../utils/tikzGenerator'
 import { normalizeOptions } from '../../../utils/optionText'
 import { getReviewStateLabel, getUnjudgedReasonText, getAiAnswerRiskText } from '../../../utils/reviewDecision'
+import { isHeicFile, getPreviewUrl } from '../../../utils/heicPreview'
 import { ElMessage, ElMessageBox, ElLoading } from 'element-plus'
-import { DocumentChecked, Delete, Plus, Upload, Picture, EditPen, ArrowLeft, ArrowRight, ArrowDown, RefreshLeft, Crop } from '@element-plus/icons-vue'
+import { DocumentChecked, Delete, Plus, Upload, Picture, EditPen, ArrowLeft, ArrowRight, ArrowDown, RefreshLeft, Crop, Camera } from '@element-plus/icons-vue'
 import MathRender from '../MathRender.vue'
 import QuestionEditForm from './QuestionEditForm.vue'
+import AnswerRecognizeDialog from './AnswerRecognizeDialog.vue'
 
 const store = useReviewStore()
 const q = computed(() => store.currentReviewQuestion)
@@ -536,6 +556,13 @@ const originalData = ref(null)
 const localImageUrl = ref('')
 const showTagSelector = ref(false)
 const allKnowledgeTags = ref(['全等三角形判定', '角的关系推导', '线段等式证明', '平行线的性质', '角平分线定义', '三角形内角和定理', '等式性质', '勾股定理', '相似三角形', '圆的性质', '函数与图像', '概率统计'])
+
+// 答案 OCR 识别：弹窗状态 + 识别中锁 + 原图预览 + 识别结果
+const recognizeDialogVisible = ref(false)
+const recognizeLoading = ref(false)
+const recognizeResult = ref(null)
+const recognizePreviewUrl = ref('')
+let recognizePreviewUrlToRevoke = ''
 
 // ═══ 原卷裁剪相关 ═══
 const cropDialogVisible = ref(false)
@@ -803,6 +830,46 @@ const handleCancelEdit = () => {
   }
   editing.value = false
 }
+
+// el-upload before-upload：拦截文件 → 调识别接口 → 弹预览弹窗
+const handleRecognizeAnswerBeforeUpload = async (file) => {
+  if (!q.value?.id) {
+    ElMessage.warning('当前题目未选中')
+    return false
+  }
+  if (recognizeLoading.value) return false
+
+  if (recognizePreviewUrlToRevoke) {
+    URL.revokeObjectURL(recognizePreviewUrlToRevoke)
+    recognizePreviewUrlToRevoke = ''
+  }
+  try {
+    if (isHeicFile(file)) {
+      recognizePreviewUrl.value = await getPreviewUrl(file)
+      recognizePreviewUrlToRevoke = recognizePreviewUrl.value
+    } else {
+      recognizePreviewUrl.value = URL.createObjectURL(file)
+    }
+  } catch {
+    recognizePreviewUrl.value = ''
+  }
+
+  recognizeLoading.value = true
+  try {
+    recognizeResult.value = await recognizeAnswer(q.value.id, file)
+    recognizeDialogVisible.value = true
+  } catch (err) {
+    ElMessage.error(`识别失败：${err.message || err}`)
+  } finally {
+    recognizeLoading.value = false
+  }
+  return false  // 阻止 el-upload 自行上传
+}
+
+const handleApplyRecognized = (answer) => {
+  form.value = { ...form.value, answer }
+  ElMessage.success('已填入答案，点「保存」即可入库')
+}
 const addOption = () => { form.value.options.push('') }
 const removeOption = (idx) => { form.value.options.splice(idx, 1) }
 const removeTag = (tag) => { form.value.tags = form.value.tags.filter(t => t !== tag) }
@@ -1049,6 +1116,17 @@ const handleRetryGeometry = async () => {
   color: var(--wb-text-tertiary);
   letter-spacing: 0.5px;
 }
+.ops-ans-edit-wrap {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 6px;
+}
+.ops-ans-recognize-btn {
+  font-size: 12px !important;
+  padding: 4px 10px !important;
+}
+
 .ops-cmp-value {
   display: block;
   font-size: 16px;
