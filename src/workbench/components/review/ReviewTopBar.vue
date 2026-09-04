@@ -168,7 +168,11 @@ watch(() => store.currentTask?.id, (id) => {
 }, { immediate: true })
 
 const canNextTask = computed(() => {
-  if (!store.currentTask || store.pendingTasks.length === 0) return false
+  if (store.pendingTasks.length === 0) return false
+  if (!store.currentTask) return false
+  // 复核完后 currentTask.status='reviewed' 已不在 pendingTasks 中，
+  // 但老师仍可手动点"下一份"跳到下一份待复核试卷。
+  if (store.currentTask.status === 'reviewed') return true
   const idx = store.pendingTasks.findIndex(t => t.id === store.currentTask.id)
   return idx >= 0 && idx < store.pendingTasks.length - 1
 })
@@ -217,17 +221,15 @@ const handleComplete = async () => {
   await doComplete()
 }
 
-// 真正执行完成复核 + 自动跳下一份
+// 真正执行完成复核：store 不再自动跳下一份，让老师选择「留底为答案库」或「下一份」。
 const doComplete = async () => {
   try {
     await store.completeTaskReview()
     ElMessage.success('试卷复核完成，已保存')
-    const next = store.nextTask()
-    if (next) {
-      selectedTaskId.value = next.id
-      await store.selectTask(next)
-      ElMessage.info(`已切换到下一份试卷: ${next.original_name || '未命名试卷'}`)
-    }
+    const tip = store.pendingTasks.length > 0
+      ? '可点击「📌 留底为答案库」沉淀答案，或「▶ 下一份」继续处理'
+      : '可点击「📌 留底为答案库」沉淀答案；当前学生已无待复核试卷'
+    ElMessage.info(tip)
   } catch (err) {
     console.error('保存失败:', err)
     ElMessage.error('保存失败，请重试')

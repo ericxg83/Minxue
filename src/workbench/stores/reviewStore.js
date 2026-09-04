@@ -799,17 +799,10 @@ export const useReviewStore = defineStore('review', () => {
       const sorter = { done: 0, reviewed: 1 }
       studentTasks.value.sort((a, b) => (sorter[a.status] ?? 99) - (sorter[b.status] ?? 99))
     }
-    // 还有待复核试卷 → 重新聚合加载题目；无 → 空状态
-    const next = nextTask()
-    if (next) {
-      await selectTask(next)
-    } else {
-      allQuestions.value = []
-      questionToTaskMap.value = {}
-      currentTask.value = null
-      currentReviewIndex.value = 0
-      reviewAllDone.value = true
-    }
+    // 复核完成后停在当前 task（status='reviewed'），让老师自己决定：
+    //   ① 「📌 留底为答案库」沉淀答案进资源（canArchive 见 lastArchivableTask），
+    //   ② 「▶ 下一份」手动跳到下一份待复核试卷。
+    // 不再自动跳转，避免跳过"留底为答案库"窗口。题目列表保留以便翻看刚复核完的题。
   }
 
   // ── 错题拦截门禁 ──────────────────────────────────────────
