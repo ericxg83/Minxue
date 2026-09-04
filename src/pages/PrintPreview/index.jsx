@@ -9,6 +9,7 @@ import dayjs from 'dayjs'
 import { saveFileToDevice } from '../../utils/nativeDownload'
 import { exportWrongBookPDF } from '../../utils/wrongBookPdfExporter'
 import { triggerBrowserPrint } from '../../utils/browserPrint'
+import { printPdfOnDevice, isNativePrintAvailable } from '../../utils/nativePrint'
 import {
   buildPaperBody,
   buildPaperCSS,
@@ -452,17 +453,28 @@ export default function PrintPreview({ onClose, questions: propQuestions, existi
       const questions = await ensureEnriched()
       if (!questions || questions.length === 0) throw new Error('没有题目可打印')
 
-      // "直接打印"走浏览器/Android WebView 原生 print()，而不是打开 blob PDF。
-      // 后者在 Capacitor 中常被拦截，也不会自动调出打印机弹出框。
+      // Android Capacitor 的 WebView 不保证 iframe.contentWindow.print() 有效，
+      // 改走原生 PrintManager；普通网页继续使用浏览器打印对话框。
       setPdfStage('正在打开打印窗口…')
-      await triggerBrowserPrint({
-        title: `${currentStudent?.name || '学生'} - ${getExamName()}`,
-        studentName: currentStudent?.name || '',
-        questions,
-        showAnswers: false,
-        qrContent: getQrContent(),
-      })
-      if (saved) Toast.show({ icon: 'success', content: '已保存到组卷历史' })
+      if (isNativePrintAvailable()) {
+        let printableBlob = pdfBlob
+        if (!printableBlob) {
+          setPdfStage('正在生成 PDF，请稍候…')
+          const result = await generatePDF(questions)
+          printableBlob = result?.pdfBlob
+        }
+        if (!printableBlob) throw new Error('PDF生成结果为空，请重试')
+        await printPdfOnDevice(printableBlob, `${currentStudent?.name || '学生'} - ${getExamName()}`)
+      } else {
+        await triggerBrowserPrint({
+          title: `${currentStudent?.name || '学生'} - ${getExamName()}`,
+          studentName: currentStudent?.name || '',
+          questions,
+          showAnswers: false,
+          qrContent: getQrContent(),
+        })
+      }
+      Toast.show({ icon: 'success', content: saved ? '已打开打印窗口，并保存到组卷历史' : '已打开打印窗口' })
     } catch (error) {
       console.error('PDF打印失败:', error)
       Toast.show({ icon: 'fail', content: error?.message || '打印失败，请重试', duration: 3200 })
