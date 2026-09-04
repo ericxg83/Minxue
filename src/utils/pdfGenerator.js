@@ -239,7 +239,7 @@ export function buildPaperCSS(scope = '') {
   const root = scope || 'body'
   return `${scope ? `${scope} *` : '*'} {margin:0;padding:0;box-sizing:border-box}
 ${root}{font-family:'Microsoft YaHei','PingFang SC','Noto Sans SC','SimSun',sans-serif;color:#1a1a1a}
-${s}.page{width:794px;padding:24px 36px;position:relative}
+${s}.page{width:794px;height:auto;overflow:visible;padding:24px 36px;position:relative}
 ${s}.head-area{min-height:100px;padding-right:170px}
 ${s}.title{font-size:20px;font-weight:bold;margin-bottom:4px;letter-spacing:1px}
 ${s}.sub-title{font-size:13px;color:#555;margin-bottom:8px}
