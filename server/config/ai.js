@@ -87,44 +87,107 @@ export async function withAiLimit(fn) {
 }
 
 // 429 有两种完全不同的成因，必须区别对待，否则会白等几十分钟还是全页失败：
-//   1) 当日配额用尽（"exceeded today's quota for model X"）——重试到明天也没用，
-//      唯一出路是换一个模型（ModelScope 的报错自己就写着 "consider using other models"）
-//   2) 瞬时并发限流——退避重试有效
+//   1) 真·额度耗尽（quota/credit/balance 用完、SenseNova 5h frequency limit）
+//      ——重试到重置前也没用，唯一出路是换 Key / 换模型
+//   2) 瞬时并发限流（HTTP 429 "Too Many Requests"、裸 "rate limit"、"retry after"）
+//      ——退避重试有效，**绝不能按额度耗尽处理**，否则会把主模型拉黑一整天
+// 事故复盘（2026-09-04）：旧正则把 `too many requests` 也算额度耗尽，SenseNova
+// 深度并发一次瞬时限流就把 deepseek-v4-pro 按「Key + 模型 + 自然日」拉黑，
+// 全天 12/19 题降级到 glm-5.2 兜底。收紧匹配面，让"是否重试"由错误消息决定。
 export function isQuotaExhaustedError(err) {
   const data = err?.response?.data
   const msg = data?.error?.message || data?.message || (typeof data === 'string' ? data : '') || ''
-  return /exceeded[^.]*quota|quota[^.]*exceeded|quota.*limit|limit.*reached|daily.*limit|out of quota|insufficient.*quota|balance.*insufficient|insufficient.*balance|rate.*limit.*(reached|exceeded)/i.test(msg)
-    // SenseNova / 部分聚合网关的「频率/额度上限」语义不同，但本质都是"该账号配额用完，
-    // 需等待重置（SenseNova 是每 5 小时重置一次）。不识别会当成瞬时 429 反复重试浪费时间，
-    // 识别后由调用方把该 Key 冷却到重置时刻再自动复用。
-    || /frequency\s*limit|exceeds?(.{0,20})?limit|too many requests|requests?(.{0,12})?limited|usage.{0,12}exceeded/i.test(msg)
+  return /exceeded[^.]*quota|quota[^.]*exceeded|quota.*limit|daily.*limit|out of quota|insufficient.*quota|balance.*insufficient|insufficient.*balance|exhausted|credit.{0,12}(exhausted|insufficient)|no.{0,8}credit|reject_no_credit|frequency\s*limit|usage.{0,12}exceeded/i.test(msg)
 }
 
-// 按「Key + 模型 + 自然日」记录配额耗尽，避免整轮解析反复撞同一个已耗尽的组合。
-// 魔搭配额按「账号 × 模型 × 自然日」计：多把 Key 若属同一账号则共享配额
-// （第二把 Key 也会撞 429 然后被独立标记），若属不同账号则是真正的独立配额。
-// 按 Key 细分标记两种情况都正确。
-const _modelExhaustedDate = new Map()
+// 瞬时限流：状态 429 且不匹配上面的额度耗尽字样。调用方应做退避重试而不是冷却。
+export function isTransientRateLimit(err) {
+  return err?.response?.status === 429 && !isQuotaExhaustedError(err)
+}
 
-function today() {
-  return new Date().toISOString().slice(0, 10)
+// 给 AnswerEngine 日志用的分类标签。让「一次 429 到底为什么」肉眼可读，
+// 免得又出现「所有 pro 静默降级到 glm 却查不到根因」这种事故。
+function classifyAnswerEngineError(err) {
+  const status = err?.response?.status
+  if (status === 429) return isQuotaExhaustedError(err) ? '429-quota-exhausted' : '429-transient-rate-limit'
+  if (status) return `${status}`
+  return err?.code || err?.name || 'unknown'
+}
+
+// 只取供应商返回的错误消息前 200 字，不含 Key、不含请求正文。
+function extractErrorSnippet(err) {
+  const data = err?.response?.data
+  const raw = (data && typeof data === 'object')
+    ? (data?.error?.message || data?.message || JSON.stringify(data))
+    : (typeof data === 'string' ? data : (err?.message || ''))
+  return String(raw).replace(/\s+/g, ' ').slice(0, 200)
+}
+
+// 「Key + 模型 + 冷却到期时间戳」记录该组合已耗尽。用 TTL 而不是自然日，因为：
+//   - 魔搭是「账号 × 模型 × 自然日」→ 冷却到 UTC 当日 24 点
+//   - SenseNova 是「账号 × 5 小时」→ 冷却到下一个重置点（默认 5h 后自动放行）
+//   - 瞬时限流绝不该进这张表（由 isTransientRateLimit 走退避重试路径）
+// 冷却到期后自动放行，不需要重启进程。
+const _modelExhaustedUntil = new Map() // `${keyTail}|${model}` -> 冷却到期 ms
+
+// 自然日剩余毫秒（ModelScope 的额度重置节奏）
+function msUntilEndOfDayUtc() {
+  const now = new Date()
+  const eod = Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate() + 1, 0, 0, 0)
+  return Math.max(60_000, eod - now.getTime())
 }
 
 const keyTail = (apiKey) => String(apiKey || '').slice(-8)
 
-function markModelExhaustedToday(apiKey, model) {
+/**
+ * 标记某 Key×模型进入冷却。
+ * @param {string} apiKey
+ * @param {string} model
+ * @param {number} [ttlMs] 冷却毫秒；默认到 UTC 当日 24 点（ModelScope 语义）。
+ *                        SenseNova 请传 5h。
+ */
+function markModelExhausted(apiKey, model, ttlMs = msUntilEndOfDayUtc()) {
   if (!model) return
   const scope = `${keyTail(apiKey)}|${model}`
-  if (_modelExhaustedDate.get(scope) === today()) return
-  _modelExhaustedDate.set(scope, today())
-  console.warn(`[AI] 模型 ${model}（Key…${keyTail(apiKey)}）当日配额已用尽，今日不再使用，自动切换`)
+  const until = Date.now() + ttlMs
+  const existing = _modelExhaustedUntil.get(scope)
+  // 只在延长冷却时打日志，避免同一批次反复撞同一 Key×模型时刷屏
+  if (existing && existing >= until) return
+  _modelExhaustedUntil.set(scope, until)
+  console.warn(`[AI] 模型 ${model}（Key…${keyTail(apiKey)}）配额已用尽，冷却 ${Math.round(ttlMs / 60000)} 分钟`)
 }
 
-export function isModelExhaustedToday(model, apiKey = AI_CONFIG.API_KEY) {
-  return Boolean(model) && _modelExhaustedDate.get(`${keyTail(apiKey)}|${model}`) === today()
+function isModelExhausted(model, apiKey = AI_CONFIG.API_KEY) {
+  if (!model) return false
+  const until = _modelExhaustedUntil.get(`${keyTail(apiKey)}|${model}`)
+  if (!until) return false
+  if (Date.now() >= until) {
+    _modelExhaustedUntil.delete(`${keyTail(apiKey)}|${model}`) // 到期即清，防内存爬升
+    return false
+  }
+  return true
 }
 
-async function postWith429Retry(client, endpoint, body, axiosOptions, { retry429 = true, retry503 = true } = {}) {
+// 兼容旧调用点的名字（外部仍按自然日语义读的话，TTL 版是它的严格超集）
+const isModelExhaustedToday = isModelExhausted
+// 兼容旧导出名，worker/脚本里可能有引用
+export { isModelExhaustedToday }
+
+// 解析 Retry-After header：可能是秒数（"30"）也可能是 HTTP-date。返回毫秒或 null。
+function parseRetryAfterMs(header) {
+  if (!header) return null
+  const sec = Number(header)
+  if (Number.isFinite(sec) && sec >= 0) return sec * 1000
+  const date = Date.parse(header)
+  if (Number.isFinite(date)) return Math.max(0, date - Date.now())
+  return null
+}
+
+async function postWith429Retry(client, endpoint, body, axiosOptions, {
+  retry429 = true,
+  retry503 = true,
+  exhaustedTtlMs = null, // null → 走 markModelExhausted 的默认（自然日剩余，MS 语义）
+} = {}) {
   for (let attempt = 0; ; attempt += 1) {
     try {
       const response = await withAiLimit(() => client.post(endpoint, body, axiosOptions))
@@ -143,16 +206,23 @@ async function postWith429Retry(client, endpoint, body, axiosOptions, { retry429
           `imageBase64Size=${imgSize}B`,
           `errorMsg=${body?.error?.message || JSON.stringify(body)?.substring(0, 300)}`)
       }
-      // 配额耗尽：立刻放弃该 Key×模型组合并上抛，让调用方换组合，绝不浪费时间重试
+      // 真·额度耗尽（quota/credit/balance/frequency limit）：立刻放弃该 Key×模型组合并上抛，
+      // 让调用方换组合，绝不浪费时间重试。瞬时限流（isTransientRateLimit）走下面的退避。
       if (status === 429 && isQuotaExhaustedError(err)) {
         const auth = String(axiosOptions?.headers?.Authorization || '').replace(/^Bearer\s+/i, '')
-        markModelExhaustedToday(auth, body?.model)
+        markModelExhausted(auth, body?.model, exhaustedTtlMs ?? msUntilEndOfDayUtc())
         throw err
       }
       if (status === 429) notifyAiRateLimited()
       if (retry429 && status === 429 && attempt < RETRY_DELAYS_429.length) {
-        const delay = RETRY_DELAYS_429[attempt]
-        console.warn(`[AI] 429 rate limit, retrying in ${delay / 1000}s (${attempt + 1}/${RETRY_DELAYS_429.length})`)
+        // Retry-After 优先：服务端说等几秒就等几秒（限 30s 以内，超过 30s 说明是真限流窗口
+        // 而不是"稍安勿躁"，宁可上抛让调用方降级）
+        const header = err.response?.headers?.['retry-after']
+        const raMs = parseRetryAfterMs(header)
+        const delay = (raMs != null && raMs <= 30_000)
+          ? Math.max(500, raMs)
+          : RETRY_DELAYS_429[attempt]
+        console.warn(`[AI] 429 transient rate limit, retrying in ${Math.round(delay / 1000)}s (${attempt + 1}/${RETRY_DELAYS_429.length})${header ? ' [Retry-After]' : ''}`)
         await sleep(delay)
         continue
       }
@@ -171,7 +241,7 @@ async function postWith429Retry(client, endpoint, body, axiosOptions, { retry429
 // 主模型瞬时限流冷却：只在短时间窗口内跳过主模型，绝不整天禁用。
 // （历史实现按自然日锁定，一次 429 就让当天所有请求全部落到坏掉的备份上，
 //   导致「全部 N 页 OCR 识别失败」，务必保持为短窗口。配额耗尽由
-//   _modelExhaustedDate 按模型单独处理，不走这里。）
+//   _modelExhaustedUntil 按模型单独 TTL 处理，不走这里。）
 const MAIN_RATE_LIMIT_COOLDOWN_MS = 60 * 1000
 let _mainRateLimitedUntil = 0
 
@@ -511,6 +581,9 @@ async function requestOpenAIProvider({
   retry503 = true,
   vendor = null,
   extraBody = null,
+  // 命中真·额度耗尽时，该 Key×模型冷却多久。默认由 postWith429Retry 用「自然日剩余」，
+  // 匹配 ModelScope 的账号×模型×日 配额。SenseNova 5h 窗口 / 其它短周期请显式传。
+  exhaustedTtlMs = null,
 }) {
   const headers = vendor ? buildVendorHeaders(vendor, apiKey) : {
     'Content-Type': 'application/json',
@@ -533,7 +606,7 @@ async function requestOpenAIProvider({
     endpoint,
     body,
     { headers, timeout },
-    { retry429, retry503 },
+    { retry429, retry503, exhaustedTtlMs },
   )
 
   return extractContent(response.data?.choices?.[0]?.message)
@@ -807,6 +880,9 @@ export async function callAnswerEngineCompletion(opts) {
               retry503: false,
               vendor,
               extraBody: vendor.extraBody || null,
+              // SenseNova 的重置是 5h 窗口而不是自然日；命中真·额度耗尽时按 Key 冷却时长冷却
+              // 该 Key×模型即可，绝不能按「当日不再使用」拉黑 —— 那会让 pro 从早上禁言到半夜。
+              exhaustedTtlMs: ANSWER_ENGINE.KEY_COOLDOWN_MS,
             })
             if (content) {
               return { content, usedBackup: true, provider: `${vendor.name}:${model}` }
@@ -814,6 +890,8 @@ export async function callAnswerEngineCompletion(opts) {
             console.warn(`[AnswerEngine] ${vendor.name}:${model} 返回空内容`)
           } catch (err) {
             const status = err.response?.status
+            const errKind = classifyAnswerEngineError(err)
+            const errSnippet = extractErrorSnippet(err)
             if (status === 401 || status === 403) {
               // 该 Key 鉴权失败（无效/未授权），所有模型都不会成功，直接换下一把 Key，
               // 避免在一把废 Key 上对多个模型各空打一次
@@ -823,10 +901,12 @@ export async function callAnswerEngineCompletion(opts) {
             if (isQuotaExhaustedError(err)) {
               // 该 Key 5h 额度已用尽 → 冷却此 Key，换下一把 Key，不在这把 Key 上继续空耗
               cooldownAnswerEngineKey(apiKey)
+              console.warn(`[AnswerEngine] ${vendor.name}:${model} 失败: ${errKind} ${errSnippet} → Key 尾号 ${keyTail(apiKey)} 冷却`)
               break
             }
-            // 只记状态码/错误码，不打印 Key 和正文
-            console.warn(`[AnswerEngine] ${vendor.name}:${model} 失败: ${status || err.code || err.message}`)
+            // 瞬时限流（429）或网络/超时/5xx：只让这一 model 让路到下一个 model，
+            // 不换 Key 也不冷却 —— 下一题 pro 仍是首选，避免一次并发风暴把主模型全线关停。
+            console.warn(`[AnswerEngine] ${vendor.name}:${model} 失败: ${errKind} ${errSnippet}`)
           }
         }
       }
