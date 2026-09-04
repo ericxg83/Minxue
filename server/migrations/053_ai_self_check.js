@@ -19,7 +19,7 @@ import { query } from '../config/neon.js'
 //                          "serial_pollution", "self_check_skipped"]
 //                          可能为多 issue；null/空 = 全过或未自检
 //
-// 索引：只对失败行建部分索引，方便后台审计脚本按 ws_id 扫盘。
+// 索引：只对失败行建部分索引，方便后台审计脚本按 task_id 扫盘。
 //       不建成功行索引（数据量太大，写入开销不划算）。
 //
 // 幂等：ADD COLUMN IF NOT EXISTS + CREATE INDEX IF NOT EXISTS。
@@ -38,7 +38,7 @@ export const migrateAiSelfCheck = async () => {
     // 部分索引：只覆盖失败行，写入开销可忽略
     await query(`
       CREATE INDEX IF NOT EXISTS questions_ai_self_check_failed_idx
-      ON questions (ws_id) WHERE ai_self_check_passed = false
+      ON questions (task_id) WHERE ai_self_check_passed = false
     `)
 
     const { rows } = await query(`

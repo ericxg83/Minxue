@@ -47,6 +47,7 @@ import { migrateWrongQuestionsUniqueIndex } from './migrations/052_dedupe_wrong_
 import { migrateAiSelfCheck } from './migrations/053_ai_self_check.js'
 import { migrateTaskTypeEnum } from './migrations/054_task_type_enum.js'
 import { migrateFixExamPublishedInconsistency } from './migrations/055_fix_exam_published_inconsistency.js'
+import { migrateGeometryManualOverride } from './migrations/056_add_geometry_manual_override.js'
 import { scheduleNightParse, scheduleWeeklyDiagnosis } from './services/nightParseService.js'
 import { scheduleWeeklyMissingFigureCheck } from './services/missingFigureMonitorService.js'
 
@@ -1557,12 +1558,15 @@ async function syncDraftAnswerBank(question) {
 app.put('/api/questions/:id', async (req, res) => {
   try {
     const { id } = req.params
-    const { content, options, answer, analysis, status, question_type, subject, is_correct, student_answer, image_url, ai_answer, answer_source, geometry_image_url, review_status, review_metadata, display_image_type, source_type } = req.body
+    const { content, options, answer, analysis, status, question_type, subject, is_correct, student_answer, image_url, ai_answer, answer_source, geometry_image_url, review_status, review_metadata, display_image_type, source_type, geometry_manual_override } = req.body
     const hasIsCorrect = 'is_correct' in req.body
     const hasAnswerSource = 'answer_source' in req.body && answer_source !== undefined
     const hasReviewStatus = 'review_status' in req.body
     const hasDisplayImageType = 'display_image_type' in req.body
     const hasSourceType = 'source_type' in req.body && source_type !== undefined
+    // 手动配图标记：只在 body 里显式给了值时才更新，undefined/null 都不动。
+    // 老师手动裁剪/上传时前端传 true，删除配图时前端传 false。
+    const hasGeometryManualOverride = 'geometry_manual_override' in req.body && geometry_manual_override !== undefined && geometry_manual_override !== null
 
     // 复核或改判前读取旧值，用于 judgement 审计
     let oldQuestion = null
@@ -1598,10 +1602,11 @@ app.put('/api/questions/:id', async (req, res) => {
            review_status = CASE WHEN $17 THEN $18::text ELSE review_status END,
            display_image_type = CASE WHEN $20 THEN $19::text ELSE display_image_type END,
            source_type = CASE WHEN $21 THEN $22::text ELSE source_type END,
+           geometry_manual_override = CASE WHEN $23 THEN $24::boolean ELSE geometry_manual_override END,
            updated_at = NOW()
        WHERE id = $13
        RETURNING *`,
-      [n(content), optionsJson, n(answer), n(analysis), n(status), n(question_type), n(subject), n(is_correct), n(student_answer), n(image_url), n(ai_answer), n(answer_source), id, hasIsCorrect, hasAnswerSource, n(geometry_image_url), hasReviewStatus, n(review_status), n(display_image_type), hasDisplayImageType, hasSourceType, n(source_type)]
+      [n(content), optionsJson, n(answer), n(analysis), n(status), n(question_type), n(subject), n(is_correct), n(student_answer), n(image_url), n(ai_answer), n(answer_source), id, hasIsCorrect, hasAnswerSource, n(geometry_image_url), hasReviewStatus, n(review_status), n(display_image_type), hasDisplayImageType, hasSourceType, n(source_type), hasGeometryManualOverride, n(geometry_manual_override)]
     )
 
     if (rows.length === 0) return res.status(404).json({ error: '题目不存在' })
@@ -3261,6 +3266,7 @@ if (process.argv[1] === __filename || process.argv[1]?.endsWith('server/index.js
       await migrateTaskTypeEnum()
       await migrateAiSelfCheck()
       await migrateFixExamPublishedInconsistency()
+      await migrateGeometryManualOverride()
     } catch (err) {
       console.error('数据库迁移失败:', err.message)
     }

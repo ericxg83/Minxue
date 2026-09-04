@@ -875,8 +875,14 @@ const confirmCrop = async () => {
     const url = await uploadImage(file, store.currentTask?.student_id || store.currentStudent?.id)
     if (!url) throw new Error('上传返回无 URL')
     localImageUrl.value = url
-    displayImageUrl.value = url
-    if (q.value) q.value.geometry_image_url = url
+    if (q.value) {
+      q.value.geometry_image_url = url
+      // 老师手动裁剪 = 人工背书这张图，标记 override，保存后落库；
+      // 即使该题被视觉模型判为"无可重绘"（数轴/实物/统计图），前端也不再屏蔽。
+      q.value.geometry_manual_override = true
+    }
+    // 绕过当前会话内的几何图显示闸门，立刻看到刚裁的图
+    showOriginal.value = true
     cropDialogVisible.value = false
     ElMessage.success('裁剪图片已上传并处理')
   } catch (err) {
@@ -1060,10 +1066,12 @@ const handleSave = async () => {
     const resp = await updateQuestion(question.id, {
       content: form.value.content, options: form.value.options, answer: form.value.answer,
       analysis: form.value.analysis, student_answer: question.student_answer,
-      geometry_image_url: localImageUrl.value || question.geometry_image_url, ai_tags: form.value.tags,
+      geometry_image_url: localImageUrl.value || question.geometry_image_url,
+      geometry_manual_override: !!question.geometry_manual_override,
+      ai_tags: form.value.tags,
       question_type: form.value.question_type, subject: form.value.subject
     })
-    Object.assign(question, { content: form.value.content, options: form.value.options, answer: form.value.answer, analysis: form.value.analysis, ai_tags: form.value.tags, geometry_image_url: localImageUrl.value, question_type: form.value.question_type, subject: form.value.subject })
+    Object.assign(question, { content: form.value.content, options: form.value.options, answer: form.value.answer, analysis: form.value.analysis, ai_tags: form.value.tags, geometry_image_url: localImageUrl.value, geometry_manual_override: !!question.geometry_manual_override, question_type: form.value.question_type, subject: form.value.subject })
     // 同步后端算的最新入册风险（⚠ 缺图 / ⚠ 低置信 tag 实时消失/出现）
     if (Array.isArray(resp?.question?.wrong_book_risks)) question.wrong_book_risks = resp.question.wrong_book_risks
     // 保存后自动重批改
@@ -1160,8 +1168,10 @@ const handleImageUpload = async (file) => {
     const response = await fetch('/api/upload', { method: 'POST', body: formData })
     if (!response.ok) throw new Error('上传失败')
     const result = await response.json()
-    displayImageUrl.value = localImageUrl.value = result.url
+    localImageUrl.value = result.url
     question.geometry_image_url = result.url
+    question.geometry_manual_override = true
+    showOriginal.value = true
     ElMessage.success('配图上传成功')
   } catch (err) {
     console.error('图片上传失败:', err)
@@ -1170,8 +1180,12 @@ const handleImageUpload = async (file) => {
   return false
 }
 const deleteImage = () => {
-  localImageUrl.value = displayImageUrl.value = ''
-  if (q.value) q.value.geometry_image_url = ''
+  localImageUrl.value = ''
+  if (q.value) {
+    q.value.geometry_image_url = ''
+    q.value.geometry_manual_override = false
+  }
+  showOriginal.value = false
   ElMessage.success('配图已删除')
 }
 

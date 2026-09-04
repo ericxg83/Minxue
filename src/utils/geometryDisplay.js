@@ -46,6 +46,12 @@ export function isTikzCode(str) {
 export function getGeometryDisplayUrl(question) {
   if (!question) return { url: null, type: 'none' }
 
+  // 老师手动裁剪/上传的配图，直接展示——人工背书优先于"无可重绘"闸门。
+  // 该分支同时保证：即便几何重建已经产出 SVG，只要老师覆盖了配图，就用老师的。
+  if (question.geometry_manual_override && question.geometry_image_url) {
+    return { url: question.geometry_image_url, type: 'raw' }
+  }
+
   // 服务端已结论：原图根本不是几何结构（实物/统计图/数轴），裁剪图不可信
   if (question.tikz_status === 'none'
     && typeof question.asset_last_error === 'string'
