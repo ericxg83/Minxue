@@ -48,6 +48,7 @@ import { migrateAiSelfCheck } from './migrations/053_ai_self_check.js'
 import { migrateTaskTypeEnum } from './migrations/054_task_type_enum.js'
 import { migrateFixExamPublishedInconsistency } from './migrations/055_fix_exam_published_inconsistency.js'
 import { scheduleNightParse, scheduleWeeklyDiagnosis } from './services/nightParseService.js'
+import { scheduleWeeklyMissingFigureCheck } from './services/missingFigureMonitorService.js'
 
 const __dirname = dirname(fileURLToPath(import.meta.url))
 dotenv.config({ path: resolve(__dirname, '.env') })
@@ -58,9 +59,10 @@ import multer from 'multer'
 import { query, TABLES, TASK_STATUS, QUESTION_STATUS } from './config/neon.js'
 import { uploadFilesWithRetry } from './services/uploadRetryManager.js'
 import { createUploadReport, logUploadReport } from './services/uploadReportLogger.js'
-import { createJudgement, batchUpdateQuestionTags, getQuestionAssets, getQuestionAssetsByType, createResource, replaceResourceAnswers } from './services/neonService.js'
+import { createJudgement, batchUpdateQuestionTags, getQuestionAssets, getQuestionAssetsByType, createResource, replaceResourceAnswers, addWrongQuestions } from './services/neonService.js'
 import { judgeAnswer, findDirtyAnswers } from './services/judgeService.js'
 import { checkQuestionCompleteness } from './utils/questionCompleteness.js'
+import { computeWrongBookRisks } from './utils/wrongBookRisks.js'
 import { normalizeOptions } from './utils/optionText.js'
 import { computeTaskStats } from './utils/taskStats.js'
 import { fixFileIfNeeded } from './services/uploadValidator.js'
@@ -1232,6 +1234,29 @@ app.get('/api/diagnostics/upload-reports', async (req, res) => {
   }
 })
 
+// Diagnostics: 缺图监控 —— 每周被错题本挡的题趋势，数据驱动决定是否要做工程优化
+app.get('/api/diagnostics/weekly-missing-figures', async (req, res) => {
+  try {
+    const weeks = Math.min(26, Math.max(1, parseInt(req.query.weeks, 10) || 8))
+    const { getWeeklyMissingFigureStats } = await import('./services/missingFigureMonitorService.js')
+    const stats = await getWeeklyMissingFigureStats(weeks)
+    const currentWeek = stats[0]
+    res.json({
+      success: true,
+      weeks,
+      stats,
+      decision: currentWeek?.wrong_book_blocked >= 5
+        ? `⚠️ 本周 ${currentWeek.wrong_book_blocked} 道被错题本挡，建议评估"作图题分类 / prompt 调优"`
+        : currentWeek?.wrong_book_blocked > 0
+          ? `本周 ${currentWeek.wrong_book_blocked} 道被挡，老师复核补图可消化`
+          : '本周 0 道被挡'
+    })
+  } catch (error) {
+    console.error('获取缺图监控失败:', error)
+    res.status(500).json({ error: error.message })
+  }
+})
+
 // Diagnostics: Worker Status & System Health
 app.get('/api/diagnostics/worker-status', async (req, res) => {
   try {
@@ -1655,6 +1680,45 @@ app.put('/api/questions/:id', async (req, res) => {
     }
 
     if (hasReviewStatus) {
+      // 老师人工复核「标错」时强入错题本：即使 conf<0.8 当时 OCR 没入，现在也补入。
+      // review_status='wrong_no_book' 是「明确不入」语义；其他值走原判定路径。
+      if (review_status === 'wrong' && updatedQuestion.student_id) {
+        const completeness = checkQuestionCompleteness(updatedQuestion)
+        if (completeness.isComplete && updatedQuestion.answer && String(updatedQuestion.answer).trim()) {
+          try {
+            await addWrongQuestions(
+              updatedQuestion.student_id,
+              [id],
+              null,
+              new Map([[id, updatedQuestion]]),
+              { skipConfidence: true }
+            )
+          } catch (e) {
+            console.error(`[manual_review] 强入错题本失败 q=${id.slice(0,8)}:`, e.message)
+          }
+        }
+      }
+      // 复核点「正确」= AI 误判，学生本来没错 → 该题本不该入册，从错题本移除。
+      // 复核点「排除」= 题目本身有问题（OCR 残段、重复题等）→ 从错题本移除。
+      // 复核点「错误但不入册」= 老师明确否决入册 → 若历史上因低置信度已入册，一并撤回。
+      // 严禁前端在此路径写 lifecycle_status='mastered'：掌握度只能由重练卷
+      // finalizeGeneratedExamResults 状态机推进，绕开会造成"假掌握"（见 2026-09 reviewStore 修复）。
+      if (
+        (review_status === 'correct' || review_status === 'exclude' || review_status === 'wrong_no_book')
+        && updatedQuestion.student_id
+      ) {
+        try {
+          const del = await query(
+            `DELETE FROM ${TABLES.WRONG_QUESTIONS} WHERE student_id = $1 AND question_id = $2`,
+            [updatedQuestion.student_id, id]
+          )
+          if (del.rowCount > 0) {
+            console.log(`[manual_review] 从错题本移除 q=${id.slice(0,8)} 原因=${review_status} 影响行=${del.rowCount}`)
+          }
+        } catch (e) {
+          console.error(`[manual_review] 错题本移除失败 q=${id.slice(0,8)}:`, e.message)
+        }
+      }
       await createJudgement({
         questionId: id,
         studentId: updatedQuestion.student_id || oldQuestion?.student_id || null,
@@ -1667,6 +1731,27 @@ app.put('/api/questions/:id', async (req, res) => {
           ...(review_metadata && typeof review_metadata === 'object' ? review_metadata : {})
         }
       })
+    }
+
+    // 给复核页带最新入册风险：老师补完配图/改完题干后，前端拿到这个字段
+    // 即时把 ⚠ tag 消失，不需要重拉整个 task。
+    // is_complete 列此刻还是旧值（fire-and-forget 重算在 res.json 之后），
+    // 所以基于"题干/选项/参考答案/配图"现算一次，保证响应反映补图后的真实状态。
+    try {
+      const { isComplete: liveIsComplete } = checkQuestionCompleteness(updatedQuestion)
+      updatedQuestion.is_complete = liveIsComplete
+      const { rows: inWqRows } = await query(
+        `SELECT EXISTS (SELECT 1 FROM ${TABLES.WRONG_QUESTIONS} WHERE question_id = $1) AS in_wq`,
+        [id]
+      )
+      const CONF_THRESHOLD = parseFloat(process.env.CONFIDENCE_THRESHOLD) || 0.8
+      updatedQuestion.wrong_book_risks = computeWrongBookRisks(
+        updatedQuestion,
+        inWqRows[0]?.in_wq === true,
+        CONF_THRESHOLD
+      )
+    } catch (e) {
+      console.error(`[wrong_book_risks] 计算失败 q=${id.slice(0,8)}:`, e.message)
     }
 
     res.json({ success: true, question: updatedQuestion })
@@ -1728,7 +1813,7 @@ app.post('/api/questions/:id/rejudge', async (req, res) => {
 
     const { rows } = await query(
       `SELECT id, student_id, student_answer, answer, question_type, is_correct,
-              content, geometry_image_url, options
+              content, geometry_image_url, options, answer_source
        FROM ${TABLES.QUESTIONS} WHERE id = $1 AND deleted_at IS NULL`,
       [id]
     )
@@ -1895,7 +1980,8 @@ app.get('/api/questions/task/:taskId', async (req, res) => {
               qc.ai_tags AS _cache_ai_tags,
               a.tikz_status,
               a.processed_at AS asset_processed_at,
-              a.last_error AS asset_last_error
+              a.last_error AS asset_last_error,
+              EXISTS (SELECT 1 FROM ${TABLES.WRONG_QUESTIONS} wq WHERE wq.question_id = q.id) AS in_wrong_book
        FROM ${TABLES.QUESTIONS} q
        LEFT JOIN ${TABLES.QUESTION_CACHE} qc ON q.cache_id = qc.id
        LEFT JOIN LATERAL (
@@ -1910,17 +1996,22 @@ app.get('/api/questions/task/:taskId', async (req, res) => {
                 COALESCE((q.block_coordinates->>'y')::float, 99999), q.created_at`,
       [taskId]
     )
+    const CONF_THRESHOLD = parseFloat(process.env.CONFIDENCE_THRESHOLD) || 0.8
     // JS 层做 COALESCE：cache 字段优先于 question 自身字段
-    const merged = rows.map(q => ({
-      ...q,
-      content: q.content ?? q._cache_content,
-      options: q.options ?? q._cache_options,
-      answer: q.answer || q._cache_answer,
-      analysis: q.analysis ?? q._cache_analysis,
-      question_type: q.question_type ?? q._cache_question_type,
-      subject: q.subject ?? q._cache_subject,
-      ai_tags: q.ai_tags ?? q._cache_ai_tags
-    }))
+    const merged = rows.map(q => {
+      const merged_q = {
+        ...q,
+        content: q.content ?? q._cache_content,
+        options: q.options ?? q._cache_options,
+        answer: q.answer || q._cache_answer,
+        analysis: q.analysis ?? q._cache_analysis,
+        question_type: q.question_type ?? q._cache_question_type,
+        subject: q.subject ?? q._cache_subject,
+        ai_tags: q.ai_tags ?? q._cache_ai_tags
+      }
+      merged_q.wrong_book_risks = computeWrongBookRisks(merged_q, q.in_wrong_book, CONF_THRESHOLD)
+      return merged_q
+    })
     // 移除 _cache_ 前缀的临时字段
     for (const qq of merged) {
       delete qq._cache_content
@@ -2678,7 +2769,7 @@ app.post('/api/generated-exams/:id/grade', async (req, res) => {
       return res.status(400).json({ error: '无效的试卷ID' })
     }
 
-    // 掌握度进阶：new → review_1 → review_2 → mastered
+    // 掌握度进阶：new → review_1 → mastered（累计答对 2 次；答错不重置；mastered 后答错退回 review_1）
     const gradingResult = await finalizeGeneratedExamResults({
       generatedExamId: id,
       studentId,
@@ -3218,6 +3309,14 @@ if (process.argv[1] === __filename || process.argv[1]?.endsWith('server/index.js
       scheduleWeeklyDiagnosis()
     } catch (err) {
       console.error('周维度错因诊断定时器启动失败:', err.message)
+    }
+
+    // 缺图监控：每周日 23:17 跑一次，记录"错题本被挡题数"趋势。
+    // 数据驱动决策：若某周 ≥5 道再考虑做"作图题分类 / prompt 调优"工程。
+    try {
+      scheduleWeeklyMissingFigureCheck()
+    } catch (err) {
+      console.error('缺图监控定时器启动失败:', err.message)
     }
 
     console.log(`并发数: ${process.env.CONCURRENCY || 2}`)

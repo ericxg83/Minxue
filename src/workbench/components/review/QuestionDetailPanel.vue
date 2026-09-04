@@ -947,9 +947,11 @@ const saveQuickStudentAnswer = async () => {
   try {
     // 同步把 answer_source 改为 'teacher_input'，让右上角标签从"未作答"切到"手动录入"，
     // 否则 OCR 留下的 answer_source='blank' 会持续误导老师。
-    await updateQuestion(question.id, { student_answer: text, answer_source: 'teacher_input' })
+    const resp = await updateQuestion(question.id, { student_answer: text, answer_source: 'teacher_input' })
     question.student_answer = text
     question.answer_source = 'teacher_input'
+    // 同步后端算的最新入册风险（⚠ tag 实时消失/出现）
+    if (Array.isArray(resp?.question?.wrong_book_risks)) question.wrong_book_risks = resp.question.wrong_book_risks
     // 答案变更后自动重判，否则 AI 判定会跟学生答案对不上
     try {
       const rejudgeResult = await rejudgeQuestion(question.id)
@@ -981,8 +983,9 @@ const saveQuickAnswer = async () => {
   }
   quickAnswerSaving.value = true
   try {
-    await updateQuestion(question.id, { answer: text })
+    const resp = await updateQuestion(question.id, { answer: text })
     question.answer = text
+    if (Array.isArray(resp?.question?.wrong_book_risks)) question.wrong_book_risks = resp.question.wrong_book_risks
     quickAnswerEditing.value = false
     quickAnswerText.value = ''
     ElMessage.success('标准答案已保存')
@@ -1054,13 +1057,15 @@ const handleSave = async () => {
   if (!question?.id) return
   const loading = ElLoading.service({ lock: true, text: '保存中...', background: 'rgba(0,0,0,0.7)' })
   try {
-    await updateQuestion(question.id, {
+    const resp = await updateQuestion(question.id, {
       content: form.value.content, options: form.value.options, answer: form.value.answer,
       analysis: form.value.analysis, student_answer: question.student_answer,
       geometry_image_url: localImageUrl.value || question.geometry_image_url, ai_tags: form.value.tags,
       question_type: form.value.question_type, subject: form.value.subject
     })
     Object.assign(question, { content: form.value.content, options: form.value.options, answer: form.value.answer, analysis: form.value.analysis, ai_tags: form.value.tags, geometry_image_url: localImageUrl.value, question_type: form.value.question_type, subject: form.value.subject })
+    // 同步后端算的最新入册风险（⚠ 缺图 / ⚠ 低置信 tag 实时消失/出现）
+    if (Array.isArray(resp?.question?.wrong_book_risks)) question.wrong_book_risks = resp.question.wrong_book_risks
     // 保存后自动重批改
     try {
       const rejudgeResult = await rejudgeQuestion(question.id)

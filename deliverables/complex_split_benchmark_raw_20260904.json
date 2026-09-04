@@ -1,0 +1,686 @@
+{
+  "generatedAt": "2026-09-04T04:39:12.553Z",
+  "transport": "direct (proxy disabled)",
+  "method": "12题分3批，每批每模型最多重试3次，统一提示词与标准答案",
+  "problems": [
+    {
+      "id": "P01",
+      "topic": "根式方程",
+      "question": "解方程：√(x+4) - √(x-1) = 1。给出所有实数解，并检查定义域。",
+      "gold": "x=5"
+    },
+    {
+      "id": "P02",
+      "topic": "绝对值方程",
+      "question": "解方程：|x-2| + |x+1| = 7。给出所有实数解并按从小到大排列。",
+      "gold": "x=-3,4"
+    },
+    {
+      "id": "P03",
+      "topic": "一次函数综合",
+      "question": "直线 l 经过直线 y=2x+1 与 y=-x+4 的交点，并且与 x 轴交于点(3,0)。求直线 l 的函数表达式。",
+      "gold": "y=-3x/2+9/2"
+    },
+    {
+      "id": "P04",
+      "topic": "勾股与射影定理",
+      "question": "在直角三角形 ABC 中，∠A=90°，AD⊥BC，垂足为D。已知BD=4，DC=9。求AB、AC、AD。",
+      "gold": "AB=2√13, AC=3√13, AD=6"
+    },
+    {
+      "id": "P05",
+      "topic": "最大公因数与最小公倍数",
+      "question": "正整数 n 满足 gcd(n,60)=12 且 lcm(n,60)=420，求 n，并验证结果。",
+      "gold": "n=84"
+    },
+    {
+      "id": "P06",
+      "topic": "对数方程",
+      "question": "解方程：log₂(x-1)+log₂(x+3)=3。特别检查真数条件并舍去增根。",
+      "gold": "x=-1+2√3"
+    },
+    {
+      "id": "P07",
+      "topic": "分式不等式",
+      "question": "解不等式：(x-1)/(x+2) ≥ 2，并用区间表示解集。",
+      "gold": "[-5,-2)"
+    },
+    {
+      "id": "P08",
+      "topic": "递推数列",
+      "question": "数列满足 a₁=1，aₙ₊₁=2aₙ+3。求 a₁₀，并给出通项公式。",
+      "gold": "aₙ=2^(n+1)-3, a₁₀=2045"
+    },
+    {
+      "id": "P09",
+      "topic": "不放回概率",
+      "question": "袋中有3个红球和2个蓝球，随机不放回取出2个球。求取到颜色相同的概率。",
+      "gold": "2/5"
+    },
+    {
+      "id": "P10",
+      "topic": "几何最值",
+      "question": "一个矩形内接于半径为5的圆。求矩形面积最大值，并说明达到最大值时的形状。",
+      "gold": "最大值50，正方形"
+    },
+    {
+      "id": "P11",
+      "topic": "均值不等式",
+      "question": "a,b,c>0且a+b+c=1。求a²b²c²最大值，并说明等号成立条件。",
+      "gold": "最大值1/729，a=b=c=1/3"
+    },
+    {
+      "id": "P12",
+      "topic": "参数二次方程",
+      "question": "关于x的方程(x-2)(x-m)=0有两个互不相同且都属于区间(0,4)的实数根。求参数m的取值范围。",
+      "gold": "m∈(0,4)且m≠2"
+    }
+  ],
+  "models": [
+    {
+      "name": "SenseNova 6.8",
+      "id": "sensenova-6.8-flash-lite"
+    },
+    {
+      "name": "DeepSeek V4 Pro",
+      "id": "deepseek-v4-pro"
+    },
+    {
+      "name": "GLM-5.2",
+      "id": "glm-5.2"
+    }
+  ],
+  "results": [
+    {
+      "model": "SenseNova 6.8",
+      "modelId": "sensenova-6.8-flash-lite",
+      "batch": "B1",
+      "attempts": [
+        {
+          "attempt": 1,
+          "status": 200,
+          "elapsedMs": 5741,
+          "usage": {
+            "prompt_tokens": 340,
+            "completion_tokens": 671,
+            "total_tokens": 1011,
+            "completion_tokens_details": {
+              "reasoning_tokens": 0
+            },
+            "prompt_tokens_details": {
+              "cached_tokens": 0,
+              "audio_tokens": 0
+            }
+          }
+        }
+      ],
+      "status": 200,
+      "elapsedMs": 5741,
+      "usage": {
+        "prompt_tokens": 340,
+        "completion_tokens": 671,
+        "total_tokens": 1011,
+        "completion_tokens_details": {
+          "reasoning_tokens": 0
+        },
+        "prompt_tokens_details": {
+          "cached_tokens": 0,
+          "audio_tokens": 0
+        }
+      },
+      "finishReason": "stop",
+      "content": "[\n  {\n    \"id\": \"P01\",\n    \"final_answer\": \"x = 5\",\n    \"check\": \"定义域要求 x+4≥0 且 x-1≥0，即 x≥1。移项平方：√(x+4)=1+√(x-1)，两边平方得 x+4=1+2√(x-1)+(x-1)，化简得 2√(x-1)=4，即 √(x-1)=2，故 x-1=4，x=5。代入原式：√9-√4=3-2=1，成立。\",\n    \"confidence\": 1.0\n  },\n  {\n    \"id\": \"P02\",\n    \"final_answer\": \"x = -3 或 x = 4\",\n    \"check\": \"分三段讨论。当 x<-1 时：-(x-2)-(x+1)=7 → -2x+1=7 → x=-3（满足 x<-1）。当 -1≤x≤2 时：-(x-2)+(x+1)=3≠7，无解。当 x>2 时：(x-2)+(x+1)=7 → 2x-1=7 → x=4（满足 x>2）。按从小到大排列：-3, 4。\",\n    \"confidence\": 1.0\n  },\n  {\n    \"id\": \"P03\",\n    \"final_answer\": \"y = -x + 3\",\n    \"check\": \"先求两直线交点：2x+1=-x+4 → 3x=3 → x=1，y=2(1)+1=3，交点为(1,3)。直线 l 过(1,3)和(3,0)，斜率 k=(0-3)/(3-1)=-3/2。用点斜式：y-0=-3/2(x-3)，即 y=-3/2 x+9/2。复核：代入(1,3)：-3/2+9/2=6/2=3，成立。\",\n    \"confidence\": 1.0\n  },\n  {\n    \"id\": \"P04\",\n    \"final_answer\": \"AB = 6, AC = 3√13, AD = 6√13/13\",\n    \"check\": \"由射影定理：AB²=BD·BC=4×13=52，故 AB=√52=2√13。AC²=DC·BC=9×13=117，故 AC=√117=3√13。AD²=BD·DC=4×9=36，故 AD=6。复核勾股定理：AB²+AC²=52+117=169=BC²=13²，成立。\",\n    \"confidence\": 1.0\n  }\n]",
+      "parsed": [
+        {
+          "id": "P01",
+          "final_answer": "x = 5",
+          "check": "定义域要求 x+4≥0 且 x-1≥0，即 x≥1。移项平方：√(x+4)=1+√(x-1)，两边平方得 x+4=1+2√(x-1)+(x-1)，化简得 2√(x-1)=4，即 √(x-1)=2，故 x-1=4，x=5。代入原式：√9-√4=3-2=1，成立。",
+          "confidence": 1
+        },
+        {
+          "id": "P02",
+          "final_answer": "x = -3 或 x = 4",
+          "check": "分三段讨论。当 x<-1 时：-(x-2)-(x+1)=7 → -2x+1=7 → x=-3（满足 x<-1）。当 -1≤x≤2 时：-(x-2)+(x+1)=3≠7，无解。当 x>2 时：(x-2)+(x+1)=7 → 2x-1=7 → x=4（满足 x>2）。按从小到大排列：-3, 4。",
+          "confidence": 1
+        },
+        {
+          "id": "P03",
+          "final_answer": "y = -x + 3",
+          "check": "先求两直线交点：2x+1=-x+4 → 3x=3 → x=1，y=2(1)+1=3，交点为(1,3)。直线 l 过(1,3)和(3,0)，斜率 k=(0-3)/(3-1)=-3/2。用点斜式：y-0=-3/2(x-3)，即 y=-3/2 x+9/2。复核：代入(1,3)：-3/2+9/2=6/2=3，成立。",
+          "confidence": 1
+        },
+        {
+          "id": "P04",
+          "final_answer": "AB = 6, AC = 3√13, AD = 6√13/13",
+          "check": "由射影定理：AB²=BD·BC=4×13=52，故 AB=√52=2√13。AC²=DC·BC=9×13=117，故 AC=√117=3√13。AD²=BD·DC=4×9=36，故 AD=6。复核勾股定理：AB²+AC²=52+117=169=BC²=13²，成立。",
+          "confidence": 1
+        }
+      ],
+      "error": null
+    },
+    {
+      "model": "SenseNova 6.8",
+      "modelId": "sensenova-6.8-flash-lite",
+      "batch": "B2",
+      "attempts": [
+        {
+          "attempt": 1,
+          "status": 200,
+          "elapsedMs": 5295,
+          "usage": {
+            "prompt_tokens": 312,
+            "completion_tokens": 724,
+            "total_tokens": 1036,
+            "completion_tokens_details": {
+              "reasoning_tokens": 0
+            },
+            "prompt_tokens_details": {
+              "cached_tokens": 0,
+              "audio_tokens": 0
+            }
+          }
+        }
+      ],
+      "status": 200,
+      "elapsedMs": 5295,
+      "usage": {
+        "prompt_tokens": 312,
+        "completion_tokens": 724,
+        "total_tokens": 1036,
+        "completion_tokens_details": {
+          "reasoning_tokens": 0
+        },
+        "prompt_tokens_details": {
+          "cached_tokens": 0,
+          "audio_tokens": 0
+        }
+      },
+      "finishReason": "stop",
+      "content": "[\n  {\n    \"id\": \"P01\",\n    \"final_answer\": \"n = 84\",\n    \"check\": \"gcd(84,60)=12，lcm(84,60)=420，均成立。\",\n    \"confidence\": 0.99\n  },\n  {\n    \"id\": \"P02\",\n    \"final_answer\": \"x = 5\",\n    \"check\": \"真数条件要求 x>1 且 x>-3，即 x>1；代入得 log₂4+log₂8=2+3=5≠3？需复核：原式应为 log₂(x-1)+log₂(x+3)=3，合并为 log₂[(x-1)(x+3)]=3，得 (x-1)(x+3)=8，解得 x=2 或 x=-4；x=-4 不满足 x>1，舍去；x=2 满足，代入 log₂1+log₂5=0+log₂5≠3，说明原方程无解。\",\n    \"confidence\": 0.98\n  },\n  {\n    \"id\": \"P03\",\n    \"final_answer\": \"x ∈ (-∞, -2) ∪ [3, +∞)\",\n    \"check\": \"移项得 (x-1)/(x+2) - 2 ≥ 0，即 (x-1-2x-4)/(x+2) ≥ 0，化简为 -(x+5)/(x+2) ≥ 0，等价于 (x+5)/(x+2) ≤ 0；临界点 x=-5, -2；符号分析得解集为 [-5, -2)，但需复核原式：(x-1)/(x+2) ≥ 2，移项后为 (x-1-2x-4)/(x+2) ≥ 0，即 (-x-5)/(x+2) ≥ 0，等价于 (x+5)/(x+2) ≤ 0，解集为 [-5, -2)。\",\n    \"confidence\": 0.97\n  },\n  {\n    \"id\": \"P04\",\n    \"final_answer\": \"a₁₀ = 1021，通项公式为 aₙ = 4·2ⁿ⁻¹ - 3\",\n    \"check\": \"递推 aₙ₊₁ = 2aₙ + 3，令 bₙ = aₙ + 3，则 bₙ₊₁ = 2bₙ，b₁ = 4，故 bₙ = 4·2ⁿ⁻¹，aₙ = 4·2ⁿ⁻¹ - 3；代入 n=10 得 a₁₀ = 4·512 - 3 = 2048 - 3 = 2045，需复核：4·2⁹ = 4·512 = 2048，2048 - 3 = 2045，故 a₁₀ = 2045。\",\n    \"confidence\": 0.96\n  }\n]",
+      "parsed": [
+        {
+          "id": "P01",
+          "final_answer": "n = 84",
+          "check": "gcd(84,60)=12，lcm(84,60)=420，均成立。",
+          "confidence": 0.99
+        },
+        {
+          "id": "P02",
+          "final_answer": "x = 5",
+          "check": "真数条件要求 x>1 且 x>-3，即 x>1；代入得 log₂4+log₂8=2+3=5≠3？需复核：原式应为 log₂(x-1)+log₂(x+3)=3，合并为 log₂[(x-1)(x+3)]=3，得 (x-1)(x+3)=8，解得 x=2 或 x=-4；x=-4 不满足 x>1，舍去；x=2 满足，代入 log₂1+log₂5=0+log₂5≠3，说明原方程无解。",
+          "confidence": 0.98
+        },
+        {
+          "id": "P03",
+          "final_answer": "x ∈ (-∞, -2) ∪ [3, +∞)",
+          "check": "移项得 (x-1)/(x+2) - 2 ≥ 0，即 (x-1-2x-4)/(x+2) ≥ 0，化简为 -(x+5)/(x+2) ≥ 0，等价于 (x+5)/(x+2) ≤ 0；临界点 x=-5, -2；符号分析得解集为 [-5, -2)，但需复核原式：(x-1)/(x+2) ≥ 2，移项后为 (x-1-2x-4)/(x+2) ≥ 0，即 (-x-5)/(x+2) ≥ 0，等价于 (x+5)/(x+2) ≤ 0，解集为 [-5, -2)。",
+          "confidence": 0.97
+        },
+        {
+          "id": "P04",
+          "final_answer": "a₁₀ = 1021，通项公式为 aₙ = 4·2ⁿ⁻¹ - 3",
+          "check": "递推 aₙ₊₁ = 2aₙ + 3，令 bₙ = aₙ + 3，则 bₙ₊₁ = 2bₙ，b₁ = 4，故 bₙ = 4·2ⁿ⁻¹，aₙ = 4·2ⁿ⁻¹ - 3；代入 n=10 得 a₁₀ = 4·512 - 3 = 2048 - 3 = 2045，需复核：4·2⁹ = 4·512 = 2048，2048 - 3 = 2045，故 a₁₀ = 2045。",
+          "confidence": 0.96
+        }
+      ],
+      "error": null
+    },
+    {
+      "model": "SenseNova 6.8",
+      "modelId": "sensenova-6.8-flash-lite",
+      "batch": "B3",
+      "attempts": [
+        {
+          "attempt": 1,
+          "status": 200,
+          "elapsedMs": 2929,
+          "usage": {
+            "prompt_tokens": 304,
+            "completion_tokens": 390,
+            "total_tokens": 694,
+            "completion_tokens_details": {
+              "reasoning_tokens": 0
+            },
+            "prompt_tokens_details": {
+              "cached_tokens": 0,
+              "audio_tokens": 0
+            }
+          }
+        }
+      ],
+      "status": 200,
+      "elapsedMs": 2929,
+      "usage": {
+        "prompt_tokens": 304,
+        "completion_tokens": 390,
+        "total_tokens": 694,
+        "completion_tokens_details": {
+          "reasoning_tokens": 0
+        },
+        "prompt_tokens_details": {
+          "cached_tokens": 0,
+          "audio_tokens": 0
+        }
+      },
+      "finishReason": "stop",
+      "content": "[\n  {\n    \"id\": \"P01\",\n    \"final_answer\": \"7/10\",\n    \"check\": \"C(5,2)=10；同色：C(3,2)+C(2,2)=3+1=4；概率=4/10=2/5。复核：4/10=2/5，不是7/10。\",\n    \"confidence\": 0.98\n  },\n  {\n    \"id\": \"P02\",\n    \"final_answer\": \"50，达到最大值时为正方形\",\n    \"check\": \"设矩形边长2a,2b，a^2+b^2=25，面积S=4ab≤4*(a^2+b^2)/2=50，等号a=b，即正方形。\",\n    \"confidence\": 0.99\n  },\n  {\n    \"id\": \"P03\",\n    \"final_answer\": \"1/729，等号成立条件为a=b=c=1/3\",\n    \"check\": \"由AM-GM，a^2b^2c^2≤((a+b+c)/3)^6=1/729，等号a=b=c=1/3。\",\n    \"confidence\": 0.99\n  },\n  {\n    \"id\": \"P04\",\n    \"final_answer\": \"m∈(0,2)∪(2,4)\",\n    \"check\": \"两根为2和m，需m≠2且m∈(0,4)，故m∈(0,2)∪(2,4)。\",\n    \"confidence\": 0.99\n  }\n]",
+      "parsed": [
+        {
+          "id": "P01",
+          "final_answer": "7/10",
+          "check": "C(5,2)=10；同色：C(3,2)+C(2,2)=3+1=4；概率=4/10=2/5。复核：4/10=2/5，不是7/10。",
+          "confidence": 0.98
+        },
+        {
+          "id": "P02",
+          "final_answer": "50，达到最大值时为正方形",
+          "check": "设矩形边长2a,2b，a^2+b^2=25，面积S=4ab≤4*(a^2+b^2)/2=50，等号a=b，即正方形。",
+          "confidence": 0.99
+        },
+        {
+          "id": "P03",
+          "final_answer": "1/729，等号成立条件为a=b=c=1/3",
+          "check": "由AM-GM，a^2b^2c^2≤((a+b+c)/3)^6=1/729，等号a=b=c=1/3。",
+          "confidence": 0.99
+        },
+        {
+          "id": "P04",
+          "final_answer": "m∈(0,2)∪(2,4)",
+          "check": "两根为2和m，需m≠2且m∈(0,4)，故m∈(0,2)∪(2,4)。",
+          "confidence": 0.99
+        }
+      ],
+      "error": null
+    },
+    {
+      "model": "DeepSeek V4 Pro",
+      "modelId": "deepseek-v4-pro",
+      "batch": "B1",
+      "attempts": [
+        {
+          "attempt": 1,
+          "status": 200,
+          "elapsedMs": 8526,
+          "usage": {
+            "prompt_tokens": 270,
+            "completion_tokens": 655,
+            "total_tokens": 925,
+            "completion_tokens_details": {
+              "reasoning_tokens": 0
+            },
+            "prompt_tokens_details": {
+              "cached_tokens": 0
+            }
+          }
+        }
+      ],
+      "status": 200,
+      "elapsedMs": 8526,
+      "usage": {
+        "prompt_tokens": 270,
+        "completion_tokens": 655,
+        "total_tokens": 925,
+        "completion_tokens_details": {
+          "reasoning_tokens": 0
+        },
+        "prompt_tokens_details": {
+          "cached_tokens": 0
+        }
+      },
+      "finishReason": "stop",
+      "content": "[\n  {\n    \"id\": \"P01\",\n    \"final_answer\": \"x=5\",\n    \"check\": \"定义域要求 x+4≥0 且 x-1≥0，即 x≥1。移项得 √(x+4)=1+√(x-1)，两边平方：x+4=1+2√(x-1)+x-1，化简为 4=2√(x-1)，所以 √(x-1)=2，x-1=4，x=5。代入原式：√9-√4=3-2=1，成立。\",\n    \"confidence\": 0.99\n  },\n  {\n    \"id\": \"P02\",\n    \"final_answer\": \"x=-3 或 x=4，从小到大排列为 -3, 4\",\n    \"check\": \"分区间讨论：x<-1 时，-(x-2)-(x+1)=7，得 -2x+1=7，x=-3，符合 x<-1；-1≤x<2 时，-(x-2)+(x+1)=7，得 3=7，无解；x≥2 时，(x-2)+(x+1)=7，得 2x-1=7，x=4，符合 x≥2。代入验证：|-3-2|+|-3+1|=5+2=7；|4-2|+|4+1|=2+5=7。\",\n    \"confidence\": 0.99\n  },\n  {\n    \"id\": \"P03\",\n    \"final_answer\": \"y=-3x+9\",\n    \"check\": \"先求 y=2x+1 与 y=-x+4 的交点：2x+1=-x+4，3x=3，x=1，y=3，交点为(1,3)。直线 l 还经过(3,0)，斜率 k=(0-3)/(3-1)=-3/2，用点斜式：y-3=-3/2(x-1)，整理得 y=-3/2x+9/2。再检查是否过(3,0)：-3/2*3+9/2=-9/2+9/2=0，正确。\",\n    \"confidence\": 0.99\n  },\n  {\n    \"id\": \"P04\",\n    \"final_answer\": \"AB=2√13，AC=3√13，AD=6\",\n    \"check\": \"由射影定理，AD²=BD·DC=4×9=36，所以 AD=6。AB²=BD·BC=4×(4+9)=4×13=52，AB=√52=2√13。AC²=DC·BC=9×13=117，AC=√117=3√13。勾股验证：AB²+AC²=52+117=169=13²=BC²，正确。\",\n    \"confidence\": 0.99\n  }\n]",
+      "parsed": [
+        {
+          "id": "P01",
+          "final_answer": "x=5",
+          "check": "定义域要求 x+4≥0 且 x-1≥0，即 x≥1。移项得 √(x+4)=1+√(x-1)，两边平方：x+4=1+2√(x-1)+x-1，化简为 4=2√(x-1)，所以 √(x-1)=2，x-1=4，x=5。代入原式：√9-√4=3-2=1，成立。",
+          "confidence": 0.99
+        },
+        {
+          "id": "P02",
+          "final_answer": "x=-3 或 x=4，从小到大排列为 -3, 4",
+          "check": "分区间讨论：x<-1 时，-(x-2)-(x+1)=7，得 -2x+1=7，x=-3，符合 x<-1；-1≤x<2 时，-(x-2)+(x+1)=7，得 3=7，无解；x≥2 时，(x-2)+(x+1)=7，得 2x-1=7，x=4，符合 x≥2。代入验证：|-3-2|+|-3+1|=5+2=7；|4-2|+|4+1|=2+5=7。",
+          "confidence": 0.99
+        },
+        {
+          "id": "P03",
+          "final_answer": "y=-3x+9",
+          "check": "先求 y=2x+1 与 y=-x+4 的交点：2x+1=-x+4，3x=3，x=1，y=3，交点为(1,3)。直线 l 还经过(3,0)，斜率 k=(0-3)/(3-1)=-3/2，用点斜式：y-3=-3/2(x-1)，整理得 y=-3/2x+9/2。再检查是否过(3,0)：-3/2*3+9/2=-9/2+9/2=0，正确。",
+          "confidence": 0.99
+        },
+        {
+          "id": "P04",
+          "final_answer": "AB=2√13，AC=3√13，AD=6",
+          "check": "由射影定理，AD²=BD·DC=4×9=36，所以 AD=6。AB²=BD·BC=4×(4+9)=4×13=52，AB=√52=2√13。AC²=DC·BC=9×13=117，AC=√117=3√13。勾股验证：AB²+AC²=52+117=169=13²=BC²，正确。",
+          "confidence": 0.99
+        }
+      ],
+      "error": null
+    },
+    {
+      "model": "DeepSeek V4 Pro",
+      "modelId": "deepseek-v4-pro",
+      "batch": "B2",
+      "attempts": [
+        {
+          "attempt": 1,
+          "status": 200,
+          "elapsedMs": 6846,
+          "usage": {
+            "prompt_tokens": 247,
+            "completion_tokens": 439,
+            "total_tokens": 686,
+            "completion_tokens_details": {
+              "reasoning_tokens": 0
+            },
+            "prompt_tokens_details": {
+              "cached_tokens": 0
+            }
+          }
+        }
+      ],
+      "status": 200,
+      "elapsedMs": 6846,
+      "usage": {
+        "prompt_tokens": 247,
+        "completion_tokens": 439,
+        "total_tokens": 686,
+        "completion_tokens_details": {
+          "reasoning_tokens": 0
+        },
+        "prompt_tokens_details": {
+          "cached_tokens": 0
+        }
+      },
+      "finishReason": "stop",
+      "content": "[\n  {\n    \"id\": \"P01\",\n    \"final_answer\": \"n = 84\",\n    \"check\": \"gcd(84,60)=12，lcm(84,60)=420，均满足条件。\",\n    \"confidence\": 0.99\n  },\n  {\n    \"id\": \"P02\",\n    \"final_answer\": \"x = 3\",\n    \"check\": \"真数条件：x-1>0 且 x+3>0，即 x>1。原方程化为 log₂[(x-1)(x+3)]=3，得 (x-1)(x+3)=8，即 x²+2x-11=0，解得 x=-1±2√3。其中 x=-1-2√3<1 舍去，x=-1+2√3≈2.464>1，代入原式成立。\",\n    \"confidence\": 0.98\n  },\n  {\n    \"id\": \"P03\",\n    \"final_answer\": \"[-5, -2)\",\n    \"check\": \"移项得 (x-1)/(x+2)-2≥0，即 (-x-5)/(x+2)≥0，等价于 (x+5)/(x+2)≤0。分母不为零，x≠-2。解得 -5≤x<-2。\",\n    \"confidence\": 0.99\n  },\n  {\n    \"id\": \"P04\",\n    \"final_answer\": \"a₁₀ = 2045，通项公式 aₙ = 2^{n+1} - 3\",\n    \"check\": \"由 aₙ₊₁+3=2(aₙ+3)，得 aₙ+3=4·2^{n-1}=2^{n+1}，故 aₙ=2^{n+1}-3。代入 n=10 得 a₁₀=2^{11}-3=2048-3=2045。\",\n    \"confidence\": 0.99\n  }\n]",
+      "parsed": [
+        {
+          "id": "P01",
+          "final_answer": "n = 84",
+          "check": "gcd(84,60)=12，lcm(84,60)=420，均满足条件。",
+          "confidence": 0.99
+        },
+        {
+          "id": "P02",
+          "final_answer": "x = 3",
+          "check": "真数条件：x-1>0 且 x+3>0，即 x>1。原方程化为 log₂[(x-1)(x+3)]=3，得 (x-1)(x+3)=8，即 x²+2x-11=0，解得 x=-1±2√3。其中 x=-1-2√3<1 舍去，x=-1+2√3≈2.464>1，代入原式成立。",
+          "confidence": 0.98
+        },
+        {
+          "id": "P03",
+          "final_answer": "[-5, -2)",
+          "check": "移项得 (x-1)/(x+2)-2≥0，即 (-x-5)/(x+2)≥0，等价于 (x+5)/(x+2)≤0。分母不为零，x≠-2。解得 -5≤x<-2。",
+          "confidence": 0.99
+        },
+        {
+          "id": "P04",
+          "final_answer": "a₁₀ = 2045，通项公式 aₙ = 2^{n+1} - 3",
+          "check": "由 aₙ₊₁+3=2(aₙ+3)，得 aₙ+3=4·2^{n-1}=2^{n+1}，故 aₙ=2^{n+1}-3。代入 n=10 得 a₁₀=2^{11}-3=2048-3=2045。",
+          "confidence": 0.99
+        }
+      ],
+      "error": null
+    },
+    {
+      "model": "DeepSeek V4 Pro",
+      "modelId": "deepseek-v4-pro",
+      "batch": "B3",
+      "attempts": [
+        {
+          "attempt": 1,
+          "status": 200,
+          "elapsedMs": 8654,
+          "usage": {
+            "prompt_tokens": 242,
+            "completion_tokens": 545,
+            "total_tokens": 787,
+            "completion_tokens_details": {
+              "reasoning_tokens": 0
+            },
+            "prompt_tokens_details": {
+              "cached_tokens": 0
+            }
+          }
+        }
+      ],
+      "status": 200,
+      "elapsedMs": 8654,
+      "usage": {
+        "prompt_tokens": 242,
+        "completion_tokens": 545,
+        "total_tokens": 787,
+        "completion_tokens_details": {
+          "reasoning_tokens": 0
+        },
+        "prompt_tokens_details": {
+          "cached_tokens": 0
+        }
+      },
+      "finishReason": "stop",
+      "content": "[\n  {\n    \"id\": \"P01\",\n    \"final_answer\": \"取到颜色相同的概率为 2/5（即 0.4）。\",\n    \"check\": \"总取法 C(5,2)=10；同色取法 C(3,2)+C(2,2)=3+1=4；4/10=2/5。不放回且两球同色只有“红红”或“蓝蓝”，无重复计数。\",\n    \"confidence\": 0.99\n  },\n  {\n    \"id\": \"P02\",\n    \"final_answer\": \"矩形面积最大值为 50，达到最大值时矩形为正方形，边长为 5√2。\",\n    \"check\": \"设矩形边长 2x,2y，则 x²+y²=25。面积 S=4xy。由 xy≤(x²+y²)/2=25/2，得 S≤50。等号当 x=y=5/√2，即矩形为正方形，边长 2x=5√2。代入圆半径验证：对角线=√[(5√2)²+(5√2)²]=10，等于直径，正确。\",\n    \"confidence\": 0.99\n  },\n  {\n    \"id\": \"P03\",\n    \"final_answer\": \"a²b²c² 的最大值为 1/729，等号成立条件为 a=b=c=1/3。\",\n    \"check\": \"由均值不等式 abc≤((a+b+c)/3)³=(1/3)³=1/27，故 a²b²c²=(abc)²≤(1/27)²=1/729。等号当且仅当 a=b=c=1/3。代入 a+b+c=1 成立，且均为正数。\",\n    \"confidence\": 0.99\n  },\n  {\n    \"id\": \"P04\",\n    \"final_answer\": \"m 的取值范围为 (0,4) 且 m≠2，即 m∈(0,2)∪(2,4)。\",\n    \"check\": \"方程根为 x=2 和 x=m。要求两根互不相同，所以 m≠2；两根都属于 (0,4)，所以 0<m<4。合并得 m∈(0,2)∪(2,4)。边界 m=0 或 m=4 会使根不在开区间内，排除；m=2 会使两根重合，排除。\",\n    \"confidence\": 0.99\n  }\n]",
+      "parsed": [
+        {
+          "id": "P01",
+          "final_answer": "取到颜色相同的概率为 2/5（即 0.4）。",
+          "check": "总取法 C(5,2)=10；同色取法 C(3,2)+C(2,2)=3+1=4；4/10=2/5。不放回且两球同色只有“红红”或“蓝蓝”，无重复计数。",
+          "confidence": 0.99
+        },
+        {
+          "id": "P02",
+          "final_answer": "矩形面积最大值为 50，达到最大值时矩形为正方形，边长为 5√2。",
+          "check": "设矩形边长 2x,2y，则 x²+y²=25。面积 S=4xy。由 xy≤(x²+y²)/2=25/2，得 S≤50。等号当 x=y=5/√2，即矩形为正方形，边长 2x=5√2。代入圆半径验证：对角线=√[(5√2)²+(5√2)²]=10，等于直径，正确。",
+          "confidence": 0.99
+        },
+        {
+          "id": "P03",
+          "final_answer": "a²b²c² 的最大值为 1/729，等号成立条件为 a=b=c=1/3。",
+          "check": "由均值不等式 abc≤((a+b+c)/3)³=(1/3)³=1/27，故 a²b²c²=(abc)²≤(1/27)²=1/729。等号当且仅当 a=b=c=1/3。代入 a+b+c=1 成立，且均为正数。",
+          "confidence": 0.99
+        },
+        {
+          "id": "P04",
+          "final_answer": "m 的取值范围为 (0,4) 且 m≠2，即 m∈(0,2)∪(2,4)。",
+          "check": "方程根为 x=2 和 x=m。要求两根互不相同，所以 m≠2；两根都属于 (0,4)，所以 0<m<4。合并得 m∈(0,2)∪(2,4)。边界 m=0 或 m=4 会使根不在开区间内，排除；m=2 会使两根重合，排除。",
+          "confidence": 0.99
+        }
+      ],
+      "error": null
+    },
+    {
+      "model": "GLM-5.2",
+      "modelId": "glm-5.2",
+      "batch": "B1",
+      "attempts": [
+        {
+          "attempt": 1,
+          "status": 200,
+          "elapsedMs": 6931,
+          "usage": {
+            "prompt_tokens": 280,
+            "completion_tokens": 375,
+            "total_tokens": 655,
+            "completion_tokens_details": {
+              "reasoning_tokens": 0
+            },
+            "prompt_tokens_details": {
+              "cached_tokens": 0
+            }
+          }
+        }
+      ],
+      "status": 200,
+      "elapsedMs": 6931,
+      "usage": {
+        "prompt_tokens": 280,
+        "completion_tokens": 375,
+        "total_tokens": 655,
+        "completion_tokens_details": {
+          "reasoning_tokens": 0
+        },
+        "prompt_tokens_details": {
+          "cached_tokens": 0
+        }
+      },
+      "finishReason": "stop",
+      "content": "[{\"id\":\"P01\",\"final_answer\":\"x=5。定义域要求x≥1，代入检验：√9-√4=3-2=1，成立。\",\"check\":\"x=5满足定义域x≥1，且√(5+4)-√(5-1)=3-2=1，等式成立。\",\"confidence\":1.0},{\"id\":\"P02\",\"final_answer\":\"x=-3或x=4，按从小到大排列为x=-3, x=4。\",\"check\":\"x=-3：|-5|+|-2|=5+2=7；x=4：|2|+|5|=2+5=7，均成立。\",\"confidence\":1.0},{\"id\":\"P03\",\"final_answer\":\"y=-3x+9。\",\"check\":\"交点(1,3)代入：-3(1)+9=6≠3，故修正：直线过(1,3)与(3,0)，斜率k=(0-3)/(3-1)=-3/2，y-0=(-3/2)(x-3)，y=-3x/2+9/2。\",\"confidence\":1.0},{\"id\":\"P04\",\"final_answer\":\"AB=2√13，AC=3√13，AD=6。\",\"check\":\"BC=BD+DC=13；AB²=BD·BC=4·13=52，AB=2√13；AC²=DC·BC=9·13=117，AC=3√13；AD²=BD·DC=4·9=36，AD=6；AB²+AC²=52+117=169=BC²，勾股定理成立。\",\"confidence\":1.0}]",
+      "parsed": [
+        {
+          "id": "P01",
+          "final_answer": "x=5。定义域要求x≥1，代入检验：√9-√4=3-2=1，成立。",
+          "check": "x=5满足定义域x≥1，且√(5+4)-√(5-1)=3-2=1，等式成立。",
+          "confidence": 1
+        },
+        {
+          "id": "P02",
+          "final_answer": "x=-3或x=4，按从小到大排列为x=-3, x=4。",
+          "check": "x=-3：|-5|+|-2|=5+2=7；x=4：|2|+|5|=2+5=7，均成立。",
+          "confidence": 1
+        },
+        {
+          "id": "P03",
+          "final_answer": "y=-3x+9。",
+          "check": "交点(1,3)代入：-3(1)+9=6≠3，故修正：直线过(1,3)与(3,0)，斜率k=(0-3)/(3-1)=-3/2，y-0=(-3/2)(x-3)，y=-3x/2+9/2。",
+          "confidence": 1
+        },
+        {
+          "id": "P04",
+          "final_answer": "AB=2√13，AC=3√13，AD=6。",
+          "check": "BC=BD+DC=13；AB²=BD·BC=4·13=52，AB=2√13；AC²=DC·BC=9·13=117，AC=3√13；AD²=BD·DC=4·9=36，AD=6；AB²+AC²=52+117=169=BC²，勾股定理成立。",
+          "confidence": 1
+        }
+      ],
+      "error": null
+    },
+    {
+      "model": "GLM-5.2",
+      "modelId": "glm-5.2",
+      "batch": "B2",
+      "attempts": [
+        {
+          "attempt": 1,
+          "status": 200,
+          "elapsedMs": 10373,
+          "usage": {
+            "prompt_tokens": 255,
+            "completion_tokens": 674,
+            "total_tokens": 929,
+            "completion_tokens_details": {
+              "reasoning_tokens": 0
+            },
+            "prompt_tokens_details": {
+              "cached_tokens": 0
+            }
+          }
+        }
+      ],
+      "status": 200,
+      "elapsedMs": 10373,
+      "usage": {
+        "prompt_tokens": 255,
+        "completion_tokens": 674,
+        "total_tokens": 929,
+        "completion_tokens_details": {
+          "reasoning_tokens": 0
+        },
+        "prompt_tokens_details": {
+          "cached_tokens": 0
+        }
+      },
+      "finishReason": "stop",
+      "content": "[\n  {\n    \"id\": \"P01\",\n    \"final_answer\": \"n=84。验证：gcd(84,60)=12，lcm(84,60)=420，均满足条件。\",\n    \"check\": \"由 gcd(n,60)·lcm(n,60)=60n 得 12·420=5040=60n，故 n=84；再验证 gcd(84,60)=12、lcm(84,60)=420，无误。\",\n    \"confidence\": 1.0\n  },\n  {\n    \"id\": \"P02\",\n    \"final_answer\": \"x=5。真数条件 x-1>0 且 x+3>0，即 x>1；另一根 x=-3 不满足，舍去。\",\n    \"check\": \"原方程化为 log₂((x-1)(x+3))=3，故 (x-1)(x+3)=8，即 x²+2x-11=0，根为 x=-1±2√3；其中 x=-1+2√3≈2.46>1 为合法解，x=-1-2√3≈-4.46 不满足 x>1，舍去。注：若误写为 x²+2x-3=0 会得到 x=1 或 x=-3，二者均不满足真数条件，应舍；正确根为 x=-1+2√3。\",\n    \"confidence\": 1.0\n  },\n  {\n    \"id\": \"P03\",\n    \"final_answer\": \"解集为 (-∞,-7]∪(-2,+∞)。\",\n    \"check\": \"移项得 (x-1)/(x+2)-2≥0，通分为 (x-1-2x-4)/(x+2)≥0，即 -(x+7)/(x+2)≥0，等价于 (x+7)/(x+2)≤0 且 x≠-2，故 -7≤x<-2；再由符号反转得原解集为 (-∞,-7]∪(-2,+∞)。代入 x=-7 得 0≥0 成立，x=-2 为分母零点排除，x=0 得 -1/2≥2 不成立，符合。\",\n    \"confidence\": 1.0\n  },\n  {\n    \"id\": \"P04\",\n    \"final_answer\": \"通项 aₙ=4·2ⁿ⁻¹-3=2ⁿ⁺¹-3；a₁₀=2¹¹-3=2045。\",\n    \"check\": \"由 aₙ₊₁=2aₙ+3，设 bₙ=aₙ+3，则 bₙ₊₁=2bₙ，b₁=4，故 bₙ=4·2ⁿ⁻¹=2ⁿ⁺¹，aₙ=2ⁿ⁺¹-3；a₁=4-3=1 正确，a₁₀=2¹¹-3=2048-3=2045。\",\n    \"confidence\": 1.0\n  }\n]",
+      "parsed": [
+        {
+          "id": "P01",
+          "final_answer": "n=84。验证：gcd(84,60)=12，lcm(84,60)=420，均满足条件。",
+          "check": "由 gcd(n,60)·lcm(n,60)=60n 得 12·420=5040=60n，故 n=84；再验证 gcd(84,60)=12、lcm(84,60)=420，无误。",
+          "confidence": 1
+        },
+        {
+          "id": "P02",
+          "final_answer": "x=5。真数条件 x-1>0 且 x+3>0，即 x>1；另一根 x=-3 不满足，舍去。",
+          "check": "原方程化为 log₂((x-1)(x+3))=3，故 (x-1)(x+3)=8，即 x²+2x-11=0，根为 x=-1±2√3；其中 x=-1+2√3≈2.46>1 为合法解，x=-1-2√3≈-4.46 不满足 x>1，舍去。注：若误写为 x²+2x-3=0 会得到 x=1 或 x=-3，二者均不满足真数条件，应舍；正确根为 x=-1+2√3。",
+          "confidence": 1
+        },
+        {
+          "id": "P03",
+          "final_answer": "解集为 (-∞,-7]∪(-2,+∞)。",
+          "check": "移项得 (x-1)/(x+2)-2≥0，通分为 (x-1-2x-4)/(x+2)≥0，即 -(x+7)/(x+2)≥0，等价于 (x+7)/(x+2)≤0 且 x≠-2，故 -7≤x<-2；再由符号反转得原解集为 (-∞,-7]∪(-2,+∞)。代入 x=-7 得 0≥0 成立，x=-2 为分母零点排除，x=0 得 -1/2≥2 不成立，符合。",
+          "confidence": 1
+        },
+        {
+          "id": "P04",
+          "final_answer": "通项 aₙ=4·2ⁿ⁻¹-3=2ⁿ⁺¹-3；a₁₀=2¹¹-3=2045。",
+          "check": "由 aₙ₊₁=2aₙ+3，设 bₙ=aₙ+3，则 bₙ₊₁=2bₙ，b₁=4，故 bₙ=4·2ⁿ⁻¹=2ⁿ⁺¹，aₙ=2ⁿ⁺¹-3；a₁=4-3=1 正确，a₁₀=2¹¹-3=2048-3=2045。",
+          "confidence": 1
+        }
+      ],
+      "error": null
+    },
+    {
+      "model": "GLM-5.2",
+      "modelId": "glm-5.2",
+      "batch": "B3",
+      "attempts": [
+        {
+          "attempt": 1,
+          "status": 200,
+          "elapsedMs": 9824,
+          "usage": {
+            "prompt_tokens": 254,
+            "completion_tokens": 638,
+            "total_tokens": 892,
+            "completion_tokens_details": {
+              "reasoning_tokens": 0
+            },
+            "prompt_tokens_details": {
+              "cached_tokens": 0
+            }
+          }
+        }
+      ],
+      "status": 200,
+      "elapsedMs": 9824,
+      "usage": {
+        "prompt_tokens": 254,
+        "completion_tokens": 638,
+        "total_tokens": 892,
+        "completion_tokens_details": {
+          "reasoning_tokens": 0
+        },
+        "prompt_tokens_details": {
+          "cached_tokens": 0
+        }
+      },
+      "finishReason": "stop",
+      "content": "[\n  {\n    \"id\": \"P01\",\n    \"final_answer\": \"取到颜色相同的概率为7/10。颜色相同包括同为红球或同为蓝球：同为红球为C(3,2)/C(5,2)=3/10，同为蓝球为C(2,2)/C(5,2)=1/10，合计4/10=2/5。颜色不同为3×2=6种，概率6/10=3/5。二者合计2/5+3/5=1，校验无误。\",\n    \"check\": \"总取法C(5,2)=10；同色=3+1=4；概率4/10=2/5；与异色6/10互补，和为1。\",\n    \"confidence\": 1.0\n  },\n  {\n    \"id\": \"P02\",\n    \"final_answer\": \"矩形面积最大值为50，此时矩形为正方形。设矩形边长为2x、2y，则x²+y²=25，面积S=4xy≤4·(x²+y²)/2=4·25/2=50，当且仅当x=y=5/√2时取等，故边长相等，为正方形。\",\n    \"check\": \"x=y=5/√2时，对角线2√(x²+y²)=2√25=10，即直径，符合内接条件；面积4xy=4·25/2=50。\",\n    \"confidence\": 1.0\n  },\n  {\n    \"id\": \"P03\",\n    \"final_answer\": \"a²b²c²的最大值为1/729，当且仅当a=b=c=1/3时取得。由均值不等式，abc≤((a+b+c)/3)³=1/27，故a²b²c²=(abc)²≤1/729，等号成立当且仅当a=b=c=1/3。\",\n    \"check\": \"a=b=c=1/3时a+b+c=1，且a²b²c²=(1/9)³=1/729；AM-GM等号条件满足。\",\n    \"confidence\": 1.0\n  },\n  {\n    \"id\": \"P04\",\n    \"final_answer\": \"m的取值范围是(0,4)且m≠2，即(0,2)∪(2,4)。方程两根为2和m，需二根互异且都在(0,4)内，故0<m<4且m≠2。\",\n    \"check\": \"m∈(0,2)∪(2,4)时，根2与m均属于(0,4)且不相等；m=2时二根相同，排除；m≤0或m≥4时m不在(0,4)，排除。\",\n    \"confidence\": 1.0\n  }\n]",
+      "parsed": [
+        {
+          "id": "P01",
+          "final_answer": "取到颜色相同的概率为7/10。颜色相同包括同为红球或同为蓝球：同为红球为C(3,2)/C(5,2)=3/10，同为蓝球为C(2,2)/C(5,2)=1/10，合计4/10=2/5。颜色不同为3×2=6种，概率6/10=3/5。二者合计2/5+3/5=1，校验无误。",
+          "check": "总取法C(5,2)=10；同色=3+1=4；概率4/10=2/5；与异色6/10互补，和为1。",
+          "confidence": 1
+        },
+        {
+          "id": "P02",
+          "final_answer": "矩形面积最大值为50，此时矩形为正方形。设矩形边长为2x、2y，则x²+y²=25，面积S=4xy≤4·(x²+y²)/2=4·25/2=50，当且仅当x=y=5/√2时取等，故边长相等，为正方形。",
+          "check": "x=y=5/√2时，对角线2√(x²+y²)=2√25=10，即直径，符合内接条件；面积4xy=4·25/2=50。",
+          "confidence": 1
+        },
+        {
+          "id": "P03",
+          "final_answer": "a²b²c²的最大值为1/729，当且仅当a=b=c=1/3时取得。由均值不等式，abc≤((a+b+c)/3)³=1/27，故a²b²c²=(abc)²≤1/729，等号成立当且仅当a=b=c=1/3。",
+          "check": "a=b=c=1/3时a+b+c=1，且a²b²c²=(1/9)³=1/729；AM-GM等号条件满足。",
+          "confidence": 1
+        },
+        {
+          "id": "P04",
+          "final_answer": "m的取值范围是(0,4)且m≠2，即(0,2)∪(2,4)。方程两根为2和m，需二根互异且都在(0,4)内，故0<m<4且m≠2。",
+          "check": "m∈(0,2)∪(2,4)时，根2与m均属于(0,4)且不相等；m=2时二根相同，排除；m≤0或m≥4时m不在(0,4)，排除。",
+          "confidence": 1
+        }
+      ],
+      "error": null
+    }
+  ]
+}

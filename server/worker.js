@@ -4061,7 +4061,7 @@ const processWorkbookGrading = async (job) => {
   // 直接基于 questionsWithStudentId 过滤（自带 id），确保 question_id 一定与
   // 已落库的题目行一致；不再用"题号 → question_id"映射，避免多页同题号/跨 section
   // 同题号覆盖导致 question_id 指向错误的题目甚至 NULL。
-  const wrongQuestions = questionsWithStudentId.filter(q => q.is_correct === false && q.question_number)
+  const wrongQuestions = questionsWithStudentId.filter(q => (q.is_correct === false || q.answer_source === 'blank') && q.question_number)
 
   for (const wq of wrongQuestions) {
     const pageImageUrl = wq.image_url || imageList[0]?.image_url
@@ -5088,7 +5088,7 @@ const processAnswerBankGrading = async (job) => {
     for (let idx = 0; idx < questionsWithIds.length; idx++) {
       const q = questionsWithIds[idx]
       const matchInfo = matchInfoByQN.get(idx + 1) || {}
-      if (q.is_correct === false) {
+      if (q.is_correct === false || q.answer_source === 'blank') {
         await addWrongQuestions(studentId, [q.id], null, null).catch(e =>
           console.error(`⚠️ [AnswerBank] 错题本同步失败 questionId=${q.id}:`, e.message)
         )

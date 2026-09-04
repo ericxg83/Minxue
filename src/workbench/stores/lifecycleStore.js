@@ -3,21 +3,22 @@ import { ref, computed } from 'vue'
 
 /**
  * 错题生命周期管理 Store
- * 
- * 状态流转规则：
+ *
+ * 状态流转规则（与后端 gradingFinalizer.getNextLifecycle 保持一致）：
  * - 首次错误 → new
- * - new 重练正确 → review_1
- * - review_1 重练正确 → review_2
- * - review_2 重练正确 → mastered
- * - 任何状态重练错误 → 回到 new
+ * - 累计答对 1 次 → review_1
+ * - 累计答对 2 次 → mastered
+ * - 答错不重置进度；仅"已掌握答错"退回 review_1 重新验证
+ *
+ * review_2 保留为历史兼容枚举（生产库 0 条），不再被写入。
  */
 
 // 生命周期状态定义
 export const LIFECYCLE_STATUS = {
   NEW: 'new',           // 新错题
-  REVIEW_1: 'review_1', // 第一次重练
-  REVIEW_2: 'review_2', // 第二次重练
-  MASTERED: 'mastered'  // 已掌握
+  REVIEW_1: 'review_1', // 累计答对 1 次
+  REVIEW_2: 'review_2', // 历史兼容枚举，不再被写入
+  MASTERED: 'mastered'  // 累计答对 2 次
 }
 
 // 状态显示名称
@@ -38,28 +39,28 @@ export const LIFECYCLE_STATUS_COLORS = {
 
 export const useLifecycleStore = defineStore('lifecycle', () => {
   // 计算下一个生命周期状态（重练正确）
+  // review_2 是历史脏值，按 review_1 语义处理
   const getNextStatus = (currentStatus) => {
     switch (currentStatus) {
       case LIFECYCLE_STATUS.NEW:
+      case LIFECYCLE_STATUS.REVIEW_2:
         return LIFECYCLE_STATUS.REVIEW_1
       case LIFECYCLE_STATUS.REVIEW_1:
-        return LIFECYCLE_STATUS.REVIEW_2
-      case LIFECYCLE_STATUS.REVIEW_2:
+      case LIFECYCLE_STATUS.MASTERED:
         return LIFECYCLE_STATUS.MASTERED
       default:
-        return currentStatus
+        return LIFECYCLE_STATUS.REVIEW_1
     }
   }
 
   // 处理重练结果
   const processReviewResult = (currentStatus, isCorrect) => {
     if (isCorrect) {
-      // 正确：进入下一个阶段
       return getNextStatus(currentStatus)
-    } else {
-      // 错误：重新回到 new
-      return LIFECYCLE_STATUS.NEW
     }
+    // 答错不重置进度；已掌握退回 review_1 重新验证
+    if (currentStatus === LIFECYCLE_STATUS.MASTERED) return LIFECYCLE_STATUS.REVIEW_1
+    return currentStatus
   }
 
   // 判断是否需要重练（非 mastered 状态都需要重练）

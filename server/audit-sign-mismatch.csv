@@ -1,0 +1,103 @@
+task_id,question_number,answer,student_answer,issues,is_correct,ai_self_check_passed
+ea7935c6-5675-4943-a262-033ab45f13a1,4,1,(1) m²−2m+2=1 → m²−2m+1=0 → (m−1)²=0 → m=1；(2) m²−2m+2=2 → m²−2m=0 → m(m−2)=0 → m=0 或 m=2。,arithmetic_mismatch,false,
+87240cbf-abd5-45ea-972d-55befd4037f8,8,m≥0，-m,≤0；,arithmetic_mismatch,true,
+7639eee3-2891-43fb-9bb8-8a4346290476,2,"开口方向：向上；对称轴：x=1；顶点坐标：(1,0)；变化规律：当x<1时，y随x增大而减小；当x>1时，y随x增大而增大；有最小值，当x=1时取得最小值0","向上, x=1, (1,0), 最小值, x=1, 0",arithmetic_mismatch,true,
+af756133-16f8-4386-8f94-0fb68c95e5f3,1,"y=(x-2)²-4，对称轴：x=2，顶点坐标：(2,-4)，最小值，当x=2时取得","y=(x-2)²-4
+直线x=2
+(2,-4)
+最小值
+x=2",arithmetic_mismatch,true,
+85e391bf-81f4-4736-9c8d-c811a565643a,2,"开口方向：向上；对称轴：x=1；顶点坐标：(1,0)；变化规律：当x<1时，y随x增大而减小；当x>1时，y随x增大而增大；有最小值，当x=1时取得最小值0","向上, x=1, (1,0), 当x>1时y随x增大而增大；当x<1时y随x增大而减小, 最小值, x=0",arithmetic_mismatch,true,
+73e54aef-882f-4647-a3c1-d461cb861c59,4,1,解：(1) 由题意可得 m²−2m+2=1 且 m²+m≠0，解得 m=1。(2) 由题意可得 m²−2m+2=2 且 m²+m≠0，解得 m=2。,arithmetic_mismatch,false,
+ea7935c6-5675-4943-a262-033ab45f13a1,5,"y = -2x² + 3，开口向下，对称轴为 x=0，顶点坐标为 (0,3)；由 y=-2x² 向上平移 3 个单位得到","(1) 把A,B代入
+{1=a+c
+{-5=4a+c
+a=-2
+c=3",arithmetic_mismatch,false,
+85e391bf-81f4-4736-9c8d-c811a565643a,3,y = -1/3(x + 3)²,y = -\frac{1}{3}(x + 3)^2,serial_pollution,false,
+7639eee3-2891-43fb-9bb8-8a4346290476,2,"a < 1, 高","a < 1, 高",arithmetic_mismatch,true,
+ea7935c6-5675-4943-a262-033ab45f13a1,3,a = -1/4，函数表达式为 y = -1/4 x²,"把A代入
+-1/4 = a
+y = -1/4 x²",arithmetic_mismatch,true,
+7495d7be-9b49-411d-ae8e-c5a11c13bda8,10,(1) =；(2) <,"=,<",arithmetic_mismatch,false,
+ea7935c6-5675-4943-a262-033ab45f13a1,2,"开口方向：向上；对称轴：x=1；顶点坐标：(1,0)；变化规律：当x<1时，y随x增大而减小；当x>1时，y随x增大而增大；有最小值，当x=1时取得最小值0","true, 上, x=1, (1,0), 最小值, 1",arithmetic_mismatch,true,
+73e54aef-882f-4647-a3c1-d461cb861c59,1,"下,2,上,2","下, 2, 上, 2",arithmetic_mismatch,true,
+85e391bf-81f4-4736-9c8d-c811a565643a,3,y = -1/3x² - 3,y = -1/3x² - 3,arithmetic_mismatch,true,
+ea7935c6-5675-4943-a262-033ab45f13a1,1,"下,2,上,2","左, 2, 右, 2",arithmetic_mismatch,true,
+af756133-16f8-4386-8f94-0fb68c95e5f3,1,"上,x=-2,(-2,-1),-2,小,-1","上, 直线x=-2, (-2,-1), -2, 小, -1",arithmetic_mismatch,true,
+85e391bf-81f4-4736-9c8d-c811a565643a,3,y = -1/3x² + 3,y = -1/3x² + 3,arithmetic_mismatch,true,
+ddcfedfe-b24c-4b97-b2bc-8eaf06c32c29,3,a > 2,a > 2,arithmetic_mismatch,true,
+ddcfedfe-b24c-4b97-b2bc-8eaf06c32c29,4,"y = -2x², (0,0), x=0, 向下, 顶点在原点，开口向下, 不在","(1) y=4x²
+(2) (0,4), y轴, 向上
+(3) 否",arithmetic_mismatch,false,
+73e54aef-882f-4647-a3c1-d461cb861c59,3,y=-1/3(x-3)²,y = -\frac{1}{3}(x - 3)^2,serial_pollution,false,
+87240cbf-abd5-45ea-972d-55befd4037f8,11,整数或简单分数，再核对：2又11/25的算术平方根……实际上 61/25 的61不是完全平方数，所以答案应为 √61/5,"解：(1) √49=7；(2) √(169/196)=13/14；(3) √(361/256)=19/16；(4) 2又11/25=61/25, √(61/25)=8/5；(5) 12.25=(35/5)²=(12.5)², √12.25=3.5",arithmetic_mismatch,false,
+7639eee3-2891-43fb-9bb8-8a4346290476,4,"y=4x², B(m,4)，m=-1，点A与点B关于抛物线的对称轴对称, D(n,-4an²)","将A(-1,4)代入y=ax²得4=a(-1)²，a=4，所以y=4x², 将B(m,4)代入y=4x²得4=4m²，m=±1，因为A、B不同，所以m=1，B(1,4)。是, 因为C(n, 4n²)，对称轴是y轴，所以D(-n, 4n²)",answer_sign_mismatch,false,
+73e54aef-882f-4647-a3c1-d461cb861c59,3,y = -1/3(x + 3)²,y = -\frac{1}{3}(x + 3)^2,serial_pollution,false,
+73e54aef-882f-4647-a3c1-d461cb861c59,5,"y = ½(x - 2)², x = -2, (-2, 0)","解：把点A(2,2)代入，得 2 = ½(2 + m)² → 4 = (2 + m)² → 2 + m = ±2 → m = 0 或 m = -4。因 m < 0，故 m = -4。表达式为 y = ½(x - 4)²，对称轴 x = 4，顶点 (4, 0)。",answer_sign_mismatch|serial_pollution,false,
+85e391bf-81f4-4736-9c8d-c811a565643a,2,"上,y轴,(0,-2),0,小,-2,下,y轴,(0,2),0,大,2","上, y轴, (2, 0), 0, 小, -2, 下, y轴, (-2, 0), 0, 大, 2",arithmetic_mismatch,true,
+7639eee3-2891-43fb-9bb8-8a4346290476,3,y = -1/3(x + 3)²,y = -\frac{1}{3}(x + 3)^2,serial_pollution,false,
+7495d7be-9b49-411d-ae8e-c5a11c13bda8,7,"-4, -3, -2, 2, 3, 4","±2,±3,±4",answer_sign_mismatch,true,
+ea7935c6-5675-4943-a262-033ab45f13a1,3,y = -1/3(x - 3)²,y = -\frac{1}{3}x^2 + 3,serial_pollution,false,
+85e391bf-81f4-4736-9c8d-c811a565643a,3,y = -1/3(x - 3)²,y = -\frac{1}{3}(x - 3)^2,serial_pollution,false,
+7639eee3-2891-43fb-9bb8-8a4346290476,3,y = -\frac{1}{3}x^2 + 3,y=ax²+k a=-1/3 k=3代入 y=-1/3x²+3,arithmetic_mismatch,true,
+73e54aef-882f-4647-a3c1-d461cb861c59,5,"y = -2x² + 3，开口向下，对称轴为 x=0，顶点坐标为 (0,3)；由 y=-2x² 向上平移 3 个单位得到","(1) 解：把点A(-1,1) B(2,-5)代入y=ax²+c得
+{1=a+c
+{-5=4a+c
+解得{a=-2
+{b=3
+∴该抛物线的表达式为y=-2x²+3
+开口方向：向下
+对称轴：y轴
+顶点坐标：(0,3)
+(2) 抛物线y=-2x²+3由抛物线y=-2x²向上平移3个单位长度得到。",arithmetic_mismatch,false,
+7639eee3-2891-43fb-9bb8-8a4346290476,3,a = -1/4，函数表达式为 y = -1/4 x²,a = -1/4，函数表达式为 y = -1/4 x²,arithmetic_mismatch,true,
+73e54aef-882f-4647-a3c1-d461cb861c59,3,y = -1/3x² - 3,y = -\frac{1}{3}x^2 - 3,serial_pollution|arithmetic_mismatch,false,
+b967a0af-0aee-4cd2-ad18-884e63fd44cf,14,(1) 是；(2) m = -48 或 m = -27/16,"(1) 解：①=±√((-18)×(-8))=±√144=±12, ②=±√((-18)×(-2))=±√36=±6, ③=±√((-8)×(-2))=±√16=±4，答：是圆满组合数，因为±12、±6、±4是整数。(2) ①=±√((-3)(-12))=±√36=±6, ②=±√((-3)(m))=±√(-3m), ③=±√((-12)(m))=±√(-12m)；且±√(-3m)=±12 且±√(-12m)=±12，由±√(-3m)=±12得-3m=144，-m=48，∴m值不想等；∴由得m=-48(舍)，答：m=-48",answer_sign_mismatch,false,
+85e391bf-81f4-4736-9c8d-c811a565643a,4,"1,2","(1) m=1；(2) m₁=0, m₂=2。",serial_pollution,true,
+87240cbf-abd5-45ea-972d-55befd4037f8,9,√3,√3,arithmetic_mismatch,true,
+73e54aef-882f-4647-a3c1-d461cb861c59,1,"左,2,下,1","下, 1, 左, 2",arithmetic_mismatch,true,
+b967a0af-0aee-4cd2-ad18-884e63fd44cf,4,9,±3,answer_sign_mismatch,false,
+85e391bf-81f4-4736-9c8d-c811a565643a,4,"y=4x², (1,4), 是, (-n, 4n²)","y = 4x², B(1, 4)，A与B关于y轴对称, D(-n, 4n²)",arithmetic_mismatch,true,
+c69438bc-5d78-4c38-9b65-aab9e2641be8,5,"1,2,3,6,6,12,18","1,2,3,6; 6,12,18",arithmetic_mismatch,true,
+af756133-16f8-4386-8f94-0fb68c95e5f3,6,"'<,>,>'，说明题目中图像顶点应在 y 轴左侧（x < 0），即 -m < 0 ⇒ m > 0；同时顶点纵坐标 h > 0（顶点在 x 轴上方）",">, <, <",arithmetic_mismatch,false,
+ddcfedfe-b24c-4b97-b2bc-8eaf06c32c29,6,第一空为-5，第二空为a≠2且a≠-5,(1) a=-5; (2) a≠-5且a≠2,serial_pollution|arithmetic_mismatch,true,
+ea7935c6-5675-4943-a262-033ab45f13a1,3,y = -1/3(x + 3)²,y = -\frac{1}{3}x^2 - 3,serial_pollution,false,
+7639eee3-2891-43fb-9bb8-8a4346290476,5,"y = -2x² + 3，开口向下，对称轴为 y 轴（x=0），顶点坐标为 (0, 3)；由 y = -2x² 向上平移 3 个单位得到","将A(-1,1), B(2,-5)代入
+1 = a(-1)² + c → 1 = a + c
+-5 = a(2)² + c → -5 = 4a + c
+解得 {a=-2, c=3}
+y = -2x² + 3
+由 y = -2x² 向上平移3个单位长度",arithmetic_mismatch,true,
+85e391bf-81f4-4736-9c8d-c811a565643a,1,"下,2,上,2","下, 2, 上, 2",arithmetic_mismatch,true,
+85e391bf-81f4-4736-9c8d-c811a565643a,4,"<, (-5, 9)","<, (3, 25)",arithmetic_mismatch,false,
+7639eee3-2891-43fb-9bb8-8a4346290476,1,下 （0，0） x 轴 减 加 0 小 0,"下, (0,0), y轴, 增大, 减小, 0, 大, 0",arithmetic_mismatch,true,
+85e391bf-81f4-4736-9c8d-c811a565643a,3,"3,0",把 x=0 代入，y=3；把 x=-1 代入，y=0。,serial_pollution,true,
+85e391bf-81f4-4736-9c8d-c811a565643a,3,a = -1/4，函数表达式为 y = -1/4 x²,"把 A(-1, -1/4) 代入，-1/4 = a，a = -1/4，y = -1/4 x²",arithmetic_mismatch,false,
+7639eee3-2891-43fb-9bb8-8a4346290476,3,y = -1/3(x - 3)²,y = -\frac{1}{3}(x - 3)^2,serial_pollution,false,
+ea7935c6-5675-4943-a262-033ab45f13a1,3,y = -1/3x² + 3,y = -1/3x² + 3,arithmetic_mismatch,true,
+ddcfedfe-b24c-4b97-b2bc-8eaf06c32c29,4,"y=3x²-6x+5, 83",y=3x²-6x+5; y=77,arithmetic_mismatch,false,
+ea7935c6-5675-4943-a262-033ab45f13a1,3,y = -1/3x² - 3,y = -1/3x² - 3,arithmetic_mismatch,true,
+73e54aef-882f-4647-a3c1-d461cb861c59,3,a = -1/4，函数表达式为 y = -1/4 x²,"解：把A(-1, -1/4)代入，得 -1/4 = a，∴该函数的表达式为 y = -1/4 x²",arithmetic_mismatch,false,
+73e54aef-882f-4647-a3c1-d461cb861c59,2,"开口方向：向上；对称轴：x=1；顶点坐标：(1,0)；变化规律：当x<1时，y随x增大而减小；当x>1时，y随x增大而增大；有最小值，当x=1时取得最小值0","手绘抛物线，顶点在(1,0)，开口向上。, 向上, 直线x=1, (1,0), 当x<1时，y随x的值增大而减小；当x>1时，y随x的值增大而增大。, 最小值, 1",arithmetic_mismatch,true,
+85e391bf-81f4-4736-9c8d-c811a565643a,5,"y = ½(x - 2)², x = -2, (-2, 0)","把A(2,2)代入
+2 = ½(2+m)²
+±2 = 2+m
+m₁ = 0（舍）
+m₂ = -4
+y = ½(x-4)²
+直线x=4
+(4,0), 向右平移4个单位长度",answer_sign_mismatch|serial_pollution,false,
+87240cbf-abd5-45ea-972d-55befd4037f8,12,依次为 17，2/3，5/2，4，0.021,(1) 解：原式=17；(2) 解：原式=2/3；(3) 解：原式=√25=5/2；(4) 解：原式=4；(5) 解：原式=0.021,serial_pollution|arithmetic_mismatch,false,
+7639eee3-2891-43fb-9bb8-8a4346290476,1,"下,2,上,2","下, 2, 上, 2",arithmetic_mismatch,true,
+b967a0af-0aee-4cd2-ad18-884e63fd44cf,9,1.3115,414.7,arithmetic_mismatch,false,
+73e54aef-882f-4647-a3c1-d461cb861c59,3,y = -1/3x² + 3,y = -\frac{1}{3}x^2 + 3,serial_pollution|arithmetic_mismatch,false,
+b967a0af-0aee-4cd2-ad18-884e63fd44cf,7,±2,±16,arithmetic_mismatch,false,
+7639eee3-2891-43fb-9bb8-8a4346290476,4,"m=1 或 m=2, m≠1 且 m≠2",(1) m=1；(2) m=0 或 m=2。,serial_pollution,false,
+7639eee3-2891-43fb-9bb8-8a4346290476,3,"3,0",当x=0时，y=3；当x=-1时，y=0。,serial_pollution,false,
+85e391bf-81f4-4736-9c8d-c811a565643a,5,"y = -2x² + 3，开口向下，对称轴为 x=0，顶点坐标为 (0,3)；由 y=-2x² 向上平移 3 个单位得到","把 A(-1,1), B(2,-5) 代入
+{ 1 = a + c
+  -5 = 4a + c
+a = -2
+c = 3, 向上平移3个单位",arithmetic_mismatch,false,
+b967a0af-0aee-4cd2-ad18-884e63fd44cf,8,3 或 -3,±√2,answer_sign_mismatch,false,

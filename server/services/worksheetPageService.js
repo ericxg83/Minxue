@@ -20,8 +20,11 @@ async function syncWrongQuestions(taskId, studentId, worksheetId, pageNumber, ch
   const wrongRemoved = []
 
   for (const ch of changes) {
-    const wasWrong = ch.oldIsCorrect === false
-    const isWrong = ch.newIsCorrect === false
+    const isBlank = ch.answer_source === 'blank'
+    // 空答（answer_source='blank'）和判错（newIsCorrect=false）都视为错题入册；
+    // 补答对（newIsCorrect=true）则从错题本移除，与正常错题一致。
+    const wasWrong = ch.oldIsCorrect === false || (isBlank && ch.oldIsCorrect === null)
+    const isWrong = ch.newIsCorrect === false || (isBlank && ch.newIsCorrect === null)
 
     if (wasWrong && !isWrong) {
       // 原来是错题，现在对了：从错题本移除
@@ -50,19 +53,24 @@ async function syncWrongQuestions(taskId, studentId, worksheetId, pageNumber, ch
                student_answer = $2,
                correct_answer = $3,
                question_id = COALESCE($4, question_id),
-               page_number = COALESCE($5, page_number)
+               page_number = COALESCE($5, page_number),
+               is_blank = $6,
+               error_type = $7
            WHERE id = $1`,
-          [existing[0].id, ch.student_answer || null, ch.answer || null, ch.id, pageNumber]
+          [existing[0].id, ch.student_answer || null, ch.answer || null, ch.id, pageNumber, isBlank, isBlank ? '未作答' : null]
         )
       } else {
         await query(
           `INSERT INTO wrong_questions
            (student_id, question_id, worksheet_id, page_number, question_no,
-            student_answer, correct_answer, question_type, answer_type, status, error_count, added_at, last_wrong_at, created_at, updated_at)
-           VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, 'pending', 1, NOW(), NOW(), NOW(), NOW())`,
+            student_answer, correct_answer, question_type, answer_type, status, error_count, added_at, last_wrong_at, created_at, updated_at,
+            is_blank, error_type)
+           VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, 'pending', 1, NOW(), NOW(), NOW(), NOW(),
+                   $10, $11)`,
           [studentId, ch.id, worksheetId, pageNumber, ch.question_number,
            ch.student_answer || null, ch.answer || null,
-           ch.question_type || 'answer', ch.question_type || 'answer']
+           ch.question_type || 'answer', ch.question_type || 'answer',
+           isBlank, isBlank ? '未作答' : null]
         )
       }
       wrongAdded.push(ch.question_number)
@@ -101,7 +109,7 @@ export async function regradeTaskPageWithUnit(taskId, pageNumber, unitKey) {
 
   // 2) 加载该页题目（questions 表不存 sub_no，故只按 question_no 匹配）
   const { rows: questions } = await query(
-    `SELECT id, question_number, question_type, student_answer, answer, is_correct
+    `SELECT id, question_number, question_type, student_answer, answer, is_correct, answer_source
      FROM questions
      WHERE task_id = $1 AND page_number = $2 AND deleted_at IS NULL
      ORDER BY question_number`,
@@ -175,7 +183,7 @@ export async function regradeTaskPageWithUnit(taskId, pageNumber, unitKey) {
       updated++
 
       // 记录状态变化，用于同步错题本
-      if (oldIsCorrect !== newIsCorrect) {
+      if (oldIsCorrect !== newIsCorrect || q.answer_source === 'blank') {
         changes.push({
           id: q.id,
           question_number: q.question_number,
@@ -183,7 +191,8 @@ export async function regradeTaskPageWithUnit(taskId, pageNumber, unitKey) {
           newIsCorrect,
           answer: row.answer,
           student_answer: q.student_answer,
-          question_type: q.question_type || row.answer_type || 'answer'
+          question_type: q.question_type || row.answer_type || 'answer',
+          answer_source: q.answer_source
         })
       }
     } catch (e) {

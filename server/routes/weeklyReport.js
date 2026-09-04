@@ -45,7 +45,7 @@ router.get('/:studentId', async (req, res) => {
       `SELECT
         COUNT(*)::int AS total,
         COUNT(*) FILTER (WHERE is_correct = true)::int AS correct,
-        COUNT(*) FILTER (WHERE is_correct = false)::int AS wrong
+        COUNT(*) FILTER (WHERE is_correct = false OR answer_source = 'blank')::int AS wrong
       FROM ${TABLES.QUESTIONS}
       WHERE student_id = $1
         AND created_at >= $2
@@ -104,7 +104,7 @@ router.get('/:studentId', async (req, res) => {
       `SELECT
         COALESCE(NULLIF(q.subject, ''), '其他') AS subject,
         jsonb_array_elements_text(CASE WHEN jsonb_typeof(q.ai_tags::jsonb) = 'array' THEN q.ai_tags::jsonb ELSE '[]'::jsonb END) AS tag,
-        COUNT(*) FILTER (WHERE q.is_correct = false)::int AS wrong_count,
+        COUNT(*) FILTER (WHERE q.is_correct = false OR q.answer_source = 'blank')::int AS wrong_count,
         COUNT(*)::int AS total_count
       FROM ${TABLES.WRONG_QUESTIONS} wq
       JOIN ${TABLES.QUESTIONS} q ON q.id = wq.question_id
@@ -261,7 +261,7 @@ router.get('/', async (req, res) => {
           `SELECT
             COUNT(*)::int AS total,
             COUNT(*) FILTER (WHERE is_correct = true)::int AS correct,
-            COUNT(*) FILTER (WHERE is_correct = false)::int AS wrong
+            COUNT(*) FILTER (WHERE is_correct = false OR answer_source = 'blank')::int AS wrong
           FROM ${TABLES.QUESTIONS}
           WHERE student_id = $1
             AND created_at >= $2

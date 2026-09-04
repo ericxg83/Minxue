@@ -69,12 +69,11 @@ export const finalizeGradingBatch = async ({
 
   const questionMap = toQuestionMap(pendingQuestions)
   const confidenceMap = new Map(pendingQuestions.map(q => [q.id, q.confidence]))
-  // 判题域契约：只有 is_correct === false（明确判错）才入错题本。
-  // is_correct === null 是"AI 未判定"，不是错 —— 缺参考答案、参考答案无法核对
-  // （"证明略""答案不唯一"）都会落 null，这类题必须等老师复核给结论，
-  // 自动入册会让错题本混入系统噪音，重练在浪费学生时间。请勿"顺手修好"这个过滤。
+  // 判题域契约：is_correct === false（明确判错）或 answer_source='blank'（空答/不会）才入错题本。
+  // 空题算"不会"等同错题，老师拍板入册；is_correct === null 的其它情况（缺参考答案/答案不唯一）
+  // 仍由老师复核给结论，避免错题本混入系统噪音。
   const wrongIds = pendingQuestions
-    .filter(q => q.is_correct === false && q.answer && q.answer.trim())
+    .filter(q => (q.is_correct === false || q.answer_source === 'blank') && q.answer && q.answer.trim())
     .map(q => q.id)
 
   if (wrongIds.length > 0) {
@@ -146,7 +145,8 @@ export const finalizeRejudgeResult = async ({
   question,
   isCorrect,
   oldIsCorrect,
-  source = 'pc_rejudge'
+  source = 'pc_rejudge',
+  manualOverride = false
 }) => {
   if (!question?.id || !question.student_id) {
     return { settled: false, skipped: true }
@@ -191,14 +191,15 @@ export const finalizeRejudgeResult = async ({
   )
 
   let wrongQuestionAdded = false
-  if (isCorrect === false && question.answer && question.answer.trim()) {
+  if ((isCorrect === false || question.answer_source === 'blank') && question.answer && question.answer.trim()) {
     const completeness = checkQuestionCompleteness(question)
     if (completeness.isComplete) {
       const added = await addWrongQuestions(
         question.student_id,
         [question.id],
         null,
-        new Map([[question.id, question]])
+        new Map([[question.id, question]]),
+        { skipConfidence: manualOverride }
       )
       wrongQuestionAdded = added.length > 0
     }
@@ -241,13 +242,32 @@ export const finalizeRejudgeResult = async ({
   return { settled: true, skipped: false, isCorrect, wrongQuestionAdded }
 }
 
-const getNextLifecycle = (current) => {
-  switch (current) {
-    case LIFECYCLE_STATUS.NEW: return LIFECYCLE_STATUS.REVIEW_1
-    case LIFECYCLE_STATUS.REVIEW_1: return LIFECYCLE_STATUS.REVIEW_2
-    case LIFECYCLE_STATUS.REVIEW_2: return LIFECYCLE_STATUS.MASTERED
-    default: return LIFECYCLE_STATUS.REVIEW_1
+/**
+ * 掌握度状态机（业务规则：累计答对 2 次到达 mastered，中途答错不重置进度）
+ *
+ * 状态：NEW（新错题/累计答对 0 次）→ REVIEW_1（累计答对 1 次）→ MASTERED（累计答对 2 次）
+ * 答对：NEW → REVIEW_1 → MASTERED；MASTERED 保持
+ * 答错：NEW/REVIEW_1 保持原位（error_count+1），MASTERED 退回 REVIEW_1 重新验证
+ *
+ * REVIEW_2 保留为历史兼容枚举（生产库 0 条），不再被写入；
+ * 遇到旧 review_2 数据时按 REVIEW_1 语义处理。
+ */
+const getNextLifecycle = (current, isCorrect) => {
+  if (isCorrect) {
+    switch (current) {
+      case LIFECYCLE_STATUS.NEW:
+      case LIFECYCLE_STATUS.REVIEW_2:
+        return LIFECYCLE_STATUS.REVIEW_1
+      case LIFECYCLE_STATUS.REVIEW_1:
+        return LIFECYCLE_STATUS.MASTERED
+      case LIFECYCLE_STATUS.MASTERED:
+        return LIFECYCLE_STATUS.MASTERED
+      default:
+        return LIFECYCLE_STATUS.REVIEW_1
+    }
   }
+  if (current === LIFECYCLE_STATUS.MASTERED) return LIFECYCLE_STATUS.REVIEW_1
+  return current
 }
 
 /**
@@ -311,20 +331,19 @@ export const finalizeGeneratedExamResults = async ({
     const skipWrongBook = result.skipWrongBook && !result.isCorrect
 
     if (!skipWrongBook) {
-      let nextLifecycle
+      const nextLifecycle = getNextLifecycle(currentLifecycle, result.isCorrect)
       let errorCountDelta = 0
 
       if (result.isCorrect) {
-        nextLifecycle = getNextLifecycle(currentLifecycle)
         if (nextLifecycle === LIFECYCLE_STATUS.MASTERED && currentLifecycle !== LIFECYCLE_STATUS.MASTERED) {
           masteredCount++
         } else if (nextLifecycle !== currentLifecycle) {
           upgradedCount++
         }
       } else {
-        nextLifecycle = LIFECYCLE_STATUS.NEW
+        // 答错不重置进度；仅"已掌握退回 review_1"计入 reset
         errorCountDelta = 1
-        if (currentLifecycle !== LIFECYCLE_STATUS.NEW) resetCount++
+        if (nextLifecycle !== currentLifecycle) resetCount++
       }
 
       const status = nextLifecycle === LIFECYCLE_STATUS.MASTERED

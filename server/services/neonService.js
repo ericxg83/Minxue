@@ -185,15 +185,16 @@ export const batchUpdateQuestionTags = async (tagUpdates) => {
   return results
 }
 
-export const addWrongQuestions = async (studentId, questionIds, questionConfidenceMap = null, questionMap = null) => {
+export const addWrongQuestions = async (studentId, questionIds, questionConfidenceMap = null, questionMap = null, opts = {}) => {
   if (!questionIds || questionIds.length === 0) return []
 
   const CONFIDENCE_THRESHOLD = parseFloat(process.env.CONFIDENCE_THRESHOLD) || 0.8
 
   // [P0-1] 按置信度阈值过滤 — 低于 0.8 的不进入错题本
   // 注意：questionConfidenceMap 必须是 Map 实例（有 .get 方法）
+  // opts.skipConfidence=true：老师人工复核后强入（人工是 ground truth，不再受 AI 把握挡）
   let filteredIds = questionIds
-  if (questionConfidenceMap instanceof Map) {
+  if (!opts.skipConfidence && questionConfidenceMap instanceof Map) {
     const lowConfList = questionIds.filter(id => {
       const conf = questionConfidenceMap.get(id)
       return conf !== undefined && conf !== null && conf < CONFIDENCE_THRESHOLD
@@ -236,11 +237,21 @@ export const addWrongQuestions = async (studentId, questionIds, questionConfiden
   // 2026-09-02：依赖迁移 052 的 uq_wrong_questions_student_question_id，
   // INSERT ON CONFLICT DO NOTHING 在并发场景下也能兜底（即使前置 SELECT
   // 漏了对方未提交的行，UNIQUE 索引也会把第二个 INSERT 静默吞掉）。
-  const values = newIds.map((_, i) => `($1, $${i + 2}, 'pending', 1, NOW(), NOW(), NOW())`).join(',')
+  // 空题（answer_source='blank'）同步写 is_blank/error_type，移动端列表用
+  // error_type='未作答' 兜底显示，diagnosisService 也不会覆盖（WHERE 已排除 is_blank）。
+  const blankIds = new Set(
+    Array.from(questionMap?.entries?.() || [])
+      .filter(([, q]) => q?.answer_source === 'blank')
+      .map(([id]) => id)
+  )
+  const values = newIds.map((id, i) => {
+    const isBlank = blankIds.has(id)
+    return `($1, $${i + 2}, 'pending', 1, NOW(), NOW(), NOW(), ${isBlank}::boolean, ${isBlank ? `'未作答'` : `NULL`}::text)`
+  }).join(',')
   const params = [studentId, ...newIds]
 
   await query(
-    `INSERT INTO ${TABLES.WRONG_QUESTIONS} (student_id, question_id, status, error_count, added_at, last_wrong_at, created_at) VALUES ${values}
+    `INSERT INTO ${TABLES.WRONG_QUESTIONS} (student_id, question_id, status, error_count, added_at, last_wrong_at, created_at, is_blank, error_type) VALUES ${values}
      ON CONFLICT (student_id, question_id)
        WHERE question_id IS NOT NULL
      DO NOTHING`,
@@ -279,13 +290,19 @@ export const addSelfContainedWrongQuestion = async (params) => {
     return null
   }
 
+  // 空答同步写 is_blank/error_type：移动端列表直接显示「未作答」，
+  // diagnosisService 不会再覆盖（其 WHERE 排除 is_blank=TRUE）。
+  const isBlank = !studentAnswer || studentAnswer === '未作答'
+
   const { rows } = await query(
     `INSERT INTO ${TABLES.WRONG_QUESTIONS}
      (student_id, question_id, worksheet_id, page_number, question_no,
       student_answer, correct_answer, answer_type, content,
       question_type, block_coordinates, question_image_url,
-      subject, source_type, status, error_count, added_at, last_wrong_at, created_at, updated_at)
-     VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, 'pending', 1, NOW(), NOW(), NOW(), NOW())
+      subject, source_type, status, error_count, added_at, last_wrong_at, created_at, updated_at,
+      is_blank, error_type)
+     VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, 'pending', 1, NOW(), NOW(), NOW(), NOW(),
+             $15, $16)
      ON CONFLICT (student_id, worksheet_id, question_no)
        WHERE worksheet_id IS NOT NULL AND question_no IS NOT NULL
      DO UPDATE SET
@@ -301,7 +318,7 @@ export const addSelfContainedWrongQuestion = async (params) => {
     [studentId, questionId || null, worksheetId, pageNumber, questionNo,
      studentAnswer, correctAnswer, answerType, content,
      questionType, blockCoordinates ? JSON.stringify(blockCoordinates) : null,
-     questionImageUrl, subject, sourceType]
+     questionImageUrl, subject, sourceType, isBlank, isBlank ? '未作答' : null]
   )
   return rows[0].id
 }

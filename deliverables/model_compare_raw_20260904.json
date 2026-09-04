@@ -1,0 +1,366 @@
+{
+  "generatedAt": "2026-09-04T02:49:18.767Z",
+  "transport": "direct (proxy disabled) because local HTTPS proxy returned protocol error",
+  "tests": [
+    {
+      "kind": "vision",
+      "provider": "SenseNova",
+      "model": "sensenova-6.8-flash-lite",
+      "image": "clean_math",
+      "file": "D:/Minxue_App_V3/debug_images/pdf_2141_page1_z4.png",
+      "status": 429,
+      "elapsedMs": 62554,
+      "error": "Server is busy, please try again later (Status code: 429)",
+      "response": {
+        "error": {
+          "message": "Server is busy, please try again later (Status code: 429)",
+          "type": "rate_limit_error",
+          "code": "429"
+        }
+      }
+    },
+    {
+      "kind": "vision",
+      "provider": "SenseNova",
+      "model": "sensenova-6.7-flash-lite",
+      "image": "clean_math",
+      "file": "D:/Minxue_App_V3/debug_images/pdf_2141_page1_z4.png",
+      "status": 404,
+      "elapsedMs": 213,
+      "error": "model route not found",
+      "response": {
+        "error": {
+          "message": "model route not found",
+          "type": "not_found_error",
+          "code": "5"
+        }
+      }
+    },
+    {
+      "kind": "vision",
+      "provider": "SenseNova",
+      "model": "sensenova-6.8-flash-lite",
+      "image": "handwritten_math",
+      "file": "D:/Minxue_App_V3/multimodal_exam_engine/real_geometry.png",
+      "status": 200,
+      "elapsedMs": 17197,
+      "usage": {
+        "prompt_tokens": 5224,
+        "completion_tokens": 2830,
+        "total_tokens": 8054,
+        "completion_tokens_details": {
+          "reasoning_tokens": 0
+        },
+        "prompt_tokens_details": {
+          "cached_tokens": 0,
+          "audio_tokens": 0
+        }
+      },
+      "finishReason": "stop",
+      "contentChars": 6267,
+      "parsed": {
+        "page_title": "25.3(2) 一次函数的图像",
+        "questionCount": 10,
+        "questions": [
+          {
+            "no": 1,
+            "type": "choice",
+            "content": "已知函数 y=kx 的图像经过点(-1,1)，则函数 y=kx+3 的图像是",
+            "answer": "C",
+            "student_answer": "C",
+            "confidence": 0.95,
+            "image_type": "geometry",
+            "has_image_bbox": true
+          },
+          {
+            "no": 2,
+            "type": "choice",
+            "content": "若直线 y=-2x+k 与两坐标轴所围成的三角形面积是9，则 k 的值为",
+            "answer": "C",
+            "student_answer": "C",
+            "confidence": 0.95,
+            "image_type": "none",
+            "has_image_bbox": false
+          },
+          {
+            "no": 3,
+            "type": "fill",
+            "content": "一次函数 y=x-2 的图像与两坐标轴交点之间的距离是______。",
+            "answer": "2√2",
+            "student_answer": "2√2",
+            "confidence": 0.9,
+            "image_type": "none",
+            "has_image_bbox": false
+          },
+          {
+            "no": 4,
+            "type": "fill",
+            "content": "已知直线 y=kx+b 平行于直线 y=-7x+4，且在 y 轴上的截距为-1，那么该直线的表达式是______。",
+            "answer": "y=-7x-1",
+            "student_answer": "y=-7x+4",
+            "confidence": 0.9,
+            "image_type": "none",
+            "has_image_bbox": false
+          },
+          {
+            "no": 5,
+            "type": "fill",
+            "content": "已知一次函数 y=kx+b 的图像经过点(0,-4)，且当 x=2 时，y=0，则 k=______，b=______。",
+            "answer": "k=2, b=-4",
+            "student_answer": "k=-2, b=4",
+            "confidence": 0.9,
+            "image_type": "none",
+            "has_image_bbox": false
+          },
+          {
+            "no": 6,
+            "type": "fill",
+            "content": "已知一次函数 y=-x+a 与 y=x+b 的图像相交于点(m,8)，则 a+b=______。",
+            "answer": "16",
+            "student_answer": "0",
+            "confidence": 0.9,
+            "image_type": "none",
+            "has_image_bbox": false
+          },
+          {
+            "no": 7,
+            "type": "choice",
+            "content": "已知一次函数的图像与直线 y=-x+1 平行，且过点(8,2)，则此一次函数的表达式为",
+            "answer": "C",
+            "student_answer": "C",
+            "confidence": 0.95,
+            "image_type": "none",
+            "has_image_bbox": false
+          },
+          {
+            "no": 8,
+            "type": "choice",
+            "content": "把直线 y=2x-1 沿 y 轴方向向上移动 3 个单位长度，得到直线",
+            "answer": "A",
+            "student_answer": "A",
+            "confidence": 0.95,
+            "image_type": "none",
+            "has_image_bbox": false
+          },
+          {
+            "no": 9,
+            "type": "fill",
+            "content": "如图，在平面直角坐标系中，□OABC 的边 OC 落在 x 轴的正半轴上，且点 B(6,2)，直线 y=2x+1 以每秒 2 个单位长度的速度沿 y 轴向下平移，经过______秒，该直线可将□OABC 分成面积相等的两部分。",
+            "answer": "5/2",
+            "student_answer": "5/2",
+            "confidence": 0.85,
+            "image_type": "geometry",
+            "has_image_bbox": true
+          },
+          {
+            "no": 10,
+            "type": "answer",
+            "content": "已知直线 l 与直线 y=2x+1 的交点的横坐标为 2，与直线 y=-x+2 的交点的纵坐标为 1，求直线 l 的函数表达式。",
+            "answer": "y=2x-1",
+            "student_answer": "y=2x-1",
+            "confidence": 0.9,
+            "image_type": "none",
+            "has_image_bbox": false
+          }
+        ]
+      }
+    },
+    {
+      "kind": "vision",
+      "provider": "SenseNova",
+      "model": "sensenova-6.7-flash-lite",
+      "image": "handwritten_math",
+      "file": "D:/Minxue_App_V3/multimodal_exam_engine/real_geometry.png",
+      "status": 404,
+      "elapsedMs": 81,
+      "error": "model route not found",
+      "response": {
+        "error": {
+          "message": "model route not found",
+          "type": "not_found_error",
+          "code": "5"
+        }
+      }
+    },
+    {
+      "kind": "vision",
+      "provider": "ModelScope",
+      "model": "Qwen/Qwen3-VL-235B-A22B-Instruct",
+      "image": "clean_math",
+      "file": "D:/Minxue_App_V3/debug_images/pdf_2141_page1_z4.png",
+      "status": 400,
+      "elapsedMs": 605,
+      "error": "input size exceed limit 2048x2048,current input:(2382,3368)",
+      "response": {
+        "error": {
+          "message": "input size exceed limit 2048x2048,current input:(2382,3368)",
+          "request_id": "fcbabdb2-c81c-4bdd-8b0e-6bdf470d66ea"
+        }
+      }
+    },
+    {
+      "kind": "vision",
+      "provider": "ModelScope",
+      "model": "Qwen/Qwen3-VL-235B-A22B-Instruct",
+      "image": "handwritten_math",
+      "file": "D:/Minxue_App_V3/multimodal_exam_engine/real_geometry.png",
+      "status": 429,
+      "elapsedMs": 118,
+      "error": "We have to rate limit you for model Qwen/Qwen3-VL-235B-A22B-Instruct. If you need higher limits, please consider other (commercial) API providers.",
+      "response": {
+        "error": {
+          "message": "We have to rate limit you for model Qwen/Qwen3-VL-235B-A22B-Instruct. If you need higher limits, please consider other (commercial) API providers.",
+          "request_id": "7118b59f-0c0b-4c71-9b63-75fb3ecd9667"
+        }
+      }
+    },
+    {
+      "kind": "vision",
+      "provider": "ModelScope",
+      "model": "Qwen/Qwen3-VL-8B-Instruct",
+      "image": "clean_math",
+      "file": "D:/Minxue_App_V3/debug_images/pdf_2141_page1_z4.png",
+      "status": 400,
+      "elapsedMs": 359,
+      "error": "input size exceed limit 2048x2048,current input:(2382,3368)",
+      "response": {
+        "error": {
+          "message": "input size exceed limit 2048x2048,current input:(2382,3368)",
+          "request_id": "eb32a4b3-bf69-44b0-8f10-ab6a89f3f632"
+        }
+      }
+    },
+    {
+      "kind": "text",
+      "provider": "SenseNova",
+      "model": "deepseek-v4-pro",
+      "status": 200,
+      "elapsedMs": 2986,
+      "usage": {
+        "prompt_tokens": 88,
+        "completion_tokens": 123,
+        "total_tokens": 211,
+        "completion_tokens_details": {
+          "reasoning_tokens": 0
+        },
+        "prompt_tokens_details": {
+          "cached_tokens": 0
+        }
+      },
+      "finishReason": "stop",
+      "content": "[\n  {\"题号\": 1, \"答案\": \"x=5\", \"关键步骤\": \"2x=15-5=10，x=10÷2=5\"},\n  {\"题号\": 2, \"答案\": \"a=9\", \"关键步骤\": \"设a=3k,b=4k，则3k+4k=21，k=3，a=9\"},\n  {\"题号\": 3, \"答案\": \"10\", \"关键步骤\": \"斜边=√(6²+8²)=√100=10\"}\n]"
+    },
+    {
+      "kind": "text",
+      "provider": "SenseNova",
+      "model": "deepseek-v4-flash",
+      "status": 429,
+      "elapsedMs": 94,
+      "error": "Allocated quota exceeded, please increase your quota limit.",
+      "response": {
+        "error": {
+          "message": "Allocated quota exceeded, please increase your quota limit.",
+          "type": "invalid_request_error",
+          "code": "insufficient_quota"
+        }
+      }
+    },
+    {
+      "kind": "text",
+      "provider": "SenseNova",
+      "model": "glm-5.2",
+      "status": 429,
+      "elapsedMs": 85,
+      "error": "Workspace allocated quota exceeded, please increase your quota limit.",
+      "response": {
+        "error": {
+          "message": "Workspace allocated quota exceeded, please increase your quota limit.",
+          "type": "invalid_request_error",
+          "code": "insufficient_quota"
+        }
+      }
+    },
+    {
+      "kind": "text",
+      "provider": "SenseNova",
+      "model": "kimi-k3",
+      "status": 400,
+      "elapsedMs": 42,
+      "error": "field Temperature invalid, only 1 is allowed for this model",
+      "response": {
+        "error": {
+          "message": "field Temperature invalid, only 1 is allowed for this model",
+          "type": "invalid_request_error",
+          "param": "temperature",
+          "code": "3"
+        }
+      }
+    },
+    {
+      "kind": "text",
+      "provider": "SenseNova",
+      "model": "sensenova-6.7-flash-lite",
+      "status": 404,
+      "elapsedMs": 19,
+      "error": "model route not found",
+      "response": {
+        "error": {
+          "message": "model route not found",
+          "type": "not_found_error",
+          "code": "5"
+        }
+      }
+    },
+    {
+      "kind": "text",
+      "provider": "SenseNova",
+      "model": "sensenova-6.8-flash-lite",
+      "status": 200,
+      "elapsedMs": 6062,
+      "usage": {
+        "prompt_tokens": 103,
+        "completion_tokens": 106,
+        "total_tokens": 209,
+        "completion_tokens_details": {
+          "reasoning_tokens": 0
+        },
+        "prompt_tokens_details": {
+          "cached_tokens": 0,
+          "audio_tokens": 0
+        }
+      },
+      "finishReason": "stop",
+      "content": "[{\"题号\":1,\"答案\":\"x=5\",\"关键步骤\":\"移项得2x=10，两边除以2\"},{\"题号\":2,\"答案\":\"a=9\",\"关键步骤\":\"设a=3k,b=4k，代入a+b=21得k=3，故a=9\"},{\"题号\":3,\"答案\":\"10\",\"关键步骤\":\"由勾股定理√(6²+8²)=√100=10\"}]"
+    },
+    {
+      "kind": "text",
+      "provider": "SenseNova",
+      "model": "sensenova-u1.5-lite",
+      "status": 404,
+      "elapsedMs": 24,
+      "error": "model is not found",
+      "response": {
+        "error": {
+          "message": "model is not found",
+          "type": "not_found_error",
+          "code": "5"
+        }
+      }
+    },
+    {
+      "kind": "text",
+      "provider": "SenseNova",
+      "model": "sensenova-u1-fast",
+      "status": 404,
+      "elapsedMs": 20,
+      "error": "model is not found",
+      "response": {
+        "error": {
+          "message": "model is not found",
+          "type": "not_found_error",
+          "code": "5"
+        }
+      }
+    }
+  ]
+}

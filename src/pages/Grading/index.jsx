@@ -19,13 +19,24 @@ const LIFECYCLE_LABELS = {
 
 const LIFECYCLE_ORDER = ['new', 'review_1', 'review_2', 'mastered']
 
-const getNextLifecycle = (current) => {
-  switch (current) {
-    case 'new': return 'review_1'
-    case 'review_1': return 'review_2'
-    case 'review_2': return 'mastered'
-    default: return 'review_1'
+// 与后端 finalizeGeneratedExamResults 保持一致：
+// 累计答对 2 次到 mastered；答错不重置进度；mastered 后答错退回 review_1 重新验证。
+// review_2 保留为历史兼容枚举，不再被写入。
+const getNextLifecycle = (current, isCorrect) => {
+  if (isCorrect) {
+    switch (current) {
+      case 'new':
+      case 'review_2':
+        return 'review_1'
+      case 'review_1':
+      case 'mastered':
+        return 'mastered'
+      default:
+        return 'review_1'
+    }
   }
+  if (current === 'mastered') return 'review_1'
+  return current
 }
 
 const COLORS = {
@@ -98,7 +109,7 @@ export default function Grading({ paperId, studentId, questionIds, onClose, onCo
     if (!q) return
 
     const currentLifecycle = gradingResults[q.id]?.newLifecycle || q.lifecycle_status || 'new'
-    const newLifecycle = isCorrect ? getNextLifecycle(currentLifecycle) : 'new'
+    const newLifecycle = getNextLifecycle(currentLifecycle, isCorrect)
 
     const newResults = {
       ...gradingResults,
@@ -135,11 +146,12 @@ export default function Grading({ paperId, studentId, questionIds, onClose, onCo
     let reset = 0
 
     for (const r of results) {
-      if (r.isCorrect && r.previousLifecycle === 'new' && r.newLifecycle === 'review_1') upgradedToReview1++
-      if (r.isCorrect && r.previousLifecycle === 'review_1' && r.newLifecycle === 'review_2') upgradedToMastered++
-      if (r.isCorrect && r.previousLifecycle === 'review_2' && r.newLifecycle === 'mastered') upgradedToMastered++
+      // 新语义：答对 NEW→REVIEW_1 算 upgradedToReview1；答对 REVIEW_1→MASTERED 算 upgradedToMastered
+      // 答错不重置进度；只有已掌握答错退回 REVIEW_1 才算 reset
+      if (r.isCorrect && r.newLifecycle === 'review_1' && r.previousLifecycle !== 'review_1' && r.previousLifecycle !== 'mastered') upgradedToReview1++
+      if (r.isCorrect && r.newLifecycle === 'mastered' && r.previousLifecycle !== 'mastered') upgradedToMastered++
       if (r.newLifecycle === 'mastered') mastered++
-      if (!r.isCorrect) reset++
+      if (!r.isCorrect && r.previousLifecycle === 'mastered') reset++
     }
     return { mastered, upgradedToReview1, upgradedToMastered, reset }
   }

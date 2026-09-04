@@ -40,6 +40,13 @@
           class="item-confidence"
           :class="{ low: q.confidence < store.confidenceThreshold }"
         >{{ Math.round(q.confidence * 100) }}</span>
+        <span
+          v-for="risk in (q.wrong_book_risks || [])"
+          :key="risk"
+          class="item-wrong-book-risk"
+          :class="risk"
+          :title="riskHint(risk)"
+        >{{ riskLabel(risk) }}</span>
       </div>
     </div>
 
@@ -162,6 +169,16 @@ const difficultyText = (d) => {
   return map[d] || ''
 }
 
+// 错题本入册风险标签（后端 GET /api/questions/task/:taskId 在每道题上算 wrong_book_risks）
+// 让复核老师看到"这题虽判错/未作答，但会被错题本挡"——需现场处理。
+const RISK_LABELS = { missing_figure: '⚠ 缺图', low_confidence: '⚠ 低置信' }
+const RISK_HINTS = {
+  missing_figure: '题干引用图但缺配图，错题本不会收。点「编辑」补配图后会自动入册。',
+  low_confidence: 'AI 判错但把握不足 (<0.8)，错题本暂不收。点「标错」(W) 即强入。'
+}
+const riskLabel = (r) => RISK_LABELS[r] || r
+const riskHint = (r) => RISK_HINTS[r] || ''
+
 const onSelect = (idx) => {
   store.jumpToQuestion(idx)
 }
@@ -282,6 +299,22 @@ const onThresholdChange = (val) => {
 .item-difficulty.diff-5 {
   color: var(--wb-danger);
   background: var(--wb-danger-soft);
+}
+.item-wrong-book-risk {
+  font-size: 10px;
+  padding: 0 5px;
+  border-radius: var(--wb-radius-xs);
+  white-space: nowrap;
+  flex-shrink: 0;
+  border: 1px solid transparent;
+}
+.item-wrong-book-risk.missing_figure {
+  color: var(--wb-danger);
+  background: var(--wb-danger-soft);
+}
+.item-wrong-book-risk.low_confidence {
+  color: var(--wb-warning);
+  background: var(--wb-warning-soft);
 }
 .nav-empty {
   flex: 1;

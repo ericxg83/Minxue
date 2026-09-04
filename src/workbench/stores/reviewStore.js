@@ -1,6 +1,6 @@
 import { defineStore } from 'pinia'
 import { ref, computed } from 'vue'
-import { getStudents, getWrongQuestionsByStudent, getQuestionsByTask, getTasksByStudent, getTaskById, updateWrongQuestionStatus, updateTaskStatus, recalculateTaskStats, getLatestJudgements, clearStudentCaches, updateQuestionReviewStatus, addWrongQuestions, getGeneratedExamsByStudent, getQuestionsByIds, gradeGeneratedExam } from '../../services/apiService'
+import { getStudents, getWrongQuestionsByStudent, getQuestionsByTask, getTasksByStudent, getTaskById, updateTaskStatus, recalculateTaskStats, getLatestJudgements, clearStudentCaches, updateQuestionReviewStatus, addWrongQuestions, getGeneratedExamsByStudent, getQuestionsByIds, gradeGeneratedExam } from '../../services/apiService'
 import { useLifecycleStore, LIFECYCLE_STATUS } from './lifecycleStore'
 import { checkQuestionCompleteness } from '../../utils/questionCompleteness.js'
 import { TASK_TYPE, getReviewConfig } from '../config/reviewConfig'
@@ -377,37 +377,12 @@ export const useReviewStore = defineStore('review', () => {
     }
 
     // 持久化 review_status 到数据库
+    // 错题本同步（correct/exclude/wrong_no_book → 移除；wrong → 强入）在后端
+    // PUT /questions/:id 的 hasReviewStatus 分支统一处理，前端不再持有错题本写责任，
+    // 避免绕过 new→review_1→mastered 状态机造成"假掌握"。
     updateQuestionReviewStatus(questionId, result, metadata).catch(e =>
       console.error(`review_status 持久化失败 q=${questionId.substring(0, 8)}:`, e.message)
     )
-
-    // Also update the wrong question if it exists
-    if (wq) {
-      const currentStatus = wq.lifecycle_status || LIFECYCLE_STATUS.NEW
-
-      switch (result) {
-        case 'correct':
-          // [Bugfix] 人工确认做对 → 直接标记为已掌握，不再渐进式推进
-          wq.lifecycle_status = LIFECYCLE_STATUS.MASTERED
-          wq.status = 'mastered'
-          wq.practice_count = (wq.practice_count || 0) + 1
-          break
-        case 'wrong':
-          wq.lifecycle_status = LIFECYCLE_STATUS.NEW
-          wq.status = 'pending'
-          wq.error_count = (wq.error_count || 0) + 1
-          break
-        case 'exclude':
-          wq.lifecycle_status = LIFECYCLE_STATUS.EXCLUDED
-          wq.status = 'excluded'
-          break
-      }
-
-      // [P0-3c] 持久化审核结果到数据库
-      updateWrongQuestionStatus(wq.id, wq.status, {
-        lifecycle_status: wq.lifecycle_status
-      }).catch(e => console.error(`[P0-3c] 审核结果持久化失败 wq=${wq.id.substring(0, 8)}:`, e.message))
-    }
 
     // 自动进入下一题
     if (!nextQuestion()) {
