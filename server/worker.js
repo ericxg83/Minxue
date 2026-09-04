@@ -10,7 +10,7 @@ import axios from 'axios'
 import sharp from 'sharp'
 import { TABLES, TASK_STATUS } from './config/neon.js'
 import { query } from './config/neon.js'
-import { AI_CONFIG, getAIHeaders, buildOCRPrompt, buildAnswerGenerationPrompt, getCurrentTextModel, getCurrentVLModel, rotateTextModel, rotateVLModel, TEXT_MODELS, VL_MODELS, callTextCompletion, callVisionCompletion } from './config/ai.js'
+import { AI_CONFIG, getAIHeaders, buildOCRPrompt, buildAnswerGenerationPrompt, getCurrentTextModel, getCurrentVLModel, rotateTextModel, rotateVLModel, TEXT_MODELS, VL_MODELS, callTextCompletion, callVisionCompletion, callAnswerEngineCompletion, ANSWER_ENGINE } from './config/ai.js'
 import { updateTaskStatus, createQuestions, batchUpdateQuestionTags, addWrongQuestions, createJudgement, updateQuestionAnswer, markAnswerException, markAiAnswerRisk, findCachedQuestionByFingerprint, cacheQuestion, incrementQuestionUseCount, updateQuestionCacheId, createQuestionAsset, lookupWorksheetAnswer, getWorksheetAnswersBySection, deleteQuestionsByTaskId, bulkLookupResourceAnswers, getResourceAnswersBySection, getResourceById, addSelfContainedWrongQuestion } from './services/neonService.js'
 import { uploadImage } from './services/ossService.js'
 import { cropAndUploadQuestionRegion } from './utils/cropAndUpload.js'
@@ -573,6 +573,17 @@ if (!AI_KEY) {
 }
 console.log(`🤖 [AI Config] Model: ${AI_CONFIG.MODEL}`)
 console.log(`🔗 [AI Config] Endpoint: ${AI_CONFIG.ENDPOINT}`)
+// 两段式批改：视觉模型只识别卷面，标准答案/解析交给答案引擎。
+// 这一行用于线上确认当前生效的组合，出问题先看这里。
+console.log(`🧠 [Answer Engine] ${ANSWER_ENGINE.ENABLED
+  ? `启用 → ${ANSWER_ENGINE.VENDOR}:${ANSWER_ENGINE.MODEL}（降级链: ${ANSWER_ENGINE.FALLBACK_MODELS.join(' → ')}，超时 ${ANSWER_ENGINE.TIMEOUT_MS}ms，Key冷却 ${Math.round(ANSWER_ENGINE.KEY_COOLDOWN_MS / 3600000)}h）`
+  : '已关闭 → 回退通用文本链路（ANSWER_ENGINE_ENABLED=0）'}`)
+{
+  const _primarySet = !!process.env.SENSENOVA_API_KEY
+  const _extra = process.env.ANSWER_ENGINE_KEYS ? process.env.ANSWER_ENGINE_KEYS.split(',').filter(Boolean).length : 0
+  console.log(`🔑 [Answer Engine] Key 池: ${_primarySet ? 1 + _extra : _extra} 把（主 ${ANSWER_ENGINE.VENDOR} Key ${_primarySet ? '已配置' : '未配置'}${_extra ? ` + 额外 ${_extra} 把` : ''}）`)
+}
+console.log(`👁️  [OCR Answer] mode=${process.env.OCR_ANSWER_MODE === 'legacy' ? 'legacy（视觉模型自行解题）' : 'copy_only（只抄卷面印刷答案，不自行解题）'}`)
 
 const TAG_SYNONYM_MAP = {
   '几何-三角形': '三角形',
@@ -1337,16 +1348,23 @@ function normalizeGeneratedAnswer(question, candidateAnswer) {
 
 /**
  * Generate a single answer for a question via text-only AI call.
+ *
+ * 2026-09-04 改造：视觉模型（MiniMax / SenseNova 6.8）只负责识别卷面，标准答案与解析
+ * 统一由答案引擎（默认 SenseNova 上的 deepseek-v4-pro）基于识别出的题干求解。
+ * 依据：12 道复杂题基准 deepseek-v4-pro 12/12 · glm-5.2 9/12 · sensenova-6.8 7/12，
+ * 且 DeepSeek token 最省。改造前这里走 callTextCompletion，实际会落到 GMI/MiniMax
+ * （GMI_FIRST=1 + TEXT_MODELS 为空），正是计算能力最弱的一环。
+ * 回滚：ANSWER_ENGINE_ENABLED=0。
  */
 export const generateAnswerForQuestion = async (questionContent, retryCount = 0) => {
   if (!questionContent || !questionContent.trim()) {
-    return { success: true, answer: '', analysis: '' }
+    return { success: true, answer: '', analysis: '', source: 'empty-input' }
   }
 
   const prompt = buildAnswerGenerationPrompt()
 
   try {
-    const { content } = await callTextCompletion({
+    const { content, provider } = await callAnswerEngineCompletion({
       systemContent: prompt,
       userContent: `请计算以下题目的标准答案：\n\n${questionContent}`,
       temperature: 0.2,
@@ -1405,11 +1423,14 @@ export const generateAnswerForQuestion = async (questionContent, retryCount = 0)
       success: true,
       answer: coerceAIText(result.answer),
       analysis: coerceAIText(result.analysis),
-      subject: result.subject || null
+      subject: result.subject || null,
+      source: 'answer-engine',
+      engine: provider || 'unknown'
     }
   } catch (error) {
-    // callTextCompletion 内部已完成"主API→备用API"切换，
-    // 两家都失败（限流/网络）时才到这里，按原逻辑重试或返回空
+    // 答案引擎内部已按「主模型 → FALLBACK_MODELS → 通用文本链路」逐层降级，
+    // 到这里说明整条文本链路都不可用（限流/网络），按原逻辑重试或返回空。
+    // 返回空时该题保留 OCR 阶段的答案（若有），没有则转人工复核 —— 不拿猜测值顶上。
     const isNetworkError = !error.response || error.code === 'ECONNABORTED' || error.code === 'ETIMEDOUT'
     const shouldRetry = isNetworkError && retryCount < AI_CONFIG.MAX_RETRIES
     if (shouldRetry) {
@@ -1417,7 +1438,7 @@ export const generateAnswerForQuestion = async (questionContent, retryCount = 0)
       return generateAnswerForQuestion(questionContent, retryCount + 1)
     }
 
-    return { success: true, answer: '', analysis: '' }
+    return { success: true, answer: '', analysis: '', source: 'engine-failed', engine: null }
   }
 }
 
@@ -1495,6 +1516,13 @@ const generateMissingAnswers = async (questions, imageBuffer = null, taskId = nu
   let exceptionCount = 0
   let cacheHitCount = 0
   let cacheMissCount = 0
+  // 答案来源观测：记录每题的标准答案实际由谁产出，便于核算准确率与成本。
+  // 只记模型/供应商名与计数，不记题目正文、不记 API Key。
+  const engineUsage = {}
+  const recordEngine = (engine) => {
+    if (!engine) return
+    engineUsage[engine] = (engineUsage[engine] || 0) + 1
+  }
 
   // 辅助函数：非关键 DB 写入 fire-and-forget，不阻塞主流程
   const fireForget = (fn, label) => {
@@ -1571,6 +1599,7 @@ const generateMissingAnswers = async (questions, imageBuffer = null, taskId = nu
 
       cacheMissCount++
       const result = await generateAnswerForQuestion(fullContent)
+      recordEngine(result.engine)
       const validation = validateAIAnswer(result.answer, result.analysis)
 
       if (!validation.isValid) {
@@ -1684,7 +1713,12 @@ const generateMissingAnswers = async (questions, imageBuffer = null, taskId = nu
     }
   }
 
-  return { updated: updatedCount, total: needAnswer.length, empty: emptyCount, placeholder: placeholderCount, exceptions: exceptionCount, cacheHits: cacheHitCount, cacheMisses: cacheMissCount }
+  // 答案来源分布日志：缓存命中的不走模型，未命中的才消耗答案引擎额度。
+  console.log(`   [答案来源] 缓存命中 ${cacheHitCount} · 答案引擎生成 ${cacheMissCount} · 异常/未生成 ${exceptionCount}`)
+  const engineSummary = Object.entries(engineUsage).map(([name, n]) => `${name}=${n}`).join(', ')
+  console.log(`   [答案引擎] ${engineSummary || '本次全部走缓存或未调用'}`)
+
+  return { updated: updatedCount, total: needAnswer.length, empty: emptyCount, placeholder: placeholderCount, exceptions: exceptionCount, cacheHits: cacheHitCount, cacheMisses: cacheMissCount, engineUsage }
 }
 
 /**

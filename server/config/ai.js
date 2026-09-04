@@ -90,10 +90,14 @@ export async function withAiLimit(fn) {
 //   1) 当日配额用尽（"exceeded today's quota for model X"）——重试到明天也没用，
 //      唯一出路是换一个模型（ModelScope 的报错自己就写着 "consider using other models"）
 //   2) 瞬时并发限流——退避重试有效
-function isQuotaExhaustedError(err) {
+export function isQuotaExhaustedError(err) {
   const data = err?.response?.data
   const msg = data?.error?.message || data?.message || (typeof data === 'string' ? data : '') || ''
   return /exceeded[^.]*quota|quota[^.]*exceeded|quota.*limit|limit.*reached|daily.*limit|out of quota|insufficient.*quota|balance.*insufficient|insufficient.*balance|rate.*limit.*(reached|exceeded)/i.test(msg)
+    // SenseNova / 部分聚合网关的「频率/额度上限」语义不同，但本质都是"该账号配额用完，
+    // 需等待重置（SenseNova 是每 5 小时重置一次）。不识别会当成瞬时 429 反复重试浪费时间，
+    // 识别后由调用方把该 Key 冷却到重置时刻再自动复用。
+    || /frequency\s*limit|exceeds?(.{0,20})?limit|too many requests|requests?(.{0,12})?limited|usage.{0,12}exceeded/i.test(msg)
 }
 
 // 按「Key + 模型 + 自然日」记录配额耗尽，避免整轮解析反复撞同一个已耗尽的组合。
@@ -268,10 +272,17 @@ export const BACKUP_VENDOR_DEFS = [
     //   - 该端点与 ZenMux/BigModel/Agnes 独立配额，天然适合作为魔搭耗尽后的首选兜底
     // 必须传 reasoning_effort:'none' 禁用思考模式，否则思考过程太长（3754+ tokens）
     // 导致 max_tokens 耗尽在 reasoning 阶段，永远拿不到 content。
+    //
+    // 2026-09-04 实测修正：
+    //   - 'sensenova-6.7-flash-lite' 已下线，调用返回 404 model route not found，
+    //     原值会让 SenseNova 在通用文本链路上整条失效 → 改为实测可用的 6.8-flash-lite。
+    //   - 强推理场景（标准答案/解析生成）不要用 6.8-flash-lite：
+    //     12 道复杂数学题基准里它只 7/12，DeepSeek V4 Pro 12/12。
+    //     那条链路走下面的 ANSWER_ENGINE，不占用这里的 textModel。
     name: 'SenseNova',
     envKey: 'SENSENOVA_API_KEY',
     endpoint: 'https://token.sensenova.cn/v1/chat/completions',
-    textModel: 'sensenova-6.7-flash-lite',
+    textModel: 'sensenova-6.8-flash-lite',
     vlModels: ['sensenova-6.8-flash-lite', 'sensenova-6.7-flash-lite'],
     referer: null,
     extraBody: { reasoning_effort: 'none' },
@@ -684,6 +695,152 @@ export async function callTextCompletion(opts) {
   throw new Error('All text AI providers failed')
 }
 
+/**
+ * ── 答案引擎（Answer Engine）────────────────────────────────────────────────
+ * 职责切分：视觉模型只负责「看懂卷面」，标准答案与解析由专门的强推理文本模型产出。
+ *
+ * 依据（2026-09-04 实测，deliverables/complex_model_benchmark_report_20260904.md）：
+ *   12 道中学数学复杂题基准 —— DeepSeek V4 Pro 12/12 · GLM-5.2 9/12 · SenseNova 6.8 7/12
+ *   DeepSeek 同时 token 最省（2,398 vs 2,476 vs 2,741）。
+ *   视觉模态实测：deepseek-v4-pro 明确返回 400「Model do not support image input」，
+ *   所以它只能做文本，不能替代 OCR —— 这也是必须拆成两段式的原因。
+ *
+ * 与 callTextCompletion 的区别：callTextCompletion 会先打 GMI/MiniMax、再打魔搭、
+ * 再走备用供应商，对「指定模型」是低效且不可控的（指定模型在前几站基本必失败）。
+ * 答案引擎直连目标供应商 + 指定模型，失败后按 FALLBACK_MODELS 降级，
+ * 全部失败才回落到通用文本链路，保证不阻塞批改。
+ *
+ * 关闭/回滚：ANSWER_ENGINE_ENABLED=0 → 完全退回改造前的 callTextCompletion 行为。
+ */
+export const ANSWER_ENGINE = {
+  ENABLED: process.env.ANSWER_ENGINE_ENABLED !== '0',
+  VENDOR: process.env.ANSWER_ENGINE_VENDOR || 'SenseNova',
+  MODEL: process.env.ANSWER_ENGINE_MODEL || 'deepseek-v4-pro',
+  FALLBACK_MODELS: (process.env.ANSWER_ENGINE_FALLBACK_MODELS || 'glm-5.2,sensenova-6.8-flash-lite')
+    .split(',').map(s => s.trim()).filter(Boolean),
+  TIMEOUT_MS: parseInt(process.env.ANSWER_ENGINE_TIMEOUT_MS, 10) || 60000,
+  // 多 Key 池：ANSWER_ENGINE_KEYS 是逗号分隔的额外 Key（多个免费账号）。
+  // 与供应商主 Key（vendor.envKey）合并去重后组成 Key 池。N 把 Key = N 倍配额。
+  // 默认冷却 5 小时 —— 对齐 SenseNova「账号 × 5 小时」重置节奏。
+  // 真实额度是服务端按账号计，冷却只是本端"别再打已耗尽的 Key"，重置后自动复用，无需重启。
+  KEY_COOLDOWN_MS: parseInt(process.env.ANSWER_ENGINE_KEY_COOLDOWN_MS, 10) || 5 * 60 * 60 * 1000,
+}
+
+/**
+ * 答案引擎 Key 池与冷却。
+ * 按 Key 维度（而非「Key×模型×自然日」）记录冷却，因为 SenseNova 公测额度是
+ * 「账号 × 5 小时」重置，与「自然日」不同步。配额耗尽的 Key 进入冷却，到期自动恢复。
+ */
+const _answerEngineKeyCooldown = new Map() // apiKey -> 冷却到期时间戳(ms)
+
+export function getAnswerEngineKeys(vendor) {
+  const primary = process.env[vendor.envKey] || ''
+  const extra = (process.env.ANSWER_ENGINE_KEYS || '')
+    .split(',').map(s => s.trim()).filter(Boolean)
+  const all = []
+  if (primary) all.push(primary)
+  for (const k of extra) if (!all.includes(k)) all.push(k)
+  return all
+}
+
+export function isAnswerEngineKeyCooling(apiKey) {
+  const until = _answerEngineKeyCooldown.get(apiKey)
+  return !!until && Date.now() < until
+}
+
+export function cooldownAnswerEngineKey(apiKey) {
+  _answerEngineKeyCooldown.set(apiKey, Date.now() + ANSWER_ENGINE.KEY_COOLDOWN_MS)
+  console.warn(`[AnswerEngine] Key 尾号 ${keyTail(apiKey)} 额度耗尽，进入冷却 ${Math.round(ANSWER_ENGINE.KEY_COOLDOWN_MS / 3600000)}h（重置后自动恢复）`)
+}
+
+/**
+ * 答案引擎文本调用：优先直连 ANSWER_ENGINE.VENDOR 的强推理模型。
+ * Key 池 + 按 Key 冷却：多账号 Key 自动分摊额度，某 Key 5h 额度用尽即冷却、换下一个，
+ * 全部冷却或全失败再回落通用文本链路，绝不卡住批改。
+ * @returns {Promise<{content: string, usedBackup: boolean, provider: string}>}
+ */
+export async function callAnswerEngineCompletion(opts) {
+  const {
+    systemContent,
+    userContent,
+    temperature = 0.2,
+    maxTokens = 2048,
+    // 单次调用覆盖主模型（分级路由 / 基准测试用）。不传则用 ANSWER_ENGINE.MODEL。
+    model: modelOverride = null,
+    // 关掉降级链，只打指定模型。基准测试要拿到"纯净"的单模型准确率时用；
+    // 生产保持默认 true，失败要能自动让路，绝不能硬卡在一个模型上。
+    fallback = true,
+  } = opts
+
+  // 一键回滚：保持改造前行为（走通用文本链路）
+  if (!ANSWER_ENGINE.ENABLED) {
+    const chain = await callTextCompletion(opts)
+    return { ...chain, provider: 'legacy-text-chain' }
+  }
+
+  const vendor = getResolvedVendors().find(v => v.name === ANSWER_ENGINE.VENDOR)
+  if (vendor) {
+    const keys = getAnswerEngineKeys(vendor)
+    if (keys.length === 0) {
+      console.warn(`[AnswerEngine] 供应商 ${ANSWER_ENGINE.VENDOR} 未配置 Key，回落通用文本链路`)
+    } else {
+      const primary = modelOverride || ANSWER_ENGINE.MODEL
+      const models = fallback ? [primary, ...ANSWER_ENGINE.FALLBACK_MODELS] : [primary]
+      let allCooling = true
+      for (const apiKey of keys) {
+        if (isAnswerEngineKeyCooling(apiKey)) continue // 这把 Key 在冷却，跳过
+        allCooling = false
+        for (const model of models) {
+          try {
+            const content = await requestOpenAIProvider({
+              endpoint: vendor.endpoint,
+              apiKey,
+              model,
+              messages: buildOpenAIMessages(systemContent, userContent),
+              temperature,
+              maxTokens,
+              timeout: ANSWER_ENGINE.TIMEOUT_MS,
+              // 429 允许重试（最多等 8s，额度真耗尽时 postWith429Retry 会立刻上抛换 Key/换模型）；
+              // 503 不重试 —— RETRY_DELAYS_503 累计可等 245s，会把批改卡死在一条链路上。
+              // 这里选择快速失败并降级，绝不硬卡在一个模型/Key 上。
+              retry429: true,
+              retry503: false,
+              vendor,
+              extraBody: vendor.extraBody || null,
+            })
+            if (content) {
+              return { content, usedBackup: true, provider: `${vendor.name}:${model}` }
+            }
+            console.warn(`[AnswerEngine] ${vendor.name}:${model} 返回空内容`)
+          } catch (err) {
+            const status = err.response?.status
+            if (status === 401 || status === 403) {
+              // 该 Key 鉴权失败（无效/未授权），所有模型都不会成功，直接换下一把 Key，
+              // 避免在一把废 Key 上对多个模型各空打一次
+              console.warn(`[AnswerEngine] ${vendor.name} Key 尾号 ${keyTail(apiKey)} 鉴权失败(${status})，跳过该 Key 全部模型`)
+              break
+            }
+            if (isQuotaExhaustedError(err)) {
+              // 该 Key 5h 额度已用尽 → 冷却此 Key，换下一把 Key，不在这把 Key 上继续空耗
+              cooldownAnswerEngineKey(apiKey)
+              break
+            }
+            // 只记状态码/错误码，不打印 Key 和正文
+            console.warn(`[AnswerEngine] ${vendor.name}:${model} 失败: ${status || err.code || err.message}`)
+          }
+        }
+      }
+      if (allCooling) {
+        console.warn(`[AnswerEngine] 所有 Key 均处于冷却（额度重置中），回落通用文本链路`)
+      }
+    }
+  }
+
+  // 答案引擎不可用 → 回落通用文本链路，绝不因为模型选择问题卡住批改
+  const fallbackChain = await callTextCompletion(opts)
+  return { ...fallbackChain, provider: 'fallback-text-chain' }
+}
+
 export async function callVisionCompletion(opts) {
   const {
     imageDataURL,
@@ -978,7 +1135,18 @@ export function wrapVisionError(lastError, { msAttempted = false, agnesAttempted
   return lastError
 }
 
-export const buildOCRPrompt = () => `你是一个专业的作业题目识别助手。请识别图片中的题目，并严格返回 JSON，不要输出任何额外说明。
+/**
+ * OCR 提示词。answer 字段的语义由 OCR_ANSWER_MODE 控制：
+ * - copy_only（默认，2026-09-04 起）：视觉模型只负责「看懂卷面」，标准答案只照抄卷面上
+ *   印刷的答案栏/参考答案，不自行求解。
+ *   理由：视觉模型（MiniMax / SenseNova 6.8）的计算能力弱，12 道复杂题基准只有 7/12，
+ *   让它算答案既费 token 又容易错；而它算出来的答案在 Step 7 会被答案引擎整体覆盖，
+ *   等于白算。留空后统一由 DeepSeek V4 Pro 基于识别出的题干重解并回填。
+ * - legacy：恢复「视觉模型独立解出标准答案」的旧行为（一键回滚开关）。
+ */
+export const buildOCRPrompt = () => {
+const legacy = process.env.OCR_ANSWER_MODE === 'legacy'
+return `你是一个专业的作业题目识别助手。请识别图片中的题目，并严格返回 JSON，不要输出任何额外说明。
 
 返回格式：
 {
@@ -989,7 +1157,9 @@ export const buildOCRPrompt = () => `你是一个专业的作业题目识别助�
       "question_number": 1,
       "content": "题目内容",
       "options": ["选项A的正文", "选项B的正文", "选项C的正文", "选项D的正文"],
-      "answer": "标准答案（由你独立解出本题得到的参考答案；绝不能抄写卷面上的任何笔迹——既不是学生写的，也不是老师红笔批的）",
+      "answer": ${legacy
+        ? `"标准答案（由你独立解出本题得到的参考答案；绝不能抄写卷面上的任何笔迹——既不是学生写的，也不是老师红笔批的）"`
+        : `"卷面上【印刷体】给出的标准答案（如练习册答案栏、卷末参考答案）；卷面上没有印刷答案就填 null，不要自己解题"`},
       "student_answer": "学生答案",
       "is_correct": true,
       "confidence": 0.95,
@@ -1039,14 +1209,17 @@ export const buildOCRPrompt = () => `你是一个专业的作业题目识别助�
    判断题的 options 填 ["正确", "错误"]；非选择题 options 填 []。
 10. page_title 只读【页面顶部/页眉的印刷体标题】，用于给这份作业命名，尽量完整（含"第X章"、圈序号 ①②③、课时号 19.1(1) 等）。
    不要把题号、题干、学生姓名、班级、页码、"一、选择题"这类栏目名当标题。整页没有印刷标题就填 null，不要编造。
-11. answer（标准答案）的来源【必须是你自己解题得到的参考答案】，与卷面笔迹无关：
+11. answer（标准答案）字段规则（与卷面笔迹严格隔离）：
    - 绝不能把老师红笔写的批语、分数、对错符号、订正内容（如"计算错误""正确""×""√""-1分"等）填进 answer——这些是批改痕迹，一律丢弃。
    - 也绝不能把学生手写的答案抄成 answer；学生笔迹只进 student_answer。
-   - 你要【独立解出本题】再填 answer。题目已印了标准答案（如练习册答案栏）时可照抄印刷体答案，但仍不得抄红笔/学生笔迹。
-   - 若确实无法解出，answer 填 null，不要用卷面上的批改文字或学生答案凑一个假答案。
-   - 题目没有印刷标准答案、且你也不能独立解出时，answer 填 null 或空字符串。**严禁把"学生演算的中间结果"（如"77""3×36-36+5"）误当成标准答案填入 answer。**
+   - **严禁把"学生演算的中间结果"（如"77""3×36-36+5"）误当成标准答案填入 answer。**
+${legacy ? `   - 你要【独立解出本题】再填 answer。题目已印了标准答案（如练习册答案栏）时可照抄印刷体答案，但仍不得抄红笔/学生笔迹。
+   - 若确实无法解出，answer 填 null，不要用卷面上的批改文字或学生答案凑一个假答案。` : `   - 【本系统由专门的答案引擎独立求解，你不需要也不应该自己计算本题。】
+     只在卷面【印刷区】明确印出了标准答案（练习册答案栏、卷末参考答案、题后括号内印刷答案）时才照抄，
+     其余情况一律填 null。空着不影响系统：标准答案会在后续步骤由强推理模型基于你识别出的 content 重新解出。
+   - 抄印刷答案时只抄答案本身，不要带上"答案："之外的题号、解析文字。`}
 
-【答案字段强约束（防止串行污染与算术幻觉）】
+${legacy ? `【答案字段强约束（防止串行污染与算术幻觉）】
 - 「answer」 与 「student_answer」 是两个**互相独立**的字段。answer 是题目印刷区显式给出的或你独立解出的标准答案；student_answer 是学生写在答题区的内容。两者绝不能混入对方的数字串——例如学生写了 83，answer 不能再出现 83。
 - 「analysis」 末尾"最终答案/答案为/答案是"给出的 X，必须满足：**从题目中可提取的函数表达式 + 代入值，用四则运算可回算得到 X**。
   - 例：解析里写"展开 y=3(x-1)²+2，代入 x=6 得 y=3×36-36+5=83"。这里算式「3*36-36+5=77」，与"最终答案为 83"不一致——是算术幻觉。
@@ -1064,7 +1237,9 @@ export const buildOCRPrompt = () => `你是一个专业的作业题目识别助�
 - "解方程" vs "方程的解"：前者是过程（动词），后者是结果（名词）——别把求的过程填进 answer。
 - "约分" vs "通分"：约分使分式变简，通分使分式变相同分母。
 - "最简分数" vs "真分数"：约到最简 ≠ 一定小于 1。
-判定不确定时，回看一遍题面"问"的是什么；不要默认走最常见的标准定义分支。
+判定不确定时，回看一遍题面"问"的是什么；不要默认走最常见的标准定义分支。` : `【字段隔离约束】
+- 「answer」 与 「student_answer」 是两个**互相独立**的字段。answer 只来自卷面印刷区；student_answer 是学生写在答题区的内容。两者绝不能混入对方的数字串——例如学生写了 83，answer 不能再出现 83。
+- 「analysis」 只在卷面本身印有解析时照抄印刷体解析；没有印刷解析就填 null，不要自己写解析。`}
 
 【数学符号识别规范（必须严格遵守）】
 - content（题干）、answer（答案）、student_answer（学生答案）中的数学式子必须完整、准确地转录，禁止漏写、替换或臆造符号。
@@ -1087,6 +1262,7 @@ export const buildOCRPrompt = () => `你是一个专业的作业题目识别助�
   · 紧凑排版的视觉错觉：印刷体里分数 -1/3 和紧邻 x² 之间只有很窄的视觉间隙，
     模型容易把分母 3 和自变量 x 合并为 3x——必须警惕。
   · 同样适用于所有「分数 + 自变量 + 指数」组合：1/2 y³、2/5 t、a/b z^n、1/4 x、3/5 sinθ 等。`
+}
 
 export const buildAnswerGenerationPrompt = () => `你是一个中小学题目解答助手。请根据给定题目生成标准答案与解析，只返回 JSON：
 {
@@ -1097,14 +1273,34 @@ export const buildAnswerGenerationPrompt = () => `你是一个中小学题目解
 
 要求：
 1. 只返回 JSON。
-2. 解析结尾要明确给出最终答案。
-3. 选择题 answer 只返回选项字母。
+2. 解析结尾要明确给出最终答案，且必须与 answer 字段完全一致。
+3. 选择题 answer 只返回选项字母（如 "C"），不要带"选项""选"等叙述。
 4. answer 必须是化到最简的最终结果，不能停在中间形态：
    - 二次根式要最简：分母不含根号（1/√2 要写成 √2/2）、根号内不含分数（√(3/2) 要写成 √6/2）、
      被开方数不留能开出的平方因子（√18 要写成 3√2）。
    - 比也要有理化后再约到最简："√3:√2" 必须写成 "√6:2"。
    - 分数约到最简；能整除时写成整数。
-5. 多空填空题按空的顺序用中文逗号分隔，不要写"第一空为…"这类叙述。`
+5. 多空填空题按空的顺序用中文逗号分隔，不要写"第一空为…"这类叙述。
+6. 不要把"求解过程"填进 answer：answer 只是最终结果（"解方程"是过程，"方程的解"才是结果）。
+7. 确实无法唯一确定答案时，answer 填 "待人工补充"，不要编造。
+
+【算术自检（写 analysis 前必须过一遍）】
+- analysis 里出现的具体算式，其四则运算结果必须等于你给出的 answer。
+  例：解析写"代入 x=6 得 y=3×36-36+5=83"，但 3*36-36+5=77 ≠ 83 —— 这是算术幻觉，必须重算。
+- 算完后把 answer 代回原题条件验一遍（方程代回原方程、几何题检查量纲与取值范围）。
+- 无法保证自洽时，answer 填 "待人工补充"，不要输出没验算过的结果。
+
+【易混概念清单（作答前必须显式判定方向）】
+下列概念在中学数学里高频混淆，容易按"默认定义"分支答非所问。必须先判定题目问的是哪一个，再作答。
+- "平方根" vs "算术平方根"：
+  · 题面写"a 的算术平方根" / 求 √a 的值 → 非负（一个值）。
+  · 题面写"a 的平方根" / "x²=a 的解" / "√a 的平方根" / 上下文涉及 ± → 取 ±（两个值）。
+  · 典型陷阱："√81的平方根是____"，先算 √81=9，再求 9 的平方根 → ±3，不是 9。
+- "相反数" vs "绝对值"：-a 的相反数是 a；-a 的绝对值是 |a|（永远非负）。
+- "方程的解" vs "不等式的解集"：方程解是离散点，不等式解集是范围（注意 ≥/≤ 端点是否取到）。
+- "约分" vs "通分"：约分使分式变简，通分使分式同分母。
+- "最简分数" vs "真分数"：约到最简 ≠ 一定小于 1。
+- 求"取值范围"/"参数范围"时，注意分母不为 0、根号内非负、对数真数大于 0 等隐含约束。`
 
 export const buildTaggingPrompt = (subject = null) => `你是一个 K12 题目知识点分类助手。请根据题目内容输出知识点和难度，只返回 JSON。
 ${subject ? `已知学科：${subject}\n` : ''}
