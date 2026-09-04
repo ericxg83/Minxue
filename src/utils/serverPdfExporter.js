@@ -269,7 +269,14 @@ export async function exportServerPDF({ studentId, studentName, questions, html,
 
   if (!resp.ok) {
     const errText = await resp.text().catch(() => '')
-    throw new Error(`??????????? PDF (Content-Type: ${resp.headers.get('content-type') || 'unknown'})`)
+    let detail = ''
+    try {
+      const payload = JSON.parse(errText)
+      detail = payload.detail || payload.error || ''
+    } catch {
+      detail = errText.slice(0, 160)
+    }
+    throw new Error(`PDF 服务返回 ${resp.status}${detail ? `：${detail}` : ''}`)
   }
 
   // 3. 拿到 PDF blob

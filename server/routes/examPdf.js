@@ -34,7 +34,10 @@ router.post('/', async (req, res) => {
 
     console.log(`[examPdf] 收到渲染请求 html=${html.length} 字符`)
 
-    const pdfBuffer = await renderExamPDF({ html, filename, pdfOptions })
+    // puppeteer-core 的 page.pdf() 在部分版本返回 Uint8Array；必须显式转成
+    // Node Buffer，否则 Express 会把它按普通对象序列化成 {"0":...}，
+    // 前端拿到的就不是合法 PDF，下载和打印都会停在"生成 PDF"阶段。
+    const pdfBuffer = Buffer.from(await renderExamPDF({ html, filename, pdfOptions }))
 
     const dt = Date.now() - t0
     console.log(`[examPdf] 渲染完成 ${dt}ms, PDF ${pdfBuffer.length} bytes`)

@@ -8,6 +8,7 @@ import { createGeneratedExam, getGeneratedExamsByStudent, getQuestionsByIds } fr
 import dayjs from 'dayjs'
 import { saveFileToDevice } from '../../utils/nativeDownload'
 import { exportWrongBookPDF } from '../../utils/wrongBookPdfExporter'
+import { triggerBrowserPrint } from '../../utils/browserPrint'
 import {
   buildPaperBody,
   buildPaperCSS,
@@ -449,19 +450,22 @@ export default function PrintPreview({ onClose, questions: propQuestions, existi
       saved = await saveGeneratedExamRecord()
       setPdfStage('正在加载试卷数据…')
       const questions = await ensureEnriched()
-      let blobUrl = pdfBlobUrl
-      if (!blobUrl) {
-        setPdfStage('正在生成 PDF，请稍候…')
-        const result = await generatePDF(questions)
-        blobUrl = result?.blobUrl
-      }
-      if (blobUrl) {
-        window.open(blobUrl, '_blank')
-        if (saved) Toast.show({ icon: 'success', content: '已保存到组卷历史' })
-      }
+      if (!questions || questions.length === 0) throw new Error('没有题目可打印')
+
+      // "直接打印"走浏览器/Android WebView 原生 print()，而不是打开 blob PDF。
+      // 后者在 Capacitor 中常被拦截，也不会自动调出打印机弹出框。
+      setPdfStage('正在打开打印窗口…')
+      await triggerBrowserPrint({
+        title: `${currentStudent?.name || '学生'} - ${getExamName()}`,
+        studentName: currentStudent?.name || '',
+        questions,
+        showAnswers: false,
+        qrContent: getQrContent(),
+      })
+      if (saved) Toast.show({ icon: 'success', content: '已保存到组卷历史' })
     } catch (error) {
-      console.error('PDF生成失败:', error)
-      Toast.show({ icon: 'fail', content: error?.message || 'PDF生成失败，请重试', duration: 3200 })
+      console.error('PDF打印失败:', error)
+      Toast.show({ icon: 'fail', content: error?.message || '打印失败，请重试', duration: 3200 })
     } finally {
       setGeneratingPdf(false)
       setPdfStage('')
