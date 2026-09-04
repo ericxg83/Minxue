@@ -29,7 +29,7 @@
           </span>
           <el-tag v-if="q.answer_source" size="small"
             :type="q.answer_source === 'blank' ? 'warning' : 'info'" effect="plain">
-            {{ q.answer_source === 'blank' ? '未作答' : q.answer_source === 'recognized' ? '识别' : q.answer_source }}
+            {{ q.answer_source === 'blank' ? '未作答' : q.answer_source === 'recognized' ? '识别' : q.answer_source === 'teacher_input' ? '手动录入' : q.answer_source }}
           </el-tag>
           <template v-if="!editing">
             <el-button size="small" type="primary" plain @click="handleEnterEdit">
@@ -50,8 +50,25 @@
       <!-- ═══ 答案对照（紧凑） ═══ -->
       <div class="ops-compare-bar">
         <div class="ops-compare-item">
-          <span class="ops-cmp-label">学生答案</span>
-          <span class="ops-cmp-value student-val">
+          <div class="ops-cmp-label-row">
+            <span class="ops-cmp-label">学生答案</span>
+            <el-button v-if="!quickStudentAnswerEditing && !editing" size="small" plain class="ops-ans-edit-btn"
+              @click="startQuickStudentAnswerEdit">
+              <el-icon><EditPen /></el-icon>
+              {{ q.student_answer ? '编辑' : '手动输入' }}
+            </el-button>
+          </div>
+          <div v-if="quickStudentAnswerEditing" class="quick-answer-edit">
+            <el-input v-model="quickStudentAnswerText" type="textarea"
+              :autosize="{ minRows: 1, maxRows: 4 }"
+              placeholder="学生答案（支持 √、²、a/b 等数学符号，也可写 $x^2+1$）" ref="quickStudentInputRef" />
+            <div class="quick-answer-actions">
+              <el-button size="small" type="primary" :loading="quickStudentAnswerSaving"
+                @click="saveQuickStudentAnswer">保存</el-button>
+              <el-button size="small" @click="cancelQuickStudentAnswerEdit">取消</el-button>
+            </div>
+          </div>
+          <span v-else class="ops-cmp-value student-val">
             <MathRender :content="q.student_answer || '—'" autoDetect tag="span" />
           </span>
         </div>
@@ -63,15 +80,14 @@
               <span v-if="editing" style="color:var(--wb-warning);font-weight:400;"> 编辑</span>
             </span>
             <!-- 截图/拍照 → 后端视觉模型识别 → 弹窗预览 → 一键填入。
-                 老师手敲 \frac、\sqrt 等 KaTeX 命令极易出错，这个按钮直接解决。 -->
-            <el-upload v-if="editing"
-              :show-file-list="false"
-              :before-upload="handleRecognizeAnswerBeforeUpload"
-              accept=".jpg,.jpeg,.png,.webp,.heic,.heif,image/jpeg,image/png,image/webp,image/heic,image/heif">
-              <el-button type="default" :loading="recognizeLoading" class="ops-ans-recognize-btn">
-                <el-icon><Camera /></el-icon> 📷 截图识别答案
-              </el-button>
-            </el-upload>
+                 老师手敲 \frac、\sqrt 等 KaTeX 命令极易出错，这个按钮直接解决。
+                 入口改为「读剪贴板」：老师从别的 AI 截好图 → 切回此对话框 → Ctrl+V / 长按粘贴
+                 即可识别，不再要求去本地文件夹找图（很多老师压根没保存截图）。
+                 兼容兜底：dialog 里仍保留「选择本地图片」入口。 -->
+            <el-button v-if="editing" type="default" :loading="recognizeLoading"
+              class="ops-ans-recognize-btn" @click="openAnswerPasteDialog">
+              <el-icon><Camera /></el-icon> 📷 截图识别答案
+            </el-button>
           </div>
           <!-- AI 解析自检未通过时标红 + 给老师"答案可能错"的红色横幅。
                数据来自 worker.js 调 aiParseSelfCheck 写入 questions.ai_self_check_issues。
@@ -347,6 +363,56 @@
       :result="recognizeResult"
       :preview-url="recognizePreviewUrl"
       @apply="handleApplyRecognized" />
+
+    <!-- 截图粘贴对话框：
+         - 主路径：在「粘贴区」里 Ctrl+V（桌面）/ 长按图片粘贴（手机）→ 直接 OCR
+         - 兜底：点「选择本地图片」仍可走文件选择器（部分老师保存了截图）
+         onPaste 监听挂在该 div 上，保证 paste 事件不会冒到别处。 -->
+    <el-dialog v-model="answerPasteDialogVisible"
+      title="粘贴截图识别答案"
+      width="420px"
+      :close-on-click-modal="false"
+      :show-close="true"
+      @opened="focusPasteTarget">
+      <div class="ops-paste-hint">
+        <div class="ops-paste-step">
+            <span class="ops-paste-num">1</span>
+            去别的 AI（如 DeepSeek/通义/豆包）拿到结果，截图
+          </div>
+          <div class="ops-paste-step">
+            <span class="ops-paste-num">2</span>
+            切回本对话框，按 <b>Ctrl + V</b>（电脑）或<b>长按图片</b>选择「粘贴」（手机）
+          </div>
+          <div class="ops-paste-step">
+            <span class="ops-paste-num">3</span>
+            后端自动 OCR 并弹预览，确认后一键填入
+          </div>
+      </div>
+      <div ref="answerPasteTargetRef"
+        class="ops-paste-drop"
+        tabindex="0"
+        @paste="handleAnswerPaste"
+        @click="focusPasteTarget">
+        <div class="ops-paste-drop-inner">
+          <div class="ops-paste-icon">📋</div>
+          <div class="ops-paste-text">点击此处，按 Ctrl+V 粘贴截图</div>
+          <div class="ops-paste-sub">支持 PNG / JPG / WebP，手机端长按图片 → 粘贴</div>
+        </div>
+      </div>
+      <div class="ops-paste-fallback">
+        <span class="ops-paste-fallback-tip">截图没在剪贴板？</span>
+        <el-upload :show-file-list="false"
+          :before-upload="handleRecognizeAnswerBeforeUpload"
+          accept=".jpg,.jpeg,.png,.webp,.heic,.heif,image/jpeg,image/png,image/webp,image/heic,image/heif">
+          <el-button size="small" link type="primary">
+            <el-icon><Picture /></el-icon> 选择本地图片
+          </el-button>
+        </el-upload>
+      </div>
+      <template #footer>
+        <el-button @click="answerPasteDialogVisible = false">取消</el-button>
+      </template>
+    </el-dialog>
   </div>
 </template>
 
@@ -551,6 +617,11 @@ const quickAnswerEditing = ref(false)
 const quickAnswerText = ref('')
 const quickAnswerSaving = ref(false)
 const quickInputRef = ref(null)
+// 学生答案 quick edit：识别不到/识别错时老师手敲，支持 √/²/a/b 等 Unicode 符号与 $...$ LaTeX。
+const quickStudentAnswerEditing = ref(false)
+const quickStudentAnswerText = ref('')
+const quickStudentAnswerSaving = ref(false)
+const quickStudentInputRef = ref(null)
 // 解析展开（默认收起；与移动端 ExamReview 同款）
 const showAnalysis = ref(false)
 const form = ref({ content: '', options: [], answer: '', analysis: '', tags: [], question_type: 'choice', subject: '' })
@@ -565,6 +636,60 @@ const recognizeLoading = ref(false)
 const recognizeResult = ref(null)
 const recognizePreviewUrl = ref('')
 let recognizePreviewUrlToRevoke = ''
+
+// 截图粘贴对话框：用于接收 Ctrl+V / 长按粘贴到剪贴板的图片
+const answerPasteDialogVisible = ref(false)
+const answerPasteTargetRef = ref(null)
+
+// 打开粘贴对话框 + 自动聚焦到粘贴 div（让 Ctrl+V 立即生效）
+const openAnswerPasteDialog = () => {
+  if (!q.value?.id) {
+    ElMessage.warning('当前题目未选中')
+    return
+  }
+  if (recognizeLoading.value) return
+  answerPasteDialogVisible.value = true
+  // nextTick 等 dialog 渲染完再聚焦
+  nextTick(() => focusPasteTarget())
+}
+
+// 让粘贴 div 拿到焦点（电脑 Ctrl+V 才能触发 / 手机端长按粘贴也需要焦点）
+const focusPasteTarget = () => {
+  const el = answerPasteTargetRef.value
+  if (el && typeof el.focus === 'function') el.focus()
+}
+
+// 从 paste 事件里挑出第一张图，转成 File 走原有识别链路
+const handleAnswerPaste = (e) => {
+  if (!e || !e.clipboardData) return
+  // 阻止默认行为（避免 contenteditable 里塞进 base64 文本）
+  e.preventDefault()
+  const items = e.clipboardData.items
+  if (!items || !items.length) {
+    ElMessage.warning('剪贴板为空，请先到别的 AI 截图')
+    return
+  }
+  for (let i = 0; i < items.length; i++) {
+    const item = items[i]
+    // 跳过 file:// 拖文件之类的情况
+    if (item.kind !== 'file') continue
+    const file = item.getAsFile()
+    if (!file) continue
+    if (!file.type || !file.type.startsWith('image/')) {
+      ElMessage.warning('剪贴板里不是图片，请粘贴截图')
+      continue
+    }
+    // 后端 recognizer_answer 强依赖 file.name 非空，便于 fixFileIfNeeded 判断 HEIC
+    if (!file.name) {
+      const ext = (file.type.split('/')[1] || 'png').replace('jpeg', 'jpg')
+      file.name = `pasted-${Date.now()}.${ext}`
+    }
+    answerPasteDialogVisible.value = false
+    handleRecognizeAnswerBeforeUpload(file)
+    return
+  }
+  ElMessage.warning('剪贴板里没有图片，请粘贴截图')
+}
 
 // ═══ 原卷裁剪相关 ═══
 const cropDialogVisible = ref(false)
@@ -784,6 +909,8 @@ watch(q, (newQ) => {
   editing.value = false
   quickAnswerEditing.value = false
   quickAnswerText.value = ''
+  quickStudentAnswerEditing.value = false
+  quickStudentAnswerText.value = ''
 }, { immediate: true })
 
 const startQuickAnswerEdit = () => {
@@ -796,6 +923,53 @@ const startQuickAnswerEdit = () => {
 const cancelQuickAnswerEdit = () => {
   quickAnswerEditing.value = false
   quickAnswerText.value = ''
+}
+const startQuickStudentAnswerEdit = () => {
+  quickStudentAnswerText.value = q.value?.student_answer || ''
+  quickStudentAnswerEditing.value = true
+  nextTick(() => {
+    quickStudentInputRef.value?.focus()
+  })
+}
+const cancelQuickStudentAnswerEdit = () => {
+  quickStudentAnswerEditing.value = false
+  quickStudentAnswerText.value = ''
+}
+const saveQuickStudentAnswer = async () => {
+  const question = q.value
+  if (!question?.id) return
+  const text = quickStudentAnswerText.value?.trim()
+  if (!text) {
+    ElMessage.warning('请输入学生答案')
+    return
+  }
+  quickStudentAnswerSaving.value = true
+  try {
+    // 同步把 answer_source 改为 'teacher_input'，让右上角标签从"未作答"切到"手动录入"，
+    // 否则 OCR 留下的 answer_source='blank' 会持续误导老师。
+    await updateQuestion(question.id, { student_answer: text, answer_source: 'teacher_input' })
+    question.student_answer = text
+    question.answer_source = 'teacher_input'
+    // 答案变更后自动重判，否则 AI 判定会跟学生答案对不上
+    try {
+      const rejudgeResult = await rejudgeQuestion(question.id)
+      if (rejudgeResult?.success) {
+        question.is_correct = rejudgeResult.is_correct
+      }
+    } catch (rejudgeErr) {
+      console.warn('重判学生答案失败（不影响保存）:', rejudgeErr.message)
+    }
+    const studentId = store.currentStudent?.id
+    if (studentId) clearStudentCaches(studentId)
+    quickStudentAnswerEditing.value = false
+    quickStudentAnswerText.value = ''
+    ElMessage.success('学生答案已保存')
+  } catch (err) {
+    console.error('保存学生答案失败:', err)
+    ElMessage.error('保存失败，请重试')
+  } finally {
+    quickStudentAnswerSaving.value = false
+  }
 }
 const saveQuickAnswer = async () => {
   const question = q.value
@@ -1122,6 +1296,11 @@ const handleRetryGeometry = async () => {
   font-size: 12px !important;
   padding: 5px 12px !important;
   height: 30px !important;
+}
+.ops-ans-edit-btn {
+  font-size: 12px !important;
+  padding: 3px 10px !important;
+  height: 26px !important;
 }
 
 .ops-cmp-value {
@@ -1515,5 +1694,78 @@ const handleRetryGeometry = async () => {
   border: 1px solid var(--wb-border);
   border-radius: var(--wb-radius-xs);
   object-fit: contain;
+}
+
+/* ── 截图粘贴对话框（OCR 答案入口）── */
+.ops-paste-hint {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin-bottom: 14px;
+  font-size: 13px;
+  color: var(--wb-text-secondary);
+  line-height: 1.5;
+}
+.ops-paste-step {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+}
+.ops-paste-num {
+  flex-shrink: 0;
+  width: 20px;
+  height: 20px;
+  border-radius: 50%;
+  background: var(--wb-primary-soft, rgba(64, 158, 255, 0.12));
+  color: var(--wb-primary, #409eff);
+  font-size: 12px;
+  font-weight: 600;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+.ops-paste-drop {
+  border: 2px dashed var(--wb-border);
+  border-radius: var(--wb-radius-md);
+  background: var(--wb-bg-soft, rgba(0, 0, 0, 0.02));
+  padding: 24px 16px;
+  text-align: center;
+  cursor: text;
+  outline: none;
+  transition: border-color 0.18s, background 0.18s;
+}
+.ops-paste-drop:focus,
+.ops-paste-drop:hover {
+  border-color: var(--wb-primary, #409eff);
+  background: var(--wb-primary-soft, rgba(64, 158, 255, 0.06));
+}
+.ops-paste-drop-inner {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 6px;
+  pointer-events: none;
+}
+.ops-paste-icon {
+  font-size: 32px;
+  line-height: 1;
+}
+.ops-paste-text {
+  font-size: 14px;
+  color: var(--wb-text);
+  font-weight: 500;
+}
+.ops-paste-sub {
+  font-size: 12px;
+  color: var(--wb-text-tertiary);
+}
+.ops-paste-fallback {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 6px;
+  margin-top: 12px;
+  font-size: 12px;
+  color: var(--wb-text-tertiary);
 }
 </style>
