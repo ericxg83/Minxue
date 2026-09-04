@@ -40,4 +40,13 @@
 
     <uses-permission android:name="android.permission.INTERNET" />
     <uses-permission android:name="android.permission.CAMERA" />
+
+    <!--
+      相册读权限：Capacitor Camera 插件只声明了相机权限，读相册要 App 自己声明。
+      Android 13+ 用 READ_MEDIA_IMAGES；Android 12 及以下用 READ_EXTERNAL_STORAGE
+      并限定 maxSdkVersion，避免新系统上申请已被废弃的权限。
+      缺了这两个权限，chooseFromGallery 会在权限检查阶段直接失败。
+    -->
+    <uses-permission android:name="android.permission.READ_MEDIA_IMAGES" />
+    <uses-permission android:name="android.permission.READ_EXTERNAL_STORAGE" android:maxSdkVersion="32" />
 </manifest>

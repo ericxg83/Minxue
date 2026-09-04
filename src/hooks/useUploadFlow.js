@@ -6,7 +6,9 @@ import { taskService } from '../services/taskService'
 import { recognizeQuestions, compressImage, saveRecognitionResult } from '../services/aiService'
 import { detectQRCode, groupFilesByQRCode, isRetryPaperQRCode } from '../services/qrDetectionService'
 import { compressImagesForUpload, describeUploadFailure } from '../utils/imageUtils'
-import { uploadImage, createTask, addWrongQuestions, clearStudentCaches, invalidateCache } from '../services/apiService'
+import { apiRequest, uploadImage, createTask, addWrongQuestions, clearStudentCaches, invalidateCache } from '../services/apiService'
+import { takePhotoFiles, pickPhotoFiles, isNativeCameraAvailable, describeCameraError } from '../services/nativeCamera'
+import { warmUpConnection, getNetworkHealth, resetNetworkHealth } from '../services/httpCore'
 import { __pendingUploadStore } from '../features/upload/pendingUploadStore'
 
 export function useUploadFlow({ loadTasks, isInitializing }) {
@@ -50,6 +52,7 @@ export function useUploadFlow({ loadTasks, isInitializing }) {
   const [stagingFiles, setStagingFiles] = useState([]) // [{ file, url, name }]
   const [stagingType, setStagingType] = useState(null) // 'regular' | 'workbook' | 'wrong_retry'
   const [stagingUploading, setStagingUploading] = useState(false)
+  const [cameraBusy, setCameraBusy] = useState(false) // 原生相机/相册打开中
   const cameraInputRef = useRef(null)
   const albumInputRef = useRef(null)
 
@@ -85,6 +88,45 @@ export function useUploadFlow({ loadTasks, isInitializing }) {
     if (e.target && 'value' in e.target) e.target.value = ''
     if (previews.length === 0) return
     setStagingFiles((prev) => [...prev, ...previews])
+  }
+
+  // ── 拍照 / 相册入口 ──
+  // 原生平台走 @capacitor/camera：WebView 的 <input capture> 会被 BridgeActivity
+  // 的文件选择器吞掉，点"拍照"也只会打开相册。Web 端保留原来的 input 行为。
+  const appendStagingFiles = (files) => {
+    if (!files || files.length === 0) return
+    setStagingFiles((prev) => [...prev, ...toPreviews(files)])
+  }
+
+  const runNativePicker = async (picker) => {
+    if (cameraBusy) return
+    setCameraBusy(true)
+    try {
+      const files = await picker()
+      appendStagingFiles(files)
+    } catch (e) {
+      const msg = describeCameraError(e)
+      // 用户主动取消不算错误，静默返回
+      if (msg) Toast.show({ message: msg, type: 'error', duration: 3000 })
+    } finally {
+      setCameraBusy(false)
+    }
+  }
+
+  const onStagingCamera = () => {
+    if (!isNativeCameraAvailable()) {
+      cameraInputRef.current?.click()
+      return
+    }
+    runNativePicker(takePhotoFiles)
+  }
+
+  const onStagingAlbum = () => {
+    if (!isNativeCameraAvailable()) {
+      albumInputRef.current?.click()
+      return
+    }
+    runNativePicker(() => pickPhotoFiles(20))
   }
 
   const removeStagingFile = (idx) => {
@@ -127,8 +169,11 @@ export function useUploadFlow({ loadTasks, isInitializing }) {
           // 必须用 exam-papers：它只返回 teacher_verified/official_verified 的答案库。
           // 旧的 /api/resources?type=exam 不过滤审核状态，会把 AI 批改自动沉淀的 ai_draft
           // 草稿（可能含"计算错误"这类脏答案）也列进选择器，绕过 PC 后台的人工确认。
-          const resp = await fetch('/api/resources/exam-papers')
-          const data = await resp.json()
+          //
+          // 必须走 apiRequest：原来是裸 fetch('/api/...')，相对路径在 Web 端由 vite
+          // dev proxy 兜住，打包进 App 后却打到 https://localhost/api/... → 必然失败，
+          // 且被下面的 catch 静默吞掉，用户永远看不到答案库选择弹窗。
+          const data = await apiRequest('/resources/exam-papers')
           const resources = (data.resources || []).filter(r => r.answer_count > 0)
           if (resources.length > 0) {
             setShowStaging(false)
@@ -422,21 +467,27 @@ export function useUploadFlow({ loadTasks, isInitializing }) {
       await uploadViaBackend(files)
     } catch (error) {
       console.error('uploadRegularHomework Error:', error)
-      Toast.show({ message: describeUploadFailure(error.message), type: 'error', duration: 4000 })
+      Toast.show({ message: describeUploadFailure(error), type: 'error', duration: 4000 })
     }
   }
 
   // 失败行 upsert：保证"上传失败"一定在列表里可见、可重试，
   // 而不是只剩一个几秒后消失的 toast（图片此时已无从找回入口）。
   // 落库文案用人类可读版本：列表的失败分类会把 "timeout" 误判成"AI 服务响应超时"。
-  const upsertFailedTemp = (tempTask, errorMsg) => {
-    const readable = describeUploadFailure(errorMsg)
-    updateTaskFromServer({ ...tempTask, status: 'failed', error: readable, result: { error: readable, rawError: errorMsg } })
+  const upsertFailedTemp = (tempTask, error) => {
+    // 尽量传原始错误对象：describeUploadFailure 靠 httpCore 打的 code 判断失败类型，
+    // 只传字符串会退化成按文案正则猜，容易误判。
+    const readable = describeUploadFailure(error)
+    const raw = typeof error === 'string' ? error : (error?.message || String(error || ''))
+    updateTaskFromServer({ ...tempTask, status: 'failed', error: readable, result: { error: readable, rawError: raw } })
   }
 
   // 客户端重传：temp 任务服务端没有记录，/api/tasks/retry 无从下手；
   // 靠 temp 上保留的 File 引用原样重走一次上传管道。
   const retryTempUpload = async (taskId) => {
+    // 用户点重试就是一个明确的新意图，先把"连接失效"计数清零，
+    // 否则上一次失败残留的计数会让后续所有请求都走"先预热"的慢路径。
+    resetNetworkHealth()
     const temp = (Array.isArray(tasks) ? tasks : []).find(t => t.id === taskId)
     const files = temp?.__files
     if (!temp || !Array.isArray(files) || files.length === 0) {
@@ -587,9 +638,9 @@ export function useUploadFlow({ loadTasks, isInitializing }) {
       if (error.code === 'EXISTING_FAILED_TASK') {
         failureText = error.message || '这份试卷之前上传过但批改失败，请到任务列表重试上次任务'
       } else {
-        failureText = describeUploadFailure(error.message)
+        failureText = describeUploadFailure(error)
       }
-      upsertFailedTemp(tempTask, error.message || '上传失败')
+      upsertFailedTemp(tempTask, error)
     }
 
     if (successCount > 0) {
@@ -718,6 +769,7 @@ export function useUploadFlow({ loadTasks, isInitializing }) {
     cameraInputRef, albumInputRef,
     openStaging, clearStaging,
     handleStagingSelectFiles, removeStagingFile,
+    onStagingCamera, onStagingAlbum, cameraBusy,
     handleSubmitStaging,
     homeworkChoiceFiles, homeworkChoiceRef,
     handleUploadAsWorkbook, handleUploadAsRegular,

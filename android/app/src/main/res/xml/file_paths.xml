@@ -2,4 +2,15 @@
 <paths xmlns:android="http://schemas.android.com/apk/res/android">
     <external-path name="my_images" path="." />
     <cache-path name="my_cache_images" path="." />
+    <!--
+      Capacitor Camera 插件把临时照片写在 getExternalFilesDir(Environment.DIRECTORY_PICTURES)
+      （/storage/emulated/0/Android/data/<appId>/files/Pictures），并用
+      <appId>.fileprovider 把它暴露给系统相机 App。原先只配了 external-path 和
+      cache-path，FileProvider.getUriForFile 找不到匹配的 root，会直接抛
+      "Failed to find configured root that contains ..." —— 拍照功能因此不可用。
+      这里补齐 Capacitor 用到的全部 root。
+    -->
+    <external-files-path name="my_external_files" path="." />
+    <external-cache-path name="my_external_cache" path="." />
+    <files-path name="my_files" path="." />
 </paths>

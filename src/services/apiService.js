@@ -1,3 +1,5 @@
+import { requestJson, onNetworkRecover, getNetworkHealth } from './httpCore'
+
 const API_BASE = import.meta.env.VITE_API_URL || '/api'
 
 // 版本号：每次部署时自动清理旧缓存
@@ -78,7 +80,7 @@ checkCacheVersion()
 // ── 请求去重：相同并发请求只发一次 ──
 const inFlightRequests = new Map()
 
-export const apiRequest = async (path, options = {}, retries = 2) => {
+export const apiRequest = async (path, options = {}, retries = 3) => {
   const method = (options.method || 'GET').toUpperCase()
 
   // 仅对 GET 请求做去重（POST/PUT/DELETE 有副作用，不做去重）
@@ -90,73 +92,38 @@ export const apiRequest = async (path, options = {}, retries = 2) => {
     }
     const promise = executeRequest()
     inFlightRequests.set(dedupKey, promise)
-    promise.finally(() => inFlightRequests.delete(dedupKey))
+    // 不使用裸 promise.finally：finally 返回的新 Promise 在原请求失败时会
+    // 形成未处理 rejection，WebView 可能因此出现全局"网络错误"遮罩。
+    const clearInFlight = () => inFlightRequests.delete(dedupKey)
+    promise.then(clearInFlight, clearInFlight)
     return promise
   }
 
   return executeRequest()
 
   async function executeRequest() {
-    const url = `${API_BASE}${path}`
-    // 普通请求 20 秒超时（防 Render 冷启动挂起）；解析类长任务可通过 options.timeout 放宽
-    const timeoutMs = options.timeout || 20000
-
-    for (let attempt = 0; attempt < retries; attempt++) {
-      try {
-        const controller = new AbortController()
-        const timeoutId = setTimeout(
-          () => controller.abort(new DOMException(`请求超时（${Math.round(timeoutMs / 1000)}秒）`, 'TimeoutError')),
-          timeoutMs
-        )
-
-        const { timeout: _timeout, ...fetchOptions } = options
-        const fetchHeaders = options.headers ? { ...options.headers } : {}
-        // body 为普通字符串时默认按 JSON 发送（兼容调用方未显式设置 Content-Type，
-        // 例如 workbench/HandoutPreview.vue 的 POST）
-        if (
-          fetchOptions.body != null &&
-          !(fetchOptions.body instanceof FormData) &&
-          !fetchHeaders['Content-Type']
-        ) {
-          fetchHeaders['Content-Type'] = 'application/json'
-        }
-        const response = await fetch(url, {
-          ...fetchOptions,
-          ...(Object.keys(fetchHeaders).length > 0 ? { headers: fetchHeaders } : {}),
-          signal: controller.signal
-        })
-        clearTimeout(timeoutId)
-
-        if (!response.ok) {
-          const error = await response.json().catch(() => ({ error: response.statusText }))
-          throw new Error(error.error || `请求失败: ${response.status}${response.statusText ? ' ' + response.statusText : ''}`)
-        }
-
-        const data = await response.json()
-        return data
-      } catch (rawError) {
-        // 部分浏览器/WebView 不支持 abort(reason)，中断时只会抛出默认的
-        // 'signal is aborted without reason'，这里统一翻译成可读的超时提示
-        const isAbort = rawError?.name === 'AbortError' || rawError?.name === 'TimeoutError'
-          || /abort/i.test(String(rawError?.message || ''))
-        const isNetworkError = rawError?.name === 'TypeError' && /fetch/i.test(String(rawError?.message || ''))
-        const error = isAbort
-          ? new Error(`请求超时（${Math.round(timeoutMs / 1000)}秒），请检查网络后重试`)
-          : isNetworkError
-            ? new Error('无法连接到服务器，请确认后端服务已启动')
-            : rawError
-        if (isAbort) error.name = 'TimeoutError'
-        // 最后一次尝试失败时抛出错误
-        if (attempt === retries - 1) {
-          throw error
-        }
-        // 等待后重试（指数退避：1s, 2s）
-        await new Promise(resolve => setTimeout(resolve, Math.pow(2, attempt) * 1000))
-        console.warn(`请求失败，重试 ${attempt + 1}/${retries - 1}:`, path, error.message)
+    // 超时/重试/失败分类统一由 httpCore 处理（旧实现 20s 超时 + 只重试 1 次，
+    // 两次尝试都落在 Render 冷启动窗口里，表现为"网络错误且重试无效"）。
+    // retries 保持"总尝试次数"语义：调用方传 1 表示写操作不重试。
+    return requestJson(path, {
+      method: options.method,
+      headers: options.headers,
+      body: options.body,
+      timeout: options.timeout,
+      attempts: retries,
+      signal: options.signal,
+      onRetry: (info) => {
+        console.warn(`请求失败，重试 ${info.attempt}/${info.attempts}:`, path, info.error?.message)
       }
-    }
+    })
   }
 }
+
+// 网络恢复（online 事件 / 请求成功）时清空 GET 去重表，
+// 避免失败瞬间的并发去重项把后续重试请求挡回旧 Promise。
+onNetworkRecover(() => inFlightRequests.clear())
+
+export { getNetworkHealth }
 
 export const getStudents = async (useCache = true) => {
   if (useCache) {

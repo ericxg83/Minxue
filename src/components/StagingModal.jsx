@@ -1,5 +1,6 @@
 import { Camera, X, Upload, Loader2, Image as ImageIcon } from 'lucide-react'
 import { useState } from 'react'
+import { isNativeCameraAvailable } from '../services/nativeCamera'
 import { motion } from 'motion/react'
 import EmptyState from './EmptyState'
 
@@ -43,11 +44,14 @@ export default function StagingModal({
   onClose,
   onCamera,
   onAlbum,
+  cameraBusy = false,
   onFilesSelected,
   onRemoveFile,
   onSubmit
 }) {
   const title = stagingType === 'workbook' ? '练习册作业' : stagingType === 'homework' ? '日常作业' : stagingType === 'wrong_retry' ? '错题重练' : '普通试卷'
+  // 原生平台走系统相机/相册，可以连拍；Web 端只有一次性的文件选择器。
+  const native = isNativeCameraAvailable()
 
   return (
     <div className="absolute inset-0 z-[25000] flex items-end justify-center">
@@ -89,15 +93,17 @@ export default function StagingModal({
           <div className="flex gap-2 mb-4">
             <button
               onClick={onCamera}
-              className="flex-1 py-2.5 rounded-xl text-[13px] font-semibold flex items-center justify-center gap-2 active:scale-[0.97] transition-all"
+              disabled={cameraBusy}
+              className="flex-1 py-2.5 rounded-xl text-[13px] font-semibold flex items-center justify-center gap-2 active:scale-[0.97] transition-all disabled:opacity-60"
               style={{ background: 'var(--primary)', color: '#fff' }}
             >
-              <Camera size={16} />
+              {cameraBusy ? <Loader2 size={16} className="animate-spin" /> : <Camera size={16} />}
               拍照
             </button>
             <button
               onClick={onAlbum}
-              className="flex-1 py-2.5 rounded-xl text-[13px] font-semibold flex items-center justify-center gap-2 active:scale-[0.97] transition-all"
+              disabled={cameraBusy}
+              className="flex-1 py-2.5 rounded-xl text-[13px] font-semibold flex items-center justify-center gap-2 active:scale-[0.97] transition-all disabled:opacity-60"
               style={{ background: 'var(--bg-mist)', color: 'var(--text)' }}
             >
               <ImageIcon size={16} />
@@ -119,7 +125,7 @@ export default function StagingModal({
               icon={ImageIcon}
               iconSize={32}
               title="点击上方按钮拍摄或选择照片"
-              description="支持连拍和相册多选"
+              description={native ? '拍照可连续拍摄，相册支持一次选多张' : '支持相册多选'}
               className="py-8"
               iconStyle={{ marginBottom: '8px', color: 'var(--text-secondary)' }}
               titleStyle={{ fontSize: 'var(--fs-13)', color: 'var(--text-secondary)' }}

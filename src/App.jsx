@@ -12,7 +12,8 @@ import {
 import { motion, AnimatePresence } from 'motion/react'
 import { useLocation, useNavigate } from 'react-router-dom'
 import { useStudentStore, useTaskStore, useWrongQuestionStore, useExamStore } from './store'
-import { getStudents, getTasksByStudent, getQuestionsByTask, getExamsByStudent, getGeneratedExamsByStudent, getGeneratedExamById, updateTaskStatus, updateQuestion, updateQuestionTags, invalidateCache, createStudent, getQuestionsByIds, deleteTask, deleteGeneratedExam, deleteWrongQuestion, recalculateTaskStats, clearStudentCaches, peekCache, writeCache, fetchWrongQuestionsPage, getTasksSummary, markNotificationsRead } from './services/apiService'
+import { apiRequest, getStudents, getTasksByStudent, getQuestionsByTask, getExamsByStudent, getGeneratedExamsByStudent, getGeneratedExamById, updateTaskStatus, updateQuestion, updateQuestionTags, invalidateCache, createStudent, getQuestionsByIds, deleteTask, deleteGeneratedExam, deleteWrongQuestion, recalculateTaskStats, clearStudentCaches, peekCache, writeCache, fetchWrongQuestionsPage, getTasksSummary, markNotificationsRead } from './services/apiService'
+import { warmUpConnection, getNetworkHealth } from './services/httpCore'
 import { initNotifications, startNotificationPolling, onNotificationTap } from './services/notificationService'
 import { taskService } from './services/taskService'
 import { dedupeWrongQuestions } from './domain/questionIdentity'
@@ -437,6 +438,7 @@ export default function App() {
     cameraInputRef, albumInputRef,
     openStaging, clearStaging,
     handleStagingSelectFiles, removeStagingFile,
+    onStagingCamera, onStagingAlbum, cameraBusy,
     handleSubmitStaging,
     homeworkChoiceFiles, homeworkChoiceRef,
     handleUploadAsWorkbook, handleUploadAsRegular,
@@ -854,18 +856,26 @@ export default function App() {
     try {
       Toast.show({ message: '正在重新处理...', type: 'info', duration: 2000 })
 
+      // 连接失效时先做一次预热探测：WebView 连接池里残留死连接的话，
+      // 直接重试只会在死连接上再撞一次（表现为"重试永远失败，重开 App 才好"）。
+      if (getNetworkHealth().stale || getNetworkHealth().offline) {
+        const ok = await warmUpConnection()
+        if (!ok) {
+          Toast.show({ message: '网络连接已失效，请检查网络后重试', type: 'error', duration: 3000 })
+          return
+        }
+      }
+
       // 服务端从库里读取全部路由字段（taskType / worksheetId / resourceId / images），
       // 这里只传 taskId，避免前端缺字段导致 workbook 任务被降级为通用 AI 管线。
-      const response = await fetch('/api/tasks/retry', {
+      //
+      // 必须走 apiRequest：这里原先是裸 fetch('/api/tasks/retry')，相对路径在
+      // Web 端会被 vite dev proxy 兜住，打包进 App 后 API_BASE 指向线上域名，
+      // 相对路径却打到 https://localhost/api/... → 必然失败。这就是"重试不行"。
+      await apiRequest('/tasks/retry', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ taskId })
       })
-
-      if (!response.ok) {
-        const data = await response.json().catch(() => ({}))
-        throw new Error(data.error || '重新处理失败')
-      }
 
       Toast.show({ message: '已重新加入处理队列', type: 'success', duration: 2000 })
 
@@ -873,7 +883,7 @@ export default function App() {
       setTimeout(() => loadTasks(), 1000)
     } catch (error) {
       console.error('重新处理失败:', error)
-      Toast.show({ message: '重新处理失败，请稍后重试', type: 'error', duration: 2000 })
+      Toast.show({ message: error?.message || '重新处理失败，请稍后重试', type: 'error', duration: 3000 })
     }
   }
 
@@ -1105,10 +1115,11 @@ export default function App() {
             stagingUploading={stagingUploading}
             cameraInputRef={cameraInputRef}
             albumInputRef={albumInputRef}
-            onBackdrop={() => { if (!stagingUploading) clearStaging() }}
-            onClose={() => { if (!stagingUploading) clearStaging() }}
-            onCamera={() => cameraInputRef.current?.click()}
-            onAlbum={() => albumInputRef.current?.click()}
+            onBackdrop={() => { if (!stagingUploading && !cameraBusy) clearStaging() }}
+            onClose={() => { if (!stagingUploading && !cameraBusy) clearStaging() }}
+            onCamera={onStagingCamera}
+            onAlbum={onStagingAlbum}
+            cameraBusy={cameraBusy}
             onFilesSelected={handleStagingSelectFiles}
             onRemoveFile={removeStagingFile}
             onSubmit={handleSubmitStaging}

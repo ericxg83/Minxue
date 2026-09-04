@@ -1,3 +1,5 @@
+import { requestJson, TIMEOUT, warmUpConnection } from './httpCore'
+
 const API_BASE = import.meta.env.VITE_API_URL || '/api'
 
 // 计算单个文件的 SHA-256，返回 64 字符 hex
@@ -23,46 +25,46 @@ const computeContentHashes = async (files) => {
   return results
 }
 
+// 统一走 httpCore：上传请求此前既没有超时也没有重试，一次 Render 冷启动或
+// 4G/WiFi 切换就会让 fetch 永久挂起或直抛 Failed to fetch，用户只看到"网络错误"。
 const apiRequest = async (path, options = {}) => {
-  const url = `${API_BASE}${path}`
   console.debug('📡📡📡 [API] === REQUEST START ===')
-  console.debug('📡 [API] URL:', url)
+  console.debug('📡 [API] URL:', `${API_BASE}${path}`)
   console.debug('📡 [API] Method:', options.method || 'GET')
   console.debug('📡 [API] Options:', options)
   try {
-    const response = await fetch(url, {
-      ...options,
-      headers: {
-        ...options.headers
-      }
+    const data = await requestJson(path, {
+      method: options.method,
+      headers: options.headers,
+      body: options.body,
+      // 只有真正带文件的上传才放宽到 180s；普通查询沿用 30s，
+      // 否则轮询卡在死连接上要等 6 分钟才报错。
+      timeout: options.timeout || (options.body instanceof FormData ? TIMEOUT.UPLOAD : TIMEOUT.DEFAULT),
+      attempts: options.attempts
     })
-    console.debug('📡 [API] Response status:', response.status)
-    console.debug('📡 [API] Response OK:', response.ok)
-    
-    if (!response.ok) {
-      const errorBody = await response.json().catch(() => ({ error: response.statusText }))
-      console.error('💥💥💥 [API] ERROR RESPONSE:', errorBody)
-      // 2026-09-02：409 EXISTING_FAILED_TASK 是"已上传过相同内容、上次批改失败"的
-      // 去重信号，需要让上层弹"已上传过"提示而不是"请求失败"。
-      // 抛带 code 的 Error 让 uploadViaBackend 识别。
-      if (response.status === 409 && errorBody.error === 'EXISTING_FAILED_TASK') {
-        const conflictErr = new Error(errorBody.message || '已上传过相同内容试卷，上次批改失败')
-        conflictErr.code = 'EXISTING_FAILED_TASK'
-        conflictErr.existingTask = errorBody.existingTask || null
-        throw conflictErr
-      }
-      throw new Error(errorBody.error || `请求失败: ${response.status}`)
-    }
-    const data = await response.json()
     console.debug('📡 [API] Response data (first 300 chars):', JSON.stringify(data).substring(0, 300))
     console.debug('📡📡📡 [API] === REQUEST SUCCESS ===')
     return data
   } catch (error) {
-    console.error('💥💥💥 [API] NETWORK ERROR:', error.message)
-    console.error('💥 [API] Error stack:', error.stack)
+    console.error('💥💥💥 [API] REQUEST FAILED:', error.code || '', error.message)
+
+    // 2026-09-02：409 EXISTING_FAILED_TASK 是"已上传过相同内容、上次批改失败"的
+    // 去重信号，需要让上层弹"已上传过"提示而不是"请求失败"。
+    // 抛带 code 的 Error 让 uploadViaBackend 识别。
+    const payload = error?.payload
+    if (error?.status === 409 && payload?.error === 'EXISTING_FAILED_TASK') {
+      const conflictErr = new Error(payload.message || '已上传过相同内容试卷，上次批改失败')
+      conflictErr.code = 'EXISTING_FAILED_TASK'
+      conflictErr.existingTask = payload.existingTask || null
+      throw conflictErr
+    }
     throw error
   }
 }
+
+// 上传前的连接预热：Render 实例休眠时首请求要 30~60s，直接拿几 MB 的图片去撞
+// 冷启动窗口必然失败。先打一次 /health 把实例唤醒，再走真正的上传。
+const warmUpBeforeUpload = () => warmUpConnection().catch(() => false)
 
 export const taskService = {
   uploadFiles: async (studentId, files, options = {}) => {
@@ -109,6 +111,9 @@ export const taskService = {
 
     console.debug('📤 [taskService.uploadFiles] FormData constructed, calling apiRequest...')
 
+    // 冷启动预热：先用 /health 唤醒后端实例，避免大图请求撞在冷启动窗口里
+    await warmUpBeforeUpload()
+
     return apiRequest('/tasks/upload', {
       method: 'POST',
       body: formData,
@@ -130,6 +135,8 @@ export const taskService = {
     const contentHashes = await computeContentHashes(files)
     const headers = {}
     if (contentHashes) headers['X-Content-Hashes'] = contentHashes.join(',')
+
+    await warmUpBeforeUpload()
 
     return apiRequest('/tasks/upload', {
       method: 'POST',
@@ -155,6 +162,8 @@ export const taskService = {
     const contentHashes = await computeContentHashes(files)
     const headers = {}
     if (contentHashes) headers['X-Content-Hashes'] = contentHashes.join(',')
+
+    await warmUpBeforeUpload()
 
     return apiRequest('/tasks/upload', {
       method: 'POST',

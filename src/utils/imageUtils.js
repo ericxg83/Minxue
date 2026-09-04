@@ -92,10 +92,15 @@ function dataURLToBlob(dataUrl) {
 
 // 把后端/网络层的失败原因归成人能看懂的一句话。
 // 笼统的"上传失败"让用户以为照片有问题，反复重拍同一张只是再次超时。
-export const describeUploadFailure = (errorMsg) => {
-  const e = String(errorMsg || '')
-  if (/timeout|超时|ETIMEDOUT/i.test(e)) return '网络不稳定，图片上传超时，请稍后重试'
-  if (/Failed to fetch|NetworkError|network|ERR_/.test(e)) return '网络连接中断，请检查网络后重试'
+// 入参可以是 Error（优先用 httpCore 打的 code）或字符串（兼容旧调用方）。
+export const describeUploadFailure = (error) => {
+  const code = typeof error === 'object' && error ? error.code : null
+  const e = String((typeof error === 'object' && error ? error.message : error) || '')
+
+  // httpCore 已经把网络类失败归类好了，直接用它的判定，别再靠正则猜文案。
+  if (code === 'TIMEOUT' || /timeout|超时|ETIMEDOUT/i.test(e)) return '网络不稳定，图片上传超时，请稍后重试'
+  if (code === 'OFFLINE') return '当前设备处于离线状态，请连接网络后重试'
+  if (code === 'NETWORK' || /Failed to fetch|NetworkError|network|ERR_/i.test(e)) return '网络连接中断，请检查网络后重试'
   if (/不支持|格式|format/i.test(e)) return '图片格式不支持，请使用 JPG/PNG/WEBP'
   if (/过大|20MB|LIMIT_FILE_SIZE/i.test(e)) return '图片过大（超过 20MB），请压缩后重试'
   if (/认证|AccessDenied|403|401/.test(e)) return '存储服务鉴权失败，请联系管理员'

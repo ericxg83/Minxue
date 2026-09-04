@@ -2,7 +2,7 @@ import { useState, useRef, useEffect } from 'react'
 import { motion } from 'motion/react'
 import { ArrowLeft, Camera, Image as ImageIcon, Loader2, Upload, ClipboardList, CheckCircle2, Clock } from 'lucide-react'
 import { Toast } from 'antd-mobile'
-import { getRetryTask } from '../../services/apiService'
+import { apiRequest, getRetryTask } from '../../services/apiService'
 
 // HEIC 预览格：浏览器解不开 HEIC 时 onError 切占位（不白屏）。
 // HEIC 上传由后端 fixFileIfNeeded needsHeicTranscode 用 heic-decode 转 jpg。
@@ -34,6 +34,7 @@ function HeicPreviewCell({ p, onRemove }) {
   )
 }
 import { taskService } from '../../services/taskService'
+import { takePhotoFiles, pickPhotoFiles, isNativeCameraAvailable, describeCameraError } from '../../services/nativeCamera'
 import dayjs from 'dayjs'
 
 // 状态映射（spec：待批改 / 批改中 / 已完成）
@@ -62,6 +63,7 @@ export default function RetryTask({ taskId, onBack }) {
   const [error, setError] = useState(null)
   const [uploading, setUploading] = useState(false)
   const [pendingFiles, setPendingFiles] = useState([]) // 已选未上传的本地文件预览
+  const [pickerBusy, setPickerBusy] = useState(false) // 原生相机/相册打开中
   const cameraInputRef = useRef(null)
   const albumInputRef = useRef(null)
   const pendingRef = useRef(null)
@@ -115,6 +117,40 @@ export default function RetryTask({ taskId, onBack }) {
     e.target.value = ''
   }
 
+  // 拍照 / 相册：原生平台走系统相机与原生相册（WebView 的 <input capture> 会被
+  // BridgeActivity 的文件选择器吞掉，点"拍照"只会打开相册），Web 端回退到 input。
+  const runNativePicker = async (picker) => {
+    if (pickerBusy) return
+    setPickerBusy(true)
+    try {
+      const files = await picker()
+      if (files && files.length > 0) {
+        setPendingFiles((prev) => [...prev, ...toPreviews(files)])
+      }
+    } catch (e) {
+      const msg = describeCameraError(e)
+      if (msg) Toast.show({ icon: 'fail', content: msg })
+    } finally {
+      setPickerBusy(false)
+    }
+  }
+
+  const handleCameraClick = () => {
+    if (!isNativeCameraAvailable()) {
+      cameraInputRef.current?.click()
+      return
+    }
+    runNativePicker(takePhotoFiles)
+  }
+
+  const handleAlbumClick = () => {
+    if (!isNativeCameraAvailable()) {
+      albumInputRef.current?.click()
+      return
+    }
+    runNativePicker(() => pickPhotoFiles(20))
+  }
+
   const removePending = (idx) => {
     setPendingFiles((prev) => {
       const next = prev.filter((_, i) => i !== idx)
@@ -136,11 +172,11 @@ export default function RetryTask({ taskId, onBack }) {
       const created = (res.tasks || []).filter((t) => !t.error)
       if (created.length === 0) throw new Error(res?.report?.summary || '上传失败')
 
-      // 关联批改任务并置 grading
+      // 关联批改任务并置 grading。
+      // 走 apiRequest 拿超时与重试：这步失败会静默让任务永远停在"待批改"。
       const firstTaskId = created[0].id
-      await fetch(`${import.meta.env.VITE_API_URL || '/api'}/retry-tasks/${taskId}/link`, {
+      await apiRequest(`/retry-tasks/${taskId}/link`, {
         method: 'PATCH',
-        headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ retryTaskId: firstTaskId })
       })
 
@@ -237,15 +273,17 @@ export default function RetryTask({ taskId, onBack }) {
 
               <div className="flex gap-2">
                 <button
-                  onClick={() => cameraInputRef.current?.click()}
-                  className="flex-1 py-2.5 rounded-lg text-[13px] font-medium flex items-center justify-center gap-1.5"
+                  onClick={handleCameraClick}
+                  disabled={pickerBusy}
+                  className="flex-1 py-2.5 rounded-lg text-[13px] font-medium flex items-center justify-center gap-1.5 disabled:opacity-60"
                   style={{ background: 'var(--primary-mist)', color: 'var(--primary-hover)' }}
                 >
-                  <Camera size={16} /> 拍照
+                  {pickerBusy ? <Loader2 size={16} className="animate-spin" /> : <Camera size={16} />} 拍照
                 </button>
                 <button
-                  onClick={() => albumInputRef.current?.click()}
-                  className="flex-1 py-2.5 rounded-lg text-[13px] font-medium flex items-center justify-center gap-1.5"
+                  onClick={handleAlbumClick}
+                  disabled={pickerBusy}
+                  className="flex-1 py-2.5 rounded-lg text-[13px] font-medium flex items-center justify-center gap-1.5 disabled:opacity-60"
                   style={{ background: 'var(--bg-secondary)', color: 'var(--text-secondary)' }}
                 >
                   <ImageIcon size={16} /> 相册
