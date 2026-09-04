@@ -172,14 +172,26 @@ export function extractChoiceLetters(value) {
   if (relaxed) return relaxed
 
   const upper = cleaned.toUpperCase()
-  const head = upper.replace(/^(?:ANSWER|正确答案|答案|答|选择|选项|选|为|是)\s*[:：]?\s*/, '')
-  const headMatch = head.match(/^[(\[【]?\s*([A-H])\s*[)\]】]?/)
-  if (headMatch && !/^[A-Z0-9]/.test(head.slice(headMatch[0].length))) return headMatch[1]
 
   // "……，选(B)" / "答案为 D" / "应选 C 项"：标记词后面紧跟的字母
   const marked = upper.match(
     /(?:正确答案|答案|应选|故选|选项|选)\s*(?:为|是)?\s*[:：]?\s*[(\[【]?\s*([A-H])\s*[)\]】]?(?![A-Z0-9])/)
   if (marked) return marked[1]
+
+  // 选择题 AI 解析答案的综述形态："B正确；C错误；D错误" / "B 正确，D 正确，C 错误"。
+  // 必须在 headMatch 之前：综述串以某个答案字母开头时（如 "B正确，D正确"），
+  // headMatch 会"巧合命中"首字母就 return，漏掉 D 等其他正确答案字母。
+  // "字母 + 错误"不算答案；字母要求不与其它字母/数字相连，避免误伤"运算正确"/"C1正确"。
+  const correctLetters = [
+    ...upper.matchAll(/(?<![A-Z0-9])([A-H])\s*(?:正确|是对的?|√|✓)(?![A-Z0-9])/gi)
+  ].map(m => m[1])
+  if (correctLetters.length > 0) {
+    return [...new Set(correctLetters)].sort().join('')
+  }
+
+  const head = upper.replace(/^(?:ANSWER|正确答案|答案|答|选择|选项|选|为|是)\s*[:：]?\s*/, '')
+  const headMatch = head.match(/^[(\[【]?\s*([A-H])\s*[)\]】]?/)
+  if (headMatch && !/^[A-Z0-9]/.test(head.slice(headMatch[0].length))) return headMatch[1]
 
   // 全串只有一个被括号括起来的字母："(A) 12米"
   const bracketed = [...upper.matchAll(/[(\[【]\s*([A-H])\s*[)\]】]/g)].map(m => m[1])
