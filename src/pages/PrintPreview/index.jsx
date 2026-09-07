@@ -162,8 +162,14 @@ export default function PrintPreview({ onClose, questions: propQuestions, existi
 
   // 二维码内容：错题重练任务入口 URL（/retry-task/{id}），任意相机可扫
   // 二维码只承载唯一 task 定位，不再绑定具体批改页面
+  // Capacitor App 内 window.location.origin 是 https://localhost，外部相机无法解析；
+  // 仅在真实公网域名部署时用 origin，本地/App 环境一律回退到配置的公网基址。
   const getRetryTaskUrl = (id) => {
-    const base = import.meta.env.VITE_APP_BASE_URL || window.location.origin
+    const origin = window.location.origin
+    const isLocalOrigin = !origin || /^https?:\/\/(localhost|127\.0\.0\.1|\[::1\])(:\d+)?$/.test(origin)
+    const base = isLocalOrigin
+      ? (import.meta.env.VITE_APP_BASE_URL || 'https://minxue.pages.dev')
+      : origin
     return `${base}/retry-task/${id.toUpperCase()}`
   }
 
