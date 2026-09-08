@@ -1493,7 +1493,7 @@ async function syncDraftAnswerBank(question) {
      FROM ${TABLES.RESOURCE_ANSWERS} ra
      JOIN ${TABLES.TASKS} t ON t.resource_id = ra.resource_id
      JOIN ${TABLES.QUESTIONS} q ON q.task_id = t.id AND q.question_number = ra.question_no
-                              AND (ra.sub_no IS NULL OR ra.sub_no = '' OR ra.sub_no = q.sub_no)
+                              AND (ra.sub_no IS NULL OR ra.sub_no = '') -- questions 表无 sub_no 列，只按整题级匹配草稿答案库
      WHERE t.id = $1
        AND ra.question_no = $2
        AND ra.answer_status IN ('ai_draft', 'excluded')
