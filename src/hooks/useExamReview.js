@@ -135,6 +135,7 @@ export function useExamReview({ task, onSave }) {
     setSaving(true)
     let successCount = 0
     const skippedWrongBook = []
+    let lastError = null
     for (const qId of dirtyIds) {
       try {
         const edit = edits[qId]
@@ -173,6 +174,7 @@ export function useExamReview({ task, onSave }) {
         }
       } catch (e) {
         console.error('保存失败:', qId, e)
+        lastError = e
       }
     }
     setSaving(false)
@@ -201,7 +203,10 @@ export function useExamReview({ task, onSave }) {
       if (onSave) onSave()
       return true
     } else {
-      Toast.show({ message: '保存失败', type: 'error' })
+      // 把服务端返回的具体原因（HTTP 状态、网络错误、离线）冒到 toast，
+      // 避免只看到"保存失败"却不知是接口挂了、CORS 拦了还是断网。
+      const reason = lastError?.message || '未知错误'
+      Toast.show({ message: `保存失败：${reason}`, type: 'error', duration: 4000 })
       return false
     }
   }, [edits, wrongIdMap, questions, task, Toast, onSave])

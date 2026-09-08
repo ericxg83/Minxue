@@ -974,7 +974,9 @@ const saveQuickStudentAnswer = async () => {
     ElMessage.success('学生答案已保存')
   } catch (err) {
     console.error('保存学生答案失败:', err)
-    ElMessage.error('保存失败，请重试')
+    // 把后端返回的具体原因（如"题目不存在"/"网络中断"/HTTP 状态码）冒出来，
+    // 避免只看到"保存失败，请重试"却无从判断是接口挂了、被 CORS 拦了还是本地状态问题。
+    ElMessage.error(`保存失败：${err?.message || err || '未知错误'}`)
   } finally {
     quickStudentAnswerSaving.value = false
   }
@@ -997,7 +999,7 @@ const saveQuickAnswer = async () => {
     ElMessage.success('标准答案已保存')
   } catch (err) {
     console.error('保存标准答案失败:', err)
-    ElMessage.error('保存失败，请重试')
+    ElMessage.error(`保存失败：${err?.message || err || '未知错误'}`)
   } finally {
     quickAnswerSaving.value = false
   }
@@ -1091,7 +1093,7 @@ const handleSave = async () => {
   } catch (err) {
     loading.close()
     console.error('保存失败:', err)
-    ElMessage.error('保存失败，请重试')
+    ElMessage.error(`保存失败：${err?.message || err || '未知错误'}`)
   }
 }
 
