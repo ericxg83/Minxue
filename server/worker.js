@@ -1787,7 +1787,7 @@ const processSlimGrading = async (job) => {
     if (questionIds.length === 0) return fail('组卷无题目')
 
     const { rows: bankQuestions } = await query(
-      `SELECT id, content, answer, analysis, question_type, options, sort_order
+      `SELECT id, content, answer, analysis, question_type, options
        FROM ${TABLES.QUESTIONS} WHERE id = ANY($1)`,
       [questionIds]
     )
