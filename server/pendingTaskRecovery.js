@@ -292,10 +292,16 @@ class PendingTaskRecovery {
   /**
    * 扫描 stuck processing 任务：started_at 距今超过 PROCESSING_TIMEOUT_MS 仍未结束
    * （worker 崩溃 / 锁超时未回填），重置为 pending 重新入队。
+   *
+   * 这是 BullMQ 自身 stalled 回收之外的第二道保险：只处理【已不在队列里】的 processing 孤儿
+   * （in-flight 命中队列的会被跳过，不会和在跑的 job 抢），started_at 是首次进 PROCESSING 时
+   * 写一次、之后不刷新，所以不能用它判活。阈值取 6 分钟：略大于 lockDuration(5min)，
+   * 让 BullMQ 自己先回收；单页视觉链最坏情况(3min 超时 + 退避)也远小于 6min 且有 in-flight 闸门兜底，
+   * 不会误伤正在跑的活 job。历史默认 30min 与 lockDuration 叠加，导致发版孤儿要卡满 ~30min。
    */
   async scanProcessingStuck() {
     try {
-      const PROCESSING_TIMEOUT_MS = parseInt(process.env.TASK_PROCESSING_TIMEOUT_MS) || 30 * 60 * 1000 // 30 min
+      const PROCESSING_TIMEOUT_MS = parseInt(process.env.TASK_PROCESSING_TIMEOUT_MS) || 6 * 60 * 1000 // 6 min
       const MAX_AUTO_RETRIES = 3
       console.log('[PendingTaskRecovery]  开始扫描 stuck processing 任务...')
 

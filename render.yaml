@@ -71,8 +71,8 @@ services:
         sync: false
       - key: MAX_RETRIES
         value: 3
-      - key: TASK_TIMEOUT_MS
-        value: 1800000
+      - key: TASK_LOCK_DURATION_MS
+        value: 300000
       - key: CONCURRENCY
         value: 2
       - key: ALLOWED_ORIGIN

@@ -133,6 +133,15 @@ const initQueue = async () => {
       const stalledInterval = parseInt(process.env.REDIS_STALLED_INTERVAL) || 300000 // 5 min
 
       console.log(`🔄 [Queue] 创建 Worker (concurrency=${concurrency}, drainDelay=${drainDelay}s)...`)
+      // lockDuration = active job 锁的 TTL。worker 存活时每 lockDuration/2 自动续租，
+      // 所以调小它【不会】截断正常的多页批改（活着的 job 一直续租），
+      // 它唯一决定的是「worker 被发版重启 / OOM 杀死后，这个 in-flight job 要多久
+      // 才被 BullMQ 判为 stalled 并重新投递」。
+      // 历史默认 30 分钟：发版正好赶上用户「上传后几分钟」时，在途任务变成孤儿，
+      // 前端表现就是「5% 卡住二十几分钟」——因为没有任何进程在算它、也没到锁回收点。
+      // 降到 5 分钟，孤儿最迟 ~5 分钟(下一个 stalled 扫描点)自动重新开跑。
+      // 用独立变量名 TASK_LOCK_DURATION_MS：不再复用旧的 TASK_TIMEOUT_MS(曾在 Render 钉成 1800000)，
+      // 避免那 30 分钟锁被旧 env 顶回来。
       taskWorker = new Worker('task-processing', async (job) => {
         console.log(`🔥 [Worker] 收到任务: jobId=${job.id}, taskId=${job.data.taskId}`)
         return processTask(job)
@@ -141,7 +150,7 @@ const initQueue = async () => {
         concurrency,
         drainDelay,
         stalledInterval,
-        lockDuration: parseInt(process.env.TASK_TIMEOUT_MS) || 1800000
+        lockDuration: parseInt(process.env.TASK_LOCK_DURATION_MS) || 300000
       })
 
       // ── TikZ 生成队列 ──
