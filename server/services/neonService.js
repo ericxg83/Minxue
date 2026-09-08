@@ -999,7 +999,7 @@ const upsertUnitsWithClient = async (client, resourceId, units) => {
   ).join(',')
   const params = [resourceId]
   for (const u of uniq) {
-    params.push(u.unit_key, u.unit_title || null, ++seq, u.lesson_code || null, u.ordinal ?? null)
+    params.push(sanitizeText(u.unit_key), sanitizeText(u.unit_title) || null, ++seq, sanitizeText(u.lesson_code) || null, u.ordinal ?? null)
   }
   const { rows } = await client.query(
     `INSERT INTO resource_units (resource_id, unit_key, unit_title, unit_seq, lesson_code, ordinal)
@@ -1046,7 +1046,7 @@ export const upsertResourceUnitPageRanges = async (resourceId, ranges) => {
   const values = ranges.map((_, i) => `($${i * 3 + 2}::text, $${i * 3 + 3}::int, $${i * 3 + 4}::int)`).join(',')
   const params = [resourceId]
   for (const r of ranges) {
-    params.push(r.unit_key, r.answer_page_start, r.answer_page_end)
+    params.push(sanitizeText(r.unit_key), r.answer_page_start, r.answer_page_end)
   }
   const { rows } = await query(
     `UPDATE resource_units SET
@@ -1089,7 +1089,7 @@ export const batchInsertAnswers = async (worksheetId, answers) => {
   ).join(',')
   const params = [worksheetId]
   for (const a of answers) {
-    params.push(a.question_no, a.answer, a.answer_type || 'choice', a.section || null)
+    params.push(a.question_no, sanitizeText(a.answer), sanitizeText(a.answer_type) || 'choice', sanitizeText(a.section) || null)
   }
   const { rows } = await query(
     `INSERT INTO ${TABLES.RESOURCE_ANSWERS} (resource_id, question_no, answer, answer_type, section, answer_status)
@@ -1100,6 +1100,36 @@ export const batchInsertAnswers = async (worksheetId, answers) => {
     params
   )
   return rows
+}
+
+/**
+ * 按真实唯一键 (unit_id, section, question_no, sub_no) 收敛（unit_id 解析后才知道）。
+ * dedupeAnswers 只按 unit_key 去重；若两个不同 unit_key 被 resolveUnitIds 归一为同一
+ * unit_id（OCR 把"堂堂练①"与"堂堂练⑴"识别成不同串但指向同一单元），仍会撞
+ * resource_answers_unit_question_key 唯一约束。且 ON CONFLICT DO UPDATE 在「同一条
+ * INSERT 内两行同键」时 PG 会报 "cannot affect row a second time"（不允许一次 INSERT
+ * 更新自己刚插入的行）。故写库前必须按真实键再收敛一次，保证 VALUES 内无重复键。
+ * 约束为 NULLS NOT DISTINCT：NULL 与 NULL 视为相等、与 '' 不等，故 key 用哨兵区分 null 与 ''。
+ */
+const dedupeByDbKey = (answers, unitIdOf) => {
+  const byKey = new Map()
+  for (const a of answers) {
+    const key = `${unitIdOf(a) ?? '∅'}|${a.section ?? '∅'}|${a.question_no}|${a.sub_no || ''}`
+    const prev = byKey.get(key)
+    if (!prev || (a.confidence ?? 0) >= (prev.confidence ?? 0)) byKey.set(key, a)
+  }
+  return [...byKey.values()]
+}
+
+/**
+ * 落库前清洗文本：Postgres text 列不允许 NUL(0x00) 字节，OCR/预处理可能把不可打印字符
+ * 带进答案或单元名，直接 INSERT 会报 "invalid byte sequence for encoding UTF8: 0x00" 使整批
+ * 解析崩溃。此处去掉 NUL 及 C0 控制字符（保留 \t \n \r，答案里可能有换行），保证落库安全。
+ * 所有写入 resource_answers / resource_units 文本列的入口都必须过这道清洗。
+ */
+const sanitizeText = (v) => {
+  if (typeof v !== 'string') return v
+  return v.replace(/[\u0000-\u0008\u000B\u000C\u000E-\u001F]/g, '')
 }
 
 /**
@@ -1114,15 +1144,16 @@ export const replaceWorksheetAnswers = async (worksheetId, answers) => {
     await client.query(`DELETE FROM ${TABLES.RESOURCE_ANSWERS} WHERE resource_id = $1`, [worksheetId])
     if (!answers || answers.length === 0) return []
     const unitMap = await resolveUnitIds(client, worksheetId, answers)
-    const values = answers.map((_, i) =>
+    const unitIdOf = a => (a.unit_key ? (unitMap.get(a.unit_key) || null) : null)
+    const deduped = dedupeByDbKey(answers, unitIdOf)
+    const values = deduped.map((_, i) =>
       `($1, $${i * 7 + 2}, $${i * 7 + 3}, $${i * 7 + 4}, $${i * 7 + 5}, $${i * 7 + 6}, $${i * 7 + 7}, $${i * 7 + 8}, 'official_verified')`
     ).join(',')
     const params = [worksheetId]
-    for (const a of answers) {
+    for (const a of deduped) {
       params.push(
-        a.question_no, a.answer, a.answer_type || 'choice', a.section || null, a.content || null,
-        a.unit_key ? (unitMap.get(a.unit_key) || null) : null,
-        a.sub_no || ''
+        a.question_no, sanitizeText(a.answer), sanitizeText(a.answer_type) || 'choice', sanitizeText(a.section) || null, sanitizeText(a.content) || null,
+        unitIdOf(a), sanitizeText(a.sub_no) || ''
       )
     }
     const { rows } = await client.query(
@@ -1157,34 +1188,43 @@ export const upsertWorksheetAnswers = async (worksheetId, answers) => {
   return transaction(async (client) => {
     const unitMap = await resolveUnitIds(client, worksheetId, answers)
     const unitIdOf = a => (a.unit_key ? (unitMap.get(a.unit_key) || null) : null)
+    // 按真实唯一键收敛：保证 VALUES 内无重复键，避免 ON CONFLICT DO UPDATE 在「同一条
+    // INSERT 内两行同键」时报 "cannot affect row a second time"（详见 dedupeByDbKey 注释）。
+    const deduped = dedupeByDbKey(answers, unitIdOf)
+    if (deduped.length === 0) return []
 
-    const delConds = answers.map((_, i) =>
+    const delConds = deduped.map((_, i) =>
       `(unit_id IS NOT DISTINCT FROM $${i * 4 + 2}
         AND section IS NOT DISTINCT FROM $${i * 4 + 3}
         AND question_no = $${i * 4 + 4}
         AND sub_no = $${i * 4 + 5})`
     ).join(' OR ')
     const delParams = [worksheetId]
-    for (const a of answers) {
+    for (const a of deduped) {
       delParams.push(unitIdOf(a), a.section || null, a.question_no, a.sub_no || '')
     }
     await client.query(
       `DELETE FROM ${TABLES.RESOURCE_ANSWERS} WHERE resource_id = $1 AND (${delConds})`,
       delParams
     )
-    const values = answers.map((_, i) =>
+    const values = deduped.map((_, i) =>
       `($1, $${i * 7 + 2}, $${i * 7 + 3}, $${i * 7 + 4}, $${i * 7 + 5}, $${i * 7 + 6}, $${i * 7 + 7}, $${i * 7 + 8}, 'official_verified')`
     ).join(',')
     const params = [worksheetId]
-    for (const a of answers) {
+    for (const a of deduped) {
       params.push(
-        a.question_no, a.answer, a.answer_type || 'choice', a.section || null, a.content || null,
-        unitIdOf(a), a.sub_no || ''
+        a.question_no, sanitizeText(a.answer), sanitizeText(a.answer_type) || 'choice', sanitizeText(a.section) || null, sanitizeText(a.content) || null,
+        unitIdOf(a), sanitizeText(a.sub_no) || ''
       )
     }
+    // ON CONFLICT 兜底：dedupeByDbKey 已保证 VALUES 内唯一键不重复（避免 "cannot affect
+    // row a second time"），此处仅用于覆盖「上一批已写入的现存行」（跨批同键），用
+    // DO UPDATE 让后批覆盖先批（续答场景后批内容更完整）。约束为 NULLS NOT DISTINCT。
     const { rows } = await client.query(
       `INSERT INTO ${TABLES.RESOURCE_ANSWERS} (resource_id, question_no, answer, answer_type, section, content, unit_id, sub_no, answer_status)
        VALUES ${values}
+       ON CONFLICT ${ANSWER_CONFLICT_TARGET}
+       DO UPDATE SET answer = EXCLUDED.answer, answer_type = EXCLUDED.answer_type, content = EXCLUDED.content, answer_status = EXCLUDED.answer_status
        RETURNING *`,
       params
     )
@@ -1215,7 +1255,7 @@ export const updateWorksheetAnswer = async (id, { answer, answer_type }) => {
   const { rows } = await query(
     `UPDATE ${TABLES.WORKSHEET_ANSWERS} SET answer = $2, answer_type = COALESCE($3, answer_type)
      WHERE id = $1 RETURNING *`,
-    [id, answer, answer_type || null]
+    [id, sanitizeText(answer), sanitizeText(answer_type) || null]
   )
   return rows[0] || null
 }
@@ -1427,14 +1467,14 @@ export const replaceResourceAnswers = async (resourceId, answers) => {
     for (const a of answers) {
       params.push(
         a.question_no,
-        a.answer,
-        a.answer_type || 'choice',
-        a.content || null,
-        a.section || null,
+        sanitizeText(a.answer),
+        sanitizeText(a.answer_type) || 'choice',
+        sanitizeText(a.content) || null,
+        sanitizeText(a.section) || null,
         a.answer_status || 'ai_draft',
         a.source || 'ai_parse',
         a.unit_key ? (unitMap.get(a.unit_key) || null) : null,
-        a.sub_no || ''
+        sanitizeText(a.sub_no) || ''
       )
     }
     const { rows } = await client.query(

@@ -12,6 +12,12 @@ const require = createRequire(import.meta.url)
 // 注意：Node 环境下 pdfjs 用 fs 读取，需传文件系统路径而非 file:// URL
 const STANDARD_FONT_DATA_URL =
   path.join(path.dirname(require.resolve('pdfjs-dist/package.json')), 'standard_fonts') + path.sep
+// 中文等 CID 字体需要 CMap 才能正确抽取/渲染字形，否则 Node 端刷一堆
+// "Ensure that the cMapUrl and cMapPacked API parameters are provided" 告警，
+// 且文字版 PDF 的中文会被抽成乱码。cMaps 随 pdfjs-dist 一并发布，直接指本地路径。
+const CMAP_URL =
+  path.join(path.dirname(require.resolve('pdfjs-dist/package.json')), 'cmaps') + path.sep
+const CMAP_OPTS = { cMapUrl: CMAP_URL, cMapPacked: true }
 
 let pdfjsPromise = null
 const loadPdfjs = () => {
@@ -37,7 +43,7 @@ const withTimeout = (promise, ms, label = 'Operation') => {
 export const extractPdfText = async (fileBuffer, timeoutMs = 30000) => {
   const pdfjs = await loadPdfjs()
   const doc = await withTimeout(
-    pdfjs.getDocument({ data: new Uint8Array(fileBuffer), useSystemFonts: true }).promise,
+    pdfjs.getDocument({ data: new Uint8Array(fileBuffer), useSystemFonts: true, ...CMAP_OPTS }).promise,
     timeoutMs,
     `PDF document loading (>${Math.round(timeoutMs / 1000)}s)`
   )
@@ -71,7 +77,7 @@ export const extractPdfText = async (fileBuffer, timeoutMs = 30000) => {
 export const getPdfPageCount = async (fileBuffer, timeoutMs = 30000) => {
   const pdfjs = await loadPdfjs()
   const doc = await withTimeout(
-    pdfjs.getDocument({ data: new Uint8Array(fileBuffer) }).promise,
+    pdfjs.getDocument({ data: new Uint8Array(fileBuffer), ...CMAP_OPTS }).promise,
     timeoutMs,
     `PDF page count loading (>${Math.round(timeoutMs / 1000)}s)`
   )
@@ -94,6 +100,7 @@ export const renderPdfToJpegs = async (fileBuffer, { scale = 2, maxPages = 20, q
     pdfjs.getDocument({
       data: new Uint8Array(fileBuffer),
       standardFontDataUrl: STANDARD_FONT_DATA_URL,
+      ...CMAP_OPTS,
     }).promise,
     timeoutMs,
     `PDF document loading for render (>${Math.round(timeoutMs / 1000)}s)`
