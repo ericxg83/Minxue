@@ -240,7 +240,16 @@ const doComplete = async () => {
 const handleAddToBook = async (item) => {
   item.adding = true
   try {
-    await store.addQuestionToBook(item.questionId)
+    const result = await store.addQuestionToBook(item.questionId)
+    const added = result?.added?.length || 0
+    const skipped = result?.skipped?.length || 0
+    if (added > 0) {
+      ElMessage.success(skipped > 0 ? `已加入 ${added} 题，${skipped} 题信息不完整被跳过` : '已加入错题本')
+    } else if (skipped > 0) {
+      ElMessage.warning('题目信息不完整，无法加入错题本，请先补全题干/答案/选项')
+    } else {
+      ElMessage.info('这道题已在错题本中')
+    }
   } catch (error) {
     ElMessage.error(error.message || '加入错题本失败，请重试')
   } finally {

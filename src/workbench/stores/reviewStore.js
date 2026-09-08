@@ -816,12 +816,15 @@ export const useReviewStore = defineStore('review', () => {
   // 将一道题加入错题本（仅对完整题有效；不完整题服务端会跳过）
   const addQuestionToBook = async (questionId) => {
     const studentId = currentStudent.value?.id
-    if (!studentId || !questionId) return
-    await addWrongQuestions(studentId, [questionId])
+    if (!studentId || !questionId) return null
+    const result = await addWrongQuestions(studentId, [questionId])
     if (studentId) {
       clearStudentCaches(studentId)
       await loadWrongQuestions(studentId)
     }
+    // 把服务端的 added / skipped / alreadyExists 结果回传给调用方，
+    // 让 UI 能区分"已加入 / 题不完整 / 已在错题本"，不再出现点了没反应
+    return result
   }
 
   // ReviewTopBar 触发「去编辑」：跳到该题并通知详情面板打开编辑

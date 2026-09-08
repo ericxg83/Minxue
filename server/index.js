@@ -2223,29 +2223,46 @@ app.post('/api/wrong-questions', async (req, res) => {
     const existingIds = new Set(existingRows.rows.map(r => r.question_id))
     const newIds = questionIds.filter(id => !existingIds.has(id))
 
-    if (newIds.length === 0) {
-      return res.json({ success: true, added: [], alreadyExists: [...existingIds], message: '全部已存在' })
-    }
-
-    // 完整性检查 — 过滤不完整题目
+    // 完整性检查 — 用动态口径 checkQuestionCompleteness() 现算（唯一真值源）。
+    // 查全部 questionIds 而非只查 newIds：已入册但被隐藏的题也要参与下面的自愈。
     const { rows: qRows } = await query(
       `SELECT id, content, geometry_image_url, question_type, options, answer FROM ${TABLES.QUESTIONS} WHERE id = ANY($1)`,
-      [newIds]
+      [questionIds]
     )
-    const qMap = new Map(qRows.map(r => [r.id, r]))
-    const skippedIds = []
-    const validIds = newIds.filter(id => {
-      const q = qMap.get(id)
-      if (!q) return false
-      const { isComplete } = checkQuestionCompleteness(q)
-      if (!isComplete) skippedIds.push(id)
-      return isComplete
-    })
+    const qIdSet = new Set(qRows.map(r => r.id))
+    const isCompleteMap = new Map(qRows.map(r => [r.id, checkQuestionCompleteness(r).isComplete]))
+    const completeIds = questionIds.filter(id => isCompleteMap.get(id) === true)
+
+    // 写入侧自愈：questions.is_complete 只是动态口径的反范式缓存。questions 有 20+ 处
+    // UPDATE 写入点，只有 PUT /api/questions/:id 会重算它，答案/选项/配图入库后被异步
+    // 补全时不回写，持久列因此长期偏旧（实测全表 92 条偏旧、反向 0 条，只会偏保守）。
+    // GET 错题列表按该列过滤，不回写就会出现「写入成功/已存在，但列表看不到 → 点了没反应」。
+    // 范围只限本次提交的题目，不做全表回填。必须在 res.json 之前完成——
+    // 前端 addQuestionToBook 拿到响应后立刻 loadWrongQuestions。
+    if (completeIds.length > 0) {
+      try {
+        await query(
+          `UPDATE ${TABLES.QUESTIONS} SET is_complete = TRUE, updated_at = NOW()
+           WHERE id = ANY($1) AND is_complete IS DISTINCT FROM TRUE`,
+          [completeIds]
+        )
+      } catch (e) {
+        console.error('[manual-add] is_complete 回写失败（不影响入册结果）:', e.message)
+      }
+    }
+
+    if (newIds.length === 0) {
+      return res.json({ success: true, added: [], skipped: [], alreadyExists: [...existingIds], message: '全部已存在' })
+    }
+
+    // 只有确实存在该题、且动态口径判不完整时才算 skipped（保持原有语义）
+    const skippedIds = newIds.filter(id => qIdSet.has(id) && isCompleteMap.get(id) !== true)
+    const validIds = newIds.filter(id => isCompleteMap.get(id) === true)
     if (skippedIds.length > 0) {
       console.log(`  ⚠️ [manual-add] ${skippedIds.length} 道题不完整，已跳过: ${skippedIds.join(', ')}`)
     }
     if (validIds.length === 0) {
-      return res.json({ success: true, added: [], skipped: skippedIds, message: '所有题目均不完整' })
+      return res.json({ success: true, added: [], skipped: skippedIds, alreadyExists: [...existingIds], message: '所有题目均不完整' })
     }
 
     const values = validIds.map((id, i) => `($1, $${i + 2})`).join(',')
@@ -2255,22 +2272,6 @@ app.post('/api/wrong-questions', async (req, res) => {
       `INSERT INTO ${TABLES.WRONG_QUESTIONS} (student_id, question_id) VALUES ${values} ON CONFLICT DO NOTHING`,
       params
     )
-
-    // 写入侧自愈：这些题刚由动态口径 checkQuestionCompleteness() 判定 complete，而
-    // questions.is_complete 只是它的反范式缓存——questions 有 20+ 处 UPDATE 写入点，
-    // 只有 PUT /api/questions/:id 会重算它，答案/选项/配图入库后异步补全时不会回写，
-    // 导致持久列长期偏旧（实测全表 92 条偏旧、反向 0 条，只会偏保守不会偏宽松）。
-    // GET 错题列表按该列过滤，不回写就会出现「写入成功但列表看不到 → 点了没反应」。
-    // 必须在 res.json 之前完成：前端 addQuestionToBook 拿到响应后立即 loadWrongQuestions。
-    try {
-      await query(
-        `UPDATE ${TABLES.QUESTIONS} SET is_complete = TRUE, updated_at = NOW()
-         WHERE id = ANY($1) AND is_complete IS DISTINCT FROM TRUE`,
-        [validIds]
-      )
-    } catch (e) {
-      console.error('[manual-add] is_complete 回写失败（不影响入册结果）:', e.message)
-    }
 
     res.json({ success: true, added: validIds, skipped: skippedIds, alreadyExists: [...existingIds] })
     // [Shadow Mode] 追加写入人工添加错题判定记录
