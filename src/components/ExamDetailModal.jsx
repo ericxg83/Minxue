@@ -1,4 +1,4 @@
-import { AlertCircle, CheckCircle2, ClipboardCheck, FileDown, Loader2 } from 'lucide-react'
+import { Camera, CheckCircle2, ClipboardCheck, FileDown, Loader2 } from 'lucide-react'
 import dayjs from 'dayjs'
 import BottomSheet from './BottomSheet'
 
@@ -6,11 +6,12 @@ const stage = e => e.status === 'graded' ? 'completed' : ['submitted', 'grading'
 const total = e => e.question_ids?.length || e.total_count || 0
 const time = v => dayjs(v).isValid() ? dayjs(v).format('YYYY/MM/DD HH:mm') : '最近创建'
 
-// 重练卷详情：档案动作集中在这里（查看/打印、删除、看批改结果）。
-// 不放上传按钮——答卷上传唯一入口在首页「错题重练」，扫码自动定位这份卷。
-export default function ExamDetailModal({ exam, onClose, onReprint, onDelete, onOpenResult }) {
+// 重练卷详情：档案动作集中在这里（上传答卷、查看/打印、删除、看批改结果）。
+// 主入口=本页"上传答卷"（选中这份卷即定位 examId，多页天然归一）；首页扫码上传为辅助路径。
+export default function ExamDetailModal({ exam, onClose, onReprint, onDelete, onOpenResult, onUploadAnswer }) {
   const current = stage(exam)
   const completed = current === 'completed'
+  const inProgress = current === 'in_progress'
   const count = total(exam)
   const score = completed && count ? `${exam.correct_count || 0}/${count} 题正确` : null
 
@@ -30,12 +31,25 @@ export default function ExamDetailModal({ exam, onClose, onReprint, onDelete, on
           </div>
         </div>
 
-        {!completed && current !== 'in_progress' && (
-          <div className='mt-4 flex items-start gap-2.5 rounded-2xl px-3.5 py-3' style={{ background: 'var(--info-soft, var(--primary-soft))' }}>
-            <AlertCircle size={15} className='mt-0.5 shrink-0' style={{ color: 'var(--primary)' }} />
-            <p className='text-[12px] leading-5' style={{ color: 'var(--text-secondary)' }}>
-              做完这份卷后，从首页「上传作业」选「错题重练」拍照上传，扫码会自动定位到这份卷并批改。
+        {!completed && !inProgress && (
+          <div className='mt-5 space-y-2.5'>
+            <button
+              type='button'
+              onClick={() => onUploadAnswer(exam)}
+              className='flex w-full items-center justify-center gap-2 rounded-xl py-3 text-[14px] font-semibold text-white transition-transform active:scale-[0.98]'
+              style={{ background: 'var(--primary)' }}
+            >
+              <Camera size={16} />上传答卷
+            </button>
+            <p className='text-center text-[11px] leading-4' style={{ color: 'var(--text-tertiary)' }}>
+              拍整份做完的卷子，多页一起传，系统按这份卷批改并更新掌握度
             </p>
+          </div>
+        )}
+        {inProgress && (
+          <div className='mt-4 flex items-center gap-2 rounded-2xl px-3.5 py-3' style={{ background: 'var(--primary-soft)' }}>
+            <Loader2 size={15} className='animate-spin' style={{ color: 'var(--primary)' }} />
+            <p className='text-[12px]' style={{ color: 'var(--text-secondary)' }}>正在整理批改结果，稍后可回来查看</p>
           </div>
         )}
 
@@ -43,8 +57,10 @@ export default function ExamDetailModal({ exam, onClose, onReprint, onDelete, on
           <button
             type='button'
             onClick={() => onReprint(exam)}
-            className='flex w-full items-center justify-center gap-2 rounded-xl py-3 text-[14px] font-semibold text-white transition-transform active:scale-[0.98]'
-            style={{ background: 'var(--primary)' }}
+            className={`flex w-full items-center justify-center gap-2 rounded-xl py-3 text-[14px] font-semibold transition-transform active:scale-[0.98] ${completed || inProgress ? 'text-white' : ''}`}
+            style={completed || inProgress
+              ? { background: 'var(--primary)' }
+              : { background: 'var(--bg-secondary)', color: 'var(--text)' }}
           >
             <FileDown size={16} />查看 / 打印试卷
           </button>

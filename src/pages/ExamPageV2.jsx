@@ -16,8 +16,8 @@ const filterMatch = {
 const total = e => e.question_ids?.length || e.total_count || 0
 const time = v => dayjs(v).isValid() ? dayjs(v).format('MM/DD HH:mm') : '最近创建'
 
-// 组卷历史 = 档案页：一行即一份卷，整行点击打开卷详情（查看/打印、删除、看批改结果）。
-// 不在此页上传答卷、不做状态置顶催办——上传唯一入口在首页，待办提醒归首页。
+// 组卷历史 = 档案页：一行即一份卷，整行点击打开卷详情（上传答卷、查看/打印、删除、看批改结果）。
+// 上传答卷在详情页发起（选中这份卷=定位 examId，多页天然归一）；待办催办提醒仍归首页。
 function ExamRow({ exam, onOpen }) {
   const current = stage(exam)
   const completed = current === 'completed'
@@ -43,7 +43,7 @@ function ExamRow({ exam, onOpen }) {
   </button>
 }
 
-export default function ExamPageV2({ studentExams, onReprint, onDelete, onOpenResult, onOpenWrongBook }) {
+export default function ExamPageV2({ studentExams, onReprint, onDelete, onOpenResult, onOpenWrongBook, onUploadAnswer }) {
   const [detailExam, setDetailExam] = useState(null)
   const [filter, setFilter] = useState('all')
   const exams = (Array.isArray(studentExams) ? studentExams : [])
@@ -88,6 +88,7 @@ export default function ExamPageV2({ studentExams, onReprint, onDelete, onOpenRe
         onReprint={(exam) => { setDetailExam(null); onReprint(exam) }}
         onDelete={(exam) => { setDetailExam(null); onDelete(exam) }}
         onOpenResult={(exam) => { setDetailExam(null); onOpenResult(exam) }}
+        onUploadAnswer={(exam) => { setDetailExam(null); onUploadAnswer?.(exam) }}
       />
     )}
   </motion.div>

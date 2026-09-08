@@ -213,12 +213,16 @@ app.post('/api/tasks/upload', upload.array('files', 20), async (req, res) => {
     console.log(`[Upload] 📥 req.body: studentId=${studentId} taskType=${taskType} worksheetId=${worksheetId} (len=${worksheetId?.length}) subject=${subject} resourceId=${resourceId} generatedExamId=${generatedExamId} taskName=${taskName || '(由文件名生成)'}`)
     // 业务类型枚举：'general' / 'wrong_retry' / 'retry_paper' / 'workbook' / 'exam' / 'homework'
     // 移动端 useUploadFlow.js 实际上传 exam/homework，原样落库；其他类型归一到 'general'。
-    const normalizedTaskType = taskType === 'wrong_retry' ? 'wrong_retry'
+    // 'retry_paper'（历史客户端/周报遗留值）归一到 'wrong_retry'，保持"重练"标签分类一致。
+    let normalizedTaskType = taskType === 'wrong_retry' ? 'wrong_retry'
+      : taskType === 'retry_paper' ? 'wrong_retry'
       : taskType === 'workbook' ? 'workbook'
       : taskType === 'exam' ? 'exam'
       : taskType === 'homework' ? 'homework'
       : 'general'
     const normalizedGeneratedExamId = generatedExamId && /^[0-9a-f-]{36}$/i.test(generatedExamId) ? generatedExamId : null
+    // 单点收口：只要携带合法 generatedExamId 即为错题重练批改，强制 task_type='wrong_retry'。
+    if (normalizedGeneratedExamId) normalizedTaskType = 'wrong_retry'
     const normalizedResourceId = resourceId && /^[0-9a-f-]{36}$/i.test(resourceId) ? resourceId : null
 
     // 错题重练上传：未传 studentId 时，从组卷记录自动关联（二维码只承载 task 定位）
@@ -2220,7 +2224,7 @@ app.post('/api/wrong-questions', async (req, res) => {
     const newIds = questionIds.filter(id => !existingIds.has(id))
 
     if (newIds.length === 0) {
-      return res.json({ success: true, added: [], message: '全部已存在' })
+      return res.json({ success: true, added: [], alreadyExists: [...existingIds], message: '全部已存在' })
     }
 
     // 完整性检查 — 过滤不完整题目
@@ -2245,14 +2249,30 @@ app.post('/api/wrong-questions', async (req, res) => {
     }
 
     const values = validIds.map((id, i) => `($1, $${i + 2})`).join(',')
-    const params = [studentId, ...newIds]
+    const params = [studentId, ...validIds]
 
     await query(
       `INSERT INTO ${TABLES.WRONG_QUESTIONS} (student_id, question_id) VALUES ${values} ON CONFLICT DO NOTHING`,
       params
     )
 
-    res.json({ success: true, added: validIds, skipped: skippedIds })
+    // 写入侧自愈：这些题刚由动态口径 checkQuestionCompleteness() 判定 complete，而
+    // questions.is_complete 只是它的反范式缓存——questions 有 20+ 处 UPDATE 写入点，
+    // 只有 PUT /api/questions/:id 会重算它，答案/选项/配图入库后异步补全时不会回写，
+    // 导致持久列长期偏旧（实测全表 92 条偏旧、反向 0 条，只会偏保守不会偏宽松）。
+    // GET 错题列表按该列过滤，不回写就会出现「写入成功但列表看不到 → 点了没反应」。
+    // 必须在 res.json 之前完成：前端 addQuestionToBook 拿到响应后立即 loadWrongQuestions。
+    try {
+      await query(
+        `UPDATE ${TABLES.QUESTIONS} SET is_complete = TRUE, updated_at = NOW()
+         WHERE id = ANY($1) AND is_complete IS DISTINCT FROM TRUE`,
+        [validIds]
+      )
+    } catch (e) {
+      console.error('[manual-add] is_complete 回写失败（不影响入册结果）:', e.message)
+    }
+
+    res.json({ success: true, added: validIds, skipped: skippedIds, alreadyExists: [...existingIds] })
     // [Shadow Mode] 追加写入人工添加错题判定记录
     for (const qId of validIds) {
       createJudgement({

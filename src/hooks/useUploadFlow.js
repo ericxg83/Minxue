@@ -4,7 +4,7 @@ import { useTaskStore, useStudentStore } from '../store'
 import { useToast } from '../components/ToastProvider'
 import { taskService } from '../services/taskService'
 import { recognizeQuestions, compressImage, saveRecognitionResult } from '../services/aiService'
-import { detectQRCode, groupFilesByQRCode, isRetryPaperQRCode } from '../services/qrDetectionService'
+import { detectQRCode, parseRetryExamId } from '../services/qrDetectionService'
 import { compressImagesForUpload, describeUploadFailure } from '../utils/imageUtils'
 import { apiRequest, uploadImage, createTask, addWrongQuestions, clearStudentCaches, invalidateCache } from '../services/apiService'
 import { takePhotoFiles, pickPhotoFiles, isNativeCameraAvailable, describeCameraError } from '../services/nativeCamera'
@@ -66,6 +66,8 @@ export function useUploadFlow({ loadTasks, isInitializing }) {
   stagingRef.current = stagingFiles
   const stagingTypeRef = useRef(null)
   stagingTypeRef.current = stagingType
+  // 组卷历史「上传答卷」：本次暂存绑定到的 generated_exam UUID（stagingType='retry_bound' 时有效）
+  const retryBoundExamIdRef = useRef(null)
   const homeworkChoiceRef = useRef([])
   homeworkChoiceRef.current = homeworkChoiceFiles
 
@@ -143,10 +145,19 @@ export function useUploadFlow({ loadTasks, isInitializing }) {
     setStagingType(null)
     setStagingUploading(false)
     setShowStaging(false)
+    retryBoundExamIdRef.current = null
   }
 
   const openStaging = (type) => {
     setStagingType(type)
+    setStagingFiles([])
+    setShowStaging(true)
+  }
+
+  // 组卷历史「上传答卷」主入口：已选定这份卷(examId)，上传的所有页直接绑到该 examId 走重练批改。
+  const openStagingForRetry = (examId) => {
+    retryBoundExamIdRef.current = examId
+    setStagingType('retry_bound')
     setStagingFiles([])
     setShowStaging(true)
   }
@@ -157,6 +168,18 @@ export function useUploadFlow({ loadTasks, isInitializing }) {
     if (files.length === 0) return
     setStagingUploading(true)
     try {
+      if (stagingTypeRef.current === 'retry_bound') {
+        const examId = retryBoundExamIdRef.current
+        if (!examId) {
+          Toast.show({ message: '未定位到这份重练卷，请重新选择', type: 'error' })
+          return
+        }
+        setShowStaging(false)
+        await uploadRetryPaperGroup(files.map(p => p.file), examId)
+        retryBoundExamIdRef.current = null
+        return
+      }
+
       if (stagingTypeRef.current === 'homework') {
         setShowStaging(false)
         setHomeworkChoiceFiles(files.map(p => p.file))
@@ -380,18 +403,20 @@ export function useUploadFlow({ loadTasks, isInitializing }) {
         const filesWithQR = []
         for (const file of newFiles) {
           const qrContent = await detectQRCode(file)
-          filesWithQR.push({ file, qrContent })
+          filesWithQR.push({ file, examId: parseRetryExamId(qrContent) })
         }
         qrToast.dismiss()
 
-        const groupedFiles = groupFilesByQRCode(filesWithQR)
+        // 整批绑定一份 examId：一次上传内任一页识别到重练码，即视为"同一份卷的多页"，
+        // 全部绑到那个 examId 走重练批改。反面/内页没有码不再被拆去日常批改。
+        const distinctIds = [...new Set(filesWithQR.map(f => f.examId).filter(Boolean))]
 
-        for (const group of groupedFiles) {
-          if (group.isRetryPaper && group.qrContent && isRetryPaperQRCode(group.qrContent)) {
-            await uploadRetryPaperGroup(group.files, group.qrContent)
-          } else {
-            await uploadRegularHomework(group.files)
-          }
+        if (distinctIds.length === 1) {
+          await uploadRetryPaperGroup(newFiles, distinctIds[0])
+        } else if (distinctIds.length > 1) {
+          Toast.show({ message: '一次上传里检测到多份重练卷，请分开上传', type: 'error', duration: 3500 })
+        } else {
+          await uploadRegularHomework(newFiles)
         }
 
         clearPendingUploadFlow()
@@ -407,8 +432,8 @@ export function useUploadFlow({ loadTasks, isInitializing }) {
     }
   }
 
-  // 错题重练卷（多页合并一个任务）
-  const uploadRetryPaperGroup = async (files, qrContent) => {
+  // 错题重练卷（整批多页合并为一个重练批改任务，examId = 裸 generated_exam UUID）
+  const uploadRetryPaperGroup = async (files, examId) => {
     const retryToast = Toast.show({ message: `检测到错题重练卷，正在上传 ${files.length} 页...`, type: 'loading', duration: 0 })
 
     let tempTask
@@ -416,9 +441,9 @@ export function useUploadFlow({ loadTasks, isInitializing }) {
       tempTask = {
         id: `temp-retry-${Date.now()}`,
         student_id: currentStudent.id,
-        original_name: `错题重练_${qrContent}_${dayjs().format('YYYY-MM-DD_HH-mm-ss')}`,
-        task_type: 'retry_paper',
-        retry_paper_id: qrContent,
+        original_name: `错题重练_${dayjs().format('YYYY-MM-DD_HH-mm-ss')}`,
+        task_type: 'wrong_retry',
+        generated_exam_id: examId,
         pages: files.map((file, index) => ({
           id: `page-${index + 1}`,
           image_url: URL.createObjectURL(file),
@@ -433,16 +458,13 @@ export function useUploadFlow({ loadTasks, isInitializing }) {
       addTask(tempTask)
       setUploadingTasks(prev => [...prev, tempTask.id])
 
-      const result = await taskService.uploadFiles(currentStudent.id, files, {
-        taskType: 'retry_paper',
-        retryPaperId: qrContent
-      })
+      const result = await taskService.uploadRetryAnswer(examId, files)
 
       if (result.success && result.tasks && result.tasks.length > 0) {
         const updatedTask = result.tasks[0]
         updateTaskInStore(tempTask.id, 'processing', {
           id: updatedTask.id,
-          generatedExamId: updatedTask.generated_exam_id
+          generatedExamId: updatedTask.generated_exam_id || examId
         })
         processTask(updatedTask)
       }
@@ -767,7 +789,7 @@ export function useUploadFlow({ loadTasks, isInitializing }) {
     // 暂存区
     showStaging, stagingFiles, stagingType, stagingUploading,
     cameraInputRef, albumInputRef,
-    openStaging, clearStaging,
+    openStaging, openStagingForRetry, clearStaging,
     handleStagingSelectFiles, removeStagingFile,
     onStagingCamera, onStagingAlbum, cameraBusy,
     handleSubmitStaging,

@@ -436,7 +436,7 @@ export default function App() {
     uploadQueue, isUploading,
     showStaging, stagingFiles, stagingType, stagingUploading,
     cameraInputRef, albumInputRef,
-    openStaging, clearStaging,
+    openStaging, openStagingForRetry, clearStaging,
     handleStagingSelectFiles, removeStagingFile,
     onStagingCamera, onStagingAlbum, cameraBusy,
     handleSubmitStaging,
@@ -1009,6 +1009,7 @@ export default function App() {
                 onDelete={(exam) => { setDeleteTarget({ type: 'exam', id: exam.id }); setShowDeleteConfirm(true) }}
                 onOpenResult={handleOpenExamResult}
                 onOpenWrongBook={() => setCurrentPage('wrongbook')}
+                onUploadAnswer={(exam) => openStagingForRetry(exam?.id)}
               />
             )}
 

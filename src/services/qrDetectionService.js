@@ -16,6 +16,24 @@ export const isRetryPaperQRCode = (value) => {
   }
 }
 
+// 从卷上二维码内容抽出裸 generated_exam UUID（小写）。
+// 覆盖三种历史格式：/retry-task/{uuid}（大写）URL、MXG:{uuid}、旧 JSON{generatedExamId|paperId}。
+// 识别失败返回 null（调用方据此决定是否走重练批改）。
+export const parseRetryExamId = (value) => {
+  const raw = String(value || '').trim()
+  if (!raw) return null
+  const urlM = raw.match(/\/retry-task\/([0-9a-fA-F-]{36})(?:[/?#]|$)/)
+  if (urlM) return urlM[1].toLowerCase()
+  const mxgM = raw.match(/^MXG:([0-9A-F]{8}-[0-9A-F]{4}-[0-9A-F]{4}-[0-9A-F]{4}-[0-9A-F]{12})$/i)
+  if (mxgM) return mxgM[1].toLowerCase()
+  try {
+    const parsed = JSON.parse(raw)
+    const id = parsed?.generatedExamId || parsed?.examId || null
+    if (id && /^[0-9a-fA-F-]{36}$/.test(id)) return id.toLowerCase()
+  } catch { /* 非 JSON，忽略 */ }
+  return null
+}
+
 export const detectQRCode = async (imageFile) => {
   try {
     const imageBitmap = await createImageBitmap(imageFile)

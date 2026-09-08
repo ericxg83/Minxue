@@ -127,6 +127,7 @@ export const taskService = {
   uploadRetryAnswer: async (generatedExamId, files) => {
     const formData = new FormData()
     formData.append('generatedExamId', generatedExamId)
+    formData.append('taskType', 'wrong_retry')
 
     for (const file of files) {
       formData.append('files', file)
