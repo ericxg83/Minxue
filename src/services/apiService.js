@@ -717,13 +717,23 @@ export const deleteWorksheet = async (id) => {
   return apiRequest(`/worksheets/${id}`, { method: 'DELETE' })
 }
 
-export const updateWorksheetStatus = async (id, status) => {
+// 练习册发布。返回 { worksheet, publishRisk }。
+// 通用规则（发布闸门，见 AGENTS.md）：答案库有疑似错位/缺失风险时后端 409 拦截
+// （code=PUBLISH_RISKY，附 risk.issues）；教师二次确认后带 force=true 强制放行。
+export const updateWorksheetStatus = async (id, status, options = {}) => {
   const data = await apiRequest(`/worksheets/${id}/status`, {
     method: 'PUT',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ status })
+    body: JSON.stringify({ status, ...(options.force ? { force: true } : {}) })
   })
-  return data.worksheet
+  return data
+}
+
+// 发布前只读风险评估（不改变状态）：审核页「确认发布」前调用，
+// risk.blocking 为 true 时应弹窗列出 risk.issues 请教师确认。
+export const getWorksheetPublishRisk = async (id) => {
+  const data = await apiRequest(`/worksheets/${id}/publish-risk`)
+  return data.risk
 }
 
 // 练习册答案清单。答案条数多时解析侧返回较慢，沿用原 axios 客户端的 120 秒上限。

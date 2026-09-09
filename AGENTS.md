@@ -39,6 +39,22 @@
 8. 优先复用现有服务、组件、队列、缓存和数据模型，避免重复开发。
 9. 错题「同一题」判定统一走 `src/domain/questionIdentity.js`，按归一化后的身份键精确匹配，禁止用相似度阈值自动合并错题。
 10. 当前产品口径是「只练错题」：重练与组卷只使用学生真实做错的题目，变式题（`variant_questions`）仅作讲义素材，不进入重练卷。
+11. 练习册答案解析质量闸（2026-09-09 九上上海作业答案全本错位事故沉淀，通用规则）：
+    - 背景：78 页扫描版答案 PDF 的三层叠加故障——① 15 页 `Promise.all` 瞬时打爆魔搭配额，
+      `callVisionCompletion` 静默降级弱备份视觉模型（双栏阅读顺序错乱、单元标题漏读）；
+      ② PDF 自带隐藏 OCR 文字层（上标打碎成 NUL、阅读顺序错乱）被快路径直接采用；
+      ③ 渲染层遇 NUL 崩溃。结果 626 条答案全部错位入库且 status 照常 published。
+    - 解析层三道通用防线（`server/routes/worksheets.js`、`server/config/ai.js`、
+      `server/services/pdfService.js`，回归测试 `test/answerOcrGuard.test.mjs` 锁定）：
+      答案页 OCR 必须 `noBackup:true` 锁主力视觉模型（弱模型 outputs 不得入库）；
+      分批 OCR 限 3 并发 + 单页空结果重试；文字层先过质量门禁
+     （`question_seq_anomaly ≥ 3` 或含 NUL/C0 损坏字符即丢弃改走逐页 OCR）；渲染层过滤控制字符防崩。
+    - 发布闸门：`PUT /worksheets/:id/status → published` 发布前必经
+      `getWorksheetPublishRisk`（`server/services/worksheetPublishRiskService.js`）评估；
+      blocking 时后端 409（`code=PUBLISH_RISKY`）拦截，教师须在审核页看到 issues 二次确认后
+      带 `force=true` 才放行；列表页不设强制放行入口。
+    - 新增答案版式异常只允许加规则/加测试，不允许放宽上述任一门禁；
+      门禁误伤正常 PDF 时，应调门禁判据本身并同步更新回归测试，不得绕行。
 
 ## 架构关键提醒
 

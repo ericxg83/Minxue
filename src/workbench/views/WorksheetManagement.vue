@@ -417,6 +417,13 @@ const handleToggleStatus = async (row) => {
     ElMessage.success(newStatus === 'published' ? '已发布' : '已撤回')
     await loadData()
   } catch (e) {
+    // 发布闸门（通用规则）：列表页直接发布同样被后端 409 拦截（PUBLISH_RISKY），
+    // 此处只提示去审核页处理，不提供强制放行入口——强制放行必须在审核页看过 issues 后二次确认。
+    if (newStatus === 'published' && e?.status === 409 && e?.payload?.code === 'PUBLISH_RISKY') {
+      const n = e.payload?.risk?.issues?.length || 0
+      ElMessage.warning(`发布被拦截：答案库存在 ${n} 项疑似错位/缺失风险，请进入审核页复核后再发布`)
+      return
+    }
     ElMessage.error('操作失败: ' + e.message)
   }
 }

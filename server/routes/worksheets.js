@@ -34,6 +34,7 @@ import {
   fixDirtyQuestionTypes,
 } from '../services/worksheetFixService.js'
 import { regradeTaskPageWithUnit } from '../services/worksheetPageService.js'
+import { getWorksheetPublishRisk } from '../services/worksheetPublishRiskService.js'
 import { query as pgQuery } from '../config/neon.js'
 const query = pgQuery
 
@@ -461,12 +462,50 @@ router.get('/:id', async (req, res) => {
 
 router.put('/:id/status', async (req, res) => {
   try {
-    const { status } = req.body
+    const { status, force } = req.body
     if (!['draft', 'reviewing', 'published'].includes(status)) {
       return res.status(400).json({ error: '无效状态' })
     }
+    // ── 发布闸门（通用规则，见 AGENTS.md「练习册发布闸门」）──
+    // 背景（2026-09-09 九上上海作业事故）：答案库带题号错位 warning 入库后，
+    // 发布动作本身无任何检查，错位答案直接上线成为批改依据。
+    // 规则：发布 published 且风险评估 blocking 时，后端 409 拦截；
+    // 教师在审核页看到 issues 并二次确认后，带 force=true 强制放行。
+    // 风险评估自身失败不阻塞发布（仅记录），避免评估 bug 冻结正常发布流程。
+    let publishRisk = null
+    if (status === 'published') {
+      try {
+        publishRisk = await getWorksheetPublishRisk(req.params.id)
+      } catch (riskErr) {
+        // 风险评估失败不阻塞发布，仅记录
+        console.warn(`[发布风险评估] worksheet=${req.params.id} 评估失败: ${riskErr.message}`)
+      }
+      if (!force && publishRisk && publishRisk.blocking) {
+        return res.status(409).json({
+          error: '该练习册答案库存在疑似错位/缺失风险，请先在审核页复核，确认无误后再强制发布',
+          code: 'PUBLISH_RISKY',
+          risk: publishRisk,
+        })
+      }
+      if (force && publishRisk && publishRisk.blocking) {
+        console.warn(`[发布闸门] worksheet=${req.params.id} 教师确认后强制发布，风险项 ${publishRisk.issues.length} 条`)
+      }
+    }
     const worksheet = await updateWorksheetStatus(req.params.id, status)
-    res.json({ success: true, worksheet })
+    res.json({ success: true, worksheet, publishRisk })
+  } catch (e) {
+    res.status(500).json({ error: e.message })
+  }
+})
+
+// 发布前只读风险评估：审核页「确认发布」前调用，
+// 有 blocking 风险时前端弹窗要求教师确认，避免未知版式错位答案被直接发布。
+// 只读不写：不改变 worksheet 状态。
+router.get('/:id/publish-risk', async (req, res) => {
+  try {
+    const risk = await getWorksheetPublishRisk(req.params.id)
+    if (!risk) return res.status(404).json({ error: '练习册不存在' })
+    res.json({ success: true, risk })
   } catch (e) {
     res.status(500).json({ error: e.message })
   }

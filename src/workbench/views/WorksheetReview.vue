@@ -106,7 +106,7 @@
 import { ref, computed, onMounted } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { ArrowLeft, View } from '@element-plus/icons-vue'
-import { ElMessage } from 'element-plus'
+import { ElMessage, ElMessageBox } from 'element-plus'
 import {
   getWorksheets, getWorksheetAnswers, updateWorksheetAnswer, updateWorksheetStatus
 } from '../../services/apiService.js'
@@ -265,12 +265,37 @@ const saveAnswer = async () => {
   saving.value = false
 }
 
+// 发布闸门（通用规则，见 AGENTS.md「练习册发布闸门」）：
+// 答案库有疑似错位/缺失风险时后端 409 拦截（PUBLISH_RISKY），此处列出 risk.issues
+// 请教师二次确认，确认后带 force=true 强制放行。
 const handlePublish = async () => {
   try {
     await updateWorksheetStatus(worksheetId, 'published')
     worksheet.value.status = 'published'
     ElMessage.success('已发布')
   } catch (e) {
+    if (e?.status === 409 && e?.payload?.code === 'PUBLISH_RISKY') {
+      const issues = e.payload?.risk?.issues || []
+      const detail = issues.slice(0, 8).join('\n')
+      const more = issues.length > 8 ? `\n…等共 ${issues.length} 项` : ''
+      try {
+        await ElMessageBox.confirm(
+          `该练习册答案库存在疑似错位/缺失风险，暂不能直接发布：\n${detail}${more}\n\n请先在左侧题号列表 / PDF 预览中复核；确认答案无误后可强制发布。`,
+          '发布被拦截：答案库疑似错位',
+          { confirmButtonText: '确认无误，强制发布', cancelButtonText: '先去复核', type: 'warning' }
+        )
+      } catch {
+        return // 教师取消：留在审核页复核
+      }
+      try {
+        await updateWorksheetStatus(worksheetId, 'published', { force: true })
+        worksheet.value.status = 'published'
+        ElMessage.success('已强制发布')
+      } catch (e2) {
+        ElMessage.error('发布失败: ' + e2.message)
+      }
+      return
+    }
     ElMessage.error('发布失败: ' + e.message)
   }
 }

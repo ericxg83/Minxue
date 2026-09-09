@@ -89,3 +89,25 @@ test('pdfService 渲染上下文必须有控制字符过滤（NUL 文字层不�
     '加固应覆盖 measureText/fillText 等 pdf.js 文字渲染入口'
   )
 })
+
+test('发布闸门：风险 blocking 时后端必须 409 拦截（force=true 才放行）', () => {
+  const src = read('server/routes/worksheets.js')
+  assert.ok(
+    src.includes("code: 'PUBLISH_RISKY'"),
+    '发布 published 且风险 blocking 时应返回 code=PUBLISH_RISKY 的 409'
+  )
+  assert.ok(
+    src.includes('if (!force && publishRisk && publishRisk.blocking)'),
+    '无 force 时 blocking 风险必须拦截；force=true 才放行'
+  )
+  assert.ok(
+    src.includes("const { status, force } = req.body"),
+    '发布路由应从 body 读取 force 字段'
+  )
+  // 前端：审核页 409 后必须弹窗列 issues 并允许二次确认强制发布
+  const review = read('src/workbench/views/WorksheetReview.vue')
+  assert.ok(
+    review.includes('PUBLISH_RISKY') && review.includes('force: true'),
+    '审核页发布被拦截后应弹窗请教师确认，确认后带 force=true 强制发布'
+  )
+})
