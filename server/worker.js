@@ -2000,6 +2000,10 @@ const normalizeTitleForMatch = (s) => {
   // 圈序号 → ASCII 数字（"堂堂练①" → "堂堂练1"）
   return String(s)
     .replace(CIRCLED_DIGITS_RE, m => circledToAsciiMap[m] || m)
+    // 全角括号 → 半角：OCR 常把印刷体"27.4(1)"读成全角"27.4（1）"，
+    // 而答案库 unit_key/unit_title 是半角。不归一化会导致标题/防御1判定失配，
+    // 可信标题被当成"OCR 误识别"置空 → 单元匹配失败 → 参考答案空白。
+    .replace(/[（）]/g, (p) => (p === '（' ? '(' : ')'))
     .replace(/[\s　]+/g, '') // 空白已经由 normalizeSectionName 压过，此处再兜一次
 }
 
@@ -3924,6 +3928,7 @@ const processWorkbookGrading = async (job) => {
     }
     const lookupRow = (qNo, subNo, questionType) => {
       if (!unitAnswers) return null
+      // 先精确匹配 qno|sub_no（答案库若按小问分条则可精确定位）
       const qKey = `${Number(qNo)}|${subNo || ''}`
       let best = null
       let bestScore = -1
@@ -3936,7 +3941,29 @@ const processWorkbookGrading = async (job) => {
           best = row
         }
       }
-      return best
+      if (best) return best
+      // 回退：答案库整题一条答案（sub_no=''）而 OCR 拆成多个小问（Q3(1)/Q3(2)…）时，
+      // 精确键 qno|小问 永远查不到。答案库 Q3 的答案含 (1)(2)(3) 全部小问，
+      // 回退到 qno|'' 整题行，避免判成"参考答案空白"。
+      if (subNo) {
+        const qKeyWhole = `${Number(qNo)}|`
+        let bestWhole = null
+        let bestWholeScore = -1
+        for (const [section, qMap] of unitAnswers) {
+          const row = qMap.get(qKeyWhole)
+          if (!row) continue
+          const score = sectionScoreForType(section, questionType)
+          if (score > bestWholeScore) {
+            bestWholeScore = score
+            bestWhole = row
+          }
+        }
+        if (bestWhole) {
+          console.log(`   [Workbook] 小问回退: 题${qNo}(${subNo}) → 整题答案（答案库按整题存）`)
+          return bestWhole
+        }
+      }
+      return null
     }
 
     // 避免答案指纹兜底时重复占用同一答案行
@@ -4012,6 +4039,33 @@ const processWorkbookGrading = async (job) => {
   }
 
   console.log(`   [Workbook] 答案匹配: ${matchedCount}/${allQuestions.length} 题, 错误: ${wrongCount} 题, 空: ${emptyCount} 题`)
+
+  // 用 OCR 卷面标题给任务改名（与通用管线 5436 行口径一致）：练习册类型上传时前端
+  // 固定把任务名拼成"科目 · 练习册名"——选练习册只是选批改模式/答案来源，不代表
+  // 作业本身身份，列表里多份同练习册任务无法区分。命名统一以卷面印刷标题为准。
+  // 优先取匹配成功页的标题（该标题已通过 pickAnswerUnit 可信校验），兜底取首个非空标题。
+  try {
+    const titledPage = pagesMatchInfo.find(p => p.matched_unit && p.page_title)
+      || pagesMatchInfo.find(p => p.page_title)
+    if (titledPage?.page_title) {
+      const { rows: nameRows } = await query(
+        `SELECT original_name FROM ${TABLES.TASKS} WHERE id = $1`,
+        [taskId]
+      )
+      const originalName = nameRows[0]?.original_name || ''
+      const auto = !originalName
+        || /^.{1,20} · /.test(originalName) // 前端拼装的"科目 · 练习册名"
+        || /作业\s+\d{2}\/\d{2}\s+\d{2}:\d{2}$/.test(originalName)
+        || /\.(jpe?g|png|heic|heif|webp|bmp)(\s|$)/i.test(originalName)
+      if (auto) {
+        const cleaned = titledPage.page_title.replace(/\s+/g, ' ').trim().slice(0, 100)
+        await query(`UPDATE ${TABLES.TASKS} SET original_name = $1 WHERE id = $2`, [cleaned, taskId])
+        console.log(`   📝 [Workbook] 任务改名: "${originalName}" → "${cleaned}"（来自卷面标题）`)
+      }
+    }
+  } catch (e) {
+    console.warn(`   ⚠️ [Workbook] 任务改名失败: ${e.message}`)
+  }
 
   // 单元匹配诊断信息（写入 task metadata 供前端排查）
   const sectionMatchInfo = {
@@ -4172,7 +4226,12 @@ const processWorkbookGrading = async (job) => {
     pendingCount,
     duration: `${duration}s`,
     source: 'workbook',
-    sectionMatch: sectionMatchInfo
+    sectionMatch: sectionMatchInfo,
+    // 清除历史失败标记：updateTaskStatus 是 merge 语义，重跑成功时若不显式清除，
+    // 上次失败的 error / errorType / failedAt 会残留在 result 里，前端据此误报失败。
+    error: null,
+    errorType: null,
+    failedAt: null
   })
 
   console.log(`✅ [Workbook] 完成: ${allQuestions.length} 题, ${wrongCount} 错, ${emptyCount} 空, ${pendingCount} 待人工, 共 ${imageList.length} 页, 耗时 ${duration}s`)

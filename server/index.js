@@ -862,7 +862,16 @@ async function retryTaskById(taskId) {
       originalName: task.original_name,
       taskType: task.task_type || null,
       worksheetId: task.worksheet_id || null,
-      resourceId: task.resource_id || task.worksheet_id || null,
+      // ⚠️ workbook 任务绝不能把 worksheet_id 兜底进 resourceId：
+      // processTask 见 resourceId 非空会优先路由到 processAnswerBankGrading（普通错题
+      // addWrongQuestions 语义），绕开练习册专用的 processWorkbookGrading（自包含错题
+      // addSelfContainedWrongQuestion 语义），重批改会破坏错题数据模型
+      // （练习册错题带 worksheet_id/page_number/question_no，普通错题只挂 question_id）。
+      // worksheet 的答案库本就存在 resource_answers（resource_id = worksheet_id），
+      // workbook 管线内部按 worksheetId 读取，无需 resourceId 兜底。
+      resourceId: task.task_type === 'workbook'
+        ? (task.resource_id || null)
+        : (task.resource_id || task.worksheet_id || null),
       generatedExamId: task.generated_exam_id || null
     }, {
       attempts: parseInt(process.env.MAX_RETRIES) || 3,

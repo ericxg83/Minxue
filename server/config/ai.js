@@ -1,5 +1,14 @@
 import axios from 'axios'
 
+// 全局禁用 HTTPS_PROXY/HTTP_PROXY 等系统代理：环境里若设置了不可达的代理（如沙箱代理），
+// axios 默认会走它，导致 AI 请求出现 "400 The plain HTTP request was sent to HTTPS port"
+// 或被代理 IP 触发 ModelScope 限流（429）。OSS/前端走的是浏览器/独立代理，与这里无关。
+// 显式 proxy:false 之后 AI 调用直连对应供应商，正常返回 200/4xx。
+// axios 0.27+ 默认尊重 process.env.proxy，0.22 同样。这里覆盖一次即可。
+const proxyOff = { proxy: false, httpsAgent: false, httpAgent: false }
+const axiosNoProxy = axios.create({ ...proxyOff, timeout: 120000 })
+const backupAxios = axios.create({ ...proxyOff, timeout: 60000 })
+
 export const AI_CONFIG = {
   get ENDPOINT() {
     return process.env.AI_ENDPOINT || 'https://api-inference.modelscope.cn/v1/chat/completions'
@@ -195,13 +204,16 @@ async function postWith429Retry(client, endpoint, body, axiosOptions, {
       return response
     } catch (err) {
       const status = err.response?.status
+      const auth = String(axiosOptions?.headers?.Authorization || '').replace(/^Bearer\s+/i, '')
       // 诊断：详细记录 400 错误（通常提示 prompt 过长 / 图片超限 / 字段格式错误）
       if (status === 400) {
         const body = err.response?.data
         const dataSize = JSON.stringify(body).length
         const imgSize = body?.messages?.[1]?.content?.find?.(c => c.type === 'image_url')?.image_url?.url?.length || 0
         console.error(`[AI] 400 bad request:`,
-          `model=${body?.model}`,
+          `endpoint=${endpoint}`,
+          `keyTail=${auth?.slice(-8)}`,
+          `model=${body?.model || '(unknown)'}`,
           `dataSize=${dataSize}B`,
           `imageBase64Size=${imgSize}B`,
           `errorMsg=${body?.error?.message || JSON.stringify(body)?.substring(0, 300)}`)
@@ -510,8 +522,6 @@ const GEMINI_DIRECT = {
   ENDPOINT: 'https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent',
 }
 
-const backupAxios = axios.create({ timeout: 60000 })
-
 // ⚠️ 绝不要在 content 为空时回退到 message.reasoning / reasoning_content。
 // 思考模型（如 Qwen/Qwen3-VL-8B-Thinking）在 max_tokens 耗尽于推理阶段时，
 // content 为空而 reasoning 里是思维链原文（"用户现在需要识别作业……"）。
@@ -602,10 +612,10 @@ async function requestOpenAIProvider({
   }
 
   const response = await postWith429Retry(
-    vendor ? backupAxios : axios,
+    vendor ? backupAxios : axiosNoProxy,
     endpoint,
     body,
-    { headers, timeout },
+    { headers, timeout, proxy: false },
     { retry429, retry503, exhaustedTtlMs },
   )
 
@@ -618,19 +628,20 @@ async function requestGeminiText({ systemContent, userContent, temperature, maxT
     `${GEMINI_DIRECT.ENDPOINT}?key=${encodeURIComponent(GEMINI_DIRECT.API_KEY)}`,
     {
       contents: [
-        {
-          role: 'user',
-          parts: [{ text: `${systemContent}\n\n${userContent}` }],
-        },
-      ],
-      generationConfig: { temperature, maxOutputTokens: maxTokens },
-    },
-    {
-      headers: { 'Content-Type': 'application/json' },
-      timeout: AI_CONFIG.TIMEOUT,
-    },
-    { retry429: true },
-  )
+          {
+            role: 'user',
+            parts: [{ text: `${systemContent}\n\n${userContent}` }],
+          },
+        ],
+        generationConfig: { temperature, maxOutputTokens: maxTokens },
+      },
+      {
+        headers: { 'Content-Type': 'application/json' },
+        timeout: AI_CONFIG.TIMEOUT,
+        proxy: false,
+      },
+      { retry429: true },
+    )
 
   return response.data?.candidates?.[0]?.content?.parts?.map(part => part?.text || '').join('') || ''
 }
@@ -659,6 +670,7 @@ async function requestGeminiVision({ systemPrompt, userText, imageDataURL, tempe
     {
       headers: { 'Content-Type': 'application/json' },
       timeout: AI_CONFIG.TIMEOUT,
+      proxy: false,
     },
     { retry429: true },
   )
@@ -929,7 +941,17 @@ export async function callVisionCompletion(opts) {
     temperature = 0.3,
     maxTokens = 8192,
     model,
+    // noBackup=true：禁止静默降级到备份视觉供应商（MiniMax-M3/8B/sensenova/agnes/gpt-4o-mini 等）。
+    //   背景（2026-09-09 练习册答案 PDF 错位修复）：答案页整本解析时 15 页并发打爆魔搭配额，
+    //   请求被静默轮换到弱模型，双栏答案页阅读顺序错乱、单元标题漏读 → 全本答案错位入库。
+    //   对质量敏感的 OCR 场景（练习册答案页）应传 noBackup，魔搭耗尽时宁可当页失败重试，
+    //   也不能拿弱模型的错乱输出污染答案库。显式 env（BACKUP_FIRST/GMI_FIRST）也被本选项压住：
+    //   调用方的质量约束比全局路由开关更具体。
+    noBackup = false,
   } = opts
+  if (noBackup) {
+    console.log('[AI] noBackup=1：本次视觉请求仅使用魔搭（ModelScope）Key×模型矩阵，不降级备份供应商')
+  }
 
   const messages = buildVisionMessages(systemPrompt, userText, imageDataURL)
 
@@ -1006,7 +1028,7 @@ export async function callVisionCompletion(opts) {
     }
   }
 
-  if (allMsExhausted || forceBackupFirst) {
+  if (!noBackup && (allMsExhausted || forceBackupFirst)) {
     if (forceBackupFirst) {
       console.warn('[AI] BACKUP_FIRST=1 已开启，备份供应商优先（ZenMux 等先于魔搭被尝试）')
     } else {
@@ -1051,7 +1073,8 @@ export async function callVisionCompletion(opts) {
   } else {
     // GMI_FIRST=1 时，把 GMI 插到最前作为"主 KEY"；
     // 魔搭仍保留在后面兜底，10 天 Key 失效后只需去掉 GMI_FIRST=1 即可自动回落到魔搭。
-    if (gmiFirst && gmiVendor) {
+    // noBackup=1 时跳过 GMI（非魔搭供应商一律不用）。
+    if (!noBackup && gmiFirst && gmiVendor) {
       console.log(`[AI] GMI_FIRST=1 开启，GMI 顶替魔搭作为首选视觉供应商（端点=${gmiVendor.endpoint}）`)
       for (const vlModel of gmiVendor.vlModels) {
         providers.push(async () => {
@@ -1086,7 +1109,9 @@ export async function callVisionCompletion(opts) {
       }
     }
     // 备份供应商视觉兜底（Agnes → FreeModel → SenseNova，各自独立配额）
-    for (const vendor of BACKUP_CONFIG.VENDORS) {
+    // noBackup=1 时跳过：质量敏感场景宁可失败，不用弱模型输出。
+    if (!noBackup) {
+      for (const vendor of BACKUP_CONFIG.VENDORS) {
       for (const vlModel of vendor.vlModels) {
         providers.push(async () => {
           try {
@@ -1111,6 +1136,7 @@ export async function callVisionCompletion(opts) {
             throw err
           }
         })
+      }
       }
     }
   }

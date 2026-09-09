@@ -894,6 +894,42 @@ const withBatchTimeout = (promise, ms, label) => {
 }
 
 // 渲染并 OCR 一个批次（startPage..endPage，1-based 闭区间），返回解析出的答案与批末单元
+// 单页 OCR 并发上限：此前 15 页 Promise.all 瞬时打满魔搭「Key×模型」配额 → 429 →
+// callVisionCompletion 静默轮换到弱备份视觉模型 → 双栏答案页阅读顺序错乱、单元标题漏读
+// （实测 2026-09-08 九上上海作业答案全本解析 84 处题号错位、626 条答案全部错位入库）。
+// 降到小并发后，瞬时 429 由 provider 内置退避消化；配合答案页 OCR 的 noBackup=true，
+// 整本解析稳定落在主力模型上。可用 OCR_PAGE_CONCURRENCY env 调整。
+const OCR_PAGE_CONCURRENCY = Math.max(1, parseInt(process.env.OCR_PAGE_CONCURRENCY, 10) || 3)
+
+// 带并发上限的 map：保持输入顺序返回结果，单页异常向上抛（由 withBatchTimeout/上层兜住）
+async function mapWithConcurrency(items, limit, fn) {
+  const results = new Array(items.length)
+  let next = 0
+  const workers = Array.from({ length: Math.min(limit, items.length) }, async () => {
+    while (next < items.length) {
+      const i = next++
+      results[i] = await fn(items[i], i)
+    }
+  })
+  await Promise.all(workers)
+  return results
+}
+
+// 单页 OCR + 一次空结果重试（模型偶发返回空串）。真实失败页号统一由本函数登记到
+// ocrFailedPages：首试失败登记走 scratch 数组，重试成功即撤销，避免误报"第 X 页识别失败"。
+async function ocrPageWithRetry(imgBuffer, realPage, ocrFailedPages) {
+  const scratch = []
+  let content = await ocrExtractFromBuffer(imgBuffer, realPage - 1, scratch)
+  if (scratch.length > 0 || !(content || '').trim()) {
+    console.warn(`[分批解析] 第 ${realPage} 页 OCR ${scratch.length > 0 ? '失败' : '结果为空'}，重试 1 次`)
+    content = await ocrExtractFromBuffer(imgBuffer, realPage - 1, scratch)
+  }
+  if (!(content || '').trim() && !ocrFailedPages.includes(realPage)) {
+    ocrFailedPages.push(realPage)
+  }
+  return content || ''
+}
+
 async function processOcrBatch(fileBuffer, startPage, endPage, carryState, lowConfidence, ocrFailedPages) {
   let { images } = await renderPdfToJpegs(fileBuffer, {
     scale: 3,
@@ -901,9 +937,10 @@ async function processOcrBatch(fileBuffer, startPage, endPage, carryState, lowCo
     endPage,
     maxPages: OCR_BATCH_SIZE,
   })
-  const ocrContents = await Promise.all(
-    // startPage - 1 + i：ocrExtractFromBuffer 内部 push pageIndex+1，此处换算为真实页号
-    images.map((img, i) => ocrExtractFromBuffer(img, startPage - 1 + i, ocrFailedPages))
+  const ocrContents = await mapWithConcurrency(
+    images,
+    OCR_PAGE_CONCURRENCY,
+    (img, i) => ocrPageWithRetry(img, startPage + i, ocrFailedPages)
   )
   images = null // 断引用：JPEG buffer 不与 OCR 文本同时存活到解析阶段，下一批分配大对象时可被回收
 
@@ -1218,6 +1255,9 @@ async function ocrExtractSafe(base64Image, pageIndex, failedPages) {
 
 // 基于 OSS URL 的 OCR：上传图片到 OSS 后以 HTTP URL 调用 AI，
 // 解决 ModelScope 等 API 不支持 data:image/jpeg;base64 格式的问题
+// noBackup=true：答案页 OCR 质量敏感——弱备份模型读双栏排版会错乱阅读顺序、漏读单元
+// 标题，整本答案错位（2026-09-08 九上上海作业答案 78 页实测 84 处题号错位）。
+// 魔搭耗尽时宁可本页失败（进 failedPages 重试/告警），不用弱模型输出污染答案库。
 async function ocrExtractFromBuffer(imgBuffer, pageIndex, failedPages) {
   try {
     const url = await uploadImage(imgBuffer, `page_${pageIndex + 1}.jpg`, 'system')
@@ -1226,7 +1266,8 @@ async function ocrExtractFromBuffer(imgBuffer, pageIndex, failedPages) {
       systemPrompt: ANSWER_OCR_SYSTEM_PROMPT,
       userText: '请提取这份练习册答案中的所有单元标题、题号和对应答案。',
       temperature: 0.0,
-      maxTokens: 4096,
+      maxTokens: 8192,
+      noBackup: true,
     })
     return content || ''
   } catch (e) {
@@ -1242,7 +1283,8 @@ async function ocrExtractRawText(base64Image) {
     systemPrompt: ANSWER_OCR_SYSTEM_PROMPT,
     userText: '请提取这份练习册答案中的所有单元标题、题号和对应答案。',
     temperature: 0.0,
-    maxTokens: 4096,
+    maxTokens: 8192,
+    noBackup: true,
   })
   return content || ''
 }

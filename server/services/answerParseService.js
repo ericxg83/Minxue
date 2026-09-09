@@ -214,29 +214,42 @@ export function parseUnitHeader(line) {
  * 行内多题安全拆分。
  * 拆分点：分号（；;）或空白，且后面紧跟 "题号." / "题号．" / "题号、"。
  * 防误拆保护：
- *  - ASCII 点号后必须跟空白或单个选项字母（避免把小数 "3.5元"、"18.360" 拆断）
+ *  - ASCII 点号后不能是数字，避免把小数 "3.5元"、"18.360" 拆断；答案可从
+ *    任意非数字字符开始（如 "3.a>2"、"7.-1"、"10.解："），因为这类紧凑
+ *    排版是本套答案 PDF 的实际格式。
  *  - 题号必须严格递增，且跳跃不超过 30（避免把答案里的普通数字当题号）
  */
 export function splitInlineAnswers(line) {
-  const re = /(?:[；;]|\s)+(?=(\d{1,3})\s*(?:[．、]|\.(?=\s|[A-Da-d](?:\s|$))))/g
-
-  // 首段题号（作为递增校验起点）
-  const firstM = line.match(/^\(?(\d{1,3})\)?\s*[.．、]/)
-  let prevNo = firstM ? parseInt(firstM[1], 10) : null
-
-  const parts = []
-  let last = 0
+  // 先找所有“分隔符 + 题号 + 标点”候选，再按题号连续性确认。
+  // 本册存在“1.A 2.D 3.2 1”这种题号后紧跟数字答案的紧凑格式，
+  // 因此不能简单禁止“题号.数字”；但“3.5m”这类小数又不能被拆开。
+  const candidateRe = /(?:^|[；;\s])\(?([0-9]{1,3})\)?\s*(?:([．、.])|(?=[A-Da-d✓√✔✗✘×解证明计算]))/g
+  const starts = []
+  let prevNo = null
   let m
-  while ((m = re.exec(line)) !== null) {
+  while ((m = candidateRe.exec(line)) !== null) {
     const no = parseInt(m[1], 10)
+    const punctuation = m[2] || ''
+    const tokenStart = m.index + m[0].lastIndexOf(m[1])
+    const after = line.slice(candidateRe.lastIndex).replace(/^\s+/, '')
+    const nextIsDigit = /^\d/.test(after)
+    // 小数候选只有在它正好是下一道题号时才接受：
+    // “1. 3.5元 2.B”中的 3 不接受；“1.A 2.D 3.2 1”中的 3 接受。
+    if (punctuation === '.' && nextIsDigit && prevNo !== null && no !== prevNo + 1) continue
     if (prevNo !== null && (no <= prevNo || no > prevNo + 30)) continue
-    parts.push(line.slice(last, m.index))
-    last = m.index + m[0].length
+    starts.push({ start: tokenStart, no })
     prevNo = no
   }
-  parts.push(line.slice(last))
-  // 去掉每段的尾随分隔符（"1. C；" 的分号若残留，会让选择题正则匹配失败被误标为一般答案）
-  return parts.map(s => s.trim().replace(/[；;、,\s]+$/, '')).filter(Boolean)
+  if (starts.length === 0) return [String(line || '').trim()].filter(Boolean)
+
+  const parts = []
+  for (let i = 0; i < starts.length; i++) {
+    const start = starts[i].start
+    const end = i + 1 < starts.length ? starts[i + 1].start : line.length
+    const part = line.slice(start, end).trim().replace(/[；;、,\s]+$/, '')
+    if (part) parts.push(part)
+  }
+  return parts
 }
 
 /**
@@ -496,14 +509,14 @@ export function parseAnswerText(text, lowConfidence = [], initialState = null, p
 
   for (const { line: trimmed, unit, group } of processedLines) {
     // 选择题：单字母 A-D
-    let m = trimmed.match(/^\(?(\d+)\)?[.．、\s]\s*([A-Da-d])\s*$/)
+    let m = trimmed.match(/^\(?(\d+)\)?(?:[．、]|\.(?=\D)|\s)\s*([A-Da-d])\s*$/)
     if (m) {
       push(unit, group, { question_no: parseInt(m[1], 10), answer: m[2].toUpperCase(), answer_type: 'choice', confidence: 0.95 })
       continue
     }
 
     // 判断题：√ / × 等符号
-    m = trimmed.match(/^\(?(\d+)\)?[.．、\s]\s*([✓√✔✗✘×])\s*$/)
+    m = trimmed.match(/^\(?(\d+)\)?(?:[．、]|\.(?=\D)|\s)\s*([✓√✔✗✘×])\s*$/)
     if (m) {
       push(unit, group, { question_no: parseInt(m[1], 10), answer: m[2], answer_type: 'judge', confidence: 0.95 })
       continue
@@ -521,7 +534,7 @@ export function parseAnswerText(text, lowConfidence = [], initialState = null, p
     }
 
     // 一般答案
-    m = trimmed.match(/^(\d+)[.．、\s]\s*(.+)$/)
+    m = trimmed.match(/^(\d+)(?:[．、]|\.(?=\D)|\s)\s*(.+)$/)
     if (m) {
       const ans = m[2].trim()
       if (ans.length >= 200) continue
