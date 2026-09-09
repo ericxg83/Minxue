@@ -767,12 +767,31 @@ async function doParse(worksheetId, file, precomputedAnswers = null, isCombined 
   let ocrPagesTried = 0
 
   if (fullText && fullText.trim().length > 50) {
+    // 文字层尝试用独立的 lowConfidence 收集器：若文字层被判不可信丢弃，
+    // 其异常信号不应污染后续 OCR 路径的告警统计。
+    const textLayerLowConfidence = []
     const answerSection = fullText.replace(/[\s\S]*?(参考答案|标准答案|参考解答|答案)/, '')
     markerFound = answerSection.length < fullText.length
-    parsedAnswers = parseAnswerText(markerFound ? answerSection : fullText, lowConfidence).answers
+    parsedAnswers = parseAnswerText(markerFound ? answerSection : fullText, textLayerLowConfidence).answers
     if (markerFound && parsedAnswers.length === 0) {
       // 标记词切分后无结果（可能切错位置），退回全文解析
-      parsedAnswers = parseAnswerText(fullText, lowConfidence).answers
+      parsedAnswers = parseAnswerText(fullText, textLayerLowConfidence).answers
+    }
+
+    // ── 文字层质量门禁（2026-09-09 九上上海作业答案错位修复）──
+    // 扫描版 PDF 常带隐藏 OCR 文字层：数学符号严重损坏（上标丢失成 NUL/乱码，
+    // 实测 "y=3x²" 提取成 "y=3x\u0000"），双栏排版下阅读顺序还可能整页错乱。
+    // 这类文字层"能提取出大量文字"，此前被直接采用 → 全本答案错位入库（626 条全错）。
+    // 判据：题号连续性校验报出 ≥3 处反向/重置/大跳号（干净的文字层应接近 0），
+    // 或文字层含 NUL 等 C0 损坏字符（数学上标/分数线被打碎的直接证据）。
+    // 命中即丢弃文字层结果，走逐页视觉 OCR——视觉模型按版面正确阅读双栏。
+    const seqAnomalies = textLayerLowConfidence.filter(x => x && x.kind === 'question_seq_anomaly')
+    const hasBrokenControlChars = /[\u0000-\u0008\u000B\u000C\u000E-\u001F]/.test(fullText)
+    if (parsedAnswers.length > 0 && (seqAnomalies.length >= 3 || hasBrokenControlChars)) {
+      console.warn(`[解析] PDF 文字层解析出 ${parsedAnswers.length} 条答案，但质量门禁命中`
+        + `（题号错位信号 ${seqAnomalies.length} 处${hasBrokenControlChars ? ' + 文字层含损坏控制字符(上标/分数线被打碎)' : ''}），`
+        + `判定为不可信的扫描版文字层，丢弃后改走逐页 OCR`)
+      parsedAnswers = []
     }
   }
 

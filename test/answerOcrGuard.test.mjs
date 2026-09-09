@@ -57,3 +57,19 @@ test('retryTaskById 对 workbook 任务不得把 worksheet_id 兜底进 resource
     'retryTaskById 应对 workbook 任务保持 resourceId 原值，防止重试被 processAnswerBankGrading 抢路由'
   )
 })
+
+test('doParse 文字层快路径必须有质量门禁（扫描版损坏文字层不得直接入库）', () => {
+  const src = read('server/routes/worksheets.js')
+  assert.ok(
+    src.includes('textLayerLowConfidence'),
+    '文字层解析应使用独立 lowConfidence 收集器，避免污染 OCR 路径告警'
+  )
+  assert.ok(
+    src.includes("kind === 'question_seq_anomaly'") && src.includes('>= 3'),
+    '文字层质量门禁应基于题号连续性异常数（≥3 处丢弃）'
+  )
+  assert.ok(
+    src.includes('hasBrokenControlChars'),
+    '文字层质量门禁应检测 NUL 等损坏控制字符（上标/分数线被打碎的证据）'
+  )
+})
