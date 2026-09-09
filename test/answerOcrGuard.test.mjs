@@ -73,3 +73,19 @@ test('doParse 文字层快路径必须有质量门禁（扫描版损坏文字层
     '文字层质量门禁应检测 NUL 等损坏控制字符（上标/分数线被打碎的证据）'
   )
 })
+
+test('pdfService 渲染上下文必须有控制字符过滤（NUL 文字层不再崩 canvas）', () => {
+  const src = read('server/services/pdfService.js')
+  assert.ok(
+    src.includes('hardenTextContext'),
+    '渲染上下文应调用 hardenTextContext 加固（过滤 NUL/孤立代理对）'
+  )
+  assert.ok(
+    src.includes('sanitizeRenderText'),
+    '应有 sanitizeRenderText 控制字符清理函数'
+  )
+  assert.ok(
+    src.includes("'measureText'") && src.includes("'fillText'"),
+    '加固应覆盖 measureText/fillText 等 pdf.js 文字渲染入口'
+  )
+})

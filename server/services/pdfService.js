@@ -88,6 +88,41 @@ export const getPdfPageCount = async (fileBuffer, timeoutMs = 30000) => {
   }
 }
 
+// ── 渲染上下文文字加固（2026-09-09 答案 PDF 渲染崩溃修复）──
+// 扫描版 PDF 常带隐藏 OCR 文字层，其中数学上标等常被打碎成 NUL 等 C0 控制字符
+// （实测 "y=3x²" 的文字层是 "y=3x\u0000"）。pdf.js 渲染时把每个字符喂给 canvas 的
+// measureText/fillText，@napi-rs/canvas 把字符串转 C 字符串时遇到 NUL/孤立代理对
+// 直接抛 "Convert String to CString failed"（本地与 Render 均实测整页崩溃），
+// 导致逐页 OCR 解析全挂。这些字符来自隐形文字层、本来就没有可见字形，
+// 渲染前剥掉即可，不影响扫描图像本身。
+const UNSAFE_TEXT_RE = /[\u0000-\u001F\uFFFE\uFFFF]|[\uD800-\uDBFF](?![\uDC00-\uDFFF])|(?<![\uD800-\uDBFF])[\uDC00-\uDFFF]/g
+const sanitizeRenderText = (s) => {
+  if (typeof s !== 'string' || s.length === 0) return s
+  let unsafe = false
+  for (let i = 0; i < s.length; i++) {
+    const c = s.charCodeAt(i)
+    if (c <= 0x1F || c === 0xFFFE || c === 0xFFFF || (c >= 0xD800 && c <= 0xDFFF)) {
+      // 孤立代理对里高位/低位本身就该剥；成对代理是合法文字不命中 unsafe 检查
+      if (!(c >= 0xD800 && c <= 0xDBFF)) { unsafe = true; break }
+    }
+  }
+  if (!unsafe) return s
+  return s.replace(UNSAFE_TEXT_RE, '')
+}
+// pdf.js 渲染文字时只走这几个入口；用 String 检测做零开销快路径
+const TEXT_CTX_METHODS = ['measureText', 'fillText', 'strokeText', 'fillStrokeText', 'outlineText']
+const hardenTextContext = (ctx) => {
+  for (const name of TEXT_CTX_METHODS) {
+    const orig = ctx[name]
+    if (typeof orig !== 'function') continue
+    ctx[name] = function (...args) {
+      if (typeof args[0] === 'string') args[0] = sanitizeRenderText(args[0])
+      return orig.apply(this, args)
+    }
+  }
+  return ctx
+}
+
 // 将扫描版 PDF 逐页渲染为 JPEG buffer（供视觉模型 OCR）
 // timeoutMs: 每页渲染超时（默认 30s），避免卡在某页
 // maxEdge: 渲染后最长边像素上限。扫描版 PDF 单页原始尺寸可能极大（高 DPI 扫描），
@@ -116,7 +151,7 @@ export const renderPdfToJpegs = async (fileBuffer, { scale = 2, maxPages = 20, q
       const effectiveScale = Math.min(scale, maxEdge / maxBase)
       const viewport = page.getViewport({ scale: effectiveScale })
       const canvas = createCanvas(Math.ceil(viewport.width), Math.ceil(viewport.height))
-      const ctx = canvas.getContext('2d')
+      const ctx = hardenTextContext(canvas.getContext('2d'))
       ctx.fillStyle = '#ffffff'
       ctx.fillRect(0, 0, canvas.width, canvas.height)
       await withTimeout(
