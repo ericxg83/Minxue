@@ -381,7 +381,10 @@ function buildSegments(text, picked) {
     sub_no: String(k.no),
     answer: text.slice(k.end, i + 1 < picked.length ? picked[i + 1].start : text.length).trim(),
   }))
-  if (segs.some(s => !s.answer || s.answer.length > 80)) return null
+  // 2026-09-10：长解答题（如 27.1 的 q4/q9/q10）的 (1)(2)(3) 段可合法超过 80 字，
+  // 该限制原本只用于防误拆。防误拆已由 pickStrictSequence 的「首标记须为 1 且位于行首」严格把关，
+  // 此处把单段上限提到 2000，避免把「续行归并后」的长答案块重新判成不可拆。
+  if (segs.some(s => !s.answer || s.answer.length > 2000)) return null
   return segs
 }
 
@@ -507,11 +510,20 @@ export function parseAnswerText(text, lowConfidence = [], initialState = null, p
     })
   }
 
+  // 续行归并锚点：记录最近一次「整题答案」行在 results 中的下标与 scope，
+  // 供后续不以题号开头的续行归并到该答案（同 unit_key + 同 section 才允许）。
+  let lastContinuationAnchor = null
+  let lastAnchorUnitKey = null
+  let lastAnchorGroup = null
+
   for (const { line: trimmed, unit, group } of processedLines) {
+    const unitKey = unit?.unit_key ?? null
+
     // 选择题：单字母 A-D
     let m = trimmed.match(/^\(?(\d+)\)?(?:[．、]|\.(?=\D)|\s)\s*([A-Da-d])\s*$/)
     if (m) {
       push(unit, group, { question_no: parseInt(m[1], 10), answer: m[2].toUpperCase(), answer_type: 'choice', confidence: 0.95 })
+      lastContinuationAnchor = null
       continue
     }
 
@@ -519,6 +531,7 @@ export function parseAnswerText(text, lowConfidence = [], initialState = null, p
     m = trimmed.match(/^\(?(\d+)\)?(?:[．、]|\.(?=\D)|\s)\s*([✓√✔✗✘×])\s*$/)
     if (m) {
       push(unit, group, { question_no: parseInt(m[1], 10), answer: m[2], answer_type: 'judge', confidence: 0.95 })
+      lastContinuationAnchor = null
       continue
     }
 
@@ -530,38 +543,69 @@ export function parseAnswerText(text, lowConfidence = [], initialState = null, p
       for (let i = 0; i < letters.length; i++) {
         push(unit, group, { question_no: start + i, answer: letters[i], answer_type: 'choice', confidence: 0.9 })
       }
+      lastContinuationAnchor = null
       continue
     }
 
-    // 一般答案
+    // 一般答案（新题整行起点）
     m = trimmed.match(/^(\d+)(?:[．、]|\.(?=\D)|\s)\s*(.+)$/)
     if (m) {
       const ans = m[2].trim()
-      if (ans.length >= 200) continue
+      if (ans.length >= 2000) continue
       const questionNo = parseInt(m[1], 10)
-
-      // 多空题按 (1)(2)(3) 拆成独立子题，避免整题一坨字符串比对
-      const subs = splitSubAnswers(ans)
-      if (subs) {
-        for (const s of subs) {
-          const subJudge = JUDGE_SYMBOL_RE.test(s.answer)
-          push(unit, group, {
-            question_no: questionNo,
-            sub_no: s.sub_no,
-            answer: s.answer,
-            answer_type: subJudge ? 'judge' : 'answer',
-            confidence: 0.8,
-          })
-        }
-        lowConfidence.push({ question_no: questionNo, answer: ans, section: group || null })
-        continue
-      }
-
       const isJudge = JUDGE_SYMBOL_RE.test(ans)
       push(unit, group, { question_no: questionNo, answer: ans, answer_type: isJudge ? 'judge' : 'answer', confidence: 0.8 })
+
+      // 续行归并锚点：只允许归并到「整题答案」（sub_no 为空）行
+      lastContinuationAnchor = results.length - 1
+      lastAnchorUnitKey = unitKey
+      lastAnchorGroup = group ?? null
       if (!isJudge) lowConfidence.push({ question_no: questionNo, answer: ans, section: group || null })
+      continue
+    }
+
+    // 续行归并：不以题号开头的行是上一题的后续内容（解答题答案可以跨多行排版）。
+    // 实测 27.1 的 q4/q9/q10 都是「首行 + (2)/(3) 等续行」；旧逻辑逐行解析时这些
+    // 续行不匹配任何模式被直接丢弃，导致答案只留首行、sub_no 为空。
+    // 归并条件严格：锚点存在、整题 answer（非 sub/非 choice/judge）、同一 unit_key、
+    // 同一 section，防止把下一个单元/大题的首行续行错误追到上一题。
+    const anchor = lastContinuationAnchor != null ? results[lastContinuationAnchor] : null
+    if (
+      anchor &&
+      (anchor.unit_key ?? null) === unitKey &&
+      (anchor.section ?? null) === (group ?? null) &&
+      (anchor.sub_no ?? '') === '' &&
+      (anchor.answer_type ?? 'answer') === 'answer'
+    ) {
+      anchor.answer = `${anchor.answer || ''}\n${trimmed}`.trim()
+      continue
+    }
+    // 其余（跨单元/大题的首行续行、无锚点的噪声行）：丢弃
+  }
+
+  // 2026-09-10 续行归并后的子题拆分：
+  // 多行解答题的 (1)(2)(3) 小问可能在首行与续行之间分布（q4/q9/q10 正是这种版式），
+  // 必须在全部续行归并完成后再统一做一次子题拆分；否则归并后整块答案不与 sub_no 对齐。
+  // 拆分门禁与旧内联拆分完全一致（splitSubAnswers → pickStrictSequence 严格递增 + 首标位置），
+  // 不会把含普通括号（如 (x+1)(x-2)）的答案误拆。
+  const postResults = []
+  for (const a of results) {
+    if (!a || String(a.sub_no || '') !== '' || (a.answer_type || 'answer') !== 'answer') {
+      postResults.push(a)
+      continue
+    }
+    const subs = splitSubAnswers(a.answer)
+    if (!subs) {
+      postResults.push(a)
+      continue
+    }
+    for (const s of subs) {
+      const subJudge = JUDGE_SYMBOL_RE.test(s.answer)
+      postResults.push({ ...a, sub_no: s.sub_no, answer: s.answer, answer_type: subJudge ? 'judge' : 'answer' })
     }
   }
+  results.length = 0
+  results.push(...postResults)
 
   // 题号连续性校验：检测答案页 OCR 错位（如试卷类小标题漏识别导致跨单元题号错位）
   // 异常项带 kind='question_seq_anomaly' 写入 lowConfidence，调用方可按 kind 区分处理
