@@ -151,3 +151,34 @@ test('solve-by-points answer matches reference value list', () => {
     judgeAnswer('当x=0时, y=4; 当x=-1时, y=0', '3, 0', 'answer'),
     { isCorrect: false, unrecognized: false })
 })
+
+// 2026-09-11 用户截图：两道最小公倍数解答题被误判为错。
+// 共同根因：判题不认识"答:……是N"最终结论句式——
+//   · 题#11 OCR 把题干数字"4、8和16"混进答案字段，数字集合兜底因学生
+//     多出 4、8 而比对失败（参考 "16"，学生结论"最小公倍数是16"）；
+//   · 短除法两小问含大量过程数字，收窄只取最后一个"="/"答:"后内容，
+//     只能捞出 126，与参考 "90,126" 2 段对不上。
+test('answer-statement (答:) final results match reference', () => {
+  // 案例1：题干数字混入 + "答:最小公倍数是16"
+  assert.deepEqual(
+    judgeAnswer('解: 答: 最小公倍数是16\n4、8和16', '16', 'answer'),
+    { isCorrect: true, unrecognized: false })
+  // 案例2：短除法两小问，过程数字 + 两个"答:"句
+  const shortDivision = '解: 2|18 30\n 3|9 15\n 3 5\n 2×3×3×5=90\n答:最小公倍数是90' +
+    '\n解: 3|42 63\n 7|14 21\n 2 3\n 3×7×2×3=126\n答:42和63最小公倍数是126'
+  assert.deepEqual(
+    judgeAnswer(shortDivision, '90,126', 'answer'),
+    { isCorrect: true, unrecognized: false })
+  // 真答错必须仍判错：结论值与参考不等
+  assert.deepEqual(
+    judgeAnswer('解: 答: 最小公倍数是48\n4、8和16', '16', 'answer'),
+    { isCorrect: false, unrecognized: false })
+  const wrongSecond = shortDivision.replace('是126', '是128')
+  assert.deepEqual(
+    judgeAnswer(wrongSecond, '90,126', 'answer'),
+    { isCorrect: false, unrecognized: false })
+  // 只答一小问（结果序列段数不足）不判对
+  assert.deepEqual(
+    judgeAnswer('解: 2|18 30\n答:最小公倍数是90', '90,126', 'answer'),
+    { isCorrect: false, unrecognized: false })
+})

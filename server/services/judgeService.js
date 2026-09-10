@@ -114,6 +114,39 @@ export function findDirtyAnswers(rows) {
   return dirty
 }
 
+/**
+ * 从解答题学生答案的"答:"句中提取最终数值结果序列。
+ *
+ * 背景（2026-09-11 用户截图：两道最小公倍数解答题被误判为错）：
+ *   · 题#11 学生答案 "解: 答: 最小公倍数是16\n4、8和16"，参考 "16"——OCR 把题干
+ *     数字"4、8和16"混进答案字段，数字集合兜底因学生多出 4、8 而比对失败；
+ *   · 短除法两小问 "解:2|18 30…=90 答:最小公倍数是90 解:3|42 63…=126
+ *     答:42和63最小公倍数是126"，参考 "90,126"——收窄逻辑只取最后一个
+ *     "="/"答:" 后的内容，只能捞出 126，与参考 2 段对不上。
+ * 共同根因：判题不认识"答:……是N"这一最终结论句式。
+ *
+ * 提取规则：按每个"答:"切分；每句到下一个"解:"为止；取句中最后一个
+ * "是/为/等于/=" 后面的数值（含 4/9 分数形态）。任何一句提取不出数值结果
+ * 即整体放弃（返回空数组），宁可走保守路径也不猜测。
+ * 只作为"判对"的补充通道，提取结果与参考段数一致且逐段等值才算对；
+ * 学生真答错时提取值与参考不等，仍落到原有判错路径。
+ */
+function extractAnswerStatementResults(s) {
+  const str = String(s || '')
+  if (!/答[:：]/.test(str)) return []
+  const clauses = str.split(/答[:：]/).slice(1)
+  const results = []
+  for (const rawClause of clauses) {
+    const clause = rawClause.split(/解[:：]/)[0]
+    const matches = [
+      ...clause.matchAll(/(?:是|为|等于|=)\s*([0-9]+(?:\.[0-9]+)?(?:\s*\/\s*[0-9]+)?)/g)
+    ]
+    if (matches.length === 0) return []
+    results.push(matches[matches.length - 1][1].replace(/\s+/g, ''))
+  }
+  return results
+}
+
 export function normalizeQuestionType(rawType, options = []) {
   const type = String(rawType || '').trim().toLowerCase()
   if (['choice', 'select', 'multiple_choice', 'single_choice', '\u9009\u62e9', '\u9009\u62e9\u9898', '\u5355\u9009', '\u5355\u9009\u9898', '\u591a\u9009', '\u591a\u9009\u9898'].includes(type)) return 'choice'
@@ -906,6 +939,25 @@ export function judgeAnswer(studentAnswer, referenceAnswer, questionType) {
   if (refLooseParts.length > 1 && studentLooseParts.length === refLooseParts.length) {
     if (studentLooseParts.every((sp, i) => normalizeAndCompare(sp, refLooseParts[i]))) {
       return { isCorrect: true, unrecognized: false }
+    }
+  }
+
+  // 解答题"答:"句最终结果序列判定："答:最小公倍数是90 … 答:42和63最小公倍数是126"
+  // vs 参考 "90,126"。学生明确写出的结论句是最高可信度的最终答案，
+  // 过程数字（短除法中间值）和题干数字（OCR 混入）都不该拖垮它。
+  // 只有"答:"句提取出的结果序列与参考段数一致且逐段等值才判对，防误判放行。
+  const stmtResults = extractAnswerStatementResults(studentAnswer)
+  if (stmtResults.length > 0) {
+    const stmtRefSegments = splitAnswers(referenceAnswer)
+    if (stmtRefSegments.length === stmtResults.length) {
+      const allMatch = stmtRefSegments.every((rp, i) => {
+        const ns = normalizeAnswer(stmtResults[i])
+        const nr = normalizeAnswer(rp)
+        return (ns !== '' && ns === nr) ||
+          isNumericEquivalent(ns, nr) ||
+          isMathEquivalent(stmtResults[i], rp)
+      })
+      if (allMatch) return { isCorrect: true, unrecognized: false }
     }
   }
 
