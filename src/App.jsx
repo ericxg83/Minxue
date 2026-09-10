@@ -225,6 +225,11 @@ export default function App() {
                 ? cachedData.find(s => s.id === lastStudentId) 
                 : null
               setCurrentStudent(lastStudent || cachedData[0])
+              // 记录 init 应用到的学生 id：后台刷新回来时，若用户已手动切换过学生，
+              // 不得用 init 时刻捕获的 lastStudentId 覆盖用户的选择
+              // （2026-09-10 事故：后台 getStudents 返回晚于用户选学生，把陆晨曦的
+              //   上传静默覆盖回上次学生，作业归错人）。
+              const appliedStudentId = (lastStudent || cachedData[0])?.id
               
               setIsInitializing(false)
               
@@ -237,6 +242,11 @@ export default function App() {
                   const freshLastStudent = lastStudentId 
                     ? freshList.find(s => s.id === lastStudentId) 
                     : null
+                  const currentId = useStudentStore.getState().currentStudent?.id
+                  if (currentId && currentId !== appliedStudentId) {
+                    // 用户已手动切换学生，保留用户的选择，只更新 students 列表
+                    return
+                  }
                   if (freshLastStudent) {
                     setCurrentStudent(freshLastStudent)
                   }
@@ -255,11 +265,15 @@ export default function App() {
           ? mockStudents.find(s => s.id === lastStudentId)
           : null
         setCurrentStudent(initialStudent || mockStudents[0])
+        const appliedStudentId = (initialStudent || mockStudents[0])?.id
 
         getStudents(false).then(result => {
           const studentList = result.data || []
           if (Array.isArray(studentList) && studentList.length > 0) {
             setStudents(studentList)
+            // 同上：用户已手动切换学生时不覆盖（fallback 也不得强切到名单第一个）
+            const currentId = useStudentStore.getState().currentStudent?.id
+            if (currentId && currentId !== appliedStudentId) return
             const freshLastStudent = lastStudentId
               ? studentList.find(s => s.id === lastStudentId)
               : null

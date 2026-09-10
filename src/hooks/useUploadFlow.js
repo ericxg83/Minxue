@@ -309,10 +309,18 @@ export function useUploadFlow({ loadTasks, isInitializing }) {
   const processUploadQueue = async () => {
     if (uploadQueue.length === 0 || isUploading || !currentStudent?.id) return
     setIsUploading(true)
-    const filesToUpload = [...uploadQueue]
+    // 2026-09-10 修复：队列项在「选文件时」就绑定学生 id。
+    // 之前队列只存 File，初始化完成后用"当时的" currentStudent 上传，
+    // 若期间学生被切走（如初始化后台刷新覆盖），作业就会归到错误学生名下。
+    const queuedItems = [...uploadQueue]
     setUploadQueue([])
     try {
-      await uploadViaBackend(filesToUpload)
+      const queuedStudentId = queuedItems.find(i => i?.studentId)?.studentId || currentStudent?.id
+      if (!queuedStudentId) {
+        Toast.show({ message: '请先选择学生后再上传试卷', type: 'error', duration: 3000 })
+        return
+      }
+      await uploadViaBackend(queuedItems.map(i => i?.file ?? i), queuedStudentId)
     } finally {
       setIsUploading(false)
     }
@@ -379,7 +387,8 @@ export function useUploadFlow({ loadTasks, isInitializing }) {
 
       if (isInitializing) {
         Toast.show({ message: `正在初始化，已缓存 ${newFiles.length} 个文件，稍后自动上传...`, type: 'success', duration: 2000 })
-        setUploadQueue(prev => [...prev, ...newFiles])
+        // 队列项绑定选文件那一刻的学生 id：初始化完成后按快照归属，不用"当时的" currentStudent
+        setUploadQueue(prev => [...prev, ...newFiles.map(f => ({ file: f, studentId: currentStudent?.id || null }))])
         return
       }
 
@@ -388,14 +397,18 @@ export function useUploadFlow({ loadTasks, isInitializing }) {
         return
       }
 
+      // 2026-09-10 修复：归属学生在「提交时」锁定为快照，后续压缩/网络等待期间
+      // 即使 currentStudent 再变化（如后台刷新覆盖），这次上传仍归到提交时的学生。
+      const studentSnapshotId = currentStudent.id
+
       setUploading(true)
 
       const flow = pendingFlowRef.current
       if (flow === 'workbook') {
-        await uploadRegularHomework(newFiles)
+        await uploadRegularHomework(newFiles, studentSnapshotId)
         clearPendingUploadFlow()
       } else if (flow === 'exam') {
-        await uploadRegularHomework(newFiles)
+        await uploadRegularHomework(newFiles, studentSnapshotId)
         clearPendingUploadFlow()
       } else {
         const qrToast = Toast.show({ message: '正在检测二维码...', type: 'loading', duration: 0 })
@@ -416,7 +429,7 @@ export function useUploadFlow({ loadTasks, isInitializing }) {
         } else if (distinctIds.length > 1) {
           Toast.show({ message: '一次上传里检测到多份重练卷，请分开上传', type: 'error', duration: 3500 })
         } else {
-          await uploadRegularHomework(newFiles)
+          await uploadRegularHomework(newFiles, studentSnapshotId)
         }
 
         clearPendingUploadFlow()
@@ -483,10 +496,10 @@ export function useUploadFlow({ loadTasks, isInitializing }) {
   }
 
   // 普通作业 — 多图一任务
-  const uploadRegularHomework = async (fileOrFiles) => {
+  const uploadRegularHomework = async (fileOrFiles, studentIdOverride = null) => {
     const files = Array.isArray(fileOrFiles) ? fileOrFiles : [fileOrFiles]
     try {
-      await uploadViaBackend(files)
+      await uploadViaBackend(files, studentIdOverride)
     } catch (error) {
       console.error('uploadRegularHomework Error:', error)
       Toast.show({ message: describeUploadFailure(error), type: 'error', duration: 4000 })
@@ -539,11 +552,21 @@ export function useUploadFlow({ loadTasks, isInitializing }) {
     }
     // 先移除旧行，重传会生成新的 temp 任务
     setTasks(prev => prev.filter(t => t.id !== taskId))
-    await uploadViaBackend(files)
+    // 重传沿用 temp 任务创建时的学生归属，不能跟着当前选中的学生走
+    await uploadViaBackend(files, temp.student_id)
   }
 
   // Upload via backend API — 多图一任务
-  const uploadViaBackend = async (rawFiles) => {
+  // 2026-09-10 修复：新增 studentIdOverride——作业归属只认「提交/入队时」锁定的学生快照。
+  // 曾经的事故：App 初始化的后台学生刷新会在用户拍照期间把 currentStudent 静默切回
+  // 上次的学生，这里读到被覆盖后的 id，陆晨曦的作业被归到蔡怡希名下。
+  const uploadViaBackend = async (rawFiles, studentIdOverride = null) => {
+    const studentId = studentIdOverride || currentStudent?.id
+    if (!studentId) {
+      Toast.show({ message: '请先选择学生后再上传试卷', type: 'error', duration: 3000 })
+      return
+    }
+
     const pendingFlowEffective = pendingFlowRef.current
     const worksheetIdEffective = __pendingUploadStore.worksheetId || selectedWorksheetIdRef.current || selectedWorksheetId
     const worksheetNameEffective = __pendingUploadStore.worksheetName
@@ -577,7 +600,7 @@ export function useUploadFlow({ loadTasks, isInitializing }) {
 
     const tempTask = {
       id: `temp-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`,
-      student_id: currentStudent.id,
+      student_id: studentId,
       image_url: URL.createObjectURL(files[0]),
       original_name: taskName,
       task_type: isWorkbook ? 'workbook' : (isExam ? 'exam' : 'homework'),
@@ -604,7 +627,7 @@ export function useUploadFlow({ loadTasks, isInitializing }) {
     }
     addTask(tempTask)
 
-    clearStudentCaches(currentStudent.id)
+    clearStudentCaches(studentId)
     // 不再用 success 样式提示"正在上传"——用户会把绿色的"已添加"误读成上传成功
     const uploadToast = Toast.show({ message: files.length > 1 ? `正在上传 ${files.length} 张图片...` : '正在上传...', type: 'loading', duration: 0 })
 
@@ -625,7 +648,7 @@ export function useUploadFlow({ loadTasks, isInitializing }) {
         options.taskType = 'exam'
         options.subject = subjectEffective
       }
-      const result = await taskService.uploadFiles(currentStudent.id, files, options)
+      const result = await taskService.uploadFiles(studentId, files, options)
       const taskResult = (result.tasks || []).find(t => !t.error) || (result.tasks || [])[0]
 
       if (taskResult && !taskResult.error) {
@@ -666,7 +689,7 @@ export function useUploadFlow({ loadTasks, isInitializing }) {
     }
 
     if (successCount > 0) {
-      invalidateCache('tasks', currentStudent.id)
+      invalidateCache('tasks', studentId)
       loadTasksRef.current().then(() => {
         if (realTaskId) {
           updateTaskInStore(realTaskId, 'processing', { progress: 0 })
