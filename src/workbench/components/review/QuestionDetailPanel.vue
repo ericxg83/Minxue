@@ -1082,7 +1082,7 @@ const handleSave = async () => {
       question_type: form.value.question_type, subject: form.value.subject
     })
     Object.assign(question, { content: form.value.content, options: form.value.options, answer: form.value.answer, analysis: form.value.analysis, ai_tags: form.value.tags, geometry_image_url: localImageUrl.value, geometry_manual_override: !!question.geometry_manual_override, question_type: form.value.question_type, subject: form.value.subject })
-    // 同步后端算的最新入册风险（⚠ 缺图 / ⚠ 低置信 tag 实时消失/出现）
+    // 同步后端算的最新入册风险（⚠ 缺图 / ⚠ 缺选项 / ⚠ 题型缺失 / ⚠ 低置信 tag 实时消失/出现）
     if (Array.isArray(resp?.question?.wrong_book_risks)) question.wrong_book_risks = resp.question.wrong_book_risks
     // 保存后自动重批改
     try {

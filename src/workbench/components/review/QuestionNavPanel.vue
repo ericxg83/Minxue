@@ -171,9 +171,19 @@ const difficultyText = (d) => {
 
 // 错题本入册风险标签（后端 GET /api/questions/task/:taskId 在每道题上算 wrong_book_risks）
 // 让复核老师看到"这题虽判错/未作答，但会被错题本挡"——需现场处理。
-const RISK_LABELS = { missing_figure: '⚠ 缺图', low_confidence: '⚠ 低置信' }
+// 2026-09-11：此前后端只报 missing_figure，任何「不完整」的题都显示「⚠ 缺图」，
+// 导致题干压根没图的题被打上缺图标签。现在后端按 checkQuestionCompleteness 的真实
+// 缺项细分，每种缺项给对应的处置指引——别再退化成一个万能「缺图」筐。
+const RISK_LABELS = {
+  missing_figure: '⚠ 缺图',
+  missing_options: '⚠ 缺选项',
+  invalid_type: '⚠ 题型缺失',
+  low_confidence: '⚠ 低置信'
+}
 const RISK_HINTS = {
-  missing_figure: '题干引用图但缺配图，错题本不会收。点「编辑」补配图后会自动入册。',
+  missing_figure: '题干引用了图（如图/图示/见图）但没有配图，错题本不会收。点「编辑」补配图后会自动入册。',
+  missing_options: '选择题没有选项，错题本不会收。点「编辑」补上选项后会自动入册。',
+  invalid_type: '题目类型为空或非法，错题本不会收。点「编辑」选定题型后会自动入册。',
   low_confidence: 'AI 判错但把握不足 (<0.8)，错题本暂不收。点「标错」(W) 即强入。'
 }
 const riskLabel = (r) => RISK_LABELS[r] || r
@@ -308,10 +318,14 @@ const onThresholdChange = (val) => {
   flex-shrink: 0;
   border: 1px solid transparent;
 }
-.item-wrong-book-risk.missing_figure {
+/* 硬挡：必须补数据才会入册 */
+.item-wrong-book-risk.missing_figure,
+.item-wrong-book-risk.missing_options,
+.item-wrong-book-risk.invalid_type {
   color: var(--wb-danger);
   background: var(--wb-danger-soft);
 }
+/* 软挡：老师一句话即可放行 */
 .item-wrong-book-risk.low_confidence {
   color: var(--wb-warning);
   background: var(--wb-warning-soft);

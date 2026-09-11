@@ -1,6 +1,7 @@
 import { randomUUID } from 'node:crypto'
 import { query, TABLES, transaction } from '../config/neon.js'
 import { checkQuestionCompleteness } from '../utils/questionCompleteness.js'
+import { syncQuestionCompleteness } from './questionCompletenessSync.js'
 import { normalizeOptions } from '../utils/optionText.js'
 import { coerceAIText } from '../utils/aiTextCoerce.js'
 
@@ -221,6 +222,11 @@ export const addWrongQuestions = async (studentId, questionIds, questionConfiden
       console.log(`  ⚠️ 完整性检查未通过，未加入错题本: ${skippedCount} 道 (缺少答案/选项/配图)`)
     }
     filteredIds = completeIds
+    // 入册前把落库列对齐到动态真值。questions.is_complete 建题时算过一次就没人回写，
+    // 动态口径判完整的题该列可能仍是 false，而 GET 错题列表按 `q.is_complete = TRUE`
+    // 过滤 → 变成「写入成功但列表看不见」（2026-09-11 实测 396 条入册记录隐藏 112 条）。
+    // 必须在 INSERT 之前完成，否则入册后立刻回拉列表会漏掉刚加的题。
+    await syncQuestionCompleteness(filteredIds)
   }
 
   if (filteredIds.length === 0) return []

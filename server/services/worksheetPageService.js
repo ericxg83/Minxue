@@ -5,6 +5,7 @@
 import { query } from '../config/neon.js'
 import { getResourceAnswersBySection } from './neonService.js'
 import { judgeAnswer } from './judgeService.js'
+import { syncQuestionCompletenessQuietly } from './questionCompletenessSync.js'
 import { searchByAnswerFingerprint } from '../worker.js'
 
 /**
@@ -209,6 +210,14 @@ export async function regradeTaskPageWithUnit(taskId, pageNumber, unitKey) {
       errors.push(`sync_wrong_questions: ${e.message}`)
     }
   }
+
+  // 6) 把 is_complete 对齐到动态真值：上面刚把参考答案写进 questions，
+  // 很多题此前因答案为空落了 false，不回写就会被错题本/周报/讲义的
+  // `is_complete = TRUE` 过滤掉。
+  syncQuestionCompletenessQuietly(
+    questions.map(q => q.id).filter(Boolean),
+    `regradeTaskPageWithUnit task=${taskId} page=${pageNumber}`
+  )
 
   return {
     success: errors.length === 0,

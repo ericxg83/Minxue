@@ -2,6 +2,7 @@ import { createHash } from 'node:crypto'
 import { query, TABLES, LIFECYCLE_STATUS, WRONG_STATUS } from '../config/neon.js'
 import { addWrongQuestions, createJudgement } from './neonService.js'
 import { syncQuestionsKnowledgeAndMastery, syncReviewResultsMastery } from './knowledgeMasteryService.js'
+import { syncQuestionCompletenessQuietly } from './questionCompletenessSync.js'
 import { checkQuestionCompleteness } from '../utils/questionCompleteness.js'
 
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
@@ -128,6 +129,13 @@ export const finalizeGradingBatch = async ({
     })
   }
 
+  // 批改落库后把 is_complete 对齐到动态真值。OCR 阶段建的题答案为空 → 落 false，
+  // 答案解析异步补齐后无人回写，错题本 / 周报 / 讲义按 `is_complete = TRUE` 过滤时会漏题。
+  syncQuestionCompletenessQuietly(
+    pendingQuestions.map(q => q.id),
+    `finalizeGradingBatch task=${taskId}`
+  )
+
   return {
     settled: pendingQuestions.length,
     skipped: settledIds.size,
@@ -238,6 +246,9 @@ export const finalizeRejudgeResult = async ({
       settlement_mode: 'rejudge'
     }
   })
+
+  // 重判常发生在老师补完答案/配图/选项之后，此时落库列最容易偏旧。
+  syncQuestionCompletenessQuietly([question.id], `finalizeRejudgeResult q=${question.id}`)
 
   return { settled: true, skipped: false, isCorrect, wrongQuestionAdded }
 }

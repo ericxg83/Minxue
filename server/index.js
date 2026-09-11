@@ -63,6 +63,7 @@ import { createUploadReport, logUploadReport } from './services/uploadReportLogg
 import { createJudgement, batchUpdateQuestionTags, getQuestionAssets, getQuestionAssetsByType, createResource, replaceResourceAnswers, addWrongQuestions } from './services/neonService.js'
 import { judgeAnswer, findDirtyAnswers } from './services/judgeService.js'
 import { checkQuestionCompleteness } from './utils/questionCompleteness.js'
+import { syncQuestionCompletenessQuietly } from './services/questionCompletenessSync.js'
 import { computeWrongBookRisks } from './utils/wrongBookRisks.js'
 import { normalizeOptions } from './utils/optionText.js'
 import { computeTaskStats } from './utils/taskStats.js'
@@ -1702,17 +1703,47 @@ app.put('/api/questions/:id', async (req, res) => {
       // review_status='wrong_no_book' 是「明确不入」语义；其他值走原判定路径。
       if (review_status === 'wrong' && updatedQuestion.student_id) {
         const completeness = checkQuestionCompleteness(updatedQuestion)
-        if (completeness.isComplete && updatedQuestion.answer && String(updatedQuestion.answer).trim()) {
+        const hasAnswer = !!(updatedQuestion.answer && String(updatedQuestion.answer).trim())
+        // 强入结果必须回传：过去失败只在 console 打日志，老师点了「错」以为已经入册，
+        // 直到最后复核被门禁拦下才发现，还以为是系统重复提示。
+        // wrong_book_sync 随响应一起返回（只读观测，不参与任何判定）。
+        if (!hasAnswer) {
+          updatedQuestion.wrong_book_sync = {
+            status: 'skipped',
+            reason: 'missing_answer',
+            issues: completeness.issues,
+            message: '缺少参考答案，未加入错题本'
+          }
+        } else if (!completeness.isComplete) {
+          updatedQuestion.wrong_book_sync = {
+            status: 'skipped',
+            reason: 'incomplete',
+            issues: completeness.issues,
+            message: `题目元素不完整（${completeness.issues.join('、')}），未加入错题本`
+          }
+        } else {
           try {
-            await addWrongQuestions(
+            const added = await addWrongQuestions(
               updatedQuestion.student_id,
               [id],
               null,
               new Map([[id, updatedQuestion]]),
               { skipConfidence: true }
             )
+            updatedQuestion.wrong_book_sync = {
+              status: (added?.length || 0) > 0 ? 'added' : 'already_exists',
+              reason: null,
+              issues: [],
+              message: (added?.length || 0) > 0 ? '' : '这道题已在错题本中'
+            }
           } catch (e) {
             console.error(`[manual_review] 强入错题本失败 q=${id.slice(0,8)}:`, e.message)
+            updatedQuestion.wrong_book_sync = {
+              status: 'failed',
+              reason: 'write_error',
+              issues: [],
+              message: '写入错题本失败，请稍后重试'
+            }
           }
         }
       }
@@ -1755,6 +1786,10 @@ app.put('/api/questions/:id', async (req, res) => {
     // 即时把 ⚠ tag 消失，不需要重拉整个 task。
     // is_complete 列此刻还是旧值（fire-and-forget 重算在 res.json 之后），
     // 所以基于"题干/选项/参考答案/配图"现算一次，保证响应反映补图后的真实状态。
+    // 只覆盖响应里的副本，落库列由下面的 syncQuestionCompletenessQuietly 统一回写——
+    // 历史 bug：这里一旦把 updatedQuestion.is_complete 改成新值，后面的
+    // `isComplete !== updatedQuestion.is_complete` 就成了新值比新值，恒等，
+    // UPDATE 永远不执行，缓存列再也追不上真值。
     try {
       const { isComplete: liveIsComplete } = checkQuestionCompleteness(updatedQuestion)
       updatedQuestion.is_complete = liveIsComplete
@@ -1774,20 +1809,9 @@ app.put('/api/questions/:id', async (req, res) => {
 
     res.json({ success: true, question: updatedQuestion })
 
-    // 重算 is_complete（非阻塞）
-    ;(async () => {
-      try {
-        const { isComplete } = checkQuestionCompleteness(updatedQuestion)
-        if (isComplete !== updatedQuestion.is_complete) {
-          await query(
-            `UPDATE ${TABLES.QUESTIONS} SET is_complete = $1, updated_at = NOW() WHERE id = $2`,
-            [isComplete, id]
-          )
-        }
-      } catch (e) {
-        console.error(`is_complete 更新失败 q=${id.substring(0, 8)}:`, e.message)
-      }
-    })()
+    // 回写落库列（非阻塞，失败只记日志）：缓存列必须追上动态真值，
+    // 否则 GET 错题列表 / 周报 / 讲义按 `is_complete = TRUE` 过滤时会继续漏掉这题。
+    syncQuestionCompletenessQuietly([id], `PUT /api/questions q=${id}`)
   } catch (error) {
     console.error('更新题目失败:', error)
     res.status(500).json({ error: error.message })
@@ -2243,18 +2267,15 @@ app.post('/api/wrong-questions', async (req, res) => {
     const completeIds = questionIds.filter(id => isCompleteMap.get(id) === true)
 
     // 写入侧自愈：questions.is_complete 只是动态口径的反范式缓存。questions 有 20+ 处
-    // UPDATE 写入点，只有 PUT /api/questions/:id 会重算它，答案/选项/配图入库后被异步
-    // 补全时不回写，持久列因此长期偏旧（实测全表 92 条偏旧、反向 0 条，只会偏保守）。
-    // GET 错题列表按该列过滤，不回写就会出现「写入成功/已存在，但列表看不到 → 点了没反应」。
-    // 范围只限本次提交的题目，不做全表回填。必须在 res.json 之前完成——
-    // 前端 addQuestionToBook 拿到响应后立刻 loadWrongQuestions。
+    // UPDATE 写入点，历史上有 30+ 处根本不回写它，答案/选项/配图入库后被异步
+    // 补全时列值长期偏旧（2026-09-11 实测：396 条已入册错题被读口径隐藏 112 条，
+    // 近 48h 新入册甚至隐藏 53%）。GET 错题列表按该列过滤，不回写就会出现
+    // 「写入成功/已存在，但列表看不到 → 点了没反应」。
+    // 范围只限本次提交的题目，不做全表回填（全量走 backfill 脚本）。
+    // 必须在 res.json 之前完成——前端 addQuestionToBook 拿到响应后立刻 loadWrongQuestions。
     if (completeIds.length > 0) {
       try {
-        await query(
-          `UPDATE ${TABLES.QUESTIONS} SET is_complete = TRUE, updated_at = NOW()
-           WHERE id = ANY($1) AND is_complete IS DISTINCT FROM TRUE`,
-          [completeIds]
-        )
+        await syncQuestionCompleteness(completeIds)
       } catch (e) {
         console.error('[manual-add] is_complete 回写失败（不影响入册结果）:', e.message)
       }
