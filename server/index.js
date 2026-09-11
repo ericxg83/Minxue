@@ -69,6 +69,7 @@ import { normalizeOptions } from './utils/optionText.js'
 import { computeTaskStats } from './utils/taskStats.js'
 import { fixFileIfNeeded } from './services/uploadValidator.js'
 import { recognizeAnswerImage } from './services/answerOCRService.js'
+import { recognizeQuestionImage } from './services/questionOCRService.js'
 import { uploadImage, deleteFile } from './services/ossService.js'
 import { getTaskQueue, getGeometryQueue, getQueueStats, taskWorker } from './queue.js'
 import { processTask } from './worker.js'
@@ -1685,7 +1686,12 @@ app.put('/api/questions/:id', async (req, res) => {
           question: { ...updatedQuestion, is_correct },
           isCorrect: is_correct,
           oldIsCorrect,
-          source: 'review_edit'
+          source: 'review_edit',
+          // 老师手动改 is_correct = 人工判定（ground truth），按口径「人工标错直接入」，
+          // 不受 AI 置信度闸约束。此前靠「confidenceMap 传 null」意外绕过闸，
+          // 2026-09-11 闸改 fail-closed（未传 Map 会回读 DB 判定）后必须显式声明，
+          // 否则老师改错的低置信题会被误挡在错题本外。
+          manualOverride: true
         })
       } catch (settleErr) {
         console.error('[settle] review_edit finalizeRejudgeResult 失败:', settleErr.message)
@@ -1846,6 +1852,42 @@ app.post('/api/questions/:id/recognize-answer', upload.single('image'), async (r
   }
 })
 
+// 上传一张「单题区域裁剪图」→ 视觉模型重识别题干/选项/答案 → 返回结构化元素，**不写库**。
+// 用于 PC 批改工作台「重新识别本题」：整页 OCR 漏识别选择题选项（options 为空）时，
+// 老师按 block_coordinates 框选该题区域重新识别，补全后即可通过完整性门禁进入错题本。
+// 与 recognize-answer 一致：只返回结果，由前端预览确认后再走 PUT /api/questions/:id 落库。
+app.post('/api/questions/:id/recognize-question', upload.single('image'), async (req, res) => {
+  try {
+    const { id } = req.params
+    if (!req.file || !req.file.buffer || req.file.buffer.length === 0) {
+      return res.status(400).json({ ok: false, error: '未收到图片' })
+    }
+    const { rows } = await query(
+      `SELECT id FROM ${TABLES.QUESTIONS} WHERE id = $1 AND deleted_at IS NULL`,
+      [id]
+    )
+    if (rows.length === 0) {
+      return res.status(404).json({ ok: false, error: '题目不存在' })
+    }
+    const { fixedBuffer } = await fixFileIfNeeded(
+      req.file.buffer,
+      req.file.originalname || 'question.jpg'
+    )
+    const result = await recognizeQuestionImage(fixedBuffer, 'image/jpeg')
+    res.json({
+      ok: true,
+      content: result.content,
+      options: result.options,
+      answer: result.answer,
+      analysis: result.analysis,
+      question_type: result.question_type
+    })
+  } catch (error) {
+    console.error(`[recognize-question] q=${req.params.id?.slice(0, 8)}:`, error.message)
+    res.status(500).json({ ok: false, error: error.message || '识别失败' })
+  }
+})
+
 // ─────────────────────────────────────────────
 // 重批改（重新判定 is_correct）
 // ─────────────────────────────────────────────
@@ -1871,7 +1913,10 @@ app.post('/api/questions/:id/rejudge', async (req, res) => {
       const settlement = await finalizeRejudgeResult({
         question: q,
         isCorrect,
-        oldIsCorrect
+        oldIsCorrect,
+        // 该端点由 PC 复核页「保存」触发（QuestionDetailPanel 教师操作）→ 人工判定，
+        // 按口径不受 AI 置信度闸约束。理由同上方 review_edit 分支。
+        manualOverride: true
       })
       return res.json({
         success: true,
@@ -1950,13 +1995,20 @@ app.post('/api/questions/batch', async (req, res) => {
       qc.ai_tags AS _cache_ai_tags,
       a.tikz_status,
       a.processed_at AS asset_processed_at,
-      a.last_error AS asset_last_error`
+      a.last_error AS asset_last_error,
+      tk.image_url AS task_image_url,
+      tk.images AS task_images`
     // 当提供 studentId 时，LEFT JOIN wrong_questions 带出掌握度信息
     if (studentId) {
       queryStr += `, wq.error_count, wq.lifecycle_status, wq.status AS wq_status`
     }
+    // 原卷页图存在 tasks 上（tasks.image_url = 上传首页图；tasks.images = JSONB 数组，
+    // 顺序即 1-based 页号），而 questions.image_url 基本为空（全库约 12.5% 有值，
+    // 重练卷引用的原题 60/60 全为 NULL）。重练批改页「原卷出处」需要按 page_number 取页图，
+    // 故随 q.* 一并带出。纯增字段：tasks.id 是主键，LEFT JOIN 不会放大行数；移动端忽略即可。
     queryStr += ` FROM ${TABLES.QUESTIONS} q
        LEFT JOIN ${TABLES.QUESTION_CACHE} qc ON q.cache_id = qc.id
+       LEFT JOIN ${TABLES.TASKS} tk ON tk.id = q.task_id
        LEFT JOIN LATERAL (
          SELECT tikz_status, processed_at, last_error
          FROM ${TABLES.QUESTION_ASSETS}

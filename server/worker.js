@@ -4151,7 +4151,22 @@ const processWorkbookGrading = async (job) => {
   // 同题号覆盖导致 question_id 指向错误的题目甚至 NULL。
   const wrongQuestions = questionsWithStudentId.filter(q => (q.is_correct === false || q.answer_source === 'blank') && q.question_number)
 
+  // 置信度闸（与 addWrongQuestions 同口径，2026-09-11 补齐）：
+  //   练习册自包含错题走 addSelfContainedWrongQuestion，而该函数**没有**置信度闸，
+  //   于是 AI 低置信判错的练习册题会直接入册，与「低置信度一定不能入」冲突。
+  //   在此按同一阈值拦截。未作答(blank)不受约束；confidence 为空（AI 未判定）也不挡。
+  //   实测：本路径已判定的题 confidence 统一为 0.95、未作答为 null，
+  //   所以该闸对现有数据零影响，是防空转的未来防护。
+  const workbookConfidenceThreshold = parseFloat(process.env.CONFIDENCE_THRESHOLD) || 0.8
+  let workbookAdded = 0
+  let workbookSkippedLowConf = 0
+
   for (const wq of wrongQuestions) {
+    if (wq.answer_source !== 'blank' && wq.confidence != null && wq.confidence < workbookConfidenceThreshold) {
+      workbookSkippedLowConf++
+      console.log(`   [Workbook] 低置信度错题已排除: question_no=${wq.question_number} conf=${wq.confidence} (阈值 ${workbookConfidenceThreshold})`)
+      continue
+    }
     const pageImageUrl = wq.image_url || imageList[0]?.image_url
     let questionImageUrl = null
 
@@ -4168,26 +4183,36 @@ const processWorkbookGrading = async (job) => {
       }
     }
 
-    await addSelfContainedWrongQuestion({
-      studentId,
-      worksheetId,
-      questionNo: wq.question_number,
-      pageNumber: wq.page_number || 1,
-      studentAnswer: wq.student_answer || null,
-      correctAnswer: wq.answer || null,
-      answerType: wq.question_type || 'choice',
-      content: wq.content || null,
-      questionType: wq.question_type || 'choice',
-      blockCoordinates: wq.block_coordinates || null,
-      questionImageUrl,
-      subject: null,
-      sourceType: 'workbook',
-      questionId: wq.id
-    })
+    // 逐题独立 try/catch：单题写入异常（裁剪/写库抖动）不得中断其余错题的入册。
+    // 练习册错题以 (student_id, worksheet_id, question_no) 为自包含定位键，
+    // addSelfContainedWrongQuestion 的 ON CONFLICT DO UPDATE 保证重复调用幂等。
+    try {
+      await addSelfContainedWrongQuestion({
+        studentId,
+        worksheetId,
+        questionNo: wq.question_number,
+        pageNumber: wq.page_number || 1,
+        studentAnswer: wq.student_answer || null,
+        correctAnswer: wq.answer || null,
+        answerType: wq.question_type || 'choice',
+        content: wq.content || null,
+        questionType: wq.question_type || 'choice',
+        blockCoordinates: wq.block_coordinates || null,
+        questionImageUrl,
+        subject: null,
+        sourceType: 'workbook',
+        questionId: wq.id
+      })
+    } catch (e) {
+      console.error(`  ⚠️ [Workbook] 错题入册失败 question_no=${wq.question_number} q=${String(wq.id).slice(0, 8)}:`, e.message)
+      continue
+    }
+    workbookAdded++
   }
 
   if (wrongQuestions.length > 0) {
-    console.log(`   [Workbook] 已添加 ${wrongQuestions.length} 题到错题本（自包含）`)
+    const skipNote = workbookSkippedLowConf > 0 ? `，低置信度排除 ${workbookSkippedLowConf} 题` : ''
+    console.log(`   [Workbook] 已添加 ${workbookAdded} 题到错题本（自包含）${skipNote}`)
   }
 
   // 7. 记录 judgement
@@ -5178,11 +5203,28 @@ const processAnswerBankGrading = async (job) => {
     await markImageReasoningRisk(questionsWithIds)
 
     // 同步错题本 + judgement
+    //
+    // ⚠️ 旧写法 `addWrongQuestions(studentId, [q.id], null, null)` 两个 Map 都传 null，
+    //    而 neonService.addWrongQuestions 的两道闸都是「参数是 Map 实例才生效」→ 等于闸全开，
+    //    低置信度题可绕过置信度闸直接入册（2026-09-11 修复）。
+    //
+    // 置信度闸：只对 answer_source<>'blank' 的题生效。
+    //   未作答（blank）的 confidence 结构性为 0（建题时 `isEmpty ? 0 : …`），用阈值卡
+    //   会永远入不了册，而「未作答等同不会」按口径该入 → blank 题**不放置信度值**；
+    //   闸的实现是「map 里查不到 = 放行」，故 blank 天然豁免、AI 判错的题仍受阈值约束。
+    // 完整性闸：传 questionMap 让 checkQuestionCompleteness 生效，并顺带回写 is_complete。
+    const answerBankConfidenceMap = new Map(
+      questionsWithIds
+        .filter(q => q.answer_source !== 'blank')
+        .map(q => [q.id, q.confidence])
+    )
+    const answerBankQuestionMap = new Map(questionsWithIds.map(q => [q.id, q]))
+
     for (let idx = 0; idx < questionsWithIds.length; idx++) {
       const q = questionsWithIds[idx]
       const matchInfo = matchInfoByQN.get(idx + 1) || {}
       if (q.is_correct === false || q.answer_source === 'blank') {
-        await addWrongQuestions(studentId, [q.id], null, null).catch(e =>
+        await addWrongQuestions(studentId, [q.id], answerBankConfidenceMap, answerBankQuestionMap).catch(e =>
           console.error(`⚠️ [AnswerBank] 错题本同步失败 questionId=${q.id}:`, e.message)
         )
       }

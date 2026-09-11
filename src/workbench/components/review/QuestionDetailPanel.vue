@@ -168,13 +168,6 @@
 
       <!-- ═══ 完整题目内容（始终可见，不折叠） ═══ -->
       <div class="ops-question-body">
-        <!-- 原卷出处（仅 paper 模式/错题重练卷展示）：
-             重练卷是打印出来的白卷，老师批改时看不到这题当初出自哪次作业。
-             paper 模式：题目行的 image_url 就是原作业页图，block_coordinates 是题干定位框；
-             image 模式：题目是本次新建行，组件内部用归一化题干在错题本里
-             精确匹配同题旧记录（同题口径走 src/domain/questionIdentity.js），匹配不上不显示。 -->
-        <OriginalPaperSource :question="q" />
-
         <!-- 题型 & 学科（仅在编辑时显示） -->
         <div v-if="editing" class="ops-q-section">
           <div class="ops-q-label">题型 · 学科</div>
@@ -201,18 +194,27 @@
             v-model:form="form"
             :display-image-url="displayImageUrl"
             :show-crop="true"
+            :show-recognize-question="true"
             @image-upload="handleImageUpload"
             @image-crop="handleCropFromPaper"
             @image-delete="deleteImage"
             @open-tag-selector="showTagSelector = true"
+            @question-recognize="handleRecognizeQuestionFromPaper"
           />
         </div>
 
         <!-- ═══ 预览模式：题干 + 配图 + 选项（统一卡片） ═══ -->
         <div v-else class="ops-content-card">
-          <div class="ops-q-section" v-if="q.content">
-            <div class="ops-q-label">题干</div>
-            <div class="ops-q-text"><MathRender :content="q.content" autoDetect /></div>
+          <!-- 题干标签行挂「原卷」小入口（重练卷才有；作业批改中间栏就是原卷，会自隐）。
+               本节刻意不以 q.content 为渲染条件：OCR 题干残缺时老师恰恰最需要点它看原卷，
+               若跟着空文本一起消失，入口就白做了。空文本给一句中性占位。 -->
+          <div class="ops-q-section">
+            <div class="ops-q-label-row">
+              <span class="ops-q-label">题干</span>
+              <OriginalPaperSource :question="q" />
+            </div>
+            <div v-if="q.content" class="ops-q-text"><MathRender :content="q.content" autoDetect /></div>
+            <div v-else class="ops-q-text ops-q-text--empty">未识别到题干文本</div>
           </div>
           <div class="ops-q-section ops-image-section" v-if="displayImageUrl">
     <div class="ops-q-label">配图</div>
@@ -265,6 +267,18 @@
               :class="{ 'option-highlight': opt === q.answer }">
               <span class="ops-opt-letter">{{ String.fromCharCode(65 + idx) }}.</span>
               <span class="ops-opt-text"><MathRender :content="opt" autoDetect tag="span" /></span>
+            </div>
+          </div>
+          <!-- 选择题但选项为空：整页 OCR 漏识别选项的典型形态。
+               旧版这里整块隐藏，老师只看到题干、既不知道缺了什么，也不知道下一步做什么，
+               点「标错」被完整性门禁拦下后才回头找原因。这里直接给出原因 + 出口。 -->
+          <div class="ops-q-section" v-else-if="normalizeType(q) === 'choice'">
+            <div class="ops-q-label">选项</div>
+            <div class="ops-options-missing">
+              <span>未识别到选项，这道题暂时无法加入错题本</span>
+              <el-button text size="small" type="primary" @click="handleEnterEdit">
+                去编辑里「重新识别本题」
+              </el-button>
             </div>
           </div>
         </div>
@@ -327,8 +341,12 @@
       </div>
     </template>
 
-    <!-- ═══ 原卷裁剪对话框 ═══ -->
-    <el-dialog v-model="cropDialogVisible" title="从原卷截图" width="auto"
+    <!-- ═══ 原卷裁剪对话框（双模式）═══
+         figure    → 裁剪结果作为「配图」上传（白底化/去手写），沿用原行为
+         recognize → 裁剪结果直接送视觉模型重识别题干/选项/答案，补全残缺题目 -->
+    <el-dialog v-model="cropDialogVisible"
+      :title="cropMode === 'recognize' ? '框选这道题所在的区域' : '从原卷截图'"
+      width="auto"
       :close-on-click-modal="false" destroy-on-close append-to-body>
       <div class="crop-container" ref="cropContainerRef">
         <img :src="cropImageSource" class="crop-image" ref="cropImageRef"
@@ -343,13 +361,18 @@
           }"></div>
         <div v-if="cropSizeLabel" class="crop-size-label">{{ cropSizeLabel }}</div>
       </div>
+      <div v-if="cropMode === 'recognize'" class="crop-mode-hint">
+        把这道题的<b>题干和选项一起</b>框进来（默认已按题目位置预选，可直接调整）。
+      </div>
       <div v-if="cropPreviewUrl" class="crop-preview-bar">
         <span class="crop-preview-label">预览</span>
         <img :src="cropPreviewUrl" class="crop-preview-img" />
       </div>
       <template #footer>
         <el-button @click="cropDialogVisible = false">取消</el-button>
-        <el-button type="primary" :disabled="!cropPreviewUrl" :loading="cropLoading" @click="confirmCrop">确认裁剪</el-button>
+        <el-button type="primary" :disabled="!cropPreviewUrl" :loading="cropLoading" @click="confirmCrop">
+          {{ cropMode === 'recognize' ? '开始识别' : '确认裁剪' }}
+        </el-button>
       </template>
     </el-dialog>
 
@@ -370,6 +393,14 @@
       :result="recognizeResult"
       :preview-url="recognizePreviewUrl"
       @apply="handleApplyRecognized" />
+
+    <!-- 重新识别本题：整页 OCR 漏识别选项时框选原卷区域重识别，
+         预览逐字段确认后回填编辑表单（默认只补空字段，不覆盖已有内容） -->
+    <QuestionRecognizeDialog v-model="questionRecognizeDialogVisible"
+      :result="questionRecognizeResult"
+      :preview-url="questionRecognizePreviewUrl"
+      :current="{ content: form.content, options: form.options, answer: form.answer }"
+      @apply="handleApplyRecognizedQuestion" />
 
     <!-- 截图粘贴对话框：
          - 主路径：在「粘贴区」里 Ctrl+V（桌面）/ 长按图片粘贴（手机）→ 直接 OCR
@@ -427,7 +458,7 @@
 import { ref, computed, watch, nextTick } from 'vue'
 import { useReviewStore } from '../../stores/reviewStore'
 import { updateQuestion, rejudgeQuestion, retryGeometry, clearStudentCaches, uploadImage, getQuestionAssets } from '../../../services/apiService'
-import { recognizeAnswer } from '../../../api/answerOCR'
+import { recognizeAnswer, recognizeQuestion } from '../../../api/answerOCR'
 import { processExamImage } from '../../../utils/imageProcessor'
 import { getGeometryDisplayUrl, getTikzStatus } from '../../../utils/geometryDisplay'
 import { tikzToSvg } from '../../../utils/tikzGenerator'
@@ -438,6 +469,7 @@ import { DocumentChecked, Delete, Plus, Upload, Picture, EditPen, ArrowLeft, Arr
 import MathRender from '../MathRender.vue'
 import QuestionEditForm from './QuestionEditForm.vue'
 import AnswerRecognizeDialog from './AnswerRecognizeDialog.vue'
+import QuestionRecognizeDialog from './QuestionRecognizeDialog.vue'
 import OriginalPaperSource from './OriginalPaperSource.vue'
 
 const store = useReviewStore()
@@ -645,6 +677,12 @@ const recognizeResult = ref(null)
 const recognizePreviewUrl = ref('')
 let recognizePreviewUrlToRevoke = ''
 
+// 单题「重新识别」：吃原卷框选裁剪图，重识别题干/选项/答案（整页 OCR 漏选项时的补全手段）
+const questionRecognizeDialogVisible = ref(false)
+const questionRecognizeResult = ref(null)
+const questionRecognizePreviewUrl = ref('')
+let questionRecognizePreviewToRevoke = ''
+
 // 截图粘贴对话框：用于接收 Ctrl+V / 长按粘贴到剪贴板的图片
 const answerPasteDialogVisible = ref(false)
 const answerPasteTargetRef = ref(null)
@@ -710,8 +748,12 @@ const cropMaxWidth = ref(800)
 const cropSizeLabel = ref('')
 const cropPreviewUrl = ref('')
 const cropLoading = ref(false)
+// 'figure'   = 裁剪结果当配图（原有行为）
+// 'recognize' = 裁剪结果送视觉模型重识别题干/选项/答案（整页 OCR 漏选项时的补全手段）
+const cropMode = ref('figure')
 
-const handleCropFromPaper = () => {
+// 打开原卷裁剪弹窗。mode 决定「确认」后走哪条链路。
+const openCropDialog = (mode) => {
   const task = store.currentTask
   if (!task) {
     ElMessage.warning('当前试卷无原图')
@@ -732,11 +774,23 @@ const handleCropFromPaper = () => {
     ElMessage.warning('当前试卷无原图')
     return
   }
+  cropMode.value = mode
   cropImageSource.value = pageImage
   cropSelection.value = null
   cropPreviewUrl.value = ''
   cropSizeLabel.value = ''
   cropDialogVisible.value = true
+}
+
+const handleCropFromPaper = () => openCropDialog('figure')
+
+// 「重新识别本题」入口。原卷页图取不到时由 openCropDialog 统一提示（不在这里重复判断）。
+const handleRecognizeQuestionFromPaper = () => {
+  if (!q.value?.id) {
+    ElMessage.warning('当前题目未选中')
+    return
+  }
+  openCropDialog('recognize')
 }
 
 const parseBbox = (b) => {
@@ -867,12 +921,34 @@ const onCropMouseUp = () => {
   generateCropPreview()
 }
 
+// 裁剪弹窗确认：按 cropMode 分流。
+// 两条链路对同一张裁剪图的处理方式**故意不同**：
+//   配图链路要做白底化/去手写/增强（让图好看）；
+//   识别链路必须用原始裁剪图 —— 那些增强为「配图可读性」服务，会改变笔画粗细与灰度，
+//   反而可能吃掉印刷小字或细笔划，让 OCR 更差。
 const confirmCrop = async () => {
   if (!cropPreviewUrl.value || !q.value?.id) return
   cropLoading.value = true
   try {
-    // 使用 imageProcessor.js 的 processExamImage 进行白底化 + 去脏边 + 去手写 + 增强
-    const processedDataUrl = await processExamImage(cropPreviewUrl.value, {
+    if (cropMode.value === 'recognize') {
+      await runQuestionRecognize(cropPreviewUrl.value)
+    } else {
+      await uploadCroppedFigure(cropPreviewUrl.value)
+    }
+  } finally {
+    cropLoading.value = false
+  }
+}
+
+const dataUrlToFile = async (dataUrl, filename) => {
+  const blob = await (await fetch(dataUrl)).blob()
+  return new File([blob], filename, { type: blob.type || 'image/png' })
+}
+
+// 链路一（原有行为）：白底化 + 去脏边 + 去手写 + 增强 → 上传 OSS → 写 geometry_image_url
+const uploadCroppedFigure = async (dataUrl) => {
+  try {
+    const processedDataUrl = await processExamImage(dataUrl, {
       autoEnhance: true,
       removeHandwriting: true,
       padding: 5
@@ -896,8 +972,25 @@ const confirmCrop = async () => {
   } catch (err) {
     console.error('裁剪上传失败:', err)
     ElMessage.error('裁剪图片上传失败')
-  } finally {
-    cropLoading.value = false
+  }
+}
+
+// 链路二（新增）：原始裁剪图直传后端重识别 → 弹预览，老师逐字段勾选后才回填
+const runQuestionRecognize = async (dataUrl) => {
+  const file = await dataUrlToFile(dataUrl, 'question-crop.png')
+  if (questionRecognizePreviewToRevoke) {
+    URL.revokeObjectURL(questionRecognizePreviewToRevoke)
+    questionRecognizePreviewToRevoke = ''
+  }
+  questionRecognizePreviewUrl.value = URL.createObjectURL(file)
+  questionRecognizePreviewToRevoke = questionRecognizePreviewUrl.value
+  try {
+    questionRecognizeResult.value = await recognizeQuestion(q.value.id, file)
+    cropDialogVisible.value = false
+    questionRecognizeDialogVisible.value = true
+  } catch (err) {
+    console.error('重新识别失败:', err)
+    ElMessage.error(`识别失败：${err?.message || err}`)
   }
 }
 
@@ -925,6 +1018,14 @@ watch(q, (newQ) => {
   quickAnswerText.value = ''
   quickStudentAnswerEditing.value = false
   quickStudentAnswerText.value = ''
+  // 换题时收掉上一题的识别结果与临时预览 URL，避免对象 URL 泄漏 + 串题
+  questionRecognizeDialogVisible.value = false
+  questionRecognizeResult.value = null
+  if (questionRecognizePreviewToRevoke) {
+    URL.revokeObjectURL(questionRecognizePreviewToRevoke)
+    questionRecognizePreviewToRevoke = ''
+    questionRecognizePreviewUrl.value = ''
+  }
 }, { immediate: true })
 
 const startQuickAnswerEdit = () => {
@@ -1059,6 +1160,36 @@ const handleApplyRecognized = (answer) => {
   form.value = { ...form.value, answer }
   ElMessage.success('已填入答案，点「保存」即可入库')
 }
+
+// 应用「重新识别本题」结果：只写老师勾选的字段。
+// 默认策略（空字段默认勾选、非空默认不勾）在 QuestionRecognizeDialog 内实现，
+// 这里只负责把选中的值填进表单 —— 真正落库仍要老师点「保存」走 PUT /api/questions/:id，
+// 从而自动联动 is_complete / wrong_book_risks / 重判。
+const handleApplyRecognizedQuestion = (payload) => {
+  const applied = []
+  if (payload?.content) {
+    form.value.content = payload.content
+    applied.push('题干')
+  }
+  if (Array.isArray(payload?.options) && payload.options.length > 0) {
+    form.value.options = [...payload.options]
+    // 选项只属于选择题：采用选项即把题型定为 choice。
+    // 否则编辑表单的「选项」区块（v-if question_type === 'choice'）不渲染，
+    // 老师会以为补了个寂寞；checkQuestionCompleteness 的缺选项规则也只对 choice 生效。
+    form.value.question_type = 'choice'
+    applied.push(`${payload.options.length} 个选项`)
+  }
+  if (payload?.answer) {
+    form.value.answer = payload.answer
+    applied.push('参考答案')
+  }
+  if (payload?.analysis) {
+    form.value.analysis = payload.analysis
+    applied.push('解析')
+  }
+  if (applied.length === 0) return
+  ElMessage.success(`已填入${applied.join('、')}，点「保存」即可入库`)
+}
 const addOption = () => { form.value.options.push('') }
 const removeOption = (idx) => { form.value.options.splice(idx, 1) }
 const removeTag = (tag) => { form.value.tags = form.value.tags.filter(t => t !== tag) }
@@ -1119,7 +1250,7 @@ const handleReview = async (result) => {
     const blocked = store.reviewQuestion(question.id, result)
     if (blocked?.blocked) {
       ElMessageBox.confirm(
-        `题目不完整，无法加入错题本：<br><span style="color:var(--wb-warning)">${blocked.issues.map(i => '• ' + i).join('<br>')}</span><br><br>是否现在编辑以补充缺失信息？`,
+        `题目不完整，无法加入错题本：<br><span style="color:var(--wb-warning)">${blocked.issues.map(i => '• ' + i).join('<br>')}</span><br><br>去编辑面板补全即可：选择题缺选项时点「<b>重新识别本题</b>」，在原卷上框一下就能自动补出来。`,
         '题目不完整',
         { confirmButtonText: '去编辑', cancelButtonText: '取消', type: 'warning', dangerouslyUseHTMLString: true }
       ).then(() => {
@@ -1494,6 +1625,16 @@ const handleRetryGeometry = async () => {
   letter-spacing: 0.5px;
   flex-shrink: 0;
 }
+/* 题干标签行：标签 + 右侧「原卷」小入口 */
+.ops-q-label-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.ops-q-text--empty {
+  color: var(--wb-text-tertiary);
+  font-style: italic;
+}
 .ops-q-text {
   font-size: 15px;
   line-height: 1.7;
@@ -1524,6 +1665,21 @@ const handleRetryGeometry = async () => {
 }
 .option-highlight .ops-opt-letter,
 .option-highlight .ops-opt-text { color: var(--wb-success); font-weight: 600; }
+
+/* 选择题选项缺失（整页 OCR 漏识别）：给原因 + 出口，而不是静默隐藏整块 */
+.ops-options-missing {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 4px 8px;
+  padding: 8px 10px;
+  border: 1px dashed var(--wb-warning, #e6a23c);
+  border-radius: var(--wb-radius-xs, 4px);
+  background: var(--wb-warning-light, #fdf6ec);
+  font-size: 13px;
+  line-height: 1.6;
+  color: var(--wb-text-secondary);
+}
 
 /* 配图 */
 .ops-image-wrap {
@@ -1723,6 +1879,16 @@ const handleRetryGeometry = async () => {
   border: 1px solid var(--wb-border);
   border-radius: var(--wb-radius-xs);
   object-fit: contain;
+}
+/* 「重新识别」模式下框选区域的操作提示 */
+.crop-mode-hint {
+  margin-top: 32px;
+  padding: 8px 12px;
+  border-radius: var(--wb-radius-xs);
+  background: var(--wb-primary-light, #ecf5ff);
+  color: var(--wb-text-secondary);
+  font-size: 13px;
+  line-height: 1.6;
 }
 
 /* ── 截图粘贴对话框（OCR 答案入口）── */

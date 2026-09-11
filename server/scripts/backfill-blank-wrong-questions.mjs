@@ -81,6 +81,11 @@ const run = async () => {
     }
 
     // 真做：按学生批量调 addWrongQuestions
+    // 注意：confidenceMap 传 null。本脚本只捞 answer_source='blank' 的题，而未作答的
+    // confidence 结构性为 0，若放置信度值会被阈值闸全部剔除——但「未作答等同不会」按口径该入册。
+    // 2026-09-11 起 addWrongQuestions 的置信度闸改为 fail-closed：未传 Map 会回读 DB 现况判定，
+    // 但 blank 题本就不放进置信度 Map（未作答不受 AI 置信度约束）→ 仍然全部放行。
+    // 切勿改成传真实 confidenceMap，否则该脚本会一条都入不了。
     const questionIds = ids.map(q => q.id)
     const questionMap = new Map(ids.map(q => [q.id, q]))
     try {

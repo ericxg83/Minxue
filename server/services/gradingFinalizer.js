@@ -1,6 +1,7 @@
 import { createHash } from 'node:crypto'
 import { query, TABLES, LIFECYCLE_STATUS, WRONG_STATUS } from '../config/neon.js'
 import { addWrongQuestions, createJudgement } from './neonService.js'
+import { compensateWrongBook } from './wrongBookCompensation.js'
 import { syncQuestionsKnowledgeAndMastery, syncReviewResultsMastery } from './knowledgeMasteryService.js'
 import { syncQuestionCompletenessQuietly } from './questionCompletenessSync.js'
 import { checkQuestionCompleteness } from '../utils/questionCompleteness.js'
@@ -69,16 +70,25 @@ export const finalizeGradingBatch = async ({
   }
 
   const questionMap = toQuestionMap(pendingQuestions)
-  const confidenceMap = new Map(pendingQuestions.map(q => [q.id, q.confidence]))
   // 判题域契约：is_correct === false（明确判错）或 answer_source='blank'（空答/不会）才入错题本。
   // 空题算"不会"等同错题，老师拍板入册；is_correct === null 的其它情况（缺参考答案/答案不唯一）
   // 仍由老师复核给结论，避免错题本混入系统噪音。
-  const wrongIds = pendingQuestions
-    .filter(q => (q.is_correct === false || q.answer_source === 'blank') && q.answer && q.answer.trim())
-    .map(q => q.id)
-
-  if (wrongIds.length > 0) {
-    await addWrongQuestions(studentId, wrongIds, confidenceMap, questionMap)
+  //
+  // 入册统一走 compensateWrongBook 对账：以数据库现况为准，
+  //   · 能补上「判题时参考答案为空、随后才异步补齐」的漏网（本题在此处的 in-memory 快照可能已有答案，
+  //     但历史批次/其它入口未必赶上，故以库为准再对一次账）；
+  //   · 排除老师已给终态复核结论（correct / exclude / wrong_no_book）的题，避免把老师判对的题又拉回错题本；
+  //   · 置信度闸 / 完整性闸 / 空答语义仍复用 addWrongQuestions，不在此另写口径。
+  // 用 try/catch 包住：一次入册异常绝不能吞掉后面的 judgement 审计与掌握度更新（原实现即此处裸 await，异常会中断整轮结算）。
+  let wrongBookStats = { added: 0 }
+  try {
+    wrongBookStats = await compensateWrongBook({
+      studentId,
+      questions: pendingQuestions,
+      reason: `finalizeGradingBatch task=${taskId}`
+    })
+  } catch (e) {
+    console.error(`[GradingFinalizer] 错题入册失败 task=${taskId}:`, e.message)
   }
 
   const updateIds = pendingQuestions.filter(q => q.is_correct !== null && q.is_correct !== undefined).map(q => q.id)
@@ -129,28 +139,20 @@ export const finalizeGradingBatch = async ({
     })
   }
 
-  // 答案解析完成后的补入（A：防止“判错但没入”历史漏网）
-  // 只对“判错 + 现在条件齐全 + 不在错题本”的题补入
-  const aiWrongIdsForCompletion = pendingQuestions
-    .filter(q => 
-      (q.is_correct === false || q.answer_source === 'blank') && 
-      q.answer && q.answer.trim() &&
-      !settledIds.has(q.id) &&
-      checkQuestionCompleteness(q).isComplete
-    )
-    .map(q => q.id)
-
-  if (aiWrongIdsForCompletion.length > 0) {
-    console.log(`[GradingFinalizer] 答案补齐后补入错题本：${aiWrongIdsForCompletion.length} 题`)
-    await addWrongQuestions(studentId, aiWrongIdsForCompletion, confidenceMap, questionMap)
-  }
-
-  // 批改落库后把 is_complete 对齐到动态真值
+  // 批改落库后把 is_complete 对齐到动态真值。OCR 阶段建的题答案为空 → 落 false，
+  // 答案解析异步补齐后无人回写，错题本 / 周报 / 讲义按 `is_complete = TRUE` 过滤时会漏题。
   syncQuestionCompletenessQuietly(
     pendingQuestions.map(q => q.id),
     `finalizeGradingBatch task=${taskId}`
   )
 
+  return {
+    settled: pendingQuestions.length,
+    skipped: settledIds.size,
+    wrongQuestions: wrongBookStats.added,
+    mastery: masteryStats.mastery || 0
+  }
+}
 
 /**
  * Final settlement for a deterministic rejudge.

@@ -1,0 +1,2110 @@
+{
+  "generatedAt": "2026-09-11T01:44:58.253Z",
+  "summary": [
+    {
+      "model": "魔搭 Qwen3-VL-8B-Instruct",
+      "math": {
+        "total": 12,
+        "correct": 3,
+        "accuracy": 0.25,
+        "avgMs": 1295.3333333333333
+      },
+      "grading": {
+        "total": 15,
+        "correct": 14,
+        "accuracy": 0.9333333333333333,
+        "avgMs": 1120.6
+      },
+      "ocr": {
+        "total": 2,
+        "validJson": 2,
+        "hasQuestions": 2,
+        "avgCompleteness": 1,
+        "avgMs": 24146.5
+      }
+    },
+    {
+      "model": "huihuiyun grok-4.6",
+      "math": {
+        "total": 12,
+        "correct": 7,
+        "accuracy": 0.5833333333333334,
+        "avgMs": 64289.25
+      },
+      "grading": {
+        "total": 15,
+        "correct": 3,
+        "accuracy": 0.2,
+        "avgMs": 51953.46666666667
+      },
+      "ocr": {
+        "total": 2,
+        "validJson": 1,
+        "hasQuestions": 1,
+        "avgCompleteness": 0.4375,
+        "avgMs": 206644
+      }
+    }
+  ],
+  "records": [
+    {
+      "testType": "math",
+      "model": "魔搭 Qwen3-VL-8B-Instruct",
+      "modelId": "Qwen/Qwen3-VL-8B-Instruct",
+      "problemId": "P01",
+      "topic": "根式方程",
+      "gold": "x=5",
+      "status": 200,
+      "elapsedMs": 984,
+      "content": "{\n  \"final_answer\": \"x = 5\",\n  \"verification\": \"代入原方程验证成立，且在定义域 x ≥ 1 内，无增根。\",\n  \"confidence\": 1.0\n}",
+      "usage": {
+        "prompt_tokens": 132,
+        "completion_tokens": 51,
+        "total_tokens": 183
+      },
+      "error": null,
+      "parsed": {
+        "final_answer": "x = 5",
+        "verification": "代入原方程验证成立，且在定义域 x ≥ 1 内，无增根。",
+        "confidence": 1
+      },
+      "finalAnswer": "x = 5",
+      "correct": true
+    },
+    {
+      "testType": "math",
+      "model": "huihuiyun grok-4.6",
+      "modelId": "grok-4.6",
+      "problemId": "P01",
+      "topic": "根式方程",
+      "gold": "x=5",
+      "status": 200,
+      "elapsedMs": 9783,
+      "content": "{\"final_answer\":\"x=5\",\"verification\":\"定义域为x≥1，代入x=5得√9-√4=3-2=1，满足方程，无其他解。\",\"confidence\":0.95}",
+      "usage": {
+        "prompt_tokens": 324,
+        "completion_tokens": 1781,
+        "total_tokens": 2105,
+        "prompt_tokens_details": {
+          "cached_tokens": 192
+        },
+        "completion_tokens_details": {
+          "reasoning_tokens": 1732
+        }
+      },
+      "error": null,
+      "parsed": {
+        "final_answer": "x=5",
+        "verification": "定义域为x≥1，代入x=5得√9-√4=3-2=1，满足方程，无其他解。",
+        "confidence": 0.95
+      },
+      "finalAnswer": "x=5",
+      "correct": true
+    },
+    {
+      "testType": "math",
+      "model": "魔搭 Qwen3-VL-8B-Instruct",
+      "modelId": "Qwen/Qwen3-VL-8B-Instruct",
+      "problemId": "P02",
+      "topic": "绝对值方程",
+      "gold": "x=-3,4",
+      "status": 200,
+      "elapsedMs": 900,
+      "content": "{\n  \"final_answer\": \"-4, 5\",\n  \"verification\": \"分段讨论绝对值方程，验证每个解在对应区间内满足原方程，无增根。\",\n  \"confidence\": 1.0\n}",
+      "usage": {
+        "prompt_tokens": 131,
+        "completion_tokens": 52,
+        "total_tokens": 183
+      },
+      "error": null,
+      "parsed": {
+        "final_answer": "-4, 5",
+        "verification": "分段讨论绝对值方程，验证每个解在对应区间内满足原方程，无增根。",
+        "confidence": 1
+      },
+      "finalAnswer": "-4, 5",
+      "correct": false
+    },
+    {
+      "testType": "math",
+      "model": "huihuiyun grok-4.6",
+      "modelId": "grok-4.6",
+      "problemId": "P02",
+      "topic": "绝对值方程",
+      "gold": "x=-3,4",
+      "status": 200,
+      "elapsedMs": 108553,
+      "content": "{\"final_answer\":\"-3,4\",\"verification\":\"Critical points divide real line into x<-1 (yields x=-3 valid), -1≤x<2 (3=7 impossible), x≥2 (yields x=4 valid); both satisfy original equation after substitution and sign checks.\",\"confidence\":0.95}",
+      "usage": {
+        "prompt_tokens": 324,
+        "completion_tokens": 1319,
+        "total_tokens": 1643,
+        "prompt_tokens_details": {
+          "cached_tokens": 192
+        },
+        "completion_tokens_details": {
+          "reasoning_tokens": 1252
+        }
+      },
+      "error": null,
+      "parsed": {
+        "final_answer": "-3,4",
+        "verification": "Critical points divide real line into x<-1 (yields x=-3 valid), -1≤x<2 (3=7 impossible), x≥2 (yields x=4 valid); both satisfy original equation after substitution and sign checks.",
+        "confidence": 0.95
+      },
+      "finalAnswer": "-3,4",
+      "correct": true
+    },
+    {
+      "testType": "math",
+      "model": "魔搭 Qwen3-VL-8B-Instruct",
+      "modelId": "Qwen/Qwen3-VL-8B-Instruct",
+      "problemId": "P03",
+      "topic": "一次函数综合",
+      "gold": "y=-3x/2+9/2",
+      "status": 200,
+      "elapsedMs": 1273,
+      "content": "{\n  \"final_answer\": \"y = -x + 3\",\n  \"verification\": \"直线 l 经过两已知直线交点 (1,3) 且过点 (3,0)，斜率计算正确，截距符合，无增根或定义域问题。\",\n  \"confidence\": 1.0\n}",
+      "usage": {
+        "prompt_tokens": 145,
+        "completion_tokens": 73,
+        "total_tokens": 218
+      },
+      "error": null,
+      "parsed": {
+        "final_answer": "y = -x + 3",
+        "verification": "直线 l 经过两已知直线交点 (1,3) 且过点 (3,0)，斜率计算正确，截距符合，无增根或定义域问题。",
+        "confidence": 1
+      },
+      "finalAnswer": "y = -x + 3",
+      "correct": false
+    },
+    {
+      "testType": "math",
+      "model": "huihuiyun grok-4.6",
+      "modelId": "grok-4.6",
+      "problemId": "P03",
+      "topic": "一次函数综合",
+      "gold": "y=-3x/2+9/2",
+      "status": 200,
+      "elapsedMs": 16176,
+      "content": "{\"final_answer\":\"y = -\\\\dfrac{3}{2}x + \\\\dfrac{9}{2}\",\"verification\":\"关键复核：交点(1,3)与(3,0)计算斜率-3/2，代入验证方程成立，无定义域或符号问题。\",\"confidence\":0.95}",
+      "usage": {
+        "prompt_tokens": 336,
+        "completion_tokens": 1294,
+        "total_tokens": 1630,
+        "prompt_tokens_details": {
+          "cached_tokens": 192
+        },
+        "completion_tokens_details": {
+          "reasoning_tokens": 1225
+        }
+      },
+      "error": null,
+      "parsed": {
+        "final_answer": "y = -\\dfrac{3}{2}x + \\dfrac{9}{2}",
+        "verification": "关键复核：交点(1,3)与(3,0)计算斜率-3/2，代入验证方程成立，无定义域或符号问题。",
+        "confidence": 0.95
+      },
+      "finalAnswer": "y = -\\dfrac{3}{2}x + \\dfrac{9}{2}",
+      "correct": true
+    },
+    {
+      "testType": "math",
+      "model": "魔搭 Qwen3-VL-8B-Instruct",
+      "modelId": "Qwen/Qwen3-VL-8B-Instruct",
+      "problemId": "P04",
+      "topic": "勾股与射影定理",
+      "gold": "AB=2√13, AC=3√13, AD=6",
+      "status": 200,
+      "elapsedMs": 2320,
+      "content": "{\n  \"final_answer\": \"AB=6, AC=√15, AD=√(BD*DC)=√36=6\",\n  \"verification\": \"利用射影定理：AD² = BD × DC = 4×9=36 ⇒ AD=6；再由勾股定理得 AB=√(AD²+BD²)=√(36+16)=√52? 错误！应重新计算。\",\n  \"confidence\": 0.8\n}",
+      "usage": {
+        "prompt_tokens": 140,
+        "completion_tokens": 109,
+        "total_tokens": 249
+      },
+      "error": null,
+      "parsed": {
+        "final_answer": "AB=6, AC=√15, AD=√(BD*DC)=√36=6",
+        "verification": "利用射影定理：AD² = BD × DC = 4×9=36 ⇒ AD=6；再由勾股定理得 AB=√(AD²+BD²)=√(36+16)=√52? 错误！应重新计算。",
+        "confidence": 0.8
+      },
+      "finalAnswer": "AB=6, AC=√15, AD=√(BD*DC)=√36=6",
+      "correct": false
+    },
+    {
+      "testType": "math",
+      "model": "huihuiyun grok-4.6",
+      "modelId": "grok-4.6",
+      "problemId": "P04",
+      "topic": "勾股与射影定理",
+      "gold": "AB=2√13, AC=3√13, AD=6",
+      "status": 200,
+      "elapsedMs": 10871,
+      "content": "{\"final_answer\":\"AB=2\\\\sqrt{13}, AC=3\\\\sqrt{13}, AD=6\",\"verification\":\"通过相似三角形性质和勾股定理复核，AB²=52, AC²=117, AD²=36，满足AB²+AC²=BC²=169，无定义域、符号或增根问题\",\"confidence\":0.95}",
+      "usage": {
+        "prompt_tokens": 335,
+        "completion_tokens": 2002,
+        "total_tokens": 2337,
+        "prompt_tokens_details": {
+          "cached_tokens": 192
+        },
+        "completion_tokens_details": {
+          "reasoning_tokens": 1921
+        }
+      },
+      "error": null,
+      "parsed": {
+        "final_answer": "AB=2\\sqrt{13}, AC=3\\sqrt{13}, AD=6",
+        "verification": "通过相似三角形性质和勾股定理复核，AB²=52, AC²=117, AD²=36，满足AB²+AC²=BC²=169，无定义域、符号或增根问题",
+        "confidence": 0.95
+      },
+      "finalAnswer": "AB=2\\sqrt{13}, AC=3\\sqrt{13}, AD=6",
+      "correct": true
+    },
+    {
+      "testType": "math",
+      "model": "魔搭 Qwen3-VL-8B-Instruct",
+      "modelId": "Qwen/Qwen3-VL-8B-Instruct",
+      "problemId": "P05",
+      "topic": "最大公因数与最小公倍数",
+      "gold": "n=84",
+      "status": 200,
+      "elapsedMs": 986,
+      "content": "{\n  \"final_answer\": \"n = 84\",\n  \"verification\": \"验证 gcd(84,60)=12 且 lcm(84,60)=420，符合题设条件。\",\n  \"confidence\": 1.0\n}",
+      "usage": {
+        "prompt_tokens": 133,
+        "completion_tokens": 59,
+        "total_tokens": 192
+      },
+      "error": null,
+      "parsed": {
+        "final_answer": "n = 84",
+        "verification": "验证 gcd(84,60)=12 且 lcm(84,60)=420，符合题设条件。",
+        "confidence": 1
+      },
+      "finalAnswer": "n = 84",
+      "correct": true
+    },
+    {
+      "testType": "math",
+      "model": "huihuiyun grok-4.6",
+      "modelId": "grok-4.6",
+      "problemId": "P05",
+      "topic": "最大公因数与最小公倍数",
+      "gold": "n=84",
+      "status": 200,
+      "elapsedMs": 98722,
+      "content": "{\"final_answer\":\"84\",\"verification\":\"通过公式n=gcd(n,60)*lcm(n,60)/60=12*420/60=84，并用质因数分解验证n=2^2*3*7满足gcd=12且lcm=420，复核通过。\",\"confidence\":1}",
+      "usage": {
+        "prompt_tokens": 320,
+        "completion_tokens": 1631,
+        "total_tokens": 1951,
+        "prompt_tokens_details": {
+          "cached_tokens": 192
+        },
+        "completion_tokens_details": {
+          "reasoning_tokens": 1563
+        }
+      },
+      "error": null,
+      "parsed": {
+        "final_answer": "84",
+        "verification": "通过公式n=gcd(n,60)*lcm(n,60)/60=12*420/60=84，并用质因数分解验证n=2^2*3*7满足gcd=12且lcm=420，复核通过。",
+        "confidence": 1
+      },
+      "finalAnswer": "84",
+      "correct": true
+    },
+    {
+      "testType": "math",
+      "model": "魔搭 Qwen3-VL-8B-Instruct",
+      "modelId": "Qwen/Qwen3-VL-8B-Instruct",
+      "problemId": "P06",
+      "topic": "对数方程",
+      "gold": "x=-1+2√3",
+      "status": 200,
+      "elapsedMs": 1147,
+      "content": "{\n  \"final_answer\": \"x = 5\",\n  \"verification\": \"真数条件 x-1>0 且 x+3>0 得 x>1，解得 x=5 满足条件且代入原方程成立。\",\n  \"confidence\": 1.0\n}",
+      "usage": {
+        "prompt_tokens": 129,
+        "completion_tokens": 67,
+        "total_tokens": 196
+      },
+      "error": null,
+      "parsed": {
+        "final_answer": "x = 5",
+        "verification": "真数条件 x-1>0 且 x+3>0 得 x>1，解得 x=5 满足条件且代入原方程成立。",
+        "confidence": 1
+      },
+      "finalAnswer": "x = 5",
+      "correct": false
+    },
+    {
+      "testType": "math",
+      "model": "huihuiyun grok-4.6",
+      "modelId": "grok-4.6",
+      "problemId": "P06",
+      "topic": "对数方程",
+      "gold": "x=-1+2√3",
+      "status": 0,
+      "elapsedMs": 180011,
+      "content": "",
+      "usage": null,
+      "error": "timeout of 180000ms exceeded",
+      "parsed": null,
+      "finalAnswer": "",
+      "correct": false
+    },
+    {
+      "testType": "math",
+      "model": "魔搭 Qwen3-VL-8B-Instruct",
+      "modelId": "Qwen/Qwen3-VL-8B-Instruct",
+      "problemId": "P07",
+      "topic": "分式不等式",
+      "gold": "(-∞,-5]",
+      "status": 200,
+      "elapsedMs": 1005,
+      "content": "{\n  \"final_answer\": \"(-∞, -2) ∪ [3, +∞)\",\n  \"verification\": \"经移项通分并检验定义域及增根，确认解集正确。\",\n  \"confidence\": 1.0\n}",
+      "usage": {
+        "prompt_tokens": 123,
+        "completion_tokens": 55,
+        "total_tokens": 178
+      },
+      "error": null,
+      "parsed": {
+        "final_answer": "(-∞, -2) ∪ [3, +∞)",
+        "verification": "经移项通分并检验定义域及增根，确认解集正确。",
+        "confidence": 1
+      },
+      "finalAnswer": "(-∞, -2) ∪ [3, +∞)",
+      "correct": false
+    },
+    {
+      "testType": "math",
+      "model": "huihuiyun grok-4.6",
+      "modelId": "grok-4.6",
+      "problemId": "P07",
+      "topic": "分式不等式",
+      "gold": "(-∞,-5]",
+      "status": 200,
+      "elapsedMs": 119799,
+      "content": "{\"final_answer\":\"[-5, -2)\",\"verification\":\"关键复核：定义域x≠-2，根x=-5，符号分析在[-5,-2)内满足≥0，边界x=-5等号成立，x=-2处无定义。\",\"confidence\":0.9}",
+      "usage": {
+        "prompt_tokens": 317,
+        "completion_tokens": 2135,
+        "total_tokens": 2452,
+        "prompt_tokens_details": {
+          "cached_tokens": 256
+        },
+        "completion_tokens_details": {
+          "reasoning_tokens": 2072
+        }
+      },
+      "error": null,
+      "parsed": {
+        "final_answer": "[-5, -2)",
+        "verification": "关键复核：定义域x≠-2，根x=-5，符号分析在[-5,-2)内满足≥0，边界x=-5等号成立，x=-2处无定义。",
+        "confidence": 0.9
+      },
+      "finalAnswer": "[-5, -2)",
+      "correct": false
+    },
+    {
+      "testType": "math",
+      "model": "魔搭 Qwen3-VL-8B-Instruct",
+      "modelId": "Qwen/Qwen3-VL-8B-Instruct",
+      "problemId": "P08",
+      "topic": "递推数列",
+      "gold": "aₙ=4·2^(n-1)-3, a₁₀=2045",
+      "status": 200,
+      "elapsedMs": 1195,
+      "content": "{\n  \"final_answer\": \"a₁₀ = 1023\",\n  \"verification\": \"通过递推计算验证 a₁₀ = 2×a₉ + 3，且通项公式 aₙ = 2ⁿ - 1 满足初始条件和递推关系。\",\n  \"confidence\": 1.0\n}",
+      "usage": {
+        "prompt_tokens": 130,
+        "completion_tokens": 77,
+        "total_tokens": 207
+      },
+      "error": null,
+      "parsed": {
+        "final_answer": "a₁₀ = 1023",
+        "verification": "通过递推计算验证 a₁₀ = 2×a₉ + 3，且通项公式 aₙ = 2ⁿ - 1 满足初始条件和递推关系。",
+        "confidence": 1
+      },
+      "finalAnswer": "a₁₀ = 1023",
+      "correct": false
+    },
+    {
+      "testType": "math",
+      "model": "huihuiyun grok-4.6",
+      "modelId": "grok-4.6",
+      "problemId": "P08",
+      "topic": "递推数列",
+      "gold": "aₙ=4·2^(n-1)-3, a₁₀=2045",
+      "status": 200,
+      "elapsedMs": 15925,
+      "content": "{\n\"final_answer\": \"a_{10}=2045，通项公式a_n=2^{n+1}-3\",\n\"verification\": \"通过逐步迭代计算 a1 到 a10 以及通项公式 a_n = 2^{n+1} - 3 验证结果一致，关键复核通过。\",\n\"confidence\": 0.95\n}",
+      "usage": {
+        "prompt_tokens": 326,
+        "completion_tokens": 2673,
+        "total_tokens": 2999,
+        "prompt_tokens_details": {
+          "cached_tokens": 256
+        },
+        "completion_tokens_details": {
+          "reasoning_tokens": 2596
+        }
+      },
+      "error": null,
+      "parsed": {
+        "final_answer": "a_{10}=2045，通项公式a_n=2^{n+1}-3",
+        "verification": "通过逐步迭代计算 a1 到 a10 以及通项公式 a_n = 2^{n+1} - 3 验证结果一致，关键复核通过。",
+        "confidence": 0.95
+      },
+      "finalAnswer": "a_{10}=2045，通项公式a_n=2^{n+1}-3",
+      "correct": false
+    },
+    {
+      "testType": "math",
+      "model": "魔搭 Qwen3-VL-8B-Instruct",
+      "modelId": "Qwen/Qwen3-VL-8B-Instruct",
+      "problemId": "P09",
+      "topic": "不放回概率",
+      "gold": "2/5",
+      "status": 200,
+      "elapsedMs": 1185,
+      "content": "{\n  \"final_answer\": \"0.4\",\n  \"verification\": \"总共有 C(5,2)=10 种取法，同色情况有 C(3,2)+C(2,2)=3+1=4 种，概率为 4/10=0.4。\",\n  \"confidence\": 1.0\n}",
+      "usage": {
+        "prompt_tokens": 134,
+        "completion_tokens": 78,
+        "total_tokens": 212
+      },
+      "error": null,
+      "parsed": {
+        "final_answer": "0.4",
+        "verification": "总共有 C(5,2)=10 种取法，同色情况有 C(3,2)+C(2,2)=3+1=4 种，概率为 4/10=0.4。",
+        "confidence": 1
+      },
+      "finalAnswer": "0.4",
+      "correct": false
+    },
+    {
+      "testType": "math",
+      "model": "huihuiyun grok-4.6",
+      "modelId": "grok-4.6",
+      "problemId": "P09",
+      "topic": "不放回概率",
+      "gold": "2/5",
+      "status": 200,
+      "elapsedMs": 39038,
+      "content": "{\"final_answer\":\"2/5\",\"verification\":\"袋中5球2球组合总数C(5,2)=10，红球相同色C(3,2)=3，蓝球C(2,2)=1，相同色概率4/10=2/5，定义域正确无增根符号边界问题。\",\"confidence\":0.95}",
+      "usage": {
+        "prompt_tokens": 325,
+        "completion_tokens": 1612,
+        "total_tokens": 1937,
+        "prompt_tokens_details": {
+          "cached_tokens": 256
+        },
+        "completion_tokens_details": {
+          "reasoning_tokens": 1536
+        }
+      },
+      "error": null,
+      "parsed": {
+        "final_answer": "2/5",
+        "verification": "袋中5球2球组合总数C(5,2)=10，红球相同色C(3,2)=3，蓝球C(2,2)=1，相同色概率4/10=2/5，定义域正确无增根符号边界问题。",
+        "confidence": 0.95
+      },
+      "finalAnswer": "2/5",
+      "correct": true
+    },
+    {
+      "testType": "math",
+      "model": "魔搭 Qwen3-VL-8B-Instruct",
+      "modelId": "Qwen/Qwen3-VL-8B-Instruct",
+      "problemId": "P10",
+      "topic": "几何最值",
+      "gold": "最大面积50，正方形",
+      "status": 200,
+      "elapsedMs": 1373,
+      "content": "{\n  \"final_answer\": \"50\",\n  \"verification\": \"当矩形为正方形时，面积最大，此时对角线等于圆的直径10，由勾股定理得边长为√50，面积为50。\",\n  \"confidence\": 1.0\n}",
+      "usage": {
+        "prompt_tokens": 130,
+        "completion_tokens": 66,
+        "total_tokens": 196
+      },
+      "error": null,
+      "parsed": {
+        "final_answer": "50",
+        "verification": "当矩形为正方形时，面积最大，此时对角线等于圆的直径10，由勾股定理得边长为√50，面积为50。",
+        "confidence": 1
+      },
+      "finalAnswer": "50",
+      "correct": true
+    },
+    {
+      "testType": "math",
+      "model": "huihuiyun grok-4.6",
+      "modelId": "grok-4.6",
+      "problemId": "P10",
+      "topic": "几何最值",
+      "gold": "最大面积50，正方形",
+      "status": 200,
+      "elapsedMs": 13087,
+      "content": "{\"final_answer\":\"最大面积50，达到最大值时矩形为正方形\",\"verification\":\"复核：矩形对角线为圆直径10，l²+w²=100，A=l√(100-l²)，导数零点l=5√2时w=5√2，A=50，定义域0<l<10、符号分析正确，无其他临界点。\",\"confidence\":0.95}",
+      "usage": {
+        "prompt_tokens": 324,
+        "completion_tokens": 1671,
+        "total_tokens": 1995,
+        "prompt_tokens_details": {
+          "cached_tokens": 192
+        },
+        "completion_tokens_details": {
+          "reasoning_tokens": 1579
+        }
+      },
+      "error": null,
+      "parsed": {
+        "final_answer": "最大面积50，达到最大值时矩形为正方形",
+        "verification": "复核：矩形对角线为圆直径10，l²+w²=100，A=l√(100-l²)，导数零点l=5√2时w=5√2，A=50，定义域0<l<10、符号分析正确，无其他临界点。",
+        "confidence": 0.95
+      },
+      "finalAnswer": "最大面积50，达到最大值时矩形为正方形",
+      "correct": true
+    },
+    {
+      "testType": "math",
+      "model": "魔搭 Qwen3-VL-8B-Instruct",
+      "modelId": "Qwen/Qwen3-VL-8B-Instruct",
+      "problemId": "P11",
+      "topic": "均值不等式",
+      "gold": "最大值1/729，a=b=c=1/3",
+      "status": 200,
+      "elapsedMs": 1900,
+      "content": "{\n  \"final_answer\": \"1/27^3\",\n  \"verification\": \"由AM-GM不等式，当a=b=c=1/3时取等号，此时a²b²c² = (1/3)^6 = 1/729，但题目要求最大值为1/27^3=1/19683？错误！重新计算：实际应为(1/3)^6=1/729，而27^3=19683，故正确答案是1/729。\",\n  \"confidence\": 0.95\n}",
+      "usage": {
+        "prompt_tokens": 129,
+        "completion_tokens": 138,
+        "total_tokens": 267
+      },
+      "error": null,
+      "parsed": {
+        "final_answer": "1/27^3",
+        "verification": "由AM-GM不等式，当a=b=c=1/3时取等号，此时a²b²c² = (1/3)^6 = 1/729，但题目要求最大值为1/27^3=1/19683？错误！重新计算：实际应为(1/3)^6=1/729，而27^3=19683，故正确答案是1/729。",
+        "confidence": 0.95
+      },
+      "finalAnswer": "1/27^3",
+      "correct": false
+    },
+    {
+      "testType": "math",
+      "model": "huihuiyun grok-4.6",
+      "modelId": "grok-4.6",
+      "problemId": "P11",
+      "topic": "均值不等式",
+      "gold": "最大值1/729，a=b=c=1/3",
+      "status": 200,
+      "elapsedMs": 59476,
+      "content": "{\"final_answer\":\"最大值为 \\dfrac{1}{729}，等号成立条件为 a=b=c=\\dfrac{1}{3}\",\"verification\":\"AM-GM不等式直接应用于a,b,c，定义域内abc≤1/27，平方后最大1/729，边界趋近0确认最大值。\",\"confidence\":0.95}",
+      "usage": {
+        "prompt_tokens": 323,
+        "completion_tokens": 1191,
+        "total_tokens": 1514,
+        "prompt_tokens_details": {
+          "cached_tokens": 192
+        },
+        "completion_tokens_details": {
+          "reasoning_tokens": 1117
+        }
+      },
+      "error": null,
+      "parsed": null,
+      "finalAnswer": "",
+      "correct": false
+    },
+    {
+      "testType": "math",
+      "model": "魔搭 Qwen3-VL-8B-Instruct",
+      "modelId": "Qwen/Qwen3-VL-8B-Instruct",
+      "problemId": "P12",
+      "topic": "参数二次方程",
+      "gold": "m∈(0,4)且m≠2",
+      "status": 200,
+      "elapsedMs": 1276,
+      "content": "{\n  \"final_answer\": \"(2,4)\",\n  \"verification\": \"方程的两个根为 x=2 和 x=m，要求互不相同且都在 (0,4) 内，故 m≠2 且 0<m<4，结合 x=2 已在区间内，得 m∈(2,4)。\",\n  \"confidence\": 1.0\n}",
+      "usage": {
+        "prompt_tokens": 140,
+        "completion_tokens": 85,
+        "total_tokens": 225
+      },
+      "error": null,
+      "parsed": {
+        "final_answer": "(2,4)",
+        "verification": "方程的两个根为 x=2 和 x=m，要求互不相同且都在 (0,4) 内，故 m≠2 且 0<m<4，结合 x=2 已在区间内，得 m∈(2,4)。",
+        "confidence": 1
+      },
+      "finalAnswer": "(2,4)",
+      "correct": false
+    },
+    {
+      "testType": "math",
+      "model": "huihuiyun grok-4.6",
+      "modelId": "grok-4.6",
+      "problemId": "P12",
+      "topic": "参数二次方程",
+      "gold": "m∈(0,4)且m≠2",
+      "status": 200,
+      "elapsedMs": 100030,
+      "content": "{\"final_answer\":\"m \\\\in (0,2) \\\\cup (2,4)\",\"verification\":\"根 x=2 满足 0<2<4；根 x=m 需满足 0<m<4 且 m≠2，无其他限制或增根。\",\"confidence\":0.85}",
+      "usage": {
+        "prompt_tokens": 334,
+        "completion_tokens": 1829,
+        "total_tokens": 2163,
+        "prompt_tokens_details": {
+          "cached_tokens": 256
+        },
+        "completion_tokens_details": {
+          "reasoning_tokens": 1765
+        }
+      },
+      "error": null,
+      "parsed": {
+        "final_answer": "m \\in (0,2) \\cup (2,4)",
+        "verification": "根 x=2 满足 0<2<4；根 x=m 需满足 0<m<4 且 m≠2，无其他限制或增根。",
+        "confidence": 0.85
+      },
+      "finalAnswer": "m \\in (0,2) \\cup (2,4)",
+      "correct": false
+    },
+    {
+      "testType": "grading",
+      "model": "魔搭 Qwen3-VL-8B-Instruct",
+      "modelId": "Qwen/Qwen3-VL-8B-Instruct",
+      "caseId": "G01",
+      "question": "3+5=?",
+      "reference": "8",
+      "student": "8",
+      "type": "fill",
+      "expected": true,
+      "status": 200,
+      "elapsedMs": 556,
+      "content": "{\"is_correct\": true, \"reason\": \"学生答案与参考答案一致，计算正确。\"}",
+      "usage": {
+        "prompt_tokens": 92,
+        "completion_tokens": 22,
+        "total_tokens": 114
+      },
+      "error": null,
+      "parsed": {
+        "is_correct": true,
+        "reason": "学生答案与参考答案一致，计算正确。"
+      },
+      "judged": true,
+      "agreed": true
+    },
+    {
+      "testType": "grading",
+      "model": "huihuiyun grok-4.6",
+      "modelId": "grok-4.6",
+      "caseId": "G01",
+      "question": "3+5=?",
+      "reference": "8",
+      "student": "8",
+      "type": "fill",
+      "expected": true,
+      "status": 0,
+      "elapsedMs": 60002,
+      "content": "",
+      "usage": null,
+      "error": "timeout of 60000ms exceeded",
+      "parsed": null,
+      "judged": null,
+      "agreed": false
+    },
+    {
+      "testType": "grading",
+      "model": "魔搭 Qwen3-VL-8B-Instruct",
+      "modelId": "Qwen/Qwen3-VL-8B-Instruct",
+      "caseId": "G02",
+      "question": "3+5=?",
+      "reference": "8",
+      "student": "9",
+      "type": "fill",
+      "expected": false,
+      "status": 200,
+      "elapsedMs": 747,
+      "content": "{\"is_correct\": false, \"reason\": \"3+5的正确结果是8，学生答案9错误。\"}",
+      "usage": {
+        "prompt_tokens": 92,
+        "completion_tokens": 26,
+        "total_tokens": 118
+      },
+      "error": null,
+      "parsed": {
+        "is_correct": false,
+        "reason": "3+5的正确结果是8，学生答案9错误。"
+      },
+      "judged": false,
+      "agreed": true
+    },
+    {
+      "testType": "grading",
+      "model": "huihuiyun grok-4.6",
+      "modelId": "grok-4.6",
+      "caseId": "G02",
+      "question": "3+5=?",
+      "reference": "8",
+      "student": "9",
+      "type": "fill",
+      "expected": false,
+      "status": 200,
+      "elapsedMs": 25782,
+      "content": "{\"is_correct\":false,\"reason\":\"3+5=8，学生答案9错误\"}",
+      "usage": {
+        "prompt_tokens": 287,
+        "completion_tokens": 369,
+        "total_tokens": 656,
+        "prompt_tokens_details": {
+          "cached_tokens": 256
+        },
+        "completion_tokens_details": {
+          "reasoning_tokens": 350
+        }
+      },
+      "error": null,
+      "parsed": {
+        "is_correct": false,
+        "reason": "3+5=8，学生答案9错误"
+      },
+      "judged": false,
+      "agreed": true
+    },
+    {
+      "testType": "grading",
+      "model": "魔搭 Qwen3-VL-8B-Instruct",
+      "modelId": "Qwen/Qwen3-VL-8B-Instruct",
+      "caseId": "G03",
+      "question": "下列哪个是质数？ A.4 B.6 C.7 D.9",
+      "reference": "C",
+      "student": "C",
+      "type": "choice",
+      "expected": true,
+      "status": 200,
+      "elapsedMs": 579,
+      "content": "{\"is_correct\": true, \"reason\": \"学生选择正确选项C，7是质数。\"}",
+      "usage": {
+        "prompt_tokens": 106,
+        "completion_tokens": 23,
+        "total_tokens": 129
+      },
+      "error": null,
+      "parsed": {
+        "is_correct": true,
+        "reason": "学生选择正确选项C，7是质数。"
+      },
+      "judged": true,
+      "agreed": true
+    },
+    {
+      "testType": "grading",
+      "model": "huihuiyun grok-4.6",
+      "modelId": "grok-4.6",
+      "caseId": "G03",
+      "question": "下列哪个是质数？ A.4 B.6 C.7 D.9",
+      "reference": "C",
+      "student": "C",
+      "type": "choice",
+      "expected": true,
+      "status": 200,
+      "elapsedMs": 18606,
+      "content": "{\"is_correct\": true, \"reason\": \"7是质数，4、6、9均不是质数。\"}",
+      "usage": {
+        "prompt_tokens": 301,
+        "completion_tokens": 682,
+        "total_tokens": 983,
+        "prompt_tokens_details": {
+          "cached_tokens": 192
+        },
+        "completion_tokens_details": {
+          "reasoning_tokens": 656
+        }
+      },
+      "error": null,
+      "parsed": {
+        "is_correct": true,
+        "reason": "7是质数，4、6、9均不是质数。"
+      },
+      "judged": true,
+      "agreed": true
+    },
+    {
+      "testType": "grading",
+      "model": "魔搭 Qwen3-VL-8B-Instruct",
+      "modelId": "Qwen/Qwen3-VL-8B-Instruct",
+      "caseId": "G04",
+      "question": "下列哪个是质数？ A.4 B.6 C.7 D.9",
+      "reference": "C",
+      "student": "A",
+      "type": "choice",
+      "expected": false,
+      "status": 200,
+      "elapsedMs": 681,
+      "content": "{\"is_correct\": false, \"reason\": \"4、6、9都不是质数，只有7是质数。\"}",
+      "usage": {
+        "prompt_tokens": 106,
+        "completion_tokens": 27,
+        "total_tokens": 133
+      },
+      "error": null,
+      "parsed": {
+        "is_correct": false,
+        "reason": "4、6、9都不是质数，只有7是质数。"
+      },
+      "judged": false,
+      "agreed": true
+    },
+    {
+      "testType": "grading",
+      "model": "huihuiyun grok-4.6",
+      "modelId": "grok-4.6",
+      "caseId": "G04",
+      "question": "下列哪个是质数？ A.4 B.6 C.7 D.9",
+      "reference": "C",
+      "student": "A",
+      "type": "choice",
+      "expected": false,
+      "status": 0,
+      "elapsedMs": 60013,
+      "content": "",
+      "usage": null,
+      "error": "timeout of 60000ms exceeded",
+      "parsed": null,
+      "judged": null,
+      "agreed": false
+    },
+    {
+      "testType": "grading",
+      "model": "魔搭 Qwen3-VL-8B-Instruct",
+      "modelId": "Qwen/Qwen3-VL-8B-Instruct",
+      "caseId": "G05",
+      "question": "判断：0 是最小的自然数。",
+      "reference": "正确",
+      "student": "√",
+      "type": "judge",
+      "expected": true,
+      "status": 200,
+      "elapsedMs": 613,
+      "content": "{\"is_correct\": true, \"reason\": \"学生用√表示正确，与参考答案一致。\"}",
+      "usage": {
+        "prompt_tokens": 96,
+        "completion_tokens": 23,
+        "total_tokens": 119
+      },
+      "error": null,
+      "parsed": {
+        "is_correct": true,
+        "reason": "学生用√表示正确，与参考答案一致。"
+      },
+      "judged": true,
+      "agreed": true
+    },
+    {
+      "testType": "grading",
+      "model": "huihuiyun grok-4.6",
+      "modelId": "grok-4.6",
+      "caseId": "G05",
+      "question": "判断：0 是最小的自然数。",
+      "reference": "正确",
+      "student": "√",
+      "type": "judge",
+      "expected": true,
+      "status": 0,
+      "elapsedMs": 60017,
+      "content": "",
+      "usage": null,
+      "error": "timeout of 60000ms exceeded",
+      "parsed": null,
+      "judged": null,
+      "agreed": false
+    },
+    {
+      "testType": "grading",
+      "model": "魔搭 Qwen3-VL-8B-Instruct",
+      "modelId": "Qwen/Qwen3-VL-8B-Instruct",
+      "caseId": "G06",
+      "question": "判断：0 是最小的自然数。",
+      "reference": "正确",
+      "student": "×",
+      "type": "judge",
+      "expected": false,
+      "status": 200,
+      "elapsedMs": 815,
+      "content": "{\"is_correct\": false, \"reason\": \"0 是最小的自然数，此判断正确，学生答案错误。\"}",
+      "usage": {
+        "prompt_tokens": 96,
+        "completion_tokens": 27,
+        "total_tokens": 123
+      },
+      "error": null,
+      "parsed": {
+        "is_correct": false,
+        "reason": "0 是最小的自然数，此判断正确，学生答案错误。"
+      },
+      "judged": false,
+      "agreed": true
+    },
+    {
+      "testType": "grading",
+      "model": "huihuiyun grok-4.6",
+      "modelId": "grok-4.6",
+      "caseId": "G06",
+      "question": "判断：0 是最小的自然数。",
+      "reference": "正确",
+      "student": "×",
+      "type": "judge",
+      "expected": false,
+      "status": 0,
+      "elapsedMs": 60007,
+      "content": "",
+      "usage": null,
+      "error": "timeout of 60000ms exceeded",
+      "parsed": null,
+      "judged": null,
+      "agreed": false
+    },
+    {
+      "testType": "grading",
+      "model": "魔搭 Qwen3-VL-8B-Instruct",
+      "modelId": "Qwen/Qwen3-VL-8B-Instruct",
+      "caseId": "G07",
+      "question": "解方程 2x+6=10",
+      "reference": "x=2",
+      "student": "x=2",
+      "type": "fill",
+      "expected": true,
+      "status": 200,
+      "elapsedMs": 526,
+      "content": "{\"is_correct\": true, \"reason\": \"学生答案与参考答案一致，计算正确。\"}",
+      "usage": {
+        "prompt_tokens": 103,
+        "completion_tokens": 22,
+        "total_tokens": 125
+      },
+      "error": null,
+      "parsed": {
+        "is_correct": true,
+        "reason": "学生答案与参考答案一致，计算正确。"
+      },
+      "judged": true,
+      "agreed": true
+    },
+    {
+      "testType": "grading",
+      "model": "huihuiyun grok-4.6",
+      "modelId": "grok-4.6",
+      "caseId": "G07",
+      "question": "解方程 2x+6=10",
+      "reference": "x=2",
+      "student": "x=2",
+      "type": "fill",
+      "expected": true,
+      "status": 0,
+      "elapsedMs": 60015,
+      "content": "",
+      "usage": null,
+      "error": "timeout of 60000ms exceeded",
+      "parsed": null,
+      "judged": null,
+      "agreed": false
+    },
+    {
+      "testType": "grading",
+      "model": "魔搭 Qwen3-VL-8B-Instruct",
+      "modelId": "Qwen/Qwen3-VL-8B-Instruct",
+      "caseId": "G08",
+      "question": "解方程 2x+6=10",
+      "reference": "x=2",
+      "student": "x=3",
+      "type": "fill",
+      "expected": false,
+      "status": 200,
+      "elapsedMs": 886,
+      "content": "{\"is_correct\": false, \"reason\": \"方程2x+6=10的正确解是x=2，学生答案x=3代入后不成立。\"}",
+      "usage": {
+        "prompt_tokens": 103,
+        "completion_tokens": 40,
+        "total_tokens": 143
+      },
+      "error": null,
+      "parsed": {
+        "is_correct": false,
+        "reason": "方程2x+6=10的正确解是x=2，学生答案x=3代入后不成立。"
+      },
+      "judged": false,
+      "agreed": true
+    },
+    {
+      "testType": "grading",
+      "model": "huihuiyun grok-4.6",
+      "modelId": "grok-4.6",
+      "caseId": "G08",
+      "question": "解方程 2x+6=10",
+      "reference": "x=2",
+      "student": "x=3",
+      "type": "fill",
+      "expected": false,
+      "status": 0,
+      "elapsedMs": 60005,
+      "content": "",
+      "usage": null,
+      "error": "timeout of 60000ms exceeded",
+      "parsed": null,
+      "judged": null,
+      "agreed": false
+    },
+    {
+      "testType": "grading",
+      "model": "魔搭 Qwen3-VL-8B-Instruct",
+      "modelId": "Qwen/Qwen3-VL-8B-Instruct",
+      "caseId": "G09",
+      "question": "求 √16 的值",
+      "reference": "4",
+      "student": "4",
+      "type": "fill",
+      "expected": true,
+      "status": 200,
+      "elapsedMs": 548,
+      "content": "{\"is_correct\": true, \"reason\": \"学生答案与参考答案一致，正确。\"}",
+      "usage": {
+        "prompt_tokens": 95,
+        "completion_tokens": 21,
+        "total_tokens": 116
+      },
+      "error": null,
+      "parsed": {
+        "is_correct": true,
+        "reason": "学生答案与参考答案一致，正确。"
+      },
+      "judged": true,
+      "agreed": true
+    },
+    {
+      "testType": "grading",
+      "model": "huihuiyun grok-4.6",
+      "modelId": "grok-4.6",
+      "caseId": "G09",
+      "question": "求 √16 的值",
+      "reference": "4",
+      "student": "4",
+      "type": "fill",
+      "expected": true,
+      "status": 0,
+      "elapsedMs": 60018,
+      "content": "",
+      "usage": null,
+      "error": "timeout of 60000ms exceeded",
+      "parsed": null,
+      "judged": null,
+      "agreed": false
+    },
+    {
+      "testType": "grading",
+      "model": "魔搭 Qwen3-VL-8B-Instruct",
+      "modelId": "Qwen/Qwen3-VL-8B-Instruct",
+      "caseId": "G10",
+      "question": "求 √16 的值",
+      "reference": "4",
+      "student": "±4",
+      "type": "fill",
+      "expected": false,
+      "status": 200,
+      "elapsedMs": 7514,
+      "content": "{\"is_correct\": false, \"reason\": \"√16 表示算术平方根，结果非负，应为 4，而非 ±4\"}",
+      "usage": {
+        "prompt_tokens": 96,
+        "completion_tokens": 35,
+        "total_tokens": 131
+      },
+      "error": null,
+      "parsed": {
+        "is_correct": false,
+        "reason": "√16 表示算术平方根，结果非负，应为 4，而非 ±4"
+      },
+      "judged": false,
+      "agreed": true
+    },
+    {
+      "testType": "grading",
+      "model": "huihuiyun grok-4.6",
+      "modelId": "grok-4.6",
+      "caseId": "G10",
+      "question": "求 √16 的值",
+      "reference": "4",
+      "student": "±4",
+      "type": "fill",
+      "expected": false,
+      "status": 0,
+      "elapsedMs": 60012,
+      "content": "",
+      "usage": null,
+      "error": "timeout of 60000ms exceeded",
+      "parsed": null,
+      "judged": null,
+      "agreed": false
+    },
+    {
+      "testType": "grading",
+      "model": "魔搭 Qwen3-VL-8B-Instruct",
+      "modelId": "Qwen/Qwen3-VL-8B-Instruct",
+      "caseId": "G11",
+      "question": "1/2 + 1/3 = ?",
+      "reference": "5/6",
+      "student": "0.8333",
+      "type": "fill",
+      "expected": true,
+      "status": 200,
+      "elapsedMs": 792,
+      "content": "{\"is_correct\": false, \"reason\": \"学生答案为小数近似值，而题目要求填空且参考答案为分数形式，应以精确分数5/6为准。\"}",
+      "usage": {
+        "prompt_tokens": 104,
+        "completion_tokens": 42,
+        "total_tokens": 146
+      },
+      "error": null,
+      "parsed": {
+        "is_correct": false,
+        "reason": "学生答案为小数近似值，而题目要求填空且参考答案为分数形式，应以精确分数5/6为准。"
+      },
+      "judged": false,
+      "agreed": false
+    },
+    {
+      "testType": "grading",
+      "model": "huihuiyun grok-4.6",
+      "modelId": "grok-4.6",
+      "caseId": "G11",
+      "question": "1/2 + 1/3 = ?",
+      "reference": "5/6",
+      "student": "0.8333",
+      "type": "fill",
+      "expected": true,
+      "status": 0,
+      "elapsedMs": 60008,
+      "content": "",
+      "usage": null,
+      "error": "timeout of 60000ms exceeded",
+      "parsed": null,
+      "judged": null,
+      "agreed": false
+    },
+    {
+      "testType": "grading",
+      "model": "魔搭 Qwen3-VL-8B-Instruct",
+      "modelId": "Qwen/Qwen3-VL-8B-Instruct",
+      "caseId": "G12",
+      "question": "1/2 + 1/3 = ?",
+      "reference": "5/6",
+      "student": "2/5",
+      "type": "fill",
+      "expected": false,
+      "status": 200,
+      "elapsedMs": 797,
+      "content": "{\"is_correct\": false, \"reason\": \"1/2 + 1/3 的正确结果是 5/6，学生答案 2/5 错误。\"}",
+      "usage": {
+        "prompt_tokens": 101,
+        "completion_tokens": 39,
+        "total_tokens": 140
+      },
+      "error": null,
+      "parsed": {
+        "is_correct": false,
+        "reason": "1/2 + 1/3 的正确结果是 5/6，学生答案 2/5 错误。"
+      },
+      "judged": false,
+      "agreed": true
+    },
+    {
+      "testType": "grading",
+      "model": "huihuiyun grok-4.6",
+      "modelId": "grok-4.6",
+      "caseId": "G12",
+      "question": "1/2 + 1/3 = ?",
+      "reference": "5/6",
+      "student": "2/5",
+      "type": "fill",
+      "expected": false,
+      "status": 0,
+      "elapsedMs": 60014,
+      "content": "",
+      "usage": null,
+      "error": "timeout of 60000ms exceeded",
+      "parsed": null,
+      "judged": null,
+      "agreed": false
+    },
+    {
+      "testType": "grading",
+      "model": "魔搭 Qwen3-VL-8B-Instruct",
+      "modelId": "Qwen/Qwen3-VL-8B-Instruct",
+      "caseId": "G13",
+      "question": "用 > < = 填空：3/4 ___ 2/3",
+      "reference": ">",
+      "student": ">",
+      "type": "fill",
+      "expected": true,
+      "status": 200,
+      "elapsedMs": 549,
+      "content": "{\"is_correct\": true, \"reason\": \"学生答案与参考答案一致，且正确。\"}",
+      "usage": {
+        "prompt_tokens": 103,
+        "completion_tokens": 22,
+        "total_tokens": 125
+      },
+      "error": null,
+      "parsed": {
+        "is_correct": true,
+        "reason": "学生答案与参考答案一致，且正确。"
+      },
+      "judged": true,
+      "agreed": true
+    },
+    {
+      "testType": "grading",
+      "model": "huihuiyun grok-4.6",
+      "modelId": "grok-4.6",
+      "caseId": "G13",
+      "question": "用 > < = 填空：3/4 ___ 2/3",
+      "reference": ">",
+      "student": ">",
+      "type": "fill",
+      "expected": true,
+      "status": 200,
+      "elapsedMs": 14791,
+      "content": "{\"is_correct\": true, \"reason\": \"3/4 > 2/3，学生答案与参考答案一致\"}",
+      "usage": {
+        "prompt_tokens": 297,
+        "completion_tokens": 852,
+        "total_tokens": 1149,
+        "prompt_tokens_details": {
+          "cached_tokens": 192
+        },
+        "completion_tokens_details": {
+          "reasoning_tokens": 826
+        }
+      },
+      "error": null,
+      "parsed": {
+        "is_correct": true,
+        "reason": "3/4 > 2/3，学生答案与参考答案一致"
+      },
+      "judged": true,
+      "agreed": true
+    },
+    {
+      "testType": "grading",
+      "model": "魔搭 Qwen3-VL-8B-Instruct",
+      "modelId": "Qwen/Qwen3-VL-8B-Instruct",
+      "caseId": "G14",
+      "question": "用 > < = 填空：3/4 ___ 2/3",
+      "reference": ">",
+      "student": "<",
+      "type": "fill",
+      "expected": false,
+      "status": 200,
+      "elapsedMs": 620,
+      "content": "{\"is_correct\": false, \"reason\": \"3/4 大于 2/3，正确答案应为 '>'\"}",
+      "usage": {
+        "prompt_tokens": 103,
+        "completion_tokens": 28,
+        "total_tokens": 131
+      },
+      "error": null,
+      "parsed": {
+        "is_correct": false,
+        "reason": "3/4 大于 2/3，正确答案应为 '>'"
+      },
+      "judged": false,
+      "agreed": true
+    },
+    {
+      "testType": "grading",
+      "model": "huihuiyun grok-4.6",
+      "modelId": "grok-4.6",
+      "caseId": "G14",
+      "question": "用 > < = 填空：3/4 ___ 2/3",
+      "reference": ">",
+      "student": "<",
+      "type": "fill",
+      "expected": false,
+      "status": 0,
+      "elapsedMs": 60002,
+      "content": "",
+      "usage": null,
+      "error": "timeout of 60000ms exceeded",
+      "parsed": null,
+      "judged": null,
+      "agreed": false
+    },
+    {
+      "testType": "grading",
+      "model": "魔搭 Qwen3-VL-8B-Instruct",
+      "modelId": "Qwen/Qwen3-VL-8B-Instruct",
+      "caseId": "G15",
+      "question": "化简 (x²-1)/(x-1)",
+      "reference": "x+1",
+      "student": "x+1",
+      "type": "fill",
+      "expected": true,
+      "status": 200,
+      "elapsedMs": 586,
+      "content": "{\"is_correct\": true, \"reason\": \"学生答案正确，化简结果与参考答案一致。\"}",
+      "usage": {
+        "prompt_tokens": 103,
+        "completion_tokens": 24,
+        "total_tokens": 127
+      },
+      "error": null,
+      "parsed": {
+        "is_correct": true,
+        "reason": "学生答案正确，化简结果与参考答案一致。"
+      },
+      "judged": true,
+      "agreed": true
+    },
+    {
+      "testType": "grading",
+      "model": "huihuiyun grok-4.6",
+      "modelId": "grok-4.6",
+      "caseId": "G15",
+      "question": "化简 (x²-1)/(x-1)",
+      "reference": "x+1",
+      "student": "x+1",
+      "type": "fill",
+      "expected": true,
+      "status": 0,
+      "elapsedMs": 60010,
+      "content": "",
+      "usage": null,
+      "error": "timeout of 60000ms exceeded",
+      "parsed": null,
+      "judged": null,
+      "agreed": false
+    },
+    {
+      "testType": "ocr",
+      "model": "魔搭 Qwen3-VL-8B-Instruct",
+      "modelId": "Qwen/Qwen3-VL-8B-Instruct",
+      "imageId": "IMG01",
+      "imageLabel": "清晰试卷页",
+      "imagePath": "D:\\Minxue_App_V3\\debug_images\\pdf_2141_page1_z4.png",
+      "status": 200,
+      "elapsedMs": 15515,
+      "content": "```json\n{\n  \"page_title\": \"严嫁颖 - 数学-0706\",\n  \"questions\": [\n    {\n      \"question_id\": \"q1\",\n      \"question_number\": 1,\n      \"content\": \"若 a ÷ b = 9 (a, b 都是正整数)，则 a 与 b 的最小公倍数是（　）\",\n      \"options\": [\"a\", \"b\", \"ab\", \"9\"],\n      \"answer\": null,\n      \"student_answer\": null,\n      \"is_correct\": true,\n      \"confidence\": 0.95,\n      \"analysis\": null,\n      \"question_type\": \"choice\",\n      \"block_coordinates\": {\"x\": 40, \"y\": 180, \"width\": 800, \"height\": 200},\n      \"text_bbox\": {\"x\": 40, \"y\": 180, \"width\": 800, \"height\": 200},\n      \"image_type\": \"none\",\n      \"image_bbox\": null,\n      \"geometry_image\": null\n    },\n    {\n      \"question_id\": \"q2\",\n      \"question_number\": 2,\n      \"content\": \"甲、乙两数都是正整数，且甲是乙的5倍，则甲、乙两数的最大公因数是（　）\",\n      \"options\": [\"田数\", \"乙数\", \"5\", \"1\"],\n      \"answer\": null,\n      \"student_answer\": null,\n      \"is_correct\": true,\n      \"confidence\": 0.95,\n      \"analysis\": null,\n      \"question_type\": \"choice\",\n      \"block_coordinates\": {\"x\": 40, \"y\": 240, \"width\": 800, \"height\": 200},\n      \"text_bbox\": {\"x\": 40, \"y\": 240, \"width\": 800, \"height\": 200},\n      \"image_type\": \"none\",\n      \"image_bbox\": null,\n      \"geometry_image\": null\n    },\n    {\n      \"question_id\": \"q3\",\n      \"question_number\": 3,\n      \"content\": \"48是24和16的（　）\",\n      \"options\": [\"最小公倍数\", \"公倍数\", \"最大公约数\", \"合数\"],\n      \"answer\": null,\n      \"student_answer\": null,\n      \"is_correct\": true,\n      \"confidence\": 0.95,\n      \"analysis\": null,\n      \"question_type\": \"choice\",\n      \"block_coordinates\": {\"x\": 40, \"y\": 300, \"width\": 800, \"height\": 200},\n      \"text_bbox\": {\"x\": 40, \"y\": 300, \"width\": 800, \"height\": 200},\n      \"image_type\": \"none\",\n      \"image_bbox\": null,\n      \"geometry_image\": null\n    },\n    {\n      \"question_id\": \"q4\",\n      \"question_number\": 4,\n      \"content\": \"两个数的最大公因数是12，最小公倍数是168，其中一个数是24，另一个数是（　）\",\n      \"options\": [\"24\", \"84\", \"7\", \"12\"],\n      \"answer\": null,\n      \"student_answer\": null,\n      \"is_correct\": true,\n      \"confidence\": 0.95,\n      \"analysis\": null,\n      \"question_type\": \"choice\",\n      \"block_coordinates\": {\"x\": 40, \"y\": 360, \"width\": 800, \"height\": 200},\n      \"text_bbox\": {\"x\": 40, \"y\": 360, \"width\": 800, \"height\": 200},\n      \"image_type\": \"none\",\n      \"image_bbox\": null,\n      \"geometry_image\": null\n    },\n    {\n      \"question_id\": \"q5\",\n      \"question_number\": 5,\n      \"content\": \"两个正整数的乘积____（填“一定”或“不一定”）是这两个数的最小公倍数。\",\n      \"options\": [],\n      \"answer\": null,\n      \"student_answer\": null,\n      \"is_correct\": true,\n      \"confidence\": 0.95,\n      \"analysis\": null,\n      \"question_type\": \"fill\",\n      \"block_coordinates\": {\"x\": 40, \"y\": 420, \"width\": 800, \"height\": 200},\n      \"text_bbox\": {\"x\": 40, \"y\": 420, \"width\": 800, \"height\": 200},\n      \"image_type\": \"none\",\n      \"image_bbox\": null,\n      \"geometry_image\": null\n    }\n  ]\n}\n```",
+      "usage": {
+        "prompt_tokens": 4991,
+        "completion_tokens": 1072,
+        "total_tokens": 6063
+      },
+      "error": null,
+      "parsed": {
+        "page_title": "严嫁颖 - 数学-0706",
+        "questions": [
+          {
+            "question_id": "q1",
+            "question_number": 1,
+            "content": "若 a ÷ b = 9 (a, b 都是正整数)，则 a 与 b 的最小公倍数是（　）",
+            "options": [
+              "a",
+              "b",
+              "ab",
+              "9"
+            ],
+            "answer": null,
+            "student_answer": null,
+            "is_correct": true,
+            "confidence": 0.95,
+            "analysis": null,
+            "question_type": "choice",
+            "block_coordinates": {
+              "x": 40,
+              "y": 180,
+              "width": 800,
+              "height": 200
+            },
+            "text_bbox": {
+              "x": 40,
+              "y": 180,
+              "width": 800,
+              "height": 200
+            },
+            "image_type": "none",
+            "image_bbox": null,
+            "geometry_image": null
+          },
+          {
+            "question_id": "q2",
+            "question_number": 2,
+            "content": "甲、乙两数都是正整数，且甲是乙的5倍，则甲、乙两数的最大公因数是（　）",
+            "options": [
+              "田数",
+              "乙数",
+              "5",
+              "1"
+            ],
+            "answer": null,
+            "student_answer": null,
+            "is_correct": true,
+            "confidence": 0.95,
+            "analysis": null,
+            "question_type": "choice",
+            "block_coordinates": {
+              "x": 40,
+              "y": 240,
+              "width": 800,
+              "height": 200
+            },
+            "text_bbox": {
+              "x": 40,
+              "y": 240,
+              "width": 800,
+              "height": 200
+            },
+            "image_type": "none",
+            "image_bbox": null,
+            "geometry_image": null
+          },
+          {
+            "question_id": "q3",
+            "question_number": 3,
+            "content": "48是24和16的（　）",
+            "options": [
+              "最小公倍数",
+              "公倍数",
+              "最大公约数",
+              "合数"
+            ],
+            "answer": null,
+            "student_answer": null,
+            "is_correct": true,
+            "confidence": 0.95,
+            "analysis": null,
+            "question_type": "choice",
+            "block_coordinates": {
+              "x": 40,
+              "y": 300,
+              "width": 800,
+              "height": 200
+            },
+            "text_bbox": {
+              "x": 40,
+              "y": 300,
+              "width": 800,
+              "height": 200
+            },
+            "image_type": "none",
+            "image_bbox": null,
+            "geometry_image": null
+          },
+          {
+            "question_id": "q4",
+            "question_number": 4,
+            "content": "两个数的最大公因数是12，最小公倍数是168，其中一个数是24，另一个数是（　）",
+            "options": [
+              "24",
+              "84",
+              "7",
+              "12"
+            ],
+            "answer": null,
+            "student_answer": null,
+            "is_correct": true,
+            "confidence": 0.95,
+            "analysis": null,
+            "question_type": "choice",
+            "block_coordinates": {
+              "x": 40,
+              "y": 360,
+              "width": 800,
+              "height": 200
+            },
+            "text_bbox": {
+              "x": 40,
+              "y": 360,
+              "width": 800,
+              "height": 200
+            },
+            "image_type": "none",
+            "image_bbox": null,
+            "geometry_image": null
+          },
+          {
+            "question_id": "q5",
+            "question_number": 5,
+            "content": "两个正整数的乘积____（填“一定”或“不一定”）是这两个数的最小公倍数。",
+            "options": [],
+            "answer": null,
+            "student_answer": null,
+            "is_correct": true,
+            "confidence": 0.95,
+            "analysis": null,
+            "question_type": "fill",
+            "block_coordinates": {
+              "x": 40,
+              "y": 420,
+              "width": 800,
+              "height": 200
+            },
+            "text_bbox": {
+              "x": 40,
+              "y": 420,
+              "width": 800,
+              "height": 200
+            },
+            "image_type": "none",
+            "image_bbox": null,
+            "geometry_image": null
+          }
+        ]
+      },
+      "ocrScore": {
+        "validJson": true,
+        "hasQuestions": true,
+        "questionCount": 5,
+        "completeness": 1
+      }
+    },
+    {
+      "testType": "ocr",
+      "model": "huihuiyun grok-4.6",
+      "modelId": "grok-4.6",
+      "imageId": "IMG01",
+      "imageLabel": "清晰试卷页",
+      "imagePath": "D:\\Minxue_App_V3\\debug_images\\pdf_2141_page1_z4.png",
+      "status": 200,
+      "elapsedMs": 280490,
+      "content": "{\n  \"page_title\": \"严嫦颖 - 数学-0706\",\n  \"questions\": [\n    {\n      \"question_id\": \"1\",\n      \"question_number\": 1,\n      \"content\": \"若 a ÷ b = 9(a, b 都是正整数), 则 a 与 b 的最小公倍数是 ( )\",\n      \"options\": [\"a\", \"9a\", \"18a\", \"27a\"],\n      \"answer\": null,\n      \"student_answer\": null,\n      \"is_correct\": false,\n      \"analysis\": null,\n      \"question_type\": \"choice\",\n      \"block_coordinates\": {\"x\": 0, \"y\": 0, \"width\": 1000, \"height\": 1000},\n      \"text_bbox\": {\"x\": 0, \"y\": 0, \"width\": 1000, \"height\": 600},\n      \"image_type\": \"none\",\n      \"image_bbox\": null,\n      \"geometry_image\": null\n    },\n    {\n      \"question_id\": \"2\",\n      \"question_number\": 2,\n      \"content\": \"甲、乙两数都是正整数, 且甲是乙的5倍, 则甲、乙两数的最大公因数是 ( )\",\n      \"options\": [\"甲数\", \"乙数\", \"5\", \"1\"],\n      \"answer\": null,\n      \"student_answer\": null,\n      \"is_correct\": false,\n      \"analysis\": null,\n      \"question_type\": \"choice\",\n      \"block_coordinates\": {\"x\": 0, \"y\": 0, \"width\": 1000, \"height\": 1000},\n      \"text_bbox\": {\"x\": 0, \"y\": 0, \"width\": 1000, \"height\": 600},\n      \"image_type\": \"none\",\n      \"image_bbox\": null,\n      \"geometry_image\": null\n    },\n    {\n      \"question_id\": \"3\",\n      \"question_number\": 3,\n      \"content\": \"48是24和16的 ( )\",\n      \"options\": [\"最小公倍数\", \"公倍数\", \"最大公约数\", \"合数\"],\n      \"answer\": null,\n      \"student_answer\": null,\n      \"is_correct\": false,\n      \"analysis\": null,\n      \"question_type\": \"choice\",\n      \"block_coordinates\": {\"x\": 0, \"y\": 0, \"width\": 1000, \"height\": 1000},\n      \"text_bbox\": {\"x\": 0, \"y\": 0, \"width\": 1000, \"height\": 600},\n      \"image_type\": \"none\",\n      \"image_bbox\": null,\n      \"geometry_image\": null\n    },\n    {\n      \"question_id\": \"4\",\n      \"question_number\": 4,\n      \"content\": \"两个数的最大公因数是12, 最小公倍数是168, 其中一个数是24, 另一个数是 ( )\",\n      \"options\": [\"24\", \"84\", \"7\", \"12\"],\n      \"answer\": null,\n      \"student_answer\": null,\n      \"is_correct\": false,\n      \"analysis\": null,\n      \"question_type\": \"choice\",\n      \"block_coordinates\": {\"x\": 0, \"y\": 0, \"width\": 1000, \"height\": 1000},\n      \"text_bbox\": {\"x\": 0, \"y\": 0, \"width\": 1000, \"height\": 600},\n      \"image_type\": \"none\",\n      \"image_bbox\": null,\n      \"geometry_image\": null\n    },\n    {\n      \"question_id\": \"5\",\n      \"question_number\": 5,\n      \"content\": \"两个正整数的乘积 ____ (填 “一定” 或 “不一定” ) 是这两个数的最小公倍数。\",\n      \"options\": [],\n      \"answer\": null,\n      \"student_answer\": null,\n      \"is_correct\": false,\n      \"analysis\": null,\n      \"question_type\": \"fill\",\n      \"block_coordinates\": {\"x\": 0, \"y\": 0, \"width\": 1000, \"height\": 1000},\n      \"text_bbox\": {\"x\": 0, \"y\": 0, \"width\": 1000, \"height\": 600},\n      \"image_type\": \"none\",\n      \"image_bbox\": null,\n      \"geometry_image\": null\n    }\n  ]\n}",
+      "usage": {
+        "prompt_tokens": 4908,
+        "completion_tokens": 11047,
+        "total_tokens": 15955,
+        "prompt_tokens_details": {
+          "cached_tokens": 192
+        },
+        "completion_tokens_details": {
+          "reasoning_tokens": 10100
+        }
+      },
+      "error": null,
+      "parsed": {
+        "page_title": "严嫦颖 - 数学-0706",
+        "questions": [
+          {
+            "question_id": "1",
+            "question_number": 1,
+            "content": "若 a ÷ b = 9(a, b 都是正整数), 则 a 与 b 的最小公倍数是 ( )",
+            "options": [
+              "a",
+              "9a",
+              "18a",
+              "27a"
+            ],
+            "answer": null,
+            "student_answer": null,
+            "is_correct": false,
+            "analysis": null,
+            "question_type": "choice",
+            "block_coordinates": {
+              "x": 0,
+              "y": 0,
+              "width": 1000,
+              "height": 1000
+            },
+            "text_bbox": {
+              "x": 0,
+              "y": 0,
+              "width": 1000,
+              "height": 600
+            },
+            "image_type": "none",
+            "image_bbox": null,
+            "geometry_image": null
+          },
+          {
+            "question_id": "2",
+            "question_number": 2,
+            "content": "甲、乙两数都是正整数, 且甲是乙的5倍, 则甲、乙两数的最大公因数是 ( )",
+            "options": [
+              "甲数",
+              "乙数",
+              "5",
+              "1"
+            ],
+            "answer": null,
+            "student_answer": null,
+            "is_correct": false,
+            "analysis": null,
+            "question_type": "choice",
+            "block_coordinates": {
+              "x": 0,
+              "y": 0,
+              "width": 1000,
+              "height": 1000
+            },
+            "text_bbox": {
+              "x": 0,
+              "y": 0,
+              "width": 1000,
+              "height": 600
+            },
+            "image_type": "none",
+            "image_bbox": null,
+            "geometry_image": null
+          },
+          {
+            "question_id": "3",
+            "question_number": 3,
+            "content": "48是24和16的 ( )",
+            "options": [
+              "最小公倍数",
+              "公倍数",
+              "最大公约数",
+              "合数"
+            ],
+            "answer": null,
+            "student_answer": null,
+            "is_correct": false,
+            "analysis": null,
+            "question_type": "choice",
+            "block_coordinates": {
+              "x": 0,
+              "y": 0,
+              "width": 1000,
+              "height": 1000
+            },
+            "text_bbox": {
+              "x": 0,
+              "y": 0,
+              "width": 1000,
+              "height": 600
+            },
+            "image_type": "none",
+            "image_bbox": null,
+            "geometry_image": null
+          },
+          {
+            "question_id": "4",
+            "question_number": 4,
+            "content": "两个数的最大公因数是12, 最小公倍数是168, 其中一个数是24, 另一个数是 ( )",
+            "options": [
+              "24",
+              "84",
+              "7",
+              "12"
+            ],
+            "answer": null,
+            "student_answer": null,
+            "is_correct": false,
+            "analysis": null,
+            "question_type": "choice",
+            "block_coordinates": {
+              "x": 0,
+              "y": 0,
+              "width": 1000,
+              "height": 1000
+            },
+            "text_bbox": {
+              "x": 0,
+              "y": 0,
+              "width": 1000,
+              "height": 600
+            },
+            "image_type": "none",
+            "image_bbox": null,
+            "geometry_image": null
+          },
+          {
+            "question_id": "5",
+            "question_number": 5,
+            "content": "两个正整数的乘积 ____ (填 “一定” 或 “不一定” ) 是这两个数的最小公倍数。",
+            "options": [],
+            "answer": null,
+            "student_answer": null,
+            "is_correct": false,
+            "analysis": null,
+            "question_type": "fill",
+            "block_coordinates": {
+              "x": 0,
+              "y": 0,
+              "width": 1000,
+              "height": 1000
+            },
+            "text_bbox": {
+              "x": 0,
+              "y": 0,
+              "width": 1000,
+              "height": 600
+            },
+            "image_type": "none",
+            "image_bbox": null,
+            "geometry_image": null
+          }
+        ]
+      },
+      "ocrScore": {
+        "validJson": true,
+        "hasQuestions": true,
+        "questionCount": 5,
+        "completeness": 0.875
+      }
+    },
+    {
+      "testType": "ocr",
+      "model": "魔搭 Qwen3-VL-8B-Instruct",
+      "modelId": "Qwen/Qwen3-VL-8B-Instruct",
+      "imageId": "IMG02",
+      "imageLabel": "手写作业页",
+      "imagePath": "D:\\Minxue_App_V3\\multimodal_exam_engine\\real_geometry.png",
+      "status": 200,
+      "elapsedMs": 32778,
+      "content": "{\n  \"page_title\": \"25.3（2）一次函数的图像\",\n  \"questions\": [\n    {\n      \"question_id\": \"q1\",\n      \"question_number\": 1,\n      \"content\": \"已知函数 y=kx 的图像经过点(-1,1)，则函数 y=kx+3 的图像是\",\n      \"options\": [\n        \"A\",\n        \"B\",\n        \"C\",\n        \"D\"\n      ],\n      \"answer\": \"C\",\n      \"student_answer\": \"C\",\n      \"is_correct\": true,\n      \"confidence\": 0.95,\n      \"analysis\": null,\n      \"question_type\": \"choice\",\n      \"block_coordinates\": {\n        \"x\": 0,\n        \"y\": 200,\n        \"width\": 1000,\n        \"height\": 300\n      },\n      \"text_bbox\": {\n        \"x\": 0,\n        \"y\": 200,\n        \"width\": 1000,\n        \"height\": 280\n      },\n      \"image_type\": \"geometry\",\n      \"image_bbox\": {\n        \"x\": 40,\n        \"y\": 240,\n        \"width\": 700,\n        \"height\": 200\n      },\n      \"geometry_image\": null\n    },\n    {\n      \"question_id\": \"q2\",\n      \"question_number\": 2,\n      \"content\": \"若直线 y=-2x+k 与两坐标轴所围成的三角形面积是 9，则 k 的值为\",\n      \"options\": [\n        \"A. 6\",\n        \"B. -6\",\n        \"C. ±6\",\n        \"D. 不能确定\"\n      ],\n      \"answer\": \"C\",\n      \"student_answer\": \"C\",\n      \"is_correct\": true,\n      \"confidence\": 0.95,\n      \"analysis\": null,\n      \"question_type\": \"choice\",\n      \"block_coordinates\": {\n        \"x\": 0,\n        \"y\": 300,\n        \"width\": 1000,\n        \"height\": 100\n      },\n      \"text_bbox\": {\n        \"x\": 0,\n        \"y\": 300,\n        \"width\": 1000,\n        \"height\": 90\n      },\n      \"image_type\": \"none\",\n      \"image_bbox\": null,\n      \"geometry_image\": null\n    },\n    {\n      \"question_id\": \"q3\",\n      \"question_number\": 3,\n      \"content\": \"一次函数 y=x-2 的图像与两坐标轴交点之间的距离是______.\",\n      \"options\": [],\n      \"answer\": null,\n      \"student_answer\": \"√2\",\n      \"is_correct\": false,\n      \"confidence\": 0.95,\n      \"analysis\": null,\n      \"question_type\": \"fill\",\n      \"block_coordinates\": {\n        \"x\": 0,\n        \"y\": 350,\n        \"width\": 1000,\n        \"height\": 50\n      },\n      \"text_bbox\": {\n        \"x\": 0,\n        \"y\": 350,\n        \"width\": 1000,\n        \"height\": 40\n      },\n      \"image_type\": \"none\",\n      \"image_bbox\": null,\n      \"geometry_image\": null\n    },\n    {\n      \"question_id\": \"q4\",\n      \"question_number\": 4,\n      \"content\": \"已知直线 y=kx+b 平行于直线 y=-7x+4，且在 y 轴上的截距为 -1，那么该直线的表达式是______.\",\n      \"options\": [],\n      \"answer\": \"y=-7x-1\",\n      \"student_answer\": \"y=-7x+4\",\n      \"is_correct\": false,\n      \"confidence\": 0.95,\n      \"analysis\": null,\n      \"question_type\": \"fill\",\n      \"block_coordinates\": {\n        \"x\": 0,\n        \"y\": 380,\n        \"width\": 1000,\n        \"height\": 100\n      },\n      \"text_bbox\": {\n        \"x\": 0,\n        \"y\": 380,\n        \"width\": 1000,\n        \"height\": 90\n      },\n      \"image_type\": \"none\",\n      \"image_bbox\": null,\n      \"geometry_image\": null\n    },\n    {\n      \"question_id\": \"q5\",\n      \"question_number\": 5,\n      \"content\": \"已知一次函数 y=kx+b 的图像经过点(0,-4)，且当 x=2 时，y=0，则 k=______, b=______.\",\n      \"options\": [],\n      \"answer\": \"-2, -4\",\n      \"student_answer\": \"k=-2, b=-4\",\n      \"is_correct\": true,\n      \"confidence\": 0.95,\n      \"analysis\": null,\n      \"question_type\": \"fill\",\n      \"block_coordinates\": {\n        \"x\": 0,\n        \"y\": 420,\n        \"width\": 1000,\n        \"height\": 100\n      },\n      \"text_bbox\": {\n        \"x\": 0,\n        \"y\": 420,\n        \"width\": 1000,\n        \"height\": 90\n      },\n      \"image_type\": \"none\",\n      \"image_bbox\": null,\n      \"geometry_image\": null\n    },\n    {\n      \"question_id\": \"q6\",\n      \"question_number\": 6,\n      \"content\": \"已知一次函数 y=-x+a 与 y=x+b 的图像相交于点(m,8)，则 a+b=______.\",\n      \"options\": [],\n      \"answer\": \"0\",\n      \"student_answer\": \"0\",\n      \"is_correct\": true,\n      \"confidence\": 0.95,\n      \"analysis\": null,\n      \"question_type\": \"fill\",\n      \"block_coordinates\": {\n        \"x\": 0,\n        \"y\": 470,\n        \"width\": 1000,\n        \"height\": 50\n      },\n      \"text_bbox\": {\n        \"x\": 0,\n        \"y\": 470,\n        \"width\": 1000,\n        \"height\": 40\n      },\n      \"image_type\": \"none\",\n      \"image_bbox\": null,\n      \"geometry_image\": null\n    },\n    {\n      \"question_id\": \"q7\",\n      \"question_number\": 7,\n      \"content\": \"已知一次函数的图像与直线 y=-x+1 平行，且过点(8,2)，则此一次函数的表达式为\",\n      \"options\": [\n        \"A. y=-x-2\",\n        \"B. y=-x-6\",\n        \"C. y=-x+10\",\n        \"D. y=-x-1\"\n      ],\n      \"answer\": \"C\",\n      \"student_answer\": \"C\",\n      \"is_correct\": true,\n      \"confidence\": 0.95,\n      \"analysis\": null,\n      \"question_type\": \"choice\",\n      \"block_coordinates\": {\n        \"x\": 0,\n        \"y\": 500,\n        \"width\": 1000,\n        \"height\": 150\n      },\n      \"text_bbox\": {\n        \"x\": 0,\n        \"y\": 500,\n        \"width\": 1000,\n        \"height\": 140\n      },\n      \"image_type\": \"none\",\n      \"image_bbox\": null,\n      \"geometry_image\": null\n    },\n    {\n      \"question_id\": \"q8\",\n      \"question_number\": 8,\n      \"content\": \"把直线 y=2x-1 沿 y 轴方向向上移动 3 个单位长度，得到直线\",\n      \"options\": [\n        \"A. y=2x+2\",\n        \"B. y=2x-4\",\n        \"C. y=2(x+3)-1\",\n        \"D. y=2(x-3)-1\"\n      ],\n      \"answer\": \"A\",\n      \"student_answer\": \"A\",\n      \"is_correct\": true,\n      \"confidence\": 0.95,\n      \"analysis\": null,\n      \"question_type\": \"choice\",\n      \"block_coordinates\": {\n        \"x\": 0,\n        \"y\": 580,\n        \"width\": 1000,\n        \"height\": 100\n      },\n      \"text_bbox\": {\n        \"x\": 0,\n        \"y\": 580,\n        \"width\": 1000,\n        \"height\": 90\n      },\n      \"image_type\": \"none\",\n      \"image_bbox\": null,\n      \"geometry_image\": null\n    },\n    {\n      \"question_id\": \"q9\",\n      \"question_number\": 9,\n      \"content\": \"如图，在平面直角坐标系中，□OABC 的边 OC 落在 x 轴的正半轴上，且点 B(6,2)，直线 y=2x+1 以每秒 2 个单位长度的速度沿 y 轴向下平移，经过______秒，该直线可将 □OABC 分成面积相等的两部分。\",\n      \"options\": [],\n      \"answer\": \"2\",\n      \"student_answer\": \"2\",\n      \"is_correct\": true,\n      \"confidence\": 0.95,\n      \"analysis\": null,\n      \"question_type\": \"fill\",\n      \"block_coordinates\": {\n        \"x\": 0,\n        \"y\": 630,\n        \"width\": 1000,\n        \"height\": 150\n      },\n      \"text_bbox\": {\n        \"x\": 0,\n        \"y\": 630,\n        \"width\": 1000,\n        \"height\": 140\n      },\n      \"image_type\": \"geometry\",\n      \"image_bbox\": {\n        \"x\": 700,\n        \"y\": 630,\n        \"width\": 300,\n        \"height\": 200\n      },\n      \"geometry_image\": null\n    },\n    {\n      \"question_id\": \"q10\",\n      \"question_number\": 10,\n      \"content\": \"已知直线 l 与直线 y=2x+1 的交点的横坐标为 2，与直线 y=-x+2 的交点的纵坐标为 1，求直线 l 的函数表达式。\",\n      \"options\": [],\n      \"answer\": null,\n      \"student_answer\": \"y=5x+6\",\n      \"is_correct\": false,\n      \"confidence\": 0.95,\n      \"analysis\": null,\n      \"question_type\": \"answer\",\n      \"block_coordinates\": {\n        \"x\": 0,\n        \"y\": 730,\n        \"width\": 1000,\n        \"height\": 150\n      },\n      \"text_bbox\": {\n        \"x\": 0,\n        \"y\": 730,\n        \"width\": 1000,\n        \"height\": 140\n      },\n      \"image_type\": \"none\",\n      \"image_bbox\": null,\n      \"geometry_image\": null\n    }\n  ]\n}",
+      "usage": {
+        "prompt_tokens": 4950,
+        "completion_tokens": 2491,
+        "total_tokens": 7441
+      },
+      "error": null,
+      "parsed": {
+        "page_title": "25.3（2）一次函数的图像",
+        "questions": [
+          {
+            "question_id": "q1",
+            "question_number": 1,
+            "content": "已知函数 y=kx 的图像经过点(-1,1)，则函数 y=kx+3 的图像是",
+            "options": [
+              "A",
+              "B",
+              "C",
+              "D"
+            ],
+            "answer": "C",
+            "student_answer": "C",
+            "is_correct": true,
+            "confidence": 0.95,
+            "analysis": null,
+            "question_type": "choice",
+            "block_coordinates": {
+              "x": 0,
+              "y": 200,
+              "width": 1000,
+              "height": 300
+            },
+            "text_bbox": {
+              "x": 0,
+              "y": 200,
+              "width": 1000,
+              "height": 280
+            },
+            "image_type": "geometry",
+            "image_bbox": {
+              "x": 40,
+              "y": 240,
+              "width": 700,
+              "height": 200
+            },
+            "geometry_image": null
+          },
+          {
+            "question_id": "q2",
+            "question_number": 2,
+            "content": "若直线 y=-2x+k 与两坐标轴所围成的三角形面积是 9，则 k 的值为",
+            "options": [
+              "A. 6",
+              "B. -6",
+              "C. ±6",
+              "D. 不能确定"
+            ],
+            "answer": "C",
+            "student_answer": "C",
+            "is_correct": true,
+            "confidence": 0.95,
+            "analysis": null,
+            "question_type": "choice",
+            "block_coordinates": {
+              "x": 0,
+              "y": 300,
+              "width": 1000,
+              "height": 100
+            },
+            "text_bbox": {
+              "x": 0,
+              "y": 300,
+              "width": 1000,
+              "height": 90
+            },
+            "image_type": "none",
+            "image_bbox": null,
+            "geometry_image": null
+          },
+          {
+            "question_id": "q3",
+            "question_number": 3,
+            "content": "一次函数 y=x-2 的图像与两坐标轴交点之间的距离是______.",
+            "options": [],
+            "answer": null,
+            "student_answer": "√2",
+            "is_correct": false,
+            "confidence": 0.95,
+            "analysis": null,
+            "question_type": "fill",
+            "block_coordinates": {
+              "x": 0,
+              "y": 350,
+              "width": 1000,
+              "height": 50
+            },
+            "text_bbox": {
+              "x": 0,
+              "y": 350,
+              "width": 1000,
+              "height": 40
+            },
+            "image_type": "none",
+            "image_bbox": null,
+            "geometry_image": null
+          },
+          {
+            "question_id": "q4",
+            "question_number": 4,
+            "content": "已知直线 y=kx+b 平行于直线 y=-7x+4，且在 y 轴上的截距为 -1，那么该直线的表达式是______.",
+            "options": [],
+            "answer": "y=-7x-1",
+            "student_answer": "y=-7x+4",
+            "is_correct": false,
+            "confidence": 0.95,
+            "analysis": null,
+            "question_type": "fill",
+            "block_coordinates": {
+              "x": 0,
+              "y": 380,
+              "width": 1000,
+              "height": 100
+            },
+            "text_bbox": {
+              "x": 0,
+              "y": 380,
+              "width": 1000,
+              "height": 90
+            },
+            "image_type": "none",
+            "image_bbox": null,
+            "geometry_image": null
+          },
+          {
+            "question_id": "q5",
+            "question_number": 5,
+            "content": "已知一次函数 y=kx+b 的图像经过点(0,-4)，且当 x=2 时，y=0，则 k=______, b=______.",
+            "options": [],
+            "answer": "-2, -4",
+            "student_answer": "k=-2, b=-4",
+            "is_correct": true,
+            "confidence": 0.95,
+            "analysis": null,
+            "question_type": "fill",
+            "block_coordinates": {
+              "x": 0,
+              "y": 420,
+              "width": 1000,
+              "height": 100
+            },
+            "text_bbox": {
+              "x": 0,
+              "y": 420,
+              "width": 1000,
+              "height": 90
+            },
+            "image_type": "none",
+            "image_bbox": null,
+            "geometry_image": null
+          },
+          {
+            "question_id": "q6",
+            "question_number": 6,
+            "content": "已知一次函数 y=-x+a 与 y=x+b 的图像相交于点(m,8)，则 a+b=______.",
+            "options": [],
+            "answer": "0",
+            "student_answer": "0",
+            "is_correct": true,
+            "confidence": 0.95,
+            "analysis": null,
+            "question_type": "fill",
+            "block_coordinates": {
+              "x": 0,
+              "y": 470,
+              "width": 1000,
+              "height": 50
+            },
+            "text_bbox": {
+              "x": 0,
+              "y": 470,
+              "width": 1000,
+              "height": 40
+            },
+            "image_type": "none",
+            "image_bbox": null,
+            "geometry_image": null
+          },
+          {
+            "question_id": "q7",
+            "question_number": 7,
+            "content": "已知一次函数的图像与直线 y=-x+1 平行，且过点(8,2)，则此一次函数的表达式为",
+            "options": [
+              "A. y=-x-2",
+              "B. y=-x-6",
+              "C. y=-x+10",
+              "D. y=-x-1"
+            ],
+            "answer": "C",
+            "student_answer": "C",
+            "is_correct": true,
+            "confidence": 0.95,
+            "analysis": null,
+            "question_type": "choice",
+            "block_coordinates": {
+              "x": 0,
+              "y": 500,
+              "width": 1000,
+              "height": 150
+            },
+            "text_bbox": {
+              "x": 0,
+              "y": 500,
+              "width": 1000,
+              "height": 140
+            },
+            "image_type": "none",
+            "image_bbox": null,
+            "geometry_image": null
+          },
+          {
+            "question_id": "q8",
+            "question_number": 8,
+            "content": "把直线 y=2x-1 沿 y 轴方向向上移动 3 个单位长度，得到直线",
+            "options": [
+              "A. y=2x+2",
+              "B. y=2x-4",
+              "C. y=2(x+3)-1",
+              "D. y=2(x-3)-1"
+            ],
+            "answer": "A",
+            "student_answer": "A",
+            "is_correct": true,
+            "confidence": 0.95,
+            "analysis": null,
+            "question_type": "choice",
+            "block_coordinates": {
+              "x": 0,
+              "y": 580,
+              "width": 1000,
+              "height": 100
+            },
+            "text_bbox": {
+              "x": 0,
+              "y": 580,
+              "width": 1000,
+              "height": 90
+            },
+            "image_type": "none",
+            "image_bbox": null,
+            "geometry_image": null
+          },
+          {
+            "question_id": "q9",
+            "question_number": 9,
+            "content": "如图，在平面直角坐标系中，□OABC 的边 OC 落在 x 轴的正半轴上，且点 B(6,2)，直线 y=2x+1 以每秒 2 个单位长度的速度沿 y 轴向下平移，经过______秒，该直线可将 □OABC 分成面积相等的两部分。",
+            "options": [],
+            "answer": "2",
+            "student_answer": "2",
+            "is_correct": true,
+            "confidence": 0.95,
+            "analysis": null,
+            "question_type": "fill",
+            "block_coordinates": {
+              "x": 0,
+              "y": 630,
+              "width": 1000,
+              "height": 150
+            },
+            "text_bbox": {
+              "x": 0,
+              "y": 630,
+              "width": 1000,
+              "height": 140
+            },
+            "image_type": "geometry",
+            "image_bbox": {
+              "x": 700,
+              "y": 630,
+              "width": 300,
+              "height": 200
+            },
+            "geometry_image": null
+          },
+          {
+            "question_id": "q10",
+            "question_number": 10,
+            "content": "已知直线 l 与直线 y=2x+1 的交点的横坐标为 2，与直线 y=-x+2 的交点的纵坐标为 1，求直线 l 的函数表达式。",
+            "options": [],
+            "answer": null,
+            "student_answer": "y=5x+6",
+            "is_correct": false,
+            "confidence": 0.95,
+            "analysis": null,
+            "question_type": "answer",
+            "block_coordinates": {
+              "x": 0,
+              "y": 730,
+              "width": 1000,
+              "height": 150
+            },
+            "text_bbox": {
+              "x": 0,
+              "y": 730,
+              "width": 1000,
+              "height": 140
+            },
+            "image_type": "none",
+            "image_bbox": null,
+            "geometry_image": null
+          }
+        ]
+      },
+      "ocrScore": {
+        "validJson": true,
+        "hasQuestions": true,
+        "questionCount": 10,
+        "completeness": 1
+      }
+    },
+    {
+      "testType": "ocr",
+      "model": "huihuiyun grok-4.6",
+      "modelId": "grok-4.6",
+      "imageId": "IMG02",
+      "imageLabel": "手写作业页",
+      "imagePath": "D:\\Minxue_App_V3\\multimodal_exam_engine\\real_geometry.png",
+      "status": 502,
+      "elapsedMs": 132798,
+      "content": "",
+      "usage": null,
+      "error": "Upstream service temporarily unavailable",
+      "parsed": null,
+      "ocrScore": {
+        "validJson": false,
+        "hasQuestions": false,
+        "questionCount": 0,
+        "completeness": 0
+      }
+    }
+  ]
+}

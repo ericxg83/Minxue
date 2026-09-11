@@ -1,47 +1,32 @@
 <template>
   <!--
-    原卷出处（错题重练卷批改）
-    背景：错题重练卷是打印出来的白卷，老师批改时只看到空白题面 + OCR 文本，
-    想不起这题当初出自哪次作业、原卷长什么样，OCR 题干残缺时更是无从判断。
-    两条数据链路，均为只读展示，不写任何数据：
-    ① paper 模式（重练批改）：重练卷的 question_ids 指向 questions 表原题记录，
-       其 image_url 就是原作业页图，block_coordinates 是题干定位框，
-       /api/questions/batch 已随 q.* 一起返回。
-    ② image 模式（作业批改）：打印的重练卷常被当作普通作业拍照上传，题目是本次
-       新建的行，与原卷无外键关联。此时用项目统一的「同一题」口径
-       （src/domain/questionIdentity.js，归一化题干精确匹配，无相似度阈值）
-       在当前学生的错题本里找同题旧记录，展示那条记录的原卷页图与定位框。
-       匹配不上就不显示，不猜。
-    image 模式下若本题是首次出现（错题本无同题旧记录），本卡片不渲染。
-  -->
-  <div v-if="origin" class="orig-src">
-    <div class="orig-src__head">
-      <span class="orig-src__title">原卷出处</span>
-      <el-tag v-if="origin.fromWrongBook" size="small" type="warning" effect="plain" class="orig-src__tag">来自错题本</el-tag>
-      <span v-if="origin.pageLabel" class="orig-src__page">{{ origin.pageLabel }}</span>
-      <el-button size="small" link type="primary" class="orig-src__more" @click="openViewer">
-        <el-icon><ZoomIn /></el-icon> 放大查看
-      </el-button>
-    </div>
+    原卷出处（题干行内小入口）
 
-    <!-- 缩略图：有定位框时直接裁出题干部位（矩形小图）；无定位框时退化为整页缩略 -->
-    <div class="orig-src__thumb" :class="{ 'is-page': !origin.crop }" @click="openViewer" title="点击查看原卷">
-      <img
-        v-if="!failed"
-        :src="origin.imageUrl"
-        :style="origin.crop ? cropStyle(origin.crop) : null"
-        :class="origin.crop ? 'orig-src__img-crop' : 'orig-src__img-page'"
-        @load="failed = false"
-        @error="failed = true"
-        draggable="false"
-      />
-      <div v-if="failed" class="orig-src__failed">原卷图片不可用（链接可能已失效）</div>
-      <div v-else-if="!origin.crop" class="orig-src__nobox">该页无定位框</div>
-    </div>
+    背景：错题重练卷是老师从错题本组的卷，题目取自更早的老卷子。老师批改时中间栏是
+    重练答卷（白卷 + 学生手写），只看到 OCR 出来的题干文本，想不起这题当初出自哪次作业、
+    原卷长什么样；OCR 题干残缺时更是无从判断。
+
+    形态（2026-09-11 收敛）：不再是一张带缩略图/定位框的大卡片 —— 老师只需要在**题干旁边
+    有一个小入口**，点开能看到这道题在原卷上的题干区域原图。故此处收敛为一个行内小眼睛
+    （图标 + 「原卷」字样，挂在「题干」标签右侧），点击弹出查看器。
+
+    展示口径（只读，不写任何数据）：只有「题目所属的原卷 ≠ 当前正在批的这份卷」才有意义。
+      · 重练批改（paper）：题目行来自更早的原作业 task → 展示
+      · 作业批改（image）：题目行就属于当前这份卷，中间栏展示的就是它本身 → 不展示
+    页图取三级兜底：task_images[page_number-1]（tasks.images 是 JSONB 数组，顺序即 1-based
+    页号）→ task_image_url（该卷首页）→ image_url（题目行自带，通常为空，别单独依赖它）。
+  -->
+  <span v-if="origin" class="orig-link">
+    <el-tooltip content="查看这道题在原卷上的题干区域" placement="top" :show-after="200">
+      <button type="button" class="orig-link__btn" @click="openViewer">
+        <el-icon :size="12"><View /></el-icon>
+        <span>原卷</span>
+      </button>
+    </el-tooltip>
 
     <el-dialog
       v-model="viewerVisible"
-      title="原卷出处"
+      :title="origin.pageLabel ? `原卷出处 · ${origin.pageLabel}` : '原卷出处'"
       width="60%"
       top="6vh"
       append-to-body
@@ -53,9 +38,7 @@
           <el-radio-button value="page">整页</el-radio-button>
         </el-radio-group>
         <span class="orig-src__hint">
-          {{ viewMode === 'stem'
-            ? (origin.fromWrongBook ? '按错题本定位框裁出的原卷题干' : '按 OCR 定位框裁出的题干原貌')
-            : '原卷整页，蓝框为本题位置' }}
+          {{ viewMode === 'stem' ? '这道题在原卷上的题干原貌' : '原卷整页，蓝框为本题位置' }}
         </span>
         <el-button size="small" link type="primary" @click="openInNewTab">
           <el-icon><Link /></el-icon> 新窗口打开
@@ -65,25 +48,27 @@
       <div class="orig-src__stage" :class="viewMode === 'stem' ? 'is-crop' : 'is-scroll'" ref="stageRef">
         <div class="orig-src__canvas">
           <img
+            v-if="!failed"
             :src="origin.imageUrl"
             class="orig-src__stage-img"
             :style="viewMode === 'stem' ? cropStyle(origin.crop) : { width: '100%' }"
             @load="onStageLoad"
+            @error="failed = true"
             draggable="false"
           />
-          <div v-if="origin.box && viewMode === 'page'" class="orig-src__box" :style="boxStyle"></div>
+          <div v-else class="orig-src__failed">原卷图片不可用（链接可能已失效）</div>
+          <div v-if="origin.box && viewMode === 'page' && !failed" class="orig-src__box" :style="boxStyle"></div>
         </div>
       </div>
     </el-dialog>
-  </div>
+  </span>
 </template>
 
 <script setup>
 import { ref, computed, watch, nextTick } from 'vue'
 import { useReviewStore } from '../../stores/reviewStore'
 import { getQuestionDisplayBox, bboxToPercentStyle } from '../../../utils/questionBbox'
-import { normalizeStem } from '../../../domain/questionIdentity'
-import { ZoomIn, Link } from '@element-plus/icons-vue'
+import { View, Link } from '@element-plus/icons-vue'
 
 const props = defineProps({
   question: { type: Object, default: null }
@@ -93,79 +78,31 @@ const store = useReviewStore()
 const q = computed(() => props.question || store.currentReviewQuestion)
 
 // ═══ 来源解析 ═══
-// paper 模式：题目行本身就是原题记录，image_url 即原作业页图。
-const paperOrigin = computed(() => {
-  if (store.source !== 'paper') return null
+// 题干定位框取自题目行（block_coordinates / text_bbox / image_bbox，见 utils/questionBbox.js）。
+const origin = computed(() => {
   const cur = q.value
-  if (!cur?.image_url) return null
+  if (!cur) return null
+
+  // 只有"题目所属的原卷 ≠ 当前正在批的这份卷"时才展示。
+  // image 模式下题目行就属于当前这份卷，中间栏展示的就是它本身，再挂入口纯属重复。
+  const currentTaskId = store.currentTask?.id
+  const fromOtherPaper = Boolean(cur.task_id && currentTaskId && cur.task_id !== currentTaskId)
+  if (store.source !== 'paper' && !fromOtherPaper) return null
+
+  const images = Array.isArray(cur.task_images) ? cur.task_images : []
+  const pageIdx = Number(cur.page_number || 0) - 1
+  const pageEntry = pageIdx >= 0 ? images[pageIdx] : null
+  const pageImageUrl = typeof pageEntry === 'string' ? pageEntry : (pageEntry?.image_url || '')
+  const imageUrl = pageImageUrl || cur.task_image_url || cur.image_url || ''
+  if (!imageUrl) return null
+
   return {
-    imageUrl: cur.image_url,
+    imageUrl,
     box: getQuestionDisplayBox(cur),
     crop: getQuestionDisplayBox(cur, { pad: 15 }),
-    pageLabel: cur.page_number ? `原卷第 ${cur.page_number} 页` : '',
-    fromWrongBook: false
+    pageLabel: cur.page_number ? `原卷第 ${cur.page_number} 页` : ''
   }
 })
-
-// image 模式：本次批改新建的题目行 → 用归一化题干在错题本里找同题旧记录。
-// 只精确匹配，不猜：匹配不上（首次出现的题）就隐藏卡片。
-//
-// 展示层专用宽松键：在 normalizeStem 之上再去掉开头的括号来源标签
-// （如「（沪教·中考）」「(沪教版七中)」，重练卷重新 OCR 时有无不定）。
-// 注意：这是确定性字符串匹配，不是相似度阈值；只服务本卡片提示，
-// 不参与 questionIdentity 的错题合并/去重口径，也不写任何数据。
-const LEADING_TAG_RE = /^[（(][^（）()]*[)）]/
-const displayKey = (raw) => {
-  let s = normalizeStem(raw)
-  for (;;) {
-    const next = s.replace(LEADING_TAG_RE, '')
-    if (next === s) return s
-    s = next
-  }
-}
-
-const stemIndex = computed(() => {
-  const map = new Map()
-  for (const wq of store.wrongQuestions || []) {
-    const stem = displayKey(wq.question?.content || wq.content)
-    if (!stem) continue
-    if (!map.has(stem)) map.set(stem, [])
-    map.get(stem).push(wq)
-  }
-  return map
-})
-
-const wrongBookOrigin = computed(() => {
-  if (store.source !== 'image') return null
-  const cur = q.value
-  const stem = displayKey(cur?.content)
-  if (!stem) return null
-  for (const wq of stemIndex.value.get(stem) || []) {
-    // 本次批改刚写入的错题（同一行）不算「原卷」，左侧查看器本来就是它
-    if (wq.question_id && wq.question_id === cur.id) continue
-    // 同一次作业里的重复出现也不算，原卷就是当前这张图
-    const origTaskId = wq.question?.task_id
-    if (origTaskId && origTaskId === cur.task_id) continue
-    const imageUrl = wq.question?.full_image_url || wq.question?.image_url || wq.question_image_url || ''
-    if (!imageUrl) continue
-    // 错题本记录的定位框：嵌套 question 的坐标优先，自包含坐标兜底
-    const coordSource = {
-      text_bbox: wq.question?.text_bbox,
-      image_bbox: wq.question?.image_bbox,
-      block_coordinates: wq.question?.block_coordinates || wq.block_coordinates
-    }
-    return {
-      imageUrl,
-      box: getQuestionDisplayBox(coordSource),
-      crop: getQuestionDisplayBox(coordSource, { pad: 15 }),
-      pageLabel: wq.question?.page_number ? `原卷第 ${wq.question.page_number} 页` : '',
-      fromWrongBook: true
-    }
-  }
-  return null
-})
-
-const origin = computed(() => paperOrigin.value || wrongBookOrigin.value)
 
 const failed = ref(false)
 
@@ -186,7 +123,9 @@ const stageRef = ref(null)
 
 const openViewer = () => {
   if (!origin.value?.imageUrl) return
+  // 默认给「题干区域」——老师点这个小眼睛就是为了看题干那一块
   viewMode.value = origin.value.crop ? 'stem' : 'page'
+  failed.value = false
   viewerVisible.value = true
 }
 
@@ -217,90 +156,38 @@ watch(() => [q.value?.id, origin.value?.imageUrl], () => { failed.value = false 
 </script>
 
 <style scoped>
-.orig-src {
-  background: #fff;
-  border: 1px solid var(--wb-border);
-  border-radius: var(--wb-radius-sm);
-  padding: 10px 12px;
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
-  flex-shrink: 0;
-}
-.orig-src__head {
-  display: flex;
+/* 行内小入口：挂在「题干」标签右侧，不占版面、不喧宾夺主 */
+.orig-link {
+  display: inline-flex;
   align-items: center;
-  gap: 8px;
 }
-.orig-src__title {
+.orig-link__btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  height: 20px;
+  padding: 0 7px;
+  border: 1px solid var(--wb-border);
+  border-radius: var(--wb-radius-xs, 4px);
+  background: #fff;
+  color: var(--wb-text-tertiary);
   font-size: 11px;
-  font-weight: 600;
-  color: var(--wb-text-tertiary);
-  letter-spacing: 0.5px;
+  font-weight: 500;
+  line-height: 1;
+  cursor: pointer;
+  transition: color 0.15s ease, border-color 0.15s ease, background 0.15s ease;
 }
-.orig-src__tag {
-  flex-shrink: 0;
+.orig-link__btn:hover {
+  color: var(--wb-primary);
+  border-color: var(--wb-primary);
+  background: var(--wb-primary-mist, rgba(99, 102, 241, 0.06));
 }
-.orig-src__page {
-  font-size: 12px;
-  color: var(--wb-text-tertiary);
-}
-.orig-src__more {
-  margin-left: auto;
-  font-size: 12px !important;
-  height: 24px !important;
-  padding: 0 4px !important;
+.orig-link__btn:focus-visible {
+  outline: 2px solid var(--wb-primary);
+  outline-offset: 1px;
 }
 
-/* 缩略图容器：固定高度 + 裁剪；整页退化模式用 object-fit */
-.orig-src__thumb {
-  position: relative;
-  height: 150px;
-  overflow: hidden;
-  border-radius: var(--wb-radius-xs);
-  border: 1px solid var(--wb-border);
-  background: #fafbfc;
-  cursor: zoom-in;
-  line-height: 0;
-}
-.orig-src__thumb.is-page {
-  background: #fff;
-}
-.orig-src__img-crop {
-  display: block;
-  max-width: none;
-  transform-origin: 0 0;
-}
-.orig-src__img-page {
-  width: 100%;
-  height: 150px;
-  object-fit: cover;
-  object-position: top center;
-}
-.orig-src__failed {
-  position: absolute;
-  inset: 0;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  font-size: 12px;
-  color: var(--wb-text-tertiary);
-  background: #fafbfc;
-  line-height: 1.5;
-}
-.orig-src__nobox {
-  position: absolute;
-  right: 6px;
-  bottom: 6px;
-  font-size: 11px;
-  color: var(--wb-text-tertiary);
-  background: rgba(255, 255, 255, 0.9);
-  padding: 2px 6px;
-  border-radius: 4px;
-  line-height: 1.4;
-}
-
-/* ── 放大查看 ── */
+/* ── 查看器 ── */
 .orig-src__toolbar {
   display: flex;
   align-items: center;
@@ -333,6 +220,15 @@ watch(() => [q.value?.id, origin.value?.imageUrl], () => { failed.value = false 
   display: block;
   max-width: none;
   transform-origin: 0 0;
+}
+.orig-src__failed {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  height: 60vh;
+  font-size: 13px;
+  color: var(--wb-text-tertiary);
+  line-height: 1.6;
 }
 .orig-src__box {
   position: absolute;

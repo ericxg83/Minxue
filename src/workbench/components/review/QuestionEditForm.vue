@@ -2,8 +2,17 @@
   <div class="qef-card">
     <!-- 题干 -->
     <div class="qef-section">
-      <div class="qef-label">题干</div>
+      <div class="qef-label-row">
+        <div class="qef-label">题干</div>
+        <el-button v-if="showRecognizeQuestion" text size="small" type="primary"
+          @click="$emit('question-recognize')">
+          <el-icon><Refresh /></el-icon> 重新识别本题
+        </el-button>
+      </div>
       <el-input v-model="localForm.content" type="textarea" :rows="4" placeholder="请输入题目内容" />
+      <div v-if="showRecognizeQuestion" class="qef-tip">
+        整页识别漏掉选项时，点「重新识别本题」在原卷上框选该题区域，自动补全题干 / 选项 / 答案。
+      </div>
     </div>
 
     <!-- 配图 -->
@@ -35,6 +44,9 @@
     <!-- 选项（仅选择题） -->
     <div class="qef-section" v-if="localForm.question_type === 'choice'">
       <div class="qef-label">选项</div>
+      <div v-if="localForm.options.length === 0" class="qef-tip qef-tip--warn">
+        当前没有选项 —— 点上方「重新识别本题」框选原卷该题区域可自动补全。
+      </div>
       <div v-for="(opt, idx) in localForm.options" :key="idx" class="qef-option-row">
         <span class="qef-opt-letter">{{ String.fromCharCode(65 + idx) }}.</span>
         <el-input v-model="localForm.options[idx]" size="default" :placeholder="'选项 ' + String.fromCharCode(65 + idx)" />
@@ -68,12 +80,14 @@
 
 <script setup>
 import { computed } from 'vue'
-import { Picture, Upload, Crop, Delete, Plus } from '@element-plus/icons-vue'
+import { Picture, Upload, Crop, Delete, Plus, Refresh } from '@element-plus/icons-vue'
 
 const props = defineProps({
   form: { type: Object, required: true },
   displayImageUrl: { type: String, default: '' },
-  showCrop: { type: Boolean, default: false }
+  showCrop: { type: Boolean, default: false },
+  // 是否提供「重新识别本题」入口（整页 OCR 漏识别选项时的补全手段）
+  showRecognizeQuestion: { type: Boolean, default: false }
 })
 
 const emit = defineEmits([
@@ -81,7 +95,8 @@ const emit = defineEmits([
   'image-upload',
   'image-crop',
   'image-delete',
-  'open-tag-selector'
+  'open-tag-selector',
+  'question-recognize'
 ])
 
 const localForm = computed({
@@ -130,6 +145,33 @@ function removeTag(tag) {
   font-weight: 600;
   color: var(--wb-text-secondary);
   margin-bottom: 8px;
+}
+
+.qef-label-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  margin-bottom: 8px;
+}
+
+.qef-label-row .qef-label {
+  margin-bottom: 0;
+}
+
+.qef-tip {
+  margin-top: 6px;
+  font-size: 12px;
+  line-height: 1.6;
+  color: var(--wb-text-tertiary, #909399);
+}
+
+.qef-tip--warn {
+  margin: 0 0 8px;
+  padding: 6px 8px;
+  border-radius: var(--wb-radius-xs, 4px);
+  background: var(--wb-warning-light, #fdf6ec);
+  color: var(--wb-warning-dark, #b88230);
 }
 
 .qef-image-wrap {

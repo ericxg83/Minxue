@@ -192,21 +192,55 @@ export const addWrongQuestions = async (studentId, questionIds, questionConfiden
   const CONFIDENCE_THRESHOLD = parseFloat(process.env.CONFIDENCE_THRESHOLD) || 0.8
 
   // [P0-1] 按置信度阈值过滤 — 低于 0.8 的不进入错题本
-  // 注意：questionConfidenceMap 必须是 Map 实例（有 .get 方法）
-  // opts.skipConfidence=true：老师人工复核后强入（人工是 ground truth，不再受 AI 把握挡）
+  //
+  // ⚠️ 口径契约（2026-09-11 用户确认，勿放宽）：
+  //   「低置信度错题一定不能自动进入错题本。」
+  //   opts.skipConfidence=true 是**唯一**的例外出口，且**只允许老师人工复核路径**使用：
+  //     · server/index.js  PUT /questions/:id  review_status==='wrong'（老师人工标错）
+  //     · gradingFinalizer.finalizeRejudgeResult  manualOverride=true（老师触发重判并拍板）
+  //   任何批处理 / backfill / 离线脚本都**不得**传 skipConfidence，只能走阈值闸。
+  //   历史上 backfill-lowconf-wrong-questions.mjs 违反此契约已删除，
+  //   替代品 server/scripts/audit-lowconf-wrong-questions.mjs 仅做稽核与清理。
+  //
+  // [fail-closed 2026-09-11] 「调用方没传 Map」不再等于闸失效。
+  //   过滤分支原先写成「questionConfidenceMap instanceof Map 才生效」，于是传 null 直接绕过闸——
+  //   实测 worker.js 答案库建题路径就这么把低置信题漏进了错题本。
+  //   现改为：未传 Map 时回读 questions.confidence 现况自行判定，闸不能被「忘记传参」绕过。
+  //   `answer_source='blank'`（学生未作答）**不放进 Map**：未作答等同「不会」，
+  //   其 confidence 结构性为 0，用阈值卡会永远入不了册，按口径该入（只受完整性闸约束）。
   let filteredIds = questionIds
-  if (!opts.skipConfidence && questionConfidenceMap instanceof Map) {
-    const lowConfList = questionIds.filter(id => {
-      const conf = questionConfidenceMap.get(id)
-      return conf !== undefined && conf !== null && conf < CONFIDENCE_THRESHOLD
-    })
-    if (lowConfList.length > 0) {
-      console.log(`  ⚠️ 低置信度错题已排除: ${lowConfList.length} 道 (阈值: ${CONFIDENCE_THRESHOLD})`)
+  if (!opts.skipConfidence) {
+    let confMap = questionConfidenceMap
+    if (!(confMap instanceof Map)) {
+      try {
+        const { rows: confRows } = await query(
+          `SELECT id, confidence, answer_source FROM ${TABLES.QUESTIONS} WHERE id = ANY($1::uuid[])`,
+          [questionIds]
+        )
+        confMap = new Map()
+        for (const r of confRows) {
+          if (r.answer_source === 'blank') continue
+          confMap.set(r.id, r.confidence)
+        }
+      } catch (e) {
+        // 回读失败不能拖垮批改主链：降级为「无置信度信息」（放行），并显式告警便于排查。
+        console.error(`  ⚠️ [WrongBook] 置信度闸回读失败，本次按无能信息放行:`, e.message)
+        confMap = null
+      }
     }
-    filteredIds = questionIds.filter(id => {
-      const conf = questionConfidenceMap.get(id)
-      return conf === undefined || conf === null || conf >= CONFIDENCE_THRESHOLD
-    })
+    if (confMap instanceof Map) {
+      const lowConfList = questionIds.filter(id => {
+        const conf = confMap.get(id)
+        return conf !== undefined && conf !== null && conf < CONFIDENCE_THRESHOLD
+      })
+      if (lowConfList.length > 0) {
+        console.log(`  ⚠️ 低置信度错题已排除: ${lowConfList.length} 道 (阈值: ${CONFIDENCE_THRESHOLD})`)
+      }
+      filteredIds = questionIds.filter(id => {
+        const conf = confMap.get(id)
+        return conf === undefined || conf === null || conf >= CONFIDENCE_THRESHOLD
+      })
+    }
   }
 
   // 完整性过滤 — 仅完整题目可进入错题本
