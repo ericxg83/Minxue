@@ -343,12 +343,18 @@ function clearFilters() {
   syncQuery()
 }
 
+// 只显示「9月8日」时，同一天的多个任务看起来像同一时间，7 天内补出时分。
+const startOfDay = date => new Date(date.getFullYear(), date.getMonth(), date.getDate()).getTime()
+
 const formatTime = value => {
   const parsed = new Date(value)
   if (Number.isNaN(parsed.getTime())) return '时间未知'
+  const hm = `${String(parsed.getHours()).padStart(2, '0')}:${String(parsed.getMinutes()).padStart(2, '0')}`
   const today = new Date()
-  const isToday = parsed.toDateString() === today.toDateString()
-  return isToday ? `今天 ${String(parsed.getHours()).padStart(2, '0')}:${String(parsed.getMinutes()).padStart(2, '0')}` : `${parsed.getMonth() + 1}月${parsed.getDate()}日`
+  if (parsed.toDateString() === today.toDateString()) return `今天 ${hm}`
+  const dayDiff = Math.round((startOfDay(today) - startOfDay(parsed)) / 86400000)
+  const monthDay = `${parsed.getMonth() + 1}月${parsed.getDate()}日`
+  return dayDiff > 0 && dayDiff <= 7 ? `${monthDay} ${hm}` : monthDay
 }
 
 const normalizeHomeworkStatus = status => {
@@ -366,6 +372,7 @@ const homework = (task, student) => {
     ...state,
     key: `homework-${student.id}-${task.id}`,
     id: task.id,
+    generatedExamId: task.generated_exam_id || null,
     studentId: student.id,
     studentName: student.name,
     studentAvatar: student.avatar || '',
@@ -382,30 +389,81 @@ const homework = (task, student) => {
   }
 }
 
-const retry = (task, student) => {
-  const completed = task.status === 'graded'
-  const questionCount = Number(task.total_count || task.question_ids?.length || 0)
+// 重练卷卡片：pages 是这份卷的答卷 task（同一张卷可能被交多次）。
+// 三态：已确认 / 已交卷待复核 / 还没交卷。
+// 旧口径只看 exam.status === 'graded'，于是「已经交了答卷、AI 也批完了」的卷仍显示「待重练」，
+// 与 tasks 表里那条已批改的答卷卡状态互相打架。
+const retry = (exam, student, pages = []) => {
+  const graded = exam.status === 'graded'
+  const submitted = pages.length > 0
+  const questionCount = Number(exam.total_count || exam.question_ids?.length || 0)
+  // 已交卷时展示最后一份答卷的时间：老师关心「什么时候交的」，而不是「什么时候出的卷」
+  const activityAt = submitted ? (pages[pages.length - 1]?.created_at || exam.created_at) : exam.created_at
+  const workflowStatus = graded ? 'completed' : submitted ? 'review' : 'retry'
   return {
-    key: `retry-${student.id}-${task.id}`,
-    id: task.id,
+    key: `retry-${student.id}-${exam.id}`,
+    id: exam.id,
     studentId: student.id,
     studentName: student.name,
     studentAvatar: student.avatar || '',
     source: 'retry',
     sourceLabel: '错题重练',
-    name: task.name || '未命名重练',
-    timeLabel: task.created_at ? formatTime(task.created_at) : '来自错题池',
-    createdAt: task.created_at,
-    imageUrl: '',
+    name: exam.name || '未命名重练',
+    timeLabel: activityAt ? formatTime(activityAt) : '来自错题池',
+    createdAt: activityAt,
+    imageUrl: pages[0]?.image_url || '',
     questionCount,
-    pendingCount: completed ? 0 : questionCount,
-    wrongCount: Number(task.wrong_count || 0),
-    workflowStatus: completed ? 'completed' : 'retry',
-    statusLabel: completed ? '已确认' : '待重练',
-    tone: completed ? 'success' : 'warning',
-    aiStatusLabel: completed ? '验证已完成' : '等待教师验证',
-    actionLabel: completed ? '查看结果' : '开始验证'
+    pendingCount: graded ? 0 : questionCount,
+    wrongCount: Number(exam.wrong_count || 0),
+    workflowStatus,
+    statusLabel: graded ? '已确认' : submitted ? '待复核' : '待重练',
+    tone: graded ? 'success' : 'warning',
+    aiStatusLabel: graded ? '验证已完成' : submitted ? 'AI 已完成，待确认' : '等待学生作答',
+    actionLabel: graded ? '查看结果' : submitted ? '进入复核' : '查看题目'
   }
+}
+
+// tasks 表里带 generated_exam_id 或 task_type='wrong_retry' 的记录是「重练卷的答卷」，不是独立作业。
+// 它们必须挂到对应卷下面，否则同一次重练会在列表里裂成两张卡。
+const isRetryTask = task => Boolean(task.generated_exam_id) || task.task_type === 'wrong_retry'
+
+// 没有卷可归的重练答卷（卷被删 / 跨学生）：降级成独立的错题重练卡，不能让任务凭空消失
+const orphanRetry = (task, student) => ({
+  ...homework(task, student),
+  key: `retry-${student.id}-${task.id}`,
+  source: 'retry',
+  sourceLabel: '错题重练',
+  aiStatusLabel: '等待教师验证'
+})
+
+// 归并：以重练卷为主线，答卷 task 只作为卷的附件（口径照搬 reviewStore.loadStudentPapers），
+// 不再单独成卡。
+const mergeStudentQueue = (tasks, exams, student) => {
+  const pagesByExam = {}
+  const cards = []
+  for (const task of tasks) {
+    if (!isRetryTask(task)) {
+      cards.push(homework(task, student))
+      continue
+    }
+    if (!task.generated_exam_id) {
+      cards.push(orphanRetry(task, student))
+      continue
+    }
+    ;(pagesByExam[task.generated_exam_id] = pagesByExam[task.generated_exam_id] || []).push(task)
+  }
+  const knownExams = new Set(exams.map(exam => exam.id))
+  for (const exam of exams) {
+    const pages = (pagesByExam[exam.id] || [])
+      .slice()
+      .sort((a, b) => new Date(a.created_at) - new Date(b.created_at))
+    cards.push(retry(exam, student, pages))
+  }
+  for (const [examId, pages] of Object.entries(pagesByExam)) {
+    if (knownExams.has(examId)) continue
+    for (const task of pages) cards.push(orphanRetry(task, student))
+  }
+  return cards
 }
 
 const priority = { failed: 0, review: 1, retry: 2, pending: 3, processing: 4, completed: 5 }
@@ -424,10 +482,7 @@ async function loadData() {
         getTasksByStudent(student.id, false).catch(() => []),
         getGeneratedExamsByStudent(student.id, false).catch(() => [])
       ])
-      return [
-        ...(tasks || []).map(task => homework(task, student)),
-        ...(exams || []).map(task => retry(task, student))
-      ]
+      return mergeStudentQueue(tasks || [], exams || [], student)
     }))
     allTasks.value = lists.flat().sort((left, right) => {
       const statusOrder = priority[left.workflowStatus] - priority[right.workflowStatus]
@@ -489,7 +544,9 @@ function focusTaskNext(task) { focusTaskRelative(task, 1) }
 function flowSteps(task) {
   const processing = task.workflowStatus === 'processing'
   const failed = task.workflowStatus === 'failed'
-  const awaitingReview = ['review', 'retry', 'pending'].includes(task.workflowStatus)
+  // 'retry' 是「卷还没交」，学生那边还没开始，不该显示成老师在等待
+  const awaitingStudent = task.workflowStatus === 'retry'
+  const awaitingReview = ['review', 'pending'].includes(task.workflowStatus)
   const completed = task.workflowStatus === 'completed'
   return [
     { label: '上传完成', note: task.timeLabel, state: 'done' },
@@ -500,8 +557,8 @@ function flowSteps(task) {
     },
     {
       label: task.source === 'retry' ? '重练验证' : '教师复核',
-      note: completed ? '已确认' : awaitingReview ? '等待处理' : '尚未开始',
-      state: completed ? 'done' : awaitingReview ? 'active' : 'pending'
+      note: completed ? '已确认' : awaitingStudent ? '等待学生作答' : awaitingReview ? '等待处理' : '尚未开始',
+      state: completed ? 'done' : awaitingStudent ? 'pending' : awaitingReview ? 'active' : 'pending'
     }
   ]
 }

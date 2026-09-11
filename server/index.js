@@ -63,7 +63,7 @@ import { createUploadReport, logUploadReport } from './services/uploadReportLogg
 import { createJudgement, batchUpdateQuestionTags, getQuestionAssets, getQuestionAssetsByType, createResource, replaceResourceAnswers, addWrongQuestions } from './services/neonService.js'
 import { judgeAnswer, findDirtyAnswers } from './services/judgeService.js'
 import { checkQuestionCompleteness } from './utils/questionCompleteness.js'
-import { syncQuestionCompletenessQuietly } from './services/questionCompletenessSync.js'
+import { syncQuestionCompleteness, syncQuestionCompletenessQuietly } from './services/questionCompletenessSync.js'
 import { computeWrongBookRisks } from './utils/wrongBookRisks.js'
 import { normalizeOptions } from './utils/optionText.js'
 import { computeTaskStats } from './utils/taskStats.js'
@@ -2325,6 +2325,31 @@ app.get('/api/wrong-questions/student/:studentId', async (req, res) => {
     const { studentId } = req.params
     const limit = Math.min(parseInt(req.query.limit) || 100, 500)
     const offset = parseInt(req.query.offset) || 0
+
+    // 读前自愈：已入册但被 questions.is_complete 陈旧值挡住的行（下面主查询按
+    // `q.is_complete = TRUE` 过滤会直接漏掉它们）。先按动态口径回写这些题，
+    // 本次响应就能带上它们——老师不必"点一次加入"再靠写接口自愈才看得到。
+    // 只处理该学生被隐藏的行（上限 200），不做全表扫描；失败不影响列表返回。
+    try {
+      const { rows: hidden } = await query(
+        `SELECT wq.question_id
+           FROM ${TABLES.WRONG_QUESTIONS} wq
+           JOIN ${TABLES.QUESTIONS} q ON q.id = wq.question_id
+          WHERE wq.student_id = $1
+            AND q.is_complete IS DISTINCT FROM TRUE
+          LIMIT 200`,
+        [studentId]
+      )
+      if (hidden.length > 0) {
+        const { updated } = await syncQuestionCompleteness(hidden.map(r => r.question_id))
+        if (updated > 0) {
+          console.log(`[wrong-book] 读前自愈 is_complete: student=${studentId} 更新 ${updated} 题`)
+        }
+      }
+    } catch (e) {
+      console.error('[wrong-book] 读前自愈失败（不影响列表）:', e.message)
+    }
+
     const { rows } = await query(
       `SELECT wq.*,
          CASE WHEN q.id IS NULL THEN NULL ELSE

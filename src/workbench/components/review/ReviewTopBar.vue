@@ -167,6 +167,22 @@ watch(() => store.currentStudent?.id, (id) => {
   selectedStudentId.value = id || ''
 }, { immediate: true })
 
+// 人工标「错」但强入错题本失败 → 及时告诉老师，别等最后复核门禁才发现。
+// 队列由 store 累积，这里逐条弹出后清空（同一时刻可能连续标了几题）。
+watch(() => store.wrongBookNotices.length, (len) => {
+  if (!len) return
+  for (const notice of store.wrongBookNotices) {
+    const no = notice.index >= 0 ? `第 ${notice.index + 1} 题` : '该题'
+    ElMessage({
+      type: 'warning',
+      message: `${no}已判为错误，但${notice.message}。请补全后重试，或在完成复核时处理。`,
+      duration: 5000,
+      showClose: true
+    })
+  }
+  store.clearWrongBookNotices()
+})
+
 // 当 store 中 currentTask 变化时同步下拉框
 watch(() => store.currentTask?.id, (id) => {
   selectedTaskId.value = id || ''

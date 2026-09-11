@@ -55,6 +55,12 @@ export const useReviewStore = defineStore('review', () => {
     promise.then(drop, drop)
     return promise
   }
+  // 人工标「错」但后端强入错题本失败时的通知队列。
+  // 后端 PUT /questions/:id 会在响应 question.wrong_book_sync 回传 status/reason/message，
+  // 以前只在服务端 console 打日志，老师点完「错」完全不知道没进错题本。
+  // store 只负责收集，弹提示由 UI 层（ReviewTopBar）消费，避免 store 依赖 UI 组件库。
+  const wrongBookNotices = ref([]) // [{ questionId, index, status, reason, message, issues, at }]
+
   // ReviewTopBar 触发「去编辑」时记录的待编辑题目，QuestionDetailPanel 监听后打开编辑面板
   const pendingEditQuestionId = ref(null)
 
@@ -406,10 +412,28 @@ export const useReviewStore = defineStore('review', () => {
     // 不刷新就会出现"库里已入册、门禁还问要不要加入"的假象（点击后又提示已在错题本中）。
     trackReviewWrite(
       updateQuestionReviewStatus(questionId, result, metadata)
-        .then(async () => {
-          if (result === REVIEW_STATUS.WRONG && currentStudent.value?.id) {
-            clearStudentCaches(currentStudent.value.id)
-            await loadWrongQuestions(currentStudent.value.id)
+        .then(async (data) => {
+          if (result === REVIEW_STATUS.WRONG) {
+            // 后端回传的强入结果：只在「没入成」时提醒老师，added/already_exists 静默通过
+            const sync = data?.question?.wrong_book_sync
+            if (sync && (sync.status === 'skipped' || sync.status === 'failed')) {
+              const idx = allQuestions.value.findIndex(item => item.id === questionId)
+              wrongBookNotices.value.push({
+                questionId,
+                index: idx,
+                status: sync.status,
+                reason: sync.reason,
+                message: sync.message || '未能加入错题本',
+                issues: Array.isArray(sync.issues) ? sync.issues : [],
+                at: Date.now()
+              })
+            }
+            // 标「错」落库后必须重拉本地错题本：wrongQuestions 是进入试卷时的旧快照，
+            // 不刷新就会出现"库里已入册、门禁还问要不要加入"的假象（点击后又提示已在错题本中）。
+            if (currentStudent.value?.id) {
+              clearStudentCaches(currentStudent.value.id)
+              await loadWrongQuestions(currentStudent.value.id)
+            }
           }
         })
         .catch(e =>
@@ -834,6 +858,11 @@ export const useReviewStore = defineStore('review', () => {
     return unresolvedWrongQuestions.value
   }
 
+  // UI 消费完提示后清空队列（避免重复弹、也避免长时间批改无界增长）
+  const clearWrongBookNotices = () => {
+    wrongBookNotices.value = []
+  }
+
   // 弹出错题拦截清单
   const openWrongGate = (list) => {
     wrongGateList.value = Array.isArray(list) ? list : []
@@ -932,6 +961,8 @@ export const useReviewStore = defineStore('review', () => {
     reviewAllDone,
     wrongGateVisible,
     wrongGateList,
+    wrongBookNotices,
+    clearWrongBookNotices,
     pendingEditQuestionId,
     unresolvedWrongQuestions,
     getUnresolvedWrong,

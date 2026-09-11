@@ -129,20 +129,28 @@ export const finalizeGradingBatch = async ({
     })
   }
 
-  // 批改落库后把 is_complete 对齐到动态真值。OCR 阶段建的题答案为空 → 落 false，
-  // 答案解析异步补齐后无人回写，错题本 / 周报 / 讲义按 `is_complete = TRUE` 过滤时会漏题。
+  // 答案解析完成后的补入（A：防止“判错但没入”历史漏网）
+  // 只对“判错 + 现在条件齐全 + 不在错题本”的题补入
+  const aiWrongIdsForCompletion = pendingQuestions
+    .filter(q => 
+      (q.is_correct === false || q.answer_source === 'blank') && 
+      q.answer && q.answer.trim() &&
+      !settledIds.has(q.id) &&
+      checkQuestionCompleteness(q).isComplete
+    )
+    .map(q => q.id)
+
+  if (aiWrongIdsForCompletion.length > 0) {
+    console.log(`[GradingFinalizer] 答案补齐后补入错题本：${aiWrongIdsForCompletion.length} 题`)
+    await addWrongQuestions(studentId, aiWrongIdsForCompletion, confidenceMap, questionMap)
+  }
+
+  // 批改落库后把 is_complete 对齐到动态真值
   syncQuestionCompletenessQuietly(
     pendingQuestions.map(q => q.id),
     `finalizeGradingBatch task=${taskId}`
   )
 
-  return {
-    settled: pendingQuestions.length,
-    skipped: settledIds.size,
-    wrongQuestions: wrongIds.length,
-    mastery: masteryStats.mastery || 0
-  }
-}
 
 /**
  * Final settlement for a deterministic rejudge.

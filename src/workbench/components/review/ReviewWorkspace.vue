@@ -126,19 +126,55 @@ onMounted(async () => {
   // 同步注册键盘监听（与原 DashboardWorkbench 一致，避免快速切换累积监听）
   document.addEventListener('keydown', onKeydown)
   store.setTaskType(props.taskType)
-  await store.initData()
 
-  // taskId 优先：Dashboard 等入口只传 taskId 时，必须先反查学生并切换，
-  // 否则会落到默认第一个学生 + 选错任务的 BUG（详见 reviewStore.loadTaskById）
+  // 任务列表/外部入口跳转：openTask 永远带 studentId + taskId（retry 的 taskId 是 exam.id），
+  // 必须以 studentId 为准定位学生，绝不能先默认选第一个学生再用 getTaskById 反查——
+  // 否则 retry 的 exam.id 命中 /tasks/:examId 会 404，loadTaskById 失败，
+  // 页面就停在默认第一个学生（丁嘉炜）的空状态，这就是「定位到错误学生」的根因。
+  const requestedStudentId = route.query.studentId
   const requestedTaskId = route.query.taskId || route.query.examId
+
+  // 先加载学生列表（不在这里默认选第一个学生，避免污染后续定位）
+  await store.loadStudents()
+
+  // 1) 入口已明确带 studentId：以它为准，绝不落到默认第一个学生
+  if (requestedStudentId) {
+    const student = store.students.find(item => String(item.id) === String(requestedStudentId))
+    if (student) {
+      if (!store.currentStudent || String(store.currentStudent.id) !== String(student.id)) {
+        store.setCurrentStudent(student)
+      }
+      // 加载该学生的任务（homework 任务或 retry 练习卷）与错题
+      await Promise.all([
+        store.loadStudentTasks(student.id),
+        store.loadWrongQuestions(student.id)
+      ])
+      // 2) 在该学生上下文里定位具体试卷（retry 的 exam 已映射到 studentTasks）
+      const task = requestedTaskId
+        ? store.studentTasks.find(t => String(t.id) === String(requestedTaskId))
+        : null
+      if (task) {
+        await store.selectTask(task)
+      } else if (requestedTaskId) {
+        // 试卷不在该学生任务列表（异常/草稿态等）：保留原反查兜底
+        await store.loadTaskById(requestedTaskId)
+      } else {
+        await store.autoSelectPendingTask?.()
+      }
+      return
+    }
+    // studentId 带错（找不到该学生）：落到默认行为
+  }
+
+  // 2) 未带 studentId：维持原默认行为（选第一个学生 + 反查 task）
+  await store.initData()
   if (requestedTaskId) {
     await store.loadTaskById(requestedTaskId)
     return
   }
-
-  const requestedStudentId = route.query.studentId
-  if (requestedStudentId) {
-    const student = store.students.find(item => String(item.id) === String(requestedStudentId))
+  const fallbackStudentId = route.query.studentId
+  if (fallbackStudentId) {
+    const student = store.students.find(item => String(item.id) === String(fallbackStudentId))
     if (student && student.id !== store.currentStudent?.id) {
       store.setCurrentStudent(student)
       await store.loadStudentTasks(student.id)
