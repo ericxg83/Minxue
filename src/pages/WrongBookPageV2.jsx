@@ -6,10 +6,18 @@ import EmptyState from '../components/EmptyState'
 import SwipeableRow from '../components/SwipeableRow'
 import MathText from '../components/MathText'
 import { MobileList, MobileSegmentedTabs } from '../features/mobile/MobilePrimitives'
+import { formatQuestionLabel } from '../utils/questionStem'
 
 const labels = { new: '待复习', review_1: '复习中', review_2: '再次复习', mastered: '已掌握' }
 const lifecycle = i => i.lifecycle_status || i.status || 'new'
 const text = i => (i.question || i).content || i.content || '题目内容暂不可用'
+const qOf = i => i.question || i
+// 多小问大题：列表里加「第10题(2)」小标，完整公共题干在详情弹窗里看
+const subLabelOf = i => {
+  const q = qOf(i)
+  const subNo = q.sub_no == null ? '' : String(q.sub_no).trim()
+  return subNo ? formatQuestionLabel(q.question_number, subNo) : ''
+}
 
 export default function WrongBookPageV2({
   filteredWrongQuestions,
@@ -72,6 +80,11 @@ export default function WrongBookPageV2({
                   </button>
                   <button type='button' onClick={() => onOpenDetail(item)} className='min-w-0 flex-1 text-left'>
                     <span className='line-clamp-2 text-[13px] font-medium leading-5' style={{ color: 'var(--text)' }}>
+                      {subLabelOf(item) && (
+                        <span className='mr-1 rounded px-1 align-middle text-[10px] font-normal' style={{ background: 'var(--bg-secondary)', color: 'var(--text-secondary)' }}>
+                          {subLabelOf(item)}
+                        </span>
+                      )}
                       <MathText content={text(item)} />
                     </span>
                     <span className='mt-0.5 block truncate text-[11px]' style={{ color: status === 'mastered' ? 'var(--success)' : 'var(--text-secondary)' }}>

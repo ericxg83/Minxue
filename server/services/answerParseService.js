@@ -268,6 +268,22 @@ export function splitSubAnswers(ans) {
   const text = String(ans || '').trim()
   if (!text) return null
 
+  // 前缀放宽（2026-09-11 事故补丁）：印刷体答案常以「解：」「答：」「证明：」开头，
+  // 此时 (1) 的 start 会 > 2，被下方 pickStrictSequence 的「首标记须在行首」
+  // 限制拒绝 → 整题答案拆不出分段（实测 27.2(2) q=10 整题行因此漏拆，
+  // 小题行错位防线也随之失效）。只要首标记前是 ≤6 字、不含数字与括号的短前缀，
+  // 就视为合法行首（把 start 修正为 0 再校验）。buildSegments 只用 end 切文本，
+  // start 修正不影响分段内容；其余严格条件（no=1、连续递增）保持不变。
+  const relaxLeading = (marks) => {
+    const first = marks[0]
+    if (!first || first.start <= 2) return marks
+    const prefix = text.slice(0, first.start)
+    if (prefix.length <= 6 && !/\d/.test(prefix) && !/[（()）]/.test(prefix)) {
+      return [{ ...first, start: 0 }, ...marks.slice(1)]
+    }
+    return marks
+  }
+
   // 模式 1: 圆括号 / 全角括号
   const re1 = /[（(]\s*(\d{1,2})\s*[）)]/g
   const marks1 = []
@@ -275,7 +291,7 @@ export function splitSubAnswers(ans) {
   while ((m = re1.exec(text)) !== null) {
     marks1.push({ no: parseInt(m[1], 10), start: m.index, end: re1.lastIndex })
   }
-  let picked = pickStrictSequence(marks1)
+  let picked = pickStrictSequence(relaxLeading(marks1))
   if (picked) return buildSegments(text, picked)
 
   // 模式 2: 圈数字 ①②③...⑳（fallback）
@@ -287,7 +303,7 @@ export function splitSubAnswers(ans) {
     const ord = CIRCLED_DIGITS.indexOf(m[1]) + 1
     if (ord > 0) marks2.push({ no: ord, start: m.index, end: re2.lastIndex })
   }
-  picked = pickStrictSequence(marks2)
+  picked = pickStrictSequence(relaxLeading(marks2))
   if (picked) return buildSegments(text, picked)
 
   return null
@@ -297,9 +313,40 @@ export function splitSubAnswers(ans) {
 const OCR_SUB_MARKER_RE = /[（(]\s*(\d{1,2})\s*[)）]/g
 
 /**
+ * 答案库小题行一致性校验（P0.5，2026-09-11 产品评审定稿）。
+ *
+ * 背景（真实事故）：resource_answers 27.2(2) 单元里，q=10 sub='' 才是正确的整题
+ * 答案，而 sub='1' 存的是另一道「抛物线 y=2(x-2)²」题的答案、sub='2'/'3' 存的是
+ * 一道等边三角形题的答案。OCR 拆出 sub_no 后 lookupRow 优先精确命中这些小题行，
+ * 反而**绕开正确的整题答案** → 参考答案张冠李戴。
+ *
+ * 规则：整题行答案能按 (1)(2) 拆出小问分段时，小题行答案必须与对应段一致
+ * （归一化后相等或互相包含）；明显不一致返回 false（调用方应回退整题行）。
+ * 无法校验的情况（整题行拆不出分段、缺对应段、缺答案文本）一律返回 true，
+ * 维持现状 —— 本函数只防「已实证的错位形态」，不放大误伤面。
+ */
+export const isSubRowConsistentWithWhole = (subNo, subAnswer, wholeAnswer) => {
+  const segs = splitSubAnswers(wholeAnswer)
+  if (!segs || segs.length < 2) return true
+  const seg = segs.find(s => String(s.sub_no) === String(subNo).trim())
+  if (!seg) return true
+  const norm = (s) => String(s || '')
+    .normalize('NFKC')
+    .replace(/[\s\u3000]+/g, '')
+    .toLowerCase()
+  const na = norm(seg.answer)
+  const nb = norm(subAnswer)
+  if (!na || !nb) return true
+  return na === nb || na.includes(nb) || nb.includes(na)
+}
+
+/**
  * 从文本中提取子题分段。
  * 只处理包含 ≥2 个连续子题标记的情况；否则返回 null。
- * 返回 [{ sub, text }]，text 已包含题干公共前缀（如“计算：”）。
+ * 返回 [{ sub, text, stem }]：
+ *   - text 已包含题干公共前缀（如“计算：”），保持历史行为不变；
+ *   - stem 是第一个子题标号之前的公共题干原文（可能为空串），
+ *     2026-09-11 新增，供调用方落 parent_stem 列（多小问题组共享题干）。
  */
 function extractSubSegments(text) {
   if (!text) return null
@@ -312,7 +359,7 @@ function extractSubSegments(text) {
   const stem = text.slice(0, markers[0].start).trim()
   return markers.map((mk, i) => {
     const seg = text.slice(mk.end, i + 1 < markers.length ? markers[i + 1].start : text.length).trim()
-    return { sub: mk.sub, text: stem ? `${stem} ${seg}` : seg }
+    return { sub: mk.sub, text: stem ? `${stem} ${seg}` : seg, stem }
   })
 }
 
@@ -351,7 +398,38 @@ export function splitOcrQuestionsBySubNo(questions) {
       else if (contentSegs) newQ.content = `${q.content || ''} (${seg.sub})`.trim()
       if (aSeg) newQ.student_answer = aSeg.text
       // 否则保持原 student_answer（学生答案未分子问时整体保留）
+      // 多小问共享题干（2026-09-11，迁移 057）：代码亲自拆题时，把「第一个子题标号
+      // 之前的公共题干」落到 parent_stem，供展示层（错题本卡片 / 重练卷 PDF / 批改页）
+      // 识别并归组。content 保持既有行为（cSeg.text 已含 stem），不改判题与答案引擎输入；
+      // 展示层按「content 是否已包含 parent_stem」去重，不会重复渲染。
+      if (cSeg && cSeg.stem && !newQ.parent_stem) newQ.parent_stem = cSeg.stem
       out.push(newQ)
+    }
+  }
+
+  // 兜底：同一大题（同页同题号）的多条小问行之间互相同步 parent_stem。
+  // 模型偶尔只在其中一条填了 parent_stem、其余留空；这些行本就同属一道大题，
+  // 继承只是把已知的公共题干补齐，不会引入其他题的内容。
+  // key 必须带页号：跨页相同题号（第1页第5题 / 第2页第5题）不是同一大题。
+  // _page_number 由 worker.js 在调用本函数前写入；page_number 是 AI 直接输出的页码，
+  // 两者任一存在都参与，防止上游漏写 _page_number 时跨页同号被误判成同组。
+  const groupPageOf = (q) => q._page_number ?? q.page_number ?? ''
+  const groupStem = new Map()
+  for (const q of out) {
+    if (!q || q.question_number == null) continue
+    if (q.sub_no == null || String(q.sub_no).trim() === '') continue
+    const stem = typeof q.parent_stem === 'string' ? q.parent_stem.trim() : ''
+    const key = `${groupPageOf(q)}|${q.question_number}`
+    if (stem && !groupStem.get(key)) groupStem.set(key, stem)
+  }
+  if (groupStem.size > 0) {
+    for (const q of out) {
+      if (!q || q.question_number == null) continue
+      if (q.sub_no == null || String(q.sub_no).trim() === '') continue
+      const cur = typeof q.parent_stem === 'string' ? q.parent_stem.trim() : ''
+      if (cur) continue
+      const stem = groupStem.get(`${groupPageOf(q)}|${q.question_number}`)
+      if (stem) q.parent_stem = stem
     }
   }
   return out

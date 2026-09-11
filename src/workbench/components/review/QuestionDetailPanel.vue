@@ -213,6 +213,10 @@
               <span class="ops-q-label">题干</span>
               <OriginalPaperSource :question="q" />
             </div>
+            <!-- 多小问大题的公共题干（迁移 057 parent_stem）：题目被拆成小问后，
+                 公共条件挂在这一列。批改页不显示它，老师看到的就是无条件的残缺题
+                 （重练卷引用的原题尤其明显）。 -->
+            <div v-if="parentStem" class="ops-q-stem"><MathRender :content="parentStem" autoDetect /></div>
             <div v-if="q.content" class="ops-q-text"><MathRender :content="q.content" autoDetect /></div>
             <div v-else class="ops-q-text ops-q-text--empty">未识别到题干文本</div>
           </div>
@@ -463,6 +467,8 @@ import { processExamImage } from '../../../utils/imageProcessor'
 import { getGeometryDisplayUrl, getTikzStatus } from '../../../utils/geometryDisplay'
 import { tikzToSvg } from '../../../utils/tikzGenerator'
 import { normalizeOptions } from '../../../utils/optionText'
+// 多小问（题组）共享题干展示口径：与错题卡片、重练卷共用同一套实现
+import { resolveQuestionDisplayStem } from '../../../utils/questionStem'
 import { getReviewStateLabel, getUnjudgedReasonText, getAiAnswerRiskText } from '../../../utils/reviewDecision'
 import { ElMessage, ElMessageBox, ElLoading } from 'element-plus'
 import { DocumentChecked, Delete, Plus, Upload, Picture, EditPen, ArrowLeft, ArrowRight, ArrowDown, RefreshLeft, Crop, Camera } from '@element-plus/icons-vue'
@@ -1641,6 +1647,17 @@ const handleRetryGeometry = async () => {
   color: var(--wb-text);
   white-space: pre-wrap;
   word-break: break-word;
+}
+/* 多小问大题公共题干：弱化呈现（灰色 + 左侧竖线），与本题题干区分 */
+.ops-q-stem {
+  font-size: 14px;
+  line-height: 1.7;
+  color: var(--wb-text-secondary);
+  white-space: pre-wrap;
+  word-break: break-word;
+  padding-left: 8px;
+  border-left: 3px solid var(--wb-border, #e5e6eb);
+  margin-bottom: 4px;
 }
 
 /* 选项 */

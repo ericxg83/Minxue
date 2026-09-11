@@ -48,6 +48,7 @@ import { migrateAiSelfCheck } from './migrations/053_ai_self_check.js'
 import { migrateTaskTypeEnum } from './migrations/054_task_type_enum.js'
 import { migrateFixExamPublishedInconsistency } from './migrations/055_fix_exam_published_inconsistency.js'
 import { migrateGeometryManualOverride } from './migrations/056_add_geometry_manual_override.js'
+import { migrateQuestionParentStem } from './migrations/057_add_question_parent_stem.js'
 import { scheduleNightParse, scheduleWeeklyDiagnosis } from './services/nightParseService.js'
 import { scheduleWeeklyMissingFigureCheck } from './services/missingFigureMonitorService.js'
 
@@ -2410,7 +2411,9 @@ app.get('/api/wrong-questions/student/:studentId', async (req, res) => {
              'options', q.options, 'answer', q.answer, 'analysis', q.analysis,
              'ai_tags', CASE WHEN q.ai_tags IS NULL OR q.ai_tags = '' THEN '[]'::jsonb ELSE q.ai_tags::jsonb END,
              'manual_tags', CASE WHEN q.manual_tags IS NULL OR q.manual_tags = '' THEN '[]'::jsonb ELSE q.manual_tags::jsonb END,
-             'image_url', q.image_url, 'images', q.images, 'geometry_image_url', q.geometry_image_url
+             'image_url', q.image_url, 'images', q.images, 'geometry_image_url', q.geometry_image_url,
+             -- 多小问（题组）：公共题干 + 小问号 + 原题号，供错题卡片补回被拆行丢掉的公共条件
+             'parent_stem', q.parent_stem, 'sub_no', q.sub_no, 'question_number', q.question_number
            )
          END AS question
        FROM ${TABLES.WRONG_QUESTIONS} wq
@@ -3395,6 +3398,7 @@ if (process.argv[1] === __filename || process.argv[1]?.endsWith('server/index.js
       await migrateAiSelfCheck()
       await migrateFixExamPublishedInconsistency()
       await migrateGeometryManualOverride()
+      await migrateQuestionParentStem()
     } catch (err) {
       console.error('数据库迁移失败:', err.message)
     }

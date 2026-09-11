@@ -3,6 +3,8 @@ import dayjs from 'dayjs'
 import MathText from './MathText'
 import BottomSheet from './BottomSheet'
 import { normalizeOptions } from '../utils/optionText'
+// 多小问（题组）共享题干展示口径：与 PC 错题卡片、重练卷长按共用同一套实现
+import { resolveQuestionDisplayStem } from '../utils/questionStem'
 
 // 状态词汇与错题本列表 Tab 对齐：待复习 / 复习中 / 已掌握
 const statusMap = {
@@ -17,6 +19,8 @@ const statusMap = {
 export default function WrongQuestionDetailModal({ wrongQuestion, onClose, onRetry, onViewImage }) {
   const wq = wrongQuestion
   const q = wq.question || wq
+  // 题干展示口径：content 自身已含 parent_stem 时 parentStem 为空串，不会重复渲染
+  const displayStem = resolveQuestionDisplayStem(q)
   const tags = q.tags_source === 'manual' ? (q.manual_tags || []) : (q.ai_tags || [])
   const status = statusMap[wq.lifecycle_status || 'new'] || statusMap.new
   const StatusIcon = status.icon
@@ -37,9 +41,17 @@ export default function WrongQuestionDetailModal({ wrongQuestion, onClose, onRet
           </div>
         </div>
 
+        {/* 多小问大题的公共题干（迁移 057 parent_stem）：题目被拆成小问后，
+            公共条件挂在这一列。不显示它，学生看到的就是一道无条件的残缺题。 */}
+        {displayStem.parentStem && (
+          <div className='mt-4 rounded-lg px-3 py-2 text-[13px]' style={{ background: 'var(--bg-secondary)', color: 'var(--text-secondary)', lineHeight: 1.7, borderLeft: '3px solid var(--border)' }}>
+            <MathText content={displayStem.parentStem} />
+          </div>
+        )}
+
         {/* 题干 */}
-        <div className='mt-4' style={{ fontSize: 'var(--fs-14)', lineHeight: 1.7, color: 'var(--text)' }}>
-          <MathText content={q.content || '（无题干）'} />
+        <div className={displayStem.parentStem ? 'mt-2' : 'mt-4'} style={{ fontSize: 'var(--fs-14)', lineHeight: 1.7, color: 'var(--text)' }}>
+          <MathText content={displayStem.content || '（无题干）'} />
         </div>
 
         {/* 选项 */}

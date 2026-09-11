@@ -6,6 +6,8 @@ import katexCss from 'katex/dist/katex.min.css?inline'
 import { isSvgCode } from './geometryDisplay'
 import { renderContent } from './mathText'
 import { normalizeOptions } from './optionText'
+// 多小问（题组）共享题干展示口径：与 PC 错题卡片、服务端重练卷 PDF 共用同一套实现
+import { resolveQuestionDisplayStem, getQuestionGroupKey } from './questionStem'
 
 const A4_W = 210
 const A4_H = 297
@@ -256,6 +258,7 @@ ${s}.q-answer{margin-bottom:14px}
 ${s}.q-head{display:flex;gap:6px;font-size:13px;line-height:1.7;margin-bottom:2px}
 ${s}.q-num{font-weight:bold;white-space:nowrap;min-width:26px}
 ${s}.q-text{flex:1;word-break:break-word}
+${s}.q-stem{font-size:13px;line-height:1.7;margin:0 0 2px 32px;word-break:break-word}
 ${s}.q-image{text-align:center;margin:4px 0 4px 32px}
 ${s}.q-image img{max-width:100%;max-height:180px;object-fit:contain;border-radius:4px}
 ${s}.opts{display:grid;gap:4px 14px;padding-left:32px;margin-bottom:2px}
@@ -283,11 +286,24 @@ export function buildPaperBody({ title, studentName, questions, showAnswers }) {
   function renderSection(qs, label) {
     if (qs.length === 0) return ''
     let html = `<div class="section-header">${label}</div>`
+    // 同一大题（同 task + 同页 + 同题号）的**连续**小问合成一个题组块：
+    // 只占一个编号（写成「10(1).」「10(2).」），公共题干只渲染一次。
+    // 单独一问答错被选进来（不成组）时按非连排分支完整渲染公共条件，单题也能作答。
+    let lastGroupKey = ''
     qs.forEach(q => {
-      num++
+      const { parentStem, content } = resolveQuestionDisplayStem(q)
+      const groupKey = getQuestionGroupKey(q)
+      const subNo = (q.sub_no != null && String(q.sub_no).trim() !== '') ? String(q.sub_no).trim() : ''
+      const isContinuation = !!groupKey && groupKey === lastGroupKey && !!subNo
+      if (!isContinuation) num++
+      lastGroupKey = groupKey
+      const qLabel = subNo ? `${num}(${subNo})` : String(num)
       const typeClass = q.question_type === 'choice' ? 'q-choice' : q.question_type === 'fill' ? 'q-fill' : 'q-answer'
       html += `<div class="question ${typeClass}">`
-      html += `<div class="q-head"><span class="q-num">${num}.</span><span class="q-text">${renderContent(q.content)}</span></div>`
+      if (parentStem && !isContinuation) {
+        html += `<div class="q-stem">${renderContent(parentStem)}</div>`
+      }
+      html += `<div class="q-head"><span class="q-num">${qLabel}.</span><span class="q-text">${renderContent(content)}</span></div>`
       const illustration = q._illustration_resolved ?? getQuestionIllustration(q)
       if (illustration) {
         html += `<div class="q-image"><img src="${illustration}" alt="配图" /></div>`

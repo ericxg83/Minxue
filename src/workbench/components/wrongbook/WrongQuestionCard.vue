@@ -33,9 +33,15 @@
       </div>
     </div>
 
+    <!-- 多小问大题的公共题干（迁移 057 parent_stem）：
+         题目被拆成小问后，公共条件挂在这一列。不渲染它，卡片上就是无条件的空题。 -->
+    <div v-if="displayStem.parentStem" class="question-parent-stem">
+      {{ displayStem.parentStem }}
+    </div>
+
     <!-- Question content -->
     <div class="question-content">
-      {{ questionContent }}
+      {{ displayStem.content }}
     </div>
 
     <!-- Task deleted warning -->
@@ -262,8 +268,8 @@ function handleToggleStatus() {
   emit('update-status', props.wrongQuestion, nextStatus)
 }
 
-// Question content text
-const questionContent = computed(() => question.value.content || '')
+// Question content text（含多小问共享题干口径：content 已自带 parent_stem 时不重复渲染）
+const displayStem = computed(() => resolveQuestionDisplayStem(question.value))
 
 // ===================== 变式题（按需展开） =====================
 const questionId = computed(() => question.value.id || props.wrongQuestion.question_id || props.wrongQuestion.id)
@@ -392,6 +398,16 @@ async function handleGenerateVariants() {
 .status-mastered {
   color: #34c759;
   background: #e8f5e9;
+}
+
+/* 多小问大题的公共题干：弱化呈现（灰色 + 左侧竖线），与本题题干区分 */
+.question-parent-stem {
+  font-size: 14px;
+  color: var(--wb-text-secondary);
+  line-height: 1.6;
+  margin-bottom: 6px;
+  padding-left: 8px;
+  border-left: 3px solid var(--wb-border, #e5e6eb);
 }
 
 .question-content {

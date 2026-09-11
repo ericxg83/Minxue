@@ -18,7 +18,7 @@ import { refineFigureBoxOnPage } from './utils/figureRegionRefiner.js'
 import { generateTextFingerprint, generatePHash, PARSER_VERSION, TEXT_SIMILARITY_THRESHOLD } from './utils/questionFingerprint.js'
 import { uploadFilesWithRetry } from './services/uploadRetryManager.js'
 import { judgeAnswer, normalizeQuestionType, normalizeChoiceAnswer, extractChoiceLetters, isGradingCommentAnswer, stripAnswerScaffolding, detectUnverifiableReference, UNJUDGED_REASONS } from './services/judgeService.js'
-import { normalizeSectionName, splitSubAnswers, splitOcrQuestionsBySubNo } from './services/answerParseService.js'
+import { normalizeSectionName, splitSubAnswers, splitOcrQuestionsBySubNo, isSubRowConsistentWithWhole } from './services/answerParseService.js'
 import { classifyQuestionLocally } from './utils/localTagger.js'
 import { finalizeGradingBatch } from './services/gradingFinalizer.js'
 import { NON_RETRYABLE_ERROR_PATTERNS } from './pendingTaskRecovery.js'
@@ -30,6 +30,7 @@ import { extractFinalAnswerFromAnalysis } from './utils/aiParseSelfCheck.js'
 import { coerceAIText } from './utils/aiTextCoerce.js'
 import { computeTaskStats } from './utils/taskStats.js'
 import { rationalizeAnswer } from './utils/radicalSimplify.js'
+import { resolveEffectiveQuestionType } from './utils/questionCompleteness.js'
 
 // ── 多模态切题引擎：几何图处理 ──
 // 使用 Sharp 进行裁剪和图像增强（替代浏览器端的 Canvas/OpenCV）
@@ -3548,6 +3549,7 @@ const processWorkbookGrading = async (job) => {
     {
       "question_number": 1,
       "sub_no": "1",  // 如果该题包含多个小问（如 21.(1)、21.(2)），填写小问号 1/2/3...；否则填 null
+      "parent_stem": null,  // ⚠️多小问大题必填：(1) 之前的公共题干原文（公共条件、公共图形描述、公共设问前提）。同一大题拆出的每个小问，parent_stem 必须逐字相同；没有小问的题填 null
       "content": "题目原文（印刷体题干，含题号描述，如'与数轴上的点一一对应的是'，选择题可写'下列各式中正确的是'）",
       "student_answer": "学生手写的答案文本，没有则填 null",
       "question_type": "choice",  // choice | fill | judge | answer
@@ -3605,6 +3607,17 @@ const processWorkbookGrading = async (job) => {
 
 - question_number 从印刷体题号读取，必须是数字
 - 如果一道大题包含多个小问（如 21.(1)、21.(2)、22.(1)、22.(2)），必须将每个小问拆成独立的 question 对象输出：question_number 填大题号，sub_no 填小问号，content 只写该小问的题干，student_answer 只写该小问的手写答案。不要把多个小问合并成一道题
+- ⚠️【拆小问绝不能丢掉大题的公共题干】每个拆出来的小问对象都必须带 parent_stem：
+  填该大题第一个小问标号（(1)）**之前的公共题干原文**（公共已知条件、公共图形文字描述、公共设问前提），
+  一个字都不能少、不能改写；同一大题拆出的所有小问，parent_stem 必须逐字相同。
+  没有小问的普通题 parent_stem 填 null。
+  反例（本系统真实事故）：原题「已知抛物线 y=ax²+1(a≠0)与直线 y=-3x+3 交于点(-1,b).(1)求 a、b 的值；(2)求抛物线与直线 y=x+5 的两交点及顶点所构成的三角形的面积。」
+    错误写法：只输出两条 content「(1)求 a、b 的值；」「(2)求…面积。」，parent_stem 留空
+      → 公共条件「已知抛物线 y=ax²+1(a≠0)与直线 y=-3x+3 交于点(-1,b).」彻底丢失，
+        这两问在错题重练卷上变成没有条件的空题，学生根本无法作答。
+    正确写法：两条都带 parent_stem = "已知抛物线 y=ax²+1(a≠0)与直线 y=-3x+3 交于点(-1,b)."，
+      content 分别只写「(1)求 a、b 的值；」「(2)求…面积。」（content 不要重复 parent_stem 的内容）
+  公共题干若跨多行（含图形说明、表格、"其中…"补充条件），必须完整并入 parent_stem，不要只取第一行。
 - student_answer 只提取学生手写的内容，如果没有手写迹，填 null；判断题的 √/× 也要提取
 - block_coordinates 是该题在图片中的整体外接矩形框（含题号、题干、学生作答区），
   用【归一化 0-1000 坐标系】：x/y 为矩形左上角，width/height 为宽高，
@@ -3926,6 +3939,22 @@ const processWorkbookGrading = async (job) => {
       if (/判断/.test(s)) return 0
       return 50
     }
+    const lookupWholeRow = (qNo, questionType) => {
+      if (!unitAnswers) return null
+      const qKeyWhole = `${Number(qNo)}|`
+      let bestWhole = null
+      let bestWholeScore = -1
+      for (const [section, qMap] of unitAnswers) {
+        const row = qMap.get(qKeyWhole)
+        if (!row) continue
+        const score = sectionScoreForType(section, questionType)
+        if (score > bestWholeScore) {
+          bestWholeScore = score
+          bestWhole = row
+        }
+      }
+      return bestWhole
+    }
     const lookupRow = (qNo, subNo, questionType) => {
       if (!unitAnswers) return null
       // 先精确匹配 qno|sub_no（答案库若按小问分条则可精确定位）
@@ -3941,27 +3970,23 @@ const processWorkbookGrading = async (job) => {
           best = row
         }
       }
-      if (best) return best
+      // 整题行（qno|''）：供小问回退与小题行防误伤校验共用
+      const wholeRow = subNo ? lookupWholeRow(qNo, questionType) : null
+      if (best) {
+        // P0.5 防误伤：答案库小题行自身可能错位（实测 27.2(2) q=10 sub='1' 是别的题
+        // 的答案）。整题行能拆出小问分段时校验一致性，明显不符则弃用小题行。
+        if (wholeRow && !isSubRowConsistentWithWhole(subNo, best.answer, wholeRow.answer)) {
+          console.warn(`   [Workbook] 答案库小题行疑似错位: 题${qNo}(${subNo}) 小题行答案"${String(best.answer).slice(0, 30)}"与整题行(${subNo})段不符，回退整题行答案`)
+          return wholeRow
+        }
+        return best
+      }
       // 回退：答案库整题一条答案（sub_no=''）而 OCR 拆成多个小问（Q3(1)/Q3(2)…）时，
       // 精确键 qno|小问 永远查不到。答案库 Q3 的答案含 (1)(2)(3) 全部小问，
       // 回退到 qno|'' 整题行，避免判成"参考答案空白"。
-      if (subNo) {
-        const qKeyWhole = `${Number(qNo)}|`
-        let bestWhole = null
-        let bestWholeScore = -1
-        for (const [section, qMap] of unitAnswers) {
-          const row = qMap.get(qKeyWhole)
-          if (!row) continue
-          const score = sectionScoreForType(section, questionType)
-          if (score > bestWholeScore) {
-            bestWholeScore = score
-            bestWhole = row
-          }
-        }
-        if (bestWhole) {
-          console.log(`   [Workbook] 小问回退: 题${qNo}(${subNo}) → 整题答案（答案库按整题存）`)
-          return bestWhole
-        }
+      if (subNo && wholeRow) {
+        console.log(`   [Workbook] 小问回退: 题${qNo}(${subNo}) → 整题答案（答案库按整题存）`)
+        return wholeRow
       }
       return null
     }
@@ -4005,7 +4030,23 @@ const processWorkbookGrading = async (job) => {
         usedQKeys.add(usedKey)
         q.answer = answerRow.answer
         q.answer_source = 'worksheet'
-        q.question_type = answerRow.answer_type || q.question_type || 'choice'
+        // 答案库的 answer_type 描述的是「这条答案记录」的题型，不是本题的题型，
+        // 不能无条件覆盖 OCR 判定结果。实测事故（2026-09-11，练习册 27.5 第 6 题）：
+        // 卷面第 6 题是填空题「则当OP=______米时，该花坛POQ的面积最大.」，答案库同题号
+        // 那条记录是 answer_type='choice'/answer='A'，这里一覆盖 → 落库成
+        // 「选择题 + options=[]」→ 完整性闸报「选择题缺少选项」，老师标错被拦、
+        // 编辑页又只有选项区块（只在 choice 下渲染），没有任何可执行的补救动作。
+        // 现在只接受与题干不矛盾的题型；题干有明确填空线且无任何选项证据时按填空题走。
+        const bankType = answerRow.answer_type || q.question_type || 'choice'
+        const resolvedType = resolveEffectiveQuestionType({
+          question_type: bankType,
+          content: q.content,
+          options: q.options
+        })
+        if (resolvedType.corrected) {
+          console.log(`   [Workbook] 题 ${q.question_number}: 答案库题型 "${bankType}" 与题干不符（题干含填空线且无选项）→ 按 "${resolvedType.type}" 处理`)
+        }
+        q.question_type = resolvedType.type || 'choice'
         // 回填题干：答案库有题干时用真实题干替换占位符 "第 N 题"
         if (answerRow.content && String(answerRow.content).trim()) {
           q.content = String(answerRow.content).trim()
@@ -4385,6 +4426,7 @@ const processAnswerBankGrading = async (job) => {
     {
       "question_number": 1,
       "sub_no": "1",  // 如果该题包含多个小问（如 21.(1)、21.(2)），填写小问号 1/2/3...；否则填 null
+      "parent_stem": null,  // ⚠️多小问大题必填：(1) 之前的公共题干原文（公共条件、公共图形描述、公共设问前提）。同一大题拆出的每个小问，parent_stem 必须逐字相同；没有小问的题填 null
       "content": "题目原文（印刷体题干）",
       "student_answer": "学生手写的答案文本，没有则填 null",
       "question_type": "choice",  // choice | fill | judge | answer
@@ -4443,7 +4485,18 @@ const processAnswerBankGrading = async (job) => {
 - question_number 从印刷体题号读取，必须是数字。
   注意：每个试卷单元（如"试卷①"）的题号都从 1 重新开始编号，请按当前页所在单元的局部题号输出。
   试卷小标题出现在本页时（如"试卷① 19.1..."），该单元下的题号即从 1 开始。
-- 如果一道大题包含多个小问（如 21.(1)、21.(2)、22.(1)、22.(2)），必须将每个小问拆成独立的 question 对象输出：question_number 填大题号，sub_no 填小问号，content 只写该小问的题干，student_answer 只写该小问的手写答案。不要把多个小问合并成一道题。
+- 如果一道大题包含多个小问（如 21.(1)、21.(2)、22.(1)、22.(2)），必须将每个小问拆成独立的 question 对象输出：question_number 填大题号，sub_no 填小问号，content 只写该小问的题干，student_answer 只写该小问的手写答案。不要把多个小问合并成一道题
+- ⚠️【拆小问绝不能丢掉大题的公共题干】每个拆出来的小问对象都必须带 parent_stem：
+  填该大题第一个小问标号（(1)）**之前的公共题干原文**（公共已知条件、公共图形文字描述、公共设问前提），
+  一个字都不能少、不能改写；同一大题拆出的所有小问，parent_stem 必须逐字相同。
+  没有小问的普通题 parent_stem 填 null。
+  反例（本系统真实事故）：原题「已知抛物线 y=ax²+1(a≠0)与直线 y=-3x+3 交于点(-1,b).(1)求 a、b 的值；(2)求抛物线与直线 y=x+5 的两交点及顶点所构成的三角形的面积。」
+    错误写法：只输出两条 content「(1)求 a、b 的值；」「(2)求…面积。」，parent_stem 留空
+      → 公共条件「已知抛物线 y=ax²+1(a≠0)与直线 y=-3x+3 交于点(-1,b).」彻底丢失，
+        这两问在错题重练卷上变成没有条件的空题，学生根本无法作答。
+    正确写法：两条都带 parent_stem = "已知抛物线 y=ax²+1(a≠0)与直线 y=-3x+3 交于点(-1,b)."，
+      content 分别只写「(1)求 a、b 的值；」「(2)求…面积。」（content 不要重复 parent_stem 的内容）
+  公共题干若跨多行（含图形说明、表格、"其中…"补充条件），必须完整并入 parent_stem，不要只取第一行。。
 
 - student_answer 只提取学生手写的内容，如果没有手写迹，填 null；判断题的 √/× 也要提取
 
@@ -4699,6 +4752,25 @@ const processAnswerBankGrading = async (job) => {
           if (score > bestScore) {
             bestScore = score
             best = row
+          }
+        }
+        // P0.5 防误伤：小题行可能错位（27.2(2) 实测），与整题行对应段明显不符时回退整题行
+        if (best && subNo) {
+          const qKeyWhole = `${Number(qNo)}|`
+          let wholeRow = null
+          let wholeScore = -1
+          for (const [section, qMap] of unitAnswers) {
+            const row = qMap.get(qKeyWhole)
+            if (!row) continue
+            const score = sectionScoreForType(section, questionType)
+            if (score > wholeScore) {
+              wholeScore = score
+              wholeRow = row
+            }
+          }
+          if (wholeRow && !isSubRowConsistentWithWhole(subNo, best.answer, wholeRow.answer)) {
+            console.warn(`   [AnswerBank] 答案库小题行疑似错位: 题${qNo}(${subNo}) 小题行答案"${String(best.answer).slice(0, 30)}"与整题行(${subNo})段不符，回退整题行答案`)
+            return wholeRow
           }
         }
         return best

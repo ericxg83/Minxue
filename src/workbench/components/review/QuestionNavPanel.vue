@@ -20,6 +20,12 @@
       >
         <StatusIcon :state="store.getAiState(q)" :size="18" />
         <span class="item-label">{{ idx + 1 }}. {{ typeLabel(q) }}</span>
+        <!-- 多小问（题组）：显示「第10题(2)」原题出处小标，避免同大题两问被当成两道独立题 -->
+        <span
+          v-if="subLabel(q)"
+          class="item-sub-tag"
+          :title="`原卷第 ${q.question_number} 题第 ${q.sub_no} 问`"
+        >{{ subLabel(q) }}</span>
         <span
           v-if="paperLabels[idx]"
           class="item-paper-tag"
@@ -163,6 +169,14 @@ const typeLabel = (q) => {
   return TYPE_MAP[normalizeType(q)] || '?'
 }
 
+// 多小问（题组）：sub_no 非空时显示「第10题(2)」原题出处小标
+const subLabel = (q) => {
+  const subNo = q?.sub_no == null ? '' : String(q.sub_no).trim()
+  if (!subNo) return ''
+  const no = q.question_number != null ? String(q.question_number).trim() : ''
+  return no ? `第${no}题(${subNo})` : `(${subNo})`
+}
+
 // 难度等级（1-5）简短标签
 const difficultyText = (d) => {
   const map = { 1: '难度1', 2: '难度2', 3: '难度3', 4: '难度4', 5: '难度5' }
@@ -262,6 +276,15 @@ const onThresholdChange = (val) => {
   color: var(--wb-text);
   overflow: hidden;
   text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.item-sub-tag {
+  flex-shrink: 0;
+  padding: 1px 6px;
+  font-size: 10px;
+  color: var(--wb-primary);
+  background: var(--wb-primary-soft);
+  border-radius: 5px;
   white-space: nowrap;
 }
 .item-confidence {

@@ -1,6 +1,6 @@
 import { randomUUID } from 'node:crypto'
 import { query, TABLES, transaction } from '../config/neon.js'
-import { checkQuestionCompleteness } from '../utils/questionCompleteness.js'
+import { checkQuestionCompleteness, resolveEffectiveQuestionType } from '../utils/questionCompleteness.js'
 import { syncQuestionCompleteness } from './questionCompletenessSync.js'
 import { normalizeOptions } from '../utils/optionText.js'
 import { coerceAIText } from '../utils/aiTextCoerce.js'
@@ -96,7 +96,17 @@ export const createQuestions = async (questions) => {
       // → "invalid input syntax for type json"（朱思诺 09/02 第三次失败就是漏了这个）。
       ai_self_check_passed: q.ai_self_check_passed !== undefined ? q.ai_self_check_passed : true,
       ai_self_check_issues: q.ai_self_check_issues != null ? JSON.stringify(q.ai_self_check_issues) : null,
-      question_type: q.question_type || 'choice',
+      // 题型落库收口：question_type 是模型/答案库的猜测字段，可能与题干自相矛盾
+      // （实测事故见 utils/questionCompleteness.js resolveEffectiveQuestionType 注释：
+      //   填空题被练习册答案库的 answer_type 覆盖成 choice → 落库成
+      //   「choice + options=[]」→ 完整性闸报「选择题缺少选项」，老师无从补救）。
+      // 这里按题干证据纠偏一次，保证落库行不自相矛盾；下游（错题本、重练卷分块
+      // 渲染、周报、讲义）都直接读这一列。纠偏范围极窄，只在明确矛盾时触发。
+      question_type: resolveEffectiveQuestionType({
+        question_type: q.question_type || 'choice',
+        content: q.content,
+        options: normalizedOptions
+      }).type || 'choice',
       subject: q.subject || null,
       // 判题域硬规则：判不出来一律 null。调用方没给 is_correct 时默认 true
       // 等于"没判过就算对"，会让未判定的题绕过复核直接算成正确结果。
@@ -111,6 +121,19 @@ export const createQuestions = async (questions) => {
       difficulty: q.difficulty ?? null,
       block_coordinates: (q.block_coordinates && typeof q.block_coordinates === 'object') ? JSON.stringify(q.block_coordinates) : null,
       question_number: q.question_number ?? null,
+      // 多小问（题组）共享题干：迁移 057 新增列，见该迁移头部注释。
+      // 语义：content 只承载本行自己那一问的题干（判题/答案引擎的输入，不可污染），
+      // parent_stem 单独存「该大题 (1) 之前的公共题干原文」，仅展示层拼接渲染。
+      // 采集层两种写法都兼容：新提示词输出 parent_stem；历史/别名 shared_stem 兜底。
+      parent_stem: coerceAIText(q.parent_stem ?? q.shared_stem) || null,
+      // 小问号：与 resource_answers.sub_no 口径一致（TEXT，非小问为 NULL）。
+      // AI 可能返回数字 2 或字符串 '2'，统一成去空格字符串；空串视作无小问。
+      sub_no: (() => {
+        const raw = q.sub_no
+        if (raw == null) return null
+        const s = String(raw).trim()
+        return s === '' ? null : s
+      })(),
       text_bbox: (q.text_bbox && typeof q.text_bbox === 'object') ? JSON.stringify(q.text_bbox) : null,
       image_bbox: (() => {
         const ib = q.image_bbox || q.geometry_image?.bbox

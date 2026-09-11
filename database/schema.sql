@@ -132,6 +132,9 @@ CREATE POLICY "Allow all" ON generated_exams FOR ALL USING (true) WITH CHECK (tr
 -- ALTER TABLE questions ADD COLUMN IF NOT EXISTS manual_tags JSONB DEFAULT '[]';
 -- ALTER TABLE questions ADD COLUMN IF NOT EXISTS tags_source VARCHAR(10) DEFAULT 'ai';
 -- ALTER TABLE questions ADD COLUMN IF NOT EXISTS block_coordinates JSONB;
+-- 迁移 057：多小问（题组）共享题干（实际执行以 server/migrations/057_add_question_parent_stem.js 为准）
+-- ALTER TABLE questions ADD COLUMN IF NOT EXISTS parent_stem TEXT;
+-- ALTER TABLE questions ADD COLUMN IF NOT EXISTS sub_no TEXT;
 
 -- 启用 RLS (Row Level Security)
 ALTER TABLE students ENABLE ROW LEVEL SECURITY;

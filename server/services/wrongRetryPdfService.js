@@ -16,6 +16,9 @@ import katex from 'katex'
 import qrcode from 'qrcode-generator'
 import { query, TABLES } from '../config/neon.js'
 import { renderExamPDF } from './examPdfRenderer.js'
+// 多小问（题组）共享题干的展示口径：与 PC 端 / 移动端共用同一套实现，
+// 保证「重练卷上的题干」和「错题本卡片上的题干」逐字一致。
+import { resolveQuestionDisplayStem, getQuestionGroupKey } from '../utils/questionStem.js'
 
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
 
@@ -178,12 +181,28 @@ const buildPaperBody = ({ title, studentName, questions, qrSvg }) => {
   blocks.forEach((blk) => {
     if (blk.items.length === 0) return
     html += `<div class="section-header" style="font-size:15px;font-weight:bold;margin:8px 0 6px;padding:4px 0 4px 10px;border-left:4px solid #4F46E5;background:#F5F6FF;">${blk.label}</div>`
+    // 同一大题（同 task + 同页 + 同题号）的**连续**小问合成一个题组块：
+    //   · 只占一个编号，编号写成「10(1).」「10(2).」；
+    //   · 公共题干（parent_stem）只渲染一次（组内首题），后继小问不重复；
+    //   · 每个小问各自渲染自己的题干与作答区，仍按小问分别计分。
+    // 只有单独一问答错被选进来（不成组）时，它自带 parent_stem，
+    // 会按「非连排」分支完整渲染公共条件 —— 单题也能作答。
+    let lastGroupKey = ''
     blk.items.forEach((q) => {
-      num++
+      const { parentStem, content } = resolveQuestionDisplayStem(q)
+      const groupKey = getQuestionGroupKey(q)
+      const subNo = (q.sub_no != null && String(q.sub_no).trim() !== '') ? String(q.sub_no).trim() : ''
+      const isContinuation = !!groupKey && groupKey === lastGroupKey && !!subNo
+      if (!isContinuation) num++
+      lastGroupKey = groupKey
+      const label = subNo ? `${num}(${subNo})` : String(num)
       const typeClass = q.question_type === 'choice' ? 'q-choice'
         : q.question_type === 'fill' ? 'q-fill' : 'q-answer'
       html += `<div class="question ${typeClass}">`
-      html += `<div class="q-head"><span class="q-num">${num}.</span><span class="q-text">${renderMath(q.content)}</span></div>`
+      if (parentStem && !isContinuation) {
+        html += `<div class="q-stem">${renderMath(parentStem)}</div>`
+      }
+      html += `<div class="q-head"><span class="q-num">${label}.</span><span class="q-text">${renderMath(content)}</span></div>`
       const illu = getQuestionIllustration(q)
       if (illu) {
         html += `<div class="q-image"><img src="${escapeHtml(illu)}" alt="配图" /></div>`
@@ -240,17 +259,23 @@ export async function exportWrongRetryPdf({ studentId, wrongQuestionIds, publicB
 
   // 1. 校验 + 拉数据：错题必须属于该学生，且 lifecycle_status != 'mastered'
   const { rows: wqRows } = await query(
+    // parent_stem / sub_no：多小问大题的共享题干与小问号（迁移 057），
+    // 供 buildPaperBody 把小问连排成一个题组块并补回公共条件。
+    // ORDER BY：同一大题的小问必须相邻，否则「连排」失效、公共条件会重复渲染。
+    //   按 页码 → 题号 → 小问号 排序，NULLS LAST 让缺题号的题沉到末尾。
     `SELECT wq.id, wq.question_id, wq.status,
             COALESCE(wq.lifecycle_status, 'new') AS lifecycle_status,
             s.name AS student_name,
             q.content, q.options, q.answer, q.analysis,
             q.question_type, q.subject,
+            q.parent_stem, q.sub_no, q.question_number, q.task_id, q.page_number,
             q.image_url, q.geometry_image_url,
             q.clean_geometry_svg, q.tikz_svg_url, q.clean_geometry_image_url
      FROM ${TABLES.WRONG_QUESTIONS} wq
      JOIN ${TABLES.STUDENTS} s ON s.id = wq.student_id
      LEFT JOIN ${TABLES.QUESTIONS} q ON q.id = wq.question_id
-     WHERE wq.student_id = $1 AND wq.id = ANY($2::uuid[])`,
+     WHERE wq.student_id = $1 AND wq.id = ANY($2::uuid[])
+     ORDER BY q.page_number NULLS LAST, q.question_number NULLS LAST, q.sub_no NULLS LAST`,
     [studentId, wrongQuestionIds]
   )
 

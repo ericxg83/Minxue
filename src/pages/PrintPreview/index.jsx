@@ -18,6 +18,8 @@ import {
   preloadKatexFonts,
 } from '../../utils/pdfGenerator'
 import { normalizeOptions } from '../../utils/optionText'
+// 多小问（题组）共享题干展示口径：与错题卡片、pdfGenerator 共用同一套实现
+import { resolveQuestionDisplayStem } from '../../utils/questionStem'
 import katexCss from 'katex/dist/katex.min.css?inline'
 
 const USE_MOCK_DATA = false
@@ -281,6 +283,7 @@ export default function PrintPreview({ onClose, questions: propQuestions, existi
           .question-number { font-weight: bold; min-width: 30px; }
           .question-type { font-size: 9pt; color: #999; }
           .question-content { margin-bottom: 8px; line-height: 1.6; }
+          .question-parent-stem { margin-bottom: 6px; line-height: 1.6; }
           .options { margin-left: 30px; margin-top: 8px; }
           .options-inline { display: flex; flex-wrap: wrap; gap: 32px; }
           .options-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
@@ -310,12 +313,15 @@ export default function PrintPreview({ onClose, questions: propQuestions, existi
             if (q.question_type === 'fill') {
               content = content.replace(/_____/g, '<span style="display:inline-block;min-width:80px;border-bottom:1px solid #333;margin:0 4px;">&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;</span>')
             }
+            // 多小问大题：补回被拆行丢掉的公共题干，否则这道题在卷面上没有条件
+            const parentStem = resolveQuestionDisplayStem(q).parentStem
             return `
               <div class="question">
                 <div class="question-header">
                   <span class="question-number">${index + 1}.</span>
                   <span class="question-type">(${q.question_type === 'choice' ? '选择题' : q.question_type === 'fill' ? '填空题' : q.question_type === 'judge' ? '判断题' : '解答题'})</span>
                 </div>
+                ${parentStem ? `<div class="question-parent-stem">${parentStem}</div>` : ''}
                 <div class="question-content">${content}</div>
                 ${q.image_url ? `<div style="text-align:center;margin-bottom:8px;"><img src="${q.image_url}" alt="配图" style="max-width:100%;max-height:200px;object-fit:contain;border-radius:4px;" /></div>` : ''}
                 ${q.options && q.options.length > 0 ? `
