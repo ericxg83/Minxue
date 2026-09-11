@@ -168,6 +168,13 @@
 
       <!-- ═══ 完整题目内容（始终可见，不折叠） ═══ -->
       <div class="ops-question-body">
+        <!-- 原卷出处（仅 paper 模式/错题重练卷展示）：
+             重练卷是打印出来的白卷，老师批改时看不到这题当初出自哪次作业。
+             paper 模式：题目行的 image_url 就是原作业页图，block_coordinates 是题干定位框；
+             image 模式：题目是本次新建行，组件内部用归一化题干在错题本里
+             精确匹配同题旧记录（同题口径走 src/domain/questionIdentity.js），匹配不上不显示。 -->
+        <OriginalPaperSource :question="q" />
+
         <!-- 题型 & 学科（仅在编辑时显示） -->
         <div v-if="editing" class="ops-q-section">
           <div class="ops-q-label">题型 · 学科</div>
@@ -431,6 +438,7 @@ import { DocumentChecked, Delete, Plus, Upload, Picture, EditPen, ArrowLeft, Arr
 import MathRender from '../MathRender.vue'
 import QuestionEditForm from './QuestionEditForm.vue'
 import AnswerRecognizeDialog from './AnswerRecognizeDialog.vue'
+import OriginalPaperSource from './OriginalPaperSource.vue'
 
 const store = useReviewStore()
 const q = computed(() => store.currentReviewQuestion)

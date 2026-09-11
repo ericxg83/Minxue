@@ -107,15 +107,20 @@
 
   <!-- 错题处理决策门禁 -->
   <el-dialog v-model="store.wrongGateVisible" title="请确认错题处理方式" width="640px" :close-on-click-modal="false">
-    <div class="wrong-gate-tip">以下题目已判定为错误，但尚未完成错题处理。请选择加入错题本，或说明本次不加入。</div>
-    <div class="wrong-gate-note">“本次不加入”仍会保留做错记录；如果题目本身无效，请返回题目并使用“排除”。</div>
+    <div class="wrong-gate-tip">以下题目已判定为错误，但尚未进入错题本。</div>
+    <div class="wrong-gate-note">
+      你亲手标「错」的题系统会立即尝试入册，列在这里说明<strong>入册失败</strong>（多因题目元素不完整）；
+      AI 判错且你还没逐题确认的题，需要你选择是否加入。
+    </div>
     <ul class="wrong-gate-list">
       <li v-for="item in store.wrongGateList" :key="item.questionId" class="wrong-gate-item">
         <div class="wrong-gate-info">
           <span class="wrong-gate-no">第 {{ item.index + 1 }} 题</span>
           <span v-if="store.isQuestionInBook(item.questionId)" class="wrong-gate-badge done">已加入错题本</span>
-          <span v-else-if="item.reason === 'incomplete'" class="wrong-gate-badge warn">题目元素不完整：{{ item.issues.join('、') }}</span>
-          <span v-else class="wrong-gate-badge warn">等待处理决定</span>
+          <span v-else-if="item.reason === 'incomplete'" class="wrong-gate-badge warn">
+            {{ item.source === 'manual' ? '已判错 · 自动入册失败：' : '题目元素不完整：' }}{{ item.issues.join('、') }}
+          </span>
+          <span v-else class="wrong-gate-badge warn">{{ item.source === 'manual' ? '已判错 · 未成功入册' : '等待处理决定' }}</span>
           <el-select v-if="item.showSkipReasons" v-model="item.skipReason" class="wrong-gate-reason" size="small" placeholder="选择不加入原因" @change="handleSkipBook(item)">
             <el-option v-for="reason in skipReasonOptions" :key="reason.value" :label="reason.label" :value="reason.value" />
           </el-select>
@@ -213,7 +218,8 @@ const goNextTask = async () => {
 // 完成批改
 const handleComplete = async () => {
   // 门禁 → 完成复核 → 自动跳下一份
-  const list = store.getUnresolvedWrong()
+  // 先等在途复核写入落库并按库中错题本重算，避免"已入册还让老师再确认一次"
+  const list = await store.prepareWrongGate()
   if (list.length > 0) {
     store.openWrongGate(list)
     return
@@ -243,12 +249,16 @@ const handleAddToBook = async (item) => {
     const result = await store.addQuestionToBook(item.questionId)
     const added = result?.added?.length || 0
     const skipped = result?.skipped?.length || 0
+    const already = result?.alreadyExists?.length || 0
     if (added > 0) {
       ElMessage.success(skipped > 0 ? `已加入 ${added} 题，${skipped} 题信息不完整被跳过` : '已加入错题本')
     } else if (skipped > 0) {
       ElMessage.warning('题目信息不完整，无法加入错题本，请先补全题干/答案/选项')
+    } else if (already > 0) {
+      // 库里已有记录（人工标错时后端已强入），这里只是把界面状态对齐，不算异常
+      ElMessage.info('这道题已在错题本中，无需重复添加')
     } else {
-      ElMessage.info('这道题已在错题本中')
+      ElMessage.info('未产生变更，请稍后重试')
     }
   } catch (error) {
     ElMessage.error(error.message || '加入错题本失败，请重试')

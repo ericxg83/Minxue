@@ -43,7 +43,18 @@ export const useReviewStore = defineStore('review', () => {
 
   // 错题拦截弹窗状态
   const wrongGateVisible = ref(false)
-  const wrongGateList = ref([]) // [{ questionId, index, reason, issues? }]
+  const wrongGateList = ref([]) // [{ questionId, index, source, reason, issues? }]
+
+  // 人工复核写入在途请求。人工标「错」时后端会顺带强入错题本，若不等这些请求落库
+  // 就拿本地旧快照算门禁，会出现「库里已经入册、界面还问要不要加入」的假象。
+  // 完成复核前统一 await，保证门禁以库为准。
+  const pendingReviewWrites = new Set()
+  const trackReviewWrite = (promise) => {
+    pendingReviewWrites.add(promise)
+    const drop = () => pendingReviewWrites.delete(promise)
+    promise.then(drop, drop)
+    return promise
+  }
   // ReviewTopBar 触发「去编辑」时记录的待编辑题目，QuestionDetailPanel 监听后打开编辑面板
   const pendingEditQuestionId = ref(null)
 
@@ -67,6 +78,12 @@ export const useReviewStore = defineStore('review', () => {
     if (last.wqSnapshot) {
       const idx = wrongQuestions.value.findIndex(w => w.id === last.wqSnapshot.id)
       if (idx >= 0) wrongQuestions.value[idx] = { ...last.wqSnapshot }
+    } else {
+      // 判定前本地没有错题记录 → 这一笔（人工标错）触发了入册。撤销时把这条内存记录
+      // 一并撤掉，否则「撤销」后界面仍显示已入册，与老师的操作意图相反。
+      // 仅回退内存，不反向写库——与撤销的整体语义一致。
+      const created = wrongQuestions.value.findIndex(w => w.question_id === last.questionId)
+      if (created >= 0) wrongQuestions.value.splice(created, 1)
     }
     return true
   }
@@ -144,7 +161,10 @@ export const useReviewStore = defineStore('review', () => {
   // 当前试卷中「判定为错但未成功入册」的错题列表
   // - 判定为错：人工标 wrong，或 AI 判错且人工未覆盖（review_status 为空且 is_correct===false）
   // - 未入册：wrongQuestions（已按 is_complete=TRUE 过滤）中无对应记录
-  // 每条附带 reason: 'complete'（可加入错题本）| 'incomplete'（题目元素不完整，需先编辑）
+  // 每条附带：
+  //   source: 'manual'（老师已标错，后端 PUT 时已尝试强入，出现在这里只可能是入册失败）
+  //           | 'ai'（AI 判错、老师未逐题确认，需要老师决定入不入册）
+  //   reason: 'complete'（可以加入错题本）| 'incomplete'（题目元素不完整，需先编辑）
   const unresolvedWrongQuestions = computed(() => {
     const inBook = new Set(wrongQuestions.value.map(wq => wq.question_id))
     return allQuestions.value
@@ -157,6 +177,7 @@ export const useReviewStore = defineStore('review', () => {
         return {
           questionId: q.id,
           index,
+          source: q.review_status === REVIEW_STATUS.WRONG ? 'manual' : 'ai',
           reason: isComplete ? 'complete' : 'incomplete',
           issues
         }
@@ -380,8 +401,20 @@ export const useReviewStore = defineStore('review', () => {
     // 错题本同步（correct/exclude/wrong_no_book → 移除；wrong → 强入）在后端
     // PUT /questions/:id 的 hasReviewStatus 分支统一处理，前端不再持有错题本写责任，
     // 避免绕过 new→review_1→mastered 状态机造成"假掌握"。
-    updateQuestionReviewStatus(questionId, result, metadata).catch(e =>
-      console.error(`review_status 持久化失败 q=${questionId.substring(0, 8)}:`, e.message)
+    //
+    // 标「错」落库后必须重拉本地错题本：wrongQuestions 是进入试卷时的旧快照，
+    // 不刷新就会出现"库里已入册、门禁还问要不要加入"的假象（点击后又提示已在错题本中）。
+    trackReviewWrite(
+      updateQuestionReviewStatus(questionId, result, metadata)
+        .then(async () => {
+          if (result === REVIEW_STATUS.WRONG && currentStudent.value?.id) {
+            clearStudentCaches(currentStudent.value.id)
+            await loadWrongQuestions(currentStudent.value.id)
+          }
+        })
+        .catch(e =>
+          console.error(`review_status 持久化失败 q=${questionId.substring(0, 8)}:`, e.message)
+        )
     )
 
     // 自动进入下一题
@@ -398,7 +431,8 @@ export const useReviewStore = defineStore('review', () => {
   const autoCompleteAndAdvance = async () => {
     if (!currentTask.value) return
     // 门禁：存在未入册错题则拦截，弹清单等用户处理（不标记复核、不跳转）
-    const list = getUnresolvedWrong()
+    // 先等在途复核写入落库 + 以库中错题本为准重拉，避免用旧快照误报
+    const list = await prepareWrongGate()
     if (list.length > 0) {
       openWrongGate(list)
       return
@@ -785,6 +819,21 @@ export const useReviewStore = defineStore('review', () => {
   // 返回当前试卷未入册错题清单（供按钮点击 / 自动完成时校验）
   const getUnresolvedWrong = () => unresolvedWrongQuestions.value
 
+  // 弹门禁前的准备动作：等在途的复核写入落库（人工标错的「强入错题本」在后端同链路执行），
+  // 再按当前学生重拉一次错题本，最后才计算清单。
+  // 不做这一步，门禁会用进入试卷时的旧快照判断，把已经入册的题再问一遍"是否加入"。
+  const prepareWrongGate = async () => {
+    if (pendingReviewWrites.size > 0) {
+      await Promise.allSettled([...pendingReviewWrites])
+    }
+    const studentId = currentStudent.value?.id
+    if (studentId) {
+      clearStudentCaches(studentId)
+      await loadWrongQuestions(studentId)
+    }
+    return unresolvedWrongQuestions.value
+  }
+
   // 弹出错题拦截清单
   const openWrongGate = (list) => {
     wrongGateList.value = Array.isArray(list) ? list : []
@@ -886,6 +935,7 @@ export const useReviewStore = defineStore('review', () => {
     pendingEditQuestionId,
     unresolvedWrongQuestions,
     getUnresolvedWrong,
+    prepareWrongGate,
     openWrongGate,
     addQuestionToBook,
     markWrongNoBook,
