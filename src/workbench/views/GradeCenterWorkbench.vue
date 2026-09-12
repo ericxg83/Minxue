@@ -113,7 +113,7 @@
               tabindex="0"
               role="button"
               :aria-pressed="selectedTask?.key === task.key"
-              :aria-label="`${task.studentName} · ${task.name} · ${task.statusLabel}，按 Enter 进入批改`"
+              :aria-label="taskAriaLabel(task)"
               :data-task-key="task.key"
               @click="selectTask(task)"
               @keydown.enter.prevent="openTask(task)"
@@ -218,6 +218,29 @@
           <span>{{ confirmToast }}</span>
         </div>
       </Transition>
+
+      <!-- 只读「重练卷卷面预览」：老师看打印出去的那张卷。
+           仅在重练卷不可批改（未交卷 / AI 处理中）时打开，不含任何复核操作。 -->
+      <el-drawer
+        :model-value="!!previewTask"
+        :title="previewTask ? `${previewTask.studentName} · ${previewTask.name}` : ''"
+        direction="rtl"
+        size="620px"
+        :with-header="true"
+        @close="closePaperPreview"
+      >
+        <div v-if="previewTask" class="paper-preview-drawer">
+          <p class="paper-preview-drawer__hint">
+            这份重练卷已布置，{{ previewTask.statusLabel }}。学生扫码提交答卷并完成 AI 批改后，
+            该卷才会进入待复核队列。此页仅供查看卷面内容，不含判定结果。
+          </p>
+          <RetryPaperPreview
+            :question-ids="previewTask.questionIds"
+            :title="previewTask.name"
+            :student-name="previewTask.studentName"
+          />
+        </div>
+      </el-drawer>
     </div>
   </div>
 </template>
@@ -236,6 +259,14 @@ import StatusTag from '../components/ui/StatusTag.vue'
 import WorkbenchSelect from '../components/ui/WorkbenchSelect.vue'
 import { getGeneratedExamsByStudent, getStudents, getTasksByStudent } from '../../services/apiService'
 import { humanizeError } from '../utils/humanizeError'
+import {
+  RETRY_PAPER_STATE,
+  resolveRetryPaperState,
+  getRetryPaperStateMeta,
+  hasAnswerSheet,
+  RETRY_STATE_TO_WORKFLOW,
+} from '../utils/retryPaperState'
+import RetryPaperPreview from '../components/review/RetryPaperPreview.vue'
 
 const route = useRoute()
 const router = useRouter()
@@ -248,7 +279,7 @@ const confirmToast = ref('')
 let toastTimer = null
 
 const allowedSource = ['homework', 'retry']
-const allowedStatus = ['active', 'failed', 'all', 'completed']
+const allowedStatus = ['active', 'issued', 'failed', 'all', 'completed']
 const studentId = ref(route.query.studentId || '')
 const sourceFilter = ref(allowedSource.includes(route.query.source) ? route.query.source : 'all')
 const statusFilter = ref(allowedStatus.includes(route.query.status) ? route.query.status : 'active')
@@ -257,9 +288,23 @@ const activeStatuses = new Set(['pending', 'processing', 'review', 'retry'])
 const failedStatuses = new Set(['failed'])
 const completedStatuses = new Set(['completed'])
 
-const pendingCount = computed(() => allTasks.value.filter(item => activeStatuses.has(item.workflowStatus)).length)
+// 「已布置·待学生作答」的重练卷：学生还没交卷，老师无事可做。
+// 它仍在 activeStatuses 里（卡片照常出现在待处理列表），但**不算「待人工复核」**——
+// 否则就是把「等学生」混进「等我干活」，这正是 2026-09-12 那次事故的认知来源。
+const isAwaitingStudent = item =>
+  item.source === 'retry' && item.retryState === RETRY_PAPER_STATE.ISSUED
+
+const pendingCount = computed(() =>
+  allTasks.value.filter(item => activeStatuses.has(item.workflowStatus) && !isAwaitingStudent(item)).length
+)
 const failedCount = computed(() => allTasks.value.filter(item => failedStatuses.has(item.workflowStatus)).length)
-const retryPendingCount = computed(() => allTasks.value.filter(item => item.source === 'retry' && activeStatuses.has(item.workflowStatus)).length)
+const retryPendingCount = computed(() =>
+  allTasks.value.filter(item => item.source === 'retry' && activeStatuses.has(item.workflowStatus) && !isAwaitingStudent(item)).length
+)
+// 已布置但学生未交卷的重练卷数。
+// 单列一格是为了让「数量守恒」对老师可见：修复后「重练待验证」会从 24 掉到 1，
+// 如果不把另外 23 份显式表达出来，老师会以为待办丢了（已与产品确认保留此计数）。
+const retryIssuedCount = computed(() => allTasks.value.filter(isAwaitingStudent).length)
 const weekCompletedCount = computed(() => {
   const now = new Date()
   const weekStart = new Date(now)
@@ -272,6 +317,7 @@ const visibleTasks = computed(() => allTasks.value.filter(item => {
   const sourceMatches = sourceFilter.value === 'all' || item.source === sourceFilter.value
   let statusMatches = true
   if (statusFilter.value === 'active') statusMatches = activeStatuses.has(item.workflowStatus)
+  else if (statusFilter.value === 'issued') statusMatches = isAwaitingStudent(item)
   else if (statusFilter.value === 'failed') statusMatches = failedStatuses.has(item.workflowStatus)
   else if (statusFilter.value === 'completed') statusMatches = completedStatuses.has(item.workflowStatus)
   return sourceMatches && statusMatches
@@ -284,6 +330,7 @@ const sourceTabs = computed(() => [
 ])
 const statusTabs = [
   { key: 'active', label: '待处理' },
+  { key: 'issued', label: '待学生作答' },
   { key: 'failed', label: '识别异常' },
   { key: 'all', label: '全部' },
   { key: 'completed', label: '已完成' }
@@ -315,6 +362,16 @@ const taskDistribution = computed(() => [
     tone: 'warning',
     active: sourceFilter.value === 'retry' && statusFilter.value === 'active',
     action: () => { sourceFilter.value = 'retry'; statusFilter.value = 'active' }
+  },
+  {
+    // 「已布置·待学生作答」单列一格：这批卷不进老师的复核队列（没有答卷就没得复核），
+    // 但必须让老师看得见，否则「重练待验证 24 → 1」会被误读成待办丢了。
+    key: 'issued',
+    label: '重练已布置',
+    count: retryIssuedCount.value,
+    tone: 'default',
+    active: statusFilter.value === 'issued',
+    action: () => { sourceFilter.value = 'retry'; statusFilter.value = 'issued' }
   },
   {
     key: 'completed',
@@ -385,21 +442,28 @@ const homework = (task, student) => {
     questionCount,
     pendingCount: state.workflowStatus === 'completed' ? 0 : questionCount,
     wrongCount: Number(task.result?.wrongCount || task.wrong_count || 0),
-    actionLabel: state.workflowStatus === 'completed' ? '查看结果' : state.workflowStatus === 'processing' ? '查看进度' : '进入复核'
+    actionLabel: state.workflowStatus === 'completed' ? '查看结果' : state.workflowStatus === 'processing' ? '查看进度' : '进入复核',
+    // 作业批改的场景口径不在本次收敛范围内，保持原有跳转行为
+    canEnterReview: true,
+    retryState: null,
   }
 }
 
 // 重练卷卡片：pages 是这份卷的答卷 task（同一张卷可能被交多次）。
 // 三态：已确认 / 已交卷待复核 / 还没交卷。
-// 旧口径只看 exam.status === 'graded'，于是「已经交了答卷、AI 也批完了」的卷仍显示「待重练」，
-// 与 tasks 表里那条已批改的答卷卡状态互相打架。
+//
+// [2026-09-12 修复] 状态口径统一走 utils/retryPaperState.resolveRetryPaperState()。
+// 以前这里用 pages.length 判「交没交」、reviewStore 用 exam.status 判，两套口径分叉：
+// 「还没交卷」的卷在 store 里被标成待复核，老师点进批改页就是无图 + 原始作业旧判定。
+// 现在两个消费方共用同一个 resolve，且**未交卷的卷不给复核入口**。
 const retry = (exam, student, pages = []) => {
-  const graded = exam.status === 'graded'
-  const submitted = pages.length > 0
+  const reviewState = resolveRetryPaperState(exam, pages)
+  const meta = getRetryPaperStateMeta(reviewState)
   const questionCount = Number(exam.total_count || exam.question_ids?.length || 0)
   // 已交卷时展示最后一份答卷的时间：老师关心「什么时候交的」，而不是「什么时候出的卷」
-  const activityAt = submitted ? (pages[pages.length - 1]?.created_at || exam.created_at) : exam.created_at
-  const workflowStatus = graded ? 'completed' : submitted ? 'review' : 'retry'
+  const activityAt = hasAnswerSheet(reviewState)
+    ? (pages[pages.length - 1]?.created_at || exam.created_at)
+    : exam.created_at
   return {
     key: `retry-${student.id}-${exam.id}`,
     id: exam.id,
@@ -413,13 +477,19 @@ const retry = (exam, student, pages = []) => {
     createdAt: activityAt,
     imageUrl: pages[0]?.image_url || '',
     questionCount,
-    pendingCount: graded ? 0 : questionCount,
+    // 卷面预览（只读抽屉 / 批改页空态）需要题单自行拉取题目，不污染批改用的 allQuestions
+    questionIds: Array.isArray(exam.question_ids) ? exam.question_ids : [],
+    // 未交卷的卷没有「待处理题」（那批题的正误属于原始作业，不是这次重练的结果）
+    pendingCount: meta.canEnterReview && reviewState !== RETRY_PAPER_STATE.REVIEWED ? questionCount : 0,
     wrongCount: Number(exam.wrong_count || 0),
-    workflowStatus,
-    statusLabel: graded ? '已确认' : submitted ? '待复核' : '待重练',
-    tone: graded ? 'success' : 'warning',
-    aiStatusLabel: graded ? '验证已完成' : submitted ? 'AI 已完成，待确认' : '等待学生作答',
-    actionLabel: graded ? '查看结果' : submitted ? '进入复核' : '查看题目'
+    // retryState 是本卡片的权威判据；workflowStatus 只是沿用既有筛选/优先级体系
+    retryState: reviewState,
+    workflowStatus: RETRY_STATE_TO_WORKFLOW[reviewState],
+    statusLabel: meta.statusLabel,
+    tone: meta.tone,
+    aiStatusLabel: meta.aiStatusLabel,
+    actionLabel: meta.actionLabel,
+    canEnterReview: meta.canEnterReview,
   }
 }
 
@@ -427,13 +497,16 @@ const retry = (exam, student, pages = []) => {
 // 它们必须挂到对应卷下面，否则同一次重练会在列表里裂成两张卡。
 const isRetryTask = task => Boolean(task.generated_exam_id) || task.task_type === 'wrong_retry'
 
-// 没有卷可归的重练答卷（卷被删 / 跨学生）：降级成独立的错题重练卡，不能让任务凭空消失
+// 没有卷可归的重练答卷（卷被删 / 跨学生）：降级成独立的错题重练卡，不能让任务凭空消失。
+// 这类卡背后是**真实存在的一份答卷 task**，所以可进批改页。
 const orphanRetry = (task, student) => ({
   ...homework(task, student),
   key: `retry-${student.id}-${task.id}`,
   source: 'retry',
   sourceLabel: '错题重练',
-  aiStatusLabel: '等待教师验证'
+  aiStatusLabel: '等待教师验证',
+  canEnterReview: true,
+  retryState: null
 })
 
 // 归并：以重练卷为主线，答卷 task 只作为卷的附件（口径照搬 reviewStore.loadStudentPapers），
@@ -510,14 +583,28 @@ function selectTask(task) {
   selectedTask.value = task
 }
 
+// 打开任务。
+// 重练卷分流：学生还没交卷 / AI 还在跑的卷**不进批改工作区** ——
+// 那里没有可复核的内容，中间栏也没有答卷图，进去只会看到「图片加载失败」
+// 加一屏属于原始作业的旧判定（2026-09-12 事故）。这类卷改为打开只读卷面预览。
 function openTask(task) {
-  if (task) {
-    selectedTask.value = task
-    showToast(`已${task.actionLabel}`)
+  if (!task) return
+  selectedTask.value = task
+  if (task.source === 'retry' && task.canEnterReview === false) {
+    openPaperPreview(task)
+    return
   }
-  if (task) {
-    router.push({ path: '/grade/task', query: { studentId: task.studentId, taskId: task.id, source: task.source } })
-  }
+  showToast(`已${task.actionLabel}`)
+  router.push({ path: '/grade/task', query: { studentId: task.studentId, taskId: task.id, source: task.source } })
+}
+
+// 只读「重练卷卷面预览」抽屉：给老师看打印出去的那张卷，不含任何复核操作。
+const previewTask = ref(null)
+function openPaperPreview(task) {
+  previewTask.value = task
+}
+function closePaperPreview() {
+  previewTask.value = null
 }
 
 function showToast(message) {
@@ -541,13 +628,32 @@ function focusTaskRelative(task, dir) {
 function focusTaskPrev(task) { focusTaskRelative(task, -1) }
 function focusTaskNext(task) { focusTaskRelative(task, 1) }
 
+// 列表行无障碍说明要如实告诉老师 Enter 会发生什么。
+// 未交卷的重练卷不再「进入批改」，而是打开只读卷面预览。
+function taskAriaLabel(task) {
+  const enter = task.source === 'retry' && task.canEnterReview === false ? '按 Enter 查看重练卷' : '按 Enter 进入批改'
+  return `${task.studentName} · ${task.name} · ${task.statusLabel}，${enter}`
+}
+
 function flowSteps(task) {
+  const isRetry = task.source === 'retry'
   const processing = task.workflowStatus === 'processing'
   const failed = task.workflowStatus === 'failed'
   // 'retry' 是「卷还没交」，学生那边还没开始，不该显示成老师在等待
   const awaitingStudent = task.workflowStatus === 'retry'
   const awaitingReview = ['review', 'pending'].includes(task.workflowStatus)
   const completed = task.workflowStatus === 'completed'
+
+  // 重练卷还没交卷：流程停在「等待学生作答」。
+  // 不能复用下面的模板 —— 那会把「出卷时间」写成「上传完成」，让老师以为学生已经交了。
+  if (isRetry && task.retryState === RETRY_PAPER_STATE.ISSUED) {
+    return [
+      { label: '重练卷已布置', note: task.timeLabel, state: 'done' },
+      { label: '等待学生作答', note: '学生扫码提交答卷后自动开始', state: 'active' },
+      { label: '教师复核', note: '尚未开始', state: 'pending' }
+    ]
+  }
+
   return [
     { label: '上传完成', note: task.timeLabel, state: 'done' },
     {
@@ -556,7 +662,7 @@ function flowSteps(task) {
       state: failed ? 'error' : processing ? 'active' : 'done'
     },
     {
-      label: task.source === 'retry' ? '重练验证' : '教师复核',
+      label: isRetry ? '重练验证' : '教师复核',
       note: completed ? '已确认' : awaitingStudent ? '等待学生作答' : awaitingReview ? '等待处理' : '尚未开始',
       state: completed ? 'done' : awaitingStudent ? 'pending' : awaitingReview ? 'active' : 'pending'
     }
@@ -915,6 +1021,11 @@ onMounted(loadData)
 
 /* B5：移动端 sticky Primary CTA · PC 默认隐藏，移动端浮动在 wb-page 底部 */
 .preview-sticky-cta { display: none; }
+
+/* ── 重练卷只读卷面预览抽屉 ──
+   仅在重练卷不可批改（未交卷 / AI 处理中）时打开，替代原来「点进去批改页」的死角路径 */
+.paper-preview-drawer { padding-bottom: 24px; }
+.paper-preview-drawer :deep(.el-drawer__body) { padding-top: 12px; }
 
 .confirm-toast {
   position: fixed;

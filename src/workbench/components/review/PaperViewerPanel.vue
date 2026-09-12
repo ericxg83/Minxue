@@ -57,8 +57,18 @@
           <span>拖拽平移 · 滚轮缩放</span>
         </div>
 
-        <!-- 图片加载失败提示 -->
-        <div v-if="imgError" class="img-error-overlay">
+        <!-- 暂无页图：区分「本来就没图」和「图挂了」。
+             此前 paper（错题重练）模式下 currentPageImage 取到空串，绑成
+             <img src=""> 后浏览器请求当前页地址、解码失败触发 @error，
+             页面就显示「图片加载失败」——其实是这份卷学生还没交答卷（2026-09-12 修复）。 -->
+        <div v-if="!store.currentPageImage" class="img-empty-overlay">
+          <el-icon size="32"><Picture /></el-icon>
+          <strong>{{ emptyImageTitle }}</strong>
+          <span>{{ emptyImageHint }}</span>
+        </div>
+
+        <!-- 图片加载失败提示（有 URL 但加载失败，如 OSS 过期 / 网络异常） -->
+        <div v-else-if="imgError" class="img-error-overlay">
           <el-icon size="24"><WarningFilled /></el-icon>
           <span>图片加载失败</span>
           <el-button size="small" @click="retryLoad" style="margin-top: 8px;">重试</el-button>
@@ -357,11 +367,23 @@ const onImgError = () => {
 }
 
 const retryLoad = () => {
+  // 无图时不要把 src 设成空串 —— 空串会再次触发 @error，空态提示会闪回「加载失败」
+  if (!store.currentPageImage) return
   imgError.value = false
   if (imgRef.value) {
-    imgRef.value.src = store.currentPageImage || ''
+    imgRef.value.src = store.currentPageImage
   }
 }
+
+// 无图空态文案：按场景说人话，别让老师以为是故障
+const emptyImageTitle = computed(() =>
+  store.source === 'paper' ? '这份重练卷还没有学生答卷' : '还没有可显示的图片'
+)
+const emptyImageHint = computed(() =>
+  store.source === 'paper'
+    ? '学生扫码提交答卷并完成 AI 批改后，这里会显示答卷原图'
+    : '任务图片缺失或尚未上传'
+)
 
 // ─── 多页切换 ─────────────────────────────────────────────
 const prevPage = () => store.setPageIndex(store.currentPageIndex - 1)
@@ -619,6 +641,30 @@ const switchToPage = (page) => {
   color: var(--wb-text-tertiary);
   font-size: 14px;
   z-index: 5;
+}
+
+/* ── 暂无页图（不是故障，是这份卷还没有可显示的图）── */
+.img-empty-overlay {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  padding: 24px;
+  text-align: center;
+  background: rgba(255, 255, 255, 0.6);
+  z-index: 5;
+}
+.img-empty-overlay strong {
+  font-size: 15px;
+  font-weight: 600;
+  color: var(--wb-text-secondary);
+}
+.img-empty-overlay span {
+  font-size: 12px;
+  color: var(--wb-text-tertiary);
 }
 
 /* ── 页码条 ── */

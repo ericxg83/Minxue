@@ -4,6 +4,14 @@ import { getStudents, getWrongQuestionsByStudent, getQuestionsByTask, getTasksBy
 import { useLifecycleStore, LIFECYCLE_STATUS } from './lifecycleStore'
 import { checkQuestionCompleteness } from '../../utils/questionCompleteness.js'
 import { TASK_TYPE, getReviewConfig } from '../config/reviewConfig'
+import {
+  RETRY_PAPER_STATE,
+  resolveRetryPaperState,
+  isPendingReview as isPendingReviewState,
+  isReviewed as isReviewedState,
+  canOpenReview as canOpenPaperReview,
+  RETRY_STATE_TO_TASK_STATUS,
+} from '../utils/retryPaperState'
 import { REVIEW_STATUS, DEFAULT_CONFIDENCE_THRESHOLD, getReviewState, needsWrongBookDecision, effectiveIsCorrect as resolveEffectiveIsCorrect } from '../../utils/reviewDecision'
 
 export const useReviewStore = defineStore('review', () => {
@@ -118,7 +126,11 @@ export const useReviewStore = defineStore('review', () => {
     }
     return t.image_url ? [{ image_url: t.image_url, page_number: 1 }] : []
   })
-  // 当前页图 URL
+  // 当前页图 URL。
+  // 注意：**无页图时返回 null，不要返回空串** —— 空串会被绑到 <img src=""> 上，
+  // 浏览器按当前页面地址发一次请求、解码失败后触发 @error，页面显示「图片加载失败」。
+  // paper（错题重练）模式下没有学生答卷就是这种情形（24 份重练卷里 23 份如此），
+  // 那是「本来就没图」，不是「图挂了」，必须让 UI 能区分（2026-09-12 修复）。
   const currentPageImage = computed(() => {
     // 多页练习册/多图任务：使用当前题目自身的 image_url
     const q = allQuestions.value[currentReviewIndex.value]
@@ -126,9 +138,9 @@ export const useReviewStore = defineStore('review', () => {
       return q.image_url
     }
     const pages = currentPaperPages.value
-    if (pages.length === 0) return currentTask.value?.image_url || ''
+    if (pages.length === 0) return currentTask.value?.image_url || null
     const idx = Math.min(currentPageIndex.value, pages.length - 1)
-    return pages[idx]?.image_url || ''
+    return pages[idx]?.image_url || null
   })
   const setPageIndex = (i) => {
     if (i >= 0 && i < currentPaperPages.value.length) {
@@ -291,11 +303,13 @@ export const useReviewStore = defineStore('review', () => {
     }
   }
 
-  // 自动选择第一份「待复核」试卷（status === 'done'）。
+  // 自动选择第一份「待复核」试卷。
   // 无待复核试卷时，不自动打开已复核试卷，而是清空当前上下文并展示空状态。
   // 已复核试卷仍可通过顶部「选择试卷」下拉手动查看。
+  // 注意：paper 模式下「待复核」必须按 _reviewState 判定 —— 未交卷的卷（ISSUED）
+  // 不能自动选中，否则又回到「老师进到无图的批改页」的老问题。
   const autoSelectPendingTask = async () => {
-    const firstPending = studentTasks.value.find(t => t.status === 'done')
+    const firstPending = studentTasks.value.find(isPendingReviewTask)
     if (firstPending) {
       await selectTask(firstPending)
       return firstPending
@@ -464,7 +478,7 @@ export const useReviewStore = defineStore('review', () => {
     // 聚合模式：一次性完成所有待复核任务
     const isAggregated = source.value === 'image' && Object.keys(questionToTaskMap.value).length > 0
     if (isAggregated) {
-      const pending = studentTasks.value.filter(t => t.status === 'done')
+      const pending = studentTasks.value.filter(isPendingReviewTask)
       for (const task of pending) {
         await persistTaskCompletion(task)
       }
@@ -481,7 +495,7 @@ export const useReviewStore = defineStore('review', () => {
     }
     // 原有单试卷流程
     await persistTaskCompletion(currentTask.value)
-    currentTask.value.status = 'reviewed'
+    markTaskReviewedLocally(currentTask.value)
     if (currentStudent.value?.id) {
       clearStudentCaches(currentStudent.value.id)
     }
@@ -554,14 +568,20 @@ export const useReviewStore = defineStore('review', () => {
   }
 
   // paper 模式：加载练习卷（generated_exams），映射为统一 task 结构
-  // status: ungraded/grading → 'done'(待复核) ; graded → 'reviewed'(已复核)
+  //
+  // [2026-09-12 修复] 状态口径统一走 utils/retryPaperState.resolveRetryPaperState()：
+  //   以前写死 `status = exam.status === 'graded' ? 'reviewed' : 'done'`，
+  //   而 exam.status 全库 24 份都是 'ungraded'（连已批完那份也是），于是**从未有学生答卷**
+  //   的卷也被标成 'done'＝待复核，老师点进去中间栏无图、左右栏是原始作业的旧判定。
+  //   现在：无答卷 → ISSUED，不进 pendingTasks，卡片照常可见但不给复核入口。
   const loadStudentPapers = async (studentId) => {
     try {
       const [exams, tasks] = await Promise.all([
         getGeneratedExamsByStudent(studentId, false),
         getTasksByStudent(studentId, false)
       ])
-      // 按 generated_exam_id 归拢答题卡页图（每张上传照片一行 task）
+      // 按 generated_exam_id 归拢答题卡页图（每张上传照片一行 task）。
+      // 这是判断「学生有没有交卷」的唯一依据 —— 不看 exam.status。
       const pagesByExam = {}
       for (const t of (tasks || [])) {
         const gid = t.generated_exam_id
@@ -571,14 +591,20 @@ export const useReviewStore = defineStore('review', () => {
       for (const gid of Object.keys(pagesByExam)) {
         pagesByExam[gid].sort((a, b) => new Date(a.created_at) - new Date(b.created_at))
       }
+      // 排序权重：待复核在前，已确认次之，其余沉底
       const sorter = { done: 0, reviewed: 1 }
       studentTasks.value = (Array.isArray(exams) ? exams : []).map(exam => {
         const pages = pagesByExam[exam.id] || []
+        const reviewState = resolveRetryPaperState(exam, pages)
+        const mappedStatus = RETRY_STATE_TO_TASK_STATUS[reviewState]
         return {
           // 统一 task 语义（复用 topbar/缩略图/完成逻辑）
           id: exam.id,
           original_name: exam.name || '未命名练习卷',
-          status: exam.status === 'graded' ? 'reviewed' : 'done',
+          status: mappedStatus,
+          // 权威字段：paper 模式一律以 _reviewState 判定队列归属与可批改性，
+          // status 只是给下游排序/镜像用的派生值。
+          _reviewState: reviewState,
           image_url: pages[0]?.image_url || '',
           // paper 专属：题目 ID 列表 + 多页图任务
           _questionIds: exam.question_ids || [],
@@ -593,14 +619,47 @@ export const useReviewStore = defineStore('review', () => {
   }
 
   // 待复核试卷（status === 'done'）
-  const pendingTasks = computed(() =>
-    studentTasks.value.filter(t => t.status === 'done')
-  )
+  // paper 模式下必须按 _reviewState 判定：只有「学生已交卷且 AI 批完」的卷才算待复核，
+  // 未交卷的卷（ISSUED）不能落进来 —— 这是本次修复的核心（李哲瀚 错题再测-0911 就是这种）。
+  const isPendingReviewTask = (t) =>
+    t._reviewState ? isPendingReviewState(t._reviewState) : t.status === 'done'
+
+  const isReviewedTask = (t) =>
+    t._reviewState ? isReviewedState(t._reviewState) : t.status === 'reviewed'
+
+  // 本地把卷标为「已复核」。
+  // paper 模式的权威字段是 _reviewState，status 只是派生镜像；两处必须一起改，
+  // 否则会出现 status='reviewed' 但 _reviewState 仍是 pending_review 的撕裂状态，
+  // 下一次 loadStudentPapers 之前「已复核」列表会是空的。
+  const markTaskReviewedLocally = (task) => {
+    if (!task) return
+    task.status = 'reviewed'
+    if (task._reviewState) task._reviewState = RETRY_PAPER_STATE.REVIEWED
+  }
+
+  const pendingTasks = computed(() => studentTasks.value.filter(isPendingReviewTask))
 
   // 已复核试卷（status === 'reviewed'）
-  const reviewedTasks = computed(() =>
-    studentTasks.value.filter(t => t.status === 'reviewed')
+  const reviewedTasks = computed(() => studentTasks.value.filter(isReviewedTask))
+
+  // 已出卷但学生还没交卷的重练卷。
+  // 这批卷**不进批改队列**，但必须在老师侧可见 —— 否则「待复核 24 → 1」会被误读成
+  // 待办丢了。批改中心用它的数量跟老师对齐「数量守恒」。
+  const issuedPapers = computed(() =>
+    studentTasks.value.filter(t => t._reviewState === RETRY_PAPER_STATE.ISSUED)
   )
+
+  // 当前卷是否允许进入批改视图。
+  // paper 模式：学生没交卷（或 AI 还在跑）→ 不允许，UI 必须渲染「不可复核」空态。
+  // image 模式 / 非纸卷：不受此限，恒为 true（保持原有作业批改行为不变）。
+  const currentPaperReviewable = computed(() => {
+    const t = currentTask.value
+    if (!t || !t._reviewState) return true
+    return canOpenPaperReview(t._reviewState)
+  })
+
+  // 当前卷的 paper 状态（image 模式为 null）
+  const currentPaperState = computed(() => currentTask.value?._reviewState || null)
 
   // 「留底」目标 task：优先 currentTask；为空时（全部复核完的 empty state）回退到
   // 最新一份已复核的任务，确保老师即便把当前 task 清掉后仍能对"刚复核完的
@@ -634,6 +693,19 @@ export const useReviewStore = defineStore('review', () => {
     reviewStatus.value = 'reviewing'
     reviewAllDone.value = false
     questionToTaskMap.value = {}
+
+    // paper 模式：学生还没交卷（或 AI 还在跑）→ **不拉题目**。
+    // 这批题目的 is_correct / confidence / review_status 全部属于**原始作业**，
+    // 拉进来渲染 = 拿过期数据冒充本次重练结果（2026-09-12 事故：老师看到
+    // 「AI 错误 12 / 未判定 7」其实是原始作业的状态）。空态由 UI 层渲染卷面预览。
+    if (source.value === 'paper' && task?._reviewState && !canOpenPaperReview(task._reviewState)) {
+      allQuestions.value = []
+      currentTaskId.value = null
+      if (currentStudent.value?.id) {
+        await loadWrongQuestions(currentStudent.value.id)
+      }
+      return
+    }
 
     if (source.value === 'paper') {
       await loadPaperQuestions(task)
@@ -803,7 +875,7 @@ export const useReviewStore = defineStore('review', () => {
     // 聚合模式：一次性完成所有待复核任务（所有试卷一起复核完成）
     const isAggregated = Object.keys(questionToTaskMap.value).length > 0
     if (isAggregated) {
-      const pending = studentTasks.value.filter(t => t.status === 'done')
+      const pending = studentTasks.value.filter(isPendingReviewTask)
       for (const task of pending) {
         await persistTaskCompletion(task)
       }
@@ -821,7 +893,7 @@ export const useReviewStore = defineStore('review', () => {
 
     // 原有单试卷逻辑
     await persistTaskCompletion(currentTask.value)
-    currentTask.value.status = 'reviewed'
+    markTaskReviewedLocally(currentTask.value)
     if (currentStudent.value?.id) {
       clearStudentCaches(currentStudent.value.id)
       await loadStudentTasks(currentStudent.value.id)
@@ -956,6 +1028,10 @@ export const useReviewStore = defineStore('review', () => {
     otherPendingPages,
     pendingTasks,
     reviewedTasks,
+    // 重练卷状态口径（paper 模式）
+    issuedPapers,
+    currentPaperState,
+    currentPaperReviewable,
     lastArchivableTask,
     // 复核完成门禁 / 空状态
     reviewAllDone,

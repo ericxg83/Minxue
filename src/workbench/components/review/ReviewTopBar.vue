@@ -40,11 +40,24 @@
             :value="t.id"
           />
         </el-option-group>
+        <!-- 已布置·学生未交卷的重练卷：可查看卷面（只读），但不算待复核 -->
+        <el-option-group v-if="store.issuedPapers.length > 0" label="已布置（待学生作答）">
+          <el-option
+            v-for="t in store.issuedPapers"
+            :key="t.id"
+            :label="`○ ${t.original_name || '未命名练习卷'}`"
+            :value="t.id"
+          />
+        </el-option-group>
       </el-select>
     </div>
 
     <div class="top-bar-right">
-      <div v-if="store.allQuestions.length > 0" class="status-chips">
+      <!-- 重练卷不可复核：不展示任何复核动作（完成批改/留底/撤销都拿不到可信数据） -->
+      <el-tag v-if="!store.currentPaperReviewable" type="info" effect="plain" class="blocked-tag">
+        该卷{{ blockedPaperHint }}，暂无可复核内容
+      </el-tag>
+      <div v-if="store.currentPaperReviewable && store.allQuestions.length > 0" class="status-chips">
         <span class="status-chip chip-correct">
           <StatusIcon state="correct" :size="16" />
           <span class="chip-label">AI正确</span>
@@ -73,35 +86,37 @@
       </div>
       <!-- 置信阈值全局提示：与左栏 slider 相同一变量（store.confidenceThreshold），
            提升"AI 正确免复核"判定的可见性；不改判定来源 -->
-      <el-tooltip
-        content="AI 置信度 ≥ 该阈值时自动判定为「正确」无需复核；低于阈值的自动判定将进入待复核。拖动左栏下方滑块可即时调整。"
-        placement="bottom"
-      >
-        <span class="threshold-badge" :class="{ 'threshold-warn': store.confidenceThreshold >= 0.85 }">
-          AI置信 ≥ {{ (store.confidenceThreshold * 100).toFixed(0) }}% 免复核
-        </span>
-      </el-tooltip>
-      <el-button size="default" :disabled="!store.canUndo" @click="handleUndoLast">
-        ↩ 撤销上一笔
-      </el-button>
-      <el-button size="default" type="warning"
-        :disabled="!store.currentTask" :loading="retryLoading"
-        @click="handleRetryTask">
-        ⟳ 重新处理
-      </el-button>
-      <el-button size="default" type="success"
-        :disabled="store.reviewProgress.confirmed !== store.reviewProgress.total || store.reviewProgress.total === 0"
-        @click="handleComplete">
-        ✓ {{ store.reviewConfig.completeLabel }}
-      </el-button>
-      <el-button size="default" plain
-        :disabled="!canArchive" :loading="archiveLoading"
-        @click="handleArchive">
-        📌 留底为答案库
-      </el-button>
-      <el-button size="default" type="primary" :disabled="!canNextTask" @click="goNextTask">
-        ▶ 下一份
-      </el-button>
+      <template v-if="store.currentPaperReviewable">
+        <el-tooltip
+          content="AI 置信度 ≥ 该阈值时自动判定为「正确」无需复核；低于阈值的自动判定将进入待复核。拖动左栏下方滑块可即时调整。"
+          placement="bottom"
+        >
+          <span class="threshold-badge" :class="{ 'threshold-warn': store.confidenceThreshold >= 0.85 }">
+            AI置信 ≥ {{ (store.confidenceThreshold * 100).toFixed(0) }}% 免复核
+          </span>
+        </el-tooltip>
+        <el-button size="default" :disabled="!store.canUndo" @click="handleUndoLast">
+          ↩ 撤销上一笔
+        </el-button>
+        <el-button size="default" type="warning"
+          :disabled="!store.currentTask" :loading="retryLoading"
+          @click="handleRetryTask">
+          ⟳ 重新处理
+        </el-button>
+        <el-button size="default" type="success"
+          :disabled="store.reviewProgress.confirmed !== store.reviewProgress.total || store.reviewProgress.total === 0"
+          @click="handleComplete">
+          ✓ {{ store.reviewConfig.completeLabel }}
+        </el-button>
+        <el-button size="default" plain
+          :disabled="!canArchive" :loading="archiveLoading"
+          @click="handleArchive">
+          📌 留底为答案库
+        </el-button>
+        <el-button size="default" type="primary" :disabled="!canNextTask" @click="goNextTask">
+          ▶ 下一份
+        </el-button>
+      </template>
     </div>
   </div>
 
@@ -148,6 +163,7 @@ import { useReviewStore } from '../../stores/reviewStore'
 import { retryTask, saveTaskAsAnswerKey } from '../../../services/apiService'
 import StatusIcon from './StatusIcon.vue'
 import { WRONG_BOOK_SKIP_REASONS } from '../../../utils/reviewDecision'
+import { RETRY_PAPER_STATE } from '../../utils/retryPaperState'
 
 const store = useReviewStore()
 
@@ -197,6 +213,11 @@ const canNextTask = computed(() => {
   const idx = store.pendingTasks.findIndex(t => t.id === store.currentTask.id)
   return idx >= 0 && idx < store.pendingTasks.length - 1
 })
+
+// 重练卷不可复核时顶栏的提示文案（与 ReviewWorkspace 的空态说明保持一致）
+const blockedPaperHint = computed(() =>
+  store.currentPaperState === RETRY_PAPER_STATE.GRADING ? 'AI 正在识别与判题' : '学生还没有提交答卷'
+)
 
 // 「留底为答案库」按钮启用条件：仅 exam 任务 + 已完成复核（status='reviewed'）+ 当前 task 有 resource_id。
 // 留底是把 task 答案沉淀进答案库资源的动作，复核完成才有可信答案可沉淀。
@@ -555,6 +576,15 @@ const handleRetryTask = async () => {
 .top-bar-right :deep(.el-button--success) { color: #fff; background: var(--wb-success); border-color: var(--wb-success); }
 .top-bar-right :deep(.el-button--primary) { color: #fff; background: var(--wb-primary); border-color: var(--wb-primary); }
 .top-bar-right :deep(.el-button--warning) { color: var(--wb-warning); background: var(--wb-warning-soft); border-color: var(--wb-warning-soft); }
+/* ── 重练卷不可复核时的顶栏提示 ──
+   替代原复核动作按钮：这批卷没有学生答卷，任何「完成批改 / 留底」都没有可信数据可写 */
+.blocked-tag {
+  height: 28px;
+  display: inline-flex;
+  align-items: center;
+  font-size: 12px;
+}
+
 @media (max-width: 1200px) { .status-chips .status-chip:nth-child(n+4), .threshold-badge { display: none; } .top-bar-right :deep(.el-button) { padding: 6px 8px; } }
 @media (max-width: 900px) { .top-bar { align-items: flex-start; height: auto; min-height: 58px; flex-direction: column; gap: 8px; padding: 10px 14px; } .top-bar-right { width: 100%; overflow-x: auto; padding-bottom: 2px; } }
 </style>

@@ -33,8 +33,34 @@
         </el-tag>
       </div>
     </div>
+    <!-- 重练卷不可复核（学生还没交卷 / AI 处理中） -->
+    <!-- 必须先于 all-done / 三栏判断：这批卷的学生答卷不存在，三栏里的
+         AI 统计、原卷出处、完成批改按钮都会拿原始作业的旧判定冒充本次结果 -->
+    <div v-if="reviewBlocked" class="review-blocked-state">
+      <el-icon size="48"><Clock /></el-icon>
+      <div class="review-blocked-title">这份重练卷还不能复核</div>
+      <div class="review-blocked-sub">
+        {{ store.currentStudent?.name || '该学生' }} 的「{{ store.currentTask?.original_name }}」已布置，
+        {{ blockedReason }}。学生扫码提交答卷并完成 AI 批改后，这里才会出现待复核内容。
+      </div>
+      <div class="review-blocked-hint">
+        下方是这张卷的纸面预览（与打印版同口径，不含判定结果）。
+      </div>
+      <div class="review-blocked-actions">
+        <el-button plain @click="goGradeCenter">返回批改中心</el-button>
+        <el-button text @click="goWrongBook">查看错题池</el-button>
+      </div>
+      <RetryPaperPreview
+        v-if="blockedQuestionIds.length"
+        class="review-blocked-preview"
+        :question-ids="blockedQuestionIds"
+        :title="store.currentTask?.original_name"
+        :student-name="store.currentStudent?.name"
+      />
+    </div>
+
     <!-- 全部复核完成（空状态） -->
-    <div v-if="store.reviewAllDone && store.currentStudent" class="all-done-state">
+    <div v-else-if="store.reviewAllDone && store.currentStudent" class="all-done-state">
       <el-icon size="56"><CircleCheck /></el-icon>
       <div class="all-done-title">该名同学暂无要处理复核的试卷</div>
       <div class="all-done-sub">
@@ -60,13 +86,15 @@
 <script setup>
 import { computed, onMounted, onUnmounted, provide, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
-import { Check, CircleCheck, Document } from '@element-plus/icons-vue'
+import { Check, CircleCheck, Clock, Document } from '@element-plus/icons-vue'
 import { useReviewStore } from '../../stores/reviewStore'
 import { getResource } from '../../../services/apiService'
 import ReviewTopBar from './ReviewTopBar.vue'
 import QuestionNavPanel from './QuestionNavPanel.vue'
 import PaperViewerPanel from './PaperViewerPanel.vue'
 import QuestionDetailPanel from './QuestionDetailPanel.vue'
+import RetryPaperPreview from './RetryPaperPreview.vue'
+import { RETRY_PAPER_STATE } from '../../utils/retryPaperState'
 
 const props = defineProps({
   // 批改场景（当前仅 homework 题目校对）
@@ -84,6 +112,26 @@ const reviewProgressPercent = computed(() => {
 const goToTodo = () => router.push('/todo')
 const goToWrongBook = () => router.push({ path: '/wrongbook', query: { studentId: store.currentStudent?.id } })
 const goToStudents = () => router.push('/students')
+const goGradeCenter = () => router.push('/grade')
+
+// ── 重练卷不可复核（2026-09-12 修复）──
+// 学生还没交卷 / AI 还在跑的卷不允许进入复核视图。
+// 兜底场景：批改中心的旧链接、Dashboard 深链、老师打开的瞬间学生才交卷。
+const reviewBlocked = computed(() =>
+  !!store.currentTask && !store.currentPaperReviewable
+)
+
+const blockedReason = computed(() => {
+  if (store.currentPaperState === RETRY_PAPER_STATE.GRADING) return 'AI 正在识别与判题'
+  return '学生还没有提交答卷'
+})
+
+// 卷面预览用的题单。reviewStore 的 paper 映射字段是 _questionIds，
+// 批改中心卡片是 questionIds —— 两处来源不同，这里统一兜住。
+const blockedQuestionIds = computed(() => {
+  const t = store.currentTask
+  return (t?._questionIds || t?.questionIds || []).filter(Boolean)
+})
 
 // 当前 task 关联 resource 的实际 status。
 // 必须用 GET /resources/:id 拿真实状态，不能从 task.status 推（B 学生复用 A 答案库时
@@ -277,6 +325,45 @@ const handleQuickReview = async (result) => {
 }
 
 .all-done-actions { display: flex; align-items: center; gap: 8px; margin-top: 12px; }
+
+/* ── 重练卷不可复核（学生还没交卷 / AI 处理中）──
+   与 all-done 空态同视觉语言，但可滚动：下方带卷面预览，让老师知道卷子长什么样 */
+.review-blocked-state {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 10px;
+  padding: 40px 24px 32px;
+  color: var(--wb-text-tertiary);
+}
+.review-blocked-state > .el-icon { color: var(--wb-text-tertiary); }
+.review-blocked-title {
+  font-size: 18px;
+  font-weight: 600;
+  color: var(--wb-text);
+}
+.review-blocked-sub {
+  max-width: 560px;
+  text-align: center;
+  font-size: 14px;
+  line-height: 1.7;
+  color: var(--wb-text-secondary);
+}
+.review-blocked-hint {
+  font-size: 13px;
+  color: var(--wb-text-tertiary);
+}
+.review-blocked-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 6px 0 10px;
+}
+.review-blocked-preview { width: 100%; max-width: 780px; margin: 0 auto; }
+
 /* ── 完成汇总弹窗 ── */
 .completion-content {
   display: flex;
