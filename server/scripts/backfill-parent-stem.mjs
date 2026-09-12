@@ -35,10 +35,49 @@ import { normalizeStemForCompare } from '../utils/questionStem.js'
 const APPLY = process.argv.includes('--apply')
 const limitIdx = process.argv.indexOf('--limit')
 const LIMIT = limitIdx > -1 ? parseInt(process.argv[limitIdx + 1], 10) || 0 : 0
+// --all：候选放宽到「孤立小问行」（同一题号只有 1 行以小问标号开头）。
+//   默认只处理成组行（同题号 ≥2 行带小问标号，拆分证据更硬）；用户报告重练卷
+//   上半截题无法练习后放开，孤立行同样按几何位置找公共题干。
+const ALL = process.argv.includes('--all')
+// --no-filter：关闭「确实需要公共条件」预筛（纯计算题的 (1)(2) 本来就独立可作答，
+//   公共部分只有“计算：”之类，回填收益低且 OCR 费用高）
+const NO_FILTER = process.argv.includes('--no-filter')
 
 const SUB_HEAD_RE = /^[（(]\s*([0-9１-９一二三四五六七八九]{1,2})\s*[)）]/
 const SUB_MARKER_ANY_RE = /[（(]\s*\d{1,2}\s*[)）]/
 const CN_NUM = { 一: 1, 二: 2, 三: 3, 四: 4, 五: 5, 六: 6, 七: 7, 八: 8, 九: 9 }
+
+// 「这一行是不是依赖公共条件才可作答」——应用题/几何题/函数题必须带条件；
+// 纯计算题（"计算：(1) 3×9^m×27^m=3^21，求m="）的小问各自独立，不必回填。
+// 只用于收敛 OCR 范围、省费用；判错最多是多花一次识别（还会被校验闸拦），不会写错数据。
+const DEPENDS_ON_STEM_RE = /(求|证明|求证|判断|说明|指出|探究|面积|周长|表达式|解析式|顶点|对称轴|抛物线|函数|图像|图象|如图|已知|取值范围|坐标|关系|条件|归纳|猜想|验证)/
+const PURE_CALC_HEAD_RE = /^(\d+\s*[)）])?\s*(计算|化简|解方程|解不等式|解方程组|因式分解|求值)\s*[:：]?\s*$/
+
+const needsParentStem = (content) => {
+  const raw = String(content || '')
+  // 剥掉开头的小问标号再看剩余文本
+  const body = raw.replace(SUB_HEAD_RE, '').trim()
+  if (!body) return false
+  // 纯指令行（"计算："）没有可回填的公共题干
+  if (PURE_CALC_HEAD_RE.test(body)) return false
+  return DEPENDS_ON_STEM_RE.test(body)
+}
+
+// 自身已含 ≥2 个小问标号的行 = 整题（AI 没拆干净或本来就完整），不需要公共题干
+const isSelfCompleteContent = (content) => {
+  const marks = String(content || '').match(/[（(]\s*[0-9１-９一二三四五六七八九]{1,2}\s*[)）]/g) || []
+  return marks.length >= 2
+}
+
+// 剥掉题干开头的题号前缀（题号已由 question_number 承载）。练习册印刷常写成
+// "18 已知抛物线…"（数字+空格）、"10. 已知…"（数字+点+空格），OCR 也可能把
+// ". " 读成破折号 → "10—经销商…"。剥完必须再跑一遍标号/悬空闸，否则会出现
+// "2.（1）二次函数…" 剥成 "（1）二次函数…" 漏网（2026-09-12 实测漏网 1 条）。
+const stripLeadingNumber = (s) => String(s || '')
+  .replace(/^\s*\d{1,2}\s*[.、．:：,，]\s*/, '')
+  .replace(/^\s*\d{1,2}\s*[—－-]\s*/, '')
+  .replace(/^\s*\d{1,2}\s+/, '')
+  .trim()
 
 const toArabic = (s) => {
   const t = String(s || '').trim()
@@ -152,7 +191,9 @@ async function ocrCommonStem(imageUrl, band) {
 }
 
 async function main() {
-  // ── 1. 候选组：同 task+页+题号 ≥2 行、≥2 行 content 以 (n) 开头、两列均为空 ──
+  // ── 1. 候选组：content 以 (n) 开头的行（--all 时含孤立单行）──
+  // 注：只要求 parent_stem IS NULL；不再要求 sub_no IS NULL —— 昨天回滚 batch 保留了
+  //     sub_no，那些行同样需要重试。
   const { rows: groups } = await pool.query(`
     WITH cand AS (
       SELECT q.task_id, q.page_number, q.question_number AS qno,
@@ -161,14 +202,14 @@ async function main() {
              ) AS sub_rows,
              count(*) AS total_rows
       FROM questions q
-      WHERE q.parent_stem IS NULL AND q.sub_no IS NULL
+      WHERE q.parent_stem IS NULL
         AND q.question_number IS NOT NULL AND q.page_number IS NOT NULL
       GROUP BY q.task_id, q.page_number, q.question_number
       HAVING count(*) FILTER (
                WHERE btrim(coalesce(q.content,'')) ~ '^[（(]\\s*[0-9１-９一二三四五六七八九]{1,2}\\s*[)）]'
-             ) >= 2
+             ) >= ${ALL ? 1 : 2}
     )
-    SELECT c.task_id, c.page_number, c.qno, c.total_rows,
+    SELECT c.task_id, c.page_number, c.qno, c.total_rows, c.sub_rows,
            jsonb_agg(jsonb_build_object(
              'id', q.id, 'content', btrim(coalesce(q.content,'')),
              'block', q.block_coordinates, 'sub', q.sub_no
@@ -177,17 +218,31 @@ async function main() {
     FROM cand c
     JOIN questions q ON q.task_id = c.task_id AND q.page_number = c.page_number AND q.question_number = c.qno
     JOIN tasks t ON t.id = c.task_id
-    GROUP BY c.task_id, c.page_number, c.qno, c.total_rows, t.images, t.image_url
+    GROUP BY c.task_id, c.page_number, c.qno, c.total_rows, c.sub_rows, t.images, t.image_url
     ORDER BY c.task_id, c.page_number, c.qno
   `)
 
-  console.log(`候选组: ${groups.length} 组${LIMIT ? `（本次处理前 ${Math.min(LIMIT, groups.length)} 组）` : ''}`)
-  if (groups.length === 0) {
+  // 「确实需要公共条件」预筛：组内只要有一行是依赖条件才能作答的（应用题/几何题/
+  // 函数题），这组就值得回填；全是纯计算小问的组跳过，省视觉模型费用。
+  const beforeFilter = groups.length
+  const kept = NO_FILTER
+    ? groups
+    : groups.filter(g => {
+        const subRows = g.rows.filter(r => SUB_HEAD_RE.test(r.content))
+        // 组内所有带标号的行都自身完整（含 ≥2 个标号）→ 本来就不缺条件，跳过
+        if (subRows.length > 0 && subRows.every(r => isSelfCompleteContent(r.content))) return false
+        return g.rows.some(r => needsParentStem(r.content))
+      })
+  const skipped = beforeFilter - kept.length
+
+  console.log(`候选组: ${beforeFilter} 组（模式=${ALL ? '--all 含孤立行' : '仅成组'}）`)
+  console.log(`需要公共条件: ${kept.length} 组${skipped ? `（跳过 ${skipped} 组纯计算题）` : ''}${LIMIT ? `，本次处理前 ${Math.min(LIMIT, kept.length)} 组` : ''}`)
+  if (kept.length === 0) {
     await pool.end()
     return
   }
 
-  const selected = LIMIT ? groups.slice(0, LIMIT) : groups
+  const selected = LIMIT ? kept.slice(0, LIMIT) : kept
   const results = []
   let passCount = 0, rejectCount = 0, errorCount = 0
 
@@ -231,9 +286,16 @@ async function main() {
       const bottom = (Number(b.y) || 0) + (Number(b.height) || 0)
       if (bottom <= groupTop + 20 && bottom > prevBottom) prevBottom = bottom
     }
-    // 裁剪带：[prevBottom, groupTop + 首行高度的 45%] —— 带上 (1) 行上半部做锚点上下文
-    const bandTop = prevBottom
-    const bandBottom = Math.min(1000, groupTop + firstRowH * 0.45)
+    // 裁剪带上边：优先用「上一题 bottom」（精确，只含两题之间的空隙 = 公共题干行）。
+    // 但 block_coordinates 实测质量参差——同一大题相邻小问的框会互相重叠（如
+    // 2e39d5d4 Q11：(1) y=620 h=120 与 (2) y=660 重叠）、或每行高仅 30‰ 且紧贴，
+    // 此时 prevBottom 不可信（gap 过小），改用固定上探：从本行顶部往上 130‰ 页高。
+    // 落在带内的上一题文字会被「邻题撞车闸」拦下，不会写错。
+    const gap = groupTop - prevBottom
+    const bandTop = (prevBottom > 0 && gap >= 20) ? prevBottom : Math.max(0, groupTop - 130)
+    // 下边取首行的 80%：让模型能看见 (1) 标号本体，才能准确判断"标号之前的文字"到哪结束。
+    // 取 45% 时实测多次在段落中途截断（"…例如：方程 x²−x="、"…与x轴交"）。
+    const bandBottom = Math.min(1000, groupTop + firstRowH * 0.8)
     if (bandBottom - bandTop < 8) {
       rejectCount++
       results.push({ label, ok: false, reason: `共享题干区域过窄(${Math.round(bandBottom - bandTop)})，跳过` })
@@ -244,6 +306,31 @@ async function main() {
       x: 0, y: bandTop,
       width: 1000,
       height: bandBottom - bandTop
+    }
+
+    // 同组几何/标号一致性闸：同页同题号可能分属不同栏目（“一、填空题 1”与
+    // “三、解答题 1”各自从 1 编号），此时组内会出现重复的小问标号。
+    // 但同一题被过度拆分时也会重复（(2) 的 ①② 被拆成两条 (2)）——用几何距离区分：
+    // 同标号各行 y 跨度 < 250‰ 视为同题拆分（容忍），≥ 250‰ 视为栏目冲突（拒绝整组），
+    // 因为把 A 题的公共条件写到 B 题上是最坏的结果。
+    const byMark = new Map()
+    for (const r of g.rows) {
+      if (!SUB_HEAD_RE.test(r.content)) continue
+      const mark = toArabic(String(r.content).match(SUB_HEAD_RE)[1])
+      if (!mark) continue
+      const y = Number(r.block?.y) || 0
+      if (!byMark.has(mark)) byMark.set(mark, [])
+      byMark.get(mark).push(y)
+    }
+    let columnConflict = false
+    for (const [, ys] of byMark) {
+      if (ys.length > 1 && Math.max(...ys) - Math.min(...ys) >= 250) columnConflict = true
+    }
+    if (columnConflict) {
+      rejectCount++
+      results.push({ label, ok: false, reason: '同组小问标号重复且纵向跨度大（疑同页同题号不同栏目）' })
+      console.log(`⛔ ${label}: 拒绝 [同组小问标号重复且纵向跨度大，疑不同栏目]`)
+      continue
     }
 
     const { stem, error } = await ocrCommonStem(pageImg, band)
@@ -260,33 +347,32 @@ async function main() {
       continue
     }
 
-    // ── 五道校验闸 ──
+    // ── 校验闸（全部对「剥掉题号前缀后的 cleanStem」判定，避免 "2.（1）…" 漏网）──
     const reasons = []
-    // 正向题号闸（强校验）：stem 若自带题号前缀（如 "8."），必须等于本组题号，
+    // 题号闸（强校验）：原始 stem 若自带题号，必须等于本组题号，
     // 否则说明裁剪带吃进了上一题/别的题 —— 这是邻题误吃最可靠的证据。
     const stemQnoMatch = stem.match(/^\s*(\d{1,2})\s*[.、．]/)
     if (stemQnoMatch && String(parseInt(stemQnoMatch[1], 10)) !== String(Number(g.qno))) {
       reasons.push(`stem 题号 ${stemQnoMatch[1]} ≠ 组题号 ${g.qno}（裁到了别的题）`)
     }
-    if (stem.length < 8) reasons.push(`过短(${stem.length}字)`)
-    if (stem.length > 300) reasons.push(`过长(${stem.length}字)`)
-    if (SUB_HEAD_RE.test(stem)) reasons.push('以小问标号开头（截取失败）')
-    // 悬空结尾闸：以逗号/分号/冒号或「当/的/和/或/在/为/时/若/则」收尾，
+    const cleanStem = stripLeadingNumber(stem)
+    if (cleanStem.length < 8) reasons.push(`过短(${cleanStem.length}字)`)
+    if (cleanStem.length > 300) reasons.push(`过长(${cleanStem.length}字)`)
+    if (SUB_HEAD_RE.test(cleanStem)) reasons.push('以小问标号开头（截取失败）')
+    // 悬空结尾闸：以逗号/分号/冒号或「当/的/和/或/在/为/时/若/则/此/求」收尾，
     // 说明转录在句中被截断（弱模型或裁剪带过窄的典型产物）
-    if (/[，,；;：:、]$|[当的和或在为时若则]$/.test(stem)) reasons.push('结尾悬空（转录疑似截断）')
-    if (!hasHanziOrDigit(stem)) reasons.push('无有效文字')
-    if (!reasons.length && collidesWithNeighbors(stem, pageRows.filter(r => !g.rows.some(gr => gr.id === r.id)))) {
+    if (/[，,；;：:、=＝]$|[当的和或在为时若则此求交即得是有与及等]$/.test(cleanStem)) reasons.push('结尾悬空（转录疑似截断）')
+    if (!hasHanziOrDigit(cleanStem)) reasons.push('无有效文字')
+    if (!reasons.length && collidesWithNeighbors(cleanStem, pageRows.filter(r => !g.rows.some(gr => gr.id === r.id)))) {
       reasons.push('与同页其他题行撞车（疑裁剪误吃邻题）')
     }
     if (reasons.length) {
       rejectCount++
-      results.push({ label, ok: false, reason: reasons.join(';'), stem })
-      console.log(`⛔ ${label}: 拒绝 [${reasons.join('; ')}] stem="${stem.slice(0, 60)}"`)
+      results.push({ label, ok: false, reason: reasons.join(';'), stem: cleanStem })
+      console.log(`⛔ ${label}: 拒绝 [${reasons.join('; ')}] stem="${cleanStem.slice(0, 60)}"`)
       continue
     }
 
-    // 存储前剥掉题号前缀（题号已由 question_number 列承载，题干不再重复）
-    const cleanStem = stem.replace(/^\s*\d{1,2}\s*[.、．]\s*/, '').trim()
     passCount++
     const subRows = g.rows.filter(r => SUB_HEAD_RE.test(r.content))
     results.push({ label, ok: true, stem: cleanStem, ids: g.rows.map(r => r.id), subRows: subRows.map(r => r.id) })

@@ -136,6 +136,8 @@ import dayjs from 'dayjs'
 import LazyImage from '../shared/LazyImage.vue'
 import { getQuestionVariants, generateQuestionVariants, getQuestionKnowledge } from '../../../services/apiService'
 import { normalizeOptions } from '../../../utils/optionText'
+// 多小问（题组）共享题干展示口径：content 已含 parent_stem 时不重复渲染
+import { resolveQuestionDisplayStem } from '../../../utils/questionStem'
 
 const STRATEGY_LABELS = {
   change_number: '改数字',
