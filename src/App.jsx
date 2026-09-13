@@ -584,20 +584,18 @@ export default function App() {
   const filteredWrongQuestions = useMemo(() => (Array.isArray(wrongQuestions) ? wrongQuestions : []).filter(wq => wq.student_id === currentStudent?.id),
     [wrongQuestions, currentStudent?.id])
 
-  // Mobile wrong-book action: prioritize unresolved items without creating a second retry flow.
-  const pendingWrongQuestions = useMemo(() => (Array.isArray(wrongQuestions) ? wrongQuestions : [])
-    .filter(wq => wq.student_id === currentStudent?.id && (wq.lifecycle_status || 'new') !== 'mastered'), [wrongQuestions, currentStudent?.id])
-
-  const priorityWrongQuestions = useMemo(() => [...pendingWrongQuestions]
+  // 队列分层（2026-09-13）：每日/重点重练默认只装「待复习(new)」。
+  // review_1（基本掌握）移出每日池，由周报重练卷承载第二次验证；
+  // 教师仍可在错题本手动勾选 review_1 题目纳入重练卷。
+  const dailyRetryQuestions = useMemo(() => (Array.isArray(wrongQuestions) ? wrongQuestions : [])
+    .filter(wq => wq.student_id === currentStudent?.id && (wq.lifecycle_status || 'new') === 'new')
     .sort((a, b) => {
-      const statusRank = { new: 0, review_1: 1, review_2: 2 }
-      const rankDiff = (statusRank[a.lifecycle_status || 'new'] ?? 3) - (statusRank[b.lifecycle_status || 'new'] ?? 3)
-      if (rankDiff !== 0) return rankDiff
       const errorDiff = (b.error_count || 1) - (a.error_count || 1)
       if (errorDiff !== 0) return errorDiff
       return dayjs(b.added_at || b.created_at).valueOf() - dayjs(a.added_at || a.created_at).valueOf()
-    })
-    .slice(0, 5), [pendingWrongQuestions])
+    }), [wrongQuestions, currentStudent?.id])
+
+  const priorityWrongQuestions = dailyRetryQuestions.slice(0, 5)
 
   // Filter generated exams
   const studentExams = useMemo(() => (Array.isArray(generatedExams) ? generatedExams : []).filter(e => e.student_id === currentStudent?.id),
@@ -949,7 +947,7 @@ export default function App() {
                 tasks={tasks}
                 isLoadingTasks={isLoadingTasks}
                 isInitializing={isInitializing}
-                pendingWrongCount={pendingWrongQuestions.length}
+                pendingWrongCount={dailyRetryQuestions.length}
                 onStartUpload={() => setShowUploadOptions(true)}
                 onOpenTasks={() => { setCurrentPage('tasks'); clearSelection() }}
                 onStartPriorityRetry={handleStartPriorityRetry}
@@ -979,7 +977,7 @@ export default function App() {
                 filteredWrongQuestions={filteredWrongQuestions}
                 bankCounts={bankCounts}
                 selectedQuestions={selectedQuestions}
-                pendingWrongQuestionCount={pendingWrongQuestions.length}
+                pendingWrongQuestionCount={dailyRetryQuestions.length}
                 onToggleSelection={toggleSelection}
                 onOpenDetail={handleOpenWrongBookDetail}
                 onDelete={handleDeleteWrongQuestion}

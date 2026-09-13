@@ -166,21 +166,24 @@ export async function getDashboardClassWeakness(opts = {}) {
 }
 
 /**
- * Dashboard 专用：本周重练效果 3 个数字（已掌握率 / 进行中 / 待重练学生）。
+ * Dashboard 专用：本周重练效果 4 个数字（完全掌握率 / 基本掌握率 / 进行中 / 待重练学生）。
  *
- * 口径（已确认，无需时间窗对比）：
- *   - 已掌握率 %：班级错题中 lifecycle_status IN ('review_2', 'mastered') 的比例
+ * 口径（2026-09-13 队列分层定稿，两级掌握拆分）：
+ *   - 完全掌握率 %：lifecycle_status = 'mastered'（累计答对 2 次，含周回顾验证）的比例
+ *   - 基本掌握率 %：lifecycle_status = 'review_1'（累计答对 1 次，待周回顾二次验证）的比例
+ *     （review_2 为历史残留枚举，按 review_1 语义计入基本掌握）
  *   - 进行中 N：已批改待教师处理的重练卷数（generated_exams 关联的 task 仍在批改/批改完未读）
  *   - 待重练学生 M：lifecycle_status IN ('new', 'review_1') 的去重学生数
  *
- * @returns {Promise<{masteryRate: number, inProgress: number, awaitingRetryStudents: number}>}
+ * @returns {Promise<{fullyMasteredRate: number, basicMasteredRate: number, masteryRate: number, inProgress: number, awaitingRetryStudents: number}>}
  */
 export async function getRetryOverview() {
   const [{ rows: masteryRows }, { rows: inProgressRows }, { rows: awaitingRows }] = await Promise.all([
     query(
       `SELECT
         COUNT(*)::int AS total,
-        COUNT(*) FILTER (WHERE lifecycle_status IN ('review_2', 'mastered'))::int AS mastered
+        COUNT(*) FILTER (WHERE lifecycle_status = 'mastered')::int AS fully_mastered,
+        COUNT(*) FILTER (WHERE lifecycle_status IN ('review_1', 'review_2'))::int AS basic_mastered
        FROM ${TABLES.WRONG_QUESTIONS}`
     ),
     query(
@@ -198,11 +201,16 @@ export async function getRetryOverview() {
   ])
 
   const total = masteryRows[0]?.total ?? 0
-  const mastered = masteryRows[0]?.mastered ?? 0
-  const masteryRate = total > 0 ? Math.round((mastered * 100) / total) : 0
+  const fullyMastered = masteryRows[0]?.fully_mastered ?? 0
+  const basicMastered = masteryRows[0]?.basic_mastered ?? 0
+  const pct = (n) => (total > 0 ? Math.round((n * 100) / total) : 0)
 
   return {
-    masteryRate,
+    fullyMasteredRate: pct(fullyMastered),
+    basicMasteredRate: pct(basicMastered),
+    // masteryRate 保留为兼容字段：旧语义把 review_2 算进「已掌握」，虚高；
+    // 现收敛为「完全掌握率」，前端已切换到新字段，留作过渡避免消费方 undefined。
+    masteryRate: pct(fullyMastered),
     inProgress: inProgressRows[0]?.n ?? 0,
     awaitingRetryStudents: awaitingRows[0]?.n ?? 0
   }

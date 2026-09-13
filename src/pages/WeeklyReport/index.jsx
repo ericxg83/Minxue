@@ -280,7 +280,7 @@ export default function WeeklyReport() {
                     </div>
                     <div style={{ flex: 1, background: '#F8F9FA', borderRadius: 'var(--radius-8)', padding: '10px 12px', textAlign: 'center' }}>
                       <div style={{ fontSize: 'var(--fs-15)', fontWeight: 600, color: T.text }}>{stats.masteredCount || 0}</div>
-                      <div style={{ fontSize: 'var(--fs-10)', color: T.textSec, marginTop: '1px' }}>已掌握</div>
+                      <div style={{ fontSize: 'var(--fs-10)', color: T.textSec, marginTop: '1px' }}>完全掌握</div>
                     </div>
                     <div style={{ flex: 1, background: '#F8F9FA', borderRadius: 'var(--radius-8)', padding: '10px 12px', textAlign: 'center' }}>
                       <div style={{ fontSize: 'var(--fs-15)', fontWeight: 600, color: T.text }}>{stats.pendingCount || 0}</div>

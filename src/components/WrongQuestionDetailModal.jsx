@@ -6,12 +6,12 @@ import { normalizeOptions } from '../utils/optionText'
 // 多小问（题组）共享题干展示口径：与 PC 错题卡片、重练卷长按共用同一套实现
 import { resolveQuestionDisplayStem } from '../utils/questionStem'
 
-// 状态词汇与错题本列表 Tab 对齐：待复习 / 复习中 / 已掌握
+// 状态词汇与错题本列表 Tab 对齐：待复习 / 基本掌握 / 完全掌握（2026-09-13 两级掌握口径）
 const statusMap = {
   new: { text: '待复习', color: 'var(--warning)', soft: 'var(--warning-soft)', icon: AlertCircle },
-  review_1: { text: '复习中 · 第 1 轮', color: 'var(--primary)', soft: 'var(--primary-soft)', icon: RotateCcw },
-  review_2: { text: '复习中 · 第 2 轮', color: 'var(--primary)', soft: 'var(--primary-soft)', icon: RotateCcw },
-  mastered: { text: '已掌握', color: 'var(--success)', soft: 'var(--success-soft)', icon: CheckCircle2 }
+  review_1: { text: '基本掌握 · 待周回顾', color: 'var(--primary)', soft: 'var(--primary-soft)', icon: RotateCcw },
+  review_2: { text: '基本掌握 · 待周回顾', color: 'var(--primary)', soft: 'var(--primary-soft)', icon: RotateCcw },
+  mastered: { text: '完全掌握', color: 'var(--success)', soft: 'var(--success-soft)', icon: CheckCircle2 }
 }
 
 // 错题详情：完整题面 + 重练动作集中在这里（对齐 ExamDetailModal 骨架）。

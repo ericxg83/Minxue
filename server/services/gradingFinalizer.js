@@ -264,14 +264,20 @@ export const finalizeRejudgeResult = async ({
 }
 
 /**
- * 掌握度状态机（业务规则：累计答对 2 次到达 mastered，中途答错不重置进度）
+ * 掌握度状态机（2026-09-13 队列分层定稿）：
  *
- * 状态：NEW（新错题/累计答对 0 次）→ REVIEW_1（累计答对 1 次）→ MASTERED（累计答对 2 次）
+ * 状态：NEW（新错题/累计答对 0 次）→ REVIEW_1（基本掌握/累计答对 1 次）→ MASTERED（完全掌握/累计答对 2 次）
  * 答对：NEW → REVIEW_1 → MASTERED；MASTERED 保持
- * 答错：NEW/REVIEW_1 保持原位（error_count+1），MASTERED 退回 REVIEW_1 重新验证
+ * 答错：NEW 保持原位（error_count+1）；
+ *       REVIEW_1 答错 → 退回 NEW（「基本掌握」是假象，回池重练）；
+ *       MASTERED 答错 → 退回 REVIEW_1（基本掌握，重新走周回顾验证）
  *
  * REVIEW_2 保留为历史兼容枚举（生产库 0 条），不再被写入；
  * 遇到旧 review_2 数据时按 REVIEW_1 语义处理。
+ *
+ * 与前端展示层两份同构实现保持逐字一致：
+ *   - 移动端 src/pages/Grading/index.jsx 的 getNextLifecycle（仅预览统计，结算仍走服务端）
+ *   - PC 端 src/workbench/stores/lifecycleStore.js 的 processReviewResult
  */
 const getNextLifecycle = (current, isCorrect) => {
   if (isCorrect) {
@@ -288,8 +294,13 @@ const getNextLifecycle = (current, isCorrect) => {
     }
   }
   if (current === LIFECYCLE_STATUS.MASTERED) return LIFECYCLE_STATUS.REVIEW_1
+  if (current === LIFECYCLE_STATUS.REVIEW_1 || current === LIFECYCLE_STATUS.REVIEW_2) {
+    return LIFECYCLE_STATUS.NEW
+  }
   return current
 }
+
+export { getNextLifecycle }
 
 /**
  * Final settlement for generated retry exams.
@@ -362,7 +373,7 @@ export const finalizeGeneratedExamResults = async ({
           upgradedCount++
         }
       } else {
-        // 答错不重置进度；仅"已掌握退回 review_1"计入 reset
+        // 答错：review_1 退回 new、mastered 退回 review_1 均计入 reset；error_count 一定 +1
         errorCountDelta = 1
         if (nextLifecycle !== currentLifecycle) resetCount++
       }

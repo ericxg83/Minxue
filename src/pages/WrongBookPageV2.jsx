@@ -8,7 +8,9 @@ import MathText from '../components/MathText'
 import { MobileList, MobileSegmentedTabs } from '../features/mobile/MobilePrimitives'
 import { formatQuestionLabel } from '../utils/questionStem'
 
-const labels = { new: '待复习', review_1: '复习中', review_2: '再次复习', mastered: '已掌握' }
+// 两级掌握文案（2026-09-13 队列分层）：new 待复习 → review_1 基本掌握（周回顾验证）→ mastered 完全掌握。
+// review_2 是历史残留枚举，按 review_1 语义展示。
+const labels = { new: '待复习', review_1: '基本掌握', review_2: '基本掌握', mastered: '完全掌握' }
 const lifecycle = i => i.lifecycle_status || i.status || 'new'
 const text = i => (i.question || i).content || i.content || '题目内容暂不可用'
 const qOf = i => i.question || i
@@ -37,8 +39,8 @@ export default function WrongBookPageV2({
   const [filter, setFilter] = useState('new')
   const tabs = [
     { id: 'new', label: '待复习', count: counts.new || 0 },
-    { id: 'review', label: '复习中', count: counts.review || 0 },
-    { id: 'mastered', label: '已掌握', count: counts.mastered || 0 }
+    { id: 'review', label: '基本掌握', count: counts.review || 0 },
+    { id: 'mastered', label: '完全掌握', count: counts.mastered || 0 }
   ]
   const visible = questions.filter(i => filter === 'review' ? ['review_1', 'review_2'].includes(lifecycle(i)) : lifecycle(i) === filter)
 

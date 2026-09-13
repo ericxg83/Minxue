@@ -4,29 +4,29 @@ import { ref, computed } from 'vue'
 /**
  * 错题生命周期管理 Store
  *
- * 状态流转规则（与后端 gradingFinalizer.getNextLifecycle 保持一致）：
- * - 首次错误 → new
- * - 累计答对 1 次 → review_1
- * - 累计答对 2 次 → mastered
- * - 答错不重置进度；仅"已掌握答错"退回 review_1 重新验证
+ * 状态流转规则（与后端 gradingFinalizer.getNextLifecycle 保持逐字一致，勿单端改）：
+ * - 首次错误 → new（待复习）
+ * - 累计答对 1 次 → review_1（基本掌握，移出每日重练池，由周回顾重练卷二次验证）
+ * - 累计答对 2 次 → mastered（完全掌握）
+ * - 答错：review_1 退回 new（假掌握回池重练）；mastered 退回 review_1 重新验证
  *
- * review_2 保留为历史兼容枚举（生产库 0 条），不再被写入。
+ * review_2 保留为历史兼容枚举（生产库 0 条），不再被写入，按 review_1 语义处理。
  */
 
 // 生命周期状态定义
 export const LIFECYCLE_STATUS = {
-  NEW: 'new',           // 新错题
-  REVIEW_1: 'review_1', // 累计答对 1 次
+  NEW: 'new',           // 待复习（每日重练池）
+  REVIEW_1: 'review_1', // 基本掌握（累计答对 1 次，待周回顾验证）
   REVIEW_2: 'review_2', // 历史兼容枚举，不再被写入
-  MASTERED: 'mastered'  // 累计答对 2 次
+  MASTERED: 'mastered'  // 完全掌握（累计答对 2 次）
 }
 
 // 状态显示名称
 export const LIFECYCLE_STATUS_LABELS = {
-  new: '新错题',
-  review_1: '第一次重练',
-  review_2: '第二次重练',
-  mastered: '已掌握'
+  new: '待复习',
+  review_1: '基本掌握',
+  review_2: '基本掌握',
+  mastered: '完全掌握'
 }
 
 // 状态颜色
@@ -58,8 +58,11 @@ export const useLifecycleStore = defineStore('lifecycle', () => {
     if (isCorrect) {
       return getNextStatus(currentStatus)
     }
-    // 答错不重置进度；已掌握退回 review_1 重新验证
+    // 答错：mastered 退回 review_1 重新验证；review_1（含历史 review_2）退回 new 回池重练
     if (currentStatus === LIFECYCLE_STATUS.MASTERED) return LIFECYCLE_STATUS.REVIEW_1
+    if (currentStatus === LIFECYCLE_STATUS.REVIEW_1 || currentStatus === LIFECYCLE_STATUS.REVIEW_2) {
+      return LIFECYCLE_STATUS.NEW
+    }
     return currentStatus
   }
 

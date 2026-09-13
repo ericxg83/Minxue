@@ -6,7 +6,8 @@
  *   Response: application/pdf + X-Exam-Id + X-Qr-Content 头
  *
  * 与移动端 PrintPreview 完全同一路径：
- *   1. 后端校验错题属于该学生 + 都是未掌握
+ *   1. 后端校验错题属于该学生 + 选题口径（默认仅「待复习(new)」，mastered/review_1 拒绝；
+ *      includeReview1=true 时教师手动勾选的 review_1 可入卷，mastered 仍拒绝）
  *   2. INSERT generated_exams（status='draft'）
  *   3. 二维码 URL = ${publicBaseUrl}/retry-task/${examId}
  *   4. 服务端拼 HTML（katex.renderToString + qrcode-generator）+ renderExamPDF
@@ -24,7 +25,7 @@ const router = express.Router()
 router.post('/api/wrong-questions/export-retry-pdf', async (req, res) => {
   const t0 = Date.now()
   try {
-    const { studentId, wrongQuestionIds } = req.body || {}
+    const { studentId, wrongQuestionIds, includeReview1 } = req.body || {}
     // 从请求头反推 baseUrl，便于本地调试（前端也允许显式传 publicBaseUrl）
     const publicBaseUrl = req.body?.publicBaseUrl
       || (req.headers.origin && /^https?:\/\//.test(req.headers.origin) ? req.headers.origin : null)
@@ -39,6 +40,7 @@ router.post('/api/wrong-questions/export-retry-pdf', async (req, res) => {
     const result = await exportWrongRetryPdf({
       studentId,
       wrongQuestionIds,
+      includeReview1: includeReview1 === true,
       publicBaseUrl,
     })
 

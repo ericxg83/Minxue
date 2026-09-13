@@ -9,19 +9,19 @@ import dayjs from 'dayjs'
 
 const formatOption = (opt, index) => `${String.fromCharCode(65 + index)}. ${opt}`
 
-// 掌握度生命周期映射
+// 两级掌握文案（2026-09-13 队列分层）：待复习 → 基本掌握（周回顾二次验证）→ 完全掌握
 const LIFECYCLE_LABELS = {
-  new: '不懂',
-  review_1: '略懂',
-  review_2: '完全懂',
-  mastered: '已掌握'
+  new: '待复习',
+  review_1: '基本掌握',
+  review_2: '基本掌握',
+  mastered: '完全掌握'
 }
 
 const LIFECYCLE_ORDER = ['new', 'review_1', 'review_2', 'mastered']
 
-// 与后端 finalizeGeneratedExamResults 保持一致：
-// 累计答对 2 次到 mastered；答错不重置进度；mastered 后答错退回 review_1 重新验证。
-// review_2 保留为历史兼容枚举，不再被写入。
+// 与后端 finalizeGeneratedExamResults 保持一致（逐字同构，勿单端改）：
+// 累计答对 2 次到 mastered；答错时 review_1 退回 new（假掌握回池重练）、mastered 退回 review_1 重新验证。
+// review_2 保留为历史兼容枚举，不再被写入，按 review_1 语义处理。
 const getNextLifecycle = (current, isCorrect) => {
   if (isCorrect) {
     switch (current) {
@@ -36,6 +36,7 @@ const getNextLifecycle = (current, isCorrect) => {
     }
   }
   if (current === 'mastered') return 'review_1'
+  if (current === 'review_1' || current === 'review_2') return 'new'
   return current
 }
 
@@ -147,11 +148,11 @@ export default function Grading({ paperId, studentId, questionIds, onClose, onCo
 
     for (const r of results) {
       // 新语义：答对 NEW→REVIEW_1 算 upgradedToReview1；答对 REVIEW_1→MASTERED 算 upgradedToMastered
-      // 答错不重置进度；只有已掌握答错退回 REVIEW_1 才算 reset
+      // 答错：review_1 退回 new、mastered 退回 review_1 都算 reset（new 答错原地不动不算）
       if (r.isCorrect && r.newLifecycle === 'review_1' && r.previousLifecycle !== 'review_1' && r.previousLifecycle !== 'mastered') upgradedToReview1++
       if (r.isCorrect && r.newLifecycle === 'mastered' && r.previousLifecycle !== 'mastered') upgradedToMastered++
       if (r.newLifecycle === 'mastered') mastered++
-      if (!r.isCorrect && r.previousLifecycle === 'mastered') reset++
+      if (!r.isCorrect && r.previousLifecycle !== 'new') reset++
     }
     return { mastered, upgradedToReview1, upgradedToMastered, reset }
   }
@@ -293,7 +294,7 @@ export default function Grading({ paperId, studentId, questionIds, onClose, onCo
             <div style={{ display: 'flex', justifyContent: 'space-around', marginBottom: '16px' }}>
               <div style={{ textAlign: 'center' }}>
                 <div style={{ fontSize: 'var(--fs-24)', fontWeight: 700, color: COLORS.success }}>{masteredCount}</div>
-                <div style={{ fontSize: 'var(--fs-12)', color: COLORS.textSecondary, marginTop: '2px' }}>已掌握</div>
+                <div style={{ fontSize: 'var(--fs-12)', color: COLORS.textSecondary, marginTop: '2px' }}>完全掌握</div>
               </div>
               <div style={{ textAlign: 'center' }}>
                 <div style={{ fontSize: 'var(--fs-24)', fontWeight: 700, color: COLORS.danger }}>{notMasteredCount}</div>

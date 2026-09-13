@@ -225,7 +225,8 @@
             </router-link>
           </header>
           <div class="retry-overview">
-            <MiniStat label="已掌握率" :value="retryOverview.masteryRate" unit="%" description="班级错题已推进到 review_2 / mastered" />
+            <MiniStat label="完全掌握率" :value="retryOverview.fullyMasteredRate" unit="%" description="累计答对 2 次完成验证的错题占比" />
+            <MiniStat label="基本掌握率" :value="retryOverview.basicMasteredRate" unit="%" description="答对 1 次、待周回顾二次验证的错题占比" />
             <MiniStat label="进行中" :value="retryOverview.inProgress" unit="份" description="重练卷已批改待处理" />
             <MiniStat label="待重练学生" :value="retryOverview.awaitingRetryStudents" unit="人" description="有错题还在错题池里" />
           </div>
@@ -519,7 +520,7 @@ onMounted(async () => {
   // Dashboard 三个聚合 API 并行加载（失败互不影响）
   Promise.allSettled([
     getDashboardWeakness(5).then((d) => { dashboardWeakness.value = d?.weakness || [] }),
-    getDashboardRetryOverview().then((d) => { retryOverview.value = d?.overview || { masteryRate: 0, inProgress: 0, awaitingRetryStudents: 0 } }),
+    getDashboardRetryOverview().then((d) => { retryOverview.value = d?.overview || { fullyMasteredRate: 0, basicMasteredRate: 0, masteryRate: 0, inProgress: 0, awaitingRetryStudents: 0 } }),
     getDashboardAttentionStudents(8).then((d) => { attentionStudentsRaw.value = d?.students || [] })
   ]).catch((e) => console.error('[Dashboard] 加载聚合数据失败:', e))
 
@@ -572,8 +573,11 @@ onBeforeUnmount(() => {
 
 .retry-overview {
   display: grid;
-  grid-template-columns: repeat(3, minmax(0, 1fr));
+  grid-template-columns: repeat(4, minmax(0, 1fr));
   gap: var(--wb-space-3);
+}
+@media (max-width: 960px) {
+  .retry-overview { grid-template-columns: repeat(2, minmax(0, 1fr)); }
 }
 @media (max-width: 640px) {
   .retry-overview { grid-template-columns: 1fr; }

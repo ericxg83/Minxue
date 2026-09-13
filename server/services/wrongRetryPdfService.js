@@ -263,13 +263,18 @@ const buildExamHTML = ({ title, studentName, questions, qrSvg }) => {
 /**
  * 导出重练卷 PDF
  *
+ * 选题口径（2026-09-13 队列分层）：默认只允许「待复习(new)」进入每日/手动重练卷；
+ * review_1 / review_2（基本掌握）已移出每日池，仅当调用方显式传 includeReview1=true
+ * （教师在错题本手动勾选「基本掌握」题纳入）时才放行；mastered 永远拒绝。
+ *
  * @param {Object} args
  * @param {string} args.studentId 学生 ID
  * @param {string[]} args.wrongQuestionIds 错题行 ID 列表（wrong_questions.id）
+ * @param {boolean} [args.includeReview1=false] 是否允许基本掌握(review_1/review_2)题目入卷（教师手动勾选场景）
  * @param {string} [args.publicBaseUrl] 二维码基址（默认 process.env.PUBLIC_BASE_URL，否则 https://minxue.pages.dev）
  * @returns {Promise<{pdfBuffer: Buffer, examId: string, qrContent: string, studentName: string, count: number}>}
  */
-export async function exportWrongRetryPdf({ studentId, wrongQuestionIds, publicBaseUrl }) {
+export async function exportWrongRetryPdf({ studentId, wrongQuestionIds, includeReview1 = false, publicBaseUrl }) {
   if (!UUID_RE.test(studentId)) {
     throw new Error('无效的 studentId')
   }
@@ -280,7 +285,7 @@ export async function exportWrongRetryPdf({ studentId, wrongQuestionIds, publicB
   const invalid = wrongQuestionIds.find((id) => !UUID_RE.test(String(id)))
   if (invalid) throw new Error(`无效的错题ID: ${invalid}`)
 
-  // 1. 校验 + 拉数据：错题必须属于该学生，且 lifecycle_status != 'mastered'
+  // 1. 校验 + 拉数据：错题必须属于该学生；选题口径见函数注释（默认排除 mastered/review_1/review_2）
   const { rows: wqRows } = await query(
     // parent_stem / sub_no：多小问大题的共享题干与小问号（迁移 057），
     // 供 buildPaperBody 把小问连排成一个题组块并补回公共条件。
@@ -308,9 +313,16 @@ export async function exportWrongRetryPdf({ studentId, wrongQuestionIds, publicB
     throw new Error(`错题不属于该学生或不存在: ${missing.join(', ')}`)
   }
 
-  const active = wqRows.filter((r) => r.lifecycle_status !== 'mastered')
+  // 队列分层（2026-09-13）：每日/手动重练池默认只装「待复习(new)」；
+  // 基本掌握(review_1/review_2) 由周报重练卷承载第二次验证，仅显式 opt-in 才入卷。
+  const active = includeReview1
+    ? wqRows.filter((r) => r.lifecycle_status !== 'mastered')
+    : wqRows.filter((r) => r.lifecycle_status === 'new')
   if (active.length === 0) {
-    throw new Error('所选错题均已掌握，无需重练')
+    const allMastered = wqRows.length > 0 && wqRows.every((r) => r.lifecycle_status === 'mastered')
+    throw new Error(allMastered
+      ? '所选错题均已完全掌握，无需重练'
+      : '所选错题中没有「待复习」状态的题目（基本掌握的题请通过周回顾重练卷验证，或在请求中显式 includeReview1=true）')
   }
 
   const studentName = active[0].student_name
