@@ -1377,10 +1377,12 @@ const recognizeQuestionsHybrid = async (imageBase64, taskId) => {
 
   console.log(`   [Hybrid] 双路并发识别：魔搭 + ${HYBRID_SECOND_VENDOR}`)
 
-  // allSettled：一路挂掉不影响另一路
+  // allSettled：一路挂掉不影响另一路。
+  // 副路 90s 上限：sensenova 实测 40–58s，留足余量；超时/连不通时 allSettled 捕获后走单路，
+  // 且 90s < 魔搭实测 73–98s，不会拖慢整体 wall-clock。
   const [msRun, secRun] = await Promise.allSettled([
     callVisionCompletion({ imageDataURL: imageUrl, systemPrompt: prompt, userText, temperature: 0.3, maxTokens: 8192 }),
-    callVendorVisionCompletion({ vendorName: HYBRID_SECOND_VENDOR, systemPrompt: prompt, userText, imageDataURL: imageUrl, temperature: 0.3, maxTokens: 8192 }),
+    callVendorVisionCompletion({ vendorName: HYBRID_SECOND_VENDOR, systemPrompt: prompt, userText, imageDataURL: imageUrl, temperature: 0.3, maxTokens: 8192, timeout: 90000 }),
   ])
 
   const msOk = msRun.status === 'fulfilled' && msRun.value?.content
