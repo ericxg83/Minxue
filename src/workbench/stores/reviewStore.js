@@ -119,7 +119,32 @@ export const useReviewStore = defineStore('review', () => {
     const t = currentTask.value
     if (!t) return []
     if (source.value === 'paper') {
-      const pages = Array.isArray(t._pageTasks) ? t._pageTasks : []
+      const rows = Array.isArray(t._pageTasks) ? t._pageTasks : []
+      // [2026-09-13 修复] 重练答卷一次上传多页时后端只落 1 行 task（页图在 images JSONB
+      // 里，image_url 仅第 1 页）。此前按 task 行数归拢页图 → 第 2 页被吞掉，
+      // 老师看不到也翻不了页（错题再测-0911 实锤：1 行 task × 2 页 images）。
+      // 现在把行内 images 展开成页；retryAlign 明细由后端逐页标注 pageNumber，
+      // 定位框按「当前页码 ↔ 记录 pageNumber」过滤（见 currentRetryAlignBoxes），
+      // 旧数据记录无 pageNumber → 一律视为第 1 页（旧管线只 OCR 首页）。
+      const pages = []
+      for (const row of rows) {
+        let imgs = row.images
+        if (typeof imgs === 'string') {
+          try { imgs = JSON.parse(imgs) } catch { imgs = null }
+        }
+        if (Array.isArray(imgs) && imgs.length > 1) {
+          imgs.forEach((img, i) => {
+            pages.push({
+              ...row,
+              id: `${row.id}::p${img.page_number || i + 1}`,
+              image_url: img.image_url || row.image_url,
+              page_number: img.page_number || i + 1,
+            })
+          })
+        } else {
+          pages.push(row)
+        }
+      }
       return pages.length > 0 ? pages : (t.image_url ? [t] : [])
     }
     // image 模式：从 task.images JSONB 构建页图列表（支持多页上传）
@@ -157,22 +182,28 @@ export const useReviewStore = defineStore('review', () => {
   // 题目行自身的 block_coordinates / text_bbox 属于【原始作业图】，与重练答卷图
   // 不是同一张图，拿它画框必然错位 —— 这正是过去 paper 模式干脆一律不画框的原因。
   // 因此 paper 模式只认 retryAlign 里的坐标；取不到就优雅降级（不画），绝不乱画。
+  // [2026-09-13 多页] 对位记录带 pageNumber（逐页 OCR）；旧记录无该字段视为第 1 页。
+  const parsePageAlignRecords = (page) => {
+    if (!page?.result) return []
+    let obj = page.result
+    if (typeof obj === 'string') {
+      try { obj = JSON.parse(obj) } catch { return [] }
+    }
+    const arr = obj?.retryAlign
+    return Array.isArray(arr) ? arr : []
+  }
+
   const currentRetryAlignBoxes = computed(() => {
     if (source.value !== 'paper') return {}
     const pages = currentPaperPages.value
     if (pages.length === 0) return {}
     const page = pages[Math.min(currentPageIndex.value, pages.length - 1)]
-    const raw = page?.result
-    if (!raw) return {}
-    let obj = raw
-    if (typeof raw === 'string') {
-      try { obj = JSON.parse(raw) } catch { return {} }
-    }
-    const arr = obj?.retryAlign
-    if (!Array.isArray(arr)) return {}
+    const records = parsePageAlignRecords(page)
+    const pageNum = page?.page_number || 1
     const map = {}
-    for (const r of arr) {
+    for (const r of records) {
       if (!r || !r.questionId) continue
+      if (Number(r.pageNumber || 1) !== Number(pageNum || 1)) continue
       map[r.questionId] = {
         text_bbox: r.text_bbox || null,
         image_bbox: r.image_bbox || null,
@@ -397,6 +428,24 @@ export const useReviewStore = defineStore('review', () => {
   const syncPageForCurrentQuestion = () => {
     const q = allQuestions.value[currentReviewIndex.value]
     if (!q) return
+    // paper（重练）模式：q.page_number 是【原始作业】的页码，与重练答卷图的页码
+    // 不是同一套编号，拿它翻答卷页会跳错页。只有该题在对位明细里有【带定位框】的
+    // 记录时，才能确定它画在哪张答卷图上 → 跳过去；否则保持老师当前页不动。
+    if (source.value === 'paper') {
+      const pages = currentPaperPages.value
+      if (pages.length <= 1) return
+      const hasBox = (r) => !!(r?.text_bbox || r?.image_bbox || r?.block_coordinates)
+      const targetIdx = pages.findIndex(p => {
+        const pageNum = p?.page_number || 1
+        return parsePageAlignRecords(p).some(
+          r => r?.questionId === q.id && hasBox(r) && Number(r.pageNumber || 1) === Number(pageNum || 1)
+        )
+      })
+      if (targetIdx >= 0 && targetIdx !== currentPageIndex.value) {
+        currentPageIndex.value = targetIdx
+      }
+      return
+    }
     const pageNum = q.page_number || 1
     const pages = currentPaperPages.value
     const idx = pages.findIndex(p => p.page_number === pageNum)

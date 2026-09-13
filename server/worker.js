@@ -1991,31 +1991,60 @@ export const processSlimGrading = async (job) => {
     await job.updateProgress(20)
     await updateTaskStatus(taskId, TASK_STATUS.PROCESSING, { progress: 20 })
 
-    // 下载 + 拉直 + 压缩图片
-    let imageBuffer
-    try { imageBuffer = await downloadImage(imageUrl) }
-    catch (e) { return fail('下载答卷图片失败: ' + e.message) }
+    // ── 答卷页图列表 ──
+    // [2026-09-13 多页修复] 重练答卷一次上传多页只落 1 行 task（页图在 images JSONB，
+    // image_url 仅第 1 页）。旧逻辑只 OCR task.image_url → 第 2 页起的学生答案从未被
+    // 识别，卷面按「未作答」处理；若第 2 页有客观题会被误判错（错题再测-0911 实锤：
+    // OCR 13 条 / 卷面 17 题，第 14-17 题从未进过识别）。
+    // 现在按 images 逐页下载 + OCR，按页序合并后再对位；单页任务行为与从前一致。
+    const taskRowRes = await query(
+      `SELECT image_url, images FROM ${TABLES.TASKS} WHERE id = $1`,
+      [taskId]
+    ).catch(() => ({ rows: [] }))
+    let rawPages = taskRowRes.rows[0]?.images
+    if (typeof rawPages === 'string') {
+      try { rawPages = JSON.parse(rawPages) } catch { rawPages = null }
+    }
+    let pageImages
+    if (Array.isArray(rawPages) && rawPages.length > 0) {
+      pageImages = rawPages.map((img, i) => ({
+        pageNumber: Number(img?.page_number) || i + 1,
+        imageUrl: resolveImageUrl(img?.image_url) || imageUrl,
+      }))
+    } else {
+      pageImages = imageUrl ? [{ pageNumber: 1, imageUrl }] : []
+    }
+    if (pageImages.length === 0) return fail('答卷图片缺失（image_url 与 images 均为空）')
 
-    let straightened
-    try { straightened = await deskewImage(imageBuffer) }
-    catch { straightened = imageBuffer }
-    let compressed
-    try { compressed = await compressImageBuffer(straightened) }
-    catch (e) { return fail('图片压缩失败: ' + e.message) }
-
-    await job.updateProgress(35)
-    await updateTaskStatus(taskId, TASK_STATUS.PROCESSING, { progress: 35 })
-
-    // OCR：仅取学生答案
+    // 逐页：下载 + 拉直 + 压缩 + OCR（仅取学生答案），按页序合并。
     // HYBRID_VISION_ENABLED=1 时走双路并发（魔搭 + 第二供应商）合并识别；
     // 默认关闭，行为与改造前完全一致。
-    const ocrResult = HYBRID_VISION_ENABLED
-      ? await recognizeQuestionsHybrid(bufferToBase64(compressed), taskId)
-      : await recognizeQuestions(bufferToBase64(compressed), taskId)
-    if (!ocrResult.success) return fail(ocrResult.error || 'AI 识别失败')
+    const ocrQuestions = []
+    for (const page of pageImages) {
+      let imageBuffer
+      try { imageBuffer = await downloadImage(page.imageUrl) }
+      catch (e) { return fail(`下载答卷图片失败（第${page.pageNumber}页）: ` + e.message) }
 
-    const ocrQuestions = ocrResult.questions || []
-    console.log(`\n🔹 [Slim] OCR 识别 ${ocrQuestions.length} 道学生答案，组卷共 ${paperOrder.length} 题（卷面顺序）`)
+      let straightened
+      try { straightened = await deskewImage(imageBuffer) }
+      catch { straightened = imageBuffer }
+      let compressed
+      try { compressed = await compressImageBuffer(straightened) }
+      catch (e) { return fail(`图片压缩失败（第${page.pageNumber}页）: ` + e.message) }
+
+      const ocrResult = HYBRID_VISION_ENABLED
+        ? await recognizeQuestionsHybrid(bufferToBase64(compressed), taskId)
+        : await recognizeQuestions(bufferToBase64(compressed), taskId)
+      if (!ocrResult.success) return fail(ocrResult.error || `AI 识别失败（第${page.pageNumber}页）`)
+
+      const pageQs = ocrResult.questions || []
+      console.log(`   [Slim] 第${page.pageNumber}页 OCR 识别 ${pageQs.length} 道学生答案`)
+      // 每条 OCR 结果带页码：对位明细（retryAlign）据此标注定位框属于哪张答卷图
+      for (const oq of pageQs) {
+        ocrQuestions.push({ ...oq, _pageNumber: page.pageNumber })
+      }
+    }
+    console.log(`\n🔹 [Slim] ${pageImages.length} 页答卷共 OCR ${ocrQuestions.length} 道学生答案，组卷共 ${paperOrder.length} 题（卷面顺序）`)
 
     await job.updateProgress(70)
     await updateTaskStatus(taskId, TASK_STATUS.PROCESSING, { progress: 70 })
@@ -2050,6 +2079,9 @@ export const processSlimGrading = async (job) => {
         paperIndex: item.paperIndex,
         matchedBy,
         studentAnswer,
+        // 定位框所属答卷页码（旧数据无此字段，前端按第 1 页兼容；
+        // matchedBy=none 时 ocr 为空 → null，本来也无框可画）
+        pageNumber: ocr?._pageNumber || null,
         text_bbox: ocr?.text_bbox || null,
         image_bbox: ocr?.image_bbox || null,
         block_coordinates: ocr?.block_coordinates || null,
@@ -2194,6 +2226,7 @@ export const processSlimGrading = async (job) => {
       retryAlignMeta: {
         paperCount: paperOrder.length,
         ocrCount: ocrQuestions.length,
+        pageCount: pageImages.length,
         matchedByNumber,
         matchedByPosition,
         unmatchedPaper,

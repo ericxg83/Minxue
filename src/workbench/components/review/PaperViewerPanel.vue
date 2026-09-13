@@ -491,8 +491,10 @@ const switchToTask = async (task) => {
 
 /** 切换到同一份练习卷的其他页图 */
 const switchToPage = (page) => {
-  if (!store.currentTask?._pageTasks) return
-  const actualIndex = store.currentTask._pageTasks.findIndex(p => p.id === page.id)
+  // otherPendingPages 来自 store.currentPaperPages（含单行 task 内 images 多页展开），
+  // 必须在同一份列表里找索引；_pageTasks 是原始 task 行，找不到展开页 id。
+  if (!store.currentPaperPages?.length) return
+  const actualIndex = store.currentPaperPages.findIndex(p => p.id === page.id)
   if (actualIndex >= 0) {
     store.setPageIndex(actualIndex)
   }
