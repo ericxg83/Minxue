@@ -31,6 +31,10 @@ import { coerceAIText } from './utils/aiTextCoerce.js'
 import { computeTaskStats } from './utils/taskStats.js'
 import { rationalizeAnswer } from './utils/radicalSimplify.js'
 import { resolveEffectiveQuestionType } from './utils/questionCompleteness.js'
+// 重练卷排卷与卷面编号的唯一口径（与打印端 wrongRetryPdfService / 前端 pdfGenerator 同源）。
+// 判题必须按【卷面顺序】对位，不能用 generated_exams.question_ids 原序 ——
+// 2026-09-13 事故：两套顺序不一致导致 21/25 份重练卷判题整体错位。
+import { buildRetryPaperOrder, alignRetryAnswers } from './utils/retryPaperOrder.js'
 
 // ── 多模态切题引擎：几何图处理 ──
 // 使用 Sharp 进行裁剪和图像增强（替代浏览器端的 Canvas/OpenCV）
@@ -1741,7 +1745,9 @@ const CONFIDENCE_THRESHOLD = parseFloat(process.env.CONFIDENCE_THRESHOLD) || 0.8
 // OCR 返回的题型不可信时，回退到题库已存的 question_type
 const SUBJECTIVE_TYPES = new Set(['answer', 'essay', 'proof', 'drawing', 'composition'])
 
-const processSlimGrading = async (job) => {
+// 导出：供离线重跑脚本（_rerun_retry_slim.mjs）绕开共享 Redis 队列直接调用，
+// 保证重跑一定走本机修复后的对位逻辑，不被线上旧 worker 抢走。
+export const processSlimGrading = async (job) => {
   const { taskId, studentId, imageUrl: rawImageUrl, originalName, generatedExamId } = job.data
   const startTime = Date.now()
 
@@ -1787,16 +1793,24 @@ const processSlimGrading = async (job) => {
 
     if (questionIds.length === 0) return fail('组卷无题目')
 
+    // 排卷需要 question_number / sub_no / page_number / task_id（题组连排判定）
     const { rows: bankQuestions } = await query(
-      `SELECT id, content, answer, analysis, question_type, options
+      `SELECT id, content, answer, analysis, question_type, options,
+              question_number, sub_no, page_number, task_id
        FROM ${TABLES.QUESTIONS} WHERE id = ANY($1)`,
       [questionIds]
     )
-    // 保持与 question_ids 一致的顺序
+    // 分块前的相对顺序：与 question_ids 保持一致
     const orderMap = new Map(questionIds.map((id, idx) => [id, idx]))
-    const storedQuestions = bankQuestions
+    const baseOrdered = bankQuestions
       .sort((a, b) => (orderMap.get(a.id) ?? 0) - (orderMap.get(b.id) ?? 0))
-      .map((q, idx) => ({ ...q, expected_number: idx + 1 }))
+
+    // ── 卷面排卷：与打印端同源口径 ──
+    // 打印卷按题型分块（一、选择题 → 二、填空题 → 三、解答题），块内保持
+    // question_ids 相对顺序，卷面编号 1..N 由此产生。学生是按【卷面编号】作答的，
+    // OCR 读到的顺序也是卷面顺序，因此判题必须按 paperOrder 对位 ——
+    // 不能拿 question_ids 原序与 OCR 顺序按位置硬对齐（2026-09-13 错位事故根因）。
+    const paperOrder = buildRetryPaperOrder(baseOrdered)
 
     await job.updateProgress(20)
     await updateTaskStatus(taskId, TASK_STATUS.PROCESSING, { progress: 20 })
@@ -1821,20 +1835,48 @@ const processSlimGrading = async (job) => {
     if (!ocrResult.success) return fail(ocrResult.error || 'AI 识别失败')
 
     const ocrQuestions = ocrResult.questions || []
-    console.log(`\n🔹 [Slim] OCR 识别 ${ocrQuestions.length} 道学生答案，组卷共 ${storedQuestions.length} 题`)
+    console.log(`\n🔹 [Slim] OCR 识别 ${ocrQuestions.length} 道学生答案，组卷共 ${paperOrder.length} 题（卷面顺序）`)
 
     await job.updateProgress(70)
     await updateTaskStatus(taskId, TASK_STATUS.PROCESSING, { progress: 70 })
 
-    // 按题号顺序对齐（OCR 顺序即卷面顺序，与题库一致）
+    // ── OCR 答案 → 卷面题 对位 ──
+    // ① 优先按 OCR 读出的卷面题号（question_number + sub_no）精确匹配卷面编号；
+    // ② 题号缺失/未命中时，按卷面顺序依次配给剩余未对位的题（位置兜底）。
+    // 这样即便 OCR 漏题、学生跳做，后面的答案也不会整体前移串位。
+    const pairs = alignRetryAnswers(paperOrder, ocrQuestions)
+
     const results = []
+    // 对位明细（含答卷图上的定位坐标）：批改页 paper 模式画题框的数据源。
+    // 此前 slim 管线把 OCR 坐标整段丢弃，题目行的坐标又属于「原始作业图」，
+    // 与重练答卷图不对齐，老师因此看不到任何定位框。
+    const alignRecords = []
     let autoCount = 0
     let manualCount = 0
+    let orphanOcrCount = 0
 
-    for (let i = 0; i < storedQuestions.length; i++) {
-      const stored = storedQuestions[i]
-      const ocr = ocrQuestions[i]
+    for (const { item, ocr, matchedBy } of pairs) {
+      // OCR 多出来的答案（卷面上没有对应的题）：不做判定，避免污染题目行
+      if (!item) {
+        orphanOcrCount++
+        continue
+      }
+      const stored = item.question
       const studentAnswer = (ocr?.student_answer || '').toString().trim()
+
+      const alignRec = {
+        questionId: stored.id,
+        label: item.label,
+        paperIndex: item.paperIndex,
+        matchedBy,
+        studentAnswer,
+        text_bbox: ocr?.text_bbox || null,
+        image_bbox: ocr?.image_bbox || null,
+        block_coordinates: ocr?.block_coordinates || null,
+        isCorrect: null,
+        confidence: null,
+      }
+      alignRecords.push(alignRec)
 
       // 存储答案为空（OCR 之前未生成）：无法自动判定
       if (!stored.answer || !stored.answer.trim()) {
@@ -1854,6 +1896,8 @@ const processSlimGrading = async (job) => {
       // 学生未作答
       if (!studentAnswer) {
         results.push({ questionId: stored.id, isCorrect: false, source: 'ocr', confidence: 0, reason: 'blank' })
+        alignRec.isCorrect = false
+        alignRec.confidence = 0
         autoCount++
         continue
       }
@@ -1865,12 +1909,27 @@ const processSlimGrading = async (job) => {
       if (!highConfidence) {
         // 低置信度：不自动判定，预填但回退人工确认
         results.push({ questionId: stored.id, isCorrect: null, source: 'manual', reason: 'low_confidence', confidence })
+        alignRec.confidence = confidence
         manualCount++
         continue
       }
 
       results.push({ questionId: stored.id, isCorrect: judgment.isCorrect, source: 'ocr', confidence })
+      alignRec.isCorrect = judgment.isCorrect
+      alignRec.confidence = confidence
       autoCount++
+    }
+
+    // 对位质量日志：题号匹配 / 位置兜底 / 未作答 / 孤立答案，便于线上排查「题号对不上」
+    const matchedByNumber = alignRecords.filter((r) => r.matchedBy === 'number').length
+    const matchedByPosition = alignRecords.filter((r) => r.matchedBy === 'position').length
+    const unmatchedPaper = alignRecords.filter((r) => r.matchedBy === 'none').length
+    console.log(
+      `   [Slim] 卷面对位：卷面 ${paperOrder.length} 题 / OCR ${ocrQuestions.length} 条 → ` +
+      `题号匹配 ${matchedByNumber}，位置兜底 ${matchedByPosition}，未作答 ${unmatchedPaper}，孤立答案 ${orphanOcrCount}`
+    )
+    if (orphanOcrCount > 0) {
+      console.warn(`   ⚠️ [Slim] OCR 识别出 ${orphanOcrCount} 条卷面上没有对应题目的答案，已跳过（不参与判定）`)
     }
 
     // 预填每道题的 is_correct + confidence（供组卷历史查看 / 改判）
@@ -1932,13 +1991,26 @@ const processSlimGrading = async (job) => {
     }
 
     await updateTaskStatus(taskId, TASK_STATUS.DONE, {
-      questionCount: storedQuestions.length,
+      questionCount: paperOrder.length,
       autoCount,
       manualCount,
       emptyCount,
       pendingCount,
       duration: Date.now() - startTime,
-      completedAt: new Date().toISOString()
+      completedAt: new Date().toISOString(),
+      // 重练答卷「题 ↔ 答案 ↔ 定位框」对位明细。tasks.result 是 merge 写入，
+      // 追加字段不会影响既有内容（无需改表结构）。
+      retryAlign: alignRecords,
+      retryAlignMeta: {
+        paperCount: paperOrder.length,
+        ocrCount: ocrQuestions.length,
+        matchedByNumber,
+        matchedByPosition,
+        unmatchedPaper,
+        orphanOcrCount,
+        // 口径版本：排卷口径若再变，靠它区分历史数据与新数据
+        orderVersion: 2,
+      },
     })
 
     return { taskId, examId: generatedExamId, autoCount, manualCount, allAuto }
@@ -2567,7 +2639,20 @@ export function pickAnswerUnit(answersByUnit, pageTitle, questions, pageNumber, 
     }
   }
 
-  // 4) 都没有命中 → 不强行挂载，让数据走"待审"通道
+  // ── 4) 结构指纹兜底（2026-09-13）────────────────────────────────────────
+  // 逐页兜底：用本页「题号 + 小题拆分结构」在全库反查单元，实现见
+  // inferUnitByStructureFingerprint（含超集校验 / ≥2 道多小题题 / 覆盖率≥70% / 打平即放弃）。
+  // 注：单页常只有 1~2 道多小题题，区分度不足会判平放弃 —— 故 processWorkbookGrading 里
+  // 另有一道【全任务级】（多页题目合并）的同类兜底，用于兜住整份扫描。
+  {
+    const fpUnit = inferUnitByStructureFingerprint(answersByUnit, questions)
+    if (fpUnit) {
+      console.log(`[pickAnswerUnit] 结构指纹兜底命中: unit="${fpUnit}"（页眉无课时号，按题号+小题结构反查）`)
+      return fpUnit
+    }
+  }
+
+  // 5) 都没有命中 → 不强行挂载，让数据走"待审"通道
   return null
 }
 
@@ -2824,6 +2909,97 @@ export function _groupByPhysicalContinuity(pageDataList, answersByUnit) {
     console.log(`   [resolveAnswerUnits] 物理连续链重建: [${chainPages.join(',')}] → unit="${u}"（首页 p${home.pageNumber} min_q=1 max_q=${home.maxQ} 确定）`)
   }
   return overrides.size ? overrides : null
+}
+
+/**
+ * 结构指纹反查单元（2026-09-13）
+ *
+ * 场景：页眉是全书通用的学校跑马灯（"新闵学校"成长·桥"练习 第01周"）、正文也无课时小标题
+ *   ⇒ 标题通道与正文小标题通道全废；学生又大量空题/书写不规范 ⇒ 「答案覆盖率兜底」够不着
+ *   （它要求 ≥3 道非选择题作答且覆盖率 ≥60%）。实测 2ed887cd 两页 14 题因此全部挂空。
+ *   另：chapterHint 由 AI 推断，会报错章节（抛物线卷面被报成"第二十一章一元二次方程"），
+ *   把候选缩窄到 2 个、正确单元不在其中，故本函数【始终在全库扫描】，不复用上游候选。
+ *
+ * 思路：用「题号 + 小题拆分结构」当指纹在全库反查。小题结构区分度极高——
+ *   Q4 拆(1)(2) ∧ Q8 拆(1)(2)(3) ∧ Q9 拆(1)(2) 这种组合在 49 个单元里唯一命中。
+ *
+ * ⚠️ 刻意不用「题号覆盖率」当主判据：题号 1~10 几乎所有单元都有，是纯数字信号，跨章错挂
+ *    风险高。这里只把它当"入围后的择优"次要指标。也正因如此，本函数对【整份扫描】
+ *   （多页题目合并）比对单页有效得多——单页往往只有 1~2 道多小题题，区分度不足会判平放弃。
+ *
+ * 保守判据（宁可留 pending，也不错挂）：
+ *   ① 每道"多小题题"，unit 的小题集合必须【包含】OCR 拆出的小题（unit 可能存得更多，
+ *      如 OCR 只认出 8.1~8.3 而答案库有 8.1~8.4，故用超集而非相等）；
+ *   ② 至少 2 道多小题题匹配（单道巧合不足以定单元）；
+ *   ③ 题号覆盖率 ≥ 70%；
+ *   ④ 并列最优即放弃（沿用既有"打平即放弃"纪律）。
+ *
+ * @param {Map<string, Map<string, Map<string, object>>>} answersByUnit unitKey→section→qKey→row
+ * @param {Array<{question_number:number, sub_no?:string}>} questions OCR 题目（可跨页合并）
+ * @returns {string|null} unitKey；无法确定时返回 null
+ */
+function inferUnitByStructureFingerprint(answersByUnit, questions) {
+  if (!answersByUnit || answersByUnit.size === 0 || !Array.isArray(questions) || questions.length === 0) return null
+
+  // 本批题目的指纹：Number(qNo) → Set<subNo>（整题行 '' 不记入 sub）
+  const pageFp = new Map()
+  for (const q of questions) {
+    if (q.question_number == null) continue
+    const n = Number(q.question_number)
+    if (!Number.isFinite(n)) continue
+    if (!pageFp.has(n)) pageFp.set(n, new Set())
+    const sub = String(q.sub_no || '')
+    if (sub) pageFp.get(n).add(sub)
+  }
+  const multiPartQs = [...pageFp.entries()].filter(([, subs]) => subs.size > 0)
+  const pageNos = [...pageFp.keys()]
+  if (multiPartQs.length < 2 || pageNos.length < 3) return null
+
+  let bestUnit = null
+  let bestSubHits = -1
+  let bestCov = -1
+  let tie = false
+
+  for (const [uk, secMap] of answersByUnit) {
+    if (!secMap) continue
+    const unitFp = new Map()
+    for (const qMap of secMap.values()) {
+      for (const key of qMap.keys()) {
+        const [qStr, sub] = String(key).split('|')
+        const n = Number(qStr)
+        if (!Number.isFinite(n)) continue
+        if (!unitFp.has(n)) unitFp.set(n, new Set())
+        if (sub) unitFp.get(n).add(sub)
+      }
+    }
+    // ①+② 多小题结构（超集）校验
+    let subHits = 0
+    let structOk = true
+    for (const [n, subs] of multiPartQs) {
+      const uSubs = unitFp.get(n)
+      if (!uSubs || uSubs.size === 0) { structOk = false; break }
+      for (const s of subs) if (!uSubs.has(s)) { structOk = false; break }
+      if (!structOk) break
+      subHits++
+    }
+    if (!structOk || subHits < 2) continue
+    // ③ 题号覆盖率
+    let hits = 0
+    for (const n of pageNos) if (unitFp.has(n)) hits++
+    const cov = hits / pageNos.length
+    if (cov < 0.7) continue
+    // ④ 择优 + 打平检测（小题命中数优先，其次覆盖率）
+    if (subHits > bestSubHits || (subHits === bestSubHits && cov > bestCov + 1e-9)) {
+      bestSubHits = subHits
+      bestCov = cov
+      bestUnit = uk
+      tie = false
+    } else if (subHits === bestSubHits && Math.abs(cov - bestCov) <= 1e-9 && bestUnit && bestUnit !== uk) {
+      tie = true
+    }
+  }
+  if (bestUnit && tie) return null
+  return bestUnit
 }
 
 export function resolveAnswerUnits(answersByUnit, pageDataList) {
@@ -3577,8 +3753,8 @@ export function searchUnitByStudentAnswers(questions, answersByUnit, candidateUn
   return null
 }
 
-const processWorkbookGrading = async (job) => {
-  const { taskId, studentId, imageUrl: rawImageUrl, worksheetId, images: jobImages } = job.data
+export const processWorkbookGrading = async (job) => {
+  const { taskId, studentId, imageUrl: rawImageUrl, worksheetId, images: jobImages, forceUnitId } = job.data
   const startTime = Date.now()
 
   console.log(`\n📘 [Workbook] 开始练习册批改 taskId=${taskId}, worksheetId=${worksheetId}`)
@@ -3990,6 +4166,64 @@ const processWorkbookGrading = async (job) => {
   const resolvedUnits = resolveAnswerUnits(answersByUnit, pageDataList)
   const unitByPageNumber = new Map(resolvedUnits.map(r => [r.pageNumber, r.unitKey]))
   const resolvedByPage = new Map(resolvedUnits.map(r => [r.pageNumber, r]))
+
+  // ── forceUnitId：定向重跑时把整份扫描钉死到指定单元 ──────────────────────
+  // 适用场景：扫描页页眉/小标题 OCR 质量差，pickAnswerUnit 所有通道都没锚定到
+  // 正确单元（matchedUnit=null ⇒ unitAnswers=null ⇒ 答案指纹/覆盖率兜底全部失效），
+  // 导致整页题目拿不到答案库答案；但人工已确认该份作业属于某个具体单元。
+  // 仅覆盖"单元归属"这一个环节，不改动题号/小问/section 的匹配逻辑与判等口径，
+  // 也不放宽任何答案审核门禁——答案仍全部来自 worksheet_answers。
+  if (forceUnitId) {
+    // answersByUnit 的键是 unit_key（如 "27.2(2)"），见 getWorksheetAnswersBySection。
+    // 允许直接传 unit_key，也允许传 unit_id(UUID)——后者需反查成 unit_key。
+    let forcedUnitKey = answersByUnit.has(forceUnitId) ? forceUnitId : null
+    if (!forcedUnitKey) {
+      outer:
+      for (const [, secMap] of answersByUnit) {
+        for (const [, qMap] of secMap) {
+          for (const [, row] of qMap) {
+            if (row.unit_id === forceUnitId) { forcedUnitKey = row.unit_key; break outer }
+          }
+        }
+      }
+    }
+    if (forcedUnitKey) {
+      for (const r of resolvedUnits) {
+        r.unitKey = forcedUnitKey
+        r.method = 'forced-unit'
+        r.groupTie = null   // 钉死后不再算"低置信度"，避免误标 is_suspicious
+      }
+      for (const key of [...unitByPageNumber.keys()]) unitByPageNumber.set(key, forcedUnitKey)
+      console.log(`   [Workbook] forceUnitId 生效："${forceUnitId}" → 单元 "${forcedUnitKey}"，全部 ${resolvedUnits.length} 页钉死（人工指定，跳过页眉锚定）`)
+    } else {
+      console.warn(`   [Workbook] forceUnitId="${forceUnitId}" 既不是 unit_key 也查不到对应 unit_id（本册共 ${answersByUnit.size} 个单元）→ 忽略，回退正常锚定`)
+    }
+  }
+
+  // ── 全任务级结构指纹兜底（2026-09-13）──────────────────────────────────
+  // 逐页 pickAnswerUnit 全部锚定失败时（页眉是学校跑马灯、section_title 缺失、
+  // chapterHint 还可能被 AI 报错章节），用【整份扫描合并后】的题目做结构反查。
+  // 为什么必须合并：单页常只有 1~2 道多小题题，区分钟不够会判平放弃；
+  // 多页合并后（如 Q4(1)(2) ∧ Q8(1)(2)(3) ∧ Q9(1)(2)）在 49 个单元里唯一命中。
+  // 只在"本来会挂空"的页上补挂，已锚定成功的页不动；判据与逐页版一致（打平即放弃）。
+  if (resolvedUnits.some(r => !r.unitKey) && allQuestions.length > 0) {
+    const fpUnit = inferUnitByStructureFingerprint(answersByUnit, allQuestions)
+    if (fpUnit) {
+      let patched = 0
+      for (const r of resolvedUnits) {
+        if (!r.unitKey) {
+          r.unitKey = fpUnit
+          r.method = 'struct-fingerprint'
+          r.groupTie = null
+          patched++
+        }
+      }
+      for (const [k, v] of [...unitByPageNumber.entries()]) {
+        if (!v) unitByPageNumber.set(k, fpUnit)
+      }
+      console.log(`   [Workbook] 全任务结构指纹兜底命中：unit="${fpUnit}" → 补挂 ${patched} 页（页眉无课时号，按整份扫描的小题结构反查）`)
+    }
+  }
 
   for (const { pageTitle, sectionTitle, imageUrl, questions, pageNumber, chapterHint } of pageDataList) {
     if (questions.length === 0) continue
@@ -5511,6 +5745,16 @@ export const processTask = async (job) => {
   const generatedExamId = job.data.generatedExamId
   const resourceId = job.data.resourceId
 
+  // ── 练习册管线优先：workbook 任务必须走 worksheet_answers 预埋答案管线 ──
+  // worksheet_id 与 resource_id 是不同表的键：worksheet_answers 存练习册答案（getWorksheetAnswersBySection），
+  // resource_answers 存答案库资源答案。上方 line 5485 的路由兜底会把 worksheet_id 填进 resourceId，
+  // 若先判 resourceId 会把本应走 processWorkbookGrading 的 workbook 任务错拐进 processAnswerBankGrading
+  // （查 resource_answers，且本册 resources 行 answer_status='none' 会再降级 general），导致整页挂空。
+  // 因此 workbook 分支必须在 resourceId 分支之前判定。
+  if (job.data.taskType === 'workbook' && job.data.worksheetId) {
+    return processWorkbookGrading(job)
+  }
+
   // ── 统一答案库管线：优先使用 resource_answers（已审核的答案库）──
   // 跳过 AI 生成答案步骤，仅 OCR + 比对缓存答案，大幅节省成本
   if (resourceId) {
@@ -5522,12 +5766,6 @@ export const processTask = async (job) => {
   // → 置信度门禁（0.8）→ 全部高置信度则自动批改并推进掌握度；否则回退人工改判。
   if (generatedExamId) {
     return processSlimGrading(job)
-  }
-
-  // ── 练习册管线：OCR 只识别题号+学生答案，不生成参考答案 ──
-  // 答案从 worksheet_answers 查找，judgeAnswer 对比判定
-  if (job.data.taskType === 'workbook' && job.data.worksheetId) {
-    return processWorkbookGrading(job)
   }
 
   // Defensive: imageUrl from DB might be string URL, JSON object string, or object

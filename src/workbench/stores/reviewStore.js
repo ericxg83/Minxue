@@ -13,6 +13,9 @@ import {
   RETRY_STATE_TO_TASK_STATUS,
 } from '../utils/retryPaperState'
 import { REVIEW_STATUS, DEFAULT_CONFIDENCE_THRESHOLD, getReviewState, needsWrongBookDecision, effectiveIsCorrect as resolveEffectiveIsCorrect } from '../../utils/reviewDecision'
+// 重练卷排卷与卷面编号的唯一口径（与服务端 worker.js 判题侧同源）。
+// 批改页题目列表必须按【卷面顺序】排列，否则老师看到的第 N 题 ≠ 学生卷面第 N 题。
+import { buildRetryPaperOrder } from '../../utils/retryPaperOrder'
 
 export const useReviewStore = defineStore('review', () => {
   const lifecycleStore = useLifecycleStore()
@@ -147,6 +150,37 @@ export const useReviewStore = defineStore('review', () => {
       currentPageIndex.value = i
     }
   }
+
+  // ── 重练答卷定位框（paper 模式专用）──
+  // slim 判题管线把「卷面题 ↔ 学生答案 ↔ 答卷图坐标」的对位明细写在
+  // task.result.retryAlign（见 worker.js processSlimGrading；tasks.result 是 merge 写入）。
+  // 题目行自身的 block_coordinates / text_bbox 属于【原始作业图】，与重练答卷图
+  // 不是同一张图，拿它画框必然错位 —— 这正是过去 paper 模式干脆一律不画框的原因。
+  // 因此 paper 模式只认 retryAlign 里的坐标；取不到就优雅降级（不画），绝不乱画。
+  const currentRetryAlignBoxes = computed(() => {
+    if (source.value !== 'paper') return {}
+    const pages = currentPaperPages.value
+    if (pages.length === 0) return {}
+    const page = pages[Math.min(currentPageIndex.value, pages.length - 1)]
+    const raw = page?.result
+    if (!raw) return {}
+    let obj = raw
+    if (typeof raw === 'string') {
+      try { obj = JSON.parse(raw) } catch { return {} }
+    }
+    const arr = obj?.retryAlign
+    if (!Array.isArray(arr)) return {}
+    const map = {}
+    for (const r of arr) {
+      if (!r || !r.questionId) continue
+      map[r.questionId] = {
+        text_bbox: r.text_bbox || null,
+        image_bbox: r.image_bbox || null,
+        block_coordinates: r.block_coordinates || null,
+      }
+    }
+    return map
+  })
   
   // 所有题目（用于显示完整题号导航 1~N）
   const studentAllQuestions = computed(() => {
@@ -738,12 +772,22 @@ export const useReviewStore = defineStore('review', () => {
     try {
       const fetched = await getQuestionsByIds(ids, currentStudent.value?.id)
       const list = Array.isArray(fetched) ? fetched : []
-      // 按 question_ids 原始顺序排列
-      allQuestions.value = list.slice().sort((a, b) => {
+      // 第 1 步：还原分块前的相对顺序（= question_ids 顺序）
+      const base = list.slice().sort((a, b) => {
         const ai = ids.indexOf(a.id)
         const bi = ids.indexOf(b.id)
         return (ai < 0 ? 9999 : ai) - (bi < 0 ? 9999 : bi)
       })
+      // 第 2 步：按【卷面顺序】重排（选择题 → 填空题 → 解答题，块内保持上面顺序）。
+      // 2026-09-13 事故：此前直接按 question_ids 顺序展示，而打印卷是分块排的，
+      // 老师批改页的第 1 题并不是学生卷面的第 1 题 →「题号根本对不上」。
+      const paperOrder = buildRetryPaperOrder(base)
+      for (const item of paperOrder) {
+        // 卷面编号（'3' / '4(1)'）挂到题目上，供列表与定位框显示
+        item.question._paperLabel = item.label
+        item.question._paperIndex = item.paperIndex
+      }
+      allQuestions.value = paperOrder.map((it) => it.question)
     } catch (e) {
       console.error('加载练习卷题目失败:', e)
       allQuestions.value = []
@@ -1059,6 +1103,8 @@ export const useReviewStore = defineStore('review', () => {
     currentPaperPages,
     currentPageImage,
     setPageIndex,
+    // 重练答卷定位框（paper 模式，来自 task.result.retryAlign）
+    currentRetryAlignBoxes,
     // 撤销上一笔（仅回退前端内存状态，不反向写库）
     canUndo,
     undoLastReview,

@@ -103,7 +103,11 @@
 import { computed, onMounted, ref, watch } from 'vue'
 import { Document, Loading, WarningFilled } from '@element-plus/icons-vue'
 import { getQuestionsByIds } from '../../../services/apiService'
-import { resolveQuestionDisplayStem, getQuestionGroupKey } from '../../../utils/questionStem'
+import { resolveQuestionDisplayStem } from '../../../utils/questionStem'
+// 排卷与卷面编号走唯一口径（与服务端判题侧、pdfGenerator 同源）。
+// 此前本组件自带一套「按 page/question_number 排序 + 编号」逻辑，与打印版
+// （按 question_ids 顺序分块）不一致，题型混合时预览与打印出来的卷会对不上。
+import { buildRetryPaperOrder, RETRY_PAPER_BLOCKS } from '../../../utils/retryPaperOrder'
 import MathRender from '../MathRender.vue'
 
 const props = defineProps({
@@ -150,22 +154,6 @@ const getIllustration = (q) => {
   return null
 }
 
-/** SQL `ORDER BY page_number, question_number, sub_no NULLS LAST` 的等价实现 */
-const toSortNum = (v) => {
-  const n = Number(v)
-  return Number.isFinite(n) ? n : Number.MAX_SAFE_INTEGER
-}
-const sortForPaper = (list) =>
-  list.slice().sort((a, b) => {
-    const pa = toSortNum(a?.page_number)
-    const pb = toSortNum(b?.page_number)
-    if (pa !== pb) return pa - pb
-    const na = toSortNum(a?.question_number)
-    const nb = toSortNum(b?.question_number)
-    if (na !== nb) return na - nb
-    return toSortNum(a?.sub_no) - toSortNum(b?.sub_no)
-  })
-
 const load = async () => {
   const ids = (props.questionIds || []).filter(Boolean)
   if (ids.length === 0) {
@@ -177,9 +165,9 @@ const load = async () => {
   loadError.value = ''
   try {
     const list = await getQuestionsByIds(ids)
-    // 打印版顺序：SQL `ORDER BY page_number, question_number, sub_no NULLS LAST`
-    // （见 exportWrongRetryPdf 的取数），不是 generated_exams.question_ids 的勾选顺序
-    questions.value = sortForPaper(Array.isArray(list) ? list : [])
+    // 顺序不在这一步定：卷面顺序统一由 blocks 按 props.questionIds（= 打印时的
+    // 题目顺序）还原后再按题型分块，保证「预览 == 打印出来的那张卷」。
+    questions.value = Array.isArray(list) ? list : []
   } catch (e) {
     console.error('[RetryPaperPreview] 拉取题目失败:', e)
     questions.value = []
@@ -191,55 +179,44 @@ const load = async () => {
 
 /**
  * 卷面行：分块 + 题组连排。
- * 编号规则与服务端 buildPaperBody 完全一致：
- *   非连排行 num++；连排行沿用上一行编号并写成 N(小问号).
+ * 排卷与编号全部交给 buildRetryPaperOrder（与打印端、判题端同源）：
+ *   ① 先按 props.questionIds 还原「分块前的相对顺序」（= 打印时的题目顺序）；
+ *   ② 再按题型分块（选择 → 填空 → 解答），编号跨块累加，连排小问共号。
  */
 const blocks = computed(() => {
-  const defs = [
-    { key: 'choice', label: '一、选择题' },
-    { key: 'fill', label: '二、填空题' },
-    { key: 'answer', label: '三、解答题' },
-  ]
-  const out = []
-  let lastGroupKey = ''
-  let num = 0
+  const ids = (props.questionIds || []).filter(Boolean)
+  const pos = new Map(ids.map((id, i) => [id, i]))
+  const base = questions.value
+    .slice()
+    .sort((a, b) => (pos.get(a?.id) ?? 9999) - (pos.get(b?.id) ?? 9999))
 
-  for (const def of defs) {
-    const items = questions.value.filter(q => {
-      const t = q?.question_type === 'choice' ? 'choice'
-        : q?.question_type === 'fill' ? 'fill'
-        : 'answer'
-      return t === def.key
-    })
-    if (items.length === 0) continue
+  const paperOrder = buildRetryPaperOrder(base)
 
-    const rows = []
-    for (const q of items) {
-      const { parentStem, content } = resolveQuestionDisplayStem(q)
-      const groupKey = getQuestionGroupKey(q)
-      const subNo = q?.sub_no == null ? '' : String(q.sub_no).trim()
-      const isContinuation = !!groupKey && groupKey === lastGroupKey && !!subNo
-      if (!isContinuation) num++
-      lastGroupKey = groupKey
+  return RETRY_PAPER_BLOCKS
+    .map((def) => {
+      const items = paperOrder.filter((it) => it.blockKey === def.key)
+      if (items.length === 0) return null
 
-      const opts = normalizeOpts(q?.options)
-      const maxLen = opts.length ? Math.max(...opts.map(o => String(o || '').length)) : 0
+      const rows = items.map(({ question: q, label, isContinuation }) => {
+        const { parentStem, content } = resolveQuestionDisplayStem(q)
+        const opts = normalizeOpts(q?.options)
+        const maxLen = opts.length ? Math.max(...opts.map(o => String(o || '').length)) : 0
 
-      rows.push({
-        key: q?.id || `${def.key}-${rows.length}`,
-        type: def.key,
-        isContinuation,
-        parentStem,
-        content,
-        label: subNo ? `${num}(${subNo})` : String(num),
-        options: opts,
-        optionCols: opts.length === 0 ? 0 : maxLen <= 8 ? 4 : maxLen <= 20 ? 2 : 1,
-        illustration: getIllustration(q),
+        return {
+          key: q?.id || `${def.key}-${label}`,
+          type: def.key,
+          isContinuation,
+          parentStem,
+          content,
+          label,
+          options: opts,
+          optionCols: opts.length === 0 ? 0 : maxLen <= 8 ? 4 : maxLen <= 20 ? 2 : 1,
+          illustration: getIllustration(q),
+        }
       })
-    }
-    out.push({ ...def, rows })
-  }
-  return out
+      return { ...def, rows }
+    })
+    .filter(Boolean)
 })
 
 onMounted(load)

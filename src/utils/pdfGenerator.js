@@ -7,7 +7,11 @@ import { isSvgCode } from './geometryDisplay'
 import { renderContent } from './mathText'
 import { normalizeOptions } from './optionText'
 // 多小问（题组）共享题干展示口径：与 PC 错题卡片、服务端重练卷 PDF 共用同一套实现
-import { resolveQuestionDisplayStem, getQuestionGroupKey } from './questionStem'
+import { resolveQuestionDisplayStem } from './questionStem'
+// 重练卷排卷与卷面编号的唯一口径（与服务端 worker.js 判题侧同源）。
+// 2026-09-13 事故：此前本文件自带分块/编号（且 judge 等题型因只认 choice/fill/answer
+// 而被整块漏掉），与判题侧的 question_ids 顺序不一致 → 卷面第 N 题 ≠ 判题第 N 题。
+import { buildRetryPaperOrder, RETRY_PAPER_BLOCKS } from './retryPaperOrder'
 
 const A4_W = 210
 const A4_H = 297
@@ -279,26 +283,19 @@ ${s}.qr-text{font-size:10px;color:#333;margin-top:3px;font-weight:bold;letter-sp
 
 /** 试卷主体 HTML（.page 内容），PDF 与预览共用 */
 export function buildPaperBody({ title, studentName, questions, showAnswers }) {
-  const choiceQs = questions.filter(q => q.question_type === 'choice')
-  const fillQs = questions.filter(q => q.question_type === 'fill')
-  const answerQs = questions.filter(q => q.question_type === 'answer')
-  let num = 0
+  // 排卷 + 卷面编号走唯一口径（src/utils/retryPaperOrder.js，与服务端同源）。
+  // 分块只重排桶间顺序，桶内保持 questions 原本的相对顺序（= question_ids 顺序）。
+  const paperOrder = buildRetryPaperOrder(questions)
 
-  function renderSection(qs, label) {
-    if (qs.length === 0) return ''
+  function renderSection(items, label) {
+    if (items.length === 0) return ''
     let html = `<div class="section-header">${label}</div>`
-    // 同一大题（同 task + 同页 + 同题号）的**连续**小问合成一个题组块：
-    // 只占一个编号（写成「10(1).」「10(2).」），公共题干只渲染一次。
-    // 单独一问答错被选进来（不成组）时按非连排分支完整渲染公共条件，单题也能作答。
-    let lastGroupKey = ''
-    qs.forEach(q => {
+    // 编号与连排判定已在 buildRetryPaperOrder 内完成（与判题侧同源），此处只渲染：
+    // 同一大题的连续小问合成一个题组块，只占一个编号（写成「10(1).」「10(2).」），
+    // 公共题干只渲染一次。单独一问答错被选进来（不成组）时按非连排分支完整渲染
+    // 公共条件 —— 单题也能作答。
+    items.forEach(({ question: q, label: qLabel, isContinuation }) => {
       const { parentStem, content } = resolveQuestionDisplayStem(q)
-      const groupKey = getQuestionGroupKey(q)
-      const subNo = (q.sub_no != null && String(q.sub_no).trim() !== '') ? String(q.sub_no).trim() : ''
-      const isContinuation = !!groupKey && groupKey === lastGroupKey && !!subNo
-      if (!isContinuation) num++
-      lastGroupKey = groupKey
-      const qLabel = subNo ? `${num}(${subNo})` : String(num)
       const typeClass = q.question_type === 'choice' ? 'q-choice' : q.question_type === 'fill' ? 'q-fill' : 'q-answer'
       html += `<div class="question ${typeClass}">`
       if (parentStem && !isContinuation) {
@@ -359,9 +356,9 @@ export function buildPaperBody({ title, studentName, questions, showAnswers }) {
       <div class="divider"></div>
       <div class="total-info">共 ${questions.length} 题</div>
     </div>
-    ${renderSection(choiceQs, '一、选择题')}
-    ${renderSection(fillQs, '二、填空题')}
-    ${renderSection(answerQs, '三、解答题')}
+    ${RETRY_PAPER_BLOCKS
+      .map(b => renderSection(paperOrder.filter(it => it.blockKey === b.key), b.label))
+      .join('')}
   </div>
   <div class="footer">敏学错题本 · 智能学习助手</div>`
 }

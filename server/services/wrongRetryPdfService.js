@@ -21,6 +21,10 @@ import { renderExamPDF } from './examPdfRenderer.js'
 // 多小问（题组）共享题干的展示口径：与 PC 端 / 移动端共用同一套实现，
 // 保证「重练卷上的题干」和「错题本卡片上的题干」逐字一致。
 import { resolveQuestionDisplayStem, getQuestionGroupKey, extractPrereqRefs, resolvePrereqHints } from '../utils/questionStem.js'
+// 重练卷排卷与卷面编号的唯一口径（与判题侧 worker.js processSlimGrading 同源）。
+// 2026-09-13 事故：此前本文件自带的「分块 + 编号」逻辑与判题侧的 question_ids
+// 顺序各自为政，题型混合时卷面第 N 题 ≠ 判题第 N 题（实测 21/25 份卷整体错位）。
+import { buildRetryPaperOrder, RETRY_PAPER_BLOCKS } from '../utils/retryPaperOrder.js'
 // 数学文本规范化：与前端 src/utils/mathText.js 同一份纯函数，
 // 保证「服务端重练卷」和「移动端/周报再测卷」的公式排版口径 100% 一致。
 import { preprocessMath, splitToSegments } from '../../src/utils/mathText.js'
@@ -175,22 +179,15 @@ ${KATEX_CSS}
 `
 
 const buildPaperBody = ({ title, studentName, questions, qrSvg }) => {
-  // 按题型分块（与前端 buildPaperBody 保持同结构）
-  const blocks = [
-    { key: 'choice', label: '一、选择题', items: [] },
-    { key: 'fill', label: '二、填空题', items: [] },
-    { key: 'answer', label: '三、解答题', items: [] },
-  ]
-  const map = { choice: blocks[0].items, fill: blocks[1].items, answer: blocks[2].items }
-  questions.forEach((q) => {
-    const t = q.question_type === 'choice' ? 'choice'
-      : q.question_type === 'fill' ? 'fill'
-      : q.question_type === 'answer' ? 'answer'
-      : 'answer'
-    map[t].push(q)
-  })
+  // 排卷 + 卷面编号走唯一口径（server/utils/retryPaperOrder.js），
+  // 与判题侧 worker.js processSlimGrading、前端 pdfGenerator/RetryPaperPreview 同源。
+  // 分块只重排桶间顺序，桶内保持 questions 原本的相对顺序（= question_ids 顺序）。
+  const paperOrder = buildRetryPaperOrder(questions)
+  const blocks = RETRY_PAPER_BLOCKS.map((b) => ({
+    ...b,
+    items: paperOrder.filter((it) => it.blockKey === b.key),
+  }))
 
-  let num = 0
   let html = `<div class="page">
     ${qrSvg ? `<div class="qr-container">${qrSvg}<div class="qr-text">扫码做题</div></div>` : ''}
     <div class="head-area">
@@ -208,21 +205,14 @@ const buildPaperBody = ({ title, studentName, questions, qrSvg }) => {
   blocks.forEach((blk) => {
     if (blk.items.length === 0) return
     html += `<div class="section-header" style="font-size:15px;font-weight:bold;margin:8px 0 6px;padding:4px 0 4px 10px;border-left:4px solid #4F46E5;background:#F5F6FF;">${blk.label}</div>`
-    // 同一大题（同 task + 同页 + 同题号）的**连续**小问合成一个题组块：
-    //   · 只占一个编号，编号写成「10(1).」「10(2).」；
+    // 编号与连排判定已在 buildRetryPaperOrder 内完成（与判题侧同源），此处只负责渲染：
+    //   · 同一大题的连续小问共用一个编号，写成「10(1).」「10(2).」；
     //   · 公共题干（parent_stem）只渲染一次（组内首题），后继小问不重复；
     //   · 每个小问各自渲染自己的题干与作答区，仍按小问分别计分。
     // 只有单独一问答错被选进来（不成组）时，它自带 parent_stem，
     // 会按「非连排」分支完整渲染公共条件 —— 单题也能作答。
-    let lastGroupKey = ''
-    blk.items.forEach((q) => {
+    blk.items.forEach(({ question: q, label, isContinuation }) => {
       const { parentStem, content } = resolveQuestionDisplayStem(q)
-      const groupKey = getQuestionGroupKey(q)
-      const subNo = (q.sub_no != null && String(q.sub_no).trim() !== '') ? String(q.sub_no).trim() : ''
-      const isContinuation = !!groupKey && groupKey === lastGroupKey && !!subNo
-      if (!isContinuation) num++
-      lastGroupKey = groupKey
-      const label = subNo ? `${num}(${subNo})` : String(num)
       const typeClass = q.question_type === 'choice' ? 'q-choice'
         : q.question_type === 'fill' ? 'q-fill' : 'q-answer'
       html += `<div class="question ${typeClass}">`

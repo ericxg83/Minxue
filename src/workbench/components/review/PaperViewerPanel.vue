@@ -34,10 +34,10 @@
             v-if="showBbox && store.currentReviewQuestion && getDisplayBox(store.currentReviewQuestion)"
             class="question-overlay overlay-current"
             :style="getOverlayStyle(store.currentReviewQuestion)"
-            :title="`第${store.currentReviewIndex + 1}题`"
+            :title="`第${overlayNumberLabel}题`"
           >
             <span class="overlay-number">
-              {{ store.currentReviewIndex + 1 }}
+              {{ overlayNumberLabel }}
               <span v-if="store.currentReviewQuestion.is_correct === true" class="overlay-icon correct">✓</span>
               <span v-else-if="store.currentReviewQuestion.is_correct === false" class="overlay-icon wrong">✗</span>
             </span>
@@ -157,11 +157,22 @@ const store = useReviewStore()
 // 已复核试卷折叠状态
 const showReviewed = ref(false)
 
-// bbox 优雅降级：仅当题目坐标与当前页图坐标系一致时绘制。
-// image 模式：坐标相对学生上传原图，可绘制。
-// paper 模式：练习卷题目的 block_coordinates 相对「原始作业图」，与答题卡页图不对齐，
-//            后端坐标管线就绪前不绘制（有坐标也不画），避免错位。
-const showBbox = computed(() => store.source === 'image')
+// bbox 绘制开关：坐标系必须与当前页图一致，否则宁可不画。
+//   image 模式：题目坐标相对学生上传原图，可直接绘制。
+//   paper 模式（错题重练）：题目行坐标属于【原始作业图】，与重练答卷图不是同一张图，
+//     过去因此一律不画 —— 老师看不到任何定位框。现在判题管线会把对位时的
+//     【答卷图坐标】存进 task.result.retryAlign（见 store.currentRetryAlignBoxes），
+//     拿到就照画，拿不到（旧数据/未对位）仍然不画，绝不画错位框。
+const showBbox = computed(() => {
+  if (store.source === 'image') return true
+  return Object.keys(store.currentRetryAlignBoxes || {}).length > 0
+})
+
+/** 定位框上的题号：重练卷显示学生卷面印的编号，老师才能与学生的作答对上 */
+const overlayNumberLabel = computed(() => {
+  const q = store.currentReviewQuestion
+  return q?._paperLabel || String(store.currentReviewIndex + 1)
+})
 
 const containerRef = ref(null)
 const imgRef = ref(null)
@@ -240,6 +251,15 @@ const unionBbox = (a, b) => {
  */
 const getDisplayBox = (q) => {
   if (!q) return null
+  // paper（重练）：优先用判题对位时保存的【答卷图坐标系】框，
+  // 题目行自身的坐标属于原始作业图，画上去必然错位。
+  const retryRaw = store.currentRetryAlignBoxes?.[q.id]
+  if (retryRaw) {
+    const retryUnion = unionBbox(parseBbox(retryRaw.text_bbox), parseBbox(retryRaw.image_bbox))
+    if (retryUnion) return retryUnion
+    const retryBlock = parseBbox(retryRaw.block_coordinates)
+    if (retryBlock) return retryBlock
+  }
   const textB = parseBbox(q.text_bbox)
   const imageB = parseBbox(q.image_bbox)
   const union = unionBbox(textB, imageB)
