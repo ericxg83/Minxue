@@ -912,6 +912,7 @@ export default function App() {
           onOpenStudentSwitcher={() => setShowStudentSwitcher(true)}
           onOpenLearningReport={() => setShowLearningReport(true)}
           onOpenNotifications={handleOpenNotifications}
+          onOpenScanQR={() => setShowScanQR(true)}
           notificationCount={notifSummary?.totalNotifications || 0}
         />
 

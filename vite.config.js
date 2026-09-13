@@ -25,12 +25,37 @@ const stripWorkbenchRedirect = () => ({
   }
 })
 
+// KaTeX 字体内联虚拟模块：把 katex/dist/fonts 下全部 woff2 生成 base64 data-URL 常量。
+// 供 src/utils/katexCssWithFonts.js 使用 —— 序列化后的试卷 HTML 会被 POST 给后端
+// Chromium（base=about:blank）或写入隐藏 iframe，字体必须以 data-URL 随 CSS 内联，
+// 否则数学符号（\neq 的斜线覆盖层等）渲染成方块、字母回退系统斜体。
+// 不用 Vite 资源 ?inline（Vite 5 不支持对二进制资源强制 inline，产物会出现
+// `xxx.woff2?inline` 伪 URL），改由本插件在 dev/build 两端一致地生成字符串模块。
+const katexFontInlinePlugin = () => ({
+  name: 'katex-font-inline',
+  resolveId(id) {
+    if (id === 'virtual:katex-fonts-data') return '\0virtual:katex-fonts-data'
+    return null
+  },
+  load(id) {
+    if (id !== '\0virtual:katex-fonts-data') return null
+    const fontsDir = resolve(__dirname, 'node_modules/katex/dist/fonts')
+    const names = fs.readdirSync(fontsDir).filter((f) => f.endsWith('.woff2')).sort()
+    const entries = names.map((f) => {
+      const b64 = fs.readFileSync(resolve(fontsDir, f)).toString('base64')
+      return `  '${f}': 'data:font/woff2;base64,${b64}',`
+    })
+    return `export const KATEX_FONTS_DATA = {\n${entries.join('\n')}\n}\n`
+  }
+})
+
 export default defineConfig(({ mode }) => ({
   plugins: [
     react(),
     vue(),
     tailwindcss(),
-    stripWorkbenchRedirect()
+    stripWorkbenchRedirect(),
+    katexFontInlinePlugin()
   ],
   resolve: {
     alias: {

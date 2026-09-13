@@ -20,7 +20,7 @@ import {
 import { normalizeOptions } from '../../utils/optionText'
 // 多小问（题组）共享题干展示口径：与错题卡片、pdfGenerator 共用同一套实现
 import { resolveQuestionDisplayStem } from '../../utils/questionStem'
-import katexCss from 'katex/dist/katex.min.css?inline'
+import { KATEX_CSS_WITH_FONTS as katexCss } from '../../utils/katexCssWithFonts'
 
 const USE_MOCK_DATA = false
 

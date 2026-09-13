@@ -44,12 +44,17 @@ const SYMBOL_MAP = {
   '≥': '\\ge ',
   '≤': '\\le ',
   '≠': '\\ne ',
+  '−': '-',      // U+2212 数学减号（OCR 高频）：不映射会落在文本段，用正文字体渲染、与相邻数学体割裂
+  '⊥': '\\bot ',  // 垂直符号：KaTeX 对裸 Unicode 报 unknownSymbol，字形依赖兜底字体（乱码隐患）
+  '∥': '\\parallel ', // 平行符号：同上
 }
 
 const SUP_BASE = {
   '⁰': '0', '¹': '1', '²': '2', '³': '3', '⁴': '4',
   '⁵': '5', '⁶': '6', '⁷': '7', '⁸': '8', '⁹': '9',
   '⁺': '+', '⁻': '-',
+  'ᵐ': 'm', 'ⁿ': 'n',
+  '⁽': '(', '⁾': ')',
 }
 
 function preprocessMath(text) {
@@ -63,7 +68,8 @@ function preprocessMath(text) {
   s = s.replace(/\\\{/g, '{').replace(/\\\}/g, '}')
 
   // 0.5 Unicode 上标 → 单个整体指数（²⁰²¹ → ^{2021}，严禁拆成 ^{2}^{0}^{2}^{1}）
-  s = s.replace(/[⁰¹²³⁴⁵⁶⁷⁸⁹⁺⁻]+/g, (run) => {
+  //     含上标字母 ᵐⁿ 与上标括号 ⁽⁾（如 aᵐ⁽ⁿ⁾ → a^{m(n)}）
+  s = s.replace(/[⁰¹²³⁴⁵⁶⁷⁸⁹⁺⁻ᵐⁿ⁽⁾]+/g, (run) => {
     let inner = ''
     for (const ch of run) inner += SUP_BASE[ch] || ch
     return '^{' + inner + '}'

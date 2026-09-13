@@ -1,4 +1,4 @@
-import { User, ChevronDown, BarChart3, Bell } from 'lucide-react'
+import { User, ChevronDown, BarChart3, Bell, ScanLine } from 'lucide-react'
 
 export default function AppHeader({
   currentStudent,
@@ -6,6 +6,7 @@ export default function AppHeader({
   onOpenStudentSwitcher,
   onOpenLearningReport,
   onOpenNotifications,
+  onOpenScanQR,
   notificationCount = 0
 }) {
   return (
@@ -27,6 +28,17 @@ export default function AppHeader({
           </button>
         </div>
         <div className="flex items-center gap-1.5">
+          {onOpenScanQR && (
+            <button
+              onClick={onOpenScanQR}
+              className="w-8 h-8 rounded-xl flex items-center justify-center transition-colors"
+              style={{ background: 'var(--bg-secondary)' }}
+              title="扫一扫"
+              aria-label="扫一扫"
+            >
+              <ScanLine size={16} style={{ color: 'var(--text-secondary)' }} />
+            </button>
+          )}
           <button
             onClick={onOpenLearningReport}
             className="w-8 h-8 rounded-xl flex items-center justify-center transition-colors"

@@ -14,19 +14,49 @@
  */
 import katex from 'katex'
 import qrcode from 'qrcode-generator'
+import { createRequire } from 'module'
+import { readFileSync } from 'fs'
 import { query, TABLES } from '../config/neon.js'
 import { renderExamPDF } from './examPdfRenderer.js'
 // 多小问（题组）共享题干的展示口径：与 PC 端 / 移动端共用同一套实现，
 // 保证「重练卷上的题干」和「错题本卡片上的题干」逐字一致。
 import { resolveQuestionDisplayStem, getQuestionGroupKey, extractPrereqRefs, resolvePrereqHints } from '../utils/questionStem.js'
+// 数学文本规范化：与前端 src/utils/mathText.js 同一份纯函数，
+// 保证「服务端重练卷」和「移动端/周报再测卷」的公式排版口径 100% 一致。
+import { preprocessMath, splitToSegments } from '../../src/utils/mathText.js'
 
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
 
-// KaTeX 在某些 Vite 把 .css 当 ?inline 处理时会变字符串数组，防御一下
+/**
+ * KaTeX CSS 加载（含字体内联）。
+ *
+ * 【历史缺陷】旧代码用 `require('katex/dist/katex.min.css')` —— 本服务是纯 ESM，
+ * require 不存在 → 恒走 catch → KATEX_CSS 恒为空 → PDF 里所有公式完全无样式。
+ * 且 katex.min.css 的字体是相对路径 url(fonts/*.woff2)，examPdfRenderer 用
+ * page.setContent（base = about:blank）加载时解析不到 → 字体回退 →
+ * 数学符号出方块（\neq 斜线覆盖层字形）、字母变系统斜体（"a=方块"乱码事故）。
+ *
+ * 现改为：createRequire 定位 katex 包内文件 → fs 读取 CSS → 把 20 个 woff2
+ * 以 base64 data-URL 内联进 CSS，无任何运行时网络/相对路径依赖。
+ */
 let KATEX_CSS = ''
 try {
-  const css = require('katex/dist/katex.min.css')
-  KATEX_CSS = typeof css === 'string' ? css : (css.default || '')
+  const require = createRequire(import.meta.url)
+  const cssPath = require.resolve('katex/dist/katex.min.css')
+  let css = readFileSync(cssPath, 'utf8')
+  // fonts 目录与 katex.min.css 同级（katex/dist/fonts/），不要去 resolve package.json
+  // （部分安装形态下 server/node_modules 有残缺目录，resolve package.json 会误报）
+  const fontsDir = cssPath.replace(/katex\.min\.css$/, 'fonts')
+  css = css.replace(/url\(fonts\/(KaTeX_[A-Za-z0-9_-]+\.woff2)\)/g, (_, name) => {
+    try {
+      const buf = readFileSync(`${fontsDir}/${name}`)
+      return `url(data:font/woff2;base64,${buf.toString('base64')})`
+    } catch (e) {
+      console.warn(`[wrongRetryPdf] 字体读取失败 ${name}:`, e.message)
+      return _
+    }
+  })
+  KATEX_CSS = css
 } catch (e) {
   console.warn('[wrongRetryPdf] KaTeX CSS 加载失败，PDF 可能丢公式样式:', e.message)
 }
@@ -40,37 +70,32 @@ const escapeHtml = (text) => {
     .replace(/"/g, '&quot;')
 }
 
+const katexRender = (latex, displayMode) => {
+  try {
+    return katex.renderToString(latex, { displayMode, throwOnError: false, output: 'html' })
+  } catch (e) {
+    return `<code class="katex-fallback">${escapeHtml(latex)}</code>`
+  }
+}
+
 /**
- * 服务端 KaTeX 渲染：把 $$...$$（块级）和 $...$（行内）转成 HTML。
- * 服务端不依赖 KaTeX auto-render 浏览器脚本，避免渲染时序问题。
+ * 服务端 KaTeX 渲染：与前端 src/utils/mathText.js 的 renderContent 完全同口径。
+ * 题干多为 OCR 落库的纯文本（无 $...$ 定界符），不能只认 $ 定界 —— 那样整段
+ * 公式会以正文中字体直排，符号（² ≠ ≤ 等）在无数学字体的容器里直接变方块。
+ * 统一走 preprocessMath（Unicode 上标/√/×÷≥≤≠ → LaTeX）+ splitToSegments
+ * （数学片段自动识别），数学片段交 KaTeX，中文等文本片段原样转义输出。
  */
 const renderMath = (text) => {
   if (!text) return ''
-  // 先块级 $$..$$（贪婪匹配含换行的公式）
-  let out = text.replace(/\$\$([^$]+?)\$\$/g, (_, latex) => {
-    try {
-      return katex.renderToString(latex, {
-        displayMode: true,
-        throwOnError: false,
-        output: 'html',
-      })
-    } catch (e) {
-      return `<code class="katex-fallback">${escapeHtml(latex)}</code>`
-    }
-  })
-  // 再行内 $...$（不含换行、不含 $）
-  out = out.replace(/\$([^$\n]+?)\$/g, (_, latex) => {
-    try {
-      return katex.renderToString(latex, {
-        displayMode: false,
-        throwOnError: false,
-        output: 'html',
-      })
-    } catch (e) {
-      return `<code class="katex-fallback">${escapeHtml(latex)}</code>`
-    }
-  })
-  return out
+  const processed = preprocessMath(String(text))
+  const segments = splitToSegments(processed)
+  const mathSegs = segments.filter((s) => s.isMath && s.text)
+  const hasRealText = segments.some((s) => !s.isMath && s.text.trim().length > 0)
+  // 独立成行唯一数学片段（如答案行）用块级排版，与前端口径一致
+  const standalone = mathSegs.length === 1 && !hasRealText
+  return segments
+    .map((seg) => (seg.isMath && seg.text ? katexRender(seg.text, standalone) : escapeHtml(seg.text)))
+    .join('')
 }
 
 /** 取题目配图：与前端 buildPaperBody.getQuestionIllustration 同口径 */

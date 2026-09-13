@@ -29,62 +29,22 @@ import {
   preloadKatexFonts,
   KATEX_FONT_FAMILIES,
 } from './pdfGenerator'
-import katexCss from 'katex/dist/katex.min.css?inline'
+import { KATEX_CSS_WITH_FONTS } from './katexCssWithFonts'
 import { getQuestionsByIds } from '../services/apiService'
 
-// KaTeX 字体 base64 缓存（同一会话内复用，避免每次都 fetch 转 base64）
-let _katexFontsCssCache = null
-
 /**
- * 把 KaTeX CSS 里的相对字体路径（fonts/KaTeX_*.woff2）替换为 data: URL，
- * 使 HTML 在 Playwright about:blank 上下文下也能加载字体。
+ * 字体已内联的 KaTeX CSS。
  *
- * 性能：20 个 woff2 × ~13KB 平均 = 254KB，base64 后 ~338KB，一次性 fetch + atob + btoa。
+ * 【历史事故记录】旧实现用 fetch(new URL('/node_modules/katex/dist/fonts/*.woff2', origin)) 内联字体：
+ *   - dev 下 Vite dev server 能伺服 /node_modules → 字体正常；
+ *   - 生产构建后站点根本没有 /node_modules 路径 → 全部 404 → 字体不内联 →
+ *     后端 Chromium 渲染时 KaTeX 字体加载失败，数学符号出方块（\neq 斜线覆盖层字形）、
+ *     字母回退系统斜体 —— 即线上再测卷「a=方块」乱码事故的根因。
+ * 现改为构建期 Vite ?inline 静态内联（katexCssWithFonts.js），dev/build 行为一致。
  */
+let _katexFontsCssCache = KATEX_CSS_WITH_FONTS
+
 export async function getKatexCssWithInlineFonts() {
-  if (_katexFontsCssCache) return _katexFontsCssCache
-
-  // 匹配 url(fonts/KaTeX_*.woff2)
-  const fontRe = /url\(fonts\/(KaTeX_[A-Za-z0-9_-]+\.woff2)\)/g
-  const matches = [...katexCss.matchAll(fontRe)]
-  const fontNames = [...new Set(matches.map(m => m[1]))]
-  console.log(`[serverPdfExporter] 内联 ${fontNames.length} 个 KaTeX 字体...`)
-
-  // 并发 fetch 所有 woff2，转 base64
-  const fontDataUrlMap = new Map()
-  await Promise.all(fontNames.map(async (name) => {
-    try {
-      // 相对于当前页面 URL 解析
-      const url = new URL(`/node_modules/katex/dist/fonts/${name}`, window.location.origin).toString()
-      const resp = await fetch(url)
-      if (!resp.ok) {
-        console.warn(`[serverPdfExporter] 字体 fetch 失败 ${name}: ${resp.status}`)
-        return
-      }
-      const buf = await resp.arrayBuffer()
-      // ArrayBuffer → base64（分片避免 call stack 溢出）
-      const bytes = new Uint8Array(buf)
-      let binary = ''
-      const chunk = 0x8000
-      for (let i = 0; i < bytes.length; i += chunk) {
-        binary += String.fromCharCode.apply(null, bytes.subarray(i, i + chunk))
-      }
-      const b64 = btoa(binary)
-      fontDataUrlMap.set(name, `data:font/woff2;base64,${b64}`)
-    } catch (e) {
-      console.warn(`[serverPdfExporter] 字体 fetch 异常 ${name}:`, e.message)
-    }
-  }))
-
-  // 替换 CSS 里的 url()
-  let inlinedCss = katexCss
-  for (const [name, dataUrl] of fontDataUrlMap.entries()) {
-    const re = new RegExp(`url\\(fonts\\/${name.replace(/\./g, '\\.')}\\)`, 'g')
-    inlinedCss = inlinedCss.replace(re, `url(${dataUrl})`)
-  }
-
-  _katexFontsCssCache = inlinedCss
-  console.log(`[serverPdfExporter] 字体内联完成，CSS 总长 ${(inlinedCss.length / 1024).toFixed(1)}KB`)
   return _katexFontsCssCache
 }
 

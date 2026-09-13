@@ -77,9 +77,13 @@ router.get('/:studentId', async (req, res) => {
 
     // 5b. 获取可用于组卷的错题 question_id（仅含已完成题目，排除已掌握）
     //     排序=学习价值优先，供前端截断为「本周重点重练卷」：
-    //       1) 学科轮转（各学科错得最多的先入选），避免单科题海霸屏其它薄弱科；
-    //       2) 同一轮内错误次数（error_count）多的优先；
+    //       1) 难度升序优先（简单→中等→难），让学生先练会简单题、再逐级突破难题；
+    //          NULL 难度按中档(3)处理，保证无难度题也能稳定入序、不阻塞。
+    //          当前系统仅录入数学，不做跨学科轮转；若将来多学科可在此改回 PARTITION BY 学科兜底。
+    //       2) 同难度内错误次数（error_count）多的优先；
     //       3) 最后按最近错题。
+    //     先易后难的「分阶段」由 lifecycle 自动推进：简单题答对标记 mastered 出池后，下轮生成时
+    //     简单题已从池消失，自然轮到中/难题——无需额外排程或状态表。
     //     返回全量有序列表（ID 体积极小），由前端只取前 N 道生成再测卷。
     const { rows: wrongIdRows } = await query(
       `SELECT wq.question_id
@@ -90,10 +94,7 @@ router.get('/:studentId', async (req, res) => {
         AND wq.added_at < $3
         AND (wq.lifecycle_status IS NULL OR wq.lifecycle_status != 'mastered')
       ORDER BY
-        ROW_NUMBER() OVER (
-          PARTITION BY COALESCE(NULLIF(q.subject, ''), '其他')
-          ORDER BY COALESCE(wq.error_count, 1) DESC, wq.added_at DESC
-        ) ASC,
+        COALESCE(q.difficulty, 3) ASC,
         COALESCE(wq.error_count, 1) DESC,
         wq.added_at DESC`,
       [studentId, periodStart, periodEnd]
