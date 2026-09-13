@@ -33,12 +33,12 @@ test('人工复核结果优先于 AI 结果', () => {
   assert.equal(effectiveIsCorrect({ is_correct: false, review_status: REVIEW_STATUS.CORRECT }), true)
   assert.equal(effectiveIsCorrect({ is_correct: true, review_status: REVIEW_STATUS.WRONG }), false)
 })
-// exception 桶必须区分"学生没写"与"AI 判不出"：后者答案已识别，
-// 旧文案「未识别答案」会让老师误以为 OCR 故障。
-test('未作答与 AI 判不出同属 exception 但文案不同', () => {
+// 2026-09-13（commit 14d9160）：未作答升级为独立终态 blank（answer_source='blank'），
+// 不再归入 exception 桶、不需要老师逐题确认；「AI 判不出」仍留在 exception。
+test('未作答是独立 blank 终态，与 AI 判不出（exception）分开', () => {
   const blank = { answer_source: 'blank', is_correct: null, confidence: 0 }
   const undecided = { answer_source: 'recognized', is_correct: null, confidence: 0.95 }
-  assert.equal(getReviewState(blank), 'exception')
+  assert.equal(getReviewState(blank), 'blank')
   assert.equal(getReviewState(undecided), 'exception')
   assert.equal(getReviewStateLabel(blank), '未作答')
   assert.equal(getReviewStateLabel(undecided), 'AI未判定')
