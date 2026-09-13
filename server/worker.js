@@ -10,7 +10,7 @@ import axios from 'axios'
 import sharp from 'sharp'
 import { TABLES, TASK_STATUS } from './config/neon.js'
 import { query } from './config/neon.js'
-import { AI_CONFIG, getAIHeaders, buildOCRPrompt, buildAnswerGenerationPrompt, getCurrentTextModel, getCurrentVLModel, rotateTextModel, rotateVLModel, TEXT_MODELS, VL_MODELS, callTextCompletion, callVisionCompletion, callAnswerEngineCompletion, ANSWER_ENGINE } from './config/ai.js'
+import { AI_CONFIG, getAIHeaders, buildOCRPrompt, buildAnswerGenerationPrompt, getCurrentTextModel, getCurrentVLModel, rotateTextModel, rotateVLModel, TEXT_MODELS, VL_MODELS, callTextCompletion, callVisionCompletion, callVendorVisionCompletion, callAnswerEngineCompletion, ANSWER_ENGINE } from './config/ai.js'
 import { updateTaskStatus, createQuestions, batchUpdateQuestionTags, addWrongQuestions, createJudgement, updateQuestionAnswer, markAnswerException, markAiAnswerRisk, findCachedQuestionByFingerprint, cacheQuestion, incrementQuestionUseCount, updateQuestionCacheId, createQuestionAsset, lookupWorksheetAnswer, getWorksheetAnswersBySection, deleteQuestionsByTaskId, bulkLookupResourceAnswers, getResourceAnswersBySection, getResourceById, addSelfContainedWrongQuestion } from './services/neonService.js'
 import { uploadImage } from './services/ossService.js'
 import { cropAndUploadQuestionRegion } from './utils/cropAndUpload.js'
@@ -1005,10 +1005,28 @@ const markImageReasoningRisk = async (questions) => {
   return targets.length
 }
 
+// 污染闸（P3）用的保守文本比较：只做「书写形态」归一化（空白 / 括号 / 全角 / 负号），
+// 刻意**不做**数学等价归一 —— 2/4 与 1/2、√8 与 2√2 都不算相同。
+// 原因：污染判据必须是"一字不差地抄"，放宽到等价会把「学生答对但写法不同」的正常题
+// 误判成污染并置空，白白把本来能自动判的题推进人工队列。
+export function isSameAnswerText(a, b) {
+  const norm = (s) => String(s ?? '')
+    .replace(/\s+/g, '')
+    .replace(/[（）()[\]【】]/g, '')
+    .replace(/[−–—ー]/g, '-')
+    .replace(/[，、]/g, ',')
+    .replace(/[。．]/g, '')
+    .trim()
+    .toLowerCase()
+  const na = norm(a)
+  const nb = norm(b)
+  return na !== '' && na === nb
+}
+
 // forceModel: 锁定到指定视觉模型。JSON 修复失败时由本函数自己传入下一个模型重试，
 //   因为 callVisionCompletion 不传 model 时会按 VL_MODELS 顺序轮询，
 //   直接递归重试只会再次命中同一个模型、拿到同样畸形的输出。
-const recognizeQuestions = async (imageBase64, taskId, retryCount = 0, forceModel = null) => {
+const recognizeQuestions = async (imageBase64, taskId, retryCount = 0, forceModel = null, opts = {}) => {
   const prompt = buildOCRPrompt()
   const startTime = Date.now()
 
@@ -1020,17 +1038,28 @@ const recognizeQuestions = async (imageBase64, taskId, retryCount = 0, forceMode
     : `data:image/jpeg;base64,${imageBase64}`
 
   try {
-    const activeModel = forceModel || getCurrentVLModel()
-    console.log(`   发送请求到: ${AI_CONFIG.ENDPOINT} (model=${activeModel})`)
-    // 主 API（ModelScope）→ 配额耗尽(429)时内置回退到备用视觉 API
-    const { content, usedBackup } = await callVisionCompletion({
-      imageDataURL: imageUrl,
-      systemPrompt: prompt,
-      userText: '请识别这张作业图片中的所有题目，并返回JSON格式结果。',
-      temperature: 0.3,
-      maxTokens: 8192,
-      ...(forceModel ? { model: forceModel } : {})
-    })
+    let content
+    let usedBackup = false
+    if (opts.prefetchedContent != null) {
+      // 双路并发（HYBRID_VISION_ENABLED）合并完结果后，复用本函数做解析 + 闸门 + 落库字段构建，
+      // 这里不能再调模型，否则等于白并发一次。
+      content = opts.prefetchedContent
+      console.log(`   [Hybrid] 使用已合并的识别结果 (${content.length} 字符)，跳过模型调用`)
+    } else {
+      const activeModel = forceModel || getCurrentVLModel()
+      console.log(`   发送请求到: ${AI_CONFIG.ENDPOINT} (model=${activeModel})`)
+      // 主 API（ModelScope）→ 配额耗尽(429)时内置回退到备用视觉 API
+      const res = await callVisionCompletion({
+        imageDataURL: imageUrl,
+        systemPrompt: prompt,
+        userText: '请识别这张作业图片中的所有题目，并返回JSON格式结果。',
+        temperature: 0.3,
+        maxTokens: 8192,
+        ...(forceModel ? { model: forceModel } : {})
+      })
+      content = res.content
+      usedBackup = res.usedBackup
+    }
 
     const duration = Date.now() - startTime
     console.log(`   AI 响应耗时: ${duration}ms${usedBackup ? ' (备用 API)' : ''}`)
@@ -1066,7 +1095,9 @@ const recognizeQuestions = async (imageBase64, taskId, retryCount = 0, forceMode
         // 4601 completion_tokens，finish_reason=stop —— 上限用掉不到 6 成，
         // 所以响应只有 2250 字符就断掉属于偶发（供应商/网络侧），重来一次通常就完整了。
         // 因此绝不能一截断就拿半页结果收工：那会静默丢题。
-        if (!forceModel) {
+        // prefetchedContent 模式（双路合并结果）不再换模型重试：
+        // 内容是我们自己 JSON.stringify 出来的，重试只会得到同样的结果并白白再打一次模型。
+        if (!forceModel && opts.prefetchedContent == null) {
           const nextModel = rotateVLModel()
           if (nextModel) {
             console.warn(`🔄 JSON 修复失败，切换到 ${nextModel} 重试 1 次...`)
@@ -1117,6 +1148,20 @@ const recognizeQuestions = async (imageBase64, taskId, retryCount = 0, forceMode
         standardAnswer = ''
       }
 
+      // P3 污染闸：OCR 模型会把学生手写答案原样抄进 answer 字段。
+      // 2026-09-13 实测：魔搭 Qwen3-VL-235B 在 15 题真实作业照上 15/15 命中，
+      // 违反 OCR 提示词的「只抄卷面印刷内容」约束。后果极严重 ——
+      // judgeAnswer(学生答案, 学生答案) 恒为 true，整卷判对、0 判错（隐形全卷误判）。
+      // 判据：归一化后 answer === student_answer 且均非空 → 判为污染并置空，
+      // 交给后续缓存 / AI 生成 / 答案库链路重解；都补不上时判题器转人工（安全侧）。
+      // 已知代价：卷面确印有参考答案且学生恰好全抄对时会被误置空 → 转人工。
+      // 这是刻意选的保守方向：漏判（转人工）远好过全卷假阳性。
+      if (standardAnswer && cleanedStudentAnswer
+        && isSameAnswerText(standardAnswer, cleanedStudentAnswer)) {
+        console.log(`   [P3] 丢弃与学生答案雷同的OCR答案（疑似抄写污染）: "${standardAnswer}" → 转后续答案链路`)
+        standardAnswer = ''
+      }
+
       const gradingResult = resolveGradingResult({
         studentAnswer: cleanedStudentAnswer,
         answer: standardAnswer,
@@ -1155,12 +1200,12 @@ const recognizeQuestions = async (imageBase64, taskId, retryCount = 0, forceMode
     // ── 空结果处理：AI 成功但返回 0 题 ──
     // 真实日志里 Qwen3-VL 偶发返回 {"questions": []}（图模糊 / 文档裁切丢内容 / 模型抽风）。
     // 重试一次：若仍为空就切换到下一个 VL 模型再试，最后兜底返回空让上层标"未识别"。
-    if (questions.length === 0 && retryCount < AI_CONFIG.MAX_RETRIES) {
+    if (questions.length === 0 && retryCount < AI_CONFIG.MAX_RETRIES && opts.prefetchedContent == null) {
       console.warn(`   ⚠️  本次识别返回 0 道题，准备重试 (${retryCount + 1}/${AI_CONFIG.MAX_RETRIES})...`)
       await new Promise(resolve => setTimeout(resolve, (retryCount + 1) * 2000))
       return recognizeQuestions(imageBase64, taskId, retryCount + 1)
     }
-    if (questions.length === 0) {
+    if (questions.length === 0 && opts.prefetchedContent == null) {
       const nextModel = rotateVLModel()
       if (nextModel) {
         console.warn(`   ⚠️  已达重试上限仍为 0 题，轮换到模型 ${nextModel} 兜底...`)
@@ -1248,6 +1293,134 @@ const recognizeQuestions = async (imageBase64, taskId, retryCount = 0, forceMode
       shouldRetry: isNetworkError && retryCount >= AI_CONFIG.MAX_RETRIES
     }
   }
+}
+
+// ── 双路并发搭配（HYBRID_VISION_ENABLED=1）──
+// 背景（2026-09-13 实测，详见 deliverables/model_hybrid_plan_20260913.md）：
+//   魔搭 Qwen3-VL-235B：student_answer 抽得全（15/15）、手写关键符号准，
+//     但 answer 字段 15/15 被学生答案污染（→ judgeAnswer 恒 true = 全卷假阳性）、
+//     坐标框 0% 严格合规、真图 73–98s。
+//   sensenova-6.8-flash-lite：快（40–58s）、严格 JSON 3/3、坐标 15/15 合法、零污染，
+//     但漏抽 4/15 学生答案、手写关键符号会丢（Q11 真值 −2√3 → 它输出 2√3）。
+//   两者能力正交 → 并发后合并，wall-clock = max(两路) 不增加端到端延迟（实测 80.3s vs 串行 131.6s）。
+const HYBRID_VISION_ENABLED = process.env.HYBRID_VISION_ENABLED === '1'
+const HYBRID_SECOND_VENDOR = process.env.HYBRID_SECOND_VENDOR || 'Huihuiyun'
+
+// 从模型返回文本解析出结果对象（不落库），用于双路交叉合并。
+// 复用生产同款修复链：stripCodeFence → JSON.parse → repairAIJson → salvageTruncatedJson。
+function parseResultFromContent(content) {
+  if (!content) return null
+  const jsonStr = stripCodeFence(content)
+  const pick = (r) => (Array.isArray(r) || Array.isArray(r?.questions) ? r : null)
+  try { return pick(JSON.parse(jsonStr)) } catch { /* 继续修复 */ }
+  let repaired = null
+  try {
+    repaired = repairAIJson(jsonStr)
+    const r = pick(JSON.parse(repaired))
+    if (r) return r
+  } catch { /* 继续抢救 */ }
+  try {
+    const salvaged = salvageTruncatedJson(repaired || jsonStr)
+    if (!salvaged) return null
+    return pick(JSON.parse(salvaged))
+  } catch { /* 无法解析 */ }
+  return null
+}
+
+/**
+ * 双路 OCR 结果合并（纯函数，可单测）：以 primary 的结构为主干，用 secondary 补强。
+ *   ① 补抽：主干漏抽 student_answer 时用另一路补上（实测补回 4/15）
+ *   ② 分歧标记：两路都抽到但不一致 → confidence 归零，走低置信度转人工。
+ *      实测这类分歧多为手写关键符号（Q11 真值 −2√3，sensenova 丢负号、魔搭正确），
+ *      宁可让人看一眼，也不能默默选一边。
+ * 按 question_number 对齐；secondary 中题号缺失/重复的题不参与合并。
+ */
+export function mergeOcrQuestions(primary, secondary) {
+  const secByNo = new Map()
+  for (const q of secondary || []) {
+    const no = String(q?.question_number ?? '').trim()
+    if (no && !secByNo.has(no)) secByNo.set(no, q)
+  }
+  let filled = 0
+  let conflicts = 0
+  const conflictDetails = []
+  const merged = (primary || []).map((q) => {
+    const no = String(q?.question_number ?? '').trim()
+    const priStu = String(q?.student_answer ?? '').trim()
+    const sec = no ? secByNo.get(no) : null
+    const secStu = String(sec?.student_answer ?? '').trim()
+
+    if ((!priStu || priStu === '未作答') && secStu && secStu !== '未作答') {
+      filled += 1
+      return { ...q, student_answer: secStu }
+    }
+    if (priStu && secStu && !isSameAnswerText(priStu, secStu)) {
+      conflicts += 1
+      conflictDetails.push({ question_number: no, primary: priStu, secondary: secStu })
+      return { ...q, confidence: 0 }
+    }
+    return q
+  })
+  return { merged, filled, conflicts, conflictDetails }
+}
+
+// 双路并发识别：魔搭（补抽学生答案）+ 第二供应商（洁净主干），合并后走统一落库链路。
+// 任一路失败都不影响另一路 —— 单路结果仍然可用，只是少了交叉补强。
+const recognizeQuestionsHybrid = async (imageBase64, taskId) => {
+  const startTime = Date.now()
+  const prompt = buildOCRPrompt()
+  const imageUrl = imageBase64.startsWith('data:') ? imageBase64 : `data:image/jpeg;base64,${imageBase64}`
+  const userText = '请识别这张作业图片中的所有题目，并返回JSON格式结果。'
+
+  console.log(`   [Hybrid] 双路并发识别：魔搭 + ${HYBRID_SECOND_VENDOR}`)
+
+  // allSettled：一路挂掉不影响另一路
+  const [msRun, secRun] = await Promise.allSettled([
+    callVisionCompletion({ imageDataURL: imageUrl, systemPrompt: prompt, userText, temperature: 0.3, maxTokens: 8192 }),
+    callVendorVisionCompletion({ vendorName: HYBRID_SECOND_VENDOR, systemPrompt: prompt, userText, imageDataURL: imageUrl, temperature: 0.3, maxTokens: 8192 }),
+  ])
+
+  const msOk = msRun.status === 'fulfilled' && msRun.value?.content
+  const secOk = secRun.status === 'fulfilled' && secRun.value?.content
+  console.log(`   [Hybrid] 魔搭 ${msOk ? 'OK' : 'FAIL'} / ${HYBRID_SECOND_VENDOR} ${secOk ? 'OK' : 'FAIL'}  wall=${((Date.now() - startTime) / 1000).toFixed(1)}s`)
+
+  const onlyOne = (content) => recognizeQuestions(imageBase64, taskId, 0, null, { prefetchedContent: content })
+  if (!msOk && !secOk) {
+    console.warn(`   [Hybrid] 两路均失败，回退单路链路（走完整降级链与重试）`)
+    return recognizeQuestions(imageBase64, taskId)
+  }
+  if (msOk && !secOk) return onlyOne(msRun.value.content)
+  if (!msOk && secOk) return onlyOne(secRun.value.content)
+
+  const msResult = parseResultFromContent(msRun.value.content)
+  const secResult = parseResultFromContent(secRun.value.content)
+  const msQ = msResult ? (Array.isArray(msResult) ? msResult : msResult.questions || []) : []
+  const secQ = secResult ? (Array.isArray(secResult) ? secResult : secResult.questions || []) : []
+  console.log(`   [Hybrid] 题数 魔搭=${msQ.length} / ${HYBRID_SECOND_VENDOR}=${secQ.length}`)
+
+  if (secQ.length === 0) return onlyOne(msRun.value.content)
+  if (msQ.length === 0) return onlyOne(secRun.value.content)
+
+  // 主干取题数更全的一路；另一路只用于补抽与分歧检测
+  const secIsPrimary = secQ.length >= msQ.length
+  const primary = secIsPrimary ? secQ : msQ
+  const secondary = secIsPrimary ? msQ : secQ
+  const secondaryName = secIsPrimary ? 'modelscope' : HYBRID_SECOND_VENDOR
+  const primaryResult = secIsPrimary ? secResult : msResult
+
+  const { merged, filled, conflicts, conflictDetails } = mergeOcrQuestions(primary, secondary)
+  for (const c of conflictDetails) {
+    console.log(`   [Hybrid] Q${c.question_number} 分歧: 主干="${c.primary}" vs ${secondaryName}="${c.secondary}" → 置信度归零转人工`)
+  }
+
+  console.log(`   [Hybrid] 主干=${secIsPrimary ? HYBRID_SECOND_VENDOR : 'modelscope'} 补抽=${filled} 分歧=${conflicts}`)
+
+  const mergedContent = JSON.stringify(
+    Array.isArray(primaryResult)
+      ? merged
+      : { ...primaryResult, questions: merged }
+  )
+  return recognizeQuestions(imageBase64, taskId, 0, null, { prefetchedContent: mergedContent })
 }
 
 // 标签生成已改为本地规则分类（零 LLM / 零 API），治理 429 限流。
@@ -1831,7 +2004,11 @@ export const processSlimGrading = async (job) => {
     await updateTaskStatus(taskId, TASK_STATUS.PROCESSING, { progress: 35 })
 
     // OCR：仅取学生答案
-    const ocrResult = await recognizeQuestions(bufferToBase64(compressed), taskId)
+    // HYBRID_VISION_ENABLED=1 时走双路并发（魔搭 + 第二供应商）合并识别；
+    // 默认关闭，行为与改造前完全一致。
+    const ocrResult = HYBRID_VISION_ENABLED
+      ? await recognizeQuestionsHybrid(bufferToBase64(compressed), taskId)
+      : await recognizeQuestions(bufferToBase64(compressed), taskId)
     if (!ocrResult.success) return fail(ocrResult.error || 'AI 识别失败')
 
     const ocrQuestions = ocrResult.questions || []
@@ -5880,7 +6057,9 @@ export const processTask = async (job) => {
       const imageBase64 = bufferToBase64(compressedBuffer)
 
       console.log(`📊 [Step 5/8] ${pageLabel}调用 AI 视觉识别...`)
-      const ocrResult = await recognizeQuestions(imageBase64, taskId)
+      const ocrResult = HYBRID_VISION_ENABLED
+        ? await recognizeQuestionsHybrid(imageBase64, taskId)
+        : await recognizeQuestions(imageBase64, taskId)
 
       if (!ocrResult.success) {
         console.error(`❌ [Step 5/8] ${pageLabel}AI 识别失败: ${ocrResult.error}`)

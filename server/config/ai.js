@@ -370,6 +370,40 @@ export const BACKUP_VENDOR_DEFS = [
     extraBody: { reasoning_effort: 'none' },
   },
   {
+    // 辉辉云聚合网关（api.huihuiyun.top）：OpenAI 兼容，OpenAI 兼容中转。
+    // 2026-09-13 实测（本次新增，原因：官方 SenseNova Key 已 429 打满 —— tpm/rpm exhausted
+    //   连测 3 次全失败，导致魔搭限流后第一备用供应商实际是断的，此通道用于补位）：
+    //   - 网关上只有 4 个模型：auto / grok-4.5 / grok-4.6 / sensenova-6.8-flash-lite
+    //   - ⚠️ auto 是随机路由，同一张图两次结果可能不同，绝不可用于生产
+    //   - sensenova-6.8-flash-lite 必须传 reasoning_effort:'none'（默认参数 100% 失败：
+    //     思考链 10.5k–12.5k 字符吃满 8192 max_tokens，正文一个 JSON 都吐不出来）
+    //   - 域名解析到境外 IP（154.9.255.39），国内直连 http=000 不通；
+    //     Render (Oregon) 出站应可直接访问（与 ZenMux 同型），但**尚未在生产实测**
+    //   - 视觉识别实测：真图 15 题 40–58s（魔搭 73–98s），严格 JSON 3/3 合规、
+    //     坐标 15/15 合法、answer 零污染；但学生答案漏抽 4/15、手写关键符号会丢负号，
+    //     **不能单独取代魔搭**（详见 deliverables/model_hybrid_plan_20260913.md）
+    //   - grok-4.6 视觉链路成功率仅 2/6，不可用于 OCR；其文本判题的数学等价宽容度最高
+    //     （62%），将来若上「判题终裁 L3」再单独配置（本供应商 extraBody 带
+    //     reasoning_effort:'none'，不适用于 grok，故 vlModels 只列 sensenova）
+    // 聚合网关 api.huihuiyun.top。2026-09-13 实测（详见 deliverables/model_hybrid_plan_20260913.md）：
+    // 该账号组仅开通 grok-4.5 / grok-4.6 / sensenova-6.8-flash-lite（+ auto 别名）。
+    //   · vlModels 只放 sensenova —— grok 系列视觉实测不可用：student_answer 0/15 全空（无学生答案=无法判题）、
+    //     延迟 122–142s，且内容误读（Q1 2√6−5→2√5−5、Q11 −√6→−√3）。grok 只能用于判题终裁，不能进 OCR 链路。
+    //   · 模型 id 必须用 /v1/models 返回的完整 id（如 auto 实为「auto（随机路由高级模型）」，短名会 404）。
+    // ⚠️ extraBody 是供应商级、不按模型区分：sensenova 必须带 reasoning_effort:'none'
+    //    （否则思考链吃满 max_tokens → 完整 OCR 100% 失败）。若将来把 grok 加进本供应商，
+    //    必须先改成按模型下发 extraBody，grok 不接受该参数。
+    name: 'Huihuiyun',
+    envKey: 'HUIHUIYUN_API_KEY',
+    endpoint: process.env.HUIHUIYUN_BASE_URL
+      ? `${process.env.HUIHUIYUN_BASE_URL.replace(/\/+$/, '')}/chat/completions`
+      : 'https://api.huihuiyun.top/v1/chat/completions',
+    textModel: 'sensenova-6.8-flash-lite',
+    vlModels: ['sensenova-6.8-flash-lite'],
+    referer: null,
+    extraBody: { reasoning_effort: 'none' },
+  },
+  {
     // ZenMux (https://zenmux.ai)：多模型聚合网关，OpenAI 兼容。
     // 2026-08-13 用户 Key 实测结论（sk-ai-v1- 前缀，账户余额 = 0）：
     //   - 付费视觉模型（xiaomi/mimo-v2.5、qwen/qwen3-vl-plus、google/gemini-2.5-flash）
@@ -931,6 +965,50 @@ export async function callAnswerEngineCompletion(opts) {
   // 答案引擎不可用 → 回落通用文本链路，绝不因为模型选择问题卡住批改
   const fallbackChain = await callTextCompletion(opts)
   return { ...fallbackChain, provider: 'fallback-text-chain' }
+}
+
+/**
+ * 直接调用指定备份供应商的视觉接口 —— 供「双路并发搭配」使用（HYBRID_VISION_ENABLED）。
+ * 与 callVisionCompletion 的区别：
+ *   · 不打魔搭、不走供应商降级链，只打指定供应商；失败直接抛，由调用方决定兜底策略。
+ *   · 用途：同一张图同时发给两个模型，再交叉合并结果。
+ *
+ * 背景（2026-09-13 实测，详见 deliverables/model_hybrid_plan_20260913.md）：
+ *   魔搭 235B student_answer 抽得全（15/15）但 answer 字段 15/15 被学生答案污染；
+ *   sensenova-6.8-flash-lite 格式合规、零污染但漏抽 4/15。两者能力正交，
+ *   并发调用后合并可同时拿到「覆盖率」与「洁净度」，且 wall-clock = max(两路) 不增加延迟。
+ */
+export async function callVendorVisionCompletion({
+  vendorName,
+  systemPrompt,
+  userText,
+  imageDataURL,
+  temperature = 0.3,
+  maxTokens = 8192,
+  timeout = 180000,
+}) {
+  const def = BACKUP_VENDOR_DEFS.find(v => v.name === vendorName)
+  const vendor = getResolvedVendors().find(v => v.name === vendorName)
+  if (!vendor) {
+    throw new Error(`视觉供应商 ${vendorName} 未启用（缺少环境变量 ${def?.envKey || '?'}）`)
+  }
+  const apiKey = process.env[vendor.envKey]
+  const model = (vendor.vlModels || [])[0]
+  if (!model) throw new Error(`视觉供应商 ${vendorName} 未配置 vlModels`)
+  const messages = buildVisionMessages(systemPrompt, userText, imageDataURL)
+  const content = await requestOpenAIProvider({
+    endpoint: vendor.endpoint,
+    apiKey,
+    model,
+    messages,
+    temperature,
+    maxTokens,
+    timeout,
+    retry429: true,
+    retry503: false,
+    extraBody: vendor.extraBody || null,
+  })
+  return { content, vendor: vendorName, model }
 }
 
 export async function callVisionCompletion(opts) {
