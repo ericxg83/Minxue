@@ -21,7 +21,7 @@ import { judgeAnswer, normalizeQuestionType, normalizeChoiceAnswer, extractChoic
 import { normalizeSectionName, splitSubAnswers, splitOcrQuestionsBySubNo, isSubRowConsistentWithWhole } from './services/answerParseService.js'
 import { classifyQuestionLocally } from './utils/localTagger.js'
 import { finalizeGradingBatch } from './services/gradingFinalizer.js'
-import { NON_RETRYABLE_ERROR_PATTERNS } from './pendingTaskRecovery.js'
+import { classifyLastError } from './pendingTaskRecovery.js'
 import { isValidImageBuffer, checkImageResolution } from './utils/imageValidator.js'
 import { formatOptionsForPrompt } from './utils/optionText.js'
 import { validateArithmeticAnswer } from './utils/arithmeticAnswerValidator.js'
@@ -6209,14 +6209,22 @@ await updateTaskStatus(taskId, TASK_STATUS.PROCESSING, { progress: 95 }).catch((
       console.error('更新任务失败状态时出错:', updateError)
     }
 
-    // ── 关键：非可重试错误不抛给 BullMQ ──
+    // ── 关键：只有"永久不可恢复"错误才不抛给 BullMQ ──
     // 配额耗尽 / 限流 / URL 失效 / 缺少 worksheetId 等属于"自愈失败"，
     // 抛给 BullMQ 会触发 attempts=3 的内部重试（每次都重复下载图片、调 AI、浪费 30s+）。
     // 返回 undefined → BullMQ 视为 completed → 不再重试。
-    // 任务在 DB 里已经是 FAILED，PendingTaskRecovery 黑名单会兜底阻止再次入队。
-    if (NON_RETRYABLE_ERROR_PATTERNS.some(pat => pat.test(error.message || ''))) {
+    //
+    // ⚠️ 瞬时错误（OSS 400/5xx、网络超时）必须抛出去让 BullMQ 重试：
+    //    它们发生在 Step 2/6（尚未调 AI），重试只是重新下载一次图片，成本极低且大概率自愈。
+    //    此前用 /下载图片失败/ 整体匹配，把这类可自愈错误一并永久拉黑，
+    //    导致任务卡死在 failed 且前端重试入口也失效（见 pendingTaskRecovery.js 注释）。
+    const verdict = classifyLastError(error.message)
+    if (verdict.kind === 'permanent') {
       console.warn(`🚫 [Worker] 任务命中非可重试黑名单，跳过 BullMQ 重试: taskId=${taskId}`)
       return undefined
+    }
+    if (verdict.kind === 'transient') {
+      console.warn(`🔁 [Worker] 瞬时错误，交由 BullMQ 重试: taskId=${taskId} — ${verdict.reason}`)
     }
 
     throw error

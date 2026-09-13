@@ -15,7 +15,7 @@ const GEOMETRY_MAX_RETRIES = GEOMETRY_RETRY_DELAYS.length
 //
 // 错误按是否"自愈"分类：
 //   1. 配额 / 限流：自愈取决于外部服务（明早重置 / 限流解除），与重试次数无关。
-//   2. 图片下载失败：URL 失效（OSS 404/403）不会自愈，反复入队只会刷日志。
+//   2. 图片下载失败：⚠️ 已拆分为两类，见下方 TRANSIENT_ERROR_PATTERNS。
 //   3. 用户输入类：缺少 worksheetId、URL 无效、文件未上传完成等，本身就是数据问题。
 //   4. 图片质量：太小（<1KB）/ 0 道题 —— 学生拍的就是空白页/模糊页，重复 OCR 不会变好，
 //      反复入队只会反复下载 → 调 AI → 0 道题 → 浪费配额 + 触发限流 429 风暴。
@@ -29,7 +29,15 @@ export const NON_RETRYABLE_ERROR_PATTERNS = [
   /rate limit/i,
   /rate_limit/i,
   /429/,
-  /下载图片失败/,
+  // ⚠️ 不要把 /下载图片失败/ 整体放进黑名单！
+  //    它把两类性质完全相反的错误混为一谈：
+  //      ① 瞬时抖动：OSS 返回 400/5xx、网络超时 —— 会自愈（实测 9/11 报 400 失败、
+  //         9/13 同一 URL HEAD 200 / 1.4MB，人工重试一次即 30 题批改成功）；
+  //      ② 客观不可恢复：分辨率过低、返回内容不是图片（URL 失效）—— 重试永远无意义。
+  //    整体拉黑会让 ① 被永久卡死在 failed：自动恢复跳过、前端重试入口也因 classifyLastError
+  //    返回 skip 而形同虚设。且下载失败发生在 Step 2/6（progress=5，尚未调用任何 AI），
+  //    重试成本只是一次 HTTP 请求，黑名单原本担心的"浪费 AI 配额 / 触发 429"并不成立。
+  //    现在 ① 交给 TRANSIENT_ERROR_PATTERNS 做有限次重试，② 由下面这些精确子类永久拉黑。
   /返回内容不是图片/,
   /URL.*失效/,
   /OSS.*错误页/,
@@ -49,19 +57,57 @@ export const NON_RETRYABLE_ERROR_PATTERNS = [
   //   误进黑名单会导致**本来能成功的任务被永久放弃**，必须靠 PendingTaskRecovery 重新入队。
 ]
 
+// ── 瞬时可自愈错误：允许有限次自动重试（与上面的永久黑名单互斥）──
+//
+// 设计依据：这类错误发生在流程早期（Step 2/6 下载图片，progress=5），
+// **尚未调用任何 AI 模型**，重试代价 = 一次 HTTP GET，不消耗配额、不会触发 429。
+// 因此给比 MAX_AUTO_RETRIES(3) 更宽松的额度，让 OSS / 网络抖动能自愈。
+export const TRANSIENT_ERROR_PATTERNS = [
+  /下载图片失败/,                  // 内层原因已由永久黑名单先行排除（分辨率过低 / 非图片内容）
+  /status code \d{3}/i,            // OSS / 网关返回的 4xx、5xx 抖动
+  /timeout of \d+ms exceeded/i,
+  /ETIMEDOUT/,
+  /ECONNRESET/,
+  /ECONNREFUSED/,
+  /socket hang up/,
+  /network error/i,
+  /ENOTFOUND/,
+  /EAI_AGAIN/,
+  /getaddrinfo/i
+]
+
+// 瞬时错误自动重试上限：5 次（AI 类错误仍是 3 次，避免烧配额）
+export const MAX_TRANSIENT_RETRIES = 5
+// 冷却：上次失败后至少间隔 5 分钟才再入队，避免 5 分钟扫描周期内反复入队刷日志
+export const TRANSIENT_RETRY_COOLDOWN_MS = 5 * 60 * 1000
+
 /**
  * 判断 last_error 是否命中"不应自动重试"黑名单。
- * 命中 → 返回 { skip: true, reason }；未命中 → 返回 { skip: false }。
+ * 返回 { skip, kind, reason }：
+ *   kind='permanent' → 永久不可恢复，放弃重试（skip=true）
+ *   kind='transient' → 瞬时可自愈，允许有限次重试（skip=false）
+ *   kind='none'      → 未命中任何名单，走常规重试逻辑（skip=false）
+ *
+ * ⚠️ 先判永久、再判瞬时：下载失败的客观子类（"图片分辨率过低"、"返回内容不是图片"）
+ *    会同时带上"下载图片失败"前缀，必须让永久黑名单优先命中。
  */
 export function classifyLastError(lastError) {
   const msg = String(lastError || '').trim()
-  if (!msg) return { skip: false } // 没有错误信息时放行（保守处理）
+  if (!msg) return { skip: false, kind: 'none' } // 没有错误信息时放行（保守处理）
+
   for (const pat of NON_RETRYABLE_ERROR_PATTERNS) {
     if (pat.test(msg)) {
-      return { skip: true, reason: `命中非重试黑名单 (${pat})` }
+      return { skip: true, kind: 'permanent', reason: `命中非重试黑名单 (${pat})` }
     }
   }
-  return { skip: false }
+
+  for (const pat of TRANSIENT_ERROR_PATTERNS) {
+    if (pat.test(msg)) {
+      return { skip: false, kind: 'transient', reason: `瞬时可自愈错误 (${pat})` }
+    }
+  }
+
+  return { skip: false, kind: 'none' }
 }
 
 class PendingTaskRecovery {
@@ -189,7 +235,7 @@ class PendingTaskRecovery {
       //   因为 recognizeQuestions 内部每次已自带一次换模型重试，10 次 = 试过 20 次模型组合，
       //   仍失败说明不是模型抽风，无限重试只会烧配额。
       const { rows } = await query(
-        `SELECT id, student_id, image_url, images, original_name, status, created_at, result, retry_count, last_error,
+        `SELECT id, student_id, image_url, images, original_name, status, created_at, updated_at, result, retry_count, last_error,
                 task_type, worksheet_id, generated_exam_id, subject, resource_id
          FROM ${TABLES.TASKS}
          WHERE status = 'failed'
@@ -208,9 +254,15 @@ class PendingTaskRecovery {
                    OR last_error ILIKE '%JSON 格式错误%')
                   AND COALESCE(retry_count, 0) < $2
                 )
+             -- ③ 瞬时下载/网络错误（OSS 400/5xx、超时）：重试成本只是一次 HTTP GET，
+             --    给比常规 3 次更宽松的额度让它自愈；客观子类由 classifyLastError 再过滤。
+             OR (
+                  last_error ILIKE '%下载图片失败%'
+                  AND COALESCE(retry_count, 0) < $3
+                )
            )
          ORDER BY updated_at ASC`,
-        [MAX_AUTO_RETRIES, MAX_AI_REFUSAL_RETRIES]
+        [MAX_AUTO_RETRIES, MAX_AI_REFUSAL_RETRIES, MAX_TRANSIENT_RETRIES]
       )
 
       if (rows.length === 0) {
@@ -248,6 +300,18 @@ class PendingTaskRecovery {
             console.log(`[PendingTaskRecovery] 🚫 跳过 ${task.original_name}: ${verdict.reason}; last_error="${String(task.last_error || '').substring(0, 80)}"`)
             skippedCount++
             continue
+          }
+
+          // ── 瞬时错误冷却：距上次失败不足 TRANSIENT_RETRY_COOLDOWN_MS 则本轮不重试 ──
+          //   目的：扫描每 5 分钟一次，不加冷却会让刚失败的任务被立刻重新入队，
+          //   OSS 抖动还没恢复就又失败，retry_count 被白白耗尽。
+          if (verdict.kind === 'transient') {
+            const sinceMs = Date.now() - new Date(task.updated_at || task.created_at).getTime()
+            if (sinceMs < TRANSIENT_RETRY_COOLDOWN_MS) {
+              console.log(`[PendingTaskRecovery] ⏳ 冷却中，跳过 ${task.original_name}: ${verdict.reason}; 距上次失败 ${Math.round(sinceMs / 1000)}s < ${TRANSIENT_RETRY_COOLDOWN_MS / 1000}s`)
+              skippedCount++
+              continue
+            }
           }
 
           // ── AI 偶发拒绝：重置 retry_count=0，让这次"重试"算作第 1 次 ──

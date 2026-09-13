@@ -190,6 +190,14 @@
               </dl>
 
               <div class="preview-actions">
+                <!-- 识别异常的任务：直接给重试入口，不必进复核页（那里没有可复核内容） -->
+                <ActionButton
+                  v-if="selectedTask.workflowStatus === 'failed'"
+                  :loading="retryingTaskKey === selectedTask.key"
+                  @click="handleRetryTask(selectedTask)"
+                >
+                  重新处理<el-icon><Refresh /></el-icon>
+                </ActionButton>
                 <ActionButton variant="primary" @click="openTask(selectedTask)">
                   {{ selectedTask.actionLabel }}<el-icon><ArrowRight /></el-icon>
                 </ActionButton>
@@ -257,7 +265,7 @@ import MiniStat from '../components/ui/MiniStat.vue'
 import PageHeader from '../components/ui/PageHeader.vue'
 import StatusTag from '../components/ui/StatusTag.vue'
 import WorkbenchSelect from '../components/ui/WorkbenchSelect.vue'
-import { getGeneratedExamsByStudent, getStudents, getTasksByStudent } from '../../services/apiService'
+import { getGeneratedExamsByStudent, getStudents, getTasksByStudent, retryTask } from '../../services/apiService'
 import { humanizeError } from '../utils/humanizeError'
 import {
   RETRY_PAPER_STATE,
@@ -266,6 +274,7 @@ import {
   hasAnswerSheet,
   RETRY_STATE_TO_WORKFLOW,
 } from '../utils/retryPaperState'
+import { ElMessage } from 'element-plus'
 import RetryPaperPreview from '../components/review/RetryPaperPreview.vue'
 
 const route = useRoute()
@@ -596,6 +605,27 @@ function openTask(task) {
   }
   showToast(`已${task.actionLabel}`)
   router.push({ path: '/grade/task', query: { studentId: task.studentId, taskId: task.id, source: task.source } })
+}
+
+// 重新处理失败作业（2026-09-13 事故修复）：
+// 失败任务进复核页没有可复核内容（中间栏无答卷图，只会看到「图片加载失败」），
+// 而唯一的重试入口在复核页顶栏 → 老师实际点不到，作业永久卡在「识别异常」。
+// 这里在任务摘要区直接给入口：调 POST /api/tasks/:id/retry 重新入队，
+// 无需进入复核页。后端会重置 retry_count / last_error，绕过自动恢复的黑名单。
+const retryingTaskKey = ref(null)
+async function handleRetryTask(task) {
+  if (!task?.id) return
+  retryingTaskKey.value = task.key
+  try {
+    await retryTask(task.id)
+    ElMessage.success('已重新提交处理队列，稍后刷新即可看到结果')
+    await loadData()
+  } catch (err) {
+    console.error('[GradeCenter] 重新处理失败:', err)
+    ElMessage.error('重新处理失败: ' + (err.message || '未知错误'))
+  } finally {
+    retryingTaskKey.value = null
+  }
 }
 
 // 只读「重练卷卷面预览」抽屉：给老师看打印出去的那张卷，不含任何复核操作。
