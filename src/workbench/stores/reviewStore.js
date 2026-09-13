@@ -224,12 +224,19 @@ export const useReviewStore = defineStore('review', () => {
     return allQuestions.value[currentReviewIndex.value] || null
   })
 
-  // 题目确认状态：已有人工审核记录 OR AI confidence >= 阈值
+  // 题目确认状态：与 6 态判定（getReviewState）同源。
+  // [2026-09-13 修复] 旧实现只看 review_status / confidence 阈值，与 6 态口径不一致：
+  // AI 错误（is_correct=false，无论置信度）和未作答（blank，终态无需确认）在界面上
+  // 是终态（红 X / 未作答标签），进度条却把它们算成「未确认」→ 出现
+  // 「还差 N 题但左侧列表找不到哪 N 题」的幽灵差（错题再测-0911 实锤 15/17）。
+  // 现在统一：需要老师处理的只有 pending / exception / processing 三态
+  //（与 needsAttentionCount 完全同一集合），其余（correct/wrong/blank）都算已确认。
+  // 低置信 AI 错误的风险由完成复核时的错题门禁（prepareWrongGate）兜底，不靠进度条。
   const questionConfirmationMap = computed(() => {
     const map = {}
     for (const q of allQuestions.value) {
-      const manual = !!q.review_status
-      map[q.id] = manual || (q.confidence != null && q.confidence >= confidenceThreshold.value)
+      const state = getReviewState(q, confidenceThreshold.value)
+      map[q.id] = state !== 'pending' && state !== 'exception' && state !== 'processing'
     }
     return map
   })

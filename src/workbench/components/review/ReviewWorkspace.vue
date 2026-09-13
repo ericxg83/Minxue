@@ -21,6 +21,15 @@
         <span>已确认 {{ store.reviewProgress.confirmed }} / {{ store.reviewProgress.total }}</span>
         <el-progress :percentage="reviewProgressPercent" :stroke-width="6" :show-text="false" status="success" style="width: 120px" />
         <span class="review-progress-percent">{{ reviewProgressPercent }}%</span>
+        <!-- 未确认 > 0 时给出明确入口：口径与 6 态同源后，未确认题 = 待复核/AI未判定/处理中，
+             点击直接跳到下一道（循环），老师不用再在列表里猜「还差的题在哪」 -->
+        <button
+          v-if="store.reviewProgress.unconfirmed > 0"
+          class="review-progress-todo"
+          type="button"
+          title="跳到下一道待确认的题（待复核 / AI未判定 / 处理中）"
+          @click="jumpToNextUnconfirmed"
+        >还差 {{ store.reviewProgress.unconfirmed }} 题 · 去确认</button>
       </div>
       <div class="review-context-actions">
         <el-tag v-if="archiveState === 'published'" type="success" size="small" effect="plain">
@@ -109,6 +118,20 @@ const reviewProgressPercent = computed(() => {
   const count = Number(store.reviewProgress.confirmed) || 0
   return total > 0 ? Math.min(100, Math.round((count / total) * 100)) : 0
 })
+
+// 「还差 N 题 · 去确认」：跳到当前题之后的下一道未确认题（循环兜回头部）。
+// 未确认口径与 questionConfirmationMap（6 态同源）一致，跳转目标一定能在
+// 左侧列表里看到对应状态（待复核 / AI未判定 / 处理中）。
+const jumpToNextUnconfirmed = () => {
+  const unconfirmedIdxs = []
+  store.allQuestions.forEach((q, i) => {
+    if (store.questionConfirmationMap[q.id] === false) unconfirmedIdxs.push(i)
+  })
+  if (unconfirmedIdxs.length === 0) return
+  const cur = store.currentReviewIndex
+  const next = unconfirmedIdxs.find(i => i > cur) ?? unconfirmedIdxs[0]
+  store.jumpToQuestion(next)
+}
 const goToTodo = () => router.push('/todo')
 const goToWrongBook = () => router.push({ path: '/wrongbook', query: { studentId: store.currentStudent?.id } })
 const goToStudents = () => router.push('/students')
@@ -405,6 +428,19 @@ const handleQuickReview = async (result) => {
 .review-context-meta { color: var(--wb-text-secondary); font-size: 12px; }
 .review-progress-summary { display: flex; align-items: center; gap: 10px; color: var(--wb-text-secondary); font-size: 12px; }
 .review-progress-percent { color: var(--wb-text); font-weight: 650; font-variant-numeric: tabular-nums; }
+.review-progress-todo {
+  padding: 2px 10px;
+  border: 1px solid var(--wb-warning-soft);
+  border-radius: 999px;
+  background: var(--wb-warning-soft);
+  color: var(--wb-warning);
+  font-size: 12px;
+  font-weight: 600;
+  cursor: pointer;
+  white-space: nowrap;
+  transition: filter 0.15s;
+}
+.review-progress-todo:hover { filter: brightness(0.96); }
 .review-progress-alert { padding-left: 10px; border-left: 1px solid var(--wb-border); color: var(--wb-warning); font-size: 12px; }
 .review-context-actions { display: flex; align-items: center; gap: 8px; margin-left: 12px; flex-shrink: 0; }
 .review-context-actions :deep(.el-button) { display: inline-flex; align-items: center; gap: 4px; }
