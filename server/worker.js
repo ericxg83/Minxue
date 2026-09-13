@@ -1879,8 +1879,9 @@ export const processSlimGrading = async (job) => {
       alignRecords.push(alignRec)
 
       // 存储答案为空（OCR 之前未生成）：无法自动判定
+      // 各分支都带 studentAnswer：落库时一并回写 questions.student_answer（见下方 UPDATE 循环）。
       if (!stored.answer || !stored.answer.trim()) {
-        results.push({ questionId: stored.id, isCorrect: null, source: 'manual', reason: 'no_reference_answer' })
+        results.push({ questionId: stored.id, isCorrect: null, source: 'manual', reason: 'no_reference_answer', studentAnswer })
         manualCount++
         continue
       }
@@ -1888,14 +1889,14 @@ export const processSlimGrading = async (job) => {
       // 主观题：交由人工判定
       const qType = (stored.question_type || '').toLowerCase()
       if (SUBJECTIVE_TYPES.has(qType)) {
-        results.push({ questionId: stored.id, isCorrect: null, source: 'manual', reason: 'subjective' })
+        results.push({ questionId: stored.id, isCorrect: null, source: 'manual', reason: 'subjective', studentAnswer })
         manualCount++
         continue
       }
 
       // 学生未作答
       if (!studentAnswer) {
-        results.push({ questionId: stored.id, isCorrect: false, source: 'ocr', confidence: 0, reason: 'blank' })
+        results.push({ questionId: stored.id, isCorrect: false, source: 'ocr', confidence: 0, reason: 'blank', studentAnswer: '' })
         alignRec.isCorrect = false
         alignRec.confidence = 0
         autoCount++
@@ -1908,13 +1909,13 @@ export const processSlimGrading = async (job) => {
 
       if (!highConfidence) {
         // 低置信度：不自动判定，预填但回退人工确认
-        results.push({ questionId: stored.id, isCorrect: null, source: 'manual', reason: 'low_confidence', confidence })
+        results.push({ questionId: stored.id, isCorrect: null, source: 'manual', reason: 'low_confidence', confidence, studentAnswer })
         alignRec.confidence = confidence
         manualCount++
         continue
       }
 
-      results.push({ questionId: stored.id, isCorrect: judgment.isCorrect, source: 'ocr', confidence })
+      results.push({ questionId: stored.id, isCorrect: judgment.isCorrect, source: 'ocr', confidence, studentAnswer })
       alignRec.isCorrect = judgment.isCorrect
       alignRec.confidence = confidence
       autoCount++
@@ -1933,13 +1934,22 @@ export const processSlimGrading = async (job) => {
     }
 
     // 预填每道题的 is_correct + confidence（供组卷历史查看 / 改判）
+    // 2026-09-13：同时回写 questions.student_answer —— 此前只写 is_correct，
+    // 批改页「学生答案」展示的仍是这道题进错题本时原作业的旧答案（如卷面答 D 却显示旧答 B），
+    // 且人工重判接口按 questions.student_answer 判，旧值会让改判结果错。
+    // 对位命中的题一律回写（空串 = 本次未作答），与 is_correct 覆盖语义一致；
+    // matchedBy='none' 的题对位记录无答案，同样按未作答回写空串。
     for (const r of results) {
-      if (r.isCorrect !== null) {
-        await query(
-          `UPDATE ${TABLES.QUESTIONS} SET is_correct = $1, confidence = $2, updated_at = NOW() WHERE id = $3`,
-          [r.isCorrect, r.confidence ?? null, r.questionId]
-        ).catch((e) => console.error(`[Slim] 预填 is_correct 失败 q=${r.questionId?.substring(0, 8)}:`, e.message))
-      }
+      if (r.isCorrect === null && r.studentAnswer === undefined) continue
+      await query(
+        `UPDATE ${TABLES.QUESTIONS}
+         SET student_answer = $1,
+             is_correct = COALESCE($2, is_correct),
+             confidence = COALESCE($3, confidence),
+             updated_at = NOW()
+         WHERE id = $4`,
+        [r.studentAnswer ?? '', r.isCorrect, r.confidence ?? null, r.questionId]
+      ).catch((e) => console.error(`[Slim] 预填 is_correct/student_answer 失败 q=${r.questionId?.substring(0, 8)}:`, e.message))
     }
 
     // 判不出来的题：本管线早就分好了原因（主观题 / 缺参考答案 / 置信度不足），
