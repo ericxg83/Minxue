@@ -78,6 +78,11 @@
           <span class="chip-label">AI未判定</span>
           <span class="chip-count">{{ store.aiStateStats.exception }}</span>
         </span>
+        <span class="status-chip chip-blank">
+          <StatusIcon state="blank" :size="16" />
+          <span class="chip-label">未作答</span>
+          <span class="chip-count">{{ store.aiStateStats.blank }}</span>
+        </span>
         <span class="status-chip chip-processing">
           <StatusIcon state="processing" :size="16" />
           <span class="chip-label">处理中</span>

@@ -36,8 +36,10 @@
           :class="'diff-' + q.difficulty"
         >{{ difficultyText(q.difficulty) }}</span>
         <span
-          v-if="store.getAiState(q) === 'exception'"
-          class="item-confidence exception">{{ stateLabel(q) }}</span>
+          v-if="store.getAiState(q) === 'exception' || store.getAiState(q) === 'blank'"
+          class="item-confidence"
+          :class="store.getAiState(q) === 'exception' ? 'exception' : 'blank'"
+        >{{ stateLabel(q) }}</span>
         <span
           v-else-if="store.getAiState(q) === 'processing'"
           class="item-confidence processing">处理中</span>

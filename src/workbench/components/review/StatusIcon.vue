@@ -60,6 +60,17 @@
         <circle :cx="size * 0.5" :cy="size / 2" r="1.4" fill="#fff" />
         <circle :cx="size * 0.7" :cy="size / 2" r="1.4" fill="#fff" />
       </g>
+      <!-- blank: — （未作答，无需老师处理） -->
+      <g v-else-if="state === 'blank'">
+        <rect
+          :x="size * 0.28"
+          :y="size / 2 - 1"
+          :width="size * 0.44"
+          :height="2"
+          rx="1"
+          fill="#fff"
+        />
+      </g>
     </svg>
   </span>
 </template>
@@ -69,7 +80,7 @@ import { computed } from 'vue'
 import { REVIEW_STATE_LABELS } from '../../../utils/reviewDecision'
 
 const props = defineProps({
-  state: { type: String, default: 'pending' }, // correct | wrong | pending | exception | processing
+  state: { type: String, default: 'pending' }, // correct | wrong | pending | exception | blank | processing
   size: { type: Number, default: 18 }
 })
 
@@ -79,6 +90,7 @@ const COLORS = {
   wrong: 'var(--wb-danger)',
   pending: 'var(--wb-warning)',
   exception: 'var(--wb-accent)',
+  blank: 'var(--wb-processing)',
   processing: 'var(--wb-processing)'
 }
 

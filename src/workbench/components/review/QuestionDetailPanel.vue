@@ -145,7 +145,7 @@
       </div>
 
       <!-- AI 判定 -->
-      <div class="ops-ai-row" v-if="q.is_correct != null || q.review_status || getAiState(q) === 'exception'">
+      <div class="ops-ai-row" v-if="q.is_correct != null || q.review_status || getAiState(q) === 'exception' || getAiState(q) === 'blank'">
         <span class="ops-ai-icon" :class="getAiStateClass(q)">{{ getAiStateIcon(q) }}</span>
         <span class="ops-ai-text">{{ getAiStateText(q) }}</span>
         <!-- 判不出的原因：让老师知道为什么这题要自己定，而不是以为系统坏了 -->

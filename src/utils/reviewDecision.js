@@ -53,8 +53,8 @@ export const WRONG_BOOK_LIFECYCLE = Object.freeze({
 })
 
 /**
- * 题目的复核状态（5 态，两端同源）
- * @returns {'correct'|'wrong'|'pending'|'exception'|'processing'}
+ * 题目的复核状态（6 态，两端同源）
+ * @returns {'correct'|'wrong'|'pending'|'exception'|'blank'|'processing'}
  */
 export const getReviewState = (question, threshold = DEFAULT_CONFIDENCE_THRESHOLD) => {
   if (!question) return 'processing'
@@ -66,9 +66,12 @@ export const getReviewState = (question, threshold = DEFAULT_CONFIDENCE_THRESHOL
     question.review_status === REVIEW_STATUS.WRONG_NO_BOOK
   ) return 'wrong'
 
-  // exception 桶：AI 没有给出正误结论。两种来源——学生未作答（answer_source='blank'）
-  // 与"答案已识别但 AI 判不出"。文案必须按 answer_source 区分，见 getReviewStateLabel。
-  if (question.answer_source === 'blank') return 'exception'
+  // blank（终态，2026-09-13）：学生未作答，**不需要老师逐题确认**。
+  // 之前归入 exception（AI未判定）桶，老师被强制对每道空白题点一遍"确认"——
+  // 但"未作答等同不会"在统计与重练池里早已是既定口径（weeklyReport 的 wrong 计数
+  // 直接含 answer_source='blank'），复核页再让老师点一遍是纯冗余。
+  // 未作答的题仍显示"未作答"标签（状态图标/导航角标/顶部统计），只是移出待办。
+  if (question.answer_source === 'blank') return 'blank'
 
   // 处理中：AI 尚未出任何判定
   if (question.is_correct == null && question.confidence == null) return 'processing'
@@ -98,6 +101,7 @@ export const REVIEW_STATE_LABELS = Object.freeze({
   wrong: 'AI错误',
   pending: '待复核',
   exception: 'AI未判定',
+  blank: '未作答',
   processing: '处理中'
 })
 
@@ -105,9 +109,12 @@ export const REVIEW_STATE_LABELS = Object.freeze({
  * 单题的展示文案。exception 按 answer_source 细分：
  *   · blank      → 未作答（学生没写，OCR 没有可判内容）
  *   · 其他       → AI未判定（答案已识别，AI 拒绝给结论，需老师定）
+ * 2026-09-13 起 blank 有独立终态，label 直接命中；下面的分支保留兼容
+ * 仍把未作答映射进 exception 的旧调用方（如移动端未同步版本）。
  */
 export const getReviewStateLabel = (question, threshold = DEFAULT_CONFIDENCE_THRESHOLD) => {
   const state = getReviewState(question, threshold)
+  if (state === 'blank') return '未作答'
   if (state === 'exception' && question?.answer_source === 'blank') return '未作答'
   // wrong 状态细分：老师已复核 vs AI 自动判错。两种来源共用 'wrong' state 但语义不同，
   // 红 X 仍显示，但文案要让老师分清"这是历史结论（已复核）"还是"AI 当前判错"。
