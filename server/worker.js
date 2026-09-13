@@ -18,6 +18,7 @@ import { refineFigureBoxOnPage } from './utils/figureRegionRefiner.js'
 import { generateTextFingerprint, generatePHash, PARSER_VERSION, TEXT_SIMILARITY_THRESHOLD } from './utils/questionFingerprint.js'
 import { uploadFilesWithRetry } from './services/uploadRetryManager.js'
 import { judgeAnswer, normalizeQuestionType, normalizeChoiceAnswer, extractChoiceLetters, isGradingCommentAnswer, stripAnswerScaffolding, detectUnverifiableReference, UNJUDGED_REASONS } from './services/judgeService.js'
+import { aiJudgeAnswer, selectJudgeCandidates, AI_JUDGE_ENABLED } from './services/aiJudgeService.js'
 import { normalizeSectionName, splitSubAnswers, splitOcrQuestionsBySubNo, isSubRowConsistentWithWhole } from './services/answerParseService.js'
 import { classifyQuestionLocally } from './utils/localTagger.js'
 import { finalizeGradingBatch } from './services/gradingFinalizer.js'
@@ -962,6 +963,56 @@ const markUnjudgedReasons = async (questions) => {
   }
   for (const q of questions || []) delete q._unjudged_reason
   return targets.length
+}
+
+/**
+ * 判题终裁（L3）批量入口：本地规则判不出（is_correct=null）的客观题，并发交给
+ * grok-4.5 做等价写法仲裁。选题主口径见 aiJudgeService.selectJudgeCandidates：
+ *   学生作答 + 参考答案非空可验证 + choice/fill/judge；解答题/未作答/开放题永不送裁。
+ *
+ * AI 敢下结论 → 原地改 q.is_correct / q.status / q.confidence（confidence 抬到 0.9，
+ * 让错题本的置信度闸放行，避免"判错了却进不了错题本"）；AI 不确定/失败 → 保持原状转人工。
+ *
+ * persist=true 用于题目已落库的重判链路（每题回写 DB）；落库前链路传 false（默认），
+ * 由后续 createQuestions 一并写入。失败只记日志：终裁是增强，绝不打断批改主流程。
+ */
+const aiJudgeUncertainQuestions = async (questions, { persist = false } = {}) => {
+  if (!AI_JUDGE_ENABLED) return 0
+  const targets = selectJudgeCandidates(questions)
+  if (targets.length === 0) return 0
+
+  console.log(`   [AiJudge] ${targets.length} 道规则判不出的客观题 → grok-4.5 终裁`)
+  let judged = 0
+  await Promise.allSettled(targets.map(async (q) => {
+    try {
+      const r = await aiJudgeAnswer({
+        questionType: q.question_type,
+        studentAnswer: q.student_answer,
+        referenceAnswer: q.answer,
+      })
+      if (r.isCorrect === null) {
+        console.log(`   [AiJudge] q=${String(q.id).substring(0, 8)} 终裁不下结论（${r.reason}）→ 维持待人工`)
+        return
+      }
+      q.is_correct = r.isCorrect
+      q.status = r.isCorrect ? 'correct' : 'wrong'
+      q.confidence = 0.9
+      q._ai_judged = true
+      delete q._unjudged_reason
+      judged += 1
+      console.log(`   [AiJudge] q=${String(q.id).substring(0, 8)} 题${q.question_number || ''} → ${r.isCorrect ? '正确' : '错误'}（${r.reason}）`)
+      if (persist) {
+        await query(
+          `UPDATE questions SET is_correct = $1, confidence = $2, updated_at = NOW() WHERE id = $3`,
+          [r.isCorrect, 0.9, q.id]
+        )
+      }
+    } catch (e) {
+      console.error(`   [AiJudge] q=${String(q.id).substring(0, 8)} 终裁异常 → 维持待人工:`, e.message)
+    }
+  }))
+  console.log(`   [AiJudge] 终裁完成: ${judged}/${targets.length} 题给出结论，其余维持待人工`)
+  return judged
 }
 
 /**
@@ -4662,6 +4713,9 @@ export const processWorkbookGrading = async (job) => {
 
   await updateTaskStatus(taskId, TASK_STATUS.PROCESSING, { progress: 75 })
 
+  // 判题终裁：规则判不出的客观题 → grok-4.5 仲裁（落库前执行，结论随 createQuestions 一并写入）
+  await aiJudgeUncertainQuestions(allQuestions)
+
   // 5. 保存到数据库（复用现有 createQuestions）
   // 幂等：恢复链路/重试可能对同一 task 重复执行，先清掉旧题目行防止成倍重复
   const deletedOld = await deleteQuestionsByTaskId(taskId)
@@ -5812,6 +5866,9 @@ const processAnswerBankGrading = async (job) => {
       task_id: taskId
     }))
 
+    // 判题终裁：规则判不出的客观题 → grok-4.5 仲裁（落库前执行，结论随 createQuestions 一并写入）
+    await aiJudgeUncertainQuestions(questionsWithIds)
+
     await createQuestions(questionsWithIds)
 
     // 判不出来的题：把原因落到 answer_exception_reason（观测用，不参与判定）
@@ -6384,6 +6441,9 @@ await job.updateProgress(80)
             }
             q._unjudged_reason = gradingResult.unjudgedReason
         }
+
+        // 判题终裁：规则判不出的客观题 → grok-4.5 仲裁（本链路题目已落库，persist 逐题回写）
+        await aiJudgeUncertainQuestions(questions, { persist: true })
 
         // 判不出来的题：把原因落到 answer_exception_reason，供复核页告诉老师"为什么要我来定"。
         // 原因只是观测标注，判定结果仍只由 is_correct 表达（null = AI 未判定）。

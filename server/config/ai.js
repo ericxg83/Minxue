@@ -1011,6 +1011,51 @@ export async function callVendorVisionCompletion({
   return { content, vendor: vendorName, model }
 }
 
+/**
+ * 指定供应商 + 指定模型的纯文本调用（判题终裁等场景用）。
+ * 与 callVendorVisionCompletion 的区别：不带图片；model 可显式指定（如 grok-4.5），
+ * 不传则回落到供应商 textModel。extraBody 默认沿用供应商配置，可显式传 null 覆盖 ——
+ * 关键：Huihuiyun 的供应商级 extraBody 是 reasoning_effort:'none'（sensenova 专用），
+ * grok 系列绝不能带，判题调用必须显式传 null。
+ */
+export async function callVendorTextCompletion({
+  vendorName,
+  model = null,
+  systemPrompt,
+  userText,
+  temperature = 0.2,
+  maxTokens = 1024,
+  timeout = 30000,
+  extraBody,
+}) {
+  const def = BACKUP_VENDOR_DEFS.find(v => v.name === vendorName)
+  const vendor = getResolvedVendors().find(v => v.name === vendorName)
+  if (!vendor) {
+    throw new Error(`文本供应商 ${vendorName} 未启用（缺少环境变量 ${def?.envKey || '?'}）`)
+  }
+  const apiKey = process.env[vendor.envKey]
+  const useModel = model || vendor.textModel
+  if (!useModel) throw new Error(`文本供应商 ${vendorName} 未配置 textModel`)
+  const messages = [
+    { role: 'system', content: systemPrompt },
+    { role: 'user', content: userText },
+  ]
+  const bodyExtra = extraBody !== undefined ? extraBody : (vendor.extraBody || null)
+  const content = await requestOpenAIProvider({
+    endpoint: vendor.endpoint,
+    apiKey,
+    model: useModel,
+    messages,
+    temperature,
+    maxTokens,
+    timeout,
+    retry429: true,
+    retry503: false,
+    extraBody: bodyExtra,
+  })
+  return { content, vendor: vendorName, model: useModel }
+}
+
 export async function callVisionCompletion(opts) {
   const {
     imageDataURL,
