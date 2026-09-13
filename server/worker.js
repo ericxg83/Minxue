@@ -1040,6 +1040,7 @@ const recognizeQuestions = async (imageBase64, taskId, retryCount = 0, forceMode
   try {
     let content
     let usedBackup = false
+    let usedVendor = null
     if (opts.prefetchedContent != null) {
       // 双路并发（HYBRID_VISION_ENABLED）合并完结果后，复用本函数做解析 + 闸门 + 落库字段构建，
       // 这里不能再调模型，否则等于白并发一次。
@@ -1059,10 +1060,12 @@ const recognizeQuestions = async (imageBase64, taskId, retryCount = 0, forceMode
       })
       content = res.content
       usedBackup = res.usedBackup
+      usedVendor = res.vendorName || null
     }
 
     const duration = Date.now() - startTime
-    console.log(`   AI 响应耗时: ${duration}ms${usedBackup ? ' (备用 API)' : ''}`)
+    // 打印实际命中的供应商名：否则日志只显示「备用 API」，无法确认新供应商是否真的连上了
+    console.log(`   AI 响应耗时: ${duration}ms [供应商=${usedVendor || '未知'}]${usedBackup ? ' (备用)' : ''}`)
 
     if (!content) throw new Error('AI 返回内容为空')
 

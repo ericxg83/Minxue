@@ -1069,7 +1069,7 @@ export async function callVisionCompletion(opts) {
       retry429: true,
       retry503: false,
     })
-    return { content, usedBackup: apiKey !== AI_CONFIG.API_KEY }
+    return { content, usedBackup: apiKey !== AI_CONFIG.API_KEY, vendorName: 'ModelScope' }
   }
 
   const wantedModels = model ? [model] : VL_MODELS
@@ -1131,7 +1131,7 @@ export async function callVisionCompletion(opts) {
               vendor,
               extraBody: vendor.extraBody || null,
             })
-            return { content, usedBackup: true }
+            return { content, usedBackup: true, vendorName: vendor.name }
           } catch (err) {
             err._provider = vendor.name.toLowerCase()
             throw err
@@ -1171,7 +1171,7 @@ export async function callVisionCompletion(opts) {
               vendor: gmiVendor,
               extraBody: gmiVendor.extraBody || null,
             })
-            return { content, usedBackup: true }
+            return { content, usedBackup: true, vendorName: gmiVendor.name }
           } catch (err) {
             err._provider = gmiVendor.name.toLowerCase()
             throw err
@@ -1207,7 +1207,7 @@ export async function callVisionCompletion(opts) {
               vendor,
               extraBody: vendor.extraBody || null,
             })
-            return { content, usedBackup: true }
+            return { content, usedBackup: true, vendorName: vendor.name }
           } catch (err) {
             // 打标记让 wrapVisionError 知道是哪个 vendor 失败
             err._provider = vendor.name.toLowerCase()
