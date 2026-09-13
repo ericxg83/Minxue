@@ -87,3 +87,97 @@ export const formatQuestionLabel = (questionNumber, subNo, fallbackIndex) => {
   if (fallbackIndex != null) return `第${fallbackIndex}题`
   return '题目'
 }
+
+/* ─────────────────────────────────────────────────────────────
+ * 方案 A：前置小问联动（2026-09-12 用户拍板）
+ *
+ * 「(1)对 (2)错」且 (2) 写着「在(1)的条件下」时，只有 (2) 进重练卷，
+ * 学生缺 (1) 的数值结论。解决：重练卷渲染 (2) 时，在其上方印一行
+ * 「已知：第(1)问的结果为 …」（取前置小问行 questions.answer）。
+ *
+ * 纯函数放这里与展示口径同住；查兄弟行的数据部分由调用方完成
+ * （服务端重练卷 PDF 查库；移动端暂未接数据，注入了才显示）。
+ * ───────────────────────────────────────────────────────────── */
+
+// 引用语：在(1)的条件下 / 根据(1)(2)的结果 / 由(1)可知 / 结合(1) …
+// 动词后可能跟连续多个括号标号（「根据(1)(2)的结果」同时引用两问），逐个提取
+const PREREQ_REF_RE_SOURCE = '(?:在|根据|由|结合|利用|按照|依)\\s*((?:[（(]\\s*\\d{1,2}\\s*[）)])+)'
+
+/** 提取小问题干里引用的前置小问号，如「在(1)的条件下」→ ['1']；无引用返回 [] */
+export const extractPrereqRefs = (content) => {
+  const out = []
+  const re = new RegExp(PREREQ_REF_RE_SOURCE, 'g')
+  const numRe = /[（(]\s*(\d{1,2})\s*[）)]/g
+  let m
+  while ((m = re.exec(String(content || ''))) !== null) {
+    let n
+    numRe.lastIndex = 0
+    while ((n = numRe.exec(m[1])) !== null) out.push(String(parseInt(n[1], 10)))
+  }
+  return [...new Set(out)]
+}
+
+/** 极简答案拆段：仅当 (1)(2)(3)… 从 1 开始且连续递增时才拆（与 answerParseService
+ *  的严格口径同向），拆不出返回 null。只用于展示提示，宁可不给也不给错。 */
+const splitAnswerSegmentsLoose = (ans) => {
+  const text = String(ans || '').trim()
+  if (!text) return null
+  const re = /[（(]\s*(\d{1,2})\s*[）)]/g
+  const marks = []
+  let m
+  while ((m = re.exec(text)) !== null) marks.push({ no: String(parseInt(m[1], 10)), start: m.index, end: re.lastIndex })
+  if (marks.length < 2 || marks[0].no !== '1') return null
+  // 首标记前允许 ≤6 字、不含数字与括号的短前缀（「解：」等），与后端拆分口径一致
+  if (marks[0].start > 2) {
+    const prefix = text.slice(0, marks[0].start)
+    if (!(prefix.length <= 6 && !/\d/.test(prefix) && !/[（()）]/.test(prefix))) return null
+  }
+  for (let i = 0; i < marks.length; i++) {
+    if (marks[i].no !== String(i + 1)) return null
+  }
+  return marks.map((mk, i) => ({
+    sub_no: mk.no,
+    answer: text.slice(mk.end, i + 1 < marks.length ? marks[i + 1].start : text.length).trim()
+  }))
+}
+
+const normSub = (v) => (v == null ? '' : String(v).trim())
+
+/**
+ * 计算一道小问的「前置答案提示」。
+ *
+ * @param q            当前小问题行（需含 content / task_id / page_number / question_number）
+ * @param siblingRows  同一道大题全部行的数据（含未进本卷的前置行），需含 sub_no / answer
+ * @param selectedRows 本次重练卷选中的全部行 —— 前置小问若已在卷上（会被连排渲染，
+ *                     学生自己重做），就不剧透答案。
+ * @returns [{ ref: '1', answer: 'a=5, b=6' }]；无需提示返回 []
+ */
+export const resolvePrereqHints = (q, siblingRows = [], selectedRows = []) => {
+  const refs = extractPrereqRefs(q?.content)
+  if (refs.length === 0) return []
+  const gk = getQuestionGroupKey(q)
+  if (!gk) return []
+  const selectedSubs = new Set(
+    selectedRows.filter(r => getQuestionGroupKey(r) === gk).map(r => normSub(r.sub_no))
+  )
+  const hints = []
+  for (const ref of refs) {
+    if (selectedSubs.has(ref)) continue
+    const groupRows = siblingRows.filter(r => getQuestionGroupKey(r) === gk)
+    // 优先找独立的小问行（sub_no === ref）
+    const sib = groupRows.find(r => normSub(r.sub_no) === ref)
+    let ans = sib ? (sib.answer == null ? '' : String(sib.answer).trim()) : ''
+    // 找不到独立行时，答案常存在整题行（sub_no 为空、answer 含 (1)(2) 全部分段）
+    // → 按严格口径拆段取对应小问；拆不出宁可不给，不给错
+    if (!ans) {
+      for (const whole of groupRows.filter(r => normSub(r.sub_no) === '')) {
+        const segs = splitAnswerSegmentsLoose(String(whole.answer || ''))
+        const seg = segs && segs.find(x => x.sub_no === ref)
+        if (seg && seg.answer) { ans = seg.answer; break }
+      }
+    }
+    if (!ans) continue
+    hints.push({ ref, answer: ans })
+  }
+  return hints
+}

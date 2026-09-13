@@ -18,7 +18,7 @@ import { query, TABLES } from '../config/neon.js'
 import { renderExamPDF } from './examPdfRenderer.js'
 // 多小问（题组）共享题干的展示口径：与 PC 端 / 移动端共用同一套实现，
 // 保证「重练卷上的题干」和「错题本卡片上的题干」逐字一致。
-import { resolveQuestionDisplayStem, getQuestionGroupKey } from '../utils/questionStem.js'
+import { resolveQuestionDisplayStem, getQuestionGroupKey, extractPrereqRefs, resolvePrereqHints } from '../utils/questionStem.js'
 
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
 
@@ -130,6 +130,8 @@ body { font-family:'Microsoft YaHei','PingFang SC','Noto Sans SC','SimSun',sans-
 .q-head { display:flex; gap:6px; font-size:13px; line-height:1.7; margin-bottom:2px; }
 .q-num { font-weight:bold; white-space:nowrap; min-width:26px; }
 .q-text { flex:1; word-break:break-word; }
+.q-stem { font-size:13px; line-height:1.7; margin:0 0 2px 32px; word-break:break-word; }
+.q-prereq { font-size:12px; line-height:1.7; color:#0B7285; margin:0 0 2px 32px; word-break:break-word; }
 .q-image { text-align:center; margin:6px 0 6px 32px; }
 .q-image img { max-width:100%; max-height:180px; object-fit:contain; border-radius:4px; }
 .opts { display:grid; gap:4px 14px; padding-left:32px; margin-bottom:2px; }
@@ -201,6 +203,12 @@ const buildPaperBody = ({ title, studentName, questions, qrSvg }) => {
       html += `<div class="question ${typeClass}">`
       if (parentStem && !isContinuation) {
         html += `<div class="q-stem">${renderMath(parentStem)}</div>`
+      }
+      // 方案 A：前置小问答案提示（「在(1)的条件下」→ 印出 (1) 的结果作已知条件）
+      if (Array.isArray(q._prereq_hints)) {
+        for (const h of q._prereq_hints) {
+          html += `<div class="q-prereq">已知：第(${h.ref})问的结果为 ${renderMath(h.answer)}</div>`
+        }
       }
       html += `<div class="q-head"><span class="q-num">${label}.</span><span class="q-text">${renderMath(content)}</span></div>`
       const illu = getQuestionIllustration(q)
@@ -311,6 +319,41 @@ export async function exportWrongRetryPdf({ studentId, wrongQuestionIds, publicB
     || 'https://minxue.pages.dev'
   const qrContent = `${baseUrl}/retry-task/${examId}`
   const qrSvg = makeQrSvg(qrContent)
+
+  // 3.5 方案 A（2026-09-12 用户拍板）：前置小问联动。
+  //     「(1)对 (2)错」时只有 (2) 进重练卷，而 (2) 的题干常写着「在(1)的条件下」，
+  //     学生缺 (1) 的数值结论。这里把前置小问的标准答案查出来，渲染时印成
+  //     「已知：第(1)问的结果为 …」。前置小问若本身也在本卷（会被连排、学生重做），
+  //     resolvePrereqHints 内部会自动跳过、不剧透。
+  const needGroups = new Map()
+  for (const q of active) {
+    if (!q.task_id || q.page_number == null || q.question_number == null) continue
+    if (extractPrereqRefs(q.content).length === 0) continue
+    const gk = getQuestionGroupKey(q)
+    if (!gk) continue
+    if (!needGroups.has(gk)) {
+      needGroups.set(gk, { task_id: q.task_id, page_number: q.page_number, question_number: q.question_number })
+    }
+  }
+  if (needGroups.size > 0) {
+    const tuples = [...needGroups.values()]
+    const where = tuples.map((_, i) => `($${i * 3 + 1}::uuid, $${i * 3 + 2}, $${i * 3 + 3})`).join(', ')
+    const params = []
+    for (const t of tuples) params.push(t.task_id, t.page_number, t.question_number)
+    const { rows: siblingRows } = await query(
+      `SELECT id, task_id, page_number, question_number, sub_no, answer,
+              btrim(coalesce(content, '')) AS content
+       FROM ${TABLES.QUESTIONS}
+       WHERE (task_id, page_number, question_number) IN (${where})`,
+      params
+    )
+    let injected = 0
+    for (const q of active) {
+      const hints = resolvePrereqHints(q, siblingRows, active)
+      if (hints.length > 0) { q._prereq_hints = hints; injected++ }
+    }
+    if (injected > 0) console.log(`   [RetryPDF] 前置答案提示已注入 ${injected} 题`)
+  }
 
   // 4. 拼 HTML → 出 PDF
   const html = buildExamHTML({

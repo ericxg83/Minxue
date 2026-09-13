@@ -2069,9 +2069,86 @@ const detectLessonCode = (questions, pageTitle) => {
   return null
 }
 
-export function pickAnswerUnit(answersByUnit, pageTitle, questions, pageNumber, chapterHint) {
+/**
+ * 课时编号归一：统一全角括号、去空白，用于与答案库 unit_key 做严格相等比较。
+ * 例："27.3（2）" → "27.3(2)"。
+ */
+function normalizeLessonCode(value) {
+  return String(value ?? '')
+    .replace(/[（(]/g, '(')
+    .replace(/[）)]/g, ')')
+    .replace(/\s+/g, '')
+    .trim()
+}
+
+/**
+ * 从正文小标题里抽「课时编号」（如 "27.3（2）已知图像上三点求二次函数的表达式" → "27.3(2)"）。
+ * 抽不到返回 null，调用方落回原有级联。
+ * 之所以把编号单独抽出来：同一页上编号与副标题可能互相矛盾（实测 "27.3（2）…三点…"，
+ * 而答案库里"三点"属 27.3(1)），此时整串模糊匹配必然打平，只有编号是硬锚点。
+ */
+const SECTION_LESSON_CODE_RE = /(\d{1,2}\.\d{1,2}(?:[（(]\s*\d+\s*[）)])?)/
+function extractLessonCodeFromSectionTitle(sectionTitle) {
+  const m = normalizeLessonCode(sectionTitle).match(SECTION_LESSON_CODE_RE)
+  return m ? m[1] : null
+}
+
+export function pickAnswerUnit(answersByUnit, pageTitle, questions, pageNumber, chapterHint, sectionTitle) {
   if (!answersByUnit || answersByUnit.size === 0) return null
   if (answersByUnit.size === 1) return [...answersByUnit.keys()][0]
+
+  // ── 0--) 正文小标题里的【课时编号】严格优先（2026-09-12）──
+  // 编号（"27.3(2)"）比副标题文字可靠得多。实测该页 OCR 读出
+  // "27.3（2）已知图像上三点求二次函数的表达式"，而答案库里"三点"属 27.3(1)、
+  // "27.3(2)"的副标题是"两点"——编号与副标题互相矛盾时，任何标题模糊匹配都会在
+  // (1)/(2) 之间打平后放弃（实测确认）。此时按编号严格相等定位唯一单元即可。
+  // 与既有注释同一立场："lesson_code 严格区分，远胜标题模糊匹配"。
+  // 只在【恰好一个】unit 的 key 与编号严格相等时生效，不唯一就落回原级联。
+  if (sectionTitle && typeof sectionTitle === 'string') {
+    const code = extractLessonCodeFromSectionTitle(sectionTitle)
+    if (code) {
+      const exact = [...answersByUnit.keys()].filter(uk => normalizeLessonCode(uk) === code)
+      if (exact.length === 1) {
+        console.log(`[pickAnswerUnit] section_title="${sectionTitle}" 的课时编号 "${code}" 严格唯一命中 unit="${exact[0]}"`)
+        return exact[0]
+      }
+      if (exact.length > 1) {
+        console.warn(`[pickAnswerUnit] section_title 的课时编号 "${code}" 命中 ${exact.length} 个 unit，不唯一 → 落回原级联`)
+      }
+    }
+  }
+
+  // ── 0-) 正文单元小标题优先于页眉标题（2026-09-12）──
+  // 事故：练习册页眉印的是全书通用的书名跑马灯（"新闵学校"成长·桥"练习 第01周"），
+  // OCR 提示词要求 page_title 只读页眉 → 这个值命中不了任何 unit → 整页答案挂空。
+  // 实测 3 份卷 32 道题全部 pending，占「老师被强制逐题点击」的 70%。
+  // sectionTitle 是 OCR 新增字段：正文里印着的本页课时小标题（"27.4（2）二次函数与一元二次方程（2）"）。
+  // ⚠️ 它【只在通过下面「防御 1」同一套自检】时才顶替 pageTitle —— 即它必须能被某个 unit 的
+  //    title/key 包含。拿不准就完全不改 pageTitle，退化成"和改动前逐字节一样"的行为。
+  //    因此这里补的是"锚点缺失"，不是放宽判据：后续级联（lesson_code / 题号覆盖 / 学生答案反推 /
+  //    打平放弃）全部原样生效。
+  if (sectionTitle && typeof sectionTitle === 'string' && sectionTitle.trim()) {
+    const stNorm = normalizeTitleForMatch(sectionTitle)
+    if (stNorm && stNorm.length >= 4) {
+      let stTrusted = false
+      for (const uk of answersByUnit.keys()) {
+        const secMap = answersByUnit.get(uk)
+        const sample = secMap ? [...secMap.values()][0]?.values().next()?.value : null
+        if (!sample) continue
+        const ck = normalizeTitleForMatch(sample.unit_key || uk)
+        const ct = normalizeTitleForMatch(sample.unit_title || '')
+        const ckHit = ck && (ck.includes(stNorm) || stNorm.includes(ck))
+        const ctHit = ct && (ct.includes(stNorm) || stNorm.includes(ct))
+        if (ckHit || ctHit) { stTrusted = true; break }
+      }
+      if (stTrusted) {
+        console.log(`[pickAnswerUnit] 正文小标题可信，顶替页眉标题：section_title="${sectionTitle}" (原 page_title="${pageTitle || ''}")`)
+        pageTitle = sectionTitle
+      } else {
+        console.warn(`[pickAnswerUnit] section_title="${sectionTitle}" 不与任何 unit 的 title/key 匹配，不采用（保持用 page_title）`)
+      }
+    }
+  }
 
   // ── 防御 1：pageTitle 自检 ──
   // OCR 在答卷页经常识别不到「试卷① 19.1 平方根与立方根 基础性测试」这种小标题，
@@ -2884,7 +2961,7 @@ export function resolveAnswerUnits(answersByUnit, pageDataList) {
   // ★ 修复：分组覆盖的页【仍然先走 pickAnswerUnit 完整精细链】，分组结果只作
   //   其返回 null 时的兜底，防止分组打平错锚后静默短路全部精细匹配。
   //   返回对象携带 method / groupMatched / groupTie 诊断字段，供 sectionMatch 审计。
-  const resolved = pageDataList.map(({ pageTitle, pageNumber, questions, chapterHint }, idx) => {
+  const resolved = pageDataList.map(({ pageTitle, sectionTitle, pageNumber, questions, chapterHint }, idx) => {
     const groupInfo = groupOverrides.get(pageNumber)
     const groupTie = (groupInfo && groupInfo.tieUnits) ? groupInfo.tieUnits : (groupTieMap.get(pageNumber) || null)
     const physInfo = physicalOverrides ? physicalOverrides.get(pageNumber) : null
@@ -2899,7 +2976,7 @@ export function resolveAnswerUnits(answersByUnit, pageDataList) {
         physChainPages: physInfo.chainPages,
       }
     }
-    const preciseUnit = pickAnswerUnit(answersByUnit, pageTitle, questions, pageNumber, chapterHint)
+    const preciseUnit = pickAnswerUnit(answersByUnit, pageTitle, questions, pageNumber, chapterHint, sectionTitle)
     if (preciseUnit) {
       return {
         pageNumber, unitKey: preciseUnit, idx, method: 'precise',
@@ -3691,6 +3768,7 @@ const processWorkbookGrading = async (job) => {
     // 解析 JSON
     let questions = []
     let pageTitle = null
+    let sectionTitle = null
     try {
       const jsonStr = stripCodeFence(content)
       const parsed = JSON.parse(jsonStr)
@@ -3698,6 +3776,7 @@ const processWorkbookGrading = async (job) => {
         questions = parsed
       } else if (parsed && typeof parsed === 'object') {
         pageTitle = parsed.page_title || null
+        sectionTitle = parsed.section_title || null
         // chapter_hint 是 AI 推断的章节名（"第二十章二次根式"等），用于
         // pickAnswerUnit 兜底章节匹配。即使 pageTitle 没识别到或无法匹配，
         // chapter_hint 仍可作为可靠的章节信号（AI 看过题目内容）。
@@ -3790,6 +3869,7 @@ const processWorkbookGrading = async (job) => {
     // chapterHint 来自 AI 推断（"第二十章二次根式"等），pickAnswerUnit 内部会消费它。
     pageDataList.push({
       pageTitle,
+      sectionTitle,
       imageUrl: url,
       questions,
       pageNumber: pageNo,
@@ -3837,12 +3917,14 @@ const processWorkbookGrading = async (job) => {
         if (!content) { ocrErrorsRetry++; continue }
         let questions = []
         let pageTitle = null
+        let sectionTitle = null
         try {
           const jsonStr = stripCodeFence(content)
           const parsed = JSON.parse(jsonStr)
           if (Array.isArray(parsed)) questions = parsed
           else if (parsed && typeof parsed === 'object') {
             pageTitle = parsed.page_title || null
+            sectionTitle = parsed.section_title || null
             questions = Array.isArray(parsed.questions) ? parsed.questions : []
           }
         } catch (e) {
@@ -3860,7 +3942,7 @@ const processWorkbookGrading = async (job) => {
         }
         questions = splitOcrQuestionsBySubNo(questions)
         allQuestionsRetry.push(...questions)
-        pageDataListRetry.push({ pageTitle, imageUrl: url, questions, pageNumber: pageNo, chapterHint: null })
+        pageDataListRetry.push({ pageTitle, sectionTitle, imageUrl: url, questions, pageNumber: pageNo, chapterHint: null })
         console.log(`   [Workbook] 重试第 ${pageIdx + 1} 页: 识别到 ${questions.length} 道题`)
       }
       if (allQuestionsRetry.length > 0) {
@@ -3909,7 +3991,7 @@ const processWorkbookGrading = async (job) => {
   const unitByPageNumber = new Map(resolvedUnits.map(r => [r.pageNumber, r.unitKey]))
   const resolvedByPage = new Map(resolvedUnits.map(r => [r.pageNumber, r]))
 
-  for (const { pageTitle, imageUrl, questions, pageNumber, chapterHint } of pageDataList) {
+  for (const { pageTitle, sectionTitle, imageUrl, questions, pageNumber, chapterHint } of pageDataList) {
     if (questions.length === 0) continue
     // 页级可疑标记：单元匹配经分组兜底（group-fallback）或同号多单元打平（groupTie），
     // 说明本页归属置信度低，写 is_suspicious 供 PC 端展示，避免错挂静默无感。
@@ -3997,6 +4079,7 @@ const processWorkbookGrading = async (job) => {
     pagesMatchInfo.push({
       has_title: !!pageTitle,
       page_title: pageTitle,
+      section_title: sectionTitle,
       matched_unit: matchedUnit,
       matched_method: resolvedInfo.method || null,
       group_tie_units: resolvedInfo.groupTie || null,
@@ -4529,6 +4612,7 @@ const processAnswerBankGrading = async (job) => {
       let content = null
       let questions = []
       let pageTitle = null
+      let sectionTitle = null
       let chapterHint = null
       const maxAttempts = (AI_CONFIG.MAX_RETRIES || 0) + 1
       let ocrLastError = ''
@@ -4558,11 +4642,13 @@ const processAnswerBankGrading = async (job) => {
           const parsed = JSON.parse(jsonStr)
           questions = []
           pageTitle = null
+          sectionTitle = null
           chapterHint = null
           if (Array.isArray(parsed)) {
             questions = parsed
           } else if (parsed && typeof parsed === 'object') {
             pageTitle = parsed.page_title || null
+            sectionTitle = parsed.section_title || null
             chapterHint = parsed.chapter_hint || null
             questions = Array.isArray(parsed.questions) ? parsed.questions : []
             if (chapterHint) {
@@ -4631,6 +4717,7 @@ const processAnswerBankGrading = async (job) => {
       totalQuestions += questions.length
       pageDataList.push({
         pageTitle,
+        sectionTitle,
         pageNumber,
         imageUrl: pages[pageIdx]?.imageUrl || null,
         questions,

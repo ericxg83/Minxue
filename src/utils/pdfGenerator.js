@@ -259,6 +259,7 @@ ${s}.q-head{display:flex;gap:6px;font-size:13px;line-height:1.7;margin-bottom:2p
 ${s}.q-num{font-weight:bold;white-space:nowrap;min-width:26px}
 ${s}.q-text{flex:1;word-break:break-word}
 ${s}.q-stem{font-size:13px;line-height:1.7;margin:0 0 2px 32px;word-break:break-word}
+${s}.q-prereq{font-size:12px;line-height:1.7;color:#0B7285;margin:0 0 2px 32px;word-break:break-word}
 ${s}.q-image{text-align:center;margin:4px 0 4px 32px}
 ${s}.q-image img{max-width:100%;max-height:180px;object-fit:contain;border-radius:4px}
 ${s}.opts{display:grid;gap:4px 14px;padding-left:32px;margin-bottom:2px}
@@ -302,6 +303,12 @@ export function buildPaperBody({ title, studentName, questions, showAnswers }) {
       html += `<div class="question ${typeClass}">`
       if (parentStem && !isContinuation) {
         html += `<div class="q-stem">${renderContent(parentStem)}</div>`
+      }
+      // 方案 A：前置小问答案提示（数据由调用方注入 q._prereq_hints；暂无数据时不渲染）
+      if (Array.isArray(q._prereq_hints)) {
+        for (const h of q._prereq_hints) {
+          html += `<div class="q-prereq">已知：第(${h.ref})问的结果为 ${renderContent(h.answer)}</div>`
+        }
       }
       html += `<div class="q-head"><span class="q-num">${qLabel}.</span><span class="q-text">${renderContent(content)}</span></div>`
       const illustration = q._illustration_resolved ?? getQuestionIllustration(q)

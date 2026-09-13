@@ -1,6 +1,6 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
-import { judgeAnswer, normalizeChoiceAnswer, normalizeQuestionType, stripAnswerScaffolding } from '../server/services/judgeService.js'
+import { judgeAnswer, normalizeChoiceAnswer, normalizeQuestionType, stripAnswerScaffolding, sanitizeReferenceAnswer } from '../server/services/judgeService.js'
 
 test('normalizes explicit choice answer variants globally', () => {
   assert.equal(normalizeChoiceAnswer('D'), 'D')
@@ -181,4 +181,108 @@ test('answer-statement (答:) final results match reference', () => {
   assert.deepEqual(
     judgeAnswer('解: 2|18 30\n答:最小公倍数是90', '90,126', 'answer'),
     { isCorrect: false, unrecognized: false })
+})
+
+// ─────────────────────────────────────────────────────────────
+// 判等层加固（2026-09-12）：用人工复核结论做基准回测定位出的 4 类纯匹配缺陷。
+// 基准：近 30 天 180 道人工复核题，假错 96 → 74，假对不增，一致率 24% → 36%。
+// 每组都同时锁「应判对」与「不得放水」两侧。
+// ─────────────────────────────────────────────────────────────
+
+// 缺陷 1：normalizeAnswer 的尾部标点剥离会把 '>' '<' '=' 吃成空串。
+// "用 > < = 填空"是常见题型，学生与标准逐字相同却判不出（实测 7 例）。
+test('pure comparison-symbol answers survive punctuation strip', () => {
+  assert.deepEqual(judgeAnswer('>', '>', 'fill'), { isCorrect: true, unrecognized: false })
+  assert.deepEqual(judgeAnswer('>', '＞', 'fill'), { isCorrect: true, unrecognized: false })
+  assert.deepEqual(judgeAnswer('=', '“=”', 'fill'), { isCorrect: true, unrecognized: false })
+  assert.deepEqual(judgeAnswer('<', '<', 'fill'), { isCorrect: true, unrecognized: false })
+  // 不得放水：符号不同仍判错
+  assert.deepEqual(judgeAnswer('>', '<', 'fill'), { isCorrect: false, unrecognized: false })
+  assert.deepEqual(judgeAnswer('=', '>', 'fill'), { isCorrect: false, unrecognized: false })
+  // 纯标点不是答案（归一化后两侧都空，不得判对）
+  assert.deepEqual(judgeAnswer('。', '。', 'fill'), { isCorrect: false, unrecognized: false })
+  assert.deepEqual(judgeAnswer(',', ',', 'fill'), { isCorrect: false, unrecognized: false })
+})
+
+// 缺陷 2：isMathEquivalent 内部不认识 \frac / \sqrt，表达式含 '\' 让 new Function
+// 抛 SyntaxError → 整个数学等价分支恒为 false（实测 9 例）。
+test('math equivalence understands LaTeX fractions and roots', () => {
+  assert.deepEqual(
+    judgeAnswer('y = -\\frac{1}{3}(x + 3)^2', 'y = -1/3(x + 3)²', 'fill'),
+    { isCorrect: true, unrecognized: false })
+  assert.deepEqual(
+    judgeAnswer('y = -\\frac{1}{3}x^2 + 3', 'y = -1/3x² + 3', 'fill'),
+    { isCorrect: true, unrecognized: false })
+  assert.deepEqual(
+    judgeAnswer('\\sqrt{2}', '√2', 'fill'),
+    { isCorrect: true, unrecognized: false })
+  // 不得放水
+  assert.deepEqual(
+    judgeAnswer('y = -\\frac{1}{3}(x + 3)^2', 'y = -1/3(x - 3)²', 'fill'),
+    { isCorrect: false, unrecognized: false })
+  // 带整数前缀的 \frac 是真混合数（2又1/3 = 7/3），不得被算成 2×(1/3)
+  assert.deepEqual(judgeAnswer('2\\frac{1}{3}', '7/3', 'fill'), { isCorrect: true, unrecognized: false })
+  assert.deepEqual(judgeAnswer('2\\frac{1}{3}', '2/3', 'fill'), { isCorrect: false, unrecognized: false })
+})
+
+// 缺陷 3：U+2212 排版减号未归一 → 归一化后两侧仍带不同字符，
+// isMathEquivalent 又因非法运算符抛错（实测 5 例）。
+test('U+2212 minus sign and dash variants are normalized', () => {
+  assert.deepEqual(judgeAnswer('−1/2', '-1/2', 'fill'), { isCorrect: true, unrecognized: false })
+  assert.deepEqual(judgeAnswer('x=−3', 'x=-3', 'fill'), { isCorrect: true, unrecognized: false })
+  // 不得放水（用不含数字的表达式，避开下面记录的既有"数字集合吞符号"通道）
+  assert.deepEqual(judgeAnswer('−a + b', 'a + b', 'fill'), { isCorrect: false, unrecognized: false })
+  assert.deepEqual(judgeAnswer('-2−√6或2+√6', '2', 'fill'), { isCorrect: false, unrecognized: false })
+})
+
+// 缺陷 4：列举型答案只差分隔符（"1.2.3.4.6.12" vs "1、2、3、4、6、12"、
+// "①④⑤" vs "应为①、④、⑤"）。只在两侧 ≥3 段且每段都是纯整数/带圈数字时生效。
+test('enumerated answers differing only in separators', () => {
+  assert.deepEqual(judgeAnswer('1.2.3.4.6.12', '1、2、3、4、6、12', 'fill'), { isCorrect: true, unrecognized: false })
+  assert.deepEqual(judgeAnswer('9.18.27.36', '9, 18, 27, 36', 'fill'), { isCorrect: true, unrecognized: false })
+  assert.deepEqual(judgeAnswer('①④⑤', '①,④,⑤', 'fill'), { isCorrect: true, unrecognized: false })
+  assert.deepEqual(judgeAnswer('①, ④, ⑤', '应为①、④、⑤', 'fill'), { isCorrect: true, unrecognized: false })
+  // 不得放水：元素不同 / 段数不同 / 只有两段（"3.5" 与 "3,5" 语义不同）
+  assert.deepEqual(judgeAnswer('1.2.3.4.6.12', '1、2、3、4、6、18', 'fill'), { isCorrect: false, unrecognized: false })
+  assert.deepEqual(judgeAnswer('①④⑤', '①④⑥', 'fill'), { isCorrect: false, unrecognized: false })
+  assert.deepEqual(judgeAnswer('3.5', '3,5', 'fill'), { isCorrect: false, unrecognized: false })
+  assert.deepEqual(judgeAnswer('16', '1、2、3、4、6、12', 'fill'), { isCorrect: false, unrecognized: false })
+})
+
+// 答案层：答案库把「答案 + 解析」粘成一串（'-1/4 解析：设直线 AB…'），
+// 整串逐串比对必然判错。sanitizeReferenceAnswer 在第一个解析标记处截断，
+// 四道闸门保证不把正常长答案切坏、也不让纯叙述残句变成"答案"。
+// 实测覆盖面：998 题里 11 条会被截断，收益上限 2 条，与老师结论 0 冲突（安全但收益小）。
+test('sanitizeReferenceAnswer truncates at first explanation marker', () => {
+  assert.equal(
+    sanitizeReferenceAnswer('-1/4 解析：设直线 AB 与 y 轴交于点 D，如图，则 D(0,-3)。∵'),
+    '-1/4')
+  assert.equal(
+    sanitizeReferenceAnswer('-1 或 -6 解析：∵二次函数 y=-(x+h)² 的图像开口向下'),
+    '-1 或 -6')
+  assert.equal(
+    sanitizeReferenceAnswer('B 解析：∵抛物线 y₁=-(x-a)² 经过点 A(c,m)，∴m=-(c-a)²'),
+    'B')
+  // 无解析标记 → 原样返回
+  assert.equal(sanitizeReferenceAnswer('y = -1/3(x + 3)²'), 'y = -1/3(x + 3)²')
+  assert.equal(sanitizeReferenceAnswer(''), '')
+  // 标记在开头 → 不截（片段为空）
+  assert.equal(sanitizeReferenceAnswer('解析：见课本第 12 页'), '解析：见课本第 12 页')
+  // 片段超过 20 字符 → 不截，避免把正常长答案切坏
+  const longHead = '这是一个长度明显超过二十个字符的答案片段内容描述文字 解析：说明如下'
+  assert.equal(sanitizeReferenceAnswer(longHead), longHead)
+  // 纯叙述残句不含数学字符 → 不成其为答案
+  assert.equal(
+    sanitizeReferenceAnswer('不对，因为274不能被4整除，而每个小组折的纸鹤数量相同'),
+    '不对，因为274不能被4整除，而每个小组折的纸鹤数量相同')
+})
+
+test('reference truncation only adds correct verdicts, never loosens a wrong one', () => {
+  const ref = '-1/4 解析：设直线 AB 与 y 轴交于点 D，如图，则 D(0,-3)。∵'
+  assert.deepEqual(judgeAnswer('-1/4', ref, 'answer'), { isCorrect: true, unrecognized: false })
+  // 学生答错时截断通道不得把他判对。
+  // 注意：不要用 '1/4' 做对照——'1/4' 与 '-1/4' 会被 extractAndCompare 的
+  // "数字集合兜底"判成相等（该兜底会丢负号，是既有缺陷，与本次改动无关）。
+  assert.deepEqual(judgeAnswer('3/4', ref, 'answer'), { isCorrect: false, unrecognized: false })
+  assert.deepEqual(judgeAnswer('-1/3', ref, 'answer'), { isCorrect: false, unrecognized: false })
 })

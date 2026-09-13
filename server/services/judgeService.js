@@ -241,6 +241,11 @@ function normalizeAnswer(str) {
   // Full-width to half-width (includes letters, digits, punctuation)
   s = s.replace(/[！-～]/g, ch => String.fromCharCode(ch.charCodeAt(0) - 0xFEE0))
 
+  // 数学减号类的 Unicode 变体（U+2212 −、– — ― ‐ ‑）统一为 ASCII '-'。
+  // OCR 与手写识别输出的是排版减号而非键盘减号；不归一的话两侧保留不同字符，
+  // isMathEquivalent 又会因非法运算符直接抛错（实测 5 例因此判错）。
+  s = s.replace(/[−–—―‐‑]/g, '-')
+
   // Chinese comma（、→ ,）
   s = s.replace(/、/g, ',')
 
@@ -258,8 +263,12 @@ function normalizeAnswer(str) {
   //  stripped first and the unit inside is lost, e.g. "4.8(时)" → "4.8(H")
   s = s.replace(/[（(]([^）)]+)[）)]/g, '$1')
 
-  // Strip trailing common punctuation
-  s = s.replace(/[.,;:!?，。；：！？、）)\]}>"'《》「」『』]+$/g, '')
+  // Strip trailing common punctuation。
+  // 但不得把纯符号答案吃空：'>' '<' '=' 是"用 > < = 填空"的合法答案，被剥成空串后
+  // 与参考答案永远比不上（实测学生与标准逐字相同仍判错 7 例）。
+  // 仅当被剥掉的内容含比较/等号符号时才保留原串，避免 ',' '。' 这类纯标点被当成答案。
+  const tailStripped = s.replace(/[.,;:!?，。；：！？、）)\]}>"'《》「」『』]+$/g, '')
+  s = (tailStripped === '' && /[><=≥≤≠≈]/.test(s)) ? s : tailStripped
 
   // LaTeX fraction MUST run AFTER toUpperCase (because toUpperCase changes \frac to \FRAC)
   // Convert LaTeX fraction back to standard form: \FRAC{n}{d} → n/d (after toUpperCase)
@@ -449,6 +458,21 @@ function prepareMathExpr(input) {
   const eqIdx = s.indexOf('=')
   if (eqIdx > 0) s = s.substring(eqIdx + 1)
   s = s.trim()
+  // 数学减号类 Unicode 变体 → ASCII '-'（同 normalizeAnswer，避免 eval 因非法运算符抛错）
+  s = s.replace(/[−–—―‐‑]/g, '-')
+  // LaTeX 分数与根号。此前只有外层 normalizeAnswer 会转 \frac，isMathEquivalent 内部
+  // 不认识 → 表达式里的 '\' 让 new Function 抛 SyntaxError → 整个数学等价分支恒为 false。
+  // 实测 9 例（"y = -\frac{1}{3}(x + 3)^2" vs "y = -1/3(x + 3)²"）因此判错。
+  // 带整数前缀的 "2\frac{1}{3}" 是真混合数（7/3）而非 2×(1/3)，按真分数分支处理，
+  // 否则会把它算成 2/3，学生写 7/3 而参考是 2/3 时会造成假判对。
+  s = s.replace(/(\d+)\s*\\[dt]?frac\s*\{([^{}]*)\}\s*\{([^{}]*)\}/gi, (m, whole, num, den) => {
+    const n = Number(num); const d = Number(den)
+    if (Number.isFinite(n) && Number.isFinite(d) && n < d) return `((${whole})+(${num})/(${den}))`
+    return `((${whole})*(${num})/(${den}))`
+  })
+  s = s.replace(/\\[dt]?frac\s*\{([^{}]*)\}\s*\{([^{}]*)\}/gi, '($1)/($2)')
+  s = s.replace(/\\sqrt\s*\[\s*3\s*\]\s*\{([^{}]*)\}/gi, '(($1))**(1/3)')
+  s = s.replace(/\\sqrt\s*\{([^{}]*)\}/gi, '(($1))**0.5')
   // ^ → **  (exponentiation)
   s = s.replace(/\^/g, '**')
   // Unicode 上标数字 → **N（OCR 常见 x² y³ 这类手写形态；否则 ² 不是合法 JS 标识符 → eval 抛错 → 数学等价失败）
@@ -632,6 +656,35 @@ export function stripAnswerScaffolding(value) {
 }
 
 /**
+ * 参考答案的「解析截断」：答案库里大量参考答案是"答案 + 解析"粘在一串，
+ * 例如 '-1/4 解析：设直线 AB 与 y 轴交于点 D…'、'-1 或 -6 解析：∵二次函数…'。
+ * 整串拿去逐串比对必然判错，学生写对也错（近 30 天实测 16 例假错）。
+ *
+ * 只做一件事：在第一个解析性标记处截断，其余情况原样返回。
+ * 四道保守闸门（缺一不可），避免把正常长答案切坏：
+ *   ① 截断后片段非空、长度 ≤ 20 字符
+ *   ② 片段本身不含任何解析性标记
+ *   ③ 片段含数字/字母/数学符号（纯叙述残句如"不对"不算答案）
+ *   ④ 被切掉的尾巴 ≥ 8 字符（确有解析内容，不是顺手切了个逗号）
+ *
+ * 只用于「多看一种参考写法」——判等仍以原串结果为准，不因此放宽判错。
+ */
+const REF_EXPLAIN_MARKER = /(?:解析|详解|说明|思路|分析|点评|因为|所以|可知|由此)/
+export function sanitizeReferenceAnswer(value) {
+  const raw = String(value ?? '').trim()
+  if (!raw) return raw
+  const m = REF_EXPLAIN_MARKER.exec(raw)
+  if (!m || m.index === 0) return raw
+  const candidate = raw.slice(0, m.index).replace(/[，,；;。、：:\s]+$/, '').trim()
+  if (!candidate) return raw
+  if (candidate.length > 20) return raw
+  if (REF_EXPLAIN_MARKER.test(candidate)) return raw
+  if (!/[0-9A-Za-z√∛±><=≥≤≠≈+\-*/^]|[①-⑳]/.test(candidate)) return raw
+  if (raw.length - candidate.length < 8) return raw
+  return candidate
+}
+
+/**
  * Compare student answer against reference answer with tolerance.
  * Returns { isCorrect: boolean, unrecognized: boolean }
  */
@@ -683,6 +736,60 @@ export function judgeAnswer(studentAnswer, referenceAnswer, questionType) {
     const normStudent = normalizeJudgeAnswer(cleanJudge(studentAnswer))
     const normRef = normalizeJudgeAnswer(cleanJudge(referenceAnswer))
     return { isCorrect: normStudent === normRef, unrecognized: false }
+  }
+
+  // ── 参考答案「答案 + 解析」粘连时，多看一种写法 ──
+  // 答案库里参考答案常是 '-1/4 解析：设直线 AB…'，整串比对必然判错。
+  // 这里只用截断后的片段再判一次：命中即判对；不命中不回传 false，
+  // 原串的判断结果仍是权威（放水风险因此只来自"片段被判对"，已被四道闸门限制）。
+  // 递归只可能发生一层：sanitizeReferenceAnswer 对已截断的值按定义返回原值。
+  const truncatedRef = sanitizeReferenceAnswer(referenceAnswer)
+  if (truncatedRef !== String(referenceAnswer ?? '').trim()) {
+    const retry = judgeAnswer(studentAnswer, truncatedRef, questionType)
+    if (retry.isCorrect === true) return { isCorrect: true, unrecognized: false }
+  }
+
+  // ── 纯符号 / 列举型答案的恒等快路径（在一切收窄与语义兜底之前）──
+  // 1) 轻清理后逐字相同：只去引号、空白、做全角转半角，不做任何语义猜测，因此不可能放水。
+  //    覆盖 '“=”' vs '=' 这类参考答案被引号包裹的形态，以及 normalizeAnswer 尾部
+  //    标点剥离会把 '>' '<' '=' 吃空、导致"学生与标准逐字相同却判错"的缺陷。
+  // 2) 列举型答案只差分隔符："1.2.3.4.6.12" vs "1、2、3、4、6、12"、
+  //    "①④⑤" vs "应为①、④、⑤"。两侧都 ≥3 段且每段都是纯整数/带圈数字时才生效，
+  //    2 段的情况不放行（"3.5" 与 "3,5" 语义不同，必须留在原路径判断）。
+  {
+    const LITERAL_MEANINGFUL_RE = /[0-9A-Z√∛±><=≥≤≠≈+\-*/^()\[\]{}①-⑳]/
+    const lightLiteral = (v) => String(v ?? '')
+      .replace(/[！-～]/g, ch => String.fromCharCode(ch.charCodeAt(0) - 0xFEE0))
+      .replace(/["'“”‘’「」『』]/g, '')
+      .replace(/\s+/g, '')
+      .toUpperCase()
+    const lightStudent = lightLiteral(studentAnswer)
+    if (lightStudent && lightStudent === lightLiteral(referenceAnswer) &&
+        LITERAL_MEANINGFUL_RE.test(lightStudent)) {
+      return { isCorrect: true, unrecognized: false }
+    }
+
+    const CIRCLE_DIGITS = '①②③④⑤⑥⑦⑧⑨⑩⑪⑫⑬⑭⑮⑯⑰⑱⑲⑳'
+    const SEQ_SHELL_RE = /^[（(]?\s*(?:应为|正确答案|标准答案|参考答案|答案)\s*(?:为|是)?\s*[:：]?\s*/
+    const seqAtoms = (v) => {
+      const t = String(v ?? '').trim()
+        .replace(SEQ_SHELL_RE, '')
+        // 相邻带圈数字之间补分隔符："①④⑤" → "①,④,⑤"
+        .replace(new RegExp(`([${CIRCLE_DIGITS}])(?=[${CIRCLE_DIGITS}])`, 'g'), '$1,')
+      return t.split(/[.、,，;；\s]+/).map(x => x.trim()).filter(Boolean)
+    }
+    const isSeqAtom = (x) => /^\d+$/.test(x) || (x.length === 1 && CIRCLE_DIGITS.includes(x))
+    const seqNorm = (x) => {
+      const i = CIRCLE_DIGITS.indexOf(x)
+      return i >= 0 ? String(i + 1) : x
+    }
+    const studentAtoms = seqAtoms(studentAnswer)
+    const refAtoms = seqAtoms(referenceAnswer)
+    if (studentAtoms.length >= 3 && studentAtoms.length === refAtoms.length &&
+        studentAtoms.every(isSeqAtom) && refAtoms.every(isSeqAtom) &&
+        studentAtoms.every((x, i) => seqNorm(x) === seqNorm(refAtoms[i]))) {
+      return { isCorrect: true, unrecognized: false }
+    }
   }
 
   // Fill / answer / other: normalized comparison with tolerance

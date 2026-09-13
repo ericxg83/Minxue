@@ -7,7 +7,9 @@ import {
   isStemContainedInContent,
   resolveQuestionDisplayStem,
   getQuestionGroupKey,
-  formatQuestionLabel
+  formatQuestionLabel,
+  extractPrereqRefs,
+  resolvePrereqHints
 } from '../server/utils/questionStem.js'
 import * as feMirror from '../src/utils/questionStem.js'
 import { splitOcrQuestionsBySubNo, isSubRowConsistentWithWhole, splitSubAnswers } from '../server/services/answerParseService.js'
@@ -191,4 +193,60 @@ test('重练卷 PDF 渲染公共题干（连排去重 + 题组编号）', () => 
   assert.ok(svc.includes('ORDER BY q.page_number NULLS LAST'), '小问必须相邻，否则连排失效')
   assert.ok(svc.includes('q-stem'), 'PDF 模板应有公共题干样式')
   assert.ok(svc.includes('isContinuation'), '应有连排判定（同大题只渲染一次公共题干）')
+})
+
+// ── 方案 A：前置小问联动（「在(1)的条件下」→ 印出 (1) 的结果作已知条件）──
+
+test('extractPrereqRefs：识别各类前置引用语', () => {
+  assert.deepEqual(extractPrereqRefs('(2)在(1)的条件下，若a=4,b=6，求最大值.'), ['1'])
+  assert.deepEqual(extractPrereqRefs('(3)根据(1)(2)的结果，证明结论.'), ['1', '2'])
+  assert.deepEqual(extractPrereqRefs('(2)由(1)可知，求a的值.'), ['1'])
+  assert.deepEqual(extractPrereqRefs('(2)求四边形EFGH的面积的最大值.'), [], '无引用不误报')
+  assert.deepEqual(extractPrereqRefs('(2)结合(2)的内容再算一遍.'), ['2'], '引用自身也不误报为缺失')
+})
+
+const GRP = { task_id: 't1', page_number: 2, question_number: 10 }
+const mkGroup = (overrides) => ({
+  task_id: 't1', page_number: 2, question_number: 10,
+  ...overrides
+})
+
+test('resolvePrereqHints：前置小问已在重练卷 → 不剧透（连排自会重做）', () => {
+  const q = mkGroup({ sub_no: '2', content: '(2)在(1)的条件下，求顶点坐标。' })
+  const sibs = [mkGroup({ sub_no: '1', answer: 'y=x²-4x+3' }), q]
+  const hints = resolvePrereqHints(q, sibs, sibs)
+  assert.deepEqual(hints, [])
+})
+
+test('resolvePrereqHints：前置小问不在卷上 → 注入其标准答案', () => {
+  const q = mkGroup({ sub_no: '2', content: '(2)在(1)的条件下，求顶点坐标。' })
+  const sibling = mkGroup({ sub_no: '1', answer: 'y=x²-4x+3' })
+  const hints = resolvePrereqHints(q, [sibling], [q])
+  assert.equal(hints.length, 1)
+  assert.equal(hints[0].ref, '1')
+  assert.equal(hints[0].answer, 'y=x²-4x+3')
+})
+
+test('resolvePrereqHints：前置行是整题行（sub_no 为空）→ 拆段取对应小问', () => {
+  const q = mkGroup({ sub_no: '2', content: '(2)在(1)的条件下，求顶点坐标。' })
+  const whole = mkGroup({ sub_no: null, answer: '解：(1) y=x²-4x+3 (2) 顶点为(2,-1)' })
+  const hints = resolvePrereqHints(q, [whole], [q])
+  assert.equal(hints.length, 1)
+  assert.equal(hints[0].answer, 'y=x²-4x+3')
+})
+
+test('resolvePrereqHints：整题行拆不出严格分段 / 前置行无答案 → 宁可不提示', () => {
+  const q = mkGroup({ sub_no: '2', content: '(2)在(1)的条件下，求顶点坐标。' })
+  // 标号从 2 开始（缺 (1) 段），严格口径不拆
+  const messy = mkGroup({ sub_no: null, answer: '(2) 顶点为(2,-1)' })
+  assert.deepEqual(resolvePrereqHints(q, [messy], [q]), [])
+  // 前置行没有答案文本
+  const noAns = mkGroup({ sub_no: '1', answer: null })
+  assert.deepEqual(resolvePrereqHints(q, [noAns], [q]), [])
+})
+
+test('resolvePrereqHints：无引用语 / 缺组键 → 不注入', () => {
+  const plain = mkGroup({ sub_no: '2', content: '(2)求四边形EFGH的面积的最大值.' })
+  assert.deepEqual(resolvePrereqHints(plain, [], [plain]), [])
+  assert.deepEqual(resolvePrereqHints({ content: '(2)在(1)的条件下。' }, [], []), [])
 })
