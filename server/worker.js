@@ -2239,10 +2239,14 @@ export const processSlimGrading = async (job) => {
         .filter((r) => r.isCorrect !== null)
         .map((r) => ({ questionId: r.questionId, isCorrect: r.isCorrect }))
       const gradePayload = { id: generatedExamId, studentId, results: gradeResults }
-      await callGradeEndpoint(gradePayload).catch((e) => {
-        console.error('[Slim] 自动批改提交失败:', e.message)
-      })
-      console.log(`\n🔹 [Slim] 全自动判定完成：${autoCount} 题，组卷已标记 graded`)
+      // 不能用 .catch() 吞掉：这条调用是「组卷已结算」的唯一落库入口，
+      // 失败时若仍打印"已标记 graded"会误导排查（2026-09-14 事故里就是这么掩盖的）。
+      try {
+        await callGradeEndpoint(gradePayload)
+        console.log(`\n🔹 [Slim] 全自动判定完成：${autoCount} 题，组卷已标记 graded`)
+      } catch (e) {
+        console.error(`\n🔹 [Slim] 全自动判定完成：${autoCount} 题，但组卷结算失败（卷仍为待复核）:`, e.message)
+      }
     } else {
       // 存在需人工判定的题：整卷保持未批改，老师在组卷历史逐题改判后保存
       console.log(`\n🔹 [Slim] 存在 ${manualCount} 道需人工判定题，整卷保持未批改，等待改判`)

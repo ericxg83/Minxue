@@ -204,6 +204,14 @@ watch(() => store.wrongBookNotices.length, (len) => {
   store.clearWrongBookNotices()
 })
 
+// 逐题改到最后一道时触发的「自动完成复核」落库失败 → 必须让老师看到失败。
+// 这条路径没有按钮点击事件可以 catch，故由 store 抛到队列、这里消费。
+watch(() => store.saveError, (err) => {
+  if (!err) return
+  ElMessage.error(`试卷状态保存失败：${err.message}。题目判定已保留，请重新点击「${store.reviewConfig.completeLabel}」重试。`)
+  store.saveError = null
+})
+
 // 当 store 中 currentTask 变化时同步下拉框
 watch(() => store.currentTask?.id, (id) => {
   selectedTaskId.value = id || ''
@@ -279,8 +287,11 @@ const doComplete = async () => {
       : '可点击「📌 留底为答案库」沉淀答案；当前学生已无待复核试卷'
     ElMessage.info(tip)
   } catch (err) {
+    // 落库失败时绝不能提示成功：completeTaskReview 现在会把服务端错误原样抛出，
+    // 这里把真实原因展示给老师（过去一律吞掉 → 界面说成功、库里没写）。
     console.error('保存失败:', err)
-    ElMessage.error('保存失败，请重试')
+    const detail = err?.response?.data?.error || err?.message || ''
+    ElMessage.error(detail ? `保存失败：${detail}` : '保存失败，请重试')
   }
 }
 

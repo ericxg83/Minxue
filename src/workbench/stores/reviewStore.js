@@ -72,6 +72,13 @@ export const useReviewStore = defineStore('review', () => {
   // store 只负责收集，弹提示由 UI 层（ReviewTopBar）消费，避免 store 依赖 UI 组件库。
   const wrongBookNotices = ref([]) // [{ questionId, index, status, reason, message, issues, at }]
 
+  // 「完成复核」落库失败的通知（逐题改到最后一道触发的自动完成路径用）。
+  // 与 wrongBookNotices 同样：store 只收集，弹提示由 UI 层消费。
+  // 存在的意义是杜绝「假成功」——落库失败时界面必须让老师看到失败，
+  // 而不是显示已复核却什么都没写进去（2026-09-14 错题再测-0911 事故）。
+  // 存对象并带 at：连续两次同样原因的失败也要各弹一次（用纯字符串会被 watch 去重）。
+  const saveError = ref(null) // { message, at }
+
   // ReviewTopBar 触发「去编辑」时记录的待编辑题目，QuestionDetailPanel 监听后打开编辑面板
   const pendingEditQuestionId = ref(null)
 
@@ -565,12 +572,23 @@ export const useReviewStore = defineStore('review', () => {
       openWrongGate(list)
       return
     }
+    // 落库失败必须中断：不标记本地已复核、不跳下一份，并把错误交给 UI 提示。
+    // 否则老师看到的「已复核」只是内存状态，库里仍是待复核（假成功）。
+    const persistAll = async (tasks) => {
+      for (const task of tasks) {
+        await persistTaskCompletion(task)
+      }
+    }
     // 聚合模式：一次性完成所有待复核任务
     const isAggregated = source.value === 'image' && Object.keys(questionToTaskMap.value).length > 0
     if (isAggregated) {
       const pending = studentTasks.value.filter(isPendingReviewTask)
-      for (const task of pending) {
-        await persistTaskCompletion(task)
+      try {
+        await persistAll(pending)
+      } catch (e) {
+        console.error('自动完成复核保存失败:', e)
+        saveError.value = { message: e?.response?.data?.error || e?.message || '保存失败，请重试', at: Date.now() }
+        return
       }
       if (currentStudent.value?.id) {
         clearStudentCaches(currentStudent.value.id)
@@ -584,7 +602,13 @@ export const useReviewStore = defineStore('review', () => {
       return
     }
     // 原有单试卷流程
-    await persistTaskCompletion(currentTask.value)
+    try {
+      await persistTaskCompletion(currentTask.value)
+    } catch (e) {
+      console.error('自动完成复核保存失败:', e)
+      saveError.value = { message: e?.response?.data?.error || e?.message || '保存失败，请重试', at: Date.now() }
+      return
+    }
     markTaskReviewedLocally(currentTask.value)
     if (currentStudent.value?.id) {
       clearStudentCaches(currentStudent.value.id)
@@ -940,6 +964,16 @@ export const useReviewStore = defineStore('review', () => {
   // 持久化「完成复核」：按数据来源分支落库
   // - image：刷新任务统计 + 标记 task=reviewed
   // - paper：按各题正误调用 gradeGeneratedExam（掌握度进阶 + 标记 exam=graded）
+  //
+  // [2026-09-14 修复] 核心状态写入不再静默失败。
+  //   旧实现对 gradeGeneratedExam / updateTaskStatus 一律 `.catch(console.error)`，
+  //   于是后端报错时前端照常弹「试卷复核完成，已保存」并把本地 task 乐观标成
+  //   reviewed，但库里状态根本没变 → 左侧列表仍是「待复核」、移动端仍是「待完成」；
+  //   更糟的是每次重试都会把 wrong_questions 的 lifecycle / practice_count 重复
+  //   推进一遍（已经推进过的那部分 SQL 先提交了），制造假掌握。
+  //   （2026-09-14 错题再测-0911 事故）
+  //   现在：核心写入异常一律向上抛 → completeTaskReview 不标记本地已复核 →
+  //   UI 弹「保存失败」，老师能立刻知道并重试，而不是被假成功误导。
   const persistTaskCompletion = async (task) => {
     if (!task) return
     if (source.value === 'paper') {
@@ -951,19 +985,16 @@ export const useReviewStore = defineStore('review', () => {
         }))
         .filter(r => r.isCorrect != null)
       if (results.length > 0 && currentStudent.value?.id) {
-        await gradeGeneratedExam(task.id, currentStudent.value.id, results).catch(e =>
-          console.error('保存练习卷批改结果失败:', e.message)
-        )
+        await gradeGeneratedExam(task.id, currentStudent.value.id, results)
       }
       return
     }
-    // image 模式
+    // image 模式：统计是派生数据，刷新失败不阻塞复核结论；
+    // 但 task 状态是复核结论本身，必须写成功，失败即抛出。
     await recalculateTaskStats(task.id).catch(e =>
-      console.error('刷新统计数据失败:', e.message)
+      console.warn('刷新统计数据失败（不影响复核结论）:', e.message)
     )
-    await updateTaskStatus(task.id, 'reviewed').catch(e =>
-      console.error('保存复核状态失败:', e.message)
-    )
+    await updateTaskStatus(task.id, 'reviewed')
   }
 
   // 结合人工复核结果得到每题最终正误（供 paper 提交）
@@ -1140,6 +1171,7 @@ export const useReviewStore = defineStore('review', () => {
     wrongGateList,
     wrongBookNotices,
     clearWrongBookNotices,
+    saveError,
     pendingEditQuestionId,
     unresolvedWrongQuestions,
     getUnresolvedWrong,

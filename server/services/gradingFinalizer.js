@@ -29,6 +29,25 @@ const toQuestionMap = (questions) => new Map(
   questions.filter(q => q?.id).map(q => [q.id, q])
 )
 
+/**
+ * 批量回写 questions.is_correct 的 CASE 片段（结算收尾唯一出口）。
+ *
+ * ⚠️ THEN 分支必须显式写 `::boolean`，不能省。
+ *   `SET is_correct = CASE id WHEN $1::uuid THEN $2 ... END` 里，$2 处在 THEN 位置
+ *   没有任何类型上下文，PostgreSQL 会把它推断成 text，整条语句直接抛：
+ *     `42804 column "is_correct" is of type boolean but expression is of type text`
+ *   炸点在「错题生命周期已推进、exam.status 还没写」之间，异常又被上层静默吞掉，
+ *   于是表现为：前端提示「复核完成，已保存」，但库里 exam.status 永远 ungraded
+ *   → 左侧列表一直「待复核」、移动端一直「待完成」，且每点一次完成复核就把
+ *   wrong_questions 的 lifecycle/practice_count 重复推进一次（假掌握）。
+ *   （2026-09-14 错题再测-0911 事故根因）
+ *   新增同类批量更新必须复用本函数，不要另写一份 CASE。
+ */
+const buildIsCorrectAssignments = (ids) =>
+  ids.map((_, index) => `WHEN $${index * 2 + 1}::uuid THEN $${index * 2 + 2}::boolean`).join(' ')
+
+export { buildIsCorrectAssignments }
+
 const buildQuestionSettlementKey = ({ questionId, mode, fingerprint }) =>
   `${mode}:${questionId}:${fingerprint || 'default'}`
 
@@ -93,16 +112,13 @@ export const finalizeGradingBatch = async ({
 
   const updateIds = pendingQuestions.filter(q => q.is_correct !== null && q.is_correct !== undefined).map(q => q.id)
   if (updateIds.length > 0) {
-    const clauses = updateIds.map((_, index) =>
-      `WHEN $${index * 2 + 1}::uuid THEN $${index * 2 + 2}`
-    ).join(' ')
     const params = updateIds.flatMap(id => {
       const question = questionMap.get(id)
       return [id, question.is_correct === true]
     })
     await query(
       `UPDATE ${TABLES.QUESTIONS}
-       SET is_correct = CASE id ${clauses} END, updated_at = NOW()
+       SET is_correct = CASE id ${buildIsCorrectAssignments(updateIds)} END, updated_at = NOW()
        WHERE id = ANY($${params.length + 1}::uuid[])`,
       [...params, updateIds]
     )
@@ -439,21 +455,22 @@ export const finalizeGeneratedExamResults = async ({
   }
 
   if (updateQuestionIds.length > 0) {
-    const clauses = updateQuestionIds.map((_, index) =>
-      `WHEN $${index * 2 + 1}::uuid THEN $${index * 2 + 2}`
-    ).join(' ')
     const params = updateQuestionIds.flatMap((questionId, index) => [
       questionId,
       updateQuestionValues[index]
     ])
     await query(
       `UPDATE ${TABLES.QUESTIONS}
-       SET is_correct = CASE id ${clauses} END, updated_at = NOW()
+       SET is_correct = CASE id ${buildIsCorrectAssignments(updateQuestionIds)} END, updated_at = NOW()
        WHERE id = ANY($${params.length + 1}::uuid[])`,
       [...params, updateQuestionIds]
     )
   }
 
+  // ⚠️ 本语句必须在此前所有写入成功之后才执行：它是「已结算」的唯一落库标记，
+  // 一旦它执行成功，下游（PC 列表 / 移动端）才会把这份卷当作已复核。
+  // 反过来说，它上面的任一步抛错都必须让整个请求失败（不能静默），
+  // 否则就会出现「错题生命周期已推进、卷却还显示待复核」的撕裂状态。
   await query(
     `UPDATE ${TABLES.GENERATED_EXAMS}
      SET status = 'graded', updated_at = NOW()
