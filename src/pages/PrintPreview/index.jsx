@@ -75,7 +75,11 @@ export default function PrintPreview({ onClose, questions: propQuestions, existi
   // 错题本返回的题目缺少 options / 几何配图等完整字段，直接生成会丢选项、丢图。
   // 参照周报告「错题再测卷」的生成方式（getQuestionsByIds 拉取完整题目），
   // 在预览与导出前补齐，保证移动端重练卷与报告中的再测卷格式一致。
-  const needsFullData = (qs) => qs.length > 0 && qs.some(q => !Array.isArray(q.options))
+  // 补齐触发条件：缺 options（丢选项/几何图）或缺 difficulty（丢星级）。
+  // 后者是「错题本勾选组卷 → 预览无星级、组卷历史重打 → 有星级」的兜底：
+  // 旧版错题本接口白名单不带 difficulty，缓存/历史数据仍可能缺该字段，
+  // 这里主动 getQuestionsByIds 拉全量（SELECT q.* 含 difficulty）对齐两条链路。
+  const needsFullData = (qs) => qs.length > 0 && qs.some(q => !Array.isArray(q.options) || q.difficulty == null)
 
   const ensureEnriched = async () => {
     const qs = previewRef.current

@@ -2414,6 +2414,8 @@ app.get('/api/wrong-questions/student/:studentId', async (req, res) => {
              'ai_tags', CASE WHEN q.ai_tags IS NULL OR q.ai_tags = '' THEN '[]'::jsonb ELSE q.ai_tags::jsonb END,
              'manual_tags', CASE WHEN q.manual_tags IS NULL OR q.manual_tags = '' THEN '[]'::jsonb ELSE q.manual_tags::jsonb END,
              'image_url', q.image_url, 'images', q.images, 'geometry_image_url', q.geometry_image_url,
+             -- 难度星级（difficultyStars）：组卷预览与重打预览必须同一口径，缺了会只在重打链路显示
+             'difficulty', q.difficulty,
              -- 多小问（题组）：公共题干 + 小问号 + 原题号，供错题卡片补回被拆行丢掉的公共条件
              'parent_stem', q.parent_stem, 'sub_no', q.sub_no, 'question_number', q.question_number
            )
