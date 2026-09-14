@@ -53,6 +53,7 @@
           </div>
           <div class="rpp-q-head">
             <span class="rpp-q-num">{{ row.label }}.</span>
+            <span v-if="row.stars" class="rpp-q-diff">{{ row.stars }}</span>
             <MathRender class="rpp-q-text" :content="row.content" autoDetect />
           </div>
           <div v-if="row.illustration" class="rpp-q-image">
@@ -107,7 +108,7 @@ import { resolveQuestionDisplayStem } from '../../../utils/questionStem'
 // 排卷与卷面编号走唯一口径（与服务端判题侧、pdfGenerator 同源）。
 // 此前本组件自带一套「按 page/question_number 排序 + 编号」逻辑，与打印版
 // （按 question_ids 顺序分块）不一致，题型混合时预览与打印出来的卷会对不上。
-import { buildRetryPaperOrder, RETRY_PAPER_BLOCKS } from '../../../utils/retryPaperOrder'
+import { buildRetryPaperOrder, RETRY_PAPER_BLOCKS, difficultyStars } from '../../../utils/retryPaperOrder'
 import MathRender from '../MathRender.vue'
 
 const props = defineProps({
@@ -212,6 +213,7 @@ const blocks = computed(() => {
           options: opts,
           optionCols: opts.length === 0 ? 0 : maxLen <= 8 ? 4 : maxLen <= 20 ? 2 : 1,
           illustration: getIllustration(q),
+          stars: difficultyStars(q?.difficulty),
         }
       })
       return { ...def, rows }
@@ -293,6 +295,7 @@ watch(() => props.questionIds, load, { deep: true })
 }
 .rpp-q-head { display: flex; gap: 6px; }
 .rpp-q-num { font-weight: var(--wb-fw-bold); white-space: nowrap; min-width: 26px; }
+.rpp-q-diff { color: #F59E0B; font-size: 12px; letter-spacing: 1px; white-space: nowrap; flex-shrink: 0; }
 .rpp-q-text { flex: 1; min-width: 0; }
 
 .rpp-q-image { text-align: center; margin: 6px 0 6px 32px; }

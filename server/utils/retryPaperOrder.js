@@ -173,3 +173,22 @@ export function alignRetryAnswers(paperOrder, ocrQuestions) {
 
   return pairs
 }
+
+/**
+ * 难度 → 卷面星级标记（三档，固定占三格便于学生横向对比）。
+ *
+ * 与错题再测卷选题排序同一难度口径（weeklyReport 5b 用 COALESCE(q.difficulty, 3)）：
+ *   难度 1-2 → 一星（简单）；3 → 二星（中等）；4-5 → 三星（难）。
+ * 无难度值（null / undefined / '' / 非数字）返回空串 —— 卷面不标星：
+ *   排序把 NULL 当中档只是内部顺序问题，卷面展示不能拿假难度误导学生。
+ * 字符用 ★/☆（U+2605/2606）而非彩色 emoji ⭐：服务端 Chromium 渲染 PDF 时
+ *   运行环境常无彩色 emoji 字体，emoji 会印成豆腐块 □□□。
+ */
+export const difficultyStars = (difficulty) => {
+  if (difficulty == null || difficulty === '') return ''
+  const d = Number(difficulty)
+  if (!Number.isFinite(d)) return ''
+  if (d <= 2) return '★☆☆'
+  if (d === 3) return '★★☆'
+  return '★★★'
+}

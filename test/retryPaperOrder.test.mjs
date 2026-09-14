@@ -23,6 +23,7 @@ import {
   alignRetryAnswers,
   normalizeRetryPaperLabel,
   retryPaperBucketOf,
+  difficultyStars,
 } from '../server/utils/retryPaperOrder.js'
 
 const __dirname = dirname(fileURLToPath(import.meta.url))
@@ -183,4 +184,23 @@ test('双端同构：server/utils/retryPaperOrder.js 与 src/utils/retryPaperOrd
     webBody,
     '服务端与前端的排卷实现已分叉 —— 打印的卷与判的题会再次错位，请同步两侧'
   )
+})
+
+test('难度→卷面星级：三档映射，缺失值一律不标星', () => {
+  // 三档：1-2 简单 / 3 中等 / 4-5 难（与 weeklyReport 5b 选题排序同一难度口径）
+  assert.equal(difficultyStars(1), '★☆☆')
+  assert.equal(difficultyStars(2), '★☆☆')
+  assert.equal(difficultyStars(3), '★★☆')
+  assert.equal(difficultyStars(4), '★★★')
+  assert.equal(difficultyStars(5), '★★★')
+  // 字符串形态（DB 偶有文本）也要正确归一
+  assert.equal(difficultyStars('2'), '★☆☆')
+  assert.equal(difficultyStars('4'), '★★★')
+  // 缺失值必须返回空串（卷面不标星）：
+  // 注意 Number(null) === 0，若不先判空会被误判成「难度 0 → 一星（简单）」，
+  // 把没标难度的题印成最简单题，等于用假难度误导学生。
+  assert.equal(difficultyStars(null), '')
+  assert.equal(difficultyStars(undefined), '')
+  assert.equal(difficultyStars(''), '')
+  assert.equal(difficultyStars('abc'), '')
 })

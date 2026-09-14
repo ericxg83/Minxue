@@ -11,7 +11,7 @@ import { resolveQuestionDisplayStem } from './questionStem'
 // 重练卷排卷与卷面编号的唯一口径（与服务端 worker.js 判题侧同源）。
 // 2026-09-13 事故：此前本文件自带分块/编号（且 judge 等题型因只认 choice/fill/answer
 // 而被整块漏掉），与判题侧的 question_ids 顺序不一致 → 卷面第 N 题 ≠ 判题第 N 题。
-import { buildRetryPaperOrder, RETRY_PAPER_BLOCKS } from './retryPaperOrder'
+import { buildRetryPaperOrder, RETRY_PAPER_BLOCKS, difficultyStars } from './retryPaperOrder'
 
 const A4_W = 210
 const A4_H = 297
@@ -261,6 +261,7 @@ ${s}.q-fill{margin-bottom:10px}
 ${s}.q-answer{margin-bottom:14px}
 ${s}.q-head{display:flex;gap:6px;font-size:13px;line-height:1.7;margin-bottom:2px}
 ${s}.q-num{font-weight:bold;white-space:nowrap;min-width:26px}
+${s}.q-diff{color:#F59E0B;font-size:12px;letter-spacing:1px;white-space:nowrap;flex-shrink:0}
 ${s}.q-text{flex:1;word-break:break-word}
 ${s}.q-stem{font-size:13px;line-height:1.7;margin:0 0 2px 32px;word-break:break-word}
 ${s}.q-prereq{font-size:12px;line-height:1.7;color:#0B7285;margin:0 0 2px 32px;word-break:break-word}
@@ -307,7 +308,9 @@ export function buildPaperBody({ title, studentName, questions, showAnswers }) {
           html += `<div class="q-prereq">已知：第(${h.ref})问的结果为 ${renderContent(h.answer)}</div>`
         }
       }
-      html += `<div class="q-head"><span class="q-num">${qLabel}.</span><span class="q-text">${renderContent(content)}</span></div>`
+      // 卷面难度星级（★☆☆ 简单 / ★★☆ 中等 / ★★★ 难）；无难度值时不渲染，避免假难度误导
+      const stars = difficultyStars(q.difficulty)
+      html += `<div class="q-head"><span class="q-num">${qLabel}.</span>${stars ? `<span class="q-diff">${stars}</span>` : ''}<span class="q-text">${renderContent(content)}</span></div>`
       const illustration = q._illustration_resolved ?? getQuestionIllustration(q)
       if (illustration) {
         html += `<div class="q-image"><img src="${illustration}" alt="配图" /></div>`

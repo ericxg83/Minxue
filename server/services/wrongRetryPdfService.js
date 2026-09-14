@@ -24,7 +24,7 @@ import { resolveQuestionDisplayStem, getQuestionGroupKey, extractPrereqRefs, res
 // 重练卷排卷与卷面编号的唯一口径（与判题侧 worker.js processSlimGrading 同源）。
 // 2026-09-13 事故：此前本文件自带的「分块 + 编号」逻辑与判题侧的 question_ids
 // 顺序各自为政，题型混合时卷面第 N 题 ≠ 判题第 N 题（实测 21/25 份卷整体错位）。
-import { buildRetryPaperOrder, RETRY_PAPER_BLOCKS } from '../utils/retryPaperOrder.js'
+import { buildRetryPaperOrder, RETRY_PAPER_BLOCKS, difficultyStars } from '../utils/retryPaperOrder.js'
 // 数学文本规范化：与前端 src/utils/mathText.js 同一份纯函数，
 // 保证「服务端重练卷」和「移动端/周报再测卷」的公式排版口径 100% 一致。
 import { preprocessMath, splitToSegments } from '../../src/utils/mathText.js'
@@ -158,6 +158,7 @@ body { font-family:'Microsoft YaHei','PingFang SC','Noto Sans SC','SimSun',sans-
 .question { margin-bottom:12px; page-break-inside:avoid; }
 .q-head { display:flex; gap:6px; font-size:13px; line-height:1.7; margin-bottom:2px; }
 .q-num { font-weight:bold; white-space:nowrap; min-width:26px; }
+.q-diff { color:#F59E0B; font-size:12px; letter-spacing:1px; white-space:nowrap; flex-shrink:0; }
 .q-text { flex:1; word-break:break-word; }
 .q-stem { font-size:13px; line-height:1.7; margin:0 0 2px 32px; word-break:break-word; }
 .q-prereq { font-size:12px; line-height:1.7; color:#0B7285; margin:0 0 2px 32px; word-break:break-word; }
@@ -225,7 +226,9 @@ const buildPaperBody = ({ title, studentName, questions, qrSvg }) => {
           html += `<div class="q-prereq">已知：第(${h.ref})问的结果为 ${renderMath(h.answer)}</div>`
         }
       }
-      html += `<div class="q-head"><span class="q-num">${label}.</span><span class="q-text">${renderMath(content)}</span></div>`
+      // 卷面难度星级（★☆☆ 简单 / ★★☆ 中等 / ★★★ 难）；无难度值时不渲染，避免假难度误导
+      const stars = difficultyStars(q.difficulty)
+      html += `<div class="q-head"><span class="q-num">${label}.</span>${stars ? `<span class="q-diff">${stars}</span>` : ''}<span class="q-text">${renderMath(content)}</span></div>`
       const illu = getQuestionIllustration(q)
       if (illu) {
         html += `<div class="q-image"><img src="${escapeHtml(illu)}" alt="配图" /></div>`
@@ -295,7 +298,7 @@ export async function exportWrongRetryPdf({ studentId, wrongQuestionIds, include
             COALESCE(wq.lifecycle_status, 'new') AS lifecycle_status,
             s.name AS student_name,
             q.content, q.options, q.answer, q.analysis,
-            q.question_type, q.subject,
+            q.question_type, q.subject, q.difficulty,
             q.parent_stem, q.sub_no, q.question_number, q.task_id, q.page_number,
             q.image_url, q.geometry_image_url,
             q.clean_geometry_svg, q.tikz_svg_url, q.clean_geometry_image_url
