@@ -75,8 +75,13 @@ function ResultSummary({ questionCount, wrong, empty, pending, truncated }) {
   return <>{nodes}</>
 }
 
-// 一行一动作：完成行整行可点开批改结果；失败/卡住行只保留"重新处理"；
+// 一行一动作：完成行整行可点开批改复核；失败/卡住行只保留"重新处理"；
 // 处理中/等待行是纯状态展示，不可点（避免点开黑屏或无效跳转）。
+//
+// 错题重练答卷行是例外（2026-09-14）：重练批改走 slim 管线，**不在 questions 表建行**，
+// 结果回写在组卷 question_ids 指向的原题行上 → 按 task_id 取数必为空，
+// 点进去只会弹「暂无题目数据」。移动端也不需要这个二级页面（结果数字本行已显示，
+// 逐题明细归错题本、改判归 PC 复核台），故重练行不可点。
 function TaskRow({ task, onRetryTask, onOpenReview }) {
   const current = stage(task)
   const wrong = task.result?.wrongCount || 0
@@ -85,7 +90,7 @@ function TaskRow({ task, onRetryTask, onOpenReview }) {
   const questionCount = task.result?.questionCount || task.question_count || 0
   const truncated = Number(task.result?.ocrTruncated) > 0
   const bad = current === 'failed' || current === 'stalled'
-  const clickable = current === 'completed'
+  const clickable = current === 'completed' && !retry(task)
   const Icon = bad ? AlertCircle : current === 'processing' ? Loader2 : current === 'completed' ? CheckCircle2 : Clock3
   const pageCount = (Array.isArray(task.images) ? task.images.length : 0) || (Array.isArray(task.pages) ? task.pages.length : 0) || 0
   const isTemp = Boolean(task.is_temp) || (typeof task.id === 'string' && task.id.startsWith('temp-'))

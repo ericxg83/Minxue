@@ -123,11 +123,16 @@ export const isBusyStage = stage =>
 /**
  * 已出结果时的数字口径（列表行与详情共用，避免两处各显示一套）。
  *
- * 为什么不用「11/17 题正确」：`correct_count` 之外的那几题里混着**未作答 / 未判定**
- * （`is_correct IS NULL` 或 `answer_source='blank'`），用比例式表达会把它们全读成"错"。
+ * 为什么不用「11/17 题正确」：`correct_count` 之外的那几题里混着 **AI 未判定**
+ * （`is_correct IS NULL`，如主观题 / 缺参考答案），比例式会把它们读成"错"。
  * 家长真正要看的是"错了几题"，所以分段写出错误数，其余单独标「未判定」。
  *
- * 口径与服务端 `/generated-exams/student/:id` 的统计完全一致，不在这里重算判题。
+ * 注意「未作答等同不会」：学生没作答的题由服务端计进 `wrong_count`（与周报 / 结算
+ * 同口径），因此第三项「未判定」只承载 AI 给不出结论的题，不会再出现"未作答"一类。
+ *
+ * 数字由服务端 `/generated-exams/student/:id` 给出，归类口径见
+ * `server/utils/questionResultCaliber.js`（**人工复核结论优先**，与前端
+ * `effectiveIsCorrect` / 结算 `gradeGeneratedExam` 同源）。前端只展示，不重算判题。
  *
  * @returns {{total:number, correct:number, wrong:number, rest:number, allCorrect:boolean, text:string}|null}
  */
