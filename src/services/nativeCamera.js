@@ -43,22 +43,93 @@ const extFromMime = (mime) => {
   return 'jpg'
 }
 
+// 猜测 MIME：MediaResult.metadata.format 只在 includeMetadata:true 时才有，缺省按 jpeg。
+const guessMime = (media) => {
+  const fmt = String(media?.metadata?.format || '').toLowerCase()
+  if (fmt.includes('png')) return 'image/png'
+  if (fmt.includes('webp')) return 'image/webp'
+  if (fmt.includes('heic')) return 'image/heic'
+  if (fmt.includes('heif')) return 'image/heif'
+  return 'image/jpeg'
+}
+
+// base64（原生 Filesystem 返回的形态）→ File
+function base64ToFile(base64, name, mime) {
+  const bin = atob(base64)
+  const bytes = new Uint8Array(bin.length)
+  for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i)
+  return new File([bytes], name, { type: mime, lastModified: Date.now() })
+}
+
+// 逐个候选 URL 试 fetch（webPath / convertFileSrc(uri) / 裸 uri）。
+// 加超时：WebView 对某些不可服务的外部存储路径可能不返回（挂起），
+// 否则会卡住后续的 Filesystem 兜底。
+async function fetchToFile(srcs, fallbackMime) {
+  for (const src of srcs) {
+    if (!src) continue
+    let timer
+    try {
+      const ctrl = typeof AbortController !== 'undefined' ? new AbortController() : null
+      if (ctrl) timer = setTimeout(() => ctrl.abort(), 8000)
+      const res = await fetch(src, ctrl ? { signal: ctrl.signal } : undefined)
+      if (!res.ok) continue
+      const blob = await res.blob()
+      if (!blob || blob.size === 0) continue
+      const mime = blob.type || fallbackMime
+      return new File([blob], uniqueName(extFromMime(mime)), {
+        type: mime,
+        lastModified: Date.now()
+      })
+    } catch {
+      // 该候选不可用（超时/404/被拒），试下一个
+    } finally {
+      if (timer) clearTimeout(timer)
+    }
+  }
+  return null
+}
+
 /**
- * 把插件返回的 webPath（capacitor://localhost/_capacitor_file_/... 之类）
- * 读成真正的 File。插件只给路径，上传链路（压缩 / FormData / OCR）要的是 File。
+ * 把插件返回的路径读成真正的 File。上传链路（压缩 / FormData / OCR）要的是 File。
+ *
+ * 为什么不能只用 fetch(webPath)：
+ * 相机拍的照片写在 getExternalFilesDir(DIRECTORY_PICTURES)（外部存储目录），
+ * WebView 里 fetch 这个 webPath 常常取不到（相册选中的图会复制到应用内部缓存，
+ * 所以"相册能传、拍照不能传"）。因此 fetch 全部失败时，回退到 @capacitor/filesystem
+ * 直接按 uri 读文件（官方推荐的原生全分辨率读法），彻底绕开 WebView 的取文件限制。
  */
 async function mediaToFile(media) {
-  const src = media?.webPath || media?.uri || media?.path
-  if (!src) return null
-  const res = await fetch(src)
-  if (!res.ok) return null
-  const blob = await res.blob()
-  if (!blob || blob.size === 0) return null
-  const mime = blob.type || 'image/jpeg'
-  return new File([blob], uniqueName(extFromMime(mime)), {
-    type: mime,
-    lastModified: Date.now()
-  })
+  const rawUri = media?.uri || media?.path
+  const mime = guessMime(media)
+
+  const candidates = []
+  if (media?.webPath) candidates.push(media.webPath)
+  if (rawUri) {
+    try {
+      const w = Capacitor.convertFileSrc(rawUri)
+      if (w) candidates.push(w)
+    } catch {
+      // convertFileSrc 不可用时忽略
+    }
+    candidates.push(rawUri)
+  }
+
+  const viaFetch = await fetchToFile(candidates, mime)
+  if (viaFetch) return viaFetch
+
+  // 兜底：原生直接用 Filesystem 读 uri
+  if (isNativeCameraAvailable() && rawUri) {
+    try {
+      const { Filesystem } = await import('@capacitor/filesystem')
+      const { data } = await Filesystem.readFile({ path: rawUri })
+      if (typeof data === 'string' && data.length > 0) {
+        return base64ToFile(data, uniqueName(extFromMime(mime)), mime)
+      }
+    } catch (e) {
+      console.warn('[nativeCamera] Filesystem 读取失败:', e?.message)
+    }
+  }
+  return null
 }
 
 async function toFiles(list) {
@@ -112,7 +183,15 @@ export async function takePhotoFiles() {
       correctOrientation: true,
       cameraDirection: CameraDirection.Rear
     })
-    return toFiles([result])
+    const files = await toFiles([result])
+    // 拍到了图（有 uri/webPath）却读不出文件 —— 不是用户取消，必须让用户看到，
+    // 否则表现为"拍完照之后毫无反应"。
+    if (files.length === 0 && (result?.uri || result?.webPath || result?.path)) {
+      const err = new Error('照片已拍摄，但读取失败，请重试或改用相册')
+      err.code = 'PHOTO_READ_FAILED'
+      throw err
+    }
+    return files
   }
 
   const photo = await Camera.getPhoto({
