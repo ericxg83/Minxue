@@ -1,6 +1,7 @@
 import { Router } from 'express'
 import { query, TABLES } from '../config/neon.js'
 import { parsePeriod, getIsoWeek } from '../utils/period.js'
+import { sqlCorrectExpr, sqlWrongExpr } from '../utils/questionResultCaliber.js'
 
 const router = Router()
 
@@ -41,11 +42,14 @@ router.get('/:studentId', async (req, res) => {
     )
 
     // 3. 本周批改题量 & 正确率
+    // 2026-09-14：正确/错误按 questionResultCaliber 归类（**人工复核结论优先**），
+    // 与移动端组卷数字、结算掌握度同一口径；此前只数 is_correct，老师改判不算数。
+    // 未作答等同不会（blank 且 is_correct=false）计入 wrong —— 与周报 wrong 原口径一致。
     const { rows: questionRows } = await query(
       `SELECT
         COUNT(*)::int AS total,
-        COUNT(*) FILTER (WHERE is_correct = true)::int AS correct,
-        COUNT(*) FILTER (WHERE is_correct = false OR answer_source = 'blank')::int AS wrong
+        COUNT(*) FILTER (WHERE ${sqlCorrectExpr()})::int AS correct,
+        COUNT(*) FILTER (WHERE ${sqlWrongExpr()})::int AS wrong
       FROM ${TABLES.QUESTIONS}
       WHERE student_id = $1
         AND created_at >= $2
@@ -113,7 +117,7 @@ router.get('/:studentId', async (req, res) => {
       `SELECT
         COALESCE(NULLIF(q.subject, ''), '其他') AS subject,
         jsonb_array_elements_text(CASE WHEN jsonb_typeof(q.ai_tags::jsonb) = 'array' THEN q.ai_tags::jsonb ELSE '[]'::jsonb END) AS tag,
-        COUNT(*) FILTER (WHERE q.is_correct = false OR q.answer_source = 'blank')::int AS wrong_count,
+        COUNT(*) FILTER (WHERE ${sqlWrongExpr('q.')})::int AS wrong_count,
         COUNT(*)::int AS total_count
       FROM ${TABLES.WRONG_QUESTIONS} wq
       JOIN ${TABLES.QUESTIONS} q ON q.id = wq.question_id
@@ -134,7 +138,7 @@ router.get('/:studentId', async (req, res) => {
       `SELECT
         to_char(created_at, 'MM-DD') AS day,
         COUNT(*)::int AS total,
-        COUNT(*) FILTER (WHERE is_correct = true)::int AS correct
+        COUNT(*) FILTER (WHERE ${sqlCorrectExpr()})::int AS correct
       FROM ${TABLES.QUESTIONS}
       WHERE student_id = $1
         AND created_at >= $2
@@ -150,7 +154,7 @@ router.get('/:studentId', async (req, res) => {
       `SELECT
         COALESCE(NULLIF(subject, ''), '其他') AS subject,
         COUNT(*)::int AS total,
-        COUNT(*) FILTER (WHERE is_correct = true)::int AS correct
+        COUNT(*) FILTER (WHERE ${sqlCorrectExpr()})::int AS correct
       FROM ${TABLES.QUESTIONS}
       WHERE student_id = $1
         AND created_at >= $2
@@ -269,8 +273,8 @@ router.get('/', async (req, res) => {
         const { rows: questionRows } = await query(
           `SELECT
             COUNT(*)::int AS total,
-            COUNT(*) FILTER (WHERE is_correct = true)::int AS correct,
-            COUNT(*) FILTER (WHERE is_correct = false OR answer_source = 'blank')::int AS wrong
+            COUNT(*) FILTER (WHERE ${sqlCorrectExpr()})::int AS correct,
+            COUNT(*) FILTER (WHERE ${sqlWrongExpr()})::int AS wrong
           FROM ${TABLES.QUESTIONS}
           WHERE student_id = $1
             AND created_at >= $2

@@ -68,6 +68,7 @@ import { syncQuestionCompleteness, syncQuestionCompletenessQuietly } from './ser
 import { computeWrongBookRisks } from './utils/wrongBookRisks.js'
 import { normalizeOptions } from './utils/optionText.js'
 import { computeTaskStats } from './utils/taskStats.js'
+import { summarizeQuestionResults } from './utils/questionResultCaliber.js'
 import { fixFileIfNeeded } from './services/uploadValidator.js'
 import { recognizeAnswerImage } from './services/answerOCRService.js'
 import { recognizeQuestionImage } from './services/questionOCRService.js'
@@ -2721,31 +2722,32 @@ app.get('/api/generated-exams/student/:studentId', async (req, res) => {
     }
 
     // 批量计算所有试卷的统计（1 次查询替代 N 次 per-exam 查询）
+    // 2026-09-14：正确/错误/未判定的归类统一走 server/utils/questionResultCaliber.js ——
+    // **人工复核结论（review_status）优先于 AI 判定**，与前端 effectiveIsCorrect / 结算
+    // gradeGeneratedExam 同源。此前这里只数 is_correct，老师改判的结果不会体现在
+    // 家长看到的分数上（全库 7 份已批改卷里 6 份两套口径不一致）。
     const allQIds = [...new Set(rows.flatMap(e => e.question_ids || []))]
     const qCorrectMap = new Map()
     if (allQIds.length > 0) {
       const placeholders = allQIds.map((_, i) => `$${i + 1}`).join(',')
       const { rows: qRows } = await query(
-        `SELECT id, is_correct, answer_source FROM ${TABLES.QUESTIONS} WHERE id IN (${placeholders})`,
+        `SELECT id, is_correct, answer_source, review_status FROM ${TABLES.QUESTIONS} WHERE id IN (${placeholders})`,
         allQIds
       )
       for (const q of qRows) {
-        qCorrectMap.set(q.id, { is_correct: q.is_correct, answer_source: q.answer_source })
+        qCorrectMap.set(q.id, { is_correct: q.is_correct, answer_source: q.answer_source, review_status: q.review_status })
       }
     }
 
     const examsWithStats = rows.map(exam => {
       const qIds = exam.question_ids || []
-      let correct_count = 0, wrong_count = 0, not_answered_count = 0
-      for (const qid of qIds) {
-        const info = qCorrectMap.get(qid)
-        if (!info || info.is_correct === null || info.answer_source === 'blank') not_answered_count++
-        else if (info.is_correct === true) correct_count++
-        else wrong_count++
-      }
+      const summary = summarizeQuestionResults(qIds.map(qid => qCorrectMap.get(qid)))
+      // not_answered_count 沿用旧字段名（前端 apiService 已透传），语义 = 「未判定」：
+      // AI 给不出结论（is_correct IS NULL）或老师标了排除。未作答按既定口径并入 wrong。
+      const { correct: correct_count, wrong: wrong_count, unjudged: not_answered_count, excluded: excluded_count } = summary
       return {
         ...exam,
-        correct_count, wrong_count, not_answered_count, excluded_count: 0, total_count: qIds.length,
+        correct_count, wrong_count, not_answered_count, excluded_count, total_count: qIds.length,
         // 该卷的答卷行（学生每交一次一条，按 created_at 升序）。空数组 = 学生还没交卷。
         answer_sheets: sheetsByExam.get(exam.id) || []
       }
