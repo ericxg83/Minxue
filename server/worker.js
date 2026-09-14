@@ -4921,8 +4921,9 @@ export const processWorkbookGrading = async (job) => {
     }
 
     // 逐题独立 try/catch：单题写入异常（裁剪/写库抖动）不得中断其余错题的入册。
-    // 练习册错题以 (student_id, worksheet_id, question_no) 为自包含定位键，
-    // addSelfContainedWrongQuestion 的 ON CONFLICT DO UPDATE 保证重复调用幂等。
+    // 练习册错题以 (student_id, worksheet_id, question_no) 为自包含定位键。
+    // taskId 必传（2026-09-14 根治）：入册层据此区分「同任务重跑（不加 error_count）」
+    // 与「新任务真做错（+1）」，杜绝批改链路重跑把错题次数越刷越高。
     try {
       await addSelfContainedWrongQuestion({
         studentId,
@@ -4938,7 +4939,8 @@ export const processWorkbookGrading = async (job) => {
         questionImageUrl,
         subject: null,
         sourceType: 'workbook',
-        questionId: wq.id
+        questionId: wq.id,
+        taskId
       })
     } catch (e) {
       console.error(`  ⚠️ [Workbook] 错题入册失败 question_no=${wq.question_number} q=${String(wq.id).slice(0, 8)}:`, e.message)

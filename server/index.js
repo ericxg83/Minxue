@@ -49,6 +49,7 @@ import { migrateTaskTypeEnum } from './migrations/054_task_type_enum.js'
 import { migrateFixExamPublishedInconsistency } from './migrations/055_fix_exam_published_inconsistency.js'
 import { migrateGeometryManualOverride } from './migrations/056_add_geometry_manual_override.js'
 import { migrateQuestionParentStem } from './migrations/057_add_question_parent_stem.js'
+import { migrateWrongQuestionsLastWrongTaskId } from './migrations/058_add_wrong_questions_last_wrong_task_id.js'
 import { scheduleNightParse, scheduleWeeklyDiagnosis } from './services/nightParseService.js'
 import { scheduleWeeklyMissingFigureCheck } from './services/missingFigureMonitorService.js'
 
@@ -3427,6 +3428,7 @@ if (process.argv[1] === __filename || process.argv[1]?.endsWith('server/index.js
       await migrateFixExamPublishedInconsistency()
       await migrateGeometryManualOverride()
       await migrateQuestionParentStem()
+      await migrateWrongQuestionsLastWrongTaskId()
     } catch (err) {
       console.error('数据库迁移失败:', err.message)
     }

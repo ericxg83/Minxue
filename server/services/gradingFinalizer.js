@@ -1,5 +1,5 @@
 import { createHash } from 'node:crypto'
-import { query, TABLES, LIFECYCLE_STATUS, WRONG_STATUS } from '../config/neon.js'
+import { query, transaction, TABLES, LIFECYCLE_STATUS, WRONG_STATUS } from '../config/neon.js'
 import { addWrongQuestions, createJudgement } from './neonService.js'
 import { compensateWrongBook } from './wrongBookCompensation.js'
 import { syncQuestionsKnowledgeAndMastery, syncReviewResultsMastery } from './knowledgeMasteryService.js'
@@ -425,80 +425,89 @@ export const finalizeGeneratedExamResults = async ({
     updateQuestionValues.push(result.isCorrect)
   }
 
-  if (insertedRows.length > 0) {
-    const placeholders = insertedRows.map((_, index) => {
-      const base = index * 5
-      return `($1, $${base + 2}, $${base + 3}, $${base + 4}, $${base + 5}, $${base + 6}, NOW())`
-    }).join(', ')
-    const params = [studentId]
-    for (const row of insertedRows) {
-      // practice_count 起始为 1：本次是第一次重练；UPDATE 路径后续每次 +1
-      params.push(row.questionId, row.status, row.lifecycleStatus, row.errorCount, 1)
+  // ⚠️ 结算原子化（2026-09-14 根治，勿拆回逐步提交）：以下全部写入在同一个事务里，
+  // 要么整体提交、要么整体回滚。历史事故（42804）正是「错题推进已提交、后续步骤炸」的
+  // 半提交状态，叠加结算审计未落库 ⇒ 老师每点一次复核就重复推进一次
+  // （error_count 刷到 28、practice_count 刷到 31、new→review_1→mastered 假升级）。
+  // 事务化后任何一步失败即整体回滚并向上抛，不存在"写了一半"，重试也天然幂等。
+  // 注意：结算审计必须在本事务内用 client 直写（createJudgement 自带重试且吞异常、
+  // 且走连接池，进不了事务）——审计缺失正是当年重复推进的前提条件之一。
+  await transaction(async (client) => {
+    if (insertedRows.length > 0) {
+      const placeholders = insertedRows.map((_, index) => {
+        const base = index * 5
+        return `($1, $${base + 2}, $${base + 3}, $${base + 4}, $${base + 5}, $${base + 6}, NOW())`
+      }).join(', ')
+      const params = [studentId]
+      for (const row of insertedRows) {
+        // practice_count 起始为 1：本次是第一次重练；UPDATE 路径后续每次 +1
+        params.push(row.questionId, row.status, row.lifecycleStatus, row.errorCount, 1)
+      }
+      await client.query(
+        `INSERT INTO ${TABLES.WRONG_QUESTIONS}
+         (student_id, question_id, status, lifecycle_status, error_count, practice_count, created_at)
+         VALUES ${placeholders}
+         ON CONFLICT DO NOTHING`,
+        params
+      )
     }
-    await query(
-      `INSERT INTO ${TABLES.WRONG_QUESTIONS}
-       (student_id, question_id, status, lifecycle_status, error_count, practice_count, created_at)
-       VALUES ${placeholders}
-       ON CONFLICT DO NOTHING`,
-      params
+
+    for (const row of updatedRows) {
+      await client.query(
+        `UPDATE ${TABLES.WRONG_QUESTIONS}
+         SET status = $1, lifecycle_status = $2, error_count = $3,
+             practice_count = practice_count + 1, updated_at = NOW()
+         WHERE id = $4`,
+        [row.status, row.lifecycleStatus, row.errorCount, row.id]
+      )
+    }
+
+    if (updateQuestionIds.length > 0) {
+      const params = updateQuestionIds.flatMap((questionId, index) => [
+        questionId,
+        updateQuestionValues[index]
+      ])
+      await client.query(
+        `UPDATE ${TABLES.QUESTIONS}
+         SET is_correct = CASE id ${buildIsCorrectAssignments(updateQuestionIds)} END, updated_at = NOW()
+         WHERE id = ANY($${params.length + 1}::uuid[])`,
+        [...params, updateQuestionIds]
+      )
+    }
+
+    // 本语句保持在题目回写之后（原注释约定不变）；事务化后即使失败也已整体回滚，
+    // 不会再出现「错题已推进、exam 还是 ungraded」的撕裂状态。
+    await client.query(
+      `UPDATE ${TABLES.GENERATED_EXAMS}
+       SET status = 'graded', updated_at = NOW()
+       WHERE id = $1`,
+      [generatedExamId]
     )
-  }
 
-  for (const row of updatedRows) {
-    await query(
-      `UPDATE ${TABLES.WRONG_QUESTIONS}
-       SET status = $1, lifecycle_status = $2, error_count = $3,
-           practice_count = practice_count + 1, updated_at = NOW()
-       WHERE id = $4`,
-      [row.status, row.lifecycleStatus, row.errorCount, row.id]
-    )
-  }
+    // 结算审计（settlement_key 是幂等判据）：必须在事务内落库。
+    for (const result of pendingResults) {
+      await client.query(
+        `INSERT INTO ${TABLES.JUDGEMENTS}
+         (question_id, student_id, source, is_correct, metadata)
+         VALUES ($1, $2, $3, $4, $5)`,
+        [result.questionId, studentId, 'manual_review', result.isCorrect,
+         JSON.stringify({
+           generated_exam_id: generatedExamId,
+           settlement_key: settlementKey,
+           settlement_mode: 'retry',
+           wrong_book_action: result.skipWrongBook ? 'skip' : 'settle'
+         })]
+      )
+    }
+  })
 
-  if (updateQuestionIds.length > 0) {
-    const params = updateQuestionIds.flatMap((questionId, index) => [
-      questionId,
-      updateQuestionValues[index]
-    ])
-    await query(
-      `UPDATE ${TABLES.QUESTIONS}
-       SET is_correct = CASE id ${buildIsCorrectAssignments(updateQuestionIds)} END, updated_at = NOW()
-       WHERE id = ANY($${params.length + 1}::uuid[])`,
-      [...params, updateQuestionIds]
-    )
-  }
-
-  // ⚠️ 本语句必须在此前所有写入成功之后才执行：它是「已结算」的唯一落库标记，
-  // 一旦它执行成功，下游（PC 列表 / 移动端）才会把这份卷当作已复核。
-  // 反过来说，它上面的任一步抛错都必须让整个请求失败（不能静默），
-  // 否则就会出现「错题生命周期已推进、卷却还显示待复核」的撕裂状态。
-  await query(
-    `UPDATE ${TABLES.GENERATED_EXAMS}
-     SET status = 'graded', updated_at = NOW()
-     WHERE id = $1`,
-    [generatedExamId]
-  )
-
+  // 知识点/掌握度同步是尽力而为的旁路（失败仅告警），放在事务外避免长事务持锁。
   if (pendingResults.length > 0) {
     try {
       await syncReviewResultsMastery({ studentId, results: pendingResults })
     } catch (error) {
       console.error(`[GradingFinalizer] mastery sync failed exam=${generatedExamId}:`, error.message)
     }
-  }
-
-  for (const result of pendingResults) {
-    await createJudgement({
-      questionId: result.questionId,
-      studentId,
-      source: 'manual_review',
-      isCorrect: result.isCorrect,
-      metadata: {
-        generated_exam_id: generatedExamId,
-        settlement_key: settlementKey,
-        settlement_mode: 'retry',
-        wrong_book_action: result.skipWrongBook ? 'skip' : 'settle'
-      }
-    })
   }
 
   return {

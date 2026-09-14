@@ -343,7 +343,8 @@ export const addSelfContainedWrongQuestion = async (params) => {
     studentId, worksheetId, questionNo, pageNumber,
     studentAnswer, correctAnswer, answerType, content,
     questionType, blockCoordinates, questionImageUrl,
-    subject, sourceType = 'workbook', questionId
+    subject, sourceType = 'workbook', questionId,
+    taskId = null
   } = params
 
   // 防垃圾行守卫：既无 question_id 又无 (worksheet_id + question_no) 的错题没有
@@ -357,19 +358,33 @@ export const addSelfContainedWrongQuestion = async (params) => {
   // diagnosisService 不会再覆盖（其 WHERE 排除 is_blank=TRUE）。
   const isBlank = !studentAnswer || studentAnswer === '未作答'
 
+  // error_count 条件增量（2026-09-14 污染事故根治，勿回退为无条件 +1）：
+  //   练习册批改链路会被多波重跑（答案修复回填 / 重识别 / 补偿对账），无条件 +1 会把
+  //   真实 1 次做错刷成 N 次（实测 36 行 err=2~9）。判据 = 上次判错任务的 task_id：
+  //     · 同一任务重跑（EXCLUDED 与存量相同）→ 不加；
+  //     · 不同任务真做错 → +1；
+  //     · 来路不明（taskId 为空，含老脚本调用）→ 不加（宁少勿多）。
+  //   last_wrong_task_id 回填/更新取「最新一个非空任务」，历史行由迁移 058 反查补齐。
   const { rows } = await query(
     `INSERT INTO ${TABLES.WRONG_QUESTIONS}
      (student_id, question_id, worksheet_id, page_number, question_no,
       student_answer, correct_answer, answer_type, content,
       question_type, block_coordinates, question_image_url,
       subject, source_type, status, error_count, added_at, last_wrong_at, created_at, updated_at,
-      is_blank, error_type)
+      is_blank, error_type, last_wrong_task_id)
      VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, 'pending', 1, NOW(), NOW(), NOW(), NOW(),
-             $15, $16)
+             $15, $16, $17)
      ON CONFLICT (student_id, worksheet_id, question_no)
        WHERE worksheet_id IS NOT NULL AND question_no IS NOT NULL
      DO UPDATE SET
-       error_count = ${TABLES.WRONG_QUESTIONS}.error_count + 1,
+       error_count = CASE
+         WHEN EXCLUDED.last_wrong_task_id IS NOT NULL
+           AND ${TABLES.WRONG_QUESTIONS}.last_wrong_task_id IS NOT NULL
+           AND EXCLUDED.last_wrong_task_id <> ${TABLES.WRONG_QUESTIONS}.last_wrong_task_id
+         THEN ${TABLES.WRONG_QUESTIONS}.error_count + 1
+         ELSE ${TABLES.WRONG_QUESTIONS}.error_count
+       END,
+       last_wrong_task_id = COALESCE(EXCLUDED.last_wrong_task_id, ${TABLES.WRONG_QUESTIONS}.last_wrong_task_id),
        last_wrong_at = NOW(),
        updated_at = NOW(),
        student_answer = EXCLUDED.student_answer,
@@ -381,7 +396,8 @@ export const addSelfContainedWrongQuestion = async (params) => {
     [studentId, questionId || null, worksheetId, pageNumber, questionNo,
      studentAnswer, correctAnswer, answerType, content,
      questionType, blockCoordinates ? JSON.stringify(blockCoordinates) : null,
-     questionImageUrl, subject, sourceType, isBlank, isBlank ? '未作答' : null]
+     questionImageUrl, subject, sourceType, isBlank, isBlank ? '未作答' : null,
+     taskId || null]
   )
   return rows[0].id
 }
