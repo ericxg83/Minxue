@@ -12,7 +12,7 @@ import {
 import { motion, AnimatePresence } from 'motion/react'
 import { useLocation, useNavigate } from 'react-router-dom'
 import { useStudentStore, useTaskStore, useWrongQuestionStore, useExamStore } from './store'
-import { apiRequest, getStudents, getTasksByStudent, getQuestionsByTask, getExamsByStudent, getGeneratedExamsByStudent, getGeneratedExamById, updateTaskStatus, updateQuestion, updateQuestionTags, invalidateCache, createStudent, getQuestionsByIds, deleteTask, deleteGeneratedExam, deleteWrongQuestion, recalculateTaskStats, clearStudentCaches, peekCache, writeCache, fetchWrongQuestionsPage, getTasksSummary, markNotificationsRead } from './services/apiService'
+import { apiRequest, getStudents, getTasksByStudent, getQuestionsByTask, getExamsByStudent, getGeneratedExamsByStudent, generatedExamsCacheKey, getGeneratedExamById, updateTaskStatus, updateQuestion, updateQuestionTags, invalidateCache, createStudent, getQuestionsByIds, deleteTask, deleteGeneratedExam, deleteWrongQuestion, recalculateTaskStats, clearStudentCaches, peekCache, writeCache, fetchWrongQuestionsPage, getTasksSummary, markNotificationsRead } from './services/apiService'
 import { warmUpConnection, getNetworkHealth } from './services/httpCore'
 import { initNotifications, startNotificationPolling, onNotificationTap } from './services/notificationService'
 import { taskService } from './services/taskService'
@@ -557,7 +557,7 @@ export default function App() {
       return
     }
     if (showCachedFirst) {
-      const cached = peekCache(`generated_exams_cache_${studentId}`)
+      const cached = peekCache(generatedExamsCacheKey(studentId))
       if (Array.isArray(cached) && cached.length > 0) setGeneratedExams(cached)
     }
     try {
@@ -675,18 +675,11 @@ export default function App() {
     setShowReprint(true)
   }
 
-  // 重练卷完成态 → 经 generated_exam_id 找回关联批改任务，复用作业页的复核界面
-  const handleOpenExamResult = (exam) => {
-    const all = Array.isArray(tasks) ? tasks : []
-    const linked = all.find(t => t.generated_exam_id === exam.id && isTaskCompleted(t))
-      || all.find(t => t.generated_exam_id === exam.id)
-    if (!linked) {
-      Toast.show({ message: '未找到这份卷的批改记录', type: 'info' })
-      return
-    }
-    setReviewTask(linked)
-    setShowExamReview(true)
-  }
+  // 重练卷的批改结果不在移动端展开：
+  //   ① 结果数字已在组卷列表行 / 组卷详情里直接显示（exam.correct_count / total_count）；
+  //   ② 「哪几题错了」归错题本，「逐题改判」归 PC 复核台 —— 移动端没有这两类动作；
+  //   ③ 技术上也进不去：重练答卷走 processSlimGrading，不建 questions 行，按 task_id 取数为空。
+  // 因此这里不再提供「查看批改结果」入口（原按钮只会弹出「暂无题目数据」空态）。
 
   // Delete exam
   const handleDeleteExam = async (examId) => {
@@ -1020,7 +1013,6 @@ export default function App() {
                 studentExams={studentExams}
                 onReprint={handleReprintExam}
                 onDelete={(exam) => { setDeleteTarget({ type: 'exam', id: exam.id }); setShowDeleteConfirm(true) }}
-                onOpenResult={handleOpenExamResult}
                 onOpenWrongBook={() => setCurrentPage('wrongbook')}
                 onUploadAnswer={(exam) => openStagingForRetry(exam?.id)}
               />

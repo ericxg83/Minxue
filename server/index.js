@@ -2699,6 +2699,27 @@ app.get('/api/generated-exams/student/:studentId', async (req, res) => {
       [studentId, limit, offset]
     )
 
+    // 答卷汇总（2026-09-14）：移动端列表要区分「等待作答 / 已提交答卷 / 正在批改 / 等待复核」，
+    // 但 exam.status 只能区分「是否结算」，判断「有没有交卷」的唯一判据是
+    // tasks.generated_exam_id = exam.id 的行是否存在（与 PC 单一口径
+    // src/workbench/utils/retryPaperState.js 完全一致，两端不许各判一套）。
+    // 这里按卷返回全部答卷行（含 created_at，供前端「取最新一次」排序），纯粹只读扩展。
+    const examIds = rows.map(e => e.id)
+    const sheetsByExam = new Map()
+    if (examIds.length > 0) {
+      const sheetPlaceholders = examIds.map((_, i) => `$${i + 1}`).join(',')
+      const { rows: sheetRows } = await query(
+        `SELECT id, generated_exam_id, status, created_at FROM ${TABLES.TASKS}
+         WHERE generated_exam_id IN (${sheetPlaceholders})
+         ORDER BY created_at ASC`,
+        examIds
+      )
+      for (const sheet of sheetRows) {
+        if (!sheetsByExam.has(sheet.generated_exam_id)) sheetsByExam.set(sheet.generated_exam_id, [])
+        sheetsByExam.get(sheet.generated_exam_id).push(sheet)
+      }
+    }
+
     // 批量计算所有试卷的统计（1 次查询替代 N 次 per-exam 查询）
     const allQIds = [...new Set(rows.flatMap(e => e.question_ids || []))]
     const qCorrectMap = new Map()
@@ -2722,7 +2743,12 @@ app.get('/api/generated-exams/student/:studentId', async (req, res) => {
         else if (info.is_correct === true) correct_count++
         else wrong_count++
       }
-      return { ...exam, correct_count, wrong_count, not_answered_count, excluded_count: 0, total_count: qIds.length }
+      return {
+        ...exam,
+        correct_count, wrong_count, not_answered_count, excluded_count: 0, total_count: qIds.length,
+        // 该卷的答卷行（学生每交一次一条，按 created_at 升序）。空数组 = 学生还没交卷。
+        answer_sheets: sheetsByExam.get(exam.id) || []
+      }
     })
 
     res.json({ success: true, generatedExams: examsWithStats })

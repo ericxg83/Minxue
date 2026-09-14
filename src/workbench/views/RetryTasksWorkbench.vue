@@ -66,7 +66,14 @@ const loading = ref(true)
 const selectedStudentId = ref(route.query.studentId || '')
 const activeFilter = ref('all')
 
-const visibleExams = computed(() => exams.value.filter(exam => activeFilter.value === 'all' || exam.status === activeFilter.value))
+// status 现在保留原始值（ungraded / grading / graded），筛选按「是否已结算」判定：
+// 若仍写 `exam.status === 'ungraded'`，'grading'（已收到答卷）的卷会从
+// 「待批改」和「已完成」两个 tab 里同时消失。
+const visibleExams = computed(() => exams.value.filter(exam => {
+  if (activeFilter.value === 'all') return true
+  const graded = exam.status === 'graded'
+  return activeFilter.value === 'graded' ? graded : !graded
+}))
 const pendingExams = computed(() => exams.value.filter(exam => exam.status !== 'graded'))
 const gradedExams = computed(() => exams.value.filter(exam => exam.status === 'graded'))
 const totalQuestions = computed(() => exams.value.reduce((sum, exam) => sum + (exam.total_count || exam.question_ids?.length || 0), 0))

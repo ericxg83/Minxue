@@ -588,8 +588,16 @@ export const deleteGeneratedExam = async (id) => {
   return apiRequest(`/generated-exams/${id}`, { method: 'DELETE' })
 }
 
+/**
+ * 组卷列表缓存 key（带版本）。
+ * v2（2026-09-14）：缓存里改为保存**原始 exam.status + 答卷行 answer_sheets**。
+ * 旧 key 存的是被压成 'graded'/'ungraded' 二值的数据（'grading' 已丢失），
+ * 不升版本会让新文案看起来"改了没生效"。
+ */
+export const generatedExamsCacheKey = studentId => `generated_exams_cache_v2_${studentId}`
+
 export const getGeneratedExamsByStudent = async (studentId, useCache = true) => {
-  const cacheKey = `generated_exams_cache_${studentId}`
+  const cacheKey = generatedExamsCacheKey(studentId)
 
   if (useCache) {
     const cached = readCache(cacheKey, CACHE_MAX_AGE.GENERATED)
@@ -604,7 +612,12 @@ export const getGeneratedExamsByStudent = async (studentId, useCache = true) => 
     student_id: exam.student_id,
     name: exam.name || `错题卷-${exam.created_at ? exam.created_at.slice(5,10) : new Date().toISOString().slice(5,10)}`,
     question_ids: exam.question_ids || [],
-    status: exam.status === 'done' || exam.status === 'graded' ? 'graded' : 'ungraded',
+    // 这里原来把 status 压成 'graded' / 'ungraded' 二值，把 'grading' 吞掉了，
+    // 导致移动端「等待作答 / 已提交答卷 / 正在批改 / 等待复核」四档全部塌成「待完成」
+    // （蔡怡希 · 错题再测-0911 已批完待复核，显示的却是「待完成」）。
+    // 现在原样透出后端状态；阶段判定统一走 src/domain/retryExamStage.js。
+    status: exam.status,
+    answer_sheets: Array.isArray(exam.answer_sheets) ? exam.answer_sheets : [],
     created_at: exam.created_at,
     graded_at: null,
     source: 'generated',
@@ -641,7 +654,7 @@ export const createGeneratedExam = async (examData) => {
       questionIds: examData.question_ids || []
     })
   })
-  clearCache(`generated_exams_cache_${examData.student_id}`)
+  clearCache(generatedExamsCacheKey(examData.student_id))
   return data.exam
 }
 
@@ -915,7 +928,7 @@ export const clearStudentCaches = (studentId) => {
       `tasks_cache_${studentId}`,
       `exams_cache_${studentId}`,
       `wrong_questions_cache_${studentId}`,
-      `generated_exams_cache_${studentId}`
+      generatedExamsCacheKey(studentId)
     ]
     studentCacheKeys.forEach(key => {
       clearCache(key)
@@ -938,7 +951,7 @@ export const invalidateCache = (type, studentId) => {
     exams: `exams_cache_${studentId}`,
     wrong: `wrong_questions_cache_${studentId}`,
     questions: null,
-    generated: `generated_exams_cache_${studentId}`,
+    generated: generatedExamsCacheKey(studentId),
     summary: 'tasks_summary_cache'
   }
 
