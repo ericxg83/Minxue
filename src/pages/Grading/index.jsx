@@ -4,6 +4,7 @@ import { CheckCircle2, XCircle, ChevronLeft, ChevronRight, Loader2, QrCode, Eye,
 import { getQuestionsByIds, gradeGeneratedExam, batchUpsertWrongQuestionStatus, markGeneratedExamGraded } from '../../services/apiService'
 import { useStudentStore } from '../../store'
 import { normalizeOptions } from '../../utils/optionText'
+import { getReferenceAnswerOrigin } from '../../utils/reviewDecision'
 import MathText from '../../components/MathText'
 import dayjs from 'dayjs'
 
@@ -541,6 +542,27 @@ export default function Grading({ paperId, studentId, questionIds, onClose, onCo
                     display: 'flex', alignItems: 'center', gap: 6
                   }}>
                     参考答案
+                    {/* 参考答案来源（卷面印刷 / 答案库 / AI 生成）。与 PC 端
+                        QuestionDetailPanel.vue 同源（utils/reviewDecision.js），
+                        措辞一致：老师看不出来源就会把 AI 算错的参考答案当成学生答错。 */}
+                    {(() => {
+                      const origin = getReferenceAnswerOrigin(currentQuestion)
+                      if (!origin) return null
+                      const warn = origin.tone === 'warning'
+                      return (
+                        <span title={origin.hint} style={{
+                          fontSize: 'var(--fs-11, 11px)',
+                          fontWeight: 600,
+                          padding: '1px 6px',
+                          borderRadius: '4px',
+                          color: warn ? '#b45309' : '#475569',
+                          background: warn ? '#fffbeb' : '#f1f5f9',
+                          border: `1px solid ${warn ? '#fcd34d' : '#cbd5e1'}`
+                        }}>
+                          {origin.label}
+                        </span>
+                      )
+                    })()}
                     {currentQuestion?.ai_self_check_passed === false && (
                       <span style={{ fontSize: 'var(--fs-12)' }}>⚠ AI 不可信</span>
                     )}

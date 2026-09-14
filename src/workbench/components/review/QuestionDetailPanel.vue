@@ -27,9 +27,9 @@
             :class="{ 'conf-low': q.confidence < store.confidenceThreshold }">
             {{ Math.round(q.confidence * 100) }}%
           </span>
-          <el-tag v-if="q.answer_source" size="small"
+          <el-tag v-if="q.answer_source && q.answer_source !== 'worksheet'" size="small"
             :type="q.answer_source === 'blank' ? 'warning' : 'info'" effect="plain">
-            {{ q.answer_source === 'blank' ? '未作答' : q.answer_source === 'recognized' ? '识别' : q.answer_source === 'teacher_input' ? '手动录入' : q.answer_source }}
+            {{ answerSourceLabel }}
           </el-tag>
           <template v-if="!editing">
             <el-button size="small" type="primary" plain @click="handleEnterEdit">
@@ -89,6 +89,14 @@
               <el-icon><Camera /></el-icon> 📷 截图识别答案
             </el-button>
           </div>
+          <!-- 参考答案来源（卷面印刷 / 答案库 / AI 生成）。老师看不出来源时会把 AI 算错的
+               参考答案当成"学生答错"，事故里就是这样反复怀疑批改逻辑的。
+               AI 生成那档带悬停说明，措辞只提示不施压。 -->
+          <span v-if="refAnswerOrigin" class="ops-ref-origin"
+                :class="`origin-${refAnswerOrigin.tone}`"
+                :title="refAnswerOrigin.hint">
+            {{ refAnswerOrigin.label }}
+          </span>
           <!-- AI 解析自检未通过时标红 + 给老师"答案可能错"的红色横幅。
                数据来自 worker.js 调 aiParseSelfCheck 写入 questions.ai_self_check_issues。
                移动端 Grading\index.jsx:538 已对齐相同 UX，避免老师改题无据可依。 -->
@@ -469,7 +477,7 @@ import { tikzToSvg } from '../../../utils/tikzGenerator'
 import { normalizeOptions } from '../../../utils/optionText'
 // 多小问（题组）共享题干展示口径：与错题卡片、重练卷共用同一套实现
 import { resolveQuestionDisplayStem } from '../../../utils/questionStem'
-import { getReviewStateLabel, getUnjudgedReasonText, getAiAnswerRiskText } from '../../../utils/reviewDecision'
+import { getReviewStateLabel, getUnjudgedReasonText, getAiAnswerRiskText, getReferenceAnswerOrigin } from '../../../utils/reviewDecision'
 import { ElMessage, ElMessageBox, ElLoading } from 'element-plus'
 import { DocumentChecked, Delete, Plus, Upload, Picture, EditPen, ArrowLeft, ArrowRight, ArrowDown, RefreshLeft, Crop, Camera } from '@element-plus/icons-vue'
 import MathRender from '../MathRender.vue'
@@ -509,6 +517,18 @@ const typeTagType = computed(() => {
   return map[normalizeType(q.value)] || 'info'
 })
 const optionsList = computed(() => normalizeOptions(q.value?.options || []))
+
+// 学生答案来源标签文案。'worksheet' 不在这里处理 —— 那个值描述的是**参考答案**来自
+// 答案库（该列语义混用），显示成学生答案来源会误导，改由「参考答案」栏的来源标签表达。
+const answerSourceLabel = computed(() => {
+  const s = q.value?.answer_source
+  if (!s) return ''
+  return s === 'blank' ? '未作答' : s === 'recognized' ? '识别' : s === 'teacher_input' ? '手动录入' : s
+})
+
+// 参考答案来源（卷面印刷 / 答案库 / AI 生成）。纯展示，帮助老师判断该不该相信这个答案 ——
+// 事故里老师反复怀疑批改逻辑，实际是 AI 补的参考答案错了。见 utils/reviewDecision.js 注释。
+const refAnswerOrigin = computed(() => getReferenceAnswerOrigin(q.value))
 
 // 难度系数（1-5）显示
 const difficultyLabel = computed(() => {
@@ -1423,6 +1443,29 @@ const handleRetryGeometry = async () => {
   background: #fef2f2;
   border: 1px solid #fca5a5;
   cursor: help;
+}
+
+/* 参考答案来源标签（卷面印刷 / 答案库 / AI 生成）。
+   中性信息用灰，AI 生成用琥珀 —— 不是报错，是"别无条件信它"，所以刻意不用红色：
+   红色留给上面那个真正表示"解析自检没过"的 ⚠ AI 不可信。 */
+.ops-ref-origin {
+  margin-left: 6px;
+  padding: 1px 6px;
+  border-radius: 4px;
+  font-size: var(--fs-10);
+  font-weight: 600;
+  cursor: help;
+  white-space: nowrap;
+}
+.ops-ref-origin.origin-info {
+  color: #475569;
+  background: #f1f5f9;
+  border: 1px solid #cbd5e1;
+}
+.ops-ref-origin.origin-warning {
+  color: #b45309;
+  background: #fffbeb;
+  border: 1px solid #fcd34d;
 }
 
 /* ── 答案对照条 ── */
