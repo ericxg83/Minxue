@@ -25,6 +25,59 @@ const ANSWER_MARKER_PATTERNS = [
   new RegExp(`最终答案${SEP}${CAP}`, 'i'),
 ]
 
+// 客观题 answer 字段里的「元话语」特征。命中即认为这条 answer 不是可对照的答案值，
+// 而是模型的自述残句/整段解释（`应包含10`、`写作0.31818...（或标准循环小数记法…）`）。
+// 主观题（essay/answer 等长答案）不适用本判据，只在 choice/fill/judge 上使用。
+// 刻意保守：宁可漏判（走原有判等路径）也不要把正常答案判成「不可核对」推人工。
+const NARRATION_HINTS = /应包含|应为|应该是|应该|注意|题目要求|按题目|见解析|写作|等等|以上|由于|因此|所以|说明|解释|可能/
+
+// 候选值「不像答案」的较宽判据，只用于在多个答案标记之间**挑一个**（不用于拒写）。
+// 比 NARRATION_HINTS 多的是解析口吻的动词：`解得…`、`取到…`、`不等于…`、`…为准`。
+const CHATTY_FRAGMENT_RE = new RegExp(
+  `${NARRATION_HINTS.source}|解得|不等于|正确|错误|选项|取到|满足条件|函数值为|分为|讨论|移项|代入|如图|为准`
+)
+
+/**
+ * 判断 answer 字段是否是「不可入库的叙述型答案」（仅用于客观题）。
+ *
+ * 2026-09-14 新增（错题再测-0911 事故）：
+ *   答案引擎的 answer 字段偶尔是元话语——解析里自言自语「所以正确答案应包含10」
+ *   被当成答案写进 `questions.answer`，再经 question_cache 指纹复用传染给
+ *   所有同题干的学生（全库 45/586 条缓存命中此类）。客观题的答案必须是可对照的短值，
+ *   命中叙述特征时应当**拒写并转人工**，而不是把一个判等层永远对不上的字符串塞进库。
+ *
+ * 判据只用关键词，**不做长度阈值**：实测客观题里按长度（>30/40/60 字）判会把
+ * 合法的多空答案（`(1)a⁶；(2)-x¹²；(3)x¹⁰`、`18的因数有1,2,3,6,9,18，其中…`）
+ * 一起打成"叙述型"，误伤远大于收益；关键词口径在 360 条客观题缓存上命中 14 条且全是坏答案。
+ */
+export function isNarrativeAnswer(answer) {
+  const s = String(answer ?? '').trim()
+  if (!s) return false
+  return NARRATION_HINTS.test(s)
+}
+
+/**
+ * 剥掉答案尾部的分隔符。**保留无限小数的省略号**：`0.31818...` 的 `...` 是有信息的，
+ * 统一按"最后两个字符是不是 `..`"来判断要不要剥那个孤立的句末点。
+ * （2026-09-14：原先一律 `[，,；;、.]+$` 会把 `0.31818...` 吃成 `0.31818`，
+ *   把一个无限小数变成了截断值 —— 参考答案从此与题目语义不符。）
+ */
+export function stripTrailingSeparators(value) {
+  let out = String(value ?? '').replace(/[，,；;、\s]+$/, '')
+  if (/[^.]\.$/.test(out)) out = out.replace(/\.$/, '')
+  return out
+}
+
+/** 剥掉候选值两侧的语气脚手架：「应为 X」「以 X 为准」「“X”」。 */
+export function cleanAnswerScaffold(value) {
+  return stripTrailingSeparators(String(value ?? ''))
+    .replace(/^[“"「'']\s*/, '')
+    .replace(/\s*[”"」'']$/, '')
+    .replace(/^(?:应为|应该是|应该是|应该|是|答案[是为：:]?|故|所以|以|写作|写为|记作)\s*/, '')
+    .replace(/\s*(?:为准|即可|为止)\s*$/, '')
+    .trim()
+}
+
 /**
  * 从 analysis 文本中抽"最终答案"字段。
  * 直接复用 worker.js 现有逻辑（CAP/SEP 模板避小数点误切 + tail(800) 截断）。
@@ -34,17 +87,38 @@ const ANSWER_MARKER_PATTERNS = [
  * 但 answer 字段写错（典型如题 14：analysis 末尾 "= 11/5"，answer 写 "√5"）。
  * 抓不到会导致自检全套通过、answer 字段悄悄错。fallback 限定取末行末段，避免
  * 误抓 analysis 中间步骤的等式右边。
+ *
+ * 2026-09-14 修正取值口径（错题再测-0911 事故）：
+ *   旧实现按 pattern 列表顺序返回**第一个**命中，模型在解析里自我纠错/自言自语时
+ *   （例：`……所以正确答案应包含10。……最终答案：2,3,5,6,7,8,10。`）会抓到中间那句
+ *   `应包含10` 并写进 questions.answer —— 实测全库 45/586 条缓存答案因此不是文末答案。
+ *   现在：收集**所有**命中，先筛掉「解析口吻」的候选（`解得…`、`以…为准`），
+ *   在剩下的候选里取**位置最靠后**的一个；全都不干净时退回最后一个。
+ *   实测 30 条多候选样本里 20+ 条因此拿到更完整的答案（`应为①、④、⑤`→`①,④,⑤`）。
  */
 export function extractFinalAnswerFromAnalysis(analysis) {
   if (!analysis || typeof analysis !== 'string') return null
   const tail = analysis.length > 800 ? analysis.substring(analysis.length - 800) : analysis
+
+  const candidates = []
   for (const pattern of ANSWER_MARKER_PATTERNS) {
-    const match = tail.match(pattern)
-    if (match && match[1]) {
-      const extracted = match[1].trim().replace(/[，,；;、.]+$/, '').trim()
-      if (extracted) return extracted
+    const re = new RegExp(pattern.source, pattern.flags.includes('g') ? pattern.flags : `${pattern.flags}g`)
+    let match
+    while ((match = re.exec(tail)) !== null) {
+      const value = cleanAnswerScaffold(match[1])
+      if (value) candidates.push({ index: match.index, value })
+      if (match.index === re.lastIndex) re.lastIndex += 1
     }
   }
+  if (candidates.length) {
+    candidates.sort((a, b) => a.index - b.index)
+    const cleanOnes = candidates.filter(c => !CHATTY_FRAGMENT_RE.test(c.value))
+    // 全是解析口吻的候选（`以 -1<t<0 为准`、`解得 m≠1…`）时返回 null：
+    // 宁可让调用方保留 answer 字段原值，也不要拿半截句子去覆盖它。
+    // （旧实现在这种情况下返回列表里先命中的那个，正是 `应包含10` 入库的成因之一。）
+    return cleanOnes.length ? cleanOnes[cleanOnes.length - 1].value : null
+  }
+
   // Fallback：analysis 末行以"= X"结尾，X 含数字/根号/字母/分数。
   // 取末行（按换行/句号切），避免抓到中间步骤的等式右边。
   const lastLine = tail.split(/[\n。]/).filter(s => s.trim()).pop() || tail

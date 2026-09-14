@@ -27,7 +27,9 @@ import { isValidImageBuffer, checkImageResolution } from './utils/imageValidator
 import { formatOptionsForPrompt } from './utils/optionText.js'
 import { validateArithmeticAnswer } from './utils/arithmeticAnswerValidator.js'
 import { aiParseSelfCheck } from './utils/aiParseSelfCheck.js'
-import { extractFinalAnswerFromAnalysis } from './utils/aiParseSelfCheck.js'
+import { extractFinalAnswerFromAnalysis, isNarrativeAnswer } from './utils/aiParseSelfCheck.js'
+import { rescueReferenceAnswer } from './utils/referenceAnswerRescue.js'
+import { describeReferenceAnswerRisk } from './utils/referenceAnswerSelfCheck.js'
 import { coerceAIText } from './utils/aiTextCoerce.js'
 import { computeTaskStats } from './utils/taskStats.js'
 import { rationalizeAnswer } from './utils/radicalSimplify.js'
@@ -1772,6 +1774,56 @@ const generateMissingAnswers = async (questions, imageBuffer = null, taskId = nu
     console.warn(`     题目 ${q.id.substring(0, 8)}: ${validation.reason}，已转人工复核`)
   }
 
+  // 参考答案「叙述型」闸（2026-09-14 错题再测-0911 事故）。
+  //
+  // 现象：答案引擎的 answer 字段偶尔是元话语——解析里自言自语「所以正确答案应包含10」
+  // 被当作答案写进 `questions.answer`，判等层永远对不上（学生答对也判错），
+  // 再经 question_cache 题干指纹复用传染给所有同题干的学生。
+  // 全库 586 条缓存实测：客观题命中此类 14 条，错题再测-0911 的 `应包含10` 是其一。
+  //
+  // 口径：客观题（choice/fill/judge）的参考答案必须是可对照的短值。
+  //   ① 先尝试 rescueReferenceAnswer 从解析/残句里救回真答案（`应包含10` → `2,3,5,6,7,8,10`）；
+  //   ② 救不回来（模型自己都说"选项里没有/待人工"）→ 清空答案 + 转人工，
+  //      与 rejectArithmeticMismatch 同一策略：不拿猜测值顶上。
+  // 主观题不适用本闸——叙述本身就是答案。
+  const isObjectiveForAnswerGate = (q) => !SUBJECTIVE_TYPES.has(String(q?.question_type || '').toLowerCase())
+
+  /** @returns {string|null} 救回后的答案；null = 救不回来（调用方清空转人工） */
+  const tryRescueReferenceAnswer = (value, analysis, q) => {
+    if (!isObjectiveForAnswerGate(q) || !isNarrativeAnswer(value)) return null
+    const rescued = rescueReferenceAnswer(value, analysis)
+    if (rescued) {
+      console.warn(`     题目 ${q.id.substring(0, 8)}: 参考答案疑似叙述残句，已救回 ${JSON.stringify(String(value).slice(0, 20))} → ${JSON.stringify(rescued.slice(0, 20))}`)
+    }
+    return rescued
+  }
+
+  const rejectNarrativeAnswer = async (q, analysis, value) => {
+    await updateQuestionAnswer(q.id, '', analysis, true)
+    q.answer = ''
+    if (analysis) q.analysis = analysis
+    exceptionCount++
+    await markAnswerException(q.id, '参考答案不可核对（疑似 AI 自述残句）')
+    console.warn(`     题目 ${q.id.substring(0, 8)}: 参考答案疑似叙述残句且救不回来 ${JSON.stringify(String(value).slice(0, 24))}，已清空并转人工复核`)
+  }
+
+  // 参考答案「自洽性风险」标注（P0 ③，2026-09-14 错题再测-0911 事故）。
+  //
+  // 与上面的叙述型闸分工：
+  //   · 叙述型闸 → 答案根本不可核对（`应包含10`），**清空 + 转人工**（硬拦）；
+  //   · 本闸     → 答案可核对，但解析结论区的算式本身算错、答案正好抄了它的右边
+  //                （`a + b = 8 + 3 = 29`），**只标风险不改判定**，由老师定。
+  //
+  // 为什么只标注不拦：全库 586 条缓存回测，同类判据（"算术自检不通过就拦"）命中 28 条
+  // 而只有 1 条是真幻觉，误伤 27 条正确答案（`27 的立方根为 3`、`x³=64 则 x=4`…）。
+  // 拦=大面积误伤；标注=老师多看一眼。见 utils/referenceAnswerSelfCheck.js 顶部说明。
+  const flagReferenceAnswerRisk = async (q, answer, analysis) => {
+    const risk = describeReferenceAnswerRisk({ answer, analysis, questionType: q.question_type })
+    if (!risk) return
+    await markAiAnswerRisk(q.id, risk)   // 内部自带 try/catch，观测信息不打断批改主流程
+    console.warn(`     题目 ${q.id.substring(0, 8)}: ${risk}`)
+  }
+
   // ⏳ 进度条中间状态：80% 打在这里后会跑这个批次循环，单个 batch 可能耗时分钟级
   // （AI 生成答案 / 缓存回填），期间 result.progress 一直停 80 → 前端"批改中"看着像卡死。
   // 按 batch 完成度把 80→84 拆细，让前端能看到推进。
@@ -1798,33 +1850,44 @@ const generateMissingAnswers = async (questions, imageBuffer = null, taskId = nu
 
           let finalAnswer = extractAnswerFromAnalysis(cached.answer, cached.analysis, q.options)
           finalAnswer = normalizeGeneratedAnswer(q, finalAnswer)
-          const arithmeticValidation = validateArithmeticAnswer(content, finalAnswer)
-          if (!arithmeticValidation.isValid) {
-            await rejectArithmeticMismatch(q, cached.analysis, arithmeticValidation)
+          // 缓存命中的答案也过叙述型闸：历史缓存里就沉了 `应包含10` 这类残句，
+          // 直接复用等于把错误一直传染下去。先尝试救回；救不回来则**不复用缓存**，
+          // 落到下面重新生成（新答案仍会再过一次闸）。
+          const rescuedFromCache = tryRescueReferenceAnswer(finalAnswer, cached.analysis, q)
+          if (rescuedFromCache) finalAnswer = rescuedFromCache
+          const cacheAnswerStillBad = isObjectiveForAnswerGate(q) && isNarrativeAnswer(finalAnswer)
+          if (cacheAnswerStillBad) {
+            console.warn(`     题目 ${q.id.substring(0, 8)}: 缓存答案疑似叙述残句且救不回来 ${JSON.stringify(String(finalAnswer).slice(0, 24))}，放弃缓存改用答案引擎`)
+          } else {
+            const arithmeticValidation = validateArithmeticAnswer(content, finalAnswer)
+            if (!arithmeticValidation.isValid) {
+              await rejectArithmeticMismatch(q, cached.analysis, arithmeticValidation)
+              return
+            }
+            try {
+              await updateQuestionAnswer(q.id, finalAnswer, cached.analysis)
+              q.answer = finalAnswer
+              if (cached.analysis) q.analysis = cached.analysis
+              updatedCount++
+              await flagReferenceAnswerRisk(q, finalAnswer, cached.analysis)
+
+              // 非关键写入：fire-and-forget
+              if (finalAnswer !== cached.answer) {
+                fireForget(() => query(
+                  `UPDATE ${TABLES.QUESTION_CACHE} SET answer = $1, updated_at = NOW() WHERE id = $2`,
+                  [finalAnswer, cached.id]
+                ), `缓存答案同步更新 q=${q.id.substring(0, 8)}`)
+              }
+              fireForget(() => saveQuestionSubject(q, cached.subject), `学科同步 q=${q.id.substring(0, 8)}`)
+              fireForget(() => incrementQuestionUseCount(fingerprint, PARSER_VERSION), `useCount q=${q.id.substring(0, 8)}`)
+              q.cache_id = cached.id
+              fireForget(() => updateQuestionCacheId(q.id, cached.id), `cacheId q=${q.id.substring(0, 8)}`)
+            } catch (err) {
+              console.error(`     题目 ${q.id.substring(0, 8)}: 缓存答案写入失败`, err.message)
+              exceptionCount++
+            }
             return
           }
-          try {
-            await updateQuestionAnswer(q.id, finalAnswer, cached.analysis)
-            q.answer = finalAnswer
-            if (cached.analysis) q.analysis = cached.analysis
-            updatedCount++
-
-            // 非关键写入：fire-and-forget
-            if (finalAnswer !== cached.answer) {
-              fireForget(() => query(
-                `UPDATE ${TABLES.QUESTION_CACHE} SET answer = $1, updated_at = NOW() WHERE id = $2`,
-                [finalAnswer, cached.id]
-              ), `缓存答案同步更新 q=${q.id.substring(0, 8)}`)
-            }
-            fireForget(() => saveQuestionSubject(q, cached.subject), `学科同步 q=${q.id.substring(0, 8)}`)
-            fireForget(() => incrementQuestionUseCount(fingerprint, PARSER_VERSION), `useCount q=${q.id.substring(0, 8)}`)
-            q.cache_id = cached.id
-            fireForget(() => updateQuestionCacheId(q.id, cached.id), `cacheId q=${q.id.substring(0, 8)}`)
-          } catch (err) {
-            console.error(`     题目 ${q.id.substring(0, 8)}: 缓存答案写入失败`, err.message)
-            exceptionCount++
-          }
-          return
         } else if (cached) {
           console.log(`     题目 ${q.id.substring(0, 8)}: 缓存命中但答案无效，重新调用AI`)
         }
@@ -1838,7 +1901,11 @@ const generateMissingAnswers = async (questions, imageBuffer = null, taskId = nu
 
       if (!validation.isValid) {
         if (result.analysis && result.analysis.trim()) {
-          const extracted = extractAnswerFromAnalysis(result.answer, result.analysis, q.options)
+          const extractedRaw = extractAnswerFromAnalysis(result.answer, result.analysis, q.options)
+          // 叙述型残句先救回（`写作0.31818...（或…）` → `0.31818...`）
+          const extracted = (isObjectiveForAnswerGate(q) && isNarrativeAnswer(extractedRaw))
+            ? tryRescueReferenceAnswer(extractedRaw, result.analysis, q)
+            : extractedRaw
           if (extracted && extracted !== '-' && extracted !== result.answer) {
             try {
               const safeExtracted = normalizeGeneratedAnswer(q, extracted)
@@ -1868,6 +1935,16 @@ const generateMissingAnswers = async (questions, imageBuffer = null, taskId = nu
         const oldAnswer = q.answer
         let finalAnswer = extractAnswerFromAnalysis(result.answer, result.analysis, q.options)
         finalAnswer = normalizeGeneratedAnswer(q, finalAnswer)
+        // 叙述型残句：先救回；救不回来才清空转人工
+        if (isObjectiveForAnswerGate(q) && isNarrativeAnswer(finalAnswer)) {
+          const rescued = tryRescueReferenceAnswer(finalAnswer, result.analysis, q)
+          if (rescued) {
+            finalAnswer = rescued
+          } else {
+            await rejectNarrativeAnswer(q, result.analysis, finalAnswer)
+            return
+          }
+        }
         const arithmeticValidation = validateArithmeticAnswer(content, finalAnswer)
         if (!arithmeticValidation.isValid) {
           await rejectArithmeticMismatch(q, result.analysis, arithmeticValidation)
@@ -1879,6 +1956,7 @@ const generateMissingAnswers = async (questions, imageBuffer = null, taskId = nu
           if (result.analysis) q.analysis = result.analysis
           updatedCount++
           console.log(`     题目 ${q.id.substring(0, 8)}: 答案 ${oldAnswer || '(空)'} → ${finalAnswer}`)
+          await flagReferenceAnswerRisk(q, finalAnswer, result.analysis)
 
           // 非关键写入：fire-and-forget
           if (fingerprint) {
@@ -2204,17 +2282,35 @@ export const processSlimGrading = async (job) => {
     // 且人工重判接口按 questions.student_answer 判，旧值会让改判结果错。
     // 对位命中的题一律回写（空串 = 本次未作答），与 is_correct 覆盖语义一致；
     // matchedBy='none' 的题对位记录无答案，同样按未作答回写空串。
+    //
+    // 2026-09-14 修正 is_correct 的写入语义（错题再测-0911 事故）：
+    //   旧实现写 `is_correct = COALESCE($2, is_correct)`——本次判不出的题（主观题 /
+    //   缺参考答案 / 低置信度）$2 为 null，COALESCE 就把**原作业的旧判定**留了下来。
+    //   而批改页 6 态（src/utils/reviewDecision.js）见 is_correct===false 即显示「AI错误」，
+    //   于是「本次根本没判」被显示成「AI错误」，且这批行的 student_answer 已被本次
+    //   答卷覆盖 ⇒ 页面上是「新学生答案 + 旧判定」错配。
+    //   行的语义是「最新一次批改」：本次没结论就写 null（页面落 6 态 exception/AI未判定），
+    //   绝不继承上一次的结论。confidence 仍 COALESCE——它只是 OCR 置信度线索，
+    //   缺失时保留旧值可让 6 态落在「AI未判定（有置信度）」，而不是「处理中」。
+    const prefillFailures = []
     for (const r of results) {
       if (r.isCorrect === null && r.studentAnswer === undefined) continue
       await query(
         `UPDATE ${TABLES.QUESTIONS}
          SET student_answer = $1,
-             is_correct = COALESCE($2, is_correct),
+             is_correct = $2::boolean,
              confidence = COALESCE($3, confidence),
              updated_at = NOW()
          WHERE id = $4`,
         [r.studentAnswer ?? '', r.isCorrect, r.confidence ?? null, r.questionId]
-      ).catch((e) => console.error(`[Slim] 预填 is_correct/student_answer 失败 q=${r.questionId?.substring(0, 8)}:`, e.message))
+      ).catch((e) => {
+        prefillFailures.push({ questionId: r.questionId, message: e.message })
+        console.error(`[Slim] 预填 is_correct/student_answer 失败 q=${r.questionId?.substring(0, 8)}:`, e.message)
+      })
+    }
+    if (prefillFailures.length > 0) {
+      // 不静默：本次判定没落库 ⇒ 批改页会显示旧状态（老师会当成"没批改"）或矛盾状态。
+      console.error(`   ⚠️ [Slim] ${prefillFailures.length}/${results.length} 题的 is_correct/student_answer 未落库，批改页状态不可信`)
     }
 
     // 判不出来的题：本管线早就分好了原因（主观题 / 缺参考答案 / 置信度不足），
