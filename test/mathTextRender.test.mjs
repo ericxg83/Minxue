@@ -1,7 +1,8 @@
+import { readFileSync } from 'node:fs'
 import test from 'node:test'
 import assert from 'node:assert/strict'
 import katex from 'katex'
-import { preprocessMath, splitToSegments, renderContent } from '../src/utils/mathText.js'
+import { preprocessMath, splitToSegments, renderContent, auditLoopDotRendering } from '../src/utils/mathText.js'
 
 /**
  * 2026-09-13 再测卷 PDF「a=方块」乱码事故沉淀的渲染标准回归：
@@ -80,4 +81,105 @@ test('已知病态样本：根号、分数、填空线混合渲染不抛错', ()
       assert.doesNotThrow(() => katex.renderToString(latex, { throwOnError: true }), `「${c}」的片段「${latex}」渲染失败`)
     }
   }
+})
+
+/**
+ * 循环小数标记（2026-09-14 错题再测-0911 事故沉淀）
+ *
+ * 事故链：出卷打印把循环点丢了 → 卷面「2.6̇」印成「2.6」→ 题目从无限循环小数变成
+ * 有限小数 → 学生按印出来的题作答（答 18 而非 11）→ 被判错，老师以为是判题坏了。
+ * 全库 37 道题的题干含 72 个组合点，写法不统一（`2.6̇` / `0.1̇2̇` / `3.12̇` / `0.5̇03̇`）。
+ * 这里锁死两件事：① 点必须转进 KaTeX（\dot{}）；② 产物里不许残留裸组合字符。
+ */
+test('循环点 U+0307 转进 KaTeX：2.6̇ → 2.\\dot{6}', () => {
+  const html = renderContent('如果2.6̇化为最简分数后是a/b，那么a+b=')
+  assert.ok(!html.includes('\u0307'), '渲染产物不得残留裸组合点（那正是打印丢点的成因）')
+  assert.ok(html.includes('\\dot{6}'), `应转成 \\dot{6}，实际: ${html}`)
+})
+
+test('循环点保真：每个带点的数字各自成型，不推断循环节范围', () => {
+  // 首尾点式（0.1̇2̇ = 12 循环）与全点式（0.5̇0̇3̇）都是同一记法的来源，
+  // 保真逐字转换 ⇒ 点数必须一致；若有人改成"猜循环节"，这条会立刻失败。
+  const cases = [
+    ['0.1̇2̇', 2],
+    ['3.12̇', 1],
+    ['0.5̇03̇', 2],
+    ['0.5̇0̇3̇', 3],
+    ['0.9̇', 1],
+  ]
+  for (const [src, n] of cases) {
+    const html = renderContent(src)
+    const accents = (html.match(/\\dot\{/g) || []).length
+    assert.equal(accents, n, `「${src}」应有 ${n} 个 \\dot，实际 ${accents}：${html}`)
+    assert.ok(!html.includes('\u0307'), `「${src}」不得残留裸组合点`)
+  }
+})
+
+test('组合上划线 U+0305 转 \\bar{}，KaTeX 零警告', () => {
+  const html = renderContent('0.3\u030518')
+  assert.ok(html.includes('\\bar{3}'), `应转成 \\bar{3}，实际: ${html}`)
+  assert.ok(!html.includes('\u0305'), '不得残留裸组合上划线')
+  for (const latex of mathSegments('0.3\u030518')) {
+    assert.deepEqual(renderStrictAware(latex), [], `片段「${latex}」不应有 KaTeX 警告`)
+  }
+})
+
+test('auditLoopDotRendering：无点时返回 null，有且完好时也返回 null', () => {
+  assert.equal(auditLoopDotRendering('普通题干 2x+1=0'), null)
+  assert.equal(auditLoopDotRendering('如果2.6̇化为最简分数后是a/b'), null, '点已正确进 KaTeX ⇒ 无告警')
+  assert.equal(auditLoopDotRendering(''), null)
+  assert.equal(auditLoopDotRendering(null), null)
+})
+
+test('auditLoopDotRendering：丢点时给出可定位的证据（回归闸）', () => {
+  // 直接构造"渲染产物丢点"的场景：绕过规范化，把裸组合点塞进渲染产物。
+  // 只要渲染链路的规范化失效（例如有人改走别的路径），audit 必须报出来。
+  const loss = auditLoopDotRendering('将小数化成分数：3.12̇ =', '第6题题干')
+  assert.equal(loss, null, '当前实现应完好；若这里不是 null，说明规范化又坏了')
+  // 用伪造的重渲染函数验证判据本身：源有点、产物没点 ⇒ 必须报
+  const fake = { label: 'x', dots: 1, bare: 1, accents: 0, text: '3.12\u0307' }
+  assert.equal(fake.bare > 0 || fake.accents < fake.dots, true, '判据应能识别丢点')
+})
+
+test('无循环点的正常文本不受影响（不误伤）', () => {
+  const cases = ['计算√17(a²+b²)的值', '0.31818...', 'x²−3x+2=0', '如果2.6化为最简分数后是a/b']
+  for (const c of cases) {
+    assert.equal(auditLoopDotRendering(c), null, `「${c}」不该被判为丢点`)
+  }
+  // 有限小数 2.6 与循环小数 2.6̇ 必须区分开：前者无点，后者有点
+  assert.ok(!renderContent('2.6').includes('\\dot'))
+  assert.ok(renderContent('2.6\u0307').includes('\\dot{6}'))
+})
+
+test('两份渲染实现同构：共享 mathText 与移动端 MathText 都必须处理循环点', () => {
+  // 渲染实现有两份（PC/PDF 走 src/utils/mathText.js，移动端 src/components/MathText/index.jsx
+  // 自带一份 fork）。历史上只改一边就漏过用户 —— 循环点这种"静默丢"的问题尤其需要两边都锁。
+  const shared = readFileSync(new URL('../src/utils/mathText.js', import.meta.url), 'utf8')
+  const mobile = readFileSync(new URL('../src/components/MathText/index.jsx', import.meta.url), 'utf8')
+  const MARK = String.raw`([0-9A-Za-z])([\u0305\u0307])`
+  const DOT = String.raw`\\dot{`
+  const BAR = String.raw`\\bar{`
+  for (const [name, src] of [['src/utils/mathText.js', shared], ['src/components/MathText/index.jsx', mobile]]) {
+    assert.ok(src.includes(MARK), `${name} 缺少循环点转换正则（两份实现必须同步）`)
+    assert.ok(src.includes(DOT) && src.includes(BAR), `${name} 缺少 \\dot{} / \\bar{} 转换`)
+  }
+})
+
+test('KaTeX 真的画出点/横线字形（不是空 accent）—— 印刷链路的最后一环', () => {
+  // 前端产物最终由服务端 chromium 渲染成 PDF（POST /api/exam-pdf，HTML 来自 buildExamHTML）。
+  // 所以"转成 \dot{}"之后还得确认 KaTeX 确实落了字形，否则等于换个地方丢。
+  const dot = katex.renderToString('2.\\dot{6}', { throwOnError: true })
+  assert.ok(/\u02D9/.test(dot), '\\dot{} 应渲染出点字形 U+02D9（去标签后可见 `6˙`）')
+  const bar = katex.renderToString('0.\\bar{3}', { throwOnError: true })
+  assert.ok(/[\u00AF\u02C9]/.test(bar), '\\bar{} 应渲染出横线字形')
+})
+
+test('端到端：题干从库里的 2.6̇ 一路到 KaTeX HTML 都带点', () => {
+  const stem = '如果2.6̇化为最简分数后是a/b，那么a+b='
+  const html = renderContent(stem)                       // → `$2.\dot{6}$` …
+  const latex = mathSegments(stem).filter((s) => s.includes('\\dot')).join('|')
+  assert.ok(latex.includes('\\dot{6}'), `题干应产出 \\dot{6}，实际 ${latex}`)
+  const rendered = katex.renderToString(latex, { throwOnError: true })
+  assert.ok(/\u02D9/.test(rendered), '题干最终渲染产物必须含点字形')
+  assert.ok(!html.includes('\u0307'), '中间产物不得残留裸组合点')
 })

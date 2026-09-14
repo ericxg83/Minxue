@@ -4,7 +4,7 @@ import qrcode from 'qrcode-generator'
 import renderMathInElement from 'katex/dist/contrib/auto-render.mjs'
 import { KATEX_CSS_WITH_FONTS as katexCss } from './katexCssWithFonts'
 import { isSvgCode } from './geometryDisplay'
-import { renderContent } from './mathText'
+import { renderContent, auditLoopDotRendering } from './mathText'
 import { normalizeOptions } from './optionText'
 // 多小问（题组）共享题干展示口径：与 PC 错题卡片、服务端重练卷 PDF 共用同一套实现
 import { resolveQuestionDisplayStem } from './questionStem'
@@ -288,6 +288,16 @@ export function buildPaperBody({ title, studentName, questions, showAnswers }) {
   // 分块只重排桶间顺序，桶内保持 questions 原本的相对顺序（= question_ids 顺序）。
   const paperOrder = buildRetryPaperOrder(questions)
 
+  // 印刷前自检：循环小数标记（组合点 U+0307 / 组合上划线 U+0305）必须活着进渲染产物。
+  // 丢点是**静默**的 —— 页面上「2.6̇」变「2.6」，题目从无限循环小数变成有限小数，
+  // 学生照着印出来的题作答必然被判错（2026-09-14 错题再测-0911 事故实证）。
+  // 渲染层已做规范化（mathText.js 步骤 0.7），这里再验一遍产物，防未来换渲染路径时回归。
+  const loopDotLosses = []
+  const checkLoopDots = (text, label) => {
+    const loss = auditLoopDotRendering(text, label)
+    if (loss) loopDotLosses.push(loss)
+  }
+
   function renderSection(items, label) {
     if (items.length === 0) return ''
     let html = `<div class="section-header">${label}</div>`
@@ -298,6 +308,11 @@ export function buildPaperBody({ title, studentName, questions, showAnswers }) {
     items.forEach(({ question: q, label: qLabel, isContinuation }) => {
       const { parentStem, content } = resolveQuestionDisplayStem(q)
       const typeClass = q.question_type === 'choice' ? 'q-choice' : q.question_type === 'fill' ? 'q-fill' : 'q-answer'
+      const dotLabel = `第${qLabel}题`
+      checkLoopDots(parentStem, `${dotLabel}公共题干`)
+      checkLoopDots(content, `${dotLabel}题干`)
+      if (showAnswers && q.answer) checkLoopDots(q.answer, `${dotLabel}参考答案`)
+      if (Array.isArray(q.options)) q.options.forEach((o, i) => checkLoopDots(o, `${dotLabel}选项${String.fromCharCode(65 + i)}`))
       html += `<div class="question ${typeClass}">`
       if (parentStem && !isContinuation) {
         html += `<div class="q-stem">${renderContent(parentStem)}</div>`
@@ -341,6 +356,12 @@ export function buildPaperBody({ title, studentName, questions, showAnswers }) {
       html += `</div>`
     })
     return html
+  }
+
+  if (loopDotLosses.length > 0) {
+    // 不静默：丢点会让题目语义变化，属于必须被看见的印刷事故。老师若在控制台/日志
+    // 看到这条，说明本次出卷有题目不能直接发给学生。
+    console.error('[试卷自检] 循环小数标记在渲染产物里丢失，印出来的题目会变义：', loopDotLosses)
   }
 
   return `<div class="page">

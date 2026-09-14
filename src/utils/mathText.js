@@ -79,6 +79,24 @@ function preprocessMath(text) {
   // 单个 _ 保留（可能用于下标，如 x_1；x_1 会在步骤 5 转 x_{1}）
   s = s.replace(/_{2,}/g, '\\underline{\\quad}')
 
+  // 0.7 循环小数标记：组合上点 U+0307 / 组合上划线 U+0305 → \dot{} / \bar{}
+  //
+  // 为什么必须在这里转（2026-09-14 错题再测-0911 事故）：
+  //   这两个是**组合附加符号**，语义上"贴在前一个数字上"。而数学段在两条渲染路径
+  //   （pdfGenerator 的 auto-render、MathRender 的 renderToString）里都交给 KaTeX
+  //   独占排版，KaTeX 的字形有自己的盒模型/定位 —— 落在文本段的孤立组合字符
+  //   附着不到前一个字形上，于是打印出来「2.6̇」变成「2.6」，题目从无限循环小数
+  //   变成有限小数，学生照着印出来的题作答必然被判定为错（事故里 5 个学生答 18、
+  //   3 个学生按 3.12 作答，都是这个成因；全库 37 道题的题干含 72 个点）。
+  //   转成 \dot{6} 后由 KaTeX 自己排版，预览与 PDF 都不会再丢。
+  //
+  // 保真转换、**不推断循环节范围**：OCR 有时只在循环节首尾加点（0.5̇03̇ = 503 循环），
+  // 有时每个数字都带点（0.5̇0̇3̇）—— 两种是同一记法的不同来源。猜循环节会把
+  // 0.3̇1̇8̇ 错排成 0.3̇8̇（318 循环 → 38 循环），语义就错了。
+  s = s.replace(/([0-9A-Za-z])([\u0305\u0307])/g, (_m, base, mark) =>
+    mark === '\u0307' ? `\\dot{${base}}` : `\\bar{${base}}`
+  )
+
   // 1. √ → \sqrt{...}
   s = convertSqrt(s)
 
@@ -325,10 +343,36 @@ function renderContent(text) {
   return html
 }
 
+/**
+ * 印刷/预览自检：循环小数标记有没有活着走到渲染产物里。
+ *
+ * 背景（2026-09-14 错题再测-0911 事故）：组合点丢过一次，而且**丢得悄无声息** ——
+ * 页面上「2.6̇」变成「2.6」，题目从无限循环小数变成有限小数，没有任何报错，
+ * 直到学生按印出来的题作答被判错才被发现。
+ * 所以渲染前规范化之外，还要有一道"渲染后点数对得上"的自检：原文有几个点，
+ * 产物里就该有几个 \dot/\bar，且**不允许有裸组合字符**残留在 KaTeX 之外。
+ *
+ * @param {string} text 题目原文（题干/选项/答案均可）
+ * @param {string} [label] 定位用标签，如 `第3题题干`
+ * @returns {null | {label:string, dots:number, bare:number, accents:number, text:string}}
+ *          返回 null 表示无循环点或渲染完好；返回对象即为"丢点"证据
+ */
+function auditLoopDotRendering(text, label = '') {
+  const src = String(text || '')
+  const dots = (src.match(/[\u0305\u0307]/g) || []).length
+  if (!dots) return null
+  const rendered = renderContent(src)
+  const bare = (rendered.match(/[\u0305\u0307]/g) || []).length
+  const accents = (rendered.match(/\\dot\{|\\bar\{/g) || []).length
+  if (bare === 0 && accents >= dots) return null
+  return { label, dots, bare, accents, text: src.slice(0, 60) }
+}
+
 export {
   preprocessMath,
   convertSqrt,
   splitToSegments,
   isMathChar,
   renderContent,
+  auditLoopDotRendering,
 }
