@@ -891,7 +891,7 @@ const downloadImage = async (imageUrl) => {
  * handwriting, or did it see a blank line / fill-in placeholder?
  * Returns 'blank' when AI likely saw empty/placeholder, otherwise 'recognized'.
  */
-function determineAnswerSource(rawStudentAnswer) {
+export function determineAnswerSource(rawStudentAnswer) {
   const trimmed = String(rawStudentAnswer || '').trim()
   if (!trimmed || trimmed === '未作答') return 'blank'
   // AI commonly returns "____" for fill-in-blank when it reads the
@@ -2292,17 +2292,31 @@ export const processSlimGrading = async (job) => {
     //   行的语义是「最新一次批改」：本次没结论就写 null（页面落 6 态 exception/AI未判定），
     //   绝不继承上一次的结论。confidence 仍 COALESCE——它只是 OCR 置信度线索，
     //   缺失时保留旧值可让 6 态落在「AI未判定（有置信度）」，而不是「处理中」。
+    //
+    // 2026-09-14 修正 answer_source 的写入语义（「明明写了答案却显示未作答」事故）：
+    //   旧实现只回写 student_answer/is_correct/confidence，answer_source 留着原作业
+    //   批改时的旧值。原作业 OCR 判空过的题带着 answer_source='blank' 进错题本，
+    //   重练时学生写了答案、答案也回写了，但旧 blank 标留存 ⇒ 批改页 6 态
+    //   （src/utils/reviewDecision.js:74）blank 优先于 is_correct，显示成「未作答」。
+    //   与 is_correct 同理，answer_source 也按「行 = 最新一次批改」刷新：
+    //   本次答案非空 → recognized，本次真没写 → blank（判空口径与主 OCR 管线
+    //   determineAnswerSource 完全同源：空 / '未作答' / 纯下划线）。
+    //   blank 时把 student_answer 一并归一为空串，保证「blank ⇔ student_answer 为空」
+    //   的展示层不变量成立（与主管线落库行为一致）。
     const prefillFailures = []
     for (const r of results) {
       if (r.isCorrect === null && r.studentAnswer === undefined) continue
+      const nextStudentAnswer = r.studentAnswer ?? ''
+      const nextAnswerSource = determineAnswerSource(nextStudentAnswer)
       await query(
         `UPDATE ${TABLES.QUESTIONS}
          SET student_answer = $1,
+             answer_source = $5,
              is_correct = $2::boolean,
              confidence = COALESCE($3, confidence),
              updated_at = NOW()
          WHERE id = $4`,
-        [r.studentAnswer ?? '', r.isCorrect, r.confidence ?? null, r.questionId]
+        [nextAnswerSource === 'blank' ? '' : nextStudentAnswer, r.isCorrect, r.confidence ?? null, r.questionId, nextAnswerSource]
       ).catch((e) => {
         prefillFailures.push({ questionId: r.questionId, message: e.message })
         console.error(`[Slim] 预填 is_correct/student_answer 失败 q=${r.questionId?.substring(0, 8)}:`, e.message)
