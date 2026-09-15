@@ -475,14 +475,30 @@ function prepareMathExpr(input) {
   s = s.replace(/\\sqrt\s*\{([^{}]*)\}/gi, '(($1))**0.5')
   // ^ → **  (exponentiation)
   s = s.replace(/\^/g, '**')
+  // Unicode 乘号 / 除号 → ASCII（2026-09-15）。
+  // OCR 与教材排版都用 ×/÷，而 prepareMathExpr 原本只归一 LaTeX 的 \times/\cdot，
+  // 残留的 `×` 会让 new Function 抛 SyntaxError → 数学等价分支恒为 false。
+  // normalizeAnswer 里有同一份归一，但 prepareMathExpr 不在它的下游，必须各补一份：
+  // 实测 `judgeAnswer('5×10²','500')` 判错、`('5*10^2','500')` 判对，差别只在这个 ×。
+  s = s.replace(/[×✕✖]/g, '*')
+  s = s.replace(/÷/g, '/')
   // Unicode 上标数字 → **N（OCR 常见 x² y³ 这类手写形态；否则 ² 不是合法 JS 标识符 → eval 抛错 → 数学等价失败）
   // 2026-09-01 用户截图：题#11 答案含 "x²" 上标，原 prepareMathExpr 不处理，
   //   isMathEquivalent 走 eval 抛错 → 整个数学等价分支 false。
-  s = s.replace(/([a-zA-Z\)])[⁰¹²³⁴⁵⁶⁷⁸⁹]+/g, (_, base) => {
-    const supMap = { '⁰': '0', '¹': '1', '²': '2', '³': '3', '⁴': '4', '⁵': '5', '⁶': '6', '⁷': '7', '⁸': '8', '⁹': '9' }
+  // 2026-09-15 用户截图补两点缺口：
+  //   ① 基底原来只认「字母 / 右括号」，**数字基底漏了** ⇒ 科学记数法 `5×10²`（=500）、
+  //      `-3.6×10⁻⁴` 全部无法求值，与参考答案永远对不上（实测这批卷子 4/4 判错）；
+  //   ② 上标可能带正负号（`10⁻⁴`）。带符号必须包成 `10**(-4)`，
+  //      因为 `10**-4` 是 JS 语法错误（幂运算符右侧不允许一元负号）。
+  s = s.replace(/([a-zA-Z\)\d])([⁺⁻]?[⁰¹²³⁴⁵⁶⁷⁸⁹]+)/g, (_, base, sup) => {
+    const supMap = {
+      '⁰': '0', '¹': '1', '²': '2', '³': '3', '⁴': '4',
+      '⁵': '5', '⁶': '6', '⁷': '7', '⁸': '8', '⁹': '9',
+      '⁻': '-', '⁺': '+'
+    }
     let n = ''
-    for (const c of _.slice(1)) n += supMap[c] || c
-    return `${base}**${n}`
+    for (const c of sup) n += supMap[c] ?? c
+    return /^[+\-]/.test(n) ? `${base}**(${n})` : `${base}**${n}`
   })
   // 用 **0.5 而非 Math.sqrt，避免后续 toLowerCase 把 Math 变成 math 导致 ReferenceError。
   s = convertSqrtToPower(s)

@@ -286,3 +286,31 @@ test('reference truncation only adds correct verdicts, never loosens a wrong one
   assert.deepEqual(judgeAnswer('3/4', ref, 'answer'), { isCorrect: false, unrecognized: false })
   assert.deepEqual(judgeAnswer('-1/3', ref, 'answer'), { isCorrect: false, unrecognized: false })
 })
+
+// 缺陷 5（2026-09-15 用户截图）：科学记数法 `5×10²`（=500）与 `500` 判不等。
+// 题：地球到太阳 1.5×10⁸ km、光速 3×10⁸ m/s，求光行时间 —— 学生答 `5×10²`，参考 `500`。
+// prepareMathExpr 两处缺口，缺一个都判不对：
+//   ① 上标归一正则的基底只认「字母 / 右括号」（`x²` 能转），**数字基底漏了**：
+//      `10²` 里的 `²` 原样保留 → new Function 抛 SyntaxError → 数学等价分支恒 false；
+//   ② 函数内没有 `×/÷` → `*//` 归一（该归一只在 normalizeAnswer 里，而它不在下游）。
+// 实测后果：这道题同批 4 份卷子判等全部判错。
+test('scientific notation is equivalent to its decimal value', () => {
+  // 学生手写形态 5×10²
+  assert.deepEqual(judgeAnswer('5×10²', '500', 'answer'), { isCorrect: true, unrecognized: false })
+  assert.deepEqual(judgeAnswer('5×10²', '500', 'fill'), { isCorrect: true, unrecognized: false })
+  // OCR 另一种写法 5×10^2
+  assert.deepEqual(judgeAnswer('5×10^2', '500', 'answer'), { isCorrect: true, unrecognized: false })
+  // 反方向：参考侧是科学记数法、学生侧是十进制值（负指数必须包成 **(-4)，否则 JS 语法错误）
+  assert.deepEqual(judgeAnswer('-0.00036', '-3.6×10⁻⁴', 'fill'), { isCorrect: true, unrecognized: false })
+  assert.deepEqual(judgeAnswer('0.00036', '3.6×10⁻⁴', 'fill'), { isCorrect: true, unrecognized: false })
+  // 既有能力不得回退
+  assert.deepEqual(judgeAnswer('5*10^2', '500', 'answer'), { isCorrect: true, unrecognized: false })
+  assert.deepEqual(judgeAnswer('x²', 'x^2', 'fill'), { isCorrect: true, unrecognized: false })
+  assert.deepEqual(judgeAnswer('(x+3)²', '(x+3)^2', 'fill'), { isCorrect: true, unrecognized: false })
+
+  // 不得放水：指数不同 / 数值不同 一律仍判错
+  assert.deepEqual(judgeAnswer('5×10³', '500', 'answer'), { isCorrect: false, unrecognized: false })
+  assert.deepEqual(judgeAnswer('5×10²', '5000', 'answer'), { isCorrect: false, unrecognized: false })
+  assert.deepEqual(judgeAnswer('6×10²', '500', 'answer'), { isCorrect: false, unrecognized: false })
+  assert.deepEqual(judgeAnswer('2×10⁻³', '0.02', 'fill'), { isCorrect: false, unrecognized: false })
+})
