@@ -89,9 +89,9 @@
               <el-icon><Camera /></el-icon> 📷 截图识别答案
             </el-button>
           </div>
-          <!-- 参考答案来源（卷面印刷 / 答案库 / AI 生成）。老师看不出来源时会把 AI 算错的
-               参考答案当成"学生答错"，事故里就是这样反复怀疑批改逻辑的。
-               AI 生成那档带悬停说明，措辞只提示不施压。 -->
+          <!-- 参考答案来源（答案库 / AI 解答，两档）。卷面只印题目不印答案，
+               老师看不出来源时会把 AI 算错的参考答案当成"学生答错"，事故里就是这样
+               反复怀疑批改逻辑的。AI 解答那档带悬停说明，措辞只提示不施压。 -->
           <span v-if="refAnswerOrigin" class="ops-ref-origin"
                 :class="`origin-${refAnswerOrigin.tone}`"
                 :title="refAnswerOrigin.hint">
@@ -526,7 +526,7 @@ const answerSourceLabel = computed(() => {
   return s === 'blank' ? '未作答' : s === 'recognized' ? '识别' : s === 'teacher_input' ? '手动录入' : s
 })
 
-// 参考答案来源（卷面印刷 / 答案库 / AI 生成）。纯展示，帮助老师判断该不该相信这个答案 ——
+// 参考答案来源（答案库 / AI 解答，两档）。纯展示，帮助老师判断该不该相信这个答案 ——
 // 事故里老师反复怀疑批改逻辑，实际是 AI 补的参考答案错了。见 utils/reviewDecision.js 注释。
 const refAnswerOrigin = computed(() => getReferenceAnswerOrigin(q.value))
 
@@ -1271,6 +1271,29 @@ const handleReview = async (result) => {
     wrong: `已标记为${btn.wrong}`,
     exclude: '已删除本题'
   }
+  // [2026-09-15] 「删除」必须二次确认，避免误点误删。
+  // 该动作是软删除：review_status='exclude' 落库后前端立即从列表移除，
+  // 后端 getQuestionsByTask 也会永久过滤 → 本页面再也看不到、点不到这题；
+  // 而「撤销上一笔」(undoLastReview) 只回退内存状态、不会把题插回列表，
+  // 即删除在本页面不可挽回，因此必须挡住误触。
+  if (result === 'exclude') {
+    try {
+      await ElMessageBox.confirm(
+        '删除后本题将从本份试卷中移除、不再计入复核进度，且本页面无法找回。<br><span style="color:var(--wb-text-tertiary)">适用场景：OCR 把一行识别成两行、两道题识别成同一道、识别失败的残段等。</span>',
+        '确认删除本题？',
+        {
+          confirmButtonText: '删除',
+          cancelButtonText: '取消',
+          type: 'warning',
+          confirmButtonClass: 'el-button--danger',
+          dangerouslyUseHTMLString: true,
+        }
+      )
+    } catch {
+      // 老师取消 → 不做任何变更（不写库、不动列表、不弹成功提示）
+      return
+    }
+  }
   // 标记"错误"需完整性检查（错误题要入错题本）
   if (result === 'wrong') {
     const blocked = store.reviewQuestion(question.id, result)
@@ -1445,8 +1468,8 @@ const handleRetryGeometry = async () => {
   cursor: help;
 }
 
-/* 参考答案来源标签（卷面印刷 / 答案库 / AI 生成）。
-   中性信息用灰，AI 生成用琥珀 —— 不是报错，是"别无条件信它"，所以刻意不用红色：
+/* 参考答案来源标签（答案库 / AI 解答，两档）。
+   中性信息用灰，AI 解答用琥珀 —— 不是报错，是"别无条件信它"，所以刻意不用红色：
    红色留给上面那个真正表示"解析自检没过"的 ⚠ AI 不可信。 */
 .ops-ref-origin {
   margin-left: 6px;
