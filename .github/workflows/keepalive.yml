@@ -1,0 +1,59 @@
+name: Render Keepalive
+
+# ── 为什么需要这个 workflow ────────────────────────────────────────────
+# 后端 minxue-api 挂在 Render 免费实例上（render.yaml: plan: free）。
+# Render 免费实例在「15 分钟无入站 HTTP 请求」后会 spin down，
+# 而实例唤醒时要重新调度容器、并串行重跑 server/index.js 里 48 个数据库迁移
+# （每个迁移 2 次 DB 往返，且 Render 在 Oregon、Neon 在新加坡，单次往返约 200ms）。
+# 结果就是用户「过一段时间打开 App」要干等 30~60 秒。
+#
+# 这里每 10 分钟打一次极轻量的 /api/health（该路由不查库），
+# 让实例保持常驻，把冷启动从用户路径上彻底移除。
+#
+# 为什么是 10 分钟而不是 5 分钟：
+#   GitHub 的 schedule 在高负载时可能延迟数分钟，10 分钟间隔 + 延迟
+#   仍能稳定落在 Render 的 15 分钟阈值内；同时把 Action 分钟数压到最低。
+#   仓库为 public 时 Actions 不计费；private 仓库每月约消耗 1.5k 分钟。
+#   若想完全免费且更精确，可改用 Cloudflare Worker Cron
+#   （见 docs/ops-keepalive.md 的备选方案）。
+
+on:
+  schedule:
+    - cron: '*/10 * * * *'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+# 同一时刻只允许一个保活任务，避免堆积
+concurrency:
+  group: render-keepalive
+  cancel-in-progress: false
+
+jobs:
+  ping:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Ping /api/health
+        run: |
+          URL="https://minxue-api.onrender.com/api/health"
+
+          for attempt in 1 2 3; do
+            # 实例若在休眠，这一次请求会等容器起来，因此单次超时放宽到 120s
+            code=$(curl -s -o health.json -w '%{http_code}' \
+              --max-time 120 --noproxy '*' "$URL" || echo "000")
+
+            if [ "$code" = "200" ]; then
+              echo "保活成功（第 $attempt 次尝试，HTTP $code）"
+              cat health.json
+              echo
+              exit 0
+            fi
+
+            echo "第 $attempt 次尝试未成功：HTTP $code"
+            sleep 15
+          done
+
+          echo "三次探测均失败，实例可能未启动或服务异常，请检查 Render Dashboard"
+          exit 1
