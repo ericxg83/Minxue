@@ -1,0 +1,20 @@
+# Cloudflare Worker：Render 免费实例保活
+#
+# 独立于仓库根目录的 wrangler.toml（那是 Pages 配置，Pages Functions 不支持 cron）。
+# 部署：cd workers/keepalive && npx wrangler deploy
+#
+# 部署后可用 `npx wrangler tail` 看 cron 触发的日志，
+# 或直接访问 Worker 的 URL 手动探活一次。
+
+name = "minxue-render-keepalive"
+main = "src/index.js"
+compatibility_date = "2025-01-01"
+
+# Render 免费实例 15 分钟无入站请求即 spin down；5 分钟一次留足调度余量。
+# Cloudflare Cron Triggers 对 Worker 的 scheduled 调用不计入请求数配额。
+[triggers]
+crons = ["*/5 * * * *"]
+
+# 保留日志，便于确认 cron 是否按时触发、实例是否一直醒着
+[observability]
+enabled = true
