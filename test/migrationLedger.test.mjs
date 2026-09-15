@@ -16,7 +16,7 @@
 //     · index.js 的迁移清单必须与 import 严格对位，且不允许退回裸 await 写法。
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { readFileSync } from 'node:fs'
+import { readFileSync, readdirSync } from 'node:fs'
 import { resolve } from 'node:path'
 import { runMigrations, versionOf, loadAppliedVersions } from '../server/migrations/migrationLedger.js'
 
@@ -217,6 +217,45 @@ test('index.js 的迁移清单与 import 严格对位，且不允许退回裸 aw
     strayAwaits,
     [],
     `迁移必须走台账，发现绕过台账的裸调用: ${strayAwaits.join(', ')}`
+  )
+})
+
+test('工作区迁移文件不得出现 CRLF（跨平台指纹不一致会让迁移每次冷启动白跑）', () => {
+  // 真实事故（2026-09-15）：.gitattributes 声明 `*.js text eol=lf`，但
+  // 037_add_variant_questions.js 的 blob 历史上就是 CRLF，于是本地工作区为 CRLF、
+  // 线上 checkout 为 LF。Function.prototype.toString() 会带上 \r，同一份代码
+  // 因此算出两个指纹：本地 3451587da6dd、线上 4ad056a4ddea。结果线上已记账的
+  // 037 在本地被判成「待应用」，每次冷启动都白跑一次。
+  //
+  // versionOf 已做行尾归一化兜底，这条断言从源头堵住 CRLF 再溜进来。
+  const dir = resolve(ROOT, 'server/migrations')
+  const offenders = readdirSync(dir)
+    .filter((f) => f.endsWith('.js'))
+    .filter((f) => readFileSync(resolve(dir, f), 'utf8').includes('\r'))
+
+  assert.deepEqual(
+    offenders,
+    [],
+    `以下迁移文件含 CRLF，必须转为 LF：${offenders.join(', ')}`
+  )
+})
+
+test('版本号对行尾差异免疫（同一份代码在 LF 与 CRLF 下必须同指纹）', () => {
+  // 直接构造同一段源码的两种行尾，验证 versionOf 的归一化生效。
+  // 用一个临时模块落地两种行尾再 import，避免依赖文件系统的实际行尾。
+  const body = 'async function demo() {\n  await 1\n  await 2\n}'
+  const lfFn = new Function(`return (${body})`)()
+  const crlfFn = new Function(`return (${body.replace(/\n/g, '\r\n')})`)()
+
+  assert.notEqual(
+    String(lfFn),
+    String(crlfFn),
+    '前置条件：两种行尾的函数源码必须不同，否则这条测试没有意义'
+  )
+  assert.equal(
+    versionOf('demo', lfFn),
+    versionOf('demo', crlfFn),
+    '行尾差异不得影响指纹，否则 Windows 本地与 Linux 线上会对同一份代码产生两个版本号'
   )
 })
 

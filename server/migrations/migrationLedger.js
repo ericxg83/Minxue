@@ -37,9 +37,18 @@ const UNDEFINED_TABLE = '42P01'
  * 计算迁移版本号。
  * 用「键 + 函数源码指纹」而非纯键：迁移文件被修改后指纹变化，
  * 该迁移会重新执行，避免「加了列却没跑」的静默失效。
+ *
+ * 指纹必须先归一化行尾再算：`.gitattributes` 声明的是 `*.js eol=lf`，但工作区
+ * 文件可能仍是 CRLF（编辑器写入、或文件早于 .gitattributes 存在），此时
+ * `Function.prototype.toString()` 会带上 `\r`，同一份代码在 Windows 与 Linux
+ * 上就得到两个不同指纹。
+ * 实测事故：server/migrations/037_add_variant_questions.js 工作区为 CRLF，
+ * 未归一化时本地算出 3451587da6dd、线上记账为 4ad056a4ddea，对不上 →
+ * 该迁移每次冷启动都被判为「待应用」白跑一次。归一化后可精确复原线上指纹。
  */
 export const versionOf = (key, fn) => {
-  const fingerprint = createHash('sha1').update(String(fn)).digest('hex').slice(0, 12)
+  const source = String(fn).replace(/\r\n/g, '\n')
+  const fingerprint = createHash('sha1').update(source).digest('hex').slice(0, 12)
   return `${key}@${fingerprint}`
 }
 
