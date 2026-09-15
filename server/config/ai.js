@@ -269,19 +269,22 @@ export function isMainRateLimitedToday() {
 // 2026-09-15 重大变更：魔搭把 Qwen3-VL 全系下架（235B/8B/8B-Thinking 全部 400
 // "has no provider supported"，且两把账号的 /v1/models 清单均已无任何 Qwen3-VL，
 // 被 Qwen3.5/Qwen3.8 新系列替代）。旧列表绝不能放回——每次请求都会空轮 3 个死模型。
-// 新清单（2026-09-15 用真实题目图 prod_imgs/crop1.jpg 实测，见 _diag_ms_newvl_quality.mjs）：
-//   Qwen/Qwen3.8-27B            主力：12s、3 题全识别（含手写 5×10²/上标）、JSON 合规、answer 无污染
-//   Shanghai_AI_Laboratory/Intern-S2-Preview  第一备份：3.2s 最快，但 answer 会抄学生答案（P3 污染闸兜底）
-//   Qwen/Qwen3.8-27B 之外的 Qwen/Qwen3.5-397B-A17B  第二备份：21s，识别完整，同样有 answer 污染
-// 注意：InternVL3_5-241B / Intern-S1 / ERNIE-4.5-VL / Hy3 / GLM-5.2 实测 200 但 choices 空
-//（「下架征兆」同款模式，绝不能放进轮换列表）；MiniMax-M3 400 无 provider；Step-3.7-Flash 幻觉。
-// AI_MODEL 环境变量作为队首（Render env 建议同步设为 Qwen/Qwen3.8-27B）。
+// 新清单排序依据（2026-09-15 双图×2轮基准，deliverables/bench_vision_3way_20260915_newms.json，
+// 生产 OCR 提示词，与 9-13 旧 235B/sensenova 数据同口径对比）：
+//   Qwen/Qwen3.5-122B-A10B                      主力：IMG_A 40s（三家最快）、严格 JSON 4/4 轮、
+//                                               题数 15/15、坐标 27/30 合法、0 污染、要素命中 7/9（=旧235B）
+//   Qwen/Qwen3.8-27B                            第一备份：质量同样好（坐标 30/30 全合法、要素 7/9），
+//                                               但 IMG_A 94~131s 最慢
+//   Shanghai_AI_Laboratory/Intern-S2-Preview    第二备份：单样本可用，answer 会抄学生答案（P3 闸兜底）
+//   ⚠️ Qwen/Qwen3.8-Flash-Next 明确排除：IMG_A 关键要素只命中 4/9，缺根号嵌套/−√6/指数题——
+//      有漏抽/识别偏差疑点，且 105~155s 最慢。
+// AI_MODEL 环境变量作为队首（Render env 建议同步设为 Qwen/Qwen3.5-122B-A10B）。
 export const VL_MODELS = [...new Set([
   process.env.AI_MODEL,
   process.env.VL_MODEL,
+  'Qwen/Qwen3.5-122B-A10B',
   'Qwen/Qwen3.8-27B',
   'Shanghai_AI_Laboratory/Intern-S2-Preview',
-  'Qwen/Qwen3.5-397B-A17B',
 ].filter(Boolean))]
 
 // 2026-08 实测：魔搭当前没有可用的纯文本在线模型：
