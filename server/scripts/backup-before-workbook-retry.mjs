@@ -1,13 +1,18 @@
 /**
  * 重跑前盘点 + 备份（只读 + 写备份文件，不改库）
- * 目标任务：2ed887cd / 100c18eb / cd9c22f1（练习册重跑，会删题重建）
+ * 目标任务：练习册重跑会删题重建，跑前必须备份。
+ *
+ * 用法：
+ *   node server/scripts/backup-before-workbook-retry.mjs                 # 默认三份
+ *   node server/scripts/backup-before-workbook-retry.mjs 2ed887cd 100c18eb
  */
 import { config } from 'dotenv'
 config({ path: 'D:/Minxue_App_V3/server/.env' })
 import pg from 'pg'
 import { writeFileSync, mkdirSync } from 'node:fs'
 
-const TASKS = ['2ed887cd', '100c18eb', 'cd9c22f1']
+const CLI = process.argv.slice(2).filter(a => !a.startsWith('--'))
+const TASKS = CLI.length ? CLI : ['2ed887cd', '100c18eb', 'cd9c22f1']
 const pool = new pg.Pool({ connectionString: process.env.NEON_DATABASE_URL, ssl: { rejectUnauthorized: false } })
 const q = async (s, p) => (await pool.query(s, p)).rows
 
@@ -47,7 +52,7 @@ console.table(await q(`
 const ts = new Date().toISOString().replace(/[:.]/g, '-').slice(0, 19)
 const backup = {
   createdAt: new Date().toISOString(),
-  reason: 'workbook 任务重跑前备份（2ed887cd/100c18eb/cd9c22f1）',
+  reason: `workbook 任务重跑前备份（${TASKS.join('/')}）`,
   taskIds: ids,
   questions: await q(`SELECT * FROM questions WHERE task_id::text = ANY($1)`, [ids]),
   wrongQuestions: await q(`

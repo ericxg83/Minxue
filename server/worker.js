@@ -2539,6 +2539,9 @@ function normalizeLessonCode(value) {
   return String(value ?? '')
     .replace(/[（(]/g, '(')
     .replace(/[）)]/g, ')')
+    // 全角句点 → 半角：OCR 把 "27.2(3)" 读成 "27．2(3)" 是常态（与答案册解析事故同源）。
+    // 只转 U+FF0E 全角句点，不动中文句号「。」—— 后者一旦变点号会在普通文本里造出假编号。
+    .replace(/．/g, '.')
     .replace(/\s+/g, '')
     .trim()
 }
@@ -2555,9 +2558,103 @@ function extractLessonCodeFromSectionTitle(sectionTitle) {
   return m ? m[1] : null
 }
 
-export function pickAnswerUnit(answersByUnit, pageTitle, questions, pageNumber, chapterHint, sectionTitle) {
+/**
+ * 收集一段文本里所有"课时编号"形态的片段（去重）。
+ * 形态：`27.3(2)` / `27.2（3）` / `19.1(1)` / `30.1`，全角括号与空白先归一。
+ * 只是"候选收集"，不做取舍 —— 取舍交由调用方（要求唯一 + 答案库能唯一命中）。
+ */
+const LESSON_CODE_SCAN_RE = /(\d{1,2}\s*[.．]\s*\d{1,2}(?:\s*[（(]\s*\d{1,2}\s*[）)])?)/g
+// 形态二：编号与课时序号分离 —— 「27.2 二次函数的图像与性质 (2)」
+// 卷面/OCR 常把"课时号"与"该课时下的序号"分开印：编号在行首，序号在标题末尾的括号里。
+// 只扫连续编号会得到 "27.2"，对不上答案库的 unit_key "27.2(2)" ——
+// 实测 2026-09-15：李哲瀚 27.2(2) 卷重跑时 section_title 正是这个形态，导致整页锚定失败、
+// 7 道题全部落成"待人工"。
+// 限制：中间不得出现其它数字（[^\d(（]），避免把两处无关的数字硬拼成一个编号。
+const SPLIT_LESSON_CODE_RE = /(\d{1,2})\s*[.．]\s*(\d{1,2})[^\d(（]{0,24}?[（(]\s*(\d{1,2})\s*[）)]/g
+function collectLessonCodes(text) {
+  const out = new Set()
+  if (!text || typeof text !== 'string') return out
+  const norm = normalizeLessonCode(text)
+  LESSON_CODE_SCAN_RE.lastIndex = 0
+  let m
+  while ((m = LESSON_CODE_SCAN_RE.exec(norm)) !== null) out.add(m[1])
+  // 分离形态组合成完整编号；它可能与前一条扫出的 "27.2" 共存，
+  // 但 "27.2" 不在答案库的 unit_key 集合里，会在 validCodes 过滤时被剔除。
+  SPLIT_LESSON_CODE_RE.lastIndex = 0
+  while ((m = SPLIT_LESSON_CODE_RE.exec(norm)) !== null) out.add(`${m[1]}.${m[2]}(${m[3]})`)
+  return out
+}
+
+/**
+ * 从"本页所有可得文本"里提炼唯一课时编号。
+ *
+ * 为什么需要它（2026-09-15 事故）：
+ *   workbook 提示词原先【没有】section_title 字段，模型即便读到了正文里的课时标题也无处可填，
+ *   `parsed.section_title` 恒为 undefined → 恒 null。于是当页眉印的是书名跑马灯
+ *   （「新闵学校"成长·桥"练习 第01周」）时，标题类锚点全空，整页落到
+ *   struct-fingerprint / group-fallback 去猜单元；而答案册里同一题号横跨 49 个单元
+ *   （题号 4 有 62 条记录、46 个不同答案）→ 猜错就"一份卷没有一道对得上"。
+ *
+ * 本函数的立场：课时编号是**本页唯一硬锚点**，比任何标题模糊匹配都可靠。
+ * 只要它在本页任何地方出现过（页眉、正文小标题、题干、甚至模型的原始响应），
+ * 就应该被用上 —— 这些文本都是 OCR 一次调用已经产出的，零额外成本。
+ *
+ * @param {string[]} sources 本页可得文本
+ * @param {Set<string>} [validCodes] 允许的编号集合（答案库现有 unit_key 归一化后的集合）。
+ *        传了就只统计这个集合里的编号 —— 这一步很关键：题干里的 "1.5"/"3.14" 这类小数
+ *        会被自动排除，不必靠"整数部分≥10"之类的脆弱启发式。
+ * @returns {string|null} 过滤后【恰好一个】课时编号时返回它，0 个或多个都返回 null
+ */
+export function extractUniqueLessonCode(sources, validCodes) {
+  const found = new Set()
+  for (const s of sources) {
+    for (const code of collectLessonCodes(s)) {
+      if (validCodes && !validCodes.has(code)) continue
+      found.add(code)
+    }
+  }
+  if (found.size !== 1) return null
+  return [...found][0]
+}
+
+export function pickAnswerUnit(answersByUnit, pageTitle, questions, pageNumber, chapterHint, sectionTitle, rawOcrText) {
   if (!answersByUnit || answersByUnit.size === 0) return null
   if (answersByUnit.size === 1) return [...answersByUnit.keys()][0]
+
+  // ── 0-!) 整页课时编号硬锚定（2026-09-15）──
+  // 立场：课时编号是本页唯一的**硬锚点**，优先级高于一切标题模糊匹配。
+  //
+  // 事故背景：workbook 提示词原先没有 section_title 字段 → 该信号恒 null；
+  // 页眉又常印书名跑马灯（「新闵学校"成长·桥"练习 第01周」）→ 标题类锚点全空。
+  // 于是整页落到 struct-fingerprint / group-fallback 去猜单元。答案册里同一题号横跨
+  // 49 个单元（题号 4 有 62 条记录、46 个不同答案）→ 猜错后按题号取答案必然张冠李戴，
+  // 实测一份卷 7~10 题判错、且"把对的判成错、把错的判成对"两者同时发生。
+  //
+  // 这里把本页**所有可得文本**扫一遍找编号（页眉、正文小标题、题干、以及模型原始响应全文）
+  // —— 这些文本都是同一次 OCR 已经产出的，零额外成本。
+  //
+  // 两道硬约束，宁可不用也不误锚：
+  //   ① 过滤后（只认答案库确实存在的编号）必须【恰好一个】，出现多个说明本页跨课时，放弃；
+  //   ② 该编号必须与答案库某个 unit_key 严格相等且【唯一】，命中多个同样放弃。
+  {
+    const validCodes = new Set([...answersByUnit.keys()].map(normalizeLessonCode))
+    // 来源只用"模型确实读到过的东西"：页眉标题、正文小标题、以及 OCR 原始响应全文。
+    // 原始响应里已经包含模型输出的全部文本（含题干），所以不必再单独扫 question.content；
+    // 少一路来源就少一份噪声。
+    const sources = [pageTitle, sectionTitle, rawOcrText]
+    for (const q of Array.isArray(questions) ? questions : []) {
+      if (q && typeof q === 'object' && typeof q._lesson_code === 'string') sources.push(q._lesson_code)
+    }
+    const pageCode = extractUniqueLessonCode(sources, validCodes)
+    if (pageCode) {
+      const hit = [...answersByUnit.keys()].filter(uk => normalizeLessonCode(uk) === pageCode)
+      if (hit.length === 1) {
+        console.log(`[pickAnswerUnit] 整页课时编号 "${pageCode}" 严格唯一命中 unit="${hit[0]}"（来源含页眉/正文/OCR 原文）`)
+        return hit[0]
+      }
+      console.warn(`[pickAnswerUnit] 整页课时编号 "${pageCode}" 在答案库命中 ${hit.length} 个 unit，不唯一 → 落回原级联`)
+    }
+  }
 
   // ── 0--) 正文小标题里的【课时编号】严格优先（2026-09-12）──
   // 编号（"27.3(2)"）比副标题文字可靠得多。实测该页 OCR 读出
@@ -3203,7 +3300,9 @@ export function _groupByPhysicalContinuity(pageDataList, answersByUnit) {
       h.pg.pageTitle,
       h.pg.questions,
       h.pg.pageNumber,
-      h.pg.chapterHint
+      h.pg.chapterHint,
+      h.pg.sectionTitle,
+      h.pg.rawOcrText
     )
     return { h, u, unitMaxQ: u ? unitMaxQ(u) : -Infinity }
   }).filter(x => x.u)
@@ -3527,7 +3626,7 @@ export function resolveAnswerUnits(answersByUnit, pageDataList) {
   // ★ 修复：分组覆盖的页【仍然先走 pickAnswerUnit 完整精细链】，分组结果只作
   //   其返回 null 时的兜底，防止分组打平错锚后静默短路全部精细匹配。
   //   返回对象携带 method / groupMatched / groupTie 诊断字段，供 sectionMatch 审计。
-  const resolved = pageDataList.map(({ pageTitle, sectionTitle, pageNumber, questions, chapterHint }, idx) => {
+  const resolved = pageDataList.map(({ pageTitle, sectionTitle, pageNumber, questions, chapterHint, rawOcrText }, idx) => {
     const groupInfo = groupOverrides.get(pageNumber)
     const groupTie = (groupInfo && groupInfo.tieUnits) ? groupInfo.tieUnits : (groupTieMap.get(pageNumber) || null)
     const physInfo = physicalOverrides ? physicalOverrides.get(pageNumber) : null
@@ -3542,7 +3641,7 @@ export function resolveAnswerUnits(answersByUnit, pageDataList) {
         physChainPages: physInfo.chainPages,
       }
     }
-    const preciseUnit = pickAnswerUnit(answersByUnit, pageTitle, questions, pageNumber, chapterHint, sectionTitle)
+    const preciseUnit = pickAnswerUnit(answersByUnit, pageTitle, questions, pageNumber, chapterHint, sectionTitle, rawOcrText)
     if (preciseUnit) {
       return {
         pageNumber, unitKey: preciseUnit, idx, method: 'precise',
@@ -4187,6 +4286,8 @@ export const processWorkbookGrading = async (job) => {
 只输出 JSON 对象，格式：
 {
   "page_title": "页面顶部印刷体标题。注意区分层级：'堂堂练① 19.1(1) 算术平方根'（课时练习）、'试卷① 19.1 平方根与立方根 基础性测试'（课时测试卷）、'第二章 评价测试卷'/'第十九章 单元测试卷'（章级/综合测试卷）。'试卷N'与'第X章...测试卷'是不同单元，必须如实区分输出，不要简化或省略，没有则填 null",
+  "section_title": "正文里印着的【本页课时小标题】，形如'27.3（2）已知图像上三点求二次函数的表达式'、'19.1(1) 算术平方根'、'27.2（4）二次函数的图像与性质'；整页没有则填 null",
+  "lesson_code": "本页印刷的【课时编号】本身，形如 '27.3(2)'、'19.1(1)'、'27.2（3）'。只填编号，不要带后面的标题文字（如填 '27.3(2)' 而不是 '27.3（2）已知图像上三点求二次函数的表达式'）；整页找不到这种编号才填 null",
   "chapter_hint": "根据题目内容推断的章节名，如'第二十章二次根式'，不确定就填 null",
   "questions": [
     {
@@ -4205,6 +4306,22 @@ export const processWorkbookGrading = async (job) => {
 - page_title 从页面页眉/大标题的印刷体读取，尽量完整（包括圈序号 ①②③、课时编号 19.1(1) 等关键信息）。
   它是批改时定位答案库的关键锚点——必须如实输出，绝不要省略或简化。
   例如：识别到"堂堂练①  19.1(1)  算术平方根"就必须原样输出整串，不要简化为"堂堂练1"。
+
+⚠️【lesson_code 是本管线最重要的锚点，必须优先保证】
+  它是"这一页到底属于哪一课时"的唯一硬凭据，缺失会让这一页的参考答案全部取错。
+  规则：
+  1) 「课时编号」= "数字.数字" 或 "数字.数字(数字)" 形式，如 27.3(2)、19.1(1)、27.2（3）、30.1。
+     lesson_code 只填这个编号本身，括号统一用半角，不要带任何后续标题文字。
+  2) 【它可能出现在页面的任何位置】—— 不一定在页眉。可能在页眉下方一行大字、
+     可能在页面正中、也可能与书名印在同一行。请通读整页后再填。
+  3) ⚠️ 练习册页眉常见【两行标题】的排版：
+     第一行是全书通用的书名跑马灯（如「新闵学校"成长·桥"练习 第01周」「数学堂堂清」），
+        → 这一行填 page_title；
+     第二行才是本页真正的课时标题（如「27.3（2）已知图像上三点求二次函数的表达式」），
+        → 这一行整句填 section_title，其中的编号 "27.3(2)" 填 lesson_code。
+     绝不能因为第一行有书名就忽略第二行——第二行才是本页的归属依据。
+  4) 整页确实没有任何"数字.数字"形式的课时编号（如整本是单元测试卷、期中期末卷）时，
+     lesson_code 与 section_title 都填 null，不要用书名、栏目名、题号去凑。
 
 ⚠️【关键】如果页面顶部看不到印刷体页眉/标题（被裁掉、模糊、或本就是"二、选择题 + 简答题"这类无章节标题的排版），
   绝对不能把 page_title 留为 null！必须根据本页【题目内容特征】推断最可能的章节标题并填入：
@@ -4335,6 +4452,9 @@ export const processWorkbookGrading = async (job) => {
     let questions = []
     let pageTitle = null
     let sectionTitle = null
+    // lesson_code：本页印刷的课时编号（"27.3(2)"）。与 section_title 一起构成本页的
+    // 硬锚点，见 pickAnswerUnit 的「0-!) 整页课时编号硬锚定」。
+    let lessonCode = null
     try {
       const jsonStr = stripCodeFence(content)
       const parsed = JSON.parse(jsonStr)
@@ -4343,6 +4463,7 @@ export const processWorkbookGrading = async (job) => {
       } else if (parsed && typeof parsed === 'object') {
         pageTitle = parsed.page_title || null
         sectionTitle = parsed.section_title || null
+        lessonCode = parsed.lesson_code || null
         // chapter_hint 是 AI 推断的章节名（"第二十章二次根式"等），用于
         // pickAnswerUnit 兜底章节匹配。即使 pageTitle 没识别到或无法匹配，
         // chapter_hint 仍可作为可靠的章节信号（AI 看过题目内容）。
@@ -4353,6 +4474,13 @@ export const processWorkbookGrading = async (job) => {
           // 把 chapter_hint 也合并进每个 question 的临时字段，供 pickAnswerUnit 用
           for (const q of questions) {
             if (q && typeof q === 'object') q._chapter_hint = chapterHint
+          }
+        }
+        // lesson_code 同样挂到每题上：pickAnswerUnit 会连同页眉/正文/题干/OCR 原文
+        // 一起扫，任一来源命中即可锚定。模型把它填在哪个字段都能被捡回来。
+        if (lessonCode) {
+          for (const q of questions) {
+            if (q && typeof q === 'object') q._lesson_code = lessonCode
           }
         }
       }
@@ -4436,6 +4564,10 @@ export const processWorkbookGrading = async (job) => {
     pageDataList.push({
       pageTitle,
       sectionTitle,
+      // OCR 原始响应全文：模型这一次调用"读到"的整页文本都在这里。
+      // pickAnswerUnit 会扫它找课时编号 —— 即便模型把编号塞进了别的字段、或被结构化输出
+      // 挤掉了，只要响应里出现过就能捞回来。零额外成本（同一次调用已产出）。
+      rawOcrText: content,
       imageUrl: url,
       questions,
       pageNumber: pageNo,
@@ -4484,6 +4616,7 @@ export const processWorkbookGrading = async (job) => {
         let questions = []
         let pageTitle = null
         let sectionTitle = null
+        let lessonCode = null
         try {
           const jsonStr = stripCodeFence(content)
           const parsed = JSON.parse(jsonStr)
@@ -4491,6 +4624,7 @@ export const processWorkbookGrading = async (job) => {
           else if (parsed && typeof parsed === 'object') {
             pageTitle = parsed.page_title || null
             sectionTitle = parsed.section_title || null
+            lessonCode = parsed.lesson_code || null
             questions = Array.isArray(parsed.questions) ? parsed.questions : []
           }
         } catch (e) {
@@ -4505,10 +4639,11 @@ export const processWorkbookGrading = async (job) => {
         for (const q of questions) {
           q._page_image_url = url
           q._page_number = pageNo
+          if (lessonCode) q._lesson_code = lessonCode
         }
         questions = splitOcrQuestionsBySubNo(questions)
         allQuestionsRetry.push(...questions)
-        pageDataListRetry.push({ pageTitle, sectionTitle, imageUrl: url, questions, pageNumber: pageNo, chapterHint: null })
+        pageDataListRetry.push({ pageTitle, sectionTitle, lessonCode, rawOcrText: content, imageUrl: url, questions, pageNumber: pageNo, chapterHint: null })
         console.log(`   [Workbook] 重试第 ${pageIdx + 1} 页: 识别到 ${questions.length} 道题`)
       }
       if (allQuestionsRetry.length > 0) {
@@ -4862,6 +4997,7 @@ export const processWorkbookGrading = async (job) => {
     delete q._page_image_url
     delete q._page_number
     delete q._chapter_hint
+    delete q._lesson_code
     // 题干垃圾检测标记在匹配阶段已可能被答案库真实题干覆盖；
     // 若仍是垃圾内容（未回填），重置为占位符，避免"× ×"污染题库列表。
     if (q._content_garbage) {
