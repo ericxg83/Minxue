@@ -60,12 +60,12 @@
       <div v-if="store.currentPaperReviewable && store.allQuestions.length > 0" class="status-chips">
         <span class="status-chip chip-correct">
           <StatusIcon state="correct" :size="16" />
-          <span class="chip-label">AI正确</span>
+          <span class="chip-label">AI判对</span>
           <span class="chip-count">{{ store.aiStateStats.correct }}</span>
         </span>
         <span class="status-chip chip-wrong">
           <StatusIcon state="wrong" :size="16" />
-          <span class="chip-label">AI错误</span>
+          <span class="chip-label">AI判错</span>
           <span class="chip-count">{{ store.aiStateStats.wrong }}</span>
         </span>
         <span class="status-chip chip-pending">

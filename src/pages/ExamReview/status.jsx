@@ -31,13 +31,17 @@ export const getStatusInfo = (q) => {
     case 'correct':
       return {
         bg: 'var(--success-soft)', color: COLORS.success,
-        text: 'AI正确', icon: CheckCircle2,
+        // 文案走统一口径（getReviewStateLabel / reviewDecision.js）：
+        // correct 状态在老师复核改判为对时要显示「已复核-人工判对」，
+        // 不能硬编码成 AI 的结论（2026-09-15 与 PC 端对齐）。
+        text: getReviewStateLabel(q), icon: CheckCircle2,
         isGreyed: false, source: 'ai_correct'
       }
     case 'wrong':
       return {
         bg: 'var(--danger-soft)', color: COLORS.danger,
-        text: 'AI错误', icon: XCircle,
+        // 同上：wrong 状态细分「已复核」「已复核-AI翻案」「AI判错」，统一由 label 决定
+        text: getReviewStateLabel(q), icon: XCircle,
         isGreyed: false, source: 'ai_wrong'
       }
     case 'exception':

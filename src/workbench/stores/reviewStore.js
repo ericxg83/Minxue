@@ -1020,7 +1020,7 @@ export const useReviewStore = defineStore('review', () => {
   }
 
   // ── 6 态语义判定（用于左侧图标 / 顶部统计）──────────────────────
-  // 返回：correct（AI正确）| wrong（AI错误）| pending（待复核）| exception（AI未判定）| blank（未作答）| processing（处理中）
+  // 返回：correct（AI判对）| wrong（AI判错）| pending（待复核）| exception（AI未判定）| blank（未作答）| processing（处理中）
   // 优先用既有人工复核结果，其次 AI 判定字段。
   // 题目的 6 态判定 —— 实现见 src/utils/reviewDecision.js，移动端复核页共用同一函数
   const getAiState = (q) => getReviewState(q, confidenceThreshold.value)

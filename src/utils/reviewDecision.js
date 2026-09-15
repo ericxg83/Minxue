@@ -2,7 +2,7 @@
  * 人工复核判定的唯一真相来源（移动端 React + PC 端 Vue 共用）
  *
  * 判定语义曾在两端各自实现，阈值不同（移动端 0.9 / PC 端 0.5），
- * 导致同一道题在手机上显示「待人工复核」而在 PC 上显示「AI正确」。
+ * 导致同一道题在手机上显示「待人工复核」而在 PC 上显示「AI判对」。
  * 状态判定与阈值必须只有一份实现。
  */
 
@@ -96,9 +96,14 @@ export const isExcluded = question => question?.review_status === REVIEW_STATUS.
 // 5 态的展示文案唯一真相来源（移动端 React + PC 端 Vue 共用）。
 // exception 只是"AI 没给出正误结论"，不代表 OCR 失败——旧文案「未识别答案」会让老师
 // 在学生答案明明已识别出来时误判为识别故障，因此聚合桶统一叫「AI未判定」。
+//
+// 2026-09-15 措辞收敛：`AI正确` / `AI错误` → `AI判对` / `AI判错`。
+// 「AI正确」读起来像"AI 本身是对的"，而不是"AI 判定学生答对"，用户拿着
+// 「学生 ±4 / 参考答案 ±2 / 勾选 AI正确」的截图来问"答案都不一样，AI 凭什么判对"，
+// 就是被这个词坑的。「判对 / 判错」把主语明确成"一次判定"。
 export const REVIEW_STATE_LABELS = Object.freeze({
-  correct: 'AI正确',
-  wrong: 'AI错误',
+  correct: 'AI判对',
+  wrong: 'AI判错',
   pending: '待复核',
   exception: 'AI未判定',
   blank: '未作答',
@@ -124,7 +129,20 @@ export const getReviewStateLabel = (question, threshold = DEFAULT_CONFIDENCE_THR
     const hasManualReview = question?.review_status === REVIEW_STATUS.WRONG ||
                             question?.review_status === REVIEW_STATUS.WRONG_NO_BOOK
     if (hasManualReview) {
-      return question?.is_correct === true ? '已复核·AI 翻案' : '已复核'
+      return question?.is_correct === true ? '已复核-AI翻案' : '已复核'
+    }
+  }
+  // correct 状态同样要细分（2026-09-15）——与上面的 wrong 分支对称。
+  // 老师复核改判「做对了」时，AI 原本判的可能是「错」(is_correct=false)，
+  // 也可能根本没给结论 (is_correct=null)。旧实现让这两种都落回
+  // REVIEW_STATE_LABELS.correct =「AI判对」，等于**把人工结论署上 AI 的名**。
+  // 用户拿「学生 ±4 / 参考答案 ±2 / 勾选 AI正确」的截图来问「答案不一样为什么说 AI 判断正确」
+  // 就是踩在这里：那条题 is_correct=false、review_status='correct'，页面却写「AI判对」。
+  // 全库同类 81 条。人工推翻 AI 时，文案必须写明这结论是人下的。
+  if (state === 'correct') {
+    const hasManualReview = question?.review_status === REVIEW_STATUS.CORRECT
+    if (hasManualReview && question?.is_correct !== true) {
+      return '已复核-人工判对'
     }
   }
   return REVIEW_STATE_LABELS[state] || REVIEW_STATE_LABELS.pending

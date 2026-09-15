@@ -540,8 +540,8 @@ export default function ExamReview({ task, onClose, onSave, onViewImage }) {
     { key: 'attention', label: '需处理', count: needsAttentionCount, dot: COLORS.warning },
     { key: 'uncertain', label: '待复核', count: stats.uncertain, dot: COLORS.warning },
     { key: 'error', label: 'AI未判定', count: stats.error, dot: 'var(--warning)' },
-    { key: 'ai_correct', label: 'AI正确', count: stats.ai_correct, dot: COLORS.success },
-    { key: 'ai_wrong', label: 'AI错误', count: stats.ai_wrong, dot: COLORS.danger },
+    { key: 'ai_correct', label: 'AI判对', count: stats.ai_correct, dot: COLORS.success },
+    { key: 'ai_wrong', label: 'AI判错', count: stats.ai_wrong, dot: COLORS.danger },
     { key: 'all', label: '全部', count: validQuestions.length, dot: 'var(--text-tertiary)' }
   ].filter(o => o.count > 0 || o.key === 'all' || o.key === filter)
 
