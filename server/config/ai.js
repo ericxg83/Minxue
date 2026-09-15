@@ -17,7 +17,7 @@ export const AI_CONFIG = {
     return process.env.AI_API_KEY || ''
   },
   get MODEL() {
-    return process.env.AI_MODEL || 'Qwen/Qwen3-VL-8B-Instruct'
+    return process.env.AI_MODEL || 'Qwen/Qwen3.8-27B'
   },
   TIMEOUT: 120000,
   MAX_RETRIES: 2,
@@ -266,18 +266,22 @@ export function isMainRateLimitedToday() {
   return Date.now() < _mainRateLimitedUntil
 }
 
-// 2026-07 实测魔搭在线推理模型清单：Qwen3-VL-30B-A3B-Instruct 已下架
-// （请求返回 200 但 choices=null，绝不能再放进轮换列表——空响应会拖慢整批），
-// 235B-A22B-Instruct 与 8B-Thinking 在线且各有独立当日配额。
-// 顺序（2026-08-14 调优）= 质量优先：235B 主力（质量明显优于 8B，另有独立免费日配额）
-// → 8B 第一备份（便宜、量大、兜底）→ 8B-Thinking 最深兜底（推理模型较慢）。
-// AI_MODEL 环境变量作为队首；以下硬编码保证 235B/8B/8B-Thinking 始终可轮换。
+// 2026-09-15 重大变更：魔搭把 Qwen3-VL 全系下架（235B/8B/8B-Thinking 全部 400
+// "has no provider supported"，且两把账号的 /v1/models 清单均已无任何 Qwen3-VL，
+// 被 Qwen3.5/Qwen3.8 新系列替代）。旧列表绝不能放回——每次请求都会空轮 3 个死模型。
+// 新清单（2026-09-15 用真实题目图 prod_imgs/crop1.jpg 实测，见 _diag_ms_newvl_quality.mjs）：
+//   Qwen/Qwen3.8-27B            主力：12s、3 题全识别（含手写 5×10²/上标）、JSON 合规、answer 无污染
+//   Shanghai_AI_Laboratory/Intern-S2-Preview  第一备份：3.2s 最快，但 answer 会抄学生答案（P3 污染闸兜底）
+//   Qwen/Qwen3.8-27B 之外的 Qwen/Qwen3.5-397B-A17B  第二备份：21s，识别完整，同样有 answer 污染
+// 注意：InternVL3_5-241B / Intern-S1 / ERNIE-4.5-VL / Hy3 / GLM-5.2 实测 200 但 choices 空
+//（「下架征兆」同款模式，绝不能放进轮换列表）；MiniMax-M3 400 无 provider；Step-3.7-Flash 幻觉。
+// AI_MODEL 环境变量作为队首（Render env 建议同步设为 Qwen/Qwen3.8-27B）。
 export const VL_MODELS = [...new Set([
   process.env.AI_MODEL,
   process.env.VL_MODEL,
-  'Qwen/Qwen3-VL-235B-A22B-Instruct',
-  'Qwen/Qwen3-VL-8B-Instruct',
-  'Qwen/Qwen3-VL-8B-Thinking',
+  'Qwen/Qwen3.8-27B',
+  'Shanghai_AI_Laboratory/Intern-S2-Preview',
+  'Qwen/Qwen3.5-397B-A17B',
 ].filter(Boolean))]
 
 // 2026-08 实测：魔搭当前没有可用的纯文本在线模型：
@@ -1097,24 +1101,32 @@ export async function callVisionCompletion(opts) {
     if (isModelExhaustedToday(vlModel, apiKey)) {
       throw new Error(`模型 ${vlModel} 当日配额已用尽（跳过）`)
     }
-    const content = await requestOpenAIProvider({
-      endpoint: AI_CONFIG.ENDPOINT,
-      apiKey,
-      model: vlModel,
-      messages,
-      temperature,
-      maxTokens,
-      // ⚠️ 超时必须大于模型真实延迟，否则主模型永远失败、每张图都被判成
-      // "所有视觉模型均不可用：timeout of 45000ms exceeded"。
-      // 2026-08-26 实测（Qwen3-VL-235B + 本 OCR 提示词，同一张 733KB 压缩图连测 3 次）：
-      //   107935ms / 90119ms / 111313ms，三次都 finish_reason=stop、结果完整。
-      // 此前硬上限 45s 低于正常延迟，大图（>600KB）注定超时。
-      // 原注释担心的"卡在 503 重试累计 245s"由 retry503:false 兜住，与超时值无关。
-      timeout: parseInt(process.env.VISION_TIMEOUT_MS) || 180000,
-      retry429: true,
-      retry503: false,
-    })
-    return { content, usedBackup: apiKey !== AI_CONFIG.API_KEY, vendorName: 'ModelScope' }
+    let content
+    try {
+      content = await requestOpenAIProvider({
+        endpoint: AI_CONFIG.ENDPOINT,
+        apiKey,
+        model: vlModel,
+        messages,
+        temperature,
+        maxTokens,
+        // ⚠️ 超时必须大于模型真实延迟，否则主模型永远失败、每张图都被判成
+        // "所有视觉模型均不可用：timeout of 45000ms exceeded"。
+        // 2026-08-26 实测（Qwen3-VL-235B + 本 OCR 提示词，同一张 733KB 压缩图连测 3 次）：
+        //   107935ms / 90119ms / 111313ms，三次都 finish_reason=stop、结果完整。
+        // 此前硬上限 45s 低于正常延迟，大图（>600KB）注定超时。
+        // 原注释担心的"卡在 503 重试累计 245s"由 retry503:false 兜住，与超时值无关。
+        timeout: parseInt(process.env.VISION_TIMEOUT_MS) || 180000,
+        retry429: true,
+        retry503: false,
+      })
+      return { content, usedBackup: apiKey !== AI_CONFIG.API_KEY, vendorName: 'ModelScope' }
+    } catch (err) {
+      // ⚠️ 必须打标：否则 wrapVisionError 的按顺序推断会把连续多个魔搭组合的失败
+      // 误标成 Agnes/FreeModel/SenseNova，前端出现「四家全灭」的假象（2026-09-15 实锤）。
+      err._provider = 'ms'
+      throw err
+    }
   }
 
   const wantedModels = model ? [model] : VL_MODELS
