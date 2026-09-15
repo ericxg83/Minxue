@@ -20,7 +20,10 @@ name: Render Keepalive
 
 on:
   schedule:
-    - cron: '*/10 * * * *'
+    # 刻意避开整十分（0/10/20…）：GitHub 官方文档说明 schedule 在高负载时会延迟
+    # 甚至丢弃，并明确建议「避免整点触发」。最初的 `*/10 * * * *` 正好全踩在
+    # 整十分上，实测上线后 40 分钟、跨 4 个调度窗口一次都没触发。
+    - cron: '7,17,27,37,47,57 * * * *'
   workflow_dispatch:
 
 permissions:
