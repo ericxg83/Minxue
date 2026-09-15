@@ -21,7 +21,7 @@ import { usePaperBank } from './features/PaperBank/index.jsx'
 import { useUploadFlow } from './hooks/useUploadFlow'
 import { usePolling } from './hooks/usePolling'
 import { __pendingUploadStore } from './features/upload/pendingUploadStore'
-import { mockTasks, mockWrongQuestions, mockGeneratedExams, mockStudents } from './data/mockData'
+import { mockTasks, mockWrongQuestions, mockGeneratedExams } from './data/mockData'
 import StudentSwitcher from './components/StudentSwitcher'
 import AppHeader from './components/AppHeader'
 import UploadOptionsModal from './components/UploadOptionsModal'
@@ -211,77 +211,68 @@ export default function App() {
           return
         }
         
-        // Try cache first for instant display
-        const cached = localStorage.getItem('students_cache')
-        if (cached) {
-          try {
-            const cachedData = JSON.parse(cached)
-            if (Array.isArray(cachedData) && cachedData.length > 0) {
-              setStudents(cachedData)
-              
-              // Restore last selected student
-              const lastStudentId = localStorage.getItem('lastStudentId')
-              const lastStudent = lastStudentId 
-                ? cachedData.find(s => s.id === lastStudentId) 
-                : null
-              setCurrentStudent(lastStudent || cachedData[0])
-              // 记录 init 应用到的学生 id：后台刷新回来时，若用户已手动切换过学生，
-              // 不得用 init 时刻捕获的 lastStudentId 覆盖用户的选择
-              // （2026-09-10 事故：后台 getStudents 返回晚于用户选学生，把陆晨曦的
-              //   上传静默覆盖回上次学生，作业归错人）。
-              const appliedStudentId = (lastStudent || cachedData[0])?.id
-              
-              setIsInitializing(false)
-              
-              // Background refresh for fresh data
-              getStudents(false).then(freshResult => {
-                const freshList = freshResult.data || []
-                if (Array.isArray(freshList) && freshList.length > 0) {
-                  setStudents(freshList)
-                  // Re-apply last student selection with fresh data
-                  const freshLastStudent = lastStudentId 
-                    ? freshList.find(s => s.id === lastStudentId) 
-                    : null
-                  const currentId = useStudentStore.getState().currentStudent?.id
-                  if (currentId && currentId !== appliedStudentId) {
-                    // 用户已手动切换学生，保留用户的选择，只更新 students 列表
-                    return
-                  }
-                  if (freshLastStudent) {
-                    setCurrentStudent(freshLastStudent)
-                  }
-                }
-              }).catch(() => {})
-              return
-            }
-          } catch (e) { /* ignore parse error */ }
-        }
-        
-        // No cache — show mock data immediately, fetch real data in background
-        setIsInitializing(false)
-        setStudents(mockStudents)
         const lastStudentId = localStorage.getItem('lastStudentId')
-        const initialStudent = lastStudentId
-          ? mockStudents.find(s => s.id === lastStudentId)
-          : null
-        setCurrentStudent(initialStudent || mockStudents[0])
-        const appliedStudentId = (initialStudent || mockStudents[0])?.id
 
-        getStudents(false).then(result => {
-          const studentList = result.data || []
-          if (Array.isArray(studentList) && studentList.length > 0) {
-            setStudents(studentList)
-            // 同上：用户已手动切换学生时不覆盖（fallback 也不得强切到名单第一个）
-            const currentId = useStudentStore.getState().currentStudent?.id
-            if (currentId && currentId !== appliedStudentId) return
-            const freshLastStudent = lastStudentId
-              ? studentList.find(s => s.id === lastStudentId)
-              : null
-            setCurrentStudent(freshLastStudent || studentList[0])
-          }
-        }).catch(err => {
-          console.error('后台获取学生数据失败，保留模拟数据:', err)
+        // 1) 先读本地缓存立即上屏。peekCache 刻意无视 TTL，与各页 load 函数同一口径
+        //    （tasks / wrong-questions 都走 peekCache 秒开，students 保持一致）。
+        const cachedData = peekCache('students_cache')
+        if (Array.isArray(cachedData) && cachedData.length > 0) {
+          setStudents(cachedData)
+
+          // Restore last selected student
+          const lastStudent = lastStudentId
+            ? cachedData.find(s => s.id === lastStudentId)
+            : null
+          setCurrentStudent(lastStudent || cachedData[0])
+          // 记录 init 应用到的学生 id：后台刷新回来时，若用户已手动切换过学生，
+          // 不得用 init 时刻捕获的 lastStudentId 覆盖用户的选择
+          // （2026-09-10 事故：后台 getStudents 返回晚于用户选学生，把陆晨曦的
+          //   上传静默覆盖回上次学生，作业归错人）。
+          const appliedStudentId = (lastStudent || cachedData[0])?.id
+
+          setIsInitializing(false)
+
+          // Background refresh for fresh data
+          getStudents(false).then(freshResult => {
+            const freshList = freshResult.data || []
+            if (Array.isArray(freshList) && freshList.length > 0) {
+              setStudents(freshList)
+              // Re-apply last student selection with fresh data
+              const freshLastStudent = lastStudentId
+                ? freshList.find(s => s.id === lastStudentId)
+                : null
+              const currentId = useStudentStore.getState().currentStudent?.id
+              if (currentId && currentId !== appliedStudentId) {
+                // 用户已手动切换学生，保留用户的选择，只更新 students 列表
+                return
+              }
+              if (freshLastStudent) {
+                setCurrentStudent(freshLastStudent)
+              }
+            }
+          }).catch(() => {})
+          return
+        }
+
+        // 2) 无缓存：等真实名单，不再用 mockStudents 占位。
+        //    此前先 setStudents(mockStudents) 把「张三」这类假学生推上屏、拿到真实名单
+        //    后再整批替换，视觉上就是「内容重新加载了一遍」；这期间 tasks /
+        //    wrong-questions 的请求还全打在假学生 id 上，纯属无效请求。
+        //    这里保持 isInitializing=true，由 HomeDashboard 显示「正在准备学习数据…」，
+        //    拿到真实名单后一次落位；网络失败也要结束初始化，避免永久 loading。
+        const result = await getStudents(false).catch(err => {
+          console.error('获取学生数据失败:', err)
+          return null
         })
+        const studentList = (result?.data || []).filter(Boolean)
+        if (studentList.length > 0) {
+          setStudents(studentList)
+          const lastStudent = lastStudentId
+            ? studentList.find(s => s.id === lastStudentId)
+            : null
+          setCurrentStudent(lastStudent || studentList[0])
+        }
+        setIsInitializing(false)
       } catch (error) {
         console.error('初始化失败:', error)
         setIsInitializing(false)
