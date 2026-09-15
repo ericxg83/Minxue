@@ -638,6 +638,15 @@ export const getGeneratedExamById = async (examId) => {
   return data.exam
 }
 
+// 组卷「批改详情」只读数据源（移动端批改详情标注视图专用）。
+// 返回 { pages: [{page, imageUrl}], marks: [{questionId, label, verdict, matchedBy, page, bbox, studentAnswer}] }。
+// 判定为人工复核优先口径（服务端 classifyQuestionResult），定位框只来自 retryAlign
+// 的答卷图坐标系 —— 与 PC PaperViewerPanel 同源，见 server/utils/gradingDetailView.js。
+export const getExamGradingDetail = async (examId) => {
+  const data = await apiRequest(`/generated-exams/${examId}/grading-detail`)
+  return data.detail
+}
+
 // 错题重练任务入口（二维码 = /retry-task/:id）：拉取任务详情 + 关联批改任务状态
 export const getRetryTask = async (taskId) => {
   const data = await apiRequest(`/retry-tasks/${taskId}`)

@@ -70,7 +70,8 @@ import { syncQuestionCompleteness, syncQuestionCompletenessQuietly } from './ser
 import { computeWrongBookRisks } from './utils/wrongBookRisks.js'
 import { normalizeOptions } from './utils/optionText.js'
 import { computeTaskStats } from './utils/taskStats.js'
-import { summarizeQuestionResults } from './utils/questionResultCaliber.js'
+import { summarizeQuestionResults, classifyQuestionResult } from './utils/questionResultCaliber.js'
+import { buildGradingDetailView } from './utils/gradingDetailView.js'
 import { fixFileIfNeeded } from './services/uploadValidator.js'
 import { recognizeAnswerImage } from './services/answerOCRService.js'
 import { recognizeQuestionImage } from './services/questionOCRService.js'
@@ -2800,6 +2801,83 @@ app.delete('/api/generated-exams/:id', async (req, res) => {
     res.json({ success: true, message: '错题卷已删除' })
   } catch (error) {
     console.error('删除错题卷失败:', error)
+    res.status(500).json({ error: error.message })
+  }
+})
+
+// 组卷「批改详情」只读数据源（移动端 ExamDetailModal → 标注视图专用）。
+// 场景：晚托班老师在手机上打开一份已出结果的重练卷，要看答卷图上每题的勾/叉
+// 标注，对照学生手里的纸质卷讲题。PC 批改页（PaperViewerPanel paper 模式）已有
+// 同款能力，本端点把它的数据链路原样开放给移动端 —— **纯只读**，不写任何字段。
+//
+// 数据口径与 PC 完全同源（不许各判一套）：
+//   · 页图：tasks.generated_exam_id = exam.id 的全部答卷行按 created_at 升序，
+//     行内 images JSONB 展开成页（多图行 page_number 1..n；与 reviewStore
+//     currentPaperPages 的展开规则一致）。
+//   · 定位框：只认 task.result.retryAlign 的【答卷图坐标系】框（worker 逐页 OCR
+//     写死 pageNumber=行内 1-based）；取框优先级 = text_bbox ∪ image_bbox 并集 →
+//     回退 block_coordinates → 无框不画。绝不回退题目行自身坐标（那是原作业图）。
+//     旧记录缺 pageNumber 视为该行第 1 页（旧管线只 OCR 首页，与 PC 同款兼容）。
+//   · 判定：questions.is_correct/review_status，人工复核优先（classifyQuestionResult，
+//     与结算/移动端分数同一口径）。retryAlign 里自带的 isCorrect 只是当时快照，
+//     不采用 —— 老师复核改判后必须以 questions 表为准。
+//   · 多次交卷 / 分批上传：同一 questionId 出现在多行时，后写者覆盖（最新提交为准）。
+app.get('/api/generated-exams/:id/grading-detail', async (req, res) => {
+  try {
+    const { id } = req.params
+    if (!UUID_RE.test(id)) {
+      return res.status(400).json({ error: '无效的试卷ID' })
+    }
+    const { rows: examRows } = await query(
+      `SELECT id, question_ids, status FROM ${TABLES.GENERATED_EXAMS} WHERE id = $1`,
+      [id]
+    )
+    if (examRows.length === 0) {
+      return res.status(404).json({ error: '试卷不存在' })
+    }
+    const exam = examRows[0]
+    const questionIds = Array.isArray(exam.question_ids) ? exam.question_ids : []
+
+    // 答卷行：与 PC _pageTasks 同款归拢（判「有没有交卷」的唯一依据）
+    const { rows: sheetRows } = await query(
+      `SELECT id, status, images, result, created_at FROM ${TABLES.TASKS}
+       WHERE generated_exam_id = $1
+       ORDER BY created_at ASC`,
+      [id]
+    )
+
+    // ── 页图展开 + 对位明细：几何/对位口径在 server/utils/gradingDetailView.js
+    //      （唯一口径，test/gradingDetailView.test.mjs 锁死）──
+    const verdictByQuestion = new Map()
+    if (questionIds.length > 0) {
+      const placeholders = questionIds.map((_, i) => `$${i + 1}`).join(',')
+      const { rows: qRows } = await query(
+        `SELECT id, is_correct, review_status, answer_source FROM ${TABLES.QUESTIONS} WHERE id IN (${placeholders})`,
+        questionIds
+      )
+      for (const qr of qRows) {
+        verdictByQuestion.set(qr.id, classifyQuestionResult(qr))
+      }
+    }
+    const { pages, marks } = buildGradingDetailView(
+      questionIds,
+      sheetRows,
+      qid => verdictByQuestion.get(qid) || 'unjudged'
+    )
+
+    res.json({
+      success: true,
+      detail: {
+        examId: id,
+        status: exam.status,
+        totalPages: pages.length,
+        hasAnswerSheet: sheetRows.length > 0,
+        pages,
+        marks,
+      },
+    })
+  } catch (error) {
+    console.error('获取组卷批改详情失败:', error)
     res.status(500).json({ error: error.message })
   }
 })

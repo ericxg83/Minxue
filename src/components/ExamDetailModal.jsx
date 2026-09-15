@@ -1,6 +1,8 @@
-import { AlertCircle, Camera, CheckCircle2, ClipboardCheck, Clock, FileCheck2, FileDown, Loader2 } from 'lucide-react'
+import { useState } from 'react'
+import { AlertCircle, Camera, CheckCircle2, ClipboardCheck, Clock, Eye, FileCheck2, FileDown, Loader2 } from 'lucide-react'
 import dayjs from 'dayjs'
 import BottomSheet from './BottomSheet'
+import GradingDetailSheet from './GradingDetailSheet'
 import { RETRY_EXAM_STAGE, RETRY_EXAM_STAGE_HINT, RETRY_EXAM_STAGE_TEXT, RETRY_EXAM_STAGE_TONE, canSubmitAnswerSheet, isResultStage, resolveRetryExamScore, resolveRetryExamStage } from '../domain/retryExamStage'
 
 const STAGE_ICON = {
@@ -32,10 +34,15 @@ const time = v => dayjs(v).isValid() ? dayjs(v).format('YYYY/MM/DD HH:mm') : '�
 //
 // 2026-09-14：删掉「查看批改结果」二级入口 —— 移动端只需要知道结果数字（本页已有），
 // 逐题明细归错题本、改判归 PC 复核台；且重练答卷不建 questions 行，按 task_id 必然取空。
+//
+// 2026-09-15 P1：恢复一个**只读**批改视图，但形态与当年删掉的逐题文字明细不同 ——
+// 「批改详情」= 答卷图 + 每题勾/叉标注（服务端 gradingDetailView 只读口径），
+// 服务晚托老师对照纸质卷讲题。仍然不提供改判、不写任何状态（改判归 PC 复核台）。
 export default function ExamDetailModal({ exam, onClose, onReprint, onDelete, onUploadAnswer }) {
   const stage = resolveRetryExamStage(exam)
   const settled = isResultStage(stage)
   const canSubmit = canSubmitAnswerSheet(stage)
+  const [showGrading, setShowGrading] = useState(false)
   const tone = TONE_STYLE[RETRY_EXAM_STAGE_TONE[stage]] || TONE_STYLE.neutral
   const Icon = STAGE_ICON[stage] || ClipboardCheck
   const hint = RETRY_EXAM_STAGE_HINT[stage]
@@ -81,6 +88,16 @@ export default function ExamDetailModal({ exam, onClose, onReprint, onDelete, on
         )}
 
         <div className='mt-5 space-y-2.5'>
+          {settled && (
+            <button
+              type='button'
+              onClick={() => setShowGrading(true)}
+              className='flex w-full items-center justify-center gap-2 rounded-xl py-3 text-[14px] font-semibold transition-transform active:scale-[0.98]'
+              style={{ background: 'var(--bg-secondary)', color: 'var(--text)' }}
+            >
+              <Eye size={16} />查看批改详情
+            </button>
+          )}
           <button
             type='button'
             onClick={() => onReprint(exam)}
@@ -100,5 +117,9 @@ export default function ExamDetailModal({ exam, onClose, onReprint, onDelete, on
             删除这份卷
           </button>
         </div>
-  </BottomSheet>
+
+        {showGrading && (
+          <GradingDetailSheet exam={exam} onClose={() => setShowGrading(false)} />
+        )}
+      </BottomSheet>
 }
