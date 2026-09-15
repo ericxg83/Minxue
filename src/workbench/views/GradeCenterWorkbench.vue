@@ -322,21 +322,32 @@ const weekCompletedCount = computed(() => {
   return allTasks.value.filter(item => completedStatuses.has(item.workflowStatus) && new Date(item.createdAt || 0) >= weekStart).length
 })
 
+// 状态维度的唯一匹配口径：visibleTasks 列表与 sourceTabs 计数徽标必须共用，
+// 否则 tab 上的数字（全状态统计）和点进去看到的列表行数（叠加状态筛选）对不上，
+// 老师会以为任务丢了（2026-09-15 反馈：「学生作业 73」下面只列出 4 条）。
+const matchesStatusFilter = item => {
+  if (statusFilter.value === 'active') return activeStatuses.has(item.workflowStatus)
+  if (statusFilter.value === 'issued') return isAwaitingStudent(item)
+  if (statusFilter.value === 'failed') return failedStatuses.has(item.workflowStatus)
+  if (statusFilter.value === 'completed') return completedStatuses.has(item.workflowStatus)
+  return true
+}
+
 const visibleTasks = computed(() => allTasks.value.filter(item => {
   const sourceMatches = sourceFilter.value === 'all' || item.source === sourceFilter.value
-  let statusMatches = true
-  if (statusFilter.value === 'active') statusMatches = activeStatuses.has(item.workflowStatus)
-  else if (statusFilter.value === 'issued') statusMatches = isAwaitingStudent(item)
-  else if (statusFilter.value === 'failed') statusMatches = failedStatuses.has(item.workflowStatus)
-  else if (statusFilter.value === 'completed') statusMatches = completedStatuses.has(item.workflowStatus)
-  return sourceMatches && statusMatches
+  return sourceMatches && matchesStatusFilter(item)
 }))
 
-const sourceTabs = computed(() => [
-  { key: 'all', label: '全部', count: allTasks.value.length },
-  { key: 'homework', label: '学生作业', count: allTasks.value.filter(item => item.source === 'homework').length },
-  { key: 'retry', label: '错题重练', count: allTasks.value.filter(item => item.source === 'retry').length }
-])
+// 计数口径：在当前「状态」筛选下统计各来源的任务数，与下方列表完全一致；
+// 「全部」tab 的数字 = 两个来源之和 = 当前状态下列表总行数。
+const sourceTabs = computed(() => {
+  const scope = allTasks.value.filter(matchesStatusFilter)
+  return [
+    { key: 'all', label: '全部', count: scope.length },
+    { key: 'homework', label: '学生作业', count: scope.filter(item => item.source === 'homework').length },
+    { key: 'retry', label: '错题重练', count: scope.filter(item => item.source === 'retry').length }
+  ]
+})
 const statusTabs = [
   { key: 'active', label: '待处理' },
   { key: 'issued', label: '待学生作答' },

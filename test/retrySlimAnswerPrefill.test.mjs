@@ -45,9 +45,12 @@ test('slim 预填 is_correct 不得使用 COALESCE 保留旧判定', () => {
 })
 
 test('slim 预填必须显式写入本次结果（含 null），且带 ::boolean 类型转换', () => {
+  // [2026-09-15 修正] SET 里后来插入了 answer_source 行，正则同步放宽；
+  // 锁的意图不变：is_correct 必须带 $2::boolean ——
+  // 缺类型转换会让 PG 把参数推断成 text（历史 42804）
   assert.match(
     slimCode,
-    /SET student_answer = \$1,\s*\n\s*is_correct = \$2::boolean,/,
+    /SET student_answer = \$1,\s*\n(?:\s*answer_source = \$\d+,\s*\n)?\s*is_correct = \$2::boolean,/,
     'is_correct 必须显式写 $2::boolean —— 缺类型转换会让 PG 把参数推断成 text（历史 42804）'
   )
   assert.match(
