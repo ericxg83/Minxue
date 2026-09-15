@@ -67,7 +67,14 @@ test('迁移 058 必须存在、幂等（先查列再 ADD）、已注册进 inde
   assert.match(mig, /ADD COLUMN last_wrong_task_id UUID/, '列定义必须是可空 UUID')
   const idx = read(INDEX)
   assert.match(idx, /migrations\/058_add_wrong_questions_last_wrong_task_id\.js/, '必须 import 迁移')
-  assert.match(idx, /await migrateWrongQuestionsLastWrongTaskId\(\)/, '必须在启动迁移链中调用')
+  // 迁移链自 2026-09-15 起改由 runMigrations 台账执行：登记形式从裸
+  // `await migrateXxx()` 变成 [key, fn] 元组（见 server/migrations/migrationLedger.js）。
+  // 判据随之更新，但约束不放宽——迁移仍然必须注册进启动链，否则永远不会被应用。
+  assert.match(
+    idx,
+    /\['migrateWrongQuestionsLastWrongTaskId',\s*migrateWrongQuestionsLastWrongTaskId\]/,
+    '必须在 runMigrations 启动迁移清单中注册'
+  )
 })
 
 // ---------- 修复 2：重练结算事务化 ----------

@@ -2,6 +2,7 @@ import dotenv from 'dotenv'
 import { dirname, resolve } from 'path'
 import { fileURLToPath } from 'url'
 import { pendingTaskRecovery } from './pendingTaskRecovery.js'
+import { runMigrations } from './migrations/migrationLedger.js'
 import { migrateGeometryImageUrl } from './migrations/addGeometryImageUrl.js'
 import { migrateLifecycleStatus } from './migrations/007_add_lifecycle_status.js'
 import { migrateReviewStatus } from './migrations/008_add_review_status.js'
@@ -3382,55 +3383,62 @@ if (process.argv[1] === __filename || process.argv[1]?.endsWith('server/index.js
     }
 
     // 运行数据库迁移
+    // 经台账（schema_migrations）判定，已应用的迁移不再重复执行。
+    // 背景：本回调每次冷启动都会跑一遍，48 个迁移每个 2 次 DB 往返，
+    // 而 Render 实例在 Oregon、Neon 在新加坡，单次往返约 200ms——
+    // 90+ 次串行跨洋往返就是「过一段时间打开 App 干等半分钟」的主因。
+    // 台账把稳态成本压到 1 次查询；迁移文件改动后源码指纹变化仍会重跑，不吞迁移。
     try {
-      await migrateGeometryImageUrl()
-      await migrateLifecycleStatus()
-      await migrateReviewStatus()
-      await migrateQuestionCacheId()
-      await migrateJudgements()
-      await migrateIsComplete()
-      await migratePracticeCount()
-      await migrateDifficulty()
-      await migratePageUnderstanding()
-      await migrateGeometryCleanup()
-      await migrateGeometryTikzDisplay()
-      await migrateGeometryCropType()
-      await migrateCleanGeometrySvg()
-      await migrateSourceType()
-      await migrateRetryTaskFields()
-      await migrateGeometryReconstructionAsync()
-      await migrateTaskSystemFields()
-      await migrateWorksheets()
-      await migrateTaskImages()
-      await migrateWorksheetParseStatus()
-      await migrateDeduplicateWorksheetAnswers()
-      await migrateWorksheetAnswerContent()
-      await migrateResources()
-      await migrateQuestionPdfUrl()
-      await migrateCompleteResources()
-      await migrateParseProgressColumns()
-      await migrateResourceUnits()
-      await migrateWrongQuestionSelfContained()
-      await migrateWrongQuestionSubject()
-      await migrateErrorAnalysis()
-      await migrateKnowledgeTables()
-      await migrateVariantQuestions()
-      await migrateVariantQuestionType()
-      await migrateRelaxQuestionTypeCheck()
-      await migrateHandoutLectures()
-      await migrateTaskNotificationRead()
-      await migrateTeachingQuestionTypes()
-      await migrateTeachingQuestionTypeAuto()
-      await migrateStudentEnrollmentStatus()
-      await migrateAiAnswerRiskReason()
-      await migrateTaskContentHash()
-      await migrateWrongQuestionsUniqueIndex()
-      await migrateTaskTypeEnum()
-      await migrateAiSelfCheck()
-      await migrateFixExamPublishedInconsistency()
-      await migrateGeometryManualOverride()
-      await migrateQuestionParentStem()
-      await migrateWrongQuestionsLastWrongTaskId()
+      await runMigrations([
+        ['migrateGeometryImageUrl', migrateGeometryImageUrl],
+        ['migrateLifecycleStatus', migrateLifecycleStatus],
+        ['migrateReviewStatus', migrateReviewStatus],
+        ['migrateQuestionCacheId', migrateQuestionCacheId],
+        ['migrateJudgements', migrateJudgements],
+        ['migrateIsComplete', migrateIsComplete],
+        ['migratePracticeCount', migratePracticeCount],
+        ['migrateDifficulty', migrateDifficulty],
+        ['migratePageUnderstanding', migratePageUnderstanding],
+        ['migrateGeometryCleanup', migrateGeometryCleanup],
+        ['migrateGeometryTikzDisplay', migrateGeometryTikzDisplay],
+        ['migrateGeometryCropType', migrateGeometryCropType],
+        ['migrateCleanGeometrySvg', migrateCleanGeometrySvg],
+        ['migrateSourceType', migrateSourceType],
+        ['migrateRetryTaskFields', migrateRetryTaskFields],
+        ['migrateGeometryReconstructionAsync', migrateGeometryReconstructionAsync],
+        ['migrateTaskSystemFields', migrateTaskSystemFields],
+        ['migrateWorksheets', migrateWorksheets],
+        ['migrateTaskImages', migrateTaskImages],
+        ['migrateWorksheetParseStatus', migrateWorksheetParseStatus],
+        ['migrateDeduplicateWorksheetAnswers', migrateDeduplicateWorksheetAnswers],
+        ['migrateWorksheetAnswerContent', migrateWorksheetAnswerContent],
+        ['migrateResources', migrateResources],
+        ['migrateQuestionPdfUrl', migrateQuestionPdfUrl],
+        ['migrateCompleteResources', migrateCompleteResources],
+        ['migrateParseProgressColumns', migrateParseProgressColumns],
+        ['migrateResourceUnits', migrateResourceUnits],
+        ['migrateWrongQuestionSelfContained', migrateWrongQuestionSelfContained],
+        ['migrateWrongQuestionSubject', migrateWrongQuestionSubject],
+        ['migrateErrorAnalysis', migrateErrorAnalysis],
+        ['migrateKnowledgeTables', migrateKnowledgeTables],
+        ['migrateVariantQuestions', migrateVariantQuestions],
+        ['migrateVariantQuestionType', migrateVariantQuestionType],
+        ['migrateRelaxQuestionTypeCheck', migrateRelaxQuestionTypeCheck],
+        ['migrateHandoutLectures', migrateHandoutLectures],
+        ['migrateTaskNotificationRead', migrateTaskNotificationRead],
+        ['migrateTeachingQuestionTypes', migrateTeachingQuestionTypes],
+        ['migrateTeachingQuestionTypeAuto', migrateTeachingQuestionTypeAuto],
+        ['migrateStudentEnrollmentStatus', migrateStudentEnrollmentStatus],
+        ['migrateAiAnswerRiskReason', migrateAiAnswerRiskReason],
+        ['migrateTaskContentHash', migrateTaskContentHash],
+        ['migrateWrongQuestionsUniqueIndex', migrateWrongQuestionsUniqueIndex],
+        ['migrateTaskTypeEnum', migrateTaskTypeEnum],
+        ['migrateAiSelfCheck', migrateAiSelfCheck],
+        ['migrateFixExamPublishedInconsistency', migrateFixExamPublishedInconsistency],
+        ['migrateGeometryManualOverride', migrateGeometryManualOverride],
+        ['migrateQuestionParentStem', migrateQuestionParentStem],
+        ['migrateWrongQuestionsLastWrongTaskId', migrateWrongQuestionsLastWrongTaskId]
+      ])
     } catch (err) {
       console.error('数据库迁移失败:', err.message)
     }
