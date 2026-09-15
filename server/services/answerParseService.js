@@ -22,7 +22,9 @@ export function isSectionHeader(line) {
   // 下面所有答案错挂到上一个"第十九章实数"父单元，批改时『试卷① 19.1』卷完全错位。
   // 但『试卷/考卷』已由更靠前的 EXAM_HEADER_RE 单独精确处理（避免单『试卷』被误识别为
   // 孤儿单元），故这里关键词表不再列『试卷/考卷』。
-  if (/(?:阶段卷|评价测试|阶段练|综合练习|单元测试|测试卷|月考卷|期中卷|期末卷|模拟卷|真题卷|专题练习|专项练习|专项训练|复习卷|巩固卷|提升卷|拓展卷|检测卷|验收卷|达标卷|冲刺卷|押题卷|预测卷|闯关练习|水平测试|能力测试|单元卷|综合卷|练习卷|模拟测试|真题演练)/.test(line)) return true
+  // 『期中测试|期末测试』：2026-09-15 八上上海作业实测，答案册书尾「期末测试(一)/(二)」
+  // 不含"卷"字也不以"第X章"开头，被整卷漏识别 → 其答案全部错挂进前一个伪单元。
+  if (/(?:阶段卷|评价测试|阶段练|综合练习|单元测试|测试卷|月考卷|期中卷|期末卷|期中测试|期末测试|模拟卷|真题卷|专题练习|专项练习|专项训练|复习卷|巩固卷|提升卷|拓展卷|检测卷|验收卷|达标卷|冲刺卷|押题卷|预测卷|闯关练习|水平测试|能力测试|单元卷|综合卷|练习卷|模拟测试|真题演练)/.test(line)) return true
   return false
 }
 
@@ -113,6 +115,25 @@ const UNIT_LABEL_RE = new RegExp(
 // 归一化交给 normLesson（它会压掉所有空白并把 ．→ .），这里只负责"能匹配到"。
 const LESSON_CODE_RE = /(\d{1,2}\s*[.．]\s*\d{1,2}(?:\s*[（(]\s*\d{1,2}\s*[）)])?)/
 const LESSON_LINE_RE = /^(\d{1,2}\s*[.．]\s*\d{1,2}(?:\s*[（(]\s*\d{1,2}\s*[）)])?)\s*[、.．]?\s*([一-龥][^\n]{0,40})$/
+
+/**
+ * 课时标题行的"答案尾巴"守卫（2026-09-15 八上上海作业 56 页解析实测沉淀）：
+ * 「9. 2或12」「14. 0或1或√2」「6. 12厘米和4厘米」「9. 5元」这类**题号+含"或"/单位的答案行**
+ * 恰好满足 LESSON_LINE_RE 的"编号 + 中文开头"形态，被误判成课时标题 → 建出 12 个伪单元
+ * （unit_key 如 9.2/14.0），其后同单元的全部答案错挂进去，且顶替掉真正的单元标题。
+ * 真课时标题的尾巴一定是中文章节名（≥2 连续汉字，如"算术平方根"）；
+ * 答案尾巴的特征：以"或"开头（多解答案）/ 以计量单位开头 / 几乎没有汉字。
+ * 命中即拒绝当标题，让该行落回普通答案行（其题号本来就该入库）。
+ */
+function looksLikeAnswerTail(tail) {
+  const t = String(tail || '').trim()
+  if (!t) return false
+  if (/^或/.test(t)) return true // 「9. 2或12」「13. 4或√119/2」
+  if (/^(厘米|千米|米|元|分|秒|千克|克|吨|升|毫升|°|％|%)/.test(t)) return true // 「6. 12厘米和4厘米」
+  const hanzi = (t.match(/[\u4e00-\u9fa5]/g) || []).length
+  if (hanzi < 2) return true // 「9. 5元」
+  return false
+}
 // 试卷标题：试卷① 19.1 平方根与立方根 基础性测试 / 试卷 19.2(1) / 试卷一 19.1 / 试卷1 / 试卷 ...
 // 之前只识别『堂堂练/课课练...』，但『试卷① 19.1 平方根与立方根 基础性测试』是另一类合法单元，
 // 漏识别会让本卷所有题目错挂到上一个『第十九章实数』父单元。
@@ -194,7 +215,7 @@ export function parseUnitHeader(line) {
 
   // ② 纯课时编号行：19.1(1) 算术平方根
   const cm = raw.match(LESSON_LINE_RE)
-  if (cm) {
+  if (cm && !looksLikeAnswerTail(cm[2])) {
     const lesson = normLesson(cm[1])
     return { unit_key: lesson, unit_title: normalizeSectionName(raw), lesson_code: lesson, ordinal: null }
   }
@@ -506,7 +527,13 @@ function toState(input) {
     return { unit: title ? { unit_key: title, unit_title: title, lesson_code: null, ordinal: null } : null, group: null }
   }
   if (input.unit !== undefined || input.group !== undefined) {
-    return { unit: input.unit || null, group: input.group || null }
+    return {
+      unit: input.unit || null,
+      group: input.group || null,
+      // 透传 pageRanges：跨批解析（doParseOcrBatched / resume-worksheet-parse）靠它
+      // 跨批延续"单元→页范围"。2026-09-15 发现被这里丢弃 → 单元页范围三轮全 null。
+      pageRanges: input.pageRanges,
+    }
   }
   return { unit: input, group: null }
 }

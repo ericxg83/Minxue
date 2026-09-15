@@ -542,7 +542,7 @@ export default function Grading({ paperId, studentId, questionIds, onClose, onCo
                     display: 'flex', alignItems: 'center', gap: 6
                   }}>
                     参考答案
-                    {/* 参考答案来源（卷面印刷 / 答案库 / AI 生成）。与 PC 端
+                    {/* 参考答案来源（答案库 / AI 解答，两档）。与 PC 端
                         QuestionDetailPanel.vue 同源（utils/reviewDecision.js），
                         措辞一致：老师看不出来源就会把 AI 算错的参考答案当成学生答错。 */}
                     {(() => {

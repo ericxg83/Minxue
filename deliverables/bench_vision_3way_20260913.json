@@ -1,0 +1,1466 @@
+{
+  "generatedAt": "2026-09-13T11:27:42.367Z",
+  "records": [
+    {
+      "imageId": "IMG_A",
+      "imageLabel": "真实作业照(手写+红笔) 19.2实数 提高性测试",
+      "config": "ms-235b",
+      "label": "魔搭 Qwen3-VL-235B (主模型)",
+      "round": 1,
+      "ms": 83110,
+      "status": 200,
+      "finish": "stop",
+      "usage": {
+        "prompt_tokens": 5443,
+        "completion_tokens": 3290,
+        "total_tokens": 8733
+      },
+      "reasoningLen": 0,
+      "error": null,
+      "contentLen": 8502,
+      "parsed": null,
+      "rawContent": "{\n  \"page_title\": \"试卷④ 19.2 实数 提高性测试\",\n  \"section_title\": \"19.2 实数\",\n  \"questions\": [\n    {\n      \"question_id\": \"1\",\n      \"question_number\": 1,\n      \"sub_no\": null,\n      \"parent_stem\": null,\n      \"content\": \"2√6 - 5 的绝对值是\",\n      \"options\": [],\n      \"answer\": \"5 - 2√6\",\n      \"student_answer\": \"5-2√6\",\n      \"is_correct\": true,\n      \"confidence\": 0.98,\n      \"analysis\": null,\n      \"question_type\": \"fill\",\n      \"block_coordinates\": { \"x\": 50, 290, 450, 320 },\n      \"text_bbox\": { \"x\": 50, 290, 450, 320 },\n      \"image_type\": \"none\",\n      \"image_bbox\": null,\n      \"geometry_image\": null\n    },\n    {\n      \"question_id\": \"2\",\n      \"question_number\": 2,\n      \"sub_no\": null,\n      \"parent_stem\": null,\n      \"content\": \"计算：√(√15)² + (-√10)² - |-4| =\",\n      \"options\": [],\n      \"answer\": \"1\",\n      \"student_answer\": \"1\",\n      \"is_correct\": true,\n      \"confidence\": 0.97,\n      \"analysis\": null,\n      \"question_type\": \"fill\",\n      \"block_coordinates\": { \"x\": 50, 320, 550, 350 },\n      \"text_bbox\": { \"x\": 50, 320, 550, 350 },\n      \"image_type\": \"none\",\n      \"image_bbox\": null,\n      \"geometry_image\": null\n    },\n    {\n      \"question_id\": \"3\",\n      \"question_number\": 3,\n      \"sub_no\": null,\n      \"parent_stem\": null,\n      \"content\": \"已知太阳到地球的距离约为 1.5×10⁸ km，光速约为 3×10⁵ km/s，那么光从太阳照到地球大约需要 ______ s。（结果用科学记数法表示）\",\n      \"options\": [],\n      \"answer\": \"5×10²\",\n      \"student_answer\": \"5×10²\",\n      \"is_correct\": true,\n      \"confidence\": 0.96,\n      \"analysis\": null,\n      \"question_type\": \"fill\",\n      \"block_coordinates\": { \"x\": 50, 350, 900, 380 },\n      \"text_bbox\": { \"x\": 50, 350, 900, 380 },\n      \"image_type\": \"none\",\n      \"image_bbox\": null,\n      \"geometry_image\": null\n    },\n    {\n      \"question_id\": \"4\",\n      \"question_number\": 4,\n      \"sub_no\": null,\n      \"parent_stem\": null,\n      \"content\": \"有下列说法：①立方根等于本身的数是 -1, 0, 1；② -a 没有平方根；③两个无理数的和还是无理数；④若 a+b<0, ab>0，则 |2a+3b| = -2a-3b；⑤若 |a-b| + a-b = 0，则 b>a；⑥ |a| > |b|，则 (a+b)(a-b) 是负数。其中正确的序号有\",\n      \"options\": [],\n      \"answer\": \"①④\",\n      \"student_answer\": \"①④\",\n      \"is_correct\": true,\n      \"confidence\": 0.95,\n      \"analysis\": null,\n      \"question_type\": \"fill\",\n      \"block_coordinates\": { \"x\": 50, 380, 900, 430 },\n      \"text_bbox\": { \"x\": 50, 380, 900, 430 },\n      \"image_type\": \"none\",\n      \"image_bbox\": null,\n      \"geometry_image\": null\n    },\n    {\n      \"question_id\": \"5\",\n      \"question_number\": 5,\n      \"sub_no\": null,\n      \"parent_stem\": null,\n      \"content\": \"解方程：x² + 1 = 25/36，x =\",\n      \"options\": [],\n      \"answer\": \"±5/6\",\n      \"student_answer\": \"±5/6\",\n      \"is_correct\": true,\n      \"confidence\": 0.97,\n      \"analysis\": null,\n      \"question_type\": \"fill\",\n      \"block_coordinates\": { \"x\": 50, 430, 450, 460 },\n      \"text_bbox\": { \"x\": 50, 430, 450, 460 },\n      \"image_type\": \"none\",\n      \"image_bbox\": null,\n      \"geometry_image\": null\n    },\n    {\n      \"question_id\": \"6\",\n      \"question_number\": 6,\n      \"sub_no\": null,\n      \"parent_stem\": null,\n      \"content\": \"设 √a = 1.362, √b = 13.62，用平方根运算性质求 a ÷ b 的值：\",\n      \"options\": [],\n      \"answer\": \"0.01\",\n      \"student_answer\": \"0.01\",\n      \"is_correct\": false,\n      \"confidence\": 0.94,\n      \"analysis\": null,\n      \"question_type\": \"fill\",\n      \"block_coordinates\": { \"x\": 50, 460, 600, 490 },\n      \"text_bbox\": { \"x\": 50, 460, 600, 490 },\n      \"image_type\": \"none\",\n      \"image_bbox\": null,\n      \"geometry_image\": null\n    },\n    {\n      \"question_id\": \"7\",\n      \"question_number\": 7,\n      \"sub_no\": null,\n      \"parent_stem\": null,\n      \"content\": \"已知 √102.01 = 10.1，则 ±√1.0201 =\",\n      \"options\": [],\n      \"answer\": \"±1.01\",\n      \"student_answer\": \"±1.01\",\n      \"is_correct\": true,\n      \"confidence\": 0.98,\n      \"analysis\": null,\n      \"question_type\": \"fill\",\n      \"block_coordinates\": { \"x\": 50, 490, 500, 520 },\n      \"text_bbox\": { \"x\": 50, 490, 500, 520 },\n      \"image_type\": \"none\",\n      \"image_bbox\": null,\n      \"geometry_image\": null\n    },\n    {\n      \"question_id\": \"8\",\n      \"question_number\": 8,\n      \"sub_no\": null,\n      \"parent_stem\": null,\n      \"content\": \"已知 1, √5, 5 三个数，再添上一个数，写出一个比例式：\",\n      \"options\": [],\n      \"answer\": \"1:√5 = √5:5\",\n      \"student_answer\": \"1:√5=√5:5\",\n      \"is_correct\": true,\n      \"confidence\": 0.96,\n      \"analysis\": null,\n      \"question_type\": \"fill\",\n      \"block_coordinates\": { \"x\": 50, 520, 600, 550 },\n      \"text_bbox\": { \"x\": 50, 520, 600, 550 },\n      \"image_type\": \"none\",\n      \"image_bbox\": null,\n      \"geometry_image\": null\n    },\n    {\n      \"question_id\": \"9\",\n      \"question_number\": 9,\n      \"sub_no\": null,\n      \"parent_stem\": null,\n      \"content\": \"正方形的边长增加 4 cm 后，面积为 50 cm²，原正方形的边长是 ______ cm。（结果保留根号）\",\n      \"options\": [],\n      \"answer\": \"5√2 - 4\",\n      \"student_answer\": \"5√2-4\",\n      \"is_correct\": true,\n      \"confidence\": 0.95,\n      \"analysis\": null,\n      \"question_type\": \"fill\",\n      \"block_coordinates\": { \"x\": 50, 550, 900, 580 },\n      \"text_bbox\": { \"x\": 50, 550, 900, 580 },\n      \"image_type\": \"none\",\n      \"image_bbox\": null,\n      \"geometry_image\": null\n    },\n    {\n      \"question_id\": \"10\",\n      \"question_number\": 10,\n      \"sub_no\": null,\n      \"parent_stem\": null,\n      \"content\": \"若 x - 2 的平方根是 ±5，那么 x 的立方根为\",\n      \"options\": [],\n      \"answer\": \"3\",\n      \"student_answer\": \"3\",\n      \"is_correct\": false,\n      \"confidence\": 0.93,\n      \"analysis\": null,\n      \"question_type\": \"fill\",\n      \"block_coordinates\": { \"x\": 50, 580, 600, 610 },\n      \"text_bbox\": { \"x\": 50, 580, 600, 610 },\n      \"image_type\": \"none\",\n      \"image_bbox\": null,\n      \"geometry_image\": null\n    },\n    {\n      \"question_id\": \"11\",\n      \"question_number\": 11,\n      \"sub_no\": null,\n      \"parent_stem\": null,\n      \"content\": \"观察分析下列数据：0, √3, -√6, 3, -2√3, √15, …，根据数据排列的规律，得到第 25 个数据应是\",\n      \"options\": [],\n      \"answer\": \"5√3\",\n      \"student_answer\": \"5√3\",\n      \"is_correct\": true,\n      \"confidence\": 0.94,\n      \"analysis\": null,\n      \"question_type\": \"fill\",\n      \"block_coordinates\": { \"x\": 50, 610, 900, 640 },\n      \"text_bbox\": { \"x\": 50, 610, 900, 640 },\n      \"image_type\": \"none\",\n      \"image_bbox\": null,\n      \"geometry_image\": null\n    },\n    {\n      \"question_id\": \"12\",\n      \"question_number\": 12,\n      \"sub_no\": null,\n      \"parent_stem\": null,\n      \"content\": \"计算：(2√2 + 3)²⁰²² (2√2 - 3)²⁰²⁴ =\",\n      \"options\": [],\n      \"answer\": \"17 - 12√2\",\n      \"student_answer\": \"17-12√2\",\n      \"is_correct\": true,\n      \"confidence\": 0.95,\n      \"analysis\": null,\n      \"question_type\": \"fill\",\n      \"block_coordinates\": { \"x\": 50, 640, 600, 670 },\n      \"text_bbox\": { \"x\": 50, 640, 600, 670 },\n      \"image_type\": \"none\",\n      \"image_bbox\": null,\n      \"geometry_image\": null\n    },\n    {\n      \"question_id\": \"13\",\n      \"question_number\": 13,\n      \"sub_no\": null,\n      \"parent_stem\": null,\n      \"content\": \"已知 a、b 互为相反数，c、d 互为倒数，x = -3，计算：2¹⁰⁰·a + |x|/c·x/d - √x² + 2¹⁰⁰·b =\",\n      \"options\": [],\n      \"answer\": \"-3\",\n      \"student_answer\": \"-3\",\n      \"is_correct\": false,\n      \"confidence\": 0.92,\n      \"analysis\": null,\n      \"question_type\": \"fill\",\n      \"block_coordinates\": { \"x\": 50, 670, 900, 700 },\n      \"text_bbox\": { \"x\": 50, 670, 900, 700 },\n      \"image_type\": \"none\",\n      \"image_bbox\": null,\n      \"geometry_image\": null\n    },\n    {\n      \"question_id\": \"14\",\n      \"question_number\": 14,\n      \"sub_no\": null,\n      \"parent_stem\": null,\n      \"content\": \"已知 ∛(3y - 1) 和 ∛(1 - 2x) (x ≠ 0) 互为相反数，则 y/x =\",\n      \"options\": [],\n      \"answer\": \"2/3\",\n      \"student_answer\": \"2/3\",\n      \"is_correct\": false,\n      \"confidence\": 0.91,\n      \"analysis\": null,\n      \"question_type\": \"fill\",\n      \"block_coordinates\": { \"x\": 50, 700, 600, 730 },\n      \"text_bbox\": { \"x\": 50, 700, 600, 730 },\n      \"image_type\": \"none\",\n      \"image_bbox\": null,\n      \"geometry_image\": null\n    },\n    {\n      \"question_id\": \"15\",\n      \"question_number\": 15,\n      \"sub_no\": null,\n      \"parent_stem\": null,\n      \"content\": \"下列运算中，正确的是\",\n      \"options\": [\n        \"√2 + √3 ≠ √5\",\n        \"(√-(a+b))² = a+b\",\n        \"-2√3 = √(-2)²×3\",\n        \"|√3 - 2| = 2 - √3\"\n      ],\n      \"answer\": \"D\",\n      \"student_answer\": \"D\",\n      \"is_correct\": true,\n      \"confidence\": 0.97,\n      \"analysis\": null,\n      \"question_type\": \"choice\",\n      \"block_coordinates\": { \"x\": 50, 770, 900, 900 },\n      \"text_bbox\": { \"x\": 50, 770, 900, 900 },\n      \"image_type\": \"none\",\n      \"image_bbox\": null,\n      \"geometry_image\": null\n    }\n  ]\n}"
+    },
+    {
+      "imageId": "IMG_A",
+      "imageLabel": "真实作业照(手写+红笔) 19.2实数 提高性测试",
+      "config": "ms-235b",
+      "label": "魔搭 Qwen3-VL-235B (主模型)",
+      "round": 2,
+      "ms": 97765,
+      "status": 200,
+      "finish": "stop",
+      "usage": {
+        "prompt_tokens": 5443,
+        "completion_tokens": 3268,
+        "total_tokens": 8711
+      },
+      "reasoningLen": 0,
+      "error": null,
+      "contentLen": 8483,
+      "parsed": null,
+      "rawContent": "{\n  \"page_title\": \"试卷④ 19.2 实数 提高性测试\",\n  \"section_title\": \"19.2 实数\",\n  \"questions\": [\n    {\n      \"question_id\": \"1\",\n      \"question_number\": 1,\n      \"sub_no\": null,\n      \"parent_stem\": null,\n      \"content\": \"2√6 - 5 的绝对值是\",\n      \"options\": [],\n      \"answer\": \"5 - 2√6\",\n      \"student_answer\": \"5 - 2√6\",\n      \"is_correct\": true,\n      \"confidence\": 0.98,\n      \"analysis\": null,\n      \"question_type\": \"fill\",\n      \"block_coordinates\": { \"x\": 50, 300, 450, 330 },\n      \"text_bbox\": { \"x\": 50, 300, 450, 330 },\n      \"image_type\": \"none\",\n      \"image_bbox\": null,\n      \"geometry_image\": null\n    },\n    {\n      \"question_id\": \"2\",\n      \"question_number\": 2,\n      \"sub_no\": null,\n      \"parent_stem\": null,\n      \"content\": \"计算：√(√15)² + (-√10)² - |-4| =\",\n      \"options\": [],\n      \"answer\": \"1\",\n      \"student_answer\": \"1\",\n      \"is_correct\": true,\n      \"confidence\": 0.97,\n      \"analysis\": null,\n      \"question_type\": \"fill\",\n      \"block_coordinates\": { \"x\": 50, 330, 600, 360 },\n      \"text_bbox\": { \"x\": 50, 330, 600, 360 },\n      \"image_type\": \"none\",\n      \"image_bbox\": null,\n      \"geometry_image\": null\n    },\n    {\n      \"question_id\": \"3\",\n      \"question_number\": 3,\n      \"sub_no\": null,\n      \"parent_stem\": null,\n      \"content\": \"已知太阳到地球的距离约为 1.5×10⁸ km，光速约为 3×10⁵ km/s，那么光从太阳照到地球大约需要 ______ s。（结果用科学记数法表示）\",\n      \"options\": [],\n      \"answer\": \"5×10²\",\n      \"student_answer\": \"5×10²\",\n      \"is_correct\": true,\n      \"confidence\": 0.96,\n      \"analysis\": null,\n      \"question_type\": \"fill\",\n      \"block_coordinates\": { \"x\": 50, 360, 900, 390 },\n      \"text_bbox\": { \"x\": 50, 360, 900, 390 },\n      \"image_type\": \"none\",\n      \"image_bbox\": null,\n      \"geometry_image\": null\n    },\n    {\n      \"question_id\": \"4\",\n      \"question_number\": 4,\n      \"sub_no\": null,\n      \"parent_stem\": null,\n      \"content\": \"有下列说法：①立方根等于本身的数是-1,0,1；②-a没有平方根；③两个无理数的和还是无理数；④若a+b<0,ab>0，则|2a+3b|=-2a-3b；⑤若|a-b|+a-b=0，则b>a；⑥|a|>|b|，则(a+b)(a-b)是负数。其中正确的序号有\",\n      \"options\": [],\n      \"answer\": \"①④\",\n      \"student_answer\": \"①④\",\n      \"is_correct\": true,\n      \"confidence\": 0.95,\n      \"analysis\": null,\n      \"question_type\": \"fill\",\n      \"block_coordinates\": { \"x\": 50, 390, 900, 450 },\n      \"text_bbox\": { \"x\": 50, 390, 900, 450 },\n      \"image_type\": \"none\",\n      \"image_bbox\": null,\n      \"geometry_image\": null\n    },\n    {\n      \"question_id\": \"5\",\n      \"question_number\": 5,\n      \"sub_no\": null,\n      \"parent_stem\": null,\n      \"content\": \"解方程：x² + 1 = 25/36，x =\",\n      \"options\": [],\n      \"answer\": \"±5/6\",\n      \"student_answer\": \"±5/6\",\n      \"is_correct\": true,\n      \"confidence\": 0.97,\n      \"analysis\": null,\n      \"question_type\": \"fill\",\n      \"block_coordinates\": { \"x\": 50, 450, 450, 480 },\n      \"text_bbox\": { \"x\": 50, 450, 450, 480 },\n      \"image_type\": \"none\",\n      \"image_bbox\": null,\n      \"geometry_image\": null\n    },\n    {\n      \"question_id\": \"6\",\n      \"question_number\": 6,\n      \"sub_no\": null,\n      \"parent_stem\": null,\n      \"content\": \"设√a = 1.362，√b = 13.62，用平方根运算性质求 a ÷ b 的值：\",\n      \"options\": [],\n      \"answer\": \"0.01\",\n      \"student_answer\": \"0.01\",\n      \"is_correct\": false,\n      \"confidence\": 0.94,\n      \"analysis\": null,\n      \"question_type\": \"fill\",\n      \"block_coordinates\": { \"x\": 50, 480, 600, 510 },\n      \"text_bbox\": { \"x\": 50, 480, 600, 510 },\n      \"image_type\": \"none\",\n      \"image_bbox\": null,\n      \"geometry_image\": null\n    },\n    {\n      \"question_id\": \"7\",\n      \"question_number\": 7,\n      \"sub_no\": null,\n      \"parent_stem\": null,\n      \"content\": \"已知√102.01 = 10.1，则±√1.0201 =\",\n      \"options\": [],\n      \"answer\": \"±1.01\",\n      \"student_answer\": \"±1.01\",\n      \"is_correct\": true,\n      \"confidence\": 0.98,\n      \"analysis\": null,\n      \"question_type\": \"fill\",\n      \"block_coordinates\": { \"x\": 50, 510, 600, 540 },\n      \"text_bbox\": { \"x\": 50, 510, 600, 540 },\n      \"image_type\": \"none\",\n      \"image_bbox\": null,\n      \"geometry_image\": null\n    },\n    {\n      \"question_id\": \"8\",\n      \"question_number\": 8,\n      \"sub_no\": null,\n      \"parent_stem\": null,\n      \"content\": \"已知1, √5, 5三个数，再添上一个数，写出一个比例式：\",\n      \"options\": [],\n      \"answer\": \"1:√5 = √5:5\",\n      \"student_answer\": \"1:√5 = √5:5\",\n      \"is_correct\": true,\n      \"confidence\": 0.96,\n      \"analysis\": null,\n      \"question_type\": \"fill\",\n      \"block_coordinates\": { \"x\": 50, 540, 600, 570 },\n      \"text_bbox\": { \"x\": 50, 540, 600, 570 },\n      \"image_type\": \"none\",\n      \"image_bbox\": null,\n      \"geometry_image\": null\n    },\n    {\n      \"question_id\": \"9\",\n      \"question_number\": 9,\n      \"sub_no\": null,\n      \"parent_stem\": null,\n      \"content\": \"正方形的边长增加4 cm后，面积为50 cm²，原正方形的边长是 ______ cm。（结果保留根号）\",\n      \"options\": [],\n      \"answer\": \"5√2 - 4\",\n      \"student_answer\": \"5√2 - 4\",\n      \"is_correct\": true,\n      \"confidence\": 0.95,\n      \"analysis\": null,\n      \"question_type\": \"fill\",\n      \"block_coordinates\": { \"x\": 50, 570, 900, 600 },\n      \"text_bbox\": { \"x\": 50, 570, 900, 600 },\n      \"image_type\": \"none\",\n      \"image_bbox\": null,\n      \"geometry_image\": null\n    },\n    {\n      \"question_id\": \"10\",\n      \"question_number\": 10,\n      \"sub_no\": null,\n      \"parent_stem\": null,\n      \"content\": \"若x-2的平方根是±5，那么x的立方根为\",\n      \"options\": [],\n      \"answer\": \"3\",\n      \"student_answer\": \"3\",\n      \"is_correct\": false,\n      \"confidence\": 0.93,\n      \"analysis\": null,\n      \"question_type\": \"fill\",\n      \"block_coordinates\": { \"x\": 50, 600, 600, 630 },\n      \"text_bbox\": { \"x\": 50, 600, 600, 630 },\n      \"image_type\": \"none\",\n      \"image_bbox\": null,\n      \"geometry_image\": null\n    },\n    {\n      \"question_id\": \"11\",\n      \"question_number\": 11,\n      \"sub_no\": null,\n      \"parent_stem\": null,\n      \"content\": \"观察分析下列数据：0, √3, -√6, 3, -2√3, √15, …，根据数据排列的规律，得到第25个数据应是\",\n      \"options\": [],\n      \"answer\": \"-2√3\",\n      \"student_answer\": \"-2√3\",\n      \"is_correct\": true,\n      \"confidence\": 0.94,\n      \"analysis\": null,\n      \"question_type\": \"fill\",\n      \"block_coordinates\": { \"x\": 50, 630, 900, 660 },\n      \"text_bbox\": { \"x\": 50, 630, 900, 660 },\n      \"image_type\": \"none\",\n      \"image_bbox\": null,\n      \"geometry_image\": null\n    },\n    {\n      \"question_id\": \"12\",\n      \"question_number\": 12,\n      \"sub_no\": null,\n      \"parent_stem\": null,\n      \"content\": \"计算：(2√2 + 3)^2022 (2√2 - 3)^2024 =\",\n      \"options\": [],\n      \"answer\": \"17 - 12√2\",\n      \"student_answer\": \"17 - 12√2\",\n      \"is_correct\": true,\n      \"confidence\": 0.96,\n      \"analysis\": null,\n      \"question_type\": \"fill\",\n      \"block_coordinates\": { \"x\": 50, 660, 600, 690 },\n      \"text_bbox\": { \"x\": 50, 660, 600, 690 },\n      \"image_type\": \"none\",\n      \"image_bbox\": null,\n      \"geometry_image\": null\n    },\n    {\n      \"question_id\": \"13\",\n      \"question_number\": 13,\n      \"sub_no\": null,\n      \"parent_stem\": null,\n      \"content\": \"已知a、b互为相反数，c、d互为倒数，x = -3，计算：2^100 · a + |x|/c · x/d - √x² + 2^100 · b =\",\n      \"options\": [],\n      \"answer\": \"-3\",\n      \"student_answer\": \"-3\",\n      \"is_correct\": false,\n      \"confidence\": 0.92,\n      \"analysis\": null,\n      \"question_type\": \"fill\",\n      \"block_coordinates\": { \"x\": 50, 690, 900, 720 },\n      \"text_bbox\": { \"x\": 50, 690, 900, 720 },\n      \"image_type\": \"none\",\n      \"image_bbox\": null,\n      \"geometry_image\": null\n    },\n    {\n      \"question_id\": \"14\",\n      \"question_number\": 14,\n      \"sub_no\": null,\n      \"parent_stem\": null,\n      \"content\": \"已知∛(3y - 1) 和 ∛(1 - 2x) (x ≠ 0) 互为相反数，则 y/x =\",\n      \"options\": [],\n      \"answer\": \"2/3\",\n      \"student_answer\": \"2/3\",\n      \"is_correct\": false,\n      \"confidence\": 0.91,\n      \"analysis\": null,\n      \"question_type\": \"fill\",\n      \"block_coordinates\": { \"x\": 50, 720, 600, 750 },\n      \"text_bbox\": { \"x\": 50, 720, 600, 750 },\n      \"image_type\": \"none\",\n      \"image_bbox\": null,\n      \"geometry_image\": null\n    },\n    {\n      \"question_id\": \"15\",\n      \"question_number\": 15,\n      \"sub_no\": null,\n      \"parent_stem\": null,\n      \"content\": \"下列运算中，正确的是\",\n      \"options\": [\n        \"√2 + √3 ≠ √5\",\n        \"(√-(a+b))² = a + b\",\n        \"-2√3 = √(-2)² × 3\",\n        \"|√3 - 2| = 2 - √3\"\n      ],\n      \"answer\": \"D\",\n      \"student_answer\": \"D\",\n      \"is_correct\": true,\n      \"confidence\": 0.97,\n      \"analysis\": null,\n      \"question_type\": \"choice\",\n      \"block_coordinates\": { \"x\": 50, 780, 900, 900 },\n      \"text_bbox\": { \"x\": 50, 780, 900, 900 },\n      \"image_type\": \"none\",\n      \"image_bbox\": null,\n      \"geometry_image\": null\n    }\n  ]\n}"
+    },
+    {
+      "imageId": "IMG_A",
+      "imageLabel": "真实作业照(手写+红笔) 19.2实数 提高性测试",
+      "config": "grok-4.6",
+      "label": "grok-4.6",
+      "round": 1,
+      "ms": 122294,
+      "status": 502,
+      "error": "Upstream service temporarily unavailable",
+      "contentLen": 0,
+      "parsed": null,
+      "rawContent": ""
+    },
+    {
+      "imageId": "IMG_A",
+      "imageLabel": "真实作业照(手写+红笔) 19.2实数 提高性测试",
+      "config": "grok-4.6",
+      "label": "grok-4.6",
+      "round": 2,
+      "ms": 122444,
+      "status": 502,
+      "error": "Upstream service temporarily unavailable",
+      "contentLen": 0,
+      "parsed": null,
+      "rawContent": ""
+    },
+    {
+      "imageId": "IMG_A",
+      "imageLabel": "真实作业照(手写+红笔) 19.2实数 提高性测试",
+      "config": "sensenova",
+      "label": "sensenova-6.8-flash-lite (默认参数)",
+      "round": 1,
+      "ms": 88056,
+      "status": 200,
+      "finish": "length",
+      "usage": {
+        "prompt_tokens": 5348,
+        "completion_tokens": 8192,
+        "total_tokens": 13540,
+        "completion_tokens_details": {
+          "reasoning_tokens": 8192
+        },
+        "prompt_tokens_details": {
+          "cached_tokens": 0,
+          "audio_tokens": 0
+        }
+      },
+      "reasoningLen": 10554,
+      "error": null,
+      "contentLen": 0,
+      "parsed": null,
+      "rawContent": ""
+    },
+    {
+      "imageId": "IMG_A",
+      "imageLabel": "真实作业照(手写+红笔) 19.2实数 提高性测试",
+      "config": "sensenova",
+      "label": "sensenova-6.8-flash-lite (默认参数)",
+      "round": 2,
+      "ms": 105009,
+      "status": 200,
+      "finish": "length",
+      "usage": {
+        "prompt_tokens": 5348,
+        "completion_tokens": 8192,
+        "total_tokens": 13540,
+        "completion_tokens_details": {
+          "reasoning_tokens": 8192
+        },
+        "prompt_tokens_details": {
+          "cached_tokens": 0,
+          "audio_tokens": 0
+        }
+      },
+      "reasoningLen": 12524,
+      "error": null,
+      "contentLen": 0,
+      "parsed": null,
+      "rawContent": ""
+    },
+    {
+      "imageId": "IMG_A",
+      "imageLabel": "真实作业照(手写+红笔) 19.2实数 提高性测试",
+      "config": "sensenova-effort-none",
+      "label": "sensenova-6.8-flash-lite (reasoning_effort=none)",
+      "round": 1,
+      "ms": 300026,
+      "status": 0,
+      "error": "timeout of 300000ms exceeded",
+      "contentLen": 0,
+      "parsed": null,
+      "rawContent": ""
+    },
+    {
+      "imageId": "IMG_A",
+      "imageLabel": "真实作业照(手写+红笔) 19.2实数 提高性测试",
+      "config": "sensenova-effort-none",
+      "label": "sensenova-6.8-flash-lite (reasoning_effort=none)",
+      "round": 2,
+      "ms": 39923,
+      "status": 200,
+      "finish": "stop",
+      "usage": {
+        "prompt_tokens": 5322,
+        "completion_tokens": 4023,
+        "total_tokens": 9345,
+        "completion_tokens_details": {
+          "reasoning_tokens": 0
+        },
+        "prompt_tokens_details": {
+          "cached_tokens": 0,
+          "audio_tokens": 0
+        }
+      },
+      "reasoningLen": 0,
+      "error": null,
+      "contentLen": 10294,
+      "parsed": {
+        "page_title": "试卷④ 19.2 实数 提高性测试",
+        "section_title": null,
+        "questions": [
+          {
+            "question_id": "q1",
+            "question_number": 1,
+            "sub_no": null,
+            "parent_stem": null,
+            "content": "2√6-5 的绝对值是______。",
+            "options": [],
+            "answer": null,
+            "student_answer": "5-2√6",
+            "is_correct": true,
+            "confidence": 0.95,
+            "analysis": null,
+            "question_type": "fill",
+            "block_coordinates": {
+              "x": 60,
+              "y": 290,
+              "width": 900,
+              "height": 40
+            },
+            "text_bbox": {
+              "x": 60,
+              "y": 290,
+              "width": 900,
+              "height": 40
+            },
+            "image_type": "none",
+            "image_bbox": null,
+            "geometry_image": null
+          },
+          {
+            "question_id": "q2",
+            "question_number": 2,
+            "sub_no": null,
+            "parent_stem": null,
+            "content": "计算：√((√15)²)+(-√10)²-|-4|=______。",
+            "options": [],
+            "answer": null,
+            "student_answer": "1",
+            "is_correct": true,
+            "confidence": 0.95,
+            "analysis": null,
+            "question_type": "fill",
+            "block_coordinates": {
+              "x": 60,
+              "y": 330,
+              "width": 900,
+              "height": 40
+            },
+            "text_bbox": {
+              "x": 60,
+              "y": 330,
+              "width": 900,
+              "height": 40
+            },
+            "image_type": "none",
+            "image_bbox": null,
+            "geometry_image": null
+          },
+          {
+            "question_id": "q3",
+            "question_number": 3,
+            "sub_no": null,
+            "parent_stem": null,
+            "content": "已知太阳到地球的距离约为 1.5×10⁸ km，光速约为 3×10⁵ km/s，那么光从太阳照到地球大约需要______s。（结果用科学记数法表示）",
+            "options": [],
+            "answer": null,
+            "student_answer": "5×10²",
+            "is_correct": true,
+            "confidence": 0.95,
+            "analysis": null,
+            "question_type": "fill",
+            "block_coordinates": {
+              "x": 60,
+              "y": 370,
+              "width": 900,
+              "height": 40
+            },
+            "text_bbox": {
+              "x": 60,
+              "y": 370,
+              "width": 900,
+              "height": 40
+            },
+            "image_type": "none",
+            "image_bbox": null,
+            "geometry_image": null
+          },
+          {
+            "question_id": "q4",
+            "question_number": 4,
+            "sub_no": null,
+            "parent_stem": null,
+            "content": "有下列说法：①立方根等于本身的数是-1,0,1；②-a 没有平方根；③两个无理数的和还是无理数；④若 a+b<0,ab>0，则|2a+3b|=-2a-3b；⑤若|a-b|+a-b=0，则 b>a；⑥|a|>|b|，则(a+b)(a-b)是负数。其中正确的序号有______。",
+            "options": [],
+            "answer": null,
+            "student_answer": "①④",
+            "is_correct": true,
+            "confidence": 0.95,
+            "analysis": null,
+            "question_type": "fill",
+            "block_coordinates": {
+              "x": 60,
+              "y": 410,
+              "width": 900,
+              "height": 80
+            },
+            "text_bbox": {
+              "x": 60,
+              "y": 410,
+              "width": 900,
+              "height": 80
+            },
+            "image_type": "none",
+            "image_bbox": null,
+            "geometry_image": null
+          },
+          {
+            "question_id": "q5",
+            "question_number": 5,
+            "sub_no": null,
+            "parent_stem": null,
+            "content": "解方程：x²+1=36/25，x=______。",
+            "options": [],
+            "answer": null,
+            "student_answer": "±5/3",
+            "is_correct": true,
+            "confidence": 0.95,
+            "analysis": null,
+            "question_type": "fill",
+            "block_coordinates": {
+              "x": 60,
+              "y": 490,
+              "width": 900,
+              "height": 40
+            },
+            "text_bbox": {
+              "x": 60,
+              "y": 490,
+              "width": 900,
+              "height": 40
+            },
+            "image_type": "none",
+            "image_bbox": null,
+            "geometry_image": null
+          },
+          {
+            "question_id": "q6",
+            "question_number": 6,
+            "sub_no": null,
+            "parent_stem": null,
+            "content": "设√a=1.362,√b=13.62，用平方根运算性质求 a÷b 的值：______。",
+            "options": [],
+            "answer": null,
+            "student_answer": null,
+            "is_correct": false,
+            "confidence": 0.9,
+            "analysis": null,
+            "question_type": "fill",
+            "block_coordinates": {
+              "x": 60,
+              "y": 530,
+              "width": 900,
+              "height": 40
+            },
+            "text_bbox": {
+              "x": 60,
+              "y": 530,
+              "width": 900,
+              "height": 40
+            },
+            "image_type": "none",
+            "image_bbox": null,
+            "geometry_image": null
+          },
+          {
+            "question_id": "q7",
+            "question_number": 7,
+            "sub_no": null,
+            "parent_stem": null,
+            "content": "已知√102.01=10.1，则±√1.0201=______。",
+            "options": [],
+            "answer": null,
+            "student_answer": "±1.01",
+            "is_correct": true,
+            "confidence": 0.95,
+            "analysis": null,
+            "question_type": "fill",
+            "block_coordinates": {
+              "x": 60,
+              "y": 570,
+              "width": 900,
+              "height": 40
+            },
+            "text_bbox": {
+              "x": 60,
+              "y": 570,
+              "width": 900,
+              "height": 40
+            },
+            "image_type": "none",
+            "image_bbox": null,
+            "geometry_image": null
+          },
+          {
+            "question_id": "q8",
+            "question_number": 8,
+            "sub_no": null,
+            "parent_stem": null,
+            "content": "已知 1,√5,5 三个数，再添上一个数，写出一个比例式：______。",
+            "options": [],
+            "answer": null,
+            "student_answer": "1:√5=√5:5",
+            "is_correct": true,
+            "confidence": 0.95,
+            "analysis": null,
+            "question_type": "fill",
+            "block_coordinates": {
+              "x": 60,
+              "y": 610,
+              "width": 900,
+              "height": 40
+            },
+            "text_bbox": {
+              "x": 60,
+              "y": 610,
+              "width": 900,
+              "height": 40
+            },
+            "image_type": "none",
+            "image_bbox": null,
+            "geometry_image": null
+          },
+          {
+            "question_id": "q9",
+            "question_number": 9,
+            "sub_no": null,
+            "parent_stem": null,
+            "content": "正方形的边长增加 4 cm 后，面积为 50 cm²，原正方形的边长是______cm。（结果保留根号）",
+            "options": [],
+            "answer": null,
+            "student_answer": "5√2-4",
+            "is_correct": true,
+            "confidence": 0.95,
+            "analysis": null,
+            "question_type": "fill",
+            "block_coordinates": {
+              "x": 60,
+              "y": 650,
+              "width": 900,
+              "height": 40
+            },
+            "text_bbox": {
+              "x": 60,
+              "y": 650,
+              "width": 900,
+              "height": 40
+            },
+            "image_type": "none",
+            "image_bbox": null,
+            "geometry_image": null
+          },
+          {
+            "question_id": "q10",
+            "question_number": 10,
+            "sub_no": null,
+            "parent_stem": null,
+            "content": "若 x-2 的平方根是±5，那么 x 的立方根为______。",
+            "options": [],
+            "answer": null,
+            "student_answer": null,
+            "is_correct": false,
+            "confidence": 0.9,
+            "analysis": null,
+            "question_type": "fill",
+            "block_coordinates": {
+              "x": 60,
+              "y": 690,
+              "width": 900,
+              "height": 40
+            },
+            "text_bbox": {
+              "x": 60,
+              "y": 690,
+              "width": 900,
+              "height": 40
+            },
+            "image_type": "none",
+            "image_bbox": null,
+            "geometry_image": null
+          },
+          {
+            "question_id": "q11",
+            "question_number": 11,
+            "sub_no": null,
+            "parent_stem": null,
+            "content": "观察分析下列数据：0,√3,-√6,3,-2√3,√15,…，根据数据排列的规律，得到第 25 个数据应是______。",
+            "options": [],
+            "answer": null,
+            "student_answer": "2√3",
+            "is_correct": true,
+            "confidence": 0.9,
+            "analysis": null,
+            "question_type": "fill",
+            "block_coordinates": {
+              "x": 60,
+              "y": 730,
+              "width": 900,
+              "height": 40
+            },
+            "text_bbox": {
+              "x": 60,
+              "y": 730,
+              "width": 900,
+              "height": 40
+            },
+            "image_type": "none",
+            "image_bbox": null,
+            "geometry_image": null
+          },
+          {
+            "question_id": "q12",
+            "question_number": 12,
+            "sub_no": null,
+            "parent_stem": null,
+            "content": "计算：(2√2+3)²⁰²²(2√2-3)²⁰²⁴=______。",
+            "options": [],
+            "answer": null,
+            "student_answer": "17-12√2",
+            "is_correct": true,
+            "confidence": 0.95,
+            "analysis": null,
+            "question_type": "fill",
+            "block_coordinates": {
+              "x": 60,
+              "y": 770,
+              "width": 900,
+              "height": 40
+            },
+            "text_bbox": {
+              "x": 60,
+              "y": 770,
+              "width": 900,
+              "height": 40
+            },
+            "image_type": "none",
+            "image_bbox": null,
+            "geometry_image": null
+          },
+          {
+            "question_id": "q13",
+            "question_number": 13,
+            "sub_no": null,
+            "parent_stem": null,
+            "content": "已知 a、b 互为相反数，c、d 互为倒数，x=-3，计算：2¹⁰⁰·a+|x|/c·x/d-√(x²)+2¹⁰⁰·b=______。",
+            "options": [],
+            "answer": null,
+            "student_answer": null,
+            "is_correct": false,
+            "confidence": 0.9,
+            "analysis": null,
+            "question_type": "fill",
+            "block_coordinates": {
+              "x": 60,
+              "y": 810,
+              "width": 900,
+              "height": 40
+            },
+            "text_bbox": {
+              "x": 60,
+              "y": 810,
+              "width": 900,
+              "height": 40
+            },
+            "image_type": "none",
+            "image_bbox": null,
+            "geometry_image": null
+          },
+          {
+            "question_id": "q14",
+            "question_number": 14,
+            "sub_no": null,
+            "parent_stem": null,
+            "content": "已知∛(3y-1) 和∛(1-2x)（x≠0）互为相反数，则 y/x=______。",
+            "options": [],
+            "answer": null,
+            "student_answer": null,
+            "is_correct": false,
+            "confidence": 0.9,
+            "analysis": null,
+            "question_type": "fill",
+            "block_coordinates": {
+              "x": 60,
+              "y": 850,
+              "width": 900,
+              "height": 40
+            },
+            "text_bbox": {
+              "x": 60,
+              "y": 850,
+              "width": 900,
+              "height": 40
+            },
+            "image_type": "none",
+            "image_bbox": null,
+            "geometry_image": null
+          },
+          {
+            "question_id": "q15",
+            "question_number": 15,
+            "sub_no": null,
+            "parent_stem": null,
+            "content": "下列运算中，正确的是",
+            "options": [
+              "√2+√3=√5",
+              "(√-(a+b))²=a+b",
+              "-2√3=√((-2)²×3)",
+              "|√3-2|=2-√3"
+            ],
+            "answer": null,
+            "student_answer": "D",
+            "is_correct": true,
+            "confidence": 0.95,
+            "analysis": null,
+            "question_type": "choice",
+            "block_coordinates": {
+              "x": 60,
+              "y": 890,
+              "width": 900,
+              "height": 100
+            },
+            "text_bbox": {
+              "x": 60,
+              "y": 890,
+              "width": 900,
+              "height": 100
+            },
+            "image_type": "none",
+            "image_bbox": null,
+            "geometry_image": null
+          }
+        ]
+      },
+      "rawContent": "{\n  \"page_title\": \"试卷④ 19.2 实数 提高性测试\",\n  \"section_title\": null,\n  \"questions\": [\n    {\n      \"question_id\": \"q1\",\n      \"question_number\": 1,\n      \"sub_no\": null,\n      \"parent_stem\": null,\n      \"content\": \"2√6-5 的绝对值是______。\",\n      \"options\": [],\n      \"answer\": null,\n      \"student_answer\": \"5-2√6\",\n      \"is_correct\": true,\n      \"confidence\": 0.95,\n      \"analysis\": null,\n      \"question_type\": \"fill\",\n      \"block_coordinates\": {\n        \"x\": 60,\n        \"y\": 290,\n        \"width\": 900,\n        \"height\": 40\n      },\n      \"text_bbox\": {\n        \"x\": 60,\n        \"y\": 290,\n        \"width\": 900,\n        \"height\": 40\n      },\n      \"image_type\": \"none\",\n      \"image_bbox\": null,\n      \"geometry_image\": null\n    },\n    {\n      \"question_id\": \"q2\",\n      \"question_number\": 2,\n      \"sub_no\": null,\n      \"parent_stem\": null,\n      \"content\": \"计算：√((√15)²)+(-√10)²-|-4|=______。\",\n      \"options\": [],\n      \"answer\": null,\n      \"student_answer\": \"1\",\n      \"is_correct\": true,\n      \"confidence\": 0.95,\n      \"analysis\": null,\n      \"question_type\": \"fill\",\n      \"block_coordinates\": {\n        \"x\": 60,\n        \"y\": 330,\n        \"width\": 900,\n        \"height\": 40\n      },\n      \"text_bbox\": {\n        \"x\": 60,\n        \"y\": 330,\n        \"width\": 900,\n        \"height\": 40\n      },\n      \"image_type\": \"none\",\n      \"image_bbox\": null,\n      \"geometry_image\": null\n    },\n    {\n      \"question_id\": \"q3\",\n      \"question_number\": 3,\n      \"sub_no\": null,\n      \"parent_stem\": null,\n      \"content\": \"已知太阳到地球的距离约为 1.5×10⁸ km，光速约为 3×10⁵ km/s，那么光从太阳照到地球大约需要______s。（结果用科学记数法表示）\",\n      \"options\": [],\n      \"answer\": null,\n      \"student_answer\": \"5×10²\",\n      \"is_correct\": true,\n      \"confidence\": 0.95,\n      \"analysis\": null,\n      \"question_type\": \"fill\",\n      \"block_coordinates\": {\n        \"x\": 60,\n        \"y\": 370,\n        \"width\": 900,\n        \"height\": 40\n      },\n      \"text_bbox\": {\n        \"x\": 60,\n        \"y\": 370,\n        \"width\": 900,\n        \"height\": 40\n      },\n      \"image_type\": \"none\",\n      \"image_bbox\": null,\n      \"geometry_image\": null\n    },\n    {\n      \"question_id\": \"q4\",\n      \"question_number\": 4,\n      \"sub_no\": null,\n      \"parent_stem\": null,\n      \"content\": \"有下列说法：①立方根等于本身的数是-1,0,1；②-a 没有平方根；③两个无理数的和还是无理数；④若 a+b<0,ab>0，则|2a+3b|=-2a-3b；⑤若|a-b|+a-b=0，则 b>a；⑥|a|>|b|，则(a+b)(a-b)是负数。其中正确的序号有______。\",\n      \"options\": [],\n      \"answer\": null,\n      \"student_answer\": \"①④\",\n      \"is_correct\": true,\n      \"confidence\": 0.95,\n      \"analysis\": null,\n      \"question_type\": \"fill\",\n      \"block_coordinates\": {\n        \"x\": 60,\n        \"y\": 410,\n        \"width\": 900,\n        \"height\": 80\n      },\n      \"text_bbox\": {\n        \"x\": 60,\n        \"y\": 410,\n        \"width\": 900,\n        \"height\": 80\n      },\n      \"image_type\": \"none\",\n      \"image_bbox\": null,\n      \"geometry_image\": null\n    },\n    {\n      \"question_id\": \"q5\",\n      \"question_number\": 5,\n      \"sub_no\": null,\n      \"parent_stem\": null,\n      \"content\": \"解方程：x²+1=36/25，x=______。\",\n      \"options\": [],\n      \"answer\": null,\n      \"student_answer\": \"±5/3\",\n      \"is_correct\": true,\n      \"confidence\": 0.95,\n      \"analysis\": null,\n      \"question_type\": \"fill\",\n      \"block_coordinates\": {\n        \"x\": 60,\n        \"y\": 490,\n        \"width\": 900,\n        \"height\": 40\n      },\n      \"text_bbox\": {\n        \"x\": 60,\n        \"y\": 490,\n        \"width\": 900,\n        \"height\": 40\n      },\n      \"image_type\": \"none\",\n      \"image_bbox\": null,\n      \"geometry_image\": null\n    },\n    {\n      \"question_id\": \"q6\",\n      \"question_number\": 6,\n      \"sub_no\": null,\n      \"parent_stem\": null,\n      \"content\": \"设√a=1.362,√b=13.62，用平方根运算性质求 a÷b 的值：______。\",\n      \"options\": [],\n      \"answer\": null,\n      \"student_answer\": null,\n      \"is_correct\": false,\n      \"confidence\": 0.9,\n      \"analysis\": null,\n      \"question_type\": \"fill\",\n      \"block_coordinates\": {\n        \"x\": 60,\n        \"y\": 530,\n        \"width\": 900,\n        \"height\": 40\n      },\n      \"text_bbox\": {\n        \"x\": 60,\n        \"y\": 530,\n        \"width\": 900,\n        \"height\": 40\n      },\n      \"image_type\": \"none\",\n      \"image_bbox\": null,\n      \"geometry_image\": null\n    },\n    {\n      \"question_id\": \"q7\",\n      \"question_number\": 7,\n      \"sub_no\": null,\n      \"parent_stem\": null,\n      \"content\": \"已知√102.01=10.1，则±√1.0201=______。\",\n      \"options\": [],\n      \"answer\": null,\n      \"student_answer\": \"±1.01\",\n      \"is_correct\": true,\n      \"confidence\": 0.95,\n      \"analysis\": null,\n      \"question_type\": \"fill\",\n      \"block_coordinates\": {\n        \"x\": 60,\n        \"y\": 570,\n        \"width\": 900,\n        \"height\": 40\n      },\n      \"text_bbox\": {\n        \"x\": 60,\n        \"y\": 570,\n        \"width\": 900,\n        \"height\": 40\n      },\n      \"image_type\": \"none\",\n      \"image_bbox\": null,\n      \"geometry_image\": null\n    },\n    {\n      \"question_id\": \"q8\",\n      \"question_number\": 8,\n      \"sub_no\": null,\n      \"parent_stem\": null,\n      \"content\": \"已知 1,√5,5 三个数，再添上一个数，写出一个比例式：______。\",\n      \"options\": [],\n      \"answer\": null,\n      \"student_answer\": \"1:√5=√5:5\",\n      \"is_correct\": true,\n      \"confidence\": 0.95,\n      \"analysis\": null,\n      \"question_type\": \"fill\",\n      \"block_coordinates\": {\n        \"x\": 60,\n        \"y\": 610,\n        \"width\": 900,\n        \"height\": 40\n      },\n      \"text_bbox\": {\n        \"x\": 60,\n        \"y\": 610,\n        \"width\": 900,\n        \"height\": 40\n      },\n      \"image_type\": \"none\",\n      \"image_bbox\": null,\n      \"geometry_image\": null\n    },\n    {\n      \"question_id\": \"q9\",\n      \"question_number\": 9,\n      \"sub_no\": null,\n      \"parent_stem\": null,\n      \"content\": \"正方形的边长增加 4 cm 后，面积为 50 cm²，原正方形的边长是______cm。（结果保留根号）\",\n      \"options\": [],\n      \"answer\": null,\n      \"student_answer\": \"5√2-4\",\n      \"is_correct\": true,\n      \"confidence\": 0.95,\n      \"analysis\": null,\n      \"question_type\": \"fill\",\n      \"block_coordinates\": {\n        \"x\": 60,\n        \"y\": 650,\n        \"width\": 900,\n        \"height\": 40\n      },\n      \"text_bbox\": {\n        \"x\": 60,\n        \"y\": 650,\n        \"width\": 900,\n        \"height\": 40\n      },\n      \"image_type\": \"none\",\n      \"image_bbox\": null,\n      \"geometry_image\": null\n    },\n    {\n      \"question_id\": \"q10\",\n      \"question_number\": 10,\n      \"sub_no\": null,\n      \"parent_stem\": null,\n      \"content\": \"若 x-2 的平方根是±5，那么 x 的立方根为______。\",\n      \"options\": [],\n      \"answer\": null,\n      \"student_answer\": null,\n      \"is_correct\": false,\n      \"confidence\": 0.9,\n      \"analysis\": null,\n      \"question_type\": \"fill\",\n      \"block_coordinates\": {\n        \"x\": 60,\n        \"y\": 690,\n        \"width\": 900,\n        \"height\": 40\n      },\n      \"text_bbox\": {\n        \"x\": 60,\n        \"y\": 690,\n        \"width\": 900,\n        \"height\": 40\n      },\n      \"image_type\": \"none\",\n      \"image_bbox\": null,\n      \"geometry_image\": null\n    },\n    {\n      \"question_id\": \"q11\",\n      \"question_number\": 11,\n      \"sub_no\": null,\n      \"parent_stem\": null,\n      \"content\": \"观察分析下列数据：0,√3,-√6,3,-2√3,√15,…，根据数据排列的规律，得到第 25 个数据应是______。\",\n      \"options\": [],\n      \"answer\": null,\n      \"student_answer\": \"2√3\",\n      \"is_correct\": true,\n      \"confidence\": 0.9,\n      \"analysis\": null,\n      \"question_type\": \"fill\",\n      \"block_coordinates\": {\n        \"x\": 60,\n        \"y\": 730,\n        \"width\": 900,\n        \"height\": 40\n      },\n      \"text_bbox\": {\n        \"x\": 60,\n        \"y\": 730,\n        \"width\": 900,\n        \"height\": 40\n      },\n      \"image_type\": \"none\",\n      \"image_bbox\": null,\n      \"geometry_image\": null\n    },\n    {\n      \"question_id\": \"q12\",\n      \"question_number\": 12,\n      \"sub_no\": null,\n      \"parent_stem\": null,\n      \"content\": \"计算：(2√2+3)²⁰²²(2√2-3)²⁰²⁴=______。\",\n      \"options\": [],\n      \"answer\": null,\n      \"student_answer\": \"17-12√2\",\n      \"is_correct\": true,\n      \"confidence\": 0.95,\n      \"analysis\": null,\n      \"question_type\": \"fill\",\n      \"block_coordinates\": {\n        \"x\": 60,\n        \"y\": 770,\n        \"width\": 900,\n        \"height\": 40\n      },\n      \"text_bbox\": {\n        \"x\": 60,\n        \"y\": 770,\n        \"width\": 900,\n        \"height\": 40\n      },\n      \"image_type\": \"none\",\n      \"image_bbox\": null,\n      \"geometry_image\": null\n    },\n    {\n      \"question_id\": \"q13\",\n      \"question_number\": 13,\n      \"sub_no\": null,\n      \"parent_stem\": null,\n      \"content\": \"已知 a、b 互为相反数，c、d 互为倒数，x=-3，计算：2¹⁰⁰·a+|x|/c·x/d-√(x²)+2¹⁰⁰·b=______。\",\n      \"options\": [],\n      \"answer\": null,\n      \"student_answer\": null,\n      \"is_correct\": false,\n      \"confidence\": 0.9,\n      \"analysis\": null,\n      \"question_type\": \"fill\",\n      \"block_coordinates\": {\n        \"x\": 60,\n        \"y\": 810,\n        \"width\": 900,\n        \"height\": 40\n      },\n      \"text_bbox\": {\n        \"x\": 60,\n        \"y\": 810,\n        \"width\": 900,\n        \"height\": 40\n      },\n      \"image_type\": \"none\",\n      \"image_bbox\": null,\n      \"geometry_image\": null\n    },\n    {\n      \"question_id\": \"q14\",\n      \"question_number\": 14,\n      \"sub_no\": null,\n      \"parent_stem\": null,\n      \"content\": \"已知∛(3y-1) 和∛(1-2x)（x≠0）互为相反数，则 y/x=______。\",\n      \"options\": [],\n      \"answer\": null,\n      \"student_answer\": null,\n      \"is_correct\": false,\n      \"confidence\": 0.9,\n      \"analysis\": null,\n      \"question_type\": \"fill\",\n      \"block_coordinates\": {\n        \"x\": 60,\n        \"y\": 850,\n        \"width\": 900,\n        \"height\": 40\n      },\n      \"text_bbox\": {\n        \"x\": 60,\n        \"y\": 850,\n        \"width\": 900,\n        \"height\": 40\n      },\n      \"image_type\": \"none\",\n      \"image_bbox\": null,\n      \"geometry_image\": null\n    },\n    {\n      \"question_id\": \"q15\",\n      \"question_number\": 15,\n      \"sub_no\": null,\n      \"parent_stem\": null,\n      \"content\": \"下列运算中，正确的是\",\n      \"options\": [\n        \"√2+√3=√5\",\n        \"(√-(a+b))²=a+b\",\n        \"-2√3=√((-2)²×3)\",\n        \"|√3-2|=2-√3\"\n      ],\n      \"answer\": null,\n      \"student_answer\": \"D\",\n      \"is_correct\": true,\n      \"confidence\": 0.95,\n      \"analysis\": null,\n      \"question_type\": \"choice\",\n      \"block_coordinates\": {\n        \"x\": 60,\n        \"y\": 890,\n        \"width\": 900,\n        \"height\": 100\n      },\n      \"text_bbox\": {\n        \"x\": 60,\n        \"y\": 890,\n        \"width\": 900,\n        \"height\": 100\n      },\n      \"image_type\": \"none\",\n      \"image_bbox\": null,\n      \"geometry_image\": null\n    }\n  ]\n}"
+    },
+    {
+      "imageId": "IMG_C",
+      "imageLabel": "清晰印刷卷(扫描/PDF渲染) 0706",
+      "config": "ms-235b",
+      "label": "魔搭 Qwen3-VL-235B (主模型)",
+      "round": 1,
+      "ms": 291,
+      "status": 429,
+      "error": "We have to rate limit you for model Qwen/Qwen3-VL-235B-A22B-Instruct. If you need higher limits, please consider other (commercial) API providers.",
+      "contentLen": 0,
+      "parsed": null,
+      "rawContent": ""
+    },
+    {
+      "imageId": "IMG_C",
+      "imageLabel": "清晰印刷卷(扫描/PDF渲染) 0706",
+      "config": "ms-235b",
+      "label": "魔搭 Qwen3-VL-235B (主模型)",
+      "round": 2,
+      "ms": 90,
+      "status": 429,
+      "error": "We have to rate limit you for model Qwen/Qwen3-VL-235B-A22B-Instruct. If you need higher limits, please consider other (commercial) API providers.",
+      "contentLen": 0,
+      "parsed": null,
+      "rawContent": ""
+    },
+    {
+      "imageId": "IMG_C",
+      "imageLabel": "清晰印刷卷(扫描/PDF渲染) 0706",
+      "config": "grok-4.6",
+      "label": "grok-4.6",
+      "round": 1,
+      "ms": 117111,
+      "status": 200,
+      "finish": "stop",
+      "usage": {
+        "prompt_tokens": 5783,
+        "completion_tokens": 11686,
+        "total_tokens": 17469,
+        "prompt_tokens_details": {
+          "cached_tokens": 192
+        },
+        "completion_tokens_details": {
+          "reasoning_tokens": 10675
+        }
+      },
+      "reasoningLen": 0,
+      "error": null,
+      "contentLen": 2952,
+      "parsed": {
+        "page_title": "严嫦颖 - 数学-0706",
+        "section_title": null,
+        "questions": [
+          {
+            "question_id": "1",
+            "question_number": 1,
+            "sub_no": null,
+            "parent_stem": null,
+            "content": "若 a ÷ b = 9 (a,b 都是正整数), 则 a 与 b 的最小公倍数是 ( )",
+            "options": [
+              "9",
+              "18",
+              "81",
+              "9b"
+            ],
+            "answer": null,
+            "student_answer": null,
+            "is_correct": null,
+            "analysis": null,
+            "question_type": "choice",
+            "block_coordinates": {
+              "x": 0,
+              "y": 200,
+              "width": 1000,
+              "height": 100
+            },
+            "text_bbox": {
+              "x": 0,
+              "y": 200,
+              "width": 1000,
+              "height": 100
+            },
+            "image_type": "none",
+            "image_bbox": null,
+            "geometry_image": null
+          },
+          {
+            "question_id": "2",
+            "question_number": 2,
+            "sub_no": null,
+            "parent_stem": null,
+            "content": "甲、乙两数都是正整数，且甲是乙的5倍，则甲、乙两数的最大公因数是 ( )",
+            "options": [
+              "1",
+              "2",
+              "5",
+              "1"
+            ],
+            "answer": null,
+            "student_answer": null,
+            "is_correct": null,
+            "analysis": null,
+            "question_type": "choice",
+            "block_coordinates": {
+              "x": 0,
+              "y": 350,
+              "width": 1000,
+              "height": 100
+            },
+            "text_bbox": {
+              "x": 0,
+              "y": 350,
+              "width": 1000,
+              "height": 100
+            },
+            "image_type": "none",
+            "image_bbox": null,
+            "geometry_image": null
+          },
+          {
+            "question_id": "3",
+            "question_number": 3,
+            "sub_no": null,
+            "parent_stem": null,
+            "content": "48是24和16的 ( )",
+            "options": [
+              "最小公倍数",
+              "公倍数",
+              "最大公约数",
+              "公数"
+            ],
+            "answer": null,
+            "student_answer": null,
+            "is_correct": null,
+            "analysis": null,
+            "question_type": "choice",
+            "block_coordinates": {
+              "x": 0,
+              "y": 500,
+              "width": 1000,
+              "height": 100
+            },
+            "text_bbox": {
+              "x": 0,
+              "y": 500,
+              "width": 1000,
+              "height": 100
+            },
+            "image_type": "none",
+            "image_bbox": null,
+            "geometry_image": null
+          },
+          {
+            "question_id": "4",
+            "question_number": 4,
+            "sub_no": null,
+            "parent_stem": null,
+            "content": "两个数的最大公因数是12，最小公倍数是168，其中一个数是24, 另一个数是 ( )",
+            "options": [
+              "24",
+              "84",
+              "7",
+              "12"
+            ],
+            "answer": null,
+            "student_answer": null,
+            "is_correct": null,
+            "analysis": null,
+            "question_type": "choice",
+            "block_coordinates": {
+              "x": 0,
+              "y": 650,
+              "width": 1000,
+              "height": 100
+            },
+            "text_bbox": {
+              "x": 0,
+              "y": 650,
+              "width": 1000,
+              "height": 100
+            },
+            "image_type": "none",
+            "image_bbox": null,
+            "geometry_image": null
+          },
+          {
+            "question_id": "5",
+            "question_number": 5,
+            "sub_no": null,
+            "parent_stem": null,
+            "content": "两个正整数的乘积____ (填“一定”或“不一定”) 是这两个数的最小公倍数。",
+            "options": [],
+            "answer": null,
+            "student_answer": null,
+            "is_correct": null,
+            "analysis": null,
+            "question_type": "fill",
+            "block_coordinates": {
+              "x": 0,
+              "y": 800,
+              "width": 1000,
+              "height": 100
+            },
+            "text_bbox": {
+              "x": 0,
+              "y": 800,
+              "width": 1000,
+              "height": 100
+            },
+            "image_type": "none",
+            "image_bbox": null,
+            "geometry_image": null
+          }
+        ]
+      },
+      "rawContent": "{\n  \"page_title\": \"严嫦颖 - 数学-0706\",\n  \"section_title\": null,\n  \"questions\": [\n    {\n      \"question_id\": \"1\",\n      \"question_number\": 1,\n      \"sub_no\": null,\n      \"parent_stem\": null,\n      \"content\": \"若 a ÷ b = 9 (a,b 都是正整数), 则 a 与 b 的最小公倍数是 ( )\",\n      \"options\": [\"9\", \"18\", \"81\", \"9b\"],\n      \"answer\": null,\n      \"student_answer\": null,\n      \"is_correct\": null,\n      \"analysis\": null,\n      \"question_type\": \"choice\",\n      \"block_coordinates\": {\"x\": 0, \"y\": 200, \"width\": 1000, \"height\": 100},\n      \"text_bbox\": {\"x\": 0, \"y\": 200, \"width\": 1000, \"height\": 100},\n      \"image_type\": \"none\",\n      \"image_bbox\": null,\n      \"geometry_image\": null\n    },\n    {\n      \"question_id\": \"2\",\n      \"question_number\": 2,\n      \"sub_no\": null,\n      \"parent_stem\": null,\n      \"content\": \"甲、乙两数都是正整数，且甲是乙的5倍，则甲、乙两数的最大公因数是 ( )\",\n      \"options\": [\"1\", \"2\", \"5\", \"1\"],\n      \"answer\": null,\n      \"student_answer\": null,\n      \"is_correct\": null,\n      \"analysis\": null,\n      \"question_type\": \"choice\",\n      \"block_coordinates\": {\"x\": 0, \"y\": 350, \"width\": 1000, \"height\": 100},\n      \"text_bbox\": {\"x\": 0, \"y\": 350, \"width\": 1000, \"height\": 100},\n      \"image_type\": \"none\",\n      \"image_bbox\": null,\n      \"geometry_image\": null\n    },\n    {\n      \"question_id\": \"3\",\n      \"question_number\": 3,\n      \"sub_no\": null,\n      \"parent_stem\": null,\n      \"content\": \"48是24和16的 ( )\",\n      \"options\": [\"最小公倍数\", \"公倍数\", \"最大公约数\", \"公数\"],\n      \"answer\": null,\n      \"student_answer\": null,\n      \"is_correct\": null,\n      \"analysis\": null,\n      \"question_type\": \"choice\",\n      \"block_coordinates\": {\"x\": 0, \"y\": 500, \"width\": 1000, \"height\": 100},\n      \"text_bbox\": {\"x\": 0, \"y\": 500, \"width\": 1000, \"height\": 100},\n      \"image_type\": \"none\",\n      \"image_bbox\": null,\n      \"geometry_image\": null\n    },\n    {\n      \"question_id\": \"4\",\n      \"question_number\": 4,\n      \"sub_no\": null,\n      \"parent_stem\": null,\n      \"content\": \"两个数的最大公因数是12，最小公倍数是168，其中一个数是24, 另一个数是 ( )\",\n      \"options\": [\"24\", \"84\", \"7\", \"12\"],\n      \"answer\": null,\n      \"student_answer\": null,\n      \"is_correct\": null,\n      \"analysis\": null,\n      \"question_type\": \"choice\",\n      \"block_coordinates\": {\"x\": 0, \"y\": 650, \"width\": 1000, \"height\": 100},\n      \"text_bbox\": {\"x\": 0, \"y\": 650, \"width\": 1000, \"height\": 100},\n      \"image_type\": \"none\",\n      \"image_bbox\": null,\n      \"geometry_image\": null\n    },\n    {\n      \"question_id\": \"5\",\n      \"question_number\": 5,\n      \"sub_no\": null,\n      \"parent_stem\": null,\n      \"content\": \"两个正整数的乘积____ (填“一定”或“不一定”) 是这两个数的最小公倍数。\",\n      \"options\": [],\n      \"answer\": null,\n      \"student_answer\": null,\n      \"is_correct\": null,\n      \"analysis\": null,\n      \"question_type\": \"fill\",\n      \"block_coordinates\": {\"x\": 0, \"y\": 800, \"width\": 1000, \"height\": 100},\n      \"text_bbox\": {\"x\": 0, \"y\": 800, \"width\": 1000, \"height\": 100},\n      \"image_type\": \"none\",\n      \"image_bbox\": null,\n      \"geometry_image\": null\n    }\n  ]\n}"
+    },
+    {
+      "imageId": "IMG_C",
+      "imageLabel": "清晰印刷卷(扫描/PDF渲染) 0706",
+      "config": "grok-4.6",
+      "label": "grok-4.6",
+      "round": 2,
+      "ms": 79867,
+      "status": 200,
+      "finish": "stop",
+      "usage": {
+        "prompt_tokens": 5783,
+        "completion_tokens": 8191,
+        "total_tokens": 13974,
+        "prompt_tokens_details": {
+          "cached_tokens": 3328
+        },
+        "completion_tokens_details": {
+          "reasoning_tokens": 7176
+        }
+      },
+      "reasoningLen": 0,
+      "error": null,
+      "contentLen": 2950,
+      "parsed": {
+        "page_title": "严嫦颖 - 数学-0706",
+        "section_title": null,
+        "questions": [
+          {
+            "question_id": "1",
+            "question_number": 1,
+            "sub_no": null,
+            "parent_stem": null,
+            "content": "若 a ÷ b = 9 (a, b 都是正整数), 则 a 与 b 的最小公倍数是 ( )",
+            "options": [
+              "9",
+              "18",
+              "27",
+              "36"
+            ],
+            "answer": null,
+            "student_answer": null,
+            "is_correct": null,
+            "analysis": null,
+            "question_type": "choice",
+            "block_coordinates": {
+              "x": 0,
+              "y": 0,
+              "width": 1000,
+              "height": 300
+            },
+            "text_bbox": {
+              "x": 0,
+              "y": 0,
+              "width": 1000,
+              "height": 300
+            },
+            "image_type": "none",
+            "image_bbox": null,
+            "geometry_image": null
+          },
+          {
+            "question_id": "2",
+            "question_number": 2,
+            "sub_no": null,
+            "parent_stem": null,
+            "content": "甲、乙两数都是正整数，且甲是乙的5倍，则甲、乙两数的最大公因数是 ( )",
+            "options": [
+              "5",
+              "2",
+              "5",
+              "1"
+            ],
+            "answer": null,
+            "student_answer": null,
+            "is_correct": null,
+            "analysis": null,
+            "question_type": "choice",
+            "block_coordinates": {
+              "x": 0,
+              "y": 400,
+              "width": 1000,
+              "height": 300
+            },
+            "text_bbox": {
+              "x": 0,
+              "y": 400,
+              "width": 1000,
+              "height": 300
+            },
+            "image_type": "none",
+            "image_bbox": null,
+            "geometry_image": null
+          },
+          {
+            "question_id": "3",
+            "question_number": 3,
+            "sub_no": null,
+            "parent_stem": null,
+            "content": "48是24和16的 ( )",
+            "options": [
+              "最小公因数",
+              "公倍数",
+              "最大公约数",
+              "合数"
+            ],
+            "answer": null,
+            "student_answer": null,
+            "is_correct": null,
+            "analysis": null,
+            "question_type": "choice",
+            "block_coordinates": {
+              "x": 0,
+              "y": 800,
+              "width": 1000,
+              "height": 300
+            },
+            "text_bbox": {
+              "x": 0,
+              "y": 800,
+              "width": 1000,
+              "height": 300
+            },
+            "image_type": "none",
+            "image_bbox": null,
+            "geometry_image": null
+          },
+          {
+            "question_id": "4",
+            "question_number": 4,
+            "sub_no": null,
+            "parent_stem": null,
+            "content": "两个数的最大公因数是12，最小公倍数是168，其中一个数是24，另一个数是 ( )",
+            "options": [
+              "24",
+              "84",
+              "7",
+              "12"
+            ],
+            "answer": null,
+            "student_answer": null,
+            "is_correct": null,
+            "analysis": null,
+            "question_type": "choice",
+            "block_coordinates": {
+              "x": 0,
+              "y": 1200,
+              "width": 1000,
+              "height": 300
+            },
+            "text_bbox": {
+              "x": 0,
+              "y": 1200,
+              "width": 1000,
+              "height": 300
+            },
+            "image_type": "none",
+            "image_bbox": null,
+            "geometry_image": null
+          },
+          {
+            "question_id": "5",
+            "question_number": 5,
+            "sub_no": null,
+            "parent_stem": null,
+            "content": "两个正整数的乘积____（填“一定”或“不一定”）是这两个数的最小公倍数。",
+            "options": [],
+            "answer": null,
+            "student_answer": null,
+            "is_correct": null,
+            "analysis": null,
+            "question_type": "fill",
+            "block_coordinates": {
+              "x": 0,
+              "y": 1600,
+              "width": 1000,
+              "height": 300
+            },
+            "text_bbox": {
+              "x": 0,
+              "y": 1600,
+              "width": 1000,
+              "height": 300
+            },
+            "image_type": "none",
+            "image_bbox": null,
+            "geometry_image": null
+          }
+        ]
+      },
+      "rawContent": "{\n  \"page_title\": \"严嫦颖 - 数学-0706\",\n  \"section_title\": null,\n  \"questions\": [\n    {\n      \"question_id\": \"1\",\n      \"question_number\": 1,\n      \"sub_no\": null,\n      \"parent_stem\": null,\n      \"content\": \"若 a ÷ b = 9 (a, b 都是正整数), 则 a 与 b 的最小公倍数是 ( )\",\n      \"options\": [\"9\", \"18\", \"27\", \"36\"],\n      \"answer\": null,\n      \"student_answer\": null,\n      \"is_correct\": null,\n      \"analysis\": null,\n      \"question_type\": \"choice\",\n      \"block_coordinates\": {\"x\": 0, \"y\": 0, \"width\": 1000, \"height\": 300},\n      \"text_bbox\": {\"x\": 0, \"y\": 0, \"width\": 1000, \"height\": 300},\n      \"image_type\": \"none\",\n      \"image_bbox\": null,\n      \"geometry_image\": null\n    },\n    {\n      \"question_id\": \"2\",\n      \"question_number\": 2,\n      \"sub_no\": null,\n      \"parent_stem\": null,\n      \"content\": \"甲、乙两数都是正整数，且甲是乙的5倍，则甲、乙两数的最大公因数是 ( )\",\n      \"options\": [\"5\", \"2\", \"5\", \"1\"],\n      \"answer\": null,\n      \"student_answer\": null,\n      \"is_correct\": null,\n      \"analysis\": null,\n      \"question_type\": \"choice\",\n      \"block_coordinates\": {\"x\": 0, \"y\": 400, \"width\": 1000, \"height\": 300},\n      \"text_bbox\": {\"x\": 0, \"y\": 400, \"width\": 1000, \"height\": 300},\n      \"image_type\": \"none\",\n      \"image_bbox\": null,\n      \"geometry_image\": null\n    },\n    {\n      \"question_id\": \"3\",\n      \"question_number\": 3,\n      \"sub_no\": null,\n      \"parent_stem\": null,\n      \"content\": \"48是24和16的 ( )\",\n      \"options\": [\"最小公因数\", \"公倍数\", \"最大公约数\", \"合数\"],\n      \"answer\": null,\n      \"student_answer\": null,\n      \"is_correct\": null,\n      \"analysis\": null,\n      \"question_type\": \"choice\",\n      \"block_coordinates\": {\"x\": 0, \"y\": 800, \"width\": 1000, \"height\": 300},\n      \"text_bbox\": {\"x\": 0, \"y\": 800, \"width\": 1000, \"height\": 300},\n      \"image_type\": \"none\",\n      \"image_bbox\": null,\n      \"geometry_image\": null\n    },\n    {\n      \"question_id\": \"4\",\n      \"question_number\": 4,\n      \"sub_no\": null,\n      \"parent_stem\": null,\n      \"content\": \"两个数的最大公因数是12，最小公倍数是168，其中一个数是24，另一个数是 ( )\",\n      \"options\": [\"24\", \"84\", \"7\", \"12\"],\n      \"answer\": null,\n      \"student_answer\": null,\n      \"is_correct\": null,\n      \"analysis\": null,\n      \"question_type\": \"choice\",\n      \"block_coordinates\": {\"x\": 0, \"y\": 1200, \"width\": 1000, \"height\": 300},\n      \"text_bbox\": {\"x\": 0, \"y\": 1200, \"width\": 1000, \"height\": 300},\n      \"image_type\": \"none\",\n      \"image_bbox\": null,\n      \"geometry_image\": null\n    },\n    {\n      \"question_id\": \"5\",\n      \"question_number\": 5,\n      \"sub_no\": null,\n      \"parent_stem\": null,\n      \"content\": \"两个正整数的乘积____（填“一定”或“不一定”）是这两个数的最小公倍数。\",\n      \"options\": [],\n      \"answer\": null,\n      \"student_answer\": null,\n      \"is_correct\": null,\n      \"analysis\": null,\n      \"question_type\": \"fill\",\n      \"block_coordinates\": {\"x\": 0, \"y\": 1600, \"width\": 1000, \"height\": 300},\n      \"text_bbox\": {\"x\": 0, \"y\": 1600, \"width\": 1000, \"height\": 300},\n      \"image_type\": \"none\",\n      \"image_bbox\": null,\n      \"geometry_image\": null\n    }\n  ]\n}"
+    },
+    {
+      "imageId": "IMG_C",
+      "imageLabel": "清晰印刷卷(扫描/PDF渲染) 0706",
+      "config": "sensenova",
+      "label": "sensenova-6.8-flash-lite (默认参数)",
+      "round": 1,
+      "ms": 95385,
+      "status": 200,
+      "finish": "length",
+      "usage": {
+        "prompt_tokens": 5828,
+        "completion_tokens": 8192,
+        "total_tokens": 14020,
+        "completion_tokens_details": {
+          "reasoning_tokens": 8192
+        },
+        "prompt_tokens_details": {
+          "cached_tokens": 0,
+          "audio_tokens": 0
+        }
+      },
+      "reasoningLen": 11502,
+      "error": null,
+      "contentLen": 0,
+      "parsed": null,
+      "rawContent": ""
+    },
+    {
+      "imageId": "IMG_C",
+      "imageLabel": "清晰印刷卷(扫描/PDF渲染) 0706",
+      "config": "sensenova",
+      "label": "sensenova-6.8-flash-lite (默认参数)",
+      "round": 2,
+      "ms": 89645,
+      "status": 200,
+      "finish": "stop",
+      "usage": {
+        "prompt_tokens": 5828,
+        "completion_tokens": 7143,
+        "total_tokens": 12971,
+        "completion_tokens_details": {
+          "reasoning_tokens": 5764
+        },
+        "prompt_tokens_details": {
+          "cached_tokens": 0,
+          "audio_tokens": 0
+        }
+      },
+      "reasoningLen": 10183,
+      "error": null,
+      "contentLen": 3633,
+      "parsed": null,
+      "rawContent": "\n\n{\n  \"page_title\": \"严嫁颖 - 数学-0706\",\n  \"section_title\": null,\n  \"questions\": [\n    {\n      \"question_id\": \"q1\",\n      \"question_number\": 1,\n      \"sub_no\": null,\n      \"parent_stem\": null,\n      \"content\": \"若 a ÷ b = 9 (a, b 都是正整数)，则 a 与 b 的最小公倍数是（ ）\",\n      \"options\": [\n        \"a\",\n        \"b\",\n        \"ab\",\n        \"9\"\n      ],\n      \"answer\": null,\n      \"student_answer\": null,\n      \"is_correct\": null,\n      \"confidence\": 0.95,\n      \"analysis\": null,\n      \"question_type\": \"choice\",\n      \"block_coordinates\": {\n        \"x\": 50,\n        \"y\": 185,\n        \"width\": 900,\n        \"height\": 60\n      },\n      \"text_bbox\": {\n        \"x\": 50,\n        \"y\": 185,\n        \"width\": 900,\n        \"height\": 60\n      },\n      \"image_type\": \"none\",\n      \"image_bbox\": null,\n      \"geometry_image\": null\n    },\n    {\n      \"question_id\": \"q2\",\n      \"question_number\": 2,\n      \"sub_no\": null,\n      \"parent_stem\": null,\n      \"content\": \"甲、乙两数都是正整数，且甲是乙的5倍，则甲、乙两数的最大公因数是（ ）\",\n      \"options\": [\n        \"甲数\",\n        \"乙数\",\n        \"5\",\n        \"1\"\n      ],\n      \"answer\": null,\n      \"student_answer\": null,\n      \"is_correct\": null,\n      \"confidence\": 0.95,\n      \"analysis\": null,\n      \"question_type\": \"choice\",\n      \"block_coordinates\": {\n        \"x\": 50,\n        \"y\": 260,\n        \"width\": 900,\n        \"height\": 60\n      },\n      \"text_bbox\": {\n        \"x\": 50,\n        \"y\": 260,\n        \"width\": 900,\n        \"height\": 60\n      },\n      \"image_type\": \"none\",\n      \"image_bbox\": null,\n      \"geometry_image\": null\n    },\n    {\n      \"question_id\": \"q3\",\n      \"question_number\": 3,\n      \"sub_no\": null,\n      \"parent_stem\": null,\n      \"content\": \"48是24和16的（ ）\",\n      \"options\": [\n        \"最小公倍数\",\n        \"公倍数\",\n        \"最大公因数\",\n        \"公因数\"\n      ],\n      \"answer\": null,\n      \"student_answer\": null,\n      \"is_correct\": null,\n      \"confidence\": 0.95,\n      \"analysis\": null,\n      \"question_type\": \"choice\",\n      \"block_coordinates\": {\n        \"x\": 50,\n        \"y\": 330,\n        \"width\": 900,\n        \"height\": 55\n      },\n      \"text_bbox\": {\n        \"x\": 50,\n        \"y\": 330,\n        \"width\": 900,\n        \"height\": 55\n      },\n      \"image_type\": \"none\",\n      \"image_bbox\": null,\n      \"geometry_image\": null\n    },\n    {\n      \"question_id\": \"q4\",\n      \"question_number\": 4,\n      \"sub_no\": null,\n      \"parent_stem\": null,\n      \"content\": \"两个数的最大公因数是12，最小公倍数是168，其中一个数是24，另一个数是（ ）\",\n      \"options\": [\n        \"24\",\n        \"84\",\n        \"7\",\n        \"12\"\n      ],\n      \"answer\": null,\n      \"student_answer\": null,\n      \"is_correct\": null,\n      \"confidence\": 0.95,\n      \"analysis\": null,\n      \"question_type\": \"choice\",\n      \"block_coordinates\": {\n        \"x\": 50,\n        \"y\": 395,\n        \"width\": 900,\n        \"height\": 55\n      },\n      \"text_bbox\": {\n        \"x\": 50,\n        \"y\": 395,\n        \"width\": 900,\n        \"height\": 55\n      },\n      \"image_type\": \"none\",\n      \"image_bbox\": null,\n      \"geometry_image\": null\n    },\n    {\n      \"question_id\": \"q5\",\n      \"question_number\": 5,\n      \"sub_no\": null,\n      \"parent_stem\": null,\n      \"content\": \"两个正整数的乘积____（填\"一定\"或\"不一定\"）是这两个数的最小公倍数。\",\n      \"options\": [],\n      \"answer\": null,\n      \"student_answer\": null,\n      \"is_correct\": null,\n      \"confidence\": 0.95,\n      \"analysis\": null,\n      \"question_type\": \"fill\",\n      \"block_coordinates\": {\n        \"x\": 50,\n        \"y\": 490,\n        \"width\": 900,\n        \"height\": 30\n      },\n      \"text_bbox\": {\n        \"x\": 50,\n        \"y\": 490,\n        \"width\": 900,\n        \"height\": 30\n      },\n      \"image_type\": \"none\",\n      \"image_bbox\": null,\n      \"geometry_image\": null\n    }\n  ]\n}"
+    },
+    {
+      "imageId": "IMG_C",
+      "imageLabel": "清晰印刷卷(扫描/PDF渲染) 0706",
+      "config": "sensenova-effort-none",
+      "label": "sensenova-6.8-flash-lite (reasoning_effort=none)",
+      "round": 1,
+      "ms": 17376,
+      "status": 200,
+      "finish": "stop",
+      "usage": {
+        "prompt_tokens": 5802,
+        "completion_tokens": 1228,
+        "total_tokens": 7030,
+        "completion_tokens_details": {
+          "reasoning_tokens": 0
+        },
+        "prompt_tokens_details": {
+          "cached_tokens": 0,
+          "audio_tokens": 0
+        }
+      },
+      "reasoningLen": 0,
+      "error": null,
+      "contentLen": 3091,
+      "parsed": {
+        "page_title": "严嫁颖 - 数学-0706",
+        "section_title": null,
+        "questions": [
+          {
+            "question_id": "q1",
+            "question_number": 1,
+            "sub_no": null,
+            "parent_stem": null,
+            "content": "若 a ÷ b = 9 (a, b 都是正整数)，则 a 与 b 的最小公倍数是（  ）",
+            "options": [
+              "a",
+              "b",
+              "ab",
+              "9"
+            ],
+            "answer": null,
+            "student_answer": null,
+            "is_correct": null,
+            "confidence": 0.95,
+            "analysis": null,
+            "question_type": "choice",
+            "block_coordinates": {
+              "x": 40,
+              "y": 200,
+              "width": 920,
+              "height": 60
+            },
+            "text_bbox": {
+              "x": 40,
+              "y": 200,
+              "width": 920,
+              "height": 60
+            },
+            "image_type": "none",
+            "image_bbox": null,
+            "geometry_image": null
+          },
+          {
+            "question_id": "q2",
+            "question_number": 2,
+            "sub_no": null,
+            "parent_stem": null,
+            "content": "甲、乙两数都是正整数，且甲是乙的5倍，则甲、乙两数的最大公因数是（  ）",
+            "options": [
+              "甲数",
+              "乙数",
+              "5",
+              "1"
+            ],
+            "answer": null,
+            "student_answer": null,
+            "is_correct": null,
+            "confidence": 0.95,
+            "analysis": null,
+            "question_type": "choice",
+            "block_coordinates": {
+              "x": 40,
+              "y": 260,
+              "width": 920,
+              "height": 60
+            },
+            "text_bbox": {
+              "x": 40,
+              "y": 260,
+              "width": 920,
+              "height": 60
+            },
+            "image_type": "none",
+            "image_bbox": null,
+            "geometry_image": null
+          },
+          {
+            "question_id": "q3",
+            "question_number": 3,
+            "sub_no": null,
+            "parent_stem": null,
+            "content": "48是24和16的（  ）",
+            "options": [
+              "最小公倍数",
+              "公倍数",
+              "最大公因数",
+              "公因数"
+            ],
+            "answer": null,
+            "student_answer": null,
+            "is_correct": null,
+            "confidence": 0.95,
+            "analysis": null,
+            "question_type": "choice",
+            "block_coordinates": {
+              "x": 40,
+              "y": 320,
+              "width": 920,
+              "height": 60
+            },
+            "text_bbox": {
+              "x": 40,
+              "y": 320,
+              "width": 920,
+              "height": 60
+            },
+            "image_type": "none",
+            "image_bbox": null,
+            "geometry_image": null
+          },
+          {
+            "question_id": "q4",
+            "question_number": 4,
+            "sub_no": null,
+            "parent_stem": null,
+            "content": "两个数的最大公因数是12，最小公倍数是168，其中一个数是24，另一个数是（  ）",
+            "options": [
+              "24",
+              "84",
+              "7",
+              "12"
+            ],
+            "answer": null,
+            "student_answer": null,
+            "is_correct": null,
+            "confidence": 0.95,
+            "analysis": null,
+            "question_type": "choice",
+            "block_coordinates": {
+              "x": 40,
+              "y": 380,
+              "width": 920,
+              "height": 60
+            },
+            "text_bbox": {
+              "x": 40,
+              "y": 380,
+              "width": 920,
+              "height": 60
+            },
+            "image_type": "none",
+            "image_bbox": null,
+            "geometry_image": null
+          },
+          {
+            "question_id": "q5",
+            "question_number": 5,
+            "sub_no": null,
+            "parent_stem": null,
+            "content": "两个正整数的乘积____（填\"一定\"或\"不一定\"）是这两个数的最小公倍数。",
+            "options": [],
+            "answer": null,
+            "student_answer": null,
+            "is_correct": null,
+            "confidence": 0.95,
+            "analysis": null,
+            "question_type": "fill",
+            "block_coordinates": {
+              "x": 40,
+              "y": 460,
+              "width": 920,
+              "height": 40
+            },
+            "text_bbox": {
+              "x": 40,
+              "y": 460,
+              "width": 920,
+              "height": 40
+            },
+            "image_type": "none",
+            "image_bbox": null,
+            "geometry_image": null
+          }
+        ]
+      },
+      "rawContent": "```json\n{\n  \"page_title\": \"严嫁颖 - 数学-0706\",\n  \"section_title\": null,\n  \"questions\": [\n    {\n      \"question_id\": \"q1\",\n      \"question_number\": 1,\n      \"sub_no\": null,\n      \"parent_stem\": null,\n      \"content\": \"若 a ÷ b = 9 (a, b 都是正整数)，则 a 与 b 的最小公倍数是（  ）\",\n      \"options\": [\"a\", \"b\", \"ab\", \"9\"],\n      \"answer\": null,\n      \"student_answer\": null,\n      \"is_correct\": null,\n      \"confidence\": 0.95,\n      \"analysis\": null,\n      \"question_type\": \"choice\",\n      \"block_coordinates\": {\"x\": 40, \"y\": 200, \"width\": 920, \"height\": 60},\n      \"text_bbox\": {\"x\": 40, \"y\": 200, \"width\": 920, \"height\": 60},\n      \"image_type\": \"none\",\n      \"image_bbox\": null,\n      \"geometry_image\": null\n    },\n    {\n      \"question_id\": \"q2\",\n      \"question_number\": 2,\n      \"sub_no\": null,\n      \"parent_stem\": null,\n      \"content\": \"甲、乙两数都是正整数，且甲是乙的5倍，则甲、乙两数的最大公因数是（  ）\",\n      \"options\": [\"甲数\", \"乙数\", \"5\", \"1\"],\n      \"answer\": null,\n      \"student_answer\": null,\n      \"is_correct\": null,\n      \"confidence\": 0.95,\n      \"analysis\": null,\n      \"question_type\": \"choice\",\n      \"block_coordinates\": {\"x\": 40, \"y\": 260, \"width\": 920, \"height\": 60},\n      \"text_bbox\": {\"x\": 40, \"y\": 260, \"width\": 920, \"height\": 60},\n      \"image_type\": \"none\",\n      \"image_bbox\": null,\n      \"geometry_image\": null\n    },\n    {\n      \"question_id\": \"q3\",\n      \"question_number\": 3,\n      \"sub_no\": null,\n      \"parent_stem\": null,\n      \"content\": \"48是24和16的（  ）\",\n      \"options\": [\"最小公倍数\", \"公倍数\", \"最大公因数\", \"公因数\"],\n      \"answer\": null,\n      \"student_answer\": null,\n      \"is_correct\": null,\n      \"confidence\": 0.95,\n      \"analysis\": null,\n      \"question_type\": \"choice\",\n      \"block_coordinates\": {\"x\": 40, \"y\": 320, \"width\": 920, \"height\": 60},\n      \"text_bbox\": {\"x\": 40, \"y\": 320, \"width\": 920, \"height\": 60},\n      \"image_type\": \"none\",\n      \"image_bbox\": null,\n      \"geometry_image\": null\n    },\n    {\n      \"question_id\": \"q4\",\n      \"question_number\": 4,\n      \"sub_no\": null,\n      \"parent_stem\": null,\n      \"content\": \"两个数的最大公因数是12，最小公倍数是168，其中一个数是24，另一个数是（  ）\",\n      \"options\": [\"24\", \"84\", \"7\", \"12\"],\n      \"answer\": null,\n      \"student_answer\": null,\n      \"is_correct\": null,\n      \"confidence\": 0.95,\n      \"analysis\": null,\n      \"question_type\": \"choice\",\n      \"block_coordinates\": {\"x\": 40, \"y\": 380, \"width\": 920, \"height\": 60},\n      \"text_bbox\": {\"x\": 40, \"y\": 380, \"width\": 920, \"height\": 60},\n      \"image_type\": \"none\",\n      \"image_bbox\": null,\n      \"geometry_image\": null\n    },\n    {\n      \"question_id\": \"q5\",\n      \"question_number\": 5,\n      \"sub_no\": null,\n      \"parent_stem\": null,\n      \"content\": \"两个正整数的乘积____（填\\\"一定\\\"或\\\"不一定\\\"）是这两个数的最小公倍数。\",\n      \"options\": [],\n      \"answer\": null,\n      \"student_answer\": null,\n      \"is_correct\": null,\n      \"confidence\": 0.95,\n      \"analysis\": null,\n      \"question_type\": \"fill\",\n      \"block_coordinates\": {\"x\": 40, \"y\": 460, \"width\": 920, \"height\": 40},\n      \"text_bbox\": {\"x\": 40, \"y\": 460, \"width\": 920, \"height\": 40},\n      \"image_type\": \"none\",\n      \"image_bbox\": null,\n      \"geometry_image\": null\n    }\n  ]\n}\n```"
+    },
+    {
+      "imageId": "IMG_C",
+      "imageLabel": "清晰印刷卷(扫描/PDF渲染) 0706",
+      "config": "sensenova-effort-none",
+      "label": "sensenova-6.8-flash-lite (reasoning_effort=none)",
+      "round": 2,
+      "ms": 18821,
+      "status": 200,
+      "finish": "stop",
+      "usage": {
+        "prompt_tokens": 5802,
+        "completion_tokens": 1333,
+        "total_tokens": 7135,
+        "completion_tokens_details": {
+          "reasoning_tokens": 0
+        },
+        "prompt_tokens_details": {
+          "cached_tokens": 0,
+          "audio_tokens": 0
+        }
+      },
+      "reasoningLen": 0,
+      "error": null,
+      "contentLen": 3475,
+      "parsed": {
+        "page_title": "严嫁颖 - 数学-0706",
+        "section_title": null,
+        "questions": [
+          {
+            "question_id": "q1",
+            "question_number": 1,
+            "sub_no": null,
+            "parent_stem": null,
+            "content": "若 a ÷ b = 9 (a, b 都是正整数)，则 a 与 b 的最小公倍数是（  ）",
+            "options": [
+              "a",
+              "b",
+              "ab",
+              "9"
+            ],
+            "answer": null,
+            "student_answer": null,
+            "is_correct": null,
+            "confidence": 0.95,
+            "analysis": null,
+            "question_type": "choice",
+            "block_coordinates": {
+              "x": 40,
+              "y": 200,
+              "width": 920,
+              "height": 80
+            },
+            "text_bbox": {
+              "x": 40,
+              "y": 200,
+              "width": 920,
+              "height": 80
+            },
+            "image_type": "none",
+            "image_bbox": null,
+            "geometry_image": null
+          },
+          {
+            "question_id": "q2",
+            "question_number": 2,
+            "sub_no": null,
+            "parent_stem": null,
+            "content": "甲、乙两数都是正整数，且甲是乙的5倍，则甲、乙两数的最大公因数是（  ）",
+            "options": [
+              "甲数",
+              "乙数",
+              "5",
+              "1"
+            ],
+            "answer": null,
+            "student_answer": null,
+            "is_correct": null,
+            "confidence": 0.95,
+            "analysis": null,
+            "question_type": "choice",
+            "block_coordinates": {
+              "x": 40,
+              "y": 290,
+              "width": 920,
+              "height": 80
+            },
+            "text_bbox": {
+              "x": 40,
+              "y": 290,
+              "width": 920,
+              "height": 80
+            },
+            "image_type": "none",
+            "image_bbox": null,
+            "geometry_image": null
+          },
+          {
+            "question_id": "q3",
+            "question_number": 3,
+            "sub_no": null,
+            "parent_stem": null,
+            "content": "48是24和16的（  ）",
+            "options": [
+              "最小公倍数",
+              "公倍数",
+              "最大公因数",
+              "公因数"
+            ],
+            "answer": null,
+            "student_answer": null,
+            "is_correct": null,
+            "confidence": 0.95,
+            "analysis": null,
+            "question_type": "choice",
+            "block_coordinates": {
+              "x": 40,
+              "y": 380,
+              "width": 920,
+              "height": 80
+            },
+            "text_bbox": {
+              "x": 40,
+              "y": 380,
+              "width": 920,
+              "height": 80
+            },
+            "image_type": "none",
+            "image_bbox": null,
+            "geometry_image": null
+          },
+          {
+            "question_id": "q4",
+            "question_number": 4,
+            "sub_no": null,
+            "parent_stem": null,
+            "content": "两个数的最大公因数是12，最小公倍数是168，其中一个数是24，另一个数是（  ）",
+            "options": [
+              "24",
+              "84",
+              "7",
+              "12"
+            ],
+            "answer": null,
+            "student_answer": null,
+            "is_correct": null,
+            "confidence": 0.95,
+            "analysis": null,
+            "question_type": "choice",
+            "block_coordinates": {
+              "x": 40,
+              "y": 470,
+              "width": 920,
+              "height": 80
+            },
+            "text_bbox": {
+              "x": 40,
+              "y": 470,
+              "width": 920,
+              "height": 80
+            },
+            "image_type": "none",
+            "image_bbox": null,
+            "geometry_image": null
+          },
+          {
+            "question_id": "q5",
+            "question_number": 5,
+            "sub_no": null,
+            "parent_stem": null,
+            "content": "两个正整数的乘积____（填“一定”或“不一定”）是这两个数的最小公倍数。",
+            "options": [],
+            "answer": null,
+            "student_answer": null,
+            "is_correct": null,
+            "confidence": 0.95,
+            "analysis": null,
+            "question_type": "fill",
+            "block_coordinates": {
+              "x": 40,
+              "y": 600,
+              "width": 920,
+              "height": 60
+            },
+            "text_bbox": {
+              "x": 40,
+              "y": 600,
+              "width": 920,
+              "height": 60
+            },
+            "image_type": "none",
+            "image_bbox": null,
+            "geometry_image": null
+          }
+        ]
+      },
+      "rawContent": "{\n  \"page_title\": \"严嫁颖 - 数学-0706\",\n  \"section_title\": null,\n  \"questions\": [\n    {\n      \"question_id\": \"q1\",\n      \"question_number\": 1,\n      \"sub_no\": null,\n      \"parent_stem\": null,\n      \"content\": \"若 a ÷ b = 9 (a, b 都是正整数)，则 a 与 b 的最小公倍数是（  ）\",\n      \"options\": [\"a\", \"b\", \"ab\", \"9\"],\n      \"answer\": null,\n      \"student_answer\": null,\n      \"is_correct\": null,\n      \"confidence\": 0.95,\n      \"analysis\": null,\n      \"question_type\": \"choice\",\n      \"block_coordinates\": {\n        \"x\": 40,\n        \"y\": 200,\n        \"width\": 920,\n        \"height\": 80\n      },\n      \"text_bbox\": {\n        \"x\": 40,\n        \"y\": 200,\n        \"width\": 920,\n        \"height\": 80\n      },\n      \"image_type\": \"none\",\n      \"image_bbox\": null,\n      \"geometry_image\": null\n    },\n    {\n      \"question_id\": \"q2\",\n      \"question_number\": 2,\n      \"sub_no\": null,\n      \"parent_stem\": null,\n      \"content\": \"甲、乙两数都是正整数，且甲是乙的5倍，则甲、乙两数的最大公因数是（  ）\",\n      \"options\": [\"甲数\", \"乙数\", \"5\", \"1\"],\n      \"answer\": null,\n      \"student_answer\": null,\n      \"is_correct\": null,\n      \"confidence\": 0.95,\n      \"analysis\": null,\n      \"question_type\": \"choice\",\n      \"block_coordinates\": {\n        \"x\": 40,\n        \"y\": 290,\n        \"width\": 920,\n        \"height\": 80\n      },\n      \"text_bbox\": {\n        \"x\": 40,\n        \"y\": 290,\n        \"width\": 920,\n        \"height\": 80\n      },\n      \"image_type\": \"none\",\n      \"image_bbox\": null,\n      \"geometry_image\": null\n    },\n    {\n      \"question_id\": \"q3\",\n      \"question_number\": 3,\n      \"sub_no\": null,\n      \"parent_stem\": null,\n      \"content\": \"48是24和16的（  ）\",\n      \"options\": [\"最小公倍数\", \"公倍数\", \"最大公因数\", \"公因数\"],\n      \"answer\": null,\n      \"student_answer\": null,\n      \"is_correct\": null,\n      \"confidence\": 0.95,\n      \"analysis\": null,\n      \"question_type\": \"choice\",\n      \"block_coordinates\": {\n        \"x\": 40,\n        \"y\": 380,\n        \"width\": 920,\n        \"height\": 80\n      },\n      \"text_bbox\": {\n        \"x\": 40,\n        \"y\": 380,\n        \"width\": 920,\n        \"height\": 80\n      },\n      \"image_type\": \"none\",\n      \"image_bbox\": null,\n      \"geometry_image\": null\n    },\n    {\n      \"question_id\": \"q4\",\n      \"question_number\": 4,\n      \"sub_no\": null,\n      \"parent_stem\": null,\n      \"content\": \"两个数的最大公因数是12，最小公倍数是168，其中一个数是24，另一个数是（  ）\",\n      \"options\": [\"24\", \"84\", \"7\", \"12\"],\n      \"answer\": null,\n      \"student_answer\": null,\n      \"is_correct\": null,\n      \"confidence\": 0.95,\n      \"analysis\": null,\n      \"question_type\": \"choice\",\n      \"block_coordinates\": {\n        \"x\": 40,\n        \"y\": 470,\n        \"width\": 920,\n        \"height\": 80\n      },\n      \"text_bbox\": {\n        \"x\": 40,\n        \"y\": 470,\n        \"width\": 920,\n        \"height\": 80\n      },\n      \"image_type\": \"none\",\n      \"image_bbox\": null,\n      \"geometry_image\": null\n    },\n    {\n      \"question_id\": \"q5\",\n      \"question_number\": 5,\n      \"sub_no\": null,\n      \"parent_stem\": null,\n      \"content\": \"两个正整数的乘积____（填“一定”或“不一定”）是这两个数的最小公倍数。\",\n      \"options\": [],\n      \"answer\": null,\n      \"student_answer\": null,\n      \"is_correct\": null,\n      \"confidence\": 0.95,\n      \"analysis\": null,\n      \"question_type\": \"fill\",\n      \"block_coordinates\": {\n        \"x\": 40,\n        \"y\": 600,\n        \"width\": 920,\n        \"height\": 60\n      },\n      \"text_bbox\": {\n        \"x\": 40,\n        \"y\": 600,\n        \"width\": 920,\n        \"height\": 60\n      },\n      \"image_type\": \"none\",\n      \"image_bbox\": null,\n      \"geometry_image\": null\n    }\n  ]\n}"
+    }
+  ]
+}

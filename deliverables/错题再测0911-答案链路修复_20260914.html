@@ -1,0 +1,221 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>错题再测-0911 答案链路修复全记录（P0 + P1）</title>
+<style>
+  :root{
+    --bg:#f7f8fa; --card:#fff; --line:#e5e7eb; --text:#1f2937; --sub:#6b7280;
+    --green:#067647; --greenbg:#ecfdf5; --red:#b42318; --redbg:#fef3f2;
+    --amber:#b54708; --amberbg:#fffaeb; --blue:#175cd3; --bluebg:#eff8ff;
+  }
+  *{box-sizing:border-box}
+  body{margin:0;padding:32px 20px;background:var(--bg);color:var(--text);
+       font:15px/1.7 -apple-system,"Segoe UI","Microsoft YaHei",sans-serif}
+  .wrap{max-width:960px;margin:0 auto}
+  h1{font-size:24px;margin:0 0 6px}
+  h2{font-size:17px;margin:36px 0 12px;padding-bottom:8px;border-bottom:2px solid var(--line)}
+  h3{font-size:15px;margin:22px 0 8px}
+  .meta{color:var(--sub);font-size:13px;margin-bottom:22px}
+  table{width:100%;border-collapse:collapse;font-size:14px;background:var(--card)}
+  th,td{border:1px solid var(--line);padding:9px 11px;text-align:left;vertical-align:top}
+  th{background:#f3f4f6;font-weight:600}
+  code{background:#f3f4f6;padding:1px 5px;border-radius:4px;font-size:13px;
+       font-family:Consolas,Monaco,monospace;word-break:break-all}
+  .tag{display:inline-block;padding:1px 8px;border-radius:999px;font-size:12px;font-weight:600;white-space:nowrap}
+  .t-ok{background:var(--greenbg);color:var(--green);border:1px solid #a6f4c5}
+  .t-warn{background:var(--amberbg);color:var(--amber);border:1px solid #fec84b}
+  .t-info{background:var(--bluebg);color:var(--blue);border:1px solid #b2ddff}
+  .t-no{background:var(--redbg);color:var(--red);border:1px solid #fecdca}
+  ul{margin:8px 0 8px 20px;padding:0}
+  li{margin:5px 0}
+  .kpi{display:flex;gap:14px;flex-wrap:wrap;margin:16px 0}
+  .kpi div{flex:1 1 170px;background:var(--card);border:1px solid var(--line);border-radius:10px;padding:14px 16px}
+  .kpi b{display:block;font-size:22px;margin-bottom:2px}
+  .kpi span{color:var(--sub);font-size:13px}
+  .hl{background:var(--amberbg);border-left:3px solid #f79009;padding:12px 16px;border-radius:0 8px 8px 0;margin:14px 0}
+  .ok{background:var(--greenbg);border-left:3px solid #12b76a;padding:12px 16px;border-radius:0 8px 8px 0;margin:14px 0}
+  .note{color:var(--sub);font-size:13px}
+</style>
+</head>
+<body>
+<div class="wrap">
+
+  <h1>错题再测-0911 答案链路修复全记录</h1>
+  <div class="meta">
+    老师报「参考答案有误，学生答对也判错」｜P0 + P1 已实施并上线｜2026-09-14｜
+    commits <code>f3baba8</code> <code>99857de</code> <code>8eae9ae</code>
+  </div>
+
+  <div class="kpi">
+    <div><b>3 闸</b><span>P0 参考答案治理</span></div>
+    <div><b>1 处</b><span>P1 循环点渲染修复</span></div>
+    <div><b>45 项</b><span>存量数据已回填</span></div>
+    <div><b>318 / 318</b><span>回归测试通过</span></div>
+  </div>
+
+  <h2>一、这条链路断在哪（一张图看懂）</h2>
+  <table>
+    <thead><tr><th style="width:16%">环节</th><th style="width:42%">问题</th><th>状态</th></tr></thead>
+    <tbody>
+      <tr>
+        <td><b>① 答案来源</b></td>
+        <td>答案引擎把解析里的自言自语当答案写进库（<code>应包含10</code>），判等层永远对不上</td>
+        <td><span class="tag t-ok">已修</span> 残句救回，救不回清空转人工</td>
+      </tr>
+      <tr>
+        <td><b>② 答案自洽</b></td>
+        <td>解析结论区算式算错、答案照抄它（<code>a+b = 8+3 = 29</code>，正确 11）</td>
+        <td><span class="tag t-ok">已修</span> 标风险 + 已改答案</td>
+      </tr>
+      <tr>
+        <td><b>③ 重练判定语义</b></td>
+        <td><code>COALESCE</code> 让「本次未判」继承原作业旧判定 → 页面显示成「AI错误」</td>
+        <td><span class="tag t-ok">已修</span> 写 NULL + 存量回填</td>
+      </tr>
+      <tr>
+        <td><b>④ 出卷印刷</b></td>
+        <td>循环点被静默丢掉，卷面「2.6̇」印成「2.6」→ 学生答的是另一道题</td>
+        <td><span class="tag t-ok">已修</span> P1（本次）</td>
+      </tr>
+      <tr>
+        <td><b>⑤ OCR 识别</b></td>
+        <td>学生实写 <code>0.31̇8̇</code>，入库成 <code>0.318</code></td>
+        <td><span class="tag t-warn">待立项</span> 视觉链路治理</td>
+      </tr>
+    </tbody>
+  </table>
+  <p class="note">④⑤ 是一对：④ 让题目变义、⑤ 让答案变意。两者都修，才能让「学生没做错那么多」变成事实。</p>
+
+  <h2>二、P0：三道闸的力度是回测出来的，不是拍出来的</h2>
+  <p>原计划「答案自检不通过就转人工」。用全库 586 条缓存回测两个候选判据后，这个直觉被否掉了：</p>
+  <table>
+    <thead><tr><th style="width:38%">候选判据</th><th style="width:12%">命中</th><th style="width:14%">真阳性</th><th>处置</th></tr></thead>
+    <tbody>
+      <tr>
+        <td>answer 是单值 + 解析抽不到可回算它的算式</td>
+        <td>28 条</td><td><b>1 条</b></td>
+        <td><span class="tag t-no">废弃</span> 27 条是正确答案（<code>27 的立方根为 3</code>、<code>x³=64 则 x=4</code>）</td>
+      </tr>
+      <tr>
+        <td>结论区错等式抄写（修正后）</td>
+        <td>1 条</td><td><b>1 条</b></td>
+        <td><span class="tag t-ok">采用</span> 事故真题 <code>8 + 3 = 29</code></td>
+      </tr>
+    </tbody>
+  </table>
+  <p><b>闸的两种力度</b>：证据不够铁的一律 <span class="tag t-warn">只标注</span>（写 <code>ai_answer_risk_reason</code>，不改判定）；
+  只有近乎零误报的才 <span class="tag t-no">硬拦</span>（清空 + 转人工）。选错力度 = 大面积误伤正确答案。</p>
+
+  <h2>三、答案纠正（已闭环）</h2>
+  <table>
+    <thead><tr><th style="width:28%">题</th><th style="width:14%">原答案</th><th style="width:20%">改为</th><th>结果</th></tr></thead>
+    <tbody>
+      <tr><td>#4 <code>|x|=√6 … 求 x+y</code></td><td><code>2</code></td><td><code>√6+2 或 √6-2</code></td>
+        <td>2 行未复核 → 判对；2 行已复核 → 只改答案、保留老师结论</td></tr>
+      <tr><td>#7 <code>2.6̇ → a/b 求 a+b</code></td><td><code>29</code></td><td><code>11</code></td>
+        <td>4 行未复核 → 重判为错（学生答 18）</td></tr>
+      <tr><td>#12 <code>2+2⁻¹+2⁻²+⋯</code></td><td><code>4</code></td><td><b>不改</b></td>
+        <td><span class="tag t-ok">原答案正确</span> 首项 2、公比 1/2 ⇒ S = 4</td></tr>
+    </tbody>
+  </table>
+  <div class="hl">
+    <b>修正上一轮报告</b>：#12 曾被判定「答案 4 错、学生 3 对」—— <b>该结论是错的</b>。
+    该题题干首项是 <code>2</code>（不是 <code>2⁰</code>），<code>S = 4</code> 正确，学生写 3 是错位相减漏项。
+    <b>教训：改判前必须把题干原文抠出来</b> —— <code>2</code> 与 <code>2⁰</code> 在库里几乎看不出差别，结论却从 3 变成 4。
+  </div>
+  <p class="note"><b>改判口径</b>：只重判 <code>review_status IS NULL</code> 的行（老师复核结论不被脚本翻转）；
+  同步改 <code>question_cache.answer</code>（否则指纹命中把错答案写回）；清 <code>ai_answer_risk_reason</code>；
+  备份表 <code>*_bak_20260914_correction</code>，脚本幂等、可 <code>--rollback</code>。</p>
+
+  <h2>四、P1：循环小数点不再随打印丢失</h2>
+  <p><b>现象</b>：重练卷印出来「2.6̇」变成「2.6」、「3.12̇」变成「3.12」。
+  全库 37 道题的题干含 72 个组合点。</p>
+
+  <div class="hl">
+    <b>根因不是打印 CSS，而是「组合字符落进了文本段」：</b>
+    <code>splitToSegments</code> 的 <code>isMathChar</code> 不认识组合附加符号 U+0307 ⇒ 点被切到文本段；
+    而数学段交给 KaTeX <b>独占排版</b>，KaTeX 字形有自己的盒模型，孤立的组合字符附着不到前一个字上
+    ⇒ <b>静默丢失</b>（不报错，直到学生被判错才发现）。
+  </div>
+
+  <table>
+    <thead><tr><th style="width:32%">改动</th><th>说明</th></tr></thead>
+    <tbody>
+      <tr>
+        <td><code>src/utils/mathText.js</code> 步骤 0.7</td>
+        <td><code>数字+U+0307 → \dot{数字}</code>、<code>数字+U+0305 → \bar{数字}</code>，交给 KaTeX 排版。<br>
+        <b>保真逐字转换、不推断循环节</b> —— OCR 有点在首尾（<code>0.5̇03̇</code>）、有点在每个数字（<code>0.5̇0̇3̇</code>），
+        猜循环节会把 318 循环排成 38 循环。</td>
+      </tr>
+      <tr>
+        <td><code>src/components/MathText/index.jsx</code></td>
+        <td>移动端自带一份 fork（且方向相反），同步加步骤 0；新增<b>源码级同构测试</b>防只改一边。</td>
+      </tr>
+      <tr>
+        <td><code>auditLoopDotRendering()</code> → <code>buildPaperBody</code></td>
+        <td>渲染后自检「点数对得上、无裸组合字符残留」，出卷印刷前跑，丢点则 <code>console.error</code> —— <b>不静默</b>。</td>
+      </tr>
+    </tbody>
+  </table>
+
+  <div class="ok">
+    <b>验证</b>：全库 37 道含点题干 <b>37/37 保住点位</b>（<code>2.6̇ → $2.\dot{6}$</code>）；
+    KaTeX 落<b>真实点字形</b>（U+02D9）；确认只有一条印刷链路（前端 <code>buildExamHTML</code> → 服务端 chromium 转 PDF）；
+    测试 311 → <b>318 全绿</b>；<code>vite build</code> 通过。
+  </div>
+
+  <h3>判等层「循环小数 ↔ 分数」归一：用数据否掉了</h3>
+  <p>学生答案保留循环信息的全库只有 <b>13 行</b>，真需要归一的只有 <b>1 行</b>（且按标准记法判错本就正确），
+  其余是解答题推导过程或识别侧丢点。代价是「猜循环节」算法 + 触碰<b>有已知放水通道</b>的判等层。
+  <b>结论：不做</b>，钱花在识别侧（⑤）。</p>
+
+  <h2>五、存量数据回填（均已执行，各有备份表）</h2>
+  <table>
+    <thead><tr><th style="width:36%">动作</th><th style="width:10%">量</th><th style="width:30%">脚本</th><th>备份表</th></tr></thead>
+    <tbody>
+      <tr><td>解答题 <code>is_correct → NULL</code></td><td>27</td>
+        <td><code>backfill-retry-notjudged-20260914.mjs</code></td><td><code>questions_bak_20260914_retrynotjudged</code></td></tr>
+      <tr><td>坏缓存作废为「待人工补充」</td><td>2</td>
+        <td><code>backfill-answer-quality-20260914.mjs</code></td><td><code>*_bak_20260914_answer</code></td></tr>
+      <tr><td>标注「参考答案存疑」</td><td>5</td>
+        <td><code>backfill-reference-risk-20260914.mjs</code></td><td><code>questions_bak_20260914_risk</code></td></tr>
+      <tr><td>参考答案纠正 + 重判</td><td>9 + 2</td>
+        <td><code>backfill-answer-correction-20260914.mjs</code></td><td><code>*_bak_20260914_correction</code></td></tr>
+    </tbody>
+  </table>
+  <p class="note">5 条风险标注全是<b>同一道题</b>在 5 个学生名下 —— 正是 <code>question_cache</code> 题干指纹复用
+  「一条错答案传染所有学生」的实证。</p>
+
+  <h2>六、还差什么</h2>
+  <table>
+    <thead><tr><th style="width:22%">项</th><th>内容</th><th style="width:16%">建议</th></tr></thead>
+    <tbody>
+      <tr>
+        <td><b>P1.5 识别侧丢点</b></td>
+        <td>学生实写 <code>0.31̇8̇</code> 入库成 <code>0.318</code>；<code>5.295̇4̇</code> → <code>5.2954</code>。
+            判等层救不了（字段里没有循环信息）</td>
+        <td><span class="tag t-warn">建议做</span> 视觉链路治理</td>
+      </tr>
+      <tr>
+        <td><b>#7 那 5 个学生</b></td>
+        <td>他们照着「印丢点的卷子」答 18（2.6=13/5）。答案改对后仍判错，需决定：人工改判为对 / 标 <code>exclude</code></td>
+        <td><span class="tag t-warn">需产品决策</span></td>
+      </tr>
+      <tr>
+        <td><b>P2 参考答案来源可见</b></td>
+        <td>批改页看不出参考答案是「卷面印刷的」还是「AI 算出来的」。AI 生成的那类给弱提示，
+            老师才不会把 AI 的错答案当成学生的错</td>
+        <td><span class="tag t-info">建议做小版本</span> 成本低</td>
+      </tr>
+    </tbody>
+  </table>
+
+  <h2>七、部署状态</h2>
+  <p>三个 commit <b>已 push 到 main</b>（最新 <code>99857de..8eae9ae</code>）
+  → Render 后端与 Cloudflare Pages 前端自动部署。</p>
+
+</div>
+</body>
+</html>

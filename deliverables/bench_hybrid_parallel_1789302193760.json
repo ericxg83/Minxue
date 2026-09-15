@@ -1,0 +1,1344 @@
+{
+  "img": "prod_imgs/ocr_a.jpg",
+  "wall": 80282,
+  "sn": {
+    "ms": 51301,
+    "ok": true,
+    "mode": "strict",
+    "questions": [
+      {
+        "question_id": "q1",
+        "question_number": 1,
+        "sub_no": null,
+        "parent_stem": null,
+        "content": "2√6-5 的绝对值是______。",
+        "options": [],
+        "answer": null,
+        "student_answer": "5-2√6",
+        "is_correct": true,
+        "confidence": 0.95,
+        "analysis": null,
+        "question_type": "fill",
+        "block_coordinates": {
+          "x": 60,
+          "y": 300,
+          "width": 900,
+          "height": 40
+        },
+        "text_bbox": {
+          "x": 60,
+          "y": 300,
+          "width": 900,
+          "height": 40
+        },
+        "image_type": "none",
+        "image_bbox": null,
+        "geometry_image": null
+      },
+      {
+        "question_id": "q2",
+        "question_number": 2,
+        "sub_no": null,
+        "parent_stem": null,
+        "content": "计算：√((√15)²)+(-√10)²-|-4|=______。",
+        "options": [],
+        "answer": null,
+        "student_answer": "1",
+        "is_correct": true,
+        "confidence": 0.95,
+        "analysis": null,
+        "question_type": "fill",
+        "block_coordinates": {
+          "x": 60,
+          "y": 340,
+          "width": 900,
+          "height": 40
+        },
+        "text_bbox": {
+          "x": 60,
+          "y": 340,
+          "width": 900,
+          "height": 40
+        },
+        "image_type": "none",
+        "image_bbox": null,
+        "geometry_image": null
+      },
+      {
+        "question_id": "q3",
+        "question_number": 3,
+        "sub_no": null,
+        "parent_stem": null,
+        "content": "已知太阳到地球的距离约为 1.5×10⁸ km，光速约为 3×10⁵ km/s，那么光从太阳照到地球大约需要______s。（结果用科学记数法表示）",
+        "options": [],
+        "answer": null,
+        "student_answer": "5×10²",
+        "is_correct": true,
+        "confidence": 0.95,
+        "analysis": null,
+        "question_type": "fill",
+        "block_coordinates": {
+          "x": 60,
+          "y": 380,
+          "width": 900,
+          "height": 60
+        },
+        "text_bbox": {
+          "x": 60,
+          "y": 380,
+          "width": 900,
+          "height": 60
+        },
+        "image_type": "none",
+        "image_bbox": null,
+        "geometry_image": null
+      },
+      {
+        "question_id": "q4",
+        "question_number": 4,
+        "sub_no": null,
+        "parent_stem": null,
+        "content": "有下列说法：①立方根等于本身的数是-1,0,1；②-a 没有平方根；③两个无理数的和还是无理数；④若 a+b<0,ab>0，则|2a+3b|=-2a-3b；⑤若|a-b|+a-b=0，则 b>a；⑥|a|>|b|，则(a+b)(a-b)是负数。其中正确的序号有______。",
+        "options": [],
+        "answer": null,
+        "student_answer": "①④",
+        "is_correct": true,
+        "confidence": 0.95,
+        "analysis": null,
+        "question_type": "fill",
+        "block_coordinates": {
+          "x": 60,
+          "y": 440,
+          "width": 900,
+          "height": 100
+        },
+        "text_bbox": {
+          "x": 60,
+          "y": 440,
+          "width": 900,
+          "height": 100
+        },
+        "image_type": "none",
+        "image_bbox": null,
+        "geometry_image": null
+      },
+      {
+        "question_id": "q5",
+        "question_number": 5,
+        "sub_no": null,
+        "parent_stem": null,
+        "content": "解方程：x²+1=35/36，x=______。",
+        "options": [],
+        "answer": null,
+        "student_answer": "±5/6",
+        "is_correct": true,
+        "confidence": 0.95,
+        "analysis": null,
+        "question_type": "fill",
+        "block_coordinates": {
+          "x": 60,
+          "y": 540,
+          "width": 900,
+          "height": 40
+        },
+        "text_bbox": {
+          "x": 60,
+          "y": 540,
+          "width": 900,
+          "height": 40
+        },
+        "image_type": "none",
+        "image_bbox": null,
+        "geometry_image": null
+      },
+      {
+        "question_id": "q6",
+        "question_number": 6,
+        "sub_no": null,
+        "parent_stem": null,
+        "content": "设√a=1.362,√b=13.62，用平方根运算性质求 a÷b 的值：______。",
+        "options": [],
+        "answer": null,
+        "student_answer": null,
+        "is_correct": false,
+        "confidence": 0.95,
+        "analysis": null,
+        "question_type": "fill",
+        "block_coordinates": {
+          "x": 60,
+          "y": 580,
+          "width": 900,
+          "height": 40
+        },
+        "text_bbox": {
+          "x": 60,
+          "y": 580,
+          "width": 900,
+          "height": 40
+        },
+        "image_type": "none",
+        "image_bbox": null,
+        "geometry_image": null
+      },
+      {
+        "question_id": "q7",
+        "question_number": 7,
+        "sub_no": null,
+        "parent_stem": null,
+        "content": "已知√102.01=10.1，则±√1.0201=______。",
+        "options": [],
+        "answer": null,
+        "student_answer": "±1.01",
+        "is_correct": true,
+        "confidence": 0.95,
+        "analysis": null,
+        "question_type": "fill",
+        "block_coordinates": {
+          "x": 60,
+          "y": 620,
+          "width": 900,
+          "height": 40
+        },
+        "text_bbox": {
+          "x": 60,
+          "y": 620,
+          "width": 900,
+          "height": 40
+        },
+        "image_type": "none",
+        "image_bbox": null,
+        "geometry_image": null
+      },
+      {
+        "question_id": "q8",
+        "question_number": 8,
+        "sub_no": null,
+        "parent_stem": null,
+        "content": "已知 1,√5,5 三个数，再添上一个数，写出一个比例式：______。",
+        "options": [],
+        "answer": null,
+        "student_answer": "1:√5=√5:5",
+        "is_correct": true,
+        "confidence": 0.95,
+        "analysis": null,
+        "question_type": "fill",
+        "block_coordinates": {
+          "x": 60,
+          "y": 660,
+          "width": 900,
+          "height": 40
+        },
+        "text_bbox": {
+          "x": 60,
+          "y": 660,
+          "width": 900,
+          "height": 40
+        },
+        "image_type": "none",
+        "image_bbox": null,
+        "geometry_image": null
+      },
+      {
+        "question_id": "q9",
+        "question_number": 9,
+        "sub_no": null,
+        "parent_stem": null,
+        "content": "正方形的边长增加 4 cm 后，面积为 50 cm²，原正方形的边长是______cm。（结果保留根号）",
+        "options": [],
+        "answer": null,
+        "student_answer": "5√2-4",
+        "is_correct": true,
+        "confidence": 0.95,
+        "analysis": null,
+        "question_type": "fill",
+        "block_coordinates": {
+          "x": 60,
+          "y": 700,
+          "width": 900,
+          "height": 40
+        },
+        "text_bbox": {
+          "x": 60,
+          "y": 700,
+          "width": 900,
+          "height": 40
+        },
+        "image_type": "none",
+        "image_bbox": null,
+        "geometry_image": null
+      },
+      {
+        "question_id": "q10",
+        "question_number": 10,
+        "sub_no": null,
+        "parent_stem": null,
+        "content": "若 x-2 的平方根是±5，那么 x 的立方根为______。",
+        "options": [],
+        "answer": null,
+        "student_answer": null,
+        "is_correct": false,
+        "confidence": 0.95,
+        "analysis": null,
+        "question_type": "fill",
+        "block_coordinates": {
+          "x": 60,
+          "y": 740,
+          "width": 900,
+          "height": 40
+        },
+        "text_bbox": {
+          "x": 60,
+          "y": 740,
+          "width": 900,
+          "height": 40
+        },
+        "image_type": "none",
+        "image_bbox": null,
+        "geometry_image": null
+      },
+      {
+        "question_id": "q11",
+        "question_number": 11,
+        "sub_no": null,
+        "parent_stem": null,
+        "content": "观察分析下列数据：0,√3,-√6,3,-2√3,√15,…，根据数据排列的规律，得到第 25 个数据应是______。",
+        "options": [],
+        "answer": null,
+        "student_answer": "2√3",
+        "is_correct": true,
+        "confidence": 0.95,
+        "analysis": null,
+        "question_type": "fill",
+        "block_coordinates": {
+          "x": 60,
+          "y": 780,
+          "width": 900,
+          "height": 40
+        },
+        "text_bbox": {
+          "x": 60,
+          "y": 780,
+          "width": 900,
+          "height": 40
+        },
+        "image_type": "none",
+        "image_bbox": null,
+        "geometry_image": null
+      },
+      {
+        "question_id": "q12",
+        "question_number": 12,
+        "sub_no": null,
+        "parent_stem": null,
+        "content": "计算：(2√2+3)²⁰²²(2√2-3)²⁰²⁴=______。",
+        "options": [],
+        "answer": null,
+        "student_answer": "17-12√2",
+        "is_correct": true,
+        "confidence": 0.95,
+        "analysis": null,
+        "question_type": "fill",
+        "block_coordinates": {
+          "x": 60,
+          "y": 820,
+          "width": 900,
+          "height": 40
+        },
+        "text_bbox": {
+          "x": 60,
+          "y": 820,
+          "width": 900,
+          "height": 40
+        },
+        "image_type": "none",
+        "image_bbox": null,
+        "geometry_image": null
+      },
+      {
+        "question_id": "q13",
+        "question_number": 13,
+        "sub_no": null,
+        "parent_stem": null,
+        "content": "已知 a、b 互为相反数，c、d 互为倒数，x=-3，计算：2¹⁰⁰·a+|x|/c·x/d-√(x²)+2¹⁰⁰·b=______。",
+        "options": [],
+        "answer": null,
+        "student_answer": null,
+        "is_correct": false,
+        "confidence": 0.95,
+        "analysis": null,
+        "question_type": "fill",
+        "block_coordinates": {
+          "x": 60,
+          "y": 860,
+          "width": 900,
+          "height": 60
+        },
+        "text_bbox": {
+          "x": 60,
+          "y": 860,
+          "width": 900,
+          "height": 60
+        },
+        "image_type": "none",
+        "image_bbox": null,
+        "geometry_image": null
+      },
+      {
+        "question_id": "q14",
+        "question_number": 14,
+        "sub_no": null,
+        "parent_stem": null,
+        "content": "已知∛(3y-1)和∛(1-2x)（x≠0）互为相反数，则 y/x=______。",
+        "options": [],
+        "answer": null,
+        "student_answer": null,
+        "is_correct": false,
+        "confidence": 0.95,
+        "analysis": null,
+        "question_type": "fill",
+        "block_coordinates": {
+          "x": 60,
+          "y": 920,
+          "width": 900,
+          "height": 40
+        },
+        "text_bbox": {
+          "x": 60,
+          "y": 920,
+          "width": 900,
+          "height": 40
+        },
+        "image_type": "none",
+        "image_bbox": null,
+        "geometry_image": null
+      },
+      {
+        "question_id": "q15",
+        "question_number": 15,
+        "sub_no": null,
+        "parent_stem": null,
+        "content": "下列运算中，正确的是",
+        "options": [
+          "√2+√3=√5",
+          "(√-(a+b))²=a+b",
+          "-2√3=√((-2)²×3)",
+          "|√3-2|=2-√3"
+        ],
+        "answer": null,
+        "student_answer": "D",
+        "is_correct": true,
+        "confidence": 0.95,
+        "analysis": null,
+        "question_type": "choice",
+        "block_coordinates": {
+          "x": 60,
+          "y": 960,
+          "width": 900,
+          "height": 100
+        },
+        "text_bbox": {
+          "x": 60,
+          "y": 960,
+          "width": 900,
+          "height": 100
+        },
+        "image_type": "none",
+        "image_bbox": null,
+        "geometry_image": null
+      }
+    ]
+  },
+  "msc": {
+    "ms": 80263,
+    "ok": true,
+    "mode": "repaired",
+    "questions": [
+      {
+        "question_id": "1",
+        "question_number": 1,
+        "sub_no": null,
+        "parent_stem": null,
+        "content": "2√6 - 5 的绝对值是",
+        "options": [],
+        "answer": "5 - 2√6",
+        "student_answer": "5 - 2√6",
+        "is_correct": true,
+        "confidence": 0.98,
+        "analysis": null,
+        "question_type": "fill",
+        "block_coordinates": {
+          "x": 50,
+          "y": 290,
+          "width": 450,
+          "height": 320
+        },
+        "text_bbox": {
+          "x": 50,
+          "y": 290,
+          "width": 450,
+          "height": 320
+        },
+        "image_type": "none",
+        "image_bbox": null,
+        "geometry_image": null
+      },
+      {
+        "question_id": "2",
+        "question_number": 2,
+        "sub_no": null,
+        "parent_stem": null,
+        "content": "计算：√(√15)² + (-√10)² - |-4| =",
+        "options": [],
+        "answer": "1",
+        "student_answer": "1",
+        "is_correct": true,
+        "confidence": 0.97,
+        "analysis": null,
+        "question_type": "fill",
+        "block_coordinates": {
+          "x": 50,
+          "y": 320,
+          "width": 600,
+          "height": 350
+        },
+        "text_bbox": {
+          "x": 50,
+          "y": 320,
+          "width": 600,
+          "height": 350
+        },
+        "image_type": "none",
+        "image_bbox": null,
+        "geometry_image": null
+      },
+      {
+        "question_id": "3",
+        "question_number": 3,
+        "sub_no": null,
+        "parent_stem": null,
+        "content": "已知太阳到地球的距离约为 1.5×10⁸ km，光速约为 3×10⁵ km/s，那么光从太阳照到地球大约需要 ______ s。（结果用科学记数法表示）",
+        "options": [],
+        "answer": "5×10²",
+        "student_answer": "5×10²",
+        "is_correct": true,
+        "confidence": 0.96,
+        "analysis": null,
+        "question_type": "fill",
+        "block_coordinates": {
+          "x": 50,
+          "y": 350,
+          "width": 900,
+          "height": 380
+        },
+        "text_bbox": {
+          "x": 50,
+          "y": 350,
+          "width": 900,
+          "height": 380
+        },
+        "image_type": "none",
+        "image_bbox": null,
+        "geometry_image": null
+      },
+      {
+        "question_id": "4",
+        "question_number": 4,
+        "sub_no": null,
+        "parent_stem": null,
+        "content": "有下列说法：①立方根等于本身的数是-1,0,1；②-a没有平方根；③两个无理数的和还是无理数；④若a+b<0,ab>0，则|2a+3b|=-2a-3b；⑤若|a-b|+a-b=0，则b>a；⑥|a|>|b|，则(a+b)(a-b)是负数。其中正确的序号有",
+        "options": [],
+        "answer": "①④",
+        "student_answer": "①④",
+        "is_correct": true,
+        "confidence": 0.95,
+        "analysis": null,
+        "question_type": "fill",
+        "block_coordinates": {
+          "x": 50,
+          "y": 380,
+          "width": 900,
+          "height": 430
+        },
+        "text_bbox": {
+          "x": 50,
+          "y": 380,
+          "width": 900,
+          "height": 430
+        },
+        "image_type": "none",
+        "image_bbox": null,
+        "geometry_image": null
+      },
+      {
+        "question_id": "5",
+        "question_number": 5,
+        "sub_no": null,
+        "parent_stem": null,
+        "content": "解方程：x² + 1 = 25/36，x =",
+        "options": [],
+        "answer": "±5/6",
+        "student_answer": "±5/6",
+        "is_correct": true,
+        "confidence": 0.97,
+        "analysis": null,
+        "question_type": "fill",
+        "block_coordinates": {
+          "x": 50,
+          "y": 430,
+          "width": 450,
+          "height": 460
+        },
+        "text_bbox": {
+          "x": 50,
+          "y": 430,
+          "width": 450,
+          "height": 460
+        },
+        "image_type": "none",
+        "image_bbox": null,
+        "geometry_image": null
+      },
+      {
+        "question_id": "6",
+        "question_number": 6,
+        "sub_no": null,
+        "parent_stem": null,
+        "content": "设√a = 1.362，√b = 13.62，用平方根运算性质求 a ÷ b 的值：",
+        "options": [],
+        "answer": "0.01",
+        "student_answer": "0.01",
+        "is_correct": false,
+        "confidence": 0.94,
+        "analysis": null,
+        "question_type": "fill",
+        "block_coordinates": {
+          "x": 50,
+          "y": 460,
+          "width": 600,
+          "height": 490
+        },
+        "text_bbox": {
+          "x": 50,
+          "y": 460,
+          "width": 600,
+          "height": 490
+        },
+        "image_type": "none",
+        "image_bbox": null,
+        "geometry_image": null
+      },
+      {
+        "question_id": "7",
+        "question_number": 7,
+        "sub_no": null,
+        "parent_stem": null,
+        "content": "已知√102.01 = 10.1，则±√1.0201 =",
+        "options": [],
+        "answer": "±1.01",
+        "student_answer": "±1.01",
+        "is_correct": true,
+        "confidence": 0.98,
+        "analysis": null,
+        "question_type": "fill",
+        "block_coordinates": {
+          "x": 50,
+          "y": 490,
+          "width": 450,
+          "height": 520
+        },
+        "text_bbox": {
+          "x": 50,
+          "y": 490,
+          "width": 450,
+          "height": 520
+        },
+        "image_type": "none",
+        "image_bbox": null,
+        "geometry_image": null
+      },
+      {
+        "question_id": "8",
+        "question_number": 8,
+        "sub_no": null,
+        "parent_stem": null,
+        "content": "已知1, √5, 5三个数，再添上一个数，写出一个比例式：",
+        "options": [],
+        "answer": "1:√5 = √5:5",
+        "student_answer": "1:√5 = √5:5",
+        "is_correct": true,
+        "confidence": 0.96,
+        "analysis": null,
+        "question_type": "fill",
+        "block_coordinates": {
+          "x": 50,
+          "y": 520,
+          "width": 600,
+          "height": 550
+        },
+        "text_bbox": {
+          "x": 50,
+          "y": 520,
+          "width": 600,
+          "height": 550
+        },
+        "image_type": "none",
+        "image_bbox": null,
+        "geometry_image": null
+      },
+      {
+        "question_id": "9",
+        "question_number": 9,
+        "sub_no": null,
+        "parent_stem": null,
+        "content": "正方形的边长增加4 cm后，面积为50 cm²，原正方形的边长是 ______ cm。（结果保留根号）",
+        "options": [],
+        "answer": "5√2 - 4",
+        "student_answer": "5√2 - 4",
+        "is_correct": true,
+        "confidence": 0.95,
+        "analysis": null,
+        "question_type": "fill",
+        "block_coordinates": {
+          "x": 50,
+          "y": 550,
+          "width": 900,
+          "height": 580
+        },
+        "text_bbox": {
+          "x": 50,
+          "y": 550,
+          "width": 900,
+          "height": 580
+        },
+        "image_type": "none",
+        "image_bbox": null,
+        "geometry_image": null
+      },
+      {
+        "question_id": "10",
+        "question_number": 10,
+        "sub_no": null,
+        "parent_stem": null,
+        "content": "若x-2的平方根是±5，那么x的立方根为",
+        "options": [],
+        "answer": "3",
+        "student_answer": "3",
+        "is_correct": false,
+        "confidence": 0.93,
+        "analysis": null,
+        "question_type": "fill",
+        "block_coordinates": {
+          "x": 50,
+          "y": 580,
+          "width": 450,
+          "height": 610
+        },
+        "text_bbox": {
+          "x": 50,
+          "y": 580,
+          "width": 450,
+          "height": 610
+        },
+        "image_type": "none",
+        "image_bbox": null,
+        "geometry_image": null
+      },
+      {
+        "question_id": "11",
+        "question_number": 11,
+        "sub_no": null,
+        "parent_stem": null,
+        "content": "观察分析下列数据：0, √3, -√6, 3, -2√3, √15, …，根据数据排列的规律，得到第25个数据应是",
+        "options": [],
+        "answer": "-2√3",
+        "student_answer": "-2√3",
+        "is_correct": true,
+        "confidence": 0.94,
+        "analysis": null,
+        "question_type": "fill",
+        "block_coordinates": {
+          "x": 50,
+          "y": 610,
+          "width": 900,
+          "height": 640
+        },
+        "text_bbox": {
+          "x": 50,
+          "y": 610,
+          "width": 900,
+          "height": 640
+        },
+        "image_type": "none",
+        "image_bbox": null,
+        "geometry_image": null
+      },
+      {
+        "question_id": "12",
+        "question_number": 12,
+        "sub_no": null,
+        "parent_stem": null,
+        "content": "计算：(2√2 + 3)^2022 (2√2 - 3)^2024 =",
+        "options": [],
+        "answer": "17 - 12√2",
+        "student_answer": "17 - 12√2",
+        "is_correct": true,
+        "confidence": 0.96,
+        "analysis": null,
+        "question_type": "fill",
+        "block_coordinates": {
+          "x": 50,
+          "y": 640,
+          "width": 600,
+          "height": 670
+        },
+        "text_bbox": {
+          "x": 50,
+          "y": 640,
+          "width": 600,
+          "height": 670
+        },
+        "image_type": "none",
+        "image_bbox": null,
+        "geometry_image": null
+      },
+      {
+        "question_id": "13",
+        "question_number": 13,
+        "sub_no": null,
+        "parent_stem": null,
+        "content": "已知a、b互为相反数，c、d互为倒数，x = -3，计算：2^100 · a + |x|/c · x/d - √x² + 2^100 · b =",
+        "options": [],
+        "answer": "-3",
+        "student_answer": "-3",
+        "is_correct": false,
+        "confidence": 0.92,
+        "analysis": null,
+        "question_type": "fill",
+        "block_coordinates": {
+          "x": 50,
+          "y": 670,
+          "width": 900,
+          "height": 700
+        },
+        "text_bbox": {
+          "x": 50,
+          "y": 670,
+          "width": 900,
+          "height": 700
+        },
+        "image_type": "none",
+        "image_bbox": null,
+        "geometry_image": null
+      },
+      {
+        "question_id": "14",
+        "question_number": 14,
+        "sub_no": null,
+        "parent_stem": null,
+        "content": "已知∛(3y - 1) 和 ∛(1 - 2x) (x ≠ 0) 互为相反数，则 y/x =",
+        "options": [],
+        "answer": "2/3",
+        "student_answer": "2/3",
+        "is_correct": false,
+        "confidence": 0.91,
+        "analysis": null,
+        "question_type": "fill",
+        "block_coordinates": {
+          "x": 50,
+          "y": 700,
+          "width": 600,
+          "height": 730
+        },
+        "text_bbox": {
+          "x": 50,
+          "y": 700,
+          "width": 600,
+          "height": 730
+        },
+        "image_type": "none",
+        "image_bbox": null,
+        "geometry_image": null
+      },
+      {
+        "question_id": "15",
+        "question_number": 15,
+        "sub_no": null,
+        "parent_stem": null,
+        "content": "下列运算中，正确的是",
+        "options": [
+          "√2 + √3 ≠ √5",
+          "(√-(a+b))² = a + b",
+          "-2√3 = √(-2)² × 3",
+          "|√3 - 2| = 2 - √3"
+        ],
+        "answer": "D",
+        "student_answer": "D",
+        "is_correct": true,
+        "confidence": 0.97,
+        "analysis": null,
+        "question_type": "choice",
+        "block_coordinates": {
+          "x": 50,
+          "y": 780,
+          "width": 900,
+          "height": 880
+        },
+        "text_bbox": {
+          "x": 50,
+          "y": 780,
+          "width": 900,
+          "height": 880
+        },
+        "image_type": "none",
+        "image_bbox": null,
+        "geometry_image": null
+      }
+    ]
+  },
+  "merged": [
+    {
+      "question_id": "q1",
+      "question_number": 1,
+      "sub_no": null,
+      "parent_stem": null,
+      "content": "2√6-5 的绝对值是______。",
+      "options": [],
+      "answer": null,
+      "student_answer": "5-2√6",
+      "is_correct": true,
+      "confidence": 0.95,
+      "analysis": null,
+      "question_type": "fill",
+      "block_coordinates": {
+        "x": 60,
+        "y": 300,
+        "width": 900,
+        "height": 40
+      },
+      "text_bbox": {
+        "x": 60,
+        "y": 300,
+        "width": 900,
+        "height": 40
+      },
+      "image_type": "none",
+      "image_bbox": null,
+      "geometry_image": null
+    },
+    {
+      "question_id": "q2",
+      "question_number": 2,
+      "sub_no": null,
+      "parent_stem": null,
+      "content": "计算：√((√15)²)+(-√10)²-|-4|=______。",
+      "options": [],
+      "answer": null,
+      "student_answer": "1",
+      "is_correct": true,
+      "confidence": 0.95,
+      "analysis": null,
+      "question_type": "fill",
+      "block_coordinates": {
+        "x": 60,
+        "y": 340,
+        "width": 900,
+        "height": 40
+      },
+      "text_bbox": {
+        "x": 60,
+        "y": 340,
+        "width": 900,
+        "height": 40
+      },
+      "image_type": "none",
+      "image_bbox": null,
+      "geometry_image": null
+    },
+    {
+      "question_id": "q3",
+      "question_number": 3,
+      "sub_no": null,
+      "parent_stem": null,
+      "content": "已知太阳到地球的距离约为 1.5×10⁸ km，光速约为 3×10⁵ km/s，那么光从太阳照到地球大约需要______s。（结果用科学记数法表示）",
+      "options": [],
+      "answer": null,
+      "student_answer": "5×10²",
+      "is_correct": true,
+      "confidence": 0.95,
+      "analysis": null,
+      "question_type": "fill",
+      "block_coordinates": {
+        "x": 60,
+        "y": 380,
+        "width": 900,
+        "height": 60
+      },
+      "text_bbox": {
+        "x": 60,
+        "y": 380,
+        "width": 900,
+        "height": 60
+      },
+      "image_type": "none",
+      "image_bbox": null,
+      "geometry_image": null
+    },
+    {
+      "question_id": "q4",
+      "question_number": 4,
+      "sub_no": null,
+      "parent_stem": null,
+      "content": "有下列说法：①立方根等于本身的数是-1,0,1；②-a 没有平方根；③两个无理数的和还是无理数；④若 a+b<0,ab>0，则|2a+3b|=-2a-3b；⑤若|a-b|+a-b=0，则 b>a；⑥|a|>|b|，则(a+b)(a-b)是负数。其中正确的序号有______。",
+      "options": [],
+      "answer": null,
+      "student_answer": "①④",
+      "is_correct": true,
+      "confidence": 0.95,
+      "analysis": null,
+      "question_type": "fill",
+      "block_coordinates": {
+        "x": 60,
+        "y": 440,
+        "width": 900,
+        "height": 100
+      },
+      "text_bbox": {
+        "x": 60,
+        "y": 440,
+        "width": 900,
+        "height": 100
+      },
+      "image_type": "none",
+      "image_bbox": null,
+      "geometry_image": null
+    },
+    {
+      "question_id": "q5",
+      "question_number": 5,
+      "sub_no": null,
+      "parent_stem": null,
+      "content": "解方程：x²+1=35/36，x=______。",
+      "options": [],
+      "answer": null,
+      "student_answer": "±5/6",
+      "is_correct": true,
+      "confidence": 0.95,
+      "analysis": null,
+      "question_type": "fill",
+      "block_coordinates": {
+        "x": 60,
+        "y": 540,
+        "width": 900,
+        "height": 40
+      },
+      "text_bbox": {
+        "x": 60,
+        "y": 540,
+        "width": 900,
+        "height": 40
+      },
+      "image_type": "none",
+      "image_bbox": null,
+      "geometry_image": null
+    },
+    {
+      "question_id": "q6",
+      "question_number": 6,
+      "sub_no": null,
+      "parent_stem": null,
+      "content": "设√a=1.362,√b=13.62，用平方根运算性质求 a÷b 的值：______。",
+      "options": [],
+      "answer": null,
+      "student_answer": "0.01",
+      "is_correct": false,
+      "confidence": 0.95,
+      "analysis": null,
+      "question_type": "fill",
+      "block_coordinates": {
+        "x": 60,
+        "y": 580,
+        "width": 900,
+        "height": 40
+      },
+      "text_bbox": {
+        "x": 60,
+        "y": 580,
+        "width": 900,
+        "height": 40
+      },
+      "image_type": "none",
+      "image_bbox": null,
+      "geometry_image": null,
+      "_stu_from": "ms-235b"
+    },
+    {
+      "question_id": "q7",
+      "question_number": 7,
+      "sub_no": null,
+      "parent_stem": null,
+      "content": "已知√102.01=10.1，则±√1.0201=______。",
+      "options": [],
+      "answer": null,
+      "student_answer": "±1.01",
+      "is_correct": true,
+      "confidence": 0.95,
+      "analysis": null,
+      "question_type": "fill",
+      "block_coordinates": {
+        "x": 60,
+        "y": 620,
+        "width": 900,
+        "height": 40
+      },
+      "text_bbox": {
+        "x": 60,
+        "y": 620,
+        "width": 900,
+        "height": 40
+      },
+      "image_type": "none",
+      "image_bbox": null,
+      "geometry_image": null
+    },
+    {
+      "question_id": "q8",
+      "question_number": 8,
+      "sub_no": null,
+      "parent_stem": null,
+      "content": "已知 1,√5,5 三个数，再添上一个数，写出一个比例式：______。",
+      "options": [],
+      "answer": null,
+      "student_answer": "1:√5=√5:5",
+      "is_correct": true,
+      "confidence": 0.95,
+      "analysis": null,
+      "question_type": "fill",
+      "block_coordinates": {
+        "x": 60,
+        "y": 660,
+        "width": 900,
+        "height": 40
+      },
+      "text_bbox": {
+        "x": 60,
+        "y": 660,
+        "width": 900,
+        "height": 40
+      },
+      "image_type": "none",
+      "image_bbox": null,
+      "geometry_image": null
+    },
+    {
+      "question_id": "q9",
+      "question_number": 9,
+      "sub_no": null,
+      "parent_stem": null,
+      "content": "正方形的边长增加 4 cm 后，面积为 50 cm²，原正方形的边长是______cm。（结果保留根号）",
+      "options": [],
+      "answer": null,
+      "student_answer": "5√2-4",
+      "is_correct": true,
+      "confidence": 0.95,
+      "analysis": null,
+      "question_type": "fill",
+      "block_coordinates": {
+        "x": 60,
+        "y": 700,
+        "width": 900,
+        "height": 40
+      },
+      "text_bbox": {
+        "x": 60,
+        "y": 700,
+        "width": 900,
+        "height": 40
+      },
+      "image_type": "none",
+      "image_bbox": null,
+      "geometry_image": null
+    },
+    {
+      "question_id": "q10",
+      "question_number": 10,
+      "sub_no": null,
+      "parent_stem": null,
+      "content": "若 x-2 的平方根是±5，那么 x 的立方根为______。",
+      "options": [],
+      "answer": null,
+      "student_answer": "3",
+      "is_correct": false,
+      "confidence": 0.95,
+      "analysis": null,
+      "question_type": "fill",
+      "block_coordinates": {
+        "x": 60,
+        "y": 740,
+        "width": 900,
+        "height": 40
+      },
+      "text_bbox": {
+        "x": 60,
+        "y": 740,
+        "width": 900,
+        "height": 40
+      },
+      "image_type": "none",
+      "image_bbox": null,
+      "geometry_image": null,
+      "_stu_from": "ms-235b"
+    },
+    {
+      "question_id": "q11",
+      "question_number": 11,
+      "sub_no": null,
+      "parent_stem": null,
+      "content": "观察分析下列数据：0,√3,-√6,3,-2√3,√15,…，根据数据排列的规律，得到第 25 个数据应是______。",
+      "options": [],
+      "answer": null,
+      "student_answer": "2√3",
+      "is_correct": true,
+      "confidence": 0.95,
+      "analysis": null,
+      "question_type": "fill",
+      "block_coordinates": {
+        "x": 60,
+        "y": 780,
+        "width": 900,
+        "height": 40
+      },
+      "text_bbox": {
+        "x": 60,
+        "y": 780,
+        "width": 900,
+        "height": 40
+      },
+      "image_type": "none",
+      "image_bbox": null,
+      "geometry_image": null
+    },
+    {
+      "question_id": "q12",
+      "question_number": 12,
+      "sub_no": null,
+      "parent_stem": null,
+      "content": "计算：(2√2+3)²⁰²²(2√2-3)²⁰²⁴=______。",
+      "options": [],
+      "answer": null,
+      "student_answer": "17-12√2",
+      "is_correct": true,
+      "confidence": 0.95,
+      "analysis": null,
+      "question_type": "fill",
+      "block_coordinates": {
+        "x": 60,
+        "y": 820,
+        "width": 900,
+        "height": 40
+      },
+      "text_bbox": {
+        "x": 60,
+        "y": 820,
+        "width": 900,
+        "height": 40
+      },
+      "image_type": "none",
+      "image_bbox": null,
+      "geometry_image": null
+    },
+    {
+      "question_id": "q13",
+      "question_number": 13,
+      "sub_no": null,
+      "parent_stem": null,
+      "content": "已知 a、b 互为相反数，c、d 互为倒数，x=-3，计算：2¹⁰⁰·a+|x|/c·x/d-√(x²)+2¹⁰⁰·b=______。",
+      "options": [],
+      "answer": null,
+      "student_answer": "-3",
+      "is_correct": false,
+      "confidence": 0.95,
+      "analysis": null,
+      "question_type": "fill",
+      "block_coordinates": {
+        "x": 60,
+        "y": 860,
+        "width": 900,
+        "height": 60
+      },
+      "text_bbox": {
+        "x": 60,
+        "y": 860,
+        "width": 900,
+        "height": 60
+      },
+      "image_type": "none",
+      "image_bbox": null,
+      "geometry_image": null,
+      "_stu_from": "ms-235b"
+    },
+    {
+      "question_id": "q14",
+      "question_number": 14,
+      "sub_no": null,
+      "parent_stem": null,
+      "content": "已知∛(3y-1)和∛(1-2x)（x≠0）互为相反数，则 y/x=______。",
+      "options": [],
+      "answer": null,
+      "student_answer": "2/3",
+      "is_correct": false,
+      "confidence": 0.95,
+      "analysis": null,
+      "question_type": "fill",
+      "block_coordinates": {
+        "x": 60,
+        "y": 920,
+        "width": 900,
+        "height": 40
+      },
+      "text_bbox": {
+        "x": 60,
+        "y": 920,
+        "width": 900,
+        "height": 40
+      },
+      "image_type": "none",
+      "image_bbox": null,
+      "geometry_image": null,
+      "_stu_from": "ms-235b"
+    },
+    {
+      "question_id": "q15",
+      "question_number": 15,
+      "sub_no": null,
+      "parent_stem": null,
+      "content": "下列运算中，正确的是",
+      "options": [
+        "√2+√3=√5",
+        "(√-(a+b))²=a+b",
+        "-2√3=√((-2)²×3)",
+        "|√3-2|=2-√3"
+      ],
+      "answer": null,
+      "student_answer": "D",
+      "is_correct": true,
+      "confidence": 0.95,
+      "analysis": null,
+      "question_type": "choice",
+      "block_coordinates": {
+        "x": 60,
+        "y": 960,
+        "width": 900,
+        "height": 100
+      },
+      "text_bbox": {
+        "x": 60,
+        "y": 960,
+        "width": 900,
+        "height": 100
+      },
+      "image_type": "none",
+      "image_bbox": null,
+      "geometry_image": null
+    }
+  ]
+}

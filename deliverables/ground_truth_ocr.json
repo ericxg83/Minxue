@@ -1,0 +1,195 @@
+{
+  "_note": "人工判读的识别基准 ground truth，用于评价三方模型 OCR 输出质量。key 与 _bench_vision_3way.mjs 的 IMAGES 一致。",
+  "generatedAt": "2026-09-13",
+  "IMG_A": {
+    "source": "test_imgs/30436.jpg (2160x3840) → prod_imgs/ocr_a.jpg (1080x1920, q85)",
+    "type": "真实手机拍摄作业照（含学生手写 + 老师红笔批改）",
+    "page_title": "试卷④ 19.2 实数 提高性测试",
+    "sub_header": "（时间 45 分钟，满分 100 分）",
+    "expected_question_count": 15,
+    "sections": [
+      "一、填空题（每小题 2 分，共 28 分）",
+      "二、选择题（每小题 2 分，共 10 分）"
+    ],
+    "questions": [
+      {
+        "no": 1,
+        "type": "fill",
+        "stem_key": "2√6−5 的绝对值是____",
+        "student_answer": "5−2√6",
+        "note": "老师红勾，判对"
+      },
+      {
+        "no": 2,
+        "type": "fill",
+        "stem_key": "计算：√((√15)²+(−√10)²)−|−4|=____",
+        "student_answer": "1",
+        "note": "学生演算 √(15+10)−4=5−4=1"
+      },
+      {
+        "no": 3,
+        "type": "fill",
+        "stem_key": "太阳到地球距离约 1.5×10⁸ km，光速约 3×10⁵ km/s，需要____s（科学记数法）",
+        "student_answer": "5×10²"
+      },
+      {
+        "no": 4,
+        "type": "fill",
+        "stem_key": "有下列说法：①立方根等于本身的数是−1,0,1；②−a 没有平方根；③两个无理数的和还是无理数；④若 a+b<0,ab>0 则 |2a+3b|=−2a−3b；⑤若 |a−b|+a−b=0 则 b>a；⑥|a|>|b| 则 (a+b)(a−b) 是负数。正确的序号有____",
+        "student_answer": "①④",
+        "note": "六大项，长题干，易被截断或漏项"
+      },
+      {
+        "no": 5,
+        "type": "fill",
+        "stem_key": "解方程：x²+1 = 1/36 · x",
+        "student_answer": "（被红笔划掉，不清）"
+      },
+      {
+        "no": 6,
+        "type": "fill",
+        "stem_key": "设 √a=1.362，√b=13.62，用平方根运算性质求 a÷b 的值",
+        "student_answer": "（学生划掉）"
+      },
+      {
+        "no": 7,
+        "type": "fill",
+        "stem_key": "已知 √102.01=10.1，则 ±√1.0201=____",
+        "student_answer": "1.01"
+      },
+      {
+        "no": 8,
+        "type": "fill",
+        "stem_key": "已知 1、√5、5 三个数，再添上一个数，写出一个比例式：____",
+        "student_answer": "1:√5=√5:5"
+      },
+      {
+        "no": 9,
+        "type": "fill",
+        "stem_key": "正方形的边长增加 4 cm 后，面积为 50 cm²，原正方形的边长是____cm（结果保留根号）",
+        "student_answer": "5√2−4"
+      },
+      {
+        "no": 10,
+        "type": "fill",
+        "stem_key": "若 x−2 的平方根是 ±5，那么 x 的立方根为____",
+        "student_answer": "3"
+      },
+      {
+        "no": 11,
+        "type": "fill",
+        "stem_key": "观察数据 0、√3、−√6、3、−2√3、√15、…，第 25 个数据应是____",
+        "student_answer": "−2√3"
+      },
+      {
+        "no": 12,
+        "type": "fill",
+        "stem_key": "计算：(2√2+3)^2022 · (2√2−3)^2024",
+        "student_answer": "17−12√2",
+        "note": "带指数，OCR 易丢上标"
+      },
+      {
+        "no": 13,
+        "type": "fill",
+        "stem_key": "已知 a、b 互为相反数，c、d 互为倒数，x=−3，计算 2^100·a + |x|/c · x/d − √(x²) + 2^100·b",
+        "student_answer": "0"
+      },
+      {
+        "no": 14,
+        "type": "fill",
+        "stem_key": "已知 ∛(3y−1) 和 ∛(1−2x)（x≠0）互为相反数，则 y/x =____",
+        "student_answer": "（未作答）"
+      },
+      {
+        "no": 15,
+        "type": "choice",
+        "stem_key": "下列运算中，正确的是",
+        "options": [
+          "√2+√3=√5",
+          "√((−(a+b))²)=a+b",
+          "−2√3=√((−2)²×3)",
+          "|√3−2|=2−√3"
+        ],
+        "student_answer": "D",
+        "note": "正确选项为 D；选项必须在第 15 题对象上，且不带 A/B/C/D 标号"
+      }
+    ],
+    "distractors": [
+      "红笔 √/×/圈错/分数",
+      "教师批改笔迹",
+      "姓名栏手写",
+      "装订线/桌面背景"
+    ],
+    "_correction_note": "2026-09-13 放大原图复核后修正：Q1 题干为 2√6−5（非 2√5）；Q4 第⑤项为 |a−b|+a−b=0（非 |a−6|）；Q11 第3项为 −√6，学生答 −2√3。"
+  },
+  "IMG_C": {
+    "source": "debug_images/pdf_2141_page1_z4.png → prod_imgs/ocr_c.jpg (1358x1920, q85)",
+    "type": "清晰印刷卷（PDF 渲染，无手写）",
+    "page_title": "严嫁颖 - 数学-0706",
+    "expected_question_count": 5,
+    "sections": [
+      "一、选择题",
+      "二、填空题"
+    ],
+    "questions": [
+      {
+        "no": 1,
+        "type": "choice",
+        "stem_key": "若 a÷b=9 (a,b 都是正整数)，则 a 与 b 的最小公倍数是（ ）",
+        "options": [
+          "a",
+          "b",
+          "ab",
+          "9"
+        ],
+        "note": "正确选项 C"
+      },
+      {
+        "no": 2,
+        "type": "choice",
+        "stem_key": "甲、乙两数都是正整数，且甲是乙的5倍，则甲、乙两数的最大公因数是（ ）",
+        "options": [
+          "甲数",
+          "乙数",
+          "5",
+          "1"
+        ],
+        "note": "正确选项 B"
+      },
+      {
+        "no": 3,
+        "type": "choice",
+        "stem_key": "48是24和16的（ ）",
+        "options": [
+          "最小公倍数",
+          "公倍数",
+          "最大公因数",
+          "公因数"
+        ],
+        "note": "正确选项 A"
+      },
+      {
+        "no": 4,
+        "type": "choice",
+        "stem_key": "两个数的最大公因数是12，最小公倍数是168，其中一个数是24，另一个数是（ ）",
+        "options": [
+          "24",
+          "84",
+          "7",
+          "12"
+        ],
+        "note": "正确选项 B"
+      },
+      {
+        "no": 5,
+        "type": "fill",
+        "stem_key": "两个正整数的乘积____（填“一定”或“不一定”）是这两个数的最小公倍数。"
+      }
+    ],
+    "distractors": [
+      "右上角二维码",
+      "扫码批改水印",
+      "姓名/班级/得分横线"
+    ]
+  }
+}

@@ -1,0 +1,68 @@
+{
+  "generatedAt": "2026-09-13T12:04:59.460Z",
+  "records": [
+    {
+      "imageId": "IMG_C",
+      "imageLabel": "清晰印刷卷(扫描/PDF渲染) 0706",
+      "config": "ms-235b",
+      "label": "魔搭 Qwen3-VL-235B (主模型)",
+      "round": 1,
+      "ms": 35110,
+      "status": 200,
+      "finish": "stop",
+      "usage": {
+        "prompt_tokens": 5923,
+        "completion_tokens": 1065,
+        "total_tokens": 6988
+      },
+      "r429": 0,
+      "reasoningLen": 0,
+      "error": null,
+      "contentLen": 2859,
+      "parsed": null,
+      "rawContent": "{\n  \"page_title\": \"严嫁颖 - 数学-0706\",\n  \"section_title\": null,\n  \"questions\": [\n    {\n      \"question_id\": \"1\",\n      \"question_number\": 1,\n      \"sub_no\": null,\n      \"parent_stem\": null,\n      \"content\": \"若 a ÷ b = 9 (a, b 都是正整数)，则 a 与 b 的最小公倍数是（ ）\",\n      \"options\": [\"a\", \"b\", \"ab\", \"9\"],\n      \"answer\": null,\n      \"student_answer\": null,\n      \"is_correct\": false,\n      \"confidence\": 0.95,\n      \"analysis\": null,\n      \"question_type\": \"choice\",\n      \"block_coordinates\": { \"x\": 48, 198, 920, 253 },\n      \"text_bbox\": { \"x\": 50, 200, 620, 220 },\n      \"image_type\": \"none\",\n      \"image_bbox\": null,\n      \"geometry_image\": null\n    },\n    {\n      \"question_id\": \"2\",\n      \"question_number\": 2,\n      \"sub_no\": null,\n      \"parent_stem\": null,\n      \"content\": \"甲、乙两数都是正整数，且甲是乙的5倍，则甲、乙两数的最大公因数是（ ）\",\n      \"options\": [\"甲数\", \"乙数\", \"5\", \"1\"],\n      \"answer\": null,\n      \"student_answer\": null,\n      \"is_correct\": false,\n      \"confidence\": 0.95,\n      \"analysis\": null,\n      \"question_type\": \"choice\",\n      \"block_coordinates\": { \"x\": 48, 253, 920, 308 },\n      \"text_bbox\": { \"x\": 50, 255, 710, 275 },\n      \"image_type\": \"none\",\n      \"image_bbox\": null,\n      \"geometry_image\": null\n    },\n    {\n      \"question_id\": \"3\",\n      \"question_number\": 3,\n      \"sub_no\": null,\n      \"parent_stem\": null,\n      \"content\": \"48是24和16的（ ）\",\n      \"options\": [\"最小公倍数\", \"公倍数\", \"最大公约数\", \"合数\"],\n      \"answer\": null,\n      \"student_answer\": null,\n      \"is_correct\": false,\n      \"confidence\": 0.95,\n      \"analysis\": null,\n      \"question_type\": \"choice\",\n      \"block_coordinates\": { \"x\": 48, 308, 920, 363 },\n      \"text_bbox\": { \"x\": 50, 310, 270, 330 },\n      \"image_type\": \"none\",\n      \"image_bbox\": null,\n      \"geometry_image\": null\n    },\n    {\n      \"question_id\": \"4\",\n      \"question_number\": 4,\n      \"sub_no\": null,\n      \"parent_stem\": null,\n      \"content\": \"两个数的最大公因数是12，最小公倍数是168，其中一个数是24，另一个数是（ ）\",\n      \"options\": [\"24\", \"84\", \"7\", \"12\"],\n      \"answer\": null,\n      \"student_answer\": null,\n      \"is_correct\": false,\n      \"confidence\": 0.95,\n      \"analysis\": null,\n      \"question_type\": \"choice\",\n      \"block_coordinates\": { \"x\": 48, 363, 920, 418 },\n      \"text_bbox\": { \"x\": 50, 365, 750, 385 },\n      \"image_type\": \"none\",\n      \"image_bbox\": null,\n      \"geometry_image\": null\n    },\n    {\n      \"question_id\": \"5\",\n      \"question_number\": 5,\n      \"sub_no\": null,\n      \"parent_stem\": null,\n      \"content\": \"两个正整数的乘积___（填“一定”或“不一定”）是这两个数的最小公倍数。\",\n      \"options\": [],\n      \"answer\": null,\n      \"student_answer\": null,\n      \"is_correct\": false,\n      \"confidence\": 0.95,\n      \"analysis\": null,\n      \"question_type\": \"fill\",\n      \"block_coordinates\": { \"x\": 48, 438, 920, 493 },\n      \"text_bbox\": { \"x\": 50, 440, 690, 460 },\n      \"image_type\": \"none\",\n      \"image_bbox\": null,\n      \"geometry_image\": null\n    }\n  ]\n}"
+    },
+    {
+      "imageId": "IMG_C",
+      "imageLabel": "清晰印刷卷(扫描/PDF渲染) 0706",
+      "config": "ms-235b",
+      "label": "魔搭 Qwen3-VL-235B (主模型)",
+      "round": 2,
+      "ms": 25773,
+      "status": 200,
+      "finish": "stop",
+      "usage": {
+        "prompt_tokens": 5923,
+        "completion_tokens": 1065,
+        "total_tokens": 6988
+      },
+      "r429": 0,
+      "reasoningLen": 0,
+      "error": null,
+      "contentLen": 2859,
+      "parsed": null,
+      "rawContent": "{\n  \"page_title\": \"严嫁颖 - 数学-0706\",\n  \"section_title\": null,\n  \"questions\": [\n    {\n      \"question_id\": \"1\",\n      \"question_number\": 1,\n      \"sub_no\": null,\n      \"parent_stem\": null,\n      \"content\": \"若 a ÷ b = 9 (a, b 都是正整数)，则 a 与 b 的最小公倍数是（ ）\",\n      \"options\": [\"a\", \"b\", \"ab\", \"9\"],\n      \"answer\": null,\n      \"student_answer\": null,\n      \"is_correct\": false,\n      \"confidence\": 0.95,\n      \"analysis\": null,\n      \"question_type\": \"choice\",\n      \"block_coordinates\": { \"x\": 48, 198, 820, 253 },\n      \"text_bbox\": { \"x\": 48, 198, 820, 223 },\n      \"image_type\": \"none\",\n      \"image_bbox\": null,\n      \"geometry_image\": null\n    },\n    {\n      \"question_id\": \"2\",\n      \"question_number\": 2,\n      \"sub_no\": null,\n      \"parent_stem\": null,\n      \"content\": \"甲、乙两数都是正整数，且甲是乙的5倍，则甲、乙两数的最大公因数是（ ）\",\n      \"options\": [\"甲数\", \"乙数\", \"5\", \"1\"],\n      \"answer\": null,\n      \"student_answer\": null,\n      \"is_correct\": false,\n      \"confidence\": 0.95,\n      \"analysis\": null,\n      \"question_type\": \"choice\",\n      \"block_coordinates\": { \"x\": 48, 253, 820, 308 },\n      \"text_bbox\": { \"x\": 48, 253, 820, 278 },\n      \"image_type\": \"none\",\n      \"image_bbox\": null,\n      \"geometry_image\": null\n    },\n    {\n      \"question_id\": \"3\",\n      \"question_number\": 3,\n      \"sub_no\": null,\n      \"parent_stem\": null,\n      \"content\": \"48是24和16的（ ）\",\n      \"options\": [\"最小公倍数\", \"公倍数\", \"最大公约数\", \"合数\"],\n      \"answer\": null,\n      \"student_answer\": null,\n      \"is_correct\": false,\n      \"confidence\": 0.95,\n      \"analysis\": null,\n      \"question_type\": \"choice\",\n      \"block_coordinates\": { \"x\": 48, 308, 820, 363 },\n      \"text_bbox\": { \"x\": 48, 308, 820, 333 },\n      \"image_type\": \"none\",\n      \"image_bbox\": null,\n      \"geometry_image\": null\n    },\n    {\n      \"question_id\": \"4\",\n      \"question_number\": 4,\n      \"sub_no\": null,\n      \"parent_stem\": null,\n      \"content\": \"两个数的最大公因数是12，最小公倍数是168，其中一个数是24，另一个数是（ ）\",\n      \"options\": [\"24\", \"84\", \"7\", \"12\"],\n      \"answer\": null,\n      \"student_answer\": null,\n      \"is_correct\": false,\n      \"confidence\": 0.95,\n      \"analysis\": null,\n      \"question_type\": \"choice\",\n      \"block_coordinates\": { \"x\": 48, 363, 820, 418 },\n      \"text_bbox\": { \"x\": 48, 363, 820, 388 },\n      \"image_type\": \"none\",\n      \"image_bbox\": null,\n      \"geometry_image\": null\n    },\n    {\n      \"question_id\": \"5\",\n      \"question_number\": 5,\n      \"sub_no\": null,\n      \"parent_stem\": null,\n      \"content\": \"两个正整数的乘积___（填“一定”或“不一定”）是这两个数的最小公倍数。\",\n      \"options\": [],\n      \"answer\": null,\n      \"student_answer\": null,\n      \"is_correct\": false,\n      \"confidence\": 0.95,\n      \"analysis\": null,\n      \"question_type\": \"fill\",\n      \"block_coordinates\": { \"x\": 48, 458, 820, 498 },\n      \"text_bbox\": { \"x\": 48, 458, 820, 483 },\n      \"image_type\": \"none\",\n      \"image_bbox\": null,\n      \"geometry_image\": null\n    }\n  ]\n}"
+    },
+    {
+      "imageId": "IMG_C",
+      "imageLabel": "清晰印刷卷(扫描/PDF渲染) 0706",
+      "config": "ms-235b",
+      "label": "魔搭 Qwen3-VL-235B (主模型)",
+      "round": 3,
+      "ms": 25854,
+      "status": 200,
+      "finish": "stop",
+      "usage": {
+        "prompt_tokens": 5923,
+        "completion_tokens": 1065,
+        "total_tokens": 6988
+      },
+      "r429": 0,
+      "reasoningLen": 0,
+      "error": null,
+      "contentLen": 2859,
+      "parsed": null,
+      "rawContent": "{\n  \"page_title\": \"严嫁颖 - 数学-0706\",\n  \"section_title\": null,\n  \"questions\": [\n    {\n      \"question_id\": \"1\",\n      \"question_number\": 1,\n      \"sub_no\": null,\n      \"parent_stem\": null,\n      \"content\": \"若 a ÷ b = 9 (a, b 都是正整数)，则 a 与 b 的最小公倍数是（ ）\",\n      \"options\": [\"a\", \"b\", \"ab\", \"9\"],\n      \"answer\": null,\n      \"student_answer\": null,\n      \"is_correct\": false,\n      \"confidence\": 0.95,\n      \"analysis\": null,\n      \"question_type\": \"choice\",\n      \"block_coordinates\": { \"x\": 48, 198, 820, 253 },\n      \"text_bbox\": { \"x\": 48, 198, 820, 222 },\n      \"image_type\": \"none\",\n      \"image_bbox\": null,\n      \"geometry_image\": null\n    },\n    {\n      \"question_id\": \"2\",\n      \"question_number\": 2,\n      \"sub_no\": null,\n      \"parent_stem\": null,\n      \"content\": \"甲、乙两数都是正整数，且甲是乙的5倍，则甲、乙两数的最大公因数是（ ）\",\n      \"options\": [\"甲数\", \"乙数\", \"5\", \"1\"],\n      \"answer\": null,\n      \"student_answer\": null,\n      \"is_correct\": false,\n      \"confidence\": 0.95,\n      \"analysis\": null,\n      \"question_type\": \"choice\",\n      \"block_coordinates\": { \"x\": 48, 253, 820, 308 },\n      \"text_bbox\": { \"x\": 48, 253, 820, 277 },\n      \"image_type\": \"none\",\n      \"image_bbox\": null,\n      \"geometry_image\": null\n    },\n    {\n      \"question_id\": \"3\",\n      \"question_number\": 3,\n      \"sub_no\": null,\n      \"parent_stem\": null,\n      \"content\": \"48是24和16的（ ）\",\n      \"options\": [\"最小公倍数\", \"公倍数\", \"最大公约数\", \"合数\"],\n      \"answer\": null,\n      \"student_answer\": null,\n      \"is_correct\": false,\n      \"confidence\": 0.95,\n      \"analysis\": null,\n      \"question_type\": \"choice\",\n      \"block_coordinates\": { \"x\": 48, 308, 820, 363 },\n      \"text_bbox\": { \"x\": 48, 308, 820, 332 },\n      \"image_type\": \"none\",\n      \"image_bbox\": null,\n      \"geometry_image\": null\n    },\n    {\n      \"question_id\": \"4\",\n      \"question_number\": 4,\n      \"sub_no\": null,\n      \"parent_stem\": null,\n      \"content\": \"两个数的最大公因数是12，最小公倍数是168，其中一个数是24，另一个数是（ ）\",\n      \"options\": [\"24\", \"84\", \"7\", \"12\"],\n      \"answer\": null,\n      \"student_answer\": null,\n      \"is_correct\": false,\n      \"confidence\": 0.95,\n      \"analysis\": null,\n      \"question_type\": \"choice\",\n      \"block_coordinates\": { \"x\": 48, 363, 820, 418 },\n      \"text_bbox\": { \"x\": 48, 363, 820, 387 },\n      \"image_type\": \"none\",\n      \"image_bbox\": null,\n      \"geometry_image\": null\n    },\n    {\n      \"question_id\": \"5\",\n      \"question_number\": 5,\n      \"sub_no\": null,\n      \"parent_stem\": null,\n      \"content\": \"两个正整数的乘积___（填“一定”或“不一定”）是这两个数的最小公倍数。\",\n      \"options\": [],\n      \"answer\": null,\n      \"student_answer\": null,\n      \"is_correct\": false,\n      \"confidence\": 0.95,\n      \"analysis\": null,\n      \"question_type\": \"fill\",\n      \"block_coordinates\": { \"x\": 48, 455, 820, 495 },\n      \"text_bbox\": { \"x\": 48, 455, 820, 479 },\n      \"image_type\": \"none\",\n      \"image_bbox\": null,\n      \"geometry_image\": null\n    }\n  ]\n}"
+    }
+  ]
+}

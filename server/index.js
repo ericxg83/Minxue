@@ -3443,6 +3443,24 @@ if (process.argv[1] === __filename || process.argv[1]?.endsWith('server/index.js
       console.error('数据库迁移失败:', err.message)
     }
 
+    // 启动清残：练习册答案解析寄生在本进程内，进程重启后状态会永远停在 'parsing'
+    // （前端无限转圈、重新上传被 409 拒绝、要等 15 分钟才被兜底扫描重置）。
+    // 此处利用「进程刚启动 ⇒ 不存在本进程发起的解析」在启动瞬间一次性清残。
+    // 仅托管实例（RENDER）执行，本机 dev 与线上共用同一个库，不得误伤线上在跑的解析。
+    try {
+      const { cleanupStaleParsingOnBoot } = await import('./services/neonService.js')
+      const cleaned = await cleanupStaleParsingOnBoot()
+      if (cleaned.skipped) {
+        console.log(`🧹 启动清残（练习册解析状态）：跳过（${cleaned.skipped}）`)
+      } else if (cleaned.count > 0) {
+        console.log(`🧹 启动清残：${cleaned.count} 本练习册解析状态 parsing → failed（${cleaned.names.join('；')}）`)
+      } else {
+        console.log('🧹 启动清残（练习册解析状态）：无残留')
+      }
+    } catch (err) {
+      console.error('启动清残（练习册解析状态）失败:', err.message)
+    }
+
     // 定时自动回填知识点标签+难度：让曾因限流失败的题目能被持续重试补齐。
     // 启动 2 分钟后先跑一次，之后每 BACKFILL_INTERVAL_HOURS 小时（默认 6h）跑一次。
     try {

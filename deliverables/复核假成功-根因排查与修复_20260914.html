@@ -1,0 +1,175 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<title>「完成复核」假成功 · 根因排查与修复</title>
+<style>
+  :root{
+    --ink:#1a1d21; --ink2:#4a5058; --ink3:#8b929c;
+    --line:#e6e9ee; --bg:#f7f8fa; --card:#fff;
+    --red:#d93025; --red-bg:#fdecea; --amber:#b26a00; --amber-bg:#fff4e0;
+    --green:#1e7f4f; --green-bg:#e8f5ee; --blue:#1a5fb4; --blue-bg:#e8f0fb;
+  }
+  *{box-sizing:border-box}
+  body{margin:0;padding:40px 24px 64px;background:var(--bg);color:var(--ink);
+    font:15px/1.7 -apple-system,"Segoe UI","PingFang SC","Microsoft YaHei",sans-serif;}
+  .wrap{max-width:900px;margin:0 auto}
+  h1{font-size:24px;margin:0 0 6px;letter-spacing:-.2px}
+  .sub{color:var(--ink3);font-size:13px;margin-bottom:28px}
+  .sub code{background:#eef0f3;padding:1px 6px;border-radius:4px;font-size:12px}
+  h2{font-size:16px;margin:36px 0 14px;padding-left:10px;border-left:3px solid var(--ink);
+    line-height:1.2}
+  .lead{background:var(--card);border:1px solid var(--line);border-radius:10px;
+    padding:18px 20px;font-size:15px}
+  .lead b{color:var(--red)}
+  .facts{display:grid;grid-template-columns:repeat(3,1fr);gap:12px;margin-top:14px}
+  .fact{background:var(--card);border:1px solid var(--line);border-radius:10px;padding:14px 16px}
+  .fact .k{font-size:12px;color:var(--ink3);margin-bottom:6px}
+  .fact .v{font-size:19px;font-weight:700;letter-spacing:-.3px}
+  .fact .v small{font-size:12px;font-weight:400;color:var(--ink3);margin-left:4px}
+  .fact.bad .v{color:var(--red)} .fact.ok .v{color:var(--green)}
+  table{width:100%;border-collapse:collapse;background:var(--card);border:1px solid var(--line);
+    border-radius:10px;overflow:hidden;font-size:13.5px}
+  th,td{text-align:left;padding:10px 14px;border-bottom:1px solid var(--line);vertical-align:top}
+  th{background:#f2f4f7;font-weight:600;font-size:12.5px;color:var(--ink2)}
+  tr:last-child td{border-bottom:none}
+  code{font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;font-size:12.5px;
+    background:#f0f2f5;padding:1.5px 5px;border-radius:4px}
+  pre{background:#1f2430;color:#e6e9ee;padding:14px 16px;border-radius:10px;overflow-x:auto;
+    font-size:12.5px;line-height:1.65;margin:12px 0}
+  pre .c{color:#8b98ab} pre .r{color:#ff8a80} pre .g{color:#8ddc9e}
+  .chain{background:var(--card);border:1px solid var(--line);border-radius:10px;padding:20px}
+  .step{display:flex;gap:12px;align-items:flex-start;padding:9px 0}
+  .step .n{flex:0 0 22px;height:22px;border-radius:50%;background:#eef0f3;color:var(--ink2);
+    font-size:12px;font-weight:700;display:flex;align-items:center;justify-content:center;margin-top:2px}
+  .step .t{flex:1}
+  .step .t b{display:block;font-size:13.5px}
+  .step .t span{font-size:12.5px;color:var(--ink2)}
+  .step.hit .n{background:var(--red);color:#fff}
+  .step.hit .t b{color:var(--red)}
+  .step.silent .n{background:var(--amber);color:#fff}
+  .step.symptom .n{background:var(--blue);color:#fff}
+  .tag{display:inline-block;font-size:11px;padding:1px 7px;border-radius:20px;margin-left:6px;
+    vertical-align:1px;font-weight:600}
+  .tag.fixed{background:var(--green-bg);color:var(--green)}
+  .tag.left{background:var(--amber-bg);color:var(--amber)}
+  ul{margin:6px 0 0;padding-left:20px} li{margin:5px 0}
+  .foot{margin-top:36px;padding-top:16px;border-top:1px solid var(--line);
+    font-size:12.5px;color:var(--ink3)}
+</style>
+</head>
+<body>
+<div class="wrap">
+
+  <h1>「完成复核」后仍显示待复核 / 待完成 · 根因排查与修复</h1>
+  <div class="sub">敏学 P0 事故 · 2026-09-14 · 复现样本：余晨瑞 · 错题再测-0911 · commit <code>2a57ab3</code></div>
+
+  <div class="lead">
+    一条 SQL 的类型推断错误，炸在结算流程的<b>最后一步之前</b>；前端又把这个异常
+    <b>静默吞掉</b>。于是界面提示「试卷复核完成，已保存」，库里却什么都没写 ——
+    PC 左侧一直「待复核」、移动端一直「待完成」，<b>两个症状是同一个根因</b>。
+  </div>
+
+  <div class="facts">
+    <div class="fact bad"><div class="k">受影响链路</div><div class="v">2 条<small>重练卷结算 + 作业批改掌握度结算</small></div></div>
+    <div class="fact bad"><div class="k">线上已结算的重练卷</div><div class="v">0 / 25<small>全部从未写成功</small></div></div>
+    <div class="fact ok"><div class="k">回归测试</div><div class="v">284 / 284<small>新增 5 例锁口径</small></div></div>
+  </div>
+
+  <h2>根因链路</h2>
+  <div class="chain">
+    <div class="step hit">
+      <div class="n">1</div>
+      <div class="t"><b>批量回写题目正误的 SQL 缺类型转换 <span class="tag fixed">已修</span></b>
+        <span><code>SET is_correct = CASE id WHEN $1::uuid THEN $2 … END</code> —— THEN 分支的参数没有类型上下文，PostgreSQL 把它推断成 <code>text</code>，整条语句抛 <code>42804</code>：<code>column "is_correct" is of type boolean but expression is of type text</code>。<br>
+        <span style="color:var(--ink3)">注：<code>CASE WHEN $n THEN …</code> 把参数放在<b>条件</b>位置时没这个问题（WHEN 有布尔上下文），所以同文件里其它写法一直是好的。</span></span></div>
+    </div>
+    <div class="step">
+      <div class="n">2</div>
+      <div class="t"><b>炸点夹在两段写入之间</b>
+        <span>结算顺序是：<b>错题生命周期推进 → 批量回写题目正误（炸在这里）→ 写 <code>exam.status='graded'</code></b>。前两段是非事务的独立语句，已提交；第三段永远执行不到。</span></div>
+    </div>
+    <div class="step silent">
+      <div class="n">3</div>
+      <div class="t"><b>前端把异常吞了 <span class="tag fixed">已修</span></b>
+        <span><code>persistTaskCompletion</code> 对 <code>gradeGeneratedExam()</code> 用了 <code>.catch(console.error)</code> → 后端 500 被吃掉，照常弹「试卷复核完成，已保存」并把本地卷标成已复核。<b>假成功就此产生。</b></span></div>
+    </div>
+    <div class="step symptom">
+      <div class="n">4</div>
+      <div class="t"><b>两端读的都是同一个未被写入的字段</b>
+        <span>PC 的 <code>resolveRetryPaperState</code> 判「已确认」、移动端 <code>ExamPageV2.stage()</code> 判「已完成」，都只看 <code>exam.status === 'graded'</code>。它没被写 → 两端同时卡住。</span></div>
+    </div>
+    <div class="step symptom">
+      <div class="n">5</div>
+      <div class="t"><b>副作用：错题数据被反复推进</b>
+        <span>炸点<b>之前</b>的 SQL 每次都成功提交，所以老师每点一次「完成复核」，<code>wrong_questions</code> 的生命周期与 <code>practice_count</code>／<code>error_count</code> 就重复累加一次（样本卷 practice_count 已达 30、答错题 error_count 27）。</span></div>
+    </div>
+  </div>
+
+  <h2>判据（只读取证，不靠猜）</h2>
+  <table>
+    <tr><th style="width:38%">观察</th><th>含义</th></tr>
+    <tr><td><code>generated_exams.updated_at === created_at</code></td><td>该卷从未被结算写过 —— 落库链路断了</td></tr>
+    <tr><td>judgements 里没有 <code>generated_exam:*</code> / <code>task:*</code> 的 <code>settlement_key</code></td><td>对应结算链路<b>从来没跑通过</b>（不只是这一次）。全库当时只有 <code>rejudge:*</code>，说明作业批改的知识点／掌握度结算也一直在失败</td></tr>
+    <tr><td><code>wrong_questions.practice_count</code> 远大于实际练习次数</td><td>失败调用反复推进前半段 SQL 留下的脏计数</td></tr>
+  </table>
+
+  <h2>定位手法：事务内 dry-run（零副作用）</h2>
+  <p style="font-size:13.5px;color:var(--ink2);margin:0 0 4px">
+    在 <code>BEGIN … ROLLBACK</code> 里按顺序复跑结算的全部 SQL，能精确报出炸在第几步。
+    比读代码猜快一个数量级 —— 本次一次就拿到 <code>42804</code> 原文。样板保留为
+    <code>server/_diag_grade_dryrun.mjs</code>。
+  </p>
+  <pre><span class="c">STEP 3: update wrong_questions OK</span>
+STEP 4: update questions  (params=34, n=17)
+<span class="r">&gt;&gt;&gt; 失败于上述 STEP： 42804 column "is_correct" is of type boolean but expression is of type text</span>
+   hint: You will need to rewrite or cast the expression.
+<span class="g">回滚后 exam 状态（应保持不变）: { status: 'ungraded', updated_at: '2026-09-11T02:44:40.557Z' }</span></pre>
+
+  <h2>修复内容</h2>
+  <table>
+    <tr><th style="width:34%">文件</th><th>改动</th></tr>
+    <tr><td><code>server/services/gradingFinalizer.js</code></td>
+      <td>抽出唯一构造器 <code>buildIsCorrectAssignments(ids)</code>，THEN 分支一律显式 <code>::boolean</code>；
+        两处结算（<code>finalizeGradingBatch</code> / <code>finalizeGeneratedExamResults</code>）共用，禁止再内联裸 CASE。
+        顺带修好作业批改的知识点／掌握度结算。</td></tr>
+    <tr><td><code>src/workbench/stores/reviewStore.js</code></td>
+      <td>核心状态写入<b>不再静默失败</b>：去掉 <code>.catch(console.error)</code>，异常上抛；
+        自动完成路径失败时不标记本地已复核、不跳下一份，新增 <code>saveError</code> 交给 UI。</td></tr>
+    <tr><td><code>src/workbench/components/review/ReviewTopBar.vue</code></td>
+      <td>落库失败时展示服务端真实原因，不再一律提示成功。</td></tr>
+    <tr><td><code>server/worker.js</code></td>
+      <td>slim 全自动结算失败时不再打印「组卷已标记 graded」，避免日志掩盖故障。</td></tr>
+    <tr><td><code>test/gradingSettlementSql.test.mjs</code>（新增）</td>
+      <td>锁定：占位符与 <code>::boolean</code> 严格对位、禁止裸 CASE、exam 状态必须写在题目回写之后。</td></tr>
+    <tr><td><code>server/scripts/repair-retry-exam-settlement.mjs</code>（新增）</td>
+      <td>补结算事故期间「点过复核但没落库」的卷。默认只列不写，须显式 <code>--exam</code>／<code>--all-pending</code>。</td></tr>
+  </table>
+
+  <h2>验证与数据修复结果</h2>
+  <table>
+    <tr><th style="width:40%">项</th><th>结果</th></tr>
+    <tr><td>全量测试</td><td>284 / 284 通过（含新增 5 例）</td></tr>
+    <tr><td>事务 dry-run 复跑修复后 SQL</td><td>STEP 1→5 全部通过，随后回滚，exam 状态保持不变</td></tr>
+    <tr><td>余晨瑞 · 错题再测-0911 补结算</td><td><code>exam.status → graded</code>，<code>updated_at</code> 更新，<b>17 条 <code>generated_exam:&lt;id&gt;:final</code> 审计落库</b>（全库首次出现该类痕迹）</td></tr>
+    <tr><td>二次推进检查</td><td>该卷 17 题生命周期<b>零变化</b>（已处于稳态：答对→mastered 保持、答错→new 原地），无假掌握风险</td></tr>
+    <tr><td>其余 4 份有答卷的卷</td><td><code>practice_count = 0</code> → 是<b>老师本来还没批</b>，不是事故受害者，<b>未做任何写入</b>。老师下次点完成复核走修复后的代码即可</td></tr>
+  </table>
+
+  <h2>遗留与建议</h2>
+  <ul>
+    <li><b>脏计数未回补</b>：样本卷 <code>practice_count</code> 30→31、答错题 <code>error_count</code> 27→28。
+      属展示型统计字段，不影响掌握度判定与队列分层；如需清理建议单独做一次计数校正，不在本次范围内。</li>
+    <li><b>排查纪律沉淀</b>：「提交后状态字段 / 计数」这类写入不允许 <code>.catch(console.error)</code>；
+      后台 fire-and-forget 任务也必须让日志反映真实结果，不许打印成功文案掩盖失败。</li>
+    <li>线上生效依赖 Render（后端）+ Cloudflare Pages（前端）自动部署完成，约数分钟。</li>
+  </ul>
+
+  <div class="foot">
+    沉淀至 <code>.workbuddy/memory/topics/pitfalls.md</code> §3 ·
+    skill「敏学结算假成功排查」·
+    commit <code>2a57ab3</code>（a2309a3..2a57ab3）
+  </div>
+</div>
+</body>
+</html>

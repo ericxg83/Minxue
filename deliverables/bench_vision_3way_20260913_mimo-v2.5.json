@@ -1,0 +1,19 @@
+{
+  "generatedAt": "2026-09-13T14:08:22.755Z",
+  "records": [
+    {
+      "imageId": "IMG_A",
+      "imageLabel": "真实作业照(手写+红笔) 19.2实数 提高性测试",
+      "config": "mimo-v2.5",
+      "label": "mimo-v2.5 (免费组)",
+      "round": 1,
+      "ms": 400053,
+      "status": 0,
+      "r429": 0,
+      "error": "timeout of 400000ms exceeded",
+      "contentLen": 0,
+      "parsed": null,
+      "rawContent": ""
+    }
+  ]
+}

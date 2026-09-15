@@ -1,0 +1,213 @@
+<!DOCTYPE html>
+<html lang="zh-CN" data-page-node-id="7ALltCffSRnObUDgpu0BTZ">
+<head data-page-node-id="YIXdVujCKnJBUWSfaJemzx">
+<meta charset="UTF-8" data-page-node-id="f0sIHYQakOGz6VH1Bs2EPw">
+<meta name="viewport" content="width=device-width, initial-scale=1" data-page-node-id="hGRtVt7c7mr5Sht3UqCDG3">
+<title>P0 实施 · 参考答案三闸（错题再测-0911）</title>
+<style>
+  :root{
+    --bg:#f7f8fa; --card:#fff; --line:#e5e7eb; --text:#1f2937; --sub:#6b7280;
+    --green:#067647; --greenbg:#ecfdf5; --red:#b42318; --redbg:#fef3f2;
+    --amber:#b54708; --amberbg:#fffaeb; --blue:#175cd3; --bluebg:#eff8ff;
+  }
+  *{box-sizing:border-box}
+  body{margin:0;padding:32px 20px;background:var(--bg);color:var(--text);
+       font:15px/1.7 -apple-system,"Segoe UI","Microsoft YaHei",sans-serif}
+  .wrap{max-width:940px;margin:0 auto}
+  h1{font-size:24px;margin:0 0 6px}
+  h2{font-size:17px;margin:34px 0 12px;padding-bottom:8px;border-bottom:2px solid var(--line)}
+  h3{font-size:15px;margin:20px 0 8px}
+  .meta{color:var(--sub);font-size:13px;margin-bottom:22px}
+  .card{background:var(--card);border:1px solid var(--line);border-radius:10px;padding:18px 20px;margin:14px 0}
+  table{width:100%;border-collapse:collapse;font-size:14px;background:var(--card)}
+  th,td{border:1px solid var(--line);padding:9px 11px;text-align:left;vertical-align:top}
+  th{background:#f3f4f6;font-weight:600}
+  code{background:#f3f4f6;padding:1px 5px;border-radius:4px;font-size:13px;
+       font-family:Consolas,Monaco,monospace;word-break:break-all}
+  .tag{display:inline-block;padding:1px 8px;border-radius:999px;font-size:12px;font-weight:600;white-space:nowrap}
+  .t-ok{background:var(--greenbg);color:var(--green);border:1px solid #a6f4c5}
+  .t-warn{background:var(--amberbg);color:var(--amber);border:1px solid #fec84b}
+  .t-info{background:var(--bluebg);color:var(--blue);border:1px solid #b2ddff}
+  .t-no{background:var(--redbg);color:var(--red);border:1px solid #fecdca}
+  ul{margin:8px 0 8px 20px;padding:0}
+  li{margin:5px 0}
+  .kpi{display:flex;gap:14px;flex-wrap:wrap;margin:14px 0}
+  .kpi div{flex:1 1 190px;background:var(--card);border:1px solid var(--line);border-radius:10px;padding:14px 16px}
+  .kpi b{display:block;font-size:22px;margin-bottom:2px}
+  .kpi span{color:var(--sub);font-size:13px}
+  .hl{background:var(--amberbg);border-left:3px solid #f79009;padding:12px 16px;border-radius:0 8px 8px 0;margin:14px 0}
+  .note{color:var(--sub);font-size:13px}
+</style>
+</head>
+<body data-page-node-id="jM5zhstMJT0oXEOMBN0RMx">
+<div class="wrap" data-page-node-id="s8epap31e4VpPsc7leUmv3">
+
+  <h1 data-page-node-id="Az6ph79NW99ClC12CBTFlh">P0 实施 · 参考答案三闸</h1>
+  <div class="meta" data-page-node-id="I5IjhqI0oWQnE8fLRKQjUS">
+    事故：错题再测-0911「参考答案有误，学生答对也判错」 ｜ commit <code data-page-node-id="3pYmn2ilLCidM5BmWqPTNA">f3baba8</code> ｜ 2026-09-14
+  </div>
+
+  <div class="kpi" data-page-node-id="Zq6y1HLVKQ9WvNdUrumob7">
+    <div data-page-node-id="f7X4mWl5BwJuPVTjq7nKYu"><b data-page-node-id="Mu1BWFJiCizgYuChOkAReD">3 / 3</b><span data-page-node-id="2BP1nIiIZSWtjtvDJNkZiH">P0 三项已落地</span></div>
+    <div data-page-node-id="spb2SFDDpGqkTAqgPfcCja"><b data-page-node-id="TKAcja6qafkqAtr0fCtEKj">45 项</b><span data-page-node-id="HtkGyke1OAN0A6BaklPq5F">存量数据已回填</span></div>
+    <div data-page-node-id="Ptd3WL7gsw3BbqBuYgA2oA"><b data-page-node-id="W0OlGZPaO5qffOI7qu69E4">311 / 311</b><span data-page-node-id="IWI2vDdk8h2R6eDMUdrHPW">回归测试通过</span></div>
+    <div data-page-node-id="OXWtQzsUuAimWM8QuDe0hs"><b data-page-node-id="2xGCZQuLG4p4SUI2YWcj3m">0</b><span data-page-node-id="GOqdEXfcuXyAdEPrEYtM5v">回测误伤（586 条缓存）</span></div>
+  </div>
+
+  <h2 data-page-node-id="gDBW1LHOPOLXgeYTO17CFp">一、三闸状态</h2>
+  <table data-page-node-id="qrSPDHRY7AUBNVppabJXFr">
+    <thead data-page-node-id="Yn20FISiBGnqgs10XmahyN"><tr data-page-node-id="GaqyTsVFeQG9qeYoylQuXn"><th style="width:15%" data-page-node-id="vMSc7RD1xmP39R77JaADyf">P0 项</th><th style="width:28%" data-page-node-id="rBASghvsdodZFS6dO3IfY8">实现</th><th style="width:34%" data-page-node-id="akFKEC1jlHoZAvzokmQvgR">口径</th><th style="width:23%" data-page-node-id="7M8cZTmmGqeRwwhWX3ZEgl">力度</th></tr></thead>
+    <tbody data-page-node-id="j3gPHFa4g66gA2EamI3eLL">
+      <tr data-page-node-id="33uI65UZ3OsyllcI8djbie">
+        <td data-page-node-id="xRESbcA0h9G9Mk07vC2Dh5"><b data-page-node-id="IOUxxDRCOUi4pApAxCwx27">② 答案来源</b></td>
+        <td data-page-node-id="gv84MA5lASaDIxhY2xxA0T"><code data-page-node-id="EF5SnVWAyxhAZybLX35tFB">utils/referenceAnswerRescue.js</code><br data-page-node-id="nXutESWErvKrtNE2d3ZxBl">+ <code data-page-node-id="WZ6IehBuI63p7gOSuB6zwY">extractFinalAnswerFromAnalysis</code></td>
+        <td data-page-node-id="DmTQglXt2KGQ5EbZXfm46b">答案是元话语残句（<code data-page-node-id="jKFCHaeMKFM79eQuOBPIFo">应包含10</code>）时先从解析救回真答案；提取器改取解析<b data-page-node-id="tEY5OmTCL7HEGAFWPHGUjq">文末</b>候选</td>
+        <td data-page-node-id="IeKS9bAYiPoF2Yf6ktmWqM"><span class="tag t-no" data-page-node-id="0Bvt6BH5jrPrEGLL76Bv3a">硬拦</span><br data-page-node-id="YFsN9bP7iccNq23Eniw3JM"><span class="note" data-page-node-id="9qZWqDzBuhLst6SfxE2C0d">救不回 → 清空 + 转人工，不拿猜测值顶上</span></td>
+      </tr>
+      <tr data-page-node-id="OXXfujmbC7v08MPi1DzAgu">
+        <td data-page-node-id="YDHUgWFTX5Kkg4vNH6bKiB"><b data-page-node-id="cY3TyYgXDZj7a3HWXKUBfU">③ 答案自洽</b></td>
+        <td data-page-node-id="V0i7xxus1ArXlYTvXPqxyT"><code data-page-node-id="tUhypGbl8sYT6PFexjvbSV">utils/referenceAnswerSelfCheck.js</code></td>
+        <td data-page-node-id="x3rQsBDUv9SsgkCwLJnE2u">解析结论区存在<b data-page-node-id="M8tKXiujczwgNfMqpvw0ie">算错的纯算术等式</b>且 answer 正好抄其右边（<code data-page-node-id="sKaRmxHvNSioHYsDLtVf9T">a+b = 8+3 = 29</code>）</td>
+        <td data-page-node-id="WWvtbVZUo1AnqSPa5gpHa9"><span class="tag t-warn" data-page-node-id="EQHSyKYFRfTPYvITlBJxzy">只标注</span><br data-page-node-id="K3wsJXsHuzC0aGitw4Ln5Y"><span class="note" data-page-node-id="fuw5PBRREuHmdl0StxoIJN">写 <code data-page-node-id="Hp61KfWARIE84i3pD8Ksp6">ai_answer_risk_reason</code>，不改判定</span></td>
+      </tr>
+      <tr data-page-node-id="2CKrH2IJp0d2cIJbzVLcaE">
+        <td data-page-node-id="ZGmzVqqa7TFFjHlxViMWGI"><b data-page-node-id="F8jEw3yEhGLTK6GwsNW0pQ">① 重练判定语义</b></td>
+        <td data-page-node-id="TgdPBpfDU1lrsq0Q0F8XBU"><code data-page-node-id="QTgTBJw4eyPx5ge2zf6Mpc">worker.processSlimGrading</code></td>
+        <td data-page-node-id="FiieYw0ALVXz37LCV3BdtV">原 <code data-page-node-id="ko4BeHomFmrva5kER2xPSi">COALESCE($2, is_correct)</code> 保留原作业旧判定 → 页面把「本次未判」显示成「AI错误」</td>
+        <td data-page-node-id="R03sQrEBf7HdKkOtuKCJA0"><span class="tag t-ok" data-page-node-id="kM4bNaZHtPGBfqAIOrB4za">已改</span><br data-page-node-id="LUqxka9NFV1prJd8fhICkI"><span class="note" data-page-node-id="bw149R5okqeAZ24KWbGODY">改 <code data-page-node-id="gNNDAuMxyGEFYr8hwcBU3q">is_correct = $2::boolean</code>；预填失败不再静默</span></td>
+      </tr>
+    </tbody>
+  </table>
+
+  <h2 data-page-node-id="6zcfP7aO8t9QemDPxSwBXL">二、判据为什么要「先回测再定力度」</h2>
+  <p data-page-node-id="XhR1Kc9IYIMD7SYRzEJ7MT">原计划是「答案入库前自检不通过就转人工」。用全库 586 条缓存回测了两个候选判据，结论推翻了直觉：</p>
+  <table data-page-node-id="Wsil5zQDdqcA5jjDeGdUrL">
+    <thead data-page-node-id="ZLvRSHU9xeDSNXpC9njzGX"><tr data-page-node-id="HjdI1sSijDfXMdJHQ44JZF"><th style="width:40%" data-page-node-id="wX0ZMOWW5lAQ1lxVC9tSkw">候选判据</th><th style="width:14%" data-page-node-id="cfiH2eA9BvKint8hwZFNMI">命中</th><th style="width:16%" data-page-node-id="YHSH6nBTSy6LyaMoo1CxkA">真阳性</th><th data-page-node-id="GhL65cbLKlwIKlfHEEHWsm">处置</th></tr></thead>
+    <tbody data-page-node-id="TVfIgn9uPR1QCMJe9HUTji">
+      <tr data-page-node-id="dUtOeUz9yN8Q0KmwiydPTM">
+        <td data-page-node-id="EfaYkkUrWLndiUy4CHq7AK">answer 是单值 + 解析里抽不到可回算它的算式</td>
+        <td data-page-node-id="jQaB5RwOZILXD9bOfJlzCm">28 条</td>
+        <td data-page-node-id="BWIq96HUFV71WC8Q7ZwS5e"><b data-page-node-id="w0AIGs6xB7z3FHcekZnKCX">1 条</b></td>
+        <td data-page-node-id="yyPVuBuF5qOGKOu9PlfDZL"><span class="tag t-no" data-page-node-id="aT39Zt5zHG1DTLZ3bTJ3L9">废弃</span> 27 条是正确答案（<code data-page-node-id="jCcEIAvnuCj1MMpGvXKq3y">27 的立方根为 3</code>、<code data-page-node-id="oqvGHdGMsq1lHzsQfD8S3T">√9 的算术平方根是 3</code>、<code data-page-node-id="sUZiDVmVZoNR4EpGyKGlOx">x³=64 则 x=4</code>）</td>
+      </tr>
+      <tr data-page-node-id="u4fWVF9OK3kyAVVIOCiVkX">
+        <td data-page-node-id="pLYYL2u2s81y5glIQ73wby">结论区错等式抄写（判据 A，修正后）</td>
+        <td data-page-node-id="1jAjSjF5XqE8hrjf7FHjx5">1 条</td>
+        <td data-page-node-id="cmHj7oiGqVsxHgTXzIW4FC"><b data-page-node-id="7qcxRc4VCxjfdknZD4fCSl">1 条</b></td>
+        <td data-page-node-id="0SOB8uirOF6TEOVT1bIitO"><span class="tag t-ok" data-page-node-id="RnAzU3p5AvlE3v0TkNHD3e">采用</span> 事故真题 <code data-page-node-id="EBxxqwLXiRirIBmHacod0o">8 + 3 = 29</code>（答案 29，正确 11）</td>
+      </tr>
+    </tbody>
+  </table>
+  <p class="note" data-page-node-id="TO9f7c7ZUE0Uj6y7CDx7mt">
+    根因：解析写法千变万化（口算、纯文字描述、算式片段被截断），<b data-page-node-id="OLuApt1eZebmSoiPOI4dJn">「抽不到可回算的算式」不等于「答案错」</b>。
+    该宽口径判据已删除，并用 <code data-page-node-id="nfIySIcHFDKHjxvDpJgAOf">test/referenceAnswerSelfCheck.test.mjs</code> 锁死防复活。
+  </p>
+
+  <h2 data-page-node-id="p5F7LCiyJLPjn0hr1Hqs05">三、重要修正：推翻上一轮报告的一个数字</h2>
+  <div class="hl" data-page-node-id="aWnrjnkVPyy7z7nz4GpqKh">
+    上一轮说「抓错句 <b data-page-node-id="fQA02F2BLpOECWYhyQb6hN">45 / 586 条缓存（7.7%）</b>，需重刷」—— 实测<b data-page-node-id="uhN9eyiRRphsSRf3O2AvEV">该口径以误报为主，不可执行</b>。
+  </div>
+  <p data-page-node-id="IMBxOwK3pO9HHkfGuze2zG">
+    逐条比对「落库 <code data-page-node-id="VAXAIgKMsKmAdcDsvtqM7I">answer</code>」与「用解析重算的文末答案」：不一致 41 条，但绝大多数是 <code data-page-node-id="6d7IpnV6bD1iFSBpijBW6C">answer</code> 更准 ——
+    <code data-page-node-id="PdQcxlAIvAQv05uWIuGpok">answer</code> 的首选来源是<b data-page-node-id="S9AyT4uQ5THEaUPnRPHCKi">卷面印刷答案（OCR）</b>，而解析末句常是「故选 B」「7/8，而不是 ±7/8」这类带上下文的句子。
+    按那个统计批量改写，会破坏大量正确答案。
+  </p>
+  <p data-page-node-id="ha3CMfEFjCIbYizhBoOm4G">真正需要修的是窄口径「叙述型」（关键词命中，事故时 14 条），现在<b data-page-node-id="wmzbSRpLXGG0jQVbq4dtN9">已清零</b>。可复用的对账口径见 <code data-page-node-id="nokruxTHbLCgr2HAOEhx5M">server/_diag_answer_qa_0914_diff.mjs</code>。</p>
+
+  <h2 data-page-node-id="Z1uJ6CcGz7pB1C1To1KEwy">四、存量数据回填（均已执行，各有备份表，可 <code data-page-node-id="vuiNUf4QPmMlUlz2dsjHET">--rollback</code>）</h2>
+  <table data-page-node-id="aiVA00ULU7W8UU0Ja2L21G">
+    <thead data-page-node-id="rnWfxS2tig8SACBHAJYzDN"><tr data-page-node-id="kn8KGKsrMtkpoboqiabBHH"><th style="width:30%" data-page-node-id="TzPGOUeMd0wYloYuOykb2J">动作</th><th style="width:12%" data-page-node-id="7ZZ0jvihUi3FxgjIbkZKTi">行数</th><th style="width:32%" data-page-node-id="KRHnYsjRf9JupwPjiRBDeG">脚本</th><th style="width:26%" data-page-node-id="B2CyFngBBiiNT1RZgcA6AV">备份表</th></tr></thead>
+    <tbody data-page-node-id="sCGXxvUWFQED5XMitNqbSK">
+      <tr data-page-node-id="HC67ikieVaMG5e9QE4p8b0">
+        <td data-page-node-id="xHxwgTdhnXh1aZHqhHvVqm">解答题 <code data-page-node-id="YjLmEAfcyI0sWNmAE1N48o">is_correct → NULL</code>（本次重练未判）</td>
+        <td data-page-node-id="wvQrpSzK8OvL14FcFjKxWN">27</td>
+        <td data-page-node-id="xLcwrKq2YaC9wU3kohfAod"><code data-page-node-id="3LnJaqQeKJLGPjKcaTYw9X">backfill-retry-notjudged-20260914.mjs</code></td>
+        <td data-page-node-id="gmK7WTAWG4cMBmP1a6opT2"><code data-page-node-id="jFGeuY9aXdeJMidsNt5dWu">questions_bak_20260914_retrynotjudged</code></td>
+      </tr>
+      <tr data-page-node-id="bQv0bWHDrMXF80CWqehthm">
+        <td data-page-node-id="c101iIDdLDlR5SQIAbt4Wq">救不回的叙述型缓存作废为「待人工补充」</td>
+        <td data-page-node-id="aF0EHLzAUeSdlWCYEMAzMT">2</td>
+        <td data-page-node-id="XuOQy5Yn1EBVTGr6DXXlUd"><code data-page-node-id="kVvD3izwdGr2FiMy1oNDgA">backfill-answer-quality-20260914.mjs</code></td>
+        <td data-page-node-id="trAQEuFwwogADtak6VVGu5"><code data-page-node-id="VNV5KNIHZSo76BZhCxHSbt">questions_bak_20260914_answer</code><br data-page-node-id="gZrqdIL2QUCjNG6THhNC0b"><code data-page-node-id="EZhBd5F8ZAPz1rSInRJRpA">question_cache_bak_20260914_answer</code></td>
+      </tr>
+      <tr data-page-node-id="ih46wA34nFkYr4wiMxr8aS">
+        <td data-page-node-id="EcNpCFLHYp9vCwexmoNGg6">标注「参考答案存疑」</td>
+        <td data-page-node-id="weNK85KiQjlGEnkGuOO0mK">5</td>
+        <td data-page-node-id="qAAtJCxnmQaRZmVGwIokE6"><code data-page-node-id="ksUeid8rH3LMCR2q1knMJK">backfill-reference-risk-20260914.mjs</code></td>
+        <td data-page-node-id="3PVPUZchj33DsB0KXg5Aus"><code data-page-node-id="JlALZm5Oslx8FCrG0XqGqD">questions_bak_20260914_risk</code></td>
+      </tr>
+    </tbody>
+  </table>
+  <p class="note" data-page-node-id="Zo1zgqZ7iNSGBrfbZEI5LN">
+    三条脚本重跑均为 0 行（幂等）。5 条风险标注全部是<b data-page-node-id="86u07AtWEBAFSO84k633ki">同一道题</b>（<code data-page-node-id="gYEuZ59YnNuYxSp4EkAvvM">2.6̇ → a/b</code>）在 5 个学生名下 ——
+    正是 <code data-page-node-id="IomsGllzyN8ftdRPlUdDvN">question_cache</code> 题干指纹复用「一条错答案传染所有学生」的实证。
+    「待人工补充」是既有占位符，worker 的缓存命中判定显式排除它 ⇒ 后续同题改走答案引擎重新生成。
+  </p>
+
+  <h2 data-page-node-id="oOW59DFKAW1ZMJxwf9OqfT">五、沉淀的两个实现坑（写给下一个改这块的人）</h2>
+  <ul data-page-node-id="oLmCDn0NUzH8XTDasovFaE">
+    <li data-page-node-id="XJdFzKXb0UEAEovJAhTXg3">
+      <code data-page-node-id="5tXMxwLjPKD3Api1VumoUU">validateArithmeticAnswer</code> 的 <code data-page-node-id="4zKDtkOqQhkXvIlFQ1aHir">applicable</code> 要求两侧都<b data-page-node-id="QtN3BQrYKCXSRmXXNGmepX">含运算符</b> —— 纯数字串会被判成「不是算式」。
+      要让 <code data-page-node-id="vZH7h1GaaQgTcvOZfrAzTR">29</code> 进入求值器得两侧补 <code data-page-node-id="CVXX29l2lAdEC6fLXJ8SdY">+0</code>（不改变数值）。缺这一步时 <code data-page-node-id="G6VEvEBImdKq69hk1LsWyX">8 + 3 = 29</code> 永远抓不到（实测漏判过）。
+    </li>
+    <li data-page-node-id="4RDeAiV0VwXvqNpvUN9XMB">
+      等式的字符类必须含 OCR 变体 <code data-page-node-id="iy2IUumfhIuPyDgIbvzto6">× ÷ − – — （）</code> —— 漏 <code data-page-node-id="ANmkRAXAjS5LYeRPNJ5E11">×</code> 时 <code data-page-node-id="0yGTRbQPRdtjtIjLRQnN88">2×1-5=2-5=-3</code> 会被从中间切断成
+      <code data-page-node-id="ImwN02WvI9HxqJ14ChAM6C">1-5=2-5</code>（-4 ≠ -3），凭空造出一个假阳性（这是唯一的误报来源，已修）。
+    </li>
+  </ul>
+
+  <h2 data-page-node-id="w6giEA8OdDSQ8S0Xak66AW">六、答案纠正（已闭环，commit 99857de）</h2>
+  <table data-page-node-id="EANr8nHAC2Yq9iVjdGDk1F">
+    <thead data-page-node-id="2UoufvML5d6m6I3TqVxpxU"><tr data-page-node-id="IQPwrllFIDjO1FVVOyAZDJ"><th style="width:30%" data-page-node-id="7SO3ACCBUfh65xQxYRO9Zu">题</th><th style="width:16%" data-page-node-id="pMlEReXWktHYJAKFjD6E1t">原答案</th><th style="width:22%" data-page-node-id="dFGqjFOyjHOw0T335B2gcT">改为</th><th data-page-node-id="k9aJBSFuNJXuCTrlVw7faW">处理结果</th></tr></thead>
+    <tbody data-page-node-id="yVumVed7HIdZ7wQSLsmvfS">
+      <tr data-page-node-id="Qr6vLi9wkTMxG7MrNl5Gcc">
+        <td data-page-node-id="JMeitPFqV1Jbbuo9v8LO4f">#4 <code data-page-node-id="C1vJFjjoD1sgcg4W00AkLk">|x|=√6 … 求 x+y</code></td>
+        <td data-page-node-id="WWXx4yOE0ockN8DT8ytucO"><code data-page-node-id="V0747JWF04xcsdWlWQ1hmY">2</code></td>
+        <td data-page-node-id="vrY2c55jzBSF245zb5NOPh"><code data-page-node-id="bgkHnWhXhM6lMfJxCwOAn0">√6+2 或 √6-2</code></td>
+        <td data-page-node-id="b57E3bMTdkFfXBsIIL4he6">2 行未复核 → 判对（原判错）；2 行老师已复核 → 只改答案、保留老师结论</td>
+      </tr>
+      <tr data-page-node-id="okeH8EEzSpB07dB1tqXAVH">
+        <td data-page-node-id="txHc5ExXx6XgjaxNwkz2EE">#7 <code data-page-node-id="OdTyRFxtAIOENEHulIwhGe">2.6̇ → a/b 求 a+b</code></td>
+        <td data-page-node-id="XHFJ8ODVQ7MV8VYJE2dkyu"><code data-page-node-id="m5sGlESWnW2UCxPkW4lfrZ">29</code></td>
+        <td data-page-node-id="3pqLVopnmsJKLxqBkm0dZw"><code data-page-node-id="dmq2md2WgIMmI2yndWNzA2">11</code></td>
+        <td data-page-node-id="hvQbT8KMCjQ87v2mRYCYwF">4 行未复核 → 重判为错（学生答 18，见下）；1 行已复核 → 保留</td>
+      </tr>
+      <tr data-page-node-id="9UxnFDECXeAhAuRHxcgXeF">
+        <td data-page-node-id="TPdHcRJSuFO3za0esJKoLn">#12 <code data-page-node-id="RxHIckFlTeTc0YVNh51AeK">2+2⁻¹+2⁻²+⋯</code></td>
+        <td data-page-node-id="mVUAKBMhewBUpsnxnIfXN4"><code data-page-node-id="TGCOkzNrmrgqI9kLc1rxZg">4</code></td>
+        <td data-page-node-id="Ac2xCe4zQgkrZp79nBLcDu"><b data-page-node-id="zGNy2GIP3BCau74Q3ObBfQ">不改</b></td>
+        <td data-page-node-id="NpHCEPYcYxouoRY5GBDCu4"><span class="tag t-ok" data-page-node-id="N3UBPLoxUHBNHrKltk2IYF">原答案正确</span> 首项 2、公比 1/2 ⇒ S = 2/(1−1/2) = 4</td>
+      </tr>
+    </tbody>
+  </table>
+
+  <div class="hl" data-page-node-id="oV2fuabdRkndG2Sh8wWHmk">
+    <b data-page-node-id="Y76JESLWF34P02W74hA81x">修正上一轮报告：</b>#12 曾被判定「答案 4 错、学生 3 对」—— <b data-page-node-id="xTJm9ErjKVWTuqFVyljR8B">该结论是错的</b>。
+    该题题干首项是 <code data-page-node-id="iVCnYv09KEcD7OGvXBIVoL">2</code>（不是 <code data-page-node-id="CfgCD3RsUvOEBrrlERZ1pX">2⁰</code>），<code data-page-node-id="rB5NCDKZzs2zk3h8xhXSGr">S = 4</code> 正确；学生写 3 是错位相减漏项，答错了。
+    教训：<b data-page-node-id="z24VLW3X0z5CyDDfHXewd7">改判前必须把题干原文抠出来</b> —— <code data-page-node-id="4Ooc2vK3F1vveWQBtFqz2i">2</code> 与 <code data-page-node-id="0UgB76OLG2B9uWHVGU6Ni1">2⁰</code> 在库里几乎看不出差别，但结论从 3 变成 4。
+  </div>
+
+  <p data-page-node-id="EAmg5uw4l5slnvF1awvlDk"><b data-page-node-id="DntNRhAKfdE9AqSebfC1th">改判口径</b>（脚本已固化）：只重判 <code data-page-node-id="mEmJ6KCA7Qym5WLrxOTTFN">review_status IS NULL</code> 的行，老师已复核的结论不被脚本翻转；
+  同步改写 <code data-page-node-id="WrzlHNFK9VhK3aCERqVawr">question_cache.answer</code>（否则题干指纹命中后又会把错答案写回来）；清掉 <code data-page-node-id="fYIY6VjArPfn4FRpf6DXat">ai_answer_risk_reason</code>。
+  备份表 <code data-page-node-id="RzXvgBN52XjBA5UCHMMs9Q">questions_bak_20260914_correction</code> / <code data-page-node-id="nE5Fvsui15qfeiiXAg7Ivu">question_cache_bak_20260914_correction</code>，脚本幂等。</p>
+
+  <h3 data-page-node-id="kMIpQqUShQZnMJegt2SRXt">仍需人工决定的一件事</h3>
+  <p data-page-node-id="jHxG5qhAlLpSWgAAlGWDe5">
+    #7 的 5 个学生答的都是 <code data-page-node-id="yA9Hh78Ivcrs9ZM7sO7cBB">18</code> —— 他们看到的重练卷<b data-page-node-id="aLsdEoB9URFFEA94F0VS1Y">印成了 <code data-page-node-id="ILFHAAeCYo0nK00Uh37Khd">2.6</code>（循环点丢了）</b>，
+    按印出来的题算出 13/5 → a+b=18。答案改对后他们仍被判错。
+    这不是判等层能解决的，需在两条路里选一条：
+  </p>
+  <ul data-page-node-id="XGgAnVQE38ngdUcrituyc3">
+    <li data-page-node-id="kkTKr7BsMifYhoGat7ZHtS"><b data-page-node-id="uskmPM5Y4AQRGO04KBLcaW">人工改判为对 / 标 <code data-page-node-id="5UiOGv7ULHhcoNPclHuzE7">exclude</code></b>（承认是系统打印坏了，不该算学生错）；</li>
+    <li data-page-node-id="UsCmr6jd3sEK1VmMgLJ4QH">或先修打印链路（P1），再决定这批历史数据怎么处理。</li>
+  </ul>
+
+  <h2 data-page-node-id="F58G3Cy6vgeg7eb5Rz9fI4">七、部署状态</h2>
+  <p data-page-node-id="3taYPCq1J8W2QpJJuopjoE">
+    两个 commit（<code data-page-node-id="uaQURorBxH898UdhMwkIwM">f3baba8</code>、<code data-page-node-id="hw9sm6H6Ll1oXBCqLKTKOi">99857de</code>）<b data-page-node-id="4IWEPoHaFifhhIZN6bH7dG">已 push 到 main</b>
+    （<code data-page-node-id="9nZkbd9fOCfGjHJBc0ihZy">2a57ab3..99857de</code>）→ Render 后端与 Cloudflare Pages 前端自动部署中。
+  </p>
+
+</div>
+</body>
+</html>

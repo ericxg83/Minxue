@@ -1033,6 +1033,44 @@ export const updateWorksheetParseProgress = async (id, { totalPages = null, done
   return rows[0] || null
 }
 
+/**
+ * 启动清残：把「上一次进程生命周期里残留的 parsing 状态」重置为 failed。
+ *
+ * 为什么需要（2026-09-15 八上数学_上海作业 56 页解析事故）：
+ *   练习册答案解析寄生在 Web 进程内（routes/worksheets.js 的 parsePdfInBackground /
+ *   doParseOcrBatched），状态回写也在同一进程。进程一旦重启（Render 部署切换 / 实例 OOM），
+ *   任务被杀且没人写回状态，parse_status 就永远停在 'parsing'：
+ *     ① 前端无限转圈（实测 updated_at 冻结、parse_done_pages 零推进）；
+ *     ② 重新上传被 409「该练习册正在解析中」拦掉，要干等 STALE_PARSING_MS(12 分钟) 才放行；
+ *     ③ pendingTaskRecovery.scanStuckWorksheetParsing 要 15 分钟 + 扫描间隔才兜底；
+ *     ④ 夜间补解析明确跳过 parsing 记录。
+ *   判据「进程刚启动 ⇒ 不可能存在本进程发起的解析」使其零延迟、零误判。
+ *
+ * 只清理 updated_at 早于本进程启动时刻的记录（uptimeSec 秒前），
+ * 避免与启动瞬间新进来的解析请求竞争。
+ *
+ * ⚠️ 仅在托管实例（RENDER 环境变量，Render 会自动注入）执行：
+ *    本机 dev 实例与线上共用同一个 Neon 库，若本机启动也无条件清理，
+ *    会把线上正在跑的解析误判为中断。
+ *
+ * @returns {Promise<{skipped?: string, count: number, names: string[]}>}
+ */
+export const cleanupStaleParsingOnBoot = async () => {
+  if (!process.env.RENDER) return { skipped: 'not-render', count: 0, names: [] }
+  // 本进程已运行秒数：updated_at 早于该时刻 ⇒ 必然由上一个（已死的）进程发起
+  const uptimeSec = Math.max(1, Math.floor(process.uptime()))
+  const { rows } = await query(
+    `UPDATE ${TABLES.WORKSHEETS}
+     SET parse_status = 'failed',
+         parse_error = '解析进程随服务器重启中断（已完成批次的答案已保留），请重新解析'
+     WHERE parse_status = 'parsing'
+       AND updated_at < NOW() - make_interval(secs => $1::int)
+     RETURNING id, name`,
+    [uptimeSec]
+  )
+  return { count: rows.length, names: rows.map(r => r.name) }
+}
+
 export const updateWorksheetAnswerCount = async (id) => {
   const { rows } = await query(
     `UPDATE ${TABLES.WORKSHEETS} SET answer_count = (
@@ -1129,9 +1167,9 @@ export const upsertResourceUnitPageRanges = async (resourceId, ranges) => {
   }
   const { rows } = await query(
     `UPDATE resource_units SET
-       answer_page_start = v.start,
-       answer_page_end   = v.end
-     FROM (VALUES ${values}) AS v(unit_key, start, end)
+       answer_page_start = v."start",
+       answer_page_end   = v."end"
+     FROM (VALUES ${values}) AS v(unit_key, "start", "end")
      WHERE resource_units.resource_id = $1
        AND resource_units.unit_key    = v.unit_key`,
     params

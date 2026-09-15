@@ -156,6 +156,14 @@
                 <Loading />
               </el-icon>
             </template>
+            <!-- 与服务端失联（后端重启/网络异常）时的显式提示，不再是无声卡住 -->
+            <el-alert
+              v-if="parsePollError"
+              :title="parsePollError"
+              type="warning"
+              :closable="false"
+              style="margin-top: 12px; text-align: left"
+            />
           </template>
         </el-result>
       </div>
@@ -297,6 +305,9 @@ const parseError = ref('')
 const parseMessage = ref('')
 const parsePollError = ref('')
 let parsePollErrorCount = 0
+// 轮询连续失败多少次才提示"与服务端连接异常"。间隔 2s ⇒ 15 次约 30 秒，
+// 足以区分"后端重启/网络抖动"与"偶发一次超时"，不会误报。
+const POLL_FAIL_NOTICE_COUNT = 15
 // 大文件分批解析进度（后端 parse_total_pages/parse_done_pages，NULL = 无页级进度走转圈）
 const OCR_BATCH_SIZE = 15 // 与后端 worksheets.js 的 OCR_BATCH_SIZE 保持一致，用于显示当前批次页码范围
 const parseTotalPages = ref(0)
@@ -501,6 +512,11 @@ const pollParseStatus = async () => {
   try {
     const ws = await getWorksheet(currentWorksheetId.value)
     if (!ws) return
+    // 连接已恢复：清掉此前的连接异常提示，避免残留误导
+    if (parsePollErrorCount > 0) {
+      parsePollErrorCount = 0
+      parsePollError.value = ''
+    }
     parseStatus.value = ws.parse_status || 'idle'
 
     if (ws.parse_status === 'parsing') {
@@ -557,7 +573,14 @@ const pollParseStatus = async () => {
     }
     // 'parsing' — continue polling
   } catch (e) {
-    // poll error, keep trying
+    // 轮询失败此前后完全静默，用户只看到进度条不动、没有任何解释
+    // （2026-09-15：后端在解析启动 41 秒后重启，用户重试上传撞上重启窗口，
+    //  看到的唯一反馈就是「网络失败」，而库里状态其实卡在 parsing）。
+    // 连续失败达阈值即显式说明原因，并告知恢复后如何自救。
+    parsePollErrorCount += 1
+    if (parsePollErrorCount >= POLL_FAIL_NOTICE_COUNT) {
+      parsePollError.value = `与服务端连接异常（已连续失败 ${parsePollErrorCount} 次）：服务器可能正在重启，后台解析可能已中断。连接恢复后若进度仍是 0%，请点「重新上传」重试。`
+    }
   }
 }
 

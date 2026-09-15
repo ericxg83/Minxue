@@ -176,22 +176,21 @@ export const getAiAnswerRiskText = (question) => {
 }
 
 /**
- * 参考答案的**来源** —— 纯展示，不参与任何判定（2026-09-14 P2）。
+ * 参考答案的**来源** —— 纯展示，不参与任何判定（2026-09-14 P2 引入，2026-09-15 收敛为两档）。
  *
  * 为什么要让老师看见：批改页上「参考答案」和「学生答案」两栏长得一样，老师看不出
- * 参考答案是**卷面上印的**（出题方给的官方答案）还是**系统自己算的**（原卷没印答案时
- * 由答案引擎补的）。错题再测-0911 事故里老师反复怀疑批改逻辑，实际是 AI 补的参考答案
- * 错了（`29`、`2`）。标出来，老师才会先怀疑答案、而不是先怀疑学生。
+ * 参考答案是**练习册答案库**给的还是**系统自己算的**。错题再测-0911 事故里老师反复
+ * 怀疑批改逻辑，实际是 AI 补的参考答案错了（`29`、`2`）。标出来，老师才会先怀疑答案、
+ * 而不是先怀疑学生。
  *
- * 判据（只用**确定的**信号，不猜）：
+ * 口径（2026-09-15 负责人确认）：**卷面上只印题目、不印答案**。参考答案只可能有两个来源：
  *   · `answer_source === 'worksheet'` → 答案库（练习册管线显式写入；该列语义混用，
  *     只有 'worksheet' 描述参考答案，'recognized'/'blank'/'teacher_input' 描述学生答案）
- *   · `cache_id` 非空 → AI 生成：cache_id 只在答案引擎补答案（或缓存命中复用）时写入，
- *     卷面印刷答案的题走不到那条链路（答案已存在就不会进 needAnswer 集合）
- *   · 其余 → 卷面印刷
+ *   · 其余 → AI 解答（答案引擎/判题链路求解所得。cache_id 非空是「确定由答案引擎补答案」
+ *     的强信号；无 cache_id 的存量数据同样来自 AI 链路 —— 原来的「卷面印刷」兜底档
+ *     前提不成立，已废除，不再给不确定的来源编造标签）
  */
 export const REFERENCE_ANSWER_ORIGIN = Object.freeze({
-  PRINTED: 'printed',
   ANSWER_BANK: 'answer_bank',
   AI_GENERATED: 'ai_generated'
 })
@@ -213,18 +212,10 @@ export const getReferenceAnswerOrigin = (question) => {
       hint: '参考答案取自练习册答案库'
     }
   }
-  if (question.cache_id) {
-    return {
-      key: REFERENCE_ANSWER_ORIGIN.AI_GENERATED,
-      label: 'AI 生成',
-      tone: 'warning',
-      hint: '卷面未印参考答案，此答案是系统自动求解的，仅供参考。若与您的判断不符，请直接改判。'
-    }
-  }
   return {
-    key: REFERENCE_ANSWER_ORIGIN.PRINTED,
-    label: '卷面印刷',
-    tone: 'info',
-    hint: '参考答案取自卷面印刷内容'
+    key: REFERENCE_ANSWER_ORIGIN.AI_GENERATED,
+    label: 'AI 解答',
+    tone: 'warning',
+    hint: '卷面不印答案，此参考答案由 AI 自动求解，仅供参考。若与您的判断不符，请直接改判。'
   }
 }
