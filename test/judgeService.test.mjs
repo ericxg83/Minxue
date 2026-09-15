@@ -314,3 +314,29 @@ test('scientific notation is equivalent to its decimal value', () => {
   assert.deepEqual(judgeAnswer('6×10²', '500', 'answer'), { isCorrect: false, unrecognized: false })
   assert.deepEqual(judgeAnswer('2×10⁻³', '0.02', 'fill'), { isCorrect: false, unrecognized: false })
 })
+
+// 缺陷 6（2026-09-15 用户截图）：学生答 'y = -2 + bx + c'（含未定义变量 bx）被判对，
+// 且对任意参考答案都成立（实测 'bx + c' vs '随便什么文字' 也判对）。
+// 根因：isMathEquivalent 的 evaluatedCount++ 在 fn1()/fn2() 调用之前自增——
+// 表达式语法合法但引用未定义标识符时，new Function 构造成功、计数 +1、调用抛
+// ReferenceError 进 catch；10 个测试点全部如此 → evaluatedCount=10 → return true。
+// 修复：只有双侧都成功求出有限数值才算有效测试点。该通道放行的判定只会 true→false
+// （保守判错交人工），不存在反向放水。
+test('math equivalence must not pass un-evaluable student expressions', () => {
+  const ref = 'y=-1/2x²+2x+5/2'
+  // 报障原案例：学生答案含未定义变量 bx，与参考完全不等值
+  assert.deepEqual(judgeAnswer('y = -2 + bx + c', ref, 'answer'), { isCorrect: false, unrecognized: false })
+  // 放水面的极端形态：含未定义变量的答案对任何参考都不再无条件判等
+  assert.deepEqual(judgeAnswer('bx + c', '随便什么文字', 'answer'), { isCorrect: false, unrecognized: false })
+  assert.deepEqual(judgeAnswer('bx + c', 'y=999', 'answer'), { isCorrect: false, unrecognized: false })
+  assert.deepEqual(judgeAnswer('b + 3', '5', 'fill'), { isCorrect: false, unrecognized: false })
+
+  // 不得误伤：可求值的正确等价写法必须照常判对
+  assert.deepEqual(judgeAnswer('y = -1/2x² + 2x + 5/2', ref, 'answer'), { isCorrect: true, unrecognized: false })
+  assert.deepEqual(judgeAnswer('y = -1/2x^2 + 2x + 5/2', ref, 'answer'), { isCorrect: true, unrecognized: false })
+  assert.deepEqual(judgeAnswer('y = -(1/2)x^2 + 2x + 5/2', ref, 'answer'), { isCorrect: true, unrecognized: false })
+  assert.deepEqual(judgeAnswer('2a + 3a', '5a', 'fill'), { isCorrect: true, unrecognized: false })
+
+  // 除零等未定义运算：测试点被跳过，但只要还有可求值点就正常比较
+  assert.deepEqual(judgeAnswer('1/0', '1', 'fill'), { isCorrect: false, unrecognized: false })
+})

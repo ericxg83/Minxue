@@ -506,9 +506,18 @@ function prepareMathExpr(input) {
   // 先处理"数字 空格 ( " 的形式（"2 √5"→"2 ((5))**0.5" 后是 "2 ("）：必须在 (\d)([a-zA-Z(]) 之前，
   // 否则 "2 (" 因中间有空格而漏插 *，生成 "2 ((" 的非法 JS → eval 抛错 → 误判不等。
   s = s.replace(/(\d)\s+\(/g, '$1*(')
+  // 数字与字母之间带空格的隐式乘号（2026-09-15）：OCR 常见 "1/2 x²"。
+  // 与下一行无空格规则同构；缺它时表达式在每个测试点抛错（旧计数缺陷下假 true）。
+  s = s.replace(/(\d)\s+([a-zA-Z])/g, '$1*$2')
   s = s.replace(/(\d)([a-zA-Z(])/g, '$1*$2')
   s = s.replace(/([a-zA-Z)])(\d)/g, '$1*$2')
   s = s.replace(/\)\(/g, ')*(')
+  // 右括号与字母/数字之间的隐式乘号（2026-09-15）：\frac{1}{3}x² 转成 "(1)/(3)x**2" 后，
+  // `)x` 之间漏插 * → 代入变量后变成 "(3)(v)" 被 JS 当函数调用 → 运行时 TypeError。
+  // 此前该形态在每个测试点都抛错，却因 isMathEquivalent 的计数缺陷被判"等价"；
+  // 计数缺陷修复后暴露，必须补上才能真正求值。
+  s = s.replace(/\)([a-zA-Z])/g, ')*$1')
+  s = s.replace(/\)(\d)/g, ')*$1')
   return s
 }
 
@@ -575,8 +584,18 @@ function isMathEquivalent(expr1, expr2) {
       try {
         const fn1 = new Function(`"use strict"; return (${s1})`)
         const fn2 = new Function(`"use strict"; return (${s2})`)
+        // 2026-09-15 用户截图：学生答 "y = -2 + bx + c"（含未定义变量 bx）被判对，且对任意参考都成立。
+        // 根因：evaluatedCount++ 原先在 fn1()/fn2() 调用之前自增——表达式语法合法但引用了
+        // 未定义标识符（如 bx）时，new Function 构造成功、计数 +1、随后调用抛 ReferenceError
+        // 进 catch。10 个测试点全部如此 → evaluatedCount=10 → return true ⇒ 含不可求值
+        // 变量的学生答案与任何参考答案都"数学等价"（实测 'bx + c' vs '随便什么文字' 判对）。
+        // 修复：只有双侧都成功求出有限数值才算"有效测试点"；求不出值或结果非有限数一律跳过。
+        // 该改动只会把"从未真正比较过"的 true 翻成 false（保守判错交人工），不产生新的放水。
+        const v1 = fn1(); const v2 = fn2()
+        if (typeof v1 !== 'number' || typeof v2 !== 'number' ||
+            !Number.isFinite(v1) || !Number.isFinite(v2)) continue
         evaluatedCount++
-        if (Math.abs(fn1() - fn2()) > 1e-9) return false
+        if (Math.abs(v1 - v2) > 1e-9) return false
       } catch {
         continue // skip test values that cause math errors (e.g. division by zero)
       }
