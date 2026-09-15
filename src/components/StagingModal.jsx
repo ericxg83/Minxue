@@ -1,12 +1,14 @@
-import { Camera, X, Upload, Loader2, Image as ImageIcon } from 'lucide-react'
+import { Camera, X, Upload, Loader2, Image as ImageIcon, Crop } from 'lucide-react'
 import { useState } from 'react'
 import { isNativeCameraAvailable } from '../services/nativeCamera'
 import { motion } from 'motion/react'
 import EmptyState from './EmptyState'
+import ImageCropper from './ImageCropper'
 
 // HEIC 预览格：浏览器解不开 HEIC 时 onError 切占位（不白屏）。
 // HEIC 上传由后端 fixFileIfNeeded needsHeicTranscode 用 heic-decode 转 jpg。
-function HeicPreviewCell({ p, onRemove }) {
+// HEIC 不提供裁剪入口：WebView canvas 解不开 HEIC，裁剪必然失败，留给上传管线的转码环节。
+function HeicPreviewCell({ p, onRemove, onCrop }) {
   const [errored, setErrored] = useState(false)
   const showPlaceholder = errored || !p.url
   return (
@@ -24,6 +26,16 @@ function HeicPreviewCell({ p, onRemove }) {
           className="w-full h-full object-cover"
           onError={() => setErrored(true)}
         />
+      )}
+      {onCrop && !showPlaceholder && !p.isHeic && (
+        <button
+          onClick={onCrop}
+          className="absolute top-1 left-1 w-5 h-5 rounded-full flex items-center justify-center"
+          style={{ background: 'rgba(0,0,0,0.5)', color: '#fff' }}
+          aria-label="裁剪这张图片"
+        >
+          <Crop size={11} />
+        </button>
       )}
       <button
         onClick={onRemove}
@@ -47,11 +59,19 @@ export default function StagingModal({
   cameraBusy = false,
   onFilesSelected,
   onRemoveFile,
+  onCropFile,
   onSubmit
 }) {
   const title = stagingType === 'workbook' ? '练习册作业' : stagingType === 'homework' ? '日常作业' : stagingType === 'wrong_retry' ? '错题重练' : stagingType === 'retry_bound' ? '错题重练 · 上传答卷' : '普通试卷'
   // 原生平台走系统相机/相册，可以连拍；Web 端只有一次性的文件选择器。
   const native = isNativeCameraAvailable()
+
+  // 2026-09-15 裁剪入口只对普通录入开放：
+  // - workbook：练习册批改靠整页课时编号硬锚定，裁掉页眉会破坏答案锚定
+  // - wrong_retry / retry_bound：重练卷靠卷面二维码绑 examId，裁掉二维码进不了重练批改
+  const canCrop = !!onCropFile && (stagingType === 'regular' || stagingType === 'homework')
+  const [croppingIdx, setCroppingIdx] = useState(null)
+  const croppingPreview = canCrop && croppingIdx != null ? stagingFiles[croppingIdx] : null
 
   return (
     <div className="absolute inset-0 z-[25000] flex items-end justify-center">
@@ -115,7 +135,12 @@ export default function StagingModal({
           {stagingFiles.length > 0 && (
             <div className="grid grid-cols-3 gap-2 mb-4">
               {stagingFiles.map((p, i) => (
-                <HeicPreviewCell key={i} p={p} onRemove={() => onRemoveFile(i)} />
+                <HeicPreviewCell
+                  key={i}
+                  p={p}
+                  onRemove={() => onRemoveFile(i)}
+                  onCrop={canCrop ? () => setCroppingIdx(i) : undefined}
+                />
               ))}
             </div>
           )}
@@ -150,6 +175,22 @@ export default function StagingModal({
           )}
         </div>
       </motion.div>
+
+      {/* 裁剪全屏层：z-[30000] 盖住暂存弹窗（z-[25000]）。
+          必须放在 motion.div 外面——sheet 带 transform 动画，
+          fixed 后代会退化成相对 sheet 定位而不是视口。 */}
+      {croppingPreview && (
+        <ImageCropper
+          image={croppingPreview.url}
+          title="裁剪图片"
+          onCropComplete={(dataUrl) => {
+            const idx = croppingIdx
+            setCroppingIdx(null)
+            onCropFile(idx, dataUrl)
+          }}
+          onCancel={() => setCroppingIdx(null)}
+        />
+      )}
     </div>
   )
 }

@@ -6,6 +6,7 @@ import { taskService } from '../services/taskService'
 import { recognizeQuestions, compressImage, saveRecognitionResult } from '../services/aiService'
 import { detectQRCode, parseRetryExamId } from '../services/qrDetectionService'
 import { compressImagesForUpload, describeUploadFailure } from '../utils/imageUtils'
+import { dataURLtoFile } from '../utils/imageOptimizer'
 import { apiRequest, uploadImage, createTask, addWrongQuestions, clearStudentCaches, invalidateCache } from '../services/apiService'
 import { takePhotoFiles, pickPhotoFiles, isNativeCameraAvailable, describeCameraError } from '../services/nativeCamera'
 import { warmUpConnection, getNetworkHealth, resetNetworkHealth } from '../services/httpCore'
@@ -135,6 +136,21 @@ export function useUploadFlow({ loadTasks, isInitializing }) {
     setStagingFiles((prev) => {
       const next = prev.filter((_, i) => i !== idx)
       if (prev[idx]?.url) URL.revokeObjectURL(prev[idx].url)
+      return next
+    })
+  }
+
+  // 2026-09-15 暂存区裁剪：把用户框选后的 dataURL 换成新 File，原位替换该张预览。
+  // 裁剪发生在 compressImagesForUpload 之前，后续压缩/上传/批改管道零改动。
+  // 文件名必须唯一化：本地去重按 file.name 匹配，沿用原图名会把裁剪后的重传判成重复跳过。
+  const applyStagingCrop = (idx, dataUrl) => {
+    setStagingFiles((prev) => {
+      const old = prev[idx]
+      if (!old) return prev
+      const file = dataURLtoFile(dataUrl, `crop_${Date.now()}_${Math.random().toString(36).slice(2, 6)}.jpg`)
+      const next = [...prev]
+      next[idx] = { file, url: URL.createObjectURL(file), isHeic: false, name: file.name }
+      if (old.url) URL.revokeObjectURL(old.url)
       return next
     })
   }
@@ -813,7 +829,7 @@ export function useUploadFlow({ loadTasks, isInitializing }) {
     showStaging, stagingFiles, stagingType, stagingUploading,
     cameraInputRef, albumInputRef,
     openStaging, openStagingForRetry, clearStaging,
-    handleStagingSelectFiles, removeStagingFile,
+    handleStagingSelectFiles, removeStagingFile, applyStagingCrop,
     onStagingCamera, onStagingAlbum, cameraBusy,
     handleSubmitStaging,
     homeworkChoiceFiles, homeworkChoiceRef,

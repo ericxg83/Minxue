@@ -442,7 +442,7 @@ export default function App() {
     showStaging, stagingFiles, stagingType, stagingUploading,
     cameraInputRef, albumInputRef,
     openStaging, openStagingForRetry, clearStaging,
-    handleStagingSelectFiles, removeStagingFile,
+    handleStagingSelectFiles, removeStagingFile, applyStagingCrop,
     onStagingCamera, onStagingAlbum, cameraBusy,
     handleSubmitStaging,
     homeworkChoiceFiles, homeworkChoiceRef,
@@ -1119,6 +1119,7 @@ export default function App() {
             cameraBusy={cameraBusy}
             onFilesSelected={handleStagingSelectFiles}
             onRemoveFile={removeStagingFile}
+            onCropFile={applyStagingCrop}
             onSubmit={handleSubmitStaging}
           />
         )}
