@@ -14,8 +14,9 @@ name: Render Keepalive
 #   GitHub 的 schedule 在高负载时可能延迟数分钟，10 分钟间隔 + 延迟
 #   仍能稳定落在 Render 的 15 分钟阈值内；同时把 Action 分钟数压到最低。
 #   仓库为 public 时 Actions 不计费；private 仓库每月约消耗 1.5k 分钟。
-#   若想完全免费且更精确，可改用 Cloudflare Worker Cron
-#   （见 docs/ops-keepalive.md 的备选方案）。
+#   若想完全免费且时间更精确，可另建一个 Cloudflare Worker 用 Cron Triggers
+#   触发同一个 URL（注意：本仓库的 wrangler.toml 是 Pages 配置，
+#   Pages Functions 不支持 cron，需要单独的 Worker）。
 
 on:
   schedule:
