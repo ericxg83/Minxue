@@ -9,7 +9,7 @@ import dayjs from 'dayjs'
 import { saveFileToDevice } from '../../utils/nativeDownload'
 import { exportWrongBookPDF } from '../../utils/wrongBookPdfExporter'
 import { triggerBrowserPrint } from '../../utils/browserPrint'
-import { printPdfOnDevice, isNativePrintAvailable } from '../../utils/nativePrint'
+import { printHtmlOnDevice, isNativePrintAvailable } from '../../utils/nativePrint'
 import {
   buildPaperBody,
   buildPaperCSS,
@@ -18,6 +18,8 @@ import {
   preloadKatexFonts,
 } from '../../utils/pdfGenerator'
 import { normalizeOptions } from '../../utils/optionText'
+// 本地卷面 HTML 渲染（KaTeX 已展开、字体 data-URL 内联），供原生打印使用
+import { renderFullHTML } from '../../utils/serverPdfExporter'
 // 多小问（题组）共享题干展示口径：与错题卡片、pdfGenerator 共用同一套实现
 import { resolveQuestionDisplayStem } from '../../utils/questionStem'
 import { KATEX_CSS_WITH_FONTS as katexCss } from '../../utils/katexCssWithFonts'
@@ -448,14 +450,48 @@ export default function PrintPreview({ onClose, questions: propQuestions, existi
         const filename = `${currentStudent?.name || 'student'}_${examName}_${dayjs().format('YYYYMMDD_HHmm')}.pdf`
         const { savedTo } = await saveFileToDevice(result.pdfBlob, filename)
         Toast.show({ icon: 'success', content: saved ? '已下载，并存入组卷历史' : '已下载到设备文件', duration: 2600 })
+      } else {
+        throw new Error('PDF 生成结果为空')
       }
     } catch (error) {
       console.error('PDF生成失败:', error)
+      // App 内兜底（2026-09-15）：服务端 PDF 或 blob→base64 桥失败时，
+      // 改开系统打印对话框——用户在打印机列表选「另存为 PDF」即可把卷子存成文件。
+      // 该路径本地渲染、零网络依赖，保证 App 里「下载PDF」永远有出路。
+      if (isNativePrintAvailable()) {
+        try {
+          setPdfStage('PDF 服务不可用，改用本地打印保存…')
+          const html = await renderPaperHTML(questions)
+          await printHtmlOnDevice(html, `${currentStudent?.name || '学生'} - ${getExamName()}`)
+          Toast.show({
+            content: 'PDF 服务暂不可用，已打开打印窗口：在打印机列表选择「另存为 PDF」即可保存文件',
+            duration: 6000,
+          })
+        } catch (fallbackErr) {
+          console.error('本地打印兜底也失败:', fallbackErr)
+          Toast.show({ icon: 'fail', content: fallbackErr?.message || '保存失败，请重试', duration: 3200 })
+        }
+        return
+      }
       Toast.show({ icon: 'fail', content: error?.message || 'PDF生成失败，请重试', duration: 3200 })
     } finally {
       setGeneratingPdf(false)
       setPdfStage('')
     }
+  }
+
+  // 本地渲染完整卷面 HTML（与预览/服务端 PDF 同一套模板）：
+  // KaTeX 在隐藏 iframe 里展开成静态 DOM、字体以 data-URL 内联，
+  // 交给原生离屏 WebView 打印时不再依赖网络与 JS。
+  const renderPaperHTML = async (questions) => {
+    const examName = getExamName()
+    return renderFullHTML({
+      title: `${currentStudent?.name || '学生'} - ${examName}`,
+      studentName: currentStudent?.name || '',
+      questions,
+      showAnswers: false,
+      qrContent: getQrContent(),
+    })
   }
 
   const handleDirectPrint = async () => {
@@ -471,17 +507,18 @@ export default function PrintPreview({ onClose, questions: propQuestions, existi
 
       // Android Capacitor 的 WebView 不保证 iframe.contentWindow.print() 有效，
       // 改走原生 PrintManager；普通网页继续使用浏览器打印对话框。
-      setPdfStage('正在打开打印窗口…')
+      //
+      // [2026-09-15 改造] 原生路径不再「服务端出 PDF → blob 转 base64 过桥」：
+      // 几 MB 的 base64 字符串走 Capacitor 桥在部分手机上会静默失败/长时间卡死，
+      // 这正是「网页能打印、App 里两个按钮都没反应」的根因。
+      // 改为本地渲染卷面 HTML → 原生离屏 WebView → 系统打印，零网络依赖。
       if (isNativePrintAvailable()) {
-        let printableBlob = pdfBlob
-        if (!printableBlob) {
-          setPdfStage('正在生成 PDF，请稍候…')
-          const result = await generatePDF(questions)
-          printableBlob = result?.pdfBlob
-        }
-        if (!printableBlob) throw new Error('PDF生成结果为空，请重试')
-        await printPdfOnDevice(printableBlob, `${currentStudent?.name || '学生'} - ${getExamName()}`)
+        setPdfStage('正在准备打印内容…')
+        const html = await renderPaperHTML(questions)
+        setPdfStage('正在打开打印窗口…')
+        await printHtmlOnDevice(html, `${currentStudent?.name || '学生'} - ${getExamName()}`)
       } else {
+        setPdfStage('正在打开打印窗口…')
         await triggerBrowserPrint({
           title: `${currentStudent?.name || '学生'} - ${getExamName()}`,
           studentName: currentStudent?.name || '',
