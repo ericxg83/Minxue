@@ -115,11 +115,15 @@ const html = `<!DOCTYPE html>
 <h2>二、已修复</h2>
 <h3>A · 展示层文案 <span class="tag ok">已改</span></h3>
 <p class="note"><code>src/utils/reviewDecision.js</code> 的 <code>getReviewStateLabel</code> 给 correct 状态补了与 wrong 对称的细分。
-移动端与 PC 端共用一份实现，<b>81 条</b>同时生效。</p>
+移动端与 PC 端共用一份实现，<b>81 条</b>同时生效。<br>
+同期措辞收敛：<code>AI正确</code>/<code>AI错误</code> → <b><code>AI判对</code>/<code>AI判错</code></b>
+（原措辞读起来像"AI 本身是对的"，而非"AI 判定学生答对"）；
+人工复核细分统一用半角 <code>-</code> 连接。并修掉 <code>ExamReview/status.jsx</code>
+correct/wrong 分支的硬编码文案 —— 它此前绕过了统一口径，导致细分在移动端不生效。</p>
 <table><thead><tr><th>is_correct（AI）</th><th>review_status</th><th>旧文案</th><th>新文案</th></tr></thead><tbody>
-<tr><td>false</td><td>correct</td><td>AI正确</td><td><b>已复核·人工判对</b></td></tr>
-<tr><td>null</td><td>correct</td><td>AI正确</td><td><b>已复核·人工判对</b></td></tr>
-<tr><td>true</td><td>correct</td><td>AI正确</td><td>AI正确（不变）</td></tr>
+<tr><td>false</td><td>correct</td><td>AI正确</td><td><b>已复核-人工判对</b></td></tr>
+<tr><td>null</td><td>correct</td><td>AI正确</td><td><b>已复核-人工判对</b></td></tr>
+<tr><td>true</td><td>correct</td><td>AI正确</td><td>AI判对</td></tr>
 </tbody></table>
 
 <h3>B · 参考答案 <span class="tag ok">已改</span></h3>
