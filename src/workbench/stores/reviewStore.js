@@ -219,6 +219,96 @@ export const useReviewStore = defineStore('review', () => {
     }
     return map
   })
+
+  // ── 重练卷「答卷覆盖度」：哪些题在整份答卷图上没有任何作答痕迹 ──
+  // [2026-09-15] 缺页黑洞（错题再测-0911 陈昊煜实锤：16 题只识别到 11 题）：
+  //   答卷少拍一页时，那几题在图上没有任何痕迹，最终落成「AI 未判定」
+  //   （exception，需要老师逐题处理）。老师看到的是 6 道"AI 判定失败"，
+  //   而真因（漏拍一页 / 学生该页空着没做）在界面上完全不可见 ——
+  //   左栏页标又被 bc94558 关掉了（paper 模式不渲染页标），于是没有任何线索。
+  //   这里把对位明细的覆盖情况算出来，交给 UI 给一句人话。
+  //
+  // 判据：retryAlign 每条对应一道卷面题，matchedBy 由 alignRetryAnswers 产出：
+  //   'number' / 'position' → 对上了 OCR 答案；'none' → 卷面有、没对到任何答案。
+  //   worker.js 对该值的注释就是「学生未作答，或整页漏识别」—— 正是要提示的两种情况。
+  //   注意**不能**用「有没有 retryAlign 记录」当判据：记录是每道卷面题都有的，
+  //   unmatched 的那几条同样在数组里（只是 matchedBy='none'、无页码无坐标）。
+  //   旧记录若缺该字段，退化为「无页码 + 无定位框 + 无学生答案」三者皆缺。
+  //
+  // 只提示、绝不作判定：不把缺痕迹的题改判成 blank，判定留给老师。
+  const isUnmatchedOnPaper = (r) => {
+    if (!r) return false
+    if (r.matchedBy) return r.matchedBy === 'none'
+    return !r.pageNumber
+      && !r.text_bbox && !r.image_bbox && !r.block_coordinates
+      && !String(r.studentAnswer || '').trim()
+  }
+
+  const retryCoverage = computed(() => {
+    if (source.value !== 'paper') return null
+    const t = currentTask.value
+    const rows = Array.isArray(t?._pageTasks) ? t._pageTasks : []
+    if (rows.length === 0) return null
+    const total = allQuestions.value.length
+    if (total === 0) return null
+
+    // 多页 / 多行 task：任一页上对到了答案就不算缺失
+    const matchedIds = new Set()
+    let anyAlign = false
+    for (const row of rows) {
+      for (const r of parsePageAlignRecords(row)) {
+        if (!r?.questionId) continue
+        anyAlign = true
+        if (!isUnmatchedOnPaper(r)) matchedIds.add(r.questionId)
+      }
+    }
+    // 整卷都没有对位明细（旧数据 / 未走对位管线）→ 无从判断，不提示
+    if (!anyAlign) return null
+
+    const missingLabels = allQuestions.value
+      .map((q, i) => (matchedIds.has(q.id) ? null : (q._paperLabel || String(i + 1))))
+      .filter(Boolean)
+    if (missingLabels.length === 0) return null
+    return {
+      total,
+      matched: total - missingLabels.length,
+      missingCount: missingLabels.length,
+      missingLabels,
+      pageCount: currentPaperPages.value.length,
+    }
+  })
+
+  // ── 每题在【答卷图】上的页码（1-based，与中央查看器「第 x / y 页」同一套编号）──
+  // 左侧题目列表的「第N页」页标数据源（2026-09-15 P1 恢复页标）。
+  //
+  // 为什么不能再用 q.page_number：那是【原始作业】的页码，与重练答卷图不是同一套编号，
+  // 这正是 bc94558 当年把 paper 模式页标整个关掉的原因之一（标出来会 1→2→1 乱跳）。
+  // 唯一可信来源是对位明细 retryAlign[].pageNumber（= 该答案所在的答卷页，
+  // 由 worker.js 逐页 OCR 时写死）。
+  //
+  // 两个必须做的换算 / 过滤：
+  //   ① 换算成 currentPaperPages 的**索引**：多行 task 时（学生分两次上传，每行各 1 张图）
+  //      两行 images 的 page_number 都是 1，直接拿 pageNumber 当页标会串页；
+  //      索引才与中央页指示器一致。
+  //   ② 无对位记录（matchedBy='none'，即图上没痕迹）的题**不标** —— 不猜页码。
+  // 只在答卷有多页时才返回（单页没有"页"可言）。
+  const retryAnswerPageMap = computed(() => {
+    if (source.value !== 'paper') return {}
+    const pages = currentPaperPages.value
+    if (pages.length <= 1) return {}
+    const map = {}
+    pages.forEach((page, idx) => {
+      const pageNum = page?.page_number || 1
+      for (const r of parsePageAlignRecords(page)) {
+        if (!r?.questionId) continue
+        if (isUnmatchedOnPaper(r)) continue
+        // 旧记录无 pageNumber → 视为第 1 页（旧管线只 OCR 首页），与定位框同款兼容
+        if (Number(r.pageNumber || 1) !== Number(pageNum || 1)) continue
+        if (map[r.questionId] == null) map[r.questionId] = idx + 1
+      }
+    })
+    return map
+  })
   
   // 所有题目（用于显示完整题号导航 1~N）
   const studentAllQuestions = computed(() => {
@@ -1194,6 +1284,10 @@ export const useReviewStore = defineStore('review', () => {
     setPageIndex,
     // 重练答卷定位框（paper 模式，来自 task.result.retryAlign）
     currentRetryAlignBoxes,
+    // 重练答卷覆盖度（卷面题数 vs 答卷图上有记录的题数），供缺页/缺题提示使用
+    retryCoverage,
+    // 每题在答卷图上的页码（1-based 索引），供左侧列表「第N页」页标使用
+    retryAnswerPageMap,
     // 撤销上一笔（仅回退前端内存状态，不反向写库）
     canUndo,
     undoLastReview,

@@ -42,6 +42,23 @@
         </el-tag>
       </div>
     </div>
+    <!-- 重练答卷覆盖度提示（缺页 / 缺题）。
+         答卷图上找不到记录的题会落成「AI 未判定」（exception，老师必须逐题处理），
+         但界面上过去没有任何线索说明"为什么这几题没判定"——左栏页标已在
+         bc94558 关闭（paper 模式不渲染），中央页指示器又只在 pages>1 时出现，
+         于是少拍一页 = 信息黑洞（2026-09-15 错题再测-0911 陈昊煜实锤：11/16）。
+         这里只陈述事实 + 两种处置建议，**不替老师改判定**。 -->
+    <div v-if="store.retryCoverage" class="review-coverage-notice">
+      <el-icon class="coverage-icon"><WarningFilled /></el-icon>
+      <span class="coverage-text">
+        本卷共 <strong>{{ store.retryCoverage.total }}</strong> 题，本次上传的答卷图上只找到
+        <strong>{{ store.retryCoverage.matched }}</strong> 题的作答记录{{ retryCoveragePageText }}；
+        <strong>第 {{ retryCoverageLabelText }} 题</strong>在图上没有任何作答痕迹。
+      </span>
+      <span class="coverage-hint">
+        若学生这几题本来空着没做，可直接按「未作答」处理；若是漏拍了一页，请让学生补传该页后重新处理。
+      </span>
+    </div>
     <!-- 重练卷不可复核（学生还没交卷 / AI 处理中） -->
     <!-- 必须先于 all-done / 三栏判断：这批卷的学生答卷不存在，三栏里的
          AI 统计、原卷出处、完成批改按钮都会拿原始作业的旧判定冒充本次结果 -->
@@ -95,7 +112,7 @@
 <script setup>
 import { computed, onMounted, onUnmounted, provide, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
-import { Check, CircleCheck, Clock, Document } from '@element-plus/icons-vue'
+import { Check, CircleCheck, Clock, Document, WarningFilled } from '@element-plus/icons-vue'
 import { useReviewStore } from '../../stores/reviewStore'
 import { getResource } from '../../../services/apiService'
 import ReviewTopBar from './ReviewTopBar.vue'
@@ -136,6 +153,26 @@ const goToTodo = () => router.push('/todo')
 const goToWrongBook = () => router.push({ path: '/wrongbook', query: { studentId: store.currentStudent?.id } })
 const goToStudents = () => router.push('/students')
 const goGradeCenter = () => router.push('/grade')
+
+// ── 重练答卷覆盖度提示文案 ──
+// 页码说明：只上传 1 页是最需要点名的情况（卷面跨 2 页却只有 1 页图 = 缺页的实锤）。
+const retryCoveragePageText = computed(() => {
+  const c = store.retryCoverage
+  if (!c) return ''
+  return c.pageCount <= 1 ? '（本次答卷只上传了 1 页）' : `（本次答卷共 ${c.pageCount} 页）`
+})
+
+// 卷面编号压成区间：12、13、14、15、16 → 12~16；散号保持顿号罗列。
+// 卷面编号可能是 '4(1)' 这类带小问号的非纯数字，遇非数字一律退回顿号罗列。
+const retryCoverageLabelText = computed(() => {
+  const labels = store.retryCoverage?.missingLabels || []
+  if (labels.length < 3) return labels.join('、')
+  const nums = labels.map(Number)
+  if (!nums.every(n => Number.isFinite(n))) return labels.join('、')
+  const sorted = nums.slice().sort((a, b) => a - b)
+  const contiguous = sorted.every((n, i) => i === 0 || n === sorted[i - 1] + 1)
+  return contiguous ? `${sorted[0]}~${sorted[sorted.length - 1]}` : labels.join('、')
+})
 
 // ── 重练卷不可复核（2026-09-12 修复）──
 // 学生还没交卷 / AI 还在跑的卷不允许进入复核视图。
@@ -441,11 +478,39 @@ const handleQuickReview = async (result) => {
   transition: filter 0.15s;
 }
 .review-progress-todo:hover { filter: brightness(0.96); }
+/* ── 重练答卷覆盖度提示（缺页 / 缺题）──
+   注意：正文用 --wb-text 而非 --wb-warning —— #D97706 压在 #FEF3C7 上对比度不足，
+   12px 小字会糊。警示语义靠左侧色条 + 数字着色承载。 */
+.review-coverage-notice {
+  display: flex;
+  align-items: baseline;
+  flex-wrap: wrap;
+  gap: 4px 10px;
+  padding: 7px 20px;
+  background: var(--wb-warning-soft);
+  border-bottom: 1px solid var(--wb-border);
+  border-left: 3px solid var(--wb-warning);
+  color: var(--wb-text);
+  font-size: 12px;
+  line-height: 1.7;
+}
+.review-coverage-notice .coverage-icon {
+  align-self: center;
+  flex-shrink: 0;
+  color: var(--wb-warning);
+  font-size: 14px;
+}
+.review-coverage-notice .coverage-text strong {
+  color: var(--wb-warning);
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+}
+.review-coverage-notice .coverage-hint { color: var(--wb-text-secondary); }
 .review-progress-alert { padding-left: 10px; border-left: 1px solid var(--wb-border); color: var(--wb-warning); font-size: 12px; }
 .review-context-actions { display: flex; align-items: center; gap: 8px; margin-left: 12px; flex-shrink: 0; }
 .review-context-actions :deep(.el-button) { display: inline-flex; align-items: center; gap: 4px; }
 .three-panel { min-height: 0; }
-@media (max-width: 1100px) { .review-shortcuts { display: none; } .review-identity-bar { padding: 0 14px; } .review-context-bar { padding: 0 14px; } }
+@media (max-width: 1100px) { .review-shortcuts { display: none; } .review-identity-bar { padding: 0 14px; } .review-context-bar { padding: 0 14px; } .review-coverage-notice { padding: 7px 14px; } }
 @media (max-width: 720px) { .review-context-bar { align-items: flex-start; flex-direction: column; gap: 8px; padding: 10px 14px; } .review-progress-summary { width: 100%; } }
 </style>
 

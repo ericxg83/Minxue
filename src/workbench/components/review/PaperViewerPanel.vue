@@ -251,14 +251,19 @@ const unionBbox = (a, b) => {
  */
 const getDisplayBox = (q) => {
   if (!q) return null
-  // paper（重练）：优先用判题对位时保存的【答卷图坐标系】框，
-  // 题目行自身的坐标属于原始作业图，画上去必然错位。
-  const retryRaw = store.currentRetryAlignBoxes?.[q.id]
-  if (retryRaw) {
+  // paper（重练）：**只认**判题对位时保存的【答卷图坐标系】框。
+  // 题目行自身的坐标属于原作业图，画到答卷图上必然错位 —— 取不到就返回 null
+  // 优雅降级（不画），绝不回退到 q 自己的坐标。
+  // [2026-09-15 修复] 旧实现在 retryRaw 存在但三个对位框全为 null 时会继续往下走，
+  // 落到 q.text_bbox / q.block_coordinates → 在答卷图上画出原作业的错位框。
+  // 而 matchedBy='none' 的题（图上没痕迹）恰好就是"记录在、框全 null"，
+  // 且实测卷内 16/16 题都带原作业坐标 → 必然命中。现在提前返回，阻断这条回退。
+  if (store.source === 'paper') {
+    const retryRaw = store.currentRetryAlignBoxes?.[q.id]
+    if (!retryRaw) return null
     const retryUnion = unionBbox(parseBbox(retryRaw.text_bbox), parseBbox(retryRaw.image_bbox))
     if (retryUnion) return retryUnion
-    const retryBlock = parseBbox(retryRaw.block_coordinates)
-    if (retryBlock) return retryBlock
+    return parseBbox(retryRaw.block_coordinates) // 可能为 null → 降级不画
   }
   const textB = parseBbox(q.text_bbox)
   const imageB = parseBbox(q.image_bbox)

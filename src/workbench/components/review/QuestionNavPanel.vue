@@ -94,6 +94,8 @@ import { ref, computed } from 'vue'
 import { useReviewStore } from '../../stores/reviewStore'
 import StatusIcon from './StatusIcon.vue'
 import { getReviewStateLabel } from '../../../utils/reviewDecision'
+// 「第N页」页标的唯一实现（含"同页只标首次出现"规则，有单测）
+import { buildRetryAnswerPageLabels } from '../../../utils/retryAnswerPageLabel'
 
 const store = useReviewStore()
 const threshold = ref(store.confidenceThreshold)
@@ -103,18 +105,29 @@ const threshold = ref(store.confidenceThreshold)
 const stateLabel = (q) => getReviewStateLabel(q, store.confidenceThreshold)
 
 // 题目归属试卷序号标签（仅每卷首题显示）
-// 两种来源：
-// 1. 多试卷聚合模式：按 questionToTaskMap 映射到任务序号
-// 2. 单任务多图（一次上传多张试卷）：按题目 page_number 映射到页序号
+// 三种来源：
+// 1. paper（重练卷）：按【答卷图】真实页码标「第N页」（见下）
+// 2. 多试卷聚合模式：按 questionToTaskMap 映射到任务序号
+// 3. 单任务多图（一次上传多张试卷）：按题目 page_number 映射到页序号
 //
-// [2026-09-13] paper（重练卷）模式不出「第N页」页标，两个原因：
-// ① 重练卷题目列表按【卷面顺序】（buildRetryPaperOrder：选择→填空→解答分块）排，
-//    页码天然交错，逐段「换页即标注」会打出 第1页/第2页/第1页 来回跳的混乱序列；
-// ② q.page_number 是【原始作业】的页码，与重练答卷图的页码不是同一套编号
-//    （见 reviewStore.syncPageForCurrentQuestion 同款结论），标出来本身就是错的。
-// 页信息由中央查看器的页指示器（第 x / y 页）承载，题号对位靠卷面顺序本身。
+// [2026-09-14 bc94558 曾把 paper 模式页标整个关掉]，两个原因：
+// ① 那时候页码源是 q.page_number = 【原始作业】页码，与重练答卷图不是同一套编号；
+// ② 重练题目按卷面顺序（选择→填空→解答分块）排，逐段换页标注会 1→2→1 乱跳。
+// [2026-09-15 P1 恢复] 两个原因现在都不成立了：
+// ① 页码源换成 retryAlign[].pageNumber（逐页 OCR 时写死的【答卷图】页码，
+//    f717242 起才有），由 store.retryAnswerPageMap 换算成与中央页指示器一致的索引；
+// ② 规则改成「同一页只在首次出现处标一次」（实现在 utils/retryAnswerPageLabel.js，
+//    有单测），不再"换页即标注"，页码即使交错也不会打出重复跳号。
+// 仍然守住的底线：无对位记录（matchedBy='none'，图上没痕迹）的题**不标** —— 不猜；
+// 答卷只有 1 页时也不标（没有"页"可言，页信息由中央指示器承载）。
 const paperLabels = computed(() => {
-  if (store.source === 'paper') return []
+  if (store.source === 'paper') {
+    return buildRetryAnswerPageLabels(
+      store.allQuestions,
+      store.retryAnswerPageMap,
+      store.currentPaperPages.length
+    )
+  }
   const map = store.questionToTaskMap
   if (map && Object.keys(map).length > 0) {
     const taskIds = [...new Set(Object.values(map))]
