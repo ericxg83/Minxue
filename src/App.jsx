@@ -729,6 +729,20 @@ export default function App() {
     }
   }
 
+  // 批量选择：全选 / 取消全选当前筛选后可见的错题（合并或剔除已选项）
+  const toggleSelectVisible = (items) => {
+    const list = Array.isArray(items) ? items : []
+    if (!list.length) return
+    const ids = new Set(list.map(i => i.id))
+    const allSelected = list.every(i => selectedQuestions.some(q => q.id === i.id))
+    if (allSelected) {
+      setSelectedQuestions(selectedQuestions.filter(q => !ids.has(q.id)))
+    } else {
+      const rest = selectedQuestions.filter(q => !ids.has(q.id))
+      setSelectedQuestions([...rest, ...list])
+    }
+  }
+
   // Edit question
   const handleEditQuestion = (question) => {
     setManagingTagsQuestion(question)
@@ -963,6 +977,8 @@ export default function App() {
                 selectedQuestions={selectedQuestions}
                 pendingWrongQuestionCount={dailyRetryQuestions.length}
                 onToggleSelection={toggleSelection}
+                onSelectVisible={toggleSelectVisible}
+                onClearSelection={clearSelection}
                 onOpenDetail={handleOpenWrongBookDetail}
                 onDelete={handleDeleteWrongQuestion}
                 onPrintPreview={handlePrintPreview}
