@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react'
-import { Bell, X, CheckCircle2, AlertCircle, Clock, Sparkles, Loader2 } from 'lucide-react'
+import { Bell, X, CheckCircle2, AlertCircle, Clock, Sparkles, Loader2, ChevronRight } from 'lucide-react'
 import { useNavigate } from 'react-router-dom'
 import EmptyState from './EmptyState'
 import { getTasksSummary, getInProgressTasks } from '../services/apiService'
@@ -21,11 +21,32 @@ const formatElapsed = (sec) => {
   return `${h} 小时${m % 60} 分`
 }
 
-export default function NotificationsPanel({ onClose }) {
+export default function NotificationsPanel({ onClose, onOpenTask, onOpenTasksPage, onOpenWrongBook }) {
   const navigate = useNavigate()
   const [summary, setSummary] = useState(null)
   const [inProgress, setInProgress] = useState([])
   const [loading, setLoading] = useState(true)
+  // 正在打开的任务：拉完整任务详情有网络往返，按钮上给出反馈并防重复点击
+  const [openingId, setOpeningId] = useState(null)
+
+  // 点击任务 = 直达该任务的结果页；未完成/重练卷无结果可看时落到作业列表。
+  // 上层（App）负责补学生上下文与决定落地页，面板只负责把任务交出去。
+  const handleOpenTask = async (task) => {
+    if (!task?.id || openingId) return
+    setOpeningId(task.id)
+    try {
+      if (onOpenTask) {
+        await onOpenTask(task)
+      } else {
+        onClose()
+        navigate('/tasks')
+      }
+    } catch (e) {
+      console.error('打开任务失败:', e)
+    } finally {
+      setOpeningId(null)
+    }
+  }
 
   useEffect(() => {
     let active = true
@@ -50,9 +71,9 @@ export default function NotificationsPanel({ onClose }) {
   }, [])
 
   const statCards = [
-    { key: 'pendingReview', label: '待确认', value: summary?.pendingReview ?? 0, icon: Clock, color: 'var(--warning)' },
-    { key: 'inProgressCount', label: '批改中', value: summary?.inProgressCount ?? 0, icon: Loader2, color: 'var(--primary)' },
-    { key: 'todayNewWrongQuestions', label: '今日新增错题', value: summary?.todayNewWrongQuestions ?? 0, icon: Sparkles, color: 'var(--primary)' }
+    { key: 'pendingReview', label: '待确认', value: summary?.pendingReview ?? 0, icon: Clock, color: 'var(--warning)', onClick: () => onOpenTasksPage?.() },
+    { key: 'inProgressCount', label: '批改中', value: summary?.inProgressCount ?? 0, icon: Loader2, color: 'var(--primary)', onClick: () => onOpenTasksPage?.() },
+    { key: 'todayNewWrongQuestions', label: '今日新增错题', value: summary?.todayNewWrongQuestions ?? 0, icon: Sparkles, color: 'var(--primary)', onClick: () => onOpenWrongBook?.() }
   ]
 
   const hasContent = !loading && summary && (
@@ -109,13 +130,18 @@ export default function NotificationsPanel({ onClose }) {
               {/* 统计卡片 */}
               <div className="grid grid-cols-3 gap-2 mb-4">
                 {statCards.map((s) => (
-                  <div key={s.key} className="rounded-xl p-3 flex flex-col items-center" style={{ background: 'var(--bg)' }}>
+                  <button
+                    key={s.key}
+                    onClick={() => { onClose(); s.onClick?.() }}
+                    className="rounded-xl p-3 flex flex-col items-center transition-opacity active:opacity-70"
+                    style={{ background: 'var(--bg)' }}
+                  >
                     <s.icon size={18} style={{ color: s.color, marginBottom: '4px' }} />
                     <span style={{ fontSize: 'var(--fs-18)', fontWeight: 700, color: 'var(--text)' }}>
                       {s.value}
                     </span>
                     <span style={{ fontSize: 'var(--fs-10)', color: 'var(--text-secondary)' }}>{s.label}</span>
-                  </div>
+                  </button>
                 ))}
               </div>
 
@@ -128,9 +154,10 @@ export default function NotificationsPanel({ onClose }) {
                   {inProgress.map((t) => (
                     <button
                       key={t.id}
-                      onClick={() => { onClose(); navigate('/') }}
+                      onClick={() => handleOpenTask(t)}
+                      disabled={!!openingId}
                       className="w-full flex items-center gap-3 rounded-xl px-3 py-2.5 text-left transition-colors"
-                      style={{ background: 'var(--bg)' }}
+                      style={{ background: 'var(--bg)', opacity: openingId && openingId !== t.id ? 0.5 : 1 }}
                     >
                       <div
                         className="w-8 h-8 rounded-lg flex items-center justify-center flex-shrink-0"
@@ -161,6 +188,9 @@ export default function NotificationsPanel({ onClose }) {
                           <span>已耗时 {formatElapsed(t.elapsedSec)}</span>
                         </div>
                       </div>
+                      {openingId === t.id
+                        ? <Loader2 size={14} className="animate-spin flex-shrink-0" style={{ color: 'var(--primary)' }} />
+                        : <ChevronRight size={14} className="flex-shrink-0" style={{ color: 'var(--text-tertiary)' }} />}
                     </button>
                   ))}
                 </div>
@@ -175,12 +205,10 @@ export default function NotificationsPanel({ onClose }) {
                     return (
                       <button
                         key={t.id}
-                        onClick={() => {
-                          onClose()
-                          navigate('/')
-                        }}
+                        onClick={() => handleOpenTask(t)}
+                        disabled={!!openingId}
                         className="w-full flex items-center gap-3 rounded-xl px-3 py-2.5 text-left transition-colors"
-                        style={{ background: 'var(--bg)' }}
+                        style={{ background: 'var(--bg)', opacity: openingId && openingId !== t.id ? 0.5 : 1 }}
                       >
                         <div className="w-8 h-8 rounded-lg flex items-center justify-center flex-shrink-0" style={{ background: cfg.bg }}>
                           {t.status === 'done' ? (
@@ -209,6 +237,9 @@ export default function NotificationsPanel({ onClose }) {
                             <span>{dayjs(t.createdAt).format('MM/DD HH:mm')}</span>
                           </div>
                         </div>
+                        {openingId === t.id
+                          ? <Loader2 size={14} className="animate-spin flex-shrink-0" style={{ color: 'var(--primary)' }} />
+                          : <ChevronRight size={14} className="flex-shrink-0" style={{ color: 'var(--text-tertiary)' }} />}
                       </button>
                     )
                   })}

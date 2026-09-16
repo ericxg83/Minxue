@@ -129,9 +129,15 @@ function goRoute(type) {
   }
 }
 
+// 点击任务直达该任务的复核页，不再回到 Dashboard 让用户自己再找一遍。
+// 识别失败的任务没有可复核的题目，落到批改中心的「失败」筛选列表。
 function openTask(task) {
   emit('close')
-  router.push('/')
+  if (task.status === 'done') {
+    router.push({ path: '/grade/task', query: { taskId: task.id, studentId: task.studentId || '', source: 'homework' } })
+  } else {
+    router.push({ path: '/grade', query: { status: 'failed' } })
+  }
 }
 
 function handleRefresh() {

@@ -590,7 +590,7 @@ app.get('/api/tasks/summary', async (req, res) => {
          COALESCE((SELECT COUNT(*)::int FROM ${TABLES.WRONG_QUESTIONS} WHERE lifecycle_status = $3 AND added_at::date = CURRENT_DATE), 0) AS today_new_wrong,
          COALESCE((SELECT COUNT(*)::int FROM ${TABLES.TASKS} WHERE status = $4 AND deleted_at IS NULL), 0) AS in_progress_count,
          (SELECT COALESCE(json_agg(row_to_json(t)), '[]'::json) FROM (
-           SELECT t.id, t.original_name, t.status, t.created_at, t.updated_at,
+           SELECT t.id, t.student_id, t.original_name, t.status, t.created_at, t.updated_at,
                   t.notification_read_at, s.name AS student_name,
                   COALESCE((t.result->>'wrong_count')::int, 0) AS wrong_count
            FROM ${TABLES.TASKS} t
@@ -600,7 +600,7 @@ app.get('/api/tasks/summary', async (req, res) => {
            ORDER BY t.updated_at DESC LIMIT 5
          ) t) AS pending_tasks,
          (SELECT COALESCE(json_agg(row_to_json(t)), '[]'::json) FROM (
-           SELECT t.id, t.original_name, t.status, t.created_at, t.updated_at,
+           SELECT t.id, t.student_id, t.original_name, t.status, t.created_at, t.updated_at,
                   t.notification_read_at, s.name AS student_name,
                   COALESCE((t.result->>'wrong_count')::int, 0) AS wrong_count
            FROM ${TABLES.TASKS} t
@@ -614,6 +614,9 @@ app.get('/api/tasks/summary', async (req, res) => {
 
     const mapTask = (t) => ({
       id: t.id,
+      // studentId 供「点击通知直达该学生下的复核页」使用：复核页以 studentId 定位学生，
+      // 缺失时会落到默认第一个学生的空状态（见 ReviewWorkspace 的 openTask 注释）。
+      studentId: t.student_id,
       originalName: t.original_name,
       status: t.status,
       createdAt: t.created_at,

@@ -12,7 +12,7 @@ import {
 import { motion, AnimatePresence } from 'motion/react'
 import { useLocation, useNavigate } from 'react-router-dom'
 import { useStudentStore, useTaskStore, useWrongQuestionStore, useExamStore } from './store'
-import { apiRequest, getStudents, getTasksByStudent, getQuestionsByTask, getExamsByStudent, getGeneratedExamsByStudent, generatedExamsCacheKey, getGeneratedExamById, updateTaskStatus, updateQuestion, updateQuestionTags, invalidateCache, createStudent, getQuestionsByIds, deleteTask, deleteGeneratedExam, deleteWrongQuestion, recalculateTaskStats, clearStudentCaches, peekCache, writeCache, fetchWrongQuestionsPage, getTasksSummary, markNotificationsRead } from './services/apiService'
+import { apiRequest, getStudents, getTasksByStudent, getQuestionsByTask, getExamsByStudent, getGeneratedExamsByStudent, generatedExamsCacheKey, getGeneratedExamById, updateTaskStatus, updateQuestion, updateQuestionTags, invalidateCache, createStudent, getQuestionsByIds, deleteTask, deleteGeneratedExam, deleteWrongQuestion, recalculateTaskStats, clearStudentCaches, peekCache, writeCache, fetchWrongQuestionsPage, getTasksSummary, markNotificationsRead, getTaskById } from './services/apiService'
 import { warmUpConnection, getNetworkHealth } from './services/httpCore'
 import { initNotifications, startNotificationPolling, onNotificationTap } from './services/notificationService'
 import { taskService } from './services/taskService'
@@ -114,6 +114,9 @@ const USE_MOCK_DATA = false
 const isTaskCompleted = (task) => {
   return task.status === 'done' || task.status === 'graded' || task.status === 'completed' || task.status === 'reviewed' || !!task.result?.questionCount
 }
+
+// 重练卷任务：走 slim 批改、不建 questions 行，移动端没有可展开的逐题结果
+const isRetryTask = (t) => t.task_type === 'retry_paper' || t.task_type === 'wrong_retry'
 
 export default function App() {
   // 路由化：以 URL hash 为唯一数据源派生底部 tab（/ → processing，#/processing / wrongbook / exam）
@@ -347,7 +350,12 @@ export default function App() {
     initNotifications().then(() => {
       cleanupPolling = startNotificationPolling((summary) => setNotifSummary(summary))
     })
-    cleanupTap = onNotificationTap(() => {
+    // 系统通知带 taskId 时直接落到该任务结果页，不再只开面板让用户再找一次
+    cleanupTap = onNotificationTap((extra) => {
+      if (extra?.taskId) {
+        openNotifTaskRef.current?.({ id: extra.taskId })
+        return
+      }
       handleOpenNotifications()
     })
     return () => {
@@ -356,6 +364,51 @@ export default function App() {
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
+
+  // 系统通知点击发生在 mount 之后很久，effect 里捕获的闭包会停留在首次渲染
+  // （currentStudent 还是 undefined），所以把入口函数放进 ref，每次渲染刷新。
+  const openNotifTaskRef = useRef(null)
+
+  // 通知/系统通知直达任务：补齐学生上下文后落到该任务的结果页。
+  // summary 里的任务只有 id/名称/状态（且是跨学生全局的），结果页要的是完整 task，
+  // 所以这里按 id 回查一次；查不到（已删除）就退回作业列表，不让点击变成"点了没反应"。
+  const handleOpenNotifTask = async (task) => {
+    const taskId = task?.id
+    if (!taskId) return
+
+    let full = null
+    try {
+      full = await getTaskById(taskId)
+    } catch (e) {
+      console.warn('[通知] 任务详情拉取失败，回退列表:', e?.message)
+    }
+    const target = full || task
+
+    // 任务属于别的学生时把上下文切过去：结果页按 task.student_id 拉错题本记录，
+    // 不切会让改判后的错题本同步写错人。summary 的 task 也带 studentId，可作兜底。
+    const ownerId = target?.student_id || task?.studentId
+    if (ownerId && ownerId !== currentStudent?.id) {
+      const owner = (students || []).find(s => s.id === ownerId)
+      if (owner) setCurrentStudent(owner)
+    }
+
+    setShowNotifications(false)
+
+    if (!full) {
+      Toast.show({ message: '任务不存在或已被删除', type: 'error', duration: 2000 })
+      setCurrentPage('tasks')
+      return
+    }
+
+    if (isTaskCompleted(target) && !isRetryTask(target)) {
+      setReviewTask(target)
+      setShowExamReview(true)
+    } else {
+      // 未完成 / 识别失败 / 重练卷：没有可展开的逐题结果，落到作业列表（可重试或看进度）
+      setCurrentPage('tasks')
+    }
+  }
+  openNotifTaskRef.current = handleOpenNotifTask
 
   // 打开通知面板：先标记全部已读（铃铛数字归零），再展示面板与最新摘要
   const handleOpenNotifications = async () => {
@@ -562,7 +615,6 @@ export default function App() {
 
 
   // Filter tasks
-  const isRetryTask = (t) => t.task_type === 'retry_paper' || t.task_type === 'wrong_retry'
   const filteredTasks = useMemo(() => (Array.isArray(tasks) ? tasks : []).filter(t => {
     if (t.student_id !== currentStudent?.id) return false
     if (processingFilter === 'all') return true
@@ -1235,7 +1287,12 @@ export default function App() {
 
         {/* Notification Panel / 通知 */}
         {showNotifications && (
-          <NotificationsPanel onClose={() => setShowNotifications(false)} />
+          <NotificationsPanel
+            onClose={() => setShowNotifications(false)}
+            onOpenTask={handleOpenNotifTask}
+            onOpenTasksPage={() => setCurrentPage('tasks')}
+            onOpenWrongBook={() => setCurrentPage('wrongbook')}
+          />
         )}
 
         {/* Learning Report / 学习报告 */}

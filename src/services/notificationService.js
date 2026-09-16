@@ -91,6 +91,9 @@ export async function dispatchFromSummary(summary) {
     if (!t.id || notified.has(t.id)) continue
     const name = t.studentName || ''
     const subject = name ? `${name}的作业` : '作业'
+    // wrong 必须在这里取：此前直接引用未定义的 wrong 会抛 ReferenceError，
+    // 被下面的 catch 静默吞掉，结果是"批改完成"系统通知一条都发不出来。
+    const wrong = Number(t.wrongCount || 0)
     const title = wrong > 0
       ? `${subject}批改完成`
       : `${subject}全部正确`
