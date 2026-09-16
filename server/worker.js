@@ -32,6 +32,8 @@ import { rescueReferenceAnswer } from './utils/referenceAnswerRescue.js'
 import { describeReferenceAnswerRisk } from './utils/referenceAnswerSelfCheck.js'
 import { coerceAIText } from './utils/aiTextCoerce.js'
 import { computeTaskStats } from './utils/taskStats.js'
+// 卷面标题 → 任务名的唯一口径（校名页眉剥离）。详见 utils/taskTitle.js 头注释。
+import { deriveTaskTitle, isAutoTaskName } from './utils/taskTitle.js'
 import { rationalizeAnswer } from './utils/radicalSimplify.js'
 import { resolveEffectiveQuestionType } from './utils/questionCompleteness.js'
 // 重练卷排卷与卷面编号的唯一口径（与打印端 wrongRetryPdfService / 前端 pdfGenerator 同源）。
@@ -4990,14 +4992,16 @@ export const processWorkbookGrading = async (job) => {
         [taskId]
       )
       const originalName = nameRows[0]?.original_name || ''
-      const auto = !originalName
-        || /^.{1,20} · /.test(originalName) // 前端拼装的"科目 · 练习册名"
-        || /作业\s+\d{2}\/\d{2}\s+\d{2}:\d{2}$/.test(originalName)
-        || /\.(jpe?g|png|heic|heif|webp|bmp)(\s|$)/i.test(originalName)
-      if (auto) {
-        const cleaned = titledPage.page_title.replace(/\s+/g, ' ').trim().slice(0, 100)
-        await query(`UPDATE ${TABLES.TASKS} SET original_name = $1 WHERE id = $2`, [cleaned, taskId])
-        console.log(`   📝 [Workbook] 任务改名: "${originalName}" → "${cleaned}"（来自卷面标题）`)
+      // 2026-09-17：与通用管线共用 deriveTaskTitle —— 卷面顶部印的是校徽文字时
+      // （"新闵学校“成长·桥”练习"）剥掉页眉只留课时后缀；剥完为空则【不改名】。
+      if (isAutoTaskName(originalName, { treatClientPaperNameAsAuto: true })) {
+        const cleaned = deriveTaskTitle(titledPage.page_title)
+        if (cleaned) {
+          await query(`UPDATE ${TABLES.TASKS} SET original_name = $1 WHERE id = $2`, [cleaned, taskId])
+          console.log(`   📝 [Workbook] 任务改名: "${originalName}" → "${cleaned}"（来自卷面标题）`)
+        } else {
+          console.log(`   ⏭️ [Workbook] 卷面标题"${titledPage.page_title}"是校名页眉/无信息量，不用于命名（保留"${originalName}"）`)
+        }
       }
     }
   } catch (e) {
@@ -6533,17 +6537,22 @@ export const processTask = async (job) => {
 
     // 用卷面印刷标题给任务改名：客户端只能给出"数学作业 08/27 21:58"或相机文件名，
     // 列表里一排同名任务用户分不清哪份。只覆盖这类自动名，用户选过练习册/答案库的名字不动。
+    //
+    // 2026-09-17：卷面顶部印的可能是校徽文字（"新闵学校“成长·桥”练习"）——它是页眉跑马灯，
+    // 不是作业身份，直接拿来命名会让整屏任务同名。deriveTaskTitle 统一剥掉校名页眉，
+    // 剥完没内容就【不改名】（保留"科目作业 时间"）。口径与 workbook 管线同一份实现。
     if (ocrPageTitle) {
-      const auto = !originalName
-        || /作业\s+\d{2}\/\d{2}\s+\d{2}:\d{2}$/.test(originalName)
-        || /\.(jpe?g|png|heic|heif|webp|bmp)(\s|$)/i.test(originalName)
-      if (auto) {
-        const cleaned = ocrPageTitle.replace(/\s+/g, ' ').trim().slice(0, 100)
-        try {
-          await query(`UPDATE ${TABLES.TASKS} SET original_name = $1 WHERE id = $2`, [cleaned, taskId])
-          console.log(`   📝 任务改名: "${originalName}" → "${cleaned}"（来自卷面标题）`)
-        } catch (e) {
-          console.warn(`   ⚠️ 任务改名失败: ${e.message}`)
+      if (isAutoTaskName(originalName)) {
+        const cleaned = deriveTaskTitle(ocrPageTitle)
+        if (cleaned) {
+          try {
+            await query(`UPDATE ${TABLES.TASKS} SET original_name = $1 WHERE id = $2`, [cleaned, taskId])
+            console.log(`   📝 任务改名: "${originalName}" → "${cleaned}"（来自卷面标题）`)
+          } catch (e) {
+            console.warn(`   ⚠️ 任务改名失败: ${e.message}`)
+          }
+        } else {
+          console.log(`   ⏭️ 卷面标题"${ocrPageTitle}"是校名页眉/无信息量，不用于命名（保留"${originalName}"）`)
         }
       }
     }
