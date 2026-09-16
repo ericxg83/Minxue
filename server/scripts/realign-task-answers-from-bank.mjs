@@ -101,7 +101,7 @@ for (const qq of questions) {
   }
   if (!answerChanged && !correctChanged) continue
 
-  changes.push({ id: qq.id, no: qq.question_number, sub: qq.sub_no, unit, oldAnswer, next, oldCorrect: qq.is_correct, nextCorrect })
+  changes.push({ id: qq.id, no: qq.question_number, sub: qq.sub_no, unit, oldAnswer, next, oldCorrect: qq.is_correct, nextCorrect, studentBlank: !(qq.student_answer && String(qq.student_answer).trim()) })
   const flag = answerChanged ? '答案' : ''
   const flag2 = correctChanged ? '判定' : ''
   console.log(`  题${qq.question_number}(${qq.sub_no ?? '整题'}) [${unit}] 改${flag}${flag2}`)
@@ -118,12 +118,18 @@ const c = await pool.connect()
 try {
   await c.query('BEGIN')
   for (const ch of changes) {
+    // answer_source 语义必须保留：`blank` 表示"学生未作答"，是分桶统计（emptyCount）
+    // 与错题本判定的输入之一。无脑写 'worksheet' 会把"未作答"洗成"已作答"，
+    // 于是 computeTaskStats 把它从 empty 桶挪进 pending 桶（实测 2026-09-16
+    // 三份卷的 emptyCount 2/2/3 被洗成 0/0/0，界面「作答 N」凭空消失）。
     await c.query(
-      `UPDATE questions SET answer=$1, is_correct=$2, answer_source='worksheet', updated_at=NOW() WHERE id=$3`,
-      [ch.next, ch.nextCorrect, ch.id])
+      `UPDATE questions SET answer=$1, is_correct=$2,
+         answer_source = CASE WHEN $4 THEN 'blank' ELSE 'worksheet' END,
+         updated_at=NOW() WHERE id=$3`,
+      [ch.next, ch.nextCorrect, ch.id, ch.studentBlank])
   }
   await c.query('COMMIT')
-  console.log(`\n✅ 已更新 ${changes.length} 行（未触碰老师已复核行的判定）`)
+  console.log(`\n✅ 已更新 ${changes.length} 行（未触碰老师已复核行的判定；未作答行的 answer_source 保持 blank）`)
 } catch (e) {
   await c.query('ROLLBACK')
   console.error('❌ 失败已回滚:', e.message)

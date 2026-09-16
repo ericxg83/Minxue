@@ -1105,7 +1105,13 @@ export async function doParseOcrBatched(worksheetId, fileBuffer, totalPages, pre
     if (totalPages > MAX_TOTAL_PAGES) {
       warnings.push(`PDF 共 ${totalPages} 页，超过 ${MAX_TOTAL_PAGES} 页解析上限，仅解析了前 ${MAX_TOTAL_PAGES} 页。`)
     }
-    if (warnings.length === 0 && lowConfidence.length > count * 0.5) {
+    // 题号连续性异常（强信号：单元/大题组标题漏识别）必须逐条列出。
+    // 2026-09-16 事故：这条告警只在单趟路径生成，分批路径（>15 页的册子，绝大多数教辅）
+    // 直接丢弃 → parse_warning 为空 → 「第19章测试(二) 的答案覆盖了测试(一)」这种
+    // 结构性错位**在管理端零提示**，直到老师批改时发现参考答案张冠李戴才暴露。
+    const seqWarning = buildSeqAnomalyWarning(lowConfidence)
+    if (seqWarning) warnings.push(seqWarning)
+    if (warnings.length === 0 && realLowConfidenceOf(lowConfidence).length > count * 0.5) {
       // 与单趟路径同步：低置信度是 OCR 质量问题，不是 PDF 内容问题，
       // 不再建议用户去"裁剪"——对纯答案 PDF 用户无意义。
       warnings.push('OCR 识别置信度偏低，建议在审核页复核若干条答案。')
@@ -1130,6 +1136,31 @@ export async function doParseOcrBatched(worksheetId, fileBuffer, totalPages, pre
  * @param {Array<number>} [options.ocrFailedPages] - OCR 失败的页码列表（部分失败时生成警告）
  * @param {string} [options.sourceLabel] - 来源标签（"PDF"或"图片"），用于错误提示
  */
+/**
+ * 「答案页题号连续性异常」告警文案（单趟路径与分批路径**共用这一份**，禁止再复制）。
+ *
+ * 为什么必须共用：该信号是「单元/大题组标题被漏识别」的唯一强信号——标题一漏，
+ * 该单元的答案会全部继承上一个单元并按题号覆盖它，答案库里看不出异常（题号连续），
+ * 只有批改时参考答案张冠李戴才暴露（2026-09-16 八上上海作业 56 页实测）。
+ * 2026-09-16 之前只有单趟路径（≤15 页）生成它，分批路径（>15 页，绝大多数教辅）
+ * 直接丢弃 → 结构性错位在管理端零提示。
+ */
+export function buildSeqAnomalyWarning(lowConfidence) {
+  const seqAnomalies = (lowConfidence || []).filter(x => x && x.kind === 'question_seq_anomaly')
+  if (seqAnomalies.length === 0) return null
+  // 必须带 unit_key：只报"第1题与第27题"老师不知道该查哪个单元（历史上文案就缺这个）。
+  const sample = seqAnomalies.slice(0, 5)
+    .map(a => (a.unit_key ? `[${a.unit_key}] ${a.message}` : a.message))
+    .filter(Boolean)
+  const more = seqAnomalies.length > 5 ? `等 ${seqAnomalies.length} 处` : ''
+  return `检测到 ${seqAnomalies.length} 处答案页题号连续性异常（可能漏识别单元/大题组标题）：${sample.join('；')}${more ? '；' + more : ''}。建议在『修复试卷单元』面板点击『重新解析』或检查答案PDF是否完整。`
+}
+
+/** 普通低置信度条目（排除 kind='question_seq_anomaly' 的结构性异常，后者单独成条告警） */
+function realLowConfidenceOf(lowConfidence) {
+  return (lowConfidence || []).filter(x => !(x && x.kind === 'question_seq_anomaly'))
+}
+
 // 按 (单元, 大题组, 题号, 子题号) 去重：同 key 保留置信度高的，相同则保留靠后的；再按单元、题号排序。
 // key 的三层缺一不可：
 //  - unit_key：几十个「堂堂练」的第 1 题会全部撞成同一个 key（实测 73 页只剩 650 条 / 5 个 section）
@@ -1185,8 +1216,7 @@ async function processOcrResults(worksheetId, parsedAnswers, options = {}) {
   // 分离『题号连续性异常』与普通低置信度条目：
   //   - 普通 lowConfidence：OCR 噪声（题没看清），按 50% 阈值提示
   //   - seqAnomaly：题号反向/跳号过大/重置，强信号 = 答案页单元标题漏识别，独立提示
-  const seqAnomalies = lowConfidence.filter(x => x && x.kind === 'question_seq_anomaly')
-  const realLowConfidence = lowConfidence.filter(x => !(x && x.kind === 'question_seq_anomaly'))
+  const realLowConfidence = realLowConfidenceOf(lowConfidence)
 
   // 生成警告提示
   let warning = null
@@ -1205,10 +1235,10 @@ async function processOcrResults(worksheetId, parsedAnswers, options = {}) {
   }
 
   // 题号连续性异常：每条都列出来（前 5 条 + 总数），便于老师/运维定位具体单元
-  if (seqAnomalies.length > 0) {
-    const sample = seqAnomalies.slice(0, 5).map(a => a.message).filter(Boolean)
-    const more = seqAnomalies.length > 5 ? `等 ${seqAnomalies.length} 处` : ''
-    const seqWarning = `检测到 ${seqAnomalies.length} 处答案页题号连续性异常（可能漏识别单元/大题组标题）：${sample.join('；')}${more ? '；' + more : ''}。建议在『修复试卷单元』面板点击『重新解析』或检查答案PDF是否完整。`
+  // 文案与分批路径共用 buildSeqAnomalyWarning，禁止两处各写一份（历史上只有单趟路径有，
+  // 分批路径静默丢弃，导致 >15 页的册子结构性错位无告警）。
+  const seqWarning = buildSeqAnomalyWarning(lowConfidence)
+  if (seqWarning) {
     warning = warning ? `${warning}\n${seqWarning}` : seqWarning
   }
 
