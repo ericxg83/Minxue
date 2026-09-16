@@ -340,3 +340,83 @@ test('math equivalence must not pass un-evaluable student expressions', () => {
   // 除零等未定义运算：测试点被跳过，但只要还有可求值点就正常比较
   assert.deepEqual(judgeAnswer('1/0', '1', 'fill'), { isCorrect: false, unrecognized: false })
 })
+
+// 缺陷 7（2026-09-16 用户截图）：学生答 -1/4√15、参考答案 -√15/4（同一道二次根式化简），
+// 数学等价却被判错。**两层根因叠加，缺一层都修不好**：
+//   ① prepareMathExpr 用 `\{([^{}]*)\}` 取 LaTeX 参数 ⇒ 参数里只要嵌套一层花括号就整个
+//      匹配不上：`\frac{\sqrt{15}}{4}`、`\frac{3\sqrt{2}}{4}`、`x^{2}` 全部残留反斜杠 →
+//      new Function 抛 SyntaxError → 数学等价分支恒为 false；
+//   ② 参考答案字段存的是答案册整段推导「解：原式=…=-√15/4」，
+//      sanitizeReferenceAnswer 只认「解析/因为/所以」这类词，不认链式等式。
+// 另有一个同源的隐蔽缺口：JS 规定一元运算符不能直接做幂运算的左操作数，
+//   `-x**2`、`-((15))**0.5/4` 都是 SyntaxError —— `-√15/4` 展开后正是这个形态，
+//   `-x²` 这类含负号的幂答案也全中招（同样让数学等价求不出值）。
+// 修复：expandLatexCommands 递归解析花括号配对 + wrapUnaryPowerExpr 给「一元符号+幂」
+//   加括号 + sanitizeReferenceAnswer 增加链式等式末段通道。
+// 全库对照（1126 题）：false→true 5 条且全部真阳性，true→false 0 条，零放水。
+test('nested LaTeX fractions/roots, unary-minus powers and chained-equation references', () => {
+  // —— 报障原案例（真实库数据：0e1d4de7 q19）——
+  const chainRef = '解：原式=\\sqrt{15}-\\frac{3}{2}\\sqrt{15}+\\frac{1}{4}\\sqrt{15}=-\\frac{\\sqrt{15}}{4}.'
+  assert.deepEqual(judgeAnswer('= -1/4√15', chainRef, 'answer'), { isCorrect: true, unrecognized: false })
+  assert.deepEqual(
+    judgeAnswer('=√15-(6/4√15-1/4√15)\n=√15-5/4√15\n=-1/4√15', chainRef, 'answer'),
+    { isCorrect: true, unrecognized: false }
+  )
+
+  // —— 嵌套参数的 LaTeX 等价写法（此前一律判错）——
+  assert.deepEqual(judgeAnswer('-\\frac{1}{4}\\sqrt{15}', '-\\frac{\\sqrt{15}}{4}', 'answer'), { isCorrect: true, unrecognized: false })
+  assert.deepEqual(judgeAnswer('\\frac{1}{2}\\sqrt{\\frac{1}{12}}', '\\frac{\\sqrt{3}}{12}', 'answer'), { isCorrect: true, unrecognized: false })
+  assert.deepEqual(judgeAnswer('\\frac{3}{4}\\sqrt{2}', '\\frac{3\\sqrt{2}}{4}', 'answer'), { isCorrect: true, unrecognized: false })
+  assert.deepEqual(judgeAnswer('\\frac{2\\sqrt{3}}{3}', '\\frac{2}{\\sqrt{3}}', 'answer'), { isCorrect: true, unrecognized: false })
+  assert.deepEqual(judgeAnswer('\\frac{1}{4}\\sqrt{15}', '\\frac{\\sqrt{15}}{4}', 'answer'), { isCorrect: true, unrecognized: false })
+  // TeX 单字符参数简写 \frac14
+  assert.deepEqual(judgeAnswer('-\\frac14\\sqrt{15}', '-\\frac{\\sqrt{15}}{4}', 'answer'), { isCorrect: true, unrecognized: false })
+  // LaTeX 幂与乘号：x^{2}、5\times10^{2}
+  assert.deepEqual(judgeAnswer('\\frac{1}{2}x^{2}+2x+\\frac{5}{2}', '0.5x^2+2x+2.5', 'fill'), { isCorrect: true, unrecognized: false })
+  assert.deepEqual(judgeAnswer('5\\times10^{2}', '500', 'answer'), { isCorrect: true, unrecognized: false })
+  // \left \right 只是定界符尺寸标记
+  assert.deepEqual(judgeAnswer('\\left(\\frac{1}{2}\\right)^{2}', '\\frac{1}{4}', 'fill'), { isCorrect: true, unrecognized: false })
+  // 一元负号 + 幂（JS 语法错误形态）
+  assert.deepEqual(judgeAnswer('-x²', '-x^2', 'fill'), { isCorrect: true, unrecognized: false })
+  assert.deepEqual(judgeAnswer('-\\sqrt{2}', '-2^{0.5}', 'fill'), { isCorrect: true, unrecognized: false })
+  assert.deepEqual(judgeAnswer('-\\frac{1}{3}(x+3)^2', '-1/3(x+3)²', 'fill'), { isCorrect: true, unrecognized: false })
+
+  // —— 混合数语义不得被破坏：2\frac{1}{3} 是真混合数 7/3，不是 2×(1/3) ——
+  assert.deepEqual(judgeAnswer('2\\frac{1}{3}', '7/3', 'fill'), { isCorrect: true, unrecognized: false })
+  assert.deepEqual(judgeAnswer('2\\frac{1}{3}', '2/3', 'fill'), { isCorrect: false, unrecognized: false })
+
+  // —— 不得放水：真不等仍判错 ——
+  assert.deepEqual(judgeAnswer('-\\frac{1}{4}\\sqrt{15}', '-\\frac{\\sqrt{15}}{2}', 'answer'), { isCorrect: false, unrecognized: false })
+  assert.deepEqual(judgeAnswer('-\\frac{1}{4}\\sqrt{15}', '\\frac{\\sqrt{15}}{4}', 'answer'), { isCorrect: false, unrecognized: false })
+  assert.deepEqual(judgeAnswer('\\sqrt{15}', '\\frac{\\sqrt{60}}{4}', 'answer'), { isCorrect: false, unrecognized: false })
+  assert.deepEqual(judgeAnswer('-x²', 'x^2', 'fill'), { isCorrect: false, unrecognized: false })
+  assert.deepEqual(judgeAnswer('5\\times10^{2}', '5000', 'answer'), { isCorrect: false, unrecognized: false })
+})
+
+// 链式等式截断通道的五道闸门（2026-09-16 落地；全库回测 14 命中 / 4 翻转 / 零放水）。
+// 第②道闸门「首段必须是叙述前缀」是回测中补的：没有它，普通方程 `y=x^2+2x=0`
+// 会被截成末段 `0`，学生写个 `0` 就被放行 —— 属于典型放水形态。
+test('sanitizeReferenceAnswer truncates chained equations to their final segment', () => {
+  // 命中：答案册整段推导，首段是「解：原式」这类叙述前缀，末段是纯数学答案
+  assert.equal(
+    sanitizeReferenceAnswer('解：原式=\\sqrt{15}-\\frac{3}{2}\\sqrt{15}+\\frac{1}{4}\\sqrt{15}=-\\frac{\\sqrt{15}}{4}.'),
+    '-\\frac{\\sqrt{15}}{4}'
+  )
+  assert.equal(sanitizeReferenceAnswer('解：原式=3+4=7'), '7')
+
+  // 闸门①：只有 2 段（普通方程，不是推导链）不截断
+  assert.equal(sanitizeReferenceAnswer('y=x^2+2x'), 'y=x^2+2x')
+  // 闸门②：首段是纯数学式（普通方程）不截断，否则末段会被当成答案放水
+  assert.equal(sanitizeReferenceAnswer('y=x^2+2x=0'), 'y=x^2+2x=0')
+  // 闸门③：末段含中文不截断
+  assert.equal(sanitizeReferenceAnswer('解：原式=3+4=等于7'), '解：原式=3+4=等于7')
+  // 闸门④：倒数第二段含中文（夹叙夹议的假链）不截断
+  assert.equal(sanitizeReferenceAnswer('解：原式=甲是3=7'), '解：原式=甲是3=7')
+  // 闸门⑤：末段过长（不像答案本体）不截断
+  const longTail = '解：原式=1+1=' + '1+'.repeat(20) + '1'
+  assert.equal(sanitizeReferenceAnswer(longTail), longTail)
+
+  // 既有能力不得回退：解析标记截断照旧
+  assert.equal(sanitizeReferenceAnswer('-1/4 解析：设直线 AB 与 y 轴交于点 D，如图'), '-1/4')
+  assert.equal(sanitizeReferenceAnswer('y = -1/3(x + 3)²'), 'y = -1/3(x + 3)²')
+})

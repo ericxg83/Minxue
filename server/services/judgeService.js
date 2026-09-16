@@ -273,6 +273,10 @@ function normalizeAnswer(str) {
   // LaTeX fraction MUST run AFTER toUpperCase (because toUpperCase changes \frac to \FRAC)
   // Convert LaTeX fraction back to standard form: \FRAC{n}{d} → n/d (after toUpperCase)
   // IMPORTANT: must add spaces around the fraction so mixed number rule can match "36 5/14"
+  // ⚠️ 已知边界（2026-09-16）：`[^}]+` 不匹配嵌套参数（`\FRAC{\SQRT{15}}{4}` 原样保留）。
+  //    这是**故意不修**的：它只影响字面相等快路径，判对由 isMathEquivalent 兜住
+  //    （该分支已用 expandLatexCommands 支持嵌套，同批 5 条误判因此全部判对）。
+  //    要动这里请先确认不破坏上面的混合数规则（`2\FRAC{1}{3}` → `2 1/3` → `2+1/3`）。
   s = s.replace(/\\FRAC\{([^}]+)\}\{([^}]+)\}/gi, ' $1/$2 ')
 
   // Unit synonym replacement (Chinese → symbolic); longer patterns first
@@ -450,6 +454,121 @@ function convertSqrtToPower(s) {
 }
 
 /**
+ * 读取一个 LaTeX 命令参数：`{...}`（花括号配对，支持嵌套）或单个字符。
+ * TeX 允许 `\frac12` 这种不带括号的单字符参数，也必须支持。
+ * @returns {{content: string, end: number}|null} 解析不出来返回 null
+ */
+function readLatexArg(s, index) {
+  let i = index
+  while (i < s.length && /\s/.test(s[i])) i++
+  if (s[i] === '{') {
+    let depth = 0
+    let j = i
+    for (; j < s.length; j++) {
+      if (s[j] === '{') depth++
+      else if (s[j] === '}') { depth--; if (depth === 0) break }
+    }
+    if (j >= s.length) return null
+    return { content: s.slice(i + 1, j), end: j + 1 }
+  }
+  if (i < s.length) return { content: s[i], end: i + 1 }
+  return null
+}
+
+/**
+ * LaTeX → JS 表达式的递归展开（\frac \dfrac \tfrac \sqrt \times \cdot \div \left \right ^{...}）。
+ *
+ * 2026-09-16 修复（用户截图：学生答 -1/4√15、参考 -√15/4，数学等价却判错）：
+ * 原实现用 `\{([^{}]*)\}` 取参数，**参数里只要嵌套一层花括号就整个匹配不上**：
+ *   `\frac{\sqrt{15}}{4}`、`\frac{3\sqrt{2}}{4}`、`\sqrt{\frac{1}{2}}`、`x^{2}`、`10^{2}`
+ * 未转换的 `\frac` 连同反斜杠留在表达式里 → new Function 抛 SyntaxError →
+ * 数学等价分支**恒为 false** ⇒ 这类卷子无论学生写得多对都判错。
+ * 递归解析同时补上了原实现缺的 `\times`/`\cdot`/`\div`/`\left`/`\right` 与 `^{...}`。
+ *
+ * 混合数语义保持不变：`2\frac{1}{3}` 是真混合数（7/3），不是 2×(1/3)——
+ * 算成 2/3 会在学生写 7/3、参考写 2\frac{1}{3} 时造成假判对。
+ */
+function expandLatexCommands(input, depth = 0) {
+  const src = String(input ?? '')
+  if (depth > 6) return src
+  let out = ''
+  let i = 0
+  while (i < src.length) {
+    if (src[i] === '\\') {
+      const rest = src.slice(i)
+      // \frac / \dfrac / \tfrac
+      let m = /^\\([dt]?frac)(?![a-zA-Z])/.exec(rest)
+      if (m) {
+        const arg1 = readLatexArg(src, i + m[0].length)
+        const arg2 = arg1 ? readLatexArg(src, arg1.end) : null
+        if (arg2) {
+          const num = expandLatexCommands(arg1.content, depth + 1)
+          const den = expandLatexCommands(arg2.content, depth + 1)
+          // 紧邻的整数是混合数的整数部分（`2\frac{1}{3}`），不是乘数
+          const mix = /(?<![\d.])(\d+)\s*$/.exec(out)
+          if (mix) {
+            const whole = mix[1]
+            const n = Number(arg1.content.trim())
+            const d = Number(arg2.content.trim())
+            const isProper = Number.isFinite(n) && Number.isFinite(d) && n < d
+            out = out.slice(0, out.length - mix[0].length) +
+              (isProper ? `((${whole})+(${num})/(${den}))` : `((${whole})*(${num})/(${den}))`)
+          } else {
+            out += `((${num})/(${den}))`
+          }
+          i = arg2.end
+          continue
+        }
+        out += src[i]; i++; continue
+      }
+      // \sqrt[n]{x} / \sqrt{x} / \sqrt2
+      m = /^\\sqrt(?![a-zA-Z])/.exec(rest)
+      if (m) {
+        let j = i + m[0].length
+        let degree = '2'
+        const opt = /^\s*\[([^\]]*)\]/.exec(src.slice(j))
+        if (opt) { degree = opt[1].trim(); j += opt[0].length }
+        const arg1 = readLatexArg(src, j)
+        if (arg1) {
+          const inner = expandLatexCommands(arg1.content, depth + 1)
+          out += degree === '2' ? `((${inner}))**0.5` : `((${inner}))**((1)/(${degree}))`
+          i = arg1.end
+          continue
+        }
+        out += src[i]; i++; continue
+      }
+      m = /^\\(?:times|cdot)(?![a-zA-Z])/.exec(rest)
+      if (m) { out += '*'; i += m[0].length; continue }
+      m = /^\\div(?![a-zA-Z])/.exec(rest)
+      if (m) { out += '/'; i += m[0].length; continue }
+      // \left \right 只是定界符尺寸标记，不改变数学含义；\left. \right. 是占位点
+      m = /^\\(?:left|right)(?![a-zA-Z])/.exec(rest)
+      if (m) {
+        i += m[0].length
+        if (src[i] === '.') i++
+        continue
+      }
+      out += src[i]; i++; continue
+    }
+    if (src[i] === '^') {
+      // ^{...} / ^2 / ^-4：带符号必须包成 **(-4)，因为 `10**-4` 是 JS 语法错误
+      let k = i + 1
+      let sign = ''
+      if (src[k] === '+' || src[k] === '-') { if (src[k] === '-') sign = '-'; k++ }
+      const arg1 = readLatexArg(src, k)
+      if (arg1 && (src[k] === '{' || /^[0-9a-zA-Z]$/.test(arg1.content))) {
+        out += `**(${sign}${expandLatexCommands(arg1.content, depth + 1)})`
+        i = arg1.end
+        continue
+      }
+    }
+    out += src[i]
+    i++
+  }
+  return out
+}
+
+/**
  * 把数学表达式改写成可被 JS eval 的形式（去等式左边、^→**、√→**0.5、补隐式乘号）。
  */
 function prepareMathExpr(input) {
@@ -460,20 +579,14 @@ function prepareMathExpr(input) {
   s = s.trim()
   // 数学减号类 Unicode 变体 → ASCII '-'（同 normalizeAnswer，避免 eval 因非法运算符抛错）
   s = s.replace(/[−–—―‐‑]/g, '-')
-  // LaTeX 分数与根号。此前只有外层 normalizeAnswer 会转 \frac，isMathEquivalent 内部
-  // 不认识 → 表达式里的 '\' 让 new Function 抛 SyntaxError → 整个数学等价分支恒为 false。
-  // 实测 9 例（"y = -\frac{1}{3}(x + 3)^2" vs "y = -1/3(x + 3)²"）因此判错。
-  // 带整数前缀的 "2\frac{1}{3}" 是真混合数（7/3）而非 2×(1/3)，按真分数分支处理，
-  // 否则会把它算成 2/3，学生写 7/3 而参考是 2/3 时会造成假判对。
-  s = s.replace(/(\d+)\s*\\[dt]?frac\s*\{([^{}]*)\}\s*\{([^{}]*)\}/gi, (m, whole, num, den) => {
-    const n = Number(num); const d = Number(den)
-    if (Number.isFinite(n) && Number.isFinite(d) && n < d) return `((${whole})+(${num})/(${den}))`
-    return `((${whole})*(${num})/(${den}))`
-  })
-  s = s.replace(/\\[dt]?frac\s*\{([^{}]*)\}\s*\{([^{}]*)\}/gi, '($1)/($2)')
-  s = s.replace(/\\sqrt\s*\[\s*3\s*\]\s*\{([^{}]*)\}/gi, '(($1))**(1/3)')
-  s = s.replace(/\\sqrt\s*\{([^{}]*)\}/gi, '(($1))**0.5')
-  // ^ → **  (exponentiation)
+  // LaTeX 命令递归展开（\frac \sqrt \times \cdot \div \left \right ^{...}）。
+  // 2026-09-16 修复：此前用 `\{([^{}]*)\}` 取参数，参数里嵌套一层花括号就整个匹配不上，
+  // 未转换的 `\frac` 连同反斜杠留在表达式里 → new Function 抛 SyntaxError →
+  // 数学等价分支恒 false。实测 `\frac{\sqrt{15}}{4}`（-√15/4）、`\frac{3\sqrt{2}}{4}`、
+  // `x^{2}`、`\frac{-b+\sqrt{b^2-4ac}}{2a}` 全部无法求值。
+  // 混合数语义由 expandLatexCommands 内部保留（`2\frac{1}{3}` = 7/3）。
+  s = expandLatexCommands(s)
+  // ^ → **  (exponentiation)：处理 LaTeX 之外残留的 `^`（如 `x^(2)`）
   s = s.replace(/\^/g, '**')
   // Unicode 乘号 / 除号 → ASCII（2026-09-15）。
   // OCR 与教材排版都用 ×/÷，而 prepareMathExpr 原本只归一 LaTeX 的 \times/\cdot，
@@ -518,6 +631,83 @@ function prepareMathExpr(input) {
   // 计数缺陷修复后暴露，必须补上才能真正求值。
   s = s.replace(/\)([a-zA-Z])/g, ')*$1')
   s = s.replace(/\)(\d)/g, ')*$1')
+  // ── 一元符号 + 幂运算必须加括号（2026-09-16）──
+  // JS 语法规定一元运算符不能直接做幂运算的左操作数：
+  //   `-x**2`、`-((15))**0.5/4` 都是 SyntaxError
+  //   （"Unary operator used immediately before exponentiation expression"）
+  // 而整条数学等价分支靠 new Function 求值 ⇒ 这类表达式**一律求不出值** →
+  // 数学等价恒 false。实测：`-√15/4` 与 `-\frac{\sqrt{15}}{4}` 展开后正是这个形态，
+  // 学生把答案写对（-1/4√15）也判错；`-x²` 这类含负号的幂答案同样全中招。
+  // 修复：把「一元符号 + 幂表达式」整体包一层括号，`-x**2` → `-(x**2)`，语义不变。
+  s = wrapUnaryPowerExpr(s)
+  return s
+}
+
+/** 跳过空白，返回第一个非空白字符的下标 */
+function skipWsAt(s, i) {
+  let j = i
+  while (j < s.length && /\s/.test(s[j])) j++
+  return j
+}
+
+/** 从 i 开始吃掉一个「原子」（括号组 / 数字 / 标识符），返回结束下标；失败返回 -1 */
+function mathAtomEnd(s, i) {
+  const start = skipWsAt(s, i)
+  if (s[start] === '(') {
+    let depth = 0
+    for (let j = start; j < s.length; j++) {
+      if (s[j] === '(') depth++
+      else if (s[j] === ')') { depth--; if (depth === 0) return j + 1 }
+    }
+    return -1
+  }
+  let j = start
+  while (j < s.length && /[0-9.]/.test(s[j])) j++
+  if (j > start) return j
+  while (j < s.length && /[A-Za-z0-9_]/.test(s[j])) j++
+  return j > start ? j : -1
+}
+
+/** i 处的 +/- 是否是一元运算符（前一个非空白字符是运算符/左括号/开头） */
+function isUnarySignAt(s, i) {
+  let j = i - 1
+  while (j >= 0 && /\s/.test(s[j])) j--
+  if (j < 0) return true
+  return '+-*/(^,:<>='.includes(s[j])
+}
+
+/** 若 i 处开始是一个 `原子 ** 原子` 幂表达式，返回其结束下标；否则 -1 */
+function powerExprEnd(s, i) {
+  const a = mathAtomEnd(s, i)
+  if (a < 0) return -1
+  const k = skipWsAt(s, a)
+  if (s.slice(k, k + 2) !== '**') return -1
+  return mathAtomEnd(s, k + 2)
+}
+
+/** 把「一元符号 + 幂表达式」包成括号：`-x**2` → `-(x**2)`。见 prepareMathExpr 末尾注释。 */
+function wrapUnaryPowerExpr(expr) {
+  let s = String(expr ?? '')
+  for (let pass = 0; pass < 4; pass++) {
+    let changed = false
+    let out = ''
+    let i = 0
+    while (i < s.length) {
+      if ((s[i] === '-' || s[i] === '+') && isUnarySignAt(s, i)) {
+        const end = powerExprEnd(s, i + 1)
+        if (end > 0) {
+          out += s[i] + '(' + s.slice(i + 1, end) + ')'
+          i = end
+          changed = true
+          continue
+        }
+      }
+      out += s[i]
+      i++
+    }
+    s = out
+    if (!changed) break
+  }
   return s
 }
 
@@ -705,18 +895,65 @@ export function stripAnswerScaffolding(value) {
  * 只用于「多看一种参考写法」——判等仍以原串结果为准，不因此放宽判错。
  */
 const REF_EXPLAIN_MARKER = /(?:解析|详解|说明|思路|分析|点评|因为|所以|可知|由此)/
+
+/** 是否含中日韩文字/全角标点（用于判断片段是不是「纯数学式」） */
+const CJK_TEXT_RE = /[\u3000-\u303f\u4e00-\u9fff\uff00-\uffef]/
+
+/**
+ * 片段是否是一个「纯数学式」：不含中文、含数字、只由数字/字母/运算符/LaTeX/数学符号组成。
+ * 用于链式等式截断的取舍——含中文的片段（如「设 x=a 所以」）不能当答案。
+ */
+function isPureMathFragment(value) {
+  const v = String(value ?? '').trim()
+  if (!v || CJK_TEXT_RE.test(v)) return false
+  if (!/[0-9]/.test(v)) return false
+  return /^[0-9A-Za-z\\{}()[\]+\-*/^_.,;:!?\s√∛±×÷·%°'"=<>≤≥≠≈|]+$/.test(v)
+}
+
+/**
+ * 「链式等式」取末段：答案册导出的参考答案常是整段推导粘在一串，末段才是答案，
+ * 例如 `解：原式=\sqrt{15}-\frac{3}{2}\sqrt{15}+\frac{1}{4}\sqrt{15}=-\frac{\sqrt{15}}{4}.`
+ * 整串拿去比对必然判错——学生写对 `-1/4√15` 也判错（2026-09-16 用户截图）。
+ *
+ * 判据（必须同时满足，全部为保守方向）：
+ *   ① 至少 3 段（`A=B=C`，2 段只是普通方程，不是推导链）
+ *   ② 首段必须是叙述前缀（含中文）—— 排除 `y=x^2+2x=0` 这类**普通方程**：
+ *      否则会把方程末段当答案，学生写个末段数字就被放行（实测该形态确会放水）
+ *   ③ 末段是纯数学式且长度 ≤ 20、不含 `=`（取的就是最后一段）
+ *   ④ 倒数第二段也是纯数学式（排除 `解：设x=a 所以 x=2` 这类夹杂叙述的假链）
+ *   ⑤ 被切掉的尾巴 ≥ 8 字符（确有推导内容，不是顺手切了个标点）
+ *
+ * 全库回测（1268 题）：命中 14 条，翻转成判对 4 条且**全部真阳性、零放水**。
+ */
+function truncateChainedEquation(raw) {
+  const parts = String(raw).split('=')
+  if (parts.length < 3) return null
+  if (!CJK_TEXT_RE.test(parts[0])) return null
+  const tail = parts[parts.length - 1].replace(/[。.，,；;：:\s]+$/, '').trim()
+  const prev = parts[parts.length - 2].trim()
+  if (!tail || tail.length > 20) return null
+  if (!isPureMathFragment(tail) || !isPureMathFragment(prev)) return null
+  if (raw.length - tail.length < 8) return null
+  return tail
+}
+
 export function sanitizeReferenceAnswer(value) {
   const raw = String(value ?? '').trim()
   if (!raw) return raw
   const m = REF_EXPLAIN_MARKER.exec(raw)
-  if (!m || m.index === 0) return raw
-  const candidate = raw.slice(0, m.index).replace(/[，,；;。、：:\s]+$/, '').trim()
-  if (!candidate) return raw
-  if (candidate.length > 20) return raw
-  if (REF_EXPLAIN_MARKER.test(candidate)) return raw
-  if (!/[0-9A-Za-z√∛±><=≥≤≠≈+\-*/^]|[①-⑳]/.test(candidate)) return raw
-  if (raw.length - candidate.length < 8) return raw
-  return candidate
+  if (m && m.index > 0) {
+    const candidate = raw.slice(0, m.index).replace(/[，,；;。、：:\s]+$/, '').trim()
+    if (candidate &&
+        candidate.length <= 20 &&
+        !REF_EXPLAIN_MARKER.test(candidate) &&
+        /[0-9A-Za-z√∛±><=≥≤≠≈+\-*/^]|[①-⑳]/.test(candidate) &&
+        raw.length - candidate.length >= 8) {
+      return candidate
+    }
+  }
+  const chained = truncateChainedEquation(raw)
+  if (chained) return chained
+  return raw
 }
 
 /**
