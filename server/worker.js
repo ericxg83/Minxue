@@ -17,7 +17,7 @@ import { cropAndUploadQuestionRegion } from './utils/cropAndUpload.js'
 import { refineFigureBoxOnPage } from './utils/figureRegionRefiner.js'
 import { generateTextFingerprint, generatePHash, PARSER_VERSION, TEXT_SIMILARITY_THRESHOLD } from './utils/questionFingerprint.js'
 import { uploadFilesWithRetry } from './services/uploadRetryManager.js'
-import { judgeAnswer, normalizeQuestionType, normalizeChoiceAnswer, extractChoiceLetters, isGradingCommentAnswer, stripAnswerScaffolding, detectUnverifiableReference, UNJUDGED_REASONS } from './services/judgeService.js'
+import { judgeAnswer, normalizeQuestionType, normalizeChoiceAnswer, extractChoiceLetters, isGradingCommentAnswer, stripAnswerScaffolding, detectUnverifiableReference, detectReferenceMismatch, UNJUDGED_REASONS } from './services/judgeService.js'
 import { aiJudgeAnswer, selectJudgeCandidates, AI_JUDGE_ENABLED } from './services/aiJudgeService.js'
 import { normalizeSectionName, splitSubAnswers, splitOcrQuestionsBySubNo, isSubRowConsistentWithWhole } from './services/answerParseService.js'
 import { classifyQuestionLocally } from './utils/localTagger.js'
@@ -4683,6 +4683,8 @@ export const processWorkbookGrading = async (job) => {
   let wrongCount = 0
   let matchedCount = 0
   let emptyCount = 0
+  // P1/P2 参考答案安全带（2026-09-16）：被判定为"参考答案与本题不匹配"而丢弃的题数
+  let refGuardDowngraded = 0
   const pagesMatchInfo = []
   const isChoiceLike = (t) => t === 'choice' || t === 'judge'
 
@@ -4766,6 +4768,32 @@ export const processWorkbookGrading = async (job) => {
 
     const unitAnswers = matchedUnit != null ? answersByUnit.get(matchedUnit) : null
 
+    // 2.0) 单元答案池结构体检（P2，2026-09-16）
+    //   答案册是双栏连排、一个单元的回答常常横跨页边界，而解析按「页」归属单元：
+    //   上一单元的尾巴会被划进本单元，本单元自己的尾巴会被下一单元带走并同题号互相覆盖。
+    //   可观测症状 = 单元答案池的题号不连续（出现缺口）。缺口之后的题号极可能来自别的单元，
+    //   不能拿去判分（实测 28.1(2) 池缺 5/6，q7~q14 实为 28.1(1) 的尾巴）。
+    //   题号连续（无缺口）时不产生任何影响 —— 27 章那批单元都是连续的。
+    const unitQuestionNos = new Set()
+    if (unitAnswers) {
+      for (const [, qMap] of unitAnswers) {
+        for (const qKey of qMap.keys()) {
+          const n = parseInt(String(qKey).split('|')[0], 10)
+          if (Number.isFinite(n)) unitQuestionNos.add(n)
+        }
+      }
+    }
+    let unitGapStart = null
+    if (unitQuestionNos.size > 0) {
+      const maxNo = Math.max(...unitQuestionNos)
+      for (let n = 1; n <= maxNo; n++) {
+        if (!unitQuestionNos.has(n)) { unitGapStart = n; break }
+      }
+    }
+    if (unitGapStart != null) {
+      console.warn(`   [Workbook][RefGuard] 单元 "${matchedUnit}" 答案池题号不连续（缺口起点 ${unitGapStart}，共 ${unitQuestionNos.size} 个题号）→ 题号 ≥ ${unitGapStart} 的参考答案不采信`)
+    }
+
     // 2) 在该单元的"section → qNo|subNo → row"二维索引中，每道题独立查答案。
     //    同一 unit 下不同 section 可能有相同题号（如"一、填空题 1"和"三、解答题 1"），
     //    必须按 question_type 选择对应 section，否则会把填空题答案挂到解答题上。
@@ -4844,7 +4872,9 @@ export const processWorkbookGrading = async (job) => {
       group_tie_units: resolvedInfo.groupTie || null,
       suspicious: pageSuspicious,
       question_count: questions.length,
-      page_number: pageNumber || null
+      page_number: pageNumber || null,
+      unit_answer_count: unitQuestionNos.size,
+      unit_gap_start: unitGapStart
     })
 
     console.log(`   [Workbook] 页匹配: title="${pageTitle}" → unit="${matchedUnit}" (${questions.length} 题)${pageSuspicious ? ' [suspect]' : ''}`)
@@ -4865,6 +4895,30 @@ export const processWorkbookGrading = async (job) => {
           answerRow = found.row
           usedKey = found.qKey
           console.log(`   [Workbook] 答案指纹兜底: 题${q.question_number} → ${usedKey} student="${String(q.student_answer).slice(0, 30)}" ref="${String(found.row.answer).slice(0, 30)}"`)
+        }
+      }
+
+      // ── P1 参考答案安全阀（2026-09-16）──────────────────────────────────
+      //   取到行从不等于"这就是本题的答案"：卷面题与答案册不同源（老师随机组题）或
+      //   单元归属错位时，按题号取出的行是**别的题**的答案，直接判分就是假红叉，
+      //   而且 UI 上参考答案有内容、置信度 0.95，老师根本看不出异常。
+      //   两条硬判据（都只在"一眼可判"时拦，判不出就放行，不比改前更差）：
+      //     ① 题型/形态冲突：选择题配到非选项字母、填空题配到一整段解答；
+      //     ② 题号落在该单元答案池的缺口之后（结构体检发现尾部被别的单元占了）。
+      //   命中 → 丢弃参考答案、is_correct=null、写 answer_exception_reason 让老师看见。
+      if (answerRow) {
+        const sheetType = q.question_type || 'choice'
+        const mismatchReason = detectReferenceMismatch({ sheetType, referenceAnswer: answerRow.answer })
+          || (unitGapStart != null && Number(q.question_number) >= unitGapStart ? 'reference_mismatch' : null)
+        if (mismatchReason) {
+          refGuardDowngraded++
+          console.warn(`   [Workbook][RefGuard] 题 ${q.question_number}: 参考答案与本题不匹配，已丢弃（卷面题型=${sheetType}，答案库行=${usedKey}，答案="${String(answerRow.answer).slice(0, 40)}"${unitGapStart != null && Number(q.question_number) >= unitGapStart ? `，单元题号缺口≥${unitGapStart}` : ''}）→ 转人工`)
+          q.is_correct = null
+          q.answer = null
+          q.answer_source = 'recognized'
+          q.is_suspicious = true
+          q._unjudged_reason = mismatchReason
+          continue
         }
       }
 
@@ -4958,6 +5012,46 @@ export const processWorkbookGrading = async (job) => {
   const allNoMatch = pagesMatchInfo.every(p => p.matched_unit == null)
   if (allNoMatch) {
     sectionMatchInfo.match_fail_reason = '所有页面均无法匹配到所属练习单元'
+  }
+
+  // P2 入口预检结论（2026-09-16）：丢弃率过高说明「这份卷根本不是这本练习册的题」
+  //   （实测：成长·桥第03周 12 题里有 9 题的参考答案被判为不匹配）。
+  //   不静默判分、不假装成功 —— 把结论写进 result 供前端提示，并给出明确建议。
+  if (refGuardDowngraded > 0) {
+    const ratio = refGuardDowngraded / Math.max(allQuestions.length, 1)
+    sectionMatchInfo.workbookMatch = {
+      downgraded: refGuardDowngraded,
+      total: allQuestions.length,
+      ratio: Number(ratio.toFixed(2))
+    }
+    if (ratio >= 0.5) {
+      sectionMatchInfo.match_fail_reason = '卷面题目与本练习册答案册对不上（题型/题号不匹配），参考答案已丢弃并转人工；建议改用普通作业批改'
+      console.warn(`   ⚠️ [Workbook][RefGuard] ${refGuardDowngraded}/${allQuestions.length} 题的参考答案与卷面题不匹配（${(ratio * 100).toFixed(0)}%）—— 这份卷很可能不是这本练习册的题，建议改走普通作业批改`)
+
+      // 半数以上的参考答案都对不上 ⇒ 剩下的那部分也不可信（同一份答案册、同一次取行）。
+      // 题型/答案形态"看起来正常"的题（如选择题配到一个合法字母）恰恰最危险：
+      // 老师看不出异常，却是在用另一道题的答案判分。整卷丢弃，全部转人工。
+      // 未作答不动（本来就走 blank 桶）；本就没有参考答案的题不动。
+      let dropped = 0
+      for (const q of allQuestions) {
+        if (q.answer_source === 'blank') continue
+        if (String(q.answer ?? '').trim() === '' && q.is_correct == null) continue
+        q.answer = null
+        q.is_correct = null
+        q.is_suspicious = true
+        q._unjudged_reason = 'reference_mismatch'
+        dropped++
+      }
+      // 计数器随答案一起重算：不重算会把"已丢弃的错"写进 tasks.result.wrongCount，
+      // 列表页就会显示"6 错"，老师点进去却一道都没有。
+      wrongCount = 0
+      matchedCount = 0
+      emptyCount = allQuestions.filter(q => q.answer_source === 'blank').length
+      sectionMatchInfo.workbookMatch.dropped_all = dropped
+      console.warn(`   ⚠️ [Workbook][RefGuard] 整卷 ${dropped} 题的参考答案已全部丢弃，转人工；wrongCount/matchedCount 已重算`)
+    } else {
+      console.warn(`   ⚠️ [Workbook][RefGuard] ${refGuardDowngraded}/${allQuestions.length} 题的参考答案被丢弃（占 ${(ratio * 100).toFixed(0)}%），已转人工确认`)
+    }
   }
 
   await updateTaskStatus(taskId, TASK_STATUS.PROCESSING, { progress: 75 })

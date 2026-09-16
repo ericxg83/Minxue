@@ -79,6 +79,42 @@ export function detectUnverifiableReference(referenceAnswer) {
     : null
 }
 
+// ── 参考答案与卷面题是否同一道题（2026-09-16 事故沉淀）────────────────
+// 练习册管线只按「题号|小问」取答案，从不校验取到的答案是不是这道题的。
+// 一旦卷面题与答案册不同源（老师随机组题）或答案册单元归属错位（上一单元的尾巴
+// 混进本单元），就会拿别的题的答案去判分 → 假红叉，且老师看不出来。
+// 这里只做「一眼可判的硬冲突」，判不出的一律放行（不拦截 = 不比现在差）。
+const CHOICE_REF_RE = /^[A-Da-d]{1,4}$/
+const JUDGE_REF_RE = /^(√|×|对|错|正确|错误|T|F|t|f)$/
+const PROOF_HEAD_RE = /^\s*(解|证明|答|求|解析)\s*[:：]/
+const LONG_REF_LEN = 40
+
+/** 参考答案是不是一整段解答/证明（而不是一个可比对的值） */
+export function isProofLikeReference(referenceAnswer) {
+  const s = String(referenceAnswer ?? '').trim()
+  if (!s) return false
+  return s.length >= LONG_REF_LEN || PROOF_HEAD_RE.test(s)
+}
+
+/**
+ * 卷面题型与参考答案形态是否明显对不上。
+ *
+ * @param {object} p
+ * @param {string} p.sheetType 卷面题型（choice / fill / judge / answer…），取 OCR 后的有效题型
+ * @param {string} p.referenceAnswer 答案库取到的参考答案
+ * @returns {'reference_mismatch'|null}
+ */
+export function detectReferenceMismatch({ sheetType, referenceAnswer } = {}) {
+  const ref = String(referenceAnswer ?? '').trim()
+  if (!ref) return null
+  const t = String(sheetType || '')
+  if (t === 'choice') return CHOICE_REF_RE.test(ref) ? null : 'reference_mismatch'
+  if (t === 'judge') return JUDGE_REF_RE.test(ref) ? null : 'reference_mismatch'
+  // 填空：参考答案是一整段解答/证明 → 必是另一道题（如"解：由题知，∵EG//BC…"）
+  if (t === 'fill') return isProofLikeReference(ref) ? 'reference_mismatch' : null
+  return null
+}
+
 /**
  * "AI 未判定"的原因码与展示文案。写入 questions.answer_exception_reason，
  * 直接给老师看，因此存的是可读中文而不是裸码。
@@ -90,7 +126,8 @@ export const UNJUDGED_REASONS = Object.freeze({
   no_reference_answer: '缺少参考答案，无法自动判定',
   unverifiable_reference: '参考答案无法自动核对（含略/见解析/答案不唯一）',
   subjective: '主观题需人工判定',
-  low_confidence: '识别置信度不足，需人工确认'
+  low_confidence: '识别置信度不足，需人工确认',
+  reference_mismatch: '参考答案与本题不匹配，已转为人工判定'
 })
 
 /**

@@ -100,12 +100,24 @@ export async function withAiLimit(fn) {
 //      ——重试到重置前也没用，唯一出路是换 Key / 换模型
 //   2) 瞬时并发限流（HTTP 429 "Too Many Requests"、裸 "rate limit"、"retry after"）
 //      ——退避重试有效，**绝不能按额度耗尽处理**，否则会把主模型拉黑一整天
+//   3) 按分钟/秒的速率配额打满（`tpm exhausted` / `rpm limit`）—— 同上，属瞬时限流。
+//      SenseNova 官方口径：高峰期出现 429 是正常现象，退避重试即可。
 // 事故复盘（2026-09-04）：旧正则把 `too many requests` 也算额度耗尽，SenseNova
 // 深度并发一次瞬时限流就把 deepseek-v4-pro 按「Key + 模型 + 自然日」拉黑，
 // 全天 12/19 题降级到 glm-5.2 兜底。收紧匹配面，让"是否重试"由错误消息决定。
+// ③ 按分钟/秒的速率配额（TPM/RPM/QPS）。官方口径：高峰期出现 429 属正常现象，
+//    退避重试即可恢复。**必须排除在"额度耗尽"之外** —— 实测 2026-09-16：
+//    SenseNova 返回 `tpm exhausted`，被下面正则里的裸词 `exhausted` 抓成"额度耗尽"，
+//    于是整把 Key 被冷却 5 小时，答案引擎全线降级到弱模型（额度池当时是满的）。
+const TRANSIENT_RATE_LIMIT_RE = /\b(tpm|rpm|qpm|qps|tps)\b[\s\S]{0,24}?(exhausted|exceeded|limit|rate)|too\s*many\s*requests|retry[\s_-]*after/i
+// 明确指向"积分/余额/信用"的字样：出现任一个就不算瞬时限流
+const QUOTA_WORD_RE = /quota|credit|balance|insufficient|out\s+of|no\s+credit/i
+
 export function isQuotaExhaustedError(err) {
   const data = err?.response?.data
   const msg = data?.error?.message || data?.message || (typeof data === 'string' ? data : '') || ''
+  if (!msg) return false
+  if (TRANSIENT_RATE_LIMIT_RE.test(msg) && !QUOTA_WORD_RE.test(msg)) return false
   return /exceeded[^.]*quota|quota[^.]*exceeded|quota.*limit|daily.*limit|out of quota|insufficient.*quota|balance.*insufficient|insufficient.*balance|exhausted|credit.{0,12}(exhausted|insufficient)|no.{0,8}credit|reject_no_credit|frequency\s*limit|usage.{0,12}exceeded/i.test(msg)
 }
 
@@ -844,6 +856,12 @@ export const ANSWER_ENGINE = {
   MODEL: process.env.ANSWER_ENGINE_MODEL || 'deepseek-v4-pro',
   FALLBACK_MODELS: (process.env.ANSWER_ENGINE_FALLBACK_MODELS || 'glm-5.2,sensenova-6.8-flash-lite')
     .split(',').map(s => s.trim()).filter(Boolean),
+  // 主供应商（Key 池 × FALLBACK_MODELS）全部失败后、回落通用文本链路之前，
+  // 再试这些**备用供应商**（各自用自己的 Key 与 textModel，互不影响主供应商配额）。
+  // 2026-09-16 接入 Huihuiyun：SenseNova 高峰期 rpm 限流时，用免费的 sensenova-6.8-flash-lite
+  // 顶上，避免掉进通用文本链路（实测会给出错误答案，如选择题答非所问）。
+  FALLBACK_VENDORS: (process.env.ANSWER_ENGINE_FALLBACK_VENDORS || 'Huihuiyun')
+    .split(',').map(s => s.trim()).filter(Boolean),
   TIMEOUT_MS: parseInt(process.env.ANSWER_ENGINE_TIMEOUT_MS, 10) || 60000,
   // 多 Key 池：ANSWER_ENGINE_KEYS 是逗号分隔的额外 Key（多个免费账号）。
   // 与供应商主 Key（vendor.envKey）合并去重后组成 Key 池。N 把 Key = N 倍配额。
@@ -966,6 +984,39 @@ export async function callAnswerEngineCompletion(opts) {
       if (allCooling) {
         console.warn(`[AnswerEngine] 所有 Key 均处于冷却（额度重置中），回落通用文本链路`)
       }
+    }
+  }
+
+  // 备用供应商兜底：各自用自己的 Key 与 textModel，与主供应商的配额/冷却互不影响。
+  // 注意这层在「主供应商 Key 池」之后、通用文本链路之前 —— 通用链路的模型质量
+  // 实测不足以给练习册出参考答案（会给出张冠李戴的选项），能不走就不走。
+  for (const vendorName of ANSWER_ENGINE.FALLBACK_VENDORS) {
+    if (vendor && vendor.name === vendorName) continue // 主供应商就是它的话，上面已经试过
+    const fbVendor = getResolvedVendors().find(v => v.name === vendorName)
+    if (!fbVendor) continue
+    const fbKey = process.env[fbVendor.envKey] || ''
+    if (!fbKey) continue
+    try {
+      const content = await requestOpenAIProvider({
+        endpoint: fbVendor.endpoint,
+        apiKey: fbKey,
+        model: fbVendor.textModel,
+        messages: buildOpenAIMessages(systemContent, userContent),
+        temperature,
+        maxTokens,
+        timeout: ANSWER_ENGINE.TIMEOUT_MS,
+        retry429: true,
+        retry503: false,
+        vendor: fbVendor,
+        extraBody: fbVendor.extraBody || null,
+      })
+      if (content) {
+        console.warn(`[AnswerEngine] 主供应商不可用 → 备用供应商兜底成功: ${fbVendor.name}:${fbVendor.textModel}`)
+        return { content, usedBackup: true, provider: `${fbVendor.name}:${fbVendor.textModel}` }
+      }
+      console.warn(`[AnswerEngine] 备用供应商 ${fbVendor.name}:${fbVendor.textModel} 返回空内容`)
+    } catch (err) {
+      console.warn(`[AnswerEngine] 备用供应商 ${fbVendor.name}:${fbVendor.textModel} 失败: ${classifyAnswerEngineError(err)} ${extractErrorSnippet(err)}`)
     }
   }
 
