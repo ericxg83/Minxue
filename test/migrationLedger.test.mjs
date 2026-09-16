@@ -197,7 +197,7 @@ test('index.js 的迁移清单与 import 严格对位，且不允许退回裸 aw
   const items = [...listBlock[1].matchAll(/\['([^']+)',\s*(\w+)\]/g)]
     .map(([, key, fn]) => ({ key, fn }))
 
-  assert.equal(items.length, 48, `迁移清单必须完整，实际 ${items.length} 项`)
+  assert.equal(items.length, 49, `迁移清单必须完整，实际 ${items.length} 项`)
 
   for (const { key, fn } of items) {
     assert.equal(key, fn, `迁移键与函数名必须一致，发现 ['${key}', ${fn}]`)

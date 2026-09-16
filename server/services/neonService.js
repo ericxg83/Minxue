@@ -365,18 +365,7 @@ export const addSelfContainedWrongQuestion = async (params) => {
   //     · 不同任务真做错 → +1；
   //     · 来路不明（taskId 为空，含老脚本调用）→ 不加（宁少勿多）。
   //   last_wrong_task_id 回填/更新取「最新一个非空任务」，历史行由迁移 058 反查补齐。
-  const { rows } = await query(
-    `INSERT INTO ${TABLES.WRONG_QUESTIONS}
-     (student_id, question_id, worksheet_id, page_number, question_no,
-      student_answer, correct_answer, answer_type, content,
-      question_type, block_coordinates, question_image_url,
-      subject, source_type, status, error_count, added_at, last_wrong_at, created_at, updated_at,
-      is_blank, error_type, last_wrong_task_id)
-     VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, 'pending', 1, NOW(), NOW(), NOW(), NOW(),
-             $15, $16, $17)
-     ON CONFLICT (student_id, worksheet_id, question_no)
-       WHERE worksheet_id IS NOT NULL AND question_no IS NOT NULL
-     DO UPDATE SET
+  const errorCountBumpSql = `
        error_count = CASE
          WHEN EXCLUDED.last_wrong_task_id IS NOT NULL
            AND ${TABLES.WRONG_QUESTIONS}.last_wrong_task_id IS NOT NULL
@@ -386,20 +375,94 @@ export const addSelfContainedWrongQuestion = async (params) => {
        END,
        last_wrong_task_id = COALESCE(EXCLUDED.last_wrong_task_id, ${TABLES.WRONG_QUESTIONS}.last_wrong_task_id),
        last_wrong_at = NOW(),
-       updated_at = NOW(),
+       updated_at = NOW()`
+
+  // 2026-09-16 跨卷串行根治（方案A，见 _错题本跨卷串行根治方案-20260916.md）：
+  //   旧身份键 (student_id, worksheet_id, question_no) 里 worksheet_id 是「答案册资源」，
+  //   同一本答案册挂多份周练 → 同题号跨卷共用一行，且快照 COALESCE 保旧 → 题干/判定错配。
+  //   新口径按「题」定位：
+  //     · 有 questionId（练习册批改链路恒有，worker 传 wq.id）→ 冲突目标
+  //       (student_id, question_id)（052 部分唯一索引），快照取最新（EXCLUDED），
+  //       并把 worksheet_id/question_no/page_number 刷新为最新一次做错的出处；
+  //     · 无 questionId（真自包含）→ 保留旧键，迁移 059 已把该索引收窄到
+  //       question_id IS NULL 的行，与上一条互斥。
+  //   回退（23505/42P10）：迁移 059 未执行（新代码先于迁移生效）或历史串行行仍在时，
+  //   回退旧冲突目标，行为与旧版一致——保证批改入册绝不因索引差异而中断。
+  const baseInsertSql = `INSERT INTO ${TABLES.WRONG_QUESTIONS}
+     (student_id, question_id, worksheet_id, page_number, question_no,
+      student_answer, correct_answer, answer_type, content,
+      question_type, block_coordinates, question_image_url,
+      subject, source_type, status, error_count, added_at, last_wrong_at, created_at, updated_at,
+      is_blank, error_type, last_wrong_task_id)
+     VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, 'pending', 1, NOW(), NOW(), NOW(), NOW(),
+             $15, $16, $17)`
+  const baseParams = [studentId, questionId || null, worksheetId, pageNumber, questionNo,
+    studentAnswer, correctAnswer, answerType, content,
+    questionType, blockCoordinates ? JSON.stringify(blockCoordinates) : null,
+    questionImageUrl, subject, sourceType, isBlank, isBlank ? '未作答' : null,
+    taskId || null]
+
+  try {
+    let rows
+    if (questionId) {
+      ;({ rows } = await query(
+        `${baseInsertSql}
+     ON CONFLICT (student_id, question_id)
+       WHERE question_id IS NOT NULL
+     DO UPDATE SET
+       ${errorCountBumpSql},
+       worksheet_id = EXCLUDED.worksheet_id,
+       page_number = EXCLUDED.page_number,
+       question_no = EXCLUDED.question_no,
+       student_answer = EXCLUDED.student_answer,
+       correct_answer = EXCLUDED.correct_answer,
+       answer_type = EXCLUDED.answer_type,
+       content = EXCLUDED.content,
+       question_type = EXCLUDED.question_type,
+       block_coordinates = COALESCE(EXCLUDED.block_coordinates, ${TABLES.WRONG_QUESTIONS}.block_coordinates),
+       question_image_url = COALESCE(EXCLUDED.question_image_url, ${TABLES.WRONG_QUESTIONS}.question_image_url),
+       is_blank = EXCLUDED.is_blank,
+       error_type = EXCLUDED.error_type
+     RETURNING id`,
+        baseParams
+      ))
+    } else {
+      ;({ rows } = await query(
+        `${baseInsertSql}
+     ON CONFLICT (student_id, worksheet_id, question_no)
+       WHERE question_id IS NULL AND worksheet_id IS NOT NULL AND question_no IS NOT NULL
+     DO UPDATE SET
+       ${errorCountBumpSql},
+       student_answer = EXCLUDED.student_answer,
+       correct_answer = EXCLUDED.correct_answer,
+       question_image_url = COALESCE(EXCLUDED.question_image_url, ${TABLES.WRONG_QUESTIONS}.question_image_url),
+       content = COALESCE(EXCLUDED.content, ${TABLES.WRONG_QUESTIONS}.content)
+     RETURNING id`,
+        baseParams
+      ))
+    }
+    return rows[0].id
+  } catch (e) {
+    if (e && (e.code === '23505' || e.code === '42P10')) {
+      console.warn(`  ⚠️ [WrongBook] 身份键冲突(${e.code})，回退旧冲突目标重试: ${e.detail || e.message}`)
+      const { rows } = await query(
+        `${baseInsertSql}
+     ON CONFLICT (student_id, worksheet_id, question_no)
+       WHERE worksheet_id IS NOT NULL AND question_no IS NOT NULL
+     DO UPDATE SET
+       ${errorCountBumpSql},
        student_answer = EXCLUDED.student_answer,
        correct_answer = EXCLUDED.correct_answer,
        question_id = COALESCE(${TABLES.WRONG_QUESTIONS}.question_id, EXCLUDED.question_id),
        question_image_url = COALESCE(EXCLUDED.question_image_url, ${TABLES.WRONG_QUESTIONS}.question_image_url),
        content = COALESCE(EXCLUDED.content, ${TABLES.WRONG_QUESTIONS}.content)
      RETURNING id`,
-    [studentId, questionId || null, worksheetId, pageNumber, questionNo,
-     studentAnswer, correctAnswer, answerType, content,
-     questionType, blockCoordinates ? JSON.stringify(blockCoordinates) : null,
-     questionImageUrl, subject, sourceType, isBlank, isBlank ? '未作答' : null,
-     taskId || null]
-  )
-  return rows[0].id
+        baseParams
+      )
+      return rows[0].id
+    }
+    throw e
+  }
 }
 
 export const updateQuestionAnswer = async (questionId, answer, analysis, forceUpdate = false) => {
