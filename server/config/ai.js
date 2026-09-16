@@ -389,6 +389,24 @@ export const BACKUP_VENDOR_DEFS = [
     extraBody: { reasoning_effort: 'none' },
   },
   {
+    // 阿里云百炼「Token Plan」（token-plan.cn-beijing.maas.aliyuncs.com）：OpenAI 兼容。
+    // 2026-09-16 接入：SenseNova 是「账号级 RPM」，白天被线上批改占满，本机/备用拿不到 pro；
+    // 百炼 Token Plan 的 deepseek-v4-pro 是独立额度（sk-sp- Key 必须配套 token-plan 域名，
+    // 打通用 dashscope 地址会 401 —— 见 skill「敏学练习册解析中断排查」）。
+    // 实测：卷面第5题 5.4s 返回「3」（正确），277 tokens。
+    // ⚠️ 该池是用户付费额度，只作答案引擎的**显式主供应商**（ANSWER_ENGINE_VENDOR=Bailian），
+    //    不要默认加进 FALLBACK_VENDORS 自动消耗。
+    name: 'Bailian',
+    envKey: 'BAILIAN_API_KEY',
+    endpoint: process.env.BAILIAN_BASE_URL
+      ? `${process.env.BAILIAN_BASE_URL.replace(/\/+$/, '')}/chat/completions`
+      : 'https://token-plan.cn-beijing.maas.aliyuncs.com/compatible-mode/v1/chat/completions',
+    textModel: 'deepseek-v4-pro',
+    vlModels: [],
+    referer: null,
+    extraBody: null,
+  },
+  {
     // 辉辉云聚合网关（api.huihuiyun.top）：OpenAI 兼容，OpenAI 兼容中转。
     // 2026-09-13 实测（本次新增，原因：官方 SenseNova Key 已 429 打满 —— tpm/rpm exhausted
     //   连测 3 次全失败，导致魔搭限流后第一备用供应商实际是断的，此通道用于补位）：
@@ -879,11 +897,15 @@ const _answerEngineKeyCooldown = new Map() // apiKey -> 冷却到期时间戳(ms
 
 export function getAnswerEngineKeys(vendor) {
   const primary = process.env[vendor.envKey] || ''
-  const extra = (process.env.ANSWER_ENGINE_KEYS || '')
-    .split(',').map(s => s.trim()).filter(Boolean)
   const all = []
   if (primary) all.push(primary)
-  for (const k of extra) if (!all.includes(k)) all.push(k)
+  // ANSWER_ENGINE_KEYS 语义 = 主供应商的「同账号额外 Key」；备用供应商（如 Bailian 付费池）
+  // 绝不能混入主供应商的 Key，否则会出现"拿商汤 Key 打百炼域名"的 401 空转。
+  if (vendor.name === ANSWER_ENGINE.VENDOR) {
+    const extra = (process.env.ANSWER_ENGINE_KEYS || '')
+      .split(',').map(s => s.trim()).filter(Boolean)
+    for (const k of extra) if (!all.includes(k)) all.push(k)
+  }
   return all
 }
 
