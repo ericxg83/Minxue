@@ -420,6 +420,8 @@ app.post('/api/tasks/upload', upload.array('files', 20), async (req, res) => {
           generatedExamId: normalizedGeneratedExamId,
           taskType: normalizedTaskType,
           worksheetId: worksheetId || null,
+          // 任务表已有 subject 时同步进 job；worker 仍以练习册资源 subject 为权威。
+          subject: subject || null,
           resourceId: normalizedResourceId
         }
 
@@ -873,6 +875,7 @@ async function retryTaskById(taskId) {
       originalName: task.original_name,
       taskType: task.task_type || null,
       worksheetId: task.worksheet_id || null,
+      subject: task.subject || null,
       // ⚠️ workbook 任务绝不能把 worksheet_id 兜底进 resourceId：
       // processTask 见 resourceId 非空会优先路由到 processAnswerBankGrading（普通错题
       // addWrongQuestions 语义），绕开练习册专用的 processWorkbookGrading（自包含错题

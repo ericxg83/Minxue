@@ -4306,7 +4306,37 @@ export const processWorkbookGrading = async (job) => {
   const { taskId, studentId, imageUrl: rawImageUrl, worksheetId, images: jobImages, forceUnitId } = job.data
   const startTime = Date.now()
 
-  console.log(`\n📘 [Workbook] 开始练习册批改 taskId=${taskId}, worksheetId=${worksheetId}`)
+  // workbook 的学科以已选择的练习册资源为权威来源；客户端/旧任务字段只作兜底。
+  // 这样即使历史任务的 tasks.subject 为空，批改仍能把正确学科传播到题目和错题本。
+  const { rows: subjectRows } = await query(
+    `SELECT r.subject AS resource_subject, t.subject AS task_subject
+       FROM ${TABLES.TASKS} t
+       LEFT JOIN ${TABLES.RESOURCES} r
+         ON r.id = t.worksheet_id AND r.resource_type = 'worksheet'
+      WHERE t.id = $1 AND t.worksheet_id = $2
+      LIMIT 1`,
+    [taskId, worksheetId]
+  )
+  const normalizeSubject = (value) => {
+    const normalized = typeof value === 'string' ? value.trim() : ''
+    return normalized || null
+  }
+  const workbookSubject = normalizeSubject(subjectRows[0]?.resource_subject)
+    || normalizeSubject(job.data.subject)
+    || normalizeSubject(subjectRows[0]?.task_subject)
+    || null
+
+  // 任务元数据也自愈：只补空值，不覆盖已有任务字段，避免改动历史人工记录。
+  if (workbookSubject && taskId) {
+    await query(
+      `UPDATE ${TABLES.TASKS}
+          SET subject = $1, updated_at = NOW()
+        WHERE id = $2 AND (subject IS NULL OR BTRIM(subject) = '')`,
+      [workbookSubject, taskId]
+    )
+  }
+
+  console.log(`\n📘 [Workbook] 开始练习册批改 taskId=${taskId}, worksheetId=${worksheetId}, subject=${workbookSubject || '未设置'}`)
 
   // 1. 收集所有待处理的图片URL（支持多页）
   const resolveUrl = (url) => {
@@ -5146,7 +5176,9 @@ export const processWorkbookGrading = async (job) => {
     // 同时写入 text_bbox，使前端 getDisplayBox 的首选路径生效。
     block_coordinates: q.block_coordinates || null,
     text_bbox: q.block_coordinates || null,
-    source_type: 'workbook'
+    source_type: 'workbook',
+    // workbook 学科由练习册资源决定，不能依赖 OCR 或客户端是否传 subject。
+    subject: workbookSubject || q.subject || null
   }))
   // 清除临时标记字段
   for (const q of questionsWithStudentId) {
@@ -5245,7 +5277,8 @@ export const processWorkbookGrading = async (job) => {
         questionType: wq.question_type || 'choice',
         blockCoordinates: wq.block_coordinates || null,
         questionImageUrl,
-        subject: null,
+        // 与 questions.subject 使用同一权威来源，保证错题本自包含记录也可按学科筛选。
+        subject: workbookSubject || wq.subject || null,
         sourceType: 'workbook',
         questionId: wq.id,
         taskId
@@ -6411,13 +6444,14 @@ export const processTask = async (job) => {
   if ((job.data.taskType === undefined || (job.data.taskType === 'workbook' && !job.data.worksheetId)) && taskId) {
     try {
       const { rows } = await query(
-        `SELECT task_type, worksheet_id, generated_exam_id, resource_id FROM ${TABLES.TASKS} WHERE id = $1`,
+        `SELECT task_type, worksheet_id, generated_exam_id, resource_id, subject FROM ${TABLES.TASKS} WHERE id = $1`,
         [taskId]
       )
       if (rows[0]) {
         job.data.taskType = rows[0].task_type || 'general'
         if (!job.data.worksheetId) job.data.worksheetId = rows[0].worksheet_id || null
         if (!job.data.generatedExamId) job.data.generatedExamId = rows[0].generated_exam_id || null
+        if (!job.data.subject) job.data.subject = rows[0].subject || null
         if (!job.data.resourceId) job.data.resourceId = rows[0].resource_id || rows[0].worksheet_id || null
       }
     } catch (e) {

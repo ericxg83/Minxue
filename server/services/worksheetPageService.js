@@ -16,7 +16,7 @@ import { searchByAnswerFingerprint } from '../worker.js'
  * @param {number} pageNumber
  * @param {Array<{ id, question_number, oldIsCorrect, newIsCorrect, answer, student_answer, question_type }>} changes
  */
-async function syncWrongQuestions(taskId, studentId, worksheetId, pageNumber, changes) {
+async function syncWrongQuestions(taskId, studentId, worksheetId, pageNumber, subject, changes) {
   const wrongAdded = []
   const wrongRemoved = []
 
@@ -55,22 +55,23 @@ async function syncWrongQuestions(taskId, studentId, worksheetId, pageNumber, ch
                correct_answer = $3,
                question_id = COALESCE($4, question_id),
                page_number = COALESCE($5, page_number),
-               is_blank = $6,
-               error_type = $7
+               subject = COALESCE(NULLIF(BTRIM($6), ''), subject),
+               is_blank = $7,
+               error_type = $8
            WHERE id = $1`,
-          [existing[0].id, ch.student_answer || null, ch.answer || null, ch.id, pageNumber, isBlank, isBlank ? '未作答' : null]
+          [existing[0].id, ch.student_answer || null, ch.answer || null, ch.id, pageNumber, subject || null, isBlank, isBlank ? '未作答' : null]
         )
       } else {
         await query(
           `INSERT INTO wrong_questions
            (student_id, question_id, worksheet_id, page_number, question_no,
-            student_answer, correct_answer, question_type, answer_type, status, error_count, added_at, last_wrong_at, created_at, updated_at,
+            student_answer, correct_answer, question_type, answer_type, subject, status, error_count, added_at, last_wrong_at, created_at, updated_at,
             is_blank, error_type)
-           VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, 'pending', 1, NOW(), NOW(), NOW(), NOW(),
-                   $10, $11)`,
+           VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, 'pending', 1, NOW(), NOW(), NOW(), NOW(),
+                   $11, $12)`,
           [studentId, ch.id, worksheetId, pageNumber, ch.question_number,
            ch.student_answer || null, ch.answer || null,
-           ch.question_type || 'answer', ch.question_type || 'answer',
+           ch.question_type || 'answer', ch.question_type || 'answer', subject || null,
            isBlank, isBlank ? '未作答' : null]
         )
       }
@@ -93,7 +94,12 @@ async function syncWrongQuestions(taskId, studentId, worksheetId, pageNumber, ch
 export async function regradeTaskPageWithUnit(taskId, pageNumber, unitKey) {
   // 1) 确认 task 属于哪个 worksheet 及学生
   const { rows: taskRows } = await query(
-    `SELECT worksheet_id, student_id FROM tasks WHERE id = $1 AND deleted_at IS NULL`,
+    `SELECT t.worksheet_id, t.student_id,
+            COALESCE(NULLIF(BTRIM(r.subject), ''), NULLIF(BTRIM(t.subject), '')) AS subject
+       FROM tasks t
+       LEFT JOIN resources r
+         ON r.id = t.worksheet_id AND r.resource_type = 'worksheet'
+      WHERE t.id = $1 AND t.deleted_at IS NULL`,
     [taskId]
   )
   if (taskRows.length === 0) {
@@ -101,6 +107,7 @@ export async function regradeTaskPageWithUnit(taskId, pageNumber, unitKey) {
   }
   const worksheetId = taskRows[0].worksheet_id
   const studentId = taskRows[0].student_id
+  const subject = typeof taskRows[0].subject === 'string' ? taskRows[0].subject.trim() || null : null
   if (!worksheetId) {
     return { success: false, updated: 0, skipped: 0, error: '任务未关联练习册' }
   }
@@ -177,9 +184,13 @@ export async function regradeTaskPageWithUnit(taskId, pageNumber, unitKey) {
     try {
       await query(
         `UPDATE questions
-         SET answer = $1, is_correct = $2, status = $3, updated_at = NOW()
-         WHERE id = $4`,
-        [row.answer, judgment.isCorrect, status, q.id]
+         SET answer = $1,
+             is_correct = $2,
+             status = $3,
+             subject = COALESCE(NULLIF(BTRIM($4), ''), subject),
+             updated_at = NOW()
+         WHERE id = $5`,
+        [row.answer, judgment.isCorrect, status, subject, q.id]
       )
       updated++
 
@@ -204,10 +215,34 @@ export async function regradeTaskPageWithUnit(taskId, pageNumber, unitKey) {
   // 5) 同步错题本：错→对删除，对→错添加
   if (changes.length > 0) {
     try {
-      await syncWrongQuestions(taskId, studentId, worksheetId, pageNumber, changes)
+      await syncWrongQuestions(taskId, studentId, worksheetId, pageNumber, subject, changes)
     } catch (e) {
       console.error(`[regradeTaskPageWithUnit] 同步错题本失败: ${e.message}`)
       errors.push(`sync_wrong_questions: ${e.message}`)
+    }
+  }
+
+  // 即使题目本次仍然是“错 -> 错”，也补齐历史空学科的 workbook 错题记录；
+  // 只更新空值，不覆盖教师或历史链路已经确认的 subject。
+  if (subject) {
+    try {
+      await query(
+        `UPDATE wrong_questions w
+            SET subject = $1, updated_at = NOW()
+          WHERE w.student_id = $2
+            AND w.worksheet_id = $3
+            AND (w.subject IS NULL OR BTRIM(w.subject) = '')
+            AND EXISTS (
+              SELECT 1 FROM questions q
+               WHERE q.id = w.question_id
+                 AND q.task_id = $4
+                 AND q.page_number = $5
+            )`,
+        [subject, studentId, worksheetId, taskId, pageNumber]
+      )
+    } catch (e) {
+      console.error(`[regradeTaskPageWithUnit] 补齐错题 subject 失败: ${e.message}`)
+      errors.push(`sync_wrong_question_subject: ${e.message}`)
     }
   }
 

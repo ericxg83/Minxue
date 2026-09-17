@@ -75,7 +75,9 @@ test('迁移059 必须注册进启动迁移链', () => {
 })
 
 test('worker 入册调用必须传 questionId=wq.id（按题定位的前提）', () => {
-  const m = WORKER_SRC.match(/addSelfContainedWrongQuestion\(\{[\s\S]{0,600}?\}\)/)
+  // 窗口 900：2026-09-17 起 subject 传播使调用块从 ~570 字符增至 ~680，
+  // 原 600 窗口会漏匹配；取 900 留余量。
+  const m = WORKER_SRC.match(/addSelfContainedWrongQuestion\(\{[\s\S]{0,900}?\}\)/)
   assert.ok(m, '找到入册调用')
   assert.ok(m[0].includes('questionId: wq.id'), '必须传 wq.id')
   assert.ok(m[0].includes('taskId'), '必须传 taskId（error_count 条件增量依赖）')
