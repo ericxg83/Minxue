@@ -121,6 +121,12 @@ const routes = [
     name: 'WeekendHandout',
     component: () => import('../views/WeekendHandout.vue'),
     meta: { requiresPC: false }
+  },
+  {
+    path: '/weekend-ppt/board',
+    name: 'WeekendBoard',
+    component: () => import('../views/WeekendBoard.vue'),
+    meta: { requiresPC: false }
   }
 ]
 

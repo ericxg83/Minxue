@@ -77,3 +77,30 @@ test('工作台入口：路由 + 侧栏菜单存在', () => {
   assert.ok(VIEW_SRC.includes('/weekend-ppt/preview'), '页面必须调用 preview 接口')
   assert.ok(VIEW_SRC.includes('/api/weekend-ppt/generate'), '页面必须调用 generate 接口')
 })
+
+test('白板模式：路由 + 手写组件 + 入口', () => {
+  const BOARD_SRC = readFileSync(resolve(ROOT, 'src/workbench/views/WeekendBoard.vue'), 'utf8')
+  const CANVAS_SRC = readFileSync(resolve(ROOT, 'src/workbench/components/DrawingCanvas.vue'), 'utf8')
+  // 路由注册（board 必须在 /weekend-ppt 之后且路径完整）
+  assert.ok(
+    ROUTER_SRC.includes("path: '/weekend-ppt/board'") &&
+      ROUTER_SRC.includes("import('../views/WeekendBoard.vue')"),
+    '必须注册 /weekend-ppt/board 路由'
+  )
+  // 手写层：Canvas + Pointer Events + 分层（覆盖在题目上）
+  assert.ok(CANVAS_SRC.includes('<canvas'), '必须有 canvas 元素')
+  assert.ok(CANVAS_SRC.includes('@pointerdown'), '必须用 Pointer Events（统一鼠标/触控笔/触摸）')
+  assert.ok(CANVAS_SRC.includes('e.pressure'), '必须读取笔压')
+  assert.ok(CANVAS_SRC.includes('z-index: 3'), '手写层必须在题目层之上')
+  assert.ok(CANVAS_SRC.includes('exportPng'), '必须支持板书导出')
+  // 白板页：答案浮现 + 原卷 + 全屏 + localStorage 笔迹
+  assert.ok(BOARD_SRC.includes('showAnswer'), '必须有答案浮现')
+  assert.ok(BOARD_SRC.includes('showOriginal'), '必须有原卷对照')
+  assert.ok(BOARD_SRC.includes('requestFullscreen'), '必须支持全屏投屏')
+  assert.ok(BOARD_SRC.includes('localStorage.setItem'), '笔迹必须本地持久化')
+  assert.ok(BOARD_SRC.includes('wb_strokes_'), '笔迹 key 必须按题隔离')
+  // 入口：预览区有「白板模式」按钮，跳转携带 selected
+  assert.ok(VIEW_SRC.includes('白板模式'), '页面上必须有白板模式按钮')
+  assert.ok(VIEW_SRC.includes("path: '/weekend-ppt/board'"), '必须跳转白板路由')
+  assert.ok(VIEW_SRC.includes('selected.value'), '跳转必须携带勾选题目')
+})

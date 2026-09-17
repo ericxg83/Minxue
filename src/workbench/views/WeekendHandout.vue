@@ -135,6 +135,14 @@
       >
         <template #actions>
           <ActionButton
+            variant="secondary"
+            :disabled="selectedCount === 0"
+            @click="openBoard"
+          >
+            <el-icon><MagicStick /></el-icon>
+            白板模式
+          </ActionButton>
+          <ActionButton
             variant="primary"
             :loading="generating"
             :disabled="selectedCount === 0"
@@ -250,8 +258,9 @@
 
 <script setup>
 import { computed, onMounted, ref } from 'vue'
+import { useRouter } from 'vue-router'
 import { ElMessage } from 'element-plus'
-import { Download, Reading, Search } from '@element-plus/icons-vue'
+import { Download, MagicStick, Reading, Search } from '@element-plus/icons-vue'
 import { apiRequest } from '../../services/apiService'
 import ActionButton from '../components/ui/ActionButton.vue'
 import ContentCard from '../components/ui/ContentCard.vue'
@@ -266,6 +275,8 @@ const TIER_COLORS = {
   hard: { fg: '#D97706', bg: '#FEF3C7' },
   unknown: { fg: '#64748B', bg: '#F1F5F9' },
 }
+
+const router = useRouter()
 
 // ── 参数 ──
 const params = ref({
@@ -368,21 +379,7 @@ async function runPreview() {
   handout.value = null
   selected.value = new Set()
   try {
-    const body = {
-      grade: params.value.grade,
-      subject: params.value.subject,
-      students: params.value.students,
-      limit: Number(params.value.limit) || 0,
-      maxPerDay: Number(params.value.maxPerDay) || 0,
-      mergeThin: Number(params.value.mergeThin) || 0,
-      withAnswer: withAnswer.value,
-    }
-    if (periodPreset.value === 'custom') {
-      body.from = params.value.from || undefined
-      body.to = params.value.to || undefined
-    } else {
-      body.days = params.value.days
-    }
+    const body = buildParamsBody()
     const res = await apiRequest('/weekend-ppt/preview', { method: 'POST', body })
     if (!res.success) throw new Error(res.error || '生成失败')
     handout.value = res.handout
@@ -396,6 +393,48 @@ async function runPreview() {
 }
 
 // ── 生成下载 ──
+function buildParamsBody(extra = {}) {
+  const body = {
+    grade: params.value.grade,
+    subject: params.value.subject,
+    students: params.value.students,
+    limit: Number(params.value.limit) || 0,
+    maxPerDay: Number(params.value.maxPerDay) || 0,
+    mergeThin: Number(params.value.mergeThin) || 0,
+    withAnswer: withAnswer.value,
+    ...extra,
+  }
+  if (periodPreset.value === 'custom') {
+    body.from = params.value.from || undefined
+    body.to = params.value.to || undefined
+  } else {
+    body.days = params.value.days
+  }
+  return body
+}
+
+/** 白板模式：携带筛选参数 + selected 题号跳转讲题白板 */
+function openBoard() {
+  if (selected.value.size === 0) {
+    ElMessage.warning('请先勾选题目')
+    return
+  }
+  const body = buildParamsBody()
+  const query = {
+    grade: body.grade,
+    subject: body.subject || '',
+    days: body.days ? String(body.days) : '',
+    limit: body.limit ? String(body.limit) : '',
+    maxPerDay: body.maxPerDay ? String(body.maxPerDay) : '',
+    mergeThin: body.mergeThin ? String(body.mergeThin) : '',
+    students: body.students.join(','),
+    selected: [...selected.value].join(','),
+  }
+  if (body.from) query.from = body.from
+  if (body.to) query.to = body.to
+  router.push({ path: '/weekend-ppt/board', query })
+}
+
 async function runGenerate() {
   if (selected.value.size === 0) {
     ElMessage.warning('请先勾选题目')
@@ -403,22 +442,7 @@ async function runGenerate() {
   }
   generating.value = true
   try {
-    const body = {
-      grade: params.value.grade,
-      subject: params.value.subject,
-      students: params.value.students,
-      limit: Number(params.value.limit) || 0,
-      maxPerDay: Number(params.value.maxPerDay) || 0,
-      mergeThin: Number(params.value.mergeThin) || 0,
-      withAnswer: withAnswer.value,
-      selected: [...selected.value],
-    }
-    if (periodPreset.value === 'custom') {
-      body.from = params.value.from || undefined
-      body.to = params.value.to || undefined
-    } else {
-      body.days = params.value.days
-    }
+    const body = buildParamsBody({ selected: [...selected.value] })
     const res = await fetch('/api/weekend-ppt/generate', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
