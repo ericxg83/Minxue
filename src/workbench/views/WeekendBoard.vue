@@ -67,6 +67,7 @@
           v-model:color="color"
           v-model:size="penSize"
           :strokes="currentStrokes"
+          :allow-touch="allowTouch"
           :export-title="exportTitle"
           :export-texts="exportTexts"
           :export-figure="current?.figure || ''"
@@ -116,6 +117,17 @@
           <el-icon><Delete /></el-icon>
         </button>
       </div>
+      <div class="tool-group">
+        <button
+          type="button"
+          class="tool-btn"
+          :class="{ active: allowTouch }"
+          :title="allowTouch ? '手指绘制已开启（触控笔优先）' : '手指绘制已关闭（防手掌误触）'"
+          @click="allowTouch = !allowTouch"
+        >
+          <el-icon><Pointer /></el-icon>
+        </button>
+      </div>
     </aside>
 
     <!-- 底栏：翻题 -->
@@ -149,7 +161,7 @@ import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { ElMessage } from 'element-plus'
 import {
-  ArrowLeft, ArrowRight, Back, Delete, Download, FullScreen, Reading, RefreshLeft, Remove,
+  ArrowLeft, ArrowRight, Back, Delete, Download, FullScreen, Pointer, Reading, RefreshLeft, Remove,
 } from '@element-plus/icons-vue'
 import { apiRequest } from '../../services/apiService'
 import DrawingCanvas from '../components/DrawingCanvas.vue'
@@ -166,6 +178,7 @@ const showOriginal = ref(false)
 const tool = ref('pen')
 const color = ref('#E11D48')
 const penSize = ref(3)
+const allowTouch = ref(false)
 const canvasRef = ref(null)
 const questionWrapRef = ref(null)
 const isFullscreen = ref(false)

@@ -36,6 +36,10 @@ const props = defineProps({
   exportTexts: { type: Array, default: () => [] },
   exportFigure: { type: String, default: '' },
   disabled: { type: Boolean, default: false },
+  // 防手掌误触（2026-09-17 平板+笔场景）：默认只有触控笔/鼠标可书写，
+  // 手指（touch）默认忽略——平板写字时手掌贴在屏幕不会误画。
+  // 需要手指绘图时由页面工具栏显式开启。
+  allowTouch: { type: Boolean, default: false },
 })
 const emit = defineEmits(['update:strokes'])
 
@@ -104,6 +108,8 @@ function pointFromEvent(e) {
 function onPointerDown(e) {
   if (props.disabled) return
   if (e.pointerType === 'mouse' && e.button !== 0) return
+  // 平板防手掌误触：默认忽略手指，仅触控笔(pen)与鼠标可写
+  if (e.pointerType === 'touch' && !props.allowTouch) return
   canvasRef.value.setPointerCapture(e.pointerId)
   drawing = true
   const stroke = {

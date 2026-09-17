@@ -93,6 +93,12 @@ test('白板模式：路由 + 手写组件 + 入口', () => {
   assert.ok(CANVAS_SRC.includes('e.pressure'), '必须读取笔压')
   assert.ok(CANVAS_SRC.includes('z-index: 3'), '手写层必须在题目层之上')
   assert.ok(CANVAS_SRC.includes('exportPng'), '必须支持板书导出')
+  // 平板防手掌误触：手指(touch)默认忽略，仅触控笔/鼠标可书写，除非显式开启
+  assert.ok(
+    CANVAS_SRC.includes("e.pointerType === 'touch' && !props.allowTouch"),
+    '手指默认不绘制（防手掌误触），须 allowTouch 开启'
+  )
+  assert.ok(CANVAS_SRC.includes('allowTouch: { type: Boolean, default: false }'), 'allowTouch 默认关闭')
   // 白板页：答案浮现 + 原卷 + 全屏 + localStorage 笔迹
   assert.ok(BOARD_SRC.includes('showAnswer'), '必须有答案浮现')
   assert.ok(BOARD_SRC.includes('showOriginal'), '必须有原卷对照')
