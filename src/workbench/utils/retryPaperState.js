@@ -8,10 +8,13 @@
  *
  * 口径铁律：
  *   1. 重练卷只有在学生上传答卷之后，才进入老师的待批改队列。
- *   2. **`exam.status` 绝不能用来判断「有没有交卷」** —— 全库 24 份 status 都是
- *      'ungraded'，连那份已经批完、答卷 task.status='done' 的也是。它只能区分
- *      「待复核 / 已确认」（'graded' 由 gradingFinalizer 结算时写入）。
- *   3. 「交没交卷」的唯一判据是 `tasks.generated_exam_id = exam.id` 的行是否存在。
+ *   2. `exam.status` 只能区分「是否已结算」，**绝不能**用来判断「有没有交卷」——
+ *      「交没交卷」的唯一判据是 `tasks.generated_exam_id = exam.id` 的行是否存在。
+ *      [2026-09-17 更新] 结算时机已提前到「AI 批完时」（与通用作业管线对齐），
+ *      因此 'graded' 的语义是「结果已出」，**不再等于**「老师确认了」；
+ *      「老师确认了」看答卷 task.status === 'reviewed'。
+ *   3. 「还有几道要老师定」看 `exam.not_answered_count`（未判定题数，
+ *      口径 = server/utils/questionResultCaliber.js，与移动端分数同源）。
  *
  * 数据事实（2026-09-12 全库探针）：
  *   - generated_exams 24 份 / retry_task_id 非空 0 份
@@ -31,9 +34,16 @@ export const RETRY_PAPER_STATE = {
   GRADING: 'grading',
   /** 识别异常：学生已交答卷，AI 处理失败（老师可进去查看答卷并重处理） */
   FAILED: 'failed',
-  /** 待复核：学生已交答卷，AI 批完等老师确认 */
+  /** 待复核：学生已交答卷，AI 批完等老师确认（本卷尚未结算） */
   PENDING_REVIEW: 'pending_review',
-  /** 已确认：老师已确认，掌握度已结算（exam.status='graded'） */
+  /**
+   * 待确认：AI 已出结果（exam 已结算），但本卷仍有 AI 给不出结论的题等老师拍板。
+   * 2026-09-17 新增 —— 结算提前到批改时（worker slim 批完即结算）后，
+   * exam.status='graded' 的语义从「老师确认了」变成「AI 批完了、结果已出」，
+   * 因此必须再看「还有没有未判定题」，否则这几道题会随"已确认"一起从老师待办里消失。
+   */
+  PENDING_CONFIRM: 'pending_confirm',
+  /** 已确认：老师已拍板（答卷 task 被标 reviewed），掌握度已结算 */
   REVIEWED: 'reviewed',
 }
 
@@ -52,7 +62,8 @@ const sortPages = (pages) => {
 /**
  * 解析重练卷批改状态（单一出口）
  *
- * @param {Object} exam  generated_exams 行（只需 status；可为空对象）
+ * @param {Object} exam  generated_exams 行 + 接口附带的统计字段
+ *                      （只需 status 与 not_answered_count；可为空对象）
  * @param {Array}  pages 该卷的答卷 task 列表（tasks.generated_exam_id = exam.id）
  * @returns {string} RETRY_PAPER_STATE 之一
  */
@@ -69,13 +80,23 @@ export function resolveRetryPaperState(exam, pages = []) {
   if (GRADING_TASK_STATUSES.includes(taskStatus)) return RETRY_PAPER_STATE.GRADING
   if (taskStatus === 'failed') return RETRY_PAPER_STATE.FAILED
 
-  // 到这里说明答卷已批完。区分「待复核 / 已确认」才轮到 exam.status ——
-  // 这是它唯一可信的用途（gradingFinalizer 结算时写入 'graded'）。
-  if (exam?.status === 'graded') return RETRY_PAPER_STATE.REVIEWED
+  // 到这里说明答卷已批完。
+  //
+  // [2026-09-17] exam.status 的语义变了：结算从「老师点完成复核时」提前到「AI 批完时」
+  // （worker.js::processSlimGrading 批完即结算，与通用作业管线的 finalizeGradingBatch 对齐），
+  // 所以 'graded' 不再等于"老师确认了"，只表示"结果已出"。
+  // 于是分三档：
+  //   · 老师已拍板（答卷 task 被标 reviewed）→ 已确认（终态，不再打扰老师）
+  //   · 还没拍板 + 还有未判定题 → 待确认（老师只需处理这几道）
+  //   · 还没拍板 + 没有未判定题 → 已确认
+  if (exam?.status === 'graded') {
+    if (taskStatus === 'reviewed') return RETRY_PAPER_STATE.REVIEWED
+    return Number(exam?.not_answered_count || 0) > 0
+      ? RETRY_PAPER_STATE.PENDING_CONFIRM
+      : RETRY_PAPER_STATE.REVIEWED
+  }
 
-  // task.status='done' / 'reviewed' 都按待复核处理：
-  // paper 模式结算只写 exam.status，不会把答卷 task 改成 reviewed（见
-  // reviewStore.persistTaskCompletion 的 paper 分支），因此不能依赖 task.status。
+  // task.status='done' 且未结算：AI 批完但结算没成功（或历史数据）
   return RETRY_PAPER_STATE.PENDING_REVIEW
 }
 
@@ -87,10 +108,12 @@ export const canOpenReview = (state) =>
   hasAnswerSheet(state) && state !== RETRY_PAPER_STATE.GRADING
 
 /** 是否允许「完成批改」结算：只有 AI 批完待老师确认的卷才可结算 */
-export const canSettleReview = (state) => state === RETRY_PAPER_STATE.PENDING_REVIEW
+export const canSettleReview = (state) =>
+  state === RETRY_PAPER_STATE.PENDING_REVIEW || state === RETRY_PAPER_STATE.PENDING_CONFIRM
 
-/** 是否「待复核」（老师现在就该动手的） */
-export const isPendingReview = (state) => state === RETRY_PAPER_STATE.PENDING_REVIEW
+/** 是否「待复核 / 待确认」（老师现在就该动手的） */
+export const isPendingReview = (state) =>
+  state === RETRY_PAPER_STATE.PENDING_REVIEW || state === RETRY_PAPER_STATE.PENDING_CONFIRM
 
 /** 是否「已确认」 */
 export const isReviewed = (state) => state === RETRY_PAPER_STATE.REVIEWED
@@ -137,6 +160,16 @@ export const RETRY_PAPER_STATE_META = {
     stepNote: '等待处理',
     canEnterReview: true,
   },
+  [RETRY_PAPER_STATE.PENDING_CONFIRM]: {
+    // 结果已出（移动端此时已能看到对/错/未判定），只剩几道 AI 给不出结论的题等老师定。
+    // 文案刻意不说「待复核」：那会让老师以为整卷都没批。
+    statusLabel: '待确认',
+    tone: 'warning',
+    aiStatusLabel: 'AI 已出结果',
+    actionLabel: '进入确认',
+    stepNote: '剩余题待您定',
+    canEnterReview: true,
+  },
   [RETRY_PAPER_STATE.REVIEWED]: {
     statusLabel: '已确认',
     tone: 'success',
@@ -163,6 +196,7 @@ export function getRetryPaperStateMeta(state) {
  *   grading         → 'processing' AI 处理中
  *   failed          → 'failed'     识别异常
  *   pending_review  → 'review'     待复核（主队列）
+ *   pending_confirm → 'review'     待确认（已出结果，只剩几道等老师定）—— 同样进主队列
  *   reviewed        → 'completed'  已完成
  */
 export const RETRY_STATE_TO_WORKFLOW = {
@@ -170,6 +204,7 @@ export const RETRY_STATE_TO_WORKFLOW = {
   [RETRY_PAPER_STATE.GRADING]: 'processing',
   [RETRY_PAPER_STATE.FAILED]: 'failed',
   [RETRY_PAPER_STATE.PENDING_REVIEW]: 'review',
+  [RETRY_PAPER_STATE.PENDING_CONFIRM]: 'review',
   [RETRY_PAPER_STATE.REVIEWED]: 'completed',
 }
 
@@ -183,5 +218,6 @@ export const RETRY_STATE_TO_TASK_STATUS = {
   [RETRY_PAPER_STATE.GRADING]: 'grading',
   [RETRY_PAPER_STATE.FAILED]: 'failed',
   [RETRY_PAPER_STATE.PENDING_REVIEW]: 'done',
+  [RETRY_PAPER_STATE.PENDING_CONFIRM]: 'done',
   [RETRY_PAPER_STATE.REVIEWED]: 'reviewed',
 }

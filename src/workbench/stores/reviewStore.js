@@ -809,6 +809,9 @@ export const useReviewStore = defineStore('review', () => {
           // 权威字段：paper 模式一律以 _reviewState 判定队列归属与可批改性，
           // status 只是给下游排序/镜像用的派生值。
           _reviewState: reviewState,
+          // 本卷还有几道 AI 给不出结论的题（口径：server/utils/questionResultCaliber.js
+          // 的 unjudged，与移动端分数同源）。老师拍板后据此区分「已确认 / 待确认」。
+          _unjudgedCount: Number(exam.not_answered_count || 0),
           image_url: pages[0]?.image_url || '',
           // paper 专属：题目 ID 列表 + 多页图任务
           _questionIds: exam.question_ids || [],
@@ -825,6 +828,8 @@ export const useReviewStore = defineStore('review', () => {
   // 待复核试卷（status === 'done'）
   // paper 模式下必须按 _reviewState 判定：只有「学生已交卷且 AI 批完」的卷才算待复核，
   // 未交卷的卷（ISSUED）不能落进来 —— 这是本次修复的核心（李哲瀚 错题再测-0911 就是这种）。
+  // 2026-09-17：PENDING_CONFIRM（已出结果、剩几道待老师定）同样进队列 ——
+  // 它是老师现在就该动手的（见 utils/retryPaperState.js 的 isPendingReview）。
   const isPendingReviewTask = (t) =>
     t._reviewState ? isPendingReviewState(t._reviewState) : t.status === 'done'
 
@@ -835,10 +840,18 @@ export const useReviewStore = defineStore('review', () => {
   // paper 模式的权威字段是 _reviewState，status 只是派生镜像；两处必须一起改，
   // 否则会出现 status='reviewed' 但 _reviewState 仍是 pending_review 的撕裂状态，
   // 下一次 loadStudentPapers 之前「已复核」列表会是空的。
+  //
+  // [2026-09-17] 老师拍板后若本卷仍有未判定题，状态是「待确认」而不是「已确认」——
+  // 与 resolveRetryPaperState 的判定保持一致（exam 已结算 + 答卷 task 已 reviewed
+  // 才算终态；真实来源是服务端，这里只是本地镜像，下次加载会重新对齐）。
   const markTaskReviewedLocally = (task) => {
     if (!task) return
     task.status = 'reviewed'
-    if (task._reviewState) task._reviewState = RETRY_PAPER_STATE.REVIEWED
+    if (task._reviewState) {
+      task._reviewState = Number(task._unjudgedCount || 0) > 0
+        ? RETRY_PAPER_STATE.PENDING_CONFIRM
+        : RETRY_PAPER_STATE.REVIEWED
+    }
   }
 
   const pendingTasks = computed(() => studentTasks.value.filter(isPendingReviewTask))
@@ -1076,6 +1089,17 @@ export const useReviewStore = defineStore('review', () => {
         .filter(r => r.isCorrect != null)
       if (results.length > 0 && currentStudent.value?.id) {
         await gradeGeneratedExam(task.id, currentStudent.value.id, results)
+      }
+      // [2026-09-17] 老师拍板也要落到**答卷 task** 上（普通批改任务就是这么做的：
+      // 确认后 task.status → reviewed）。重练卷的状态判定
+      // （utils/retryPaperState.js resolveRetryPaperState）用「答卷 task 是否 reviewed」
+      // 区分「已确认 / 待确认」—— 不写它，老师点完确认下次加载又回到「待确认」，
+      // 卷子永远躺在待办里点不掉。
+      // 注意 task.id 是 exam.id（paper 模式的 task 是卷的镜像），答卷 task 在 _pageTasks 里。
+      const sheets = Array.isArray(task._pageTasks) ? task._pageTasks : []
+      const latestSheet = sheets[sheets.length - 1]
+      if (latestSheet?.id) {
+        await updateTaskStatus(latestSheet.id, 'reviewed')
       }
       return
     }

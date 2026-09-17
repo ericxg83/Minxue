@@ -105,6 +105,8 @@
               v-memo="[
                 task.workflowStatus,
                 task.wrongCount,
+                task.pendingCount,
+                task.retryStats?.text,
                 task.statusLabel,
                 selectedTask?.key === task.key
               ]"
@@ -131,6 +133,8 @@
                 <div class="task-meta">
                   <time>{{ task.timeLabel }}</time>
                   <span>{{ task.questionCount }} 题</span>
+                  <!-- 重练卷：直接给出批改结果（口径同移动端/每日报告），不把整卷算成"待复核" -->
+                  <span v-if="task.retryStats" class="task-result">{{ task.retryStats.text }}</span>
                   <span v-if="task.pendingCount">{{ task.pendingCount }} 待处理</span>
                 </div>
               </div>
@@ -480,10 +484,29 @@ const retry = (exam, student, pages = []) => {
   const reviewState = resolveRetryPaperState(exam, pages)
   const meta = getRetryPaperStateMeta(reviewState)
   const questionCount = Number(exam.total_count || exam.question_ids?.length || 0)
+  // 四桶结果（口径 = server/utils/questionResultCaliber.js，人工复核优先；
+  // 与移动端「X 正确 · Y 错误 · Z 未判定」、复习课分数完全同源，前端只展示不重算）。
+  const correctCount = Number(exam.correct_count || 0)
+  const wrongCount = Number(exam.wrong_count || 0)
+  const unjudgedCount = Number(exam.not_answered_count || 0)
+  // 结果可见的条件：学生已交卷、AI 不在处理中/没失败。
+  // [2026-09-17 产品口径] 出结果**不等老师确认**（结算已提前到 AI 批完时）。
+  const resultVisible = hasAnswerSheet(reviewState)
+    && reviewState !== RETRY_PAPER_STATE.GRADING
+    && reviewState !== RETRY_PAPER_STATE.FAILED
+  const retryStats = resultVisible
+    ? { correct: correctCount, wrong: wrongCount, unjudged: unjudgedCount,
+        text: `${correctCount} 对 · ${wrongCount} 错${unjudgedCount > 0 ? ` · ${unjudgedCount} 待定` : ''}` }
+    : null
   // 已交卷时展示最后一份答卷的时间：老师关心「什么时候交的」，而不是「什么时候出的卷」
   const activityAt = hasAnswerSheet(reviewState)
     ? (pages[pages.length - 1]?.created_at || exam.created_at)
     : exam.created_at
+  // 待处理 = **真正等老师定的题**（AI 给不出结论的那几道）。
+  // 旧实现拿整卷题数顶替，于是"1 道题待定"和"整卷没批"看起来一样，
+  // 这正是「必须整卷复核完才算完」的观感来源（2026-09-17 修正）。
+  const pendingConfirm = reviewState === RETRY_PAPER_STATE.PENDING_REVIEW
+    || reviewState === RETRY_PAPER_STATE.PENDING_CONFIRM
   return {
     key: `retry-${student.id}-${exam.id}`,
     id: exam.id,
@@ -500,8 +523,11 @@ const retry = (exam, student, pages = []) => {
     // 卷面预览（只读抽屉 / 批改页空态）需要题单自行拉取题目，不污染批改用的 allQuestions
     questionIds: Array.isArray(exam.question_ids) ? exam.question_ids : [],
     // 未交卷的卷没有「待处理题」（那批题的正误属于原始作业，不是这次重练的结果）
-    pendingCount: meta.canEnterReview && reviewState !== RETRY_PAPER_STATE.REVIEWED ? questionCount : 0,
-    wrongCount: Number(exam.wrong_count || 0),
+    pendingCount: pendingConfirm && meta.canEnterReview ? unjudgedCount : 0,
+    correctCount,
+    wrongCount,
+    unjudgedCount,
+    retryStats,
     // retryState 是本卡片的权威判据；workflowStatus 只是沿用既有筛选/优先级体系
     retryState: reviewState,
     workflowStatus: RETRY_STATE_TO_WORKFLOW[reviewState],
@@ -943,6 +969,11 @@ onMounted(loadData)
   margin-top: var(--wb-space-1);
   color: var(--wb-text-secondary);
   font-size: var(--wb-fs-meta);
+}
+/* 重练卷的批改结果（对/错/待定）：比时间、题数更重要的信息，用正文色压过同行的次要文字 */
+.task-result {
+  color: var(--wb-text-primary, var(--wb-text-secondary));
+  font-variant-numeric: tabular-nums;
 }
 .task-state { display: flex; align-items: center; }
 

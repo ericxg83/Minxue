@@ -2223,7 +2223,23 @@ export const processSlimGrading = async (job) => {
       }
       alignRecords.push(alignRec)
 
-      // 存储答案为空（OCR 之前未生成）：无法自动判定
+      // ── ① 学生未作答（2026-09-17 P0：提到最前）──────────────────────
+      // 终态 blank：不需要参考答案，也不该占老师的待办。
+      // 此前这一段排在「主观题」之后，于是**学生根本没写的解答题**落 reason='subjective'
+      // 计入 manualCount → 整卷不满足 allAuto → 卷子永远停在待复核、老师被迫进卷点确认。
+      // 实测近 45 天 10 份重练答卷 48 道待人工里 17 道（35%）都是这种「空白解答题」。
+      // 而且客观题未作答一直走的就是这条 blank 分支 —— P0 只是把这个不对称抹平，
+      // blank 的展示与统计口径（未作答终态、不进待办、未作答等同不会）与
+      // src/utils/reviewDecision.js 完全一致。
+      if (!studentAnswer) {
+        results.push({ questionId: stored.id, isCorrect: false, source: 'ocr', confidence: 0, reason: 'blank', studentAnswer: '' })
+        alignRec.isCorrect = false
+        alignRec.confidence = 0
+        autoCount++
+        continue
+      }
+
+      // ── ② 存储答案为空（OCR 之前未生成）：无法自动判定 ──────────────
       // 各分支都带 studentAnswer：落库时一并回写 questions.student_answer（见下方 UPDATE 循环）。
       if (!stored.answer || !stored.answer.trim()) {
         results.push({ questionId: stored.id, isCorrect: null, source: 'manual', reason: 'no_reference_answer', studentAnswer })
@@ -2231,20 +2247,31 @@ export const processSlimGrading = async (job) => {
         continue
       }
 
-      // 主观题：交由人工判定
+      // ── ③ 主观题（解答题/证明题…）：先判等，**只放行「判对」** ────────
+      // 2026-09-17 P1（复核减负）：此处原本无条件转人工（reason='subjective'），
+      // 等于"有参考答案却没用它判" —— 待人工 48 道里 100% 都出自这一个分支。
+      // 现改为先跑一次 judgeAnswer，命中数学等价即自动判对。
+      //
+      // ⚠️ 只放行 true，判错/判不出仍旧转人工，这个不对称是刻意的：
+      //   主观题的参考答案是一整段过程，可能本身有误（AI 现算 / 答案库错位），
+      //   而"判对"= 两侧归约后等价，学生确实做对了 ⇒ 代价小；
+      //   "判错"若基于错答案 ⇒ 假红叉 + 误入错题本 + 进下一轮重练（一条错答案传染）。
+      //   judgeAnswer 内部已对"证明略/见解析/答案不唯一"这类不可核对参考返回 null，
+      //   因此这里不需要再叠一层参考形态闸门。
+      //   置信度沿用客观题同一门槛：OCR 若没把手写作答读准，宁可交人。
       const qType = (stored.question_type || '').toLowerCase()
       if (SUBJECTIVE_TYPES.has(qType)) {
+        const subjectiveJudgment = judgeAnswer(studentAnswer, stored.answer, stored.question_type)
+        const subjectiveConfidence = ocr?.confidence != null ? Number(ocr.confidence) : 0
+        if (subjectiveJudgment.isCorrect === true && subjectiveConfidence >= CONFIDENCE_THRESHOLD) {
+          results.push({ questionId: stored.id, isCorrect: true, source: 'ocr', confidence: subjectiveConfidence, studentAnswer })
+          alignRec.isCorrect = true
+          alignRec.confidence = subjectiveConfidence
+          autoCount++
+          continue
+        }
         results.push({ questionId: stored.id, isCorrect: null, source: 'manual', reason: 'subjective', studentAnswer })
         manualCount++
-        continue
-      }
-
-      // 学生未作答
-      if (!studentAnswer) {
-        results.push({ questionId: stored.id, isCorrect: false, source: 'ocr', confidence: 0, reason: 'blank', studentAnswer: '' })
-        alignRec.isCorrect = false
-        alignRec.confidence = 0
-        autoCount++
         continue
       }
 
@@ -2344,47 +2371,78 @@ export const processSlimGrading = async (job) => {
     await job.updateProgress(90)
     await updateTaskStatus(taskId, TASK_STATUS.PROCESSING, { progress: 90 })
 
-    // 仅当全部题都成功自动判定（无任何 manual 回退）才标记 graded + 推进掌握度
+    // ── 结算（2026-09-17 改：与通用作业管线对齐，批完即结算）──────────────
+    // 旧实现只在 allAuto（全卷零人工）时才调 /grade ⇒ 一道题转人工就把整卷锁死：
+    // exam.status 一直是 ungraded，卷子永远停在「待复核」，家长端也永远出不了结果，
+    // 而通用作业管线（worker.js:finalizeGradingBatch）**批改末尾就结算**、不等老师复核。
+    //
+    // 现在只把「有结论的题」交结算，未判出的题保持 is_correct=null 继续进老师待办：
+    //   · 幂等：结算是按 (questionId, settlement_key='generated_exam:{id}:final') 去重的，
+    //     重跑/多次调用不会重复推进生命周期；
+    //   · 老师之后改判走 PUT /api/questions/:id → finalizeRejudgeResult（**另一把** key），
+    //     所以「先结算、后改判」能正常纠正，不会造成假掌握。
+    const settledResults = results
+      .filter((r) => r.isCorrect !== null)
+      .map((r) => ({ questionId: r.questionId, isCorrect: r.isCorrect }))
     const allAuto = manualCount === 0 && autoCount > 0
-    if (allAuto) {
-      const gradeResults = results
-        .filter((r) => r.isCorrect !== null)
-        .map((r) => ({ questionId: r.questionId, isCorrect: r.isCorrect }))
-      const gradePayload = { id: generatedExamId, studentId, results: gradeResults }
+    if (settledResults.length > 0) {
+      const gradePayload = { id: generatedExamId, studentId, results: settledResults }
       // 不能用 .catch() 吞掉：这条调用是「组卷已结算」的唯一落库入口，
       // 失败时若仍打印"已标记 graded"会误导排查（2026-09-14 事故里就是这么掩盖的）。
       try {
         await callGradeEndpoint(gradePayload)
-        console.log(`\n🔹 [Slim] 全自动判定完成：${autoCount} 题，组卷已标记 graded`)
+        console.log(
+          allAuto
+            ? `\n🔹 [Slim] 全自动判定完成：${autoCount} 题，组卷已结算`
+            : `\n🔹 [Slim] 部分结算完成：${settledResults.length} 题已出结论（${manualCount} 题待老师确认），组卷已结算`
+        )
       } catch (e) {
-        console.error(`\n🔹 [Slim] 全自动判定完成：${autoCount} 题，但组卷结算失败（卷仍为待复核）:`, e.message)
+        console.error(
+          `\n🔹 [Slim] 有 ${settledResults.length} 题已判定，但组卷结算失败（卷仍为待复核）:`,
+          e.message
+        )
       }
     } else {
-      // 存在需人工判定的题：整卷保持未批改，老师在组卷历史逐题改判后保存
-      console.log(`\n🔹 [Slim] 存在 ${manualCount} 道需人工判定题，整卷保持未批改，等待改判`)
+      // 一道题都没判出来（全主观题/全缺答案）：不结算，等老师逐题改判
+      console.log(`\n🔹 [Slim] ${manualCount} 道题全部待人工判定，本卷不结算`)
     }
 
     await job.updateProgress(100)
 
-    // 统计空白题数（学生未作答）+ 待人工题数（无参考答案 / 主观题 / 置信度不足）
+    // 统计分桶（2026-09-17 修洞）：旧实现查
+    // `questions WHERE task_id = <本答卷任务>` —— 而重练答卷在 questions 表里**没有本卷题行**
+    // （题目行是原作业共用行，task_id 指向原作业）⇒ 恒 0 行 ⇒ emptyCount/pendingCount 恒 0，
+    // 卡片上的"待处理"因此只能拿整卷题数顶替（GradeCenterWorkbench 旧写法）。
+    // 改为按本卷 questionIds 回读刚才预填过的行，再走**同一个** computeTaskStats（四桶口径
+    // 与批改页 6 态、PC 列表同源，见 utils/taskStats.js 文件头），不在这里另写一套分桶。
+    let correctCount = 0
+    let wrongCount = 0
     let emptyCount = 0
     let pendingCount = 0
     try {
-      const { rows: gradedRows } = await query(
-        `SELECT is_correct, answer_source, review_status, confidence FROM ${TABLES.QUESTIONS} WHERE task_id = $1`,
-        [taskId]
-      )
+      const resultIds = results.map((r) => r.questionId).filter(Boolean)
+      const { rows: gradedRows } = resultIds.length
+        ? await query(
+            `SELECT is_correct, answer_source, review_status, confidence
+             FROM ${TABLES.QUESTIONS} WHERE id = ANY($1::uuid[])`,
+            [resultIds]
+          )
+        : { rows: [] }
       const stats = computeTaskStats(gradedRows)
+      correctCount = stats.correctCount
+      wrongCount = stats.wrongCount
       emptyCount = stats.emptyCount
       pendingCount = stats.pendingCount
     } catch (e) {
-      console.error('   [Slim] 统计空白/待人工题数失败:', e.message)
+      console.error('   [Slim] 统计四桶失败:', e.message)
     }
 
     await updateTaskStatus(taskId, TASK_STATUS.DONE, {
       questionCount: paperOrder.length,
       autoCount,
       manualCount,
+      correctCount,
+      wrongCount,
       emptyCount,
       pendingCount,
       duration: Date.now() - startTime,

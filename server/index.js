@@ -988,29 +988,59 @@ app.post('/api/tasks/:taskId/recalculate-stats', async (req, res) => {
   try {
     const { taskId } = req.params
 
-    const { rows } = await query(
-      `SELECT is_correct, answer_source, review_status, confidence FROM ${TABLES.QUESTIONS} WHERE task_id = $1`,
+    // [2026-09-17 修复] 重练答卷（task_type=wrong_retry / 带 generated_exam_id）在 questions 表里
+    // **没有本卷题行** —— 题目行是原作业共用行（task_id 指向原作业，见
+    // topics/retry-paper-order.md §5.5）。旧实现一律按 task_id 查，对重练答卷恒 0 行，
+    // 于是把 questionCount/wrongCount/emptyCount/pendingCount **全部写成 0**：
+    // 实测 5 份 status='reviewed' 的重练答卷 result.questionCount 全是 0
+    // （未复核的 done 卷反而正常）⇒ 老师一点「完成复核」，卡片上的题数与统计就清零。
+    // 现在按题目 ID 取行（重练卷走 generated_exams.question_ids），口径不变。
+    let questionIds = null
+    const { rows: taskRows } = await query(
+      `SELECT task_type, generated_exam_id FROM ${TABLES.TASKS} WHERE id = $1`,
       [taskId]
     )
+    const retryExamId = taskRows[0]?.task_type === 'wrong_retry' || taskRows[0]?.generated_exam_id
+      ? taskRows[0]?.generated_exam_id
+      : null
+    if (retryExamId) {
+      const { rows: examRows } = await query(
+        `SELECT question_ids FROM ${TABLES.GENERATED_EXAMS} WHERE id = $1`,
+        [retryExamId]
+      )
+      const raw = examRows[0]?.question_ids
+      questionIds = Array.isArray(raw) ? raw : (typeof raw === 'string' ? JSON.parse(raw || '[]') : [])
+    }
+
+    const { rows } = questionIds
+      ? await query(
+          `SELECT is_correct, answer_source, review_status, confidence
+           FROM ${TABLES.QUESTIONS} WHERE id = ANY($1::uuid[])`,
+          [questionIds]
+        )
+      : await query(
+          `SELECT is_correct, answer_source, review_status, confidence FROM ${TABLES.QUESTIONS} WHERE task_id = $1`,
+          [taskId]
+        )
 
     // 与复核页「需处理」同一套分桶：四桶互斥，未作答不再与"改判为错"同时命中，
     // 非空但判不出的题进 pendingCount 而不是凭空消失。
-    const { questionCount, wrongCount, emptyCount, pendingCount } = computeTaskStats(rows)
+    const { questionCount, correctCount, wrongCount, emptyCount, pendingCount } = computeTaskStats(rows)
 
-    const { rows: taskRows } = await query(
+    const { rows: updatedRows } = await query(
       `UPDATE ${TABLES.TASKS}
        SET result = COALESCE(result, '{}'::jsonb) || $1::jsonb,
            updated_at = NOW()
        WHERE id = $2
        RETURNING *`,
-      [JSON.stringify({ questionCount, wrongCount, emptyCount, pendingCount, progress: 100 }), taskId]
+      [JSON.stringify({ questionCount, correctCount, wrongCount, emptyCount, pendingCount, progress: 100 }), taskId]
     )
 
-    if (taskRows.length === 0) {
+    if (updatedRows.length === 0) {
       return res.status(404).json({ error: '任务不存在' })
     }
 
-    res.json({ success: true, result: taskRows[0].result })
+    res.json({ success: true, result: updatedRows[0].result })
   } catch (error) {
     console.error('重新计算任务统计失败:', error)
     res.status(500).json({ error: error.message })

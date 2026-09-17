@@ -19,6 +19,11 @@
  *
  * 移动端四档（2026-09-14 老师确认）：
  *   等待作答 → 已提交答卷 → 正在批改 → 等待复核 → （已出结果，直接显示分数）
+ *
+ * [2026-09-17 产品口径] 「已出结果」以 **AI 批完（exam 已结算）** 为界，不再等老师确认：
+ *   PC 的 PENDING_CONFIRM（已出结果、剩几道待老师定）在移动端同样映射到 RESULT，
+ *   行内直接显示「X 正确 · Y 错误 · Z 未判定」—— 家长不该因为老师还没点确认而看不到结果。
+ *   PENDING_REVIEW（AI 批完但**结算失败**）才继续停在「等待复核」。
  */
 // 带 .js 扩展名是刻意的：这样 server/ 下的只读回归脚本能直接 import 本文件，
 // 用真实数据回放四档判定（见 server/_diag_exam_stage_render.mjs）。
@@ -57,7 +62,12 @@ export function resolveRetryExamStage(exam) {
   const sheets = Array.isArray(exam?.answer_sheets) ? exam.answer_sheets : []
   const base = resolveRetryPaperState(exam, sheets)
 
-  if (base === RETRY_PAPER_STATE.REVIEWED) return RETRY_EXAM_STAGE.RESULT
+  // PENDING_CONFIRM（2026-09-17）：AI 已出结果、exam 已结算，只剩几道题等老师定 ——
+  // 家长/学生端此时就该看到结果（对/错/未判定），不能因为老师还没点确认而继续显示
+  // 「等待复核」。这是本次「批完即出结果」的产品口径。
+  if (base === RETRY_PAPER_STATE.REVIEWED || base === RETRY_PAPER_STATE.PENDING_CONFIRM) {
+    return RETRY_EXAM_STAGE.RESULT
+  }
   if (base === RETRY_PAPER_STATE.FAILED) return RETRY_EXAM_STAGE.FAILED
   if (base === RETRY_PAPER_STATE.PENDING_REVIEW) return RETRY_EXAM_STAGE.PENDING_REVIEW
   if (base === RETRY_PAPER_STATE.ISSUED) return RETRY_EXAM_STAGE.ISSUED
