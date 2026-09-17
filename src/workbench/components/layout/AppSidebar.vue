@@ -1,9 +1,9 @@
 <template><aside class="app-sidebar"><button class="brand" type="button" @click="go('/')"><span class="brand-mark">敏</span><span><strong>敏学</strong><small>教师工作台</small></span></button><nav aria-label="主导航"><section v-for="group in navGroups" :key="group.label" class="nav-group"><div v-if="group.label" class="group-label">{{ group.label }}</div><button v-for="item in group.items" :key="item.path" type="button" :class="['nav-link',{'is-active':isActive(item.path)}]" @click="go(item.path)"><el-icon><component :is="item.icon" /></el-icon><span>{{ item.label }}</span></button></section></nav><div class="sidebar-footer"><div class="avatar">师</div><span><strong>管理员</strong><small>教学负责人</small></span><el-icon><MoreFilled /></el-icon></div></aside></template>
 <script setup>
 import {useRoute,useRouter} from 'vue-router'
-import {Collection,DataAnalysis,DocumentChecked,HomeFilled,MoreFilled,Notebook,Reading,User} from '@element-plus/icons-vue'
+import {Collection,DataAnalysis,DocumentChecked,Files,HomeFilled,MoreFilled,Notebook,Reading,User} from '@element-plus/icons-vue'
 const route=useRoute(),router=useRouter()
-const navGroups=[{label:'',items:[{label:'工作台',path:'/',icon:HomeFilled}]},{label:'教学工作',items:[{label:'批改中心',path:'/grade',icon:DocumentChecked},{label:'学习诊断',path:'/weekly-report',icon:DataAnalysis},{label:'错题中心',path:'/wrongbook',icon:Collection},{label:'学生管理',path:'/students',icon:User}]},{label:'教学资源',items:[{label:'练习册管理',path:'/worksheets',icon:Notebook},{label:'试卷答案库',path:'/paper',icon:Notebook},{label:'我的讲义',path:'/handouts',icon:Reading},{label:'我的题型库',path:'/question-bank',icon:Collection}]}]
+const navGroups=[{label:'',items:[{label:'工作台',path:'/',icon:HomeFilled}]},{label:'教学工作',items:[{label:'批改中心',path:'/grade',icon:DocumentChecked},{label:'学习诊断',path:'/weekly-report',icon:DataAnalysis},{label:'错题中心',path:'/wrongbook',icon:Collection},{label:'学生管理',path:'/students',icon:User}]},{label:'教学资源',items:[{label:'练习册管理',path:'/worksheets',icon:Notebook},{label:'试卷答案库',path:'/paper',icon:Notebook},{label:'我的讲义',path:'/handouts',icon:Reading},{label:'周末班课件',path:'/weekend-ppt',icon:Files},{label:'我的题型库',path:'/question-bank',icon:Collection}]}]
 const isActive=path=>path==='/'?route.path==='/':route.path.startsWith(path)
 const go=path=>{if(route.path!==path)router.push(path)}
 </script>

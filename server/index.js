@@ -95,6 +95,7 @@ import weaknessRouter from './routes/weakness.js'
 import examPdfRouter from './routes/examPdf.js'
 import wrongQuestionsExportRouter from './routes/wrongQuestionsExport.js'
 import dashboardRouter from './routes/dashboard.js'
+import weekendHandoutRouter from './routes/weekendHandout.js'
 import { runErrorDiagnosis } from './services/diagnosisService.js'
 import { cleanupStudentData } from './services/dataCleanupService.js'
 import { getStudentMastery } from './services/knowledgeMasteryService.js'
@@ -3454,6 +3455,8 @@ app.use('/api/teaching-question-types', teachingQuestionTypesRouter)
 app.use('/api/weakness', weaknessRouter)
 app.use('/api/exam-pdf', examPdfRouter)
 app.use('/api/dashboard', dashboardRouter)
+// weekendHandout 路由内部已写完整路径（/api/weekend-ppt/*），直接挂载避免双重前缀
+app.use(weekendHandoutRouter)
 
 // 错误处理中间件（必须在路由之后，才能捕获路由中的未处理异常）
 app.use((err, req, res, next) => {
