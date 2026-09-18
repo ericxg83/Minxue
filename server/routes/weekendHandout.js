@@ -49,6 +49,7 @@ function sanitizeParams(body = {}) {
     maxPerDay: num(body.maxPerDay, 0),
     limit: num(body.limit, 0),
     mergeThin: num(body.mergeThin, 0),
+    difficulty: str(body.difficulty),
     withAnswer: body.withAnswer !== false,
   }
   return params

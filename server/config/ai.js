@@ -750,8 +750,36 @@ async function requestGeminiVision({ systemPrompt, userText, imageDataURL, tempe
 }
 
 export async function callTextCompletion(opts) {
-  const { systemContent, userContent, temperature = 0.2, maxTokens = 500, model } = opts
+  const { systemContent, userContent, temperature = 0.2, maxTokens = 500, model, preferredVendor } = opts
   const messages = buildOpenAIMessages(systemContent, userContent)
+
+  // ── 指定「优先厂商」────────────────────────────────────────────────────────
+  // 回填等场景用：本地实测常规降级链会先空耗 ~20s 等 Gemini 超时、再撞魔搭/SenseNova
+  // 的 429 重试；指定可用厂商（如 BigModel，免费且 ~3s/条）后先直连它，成功即返回。
+  // 指定厂商失败则静默回落常规链，不阻断。
+  if (preferredVendor) {
+    const pv = BACKUP_CONFIG.VENDORS.find(
+      v => v.name.toLowerCase() === String(preferredVendor).trim().toLowerCase()
+    )
+    if (pv) {
+      try {
+        const content = await requestOpenAIProvider({
+          endpoint: pv.endpoint,
+          apiKey: process.env[pv.envKey] || '',
+          model: model || pv.textModel,
+          messages,
+          temperature,
+          maxTokens,
+          timeout: AI_CONFIG.TIMEOUT,
+          vendor: pv,
+          extraBody: pv.extraBody || null,
+        })
+        if (content) return { content, usedBackup: true, vendor: pv.name }
+      } catch {
+        // 回落常规降级链
+      }
+    }
+  }
 
   // GMI_FIRST=1 时把 GMI 顶到最前作为"主 KEY"。
   // 10 天免费期内避免触发魔搭限流；失效后改 0 即可回落，与视觉链共用同一开关。
@@ -841,6 +869,9 @@ export async function callTextCompletion(opts) {
         maxTokens,
         timeout: AI_CONFIG.TIMEOUT,
         vendor,
+        // ⚠️ 必须传 vendor.extraBody：Huihuiyun(sensenova-6.8-flash-lite) 不带
+        //    reasoning_effort:'none' 会 100% 失败（思考链吃满 max_tokens，正文吐不出来）。
+        extraBody: vendor.extraBody || null,
       })
       if (content) return { content, usedBackup: true }
     } catch {
@@ -1509,6 +1540,10 @@ return `你是一个专业的作业题目识别助手。请识别图片中的题
    绝不能框题干下面的那条文字，也不要把整行图全框进来。
    如果确实找不到本题的配图，image_type 填 "none"、image_bbox 填 null，
    不要用题干区域的坐标凑一个框——凑出来的框裁出的是文字，会被当成配图展示给学生。
+   ⚠️ 多小问大题（拆成多行输出、公共题干写在 parent_stem）：如果图形出现在公共题干里
+   （公共题干含"如图/图1/图示/附图/见图"），那么**拆出来的每一个小问都必须返回同一个
+   image_type 与 image_bbox**（同一个图形，坐标逐字相同），不能只在其中一个小问上返回、
+   也不能都不返回。小问自己另配图时，才返回它自己的框。
 5. 如果题目无法识别，不要编造内容。
 6. 剔除卷面批改痕迹（重要）：
    - 卷面上的"√/✓/✔/×/✗/圈错/半对/分数/批语"都是批改痕迹，不是学生作答内容。
@@ -1674,6 +1709,9 @@ export const buildGeometryReconstructionPrompt = () => `你是几何图结构识
   "points": [ { "label": "A", "x": 12.5, "y": 88.0, "type": "vertex" } ],
   "segments": [ { "from": "A", "to": "B", "style": "solid", "relation": "normal" } ],
   "circles": [ { "cx": 50.0, "cy": 50.0, "r": 20.0, "style": "solid" } ],
+  "polygons": [ { "points": ["A", "B", "C"], "fill": true } ],
+  "arcs": [ { "center": "O", "from": "A", "to": "B", "style": "solid" } ],
+  "angleMarks": [ { "vertex": "A", "from": "B", "to": "C" } ],
   "rightAngles": [ { "vertex": "C", "from": "A", "to": "B" } ],
   "coordinate_system": { "exists": false, "origin": "", "x_axis": false, "y_axis": false },
   "constraints": [],
@@ -1684,6 +1722,14 @@ export const buildGeometryReconstructionPrompt = () => `你是几何图结构识
 - figure_type：纯几何示意图填 "geometry"；坐标系/函数图象填 "coordinate"；画在坐标背景里的几何图填 "geometry_with_coords"。
 - points：图上的顶点、交点、圆心。label 用原图字母，必须含 x、y。
 - segments：端点必须引用 points 里存在的 label。style 取 solid|dashed|dotted；relation 取 normal|perpendicular|parallel。
+- circles：圆心的 cx/cy 与半径 r，都是 0~100 区间内的数。
+- polygons：只有原图上有**灰底阴影区域**（教材里"求阴影部分面积"那种）时才填，points 按顺时针或逆时针依次列出顶点 label（至少 3 个），fill 填 true。
+  ⚠️ 多边形的每条边都必须同时用 segments 表达（重绘时会核对：边不在 segments 里就不上色）。
+  没有阴影区域就填 []，不要为了"补全图形"而填。
+- arcs：原图上有**圆弧**（扇形弧、优弧、劣弧）时才填。center/from/to 都是 points 里的 label，
+  弧从 from 逆时针扫到 to。普通直线边不要用 arcs 表达。
+- angleMarks：原图在角上画了**小弧线标记**（表示"这个角相等/是这个角"）时才填，
+  vertex 是角的顶点，from/to 是两条边上的另一点。直角用 rightAngles，不要用 angleMarks。
 - rightAngles：原图上有直角小方块标记时填写，vertex 是直角所在顶点。
 - labels：见下方"标注纪律"，通常应为空数组。
 - constraints：原图明确给出的等量/平行/垂直关系，如 { "type": "parallel", "segments": ["AB","CD"] }。
@@ -1698,9 +1744,19 @@ export const buildGeometryReconstructionPrompt = () => `你是几何图结构识
 
 其它纪律：
 1. 只输出 JSON，不要任何解释文字。
-2. 不要补画原图中不存在的点、线、圆、坐标轴。
-3. 若该点是由作图关系定义的派生点（垂足、中点、两线交点、线段上的动点），在该点上追加 "derived" 字段说明其来源，例如 { "label": "D", "x": 30.0, "y": 55.0, "derived": { "on_segment": "AB" } }。宁可标注 derived，也不要把位置猜成一个自由点。
+2. 不要补画原图中不存在的点、线、圆、面、弧、坐标轴。宁缺毋滥：拿不准的元素直接不填。
+3. 若该点是由作图关系定义的派生点，必须在该点上追加 "derived" 字段说明来源。
+   **一律用下面的扁平写法**（服务端只认这几种键名，写错等于没标）：
+   - 垂足：{ "label": "D", "x": 30.0, "y": 55.0, "derived": { "foot_of": "C", "perpendicular_to": "AB" } }
+   - 中点：{ "derived": { "midpoint_of": "AB" } }
+   - 两线交点：{ "derived": { "intersection": ["AF", "BC"] } }
+   - 线段上的点：{ "derived": { "on_segment": "AB" } }
+   - 直线上的点（不在线段内）：{ "derived": { "on_line": "AB" } }
+   - 圆上的点：{ "derived": { "on_circle": "O" } }
+   - 折叠/对称的像（带撇点）：{ "derived": { "reflect_of": "B", "axis": "AC" } }
+   - 重心/内心/外心：{ "derived": { "centroid_of": "ABC" } }（内心写 "incenter_of"，外心写 "circumcenter_of"）
+   宁可标注 derived，也不要把位置猜成一个自由点。拿不准是哪一种就标最贴近的那个，不要自造键名。
 4. 忽略一切手写笔迹：解题演算、涂画、勾选、红笔批改。
-5. 若图中没有任何可定位的印刷几何结构（实物照片、统计图表、纯文字示意），返回 {"figure_type":"geometry","points":[],"segments":[],"circles":[]}。`
+5. 若图中没有任何可定位的印刷几何结构（实物照片、统计图表、纯文字示意），返回 {"figure_type":"geometry","points":[],"segments":[],"circles":[],"polygons":[],"arcs":[],"angleMarks":[]}。`
 
 export const buildTikzGenerationPrompt = () => `你是一个 TikZ 代码生成助手。请根据输入几何图输出完整的 tikzpicture 代码，不要附加任何解释。`

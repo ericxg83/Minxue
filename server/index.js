@@ -1510,16 +1510,16 @@ app.delete('/api/students/:id', async (req, res) => {
 // Questions CRUD
 app.post('/api/questions', async (req, res) => {
   try {
-    const { task_id, student_id, content, options, answer, status, question_type, subject, analysis, image_url, geometry_image_url } = req.body
+    const { task_id, student_id, content, options, answer, status, question_type, subject, analysis, image_url, geometry_image_url, parent_stem } = req.body
 
     if (!task_id || !student_id || !content) {
       return res.status(400).json({ error: '缺少必要字段' })
     }
 
     const { rows } = await query(
-      `INSERT INTO ${TABLES.QUESTIONS} (task_id, student_id, content, options, answer, status, question_type, subject, analysis, image_url, geometry_image_url, is_complete)
-       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12) RETURNING *`,
-      [task_id, student_id, content, JSON.stringify(normalizeOptions(options || [])), answer || null, status || 'pending', question_type || 'answer', subject || '数学', analysis || '', image_url || null, geometry_image_url || null, checkQuestionCompleteness({ content, options, answer, question_type, geometry_image_url }).isComplete]
+      `INSERT INTO ${TABLES.QUESTIONS} (task_id, student_id, content, options, answer, status, question_type, subject, analysis, image_url, geometry_image_url, is_complete, parent_stem)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13) RETURNING *`,
+      [task_id, student_id, content, JSON.stringify(normalizeOptions(options || [])), answer || null, status || 'pending', question_type || 'answer', subject || '数学', analysis || '', image_url || null, geometry_image_url || null, checkQuestionCompleteness({ content, parent_stem, options, answer, question_type, geometry_image_url }).isComplete, parent_stem || null]
     )
 
     res.status(201).json({ success: true, question: rows[0] })
@@ -1940,7 +1940,7 @@ app.post('/api/questions/:id/rejudge', async (req, res) => {
 
     const { rows } = await query(
       `SELECT id, student_id, student_answer, answer, question_type, is_correct,
-              content, geometry_image_url, options, answer_source
+              content, parent_stem, geometry_image_url, options, answer_source
        FROM ${TABLES.QUESTIONS} WHERE id = $1 AND deleted_at IS NULL`,
       [id]
     )
@@ -2353,8 +2353,9 @@ app.post('/api/wrong-questions', async (req, res) => {
 
     // 完整性检查 — 用动态口径 checkQuestionCompleteness() 现算（唯一真值源）。
     // 查全部 questionIds 而非只查 newIds：已入册但被隐藏的题也要参与下面的自愈。
+    // parent_stem 必须一起查：拆小问后「如图」只留在公共题干，漏查会把缺图题判成完整。
     const { rows: qRows } = await query(
-      `SELECT id, content, geometry_image_url, question_type, options, answer FROM ${TABLES.QUESTIONS} WHERE id = ANY($1)`,
+      `SELECT id, content, parent_stem, geometry_image_url, question_type, options, answer FROM ${TABLES.QUESTIONS} WHERE id = ANY($1)`,
       [questionIds]
     )
     const qIdSet = new Set(qRows.map(r => r.id))
@@ -2501,8 +2502,9 @@ app.put('/api/wrong-questions/upsert', async (req, res) => {
     }
 
     // 完整性检查 — 不完整的题目不能添加/更新错题本
+    // parent_stem 必须一起查：拆小问后「如图」只留在公共题干（见 questionCompleteness.js）。
     const { rows: qRows } = await query(
-      `SELECT content, geometry_image_url, question_type, options, answer FROM ${TABLES.QUESTIONS} WHERE id = $1`,
+      `SELECT content, parent_stem, geometry_image_url, question_type, options, answer FROM ${TABLES.QUESTIONS} WHERE id = $1`,
       [questionId]
     )
     if (qRows.length > 0) {
@@ -3084,14 +3086,22 @@ let backfillProgress = { total: 0, updated: 0, skipped: 0, failed: 0, done: fals
 // 筛选"缺知识点标签 或 缺难度 或 仅有本地占位"的题目 —— select 与 count 共用，避免两处漂移。
 // tags_source='local'：上传热路径用本地规则分类打的占位（tags 可能是「未分类」、difficulty 恒为 3），
 // 需由定时 LLM 回填修正；修正成功后 tags_source 被写为 'ai'，自然不再被重复捞取。
-const BACKFILL_WHERE = `q.is_complete = TRUE
-         AND (
-           q.ai_tags IS NULL
-           OR q.ai_tags = ''
-           OR q.ai_tags = '[]'
-           OR q.ai_tags::text = '["未分类"]'
+//
+// ⚠️ 2026-09-18：**难度回填不再要求 is_complete=TRUE**。
+//   原写法 `q.is_complete = TRUE AND (...)` 会让所有 is_complete=false 的题永远拿不到难度 ——
+//   实测全库 287 条 `difficulty IS NULL` 100% 是 is_complete=false（残题：选择题选项是图片/
+//   未抓到 → options=[] → 完整性闸判缺选项），导致周末课件出现「未判定」档。
+//   难度只依赖题干、与题目是否完整无关；标签回填仍只在完整题上做（避免用残题正文打错标签，
+//   写入侧由下方 `q.is_complete === true` 把关）。
+const BACKFILL_WHERE = `(
+           (q.is_complete = TRUE AND (
+             q.ai_tags IS NULL
+             OR q.ai_tags = ''
+             OR q.ai_tags = '[]'
+             OR q.ai_tags::text = '["未分类"]'
+             OR q.tags_source = 'local'
+           ))
            OR q.difficulty IS NULL
-           OR q.tags_source = 'local'
          )`
 
 /** 把题目 options 归一化成字符串数组：兼容数组 / JSON字符串 / 对象 / null */
@@ -3142,7 +3152,7 @@ async function runBackfillTags({ limit = 20, trigger = 'manual', chain = false }
     // 1. 查找本批需要回填的题目：知识点标签缺失 或 难度未判定
     backfillProgress.detail = '查询数据库中...'
     const { rows: questions } = await query(
-      `SELECT q.id, q.content, q.options, q.subject, q.ai_tags, q.difficulty, q.question_type
+      `SELECT q.id, q.content, q.options, q.subject, q.ai_tags, q.difficulty, q.question_type, q.is_complete
        FROM ${TABLES.QUESTIONS} q
        WHERE ${BACKFILL_WHERE}
        ORDER BY q.created_at DESC
@@ -3179,13 +3189,16 @@ async function runBackfillTags({ limit = 20, trigger = 'manual', chain = false }
 
         const hasTags = tagResult && tagResult.tags && tagResult.tags.length > 0 && tagResult.tags[0] !== '未分类'
         const hasDifficulty = tagResult && tagResult.difficulty !== null && tagResult.difficulty !== undefined
+        // 标签只在完整题上写：残题（is_complete=false）正文可能残缺，打标签会误导知识点关联；
+        // 难度不看完整性（只依赖题干），残题也要补，否则课件永远显示「未判定」。
+        const writeTags = hasTags && q.is_complete === true
 
-        if (hasTags || hasDifficulty) {
+        if (writeTags || hasDifficulty) {
           // 动态拼装 SET 子句：只更新本次成功识别出的字段，避免用 NULL 覆盖已有值
           const sets = []
           const params = []
           let p = 1
-          if (hasTags) {
+          if (writeTags) {
             const uniqueTags = [...new Set(tagResult.tags.map(t => t.trim()).filter(Boolean))]
             sets.push(`ai_tags = $${p++}::jsonb`, `tags_source = 'ai'`)
             params.push(JSON.stringify(uniqueTags))
@@ -3203,7 +3216,7 @@ async function runBackfillTags({ limit = 20, trigger = 'manual', chain = false }
               params
             )
             backfillProgress.updated++
-            const tagStr = hasTags ? tagResult.tags.join(', ') : '(保留原标签)'
+            const tagStr = writeTags ? tagResult.tags.join(', ') : '(保留原标签)'
             console.log(`  [BackfillTags] ✅ [${i + 1}/${questions.length}] ${shortId}: ${tagStr} | 难度=${hasDifficulty ? tagResult.difficulty : '-'}`)
           } catch (err) {
             backfillProgress.failed++

@@ -67,7 +67,10 @@ export async function generateTag(questionContent, subject = null, retryCount = 
       systemContent: prompt,
       userContent: `请分析以下题目，提取知识点标签：\n\n${questionContent}`,
       temperature: 0.2,
-      maxTokens: 500
+      maxTokens: 500,
+      // 回填专用「优先厂商」（env 配置，如 BigModel）：本地常规降级链会先空耗 ~20s 等
+      // Gemini 超时 + 魔搭/SenseNova 429 重试，指定可用厂商后单条 ~3s。未配置则走常规链。
+      preferredVendor: process.env.BACKFILL_TEXT_VENDOR || undefined
     })
     if (!content) throw new Error('AI 返回内容为空')
 
@@ -136,17 +139,20 @@ async function main() {
   console.log('='.repeat(60))
 
   // 1. Find questions missing tags OR difficulty
+  // ⚠️ 难度回填不受 is_complete 限制（残题也要补难度，否则课件显示「未判定」）；
+  //    标签回填仍只在完整题上做（残题正文可能残缺，打标签会误导知识点关联）。
   const { rows: questions } = await query(
-    `SELECT q.id, q.content, q.options, q.subject, q.ai_tags, q.difficulty, q.question_type
+    `SELECT q.id, q.content, q.options, q.subject, q.ai_tags, q.difficulty, q.question_type, q.is_complete
      FROM ${TABLES.QUESTIONS} q
-     WHERE q.is_complete = TRUE
-       AND (
+     WHERE (
+       (q.is_complete = TRUE AND (
          q.ai_tags IS NULL
          OR q.ai_tags = ''
          OR q.ai_tags = '[]'
          OR q.ai_tags::text = '["未分类"]'
-         OR q.difficulty IS NULL
-       )
+       ))
+       OR q.difficulty IS NULL
+     )
      ORDER BY q.created_at DESC
      LIMIT 500`,
     []
@@ -175,8 +181,10 @@ async function main() {
 
       const hasTags = tagResult.tags && tagResult.tags.length > 0 && tagResult.tags[0] !== '未分类'
       const hasDifficulty = tagResult.difficulty !== null && tagResult.difficulty !== undefined
+      // 标签只在完整题上写（残题正文可能残缺）；难度不看完整性，残题也要补。
+      const writeTags = hasTags && q.is_complete === true
 
-      if (!hasTags && !hasDifficulty) {
+      if (!writeTags && !hasDifficulty) {
         skipped++
         console.log(`  ⏭️  [${i + batch.indexOf(q) + 1}/${total}] ${shortId}: 无法识别标签/难度 (${subject || '无学科'})`)
         return
@@ -186,7 +194,7 @@ async function main() {
       const sets = []
       const params = []
       let p = 1
-      if (hasTags) {
+      if (writeTags) {
         const uniqueTags = deduplicateTags(tagResult.tags)
         sets.push(`ai_tags = $${p++}::jsonb`, `tags_source = 'ai'`)
         params.push(JSON.stringify(uniqueTags))
@@ -204,7 +212,7 @@ async function main() {
           params
         )
         updated++
-        const tagStr = hasTags ? deduplicateTags(tagResult.tags).join(', ') : '(保留原标签)'
+        const tagStr = writeTags ? deduplicateTags(tagResult.tags).join(', ') : '(保留原标签)'
         console.log(`  ✅ [${i + batch.indexOf(q) + 1}/${total}] ${shortId}: ${tagStr} | 难度=${hasDifficulty ? tagResult.difficulty : '-'} (${subject || '无学科'})`)
       } catch (err) {
         failed++

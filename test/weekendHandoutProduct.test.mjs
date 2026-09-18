@@ -110,3 +110,79 @@ test('白板模式：路由 + 手写组件 + 入口', () => {
   assert.ok(VIEW_SRC.includes("path: '/weekend-ppt/board'"), '必须跳转白板路由')
   assert.ok(VIEW_SRC.includes('selected.value'), '跳转必须携带勾选题目')
 })
+
+test('序号展示口径：节内局部序号 + 不显示卷面题号（2026-09-18 修复）', () => {
+  // 预览页：节内序号从 1 起（localSeq），勾选仍用全局 index
+  assert.ok(
+    VIEW_SRC.includes('localSeq: i + 1'),
+    '预览页必须生成节内序号 localSeq（每节从 1 起）'
+  )
+  assert.ok(VIEW_SRC.includes('{{ q.localSeq }}'), '蓝色序号徽标必须显示节内序号 localSeq')
+  assert.ok(
+    VIEW_SRC.includes('toggleQuestion(q.index') && VIEW_SRC.includes('isSelected(q.index'),
+    '勾选/选中仍必须用全局唯一 index（localSeq 仅展示，不能进数据主键）'
+  )
+  // 用户明确不关心「卷面第几题」——预览页不应出现卷面题号标签
+  assert.ok(
+    !VIEW_SRC.includes('q.questionNumber') || !/卷面第\s*\{\{\s*q\.questionNumber/.test(VIEW_SRC),
+    '预览页不应显示「卷面第 N 题」标签（用户不关心此信息）'
+  )
+  // 白板：题面徽标与板书导出标题用课件序号（currentIndex + 1），不混卷面号
+  const B_SRC = readFileSync(resolve(ROOT, 'src/workbench/views/WeekendBoard.vue'), 'utf8')
+  assert.ok(B_SRC.includes('第 {{ currentIndex + 1 }} 题'), '白板题面徽标必须显示课件序号 currentIndex+1')
+  assert.ok(B_SRC.includes('currentIndex.value + 1'), '板书导出标题必须用 currentIndex 而非卷面号')
+  assert.ok(
+    !/卷面第\s*\{\{\s*current(?:Index)?\.?value?\??\.questionNumber/.test(B_SRC),
+    '白板题面与导出标题不应再出现卷面题号'
+  )
+  // PPT 渲染端：页眉序号按节重置（与原全局递增解耦），日志统计改用 totalQ
+  assert.ok(PPTX_SRC.includes('let seq = 0'), 'PPT 页眉序号必须在节内初始化（每节从 1 起）')
+  assert.ok(PPTX_SRC.includes('totalQ'), 'PPT 渲染完成日志必须用 totalQ 统计总题数')
+})
+
+test('难度筛选：参数 + 路由 + 预览星级（2026-09-18 加入，与错题组卷预览页口径一致）', () => {
+  // —— 后端 lib：解构 + 过滤块 ——
+  assert.ok(LIB_SRC.includes("difficulty = ''"), 'buildHandout 必须解构 difficulty（默认空=不限）')
+  assert.ok(
+    LIB_SRC.includes("if (difficulty && difficulty !== 'all')"),
+    'buildHandout 难度过滤条件：非空且非 all 才生效（避免空串误过滤）'
+  )
+  assert.ok(
+    LIB_SRC.includes('TIERS.find(x => x.match(t.difficulty))') && LIB_SRC.includes('k === difficulty'),
+    '过滤必须按 TIERS 档位 key 匹配，不能直接比 difficulty 数值（与组卷预览同口径）'
+  )
+
+  // —— 路由 sanitizeParams 透传 ——
+  assert.ok(ROUTE_SRC.includes("difficulty: str(body.difficulty)"), 'sanitizeParams 必须取 difficulty')
+  assert.ok(ROUTE_SRC.includes('...params'), 'preview 必须把 sanitize 后的参数整体透传给 buildHandout')
+
+  // —— 前端：参数 + 选项 + 下拉绑定 ——
+  assert.ok(VIEW_SRC.includes('difficulty:'), 'WeekendHandout 默认参数必须包含 difficulty 字段')
+  assert.ok(VIEW_SRC.includes('difficultyOptions'), '必须定义 difficultyOptions 选项数组')
+  assert.ok(
+    VIEW_SRC.includes('基础（难度1-2）') &&
+      VIEW_SRC.includes('中等（难度3）') &&
+      VIEW_SRC.includes('较难（难度4-5）') &&
+      VIEW_SRC.includes('难度未判定'),
+    '难度选项必须覆盖四档且标签清晰（与错题组卷预览页口径一致）'
+  )
+  assert.ok(
+    VIEW_SRC.includes('v-model="params.difficulty"') &&
+      VIEW_SRC.includes(':options="difficultyOptions"') &&
+      VIEW_SRC.includes('aria-label="难度筛选"'),
+    '必须用 WorkbenchSelect 绑定 params.difficulty，并暴露 a11y 标签'
+  )
+  assert.ok(VIEW_SRC.includes("difficulty: body.difficulty") || VIEW_SRC.includes('difficulty: params.value.difficulty'),
+    'buildParamsBody 必须把难度筛选发给后端')
+
+  // —— 预览页用 difficultyStars 显示星级（与 RetryPaperPreview 同口径）——
+  assert.ok(VIEW_SRC.includes('difficultyStars'), '预览页必须复用 difficultyStars 工具，确保与组卷预览同口径')
+  assert.ok(VIEW_SRC.includes('item-diff'), '预览页每题必须有难度星级容器')
+  assert.ok(VIEW_SRC.includes('.item-diff {') || /\.item-diff\s*\{[^}]*(color|gold|#)/s.test(VIEW_SRC),
+    '难度星级必须用与组卷预览页一致的金色样式')
+
+  // —— 白板入口：把 difficulty 透传给后端，否则预览筛了、白板又拉全档 ——
+  const B_SRC = readFileSync(resolve(ROOT, 'src/workbench/views/WeekendBoard.vue'), 'utf8')
+  assert.ok(B_SRC.includes("Number(q.difficulty)") || B_SRC.includes("q.difficulty"),
+    'WeekendBoard 必须从 query 读取 difficulty 并传给后端')
+})

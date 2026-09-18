@@ -89,6 +89,7 @@ export async function buildHandout(opts) {
     maxPerDay = 0,
     limit = 0,
     mergeThin = 0,
+    difficulty = '',
     withAnswer = true,
     logger = () => {},
   } = opts
@@ -259,13 +260,26 @@ export async function buildHandout(opts) {
     return { stem, parentStem, subParts, missingSubs, answer, mergedSubNos }
   }
 
+  /**
+   * 原卷图解析：整页图优先，block 裁片兜底。
+   *
+   * 2026-09-18 白板第9题事故：白板「原卷图」弹窗标题写的是"学生原卷（整页图）"，
+   * 但这里此前把 `question_image_url`（按 block_coordinates 裁的题目区域）排第一，
+   * 于是弹窗显示的是裁片。而 block_coordinates 存在系统性漂移（线上实例 9eff748b 第1页
+   * 所有题目的 block y 逐题下移约 1~1.5 题，第9题 block 甚至 y+h=1120 越出页面），
+   * 裁片指向的往往是邻题区域 —— 用户看到"点开原卷图页不对"。
+   *
+   * 修复口径：整页图永远正确（页码由 wq/q 的 page_number 定位），裁片只有在没有整页图
+   * 时才兜底。老师点"原卷图"看的是学生手写上下文，整页比错位裁片可用得多。
+   */
   function resolveDocImage(r) {
-    if (r.question_image_url) return r.question_image_url
-    if (r.q_image_url) return r.q_image_url
     const imgs = Array.isArray(r.task_images) ? r.task_images : []
     const page = r.wq_page_number ?? r.q_page_number ?? null
     const byPage = page == null ? null : imgs.find(i => Number(i?.page_number) === Number(page))
-    const pick = byPage || imgs[0]
+    if (byPage?.image_url) return byPage.image_url
+    if (r.question_image_url) return r.question_image_url
+    if (r.q_image_url) return r.q_image_url
+    const pick = imgs[0]
     return pick?.image_url || null
   }
 
@@ -407,6 +421,14 @@ export async function buildHandout(opts) {
       log(`   [去重] 完整题干相同合并: ${cur.questionNumber ?? ''} 现 ${cur.studentCount} 人错`)
     }
     topics = [...completeMap.values()]
+
+    // 难度筛选（生成参数可选：basic/medium/hard/unknown，空=不限）
+    if (difficulty && difficulty !== 'all') {
+      topics = topics.filter(t => {
+        const k = TIERS.find(x => x.match(t.difficulty))?.key
+        return k === difficulty
+      })
+    }
 
     const tierIdx = t => TIERS.findIndex(x => x.match(t.difficulty))
     topics.sort((a, b) =>

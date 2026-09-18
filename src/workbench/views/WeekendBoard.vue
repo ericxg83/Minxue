@@ -48,16 +48,24 @@
         <!-- 题目 HTML 层 -->
         <div ref="questionLayerRef" class="question-layer">
           <div class="q-head">
-            <span class="q-badge">{{ current.questionNumber != null ? '第 ' + current.questionNumber + ' 题' : '题目' }}</span>
+            <span class="q-badge">第 {{ currentIndex + 1 }} 题</span>
             <span class="q-meta">{{ current.day }} · {{ current.typeLabel || '未标题型' }} · {{ current.tierLabel || '难度未判定' }} · {{ current.studentCount }} 人错</span>
           </div>
-          <div v-if="current.parentStem" class="q-parent">{{ current.parentStem }}</div>
+          <MathRender v-if="current.parentStem" class="q-parent" :content="current.parentStem" auto-detect />
           <div v-if="(current.subParts || []).length > 1" class="q-subparts">
             <div v-for="sp in current.subParts" :key="sp.subNo" class="q-sub">
-              <span class="q-subno">({{ sp.subNo }})</span>{{ sp.content }}
+              <span class="q-subno">({{ sp.subNo }})</span>
+              <MathRender class="q-sub-text" :content="sp.content" auto-detect tag="span" />
             </div>
           </div>
-          <div v-else class="q-stem">{{ current.stem }}</div>
+          <MathRender v-else class="q-stem" :content="current.stem" auto-detect />
+          <!-- 选择题选项：题干已内联 A．B．C．D．时不再重复渲染 -->
+          <div v-if="showOptions" class="q-options" :class="{ 'q-options--two': optionsCompact }">
+            <div v-for="(opt, i) in current.options" :key="i" class="q-option">
+              <span class="q-option__mark">{{ String.fromCharCode(65 + i) }}</span>
+              <MathRender class="q-option__text" :content="opt" auto-detect tag="span" />
+            </div>
+          </div>
           <div v-if="(current.missingSubs || []).length" class="q-missing">
             ⚠ 本题错在第 {{ current.missingSubs.join('、') }} 问，但题库缺该小问题干 — 讲前请看原卷图
           </div>
@@ -71,7 +79,7 @@
         <transition name="ans-pop">
           <div v-if="showAnswer" class="answer-layer">
             <div class="ans-title">参考答案{{ current.answerSourceLabel ? ' · ' + current.answerSourceLabel : '' }}</div>
-            <div class="ans-body">{{ current.answer || '参考答案暂缺 — 讲前请人工补' }}</div>
+            <div class="ans-body"><MathRender :content="current.answer || '参考答案暂缺 — 讲前请人工补'" auto-detect :force-inline="answerIsShort" /></div>
             <div v-if="current.answerRisk" class="ans-risk">⚠ {{ current.answerRisk }}</div>
           </div>
         </transition>
@@ -219,7 +227,9 @@ import {
   ArrowLeft, ArrowRight, Back, Delete, Download, FullScreen, Pointer, Reading, RefreshLeft, Remove,
 } from '@element-plus/icons-vue'
 import { apiRequest } from '../../services/apiService'
+import { hasExplicitOptionMarkers } from '../../utils/questionCompleteness'
 import DrawingCanvas from '../components/DrawingCanvas.vue'
+import MathRender from '../components/MathRender.vue'
 import EmptyState from '../components/ui/EmptyState.vue'
 
 const route = useRoute()
@@ -252,9 +262,76 @@ const penSizes = [
 ]
 
 const current = computed(() => questions.value[currentIndex.value] || null)
-// 几何裁图优先；历史题库缺少裁图时，回退到该题的原题裁片。
-// 不回退 students[].docImage，后者是整页学生作答卷，会把书写痕迹带入讲题区。
-const displayFigureUrl = computed(() => current.value?.figure || current.value?.wbImage || '')
+
+/**
+ * 题干判定文本（公共题干 + 各小问正文）。
+ * 多小问大题拆行落库后「如图」只留在 parentStem，只看 stem 会漏判。
+ */
+const figureJudgeText = computed(() => {
+  const c = current.value
+  if (!c) return ''
+  const parts = [c.parentStem || '']
+  if ((c.subParts || []).length > 1) {
+    for (const sp of c.subParts) parts.push(sp.content || '')
+  } else {
+    parts.push(c.stem || '')
+  }
+  return parts.filter(Boolean).join(' ')
+})
+
+/**
+ * 题干是否提到「图」。
+ *
+ * 注意：这**不是**完整性判定的 `hasFigureReference`（questionCompleteness.js），
+ * 两者问的不是同一个问题，口径也不该相同：
+ *   · `hasFigureReference` 问「题目引用了图、但题库没配图吗」，它决定题目算不算残缺，
+ *     口径必须严格（如图 / 图1 / 图示 / 附图 / 见图），不能放宽；
+ *   · 这里问「这张原题裁片对讲题有没有价值」，口径应当更宽：题干出现「图」字
+ *     （如图 / 图像 / 作图 / 图中 / 下图…）就认为可能有图。漏判的代价是老师对着一道
+ *     没有图的几何题讲不了，误判的代价只是多挂一张裁片 —— 两者不对称，所以宁可放宽。
+ *
+ * 实测（2026-09-18 白板题单）：
+ *   初二 130 题：27 条只有原题裁片、无几何裁图，其中题干含「图」的 0 条；
+ *   初三  49 题：14 条同上，其中含「图」的 3 条 —— 恰好是「平行线分线段的作图中」
+ *   和两条「二次函数图像」题，用严格口径会把这 3 条需要的图误删。
+ */
+const stemMentionsFigure = computed(() => /图/.test(figureJudgeText.value))
+
+/**
+ * 讲题区配图。
+ *
+ * 1) `figure`（几何裁图）优先 —— 它只在题目真引图、且过了渲染闸之后才生成，直接可用。
+ * 2) 历史题库没有裁图时，只有题干提到「图」才回退到原题裁片 `wbImage`。
+ *    否则不回退：wbImage 是学生卷面上按 block_coordinates 裁的题目区域，
+ *    对非图形题（如「计算：(√5)³-(5+√5)÷√5」）它只是题干复述 + 学生手写，
+ *    对讲题零价值，还把书写痕迹带进讲题区。
+ *    同理不回退 students[].docImage（整页学生作答卷）。
+ */
+const displayFigureUrl = computed(() => {
+  const c = current.value
+  if (!c) return ''
+  if (c.figure) return c.figure
+  if (!stemMentionsFigure.value) return ''
+  return c.wbImage || ''
+})
+
+// 选择题选项：题干已内联 ≥2 个 A–D 标号说明选项写在题干里，避免重复渲染
+const showOptions = computed(() => {
+  const c = current.value
+  if (!c || !Array.isArray(c.options) || c.options.length === 0) return false
+  return !hasExplicitOptionMarkers(c.stem || '')
+})
+
+// 短答案（选择题字母、数值）保持行内排版：纯数学内容会被 renderContent 标成
+// 独立公式，一个「A」会渲染成居中放大的斜体 A，既不像卷面也不像答案。
+const answerIsShort = computed(() => String(current.value?.answer || '').trim().length <= 20)
+
+// 选项排布：中考卷面短选项（≤4 条、单条 ≤14 字）走两列，长选项单列铺满
+const optionsCompact = computed(() => {
+  const opts = current.value?.options || []
+  if (opts.length === 0 || opts.length > 4) return false
+  return opts.every(o => String(o).length <= 14)
+})
 
 // 笔迹 localStorage key：按「参数+题目 index」隔离
 const strokesKey = computed(() => {
@@ -268,7 +345,7 @@ const currentStrokes = ref([])
 // 导出用：题干文本
 const exportTitle = computed(() => {
   if (!current.value) return ''
-  return `${handout.value?.grade || ''} · ${current.value.day} · 第 ${current.value.questionNumber ?? ''} 题`
+  return `${handout.value?.grade || ''} · ${current.value.day} · 第 ${currentIndex.value + 1} 题`
 })
 const exportTexts = computed(() => {
   if (!current.value) return []
@@ -295,6 +372,7 @@ onMounted(async () => {
     limit: Number(q.limit) || 0,
     maxPerDay: Number(q.maxPerDay) || 0,
     mergeThin: Number(q.mergeThin) || 0,
+    difficulty: q.difficulty ? String(q.difficulty) : undefined,
     withAnswer: true,
   }
   try {
@@ -752,6 +830,27 @@ onBeforeUnmount(() => {
 .q-sub { font-size: calc(16.5px * var(--s)); line-height: 1.85; color: var(--wb-text, #1e293b); margin-top: calc(6px * var(--s)); }
 .q-subno { color: var(--wb-primary, #6366f1); font-weight: 600; margin-right: 4px; }
 .q-stem { font-size: calc(16.5px * var(--s)); line-height: 1.85; color: var(--wb-text, #1e293b); margin-top: calc(10px * var(--s)); }
+/* 选择题选项（中考样式）：A. 内容；短选项两列，长选项单列铺满 */
+.q-options {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: calc(6px * var(--s)) calc(28px * var(--s));
+  margin-top: calc(12px * var(--s));
+}
+.q-options--two { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+.q-option {
+  display: flex;
+  align-items: baseline;
+  gap: calc(6px * var(--s));
+  font-size: calc(16.5px * var(--s));
+  line-height: 1.75;
+  color: var(--wb-text, #1e293b);
+}
+.q-option__mark {
+  flex: 0 0 auto;
+  font-weight: 650;
+  color: var(--wb-primary, #6366f1);
+}
 .q-missing {
   margin-top: calc(12px * var(--s));
   padding: 8px 12px;

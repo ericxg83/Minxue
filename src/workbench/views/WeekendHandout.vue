@@ -108,6 +108,15 @@
               aria-label="薄天合并阈值"
             />
           </div>
+          <div class="param-field">
+            <label>难度筛选</label>
+            <WorkbenchSelect
+              v-model="params.difficulty"
+              :options="difficultyOptions"
+              width="220px"
+              aria-label="难度筛选"
+            />
+          </div>
         </div>
 
         <div class="param-actions">
@@ -162,7 +171,7 @@
           >
             全选
           </el-checkbox>
-          <span class="toolbar-hint">按「日期倒序 → 每天由易到难」排列；同题多人错已合并</span>
+          <span class="toolbar-hint">每节按「日期倒序 → 节内由易到难」排列；蓝色编号为本节序号（每节从 1 起）</span>
         </div>
 
         <div v-if="previewing" class="preview-loading" aria-label="正在加载题单">
@@ -205,16 +214,15 @@
                 <el-checkbox
                   :model-value="isSelected(q.index)"
                   @change="val => toggleQuestion(q.index, !!val)"
-                  :aria-label="`选择第 ${q.index} 题`"
+                  :aria-label="`选择本节第 ${q.localSeq} 题`"
                 />
               </div>
               <div class="item-body">
                 <div class="item-head">
-                  <span class="item-seq">{{ q.index }}</span>
-                  <span class="item-qn" v-if="q.questionNumber != null">第 {{ q.questionNumber }} 题</span>
+                  <span class="item-seq">{{ q.localSeq }}</span>
                   <span class="item-tag type">{{ q.typeLabel || '未标题型' }}</span>
                   <span class="item-tag tier" :style="tierStyle(q.tier)">{{ q.tierLabel || '难度未判定' }}</span>
-                  <span v-if="q.difficulty != null" class="item-diff">难度 {{ q.difficulty }}</span>
+                  <span v-if="q.difficulty != null" class="item-diff" :title="`难度 ${q.difficulty}`">{{ difficultyStars(q.difficulty) }}</span>
                   <span class="item-count">{{ q.studentCount }} 人错</span>
                   <span v-if="(q.subParts || []).length > 1" class="item-multi">
                     含 {{ q.subParts.length }} 小问（完整题）
@@ -225,19 +233,25 @@
                   <span v-if="!q.hasAnswer" class="item-no-answer">答案暂缺</span>
                 </div>
                 <div class="item-stem">
-                  <template v-if="q.parentStem">{{ q.parentStem }}</template>
+                  <MathRender v-if="q.parentStem" :content="q.parentStem" auto-detect tag="span" />
                   <template v-if="q.subParts && q.subParts.length > 1">
                     <div
                       v-for="sp in q.subParts"
                       :key="sp.subNo"
                       class="item-sub"
-                    >({{ sp.subNo }}) {{ sp.content }}</div>
+                    >({{ sp.subNo }}) <MathRender :content="sp.content" auto-detect tag="span" /></div>
                   </template>
-                  <template v-else>{{ q.stem }}</template>
+                  <MathRender v-else :content="q.stem" auto-detect tag="span" />
                 </div>
                 <div class="item-answer" v-if="withAnswer">
                   <span class="ans-label">参考答案</span>
-                  <span class="ans-text">{{ q.answer || '（库里为空，讲前请人工补）' }}</span>
+                  <MathRender
+                    class="ans-text"
+                    :content="q.answer || '（库里为空，讲前请人工补）'"
+                    auto-detect
+                    :force-inline="String(q.answer || '').trim().length <= 20"
+                    tag="span"
+                  />
                   <span v-if="q.answerRisk" class="ans-risk">⚠ {{ q.answerRisk }}</span>
                 </div>
               </div>
@@ -265,6 +279,8 @@ import { apiRequest } from '../../services/apiService'
 import ActionButton from '../components/ui/ActionButton.vue'
 import ContentCard from '../components/ui/ContentCard.vue'
 import EmptyState from '../components/ui/EmptyState.vue'
+import MathRender from '../components/MathRender.vue'
+import { difficultyStars } from '../../utils/retryPaperOrder'
 import PageHeader from '../components/ui/PageHeader.vue'
 import WorkbenchInput from '../components/ui/WorkbenchInput.vue'
 import WorkbenchSelect from '../components/ui/WorkbenchSelect.vue'
@@ -289,6 +305,7 @@ const params = ref({
   limit: 0,
   maxPerDay: 0,
   mergeThin: 0,
+  difficulty: '',
 })
 const periodPreset = ref('days7')
 const withAnswer = ref(true)
@@ -302,6 +319,15 @@ const periodOptions = [
   { label: '最近 14 天', value: 'days14' },
   { label: '最近 20 天', value: 'days20' },
   { label: '自定义时段', value: 'custom' },
+]
+
+// 难度筛选（与错题组卷预览页「星级」口径一致：basic=星级1 / medium=星级2 / hard=星级3 / unknown=未判定）
+const difficultyOptions = [
+  { label: '不限', value: '' },
+  { label: '基础（难度1-2）', value: 'basic' },
+  { label: '中等（难度3）', value: 'medium' },
+  { label: '较难（难度4-5）', value: 'hard' },
+  { label: '难度未判定', value: 'unknown' },
 ]
 
 function onPeriodPreset(val) {
@@ -348,7 +374,10 @@ const previewMeta = computed(() => {
 })
 
 function questionsOf(label) {
-  return questionSlides.value.filter(q => q.sectionLabel === label)
+  // 节内序号（localSeq）从 1 起连续展示；勾选/跳转仍用全局唯一 index
+  return questionSlides.value
+    .filter(q => q.sectionLabel === label)
+    .map((q, i) => ({ ...q, localSeq: i + 1 }))
 }
 function sectionTierText(sec) {
   const t = sec.tiers || {}
@@ -380,7 +409,7 @@ async function runPreview() {
   selected.value = new Set()
   try {
     const body = buildParamsBody()
-    const res = await apiRequest('/weekend-ppt/preview', { method: 'POST', body })
+    const res = await apiRequest('/weekend-ppt/preview', { method: 'POST', body: JSON.stringify(body) })
     if (!res.success) throw new Error(res.error || '生成失败')
     handout.value = res.handout
     // 默认全选
@@ -401,6 +430,7 @@ function buildParamsBody(extra = {}) {
     limit: Number(params.value.limit) || 0,
     maxPerDay: Number(params.value.maxPerDay) || 0,
     mergeThin: Number(params.value.mergeThin) || 0,
+    difficulty: params.value.difficulty || undefined,
     withAnswer: withAnswer.value,
     ...extra,
   }
@@ -429,6 +459,7 @@ function openBoard() {
     limit: body.limit ? String(body.limit) : '',
     maxPerDay: body.maxPerDay ? String(body.maxPerDay) : '',
     mergeThin: body.mergeThin ? String(body.mergeThin) : '',
+    difficulty: body.difficulty || '',
     students: body.students.join(','),
     selected: [...selected.value].join(','),
     fs: '1',
@@ -610,6 +641,13 @@ async function runGenerate() {
   font-size: 12px;
   font-weight: 650;
   color: var(--wb-text, #1e293b);
+}
+.item-diff {
+  color: #F59E0B;
+  font-size: 12px;
+  letter-spacing: 1px;
+  font-weight: 650;
+  white-space: nowrap;
 }
 .item-multi {
   font-size: 11.5px;
