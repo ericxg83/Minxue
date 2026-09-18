@@ -88,13 +88,16 @@ onBeforeUnmount(() => {
   if (rafId) cancelAnimationFrame(rafId)
 })
 
-// 外部替换笔迹（切题）→ 覆盖本地
+// 外部替换笔迹（切题）→ 覆盖本地。
+// immediate:true 必需：本组件若在「已有笔迹」的情况下挂载（首次进入某题、
+// 或切题时重建画布），初始 props.strokes 不会触发 watch，笔迹不会绘制；
+// 更糟的是随后第一笔会以空数组为底写入，把已存的笔迹覆盖掉。
 watch(() => props.strokes, (val) => {
   if (val !== localStrokes.value) {
     localStrokes.value = Array.isArray(val) ? val : []
   }
   redraw()
-}, { deep: false })
+}, { deep: false, immediate: true })
 
 function pointFromEvent(e) {
   const rect = canvasRef.value.getBoundingClientRect()

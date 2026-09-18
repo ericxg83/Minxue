@@ -413,7 +413,9 @@ function buildParamsBody(extra = {}) {
   return body
 }
 
-/** 白板模式：携带筛选参数 + selected 题号跳转讲题白板 */
+/** 白板模式：携带筛选参数 + selected 题号打开讲题白板。
+ *  fs=1 → 白板直接进全屏讲题模式（平板场景：选完题即可全屏开讲）。
+ *  新标签页打开：白板全屏后不覆盖选题页，讲完可直接回来调整勾选。 */
 function openBoard() {
   if (selected.value.size === 0) {
     ElMessage.warning('请先勾选题目')
@@ -429,10 +431,14 @@ function openBoard() {
     mergeThin: body.mergeThin ? String(body.mergeThin) : '',
     students: body.students.join(','),
     selected: [...selected.value].join(','),
+    fs: '1',
   }
   if (body.from) query.from = body.from
   if (body.to) query.to = body.to
-  router.push({ path: '/weekend-ppt/board', query })
+  const { href } = router.resolve({ path: '/weekend-ppt/board', query })
+  const win = window.open(href, '_blank')
+  // 弹窗被浏览器拦截时退回当前页跳转，保证入口始终可用
+  if (!win) router.push({ path: '/weekend-ppt/board', query })
 }
 
 async function runGenerate() {
