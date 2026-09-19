@@ -1,5 +1,14 @@
 <template>
-  <div ref="boardPageRef" class="board-page" :class="{ 'board-immersive': isImmersive }" @mousemove="onBoardMouseMove">
+  <div
+    ref="boardPageRef"
+    class="board-page"
+    :class="{ 'board-immersive': isImmersive }"
+    @mousemove="onBoardMouseMove"
+    @pointerdown.capture="onBoardPointerDown"
+    @pointermove.capture="onBoardPointerMove"
+    @pointerup.capture="onBoardPointerUp"
+    @pointercancel.capture="onBoardPointerUp"
+  >
     <!-- 顶栏：普通模式常驻；全屏讲题模式下变成悬浮在顶部的半透明控制条，
          鼠标移到顶部才显示，移开后自动隐藏，不再占掉白板内容空间。 -->
     <header
@@ -428,11 +437,11 @@ onMounted(async () => {
   // 并在用户第一次触摸/按键时补一次原生全屏（全屏需要用户手势，无法在加载时自动调用）。
   if (String(q.fs || '') === '1') {
     isImmersive.value = true
-    showTopbar.value = isTouchDevice.value
+    showTopbar.value = false
     armAutoFullscreen()
     showHint(
       isTouchDevice.value
-        ? '全屏讲题模式：左右滑动切题，也可点两侧箭头 · 点右上角可退出'
+        ? '全屏讲题模式：左右滑动切题 · 顶部下拉可唤出控制条，继续下拉退出全屏'
         : '全屏讲题模式：← → / 空格切题 · A 答案 · F 全屏 · Esc 退出',
       5600
     )
@@ -445,8 +454,9 @@ onMounted(async () => {
 // iOS Safari 不支持对任意元素调用全屏（只能对 video），此时仅保留沉浸模式，功能不受影响。
 const isImmersive = ref(false)
 const nativeFs = ref(false)
-// 全屏讲题时顶部控制条默认收起；触屏设备保持常驻，避免平板课堂上找不到退出/答案入口。
-const showTopbar = ref(true)
+// 全屏讲题时顶部控制条默认收起（触屏同样收起），从屏幕顶部下拉可临时唤出；
+// 继续下拉越过阈值则退出全屏。
+const showTopbar = ref(false)
 const suppressTopbarTransition = ref(false)
 const isTouchDevice = ref(false)
 const hint = ref('')
@@ -482,6 +492,44 @@ function onBoardMouseMove(e) {
   if (e.clientY <= 18) showTopbar.value = true
   else if (e.clientY > 90) showTopbar.value = false
 }
+// ── 顶部下拉手势：从屏幕顶部往下拉唤出控制条，继续下拉退出全屏 ──
+const topPull = ref(null)
+let topPullTimer = null
+const TOP_PULL_EXIT = 110 // 下拉超过该距离视为退出全屏
+const TOP_PULL_SHOW = 36 // 下拉超过该距离先唤出控制条
+function onBoardPointerDown(e) {
+  if (e.pointerType !== 'touch' || !isImmersive.value) return
+  if (topPull.value) return
+  if (e.clientY > 26) return
+  topPull.value = { id: e.pointerId, x: e.clientX, y: e.clientY, t: Date.now() }
+}
+function onBoardPointerMove(e) {
+  const g = topPull.value
+  if (!g || e.pointerId !== g.id) return
+  const dy = e.clientY - g.y
+  if (dy > TOP_PULL_SHOW) showTopbar.value = true
+}
+function onBoardPointerUp(e) {
+  const g = topPull.value
+  if (!g || e.pointerId !== g.id) return
+  topPull.value = null
+  const dy = e.clientY - g.y
+  const dt = Date.now() - g.t
+  if (dy >= TOP_PULL_EXIT && dt <= 900) {
+    exitFullscreenMode()
+    return
+  }
+  if (dy <= TOP_PULL_SHOW) {
+    showTopbar.value = isTouchDevice.value ? false : true
+    return
+  }
+  // 轻下拉后短暂停留，避免抬手瞬间又隐藏
+  clearTimeout(topPullTimer)
+  topPullTimer = setTimeout(() => {
+    if (!isImmersive.value) return
+    showTopbar.value = false
+  }, 2600)
+}
 async function enterNativeFs() {
   const el = boardPageRef.value || document.documentElement
   const fn = el.requestFullscreen || el.webkitRequestFullscreen
@@ -505,7 +553,7 @@ async function exitNativeFs() {
 }
 async function enterFullscreenMode() {
   isImmersive.value = true
-  showTopbar.value = isTouchDevice.value
+  showTopbar.value = false
   // 进入时先不播收起动画，避免顶栏从常驻位置跳到悬浮位置造成画面跳动
   suppressTopbarTransition.value = true
   const ok = await enterNativeFs()
@@ -741,6 +789,7 @@ function goBack() {
 onBeforeUnmount(() => {
   clearTimeout(saveTimer)
   clearTimeout(hintTimer)
+  clearTimeout(topPullTimer)
   if (autoFsHandler) {
     window.removeEventListener('pointerup', autoFsHandler, true)
     window.removeEventListener('keyup', autoFsHandler, true)
@@ -839,6 +888,7 @@ onBeforeUnmount(() => {
   transform: translateY(0);
   transition: transform 0.16s ease, opacity 0.16s ease;
 }
+/* 触屏全屏同样隐藏控制条；顶部下拉唤出，继续下拉退出全屏 */
 @media (pointer: coarse) {
   .board-topbar--overlay {
     position: absolute;
@@ -850,10 +900,10 @@ onBeforeUnmount(() => {
     box-shadow: 0 4px 18px rgba(15, 23, 42, 0.10);
   }
   .board-topbar--overlay.board-topbar--hidden {
-    visibility: visible;
-    opacity: 1;
-    transform: none;
-    pointer-events: auto;
+    visibility: hidden;
+    opacity: 0;
+    transform: translateY(-100%);
+    pointer-events: none;
   }
 }
 .tb-left {
