@@ -45,6 +45,7 @@ import fs from 'node:fs'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { normalizeStem } from '../utils/stemNormalize.js'
+import { ocrStemKey } from '../utils/ocrStemKey.js'
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url))
 const REPO_ROOT = path.resolve(__dirname, '..', '..')
@@ -250,7 +251,21 @@ if (rows.length === 0) {
  *  多小问聚合在组装阶段做次级分组（同 task#题号 → 完整题），这里不用 task 维度，
  *  否则不同学生各自 task 的同题面会拆散「共 N 人错」。 */
 const MIN_MERGE_KEY_LEN = 12
+
 function topicKey(r) {
+  // 练习册错题：同一练习册 + 页码 + 题号 + OCR 等价题干指纹。
+  // 同一道题在不同学生任务里可能各生成一条 questions 行（question_id 不同），
+  // 只按 question_id 分组会把同卷同题拆成多张 slide（线上 42/43、45/46 事故）。
+  // 不能只用 worksheet+page+question_no 裸合并：OCR 题号/页码不可靠，
+  // 同页同题号可能混入完全不同的题。
+  if (r.source_type === 'workbook' && r.worksheet_id && r.question_no != null) {
+    const page = r.wq_page_number ?? r.q_page_number ?? null
+    const stem = `${r.parent_stem || ''}${r.content || ''}`
+    const norm = ocrStemKey(stem)
+    if (page != null && norm.length >= MIN_MERGE_KEY_LEN) {
+      return 'ws:' + `${r.worksheet_id}|p${page}|n${r.question_no}|s:${norm}`
+    }
+  }
   const stem = `${r.parent_stem || ''}${r.content || ''}`
   const norm = normalizeStem(stem)
   if (norm.length >= MIN_MERGE_KEY_LEN) return 'topic:' + norm

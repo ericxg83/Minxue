@@ -1,6 +1,7 @@
 import sharp from 'sharp'
 import axios from 'axios'
 import { uploadImage } from '../services/ossService.js'
+import { isOutOfRangeBox } from './blockBoxTrust.js'
 
 /**
  * 下载图片
@@ -38,23 +39,18 @@ function parseBox(coords) {
 }
 
 /**
- * 坐标可信度校验：
+ * 坐标可信度校验（薄包装，判据本体在 utils/blockBoxTrust.js，与读取侧共用同一份逻辑）。
  *  - AI 约定 0-1000 归一化整数；任一数值越界（>1000 或 <0）说明模型实际给了
  *    像素坐标或发生了幻觉，裁剪框会指到错误区域 → 不可信。
  *  - 空框/负宽高等属退化框 → 不可信。
- * 注意：x/y 越界但宽高仍有效时（如 x=1000,width=50 的贴边条），交给
- * clamp + 墨迹校验兜底，不在此一棍子打死。
+ *  - 右下角（x+width / y+height）也必须落在 0-1000 内（2026-09-18 补）。
+ *    此前只校验左上角，于是 y=920,height=300 这种框被当成合法：
+ *    clamp 后裁剪框变成页面最底部的一条 220px 横条，**与本题毫无关系**。
+ *    存量实测：wrong_questions 125 条里 24 条命中（19%），
+ *    含 a775a783 第11题（y920 h300）与 9eff748b 第9题（y920 h200）。
  */
-function isUnreliableBox(box) {
-  if (!box) return true
-  const { x, y, width, height } = box
-  // x/y 必须落在 0-1000 归一化区间；越过 1000 多为像素坐标（高分辨率照片），
-  // 裁剪会整体偏移到页面右侧/下方 → 直接判不可信，回退整页。
-  if (x < -1 || x > 1001 || y < -1 || y > 1001) return true
-  if (!(width >= 1) || !(height >= 1)) return true
-  // 宽高本身不应超过 1000（归一化上界），超过同样可疑。
-  if (width > 1001 || height > 1001) return true
-  return false
+export function isUnreliableBox(box) {
+  return isOutOfRangeBox(box)
 }
 
 /**

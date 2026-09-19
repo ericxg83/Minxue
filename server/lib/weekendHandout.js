@@ -19,6 +19,8 @@
  */
 import pg from 'pg'
 import { normalizeStem } from '../utils/stemNormalize.js'
+import { ocrStemKey } from '../utils/ocrStemKey.js'
+import { findPlaceholderBlockPages, parseBlockBox, isOutOfRangeBox } from '../utils/blockBoxTrust.js'
 
 // ── 常量（渲染端共用，勿改）──
 export const TIERS = [
@@ -139,6 +141,7 @@ export async function buildHandout(opts) {
        wq.student_answer AS wq_student_answer, wq.correct_answer AS wq_correct_answer,
        wq.content AS wq_content,
        wq.question_no, wq.page_number AS wq_page_number, wq.question_image_url,
+       wq.block_coordinates AS wq_block_coordinates,
        wq.source_type, wq.last_wrong_task_id, wq.worksheet_id,
        s.name AS student_name,
        q.id AS q_id, q.content, q.answer AS q_answer, q.options,
@@ -186,6 +189,22 @@ export async function buildHandout(opts) {
     log(`[2b] 同大题配图索引: ${figureByQGroup.size} 组`)
   }
 
+  // ── 「均分占位」block 页索引 ──
+  //
+  // 2026-09-18：OCR 模型在部分页面上不逐题测量，而是把整页按题数均分，返回等差/等宽/等高的
+  // 占位框（实例 fd8b6bc9 p1：y 步长恒为 60、width 全为 800）。这种框裁出来会逐题漂移，
+  // 页尾偏出约 1 题 —— 老师看到的「题图」是邻题的图。prompt 里已写明禁止占位坐标但压不住，
+  // 所以取图侧再拦一道：命中页不把 block 裁片当「题图」，宁可不出图（口径同 isDegenerateFigureBox）。
+  //
+  // 判据与证据见 utils/blockBoxTrust.js 头部注释；全库命中 3 页 / 26 题（1.4%）。
+  const placeholderPageKeys = findPlaceholderBlockPages(
+    rows.map(r => ({ taskId: r.last_wrong_task_id, pageNumber: r.wq_page_number ?? r.q_page_number, block: r.wq_block_coordinates }))
+  )
+  if (placeholderPageKeys.size) {
+    log(`[2c] block 均分占位页: ${placeholderPageKeys.size} 页 → 该页题图回退为「不显示」（避免展示邻题裁片）`)
+  }
+  const isPlaceholderPage = (r) => placeholderPageKeys.has(`${r.last_wrong_task_id ?? ''}|${(r.wq_page_number ?? r.q_page_number) ?? ''}`)
+
   // ── 同卷同题小问索引（多小问完整化）──
   const subRowsByQGroup = new Map()
   {
@@ -216,7 +235,21 @@ export async function buildHandout(opts) {
 
   // ── 组装 ──
   const MIN_MERGE_KEY_LEN = 12
+
   function topicKey(r) {
+    // 练习册错题：同一练习册 + 页码 + 题号 + OCR 等价题干指纹。
+    // 同一道题在不同学生任务里可能各生成一条 questions 行（question_id 不同），
+    // 只按 question_id 分组会把同卷同题拆成多张 slide（线上 42/43、45/46 事故）。
+    // 同时不能只用 worksheet+page+question_no 裸合并：OCR 题号/页码不可靠，
+    // 同页同题号可能混入完全不同的题（如「AB//CD//EF」与「直线l₁∥l₂∥l₃」）。
+    if (r.source_type === 'workbook' && r.worksheet_id && r.question_no != null) {
+      const page = r.wq_page_number ?? r.q_page_number ?? null
+      const stem = `${r.parent_stem || ''}${r.content || ''}`
+      const norm = ocrStemKey(stem)
+      if (page != null && norm.length >= MIN_MERGE_KEY_LEN) {
+        return 'ws:' + `${r.worksheet_id}|p${page}|n${r.question_no}|s:${norm}`
+      }
+    }
     const stem = `${r.parent_stem || ''}${r.content || ''}`
     const norm = normalizeStem(stem)
     if (norm.length >= MIN_MERGE_KEY_LEN) return 'topic:' + norm
@@ -288,6 +321,15 @@ export async function buildHandout(opts) {
   }
 
   function resolveWbImage(r) {
+    // 两道闸，都是「宁可不出图，也不给老师看邻题的图」（口径同 isDegenerateFigureBox）：
+    //  ① 整页均分占位：该页所有框都不是量出来的 → 不展示。
+    //  ② 本题框越界/退化（右下角超出 1000 等）：裁出来必然不是本题 → 不展示。
+    //     存量实测 24/125 条错题命中，含用户报过的 a775a783 第11题（y920 h300）
+    //     与 9eff748b 第9题（y920 h200）—— 它们的裁片是页面最底部一条横条。
+    // 原卷图另有 resolveDocImage（整页图优先），不受此影响。
+    if (isPlaceholderPage(r)) return null
+    const b = parseBlockBox(r.wq_block_coordinates)
+    if (b && isOutOfRangeBox(b)) return null
     return r.question_image_url || r.q_image_url || null
   }
 
