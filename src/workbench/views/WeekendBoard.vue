@@ -824,10 +824,9 @@ onBeforeUnmount(() => {
   --s-mode: 1;
   --s-screen: 1;
   --s: calc(var(--s-mode) * var(--s-screen));
-  /* 配图区最多占题目面板的高度比例。配图区实际拿「面板高度 − 题干区高度」的剩余空间，
-     用这个上限兜底：超长题干也至少留得住约 1/4 面板的文字。题干区自己滚动，
-     所以配图永远不会被推到折线以下（2026-09-18 修复「图像看不全」）。 */
-  --fig-max: 72%;
+  /* 配图区最多占题目面板的高度比例。题干区自己滚动；
+     配图与题干都要可收缩，长题干 + 大图时先缩图，保证题目可见。 */
+  --fig-max: 58%;
 }
 /* 沉浸模式：撑满视口并盖住工作台侧栏与顶栏（平板讲题场景） */
 .board-page.board-immersive {
@@ -999,7 +998,7 @@ onBeforeUnmount(() => {
 }
 .q-body::-webkit-scrollbar-thumb:hover { background: #94a3b8; }
 /* 显示答案时给题干区让位（答案层住在题干区里，见 .answer-layer） */
-.question-layer.has-answer { --fig-max: 52%; }
+.question-layer.has-answer { --fig-max: 42%; }
 .q-head { display: flex; align-items: center; gap: 10px; margin-bottom: calc(14px * var(--s)); flex-wrap: wrap; }
 .q-badge {
   padding: calc(4px * var(--s)) calc(12px * var(--s));
@@ -1046,8 +1045,9 @@ onBeforeUnmount(() => {
   font-size: calc(13.5px * var(--s));
 }
 .q-figure {
-  /* 不拉伸（不放大低清裁片）、也不收缩（收缩让给题干区）：配图优先保住完整 */
-  flex: 0 0 auto;
+  /* 不主动拉伸（不放大低清裁片），但允许收缩：长题干 + 大图时先让路给题目 */
+  flex: 0 1 auto;
+  width: 100%;
   min-height: 0;
   max-height: var(--fig-max);
   margin-top: calc(16px * var(--s));
