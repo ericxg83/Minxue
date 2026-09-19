@@ -157,3 +157,24 @@
 - **`text_bbox` 覆盖未修（待决策）**：`worker.js:5260/6340` 把 `text_bbox` 写成 `block_coordinates`
   → workbook 路径前端并集框比 block 还松。改回 `q.text_bbox || null` 属写入侧行为变更，需负责人确认。
   retryAlign 框（答卷 OCR）实测 10% 越界（17/170），成因未定，读取侧保持宽松（框丢了比框歪更伤老师）。
+
+## 10. 提交纪律：工作区长期存在大量未提交工作（2026-09-19 血泪）
+
+- **工作区常年有 140+ 项未提交内容**（几何重构、functionGraph、geom/dsl、deliverables 等），
+  且 `server/config/ai.js` / `server/geometryWorker.js` 这类**热文件里混着多个会话的改动**。
+  **⛔ 禁止 `git add -A` / `git add <整个热文件>`** —— 会把未验证的工作推上 main。
+- **⚠️ `server/.env.bak-20260918-1645` 未跟踪但含密钥**，任何 `-A` 式提交都会泄漏它。
+- 切分手法（已验证）：
+  - 改动在**不同区域** → `git diff -U3` 后**按 hunk 序号过滤**再 `git apply --cached`（先 `--check`）。
+  - 改动在**同一区域**（git 合并成一块）→ 取 `git show HEAD:<file>` 原文，用字符串替换精确重建，
+    再 `git hash-object -w --path <file>` + `git update-index --cacheinfo 100644,<blob>,<path>`。
+    **全程不碰工作区**，用户未提交的工作零风险。
+  - **⛔ 不要用 `git stash --keep-index` 验证提交态** —— 同区域的改动 pop 时必然冲突，会危及用户工作。
+- 验证手法（已验证）：`git write-tree` → `git commit-tree` → `git worktree add .verify-wt <commit> --detach`，
+  worktree 建在**仓库内部**，Node 沿父目录即可找到根 `node_modules`，不必复制依赖；
+  再建一个纯 HEAD 的 worktree 做对照，确认「新增失败数 = 0」。
+- **⚠️ HEAD 本身是红的**：`test/*.test.mjs` 在纯 HEAD 上 448 项有 **12 项失败**
+  （`answerPollutionGate`/`failedTaskRetryClassify`/`gradingDecision`/`gradingSettlementSql`/
+  `hybridOcrMerge`/`lifecycleQueue`/`migrationLedger`/`retryPrefillAnswerSource`/`workbookAnswerUnit`/
+  `worksheetParseWarnings`/`wrongQuestionSnapshotSql`/序号展示口径）—— 它们断言的是**未提交的工作区代码**。
+  任何人 clone 后都会红。**判断"是不是我改坏的"必须先跑 HEAD 对照，不能只看失败数。**
