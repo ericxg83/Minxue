@@ -239,7 +239,13 @@
             :class="{ 'is-zoomed': zoomedSrc === stu.docImage }"
             @click="toggleZoom(stu.docImage)"
           />
-          <div v-else class="no-img">无原卷图</div>
+          <!-- 空态要说清"为什么没有"：极少数历史错题行没有关联到任何卷
+               （question_id 为空或题目未挂 task），这类题确实取不到整页图。
+               其余情况后端都已兜底（resolveDocImage 三级回退）。 -->
+          <div v-else class="no-img">
+            <span>该题未关联到卷面原图</span>
+            <span class="no-img__sub">（历史错题缺少出处信息，非加载失败）</span>
+          </div>
           <figcaption>{{ stu.name }}<span v-if="stu.wrongTimes > 1"> ×{{ stu.wrongTimes }}</span></figcaption>
         </figure>
       </div>
@@ -404,6 +410,7 @@ onMounted(async () => {
     maxPerDay: Number(q.maxPerDay) || 0,
     mergeThin: Number(q.mergeThin) || 0,
     difficulty: q.difficulty ? String(q.difficulty) : undefined,
+    chapter: q.chapter ? String(q.chapter) : undefined,
     withAnswer: true,
   }
   try {
@@ -1278,13 +1285,17 @@ onBeforeUnmount(() => {
 .original-item figcaption { margin-top: 6px; font-size: 14px; color: var(--wb-text-secondary, #64748b); }
 .no-img {
   display: grid;
+  align-content: center;
+  justify-items: center;
+  gap: 4px;
   height: 160px;
-  place-items: center;
   border: 1px dashed var(--wb-border, #e2e8f0);
   border-radius: 8px;
   color: var(--wb-text-tertiary, #94a3b8);
   font-size: 13px;
 }
+
+.no-img__sub { font-size: 12px; opacity: 0.75; }
 
 .board-empty { padding: 60px 0; }
 
