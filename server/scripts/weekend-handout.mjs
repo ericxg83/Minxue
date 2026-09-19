@@ -166,11 +166,14 @@ const { rows } = await pool.query(
      q.geometry_image_url, q.clean_geometry_image_url, q.image_url AS q_image_url,
      q.parent_stem, q.sub_no, q.ai_answer_risk_reason, q.ai_tags, q.analysis,
      q.answer_exception, q.review_status, q.is_complete,
-     t.images AS task_images, t.subject AS t_subject, t.original_name AS task_name
+     t.images AS task_images, t.subject AS t_subject, t.original_name AS task_name,
+     tq.images AS qtask_images
    FROM wrong_questions wq
    JOIN students s ON s.id = wq.student_id
    LEFT JOIN questions q ON q.id = wq.question_id
    LEFT JOIN tasks t ON t.id = wq.last_wrong_task_id
+   -- 题目自身所属的卷：wq.last_wrong_task_id 存在量空值时，原卷图回退到它
+   LEFT JOIN tasks tq ON tq.id = q.task_id
    WHERE wq.student_id = ANY($1::uuid[])
      AND wq.added_at >= $2 AND wq.added_at < $3
      AND COALESCE(wq.lifecycle_status, 'new') <> 'mastered'
@@ -331,7 +334,12 @@ function resolveDocImage(r) {
   const page = r.wq_page_number ?? r.q_page_number ?? null
   const byPage = page == null ? null : imgs.find(i => Number(i?.page_number) === Number(page))
   const pick = byPage || imgs[0]
-  return pick?.image_url || null
+  if (pick?.image_url) return pick.image_url
+  // 末级兜底（2026-09-19，同 lib/weekendHandout.js）：wq.last_wrong_task_id 为空
+  // （重练结算历史写入未落该列）时，改用题目所属卷 tq.images 的整页图。
+  const qImgs = Array.isArray(r.qtask_images) ? r.qtask_images : []
+  const qByPage = page == null ? null : qImgs.find(i => Number(i?.page_number) === Number(page))
+  return qByPage?.image_url || qImgs[0]?.image_url || null
 }
 
 function resolveFigure(r) {

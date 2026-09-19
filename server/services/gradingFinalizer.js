@@ -5,6 +5,7 @@ import { compensateWrongBook } from './wrongBookCompensation.js'
 import { syncQuestionsKnowledgeAndMastery, syncReviewResultsMastery } from './knowledgeMasteryService.js'
 import { syncQuestionCompletenessQuietly } from './questionCompletenessSync.js'
 import { checkQuestionCompleteness } from '../utils/questionCompleteness.js'
+import { buildWrongQuestionSnapshotSql } from '../utils/wrongQuestionSnapshot.js'
 
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
 
@@ -449,6 +450,17 @@ export const finalizeGeneratedExamResults = async ({
          VALUES ${placeholders}
          ON CONFLICT DO NOTHING`,
         params
+      )
+
+      // 入册快照补齐（同一事务内，紧跟 INSERT）：
+      //   上面的 INSERT 只写生命周期字段，出处分 (last_wrong_task_id / page_number /
+      //   question_no / content / question_type / block_coordinates) 全为空。后果是
+      //   周末班白板「学生原卷（整页图）」按 last_wrong_task_id 取 tasks.images 取不到，
+      //   弹窗永远「无原卷图」（2026-09-19 用户报障）。这里从题目行补齐快照，
+      //   口径见 utils/wrongQuestionSnapshot.js（只补空、不覆盖、失败即整体回滚）。
+      await client.query(
+        buildWrongQuestionSnapshotSql(),
+        [insertedRows.map(r => r.questionId), studentId]
       )
     }
 

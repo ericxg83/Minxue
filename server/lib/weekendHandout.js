@@ -21,6 +21,7 @@ import pg from 'pg'
 import { normalizeStem } from '../utils/stemNormalize.js'
 import { ocrStemKey } from '../utils/ocrStemKey.js'
 import { findPlaceholderBlockPages, parseBlockBox, isOutOfRangeBox } from '../utils/blockBoxTrust.js'
+import { getCatalogForGrade, resolveChapter } from '../config/textbookCatalog.js'
 
 // ── 常量（渲染端共用，勿改）──
 export const TIERS = [
@@ -65,6 +66,22 @@ function parseOptions(raw) {
   return []
 }
 
+/** 取目录节点及其全部后代节点 id（用于「选章包含全部课时」） */
+function chapterNodeIds(catalog, nodeId) {
+  const ids = new Set([nodeId])
+  let changed = true
+  while (changed) {
+    changed = false
+    for (const n of catalog.nodes) {
+      if (n.parentId && ids.has(n.parentId) && !ids.has(n.id)) {
+        ids.add(n.id)
+        changed = true
+      }
+    }
+  }
+  return ids
+}
+
 /**
  * @param {object} opts
  * @param {pg.Pool} opts.pool      数据库连接池（调用方管理生命周期）
@@ -78,6 +95,7 @@ function parseOptions(raw) {
  * @param {number} [opts.limit=0]    整份课件最多题数
  * @param {number} [opts.mergeThin=0] 题量小于该值的天并入其后第一个足量日
  * @param {boolean} [opts.withAnswer=true]
+ * @param {string} [opts.chapter=''] 标准教材章节 id（空=不限）
  * @param {(msg:string)=>void} [opts.logger]
  */
 export async function buildHandout(opts) {
@@ -92,11 +110,16 @@ export async function buildHandout(opts) {
     limit = 0,
     mergeThin = 0,
     difficulty = '',
+    chapter = '',
     withAnswer = true,
     logger = () => {},
   } = opts
   const log = logger
   if (!pool) throw new Error('buildHandout: pool 必传')
+  const catalog = getCatalogForGrade(grade)
+  const chapterNode = chapter ? catalog?.nodes?.find(n => n.id === chapter) || null : null
+  const chapterIds = chapterNode ? chapterNodeIds(catalog, chapterNode.id) : null
+  log(`[0] 章节筛选: chapter=${chapter || '(不限)'}${chapterNode ? ` → ${chapterNode.name} (${chapterIds.size} 个节点)` : ''}`)
 
   // ── 时段：--from/--to 优先，否则最近 --days 天 ──
   const now = new Date()
@@ -150,11 +173,15 @@ export async function buildHandout(opts) {
        q.geometry_image_url, q.clean_geometry_image_url, q.image_url AS q_image_url,
        q.parent_stem, q.sub_no, q.ai_answer_risk_reason, q.ai_tags, q.analysis,
        q.answer_exception, q.review_status, q.is_complete,
-       t.images AS task_images, t.subject AS t_subject, t.original_name AS task_name
+       t.images AS task_images, t.subject AS t_subject, t.original_name AS task_name,
+       tq.images AS qtask_images
      FROM wrong_questions wq
      JOIN students s ON s.id = wq.student_id
      LEFT JOIN questions q ON q.id = wq.question_id
      LEFT JOIN tasks t ON t.id = wq.last_wrong_task_id
+     -- 题目自身所属的卷（原作业/练习册）：wq.last_wrong_task_id 有存量空值时
+     -- 原卷图回退到它，见 resolveDocImage
+     LEFT JOIN tasks tq ON tq.id = q.task_id
      WHERE wq.student_id = ANY($1::uuid[])
        AND wq.added_at >= $2 AND wq.added_at < $3
        AND COALESCE(wq.lifecycle_status, 'new') <> 'mastered'
@@ -162,6 +189,46 @@ export async function buildHandout(opts) {
      ORDER BY wq.added_at DESC`,
     params
   )
+  const tasksById = new Map()
+  {
+    const taskIds = [...new Set(rows.map(r => r.last_wrong_task_id || r.q_task_id).filter(Boolean))]
+    if (taskIds.length) {
+      const { rows: taskRows } = await pool.query(
+        `SELECT id, original_name, result FROM tasks WHERE id = ANY($1::uuid[])`,
+        [taskIds]
+      )
+      for (const t of taskRows) tasksById.set(t.id, t)
+    }
+  }
+
+  // ── 错题行章节归属（读侧，不写 questions/wrong_questions）──
+  // 章节名只取标准教材目录；OCR/任务名里的 unit_key 仅用于映射到标准节点。
+  const chapterByTaskPage = new Map()  // `${taskId}|${page}` → chapterId
+  for (const r of rows) {
+    const taskId = r.last_wrong_task_id || r.q_task_id
+    const page = r.wq_page_number ?? r.q_page_number ?? null
+    if (!taskId || page == null) continue
+    const key = `${taskId}|${page}`
+    if (chapterByTaskPage.has(key)) continue
+    const task = tasksById.get(taskId)
+    const pageMeta = task?.result?.sectionMatch?.pages?.find(p => Number(p.page_number) === Number(page))
+    const unitKey = pageMeta?.matched_unit || null
+    const unitTitle = pageMeta?.section_title || null
+    const node = unitKey ? resolveChapter(grade, unitKey, unitTitle, task?.original_name || '') : null
+    if (node) chapterByTaskPage.set(key, node.id)
+  }
+  function chapterOfRow(r) {
+    const taskId = r.last_wrong_task_id || r.q_task_id
+    const page = r.wq_page_number ?? r.q_page_number ?? null
+    const key = taskId && page != null ? `${taskId}|${page}` : null
+    if (key && chapterByTaskPage.has(key)) return chapterByTaskPage.get(key)
+    return resolveChapter(
+      grade,
+      r.worksheet_id ? String(r.question_no ?? '') : '',
+      '',
+      r.task_name || ''
+    )?.id || null
+  }
 
   // ── 同大题配图索引 ──
   const figureByQGroup = new Map()
@@ -304,6 +371,14 @@ export async function buildHandout(opts) {
    *
    * 修复口径：整页图永远正确（页码由 wq/q 的 page_number 定位），裁片只有在没有整页图
    * 时才兜底。老师点"原卷图"看的是学生手写上下文，整页比错位裁片可用得多。
+   *
+   * 2026-09-19 二次修复（「就说无原卷图啊」）：存量错题行里 wq.last_wrong_task_id 可能为空
+   *   —— 重练卷结算（gradingFinalizer.finalizeGeneratedExamResults）历史上只写
+   *   (student_id, question_id, status, lifecycle_status, error_count, practice_count)，
+   *   出处列没落；这批行 wq.question_image_url / q.image_url 也基本为空，
+   *   于是 docImage 恒为 null，弹窗只剩「无原卷图」。
+   *   只用 q.task_id 反查就够：题目行必然知道自己属于哪份卷（tq 别名），
+   *   整页图就在 tq.images 里，页码用 q.page_number。
    */
   function resolveDocImage(r) {
     const imgs = Array.isArray(r.task_images) ? r.task_images : []
@@ -313,7 +388,12 @@ export async function buildHandout(opts) {
     if (r.question_image_url) return r.question_image_url
     if (r.q_image_url) return r.q_image_url
     const pick = imgs[0]
-    return pick?.image_url || null
+    if (pick?.image_url) return pick.image_url
+    // 末级兜底：wq.last_wrong_task_id 缺失时改用题目所属卷的整页图（同上注释）
+    const qImgs = Array.isArray(r.qtask_images) ? r.qtask_images : []
+    const qByPage = page == null ? null : qImgs.find(i => Number(i?.page_number) === Number(page))
+    if (qByPage?.image_url) return qByPage.image_url
+    return qImgs[0]?.image_url || null
   }
 
   function resolveFigure(r) {
@@ -343,8 +423,13 @@ export async function buildHandout(opts) {
 
   const daysOut = []
   for (const [day, list] of [...dayMap.entries()].sort((a, b) => b[0].localeCompare(a[0]))) {
+    const dayRows = chapterIds ? list.filter(r => {
+      const cid = chapterOfRow(r)
+      return cid && chapterIds.has(cid)
+    }) : list
+    if (dayRows.length === 0) continue
     const topicMap = new Map()
-    for (const r of list) {
+    for (const r of dayRows) {
       const k = topicKey(r)
       if (!topicMap.has(k)) topicMap.set(k, [])
       topicMap.get(k).push(r)
@@ -429,6 +514,9 @@ export async function buildHandout(opts) {
         diffInconsistent,
         diffValues: [...new Set(diffVals)].sort(),
         sourceTypes: [...new Set(members.map(m => m.source_type).filter(Boolean))],
+        chapterId: chapterOfRow(primary) || null,
+        chapterName: catalog?.nodes?.find(n => n.id === chapterOfRow(primary))?.name || null,
+        chapterTrust: chapterOfRow(primary) ? 'mapped' : 'unknown',
       })
     }
 
@@ -490,9 +578,9 @@ export async function buildHandout(opts) {
     daysOut.push({
       day,
       topics: kept,
-      rawRows: list.length,
-      studentCount: new Set(list.map(r => r.student_id)).size,
-      studentIds: [...new Set(list.map(r => r.student_id))],
+      rawRows: dayRows.length,
+      studentCount: new Set(dayRows.map(r => r.student_id)).size,
+      studentIds: [...new Set(dayRows.map(r => r.student_id))],
       clipped,
       totalTopics: topics.length,
     })
@@ -559,9 +647,29 @@ export async function buildHandout(opts) {
 
   // ── 汇总 ──
   const totalTopics = sections.reduce((s, d) => s + d.topics.length, 0)
+  const scopedRows = chapterIds ? rows.filter(r => {
+    const cid = chapterOfRow(r)
+    return cid && chapterIds.has(cid)
+  }) : rows
   const totalRows = sections.reduce((s, d) => s + d.rawRows, 0)
-  const allStudents = [...new Map(rows.map(r => [r.student_id, r.student_name])).values()]
-  const unknownSubject = rows.filter(r => !r.q_subject && !r.t_subject).length
+  const allStudents = [...new Map(scopedRows.map(r => [r.student_id, r.student_name])).values()]
+  const unknownSubject = scopedRows.filter(r => !r.q_subject && !r.t_subject).length
+  const chapterBuckets = new Map()
+  for (const r of scopedRows) {
+    const cid = chapterOfRow(r) || '__unknown__'
+    if (!chapterBuckets.has(cid)) chapterBuckets.set(cid, [])
+    chapterBuckets.get(cid).push(r)
+  }
+  const chapterSummary = [...chapterBuckets.entries()]
+    .map(([id, list]) => ({
+      id: id === '__unknown__' ? null : id,
+      name: id === '__unknown__'
+        ? '未识别章节'
+        : (catalog?.nodes?.find(n => n.id === id)?.name || id),
+      rows: list.length,
+      students: new Set(list.map(r => r.student_id)).size,
+    }))
+    .sort((a, b) => String(a.name || '').localeCompare(String(b.name || ''), 'zh'))
   const periodLabel = `${toYmd(periodStart)} ~ ${toYmd(new Date(periodEnd.getTime() - 1))}`
   const nameOf = id => studentRows.find(s => s.id === id)?.name || ''
 
@@ -634,6 +742,8 @@ export async function buildHandout(opts) {
       days, from: from || null, to: to || null,
       limit: limit || null, maxPerDay: maxPerDay || null, mergeThin: mergeThin || null,
       students: studentFilter.length ? studentFilter : null,
+      chapter: chapterNode?.id || null,
+      chapterName: chapterNode?.name || null,
     },
     stats: {
       rawRows: totalRows, topics: totalTopics, questionSlides: seq,
@@ -641,6 +751,7 @@ export async function buildHandout(opts) {
       students: allStudents.length, studentNames: allStudents,
       limitDropped,
       unknownSubject,
+      chapterSummary,
     },
     overview: sections.map(d => ({
       label: d.mergedDays.length ? `${d.dayFrom} ~ ${d.day}` : d.day,
