@@ -27,6 +27,10 @@ dotenv.config({ path: resolve(__dirname, '.env') })
 import axios from 'axios'
 import { query, TABLES } from './config/neon.js'
 import { callVisionCompletion, buildGeometryReconstructionPrompt } from './config/ai.js'
+// 限流/过载安全网：429（配额窗口）与 503（上游高负载）是常态噪声，不该消耗
+// handleRetry 的 3 次预算 —— 否则本来能重绘的题会被永久标 tikz_status='none'。
+// 见 server/utils/aiProviderRetry.js 头部说明与实测依据（Google 免费档 5 RPM，需跨整分钟窗退避）。
+import { withProviderRetry } from './utils/aiProviderRetry.js'
 import { parseGeometryStructure, renderGeometrySvg, isEmptyStructure, isRawEmptyStructure, hasDerivedPoints } from './utils/geometrySvg.js'
 import { validateGeometryLabels } from './utils/geometryLabelValidator.js'
 import { validateStructureAgainstContent } from './utils/geometryContentGate.js'
@@ -44,6 +48,25 @@ const RETRY_DELAYS = [
   2 * 60 * 60 * 1000 // 第 3 次失败 → 2 小时
 ]
 const MAX_RETRIES = RETRY_DELAYS.length // 3
+
+// ── 几何重绘专用视觉通道（2026-09-19）─────────────────────────────────────────
+// **当前默认关闭**：几何重绘继续走原有降级链（魔搭 → 辉辉云 …）。
+//
+// 为什么不启用原生 Gemini：Google 免费档配额是「按项目 × 按模型 × 按天」，
+// gemini-3.8-flash 实测只有 **20 次/天**（另有 5 RPM）。DSL 闭环每图约 2.5 次视觉调用
+// → 每天最多 ~8 张图，105 张存量回填要 ~13 天。稳态量 4–20 张/天，覆盖不了。
+// （能力本身没问题：同一模型经辉辉云跑基准 19/20 = 95%，直连实测也能出图。）
+//
+// 想启用这条通道时，两个开关都要打开：
+//   1) GEMINI_DIRECT_ENABLED=1   （ai.js：点亮 Gemini 直连通道）
+//   2) GEOMETRY_VISION_VENDOR=GoogleGeminiDirect （本文件：把该通道置顶到几何链路）
+// 关闭：GEOMETRY_VISION_VENDOR=off（或 none/0/false），或不设置（默认即为关闭）。
+const GEOMETRY_VISION_VENDOR = (() => {
+  const raw = process.env.GEOMETRY_VISION_VENDOR
+  if (raw === undefined) return null                     // 未设置 → 不指定（走原降级链）
+  const v = String(raw).trim()
+  return /^(?:off|none|0|false)$/i.test(v) ? null : (v || null)
+})()
 
 // ── 辅助 ──
 
@@ -69,13 +92,17 @@ async function reconstructGeometrySvg(imageBuffer, questionId, content, options)
   const base64 = imageBuffer.toString('base64')
   const dataURL = `data:image/png;base64,${base64}`
 
-  const result = await callVisionCompletion({
-    imageDataURL: dataURL,
-    systemPrompt: buildGeometryReconstructionPrompt(),
-    userText: '请识别这张几何图中的纯几何结构（点/线/圆/标注），只输出结构化 JSON。',
-    temperature: 0.1,
-    maxTokens: 3072
-  })
+  const result = await withProviderRetry(
+    () => callVisionCompletion({
+      imageDataURL: dataURL,
+      systemPrompt: buildGeometryReconstructionPrompt(),
+      userText: '请识别这张几何图中的纯几何结构（点/线/圆/标注），只输出结构化 JSON。',
+      temperature: 0.1,
+      maxTokens: 3072,
+      preferredVendor: GEOMETRY_VISION_VENDOR
+    }),
+    { onWait: ({ kind, attempt, waitMs }) => console.warn(`   ⏳ [几何Worker] ${shortId}: 结构识别 ${kind} 第 ${attempt} 次，等待 ${Math.round(waitMs / 1000)}s`) }
+  )
 
   const structure = parseGeometryStructure(result.content)
   if (!structure) {

@@ -1,4 +1,5 @@
 import axios from 'axios'
+import { createRateLimiter } from '../utils/aiRateLimiter.js'
 
 // 全局禁用 HTTPS_PROXY/HTTP_PROXY 等系统代理：环境里若设置了不可达的代理（如沙箱代理），
 // axios 默认会走它，导致 AI 请求出现 "400 The plain HTTP request was sent to HTTPS port"
@@ -113,11 +114,39 @@ const TRANSIENT_RATE_LIMIT_RE = /\b(tpm|rpm|qpm|qps|tps)\b[\s\S]{0,24}?(exhauste
 // 明确指向"积分/余额/信用"的字样：出现任一个就不算瞬时限流
 const QUOTA_WORD_RE = /quota|credit|balance|insufficient|out\s+of|no\s+credit/i
 
+// ── 「按分钟窗」还是「按天」：以 Google 官方 quotaId 为准 ──────────────────────
+// 2026-09-19 实测两组真实报文（同一 metric 名，靠 quotaId 才能区分）：
+//   分钟窗：quotaId=GenerateRequestsPerMinutePerProjectPerModel-FreeTier, limit=15
+//   按天  ：quotaId=GenerateRequestsPerDayPerProjectPerModel-FreeTier,    limit=20
+// ⚠️ 千万别用 body 里的「Please retry in 12.3s」当判据 —— 实测**按天的配额耗尽也会给秒级提示**，
+//    据此判成"瞬时限流"会让通道每 65s 重试一次却整天不可能成功（还白白烧掉重试预算）。
+const QUOTA_FAILURE_TYPE = 'QuotaFailure'
+
+/** 取 Google QuotaFailure 明细里的 quotaId 列表（唯一可靠的窗口/按天区分依据） */
+export function quotaViolationIds(err) {
+  const details = err?.response?.data?.error?.details
+  if (!Array.isArray(details)) return []
+  const ids = []
+  for (const d of details) {
+    if (typeof d?.['@type'] !== 'string' || !d['@type'].includes(QUOTA_FAILURE_TYPE)) continue
+    for (const v of (Array.isArray(d.violations) ? d.violations : [])) {
+      const id = String(v?.quotaId || '')
+      if (id) ids.push(id)
+    }
+  }
+  return ids
+}
+
 export function isQuotaExhaustedError(err) {
   const data = err?.response?.data
   const msg = data?.error?.message || data?.message || (typeof data === 'string' ? data : '') || ''
   if (!msg) return false
   if (TRANSIENT_RATE_LIMIT_RE.test(msg) && !QUOTA_WORD_RE.test(msg)) return false
+  // ① 有官方 quotaId → 以它为准（最可靠）：
+  //    PerDay → 当日额度真的耗尽（该换供应商/等明天）；PerMinute → 窗口限流（退避重试即可）
+  const ids = quotaViolationIds(err)
+  if (ids.length) return ids.some(id => /PerDay/i.test(id))
+  // ② 无 quotaId（非 Google 系供应商）→ 退回文案判据
   return /exceeded[^.]*quota|quota[^.]*exceeded|quota.*limit|daily.*limit|out of quota|insufficient.*quota|balance.*insufficient|insufficient.*balance|exhausted|credit.{0,12}(exhausted|insufficient)|no.{0,8}credit|reject_no_credit|frequency\s*limit|usage.{0,12}exceeded/i.test(msg)
 }
 
@@ -208,6 +237,10 @@ async function postWith429Retry(client, endpoint, body, axiosOptions, {
   retry429 = true,
   retry503 = true,
   exhaustedTtlMs = null, // null → 走 markModelExhausted 的默认（自然日剩余，MS 语义）
+  // 429 退避时间表。默认 RETRY_DELAYS_429 = [3s, 5s]（共 8s），适合"稍安勿躁"型限流。
+  // ⚠️ Google 免费档是**按分钟**的窗口限流（实测 flash 系列 5 RPM），8s 退避必然撞墙 ——
+  //    必须跨过整个分钟窗才有意义，故 Gemini 直连通道显式传自己的时间表（见 GEMINI_DIRECT.RETRY_429_DELAYS）。
+  retry429Delays = RETRY_DELAYS_429,
 } = {}) {
   for (let attempt = 0; ; attempt += 1) {
     try {
@@ -238,15 +271,17 @@ async function postWith429Retry(client, endpoint, body, axiosOptions, {
         throw err
       }
       if (status === 429) notifyAiRateLimited()
-      if (retry429 && status === 429 && attempt < RETRY_DELAYS_429.length) {
-        // Retry-After 优先：服务端说等几秒就等几秒（限 30s 以内，超过 30s 说明是真限流窗口
-        // 而不是"稍安勿躁"，宁可上抛让调用方降级）
+      if (retry429 && status === 429 && attempt < retry429Delays.length) {
+        // Retry-After 优先：服务端说等几秒就等几秒。
+        // 注意：只有当服务端给的等待 ≤ 当前时间表的最大档时才会被采用 —— 否则以本通道
+        // 自己的时间表为准（Google 不给 Retry-After，只在 body 里写 "Please retry in 46.6s"）。
         const header = err.response?.headers?.['retry-after']
         const raMs = parseRetryAfterMs(header)
-        const delay = (raMs != null && raMs <= 30_000)
+        const maxScheduled = Math.max(...retry429Delays)
+        const delay = (raMs != null && raMs <= maxScheduled)
           ? Math.max(500, raMs)
-          : RETRY_DELAYS_429[attempt]
-        console.warn(`[AI] 429 transient rate limit, retrying in ${Math.round(delay / 1000)}s (${attempt + 1}/${RETRY_DELAYS_429.length})${header ? ' [Retry-After]' : ''}`)
+          : retry429Delays[attempt]
+        console.warn(`[AI] 429 transient rate limit, retrying in ${Math.round(delay / 1000)}s (${attempt + 1}/${retry429Delays.length})${header ? ' [Retry-After]' : ''}`)
         await sleep(delay)
         continue
       }
@@ -582,15 +617,94 @@ export const MODELSCOPE_BACKUP = {
   },
 }
 
-const GEMINI_DIRECT = {
+export const GEMINI_DIRECT = {
   get API_KEY() {
-    return process.env.GEMINI_API_KEY || process.env.GOOGLE_API_KEY || ''
+    // ⚠️ 2026-09-19：Render 上这把 key 曾被命名为 MODEL_GIMINI，而代码只认下面两个名字
+    //    → GEMINI_DIRECT.ENABLED === false → 本文件里整段 Gemini 兜底被**静默跳过**，
+    //    不报任何错，表现为"配了 key 但完全没用上"。这里兼容该别名，避免再踩。
+    return process.env.GEMINI_API_KEY
+      || process.env.GOOGLE_API_KEY
+      || process.env.MODEL_GIMINI
+      || ''
   },
   get ENABLED() {
-    return Boolean(this.API_KEY)
+    // ⛔ 2026-09-19 决策：**整条原生 Gemini 通道默认关闭**，几何重绘继续由辉辉云承担。
+    //    依据（实测）：Google 免费档配额是「按项目 × 按模型 × 按天」，
+    //    gemini-3.8-flash 只有 **20 次/天**（quotaId=GenerateRequestsPerDayPerProjectPerModel-FreeTier）。
+    //    DSL 闭环每张图约 2.5 次视觉调用 → 每天最多 ~8 张图；105 张存量回填需 ~13 天。
+    //    稳态量 4–20 张/天，覆盖不了上限 → 不足以当几何专用通道。
+    //    改为**显式开启**，避免配了 key 就被静默接管（也避免悄悄消耗 20/天的额度）。
+    //    想启用：设 GEMINI_DIRECT_ENABLED=1（并确认已配 GEMINI_API_KEY / GOOGLE_API_KEY / MODEL_GIMINI）。
+    if (!this.API_KEY) return false
+    return /^(?:1|true|on|yes)$/i.test(String(process.env.GEMINI_DIRECT_ENABLED || ''))
   },
-  MODEL: 'gemini-2.5-flash',
-  ENDPOINT: 'https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent',
+  // ⚠️ 2026-09-19 实测：原写死的 gemini-2.5-flash 对**新用户已下架**，调用返回 404
+  //    「no longer available to new users. Please update your code to use models/gemini-3.6-flash」。
+  //    即 key 配对了、模型名不对，Gemini 直连依然全废（且 404 被 try/catch 吞掉，日志里看不到）。
+  //    现改为 env 可配，换模型不必再改代码；默认取 gemini-3.8-flash
+  //    （与辉辉云基线同模型，几何 DSL 实测 19/20 = 95%）。
+  get MODEL() {
+    return process.env.GEMINI_DIRECT_MODEL || 'gemini-3.8-flash'
+  },
+  // base URL 可覆盖（与 HUIHUIYUN_BASE_URL / BAILIAN_BASE_URL 同一约定）：
+  // 便于本地用 mock server 端到端验证请求体，而不必真的出网。
+  get BASE_URL() {
+    return (process.env.GEMINI_DIRECT_BASE_URL || 'https://generativelanguage.googleapis.com').replace(/\/+$/, '')
+  },
+  get ENDPOINT() {
+    return `${this.BASE_URL}/v1beta/models/${this.MODEL}:generateContent`
+  },
+  // 免费档实测 flash 系列 5 RPM / lite 系列 15 RPM。取 4（留 20% 余量）压住 429。
+  // 配额按 project+model 计，故本通道所有调用共用同一个限流器。
+  get RPM() {
+    const v = Number(process.env.GEMINI_DIRECT_RPM)
+    return Number.isFinite(v) && v > 0 ? v : 4
+  },
+  // 思考预算：**默认不下发**（null）。
+  // ⚠️ 2026-09-19 实测：`gemini-3.5-flash-lite` 收到 `thinkingConfig.thinkingBudget` 直接
+  //    返回 **400 INVALID_ARGUMENT**（同一请求去掉该字段即 200 OK）。各模型对 thinkingConfig
+  //    的支持面并不一致，无条件下发会把整条通道打挂 —— 所以改为**显式开启才下发**。
+  // 需要时设 GEMINI_DIRECT_THINKING_BUDGET=0（关思考）/-1（动态）/正整数。
+  get THINKING_BUDGET() {
+    const raw = process.env.GEMINI_DIRECT_THINKING_BUDGET
+    if (raw === undefined || raw === '') return null
+    const v = Number(raw)
+    return Number.isFinite(v) ? v : null
+  },
+  // 429 退避时间表。Google 免费档是**按分钟**的窗口限流，默认的 [3s,5s]（共 8s）必然撞墙
+  // （实测：46.6s 的 retry 提示、短退避全部失败）。默认单次 65s（跨整窗 + 余量）。
+  // 设 GEMINI_DIRECT_RETRY_WAIT_MS=0 可退回默认短退避。
+  get RETRY_429_DELAYS() {
+    const v = Number(process.env.GEMINI_DIRECT_RETRY_WAIT_MS)
+    const ms = Number.isFinite(v) && v >= 0 ? v : 65000
+    return ms > 0 ? [ms] : RETRY_DELAYS_429
+  },
+  // 视觉输出的 maxOutputTokens 下限。几何 DSL 产物可达数千字符，
+  // 调用方常传 3072 → 一旦被思考或长输出吃满就是"空正文"失败。这里兜到 8192。
+  get MIN_VISION_MAX_TOKENS() {
+    const v = Number(process.env.GEMINI_DIRECT_MIN_MAX_TOKENS)
+    return Number.isFinite(v) && v > 0 ? v : 8192
+  },
+}
+
+// 通道级令牌桶（惰性创建，读取 env 的时机与其它 getter 一致）
+let _geminiLimiter = null
+let _geminiLimiterRpm = null
+function geminiLimiter() {
+  const rpm = GEMINI_DIRECT.RPM
+  if (!_geminiLimiter || _geminiLimiterRpm !== rpm) {
+    _geminiLimiter = createRateLimiter({ perMinute: rpm, burst: 1 })
+    _geminiLimiterRpm = rpm
+  }
+  return _geminiLimiter
+}
+
+/** 从 data URL 解析真实 MIME 与 base64。别硬编码 image/jpeg —— 几何裁片是 PNG。 */
+export function splitDataUrl(dataUrl) {
+  const s = String(dataUrl || '')
+  const m = /^data:([\w/+.-]+);base64,(.*)$/s.exec(s)
+  if (m) return { mime: m[1], data: m[2] }
+  return { mime: 'image/png', data: s.replace(/^data:[\w/+.-]+;base64,/, '') }
 }
 
 // ⚠️ 绝不要在 content 为空时回退到 message.reasoning / reasoning_content。
@@ -694,6 +808,8 @@ async function requestOpenAIProvider({
 }
 
 async function requestGeminiText({ systemContent, userContent, temperature, maxTokens }) {
+  // 通道侧限速：配额按 project+model 计，与视觉调用共用同一份额度
+  await geminiLimiter().acquire()
   const response = await postWith429Retry(
     backupAxios,
     `${GEMINI_DIRECT.ENDPOINT}?key=${encodeURIComponent(GEMINI_DIRECT.API_KEY)}`,
@@ -704,20 +820,35 @@ async function requestGeminiText({ systemContent, userContent, temperature, maxT
             parts: [{ text: `${systemContent}\n\n${userContent}` }],
           },
         ],
-        generationConfig: { temperature, maxOutputTokens: maxTokens },
+        generationConfig: {
+          temperature,
+          maxOutputTokens: maxTokens,
+          ...(GEMINI_DIRECT.THINKING_BUDGET === null
+            ? {}
+            : { thinkingConfig: { thinkingBudget: GEMINI_DIRECT.THINKING_BUDGET } }),
+        },
       },
       {
         headers: { 'Content-Type': 'application/json' },
         timeout: AI_CONFIG.TIMEOUT,
         proxy: false,
       },
-      { retry429: true },
+      { retry429: true, retry429Delays: GEMINI_DIRECT.RETRY_429_DELAYS },
     )
 
-  return response.data?.candidates?.[0]?.content?.parts?.map(part => part?.text || '').join('') || ''
+  return response.data?.candidates?.[0]?.content?.parts
+    ?.filter(part => part?.thought !== true)
+    .map(part => part?.text || '').join('') || ''
 }
 
 async function requestGeminiVision({ systemPrompt, userText, imageDataURL, temperature, maxTokens }) {
+  // 通道侧限速（见 GEMINI_DIRECT.RPM 注释）
+  await geminiLimiter().acquire()
+  // 真实 MIME 从 data URL 解析 —— 原代码硬编码 image/jpeg，而几何裁片是 PNG。
+  // 标错 MIME 会让上游按 JPEG 解码 PNG 字节（可能 400 / 识别质量下降）。
+  const { mime, data } = splitDataUrl(imageDataURL)
+  // 输出预算兜底：调用方常传 3072，几何 DSL 产物可达数千字符，吃满即"空正文"失败
+  const outputBudget = Math.max(Number(maxTokens) || 0, GEMINI_DIRECT.MIN_VISION_MAX_TOKENS)
   const response = await postWith429Retry(
     backupAxios,
     `${GEMINI_DIRECT.ENDPOINT}?key=${encodeURIComponent(GEMINI_DIRECT.API_KEY)}`,
@@ -729,24 +860,33 @@ async function requestGeminiVision({ systemPrompt, userText, imageDataURL, tempe
             { text: `${systemPrompt}\n\n${userText}` },
             {
               inline_data: {
-                mime_type: 'image/jpeg',
-                data: imageDataURL.replace(/^data:image\/\w+;base64,/, ''),
+                mime_type: mime,
+                data,
               },
             },
           ],
         },
       ],
-      generationConfig: { temperature, maxOutputTokens: maxTokens },
+      generationConfig: {
+        temperature,
+        maxOutputTokens: outputBudget,
+        ...(GEMINI_DIRECT.THINKING_BUDGET === null
+          ? {}
+          : { thinkingConfig: { thinkingBudget: GEMINI_DIRECT.THINKING_BUDGET } }),
+      },
     },
     {
       headers: { 'Content-Type': 'application/json' },
       timeout: AI_CONFIG.TIMEOUT,
       proxy: false,
     },
-    { retry429: true },
+    { retry429: true, retry429Delays: GEMINI_DIRECT.RETRY_429_DELAYS },
   )
 
-  return response.data?.candidates?.[0]?.content?.parts?.map(part => part?.text || '').join('') || ''
+  // 必须剔除 thought 分片：思考内容是思维链原文，混进正文会让下游 JSON.parse 必然失败
+  return response.data?.candidates?.[0]?.content?.parts
+    ?.filter(part => part?.thought !== true)
+    .map(part => part?.text || '').join('') || ''
 }
 
 export async function callTextCompletion(opts) {
@@ -1182,6 +1322,14 @@ export async function callVisionCompletion(opts) {
     //   也不能拿弱模型的错乱输出污染答案库。显式 env（BACKUP_FIRST/GMI_FIRST）也被本选项压住：
     //   调用方的质量约束比全局路由开关更具体。
     noBackup = false,
+    // 指定视觉通道（2026-09-19）：几何重绘要独占一条低频免费通道，避免与 OCR/文本兜底
+    // 抢同一份配额（Google 免费档按 project+model 计，flash 系列仅 5 RPM）。
+    //   preferredVendor: 'GoogleGeminiDirect' → 该通道**置顶**，失败仍走原降级链
+    //   onlyVendor:      'GoogleGeminiDirect' → **只走**该通道（失败即失败，不静默换弱模型）
+    // noBackup=1 时 preferredVendor 不生效（答案页 OCR 的质量约束更强，保持原语义）；
+    // onlyVendor 是调用方的显式指令，优先级最高。
+    preferredVendor = null,
+    onlyVendor = null,
   } = opts
   if (noBackup) {
     console.log('[AI] noBackup=1：本次视觉请求仅使用魔搭（ModelScope）Key×模型矩阵，不降级备份供应商')
@@ -1415,8 +1563,42 @@ export async function callVisionCompletion(opts) {
     }
   }
 
+  // ── 指定通道注入（2026-09-19）──────────────────────────────────────────────
+  // 放在所有分支之后、执行循环之前，故对「魔搭优先」「备份优先」两条路径都生效。
+  const wantsGemini = /^(?:gemini|googlegeminidirect)$/i.test(String(onlyVendor || ''))
+    || (!noBackup && /^(?:gemini|googlegeminidirect)$/i.test(String(preferredVendor || '')))
+  if (wantsGemini && GEMINI_DIRECT.ENABLED) {
+    const geminiProvider = async () => {
+      try {
+        const content = await requestGeminiVision({ systemPrompt, userText, imageDataURL, temperature, maxTokens })
+        if (!content) throw new Error('返回空内容')
+        return { content, usedBackup: true, vendorName: 'GoogleGeminiDirect' }
+      } catch (err) {
+        // 打标 + 前缀，但**保留 err.response.status** —— 上游 withProviderRetry 依赖它判限流/过载
+        err._provider = 'googlegeminidirect'
+        if (err && typeof err.message === 'string' && !err.message.startsWith('Gemini 直连')) {
+          err.message = `Gemini 直连(${GEMINI_DIRECT.MODEL})失败：${err.message}`
+        }
+        throw err
+      }
+    }
+    if (onlyVendor) {
+      // 独占：清掉魔搭/备份/末轮兜底，避免"静默降级到弱模型"（几何产物会与原图不一致）
+      providers.length = 0
+      providers.push(geminiProvider)
+      console.log(`[AI] onlyVendor=GoogleGeminiDirect：本次视觉请求仅走 Gemini 直连（model=${GEMINI_DIRECT.MODEL}，${GEMINI_DIRECT.RPM} RPM）`)
+    } else {
+      providers.unshift(geminiProvider)
+      console.log(`[AI] preferredVendor=GoogleGeminiDirect：Gemini 直连置顶（model=${GEMINI_DIRECT.MODEL}，${GEMINI_DIRECT.RPM} RPM），失败仍走原降级链`)
+    }
+  } else if (String(onlyVendor || preferredVendor || '') && /^(?:gemini|googlegeminidirect)$/i.test(String(onlyVendor || preferredVendor)) && !GEMINI_DIRECT.ENABLED) {
+    // 显式要了 Gemini 但没配 key：必须吵出来，否则又是"配了却静默没生效"
+    console.warn('[AI] ⚠️ 指定了 Gemini 直连通道，但 GEMINI_DIRECT.ENABLED=false（缺 GEMINI_API_KEY/GOOGLE_API_KEY/MODEL_GIMINI）→ 该指定被忽略，回退默认链路')
+  }
+
   let lastError = null
   let msAttempted = false
+  let geminiAttempted = false
   let agnesAttempted = false
   let fmAttempted = false
   let snAttempted = false
@@ -1426,8 +1608,13 @@ export async function callVisionCompletion(opts) {
       if (result.content) return result
       lastError = new Error('AI returned empty content')
     } catch (err) {
-      // 仅瞬时限流才进冷却；配额耗尽已按模型单独标记，不应连带冷却整个主站
-      if (err.response?.status === 429 && !isQuotaExhaustedError(err) && !isMainRateLimitedToday()) {
+      // 仅瞬时限流才进冷却；配额耗尽已按模型单独标记，不应连带冷却整个主站。
+      // ⚠️ 2026-09-19：**必须排除 Gemini 直连通道** —— 它用的是完全独立的配额（Google 项目级），
+      //    它 429 跟魔搭没有任何关系。实测未排除时日志出现
+      //    「[AI] 主模型限流，冷却 60s」+「魔搭所有 Key×模型组合今日配额均已耗尽」，
+      //    归因完全错方向，还会平白把魔搭冷却掉。
+      const fromGeminiDirect = err._provider === 'googlegeminidirect'
+      if (!fromGeminiDirect && err.response?.status === 429 && !isQuotaExhaustedError(err) && !isMainRateLimitedToday()) {
         markMainRateLimited()
       }
       lastError = err
@@ -1436,6 +1623,12 @@ export async function callVisionCompletion(opts) {
       else if (err._provider === 'agnes' || /Agnes|agnes/i.test(err.message || '')) agnesAttempted = true
       else if (err._provider === 'freemodel' || /FreeModel|freemodel/i.test(err.message || '')) fmAttempted = true
       else if (err._provider === 'sensenova' || /SenseNova|sensenova/i.test(err.message || '')) snAttempted = true
+      else if (err._provider === 'googlegeminidirect') {
+        // Gemini 直连失败：**不计入**魔搭/备份计数。
+        // 否则会掉进下面的"按调用顺序推断"分支，被误标成"魔搭配额耗尽"，
+        // 让 last_error 指向错误的方向（本项目已多次踩过"归因错方向"的坑）。
+        geminiAttempted = true
+      }
       else {
         // provider 闭包内未显式打标时，按调用顺序推断（先魔搭后 Agnes 再 FreeModel 再 SenseNova）
         if (!msAttempted) msAttempted = true
@@ -1449,7 +1642,7 @@ export async function callVisionCompletion(opts) {
   // ── 统一错误信息：让用户/前端/黑名单都能精确知道是哪一类 provider 不可用 ──
   // 仅魔搭失败 → 提示"魔搭视觉模型当日配额耗尽或限流，请明日再试或配置其他模型"
   // 魔搭+Agnes 都失败 → 提示"所有视觉模型均不可用，请稍后重试"
-  throw wrapVisionError(lastError, { msAttempted, agnesAttempted, fmAttempted, snAttempted })
+  throw wrapVisionError(lastError, { msAttempted, agnesAttempted, fmAttempted, snAttempted, geminiAttempted })
 }
 
 /**
@@ -1461,9 +1654,12 @@ export async function callVisionCompletion(opts) {
  *   - 仅 Agnes 失败 → "所有 Agnes 视觉模型均不可用：${baseMsg}"
  *   - 魔搭 + Agnes 都失败 → "所有视觉模型（魔搭 + Agnes）均不可用：${baseMsg}"
  *   - 都没尝试（理论不可能）→ 抛原 error
+ *   - 仅 Gemini 直连失败（onlyVendor 通道）→ 保留原 message，不改写成"魔搭耗尽"
  */
-export function wrapVisionError(lastError, { msAttempted = false, agnesAttempted = false, fmAttempted = false, snAttempted = false } = {}) {
+export function wrapVisionError(lastError, { msAttempted = false, agnesAttempted = false, fmAttempted = false, snAttempted = false, geminiAttempted = false } = {}) {
   if (!lastError) return new Error('All vision AI providers failed')
+  // 独占通道（onlyVendor=Gemini）下失败就是失败，不要把归因指向魔搭
+  if (geminiAttempted && !msAttempted && !agnesAttempted && !fmAttempted && !snAttempted) return lastError
   // 收集所有尝试过的 provider 名称
   const tried = []
   if (msAttempted) tried.push('魔搭')
