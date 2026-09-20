@@ -277,6 +277,62 @@ function topicKey(r) {
   return 'self:' + (own || r.wq_id)
 }
 
+/**
+ * 跨天/跨桶「完整题干」合并键（2026-09-20 去重修复，与 lib/weekendHandout.js 同构）。
+ * 同一道印刷体题经不同学生 OCR 后题面常有等效写法差异（∥//、×x、全半角、填空线有无），
+ * topicKey 的 ocrStemKey 只折叠 `_{2,}→_`（「长为_」与「长为」仍不同键）→ 同题被拆。
+ * 这里 ocrStemKey（OCR 等价折叠）→ normalizeStem（NFKC/间距/标点/破折号）→ 去全部下划线，
+ * 长度 < MIN_MERGE_KEY_LEN 不参与合并（不做相似度阈值）。
+ */
+function mergeKeyOf(t) {
+  const raw = `${t.parentStem || ''}|${(t.subParts || []).map(p => `(${p.subNo})${p.content}`).join('')}|${t.content}`
+  if (!String(raw).trim()) return ''
+  const k = normalizeStem(ocrStemKey(raw)).replace(/_+/g, '')
+  return k.length >= MIN_MERGE_KEY_LEN ? k : ''
+}
+
+/** 学生明细并集：同学生累加错次/日期，答案缺位互补 */
+function mergeStudents(dst, src) {
+  const out = [...dst]
+  for (const st of src) {
+    const exist = out.find(x => x.id === st.id)
+    if (exist) {
+      exist.wrongTimes += st.wrongTimes
+      exist.days = [...new Set([...(exist.days || []), ...(st.days || [])])].sort()
+      if (!exist.studentAnswer) exist.studentAnswer = st.studentAnswer
+    } else {
+      out.push(st)
+    }
+  }
+  return out.sort((a, b) => b.wrongTimes - a.wrongTimes || a.name.localeCompare(b.name))
+}
+
+/** 把 topic t 并入按合并键分组的 map（命中已有组则合并；短键退回按原始 key 查找防覆盖） */
+function mergeTopicInto(map, t, log) {
+  const mergedKey = mergeKeyOf(t)
+  const lookupKey = mergedKey || t.key
+  const cur = map.get(lookupKey)
+  if (!cur) {
+    map.set(lookupKey, { ...t, _day: t._day || '' })
+    return false
+  }
+  cur.students = mergeStudents(cur.students, t.students)
+  cur.studentCount = cur.students.length
+  cur.rawCount += t.rawCount
+  cur.diffValues = [...new Set([...(cur.diffValues || []), ...(t.diffValues || [])])].sort()
+  cur.diffInconsistent = cur.diffValues.length >= 2
+  if (t._day > cur._day) cur._day = t._day
+  log(`   [去重] 完整题干相同合并: ${cur.questionNumber ?? ''} 现 ${cur.studentCount} 人错`)
+  return true
+}
+
+/** 「完整题干相同」去重（2026-09-17 二次合并 / 2026-09-20 全局合并共用） */
+function dedupeTopics(topics, log) {
+  const completeMap = new Map()
+  for (const t of topics) mergeTopicInto(completeMap, t, log)
+  return [...completeMap.values()]
+}
+
 /** 同卷同题小问完整化：给一组错题成员（可能来自不同学生/不同 task，但题面相同），
  *  把同一 task#题号 的多小问行拼成完整题干 + 整题答案。
  *  返回 { stem, parentStem, subParts, missingSubs, answer }；无多小问则原样返回。 */
@@ -391,7 +447,7 @@ for (const r of rows) {
   dayMap.get(day).push(r)
 }
 
-const days = []
+let days = []
 for (const [day, list] of [...dayMap.entries()].sort((a, b) => b[0].localeCompare(a[0]))) {
   // 桶内按 topic 合并
   const topicMap = new Map()
@@ -421,6 +477,7 @@ for (const [day, list] of [...dayMap.entries()].sort((a, b) => b[0].localeCompar
         id: m.student_id,
         name: m.student_name,
         wrongTimes: (cur?.wrongTimes || 0) + 1,
+        days: [toYmd(new Date(m.added_at))],
         difficulty: m.difficulty,
         studentAnswer: m.wq_student_answer,
         errorType: m.error_type || (m.is_blank ? '空题' : null),
@@ -431,6 +488,7 @@ for (const [day, list] of [...dayMap.entries()].sort((a, b) => b[0].localeCompar
       }
       if (cur) {
         cur.wrongTimes = item.wrongTimes
+        cur.days = [...new Set([...(cur.days || []), ...(item.days || [])])].sort()
         cur.studentAnswer = cur.studentAnswer || item.studentAnswer
         cur.docImage = cur.docImage || item.docImage
         cur.isBlank = cur.isBlank && item.isBlank
@@ -494,36 +552,9 @@ for (const [day, list] of [...dayMap.entries()].sort((a, b) => b[0].localeCompar
     })
   }
 
-  // 二次合并（2026-09-17 产品化发现）：多小问完整化后，「完整题干」相同的条目
-  // 若因错的小问不同（topicKey 在完整化之前按 content 分桶）会拆成两条完全相同的题。
-  // 例：同一学生同一天错题本里题11 有两条（一条错(2)问、一条错(3)问），完整化后
-  // 都是 3 小问 + 同一份答案 —— 应合并为一条，学生/错次累加。
-  const completeMap = new Map()
-  for (const t of topics) {
-    const key = normalizeStem(
-      `${t.parentStem || ''}|${(t.subParts || []).map(p => `(${p.subNo})${p.content}`).join('')}|${t.content}`
-    )
-    if (!key) { completeMap.set(t.key, t); continue }
-    const cur = completeMap.get(key)
-    if (!cur) { completeMap.set(key, t); continue }
-    const students = [...cur.students]
-    for (const st of t.students) {
-      const exist = students.find(x => x.id === st.id)
-      if (exist) {
-        exist.wrongTimes += st.wrongTimes
-        if (!exist.studentAnswer) exist.studentAnswer = st.studentAnswer
-      } else {
-        students.push(st)
-      }
-    }
-    cur.students = students.sort((a, b) => b.wrongTimes - a.wrongTimes || a.name.localeCompare(b.name))
-    cur.studentCount = students.length
-    cur.rawCount += t.rawCount
-    cur.diffValues = [...new Set([...(cur.diffValues || []), ...(t.diffValues || [])])].sort()
-    cur.diffInconsistent = cur.diffValues.length >= 2
-    log(`   [去重] 完整题干相同合并: ${cur.questionNumber ?? ''} 现 ${cur.studentCount} 人错`)
-  }
-  topics = [...completeMap.values()]
+  // 二次合并（2026-09-17 发现 / 2026-09-20 键升级）：完整题干相同的条目
+  // 若因错的小问不同或 OCR 题面微差（∥//、填空线有无）被拆开 → 合并为一条。
+  topics = dedupeTopics(topics, log)
 
   // 排序：难度档 → 难度值 → 共错人数 → 首次出现
   const tierIdx = t => TIERS.findIndex(x => x.match(t.difficulty))
@@ -550,6 +581,46 @@ for (const [day, list] of [...dayMap.entries()].sort((a, b) => b[0].localeCompar
     clipped,
     totalTopics: topics.length,
   })
+}
+
+// ── 全局跨天去重（2026-09-20 修复，与 lib/weekendHandout.js 同构）────────────────
+// 用户口径：「两个人共同错一道题，应累计成同一题 '共 N 人错'，而不是课件里出现两次。」
+// 原实现只在单天桶内二次合并，跨天共错被拆进不同日期节。这里全部天拉平 → 合并 →
+// 归到组内最近错误日期的节，再重新排序并执行 maxPerDay 上限。
+if (days.length > 1) {
+  const flat = []
+  for (const d of days) {
+    for (const t of d.topics) flat.push({ ...t, _day: d.day })
+  }
+  const merged = dedupeTopics(flat, log)
+  const byDay = new Map()
+  for (const t of merged) {
+    if (!byDay.has(t._day)) byDay.set(t._day, [])
+    byDay.get(t._day).push(t)
+  }
+  days = days
+    .map(d => ({ ...d, topics: byDay.get(d.day) || [] }))
+    .filter(d => d.topics.length > 0)
+    .map(d => {
+      let topics = sortTopics(d.topics)
+      let clipped = 0
+      if (MAX_PER_DAY > 0 && topics.length > MAX_PER_DAY) {
+        clipped = topics.length - MAX_PER_DAY
+        topics = topics.slice(0, MAX_PER_DAY)
+      }
+      const studentIds = [...new Set(topics.flatMap(t => t.students.map(st => st.id)))]
+      return {
+        ...d,
+        topics,
+        rawRows: topics.reduce((s, t) => s + t.rawCount, 0),
+        studentCount: studentIds.length,
+        studentIds,
+        clipped,
+        totalTopics: topics.length,
+      }
+    })
+  if (days.length === 0) throw new Error('该时段没有符合条件的错题，未生成课件。')
+  log(`[3] 全局跨天去重: 共错题合并 → ${days.reduce((s, d) => s + d.totalTopics, 0)} 题（归到最近错题日期节）`)
 }
 
 // ── 薄天合并：题量 < MERGE_THIN 的自然日并入「其后第一个足量日」，合成一节 ──
@@ -943,7 +1014,7 @@ for (const sec of sections) {
       diffInconsistent: t.diffInconsistent,
       studentCount: t.studentCount,
       students: t.students.map(s => ({
-        name: s.name, wrongTimes: s.wrongTimes, answer: s.studentAnswer,
+        name: s.name, wrongTimes: s.wrongTimes, days: s.days || [], answer: s.studentAnswer,
         errorType: s.errorType, errorReason: s.errorReason, blank: s.isBlank,
         docImage: s.docImage, docPage: s.docPage,
       })),
@@ -1009,7 +1080,7 @@ fs.writeFileSync(jsonPath, JSON.stringify({
       questionType: t.questionType, studentCount: t.studentCount, rawCount: t.rawCount,
       content: (t.parentStem ? t.parentStem + ' ' : '') + t.content,
       answer: t.answer || null, answerSource: t.answerSource, answerRisk: t.answerRisk,
-      students: t.students.map(s => ({ name: s.name, wrongTimes: s.wrongTimes, studentAnswer: s.studentAnswer, errorType: s.errorType })),
+      students: t.students.map(s => ({ name: s.name, wrongTimes: s.wrongTimes, days: s.days || [], studentAnswer: s.studentAnswer, errorType: s.errorType })),
     })),
   })),
 }, null, 2), 'utf8')

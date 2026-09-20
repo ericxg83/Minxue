@@ -329,10 +329,12 @@ const TIER_COLORS = {
 const router = useRouter()
 
 // ── 参数 ──
+// days 默认 20（2026-09-20）：7 天窗口会把错题日期稍早的题滤掉（张诗蕊案例：34 题卷只出 25 题），
+// 与后端 CLI/lib 默认 20 对齐。
 const params = ref({
   grade: '初三',
   subject: '',
-  days: 7,
+  days: 20,
   from: '',
   to: '',
   students: [],
@@ -342,7 +344,7 @@ const params = ref({
   difficulty: '',
   chapter: '',
 })
-const periodPreset = ref('days7')
+const periodPreset = ref('days20')
 const withAnswer = ref(true)
 const previewing = ref(false)
 const generating = ref(false)

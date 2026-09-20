@@ -38,7 +38,10 @@ test('同题二次去重：完整题干相同的条目合并（CLI 与 lib 同�
     'lib 必须包含完整题干二次去重逻辑'
   )
   assert.ok(LIB_SRC.includes('normalizeStem('), '去重键必须用 normalizeStem')
-  assert.ok(LIB_SRC.includes('cur.students = students.sort'), '合并后学生明细按错次排序')
+  assert.ok(
+    LIB_SRC.includes('b.wrongTimes - a.wrongTimes') && (LIB_SRC.includes('mergeStudents') || LIB_SRC.includes('students.sort')),
+    '合并后学生明细按错次排序（mergeStudents）'
+  )
   // CLI 侧同构
   assert.ok(
     CLI_SRC.includes('完整题干相同合并'),

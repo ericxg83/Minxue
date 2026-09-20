@@ -30,3 +30,33 @@ test('ocrStemKey：OCR 等效写法归一为同一键', async () => {
   const e = ocrStemKey('如图，AB//CD//EF，AF、BE 交于点 G，下列比例式中，错误的是')
   assert.notEqual(a, e)
 })
+
+test('2026-09-20 去重修复：合并键折叠 OCR 差异并删除填空线；全局跨天合并（CLI 同构）', () => {
+  // ① 合并键 = ocrStemKey + normalizeStem + 去下划线（填空线有无/∥// 不再拆题）
+  assert.ok(LIB_SRC.includes('function mergeKeyOf'), 'lib 必须定义 mergeKeyOf（跨天/跨桶合并键）')
+  assert.ok(CLI_SRC.includes('function mergeKeyOf'), 'CLI 必须同构 mergeKeyOf')
+  assert.ok(LIB_SRC.includes(".replace(/_+/g, '')"), 'lib 合并键必须删除填空线/下标分隔下划线')
+  assert.ok(CLI_SRC.includes(".replace(/_+/g, '')"), 'CLI 合并键必须删除填空线')
+  // ② 全局跨天合并：_day 归节（两个人共错一题跨天只出现一次，累计共 N 人错）
+  assert.ok(LIB_SRC.includes("_day: t._day"), 'lib 必须有跨天合并的日期归属逻辑 _day')
+  assert.ok(CLI_SRC.includes("_day: t._day"), 'CLI 必须同构跨天合并 _day')
+  assert.ok(LIB_SRC.includes('全局跨天去重'), 'lib 必须有全局跨天去重')
+  assert.ok(CLI_SRC.includes('全局跨天去重'), 'CLI 必须同构全局跨天去重')
+  // ③ 学生明细记录错误日期 days（跨天合并后保留「谁哪天错的」）
+  assert.ok(LIB_SRC.includes('days: [day]'), 'lib 学生明细必须记录错误日期 days')
+  assert.ok(CLI_SRC.includes('toYmd(new Date(m.added_at))'), 'CLI 学生明细必须记录错误日期 days')
+})
+
+test('mergeKeyOf 语义：OCR 折叠 + 去下划线后，填空线有无 / ∥// 不影响合并键（2026-09-20）', async () => {
+  // 与 lib mergeKeyOf 相同的组合：ocrStemKey → normalizeStem → 去 _
+  const { ocrStemKey } = await import('../server/utils/ocrStemKey.js')
+  const { normalizeStem } = await import('../server/utils/stemNormalize.js')
+  const merge = raw => normalizeStem(ocrStemKey(raw)).replace(/_+/g, '')
+  // 实测 f8cf5d96 p1n5：同题两条仅「填空线有无 + 标点空格」差异 → 必须同键
+  const a = merge('如图，已知直线l₁//l₂//l₃，DE=2，EF=6，BC=5，那么AB的长为______')
+  const b = merge('如图，已知直线l₁∥l₂∥l₃DE=2 EF=6,BC=5，那么AB的长为')
+  assert.equal(a, b)
+  // 同页同题号混入的另题（两条不平行的直线）绝不能同键
+  const c = merge('如图，两条不平行的直线l1与l2相交于点O，四条平行线分别交直线l1于点A、B、C、D')
+  assert.notEqual(a, c)
+})

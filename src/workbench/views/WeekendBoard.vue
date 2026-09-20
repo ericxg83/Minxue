@@ -246,7 +246,7 @@
             <span>该题未关联到卷面原图</span>
             <span class="no-img__sub">（历史错题缺少出处信息，非加载失败）</span>
           </div>
-          <figcaption>{{ stu.name }}<span v-if="stu.wrongTimes > 1"> ×{{ stu.wrongTimes }}</span></figcaption>
+          <figcaption>{{ stu.name }}<span v-if="stu.wrongTimes > 1"> ×{{ stu.wrongTimes }}</span><span v-if="stu.days?.length" class="stu-days">（{{ stu.days.join('、') }}）</span></figcaption>
         </figure>
       </div>
     </el-dialog>
@@ -1283,6 +1283,7 @@ onBeforeUnmount(() => {
   cursor: zoom-out;
 }
 .original-item figcaption { margin-top: 6px; font-size: 14px; color: var(--wb-text-secondary, #64748b); }
+.original-item figcaption .stu-days { margin-left: 2px; font-size: 12px; color: var(--wb-text-tertiary, #94a3b8); }
 .no-img {
   display: grid;
   align-content: center;
