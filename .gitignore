@@ -39,6 +39,8 @@ capacitor.config.json
 server/.env
 server/.env.local
 server/.env.*.local
+# .env 的人工备份（含密钥），防止被自动提交守护进程整份 add 卷走
+server/.env.bak*
 .env.development
 .env.test
 
@@ -174,4 +176,6 @@ prod_imgs/
 # 数据修复脚本的回滚备份（含学生数据）
 server/backups/
 # 中间态临时文件
-deliverables/*.tmp
+# deliverables/ 为课件/讲义等生成产物输出目录（含数百 MB pptx），非源码，整目录忽略。（2026-09-20 加入，修复 Minxue Deploy 自动提交守护进程 git add 长期持锁阻塞手动提交）
+# 若需保留某份交付物，请单独 git add -f 该文件，勿放开整目录。
+deliverables/

@@ -44,6 +44,13 @@
   `quotaId` 的 `PerMinute`/`PerDay`**，body 里的「retry in Ns」不可信。- **限流安全网**：`aiProviderRetry.js` 包住 `geometryWorker.js` 三处视觉调用；否则 429 会消耗
   `handleRetry` 的 3 次预算 → 写 `tikz_status='none'` = 永久放弃重绘。429 退避须 ≥60s。
 - 辉辉云换 key 必须同步改 `config/ai.js` 的 `Huihuiyun.vlModels`；后备模型**只能当文字 OCR 兜底，不能当配图定位兜底**。
+- **答案引擎兜底 key 可能早已被禁用**（2026-09-20 实测旧 HUIHUIYUN_API_KEY=API_KEY_DISABLED，备用链路
+  一直静默断着）。换 key 后**必须实测**（`/v1/models` 列模型 + 单轮对话），别只看 .env 有没有配。
+  当前 `Huihuiyun`（sk-30d6...）7 模型全为文本（deepseek-v4-flash/glm-5.2/grok-4.5/4.6/sensenova-6.8-flash-lite），
+  无视觉。
+- **引擎回填必须逐条验算**：兜底模型（deepseek-v4-flash）输出不稳定，同题两次调用可能不同
+  （2026-09-20 题25(1) 两次分别为 (2/3,4/3)/(2,2)）；`extractAnswerFromAnalysis` 可能带截断尾巴。
+  多解/分段题宁可人工定点写库（附推导进 analysis），不直接信提取值。
 
 ## 4. 几何重画
 
@@ -74,3 +81,6 @@
 - 练习册答案解析质量闸（AGENTS.md 第 11 条）：OCR 锁主力模型 + 3 并发 + 文字层门禁 + 控制字符过滤；
   发布 published 必经 `getWorksheetPublishRisk`（blocking → 409，须 `force=true`）。
   **新增版式异常只许加规则/加测试，不得放宽或绕行任一门禁。**
+- 周末班课件（`lib/weekendHandout.js` ↔ CLI 同构）：**课件范围内同一道题只出现一次**——
+  全局跨天合并（`mergeKeyOf` = ocrStemKey→normalizeStem→去 `_`，长度 ≥12 闸），
+  跨天共错合并到最晚错题日期节并累计「共 N 人错」，禁止改回 per-day 合并。
