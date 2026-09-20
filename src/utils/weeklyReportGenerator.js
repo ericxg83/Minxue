@@ -198,14 +198,73 @@ function renderAvatar(student) {
 /**
  * 生成诊断报告 HTML 内容（3 页：封面 / 概览 / 学科诊断）
  */
-function buildDiagnosisHTML(reportData) {
-  const { student, period, stats, subjectDiagnosis = [], dailyTrend = [] } = reportData
+/**
+ * 单个对比指标卡：本周值 + 较上周差值（带"升=好"语义配色）
+ * @param {string} label
+ * @param {number} cur - 本周值
+ * @param {number|null} prev - 上周值（null=上周无数据）
+ * @param {boolean} goodWhenUp - 数值上升是否代表进步（正确率/题量上升=好；错题上升=坏）
+ * @param {string} unit
+ */
+function compareItemHTML(label, cur, prev, goodWhenUp, unit = '') {
+  const curText = `${cur}${unit}`
+  if (prev == null) {
+    return `<div class="cmp-item"><div class="cmp-label">${label}</div><div class="cmp-cur">${curText}</div><div class="cmp-diff dim">上周无数据</div></div>`
+  }
+  const d = Math.round((cur - prev) * 10) / 10
+  if (d === 0) {
+    return `<div class="cmp-item"><div class="cmp-label">${label}</div><div class="cmp-cur">${curText}</div><div class="cmp-diff">与上周持平</div><div class="cmp-prev">上周 ${prev}${unit}</div></div>`
+  }
+  const good = (d > 0) === goodWhenUp
+  const cls = good ? 'good' : 'bad'
+  const sign = d > 0 ? '+' : ''
+  return `<div class="cmp-item"><div class="cmp-label">${label}</div><div class="cmp-cur">${curText}</div><div class="cmp-diff ${cls}">${sign}${d}${unit}（上周 ${prev}${unit}）</div></div>`
+}
+
+/** 成长对比页（第 03 页）：周期对比 + 重练进步 */
+function renderComparePage(curStats, prevStats, retryProgress, badgeLabel, prevPeriodLabel) {
+  return `
+  <div class="page">
+    <div class="pad">
+      <div class="ph">
+        ${renderLogo({ compact: true })}
+        <div class="ph-right"><div class="week-badge">${badgeLabel}</div><div class="ph-cap">学习成长记录</div></div>
+      </div>
+      <div class="sec-title"><span class="sec-num">03</span>成长对比</div>
+      <div class="sec-sub">本周期 vs 上一周期（${prevPeriodLabel}），观察学习变化</div>
+
+      <div class="sub-label">较上一周期</div>
+      <div class="cmp-grid">
+        ${compareItemHTML('正确率', curStats.accuracy ?? 0, prevStats.totalQuestions ? prevStats.accuracy : null, true, '%')}
+        ${compareItemHTML('新增错题', curStats.newWrongCount ?? 0, prevStats.totalQuestions ? prevStats.newWrongCount : null, false, ' 题')}
+        ${compareItemHTML('待重练错题', curStats.pendingCount ?? 0, prevStats.totalQuestions ? prevStats.pendingCount : null, false, ' 题')}
+        ${compareItemHTML('完成题量', curStats.totalQuestions ?? 0, prevStats.totalQuestions, true, ' 题')}
+      </div>
+
+      ${retryProgress && retryProgress.examCount > 0 ? `
+      <div class="sub-label">重练进步（本周期）</div>
+      <div class="retry-strip">
+        <div class="retry-stat"><div class="v">${retryProgress.examCount}</div><div class="l">完成重练卷</div></div>
+        <div class="retry-stat"><div class="v">${retryProgress.retriedCount}</div><div class="l">重练题目</div></div>
+        <div class="retry-stat"><div class="v">${retryProgress.retryAccuracy}%</div><div class="l">重练正确率</div></div>
+        <div class="retry-stat"><div class="v">${retryProgress.pushedToBasic}</div><div class="l">推进到基本掌握</div></div>
+      </div>
+      <div style="font-size:11px;color:${T.textSec};margin-top:8px">重练答对 ${retryProgress.correctCount} 题 · 未通过回到待练 ${retryProgress.stillNew} 题</div>` : ''}
+    </div>
+    <div class="pf"><span>${BRAND.nameCn} · ${BRAND.slogan}</span><span>- 03 -</span></div>
+  </div>`
+}
+
+export function buildDiagnosisHTML(reportData) {
+  const { student, period, stats, subjectDiagnosis = [], dailyTrend = [], prev = null, retryProgress = null } = reportData
   const mode = period.mode || 'week'
   const weekNum = period.weekNum || (mode === 'week' ? dayjs(period.start).isoWeek() : null)
   const badgeLabel = mode === 'month'
     ? dayjs(period.start).format('M月')
     : mode === 'all' ? 'ALL' : `WEEK ${weekNum}`
   const accColor = colorForAccuracy(stats.accuracy)
+  // 成长对比：week/month 且有上一周期数据才渲染（all 模式无对比对象）
+  const hasCompare = mode !== 'all' && prev && prev.stats
 
   // 最薄弱知识点（跨学科 wrongCount 最高）
   let weakestTag = ''
@@ -336,6 +395,21 @@ function buildDiagnosisHTML(reportData) {
   .comment-t{font-size:13px;font-weight:700;color:${T.text};margin-bottom:5px}
   .comment-d{font-size:13px;color:${T.textSec};line-height:1.7}
 
+  /* 成长对比页 */
+  .cmp-grid{display:grid;grid-template-columns:repeat(2,1fr);gap:14px;margin-bottom:18px}
+  .cmp-item{border:1px solid ${T.borderLight};border-radius:10px;padding:14px 16px;background:#fff}
+  .cmp-label{font-size:11px;color:${T.textSec};margin-bottom:6px}
+  .cmp-cur{font-size:24px;font-weight:800;color:${T.text};line-height:1.2}
+  .cmp-diff{font-size:12px;font-weight:700;margin-top:6px}
+  .cmp-diff.good{color:${T.success}}
+  .cmp-diff.bad{color:${T.danger}}
+  .cmp-diff.dim{color:${T.textTer};font-weight:500}
+  .cmp-prev{font-size:11px;color:${T.textTer};margin-top:4px}
+  .retry-strip{display:flex;gap:12px;margin-top:4px}
+  .retry-stat{flex:1;background:${T.primaryMist};border:1px solid ${T.primarySoft};border-radius:10px;padding:12px 10px;text-align:center}
+  .retry-stat .v{font-size:20px;font-weight:800;color:${T.primary}}
+  .retry-stat .l{font-size:10px;color:${T.textSec};margin-top:4px}
+
   /* ── 学科诊断 ── */
   .subj-card{background:#fff;border:1px solid ${T.border};border-radius:16px;padding:18px 20px;margin-bottom:16px;box-shadow:0 1px 3px rgba(30,64,120,.04)}
   .subj-head{display:flex;align-items:center;justify-content:space-between;margin-bottom:12px}
@@ -407,6 +481,7 @@ function buildDiagnosisHTML(reportData) {
   .subj-badge{background:#fff;border-radius:50%}
   .mastery{border-radius:3px}
   .kt-table th{background:${T.bg};color:${T.textSec}}
+  .cmp-item,.retry-stat{border-radius:4px}
 </style></head><body>
 
   <!-- ═══ 封面页 ═══ -->
@@ -480,6 +555,8 @@ function buildDiagnosisHTML(reportData) {
     <div class="pf"><span>${BRAND.nameCn} · ${BRAND.slogan}</span><span>- 02 -</span></div>
   </div>
 
+  ${hasCompare ? renderComparePage(stats, prev.stats, retryProgress, badgeLabel, `${prev.period.start} ~ ${prev.period.end}`) : ''}
+
   ${subjectDiagnosis.length > 0 ? `
   <!-- ═══ 学科诊断页 ═══ -->
   <div class="page">
@@ -498,7 +575,7 @@ function buildDiagnosisHTML(reportData) {
         <div><div class="advice-t">学习建议</div><div class="advice-d">${escapeHtml(teacherAdvice)}</div></div>
       </div>
     </div>
-    <div class="pf"><span>${BRAND.nameCn} · ${BRAND.slogan}</span><span>- 03 -</span></div>
+    <div class="pf"><span>${BRAND.nameCn} · ${BRAND.slogan}</span><span>- ${hasCompare ? '04' : '03'} -</span></div>
   </div>
   ` : ''}
 

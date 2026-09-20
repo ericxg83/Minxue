@@ -1,9 +1,52 @@
 import { Router } from 'express'
 import { query, TABLES } from '../config/neon.js'
-import { parsePeriod, getIsoWeek } from '../utils/period.js'
+import { parsePeriod, getIsoWeek, getPeriodRange } from '../utils/period.js'
 import { sqlCorrectExpr, sqlWrongExpr } from '../utils/questionResultCaliber.js'
 
 const router = Router()
+
+/**
+ * 计算上一周期（当前周期的前一期），用于成长对比。
+ * 'all' 模式无对比对象，返回 null。
+ * @param {string} mode - 'week' | 'month' | 'all'
+ * @param {number} offset - 当前周期偏移
+ * @returns {{ periodStart: Date, periodEnd: Date } | null}
+ */
+export function shiftPrevPeriod(mode, offset) {
+  if (mode === 'all') return null
+  return getPeriodRange(mode, offset + 1)
+}
+
+/**
+ * 从本周期已出结果的重练任务（tasks.result）聚合成"重练进步"。
+ * 判题结果只信任 tasks.result（slim 重练卷不写 questions 表，禁按 task_id 查题）。
+ * 只统计"有效出结果"的卷：result 无 error/failedAt，且能读到数量型字段。
+ * @param {Array<{id:string, result:Object}>} taskRows
+ * @returns {Object}
+ */
+export function buildRetryProgress(taskRows) {
+  const valid = (taskRows || []).filter(r => {
+    const rs = r.result || {}
+    if (rs.error || rs.failedAt) return false
+    // 结果字段缺失即视为无效卷（早期老数据可能没有出分）
+    return typeof rs.correctCount === 'number' || typeof rs.questionCount === 'number'
+  })
+  const sum = (key) => valid.reduce((acc, r) => acc + (Number((r.result || {})[key]) || 0), 0)
+  const examCount = valid.length
+  const retriedCount = sum('questionCount')
+  const correctCount = sum('correctCount')
+  const wrongCount = sum('wrongCount')
+  const pendingCount = sum('pendingCount')
+  const judged = correctCount + wrongCount
+  return {
+    examCount,
+    retriedCount,
+    correctCount,
+    wrongCount,
+    pendingCount,
+    retryAccuracy: judged > 0 ? Math.round((correctCount / judged) * 1000) / 10 : 0
+  }
+}
 
 /**
  * GET /api/weekly-report/:studentId
@@ -112,26 +155,8 @@ router.get('/:studentId', async (req, res) => {
       [studentId, periodStart, periodEnd]
     )
 
-    // 6. 本周知识点诊断（从 ai_tags 展开，兼容 text 和 jsonb），带学科
-    const { rows: tagRows } = await query(
-      `SELECT
-        COALESCE(NULLIF(q.subject, ''), '其他') AS subject,
-        jsonb_array_elements_text(CASE WHEN jsonb_typeof(q.ai_tags::jsonb) = 'array' THEN q.ai_tags::jsonb ELSE '[]'::jsonb END) AS tag,
-        COUNT(*) FILTER (WHERE ${sqlWrongExpr('q.')})::int AS wrong_count,
-        COUNT(*)::int AS total_count
-      FROM ${TABLES.WRONG_QUESTIONS} wq
-      JOIN ${TABLES.QUESTIONS} q ON q.id = wq.question_id
-      WHERE wq.student_id = $1
-        AND wq.added_at >= $2
-        AND wq.added_at < $3
-        AND q.is_complete = TRUE
-        AND q.ai_tags IS NOT NULL
-        AND q.ai_tags != ''
-        AND q.ai_tags != '[]'
-      GROUP BY COALESCE(NULLIF(q.subject, ''), '其他'), tag
-      ORDER BY COALESCE(NULLIF(q.subject, ''), '其他'), wrong_count DESC, total_count DESC`,
-      [studentId, periodStart, periodEnd]
-    )
+    // 6. 本周知识点诊断（与 prev 周期共用 fetchKnowledgeDiagnosis，保证口径一致）
+    const knowledgeDiagnosis = await fetchKnowledgeDiagnosis(studentId, periodStart, periodEnd)
 
     // 7. 每日正确率趋势（本周批改题目按日期分组）
     const { rows: trendRows } = await query(
@@ -191,16 +216,6 @@ router.get('/:studentId', async (req, res) => {
       wrongQuestionIds: wrongIdRows.map(r => r.question_id)
     }
 
-    const knowledgeDiagnosis = tagRows.map(r => ({
-      subject: r.subject,
-      tag: r.tag,
-      wrongCount: r.wrong_count,
-      totalCount: r.total_count,
-      accuracy: r.total_count > 0
-        ? Math.round(((r.total_count - r.wrong_count) / r.total_count) * 1000) / 10
-        : 0
-    }))
-
     // 各学科整体正确率映射
     const subjectAccuracyMap = {}
     for (const r of subjectAccRows) {
@@ -217,6 +232,13 @@ router.get('/:studentId', async (req, res) => {
 
     const weekNum = isWeekMode ? getIsoWeek(periodStart) : null
 
+    // 8. 上一周期对比（week/month；all 模式 prev=null） + 本周期重练进步
+    const prevPeriod = shiftPrevPeriod(mode, offset)
+    const prev = prevPeriod
+      ? await fetchPeriodCompare(studentId, { ...prevPeriod, mode, offset: offset + 1 })
+      : null
+    const retryProgress = await fetchRetryProgress(studentId, periodStart, periodEnd)
+
     const result = {
       success: true,
       student: studentRows[0],
@@ -230,7 +252,10 @@ router.get('/:studentId', async (req, res) => {
       stats,
       knowledgeDiagnosis,
       subjectDiagnosis,
-      dailyTrend
+      dailyTrend,
+      // 2026-09-20 成长历史 P0：两期对比 + 重练进步（纯新增字段，向后兼容）
+      prev,
+      retryProgress
     }
 
     res.json(result)
@@ -350,6 +375,148 @@ router.get('/', async (req, res) => {
     res.status(500).json({ error: error.message })
   }
 })
+
+// ============================================================
+// 成长对比（prev）与重练进步（retryProgress）查询
+// 2026-09-20 新增：学习诊断"成长历史"P0 —— 两期对比 + 重练进步
+// 口径约定：
+//   - prev 只做同口径聚合（questions 正确率 / wrong_questions 错题与生命周期 /
+//     知识点 ai_tags），SQL 与当前周期完全一致；
+//   - 重练判题结果只信任 tasks.result（slim 重练卷不写 questions 表，
+//     统计禁按 task_id 查题，见 working-memory 铁律 9）。
+// ============================================================
+
+/** 知识点诊断（按 ai_tags 展开，兼容 text 和 jsonb），当前周期与 prev 周期共用同一段 SQL */
+async function fetchKnowledgeDiagnosis(studentId, periodStart, periodEnd) {
+  const { rows: tagRows } = await query(
+    `SELECT
+      COALESCE(NULLIF(q.subject, ''), '其他') AS subject,
+      jsonb_array_elements_text(CASE WHEN jsonb_typeof(q.ai_tags::jsonb) = 'array' THEN q.ai_tags::jsonb ELSE '[]'::jsonb END) AS tag,
+      COUNT(*) FILTER (WHERE ${sqlWrongExpr('q.')})::int AS wrong_count,
+      COUNT(*)::int AS total_count
+    FROM ${TABLES.WRONG_QUESTIONS} wq
+    JOIN ${TABLES.QUESTIONS} q ON q.id = wq.question_id
+    WHERE wq.student_id = $1
+      AND wq.added_at >= $2
+      AND wq.added_at < $3
+      AND q.is_complete = TRUE
+      AND q.ai_tags IS NOT NULL
+      AND q.ai_tags != ''
+      AND q.ai_tags != '[]'
+    GROUP BY COALESCE(NULLIF(q.subject, ''), '其他'), tag
+    ORDER BY COALESCE(NULLIF(q.subject, ''), '其他'), wrong_count DESC, total_count DESC`,
+    [studentId, periodStart, periodEnd]
+  )
+  return tagRows.map(r => ({
+    subject: r.subject,
+    tag: r.tag,
+    wrongCount: r.wrong_count,
+    totalCount: r.total_count,
+    accuracy: r.total_count > 0
+      ? Math.round(((r.total_count - r.wrong_count) / r.total_count) * 1000) / 10
+      : 0
+  }))
+}
+
+/** 上一周期的对比快照：作业/题量/正确率/错题/掌握状态 + 知识点诊断 */
+export async function fetchPeriodCompare(studentId, { periodStart, periodEnd, mode, offset }) {
+  const [taskRows, questionRows, wrongCountRows, statusRows] = await Promise.all([
+    query(
+      `SELECT
+        COUNT(*)::int AS total_tasks,
+        COUNT(*) FILTER (WHERE status = 'done')::int AS completed_tasks
+      FROM ${TABLES.TASKS}
+      WHERE student_id = $1 AND created_at >= $2 AND created_at < $3 AND deleted_at IS NULL`,
+      [studentId, periodStart, periodEnd]
+    ),
+    query(
+      `SELECT
+        COUNT(*)::int AS total,
+        COUNT(*) FILTER (WHERE ${sqlCorrectExpr()})::int AS correct,
+        COUNT(*) FILTER (WHERE ${sqlWrongExpr()})::int AS wrong
+      FROM ${TABLES.QUESTIONS}
+      WHERE student_id = $1 AND created_at >= $2 AND created_at < $3 AND is_complete = TRUE`,
+      [studentId, periodStart, periodEnd]
+    ),
+    query(
+      `SELECT COUNT(*)::int AS count
+      FROM ${TABLES.WRONG_QUESTIONS}
+      WHERE student_id = $1 AND added_at >= $2 AND added_at < $3`,
+      [studentId, periodStart, periodEnd]
+    ),
+    query(
+      `SELECT lifecycle_status, COUNT(*)::int AS count
+      FROM ${TABLES.WRONG_QUESTIONS}
+      WHERE student_id = $1 AND added_at >= $2 AND added_at < $3
+      GROUP BY lifecycle_status`,
+      [studentId, periodStart, periodEnd]
+    )
+  ])
+
+  let masteredCount = 0
+  let pendingCount = 0
+  for (const r of statusRows.rows) {
+    if (r.lifecycle_status === 'mastered') masteredCount += r.count
+    else pendingCount += r.count
+  }
+  const q = questionRows.rows[0]
+  const knowledgeDiagnosis = await fetchKnowledgeDiagnosis(studentId, periodStart, periodEnd)
+
+  return {
+    period: {
+      start: periodStart.toISOString().split('T')[0],
+      end: periodEnd.toISOString().split('T')[0],
+      mode,
+      offset
+    },
+    stats: {
+      totalTasks: taskRows.rows[0]?.total_tasks || 0,
+      completedTasks: taskRows.rows[0]?.completed_tasks || 0,
+      totalQuestions: q?.total || 0,
+      correctCount: q?.correct || 0,
+      wrongCount: q?.wrong || 0,
+      accuracy: q?.total > 0 ? Math.round((q.correct / q.total) * 1000) / 10 : 0,
+      newWrongCount: wrongCountRows.rows[0]?.count || 0,
+      masteredCount,
+      pendingCount
+    },
+    knowledgeDiagnosis
+  }
+}
+
+/** 本周期重练进步：已完成 wrong_retry 任务判题结果 + 练习后的错题生命周期推进 */
+export async function fetchRetryProgress(studentId, periodStart, periodEnd) {
+  const { rows } = await query(
+    `SELECT id, result
+     FROM ${TABLES.TASKS}
+     WHERE student_id = $1
+       AND task_type = 'wrong_retry'
+       AND deleted_at IS NULL
+       AND updated_at >= $2
+       AND updated_at < $3`,
+    [studentId, periodStart, periodEnd]
+  )
+  const progress = buildRetryProgress(rows)
+
+  // 本周期练习后的错题去向（重练结算会写 updated_at=NOW()）：
+  //   review_1 = 重练答对推进到「基本掌握」；new = 答错回池重练；mastered = 完全掌握
+  const { rows: lc } = await query(
+    `SELECT
+       COUNT(*) FILTER (WHERE lifecycle_status = 'review_1')::int AS pushed_to_basic,
+       COUNT(*) FILTER (WHERE lifecycle_status = 'mastered')::int AS mastered_cnt,
+       COUNT(*) FILTER (WHERE lifecycle_status = 'new')::int AS still_new
+     FROM ${TABLES.WRONG_QUESTIONS}
+     WHERE student_id = $1
+       AND COALESCE(practice_count, 0) > 0
+       AND updated_at >= $2
+       AND updated_at < $3`,
+    [studentId, periodStart, periodEnd]
+  )
+  progress.pushedToBasic = lc[0]?.pushed_to_basic || 0
+  progress.masteredCnt = lc[0]?.mastered_cnt || 0
+  progress.stillNew = lc[0]?.still_new || 0
+  return progress
+}
 
 /**
  * 按学科分组诊断：每科取 TOP5 薄弱知识点

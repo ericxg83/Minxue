@@ -64,12 +64,67 @@
             </ContentCard>
           </section>
 
+          <!-- 成长对比：本周 vs 上周 / 本月 vs 上月（all 模式无对比对象，不展示） -->
+          <ContentCard
+            v-if="periodMode !== 'all' && currentStudentDetail?.prev"
+            class="growth-compare"
+            title="成长对比"
+            :description="`${currentStudentName} · 本${periodMode === 'week' ? '周' : '月'} vs ${lastPeriodLabel}`"
+          >
+            <div v-if="prevHasData" class="compare-grid">
+              <div v-for="item in growthCompareItems" :key="item.key" class="compare-item">
+                <div class="compare-item__label">{{ item.label }}</div>
+                <div class="compare-item__value">{{ item.currentText }}</div>
+                <div :class="['compare-item__delta', item.tone]">
+                  <span v-if="item.prevText">{{ item.deltaText }}</span>
+                  <span v-else>上周无数据</span>
+                </div>
+                <div class="compare-item__prev">上周 {{ item.prevText }}</div>
+              </div>
+            </div>
+            <EmptyState
+              v-else
+              title="上一周期暂无学习数据"
+              description="本周期有学习记录，但上一周期没有进入批改的数据，暂无法对比。"
+            />
+          </ContentCard>
+
+          <!-- 重练进步：本周期重练卷判题结果 + 错题生命周期推进 -->
+          <ContentCard
+            v-if="retryProgressVisible"
+            class="retry-progress"
+            title="重练进步"
+            :description="`重练卷批改完成后推进错题掌握状态 · ${currentStudentName}`"
+          >
+            <div class="retry-grid">
+              <div class="retry-item">
+                <div class="retry-item__value">{{ retryProgress.examCount }}</div>
+                <div class="retry-item__label">完成重练卷</div>
+              </div>
+              <div class="retry-item">
+                <div class="retry-item__value">{{ retryProgress.retriedCount }}</div>
+                <div class="retry-item__label">重练题目</div>
+              </div>
+              <div class="retry-item">
+                <div class="retry-item__value" :class="{ 'is-good': (retryProgress.retryAccuracy || 0) >= 80 }">{{ retryProgress.retryAccuracy }}<small>%</small></div>
+                <div class="retry-item__label">重练正确率</div>
+              </div>
+              <div class="retry-item">
+                <div class="retry-item__value" :class="{ 'is-good': retryProgress.pushedToBasic > 0 }">{{ retryProgress.pushedToBasic }}</div>
+                <div class="retry-item__label">推进到基本掌握</div>
+              </div>
+            </div>
+            <div class="retry-note">
+              <span>重练答对 {{ retryProgress.correctCount }} 题 · 未通过回到待练 {{ retryProgress.stillNew }} 题</span>
+            </div>
+          </ContentCard>
+
           <ContentCard v-if="currentStudentDetail?.knowledgeDiagnosis?.length" class="knowledge-diagnosis" title="知识点诊断" description="从掌握情况、错题表现到建议动作，帮助老师完成教学判断" flush>
             <DataTable :data="weakKnowledge" size="small" empty-text=" ">
               <el-table-column prop="tag" label="知识点" min-width="180"><template #default="{ row }"><div class="knowledge-name"><strong>{{ row.tag }}</strong><small>{{ row.subject || '其他' }}</small></div></template></el-table-column>
               <el-table-column label="当前掌握" width="130"><template #default="{ row }"><StatusTag :tone="knowledgeLevel(row).key === 'critical' ? 'danger' : knowledgeLevel(row).key === 'attention' ? 'warning' : 'success'">{{ knowledgeLevel(row).label }} · {{ row.accuracy }}%</StatusTag></template></el-table-column>
               <el-table-column label="错题表现" width="130"><template #default="{ row }"><strong :class="{ 'danger-text': row.wrongCount >= 3 }">最近错误 {{ row.wrongCount }} 次</strong><small class="table-sub">共 {{ row.totalCount }} 题</small></template></el-table-column>
-              <el-table-column label="最近变化" width="130"><template #default><span class="no-comparison">本周期累计</span><small class="table-sub">暂无知识点分日对比</small></template></el-table-column>
+              <el-table-column label="最近变化" width="150"><template #default="{ row }"><div v-if="knowledgeChange(row).prevWrong != null" class="recent-change"><strong :class="knowledgeChange(row).tone === 'down' ? 'change-good' : knowledgeChange(row).tone === 'up' ? 'change-bad' : ''">{{ knowledgeChange(row).deltaText }}</strong><small class="table-sub">上周 {{ knowledgeChange(row).prevWrong }} 次</small></div><div v-else class="recent-change"><strong class="change-new">本周新增</strong><small class="table-sub">上周未出现</small></div></template></el-table-column>
               <el-table-column label="建议动作" min-width="220"><template #default="{ row }"><div class="table-action"><span>{{ getDiagnosisAction(row) }}</span><el-button text type="primary" @click.stop="openWrongBook">加入重练</el-button></div></template></el-table-column>
             </DataTable>
           </ContentCard>
@@ -977,6 +1032,76 @@ async function handleGenerateCurrent() {
   }
 }
 
+// ═══ 成长对比（prev）与重练进步（2026-09-20 P0） ═══
+const lastPeriodLabel = computed(() => {
+  if (periodMode.value === 'week') {
+    const start = dayjs().subtract(periodOffset.value + 1, 'week').startOf('isoWeek')
+    const end = dayjs().subtract(periodOffset.value + 1, 'week').endOf('isoWeek')
+    return `${start.format('MM/DD')} ~ ${end.format('MM/DD')}`
+  }
+  if (periodMode.value === 'month') {
+    return dayjs().subtract(periodOffset.value + 1, 'month').format('YYYY年M月')
+  }
+  return ''
+})
+
+const prevStats = computed(() => currentStudentDetail.value?.prev?.stats || null)
+const prevHasData = computed(() => !!prevStats.value && (prevStats.value.totalQuestions > 0 || prevStats.value.newWrongCount > 0))
+
+// 四项对比：正确率/完成题量 升=好；新增错题/待重练 升=坏
+const growthCompareItems = computed(() => {
+  const cur = currentStudentDetail.value?.stats || {}
+  const prev = prevStats.value || {}
+  const items = [
+    { key: 'accuracy', label: '正确率', cur: cur.accuracy ?? 0, prev: prev.totalQuestions ? (prev.accuracy ?? null) : null, format: v => `${v}%`, betterWhen: 'up' },
+    { key: 'newWrong', label: '新增错题', cur: cur.newWrongCount ?? 0, prev: prev.totalQuestions ? (prev.newWrongCount ?? null) : null, format: v => `${v} 题`, betterWhen: 'down' },
+    { key: 'pending', label: '待重练', cur: cur.pendingCount ?? 0, prev: prev.totalQuestions ? (prev.pendingCount ?? null) : null, format: v => `${v} 题`, betterWhen: 'down' },
+    { key: 'questions', label: '完成题量', cur: cur.totalQuestions ?? 0, prev: prev.totalQuestions ?? null, format: v => `${v} 题`, betterWhen: 'up' }
+  ]
+  return items.map(it => {
+    const delta = it.prev != null ? it.cur - it.prev : null
+    let tone = 'is-neutral'
+    let deltaText = '与上周持平'
+    if (delta != null && delta !== 0) {
+      const good = (delta > 0 && it.betterWhen === 'up') || (delta < 0 && it.betterWhen === 'down')
+      tone = good ? 'is-good' : 'is-bad'
+      deltaText = `${delta > 0 ? '较上周 +' : '较上周 -'}${Math.abs(delta)}`
+    }
+    return {
+      key: it.key,
+      label: it.label,
+      currentText: it.format(it.cur),
+      prevText: it.prev != null ? it.format(it.prev) : '',
+      deltaText,
+      tone
+    }
+  })
+})
+
+// 知识点「最近变化」：上周同名知识点错误次数对比
+const prevTagWrongMap = computed(() => {
+  const map = new Map()
+  for (const k of currentStudentDetail.value?.prev?.knowledgeDiagnosis || []) {
+    const subj = k.subject || '其他'
+    if (!map.has(subj)) map.set(subj, new Map())
+    map.get(subj).set(k.tag, k.wrongCount)
+  }
+  return map
+})
+
+function knowledgeChange(row) {
+  const subjMap = prevTagWrongMap.value.get(row.subject || '其他')
+  const prevWrong = subjMap?.get(row.tag)
+  if (prevWrong == null) return { prevWrong: null }
+  const cur = row.wrongCount
+  if (cur > prevWrong) return { prevWrong, deltaText: `较上周 +${cur - prevWrong} 次`, tone: 'up' }
+  if (cur < prevWrong) return { prevWrong, deltaText: `较上周 -${prevWrong - cur} 次`, tone: 'down' }
+  return { prevWrong, deltaText: '与上周持平', tone: 'flat' }
+}
+
+const retryProgress = computed(() => currentStudentDetail.value?.retryProgress || null)
+const retryProgressVisible = computed(() => !!retryProgress.value && retryProgress.value.examCount > 0)
+
 const topWeakTags = computed(() => {
   if (!currentStudentDetail.value?.knowledgeDiagnosis?.length) return ''
   const top3 = [...currentStudentDetail.value.knowledgeDiagnosis]
@@ -1092,6 +1217,31 @@ function knowledgeLevel(row) {
 .error-rate.is-normal strong{color:var(--wb-text-secondary)}
 .rank-num{display:inline-block;min-width:24px;padding:2px 8px;border-radius:10px;background:var(--wb-bg-elevated);color:var(--wb-text-secondary);font-size:11px;font-weight:600}
 .rank-num.is-top{background:var(--wb-primary-soft);color:var(--wb-primary)}
+
+/* ── 成长对比 / 重练进步（2026-09-20 P0） ── */
+.growth-compare,.retry-progress{margin-bottom:16px}
+.compare-grid{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:14px}
+.compare-item{display:flex;flex-direction:column;gap:6px;padding:14px 16px;border:1px solid var(--wb-border-light);border-radius:8px;background:var(--wb-bg-card)}
+.compare-item__label{color:var(--wb-text-tertiary);font-size:10px;font-weight:600}
+.compare-item__value{font-size:22px;font-weight:750;color:var(--wb-text);line-height:1.1}
+.compare-item__delta{font-size:11px;font-weight:650}
+.compare-item__delta.is-good{color:var(--wb-success)}
+.compare-item__delta.is-bad{color:var(--wb-danger)}
+.compare-item__delta.is-neutral{color:var(--wb-text-tertiary)}
+.compare-item__prev{color:var(--wb-text-tertiary);font-size:10px}
+.retry-grid{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:14px}
+.retry-item{display:flex;flex-direction:column;gap:4px;padding:14px 16px;background:var(--wb-bg-elevated);border-radius:8px}
+.retry-item__value{font-size:22px;font-weight:750;color:var(--wb-text);line-height:1.1}
+.retry-item__value small{font-size:12px;color:var(--wb-text-tertiary);margin-left:2px}
+.retry-item__value.is-good{color:var(--wb-success)}
+.retry-item__label{color:var(--wb-text-tertiary);font-size:10px}
+.retry-note{margin-top:12px;padding:10px 14px;border-radius:6px;background:var(--wb-primary-soft);color:var(--wb-text-secondary);font-size:11px}
+.recent-change{display:flex;flex-direction:column;gap:3px}
+.recent-change strong{font-size:12px;font-weight:650}
+.recent-change .change-good{color:var(--wb-success)}
+.recent-change .change-bad{color:var(--wb-danger)}
+.recent-change .change-new{color:var(--wb-warning)}
+.table-sub{display:block;color:var(--wb-text-tertiary);font-size:9px;margin-top:2px}
 .error-tags{display:flex;flex-wrap:wrap;gap:4px;align-items:center}
 .row-actions{display:flex;gap:4px;justify-content:center}
 .muted{color:var(--wb-text-tertiary);font-size:11px}
