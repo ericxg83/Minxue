@@ -113,6 +113,40 @@ export function hasParallelLineGroup(text) {
   return sub.test(s) || letters.test(s)
 }
 
+/**
+ * 题干是否是「尺规/直尺作图题」（要求画图并保留作图痕迹）。
+ *
+ * 为什么需要（2026-09-20 C 类坏批次重跑实测 06bd5ccb）：作图题（"仅用无刻度的
+ * 直尺作线段 BC 的三等分点 E、F（保留作图痕迹）"）的图上必然有**辅助痕迹线**
+ * ——利用格点/已有图形作的辅助连线（如 AB、AC），这些线是作法的一部分，
+ * 题干文本从不连写。模型把它们画出来（完全正确），闸门却因「AB 在题干中
+ * 无引用」拒稿。
+ *
+ * 触发时启用「端点字母豁免」：线段两端字母都在题干出现过即视为合法作图痕迹。
+ * 这只放开「线」，点凭空出现（硬规则 3）仍然拦截。
+ */
+export function isConstructionTask(text) {
+  return /作图|直尺|圆规|保留.*痕迹|刻度尺/.test(String(text || ''))
+}
+
+/**
+ * 从作图题题干提取「被点名的线段」（必须画在图上的主体/参照线）。
+ *
+ * 匹配「线段XY / 直线XY / 射线XY」字样（「作CD//AB」「到直线CD的垂线」「作线段BC
+ * 的三等分点」都命中）。不含「四边形/梯形/△ABC」等背景词，不受「沿直线l折叠」
+ * 单字母影响 —— 规则窄而准：只有被点名的线段漏画才算错图。
+ */
+export function extractConstructionRequiredSegs(text) {
+  const s = String(text || '')
+  const out = new Set()
+  for (const m of s.matchAll(/(?:线段|直线|射线)\s*([A-Z]['′’]?[₀-₉0-9]{0,2})\s*([A-Z]['′’]?[₀-₉0-9]{0,2})/g)) {
+    const a = normalizeLabel(m[1])
+    const b = normalizeLabel(m[2])
+    if (a && b && a !== b) out.add(segKey(a, b))
+  }
+  return out
+}
+
 /** 题干里出现过的所有大写字母（含带撇点与下标点，去重；与结构侧同一套归一） */
 function allReferencedLetters(text) {
   const s = String(text || '')
@@ -292,17 +326,42 @@ export function validateStructureAgainstContent(structure, content, options) {
     }
   }
   const parallelGroup = hasParallelLineGroup(allText)
-  const knownLetters = parallelGroup ? allReferencedLetters(allText) : new Set()
+  // 作图痕迹豁免与平行线组豁免共用「两端字母已知」判定
+  const construction = isConstructionTask(allText)
+  const knownLetters = (parallelGroup || construction) ? allReferencedLetters(allText) : new Set()
   for (const seg of drawnSegs) {
     if (refSegs.has(seg) || runPairs.has(seg) || isAxisSegment(seg)) continue
-    if (parallelGroup) {
-      // 平行线组的「端点字母豁免」：两端字母都出现在题干即可。
+    if (parallelGroup || construction) {
+      // 平行线组/作图痕迹的「端点字母豁免」：两端字母都出现在题干即可。
       // 只比字母不比撇号：l₁//l₂//l₃ 的截线交点 C 与 C′ 都算已知。
       const [a, b] = seg.split('|')
       if (knownLetters.has(a.replace(/′/g, '')) && knownLetters.has(b.replace(/′/g, ''))) continue
     }
     const [a, b] = seg.split('|')
     reasons.push(`重绘图上的线段 ${a}${b} 在题干中无引用`)
+  }
+
+  // ── 硬规则 2.5：作图题要求画的线段漏画（2026-09-20）──
+  // 与作图痕迹豁免配套的防守：豁免放行了痕迹线，但「作线段XY / 作直线XY /
+  // 到直线XY的垂线」句式点名的线段是作图主体/参照，图上必须有（或有其子段）。
+  // 实测案例（回归测试锁定）：「作CD//AB，作点B到直线CD的垂线垂足为E」——模型
+  // 漏画 CD 还把垂足画错位，此前靠「CE 无引用」歪打正着被拦；豁免上线后必须
+  // 由本规则接住，否则错图放行。
+  if (construction) {
+    const requiredSegs = extractConstructionRequiredSegs(allText)
+    for (const seg of requiredSegs) {
+      if (drawnSegs.has(seg)) continue
+      // 允许子段覆盖：模型把 XY 拆成 X-M、M-Y 两段画（含三等分/中点作图），不算漏画
+      const [x, y] = seg.split('|')
+      const covered = [...drawnSegs].some(g => {
+        const [a, b] = g.split('|')
+        return (a === x && drawnPts.has(y)) || (b === y && drawnPts.has(x)) ||
+               (a === y && drawnPts.has(x)) || (b === x && drawnPts.has(y))
+      })
+      if (!covered) {
+        reasons.push(`作图要求画 ${x}${y}，重绘图上没有`)
+      }
+    }
   }
 
   // ── 硬规则 3：点字母凭空出现（题干/选项完全没提的点） ──

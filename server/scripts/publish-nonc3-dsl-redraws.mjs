@@ -21,6 +21,10 @@
  *   node server/scripts/publish-nonc3-dsl-redraws.mjs            # 预演：打印放行/拒稿清单，不写库
  *   node server/scripts/publish-nonc3-dsl-redraws.mjs --apply --limit 6   # 小批量实发
  *   node server/scripts/publish-nonc3-dsl-redraws.mjs --apply            # 全量实发
+ *   node server/scripts/publish-nonc3-dsl-redraws.mjs --apply --allow=24f43832,786a9ee4
+ *     # 人工放行通道：对经 triage + 题干人工核实为「闸门误杀」的指定样本
+ *     # （如延长线构造、尺规作图痕迹线段），显式点名放行。名单外拒稿照拦。
+ *     # 与练习册「教师看到 issues 二次确认后 force=true」同一产品语义。
  */
 import { config } from 'dotenv'
 config({ path: 'D:/Minxue_App_V3/server/.env' })
@@ -40,6 +44,11 @@ import { validateStructureAgainstContent } from '../utils/geometryContentGate.js
 const ROOT = 'D:/Minxue_App_V3/server/scripts/logs/non-c3-test'
 const PROGRESS = path.join(ROOT, 'progress.json')
 const APPLY = process.argv.includes('--apply')
+// ── 人工放行通道（2026-09-20）：--allow=tag1,tag2 显式点名放行闸门误杀样本 ──
+// 只对「triage 归档为甲·闸门过严、且人工核对题干确认线段是题干构造必然产物」的
+// 样本使用；名单外的拒稿照拦，绝不因放行率放宽判据本身。
+const allowArg = (process.argv.find((a) => a.startsWith('--allow=')) || '').split('=')[1] || ''
+const ALLOW = new Set(allowArg.split(',').map((s) => s.trim().slice(0, 8)).filter(Boolean))
 
 const done = fs.existsSync(PROGRESS) ? JSON.parse(fs.readFileSync(PROGRESS, 'utf8')) : {}
 // ── 以数据库为准恢复 published 标记 ──
@@ -108,18 +117,36 @@ const repairMissingAssets = async () => {
 }
 
 let rows = Object.entries(done).filter(([, rec]) => rec.ok && !rec.published)
+
+// ── --force=<tag,id8,…>：点名强制重发（无视 published 标记）──
+// 用途：已发布图发现坏（如辅助点改名后 segments 引用断裂导致边消失），修好产物后覆盖上线。
+// 数据库恢复逻辑会把 published 标记还原（URL 已是 dsl-），--force 绕过该判定直达闸门+发布。
+const FORCE = new Set(
+  (process.argv.find((a) => a.startsWith('--force='))?.split('=')[1] || '')
+    .split(',').map((s) => s.trim()).filter(Boolean),
+)
+for (const t of FORCE) {
+  const hit = Object.entries(done).find(([id]) => id.replace(/-/g, '').startsWith(t))
+  if (!hit) { console.log(`--force: 未找到 ${t} 的产物记录，跳过`); continue }
+  if (!rows.some(([id]) => id === hit[0])) rows.push(hit)
+}
 if (LIMIT > 0) rows = rows.slice(0, LIMIT)
 
 console.log(`候选 ${rows.length} 张（ok 且未发布；已发布 ${Object.values(done).filter((r) => r.published).length}）`)
 console.log(APPLY ? '模式：实发' : '模式：预演（--apply 才写库，含修复缺资产行）')
 if (APPLY) await repairMissingAssets()
 
-// ── 从生产库批量取「完整题干」（parent_stem + content），与 _diag_gate_reject_triage.mjs 同一口径 ──
+// ── 从生产库批量取「完整题干」（parent_stem + content）+ 选项，与 _diag_gate_reject_triage.mjs 同一口径 ──
+// ⚠️ 选择题的字母引用几乎全在选项里，不传 options 闸门必误杀（2026-09-20 实测 0da09535 类）
 const idList = rows.map(([id]) => id)
 const stemByQid = new Map()
 if (idList.length) {
-  const rs = await query(`SELECT id, parent_stem, content FROM ${TABLES.QUESTIONS} WHERE id = ANY($1::uuid[])`, [idList])
-  for (const r of rs.rows) stemByQid.set(String(r.id), [String(r.parent_stem || ''), String(r.content || '')].join('\n'))
+  const rs = await query(`SELECT id, parent_stem, content, options FROM ${TABLES.QUESTIONS} WHERE id = ANY($1::uuid[])`, [idList])
+  for (const r of rs.rows) {
+    const text = [String(r.parent_stem || ''), String(r.content || '')].join('\n')
+    const options = Array.isArray(r.options) ? r.options.filter(Boolean) : null
+    stemByQid.set(String(r.id), { text, options })
+  }
 }
 
 const passed = []
@@ -133,15 +160,21 @@ for (const [id, rec] of rows) {
   try {
     if (!fs.existsSync(sp)) throw new Error('本地 structure.json 缺失')
     const structure = JSON.parse(fs.readFileSync(sp, 'utf8'))
-    // 题干优先用生产库完整版（parent_stem + content）；查不到再退回 progress 里的 content
-    const text = stemByQid.get(id) || rec.content || ''
+    // 题干优先用生产库完整版（parent_stem + content + options）；查不到再退回 progress 里的 content
+    const stem = stemByQid.get(id)
+    const text = stem?.text || rec.content || ''
+    const options = stem?.options ?? null
     if (!text.trim()) throw new Error('题干为空，无法过闸门')
     // ── 闸门（硬性）：⚠️ 返回 {ok, reasons} 对象，结构先 normalizeStructure，与治标脚本同一口径 ──
     const s = normalizeStructure(JSON.parse(JSON.stringify(structure)))
-    const v = validateStructureAgainstContent(s, text)
+    const v = validateStructureAgainstContent(s, text, options)
     if (!v.ok) {
-      rejected.push({ tag, reasons: (v.reasons || []).slice(0, 3) })
-      continue
+      if (ALLOW.has(tag)) {
+        console.log(`  [人工放行] ${tag}: 闸门拒稿被显式放行（--allow），reasons=${(v.reasons || []).slice(0, 2).join(' | ')}`)
+      } else {
+        rejected.push({ tag, reasons: (v.reasons || []).slice(0, 3) })
+        continue
+      }
     }
     const svg = renderGeometrySvg(structure)
     const tikz = renderGeometryTikZ(structure)

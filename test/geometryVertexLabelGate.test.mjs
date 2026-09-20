@@ -1,6 +1,6 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
-import { isVertexSymbolLabel, isSymbolLabel } from '../server/utils/geom/structure.js'
+import { isVertexSymbolLabel, isSymbolLabel, normalizeStructure } from '../server/utils/geom/structure.js'
 import { renderGeometrySvg } from '../server/utils/geometrySvg.js'
 import { renderGeometryTikZ } from '../server/utils/geometryTikZ.js'
 
@@ -40,6 +40,9 @@ test('顶点标注判据拦掉模型占位符命名', () => {
     'Axis', 'Point', 'Start', 'Bottom', 'Center',
     'AB', 'ABC', 'ABCD', 'pointA',
     '点A', '原点', '刻度',
+    // 2026-09-20：半角数字后缀 = 构造点编号（平行线分线段题 P1~P6 冒名标注）
+    'P1', 'P2', 'P3', 'P4', 'P5', 'P6', 'P0', 'P10', 'P11', 'P44',
+    'X1', 'Y1', 'k1', 'k2', 'k12', 'B8', 't0', 'p1', 'q1',
     '', '   ', null, undefined
   ]
   for (const t of block) {
@@ -56,6 +59,34 @@ test('isSymbolLabel 同步拦住下划线占位符（线段/标注通道）', ()
   assert.equal(isSymbolLabel('A'), true)
   assert.equal(isSymbolLabel('AB'), true)
   assert.equal(isSymbolLabel('α'), true)
+})
+
+test('双通道去重：同一符号同时出现在 points[] 与 labels[] 时只渲染一次（9c679f37 的 O×2）', () => {
+  // 2026-09-20 事故：§6f「两条通道都要收」后，模型偶尔把同一符号双写
+  // （points[].label = 'O' 且 labels[].text = 'O'），两条通道各渲染一次 ⇒ 完全重叠两份 O。
+  // normalizeStructure 层确定性去重：顶点通道承载几何，labels 同名条目删除。
+  const structure = {
+    figure_type: 'coordinate',
+    points: [
+      { label: 'O', x: 0, y: 0 },
+      { label: 'A', x: 3, y: 0 }
+    ],
+    labels: [
+      { text: 'O', x: -0.35, y: -0.35 },
+      { text: 'y', x: 0.2, y: 4.2 }
+    ]
+  }
+  const s = normalizeStructure(structure)
+  const oCount = (s.labels || []).filter(l => String(l.text).trim() === 'O').length
+  assert.equal(oCount, 0, `labels[] 里的冗余 O 应被删除，实际保留 ${oCount} 个`)
+  // 顶点通道的 O 原样保留（圆点+字母照常渲染）
+  assert.ok(s.points.some(p => p.label === 'O'), '顶点通道 O 保留')
+  assert.ok((s.labels || []).some(l => l.text === 'y'), 'labels 里不重复的 y 保留')
+
+  // 渲染端验证：SVG 里 O 只出现一次
+  const svg = renderGeometrySvg(structure)
+  const oTexts = [...svg.matchAll(/<text[^>]*>([^<]*)<\/text>/g)].map(m => m[1].trim()).filter(t => t === 'O')
+  assert.equal(oTexts.length, 1, `O 应只渲染一次，实际 ${oTexts.length} 次`)
 })
 
 // ── 2. SVG 渲染器：占位符不上屏，数学符号照常上屏 ──

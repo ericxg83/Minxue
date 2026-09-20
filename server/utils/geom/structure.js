@@ -42,6 +42,8 @@ export function isSymbolLabel(text) {
  * - 单个字母（A/B/C、a/b/c、O、M、x、y、α、β…），可带撇号/下标（A'、B₁、O₂）
  * - 单个数字（0、1、2…）或 -数字（数轴刻度）
  * - 单个字母+单个数字（x₁、B₂ 等教材常见下标标注；不允许字母前缀如 T1_b）
+ * - ⚠️ 半角数字后缀（P1/P0/X1/k1/B8）是模型给内部构造点的编号名，原卷几乎
+ *   不出现，一律拦（2026-09-20 平行线分线段题 P1~P6 冒名标注事故）
  * - 长度超 5、含下划线、含中文、含英文单词（Axis/Point/Start/Bottom…）一律拦
  */
 export function isVertexSymbolLabel(text) {
@@ -53,8 +55,9 @@ export function isVertexSymbolLabel(text) {
   if (/^-?\d{1,3}$/.test(t)) return true
   // 单字母（含希腊字母）可带撇号：A、A'、B′、O、M、x、α
   if (/^[A-Za-zα-ωΑ-Ω]['′]?$/.test(t)) return true
-  // 字母+下标数字：A₁、B₂、x0（不带下划线；长度已限制 ≤5）
-  if (/^[A-Za-zα-ωΑ-Ω]['′]?[0-9０-９₁₂₃₄₅₆₇₈₉₀]{1,2}$/.test(t)) return true
+  // 字母+Unicode 下标：A₁、B₂、x₀（教材下标标注；**半角数字 P1/X1/k1 是
+  // 构造点编号，不放行**——2026-09-20 P1~P6 冒名标注事故的根因）
+  if (/^[A-Za-zα-ωΑ-Ω]['′]?[₀₁₂₃₄₅₆₇₈₉]{1,2}$/.test(t)) return true
   // ∠ 开头的角名（≤5 字符内）：∠A、∠α、∠ABC 会因长度拦掉，∠A/∠α 放行
   if (/^∠[A-Za-zα-ωΑ-Ω]['′]?$/.test(t)) return true
   return false
@@ -212,6 +215,18 @@ export function normalizeStructure(obj) {
   points = ticked.points
   segments = ticked.segments
 
+  // ── 双通道去重（2026-09-20）──
+  // 模型偶尔把同一符号同时写进 points[]（顶点标注通道）与 labels[]（文字通道），
+  // 两条通道各渲染一次 ⇒ 图上同一字母出现两遍（9c679f37 的 O 完全重叠）。
+  // 顶点标注通道承载几何（圆点+字母），labels 里的同名条目是冗余，删之。
+  let labels = Array.isArray(obj?.geometry_labels) ? obj.geometry_labels
+    : Array.isArray(obj?.labels) ? obj.labels : []
+  const vtxLabels = new Set(points.map(p => p?.label).filter(l => l && !isAuxPointLabel(l) && !isTickNumberLabel(l)))
+  if (vtxLabels.size) {
+    labels = labels.filter(l => !(l?.text && vtxLabels.has(String(l.text).trim())))
+  }
+  labels = labels.filter(l => isSymbolLabel(l?.text))
+
   return {
     points,
     segments,
@@ -221,8 +236,7 @@ export function normalizeStructure(obj) {
     angleMarks,
     curves,
     // 优先用分类后的 geometry_labels；旧结构无该字段时回退到 labels（向后兼容已渲染的题）
-    labels: (Array.isArray(obj?.geometry_labels) ? obj.geometry_labels
-          : Array.isArray(obj?.labels) ? obj.labels : []).filter(l => isSymbolLabel(l?.text)),
+    labels,
     rightAngles: Array.isArray(obj?.rightAngles) ? obj.rightAngles : [],
     figure_type,
     coordinate_system,

@@ -13,7 +13,8 @@ import test from 'node:test'
 import assert from 'node:assert/strict'
 import {
   validateStructureAgainstContent,
-  hasParallelLineGroup
+  hasParallelLineGroup,
+  isConstructionTask
 } from '../server/utils/geometryContentGate.js'
 
 // ── 平行线组识别 ──
@@ -138,4 +139,52 @@ test('折叠题对角线不能因平行豁免逃逸', () => {
   // 折叠轴对称结构（AB′ 与 CB′ 是折叠后的边）有题干「沿AC折叠」支撑
   // 但这里故意点了 C′ 而题干说的是 B′ → 应被硬规则1拦（派生点标号不符）
   assert.equal(gate.ok, false, '折叠点标号与题干不符必须拦')
+})
+
+// ── 作图痕迹豁免（2026-09-20 C 类坏批次重跑实测 06bd5ccb）──
+
+test('识别尺规/直尺作图题', () => {
+  assert.equal(isConstructionTask('如图，每个小正方形的边长均为1，点A、B、C均在格点上.请仅用无刻度的直尺作线段BC的三等分点E、F.（保留作图痕迹）'), true)
+  assert.equal(isConstructionTask('用圆规和直尺作△ABC，使AB=AC，∠A=60°'), true)
+  assert.equal(isConstructionTask('如图，在△ABC中，AB=5，BC=3'), false)
+})
+
+test('作图题辅助痕迹线（端点都在题干）放行', () => {
+  // 06bd5ccb 场景：格点作图题，三等分点的标准作法要连辅助线 AB/AC（利用格点性质），
+  // 题干只连写 BC（三等分对象），AB/AC 从不连写 → 必须靠作图痕迹豁免放行。
+  const structure = {
+    points: [
+      { label: 'A', x: 20, y: 100 }, { label: 'B', x: 60, y: 40 }, { label: 'C', x: 100, y: 40 },
+      { label: 'E', x: 73, y: 40 }, { label: 'F', x: 87, y: 40 }
+    ],
+    segments: [
+      { from: 'B', to: 'C' },                                  // 三等分对象（题干连写）
+      { from: 'A', to: 'B' }, { from: 'A', to: 'C' }           // 作图痕迹线
+    ]
+  }
+  const gate = validateStructureAgainstContent(
+    structure,
+    '如图，每个小正方形的边长均为1，点A、B、C均在格点上.请仅用无刻度的直尺作线段BC的三等分点E、F.（保留作图痕迹，不写作法）'
+  )
+  assert.equal(gate.ok, true, `作图痕迹线应放行，实际拒绝: ${gate.reasons.join('；')}`)
+})
+
+test('作图题幻觉点仍拦', () => {
+  const structure = {
+    points: [
+      { label: 'A', x: 20, y: 100 }, { label: 'B', x: 60, y: 40 }, { label: 'C', x: 100, y: 40 },
+      { label: 'Z', x: 80, y: 80 }  // 题干没有的字母
+    ],
+    segments: [
+      { from: 'B', to: 'C' },
+      { from: 'A', to: 'B' }, { from: 'A', to: 'C' },
+      { from: 'B', to: 'Z' }  // 连到幻觉点
+    ]
+  }
+  const gate = validateStructureAgainstContent(
+    structure,
+    '如图，每个小正方形的边长均为1，点A、B、C均在格点上.请仅用无刻度的直尺作线段BC的三等分点E、F.（保留作图痕迹，不写作法）'
+  )
+  assert.equal(gate.ok, false, '幻觉点 Z 必须被拦')
+  assert.ok(gate.reasons.some(r => r.includes('Z')), `错误里应点名 Z: ${gate.reasons.join('|')}`)
 })
