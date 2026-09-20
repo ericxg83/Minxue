@@ -477,13 +477,19 @@ export const BACKUP_VENDOR_DEFS = [
     //    （它恰好同时满足 reasoning_effort:'none' + 大 maxTokens），故暂无冲突；
     //    若将来要在本供应商混配多个模型（如把 grok 加进来，它不接受 reasoning_effort），
     //    必须先改成按模型下发这两个字段。
+    //
+    // 2026-09-20 换新 Key（sk-30d6...，旧 key sk-ba3... 已 API_KEY_DISABLED）：
+    //   /v1/models 实测新分组只有 7 个模型：auto / deepseek-v4-flash / glm-5.2 /
+    //   grok-4.5 / grok-4.6 / sensenova-6.8-flash-lite —— **全是文本模型，无 qwen3.8-max**。
+    //   ⇒ vlModels 清空（不再承担视觉兜底；文字 OCR 兜底仍由 SenseNova / HuihuiyunGemini 承担），
+    //     textModel 保持 deepseek-v4-flash（答案引擎兜底链路实测可用）。
     name: 'Huihuiyun',
     envKey: 'HUIHUIYUN_API_KEY',
     endpoint: process.env.HUIHUIYUN_BASE_URL
       ? `${process.env.HUIHUIYUN_BASE_URL.replace(/\/+$/, '')}/chat/completions`
       : 'https://api.huihuiyun.top/v1/chat/completions',
     textModel: 'deepseek-v4-flash',
-    vlModels: ['qwen3.8-max'],
+    vlModels: [],
     maxTokens: 32768,
     referer: null,
     extraBody: { reasoning_effort: 'none' },
@@ -549,6 +555,23 @@ function resolveBackupVendors() {
     return vendor.keyPrefix ? key.startsWith(vendor.keyPrefix) : true
   })
 }
+
+// ── 免费视觉通道白名单（2026-09-20 写入侧补测专用）────────────────────────────
+// 用途：`callVisionCompletion({ freeOnly: true })` 时，备份供应商只尝试这里的通道，
+// 绝不触碰付费 key（HuihuiyunGemini 按 token 计费、Bailian 付费、Huihuiyun 聚合网关付费等）。
+// 依据（config 注释与实测）：
+//   · SenseNova sensenova-6.8-flash-lite —— 0 计费，可作视觉 OCR（弱，但量框够用）
+//   · ZenMux   z-ai/glm-4.6v-flash-free —— 零余额可用，能看图（429 限流较凶）
+//   · ZenMux   sapiens-ai/agnes-2.0-flash —— 零余额可用，识别质量差一截（白名单兜底）
+//   · BigModel glm-4v-flash —— 零余额可用，max_tokens 硬上限 1024（量框 JSON 够用）
+// 魔搭矩阵（VL_MODELS）本身是免费额度体系，不受 freeOnly 限制。
+export const FREE_VL_CHANNELS = [
+  { name: 'SenseNova', models: ['sensenova-6.8-flash-lite'] },
+  { name: 'ZenMux', models: ['z-ai/glm-4.6v-flash-free', 'sapiens-ai/agnes-2.0-flash'] },
+  { name: 'BigModel', models: ['glm-4v-flash'] },
+]
+export const isFreeVisionChannel = (vendorName, vlModel) =>
+  FREE_VL_CHANNELS.some(c => c.name === vendorName && c.models.includes(vlModel))
 
 let _resolvedVendorsCache = null
 
@@ -1326,6 +1349,11 @@ export async function callVisionCompletion(opts) {
     // onlyVendor 是调用方的显式指令，优先级最高。
     preferredVendor = null,
     onlyVendor = null,
+    // freeOnly=true（2026-09-20 写入侧补测专用）：备份供应商只走 FREE_VL_CHANNELS 白名单
+    // （零计费/零余额通道），绝不触碰付费 key（HuihuiyunGemini/Bailian/Huihuiyun 等）。
+    // 魔搭矩阵本身是免费额度体系，不受影响；freeOnly 时 GMI 插队也被跳过（非白名单）。
+    // 全部免费通道不可用 → 本次调用失败（上层捕获，不影响批改主流程）。
+    freeOnly = false,
   } = opts
   if (noBackup) {
     console.log('[AI] noBackup=1：本次视觉请求仅使用魔搭（ModelScope）Key×模型矩阵，不降级备份供应商')
@@ -1428,6 +1456,8 @@ export async function callVisionCompletion(opts) {
     // 备份供应商视觉兜底（SenseNova → Agnes → FreeModel，各自独立配额）
     for (const vendor of BACKUP_CONFIG.VENDORS) {
       for (const vlModel of vendor.vlModels) {
+        // freeOnly：只走免费白名单通道，付费 key 一律跳过
+        if (freeOnly && !isFreeVisionChannel(vendor.name, vlModel)) continue
         providers.push(async () => {
           try {
             const content = await requestOpenAIProvider({
@@ -1465,7 +1495,8 @@ export async function callVisionCompletion(opts) {
     // GMI_FIRST=1 时，把 GMI 插到最前作为"主 KEY"；
     // 魔搭仍保留在后面兜底，10 天 Key 失效后只需去掉 GMI_FIRST=1 即可自动回落到魔搭。
     // noBackup=1 时跳过 GMI（非魔搭供应商一律不用）。
-    if (!noBackup && gmiFirst && gmiVendor) {
+    // freeOnly=1 时也跳过：GMI 不在免费白名单内，写入侧补测不借道。
+    if (!noBackup && !freeOnly && gmiFirst && gmiVendor) {
       console.log(`[AI] GMI_FIRST=1 开启，GMI 顶替魔搭作为首选视觉供应商（端点=${gmiVendor.endpoint}）`)
       for (const vlModel of gmiVendor.vlModels) {
         providers.push(async () => {
@@ -1504,6 +1535,8 @@ export async function callVisionCompletion(opts) {
     if (!noBackup) {
       for (const vendor of BACKUP_CONFIG.VENDORS) {
       for (const vlModel of vendor.vlModels) {
+        // freeOnly：只走免费白名单通道，付费 key 一律跳过
+        if (freeOnly && !isFreeVisionChannel(vendor.name, vlModel)) continue
         providers.push(async () => {
           try {
             const content = await requestOpenAIProvider({
