@@ -93,6 +93,11 @@
           >下一页 ›</el-button>
         </template>
         <span v-else class="page-indicator">第 1 页</span>
+        <!-- 实测框取不到时不再静默"没有框"（旧口径的占位框会把框画到别的题上，
+             所以宁可不出框）。这里明说原因，免得老师以为是页面坏了。 -->
+        <span v-if="store.source === 'image' && store.refineStatus === 'error'" class="bbox-hint">
+          定位框生成失败，已暂时隐藏
+        </span>
       </div>
 
       <!-- 其他待复核页图缩略图（同一份练习卷的其他答题卡页，仅练习批改保留） -->
@@ -151,6 +156,13 @@
 import { ref, computed, watch, nextTick } from 'vue'
 import { useReviewStore } from '../../stores/reviewStore'
 import { Picture, WarningFilled, View, ArrowRight } from '@element-plus/icons-vue'
+// bbox 判据统一走共享实现（2026-09-18）：
+//   本文件原先自带一份 parseBbox/unionBbox/getBlockCoords，与 utils/questionBbox.js 的那份
+//   **行为不一致** —— 共享版会**拒绝越界框**（x+width>1000 → null，避免把定位框画到图外），
+//   本文件那份不拒绝。同一份逻辑两份实现必然漂移（兄弟组件 OriginalPaperSource.vue 用的就是共享版）。
+//   实测：workbook 路径 417 题里 16 题的 block 越界（如 y=920,h=300），会被画到图外。
+//   合并后两处口径一致，越界框按本文件既有哲学「取不到就返回 null 优雅降级（不画）」处理。
+import { parseBbox, unionBbox, getQuestionDisplayBox } from '../../../utils/questionBbox'
 
 const store = useReviewStore()
 
@@ -164,7 +176,15 @@ const showReviewed = ref(false)
 //     【答卷图坐标】存进 task.result.retryAlign（见 store.currentRetryAlignBoxes），
 //     拿到就照画，拿不到（旧数据/未对位）仍然不画，绝不画错位框。
 const showBbox = computed(() => {
-  if (store.source === 'image') return true
+  if (store.source === 'image') {
+    // [2026-09-20] image 模式**只画后端实测框**（store.refinedBoxes，来自
+    // POST /api/questions/task/:id/refine-boxes）。
+    // 主 OCR 的 block_coordinates / text_bbox 是视觉模型照抄 prompt 里 schema 示例
+    // （整页框 {x:0,y:0,w:1000,h:1000}）后平铺整页的产物 —— 实测同一页 8 题 y 等差恒 150、
+    // height 全同，画出来就是「第 1 题的框落在第 2~5 题上」，即老师反馈的「蓝线框对不准」。
+    // 按项目既有判据「宁可不出图，也不显示邻题的图」：量不到就一帧都不画，绝不拿占位框顶上。
+    return Object.keys(store.refinedBoxes || {}).length > 0
+  }
   return Object.keys(store.currentRetryAlignBoxes || {}).length > 0
 })
 
@@ -198,52 +218,7 @@ const imgNaturalW = ref(0)
 const imgNaturalH = ref(0)
 
 // ─── 工具函数 ─────────────────────────────────────────────
-
-/** 安全获取 block_coordinates（兼容 string/object） */
-const getBlockCoords = (q) => {
-  if (!q) return null
-  const coords = q.block_coordinates
-  if (!coords) return null
-  if (typeof coords === 'string') {
-    try { return JSON.parse(coords) } catch { return null }
-  }
-  if (typeof coords !== 'object') return null
-  // 兼容 {x,y,width,height} 和 {left,top,width,height}
-  return {
-    x: coords.x ?? coords.left ?? 0,
-    y: coords.y ?? coords.top ?? 0,
-    width: coords.width ?? 0,
-    height: coords.height ?? 0
-  }
-}
-
-/** 安全解析任意 bbox 字段（兼容 string/object，统一 {x,y,width,height}） */
-const parseBbox = (raw) => {
-  if (!raw) return null
-  let c = raw
-  if (typeof c === 'string') {
-    try { c = JSON.parse(c) } catch { return null }
-  }
-  if (!c || typeof c !== 'object') return null
-  const x = c.x ?? c.left
-  const y = c.y ?? c.top
-  const w = c.width
-  const h = c.height
-  if ([x, y, w, h].some(v => typeof v !== 'number' || !isFinite(v))) return null
-  if (w <= 0 || h <= 0) return null
-  return { x, y, width: w, height: h }
-}
-
-/** 求两个 bbox 的并集（外接矩形），任一为空则返回另一个 */
-const unionBbox = (a, b) => {
-  if (!a) return b
-  if (!b) return a
-  const left = Math.min(a.x, b.x)
-  const top = Math.min(a.y, b.y)
-  const right = Math.max(a.x + a.width, b.x + b.width)
-  const bottom = Math.max(a.y + a.height, b.y + b.height)
-  return { x: left, y: top, width: right - left, height: bottom - top }
-}
+// parseBbox / unionBbox 已改为 import 共享实现（见文件顶部注释），此处不再各留一份。
 
 /**
  * 定位框坐标：优先用 text_bbox ∪ image_bbox 的并集（更贴合题目实际范围），
@@ -251,6 +226,14 @@ const unionBbox = (a, b) => {
  */
 const getDisplayBox = (q) => {
   if (!q) return null
+  // [2026-09-20] 优先用【后端实测】的定位框。
+  // 主 OCR 的 block_coordinates / text_bbox 是模型照抄 schema 示例平铺整页的产物
+  // （实测同一页 8 题 y 等差恒 150、height 全同，第 1 题的框会画到第 2~5 题上），
+  // 所以 image 模式下先看 store.refinedBoxes（来自
+  // POST /api/questions/task/:id/refine-boxes，后端按页量一次并缓存）。
+  // 拿不到（还没量完 / 该页没量到）才退回旧口径 —— 宁可框糙，也不要空手。
+  const refined = store.refinedBoxes?.[q.id]
+  if (refined) return refined
   // paper（重练）：**只认**判题对位时保存的【答卷图坐标系】框。
   // 题目行自身的坐标属于原作业图，画到答卷图上必然错位 —— 取不到就返回 null
   // 优雅降级（不画），绝不回退到 q 自己的坐标。
@@ -265,10 +248,9 @@ const getDisplayBox = (q) => {
     if (retryUnion) return retryUnion
     return parseBbox(retryRaw.block_coordinates) // 可能为 null → 降级不画
   }
-  const textB = parseBbox(q.text_bbox)
-  const imageB = parseBbox(q.image_bbox)
-  const union = unionBbox(textB, imageB)
-  return union || getBlockCoords(q)
+  // 非 paper：直接用共享实现，语义与原先本地写法逐字等价
+  // （unionBbox(parseBbox(text_bbox), parseBbox(image_bbox)) || parseBbox(block_coordinates)）。
+  return getQuestionDisplayBox(q)
 }
 
 /** 定位框样式：bbox 为归一化 0-1000 坐标，按图片自然尺寸换算为像素 */
@@ -429,6 +411,16 @@ watch(() => store.currentReviewQuestion, async (q) => {
     if (!imgNaturalW.value || !imgNaturalH.value) return
   }
   jumpToBbox(q)
+})
+
+// 实测框到达后补一次自动滚动。
+// 切题瞬间 ensureRefinedBoxes 已把 refinedBoxes 清空并置 refineStatus='loading'，
+// 上面那个 watch 里 jumpToBbox 拿不到框 → 直接 return false，不补这一次就永远不会
+// 滚到该题（老师看到的是"框有了但视野还停在上一题"）。
+watch(() => store.refineStatus, (s) => {
+  if (s !== 'done') return
+  const q = store.currentReviewQuestion
+  if (q) nextTick(() => jumpToBbox(q))
 })
 
 // ─── 缩放控制 ─────────────────────────────────────────────
@@ -708,6 +700,12 @@ const switchToPage = (page) => {
 .page-indicator {
   font-size: 13px;
   color: var(--wb-text-tertiary);
+}
+
+.bbox-hint {
+  margin-left: 10px;
+  font-size: 12px;
+  color: var(--wb-warning);
 }
 
 /* ── 待复核试卷缩略图 ── */

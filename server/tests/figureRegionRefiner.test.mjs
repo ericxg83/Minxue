@@ -53,7 +53,6 @@ dense(20, 380, 330, 340)      // 下方题干整行
 for (const [name, box, expect] of [
   ['取中间那张图（不含图注/题干/隔壁图）', { x: 150, y: 195, width: 100, height: 90 }, { x0: 150, x1: 251, y0: 200, y1: 280 }],
   ['取最左那张图', { x: 20, y: 195, width: 100, height: 90 }, { x0: 20, x1: 121, y0: 200, y1: 280 }],
-  ['模型框偏大跨到隔壁也能收回', { x: 130, y: 190, width: 180, height: 110 }, { x0: 150, x1: 251, y0: 200, y1: 280 }],
 ]) {
   const r = refineFigureRegion(ink, W, H, box)
   if (!r) { fail++; console.log(`❌ ${name}: 返回 null`); continue }
@@ -64,6 +63,20 @@ for (const [name, box, expect] of [
     && inRange(r.y + r.height, expect.y1 - 6, expect.y1 + 8)
   if (good) { pass++; console.log(`✅ ${name} → ${JSON.stringify({ x: r.x, y: r.y, w: r.width, h: r.height })}`) }
   else { fail++; console.log(`❌ ${name}: 实际 ${JSON.stringify({ x: r.x, y: r.y, w: r.width, h: r.height })}，期望约 x ${expect.x0}..${expect.x1} y ${expect.y0}..${expect.y1}`) }
+}
+
+// ── 配图下限不低于模型框（2026-09-18 白板第9题事故）──
+// 收紧被限制为"向邻图/图注让边"，不再越过模型框裁图形。
+// 所以「模型框偏大跨到隔壁」不再强制收回单图，而是保留模型框完整覆盖 ——
+// 宁可多留边界、不砍真图（旧行为会把模型准确定位的流程图砍掉 78% 面积）。
+{
+  // f) 模型框偏大跨到隔壁：收紧本可收回单图，但齐下限要求保住模型框覆盖
+  const r = refineFigureRegion(ink, W, H, { x: 130, y: 190, width: 180, height: 110 })
+  if (!r) { fail++; console.log(`❌ 大框跨到隔壁（保住模型框覆盖）: 返回 null`) }
+  else {
+    const coversBox = r.x <= 130 && r.y <= 190 && r.x + r.width >= 310 && r.y + r.height >= 300
+    ok('大框跨到隔壁（保住模型框完整覆盖）', coversBox)
+  }
 }
 
 // 纯文字区域（模型把题干当配图）→ 必须拒绝，宁可不给配图

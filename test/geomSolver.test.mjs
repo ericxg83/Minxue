@@ -4,6 +4,7 @@ import { makeConstraint } from '../server/utils/geom/constraintSchema.js'
 import { solveGeometry } from '../server/utils/geom/solver.js'
 import { residualGate, checkDegeneracy, evaluateResiduals } from '../server/utils/geom/residual.js'
 import { extractConstraints } from '../server/utils/geom/constraintExtract.js'
+import { correctGeometryFigure } from '../server/utils/geom/correctedRender.js'
 
 const pm = (...pts) => Object.fromEntries(pts.map(([l, x, y]) => [l, { x, y }]))
 const pts = (...pts) => pts.map(([l, x, y]) => ({ label: l, x, y }))
@@ -128,4 +129,97 @@ test('集成（Phase2→3）：真实题干抽取出的约束能被求解器消�
   const sol = solveGeometry(structure.points, constraints)
   assert.ok(sol.converged)
   assert.ok(sol.displacement < 1e-2, '已满足时不应移动')
+})
+
+// ── 冻结点（fixedPoints） ──
+//
+// 背景：含派生点的结构里，真实顶点是**从图上读出来的观测值**，派生点是**推出来的**。
+// 不冻结时 LM 的最小范数步会把修正平摊到所有点上（实测折叠题真实顶点 C 被挪 21.8px），
+// 等于"把三角形掰歪"换取派生点就位。所以真实顶点必须冻结、修正只由派生点承担。
+
+test('冻结点：真实顶点零位移，派生点承担全部修正', () => {
+  // A(10,80) C(90,80) 是水平折痕，B(40,20) 关于 AC 的镜像应为 (40,140)
+  const P = pts(['A', 10, 80], ['B', 40, 20], ['C', 90, 80], ['B′', 62, 74])
+  const ref = makeConstraint('reflect', { point: 'B′', source: 'B', axis: ['A', 'C'] }, 'text')
+  const sol = solveGeometry(P, [ref], { fixedPoints: ['A', 'B', 'C'] })
+  assert.ok(sol.converged)
+  assert.ok(sol.perConstraint[0].pass, '镜像约束应被满足')
+  for (const l of ['A', 'B', 'C']) {
+    assert.ok(Math.hypot(sol.points[l].x - P.find(p => p.label === l).x,
+      sol.points[l].y - P.find(p => p.label === l).y) < 1e-9, `${l} 必须完全不动`)
+  }
+  // 残差容差是相对量（LEN_TOL_REL × scale），这里放到 0.01px 足以判定"落点正确"
+  assert.ok(Math.hypot(sol.points['B′'].x - 40, sol.points['B′'].y - 140) < 0.01,
+    `B′ 应落到 B 关于 AC 的镜像 (40,140)，实际 (${sol.points['B′'].x.toFixed(3)},${sol.points['B′'].y.toFixed(3)})`)
+})
+
+test('冻结点：不传 fixedPoints 时照旧平摊修正（锁定"必须显式冻结"）', () => {
+  const P = pts(['A', 10, 80], ['B', 40, 20], ['C', 90, 80], ['B′', 62, 74])
+  const ref = makeConstraint('reflect', { point: 'B′', source: 'B', axis: ['A', 'C'] }, 'text')
+  const sol = solveGeometry(P, [ref])
+  assert.ok(sol.perConstraint[0].pass)
+  // 不冻结时真实顶点会被挪动（这是 correctedRender 必须传 fixedPoints 的原因）
+  const movedC = Math.hypot(sol.points.C.x - 90, sol.points.C.y - 80)
+  assert.ok(movedC > 1, `不冻结时真实顶点 C 会被挪动（实测 ${movedC.toFixed(1)}px）`)
+})
+
+test('冻结点：correctionRender 对含派生点的结构自动冻结', () => {
+  const structure = {
+    points: [
+      { label: 'A', x: 10, y: 80 }, { label: 'B', x: 40, y: 20 }, { label: 'C', x: 90, y: 80 },
+      { label: 'B′', x: 62, y: 74, derived: { reflect: { source: 'B', axis: ['A', 'C'] } } }
+    ],
+    segments: [{ from: 'A', to: 'B' }, { from: 'B', to: 'C' }, { from: 'C', to: 'A' }, { from: 'A', to: 'B′' }],
+    circles: []
+  }
+  const r = correctGeometryFigure(structure, '如图，在△ABC中，将△ABC沿AC折叠，点B落在点B′处，连接AB′。')
+  assert.ok(r.ok, `应通过回灌修正，实际: ${r.reason}`)
+  assert.equal(r.solved.nFixed, 3, '三个真实顶点应被冻结')
+  assert.ok(r.solved.shiftFixed < 1e-9, `真实顶点必须零位移，实际 ${r.solved.shiftFixed}`)
+  assert.ok(r.solved.shiftDerived > 1, '修正应由派生点承担')
+})
+
+test('冻结点：无派生点的结构不冻结（照旧靠微调自洽）', () => {
+  const structure = {
+    points: [{ label: 'A', x: 10, y: 80 }, { label: 'B', x: 90, y: 80 }, { label: 'C', x: 30, y: 30 }],
+    segments: [{ from: 'A', to: 'B' }, { from: 'B', to: 'C' }, { from: 'C', to: 'A' }],
+    circles: []
+  }
+  const r = correctGeometryFigure(structure, '如图，在△ABC中，∠ACB=90°。')
+  assert.ok(r.ok, `应通过回灌修正，实际: ${r.reason}`)
+  assert.equal(r.solved.nFixed, 0, '无派生点时不应冻结任何点')
+  assert.ok(r.solved.shiftFixed > 1, '无派生点时顶点应照旧被修正')
+})
+
+test('冻结点：冻结解不开时退回不冻结（覆盖率不丢，改造是单调改进）', () => {
+  // 故意造矛盾：三角形非等腰，却给了 AB=AC —— 不动真实顶点就无解。
+  const structure = {
+    points: [
+      { label: 'A', x: 10, y: 80 }, { label: 'B', x: 40, y: 20 }, { label: 'C', x: 90, y: 80 },
+      { label: 'B′', x: 62, y: 74, derived: { reflect: { source: 'B', axis: ['A', 'C'] } } }
+    ],
+    segments: [{ from: 'A', to: 'B' }, { from: 'B', to: 'C' }, { from: 'C', to: 'A' }, { from: 'A', to: 'B′' }],
+    circles: []
+  }
+  const content = '如图，在△ABC中，AB=AC，将△ABC沿AC折叠，点B落在点B′处，连接AB′。'
+  const r = correctGeometryFigure(structure, content)
+  assert.ok(r.ok, `冻结失败后应退回不冻结并成功，实际: ${r.reason}`)
+  assert.equal(r.solved.frozeVertices, false, '应标记为走了退回路径')
+  assert.equal(r.solved.nFixed, 0)
+  assert.ok(r.solved.shiftFixed > 1, '退回路径下真实顶点会被挪动（= 改造前行为）')
+})
+
+test('冻结点：冻结能解时绝不走退回路径（图不被扭曲）', () => {
+  const structure = {
+    points: [
+      { label: 'A', x: 10, y: 80 }, { label: 'B', x: 40, y: 20 }, { label: 'C', x: 90, y: 80 },
+      { label: 'B′', x: 62, y: 74, derived: { reflect: { source: 'B', axis: ['A', 'C'] } } }
+    ],
+    segments: [{ from: 'A', to: 'B' }, { from: 'B', to: 'C' }, { from: 'C', to: 'A' }, { from: 'A', to: 'B′' }],
+    circles: []
+  }
+  const r = correctGeometryFigure(structure, '如图，在△ABC中，将△ABC沿AC折叠，点B落在点B′处，连接AB′。')
+  assert.ok(r.ok)
+  assert.equal(r.solved.frozeVertices, true, '能冻结就必须冻结（退回路径会把三角形掰歪）')
+  assert.ok(r.solved.shiftFixed < 1e-9)
 })

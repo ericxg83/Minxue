@@ -67,6 +67,7 @@ import { createUploadReport, logUploadReport } from './services/uploadReportLogg
 import { createJudgement, batchUpdateQuestionTags, getQuestionAssets, getQuestionAssetsByType, createResource, replaceResourceAnswers, addWrongQuestions } from './services/neonService.js'
 import { judgeAnswer, findDirtyAnswers } from './services/judgeService.js'
 import { checkQuestionCompleteness } from './utils/questionCompleteness.js'
+import { requeueGeometryRedrawOnRejudgeWrong } from './utils/geometryRequeueOnRejudge.js'
 import { syncQuestionCompleteness, syncQuestionCompletenessQuietly } from './services/questionCompletenessSync.js'
 import { computeWrongBookRisks } from './utils/wrongBookRisks.js'
 import { normalizeOptions } from './utils/optionText.js'
@@ -1626,16 +1627,35 @@ app.put('/api/questions/:id', async (req, res) => {
     // 老师手动裁剪/上传时前端传 true，删除配图时前端传 false。
     const hasGeometryManualOverride = 'geometry_manual_override' in req.body && geometry_manual_override !== undefined && geometry_manual_override !== null
 
-    // 复核或改判前读取旧值，用于 judgement 审计
+    // 复核或改判前读取旧值，用于 judgement 审计；answer / 存疑标注四列用于判断
+    // 「参考答案是否被人工改写」（见下方 answerRewritten）。
+    // 'answer' in req.body 必须进触发条件：老师只补答案、不改 is_correct 时，
+    // 若这里不读旧 answer，就无法区分「真改了」与「原样回传」。
     let oldQuestion = null
-    if (hasIsCorrect || hasReviewStatus) {
+    if (hasIsCorrect || hasReviewStatus || 'answer' in req.body) {
       const { rows: oldRows } = await query(
-        `SELECT is_correct, task_id, student_id, review_status FROM ${TABLES.QUESTIONS} WHERE id = $1`,
+        `SELECT is_correct, task_id, student_id, review_status, answer,
+                ai_answer_risk_reason, answer_exception, answer_exception_reason
+           FROM ${TABLES.QUESTIONS} WHERE id = $1`,
         [id]
       )
       oldQuestion = oldRows[0] || null
     }
     const oldIsCorrect = oldQuestion?.is_correct ?? null
+
+    // 人工改写参考答案 → 针对**旧**参考答案写下的观测标注全部失效，必须一并清掉。
+    //
+    // 为什么必须清：ai_answer_risk_reason 是「AI 给了正误结论，但参考答案本身可能不可靠」
+    // 的提示，weekendHandout（answerRisk）与 QuestionDetailPanel 都是**无条件透传展示**，
+    // 不看 answer 是否已经补上。而本接口原先完全不碰这三列，markAiAnswerRisk /
+    // markAnswerException（services/neonService.js）也**只有 set 没有 clear**
+    // → 老师补完答案，页面仍永久显示「⚠ 参考答案不可信」，会以为没保存成功而反复补。
+    //
+    // 判据取「非空 且 与旧值不同」：老师点「判错」时前端会把 answer 原样回传，
+    // 那种情况答案没变、风险标注依旧成立，不能清。
+    const nextAnswerText = typeof answer === 'string' ? answer.trim() : ''
+    const oldAnswerText = typeof oldQuestion?.answer === 'string' ? oldQuestion.answer.trim() : ''
+    const answerRewritten = 'answer' in req.body && nextAnswerText !== '' && nextAnswerText !== oldAnswerText
 
     // PostgreSQL pg 驱动无法推断 undefined 的类型，统一转 null
     const n = (v) => v === undefined ? null : v
@@ -1661,13 +1681,21 @@ app.put('/api/questions/:id', async (req, res) => {
            display_image_type = CASE WHEN $20 THEN $19::text ELSE display_image_type END,
            source_type = CASE WHEN $21 THEN $22::text ELSE source_type END,
            geometry_manual_override = CASE WHEN $23 THEN $24::boolean ELSE geometry_manual_override END,
+           ai_answer_risk_reason = CASE WHEN $25 THEN NULL ELSE ai_answer_risk_reason END,
+           answer_exception = CASE WHEN $25 THEN FALSE ELSE answer_exception END,
+           answer_exception_reason = CASE WHEN $25 THEN NULL ELSE answer_exception_reason END,
            updated_at = NOW()
        WHERE id = $13
        RETURNING *`,
-      [n(content), optionsJson, n(answer), n(analysis), n(status), n(question_type), n(subject), n(is_correct), n(student_answer), n(image_url), n(ai_answer), n(answer_source), id, hasIsCorrect, hasAnswerSource, n(geometry_image_url), hasReviewStatus, n(review_status), n(display_image_type), hasDisplayImageType, hasSourceType, n(source_type), hasGeometryManualOverride, n(geometry_manual_override)]
+      [n(content), optionsJson, n(answer), n(analysis), n(status), n(question_type), n(subject), n(is_correct), n(student_answer), n(image_url), n(ai_answer), n(answer_source), id, hasIsCorrect, hasAnswerSource, n(geometry_image_url), hasReviewStatus, n(review_status), n(display_image_type), hasDisplayImageType, hasSourceType, n(source_type), hasGeometryManualOverride, n(geometry_manual_override), answerRewritten]
     )
 
     if (rows.length === 0) return res.status(404).json({ error: '题目不存在' })
+
+    if (answerRewritten) {
+      console.log(`[answer-risk] q=${id.substring(0, 8)} 参考答案被人工改写，已清除存疑标注 `
+        + `(old=${JSON.stringify(oldAnswerText).slice(0, 40)} → new=${JSON.stringify(nextAnswerText).slice(0, 40)})`)
+    }
 
     // [cache_id] 如果题目关联了 question_cache 且更新了权威字段，同步写入缓存
     const updatedQuestion = rows[0]
@@ -1736,6 +1764,14 @@ app.put('/api/questions/:id', async (req, res) => {
           // 否则老师改错的低置信题会被误挡在错题本外。
           manualOverride: true
         })
+        // [P1-几何重绘] 老师改判错（旧判对/未定 → 新判错）→ 复活几何资产并重绘。
+        // 重绘异步进行、失败只告警，绝不阻塞改判响应（幂等见 requeueGeometryRedrawOnRejudgeWrong）。
+        // 只对 is_correct 明确变错触发；改成对/平移状态不花钱重绘。
+        if (is_correct === false && updatedQuestion?.id && oldIsCorrect !== false) {
+          requeueGeometryRedrawOnRejudgeWrong(updatedQuestion.id).catch(e =>
+            console.warn(`[几何重绘·改判错] 异步调用异常: ${e.message.slice(0, 80)}`)
+          )
+        }
       } catch (settleErr) {
         console.error('[settle] review_edit finalizeRejudgeResult 失败:', settleErr.message)
       }
@@ -1785,6 +1821,13 @@ app.put('/api/questions/:id', async (req, res) => {
               issues: [],
               message: (added?.length || 0) > 0 ? '' : '这道题已在错题本中'
             }
+            // [P1-几何重绘] review_status='wrong' 强入错题本 → 复活几何资产重绘。
+            // 覆盖「is_correct 未变但老师明确标错」的场景（如 AI 未判定 null → 老师标错入册）；
+            // 若上层 review_edit 分支已触发过（is_correct 变 false），函数对 pending 幂等跳过，
+            // 不会重复入队花钱。
+            requeueGeometryRedrawOnRejudgeWrong(id).catch(e =>
+              console.warn(`[几何重绘·标错强入册] q=${id.slice(0, 8)} 异常: ${e.message.slice(0, 80)}`)
+            )
           } catch (e) {
             console.error(`[manual_review] 强入错题本失败 q=${id.slice(0,8)}:`, e.message)
             updatedQuestion.wrong_book_sync = {
@@ -1961,6 +2004,12 @@ app.post('/api/questions/:id/rejudge', async (req, res) => {
         // 按口径不受 AI 置信度闸约束。理由同上方 review_edit 分支。
         manualOverride: true
       })
+      // [P1-几何重绘] 重判变为「错」→ 复活几何资产并重绘（异步，失败只告警）。
+      if (isCorrect === false && q?.id && oldIsCorrect !== false) {
+        requeueGeometryRedrawOnRejudgeWrong(q.id).catch(e =>
+          console.warn(`[几何重绘·重判错] 异步调用异常: ${e.message.slice(0, 80)}`)
+        )
+      }
       return res.json({
         success: true,
         is_correct: isCorrect,
@@ -2163,6 +2212,69 @@ app.get('/api/questions/task/:taskId', async (req, res) => {
   } catch (error) {
     console.error('获取任务题目失败:', error)
     res.status(500).json({ error: error.message })
+  }
+})
+
+/**
+ * 题目定位框「实测」接口（2026-09-20）。
+ *
+ * 背景：主 OCR 的 block_coordinates / text_bbox 是模型照抄 schema 示例平铺整页的产物
+ * （实测同一页 8 题 y 等差恒 150、height 全同），直接画在复核页上会把第 1 题的框
+ * 画到第 2~5 题上。详见 server/services/questionBoxMeasure.js 顶部注释与
+ * server/_probe_bbox_prompt_ab.mjs 的 A/B 实测。
+ *
+ * 本接口按页做一次「只为量框」的轻量视觉调用，结果缓存进 tasks.result.refinedBoxes[page]，
+ * 同一页只量一次（想重量传 force=true）。前端复核页拿到后优先用它画框。
+ */
+app.post('/api/questions/task/:taskId/refine-boxes', async (req, res) => {
+  const { taskId } = req.params
+  const pageNumber = Number(req.body?.pageNumber || 1)
+  const force = req.body?.force === true
+  try {
+    const { rows: trows } = await query(
+      `SELECT id, images, image_url, result FROM ${TABLES.TASKS} WHERE id = $1`, [taskId])
+    if (!trows.length) return res.status(404).json({ error: '任务不存在' })
+    const task = trows[0]
+
+    let result = task.result
+    if (typeof result === 'string') { try { result = JSON.parse(result) } catch { result = {} } }
+    if (!result || typeof result !== 'object') result = {}
+    const cachedAll = result.refinedBoxes && typeof result.refinedBoxes === 'object' ? result.refinedBoxes : {}
+    if (!force && cachedAll[pageNumber] && Object.keys(cachedAll[pageNumber]).length > 0) {
+      return res.json({ success: true, cached: true, boxes: cachedAll[pageNumber] })
+    }
+
+    // 页图：优先 task.images 里 page_number 匹配的那张，退化到 image_url
+    const imgs = Array.isArray(task.images) && task.images.length
+      ? task.images
+      : (task.image_url ? [{ image_url: task.image_url, page_number: 1 }] : [])
+    const pageImg = imgs.find(i => Number(i.page_number || 1) === pageNumber) || imgs[0]
+    if (!pageImg?.image_url) return res.json({ success: true, cached: false, boxes: {}, error: '该页没有图片' })
+
+    const { rows: qs } = await query(
+      `SELECT id, question_number, sub_no, page_number, content, block_coordinates
+       FROM ${TABLES.QUESTIONS}
+       WHERE task_id = $1 AND COALESCE(page_number, 1) = $2
+       ORDER BY COALESCE((block_coordinates->>'y')::float, 99999), created_at`,
+      [taskId, pageNumber])
+    if (!qs.length) return res.json({ success: true, cached: false, boxes: {}, error: '该页没有题目' })
+
+    const resp = await fetch(pageImg.image_url)
+    if (!resp.ok) return res.json({ success: true, cached: false, boxes: {}, error: '页图下载失败 ' + resp.status })
+    const buf = Buffer.from(await resp.arrayBuffer())
+
+    const { measurePageQuestionBoxes } = await import('./services/questionBoxMeasure.js')
+    const r = await measurePageQuestionBoxes({ imageBuffer: buf, questions: qs })
+    if (r.error || !Object.keys(r.boxes).length) {
+      return res.json({ success: true, cached: false, boxes: {}, error: r.error || '未量到框' })
+    }
+
+    const nextResult = { ...result, refinedBoxes: { ...cachedAll, [pageNumber]: r.boxes } }
+    await query(`UPDATE ${TABLES.TASKS} SET result = $2 WHERE id = $1`, [taskId, JSON.stringify(nextResult)])
+    res.json({ success: true, cached: false, boxes: r.boxes, padTop: r.padTop })
+  } catch (error) {
+    console.error('实测题目定位框失败:', error)
+    res.json({ success: false, boxes: {}, error: error.message })
   }
 })
 

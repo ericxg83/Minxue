@@ -13,6 +13,24 @@ const FIGURE_KEYWORDS = /如图|图1|图示|附图|见图/
 const VALID_TYPES = ['choice', 'fill', 'answer']
 
 /**
+ * ── 引图判定的题干范围（2026-09-17） ──
+ *
+ * 多小问（题组）题在落库时会被拆成多行：公共题干存 `parent_stem`，每行 `content`
+ * 只留自己的小问（「(1)求…」「(2)证明…」）。此时「如图」只存在于 `parent_stem`，
+ * 只读 `content` 会漏判 → 「题干引图但无配图」的题被判成完整，进入错题本与课件。
+ *
+ * 实测（2026-09-17 周末班课件第12题）：「如图，在△ABC中，D为BC上一点，点P在AD上…」
+ * 在 parent_stem，两个小问 content 均无引图词、geometry_image_url 均为 NULL，
+ * 但 is_complete=true、入册闸放行，学生在白板上看到一道没有图的几何证明题。
+ *
+ * 因此引图判定必须把公共题干与子题正文合并起来看。
+ * 注意：题型证据判定（resolveEffectiveQuestionType）仍只读 content —— 答题位置、
+ * 填空线、选项标号都属于子题正文语义，合并 parent_stem 会放大误纠偏范围。
+ */
+const getFigureJudgeText = (question) =>
+  `${question?.parent_stem || ''} ${question?.content || ''}`
+
+/**
  * ── 题型证据判定（2026-09-11） ──
  *
  * 背景：`question_type` 是模型/答案库给出的**猜测字段**，会与题目自身内容矛盾。
@@ -91,7 +109,8 @@ export function resolveEffectiveQuestionType(question) {
 /**
  * 检查题目完整性
  * @param {Object} question - 题目对象
- * @param {string} question.content - 题干
+ * @param {string} question.content - 题干（子题正文）
+ * @param {string|null} [question.parent_stem] - 多小问题的公共题干（含公共图形描述）
  * @param {string|null} question.geometry_image_url - 配图URL
  * @param {string|null} question.question_type - 题型 (choice/fill/answer)
  * @param {Array|string|null} question.options - 选项数组或JSON字符串
@@ -102,7 +121,9 @@ export function checkQuestionCompleteness(question) {
   const issues = []
 
   // 规则1: 题干含几何图引用但缺少配图
-  if (question.content && FIGURE_KEYWORDS.test(question.content)) {
+  // 判定文本 = parent_stem + content：拆小问后「如图」常只留在公共题干里（见 getFigureJudgeText）。
+  const figureText = getFigureJudgeText(question)
+  if (figureText.trim() && FIGURE_KEYWORDS.test(figureText)) {
     if (!question.geometry_image_url) {
       issues.push('题干引用几何图但缺少配图')
     }
@@ -135,4 +156,16 @@ export function checkQuestionCompleteness(question) {
     isComplete: issues.length === 0,
     issues
   }
+}
+
+/**
+ * 题干（含公共题干）是否引用了图形。
+ *
+ * 与服务端同名函数同源，供「配图缺失提示 / 补裁入口」共用，避免各处各写一份正则。
+ *
+ * @param {Object} question
+ * @returns {boolean}
+ */
+export function hasFigureReference(question) {
+  return FIGURE_KEYWORDS.test(getFigureJudgeText(question))
 }

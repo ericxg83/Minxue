@@ -479,6 +479,12 @@ import { normalizeOptions } from '../../../utils/optionText'
 import { resolveQuestionDisplayStem } from '../../../utils/questionStem'
 import { getReviewStateLabel, getUnjudgedReasonText, getAiAnswerRiskText, getReferenceAnswerOrigin } from '../../../utils/reviewDecision'
 import { ElMessage, ElMessageBox, ElLoading } from 'element-plus'
+// bbox 判据统一走共享实现（2026-09-18）：本文件原先自带一份 parseBbox/unionBbox，
+// 是**有意**不拒绝越界框的 —— 因为这里解析出的框只用于「原卷裁剪弹窗的自动预选」，
+// 下游 cropImageLoaded 会把框夹紧到图片可见区内（Math.min(rect.width - x, ...)），
+// 越界只会被裁掉，不会画到图外。因此这里传 allowOutOfRange:true 保留原行为，
+// 但实现与解析口径不再各留一份（原先全仓 4 份副本，两份拒绝、两份不拒绝）。
+import { parseBbox, unionBbox } from '../../../utils/questionBbox'
 import { DocumentChecked, Delete, Plus, Upload, Picture, EditPen, ArrowLeft, ArrowRight, ArrowDown, RefreshLeft, Crop, Camera } from '@element-plus/icons-vue'
 import MathRender from '../MathRender.vue'
 import QuestionEditForm from './QuestionEditForm.vue'
@@ -819,29 +825,7 @@ const handleRecognizeQuestionFromPaper = () => {
   openCropDialog('recognize')
 }
 
-const parseBbox = (b) => {
-  if (!b) return null
-  if (typeof b === 'string') { try { b = JSON.parse(b) } catch { return null } }
-  if (!b || typeof b !== 'object') return null
-  const x = b.x ?? b.x_min ?? b.left
-  const y = b.y ?? b.y_min ?? b.top
-  const width = b.width ?? b.w ?? (b.x_max != null && x != null ? b.x_max - x : 0)
-  const height = b.height ?? b.h ?? (b.y_max != null && y != null ? b.y_max - y : 0)
-  if ([x, y, width, height].some(v => typeof v !== 'number' || Number.isNaN(v))) return null
-  if (width <= 0 || height <= 0) return null
-  return { x, y, width, height }
-}
-
-const unionBbox = (a, b) => {
-  if (!a) return b
-  if (!b) return a
-  return {
-    x: Math.min(a.x, b.x),
-    y: Math.min(a.y, b.y),
-    width: Math.max(a.x + a.width, b.x + b.width) - Math.min(a.x, b.x),
-    height: Math.max(a.y + a.height, b.y + b.height) - Math.min(a.y, b.y)
-  }
-}
+// parseBbox / unionBbox 已改为 import 共享实现（见文件顶部注释），此处不再各留一份。
 
 const generateCropPreview = () => {
   const sel = cropSelection.value
@@ -875,7 +859,12 @@ const cropImageLoaded = () => {
   if (!img) return
   const rect = img.getBoundingClientRect()
   if (!rect.width || !rect.height) return
-  const box = unionBbox(parseBbox(q.value?.text_bbox), parseBbox(q.value?.image_bbox))
+  // allowOutOfRange：这里只做「自动预选」，越界部分稍后由下方 Math.min 夹到图片内，
+  // 所以不按绘制路径那样丢弃越界框（否则 11.9% 的题会连预选框都没有）。
+  const box = unionBbox(
+    parseBbox(q.value?.text_bbox, { allowOutOfRange: true }),
+    parseBbox(q.value?.image_bbox, { allowOutOfRange: true })
+  )
   if (!box) return
   // 归一化 0-1000 坐标 → 显示像素
   let x = (box.x / 1000) * rect.width

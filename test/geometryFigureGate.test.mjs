@@ -64,3 +64,64 @@ test('空题干不出图', () => {
   assert.equal(hasFigureReference(null), false)
   assert.equal(hasFigureReference(undefined), false)
 })
+
+// ── 函数图象排除（2026-09-18）──────────────────────────────────────────────
+// 背景：renderGeometrySvg() 只能输出线段/圆/直角标记，没有曲线能力。
+// 实测 74 张待重画资产里 44 张是函数图象题，全部 0 成功——不拦就是持续制造假失败。
+// 这类题应走独立的函数图象渲染通道。
+
+test('函数图象题不进几何重画——渲染器没有曲线能力', () => {
+  const r = checkFigureReference(
+    '如图，抛物线 y=ax²+1(a<0) 与过点 (0,-3) 且平行于 x 轴的直线相交于点 A、B，与 y 轴交于点 C，若∠ACB 为直角，则 a=______．'
+  )
+  assert.equal(r.ok, false)
+  assert.equal(r.reason, 'function_graph')
+})
+
+test('二次函数 / 反比例函数 / 一次函数题同样拦下', () => {
+  assert.equal(
+    checkFigureReference('二次函数 y = a(x + m)² 的大致图像如图所示，其中 a、m 均为常数，那么 a、m 的取值范围为').reason,
+    'function_graph'
+  )
+  assert.equal(
+    checkFigureReference('如图，反比例函数 y=k/x 的图象经过点 A(1,2)，求 k 的值').reason,
+    'function_graph'
+  )
+  assert.equal(
+    checkFigureReference('如图，一次函数 y=kx+b 的图象与坐标轴交于 A、B 两点').reason,
+    'function_graph'
+  )
+})
+
+test('坐标系里的多边形仍放行——渲染器支持坐标轴，与曲线题区分开', () => {
+  assert.equal(
+    hasFigureReference('如图，在平面直角坐标系中，△ABC的三个顶点为A(1,2)、B(4,1)、C(3,5)，求△ABC的面积。'),
+    true
+  )
+})
+
+test('函数图象排除优先于「如图」放行——写了如图也不进队列', () => {
+  const r = checkFigureReference('如图所示，抛物线 y=x²+bx+c 的顶点为 P')
+  assert.equal(r.ok, false)
+  assert.equal(r.reason, 'function_graph')
+})
+
+// ── parent_stem 口径（与 checkQuestionCompleteness 规则1 同源）──────────────
+// 多小问大题拆行后「如图」只留在 parent_stem，子题 content 只有「(1)…」。
+// 漏判会把该重画的题标成 none。
+
+test('判定必须含 parent_stem：引图词只在公共题干里时不能漏判', () => {
+  const stem = '如图，在△ABC中，AB=AC，点D在BC边上，DE⊥AB于点E。'
+  assert.equal(checkFigureReference('(1)求证：△ABD≌△ACD；', stem).ok, true)
+  assert.equal(checkFigureReference('(1)求证：△ABD≌△ACD；').ok, false, '只看子题正文应判无图')
+})
+
+test('判定必须含 parent_stem：排除项在公共题干里时同样生效', () => {
+  const stem = '如图，抛物线 y=ax²+1(a≠0)与直线 y=-3x+3 交于点(-1,b).'
+  assert.equal(checkFigureReference('(1)求 a、b 的值；', stem).reason, 'function_graph')
+})
+
+test('parent_stem 与 content 都为空的题不出图', () => {
+  assert.equal(hasFigureReference('', ''), false)
+  assert.equal(hasFigureReference(null, null), false)
+})

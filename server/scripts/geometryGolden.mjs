@@ -53,7 +53,7 @@ async function loadFromDb() {
   const { rows } = await query(
     `SELECT a.id AS asset_id, a.question_id, a.tikz_status, a.last_error, a.retry_count,
             a.cropped_image_url, a.tikz_json, a.geometry_structure_json,
-            q.geometry_image_url, q.content
+            q.geometry_image_url, q.content, q.parent_stem
        FROM question_assets a
        JOIN questions q ON q.id = a.question_id
       WHERE q.deleted_at IS NULL
@@ -67,6 +67,8 @@ async function loadFromDb() {
     lastError: r.last_error,
     retryCount: r.retry_count,
     content: r.content || '',
+    // 引图判定必须含 parent_stem：多小问大题拆行后「如图」只留在公共题干里
+    parentStem: r.parent_stem || '',
     croppedImageUrl: r.cropped_image_url || null,
     geometryImageUrl: r.geometry_image_url || null,
     structure: r.tikz_json || r.geometry_structure_json || null,
@@ -175,11 +177,11 @@ async function exportGoldenFixture(all) {
   const byStatus = {}
   for (const i of all) byStatus[i.tikzStatus] = (byStatus[i.tikzStatus] || 0) + 1
 
-  // Phase 0 附带估算：41 条 failed 中多少条有资格重绘（纯文本闸门，零视觉调用）
+  // Phase 0 附带估算：failed 里多少条有资格重绘（纯文本闸门，零视觉调用）
   const failed = all.filter(i => i.tikzStatus === 'failed')
-  const estimate = { failedTotal: failed.length, eligible: 0, number_line: 0, no_figure_reference: 0 }
+  const estimate = { failedTotal: failed.length, eligible: 0 }
   for (const f of failed) {
-    const r = checkFigureReference(f.content)
+    const r = checkFigureReference(f.content, f.parentStem)
     if (r.ok) estimate.eligible++
     else estimate[r.reason] = (estimate[r.reason] || 0) + 1
   }
@@ -195,7 +197,7 @@ async function exportGoldenFixture(all) {
 
   console.log(`✅ golden fixture 已写入 ${FIXTURE}`)
   console.log(`   黄金集 ${golden.length} 条（全为带结构存量资产）；总资产 ${all.length} 条 = ${Object.entries(byStatus).map(([k, v]) => `${k}:${v}`).join(', ')}`)
-  console.log(`   failed(${estimate.failedTotal}) 纯文本闸门估算：可重绘 ${estimate.eligible} 条 / 数轴 ${estimate.number_line} / 无图指代 ${estimate.no_figure_reference}`)
+  console.log(`   failed(${estimate.failedTotal}) 纯文本闸门估算：可重绘 ${estimate.eligible} 条 / 其余按 reason 分布 ${Object.entries(estimate).filter(([k]) => k !== 'failedTotal' && k !== 'eligible').map(([k, v]) => `${k}:${v}`).join(', ') || '（无）'}`)
   return golden
 }
 

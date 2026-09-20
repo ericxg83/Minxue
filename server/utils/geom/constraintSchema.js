@@ -109,7 +109,18 @@ export function parseSeg(v) {
 /**
  * 把视觉模型写在点上的 derived 字段翻译成约束。
  *
- * 模型对这个字段的键名很随意（prompt 只举了 on_segment 一例），所以尽量宽容地认。
+ * 模型对这个字段的键名很随意（prompt 只举了 on_segment 一例，且是扁平写法
+ * { "on_segment": "AB" }），垂足/中点/交点没有给格式，实测会写成嵌套对象。
+ * 两种形态都必须认，否则模型标了 derived 却一条约束都抽不出来：
+ *   扁平：{ foot_of: 'C', perpendicular_to: 'AB' }
+ *   嵌套：{ foot: { from: 'C', on_line: ['A', 'B'] } }
+ *
+ * 支持的类型：垂足 / 中点 / 两线交点 / 落边落线 / 在圆上 / 折叠对称像 / 重心·内心·外心。
+ * 其余（rotate 等）不映射——prompt 没要求，凭空认键名会造出错约束。
+ *
+ * 注意：parseSeg 对对象会退化成 String(obj)="[object Object]"，剥非字母后切出
+ * "ob" 这类垃圾字母。所以对象必须先由 obj() 识别并走嵌套分支，绝不能直接丢给 parseSeg。
+ *
  * 注意这一路的可信度低于题干：模型经常漏标 derived（实测两个垂足都没标），
  * 也可能标错线段——它只作为题干抽取的补充。
  */
@@ -124,26 +135,80 @@ export function fromDerivedField(label, derived, raw = '') {
     for (const k of keys) if (derived[k] != null) return derived[k]
     return null
   }
+  /** 只接受非数组对象；数组/字符串走 parseSeg 的扁平分支 */
+  const obj = (v) => (v && typeof v === 'object' && !Array.isArray(v)) ? v : null
+  /** 只接受非空字符串（对象/数组一律判否，避免 String(obj) 污染） */
+  const str = (v) => (typeof v === 'string' && v.trim()) ? v.trim() : null
+  /** 只对字符串/数组做 parseSeg；对象一律判否（否则 String(obj) 会切出 "ob" 这类垃圾字母） */
+  const seg = (v) => (typeof v === 'string' || Array.isArray(v)) ? parseSeg(v) : null
+  /** 三顶点（重心/内心/外心的 of）：接受 'ABC' 或 ['A','B','C']，必须恰好 3 个 */
+  const tri = (v) => {
+    const arr = Array.isArray(v)
+      ? v.map(String)
+      : (typeof v === 'string' ? [...v.matchAll(/[A-Z][′'’]?/g)].map(x => x[0].replace(/[′'’]/g, '′')) : [])
+    return arr.length === 3 ? arr : null
+  }
 
-  const onSeg = parseSeg(get('on_segment', 'onSegment', 'on', 'segment'))
-  const onLine = parseSeg(get('on_line', 'onLine', 'line'))
-  const midOf = parseSeg(get('midpoint_of', 'midpointOf', 'midpoint', 'mid_of'))
-  const footFrom = get('foot_of', 'footOf', 'foot_from', 'from')
-  const footOn = parseSeg(get('perpendicular_to', 'perpendicularTo', 'foot_on', 'onLine', 'on_segment'))
-  const inter = get('intersection_of', 'intersectionOf', 'intersect_of', 'intersection')
-  const onCircle = get('on_circle', 'onCircle', 'circle')
+  const footRaw = get('foot', 'footOf', 'foot_of')
+  const midRaw = get('midpoint', 'midpointOf', 'midpoint_of', 'mid_of')
+  const interRaw = get('intersection', 'intersectionOf', 'intersection_of', 'intersect_of')
+  const footObj = obj(footRaw)
+  const midObj = obj(midRaw)
+  const interObj = obj(interRaw)
 
-  if (footFrom && footOn) push('foot', { point: label, from: String(footFrom), onLine: footOn })
+  const onSeg = seg(get('on_segment', 'onSegment', 'on', 'segment'))
+  const onLine = seg(get('on_line', 'onLine', 'line'))
+  const midOf = seg(midRaw)
+    || (midObj ? seg(midObj.of ?? midObj.segment ?? midObj.on ?? midObj.line) : null)
+  const footFrom = str(get('foot_of', 'footOf', 'foot_from', 'footFrom', 'from'))
+    || (footObj ? str(footObj.from ?? footObj.source ?? footObj.of) : null)
+  const footOn = seg(get('perpendicular_to', 'perpendicularTo', 'foot_on', 'onLine', 'on_segment'))
+    || (footObj ? seg(footObj.on_line ?? footObj.onLine ?? footObj.to ?? footObj.line ?? footObj.on) : null)
+  const onCircle = str(get('on_circle', 'onCircle', 'circle'))
+
+  if (footFrom && footOn) push('foot', { point: label, from: footFrom, onLine: footOn })
   else if (midOf) push('midpoint', { point: label, of: midOf })
   else if (onSeg) push('on_segment', { point: label, of: onSeg })
   else if (onLine) push('on_line', { point: label, of: onLine })
 
-  if (Array.isArray(inter) && inter.length === 2) {
-    const l1 = parseSeg(inter[0])
-    const l2 = parseSeg(inter[1])
-    if (l1 && l2) push('line_intersect', { point: label, l1, l2 })
+  // 折叠/对称的像：{ reflect_of: 'B', axis: 'AC' } 或 { reflect: { source:'B', axis:['A','C'] } }
+  // 带撇点（B′）是原像点关于轴的镜像，轴缺失就整条不认——猜轴会把图拧变形。
+  const reflectRaw = get('reflect', 'reflectOf', 'reflect_of', 'fold', 'folded_from', 'mirror_of')
+  const reflectObj = obj(reflectRaw)
+  const reflectSource = str(reflectRaw)
+    || (reflectObj ? str(reflectObj.source ?? reflectObj.from ?? reflectObj.of) : null)
+    || (reflectRaw != null ? str(get('source', 'from')) : null)
+  const reflectAxis = (reflectObj
+    ? seg(reflectObj.axis ?? reflectObj.over ?? reflectObj.across ?? reflectObj.line ?? reflectObj.on_line)
+    : null)
+    || (reflectRaw != null ? seg(get('axis', 'over', 'across')) : null)
+  if (reflectSource && reflectAxis) push('reflect', { point: label, source: reflectSource, axis: reflectAxis })
+
+  // 三心：{ centroid_of: 'ABC' } / { incenter_of: 'ABC' } / { circumcenter_of: 'ABC' }
+  const CENTER_KEYS = [
+    ['centroid', ['centroid', 'centroidOf', 'centroid_of']],
+    ['incenter', ['incenter', 'incenterOf', 'incenter_of']],
+    ['circumcenter', ['circumcenter', 'circumcenterOf', 'circumcenter_of', 'orthocenter_of']]
+  ]
+  for (const [type, keys] of CENTER_KEYS) {
+    const raw = get(...keys)
+    const of = tri(raw) || (obj(raw) ? tri(raw.of ?? raw.vertices ?? raw.points ?? raw.triangle) : null)
+    if (of) push(type, { point: label, of })
   }
-  if (onCircle && !onSeg && !onLine) push('on_circle', { point: label, circle: String(onCircle) })
+
+  // 交点：扁平 ['AF','DE'] 与嵌套 { l1, l2 } 两种形态
+  const interPair = Array.isArray(interRaw) && interRaw.length === 2
+    ? interRaw.map(seg)
+    : (interObj
+      ? [
+        seg(interObj.l1 ?? interObj.line1 ?? interObj.first ?? interObj.of ?? interObj.a),
+        seg(interObj.l2 ?? interObj.line2 ?? interObj.second ?? interObj.with ?? interObj.b)
+      ]
+      : null)
+  if (interPair && interPair[0] && interPair[1]) {
+    push('line_intersect', { point: label, l1: interPair[0], l2: interPair[1] })
+  }
+  if (onCircle && !onSeg && !onLine) push('on_circle', { point: label, circle: onCircle })
   return out
 }
 

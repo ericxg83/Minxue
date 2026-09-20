@@ -13,7 +13,9 @@
 import { extractConstraints } from './constraintExtract.js'
 import { solveGeometry } from './solver.js'
 import { residualGate } from './residual.js'
+import { derivedLabels } from './derivedCoverage.js'
 import { renderGeometrySvg } from '../geometrySvg.js'
+import { dist } from './vec.js'
 
 const isNum = (v) => typeof v === 'number' && isFinite(v)
 
@@ -56,10 +58,42 @@ export function correctGeometryFigure(structure, content, options = {}) {
   if (!constraints || constraints.length === 0) {
     return { ok: false, reason: 'no_constraints' }
   }
-  const opts = { circles: structure.circles }
 
-  const sol = solveGeometry(structure.points, constraints, opts)
-  const gate = residualGate(sol.points, constraints, opts)
+  // ── 冻结真实顶点 ──
+  // 含派生点的结构里，真实顶点是**从图上读出来的观测值**，派生点是**推出来的**：
+  // 前者应当不动，修正由后者承担。
+  //
+  // 反例（实测，折叠题 A(10,80) B(40,20) C(90,80) + B′ 关于 AC 的镜像）：
+  // 不冻结时 LM 的最小范数步把 21.8px 修正**平摊**到四个点上，
+  // 真实顶点 C 被挪 21.8px —— 等于"把三角形掰歪"换取 B′ 就位，图被扭曲。
+  // 注意 anchorWeight 调参救不了：LM 是梯度下降，首步就把修正摊开、约束满足后梯度归零，
+  // 锚再也拉不回来（局部极小）。实测 anchorWeight 放大 5000 倍，顶点仍动 3.85px。
+  //
+  // 无派生点的结构不冻结：那类题的全部点都是观测值，本来就靠求解器微调自洽。
+  const derivedSet = new Set(derivedLabels(structure))
+  const fixedPoints = derivedSet.size > 0
+    ? structure.points.map(p => p.label).filter(l => l && !derivedSet.has(l))
+    : []
+  const baseOpts = { circles: structure.circles }
+
+  // 第一选择：冻结真实顶点，让修正全部落在派生点上。
+  let sol = solveGeometry(structure.points, constraints, { ...baseOpts, fixedPoints })
+  let gate = residualGate(sol.points, constraints, baseOpts)
+  let frozeVertices = fixedPoints.length > 0
+
+  // 第二选择：冻结解不开就退回不冻结（= 改造前的行为）。
+  // 触发场景：真实顶点自身与题设矛盾，例如模型把 AB≠AC 的三角形配上了「AB=AC」的题干，
+  // 此时不动顶点就无解。这一步让冻结成为**单调改进**——它只会把"扭曲的图"换成
+  // "干净的图"或"回退裁剪原图"，绝不会把原本出得来的图变成出不来。
+  if (frozeVertices && !(sol.converged && gate.pass && !gate.degenerate)) {
+    const sol2 = solveGeometry(structure.points, constraints, baseOpts)
+    const gate2 = residualGate(sol2.points, constraints, baseOpts)
+    if (sol2.converged && gate2.pass && !gate2.degenerate) {
+      sol = sol2
+      gate = gate2
+      frozeVertices = false
+    }
+  }
 
   // 安全闸门：仅当求解收敛且解后自洽且非退化时才回灌，否则交人工复核
   if (!sol.converged) return { ok: false, reason: 'not_converged' }
@@ -70,6 +104,19 @@ export function correctGeometryFigure(structure, content, options = {}) {
   const svg = renderGeometrySvg(corrected)
   if (!svg) return { ok: false, reason: 'render_failed' }
 
+  // 位移分账：走冻结路径时 shiftFixed 必须为 0，全部修正由派生点承担；
+  // 走退回路径时 shiftFixed > 0，量级即"真实顶点被挪了多少"，供回归与人工排查。
+  let shiftFixed = 0
+  let shiftDerived = 0
+  for (const p of structure.points) {
+    const sp = sol.points[p.label]
+    if (!sp || !isNum(p.x) || !isNum(p.y)) continue
+    const d = dist({ x: p.x, y: p.y }, sp)
+    if (!isNum(d)) continue
+    if (derivedSet.has(p.label)) shiftDerived = Math.max(shiftDerived, d)
+    else shiftFixed = Math.max(shiftFixed, d)
+  }
+
   return {
     ok: true,
     svg,
@@ -77,6 +124,10 @@ export function correctGeometryFigure(structure, content, options = {}) {
       points: sol.points,
       converged: sol.converged,
       displacement: sol.displacement,
+      frozeVertices,
+      shiftFixed,
+      shiftDerived,
+      nFixed: frozeVertices ? fixedPoints.length : 0,
       pass: gate.pass,
       degenerate: gate.degenerate,
       maxNorm: gate.maxNorm,

@@ -375,17 +375,20 @@ export async function renderWeekendPptx(handout, { logger = () => {} } = {}) {
 
   const secs = slides.filter(sl => sl.kind === 'section')
   const secTotal = secs.length
-  let seq = 0
+  let totalQ = 0
   secs.forEach((sec, secIdx) => {
     buildSection(pptx, sec, secIdx + 1, secTotal)
     const day = sec.label
+    // 序号按节从 1 起（与预览页「题单预览」的节内编号一致，方便边看边对）
+    let seq = 0
     for (const q of slides.filter(sl => sl.kind === 'question' && sl.sectionLabel === day)) {
       seq += 1
+      totalQ += 1
       buildQuestion(pptx, q, seq, figMap)
     }
   })
 
   const buf = await pptx.write({ outputType: 'nodebuffer' })
-  logger(`[ppt] 渲染完成: ${seq} 题 / ${slides.filter(s => s.kind === 'section').length} 分节, ${buf.length} bytes`)
+  logger(`[ppt] 渲染完成: ${totalQ} 题 / ${secs.length} 分节, ${buf.length} bytes`)
   return buf
 }

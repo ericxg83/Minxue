@@ -186,3 +186,29 @@ test('难度筛选：参数 + 路由 + 预览星级（2026-09-18 加入，与错
   assert.ok(B_SRC.includes("Number(q.difficulty)") || B_SRC.includes("q.difficulty"),
     'WeekendBoard 必须从 query 读取 difficulty 并传给后端')
 })
+
+test('章节筛选：标准教材目录 + 树形下拉 + preview/generate/白板透传（2026-09-19）', () => {
+  // 后端 lib：chapter 参数解构 + 过滤条件
+  assert.ok(LIB_SRC.includes("chapter = ''"), 'buildHandout 必须解构 chapter（默认空=不限）')
+  assert.ok(LIB_SRC.includes('chapterNodeIds'), '选章必须包含其全部课时子节点')
+  assert.ok(
+    LIB_SRC.includes('chapterIds.has(cid)'),
+    '章节筛选必须按标准节点 id 精确过滤，不能按 OCR 标题过滤'
+  )
+  // 路由透传
+  assert.ok(ROUTE_SRC.includes("chapter: str(body.chapter)"), 'sanitizeParams 必须取 chapter')
+
+  // 前端：树形下拉 + 参数 + 透传
+  assert.ok(VIEW_SRC.includes('el-tree-select'), '必须用 Element Plus 树形下拉')
+  assert.ok(VIEW_SRC.includes('params.chapter'), '前端参数必须包含 chapter')
+  assert.ok(VIEW_SRC.includes('loadChapterTree'), '前端必须从后端接口加载章节树')
+  assert.ok(VIEW_SRC.includes('按教材章节筛选'), '下拉必须有清晰的筛选提示')
+  assert.ok(
+    VIEW_SRC.includes('chapter: body.chapter') || VIEW_SRC.includes('chapter: params.value.chapter'),
+    'buildParamsBody 必须把章节筛选发给后端'
+  )
+  // 白板必须从 query 读取 chapter 并传给 preview
+  const B_SRC = readFileSync(resolve(ROOT, 'src/workbench/views/WeekendBoard.vue'), 'utf8')
+  assert.ok(B_SRC.includes('chapter: q.chapter'), 'WeekendBoard 必须从 query 读取 chapter')
+  assert.ok(ROUTE_SRC.includes("router.get('/api/weekend-ppt/chapters'"), '必须提供章节树接口')
+})

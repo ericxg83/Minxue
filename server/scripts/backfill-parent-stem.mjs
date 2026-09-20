@@ -42,6 +42,9 @@ const ALL = process.argv.includes('--all')
 // --no-filter：关闭「确实需要公共条件」预筛（纯计算题的 (1)(2) 本来就独立可作答，
 //   公共部分只有“计算：”之类，回填收益低且 OCR 费用高）
 const NO_FILTER = process.argv.includes('--no-filter')
+// --task <id前缀>：只处理指定 task 的组（排查单份卷时省视觉模型配额）
+const taskIdx = process.argv.indexOf('--task')
+const TASK_PREFIX = taskIdx > -1 ? process.argv[taskIdx + 1] || '' : ''
 
 const SUB_HEAD_RE = /^[（(]\s*([0-9１-９一二三四五六七八九]{1,2})\s*[)）]/
 const SUB_MARKER_ANY_RE = /[（(]\s*\d{1,2}\s*[)）]/
@@ -233,16 +236,18 @@ async function main() {
         if (subRows.length > 0 && subRows.every(r => isSelfCompleteContent(r.content))) return false
         return g.rows.some(r => needsParentStem(r.content))
       })
-  const skipped = beforeFilter - kept.length
+  const skipped0 = beforeFilter - kept.length
+  const taskFiltered = TASK_PREFIX ? kept.filter(g => g.task_id.startsWith(TASK_PREFIX)) : kept
+  const skipped = beforeFilter - taskFiltered.length
 
   console.log(`候选组: ${beforeFilter} 组（模式=${ALL ? '--all 含孤立行' : '仅成组'}）`)
-  console.log(`需要公共条件: ${kept.length} 组${skipped ? `（跳过 ${skipped} 组纯计算题）` : ''}${LIMIT ? `，本次处理前 ${Math.min(LIMIT, kept.length)} 组` : ''}`)
-  if (kept.length === 0) {
+  console.log(`需要公共条件: ${taskFiltered.length} 组${skipped ? `（跳过 ${skipped} 组：纯计算题${TASK_PREFIX ? '/task 不匹配' : ''}）` : ''}${LIMIT ? `，本次处理前 ${Math.min(LIMIT, taskFiltered.length)} 组` : ''}`)
+  if (taskFiltered.length === 0) {
     await pool.end()
     return
   }
 
-  const selected = LIMIT ? kept.slice(0, LIMIT) : kept
+  const selected = LIMIT ? taskFiltered.slice(0, LIMIT) : taskFiltered
   const results = []
   let passCount = 0, rejectCount = 0, errorCount = 0
 

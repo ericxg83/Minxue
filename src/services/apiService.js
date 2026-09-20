@@ -365,8 +365,26 @@ export const getQuestionsByTask = async (taskId, useCache = true) => {
   return questions
 }
 
-export const getQuestionsByIds = async (questionIds, studentId) => {
-  if (!questionIds || questionIds.length === 0) return []
+/**
+ * 题目定位框「实测」（2026-09-20）。
+ * 主 OCR 的 block_coordinates 是模型平铺整页的产物，不能直接用来画框；
+ * 这里按页向后端要一次实测结果（后端只量一次并缓存），失败时返回空对象，调用方优雅降级。
+ * @returns {Promise<{boxes: Object<string,{x,y,width,height}>, error?: string}>}
+ */
+export const refineQuestionBoxes = async (taskId, pageNumber) => {
+  try {
+    const data = await apiRequest(`/questions/task/${taskId}/refine-boxes`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ pageNumber })
+    })
+    return { boxes: data?.boxes || {}, error: data?.error || null }
+  } catch (e) {
+    return { boxes: {}, error: e?.message || '实测定位框失败' }
+  }
+}
+
+export const getQuestionsByIds = async (questionIds, studentId) => {  if (!questionIds || questionIds.length === 0) return []
 
   const data = await apiRequest('/questions/batch', {
     method: 'POST',

@@ -57,6 +57,19 @@ const SUP_BASE = {
   '⁽': '(', '⁾': ')',
 }
 
+// Unicode 下标字符 → 数字/字母基底（U+2080-209C）。
+// 上标（²⁰²¹…）有 steps 0.5 预处理成 ^{...}，下标（₀₁₂…）此前却没有任何对应处理，
+// 导致 isMathChar 不认它 → 数学段被下标字符撕成两半（2026-09-18 白板第27题：
+// `{\sqrt{y}₀}` 露出红色源码，正是 `{√y₀}` 被 `₀` 切开、KaTeX 拿到半个花括号报错）。
+const SUB_BASE = {
+  '₀': '0', '₁': '1', '₂': '2', '₃': '3', '₄': '4',
+  '₅': '5', '₆': '6', '₇': '7', '₈': '8', '₉': '9',
+  '₊': '+', '₋': '-',
+  'ₐ': 'a', 'ₑ': 'e', 'ₒ': 'o', 'ₓ': 'x',
+  'ₕ': 'h', 'ₖ': 'k', 'ₗ': 'l', 'ₘ': 'm', 'ₙ': 'n',
+  'ₚ': 'p', 'ₛ': 's', 'ₜ': 't',
+}
+
 function preprocessMath(text) {
   let s = String(text || '')
 
@@ -73,6 +86,14 @@ function preprocessMath(text) {
     let inner = ''
     for (const ch of run) inner += SUP_BASE[ch] || ch
     return '^{' + inner + '}'
+  })
+
+  // 0.55 Unicode 下标 → 单个整体下标（y₀ → y_{0}，yₙ₊₁ → y_{n+1}；严禁拆成 _{n}_{+1}）
+  //     与上标同构，缺失是 2026-09-18 白板第27题乱码的根因（见 SUB_BASE 注释）
+  s = s.replace(/[₀₁₂₃₄₅₆₇₈₉₊₋ₐₑₒₓₕₖₗₘₙₚₛₜ]+/g, (run) => {
+    let inner = ''
+    for (const ch of run) inner += SUB_BASE[ch] || ch
+    return '_{' + inner + '}'
   })
 
   // 0.6 填空线：连续下划线 ____ → \underline{\quad}（禁止裸 _，否则 KaTeX 当作下标报错）
@@ -308,6 +329,10 @@ function isMathChar(char) {
   if ('+-*/=^_(){}[]<>|'.includes(char)) return true
   if ('αβγδεζηθικλμνξοπρστυφχψωΑΒΓΔΕΖΗΘΙΚΛΜΝΞΟΠΡΣΤΥΦΧΨΩ'.includes(char)) return true
   if ('≥≤≈∞π∥⊥'.includes(char)) return true
+  // Unicode 上下标（²⁰²¹₀₁₂…）：属于数学记号。上标已由 preprocessMath 0.5 转成 ^{...}，
+  // 下标由 0.55 转成 _{...}，正常情况下不会流到这里；这里兜底防止漏转时再被切出数学段。
+  if (char >= '\u00B2' && char <= '\u00B3') return true
+  if (char >= '\u2070' && char <= '\u209F') return true
   return false
 }
 

@@ -307,14 +307,23 @@ export function refineFigureRegion(ink, w, h, box) {
   const tight = bandStats(ink, w, vertical.start, vertical.end, column.start, column.end + 1)
   if (!tight || !isFigureBand(tight, h)) return null
 
-  const padX = Math.max(2, Math.round(tight.width * PAD_RATIO))
-  const padY = Math.max(2, Math.round(tight.height * PAD_RATIO))
-  const x0 = clamp(tight.x0 - padX, 0, w - 1)
-  const y0 = clamp(vertical.start - padY, 0, h - 1)
-  const x1 = clamp(tight.x1 + padX + 1, 1, w)
-  const y1 = clamp(vertical.end + padY + 1, 1, h)
+  // ── 配图下限不低于模型框（2026-09-18 白板第9题事故）──
+  // 收紧的初衷是"把模型框大概覆盖的区域剔掉紧贴的邻图/图注"；但当模型框本身就已经
+  // 很贴图时（视觉模型定位准确），墨迹分带会把【图形内部的稀疏结构】当成"邻图"切掉：
+  //   线上实例：数值转换器流程图，模型框 1181×442 完整盖住整张图，
+  //   收紧后只剩 595×191（面积 22%），把图砍成下半截 —— 用户看到"配图页不是这道题的"。
+  // 收紧的目的始终是【向相邻内容让边】，不是【裁切图形】。模型框是 OCR 视觉模型主动
+  // 看图给出的定位，可信度高于墨迹投影的启发式判断，把它作为收缩下限 ——
+  // 收紧可以把框向左右（邻图）压缩，但不得越过模型框的边缘收缩。
+  // 实现：收紧结果与模型框求并集（并集 = 占上界），保证输出至少覆盖模型框完整范围。
+  // 副作用：模型框严重偏位时可能多带些空白，代价远小于把真图砍掉（宁可多留白）。
+  const x0 = clamp(Math.min(tight.x0, box.x), 0, w - 1)
+  const y0 = clamp(Math.min(vertical.start, box.y), 0, h - 1)
+  const x1 = clamp(Math.max(tight.x1, box.x + box.width), 1, w)
+  const y1 = clamp(Math.max(vertical.end, box.y + box.height), 1, h)
   const outW = x1 - x0
   const outH = y1 - y0
+
   if (outW < MIN_SIDE_RATIO * w || outH < MIN_SIDE_RATIO * h) return null
   if (outH > box.height * MAX_GROWTH_H || outW > box.width * MAX_GROWTH_W) return null
 

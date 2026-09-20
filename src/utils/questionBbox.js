@@ -11,8 +11,23 @@
  * workbench/components/review/PaperViewerPanel.vue 里也有说明。
  */
 
-/** 安全解析任意 bbox 字段（兼容 JSON 字符串 / 对象 / 多种字段命名） */
-export function parseBbox (b) {
+/**
+ * 安全解析任意 bbox 字段（兼容 JSON 字符串 / 对象 / 多种字段命名）
+ *
+ * @param {*} b 原始字段
+ * @param {{allowOutOfRange?: boolean}} [opts]
+ *   allowOutOfRange=true → 只解析、**不做越界判定**，把框原样交还调用方。
+ *   只有「调用方自己会夹紧到图内」的场景才该用它（如原卷裁剪弹窗：框越界后
+ *   会被 Math.min(rect.width - x, ...) 夹回可见区，宁可有框可拖，也不要空手）。
+ *   默认严格：明显越界（超出 1005）返回 null —— 绘制类调用方用这个，
+ *   避免把定位框画到图外。
+ *
+ * ⚠️ 本函数是**全仓唯一**的 bbox 解析实现。2026-09-18 之前有 4 份分叉副本
+ *   （PaperViewerPanel.vue / QuestionDetailPanel.vue / server/utils/gradingDetailView.js /
+ *   server/scripts/backfill-choice-options.mjs），其中两份拒绝越界、两份不拒绝，
+ *   同一道题在不同页面会一个有框一个没框。新增调用方请用 opts 表达策略，不要再抄一份。
+ */
+export function parseBbox (b, opts = {}) {
   if (!b) return null
   if (typeof b === 'string') {
     try { b = JSON.parse(b) } catch { return null }
@@ -24,12 +39,24 @@ export function parseBbox (b) {
   const height = b.height ?? b.h ?? (b.y_max != null && y != null ? b.y_max - y : 0)
   if ([x, y, width, height].some((v) => typeof v !== 'number' || Number.isNaN(v))) return null
   if (width <= 0 || height <= 0) return null
+  if (opts.allowOutOfRange === true) return { x, y, width, height }
   // 越界坐标直接判定不可用，避免把定位框画到图外
   if (x < 0 || y < 0 || x + width > 1000 || y + height > 1000) {
     // 轻微越界（浮点误差）容忍，明显越界才丢弃
     if (x < -5 || y < -5 || x + width > 1005 || y + height > 1005) return null
   }
   return { x, y, width, height }
+}
+
+/** 夹紧到 [0,1000]：越界框宁可截掉溢出部分，也不要整框丢弃（绘制/裁剪前的兜底） */
+export function clampBbox (box) {
+  if (!box) return null
+  const x = Math.min(Math.max(box.x, 0), 1000)
+  const y = Math.min(Math.max(box.y, 0), 1000)
+  const right = Math.min(Math.max(box.x + box.width, 0), 1000)
+  const bottom = Math.min(Math.max(box.y + box.height, 0), 1000)
+  if (right - x <= 0 || bottom - y <= 0) return null
+  return { x, y, width: right - x, height: bottom - y }
 }
 
 /** 求两个 bbox 的并集（外接矩形），任一为空则返回另一个 */

@@ -28,29 +28,19 @@ export function parseMaybeJson(v) {
 }
 
 /** 安全解析 bbox（兼容 string/object 与 left/top 别名，统一 {x,y,width,height}）。
- *  与 PaperViewerPanel.parseBbox 逐字同口径。 */
-export function parseBbox(raw) {
-  const c = parseMaybeJson(raw)
-  if (!c || typeof c !== 'object') return null
-  const x = c.x ?? c.left
-  const y = c.y ?? c.top
-  const w = c.width
-  const h = c.height
-  if ([x, y, w, h].some(v => typeof v !== 'number' || !isFinite(v))) return null
-  if (w <= 0 || h <= 0) return null
-  return { x, y, width: w, height: h }
-}
-
-/** 两框并集（外接矩形），任一为空返回另一框 —— 与 PaperViewerPanel.unionBbox 同口径 */
-export function unionBbox(a, b) {
-  if (!a) return b
-  if (!b) return a
-  const left = Math.min(a.x, b.x)
-  const top = Math.min(a.y, b.y)
-  const right = Math.max(a.x + a.width, b.x + b.width)
-  const bottom = Math.max(a.y + a.height, b.y + b.height)
-  return { x: left, y: top, width: right - left, height: bottom - top }
-}
+ *
+ *  [2026-09-18] 原先这里自带一份实现，注释声称「与 PC 侧那份逐字同口径」，
+ *  但 PC 侧后来改成**拒绝越界框**，这句注释就变成了谎话 —— 典型的「另写一份必然漂移」。
+ *  现已改为直接复用 `src/utils/questionBbox.js` 的共享实现（server 引 src 工具已有先例：
+ *  services/wrongRetryPdfService.js 引 src/utils/mathText.js）。
+ *
+ *  这里传 allowOutOfRange:true 保留本文件原行为：数据源是 task.result.retryAlign，
+ *  实测 170 条对位框里 17 条（10%）越界（如 {x:100,y:660,w:800,h:660}，y+h 远超 1000）。
+ *  若改成严格拒绝，这 10% 的标注框会从移动端「批改详情」上直接消失 —— 那是功能退化，
+ *  不是修 bug。越界框的真问题在**上游 OCR 写坐标**，不在读取侧，故此处不擅自收紧。
+ */
+import { parseBbox, unionBbox } from '../../src/utils/questionBbox.js'
+export { parseBbox, unionBbox }
 
 /**
  * 构建「批改详情」视图数据。
@@ -103,7 +93,11 @@ export function buildGradingDetailView(questionIds, sheetRows, verdictOf) {
       if (!r?.questionId) continue
       const page = pageIndexOf(span.startPage, span.count, r.pageNumber)
       // 取框优先级与 PC 完全一致；记录在而框全空 → 不画（绝无回退）
-      const bbox = unionBbox(parseBbox(r.text_bbox), parseBbox(r.image_bbox)) || parseBbox(r.block_coordinates)
+      // allowOutOfRange：保留历史行为，见文件上方 parseBbox 的说明（越界框不丢，避免 10% 标注消失）
+      const bbox = unionBbox(
+        parseBbox(r.text_bbox, { allowOutOfRange: true }),
+        parseBbox(r.image_bbox, { allowOutOfRange: true })
+      ) || parseBbox(r.block_coordinates, { allowOutOfRange: true })
       marksByQuestion.set(r.questionId, {
         questionId: r.questionId,
         label: r.label != null ? String(r.label) : null,

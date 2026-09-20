@@ -57,6 +57,19 @@ export function solveGeometry(points, constraints, options = {}) {
   const maxIter = options.maxIter || 300
   const tol = options.tol || 1e-10
 
+  // ── 冻结点：这些标签的坐标在迭代中完全不动 ──
+  // 用途见 correctedRender：含派生点（垂足/中点/交点/折叠像…）的结构里，
+  // 真实顶点是**从图上读出来的观测值**，派生点是**推出来的**——修正应由派生点承担，
+  // 不能反过来挪真实顶点去迁就它。
+  //
+  // 实测（折叠题 A(10,80) B(40,20) C(90,80) + B′ 关于 AC 的镜像）：
+  // 不冻结时 LM 的最小范数步把 21.8px 修正**平摊**到四个点上，真实顶点 C 被挪 21.8px，
+  // 图形被扭曲。调 anchorWeight 救不了——LM 是梯度下降，首步就把修正摊开，
+  // 约束满足后梯度归零、锚再也拉不回来（局部极小）；实测权重放大 5000 倍顶点仍动 3.85px。
+  // 所以这里用硬冻结：只把 delta 的对应分量清零，保留它们在雅可比里的列，
+  // 约束仍能"看见"这些点的位置（残差确实依赖它们，如 reflect 依赖 A、C）。
+  const fixedSet = new Set(options.fixedPoints || [])
+
   const init = new Array(2 * N)
   let x = new Array(2 * N)
   labels.forEach((l, i) => {
@@ -80,8 +93,8 @@ export function solveGeometry(points, constraints, options = {}) {
       for (const comp of c.comps) r.push(w * comp.norm)
     }
     if (anchors) {
-      const aw = Math.sqrt(anchorWeight)
       for (let i = 0; i < N; i++) {
+        const aw = Math.sqrt(anchorWeight)
         r.push((aw * (vec[2 * i] - init[2 * i])) / scale)
         r.push((aw * (vec[2 * i + 1] - init[2 * i + 1])) / scale)
       }
@@ -121,6 +134,11 @@ export function solveGeometry(points, constraints, options = {}) {
     for (let a = 0; a < 2 * N; a++) A[a][a] += lambda
     const delta = solveLinear(A, b)
     if (!delta) break
+    if (fixedSet.size > 0) {
+      labels.forEach((l, i) => {
+        if (fixedSet.has(l)) { delta[2 * i] = 0; delta[2 * i + 1] = 0 }
+      })
+    }
     const xn = x.map((v, i) => v + delta[i])
     const next = build(xn)
     const nextCost = costOf(next)

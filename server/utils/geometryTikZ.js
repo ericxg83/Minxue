@@ -10,9 +10,15 @@
 import {
   parseGeometryStructure,
   normalizeStructure,
-  isEmptyStructure
+  isEmptyStructure,
+  isVertexSymbolLabel,
+  isAuxPointLabel,
+  isTickNumberLabel,
+  splitCurveRuns,
+  resolveAxisLabels
 } from './geom/structure.js'
 import { unit } from './geom/vec.js'
+import { placeLabel, outwardPref, vertexPref } from './geom/labelPlace.js'
 
 // 再导出，保持 tikzWorker 既有的 import 路径不变
 export { parseGeometryStructure, isEmptyStructure }
@@ -20,6 +26,10 @@ export { parseGeometryStructure, isEmptyStructure }
 const isNum = (v) => typeof v === 'number' && isFinite(v)
 
 const fmt = (n) => Math.round(n * 100) / 100
+
+// 数轴 / 直角坐标系数值标注距轴线的距离（cm，2026-09-19）。
+// 与 SVG 渲染器 AXIS_LABEL_DY 语义一致：固定距离、居中，同图所有标签等距。
+const AXIS_LABEL_GAP = { below: '0.25cm', above: '0.18cm', origin: '0.10cm', originDx: '0.16cm' }
 
 /* TikZ 转义（保留 _ 和 ^，用于角/指数标注） */
 const esc = (str) => String(str).replace(/([&%$#{}])/g, '\\$1')
@@ -79,6 +89,51 @@ export function renderGeometryTikZ(structure) {
     lines.push(`\\draw${opt} (${fmt(c.cx)},${fmt(c.cy)}) circle (${fmt(c.r)});`)
   }
 
+  // ── 填充多边形（阴影区域，2026-09-18）──
+  // 与 SVG 渲染器同一条判据：顶点齐备 + 每条边都已由 segments 表达，才上色。
+  const segKeys = new Set(s.segments.map(g => [String(g.from), String(g.to)].sort().join('|')))
+  for (const pg of s.polygons || []) {
+    if (!pg.fill) continue
+    const labels = pg.points || []
+    if (labels.length < 3) continue
+    if (!labels.every(l => pmap[l])) continue
+    const closed = labels.every((l, i) =>
+      segKeys.has([l, labels[(i + 1) % labels.length]].sort().join('|'))
+    )
+    if (!closed) continue
+    const coords = labels.map(l => `(${fmt(pmap[l].x)},${fmt(pmap[l].y)})`).join(' -- ')
+    lines.push(`\\draw[fill=black!12] ${coords} -- cycle;`)
+  }
+
+  // ── 圆弧（扇形弧 / 优弧劣弧，2026-09-18）──
+  for (const arc of s.arcs || []) {
+    const c = pmap[arc.center]
+    const a = pmap[arc.from]
+    const b = pmap[arc.to]
+    if (!c || !a || !b) continue
+    const R = Math.hypot(a.x - c.x, a.y - c.y)
+    if (!(R > 0)) continue
+    const { startAngle, endAngle } = arcAngles(c, a, b)
+    const style = arc.style === 'dashed' ? 'dashed' : arc.style === 'dotted' ? 'dotted' : ''
+    const opt = style ? `[${style}]` : ''
+    lines.push(
+      `\\draw${opt} (${fmt(a.x)},${fmt(a.y)}) arc[start angle=${fmt(startAngle)}, end angle=${fmt(endAngle)}, radius=${fmt(R)}];`
+    )
+  }
+
+  // ── 曲线（函数图象，2026-09-18；2026-09-19 改平滑渲染）──
+  // 与 SVG 渲染器**同源同形**：splitCurveRuns 切无定义缺口，再用 Catmull-Rom 转
+  // `.. controls ..` 三次贝塞尔。刻意不用 TikZ 的 `smooth` 绘图选项——那要
+  // plothandlers 库，仓库里没有任何 `\usetikzlibrary` 声明，缺库会直接编译失败。
+  for (const cv of s.curves || []) {
+    const style = cv.style === 'dashed' ? 'dashed' : cv.style === 'dotted' ? 'dotted' : ''
+    const opt = style ? `[${style}]` : ''
+    for (const run of splitCurveRuns(cv.points, cv.breaks)) {
+      const d = tikzSmoothPath(run)
+      if (d) lines.push(`\\draw${opt} ${d};`)
+    }
+  }
+
   // ── 线段 ──
   for (const seg of s.segments) {
     const a = pmap[seg.from]
@@ -112,35 +167,169 @@ export function renderGeometryTikZ(structure) {
     lines.push(perpendicularMark(v, a, b))
   }
 
+  // ── 角标记（顶点处的小圆弧，2026-09-18）──
+  // 半径固定 0.4 个 TikZ 单位，与 SVG 渲染器的 14px 对应。
+  const ANGLE_MARK_R = 0.4
+  for (const m of s.angleMarks || []) {
+    const v = pmap[m.vertex]
+    const a = pmap[m.from]
+    const b = pmap[m.to]
+    if (!v || !a || !b) continue
+    const { startAngle, endAngle } = arcAngles(v, a, b)
+    const rad = startAngle * Math.PI / 180
+    const sx = v.x + ANGLE_MARK_R * Math.cos(rad)
+    const sy = v.y + ANGLE_MARK_R * Math.sin(rad)
+    lines.push(
+      `\\draw (${fmt(sx)},${fmt(sy)}) arc[start angle=${fmt(startAngle)}, end angle=${fmt(endAngle)}, radius=${ANGLE_MARK_R}];`
+    )
+  }
+
   // ── 顶点圆点 ──
+  // 数轴 / 直角坐标系标注的摆位与 SVG 渲染器同一条判据（resolveAxisLabels）：
+  // 圆点吸附到轴上，模型写的 y=-9 只是"文字放轴下方"的排版意图。
+  const axisLabels = resolveAxisLabels(s)
   for (const p of s.points) {
     if (!isNum(p?.x) || !isNum(p?.y)) continue
+    // 内部辅助点（`_` 前缀）只参与几何计算，不画圆点（2026-09-19，与 SVG 渲染器同判据）
+    if (isAuxPointLabel(p.label)) continue
+    // 刻度数字（0、1、-2…）是文字刻度不是顶点，不画圆点（2026-09-19，与 SVG 同判据）
+    if (isTickNumberLabel(p.label)) continue
+    const axisLay = axisLabels.get(p.label)
+    // snap=false 的是「本来就落在轴上的真顶点」：圆点保持原位，只统一文字摆位
+    const snapped = !!axisLay && axisLay.snap !== false
+    const py = snapped ? axisLay.axisY : p.y
+    // 原点：圆点吸附到**两轴交点**（模型给的 x/y 是文字排版意图，不是几何事实）
+    const px = snapped && isNum(axisLay.atX) ? axisLay.atX : p.x
     if (p.type === 'origin') {
       // 原点：小圆圈
-      lines.push(`\\draw (${fmt(p.x)},${fmt(p.y)}) circle (0.08);`)
+      lines.push(`\\draw (${fmt(px)},${fmt(py)}) circle (0.08);`)
     } else if (p.type !== 'point') {
       // 普通顶点：实心点
-      lines.push(`\\fill (${fmt(p.x)},${fmt(p.y)}) circle (0.06);`)
+      lines.push(`\\fill (${fmt(px)},${fmt(py)}) circle (0.06);`)
     }
     // type === 'point' 不画圆点（只是位置标记）
   }
 
   // ── 顶点字母标注 ──
+  // 与 SVG 渲染器同一条判据（2026-09-19）：只画「数学符号」类名字，
+  // 拦掉视觉模型给内部对象起的占位符（pt_a、arr_u、Axis_start、T1_b…）；
+  // 摆位同样走 labelPlace 打分（避让线段/文字/点），两渲染器必须一致。
+  const labelPts = s.points
+    .filter(p => isNum(p?.x) && isNum(p?.y) && p.label && isVertexSymbolLabel(p.label))
+    .map(p => ({ x: p.x, y: p.y }))
+  const labelSegs = []
+  for (const g of s.segments) {
+    const a = pmap[g.from]
+    const b = pmap[g.to]
+    if (a && b && isNum(a.x) && isNum(a.y) && isNum(b.x) && isNum(b.y)) {
+      labelSegs.push({ a: { x: a.x, y: a.y }, b: { x: b.x, y: b.y } })
+    }
+  }
+  for (const pg of s.polygons || []) {
+    const vs = (pg?.points || []).map(l => pmap[l]).filter(v => v && isNum(v.x) && isNum(v.y))
+    for (let i = 0; i < vs.length; i++) {
+      labelSegs.push({ a: { x: vs[i].x, y: vs[i].y }, b: { x: vs[(i + 1) % vs.length].x, y: vs[(i + 1) % vs.length].y } })
+    }
+  }
+  const placedBoxes = []
   for (const p of s.points) {
     if (!isNum(p?.x) || !isNum(p?.y) || !p.label) continue
-    const pos = labelOffset(p, s.points)
-    lines.push(`\\node[${pos.anchor}] at (${fmt(p.x + pos.dx)}, ${fmt(p.y + pos.dy)}) {$${esc(p.label)}$};`)
+    if (!isVertexSymbolLabel(p.label)) continue
+    const axisLay = axisLabels.get(p.label)
+    if (axisLay) {
+      // 轴系标签：点正下/正上方居中，同图所有标签距轴等距（不走避让打分，
+      // 该算法对共线点集会把手写体推散到左右两侧）。
+      // 落轴真顶点（snap=false）也按此摆位，与刻度数字齐平；只是它本就在轴上。
+      // 原点额外右移一点（`below right`），避开 y 轴往轴下方伸出的那一小截。
+      const atY = axisLay.origin && isNum(axisLay.atY)
+        ? axisLay.atY
+        : (axisLay.snap === false ? p.y : axisLay.axisY)
+      // 原点：锚在**两轴交点**上（模型给的坐标只是"文字放哪"的排版意图）
+      const atX = axisLay.origin && isNum(axisLay.atX) ? axisLay.atX : p.x
+      let opt
+      if (axisLay.side === 'above') opt = `above=${AXIS_LABEL_GAP.above}`
+      else if (axisLay.origin) opt = `below=${AXIS_LABEL_GAP.origin}, xshift=${AXIS_LABEL_GAP.originDx}`
+      else opt = `below=${AXIS_LABEL_GAP.below}`
+      lines.push(`\\node[${opt}] at (${fmt(atX)}, ${fmt(atY)}) {$${esc(p.label)}$};`)
+      continue
+    }
+    const node = { x: p.x, y: p.y }
+    const fallback = outwardPref(node, labelPts)
+    const pos = placeLabel({
+      tag: p.label,
+      node,
+      points: labelPts,
+      segments: labelSegs,
+      placed: placedBoxes,
+      // 偏好方向 = 该顶点的外角平分线（教材惯例）；孤立点/共线点回退到"远离质心"
+      prefer: vertexPref(node, labelSegs, fallback),
+      dist: 0.35,
+      box: { w: labelWidthTikz(p.label), h: 0.5 },
+    })
+    const tx = node.x + pos.dx
+    const ty = node.y + pos.dy
+    lines.push(`\\node[${anchorOfDir(pos.dir)}] at (${fmt(tx)}, ${fmt(ty)}) {$${esc(p.label)}$};`)
+    placedBoxes.push({ x: tx, y: ty, w: labelWidthTikz(p.label), h: 0.5 })
   }
 
   // ── 长度/角度/文字标注 ──
   for (const l of s.labels) {
     if (!isNum(l?.x) || !isNum(l?.y) || l.text == null) continue
+    // 文字通道里的原点符号（模型把 O 写成 label 而不是 point）：同样锚到两轴交点，
+    // 摆位与上面「顶点字母标注」的原点分支逐字一致（同样 below/xshift），
+    // 否则它会在交点右下方老远（实测 22px/26px）。
+    const oLay = axisLabels.get(String(l.text).trim())
+    if (oLay && oLay.origin && isNum(oLay.atX) && isNum(oLay.atY)) {
+      lines.push(
+        `\\node[below=${AXIS_LABEL_GAP.origin}, xshift=${AXIS_LABEL_GAP.originDx}] at (${fmt(oLay.atX)}, ${fmt(oLay.atY)}) {$${esc(String(l.text))}$};`
+      )
+      continue
+    }
     lines.push(`\\node at (${fmt(l.x)},${fmt(l.y)}) {$${esc(String(l.text))}$};`)
   }
 
   lines.push('\\end{tikzpicture}')
 
   return lines.join('\n')
+}
+
+/**
+ * 求圆弧的起始/终止角（度，TikZ 约定：x 轴正方向为 0°，逆时针为正）。
+ * 数学坐标下从 a 逆时针扫到 b，故终止角保证大于起始角。
+ * 与 SVG 渲染器 arcPathD 同一约定，两个渲染器必须给出方向一致的弧。
+ */
+function arcAngles(c, a, b) {
+  const toDeg = (p) => Math.atan2(p.y - c.y, p.x - c.x) * 180 / Math.PI
+  const startAngle = toDeg(a)
+  let endAngle = toDeg(b)
+  while (endAngle <= startAngle) endAngle += 360
+  return { startAngle, endAngle }
+}
+
+/**
+ * 曲线采样点 → TikZ 三次贝塞尔路径（`(p0) .. controls (c1) and (c2) .. (p1) ...`）。
+ *
+ * Catmull-Rom 插值，与 `geometrySvg.js` 的 smoothPathD **逐点等价**：
+ * 两个渲染器必须给出形状一致的同一条曲线，否则 App 上的图和 PDF/讲义里的图
+ * 会对不上（此前顶点标注就踩过一次"只改一半"的坑）。
+ */
+function tikzSmoothPath(P) {
+  const pt = (p) => `(${fmt(p[0])},${fmt(p[1])})`
+  if (!Array.isArray(P) || P.length < 2) return null
+  if (P.length === 2) return `${pt(P[0])} -- ${pt(P[1])}`
+  const n = P.length
+  const at = (i) => P[Math.max(0, Math.min(n - 1, i))]
+  let out = pt(P[0])
+  for (let i = 0; i < n - 1; i++) {
+    const p0 = at(i - 1)
+    const p1 = at(i)
+    const p2 = at(i + 1)
+    const p3 = at(i + 2)
+    const c1 = [p1[0] + (p2[0] - p0[0]) / 6, p1[1] + (p2[1] - p0[1]) / 6]
+    const c2 = [p2[0] - (p3[0] - p1[0]) / 6, p2[1] - (p3[1] - p1[1]) / 6]
+    out += ` .. controls ${pt(c1)} and ${pt(c2)} .. ${pt(p2)}`
+  }
+  return out
 }
 
 /**
@@ -175,30 +364,20 @@ function parallelMark(a, b) {
 }
 
 /**
- * 计算顶点字母标注的偏移方向：让字母朝向远离图形质心的一侧。
+ * 标注文本框的近似宽度（TikZ 数学单位）。字号约 0.5 单位高，符号宽约 0.3/字符。
+ * 与 SVG 渲染器的 labelWidth 语义一致，仅量纲不同，用于避让打分。
  */
-function labelOffset(point, allPoints) {
-  let cx = 0, cy = 0, n = 0
-  for (const p of allPoints) {
-    if (isNum(p?.x) && isNum(p?.y)) { cx += p.x; cy += p.y; n++ }
-  }
-  if (n === 0) return { dx: 0, dy: 0.3, anchor: 'below' }
-  cx /= n
-  cy /= n
-  let vx = point.x - cx
-  let vy = point.y - cy
-  const len = Math.hypot(vx, vy) || 1
-  vx /= len
-  vy /= len
-  const dist = 0.3
-  const dx = vx * dist
-  const dy = vy * dist
-  // TikZ 方向锚点
-  let anchor
-  if (vx > 0.4) anchor = 'right'
-  else if (vx < -0.4) anchor = 'left'
-  else if (vy > 0.4) anchor = 'above'
-  else if (vy < -0.4) anchor = 'below'
-  else anchor = 'right'
-  return { dx, dy, anchor }
+function labelWidthTikz(label) {
+  const s = String(label || '')
+  let w = 0
+  for (const ch of s) w += /[\u2080-\u209f\u2070-\u207f]/.test(ch) ? 0.2 : 0.3
+  return Math.max(0.25, w)
+}
+
+/** 候选方向 → TikZ 节点锚点（与 labelPlace 的 dir 命名对应） */
+function anchorOfDir(dir) {
+  if (dir === 'top') return 'above'
+  if (dir === 'bottom') return 'below'
+  if (dir === 'left' || dir === 'topLeft' || dir === 'bottomLeft') return 'left'
+  return 'right'
 }

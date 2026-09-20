@@ -377,29 +377,6 @@ export const getAIHeaders = () => ({
 
 export const BACKUP_VENDOR_DEFS = [
   {
-    // GMI Cloud (https://api.gmi-serving.com/v1)：OpenAI 兼容，2026-09 用户提供的"免费 10 天 Key"。
-    // 端点与魔搭/其它供应商独立，配额独立。视觉模型实测：MiniMaxAI/MiniMax-M3 是支持
-    // 多模态的（可看图识别作业题，235KB 高清作业图 13s 返回完整 JSON），速度比魔搭快 6-8 倍。
-    // 接入策略：插在 BACKUP_VENDOR_DEFS 第 0 位是默认位置（魔搭耗尽时第一个兜底）；
-    // 设 GMI_FIRST=1 可把它顶到魔搭前面作为"主 KEY"（10 天免费期内的临时切换，失效后改回 0 即可）。
-    name: 'GMI',
-    envKey: 'GMI_API_KEY',
-    endpoint: process.env.GMI_BASE_URL
-      ? `${process.env.GMI_BASE_URL.replace(/\/+$/, '')}/chat/completions`
-      : 'https://api.gmi-serving.com/v1/chat/completions',
-    modelsEndpoint: process.env.GMI_BASE_URL
-      ? `${process.env.GMI_BASE_URL.replace(/\/+$/, '')}/models`
-      : 'https://api.gmi-serving.com/v1/models',
-    textModel: process.env.GMI_TEXT_MODEL || 'MiniMaxAI/MiniMax-M3',
-    // 默认视觉模型：M3 既是文本也是视觉，2026-09-03 实测可识别作业题。
-    // 备用再列一个 8B VL，魔搭耗尽且 M3 撞限流时作为兜底。
-    vlModels: process.env.GMI_VL_MODELS
-      ? process.env.GMI_VL_MODELS.split(',').map(s => s.trim()).filter(Boolean)
-      : ['MiniMaxAI/MiniMax-M3', 'Qwen/Qwen3-VL-8B-Instruct'],
-    keyPrefix: null,
-    referer: null,
-  },
-  {
     // SenseNova（商汤科技日日新，OpenAI 兼容）：第一备用供应商（2026-08 起排第二，仅次于魔搭）。
     // 2026-08 用户 Key 实测（token.sensenova.cn 端点有效）：
     //   - sensenova-6.8-flash-lite / sensenova-6.7-flash-lite：多模态（text+image → text），0 计费，均匀可作视觉 OCR
@@ -424,8 +401,36 @@ export const BACKUP_VENDOR_DEFS = [
     extraBody: { reasoning_effort: 'none' },
   },
   {
-    // 阿里云百炼「Token Plan」（token-plan.cn-beijing.maas.aliyuncs.com）：OpenAI 兼容。
-    // 2026-09-16 接入：SenseNova 是「账号级 RPM」，白天被线上批改占满，本机/备用拿不到 pro；
+    // 辉辉云「另一组」key 的 gemini 池（2026-09-19 用户提供，**收费，按 token 计费**）：
+    // ⚠️ 2026-09-19 用户换分组后模型池变化：3.7-flash / 3.6-flash / 3.1-pro(-preview) 可用，
+    //    **gemini-3.8-flash 返回 404 Resource not found**（分组不含该模型，不是限流）。
+    //    探测：server/_diag_gemini_pool_probe.mjs（秒级只读）。
+    //
+    // 选型实测（同题 13 张 A/B，server/_diag_37_vs_38_ab.mjs，报告 _几何重绘-换组归因结论-20260919.md）：
+    //   - 能力：3.7-flash 12/13（92.3%；唯一失败是 403 `All available accounts exhausted`
+    //     账号池打满，非模型能力）、平均 2.08 轮、标注冒名 0 条（辅助点全带 `_` 前缀）；
+    //     3.8-flash 基线 13/13 但平均 ~2.5 轮，且历史批次 80 张里 **273/1003 条（27.2%）
+    //     是内部占位符**（P1_left/L1_top/X_min/p_0）⇒ 标注比 3.7 脏，只是当时没有闸门。
+    //   - 费用（用户账单）：3.7 = $0.00152/次、$0.270/M token；
+    //     3.8 = $0.01970/次、$4.744/M token（即用户口径的「0.02/次」）
+    //     ⇒ **3.8 贵 13×（按次）/ 17.6×（按 token），单张题成本 15.6×**。
+    //     **结论：留在 3.7-flash，不要切回 3.8 分组。**
+    //   - ⚠️ 换组后必须同步改下一行：旧组写 gemini-3.8-flash，新组写 gemini-3.7-flash，
+    //     写错整条链 404（**配置与分组必须成对改**）。
+    // 视觉 DSL 生成 92%+、2-20s/次、执行错误码 0——几何重绘 DSL 通道主力，
+    // 也是 OCR/视觉识别的高质量后备。
+    // ⚠️ 收费池：默认排在 SenseNova 之后（免费通道耗尽才触发）；魔搭恢复后仍是免费主力。
+    //    不想自动消耗时删掉本段或清空 HUIHUIYUN_GEMINI_API_KEY 即可。
+    name: 'HuihuiyunGemini',
+    envKey: 'HUIHUIYUN_GEMINI_API_KEY',
+    endpoint: 'https://api.huihuiyun.top/v1/chat/completions',
+    vlModels: ['gemini-3.7-flash', 'gemini-3.1-pro'],
+    maxTokens: 16384,
+    referer: null,
+    extraBody: null,
+  },
+  {
+    // 阿里云百炼「Token Plan」（token-plan.cn-beijing.maas.aliyuncs.com）：OpenAI 兼容。    // 2026-09-16 接入：SenseNova 是「账号级 RPM」，白天被线上批改占满，本机/备用拿不到 pro；
     // 百炼 Token Plan 的 deepseek-v4-pro 是独立额度（sk-sp- Key 必须配套 token-plan 域名，
     // 打通用 dashscope 地址会 401 —— 见 skill「敏学练习册解析中断排查」）。
     // 实测：卷面第5题 5.4s 返回「3」（正确），277 tokens。
@@ -442,36 +447,44 @@ export const BACKUP_VENDOR_DEFS = [
     extraBody: null,
   },
   {
-    // 辉辉云聚合网关（api.huihuiyun.top）：OpenAI 兼容，OpenAI 兼容中转。
-    // 2026-09-13 实测（本次新增，原因：官方 SenseNova Key 已 429 打满 —— tpm/rpm exhausted
-    //   连测 3 次全失败，导致魔搭限流后第一备用供应商实际是断的，此通道用于补位）：
-    //   - 网关上只有 4 个模型：auto / grok-4.5 / grok-4.6 / sensenova-6.8-flash-lite
-    //   - ⚠️ auto 是随机路由，同一张图两次结果可能不同，绝不可用于生产
-    //   - sensenova-6.8-flash-lite 必须传 reasoning_effort:'none'（默认参数 100% 失败：
-    //     思考链 10.5k–12.5k 字符吃满 8192 max_tokens，正文一个 JSON 都吐不出来）
+    // 辉辉云聚合网关（api.huihuiyun.top）：OpenAI 兼容中转。
+    // 2026-09-13 首次接入，原因：官方 SenseNova Key 已 429 打满（tpm/rpm exhausted），
+    //   魔搭限流后第一备用供应商实际是断的，此通道用于补位。
+    //
+    // 2026-09-18 换新 Key 后重测（15 个模型全量基准，脚本 server/_diag_hhy_bench.mjs，
+    //   完整报告 _辉辉云后备模型选型-20260918.md）：
+    //   - ⚠️ 原配置的 sensenova-6.8-flash-lite 已不在账号模型列表中，且实测 **0/20 可调用**
+    //     （偶发约 10% 能通 —— 比彻底失效更危险，生产里表现为随机丢页）→ 已换掉。
+    //     它同时也是答案引擎兜底的 textModel，一并换掉。
+    //   - 账号 15 个模型中**只有 qwen3.8-max 可作视觉后备**：唯一坐标尺度正确（0-1000 归一化；
+    //     deepseek-v4-flash-vision-exp / kimi-k3 / glm-5.3-flash 都给 y>1000 非法值），
+    //     完整 OCR prompt 下 3/3 页出 JSON，50–80s/页。
+    //   - 其余实测均不可用：qwen3.8-flash 空响应、glm-5.3 400、glm-5.2 502、
+    //     MiniMax-M3 / qwen3.7-max 报错、minimax-m3 声称看不到图、deepseek-v4-pro 502 + 489s/页。
+    //   - ⚠️ 三个接入硬前提，缺一即 100% 失败（qwen3.8-max @4096 实测 0/3 页全空）：
+    //     ① extraBody 必须带 reasoning_effort:'none'（否则思考链吃满 max_tokens → content 空）
+    //     ② 必须配 maxTokens ≥ 8192 —— 备份路径是 Math.min(maxTokens, vendor.maxTokens || 4096)，
+    //        不配就被压到 4096（当年 sensenova 同一个坑）
+    //     ③ 备份超时必须 ≥ 120s —— 单页 50–80s，默认 60s 会被掐死（见 BACKUP_VISION_TIMEOUT_MS）
+    //   - 能力边界：**只能当「文字 OCR 兜底」，不能当「配图定位兜底」**。配图框 IoU≥0.5 仅 38%
+    //     （未降级期魔搭是 100% 有框）；且实测「喂单题区块裁片」与「喂整页」命中率持平
+    //     （3/6 vs 3/6），「改用区块裁片补图」这条路已被否证。配图必须靠主 OCR 锁模型解决。
+    //   - grok 系列视觉不可用（student_answer 0/15 全空、内容误读），只能用于判题终裁，不进 OCR 链路。
+    //   - 模型 id 必须用 /v1/models 返回的完整 id（短名会 404）。
     //   - 域名解析到境外 IP（154.9.255.39），国内直连 http=000 不通；
-    //     Render (Oregon) 出站应可直接访问（与 ZenMux 同型），但**尚未在生产实测**
-    //   - 视觉识别实测：真图 15 题 40–58s（魔搭 73–98s），严格 JSON 3/3 合规、
-    //     坐标 15/15 合法、answer 零污染；但学生答案漏抽 4/15、手写关键符号会丢负号，
-    //     **不能单独取代魔搭**（详见 deliverables/model_hybrid_plan_20260913.md）
-    //   - grok-4.6 视觉链路成功率仅 2/6，不可用于 OCR；其文本判题的数学等价宽容度最高
-    //     （62%），将来若上「判题终裁 L3」再单独配置（本供应商 extraBody 带
-    //     reasoning_effort:'none'，不适用于 grok，故 vlModels 只列 sensenova）
-    // 聚合网关 api.huihuiyun.top。2026-09-13 实测（详见 deliverables/model_hybrid_plan_20260913.md）：
-    // 该账号组仅开通 grok-4.5 / grok-4.6 / sensenova-6.8-flash-lite（+ auto 别名）。
-    //   · vlModels 只放 sensenova —— grok 系列视觉实测不可用：student_answer 0/15 全空（无学生答案=无法判题）、
-    //     延迟 122–142s，且内容误读（Q1 2√6−5→2√5−5、Q11 −√6→−√3）。grok 只能用于判题终裁，不能进 OCR 链路。
-    //   · 模型 id 必须用 /v1/models 返回的完整 id（如 auto 实为「auto（随机路由高级模型）」，短名会 404）。
-    // ⚠️ extraBody 是供应商级、不按模型区分：sensenova 必须带 reasoning_effort:'none'
-    //    （否则思考链吃满 max_tokens → 完整 OCR 100% 失败）。若将来把 grok 加进本供应商，
-    //    必须先改成按模型下发 extraBody，grok 不接受该参数。
+    //     Render (Oregon) 出站应可直接访问（与 ZenMux 同型），但**尚未在生产实测**。
+    // ⚠️ extraBody / maxTokens 是供应商级、不按模型区分。本供应商当前只放 qwen3.8-max
+    //    （它恰好同时满足 reasoning_effort:'none' + 大 maxTokens），故暂无冲突；
+    //    若将来要在本供应商混配多个模型（如把 grok 加进来，它不接受 reasoning_effort），
+    //    必须先改成按模型下发这两个字段。
     name: 'Huihuiyun',
     envKey: 'HUIHUIYUN_API_KEY',
     endpoint: process.env.HUIHUIYUN_BASE_URL
       ? `${process.env.HUIHUIYUN_BASE_URL.replace(/\/+$/, '')}/chat/completions`
       : 'https://api.huihuiyun.top/v1/chat/completions',
-    textModel: 'sensenova-6.8-flash-lite',
-    vlModels: ['sensenova-6.8-flash-lite'],
+    textModel: 'deepseek-v4-flash',
+    vlModels: ['qwen3.8-max'],
+    maxTokens: 32768,
     referer: null,
     extraBody: { reasoning_effort: 'none' },
   },
@@ -519,46 +532,13 @@ export const BACKUP_VENDOR_DEFS = [
     textModel: 'glm-4-flash',
     vlModels: ['glm-5v-turbo', 'glm-4v-flash'],
     maxTokens: 1024, // glm-4v-flash 硬上限；充值后想用 glm-5v-turbo 完整输出可提到 4096
+    // 2026-09-18 按模型下发：glm-5v-turbo 无 1024 限制，整页 OCR 需要 ~5000+ 字符。
+    // 实测（`_diag_backup_chain.mjs`）glm-5v-turbo 整页返回 5175 字符 / 99.8s；
+    // 若被压到 1024，端到端实测只回来 2841 字符且 JSON 在末尾断掉 → 整页失败。
+    // 配图定位质量实测 IoU≥0.5 = 75%（比辉辉云 qwen3.8-max 的 38% 更好），是链路上值得保住的兜底。
+    vlModelMaxTokens: { 'glm-5v-turbo': 8192 },
     keyPrefix: null, // 智谱 Key 形如 <id>.<secret>，无统一前缀，有 Key 即启用
     referer: null,
-  },
-  {
-    name: 'Agnes',
-    envKey: 'AGNES_API_KEY',
-    endpoint: 'https://apihub.agnes-ai.com/v1/chat/completions',
-    textModel: 'agnes-1.5-flash',
-    // 顺序：Agnes 自家独立模型（agnes-1.5-flash / gpt-4o-mini）放最前，独立配额不与魔搭冲突；
-    // 之前在列表里的 'Qwen/Qwen3-VL-8B-Instruct' 实际是通过 Agnes 中转到魔搭，
-    // 一旦魔搭 8B 配额耗尽会再次撞 429 必须被排除，避免阻塞整个视觉链；
-    // 'Qwen2.5-VL-7B-Instruct' 留在末尾作为补充（Agnes 走的是另一组 provider，与 8B 独立）。
-    vlModels: ['agnes-1.5-flash', 'gpt-4o-mini', 'Qwen2.5-VL-7B-Instruct'],
-    referer: null,
-  },
-  {
-    // FreeModel：多模型聚合网关，OpenAI 兼容格式。
-    // 配额 5 小时重置（非按日），不能作为主 API，仅作最后兜底。
-    // model='auto' 让网关自动路由到最合适的模型，无需手动选模型。
-    name: 'FreeModel',
-    envKey: 'FREEMODEL_API_KEY',
-    endpoint: 'https://api.freemodel.dev/v1/chat/completions',
-    textModel: 'auto',
-    vlModels: ['auto'],
-    referer: null,
-  },
-  {
-    // AgentRouter（付费中转网关，OpenAI 兼容）：最最最后的付费兜底。
-    // 2026-08 用户提供：OPENAI_BASE_URL=https://agentrouter.org/v1，模型 gpt-5.6-sol（付费，质量高）。
-    // 放在 BACKUP_VENDOR_DEFS 末位 = 仅在魔搭 + 全部免费备用都不可用时才触发，
-    // 避免昂贵的付费调用抢占免费额度。
-    // 注：该域名本地直连可能不稳定（fetch failed），生产 Render (Oregon) 出站已验证可配置，
-    // 启动时即用环境变量 key，无需 keyPrefix（sk-... 直接启用）。
-    name: 'AgentRouter',
-    envKey: 'AGENTROUTER_API_KEY',
-    endpoint: 'https://agentrouter.org/v1/chat/completions',
-    textModel: 'gpt-5.6-sol',
-    vlModels: ['gpt-5.6-sol'],
-    referer: null,
-    extraBody: null,
   },
 ]
 
@@ -575,6 +555,22 @@ let _resolvedVendorsCache = null
 function getResolvedVendors() {
   if (!_resolvedVendorsCache) _resolvedVendorsCache = resolveBackupVendors()
   return _resolvedVendorsCache
+}
+
+/**
+ * 备份供应商的 maxTokens 上限 —— 支持**按模型下发**，不再一个供应商一刀切。
+ *
+ * 背景（2026-09-18 端到端实测）：BigModel 的 `maxTokens: 1024` 是给 `glm-4v-flash`
+ * 的硬上限（超了报 1210），但同一个供应商下的 `glm-5v-turbo` 并没有这个限制。
+ * 供应商级一刀切的结果是：魔搭耗尽 → 辉辉云 404 → 落到 BigModel 时被压到 1024，
+ * 整页 OCR 返回 ~2800 字符就被截断，JSON 在末尾断掉 → 整页识别失败。
+ * 这正是「参数不匹配导致后备 100% 失败」这一类坑，与 maxTokens 未配时的 4096 同源。
+ *
+ * 优先级：vlModelMaxTokens[模型] > vendor.maxTokens > 4096（沿用原有兜底语义）。
+ */
+function backupModelMaxTokens(vendor, vlModel, maxTokens) {
+  const cap = (vendor?.vlModelMaxTokens || {})[vlModel] || vendor?.maxTokens || 4096
+  return Math.min(maxTokens, cap)
 }
 
 export const BACKUP_CONFIG = {
@@ -1339,8 +1335,13 @@ export async function callVisionCompletion(opts) {
 
   // 备份提供商超时：主 ModelScope 失败后快速尝试备选，防止阻塞批次。
   // 视觉请求整体比文本慢得多，20s 对大图会把本来能成功的备用也误杀，
-  // 因此按 env 可调，默认放宽到 60s。
-  const BACKUP_TIMEOUT = parseInt(process.env.BACKUP_VISION_TIMEOUT_MS) || 60000
+  // 因此按 env 可调，默认放宽到 180s。
+  // 2026-09-18 由 60s 提到 180s：辉辉云后备 qwen3.8-max 整页 OCR 实测（8 次，生产消息结构）
+  //   分布 36.8 / 39.0 / 40.8 / 71.8 / 91.5 / 109.4 / 143.3 / 300+（超时），中位 ~72s、p90 ~145s。
+  //   60s 会杀掉一半以上；120s 仍会杀掉 p90 的 143s 慢页，故取 180s 覆盖到 p90 之上。
+  //   长尾（>180s）由重试与 watchdog 兜底 —— 与 maxTokens 被压到 4096 是同一类
+  //   「参数不匹配导致后备 100% 失败」的坑，见 _辉辉云后备模型选型-20260918.md。
+  const BACKUP_TIMEOUT = parseInt(process.env.BACKUP_VISION_TIMEOUT_MS) || 180000
 
   const providers = []
 
@@ -1435,7 +1436,7 @@ export async function callVisionCompletion(opts) {
               model: model || vlModel,
               messages,
               temperature,
-              maxTokens: Math.min(maxTokens, vendor.maxTokens || 4096),
+              maxTokens: backupModelMaxTokens(vendor, vlModel, maxTokens),
               timeout: BACKUP_TIMEOUT,
               retry503: false,
               // 备用供应商 429 直接失败，让下一个备用顶上来，避免每个备用都等 8s 重试
@@ -1511,7 +1512,7 @@ export async function callVisionCompletion(opts) {
               model: model || vlModel,
               messages,
               temperature,
-              maxTokens: Math.min(maxTokens, vendor.maxTokens || 4096),
+              maxTokens: backupModelMaxTokens(vendor, vlModel, maxTokens),
               timeout: BACKUP_TIMEOUT,
               retry503: false,
               // 备用供应商 429 直接失败，让下一个备用顶上来

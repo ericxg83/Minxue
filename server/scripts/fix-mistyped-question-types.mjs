@@ -47,7 +47,7 @@ const csvCell = (v) => {
 async function main() {
   const { rows } = await pool.query(
     `SELECT q.id, q.task_id, q.student_id, q.page_number, q.question_number,
-            q.question_type, q.options, q.answer, q.content, q.geometry_image_url,
+            q.question_type, q.options, q.answer, q.content, q.parent_stem, q.geometry_image_url,
             q.is_complete, q.created_at, t.task_type, t.original_name
      FROM questions q
      LEFT JOIN tasks t ON t.id = q.task_id

@@ -6,9 +6,12 @@
  * 此时再启动作图题分类 / prompt 调优才有 ROI 依据。
  *
  * 三个指标：
- *   · refs_fig_incomplete  题干含"如图"但 is_complete=false —— 视觉模型漏检候选
+ *   · refs_fig_incomplete  题干（含公共题干 parent_stem）含"如图"但 is_complete=false —— 视觉模型漏检候选
  *   · wrong_book_blocked   会被错题本挡的错题/空答 —— 真正影响学生体验的数
  *   · blocked_other        is_complete=true 但未入 —— 旧 task 软删 / 低 conf 等对照
+ *
+ * ⚠️ 引图判据与 utils/questionCompleteness.js 的 FIGURE_KEYWORDS 同源（含 parent_stem）：
+ *    拆小问后「如图」只留在公共题干，只查 content 会系统性漏统计（2026-09-17 修正）。
  *
  * cron：每周日 23:17 跑一次（错开夜间任务），结果写日志。
  * API：/api/diagnostics/weekly-missing-figures?weeks=8 随时查趋势。
@@ -42,7 +45,7 @@ export const getWeeklyMissingFigureStats = async (weeks = 8) => {
       COUNT(*)::int AS total_questions,
       COUNT(*) FILTER (
         WHERE q.is_complete = FALSE
-          AND (q.content LIKE '%如图%' OR q.content LIKE '%图示%' OR q.content LIKE '%附图%' OR q.content LIKE '%见图%')
+          AND (COALESCE(q.parent_stem,'') || COALESCE(q.content,'')) ~ '如图|图1|图示|附图|见图'
       )::int AS refs_fig_incomplete,
       COUNT(*) FILTER (
         WHERE (q.is_correct = FALSE OR q.answer_source = 'blank')

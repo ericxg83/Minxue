@@ -1,4 +1,4 @@
-import { callVisionCompletion } from '../config/ai.js'
+import { callVisionCompletion, callVendorVisionCompletion } from '../config/ai.js'
 
 /**
  * 单题「区域重识别」服务（PC 批改工作台「重新识别本题」用）
@@ -138,22 +138,35 @@ const safeParseQuestion = (rawText) => {
  * @param {string} mimeType
  * @returns {Promise<{content:string, options:string[], answer:string, analysis:string, question_type:string}>}
  */
-export async function recognizeQuestionImage(imageBuffer, mimeType) {
+export async function recognizeQuestionImage(imageBuffer, mimeType, opts = {}) {
   if (!imageBuffer || imageBuffer.length === 0) {
     throw new Error('图片为空')
   }
 
-  const { content } = await callVisionCompletion({
+  // vendorName：显式指定视觉供应商（如 'Huihuiyun' / 'BigModel'）。
+  //   为什么需要它：默认路径锁魔搭（noBackup:true，理由见下），魔搭当日配额耗尽时
+  //   连"重新识别本题"都做不了。存量治理脚本（scripts/backfill-choice-options.mjs）
+  //   在魔搭不可用时需要一个**显式指定**的兜底通道 —— 注意这里是人工点名供应商，
+  //   不是静默降级：调用方承担选型责任，默认值不变，既有调用方零影响。
+  const { vendorName = null } = opts
+
+  const req = {
     imageDataURL: bufferToDataURL(imageBuffer, mimeType),
     systemPrompt: buildQuestionPrompt(),
     userText: '请提取这张图片中这一道题的题干、选项与参考答案，按 JSON 格式返回。',
     temperature: 0.05,
     maxTokens: 2048,
-    // 质量敏感：禁止静默降级到弱备份视觉模型。
-    // 理由同 2026-09-09 练习册答案事故（弱模型阅读顺序错乱、漏读），
-    // 补出来的题干/选项要直接落库并进入错题本，错不起。
-    noBackup: true,
-  })
+  }
+
+  const { content } = vendorName
+    ? await callVendorVisionCompletion({ ...req, vendorName, timeout: 180000 })
+    : await callVisionCompletion({
+      ...req,
+      // 质量敏感：禁止静默降级到弱备份视觉模型。
+      // 理由同 2026-09-09 练习册答案事故（弱模型阅读顺序错乱、漏读），
+      // 补出来的题干/选项要直接落库并进入错题本，错不起。
+      noBackup: true,
+    })
 
   return safeParseQuestion(content)
 }

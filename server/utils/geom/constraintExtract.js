@@ -157,22 +157,71 @@ export function extractConstraints(content, structure) {
     candidates.push(makeConstraint('parallel', { l1: [vs[1], vs[2]], l2: [vs[3], vs[0]] }, 'text', m[0]))
   }
 
-  // 折叠：将△BCE沿着BE折叠得到△BC′E / △BCE折叠后落在△BC′E
-  //   → reflect(派生点, 原像点, axis=折叠线)。带撇的是派生点（C→C′）。
-  //   轴（折叠线）可能显式给出（沿着BE），也可能只说「折叠后落在」需从上下文找。
-  const foldRe = re(String.raw`(?:将|把)?\s*△\s*(P)(P)(P)\s*(?:(?:沿着|沿|以)\s*(P)(P)\s*(?:所在直线)?)?\s*(?:折叠|翻折|对折)(?:后)?\s*(?:得到|落在)\s*△\s*(P′?)(P′?)(P′?)`)
-  for (const m of text.matchAll(foldRe)) {
-    const src = [m[1], m[2], m[3]].map(norm)
-    const axis = (m[4] && m[5]) ? [norm(m[4]), norm(m[5])] : null
-    const dst = [m[6], m[7], m[8]].map(norm)
-    for (let i = 0; i < 3; i++) {
-      if (dst[i].endsWith('′') && src[i] !== dst[i]) {
-        if (axis) {
-          candidates.push(makeConstraint('reflect', { point: dst[i], source: src[i], axis }, 'text', m[0]))
-        } else {
-          dropped.push({ raw: m[0], reason: `reflect_pair_without_axis:${src[i]}→${dst[i]}` })
-        }
-      }
+  // 折叠：将△ABC沿AC折叠 → 带撇点是原像点的镜像。
+  //
+  // 原实现只认「…折叠后得到/落在 △A′B′C′」一种写法，实测大量题目写的是
+  // 「将△ABC沿AC折叠，点B落在点B′处」——`落在` 后面跟的是**点**不是**三角**，
+  // 于是整条规则抽不到，折叠题的派生点（B′）永远是自由点。
+  //
+  // 改为两段式：先定位「折叠事件 + 轴」，再在同一句里找**点对**，两种来源都收：
+  //   a. 显式落点：点B落在点B′处 / 点B与点B′重合 / 点B的对应点是点B′
+  //   b. 像三角：…得到△AB′C′ / …落在△A′B′C′（按位与原三角配对）
+  // 像必须是**带撇点**，这一条同时挡住了「点D落在BC上」这类无关句式。
+  const FOLD_EVENT = String.raw`(?:将|把)?\s*(?:△|三角形)\s*(P)(P)(P)\s*(?:沿|沿着|以)\s*(?:直线)?\s*(P)(P)\s*(?:所在直线)?\s*(?:折叠|翻折|对折)`
+  for (const m of text.matchAll(re(FOLD_EVENT))) {
+    const src = [norm(m[1]), norm(m[2]), norm(m[3])]
+    const axis = [norm(m[4]), norm(m[5])]
+    // 只在「折叠事件所在句 + 紧邻一句」内找点对，避免匹配到后文无关的 △XYZ
+    let tail = text.slice(m.index, m.index + 160)
+    const stops = [...tail.matchAll(/。/g)].map(x => x.index)
+    if (stops.length >= 2) tail = tail.slice(0, stops[1] + 1)
+    const pairs = []
+
+    // a. 显式落点（目标必须带撇）
+    for (const p of tail.matchAll(/([A-Z][′'’]?)\s*(?:落在|与)\s*点?\s*([A-Z][′'’])/g)) {
+      const from = norm(p[1])
+      const to = norm(p[2])
+      if (from !== to) pairs.push([from, to])
+    }
+    for (const p of tail.matchAll(/([A-Z][′'’]?)\s*的对应点(?:是|为)\s*点?\s*([A-Z][′'’])/g)) {
+      const from = norm(p[1])
+      const to = norm(p[2])
+      if (from !== to) pairs.push([from, to])
+    }
+    // b. 像三角，按位配对。
+    //    注意**不能要求三个字母都带撇**——折痕上的顶点不动，所以像三角里只有被移动的
+    //    那个顶点带撇（△BCE 沿 BE 折叠得 △BC′E，△ABC 沿 AC 折叠得 △AB′C）。
+    //    按位比较后只给"变了"的位置发约束，等价于自动识别哪些顶点在折痕上。
+    const imgTri = tail.match(/(?:得到|落在|变成|成为)\s*△\s*([A-Z][′'’]?)([A-Z][′'’]?)([A-Z][′'’]?)/)
+    if (imgTri) {
+      const dst = [norm(imgTri[1]), norm(imgTri[2]), norm(imgTri[3])]
+      for (let i = 0; i < 3; i++) if (dst[i] !== src[i]) pairs.push([src[i], dst[i]])
+    }
+
+    for (const [from, to] of pairs) {
+      if (!to.includes('′')) continue // 像必须是带撇点
+      candidates.push(makeConstraint('reflect', { point: to, source: from, axis }, 'text', m[0]))
+    }
+    if (pairs.length === 0) {
+      // 认出了折叠但配不出点对：不猜，留给人工看
+      dropped.push({ raw: m[0], reason: 'fold_without_point_pair' })
+    }
+  }
+
+  // 三心：点G是△ABC的重心 / G为△ABC的内心 / O是△ABC的外心
+  // 三种都由同一个点「按三个顶点算出」，共用一套句式。
+  const CENTER_KIND = { 重心: 'centroid', 内心: 'incenter', 外心: 'circumcenter' }
+  for (const m of text.matchAll(re(String.raw`(P)\s*(?:是|为)\s*(?:△|三角形)\s*(P)(P)(P)\s*的\s*(重心|内心|外心)`))) {
+    const type = CENTER_KIND[m[5]]
+    if (type) {
+      candidates.push(makeConstraint(type, { point: norm(m[1]), of: [norm(m[2]), norm(m[3]), norm(m[4])] }, 'text', m[0]))
+    }
+  }
+  // 逆序句式：△ABC 的重心 G
+  for (const m of text.matchAll(re(String.raw`(?:△|三角形)\s*(P)(P)(P)\s*的\s*(重心|内心|外心)\s*(?:是|为)?\s*点?\s*(P)`))) {
+    const type = CENTER_KIND[m[4]]
+    if (type) {
+      candidates.push(makeConstraint(type, { point: norm(m[5]), of: [norm(m[1]), norm(m[2]), norm(m[3])] }, 'text', m[0]))
     }
   }
 

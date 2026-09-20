@@ -20,6 +20,11 @@ const argOf = (name) => {
   return i >= 0 ? process.argv[i + 1] : null
 }
 const TASK = argOf('--task')
+const GRADE = argOf('--grade')
+// --no-clear：收紧判"分不出图形"时**保留原配图**，只做重裁，不把已有配图清空。
+//   2026-09-17 实测：不加这个开关会误清 6 张**真图形**（矩形草地、阶梯图、抛物线…），
+//   收紧闸对这些框是假阴性 —— 所以首次大批量重裁务必先 dry-run，再用 --no-clear 上。
+const NO_CLEAR = process.argv.includes('--no-clear')
 const LIMIT = Number(argOf('--limit') || 500)
 
 const pool = new pg.Pool({
@@ -31,9 +36,11 @@ const rows = (await pool.query(`
   SELECT q.id, q.student_id, q.task_id, q.question_number, q.page_number,
          q.image_bbox, q.block_coordinates, q.geometry_image_url, t.images
   FROM questions q JOIN tasks t ON t.id = q.task_id
+  JOIN students s ON s.id = q.student_id
   WHERE q.image_bbox IS NOT NULL AND q.deleted_at IS NULL
     AND q.geometry_image_url IS NOT NULL
     ${TASK ? "AND q.task_id::text LIKE $2" : ''}
+    ${GRADE ? `AND s.grade = '${String(GRADE).replace(/'/g, '')}'` : ''}
   ORDER BY q.created_at DESC LIMIT $1`,
   TASK ? [LIMIT, TASK + '%'] : [LIMIT])).rows
 
@@ -87,9 +94,10 @@ for (const r of rows) {
     continue
   }
 
-  const newUrl = await cropAndUploadGeometryImage(buf, px, r.student_id, r.id)
-  console.log(`  ${tag}: ${newUrl ? '重裁完成' : '判不出图形 → 清除配图'}`)
-  results.push({ id: r.id, oldUrl: r.geometry_image_url, newUrl })
+  const mapped = await cropAndUploadGeometryImage(buf, px, r.student_id, r.id)
+  const newUrl = (!mapped && NO_CLEAR) ? r.geometry_image_url : mapped
+  console.log(`  ${tag}: ${mapped ? '重裁完成' : (NO_CLEAR ? '收紧未通过，保留原图（--no-clear）' : '判不出图形 → 清除配图')}`)
+  results.push({ id: r.id, oldUrl: r.geometry_image_url, newUrl, kept: !mapped && NO_CLEAR })
 }
 
 const cleared = results.filter(r => r.newUrl === null).length

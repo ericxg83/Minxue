@@ -38,7 +38,8 @@ const hasUsableAnswer = (q) => {
 const hasTerminalReview = (q) => TERMINAL_REVIEW_STATUS.has(q.review_status)
 
 const QUESTION_COLUMNS = `q.id, q.student_id, q.answer, q.answer_source, q.is_correct, q.review_status,
-         q.content, q.geometry_image_url, q.question_type, q.options, q.confidence`
+         q.content, q.parent_stem, q.geometry_image_url, q.question_type, q.options, q.confidence,
+         q.task_id, q.question_number, q.page_number, q.block_coordinates`
 
 /**
  * 通用题错题入册对账补入（question_id 定位模型）

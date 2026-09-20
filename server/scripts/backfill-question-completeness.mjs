@@ -14,6 +14,9 @@
  *
  * 判定口径：直接复用 server/utils/questionCompleteness.js，不在脚本里另写一份规则。
  *
+ * ⚠️ 取数字段必须含 parent_stem（2026-09-17）：引图判定看的是 parent_stem + content，
+ *    拆小问后「如图」只留在公共题干，漏查会把缺图题回写成 TRUE（反向制造隐形错题）。
+ *
  * 用法：
  *   node scripts/backfill-question-completeness.mjs                    # dry-run，只报差异
  *   node scripts/backfill-question-completeness.mjs --apply            # 真正回写
@@ -83,7 +86,7 @@ const fetchBatch = async (lastCreatedAt, lastId) => {
   }
   const where = buildWhere(params)
   const { rows } = await pool.query(
-    `SELECT q.id, q.created_at, q.is_complete, q.content, q.geometry_image_url,
+    `SELECT q.id, q.created_at, q.is_complete, q.content, q.parent_stem, q.geometry_image_url,
             q.question_type, q.options, q.answer
      FROM questions q
      WHERE ${where}${paging}

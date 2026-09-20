@@ -198,3 +198,66 @@ test('e925714f 旋转双垂足：AD⊥MN、BE⊥MN 抽出 foot×2，∠ACB=90° 
   )
   assert.equal(eqInvolvingDE, false, '线段和差结论不应被抽成等长')
 })
+
+// ── 折叠（reflect） ──
+// 原实现只认「…折叠后得到/落在 △A′B′C′」，而大量题目写的是「点B落在点B′处」，
+// `落在` 后面跟的是点不是三角，整条规则抽不到 → 折叠题的 B′ 永远是自由点。
+
+test('折叠·落点句式：将△ABC沿AC折叠，点B落在点B′处', () => {
+  const content = '如图，在△ABC中，将△ABC沿AC折叠，点B落在点B′处，连接AB′。'
+  const s = structureWith(['A', 'B', 'C', 'B′'], [['A','B'],['B','C'],['C','A'],['A','B′']])
+  const { constraints } = extractConstraints(content, s)
+  const rs = ofType(constraints, 'reflect')
+  assert.equal(rs.length, 1, '应抽出 1 条 reflect')
+  assert.equal(rs[0].args.point, 'B′', '像是带撇点')
+  assert.equal(rs[0].args.source, 'B', '原像是 B')
+  assert.deepEqual(rs[0].args.axis, ['A', 'C'], '轴是折痕 AC')
+})
+
+test('折叠·像三角句式：将△ABC沿AC折叠，得到△AB′C', () => {
+  const content = '如图，在△ABC中，将△ABC沿AC折叠，得到△AB′C，连接BB′。'
+  const s = structureWith(['A', 'B', 'C', 'B′'], [['A','B'],['B','C'],['C','A'],['A','B′'],['B','B′']])
+  const { constraints } = extractConstraints(content, s)
+  const rs = ofType(constraints, 'reflect')
+  assert.equal(rs.length, 1)
+  assert.equal(rs[0].args.point, 'B′')
+  assert.equal(rs[0].args.source, 'B')
+  assert.deepEqual(rs[0].args.axis, ['A', 'C'])
+})
+
+test('折叠·无折痕时不猜轴（整条不出）', () => {
+  const content = '如图，将△ABC折叠，点B落在点B′处。'
+  const s = structureWith(['A', 'B', 'C', 'B′'], [['A','B'],['B','C'],['C','A'],['A','B′']])
+  const { constraints } = extractConstraints(content, s)
+  assert.equal(ofType(constraints, 'reflect').length, 0, '没有折痕就不能猜轴，否则把图拧变形')
+})
+
+test('折叠·「点D落在BC上」不得被误判成折叠', () => {
+  // 落点句式的目标**必须带撇**，这条同时挡住了无关的「落在某条边上」
+  const content = '如图，在△ABC中，点D落在BC上，连接AD。'
+  const s = structureWith(['A', 'B', 'C', 'D'], [['A','B'],['B','C'],['C','A'],['A','D']])
+  const { constraints } = extractConstraints(content, s)
+  assert.equal(ofType(constraints, 'reflect').length, 0)
+})
+
+// ── 三心（重心/内心/外心） ──
+
+test('三心·正序：点G是△ABC的重心 / 点I是内心 / 点O是外心', () => {
+  const content = '如图，在△ABC中，点G是△ABC的重心，点I是△ABC的内心，点O是△ABC的外心。'
+  const s = structureWith(['A', 'B', 'C', 'G', 'I', 'O'], [['A','B'],['B','C'],['C','A'],['A','G'],['A','I'],['A','O']])
+  const { constraints } = extractConstraints(content, s)
+  const g = ofType(constraints, 'centroid')[0]
+  const i = ofType(constraints, 'incenter')[0]
+  const o = ofType(constraints, 'circumcenter')[0]
+  assert.deepEqual(g?.args, { point: 'G', of: ['A', 'B', 'C'] })
+  assert.deepEqual(i?.args, { point: 'I', of: ['A', 'B', 'C'] })
+  assert.deepEqual(o?.args, { point: 'O', of: ['A', 'B', 'C'] })
+})
+
+test('三心·逆序：△ABC 的重心 G', () => {
+  const content = '如图，△ABC的重心G，连接AG。'
+  const s = structureWith(['A', 'B', 'C', 'G'], [['A','B'],['B','C'],['C','A'],['A','G']])
+  const { constraints } = extractConstraints(content, s)
+  const g = ofType(constraints, 'centroid')[0]
+  assert.deepEqual(g?.args, { point: 'G', of: ['A', 'B', 'C'] })
+})

@@ -17,8 +17,28 @@ import { Router } from 'express'
 import pg from 'pg'
 import { buildHandout } from '../lib/weekendHandout.js'
 import { renderWeekendPptx } from '../services/weekendPptxService.js'
+import { buildChapterTree, getCatalogForGrade } from '../config/textbookCatalog.js'
 
 const router = Router()
+
+/**
+ * GET /api/weekend-ppt/chapters?grade=初三
+ * 标准教材章节目录（树形），供前端章节筛选使用。目录是只读配置，不依赖 OCR。
+ */
+router.get('/api/weekend-ppt/chapters', (req, res) => {
+  const grade = String(req.query?.grade || '初三')
+  const catalog = getCatalogForGrade(grade)
+  if (!catalog) {
+    return res.status(400).json({ success: false, error: `未维护「${grade}」数学教材目录` })
+  }
+  res.json({
+    success: true,
+    grade,
+    edition: catalog.edition,
+    subject: catalog.subject,
+    tree: buildChapterTree(grade),
+  })
+})
 
 // 单例连接池（与 config/neon.js getPool 同级配置；buildHandout 需要传入 pool）
 let _pool = null
@@ -50,6 +70,7 @@ function sanitizeParams(body = {}) {
     limit: num(body.limit, 0),
     mergeThin: num(body.mergeThin, 0),
     difficulty: str(body.difficulty),
+    chapter: str(body.chapter),
     withAnswer: body.withAnswer !== false,
   }
   return params

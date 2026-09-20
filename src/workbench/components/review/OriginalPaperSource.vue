@@ -49,14 +49,22 @@
         <div class="orig-src__canvas">
           <img
             v-if="!failed"
-            :src="origin.imageUrl"
+            :src="viewerSrc"
             class="orig-src__stage-img"
             :style="viewMode === 'stem' ? cropStyle(origin.crop) : { width: '100%' }"
             @load="onStageLoad"
             @error="failed = true"
             draggable="false"
           />
-          <div v-else class="orig-src__failed">原卷图片不可用（链接可能已失效）</div>
+          <div v-else class="orig-src__failed">
+            <div class="orig-src__failed-body">
+              <span>原卷图片加载失败（网络或缓存异常）</span>
+              <el-button size="small" type="primary" plain @click="retryLoad">重试</el-button>
+              <el-button v-if="origin?.imageUrl" size="small" link type="primary" @click="openInNewTab">
+                新窗口打开
+              </el-button>
+            </div>
+          </div>
           <div v-if="origin.box && viewMode === 'page' && !failed" class="orig-src__box" :style="boxStyle"></div>
         </div>
       </div>
@@ -121,12 +129,43 @@ const viewerVisible = ref(false)
 const viewMode = ref('stem')
 const stageRef = ref(null)
 
+// ═══ 图片加载加固（2026-09-19 修复「原卷图显示空白」）═══
+// 现象：弹窗打开后图片区全白、无任何错误提示。排查结论：数据/接口/渲染数学全部正常
+// （URL 166 个全 200、图内容 112 张非空白、bbox 与页图坐标系配套、本地 30 题逐题验证 OK），
+// 白屏只能来自浏览器运行时：① OSS 响应被浏览器缓存成坏结果后一直复用；
+// ② 网络抖动导致 img 请求挂起（pending 不触发 onload/onerror → 无提示白屏）。
+// 加固：打开时加 `_t` 时间戳破缓存；10s 超时未加载 → 判定失败给出提示 + 重试。
+const loadedOnce = ref(false)
+const viewerSrc = ref('')
+let loadTimer = null
+
+// URL 可能已带 query（OSS 签名等）→ 用 & 拼接，否则用 ?
+const withCacheBust = (url) => `${url}${url.includes('?') ? '&' : '?'}_t=${Date.now()}`
+
 const openViewer = () => {
   if (!origin.value?.imageUrl) return
   // 默认给「题干区域」——老师点这个小眼睛就是为了看题干那一块
   viewMode.value = origin.value.crop ? 'stem' : 'page'
   failed.value = false
+  loadedOnce.value = false
+  viewerSrc.value = withCacheBust(origin.value.imageUrl)
   viewerVisible.value = true
+  // 加载超时检测：OSS/网络抖动导致 img 永远 pending 时，10s 后给出可见提示而非无限白屏
+  clearTimeout(loadTimer)
+  loadTimer = setTimeout(() => {
+    if (viewerVisible.value && !loadedOnce.value) failed.value = true
+  }, 10000)
+}
+
+const retryLoad = () => {
+  if (!origin.value?.imageUrl) return
+  failed.value = false
+  loadedOnce.value = false
+  viewerSrc.value = withCacheBust(origin.value.imageUrl)
+  clearTimeout(loadTimer)
+  loadTimer = setTimeout(() => {
+    if (viewerVisible.value && !loadedOnce.value) failed.value = true
+  }, 10000)
 }
 
 const onModeChange = () => {
@@ -142,8 +181,13 @@ const scrollToBox = () => {
   stage.scrollTop = Math.max(0, (origin.value.box.y / 1000) * stage.scrollHeight - 24)
 }
 
-const onStageLoad = () => {
+const onStageLoad = (e) => {
+  loadedOnce.value = true
+  clearTimeout(loadTimer)
   failed.value = false
+  // 加载成功但图片解码异常（naturalWidth 为 0）也按失败处理，避免显示空白
+  const img = e?.target
+  if (img && (!img.naturalWidth || !img.naturalHeight)) failed.value = true
   if (viewMode.value === 'page') nextTick(scrollToBox)
 }
 
@@ -151,8 +195,14 @@ const openInNewTab = () => {
   if (origin.value?.imageUrl) window.open(origin.value.imageUrl, '_blank', 'noopener')
 }
 
-// 切题重置：避免沿用上一题的加载失败标记
-watch(() => [q.value?.id, origin.value?.imageUrl], () => { failed.value = false })
+// 切题重置：避免沿用上一题的加载失败标记 / 未清理的超时器
+watch(() => [q.value?.id, origin.value?.imageUrl], () => {
+  failed.value = false
+  loadedOnce.value = false
+  clearTimeout(loadTimer)
+})
+// 关闭弹窗时清理超时器
+watch(viewerVisible, (v) => { if (!v) clearTimeout(loadTimer) })
 </script>
 
 <style scoped>
@@ -229,6 +279,12 @@ watch(() => [q.value?.id, origin.value?.imageUrl], () => { failed.value = false 
   font-size: 13px;
   color: var(--wb-text-tertiary);
   line-height: 1.6;
+}
+.orig-src__failed-body {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 10px;
 }
 .orig-src__box {
   position: absolute;

@@ -25,6 +25,32 @@ export function isTikzCode(str) {
 }
 
 /**
+ * 几何重画产物是否「画残了」—— SVG 里一个线段类图元都没有。
+ *
+ * 背景（2026-09-18 第58题排查）：`ed15adea` / `c0dfa67b` 的 clean_geometry_svg 里
+ * 只有顶点圆点（`<circle r="2.4">`）和一条**空的**线段组 `<g stroke=...></g>`，
+ * 一条线都没有。批改中心按优先级 1 直接内联渲染它 → 老师看到的是一张几乎空白的图；
+ * 而白板不认这个字段、回退到裁剪原图 → 同一道题在两个页面显示两张完全不同的图。
+ *
+ * 发布通道的 `isBlankRaster` 闸确实拦住了它们（这两条的 clean_geometry_image_url 都是 NULL），
+ * 但拦的是「发布成图片」，`clean_geometry_svg` 本身仍留在库里并被前端直读 —— 所以取图侧要再拦一次。
+ *
+ * 判据：没有任何 `<line|path|polyline|polygon|ellipse>` 即判残图。
+ * 不把 `<circle>` 计入有效图元，是因为渲染器把每个顶点画成一个 r=2.4 的圆点，
+ * 单靠圆点撑不起一张图。实测全库 43 条 SVG 的**最大圆半径只有 3**，故 `r >= 12` 必然是真圆
+ * —— 留这个后门是为了防止将来渲染器改用 `<circle>` 画圆题时误杀（届时请同步更新本判据与测试）。
+ */
+export function isDegenerateGeometrySvg(svg) {
+  if (!isSvgCode(svg)) return false
+  const s = String(svg)
+  if (/<(line|path|polyline|polygon|ellipse)\b/i.test(s)) return false
+  for (const m of s.matchAll(/<circle\b[^>]*\br="([\d.]+)"/gi)) {
+    if (Number(m[1]) >= 12) return false
+  }
+  return true
+}
+
+/**
  * 根据 question 对象返回前端应显示的几何图内容及显示类型。
  *
  * 优先级：
@@ -42,6 +68,9 @@ export function isTikzCode(str) {
  * 时，回退到原始裁剪图几乎一定是 bbox 错位裁到了别处题目或题干文字——
  * 服务端已经在裁剪原图上判不出几何结构，再展示出来只会把错东西端给用户。
  * 其他 'none' 原因（派生点未解 / 题干引用不符）保留裁剪原图展示，让用户至少能看到图。
+ *
+ * ⚠️ 画残的 SVG（见 isDegenerateGeometrySvg）跳过，继续沿优先级往下找 ——
+ * 「一张几乎空白的图」比「裁剪原图」更误导人。
  */
 export function getGeometryDisplayUrl(question) {
   if (!question) return { url: null, type: 'none' }
@@ -60,7 +89,7 @@ export function getGeometryDisplayUrl(question) {
   }
 
   // 1. clean_geometry_svg 是干净 SVG 源码 → 内联渲染（新主流程）
-  if (isSvgCode(question.clean_geometry_svg)) {
+  if (isSvgCode(question.clean_geometry_svg) && !isDegenerateGeometrySvg(question.clean_geometry_svg)) {
     return { url: question.clean_geometry_svg, type: 'svg_code' }
   }
 
@@ -70,7 +99,8 @@ export function getGeometryDisplayUrl(question) {
   }
 
   // 3. clean_geometry_image_url 是 SVG 源码（兼容）
-  if (isSvgCode(question.clean_geometry_image_url)) {
+  if (isSvgCode(question.clean_geometry_image_url)
+    && !isDegenerateGeometrySvg(question.clean_geometry_image_url)) {
     return { url: question.clean_geometry_image_url, type: 'svg_code' }
   }
 

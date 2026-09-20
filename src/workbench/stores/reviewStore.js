@@ -1,6 +1,6 @@
 import { defineStore } from 'pinia'
 import { ref, computed } from 'vue'
-import { getStudents, getWrongQuestionsByStudent, getQuestionsByTask, getTasksByStudent, getTaskById, updateTaskStatus, recalculateTaskStats, getLatestJudgements, clearStudentCaches, updateQuestionReviewStatus, addWrongQuestions, getGeneratedExamsByStudent, getQuestionsByIds, gradeGeneratedExam } from '../../services/apiService'
+import { getStudents, getWrongQuestionsByStudent, getQuestionsByTask, getTasksByStudent, getTaskById, updateTaskStatus, recalculateTaskStats, getLatestJudgements, clearStudentCaches, updateQuestionReviewStatus, addWrongQuestions, getGeneratedExamsByStudent, getQuestionsByIds, gradeGeneratedExam, refineQuestionBoxes } from '../../services/apiService'
 import { useLifecycleStore, LIFECYCLE_STATUS } from './lifecycleStore'
 import { checkQuestionCompleteness } from '../../utils/questionCompleteness.js'
 import { TASK_TYPE, getReviewConfig } from '../config/reviewConfig'
@@ -180,6 +180,8 @@ export const useReviewStore = defineStore('review', () => {
   const setPageIndex = (i) => {
     if (i >= 0 && i < currentPaperPages.value.length) {
       currentPageIndex.value = i
+      // 换页 → 该页的实测定位框可能还没取过
+      ensureRefinedBoxes()
     }
   }
 
@@ -546,7 +548,7 @@ export const useReviewStore = defineStore('review', () => {
         )
       })
       if (targetIdx >= 0 && targetIdx !== currentPageIndex.value) {
-        currentPageIndex.value = targetIdx
+        setPageIndex(targetIdx)
       }
       return
     }
@@ -554,7 +556,11 @@ export const useReviewStore = defineStore('review', () => {
     const pages = currentPaperPages.value
     const idx = pages.findIndex(p => p.page_number === pageNum)
     if (idx >= 0 && idx !== currentPageIndex.value) {
-      currentPageIndex.value = idx
+      // [2026-09-20 修复] 此前这里是直接写 currentPageIndex.value，绕过了 setPageIndex 内的
+      // ensureRefinedBoxes() → 只有第 1 页取到了后端实测框，切到第 2~4 页仍画旧口径的
+      // block_coordinates 占位框（= 「第 1 题的框画到第 2~5 题上」那个现象）。
+      // 切页必须走同一个入口，否则「取实测框」这一步会被静默跳过。
+      setPageIndex(idx)
     }
   }
 
@@ -939,6 +945,9 @@ export const useReviewStore = defineStore('review', () => {
     // 同步当前题目所在页，确保 PaperViewerPanel 显示正确页图
     syncPageForCurrentQuestion()
 
+    // 定位框实测（image 模式）：异步取，拿到后 PaperViewerPanel 自动换成实测框
+    ensureRefinedBoxes()
+
     if (currentStudent.value?.id) {
       await loadWrongQuestions(currentStudent.value.id)
     }
@@ -1233,6 +1242,39 @@ export const useReviewStore = defineStore('review', () => {
     wrongGateVisible.value = false
   }
 
+  // ── 题目定位框「实测」（2026-09-20） ──────────────────────────────
+  // 主 OCR 的 block_coordinates 是模型照抄 schema 示例平铺整页的产物（同一页 8 题
+  // y 等差恒 150、height 全同），直接画会把第 1 题的框画到第 2~5 题上。
+  // 后端按页做一次轻量「只为量框」的视觉调用并缓存（tasks.result.refinedBoxes），
+  // 这里只负责取回来给 PaperViewerPanel 用；取不到就退回旧行为（宁可框糙，也不要空手）。
+  const refinedBoxes = ref({})        // { [questionId]: {x,y,width,height} }
+  const refineStatus = ref('idle')    // idle | loading | done | error
+  const refinedPageKey = ref(null)    // `${taskId}|${pageNumber}`，避免重复请求
+
+  /** 取当前页的实测定位框；同一页只请求一次 */
+  const ensureRefinedBoxes = async () => {
+    if (source.value !== 'image') return
+    const taskId = currentTask.value?.id
+    if (!taskId) return
+    const pages = currentPaperPages.value
+    const page = pages.length ? pages[Math.min(currentPageIndex.value, pages.length - 1)] : null
+    const pageNumber = Number(page?.page_number || 1)
+    const key = `${taskId}|${pageNumber}`
+    if (refinedPageKey.value === key && refineStatus.value !== 'error') return
+    refinedPageKey.value = key
+    refinedBoxes.value = {}
+    refineStatus.value = 'loading'
+    try {
+      const { boxes, error } = await refineQuestionBoxes(taskId, pageNumber)
+      // 期间老师可能已经切页/切卷，结果作废
+      if (refinedPageKey.value !== key) return
+      refinedBoxes.value = boxes || {}
+      refineStatus.value = error ? 'error' : 'done'
+    } catch {
+      if (refinedPageKey.value === key) refineStatus.value = 'error'
+    }
+  }
+
   return {
     students,
     currentStudent,
@@ -1308,6 +1350,10 @@ export const useReviewStore = defineStore('review', () => {
     setPageIndex,
     // 重练答卷定位框（paper 模式，来自 task.result.retryAlign）
     currentRetryAlignBoxes,
+    // 题目定位框「实测」（image 模式，来自 POST /questions/task/:id/refine-boxes）
+    refinedBoxes,
+    refineStatus,
+    ensureRefinedBoxes,
     // 重练答卷覆盖度（卷面题数 vs 答卷图上有记录的题数），供缺页/缺题提示使用
     retryCoverage,
     // 每题在答卷图上的页码（1-based 索引），供左侧列表「第N页」页标使用

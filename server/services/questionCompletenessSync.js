@@ -20,6 +20,9 @@ const normalizeIds = (questionIds) => {
  *
  * 因此凡是要么写入了完整性相关字段、要么依赖该列做过滤的地方，都要调这里对齐一次。
  *
+ * ⚠️ 取数字段必须包含 parent_stem：动态口径的引图判定看的是 parent_stem + content
+ * （拆小问后「如图」只留在公共题干），漏查会把缺图题重算成完整并回写 TRUE。
+ *
  * @param {string[]|string} questionIds
  * @returns {Promise<{checked: number, updated: number}>} 实际被 UPDATE 的行数
  */
@@ -28,7 +31,7 @@ export const syncQuestionCompleteness = async (questionIds) => {
   if (ids.length === 0) return { checked: 0, updated: 0 }
 
   const { rows } = await query(
-    `SELECT id, content, geometry_image_url, question_type, options, answer
+    `SELECT id, content, parent_stem, geometry_image_url, question_type, options, answer
      FROM ${TABLES.QUESTIONS}
      WHERE id = ANY($1)`,
     [ids]

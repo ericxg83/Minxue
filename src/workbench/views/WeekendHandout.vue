@@ -117,6 +117,23 @@
               aria-label="难度筛选"
             />
           </div>
+          <div class="param-field">
+            <label>章节</label>
+            <el-tree-select
+              v-model="params.chapter"
+              :data="chapterTreeOptions"
+              :props="{ label: 'label', children: 'children', value: 'value' }"
+              node-key="value"
+              check-strictly
+              filterable
+              clearable
+              :loading="chapterOptionsLoading"
+              placeholder="按教材章节筛选（可搜章节名）"
+              class="wb-tree-select"
+              style="width: 320px"
+              aria-label="按教材章节筛选"
+            />
+          </div>
         </div>
 
         <div class="param-actions">
@@ -209,6 +226,7 @@
               :key="q.index"
               class="deck-item"
               :class="{ 'item-selected': isSelected(q.index) }"
+              :data-slide-index="q.index"
             >
               <div class="item-check">
                 <el-checkbox
@@ -243,6 +261,21 @@
                   </template>
                   <MathRender v-else :content="q.stem" auto-detect tag="span" />
                 </div>
+                <!-- 选择题选项：缺了它老师只看到「题干 + 参考答案 D」，会误判成识别失败。
+                     题干已内联 ≥2 个 A–D 标号时说明选项写在题干里，不重复渲染（与白板同口径）。 -->
+                <div
+                  v-if="showOptionsOf(q)"
+                  class="item-options"
+                  :class="{ 'item-options--two': optionsCompactOf(q) }"
+                >
+                  <div v-for="(opt, i) in q.options" :key="i" class="item-option">
+                    <span class="item-option__mark">{{ String.fromCharCode(65 + i) }}</span>
+                    <MathRender class="item-option__text" :content="opt" auto-detect tag="span" />
+                  </div>
+                </div>
+                <div v-else-if="isChoiceMissingOptions(q)" class="item-no-options">
+                  ⚠ 本题是选择题，但题库未采集到选项（A/B/C/D），讲前请对照原卷
+                </div>
                 <div class="item-answer" v-if="withAnswer">
                   <span class="ans-label">参考答案</span>
                   <MathRender
@@ -271,7 +304,7 @@
 </template>
 
 <script setup>
-import { computed, onMounted, ref } from 'vue'
+import { computed, onMounted, ref, watch } from 'vue'
 import { useRouter } from 'vue-router'
 import { ElMessage } from 'element-plus'
 import { Download, MagicStick, Reading, Search } from '@element-plus/icons-vue'
@@ -281,6 +314,7 @@ import ContentCard from '../components/ui/ContentCard.vue'
 import EmptyState from '../components/ui/EmptyState.vue'
 import MathRender from '../components/MathRender.vue'
 import { difficultyStars } from '../../utils/retryPaperOrder'
+import { hasExplicitOptionMarkers } from '../../utils/questionCompleteness'
 import PageHeader from '../components/ui/PageHeader.vue'
 import WorkbenchInput from '../components/ui/WorkbenchInput.vue'
 import WorkbenchSelect from '../components/ui/WorkbenchSelect.vue'
@@ -306,6 +340,7 @@ const params = ref({
   maxPerDay: 0,
   mergeThin: 0,
   difficulty: '',
+  chapter: '',
 })
 const periodPreset = ref('days7')
 const withAnswer = ref(true)
@@ -329,6 +364,27 @@ const difficultyOptions = [
   { label: '较难（难度4-5）', value: 'hard' },
   { label: '难度未判定', value: 'unknown' },
 ]
+
+const chapterTreeOptions = ref([])
+const chapterOptionsLoading = ref(false)
+
+async function loadChapterTree() {
+  chapterOptionsLoading.value = true
+  try {
+    const res = await apiRequest(`/weekend-ppt/chapters?grade=${encodeURIComponent(params.value.grade)}`)
+    chapterTreeOptions.value = res?.tree || []
+  } catch (e) {
+    chapterTreeOptions.value = []
+    ElMessage.warning('教材章节加载失败：' + (e.message || '网络错误'))
+  } finally {
+    chapterOptionsLoading.value = false
+  }
+}
+
+watch(() => params.value.grade, () => {
+  params.value.chapter = ''
+  loadChapterTree()
+})
 
 function onPeriodPreset(val) {
   if (val === 'custom') {
@@ -354,6 +410,7 @@ const gradeOptions = computed(() => {
 })
 
 onMounted(async () => {
+  await loadChapterTree()
   try {
     const res = await apiRequest('/students')
     students.value = (res.students || []).filter(s => s.enrollment_status !== 'archived')
@@ -391,6 +448,44 @@ function sectionTierText(sec) {
 function tierStyle(tier) {
   const c = TIER_COLORS[tier] || TIER_COLORS.unknown
   return { color: c.fg, background: c.bg, borderColor: c.fg + '33' }
+}
+
+// ── 选择题选项 ──
+// 背景（2026-09-18）：本页原先完全不渲染 options，老师只看到「题干 + 参考答案 D」，
+// 误以为识别失败。后端 slides[].options 一直是给全的，前端漏渲染是第一个缺陷；
+// 练习册管线 prompt 没采集 options 是第二个缺陷 —— 两者叠加成「选择题没有 A/B/C/D」。
+/** 本题用于判「选项是否已内联在题干里」的文本（公共题干 + 本题题干 + 各小问） */
+function stemTextOf(q) {
+  const parts = [q.parentStem || '', q.stem || '']
+  for (const sp of q.subParts || []) parts.push(sp.content || '')
+  return parts.join('\n')
+}
+function optionListOf(q) {
+  const opts = q?.options
+  if (Array.isArray(opts)) return opts.filter(o => String(o ?? '').trim() !== '')
+  if (typeof opts === 'string') {
+    try {
+      const p = JSON.parse(opts)
+      return Array.isArray(p) ? p.filter(o => String(o ?? '').trim() !== '') : []
+    } catch { return [] }
+  }
+  return []
+}
+/** 有选项且题干没内联标号 → 渲染选项；题干已内联 A．B．C．D．时说明选项就在题干里，不重复 */
+function showOptionsOf(q) {
+  const opts = optionListOf(q)
+  if (opts.length === 0) return false
+  return !hasExplicitOptionMarkers(stemTextOf(q))
+}
+/** 选择题却一个选项都没有 → 显式告警，别让老师以为是页面坏了 */
+function isChoiceMissingOptions(q) {
+  return q?.questionType === 'choice' && optionListOf(q).length === 0
+}
+/** 短选项（≤4 条、单条 ≤14 字）走两列，长选项单列铺满（与讲题白板同口径） */
+function optionsCompactOf(q) {
+  const opts = optionListOf(q)
+  if (opts.length === 0 || opts.length > 4) return false
+  return opts.every(o => String(o).length <= 14)
 }
 function isSelected(idx) { return selected.value.has(idx) }
 function toggleQuestion(idx, val) {
@@ -431,6 +526,7 @@ function buildParamsBody(extra = {}) {
     maxPerDay: Number(params.value.maxPerDay) || 0,
     mergeThin: Number(params.value.mergeThin) || 0,
     difficulty: params.value.difficulty || undefined,
+    chapter: params.value.chapter || undefined,
     withAnswer: withAnswer.value,
     ...extra,
   }
@@ -460,6 +556,7 @@ function openBoard() {
     maxPerDay: body.maxPerDay ? String(body.maxPerDay) : '',
     mergeThin: body.mergeThin ? String(body.mergeThin) : '',
     difficulty: body.difficulty || '',
+    chapter: body.chapter || '',
     students: body.students.join(','),
     selected: [...selected.value].join(','),
     fs: '1',
@@ -680,6 +777,39 @@ async function runGenerate() {
 }
 .item-sub {
   margin-top: 2px;
+}
+/* 选择题选项：短选项两列、长选项单列 */
+.item-options {
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: 2px 18px;
+  margin-top: 6px;
+  font-size: 13.5px;
+  line-height: 1.7;
+  color: var(--wb-text, #1e293b);
+}
+.item-options--two {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+.item-option {
+  display: flex;
+  gap: 6px;
+  align-items: baseline;
+  min-width: 0;
+}
+.item-option__mark {
+  flex: 0 0 auto;
+  font-weight: 650;
+  color: var(--wb-text-secondary, #64748b);
+}
+.item-option__text {
+  min-width: 0;
+}
+/* 选择题但选项缺失：显式提示，避免老师误判成页面故障 */
+.item-no-options {
+  margin-top: 6px;
+  font-size: 12px;
+  color: #b45309;
 }
 .item-answer {
   margin-top: 10px;

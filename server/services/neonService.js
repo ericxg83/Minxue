@@ -114,6 +114,7 @@ export const createQuestions = async (questions) => {
       status: statusValue,
       image_url: q.image_url || null,
       geometry_image_url: q.geometry_image_url || null,
+      clean_geometry_image_url: q.clean_geometry_image_url || null,
       // 同样的 jsonb 列兜底：AI 偶尔把 ai_tags/manual_tags 返回成字符串/对象。
       ai_tags: JSON.stringify(Array.isArray(q.ai_tags) ? q.ai_tags : []),
       manual_tags: JSON.stringify(Array.isArray(q.manual_tags) ? q.manual_tags : []),
@@ -302,19 +303,113 @@ export const addWrongQuestions = async (studentId, questionIds, questionConfiden
   // 漏了对方未提交的行，UNIQUE 索引也会把第二个 INSERT 静默吞掉）。
   // 空题（answer_source='blank'）同步写 is_blank/error_type，移动端列表用
   // error_type='未作答' 兜底显示，diagnosisService 也不会覆盖（WHERE 已排除 is_blank）。
+
+  // ── 入册快照增强（2026-09-18）──
+  // 此前的 INSERT 只写 (student_id, question_id, status, ...)，错题行缺失任务出处与卷面信息：
+  //   · last_wrong_task_id 恒为 NULL → 白板/课件「原卷图」按 last_wrong_task_id 取 tasks.images
+  //     拿不到整页图 → 弹窗永远「无原卷图」（2026-09-18 白板第1题「求证：AD²=AC·BE。」事故根因）；
+  //   · source_type 落列默认值 'workbook' → 作业批改(general)产生的错题全部被标成练习册错题
+  //     （实测 549 行错标）；
+  //   · question_no / page_number / content 为空 → 错题行不自包含，展示全靠 LEFT JOIN questions。
+  // 现在从 questionMap（调用方权威快照）或回读 questions 补齐，一并写入快照。
+  const enrichMap = new Map()
+  if (questionMap instanceof Map) {
+    for (const [id, q] of questionMap.entries()) {
+      if (!newIds.includes(id) || enrichMap.has(id)) continue
+      enrichMap.set(id, {
+        task_id: q.task_id || q.taskId || null,
+        question_no: q.question_number ?? q.question_no ?? null,
+        page_number: q.page_number ?? null,
+        content: q.content ?? '',
+        question_type: q.question_type ?? null,
+        block_coordinates: (q.block_coordinates && typeof q.block_coordinates === 'object') ? q.block_coordinates : null
+      })
+    }
+  }
+  const missingEnrich = newIds.filter(id => !enrichMap.has(id))
+  if (missingEnrich.length > 0) {
+    try {
+      const { rows: enrichRows } = await query(
+        `SELECT id, task_id, question_number, page_number, content, question_type, block_coordinates
+           FROM ${TABLES.QUESTIONS} WHERE id = ANY($1::uuid[])`,
+        [missingEnrich]
+      )
+      for (const r of enrichRows) {
+        enrichMap.set(r.id, {
+          task_id: r.task_id || null,
+          question_no: r.question_number ?? null,
+          page_number: r.page_number ?? null,
+          content: r.content ?? '',
+          question_type: r.question_type ?? null,
+          block_coordinates: r.block_coordinates || null
+        })
+      }
+    } catch (e) {
+      console.error('  ⚠️ [WrongBook] 入册快照增强回读失败（不影响入册，快照字段留空）:', e.message)
+    }
+  }
+  // source_type 语义与 addSelfContainedWrongQuestion 对齐：练习册批改→'workbook'，
+  // 其余（作业批改/晚托/重练等）→'homework'；任务信息缺失时留 NULL（列默认值兜底）。
+  const taskIds = [...new Set(Array.from(enrichMap.values(), v => v.task_id).filter(Boolean))]
+  const taskTypeById = new Map()
+  if (taskIds.length > 0) {
+    try {
+      const { rows: taskRows } = await query(
+        `SELECT id, task_type FROM ${TABLES.TASKS} WHERE id = ANY($1::uuid[])`,
+        [taskIds]
+      )
+      for (const t of taskRows) taskTypeById.set(t.id, t.task_type)
+    } catch (e) {
+      console.error('  ⚠️ [WrongBook] task_type 回读失败（source_type 留空）:', e.message)
+    }
+  }
+
   const blankIds = new Set(
     Array.from(questionMap?.entries?.() || [])
       .filter(([, q]) => q?.answer_source === 'blank')
       .map(([id]) => id)
   )
+  const params = [studentId]
+  // 每行 10 个位置参数：question_id, is_blank, error_type, source_type, question_no,
+  //                          page_number, content, question_type, block_coordinates, last_wrong_task_id
+  const ROW_PARAM_COUNT = 10
   const values = newIds.map((id, i) => {
+    const base = i * ROW_PARAM_COUNT + 2
     const isBlank = blankIds.has(id)
-    return `($1, $${i + 2}, 'pending', 1, NOW(), NOW(), NOW(), ${isBlank}::boolean, ${isBlank ? `'未作答'` : `NULL`}::text)`
+    const en = enrichMap.get(id) || {}
+    const taskType = taskTypeById.get(en.task_id)
+    const sourceType = taskType ? (taskType === 'workbook' ? 'workbook' : 'homework') : null
+    const row = [
+      id,
+      isBlank,
+      isBlank ? '未作答' : null,
+      sourceType,
+      en.question_no ?? null,
+      en.page_number ?? null,
+      en.content ?? '',
+      en.question_type ?? null,
+      en.block_coordinates ? JSON.stringify(en.block_coordinates) : null,
+      en.task_id ?? null
+    ]
+    params.push(...row)
+    // 列序必须与上面 INSERT 的列清单逐位对齐：
+    //   $1=student_id | $base=question_id | status/error_count/added_at/last_wrong_at/created_at
+    //   为字面量（列序上夹在 question_id 与 is_blank 之间）| $base+1.. = is_blank, error_type,
+    //   source_type, question_no, page_number, content, question_type, block_coordinates,
+    //   last_wrong_task_id（共 9 个）
+    // 2026-09-20 修复：09-18 扩列时漏掉中间 5 个字面量 → 16 列对 11 值 → 每次调用必抛
+    //   42601 INSERT has more target columns than expressions，作业批改/重批改/答案库批改/
+    //   补偿四条链路的错题入册全部失败（实测 09-19 10:53 后 24 小时入册为 0）。
+    const tail = row.slice(1).map((_, j) => `$${base + 1 + j}`).join(', ')
+    return `($1, $${base}, 'pending', 1, NOW(), NOW(), NOW(), ${tail})`
   }).join(',')
-  const params = [studentId, ...newIds]
 
   await query(
-    `INSERT INTO ${TABLES.WRONG_QUESTIONS} (student_id, question_id, status, error_count, added_at, last_wrong_at, created_at, is_blank, error_type) VALUES ${values}
+    `INSERT INTO ${TABLES.WRONG_QUESTIONS}
+       (student_id, question_id, status, error_count, added_at, last_wrong_at, created_at,
+        is_blank, error_type, source_type, question_no, page_number, content, question_type,
+        block_coordinates, last_wrong_task_id)
+     VALUES ${values}
      ON CONFLICT (student_id, question_id)
        WHERE question_id IS NOT NULL
      DO NOTHING`,
@@ -833,8 +928,8 @@ export const updateQuestionCacheId = async (questionId, cacheId) => {
 export const createQuestionAsset = async (asset) => {
   const { rows } = await query(
     `INSERT INTO ${TABLES.QUESTION_ASSETS}
-     (question_id, asset_type, original_image_url, cropped_image_url, bbox, tikz_code, tikz_status)
-     VALUES ($1, $2, $3, $4, $5, $6, $7)
+     (question_id, asset_type, original_image_url, cropped_image_url, bbox, tikz_code, tikz_json, last_error, tikz_status)
+     VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
      RETURNING *`,
     [
       asset.question_id,
@@ -843,6 +938,8 @@ export const createQuestionAsset = async (asset) => {
       asset.cropped_image_url || null,
       asset.bbox ? JSON.stringify(asset.bbox) : null,
       asset.tikz_code || null,
+      asset.tikz_json != null ? JSON.stringify(asset.tikz_json) : null,
+      asset.last_error || null,
       asset.tikz_status || 'none'
     ]
   )
@@ -970,6 +1067,28 @@ export const updateQuestionDenormalizedSvg = async (questionId, cleanSvg) => {
 }
 
 /**
+ * 回写干净几何图的**图片 URL**（clean_geometry_image_url）。
+ *
+ * 为什么必须单独回写：重画产物原本只落到 clean_geometry_svg（SVG 源码），
+ * 而周末课件/讲义取图走的是 clean_geometry_image_url（图片 URL，见
+ * lib/weekendHandout.js 的 resolveFigure）。两个字段不通，重画结果对课件
+ * 就是不可见的（实测 15 题有 SVG、0 题有 URL）。
+ *
+ * @param {string} questionId
+ * @param {string} imageUrl - OSS/CDN 图片地址
+ */
+export const updateQuestionCleanGeometryUrl = async (questionId, imageUrl) => {
+  await query(
+    `UPDATE ${TABLES.QUESTIONS}
+     SET clean_geometry_image_url = $1,
+         display_image_type = COALESCE(display_image_type, 'clean'),
+         updated_at = NOW()
+     WHERE id = $2`,
+    [imageUrl, questionId]
+  )
+}
+
+/**
  * 获取待处理的几何重建资产（Worker 扫描用）
  * @param {number} [limit=10] - 一次最多取多少条
  * @returns {Array} 资产列表
@@ -979,7 +1098,7 @@ export const getPendingGeometryAssets = async (limit = 10) => {
     `SELECT a.id, a.question_id, a.cropped_image_url,
             a.retry_count, a.last_error, a.tikz_status,
             q.geometry_image_url, q.image_type,
-            q.student_id, q.content, q.options
+            q.student_id, q.content, q.parent_stem, q.options
      FROM ${TABLES.QUESTION_ASSETS} a
      JOIN ${TABLES.QUESTIONS} q ON q.id = a.question_id
      WHERE a.asset_type = 'geometry_image'

@@ -21,6 +21,18 @@ const props = defineProps({
     type: Boolean,
     default: false
   },
+  /**
+   * 强制行内排版。
+   *
+   * renderContent 把「整段只有数学、没有中文」的内容标成 $$...$$（独立公式），
+   * 这对 PDF 里独占一行的推导式是对的；但答案卡这类场景里，一个纯字母答案
+   * （选择题答案 "A"、数值 "1/2"）会被渲染成居中放大的独立公式，
+   * 既不像卷面也不好看。答案层传 forceInline 即可保持行内。
+   */
+  forceInline: {
+    type: Boolean,
+    default: false
+  },
   tag: {
     type: String,
     default: 'div'
@@ -46,7 +58,7 @@ const tagStyle = computed(() => {
  * each math segment in $...$ / $$...$$ delimiters.
  * Returns a single HTML string safe for v-html.
  */
-function renderToHtml(text) {
+function renderToHtml(text, forceInline = false) {
   if (!text || typeof text !== 'string') {
     return text || ''
   }
@@ -63,7 +75,7 @@ function renderToHtml(text) {
       const rawMath = displayMatch[1].trim()
       if (rawMath) {
         try {
-          htmlParts.push(katex.renderToString(decodeHtml(rawMath), { displayMode: true, throwOnError: false }))
+          htmlParts.push(katex.renderToString(decodeHtml(rawMath), { displayMode: !forceInline, throwOnError: false }))
         } catch (e) {
           htmlParts.push(fallbackErrorHtml('$$' + rawMath + '$$'))
         }
@@ -124,13 +136,24 @@ function decodeHtml(str) {
 }
 
 /**
- * Fallback rendering when KaTeX fails. content 来自已转义的 normalized 串，直接内联。
+ * Fallback rendering when KaTeX fails.
+ *
+ * 2026-09-18 白板第27题事故：`{\sqrt{y}₀}` 这种「半个花括号 + 半截命令」的片段送进
+ * KaTeX 后报错，这里把源码以**红色 code 块**亮出来 —— 老师看到的就是满屏乱码。
+ * OCR/打磨阶段产出的 LaTeX 不可能 100% 合法，兜底的目标是把数学当「文本」继续看，
+ * 而不是把半成品 LaTeX 亮给人看。所以：
+ *   - 剥掉残缺的定界符/开括号（扔掉必然报错的尾部开括号），保留可读的部分；
+ *   - 不能确定成完整公式时，用普通文本呈现，不再染红。
  */
 function fallbackErrorHtml(content) {
-  return '<code style="background:#FEE2E2;padding:1px 4px;border-radius: var(--wb-radius-xs);font-size:0.9em;color:#DC2626">'
-    + content
-    + '</code>'
+  let s = String(content || '')
+    // 剥掉可能误入的 $ 定界符（rawMath 里本不该有，兜底防御）
+    .replace(/\$/g, '')
+    // KaTeX 报错几乎都来自「半截命令 + 未闭合花括号」，剥掉尾部孤立残留，
+    // 保留可读的部分以文本呈现，不再染红（见函数头注释）
+    .replace(/[{,]\s*$/g, '')
+  return s.replace(/ /g, '\u00A0')
 }
 
-const renderedHtml = computed(() => renderToHtml(props.content))
+const renderedHtml = computed(() => renderToHtml(props.content, props.forceInline))
 </script>

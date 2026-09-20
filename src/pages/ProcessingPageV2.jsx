@@ -88,7 +88,9 @@ function TaskRow({ task, onRetryTask, onOpenReview }) {
   const empty = task.result?.emptyCount || 0
   const pending = task.result?.pendingCount || 0
   const questionCount = task.result?.questionCount || task.question_count || 0
-  const truncated = Number(task.result?.ocrTruncated) > 0
+  // 两件都指向同一个动作「重新识别」：OCR 靠截断抢救可能缺题；引图题没拿到配图（漏框/框到别的题被拦）。
+  // figureMissingRefs 只有新任务才有（旧数据无此字段），不会让历史任务突然冒提示。
+  const truncated = Number(task.result?.ocrTruncated) > 0 || Number(task.result?.figureMissingRefs) > 0
   const bad = current === 'failed' || current === 'stalled'
   const clickable = current === 'completed' && !retry(task)
   const Icon = bad ? AlertCircle : current === 'processing' ? Loader2 : current === 'completed' ? CheckCircle2 : Clock3

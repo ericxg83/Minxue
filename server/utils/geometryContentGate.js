@@ -11,11 +11,11 @@
  * 原则沿用 geometryLabelValidator："宁愿少显示，也不显示错误信息"。
  */
 
+import { isAuxPointLabel, isTickNumberLabel, detectNumberAxis, detectCoordAxes } from './geom/structure.js'
+
 const GREEK = 'αβγδεζηθικλμνξοπρστυφχψω'
 
-// 点 = 大写字母或大写字母+撇（C′/A'）。前后都不能紧跟小写字母，
-// 以排除 tan/sin/cos 等缩写与英文单词；允许紧跟 △ ∠ ( 、 等几何符号或标点。
-const PT = /[A-Z][′'’]?(?![a-z])/g
+// （点名正则 PT / PT_LOWER 见下方 normalizeLabel 旁——两者共用同一套下标/撇归一约定）
 
 /**
  * 把题干里的 \frac{...}{...} 还原成"分子 / 分母"的可读形态，便于后续提取
@@ -40,27 +40,28 @@ function unfoldFractions(content) {
 }
 
 /**
- * 提取题干中被引用的"点"（大写字母，含带撇派生点 C′/A'）。
+ * 提取题干中被引用的"点"：大写字母（含带撇 C′/A' 与下标 A₁）＋**独立成词的小写字母**
+ * （数轴上表示数的 a、b、c 就是小写）。
  */
 export function extractReferencedPoints(content) {
   const s = unfoldFractions(content)
   const pts = new Set()
-  for (const m of s.matchAll(PT)) {
-    pts.add(m[0].replace(/[′'’]/g, '′'))
-  }
+  for (const m of s.matchAll(PT)) pts.add(normalizeLabel(m[0]))
+  for (const m of s.matchAll(PT_LOWER)) pts.add(normalizeLabel(m[0]))
   return pts
 }
 
 /**
- * 提取题干中被引用的线段/直线：题干里相邻出现的两个点字母（AB、BC′）。
+ * 提取题干中被引用的线段/直线：题干里相邻出现的两个点字母（AB、BC′、C₁D）。
  * 线段在题干中几乎总是连写，单字母上下文不足为凭，这里只取连写对。
  */
 export function extractReferencedSegments(content) {
   const s = unfoldFractions(content)
   const segs = new Set()
-  for (const m of s.matchAll(/([A-Z][′'’]?)([A-Z][′'’]?)(?![a-z])/g)) {
-    const a = m[1].replace(/[′'’]/g, '′')
-    const b = m[2].replace(/[′'’]/g, '′')
+  const one = `[A-Z][′'’]?(?:[₀-₉0-9]+)?`
+  for (const m of s.matchAll(new RegExp(`(${one})(${one})(?![a-z])`, 'g'))) {
+    const a = normalizeLabel(m[1])
+    const b = normalizeLabel(m[2])
     if (a === b) continue
     segs.add([a, b].sort().join('|'))
   }
@@ -68,21 +69,82 @@ export function extractReferencedSegments(content) {
 }
 
 /**
- * 提取题干中的"连写串"：△BCE、四边形ABCD、∠BAC 里连续出现的大写字母（含带撇 C′）。
+ * 提取题干中的"连写串"：△BCE、四边形ABCD、∠BAC 里连续出现的大写字母（含 C′、C₁）。
  * 只有串内**相邻**（以及首尾闭合）的字母对算作边——"四边形ABCD"给出 AB/BC/CD/DA，
  * 不含对角线 AC/BD。对角线要么题干显式连写（"连接AC"），要么就是模型凭空加的。
  */
 export function extractLetterRuns(content) {
   const s = unfoldFractions(content)
+  const one = `[A-Z][′'’]?(?:[₀-₉0-9]+)?`
   const runs = []
-  for (const m of s.matchAll(/[A-Z][′'’]?(?:[A-Z][′'’]?)+/g)) {
-    const letters = [...m[0].matchAll(/[A-Z][′'’]?/g)].map(x => x[0].replace(/[′'’]/g, '′'))
+  for (const m of s.matchAll(new RegExp(`${one}(?:${one})+`, 'g'))) {
+    const letters = [...m[0].matchAll(new RegExp(one, 'g'))].map(x => normalizeLabel(x[0]))
     if (letters.length >= 2) runs.push(letters)
   }
   return runs
 }
 
 const segKey = (a, b) => [a, b].sort().join('|')
+
+/**
+ * 题干是否声明了「平行线组」（**3 条及以上**直线互相平行，如 l₁//l₂//l₃、AB∥CD∥EF、
+ * 直线l1∥l2∥l3）。
+ *
+ * 为什么需要：平行线分线段成比例题的图上，三条平行线本身（如 AD/BE/CF）是图形主体，
+ * 但题干文本只写截线上的线段长度（AB=3, AC=9, DE=2），从不写平行线的两端字母。
+ * 模型把平行线画出来（完全正确），核对闸门却因「AD 在题干中无引用」拒稿
+ * （2026-09-18 批量实测：20 条 pending 只成功 1 条，其余几乎全是这个原因）。
+ *
+ * 为什么必须是 3 条：单对平行（CD//AB、DE//BC）不是"平行线组"——那种图（三角形内
+ * 平行辅助线、梯形两条底边）的线段几乎总是被题干显式连写（AB、CD 都出现过），
+ * 不需要端点豁免。放开它会误放过模型把垂足/辅助线画错位的错图（实测作图题
+ * 「作CD//AB，作点B到直线CD的垂线垂足为点E」：模型画 CE/EB 被误豁免，已作为回归测试拦下）。
+ *
+ * 触发时启用「端点字母豁免」：线段两端字母都在题干出现过即视为合法图示元素。
+ * 这只放开「线」，点凭空出现（硬规则 3）仍然拦截，幻觉点不会被放行。
+ * 四边形对角线（AC 在「四边形ABCD」串内非相邻）不受影响：该题干没有平行线组声明。
+ */
+export function hasParallelLineGroup(text) {
+  const s = String(text || '')
+  // 1) 带下标的平行线：l₁//l₂//l₃ / l1//l2//l3 / 直线l1∥l2∥l3 —— {2,} 表示至少 3 条
+  const sub = /(?:直线)?\s*l\s*[₁₂₃４５６７８９０1234567890１２３４５６７８９０](?:\s*(?:∥|\/\/)\s*l\s*[₁₂₃４５６７８９０1234567890１２３４５６７８９０]){2,}/
+  // 2) 字母平行线组：AB∥CD∥EF / AB//CD//EF —— {2,} 表示至少 3 条
+  const letters = /[A-Z][′'’]?[A-Z][′'’]?(?:\s*(?:∥|\/\/)\s*[A-Z][′'’]?[A-Z][′'’]?){2,}/
+  return sub.test(s) || letters.test(s)
+}
+
+/** 题干里出现过的所有大写字母（含带撇点与下标点，去重；与结构侧同一套归一） */
+function allReferencedLetters(text) {
+  const s = String(text || '')
+  const set = new Set()
+  for (const m of s.matchAll(/[A-Z][′'’]?(?:[₀-₉0-9]+)?/g)) {
+    set.add(normalizeLabel(m[0]))
+  }
+  return set
+}
+
+/** 撇号归一：把各种撇（' ’ ′）统一成 U+2032，便于跨来源比较字母 */
+const normalizePrime = (s) => String(s ?? '').replace(/[′'’]/g, '′')
+
+/**
+ * 点名的**唯一归一函数**：撇号统一 + 下标统一（₀-₉ → 0-9）。
+ *
+ * 为什么需要下标归一（2026-09-19 三修）：同一道题里，"C₁"常常被写成
+ * "C1"（模型写 ASCII 数字，题干排版用下标字符），两边字面不同却被当成两个点，
+ * 于是线段 `C1D` 被判"题干中无引用"（生产库 last_error 实测：
+ * `重绘图上的线段 BC1 在题干中无引用；…线段 C1D 在题干中无引用`）。
+ * 归一后 `C₁` ≡ `C1`、`A′` ≡ `A'`，跨来源比较才成立。
+ */
+const SUB_TO_DIGIT = { '₀': '0', '₁': '1', '₂': '2', '₃': '3', '₄': '4', '₅': '5', '₆': '6', '₇': '7', '₈': '8', '₉': '9' }
+const normalizeLabel = (s) => String(s ?? '')
+  .replace(/[′'’]/g, '′')
+  .replace(/[₀-₉]/g, (c) => SUB_TO_DIGIT[c])
+
+// 点名（含下标与撇）：`A`、`A′`、`A₁`、`C1`
+const PT = /[A-Z][′'’]?(?:[₀-₉0-9]+)?(?![a-z])/g
+// 数轴上"表示数的字母"是小写（a、b、c）：只认**独立成词的单字母**，
+// 避免把 tan/sin/cos 这类缩写里的字母当成点名（(?<![A-Za-z])…(?![A-Za-z])）。
+const PT_LOWER = /(?<![A-Za-z])[a-z](?![A-Za-z])/g
 
 // 题干里的形状词 → 该形状要求"所有边等长"。模型给的坐标只需相对准确，
 // 故容差放到 1.35（正方形画成 2:1 矩形是 2.0，能抓住；轻微手抖不误杀）。
@@ -132,13 +194,57 @@ function checkShapeConstraints(structure, content, reasons) {
  *   （"BD/CE = AB/AC"）。把 options 也作为合法引用来源，避免把"标准 ABC 三角
  *   形图"误判为多画 AB 边。
  * @returns {{ ok: boolean, reasons: string[] }} ok=false 时 reasons 给出可读原因
+ *
+ * 坐标系豁免：structure.coordinate_system.exists 为真时，原点 O 与轴标 X/Y
+ * （以及任何以它们为端点的线段）不参与硬规则 2/3。这类字母是插图标配，
+ * 题干不写它们不是"凭空多画"。
  */
 export function validateStructureAgainstContent(structure, content, options) {
   const reasons = []
-  const pts = (structure?.points || []).map(p => p.label).filter(Boolean)
-  const segs = (structure?.segments || []).map(g => segKey(g.from, g.to))
-  const drawnPts = new Set(pts)
+  // ── 渲染家具豁免（2026-09-19 三修）──
+  //
+  // 这三类东西**不是"题面要标注的点"，而是插图家具**，题干里本来就不会写它们：
+  //   ① `_` 前缀辅助点/辅助线段（规则 11/13 要求模型这么命名：曲线采样、刻度小竖线、阴影顶点）；
+  //   ② 刻度数字（0、1、-2…规则 13 明确要求用 `point` 承载，渲染器吸附到轴上）；
+  //   ③ 轴上字母 O / X / Y（原点与轴名，插图标配）。
+  //
+  // 旧口径把这三类全当"模型幻觉"，于是**每一张按规则画出来的图都会被 content_mismatch 拒稿**。
+  // 生产库实测：`tikz_status='none'` 里约 40 张的 last_error 就是本闸门，其中
+  // 「重绘图上的点 O 在题干中未出现」9 张、刻度数字若干；`geometry_structure_json` 至今 0 条，
+  // 说明 DSL 重绘这条路**从未成功发布过任何一张**（46 条 completed 走的是不走闸门的
+  // 确定性函数图象通道）。属于"闸门判据 ↔ 提示词契约"三处脱节的老坑。
+  //
+  // 判据一律**复用渲染器那一份**（structure.js），保证"上屏的东西"与"闸门核对的东西"
+  // 是同一套定义；真实字母（A、B、C′、P…）的核对口径一字未改。
+  const hasAxis = !!(
+    structure?.coordinate_system?.exists ||
+    detectCoordAxes(structure?.points, structure?.segments, structure?.labels) ||
+    detectNumberAxis(structure?.points, structure?.segments)
+  )
+  const axisLabels = new Set()
+  if (hasAxis) {
+    if (structure?.coordinate_system?.origin) axisLabels.add(normalizeLabel(structure.coordinate_system.origin))
+    for (const l of ['O', 'X', 'Y', 'x', 'y']) axisLabels.add(l) // 原点惯例 O，轴名 X/x、Y/y
+  }
+  const isAxisLabel = (label) => axisLabels.size > 0 && axisLabels.has(normalizeLabel(label))
+  const isFurniture = (label) =>
+    isAuxPointLabel(label) ||
+    isTickNumberLabel(label) ||
+    isAxisLabel(label)
+
+  const pts = (structure?.points || [])
+    .filter(p => p?.label && !isFurniture(p.label))
+    .map(p => p.label)
+  const segs = (structure?.segments || [])
+    .filter(g => !isFurniture(g?.from) && !isFurniture(g?.to))
+    .map(g => segKey(normalizeLabel(g.from), normalizeLabel(g.to)))
+  const drawnPts = new Set(pts.map(normalizeLabel))
   const drawnSegs = new Set(segs)
+  const isAxisSegment = (seg) => {
+    if (axisLabels.size === 0) return false
+    const [a, b] = seg.split('|')
+    return isAxisLabel(a) || isAxisLabel(b)
+  }
 
   const optionsArr = Array.isArray(options) ? options.filter(Boolean) : []
   const hasOptions = optionsArr.length > 0
@@ -170,6 +276,12 @@ export function validateStructureAgainstContent(structure, content, options) {
   //   a. 这条边曾在题干或选项里连写过（AB、BA）
   //   b. 两端字母在题干/选项某个连写串里相邻，或是该串的首尾（△BCE 给出 BC/CE/EB）
   // 不含对角线：四边形ABCD 不隐含 AC/BD。折叠题里被凭空画出的两条对角线正是这么被抓到的。
+  //
+  // 2026-09-18 新增豁免「平行线组」：题干声明了多条直线平行（l₁//l₂//l₃、
+  // AB∥CD∥EF）时，图上必然要把这些平行线画出来，而它们的端点字母（如平行线
+  // 被两条截线穿过产生的 AD/BE/CF）题干文本从不连写。若这些线段的两个端点字母
+  // 都曾在题干出现过，视为合法图示元素放行。实测不豁免时，平行线分线段成比例
+  // 这类最标准的几何题几乎全被误杀（20 条 pending 仅 1 条成功）。
   const runPairs = new Set()
   for (const letters of extractLetterRuns(allText)) {
     for (let i = 0; i + 1 < letters.length; i++) {
@@ -179,8 +291,16 @@ export function validateStructureAgainstContent(structure, content, options) {
       runPairs.add(segKey(letters[letters.length - 1], letters[0]))
     }
   }
+  const parallelGroup = hasParallelLineGroup(allText)
+  const knownLetters = parallelGroup ? allReferencedLetters(allText) : new Set()
   for (const seg of drawnSegs) {
-    if (refSegs.has(seg) || runPairs.has(seg)) continue
+    if (refSegs.has(seg) || runPairs.has(seg) || isAxisSegment(seg)) continue
+    if (parallelGroup) {
+      // 平行线组的「端点字母豁免」：两端字母都出现在题干即可。
+      // 只比字母不比撇号：l₁//l₂//l₃ 的截线交点 C 与 C′ 都算已知。
+      const [a, b] = seg.split('|')
+      if (knownLetters.has(a.replace(/′/g, '')) && knownLetters.has(b.replace(/′/g, ''))) continue
+    }
     const [a, b] = seg.split('|')
     reasons.push(`重绘图上的线段 ${a}${b} 在题干中无引用`)
   }
@@ -200,17 +320,21 @@ export function validateStructureAgainstContent(structure, content, options) {
   for (const letters of extractLetterRuns(allText)) {
     letters.forEach(l => refLetters.add(l))
   }
+  // 去撇形式：题干写 A′、结构写 A（或反之）算同一个点。
+  // 旧口径只给结构侧去撇、题干侧不去，于是「题干有 A′、图上标 A」会被误判为幻觉点。
+  const refLettersBare = new Set([...refLetters].map(l => l.replace(/′/g, '')))
   const exemptByAdjacency = new Set()
   for (const seg of drawnSegs) {
     const [a, b] = seg.split('|')
     const aBare = a.replace(/′/g, '')
     const bBare = b.replace(/′/g, '')
-    if (refLetters.has(aBare) && !refLetters.has(bBare)) exemptByAdjacency.add(bBare)
-    if (refLetters.has(bBare) && !refLetters.has(aBare)) exemptByAdjacency.add(aBare)
+    if (refLettersBare.has(aBare) && !refLettersBare.has(bBare)) exemptByAdjacency.add(bBare)
+    if (refLettersBare.has(bBare) && !refLettersBare.has(aBare)) exemptByAdjacency.add(aBare)
   }
   for (const p of pts) {
-    const bare = p.replace(/′/g, '')
-    if (!refLetters.has(bare) && !exemptByAdjacency.has(bare)) {
+    const full = normalizeLabel(p)
+    const bare = full.replace(/′/g, '')
+    if (!refLetters.has(full) && !refLettersBare.has(bare) && !exemptByAdjacency.has(bare)) {
       reasons.push(`重绘图上的点 ${p} 在题干中未出现`)
     }
   }
@@ -220,4 +344,41 @@ export function validateStructureAgainstContent(structure, content, options) {
   checkShapeConstraints(structure, content, reasons)
 
   return { ok: reasons.length === 0, reasons }
+}
+
+/**
+ * 「流程图 / 数值转换器 / 输入→输出表格」类配图的**内容闸门**（2026-09-19 新增）。
+ *
+ * 为什么需要：这类题的配图里有**中文说明文字**（"输入""求算术平方根""是否为无理数""输出"）
+ * 或**分数数值表格**，而 DSL 的 `label` 通道被 `isSymbolLabel` 有意锁死——只放行数学符号，
+ * 以免学生手写答案被当成题设文字画进图里。放行中文会破坏这道防伪闸门，代价远大于收益。
+ * 几何 DSL 也本就不是画流程图的工具。
+ *
+ * 处置：识别出来后**不进入重绘**，直接保留原图裁片（与「数轴/实物/统计图」同类，返回
+ * `non_geometry_figure`）。全库规模极小（2026-09-19 实测：含"转换器/流程图"6 题、
+ * 输入+输出表格 5 题），不值得为它做通用多面板/文字渲染改造。
+ *
+ * @param {string} content 题干文本
+ * @returns {{skip:boolean, kind?:string, reason?:string}}
+ */
+const FLOWCHART_RE = /(数值|数据)?转换器|流程图|程序框图|运算程序/
+const IO_TABLE_RE = /输入\s*[:：][\s\S]{0,150}?输出\s*[:：]/
+
+export function detectNonGeometryFigure(content) {
+  const t = String(content || '')
+  if (FLOWCHART_RE.test(t)) {
+    return {
+      skip: true,
+      kind: 'flowchart',
+      reason: '流程图/数值转换器：框内是中文说明文字，几何 DSL 只画数学符号（放行中文会破坏防手写答案闸门）'
+    }
+  }
+  if (IO_TABLE_RE.test(t)) {
+    return {
+      skip: true,
+      kind: 'io_table',
+      reason: '输入→运算→输出表格题：图内是数值表格与文字，不是几何图形'
+    }
+  }
+  return { skip: false }
 }
