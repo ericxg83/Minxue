@@ -1,0 +1,316 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>初三 周末班错题课件 · 2026-08-31 ~ 2026-09-20</title>
+<style>
+  :root{
+    --ink:#1b1f24; --ink-2:#4b5563; --ink-3:#8b949e; --line:#e3e6ea; --line-2:#eef1f4;
+    --bg:#ffffff; --bg-soft:#f7f8fa; --bg-tint:#fbfcfd;
+    --basic:#0f7b4f; --medium:#1e6fd9; --hard:#c2410c;
+    --warn:#b45309; --danger:#b91c1c; --shadow:0 1px 2px rgba(16,24,40,.06);
+  }
+  *{box-sizing:border-box}
+  body{margin:0;background:var(--bg-soft);color:var(--ink);
+    font:15px/1.75 -apple-system,BlinkMacSystemFont,"Segoe UI","PingFang SC","Hiragino Sans GB","Microsoft YaHei",sans-serif;
+    -webkit-font-smoothing:antialiased}
+  .wrap{max-width:960px;margin:0 auto;padding:24px 20px 64px}
+  .cover{background:var(--bg);border:1px solid var(--line);border-radius:12px;padding:26px 28px;box-shadow:var(--shadow)}
+  .cover h1{margin:0 0 6px;font-size:22px;letter-spacing:.2px}
+  .cover .sub{color:var(--ink-2);font-size:13px;margin-bottom:16px}
+  .meta{display:flex;flex-wrap:wrap;gap:8px 22px;font-size:13px;color:var(--ink-2)}
+  .meta b{color:var(--ink);font-weight:600}
+  .note{margin-top:16px;padding:12px 14px;border-left:3px solid var(--medium);background:var(--bg-tint);
+    border-radius:0 8px 8px 0;font-size:12.5px;color:var(--ink-2)}
+  .note code{background:#eef1f4;padding:1px 5px;border-radius:4px;font-size:12px}
+  table.ov{width:100%;border-collapse:collapse;margin-top:14px;font-size:13px}
+  table.ov th,table.ov td{padding:7px 10px;border-bottom:1px solid var(--line-2);text-align:right}
+  table.ov th:first-child,table.ov td:first-child{text-align:left}
+  table.ov th{color:var(--ink-3);font-weight:500;font-size:12px}
+  .day{background:var(--bg);border:1px solid var(--line);border-radius:12px;margin-top:20px;
+    padding:22px 24px;box-shadow:var(--shadow)}
+  .day-title{margin:0 0 4px;font-size:17px;padding-bottom:10px;border-bottom:2px solid var(--ink);}
+  .clip-note{font-size:12.5px;color:var(--warn);background:#fffbeb;border:1px solid #fde68a;
+    padding:8px 12px;border-radius:8px;margin:12px 0 0}
+  .tier{margin-top:20px}
+  .tier-title{display:flex;align-items:baseline;gap:10px;margin:0 0 10px}
+  .tier-name{font-size:15px;padding:2px 10px;border-radius:999px;color:#fff;background:var(--ink-2)}
+  .tier-basic .tier-name{background:var(--basic)}
+  .tier-medium .tier-name{background:var(--medium)}
+  .tier-hard .tier-name{background:var(--hard)}
+  .tier-unknown .tier-name{background:#9aa4b2}
+  .tier-hint{font-size:12px;color:var(--ink-3)}
+  .q{border:1px solid var(--line);border-radius:10px;padding:14px 16px;margin:12px 0;background:var(--bg-tint)}
+  .q-head{display:flex;flex-wrap:wrap;align-items:center;gap:8px;margin-bottom:10px}
+  .q-idx{display:inline-flex;align-items:center;justify-content:center;min-width:24px;height:24px;padding:0 6px;
+    border-radius:6px;background:var(--ink);color:#fff;font-size:12.5px;font-weight:600}
+  .q-no{font-size:12.5px;color:var(--ink-2)}
+  .badge{font-size:11.5px;padding:2px 8px;border-radius:999px;border:1px solid var(--line);
+    background:#fff;color:var(--ink-2);white-space:nowrap}
+  .badge-type{background:#eef4ff;border-color:#d6e4ff;color:#1e4fa8}
+  .d1,.d2{background:#e9f7f0;border-color:#c7ead9;color:var(--basic)}
+  .d3{background:#eaf2fe;border-color:#cfe1fb;color:var(--medium)}
+  .d4,.d5{background:#fdf0e9;border-color:#fadcc8;color:var(--hard)}
+  .badge-warn{background:#fffbeb;border-color:#fde68a;color:var(--warn)}
+  .badge-shared{background:#fdecec;border-color:#f8d0d0;color:var(--danger);font-weight:600}
+  .badge-single{color:var(--ink-3)}
+  .badge-jitter{background:#f5f3ff;border-color:#ddd6fe;color:#6d28d9}
+  .badge-day{background:var(--bg-soft);border-color:var(--line);color:var(--ink-3);font-variant-numeric:tabular-nums}
+  .parent-stem{font-size:13px;color:var(--ink-2);padding:8px 10px;background:#fff;border-left:2px solid var(--line);
+    border-radius:0 6px 6px 0;margin-bottom:8px}
+  .stem{font-size:15.5px;line-height:1.9}
+  .subno{font-size:12px;color:var(--ink-3);margin-top:4px}
+  .options{margin:10px 0 0;padding-left:0;list-style:none;display:grid;grid-template-columns:repeat(auto-fill,minmax(210px,1fr));gap:4px 14px}
+  .options li{font-size:14px;color:var(--ink-2);padding-left:20px;position:relative}
+  .options li::before{display:inline-block;position:absolute;left:0;color:var(--ink-3)}
+  .options li:nth-child(1)::before{content:"A."}
+  .options li:nth-child(2)::before{content:"B."}
+  .options li:nth-child(3)::before{content:"C."}
+  .options li:nth-child(4)::before{content:"D."}
+  .options li:nth-child(5)::before{content:"E."}
+  .fig{margin:12px 0 0;padding:0}
+  .fig img{max-width:min(420px,100%);border:1px solid var(--line);border-radius:8px;background:#fff}
+  .fig figcaption{font-size:11.5px;color:var(--ink-3);margin-top:4px}
+  .answer{margin-top:12px;padding:9px 12px;background:#e9f7f0;border:1px solid #c7ead9;border-radius:8px;
+    font-size:14px;display:flex;flex-wrap:wrap;gap:6px 14px;align-items:baseline}
+  .answer .k{font-size:11.5px;color:var(--basic);font-weight:600;letter-spacing:.4px}
+  .answer .v{font-weight:600}
+  .answer .src,.answer .risk{font-size:11.5px;color:var(--ink-3)}
+  .answer .risk{color:var(--warn)}
+  .answer-missing{background:#fffbeb;border-color:#fde68a}
+  .answer-missing .k{color:var(--warn)}
+  .muted{color:var(--ink-3);font-weight:400}
+  .who{margin-top:12px;border-top:1px dashed var(--line);padding-top:10px}
+  .who .k{font-size:11.5px;color:var(--ink-3);letter-spacing:.4px}
+  ul.students{list-style:none;margin:6px 0 0;padding:0}
+  ul.students li{font-size:13px;color:var(--ink-2);display:flex;flex-wrap:wrap;align-items:center;
+    gap:4px 10px;padding:4px 0;border-bottom:1px solid var(--line-2)}
+  ul.students li:last-child{border-bottom:0}
+  .sname{font-weight:600;color:var(--ink);min-width:52px}
+  .times{font-size:11.5px;color:var(--danger)}
+  .sa em{font-style:normal;color:var(--danger)}
+  .sa.blank{color:var(--ink-3)}
+  .et{font-size:11.5px;padding:1px 7px;border-radius:999px;background:#fff;border:1px solid var(--line);color:var(--ink-2)}
+  .er{font-size:11.5px;color:var(--ink-3)}
+  a.eye{display:inline-flex;align-items:center;gap:4px;font-size:11.5px;color:var(--medium);
+    text-decoration:none;padding:1px 7px;border:1px solid #cfe1fb;background:#fff;border-radius:999px}
+  a.eye:hover{background:#eef4ff}
+  .eye-disabled{font-size:11.5px;color:var(--ink-3)}
+  .frac{display:inline-flex;flex-direction:column;vertical-align:middle;text-align:center;font-size:.86em;
+    line-height:1.1;margin:0 1px;padding:0 2px}
+  .frac i{font-style:normal;border-bottom:1px solid currentColor;padding:0 2px}
+  .frac i:last-child{border-bottom:0}
+  sub,sup{font-size:.72em}
+  @media print{
+    body{background:#fff}
+    .wrap{max-width:none;padding:0}
+    .cover,.day{box-shadow:none;border:none;border-radius:0;padding:0;margin:0}
+    .day{page-break-before:always}
+    .day:first-of-type{page-break-before:auto}
+    .q{break-inside:avoid;page-break-inside:avoid;background:#fff}
+    a.eye{display:none}
+    .note{display:none}
+    .cover{padding-bottom:16px}
+  }
+</style>
+</head>
+<body>
+<div class="wrap">
+
+<div class="cover">
+  <h1>初三 · 周末班错题课件</h1>
+  <div class="sub">按「日期倒序 → 难度由易到难」组织 · 生成于 2026/9/19 14:07:17</div>
+  <div class="meta">
+    <span>时段 <b>2026-08-31 ~ 2026-09-20</b></span>
+    <span>学生 <b>8 人</b></span>
+    <span>错题 <b>25 条</b></span>
+    <span>去重题 <b>10 题</b></span>
+    <span>有课日 <b>13 天</b></span>
+    <span>分节 <b>1 节</b></span>
+    <span>学科字段缺失 <b>1 条</b></span>
+    <span>本份截取 <b>前 10 题</b>（共 172 题）</span>
+  </div>
+  <table class="ov">
+    <thead><tr><th>日期</th><th>题数</th><th>学生数</th><th>基础 1-2</th><th>中等 3</th><th>较难 4-5</th><th>未判定</th></tr></thead>
+    <tbody><tr>
+  <td>2026-09-18</td>
+  <td>25</td><td>2</td>
+  <td>0</td>
+  <td>10</td>
+  <td>0</td>
+  <td>0</td>
+</tr></tbody>
+  </table>
+  <div class="note">
+    <b>口径说明</b><br>
+    1. 同一道题由多人错时合并为一条，标注「共 N 人错」并列出各人错答 —— 合并走<b>归一化题干精确匹配</b>，不做相似度合并。<br>
+    2. 难度来自 <code>questions.difficulty</code>（1–5，AI 判定，<code>tags_source='ai'</code>）；同题多人错时取众数。<br>
+    3. 每题「原卷」小眼睛链接指向该学生上传的整页图 —— 系统不提供可靠的题目裁图，讲题时以整页图为准。<br>
+    4. 页面右侧留白可直接打印：每日自动分页，题目不跨页断开。<br>
+    5. 本份为<b>讲义版</b>（含参考答案）。出不含答案的版本加 <code>--no-answer</code>。
+  </div>
+</div>
+
+<section class="day">
+  <h2 class="day-title">2026-09-18（10 题 · 2 名学生）</h2>
+  
+  <section class="tier tier-medium">
+      <h3 class="tier-title"><span class="tier-name">中等</span>
+        <span class="tier-hint">难度 3 · 常规题 · 10 题</span></h3>
+      <article class="q">
+  <header class="q-head">
+    <span class="q-idx">1</span>
+    <span class="q-no">第 11 题</span>
+    <span class="badge badge-type">解答题</span>
+    <span class="badge badge-diff d3">难度 3</span><span class="badge badge-single">1 人错</span>
+  </header>
+  <div class="stem">求证：AD²=AC·BE。</div>
+  
+  <figure class="fig"><img src="https://minxue-app-oss.oss-cn-shanghai.aliyuncs.com/images/bf235b85-e5d4-4f50-9e42-af8330df9451/20260918/afc4230d-c45d-4b7a-b28a-79aa2a308e7d.png" alt="题图" loading="lazy"><figcaption>题图（系统裁片）</figcaption></figure>
+  <div class="answer"><span class="k">参考答案</span><span class="v">36°</span>
+             <span class="src">来源：学生未作答</span>
+             </div>
+  <div class="who"><span class="k">错的学生</span><ul class="students"><li><span class="sname">张诗蕊</span><span class="sa blank">未作答</span><span class="et">未作答</span><span class="eye-disabled" title="无原卷图">无图</span></li></ul></div>
+</article>
+<article class="q">
+  <header class="q-head">
+    <span class="q-idx">2</span>
+    <span class="q-no">第 12 题</span>
+    <span class="badge badge-type">填空题</span>
+    <span class="badge badge-diff d3">难度 3</span><span class="badge badge-single">1 人错</span>
+  </header>
+  <div class="stem">求证：PM=QM。</div>
+  
+  <figure class="fig"><img src="https://minxue-app-oss.oss-cn-shanghai.aliyuncs.com/images/bf235b85-e5d4-4f50-9e42-af8330df9451/20260918/aedffcb2-580a-47ad-bb6a-faa84af0b3a2.png" alt="题图" loading="lazy"><figcaption>题图（系统裁片）</figcaption></figure>
+  <div class="answer"><span class="k">参考答案</span><span class="v">无法唯一确定，填“待人工补充</span>
+             <span class="src">来源：卷面识别</span>
+             <span class="risk">⚠ AI 视觉推理不擅长，建议核对参考答案</span></div>
+  <div class="who"><span class="k">错的学生</span><ul class="students"><li><span class="sname">张诗蕊</span><span class="et">不会分析</span><span class="er">学生未意识到条件不足，错误假设AB可求并算出2√6，缺乏对几何存在性的分析</span><span class="eye-disabled" title="无原卷图">无图</span></li></ul></div>
+</article>
+<article class="q">
+  <header class="q-head">
+    <span class="q-idx">3</span>
+    <span class="q-no">第 13 题</span>
+    <span class="badge badge-type">填空题</span>
+    <span class="badge badge-diff d3">难度 3</span><span class="badge badge-single">1 人错</span>
+  </header>
+  <div class="stem">若A(-4,y₁)、B(2,y₂)、C(1,y₃)为二次函数y=x²+k的图像上的三点，则y₁、y₂、y₃的大小关系是______（用&quot;&lt;&quot;连接）。</div>
+  
+  
+  <div class="answer"><span class="k">参考答案</span><span class="v">y₃&lt;y₂&lt;y₁</span>
+             <span class="src">来源：卷面识别</span>
+             </div>
+  <div class="who"><span class="k">错的学生</span><ul class="students"><li><span class="sname">张诗蕊</span><span class="et">计算错误</span><span class="er">代入x值计算y值时出错，导致y₂与y₃大小关系判断错误。</span><span class="eye-disabled" title="无原卷图">无图</span></li></ul></div>
+</article>
+<article class="q">
+  <header class="q-head">
+    <span class="q-idx">4</span>
+    <span class="q-no">第 2 题</span>
+    <span class="badge badge-type">选择题</span>
+    <span class="badge badge-diff d3">难度 3</span><span class="badge badge-single">1 人错</span>
+  </header>
+  <div class="stem">对于二次函数y=-2(x-3)²+1，下列说法中正确的是</div>
+  <ol class="options"><li>图象的开口向上</li><li>函数的最小值为1</li><li>当x&lt;3时，y随x的增大而减小</li><li>图象的对称轴为直线x=3</li></ol>
+  
+  <div class="answer"><span class="k">参考答案</span><span class="v">D</span>
+             <span class="src">来源：卷面识别</span>
+             </div>
+  <div class="who"><span class="k">错的学生</span><ul class="students"><li><span class="sname">张诗蕊</span><span class="et">概念不理解</span><span class="er">未掌握顶点式二次函数的顶点、对称轴及开口方向等性质。</span><span class="eye-disabled" title="无原卷图">无图</span></li></ul></div>
+</article>
+<article class="q">
+  <header class="q-head">
+    <span class="q-idx">5</span>
+    <span class="q-no">第 5 题</span>
+    <span class="badge badge-type">填空题</span>
+    <span class="badge badge-diff d3">难度 3</span><span class="badge badge-single">1 人错</span>
+  </header>
+  <div class="stem">如图，已知BD和CE是△ABC的高，BD与CE相交于点O，那么图中与△ABD相似的三角形是______。</div>
+  
+  <figure class="fig"><img src="https://minxue-app-oss.oss-cn-shanghai.aliyuncs.com/images/ee200770-3631-40b9-a60e-e4e275ac8495/20260918/32a90e09-ece8-412b-a674-a69e95816fd2.png" alt="题图" loading="lazy"><figcaption>题图（系统裁片）</figcaption></figure>
+  <div class="answer"><span class="k">参考答案</span><span class="v">△ACE、△BEO、△CDO</span>
+             <span class="src">来源：卷面识别</span>
+             <span class="risk">⚠ AI 视觉推理不擅长，建议核对参考答案</span></div>
+  <div class="who"><span class="k">错的学生</span><ul class="students"><li><span class="sname">王艺博</span><span class="et">审题错误</span><span class="er">只写出了最明显的相似三角形，未找出所有符合条件的三角形</span><span class="eye-disabled" title="无原卷图">无图</span></li></ul></div>
+</article>
+<article class="q">
+  <header class="q-head">
+    <span class="q-idx">6</span>
+    <span class="q-no">第 5 题</span>
+    <span class="badge badge-type">填空题</span>
+    <span class="badge badge-diff d3">难度 3</span><span class="badge badge-single">1 人错</span>
+  </header>
+  <div class="stem">如图，已知BD和CE是△ABC的高，BD与CE相交于点O，那么图中与△ABD相似的三角形是</div>
+  
+  <figure class="fig"><img src="https://minxue-app-oss.oss-cn-shanghai.aliyuncs.com/images/bf235b85-e5d4-4f50-9e42-af8330df9451/20260918/696d7cd2-2b24-4377-a3d4-5a059c93c0b7.png" alt="题图" loading="lazy"><figcaption>题图（系统裁片）</figcaption></figure>
+  <div class="answer"><span class="k">参考答案</span><span class="v">△ACE、△BEO、△CDO</span>
+             <span class="src">来源：卷面识别</span>
+             <span class="risk">⚠ AI 视觉推理不擅长，建议核对参考答案</span></div>
+  <div class="who"><span class="k">错的学生</span><ul class="students"><li><span class="sname">张诗蕊</span><span class="et">步骤遗漏</span><span class="er">只找出一个相似三角形，遗漏了△BEO和△CDO</span><span class="eye-disabled" title="无原卷图">无图</span></li></ul></div>
+</article>
+<article class="q">
+  <header class="q-head">
+    <span class="q-idx">7</span>
+    <span class="q-no">第 6 题</span>
+    <span class="badge badge-type">填空题</span>
+    <span class="badge badge-diff d3">难度 3</span><span class="badge badge-single">1 人错</span>
+  </header>
+  <div class="stem">如图，□ABCD的对角线相交于点O，已知OE∥AB，与△BOE相似的三角形是</div>
+  
+  <figure class="fig"><img src="https://minxue-app-oss.oss-cn-shanghai.aliyuncs.com/images/bf235b85-e5d4-4f50-9e42-af8330df9451/20260918/b6177371-f41f-4086-b0bb-b4acde38edd7.png" alt="题图" loading="lazy"><figcaption>题图（系统裁片）</figcaption></figure>
+  <div class="answer"><span class="k">参考答案</span><span class="v">△DOF</span>
+             <span class="src">来源：卷面识别</span>
+             <span class="risk">⚠ AI 视觉推理不擅长，建议核对参考答案</span></div>
+  <div class="who"><span class="k">错的学生</span><ul class="students"><li><span class="sname">张诗蕊</span><span class="et">概念不理解</span><span class="er">相似三角形判定错误</span><span class="eye-disabled" title="无原卷图">无图</span></li></ul></div>
+</article>
+<article class="q">
+  <header class="q-head">
+    <span class="q-idx">8</span>
+    <span class="q-no">第 7 题</span>
+    <span class="badge badge-type">填空题</span>
+    <span class="badge badge-diff d3">难度 3</span><span class="badge badge-single">1 人错</span>
+  </header>
+  <div class="stem">如图，已知△ABC和△GAF是两个全等的等腰直角三角形，那么图中相似三角形（不包括全等）共有 对。</div>
+  
+  <figure class="fig"><img src="https://minxue-app-oss.oss-cn-shanghai.aliyuncs.com/images/bf235b85-e5d4-4f50-9e42-af8330df9451/20260918/9e9398ee-6dbc-4b0e-bf8b-acb6220667c1.png" alt="题图" loading="lazy"><figcaption>题图（系统裁片）</figcaption></figure>
+  <div class="answer"><span class="k">参考答案</span><span class="v">5</span>
+             <span class="src">来源：卷面识别</span>
+             <span class="risk">⚠ AI 视觉推理不擅长，建议核对参考答案</span></div>
+  <div class="who"><span class="k">错的学生</span><ul class="students"><li><span class="sname">张诗蕊</span><span class="et">计算错误</span><span class="er">未正确计算相似三角形对数</span><span class="eye-disabled" title="无原卷图">无图</span></li></ul></div>
+</article>
+<article class="q">
+  <header class="q-head">
+    <span class="q-idx">9</span>
+    <span class="q-no">第 9 题</span>
+    <span class="badge badge-type">填空题</span>
+    <span class="badge badge-diff d3">难度 3</span><span class="badge badge-single">1 人错</span>
+  </header>
+  <div class="stem">已知函数 y=(k-3)x²+2x+1 的图像与 x 轴有交点，则 k 的取值范围是□。</div>
+  
+  
+  <div class="answer"><span class="k">参考答案</span><span class="v">k≤4</span>
+             <span class="src">来源：卷面识别</span>
+             </div>
+  <div class="who"><span class="k">错的学生</span><ul class="students"><li><span class="sname">张诗蕊</span><span class="et">审题错误</span><span class="er">误认为二次函数要求k≠3，未考虑k=3时一次函数也有交点</span><span class="eye-disabled" title="无原卷图">无图</span></li></ul></div>
+</article>
+<article class="q">
+  <header class="q-head">
+    <span class="q-idx">10</span>
+    <span class="q-no">第 9 题</span>
+    <span class="badge badge-type">填空题</span>
+    <span class="badge badge-diff d3">难度 3</span><span class="badge badge-single">1 人错</span>
+  </header>
+  <div class="stem">如果点A(3,m)、B(5,n)是抛物线y=2023(x-1)²+2024上的两个点，那么m和n的大小关系是m______n（填&quot;&gt;&quot;或&quot;&lt;&quot;或&quot;=&quot;）。</div>
+  
+  
+  <div class="answer"><span class="k">参考答案</span><span class="v">m &lt; n</span>
+             <span class="src">来源：卷面识别</span>
+             </div>
+  <div class="who"><span class="k">错的学生</span><ul class="students"><li><span class="sname">张诗蕊</span><span class="et">粗心</span><span class="er">学生答案与正确答案一致，可能误判为错误。</span><span class="eye-disabled" title="无原卷图">无图</span></li></ul></div>
+</article>
+    </section>
+</section>
+
+</div>
+</body>
+</html>

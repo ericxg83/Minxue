@@ -1,0 +1,216 @@
+<!DOCTYPE html><html lang="zh-CN"><head><meta charset="utf-8"><title>初三 周末班错题课件</title><style>
+  @page { size: 13.333in 7.5in; margin: 0; }
+  * { box-sizing: border-box; -webkit-print-color-adjust: exact; print-color-adjust: exact; }
+  html,body { margin:0; padding:0; font-family:"微软雅黑","Microsoft YaHei",sans-serif; color:#1b1f24; }
+  .slide { width:13.333in; height:7.5in; overflow:hidden; page-break-after:always; break-after:page;
+            position:relative; background:#f2f4fb; padding:.30in 0.46in .32in; display:flex; flex-direction:column; }
+  .slide:last-child { page-break-after:auto; break-after:auto; }
+
+  /* ── 封面 ── */
+  .cover { padding:0; background:linear-gradient(135deg,#4a4ee4 0%,#7c38c9 100%); color:#fff; }
+  .cv-circ { position:absolute; border-radius:50%; background:rgba(255,255,255,.09); }
+  .cv-circ.c1 { width:5.4in; height:5.4in; right:-1.2in; top:-1.9in; }
+  .cv-circ.c2 { width:3.8in; height:3.8in; right:-0.6in; bottom:-1.2in; }
+  .cv-circ.c3 { width:3.2in; height:3.2in; left:-1.5in; bottom:-1.0in; background:rgba(255,255,255,.06); }
+  .cv-inner { position:relative; padding:.86in .92in; height:100%; display:flex; flex-direction:column; }
+  .cv-kicker { margin:0; font-size:19pt; font-weight:700; color:#cfcbf7; letter-spacing:.06em; }
+  .cover h1 { margin:.10in 0 .12in; font-size:44pt; line-height:1.15; }
+  .cv-sub { margin:0 0 .38in; font-size:15pt; color:#c9c6f2; }
+  .cv-nums { display:flex; gap:.26in; }
+  .cv-card { background:rgba(255,255,255,.13); border-radius:14px; padding:.16in .24in; width:2.52in; }
+  .cv-card b { display:block; font-size:31pt; line-height:1.1; }
+  .cv-card span { color:#d4d1f6; font-size:12.5pt; }
+  .cv-meta { margin:auto 0 0; padding:0; list-style:none; color:#bebaee; font-size:14pt; line-height:1.9; }
+
+  /* ── 目录 ── */
+  .overview { background:#f2f4fb; }
+  .overview .ocard { background:#fff; border:1px solid #e5e9f4; border-radius:12px; flex:1;
+                      padding:.40in .44in; display:flex; flex-direction:column; }
+  .overview h2 { margin:0 0 .18in; font-size:25pt; display:flex; align-items:center; gap:.14in; }
+  .overview h2 .bar { width:.085in; height:.46in; border-radius:99px; background:linear-gradient(180deg,#4a4ee4,#7c38c9); }
+  .overview h2 small { font-size:14pt; color:#8b949e; font-weight:400; }
+  .overview table { width:100%; border-collapse:collapse; font-size:14pt; }
+  .overview th,.overview td { padding:8px 10px; border-bottom:1px solid #eef1f7; text-align:right; }
+  .overview th:first-child,.overview td:first-child { text-align:left; }
+  .overview th { color:#4c51e0; font-size:12.5pt; font-weight:700; }
+
+  /* ── 分节页 ── */
+  .divider { background:linear-gradient(135deg,#4a4ee4 0%,#7c38c9 100%); color:#fff; justify-content:center; padding-left:0.92in; }
+  .dv-circ { position:absolute; border-radius:50%; background:rgba(255,255,255,.08); }
+  .dv-circ.c1 { width:4.6in; height:4.6in; right:-1.0in; top:-1.4in; }
+  .dv-circ.c2 { width:3.4in; height:3.4in; left:-1.2in; bottom:-1.4in; background:rgba(255,255,255,.06); }
+  .divider .kicker { margin:0 0 .10in; font-size:15pt; font-weight:700; letter-spacing:.08em; color:#cfcbf7; }
+  .divider h1 { margin:0 0 .22in; font-size:46pt; }
+  .divider .dim { color:#d4d1f6; font-size:16pt; margin:0 0 .10in; }
+  .divider .dim2 { color:#bebaee; font-size:14pt; margin:0; }
+
+  /* ── 题目页 ── */
+  .hdr { display:flex; align-items:center; gap:.18in; height:.64in; margin-bottom:.14in; }
+  .idx { width:.64in; height:.64in; border-radius:12px; flex:none;
+          background:linear-gradient(135deg,#4a4ee4,#7c38c9); color:#fff; font-size:22pt; font-weight:700;
+          display:flex; align-items:center; justify-content:center; }
+  .meta .m1 { font-size:12.5pt; color:#8b949e; line-height:1.3; }
+  .meta .m2 { display:flex; align-items:center; gap:.14in; margin-top:.035in; }
+  .dots { display:inline-flex; gap:.055in; }
+  .dots i { width:.105in; height:.105in; border-radius:50%; background:#dde2f0; }
+  .dots.d-basic i.on { background:#0f7b4f; }
+  .dots.d-medium i.on { background:#1e6fd9; }
+  .dots.d-hard i.on { background:#c2410c; }
+  .dots.d-unknown i.on { background:#6b7280; }
+  .tl { font-size:12.5pt; }
+  .t-basic { color:#0f7b4f; } .t-medium { color:#1e6fd9; } .t-hard { color:#c2410c; } .t-unknown { color:#6b7280; }
+  .hot { font-size:11.5pt; font-weight:700; color:#b91c1c; background:#fce9e9; border-radius:999px; padding:.02in .12in; }
+  .dimc { font-size:11.5pt; color:#8b949e; }
+  .chip { font-size:11pt; padding:.02in .11in; border-radius:999px; white-space:nowrap; }
+  .chip.warn { color:#b45309; background:#fffbeb; }
+  .chip.jit { color:#6d28d9; background:#f5f3ff; }
+  .who { margin-left:auto; font-size:13.5pt; font-weight:700; color:#4b5563; white-space:nowrap; }
+
+  .card { flex:1; background:#fff; border:1px solid #e5e9f4; border-radius:12px;
+           padding:.24in .32in; min-height:0; display:flex; flex-direction:column; line-height:1.45; }
+  .crow { display:flex; gap:.28in; min-height:0; }
+  .ccol { flex:1; min-width:0; }
+  .cond { background:#eef1fe; border-left:.065in solid #b9c2f5; border-radius:8px;
+           padding:.09in .18in .10in; margin-bottom:.12in; color:#3f478f; }
+  .cond span { display:block; font-size:10.5pt; font-weight:700; margin-bottom:.03in; }
+  .miss-warn { background:#fffbeb; border:1px solid #fde68a; border-radius:8px; padding:.05in .14in;
+                margin-bottom:.12in; font-size:12.5pt; font-weight:700; color:#b45309; }
+  .fallback { background:#fffbeb; border:1px solid #fde68a; border-radius:6px; padding:.04in .1in;
+               margin-bottom:.08in; font-size:.62em; color:#b45309; }
+  .stem { font-size:1em; line-height:1.5; }
+  sup, sub { font-size:.6em; line-height:0; }
+  .opt { font-size:.85em; color:#4b5563; line-height:1.45; margin-top:.04in; }
+  .opt i { font-style:normal; color:#8b949e; }
+  .panel { width:4.75in; flex:none; border:1px solid #e5e9f4; border-radius:10px; background:#f2f4fb;
+            display:flex; flex-direction:column; align-items:center; justify-content:center; padding:.14in; }
+  .panel img { max-width:100%; max-height:3.7399999999999993in; }
+  .panel .cap { font-size:10pt; color:#8b949e; margin-top:.06in; }
+  .nofig { margin-top:.14in; padding:.06in .14in; border:1px dashed #f0d9a8; border-radius:8px;
+            background:#fffbeb; color:#b45309; font-size:11.5pt; }
+
+  .ans { height:1.44in; border-radius:12px; padding:.09in .26in; display:flex; flex-direction:column; justify-content:center;
+          background:#ebfbf3; border:1px solid #bfe9d6; overflow:hidden; margin-top:.14in; }
+  .ans .lab { font-size:11pt; color:#0f7b4f; font-weight:700; }
+  .ans .risk { color:#b45309; font-weight:400; }
+  .ans .val { font-weight:700; color:#0f7b4f; line-height:1.36; }
+  .ans.miss { background:#fffbeb; border-color:#fde68a; }
+  .ans.miss .lab { color:#b45309; }
+  .ans.miss .val { color:#b45309; font-size:18pt; }
+  .ans.plain { background:#fff; border-color:#e5e9f4; align-items:flex-start; }
+  .ans.plain .lab { color:#8b949e; }
+</style></head><body><section class="slide cover">
+  <div class="cv-circ c1"></div><div class="cv-circ c2"></div><div class="cv-circ c3"></div>
+  <div class="cv-inner">
+    <p class="cv-kicker">周末错题讲评</p>
+    <h1>初三 周末班错题课件</h1>
+    <p class="cv-sub">日期倒序 · 每天内部由易到难　｜　PDF 版答案直接印出</p>
+    <div class="cv-nums"><div class="cv-card"><b>10</b><span>题目</span></div><div class="cv-card"><b>2</b><span>有课日</span></div><div class="cv-card"><b>4</b><span>学生</span></div><div class="cv-card"><b>10</b><span>错题条数</span></div></div>
+    <ul class="cv-meta">
+      <li>时段　2026-09-14 ~ 2026-09-17</li>
+      <li>学生　张诗蕊、李哲瀚、陈施君、程思豪</li>
+      <li>备注　演讲者视图可见：谁错了、错在哪、原卷图链接</li>
+    </ul>
+  </div>
+</section><section class="slide overview">
+  <div class="ocard">
+    <h2><span class="bar"></span>本份课件目录<small>按日期倒序</small></h2>
+    <table><thead><tr><th>日期</th><th>题数</th><th>学生</th><th>基础</th><th>中等</th><th>较难</th><th>未判定</th></tr></thead>
+    <tbody><tr><td>2026-09-16</td><td>1</td><td>1</td><td>0</td><td>1</td><td>0</td><td>0</td></tr><tr><td>2026-09-15</td><td>9</td><td>4</td><td>2</td><td>3</td><td>4</td><td>0</td></tr></tbody></table>
+  </div>
+</section><section class="slide divider">
+  <div class="dv-circ c1"></div><div class="dv-circ c2"></div>
+  <p class="kicker">SECTION 01 / 02</p>
+  <h1>2026-09-16</h1>
+  <p class="dim">1 题　·　中等 1　·　1 名学生</p>
+  <p class="dim2">错的学生：张诗蕊</p>
+</section><section class="slide q">
+  <div class="hdr">
+    <div class="idx">1</div>
+    <div class="meta"><div class="m1">2026-09-16 · 填空题</div><div class="m2"><span class="dots d-medium"><i class="on"></i><i class="on"></i><i class="on"></i><i class=""></i></span><b class="tl t-medium">难度 3 · 中等</b><span class="dimc">1 人错</span></div></div>
+    <div class="who">卷面第 9 题　·　张诗蕊</div>
+  </div>
+  <div class="card" style="font-size:30pt"><div class="stem">已知在△ABC中，三边长a=2,b=4,c=3,h<sub>a</sub>、h<sub>b</sub>、h<sub>c</sub>分别为边a、b、c上的高，那么h<sub>a</sub>:h<sub>b</sub>:h<sub>c</sub>=____.</div></div>
+  <div class="ans"><div class="lab">参考答案　·　卷面识别</div><div class="val" style="font-size:26pt">6:3:4</div></div>
+</section><section class="slide divider">
+  <div class="dv-circ c1"></div><div class="dv-circ c2"></div>
+  <p class="kicker">SECTION 02 / 02</p>
+  <h1>2026-09-15</h1>
+  <p class="dim">9 题　·　基础 2 · 中等 3 · 较难 4　·　4 名学生</p>
+  <p class="dim2">错的学生：陈施君、程思豪、李哲瀚、张诗蕊</p>
+</section><section class="slide q">
+  <div class="hdr">
+    <div class="idx">2</div>
+    <div class="meta"><div class="m1">2026-09-15 · 解答题</div><div class="m2"><span class="dots d-basic"><i class="on"></i><i class="on"></i><i class=""></i><i class=""></i></span><b class="tl t-basic">难度 2 · 基础</b><span class="dimc">1 人错</span></div></div>
+    <div class="who">卷面第 10 题　·　李哲瀚</div>
+  </div>
+  <div class="card" style="font-size:30pt"><div class="crow"><div class="ccol"><div class="cond"><span>公共题干</span>如图，抛物线 y=2(x-2)² 与平行于 x 轴的直线交于点 A、B，抛物线顶点为 C，△ABC 为等边三角形，求：</div><div class="stem">(2)点B的坐标;</div></div><div class="panel" style="width:2.70in"><img src="file:///C:/Users/ADMINI~1/AppData/Local/Temp/mx_handout_img_vnzrc67n/3425764782_c73658d1-b997-4410-96a5-b591df3d1a88.jpg"/><div class="cap">题图（系统裁片）</div></div></div></div>
+  <div class="ans"><div class="lab">参考答案　·　练习册答案库</div><div class="val" style="font-size:18pt">如图，过点 C 作 CD⊥AB，垂足为 D。设 AD 为 a(a&gt;0)。∵△ABC 为等边三角形，CD⊥AB，∴AD=DB=a，∠ACD=30°，∴CD=√3a。∴点 B 的坐标为 (2+a, √3a)，∴√3a=2(2+a-2)²，∴a=√3/2，∴B((4+√3)/2, 3/2)。</div></div>
+</section><section class="slide q">
+  <div class="hdr">
+    <div class="idx">3</div>
+    <div class="meta"><div class="m1">2026-09-15 · 解答题</div><div class="m2"><span class="dots d-basic"><i class="on"></i><i class="on"></i><i class=""></i><i class=""></i></span><b class="tl t-basic">难度 2 · 基础</b><span class="dimc">1 人错</span></div></div>
+    <div class="who">卷面第 4 题　·　陈施君</div>
+  </div>
+  <div class="card" style="font-size:30pt"><div class="crow"><div class="ccol"><div class="cond"><span>公共题干</span>Ⅱ已知二次函数y=x²-2x-3.</div><div class="stem">(3)结合函数图像,直接写出当-4≤y≤0时,x的取值范围.</div></div><div class="panel" style="width:2.94in"><img src="file:///C:/Users/ADMINI~1/AppData/Local/Temp/mx_handout_img_vnzrc67n/6121174312_d882f798-a8b2-4581-a589-da24dde9207e.jpg"/><div class="cap">题图（系统裁片）</div></div></div></div>
+  <div class="ans"><div class="lab">参考答案　·　练习册答案库</div><div class="val" style="font-size:22pt">解：(1)当 y=0 时，x²-2x-3=0，解得 x₁=-1，x₂=3，∴抛物线与 x 轴的交点坐标为 (-1,0)、(3,0)。</div></div>
+</section><section class="slide q">
+  <div class="hdr">
+    <div class="idx">4</div>
+    <div class="meta"><div class="m1">2026-09-15 · 解答题</div><div class="m2"><span class="dots d-medium"><i class="on"></i><i class="on"></i><i class="on"></i><i class=""></i></span><b class="tl t-medium">难度 3 · 中等</b><span class="dimc">1 人错</span></div></div>
+    <div class="who">卷面第 11 题　·　李哲瀚</div>
+  </div>
+  <div class="card" style="font-size:30pt"><div class="cond"><span>公共题干</span>在平面直角坐标系 xOy 中，将直线 l: y=-3/4x-3 沿 x 轴翻折，得到一条新直线与 x 轴交于点 A，与 y 轴交于点 B，将抛物线 C₁: y=1/3x² 沿 x 轴平移，得到一条新抛物线 C₂ 与 y 轴交于点 D，与直线 AB 交于点 E、F，连接 DF，满足 DF//x 轴. 求：</div><div class="stem">(2)抛物线C₂的表达式.</div></div>
+  <div class="ans"><div class="lab">参考答案　·　练习册答案库　·　⚠ 答案较长，讲前请核对</div><div class="val" style="font-size:16pt">设平移后抛物线 C₂ 的顶点为 P(n,0)，则抛物线 C₂ 的表达式为 y=1/3(x-n)²，∴D(0, 1/3n²)。∵DF//x 轴，∴点 F(2n, 1/3n²)。又点 F 在直线 AB 上，∴1/3n²=3/4×2n+3，解得 n₁=6, n₂=-3/2。∴抛物线 C₂ 的表达式为 y=1/3(x-6)² 或 y=1/3(x+3/2)²。</div></div>
+</section><section class="slide q">
+  <div class="hdr">
+    <div class="idx">5</div>
+    <div class="meta"><div class="m1">2026-09-15 · 解答题</div><div class="m2"><span class="dots d-medium"><i class="on"></i><i class="on"></i><i class="on"></i><i class=""></i></span><b class="tl t-medium">难度 3 · 中等</b><span class="dimc">1 人错</span></div></div>
+    <div class="who">卷面第 3 题　·　程思豪</div>
+  </div>
+  <div class="card" style="font-size:30pt"><div class="crow"><div class="ccol"><div class="stem">3.如图,已知关于x的二次函数 y=-1/2x²+bx+c 的图像如图所示,则这个二次函数的表达式为</div></div><div class="panel" style="width:4.58in"><img src="file:///C:/Users/ADMINI~1/AppData/Local/Temp/mx_handout_img_vnzrc67n/8286765664_1d69a6d2-ca25-4da4-a44f-6cdc847ea6bc.jpg"/><div class="cap">题图（系统裁片）</div></div></div></div>
+  <div class="ans"><div class="lab">参考答案　·　练习册答案库</div><div class="val" style="font-size:26pt">y=-1/2x²+2x+5/2</div></div>
+</section><section class="slide q">
+  <div class="hdr">
+    <div class="idx">6</div>
+    <div class="meta"><div class="m1">2026-09-15 · 解答题</div><div class="m2"><span class="dots d-medium"><i class="on"></i><i class="on"></i><i class="on"></i><i class=""></i></span><b class="tl t-medium">难度 3 · 中等</b><span class="dimc">1 人错</span></div></div>
+    <div class="who">卷面第 4 题　·　李哲瀚</div>
+  </div>
+  <div class="card" style="font-size:30pt"><div class="crow"><div class="ccol"><div class="stem">如图, 已知抛物线 y=(x-2)² 的顶点为 C, 直线 y=2x+4 与抛物线交于 A、B 两点, 求 △ABC 的面积.</div></div><div class="panel" style="width:4.48in"><img src="file:///C:/Users/ADMINI~1/AppData/Local/Temp/mx_handout_img_vnzrc67n/8546190453_2caacc1a-8291-4fd7-9c87-79e268ca9ce6.jpg"/><div class="cap">题图（系统裁片）</div></div></div></div>
+  <div class="ans"><div class="lab">参考答案　·　练习册答案库　·　⚠ 答案较长，讲前请核对</div><div class="val" style="font-size:16pt">解：易知抛物线 y=(x-2)² 的顶点 C 的坐标为 (2,0)。联立两函数的表达式，得 y=2x+4, y=(x-2)²，解得 x₁=0, y₁=4, x₂=6, y₂=16。∴A(6,16), B(0,4)。过点 A 作 AD⊥x 轴，垂足为 D，则 S△ABC = S梯形ABOD - S△AOC - S△ACD = 1/2(OB+AD)·OD - 1/2OC·OB - 1/2CD·AD = 1/2×(4+16)×6 - 1/2×2×4 - 1/2×4×16 = 24。</div></div>
+</section><section class="slide q">
+  <div class="hdr">
+    <div class="idx">7</div>
+    <div class="meta"><div class="m1">2026-09-15 · 解答题</div><div class="m2"><span class="dots d-hard"><i class="on"></i><i class="on"></i><i class="on"></i><i class="on"></i></span><b class="tl t-hard">难度 4 · 较难</b><span class="dimc">1 人错</span></div></div>
+    <div class="who">卷面第 11 题　·　陈施君</div>
+  </div>
+  <div class="card" style="font-size:30pt"><div class="crow"><div class="ccol"><div class="cond"><span>公共题干</span>11.已知二次函数 y=ax²+bx+c(a≠0)的图像过点 A(1,0),点 B(-3,0)和点 C.</div><div class="stem">(3)若 z=-ax-3a 且 a&lt;0,求证: y-z+9/4a≤0.</div></div><div class="panel" style="width:2.94in"><img src="file:///C:/Users/ADMINI~1/AppData/Local/Temp/mx_handout_img_vnzrc67n/4908839743_e192d1bb-0c94-4752-b8f6-32ff21a4b2e1.jpg"/><div class="cap">题图（系统裁片）</div></div></div></div>
+  <div class="ans"><div class="lab">参考答案　·　练习册答案库　·　⚠ 答案较长，讲前请核对</div><div class="val" style="font-size:11pt">(1)解：设二次函数的表达式为 y=a(x-1)(x+3)，把 C(0,-3)代入，得 -3=a×(0-1)×(0+3)，解得 a=1，∴二次函数的表达式为 y=(x-1)(x+3)，即 y=x²+2x-3。
+2)解：抛物线表达式为 y=a(x-1)(x+3)，即 y=ax²+2ax-3a，抛物线的对称轴为直线 x=-2a/2a=-1。当 x=-1 时，y 有最值 -4a。当 a&gt;0 时，x=-3，m=0；x=-1，n=-4a，∵m-n=8，∴0+4a=8，解得 a=2；当 a&lt;0 时，x=-1，m=-4a；x=-3，n=0，∵m-n=8，∴-4a-0=8，解得 a=-2，综上所述，a 的值为 2 或 -2。
+3)证明：∵y=ax²+2ax-3a，x=-ax-3a，∴y-x+9/4a=ax²+2ax-3a-(-ax-3a)+9/4a=ax²+3ax+9/4a=a(x+3/2)²。∵a&lt;0，(x+3/2)²≥0，∴a(x+3/2)²≤0，即 y-x+9/4a≤0。</div></div>
+</section><section class="slide q">
+  <div class="hdr">
+    <div class="idx">8</div>
+    <div class="meta"><div class="m1">2026-09-15 · 解答题</div><div class="m2"><span class="dots d-hard"><i class="on"></i><i class="on"></i><i class="on"></i><i class="on"></i></span><b class="tl t-hard">难度 4 · 较难</b><span class="dimc">1 人错</span></div></div>
+    <div class="who">卷面第 11 题　·　陈施君</div>
+  </div>
+  <div class="card" style="font-size:30pt"><div class="crow"><div class="ccol"><div class="cond"><span>公共题干</span>11.已知二次函数 y=ax²+bx+c(a≠0)的图像过点 A(1,0),点 B(-3,0)和点 C.</div><div class="stem">(2)当 -3≤x≤0 时,二次函数的最大值为 m,最小值为 n,若 m-n=8,求 a 的值;</div></div><div class="panel" style="width:2.94in"><img src="file:///C:/Users/ADMINI~1/AppData/Local/Temp/mx_handout_img_vnzrc67n/4908839743_e192d1bb-0c94-4752-b8f6-32ff21a4b2e1.jpg"/><div class="cap">题图（系统裁片）</div></div></div></div>
+  <div class="ans"><div class="lab">参考答案　·　练习册答案库　·　⚠ 答案较长，讲前请核对</div><div class="val" style="font-size:11pt">(1)解：设二次函数的表达式为 y=a(x-1)(x+3)，把 C(0,-3)代入，得 -3=a×(0-1)×(0+3)，解得 a=1，∴二次函数的表达式为 y=(x-1)(x+3)，即 y=x²+2x-3。
+2)解：抛物线表达式为 y=a(x-1)(x+3)，即 y=ax²+2ax-3a，抛物线的对称轴为直线 x=-2a/2a=-1。当 x=-1 时，y 有最值 -4a。当 a&gt;0 时，x=-3，m=0；x=-1，n=-4a，∵m-n=8，∴0+4a=8，解得 a=2；当 a&lt;0 时，x=-1，m=-4a；x=-3，n=0，∵m-n=8，∴-4a-0=8，解得 a=-2，综上所述，a 的值为 2 或 -2。
+3)证明：∵y=ax²+2ax-3a，x=-ax-3a，∴y-x+9/4a=ax²+2ax-3a-(-ax-3a)+9/4a=ax²+3ax+9/4a=a(x+3/2)²。∵a&lt;0，(x+3/2)²≥0，∴a(x+3/2)²≤0，即 y-x+9/4a≤0。</div></div>
+</section><section class="slide q">
+  <div class="hdr">
+    <div class="idx">9</div>
+    <div class="meta"><div class="m1">2026-09-15 · 解答题</div><div class="m2"><span class="dots d-hard"><i class="on"></i><i class="on"></i><i class="on"></i><i class="on"></i></span><b class="tl t-hard">难度 4 · 较难</b><span class="dimc">1 人错</span></div></div>
+    <div class="who">卷面第 12 题　·　李哲瀚</div>
+  </div>
+  <div class="card" style="font-size:30pt"><div class="stem">已知直线x=c交抛物线y₁=-(x-a)²于点A(c,m),交抛物线y₂=-(x-b)²于点B(c,n),下列结论:①若a&gt;b&gt;c,则m&lt;n;②若b&gt;a&gt;c,则m&lt;n;③若c&gt;b&gt;a,则m&lt;n;④若a&gt;c&gt;b,则m&lt;n.其中正确的结论有</div></div>
+  <div class="ans"><div class="lab">参考答案　·　练习册答案库</div><div class="val" style="font-size:22pt">B 解析：∵抛物线 y₁=-(x-a)² 经过点 A(c,m)，∴m=-(c-a)²，同理可得 n=-(c-b)²，∴m-n=-(c-a)²+(c-b)²=(a-b)(2c-a-b)。</div></div>
+</section><section class="slide q">
+  <div class="hdr">
+    <div class="idx">10</div>
+    <div class="meta"><div class="m1">2026-09-15 · 解答题</div><div class="m2"><span class="dots d-hard"><i class="on"></i><i class="on"></i><i class="on"></i><i class="on"></i></span><b class="tl t-hard">难度 4 · 较难</b><span class="dimc">1 人错</span></div></div>
+    <div class="who">卷面第 7 题　·　张诗蕊</div>
+  </div>
+  <div class="card" style="font-size:30pt"><div class="crow"><div class="ccol"><div class="stem">如图，已知平行四边形ABCD顶点A的坐标为(2,6)，点B在y轴上，且AD//BC//x轴，过B、C、D三点的抛物线的顶点坐标为(2,2)，则抛物线的表达式是y=______.</div></div><div class="panel" style="width:3.73in"><img src="file:///C:/Users/ADMINI~1/AppData/Local/Temp/mx_handout_img_vnzrc67n/3012741704_87ee6203-2d8c-408a-9a42-8ecbb6b610ab.jpg"/><div class="cap">题图（系统裁片）</div></div></div></div>
+  <div class="ans"><div class="lab">参考答案　·　练习册答案库　·　⚠ 答案较长，讲前请核对</div><div class="val" style="font-size:16pt">1/4(x-2)²+2 解析：∵过B,C,D三点的抛物线的顶点坐标为(2,2),AD//BC//x轴，∴BC=4。∵四边形ABCD是平行四边形，∴AD=BC=4。∵点A的坐标为(2,6)，∴D(6,6)。设抛物线为y=a(x-2)²+2，代入点D的坐标，得6=16a+2，解得a=1/4，∴抛物线的表达式为y=1/4(x-2)²+2。</div></div>
+</section></body></html>

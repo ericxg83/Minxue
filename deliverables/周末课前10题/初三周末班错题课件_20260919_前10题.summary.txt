@@ -1,0 +1,10 @@
+年级：初三    时段：2026-08-31 ~ 2026-09-20
+学生：8 人（张诗蕊、王艺博、陈施君、周俊辰、李哲瀚、丁嘉炜、程思豪、胡传政）
+错题 25 条 → 去重 10 题，分布在 13 个自然日 / 1 个分节
+⚠ 其中 1 条 questions.subject 与 tasks.subject 均为空（练习册管线不写 subject）
+⚠ 整份课件截取前 10 题，未收录 162 题（--limit）
+分节                          题数  学生数  基础(1-2)  中等(3)  较难(4-5)  未判定
+2026-09-18                     25       2          0        10          0         0
+HTML: D:\Minxue_App_V3\deliverables\周末课前10题\初三周末班错题课件_20260919_前10题.html
+JSON: D:\Minxue_App_V3\deliverables\周末课前10题\初三周末班错题课件_20260919_前10题.json
+SLIDES: D:\Minxue_App_V3\deliverables\周末课前10题\初三周末班错题课件_20260919_前10题.slides.json

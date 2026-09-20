@@ -1,0 +1,3475 @@
+{
+  "generatedAt": "2026-09-17T02:10:45.366Z",
+  "grade": "初三",
+  "subject": null,
+  "period": {
+    "start": "2026-08-29",
+    "end": "2026-09-18"
+  },
+  "students": [
+    "丁嘉炜",
+    "周俊辰",
+    "张诗蕊",
+    "李哲瀚",
+    "王艺博",
+    "程思豪",
+    "胡传政",
+    "陈施君"
+  ],
+  "totals": {
+    "rawRows": 175,
+    "topics": 145,
+    "days": 11,
+    "sections": 11
+  },
+  "days": [
+    {
+      "day": "2026-09-16",
+      "dayFrom": "2026-09-16",
+      "mergedDays": [],
+      "rawRows": 1,
+      "totalTopics": 1,
+      "topics": [
+        {
+          "questionNumber": 9,
+          "difficulty": 3,
+          "diffValues": [
+            3
+          ],
+          "questionType": "fill",
+          "studentCount": 1,
+          "rawCount": 1,
+          "content": "已知在△ABC中，三边长a=2,b=4,c=3,h_a、h_b、h_c分别为边a、b、c上的高，那么h_a:h_b:h_c=____.",
+          "answer": "6:3:4",
+          "answerSource": "recognized",
+          "answerRisk": null,
+          "students": [
+            {
+              "name": "张诗蕊",
+              "wrongTimes": 1,
+              "studentAnswer": null,
+              "errorType": "概念不理解"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "day": "2026-09-15",
+      "dayFrom": "2026-09-15",
+      "mergedDays": [],
+      "rawRows": 9,
+      "totalTopics": 9,
+      "topics": [
+        {
+          "questionNumber": 10,
+          "difficulty": 2,
+          "diffValues": [
+            2
+          ],
+          "questionType": "answer",
+          "studentCount": 1,
+          "rawCount": 1,
+          "content": "如图，抛物线 y=2(x-2)² 与平行于 x 轴的直线交于点 A、B，抛物线顶点为 C，△ABC 为等边三角形，求： (2)点B的坐标;",
+          "answer": "如图，过点 C 作 CD⊥AB，垂足为 D。设 AD 为 a(a>0)。∵△ABC 为等边三角形，CD⊥AB，∴AD=DB=a，∠ACD=30°，∴CD=√3a。∴点 B 的坐标为 (2+a, √3a)，∴√3a=2(2+a-2)²，∴a=√3/2，∴B((4+√3)/2, 3/2)。",
+          "answerSource": "worksheet",
+          "answerRisk": null,
+          "students": [
+            {
+              "name": "李哲瀚",
+              "wrongTimes": 1,
+              "studentAnswer": null,
+              "errorType": "步骤遗漏"
+            }
+          ]
+        },
+        {
+          "questionNumber": 4,
+          "difficulty": 2,
+          "diffValues": [
+            2
+          ],
+          "questionType": "answer",
+          "studentCount": 1,
+          "rawCount": 1,
+          "content": "Ⅱ已知二次函数y=x²-2x-3. (3)结合函数图像,直接写出当-4≤y≤0时,x的取值范围.",
+          "answer": "解：(1)当 y=0 时，x²-2x-3=0，解得 x₁=-1，x₂=3，∴抛物线与 x 轴的交点坐标为 (-1,0)、(3,0)。",
+          "answerSource": "worksheet",
+          "answerRisk": null,
+          "students": [
+            {
+              "name": "陈施君",
+              "wrongTimes": 1,
+              "studentAnswer": null,
+              "errorType": "步骤遗漏"
+            }
+          ]
+        },
+        {
+          "questionNumber": 11,
+          "difficulty": 3,
+          "diffValues": [
+            3
+          ],
+          "questionType": "answer",
+          "studentCount": 1,
+          "rawCount": 1,
+          "content": "在平面直角坐标系 xOy 中，将直线 l: y=-3/4x-3 沿 x 轴翻折，得到一条新直线与 x 轴交于点 A，与 y 轴交于点 B，将抛物线 C₁: y=1/3x² 沿 x 轴平移，得到一条新抛物线 C₂ 与 y 轴交于点 D，与直线 AB 交于点 E、F，连接 DF，满足 DF//x 轴. 求： (2)抛物线C₂的表达式.",
+          "answer": "设平移后抛物线 C₂ 的顶点为 P(n,0)，则抛物线 C₂ 的表达式为 y=1/3(x-n)²，∴D(0, 1/3n²)。∵DF//x 轴，∴点 F(2n, 1/3n²)。又点 F 在直线 AB 上，∴1/3n²=3/4×2n+3，解得 n₁=6, n₂=-3/2。∴抛物线 C₂ 的表达式为 y=1/3(x-6)² 或 y=1/3(x+3/2)²。",
+          "answerSource": "worksheet",
+          "answerRisk": null,
+          "students": [
+            {
+              "name": "李哲瀚",
+              "wrongTimes": 1,
+              "studentAnswer": null,
+              "errorType": "步骤遗漏"
+            }
+          ]
+        },
+        {
+          "questionNumber": 3,
+          "difficulty": 3,
+          "diffValues": [
+            3
+          ],
+          "questionType": "answer",
+          "studentCount": 1,
+          "rawCount": 1,
+          "content": "3.如图,已知关于x的二次函数 y=-1/2x²+bx+c 的图像如图所示,则这个二次函数的表达式为",
+          "answer": "y=-1/2x²+2x+5/2",
+          "answerSource": "worksheet",
+          "answerRisk": null,
+          "students": [
+            {
+              "name": "程思豪",
+              "wrongTimes": 1,
+              "studentAnswer": null,
+              "errorType": "计算错误"
+            }
+          ]
+        },
+        {
+          "questionNumber": 4,
+          "difficulty": 3,
+          "diffValues": [
+            3
+          ],
+          "questionType": "answer",
+          "studentCount": 1,
+          "rawCount": 1,
+          "content": "如图, 已知抛物线 y=(x-2)² 的顶点为 C, 直线 y=2x+4 与抛物线交于 A、B 两点, 求 △ABC 的面积.",
+          "answer": "解：易知抛物线 y=(x-2)² 的顶点 C 的坐标为 (2,0)。联立两函数的表达式，得 {y=2x+4, y=(x-2)²}，解得 {x₁=0, y₁=4}, {x₂=6, y₂=16}。∴A(6,16), B(0,4)。过点 A 作 AD⊥x 轴，垂足为 D，则 S△ABC = S梯形ABOD - S△AOC - S△ACD = 1/2(OB+AD)·OD - 1/2OC·OB - 1/2CD·AD = 1/2×(4+16)×6 - 1/2×2×4 - 1/2×4×16 = 24。",
+          "answerSource": "worksheet",
+          "answerRisk": null,
+          "students": [
+            {
+              "name": "李哲瀚",
+              "wrongTimes": 1,
+              "studentAnswer": null,
+              "errorType": "步骤遗漏"
+            }
+          ]
+        },
+        {
+          "questionNumber": 11,
+          "difficulty": 4,
+          "diffValues": [
+            4
+          ],
+          "questionType": "answer",
+          "studentCount": 1,
+          "rawCount": 1,
+          "content": "11.已知二次函数 y=ax²+bx+c(a≠0)的图像过点 A(1,0),点 B(-3,0)和点 C. (3)若 z=-ax-3a 且 a<0,求证: y-z+9/4a≤0.",
+          "answer": "(1)解：设二次函数的表达式为 y=a(x-1)(x+3)，把 C(0,-3)代入，得 -3=a×(0-1)×(0+3)，解得 a=1，∴二次函数的表达式为 y=(x-1)(x+3)，即 y=x²+2x-3。\n2)解：抛物线表达式为 y=a(x-1)(x+3)，即 y=ax²+2ax-3a，抛物线的对称轴为直线 x=-2a/2a=-1。当 x=-1 时，y 有最值 -4a。当 a>0 时，x=-3，m=0；x=-1，n=-4a，∵m-n=8，∴0+4a=8，解得 a=2；当 a<0 时，x=-1，m=-4a；x=-3，n=0，∵m-n=8，∴-4a-0=8，解得 a=-2，综上所述，a 的值为 2 或 -2。\n3)证明：∵y=ax²+2ax-3a，x=-ax-3a，∴y-x+9/4a=ax²+2ax-3a-(-ax-3a)+9/4a=ax²+3ax+9/4a=a(x+3/2)²。∵a<0，(x+3/2)²≥0，∴a(x+3/2)²≤0，即 y-x+9/4a≤0。",
+          "answerSource": "worksheet",
+          "answerRisk": null,
+          "students": [
+            {
+              "name": "陈施君",
+              "wrongTimes": 1,
+              "studentAnswer": null,
+              "errorType": "步骤遗漏"
+            }
+          ]
+        },
+        {
+          "questionNumber": 11,
+          "difficulty": 4,
+          "diffValues": [
+            4
+          ],
+          "questionType": "answer",
+          "studentCount": 1,
+          "rawCount": 1,
+          "content": "11.已知二次函数 y=ax²+bx+c(a≠0)的图像过点 A(1,0),点 B(-3,0)和点 C. (2)当 -3≤x≤0 时,二次函数的最大值为 m,最小值为 n,若 m-n=8,求 a 的值;",
+          "answer": "(1)解：设二次函数的表达式为 y=a(x-1)(x+3)，把 C(0,-3)代入，得 -3=a×(0-1)×(0+3)，解得 a=1，∴二次函数的表达式为 y=(x-1)(x+3)，即 y=x²+2x-3。\n2)解：抛物线表达式为 y=a(x-1)(x+3)，即 y=ax²+2ax-3a，抛物线的对称轴为直线 x=-2a/2a=-1。当 x=-1 时，y 有最值 -4a。当 a>0 时，x=-3，m=0；x=-1，n=-4a，∵m-n=8，∴0+4a=8，解得 a=2；当 a<0 时，x=-1，m=-4a；x=-3，n=0，∵m-n=8，∴-4a-0=8，解得 a=-2，综上所述，a 的值为 2 或 -2。\n3)证明：∵y=ax²+2ax-3a，x=-ax-3a，∴y-x+9/4a=ax²+2ax-3a-(-ax-3a)+9/4a=ax²+3ax+9/4a=a(x+3/2)²。∵a<0，(x+3/2)²≥0，∴a(x+3/2)²≤0，即 y-x+9/4a≤0。",
+          "answerSource": "worksheet",
+          "answerRisk": null,
+          "students": [
+            {
+              "name": "陈施君",
+              "wrongTimes": 1,
+              "studentAnswer": null,
+              "errorType": "步骤遗漏"
+            }
+          ]
+        },
+        {
+          "questionNumber": 12,
+          "difficulty": 4,
+          "diffValues": [
+            4
+          ],
+          "questionType": "answer",
+          "studentCount": 1,
+          "rawCount": 1,
+          "content": "已知直线x=c交抛物线y₁=-(x-a)²于点A(c,m),交抛物线y₂=-(x-b)²于点B(c,n),下列结论:①若a>b>c,则m<n;②若b>a>c,则m<n;③若c>b>a,则m<n;④若a>c>b,则m<n.其中正确的结论有",
+          "answer": "B 解析：∵抛物线 y₁=-(x-a)² 经过点 A(c,m)，∴m=-(c-a)²，同理可得 n=-(c-b)²，∴m-n=-(c-a)²+(c-b)²=(a-b)(2c-a-b)。",
+          "answerSource": "worksheet",
+          "answerRisk": null,
+          "students": [
+            {
+              "name": "李哲瀚",
+              "wrongTimes": 1,
+              "studentAnswer": null,
+              "errorType": "步骤遗漏"
+            }
+          ]
+        },
+        {
+          "questionNumber": 7,
+          "difficulty": 4,
+          "diffValues": [
+            4
+          ],
+          "questionType": "answer",
+          "studentCount": 1,
+          "rawCount": 1,
+          "content": "如图，已知平行四边形ABCD顶点A的坐标为(2,6)，点B在y轴上，且AD//BC//x轴，过B、C、D三点的抛物线的顶点坐标为(2,2)，则抛物线的表达式是y=______.",
+          "answer": "1/4(x-2)²+2 解析：∵过B,C,D三点的抛物线的顶点坐标为(2,2),AD//BC//x轴，∴BC=4。∵四边形ABCD是平行四边形，∴AD=BC=4。∵点A的坐标为(2,6)，∴D(6,6)。设抛物线为y=a(x-2)²+2，代入点D的坐标，得6=16a+2，解得a=1/4，∴抛物线的表达式为y=1/4(x-2)²+2。",
+          "answerSource": "worksheet",
+          "answerRisk": null,
+          "students": [
+            {
+              "name": "张诗蕊",
+              "wrongTimes": 1,
+              "studentAnswer": null,
+              "errorType": "步骤遗漏"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "day": "2026-09-13",
+      "dayFrom": "2026-09-13",
+      "mergedDays": [],
+      "rawRows": 13,
+      "totalTopics": 12,
+      "topics": [
+        {
+          "questionNumber": 1,
+          "difficulty": 2,
+          "diffValues": [
+            2
+          ],
+          "questionType": "choice",
+          "studentCount": 1,
+          "rawCount": 1,
+          "content": "1.抛物线的形状、开口方向与 y=1/2x²-4x+3 相同,顶点坐标为(-2,1),则表达式为",
+          "answer": "C",
+          "answerSource": "worksheet",
+          "answerRisk": null,
+          "students": [
+            {
+              "name": "程思豪",
+              "wrongTimes": 1,
+              "studentAnswer": "A",
+              "errorType": "公式记忆错误"
+            }
+          ]
+        },
+        {
+          "questionNumber": 2,
+          "difficulty": 3,
+          "diffValues": [
+            3
+          ],
+          "questionType": "choice",
+          "studentCount": 2,
+          "rawCount": 2,
+          "content": "2.二次函数的图像如图所示,则其表达式是",
+          "answer": "A",
+          "answerSource": "worksheet",
+          "answerRisk": null,
+          "students": [
+            {
+              "name": "程思豪",
+              "wrongTimes": 1,
+              "studentAnswer": "C",
+              "errorType": "不会分析"
+            },
+            {
+              "name": "张诗蕊",
+              "wrongTimes": 1,
+              "studentAnswer": "C",
+              "errorType": "不会分析"
+            }
+          ]
+        },
+        {
+          "questionNumber": 10,
+          "difficulty": 3,
+          "diffValues": [
+            3
+          ],
+          "questionType": "answer",
+          "studentCount": 1,
+          "rawCount": 1,
+          "content": "某班数学兴趣小组对函数y=|x²-2x|的图像和性质进行了探究,探究过程如下,请补充完整. (1)自变量x的取值范围是全体实数,x与y的几组对应值列表如下:其中,m=______.",
+          "answer": "(1)1.25\n(2)如图1所示.\n(3)①由函数图像知函数图像与y=1/2有4个交点,∴对应的方程|x²-2x|=1/2有4个实数根,故答案为4;\n②如图2,由图像和表格可知方程|x²-2x|=-x+1的一个正数根约为0.4,故答案为0.4.",
+          "answerSource": "blank",
+          "answerRisk": null,
+          "students": [
+            {
+              "name": "丁嘉炜",
+              "wrongTimes": 1,
+              "studentAnswer": null,
+              "errorType": "未作答"
+            }
+          ]
+        },
+        {
+          "questionNumber": 5,
+          "difficulty": 3,
+          "diffValues": [
+            3
+          ],
+          "questionType": "fill",
+          "studentCount": 1,
+          "rawCount": 1,
+          "content": "已知线段b是线段a、c的比例中项，如果a=2,c=3，那么b=____.",
+          "answer": "√6",
+          "answerSource": "recognized",
+          "answerRisk": null,
+          "students": [
+            {
+              "name": "张诗蕊",
+              "wrongTimes": 1,
+              "studentAnswer": "B",
+              "errorType": "审题错误"
+            }
+          ]
+        },
+        {
+          "questionNumber": 6,
+          "difficulty": 3,
+          "diffValues": [
+            3
+          ],
+          "questionType": "answer",
+          "studentCount": 1,
+          "rawCount": 1,
+          "content": "已知线段AB的长是3cm，M是线段AB的黄金分割点，那么较长线段AM的长是____cm，较短线段BM的长是____cm.",
+          "answer": "(3√5-3)/2，(9-3√5)/2",
+          "answerSource": "recognized",
+          "answerRisk": null,
+          "students": [
+            {
+              "name": "张诗蕊",
+              "wrongTimes": 1,
+              "studentAnswer": "",
+              "errorType": "未作答"
+            }
+          ]
+        },
+        {
+          "questionNumber": 8,
+          "difficulty": 3,
+          "diffValues": [
+            3
+          ],
+          "questionType": "answer",
+          "studentCount": 1,
+          "rawCount": 1,
+          "content": "已知抛物线 y=ax²+2ax-1. (2)若该抛物线的顶点在x轴上，求抛物线的表达式；",
+          "answer": "由(1)知，抛物线的顶点坐标为(-1,-a-1)，∵抛物线的顶点在x轴上，∴-a-1=0，解得a=-1，∴抛物线的表达式为y=-x²-2x-1。",
+          "answerSource": "blank",
+          "answerRisk": null,
+          "students": [
+            {
+              "name": "程思豪",
+              "wrongTimes": 1,
+              "studentAnswer": null,
+              "errorType": "审题错误"
+            }
+          ]
+        },
+        {
+          "questionNumber": 9,
+          "difficulty": 3,
+          "diffValues": [
+            3
+          ],
+          "questionType": "answer",
+          "studentCount": 1,
+          "rawCount": 1,
+          "content": "如图，抛物线与x轴交于A、B两点，与y轴交于点C(0,3)，顶点坐标为(1,4)，点D(m,n)是抛物线上一点。 (1)求该抛物线的表达式；",
+          "answer": "解：(1)∵顶点坐标为(1,4)，∴设该抛物线的表达式为y=a(x-1)²+4。",
+          "answerSource": "blank",
+          "answerRisk": null,
+          "students": [
+            {
+              "name": "程思豪",
+              "wrongTimes": 1,
+              "studentAnswer": null,
+              "errorType": "未作答"
+            }
+          ]
+        },
+        {
+          "questionNumber": 4,
+          "difficulty": 4,
+          "diffValues": [
+            4
+          ],
+          "questionType": "answer",
+          "studentCount": 1,
+          "rawCount": 1,
+          "content": "4.如图,已知抛物线 y=ax²+bx+c 过原点O,格点A是该抛物线的顶点. (2)点M(m,t),N(m+2,t)都在该抛物线上,求m的值.",
+          "answer": "∵点M(m,t),N(m+2,t)都在该抛物线上，∴m+m+2=2×(-1)，∴m=-2。",
+          "answerSource": "worksheet",
+          "answerRisk": null,
+          "students": [
+            {
+              "name": "程思豪",
+              "wrongTimes": 1,
+              "studentAnswer": "y = ax² + bx + c 代入 c=0\n{ 0 = 4a - 2b + c\n  0 = c\n  3 = a - b + c",
+              "errorType": "方法选择错误"
+            }
+          ]
+        },
+        {
+          "questionNumber": 7,
+          "difficulty": 4,
+          "diffValues": [
+            4
+          ],
+          "questionType": "answer",
+          "studentCount": 1,
+          "rawCount": 1,
+          "content": "如图，已知平行四边形ABCD顶点A的坐标为(2,6)，点B在y轴上，且AD//BC//x轴，过B、C、D三点的抛物线的顶点坐标为(2,2)，则抛物线的表达式是y=______。",
+          "answer": "1/4(x-2)²+2 解析：∵过B,C,D三点的抛物线的顶点坐标为(2,2),AD//BC//x轴，∴BC=4。∵四边形ABCD是平行四边形，∴AD=BC=4。∵点A的坐标为(2,6)，∴D(6,6)。设抛物线为y=a(x-2)²+2，代入点D的坐标，得6=16a+2，解得a=1/4，∴抛物线的表达式为y=1/4(x-2)²+2。",
+          "answerSource": "worksheet",
+          "answerRisk": null,
+          "students": [
+            {
+              "name": "程思豪",
+              "wrongTimes": 1,
+              "studentAnswer": "8",
+              "errorType": "审题错误"
+            }
+          ]
+        },
+        {
+          "questionNumber": 10,
+          "difficulty": null,
+          "diffValues": [],
+          "questionType": "",
+          "studentCount": 1,
+          "rawCount": 1,
+          "content": "定义：如果直线y=-1与开口向下的抛物线有两个交点，那么这两个交点之间的距离叫作这条抛物线的“反碟长”。如图，抛物线L₁:y=-x²随其顶点沿直线y=1/2x平移一定距离后，得到新抛物线L₂的“反碟长”恰好为4，那么抛物线L₂的表达式是______。",
+          "answer": "解：(1) 由题意知 (-1,b) 既在 y=-3x+3 上，又在 y=ax²+1 上，∴ b=-3×(-1)+3=6，6=a×(-1)²+1，解得 a=5。\n4×4/5)/2 + (4×1)/2 = 18/5。",
+          "answerSource": "wrong_book",
+          "answerRisk": null,
+          "students": [
+            {
+              "name": "程思豪",
+              "wrongTimes": 1,
+              "studentAnswer": null,
+              "errorType": "未作答"
+            }
+          ]
+        },
+        {
+          "questionNumber": 5,
+          "difficulty": null,
+          "diffValues": [],
+          "questionType": "",
+          "studentCount": 1,
+          "rawCount": 1,
+          "content": "5.已知一条抛物线经过 A(0,10),B(m+2,n),C(4-m,n),D(3,1)四点,则抛物线的表达式为",
+          "answer": "B",
+          "answerSource": "wrong_book",
+          "answerRisk": null,
+          "students": [
+            {
+              "name": "程思豪",
+              "wrongTimes": 1,
+              "studentAnswer": "C",
+              "errorType": "审题错误"
+            }
+          ]
+        },
+        {
+          "questionNumber": 6,
+          "difficulty": null,
+          "diffValues": [],
+          "questionType": "answer",
+          "studentCount": 1,
+          "rawCount": 1,
+          "content": "6.如图,是由长方形和抛物线构成的图案,由6个全等的基本图案组成,建立如图所示的平面直角坐标系.若抛物线A₁的表达式为 y=-(x-6)²+4,则抛物线A₆的表达式为",
+          "answer": "y=(x+2)²-4",
+          "answerSource": "blank",
+          "answerRisk": null,
+          "students": [
+            {
+              "name": "程思豪",
+              "wrongTimes": 1,
+              "studentAnswer": null,
+              "errorType": "未作答"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "day": "2026-09-12",
+      "dayFrom": "2026-09-12",
+      "mergedDays": [],
+      "rawRows": 2,
+      "totalTopics": 2,
+      "topics": [
+        {
+          "questionNumber": 10,
+          "difficulty": null,
+          "diffValues": [],
+          "questionType": "",
+          "studentCount": 1,
+          "rawCount": 1,
+          "content": "定义：如果直线y=-1与开口向下的抛物线有两个交点，那么这两个交点之间的距离叫作这条抛物线的“反碟长”。如图，抛物线L₁:y=-x²随其顶点沿直线y=1/2x平移一定距离后，得到新抛物线L₂的“反碟长”恰好为4，那么抛物线L₂的表达式是______。",
+          "answer": "(1)1.25\n(2)如图1所示.\n(3)①由函数图像知函数图像与y=1/2有4个交点,∴对应的方程|x²-2x|=1/2有4个实数根,故答案为4;\n②如图2,由图像和表格可知方程|x²-2x|=-x+1的一个正数根约为0.4,故答案为0.4.",
+          "answerSource": "wrong_book",
+          "answerRisk": null,
+          "students": [
+            {
+              "name": "张诗蕊",
+              "wrongTimes": 1,
+              "studentAnswer": "y=-(x-2)²+1",
+              "errorType": "计算错误"
+            }
+          ]
+        },
+        {
+          "questionNumber": 8,
+          "difficulty": null,
+          "diffValues": [],
+          "questionType": "answer",
+          "studentCount": 1,
+          "rawCount": 1,
+          "content": "如图，阳光透过窗口照到室内，在地面上留下2.7m宽的亮区，已知亮区一边到窗下的墙脚距离CE为8.7m，窗口高AB=1.m，那么窗口底边离地面的高度BC为______m.",
+          "answer": "5.8",
+          "answerSource": "recognized",
+          "answerRisk": null,
+          "students": [
+            {
+              "name": "张诗蕊",
+              "wrongTimes": 1,
+              "studentAnswer": "m<2或m>4",
+              "errorType": "概念不理解"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "day": "2026-09-11",
+      "dayFrom": "2026-09-11",
+      "mergedDays": [],
+      "rawRows": 6,
+      "totalTopics": 6,
+      "topics": [
+        {
+          "questionNumber": 1,
+          "difficulty": 3,
+          "diffValues": [
+            3
+          ],
+          "questionType": "choice",
+          "studentCount": 1,
+          "rawCount": 1,
+          "content": "1. 如图,小明打高尔夫球,小球的飞行路线是一条抛物线.如果不考虑空气阻力,小球的飞行高度h(米)与飞行时间t(秒)之间满足函数关系h=20t-5t².则小球从飞出到落地瞬间所需要的时间为",
+          "answer": "C",
+          "answerSource": "worksheet",
+          "answerRisk": null,
+          "students": [
+            {
+              "name": "丁嘉炜",
+              "wrongTimes": 1,
+              "studentAnswer": null,
+              "errorType": "计算错误"
+            }
+          ]
+        },
+        {
+          "questionNumber": 10,
+          "difficulty": 3,
+          "diffValues": [
+            3
+          ],
+          "questionType": "answer",
+          "studentCount": 1,
+          "rawCount": 1,
+          "content": "已知抛物线 y=ax²+1(a≠0)与直线 y=-3x+3 交于点(-1,b). (1)求a、b的值；",
+          "answer": "解：(1) 由题意知 (-1,b) 既在 y=-3x+3 上，又在 y=ax²+1 上，∴ b=-3×(-1)+3=6，6=a×(-1)²+1，解得 a=5。\n4×4/5)/2 + (4×1)/2 = 18/5。",
+          "answerSource": "worksheet",
+          "answerRisk": null,
+          "students": [
+            {
+              "name": "李哲瀚",
+              "wrongTimes": 1,
+              "studentAnswer": null,
+              "errorType": "方法选择错误"
+            }
+          ]
+        },
+        {
+          "questionNumber": 4,
+          "difficulty": 3,
+          "diffValues": [
+            3
+          ],
+          "questionType": "answer",
+          "studentCount": 1,
+          "rawCount": 1,
+          "content": "4. 某种礼炮的升空高度h(m)与飞行时间t(s)的表达式是h=-5/2 t²+30t+1,则这种礼炮在点火升空到最高点引爆,则从点火升空到引爆需要的时间为______s.",
+          "answer": "6",
+          "answerSource": "worksheet",
+          "answerRisk": null,
+          "students": [
+            {
+              "name": "丁嘉炜",
+              "wrongTimes": 1,
+              "studentAnswer": null,
+              "errorType": "计算错误"
+            }
+          ]
+        },
+        {
+          "questionNumber": 5,
+          "difficulty": 3,
+          "diffValues": [
+            3
+          ],
+          "questionType": "choice",
+          "studentCount": 1,
+          "rawCount": 1,
+          "content": "5. 已知点 (x₁,y₁)、(x₂,y₂) 均在抛物线 y=x²-1 上，则下列说法正确的是",
+          "answer": "D",
+          "answerSource": "teacher_input",
+          "answerRisk": null,
+          "students": [
+            {
+              "name": "李哲瀚",
+              "wrongTimes": 1,
+              "studentAnswer": null,
+              "errorType": "审题错误"
+            }
+          ]
+        },
+        {
+          "questionNumber": 9,
+          "difficulty": 3,
+          "diffValues": [
+            3
+          ],
+          "questionType": "answer",
+          "studentCount": 1,
+          "rawCount": 1,
+          "content": "已知抛物线 y=ax²+n(an>0)与抛物线 y=-2x² 的形状相同，且其图像上与 x 轴最近的点到 x 轴的距离为 3. (2)在(1)的情况下，指出抛物线y=ax²+n的开口方向、对称轴和顶点坐标。",
+          "answer": "当 a=2，n=3 时，抛物线 y=2x²+3 开口向上，对称轴为 y 轴，顶点坐标为 (0,3)；当 a=-2，n=-3 时，抛物线 y=-2x²-3 开口向下，对称轴为 y 轴，顶点坐标为 (0,-3)。",
+          "answerSource": "worksheet",
+          "answerRisk": null,
+          "students": [
+            {
+              "name": "李哲瀚",
+              "wrongTimes": 1,
+              "studentAnswer": null,
+              "errorType": "单位错误"
+            }
+          ]
+        },
+        {
+          "questionNumber": 7,
+          "difficulty": 4,
+          "diffValues": [
+            4
+          ],
+          "questionType": "answer",
+          "studentCount": 1,
+          "rawCount": 1,
+          "content": "如图,在矩形ABCD中,点E、F、G、H分别在边AB、BC、CD、DA上,且AE=AH=CF=CG,已知AB=a,BC=b. (2)在(1)的条件下,若a=4,b=16,求四边形EFGH的面积的最大值.",
+          "answer": "当 a=4，b=16 时，四边形 EFGH 的面积 = -2x² + 20x = -2(x-5)² + 50。\n∵ x ≤ b，x ≤ a，∴ x ≤ 4。又∵ -2 < 0，\n∴ 当 x=4 时，四边形 EFGH 的面积取最大值为 48。",
+          "answerSource": "blank",
+          "answerRisk": null,
+          "students": [
+            {
+              "name": "丁嘉炜",
+              "wrongTimes": 1,
+              "studentAnswer": null,
+              "errorType": "未作答"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "day": "2026-09-10",
+      "dayFrom": "2026-09-10",
+      "mergedDays": [],
+      "rawRows": 22,
+      "totalTopics": 19,
+      "topics": [
+        {
+          "questionNumber": 11,
+          "difficulty": 2,
+          "diffValues": [
+            2
+          ],
+          "questionType": "answer",
+          "studentCount": 2,
+          "rawCount": 2,
+          "content": "11.已知二次函数 y=ax²+bx+c(a≠0)的图像过点 A(1,0),点 B(-3,0)和点 C. (1)若点 C(0,-3),求二次函数的表达式;",
+          "answer": "(1)解：设二次函数的表达式为 y=a(x-1)(x+3)，把 C(0,-3)代入，得 -3=a×(0-1)×(0+3)，解得 a=1，∴二次函数的表达式为 y=(x-1)(x+3)，即 y=x²+2x-3。\n2)解：抛物线表达式为 y=a(x-1)(x+3)，即 y=ax²+2ax-3a，抛物线的对称轴为直线 x=-2a/2a=-1。当 x=-1 时，y 有最值 -4a。当 a>0 时，x=-3，m=0；x=-1，n=-4a，∵m-n=8，∴0+4a=8，解得 a=2；当 a<0 时，x=-1，m=-4a；x=-3，n=0，∵m-n=8，∴-4a-0=8，解得 a=-2，综上所述，a 的值为 2 或 -2。\n3)证明：∵y=ax²+2ax-3a，x=-ax-3a，∴y-x+9/4a=ax²+2ax-3a-(-ax-3a)+9/4a=ax²+3ax+9/4a=a(x+3/2)²。∵a<0，(x+3/2)²≥0，∴a(x+3/2)²≤0，即 y-x+9/4a≤0。",
+          "answerSource": "worksheet",
+          "answerRisk": null,
+          "students": [
+            {
+              "name": "陈施君",
+              "wrongTimes": 1,
+              "studentAnswer": "证明过程略，结论成立",
+              "errorType": "步骤遗漏"
+            },
+            {
+              "name": "李哲瀚",
+              "wrongTimes": 1,
+              "studentAnswer": "y=a(x-x₁)(x-x₂)\n把A B代入.\ny=a(x-1)(x+3)\n代入C.\n-3=3a\na=1\n∴y=(x-1)(x+3).",
+              "errorType": "计算错误"
+            }
+          ]
+        },
+        {
+          "questionNumber": 12,
+          "difficulty": 2,
+          "diffValues": [
+            2
+          ],
+          "questionType": "answer",
+          "studentCount": 2,
+          "rawCount": 2,
+          "content": "如图，已知抛物线 y=ax²+bx-4 与 x 轴分别交于点 A(2,0)、B(-4,0)，与 y 轴交于点 C，点 Q 是抛物线上一点。 (1)求抛物线的表达式；",
+          "answer": "解：(1)由已知可设 y=a(x+4)(x-2)=a(x²+2x-8)，则 -8a=-4，得 a=1/2，进而有 b=2a=1，∴抛物线的表达式为 y=1/2x²+x-4。",
+          "answerSource": "worksheet",
+          "answerRisk": null,
+          "students": [
+            {
+              "name": "陈施君",
+              "wrongTimes": 1,
+              "studentAnswer": null,
+              "errorType": "步骤遗漏"
+            },
+            {
+              "name": "李哲瀚",
+              "wrongTimes": 1,
+              "studentAnswer": "a = -1/2, b = -1",
+              "errorType": "步骤遗漏"
+            }
+          ]
+        },
+        {
+          "questionNumber": 4,
+          "difficulty": 2,
+          "diffValues": [
+            2
+          ],
+          "questionType": "answer",
+          "studentCount": 1,
+          "rawCount": 1,
+          "content": "Ⅱ已知二次函数y=x²-2x-3. (2)在平面直角坐标系xOy中,画出二次函数y=x²-2x-3的图像;",
+          "answer": "解：(1)当 y=0 时，x²-2x-3=0，解得 x₁=-1，x₂=3，∴抛物线与 x 轴的交点坐标为 (-1,0)、(3,0)。",
+          "answerSource": "worksheet",
+          "answerRisk": null,
+          "students": [
+            {
+              "name": "陈施君",
+              "wrongTimes": 1,
+              "studentAnswer": "-1≤x≤3",
+              "errorType": "步骤遗漏"
+            }
+          ]
+        },
+        {
+          "questionNumber": 10,
+          "difficulty": 3,
+          "diffValues": [
+            3
+          ],
+          "questionType": "answer",
+          "studentCount": 1,
+          "rawCount": 1,
+          "content": "如图，抛物线 y=2(x-2)² 与平行于 x 轴的直线交于点 A、B，抛物线顶点为 C，△ABC 为等边三角形，求： (3)△ABC的面积.",
+          "answer": "∵a=√3/2，∴AD=DB=√3/2，CD=3/2，∴AB=√3，∴S△ABC=1/2×√3×3/2=3√3/4。",
+          "answerSource": "worksheet",
+          "answerRisk": null,
+          "students": [
+            {
+              "name": "李哲瀚",
+              "wrongTimes": 1,
+              "studentAnswer": "设 B(2+t, 2t²) 则 AB=2t，2t²=√3 t，t=√3/2，B(2+√3/2, 3/2)",
+              "errorType": "未作答"
+            }
+          ]
+        },
+        {
+          "questionNumber": 2,
+          "difficulty": 3,
+          "diffValues": [
+            3
+          ],
+          "questionType": "choice",
+          "studentCount": 1,
+          "rawCount": 1,
+          "content": "2. 某旅行社要接团去外地旅游,经计算所获营业额y(元)与旅行团人数x(人)满足表达式y=-2x²+200x+2500,要使所获营业额最大,则此旅行团应有",
+          "answer": "C",
+          "answerSource": "worksheet",
+          "answerRisk": null,
+          "students": [
+            {
+              "name": "丁嘉炜",
+              "wrongTimes": 1,
+              "studentAnswer": null,
+              "errorType": "方法选择错误"
+            }
+          ]
+        },
+        {
+          "questionNumber": 4,
+          "difficulty": 3,
+          "diffValues": [
+            3
+          ],
+          "questionType": "answer",
+          "studentCount": 1,
+          "rawCount": 1,
+          "content": "4.已知关于 x 的二次函数 y=x²-2kx-(2k+1). (1)求证:无论 k 为何值,该二次函数的图像与 x 轴都有交点;",
+          "answer": "(1)证明: ∵y=x²-2kx-(2k+1)",
+          "answerSource": "blank",
+          "answerRisk": null,
+          "students": [
+            {
+              "name": "丁嘉炜",
+              "wrongTimes": 1,
+              "studentAnswer": null,
+              "errorType": "未作答"
+            }
+          ]
+        },
+        {
+          "questionNumber": 5,
+          "difficulty": 3,
+          "diffValues": [
+            3
+          ],
+          "questionType": "choice",
+          "studentCount": 1,
+          "rawCount": 1,
+          "content": "5.关于 x 的二次函数 y=ax²+bx+c(a≠0,a、b、c 为常数)的图像如图所示,则 ax²+bx+c=m 有实数根的条件是",
+          "answer": "A",
+          "answerSource": "worksheet",
+          "answerRisk": null,
+          "students": [
+            {
+              "name": "丁嘉炜",
+              "wrongTimes": 1,
+              "studentAnswer": "C",
+              "errorType": "概念不理解"
+            }
+          ]
+        },
+        {
+          "questionNumber": 6,
+          "difficulty": 3,
+          "diffValues": [
+            3
+          ],
+          "questionType": "choice",
+          "studentCount": 1,
+          "rawCount": 1,
+          "content": "已知抛物线 y=(x-1)² 经过点 A(n,y₁)、B(n+2,y₂), 若 y₁<y₂, 则 n 的值可以为",
+          "answer": "D",
+          "answerSource": "worksheet",
+          "answerRisk": null,
+          "students": [
+            {
+              "name": "李哲瀚",
+              "wrongTimes": 1,
+              "studentAnswer": "B",
+              "errorType": "概念不理解"
+            }
+          ]
+        },
+        {
+          "questionNumber": 7,
+          "difficulty": 3,
+          "diffValues": [
+            3
+          ],
+          "questionType": "choice",
+          "studentCount": 1,
+          "rawCount": 1,
+          "content": "7.如图,抛物线 y=-x²+mx 的对称轴为直线 x=2.若关于 x 的一元二次方程 -x²+mx-t=0(t 为实数)在 1<x<3 的范围内有解,则 t 的取值范围是",
+          "answer": "B",
+          "answerSource": "worksheet",
+          "answerRisk": null,
+          "students": [
+            {
+              "name": "陈施君",
+              "wrongTimes": 1,
+              "studentAnswer": "A",
+              "errorType": "概念不理解"
+            }
+          ]
+        },
+        {
+          "questionNumber": 8,
+          "difficulty": 3,
+          "diffValues": [
+            3
+          ],
+          "questionType": "answer",
+          "studentCount": 1,
+          "rawCount": 1,
+          "content": "8.如图,关于 x 的二次函数 y=ax²+bx+c 的图像与直线 y=3 相交于点 A(0,3)和点 B,对称轴为直线 x=2,那么关于 x 的一元二次方程 ax²+bx+c=3 的解为",
+          "answer": "x₁=0，x₂=4",
+          "answerSource": "worksheet",
+          "answerRisk": null,
+          "students": [
+            {
+              "name": "李哲瀚",
+              "wrongTimes": 1,
+              "studentAnswer": "2",
+              "errorType": "概念不理解"
+            }
+          ]
+        },
+        {
+          "questionNumber": 9,
+          "difficulty": 3,
+          "diffValues": [
+            3
+          ],
+          "questionType": "answer",
+          "studentCount": 1,
+          "rawCount": 1,
+          "content": "已知关于x的二次函数y=x²-2mx+m²+4(m是常数). (1)求证:不论m为何值,该函数图像与x轴没有公共点;",
+          "answer": "(1)证明:Δ=(-2m)²-4(m²+4)=-16<0, ∴不论m为何值,该函数图像与x轴没有公共点.\n2)解:设抛物线沿y轴向下平移k(k>0)个单位长度后得到的函数图像与x轴只有一个公共点, 则平移后的抛物线表达式为y=x²-2mx+m²+4-k, Δ=(-2m)²-4(m²+4-k)=0, 解得k=4, ∴把该函数图像沿y轴向下平移4个单位长度后得到的函数图像与x轴只有一个公共点.",
+          "answerSource": "blank",
+          "answerRisk": null,
+          "students": [
+            {
+              "name": "丁嘉炜",
+              "wrongTimes": 1,
+              "studentAnswer": null,
+              "errorType": "未作答"
+            }
+          ]
+        },
+        {
+          "questionNumber": 10,
+          "difficulty": 4,
+          "diffValues": [
+            4
+          ],
+          "questionType": "answer",
+          "studentCount": 1,
+          "rawCount": 1,
+          "content": "10.已知关于 x 的二次函数 y=ax²+(a²-1)x-a 的图像与 x 轴的一个交点坐标为(m,0).若 2<m<5,则 a 的取值范围是",
+          "answer": "-5<a<-2 或 1/5<a<1/2",
+          "answerSource": "blank",
+          "answerRisk": null,
+          "students": [
+            {
+              "name": "陈施君",
+              "wrongTimes": 1,
+              "studentAnswer": null,
+              "errorType": "未作答"
+            }
+          ]
+        },
+        {
+          "questionNumber": 3,
+          "difficulty": 4,
+          "diffValues": [
+            4
+          ],
+          "questionType": "answer",
+          "studentCount": 1,
+          "rawCount": 1,
+          "content": "有一个二次函数 y=a(x-k)² 的图像, 三名同学分别说出了它的一些特点: 甲:开口向上; 乙:对称轴是直线 x=2; 丙:与 y 轴的交点到原点的距离为 2. 满足上述全部特点的二次函数的表达式为",
+          "answer": "y=1/2(x-2)²",
+          "answerSource": "worksheet",
+          "answerRisk": null,
+          "students": [
+            {
+              "name": "李哲瀚",
+              "wrongTimes": 1,
+              "studentAnswer": null,
+              "errorType": "计算错误"
+            }
+          ]
+        },
+        {
+          "questionNumber": 6,
+          "difficulty": 4,
+          "diffValues": [
+            4
+          ],
+          "questionType": "fill",
+          "studentCount": 1,
+          "rawCount": 1,
+          "content": "6. 如图,要在夹角为30°的两条小路OA与OB形成的角状空地上建一个三角形花坛,分别在边OA和OB上取点P和点Q,并扎起篱笆将花坛保护起来(篱笆的厚度忽略不计).若OP和OQ两段篱笆的总长为8米,则当OP=______米时,该花坛POQ的面积最大.",
+          "answer": "A",
+          "answerSource": "worksheet",
+          "answerRisk": null,
+          "students": [
+            {
+              "name": "丁嘉炜",
+              "wrongTimes": 1,
+              "studentAnswer": null,
+              "errorType": "计算错误"
+            }
+          ]
+        },
+        {
+          "questionNumber": 7,
+          "difficulty": 4,
+          "diffValues": [
+            4
+          ],
+          "questionType": "answer",
+          "studentCount": 1,
+          "rawCount": 1,
+          "content": "如图,在矩形ABCD中,点E、F、G、H分别在边AB、BC、CD、DA上,且AE=AH=CF=CG,已知AB=a,BC=b. (1)若b/3≤a≤3b时,求四边形EFGH的面积的最大值;",
+          "answer": "设 AE = x，\n∵ 矩形 ABCD，∴ ∠A = ∠D = ∠B = ∠C = 90°，AB = CD，AD = BC。又∵ AE = AH = CF = CG，\n∴ △AEH ≌ △CGF，BE = DG，HD = BF，\n∴ △BEF ≌ △DGH，\n2×½x² - 2×½(a-x)(b-x) = ab - x² - (ab - ax - bx + x²) = -2x² + (a+b)x。\n∵ -2 < 0，∴ 当 x = (a+b)/4 时，S四边形EFGH 有最大值。\n3b，0 < x ≤ a，(a+b)/4 在此范围内，\n∴ 四边形 EFGH 的面积的最大值为 [-(a+b)²]/[4×(-2)] = (a+b)²/8。",
+          "answerSource": "blank",
+          "answerRisk": null,
+          "students": [
+            {
+              "name": "丁嘉炜",
+              "wrongTimes": 1,
+              "studentAnswer": null,
+              "errorType": "未作答"
+            }
+          ]
+        },
+        {
+          "questionNumber": 7,
+          "difficulty": 4,
+          "diffValues": [
+            4
+          ],
+          "questionType": "choice",
+          "studentCount": 1,
+          "rawCount": 1,
+          "content": "点 A(s,t) 在二次函数 y=2(x-m)² (m 为常数) 的图像上, s-m=t≠0. 当 s-1≤x≤s+2 时, 二次函数的最大值与最小值的差为",
+          "answer": "B",
+          "answerSource": "worksheet",
+          "answerRisk": null,
+          "students": [
+            {
+              "name": "李哲瀚",
+              "wrongTimes": 1,
+              "studentAnswer": "D",
+              "errorType": "审题错误"
+            }
+          ]
+        },
+        {
+          "questionNumber": 9,
+          "difficulty": 4,
+          "diffValues": [
+            4
+          ],
+          "questionType": "answer",
+          "studentCount": 1,
+          "rawCount": 1,
+          "content": "已知二次函数 y=-(x+h)²(h为常数),当2≤x≤5时,函数的最大值为-1,则h的值为",
+          "answer": "-1 或 -6 解析：∵二次函数 y=-(x+h)² 的图像开口向下，对称轴为直线 x=-h，∴当 x<-h 时，y 随 x 的增大而增大。当 x>-h 时，y 随 x 的增大而减小。∴若 -h<2，即 h>-2，则当 x=2 时，函数 y 取最大值，即 -1=-(2+h)²，解得 h=-1 或 h=-3（舍去）；若 2≤-h≤5，即 -5≤h≤-2，则当 x=-h 时，函数 y 取最大值 0，不符合题意；若 -h>5，即 h<-5，则当 x=5 时，函数 y 取最大值，即 -1=-(5+h)²，解得 h=-4（舍去）或 h=-6。综上，h 的值为 -1 或 -6。",
+          "answerSource": "worksheet",
+          "answerRisk": null,
+          "students": [
+            {
+              "name": "李哲瀚",
+              "wrongTimes": 1,
+              "studentAnswer": "-1或-6",
+              "errorType": "单位错误"
+            }
+          ]
+        },
+        {
+          "questionNumber": 13,
+          "difficulty": null,
+          "diffValues": [],
+          "questionType": "",
+          "studentCount": 2,
+          "rawCount": 2,
+          "content": "(2)如图，抛物线y=ax²+bx+3与x轴正半轴交于点A、B，与y轴交于点C，作直线BC，已知S△ABC=3，且当y=0时，关于x的方程ax²+bx+3=0为“单位根方程”，求该抛物线的表达式.",
+          "answer": "∵y=ax²+bx+c(a≠0)过(0,3),(-1,-1)，∴c=3,a-b+3=-1，∴b=a+4，∴对称轴为直线x=-\\frac{b}{2a}=-\\frac{a+4}{2a}。①当a>0时，∵-1≤x≤2时，y随x的增大而增大，∴-\\frac{a+4}{2a}≤-1，解得a≤4，∴0<a≤4；②当a<0时，∵-1≤x≤2时，y随x的增大而增大，∴-\\frac{a+4}{2a}≥2，解得a≥-\\frac{4}{5}，∴-\\frac{4}{5}≤a<0。综上，a的取值范围是-\\frac{4}{5}≤a<0或0<a≤4。",
+          "answerSource": "wrong_book",
+          "answerRisk": null,
+          "students": [
+            {
+              "name": "陈施君",
+              "wrongTimes": 1,
+              "studentAnswer": null,
+              "errorType": "步骤遗漏"
+            },
+            {
+              "name": "李哲瀚",
+              "wrongTimes": 1,
+              "studentAnswer": null,
+              "errorType": "步骤遗漏"
+            }
+          ]
+        },
+        {
+          "questionNumber": 1,
+          "difficulty": null,
+          "diffValues": [],
+          "questionType": "",
+          "studentCount": 1,
+          "rawCount": 1,
+          "content": "1.抛物线 y=x²+2x-3 与 x 轴的交点有",
+          "answer": "C",
+          "answerSource": "wrong_book",
+          "answerRisk": null,
+          "students": [
+            {
+              "name": "丁嘉炜",
+              "wrongTimes": 1,
+              "studentAnswer": "B",
+              "errorType": "概念不理解"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "day": "2026-09-08",
+      "dayFrom": "2026-09-08",
+      "mergedDays": [],
+      "rawRows": 15,
+      "totalTopics": 12,
+      "topics": [
+        {
+          "questionNumber": 2,
+          "difficulty": 3,
+          "diffValues": [
+            3
+          ],
+          "questionType": "choice",
+          "studentCount": 1,
+          "rawCount": 1,
+          "content": "二次函数y=x²-2x-3的图像如图所示，下列说法中，错误的是",
+          "answer": "D",
+          "answerSource": "recognized",
+          "answerRisk": "AI 视觉推理不擅长，建议核对参考答案",
+          "students": [
+            {
+              "name": "胡传政",
+              "wrongTimes": 1,
+              "studentAnswer": null,
+              "errorType": "审题错误"
+            }
+          ]
+        },
+        {
+          "questionNumber": 8,
+          "difficulty": 3,
+          "diffValues": [
+            3
+          ],
+          "questionType": "fill",
+          "studentCount": 1,
+          "rawCount": 1,
+          "content": "如图，关于 x 的二次函数 y=ax²+bx+c 的图像与直线 y=3 相交于点 A(0,3) 和点 B，对称轴为直线 x=2，那么关于 x 的一元二次方程 ax²+bx+c=3 的解为",
+          "answer": "x₁=0，x₂=4",
+          "answerSource": "blank",
+          "answerRisk": null,
+          "students": [
+            {
+              "name": "胡传政",
+              "wrongTimes": 1,
+              "studentAnswer": null,
+              "errorType": "未作答"
+            }
+          ]
+        },
+        {
+          "questionNumber": 12,
+          "difficulty": 4,
+          "diffValues": [
+            4
+          ],
+          "questionType": "answer",
+          "studentCount": 2,
+          "rawCount": 2,
+          "content": "如图，已知抛物线 y=ax²+bx-4 与 x 轴分别交于点 A(2,0)、B(-4,0)，与 y 轴交于点 C，点 Q 是抛物线上一点。(1)求抛物线的表达式；(2)若点 Q 在直线 BC 下方的抛物线上，过点 Q 作 QD⊥x 轴于点 D，交直线 BC 于点 E，作 QF⊥BC 于点 F，当 BE=2EF 时，求点 Q 的坐标。",
+          "answer": "(1) y=1/2x²+x-4；(2) (-3,-5/2)",
+          "answerSource": "recognized",
+          "answerRisk": null,
+          "students": [
+            {
+              "name": "陈施君",
+              "wrongTimes": 1,
+              "studentAnswer": null,
+              "errorType": "计算错误"
+            },
+            {
+              "name": "胡传政",
+              "wrongTimes": 1,
+              "studentAnswer": null,
+              "errorType": "计算错误"
+            }
+          ]
+        },
+        {
+          "questionNumber": 13,
+          "difficulty": 4,
+          "diffValues": [
+            4
+          ],
+          "questionType": "answer",
+          "studentCount": 2,
+          "rawCount": 2,
+          "content": "在代数的领域内，存在着一类具有独特性质的方程，它们被称为“单位根方程”。此类方程的特点在于至少具备一个解：x=1。例如：方程 x²-x=0 有解 x=1，所以 x²-x=0 为“单位根方程”。(1)下列方程是“单位根方程”的有______；(填序号)①3x-3=0 ②|x-4|=4 ③x²+2x-3=0(2)如图，抛物线 y=ax²+bx+3 与 x 轴正半轴交于点 A、B，与 y 轴交于点 C，作直线 BC，已知 S△ABC=3，且当 y=0 时，关于 x 的方程 ax²+bx+3=0 为“单位根方程”，求该抛物线的表达式。",
+          "answer": "y=x²-4x+3",
+          "answerSource": "recognized",
+          "answerRisk": null,
+          "students": [
+            {
+              "name": "陈施君",
+              "wrongTimes": 1,
+              "studentAnswer": null,
+              "errorType": "审题错误"
+            },
+            {
+              "name": "胡传政",
+              "wrongTimes": 1,
+              "studentAnswer": null,
+              "errorType": "不会分析"
+            }
+          ]
+        },
+        {
+          "questionNumber": 7,
+          "difficulty": 4,
+          "diffValues": [
+            4
+          ],
+          "questionType": "choice",
+          "studentCount": 2,
+          "rawCount": 2,
+          "content": "如图，抛物线 y=-x²+mx 的对称轴为直线 x=2。若关于 x 的一元二次方程 -x²+mx-t=0(t 为实数) 在 1<x<3 的范围内有解，则 t 的取值范围是",
+          "answer": "C",
+          "answerSource": "recognized",
+          "answerRisk": "AI 视觉推理不擅长，建议核对参考答案",
+          "students": [
+            {
+              "name": "陈施君",
+              "wrongTimes": 1,
+              "studentAnswer": null,
+              "errorType": "概念不理解"
+            },
+            {
+              "name": "胡传政",
+              "wrongTimes": 1,
+              "studentAnswer": null,
+              "errorType": "概念不理解"
+            }
+          ]
+        },
+        {
+          "questionNumber": 11,
+          "difficulty": 4,
+          "diffValues": [
+            4
+          ],
+          "questionType": "answer",
+          "studentCount": 1,
+          "rawCount": 1,
+          "content": "已知一条抛物线与x轴交于A(-3,0)、B(1,0)两点，与y轴的负半轴交于点P。若△ABP的面积为6，求该抛物线的表达式。",
+          "answer": "-2(x+1)(x-3)",
+          "answerSource": "recognized",
+          "answerRisk": null,
+          "students": [
+            {
+              "name": "张诗蕊",
+              "wrongTimes": 1,
+              "studentAnswer": null,
+              "errorType": "计算错误"
+            }
+          ]
+        },
+        {
+          "questionNumber": 11,
+          "difficulty": 4,
+          "diffValues": [
+            4
+          ],
+          "questionType": "answer",
+          "studentCount": 1,
+          "rawCount": 1,
+          "content": "已知二次函数 y=ax²+bx+c(a≠0) 的图像过点 A(1,0)，点 B(-3,0) 和点 C。\n(1) 若点 C(0,-3)，求二次函数的表达式；\n(2) 当 -3≤x≤0 时，二次函数的最大值为 m，最小值为 n，若 m-n=8，求 a 的值；\n(3) 若 x=-ax-3a 且 a<0，求证：y-x+9/4a≤0。",
+          "answer": "(1) y=x²+2x-3；(2) a=2 或 a=-2；(3) 证明成立",
+          "answerSource": "recognized",
+          "answerRisk": null,
+          "students": [
+            {
+              "name": "陈施君",
+              "wrongTimes": 1,
+              "studentAnswer": null,
+              "errorType": "计算错误"
+            }
+          ]
+        },
+        {
+          "questionNumber": 12,
+          "difficulty": 4,
+          "diffValues": [
+            4
+          ],
+          "questionType": "answer",
+          "studentCount": 1,
+          "rawCount": 1,
+          "content": "有一座抛物线形拱桥，已知水位正常时，桥下水面宽度为20m，拱顶距水面5m。拱桥的截面图如图所示，其中桥拱截线是一段抛物线，平面直角坐标系的原点O是桥拱截线与正常水位的水面截线相交处的一点，x轴在水面截线上；AB是警戒线，拱顶到AB的距离是1.8m。\n(1) 求桥拱截线所在抛物线的表达式；\n(2) 求水位达到警戒线AB位置时水面的宽度。",
+          "answer": "y = -\\frac{1}{20}x^2 + 5, 12",
+          "answerSource": "recognized",
+          "answerRisk": null,
+          "students": [
+            {
+              "name": "张诗蕊",
+              "wrongTimes": 1,
+              "studentAnswer": null,
+              "errorType": "计算错误"
+            }
+          ]
+        },
+        {
+          "questionNumber": 5,
+          "difficulty": 4,
+          "diffValues": [
+            4
+          ],
+          "questionType": "answer",
+          "studentCount": 1,
+          "rawCount": 1,
+          "content": "当实数k分别满足什么条件时，抛物线y=(k+1)x²+(2k+1)x+(k+2)与x轴交点个数的情况如下：(1)有两个交点？(2)有且只有一个交点？(3)没有交点？",
+          "answer": "(1)k<-7/8且k≠-1；(2)k=-7/8；(3)k>-7/8",
+          "answerSource": "recognized",
+          "answerRisk": null,
+          "students": [
+            {
+              "name": "张诗蕊",
+              "wrongTimes": 1,
+              "studentAnswer": null,
+              "errorType": "概念不理解"
+            }
+          ]
+        },
+        {
+          "questionNumber": 5,
+          "difficulty": 4,
+          "diffValues": [
+            4
+          ],
+          "questionType": "choice",
+          "studentCount": 1,
+          "rawCount": 1,
+          "content": "抛物线 y=ax²+2ax+a²+2 的一部分如图所示，那么该抛物线在 y 轴右侧与 x 轴交点的坐标是",
+          "answer": "B",
+          "answerSource": "recognized",
+          "answerRisk": "AI 视觉推理不擅长，建议核对参考答案",
+          "students": [
+            {
+              "name": "胡传政",
+              "wrongTimes": 1,
+              "studentAnswer": null,
+              "errorType": "审题错误"
+            }
+          ]
+        },
+        {
+          "questionNumber": 6,
+          "difficulty": 4,
+          "diffValues": [
+            4
+          ],
+          "questionType": "answer",
+          "studentCount": 1,
+          "rawCount": 1,
+          "content": "证明：抛物线y=-x²+kx-k²-1(k为常数)在x轴下方。",
+          "answer": "证明成立",
+          "answerSource": "recognized",
+          "answerRisk": null,
+          "students": [
+            {
+              "name": "张诗蕊",
+              "wrongTimes": 1,
+              "studentAnswer": null,
+              "errorType": "步骤遗漏"
+            }
+          ]
+        },
+        {
+          "questionNumber": 9,
+          "difficulty": 4,
+          "diffValues": [
+            4
+          ],
+          "questionType": "fill",
+          "studentCount": 1,
+          "rawCount": 1,
+          "content": "如图，在平面直角坐标系 xOy 中，抛物线 y=x²-2x-3 与 x 轴交于点 A、B，与 y 轴交于点 C，顶点为 D，则△BCD 的面积为",
+          "answer": "3",
+          "answerSource": "blank",
+          "answerRisk": null,
+          "students": [
+            {
+              "name": "胡传政",
+              "wrongTimes": 1,
+              "studentAnswer": null,
+              "errorType": "未作答"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "day": "2026-09-04",
+      "dayFrom": "2026-09-04",
+      "mergedDays": [],
+      "rawRows": 34,
+      "totalTopics": 31,
+      "topics": [
+        {
+          "questionNumber": 3,
+          "difficulty": 2,
+          "diffValues": [
+            2
+          ],
+          "questionType": "fill",
+          "studentCount": 1,
+          "rawCount": 1,
+          "content": "若 y=(m-2)x^(m²-2)+3x 是关于 x 的二次函数，则 m 的值为",
+          "answer": "-2",
+          "answerSource": "recognized",
+          "answerRisk": null,
+          "students": [
+            {
+              "name": "王艺博",
+              "wrongTimes": 1,
+              "studentAnswer": null,
+              "errorType": "概念不理解"
+            }
+          ]
+        },
+        {
+          "questionNumber": 4,
+          "difficulty": 2,
+          "diffValues": [
+            2
+          ],
+          "questionType": "answer",
+          "studentCount": 1,
+          "rawCount": 1,
+          "content": "已知抛物线 y=ax² 经过点 A(-2,-8)。(1)求此抛物线的函数表达式；(2)写出这个二次函数图像的顶点坐标、对称轴、开口方向和图像的位置；(3)判断点 B(-1,-4)是否在此抛物线上。",
+          "answer": "y = -2x², (0,0), x=0, 向下, 在x轴下方（除顶点外）, 不在",
+          "answerSource": "recognized",
+          "answerRisk": null,
+          "students": [
+            {
+              "name": "王艺博",
+              "wrongTimes": 1,
+              "studentAnswer": null,
+              "errorType": "概念不理解"
+            }
+          ]
+        },
+        {
+          "questionNumber": 9,
+          "difficulty": 2,
+          "diffValues": [
+            2
+          ],
+          "questionType": "answer",
+          "studentCount": 1,
+          "rawCount": 1,
+          "content": "已知抛物线 y=ax²+n(an>0) 与抛物线 y=-2x² 的形状相同,且其图象上与 x 轴最近的点到 x 轴的距离为 3.\n(1) 求 a、n 的值;\n(2) 在(1)的情况下,指出抛物线 y=ax²+n 的开口方向、对称轴和顶点坐标.",
+          "answer": "(1) a=-2, n=3或 a=-2, n=-3;(2) 当 n=3时开口向下,对称轴为 y 轴,顶点坐标为 (0,3);当 n=-3时开口向下,对称轴为 y 轴,顶点坐标为 (0,-3)",
+          "answerSource": "blank",
+          "answerRisk": null,
+          "students": [
+            {
+              "name": "程思豪",
+              "wrongTimes": 1,
+              "studentAnswer": null,
+              "errorType": "未作答"
+            }
+          ]
+        },
+        {
+          "questionNumber": 9,
+          "difficulty": 2,
+          "diffValues": [
+            2
+          ],
+          "questionType": "fill",
+          "studentCount": 1,
+          "rawCount": 1,
+          "content": "已知抛物线 y=ax²+bx+c 开口向上,且经过点(4,3)和(-3,3),如果点(-2,y₁)与(1,y₂)在此抛物线上,那么 y₁ ___ y₂.(填\">\",\"<\"或\"=\")",
+          "answer": "<",
+          "answerSource": "recognized",
+          "answerRisk": null,
+          "students": [
+            {
+              "name": "程思豪",
+              "wrongTimes": 1,
+              "studentAnswer": null,
+              "errorType": "粗心"
+            }
+          ]
+        },
+        {
+          "questionNumber": 2,
+          "difficulty": 3,
+          "diffValues": [
+            3,
+            4
+          ],
+          "questionType": "answer",
+          "studentCount": 2,
+          "rawCount": 2,
+          "content": "求直线y=3x+4与抛物线y=x²的交点坐标，并求出以两交点与原点为顶点的三角形的面积．",
+          "answer": "交点坐标 (4, 16) 和 (-1, 1)，三角形面积为 10",
+          "answerSource": "blank",
+          "answerRisk": null,
+          "students": [
+            {
+              "name": "程思豪",
+              "wrongTimes": 1,
+              "studentAnswer": null,
+              "errorType": "未作答"
+            },
+            {
+              "name": "王艺博",
+              "wrongTimes": 1,
+              "studentAnswer": null,
+              "errorType": "未作答"
+            }
+          ]
+        },
+        {
+          "questionNumber": 1,
+          "difficulty": 3,
+          "diffValues": [
+            3
+          ],
+          "questionType": "answer",
+          "studentCount": 1,
+          "rawCount": 1,
+          "content": "如图，一块草地是长80m、宽60m的矩形，要在中间修筑两条互相垂直且宽为xm的小路，这时草坪面积为ym²。求y与x的函数表达式，并写出自变量x的取值范围。",
+          "answer": "y = (80 - x)(60 - x), 0 < x < 60",
+          "answerSource": "blank",
+          "answerRisk": null,
+          "students": [
+            {
+              "name": "王艺博",
+              "wrongTimes": 1,
+              "studentAnswer": null,
+              "errorType": "未作答"
+            }
+          ]
+        },
+        {
+          "questionNumber": 10,
+          "difficulty": 3,
+          "diffValues": [
+            3
+          ],
+          "questionType": "answer",
+          "studentCount": 1,
+          "rawCount": 2,
+          "content": "已知抛物线 y=ax²+1(a≠0) 与直线 y=-3x+3 交于点(-1,b)．\n(1) 求 a、b 的值；\n(2) 求抛物线与直线 y=x+5 的两交点及顶点所构成的三角形的面积．",
+          "answer": "a = 5, b = 6; 面积为18/5",
+          "answerSource": "blank",
+          "answerRisk": null,
+          "students": [
+            {
+              "name": "程思豪",
+              "wrongTimes": 2,
+              "studentAnswer": null,
+              "errorType": "未作答"
+            }
+          ]
+        },
+        {
+          "questionNumber": 11,
+          "difficulty": 3,
+          "diffValues": [
+            3
+          ],
+          "questionType": "fill",
+          "studentCount": 1,
+          "rawCount": 1,
+          "content": "关于二次函数 y=(x-1)²+5,以下说法:①函数图像的开口向上;②二次函数的最小值为1;③该函数图像的对称轴为直线 x=1;④当 x≥1 时,y 随 x 的增大而减小;⑤P(m,n) 是二次函数图像上一点,若 n>6,则 m<0 或 m>2.其中正确的有 (填序号)",
+          "answer": "①③⑤",
+          "answerSource": "blank",
+          "answerRisk": null,
+          "students": [
+            {
+              "name": "李哲瀚",
+              "wrongTimes": 1,
+              "studentAnswer": null,
+              "errorType": "未作答"
+            }
+          ]
+        },
+        {
+          "questionNumber": 12,
+          "difficulty": 3,
+          "diffValues": [
+            3
+          ],
+          "questionType": "answer",
+          "studentCount": 1,
+          "rawCount": 1,
+          "content": "如果二次函数的二次项系数为1,那么此二次函数可表示为 y=x²+px+q,我们称[p,q]为此函数的特征数,如函数 y=x²+2x+3 的特征数是[2,3].\n(1)若一个函数的特征数为[-2,1],求此函数图像的顶点坐标;\n(2)①若一个函数的特征数为[4,-1],将此函数的图像先向右平移1个单位长度,再向上平移1个单位长度,求得到的图像对应的函数的特征数;\n②若一个函数的特征数为[2,3],问此函数的图像经过怎样的平移,才能使得到的图像对应的函数的特征数为[3,4]?",
+          "answer": "(1) 顶点坐标为(1, 0);(2)① 特征数为[2,-3];② 不能通过平移使特征数变为[3,4],因为平移不改变p值",
+          "answerSource": "blank",
+          "answerRisk": null,
+          "students": [
+            {
+              "name": "程思豪",
+              "wrongTimes": 1,
+              "studentAnswer": null,
+              "errorType": "未作答"
+            }
+          ]
+        },
+        {
+          "questionNumber": 2,
+          "difficulty": 3,
+          "diffValues": [
+            3
+          ],
+          "questionType": "answer",
+          "studentCount": 1,
+          "rawCount": 1,
+          "content": "写出下列各函数的表达式，指出是什么函数，并确定函数的自变量的取值范围。(1)矩形的周长为20cm，它的面积S(cm²)是它的一边长a(cm)的函数；(2)如图，最下面是一个长方形，上面是10个小正方形。如果长方形的长为4cm，宽为小正方形边长的一半，那么这个图形的总面积S(cm²)是每个小正方形的边长x(cm)的函数。",
+          "answer": "（1）S = a(10 - a)，二次函数，a ∈ (0, 10)；（2）S = 10x² + 2x，二次函数，x > 0",
+          "answerSource": "blank",
+          "answerRisk": null,
+          "students": [
+            {
+              "name": "王艺博",
+              "wrongTimes": 1,
+              "studentAnswer": null,
+              "errorType": "未作答"
+            }
+          ]
+        },
+        {
+          "questionNumber": 3,
+          "difficulty": 3,
+          "diffValues": [
+            3
+          ],
+          "questionType": "answer",
+          "studentCount": 1,
+          "rawCount": 1,
+          "content": "一经销商按市场价收购某种海鲜1000斤放养在池塘内（假设放养期内每只海鲜的质量基本保持不变），当天市场价为每斤30元，据市场行情推测，此后该海鲜的市场价每天每斤可上涨1元，但是平均每天有10斤海鲜死去，假设死去的海鲜均于当天以每斤20元的价格全部售出。(1)用含x的代数式填空：①x天后每斤海鲜的市场价为____元；②x天后死去的海鲜共有____斤，死去的海鲜的销售总额为____元；③x天后活着的海鲜还有____斤；(2)如果放养x天后将活着的海鲜一次性出售，加上已经售出的死去的海鲜，销售总额为y₁，写出y₁关于x的函数表达式；(3)若每放养一天需支出各种费用共400元，写出经销商此次经销活动获得的总利润y₂关于放养天数x的函数表达式。",
+          "answer": "①30+x,②10x,200x,③1000-10x；y₁=(30+x)(1000-10x)+200x；y₂=(30+x)(1000-10x)+200x-400x",
+          "answerSource": "blank",
+          "answerRisk": null,
+          "students": [
+            {
+              "name": "王艺博",
+              "wrongTimes": 1,
+              "studentAnswer": null,
+              "errorType": "未作答"
+            }
+          ]
+        },
+        {
+          "questionNumber": 3,
+          "difficulty": 3,
+          "diffValues": [
+            3
+          ],
+          "questionType": "answer",
+          "studentCount": 1,
+          "rawCount": 1,
+          "content": "有一城门洞的横截面呈抛物线形，拱高4m(最高点到地面的距离)，把它放到如图所示的平面直角坐标系中，其表达式为y=−x²。(1)城门洞最宽处AB的长是多少？(2)现有一高为2.6m、宽为2.2m的运货车(从正中通过)，它能否安全通过此门？",
+          "answer": "(1) AB = 8m；(2) 能安全通过",
+          "answerSource": "blank",
+          "answerRisk": null,
+          "students": [
+            {
+              "name": "王艺博",
+              "wrongTimes": 1,
+              "studentAnswer": null,
+              "errorType": "未作答"
+            }
+          ]
+        },
+        {
+          "questionNumber": 3,
+          "difficulty": 3,
+          "diffValues": [
+            3
+          ],
+          "questionType": "fill",
+          "studentCount": 1,
+          "rawCount": 1,
+          "content": "有一个二次函数 y=a(x-k)² 的图像，三名同学分别说出了它的一些特点：甲：开口向上；乙：对称轴是直线 x=2；丙：与y轴的交点到原点的距离为2. 满足上述全部特点的二次函数的表达式为",
+          "answer": "y=1/2(x-2)²",
+          "answerSource": "recognized",
+          "answerRisk": null,
+          "students": [
+            {
+              "name": "程思豪",
+              "wrongTimes": 1,
+              "studentAnswer": null,
+              "errorType": "计算错误"
+            }
+          ]
+        },
+        {
+          "questionNumber": 8,
+          "difficulty": 3,
+          "diffValues": [
+            3
+          ],
+          "questionType": "fill",
+          "studentCount": 1,
+          "rawCount": 1,
+          "content": "如图，抛物线 y=ax²+1(a<0) 与过点 (0,-3) 且平行于 x 轴的直线相交于点 A、B，与 y 轴交于点 C，若∠ACB 为直角，则 a=______．",
+          "answer": "-1/4",
+          "answerSource": "blank",
+          "answerRisk": null,
+          "students": [
+            {
+              "name": "程思豪",
+              "wrongTimes": 1,
+              "studentAnswer": null,
+              "errorType": "未作答"
+            }
+          ]
+        },
+        {
+          "questionNumber": 8,
+          "difficulty": 3,
+          "diffValues": [
+            3
+          ],
+          "questionType": "fill",
+          "studentCount": 1,
+          "rawCount": 1,
+          "content": "如图,抛物线 y=ax²+1(a<0) 与过点(0,-3)且平行于 x 轴的直线相交于点 A、B,与 y 轴交于点 C,若∠ACB 为直角,则 a=",
+          "answer": "-1",
+          "answerSource": "blank",
+          "answerRisk": null,
+          "students": [
+            {
+              "name": "程思豪",
+              "wrongTimes": 1,
+              "studentAnswer": null,
+              "errorType": "未作答"
+            }
+          ]
+        },
+        {
+          "questionNumber": 9,
+          "difficulty": 3,
+          "diffValues": [
+            3
+          ],
+          "questionType": "answer",
+          "studentCount": 1,
+          "rawCount": 1,
+          "content": "已知抛物线 y=ax²+n(a>0) 与抛物线 y=-2x² 的形状相同，且其图像上与 x 轴最近的点到 x 轴的距离为 3．\n(1) 求 a、n 的值；\n(2) 在(1)的情况下，指出抛物线 y=ax²+n 的开口方向、对称轴和顶点坐标．",
+          "answer": "(1) a=2, n=3 或 n=-3；(2) 开口向上，对称轴为 y 轴，n=3 时顶点 (0,3)，n=-3 时顶点 (0,-3)",
+          "answerSource": "blank",
+          "answerRisk": null,
+          "students": [
+            {
+              "name": "程思豪",
+              "wrongTimes": 1,
+              "studentAnswer": null,
+              "errorType": "未作答"
+            }
+          ]
+        },
+        {
+          "questionNumber": 1,
+          "difficulty": 4,
+          "diffValues": [
+            4
+          ],
+          "questionType": "answer",
+          "studentCount": 1,
+          "rawCount": 1,
+          "content": "已知抛物线 y=ax²-2x+1(a≠0) 关于直线 x=1 对称。\n(1) 求 a 的值和顶点坐标；\n(2) 若点 C(x,y,) 在此抛物线上,当 -1≤x,≤2 时,求 y, 的最大值与最小值的差；\n(3) 若点 M(t,y₁)、N(t+1,y₂) 都在此抛物线上,且 y₁>y₂>0,求 t 的取值范围。",
+          "answer": "-1<t<0",
+          "answerSource": "blank",
+          "answerRisk": null,
+          "students": [
+            {
+              "name": "李哲瀚",
+              "wrongTimes": 1,
+              "studentAnswer": null,
+              "errorType": "未作答"
+            }
+          ]
+        },
+        {
+          "questionNumber": 10,
+          "difficulty": 4,
+          "diffValues": [
+            4
+          ],
+          "questionType": "fill",
+          "studentCount": 1,
+          "rawCount": 1,
+          "content": "如图是某隧道截面,由部分抛物线和矩形构成,以矩形的顶点A为坐标原点,AB所在直线为x轴,竖直方向为y轴,建立平面直角坐标系,抛物线的表达式为 y=-1/4 x²+2x+c,顶点为P,且AD=2,则点C的坐标为",
+          "answer": "(8,2)",
+          "answerSource": "recognized",
+          "answerRisk": "AI 视觉推理不擅长，建议核对参考答案",
+          "students": [
+            {
+              "name": "李哲瀚",
+              "wrongTimes": 1,
+              "studentAnswer": null,
+              "errorType": "计算错误"
+            }
+          ]
+        },
+        {
+          "questionNumber": 10,
+          "difficulty": 4,
+          "diffValues": [
+            4
+          ],
+          "questionType": "fill",
+          "studentCount": 1,
+          "rawCount": 1,
+          "content": "如图,在平面直角坐标系中,点 A 在抛物线 y=x²-2x+2 上运动,过点 A 作 AC⊥x 轴于点 C,以 AC 为对角线作矩形 ABCD,连接 BD,则对角线 BD 的最小值为____.",
+          "answer": "2√2",
+          "answerSource": "blank",
+          "answerRisk": null,
+          "students": [
+            {
+              "name": "程思豪",
+              "wrongTimes": 1,
+              "studentAnswer": null,
+              "errorType": "未作答"
+            }
+          ]
+        },
+        {
+          "questionNumber": 10,
+          "difficulty": 4,
+          "diffValues": [
+            4
+          ],
+          "questionType": "answer",
+          "studentCount": 1,
+          "rawCount": 1,
+          "content": "如图，在平面直角坐标系中，正方形OABC的顶点A在y轴的负半轴上，顶点C在x轴的负半轴上。抛物线y=a(x+3)²+c(a>0)的顶点为E，且经过点A、B，若△ABE为等腰直角三角形，求a的值。",
+          "answer": "1/3",
+          "answerSource": "blank",
+          "answerRisk": null,
+          "students": [
+            {
+              "name": "程思豪",
+              "wrongTimes": 1,
+              "studentAnswer": null,
+              "errorType": "未作答"
+            }
+          ]
+        },
+        {
+          "questionNumber": 11,
+          "difficulty": 4,
+          "diffValues": [
+            4
+          ],
+          "questionType": "answer",
+          "studentCount": 1,
+          "rawCount": 2,
+          "content": "在平面直角坐标系 xOy 中,将点 P₁(a,b-a) 定义为点 P(a,b) 的\"关联点\".已知点 A(x,y) 在函数 y=x² 的图像上(如图所示),点 A 的\"关联点\"是点 A₁.\n(1) 请在如图的基础上画出函数 y=x²-2 的图像,简要说明画图方法;\n(2) 如果点 A₁ 在函数 y=x²-2 的图像上,求点 A₁ 的坐标;\n(3) 将点 P₂(a,b-na) 称为点 P(a,b) 的\"待定关联点\"(n≠0).如果点 A(x,y) 的\"待定关联点\" A₂ 在函数 y=x²-n 的图像上,试用含 n 的代数式表示点 A₂ 的坐标.",
+          "answer": "A₁的坐标为(-1,-1);A₂的坐标为(x-1, y - n(x-1))",
+          "answerSource": "blank",
+          "answerRisk": null,
+          "students": [
+            {
+              "name": "程思豪",
+              "wrongTimes": 2,
+              "studentAnswer": null,
+              "errorType": "未作答"
+            }
+          ]
+        },
+        {
+          "questionNumber": 11,
+          "difficulty": 4,
+          "diffValues": [
+            4
+          ],
+          "questionType": "answer",
+          "studentCount": 1,
+          "rawCount": 1,
+          "content": "已知二次函数 y=-2x²+4x+6.\n(1)求这个函数图像的顶点坐标,并指出它的变化情况;\n(2)如图,在平面直角坐标系 xOy 中,该函数图像与 x 轴正半轴交于点 A,与 y 轴交于点 C,顶点为 D,O 为坐标原点,求四边形 OADC 的面积.",
+          "answer": "(1) 顶点坐标为 (1, 8)，x < 1 时 y 随 x 增大而增大，x > 1 时 y 随 x 增大而减小；(2) 四边形 OADC 的面积为 15",
+          "answerSource": "recognized",
+          "answerRisk": null,
+          "students": [
+            {
+              "name": "程思豪",
+              "wrongTimes": 1,
+              "studentAnswer": null,
+              "errorType": "计算错误"
+            }
+          ]
+        },
+        {
+          "questionNumber": 13,
+          "difficulty": 4,
+          "diffValues": [
+            4
+          ],
+          "questionType": "fill",
+          "studentCount": 1,
+          "rawCount": 1,
+          "content": "如图,一条抛物线与x轴相交于A,B两点(点A在点B的左侧),其顶点P在线段MN上移动.若点M,N的坐标分别为(-1,-2),(1,-2),点B的横坐标的最大值为3,则点A的横坐标的最小值为____.",
+          "answer": "-3",
+          "answerSource": "recognized",
+          "answerRisk": "AI 视觉推理不擅长，建议核对参考答案",
+          "students": [
+            {
+              "name": "李哲瀚",
+              "wrongTimes": 1,
+              "studentAnswer": null,
+              "errorType": "概念不理解"
+            }
+          ]
+        },
+        {
+          "questionNumber": 14,
+          "difficulty": 4,
+          "diffValues": [
+            4
+          ],
+          "questionType": "fill",
+          "studentCount": 1,
+          "rawCount": 1,
+          "content": "设二次函数y=x²+bx+2b-3,当-1≤x≤2时,函数有最小值-15,则b的值为____.",
+          "answer": "b=-4",
+          "answerSource": "blank",
+          "answerRisk": null,
+          "students": [
+            {
+              "name": "李哲瀚",
+              "wrongTimes": 1,
+              "studentAnswer": null,
+              "errorType": "未作答"
+            }
+          ]
+        },
+        {
+          "questionNumber": 15,
+          "difficulty": 4,
+          "diffValues": [
+            4
+          ],
+          "questionType": "fill",
+          "studentCount": 1,
+          "rawCount": 1,
+          "content": "对于一个二次函数y=a(x-m)²+k(a≠0),若存在一点P(x',y'),使得x'-m=y'-k≠0,则称2|x'-m|为该抛物线的\"开口大小\",则抛物线y=2x²+3x+3的\"开口大小\"为____.",
+          "answer": "2√2",
+          "answerSource": "blank",
+          "answerRisk": null,
+          "students": [
+            {
+              "name": "李哲瀚",
+              "wrongTimes": 1,
+              "studentAnswer": null,
+              "errorType": "未作答"
+            }
+          ]
+        },
+        {
+          "questionNumber": 16,
+          "difficulty": 4,
+          "diffValues": [
+            4
+          ],
+          "questionType": "answer",
+          "studentCount": 1,
+          "rawCount": 1,
+          "content": "在平面直角坐标系xOy中,点A(1+a,y₁)、B(b,y₂)是抛物线y=ax²-2ax(a≠0)上不重合的两点.\n(1)抛物线的对称轴为直线x=____;\n(2)当a=1,y₁=y₂时,求b的值;\n(3)若对于-2<b<-1,都有y₁<y₂,求a的取值范围.",
+          "answer": "1, -3或1, a<-1",
+          "answerSource": "blank",
+          "answerRisk": null,
+          "students": [
+            {
+              "name": "李哲瀚",
+              "wrongTimes": 1,
+              "studentAnswer": null,
+              "errorType": "未作答"
+            }
+          ]
+        },
+        {
+          "questionNumber": 17,
+          "difficulty": 4,
+          "diffValues": [
+            4
+          ],
+          "questionType": "answer",
+          "studentCount": 1,
+          "rawCount": 1,
+          "content": "在平面直角坐标系中,二次函数y=-x²+3x+m经过点A(1,0)、B(2,n).\n(1)求m,n的值;\n(2)若点C(a,-2)、D(b,-2)为该二次函数图像上的两个不同点(其中a,b为常数,a<b),求△BCD的面积.",
+          "answer": "m=2，n=4，15",
+          "answerSource": "blank",
+          "answerRisk": null,
+          "students": [
+            {
+              "name": "李哲瀚",
+              "wrongTimes": 1,
+              "studentAnswer": null,
+              "errorType": "未作答"
+            }
+          ]
+        },
+        {
+          "questionNumber": 4,
+          "difficulty": 4,
+          "diffValues": [
+            4
+          ],
+          "questionType": "choice",
+          "studentCount": 1,
+          "rawCount": 1,
+          "content": "将二次函数 y=x²+2x+3 和 y=-x²+2x-3 的图像画在同一平面直角坐标系中,那么这两个图像都是上升的部分,所对应自变量x的取值范围是",
+          "answer": "D",
+          "answerSource": "recognized",
+          "answerRisk": null,
+          "students": [
+            {
+              "name": "李哲瀚",
+              "wrongTimes": 1,
+              "studentAnswer": null,
+              "errorType": "概念不理解"
+            }
+          ]
+        },
+        {
+          "questionNumber": 7,
+          "difficulty": 4,
+          "diffValues": [
+            4
+          ],
+          "questionType": "fill",
+          "studentCount": 1,
+          "rawCount": 1,
+          "content": "已知关于 x 的函数 y=mx^(m²-m)，当 m=______时，它的图像开口向下的抛物线。",
+          "answer": "-1",
+          "answerSource": "blank",
+          "answerRisk": null,
+          "students": [
+            {
+              "name": "程思豪",
+              "wrongTimes": 1,
+              "studentAnswer": null,
+              "errorType": "未作答"
+            }
+          ]
+        },
+        {
+          "questionNumber": 8,
+          "difficulty": 4,
+          "diffValues": [
+            4
+          ],
+          "questionType": "fill",
+          "studentCount": 1,
+          "rawCount": 1,
+          "content": "如果函数 y=(k-3)x^(k²-3k+2)+kx+1 是二次函数,那么 k 的值为",
+          "answer": "4",
+          "answerSource": "recognized",
+          "answerRisk": null,
+          "students": [
+            {
+              "name": "李哲瀚",
+              "wrongTimes": 1,
+              "studentAnswer": null,
+              "errorType": "概念不理解"
+            }
+          ]
+        },
+        {
+          "questionNumber": 8,
+          "difficulty": 4,
+          "diffValues": [
+            4
+          ],
+          "questionType": "fill",
+          "studentCount": 1,
+          "rawCount": 1,
+          "content": "如图，在平面直角坐标系中，点A、B的坐标分别为(0,2)、(4,2)。若抛物线y=-3/2(x-h)²+k(h,k为常数)与线段AB交于C、D两点，且CD=1/2 AB，则k的值为____",
+          "answer": "7/2",
+          "answerSource": "blank",
+          "answerRisk": null,
+          "students": [
+            {
+              "name": "程思豪",
+              "wrongTimes": 1,
+              "studentAnswer": null,
+              "errorType": "未作答"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "day": "2026-09-03",
+      "dayFrom": "2026-09-03",
+      "mergedDays": [],
+      "rawRows": 12,
+      "totalTopics": 12,
+      "topics": [
+        {
+          "questionNumber": 1,
+          "difficulty": 2,
+          "diffValues": [
+            2
+          ],
+          "questionType": "choice",
+          "studentCount": 1,
+          "rawCount": 1,
+          "content": "由二次函数 y=-x²+2x 可知",
+          "answer": "1，B正确；最大值为 1，C错误；顶点坐标为(1,1)，D错误",
+          "answerSource": "recognized",
+          "answerRisk": null,
+          "students": [
+            {
+              "name": "程思豪",
+              "wrongTimes": 1,
+              "studentAnswer": null,
+              "errorType": "步骤遗漏"
+            }
+          ]
+        },
+        {
+          "questionNumber": 1,
+          "difficulty": 2,
+          "diffValues": [
+            2
+          ],
+          "questionType": "choice",
+          "studentCount": 1,
+          "rawCount": 1,
+          "content": "若二次函数 y=mx²(m≠0)的图像经过点(2,-5)，则它也经过",
+          "answer": "A",
+          "answerSource": "recognized",
+          "answerRisk": null,
+          "students": [
+            {
+              "name": "王艺博",
+              "wrongTimes": 1,
+              "studentAnswer": null,
+              "errorType": "计算错误"
+            }
+          ]
+        },
+        {
+          "questionNumber": 4,
+          "difficulty": 2,
+          "diffValues": [
+            2
+          ],
+          "questionType": "answer",
+          "studentCount": 1,
+          "rawCount": 1,
+          "content": "已知二次函数 y=3(x-1)²+2。(1)将二次函数化为 y=ax²+bx+c(a≠0)的形式；(2)当 x=6 时，求 y 的值。",
+          "answer": "y=3x²-6x+5, 83",
+          "answerSource": "recognized",
+          "answerRisk": null,
+          "students": [
+            {
+              "name": "王艺博",
+              "wrongTimes": 1,
+              "studentAnswer": null,
+              "errorType": "公式记忆错误"
+            }
+          ]
+        },
+        {
+          "questionNumber": 5,
+          "difficulty": 2,
+          "diffValues": [
+            2
+          ],
+          "questionType": "answer",
+          "studentCount": 1,
+          "rawCount": 1,
+          "content": "已知抛物线 y=-2x²-4x+1。(1)求这个抛物线的对称轴和顶点坐标；(2)将这个抛物线平移,使顶点移到点 P(2,0) 的位置,写出所得新抛物线的表达式和平移的过程。",
+          "answer": "-2x²+8x-8",
+          "answerSource": "recognized",
+          "answerRisk": null,
+          "students": [
+            {
+              "name": "程思豪",
+              "wrongTimes": 1,
+              "studentAnswer": null,
+              "errorType": "计算错误"
+            }
+          ]
+        },
+        {
+          "questionNumber": 6,
+          "difficulty": 2,
+          "diffValues": [
+            2
+          ],
+          "questionType": "choice",
+          "studentCount": 1,
+          "rawCount": 1,
+          "content": "已知抛物线 y=(x-1)² 经过点 A(n,y₁)、B(n+2,y₂)，若 y₁<y₂，则 n 的值可以为",
+          "answer": "D",
+          "answerSource": "recognized",
+          "answerRisk": null,
+          "students": [
+            {
+              "name": "程思豪",
+              "wrongTimes": 1,
+              "studentAnswer": null,
+              "errorType": "审题错误"
+            }
+          ]
+        },
+        {
+          "questionNumber": 6,
+          "difficulty": 2,
+          "diffValues": [
+            2
+          ],
+          "questionType": "fill",
+          "studentCount": 1,
+          "rawCount": 1,
+          "content": "已知函数 y=(a²+3a-10)x²-(a-2)x-5。(1)若该函数是 y 关于 x 的一次函数，则 a 的值为；(2)若该函数是 y 关于 x 的二次函数，则 a 的取值范围是。",
+          "answer": "第一空为-5，第二空为a≠2且a≠-5",
+          "answerSource": "recognized",
+          "answerRisk": null,
+          "students": [
+            {
+              "name": "王艺博",
+              "wrongTimes": 1,
+              "studentAnswer": null,
+              "errorType": "概念不理解"
+            }
+          ]
+        },
+        {
+          "questionNumber": 1,
+          "difficulty": 3,
+          "diffValues": [
+            3
+          ],
+          "questionType": "choice",
+          "studentCount": 1,
+          "rawCount": 1,
+          "content": "对于二次函数 y=3(x-1)²，下列结论正确的是",
+          "answer": "C",
+          "answerSource": "recognized",
+          "answerRisk": null,
+          "students": [
+            {
+              "name": "程思豪",
+              "wrongTimes": 1,
+              "studentAnswer": null,
+              "errorType": "概念不理解"
+            }
+          ]
+        },
+        {
+          "questionNumber": 4,
+          "difficulty": 3,
+          "diffValues": [
+            3
+          ],
+          "questionType": "answer",
+          "studentCount": 1,
+          "rawCount": 1,
+          "content": "如图，已知抛物线 y=(x-2)² 的顶点为 C，直线 y=2x+4 与抛物线交于 A、B 两点，求 △ABC 的面积.",
+          "answer": "24",
+          "answerSource": "recognized",
+          "answerRisk": null,
+          "students": [
+            {
+              "name": "程思豪",
+              "wrongTimes": 1,
+              "studentAnswer": null,
+              "errorType": "计算错误"
+            }
+          ]
+        },
+        {
+          "questionNumber": 7,
+          "difficulty": 3,
+          "diffValues": [
+            3
+          ],
+          "questionType": "answer",
+          "studentCount": 1,
+          "rawCount": 1,
+          "content": "在一块等腰直角三角形铁皮上截一块矩形铁皮。已知有的铁皮是等腰直角三角形 ABC，它的底边 AB 长 20 厘米。要截得的矩形 DEMN 的边 MN 在 AB 上，顶点 D、E 分别在边 AC、BC 上。设 DE 的长为 x 厘米，矩形 DEMN 的面积为 y 平方厘米，那么 y 关于 x 的函数表达式是",
+          "answer": "y=−x²/2+10x（0<x<20）",
+          "answerSource": "recognized",
+          "answerRisk": null,
+          "students": [
+            {
+              "name": "王艺博",
+              "wrongTimes": 1,
+              "studentAnswer": null,
+              "errorType": "抄写错误"
+            }
+          ]
+        },
+        {
+          "questionNumber": 8,
+          "difficulty": 3,
+          "diffValues": [
+            3
+          ],
+          "questionType": "choice",
+          "studentCount": 1,
+          "rawCount": 1,
+          "content": "类比学习是一种很重要的学习方法,小明在课堂上类比一次函数学习的过程,作二次函数 C₁:y₁=a₁x²+b₁x+c₁ 和二次函数 C₂:y₂=a₂x²+b₂x+c₂ 的图像时,列出如下表格,已知二次函数 C₁ 的图像平移后可以得到二次函数 C₂ 的图像,则平移方式为",
+          "answer": "B",
+          "answerSource": "recognized",
+          "answerRisk": null,
+          "students": [
+            {
+              "name": "程思豪",
+              "wrongTimes": 1,
+              "studentAnswer": null,
+              "errorType": "审题错误"
+            }
+          ]
+        },
+        {
+          "questionNumber": 9,
+          "difficulty": 3,
+          "diffValues": [
+            3
+          ],
+          "questionType": "answer",
+          "studentCount": 1,
+          "rawCount": 1,
+          "content": "如图，抛物线y=a(x-1)²+4与x轴交于点A、B，与y轴交于点C，过点C作CD∥x轴交抛物线的对称轴于点D，连接BD，已知点A的坐标为(-1,0)。\n(1)求该抛物线的表达式；\n(2)求梯形COBD的面积。",
+          "answer": "(1) y=-(x-1)²+4 或 y=-x²+2x+3",
+          "answerSource": "recognized",
+          "answerRisk": null,
+          "students": [
+            {
+              "name": "程思豪",
+              "wrongTimes": 1,
+              "studentAnswer": null,
+              "errorType": "计算错误"
+            }
+          ]
+        },
+        {
+          "questionNumber": 7,
+          "difficulty": 4,
+          "diffValues": [
+            4
+          ],
+          "questionType": "choice",
+          "studentCount": 1,
+          "rawCount": 1,
+          "content": "点 A(s,t) 在二次函数 y=2(x-m)²（m 为常数）的图像上，s-m=t≠0. 当 s-1≤x≤s+2 时，二次函数的最大值与最小值的差为",
+          "answer": "C",
+          "answerSource": "recognized",
+          "answerRisk": null,
+          "students": [
+            {
+              "name": "程思豪",
+              "wrongTimes": 1,
+              "studentAnswer": null,
+              "errorType": "审题错误"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "day": "2026-09-02",
+      "dayFrom": "2026-09-02",
+      "mergedDays": [],
+      "rawRows": 10,
+      "totalTopics": 10,
+      "topics": [
+        {
+          "questionNumber": 5,
+          "difficulty": 2,
+          "diffValues": [
+            2
+          ],
+          "questionType": "answer",
+          "studentCount": 1,
+          "rawCount": 1,
+          "content": "(3) y=3(x-2)²-7;",
+          "answer": "y=3x²-12x+5",
+          "answerSource": "recognized",
+          "answerRisk": null,
+          "students": [
+            {
+              "name": "周俊辰",
+              "wrongTimes": 1,
+              "studentAnswer": null,
+              "errorType": "审题错误"
+            }
+          ]
+        },
+        {
+          "questionNumber": 6,
+          "difficulty": 2,
+          "diffValues": [
+            2
+          ],
+          "questionType": "answer",
+          "studentCount": 1,
+          "rawCount": 1,
+          "content": "(4) y=-4(x-5)²+6.",
+          "answer": "y = -4x² + 40x - 94",
+          "answerSource": "recognized",
+          "answerRisk": null,
+          "students": [
+            {
+              "name": "周俊辰",
+              "wrongTimes": 1,
+              "studentAnswer": null,
+              "errorType": "方法选择错误"
+            }
+          ]
+        },
+        {
+          "questionNumber": 3,
+          "difficulty": 3,
+          "diffValues": [
+            3
+          ],
+          "questionType": "answer",
+          "studentCount": 1,
+          "rawCount": 1,
+          "content": "已知抛物线 y=-1/2x²+(5-m)x+m-3 的对称轴是 y 轴，其中 m 为常数。求抛物线的顶点坐标。",
+          "answer": "0,m-3",
+          "answerSource": "recognized",
+          "answerRisk": null,
+          "students": [
+            {
+              "name": "周俊辰",
+              "wrongTimes": 1,
+              "studentAnswer": null,
+              "errorType": "计算错误"
+            }
+          ]
+        },
+        {
+          "questionNumber": 6,
+          "difficulty": 3,
+          "diffValues": [
+            3
+          ],
+          "questionType": "fill",
+          "studentCount": 1,
+          "rawCount": 1,
+          "content": "二次函数 y = a(x + m)² + h 的大致图像如图所示，其中 a、m、h 均为常数，则 a ___ 0，m ___ 0，h ___ 0。（填“>”或“<”）",
+          "answer": "<,>,>",
+          "answerSource": "recognized",
+          "answerRisk": "AI 视觉推理不擅长，建议核对参考答案",
+          "students": [
+            {
+              "name": "周俊辰",
+              "wrongTimes": 1,
+              "studentAnswer": null,
+              "errorType": "概念不理解"
+            }
+          ]
+        },
+        {
+          "questionNumber": 9,
+          "difficulty": 3,
+          "diffValues": [
+            3
+          ],
+          "questionType": "answer",
+          "studentCount": 1,
+          "rawCount": 1,
+          "content": "写出下列各函数的表达式,指出是什么函数,并确定函数的自变量的取值范围. (2) 如图，最下面是一个长方形，上面是10个小正方形，如果长方形的长为4cm，宽为小正方形边长的一半，那么这个图形的总面积S(cm²)是每个小正方形的边长x(cm)的函数。",
+          "answer": "“4x+10x²”，可能是题目中“长方形的长为4cm”实际指其宽度方向对应10个正方形排成一行的长度，即4cm=10x → x=0.4，但这与函数关系不符",
+          "answerSource": "recognized",
+          "answerRisk": null,
+          "students": [
+            {
+              "name": "程思豪",
+              "wrongTimes": 1,
+              "studentAnswer": null,
+              "errorType": "步骤遗漏"
+            }
+          ]
+        },
+        {
+          "questionNumber": 4,
+          "difficulty": 4,
+          "diffValues": [
+            4
+          ],
+          "questionType": "answer",
+          "studentCount": 1,
+          "rawCount": 1,
+          "content": "已知抛物线 y=x²-2x+2m-4，其中 m 为常数。\n(1) 当抛物线经过原点时，求 m 的值；\n(2) 当抛物线的顶点在 x 轴上时，求 m 的值；\n(3) 当抛物线的顶点在直线 y=-x 上时，求 m 的值；\n(4) 当抛物线的顶点在第四象限时，求 m 的取值范围。",
+          "answer": "m=4, m=1, m=1, m<-1",
+          "answerSource": "recognized",
+          "answerRisk": null,
+          "students": [
+            {
+              "name": "周俊辰",
+              "wrongTimes": 1,
+              "studentAnswer": null,
+              "errorType": "计算错误"
+            }
+          ]
+        },
+        {
+          "questionNumber": 4,
+          "difficulty": 4,
+          "diffValues": [
+            4
+          ],
+          "questionType": "answer",
+          "studentCount": 1,
+          "rawCount": 1,
+          "content": "已知抛物线 y=ax² 经过 A(-1,4)、B(m,4) 两个不同的点，其中 a、m 均为常数。(1) 求这条抛物线的表达式；(2) 求点 B 的坐标，并说明点 A 与点 B 是否关于抛物线的对称轴对称；(3) 点 C 在抛物线 y=ax² 上，点 D 与点 C 关于抛物线的对称轴对称，如果点 C 的横坐标为 n，求点 D 的坐标（结果用含有字母 n 的式子表示）。",
+          "answer": "y=4x², B(m,4)，m=-1，点A与点B关于抛物线的对称轴对称, D(n,-4an²)",
+          "answerSource": "recognized",
+          "answerRisk": "AI 参考答案错误：4m²=4 应得 m=±1，AI 只给 m=-1；D(n,-4an²) 多余字母 a 应是 D(-n,4n²)",
+          "students": [
+            {
+              "name": "程思豪",
+              "wrongTimes": 1,
+              "studentAnswer": null,
+              "errorType": "计算错误"
+            }
+          ]
+        },
+        {
+          "questionNumber": 5,
+          "difficulty": 4,
+          "diffValues": [
+            4
+          ],
+          "questionType": "answer",
+          "studentCount": 1,
+          "rawCount": 1,
+          "content": "二次函数 y=ax²+2x+c (a、c 均为常数) 图像上部分点的坐标如下表所示：\n\n| x | ... | -1 | 0 | 1 | 2 | 4 | ... |\n|---|-----|----|---|---|---|---|-----|\n| y | ... | p  | n | -4| n | q | ... |\n\n根据表中的信息回答以下问题：\n(1) 该二次函数图像的对称轴是______，顶点坐标是______；\n(2) 该二次函数的表达式；\n(3) 比较 p 和 q 的大小：p ____ q。（填“>”、“=”或“<”）",
+          "answer": "(1) 对称轴x=1，顶点(1,-4)",
+          "answerSource": "recognized",
+          "answerRisk": null,
+          "students": [
+            {
+              "name": "周俊辰",
+              "wrongTimes": 1,
+              "studentAnswer": null,
+              "errorType": "公式记忆错误"
+            }
+          ]
+        },
+        {
+          "questionNumber": 6,
+          "difficulty": 4,
+          "diffValues": [
+            4
+          ],
+          "questionType": "answer",
+          "studentCount": 1,
+          "rawCount": 1,
+          "content": "用配方法将下列二次函数表达式写成 y=a(x+m)²+h 的形式，写出函数图像的对称轴、顶点坐标。判断这些函数有最大值还是最小值，并求出自变量的相应取值。(6) y=-5-1/3x²-2x.",
+          "answer": "y = -1/3(x + 3)² - 2，对称轴：x = -3，顶点坐标：(-3, -2)，有最大值，当x = -3时取得最大值-2",
+          "answerSource": "recognized",
+          "answerRisk": null,
+          "students": [
+            {
+              "name": "周俊辰",
+              "wrongTimes": 1,
+              "studentAnswer": null,
+              "errorType": "单位错误"
+            }
+          ]
+        },
+        {
+          "questionNumber": 6,
+          "difficulty": 4,
+          "diffValues": [
+            4
+          ],
+          "questionType": "answer",
+          "studentCount": 1,
+          "rawCount": 1,
+          "content": "如图，已知在正方形ABCD中，AB=4，点E在边BC上（与点B和点C均不重合），点F在边CD上，AE=AF。求△AEF的面积y关于EC的长x的函数表达式及自变量x的取值范围。",
+          "answer": "y=-0.5x^2+4x(0<x<4)",
+          "answerSource": "recognized",
+          "answerRisk": null,
+          "students": [
+            {
+              "name": "程思豪",
+              "wrongTimes": 1,
+              "studentAnswer": null,
+              "errorType": "步骤遗漏"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "day": "2026-09-01",
+      "dayFrom": "2026-09-01",
+      "mergedDays": [],
+      "rawRows": 51,
+      "totalTopics": 31,
+      "topics": [
+        {
+          "questionNumber": 4,
+          "difficulty": 2,
+          "diffValues": [
+            2,
+            3
+          ],
+          "questionType": "fill",
+          "studentCount": 4,
+          "rawCount": 4,
+          "content": "已知点 A(x₁,y₁)、B(x₂,y₂) 都在抛物线 y=-2x²+c 上，其中 c 为常数。 (1) 如果 0<x₁<x₂，那么 y₁ ___ y₂；（填“>”、“=”或“<”）",
+          "answer": ">",
+          "answerSource": "recognized",
+          "answerRisk": null,
+          "students": [
+            {
+              "name": "陈施君",
+              "wrongTimes": 1,
+              "studentAnswer": null,
+              "errorType": "粗心"
+            },
+            {
+              "name": "程思豪",
+              "wrongTimes": 1,
+              "studentAnswer": null,
+              "errorType": "计算错误"
+            },
+            {
+              "name": "胡传政",
+              "wrongTimes": 1,
+              "studentAnswer": null,
+              "errorType": "粗心"
+            },
+            {
+              "name": "周俊辰",
+              "wrongTimes": 1,
+              "studentAnswer": null,
+              "errorType": "概念不理解"
+            }
+          ]
+        },
+        {
+          "questionNumber": 3,
+          "difficulty": 2,
+          "diffValues": [
+            2,
+            3
+          ],
+          "questionType": "answer",
+          "studentCount": 2,
+          "rawCount": 2,
+          "content": "已知二次函数 y=−x²+2x+3，分别求当自变量 x=0，x=−1 时对应的函数值。",
+          "answer": "3,0",
+          "answerSource": "recognized",
+          "answerRisk": null,
+          "students": [
+            {
+              "name": "陈施君",
+              "wrongTimes": 1,
+              "studentAnswer": null,
+              "errorType": "计算错误"
+            },
+            {
+              "name": "胡传政",
+              "wrongTimes": 1,
+              "studentAnswer": null,
+              "errorType": "计算错误"
+            }
+          ]
+        },
+        {
+          "questionNumber": 1,
+          "difficulty": 2,
+          "diffValues": [
+            2
+          ],
+          "questionType": "choice",
+          "studentCount": 1,
+          "rawCount": 1,
+          "content": "下列具有二次函数关系的是",
+          "answer": "C",
+          "answerSource": "recognized",
+          "answerRisk": null,
+          "students": [
+            {
+              "name": "程思豪",
+              "wrongTimes": 1,
+              "studentAnswer": null,
+              "errorType": "概念不理解"
+            }
+          ]
+        },
+        {
+          "questionNumber": 4,
+          "difficulty": 2,
+          "diffValues": [
+            2
+          ],
+          "questionType": "answer",
+          "studentCount": 1,
+          "rawCount": 1,
+          "content": "已知二次函数y=3(x-1)²+2。（1）将二次函数化为y=ax²+bx+c(a≠0)的形式；（2）当x=6时，求y的值。",
+          "answer": "y=3x²-6x+5, 83",
+          "answerSource": "recognized",
+          "answerRisk": null,
+          "students": [
+            {
+              "name": "程思豪",
+              "wrongTimes": 1,
+              "studentAnswer": null,
+              "errorType": "计算错误"
+            }
+          ]
+        },
+        {
+          "questionNumber": 3,
+          "difficulty": 3,
+          "diffValues": [
+            3
+          ],
+          "questionType": "answer",
+          "studentCount": 4,
+          "rawCount": 4,
+          "content": "(2) 将抛物线 y=-1/3x² 平移，使它的顶点移到点(-3,0)的位置，求平移后所得的抛物线表达式。",
+          "answer": "y = -1/3(x + 3)²",
+          "answerSource": "recognized",
+          "answerRisk": null,
+          "students": [
+            {
+              "name": "陈施君",
+              "wrongTimes": 1,
+              "studentAnswer": null,
+              "errorType": "计算错误"
+            },
+            {
+              "name": "程思豪",
+              "wrongTimes": 1,
+              "studentAnswer": null,
+              "errorType": "计算错误"
+            },
+            {
+              "name": "胡传政",
+              "wrongTimes": 1,
+              "studentAnswer": null,
+              "errorType": "计算错误"
+            },
+            {
+              "name": "周俊辰",
+              "wrongTimes": 1,
+              "studentAnswer": null,
+              "errorType": "计算错误"
+            }
+          ]
+        },
+        {
+          "questionNumber": 5,
+          "difficulty": 3,
+          "diffValues": [
+            3,
+            4
+          ],
+          "questionType": "answer",
+          "studentCount": 4,
+          "rawCount": 4,
+          "content": "抛物线 y=ax²+c 经过点 A(-1,1)、B(2,-5)，其中 a、c 均为常数。(1) 求该抛物线的表达式，并写出该抛物线的开口方向、对称轴和顶点坐标；(2) 说明该抛物线如何由抛物线 y=ax² 平移得到。",
+          "answer": "y = -2x² + 3，开口向下，对称轴为 x=0，顶点坐标为 (0,3)；由 y=-2x² 向上平移 3 个单位得到",
+          "answerSource": "recognized",
+          "answerRisk": null,
+          "students": [
+            {
+              "name": "陈施君",
+              "wrongTimes": 1,
+              "studentAnswer": null,
+              "errorType": "抄写错误"
+            },
+            {
+              "name": "程思豪",
+              "wrongTimes": 1,
+              "studentAnswer": null,
+              "errorType": "步骤遗漏"
+            },
+            {
+              "name": "胡传政",
+              "wrongTimes": 1,
+              "studentAnswer": null,
+              "errorType": "计算错误"
+            },
+            {
+              "name": "周俊辰",
+              "wrongTimes": 1,
+              "studentAnswer": null,
+              "errorType": "审题错误"
+            }
+          ]
+        },
+        {
+          "questionNumber": 3,
+          "difficulty": 3,
+          "diffValues": [
+            3
+          ],
+          "questionType": "answer",
+          "studentCount": 3,
+          "rawCount": 3,
+          "content": "(1) 将抛物线 y=-1/3x² 平移，使它的顶点移到点(3,0)的位置，求平移后所得的抛物线表达式；",
+          "answer": "y = -1/3(x - 3)²",
+          "answerSource": "recognized",
+          "answerRisk": null,
+          "students": [
+            {
+              "name": "程思豪",
+              "wrongTimes": 1,
+              "studentAnswer": null,
+              "errorType": "计算错误"
+            },
+            {
+              "name": "胡传政",
+              "wrongTimes": 1,
+              "studentAnswer": null,
+              "errorType": "计算错误"
+            },
+            {
+              "name": "周俊辰",
+              "wrongTimes": 1,
+              "studentAnswer": null,
+              "errorType": "计算错误"
+            }
+          ]
+        },
+        {
+          "questionNumber": 2,
+          "difficulty": 3,
+          "diffValues": [
+            3
+          ],
+          "questionType": "fill",
+          "studentCount": 2,
+          "rawCount": 2,
+          "content": "观察下列函数：① y=2x²-7x；② y=1/x²+1；③ y=(x+1)(x-1)-(x+2)²；④ y=(x+3)²-9；⑤ y=(k²+1)x²+kx+3（k 为常数）。其中，是二次函数的为 ___ （填序号）。",
+          "answer": "①,④,⑤",
+          "answerSource": "recognized",
+          "answerRisk": null,
+          "students": [
+            {
+              "name": "程思豪",
+              "wrongTimes": 1,
+              "studentAnswer": null,
+              "errorType": "粗心"
+            },
+            {
+              "name": "周俊辰",
+              "wrongTimes": 1,
+              "studentAnswer": null,
+              "errorType": "粗心"
+            }
+          ]
+        },
+        {
+          "questionNumber": 3,
+          "difficulty": 3,
+          "diffValues": [
+            3
+          ],
+          "questionType": "answer",
+          "studentCount": 2,
+          "rawCount": 2,
+          "content": "已知二次函数 y = ax² 的图像经过点 A(-1, -1/4)，其中 a 为常数。求 a 的值，并写出这个函数的表达式。",
+          "answer": "a = -1/4，函数表达式为 y = -1/4 x²",
+          "answerSource": "recognized",
+          "answerRisk": null,
+          "students": [
+            {
+              "name": "陈施君",
+              "wrongTimes": 1,
+              "studentAnswer": null,
+              "errorType": "计算错误"
+            },
+            {
+              "name": "周俊辰",
+              "wrongTimes": 1,
+              "studentAnswer": null,
+              "errorType": "计算错误"
+            }
+          ]
+        },
+        {
+          "questionNumber": 3,
+          "difficulty": 3,
+          "diffValues": [
+            3
+          ],
+          "questionType": "answer",
+          "studentCount": 2,
+          "rawCount": 2,
+          "content": "已知二次函数 y=-x²+2x+3，分别求当自变量 x=0，x=-1 时对应的函数值。",
+          "answer": "3,0",
+          "answerSource": "recognized",
+          "answerRisk": null,
+          "students": [
+            {
+              "name": "程思豪",
+              "wrongTimes": 1,
+              "studentAnswer": null,
+              "errorType": "计算错误"
+            },
+            {
+              "name": "周俊辰",
+              "wrongTimes": 1,
+              "studentAnswer": null,
+              "errorType": "计算错误"
+            }
+          ]
+        },
+        {
+          "questionNumber": 6,
+          "difficulty": 3,
+          "diffValues": [
+            3,
+            4
+          ],
+          "questionType": "choice",
+          "studentCount": 2,
+          "rawCount": 2,
+          "content": "已知 k、b 均为常数，在同一平面直角坐标系中，一次函数 y=kx+b 与二次函数 y=kx²+b 的大致图像可能是（ ）",
+          "answer": "B",
+          "answerSource": "recognized",
+          "answerRisk": "AI 视觉推理不擅长，建议核对参考答案",
+          "students": [
+            {
+              "name": "陈施君",
+              "wrongTimes": 1,
+              "studentAnswer": null,
+              "errorType": "概念不理解"
+            },
+            {
+              "name": "周俊辰",
+              "wrongTimes": 1,
+              "studentAnswer": null,
+              "errorType": "概念不理解"
+            }
+          ]
+        },
+        {
+          "questionNumber": 10,
+          "difficulty": 3,
+          "diffValues": [
+            3
+          ],
+          "questionType": "answer",
+          "studentCount": 1,
+          "rawCount": 1,
+          "content": "经销商按市场价收购某种海鲜1000斤放养在池塘内(假设放养期内每只海鲜的质量基本保持不变),当天市场价为每斤30元,据市场行情推测,此后该海鲜的市场价每天每斤可上涨1元,但是平均每天有10斤海鲜死去,假设死去的海鲜均于当天以每斤20元的价格全部售出. (3) 若每放养一天需支出各种费用共400元，写出经销商此次经销活动获得的总利润y₂关于放养天数x的函数表达式。",
+          "answer": "y₂ = -20x² + 400x",
+          "answerSource": "recognized",
+          "answerRisk": null,
+          "students": [
+            {
+              "name": "程思豪",
+              "wrongTimes": 1,
+              "studentAnswer": null,
+              "errorType": "公式记忆错误"
+            }
+          ]
+        },
+        {
+          "questionNumber": 10,
+          "difficulty": 3,
+          "diffValues": [
+            3
+          ],
+          "questionType": "answer",
+          "studentCount": 1,
+          "rawCount": 1,
+          "content": "经销商按市场价收购某种海鲜1000斤放养在池塘内(假设放养期内每只海鲜的质量基本保持不变),当天市场价为每斤30元,据市场行情推测,此后该海鲜的市场价每天每斤可上涨1元,但是平均每天有10斤海鲜死去,假设死去的海鲜均于当天以每斤20元的价格全部售出. (2) 如果放养x天后将活着的海鲜一次性出售，加上已经售出的死去的海鲜，销售总额为y₁，写出y₁关于x的函数表达式；",
+          "answer": "y₁ = 100000 - 200x",
+          "answerSource": "recognized",
+          "answerRisk": null,
+          "students": [
+            {
+              "name": "程思豪",
+              "wrongTimes": 1,
+              "studentAnswer": null,
+              "errorType": "公式记忆错误"
+            }
+          ]
+        },
+        {
+          "questionNumber": 2,
+          "difficulty": 3,
+          "diffValues": [
+            3
+          ],
+          "questionType": "fill",
+          "studentCount": 1,
+          "rawCount": 1,
+          "content": "观察下列函数：① y=2x²−7x；② y=1/x²+1；③ y=(x+1)(x−1)−(x+2)²；④ y=(x+3)²−9；⑤ y=(k²+1)x²+kx+3（k 为常数）。其中，是二次函数的为 ___ （填序号）。",
+          "answer": "①,④,⑤",
+          "answerSource": "recognized",
+          "answerRisk": null,
+          "students": [
+            {
+              "name": "胡传政",
+              "wrongTimes": 1,
+              "studentAnswer": null,
+              "errorType": "审题错误"
+            }
+          ]
+        },
+        {
+          "questionNumber": 3,
+          "difficulty": 3,
+          "diffValues": [
+            3
+          ],
+          "questionType": "fill",
+          "studentCount": 1,
+          "rawCount": 1,
+          "content": "(1) 将抛物线 y=-1/3x² 平移，使它的顶点移到点(0,3)的位置，求平移后所得的抛物线表达式；",
+          "answer": "y = -1/3x² + 3",
+          "answerSource": "recognized",
+          "answerRisk": null,
+          "students": [
+            {
+              "name": "陈施君",
+              "wrongTimes": 1,
+              "studentAnswer": null,
+              "errorType": "计算错误"
+            }
+          ]
+        },
+        {
+          "questionNumber": 3,
+          "difficulty": 3,
+          "diffValues": [
+            3
+          ],
+          "questionType": "fill",
+          "studentCount": 1,
+          "rawCount": 1,
+          "content": "(2) 将抛物线 y=-1/3x² 平移，使它的顶点移到点(0,-3)的位置，求平移后所得的抛物线表达式。",
+          "answer": "y = -1/3x² - 3",
+          "answerSource": "recognized",
+          "answerRisk": null,
+          "students": [
+            {
+              "name": "陈施君",
+              "wrongTimes": 1,
+              "studentAnswer": null,
+              "errorType": "计算错误"
+            }
+          ]
+        },
+        {
+          "questionNumber": 3,
+          "difficulty": 3,
+          "diffValues": [
+            3
+          ],
+          "questionType": "answer",
+          "studentCount": 1,
+          "rawCount": 1,
+          "content": "(1) 将抛物线 y=-1/3 x² 移，使它的顶点移到点(3,0)的位置，求平移后所得的抛物线表达式；",
+          "answer": "y=-1/3(x-3)²",
+          "answerSource": "recognized",
+          "answerRisk": null,
+          "students": [
+            {
+              "name": "陈施君",
+              "wrongTimes": 1,
+              "studentAnswer": null,
+              "errorType": "计算错误"
+            }
+          ]
+        },
+        {
+          "questionNumber": 4,
+          "difficulty": 3,
+          "diffValues": [
+            3
+          ],
+          "questionType": "answer",
+          "studentCount": 1,
+          "rawCount": 1,
+          "content": "已知抛物线 y=ax² 经过点 A(-2,-8).\n(1)求此抛物线的函数表达式；\n(2)写出这个二次函数图像的顶点坐标、对称轴、开口方向和图像的位置；\n(3)判断点 B(-1,-4)是否在此抛物线上.",
+          "answer": "y = -2x², (0,0), x=0, 向下, 顶点在原点，开口向下, 不在",
+          "answerSource": "recognized",
+          "answerRisk": null,
+          "students": [
+            {
+              "name": "程思豪",
+              "wrongTimes": 1,
+              "studentAnswer": null,
+              "errorType": "计算错误"
+            }
+          ]
+        },
+        {
+          "questionNumber": 4,
+          "difficulty": 3,
+          "diffValues": [
+            3
+          ],
+          "questionType": "fill",
+          "studentCount": 1,
+          "rawCount": 1,
+          "content": "已知点 A(1, y₁)、B(x₂, y₂) 都在抛物线 y = (x + 2)² 上. 已知点 A(1, y₁)、B(x₂, y₂) 都在抛物线 y = (x + 2)² 上。（1）如果 x₂ > 1，那么 y₁ ___ y₂；（填“>”、“=”或“<”）",
+          "answer": ">",
+          "answerSource": "recognized",
+          "answerRisk": null,
+          "students": [
+            {
+              "name": "陈施君",
+              "wrongTimes": 1,
+              "studentAnswer": null,
+              "errorType": "概念不理解"
+            }
+          ]
+        },
+        {
+          "questionNumber": 4,
+          "difficulty": 3,
+          "diffValues": [
+            3
+          ],
+          "questionType": "fill",
+          "studentCount": 1,
+          "rawCount": 1,
+          "content": "已知点 A(x₁,y₁)、B(x₂,y₂)都在抛物线 y=-2x²+c 上，其中 c 为常数。 (2) 如果 x₁+x₂=0，那么 y₁ ___ y₂。（填“>”、“=”或“<”）",
+          "answer": "“=”",
+          "answerSource": "recognized",
+          "answerRisk": null,
+          "students": [
+            {
+              "name": "周俊辰",
+              "wrongTimes": 1,
+              "studentAnswer": null,
+              "errorType": "粗心"
+            }
+          ]
+        },
+        {
+          "questionNumber": 5,
+          "difficulty": 3,
+          "diffValues": [
+            3
+          ],
+          "questionType": "choice",
+          "studentCount": 1,
+          "rawCount": 1,
+          "content": "已知 a≠0,在同一平面直角坐标系中,函数 y=ax 与 y=ax² 的图像有可能是",
+          "answer": "C",
+          "answerSource": "recognized",
+          "answerRisk": "AI 视觉推理不擅长，建议核对参考答案",
+          "students": [
+            {
+              "name": "程思豪",
+              "wrongTimes": 1,
+              "studentAnswer": null,
+              "errorType": "概念不理解"
+            }
+          ]
+        },
+        {
+          "questionNumber": 5,
+          "difficulty": 3,
+          "diffValues": [
+            3
+          ],
+          "questionType": "answer",
+          "studentCount": 1,
+          "rawCount": 1,
+          "content": "已知抛物线 y=1/2(x+m)²(m 为常数，且 m<0)经过点 A(2,2). 已知抛物线 y = ½(x + m)²（m 为常数，且 m < 0）经过点 A(2, 2)。（1）求该抛物线的表达式，并写出对称轴和顶点坐标；",
+          "answer": "y = ½(x - 2)², x = -2, (-2, 0)",
+          "answerSource": "recognized",
+          "answerRisk": "AI 参考答案错误：(2+m)²=4 应得 m=0 或 m=-4，AI 只取 m=-2；表达式/对称轴/顶点全部错误",
+          "students": [
+            {
+              "name": "陈施君",
+              "wrongTimes": 1,
+              "studentAnswer": null,
+              "errorType": "计算错误"
+            }
+          ]
+        },
+        {
+          "questionNumber": 5,
+          "difficulty": 3,
+          "diffValues": [
+            3
+          ],
+          "questionType": "answer",
+          "studentCount": 1,
+          "rawCount": 1,
+          "content": "某印刷厂一月份印书50万册，设该厂从二月份起，每月印书量的增长率都为x，三月份的印书量为y万册，写出y关于x的函数表达式。",
+          "answer": "y = 50(1 + x)^2",
+          "answerSource": "recognized",
+          "answerRisk": null,
+          "students": [
+            {
+              "name": "陈施君",
+              "wrongTimes": 1,
+              "studentAnswer": null,
+              "errorType": "计算错误"
+            }
+          ]
+        },
+        {
+          "questionNumber": 6,
+          "difficulty": 4,
+          "diffValues": [
+            4
+          ],
+          "questionType": "answer",
+          "studentCount": 3,
+          "rawCount": 3,
+          "content": "如图，已知在正方形ABCD中，AB=4，点E在边BC上（与点B和点C均不重合），点F在边CD上，AE=AF。求△AEF的面积y关于EC的长x的函数表达式及自变量x的取值范围。",
+          "answer": "y = 8x - 16",
+          "answerSource": "recognized",
+          "answerRisk": null,
+          "students": [
+            {
+              "name": "陈施君",
+              "wrongTimes": 1,
+              "studentAnswer": null,
+              "errorType": "计算错误"
+            },
+            {
+              "name": "胡传政",
+              "wrongTimes": 1,
+              "studentAnswer": null,
+              "errorType": "公式记忆错误"
+            },
+            {
+              "name": "周俊辰",
+              "wrongTimes": 1,
+              "studentAnswer": null,
+              "errorType": "计算错误"
+            }
+          ]
+        },
+        {
+          "questionNumber": 4,
+          "difficulty": 4,
+          "diffValues": [
+            4
+          ],
+          "questionType": "answer",
+          "studentCount": 2,
+          "rawCount": 2,
+          "content": "已知函数 y=(m²+m)x^(m²−2m+2)+1，其中 m 为常数。\n(1) 当 m 取何值时，y 是 x 的一次函数？\n(2) 当 m 取何值时，y 是 x 的二次函数？",
+          "answer": "1",
+          "answerSource": "recognized",
+          "answerRisk": null,
+          "students": [
+            {
+              "name": "陈施君",
+              "wrongTimes": 1,
+              "studentAnswer": null,
+              "errorType": "计算错误"
+            },
+            {
+              "name": "胡传政",
+              "wrongTimes": 1,
+              "studentAnswer": null,
+              "errorType": "概念不理解"
+            }
+          ]
+        },
+        {
+          "questionNumber": 4,
+          "difficulty": 4,
+          "diffValues": [
+            4
+          ],
+          "questionType": "answer",
+          "studentCount": 2,
+          "rawCount": 2,
+          "content": "已知函数 y=(m²+m)x^(m²-2m+2)+1，其中 m 为常数。\n(1) 当 m 取何值时，y 是 x 的一次函数？\n(2) 当 m 取何值时，y 是 x 的二次函数？",
+          "answer": "1,2",
+          "answerSource": "recognized",
+          "answerRisk": null,
+          "students": [
+            {
+              "name": "程思豪",
+              "wrongTimes": 1,
+              "studentAnswer": null,
+              "errorType": "概念不理解"
+            },
+            {
+              "name": "周俊辰",
+              "wrongTimes": 1,
+              "studentAnswer": null,
+              "errorType": "计算错误"
+            }
+          ]
+        },
+        {
+          "questionNumber": 4,
+          "difficulty": 4,
+          "diffValues": [
+            4
+          ],
+          "questionType": "fill",
+          "studentCount": 1,
+          "rawCount": 1,
+          "content": "已知点 A(1, y₁)、B(x₂, y₂) 都在抛物线 y = (x + 2)² 上。\n(1) 如果 x₂ > 1，那么 y₁ ___ y₂；（填“>”、“=”或“<”）\n(2) 如果点 A 与点 B 关于抛物线的对称轴对称，那么点 B 的坐标是 ___。",
+          "answer": "<, (-5, 9)",
+          "answerSource": "recognized",
+          "answerRisk": null,
+          "students": [
+            {
+              "name": "周俊辰",
+              "wrongTimes": 1,
+              "studentAnswer": null,
+              "errorType": "计算错误"
+            }
+          ]
+        },
+        {
+          "questionNumber": 5,
+          "difficulty": 4,
+          "diffValues": [
+            4
+          ],
+          "questionType": "answer",
+          "studentCount": 1,
+          "rawCount": 1,
+          "content": "已知抛物线 y = ½(x + m)² (m 为常数，且 m < 0) 经过点 A(2, 2)。\n(1) 求该抛物线的表达式，并写出对称轴和顶点坐标；\n(2) 说明该抛物线是如何由抛物线 y = ½x² 平移得到的。",
+          "answer": "y = ½(x - 2)², x = -2, (-2, 0)",
+          "answerSource": "recognized",
+          "answerRisk": "AI 参考答案错误：同 #2，m=-2 应是 m=-4",
+          "students": [
+            {
+              "name": "周俊辰",
+              "wrongTimes": 1,
+              "studentAnswer": null,
+              "errorType": "计算错误"
+            }
+          ]
+        },
+        {
+          "questionNumber": 6,
+          "difficulty": 4,
+          "diffValues": [
+            4
+          ],
+          "questionType": "choice",
+          "studentCount": 1,
+          "rawCount": 1,
+          "content": "已知 -1 < a < 0, 点 (a-2, y₁)、(a, y₂)、(a+2, y₃) 都在函数 y=3x² 的图像上, 则 y₁、y₂、y₃ 的大小关系是",
+          "answer": "B",
+          "answerSource": "recognized",
+          "answerRisk": null,
+          "students": [
+            {
+              "name": "程思豪",
+              "wrongTimes": 1,
+              "studentAnswer": null,
+              "errorType": "概念不理解"
+            }
+          ]
+        },
+        {
+          "questionNumber": 7,
+          "difficulty": 4,
+          "diffValues": [
+            4
+          ],
+          "questionType": "fill",
+          "studentCount": 1,
+          "rawCount": 1,
+          "content": "在一块等腰直角三角形铁皮上截一块矩形铁皮。如图，已有的铁皮是等腰直角三角形ABC，它的底边AB长20厘米。要截得的矩形DEMN的边MN在AB上，顶点D、E分别在边AC、BC上。设DE的长为x厘米，矩形DEMN的面积为y平方厘米，那么y关于x的函数表达式是。",
+          "answer": "y = 100 - 20x",
+          "answerSource": "recognized",
+          "answerRisk": "AI 视觉推理不擅长，建议核对参考答案",
+          "students": [
+            {
+              "name": "程思豪",
+              "wrongTimes": 1,
+              "studentAnswer": null,
+              "errorType": "公式记忆错误"
+            }
+          ]
+        },
+        {
+          "questionNumber": 8,
+          "difficulty": 4,
+          "diffValues": [
+            4
+          ],
+          "questionType": "fill",
+          "studentCount": 1,
+          "rawCount": 1,
+          "content": "如图，Rt△OAB的顶点A(-2,4)在抛物线y=ax²上，将Rt△OAB绕点O顺时针旋转90°得到△OCD，边CD与该抛物线交于点P，则点P的坐标为",
+          "answer": "(-2, -8)",
+          "answerSource": "recognized",
+          "answerRisk": "AI 视觉推理不擅长，建议核对参考答案",
+          "students": [
+            {
+              "name": "程思豪",
+              "wrongTimes": 1,
+              "studentAnswer": null,
+              "errorType": "计算错误"
+            }
+          ]
+        }
+      ]
+    }
+  ]
+}

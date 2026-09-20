@@ -1,0 +1,265 @@
+{
+  "generatedAt": "2026-09-17T05:14:02.255Z",
+  "grade": "初三",
+  "subject": null,
+  "period": {
+    "start": "2026-09-14",
+    "end": "2026-09-17"
+  },
+  "students": [
+    "丁嘉炜",
+    "周俊辰",
+    "张诗蕊",
+    "李哲瀚",
+    "王艺博",
+    "程思豪",
+    "胡传政",
+    "陈施君"
+  ],
+  "totals": {
+    "rawRows": 10,
+    "topics": 10,
+    "days": 2,
+    "sections": 2
+  },
+  "days": [
+    {
+      "day": "2026-09-16",
+      "dayFrom": "2026-09-16",
+      "mergedDays": [],
+      "rawRows": 1,
+      "totalTopics": 1,
+      "topics": [
+        {
+          "questionNumber": 9,
+          "difficulty": 3,
+          "diffValues": [
+            3
+          ],
+          "questionType": "fill",
+          "studentCount": 1,
+          "rawCount": 1,
+          "content": "已知在△ABC中，三边长a=2,b=4,c=3,h_a、h_b、h_c分别为边a、b、c上的高，那么h_a:h_b:h_c=____.",
+          "answer": "6:3:4",
+          "answerSource": "recognized",
+          "answerRisk": null,
+          "students": [
+            {
+              "name": "张诗蕊",
+              "wrongTimes": 1,
+              "studentAnswer": null,
+              "errorType": "概念不理解"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "day": "2026-09-15",
+      "dayFrom": "2026-09-15",
+      "mergedDays": [],
+      "rawRows": 9,
+      "totalTopics": 9,
+      "topics": [
+        {
+          "questionNumber": 10,
+          "difficulty": 2,
+          "diffValues": [
+            2
+          ],
+          "questionType": "answer",
+          "studentCount": 1,
+          "rawCount": 1,
+          "content": "如图，抛物线 y=2(x-2)² 与平行于 x 轴的直线交于点 A、B，抛物线顶点为 C，△ABC 为等边三角形，求： (2)点B的坐标;",
+          "answer": "如图，过点 C 作 CD⊥AB，垂足为 D。设 AD 为 a(a>0)。∵△ABC 为等边三角形，CD⊥AB，∴AD=DB=a，∠ACD=30°，∴CD=√3a。∴点 B 的坐标为 (2+a, √3a)，∴√3a=2(2+a-2)²，∴a=√3/2，∴B((4+√3)/2, 3/2)。",
+          "answerSource": "worksheet",
+          "answerRisk": null,
+          "students": [
+            {
+              "name": "李哲瀚",
+              "wrongTimes": 1,
+              "studentAnswer": null,
+              "errorType": "步骤遗漏"
+            }
+          ]
+        },
+        {
+          "questionNumber": 4,
+          "difficulty": 2,
+          "diffValues": [
+            2
+          ],
+          "questionType": "answer",
+          "studentCount": 1,
+          "rawCount": 1,
+          "content": "Ⅱ已知二次函数y=x²-2x-3. (3)结合函数图像,直接写出当-4≤y≤0时,x的取值范围.",
+          "answer": "解：(1)当 y=0 时，x²-2x-3=0，解得 x₁=-1，x₂=3，∴抛物线与 x 轴的交点坐标为 (-1,0)、(3,0)。",
+          "answerSource": "worksheet",
+          "answerRisk": null,
+          "students": [
+            {
+              "name": "陈施君",
+              "wrongTimes": 1,
+              "studentAnswer": null,
+              "errorType": "步骤遗漏"
+            }
+          ]
+        },
+        {
+          "questionNumber": 11,
+          "difficulty": 3,
+          "diffValues": [
+            3
+          ],
+          "questionType": "answer",
+          "studentCount": 1,
+          "rawCount": 1,
+          "content": "在平面直角坐标系 xOy 中，将直线 l: y=-3/4x-3 沿 x 轴翻折，得到一条新直线与 x 轴交于点 A，与 y 轴交于点 B，将抛物线 C₁: y=1/3x² 沿 x 轴平移，得到一条新抛物线 C₂ 与 y 轴交于点 D，与直线 AB 交于点 E、F，连接 DF，满足 DF//x 轴. 求： (2)抛物线C₂的表达式.",
+          "answer": "设平移后抛物线 C₂ 的顶点为 P(n,0)，则抛物线 C₂ 的表达式为 y=1/3(x-n)²，∴D(0, 1/3n²)。∵DF//x 轴，∴点 F(2n, 1/3n²)。又点 F 在直线 AB 上，∴1/3n²=3/4×2n+3，解得 n₁=6, n₂=-3/2。∴抛物线 C₂ 的表达式为 y=1/3(x-6)² 或 y=1/3(x+3/2)²。",
+          "answerSource": "worksheet",
+          "answerRisk": null,
+          "students": [
+            {
+              "name": "李哲瀚",
+              "wrongTimes": 1,
+              "studentAnswer": null,
+              "errorType": "步骤遗漏"
+            }
+          ]
+        },
+        {
+          "questionNumber": 3,
+          "difficulty": 3,
+          "diffValues": [
+            3
+          ],
+          "questionType": "answer",
+          "studentCount": 1,
+          "rawCount": 1,
+          "content": "3.如图,已知关于x的二次函数 y=-1/2x²+bx+c 的图像如图所示,则这个二次函数的表达式为",
+          "answer": "y=-1/2x²+2x+5/2",
+          "answerSource": "worksheet",
+          "answerRisk": null,
+          "students": [
+            {
+              "name": "程思豪",
+              "wrongTimes": 1,
+              "studentAnswer": null,
+              "errorType": "计算错误"
+            }
+          ]
+        },
+        {
+          "questionNumber": 4,
+          "difficulty": 3,
+          "diffValues": [
+            3
+          ],
+          "questionType": "answer",
+          "studentCount": 1,
+          "rawCount": 1,
+          "content": "如图, 已知抛物线 y=(x-2)² 的顶点为 C, 直线 y=2x+4 与抛物线交于 A、B 两点, 求 △ABC 的面积.",
+          "answer": "解：易知抛物线 y=(x-2)² 的顶点 C 的坐标为 (2,0)。联立两函数的表达式，得 {y=2x+4, y=(x-2)²}，解得 {x₁=0, y₁=4}, {x₂=6, y₂=16}。∴A(6,16), B(0,4)。过点 A 作 AD⊥x 轴，垂足为 D，则 S△ABC = S梯形ABOD - S△AOC - S△ACD = 1/2(OB+AD)·OD - 1/2OC·OB - 1/2CD·AD = 1/2×(4+16)×6 - 1/2×2×4 - 1/2×4×16 = 24。",
+          "answerSource": "worksheet",
+          "answerRisk": null,
+          "students": [
+            {
+              "name": "李哲瀚",
+              "wrongTimes": 1,
+              "studentAnswer": null,
+              "errorType": "步骤遗漏"
+            }
+          ]
+        },
+        {
+          "questionNumber": 11,
+          "difficulty": 4,
+          "diffValues": [
+            4
+          ],
+          "questionType": "answer",
+          "studentCount": 1,
+          "rawCount": 1,
+          "content": "11.已知二次函数 y=ax²+bx+c(a≠0)的图像过点 A(1,0),点 B(-3,0)和点 C. (3)若 z=-ax-3a 且 a<0,求证: y-z+9/4a≤0.",
+          "answer": "(1)解：设二次函数的表达式为 y=a(x-1)(x+3)，把 C(0,-3)代入，得 -3=a×(0-1)×(0+3)，解得 a=1，∴二次函数的表达式为 y=(x-1)(x+3)，即 y=x²+2x-3。\n2)解：抛物线表达式为 y=a(x-1)(x+3)，即 y=ax²+2ax-3a，抛物线的对称轴为直线 x=-2a/2a=-1。当 x=-1 时，y 有最值 -4a。当 a>0 时，x=-3，m=0；x=-1，n=-4a，∵m-n=8，∴0+4a=8，解得 a=2；当 a<0 时，x=-1，m=-4a；x=-3，n=0，∵m-n=8，∴-4a-0=8，解得 a=-2，综上所述，a 的值为 2 或 -2。\n3)证明：∵y=ax²+2ax-3a，x=-ax-3a，∴y-x+9/4a=ax²+2ax-3a-(-ax-3a)+9/4a=ax²+3ax+9/4a=a(x+3/2)²。∵a<0，(x+3/2)²≥0，∴a(x+3/2)²≤0，即 y-x+9/4a≤0。",
+          "answerSource": "worksheet",
+          "answerRisk": null,
+          "students": [
+            {
+              "name": "陈施君",
+              "wrongTimes": 1,
+              "studentAnswer": null,
+              "errorType": "步骤遗漏"
+            }
+          ]
+        },
+        {
+          "questionNumber": 11,
+          "difficulty": 4,
+          "diffValues": [
+            4
+          ],
+          "questionType": "answer",
+          "studentCount": 1,
+          "rawCount": 1,
+          "content": "11.已知二次函数 y=ax²+bx+c(a≠0)的图像过点 A(1,0),点 B(-3,0)和点 C. (2)当 -3≤x≤0 时,二次函数的最大值为 m,最小值为 n,若 m-n=8,求 a 的值;",
+          "answer": "(1)解：设二次函数的表达式为 y=a(x-1)(x+3)，把 C(0,-3)代入，得 -3=a×(0-1)×(0+3)，解得 a=1，∴二次函数的表达式为 y=(x-1)(x+3)，即 y=x²+2x-3。\n2)解：抛物线表达式为 y=a(x-1)(x+3)，即 y=ax²+2ax-3a，抛物线的对称轴为直线 x=-2a/2a=-1。当 x=-1 时，y 有最值 -4a。当 a>0 时，x=-3，m=0；x=-1，n=-4a，∵m-n=8，∴0+4a=8，解得 a=2；当 a<0 时，x=-1，m=-4a；x=-3，n=0，∵m-n=8，∴-4a-0=8，解得 a=-2，综上所述，a 的值为 2 或 -2。\n3)证明：∵y=ax²+2ax-3a，x=-ax-3a，∴y-x+9/4a=ax²+2ax-3a-(-ax-3a)+9/4a=ax²+3ax+9/4a=a(x+3/2)²。∵a<0，(x+3/2)²≥0，∴a(x+3/2)²≤0，即 y-x+9/4a≤0。",
+          "answerSource": "worksheet",
+          "answerRisk": null,
+          "students": [
+            {
+              "name": "陈施君",
+              "wrongTimes": 1,
+              "studentAnswer": null,
+              "errorType": "步骤遗漏"
+            }
+          ]
+        },
+        {
+          "questionNumber": 12,
+          "difficulty": 4,
+          "diffValues": [
+            4
+          ],
+          "questionType": "answer",
+          "studentCount": 1,
+          "rawCount": 1,
+          "content": "已知直线x=c交抛物线y₁=-(x-a)²于点A(c,m),交抛物线y₂=-(x-b)²于点B(c,n),下列结论:①若a>b>c,则m<n;②若b>a>c,则m<n;③若c>b>a,则m<n;④若a>c>b,则m<n.其中正确的结论有",
+          "answer": "B 解析：∵抛物线 y₁=-(x-a)² 经过点 A(c,m)，∴m=-(c-a)²，同理可得 n=-(c-b)²，∴m-n=-(c-a)²+(c-b)²=(a-b)(2c-a-b)。",
+          "answerSource": "worksheet",
+          "answerRisk": null,
+          "students": [
+            {
+              "name": "李哲瀚",
+              "wrongTimes": 1,
+              "studentAnswer": null,
+              "errorType": "步骤遗漏"
+            }
+          ]
+        },
+        {
+          "questionNumber": 7,
+          "difficulty": 4,
+          "diffValues": [
+            4
+          ],
+          "questionType": "answer",
+          "studentCount": 1,
+          "rawCount": 1,
+          "content": "如图，已知平行四边形ABCD顶点A的坐标为(2,6)，点B在y轴上，且AD//BC//x轴，过B、C、D三点的抛物线的顶点坐标为(2,2)，则抛物线的表达式是y=______.",
+          "answer": "1/4(x-2)²+2 解析：∵过B,C,D三点的抛物线的顶点坐标为(2,2),AD//BC//x轴，∴BC=4。∵四边形ABCD是平行四边形，∴AD=BC=4。∵点A的坐标为(2,6)，∴D(6,6)。设抛物线为y=a(x-2)²+2，代入点D的坐标，得6=16a+2，解得a=1/4，∴抛物线的表达式为y=1/4(x-2)²+2。",
+          "answerSource": "worksheet",
+          "answerRisk": null,
+          "students": [
+            {
+              "name": "张诗蕊",
+              "wrongTimes": 1,
+              "studentAnswer": null,
+              "errorType": "步骤遗漏"
+            }
+          ]
+        }
+      ]
+    }
+  ]
+}

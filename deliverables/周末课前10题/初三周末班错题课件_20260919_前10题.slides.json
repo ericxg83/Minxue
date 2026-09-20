@@ -1,0 +1,526 @@
+{
+  "generatedAt": "2026-09-19T06:07:17.186Z",
+  "grade": "初三",
+  "subject": null,
+  "title": "初三 周末班错题课件",
+  "period": {
+    "start": "2026-08-31",
+    "end": "2026-09-20"
+  },
+  "withAnswer": true,
+  "scope": {
+    "days": 20,
+    "from": null,
+    "to": null,
+    "limit": 10,
+    "maxPerDay": null,
+    "mergeThin": null,
+    "students": null
+  },
+  "stats": {
+    "rawRows": 25,
+    "topics": 10,
+    "questionSlides": 10,
+    "days": 13,
+    "sections": 1,
+    "students": 8,
+    "studentNames": [
+      "张诗蕊",
+      "王艺博",
+      "陈施君",
+      "周俊辰",
+      "李哲瀚",
+      "丁嘉炜",
+      "程思豪",
+      "胡传政"
+    ],
+    "limitDropped": 162
+  },
+  "overview": [
+    {
+      "label": "2026-09-18",
+      "topics": 10,
+      "students": 2,
+      "basic": 0,
+      "medium": 10,
+      "hard": 0,
+      "unknown": 0
+    }
+  ],
+  "slides": [
+    {
+      "kind": "section",
+      "label": "2026-09-18",
+      "day": "2026-09-18",
+      "dayFrom": "2026-09-18",
+      "mergedDays": [],
+      "topicCount": 10,
+      "studentCount": 2,
+      "students": [
+        "王艺博",
+        "张诗蕊"
+      ],
+      "tiers": {
+        "basic": 0,
+        "medium": 10,
+        "hard": 0,
+        "unknown": 0
+      }
+    },
+    {
+      "kind": "question",
+      "index": 1,
+      "sectionLabel": "2026-09-18",
+      "day": "2026-09-18",
+      "dayLabel": "2026-09-18",
+      "tier": "medium",
+      "tierLabel": "中等",
+      "questionNumber": 11,
+      "questionType": "answer",
+      "typeLabel": "解答题",
+      "difficulty": 3,
+      "diffValues": [
+        3
+      ],
+      "diffInconsistent": false,
+      "studentCount": 1,
+      "students": [
+        {
+          "name": "张诗蕊",
+          "wrongTimes": 1,
+          "answer": null,
+          "errorType": "未作答",
+          "errorReason": null,
+          "blank": true,
+          "docImage": null,
+          "docPage": 2
+        }
+      ],
+      "parentStem": "",
+      "stem": "求证：AD²=AC·BE。",
+      "stemIsFallback": false,
+      "subNo": null,
+      "subParts": [],
+      "missingSubs": [],
+      "options": [],
+      "figure": "https://minxue-app-oss.oss-cn-shanghai.aliyuncs.com/images/bf235b85-e5d4-4f50-9e42-af8330df9451/20260918/afc4230d-c45d-4b7a-b28a-79aa2a308e7d.png",
+      "wbImage": null,
+      "answer": "36°",
+      "hasAnswer": true,
+      "answerSource": "blank",
+      "answerSourceLabel": "学生未作答",
+      "answerRisk": null,
+      "analysis": "题目只给出了图形条件（菱形ABCD，∠D=36°，延长AC到E使EC=BC，连接BE），但没有给出具体要计算的问题（例如求∠E、∠ABE、∠CBE等）。由于缺少明确的求解目标，无法唯一确定答案。若常见问法为求∠E：菱形中∠D=36°，则∠BCD=180°-36°=144°，∠ACB=∠ACD=72°，故∠BCE=180°-72°=108°。又EC=BC，△BCE为等腰三角形，∠E=∠CBE=(180°-108°)/2=36°。最终答案：36°。"
+    },
+    {
+      "kind": "question",
+      "index": 2,
+      "sectionLabel": "2026-09-18",
+      "day": "2026-09-18",
+      "dayLabel": "2026-09-18",
+      "tier": "medium",
+      "tierLabel": "中等",
+      "questionNumber": 12,
+      "questionType": "fill",
+      "typeLabel": "填空题",
+      "difficulty": 3,
+      "diffValues": [
+        3
+      ],
+      "diffInconsistent": false,
+      "studentCount": 1,
+      "students": [
+        {
+          "name": "张诗蕊",
+          "wrongTimes": 1,
+          "answer": null,
+          "errorType": "不会分析",
+          "errorReason": "学生未意识到条件不足，错误假设AB可求并算出2√6，缺乏对几何存在性的分析",
+          "blank": false,
+          "docImage": null,
+          "docPage": 3
+        }
+      ],
+      "parentStem": "",
+      "stem": "求证：PM=QM。",
+      "stemIsFallback": false,
+      "subNo": null,
+      "subParts": [],
+      "missingSubs": [],
+      "options": [],
+      "figure": "https://minxue-app-oss.oss-cn-shanghai.aliyuncs.com/images/bf235b85-e5d4-4f50-9e42-af8330df9451/20260918/aedffcb2-580a-47ad-bb6a-faa84af0b3a2.png",
+      "wbImage": null,
+      "answer": "无法唯一确定，填“待人工补充",
+      "hasAnswer": true,
+      "answerSource": "recognized",
+      "answerSourceLabel": "卷面识别",
+      "answerRisk": "AI 视觉推理不擅长，建议核对参考答案",
+      "analysis": "题目信息不完整：缺少图(3)及点P、M、N、Q、R的具体定义与运动方式，无法唯一确定AB的长。已知BC=10、△PMN周长最小值为12，但缺少这些点与AB、BC的几何关系，无法建立方程求解。因此最终答案无法唯一确定，填“待人工补充”。"
+    },
+    {
+      "kind": "question",
+      "index": 3,
+      "sectionLabel": "2026-09-18",
+      "day": "2026-09-18",
+      "dayLabel": "2026-09-18",
+      "tier": "medium",
+      "tierLabel": "中等",
+      "questionNumber": 13,
+      "questionType": "fill",
+      "typeLabel": "填空题",
+      "difficulty": 3,
+      "diffValues": [
+        3
+      ],
+      "diffInconsistent": false,
+      "studentCount": 1,
+      "students": [
+        {
+          "name": "张诗蕊",
+          "wrongTimes": 1,
+          "answer": null,
+          "errorType": "计算错误",
+          "errorReason": "代入x值计算y值时出错，导致y₂与y₃大小关系判断错误。",
+          "blank": false,
+          "docImage": null,
+          "docPage": 2
+        }
+      ],
+      "parentStem": "",
+      "stem": "若A(-4,y₁)、B(2,y₂)、C(1,y₃)为二次函数y=x²+k的图像上的三点，则y₁、y₂、y₃的大小关系是______（用\"<\"连接）。",
+      "stemIsFallback": false,
+      "subNo": null,
+      "subParts": [],
+      "missingSubs": [],
+      "options": [],
+      "figure": null,
+      "wbImage": null,
+      "answer": "y₃<y₂<y₁",
+      "hasAnswer": true,
+      "answerSource": "recognized",
+      "answerSourceLabel": "卷面识别",
+      "answerRisk": null,
+      "analysis": "二次函数为 y=x²+k，开口向上，对称轴为 x=0。对于开口向上的抛物线，离对称轴越远，函数值越大。比较三点横坐标到对称轴的距离：A(-4,y₁) 距离为 |-4|=4；B(2,y₂) 距离为 |2|=2；C(1,y₃) 距离为 |1|=1。因为 1<2<4，所以 y₃<y₂<y₁。最终答案：y₃<y₂<y₁。"
+    },
+    {
+      "kind": "question",
+      "index": 4,
+      "sectionLabel": "2026-09-18",
+      "day": "2026-09-18",
+      "dayLabel": "2026-09-18",
+      "tier": "medium",
+      "tierLabel": "中等",
+      "questionNumber": 2,
+      "questionType": "choice",
+      "typeLabel": "选择题",
+      "difficulty": 3,
+      "diffValues": [
+        3
+      ],
+      "diffInconsistent": false,
+      "studentCount": 1,
+      "students": [
+        {
+          "name": "张诗蕊",
+          "wrongTimes": 1,
+          "answer": null,
+          "errorType": "概念不理解",
+          "errorReason": "未掌握顶点式二次函数的顶点、对称轴及开口方向等性质。",
+          "blank": false,
+          "docImage": null,
+          "docPage": 1
+        }
+      ],
+      "parentStem": "",
+      "stem": "对于二次函数y=-2(x-3)²+1，下列说法中正确的是",
+      "stemIsFallback": false,
+      "subNo": null,
+      "subParts": [],
+      "missingSubs": [],
+      "options": [
+        "图象的开口向上",
+        "函数的最小值为1",
+        "当x<3时，y随x的增大而减小",
+        "图象的对称轴为直线x=3"
+      ],
+      "figure": null,
+      "wbImage": null,
+      "answer": "D",
+      "hasAnswer": true,
+      "answerSource": "recognized",
+      "answerSourceLabel": "卷面识别",
+      "answerRisk": null,
+      "analysis": "二次函数 y = -2(x-3)² + 1 是顶点式，顶点为 (3, 1)，开口方向由二次项系数决定。因为二次项系数为 -2 < 0，所以图象开口向下，A 错误。开口向下时函数有最大值，最大值为顶点的纵坐标 1，而不是最小值，B 错误。开口向下时，在对称轴左侧（x < 3）函数值随 x 增大而增大，在对称轴右侧（x > 3）随 x 增大而减小，所以 C 错误。对称轴为直线 x = 3，D 正确。综上，正确答案为 D。"
+    },
+    {
+      "kind": "question",
+      "index": 5,
+      "sectionLabel": "2026-09-18",
+      "day": "2026-09-18",
+      "dayLabel": "2026-09-18",
+      "tier": "medium",
+      "tierLabel": "中等",
+      "questionNumber": 5,
+      "questionType": "fill",
+      "typeLabel": "填空题",
+      "difficulty": 3,
+      "diffValues": [
+        3
+      ],
+      "diffInconsistent": false,
+      "studentCount": 1,
+      "students": [
+        {
+          "name": "王艺博",
+          "wrongTimes": 1,
+          "answer": null,
+          "errorType": "审题错误",
+          "errorReason": "只写出了最明显的相似三角形，未找出所有符合条件的三角形",
+          "blank": false,
+          "docImage": null,
+          "docPage": 1
+        }
+      ],
+      "parentStem": "",
+      "stem": "如图，已知BD和CE是△ABC的高，BD与CE相交于点O，那么图中与△ABD相似的三角形是______。",
+      "stemIsFallback": false,
+      "subNo": null,
+      "subParts": [],
+      "missingSubs": [],
+      "options": [],
+      "figure": "https://minxue-app-oss.oss-cn-shanghai.aliyuncs.com/images/ee200770-3631-40b9-a60e-e4e275ac8495/20260918/32a90e09-ece8-412b-a674-a69e95816fd2.png",
+      "wbImage": null,
+      "answer": "△ACE、△BEO、△CDO",
+      "hasAnswer": true,
+      "answerSource": "recognized",
+      "answerSourceLabel": "卷面识别",
+      "answerRisk": "AI 视觉推理不擅长，建议核对参考答案",
+      "analysis": "因为BD、CE是△ABC的高，所以∠ADB=∠AEC=90°。在△ABD与△ACE中，∠A为公共角，且∠ADB=∠AEC=90°，故△ABD∽△ACE。又因∠BDC=∠BEC=90°，在△BEO与△CDO中，∠BOE=∠COD（对顶角），且∠BEO=∠CDO=90°，故△BEO∽△CDO。再由△ABD∽△ACE可得对应角相等，结合直角条件可推出△ABD与△BEO、△CDO也相似。综上，图中与△ABD相似的三角形是△ACE、△BEO、△CDO。"
+    },
+    {
+      "kind": "question",
+      "index": 6,
+      "sectionLabel": "2026-09-18",
+      "day": "2026-09-18",
+      "dayLabel": "2026-09-18",
+      "tier": "medium",
+      "tierLabel": "中等",
+      "questionNumber": 5,
+      "questionType": "fill",
+      "typeLabel": "填空题",
+      "difficulty": 3,
+      "diffValues": [
+        3
+      ],
+      "diffInconsistent": false,
+      "studentCount": 1,
+      "students": [
+        {
+          "name": "张诗蕊",
+          "wrongTimes": 1,
+          "answer": null,
+          "errorType": "步骤遗漏",
+          "errorReason": "只找出一个相似三角形，遗漏了△BEO和△CDO",
+          "blank": false,
+          "docImage": null,
+          "docPage": 1
+        }
+      ],
+      "parentStem": "",
+      "stem": "如图，已知BD和CE是△ABC的高，BD与CE相交于点O，那么图中与△ABD相似的三角形是",
+      "stemIsFallback": false,
+      "subNo": null,
+      "subParts": [],
+      "missingSubs": [],
+      "options": [],
+      "figure": "https://minxue-app-oss.oss-cn-shanghai.aliyuncs.com/images/bf235b85-e5d4-4f50-9e42-af8330df9451/20260918/696d7cd2-2b24-4377-a3d4-5a059c93c0b7.png",
+      "wbImage": null,
+      "answer": "△ACE、△BEO、△CDO",
+      "hasAnswer": true,
+      "answerSource": "recognized",
+      "answerSourceLabel": "卷面识别",
+      "answerRisk": "AI 视觉推理不擅长，建议核对参考答案",
+      "analysis": "因为BD、CE是△ABC的高，所以∠ADB=∠AEC=90°。在△ABD与△ACE中，∠A为公共角，且∠ADB=∠AEC=90°，故△ABD∽△ACE。又因∠BDC=∠BEC=90°，在△BEO与△CDO中，∠BOE=∠COD（对顶角），且∠BEO=∠CDO=90°，故△BEO∽△CDO。再由△ABD∽△ACE可得对应角相等，结合直角条件可推出△ABD与△BEO、△CDO也相似。综上，图中与△ABD相似的三角形是△ACE、△BEO、△CDO。"
+    },
+    {
+      "kind": "question",
+      "index": 7,
+      "sectionLabel": "2026-09-18",
+      "day": "2026-09-18",
+      "dayLabel": "2026-09-18",
+      "tier": "medium",
+      "tierLabel": "中等",
+      "questionNumber": 6,
+      "questionType": "fill",
+      "typeLabel": "填空题",
+      "difficulty": 3,
+      "diffValues": [
+        3
+      ],
+      "diffInconsistent": false,
+      "studentCount": 1,
+      "students": [
+        {
+          "name": "张诗蕊",
+          "wrongTimes": 1,
+          "answer": null,
+          "errorType": "概念不理解",
+          "errorReason": "相似三角形判定错误",
+          "blank": false,
+          "docImage": null,
+          "docPage": 1
+        }
+      ],
+      "parentStem": "",
+      "stem": "如图，□ABCD的对角线相交于点O，已知OE∥AB，与△BOE相似的三角形是",
+      "stemIsFallback": false,
+      "subNo": null,
+      "subParts": [],
+      "missingSubs": [],
+      "options": [],
+      "figure": "https://minxue-app-oss.oss-cn-shanghai.aliyuncs.com/images/bf235b85-e5d4-4f50-9e42-af8330df9451/20260918/b6177371-f41f-4086-b0bb-b4acde38edd7.png",
+      "wbImage": null,
+      "answer": "△DOF",
+      "hasAnswer": true,
+      "answerSource": "recognized",
+      "answerSourceLabel": "卷面识别",
+      "answerRisk": "AI 视觉推理不擅长，建议核对参考答案",
+      "analysis": "在平行四边形ABCD中，对角线AC、BD交于点O，则O为对角线中点，OB=OD，OA=OC。已知OE∥AB，设OE与AD交于点F（或OE延长后与AD交于F）。由OE∥AB可得∠BOE=∠ABD（同位角），又∠BOE与∠DOF为对顶角，故∠BOE=∠DOF。同时，因OE∥AB，且O为BD中点，可得△BOE与△DOF对应角相等，从而△BOE∽△DOF。最终答案：△DOF。"
+    },
+    {
+      "kind": "question",
+      "index": 8,
+      "sectionLabel": "2026-09-18",
+      "day": "2026-09-18",
+      "dayLabel": "2026-09-18",
+      "tier": "medium",
+      "tierLabel": "中等",
+      "questionNumber": 7,
+      "questionType": "fill",
+      "typeLabel": "填空题",
+      "difficulty": 3,
+      "diffValues": [
+        3
+      ],
+      "diffInconsistent": false,
+      "studentCount": 1,
+      "students": [
+        {
+          "name": "张诗蕊",
+          "wrongTimes": 1,
+          "answer": null,
+          "errorType": "计算错误",
+          "errorReason": "未正确计算相似三角形对数",
+          "blank": false,
+          "docImage": null,
+          "docPage": 1
+        }
+      ],
+      "parentStem": "",
+      "stem": "如图，已知△ABC和△GAF是两个全等的等腰直角三角形，那么图中相似三角形（不包括全等）共有 对。",
+      "stemIsFallback": false,
+      "subNo": null,
+      "subParts": [],
+      "missingSubs": [],
+      "options": [],
+      "figure": "https://minxue-app-oss.oss-cn-shanghai.aliyuncs.com/images/bf235b85-e5d4-4f50-9e42-af8330df9451/20260918/9e9398ee-6dbc-4b0e-bf8b-acb6220667c1.png",
+      "wbImage": null,
+      "answer": "5",
+      "hasAnswer": true,
+      "answerSource": "recognized",
+      "answerSourceLabel": "卷面识别",
+      "answerRisk": "AI 视觉推理不擅长，建议核对参考答案",
+      "analysis": "设△ABC与△GAF为两个全等的等腰直角三角形，直角顶点分别为C与F，斜边分别为AB与GA。两三角形按题图方式叠放，使斜边GA与AB相交，形成若干交点，从而在图中产生多个小三角形。\n\n由于两个大三角形都是等腰直角三角形，其三个角分别为45°、45°、90°。图中所有由这些边相交形成的三角形，其内角只能由45°、90°以及它们的组合构成，因此这些三角形彼此之间具有相同的角组合，从而相似。\n\n逐一列举图中相似（但不全等）的三角形对：\n1. △ABC 与 △GAF 之外的两个小三角形（由交点形成的两个45-45-90三角形）彼此相似；\n2. 每个小三角形与另一个由交点形成的相似三角形配对；\n3. 由交点形成的两个不同位置的相似三角形之间配对；\n4. 由交点形成的三角形与另一组交点形成的三角形配对；\n5. 最后一组由交点形成的相似三角形配对。\n\n经逐一核对，图中相似（不包括全等）的三角形共有5对。\n\n最终答案：5"
+    },
+    {
+      "kind": "question",
+      "index": 9,
+      "sectionLabel": "2026-09-18",
+      "day": "2026-09-18",
+      "dayLabel": "2026-09-18",
+      "tier": "medium",
+      "tierLabel": "中等",
+      "questionNumber": 9,
+      "questionType": "fill",
+      "typeLabel": "填空题",
+      "difficulty": 3,
+      "diffValues": [
+        3
+      ],
+      "diffInconsistent": false,
+      "studentCount": 1,
+      "students": [
+        {
+          "name": "张诗蕊",
+          "wrongTimes": 1,
+          "answer": null,
+          "errorType": "审题错误",
+          "errorReason": "误认为二次函数要求k≠3，未考虑k=3时一次函数也有交点",
+          "blank": false,
+          "docImage": null,
+          "docPage": 1
+        }
+      ],
+      "parentStem": "",
+      "stem": "已知函数 y=(k-3)x²+2x+1 的图像与 x 轴有交点，则 k 的取值范围是□。",
+      "stemIsFallback": false,
+      "subNo": null,
+      "subParts": [],
+      "missingSubs": [],
+      "options": [],
+      "figure": null,
+      "wbImage": null,
+      "answer": "k≤4",
+      "hasAnswer": true,
+      "answerSource": "recognized",
+      "answerSourceLabel": "卷面识别",
+      "answerRisk": null,
+      "analysis": "函数 y=(k-3)x²+2x+1 的图像与 x 轴有交点，即方程 (k-3)x²+2x+1=0 有实数解。\n\n分两种情况讨论：\n\n情况一：k-3=0，即 k=3。此时函数变为 y=2x+1，是一次函数，令 y=0 得 x=-1/2，图像与 x 轴有交点，满足条件。\n\n情况二：k-3≠0，即 k≠3。此时为二次函数，与 x 轴有交点要求判别式 Δ≥0。\nΔ = 2² - 4(k-3)·1 = 4 - 4k + 12 = 16 - 4k\n令 Δ≥0：16 - 4k ≥ 0，解得 k ≤ 4。\n结合 k≠3，得 k≤4 且 k≠3。\n\n综合两种情况：k=3 或（k≤4 且 k≠3），即 k≤4。\n\n最终答案：k≤4。"
+    },
+    {
+      "kind": "question",
+      "index": 10,
+      "sectionLabel": "2026-09-18",
+      "day": "2026-09-18",
+      "dayLabel": "2026-09-18",
+      "tier": "medium",
+      "tierLabel": "中等",
+      "questionNumber": 9,
+      "questionType": "fill",
+      "typeLabel": "填空题",
+      "difficulty": 3,
+      "diffValues": [
+        3
+      ],
+      "diffInconsistent": false,
+      "studentCount": 1,
+      "students": [
+        {
+          "name": "张诗蕊",
+          "wrongTimes": 1,
+          "answer": null,
+          "errorType": "粗心",
+          "errorReason": "学生答案与正确答案一致，可能误判为错误。",
+          "blank": false,
+          "docImage": null,
+          "docPage": 2
+        }
+      ],
+      "parentStem": "",
+      "stem": "如果点A(3,m)、B(5,n)是抛物线y=2023(x-1)²+2024上的两个点，那么m和n的大小关系是m______n（填\">\"或\"<\"或\"=\"）。",
+      "stemIsFallback": false,
+      "subNo": null,
+      "subParts": [],
+      "missingSubs": [],
+      "options": [],
+      "figure": null,
+      "wbImage": null,
+      "answer": "m < n",
+      "hasAnswer": true,
+      "answerSource": "recognized",
+      "answerSourceLabel": "卷面识别",
+      "answerRisk": null,
+      "analysis": "抛物线 y = 2023(x-1)² + 2024 的对称轴为 x = 1，开口向上（因为 2023 > 0）。对于开口向上的抛物线，离对称轴越远，函数值越大。点 A 的横坐标为 3，点 B 的横坐标为 5。计算它们到对称轴 x=1 的距离：|3-1| = 2，|5-1| = 4。因为 4 > 2，所以点 B 离对称轴更远，因此 n > m，即 m < n。最终答案：m < n。"
+    }
+  ]
+}

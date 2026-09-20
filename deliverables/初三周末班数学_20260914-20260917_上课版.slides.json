@@ -1,0 +1,526 @@
+{
+  "generatedAt": "2026-09-17T05:14:02.251Z",
+  "grade": "初三",
+  "subject": null,
+  "title": "初三 周末班错题课件",
+  "period": {
+    "start": "2026-09-14",
+    "end": "2026-09-17"
+  },
+  "withAnswer": true,
+  "scope": {
+    "days": 20,
+    "from": "2026-09-14",
+    "to": "2026-09-17",
+    "limit": null,
+    "maxPerDay": null,
+    "mergeThin": null,
+    "students": null
+  },
+  "stats": {
+    "rawRows": 10,
+    "topics": 10,
+    "questionSlides": 10,
+    "days": 2,
+    "sections": 2,
+    "students": 4,
+    "studentNames": [
+      "张诗蕊",
+      "李哲瀚",
+      "陈施君",
+      "程思豪"
+    ],
+    "limitDropped": 0
+  },
+  "overview": [
+    {
+      "label": "2026-09-16",
+      "topics": 1,
+      "students": 1,
+      "basic": 0,
+      "medium": 1,
+      "hard": 0,
+      "unknown": 0
+    },
+    {
+      "label": "2026-09-15",
+      "topics": 9,
+      "students": 4,
+      "basic": 2,
+      "medium": 3,
+      "hard": 4,
+      "unknown": 0
+    }
+  ],
+  "slides": [
+    {
+      "kind": "section",
+      "label": "2026-09-16",
+      "day": "2026-09-16",
+      "dayFrom": "2026-09-16",
+      "mergedDays": [],
+      "topicCount": 1,
+      "studentCount": 1,
+      "students": [
+        "张诗蕊"
+      ],
+      "tiers": {
+        "basic": 0,
+        "medium": 1,
+        "hard": 0,
+        "unknown": 0
+      }
+    },
+    {
+      "kind": "question",
+      "index": 1,
+      "sectionLabel": "2026-09-16",
+      "day": "2026-09-16",
+      "dayLabel": "2026-09-16",
+      "tier": "medium",
+      "tierLabel": "中等",
+      "questionNumber": 9,
+      "questionType": "fill",
+      "typeLabel": "填空题",
+      "difficulty": 3,
+      "diffValues": [
+        3
+      ],
+      "diffInconsistent": false,
+      "studentCount": 1,
+      "students": [
+        {
+          "name": "张诗蕊",
+          "wrongTimes": 1,
+          "answer": null,
+          "errorType": "概念不理解",
+          "errorReason": "学生误认为高的比等于边长比，未掌握面积一定时高与底成反比的性质。",
+          "blank": false,
+          "docImage": "https://minxue-app-oss.oss-cn-shanghai.aliyuncs.com/images/bf235b85-e5d4-4f50-9e42-af8330df9451/20260915/6949a6cf-d2b3-4740-bcb2-3a34220ed601.jpg",
+          "docPage": 1
+        }
+      ],
+      "parentStem": "",
+      "stem": "已知在△ABC中，三边长a=2,b=4,c=3,h_a、h_b、h_c分别为边a、b、c上的高，那么h_a:h_b:h_c=____.",
+      "stemIsFallback": false,
+      "subNo": null,
+      "options": [],
+      "figure": null,
+      "wbImage": "https://minxue-app-oss.oss-cn-shanghai.aliyuncs.com/images/bf235b85-e5d4-4f50-9e42-af8330df9451/20260915/6949a6cf-d2b3-4740-bcb2-3a34220ed601.jpg",
+      "answer": "6:3:4",
+      "hasAnswer": true,
+      "answerSource": "recognized",
+      "answerSourceLabel": "卷面识别",
+      "answerRisk": null,
+      "analysis": "设三角形面积为S，则S = (1/2)a·h_a = (1/2)b·h_b = (1/2)c·h_c，因此a·h_a = b·h_b = c·h_c，得h_a : h_b : h_c = 1/a : 1/b : 1/c。代入a=2, b=4, c=3，得1/2 : 1/4 : 1/3。通分，最小公分母为12，化为6/12 : 3/12 : 4/12，即6:3:4。该比例已是最简整数比。所以，h_a:h_b:h_c = 6:3:4。"
+    },
+    {
+      "kind": "section",
+      "label": "2026-09-15",
+      "day": "2026-09-15",
+      "dayFrom": "2026-09-15",
+      "mergedDays": [],
+      "topicCount": 9,
+      "studentCount": 4,
+      "students": [
+        "陈施君",
+        "程思豪",
+        "李哲瀚",
+        "张诗蕊"
+      ],
+      "tiers": {
+        "basic": 2,
+        "medium": 3,
+        "hard": 4,
+        "unknown": 0
+      }
+    },
+    {
+      "kind": "question",
+      "index": 2,
+      "sectionLabel": "2026-09-15",
+      "day": "2026-09-15",
+      "dayLabel": "2026-09-15",
+      "tier": "basic",
+      "tierLabel": "基础",
+      "questionNumber": 10,
+      "questionType": "answer",
+      "typeLabel": "解答题",
+      "difficulty": 2,
+      "diffValues": [
+        2
+      ],
+      "diffInconsistent": false,
+      "studentCount": 1,
+      "students": [
+        {
+          "name": "李哲瀚",
+          "wrongTimes": 1,
+          "answer": null,
+          "errorType": "步骤遗漏",
+          "errorReason": "答案较标准解析明显过短，可能省略了解题步骤",
+          "blank": false,
+          "docImage": "https://minxue-app-oss.oss-cn-shanghai.aliyuncs.com/images/0575f64d-3c9e-42d5-a5e4-7a461ccef385/20260908/11b2d209-1845-425f-bbcf-76228549c74d.jpg",
+          "docPage": 2
+        }
+      ],
+      "parentStem": "如图，抛物线 y=2(x-2)² 与平行于 x 轴的直线交于点 A、B，抛物线顶点为 C，△ABC 为等边三角形，求：",
+      "stem": "(2)点B的坐标;",
+      "stemIsFallback": false,
+      "subNo": "2",
+      "options": [],
+      "figure": "https://minxue-app-oss.oss-cn-shanghai.aliyuncs.com/images/0575f64d-3c9e-42d5-a5e4-7a461ccef385/20260917/c73658d1-b997-4410-96a5-b591df3d1a88.png",
+      "wbImage": "https://minxue-app-oss.oss-cn-shanghai.aliyuncs.com/images/0575f64d-3c9e-42d5-a5e4-7a461ccef385/20260908/11b2d209-1845-425f-bbcf-76228549c74d.jpg",
+      "answer": "如图，过点 C 作 CD⊥AB，垂足为 D。设 AD 为 a(a>0)。∵△ABC 为等边三角形，CD⊥AB，∴AD=DB=a，∠ACD=30°，∴CD=√3a。∴点 B 的坐标为 (2+a, √3a)，∴√3a=2(2+a-2)²，∴a=√3/2，∴B((4+√3)/2, 3/2)。",
+      "hasAnswer": true,
+      "answerSource": "worksheet",
+      "answerSourceLabel": "练习册答案库",
+      "answerRisk": null,
+      "analysis": ""
+    },
+    {
+      "kind": "question",
+      "index": 3,
+      "sectionLabel": "2026-09-15",
+      "day": "2026-09-15",
+      "dayLabel": "2026-09-15",
+      "tier": "basic",
+      "tierLabel": "基础",
+      "questionNumber": 4,
+      "questionType": "answer",
+      "typeLabel": "解答题",
+      "difficulty": 2,
+      "diffValues": [
+        2
+      ],
+      "diffInconsistent": false,
+      "studentCount": 1,
+      "students": [
+        {
+          "name": "陈施君",
+          "wrongTimes": 1,
+          "answer": null,
+          "errorType": "步骤遗漏",
+          "errorReason": "答案较标准解析明显过短，可能省略了解题步骤",
+          "blank": false,
+          "docImage": "https://minxue-app-oss.oss-cn-shanghai.aliyuncs.com/images/23aabcd4-e3a5-47e5-9170-78d2122255b3/20260908/d882f798-a8b2-4581-a589-da24dde9207e.jpg",
+          "docPage": 1
+        }
+      ],
+      "parentStem": "Ⅱ已知二次函数y=x²-2x-3.",
+      "stem": "(3)结合函数图像,直接写出当-4≤y≤0时,x的取值范围.",
+      "stemIsFallback": false,
+      "subNo": "3",
+      "options": [],
+      "figure": null,
+      "wbImage": "https://minxue-app-oss.oss-cn-shanghai.aliyuncs.com/images/23aabcd4-e3a5-47e5-9170-78d2122255b3/20260908/d882f798-a8b2-4581-a589-da24dde9207e.jpg",
+      "answer": "解：(1)当 y=0 时，x²-2x-3=0，解得 x₁=-1，x₂=3，∴抛物线与 x 轴的交点坐标为 (-1,0)、(3,0)。",
+      "hasAnswer": true,
+      "answerSource": "worksheet",
+      "answerSourceLabel": "练习册答案库",
+      "answerRisk": null,
+      "analysis": ""
+    },
+    {
+      "kind": "question",
+      "index": 4,
+      "sectionLabel": "2026-09-15",
+      "day": "2026-09-15",
+      "dayLabel": "2026-09-15",
+      "tier": "medium",
+      "tierLabel": "中等",
+      "questionNumber": 11,
+      "questionType": "answer",
+      "typeLabel": "解答题",
+      "difficulty": 3,
+      "diffValues": [
+        3
+      ],
+      "diffInconsistent": false,
+      "studentCount": 1,
+      "students": [
+        {
+          "name": "李哲瀚",
+          "wrongTimes": 1,
+          "answer": null,
+          "errorType": "步骤遗漏",
+          "errorReason": "学生仅设出D点坐标，未利用DF∥x轴求F点并代入直线方程求解",
+          "blank": false,
+          "docImage": "https://minxue-app-oss.oss-cn-shanghai.aliyuncs.com/images/0575f64d-3c9e-42d5-a5e4-7a461ccef385/20260908/11b2d209-1845-425f-bbcf-76228549c74d.jpg",
+          "docPage": 2
+        }
+      ],
+      "parentStem": "在平面直角坐标系 xOy 中，将直线 l: y=-3/4x-3 沿 x 轴翻折，得到一条新直线与 x 轴交于点 A，与 y 轴交于点 B，将抛物线 C₁: y=1/3x² 沿 x 轴平移，得到一条新抛物线 C₂ 与 y 轴交于点 D，与直线 AB 交于点 E、F，连接 DF，满足 DF//x 轴. 求：",
+      "stem": "(2)抛物线C₂的表达式.",
+      "stemIsFallback": false,
+      "subNo": "2",
+      "options": [],
+      "figure": null,
+      "wbImage": "https://minxue-app-oss.oss-cn-shanghai.aliyuncs.com/images/0575f64d-3c9e-42d5-a5e4-7a461ccef385/20260908/11b2d209-1845-425f-bbcf-76228549c74d.jpg",
+      "answer": "设平移后抛物线 C₂ 的顶点为 P(n,0)，则抛物线 C₂ 的表达式为 y=1/3(x-n)²，∴D(0, 1/3n²)。∵DF//x 轴，∴点 F(2n, 1/3n²)。又点 F 在直线 AB 上，∴1/3n²=3/4×2n+3，解得 n₁=6, n₂=-3/2。∴抛物线 C₂ 的表达式为 y=1/3(x-6)² 或 y=1/3(x+3/2)²。",
+      "hasAnswer": true,
+      "answerSource": "worksheet",
+      "answerSourceLabel": "练习册答案库",
+      "answerRisk": null,
+      "analysis": ""
+    },
+    {
+      "kind": "question",
+      "index": 5,
+      "sectionLabel": "2026-09-15",
+      "day": "2026-09-15",
+      "dayLabel": "2026-09-15",
+      "tier": "medium",
+      "tierLabel": "中等",
+      "questionNumber": 3,
+      "questionType": "answer",
+      "typeLabel": "解答题",
+      "difficulty": 3,
+      "diffValues": [
+        3
+      ],
+      "diffInconsistent": false,
+      "studentCount": 1,
+      "students": [
+        {
+          "name": "程思豪",
+          "wrongTimes": 1,
+          "answer": null,
+          "errorType": "计算错误",
+          "errorReason": "学生算出 -2，正确应为 -1，属计算环节失误",
+          "blank": false,
+          "docImage": "https://minxue-app-oss.oss-cn-shanghai.aliyuncs.com/images/afae6ef7-d071-42c5-b229-faaef0e443f7/20260908/1d471c73-713f-40ed-9dc7-8bda8e54ed34.jpg",
+          "docPage": 1
+        }
+      ],
+      "parentStem": "",
+      "stem": "3.如图,已知关于x的二次函数 y=-1/2x²+bx+c 的图像如图所示,则这个二次函数的表达式为",
+      "stemIsFallback": false,
+      "subNo": null,
+      "options": [],
+      "figure": "https://minxue-app-oss.oss-cn-shanghai.aliyuncs.com/images/afae6ef7-d071-42c5-b229-faaef0e443f7/20260915/1d69a6d2-ca25-4da4-a44f-6cdc847ea6bc.png",
+      "wbImage": "https://minxue-app-oss.oss-cn-shanghai.aliyuncs.com/images/afae6ef7-d071-42c5-b229-faaef0e443f7/20260908/1d471c73-713f-40ed-9dc7-8bda8e54ed34.jpg",
+      "answer": "y=-1/2x²+2x+5/2",
+      "hasAnswer": true,
+      "answerSource": "worksheet",
+      "answerSourceLabel": "练习册答案库",
+      "answerRisk": null,
+      "analysis": ""
+    },
+    {
+      "kind": "question",
+      "index": 6,
+      "sectionLabel": "2026-09-15",
+      "day": "2026-09-15",
+      "dayLabel": "2026-09-15",
+      "tier": "medium",
+      "tierLabel": "中等",
+      "questionNumber": 4,
+      "questionType": "answer",
+      "typeLabel": "解答题",
+      "difficulty": 3,
+      "diffValues": [
+        3
+      ],
+      "diffInconsistent": false,
+      "studentCount": 1,
+      "students": [
+        {
+          "name": "李哲瀚",
+          "wrongTimes": 1,
+          "answer": null,
+          "errorType": "步骤遗漏",
+          "errorReason": "答案较标准解析明显过短，可能省略了解题步骤",
+          "blank": false,
+          "docImage": "https://minxue-app-oss.oss-cn-shanghai.aliyuncs.com/images/0575f64d-3c9e-42d5-a5e4-7a461ccef385/20260908/6feffe8d-52ea-46a0-af58-30ec5b74051b.jpg",
+          "docPage": 1
+        }
+      ],
+      "parentStem": "",
+      "stem": "如图, 已知抛物线 y=(x-2)² 的顶点为 C, 直线 y=2x+4 与抛物线交于 A、B 两点, 求 △ABC 的面积.",
+      "stemIsFallback": false,
+      "subNo": null,
+      "options": [],
+      "figure": "https://minxue-app-oss.oss-cn-shanghai.aliyuncs.com/images/0575f64d-3c9e-42d5-a5e4-7a461ccef385/20260915/2caacc1a-8291-4fd7-9c87-79e268ca9ce6.png",
+      "wbImage": "https://minxue-app-oss.oss-cn-shanghai.aliyuncs.com/images/0575f64d-3c9e-42d5-a5e4-7a461ccef385/20260908/6feffe8d-52ea-46a0-af58-30ec5b74051b.jpg",
+      "answer": "解：易知抛物线 y=(x-2)² 的顶点 C 的坐标为 (2,0)。联立两函数的表达式，得 {y=2x+4, y=(x-2)²}，解得 {x₁=0, y₁=4}, {x₂=6, y₂=16}。∴A(6,16), B(0,4)。过点 A 作 AD⊥x 轴，垂足为 D，则 S△ABC = S梯形ABOD - S△AOC - S△ACD = 1/2(OB+AD)·OD - 1/2OC·OB - 1/2CD·AD = 1/2×(4+16)×6 - 1/2×2×4 - 1/2×4×16 = 24。",
+      "hasAnswer": true,
+      "answerSource": "worksheet",
+      "answerSourceLabel": "练习册答案库",
+      "answerRisk": null,
+      "analysis": ""
+    },
+    {
+      "kind": "question",
+      "index": 7,
+      "sectionLabel": "2026-09-15",
+      "day": "2026-09-15",
+      "dayLabel": "2026-09-15",
+      "tier": "hard",
+      "tierLabel": "较难",
+      "questionNumber": 11,
+      "questionType": "answer",
+      "typeLabel": "解答题",
+      "difficulty": 4,
+      "diffValues": [
+        4
+      ],
+      "diffInconsistent": false,
+      "studentCount": 1,
+      "students": [
+        {
+          "name": "陈施君",
+          "wrongTimes": 1,
+          "answer": null,
+          "errorType": "步骤遗漏",
+          "errorReason": "答案较标准解析明显过短，可能省略了解题步骤",
+          "blank": false,
+          "docImage": "https://minxue-app-oss.oss-cn-shanghai.aliyuncs.com/images/23aabcd4-e3a5-47e5-9170-78d2122255b3/20260908/e192d1bb-0c94-4752-b8f6-32ff21a4b2e1.jpg",
+          "docPage": 2
+        }
+      ],
+      "parentStem": "11.已知二次函数 y=ax²+bx+c(a≠0)的图像过点 A(1,0),点 B(-3,0)和点 C.",
+      "stem": "(3)若 z=-ax-3a 且 a<0,求证: y-z+9/4a≤0.",
+      "stemIsFallback": false,
+      "subNo": "3",
+      "options": [],
+      "figure": null,
+      "wbImage": "https://minxue-app-oss.oss-cn-shanghai.aliyuncs.com/images/23aabcd4-e3a5-47e5-9170-78d2122255b3/20260908/e192d1bb-0c94-4752-b8f6-32ff21a4b2e1.jpg",
+      "answer": "(1)解：设二次函数的表达式为 y=a(x-1)(x+3)，把 C(0,-3)代入，得 -3=a×(0-1)×(0+3)，解得 a=1，∴二次函数的表达式为 y=(x-1)(x+3)，即 y=x²+2x-3。\n2)解：抛物线表达式为 y=a(x-1)(x+3)，即 y=ax²+2ax-3a，抛物线的对称轴为直线 x=-2a/2a=-1。当 x=-1 时，y 有最值 -4a。当 a>0 时，x=-3，m=0；x=-1，n=-4a，∵m-n=8，∴0+4a=8，解得 a=2；当 a<0 时，x=-1，m=-4a；x=-3，n=0，∵m-n=8，∴-4a-0=8，解得 a=-2，综上所述，a 的值为 2 或 -2。\n3)证明：∵y=ax²+2ax-3a，x=-ax-3a，∴y-x+9/4a=ax²+2ax-3a-(-ax-3a)+9/4a=ax²+3ax+9/4a=a(x+3/2)²。∵a<0，(x+3/2)²≥0，∴a(x+3/2)²≤0，即 y-x+9/4a≤0。",
+      "hasAnswer": true,
+      "answerSource": "worksheet",
+      "answerSourceLabel": "练习册答案库",
+      "answerRisk": null,
+      "analysis": ""
+    },
+    {
+      "kind": "question",
+      "index": 8,
+      "sectionLabel": "2026-09-15",
+      "day": "2026-09-15",
+      "dayLabel": "2026-09-15",
+      "tier": "hard",
+      "tierLabel": "较难",
+      "questionNumber": 11,
+      "questionType": "answer",
+      "typeLabel": "解答题",
+      "difficulty": 4,
+      "diffValues": [
+        4
+      ],
+      "diffInconsistent": false,
+      "studentCount": 1,
+      "students": [
+        {
+          "name": "陈施君",
+          "wrongTimes": 1,
+          "answer": null,
+          "errorType": "步骤遗漏",
+          "errorReason": "答案较标准解析明显过短，可能省略了解题步骤",
+          "blank": false,
+          "docImage": "https://minxue-app-oss.oss-cn-shanghai.aliyuncs.com/images/23aabcd4-e3a5-47e5-9170-78d2122255b3/20260908/e192d1bb-0c94-4752-b8f6-32ff21a4b2e1.jpg",
+          "docPage": 2
+        }
+      ],
+      "parentStem": "11.已知二次函数 y=ax²+bx+c(a≠0)的图像过点 A(1,0),点 B(-3,0)和点 C.",
+      "stem": "(2)当 -3≤x≤0 时,二次函数的最大值为 m,最小值为 n,若 m-n=8,求 a 的值;",
+      "stemIsFallback": false,
+      "subNo": "2",
+      "options": [],
+      "figure": null,
+      "wbImage": "https://minxue-app-oss.oss-cn-shanghai.aliyuncs.com/images/23aabcd4-e3a5-47e5-9170-78d2122255b3/20260908/e192d1bb-0c94-4752-b8f6-32ff21a4b2e1.jpg",
+      "answer": "(1)解：设二次函数的表达式为 y=a(x-1)(x+3)，把 C(0,-3)代入，得 -3=a×(0-1)×(0+3)，解得 a=1，∴二次函数的表达式为 y=(x-1)(x+3)，即 y=x²+2x-3。\n2)解：抛物线表达式为 y=a(x-1)(x+3)，即 y=ax²+2ax-3a，抛物线的对称轴为直线 x=-2a/2a=-1。当 x=-1 时，y 有最值 -4a。当 a>0 时，x=-3，m=0；x=-1，n=-4a，∵m-n=8，∴0+4a=8，解得 a=2；当 a<0 时，x=-1，m=-4a；x=-3，n=0，∵m-n=8，∴-4a-0=8，解得 a=-2，综上所述，a 的值为 2 或 -2。\n3)证明：∵y=ax²+2ax-3a，x=-ax-3a，∴y-x+9/4a=ax²+2ax-3a-(-ax-3a)+9/4a=ax²+3ax+9/4a=a(x+3/2)²。∵a<0，(x+3/2)²≥0，∴a(x+3/2)²≤0，即 y-x+9/4a≤0。",
+      "hasAnswer": true,
+      "answerSource": "worksheet",
+      "answerSourceLabel": "练习册答案库",
+      "answerRisk": null,
+      "analysis": ""
+    },
+    {
+      "kind": "question",
+      "index": 9,
+      "sectionLabel": "2026-09-15",
+      "day": "2026-09-15",
+      "dayLabel": "2026-09-15",
+      "tier": "hard",
+      "tierLabel": "较难",
+      "questionNumber": 12,
+      "questionType": "answer",
+      "typeLabel": "解答题",
+      "difficulty": 4,
+      "diffValues": [
+        4
+      ],
+      "diffInconsistent": false,
+      "studentCount": 1,
+      "students": [
+        {
+          "name": "李哲瀚",
+          "wrongTimes": 1,
+          "answer": null,
+          "errorType": "步骤遗漏",
+          "errorReason": "答案较标准解析明显过短，可能省略了解题步骤",
+          "blank": false,
+          "docImage": "https://minxue-app-oss.oss-cn-shanghai.aliyuncs.com/images/0575f64d-3c9e-42d5-a5e4-7a461ccef385/20260908/11b2d209-1845-425f-bbcf-76228549c74d.jpg",
+          "docPage": 2
+        }
+      ],
+      "parentStem": "",
+      "stem": "已知直线x=c交抛物线y₁=-(x-a)²于点A(c,m),交抛物线y₂=-(x-b)²于点B(c,n),下列结论:①若a>b>c,则m<n;②若b>a>c,则m<n;③若c>b>a,则m<n;④若a>c>b,则m<n.其中正确的结论有",
+      "stemIsFallback": false,
+      "subNo": null,
+      "options": [],
+      "figure": null,
+      "wbImage": "https://minxue-app-oss.oss-cn-shanghai.aliyuncs.com/images/0575f64d-3c9e-42d5-a5e4-7a461ccef385/20260908/11b2d209-1845-425f-bbcf-76228549c74d.jpg",
+      "answer": "B 解析：∵抛物线 y₁=-(x-a)² 经过点 A(c,m)，∴m=-(c-a)²，同理可得 n=-(c-b)²，∴m-n=-(c-a)²+(c-b)²=(a-b)(2c-a-b)。",
+      "hasAnswer": true,
+      "answerSource": "worksheet",
+      "answerSourceLabel": "练习册答案库",
+      "answerRisk": null,
+      "analysis": ""
+    },
+    {
+      "kind": "question",
+      "index": 10,
+      "sectionLabel": "2026-09-15",
+      "day": "2026-09-15",
+      "dayLabel": "2026-09-15",
+      "tier": "hard",
+      "tierLabel": "较难",
+      "questionNumber": 7,
+      "questionType": "answer",
+      "typeLabel": "解答题",
+      "difficulty": 4,
+      "diffValues": [
+        4
+      ],
+      "diffInconsistent": false,
+      "studentCount": 1,
+      "students": [
+        {
+          "name": "张诗蕊",
+          "wrongTimes": 1,
+          "answer": null,
+          "errorType": "步骤遗漏",
+          "errorReason": "答案较标准解析明显过短，可能省略了解题步骤",
+          "blank": false,
+          "docImage": "https://minxue-app-oss.oss-cn-shanghai.aliyuncs.com/images/bf235b85-e5d4-4f50-9e42-af8330df9451/20260908/9238a85d-72f9-4575-8c7b-74b12788bab7.jpg",
+          "docPage": 2
+        }
+      ],
+      "parentStem": "",
+      "stem": "如图，已知平行四边形ABCD顶点A的坐标为(2,6)，点B在y轴上，且AD//BC//x轴，过B、C、D三点的抛物线的顶点坐标为(2,2)，则抛物线的表达式是y=______.",
+      "stemIsFallback": false,
+      "subNo": null,
+      "options": [],
+      "figure": "https://minxue-app-oss.oss-cn-shanghai.aliyuncs.com/images/bf235b85-e5d4-4f50-9e42-af8330df9451/20260915/87ee6203-2d8c-408a-9a42-8ecbb6b610ab.png",
+      "wbImage": "https://minxue-app-oss.oss-cn-shanghai.aliyuncs.com/images/bf235b85-e5d4-4f50-9e42-af8330df9451/20260908/9238a85d-72f9-4575-8c7b-74b12788bab7.jpg",
+      "answer": "1/4(x-2)²+2 解析：∵过B,C,D三点的抛物线的顶点坐标为(2,2),AD//BC//x轴，∴BC=4。∵四边形ABCD是平行四边形，∴AD=BC=4。∵点A的坐标为(2,6)，∴D(6,6)。设抛物线为y=a(x-2)²+2，代入点D的坐标，得6=16a+2，解得a=1/4，∴抛物线的表达式为y=1/4(x-2)²+2。",
+      "hasAnswer": true,
+      "answerSource": "worksheet",
+      "answerSourceLabel": "练习册答案库",
+      "answerRisk": null,
+      "analysis": ""
+    }
+  ]
+}

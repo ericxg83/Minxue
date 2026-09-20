@@ -1,0 +1,712 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>初三 周末班错题课件 · 2026-09-11 ~ 2026-09-18</title>
+<style>
+  :root{
+    --ink:#1b1f24; --ink-2:#4b5563; --ink-3:#8b949e; --line:#e3e6ea; --line-2:#eef1f4;
+    --bg:#ffffff; --bg-soft:#f7f8fa; --bg-tint:#fbfcfd;
+    --basic:#0f7b4f; --medium:#1e6fd9; --hard:#c2410c;
+    --warn:#b45309; --danger:#b91c1c; --shadow:0 1px 2px rgba(16,24,40,.06);
+  }
+  *{box-sizing:border-box}
+  body{margin:0;background:var(--bg-soft);color:var(--ink);
+    font:15px/1.75 -apple-system,BlinkMacSystemFont,"Segoe UI","PingFang SC","Hiragino Sans GB","Microsoft YaHei",sans-serif;
+    -webkit-font-smoothing:antialiased}
+  .wrap{max-width:960px;margin:0 auto;padding:24px 20px 64px}
+  .cover{background:var(--bg);border:1px solid var(--line);border-radius:12px;padding:26px 28px;box-shadow:var(--shadow)}
+  .cover h1{margin:0 0 6px;font-size:22px;letter-spacing:.2px}
+  .cover .sub{color:var(--ink-2);font-size:13px;margin-bottom:16px}
+  .meta{display:flex;flex-wrap:wrap;gap:8px 22px;font-size:13px;color:var(--ink-2)}
+  .meta b{color:var(--ink);font-weight:600}
+  .note{margin-top:16px;padding:12px 14px;border-left:3px solid var(--medium);background:var(--bg-tint);
+    border-radius:0 8px 8px 0;font-size:12.5px;color:var(--ink-2)}
+  .note code{background:#eef1f4;padding:1px 5px;border-radius:4px;font-size:12px}
+  table.ov{width:100%;border-collapse:collapse;margin-top:14px;font-size:13px}
+  table.ov th,table.ov td{padding:7px 10px;border-bottom:1px solid var(--line-2);text-align:right}
+  table.ov th:first-child,table.ov td:first-child{text-align:left}
+  table.ov th{color:var(--ink-3);font-weight:500;font-size:12px}
+  .day{background:var(--bg);border:1px solid var(--line);border-radius:12px;margin-top:20px;
+    padding:22px 24px;box-shadow:var(--shadow)}
+  .day-title{margin:0 0 4px;font-size:17px;padding-bottom:10px;border-bottom:2px solid var(--ink);}
+  .clip-note{font-size:12.5px;color:var(--warn);background:#fffbeb;border:1px solid #fde68a;
+    padding:8px 12px;border-radius:8px;margin:12px 0 0}
+  .tier{margin-top:20px}
+  .tier-title{display:flex;align-items:baseline;gap:10px;margin:0 0 10px}
+  .tier-name{font-size:15px;padding:2px 10px;border-radius:999px;color:#fff;background:var(--ink-2)}
+  .tier-basic .tier-name{background:var(--basic)}
+  .tier-medium .tier-name{background:var(--medium)}
+  .tier-hard .tier-name{background:var(--hard)}
+  .tier-unknown .tier-name{background:#9aa4b2}
+  .tier-hint{font-size:12px;color:var(--ink-3)}
+  .q{border:1px solid var(--line);border-radius:10px;padding:14px 16px;margin:12px 0;background:var(--bg-tint)}
+  .q-head{display:flex;flex-wrap:wrap;align-items:center;gap:8px;margin-bottom:10px}
+  .q-idx{display:inline-flex;align-items:center;justify-content:center;min-width:24px;height:24px;padding:0 6px;
+    border-radius:6px;background:var(--ink);color:#fff;font-size:12.5px;font-weight:600}
+  .q-no{font-size:12.5px;color:var(--ink-2)}
+  .badge{font-size:11.5px;padding:2px 8px;border-radius:999px;border:1px solid var(--line);
+    background:#fff;color:var(--ink-2);white-space:nowrap}
+  .badge-type{background:#eef4ff;border-color:#d6e4ff;color:#1e4fa8}
+  .d1,.d2{background:#e9f7f0;border-color:#c7ead9;color:var(--basic)}
+  .d3{background:#eaf2fe;border-color:#cfe1fb;color:var(--medium)}
+  .d4,.d5{background:#fdf0e9;border-color:#fadcc8;color:var(--hard)}
+  .badge-warn{background:#fffbeb;border-color:#fde68a;color:var(--warn)}
+  .badge-shared{background:#fdecec;border-color:#f8d0d0;color:var(--danger);font-weight:600}
+  .badge-single{color:var(--ink-3)}
+  .badge-jitter{background:#f5f3ff;border-color:#ddd6fe;color:#6d28d9}
+  .badge-day{background:var(--bg-soft);border-color:var(--line);color:var(--ink-3);font-variant-numeric:tabular-nums}
+  .parent-stem{font-size:13px;color:var(--ink-2);padding:8px 10px;background:#fff;border-left:2px solid var(--line);
+    border-radius:0 6px 6px 0;margin-bottom:8px}
+  .stem{font-size:15.5px;line-height:1.9}
+  .subno{font-size:12px;color:var(--ink-3);margin-top:4px}
+  .options{margin:10px 0 0;padding-left:0;list-style:none;display:grid;grid-template-columns:repeat(auto-fill,minmax(210px,1fr));gap:4px 14px}
+  .options li{font-size:14px;color:var(--ink-2);padding-left:20px;position:relative}
+  .options li::before{display:inline-block;position:absolute;left:0;color:var(--ink-3)}
+  .options li:nth-child(1)::before{content:"A."}
+  .options li:nth-child(2)::before{content:"B."}
+  .options li:nth-child(3)::before{content:"C."}
+  .options li:nth-child(4)::before{content:"D."}
+  .options li:nth-child(5)::before{content:"E."}
+  .fig{margin:12px 0 0;padding:0}
+  .fig img{max-width:min(420px,100%);border:1px solid var(--line);border-radius:8px;background:#fff}
+  .fig figcaption{font-size:11.5px;color:var(--ink-3);margin-top:4px}
+  .answer{margin-top:12px;padding:9px 12px;background:#e9f7f0;border:1px solid #c7ead9;border-radius:8px;
+    font-size:14px;display:flex;flex-wrap:wrap;gap:6px 14px;align-items:baseline}
+  .answer .k{font-size:11.5px;color:var(--basic);font-weight:600;letter-spacing:.4px}
+  .answer .v{font-weight:600}
+  .answer .src,.answer .risk{font-size:11.5px;color:var(--ink-3)}
+  .answer .risk{color:var(--warn)}
+  .answer-missing{background:#fffbeb;border-color:#fde68a}
+  .answer-missing .k{color:var(--warn)}
+  .muted{color:var(--ink-3);font-weight:400}
+  .who{margin-top:12px;border-top:1px dashed var(--line);padding-top:10px}
+  .who .k{font-size:11.5px;color:var(--ink-3);letter-spacing:.4px}
+  ul.students{list-style:none;margin:6px 0 0;padding:0}
+  ul.students li{font-size:13px;color:var(--ink-2);display:flex;flex-wrap:wrap;align-items:center;
+    gap:4px 10px;padding:4px 0;border-bottom:1px solid var(--line-2)}
+  ul.students li:last-child{border-bottom:0}
+  .sname{font-weight:600;color:var(--ink);min-width:52px}
+  .times{font-size:11.5px;color:var(--danger)}
+  .sa em{font-style:normal;color:var(--danger)}
+  .sa.blank{color:var(--ink-3)}
+  .et{font-size:11.5px;padding:1px 7px;border-radius:999px;background:#fff;border:1px solid var(--line);color:var(--ink-2)}
+  .er{font-size:11.5px;color:var(--ink-3)}
+  a.eye{display:inline-flex;align-items:center;gap:4px;font-size:11.5px;color:var(--medium);
+    text-decoration:none;padding:1px 7px;border:1px solid #cfe1fb;background:#fff;border-radius:999px}
+  a.eye:hover{background:#eef4ff}
+  .eye-disabled{font-size:11.5px;color:var(--ink-3)}
+  .frac{display:inline-flex;flex-direction:column;vertical-align:middle;text-align:center;font-size:.86em;
+    line-height:1.1;margin:0 1px;padding:0 2px}
+  .frac i{font-style:normal;border-bottom:1px solid currentColor;padding:0 2px}
+  .frac i:last-child{border-bottom:0}
+  sub,sup{font-size:.72em}
+  @media print{
+    body{background:#fff}
+    .wrap{max-width:none;padding:0}
+    .cover,.day{box-shadow:none;border:none;border-radius:0;padding:0;margin:0}
+    .day{page-break-before:always}
+    .day:first-of-type{page-break-before:auto}
+    .q{break-inside:avoid;page-break-inside:avoid;background:#fff}
+    a.eye{display:none}
+    .note{display:none}
+    .cover{padding-bottom:16px}
+  }
+</style>
+</head>
+<body>
+<div class="wrap">
+
+<div class="cover">
+  <h1>初三 · 周末班错题课件</h1>
+  <div class="sub">按「日期倒序 → 难度由易到难」组织 · 生成于 2026/9/17 14:47:32</div>
+  <div class="meta">
+    <span>时段 <b>2026-09-11 ~ 2026-09-18</b></span>
+    <span>学生 <b>5 人</b></span>
+    <span>错题 <b>31 条</b></span>
+    <span>去重题 <b>30 题</b></span>
+    <span>有课日 <b>5 天</b></span>
+    <span>分节 <b>5 节</b></span>
+    
+    
+  </div>
+  <table class="ov">
+    <thead><tr><th>日期</th><th>题数</th><th>学生数</th><th>基础 1-2</th><th>中等 3</th><th>较难 4-5</th><th>未判定</th></tr></thead>
+    <tbody><tr>
+  <td>2026-09-16</td>
+  <td>1</td><td>1</td>
+  <td>0</td>
+  <td>1</td>
+  <td>0</td>
+  <td>0</td>
+</tr><tr>
+  <td>2026-09-15</td>
+  <td>9</td><td>4</td>
+  <td>2</td>
+  <td>3</td>
+  <td>4</td>
+  <td>0</td>
+</tr><tr>
+  <td>2026-09-13</td>
+  <td>12</td><td>3</td>
+  <td>1</td>
+  <td>6</td>
+  <td>2</td>
+  <td>3</td>
+</tr><tr>
+  <td>2026-09-12</td>
+  <td>2</td><td>1</td>
+  <td>0</td>
+  <td>0</td>
+  <td>0</td>
+  <td>2</td>
+</tr><tr>
+  <td>2026-09-11</td>
+  <td>6</td><td>2</td>
+  <td>0</td>
+  <td>5</td>
+  <td>1</td>
+  <td>0</td>
+</tr></tbody>
+  </table>
+  <div class="note">
+    <b>口径说明</b><br>
+    1. 同一道题由多人错时合并为一条，标注「共 N 人错」并列出各人错答 —— 合并走<b>归一化题干精确匹配</b>，不做相似度合并。<br>
+    2. 难度来自 <code>questions.difficulty</code>（1–5，AI 判定，<code>tags_source='ai'</code>）；同题多人错时取众数。<br>
+    3. 每题「原卷」小眼睛链接指向该学生上传的整页图 —— 系统不提供可靠的题目裁图，讲题时以整页图为准。<br>
+    4. 页面右侧留白可直接打印：每日自动分页，题目不跨页断开。<br>
+    5. 本份为<b>讲义版</b>（含参考答案）。出不含答案的版本加 <code>--no-answer</code>。
+  </div>
+</div>
+
+<section class="day">
+  <h2 class="day-title">2026-09-16（1 题 · 1 名学生）</h2>
+  
+  <section class="tier tier-medium">
+      <h3 class="tier-title"><span class="tier-name">中等</span>
+        <span class="tier-hint">难度 3 · 常规题 · 1 题</span></h3>
+      <article class="q">
+  <header class="q-head">
+    <span class="q-idx">1</span>
+    <span class="q-no">第 9 题</span>
+    <span class="badge badge-type">填空题</span>
+    <span class="badge badge-diff d3">难度 3</span><span class="badge badge-single">1 人错</span>
+  </header>
+  <div class="stem">已知在△ABC中，三边长a=2,b=4,c=3,h_a、h_b、h_c分别为边a、b、c上的高，那么h_a:h_b:h_c=____.</div>
+  
+  
+  <div class="answer"><span class="k">参考答案</span><span class="v">6:3:4</span>
+             <span class="src">来源：卷面识别</span>
+             </div>
+  <div class="who"><span class="k">错的学生</span><ul class="students"><li><span class="sname">张诗蕊</span><span class="et">概念不理解</span><span class="er">学生误认为高的比等于边长比，未掌握面积一定时高与底成反比的性质。</span><a class="eye" href="https://minxue-app-oss.oss-cn-shanghai.aliyuncs.com/images/bf235b85-e5d4-4f50-9e42-af8330df9451/20260915/6949a6cf-d2b3-4740-bcb2-3a34220ed601.jpg" target="_blank" rel="noopener" title="查看该学生原卷图"><svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></svg><span>原卷</span></a></li></ul></div>
+</article>
+    </section>
+</section>
+<section class="day">
+  <h2 class="day-title">2026-09-15（9 题 · 4 名学生）</h2>
+  
+  <section class="tier tier-basic">
+      <h3 class="tier-title"><span class="tier-name">基础</span>
+        <span class="tier-hint">难度 1-2 · 识记 / 简单 · 2 题</span></h3>
+      <article class="q">
+  <header class="q-head">
+    <span class="q-idx">1</span>
+    <span class="q-no">第 10 题</span>
+    <span class="badge badge-type">解答题</span>
+    <span class="badge badge-diff d2">难度 2</span><span class="badge badge-single">1 人错</span>
+  </header>
+  <div class="parent-stem">如图，抛物线 y=2(x-2)² 与平行于 x 轴的直线交于点 A、B，抛物线顶点为 C，△ABC 为等边三角形，求：</div><div class="stem subparts"><div class="subpart "><span class="sub-tag">(1)</span>抛物线的顶点坐标和增减性;</div><div class="subpart "><span class="sub-tag">(2)</span>点B的坐标;</div><div class="subpart "><span class="sub-tag">(3)</span>△ABC的面积.</div></div>
+           
+  
+  <figure class="fig"><img src="https://minxue-app-oss.oss-cn-shanghai.aliyuncs.com/images/0575f64d-3c9e-42d5-a5e4-7a461ccef385/20260917/c73658d1-b997-4410-96a5-b591df3d1a88.png" alt="题图" loading="lazy"><figcaption>题图（系统裁片）</figcaption></figure>
+  <div class="answer"><span class="k">参考答案</span><span class="v">如图，过点 C 作 CD⊥AB，垂足为 D。设 AD 为 a(a&gt;0)。∵△ABC 为等边三角形，CD⊥AB，∴AD=DB=a，∠ACD=30°，∴CD=√3a。∴点 B 的坐标为 (2+a, √3a)，∴√3a=2(2+a-2)²，∴a=√3/2，∴B((4+√3)/2, 3/2)。</span>
+             <span class="src">来源：练习册答案库</span>
+             </div>
+  <div class="who"><span class="k">错的学生</span><ul class="students"><li><span class="sname">李哲瀚</span><span class="et">步骤遗漏</span><span class="er">答案较标准解析明显过短，可能省略了解题步骤</span><a class="eye" href="https://minxue-app-oss.oss-cn-shanghai.aliyuncs.com/images/0575f64d-3c9e-42d5-a5e4-7a461ccef385/20260908/11b2d209-1845-425f-bbcf-76228549c74d.jpg" target="_blank" rel="noopener" title="查看该学生原卷图"><svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></svg><span>原卷</span></a></li></ul></div>
+</article>
+<article class="q">
+  <header class="q-head">
+    <span class="q-idx">2</span>
+    <span class="q-no">第 4 题</span>
+    <span class="badge badge-type">解答题</span>
+    <span class="badge badge-diff d2">难度 2</span><span class="badge badge-single">1 人错</span>
+  </header>
+  <div class="parent-stem">Ⅱ已知二次函数y=x²-2x-3.</div><div class="stem subparts"><div class="subpart "><span class="sub-tag">(1)</span>求该二次函数图像与x轴、y轴的交点;</div><div class="subpart "><span class="sub-tag">(2)</span>在平面直角坐标系xOy中,画出二次函数y=x²-2x-3的图像;</div><div class="subpart "><span class="sub-tag">(3)</span>结合函数图像,直接写出当-4≤y≤0时,x的取值范围.</div></div>
+           
+  
+  
+  <div class="answer"><span class="k">参考答案</span><span class="v">解：(1)当 y=0 时，x²-2x-3=0，解得 x₁=-1，x₂=3，∴抛物线与 x 轴的交点坐标为 (-1,0)、(3,0)。</span>
+             <span class="src">来源：练习册答案库</span>
+             </div>
+  <div class="who"><span class="k">错的学生</span><ul class="students"><li><span class="sname">陈施君</span><span class="et">步骤遗漏</span><span class="er">答案较标准解析明显过短，可能省略了解题步骤</span><a class="eye" href="https://minxue-app-oss.oss-cn-shanghai.aliyuncs.com/images/23aabcd4-e3a5-47e5-9170-78d2122255b3/20260908/d882f798-a8b2-4581-a589-da24dde9207e.jpg" target="_blank" rel="noopener" title="查看该学生原卷图"><svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></svg><span>原卷</span></a></li></ul></div>
+</article>
+    </section>
+<section class="tier tier-medium">
+      <h3 class="tier-title"><span class="tier-name">中等</span>
+        <span class="tier-hint">难度 3 · 常规题 · 3 题</span></h3>
+      <article class="q">
+  <header class="q-head">
+    <span class="q-idx">3</span>
+    <span class="q-no">第 11 题</span>
+    <span class="badge badge-type">解答题</span>
+    <span class="badge badge-diff d3">难度 3</span><span class="badge badge-single">1 人错</span>
+  </header>
+  <div class="parent-stem">在平面直角坐标系 xOy 中，将直线 l: y=-3/4x-3 沿 x 轴翻折，得到一条新直线与 x 轴交于点 A，与 y 轴交于点 B，将抛物线 C₁: y=1/3x² 沿 x 轴平移，得到一条新抛物线 C₂ 与 y 轴交于点 D，与直线 AB 交于点 E、F，连接 DF，满足 DF//x 轴. 求：</div><div class="stem subparts"><div class="subpart "><span class="sub-tag">(1)</span>直线AB的表达式;</div><div class="subpart "><span class="sub-tag">(2)</span>抛物线C₂的表达式.</div></div>
+           
+  
+  
+  <div class="answer"><span class="k">参考答案</span><span class="v">设平移后抛物线 C₂ 的顶点为 P(n,0)，则抛物线 C₂ 的表达式为 y=1/3(x-n)²，∴D(0, 1/3n²)。∵DF//x 轴，∴点 F(2n, 1/3n²)。又点 F 在直线 AB 上，∴1/3n²=3/4×2n+3，解得 n₁=6, n₂=-3/2。∴抛物线 C₂ 的表达式为 y=1/3(x-6)² 或 y=1/3(x+3/2)²。</span>
+             <span class="src">来源：练习册答案库</span>
+             </div>
+  <div class="who"><span class="k">错的学生</span><ul class="students"><li><span class="sname">李哲瀚</span><span class="et">步骤遗漏</span><span class="er">学生仅设出D点坐标，未利用DF∥x轴求F点并代入直线方程求解</span><a class="eye" href="https://minxue-app-oss.oss-cn-shanghai.aliyuncs.com/images/0575f64d-3c9e-42d5-a5e4-7a461ccef385/20260908/11b2d209-1845-425f-bbcf-76228549c74d.jpg" target="_blank" rel="noopener" title="查看该学生原卷图"><svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></svg><span>原卷</span></a></li></ul></div>
+</article>
+<article class="q">
+  <header class="q-head">
+    <span class="q-idx">4</span>
+    <span class="q-no">第 3 题</span>
+    <span class="badge badge-type">解答题</span>
+    <span class="badge badge-diff d3">难度 3</span><span class="badge badge-single">1 人错</span>
+  </header>
+  <div class="stem">3.如图,已知关于x的二次函数 y=-1/2x²+bx+c 的图像如图所示,则这个二次函数的表达式为</div>
+  
+  <figure class="fig"><img src="https://minxue-app-oss.oss-cn-shanghai.aliyuncs.com/images/afae6ef7-d071-42c5-b229-faaef0e443f7/20260915/1d69a6d2-ca25-4da4-a44f-6cdc847ea6bc.png" alt="题图" loading="lazy"><figcaption>题图（系统裁片）</figcaption></figure>
+  <div class="answer"><span class="k">参考答案</span><span class="v">y=-1/2x²+2x+5/2</span>
+             <span class="src">来源：练习册答案库</span>
+             </div>
+  <div class="who"><span class="k">错的学生</span><ul class="students"><li><span class="sname">程思豪</span><span class="et">计算错误</span><span class="er">学生算出 -2，正确应为 -1，属计算环节失误</span><a class="eye" href="https://minxue-app-oss.oss-cn-shanghai.aliyuncs.com/images/afae6ef7-d071-42c5-b229-faaef0e443f7/20260908/1d471c73-713f-40ed-9dc7-8bda8e54ed34.jpg" target="_blank" rel="noopener" title="查看该学生原卷图"><svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></svg><span>原卷</span></a></li></ul></div>
+</article>
+<article class="q">
+  <header class="q-head">
+    <span class="q-idx">5</span>
+    <span class="q-no">第 4 题</span>
+    <span class="badge badge-type">解答题</span>
+    <span class="badge badge-diff d3">难度 3</span><span class="badge badge-single">1 人错</span>
+  </header>
+  <div class="stem">如图, 已知抛物线 y=(x-2)² 的顶点为 C, 直线 y=2x+4 与抛物线交于 A、B 两点, 求 △ABC 的面积.</div>
+  
+  <figure class="fig"><img src="https://minxue-app-oss.oss-cn-shanghai.aliyuncs.com/images/0575f64d-3c9e-42d5-a5e4-7a461ccef385/20260915/2caacc1a-8291-4fd7-9c87-79e268ca9ce6.png" alt="题图" loading="lazy"><figcaption>题图（系统裁片）</figcaption></figure>
+  <div class="answer"><span class="k">参考答案</span><span class="v">解：易知抛物线 y=(x-2)² 的顶点 C 的坐标为 (2,0)。联立两函数的表达式，得 {y=2x+4, y=(x-2)²}，解得 {x₁=0, y₁=4}, {x₂=6, y₂=16}。∴A(6,16), B(0,4)。过点 A 作 AD⊥x 轴，垂足为 D，则 S△ABC = S梯形ABOD - S△AOC - S△ACD = 1/2(OB+AD)·OD - 1/2OC·OB - 1/2CD·AD = 1/2×(4+16)×6 - 1/2×2×4 - 1/2×4×16 = 24。</span>
+             <span class="src">来源：练习册答案库</span>
+             </div>
+  <div class="who"><span class="k">错的学生</span><ul class="students"><li><span class="sname">李哲瀚</span><span class="et">步骤遗漏</span><span class="er">答案较标准解析明显过短，可能省略了解题步骤</span><a class="eye" href="https://minxue-app-oss.oss-cn-shanghai.aliyuncs.com/images/0575f64d-3c9e-42d5-a5e4-7a461ccef385/20260908/6feffe8d-52ea-46a0-af58-30ec5b74051b.jpg" target="_blank" rel="noopener" title="查看该学生原卷图"><svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></svg><span>原卷</span></a></li></ul></div>
+</article>
+    </section>
+<section class="tier tier-hard">
+      <h3 class="tier-title"><span class="tier-name">较难</span>
+        <span class="tier-hint">难度 4-5 · 综合 / 压轴 · 4 题</span></h3>
+      <article class="q">
+  <header class="q-head">
+    <span class="q-idx">6</span>
+    <span class="q-no">第 11 题</span>
+    <span class="badge badge-type">解答题</span>
+    <span class="badge badge-diff d4">难度 4</span><span class="badge badge-single">1 人错</span>
+  </header>
+  <div class="parent-stem">11.已知二次函数 y=ax²+bx+c(a≠0)的图像过点 A(1,0),点 B(-3,0)和点 C.</div><div class="stem subparts"><div class="subpart "><span class="sub-tag">(1)</span>若点 C(0,-3),求二次函数的表达式;</div><div class="subpart "><span class="sub-tag">(2)</span>当 -3≤x≤0 时,二次函数的最大值为 m,最小值为 n,若 m-n=8,求 a 的值;</div><div class="subpart "><span class="sub-tag">(3)</span>若 z=-ax-3a 且 a&lt;0,求证: y-z+9/4a≤0.</div></div>
+           
+  
+  
+  <div class="answer"><span class="k">参考答案</span><span class="v">(1)解：设二次函数的表达式为 y=a(x-1)(x+3)，把 C(0,-3)代入，得 -3=a×(0-1)×(0+3)，解得 a=1，∴二次函数的表达式为 y=(x-1)(x+3)，即 y=x²+2x-3。<br>2)解：抛物线表达式为 y=a(x-1)(x+3)，即 y=ax²+2ax-3a，抛物线的对称轴为直线 x=-2a/2a=-1。当 x=-1 时，y 有最值 -4a。当 a&gt;0 时，x=-3，m=0；x=-1，n=-4a，∵m-n=8，∴0+4a=8，解得 a=2；当 a&lt;0 时，x=-1，m=-4a；x=-3，n=0，∵m-n=8，∴-4a-0=8，解得 a=-2，综上所述，a 的值为 2 或 -2。<br>3)证明：∵y=ax²+2ax-3a，x=-ax-3a，∴y-x+9/4a=ax²+2ax-3a-(-ax-3a)+9/4a=ax²+3ax+9/4a=a(x+3/2)²。∵a&lt;0，(x+3/2)²≥0，∴a(x+3/2)²≤0，即 y-x+9/4a≤0。</span>
+             <span class="src">来源：练习册答案库</span>
+             </div>
+  <div class="who"><span class="k">错的学生</span><ul class="students"><li><span class="sname">陈施君</span><span class="et">步骤遗漏</span><span class="er">答案较标准解析明显过短，可能省略了解题步骤</span><a class="eye" href="https://minxue-app-oss.oss-cn-shanghai.aliyuncs.com/images/23aabcd4-e3a5-47e5-9170-78d2122255b3/20260908/e192d1bb-0c94-4752-b8f6-32ff21a4b2e1.jpg" target="_blank" rel="noopener" title="查看该学生原卷图"><svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></svg><span>原卷</span></a></li></ul></div>
+</article>
+<article class="q">
+  <header class="q-head">
+    <span class="q-idx">7</span>
+    <span class="q-no">第 11 题</span>
+    <span class="badge badge-type">解答题</span>
+    <span class="badge badge-diff d4">难度 4</span><span class="badge badge-single">1 人错</span>
+  </header>
+  <div class="parent-stem">11.已知二次函数 y=ax²+bx+c(a≠0)的图像过点 A(1,0),点 B(-3,0)和点 C.</div><div class="stem subparts"><div class="subpart "><span class="sub-tag">(1)</span>若点 C(0,-3),求二次函数的表达式;</div><div class="subpart "><span class="sub-tag">(2)</span>当 -3≤x≤0 时,二次函数的最大值为 m,最小值为 n,若 m-n=8,求 a 的值;</div><div class="subpart "><span class="sub-tag">(3)</span>若 z=-ax-3a 且 a&lt;0,求证: y-z+9/4a≤0.</div></div>
+           
+  
+  
+  <div class="answer"><span class="k">参考答案</span><span class="v">(1)解：设二次函数的表达式为 y=a(x-1)(x+3)，把 C(0,-3)代入，得 -3=a×(0-1)×(0+3)，解得 a=1，∴二次函数的表达式为 y=(x-1)(x+3)，即 y=x²+2x-3。<br>2)解：抛物线表达式为 y=a(x-1)(x+3)，即 y=ax²+2ax-3a，抛物线的对称轴为直线 x=-2a/2a=-1。当 x=-1 时，y 有最值 -4a。当 a&gt;0 时，x=-3，m=0；x=-1，n=-4a，∵m-n=8，∴0+4a=8，解得 a=2；当 a&lt;0 时，x=-1，m=-4a；x=-3，n=0，∵m-n=8，∴-4a-0=8，解得 a=-2，综上所述，a 的值为 2 或 -2。<br>3)证明：∵y=ax²+2ax-3a，x=-ax-3a，∴y-x+9/4a=ax²+2ax-3a-(-ax-3a)+9/4a=ax²+3ax+9/4a=a(x+3/2)²。∵a&lt;0，(x+3/2)²≥0，∴a(x+3/2)²≤0，即 y-x+9/4a≤0。</span>
+             <span class="src">来源：练习册答案库</span>
+             </div>
+  <div class="who"><span class="k">错的学生</span><ul class="students"><li><span class="sname">陈施君</span><span class="et">步骤遗漏</span><span class="er">答案较标准解析明显过短，可能省略了解题步骤</span><a class="eye" href="https://minxue-app-oss.oss-cn-shanghai.aliyuncs.com/images/23aabcd4-e3a5-47e5-9170-78d2122255b3/20260908/e192d1bb-0c94-4752-b8f6-32ff21a4b2e1.jpg" target="_blank" rel="noopener" title="查看该学生原卷图"><svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></svg><span>原卷</span></a></li></ul></div>
+</article>
+<article class="q">
+  <header class="q-head">
+    <span class="q-idx">8</span>
+    <span class="q-no">第 12 题</span>
+    <span class="badge badge-type">解答题</span>
+    <span class="badge badge-diff d4">难度 4</span><span class="badge badge-single">1 人错</span>
+  </header>
+  <div class="stem">已知直线x=c交抛物线y₁=-(x-a)²于点A(c,m),交抛物线y₂=-(x-b)²于点B(c,n),下列结论:①若a&gt;b&gt;c,则m&lt;n;②若b&gt;a&gt;c,则m&lt;n;③若c&gt;b&gt;a,则m&lt;n;④若a&gt;c&gt;b,则m&lt;n.其中正确的结论有</div>
+  
+  
+  <div class="answer"><span class="k">参考答案</span><span class="v">B 解析：∵抛物线 y₁=-(x-a)² 经过点 A(c,m)，∴m=-(c-a)²，同理可得 n=-(c-b)²，∴m-n=-(c-a)²+(c-b)²=(a-b)(2c-a-b)。</span>
+             <span class="src">来源：练习册答案库</span>
+             </div>
+  <div class="who"><span class="k">错的学生</span><ul class="students"><li><span class="sname">李哲瀚</span><span class="et">步骤遗漏</span><span class="er">答案较标准解析明显过短，可能省略了解题步骤</span><a class="eye" href="https://minxue-app-oss.oss-cn-shanghai.aliyuncs.com/images/0575f64d-3c9e-42d5-a5e4-7a461ccef385/20260908/11b2d209-1845-425f-bbcf-76228549c74d.jpg" target="_blank" rel="noopener" title="查看该学生原卷图"><svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></svg><span>原卷</span></a></li></ul></div>
+</article>
+<article class="q">
+  <header class="q-head">
+    <span class="q-idx">9</span>
+    <span class="q-no">第 7 题</span>
+    <span class="badge badge-type">解答题</span>
+    <span class="badge badge-diff d4">难度 4</span><span class="badge badge-single">1 人错</span>
+  </header>
+  <div class="stem">如图，已知平行四边形ABCD顶点A的坐标为(2,6)，点B在y轴上，且AD//BC//x轴，过B、C、D三点的抛物线的顶点坐标为(2,2)，则抛物线的表达式是y=______.</div>
+  
+  <figure class="fig"><img src="https://minxue-app-oss.oss-cn-shanghai.aliyuncs.com/images/bf235b85-e5d4-4f50-9e42-af8330df9451/20260915/87ee6203-2d8c-408a-9a42-8ecbb6b610ab.png" alt="题图" loading="lazy"><figcaption>题图（系统裁片）</figcaption></figure>
+  <div class="answer"><span class="k">参考答案</span><span class="v">1/4(x-2)²+2 解析：∵过B,C,D三点的抛物线的顶点坐标为(2,2),AD//BC//x轴，∴BC=4。∵四边形ABCD是平行四边形，∴AD=BC=4。∵点A的坐标为(2,6)，∴D(6,6)。设抛物线为y=a(x-2)²+2，代入点D的坐标，得6=16a+2，解得a=1/4，∴抛物线的表达式为y=1/4(x-2)²+2。</span>
+             <span class="src">来源：练习册答案库</span>
+             </div>
+  <div class="who"><span class="k">错的学生</span><ul class="students"><li><span class="sname">张诗蕊</span><span class="et">步骤遗漏</span><span class="er">答案较标准解析明显过短，可能省略了解题步骤</span><a class="eye" href="https://minxue-app-oss.oss-cn-shanghai.aliyuncs.com/images/bf235b85-e5d4-4f50-9e42-af8330df9451/20260908/9238a85d-72f9-4575-8c7b-74b12788bab7.jpg" target="_blank" rel="noopener" title="查看该学生原卷图"><svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></svg><span>原卷</span></a></li></ul></div>
+</article>
+    </section>
+</section>
+<section class="day">
+  <h2 class="day-title">2026-09-13（12 题 · 3 名学生）</h2>
+  
+  <section class="tier tier-basic">
+      <h3 class="tier-title"><span class="tier-name">基础</span>
+        <span class="tier-hint">难度 1-2 · 识记 / 简单 · 1 题</span></h3>
+      <article class="q">
+  <header class="q-head">
+    <span class="q-idx">1</span>
+    <span class="q-no">第 1 题</span>
+    <span class="badge badge-type">选择题</span>
+    <span class="badge badge-diff d2">难度 2</span><span class="badge badge-single">1 人错</span>
+  </header>
+  <div class="stem">1.抛物线的形状、开口方向与 y=1/2x²-4x+3 相同,顶点坐标为(-2,1),则表达式为</div>
+  <ol class="options"><li>y=½(x-2)²+1</li><li>y=½(x+2)²-1</li><li>y=½(x+2)²+1</li><li>y=-½(x+2)²+1</li></ol>
+  
+  <div class="answer"><span class="k">参考答案</span><span class="v">C</span>
+             <span class="src">来源：练习册答案库</span>
+             </div>
+  <div class="who"><span class="k">错的学生</span><ul class="students"><li><span class="sname">程思豪</span><span class="sa">学生答：<em>A</em></span><span class="et">公式记忆错误</span><span class="er">未正确使用顶点式推导抛物线表达式</span><a class="eye" href="https://minxue-app-oss.oss-cn-shanghai.aliyuncs.com/images/afae6ef7-d071-42c5-b229-faaef0e443f7/20260915/c4cd7d03-99f8-4339-895f-077c5b120d40.jpg" target="_blank" rel="noopener" title="查看该学生原卷图"><svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></svg><span>原卷</span></a></li></ul></div>
+</article>
+    </section>
+<section class="tier tier-medium">
+      <h3 class="tier-title"><span class="tier-name">中等</span>
+        <span class="tier-hint">难度 3 · 常规题 · 6 题</span></h3>
+      <article class="q">
+  <header class="q-head">
+    <span class="q-idx">2</span>
+    <span class="q-no">第 2 题</span>
+    <span class="badge badge-type">选择题</span>
+    <span class="badge badge-diff d3">难度 3</span><span class="badge badge-shared">共 2 人错</span>
+  </header>
+  <div class="stem">2.二次函数的图像如图所示,则其表达式是</div>
+  <ol class="options"><li>y=-x²+2x+4</li><li>y=x²+2x+4</li><li>y=-x²-2x+4</li><li>y=-x²+2x+3</li></ol>
+  <figure class="fig"><img src="https://minxue-app-oss.oss-cn-shanghai.aliyuncs.com/images/afae6ef7-d071-42c5-b229-faaef0e443f7/20260915/5e3e2d68-e350-427f-a4b1-9ffd564b3810.png" alt="题图" loading="lazy"><figcaption>题图（系统裁片）</figcaption></figure>
+  <div class="answer"><span class="k">参考答案</span><span class="v">A</span>
+             <span class="src">来源：练习册答案库</span>
+             </div>
+  <div class="who"><span class="k">错的学生</span><ul class="students"><li><span class="sname">程思豪</span><span class="sa">学生答：<em>C</em></span><span class="et">不会分析</span><span class="er">未根据图像特征判断函数表达式，缺乏图像与解析式对应关系的理解</span><a class="eye" href="https://minxue-app-oss.oss-cn-shanghai.aliyuncs.com/images/afae6ef7-d071-42c5-b229-faaef0e443f7/20260915/48f62184-0a80-4291-85ee-522c89750b4b.jpg" target="_blank" rel="noopener" title="查看该学生原卷图"><svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></svg><span>原卷</span></a></li><li><span class="sname">张诗蕊</span><span class="sa">学生答：<em>C</em></span><span class="et">不会分析</span><span class="er">未根据图像特征判断函数表达式，缺乏图像与解析式对应关系的理解</span><a class="eye" href="https://minxue-app-oss.oss-cn-shanghai.aliyuncs.com/images/bf235b85-e5d4-4f50-9e42-af8330df9451/20260915/f4618efb-4a9c-4a6a-b74e-3ced8396ca14.jpg" target="_blank" rel="noopener" title="查看该学生原卷图"><svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></svg><span>原卷</span></a></li></ul></div>
+</article>
+<article class="q">
+  <header class="q-head">
+    <span class="q-idx">3</span>
+    <span class="q-no">第 10 题</span>
+    <span class="badge badge-type">解答题</span>
+    <span class="badge badge-diff d3">难度 3</span><span class="badge badge-single">1 人错</span>
+  </header>
+  <div class="parent-stem">某班数学兴趣小组对函数y=|x²-2x|的图像和性质进行了探究,探究过程如下,请补充完整.</div><div class="stem subparts"><div class="subpart "><span class="sub-tag">(1)</span>自变量x的取值范围是全体实数,x与y的几组对应值列表如下:其中,m=______.</div><div class="subpart "><span class="sub-tag">(2)</span>根据上表数据,在如图所示的平面直角坐标系中描点,并画出了函数图像的一部分,请画出该函数图像的另一部分.</div><div class="subpart "><span class="sub-tag">(3)</span>进一步探究函数图像解决问题:①方程|x²-2x|=1/2有______个实数根;</div><div class="subpart "><span class="sub-tag">(4)</span>(3)进一步探究函数图像解决问题:②在(2)中的平面直角坐标系中画出直线y=-x+1,根据图像写出方程|x²-2x|=-x+1的一个正数根约为______.(精确到0.1)</div></div>
+           
+  
+  
+  <div class="answer"><span class="k">参考答案</span><span class="v">(1)1.25<br>(2)如图1所示.<br>(3)①由函数图像知函数图像与y=1/2有4个交点,∴对应的方程|x²-2x|=1/2有4个实数根,故答案为4;<br>②如图2,由图像和表格可知方程|x²-2x|=-x+1的一个正数根约为0.4,故答案为0.4.</span>
+             <span class="src">来源：学生未作答</span>
+             </div>
+  <div class="who"><span class="k">错的学生</span><ul class="students"><li><span class="sname">丁嘉炜</span><span class="sa blank">未作答</span><span class="et">未作答</span><a class="eye" href="https://minxue-app-oss.oss-cn-shanghai.aliyuncs.com/images/451129ec-f9dd-44de-93a0-894901143eeb/20260913/f6dcbca3-8295-4334-bf39-98293b8a80ed.jpg" target="_blank" rel="noopener" title="查看该学生原卷图"><svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></svg><span>原卷</span></a></li></ul></div>
+</article>
+<article class="q">
+  <header class="q-head">
+    <span class="q-idx">4</span>
+    <span class="q-no">第 5 题</span>
+    <span class="badge badge-type">填空题</span>
+    <span class="badge badge-diff d3">难度 3</span><span class="badge badge-single">1 人错</span>
+  </header>
+  <div class="stem">已知线段b是线段a、c的比例中项，如果a=2,c=3，那么b=____.</div>
+  
+  
+  <div class="answer"><span class="k">参考答案</span><span class="v">√6</span>
+             <span class="src">来源：卷面识别</span>
+             </div>
+  <div class="who"><span class="k">错的学生</span><ul class="students"><li><span class="sname">张诗蕊</span><span class="sa">学生答：<em>B</em></span><span class="et">审题错误</span><span class="er">学生误将选择题选项当作答案，未求解抛物线表达式</span><a class="eye" href="https://minxue-app-oss.oss-cn-shanghai.aliyuncs.com/images/bf235b85-e5d4-4f50-9e42-af8330df9451/20260915/7c5ca670-5bd0-4be4-b134-f5b0738fa041.jpg" target="_blank" rel="noopener" title="查看该学生原卷图"><svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></svg><span>原卷</span></a></li></ul></div>
+</article>
+<article class="q">
+  <header class="q-head">
+    <span class="q-idx">5</span>
+    <span class="q-no">第 6 题</span>
+    <span class="badge badge-type">解答题</span>
+    <span class="badge badge-diff d3">难度 3</span><span class="badge badge-single">1 人错</span>
+  </header>
+  <div class="stem">已知线段AB的长是3cm，M是线段AB的黄金分割点，那么较长线段AM的长是____cm，较短线段BM的长是____cm.</div>
+  
+  
+  <div class="answer"><span class="k">参考答案</span><span class="v">(3√5-3)/2，(9-3√5)/2</span>
+             <span class="src">来源：卷面识别</span>
+             </div>
+  <div class="who"><span class="k">错的学生</span><ul class="students"><li><span class="sname">张诗蕊</span><span class="sa blank">未作答</span><span class="et">未作答</span><a class="eye" href="https://minxue-app-oss.oss-cn-shanghai.aliyuncs.com/images/bf235b85-e5d4-4f50-9e42-af8330df9451/20260915/6a1f2e6c-76f1-40bb-aef1-86c2de5d09e9.jpg" target="_blank" rel="noopener" title="查看该学生原卷图"><svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></svg><span>原卷</span></a></li></ul></div>
+</article>
+<article class="q">
+  <header class="q-head">
+    <span class="q-idx">6</span>
+    <span class="q-no">第 8 题</span>
+    <span class="badge badge-type">解答题</span>
+    <span class="badge badge-diff d3">难度 3</span><span class="badge badge-single">1 人错</span>
+  </header>
+  <div class="parent-stem">已知抛物线 y=ax²+2ax-1.</div><div class="stem subparts"><div class="subpart "><span class="sub-tag">(1)</span>该抛物线的对称轴为______；</div><div class="subpart "><span class="sub-tag">(2)</span>若该抛物线的顶点在x轴上，求抛物线的表达式；</div><div class="subpart "><span class="sub-tag">(3)</span>设点M(m,y₁),N(2,y₂)在该抛物线上，若y₁&gt;y₂，求m的取值范围。</div></div>
+           
+  
+  
+  <div class="answer"><span class="k">参考答案</span><span class="v">∵抛物线的对称轴为直线x=-1，∴N(2,y₂)关于直线x=-1的对称点为N'(-4,y₂)。①当a&gt;0时，若y₁&gt;y₂，则m&gt;2或m&lt;-4；当a&lt;0时，若y₁&gt;y₂，则-4&lt;m&lt;2。综上，当a&gt;0时，m&gt;2或m&lt;-4；当a&lt;0时，-4&lt;m&lt;2。</span>
+             <span class="src">来源：学生未作答</span>
+             </div>
+  <div class="who"><span class="k">错的学生</span><ul class="students"><li><span class="sname">程思豪</span><span class="et">审题错误</span><span class="er">学生未理解题意，误将求m范围答成抛物线表达式</span><a class="eye" href="https://minxue-app-oss.oss-cn-shanghai.aliyuncs.com/images/afae6ef7-d071-42c5-b229-faaef0e443f7/20260915/9daab327-3065-4611-813e-b261daaf55b2.jpg" target="_blank" rel="noopener" title="查看该学生原卷图"><svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></svg><span>原卷</span></a></li></ul></div>
+</article>
+<article class="q">
+  <header class="q-head">
+    <span class="q-idx">7</span>
+    <span class="q-no">第 9 题</span>
+    <span class="badge badge-type">解答题</span>
+    <span class="badge badge-diff d3">难度 3</span><span class="badge badge-single">1 人错</span>
+  </header>
+  <div class="parent-stem">如图，抛物线与x轴交于A、B两点，与y轴交于点C(0,3)，顶点坐标为(1,4)，点D(m,n)是抛物线上一点。</div><div class="stem subparts"><div class="subpart "><span class="sub-tag">(1)</span>求该抛物线的表达式；</div><div class="subpart "><span class="sub-tag">(2)</span>当-2≤m≤5/2且m≠0时：①求n的取值范围；②若S△ABC=S△ABD，求m的值。</div></div>
+           
+  
+  <figure class="fig"><img src="https://minxue-app-oss.oss-cn-shanghai.aliyuncs.com/images/afae6ef7-d071-42c5-b229-faaef0e443f7/20260917/12073e47-9927-4d90-b697-1fc00d3ef1e9.png" alt="题图" loading="lazy"><figcaption>题图（系统裁片）</figcaption></figure>
+  <div class="answer"><span class="k">参考答案</span><span class="v">解：(1)∵顶点坐标为(1,4)，∴设该抛物线的表达式为y=a(x-1)²+4。</span>
+             <span class="src">来源：学生未作答</span>
+             </div>
+  <div class="who"><span class="k">错的学生</span><ul class="students"><li><span class="sname">程思豪</span><span class="sa blank">未作答</span><span class="et">未作答</span><a class="eye" href="https://minxue-app-oss.oss-cn-shanghai.aliyuncs.com/images/afae6ef7-d071-42c5-b229-faaef0e443f7/20260915/c6e10653-aa33-477d-b5b7-cc555f509b5e.jpg" target="_blank" rel="noopener" title="查看该学生原卷图"><svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></svg><span>原卷</span></a></li></ul></div>
+</article>
+    </section>
+<section class="tier tier-hard">
+      <h3 class="tier-title"><span class="tier-name">较难</span>
+        <span class="tier-hint">难度 4-5 · 综合 / 压轴 · 2 题</span></h3>
+      <article class="q">
+  <header class="q-head">
+    <span class="q-idx">8</span>
+    <span class="q-no">第 4 题</span>
+    <span class="badge badge-type">解答题</span>
+    <span class="badge badge-diff d4">难度 4</span><span class="badge badge-single">1 人错</span>
+  </header>
+  <div class="parent-stem">4.如图,已知抛物线 y=ax²+bx+c 过原点O,格点A是该抛物线的顶点.</div><div class="stem subparts"><div class="subpart "><span class="sub-tag">(1)</span>求出该二次函数的表达式;</div><div class="subpart "><span class="sub-tag">(2)</span>点M(m,t),N(m+2,t)都在该抛物线上,求m的值.</div></div>
+           
+  
+  <figure class="fig"><img src="https://minxue-app-oss.oss-cn-shanghai.aliyuncs.com/images/afae6ef7-d071-42c5-b229-faaef0e443f7/20260917/462a37cd-47b9-4af3-b0e8-da73a68d6739.png" alt="题图" loading="lazy"><figcaption>题图（系统裁片）</figcaption></figure>
+  <div class="answer"><span class="k">参考答案</span><span class="v">∵二次函数的顶点坐标是(-1,3)，∴设二次函数的表达式为y=a(x+1)²+3。将(0,0)代入y=a(x+1)²+3，得a=-3，∴该二次函数的表达式为y=-3(x+1)²+3。</span>
+             <span class="src">来源：练习册答案库</span>
+             </div>
+  <div class="who"><span class="k">错的学生</span><ul class="students"><li><span class="sname">程思豪</span><span class="sa">学生答：<em>y = ax² + bx + c 代入 c=0<br>{ 0 = 4a - 2b + c<br>  0 = c<br>  3 = a - b + c</em></span><span class="et">方法选择错误</span><span class="er">学生未利用对称性，错误代入三点求系数，偏离题意</span><a class="eye" href="https://minxue-app-oss.oss-cn-shanghai.aliyuncs.com/images/afae6ef7-d071-42c5-b229-faaef0e443f7/20260915/b120f2d2-8615-46d5-8060-a05fe5f5ebbb.jpg" target="_blank" rel="noopener" title="查看该学生原卷图"><svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></svg><span>原卷</span></a></li></ul></div>
+</article>
+<article class="q">
+  <header class="q-head">
+    <span class="q-idx">9</span>
+    <span class="q-no">第 7 题</span>
+    <span class="badge badge-type">解答题</span>
+    <span class="badge badge-diff d4">难度 4</span><span class="badge badge-single">1 人错</span>
+  </header>
+  <div class="stem">如图，已知平行四边形ABCD顶点A的坐标为(2,6)，点B在y轴上，且AD//BC//x轴，过B、C、D三点的抛物线的顶点坐标为(2,2)，则抛物线的表达式是y=______。</div>
+  
+  <figure class="fig"><img src="https://minxue-app-oss.oss-cn-shanghai.aliyuncs.com/images/afae6ef7-d071-42c5-b229-faaef0e443f7/20260915/8c829222-6310-4e54-a7d7-259c7a1833cf.png" alt="题图" loading="lazy"><figcaption>题图（系统裁片）</figcaption></figure>
+  <div class="answer"><span class="k">参考答案</span><span class="v">1/4(x-2)²+2 解析：∵过B,C,D三点的抛物线的顶点坐标为(2,2),AD//BC//x轴，∴BC=4。∵四边形ABCD是平行四边形，∴AD=BC=4。∵点A的坐标为(2,6)，∴D(6,6)。设抛物线为y=a(x-2)²+2，代入点D的坐标，得6=16a+2，解得a=1/4，∴抛物线的表达式为y=1/4(x-2)²+2。</span>
+             <span class="src">来源：练习册答案库</span>
+             </div>
+  <div class="who"><span class="k">错的学生</span><ul class="students"><li><span class="sname">程思豪</span><span class="sa">学生答：<em>8</em></span><span class="et">审题错误</span><span class="er">学生未理解题目要求求抛物线表达式，误填数值8</span><a class="eye" href="https://minxue-app-oss.oss-cn-shanghai.aliyuncs.com/images/afae6ef7-d071-42c5-b229-faaef0e443f7/20260915/51454921-ddef-4c2f-b3ea-868bff45642e.jpg" target="_blank" rel="noopener" title="查看该学生原卷图"><svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></svg><span>原卷</span></a></li></ul></div>
+</article>
+    </section>
+<section class="tier tier-unknown">
+      <h3 class="tier-title"><span class="tier-name">难度未判定</span>
+        <span class="tier-hint">difficulty IS NULL · 需人工判断 · 3 题</span></h3>
+      <article class="q">
+  <header class="q-head">
+    <span class="q-idx">10</span>
+    <span class="q-no">第 10 题</span>
+    <span class="badge badge-type">未标题型</span>
+    <span class="badge badge-warn">难度未判定</span><span class="badge badge-single">1 人错</span>
+  </header>
+  <div class="stem">定义：如果直线y=-1与开口向下的抛物线有两个交点，那么这两个交点之间的距离叫作这条抛物线的“反碟长”。如图，抛物线L₁:y=-x²随其顶点沿直线y=1/2x平移一定距离后，得到新抛物线L₂的“反碟长”恰好为4，那么抛物线L₂的表达式是______。</div>
+  
+  
+  <div class="answer"><span class="k">参考答案</span><span class="v">解：(1) 由题意知 (-1,b) 既在 y=-3x+3 上，又在 y=ax²+1 上，∴ b=-3×(-1)+3=6，6=a×(-1)²+1，解得 a=5。<br>4×4/5)/2 + (4×1)/2 = 18/5。</span>
+             <span class="src">来源：错题本（自包含）</span>
+             </div>
+  <div class="who"><span class="k">错的学生</span><ul class="students"><li><span class="sname">程思豪</span><span class="sa blank">未作答</span><span class="et">未作答</span><a class="eye" href="https://minxue-app-oss.oss-cn-shanghai.aliyuncs.com/images/afae6ef7-d071-42c5-b229-faaef0e443f7/20260913/2fcd8619-6736-4c4b-b01b-bcf37594e08b.jpg" target="_blank" rel="noopener" title="查看该学生原卷图"><svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></svg><span>原卷</span></a></li></ul></div>
+</article>
+<article class="q">
+  <header class="q-head">
+    <span class="q-idx">11</span>
+    <span class="q-no">第 5 题</span>
+    <span class="badge badge-type">未标题型</span>
+    <span class="badge badge-warn">难度未判定</span><span class="badge badge-single">1 人错</span>
+  </header>
+  <div class="stem">5.已知一条抛物线经过 A(0,10),B(m+2,n),C(4-m,n),D(3,1)四点,则抛物线的表达式为</div>
+  
+  
+  <div class="answer"><span class="k">参考答案</span><span class="v">B</span>
+             <span class="src">来源：错题本（自包含）</span>
+             </div>
+  <div class="who"><span class="k">错的学生</span><ul class="students"><li><span class="sname">程思豪</span><span class="sa">学生答：<em>C</em></span><span class="et">审题错误</span><span class="er">学生误将选项C当作正确答案，未正确理解题目要求求抛物线表达式</span><a class="eye" href="https://minxue-app-oss.oss-cn-shanghai.aliyuncs.com/images/afae6ef7-d071-42c5-b229-faaef0e443f7/20260913/8e7514f3-5a6c-4a8c-8594-e7a3d58345ba.jpg" target="_blank" rel="noopener" title="查看该学生原卷图"><svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></svg><span>原卷</span></a></li></ul></div>
+</article>
+<article class="q">
+  <header class="q-head">
+    <span class="q-idx">12</span>
+    <span class="q-no">第 6 题</span>
+    <span class="badge badge-type">解答题</span>
+    <span class="badge badge-warn">难度未判定</span><span class="badge badge-single">1 人错</span>
+  </header>
+  <div class="stem">6.如图,是由长方形和抛物线构成的图案,由6个全等的基本图案组成,建立如图所示的平面直角坐标系.若抛物线A₁的表达式为 y=-(x-6)²+4,则抛物线A₆的表达式为</div>
+  
+  <figure class="fig"><img src="https://minxue-app-oss.oss-cn-shanghai.aliyuncs.com/images/afae6ef7-d071-42c5-b229-faaef0e443f7/20260917/4bf1cc26-463a-4642-b4cc-30ec5107ac76.png" alt="题图" loading="lazy"><figcaption>题图（系统裁片）</figcaption></figure>
+  <div class="answer"><span class="k">参考答案</span><span class="v">y=(x+2)²-4</span>
+             <span class="src">来源：学生未作答</span>
+             </div>
+  <div class="who"><span class="k">错的学生</span><ul class="students"><li><span class="sname">程思豪</span><span class="sa blank">未作答</span><span class="et">未作答</span><a class="eye" href="https://minxue-app-oss.oss-cn-shanghai.aliyuncs.com/images/afae6ef7-d071-42c5-b229-faaef0e443f7/20260915/d1d41064-68b7-4758-a288-d41717a5ee43.jpg" target="_blank" rel="noopener" title="查看该学生原卷图"><svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></svg><span>原卷</span></a></li></ul></div>
+</article>
+    </section>
+</section>
+<section class="day">
+  <h2 class="day-title">2026-09-12（2 题 · 1 名学生）</h2>
+  
+  <section class="tier tier-unknown">
+      <h3 class="tier-title"><span class="tier-name">难度未判定</span>
+        <span class="tier-hint">difficulty IS NULL · 需人工判断 · 2 题</span></h3>
+      <article class="q">
+  <header class="q-head">
+    <span class="q-idx">1</span>
+    <span class="q-no">第 10 题</span>
+    <span class="badge badge-type">未标题型</span>
+    <span class="badge badge-warn">难度未判定</span><span class="badge badge-single">1 人错</span>
+  </header>
+  <div class="stem">定义：如果直线y=-1与开口向下的抛物线有两个交点，那么这两个交点之间的距离叫作这条抛物线的“反碟长”。如图，抛物线L₁:y=-x²随其顶点沿直线y=1/2x平移一定距离后，得到新抛物线L₂的“反碟长”恰好为4，那么抛物线L₂的表达式是______。</div>
+  
+  
+  <div class="answer"><span class="k">参考答案</span><span class="v">(1)1.25<br>(2)如图1所示.<br>(3)①由函数图像知函数图像与y=1/2有4个交点,∴对应的方程|x²-2x|=1/2有4个实数根,故答案为4;<br>②如图2,由图像和表格可知方程|x²-2x|=-x+1的一个正数根约为0.4,故答案为0.4.</span>
+             <span class="src">来源：错题本（自包含）</span>
+             </div>
+  <div class="who"><span class="k">错的学生</span><ul class="students"><li><span class="sname">张诗蕊</span><span class="sa">学生答：<em>y=-(x-2)²+1</em></span><span class="et">计算错误</span><span class="er">学生算出 -2，正确应为 82，属计算环节失误</span><a class="eye" href="https://minxue-app-oss.oss-cn-shanghai.aliyuncs.com/images/bf235b85-e5d4-4f50-9e42-af8330df9451/20260913/a339295f-0943-4ad4-8dc5-f8a47a9b81d8.jpg" target="_blank" rel="noopener" title="查看该学生原卷图"><svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></svg><span>原卷</span></a></li></ul></div>
+</article>
+<article class="q">
+  <header class="q-head">
+    <span class="q-idx">2</span>
+    <span class="q-no">第 8 题</span>
+    <span class="badge badge-type">解答题</span>
+    <span class="badge badge-warn">难度未判定</span><span class="badge badge-single">1 人错</span>
+  </header>
+  <div class="stem">如图，阳光透过窗口照到室内，在地面上留下2.7m宽的亮区，已知亮区一边到窗下的墙脚距离CE为8.7m，窗口高AB=1.m，那么窗口底边离地面的高度BC为______m.</div>
+  
+  <figure class="fig"><img src="https://minxue-app-oss.oss-cn-shanghai.aliyuncs.com/images/bf235b85-e5d4-4f50-9e42-af8330df9451/20260917/7eb48d3f-c5d8-4c82-ac3c-7ab80bfdcde2.png" alt="题图" loading="lazy"><figcaption>题图（系统裁片）</figcaption></figure>
+  <div class="answer"><span class="k">参考答案</span><span class="v">5.8</span>
+             <span class="src">来源：卷面识别</span>
+             </div>
+  <div class="who"><span class="k">错的学生</span><ul class="students"><li><span class="sname">张诗蕊</span><span class="sa">学生答：<em>m&lt;2或m&gt;4</em></span><span class="et">概念不理解</span><span class="er">未理解抛物线对称性与函数值大小关系</span><a class="eye" href="https://minxue-app-oss.oss-cn-shanghai.aliyuncs.com/images/bf235b85-e5d4-4f50-9e42-af8330df9451/20260915/a18a76bf-fec8-4ff8-834c-4ccb65a5c52c.jpg" target="_blank" rel="noopener" title="查看该学生原卷图"><svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></svg><span>原卷</span></a></li></ul></div>
+</article>
+    </section>
+</section>
+<section class="day">
+  <h2 class="day-title">2026-09-11（6 题 · 2 名学生）</h2>
+  
+  <section class="tier tier-medium">
+      <h3 class="tier-title"><span class="tier-name">中等</span>
+        <span class="tier-hint">难度 3 · 常规题 · 5 题</span></h3>
+      <article class="q">
+  <header class="q-head">
+    <span class="q-idx">1</span>
+    <span class="q-no">第 1 题</span>
+    <span class="badge badge-type">选择题</span>
+    <span class="badge badge-diff d3">难度 3</span><span class="badge badge-single">1 人错</span>
+  </header>
+  <div class="stem">1. 如图,小明打高尔夫球,小球的飞行路线是一条抛物线.如果不考虑空气阻力,小球的飞行高度h(米)与飞行时间t(秒)之间满足函数关系h=20t-5t².则小球从飞出到落地瞬间所需要的时间为</div>
+  <ol class="options"><li>2 秒</li><li>3 秒</li><li>4 秒</li><li>5 秒</li></ol>
+  <figure class="fig"><img src="https://minxue-app-oss.oss-cn-shanghai.aliyuncs.com/images/451129ec-f9dd-44de-93a0-894901143eeb/20260911/b88213d4-3266-4991-8c9a-67e1263e376c.png" alt="题图" loading="lazy"><figcaption>题图（系统裁片）</figcaption></figure>
+  <div class="answer"><span class="k">参考答案</span><span class="v">C</span>
+             <span class="src">来源：练习册答案库</span>
+             </div>
+  <div class="who"><span class="k">错的学生</span><ul class="students"><li><span class="sname">丁嘉炜</span><span class="et">计算错误</span><span class="er">解方程20t-5t²=0时算错根，导致选错时间</span><a class="eye" href="https://minxue-app-oss.oss-cn-shanghai.aliyuncs.com/images/451129ec-f9dd-44de-93a0-894901143eeb/20260910/9a353140-a5f7-420b-befe-4ba0a01a40d3.jpg" target="_blank" rel="noopener" title="查看该学生原卷图"><svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></svg><span>原卷</span></a></li></ul></div>
+</article>
+<article class="q">
+  <header class="q-head">
+    <span class="q-idx">2</span>
+    <span class="q-no">第 10 题</span>
+    <span class="badge badge-type">解答题</span>
+    <span class="badge badge-diff d3">难度 3</span><span class="badge badge-single">1 人错</span>
+  </header>
+  <div class="parent-stem">已知抛物线 y=ax²+1(a≠0)与直线 y=-3x+3 交于点(-1,b).</div><div class="stem subparts"><div class="subpart "><span class="sub-tag">(1)</span>求a、b的值；</div><div class="subpart "><span class="sub-tag">(2)</span>求抛物线与直线y=x+5的两交点及顶点所构成的三角形的面积。</div></div>
+           
+  
+  
+  <div class="answer"><span class="k">参考答案</span><span class="v">解：(1) 由题意知 (-1,b) 既在 y=-3x+3 上，又在 y=ax²+1 上，∴ b=-3×(-1)+3=6，6=a×(-1)²+1，解得 a=5。<br>4×4/5)/2 + (4×1)/2 = 18/5。</span>
+             <span class="src">来源：练习册答案库</span>
+             </div>
+  <div class="who"><span class="k">错的学生</span><ul class="students"><li><span class="sname">李哲瀚</span><span class="et">方法选择错误</span><span class="er">学生误将直线与抛物线交点问题当作顶点性质题解答</span><a class="eye" href="https://minxue-app-oss.oss-cn-shanghai.aliyuncs.com/images/0575f64d-3c9e-42d5-a5e4-7a461ccef385/20260908/76e318d1-bb1b-494b-9eb9-7a47ab0fe556.jpg" target="_blank" rel="noopener" title="查看该学生原卷图"><svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></svg><span>原卷</span></a></li></ul></div>
+</article>
+<article class="q">
+  <header class="q-head">
+    <span class="q-idx">3</span>
+    <span class="q-no">第 4 题</span>
+    <span class="badge badge-type">解答题</span>
+    <span class="badge badge-diff d3">难度 3</span><span class="badge badge-single">1 人错</span>
+  </header>
+  <div class="stem">4. 某种礼炮的升空高度h(m)与飞行时间t(s)的表达式是h=-5/2 t²+30t+1,则这种礼炮在点火升空到最高点引爆,则从点火升空到引爆需要的时间为______s.</div>
+  
+  
+  <div class="answer"><span class="k">参考答案</span><span class="v">6</span>
+             <span class="src">来源：练习册答案库</span>
+             </div>
+  <div class="who"><span class="k">错的学生</span><ul class="students"><li><span class="sname">丁嘉炜</span><span class="et">计算错误</span><span class="er">学生算出 9，正确应为 6，属计算环节失误</span><a class="eye" href="https://minxue-app-oss.oss-cn-shanghai.aliyuncs.com/images/451129ec-f9dd-44de-93a0-894901143eeb/20260910/9a353140-a5f7-420b-befe-4ba0a01a40d3.jpg" target="_blank" rel="noopener" title="查看该学生原卷图"><svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></svg><span>原卷</span></a></li></ul></div>
+</article>
+<article class="q">
+  <header class="q-head">
+    <span class="q-idx">4</span>
+    <span class="q-no">第 5 题</span>
+    <span class="badge badge-type">选择题</span>
+    <span class="badge badge-diff d3">难度 3</span><span class="badge badge-single">1 人错</span>
+  </header>
+  <div class="stem">5. 已知点 (x₁,y₁)、(x₂,y₂) 均在抛物线 y=x²-1 上，则下列说法正确的是</div>
+  <ol class="options"><li>若 y₁ = y₂，则 x₁ = x₂</li><li>若 x₁ = -x₂，则 y₁ = -y₂</li><li>若 0 &lt; x₁ &lt; x₂，则 y₁ &gt; y₂</li><li>若 x₁ &lt; x₂ &lt; 0，则 y₁ &gt; y₂</li></ol>
+  
+  <div class="answer"><span class="k">参考答案</span><span class="v">D</span>
+             <span class="src">来源：教师录入</span>
+             </div>
+  <div class="who"><span class="k">错的学生</span><ul class="students"><li><span class="sname">李哲瀚</span><span class="et">审题错误</span><span class="er">未仔细阅读选项</span><a class="eye" href="https://minxue-app-oss.oss-cn-shanghai.aliyuncs.com/images/0575f64d-3c9e-42d5-a5e4-7a461ccef385/20260908/dfec9794-94d7-4f2d-bd75-e2f5ab8ecaa0.jpg" target="_blank" rel="noopener" title="查看该学生原卷图"><svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></svg><span>原卷</span></a></li></ul></div>
+</article>
+<article class="q">
+  <header class="q-head">
+    <span class="q-idx">5</span>
+    <span class="q-no">第 9 题</span>
+    <span class="badge badge-type">解答题</span>
+    <span class="badge badge-diff d3">难度 3</span><span class="badge badge-single">1 人错</span>
+  </header>
+  <div class="parent-stem">已知抛物线 y=ax²+n(an&gt;0)与抛物线 y=-2x² 的形状相同，且其图像上与 x 轴最近的点到 x 轴的距离为 3.</div><div class="stem subparts"><div class="subpart "><span class="sub-tag">(1)</span>求a、n的值；</div><div class="subpart "><span class="sub-tag">(2)</span>在(1)的情况下，指出抛物线y=ax²+n的开口方向、对称轴和顶点坐标。</div></div>
+           
+  
+  
+  <div class="answer"><span class="k">参考答案</span><span class="v">当 a=2，n=3 时，抛物线 y=2x²+3 开口向上，对称轴为 y 轴，顶点坐标为 (0,3)；当 a=-2，n=-3 时，抛物线 y=-2x²-3 开口向下，对称轴为 y 轴，顶点坐标为 (0,-3)。</span>
+             <span class="src">来源：练习册答案库</span>
+             </div>
+  <div class="who"><span class="k">错的学生</span><ul class="students"><li><span class="sname">李哲瀚</span><span class="et">单位错误</span><span class="er">结果数字正确但漏写了单位（当 a=2，n=3 时，抛物线 y=2x²+3 开口向上，对称轴为 y 轴，顶点坐标为 (0,3)；当 a=-2，n=-3 时，抛物线 y=-2x²-3 开口向下，对称轴为 y 轴，顶点坐标为 (0,-3)。）</span><a class="eye" href="https://minxue-app-oss.oss-cn-shanghai.aliyuncs.com/images/0575f64d-3c9e-42d5-a5e4-7a461ccef385/20260908/76e318d1-bb1b-494b-9eb9-7a47ab0fe556.jpg" target="_blank" rel="noopener" title="查看该学生原卷图"><svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></svg><span>原卷</span></a></li></ul></div>
+</article>
+    </section>
+<section class="tier tier-hard">
+      <h3 class="tier-title"><span class="tier-name">较难</span>
+        <span class="tier-hint">难度 4-5 · 综合 / 压轴 · 1 题</span></h3>
+      <article class="q">
+  <header class="q-head">
+    <span class="q-idx">6</span>
+    <span class="q-no">第 7 题</span>
+    <span class="badge badge-type">解答题</span>
+    <span class="badge badge-diff d4">难度 4</span><span class="badge badge-single">1 人错</span>
+  </header>
+  <div class="parent-stem">如图,在矩形ABCD中,点E、F、G、H分别在边AB、BC、CD、DA上,且AE=AH=CF=CG,已知AB=a,BC=b.</div><div class="stem subparts"><div class="subpart "><span class="sub-tag">(1)</span>若b/3≤a≤3b时,求四边形EFGH的面积的最大值;</div><div class="subpart "><span class="sub-tag">(2)</span>在(1)的条件下,若a=4,b=16,求四边形EFGH的面积的最大值.</div></div>
+           
+  
+  <figure class="fig"><img src="https://minxue-app-oss.oss-cn-shanghai.aliyuncs.com/images/451129ec-f9dd-44de-93a0-894901143eeb/20260917/eaab16cf-c6c8-49ef-a414-565fcd10a3ce.png" alt="题图" loading="lazy"><figcaption>题图（系统裁片）</figcaption></figure>
+  <div class="answer"><span class="k">参考答案</span><span class="v">设 AE = x，<br>∵ 矩形 ABCD，∴ ∠A = ∠D = ∠B = ∠C = 90°，AB = CD，AD = BC。又∵ AE = AH = CF = CG，<br>∴ △AEH ≌ △CGF，BE = DG，HD = BF，<br>∴ △BEF ≌ △DGH，<br>2×½x² - 2×½(a-x)(b-x) = ab - x² - (ab - ax - bx + x²) = -2x² + (a+b)x。<br>∵ -2 &lt; 0，∴ 当 x = (a+b)/4 时，S四边形EFGH 有最大值。<br>3b，0 &lt; x ≤ a，(a+b)/4 在此范围内，<br>∴ 四边形 EFGH 的面积的最大值为 [-(a+b)²]/[4×(-2)] = (a+b)²/8。</span>
+             <span class="src">来源：学生未作答</span>
+             </div>
+  <div class="who"><span class="k">错的学生</span><ul class="students"><li><span class="sname">丁嘉炜</span><span class="sa blank">未作答</span><span class="et">未作答</span><a class="eye" href="https://minxue-app-oss.oss-cn-shanghai.aliyuncs.com/images/451129ec-f9dd-44de-93a0-894901143eeb/20260910/7bf6b6c4-4830-49e2-bdd3-c9cb0e832fcd.jpg" target="_blank" rel="noopener" title="查看该学生原卷图"><svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></svg><span>原卷</span></a></li></ul></div>
+</article>
+    </section>
+</section>
+
+</div>
+</body>
+</html>

@@ -1,0 +1,256 @@
+{
+  "generatedAt": "2026-09-19T06:07:17.207Z",
+  "grade": "初三",
+  "subject": null,
+  "period": {
+    "start": "2026-08-31",
+    "end": "2026-09-20"
+  },
+  "students": [
+    "丁嘉炜",
+    "周俊辰",
+    "张诗蕊",
+    "李哲瀚",
+    "王艺博",
+    "程思豪",
+    "胡传政",
+    "陈施君"
+  ],
+  "totals": {
+    "rawRows": 25,
+    "topics": 10,
+    "days": 13,
+    "sections": 1
+  },
+  "days": [
+    {
+      "day": "2026-09-18",
+      "dayFrom": "2026-09-18",
+      "mergedDays": [],
+      "rawRows": 25,
+      "totalTopics": 25,
+      "topics": [
+        {
+          "questionNumber": 11,
+          "difficulty": 3,
+          "diffValues": [
+            3
+          ],
+          "questionType": "answer",
+          "studentCount": 1,
+          "rawCount": 1,
+          "content": "求证：AD²=AC·BE。",
+          "answer": "36°",
+          "answerSource": "blank",
+          "answerRisk": null,
+          "students": [
+            {
+              "name": "张诗蕊",
+              "wrongTimes": 1,
+              "studentAnswer": null,
+              "errorType": "未作答"
+            }
+          ]
+        },
+        {
+          "questionNumber": 12,
+          "difficulty": 3,
+          "diffValues": [
+            3
+          ],
+          "questionType": "fill",
+          "studentCount": 1,
+          "rawCount": 1,
+          "content": "求证：PM=QM。",
+          "answer": "无法唯一确定，填“待人工补充",
+          "answerSource": "recognized",
+          "answerRisk": "AI 视觉推理不擅长，建议核对参考答案",
+          "students": [
+            {
+              "name": "张诗蕊",
+              "wrongTimes": 1,
+              "studentAnswer": null,
+              "errorType": "不会分析"
+            }
+          ]
+        },
+        {
+          "questionNumber": 13,
+          "difficulty": 3,
+          "diffValues": [
+            3
+          ],
+          "questionType": "fill",
+          "studentCount": 1,
+          "rawCount": 1,
+          "content": "若A(-4,y₁)、B(2,y₂)、C(1,y₃)为二次函数y=x²+k的图像上的三点，则y₁、y₂、y₃的大小关系是______（用\"<\"连接）。",
+          "answer": "y₃<y₂<y₁",
+          "answerSource": "recognized",
+          "answerRisk": null,
+          "students": [
+            {
+              "name": "张诗蕊",
+              "wrongTimes": 1,
+              "studentAnswer": null,
+              "errorType": "计算错误"
+            }
+          ]
+        },
+        {
+          "questionNumber": 2,
+          "difficulty": 3,
+          "diffValues": [
+            3
+          ],
+          "questionType": "choice",
+          "studentCount": 1,
+          "rawCount": 1,
+          "content": "对于二次函数y=-2(x-3)²+1，下列说法中正确的是",
+          "answer": "D",
+          "answerSource": "recognized",
+          "answerRisk": null,
+          "students": [
+            {
+              "name": "张诗蕊",
+              "wrongTimes": 1,
+              "studentAnswer": null,
+              "errorType": "概念不理解"
+            }
+          ]
+        },
+        {
+          "questionNumber": 5,
+          "difficulty": 3,
+          "diffValues": [
+            3
+          ],
+          "questionType": "fill",
+          "studentCount": 1,
+          "rawCount": 1,
+          "content": "如图，已知BD和CE是△ABC的高，BD与CE相交于点O，那么图中与△ABD相似的三角形是______。",
+          "answer": "△ACE、△BEO、△CDO",
+          "answerSource": "recognized",
+          "answerRisk": "AI 视觉推理不擅长，建议核对参考答案",
+          "students": [
+            {
+              "name": "王艺博",
+              "wrongTimes": 1,
+              "studentAnswer": null,
+              "errorType": "审题错误"
+            }
+          ]
+        },
+        {
+          "questionNumber": 5,
+          "difficulty": 3,
+          "diffValues": [
+            3
+          ],
+          "questionType": "fill",
+          "studentCount": 1,
+          "rawCount": 1,
+          "content": "如图，已知BD和CE是△ABC的高，BD与CE相交于点O，那么图中与△ABD相似的三角形是",
+          "answer": "△ACE、△BEO、△CDO",
+          "answerSource": "recognized",
+          "answerRisk": "AI 视觉推理不擅长，建议核对参考答案",
+          "students": [
+            {
+              "name": "张诗蕊",
+              "wrongTimes": 1,
+              "studentAnswer": null,
+              "errorType": "步骤遗漏"
+            }
+          ]
+        },
+        {
+          "questionNumber": 6,
+          "difficulty": 3,
+          "diffValues": [
+            3
+          ],
+          "questionType": "fill",
+          "studentCount": 1,
+          "rawCount": 1,
+          "content": "如图，□ABCD的对角线相交于点O，已知OE∥AB，与△BOE相似的三角形是",
+          "answer": "△DOF",
+          "answerSource": "recognized",
+          "answerRisk": "AI 视觉推理不擅长，建议核对参考答案",
+          "students": [
+            {
+              "name": "张诗蕊",
+              "wrongTimes": 1,
+              "studentAnswer": null,
+              "errorType": "概念不理解"
+            }
+          ]
+        },
+        {
+          "questionNumber": 7,
+          "difficulty": 3,
+          "diffValues": [
+            3
+          ],
+          "questionType": "fill",
+          "studentCount": 1,
+          "rawCount": 1,
+          "content": "如图，已知△ABC和△GAF是两个全等的等腰直角三角形，那么图中相似三角形（不包括全等）共有 对。",
+          "answer": "5",
+          "answerSource": "recognized",
+          "answerRisk": "AI 视觉推理不擅长，建议核对参考答案",
+          "students": [
+            {
+              "name": "张诗蕊",
+              "wrongTimes": 1,
+              "studentAnswer": null,
+              "errorType": "计算错误"
+            }
+          ]
+        },
+        {
+          "questionNumber": 9,
+          "difficulty": 3,
+          "diffValues": [
+            3
+          ],
+          "questionType": "fill",
+          "studentCount": 1,
+          "rawCount": 1,
+          "content": "已知函数 y=(k-3)x²+2x+1 的图像与 x 轴有交点，则 k 的取值范围是□。",
+          "answer": "k≤4",
+          "answerSource": "recognized",
+          "answerRisk": null,
+          "students": [
+            {
+              "name": "张诗蕊",
+              "wrongTimes": 1,
+              "studentAnswer": null,
+              "errorType": "审题错误"
+            }
+          ]
+        },
+        {
+          "questionNumber": 9,
+          "difficulty": 3,
+          "diffValues": [
+            3
+          ],
+          "questionType": "fill",
+          "studentCount": 1,
+          "rawCount": 1,
+          "content": "如果点A(3,m)、B(5,n)是抛物线y=2023(x-1)²+2024上的两个点，那么m和n的大小关系是m______n（填\">\"或\"<\"或\"=\"）。",
+          "answer": "m < n",
+          "answerSource": "recognized",
+          "answerRisk": null,
+          "students": [
+            {
+              "name": "张诗蕊",
+              "wrongTimes": 1,
+              "studentAnswer": null,
+              "errorType": "粗心"
+            }
+          ]
+        }
+      ]
+    }
+  ]
+}
