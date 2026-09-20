@@ -5,6 +5,18 @@ import { syncQuestionCompleteness } from './questionCompletenessSync.js'
 import { normalizeOptions } from '../utils/optionText.js'
 import { coerceAIText } from '../utils/aiTextCoerce.js'
 
+/**
+ * content 兜底占位符：questions.content 列 NOT NULL 且无默认值。
+ * 所有识别管线都可能在极端情形下产出空题干（模型抽风 / 题号识别出但题干裁剪失败 /
+ * 纯图形题没有可抄文字），此前直接写 NULL → 约束违反 → 整卷落库失败 →
+ * 自动重试无效（same input same failure），任务永久卡在「识别异常」。
+ * 占位文案与 processWorkbookGrading 的「第 N 题」口径一致，前端可据此识别残题。
+ */
+function questionContentPlaceholder(q) {
+  const n = q?.question_number
+  return n != null && n !== '' ? `第 ${n} 题` : '(题干缺失)'
+}
+
 export const updateTaskStatus = async (taskId, status, result = null) => {
   const updateData = {
     status,
@@ -72,7 +84,11 @@ export const createQuestions = async (questions) => {
       student_id: q.student_id,
       // 文本列的最后一道闸门：上游任一识别路径把数组/对象传进来，
       // node-postgres 会按 PG 数组字面量序列化（{"x₁ = -1/2","x₂ = 5/2"}）写进 text 列。
-      content: coerceAIText(q.content) || null,
+      // NOT NULL 兜底（2026-09-20 事故：general 管线单题 content 为空 → 整卷落库失败，
+      // questions.content 无默认值，NULL 直接违反约束打成 failed，且自动重试无效）：
+      // workbook/答案库管线调用前已有占位兜底，这里做最后一道防线，
+      // content 为空时用「第 N 题」占位符兜底（与 processWorkbookGrading 口径一致）。
+      content: coerceAIText(q.content) || questionContentPlaceholder(q),
       // jsonb 列的最后一道闸门：上游把 AI 返回的 JSON 字符串/对象/数字直接透传时，
       // JSON.stringify 会把它们当成 JSON 字面量序列化（带双引号的字符串），PG jsonb 列不接受。
       // 历史事件 2026-09-02 朱思诺作业：q.options 是 AI 返回的字符串，

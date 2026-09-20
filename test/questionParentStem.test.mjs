@@ -187,6 +187,15 @@ test('createQuestions 落库映射 parent_stem / sub_no（含 shared_stem 别名
   assert.ok(neon.includes('sub_no:'), 'createQuestions 应写 sub_no')
 })
 
+test('createQuestions content 空值兜底（2026-09-20 识别异常事故：单题 content 为空整卷 failed）', () => {
+  const neon = readFileSync(`${ROOT}server/services/neonService.js`, 'utf8')
+  // content 列 NOT NULL 且无默认值；识别管线可能产出空题干，必须占位兜底而非写 NULL
+  assert.ok(!neon.includes('content: coerceAIText(q.content) || null'), 'content 空值不得写 NULL')
+  assert.ok(neon.includes('content: coerceAIText(q.content) || questionContentPlaceholder(q)'),
+    'createQuestions 应对空 content 用占位符兜底')
+  assert.ok(neon.includes('第 ${n} 题'), '占位符应带题号（与 workbook 管线口径一致）')
+})
+
 test('重练卷 PDF 渲染公共题干（连排去重 + 题组编号）', () => {
   const svc = readFileSync(`${ROOT}server/services/wrongRetryPdfService.js`, 'utf8')
   assert.ok(svc.includes('q.parent_stem, q.sub_no, q.question_number, q.task_id, q.page_number'), 'SQL 应取回题组字段')
