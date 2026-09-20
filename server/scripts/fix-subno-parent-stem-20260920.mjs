@@ -125,16 +125,82 @@ const normLoose = (s) => norm(s).replace(/[^\u4e00-\u9fa5a-zA-Z0-9]/g, '').toLow
 
 /**
  * 从残句自身文本取小问号（OCR 内容没匹配上时的兜底）。
- * 只在「整段仅出现一个小问标号」时才认——合并输出的残句（含 (1)(2)(3)）一律拒绝，
- * 避免把一条合并记录误判成某一个小问。
+ *
+ * 两条准入路径：
+ *   ① **行首圈号** ①②③… → 直接就是小问号（`②如图(3)…` 也认）。
+ *   ② **全段仅一个 `(N)`** 且位置靠前（≤20 字）→ 视为小问号。
+ *
+ * 两条拒绝：
+ *   · 全段出现 ≥2 个 `(N)` → 多半是合并输出，判不出是哪一小问，一律拒绝。
+ *   · `(N)` 前一个字符是「图/表/第/如/式/题」→ 是正文引用（`如图(3)`、`第(2)题`），不是标号。
+ *     ⚠️ 实测 `②如图(3)，当点Q与点B重合…` 若不设这道闸，会把 (3) 误当成小问号 3。
+ *   · 行首圈号**前面还有字**（如 `如图①`）默认不认：那多半是「如图①」这种图形引用，不是小问标号。
+ *   · **例外**（2026-09-20 补）：整行以「如图①」「见图③」**开头**、且行内没有任何 `(N)` 标号时，
+ *     图号**就是**小问号。典型形态是图形填空小题：「如图①，S_阴影 = ____」/「如图②，…」。
+ *     实测 `70f2550a` 题12 三条残句正是此形（①②③ 对应 (1)(2)(3)），此前被 ①② 规则漏掉。
+ *     ⚠️ 闸门不能松：必须「以 如图/见图/图 起头」且「行内无 `(N)`」，否则 `②如图(3)…` 会被误判。
  */
+const CIRCLED = '①②③④⑤⑥⑦⑧⑨⑩⑪⑫⑬⑭⑮⑯⑰⑱⑲⑳'
+const NOT_A_LABEL_BEFORE = /[图表第如式题]/
+/** 整行以「如图① / 见图③ / 图⑤」开头（图号紧跟提示词） */
+const FIG_LEAD = /^(?:如下?图|见图|图)\s*([①②③④⑤⑥⑦⑧⑨⑩⑪⑫⑬⑭⑮⑯⑰⑱⑲⑳])/
+const HAS_PAREN_LABEL = /[（(]\s*\d{1,2}\s*[)）]/
+
 const subNoFromContent = (content) => {
   const s = String(content || '')
+  const ci = CIRCLED.indexOf(s[0])
+  if (ci >= 0) return String(ci + 1)
+  // 「如图①，S_阴影 = ____」：图号即小问号（仅当行内无 (N) 标号，避免抢常规分支）
+  if (!HAS_PAREN_LABEL.test(s)) {
+    const fm = s.match(FIG_LEAD)
+    if (fm) return String(CIRCLED.indexOf(fm[1]) + 1)
+  }
   const all = [...s.matchAll(/[（(]\s*(\d+)\s*[)）]/g)]
   if (all.length !== 1) return null
-  const m = /^[^（(]{0,12}[（(]\s*(\d+)\s*[)）]/.exec(s)
-  return m ? m[1] : null
+  const hit = all[0]
+  if (hit.index > 20) return null
+  const before = hit.index > 0 ? s[hit.index - 1] : ''
+  if (NOT_A_LABEL_BEFORE.test(before)) return null
+  return hit[1]
 }
+
+/**
+ * 「行首 `(N)`」判据 —— 只在**行首**（允许前导空白）出现的小问标号。
+ * 语义上比 OCR 内容匹配更权威：OCR 是按正文相似度把残句配到某条 OCR 小问上，
+ * 同题组内多条残句正文相似时容易**整体错位**（实测 `b99925b1` 题1：
+ * `(2) 观察第(1)题…` 被配到标号 1，与 `(1) 计算下列各式…` 撞成两个 sub_no=1）。
+ * ⚠️ 只认 `(N)` 形式，**不认**行首 ①/②：`①如果MN=4…` 里的 ① 常常是**某个 (N) 内部的子部件**
+ *    （实测 `4cd6cde0` 题12：(1)(2) 下再分 ①②），把它当顶层小问号会撞号。
+ * ⚠️ 还要求**整行只有一个顶层 `(N)`**（「第(N)题」这类正文引用不算）：
+ *    实测 `8ed83ce9` 题2 的 `(1) √(8-2√15). (2) √(2-√3).` 把两个小问并在一行，
+ *    标 sub_no=1 只会造出假的父子关系 —— 这种行必须拒绝。
+ * ⚠️ 也要配合组级 `usedSubNo` 去重闸使用，否则同一 `(3)` 被拆成两行时仍会撞号。
+ */
+const LEADING_PAREN = /^[\s\u3000]*[（(]\s*(\d{1,2})\s*[)）]/
+/** 顶层 `(N)` 标号（排除「第(N)题」这种正文引用） */
+const TOP_PAREN_G = /(?<!第)[（(]\s*\d{1,2}\s*[)）]/g
+const leadingParenNo = (content) => {
+  const s = String(content || '')
+  const m = s.match(LEADING_PAREN)
+  if (!m) return null
+  if ([...s.matchAll(TOP_PAREN_G)].length !== 1) return null
+  return m[1]
+}
+
+/**
+ * 公共题干可信度闸：太短 / 只有题号 / 纯标点的别写（宁可不填，不可填错）。
+ * 实测垃圾样本：`"2."`（OCR 把题号当成了 parent_stem）、`"16."`。
+ * ⚠️ 不能把长度阈值定太高：`"计算："`（3 字）是**合法**的公共题干（「计算：(1)…(2)…」）。
+ */
+const isTrustworthyStem = (s) => {
+  const bare = String(s || '').replace(/[\s\u3000]/g, '')
+  if (bare.length < 3) return false
+  if (/^[\d０-９]+[.、．)）]?$/.test(bare)) return false   // 「2.」「16.」
+  return true
+}
+
+/** 小问号必须是纯数字 */
+const isTrustworthySubNo = (s) => /^\d{1,2}$/.test(String(s || '').trim())
 
 /** 在 OCR 小问里按内容找匹配（1 精确 → 2 包含 → 3 宽松包含） */
 const matchSub = (dbContent, ocrSubs) => {
@@ -221,7 +287,8 @@ console.log(`🔧 存量修复：多小问大题 sub_no / parent_stem 回填   m
 console.log('='.repeat(78))
 
 const snapshot = { ts: new Date().toISOString(), apply: APPLY, tasks: [] }
-const stat = { pagesOcr: 0, pagesBackup: 0, groups: 0, filledSub: 0, filledStem: 0, unmatched: 0, skippedBackup: 0, hetero: 0 }
+const stat = { pagesOcr: 0, pagesBackup: 0, groups: 0, filledSub: 0, filledStem: 0, unmatched: 0, skippedBackup: 0, hetero: 0, badStem: 0, badSub: 0 }
+const plan = []
 const touchedIds = []
 
 for (const t of taskRows) {
@@ -286,28 +353,47 @@ for (const t of taskRows) {
     const groupStem = coherent ? (matched.map(x => x.m?.parentStem).find(Boolean) || null) : null
 
     const updates = []
+    // 组级去重闸：同题组内一个 sub_no 只能填给一条残句（填重了前端会出重号小问）。
+    // ⚠️ 只在「本次新填的 sub_no」范围内去重；已有值的行不参与，避免误伤。
+    const usedSubNo = new Set(
+      rows.map(r => String(r.sub_no || '').trim()).filter(Boolean)
+    )
     for (const { r, m } of matched) {
       const noSub = !r.sub_no || !String(r.sub_no).trim()
       const noStem = !r.parent_stem || !String(r.parent_stem).trim()
-      if (!m) {
-        // 内容没匹配上 OCR：
-        //   ① sub_no 还能从残句自身的小问标号取（只认「整段仅一个小问标号」）
-        //   ② parent_stem 是整组共享的，可用组内其它残句匹配到的题干兜底
-        stat.unmatched++
-        const ownSub = noSub ? subNoFromContent(r.content) : null
-        const stemVal = noStem ? groupStem : null
-        if (ownSub || stemVal) {
-          updates.push({ id: r.id, subNo: ownSub, stem: stemVal, viaGroup: !ownSub })
+      if (!m) stat.unmatched++
+
+      // 小问号取值优先级（2026-09-20 定稿）：
+      //   ① 行首 `(N)` —— 最权威。它是残句**自己**带的标号，不受 OCR 内容匹配错位影响。
+      //   ② OCR 匹配到的那条小问的 subNo。
+      //   ③ 残句自身其它标号（圈号 / 图号 / 行内 `(N)`）兜底。
+      // ⚠️ 每一级都要过 `usedSubNo` 去重闸，否则同题组内会撞号（前端出重号小问）。
+      // ⚠️ 实测教训：`b99925b1` 题1 因缺第①级，`(2) 观察第(1)题…` 被 OCR 配到标号 1，
+      //    与 `(1) 计算下列各式…` 撞成两个 sub_no=1，而 `(3) 应用第(2)题…` 反而空着。
+      let subNo = null
+      if (noSub) {
+        const lead = leadingParenNo(r.content)
+        const fromOcr = m?.subNo
+        if (lead && isTrustworthySubNo(lead) && !usedSubNo.has(lead)) {
+          subNo = lead
+        } else if (fromOcr && isTrustworthySubNo(fromOcr) && !usedSubNo.has(String(fromOcr))) {
+          subNo = String(fromOcr)
         } else {
-          console.log(`     p${pg} 题${qno} 未匹配: ${JSON.stringify(String(r.content).slice(0, 50))}`)
+          const own = subNoFromContent(r.content)
+          if (own && isTrustworthySubNo(own) && !usedSubNo.has(own)) subNo = own
+          else if (fromOcr) stat.badSub++
         }
-        continue
+        if (subNo) usedSubNo.add(subNo)
       }
-      const setSub = noSub && m.subNo
-      const stemVal = m.parentStem || groupStem
-      const setStem = noStem && stemVal
-      if (setSub || setStem) {
-        updates.push({ id: r.id, subNo: setSub ? String(m.subNo) : null, stem: setStem ? stemVal : null })
+
+      // 公共题干：优先用本条匹配到的；没有就用组内共享的（仅同题一致时可用）
+      let stemVal = noStem ? (m?.parentStem || groupStem) : null
+      if (stemVal && !isTrustworthyStem(stemVal)) { stat.badStem++; stemVal = null }
+
+      if (subNo || stemVal) {
+        updates.push({ id: r.id, subNo, stem: stemVal, src: m ? 'ocr' : 'self+group', viaGroup: !subNo })
+      } else if (!m) {
+        console.log(`     p${pg} 题${qno} 未匹配: ${JSON.stringify(String(r.content).slice(0, 50))}`)
       }
     }
     if (!updates.length) continue
@@ -318,6 +404,12 @@ for (const t of taskRows) {
       stat.filledSub += u.subNo ? 1 : 0
       stat.filledStem += u.stem ? 1 : 0
       touchedIds.push(u.id)
+      plan.push({
+        id: u.id, taskId: t.id, taskName: t.original_name, page: Number(pg), qno: Number(qno),
+        oldSubNo: rows.find(x => x.id === u.id)?.sub_no ?? null,
+        oldStem: rows.find(x => x.id === u.id)?.parent_stem ?? null,
+        newSubNo: u.subNo || null, newStem: u.stem || null, src: u.src || (u.viaGroup ? 'group' : 'ocr'),
+      })
     }
     if (APPLY && !degraded) {
       for (const u of updates) {
@@ -338,6 +430,14 @@ for (const t of taskRows) {
   }
 }
 
+// 审计转储：dry-run 与 apply 都落，便于逐条与原卷页图核对
+if (plan.length) {
+  const auditPath = resolve(__dirname, `logs/subno-stem-plan-${Date.now()}.json`)
+  fs.mkdirSync(dirname(auditPath), { recursive: true })
+  fs.writeFileSync(auditPath, JSON.stringify({ ts: new Date().toISOString(), apply: APPLY, count: plan.length, plan }, null, 2))
+  console.log(`\n📋 审计转储: ${auditPath}`)
+}
+
 if (APPLY && touchedIds.length) {
   await syncQuestionCompleteness([...new Set(touchedIds)])
   const snapPath = resolve(__dirname, `logs/subno-stem-fix-${Date.now()}.json`)
@@ -350,5 +450,6 @@ console.log(`📊 ${APPLY ? '执行完成' : 'DRY-RUN 预览'}`)
 console.log(`   OCR 页数 ${stat.pagesOcr}（其中降级 ${stat.pagesBackup} 页）`)
 console.log(`   题组 ${stat.groups} · 可回填 sub_no ${stat.filledSub} 条 · parent_stem ${stat.filledStem} 条`)
 console.log(`   未匹配 ${stat.unmatched} 条 · 因降级跳过 ${stat.skippedBackup} 条 · 同页题号撞车组 ${stat.hetero} 个`)
+console.log(`   可信度闸挡下: 题干 ${stat.badStem} 条 · 小问号 ${stat.badSub} 条`)
 console.log('='.repeat(78))
 process.exit(0)
