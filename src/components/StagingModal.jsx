@@ -1,4 +1,4 @@
-import { Camera, X, Upload, Loader2, Image as ImageIcon, Crop } from 'lucide-react'
+import { Camera, X, Upload, Loader2, Image as ImageIcon, Crop, RotateCw } from 'lucide-react'
 import { useState } from 'react'
 import { isNativeCameraAvailable } from '../services/nativeCamera'
 import { motion } from 'motion/react'
@@ -8,7 +8,7 @@ import ImageCropper from './ImageCropper'
 // HEIC 预览格：浏览器解不开 HEIC 时 onError 切占位（不白屏）。
 // HEIC 上传由后端 fixFileIfNeeded needsHeicTranscode 用 heic-decode 转 jpg。
 // HEIC 不提供裁剪入口：WebView canvas 解不开 HEIC，裁剪必然失败，留给上传管线的转码环节。
-function HeicPreviewCell({ p, onRemove, onCrop }) {
+function HeicPreviewCell({ p, onRemove, onCrop, onRotate }) {
   const [errored, setErrored] = useState(false)
   const showPlaceholder = errored || !p.url
   return (
@@ -37,6 +37,17 @@ function HeicPreviewCell({ p, onRemove, onCrop }) {
           <Crop size={11} />
         </button>
       )}
+      {onRotate && !showPlaceholder && !p.isHeic && (
+        <button
+          onClick={onRotate}
+          className="absolute bottom-1 left-1 w-5 h-5 rounded-full flex items-center justify-center active:scale-90 transition-transform"
+          style={{ background: 'rgba(0,0,0,0.5)', color: '#fff' }}
+          aria-label="旋转摆正这张图片（每次顺时针90°）"
+          title="旋转摆正"
+        >
+          <RotateCw size={11} />
+        </button>
+      )}
       <button
         onClick={onRemove}
         className="absolute top-1 right-1 w-5 h-5 rounded-full flex items-center justify-center"
@@ -60,6 +71,7 @@ export default function StagingModal({
   onFilesSelected,
   onRemoveFile,
   onCropFile,
+  onRotateFile,
   onSubmit
 }) {
   const title = stagingType === 'workbook' ? '练习册作业' : stagingType === 'homework' ? '日常作业' : stagingType === 'wrong_retry' ? '错题重练' : stagingType === 'retry_bound' ? '错题重练 · 上传答卷' : '普通试卷'
@@ -140,6 +152,7 @@ export default function StagingModal({
                   p={p}
                   onRemove={() => onRemoveFile(i)}
                   onCrop={canCrop ? () => setCroppingIdx(i) : undefined}
+                  onRotate={onRotateFile ? () => onRotateFile(i) : undefined}
                 />
               ))}
             </div>

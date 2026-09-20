@@ -6,7 +6,7 @@ import { taskService } from '../services/taskService'
 import { recognizeQuestions, compressImage, saveRecognitionResult } from '../services/aiService'
 import { detectQRCode, parseRetryExamId } from '../services/qrDetectionService'
 import { compressImagesForUpload, describeUploadFailure } from '../utils/imageUtils'
-import { dataURLtoFile } from '../utils/imageOptimizer'
+import { dataURLtoFile, rotateImageByUrl } from '../utils/imageOptimizer'
 import { apiRequest, uploadImage, createTask, addWrongQuestions, clearStudentCaches, invalidateCache } from '../services/apiService'
 import { takePhotoFiles, pickPhotoFiles, isNativeCameraAvailable, describeCameraError } from '../services/nativeCamera'
 import { warmUpConnection, getNetworkHealth, resetNetworkHealth } from '../services/httpCore'
@@ -153,6 +153,28 @@ export function useUploadFlow({ loadTasks, isInitializing }) {
       if (old.url) URL.revokeObjectURL(old.url)
       return next
     })
+  }
+
+  // 2026-09-20 暂存区旋转：用户拍照歪了/方向不对时点旋转按钮自己摆正。
+  // 每次顺时针转 90°，转正后的图就是正常图片——压缩/上传/批改/原卷/裁题全链路
+  // 拿到的都是正图，不需要任何后续处理。
+  // 与裁剪同样"原位替换该张预览"；文件名唯一化防止本地去重误判（沿用裁剪的做法）。
+  const applyStagingRotate = async (idx) => {
+    const old = stagingRef.current[idx]
+    if (!old || old.isHeic || stagingUploading) return // HEIC 浏览器 canvas 解不开，留给后端转码
+    try {
+      const dataUrl = await rotateImageByUrl(old.url, 90)
+      const file = dataURLtoFile(dataUrl, `rotate_${Date.now()}_${Math.random().toString(36).slice(2, 6)}.jpg`)
+      setStagingFiles((prev) => {
+        const next = [...prev]
+        next[idx] = { file, url: URL.createObjectURL(file), isHeic: false, name: file.name }
+        if (prev[idx]?.url) URL.revokeObjectURL(prev[idx].url)
+        return next
+      })
+    } catch (e) {
+      console.warn('旋转失败:', e)
+      Toast.show({ message: '旋转失败，请重试', type: 'error', duration: 2000 })
+    }
   }
 
   const clearStaging = () => {
@@ -829,7 +851,7 @@ export function useUploadFlow({ loadTasks, isInitializing }) {
     showStaging, stagingFiles, stagingType, stagingUploading,
     cameraInputRef, albumInputRef,
     openStaging, openStagingForRetry, clearStaging,
-    handleStagingSelectFiles, removeStagingFile, applyStagingCrop,
+    handleStagingSelectFiles, removeStagingFile, applyStagingCrop, applyStagingRotate,
     onStagingCamera, onStagingAlbum, cameraBusy,
     handleSubmitStaging,
     homeworkChoiceFiles, homeworkChoiceRef,
