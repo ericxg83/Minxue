@@ -32,7 +32,13 @@ test('callVisionCompletion 的三处备份供应商注入点必须受 noBackup �
     src.includes('if (!noBackup && (allMsExhausted || forceBackupFirst))'),
     '魔搭全耗尽/BACKUP_FIRST 自动降级分支必须受 noBackup 门禁'
   )
-  assert.ok(src.includes('if (!noBackup && gmiFirst && gmiVendor)'), 'GMI_FIRST 插队分支必须受 noBackup 门禁')
+  assert.ok(
+    src.includes('if (!noBackup && gmiFirst && gmiVendor)')
+    // 2026-09-20 写入侧补测新增 freeOnly：GMI 插队分支再加一道「非白名单跳过」，
+    // noexcept noBackup 门禁保持不变 —— 语义仍是「GMI 插队必须受 noBackup 门禁」。
+    || src.includes('if (!noBackup && !freeOnly && gmiFirst && gmiVendor)'),
+    'GMI_FIRST 插队分支必须受 noBackup 门禁'
+  )
   // 备份供应商兜底循环（BACKUP_CONFIG.VENDORS）在 callVisionCompletion 内必须被 if (!noBackup) 包裹
   const visionFn = src.slice(src.indexOf('export async function callVisionCompletion'))
   const guardIdx = visionFn.indexOf('if (!noBackup) {')

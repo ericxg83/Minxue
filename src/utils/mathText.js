@@ -127,14 +127,25 @@ function preprocessMath(text) {
   )
 
   // 3. 斜杠除法 a/b → \frac{a}{b}（多轮处理嵌套）
+  //
+  // 这里不能只用「括号 / 单个字母数字」作为分数两端：
+  // `c^(2n+2)/a^(2n+1)` 中的正则如果从指数里的 `(2n+2)` 开始匹配，
+  // 会误写成 `c^\frac{(2n+2)}{a}^(2n+1)`，白板上就会露出残缺的 LaTeX 源码。
+  // 先把括号指数规范成 LaTeX 大括号，再让分数操作数一次性吃掉「底数+指数」；
+  // 同时禁止从指数大括号内部起匹配，避免再次截断指数。
+  // 先处理单字符/数字指数，保证 `a^2/b^3` 也按完整操作数参与分数转换。
+  s = s.replace(/([a-zA-Z0-9])\^([a-zA-Z0-9]+)/g, '$1^{$2}')
+  s = s.replace(/([a-zA-Z0-9])\^\(([^()]*)\)/g, '$1^{$2}')
+  const fractionOperand = String.raw`(?:\\sqrt\{[^{}]*\}|[a-zA-Z0-9]+(?:\.[0-9]+)?(?:\^\{[^{}]*\})?|\([^()]*\))`
+  const fractionPattern = new RegExp(
+    String.raw`(?<![\^{])(${fractionOperand})\s*\/\s*(${fractionOperand})(?!\^)`,
+    'g'
+  )
   let prev
   let guard = 0
   do {
     prev = s
-    s = s.replace(
-      /(\([^()]*\)|\\sqrt\{[^{}]*\}|[a-zA-Z0-9]+(?:\.[0-9]+)?)\s*\/\s*(\([^()]*\)|\\sqrt\{[^{}]*\}|[a-zA-Z0-9]+(?:\.[0-9]+)?)/g,
-      '\\frac{$1}{$2}'
-    )
+    s = s.replace(fractionPattern, '\\frac{$1}{$2}')
     guard++
     if (guard > 20) break
   } while (s !== prev)

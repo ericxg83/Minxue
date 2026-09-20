@@ -83,6 +83,19 @@ test('已知病态样本：根号、分数、填空线混合渲染不抛错', ()
   }
 })
 
+test('根式中带指数的分式不截断指数：c^(2n+2)/a^(2n+1)', () => {
+  const source = '化简：√(b^(2n)·c^(2n+2)/a^(2n+1))，(a>0, b>0, c>0, n是正整数)'
+  const pre = preprocessMath(source)
+  assert.ok(pre.includes('\\frac{c^{2n+2}}{a^{2n+1}}'), `应保留完整分子分母，实际：${pre}`)
+  assert.ok(!pre.includes('\\frac{(2n+2)}{a}'), `不应从指数内部截断，实际：${pre}`)
+  for (const latex of mathSegments(source)) {
+    assert.doesNotThrow(
+      () => katex.renderToString(latex, { throwOnError: true }),
+      `题干数学片段「${latex}」应能被 KaTeX 完整渲染`
+    )
+  }
+})
+
 /**
  * 循环小数标记（2026-09-14 错题再测-0911 事故沉淀）
  *

@@ -209,9 +209,19 @@ function extractArithmeticExpression(questionContent) {
   // `2024·(-2/3)`，后者能求出一个"看起来合理"的错值 -4048/3，然后拿去和正确答案 1 比对
   // → 判「验算不符」→ 清空答案。切开算式再验证，比不验证更危险。
   const candidates = source.match(/[\d\s+\-−–—*/×✕·÷().（）\[\]【】{}\\^⁰¹²³⁴⁵⁶⁷⁸⁹⁺⁻]+/g) || []
+  // ⚠️ 2026-09-20 误清空事故（填空 #27「写出一个比1/4大，比1/3小且分母为48的最简分数」）：
+  //   题干里的**参照分数**（比1/4大、比1/3小）被当成"算式"提取出 `1/4`，
+  //   evaluate 得 1/4，与正确答案 13/48 比对必不等 → 判「验算不符」→ 清空参考答案 →
+  //   老师看到「缺少参考答案，无法自动判定」。数学上 13/48 是唯一正确答案。
+  //   单个分数（分子/分母）是一个**数值**，不是运算式；真正的算式至少含一个
+  //   运算符组合（+ − × ÷ ^）把两个操作数连起来。这里只排除"纯单个分数"形态
+  //   （可带外层括号 / 正负号，如 `1/4`、`(-3/2)`、`-1/4`），
+  //   保留 `1/4+1/3`、`(3/2)^2024·(-2/3)^2024`、`-3.6×10⁻⁴` 这类真实算式。
+  const isSingleFraction = (c) => /^\(?[+-]?\d+(?:\.\d+)?\s*\/\s*\d+(?:\.\d+)?\)?$/.test(c)
   const candidatesWithOperators = candidates
     .map(normalizeExpression)
     .filter(candidate => /[+\-*/]/.test(candidate) && /\d/.test(candidate))
+    .filter(candidate => !isSingleFraction(candidate))
     .sort((left, right) => right.length - left.length)
 
   for (const candidate of candidatesWithOperators) {

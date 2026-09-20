@@ -66,6 +66,37 @@ const cases = [
     valid: true,
     applicable: false,
   },
+
+  // ── 2026-09-20 误清空事故（填空 #27「写出一个比1/4大，比1/3小且分母为48的最简分数」）──
+  // 根因：题干里的**参照分数**（比1/4大、比1/3小）被提取成"算式" `1/4`，
+  // evaluate 得 1/4，与正确答案 13/48 比对必不等 → 判「验算不符」→
+  // worker 清空参考答案 + 转人工 → 页面显示「缺少参考答案，无法自动判定」。
+  // 单个分数是数值不是算式，必须跳过校验；正确/错误答案都要放行给判题层处理。
+  {
+    question: '写出一个比1/4大，比1/3小且分母为48的最简分数。______',
+    answer: '13/48',
+    valid: true,
+    applicable: false,
+  },
+  {
+    question: '写出一个比1/4大，比1/3小且分母为48的最简分数。______',
+    answer: '1/2',
+    valid: true,
+    applicable: false,
+  },
+  {
+    // 反例：多个分数组成**真实算式**时仍必须继续校验（不得因修参照分数而放水）
+    question: '计算：1/4 + 1/3。',
+    answer: '7/12',
+    valid: true,
+    applicable: true,
+  },
+  {
+    question: '计算：1/4 + 1/3。',
+    answer: '1/2',
+    valid: false,
+    applicable: true,
+  },
 ]
 
 for (const testCase of cases) {
