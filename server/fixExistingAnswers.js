@@ -24,8 +24,8 @@ async function fixExistingAnswers() {
   console.log('🔍 查找需要修复的题目 (answer = \'-\' / NULL / 空 / 待人工补充)...')
   console.log('='.repeat(60))
 
-  const { rows } = await query(`
-    SELECT id, content, options, answer, analysis, question_type, subject, student_id
+    const { rows } = await query(`
+    SELECT id, content, parent_stem, options, answer, analysis, question_type, subject, student_id
     FROM questions
     WHERE answer = '-' OR answer IS NULL OR answer = '' OR answer = '待人工补充' OR answer = '此为主观题，无唯一标准答案'
     ORDER BY created_at DESC
@@ -56,9 +56,13 @@ async function fixExistingAnswers() {
     }
 
     const content = q.content || ''
-    const fullContent = options.length > 0
-      ? `${content}\n选项：${formatOptionsForPrompt(options)}`
-      : content
+    // ⚠️ 2026-09-20 与 worker.js:2002 对齐：多小问大题的公共条件只在 parent_stem，
+    //    只喂 content 会让答案引擎判「缺少条件」→ 答案留空（9-18 第03周 题24/25 事故）。
+    const stem = q.parent_stem || ''
+    const fullContent = [stem, content].filter(s => s && String(s).trim()).join('\n')
+    const contentWithOpts = options.length > 0
+      ? `${fullContent}\n选项：${formatOptionsForPrompt(options)}`
+      : fullContent
 
     if (!content.trim()) {
       console.log(`  [${index}/${rows.length}] ⏭️  ${q.id.substring(0, 8)}: 跳过（题目内容为空）`)
@@ -69,7 +73,7 @@ async function fixExistingAnswers() {
     process.stdout.write(`  [${index}/${rows.length}] 🔄 ${q.id.substring(0, 8)}: ${content.substring(0, 40)}... `)
 
     try {
-      const result = await generateAnswerForQuestion(fullContent)
+      const result = await generateAnswerForQuestion(contentWithOpts)
 
       // 1) 优先使用 validateAIAnswer 通过的答案
       const validation = validateAIAnswer(result.answer, result.analysis)

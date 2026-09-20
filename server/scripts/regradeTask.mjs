@@ -30,7 +30,7 @@ const { judgeAnswer, isGradingCommentAnswer } = await import('../services/judgeS
 const { finalizeRejudgeResult } = await import('../services/gradingFinalizer.js')
 
 const { rows: qs } = await query(
-  `SELECT id, question_number, content, options, answer, student_answer, question_type,
+  `SELECT id, question_number, content, parent_stem, options, answer, student_answer, question_type,
           student_id, is_correct
    FROM questions WHERE task_id = $1 ORDER BY question_number`,
   [taskId]
@@ -41,7 +41,10 @@ let ansChanged = 0, judgeChanged = 0, errCount = 0
 for (const q of qs) {
   let options = []
   try { options = q.options ? (typeof q.options === 'string' ? JSON.parse(q.options) : q.options) : [] } catch { options = [] }
-  const fullContent = options.length ? `${q.content}\n选项：${formatOptionsForPrompt(options)}` : (q.content || '')
+  // ⚠️ 2026-09-20 与 worker.js:2002 对齐：多小问大题的公共条件只在 parent_stem，
+  //    只喂 content 会让答案引擎判「缺少条件」（9-18 第03周 题24/25 事故）。
+  const content = [q.parent_stem, q.content].filter(s => s && String(s).trim()).join('\n')
+  const fullContent = options.length ? `${content}\n选项：${formatOptionsForPrompt(options)}` : content
   if (!fullContent.trim()) { console.log(`  #${q.question_number} ⏭️ 空题干`); continue }
 
   let gen
