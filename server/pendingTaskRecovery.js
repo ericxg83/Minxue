@@ -15,6 +15,10 @@ const GEOMETRY_MAX_RETRIES = GEOMETRY_RETRY_DELAYS.length
 //
 // 错误按是否"自愈"分类：
 //   1. 配额 / 限流：自愈取决于外部服务（明早重置 / 限流解除），与重试次数无关。
+//      ⚠️ 2026-09-20 起从本名单拆出：配额/限流类自愈有明确时间点（自然日重置），
+//      单独归入 QUOTA_ERROR_PATTERNS，由 scanFailedTasks 做「跨自然日自动放行」——
+//      当天拦截防烧配额，次日扫描时配额已重置，自动重新入队（本次事故：
+//      09/18 魔搭配额用尽的任务若不人工点重试会永久卡「识别异常」）。
 //   2. 图片下载失败：⚠️ 已拆分为两类，见下方 TRANSIENT_ERROR_PATTERNS。
 //   3. 用户输入类：缺少 worksheetId、URL 无效、文件未上传完成等，本身就是数据问题。
 //   4. 图片质量：太小（<1KB）/ 0 道题 —— 学生拍的就是空白页/模糊页，重复 OCR 不会变好，
@@ -22,22 +26,6 @@ const GEOMETRY_MAX_RETRIES = GEOMETRY_RETRY_DELAYS.length
 //
 // 命中黑名单 → 直接跳过，不恢复、不入队，让任务停留在 failed 状态等待人工/数据修复。
 export const NON_RETRYABLE_ERROR_PATTERNS = [
-  /所有魔搭视觉模型.*配额.*用尽/,
-  /所有视觉模型.*不可用/,
-  /所有视觉模型.*失败/,
-  /quota.*exhaust/i,
-  /rate limit/i,
-  /rate_limit/i,
-  /429/,
-  // ⚠️ 不要把 /下载图片失败/ 整体放进黑名单！
-  //    它把两类性质完全相反的错误混为一谈：
-  //      ① 瞬时抖动：OSS 返回 400/5xx、网络超时 —— 会自愈（实测 9/11 报 400 失败、
-  //         9/13 同一 URL HEAD 200 / 1.4MB，人工重试一次即 30 题批改成功）；
-  //      ② 客观不可恢复：分辨率过低、返回内容不是图片（URL 失效）—— 重试永远无意义。
-  //    整体拉黑会让 ① 被永久卡死在 failed：自动恢复跳过、前端重试入口也因 classifyLastError
-  //    返回 skip 而形同虚设。且下载失败发生在 Step 2/6（progress=5，尚未调用任何 AI），
-  //    重试成本只是一次 HTTP 请求，黑名单原本担心的"浪费 AI 配额 / 触发 429"并不成立。
-  //    现在 ① 交给 TRANSIENT_ERROR_PATTERNS 做有限次重试，② 由下面这些精确子类永久拉黑。
   /返回内容不是图片/,
   /URL.*失效/,
   /OSS.*错误页/,
@@ -56,6 +44,41 @@ export const NON_RETRYABLE_ERROR_PATTERNS = [
   //           → 9016b0aa(成功 15/15 题，标题"试卷④ 19.2 实数 提高性测试")）。
   //   误进黑名单会导致**本来能成功的任务被永久放弃**，必须靠 PendingTaskRecovery 重新入队。
 ]
+
+// ── 配额 / 限流类错误（2026-09-20 新增独立分类）────────────────────────────
+// 性质：自愈有明确时间点 —— 视觉模型配额按**自然日**重置、限流随外部负载解除。
+// 与永久黑名单的区别：这类错误**第二天自动放行重试**，不需要人工介入。
+// 与瞬时错误（TRANSIENT_ERROR_PATTERNS）的区别：瞬时错误分钟级自愈、且发生在
+// 下载阶段（不烧配额），所以当天内就给 5 次额度；配额类发生在 AI 调用阶段
+// （烧配额），**当天只给 0 次**（拦截），跨自然日后再放行 —— 烧配额与自愈时间点
+// 两者兼顾。
+export const QUOTA_ERROR_PATTERNS = [
+  /所有魔搭视觉模型.*配额.*用尽/,
+  /所有视觉模型.*不可用/,
+  /所有视觉模型.*失败/,
+  /quota.*exhaust/i,
+  /rate limit/i,
+  /rate_limit/i,
+  /429/,
+]
+
+// 判断 last_error 是否命中配额/限流类模式（供 scanFailedTasks 做跨日放行）
+export function isQuotaError(msg) {
+  const text = String(msg || '').trim()
+  return QUOTA_ERROR_PATTERNS.some(pat => pat.test(text))
+}
+
+// 跨自然日判断：配额按自然日重置，失败时刻已是「今天之前」即放行。
+// ⚠️ 用 UTC 日期（库内时间戳均为 UTC），与 SQL 侧 DATE_TRUNC('day', NOW()) 口径一致。
+export function isBeforeTodayUtc(date) {
+  if (!date) return false
+  const d = new Date(date)
+  if (isNaN(d.getTime())) return false
+  const now = new Date()
+  return d.getUTCFullYear() < now.getUTCFullYear()
+    || (d.getUTCFullYear() === now.getUTCFullYear() && d.getUTCMonth() < now.getUTCMonth())
+    || (d.getUTCFullYear() === now.getUTCFullYear() && d.getUTCMonth() === now.getUTCMonth() && d.getUTCDate() < now.getUTCDate())
+}
 
 // ── 瞬时可自愈错误：允许有限次自动重试（与上面的永久黑名单互斥）──
 //
@@ -86,6 +109,8 @@ export const TRANSIENT_RETRY_COOLDOWN_MS = 5 * 60 * 1000
  * 返回 { skip, kind, reason }：
  *   kind='permanent' → 永久不可恢复，放弃重试（skip=true）
  *   kind='transient' → 瞬时可自愈，允许有限次重试（skip=false）
+ *   kind='quota'     → 配额/限流，**当天拦截**（skip=true），跨自然日后由
+ *                      scanFailedTasks 自动放行重试（配额按自然日重置）
  *   kind='none'      → 未命中任何名单，走常规重试逻辑（skip=false）
  *
  * ⚠️ 先判永久、再判瞬时：下载失败的客观子类（"图片分辨率过低"、"返回内容不是图片"）
@@ -94,6 +119,11 @@ export const TRANSIENT_RETRY_COOLDOWN_MS = 5 * 60 * 1000
 export function classifyLastError(lastError) {
   const msg = String(lastError || '').trim()
   if (!msg) return { skip: false, kind: 'none' } // 没有错误信息时放行（保守处理）
+
+  if (isQuotaError(msg)) {
+    // 配额/限流：当天拦截防烧配额；跨自然日后由 scanFailedTasks 自动放行重试。
+    return { skip: true, kind: 'quota', reason: '配额/限流类错误（跨自然日自动放行）' }
+  }
 
   for (const pat of NON_RETRYABLE_ERROR_PATTERNS) {
     if (pat.test(msg)) {
@@ -260,6 +290,19 @@ class PendingTaskRecovery {
                   last_error ILIKE '%下载图片失败%'
                   AND COALESCE(retry_count, 0) < $3
                 )
+             -- ④ 配额/限流（2026-09-20）：上次失败已是**今天之前**（跨自然日）→ 配额已重置，
+             --    即使 retry_count 已撞 MAX_AUTO_RETRIES 也重新捞出来自动重试。
+             --    当天失败的任务不捞（classifyLastError 兜底拦截），防烧配额。
+             OR (
+                  (last_error ILIKE '%配额%用尽%'
+                   OR last_error ILIKE '%视觉模型%不可用%'
+                   OR last_error ILIKE '%所有视觉模型%失败%'
+                   OR last_error ILIKE '%quota%exhaust%'
+                   OR last_error ILIKE '%rate limit%'
+                   OR last_error ILIKE '%rate_limit%'
+                   OR last_error ILIKE '%429%')
+                  AND updated_at < DATE_TRUNC('day', NOW())
+                )
            )
          ORDER BY updated_at ASC`,
         [MAX_AUTO_RETRIES, MAX_AI_REFUSAL_RETRIES, MAX_TRANSIENT_RETRIES]
@@ -295,11 +338,20 @@ class PendingTaskRecovery {
           }
 
           // ── 黑白名单：配额耗尽 / 限流 / 图片失效 / 数据错误 → 拒绝重试 ──
+          // ⚠️ 2026-09-20 特例：配额/限流类（kind='quota'）当天拦截，但失败时刻
+          //   已是今天之前（跨自然日）→ 配额按自然日已重置，自动放行重试，
+          //   不再需要人工点「重新处理」。与应付费场景的既有语义一致：
+          //   「配额用尽就是等明天」，现在让系统自己等。
           const verdict = classifyLastError(task.last_error)
-          if (verdict.skip) {
+          const quotaCrossedDay = verdict.kind === 'quota'
+            && isBeforeTodayUtc(task.updated_at || task.created_at)
+          if (verdict.skip && !quotaCrossedDay) {
             console.log(`[PendingTaskRecovery] 🚫 跳过 ${task.original_name}: ${verdict.reason}; last_error="${String(task.last_error || '').substring(0, 80)}"`)
             skippedCount++
             continue
+          }
+          if (quotaCrossedDay) {
+            console.log(`[PendingTaskRecovery] 🌅 配额跨日自动放行: ${task.original_name} (失败于 ${new Date(task.updated_at || task.created_at).toISOString()}, 今日配额已重置)`)
           }
 
           // ── 瞬时错误冷却：距上次失败不足 TRANSIENT_RETRY_COOLDOWN_MS 则本轮不重试 ──
@@ -318,11 +370,17 @@ class PendingTaskRecovery {
           //   8B 配额紧张时同样图可能一次"图片是空白"、一次成功 OCR 15+ 道题，
           //   不应该被 MAX_AUTO_RETRIES=3 卡死。给它们无限重试机会，
           //   直到要么成功，要么用户主动取消/重新上传。
+          // 配额跨日放行同理：配额按自然日重置，重试次数也应从头算（resetRetry=true 一并清零）。
           const isAIRefusal = this.isAIRefusalLikely(task.last_error)
-          const baseRetry = isAIRefusal ? 0 : (task.retry_count || 0)
+          const baseRetry = (isAIRefusal || quotaCrossedDay) ? 0 : (task.retry_count || 0)
           await query(
-            `UPDATE ${TABLES.TASKS} SET status = 'pending', last_error = NULL, updated_at = NOW() WHERE id = $1`,
-            [task.id]
+            `UPDATE ${TABLES.TASKS}
+             SET status = 'pending',
+                 last_error = NULL,
+                 retry_count = CASE WHEN $2 THEN 0 ELSE retry_count END,
+                 updated_at = NOW()
+             WHERE id = $1`,
+            [task.id, isAIRefusal || quotaCrossedDay]
           )
           await queue.add('process-task', {
             taskId: task.id,
@@ -341,7 +399,7 @@ class PendingTaskRecovery {
             attempts: parseInt(process.env.MAX_RETRIES) || 3,
             backoff: { type: 'exponential', delay: 5000 }
           })
-          console.log(`[PendingTaskRecovery] ✅ 已恢复 failed 任务: ${task.original_name} (retry ${task.retry_count || 0}→${baseRetry + 1}${isAIRefusal ? ', AI 拒绝重置' : ''})`)
+          console.log(`[PendingTaskRecovery] ✅ 已恢复 failed 任务: ${task.original_name} (retry ${task.retry_count || 0}→${baseRetry + 1}${isAIRefusal ? ', AI 拒绝重置' : ''}${quotaCrossedDay ? ', 配额跨日重置' : ''})`)
           recoveredCount++
         } catch (err) {
           console.error(`[PendingTaskRecovery]  恢复失败 ${task.original_name}:`, err.message)

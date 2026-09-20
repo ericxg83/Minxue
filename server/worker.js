@@ -28,6 +28,65 @@ import { isValidImageBuffer, checkImageResolution } from './utils/imageValidator
 import { formatOptionsForPrompt } from './utils/optionText.js'
 import { validateArithmeticAnswer } from './utils/arithmeticAnswerValidator.js'
 import { aiParseSelfCheck } from './utils/aiParseSelfCheck.js'
+
+/**
+ * 写入侧定位框补测（2026-09-20 方案A）：
+ * 主 OCR 的 block_coordinates 是模型照抄 prompt schema 示例后平铺整页的占位框
+ * （同一页 8 题 y 等差恒 150），不可信。复核页读取侧已有独立测量兜底
+ * （POST /api/questions/task/:id/refine-boxes + tasks.result.refinedBoxes 缓存）；
+ * 这里把测量前移到【写入侧】：落库前逐页实测并覆盖 block_coordinates，
+ * 让入库数据本身可信 —— 复核页打开即显示，不消耗运行时额度。
+ *
+ * 约束（产品决策，2026-09-20）：
+ *   · **只走免费视觉通道**（measurePageQuestionBoxes 的 freeOnly）—— 不碰付费 key；
+ *   · 失败静默保留占位框（读取侧闸门照旧拦截，行为不变），绝不阻断批改主流程；
+ *   · 按页一次调用（与读取侧同一算法、同一闸门、重试 1 次）。
+ *
+ * @param {Array<{id:string, page_number?:number|string}>} questions 落库前的题目对象
+ * @param {Map<number,Buffer>} pageBuffers pageNumber → 压缩页图 buffer（1920px）
+ */
+async function refineStoredBlocks ({ questions, pageBuffers }) {
+  if (!Array.isArray(questions) || questions.length === 0) return 0
+  const byPage = new Map()
+  for (const q of questions) {
+    const p = Number(q.page_number || 1)
+    if (!byPage.has(p)) byPage.set(p, [])
+    byPage.get(p).push(q)
+  }
+  let updated = 0
+  // [2026-09-20] 魔搭耗尽日免费白名单通道质量不稳定（实测返回整页共用一带被闸门拦截）。
+  // 连续失败就整体放弃，避免每页空等几十秒走弱通道 —— 反正读取侧会兜底。
+  let consecutiveFail = 0
+  for (const [page, qs] of byPage) {
+    if (consecutiveFail >= 2) {
+      console.warn(`   [写入侧框] 连续 ${consecutiveFail} 页补测失败，本次整体放弃（保留占位框，读取侧兜底）`)
+      break
+    }
+    const buf = pageBuffers.get(page)
+    if (!buf) continue
+    try {
+      const { measurePageQuestionBoxes } = await import('./services/questionBoxMeasure.js')
+      const { boxes, error } = await measurePageQuestionBoxes({ imageBuffer: buf, questions: qs, freeOnly: true })
+      if (error) {
+        console.warn(`   [写入侧框] 第 ${page} 页补测失败：${error}（保留占位框，读取侧兜底）`)
+        consecutiveFail++
+        continue
+      }
+      let n = 0
+      for (const q of qs) {
+        const b = boxes[q.id]
+        if (b) { q.block_coordinates = b; n++ }
+      }
+      updated += n
+      consecutiveFail = 0
+      console.log(`   [写入侧框] 第 ${page} 页补测写回 ${n}/${qs.length} 题${n < qs.length ? `（缺 ${qs.length - n} 题，读取侧兜底）` : ''}`)
+    } catch (e) {
+      console.warn(`   [写入侧框] 第 ${page} 页补测异常：${e.message}（保留占位框，读取侧兜底）`)
+      consecutiveFail++
+    }
+  }
+  return updated
+}
 import { extractFinalAnswerFromAnalysis, isNarrativeAnswer } from './utils/aiParseSelfCheck.js'
 import { rescueReferenceAnswer } from './utils/referenceAnswerRescue.js'
 import { describeReferenceAnswerRisk } from './utils/referenceAnswerSelfCheck.js'
@@ -5291,9 +5350,10 @@ export const processWorkbookGrading = async (job) => {
     image_url: q._page_image_url || imageList[0]?.image_url || '',
     page_number: q._page_number || 1,
     // 题目定位框（归一化 0-1000）：来自 OCR，供前端在原图上画蓝色定位框。
-    // 同时写入 text_bbox，使前端 getDisplayBox 的首选路径生效。
+    // [2026-09-20] text_bbox 不再写成 block_coordinates 的副本（旧实现让前端
+    // 「text_bbox ∪ image_bbox 优先」路径拿到的还是同一个占位框）；OCR 没量文字框就留空。
     block_coordinates: q.block_coordinates || null,
-    text_bbox: q.block_coordinates || null,
+    text_bbox: q.text_bbox || null,
     source_type: 'workbook',
     // workbook 学科由练习册资源决定，不能依赖 OCR 或客户端是否传 subject。
     subject: workbookSubject || q.subject || null
@@ -6373,7 +6433,8 @@ const processAnswerBankGrading = async (job) => {
           // 在中间试卷页定位题目（与 processWorkbookGrading 保持一致的存储策略）。
           image_url: q._page_image_url || imageUrl || null,
           block_coordinates: q.block_coordinates || null,
-          text_bbox: q.block_coordinates || null,
+          // [2026-09-20] 不再写成 block_coordinates 的副本（见 processWorkbookGrading 同款改动）
+          text_bbox: q.text_bbox || null,
           // 单元匹配结果不写入 questions（表无对应列），仅在 judgement.metadata 记录
         }
 
@@ -6991,6 +7052,17 @@ export const processTask = async (job) => {
         }
       }
 
+            // ── 写入侧定位框补测（2026-09-20 方案A，必须在落库前执行）──────────────────
+      // 主 OCR 的 block_coordinates 是占位框；这里按页实测并覆盖成真值，createQuestions
+      // 才把真值写入库 —— 复核页打开即显示，不消耗运行时额度。
+      // 只走免费视觉通道；失败静默保留占位框（读取侧兜底），不阻断批改。
+      try {
+        const refined = await refineStoredBlocks({ questions: questionsWithStudentId, pageBuffers })
+        if (refined > 0) console.log(`✅ [写入侧框] 共补测写回 ${refined} 题的 block_coordinates（免费通道）`)
+      } catch (e) {
+        console.warn(`   ⚠️ [写入侧框] 补测整体失败（保留占位框）：${e.message}`)
+      }
+
       await createQuestions(questionsWithStudentId)
       console.log(`✅ [Step 6/8] 题目保存成功 (含 ${geometryImageCache.size} 张几何配图)`)
 
@@ -7525,9 +7597,13 @@ await updateTaskStatus(taskId, TASK_STATUS.PROCESSING, { progress: 95 }).catch((
     //    它们发生在 Step 2/6（尚未调 AI），重试只是重新下载一次图片，成本极低且大概率自愈。
     //    此前用 /下载图片失败/ 整体匹配，把这类可自愈错误一并永久拉黑，
     //    导致任务卡死在 failed 且前端重试入口也失效（见 pendingTaskRecovery.js 注释）。
+    //
+    // ⚠️ 2026-09-20：配额/限流类（kind='quota'）同样不抛给 BullMQ —— 当天配额不会
+    //    恢复，BullMQ 重试只会烧配额；它的重试时机是**跨自然日后**由
+    //    PendingTaskRecovery.scanFailedTasks 自动放行（见该文件 QUOTA_ERROR_PATTERNS）。
     const verdict = classifyLastError(error.message)
-    if (verdict.kind === 'permanent') {
-      console.warn(`🚫 [Worker] 任务命中非可重试黑名单，跳过 BullMQ 重试: taskId=${taskId}`)
+    if (verdict.kind === 'permanent' || verdict.kind === 'quota') {
+      console.warn(`🚫 [Worker] 任务命中不可立即重试黑名单（${verdict.kind}），跳过 BullMQ 重试: taskId=${taskId} — ${verdict.reason}`)
       return undefined
     }
     if (verdict.kind === 'transient') {

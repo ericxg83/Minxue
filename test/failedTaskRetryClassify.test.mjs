@@ -4,7 +4,10 @@ import {
   classifyLastError,
   NON_RETRYABLE_ERROR_PATTERNS,
   TRANSIENT_ERROR_PATTERNS,
-  MAX_TRANSIENT_RETRIES
+  MAX_TRANSIENT_RETRIES,
+  QUOTA_ERROR_PATTERNS,
+  isQuotaError,
+  isBeforeTodayUtc
 } from '../server/pendingTaskRecovery.js'
 
 /**
@@ -63,11 +66,48 @@ test('返回内容不是图片（URL 失效 / OSS 错误页）→ 永久拉黑',
   assert.equal(v.kind, 'permanent')
 })
 
-test('配额耗尽 / 限流 → 仍然永久拉黑（不因本次改动被放宽）', () => {
-  for (const msg of ['所有魔搭视觉模型配额已用尽', 'Rate limit exceeded', '429 Too Many Requests']) {
+test('配额耗尽 / 限流 → 归入 quota 类：当天拦截（skip=true），跨自然日自动放行', () => {
+  for (const msg of ['所有魔搭视觉模型配额已用尽', '所有视觉模型（魔搭 + Agnes + FreeModel + SenseNova）均不可用：所有魔搭视觉模型当日配额均已用尽', 'Rate limit exceeded', '429 Too Many Requests']) {
     const v = classifyLastError(msg)
-    assert.equal(v.kind, 'permanent', `${msg} 应永久拉黑，实际 kind=${v.kind}`)
+    assert.equal(v.kind, 'quota', `${msg} 应判为 quota 类，实际 kind=${v.kind}`)
+    assert.equal(v.skip, true, '配额类当天应拦截（防烧配额）')
   }
+})
+
+test('isQuotaError：命中配额/限流模式', () => {
+  assert.equal(isQuotaError('所有魔搭视觉模型配额已用尽'), true)
+  assert.equal(isQuotaError('所有视觉模型（魔搭 + Agnes）均不可用'), true)
+  assert.equal(isQuotaError('rate limit exceeded'), true)
+  assert.equal(isQuotaError('429 Too Many Requests'), true)
+  assert.equal(isQuotaError('图片分辨率过低'), false)
+  assert.equal(isQuotaError(null), false)
+  assert.equal(isQuotaError(''), false)
+})
+
+test('isBeforeTodayUtc：跨自然日判定（配额按自然日重置）', () => {
+  const now = new Date()
+  const today = new Date(now.getTime() + 1000) // 未来 1s，视为今天
+  const yesterday = new Date(now)
+  yesterday.setUTCDate(yesterday.getUTCDate() - 1)
+  const twoDaysAgo = new Date(now)
+  twoDaysAgo.setUTCDate(twoDaysAgo.getUTCDate() - 2)
+  assert.equal(isBeforeTodayUtc(yesterday), true, '昨天失败 → 跨日，应放行')
+  assert.equal(isBeforeTodayUtc(twoDaysAgo), true, '前天失败 → 跨日，应放行')
+  assert.equal(isBeforeTodayUtc(today), false, '今天失败 → 当天，应拦截')
+  assert.equal(isBeforeTodayUtc(null), false)
+  assert.equal(isBeforeTodayUtc(undefined), false)
+  assert.equal(isBeforeTodayUtc('not-a-date'), false)
+})
+
+test('配额类错误不得进入永久黑名单（否则跨日也无法放行）', () => {
+  for (const msg of ['所有魔搭视觉模型配额已用尽', '所有视觉模型（魔搭）均不可用', 'rate limit exceeded']) {
+    assert.equal(
+      NON_RETRYABLE_ERROR_PATTERNS.some(p => p.test(msg)),
+      false,
+      `${msg} 不应在永久黑名单里，否则 scanFailedTasks 的跨日放行永远轮不到它`
+    )
+  }
+  assert.ok(QUOTA_ERROR_PATTERNS.length > 0, '配额类模式应独立成组')
 })
 
 test('数据类错误 → 永久拉黑', () => {
