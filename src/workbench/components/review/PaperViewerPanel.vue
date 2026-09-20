@@ -231,9 +231,15 @@ const getDisplayBox = (q) => {
   // （实测同一页 8 题 y 等差恒 150、height 全同，第 1 题的框会画到第 2~5 题上），
   // 所以 image 模式下先看 store.refinedBoxes（来自
   // POST /api/questions/task/:id/refine-boxes，后端按页量一次并缓存）。
-  // 拿不到（还没量完 / 该页没量到）才退回旧口径 —— 宁可框糙，也不要空手。
   const refined = store.refinedBoxes?.[q.id]
   if (refined) return refined
+  // [2026-09-20] image 模式到此为止：该题没有实测框 → 返回 null（不画）。
+  // 实测框是按页整批产出的 —— 段数与该页题数不符时**整页作废**（见
+  // server/services/questionBoxMeasure.js 的 validateMeasureSegments），
+  // 不存在"只缺个别题"的情形；走到这里只有两种可能：该页还没量完 / 量失败。
+  // 此时任何回退（text_bbox ∪ image_bbox ∪ block_coordinates）都只会画出邻题的框，
+  // 按项目既有判据「宁可不出图，也不显示邻题的图」—— 不如不画。
+  if (store.source === 'image') return null
   // paper（重练）：**只认**判题对位时保存的【答卷图坐标系】框。
   // 题目行自身的坐标属于原作业图，画到答卷图上必然错位 —— 取不到就返回 null
   // 优雅降级（不画），绝不回退到 q 自己的坐标。

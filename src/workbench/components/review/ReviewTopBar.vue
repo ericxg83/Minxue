@@ -212,6 +212,15 @@ watch(() => store.saveError, (err) => {
   store.saveError = null
 })
 
+// [2026-09-20 方案A] 零人工项自动完成复核成功 → 轻提示（store 只记录，这里弹提示）。
+// 进卷时整卷无需老师处理（无待判/未判定/处理中、无未入册错题门禁）即自动完成，
+// 老师看到提示后可翻看刚复核完的卷面、留底或点「下一份」。
+watch(() => store.autoReviewNotice, (notice) => {
+  if (!notice) return
+  ElMessage.success(`「${notice.taskName}」无需人工处理，已自动完成复核`)
+  store.autoReviewNotice = null
+})
+
 // 当 store 中 currentTask 变化时同步下拉框
 watch(() => store.currentTask?.id, (id) => {
   selectedTaskId.value = id || ''

@@ -79,6 +79,13 @@ export const useReviewStore = defineStore('review', () => {
   // 存对象并带 at：连续两次同样原因的失败也要各弹一次（用纯字符串会被 watch 去重）。
   const saveError = ref(null) // { message, at }
 
+  // 「零人工项自动完成复核」的通知（2026-09-20 方案A）。
+  // 进入一份试卷时若满足条件（待判/未判定/处理中=0 且无未入册错题门禁），
+  // store 延迟自动 completeTaskReview 并记录本次是自动完成，UI 层（ReviewTopBar）
+  // 消费后弹轻提示。老师仍可翻看刚复核完的卷面、留底或跳下一份。
+  const autoReviewNotice = ref(null) // { taskName, at }
+  let autoReviewTimer = null
+
   // ReviewTopBar 触发「去编辑」时记录的待编辑题目，QuestionDetailPanel 监听后打开编辑面板
   const pendingEditQuestionId = ref(null)
 
@@ -951,6 +958,11 @@ export const useReviewStore = defineStore('review', () => {
     if (currentStudent.value?.id) {
       await loadWrongQuestions(currentStudent.value.id)
     }
+
+    // [2026-09-20 方案A] 零人工项自动完成复核：
+    // 试卷加载完（题目 + 错题本就绪）后，若整卷无需老师处理（无待判/未判定/处理中、
+    // 无未入册错题门禁、paper 已可复核），延迟自动完成——等价于老师点「完成复核」。
+    maybeAutoCompleteReview()
   }
 
   // paper 模式：按练习卷 question_ids 拉取题目，保持 question_ids 顺序
@@ -1165,6 +1177,63 @@ export const useReviewStore = defineStore('review', () => {
     // 不再自动跳转，避免跳过"留底为答案库"窗口。题目列表保留以便翻看刚复核完的题。
   }
 
+  // ── [2026-09-20 方案A] 零人工项自动完成复核 ──────────────
+  //
+  // 进入一份试卷后，若整卷不存在任何「需要老师处理」的项，延迟自动调用
+  // completeTaskReview() —— 与老师手动点「完成复核」逐字节等价：
+  //   persistTaskCompletion（结算早已在批完时完成，此处只写 reviewed）+ 本地镜像。
+  //
+  // 判定条件（全部满足才自动，任何一条不满足就保持人工）：
+  //   1. 非聚合模式（questionToTaskMap 为空）——聚合是老师主动批量处理，不动；
+  //   2. currentPaperReviewable（paper 模式学生已交卷且 AI 批完）；
+  //   3. needsAttentionCount === 0（待判 / AI未判定 / 处理中 全为 0）；
+  //   4. 无未入册错题门禁（unresolvedWrongQuestions 为空）——0.5~0.8 置信带的
+  //      AI 判错题批完时不自动入册，这里必须等老师拍板「加入/本次不加入」；
+  //   5. 无在途人工复核写入（pendingReviewWrites 为空）——老师在逐题点，不动；
+  //   6. 当前卷未复核（status !== 'reviewed'）；
+  //   7. 题目非空（空卷不自动完成，避免误关）。
+  //
+  // 失败处理与手动路径一致：completeTaskReview 抛错 → saveError 上抛 UI 弹错，
+  // 不标记本地已复核（假成功防护，2026-09-14 事故教训）。
+  const maybeAutoCompleteReview = () => {
+    const task = currentTask.value
+    if (!task || task.status === 'reviewed') return
+    if (Object.keys(questionToTaskMap.value).length > 0) return
+    if (!currentPaperReviewable.value) return
+    if (needsAttentionCount.value > 0) return
+    if (unresolvedWrongQuestions.value.length > 0) return
+    if (pendingReviewWrites.size > 0) return
+    if (allQuestions.value.length === 0) return
+
+    // 延迟触发：让题目列表/统计先渲染一帧，再自动完成（与逐题点完的 300ms 同款节奏）
+    setTimeout(() => {
+      // 触发前再校验一次（延迟窗口内老师可能已开始操作或已切卷）
+      if (currentTask.value !== task) return
+      if (task.status === 'reviewed') return
+      if (Object.keys(questionToTaskMap.value).length > 0) return
+      if (!currentPaperReviewable.value) return
+      if (needsAttentionCount.value > 0) return
+      if (unresolvedWrongQuestions.value.length > 0) return
+      if (pendingReviewWrites.size > 0) return
+
+      completeTaskReview()
+        .then(() => {
+          autoReviewNotice.value = {
+            taskName: task.original_name || task.name || '本卷',
+            at: Date.now(),
+          }
+        })
+        .catch((e) => {
+          // 与手动路径同一出口：落库失败必须让老师看到，绝不静默（铁律 #11）
+          console.error('零人工项自动完成复核失败:', e)
+          saveError.value = {
+            message: e?.response?.data?.error || e?.message || '保存失败，请重试',
+            at: Date.now(),
+          }
+        })
+    }, 300)
+  }
+
   // ── 错题拦截门禁 ──────────────────────────────────────────
 
   // 返回当前试卷未入册错题清单（供按钮点击 / 自动完成时校验）
@@ -1246,7 +1315,8 @@ export const useReviewStore = defineStore('review', () => {
   // 主 OCR 的 block_coordinates 是模型照抄 schema 示例平铺整页的产物（同一页 8 题
   // y 等差恒 150、height 全同），直接画会把第 1 题的框画到第 2~5 题上。
   // 后端按页做一次轻量「只为量框」的视觉调用并缓存（tasks.result.refinedBoxes），
-  // 这里只负责取回来给 PaperViewerPanel 用；取不到就退回旧行为（宁可框糙，也不要空手）。
+  // 这里只负责取回来给 PaperViewerPanel 用；取不到就**不画**（不退回占位框 ——
+  // 占位框会把邻题的框画到本题上，比不画严重得多，见 PaperViewerPanel.getDisplayBox）。
   const refinedBoxes = ref({})        // { [questionId]: {x,y,width,height} }
   const refineStatus = ref('idle')    // idle | loading | done | error
   const refinedPageKey = ref(null)    // `${taskId}|${pageNumber}`，避免重复请求
@@ -1328,6 +1398,8 @@ export const useReviewStore = defineStore('review', () => {
     wrongBookNotices,
     clearWrongBookNotices,
     saveError,
+    // [2026-09-20 方案A] 零人工项自动完成复核的通知（UI 层消费后弹轻提示）
+    autoReviewNotice,
     pendingEditQuestionId,
     unresolvedWrongQuestions,
     getUnresolvedWrong,

@@ -108,10 +108,23 @@ export async function analyzePageLayout (imageBuffer, opts = {}) {
       }
     })
 
+  // ── 6. 未合并的原始行段（供「边界吸附」用）──
+  // 上面 bands 做过「相邻行带合并」，行距紧的版面会把**相邻的好几行文字**粘成一条大带
+  // （实测：行距 5~6px < 合并阈值 9px，3 行被并成 68..128）。拿这种大带的边缘去吸附边界
+  // 没有意义 —— 会把边界拽到几十个坐标之外。吸附只该在「一行文字」的量级上微调，
+  // 所以另出一份 rawBands（每条 = 一段连续有墨的行，通常就是一行）。
+  const rawBands = raw
+    .filter(b => (b.bottom - b.top + 1) >= 2)
+    .map(b => ({ top: toN(b.top, H), bottom: toN(b.bottom + 1, H) }))
+
   return {
     width: W, height: H,
     bands,
+    rawBands,
     lineHeight: toN(medH, H),
     delta,
+    // 逐行墨迹占比（原始分辨率，每行 = 该行墨迹像素占比 0~1）。
+    // 验收/诊断用：把归一化 y 换算成行号 Math.round(y/1000*H) 即可查「边界是否落在空白缝」。
+    rowInk,
   }
 }
