@@ -343,6 +343,27 @@ function buildCompleteQuestion(members) {
     ? `${rep.q_task_id}#${rep.question_number}`
     : null
   const group = gKey ? (subRowsByQGroup.get(gKey) || null) : null
+  // 题号撞车护栏（2026-09-21 白板第125题事故，与 lib/weekendHandout.js 同构）：
+  // 分组键 (task_id, question_number) 不含 page_number，同一卷不同页各自从 1 编号时，
+  // 多道互不相关的「整题行」（sub_no 为空）会落进同一组，合并即张冠李戴
+  // （题干取 A、答案取组内最长、选项取 C）。组内整题行 ≥2 条且内容互不相同 → 放弃合并。
+  if (group && group.length > 1) {
+    const wholeItems = group.filter(x => x.sub_no == null && x.content)
+    const wholeContents = new Set(wholeItems.map(x => String(x.content || '').trim()))
+    if (wholeItems.length >= 2 && wholeContents.size > 1) {
+      log(`   [合并放弃] ${gKey} 组内含 ${wholeItems.length} 条互不相同的整题行（题号跨页撞车），回落单题展示`)
+      const stem = rep.content || rep.wq_content || rep.wq_correct_answer || ''
+      return {
+        stem,
+        parentStem: rep.parent_stem || '',
+        subParts: [],
+        missingSubs: [],
+        answer: '',
+        mergedSubNos: [],
+        numberCollision: true,
+      }
+    }
+  }
   if (!group || group.length <= 1) {
     // 非多小问：原取值链
     const stem = rep.content || rep.wq_content || rep.wq_correct_answer || ''
@@ -353,6 +374,7 @@ function buildCompleteQuestion(members) {
       missingSubs: [],
       answer: '',
       mergedSubNos: [],
+      numberCollision: false,
     }
   }
   const sorted = [...group].sort((a, b) =>
@@ -379,7 +401,7 @@ function buildCompleteQuestion(members) {
   if (missingSubs.length) {
     log(`   [合并] ${gKey} 缺小问: 组内=${mergedSubNos.join('/') || '整题'} 错题涉及=${missingSubs.join('/')} — 渲染端会标注「见原卷图」`)
   }
-  return { stem, parentStem, subParts, missingSubs, answer, mergedSubNos }
+  return { stem, parentStem, subParts, missingSubs, answer, mergedSubNos, numberCollision: false }
 }
 
 function resolveDocImage(r) {
@@ -540,6 +562,9 @@ for (const [day, list] of [...dayMap.entries()].sort((a, b) => b[0].localeCompar
       figure: (() => {
         const own = resolveFigure(primary) || members.map(resolveFigure).find(Boolean)
         if (own) return own
+        // 题号撞车组禁用同大题配图兜底（与 lib/weekendHandout.js 同构）：
+        // figureByQGroup 按 task#number 分组，撞车时取到的是「邻题」的图。
+        if (complete.numberCollision) return null
         const sibKey = primary.q_task_id && primary.question_number != null
           ? `${primary.q_task_id}#${primary.question_number}` : null
         return (sibKey && figureByQGroup.get(sibKey)) || null

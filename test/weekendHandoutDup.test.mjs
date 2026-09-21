@@ -60,3 +60,17 @@ test('mergeKeyOf 语义：OCR 折叠 + 去下划线后，填空线有无 / ∥//
   const c = merge('如图，两条不平行的直线l1与l2相交于点O，四条平行线分别交直线l1于点A、B、C、D')
   assert.notEqual(a, c)
 })
+
+test('2026-09-21 题号撞车护栏：组内整题行互不相同时放弃合并，回落单题展示（CLI 同构）', () => {
+  // 白板第125题事故：分组键 (task_id, question_number) 不含 page_number，跨页撞号时
+  // 题干/答案/选项分别来自不同题（题干=选择题、答案=另一题的 -1<t<0、选项=空）。
+  // 护栏：整题行（sub_no 为空）≥2 条且内容互不相同 → buildCompleteQuestion 直接回落 rep 自身。
+  for (const [label, SRC] of [['lib', LIB_SRC], ['CLI', CLI_SRC]]) {
+    assert.ok(SRC.includes('numberCollision'), `${label} 必须产出 numberCollision 标记`)
+    assert.ok(SRC.includes('整题行（题号跨页撞车）'), `${label} 必须有撞车放弃合并的日志/护栏注释`)
+    assert.ok(SRC.includes('if (complete.numberCollision) return null'), `${label} 撞车组必须禁用同大题配图兜底（宁可不出图，不显示邻题的图）`)
+  }
+  // 护栏判据语义：只统计「整题行」（sub_no == null 且有内容），小问行跨页的合法组不受影响
+  assert.ok(LIB_SRC.includes('x.sub_no == null && x.content'), 'lib 判据必须只看整题行')
+  assert.ok(CLI_SRC.includes('x.sub_no == null && x.content'), 'CLI 判据必须只看整题行')
+})

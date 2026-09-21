@@ -390,9 +390,26 @@ export async function buildHandout(opts) {
       ? `${rep.q_task_id}#${rep.question_number}`
       : null
     const group = gKey ? (subRowsByQGroup.get(gKey) || null) : null
+    // 题号撞车护栏（2026-09-21 白板第125题事故）：分组键 (task_id, question_number) 不含
+    // page_number，同一卷不同页各自从 1 编号时，多道互不相关的「整题行」（sub_no 为空）
+    // 会落进同一组。此前 wholeItem 取第一条、answer 取组内最长，结果题干/答案/选项
+    // 三者可以来自三道不同的题（白板第125题：题干=某选择题、答案=另一题的 -1<t<0、
+    // 选项=空）。判据：组内整题行 ≥2 条且内容互不相同 → 不是同一道题的大小问，
+    // 整体放弃合并，回落到错题行真正指向的 rep 自身内容（宁可拆开，不张冠李戴）。
+    // 与 2026-09-20 写入侧残题分组「键必须含 page_number」同一事故族；
+    // 小问行（sub_no 非空）跨页的合法合并组不受影响（护栏只看整题行数量与内容差异）。
+    if (group && group.length > 1) {
+      const wholeItems = group.filter(x => x.sub_no == null && x.content)
+      const wholeContents = new Set(wholeItems.map(x => String(x.content || '').trim()))
+      if (wholeItems.length >= 2 && wholeContents.size > 1) {
+        log(`   [合并放弃] ${gKey} 组内含 ${wholeItems.length} 条互不相同的整题行（题号跨页撞车），回落单题展示`)
+        const stem = rep.content || rep.wq_content || rep.wq_correct_answer || ''
+        return { stem, parentStem: rep.parent_stem || '', subParts: [], missingSubs: [], answer: '', mergedSubNos: [], numberCollision: true }
+      }
+    }
     if (!group || group.length <= 1) {
       const stem = rep.content || rep.wq_content || rep.wq_correct_answer || ''
-      return { stem, parentStem: rep.parent_stem || '', subParts: [], missingSubs: [], answer: '', mergedSubNos: [] }
+      return { stem, parentStem: rep.parent_stem || '', subParts: [], missingSubs: [], answer: '', mergedSubNos: [], numberCollision: false }
     }
     const sorted = [...group].sort((a, b) =>
       (a.sub_no ?? '') < (b.sub_no ?? '') ? -1 : (a.sub_no ?? '') > (b.sub_no ?? '') ? 1 : 0)
@@ -416,7 +433,7 @@ export async function buildHandout(opts) {
     if (missingSubs.length) {
       log(`   [合并] ${gKey} 缺小问: 组内=${mergedSubNos.join('/') || '整题'} 错题涉及=${missingSubs.join('/')} — 渲染端会标注「见原卷图」`)
     }
-    return { stem, parentStem, subParts, missingSubs, answer, mergedSubNos }
+    return { stem, parentStem, subParts, missingSubs, answer, mergedSubNos, numberCollision: false }
   }
 
   /**
@@ -564,6 +581,9 @@ export async function buildHandout(opts) {
         figure: (() => {
           const own = resolveFigure(primary) || members.map(resolveFigure).find(Boolean)
           if (own) return own
+          // 题号撞车组禁用同大题配图兜底：figureByQGroup 同样按 task#number 分组，
+          // 撞车时取到的是「邻题」的图（宁可不出图，不显示别的题的图）。
+          if (complete.numberCollision) return null
           const sibKey = primary.q_task_id && primary.question_number != null
             ? `${primary.q_task_id}#${primary.question_number}` : null
           return (sibKey && figureByQGroup.get(sibKey)) || null

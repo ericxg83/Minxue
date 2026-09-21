@@ -24,6 +24,10 @@
   （`待人工补充`，退让绝不能覆盖也不能投票）② 旧值是否带叙述尾巴 ③ 非等价率（>40% 先怀疑自己）。
 - **残题分组键必须含 `page_number`**（2026-09-20 存量 484 条事故）：按 `(task_id, question_number)`
   会跨页撞车；含页后 109 组/299 条为真候选。**同页题号撞车组禁用公共题干兜底**（跨题共用=造假）。
+  **读取侧同族事故（2026-09-21 白板第125题杂交题）**：`buildCompleteQuestion`（weekendHandout.js ↔
+  weekend-handout.mjs）的小问索引仍按 task#number 分组，跨页撞号时题干/答案/选项三处各取自不同题。
+  已加护栏：组内「整题行」（sub_no=NULL）≥2 且内容互不相同 → 放弃合并回落 rep 自身（`numberCollision`），
+  并禁用 figureByQGroup 邻题配图兜底；小问行跨页的 5 个合法组不受影响。护栏有回归测试锁定。
 - **残句小问号判定定稿**（`scripts/fix-subno-parent-stem-20260920.mjs`）：① 行首 `(N)` 最权威
   （整行只一个顶层 `(N)`，排除「第(N)题」引用；一行并两小问拒绝）② OCR 匹配值 ③ 圈号/图号兜底；
   每级过组级 usedSubNo 去重闸；**不认行首 ①/② 为顶层标号**。原则：**宁可留空，不填错标号**。
@@ -85,9 +89,19 @@
   → 未审核答案库被判分 → 假红叉。**改练习册判分前先想清要不要对齐两条管线。**
 - `PUT /api/questions/:id` 已按 `answerRewritten` 清 `ai_answer_risk_reason` / `answer_exception*`。
 - **答案引擎降级链**（详见 `topics/answer-engine-fallback-chain`）：主供应商 Key 池 × `[MODEL,...FALLBACK_MODELS]`
-  → `FALLBACK_VENDORS` → 通用文本链路。当前 = `Bailian:[qwen3.8-flash,deepseek-v4-pro,qwen3.8-max]`
-  → `Huihuiyun:deepseek-v4-flash` → 通用链路。**SenseNova 已不在链路里**（别再说「SenseNova → Bailian」）。
+  → `FALLBACK_VENDORS` → 通用文本链路。当前（2026-09-21 用户拍定，提交 `de3f569`）=
+  `Bailian:[qwen3.8-flash → deepseek-v4-pro → qwen3.8-max]` → `SenseNova:deepseek-v4-pro`
+  → `Huihuiyun:deepseek-v4-flash`（开思考）→ 通用链路。
+  顺序理由：Bailian 付费**不被免费额度打满影响** → SenseNova 免费**可用就用** →
+  Huihuiyun 开思考后正确率达标但**速度不行**，故放链尾。
+  ⚠️ **备用供应商必须写 `Vendor:model`** —— 供应商 `textModel` 是给**通用文本链路**挑的，
+  未必适合出标准答案（SenseNova 的 textModel 只 7/12）。只写 `SenseNova` 会拿 58% 正确率的模型顶参考答案。
+  ⚠️ **extraBody 必须走 `resolveModelExtraBody(vendor, model)`**，不能裸用 `vendor.extraBody` ——
+  那是**供应商级**字段、常是给某个特定模型打的补丁，套到外部模型上就是孤儿配置（已发生两次）。
+  ⚠️ 备用通道 `retry429:false`（辉辉云上游限流时重试合计 ≈59s 才拿到 429，实测 3/3）。
   「降级到弱模型」这条路径**没删**，只是移除了原来的触发源；**Bailian 额度触顶仍会走到它**。
+  ⚠️ **`server/.env` 不入库（`.gitignore:39`）→ 线上 Render 必须手动配**这四个 `ANSWER_ENGINE_*`，
+  否则线上仍走代码默认值（`SenseNova` / `Huihuiyun`）。
 - ⚠ 起临时实例验证**必须把 `REDIS_URL`/`REDIS_POOL_URLS` 指向不存在端口**，否则抢生产队列。
 - **`answerConsensus` 只服务答案引擎内部多路采样共识**（`worker.js:100` → `generateAnswerForQuestion`），
   **不参与学生判分**（`judgeService.js` 未引用）。改归一化前先 `npm test`（1045 条）。
