@@ -28,6 +28,9 @@ const SYMBOL_FOLD = [
   [/[［\[]/g, '('], [/[］\]]/g, ')'],
   [/[＋﹢]/g, '+'], [/[－–—﹣−]/g, '-'], [/[×✕·⋅]/g, '*'], [/[÷／]/g, '/'],
   [/[＝]/g, '='], [/[＾]/g, '^'], [/[＊]/g, '*'], [/[．]/g, '.'], [/[％]/g, '%'],
+  // 全角/变体不等号。2026-09-21 存量重跑实测：库内写 `＜`、模型写 `<`，归一化后仍是两个键，
+  // 白报一次分歧（#192 旧="＜" 新="<"）。
+  [/[＜]/g, '<'], [/[＞]/g, '>'], [/[≦]/g, '<='], [/[≧]/g, '>='], [/[≤]/g, '<='], [/[≥]/g, '>='],
   [/\\times|\\cdot/gi, '*'], [/\\div/gi, '/'],
   [/\\sqrt\s*\{([^{}]*)\}/gi, '√($1)'], [/\\sqrt\s*/gi, '√'],
   [/\\frac\s*\{([^{}]*)\}\s*\{([^{}]*)\}/gi, '($1)/($2)'],
@@ -72,13 +75,27 @@ export function normalizeAnswerKey(answer) {
   if (!s) return ''
   s = foldSuperscripts(s)
   for (const [re, to] of SYMBOL_FOLD) s = s.replace(re, to)
+  // 指数形态统一：上标折叠产出的是 `x^(2)`，而模型常写 `x^2` —— 同一答案两个键。
+  // 2026-09-21 存量重跑实测：`y=x²+2x` 与 `y=x^2+2x`、`S=-m²-4m+4` 与 `S=-m^2-4m+4`
+  // 都被判成分歧（#167 / #111）。这条必须放在 SYMBOL_FOLD 之后，否则会先被 `\circ` 规则吃掉。
+  s = s.replace(/\^(\d+)/g, '^($1)')
   // 尾部标点（保留无限小数省略号：0.31818... 的 ... 有信息）
   s = s.replace(/[。、,;:]+$/, '')
   if (/[^.]\.$/.test(s)) s = s.replace(/\.$/, '')
-  // 去掉每个分空上的「变量名=」前缀：`b=6,c=10` 与 `6,10` 是同一个答案。
+  // 去掉每个分空上的「变量/表达式=」前缀：`b=6,c=10` 与 `6,10` 是同一个答案。
   // 2026-09-21 存量对账实测：同一个正确答案，答案引擎写 `b=6，c=10`、强模型写 `6,10`，
   // 不折叠就会被当成"分歧"白报一次。
-  s = s.split(',').map(part => part.replace(/^[a-zA-Z]\s*=\s*/, '')).join(',')
+  // 2026-09-21 存量重跑补：前缀不止单个字母，`EA/AB = 1/2` 与 `1/2` 也属同一类
+  // （题目问的就是这个比值，见 #159）。LHS 限定为「字母开头的字母数字/斜杠/乘号/括号」
+  // 组成的式子，不吃掉 `AD²=AF·AB` 这类真正的等式关系答案。
+  s = s.split(',').map(part => part.replace(/^[a-zA-Z][a-zA-Z0-9/·*^()]*\s*=\s*/, '')).join(',')
+  // 纯「三角形列表」的顶点顺序归一：`△BEO` 与 `△OBE` 是同一个三角形（#156）。
+  // ⚠️ 只在**每一项都是单个三角形**时才生效 —— 相似符号 `△ABC∽△DEF` 的顶点顺序有语义
+  //    （表示 A↔D、B↔E、C↔F 的对应关系），排序会把真的错答折成等价，绝不能碰。
+  const triParts = s.split(',')
+  if (triParts.length && triParts.every(p => /^△[A-Z]{3}$/.test(p))) {
+    s = triParts.map(p => `△${[...p.slice(1)].sort().join('')}`).sort().join(',')
+  }
   // ± 位置统一：把 `-10,10` / `10,-10` 这类等价写法折叠成 `±10` 的规范形态
   const pm = s.match(/^([+-]?[\d.]+),(-?[\d.]+)$/)
   if (pm && Math.abs(parseFloat(pm[1])) === Math.abs(parseFloat(pm[2]))) s = `±${Math.abs(parseFloat(pm[1]))}`
@@ -208,6 +225,13 @@ function nearlyEqual(a, b) {
 }
 
 /**
+ * 常见单位后缀。`1.75×10⁹ mL` 与 `1.75×10⁹` 是同一个答案（单位只是表述差异，#179）。
+ * ⚠️ 必须成对判断：只有「剥掉单位后的主体相等」**且**「两侧单位相同，或有一侧压根没写单位」
+ *    才算等价。`5cm` 与 `5m` 单位不同 → 保持为两个答案，绝不能因为都是"数字+单位"就折成一个。
+ */
+const UNIT_SUFFIX = /(?:平方厘米|立方厘米|平方米|立方米|厘米|毫米|分米|千米|毫升|千克|毫克|米|克|升|元|个|人|本|度|时|分|秒|天|mL|ml|cm|mm|km|kg|mg|m|g|L|s|h)$/
+
+/**
  * 两个答案是否同一个答案。
  * ① 归一化字符串相等 → 是
  * ② 都能数值化 → 逐项比较：含 ± 的一侧按**无序集合**比（± 只是两支的写法），
@@ -220,6 +244,16 @@ export function answersEquivalent(a, b) {
   const kb = normalizeAnswerKey(b)
   if (!ka || !kb) return false
   if (ka === kb) return true
+  // 仅差一个单位后缀 → 同一答案（见 UNIT_SUFFIX 注释里的成对条件）
+  {
+    const ua = ka.replace(UNIT_SUFFIX, '')
+    const ub = kb.replace(UNIT_SUFFIX, '')
+    if (ua && ub && ua === ub) {
+      const sa = ka.slice(ua.length)
+      const sb = kb.slice(ub.length)
+      if (sa === sb || !sa || !sb) return true
+    }
+  }
   const na = parseNumericValues(a)
   const nb = parseNumericValues(b)
   if (!na || !nb || na.length !== nb.length) return false

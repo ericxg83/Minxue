@@ -153,3 +153,62 @@ test('归一化：剥掉 LaTeX 定界符 $（2026-09-21 存量重跑实测）', 
   assert.equal(normalizeAnswerKey('$45^\\circ$'), '45°')
   assert.equal(normalizeAnswerKey('$x=3$'), '3')
 })
+
+// ── 2026-09-21 存量重跑（1432 条）实测暴露的归一化缺口 ────────────────────────
+// 这批用例的共同点：**都是「同一个答案的两种写法」被判成了分歧**。
+// 伪分歧的代价不是「多看一眼」，而是会把正确答案也拖进待确认清单里，稀释真错的信号。
+
+test('归一化：指数形态统一 —— 上标 ² 与 ^2（存量重跑 #167 / #111）', () => {
+  // foldSuperscripts 把 ² 折成 ^(2)，而模型直接写 ^2；不统一就白报分歧
+  assert.ok(answersEquivalent('y=x²+2x', 'y=x^2+2x'))
+  assert.ok(answersEquivalent('S = -m²-4m+4（-4 < m<0）', 'S=-m^2-4m+4（-4<m<0）'))
+  assert.equal(normalizeAnswerKey('x²'), 'x^(2)')
+  assert.equal(normalizeAnswerKey('x^2'), 'x^(2)')
+  // 但底数/指数本身不同时仍须判为不同
+  assert.ok(!answersEquivalent('x^2', 'x^3'))
+})
+
+test('归一化：全角不等号 ＜＞（存量重跑 #192）', () => {
+  assert.ok(answersEquivalent('＜', '<'))
+  assert.ok(answersEquivalent('x≤5', 'x<=5'))
+  // ≤ 与 < 是不同答案，不能因为都含 < 就折一起
+  assert.ok(!answersEquivalent('x≤5', 'x<5'))
+})
+
+test('归一化：表达式= 前缀（存量重跑 #159）', () => {
+  // 题目问的就是这个比值，`EA/AB = 1/2` 与 `1/2` 是同一答案
+  assert.ok(answersEquivalent('EA/AB = 1/2', '1/2'))
+  assert.ok(answersEquivalent('b=6,c=10', '6,10'))
+  // 但前缀剥离不得把「等式关系型答案」整段吃掉成等价
+  assert.ok(!answersEquivalent('AD²=AF·AB', 'AD是AF、AB的比例中项'))
+})
+
+test('归一化：单位后缀（存量重跑 #179）', () => {
+  assert.ok(answersEquivalent('1.75×10^9 mL', '1.75×10^9'))
+  assert.ok(answersEquivalent('15cm', '15'))
+  // ⚠️ 成对条件：单位不同（cm vs m）必须保持为两个答案
+  assert.ok(!answersEquivalent('5cm', '5m'))
+  assert.ok(!answersEquivalent('1.75×10^9 mL', '1.75×10^9 L'))
+})
+
+test('归一化：纯三角形列表的顶点顺序（存量重跑 #156）', () => {
+  assert.ok(answersEquivalent('△ACE、△BEO、△CDO', '△ACE、△OBE、△OCD'))
+  assert.equal(normalizeAnswerKey('△BEO'), '△BEO')
+  assert.equal(normalizeAnswerKey('△OBE'), '△BEO')
+})
+
+test('回归：相似符号里的三角形顺序有语义，绝不能排序（防上面那条越界）', () => {
+  // △ABC∽△DEF 表示 A↔D、B↔E、C↔F；△ABC∽△EDF 是另一组对应关系，不是同一个答案
+  assert.ok(!answersEquivalent('△ABC∽△DEF', '△ABC∽△EDF'))
+  assert.equal(normalizeAnswerKey('△ABC∽△DEF'), '△ABC∽△DEF')
+})
+
+test('回归：真实数值差异 / 描述型差异仍须判为不同（宁可多报，不可漏报）', () => {
+  // 1.60×10¹¹ 与 1.5990×10^11 是两个数（有效数字不同），必须留给人工定夺
+  assert.ok(!answersEquivalent('1.60×10¹¹', '1.5990×10^11'))
+  // 描述型答案无法可靠归一，保持分歧
+  assert.ok(!answersEquivalent('正方形面积为 4π，圆的半径为 2', '4π，2'))
+  assert.ok(!answersEquivalent('x是无理数', '错误'))
+  // 判断题的 是 / 不是 是相反结论，剥离后不能双双变成空串而误判等价
+  assert.ok(!answersEquivalent('不是', '是'))
+})
