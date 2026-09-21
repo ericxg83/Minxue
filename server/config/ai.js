@@ -637,7 +637,13 @@ export const MODELSCOPE_BACKUP = {
     return AI_CONFIG.ENDPOINT
   },
   get API_KEY() {
-    return process.env.MODELSCOPE_BACKUP_API_KEY || ''
+    // ⚠️ 2026-09-21：第二把魔搭 Key 曾在 .env 里被写成 `MODELSCOPE_BACKUP_API_KEY_2`
+    //    （注释还注明 "not loaded by code"）⇒ 配了却完全不生效，视觉链路 MS_KEYS
+    //    `new Set([主Key, 本Key])` 去重后仍是 1 把，"有备用 Key" 是幻觉。
+    //    与 GEMINI_DIRECT.API_KEY 兼容 MODEL_GIMINI 别名同源：同一个坑不再踩第二次。
+    return process.env.MODELSCOPE_BACKUP_API_KEY
+      || process.env.MODELSCOPE_BACKUP_API_KEY_2
+      || ''
   },
   get MODEL() {
     return process.env.MODELSCOPE_BACKUP_MODEL || AI_CONFIG.MODEL

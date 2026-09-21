@@ -19,11 +19,18 @@ services:
       - key: AI_ENDPOINT
         value: https://api-inference.modelscope.cn/v1/chat/completions
       - key: AI_MODEL
-        # 魔搭视觉主模型：用 Qwen3-VL-235B（质量明显优于 8B，且魔搭有独立免费日配额）为主力，
-        # 代码 VL_MODELS 里 8B / 8B-Thinking 依次作第一/最深兜底。若已在 Render Dashboard 填过，
-        # 请把该值同步改为 Qwen/Qwen3-VL-235B-A22B-Instruct 后重新部署。
-        value: Qwen/Qwen3-VL-235B-A22B-Instruct
+        # 魔搭视觉主模型 = VL_MODELS 队首，必须是「当前在线」的模型。
+        # ⚠️ Qwen3-VL 全系（235B / 8B / 8B-Thinking）已于 2026-09-15 被魔搭下架，
+        # 实测请求返回 400 "has no provider supported"；若沿用死模型，每页视觉请求
+        # 都会先空轮一次（白耗一次往返 + 日志噪声）。当前主力见 server/config/ai.js
+        # 顶部 VL_MODELS 注释的基准结论。
+        value: Qwen/Qwen3.5-122B-A10B
       - key: MODELSCOPE_BACKUP_API_KEY
+        # 魔搭第二把 Key：必须与 AI_API_KEY 是**不同**的值。
+        # 视觉链路 MS_KEYS = new Set([AI_API_KEY, 本值])，两把相同时去重成 1 把 ⇒
+        # "有备用 Key"只是幻觉，主 Key 一耗尽整条魔搭链立刻全灭。
+        # 变量名写 MODELSCOPE_BACKUP_API_KEY_2 也兼容（见 config/ai.js 别名注释），
+        # 但只认一个变量，不要两个都填成不同值。
         sync: false
       # 备用 API：仅 TackleKey 一个厂商兜底（视觉/文本统一用 gemini-2.5-flash-nothink）
       # 已移除 Agnes / Sensnova / OpenRouter（不产 JSON 或免费额度不可用）。
