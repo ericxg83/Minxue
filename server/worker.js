@@ -15,7 +15,7 @@ import axios from 'axios'
 import sharp from 'sharp'
 import { TABLES, TASK_STATUS } from './config/neon.js'
 import { query } from './config/neon.js'
-import { AI_CONFIG, getAIHeaders, buildOCRPrompt, buildAnswerGenerationPrompt, getCurrentTextModel, getCurrentVLModel, rotateTextModel, rotateVLModel, TEXT_MODELS, VL_MODELS, callTextCompletion, callVisionCompletion, callVendorVisionCompletion, callAnswerEngineCompletion, ANSWER_ENGINE, ANSWER_QUALITY, isDegradedAnswerEngine } from './config/ai.js'
+import { AI_CONFIG, getAIHeaders, buildOCRPrompt, buildAnswerGenerationPrompt, getCurrentTextModel, getCurrentVLModel, rotateTextModel, rotateVLModel, TEXT_MODELS, VL_MODELS, callTextCompletion, callVisionCompletion, callVendorVisionCompletion, callAnswerEngineCompletion, ANSWER_ENGINE, ANSWER_QUALITY, isDegradedAnswerEngine, describeAnswerEngine } from './config/ai.js'
 import { updateTaskStatus, createQuestions, batchUpdateQuestionTags, addWrongQuestions, createJudgement, updateQuestionAnswer, markAnswerException, markAiAnswerRisk, findCachedQuestionByFingerprint, cacheQuestion, incrementQuestionUseCount, updateQuestionCacheId, createQuestionAsset, updateQuestionDenormalizedSvg, lookupWorksheetAnswer, getWorksheetAnswersBySection, deleteQuestionsByTaskId, bulkLookupResourceAnswers, getResourceAnswersBySection, getResourceById, addSelfContainedWrongQuestion } from './services/neonService.js'
 import { uploadImage } from './services/ossService.js'
 import { enhanceAndUploadFigure } from './services/figureEnhanceService.js'
@@ -585,13 +585,20 @@ console.log(`🤖 [AI Config] Model: ${AI_CONFIG.MODEL}`)
 console.log(`🔗 [AI Config] Endpoint: ${AI_CONFIG.ENDPOINT}`)
 // 两段式批改：视觉模型只识别卷面，标准答案/解析交给答案引擎。
 // 这一行用于线上确认当前生效的组合，出问题先看这里。
-console.log(`🧠 [Answer Engine] ${ANSWER_ENGINE.ENABLED
-  ? `启用 → ${ANSWER_ENGINE.VENDOR}:${ANSWER_ENGINE.MODEL}（降级链: ${ANSWER_ENGINE.FALLBACK_MODELS.join(' → ')}，超时 ${ANSWER_ENGINE.TIMEOUT_MS}ms，Key冷却 ${Math.round(ANSWER_ENGINE.KEY_COOLDOWN_MS / 3600000)}h）`
-  : '已关闭 → 回退通用文本链路（ANSWER_ENGINE_ENABLED=0）'}`)
+// ⚠️ 必须把「备用供应商」也打出来：只打 FALLBACK_MODELS 会让人以为链子只有同供应商的模型，
+//    而真正兜底的跨供应商链路（SenseNova → Huihuiyun → 通用文本链路）恰恰是最容易出问题的一环。
 {
-  const _primarySet = !!process.env.SENSENOVA_API_KEY
-  const _extra = process.env.ANSWER_ENGINE_KEYS ? process.env.ANSWER_ENGINE_KEYS.split(',').filter(Boolean).length : 0
-  console.log(`🔑 [Answer Engine] Key 池: ${_primarySet ? 1 + _extra : _extra} 把（主 ${ANSWER_ENGINE.VENDOR} Key ${_primarySet ? '已配置' : '未配置'}${_extra ? ` + 额外 ${_extra} 把` : ''}）`)
+  const _d = describeAnswerEngine()
+  console.log(`🧠 [Answer Engine] ${ANSWER_ENGINE.ENABLED
+    ? `启用 → ${ANSWER_ENGINE.VENDOR}:${ANSWER_ENGINE.MODEL}` +
+      `（同供应商降级: ${ANSWER_ENGINE.FALLBACK_MODELS.join(' → ') || '无'}` +
+      `｜跨供应商兜底: ${_d.fallbackChain.join(' → ') || '无'}` +
+      `｜再兜底: 通用文本链路` +
+      `｜超时 ${ANSWER_ENGINE.TIMEOUT_MS}ms，Key冷却 ${Math.round(ANSWER_ENGINE.KEY_COOLDOWN_MS / 3600000)}h）`
+    : '已关闭 → 回退通用文本链路（ANSWER_ENGINE_ENABLED=0）'}`)
+  // Key 池判据必须取「主供应商自己的 envKey」——原先这里硬编码 SENSENOVA_API_KEY，
+  // 切到 Bailian 后这行就变成了假信息（用 SenseNova 的 Key 去报「主 Bailian Key 已配置」）。
+  console.log(`🔑 [Answer Engine] Key 池: ${_d.primarySet ? 1 + _d.extraKeys : _d.extraKeys} 把（主 ${ANSWER_ENGINE.VENDOR} Key ${_d.primarySet ? '已配置' : '未配置'}${_d.extraKeys ? ` + 额外 ${_d.extraKeys} 把` : ''}）`)
 }
 console.log(`👁️  [OCR Answer] mode=${process.env.OCR_ANSWER_MODE === 'legacy' ? 'legacy（视觉模型自行解题）' : 'copy_only（只抄卷面印刷答案，不自行解题）'}`)
 

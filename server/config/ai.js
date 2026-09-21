@@ -1109,6 +1109,79 @@ export const ANSWER_ENGINE = {
 }
 
 /**
+ * 解析 `ANSWER_ENGINE_FALLBACK_VENDORS` 的单个条目：`Vendor` 或 `Vendor:model`。
+ *
+ * 为什么需要 `:model` 这个写法（2026-09-21）：
+ *   供应商的 `textModel` 是给**通用文本链路**挑的，未必适合出标准答案。
+ *   典型例子 SenseNova —— 它的 textModel 是 `sensenova-6.8-flash-lite`，
+ *   而 `config/ai.js` 自己的注释就写着「强推理场景（标准答案/解析生成）不要用 6.8-flash-lite：
+ *   12 道复杂数学题基准里它只 7/12，DeepSeek V4 Pro 12/12」。
+ *   所以让 SenseNova 当答案引擎的备用供应商时，**必须显式指定 deepseek-v4-pro**，
+ *   否则会拿一个 58% 正确率的模型去顶参考答案 —— 比它后面的辉辉云还差。
+ *
+ * 不写成「供应商表里加个 answerEngineModel 字段」的原因：
+ *   那种字段容易变成孤儿配置（2026-09-21 的 extraBody 事故就是这么来的）。
+ *   放在 .env 里，整条链一眼可见、一处可改。
+ */
+export function parseFallbackVendorSpec(spec) {
+  const raw = String(spec ?? '').trim()
+  if (!raw) return null
+  const idx = raw.indexOf(':')
+  const name = (idx === -1 ? raw : raw.slice(0, idx)).trim()
+  const model = idx === -1 ? null : raw.slice(idx + 1).trim() || null
+  return name ? { name, model } : null
+}
+
+/**
+ * 取「某供应商 + 某模型」实际该带的 extraBody。
+ *
+ * 为什么不能直接写 `vendor.extraBody || null`（2026-09-21 修正）：
+ *   `extraBody` 是**供应商级**字段，但现实里它往往是给**某个特定模型**打的补丁。
+ *   无脑套到同供应商的其它模型上就是孤儿配置，已发生两次：
+ *     ① 2026-09-21 Huihuiyun —— 为视觉模型 qwen3.8-max（不关思考会思考链吃满 max_tokens
+ *        导致 content 空）加的 `reasoning_effort:'none'`，在换 Key、模型池变化后忘了删，
+ *        把同供应商的**文本推理模型** `deepseek-v4-flash` 也一起关了思考；
+ *     ② 同一天答案引擎备用链 —— SenseNova 的 `reasoning_effort:'none'` 是为视觉模型
+ *        `sensenova-6.8-flash-lite` 加的（见 BACKUP_VENDOR_DEFS 注释），而备用链要借它跑
+ *        `deepseek-v4-pro`（推理模型），不修正就会把备用通道强行关思考。
+ *   判据：只有当模型「本来就是这家供应商自己的模型」（等于 textModel 或属于 vlModels）时，
+ *   才认为供应商级 extraBody 是为它准备的；对**借道该供应商的外部模型**一律不套用，
+ *   让模型保持自身默认行为（推理模型默认开思考）。
+ */
+export function resolveModelExtraBody(vendor, model) {
+  if (!vendor) return null
+  const isOwnModel = model === vendor.textModel || (vendor.vlModels || []).includes(model)
+  return isOwnModel ? (vendor.extraBody || null) : null
+}
+
+/**
+ * 启动日志用：答案引擎主供应商的 Key 是否配置 + 完整降级链（含各备用供应商实际会用的模型）。
+ * 抽成函数是为了让**日志与真实调用读同一份配置** ——
+ * 原先这段在 `worker.js` 里硬编码 `process.env.SENSENOVA_API_KEY` 判断
+ * 「主 Bailian Key 已配置」，切供应商后就成了假信息。
+ */
+export function describeAnswerEngine() {
+  const vendors = getResolvedVendors()
+  const primary = vendors.find(v => v.name === ANSWER_ENGINE.VENDOR)
+  const primarySet = !!(primary && process.env[primary.envKey])
+  const extraKeys = (process.env.ANSWER_ENGINE_KEYS || '').split(',').filter(Boolean).length
+  const fallbackChain = ANSWER_ENGINE.FALLBACK_VENDORS.map(spec => {
+    const parsed = parseFallbackVendorSpec(spec)
+    if (!parsed) return null
+    const v = vendors.find(x => x.name === parsed.name)
+    if (!v) return `${parsed.name}（未启用）`
+    const model = parsed.model || v.textModel
+    const hasKey = !!process.env[v.envKey]
+    // 顺带打出「该模型实际带不带 extraBody」—— 关思考/开思考直接决定答案质量，
+    // 而它由 resolveModelExtraBody 的归属判据决定，光看 .env 是看不出来的。
+    const extra = resolveModelExtraBody(v, model)
+    const eff = extra && extra.reasoning_effort ? `（reasoning_effort:${extra.reasoning_effort}）` : ''
+    return `${parsed.name}:${model}${eff}${hasKey ? '' : '（无 Key）'}`
+  }).filter(Boolean)
+  return { primarySet, extraKeys, fallbackChain }
+}
+
+/**
  * ── 答案质量闸（2026-09-21）──────────────────────────────────────────────────
  *
  * 事故：用户截图「单元练习十九」第 13 题（x²+y² 的平方根，正解 ±10）库里答案是 `±2√5`。
@@ -1245,7 +1318,9 @@ export async function callAnswerEngineCompletion(opts) {
               retry429: !breakerOn,
               retry503: false,
               vendor,
-              extraBody: vendor.extraBody || null,
+              // 用归属判据而不是裸 vendor.extraBody —— 见 resolveModelExtraBody 注释，
+              // 供应商级 extraBody 可能是给别的模型（常见是视觉模型）打的补丁。
+              extraBody: resolveModelExtraBody(vendor, model),
               // SenseNova 的重置是 5h 窗口而不是自然日；命中真·额度耗尽时按 Key 冷却时长冷却
               // 该 Key×模型即可，绝不能按「当日不再使用」拉黑 —— 那会让 pro 从早上禁言到半夜。
               exhaustedTtlMs: ANSWER_ENGINE.KEY_COOLDOWN_MS,
@@ -1296,33 +1371,50 @@ export async function callAnswerEngineCompletion(opts) {
   // 备用供应商兜底：各自用自己的 Key 与 textModel，与主供应商的配额/冷却互不影响。
   // 注意这层在「主供应商 Key 池」之后、通用文本链路之前 —— 通用链路的模型质量
   // 实测不足以给练习册出参考答案（会给出张冠李戴的选项），能不走就不走。
-  for (const vendorName of ANSWER_ENGINE.FALLBACK_VENDORS) {
+  for (const spec of ANSWER_ENGINE.FALLBACK_VENDORS) {
+    const parsed = parseFallbackVendorSpec(spec)
+    if (!parsed) continue
+    const { name: vendorName, model: fbModelOverride } = parsed
     if (vendor && vendor.name === vendorName) continue // 主供应商就是它的话，上面已经试过
     const fbVendor = getResolvedVendors().find(v => v.name === vendorName)
     if (!fbVendor) continue
+    // 备用供应商的模型：`Vendor:model` 写法优先，否则用它自己的 textModel。
+    // ⚠️ 注意 textModel 是给通用文本链路挑的，未必适合出标准答案（见 parseFallbackVendorSpec 注释）。
+    const fbModel = fbModelOverride || fbVendor.textModel
     const fbKey = process.env[fbVendor.envKey] || ''
     if (!fbKey) continue
     try {
       const content = await requestOpenAIProvider({
         endpoint: fbVendor.endpoint,
         apiKey: fbKey,
-        model: fbVendor.textModel,
+        model: fbModel,
         messages: buildOpenAIMessages(systemContent, userContent),
         temperature,
         maxTokens,
         timeout: ANSWER_ENGINE.TIMEOUT_MS,
-        retry429: true,
+        // 备用通道**不重试 429**（2026-09-21 实测）：
+        //   retry429 的代价是 RETRY_DELAYS_429=[3s,5s] + 每次请求自身耗时。
+        //   实测辉辉云上游限流时单次 hold ≈17s，重试 3 次合计 ≈59s 才拿到 429
+        //   （探针 _diag_backup_retry_0921.mjs：3/3 全 429，每次 55–60s）；
+        //   SenseNova 则是 5h 免费额度窗打满，重试 8s 窗口照样没恢复。
+        //   与主循环熔断期关掉 429 重试的理由一致 —— 重试只是把空转再付一遍。
+        //   关掉后同样的失败路径从 ~60s 降到 ~17s，且不影响成功路径（非 429 不触发重试）。
+        retry429: false,
         retry503: false,
         vendor: fbVendor,
-        extraBody: fbVendor.extraBody || null,
+        // ⚠️ 必须用归属判据，不能裸 fbVendor.extraBody：
+        //   备用链借的是「别人的模型」（如 SenseNova 跑 deepseek-v4-pro），
+        //   而供应商级 extraBody 往往是为它自家模型（视觉 sensenova-6.8-flash-lite）
+        //   打的补丁，套上去等于把备用推理通道强行关思考。
+        extraBody: resolveModelExtraBody(fbVendor, fbModel),
       })
       if (content) {
-        console.warn(`[AnswerEngine] 主供应商不可用 → 备用供应商兜底成功: ${fbVendor.name}:${fbVendor.textModel}`)
-        return { content, usedBackup: true, provider: `${fbVendor.name}:${fbVendor.textModel}` }
+        console.warn(`[AnswerEngine] 主供应商不可用 → 备用供应商兜底成功: ${fbVendor.name}:${fbModel}`)
+        return { content, usedBackup: true, provider: `${fbVendor.name}:${fbModel}` }
       }
-      console.warn(`[AnswerEngine] 备用供应商 ${fbVendor.name}:${fbVendor.textModel} 返回空内容`)
+      console.warn(`[AnswerEngine] 备用供应商 ${fbVendor.name}:${fbModel} 返回空内容`)
     } catch (err) {
-      console.warn(`[AnswerEngine] 备用供应商 ${fbVendor.name}:${fbVendor.textModel} 失败: ${classifyAnswerEngineError(err)} ${extractErrorSnippet(err)}`)
+      console.warn(`[AnswerEngine] 备用供应商 ${fbVendor.name}:${fbModel} 失败: ${classifyAnswerEngineError(err)} ${extractErrorSnippet(err)}`)
     }
   }
 
