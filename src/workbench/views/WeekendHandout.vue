@@ -4,7 +4,7 @@
       <PageHeader
         eyebrow="教学资源 / 错题课件"
         title="周末班错题课件"
-        description="按年级与时段聚合错题，选好题目一键生成可投屏的讲评 PPTX（多小问已合并成完整题）。"
+        description="按年级与时段聚合错题，选好题目后可在白板模式逐题讲评（多小问已合并成完整题）。"
       />
 
       <!-- 参数表单 -->
@@ -157,7 +157,7 @@
         v-if="handout"
         class="deck-preview"
         title="题单预览"
-        :description="`共 ${questionCount} 题 · 已选 ${selectedCount} 题${selectedCount !== questionCount ? '（未全选）' : ''}，勾选需要的题目后生成`"
+        :description="`共 ${questionCount} 题 · 已选 ${selectedCount} 题${selectedCount !== questionCount ? '（未全选）' : ''}，勾选需要的题目后进入白板讲题`"
       >
         <template #actions>
           <ActionButton
@@ -170,12 +170,12 @@
           </ActionButton>
           <ActionButton
             variant="primary"
-            :loading="generating"
-            :disabled="selectedCount === 0"
+            :disabled="true"
+            title="生成 PPTX 功能暂停开放，请使用白板模式讲题"
             @click="runGenerate"
           >
             <el-icon v-if="!generating"><Download /></el-icon>
-            {{ generating ? '正在生成 PPTX…' : `生成 PPTX（${selectedCount} 题）` }}
+            {{ generating ? '正在生成 PPTX…' : '生成 PPTX（暂停开放）' }}
           </ActionButton>
         </template>
 
