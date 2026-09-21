@@ -129,28 +129,9 @@
         </div>
       </div>
 
-      <!-- ═══ 解析（折叠，默认收起；与移动端 ExamReview 对齐，2026-09-01）═══
-           渲染 q.analysis（AI 批改时生成的解题过程 + 标准答案推导），
-           老师展开看 AI 是怎么判的，怀疑判错时有据可依。 -->
-      <div v-if="q.analysis || true" class="ops-analysis">
-        <button
-          type="button"
-          class="ops-analysis__toggle"
-          :aria-expanded="showAnalysis"
-          @click="showAnalysis = !showAnalysis"
-        >
-          <el-icon :size="14"><component :is="showAnalysis ? 'ArrowDown' : 'ArrowRight'" /></el-icon>
-          <span>{{ showAnalysis ? '收起解析' : '查看解析' }}</span>
-        </button>
-        <div v-if="showAnalysis" class="ops-analysis__body">
-          <MathRender
-            v-if="q.analysis"
-            :content="q.analysis"
-            autoDetect
-          />
-          <span v-else class="ops-analysis__empty">暂无解析</span>
-        </div>
-      </div>
+      <!-- 解析入口已统一到题干行的「解析」按钮（AnalysisSource，2026-09-21）：
+           原先这里是折叠区，长解析限高 280px 读起来要来回滚，且与编辑表单里的
+           「AI 解析」字段重复。现改为题干旁小入口 + 弹窗看完整解析，入口唯一。 -->
 
       <!-- AI 判定 -->
       <div class="ops-ai-row" v-if="q.is_correct != null || q.review_status || getAiState(q) === 'exception' || getAiState(q) === 'blank'">
@@ -213,13 +194,15 @@
 
         <!-- ═══ 预览模式：题干 + 配图 + 选项（统一卡片） ═══ -->
         <div v-else class="ops-content-card">
-          <!-- 题干标签行挂「原卷」小入口（重练卷才有；作业批改中间栏就是原卷，会自隐）。
+          <!-- 题干标签行挂「原卷」+「解析」两个小入口（重练卷才有原卷；作业批改中间栏
+               就是原卷，会自隐；无解析时解析入口自隐）。
                本节刻意不以 q.content 为渲染条件：OCR 题干残缺时老师恰恰最需要点它看原卷，
                若跟着空文本一起消失，入口就白做了。空文本给一句中性占位。 -->
           <div class="ops-q-section">
             <div class="ops-q-label-row">
               <span class="ops-q-label">题干</span>
               <OriginalPaperSource :question="q" />
+              <AnalysisSource :question="q" />
             </div>
             <!-- 多小问大题的公共题干（迁移 057 parent_stem）：题目被拆成小问后，
                  公共条件挂在这一列。批改页不显示它，老师看到的就是无条件的残缺题
@@ -485,12 +468,14 @@ import { ElMessage, ElMessageBox, ElLoading } from 'element-plus'
 // 越界只会被裁掉，不会画到图外。因此这里传 allowOutOfRange:true 保留原行为，
 // 但实现与解析口径不再各留一份（原先全仓 4 份副本，两份拒绝、两份不拒绝）。
 import { parseBbox, unionBbox } from '../../../utils/questionBbox'
-import { DocumentChecked, Delete, Plus, Upload, Picture, EditPen, ArrowLeft, ArrowRight, ArrowDown, RefreshLeft, Crop, Camera } from '@element-plus/icons-vue'
+import { DocumentChecked, Delete, Plus, Upload, Picture, EditPen, ArrowLeft, ArrowRight, RefreshLeft, Crop, Camera } from '@element-plus/icons-vue'
 import MathRender from '../MathRender.vue'
 import QuestionEditForm from './QuestionEditForm.vue'
 import AnswerRecognizeDialog from './AnswerRecognizeDialog.vue'
 import QuestionRecognizeDialog from './QuestionRecognizeDialog.vue'
 import OriginalPaperSource from './OriginalPaperSource.vue'
+// 解析入口（题干行小按钮 + 弹窗看完整解析），与 OriginalPaperSource 同构
+import AnalysisSource from './AnalysisSource.vue'
 
 const store = useReviewStore()
 const q = computed(() => store.currentReviewQuestion)
@@ -694,8 +679,7 @@ const quickStudentAnswerEditing = ref(false)
 const quickStudentAnswerText = ref('')
 const quickStudentAnswerSaving = ref(false)
 const quickStudentInputRef = ref(null)
-// 解析展开（默认收起；与移动端 ExamReview 同款）
-const showAnalysis = ref(false)
+// 解析已移到题干行「解析」按钮（AnalysisSource），不再有展开态状态
 const form = ref({ content: '', options: [], answer: '', analysis: '', tags: [], question_type: 'choice', subject: '' })
 const originalData = ref(null)
 const localImageUrl = ref('')
@@ -1586,50 +1570,6 @@ const handleRetryGeometry = async () => {
   padding: 8px 14px;
   border-bottom: 1px solid var(--wb-bg-hover);
   flex-shrink: 0;
-}
-
-/* ── 解析（折叠式，与移动端 ExamReview 对齐）── */
-.ops-analysis {
-  background: #fff;
-  margin: 0 10px;
-  padding: 8px 14px;
-  border-bottom: 1px solid var(--wb-bg-hover);
-  flex-shrink: 0;
-}
-.ops-analysis__toggle {
-  display: inline-flex;
-  align-items: center;
-  gap: 4px;
-  background: none;
-  border: 0;
-  padding: 4px 0;
-  color: var(--wb-text-secondary);
-  font-size: var(--wb-fs-meta);
-  font-weight: 500;
-  cursor: pointer;
-  transition: color var(--wb-motion-fast) var(--wb-motion-ease);
-}
-.ops-analysis__toggle:hover { color: var(--wb-primary); }
-.ops-analysis__toggle:focus-visible {
-  outline: 2px solid var(--wb-primary);
-  outline-offset: 2px;
-  border-radius: var(--wb-radius-sm);
-}
-.ops-analysis__body {
-  margin-top: 6px;
-  padding: 10px 12px;
-  background: var(--wb-bg-hover);
-  border-radius: var(--wb-radius-sm);
-  color: var(--wb-text);
-  font-size: var(--wb-fs-body);
-  line-height: 1.6;
-  /* 长解析限高+滚动，避免详情面板被撑得很长，老师 ctrl+F 时容易跳过其他题 */
-  max-height: 280px;
-  overflow-y: auto;
-}
-.ops-analysis__empty {
-  color: var(--wb-text-tertiary);
-  font-style: italic;
 }
 
 /* ── 顶栏模式标题 ── */

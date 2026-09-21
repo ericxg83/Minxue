@@ -127,3 +127,82 @@ export function findPlaceholderBlockPages(rows) {
   }
   return hit
 }
+
+// ── C. 同页框互相「压盖」判据（2026-09-20）──────────────────────────────
+//
+// 事故：任务 7debfcc9（第04周）p2 六道题，block 高度全部 250（=页面 1/4），
+// 相邻框 y 间距仅 100~250 → 每一框都横跨 2 道题。老师看到的「题图」里
+// 上半是本题手写、下半是下一题的题号 + 题干 —— 五张截图全是这个形态。
+//
+// 为什么前两道闸都没拦住：
+//   ① 越界闸只查右下角 ≤1000，这批框 x+w=880 / y+h=1050 里只有 2 条超界；
+//   ② 均分占位闸要「宽同≥80% 且 高同≥80% 且 间距同≥80%」，实测
+//      p2 = 宽同71% 高同71% 间距同33%（题9/10 高 100 混在 250 里把占比拉下来了）
+//      → 不是「等距占位」，是「测量粗糙 + 框给得比真题大」。
+//
+// 判据本体：同一页内，若某框与**另一题**的框在**纵向**重叠超过较矮者的 OVERLAP_RATIO，
+// 且**横向也有重叠**（必须同时成立！），两框不可能各自独立圈住一道题 → 该框裁出来必然带上下邻题。
+// 纯算术，零模型调用。
+//
+// ⚠️ 横向重叠条件是必需的，不是保险：上海作业常把多道题的图集中排成一行（图下印「第N题图」），
+//    并排题的框纵向必然完全重叠，只按纵向判会 100% 误伤 —— 这正是 2026-09-18「坐标互比」判据
+//    翻车的同一个坑。加了横向条件后，并排题（x 区间不相交）正确放行。
+//
+// 取向（同头部原则）：命中即回退「不显示」，宁可不出图，也不给老师看邻题的图。
+const OVERLAP_RATIO = 0.35 // 纵向重叠超过较矮框的 35%，且横向有重叠，即判压盖
+
+/**
+ * 同一页内是否存在「框与框纵向压盖」。
+ * @param {Array} boxes - 该页各题的 block_coordinates（原始 JSONB 值即可）
+ * @param {number} ratio - 纵向重叠占比阈值
+ * @returns {{overlapping:boolean, reason:string, pairs:Array}}
+ */
+export function detectOverlappingBlockBoxes(boxes, ratio = OVERLAP_RATIO) {
+  const list = (Array.isArray(boxes) ? boxes : []).map(parseBlockBox).filter(Boolean)
+  if (list.length < 2) return { overlapping: false, reason: `样本不足(n=${list.length})`, pairs: [] }
+
+  const pairs = []
+  for (let i = 0; i < list.length; i++) {
+    for (let j = i + 1; j < list.length; j++) {
+      const a = list[i]
+      const b = list[j]
+      // 纵向重叠
+      const vOverlap = Math.min(a.y + a.height, b.y + b.height) - Math.max(a.y, b.y)
+      if (vOverlap <= 0) continue
+      // 横向重叠：并排题（上海作业图行排版）必须在这里被排除
+      const hOverlap = Math.min(a.x + a.width, b.x + b.width) - Math.max(a.x, b.x)
+      if (hOverlap <= 0) continue
+      const shorter = Math.min(a.height, b.height)
+      if (shorter <= 0) continue
+      const r = vOverlap / shorter
+      if (r > ratio) {
+        pairs.push({ i, j, vOverlap, hOverlap, ratio: Number(r.toFixed(3)), a, b })
+      }
+    }
+  }
+  return {
+    overlapping: pairs.length > 0,
+    reason: pairs.length ? `${pairs.length} 对框压盖（最高 ${Math.max(...pairs.map(p => p.ratio))}）` : '无压盖',
+    pairs,
+  }
+}
+
+/**
+ * 找出「block 框互相压盖」的页。与占位页同构，key = `${taskId}|${pageNumber}`。
+ * @param {Array} rows - 至少含 { taskId, pageNumber, block }
+ */
+export function findOverlappingBlockPages(rows, ratio = OVERLAP_RATIO) {
+  const pages = new Map()
+  for (const r of rows) {
+    if (!r || r.block == null) continue
+    if (!parseBlockBox(r.block)) continue
+    const k = `${r.taskId ?? ''}|${r.pageNumber ?? ''}`
+    if (!pages.has(k)) pages.set(k, [])
+    pages.get(k).push(r.block)
+  }
+  const hit = new Set()
+  for (const [k, boxes] of pages) {
+    if (detectOverlappingBlockBoxes(boxes, ratio).overlapping) hit.add(k)
+  }
+  return hit
+}

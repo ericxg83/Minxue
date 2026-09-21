@@ -202,6 +202,20 @@
                 >
                   重新处理<el-icon><Refresh /></el-icon>
                 </ActionButton>
+                <!-- 上传时选错批改方式（典型：选了练习册，但这份卷根本不是该册的）→
+                     按新方式重批。会清空现有题目/判题/错题并重跑，故只对普通作业开放
+                     （重练卷的题目行共用原作业，后端直接拒绝）。 -->
+                <!-- ⚠️ 2026-09-21 起功能关停：高危不可逆（清空题目/判题/错题 + 连带删已发布重绘图），
+                     按钮保留但置灰并给出原因，恢复需前后端同时开（见 apiService 开关）。 -->
+                <ActionButton
+                  v-if="canConvertRoute(selectedTask)"
+                  variant="ghost"
+                  :disabled="!routeConvertEnabled"
+                  :title="routeConvertEnabled ? '' : routeConvertDisabledHint"
+                  @click="openConvertRoute(selectedTask)"
+                >
+                  改批改方式
+                </ActionButton>
                 <ActionButton variant="primary" @click="openTask(selectedTask)">
                   {{ selectedTask.actionLabel }}<el-icon><ArrowRight /></el-icon>
                 </ActionButton>
@@ -249,10 +263,13 @@
           <RetryPaperPreview
             :question-ids="previewTask.questionIds"
             :title="previewTask.name"
-            :student-name="previewTask.studentName"
-          />
+          :student-name="previewTask.studentName"
+        />
         </div>
       </el-drawer>
+
+      <!-- 改批改方式（练习册 / 答案库 / 日常作业 互转）—— 见 ConvertRouteDialog.vue -->
+      <ConvertRouteDialog v-model="convertRouteVisible" :task="convertRouteTask" @converted="handleRouteConverted" />
     </div>
   </div>
 </template>
@@ -263,13 +280,14 @@ import { useRoute, useRouter } from 'vue-router'
 import { ArrowRight, Check, Loading, Refresh, WarningFilled } from '@element-plus/icons-vue'
 import ActionButton from '../components/ui/ActionButton.vue'
 import ContentCard from '../components/ui/ContentCard.vue'
+import ConvertRouteDialog from '../components/review/ConvertRouteDialog.vue'
 import EmptyState from '../components/ui/EmptyState.vue'
 import FilterBar from '../components/ui/FilterBar.vue'
 import MiniStat from '../components/ui/MiniStat.vue'
 import PageHeader from '../components/ui/PageHeader.vue'
 import StatusTag from '../components/ui/StatusTag.vue'
 import WorkbenchSelect from '../components/ui/WorkbenchSelect.vue'
-import { getGeneratedExamsByStudent, getStudents, getTasksByStudent, retryTask } from '../../services/apiService'
+import { getGeneratedExamsByStudent, getStudents, getTasksByStudent, retryTask, TASK_ROUTE_CONVERT_ENABLED, TASK_ROUTE_CONVERT_DISABLED_HINT } from '../../services/apiService'
 import { humanizeError } from '../utils/humanizeError'
 import {
   RETRY_PAPER_STATE,
@@ -454,6 +472,10 @@ const homework = (task, student) => {
     key: `homework-${student.id}-${task.id}`,
     id: task.id,
     generatedExamId: task.generated_exam_id || null,
+    // 批改方式（workbook=练习册 / exam=答案库 / homework=日常作业）与所挂练习册：
+    // 「改批改方式」入口据此判断当前方式；重练卷（generated_exam_id 非空）不给这个入口。
+    taskType: task.task_type || 'homework',
+    worksheetId: task.worksheet_id || null,
     studentId: student.id,
     studentName: student.name,
     studentAvatar: student.avatar || '',
@@ -663,6 +685,27 @@ async function handleRetryTask(task) {
   } finally {
     retryingTaskKey.value = null
   }
+}
+
+// 改批改方式：上传时选错（典型是选了练习册、但这份卷根本不是该册的）→ 按新方式重批。
+// 只对普通作业开放：重练卷的题目行共用原作业，后端直接拒绝（code=blocked_retry_paper）。
+// 转换会清空现有题目/判题/错题并重跑，影响面由对话框先 dryRun 预演给老师看。
+const convertRouteVisible = ref(false)
+const convertRouteTask = ref(null)
+// 功能开关（高危操作，当前关闭）：按钮置灰不可点，对话框与 API 层各有一道闸。
+const routeConvertEnabled = TASK_ROUTE_CONVERT_ENABLED
+const routeConvertDisabledHint = TASK_ROUTE_CONVERT_DISABLED_HINT
+function canConvertRoute(task) {
+  return !!task?.id && task.source === 'homework' && !task.generatedExamId
+}
+function openConvertRoute(task) {
+  if (!routeConvertEnabled) return
+  convertRouteTask.value = task
+  convertRouteVisible.value = true
+}
+async function handleRouteConverted() {
+  convertRouteVisible.value = false
+  await loadData()
 }
 
 // 只读「重练卷卷面预览」抽屉：给老师看打印出去的那张卷，不含任何复核操作。

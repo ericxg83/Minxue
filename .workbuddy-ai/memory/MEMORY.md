@@ -94,6 +94,20 @@
   → 未审核答案库被判分 → 假红叉。**改练习册判分前先想清楚要不要对齐两条管线。**
 - `PUT /api/questions/:id` 已按 `answerRewritten` 清 `ai_answer_risk_reason` / `answer_exception*`（警示不消失先查这三列）。
 - ⚠ 起临时实例验证**必须把 `REDIS_URL`/`REDIS_POOL_URLS` 指向不存在的端口**，否则抢生产队列。
+- **答案引擎的答案质量 = 用没用上强模型，不是判据问题**（2026-09-21 实测）：主供应商 SenseNova
+  白天 rpm 打满 → 代码 3 模型 × 8s 重试后**静默降级**到 `Huihuiyun:deepseek-v4-flash`，
+  该弱模型同题 10 次采样错答率 **40%**；Bailian 付费池 deepseek-v4-pro 同题 3/3 全对、9–13s。
+  **判断答案可信度先看 `result.engine`，别只看答案值。**
+- **已落地的三道闸**（回滚开关：`ANSWER_CONSENSUS=0`、`ANSWER_PRIMARY_BREAKER_MS=0`）：
+  ① `config/ai.js` 主供应商熔断（全线失败后 60s 内只做一次不重试试探，省掉每题 24s 空转）；
+  ② `worker.js` 降级时多路采样投票（`utils/answerConsensus.js`）+ 分歧写 `ai_answer_risk_reason`；
+  ③ 降级留痕（`isDegradedAnswerEngine`）。
+- **多路投票治不了系统性偏差**：实测 40% → ~35%，几乎无改善；且 429 会把全局 AI 信号量压到
+  并发 1 → 三路串行 → 单题 140–230s。**它的价值是"标出不可靠"，不是"让答案变对"。**
+- **投票口径**：`±10` 与 `10` 必须判为**不同**答案（漏写 ± 是平方根题高频分歧点）；
+  采纳哪一路的答案就**必须连带用那一版的解析**，否则制造新的答案/解析不同源。
+- ⛔ **别再用 `aiParseSelfCheck` 去"筛掉自相矛盾的那一路"**：判据把 `36+64=100` 与答案 `±10`
+  直接比，不认识「100 的平方根」这一步变换，会把**正确的那路也筛掉**（实测自洽子集 0/3）。
 
 ## 7. 其他硬约定
 
@@ -105,3 +119,9 @@
 - 周末班课件（`lib/weekendHandout.js` ↔ CLI 同构）：**课件范围内同一道题只出现一次**——
   全局跨天合并（`mergeKeyOf` = ocrStemKey→normalizeStem→去 `_`，长度 ≥12 闸），
   跨天共错合并到最晚错题日期节并累计「共 N 人错」，禁止改回 per-day 合并。
+- **题目解析入口唯一化（2026-09-21）**：解析只在题干行的「解析」小按钮
+  （`review/AnalysisSource.vue`，与「原卷」`OriginalPaperSource.vue` 同构）弹窗查看，走 MathRender。
+  已下线两处旧入口：`QuestionDetailPanel` 的「查看解析」折叠区、`QuestionEditForm` 的「AI 解析」输入框。
+  **编辑表单不再提供解析修改能力**（老师手改会与 `ai_self_check` 语义脱节）；
+  `form.analysis` 仍由父组件原样提交，**不会清空已有解析**。无解析时不渲染按钮。
+  两个入口都自隐：原卷仅 `source==='paper'` 或跨卷题；解析仅 `analysis` trim 后非空。

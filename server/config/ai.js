@@ -639,7 +639,7 @@ export const MODELSCOPE_BACKUP = {
   get API_KEY() {
     // ⚠️ 2026-09-21：第二把魔搭 Key 曾在 .env 里被写成 `MODELSCOPE_BACKUP_API_KEY_2`
     //    （注释还注明 "not loaded by code"）⇒ 配了却完全不生效，视觉链路 MS_KEYS
-    //    `new Set([主Key, 本Key])` 去重后仍是 1 把，"有备用 Key" 是幻觉。
+    //    `new Set([主Key, 本Key])` 去重后仍是 1 把，"有备用 Key"是幻觉。
     //    与 GEMINI_DIRECT.API_KEY 兼容 MODEL_GIMINI 别名同源：同一个坑不再踩第二次。
     return process.env.MODELSCOPE_BACKUP_API_KEY
       || process.env.MODELSCOPE_BACKUP_API_KEY_2
@@ -1096,6 +1096,51 @@ export const ANSWER_ENGINE = {
 }
 
 /**
+ * ── 答案质量闸（2026-09-21）──────────────────────────────────────────────────
+ *
+ * 事故：用户截图「单元练习十九」第 13 题（x²+y² 的平方根，正解 ±10）库里答案是 `±2√5`。
+ * 实测根因（`server/_probe_answer_stability_0921.mjs`）：
+ *   · 主供应商 SenseNova 的 deepseek-v4-pro / glm-5.2 / sensenova-6.8 三个模型
+ *     **全部 429 rpm exhausted**，代码在 3 模型 × 8s 重试（共 24s）后**直接降级**到
+ *     兜底弱模型 `Huihuiyun:deepseek-v4-flash`；
+ *   · 该弱模型在**同一道题**上连续 4 次给出 `±5 / ±10 / ±10 / ±10` —— 单次采样就是掷骰子；
+ *   · 每题耗时 58–66s，且**没有任何留痕**（questions 表不记录产出该答案的通道）。
+ *   对照：Bailian 付费池的 deepseek-v4-pro 同题 3/3 全对、9–13s。
+ *
+ * 两道闸：
+ *   ① PRIMARY_BREAKER_MS 主供应商熔断 —— 全线失败后的一段时间内，主供应商只做**一次
+ *      不重试**的试探（~3s），失败立刻走备用链路。既不放弃主模型（rpm 是分钟窗，
+ *      窗口恢复时下一题就能重新用上），也不再让每道题空转 24s。
+ *   ② CONSENSUS_* 多路求解投票 —— 只在「产出答案的不是主模型」时启用，主模型正常时
+ *      零额外调用。同一道题多路独立求解，归一化后投票：全一致才当共识，
+ *      分歧就写进 ai_answer_risk_reason 交人工，而不是让某一次随机采样直接变成标准答案。
+ *
+ * 回滚：ANSWER_CONSENSUS=0（关多路采样）、ANSWER_PRIMARY_BREAKER_MS=0（关熔断）。
+ */
+export const ANSWER_QUALITY = {
+  CONSENSUS_ENABLED: process.env.ANSWER_CONSENSUS !== '0',
+  // 降级通道下的采样路数（含首路）。3 路 = 首路 + 2 路补采，并发发起，不增加墙钟等待。
+  SAMPLES_ON_DEGRADED: Math.max(2, parseInt(process.env.ANSWER_CONSENSUS_SAMPLES, 10) || 3),
+  // ⚠️ 必须用 `|| 60000` 而不是 `?? 60000`：env 未设置时 parseInt(undefined) 得到的是 **NaN**，
+  //    而 `NaN ?? x` 仍是 NaN（?? 只拦 null/undefined）→ Math.max(0, NaN) = NaN →
+  //    `NaN > 0` 为 false → 熔断永远不生效。实测踩过一次（首版写成 ??，两道题各等 128s）。
+  PRIMARY_BREAKER_MS: Math.max(0, parseInt(process.env.ANSWER_PRIMARY_BREAKER_MS, 10) || 60000),
+}
+
+// 主供应商熔断到期时间戳（进程内）。0 = 未熔断。
+let _answerEnginePrimaryDownUntil = 0
+
+export function isAnswerEnginePrimaryDegraded() {
+  return Date.now() < _answerEnginePrimaryDownUntil
+}
+
+/** 产出该答案的通道是不是「主供应商 + 主模型」——不是就说明发生了降级，答案可信度要打折 */
+export function isDegradedAnswerEngine(provider) {
+  if (!provider) return true
+  return provider !== `${ANSWER_ENGINE.VENDOR}:${ANSWER_ENGINE.MODEL}`
+}
+
+/**
  * 答案引擎 Key 池与冷却。
  * 按 Key 维度（而非「Key×模型×自然日」）记录冷却，因为 SenseNova 公测额度是
  * 「账号 × 5 小时」重置，与「自然日」不同步。配额耗尽的 Key 进入冷却，到期自动恢复。
@@ -1158,7 +1203,14 @@ export async function callAnswerEngineCompletion(opts) {
       console.warn(`[AnswerEngine] 供应商 ${ANSWER_ENGINE.VENDOR} 未配置 Key，回落通用文本链路`)
     } else {
       const primary = modelOverride || ANSWER_ENGINE.MODEL
-      const models = fallback ? [primary, ...ANSWER_ENGINE.FALLBACK_MODELS] : [primary]
+      // 熔断期：主供应商只做「单模型 + 不重试」的一次试探。
+      // 为什么不是完全跳过：rpm/tpm 是**分钟窗**，窗口一恢复就该立刻用回强模型；
+      // 一次不重试的试探只要 ~3s，而完整重试链是 3 模型 × 8s = 24s —— 现在每题都在付这 24s。
+      const breakerOn = !modelOverride && isAnswerEnginePrimaryDegraded()
+      const models = (breakerOn || !fallback) ? [primary] : [primary, ...ANSWER_ENGINE.FALLBACK_MODELS]
+      if (breakerOn) {
+        console.warn(`[AnswerEngine] 主供应商熔断中，本次只做一次不重试的试探: ${vendor.name}:${primary}`)
+      }
       let allCooling = true
       for (const apiKey of keys) {
         if (isAnswerEngineKeyCooling(apiKey)) continue // 这把 Key 在冷却，跳过
@@ -1176,7 +1228,8 @@ export async function callAnswerEngineCompletion(opts) {
               // 429 允许重试（最多等 8s，额度真耗尽时 postWith429Retry 会立刻上抛换 Key/换模型）；
               // 503 不重试 —— RETRY_DELAYS_503 累计可等 245s，会把批改卡死在一条链路上。
               // 这里选择快速失败并降级，绝不硬卡在一个模型/Key 上。
-              retry429: true,
+              // 熔断期关掉 429 重试：此时重试只是把 8s 空转再付一遍，窗口没到点照样失败。
+              retry429: !breakerOn,
               retry503: false,
               vendor,
               extraBody: vendor.extraBody || null,
@@ -1185,6 +1238,10 @@ export async function callAnswerEngineCompletion(opts) {
               exhaustedTtlMs: ANSWER_ENGINE.KEY_COOLDOWN_MS,
             })
             if (content) {
+              if (_answerEnginePrimaryDownUntil) {
+                console.log(`[AnswerEngine] 主供应商已恢复，解除熔断（${vendor.name}:${model}）`)
+                _answerEnginePrimaryDownUntil = 0
+              }
               return { content, usedBackup: true, provider: `${vendor.name}:${model}` }
             }
             console.warn(`[AnswerEngine] ${vendor.name}:${model} 返回空内容`)
@@ -1212,6 +1269,13 @@ export async function callAnswerEngineCompletion(opts) {
       }
       if (allCooling) {
         console.warn(`[AnswerEngine] 所有 Key 均处于冷却（额度重置中），回落通用文本链路`)
+      } else if (!modelOverride && ANSWER_QUALITY.PRIMARY_BREAKER_MS > 0) {
+        // 主供应商整条链（Key 池 × 模型）全线失败 → 熔断一段时间。
+        // 期间每题只做一次不重试的试探，避免「每题 3 模型 × 8s 空转」。
+        // 生产实测（2026-09-21）：SenseNova 白天被线上批改占满 rpm，正是这条路径
+        // 让每道题白等 24s 之后仍然只能拿兜底弱模型的答案。
+        _answerEnginePrimaryDownUntil = Date.now() + ANSWER_QUALITY.PRIMARY_BREAKER_MS
+        console.warn(`[AnswerEngine] 主供应商全线失败 → 熔断 ${Math.round(ANSWER_QUALITY.PRIMARY_BREAKER_MS / 1000)}s（期间每题仅一次试探，rpm 窗口恢复后自动解除）`)
       }
     }
   }

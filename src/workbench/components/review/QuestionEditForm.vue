@@ -70,11 +70,10 @@
       </div>
     </div>
 
-    <!-- AI 解析 -->
-    <div class="qef-section">
-      <div class="qef-label">AI 解析</div>
-      <el-input v-model="localForm.analysis" type="textarea" :rows="3" placeholder="题目解析" />
-    </div>
+    <!-- 解析字段已下线（2026-09-21）：解析改由题干行的「解析」按钮弹窗只读查看
+         （AnalysisSource），编辑表单不再提供修改入口，避免老师手改 AI 解析导致
+         与 ai_self_check 语义脱节。注意：form.analysis 仍由父组件持有并原样提交，
+         这里只是不再暴露输入框，不会清空已有解析。 -->
   </div>
 </template>
 

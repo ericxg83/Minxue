@@ -64,9 +64,10 @@ import multer from 'multer'
 import { query, TABLES, TASK_STATUS, QUESTION_STATUS } from './config/neon.js'
 import { uploadFilesWithRetry } from './services/uploadRetryManager.js'
 import { createUploadReport, logUploadReport } from './services/uploadReportLogger.js'
-import { createJudgement, batchUpdateQuestionTags, getQuestionAssets, getQuestionAssetsByType, createResource, replaceResourceAnswers, addWrongQuestions } from './services/neonService.js'
+import { createJudgement, batchUpdateQuestionTags, getQuestionAssets, getQuestionAssetsByType, createResource, replaceResourceAnswers, addWrongQuestions, deleteQuestionsByTaskId } from './services/neonService.js'
 import { judgeAnswer, findDirtyAnswers } from './services/judgeService.js'
 import { checkQuestionCompleteness } from './utils/questionCompleteness.js'
+import { planTaskRouteChange, resolveRouteKind, shouldResetTaskName, isRouteAutoName, buildAutoTaskName, describeRouteRisk, isRouteConvertEnabled, ROUTE_CONVERT_DISABLED_MESSAGE } from './utils/taskRoute.js'
 import { requeueGeometryRedrawOnRejudgeWrong } from './utils/geometryRequeueOnRejudge.js'
 import { syncQuestionCompleteness, syncQuestionCompletenessQuietly } from './services/questionCompletenessSync.js'
 import { computeWrongBookRisks } from './utils/wrongBookRisks.js'
@@ -930,6 +931,221 @@ app.post('/api/admin/tasks/retry-by-name', async (req, res) => {
     res.json({ success: true, message: '任务已重新提交', ...result })
   } catch (error) {
     console.error('按名称重试任务失败:', error)
+    res.status(500).json({ error: error.message })
+  }
+})
+
+// Admin: 改批改路线并重批 —— 「上传时选错练习册路线」的纠正通道。
+//
+// 事故背景（2026-09-20）：选了练习册路线、卷子其实不是那本练习册时，workbook 管线
+// 拿 A 册答案库对 B 卷题号 ⇒ 整卷错判；且 workbook 的 OCR 只提「页标题+题号+手写答案」，
+// 题干靠答案库回填，对不上就落成「第 N 题」占位符；错题还会以 source_type='workbook'
+// + 错误的 worksheet_id 入册（周末课件按 ws:{worksheet_id}|p|n 聚合 ⇒ 脏题混进该册题单）。
+// 而 PUT /api/tasks/:id 只能改 status、retry 从 DB 回读原字段重跑同一条管线 ⇒ 无法自愈。
+//
+// 本端点把「清脏数据 → 改路线 → 重入队」三步封成一次调用，字段口径唯一来源
+// utils/taskRoute.js（worksheet_id 必须与 resource_id 一起清，否则 retryTaskById 会把
+// worksheet_id 兜底成 resourceId，让任务拐进答案库管线用同一本练习册再错一次）。
+//
+// ⚠️ 默认 dryRun=true：先返回影响面，人工确认后再带 dryRun=false 执行。
+app.post('/api/admin/tasks/:taskId/convert-route', async (req, res) => {
+  try {
+    const { taskId } = req.params
+    const { target = 'homework', resourceId = null, worksheetId = null, dryRun = true } = req.body || {}
+
+    // ⚠️ 功能开关（默认关闭）：dryRun 也一起拦，避免"能预演不能执行"的半开状态让人误会。
+    if (!isRouteConvertEnabled()) {
+      return res.status(403).json({ error: ROUTE_CONVERT_DISABLED_MESSAGE, code: 'route_convert_disabled' })
+    }
+
+    const uuidRegex = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
+    if (!uuidRegex.test(taskId)) return res.status(400).json({ error: '无效的任务ID' })
+
+    const { rows } = await query(
+      `SELECT id, student_id, original_name, status, task_type, worksheet_id, resource_id,
+              generated_exam_id, subject, created_at, deleted_at
+         FROM ${TABLES.TASKS} WHERE id = $1`,
+      [taskId]
+    )
+    const task = rows[0]
+    if (!task) return res.status(404).json({ error: '任务不存在' })
+    if (task.deleted_at) return res.status(400).json({ error: '任务已删除（软删），不能转路线' })
+
+    const plan = planTaskRouteChange(task, target, { resourceId, worksheetId })
+    if (!plan.ok) {
+      const status = plan.code === 'noop' ? 200 : 400
+      return res.status(status).json({ error: plan.reason, code: plan.code, routeKind: resolveRouteKind(task) })
+    }
+
+    // ── 影响面取证（dryRun 与实跑共用同一份，保证"看到的"就是"删掉的"）──
+    const { rows: questionRows } = await query(
+      `SELECT id, content, page_number, question_no FROM ${TABLES.QUESTIONS} WHERE task_id = $1`,
+      [taskId]
+    )
+    const questionIds = questionRows.map((r) => r.id)
+    const placeholderCount = questionRows.filter((r) => /^第\s*\d+\s*题$/.test(String(r.content || '').trim())).length
+
+    const countBy = async (sql, params) => {
+      const { rows: c } = await query(sql, params)
+      return c[0] || {}
+    }
+    const wq = await countBy(
+      `SELECT COUNT(*)::int AS total FROM ${TABLES.WRONG_QUESTIONS}
+        WHERE question_id = ANY($1::uuid[]) OR last_wrong_task_id = $2`,
+      [questionIds, taskId]
+    )
+    const jd = await countBy(
+      `SELECT COUNT(*)::int AS total FROM ${TABLES.JUDGEMENTS} WHERE question_id = ANY($1::uuid[])`,
+      [questionIds]
+    )
+    const asset = await countBy(
+      `SELECT COUNT(*)::int AS total,
+              (COUNT(*) FILTER (WHERE clean_geometry_svg IS NOT NULL OR tikz_status = 'completed'))::int AS published
+         FROM ${TABLES.QUESTION_ASSETS} WHERE question_id = ANY($1::uuid[])`,
+      [questionIds]
+    )
+
+    // 转练习册时补查该册的答案条数（workbook 管线的题干与参考答案全靠它）。
+    // 0 条 = 转换后整卷无参考答案，必须提前告诉老师。
+    let workbookAnswerCount = null
+    let worksheetRow = null
+    if (target === 'workbook') {
+      const { rows: wsRows } = await query(
+        `SELECT id, name, resource_type FROM ${TABLES.RESOURCES} WHERE id = $1`,
+        [worksheetId]
+      )
+      worksheetRow = wsRows[0] || null
+      // 练习册不存在 ⇒ 转过去后 worker 会因缺答案整卷挂空，这里直接拦掉。
+      if (!worksheetRow || worksheetRow.resource_type !== 'worksheet') {
+        return res.status(400).json({ error: '所选练习册不存在（worksheetId 无效）', code: 'workbook_not_found' })
+      }
+      const c = await countBy(
+        `SELECT COUNT(*)::int AS total FROM ${TABLES.WORKSHEET_ANSWERS} WHERE worksheet_id = $1`,
+        [worksheetId]
+      )
+      workbookAnswerCount = c.total || 0
+    }
+
+    const impact = {
+      questions: questionRows.length,
+      placeholderQuestions: placeholderCount,
+      wrongQuestions: wq.total || 0,
+      judgements: jd.total || 0,
+      assets: asset.total || 0,
+      publishedRedraws: asset.published || 0,
+      workbookAnswerCount,
+    }
+    // ── 任务名还原（转路线后必须回到目标路线的命名口径）──
+    // workbook 路线的名字是客户端拼的「科目 · 练习册名」，而通用管线的改名闸
+    // `isAutoTaskName` 默认**不认**这种名字（treatClientPaperNameAsAuto 只有 workbook
+    // 管线传 true）⇒ 不改就永远挂着错误的册名，且重跑时卷面标题覆盖不上它。
+    // 还原成客户端同款自动名后，重跑时由卷面印刷标题按 taskTitle.js 口径改写。
+    // 老师手工改过的名字（非自动名）一律不动。
+    let nextName = null
+    if (target === 'workbook') {
+      if (worksheetRow?.name && isRouteAutoName(task.original_name)) {
+        nextName = `${task.subject || '数学'} · ${worksheetRow.name}`
+      }
+    } else if (shouldResetTaskName(task.original_name)) {
+      nextName = buildAutoTaskName({ subject: task.subject, createdAt: task.created_at })
+    }
+
+    const warnings = describeRouteRisk({
+      target,
+      questions: questionRows.length,
+      placeholderQuestions: placeholderCount,
+      workbookAnswerCount,
+    })
+    if (['pending', 'processing'].includes(task.status)) {
+      warnings.push(`任务当前 status=${task.status}，可能正在批改中，建议等它结束后再转换（并发写会互相覆盖）`)
+    }
+    if (questionRows.length > 0 && placeholderCount / questionRows.length >= 0.5) {
+      warnings.push(`${placeholderCount}/${questionRows.length} 道题干是「第 N 题」占位符 —— 符合"选错练习册路线"的特征`)
+    }
+    if ((asset.published || 0) > 0) {
+      warnings.push(`将连带删除 ${asset.total} 条题目资产（含 ${asset.published} 条已发布重绘图，question_assets 是 ON DELETE CASCADE），重跑后需重新重绘`)
+    }
+    if (nextName) {
+      warnings.push(`任务名将还原为「${nextName}」——重跑后由卷面印刷标题覆盖（校名页眉会被剥掉）`)
+    } else if (/\s·\s/.test(String(task.original_name || ''))) {
+      warnings.push(`任务名「${task.original_name}」疑似人工改过，保持原样不还原`)
+    }
+
+    if (dryRun) {
+      return res.json({
+        dryRun: true,
+        taskId,
+        studentId: task.student_id,
+        originalName: task.original_name,
+        routeKind: resolveRouteKind(task),
+        from: plan.from,
+        to: plan.patch,
+        nameChange: nextName ? { from: task.original_name, to: nextName } : null,
+        impact,
+        warnings,
+        samples: questionRows.slice(0, 5).map((r) => ({
+          id: r.id, page: r.page_number, no: r.question_no,
+          content: String(r.content || '').slice(0, 40),
+        })),
+        hint: '确认无误后带 dryRun=false 重新调用',
+      })
+    }
+
+    // ── 执行：清脏数据 → 改路线 → 重入队 ──
+    const deleted = { judgements: 0, wrongQuestions: 0, questions: 0 }
+    if (questionIds.length > 0) {
+      const r1 = await query(
+        `DELETE FROM ${TABLES.JUDGEMENTS} WHERE question_id = ANY($1::uuid[])`,
+        [questionIds]
+      )
+      deleted.judgements = r1.rowCount || 0
+      // ⚠️ 错题行必须先于题目行删除：wrong_questions.question_id 是 ON DELETE SET NULL，
+      // 先删 questions 只会把这些自包含脏行变成孤儿（content/worksheet_id 全留着），清不掉。
+      const r2 = await query(
+        `DELETE FROM ${TABLES.WRONG_QUESTIONS}
+          WHERE question_id = ANY($1::uuid[]) OR last_wrong_task_id = $2`,
+        [questionIds, taskId]
+      )
+      deleted.wrongQuestions = r2.rowCount || 0
+    }
+    deleted.questions = await deleteQuestionsByTaskId(taskId)
+
+    const setClauses = ['task_type = $1', 'worksheet_id = $2', 'resource_id = $3', 'updated_at = NOW()']
+    const params = [plan.patch.task_type, plan.patch.worksheet_id, plan.patch.resource_id]
+    if (nextName) {
+      params.push(nextName)
+      setClauses.push(`original_name = $${params.length}`)
+    }
+    params.push(taskId)
+    await query(
+      `UPDATE ${TABLES.TASKS} SET ${setClauses.join(', ')} WHERE id = $${params.length}`,
+      params
+    )
+
+    // retryTaskById 会重置 status/retry_count/last_error 并按【新字段】入队，
+    // 此时 worksheet_id 已为 NULL ⇒ 不会再被兜底成 resourceId（见 utils/taskRoute.js）。
+    const retry = await retryTaskById(taskId)
+
+    console.log(
+      `🔀 [Route] 转路线重批 task=${taskId.slice(0, 8)} ${plan.from.task_type}→${plan.patch.task_type}` +
+      `（清 题${deleted.questions} / 错题${deleted.wrongQuestions} / 判题${deleted.judgements}，影响面 ${JSON.stringify(impact)}）`
+    )
+
+    res.json({
+      dryRun: false,
+      taskId,
+      studentId: task.student_id,
+      originalName: task.original_name,
+      from: plan.from,
+      to: plan.patch,
+      nameChange: nextName ? { from: task.original_name, to: nextName } : null,
+      impact,
+      deleted,
+      warnings,
+      retry,
+    })
+  } catch (error) {
+    console.error('[admin/tasks/convert-route] 失败:', error)
     res.status(500).json({ error: error.message })
   }
 })

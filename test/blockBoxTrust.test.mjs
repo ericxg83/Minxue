@@ -14,6 +14,7 @@ import { readFileSync } from 'node:fs'
 import {
   parseBlockBox, isOutOfRangeBox, isUntrustworthyBlock,
   isPlaceholderBlockBoxes, findPlaceholderBlockPages,
+  detectOverlappingBlockBoxes, findOverlappingBlockPages,
 } from '../server/utils/blockBoxTrust.js'
 
 // ── 真实样本 ──
@@ -114,6 +115,115 @@ test('findPlaceholderBlockPages：同一任务不同页互不影响', () => {
 
 test('findPlaceholderBlockPages：block 为 null 的行不参与', () => {
   const hit = findPlaceholderBlockPages([{ taskId: 'T1', pageNumber: 1, block: null }])
+  assert.equal(hit.size, 0)
+})
+
+// ── 框互相压盖（2026-09-20 第04周 p2 事故）──
+// 真实样本：任务 7debfcc9 第2页，六道题 block 高度全 250（=页面 1/4），
+// 相邻 y 间距仅 100~250 → 每框横跨 2 道题，裁片上半本题、下半下一题题号。
+// 老师反馈的五张「题图」截图全是此形态。
+const SEVENDEB_P2 = [
+  { qno: 9, x: 80, y: 100, width: 700, height: 100 },
+  { qno: 10, x: 80, y: 200, width: 700, height: 100 },
+  { qno: 11, x: 80, y: 300, width: 800, height: 250 },
+  { qno: 12, x: 80, y: 550, width: 800, height: 250 },
+  { qno: 12, x: 80, y: 550, width: 800, height: 250 },
+  { qno: 13, x: 80, y: 800, width: 800, height: 250 },
+  { qno: 13, x: 80, y: 800, width: 800, height: 250 },
+]
+
+const SEVENDEB_P1 = [
+  { x: 50, y: 130, width: 900, height: 160 }, { x: 50, y: 290, width: 900, height: 180 },
+  { x: 50, y: 470, width: 900, height: 200 }, { x: 50, y: 670, width: 900, height: 60 },
+  { x: 50, y: 730, width: 900, height: 120 }, { x: 50, y: 850, width: 900, height: 120 },
+  { x: 50, y: 970, width: 900, height: 100 }, { x: 50, y: 1070, width: 900, height: 100 },
+]
+
+test('压盖检测：7debfcc9 第2页（框高全 250、间距 100~250）判为压盖', () => {
+  const v = detectOverlappingBlockBoxes(SEVENDEB_P2)
+  assert.equal(v.overlapping, true, v.reason)
+})
+
+test('压盖检测：7debfcc9 第2页正是均分占位闸放过的那一页（两闸互补）', () => {
+  // 事故的关键：占位闸判不出（宽 71% / 高 71% / 间距 33% 均 < 80%），所以必须另有一道闸
+  assert.equal(isPlaceholderBlockBoxes(SEVENDEB_P2).placeholder, false,
+    '若占位闸能拦住，就不需要压盖闸；此断言锁定两闸的互补关系')
+  assert.equal(detectOverlappingBlockBoxes(SEVENDEB_P2).overlapping, true)
+})
+
+test('压盖检测：7debfcc9 第1页（框高 60~200、间距充足）不误判', () => {
+  const v = detectOverlappingBlockBoxes(SEVENDEB_P1)
+  assert.equal(v.overlapping, false, v.reason)
+})
+
+test('压盖检测：真实测量页不误判（e01d0548 / ec11a3cc / fac27053）', () => {
+  for (const [name, boxes] of [['e01d0548', E01D0548_P1], ['ec11a3cc', EC11A3CC_P1], ['fac27053', FAC27053_P1]]) {
+    const v = detectOverlappingBlockBoxes(boxes)
+    assert.equal(v.overlapping, false, `${name}: ${v.reason}`)
+  }
+})
+
+test('压盖检测：fd8b6bc9 占位页不判压盖（底边==下框顶边，纵向重叠恰为 0）', () => {
+  // 占位页是「首尾相接」而非「互相压盖」，两闸互补而不重叠 —— 这是刻意的分工：
+  // 占位闸管「等差指纹」，压盖闸管「框比真题大」。此断言锁定两者不混为一谈。
+  const v = detectOverlappingBlockBoxes(FD8B6BC9_P1)
+  assert.equal(v.overlapping, false, v.reason)
+})
+
+test('压盖检测：恰好 35% 重叠不判（边界，容差向下）', () => {
+  // 较矮者 h=100，重叠 35 → ratio = 0.35，不 > 0.35 → 放行
+  const v = detectOverlappingBlockBoxes([
+    { x: 0, y: 0, width: 800, height: 100 },
+    { x: 0, y: 65, width: 800, height: 100 },
+  ])
+  assert.equal(v.overlapping, false, v.reason)
+})
+
+test('压盖检测：36% 重叠即判（边界，容差向上）', () => {
+  const v = detectOverlappingBlockBoxes([
+    { x: 0, y: 0, width: 800, height: 100 },
+    { x: 0, y: 64, width: 800, height: 100 },
+  ])
+  assert.equal(v.overlapping, true, v.reason)
+})
+
+test('压盖检测：框数不足 2 不判', () => {
+  const v = detectOverlappingBlockBoxes([{ x: 0, y: 0, width: 800, height: 250 }])
+  assert.equal(v.overlapping, false)
+  assert.match(v.reason, /样本不足/)
+})
+
+test('压盖检测：横向并排、纵向完全重叠的两题不误判（上海作业图行排版）', () => {
+  // 关键反例：并排题的框纵向必然 100% 重叠，只按纵向判会全部误伤。
+  // 这正是 2026-09-18「坐标互比」判据翻车的同一个坑，故必须有横向重叠条件。
+  const v = detectOverlappingBlockBoxes([
+    { x: 0, y: 100, width: 400, height: 100 },
+    { x: 500, y: 100, width: 400, height: 100 },
+  ])
+  assert.equal(v.overlapping, false, v.reason)
+})
+
+test('压盖检测：横向重叠但纵向错开的两题不误判（阶梯排版）', () => {
+  const v = detectOverlappingBlockBoxes([
+    { x: 0, y: 100, width: 400, height: 100 },
+    { x: 200, y: 300, width: 400, height: 100 },
+  ])
+  assert.equal(v.overlapping, false, v.reason)
+})
+
+test('findOverlappingBlockPages：按 task+page 分组，只标出压盖页', () => {
+  const rows = [
+    ...SEVENDEB_P2.map(b => ({ taskId: 'T1', pageNumber: 2, block: b })),
+    ...SEVENDEB_P1.map(b => ({ taskId: 'T1', pageNumber: 1, block: b })),
+  ]
+  const hit = findOverlappingBlockPages(rows)
+  assert.equal(hit.size, 1)
+  assert.ok(hit.has('T1|2'))
+  assert.ok(!hit.has('T1|1'))
+})
+
+test('findOverlappingBlockPages：block 为 null 的行不参与', () => {
+  const hit = findOverlappingBlockPages([{ taskId: 'T1', pageNumber: 1, block: null }])
   assert.equal(hit.size, 0)
 })
 

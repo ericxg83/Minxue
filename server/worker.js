@@ -10,7 +10,7 @@ import axios from 'axios'
 import sharp from 'sharp'
 import { TABLES, TASK_STATUS } from './config/neon.js'
 import { query } from './config/neon.js'
-import { AI_CONFIG, getAIHeaders, buildOCRPrompt, buildAnswerGenerationPrompt, getCurrentTextModel, getCurrentVLModel, rotateTextModel, rotateVLModel, TEXT_MODELS, VL_MODELS, callTextCompletion, callVisionCompletion, callVendorVisionCompletion, callAnswerEngineCompletion, ANSWER_ENGINE } from './config/ai.js'
+import { AI_CONFIG, getAIHeaders, buildOCRPrompt, buildAnswerGenerationPrompt, getCurrentTextModel, getCurrentVLModel, rotateTextModel, rotateVLModel, TEXT_MODELS, VL_MODELS, callTextCompletion, callVisionCompletion, callVendorVisionCompletion, callAnswerEngineCompletion, ANSWER_ENGINE, ANSWER_QUALITY, isDegradedAnswerEngine } from './config/ai.js'
 import { updateTaskStatus, createQuestions, batchUpdateQuestionTags, addWrongQuestions, createJudgement, updateQuestionAnswer, markAnswerException, markAiAnswerRisk, findCachedQuestionByFingerprint, cacheQuestion, incrementQuestionUseCount, updateQuestionCacheId, createQuestionAsset, updateQuestionDenormalizedSvg, lookupWorksheetAnswer, getWorksheetAnswersBySection, deleteQuestionsByTaskId, bulkLookupResourceAnswers, getResourceAnswersBySection, getResourceById, addSelfContainedWrongQuestion } from './services/neonService.js'
 import { uploadImage } from './services/ossService.js'
 import { enhanceAndUploadFigure } from './services/figureEnhanceService.js'
@@ -91,6 +91,7 @@ async function refineStoredBlocks ({ questions, pageBuffers }) {
 import { extractFinalAnswerFromAnalysis, isNarrativeAnswer } from './utils/aiParseSelfCheck.js'
 import { rescueReferenceAnswer } from './utils/referenceAnswerRescue.js'
 import { describeReferenceAnswerRisk } from './utils/referenceAnswerSelfCheck.js'
+import { voteAnswers, describeConsensus, answersEquivalent } from './utils/answerConsensus.js'
 import { coerceAIText } from './utils/aiTextCoerce.js'
 import { looksLikeLostParentStem } from './utils/parentStemTrust.js'
 import { computeTaskStats } from './utils/taskStats.js'
@@ -1614,6 +1615,18 @@ function normalizeGeneratedAnswer(question, candidateAnswer) {
  * （GMI_FIRST=1 + TEXT_MODELS 为空），正是计算能力最弱的一环。
  * 回滚：ANSWER_ENGINE_ENABLED=0。
  */
+
+/**
+ * 答案是否「可投票」：只有客观题的短答案才有多路比对的意义。
+ * 长叙述（主观题、整段解释、含「解得…」的元话语）无法归一化比对，
+ * 硬投票只会把噪音变成"分歧"，故直接不投。
+ */
+function isVotableAnswer(answer) {
+  const s = String(answer ?? '').trim()
+  if (!s || s.length > 60) return false
+  return !isNarrativeAnswer(s)
+}
+
 export const generateAnswerForQuestion = async (questionContent, retryCount = 0) => {
   if (!questionContent || !questionContent.trim()) {
     return { success: true, answer: '', analysis: '', source: 'empty-input' }
@@ -1621,7 +1634,9 @@ export const generateAnswerForQuestion = async (questionContent, retryCount = 0)
 
   const prompt = buildAnswerGenerationPrompt()
 
-  try {
+  // 一次独立求解：调答案引擎 → 解析 JSON。
+  // 多路采样复用同一份实现，保证「首路」与「补采路」走完全相同的 prompt 与解析口径。
+  const solveOnce = async () => {
     const { content, provider } = await callAnswerEngineCompletion({
       systemContent: prompt,
       userContent: `请计算以下题目的标准答案：\n\n${questionContent}`,
@@ -1677,13 +1692,73 @@ export const generateAnswerForQuestion = async (questionContent, retryCount = 0)
       }
     }
 
+    return { result, provider }
+  }
+
+  try {
+    const first = await solveOnce()
+
+    let answer = coerceAIText(first.result.answer)
+    let analysis = coerceAIText(first.result.analysis)
+    const subject = first.result.subject || null
+    const engine = first.provider || 'unknown'
+
+    // ── 多路求解共识（2026-09-21）────────────────────────────────────────────
+    // 只在「产出答案的不是主模型」时补采 —— 主模型正常时零额外调用、零额外成本。
+    // 依据（server/_probe_answer_stability_0921.mjs 实测）：主供应商 SenseNova 全线
+    // rpm 限流后，代码降级到兜底弱模型 Huihuiyun:deepseek-v4-flash，而该模型在
+    // **同一道题**上连续 4 次给出 `±5 / ±10 / ±10 / ±10` —— 单次采样等于掷骰子；
+    // 对照 Bailian 付费池的 deepseek-v4-pro 同题 3/3 全对。
+    // 降级通道才需要投票：多路一致 → 采纳；分歧 → 采纳多数派但必须留痕交人工。
+    let consensus = null
+    if (ANSWER_QUALITY.CONSENSUS_ENABLED
+        && isDegradedAnswerEngine(engine)
+        && isVotableAnswer(answer)) {
+      const extraCount = Math.max(0, ANSWER_QUALITY.SAMPLES_ON_DEGRADED - 1)
+      if (extraCount > 0) {
+        // ⚠️ 并发发起 ≠ 并发执行：429 会把全局 AI 信号量压到并发 1，此时三路**串行**，
+        //    单题等待从 58–66s 拉到 140–230s（2026-09-21 实测）。这是降级状态下才付的代价，
+        //    主模型可用时本分支根本不进。嫌慢用 ANSWER_CONSENSUS=0 关掉。
+        const settled = await Promise.allSettled(
+          Array.from({ length: extraCount }, () => solveOnce())
+        )
+        // 每一路连同它的解析一起收好 —— 采纳哪一路的答案，就必须用它那一版的解析。
+        // 否则会出现「解析是 A 版、答案是 B 版」这种新的自相矛盾（正是本次事故的形态）。
+        const samples = []
+        const collect = (r) => {
+          const a = coerceAIText(r?.result?.answer)
+          if (!a) return
+          samples.push({ answer: a, analysis: coerceAIText(r?.result?.analysis) })
+        }
+        collect(first)
+        for (const s of settled) if (s.status === 'fulfilled') collect(s.value)
+
+        consensus = voteAnswers(samples.map(s => s.answer))
+        consensus.sampleCount = samples.length
+        if (consensus.total >= 2) {
+          const tally = consensus.groups.map(g => `${g.answer}×${g.count}`).join(' / ')
+          if (consensus.verdict === 'unanimous') {
+            console.log(`     多路求解一致（${consensus.total} 路）：${consensus.winner}`)
+          } else if (consensus.winner) {
+            console.warn(`     多路求解${consensus.verdict === 'majority' ? '多数一致' : '分歧'}（${consensus.total} 路）：${tally} → 采纳 ${consensus.winner}`)
+          }
+          const winnerSample = samples.find(s => answersEquivalent(s.answer, consensus.winner))
+          if (winnerSample) {
+            answer = winnerSample.answer
+            if (winnerSample.analysis) analysis = winnerSample.analysis
+          }
+        }
+      }
+    }
+
     return {
       success: true,
-      answer: coerceAIText(result.answer),
-      analysis: coerceAIText(result.analysis),
-      subject: result.subject || null,
+      answer,
+      analysis,
+      subject,
       source: 'answer-engine',
-      engine: provider || 'unknown'
+      engine,
+      consensus
     }
   } catch (error) {
     // 答案引擎内部已按「主模型 → FALLBACK_MODELS → 通用文本链路」逐层降级，
@@ -1839,11 +1914,28 @@ const generateMissingAnswers = async (questions, imageBuffer = null, taskId = nu
   // 为什么只标注不拦：全库 586 条缓存回测，同类判据（"算术自检不通过就拦"）命中 28 条
   // 而只有 1 条是真幻觉，误伤 27 条正确答案（`27 的立方根为 3`、`x³=64 则 x=4`…）。
   // 拦=大面积误伤；标注=老师多看一眼。见 utils/referenceAnswerSelfCheck.js 顶部说明。
-  const flagReferenceAnswerRisk = async (q, answer, analysis) => {
+  // extraNotes：与「解析结论区算错等式」无关、但同样影响参考答案可信度的证据
+  // （多路求解分歧、产出答案的通道发生了降级）。合并成一条写进 ai_answer_risk_reason ——
+  // markAiAnswerRisk 是整列覆盖写，分两次调用会互相抹掉，所以必须在这里合并。
+  const flagReferenceAnswerRisk = async (q, answer, analysis, extraNotes = []) => {
     const risk = describeReferenceAnswerRisk({ answer, analysis, questionType: q.question_type })
-    if (!risk) return
-    await markAiAnswerRisk(q.id, risk)   // 内部自带 try/catch，观测信息不打断批改主流程
-    console.warn(`     题目 ${q.id.substring(0, 8)}: ${risk}`)
+    const text = [risk, ...extraNotes].filter(Boolean).join('；')
+    if (!text) return
+    await markAiAnswerRisk(q.id, text)   // 内部自带 try/catch，观测信息不打断批改主流程
+    console.warn(`     题目 ${q.id.substring(0, 8)}: ${text}`)
+  }
+
+  // 参考答案可信度提示：多路分歧 / 通道降级。
+  // 缓存命中的题没有 result（答案来自 question_cache，不是本次求解）→ 不产生任何提示。
+  const buildAnswerTrustNotes = (result) => {
+    if (!result || !result.engine) return []
+    const notes = []
+    const consensusNote = describeConsensus(result.consensus, { engine: result.engine })
+    if (consensusNote) notes.push(consensusNote)
+    if (isDegradedAnswerEngine(result.engine)) {
+      notes.push(`参考答案由降级通道 ${result.engine} 生成（主模型不可用），建议核对`)
+    }
+    return notes
   }
 
   // ⏳ 进度条中间状态：80% 打在这里后会跑这个批次循环，单个 batch 可能耗时分钟级
@@ -1985,7 +2077,7 @@ const generateMissingAnswers = async (questions, imageBuffer = null, taskId = nu
           if (result.analysis) q.analysis = result.analysis
           updatedCount++
           console.log(`     题目 ${q.id.substring(0, 8)}: 答案 ${oldAnswer || '(空)'} → ${finalAnswer}`)
-          await flagReferenceAnswerRisk(q, finalAnswer, result.analysis)
+          await flagReferenceAnswerRisk(q, finalAnswer, result.analysis, buildAnswerTrustNotes(result))
 
           // 非关键写入：fire-and-forget
           if (fingerprint) {

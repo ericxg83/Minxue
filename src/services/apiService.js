@@ -331,6 +331,31 @@ export const retryTask = async (taskId) => {
   return data
 }
 
+// ⚠️ 功能开关（2026-09-21）：「改批改方式」会清空该作业的题目 / 判题 / 已入册错题并连带
+// 删掉已发布几何重绘图，属于高危不可逆操作。当前**默认关闭**：前端按钮置灰不可点，
+// 后端 POST /api/admin/tasks/:id/convert-route 也会同步拒绝（防绕过界面直接调接口）。
+// 要重新开放：前端改这里为 true，且后端 Render 配环境变量 TASK_ROUTE_CONVERT_ENABLED=1，
+// 两端都开才生效（见 server/utils/taskRoute.js 的 isRouteConvertEnabled）。
+export const TASK_ROUTE_CONVERT_ENABLED = false
+export const TASK_ROUTE_CONVERT_DISABLED_HINT = '「改批改方式」暂时关闭（会清空题目与错题，风险较高）'
+
+// 改批改方式（练习册 / 答案库 / 日常作业 三者互转）并重批。
+// 先 dryRun 预演拿影响面（题数 / 占位题干 / 错题数 / 判题数 / 题目资产 + 任务名变化 + warnings），
+// 老师确认后再带 dryRun:false 实跑。字段口径见 server/utils/taskRoute.js。
+// 重练卷（错题重练/周练卷）后端会直接拒绝（code=blocked_retry_paper）。
+export const convertTaskRoute = async (taskId, { target, resourceId = null, worksheetId = null, dryRun = true } = {}) => {
+  if (!TASK_ROUTE_CONVERT_ENABLED) {
+    throw new Error(TASK_ROUTE_CONVERT_DISABLED_HINT)
+  }
+  const data = await apiRequest(`/admin/tasks/${taskId}/convert-route`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ target, resourceId, worksheetId, dryRun }),
+  })
+  if (!dryRun) clearCache(`tasks_cache_${taskId}`)
+  return data
+}
+
 const parseQuestionFields = (q) => {
   const parse = (val, fallback) => {
     if (!val) return fallback
