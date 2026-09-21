@@ -130,7 +130,10 @@ fi
 SYNC_DIR="$GIT_DIR_PATH/refs/remotes/$REMOTE"
 mkdir -p "$SYNC_DIR"
 CUR_BRANCH="$(git symbolic-ref --short -q HEAD 2>/dev/null || echo "")"
-EXISTING_LIST="$(find "$SYNC_DIR" -type f 2>/dev/null | sed "s|^$SYNC_DIR/||")"
+# ⚠️ 必须用 for-each-ref 而不是 `find`：`git gc`/`pack-refs` 会把松散引用折进 packed-refs，
+# 只扫松散文件会漏掉它们（2026-09-21 复验踩到：4 个跟踪引用被误判为"不存在"而不再刷新）。
+EXISTING_LIST="$(git for-each-ref --format='%(refname)' "refs/remotes/$REMOTE" 2>/dev/null \
+  | sed "s|^refs/remotes/$REMOTE/||")"
 N=0
 SKIPPED=""
 MISSING=""
@@ -154,8 +157,11 @@ echo "   ✓ 已同步 $N 个 $REMOTE 跟踪引用（直接写松散文件）"
 [ -n "$SKIPPED" ] && echo "   · 跳过（非当前分支且无本地跟踪引用，避免悬空指针）：$SKIPPED"
 [ -n "$MISSING" ] && echo "   ⚠ 跳过（本地缺对象）：$MISSING   → 需要时先 git fetch $REMOTE <branch>"
 
-# 反向清理：指向缺失对象的松散跟踪引用会让 fsck 报 invalid sha1 pointer
+# 反向清理：指向缺失对象的松散跟踪引用会让 fsck 报 invalid sha1 pointer。
+# 只删「松散文件」——本脚本自己写的引用都是松散文件；packed-refs 里的异常引用只提示
+# （改 packed-refs 风险高于收益，且正常 fetch 不会产生这种引用）。
 REMOVED=""
+PACKED_BAD=""
 while IFS= read -r f; do
   [ -n "$f" ] || continue
   sha="$(tr -d '\r\n' < "$f")"
@@ -164,6 +170,15 @@ while IFS= read -r f; do
   fi
 done < <(find "$SYNC_DIR" -type f 2>/dev/null)
 [ -n "$REMOVED" ] && echo "   ✓ 已清理悬空跟踪引用（对象缺失）：$REMOVED"
+
+while read -r sha ref; do
+  [ -z "$sha" ] && continue
+  GIT_NO_LAZY_FETCH=1 git cat-file -e "$sha" 2>/dev/null || PACKED_BAD="$PACKED_BAD $ref"
+done < <(git for-each-ref --format='%(objectname) %(refname)' "refs/remotes/$REMOTE" 2>/dev/null)
+if [ -n "$PACKED_BAD" ]; then
+  echo "   ⚠ 以下跟踪引用指向本地缺失对象（多在 packed-refs 里，需手工处理）：$PACKED_BAD"
+  echo "     临时绕过：判断远端状态一律用 git ls-remote；或 git fetch $REMOTE <branch> 补齐对象"
+fi
 
 # packed-refs 里若残留旧值：松散引用会盖住它，但留着会误导 `git log origin/main`
 if grep -q "refs/remotes/$REMOTE/main" "$GIT_DIR_PATH/packed-refs" 2>/dev/null; then
