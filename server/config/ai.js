@@ -573,6 +573,17 @@ export const FREE_VL_CHANNELS = [
 export const isFreeVisionChannel = (vendorName, vlModel) =>
   FREE_VL_CHANNELS.some(c => c.name === vendorName && c.models.includes(vlModel))
 
+// ── 强模型兜底白名单（2026-09-21 答案册解析故障沉淀）───────────────────────────
+// 背景：答案页 OCR 走 noBackup=true（魔搭耗尽宁可失败，不用免费弱模型污染答案库），
+//   但 2026-09-21 魔搭余额耗尽（429 insufficient balance）时答案册整本解析失败。
+// 用户提供付费 huihuiyun gemini 池（HuihuiyunGemini，按 token 计费）作为「强模型」兜底：
+//   noBackup + strongBackupOnly=true 时，魔搭耗尽只允许降级到这里的供应商
+//   （付费高质量模型，双栏/长版式不会像免费弱模型那样错乱），仍排除免费弱模型。
+// 注意：本白名单按供应商名匹配，供应商内的模型从 vendor.vlModels 全量取。
+export const STRONG_VL_FALLBACK_VENDORS = ['HuihuiyunGemini']
+export const isStrongVisionVendor = (vendorName) =>
+  STRONG_VL_FALLBACK_VENDORS.includes(vendorName)
+
 let _resolvedVendorsCache = null
 
 function getResolvedVendors() {
@@ -1354,9 +1365,16 @@ export async function callVisionCompletion(opts) {
     // 魔搭矩阵本身是免费额度体系，不受影响；freeOnly 时 GMI 插队也被跳过（非白名单）。
     // 全部免费通道不可用 → 本次调用失败（上层捕获，不影响批改主流程）。
     freeOnly = false,
+    // strongBackupOnly=true（2026-09-21 答案册解析故障沉淀）：与 noBackup 搭配使用。
+    //   noBackup=true 本意是「魔搭耗尽宁可失败，不用免费弱模型污染答案库」；
+    //   但答案册解析在魔搭余额耗尽时整本失败（2026-09-21 实锤）。
+    //   本开关允许在魔搭耗尽后**只**降级到 STRONG_VL_FALLBACK_VENDORS 白名单
+    //   （付费高质量模型，如 huihuiyun gemini），仍排除免费弱模型/白名单外付费通道。
+    //   语义：noBackup+strongBackupOnly = 「最强链路 → 付费强模型 → 宁可失败」。
+    strongBackupOnly = false,
   } = opts
   if (noBackup) {
-    console.log('[AI] noBackup=1：本次视觉请求仅使用魔搭（ModelScope）Key×模型矩阵，不降级备份供应商')
+    console.log(`[AI] noBackup=1：本次视觉请求仅使用魔搭（ModelScope）Key×模型矩阵，不降级备份供应商${strongBackupOnly ? '（strongBackupOnly=1：魔搭耗尽后仅允许强模型白名单兜底）' : ''}`)
   }
 
   const messages = buildVisionMessages(systemPrompt, userText, imageDataURL)
@@ -1532,8 +1550,12 @@ export async function callVisionCompletion(opts) {
     }
     // 备份供应商视觉兜底（Agnes → FreeModel → SenseNova，各自独立配额）
     // noBackup=1 时跳过：质量敏感场景宁可失败，不用弱模型输出。
-    if (!noBackup) {
+    //   ⚠️ 例外：noBackup + strongBackupOnly=1 时，允许降级到 STRONG_VL_FALLBACK_VENDORS
+    //   白名单（付费强模型，如 huihuiyun gemini）——魔搭耗尽时答案册解析仍能继续，
+    //   但免费弱模型依旧被排除（2026-09-21 答案册解析故障沉淀）。
+    if (!noBackup || strongBackupOnly) {
       for (const vendor of BACKUP_CONFIG.VENDORS) {
+      if (strongBackupOnly && !isStrongVisionVendor(vendor.name)) continue
       for (const vlModel of vendor.vlModels) {
         // freeOnly：只走免费白名单通道，付费 key 一律跳过
         if (freeOnly && !isFreeVisionChannel(vendor.name, vlModel)) continue
