@@ -196,3 +196,61 @@ test('端到端：题干从库里的 2.6̇ 一路到 KaTeX HTML 都带点', () =
   assert.ok(/\u02D9/.test(rendered), '题干最终渲染产物必须含点字形')
   assert.ok(!html.includes('\u0307'), '中间产物不得残留裸组合点')
 })
+
+/**
+ * 2026-09-21 白板第2题（平方根小问）渲染修复回归：
+ *   旧实现把数学段末尾的句读标点（`.` 因 ∈isMathChar 被吸进数学段）一并交给 KaTeX，
+ *   既排出"悬空的点"，又把"公式+句号"算成纯数学 ⇒ $$ 居中独立公式；
+ *   同份题面 (2)(4)(5) 居中、(3) 因含空格反而行内，一眼不标准。
+ *   修复：句读标点踢回文本段 + 公式内部空格不再切断（渲染分段）
+ *   + 独立公式判定用保守口径（不跟着合并升级）。
+ */
+test('数学段末尾句读标点被踢回文本段（不进 KaTeX，不制造悬空点）', () => {
+  const src = '(2) $\\sqrt{\\frac{3}{x-2}}$.'
+  const segs = splitToSegments(preprocessMath(src))
+  const mathSegs = segs.filter(s => s.isMath && s.text)
+  assert.ok(mathSegs.length > 0, '应识别出数学片段')
+  assert.ok(!/[.,;:!?。，、；：！？．…]+$/.test(mathSegs[mathSegs.length - 1].text),
+    `末尾数学段不应以句读结尾，实际：${mathSegs[mathSegs.length - 1].text}`)
+  assert.ok(segs.some(s => !s.isMath && /[.。]$/.test(s.text.trim())),
+    `句读应落在文本段，实际：${JSON.stringify(segs)}`)
+})
+
+test('renderContent 对"公式+句点"不再输出 $$ 居中块，句点落在公式外', () => {
+  const html = renderContent('(2) $\\sqrt{\\frac{3}{x-2}}$.')
+  assert.ok(!html.includes('$$'), `不应是居中独立公式，实际：${html}`)
+  assert.ok(html.endsWith('.'), `句点应作为普通文本落在公式之外，实际：${html}`)
+})
+
+test('公式内部空格（glueInnerSpaces=true）不切断：\\sqrt{a} + \\sqrt{b} 整体一段', () => {
+  const glued = splitToSegments(preprocessMath('\\sqrt{3-x} + \\sqrt{x-3}'))
+  const mathGlued = glued.filter(s => s.isMath && s.text)
+  assert.equal(mathGlued.length, 1, `合并口径应只有 1 个数学段，实际：${JSON.stringify(mathGlued)}`)
+})
+
+test('独立公式判定用保守口径（glueInnerSpaces=false）：同一表达式拆成多段，不被升级为居中', () => {
+  const conservative = splitToSegments(preprocessMath('\\sqrt{3-x} + \\sqrt{x-3}'), { glueInnerSpaces: false })
+  const mathConservative = conservative.filter(s => s.isMath && s.text)
+  assert.ok(mathConservative.length > 1, `判定口径应拆成多段，实际：${JSON.stringify(mathConservative)}`)
+  const html = renderContent('\\sqrt{3-x} + \\sqrt{x-3}')
+  assert.ok(!html.startsWith('$$'), `不应被升级为居中独立公式，实际：${html}`)
+})
+
+test('反例 a 1（两侧都是字母数字、无运算符）不并入数学段', () => {
+  const math = splitToSegments(preprocessMath('a 1')).filter(s => s.isMath && s.text)
+  assert.ok(!math.some(m => m.text.replace(/\s/g, '') === 'a1'), `不应粘连成 a1，实际：${JSON.stringify(math)}`)
+})
+
+/**
+ * 两份渲染实现同构（续）：移动端 MathText 也必须具备句读踢出 + 内部空格合并，
+ * 否则白板修好了、手机端还在漏点 / 散架。
+ */
+test('移动端 MathText 与共享 mathText 同构：具备句读踢出与内部空格合并', () => {
+  const shared = readFileSync(new URL('../src/utils/mathText.js', import.meta.url), 'utf8')
+  const mobile = readFileSync(new URL('../src/components/MathText/index.jsx', import.meta.url), 'utf8')
+  for (const [name, src] of [['src/utils/mathText.js', shared], ['src/components/MathText/index.jsx', mobile]]) {
+    assert.ok(src.includes('TRAILING_SENTENCE_PUNCT'), `${name} 缺少句读踢出常量（两份实现必须同步）`)
+    assert.ok(src.includes('isMathInnerSpace'), `${name} 缺少内部空格合并函数（两份实现必须同步）`)
+    assert.ok(src.includes('glueInnerSpaces'), `${name} 缺少 glueInnerSpaces 口径开关（两份实现必须同步）`)
+  }
+})

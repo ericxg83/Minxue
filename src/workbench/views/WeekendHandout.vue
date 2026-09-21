@@ -257,7 +257,7 @@
                       v-for="sp in q.subParts"
                       :key="sp.subNo"
                       class="item-sub"
-                    >({{ sp.subNo }}) <MathRender :content="sp.content" auto-detect tag="span" /></div>
+                    >({{ sp.subNo }}) <MathRender :content="sp.content" auto-detect tag="span" :force-inline="true" /></div>
                   </template>
                   <MathRender v-else :content="q.stem" auto-detect tag="span" />
                 </div>
@@ -270,7 +270,7 @@
                 >
                   <div v-for="(opt, i) in q.options" :key="i" class="item-option">
                     <span class="item-option__mark">{{ String.fromCharCode(65 + i) }}</span>
-                    <MathRender class="item-option__text" :content="opt" auto-detect tag="span" />
+                    <MathRender class="item-option__text" :content="opt" auto-detect tag="span" :force-inline="true" />
                   </div>
                 </div>
                 <div v-else-if="isChoiceMissingOptions(q)" class="item-no-options">

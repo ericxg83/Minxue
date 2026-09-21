@@ -66,7 +66,7 @@
           >
             <span v-for="(opt, i) in row.options" :key="i" class="rpp-opt">
               <b>{{ letter(i) }}.</b>
-              <MathRender :content="opt" autoDetect tag="span" />
+              <MathRender :content="opt" autoDetect tag="span" :force-inline="true" />
             </span>
           </div>
           <div v-if="row.type === 'fill'" class="rpp-fill-line"></div>

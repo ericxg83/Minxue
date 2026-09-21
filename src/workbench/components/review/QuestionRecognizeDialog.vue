@@ -49,7 +49,7 @@
         <div class="qr-options">
           <div v-for="(opt, idx) in result.options" :key="idx" class="qr-option-row">
             <span class="qr-opt-letter">{{ String.fromCharCode(65 + idx) }}.</span>
-            <span class="qr-opt-text"><MathRender :content="opt" autoDetect tag="span" /></span>
+            <span class="qr-opt-text"><MathRender :content="opt" autoDetect tag="span" :force-inline="true" /></span>
           </div>
         </div>
         <div v-if="!isEmptyCurrent('options')" class="qr-hint">

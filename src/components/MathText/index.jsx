@@ -147,15 +147,32 @@ function preprocessMath(text) {
  *   - 文本字符: 中文、中文标点、全角标点、空格
  *   - LaTeX命令: 以反斜杠开头的命令
  */
-function splitToSegments(text) {
+function splitToSegments(text, opts = {}) {
+  // glueInnerSpaces=true 用于渲染分段（公式内部空格不切断，保证 \sqrt{a} + \sqrt{b} 整体交给 KaTeX）；
+  // 设为 false 用于"独立公式判定"的保守口径（详见 src/utils/mathText.js renderContent 注释）。
+  const glueInnerSpaces = opts.glueInnerSpaces !== false
   const segments = []
   let mathBuffer = ''
   let textBuffer = ''
 
   function flushMath() {
-    if (mathBuffer.trim()) {
-      segments.push({ text: mathBuffer.trim(), isMath: true })
+    if (!mathBuffer.trim()) {
+      mathBuffer = ''
+      return
     }
+    // 数学段末尾的句读标点必须留在文本段（与 src/utils/mathText.js 同步：
+    // 2026-09-21 白板第2题，`(2) $\sqrt{...}$.` 的句点因 `.`∈isMathChar 被吸进数学段，
+    // 既在 KaTeX 数学模式里排出"悬空的点"，又把"公式+句号"算成纯数学 ⇒ 居中独立公式）。
+    // 句读是句子层标点，应由正文字体排。
+    let math = mathBuffer
+    let tail = ''
+    const punct = math.match(TRAILING_SENTENCE_PUNCT)
+    if (punct) {
+      tail = punct[0]
+      math = math.slice(0, -punct[0].length)
+    }
+    if (math.trim()) segments.push({ text: math.trim(), isMath: true })
+    if (tail) textBuffer += tail
     mathBuffer = ''
   }
 
@@ -232,7 +249,15 @@ function splitToSegments(text) {
       continue
     }
 
-    // 4. 普通字符 — 判断是数学还是文本
+    // 4. 公式内部空格：两侧都是数学记号、且至少一侧是运算符/结构符 ⇒ 属于同一公式，不切断
+    //    （`\sqrt{3-x} + \sqrt{x-3}` 必须整体交给 KaTeX，否则被切成三段各排各的、二元运算符间距丢失）
+    if (glueInnerSpaces && isMathInnerSpace(text, i, mathBuffer)) {
+      mathBuffer += char
+      i++
+      continue
+    }
+
+    // 5. 普通字符 — 判断是数学还是文本
     if (isMathChar(char)) {
       if (textBuffer) flushText()
       mathBuffer += char
@@ -274,6 +299,38 @@ function isMathChar(char) {
   // 数学关系符
   if ('≥≤≈∞π∥⊥'.includes(char)) return true
   return false
+}
+
+/**
+ * 句子级句读：这些字符跟在数学段末尾时属于「句子标点」，不是公式的一部分。
+ * 与 src/utils/mathText.js 同源（两份渲染实现必须同步，见 test/mathTextRender.test.mjs）。
+ */
+const TRAILING_SENTENCE_PUNCT = /[.,;:!?。，、；：！？．…]+$/
+
+/** 运算符/结构符：出现它说明这一侧是"公式内部"，而不是并列的独立符号 */
+const MATH_STRUCT_CHAR = /[+\-*/=<>^_{}()\[\]|]/
+
+/** 该位置是不是一个数学记号（\cmd 也算，因为 \ 不在 isMathChar 里） */
+function isMathTokenAt(text, index) {
+  if (index < 0 || index >= text.length) return false
+  const c = text[index]
+  if (isMathChar(c)) return true
+  return c === '\\' && /[a-zA-Z]/.test(text[index + 1] || '')
+}
+
+/**
+ * 空格是否处在公式内部（应当并入数学段，不切断）。保守边界：
+ * 必须 ① 当前已在数学段内；② 空格两侧都是数学记号；
+ * ③ 至少一侧是运算符/结构符。反例 `a 1` 不并（那种空格是排版间隔）。
+ */
+function isMathInnerSpace(text, index, mathBuffer) {
+  const c = text[index]
+  if (c !== ' ' && c !== '\u00A0') return false
+  if (!mathBuffer) return false
+  const prev = text[index - 1] || ''
+  const next = text[index + 1] || ''
+  if (!isMathTokenAt(text, index - 1) || !isMathTokenAt(text, index + 1)) return false
+  return MATH_STRUCT_CHAR.test(prev) || MATH_STRUCT_CHAR.test(next)
 }
 
 // ── MathText 组件 ─

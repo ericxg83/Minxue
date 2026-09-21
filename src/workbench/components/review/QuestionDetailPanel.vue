@@ -261,7 +261,7 @@
             <div v-for="(opt, idx) in optionsList" :key="idx" class="ops-option-row"
               :class="{ 'option-highlight': opt === q.answer }">
               <span class="ops-opt-letter">{{ String.fromCharCode(65 + idx) }}.</span>
-              <span class="ops-opt-text"><MathRender :content="opt" autoDetect tag="span" /></span>
+              <span class="ops-opt-text"><MathRender :content="opt" autoDetect tag="span" :force-inline="true" /></span>
             </div>
           </div>
           <!-- 选择题但选项为空：整页 OCR 漏识别选项的典型形态。

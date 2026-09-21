@@ -77,7 +77,7 @@
             <div v-if="(current.subParts || []).length > 1" class="q-subparts">
               <div v-for="sp in current.subParts" :key="sp.subNo" class="q-sub">
                 <span class="q-subno">({{ sp.subNo }})</span>
-                <MathRender class="q-sub-text" :content="sp.content" auto-detect tag="span" />
+                <MathRender class="q-sub-text" :content="sp.content" auto-detect tag="span" :force-inline="true" />
               </div>
             </div>
             <MathRender v-else class="q-stem" :content="current.stem" auto-detect />
@@ -85,7 +85,7 @@
             <div v-if="showOptions" class="q-options" :class="{ 'q-options--two': optionsCompact }">
               <div v-for="(opt, i) in current.options" :key="i" class="q-option">
                 <span class="q-option__mark">{{ String.fromCharCode(65 + i) }}</span>
-                <MathRender class="q-option__text" :content="opt" auto-detect tag="span" />
+                <MathRender class="q-option__text" :content="opt" auto-detect tag="span" :force-inline="true" />
               </div>
             </div>
             <div v-if="(current.missingSubs || []).length" class="q-missing">
