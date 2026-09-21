@@ -109,6 +109,30 @@
 - ⛔ **别再用 `aiParseSelfCheck` 去"筛掉自相矛盾的那一路"**：判据把 `36+64=100` 与答案 `±10`
   直接比，不认识「100 的平方根」这一步变换，会把**正确的那路也筛掉**（实测自洽子集 0/3）。
 
+- **答案引擎主供应商已切 Bailian（2026-09-21）**：`.env` 的 `ANSWER_ENGINE_VENDOR=Bailian` +
+  `ANSWER_ENGINE_MODEL=qwen3.8-flash`，降级链 `deepseek-v4-pro → qwen3.8-max`（同在 Bailian 内，
+  不受 SenseNova 账号级 rpm 影响）。**选型依据**：横评（`server/_bench_answer_models_0921.mjs`，
+  11 模型 × 10 易错题 × 2 次）**9 个模型并列 100%**；`qwen3.8-flash`（输入 0.8 / 输出 2.7 元每百万）
+  与 `deepseek-v4-pro`（12/24）同为 100%，但**便宜 11 倍**。
+  **答案引擎输出 98.8% 是 reasoning token → 输出价才是成本主导**
+  （`qwen3.8-max` 输出 36 元/百万比 pro 的 24 还贵，虽强但不划算）。
+  `worker.js` 的 `maxTokens` 已 2048 → 4096（防「思考吃满上限、答案被截断」）。
+- ⛔ **切供应商必须处理 `ANSWER_ENGINE_KEYS`**：它的语义是「**主供应商**的同账号额外 Key」
+  （`config/ai.js:1154-1160`，靠 `vendor.name === ANSWER_ENGINE.VENDOR` 判定）。
+  切到 Bailian 后，原 SenseNova 的 key 会被当作 Bailian key 打 token-plan 域名 →
+  **每题先 401 空转再降级**。本次已注释停用该行（原值保留在注释里，回滚时去掉 `# `）。
+- **Token Plan Lite = 2,500 Credits / 7 天**（39 元/月；7 天滚动窗口，触顶即暂停、余额不结转）。
+  **Credits 无法从 API 读**（实测 `usage` 与响应头都没有；`@modelstudio/cli` 在 npm 上**不存在**，
+  网上文章的 CLI 命令是编造的）→ 只能从控制台用量详情读。两种锚定估算
+  （1 Cr = 0.005 元 / 按量价 × 0.56）：`qwen3.8-flash` 7 天约 155–276 Credits（**6–11%** ✅）；
+  `deepseek-v4-pro` 7 天约 1,718–3,067（**69%–123%** ⚠️ 方法 A 下超额度）。
+- ⚠️ **Token Plan 的合规红线**：官方条款明确**禁止**「自动化脚本、自定义应用程序后端、
+  非交互式批量调用」，违者可能**暂停订阅或封禁 Key**。敏学后端正落在此禁区。
+  合规替代 = 百炼**按量付费**（dashscope 普通 `sk-` key），`qwen3.8-flash` 约 **6 元/月**。
+- **`server/.env` 是 UTF-8，但里面的中文注释早已是 U+FFFD 替换字符**（历史损坏，
+  别被终端乱码误导）。改它用原生 Buffer utf8 即可；**改前先做 round-trip 校验 + 备份**
+  （范式见 `server/_switch_answer_engine_0921.mjs`）。
+
 ## 7. 其他硬约定
 
 - 错题「同一题」判定统一走 `src/domain/questionIdentity.js`，禁止相似度阈值合并。
