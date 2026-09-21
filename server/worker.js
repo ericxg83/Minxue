@@ -1,8 +1,13 @@
+// ⚠️ 必须是第一个 import：本文件在模块级读 process.env
+// （HYBRID_VISION_ENABLED / HYBRID_SECOND_VENDOR / CONFIDENCE_THRESHOLD），
+// dotenv 写在模块体里会来不及。详见 loadEnv.js 顶部注释。
+import './loadEnv.js'
 import dotenv from 'dotenv'
 import { dirname, resolve } from 'path'
 import { fileURLToPath } from 'url'
 
 const __dirname = dirname(fileURLToPath(import.meta.url))
+// 环境变量已由首行 loadEnv.js 加载；此行保留以兼容直接 `node worker.js` 的历史用法。
 dotenv.config({ path: resolve(__dirname, '.env') })
 
 import crypto from 'crypto'

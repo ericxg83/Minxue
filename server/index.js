@@ -1,3 +1,6 @@
+// ⚠️ 必须是第一个 import：dotenv 必须先于下面所有模块求值。
+// 详见 loadEnv.js 顶部注释（2026-09-21「.env 切换对 index.js 不生效」事故）。
+import './loadEnv.js'
 import dotenv from 'dotenv'
 import { dirname, resolve } from 'path'
 import { fileURLToPath } from 'url'
@@ -56,6 +59,10 @@ import { scheduleNightParse, scheduleWeeklyDiagnosis } from './services/nightPar
 import { scheduleWeeklyMissingFigureCheck } from './services/missingFigureMonitorService.js'
 
 const __dirname = dirname(fileURLToPath(import.meta.url))
+// 环境变量已在文件首行 `import './loadEnv.js'` 加载完毕。
+// 原先这里才 dotenv.config()，而它**跑不过上面的静态 import** ——
+// 模块级读 process.env 的配置（ANSWER_ENGINE_*、ALLOWED_ORIGIN、PORT…）全部
+// 拿到 undefined 走默认值。保留此行只为兼容，实际已由 loadEnv.js 完成。
 dotenv.config({ path: resolve(__dirname, '.env') })
 
 import express from 'express'
