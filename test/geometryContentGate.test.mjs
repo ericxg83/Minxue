@@ -190,3 +190,85 @@ test('坐标系插图：形状约束仍照常校验（豁免不影响硬规则4�
   assert.equal(r.ok, false)
   assert.ok(r.reasons.some(s => s.includes('正方形')), r.reasons.join('；'))
 })
+
+// ── 硬规则 2.7：「点X在YZ上」位置约束（2026-09-21 第04周第7题 beda2c3d 事故）──
+
+test('点在边上：题干「点D在边AB上」，重绘把 D 画进三角形内部 → 拦截', () => {
+  // beda2c3d 的真实 tikz_json：A(100,20) B(20,180) C(180,180)，D(60,140) 悬在内部
+  const structure = {
+    points: [
+      { label: 'A', x: 100, y: 20 }, { label: 'B', x: 20, y: 180 },
+      { label: 'C', x: 180, y: 180 }, { label: 'D', x: 60, y: 140 }
+    ],
+    segments: [
+      { from: 'A', to: 'B' }, { from: 'B', to: 'C' },
+      { from: 'C', to: 'A' }, { from: 'C', to: 'D' }
+    ]
+  }
+  const content = '如图，已知在△ABC中，点D在边AB上．下列条件中，能判定△ACD与△ABC相似的是'
+  const r = validateStructureAgainstContent(structure, content)
+  assert.equal(r.ok, false)
+  assert.ok(
+    r.reasons.some(s => s.includes('点D在AB上') && s.includes('偏离')),
+    '必须点出 D 偏离 AB：' + r.reasons.join('；')
+  )
+})
+
+test('点在边上：D 正确落在 AB 上（共线 + 段内）→ 放行', () => {
+  const structure = {
+    points: [
+      { label: 'A', x: 100, y: 20 }, { label: 'B', x: 20, y: 180 },
+      { label: 'C', x: 180, y: 180 }, { label: 'D', x: 60, y: 100 }
+    ],
+    segments: [
+      { from: 'A', to: 'B' }, { from: 'B', to: 'C' },
+      { from: 'C', to: 'A' }, { from: 'C', to: 'D' }
+    ]
+  }
+  const content = '如图，已知在△ABC中，点D在边AB上．下列条件中，能判定△ACD与△ABC相似的是'
+  const r = validateStructureAgainstContent(structure, content)
+  assert.equal(r.ok, true, r.reasons.join('；'))
+})
+
+test('点在边上：无坐标的点 / 「的垂直平分线上」句式 → 不误伤', () => {
+  const r1 = validateStructureAgainstContent(
+    { points: [{ label: 'A' }, { label: 'B' }, { label: 'C' }, { label: 'D' }],
+      segments: [{ from: 'A', to: 'B' }, { from: 'B', to: 'C' }, { from: 'C', to: 'A' }] },
+    '如图，在△ABC中，点D在边AB上'
+  )
+  assert.equal(r1.ok, true, r1.reasons.join('；'))
+  const r2 = validateStructureAgainstContent(
+    { points: [
+        { label: 'A', x: 0, y: 0 }, { label: 'B', x: 100, y: 0 },
+        { label: 'C', x: 50, y: 80 }, { label: 'D', x: 50, y: 30 }
+      ],
+      segments: [{ from: 'A', to: 'B' }, { from: 'B', to: 'C' }, { from: 'C', to: 'A' }, { from: 'C', to: 'D' }] },
+    '点C在AB的垂直平分线上，连接CD'
+  )
+  assert.ok(!r2.reasons.some(s => s.includes('偏离')), r2.reasons.join('；'))
+})
+
+test('extractPointOnSegmentConstraints：三种句式 + 防误伤', async () => {
+  const { extractPointOnSegmentConstraints } = await import('../server/utils/geometryContentGate.js')
+  // ① 点X在边YZ上
+  assert.deepEqual(
+    extractPointOnSegmentConstraints('如图，点D在边AB上，点E在射线BC上'),
+    [
+      { point: 'D', on: ['A', 'B'], between: true },
+      { point: 'E', on: ['B', 'C'], between: false }
+    ]
+  )
+  // ② X为YZ上一点 / ③ YZ上取一点X
+  assert.deepEqual(
+    extractPointOnSegmentConstraints('点E为CD上一点；在BC上取一点M'),
+    [
+      { point: 'E', on: ['C', 'D'], between: true },
+      { point: 'M', on: ['B', 'C'], between: true }
+    ]
+  )
+  // 防误伤：「的垂直平分线上」「的上方」「小写直线l」都不收
+  assert.deepEqual(
+    extractPointOnSegmentConstraints('点C在AB的垂直平分线上；点P在AB的上方；点Q在直线l上'),
+    []
+  )
+})

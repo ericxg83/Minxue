@@ -12,8 +12,14 @@
  *   4. question_assets.tikz_code + tikz_status   ← TikZ 源码（PDF 讲义通道）
  *   5. questions.tikz_svg_url                    ← TikZ 源码（反范式副本，pdfGenerator 直接读）
  *
- * ⚠️ 闸门过滤是硬性要求：只发布 validateStructureAgainstContent 放行的；
- *    被拒的（幻觉点/漏画线段等）一律跳过并记录，绝不发布 —— 放行率不是 KPI。
+ * ⚠️ 闸门过滤是硬性要求（**两道，缺一不可**）：
+ *    ① `detectNonGeometryFigure` —— 这类图**根本不该重绘**（流程图框内是中文说明文字、
+ *       多子图题 DSL 只有一个画布）。**2026-09-21 事故**：这道闸门原先只加在生成侧
+ *       （geometryWorker / 批次脚本），发布侧没有 → 一张判据上线前跑出来的「空框流程图」
+ *       （`3f6abe05`）照样被发布上线，老师看到框里一个字都没有。
+ *       发布脚本必须自己再判一次：**判据上线前就已生成的旧产物，只能靠发布侧拦住**。
+ *    ② `validateStructureAgainstContent` 放行的才发；被拒的（幻觉点/漏画线段等）一律跳过。
+ *    放行率不是 KPI。
  *
  * 幂等：progress.json 里 rec.published 标记已发布，重跑跳过；单张失败不阻塞其它。
  *
@@ -39,7 +45,7 @@ import { updateQuestionAssetCleanData, updateQuestionAssetTikz, createQuestionAs
 import { renderGeometrySvg } from '../utils/geometrySvg.js'
 import { renderGeometryTikZ } from '../utils/geometryTikZ.js'
 import { normalizeStructure } from '../utils/geom/structure.js'
-import { validateStructureAgainstContent } from '../utils/geometryContentGate.js'
+import { validateStructureAgainstContent, detectNonGeometryFigure } from '../utils/geometryContentGate.js'
 
 const ROOT = 'D:/Minxue_App_V3/server/scripts/logs/non-c3-test'
 const PROGRESS = path.join(ROOT, 'progress.json')
@@ -97,8 +103,22 @@ const repairMissingAssets = async () => {
     const tag = String(id).slice(0, 8)
     const sp = path.join(ROOT, tag, 'structure.json')
     if (!fs.existsSync(sp)) continue
-    const has = await query(`SELECT 1 FROM ${TABLES.QUESTION_ASSETS} WHERE question_id = $1 LIMIT 1`, [id])
-    if (has.rows.length) continue
+    const has = await query(
+      `SELECT (SELECT 1 FROM ${TABLES.QUESTION_ASSETS} WHERE question_id = $1 LIMIT 1) AS has_asset,
+              parent_stem, content
+         FROM ${TABLES.QUESTIONS} WHERE id = $1 LIMIT 1`,
+      [id],
+    )
+    if (!has.rows.length) continue
+    if (has.rows[0].has_asset) continue
+    // 「不该重绘」的题（流程图/多子图）——产物是判据上线前跑的，绝不能借"补齐资产行"把它灌进生产
+    const pref = detectNonGeometryFigure(
+      [String(has.rows[0].parent_stem || ''), String(has.rows[0].content || '')].join('\n'),
+    )
+    if (pref.skip) {
+      console.log(`⏭ 跳过补齐资产行 ${tag}：${pref.kind}（不该重绘）`)
+      continue
+    }
     const structure = JSON.parse(fs.readFileSync(sp, 'utf8'))
     const svg = renderGeometrySvg(structure)
     const tikz = renderGeometryTikZ(structure)
@@ -152,6 +172,7 @@ if (idList.length) {
 const passed = []
 const rejected = []
 const failed = []
+const skippedNonGeom = []
 
 for (const [id, rec] of rows) {
   const tag = String(id).slice(0, 8)
@@ -165,6 +186,13 @@ for (const [id, rec] of rows) {
     const text = stem?.text || rec.content || ''
     const options = stem?.options ?? null
     if (!text.trim()) throw new Error('题干为空，无法过闸门')
+    // ── 闸门 0（硬性，2026-09-21 补）：这类图**根本不该重绘**，产物直接作废 ──
+    // 判据上线（09-20 12:13）之前生成的旧产物不会自己消失，只能在发布时拦。
+    const pref = detectNonGeometryFigure(text)
+    if (pref.skip) {
+      skippedNonGeom.push({ tag, kind: pref.kind, reason: pref.reason })
+      continue
+    }
     // ── 闸门（硬性）：⚠️ 返回 {ok, reasons} 对象，结构先 normalizeStructure，与治标脚本同一口径 ──
     const s = normalizeStructure(JSON.parse(JSON.stringify(structure)))
     const v = validateStructureAgainstContent(s, text, options)
@@ -185,7 +213,11 @@ for (const [id, rec] of rows) {
   }
 }
 
-console.log(`\n闸门放行 ${passed.length} / 拒稿 ${rejected.length} / 出错 ${failed.length}`)
+console.log(`\n不该重绘 ${skippedNonGeom.length} / 闸门放行 ${passed.length} / 拒稿 ${rejected.length} / 出错 ${failed.length}`)
+if (skippedNonGeom.length) {
+  console.log('\n── 不该重绘清单（作废，不发布）──')
+  for (const r of skippedNonGeom) console.log(`  ${r.tag} [${r.kind}]: ${r.reason}`)
+}
 if (rejected.length) {
   console.log('\n── 拒稿清单（不发布）──')
   for (const r of rejected) console.log(`  ${r.tag}: ${r.reasons.join(' | ')}`)
@@ -223,11 +255,16 @@ for (const [i, p] of passed.entries()) {
     )
     if (asset.rows.length > 0) {
       await updateQuestionAssetTikz(asset.rows[0].id, { tikz_code: p.tikz, tikz_status: 'completed' })
+      // 复位诊断字段：作废/重跑留下的 last_error 若不清，重发成功后仍挂着"已作废旧重绘产物"
+      // 或上一版的拒稿理由，后续排查会被误导（2026-09-21 实测 714b0e6c 就带着旧拒稿理由）。
+      await query(`UPDATE ${TABLES.QUESTION_ASSETS} SET last_error = '', updated_at = NOW() WHERE id = $1`, [asset.rows[0].id])
     }
 
-    // 4. questions: tikz_svg_url（反范式副本，pdfGenerator 直接读）
+    // 4. questions: tikz_svg_url（反范式副本，pdfGenerator 直接读）+ display_image_type 复位为 clean
+    //    —— 本脚本写的就是"干净几何图"，必须显式置 'clean'；之前用 COALESCE 会保留
+    //    作废脚本写下的 'raw'，语义就反了。
     await query(
-      `UPDATE ${TABLES.QUESTIONS} SET tikz_svg_url = $1, display_image_type = COALESCE(display_image_type, 'clean'), updated_at = NOW() WHERE id = $2`,
+      `UPDATE ${TABLES.QUESTIONS} SET tikz_svg_url = $1, display_image_type = 'clean', updated_at = NOW() WHERE id = $2`,
       [p.tikz, p.id],
     )
 

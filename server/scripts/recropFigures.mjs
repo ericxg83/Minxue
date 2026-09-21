@@ -9,9 +9,15 @@
  * 用法：node scripts/recropFigures.mjs [--apply] [--task <id前缀>] [--limit N]
  */
 import 'dotenv/config'
+// ⚠️ 必须清代理：不清时 OSS 下载返回 400 且被 catch 静默跳过，汇总打印"重裁 0 张"，
+//   极易误判成"没有需要重裁的题"（2026-09-21 实测踩坑；其它同类脚本都自带这一段）。
+for (const k of ['HTTP_PROXY', 'HTTPS_PROXY', 'ALL_PROXY', 'http_proxy', 'https_proxy', 'all_proxy']) {
+  delete process.env[k]
+}
 import fs from 'node:fs/promises'
 import pg from 'pg'
 import axios from 'axios'
+import sharp from 'sharp'
 import { cropAndUploadGeometryImage, isDegenerateFigureBox, clampImageBboxToBlock } from '../worker.js'
 
 const APPLY = process.argv.includes('--apply')
@@ -67,16 +73,20 @@ for (const r of rows) {
 
   if (!pageCache.has(page.image_url)) {
     try {
+      const raw = Buffer.from((await axios.get(page.image_url, { responseType: 'arraybuffer', timeout: 60000 })).data)
+      // ⚠️ 必须与生产同口径：两条批改管线都是先把整页 rotate()+resize(1800,1800,inside)+jpeg85
+      // 压缩后才交给 cropAndUploadGeometryImage（worker.js 的 pageBuffers，4183/4718/4896 三处同款）。
+      // 拿原图直接裁，收紧的墨迹掩码尺度不同 ⇒ 裁出来的框与线上不一致
+      // （2026-09-21 第5题 078d57ac 实测：原图路径裁片残留左侧手写，压缩路径裁片干净）。
       pageCache.set(page.image_url,
-        Buffer.from((await axios.get(page.image_url, { responseType: 'arraybuffer', timeout: 60000 })).data))
+        await sharp(raw).rotate().resize(1800, 1800, { fit: 'inside' }).jpeg({ quality: 85 }).toBuffer())
     } catch (e) {
       console.log(`  ${tag}: 页图下载失败(${e.message})，跳过`)
       continue
     }
   }
   const buf = pageCache.get(page.image_url)
-  const sharpMod = await import('sharp')
-  const meta = await sharpMod.default(buf).metadata()
+  const meta = await sharp(buf).metadata()
   const px = {
     x: Math.round(r.image_bbox.x / 1000 * meta.width),
     y: Math.round(r.image_bbox.y / 1000 * meta.height),

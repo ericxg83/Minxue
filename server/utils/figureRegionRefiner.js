@@ -42,6 +42,18 @@ const FLAT_RUN_RATIO = 0.35    // 数轴/长条示意图很扁，靠"最长连�
 const FLAT_MIN_HEIGHT_RATIO = 0.015 // 扁图形的带高下限，挡掉分数线/下划线那种一两行的横杠
 const TEXT_RUN_RATIO = 0.12    // 最长横向墨迹不足带宽 12% 且不高 → 文字行（图形有横贯的基线）
 
+// ── 连通域去手写阈值（2026-09-21 第5题 078d57ac）──
+// 图形是连通的线条，学生手写是几十上百个互不相连的小笔画。用"最大连通域 + 边距"
+// 把外围的手写/演算圈外削掉。只在框内连通域数量很多（=明显混入手写）时才启用，
+// 干净的图形（几个域）一律不动 —— 避免误伤由多段构成的合法图形。
+const COMPONENT_TEXT_MIN_COUNT = 12   // 框内连通域 ≥ 这么多才认为混入了手写
+const COMPONENT_MARGIN_RATIO = 0.15   // 最大域外扩比例（保留紧贴图形的顶点字母）
+const COMPONENT_MIN_SHARE = 0.15      // 最大域至少占框内总墨量的这个比例，否则不敢裁
+//   ⚠️ 0.15 是实测下限：078d57ac 图形 1250 点 / 全框总墨 6872 = 0.18，手写笔画数量多
+//   （71 个小域 5622 点）会把"占比"压得很低，但"最大域"仍然是唯一的大连通块 ——
+//   这个闸门防的是"框内没有主导图形"（最大域只是一条小线段），不是防手写。
+const COMPONENT_MIN_AREA_RATIO = 0.25 // 裁剪结果至少占到原框面积的这个比例，否则回退
+
 const clamp = (v, lo, hi) => Math.max(lo, Math.min(hi, v))
 const overlap = (a0, a1, b0, b1) => Math.max(0, Math.min(a1, b1) - Math.max(a0, b0))
 
@@ -255,6 +267,80 @@ function trimTextEdges(ink, w, h, region, column, pageH) {
 }
 
 /**
+ * 用最大连通域把框内的学生手写/演算圈外削掉（2026-09-21 第5题 078d57ac）。
+ *
+ * 为什么需要它：几何图形是**连通线条**，面积集中在少数几个大连通域里；学生手写
+ * 是几十上百个互不相连的小笔画（实测 078d57ac：图形 1 个 1250 点的大域 + 71 个小域，
+ * 小域全是手写与图注）。竖向/横向的墨迹投影都会被手写"桥接"进图形带，唯一可靠的区别
+ * 是**连通性**：图形连成一片，手写散成一堆。
+ *
+ * 安全阀（宁可漏兜，不可误伤）：
+ *   · 只有框内连通域数量 ≥ COMPONENT_TEXT_MIN_COUNT 才启用（干净图形只有几个域，不动）；
+ *   · 最大域必须占到框内总墨量的 COMPONENT_MIN_SHARE，否则认为"没有主导图形"，不动；
+ *   · 最大域按 COMPONENT_MARGIN_RATIO 外扩，保住紧贴顶点的字母标注（A/B/C/D）；
+ *   · 调用方还要复核裁剪结果仍是图形带、且面积不低于原框 COMPONENT_MIN_AREA_RATIO。
+ *
+ * @returns {Object|null} {x,y,width,height}（原图的绝对坐标）；不该裁剪时返回 null
+ */
+function trimToMainComponent(ink, w, h, x, y, width, height) {
+  if (width < 8 || height < 8) return null
+  // 框太大时直接放弃裁剪：连通域扫描的栈按区域像素数预分配，超大框不值得
+  if (width * height > 4_000_000) return null
+  const seen = new Uint8Array(width * height)
+  // 洪泛栈用预分配 Int32Array（打包 idx），绝不能放 JS 小数组 ——
+  // 2026-09-21 实测：数组版在 4GB 堆上把 recropFigures 跑到 OOM。
+  const stack = new Int32Array(width * height)
+  const at = (lx, ly) => ly * width + lx
+  let count = 0
+  let totalInk = 0
+  let best = null
+  for (let ly = 0; ly < height; ly++) {
+    for (let lx = 0; lx < width; lx++) {
+      const i = at(lx, ly)
+      if (seen[i] || !ink[(y + ly) * w + (x + lx)]) continue
+      count++
+      let top = 0
+      stack[top++] = i
+      seen[i] = 1
+      let n = 0
+      let minx = lx; let maxx = lx; let miny = ly; let maxy = ly
+      while (top > 0) {
+        const cur = stack[--top]
+        const cx = cur % width
+        const cy = (cur - cx) / width
+        n++
+        if (cx < minx) minx = cx
+        if (cx > maxx) maxx = cx
+        if (cy < miny) miny = cy
+        if (cy > maxy) maxy = cy
+        for (let dy = -1; dy <= 1; dy++) {
+          for (let dx = -1; dx <= 1; dx++) {
+            if (!dx && !dy) continue
+            const nx = cx + dx; const ny = cy + dy
+            if (nx < 0 || nx >= width || ny < 0 || ny >= height) continue
+            const j = at(nx, ny)
+            if (!seen[j] && ink[(y + ny) * w + (x + nx)]) { seen[j] = 1; stack[top++] = j }
+          }
+        }
+      }
+      totalInk += n
+      if (!best || n > best.n) best = { n, minx, maxx, miny, maxy }
+    }
+  }
+  if (!best || count < COMPONENT_TEXT_MIN_COUNT) return null
+  if (best.n < COMPONENT_MIN_SHARE * totalInk) return null
+  const cw = best.maxx - best.minx + 1
+  const ch = best.maxy - best.miny + 1
+  const mx = Math.round(cw * COMPONENT_MARGIN_RATIO)
+  const my = Math.round(ch * COMPONENT_MARGIN_RATIO)
+  const nx0 = Math.max(0, best.minx - mx)
+  const ny0 = Math.max(0, best.miny - my)
+  const nx1 = Math.min(width, best.maxx + mx + 1)
+  const ny1 = Math.min(height, best.maxy + my + 1)
+  return { x: x + nx0, y: y + ny0, width: nx1 - nx0, height: ny1 - ny0 }
+}
+
+/**
  * @param {Uint8Array} ink 整页墨迹掩码（1=墨）
  * @param {Object} box 模型框（与 ink 同坐标系）
  * @returns {Object|null} 收紧后的框 {x,y,width,height,steps}；判不出图形返回 null
@@ -299,6 +385,11 @@ export function refineFigureRegion(ink, w, h, box) {
     if (b.end < anchor.start) limitTop = Math.max(limitTop, b.end + 1)
     if (b.start > anchor.end) limitBottom = Math.min(limitBottom, b.start - 1)
   }
+  // ⚠️ 试过"把相邻的另一张图形带也当硬边界"来挡"吞并邻题图"，**已实测回退**（2026-09-21）：
+  // 用 4 张已知好样本回归，`714b0e6c`（同心圆）高度只剩 70%、`3baafdea` 68% ——
+  // "同一张图被细空白切成两带"与"两张相邻的图"在墨迹投影上不可区分，加边界必然误伤真图。
+  // 违反项目纪律"宁可漏兜，不可误伤"。该残留缺陷的处置改为上游（收紧后按覆盖率体检，
+  // 见 worker.js 的配图体检），不在本函数里做。
   const grown = growVertical(ink, w, anchor, column, limitTop, limitBottom, stopGap)
 
   // ④ 收尾修边：削掉贴在图形上下的图注/文字行
@@ -318,18 +409,52 @@ export function refineFigureRegion(ink, w, h, box) {
   // 实现：收紧结果与模型框求并集（并集 = 占上界），保证输出至少覆盖模型框完整范围。
   // 副作用：模型框严重偏位时可能多带些空白，代价远小于把真图砍掉（宁可多留白）。
   const x0 = clamp(Math.min(tight.x0, box.x), 0, w - 1)
-  const y0 = clamp(Math.min(vertical.start, box.y), 0, h - 1)
   const x1 = clamp(Math.max(tight.x1, box.x + box.width), 1, w)
-  const y1 = clamp(Math.max(vertical.end, box.y + box.height), 1, h)
-  const outW = x1 - x0
-  const outH = y1 - y0
+  const uniStart = clamp(Math.min(vertical.start, box.y), 0, h - 1)
+  const uniEnd = clamp(Math.max(vertical.end, box.y + box.height), 1, h)
+
+  // ── ⚠️ 并集之后必须【再让一次边】（2026-09-21 白板第2/4/5/6/7题事故）──
+  // 上面的并集是 2026-09-18 为"防收紧把图砍半截"加的，必须保留。但它有一个致命副作用：
+  // **刚刚被 ④ trimTextEdges 削掉的图注/邻题文字，会被并集原样加回来**。
+  // 练习册/密排版面里模型框常常整体偏到图形下方一带（图注「（第N题）」+ 下一题题干），
+  // 于是：收紧往上扩张抓到图形带（连图形上方的学生手写一起）→ 并集又把模型框那一段文字并回来
+  //   ⇒ 输出 = 图形 + 学生手写 + 图注 + 下一题文字。
+  // 实测第5题：模型框落在「（第5题）」+下一题题干上，保留率 高度 180% / 面积 270%，
+  // 老师原话"这个图的配图截图区域过大，而且手写部分也没擦除"。
+  // 修法：并集后按**同一判据**（trimTextEdges → isTextBand；学生手写因墨迹覆盖率过高本来
+  // 就算文字带）再削一次首尾，一旦削到 core 就停 —— 2026-09-18 的"不砍图"保护原样保留。
+  const uniTrim = trimTextEdges(ink, w, h, { start: uniStart, end: uniEnd }, column, h)
+  const y0 = Math.min(vertical.start, uniTrim.start)
+  const y1 = Math.max(vertical.end, uniTrim.end)
+  let outW = x1 - x0
+  let outH = y1 - y0
 
   if (outW < MIN_SIDE_RATIO * w || outH < MIN_SIDE_RATIO * h) return null
   if (outH > box.height * MAX_GROWTH_H || outW > box.width * MAX_GROWTH_W) return null
 
+  // ── 2026-09-21 第5题 (078d57ac) 追加：用连通性把框内的学生手写圈外削掉 ──
+  // 投影法削不掉"写在图形旁边、与图形同一纵向范围"的整段演算（第5题左侧 15/4、1/2×AD 等）。
+  // 判据换成连通性：图形连成一片，手写散成几十个小域。仅在明显混入手写时启用（见函数注释）。
+  let finalX = x0
+  let finalY = y0
+  const mainComp = trimToMainComponent(ink, w, h, x0, y0, outW, outH)
+  if (mainComp
+    && mainComp.width >= MIN_SIDE_RATIO * w
+    && mainComp.height >= MIN_SIDE_RATIO * h
+    && mainComp.width * mainComp.height >= COMPONENT_MIN_AREA_RATIO * outW * outH) {
+    const compStats = bandStats(ink, w, mainComp.y, mainComp.y + mainComp.height - 1,
+      mainComp.x, mainComp.x + mainComp.width)
+    if (compStats && isFigureBand(compStats, h)) {
+      finalX = mainComp.x
+      finalY = mainComp.y
+      outW = mainComp.width
+      outH = mainComp.height
+    }
+  }
+
   return {
-    x: x0,
-    y: y0,
+    x: finalX,
+    y: finalY,
     width: outW,
     height: outH,
     steps: { rowFigures: rowFigures.length, colGroups: colGroups.length, textBands: textBands.length }

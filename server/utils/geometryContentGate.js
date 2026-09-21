@@ -87,6 +87,52 @@ export function extractLetterRuns(content) {
 const segKey = (a, b) => [a, b].sort().join('|')
 
 /**
+ * 提取「点X在(边/线段/斜边…)YZ上」句式给出的**位置约束**：重绘图必须满足
+ * X 落在 YZ 上（共线，段类还要求在段内）。
+ *
+ * 为什么需要（2026-09-21 第04周第7题 beda2c3d）：题干「点D在边AB上」，重绘模型把
+ * D 画进三角形内部——线段 AB/DC 都画了、字母也都引用了，此前所有规则查的都是
+ * 「线段有没有出处、点有没有被引用」，从不查**位置关系**，这种"线段齐全、位置全错"
+ * 的图一路绿灯发布，老师看到的就是一张和原图完全不同的图。
+ *
+ * 刻意不匹配的形态（防误伤）：
+ *   · 「YZ**的**垂直平分线/中点/上方/延长线上」——「的」字隔断，本提取的 YZ 后只允许
+ *     紧跟段类限定词或「上」，带「的」的句式一概不收（那些约束不是"共线"）；
+ *   · 小写字母（数轴表示数的 a/b、直线 l₁）不在提取范围；
+ *   · 「点D、E分别在边AB、AC上」的**分别**句式暂不提取（多点多线配对易错，
+ *     收益/风险比不划算，先留空——漏提取只是少了这道防线，不会误杀）。
+ *
+ * @returns {Array<{point:string, on:[string,string], between:boolean}>} between=true 还要求 X 在段内
+ */
+export function extractPointOnSegmentConstraints(text) {
+  const s = unfoldFractions(text)
+  const one = `[A-Z][′'’]?(?:[₀-₉0-9]+)?`
+  const QUAL = '(?:边|线段|斜边|直角边|底边|对角线|射线|直线)'
+  const out = []
+  const push = (p, a, b, between) => {
+    const P = normalizeLabel(p)
+    const A = normalizeLabel(a)
+    const B = normalizeLabel(b)
+    if (P && A && B && P !== A && P !== B && A !== B) {
+      out.push({ point: P, on: [A, B].sort(), between })
+    }
+  }
+  // ① 点X在[边/线段/斜边/…/射线/直线]YZ上
+  for (const m of s.matchAll(new RegExp(`点\\s*(${one})\\s*在\\s*${QUAL}?\\s*(${one})\\s*(${one})\\s*上`, 'g'))) {
+    push(m[1], m[2], m[3], !/射线|直线/.test(m[0]))
+  }
+  // ② X为/是YZ上一点
+  for (const m of s.matchAll(new RegExp(`(${one})\\s*(?:为|是)\\s*(${one})(${one})\\s*上\\s*一?点`, 'g'))) {
+    push(m[1], m[2], m[3], true)
+  }
+  // ③ YZ上有/取/任取一点X
+  for (const m of s.matchAll(new RegExp(`(${one})(${one})\\s*上\\s*(?:有|任取|取)\\s*一?点\\s*(${one})`, 'g'))) {
+    push(m[3], m[1], m[2], true)
+  }
+  return out
+}
+
+/**
  * 题干是否声明了「平行线组」（**3 条及以上**直线互相平行，如 l₁//l₂//l₃、AB∥CD∥EF、
  * 直线l1∥l2∥l3）。
  *
@@ -296,6 +342,20 @@ export function validateStructureAgainstContent(structure, content, options) {
   const refPts = extractReferencedPoints(allText)
   const refSegs = extractReferencedSegments(allText)
 
+  // 「点X在YZ上」位置约束 + 画出的点坐标表（硬规则 2.7 用；无坐标的点自动跳过）
+  const pointOnSegConstraints = extractPointOnSegmentConstraints(allText)
+  const coordOf = new Map()
+  for (const p of structure?.points || []) {
+    if (p?.label && Number.isFinite(p.x) && Number.isFinite(p.y)) {
+      coordOf.set(normalizeLabel(p.label), p)
+    }
+  }
+  const xs = [...coordOf.values()].map(p => p.x)
+  const ys = [...coordOf.values()].map(p => p.y)
+  const diag = coordOf.size >= 2
+    ? Math.hypot(Math.max(...xs) - Math.min(...xs), Math.max(...ys) - Math.min(...ys))
+    : 0
+
   // ── 硬规则 1：题干提到带撇的派生点（折叠/对称产物），图上必须有 ──
   // 折叠、轴对称题的 C′/A′ 是结构主体，画不出它整张图就是错的。
   for (const p of refPts) {
@@ -364,6 +424,35 @@ export function validateStructureAgainstContent(structure, content, options) {
     }
   }
 
+  // ── 硬规则 2.7：题干声明「点X在YZ上」→ 图上 X 必须真的落在 YZ 上（2026-09-21）──
+  // 实测案例（回归测试锁定）：第04周第7题 beda2c3d，题干「点D在边AB上」，重绘模型把
+  // D 画进三角形内部（到 AB 直线的距离 ≈ 图高 8%），△ACD 与 △ABC 的相似关系从图上
+  // 完全看不出来，但线段 AB/DC 齐全、字母也都被引用，此前规则全部放行 ⇒ 错图发布。
+  // 这是本闸门第一条**位置关系**规则：共线距离用全图包围盒对角线的 3% 作容差，
+  // 段类（边/线段/斜边…）还要求参数 t ∈ [-3%, 103%]（射线/直线句式不要求段内）。
+  // 点不全（漏画/幻觉点）时不在本规则管——分别由硬规则 1/3 兜底。
+  if (diag > 0) {
+    for (const c of pointOnSegConstraints) {
+      const P = coordOf.get(c.point)
+      const A = coordOf.get(c.on[0])
+      const B = coordOf.get(c.on[1])
+      if (!P || !A || !B) continue
+      const abx = B.x - A.x
+      const aby = B.y - A.y
+      const len2 = abx * abx + aby * aby
+      if (len2 === 0) continue
+      const t = ((P.x - A.x) * abx + (P.y - A.y) * aby) / len2
+      const dist = Math.abs((P.x - A.x) * aby - (P.y - A.y) * abx) / Math.sqrt(len2)
+      const offLine = dist > diag * 0.03
+      const offSegment = c.between && (t < -0.03 || t > 1.03)
+      if (offLine || offSegment) {
+        reasons.push(
+          `题干说点${c.point}在${c.on[0]}${c.on[1]}上，重绘图上它${offLine ? '偏离该线段所在直线' : '跑到线段延长线上'}`
+        )
+      }
+    }
+  }
+
   // ── 硬规则 3：点字母凭空出现（题干/选项完全没提的点） ──
   // 端点对端豁免：模型画了某个字母 P，且 P 在某条 segment 的某一端，
   // 该 segment 的另一端是题干/选项已引用的字母 → P 作为"必然端点对端"豁免。
@@ -420,9 +509,89 @@ export function validateStructureAgainstContent(structure, content, options) {
  * @param {string} content 题干文本
  * @returns {{skip:boolean, kind?:string, reason?:string}}
  */
-const FLOWCHART_RE = /(数值|数据)?转换器|流程图|程序框图|运算程序/
+const FLOWCHART_RE = /(数值|数据)?转换器|流程(图|式)|程序框图|运算程序|计算程序|操作程序|按键程序|算法程序/
 const IO_TABLE_RE = /输入\s*[:：][\s\S]{0,150}?输出\s*[:：]/
 
+// ── 多子图/多面板判据（2026-09-21 新增）──
+//
+// 为什么需要：题干形如「小明把…的两个长方形沿对角线剪开，围成**如图2**所示的一个大正方形」
+// 时，原图里是**并排的两个子图**（图1 + 箭头 + 图2）。几何 DSL 的坐标空间是**单一画布**，
+// 没有「多面板/子图」概念 —— 模型只能挑一个画。实测 `845802c9`：只画出了图1 的两个长方形，
+// 图2（拼成的大正方形）、中间的箭头、尺寸标注全部丢失，而闸门（题干引用核对）因为没有
+// 字母引用可核而放行，最终把"画了一半"的图发到生产。
+//
+// 判据刻意**要求出现"图"字前缀**（图1/图2/图甲/图乙）或带括号的甲乙：
+// 裸的 ①②③ 在题干里绝大多数是**条件编号**（"下列说法正确的是①…②…"），
+// 拿它当子图编号会大面积误伤。宁可漏判，不可误判。
+const SUBFIG_CN_RE = /图\s*([1-9１２３４５６７８９①②③④⑤⑥⑦⑧⑨⑩一二三四五六七八九十])/g
+const SUBFIG_AB_RE = /图\s*([甲乙丙丁])/g
+const SUBFIG_PAREN_AB_RE = /[（(]\s*([甲乙丙丁])\s*[）)]/g
+const TWO_FIGURE_RE = /两幅图|两个图|两张图|左右两图|两侧的图|甲乙两图|甲、乙两图/
+// 「四个选项图」：同一坐标系里放 4 个函数图象当选项。DSL 也没有多坐标系概念，
+// 模型只能在一个坐标系里硬塞 4 张图 ⇒ 必然 5 轮不收敛（实测 56966fa2）。
+// 不重绘对它是 strictly better：回退原卷裁片，还省下 5 轮模型额度。
+const FOUR_OPTION_GRAPH_RE = /同一(个)?(平面直角)?坐标系[^。；;]{0,16}(大致)?(图像|图象)/
+
+/**
+ * 判定题干是否引用了**两个及以上子图**（多面板）。
+ * @param {string} content 题干文本
+ * @returns {{skip:boolean, kind?:string, reason?:string}}
+ */
+export function detectMultiPanelFigure(content) {
+  const t = String(content || '')
+  const collect = (re) => {
+    const s = new Set()
+    for (const m of t.matchAll(re)) s.add(m[1])
+    return s
+  }
+  const cn = collect(SUBFIG_CN_RE)
+  if (cn.size >= 2) {
+    return {
+      skip: true,
+      kind: 'multi_panel',
+      reason: `题干引用了 ${cn.size} 个子图（${[...cn].map((n) => `图${n}`).join('、')}）：几何 DSL 只有一个画布、没有多面板概念，重绘必然只画其中一个`
+    }
+  }
+  const ab = new Set([...collect(SUBFIG_AB_RE), ...collect(SUBFIG_PAREN_AB_RE)])
+  if (ab.size >= 2) {
+    return {
+      skip: true,
+      kind: 'multi_panel',
+      reason: `题干引用了 ${ab.size} 个子图（${[...ab].map((n) => `图${n}`).join('、')}）：几何 DSL 没有多面板概念，重绘必然只画其中一个`
+    }
+  }
+  if (TWO_FIGURE_RE.test(t)) {
+    return {
+      skip: true,
+      kind: 'multi_panel',
+      reason: '题干明说有两幅图：几何 DSL 没有多面板概念，重绘必然只画其中一个'
+    }
+  }
+  if (FOUR_OPTION_GRAPH_RE.test(t)) {
+    return {
+      skip: true,
+      kind: 'multi_panel_option_graph',
+      reason: '四选项函数图象题：需要同一画布并排 4 个坐标系，几何 DSL 不支持多坐标系，重绘必然不收敛'
+    }
+  }
+  return { skip: false }
+}
+
+/**
+ * 这类配图**根本不该走几何重绘**（走了只会输出一张更差或残缺的图）：
+ *   ① 流程图/数值转换器/程序框图 —— 框内是中文说明文字；
+ *   ② 输入→运算→输出表格 —— 图内是数值表格；
+ *   ③ 多子图/多面板（图1+图2、图甲+图乙）、四选项函数图象 —— DSL 没有多面板/多坐标系概念。
+ *
+ * ⚠️ 这条判据有**两个必须同时生效的调用点**，缺一个就会漏（2026-09-21 事故教训）：
+ *   - 生成侧：`server/geometryWorker.js`（拦住新题，省额度）
+ *   - 发布侧：`server/scripts/publish-nonc3-dsl-redraws.mjs`（拦住**判据上线前就已生成**的旧产物）
+ * 2026-09-20 事故：判据只加在生成侧，发布脚本没有 → 一张判据上线前跑出来的
+ * 「空框流程图」照样被批量发布上线，老师看到的是框里一个字都没有的流程图。
+ *
+ * @param {string} content 题干文本
+ * @returns {{skip:boolean, kind?:string, reason?:string}}
+ */
 export function detectNonGeometryFigure(content) {
   const t = String(content || '')
   if (FLOWCHART_RE.test(t)) {
@@ -439,5 +608,5 @@ export function detectNonGeometryFigure(content) {
       reason: '输入→运算→输出表格题：图内是数值表格与文字，不是几何图形'
     }
   }
-  return { skip: false }
+  return detectMultiPanelFigure(t)
 }

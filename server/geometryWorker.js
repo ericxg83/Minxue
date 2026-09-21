@@ -240,9 +240,18 @@ async function processSingleAsset(asset) {
   // 2.4 内容闸门：流程图 / 数值转换器 / 输入输出表格类配图**不适用几何重绘**
   //     （图内是中文说明文字或分数数值表格；DSL 的 label 通道有意只放行数学符号，
   //      以免手写答案被当成题设文字画进图里）。命中就直接保留原图，且省下模型额度。
+  //     同理"多子图/多面板"（图1+图2、图甲+图乙、四选项函数图象）：DSL 只有一个画布，
+  //     重绘必然只画其中一个（实测 845802c9 只画了图1、图2 整块丢失）。
   const nonGeom = detectNonGeometryFigure(content)
   if (nonGeom.skip) {
     console.log(`   ⏭ [几何Worker] ${shortId}: ${nonGeom.reason} → 保留原图，不重绘`)
+    // ⚠️ 必须同时作废**历史上已发布**的干净图：判据是后来才加的，旧产物不会自己消失，
+    //    否则前端照旧显示那张（错的/残缺的）重绘图 —— 2026-09-21 第 90 题空框流程图即此因。
+    try {
+      await retractPublishedCleanFigure(asset.question_id, nonGeom.reason)
+    } catch (e) {
+      console.error(`   ⚠️ [几何Worker] ${shortId}: 作废旧重绘产物失败:`, e.message)
+    }
     await markNotReconstructable(asset, 'non_geometry_figure', nonGeom.kind)
     return false
   }
@@ -604,10 +613,58 @@ const NOT_RECONSTRUCTABLE = {
   no_figure: '图中无可重绘的几何结构（数轴/实物/统计图）',
   derived_deferred: '含派生点（垂足/中点/交点），求解器未能确定其位置，回退裁剪原图',
   content_mismatch: '重绘结构与题干引用不符（多画/漏画），回退裁剪原图',
-  non_geometry_figure: '图内是文字/数值（流程图、数值转换器、输入输出表格），不适用几何重绘，保留原图'
+  non_geometry_figure: '图内是文字/数值（流程图、数值转换器、输入输出表格）或多子图，不适用几何重绘，保留原卷裁片'
+}
+
+/**
+ * 作废**历史上已发布**的干净图产物，让前端彻底回退到原卷裁片。
+ *
+ * 为什么必须有这一步（2026-09-21 老师报障第 90 题）：判据是**后来才加的**，而已经上线的
+ * 重绘图不会自己消失。worker 这次判出「不该重绘」后只写了 tikz_status/last_error，
+ * `clean_geometry_svg` / `clean_geometry_image_url` 原样留着 ⇒ 前端（白板读
+ * `clean_geometry_image_url`、PC 复核页读 `clean_geometry_svg`）**照旧显示那张错的图**。
+ * 实测 `3f6abe05`：流程图框内的中文说明文字全被吃掉，线上只剩一个空框。
+ *
+ * ⚠️ 不能复用 `updateQuestionAssetCleanData` —— 它的 SQL 是 `COALESCE($2, col)`，
+ * 传 null 等于"不改"，清不掉。必须裸 SQL。
+ */
+async function retractPublishedCleanFigure(questionId, reason, label = NOT_RECONSTRUCTABLE.non_geometry_figure) {
+  if (!questionId) return
+  const detail = String(reason || '').replace(/\s+/g, ' ').slice(0, 200)
+  const relErr = `${label}（已作废旧重绘产物）: ${detail}`
+  await query(
+    `UPDATE ${TABLES.QUESTION_ASSETS}
+        SET clean_geometry_svg = NULL,
+            geometry_structure_json = NULL,
+            tikz_code = NULL,
+            tikz_json = NULL,
+            last_error = $2,
+            updated_at = NOW()
+      WHERE question_id = $1`,
+    [questionId, relErr]
+  )
+  await query(
+    `UPDATE ${TABLES.QUESTIONS}
+        SET clean_geometry_svg = NULL,
+            clean_geometry_image_url = NULL,
+            tikz_svg_url = NULL,
+            display_image_type = 'raw',
+            updated_at = NOW()
+      WHERE id = $1`,
+    [questionId]
+  )
 }
 
 async function markNotReconstructable(asset, reason, detail) {
+  // ⚠️ 2026-09-21 beda2c3d：结构闸拒稿时必须**同时作废历史上已发布的干净图**。
+  // 否则「这次重绘被闸门拒 + 旧的错图仍在线」并存 —— 前端（白板/复核页）读
+  // clean_geometry_image_url，老师看到的还是那张错图。与"不该重绘"路径
+  // （retractPublishedCleanFigure）是同一个道理；且重绘被重新触发通常意味着
+  // 裁片已刷新，旧产物本就过期。宁可回退展示原卷裁片，也不留错图。
+  if (asset?.question_id) {
+    const label = NOT_RECONSTRUCTABLE[reason] || reason
+    await retractPublishedCleanFigure(asset.question_id, detail, label)
+  }
   await updateGeometryReconstructionStatus(asset.id, {
     tikz_status: 'none',
     last_error: detail ? `${NOT_RECONSTRUCTABLE[reason] || reason}: ${detail}` : (NOT_RECONSTRUCTABLE[reason] || reason),

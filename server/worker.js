@@ -22,6 +22,8 @@ import { enhanceAndUploadFigure } from './services/figureEnhanceService.js'
 // cropAndUploadQuestionRegion 已于 2026-09-21 下线（整题裁片下线），不再 import。
 // 函数本体仍保留在 utils/cropAndUpload.js（历史调用方/脚本可能需要），本管线不再调用。
 import { refineFigureBoxOnPage } from './utils/figureRegionRefiner.js'
+// 几何配图「资产行 + 重绘入队」编排（两管线共享，2026-09-21 抽自 processTask 内联版）
+import { registerGeometryAssets, settleGeometryQueue } from './utils/geometryAssetQueue.js'
 import { generateTextFingerprint, generatePHash, PARSER_VERSION, TEXT_SIMILARITY_THRESHOLD } from './utils/questionFingerprint.js'
 import { uploadFilesWithRetry } from './services/uploadRetryManager.js'
 import { judgeAnswer, normalizeQuestionType, normalizeChoiceAnswer, extractChoiceLetters, isGradingCommentAnswer, stripAnswerScaffolding, detectUnverifiableReference, detectReferenceMismatch, UNJUDGED_REASONS } from './services/judgeService.js'
@@ -5510,6 +5512,69 @@ export const processWorkbookGrading = async (job) => {
     }
   }
 
+  // ── 几何配图「资产行 + 重绘入队」（2026-09-21 补，与 processTask 共用 utils/geometryAssetQueue.js）──
+  // 事故：本管线 2026-09-21 才补上配图裁剪，但**没补"建 question_assets 行"这一步** ——
+  // 而几何重绘的入口就是这些行（geometryWorker 的批量扫描与 pendingTaskRecovery 都只扫
+  // `asset_type='geometry_image' AND tikz_status='pending'`）⇒ 练习册的引图题**永远进不了重绘队列**，
+  // 前端只能显示带学生手写、带邻题文字的原始裁片。
+  // 实测（2026-09-21）：当日 27 张配图里 18 张无资产行，**全部来自练习册卷**（第04周 ×2 + 九上上海作业答案）。
+  // 老师原话「没有重绘过的课件，不是很标准」「什么时候会重绘？是时间没到吗」——
+  // **不是时间问题，是根本没入队。**
+  let workbookPendingGeometryAssets = []
+  try {
+    const reg = await registerGeometryAssets({
+      questions: questionsWithStudentId,
+      pageImageOf: (pageNumber) => (imageList.find(x => (x.page_number || 1) === (pageNumber || 1)) || {}).image_url || null,
+      fallbackImageUrl: imageList[0]?.image_url || null,
+      studentId,
+    })
+    workbookPendingGeometryAssets = reg.pending
+  } catch (e) {
+    console.warn(`   ⚠️ [Workbook] 几何资产登记失败（不阻断批改）: ${e.message}`)
+  }
+
+  // 判题至此已终定 → 只重绘**会进错题本的题**（判错/空答），其余降级 none。
+  // ⚠️ 降级不能省：`pending` 资产会被 pendingTaskRecovery 在 30 分钟后捞起重绘 ⇒ "判对的题也花钱"。
+  if (workbookPendingGeometryAssets.length > 0) {
+    const workbookWrongIds = new Set(wrongQuestions.map(q => q.id))
+    try {
+      const toRedraw = await settleGeometryQueue(
+        workbookPendingGeometryAssets,
+        (qid) => workbookWrongIds.has(qid),
+        async (assetIds) => {
+          await query(
+            `UPDATE ${TABLES.QUESTION_ASSETS} SET tikz_status = 'none', updated_at = NOW() WHERE id = ANY($1::uuid[])`,
+            [assetIds],
+          )
+        },
+      )
+      if (toRedraw.length > 0) {
+        try {
+          const { getGeometryQueue } = await import('./queue.js')
+          const geometryQueue = await getGeometryQueue()
+          if (!geometryQueue) {
+            console.warn(`   ⚠️ [几何重绘] 队列不可用，练习册 ${toRedraw.length} 个错题资产等恢复扫描兜底`)
+          } else {
+            let queued = 0
+            for (const assetId of toRedraw) {
+              try {
+                await geometryQueue.add('reconstruct', { assetId }, { attempts: 1 })
+                queued++
+              } catch (e) {
+                console.warn(`   ⚠️ [几何重绘] 入队失败 ${assetId}: ${e.message.slice(0, 80)}`)
+              }
+            }
+            console.log(`   ⚡ [几何重绘] 练习册错题即入队 ${queued}/${toRedraw.length} 个`)
+          }
+        } catch (e) {
+          console.warn(`   ⚠️ [几何重绘] 动态加载队列失败（${e.message.slice(0, 60)}），交恢复扫描兜底`)
+        }
+      }
+    } catch (e) {
+      console.warn(`   ⚠️ [Workbook] 重绘队列收口失败（不阻断批改）: ${e.message}`)
+    }
+  }
+
   // 置信度闸（与 addWrongQuestions 同口径，2026-09-11 补齐）：
   //   练习册自包含错题走 addSelfContainedWrongQuestion，而该函数**没有**置信度闸，
   //   于是 AI 低置信判错的练习册题会直接入册，与「低置信度一定不能入」冲突。
@@ -7117,95 +7182,17 @@ export const processTask = async (job) => {
       // ── 页面理解：将裁剪后的几何图保存到 question_assets（⚡ 并行化） ──
       // 待重绘的 pending 几何资产（{assetId, questionId}）：Step 6 收集，
       // 等 Step 7 判题终定后只对「判错/空答」入队（2026-09-20 P0）。
-      const pendingGeometryAssets = []
-      const geometryQuestions = questions.filter(q => q.geometry_image_url)
-      if (geometryQuestions.length > 0) {
-        const assetResults = await Promise.allSettled(geometryQuestions.map(async (q) => {
-          const imageType = q.image_type || 'geometry'
-          const imageBbox = q.image_bbox || (q.geometry_image?.bbox || null)
-          const sourcePage = pages.find(p => p.pageNumber === q.page_number)
-
-          // 入队前先过配图引用闸门。闸门不过的三种情形：
-          //   number_line      —— 数轴题，点线渲染器画出来是一条无意义线段
-          //   function_graph   —— 函数图象/抛物线题，点线渲染器画不出曲线
-          //   no_figure_reference —— 题干根本没提图，模型会照着题干文字编一张幻觉图
-          // 实测（2026-09-18）74 张入队资产仅 1 张成功，其中 62 张属前两类。
-          //
-          // 函数图象题先走**确定性通道**：抛物线表达式本来就写在题干里，
-          // 纯文本解析 + 服务端采样即可出图，零视觉调用。
-          //   出图   → tikz_status='completed'，SVG 当场入库，不入队；
-          //   出不了 → 'none'（开口/位置无法确定，或题干另有三角形/辅助线会画残缺），
-          //            前端回退裁剪原图，不入队、不重试、不报错。
-          let tikzStatus = imageType === 'geometry' ? 'pending' : 'none'
-          let tikzCode = null
-          let tikzJson = null
-          let assetError = null
-          if (tikzStatus === 'pending') {
-            const figureGate = checkFigureReference(q.content, q.parent_stem)
-            if (!figureGate.ok) {
-              let built = null
-              if (figureGate.reason === 'function_graph') {
-                try {
-                  built = buildFunctionGraphSvg(q.parent_stem, q.content, renderGeometrySvg)
-                } catch (e) {
-                  console.warn(`   ⚠️ [函数图象] 第 ${q.question_number} 题确定性渲染异常: ${e.message}`)
-                }
-              }
-              if (built) {
-                tikzStatus = 'completed'
-                tikzCode = built.svg
-                tikzJson = built.structure
-                // 反范式字段与 geometryWorker 成功路径保持一致，前端按 display_image_type 取图
-                await updateQuestionDenormalizedSvg(q.id, built.svg)
-                // 同步发布图片 URL：周末课件配图读的是 clean_geometry_image_url
-                // （lib/weekendHandout.js resolveFigure），只有 SVG 源码它读不到。
-                try {
-                  const pub = await publishCleanGeometryUrl({
-                    questionId: q.id,
-                    svg: built.svg,
-                    studentId
-                  })
-                  if (!pub.ok) {
-                    console.warn(`   [函数图象] 第 ${q.question_number} 题配图 URL 未发布（${pub.reason}），课件回退原题裁片`)
-                  }
-                } catch (e) {
-                  console.warn(`   [函数图象] 第 ${q.question_number} 题配图 URL 发布异常: ${e.message}`)
-                }
-                console.log(
-                  `   [函数图象] 第 ${q.question_number} 题走确定性通道出图（${built.spec.expression}${built.spec.approximate ? '，陡缓为示意' : ''}），零视觉调用`
-                )
-              } else {
-                tikzStatus = 'none'
-                assetError = FIGURE_GATE_MESSAGE[figureGate.reason] || figureGate.reason
-                console.log(
-                  `   [几何图] 第 ${q.question_number} 题不进重画队列（${figureGate.reason}），回退裁剪原图`
-                )
-              }
-            }
-          }
-
-          const created = await createQuestionAsset({
-            question_id: q.id,
-            asset_type: imageType === 'chart' ? 'chart_image' : 'geometry_image',
-            original_image_url: sourcePage?.imageUrl || imageUrl,
-            cropped_image_url: q.geometry_image_url,
-            bbox: imageBbox,
-            tikz_status: tikzStatus,
-            tikz_code: tikzCode,
-            tikz_json: tikzJson,
-            last_error: assetError
-          })
-          // 收集待重绘资产：只有真正需要 Vision 重画的（geometry + pending）才收集；
-          // 函数图象确定性通道（completed）与回退原图（none）不占用重绘队列。
-          // 是否真的入队由 Step 7 判题终定后决定（只重绘判错/空答，2026-09-20 P0）。
-          if (tikzStatus === 'pending' && created?.id) {
-            pendingGeometryAssets.push({ assetId: created.id, questionId: q.id })
-          }
-          return true
-        }))
-        const assetCount = assetResults.filter(r => r.status === 'fulfilled').length
-        console.log(`   ✅ [question_assets] 已保存 ${assetCount} 条资源记录（其中 geometry 类型标记为 tikz_status=pending）`)
-      }
+      // 编排已抽到 utils/geometryAssetQueue.js —— 与练习册管线 processWorkbookGrading 共用同一份实现。
+      // 抽出的动因（2026-09-21）：练习册管线补了配图裁剪却漏了"建 question_assets 行"，
+      // 于是它的引图题永远进不了重绘队列（几何重绘的唯一入口就是这些行）。算法抄两份必然漂移，
+      // 与 utils/geometryCrop.js 同一处理方式。
+      // 入队前先过配图引用闸门（数轴/函数图象/无引图 → 不入队），函数图象题走确定性通道当场出图。
+      const { pending: pendingGeometryAssets } = await registerGeometryAssets({
+        questions,
+        pageImageOf: (pageNumber) => pages.find(p => p.pageNumber === pageNumber)?.imageUrl || null,
+        fallbackImageUrl: imageUrl,
+        studentId,
+      })
 
       // ── 几何图重建 → 后台异步任务 ──
       // 上面 Step 6 只收集 pending 资产、不立即入队；Step 7 判题终定后
