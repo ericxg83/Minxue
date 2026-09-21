@@ -680,27 +680,64 @@ class PendingTaskRecovery {
       }
 
       // ── 2. 扫描超时的 pending 资产（30 分钟以上未处理） ──
+      // [2026-09-21 重复入队根治] 判据从 created_at 改为 updated_at：入队成功后刷新
+      // updated_at，形成「入队 → 30 分钟静默 → job 真丢了才重捞」的自愈节奏。
+      // 此前只看 created_at，资产停在 pending 期间每 5 分钟就重复 add 一轮
+      // （2026-09-21 实测：队列 260 个 job 里 243 个是重复），消费速度跟不上就雪崩式积压。
       const { rows: stalePending } = await query(
         `SELECT a.id, a.question_id, a.created_at
          FROM ${TABLES.QUESTION_ASSETS} a
          WHERE a.asset_type = 'geometry_image'
            AND a.tikz_status = 'pending'
-           AND a.created_at < NOW() - INTERVAL '30 minutes'
-         ORDER BY a.created_at ASC
+           AND a.updated_at < NOW() - INTERVAL '30 minutes'
+         ORDER BY a.updated_at ASC
          LIMIT 20`
       )
 
       if (stalePending.length > 0) {
-        console.log(`[PendingTaskRecovery] 📋 发现 ${stalePending.length} 个超时未处理的几何资产`)
+        // 入队前查重：waiting/active/delayed 里已有同 assetId 的 job 就跳过。
+        // 兜底扫描跑在 web 与 worker 两个进程里，仅靠 updated_at 防不住跨实例竞态。
+        const alreadyQueued = new Set()
+        for (const st of ['waiting', 'delayed', 'active']) {
+          try {
+            const queued = await geometryQueue.getJobs([st], 0, -1)
+            for (const j of queued) if (j?.data?.assetId) alreadyQueued.add(j.data.assetId)
+          } catch (err) {
+            console.warn(`[PendingTaskRecovery] ⚠️ 查重读取 ${st} 失败（按无重复处理）: ${err.message}`)
+          }
+        }
+        let skippedDup = 0
+        console.log(`[PendingTaskRecovery] 📋 发现 ${stalePending.length} 个超时未处理的几何资产（队列已有 ${alreadyQueued.size} 个 job）`)
         for (const asset of stalePending) {
           try {
+            if (alreadyQueued.has(asset.id)) {
+              skippedDup++
+              // 已在队列但资产仍 pending → 刷新 updated_at，重置 30 分钟静默窗
+              await query(
+                `UPDATE ${TABLES.QUESTION_ASSETS}
+                 SET updated_at = NOW()
+                 WHERE id = $1`,
+                [asset.id]
+              )
+              continue
+            }
             await geometryQueue.add('reconstruct', {
               assetId: asset.id
             }, { attempts: 1 })
+            // 入队成功 → 刷新 updated_at，开启下一轮 30 分钟静默窗
+            await query(
+              `UPDATE ${TABLES.QUESTION_ASSETS}
+               SET updated_at = NOW()
+               WHERE id = $1`,
+              [asset.id]
+            )
             console.log(`[PendingTaskRecovery] ✅ 重新入队: ${asset.question_id?.substring(0, 8)}`)
           } catch (err) {
             console.error(`[PendingTaskRecovery]  入队失败 ${asset.id?.substring(0, 8)}:`, err.message)
           }
+        }
+        if (skippedDup > 0) {
+          console.log(`[PendingTaskRecovery] ℹ️ ${skippedDup} 个资产已在队列，跳过重复入队`)
         }
       }
     } catch (err) {
@@ -742,6 +779,17 @@ class PendingTaskRecovery {
 
       let reEnqueued = 0
       let abandoned = 0
+      // [2026-09-21] 与 scanGeometryAssets 同口径：入队前查重，防 watchdog 与 5 分钟兜底
+      // 扫描对同一资产各塞一个 job（两个进程都在跑 recovery）
+      const alreadyQueued = new Set()
+      for (const st of ['waiting', 'delayed', 'active']) {
+        try {
+          const queued = await queue.getJobs([st], 0, -1)
+          for (const j of queued) if (j?.data?.assetId) alreadyQueued.add(j.data.assetId)
+        } catch (err) {
+          console.warn(`[PendingTaskRecovery] ⚠️ watchdog 查重读取 ${st} 失败: ${err.message}`)
+        }
+      }
       for (const a of rows) {
         const ageH = Math.round(a.age_sec / 3600)
         try {
@@ -757,6 +805,17 @@ class PendingTaskRecovery {
             )
             console.warn(`[PendingTaskRecovery] 🛑 24h watchdog 回退原图: ${a.question_id?.substring(0, 8)} (age=${ageH}h, retries=${a.retry_count})`)
             abandoned++
+          } else if (alreadyQueued.has(a.id)) {
+            // 已有 job 在队列 → 只把卡死的 processing 复位为 pending，不重复入队
+            if (a.tikz_status === 'processing') {
+              await query(
+                `UPDATE ${TABLES.QUESTION_ASSETS}
+                 SET tikz_status = 'pending', processed_at = NULL
+                 WHERE id = $1`,
+                [a.id]
+              )
+              console.warn(`[PendingTaskRecovery] ♻️ 24h watchdog 复位 pending（已在队列，不重复入队）: ${a.question_id?.substring(0, 8)}`)
+            }
           } else {
             // pending/processing 卡死 24h+:重置状态 + 重新入队
             await query(

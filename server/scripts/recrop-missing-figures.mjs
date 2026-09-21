@@ -27,6 +27,7 @@
  *   node scripts/recrop-missing-figures.mjs --limit 3    # 只处理前 N 条
  *   node scripts/recrop-missing-figures.mjs --task <前缀> # 只处理某个 task
  *   node scripts/recrop-missing-figures.mjs --all        # 不限「已入错题本」，扫全部符合条件的题
+ *   node scripts/recrop-missing-figures.mjs --force-id a,b # 定向补裁（绕过默认候选条件，仍不覆盖已有配图）
  *
  * 写入范围：仅 geometry_image_url / image_type / image_bbox 三列（展示用），可整列回滚。
  * --apply 完成后按动态口径回填 is_complete（引图判据含 parent_stem，见 utils/questionCompleteness.js）。
@@ -52,6 +53,11 @@ const TASK = argOf('--task')
 const GRADE = argOf('--grade')
 // --skip-id a,b：跳过指定 question id 前缀（例如模型给出的框两次不一致、页上多图易混的题）
 const SKIP = (argOf('--skip-id') || '').split(',').map(x => x.trim()).filter(Boolean)
+// --force-id a,b：定向补裁指定 question id 前缀，绕过默认候选三条件
+// （geometry_image_url IS NULL + image_type IS NULL + 题干关键词）。用于「模型判了
+// image_type=geometry 但管线没产出裁片」（如 2026-09-21 练习册旧 prompt 批次）的题。
+// 仍保留 deleted_at IS NULL 与 geometry_image_url IS NULL（绝不覆盖已有配图）。
+const FORCE = (argOf('--force-id') || '').split(',').map(x => x.trim()).filter(Boolean)
 
 const PROMPT = `你是作业图片版面分析助手。用户会指定页码上的某一道题，请只做一件事：
 给出**这道题的配图（图形本身）**在这张作业图上的外接矩形。
@@ -74,10 +80,13 @@ const pool = new pg.Pool({ connectionString: process.env.NEON_DATABASE_URL, ssl:
 const params = []
 // 引图判据与 utils/questionCompleteness.js 的 FIGURE_KEYWORDS 同源（含 parent_stem），
 // 不能用只匹配「如图」的 LIKE：完整性闸认的是 /如图|图1|图示|附图|见图/，两边必须一致。
-let where = `WHERE q.geometry_image_url IS NULL
+let where = FORCE.length
+  ? `WHERE q.geometry_image_url IS NULL AND q.deleted_at IS NULL`
+  : `WHERE q.geometry_image_url IS NULL
     AND q.image_type IS NULL
     AND (COALESCE(q.parent_stem,'') || COALESCE(q.content,'')) ~ '如图|图1|图示|附图|见图'
     AND q.deleted_at IS NULL`
+if (FORCE.length) { params.push(FORCE.map(x => x + '%')); where += `\n    AND (q.id::text LIKE ANY($${params.length}))` }
 if (TASK) { params.push(TASK + '%'); where += `\n    AND q.task_id::text LIKE $${params.length}` }
 if (GRADE) { params.push(String(GRADE)); where += `\n    AND s.grade = $${params.length}` }
 
