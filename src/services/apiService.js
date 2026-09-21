@@ -501,7 +501,10 @@ export const getWrongQuestionsByStudent = async (studentId, useCache = true) => 
     const dbQuestion = questionsMap[wq.question_id] || {}
 
     // 自包含字段优先：wrong_questions 自身字段覆盖 questions 表字段
-    const hasSelfContained = wq.content || wq.question_image_url || wq.correct_answer
+    // [2026-09-21 整题裁片下线] 这里原先把 wq.question_image_url（学生卷面上按 block_coordinates
+    // 裁的整题裁片 = 配图 B）当作题目图下发。B 已在写入侧下线，错题本题图统一走题目自身字段：
+    // geometry_image_url（配图 A）/ image_url。留痕要看整页原图走 full_image_url。
+    const hasSelfContained = wq.content || wq.correct_answer || wq.student_answer
     if (hasSelfContained || !dbQuestion.id) {
       return {
         ...wq,
@@ -509,7 +512,7 @@ export const getWrongQuestionsByStudent = async (studentId, useCache = true) => 
           id: dbQuestion.id || wq.id,
           content: wq.content || dbQuestion.content || null,
           subject: wq.subject || dbQuestion.subject || null,
-          image_url: wq.question_image_url || dbQuestion.image_url || null,
+          image_url: dbQuestion.geometry_image_url || dbQuestion.image_url || null,
           // 整页原图（一定包含本题），供错题详情“查看原图”兜底使用
           full_image_url: dbQuestion.image_url || wq.page_image_url || null,
           answer: wq.correct_answer || dbQuestion.answer || null,

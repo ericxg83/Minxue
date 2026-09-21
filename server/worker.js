@@ -14,7 +14,8 @@ import { AI_CONFIG, getAIHeaders, buildOCRPrompt, buildAnswerGenerationPrompt, g
 import { updateTaskStatus, createQuestions, batchUpdateQuestionTags, addWrongQuestions, createJudgement, updateQuestionAnswer, markAnswerException, markAiAnswerRisk, findCachedQuestionByFingerprint, cacheQuestion, incrementQuestionUseCount, updateQuestionCacheId, createQuestionAsset, updateQuestionDenormalizedSvg, lookupWorksheetAnswer, getWorksheetAnswersBySection, deleteQuestionsByTaskId, bulkLookupResourceAnswers, getResourceAnswersBySection, getResourceById, addSelfContainedWrongQuestion } from './services/neonService.js'
 import { uploadImage } from './services/ossService.js'
 import { enhanceAndUploadFigure } from './services/figureEnhanceService.js'
-import { cropAndUploadQuestionRegion } from './utils/cropAndUpload.js'
+// cropAndUploadQuestionRegion 已于 2026-09-21 下线（整题裁片下线），不再 import。
+// 函数本体仍保留在 utils/cropAndUpload.js（历史调用方/脚本可能需要），本管线不再调用。
 import { refineFigureBoxOnPage } from './utils/figureRegionRefiner.js'
 import { generateTextFingerprint, generatePHash, PARSER_VERSION, TEXT_SIMILARITY_THRESHOLD } from './utils/questionFingerprint.js'
 import { uploadFilesWithRetry } from './services/uploadRetryManager.js'
@@ -96,7 +97,13 @@ import { computeTaskStats } from './utils/taskStats.js'
 // 卷面标题 → 任务名的唯一口径（校名页眉剥离）。详见 utils/taskTitle.js 头注释。
 import { deriveTaskTitle, isAutoTaskName } from './utils/taskTitle.js'
 import { rationalizeAnswer } from './utils/radicalSimplify.js'
-import { resolveEffectiveQuestionType, hasFigureReference, checkQuestionCompleteness, COMPLETENESS_CODES } from './utils/questionCompleteness.js'
+import { resolveEffectiveQuestionType, hasFigureReference, checkQuestionCompleteness } from './utils/questionCompleteness.js'
+// 配图裁剪编排 + 配图框归属判据（2026-09-21 从本文件抽出，与练习册管线共用同一份实现）。
+// 详见 utils/geometryCrop.js / utils/figureBoxTrust.js 头部注释。
+import { cropGeometryFigures } from './utils/geometryCrop.js'
+// is_complete 反范式列回写：入册前必须把缓存列对齐到 checkQuestionCompleteness 的动态真值。
+// 练习册自包含错题走 addSelfContainedWrongQuestion（无此逻辑），故在此显式调用。
+import { syncQuestionCompleteness } from './services/questionCompletenessSync.js'
 // 几何重画入队闸门：数轴 / 函数图象题渲染器画不出来，题干没提图的题会诱发幻觉图。
 // 判据只此一处（server/utils/geometryFigureGate.js），不要在 worker 里另写一份正则。
 import { checkFigureReference, FIGURE_GATE_MESSAGE } from './utils/geometryFigureGate.js'
@@ -549,156 +556,15 @@ export function normalizeBlockBoxSemantics(questions) {
 }
 
 /**
- * 配图框体检：AI 没真正定位到配图时，会拿题目框机械推一个「题干下方的一条」交差。
- * 这种框裁出来是纯文字（题干续行 / 选项行），当配图展示等于把错东西端给用户看，
- * 宁可不显示配图。判据只看归一化 0-1000 坐标，零成本、无需下载原图。
+ * 配图框归属判据（isDegenerateFigureBox / clampImageBboxToBlock / inheritSharedStemFigures）
+ * 已于 2026-09-21 抽到 `server/utils/figureBoxTrust.js`，供日常管线与练习册管线共用。
  *
- * 线上实例（「复习七 三角形(2)」第 1 页 9 道题，配图集中排成两行、图下标注"第N题图"）：
- *   #2 block{x:150,y:240,w:700,h:70} → image_bbox{x:150,y:280,w:700,h:30}
- *   #9 block{x:150,y:750,w:700,h:40} → image_bbox{x:150,y:790,w:700,h:40}
- * 9 个配图框的左边界和宽度全部与题目框一字不差、且都压在题目框里或紧贴其下方——
- * 这是从 block 算出来的，不是看着图框出来的。真正定位到的配图框不会有这种巧合
- * （同任务第 2 页三道题的配图框 x 都与 block 相差数百）。
- *
- * 刻意不拿「宽高比过大」当判据：数轴、长条示意图这类合法配图本就极扁，会被连带误杀。
+ * 抽出的动因：练习册批改管线本次补齐配图能力，需要跑**同一套**判据。
+ * 算法抄两份必然漂移（本仓已有 parseBbox 抄三份的前车之鉴）。
+ * 此处 re-export 仅维持既有 `import { x } from './worker.js'` 调用方不破。
  */
-export function isDegenerateFigureBox(box, blockBox) {
-  if (!box || typeof box !== 'object') return true
-  const x = Number(box.x), y = Number(box.y)
-  const w = Number(box.width), h = Number(box.height)
-  if (![x, y, w, h].every(Number.isFinite)) return true
-  // 任一边不足页面 2.5%：几何图不可能这么小，属退化框
-  if (w < 25 || h < 25) return true
-
-  if (blockBox && typeof blockBox === 'object') {
-    const bx = Number(blockBox.x), by = Number(blockBox.y)
-    const bw = Number(blockBox.width), bh = Number(blockBox.height)
-    if ([bx, by, bw, bh].every(Number.isFinite) && bw > 0 && bh > 0
-      && Math.abs(x - bx) <= 2 && Math.abs(w - bw) <= 2 && y >= by - 2) {
-      return true
-    }
-  }
-  return false
-}
-
-/**
- * 子题共享母题配图（2026-09-17）
- *
- * 背景：多小问大题被拆行落库后，「如图」只存在于 `parent_stem`，模型常常只把
- * `image_type` / `image_bbox` 挂在其中一个小问上、甚至整组都不给。漏给的小问于是
- * 既没有裁图，完整性闸又按 `parent_stem + content` 判它引图 → 题被判不完整、错题本
- * 与周末课件都拿不到图（2026-09-17 周末班课件第12题：两个小问 content 无引图词、
- * geometry_image_url 全空，公共题干含「如图」）。
- *
- * 处理：按 `(页码, 公共题干原文)` 分组，组内任一题拿到框，其余「引图且自身无框」的小问
- * 共享同一框。后续裁剪走 geometryImageCache（key = 页码 + 框），天然复用同一张 OSS 图，
- * 不会重复上传，也不会把图挂到不相关的题上。
- *
- * 严格限定「同页 + 公共题干逐字相同」，绝不跨题组或跨页继承。
- * 原地修改传入的题目对象，返回被继承的题目列表（供日志/断言）。
- *
- * @param {Array<Object>} questions 同一 task 本次 OCR 出的全部题目
- * @param {number} [fallbackPageNumber=1] 题目缺 page_number 时的兜底页码
- * @returns {Array<Object>} 实际发生继承的题目
- */
-export function inheritSharedStemFigures(questions, fallbackPageNumber = 1) {
-  const list = Array.isArray(questions) ? questions : []
-  const inherited = []
-
-  const groups = new Map()
-  for (const q of list) {
-    const stem = String(q?.parent_stem || '').trim()
-    if (!stem) continue
-    const key = `${q.page_number || fallbackPageNumber}|${stem}`
-    if (!groups.has(key)) groups.set(key, [])
-    groups.get(key).push(q)
-  }
-
-  for (const group of groups.values()) {
-    if (group.length < 2) continue
-    const donor = group.find(g => {
-      const bbox = g.image_bbox || g.geometry_image?.bbox || null
-      const itype = g.image_type || (g.geometry_image?.has_image ? 'geometry' : null)
-      return bbox && itype && itype !== 'none'
-    })
-    if (!donor) continue
-    const donorBbox = donor.image_bbox || donor.geometry_image?.bbox
-    const donorType = donor.image_type && donor.image_type !== 'none' ? donor.image_type : 'geometry'
-    for (const q of group) {
-      if (q === donor) continue
-      if (!hasFigureReference(q)) continue
-      if (q.image_bbox || q.geometry_image?.bbox) continue
-      q.image_bbox = donorBbox
-      q.image_type = donorType
-      if (!q.geometry_image && donor.geometry_image) q.geometry_image = donor.geometry_image
-      inherited.push(q)
-    }
-  }
-
-  return inherited
-}
-
-/**
- * 配图 bbox 收紧：只在框大得异常时用本题 block_coordinates 兜边界。
- *
- * 早先这里是无条件与 block 求交集，代价太大：
- *  - 「多题配图集中排成一行」的版式（图下标注"第N题图"）里，配图本就落在题目
- *    block 之外，甚至比题干起始位置更靠上（右上角配图）。无条件求交会把配图切掉
- *    大半，或交集为空。
- *  - 交集为空时旧代码退回 block 自身范围，而 block 是题干文字区——等于把选项文字
- *    裁出来当「配图」展示，比不给配图更误导人。
- * 角点形态修正（normalizeBlockBoxSemantics）落地后，"配图框纵向跨到下一题"的主因
- * 已经消失，所以这里只保留对超大框的兜底。
- *
- * @param {Object} imageBbox - 配图 bbox（归一化 0-1000）
- * @param {Object|null} blockBox - 本题 block_coordinates（归一化 0-1000）
- * @returns {Object|null} 收紧后的 bbox；无法定位配图时返回 null
- */
-export function clampImageBboxToBlock(imageBbox, blockBox) {
-  if (!imageBbox || typeof imageBbox !== 'object') return null
-
-  const num = (v, d = 0) => (typeof v === 'number' && isFinite(v) ? v : d)
-
-  const ix = num(imageBbox.x)
-  const iy = num(imageBbox.y)
-  const iw = num(imageBbox.width)
-  const ih = num(imageBbox.height)
-  if (iw <= 0 || ih <= 0) return null
-
-  // 只有明显失控的框才需要 block 兜边界：纵向过半页，或面积超过页面 40%
-  const oversized = ih > 500 || iw * ih > 400000
-  if (!oversized || !blockBox || typeof blockBox !== 'object') return { ...imageBbox }
-
-  const bx = num(blockBox.x)
-  const by = num(blockBox.y)
-  const bw = num(blockBox.width)
-  const bh = num(blockBox.height)
-  if (bw <= 0 || bh <= 0) return { ...imageBbox }
-
-  // 与本题 block 求交集（block 略放宽，避免把贴边的顶点字母裁掉）
-  const pad = 10 // 归一化 0-1000 下约 1%
-  const left = Math.max(ix, bx - pad)
-  const top = Math.max(iy, by - pad)
-  const right = Math.min(ix + iw, bx + bw + pad)
-  const bottom = Math.min(iy + ih, by + bh + pad)
-
-  // 交集无效说明 AI 的框和本题完全对不上 → 判为未定位到配图，绝不退回 block 自身
-  if (right - left <= 0 || bottom - top <= 0) return null
-
-  const clamp01000 = (v) => Math.max(0, Math.min(1000, Math.round(v)))
-  const result = {
-    ...imageBbox,
-    x: clamp01000(left),
-    y: clamp01000(top),
-    width: clamp01000(right - left),
-    height: clamp01000(bottom - top),
-  }
-
-  if (result.x !== ix || result.y !== iy || result.width !== iw || result.height !== ih) {
-    console.log(`   [几何图] 超大 bbox 按题目框收紧: ${JSON.stringify({ x: ix, y: iy, width: iw, height: ih })} → ${JSON.stringify({ x: result.x, y: result.y, width: result.width, height: result.height })}`)
-  }
-  return result
-}
+export { isDegenerateFigureBox, clampImageBboxToBlock, inheritSharedStemFigures } from './utils/figureBoxTrust.js'
+export { cropGeometryFigures } from './utils/geometryCrop.js'
 
 // AI 密钥校验
 const AI_KEY = AI_CONFIG.API_KEY
@@ -4549,7 +4415,10 @@ export const processWorkbookGrading = async (job) => {
       "options": ["选项A的正文", "选项B的正文", "选项C的正文", "选项D的正文"],
       "student_answer": "学生手写的答案文本，没有则填 null",
       "question_type": "choice",  // choice | fill | judge | answer
-      "block_coordinates": { "x": 120, "y": 300, "width": 760, "height": 90 }
+      "block_coordinates": { "x": 120, "y": 300, "width": 760, "height": 90 },
+      "image_type": "geometry/chart/none",
+      "image_bbox": null,  // 有配图时填 { "x": 640, "y": 180, "width": 200, "height": 130 }（只框图形本身）
+      "has_figure": false  // true=本题有配图并对图形本身给出了 image_bbox
     }
   ]
 }
@@ -4592,6 +4461,26 @@ export const processWorkbookGrading = async (job) => {
   计算题可写"(1) √12 × √(1/3)"；填空题可写"某数..."。
   它的作用是：后端会用 content 里的关键数学符号（√、根号等）反推章节归属。
   content 缺失会导致章节无法反推。
+
+- 配图字段（image_type / image_bbox / has_figure）必须填（2026-09-21 补，与日常批改管线同口径）：
+  ⚠️ 2026-09-20 事故：本 prompt 原先没有配图字段，全卷「如图」的几何题配图从未被采集，
+  落库后 geometry_image_url 全空 → 错题本/周末课件题单/讲题白板里的几何题没有图，
+  学生在白板上看到的是一道没有图形的几何证明题。**引图题漏填 image_bbox 等同于这道题不可用。**
+  · image_type：图形类别，"geometry"（几何图/示意图）| "chart"（函数图/统计图表）| "none"（无配图）。
+  · image_bbox：**配图本身**的外接矩形（0-1000 归一化，与 block_coordinates 同一坐标系）；
+    只框图形（几何图、函数图、统计图表、示意图），不要把题干文字、选项文字、答题横线框进去。
+    没有配图时填 null。
+  · has_figure：本题是否有配图并给出了 image_bbox（true/false）。
+  · ⚠️ 常见排版陷阱：很多试卷把好几道题的配图集中排成一行，图的正下方标注"第1题图"
+    "第2题图"…，而不是把图放在各自题目的正下方。遇到这种排版，必须按下方标注找到
+    属于本题的那一格图，只框那一格（例如第2题就框标注"第2题图"的那一张），
+    绝不能框题干下面的那条文字，也不要把整行图全框进来。
+  · 如果确实找不到本题的配图，image_type 填 "none"、image_bbox 填 null、has_figure 填 false，
+    **不要用题干区域的坐标凑一个框**——凑出来的框裁出的是文字，会被当成配图展示给学生。
+  · ⚠️ 多小问大题（拆成多行输出、公共题干写在 parent_stem）：如果图形出现在公共题干里
+    （公共题干含"如图/图1/图示/附图/见图"），那么**拆出来的每一个小问都必须返回同一个
+    image_type 与 image_bbox**（同一个图形，坐标逐字相同），不能只在其中一个小问上返回、
+    也不能都不返回。小问自己另配图时，才返回它自己的框。
 
 - options 必须填：**凡是卷面印了 A、B、C、D 选项的题，都要把选项完整填进 options**。
   ⚠️ 2026-09-18 事故：本 prompt 原先没有 options 字段，选择题的选项从未被采集，
@@ -4666,6 +4555,10 @@ export const processWorkbookGrading = async (job) => {
   let allPageTitles = []
   let pageDataList = []   // 逐页数据：{ pageTitle, imageUrl, questions[] }
   let ocrErrors = 0
+  // 页码 → 压缩后的页图 buffer（2026-09-21 补，几何配图裁剪按页取图）。
+  // 此前 compressedBuffer 是 for 循环内的局部变量、用完即弃，本管线没有任何页图留存，
+  // 所以即便 OCR 采到了 image_bbox 也无从裁剪。与 processTask 的 pageBuffers 同构。
+  const pageBuffers = new Map()
   // 记录最近一次 AI 原始响应（去空白/截断 200 字），0 道题 throw 时拼到 error message，
   // 让 NON_RETRYABLE_ERROR_PATTERNS 能匹配"图片是空白"等 AI 拒绝模板。
   let _lastOcrAiHint = null
@@ -4700,13 +4593,19 @@ export const processWorkbookGrading = async (job) => {
       .jpeg({ quality: 85 })
       .toBuffer()
 
+    // 留存本页压缩图，供后续几何配图裁剪按页取图（页码口径与题目一致：imageList 的 page_number）
+    pageBuffers.set(imageList[pageIdx].page_number || (pageIdx + 1), compressedBuffer)
+
     // OCR
     const { content } = await callVisionCompletion({
       imageDataURL: `data:image/jpeg;base64,${compressedBuffer.toString('base64')}`,
       systemPrompt: workbookPrompt,
       userText: '识别这张作业图片的页面标题和所有题目的学生答案。',
       temperature: 0.1,
-      maxTokens: 4096
+      maxTokens: 4096,
+      // 配图字段（image_type/image_bbox）是本次新增采集，弱备份模型不守 schema 会整列丢失
+      // → 配图全空、完整性闸又判缺图。与答案页 OCR 同口径锁主力模型。见 P0-3（2026-09-21）。
+      noBackup: true
     })
 
     if (!content) {
@@ -4871,6 +4770,9 @@ export const processWorkbookGrading = async (job) => {
           .resize(1800, 1800, { fit: 'inside' })
           .jpeg({ quality: 85 })
           .toBuffer()
+        // 与首轮同口径留存页图（重试成功会整体替换 allQuestions/pageDataList，
+        // 页图也必须跟着换，否则几何配图会按旧页图裁剪）。
+        pageBuffers.set(imageList[pageIdx].page_number || (pageIdx + 1), compressedBuffer)
         const { content } = await callVisionCompletion({
           imageDataURL: `data:image/jpeg;base64,${compressedBuffer.toString('base64')}`,
           systemPrompt: workbookPrompt,
@@ -5334,6 +5236,38 @@ export const processWorkbookGrading = async (job) => {
   if (deletedOld > 0) {
     console.log(`   [Workbook] 幂等清理: 删除旧题目 ${deletedOld} 行 (taskId=${taskId})`)
   }
+  // ── 几何配图裁剪（2026-09-21 补，与日常管线 processTask 共用同一份实现）──
+  // 事故：本管线此前完全没有配图采集与裁剪 → questions.geometry_image_url 恒为空 →
+  //   ① 错题本完整性闸（checkQuestionCompleteness 规则1）判「题干引图但缺配图」，
+  //      所以历史上不敢开这道闸（一开就把引图题全挡在错题本外）；
+  //   ② 周末课件题单/讲题白板里的几何题没有图，老师对着一道没有图形的证明题讲不了。
+  // 编排逻辑在 utils/geometryCrop.js，与 processTask 同源同判据。
+  const workbookPageDims = new Map() // pageNumber → {w, h}
+  for (const [pageNo, buf] of pageBuffers) {
+    try {
+      const _meta = await sharp(buf).metadata()
+      workbookPageDims.set(pageNo, { w: _meta.width, h: _meta.height })
+    } catch (e) {
+      console.warn(`   ⚠️ [坐标] 读取第 ${pageNo} 页压缩图尺寸失败: ${e.message}`)
+    }
+  }
+  let workbookFigureMissingRefs = 0
+  try {
+    const cropResult = await cropGeometryFigures({
+      questions: allQuestions,
+      pageBuffers,
+      pageDims: workbookPageDims,
+      cropImage: cropAndUploadGeometryImage,
+      studentId,
+      fallbackBuffer: pageBuffers.values().next().value || null,
+      fallbackPage: imageList[0]?.page_number || 1
+    })
+    workbookFigureMissingRefs = cropResult.missingRefs
+  } catch (e) {
+    // 配图裁剪失败绝不能阻断批改主流程：题照常落库，配图留空由老师复核补。
+    console.warn(`   ⚠️ [Workbook] 几何配图裁剪整体失败（题照常落库，配图留空）: ${e.message}`)
+  }
+
   const questionsWithStudentId = allQuestions.map(q => ({
     ...q,
     id: crypto.randomUUID(),
@@ -5344,7 +5278,9 @@ export const processWorkbookGrading = async (job) => {
     analysis: coerceAIText(q.analysis),
     student_answer: coerceAIText(q.student_answer) || null,
     ai_answer: null,
-    is_complete: true,
+    // is_complete 不在此硬编码：createQuestions 会用 checkQuestionCompleteness(q) 的
+    // 动态真值覆写（这是「唯一判据」，落库列只是它的反范式缓存）。
+    // 原先写的 `true` 会让建题瞬间与真值不符，且掩盖缺项；改为交给 createQuestions 统一算。
     confidence: q.is_correct !== null ? 0.95 : null,
     question_type: q.question_type || 'choice',
     image_url: q._page_image_url || imageList[0]?.image_url || '',
@@ -5354,6 +5290,12 @@ export const processWorkbookGrading = async (job) => {
     // 「text_bbox ∪ image_bbox 优先」路径拿到的还是同一个占位框）；OCR 没量文字框就留空。
     block_coordinates: q.block_coordinates || null,
     text_bbox: q.text_bbox || null,
+    // 配图元素（2026-09-21 补，与日常管线 processTask 同口径）：
+    // 练习册此前完全不映射这三列 → geometry_image_url 永远为空 →
+    // 引图题在错题本/周末课件/讲题白板里没有图，且完整性闸不敢开（一开就全挡）。
+    // 字段名与 image_type 取值必须与 server/config/ai.js buildOCRPrompt 逐字一致。
+    image_type: q.image_type || null,
+    image_bbox: q.image_bbox || null,
     source_type: 'workbook',
     // workbook 学科由练习册资源决定，不能依赖 OCR 或客户端是否传 subject。
     subject: workbookSubject || q.subject || null
@@ -5402,30 +5344,47 @@ export const processWorkbookGrading = async (job) => {
   // 直接基于 questionsWithStudentId 过滤（自带 id），确保 question_id 一定与
   // 已落库的题目行一致；不再用"题号 → question_id"映射，避免多页同题号/跨 section
   // 同题号覆盖导致 question_id 指向错误的题目甚至 NULL。
-  // ── 完整性闸（2026-09-18 补）──
-  // 练习册自包含错题此前只判「判错/未作答 + 有题号」，**不过 checkQuestionCompleteness**，
-  // 于是残题照样入册 → 经错题本流进周末课件题单/讲题白板。实测：89 道 options=[] 的选择题里
-  // 15 道就是这么进来的（老师看到的只有「题干 + 参考答案 D」，无从得知少了 A/B/C/D）。
+  // ── 完整性闸（2026-09-21 对齐日常管线口径）──
   //
-  // ⚠️ 只拦 missing_options 这一条，另外两条规则在本管线**不成立**，拦了就是误伤：
-  //   · missing_figure：本管线（processWorkbookGrading）**从不产出 geometry_image_url**，
-  //     配图靠 wrong_questions.question_image_url（原题裁片）兜底，白板据此回退显示原卷。
-  //     直接跑全量判据会把 205 道引图题全部挡在错题本外（实测 workbook 417 题里 205 题引图）。
-  //   · missing_answer：answer_source === 'blank'（学生未作答）**本身就是入册条件之一**，
-  //     这类题按设计就没有参考答案，拦它等于把「未作答」这条业务线整条掐掉。
-  //   而缺选项没有任何补救路径 —— 编辑页的选项区块只在 choice 下渲染，老师想补也补不了，
-  //   所以必须在入册这一步拦下。
+  // 口径契约：**两管线必须完全一致，不得为练习册另写豁免规则**（用户 2026-09-21 拍定：
+  //   「一切都和日常管线走一样的路线，减少操作者老师的学习成本」）。
+  //
+  // 历史取舍（2026-09-18 只拦 missing_options）已被撤销。它的两条理由在配图能力补齐后：
+  //   · 「missing_figure 会把 205 道引图题全挡掉」→ **不再成立**。本管线本次已补齐
+  //     geometry_image_url 采集（见上方 [几何配图裁剪] 段），引图题不再是「缺图」；
+  //     真缺图的题本期就该拦（第04周 11 道引图缺图题实测「应拦未拦」）。
+  //   · 「missing_answer 会掐掉未作答业务线」→ **日常管线本来就豁免它**，豁免点不在闸里，
+  //     而在**候选筛选**：answer_source='blank' 是入册条件之一，且这类题按设计没有
+  //     参考答案。日常管线的做法是 —— 候选筛选只认 (判错 || 未作答)，闸跑全量判据。
+  //     但因为「无参考答案时批改流程根本不会尝试入册」，missing_answer 天然进不了候选。
+  //     本管线照抄同一结构即可，**不需要为练习册单独写一条豁免规则**。
+  //
+  // 入册前还必须调 syncQuestionCompleteness 把 questions.is_complete 反范式列对齐到
+  // 动态真值 —— 否则「写入成功但错题列表看不见」（GET 按 q.is_complete = TRUE 过滤，
+  // 2026-09-11 实测 396 条入册记录隐藏 112 条）。这一点与 addWrongQuestions 同源。
   let workbookSkippedIncomplete = 0
+  const incompleteSkipReasons = {}
   const wrongQuestions = questionsWithStudentId.filter(q => {
     if (!((q.is_correct === false || q.answer_source === 'blank') && q.question_number)) return false
-    const { codes } = checkQuestionCompleteness(q)
-    if (codes.includes(COMPLETENESS_CODES.missing_options)) {
+    const { isComplete, codes } = checkQuestionCompleteness(q)
+    if (!isComplete) {
       workbookSkippedIncomplete++
-      console.log(`   [Workbook] 完整性闸拦下（选择题缺选项，编辑页无补救路径）: question_no=${q.question_number}`)
+      const label = codes.join(',') || 'unknown'
+      incompleteSkipReasons[label] = (incompleteSkipReasons[label] || 0) + 1
+      console.log(`   [Workbook] 完整性闸拦下: question_no=${q.question_number} 缺项=${codes.join('/')}`)
       return false
     }
     return true
   })
+  // 入册前对齐 is_complete 缓存列（与 addWrongQuestions 内部同源）。
+  // 必须在写 wrong_questions 之前完成，否则入册后立刻回拉错题列表会漏掉刚加的题。
+  if (wrongQuestions.length > 0) {
+    try {
+      await syncQuestionCompleteness(wrongQuestions.map(q => q.id))
+    } catch (e) {
+      console.warn(`   ⚠️ [Workbook] is_complete 对齐失败（不阻断入册）: ${e.message}`)
+    }
+  }
 
   // 置信度闸（与 addWrongQuestions 同口径，2026-09-11 补齐）：
   //   练习册自包含错题走 addSelfContainedWrongQuestion，而该函数**没有**置信度闸，
@@ -5443,23 +5402,25 @@ export const processWorkbookGrading = async (job) => {
       console.log(`   [Workbook] 低置信度错题已排除: question_no=${wq.question_number} conf=${wq.confidence} (阈值 ${workbookConfidenceThreshold})`)
       continue
     }
-    const pageImageUrl = wq.image_url || imageList[0]?.image_url
-    let questionImageUrl = null
+    // ── 整题裁片（wrong_questions.question_image_url）已下线（2026-09-21）──
+    //
+    // 用户口径：「我不管是日常作业还是练习册管线，我最终都是把题目结构化了。
+    //   我的错题本都是结构化存到库里的。我如果要留痕的话，我只需要原始图片就可以了，
+    //   而不是这道题的裁片。」
+    //
+    // 事实依据：
+    //   · 本管线是 question_image_url 的**全仓唯一写入点**（日常管线不产它）；
+    //   · 它按 block_coordinates 裁，而 block 是「均分占位」偏多 → 裁片系统性带上下邻题
+    //     （第04周 p2 实测五张截图全部是「上半本题 + 下半下一题题号」）；
+    //   · 消费方（周末课件题单 / 讲题白板）本就是**配图优先**（figure 先用
+    //     clean_geometry_image_url / geometry_image_url），裁片只作回退，配图补齐后无消费方；
+    //   · 留痕走整页原图（tasks.images + docImage），整页图永远正确，比错位裁片有用得多。
+    //
+    // 因此这里不再裁剪、不再写 question_image_url。存量行不删（无消费方，自然失效）。
+    // 也正因此，不必再给写入侧补 blockBoxTrust 的第二三道闸 —— 那是给裁片修的护栏。
+    const questionImageUrl = null
 
-    if (pageImageUrl && wq.block_coordinates) {
-      try {
-        questionImageUrl = await cropAndUploadQuestionRegion(
-          pageImageUrl,
-          wq.block_coordinates,
-          studentId,
-          crypto.randomUUID()
-        )
-      } catch (e) {
-        console.warn(`  ⚠️ [Workbook] 错题裁剪失败: question_no=${wq.question_number}, error=${e.message}`)
-      }
-    }
-
-    // 逐题独立 try/catch：单题写入异常（裁剪/写库抖动）不得中断其余错题的入册。
+    // 逐题独立 try/catch：单题写入异常（写库抖动）不得中断其余错题的入册。
     // 练习册错题按「题」定位（2026-09-16 跨卷串行根治）：questionId=wq.id 恒有 →
     // 冲突目标 (student_id, question_id)，跨卷同题号不再共用一行；
     // 无 questionId 的真自包含错题才退 (student_id, worksheet_id, question_no)。
@@ -5494,7 +5455,7 @@ export const processWorkbookGrading = async (job) => {
   if (wrongQuestions.length > 0 || workbookSkippedIncomplete > 0) {
     const skipNote = [
       workbookSkippedLowConf > 0 ? `低置信度排除 ${workbookSkippedLowConf} 题` : '',
-      workbookSkippedIncomplete > 0 ? `完整性闸排除 ${workbookSkippedIncomplete} 题（选择题缺选项）` : '',
+      workbookSkippedIncomplete > 0 ? `完整性闸排除 ${workbookSkippedIncomplete} 题（${Object.entries(incompleteSkipReasons).map(([k, v]) => `${k}=${v}`).join(' ')}）` : '',
     ].filter(Boolean).join('，')
     console.log(`   [Workbook] 已添加 ${workbookAdded} 题到错题本（自包含）${skipNote ? '，' + skipNote : ''}`)
   }
@@ -5536,6 +5497,9 @@ export const processWorkbookGrading = async (job) => {
     duration: `${duration}s`,
     source: 'workbook',
     sectionMatch: sectionMatchInfo,
+    // 引图题最终没拿到配图的数量（与 processTask 同口径）：漏框 / 退化框 / 归属存疑被拦都计入。
+    // 前端据此提示「重新识别」，运维可据此按图索骥补图。
+    figureMissingRefs: workbookFigureMissingRefs > 0 ? workbookFigureMissingRefs : undefined,
     // 清除历史失败标记：updateTaskStatus 是 merge 语义，重跑成功时若不显式清除，
     // 上次失败的 error / errorType / failedAt 会残留在 result 里，前端据此误报失败。
     error: null,
@@ -5674,7 +5638,10 @@ const processAnswerBankGrading = async (job) => {
       "options": ["选项A的正文", "选项B的正文", "选项C的正文", "选项D的正文"],
       "student_answer": "学生手写的答案文本，没有则填 null",
       "question_type": "choice",  // choice | fill | judge | answer
-      "block_coordinates": { "x": 120, "y": 300, "width": 760, "height": 90 }
+      "block_coordinates": { "x": 120, "y": 300, "width": 760, "height": 90 },
+      "image_type": "geometry/chart/none",
+      "image_bbox": null,  // 有配图时填 { "x": 640, "y": 180, "width": 200, "height": 130 }（只框图形本身）
+      "has_figure": false  // true=本题有配图并对图形本身给出了 image_bbox
     }
   ]
 }
@@ -5701,6 +5668,26 @@ const processAnswerBankGrading = async (job) => {
   计算题可写"(1) √12 × √(1/3)"；填空题可写"某数..."。
   它的作用是：后端会用 content 里的关键数学符号（√、根号等）反推章节归属。
   content 缺失会导致章节无法反推。
+
+- 配图字段（image_type / image_bbox / has_figure）必须填（2026-09-21 补，与日常批改管线同口径）：
+  ⚠️ 2026-09-20 事故：本 prompt 原先没有配图字段，全卷「如图」的几何题配图从未被采集，
+  落库后 geometry_image_url 全空 → 错题本/周末课件题单/讲题白板里的几何题没有图，
+  学生在白板上看到的是一道没有图形的几何证明题。**引图题漏填 image_bbox 等同于这道题不可用。**
+  · image_type：图形类别，"geometry"（几何图/示意图）| "chart"（函数图/统计图表）| "none"（无配图）。
+  · image_bbox：**配图本身**的外接矩形（0-1000 归一化，与 block_coordinates 同一坐标系）；
+    只框图形（几何图、函数图、统计图表、示意图），不要把题干文字、选项文字、答题横线框进去。
+    没有配图时填 null。
+  · has_figure：本题是否有配图并给出了 image_bbox（true/false）。
+  · ⚠️ 常见排版陷阱：很多试卷把好几道题的配图集中排成一行，图的正下方标注"第1题图"
+    "第2题图"…，而不是把图放在各自题目的正下方。遇到这种排版，必须按下方标注找到
+    属于本题的那一格图，只框那一格（例如第2题就框标注"第2题图"的那一张），
+    绝不能框题干下面的那条文字，也不要把整行图全框进来。
+  · 如果确实找不到本题的配图，image_type 填 "none"、image_bbox 填 null、has_figure 填 false，
+    **不要用题干区域的坐标凑一个框**——凑出来的框裁出的是文字，会被当成配图展示给学生。
+  · ⚠️ 多小问大题（拆成多行输出、公共题干写在 parent_stem）：如果图形出现在公共题干里
+    （公共题干含"如图/图1/图示/附图/见图"），那么**拆出来的每一个小问都必须返回同一个
+    image_type 与 image_bbox**（同一个图形，坐标逐字相同），不能只在其中一个小问上返回、
+    也不能都不返回。小问自己另配图时，才返回它自己的框。
 
 - options 必须填：**凡是卷面印了 A、B、C、D 选项的题，都要把选项完整填进 options**。
   ⚠️ 2026-09-18 事故：本 prompt 原先没有 options 字段，选择题的选项从未被采集，
@@ -5799,7 +5786,10 @@ const processAnswerBankGrading = async (job) => {
             systemPrompt: answerBankPrompt,
             userText: '识别这张作业图片的页面标题和所有题目的学生答案。',
             temperature: 0.1,
-            maxTokens: 4096
+            maxTokens: 4096,
+            // 配图字段（image_type/image_bbox）是本次新增采集，弱备份模型不守 schema 会整列丢失
+            // → 配图全空、完整性闸又判缺图。与答案页 OCR 同口径锁主力模型。见 P0-3（2026-09-21）。
+            noBackup: true
           })
           content = result?.content
         } catch (e) {
@@ -6435,6 +6425,9 @@ const processAnswerBankGrading = async (job) => {
           block_coordinates: q.block_coordinates || null,
           // [2026-09-20] 不再写成 block_coordinates 的副本（见 processWorkbookGrading 同款改动）
           text_bbox: q.text_bbox || null,
+          // 配图元素（2026-09-21 补，与 processWorkbookGrading / processTask 同口径）
+          image_type: q.image_type || null,
+          image_bbox: q.image_bbox || null,
           // 单元匹配结果不写入 questions（表无对应列），仅在 judgement.metadata 记录
         }
 
@@ -6903,89 +6896,20 @@ export const processTask = async (job) => {
       }
 
       // ── 多模态切题：处理几何配图（⚡ 并行化） ─
-      const geometryImageCache = new Map() // 页码+bbox 去重缓存 (一图多题)
-
-      // ── 子题共享母题配图（2026-09-17） ──
-      // 多小问大题被拆行后，「如图」只存在于 parent_stem，模型常常只把 image_type/image_bbox
-      // 挂在其中一个小问上、甚至整组都不给；漏给的小问既没有裁图、完整性闸又按 parent_stem
-      // 判它引图（2026-09-17 周末班课件第12题）。判据与继承规则见 inheritSharedStemFigures。
-      for (const q of inheritSharedStemFigures(questions, pages[0].pageNumber)) {
-        console.log(`   [几何图] 第 ${q.question_number} 题${q.sub_no ? `(${q.sub_no})` : ''} 继承公共题干配图框 ${JSON.stringify(q.image_bbox)}`)
-      }
-
-      // 收集所有需要裁剪几何图的题目
-      const geometryTasks = questions
-        .filter(q => {
-          const hasImage = q.image_type && q.image_type !== 'none'
-          const hasLegacyImage = q.geometry_image?.has_image && q.geometry_image.bbox
-          const imageType = q.image_type || (hasLegacyImage ? 'geometry' : null)
-          if (!q.image_type && imageType) q.image_type = imageType
-          return hasImage || hasLegacyImage
-        })
-        .map(q => {
-          const imageBbox = q.image_bbox || (q.geometry_image?.bbox || null)
-          const imageType = q.image_type || 'geometry'
-          const bbox = imageBbox
-          if (!bbox) {
-            if (hasFigureReference(q)) {
-              console.log(`   ⚠️ [几何图] ${q.id}: 题干含"如图"关键词但未返回 bbox`)
-            }
-            return null
-          }
-          const pageNo = q.page_number || pages[0].pageNumber
-          const dims = pageDims.get(pageNo)
-          // ⛔ 不要再加「配图框必须与本题 block 纵向有交集」这类闸（2026-09-18 实测证伪）。
-          // 上海作业常把多道题的图集中排成一行、图下印「第N题图」，此时配图框必然落在
-          // **本题 block 上方**。实测（_diag_page_layout_truth.mjs + _diag_figure_label_check.mjs）：
-          //   2958a4e3 第4题 框 y273~413 vs block y490~590，纵向完全错开，但读图行标注确认
-          //   该框正落在「第4题图」那一格上 —— 完全正确。同类样本 2/2 均正确。
-          // 用「纵向错开」当判据会把正常排版全部误杀（实测假阳性率约 28%），比不拦更糟。
-          // 判断配图归属只能靠读图行标注（贵），不能靠坐标互比。
-          // 退化框（从题目框机械推出来的"题干下方一条"）裁出来是选项/题干文字，
-          // 当配图展示纯属误导 → 宁可不给配图
-          if (isDegenerateFigureBox(bbox, q.block_coordinates)) {
-            console.log(`   ⚠️ [几何图] 第 ${q.question_number} 题配图框未定位到图形(${JSON.stringify(bbox)})，跳过裁剪`)
-            return null
-          }
-          const safeBbox = clampImageBboxToBlock(bbox, q.block_coordinates)
-          if (!safeBbox) {
-            console.log(`   ⚠️ [几何图] 第 ${q.question_number} 题配图框与题目完全对不上(${JSON.stringify(bbox)})，跳过裁剪`)
-            return null
-          }
-          const pixelBbox = dims ? denormalizeBbox(safeBbox, dims.w, dims.h) : safeBbox
-          const cacheKey = `${pageNo}:${JSON.stringify(safeBbox)}`
-          return { q, safeBbox, pixelBbox, cacheKey, imageType, imageBbox, pageNo }
-        })
-        .filter(Boolean)
-
-      if (geometryTasks.length > 0) {
-        console.log(`   [几何图] ⚡ 并行裁剪 ${geometryTasks.length} 张配图...`)
-        await Promise.allSettled(geometryTasks.map(async ({ q, safeBbox, pixelBbox, cacheKey, pageNo }) => {
-          if (geometryImageCache.has(cacheKey)) {
-            q.geometry_image_url = geometryImageCache.get(cacheKey)
-          } else {
-            const pageBuffer = pageBuffers.get(pageNo) || compressedBuffer
-            q.geometry_image_url = await cropAndUploadGeometryImage(pageBuffer, pixelBbox, studentId, q.id)
-            if (q.geometry_image_url) {
-              geometryImageCache.set(cacheKey, q.geometry_image_url)
-            }
-          }
-        }))
-      }
-
-      // 兜底统计：引图题最终仍然没有配图 URL 的条数（漏框 / 退化框 / 收紧判非图形 都算）。
-      // 判据统一走 hasFigureReference（= parent_stem + content），不再手写「如图|图1|图示」——
-      // 多小问拆行后引图词常只存在于 parent_stem，只读 content 的判据会漏（2026-09-17 周末班第12题）。
-      // 这是 figureMissingRefs 的**唯一**计数点，Step 6 过滤阶段不重复计数。
-      for (const q of questions) {
-        if (q.geometry_image_url) continue
-        if (!hasFigureReference(q)) continue
-        console.log(`   ⚠️ [几何图] 第 ${q.question_number} 题${q.sub_no ? `(${q.sub_no})` : ''}: 引图但最终无配图 (${q.id})`)
-        figureMissingRefs += 1
-      }
-      if (figureMissingRefs > 0) {
-        console.warn(`   ⚠️ [几何图] 本次批改有 ${figureMissingRefs} 道引图题没拿到配图（已记入任务结果 figureMissingRefs）`)
-      }
+      // 编排逻辑已抽到 utils/geometryCrop.js，与练习册管线 processWorkbookGrading 共用同一份实现。
+      // 抽出的动因：练习册管线本次补齐配图采集，两条管线做的是同一件事（把手写卷面上的
+      // 几何图形按 image_bbox 裁出来），算法抄两份必然漂移。
+      const cropResult = await cropGeometryFigures({
+        questions,
+        pageBuffers,
+        pageDims,
+        cropImage: cropAndUploadGeometryImage,
+        studentId,
+        fallbackBuffer: compressedBuffer,
+        fallbackPage: pages[0]?.pageNumber || 1,
+      })
+      const geometryImageCount = cropResult.cropped
+      figureMissingRefs = cropResult.missingRefs
 
       const questionsWithStudentId = questions.map(q => ({
         ...q,
@@ -7064,7 +6988,7 @@ export const processTask = async (job) => {
       }
 
       await createQuestions(questionsWithStudentId)
-      console.log(`✅ [Step 6/8] 题目保存成功 (含 ${geometryImageCache.size} 张几何配图)`)
+      console.log(`✅ [Step 6/8] 题目保存成功 (含 ${geometryImageCount} 张几何配图)`)
 
       // ── 页面理解：将裁剪后的几何图保存到 question_assets（⚡ 并行化） ──
       // 待重绘的 pending 几何资产（{assetId, questionId}）：Step 6 收集，

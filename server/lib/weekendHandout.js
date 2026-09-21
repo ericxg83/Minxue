@@ -20,7 +20,10 @@
 import pg from 'pg'
 import { normalizeStem } from '../utils/stemNormalize.js'
 import { ocrStemKey } from '../utils/ocrStemKey.js'
-import { findPlaceholderBlockPages, parseBlockBox, isOutOfRangeBox } from '../utils/blockBoxTrust.js'
+// blockBoxTrust 的三道闸原先只服务于 resolveWbImage（整题裁片的展示护栏）。
+// 整题裁片于 2026-09-21 下线（用户口径：题目一律结构化入库，留痕只用整页原图），
+// 课件题图改为「配图（A）优先 → 回退整页原卷图」，不再消费裁片 → 护栏也一并移除。
+// 判据本体保留在 utils/blockBoxTrust.js（写入侧 / 其它读取侧仍可能引用）。
 import { getCatalogForGrade, resolveChapter } from '../config/textbookCatalog.js'
 
 // ── 常量（渲染端共用，勿改）──
@@ -163,7 +166,7 @@ export async function buildHandout(opts) {
        wq.lifecycle_status, wq.is_blank, wq.error_type, wq.error_reason,
        wq.student_answer AS wq_student_answer, wq.correct_answer AS wq_correct_answer,
        wq.content AS wq_content,
-       wq.question_no, wq.page_number AS wq_page_number, wq.question_image_url,
+       wq.question_no, wq.page_number AS wq_page_number,
        wq.block_coordinates AS wq_block_coordinates,
        wq.source_type, wq.last_wrong_task_id, wq.worksheet_id,
        s.name AS student_name,
@@ -256,21 +259,13 @@ export async function buildHandout(opts) {
     log(`[2b] 同大题配图索引: ${figureByQGroup.size} 组`)
   }
 
-  // ── 「均分占位」block 页索引 ──
+  // ── 整题裁片护栏已移除（2026-09-21）──
   //
-  // 2026-09-18：OCR 模型在部分页面上不逐题测量，而是把整页按题数均分，返回等差/等宽/等高的
-  // 占位框（实例 fd8b6bc9 p1：y 步长恒为 60、width 全为 800）。这种框裁出来会逐题漂移，
-  // 页尾偏出约 1 题 —— 老师看到的「题图」是邻题的图。prompt 里已写明禁止占位坐标但压不住，
-  // 所以取图侧再拦一道：命中页不把 block 裁片当「题图」，宁可不出图（口径同 isDegenerateFigureBox）。
-  //
-  // 判据与证据见 utils/blockBoxTrust.js 头部注释；全库命中 3 页 / 26 题（1.4%）。
-  const placeholderPageKeys = findPlaceholderBlockPages(
-    rows.map(r => ({ taskId: r.last_wrong_task_id, pageNumber: r.wq_page_number ?? r.q_page_number, block: r.wq_block_coordinates }))
-  )
-  if (placeholderPageKeys.size) {
-    log(`[2c] block 均分占位页: ${placeholderPageKeys.size} 页 → 该页题图回退为「不显示」（避免展示邻题裁片）`)
-  }
-  const isPlaceholderPage = (r) => placeholderPageKeys.has(`${r.last_wrong_task_id ?? ''}|${(r.wq_page_number ?? r.q_page_number) ?? ''}`)
+  // 这里原有三块索引（[2c] 均分占位页 / [2d] 框压盖页 / resolveWbImage 里的越界框判据），
+  // 全部只服务于「把 wrong_questions.question_image_url（整题裁片）当题图展示」这条路。
+  // 整题裁片已下线（用户口径：题目一律结构化入库，留痕只用整页原图；课件题图读配图 A），
+  // 消费方消失 → 护栏一并移除，不再为一条已下线的路径维护判据。
+  // 判据本体保留在 utils/blockBoxTrust.js，写入侧与其它读取侧仍可引用。
 
   // ── 同卷同题小问索引（多小问完整化）──
   const subRowsByQGroup = new Map()
@@ -449,7 +444,11 @@ export async function buildHandout(opts) {
     const page = r.wq_page_number ?? r.q_page_number ?? null
     const byPage = page == null ? null : imgs.find(i => Number(i?.page_number) === Number(page))
     if (byPage?.image_url) return byPage.image_url
-    if (r.question_image_url) return r.question_image_url
+    // [2026-09-21 整题裁片下线] 原先这里还有 `if (r.question_image_url) return r.question_image_url`
+    // 作为「原卷图」回退，但 question_image_url 是学生卷面上按 block_coordinates 裁的**整题裁片**，
+    // 属「配图 B」，已在写入侧正式下线，且它并不是「留痕用的原始整页图」。
+    // 留痕口径：整页原图（tasks.images）优先，缺失时退到题目所属卷的整页图（下方 qImgs）。
+    // 详见 _产品评审-练习册管线对齐日常管线-20260921.md 的 P0-6。
     if (r.q_image_url) return r.q_image_url
     const pick = imgs[0]
     if (pick?.image_url) return pick.image_url
@@ -464,18 +463,14 @@ export async function buildHandout(opts) {
     return r.clean_geometry_image_url || r.geometry_image_url || null
   }
 
-  function resolveWbImage(r) {
-    // 两道闸，都是「宁可不出图，也不给老师看邻题的图」（口径同 isDegenerateFigureBox）：
-    //  ① 整页均分占位：该页所有框都不是量出来的 → 不展示。
-    //  ② 本题框越界/退化（右下角超出 1000 等）：裁出来必然不是本题 → 不展示。
-    //     存量实测 24/125 条错题命中，含用户报过的 a775a783 第11题（y920 h300）
-    //     与 9eff748b 第9题（y920 h200）—— 它们的裁片是页面最底部一条横条。
-    // 原卷图另有 resolveDocImage（整页图优先），不受此影响。
-    if (isPlaceholderPage(r)) return null
-    const b = parseBlockBox(r.wq_block_coordinates)
-    if (b && isOutOfRangeBox(b)) return null
-    return r.question_image_url || r.q_image_url || null
-  }
+  // ── resolveWbImage 已移除（2026-09-21）──
+  //
+  // 它返回的是 wrong_questions.question_image_url（学生卷面上按 block_coordinates 裁的
+  // **整题裁片**）。用户口径：「题目一律结构化入库；要留痕只需原始图片，不需要这道题的裁片。」
+  // 该裁片已于 2026-09-21 在写入侧正式下线（worker.js processWorkbookGrading），
+  // 白板题图改为「配图（figure）→ 无配图则不显示」，不再有回退路径。
+  // 详见 _产品评审-练习册管线对齐日常管线-20260921.md 的 P0-6。
+  // 原卷图另有 resolveDocImage（整页图优先），不受此影响。
 
   // 按天分桶
   const dayMap = new Map()
@@ -573,7 +568,7 @@ export async function buildHandout(opts) {
             ? `${primary.q_task_id}#${primary.question_number}` : null
           return (sibKey && figureByQGroup.get(sibKey)) || null
         })(),
-        wbImage: resolveWbImage(primary) || members.map(resolveWbImage).find(Boolean) || null,
+        // wbImage（整题裁片）已于 2026-09-21 下线，不再产出。见 resolveWbImage 处的说明。
         students,
         studentCount: students.length,
         rawCount: members.length,
@@ -801,7 +796,7 @@ export async function buildHandout(opts) {
         missingSubs: t.missingSubs || [],
         options: t.options,
         figure: t.figure || null,
-        wbImage: t.wbImage || null,
+        // wbImage 不再下发（2026-09-21 整题裁片下线）
         answer: t.answer || '',
         hasAnswer: t.hasAnswer,
         answerSource: t.answerSource,

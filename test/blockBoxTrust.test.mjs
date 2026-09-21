@@ -163,11 +163,24 @@ test('isUntrustworthyBlock：直接吃原始 JSONB 值', () => {
 const HANDOUT_SRC = readFileSync(new URL('../server/lib/weekendHandout.js', import.meta.url), 'utf8')
 const CROP_SRC = readFileSync(new URL('../server/utils/cropAndUpload.js', import.meta.url), 'utf8')
 
-test('契约：weekendHandout.resolveWbImage 必须同时拦「占位页」与「越界框」', () => {
-  const m = HANDOUT_SRC.match(/function resolveWbImage\(r\)\s*\{[\s\S]{0,900}?\n  \}/)
-  assert.ok(m, '找到 resolveWbImage')
-  assert.ok(m[0].includes('isPlaceholderPage(r)'), '必须拦均分占位页')
-  assert.ok(m[0].includes('isOutOfRangeBox(b)'), '必须拦越界框（存量 24/125 条错题的裁片是页面底部横条）')
+// [2026-09-21 整题裁片（配图 B）下线] resolveWbImage 及其三道护栏（占位页 / 压盖页 / 越界框）
+// 连同函数一起移除。理由：它读的是 wrong_questions.question_image_url（学生卷面上按
+// block_coordinates 裁的**整题裁片**），该字段已在写入侧（worker.js processWorkbookGrading）
+// 正式下线；白板题图改为「配图 figure（= questions.geometry_image_url）→ 无配图则不显示」，
+// 不再有回退路径。留痕只用整页原图（tasks.images）。
+// → 原「必须拦三道」的接线契约失去标的，改为锁定「函数与护栏代码块均已移除」，
+//   防止有人把整题裁片当题图回退又加回来。详见 _产品评审-练习册管线对齐日常管线-20260921.md P0-6。
+test('契约：weekendHandout 不得再引入整题裁片（resolveWbImage / wbImage）作题图回退', () => {
+  assert.ok(!/function resolveWbImage/.test(HANDOUT_SRC), 'resolveWbImage 必须已删除（整题裁片下线）')
+  assert.ok(!/\bwbImage\s*:/.test(HANDOUT_SRC), 'wbImage 字段不得再下发')
+  // 只在**非注释**代码里查 question_image_url：SELECT 字段、resolveDocImage 回退分支等都不许再有它；
+  // 注释里提到它是为了记录下线原因，允许保留。
+  const codeOnly = HANDOUT_SRC
+    .replace(/\/\*[\s\S]*?\*\//g, '')
+    .replace(/(^|[^:])\/\/[^\n]*/g, '$1')
+  assert.ok(!/question_image_url/.test(codeOnly), '不得再读 wq.question_image_url 当原卷图/题图（只允许出现在注释里）')
+  assert.ok(HANDOUT_SRC.includes('function resolveDocImage(r)'), '整页原图回退 resolveDocImage 必须保留（留痕用）')
+  assert.ok(HANDOUT_SRC.includes('function resolveFigure(r)'), '配图 A 解析 resolveFigure 必须保留')
 })
 
 test('契约：weekendHandout 的 SELECT 必须带出 wq.block_coordinates（否则拦不了）', () => {

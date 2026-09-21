@@ -300,55 +300,20 @@ const penSizes = [
 const current = computed(() => questions.value[currentIndex.value] || null)
 
 /**
- * 题干判定文本（公共题干 + 各小问正文）。
- * 多小问大题拆行落库后「如图」只留在 parentStem，只看 stem 会漏判。
- */
-const figureJudgeText = computed(() => {
-  const c = current.value
-  if (!c) return ''
-  const parts = [c.parentStem || '']
-  if ((c.subParts || []).length > 1) {
-    for (const sp of c.subParts) parts.push(sp.content || '')
-  } else {
-    parts.push(c.stem || '')
-  }
-  return parts.filter(Boolean).join(' ')
-})
-
-/**
- * 题干是否提到「图」。
- *
- * 注意：这**不是**完整性判定的 `hasFigureReference`（questionCompleteness.js），
- * 两者问的不是同一个问题，口径也不该相同：
- *   · `hasFigureReference` 问「题目引用了图、但题库没配图吗」，它决定题目算不算残缺，
- *     口径必须严格（如图 / 图1 / 图示 / 附图 / 见图），不能放宽；
- *   · 这里问「这张原题裁片对讲题有没有价值」，口径应当更宽：题干出现「图」字
- *     （如图 / 图像 / 作图 / 图中 / 下图…）就认为可能有图。漏判的代价是老师对着一道
- *     没有图的几何题讲不了，误判的代价只是多挂一张裁片 —— 两者不对称，所以宁可放宽。
- *
- * 实测（2026-09-18 白板题单）：
- *   初二 130 题：27 条只有原题裁片、无几何裁图，其中题干含「图」的 0 条；
- *   初三  49 题：14 条同上，其中含「图」的 3 条 —— 恰好是「平行线分线段的作图中」
- *   和两条「二次函数图像」题，用严格口径会把这 3 条需要的图误删。
- */
-const stemMentionsFigure = computed(() => /图/.test(figureJudgeText.value))
-
-/**
  * 讲题区配图。
  *
- * 1) `figure`（几何裁图）优先 —— 它只在题目真引图、且过了渲染闸之后才生成，直接可用。
- * 2) 历史题库没有裁图时，只有题干提到「图」才回退到原题裁片 `wbImage`。
- *    否则不回退：wbImage 是学生卷面上按 block_coordinates 裁的题目区域，
- *    对非图形题（如「计算：(√5)³-(5+√5)÷√5」）它只是题干复述 + 学生手写，
- *    对讲题零价值，还把书写痕迹带进讲题区。
- *    同理不回退 students[].docImage（整页学生作答卷）。
+ * 只读 `figure`（几何裁图 = 题目配图 A）—— 它只在题目真引图、且过了渲染闸之后才生成，直接可用。
+ *
+ * [2026-09-21 整题裁片下线] 原先这里还有一条回退：历史题库没有配图、且题干提到「图」时，
+ * 回退到原题裁片 `wbImage`（wrong_questions.question_image_url）。该字段已在写入侧正式下线
+ * （用户口径：题目一律结构化入库；要留痕只需整页原图，不需要整题裁片），字段不再下发，
+ * 回退分支随之移除。没有配图就不显示 —— 不再拿学生卷面上的裁片充当题图。
+ * 同理不回退 students[].docImage（整页学生作答卷，属「留痕」不属于「配图」）。
  */
 const displayFigureUrl = computed(() => {
   const c = current.value
   if (!c) return ''
-  if (c.figure) return c.figure
-  if (!stemMentionsFigure.value) return ''
-  return c.wbImage || ''
+  return c.figure || ''
 })
 
 // 选择题选项：题干已内联 ≥2 个 A–D 标号说明选项写在题干里，避免重复渲染

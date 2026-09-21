@@ -157,7 +157,7 @@ const { rows } = await pool.query(
      wq.lifecycle_status, wq.is_blank, wq.error_type, wq.error_reason,
      wq.student_answer AS wq_student_answer, wq.correct_answer AS wq_correct_answer,
      wq.content AS wq_content,
-     wq.question_no, wq.page_number AS wq_page_number, wq.question_image_url,
+     wq.question_no, wq.page_number AS wq_page_number,
      wq.source_type, wq.last_wrong_task_id, wq.worksheet_id,
      s.name AS student_name,
      q.id AS q_id, q.content, q.answer AS q_answer, q.options,
@@ -383,8 +383,12 @@ function buildCompleteQuestion(members) {
 }
 
 function resolveDocImage(r) {
-  // 原卷/答卷整页图：question_image_url → q.image_url → task.images 按页
-  if (r.question_image_url) return r.question_image_url
+  // 原卷/答卷整页图：q.image_url → task.images 按页（留痕只用整页原图）
+  //
+  // [2026-09-21 整题裁片下线] 原先这里第一优先级是 question_image_url，但它是学生卷面上按
+  // block_coordinates 裁的**整题裁片**（属「配图 B」），不是整页原图，且该字段已在写入侧
+  // （worker.js processWorkbookGrading）正式下线。与 lib/weekendHandout.js 保持同构，一并去掉。
+  // 详见 _产品评审-练习册管线对齐日常管线-20260921.md 的 P0-6。
   if (r.q_image_url) return r.q_image_url
   const imgs = Array.isArray(r.task_images) ? r.task_images : []
   const page = r.wq_page_number ?? r.q_page_number ?? null
@@ -399,18 +403,18 @@ function resolveDocImage(r) {
 }
 
 function resolveFigure(r) {
-  // 配图口径（2026-09-17 定。实测：图形裁片 53 张、0 张宽扁；错题本行裁片 24 张里 17 张宽条，
-  // 投屏就是一条灰带 —— 所以默认只用图形裁片）：
+  // 配图口径（2026-09-17 定）：只用图形裁片（配图 A）。
   //   ① clean_geometry_image_url / geometry_image_url —— 题库图形裁片（App 几何图展示口径）
-  //   ② wrong_questions.question_image_url —— 错题本那条链的"题目行裁片"，
-  //      默认不引用；需要时用 --wb-image 打开（见 resolveWbImage）
+  // [2026-09-21] ② wrong_questions.question_image_url（题目行裁片）与 --wb-image 开关一并下线，
+  //   该字段已是写入侧死字段。没有配图就不出图，不再拿学生卷面裁片充当题图。
   return r.clean_geometry_image_url || r.geometry_image_url || null
 }
 
-/** 错题本字段（题目行裁片）：与 apiService 的 image_url = wq.question_image_url || q.image_url 同源 */
-function resolveWbImage(r) {
-  return r.question_image_url || r.q_image_url || null
-}
+// ── resolveWbImage 已移除（2026-09-21）──
+// 它返回 wrong_questions.question_image_url（学生卷面上按 block_coordinates 裁的**整题裁片**，
+// 即「配图 B」）。用户口径：「题目一律结构化入库；要留痕只需原始图片，不需要这道题的裁片。」
+// 与 lib/weekendHandout.js 保持同构，产出端不再下发 wbImage。
+// 详见 _产品评审-练习册管线对齐日常管线-20260921.md 的 P0-6。
 
 /**
  * 同大题（task + 题号）配图索引。
@@ -540,8 +544,7 @@ for (const [day, list] of [...dayMap.entries()].sort((a, b) => b[0].localeCompar
           ? `${primary.q_task_id}#${primary.question_number}` : null
         return (sibKey && figureByQGroup.get(sibKey)) || null
       })(),
-      // 错题本口径的题图（题目行裁片），仅 --wb-image 时由渲染端使用
-      wbImage: resolveWbImage(primary) || members.map(resolveWbImage).find(Boolean) || null,
+      // wbImage（整题裁片）已于 2026-09-21 下线，不再产出。见 resolveWbImage 处的说明。
       students,
       studentCount: students.length,
       rawCount: members.length,
@@ -1027,7 +1030,7 @@ for (const sec of sections) {
       missingSubs: t.missingSubs || [],
       options: t.options,
       figure: t.figure || null,
-      wbImage: t.wbImage || null,
+      // wbImage 不再下发（2026-09-21 整题裁片下线）
       answer: t.answer || '',
       hasAnswer: t.hasAnswer,
       answerSource: t.answerSource,

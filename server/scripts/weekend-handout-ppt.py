@@ -17,7 +17,7 @@
   python server/scripts/weekend-handout-ppt.py xxx.slides.json --out <dir> --no-pdf
   python server/scripts/weekend-handout-ppt.py xxx.slides.json --no-animation    # 不出动画（答案直接可见）
   python server/scripts/weekend-handout-ppt.py xxx.slides.json --page-image     # 无配图时退贴整页原卷（默认关）
-  python server/scripts/weekend-handout-ppt.py xxx.slides.json --wb-image      # 无配图时退用错题本行裁片（默认关）
+  # [2026-09-21] --wb-image 已下线（整题裁片 = 配图 B，写入侧已停；slides.json 不再下发 wbImage）
 
 配图口径（2026-09-17 定）：
   **只贴 `questions.geometry_image_url` 系统裁片**；投屏绝不放整页原卷扫描
@@ -1205,9 +1205,6 @@ def main():
     ap.add_argument("slides_json")
     ap.add_argument("--out", default=None)
     ap.add_argument("--no-animation", action="store_true", help="不出动画，答案直接可见")
-    ap.add_argument("--wb-image", action="store_true",
-                    help="没有图形裁片时，退用错题本字段（wrong_questions.question_image_url 的题目行裁片）。"
-                         "实测多为宽扁条、投屏偏小，默认关")
     ap.add_argument("--page-image", action="store_true",
                     help="题目没有系统配图时，退回贴整页原卷页（默认关闭：投屏只给配图，原卷页太乱）")
     ap.add_argument("--no-page-image", action="store_true", help="（已废弃，等同于默认行为；保留兼容）")
@@ -1216,7 +1213,8 @@ def main():
     ap.add_argument("--cache", default=None)
     args = ap.parse_args()
     use_page_image = bool(args.page_image) and not args.no_page_image
-    use_wb_image = bool(args.wb_image)
+    # [2026-09-21] --wb-image 已下线：整题裁片（wrong_questions.question_image_url，配图 B）
+    # 在写入侧正式下线，slides.json 也不再下发 wbImage 字段。
 
     src = Path(args.slides_json).resolve()
     data = json.loads(src.read_text(encoding="utf-8"))
@@ -1238,8 +1236,6 @@ def main():
     for q in questions:
         if q.get("figure"):
             need.append(q["figure"])
-        elif use_wb_image and q.get("wbImage"):
-            need.append(q["wbImage"])
         elif use_page_image and FIG_HINT.search((q.get("parentStem") or "") + (q.get("stem") or "")):
             doc = next((st.get("docImage") for st in q.get("students", []) if st.get("docImage")), None)
             if doc:
@@ -1260,8 +1256,6 @@ def main():
     for q in questions:
         if q.get("figure"):
             fig_for[id(q)] = imgmap_paths.get(q["figure"])
-        elif use_wb_image and q.get("wbImage"):
-            fig_for[id(q)] = imgmap_paths.get(q["wbImage"])
         elif use_page_image and FIG_HINT.search((q.get("parentStem") or "") + (q.get("stem") or "")):
             doc = next((st.get("docImage") for st in q.get("students", []) if st.get("docImage")), None)
             page_for[id(q)] = imgmap_paths.get(doc) if doc else None

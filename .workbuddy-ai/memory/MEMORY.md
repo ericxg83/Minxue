@@ -22,7 +22,28 @@
   （须**整行只有一个顶层 `(N)`**，排除「第(N)题」引用；一行并两个小问的拒绝）；② OCR 匹配值；
   ③ 圈号/图号兜底。每级都过**组级 usedSubNo 去重闸**。**不认行首 ①/② 为顶层标号**
   （常是某 `(N)` 内部子部件，当顶层用会撞号）。原则：**宁可留空，不填错标号**。
-- 练习册自包含错题入册闸**只拦 `missing_options`**，另两条在该管线不成立，拦了是误伤（改前先读 `worker.js` 注释）。
+- **「题目完整」是跨管线不变量，两条批改管线（general / workbook）规则必须一致**
+  （2026-09-21 用户拍定：「一切都和日常管线走一样的路线，减少老师的学习成本」）。
+  ~~练习册自包含错题入册闸只拦 `missing_options`，另两条在该管线不成立~~ ← **此取舍已废**：
+  它成立于「练习册管线不产配图」的前提，**配图补齐后前提不成立**。
+  **顺序铁律：先补数据（配图），再收门禁**（反了会把引图题全挡在错题本外）。
+  日常闸的实际结构 = 候选筛选 `is_correct===false || answer_source==='blank'`
+  + `checkQuestionCompleteness(q).isComplete` + 入册前 `syncQuestionCompleteness`
+  （`missing_answer` 由候选筛选天然豁免，**不要为练习册另写豁免规则**）。
+- **两管线的错题写入函数不同但门禁必须对齐**：日常走 `addWrongQuestions`（**有**完整性闸），
+  练习册走 `addSelfContainedWrongQuestion`（**原本无闸、2026-09-21 补**）。
+  练习册还缺「入册前 `syncQuestionCompleteness`」→ 不补会重演 2026-09-11
+  「写入成功但列表按 `is_complete=TRUE` 过滤看不见」（实测 396 条藏 112 条）。
+- **补图后自动入册已存在**：`PUT /api/questions/:id` 的复核「标错强入册」分支
+  （`server/index.js`，调 `addWrongQuestions(..., {skipConfidence:true})`，返回 `wrong_book_sync`）——
+  练习册题走同一 PUT，**不需要新写路径**。
+- **配图 A / B 已统一（2026-09-21 落地完成）**：A = `questions.geometry_image_url`（图形元素）
+  两管线**都采集**；B = `wrong_questions.question_image_url`（**整题裁片**）**已整体下线**。
+  编排共享于 `server/utils/geometryCrop.js`（`cropGeometryFigures`，`cropImage` 按位置参数注入）。
+  用户原话：「题目一律结构化入库，留痕只需整页原图，不需要这道题的裁片」——
+  **三类图别混**：配图 A / 整题裁片 B（已废） / 留痕整页原图 `tasks.images`。
+  课件白板题图现只认 A（`figure`），没有就不显示（宁可不显示，不显示错图）。
+  新增练习册配图相关代码前先读 `topics/board.md` §2.1 + `topics/geometry-pipeline`。
 - **⛔ 禁止用「`image_bbox` 与 `block_coordinates` 坐标互比」判断配图归属**（假阳性 ~28%，会删掉正确配图）。
 - **⛔ 禁止用 `block_coordinates` 定位题目区域**：不是"错位"是**"没量"** —— 模型按题数**均分**返回占位框。
   只能当纵向区段粗线索，裁图前先过 `server/utils/blockBoxTrust.js` 两道闸；**宁可不出图，也不显示邻题的图**；
