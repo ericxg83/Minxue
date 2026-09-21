@@ -1379,8 +1379,25 @@ export async function callVisionCompletion(opts) {
     //   语义：noBackup+strongBackupOnly = 「最强链路 → 付费强模型 → 宁可失败」。
     strongBackupOnly = false,
   } = opts
+
+  // ModelScope Key 池：主 Key + 备用 Key，与 VL_MODELS 组成「Key×模型」矩阵。
+  // 配额按账号×模型计，同一模型先主 Key 后备用 Key，都耗尽再换下一个模型。
+  // ⭐ 摩搭是体验最好的供应商（速度快、正确率高），必须作为第一优先级。
+  // ⚠️ 2026-09-21：`new Set` 去重意味着**两把 Key 填同一个值 ⇒ 实际只有一把**，
+  //    "有备用 Key"只是幻觉（主 Key 耗尽即整链失效）。故把实际加载的把数与尾号打进日志，
+  //    便于在 Render 日志里一眼确认第二把 Key 有没有配上（只打尾号，不泄露密钥）。
+  const MS_KEYS = [...new Set([
+    AI_CONFIG.API_KEY,
+    MODELSCOPE_BACKUP.ENABLED ? MODELSCOPE_BACKUP.API_KEY : null,
+  ].filter(Boolean))]
+
   if (noBackup) {
-    console.log(`[AI] noBackup=1：本次视觉请求仅使用魔搭（ModelScope）Key×模型矩阵，不降级备份供应商${strongBackupOnly ? '（strongBackupOnly=1：魔搭耗尽后仅允许强模型白名单兜底）' : ''}`)
+    const poolDesc = MS_KEYS.length
+      ? `${MS_KEYS.length} 把 Key（${MS_KEYS.map(k => '…' + keyTail(k)).join(' / ')}）${MS_KEYS.length > 1
+        ? ''
+        : ' ⚠ 只有一把：主 Key 额度耗尽时整条魔搭链立即失效，请在 Render 把 MODELSCOPE_BACKUP_API_KEY 配成另一个魔搭账号的 Key'}`
+      : '0 把 Key（AI_API_KEY / MODELSCOPE_BACKUP_API_KEY 均未配置 ⇒ 本次必然失败）'
+    console.log(`[AI] noBackup=1：本次视觉请求仅使用魔搭（ModelScope）Key×模型矩阵 = ${poolDesc} × ${VL_MODELS.length} 模型，不降级备份供应商${strongBackupOnly ? '（strongBackupOnly=1：魔搭耗尽后仅允许强模型白名单兜底）' : ''}`)
   }
 
   const messages = buildVisionMessages(systemPrompt, userText, imageDataURL)
@@ -1397,13 +1414,7 @@ export async function callVisionCompletion(opts) {
 
   const providers = []
 
-  // ModelScope Key 池：主 Key + 备用 Key，与 VL_MODELS 组成「Key×模型」矩阵。
-  // 配额按账号×模型计，同一模型先主 Key 后备用 Key，都耗尽再换下一个模型。
-  // ⭐ 摩搭是体验最好的供应商（速度快、正确率高），必须作为第一优先级。
-  const MS_KEYS = [...new Set([
-    AI_CONFIG.API_KEY,
-    MODELSCOPE_BACKUP.ENABLED ? MODELSCOPE_BACKUP.API_KEY : null,
-  ].filter(Boolean))]
+  // ModelScope Key 池见函数开头（提到 noBackup 日志之前，便于日志里打印实际把数）。
 
   const callMsProvider = (apiKey, vlModel) => async () => {
     if (isModelExhaustedToday(vlModel, apiKey)) {

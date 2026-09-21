@@ -96,6 +96,19 @@ test('两把 Key 相同时，矩阵退化为 1 把（这是"假备份"的判据�
   assert.equal(diff.length, 2)
 })
 
+test('MS_KEYS 只定义一次（定义点提到 noBackup 日志之前，避免两处定义各自漂移）', () => {
+  const n = (AI_SRC.match(/const MS_KEYS = \[\.\.\.new Set\(\[/g) || []).length
+  assert.equal(n, 1, `MS_KEYS 定义点应恰好 1 处，实际 ${n} 处`)
+})
+
+test('noBackup 日志必须打印实际加载的 Key 把数与尾号（线上确认第二把 Key 是否生效的唯一入口）', () => {
+  assert.ok(AI_SRC.includes('把 Key（'), 'noBackup 日志应打印实际加载几把 Key')
+  assert.ok(/MS_KEYS\.map\(k => '…' \+ keyTail\(k\)\)/.test(AI_SRC), '日志应只打印 Key 尾号（不泄露完整密钥）')
+  const logIdx = AI_SRC.indexOf('[AI] noBackup=1')
+  const defIdx = AI_SRC.indexOf('const MS_KEYS = [...new Set([')
+  assert.ok(defIdx !== -1 && defIdx < logIdx, 'MS_KEYS 必须在 noBackup 日志之前定义，否则日志拿不到实际把数')
+})
+
 // ── 3. VL_MODELS 队首必须是 AI_MODEL（所以配错模型名代价最大）───────────────
 
 test('AI_MODEL 处于 VL_MODELS 队首（错误模型名会让每页请求先空轮一次）', () => {
