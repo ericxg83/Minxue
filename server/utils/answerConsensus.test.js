@@ -203,6 +203,18 @@ test('回归：相似符号里的三角形顺序有语义，绝不能排序（�
   assert.equal(normalizeAnswerKey('△ABC∽△DEF'), '△ABC∽△DEF')
 })
 
+test('归一化：带分数（混数）—— 必须在去空白之前处理（存量重跑 #49）', () => {
+  // `1 6/7` 是 13/7；SYMBOL_FOLD 的 \s+→'' 会把它压成 `16/7`（错值），
+  // 于是与模型写的 `13/7` 判成两个答案。所以混数折叠必须先做。
+  assert.ok(answersEquivalent('1 6/7', '13/7'))
+  assert.equal(normalizeAnswerKey('1 6/7'), '13/7')
+  assert.equal(normalizeAnswerKey('2 1/2'), '5/2')
+  assert.ok(answersEquivalent('-1 6/7', '-13/7'))
+  // 不能把普通分数/整数误伤
+  assert.equal(normalizeAnswerKey('13/7'), '13/7')
+  assert.ok(!answersEquivalent('1 6/7', '16/7'))
+})
+
 test('回归：真实数值差异 / 描述型差异仍须判为不同（宁可多报，不可漏报）', () => {
   // 1.60×10¹¹ 与 1.5990×10^11 是两个数（有效数字不同），必须留给人工定夺
   assert.ok(!answersEquivalent('1.60×10¹¹', '1.5990×10^11'))

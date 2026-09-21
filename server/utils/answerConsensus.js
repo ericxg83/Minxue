@@ -73,6 +73,12 @@ function stripScaffolding(s) {
 export function normalizeAnswerKey(answer) {
   let s = stripScaffolding(answer)
   if (!s) return ''
+  // 带分数（混数）必须先于「去空白」处理：`1 6/7` = 13/7。
+  // 2026-09-21 存量重跑实测 #49：SYMBOL_FOLD 里的 `\s+ → ''` 会把 `1 6/7` 压成 `16/7`，
+  // 于是与模型写的 `13/7` 判成两个答案 —— 而这个 `16/7` 本身就是个**错值**。
+  // 取舍：中文数学卷里「数字 空格 数字/数字」几乎只出现在带分数，
+  // 乘法会写成 `2×1/2` 或 `2·1/2`，所以按带分数解释是安全的。
+  s = s.replace(/(\d+)\s+(\d+)\s*\/\s*(\d+)/g, (m, w, n, d) => `${Number(w) * Number(d) + Number(n)}/${d}`)
   s = foldSuperscripts(s)
   for (const [re, to] of SYMBOL_FOLD) s = s.replace(re, to)
   // 指数形态统一：上标折叠产出的是 `x^(2)`，而模型常写 `x^2` —— 同一答案两个键。
