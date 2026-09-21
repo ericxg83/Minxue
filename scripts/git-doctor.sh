@@ -32,8 +32,16 @@
 # 修法：不信本地跟踪引用，改信 `git ls-remote`；用**直接写松散文件**的方式同步
 # （松散引用优先于 packed-refs，已验证生效）。
 #
+# ⚠️ 同步时的两条护栏（2026-09-21 复验补）：
+#   1. **只同步「当前分支 + 已有本地跟踪引用」的远端分支**。给一个本地没有对象的远端
+#      分支建跟踪引用，会让 `git fsck` 报 `refs/remotes/<remote>/<b>: invalid sha1 pointer`。
+#   2. 写入前用 `GIT_NO_LAZY_FETCH=1 git cat-file -e <sha>` 确认对象已在本地；
+#      写完之后再反向扫一遍，把指向缺失对象的松散跟踪引用删掉（防止旧版本脚本留下的脏引用）。
+#   （本仓是 blob:none 部分克隆，只过滤 blob；commit/tree 对象正常 fetch 时一定落地，
+#     所以这两条护栏只会拦到「手工造出来的」引用，不会误删正常跟踪引用。）
+#
 # 用法：
-#   bash scripts/git-doctor.sh            # 诊断 + 修 ①③
+#   bash scripts/git-doctor.sh            # 诊断 + 修 ①③（含 packed-refs 自动修正，带备份）
 #   bash scripts/git-doctor.sh --repack   # 额外做一次 pack 合并（约 1~2 分钟，别中断）
 #
 set -uo pipefail
@@ -116,24 +124,58 @@ else
   echo "   ⚠ 不一致 → 直接写松散引用修正（git update-ref 在本环境会静默失效）"
 fi
 
-# 无论是否一致都同步一遍（顺带补上其它分支，并清理已删除的远端分支）
+# 同步范围：当前分支（③ 真正要解决的）+ 已有本地跟踪引用的分支。
+# 其余远端分支跳过 —— 给本地没有对象的引用建指针只会让 `git fsck` 报
+# `invalid sha1 pointer`（2026-09-21 复验踩到）。
 SYNC_DIR="$GIT_DIR_PATH/refs/remotes/$REMOTE"
 mkdir -p "$SYNC_DIR"
+CUR_BRANCH="$(git symbolic-ref --short -q HEAD 2>/dev/null || echo "")"
+EXISTING_LIST="$(find "$SYNC_DIR" -type f 2>/dev/null | sed "s|^$SYNC_DIR/||")"
 N=0
+SKIPPED=""
+MISSING=""
 while read -r sha ref; do
   [ -z "$sha" ] && continue
   name="${ref#refs/heads/}"
+  if [ "$name" != "$CUR_BRANCH" ] && ! printf '%s\n' "$EXISTING_LIST" | grep -Fxq "$name"; then
+    SKIPPED="$SKIPPED $name"
+    continue
+  fi
+  # 对象不在本地就不建引用（GIT_NO_LAZY_FETCH 支持的版本下生效；不支持时 cat-file 会
+  # 顺手把对象拉下来，同样不会留下悬空指针）
+  if ! GIT_NO_LAZY_FETCH=1 git cat-file -e "$sha" 2>/dev/null; then
+    MISSING="$MISSING $name"
+    continue
+  fi
   mkdir -p "$(dirname "$SYNC_DIR/$name")"
   printf '%s\n' "$sha" > "$SYNC_DIR/$name" && N=$((N + 1))
 done < <(git ls-remote --heads "$REMOTE" 2>/dev/null)
 echo "   ✓ 已同步 $N 个 $REMOTE 跟踪引用（直接写松散文件）"
+[ -n "$SKIPPED" ] && echo "   · 跳过（非当前分支且无本地跟踪引用，避免悬空指针）：$SKIPPED"
+[ -n "$MISSING" ] && echo "   ⚠ 跳过（本地缺对象）：$MISSING   → 需要时先 git fetch $REMOTE <branch>"
 
-# 提示：packed-refs 里若残留旧值，虽然会被松散引用盖住，但建议一并清理
+# 反向清理：指向缺失对象的松散跟踪引用会让 fsck 报 invalid sha1 pointer
+REMOVED=""
+while IFS= read -r f; do
+  [ -n "$f" ] || continue
+  sha="$(tr -d '\r\n' < "$f")"
+  if ! GIT_NO_LAZY_FETCH=1 git cat-file -e "$sha" 2>/dev/null; then
+    rm -f "$f" && REMOVED="$REMOVED ${f#"$SYNC_DIR/"}"
+  fi
+done < <(find "$SYNC_DIR" -type f 2>/dev/null)
+[ -n "$REMOVED" ] && echo "   ✓ 已清理悬空跟踪引用（对象缺失）：$REMOVED"
+
+# packed-refs 里若残留旧值：松散引用会盖住它，但留着会误导 `git log origin/main`
 if grep -q "refs/remotes/$REMOTE/main" "$GIT_DIR_PATH/packed-refs" 2>/dev/null; then
   PK=$(awk -v r="refs/remotes/$REMOTE/main" '$2==r {print $1}' "$GIT_DIR_PATH/packed-refs")
-  if [ -n "$PK" ] && [ "$PK" != "$(git rev-parse "refs/remotes/$REMOTE/main" 2>/dev/null)" ]; then
-    echo "   ⚠ packed-refs 仍残留旧值 ${PK:0:8}（已被松散引用覆盖，但建议清理）"
-    echo "     备份并修正：cp .git/packed-refs .git/packed-refs.bak && sed -i 's/^$PK/$TRUE_SHA/' .git/packed-refs"
+  NOW="$(git rev-parse "refs/remotes/$REMOTE/main" 2>/dev/null)"
+  if [ -n "$PK" ] && [ "$PK" != "$NOW" ]; then
+    BAK="$GIT_DIR_PATH/packed-refs.bak-$(date +%Y%m%d-%H%M%S)"
+    cp "$GIT_DIR_PATH/packed-refs" "$BAK"
+    awk -v r="refs/remotes/$REMOTE/main" -v s="$NOW" \
+      '{ if ($2==r && $1 !~ /^\^/) print s" "$2; else print }' \
+      "$BAK" > "$GIT_DIR_PATH/packed-refs"
+    echo "   ✓ packed-refs 残留旧值 ${PK:0:8} 已修正为 ${NOW:0:8}（备份：$(basename "$BAK")）"
   else
     echo "   ✓ packed-refs 一致"
   fi
