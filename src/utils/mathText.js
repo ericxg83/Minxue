@@ -234,13 +234,37 @@ function convertSqrt(s) {
   return out
 }
 
-function splitToSegments(text) {
+function splitToSegments(text, opts = {}) {
+  // glueInnerSpaces=false 用于「独立公式判定」的保守口径，见 renderContent 注释：
+  // 判定不看合并结果，否则 `-|-2| = 2` 这类行内项会被升级成居中独立公式。
+  const glueInnerSpaces = opts.glueInnerSpaces !== false
   const segments = []
   let mathBuffer = ''
   let textBuffer = ''
 
   function flushMath() {
-    if (mathBuffer.trim()) segments.push({ text: mathBuffer.trim(), isMath: true })
+    if (!mathBuffer.trim()) {
+      mathBuffer = ''
+      return
+    }
+    // 数学段末尾的句读标点必须留在文本段（2026-09-21 白板第2题）。
+    //
+    // 症状：`(2) $\sqrt{\frac{3}{x-2}}$.` 的句点在旧实现里因为 `.` 属于 isMathChar
+    // 被吸进数学段，于是 ① KaTeX 在数学模式里排出一个"悬空的点"，跟卷面的句号不是一个东西；
+    // ② 「公式+句号」被算成"整段只有数学" ⇒ standalone ⇒ $$...$$ 独立公式，
+    //    在同一份题面里 (2)(4)(5) 被居中、(3) 因为中间有空格反而行内，一眼就是"不标准"。
+    // 句读是句子层面的标点，任何渲染路径（预览/PDF/白板）都该由正文字体排。
+    let math = mathBuffer
+    let tail = ''
+    const punct = math.match(TRAILING_SENTENCE_PUNCT)
+    if (punct) {
+      tail = punct[0]
+      math = math.slice(0, -punct[0].length)
+    }
+    if (math.trim()) segments.push({ text: math.trim(), isMath: true })
+    // 进入数学段前 textBuffer 必已 flush 干净，这里直接把标点接回文本缓冲，
+    // 保证「数学段 → 标点」的先后顺序不丢。
+    if (tail) textBuffer += tail
     mathBuffer = ''
   }
   function flushText() {
@@ -308,7 +332,16 @@ function splitToSegments(text) {
       continue
     }
 
-    // 4. 普通字符 — 判断是数学还是文本
+    // 4. 公式内部空格：两侧都是数学记号、且至少一侧是运算符/结构符 ⇒ 属于同一公式，不切断
+    //    （`\sqrt{3-x} + \sqrt{x-3}` 必须整体交给 KaTeX，否则被切成三段各排各的，
+    //     二元运算符间距丢失、两段字号观感不一致 —— 白板第2题 (3) 就是这么散架的）
+    if (glueInnerSpaces && isMathInnerSpace(text, i, mathBuffer)) {
+      mathBuffer += char
+      i++
+      continue
+    }
+
+    // 5. 普通字符 — 判断是数学还是文本
     if (isMathChar(char)) {
       if (textBuffer) flushText()
       mathBuffer += char
@@ -347,6 +380,44 @@ function isMathChar(char) {
   return false
 }
 
+/**
+ * 句子级句读：这些字符跟在数学段末尾时属于「句子标点」，不是公式的一部分。
+ *
+ * 单独定义成常量是因为它同时被两处消费：splitToSegments 的 flushMath（把句读踢出数学段），
+ * 以及测试里的口径断言。新增符号（如全角句号变体）改这里一处即可。
+ */
+const TRAILING_SENTENCE_PUNCT = /[.,;:!?。，、；：！？．…]+$/
+
+/** 运算符/结构符：出现它说明这一侧是"公式内部"，而不是并列的独立符号 */
+const MATH_STRUCT_CHAR = /[+\-*/=<>^_{}()\[\]|]/
+
+/** 该位置是不是一个数学记号（\cmd 也算，因为 \ 不在 isMathChar 里） */
+function isMathTokenAt(text, index) {
+  if (index < 0 || index >= text.length) return false
+  const c = text[index]
+  if (isMathChar(c)) return true
+  return c === '\\' && /[a-zA-Z]/.test(text[index + 1] || '')
+}
+
+/**
+ * 空格是否处在公式内部（应当并入数学段，不切断）。
+ *
+ * 保守边界（避免把中文里的并列项粘成一个公式）：
+ *   必须 ① 当前已在数学段内；② 空格两侧都是数学记号；
+ *   ③ 至少一侧是运算符/结构符（如 `\sqrt{3-x} + \sqrt{x-3}` 的 `}` 与 `+`）。
+ * 反例 `a 1`（两侧都是普通字母数字）不并 —— 那种空格是排版间隔，并进去会让 KaTeX
+ * 忽略空格把 `a 1` 排成 `a1`。
+ */
+function isMathInnerSpace(text, index, mathBuffer) {
+  const c = text[index]
+  if (c !== ' ' && c !== '\u00A0') return false
+  if (!mathBuffer) return false
+  const prev = text[index - 1] || ''
+  const next = text[index + 1] || ''
+  if (!isMathTokenAt(text, index - 1) || !isMathTokenAt(text, index + 1)) return false
+  return MATH_STRUCT_CHAR.test(prev) || MATH_STRUCT_CHAR.test(next)
+}
+
 function escapeHtml(text) {
   if (!text) return ''
   return String(text)
@@ -359,14 +430,23 @@ function escapeHtml(text) {
 /**
  * 渲染内容：中文保持纯文本，数学片段用严格 $...$（行内）/ $$...$$（独立）定界符包裹。
  * 返回可安全注入 DOM 的 HTML 字符串。
+ *
+ * ⚠ 两个口径必须分开（2026-09-21 白板第2题沉淀）：
+ *   - **渲染分段**用新口径：公式内部空格不再切断数学段，`\sqrt{3-x} + \sqrt{x-3}`
+ *     整体交给 KaTeX，二元运算符间距才对；
+ *   - **"是否独立公式"判定**用保守口径（空格仍切断）：判定一旦跟着合并走，
+ *     全库会有 338 处行内项（选项 174 / 答案 91 / 题干 73）被凭空升级成 $$ 居中块
+ *     —— 选项、小问、答案都是行内项，居中不是版式意图，只是这个启发式的副作用。
+ *     判定保持"原本就只有一个数学表达式"才算独立公式，分段改口径就不会掀动版式。
  */
 function renderContent(text) {
   if (!text) return ''
   const processed = preprocessMath(String(text))
   const segments = splitToSegments(processed)
-  const mathSegs = segments.filter(s => s.isMath && s.text)
-  const hasRealText = segments.some(s => !s.isMath && s.text.trim().length > 0)
-  const standalone = mathSegs.length === 1 && !hasRealText
+  const decisionSegs = splitToSegments(processed, { glueInnerSpaces: false })
+  const decisionMath = decisionSegs.filter(s => s.isMath && s.text)
+  const decisionHasText = decisionSegs.some(s => !s.isMath && s.text.trim().length > 0)
+  const standalone = decisionMath.length === 1 && !decisionHasText
   let html = ''
   for (const seg of segments) {
     if (seg.isMath && seg.text) {
@@ -409,6 +489,8 @@ export {
   convertSqrt,
   splitToSegments,
   isMathChar,
+  isMathInnerSpace,
+  TRAILING_SENTENCE_PUNCT,
   renderContent,
   auditLoopDotRendering,
 }
