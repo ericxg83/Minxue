@@ -39,11 +39,15 @@ test('callVisionCompletion 的三处备份供应商注入点必须受 noBackup �
     || src.includes('if (!noBackup && !freeOnly && gmiFirst && gmiVendor)'),
     'GMI_FIRST 插队分支必须受 noBackup 门禁'
   )
-  // 备份供应商兜底循环（BACKUP_CONFIG.VENDORS）在 callVisionCompletion 内必须被 if (!noBackup) 包裹
+  // 备份供应商兜底循环（BACKUP_CONFIG.VENDORS）在 callVisionCompletion 内必须被
+  // if (!noBackup || strongBackupOnly) 门禁包裹：noBackup 默认仍拒绝一切备份；
+  // 仅当显式 strongBackupOnly=1 时放行 STRONG_VL_FALLBACK_VENDORS 强模型白名单
+  // （2026-09-21 答案册解析故障：魔搭余额耗尽时降级到付费 huihuiyun gemini，
+  //   免费弱模型依旧被排除——门禁语义未放宽，只是加了一个付费强模型例外口子）。
   const visionFn = src.slice(src.indexOf('export async function callVisionCompletion'))
-  const guardIdx = visionFn.indexOf('if (!noBackup) {')
+  const guardIdx = visionFn.indexOf('if (!noBackup || strongBackupOnly) {')
   const vendorIdx = visionFn.indexOf('for (const vendor of BACKUP_CONFIG.VENDORS)', guardIdx)
-  assert.ok(guardIdx > 0 && vendorIdx > guardIdx, '备份供应商兜底循环必须位于 if (!noBackup) 门禁之后')
+  assert.ok(guardIdx > 0 && vendorIdx > guardIdx, '备份供应商兜底循环必须位于 if (!noBackup || strongBackupOnly) 门禁之后')
 })
 
 test('分批 OCR 必须走 mapWithConcurrency 并发上限，不得裸 Promise.all 打满配额', () => {

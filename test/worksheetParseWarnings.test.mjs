@@ -27,7 +27,15 @@ test('buildSeqAnomalyWarning：有结构性异常时必须出文案并列出条�
   const w = buildSeqAnomalyWarning(lc)
   assert.ok(w && w.includes('1 处答案页题号连续性异常'), '必须报出异常条数')
   assert.ok(w.includes('第19章测试(一)'), '必须带上具体单元，便于定位')
-  assert.ok(w.includes('重新解析'), '必须给出可执行入口')
+  // 建议句必须指向**界面上真实存在**的入口。
+  // 2026-09-21 修正：旧断言要求含「重新解析」，它对着一句错文案写的——原文案让老师去
+  // 「『修复试卷单元』面板」，但该面板在 PC 工作台里根本不存在（模板止于
+  // WorksheetManagement.vue:219，而修复逻辑全在 <script setup> 741 行起、无 UI 触发点）。
+  // 现在入口是列表页的「编辑」按钮（handleUploadPdf → 重新上传并重解析）。
+  assert.ok(w.includes('编辑'), '必须给出界面上真实存在的入口（列表页『编辑』= 重新上传并重解析）')
+  assert.ok(!w.includes('修复试卷单元'), '不得再指向不存在的『修复试卷单元』面板')
+  // 发布闸靠这个信号词判定 blocking（RISK_WARNING_RE），删了它 409 拦截就失效
+  assert.ok(w.includes('题号连续性异常'), '发布闸信号词「题号连续性异常」不得移除')
 })
 
 test('buildSeqAnomalyWarning：无异常返回 null（不得凭空告警）', () => {

@@ -729,8 +729,9 @@ async function doParseImages(worksheetId, files) {
   // 章节标题只出现在首页，后续页答案要延续上一页的章节，否则会落到 section=null
   // 与其它章节的同题号互相覆盖。
   const ocrFailedPages = []
+  const ocrBackupPages = [] // 走了备用视觉模型的页，落库进 parse_warning
   const ocrContents = await Promise.all(
-    files.map((f, i) => ocrExtractSafe(f.buffer.toString('base64'), i, ocrFailedPages))
+    files.map((f, i) => ocrExtractSafe(f.buffer.toString('base64'), i, ocrFailedPages, ocrBackupPages))
   )
   if (ocrFailedPages.length === files.length) {
     throw new Error(`全部 ${files.length} 页 OCR 识别失败（AI 服务可能暂时不可用），请稍后重试`)
@@ -746,6 +747,7 @@ async function doParseImages(worksheetId, files) {
   await processOcrResults(worksheetId, parsedAnswers, {
     lowConfidence,
     ocrFailedPages,
+    ocrBackupPages,
     sourceLabel: '图片',
   })
 }
@@ -803,6 +805,7 @@ async function doParse(worksheetId, file, precomputedAnswers = null, isCombined 
   let markerFound = false
   let ocrTruncatedInfo = null
   const ocrFailedPages = []
+  const ocrBackupPages = [] // 走了备用视觉模型的页（{page, vendor}），落库进 parse_warning
   let ocrPagesTried = 0
 
   if (fullText && fullText.trim().length > 50) {
@@ -859,7 +862,7 @@ async function doParse(worksheetId, file, precomputedAnswers = null, isCombined 
       // OCR 并行，解析按页顺序（单元跨页延续，见 processOcrBatch 说明）
       ocrPagesTried = images.length
       const ocrContents = await Promise.all(
-        images.map((img, i) => ocrExtractFromBuffer(img, i, ocrFailedPages))
+        images.map((img, i) => ocrExtractFromBuffer(img, i, ocrFailedPages, ocrBackupPages))
       )
       let carryState = null
       for (let i = 0; i < ocrContents.length; i++) {
@@ -929,6 +932,7 @@ async function doParse(worksheetId, file, precomputedAnswers = null, isCombined 
     markerFound,
     lowConfidence,
     ocrFailedPages,
+    ocrBackupPages,
     sourceLabel: 'PDF',
   })
 }
@@ -975,12 +979,12 @@ async function mapWithConcurrency(items, limit, fn) {
 
 // 单页 OCR + 一次空结果重试（模型偶发返回空串）。真实失败页号统一由本函数登记到
 // ocrFailedPages：首试失败登记走 scratch 数组，重试成功即撤销，避免误报"第 X 页识别失败"。
-async function ocrPageWithRetry(imgBuffer, realPage, ocrFailedPages) {
+async function ocrPageWithRetry(imgBuffer, realPage, ocrFailedPages, backupPages) {
   const scratch = []
-  let content = await ocrExtractFromBuffer(imgBuffer, realPage - 1, scratch)
+  let content = await ocrExtractFromBuffer(imgBuffer, realPage - 1, scratch, backupPages)
   if (scratch.length > 0 || !(content || '').trim()) {
     console.warn(`[分批解析] 第 ${realPage} 页 OCR ${scratch.length > 0 ? '失败' : '结果为空'}，重试 1 次`)
-    content = await ocrExtractFromBuffer(imgBuffer, realPage - 1, scratch)
+    content = await ocrExtractFromBuffer(imgBuffer, realPage - 1, scratch, backupPages)
   }
   if (!(content || '').trim() && !ocrFailedPages.includes(realPage)) {
     ocrFailedPages.push(realPage)
@@ -988,7 +992,7 @@ async function ocrPageWithRetry(imgBuffer, realPage, ocrFailedPages) {
   return content || ''
 }
 
-async function processOcrBatch(fileBuffer, startPage, endPage, carryState, lowConfidence, ocrFailedPages) {
+async function processOcrBatch(fileBuffer, startPage, endPage, carryState, lowConfidence, ocrFailedPages, backupPages) {
   let { images } = await renderPdfToJpegs(fileBuffer, {
     scale: 3,
     startPage,
@@ -998,7 +1002,7 @@ async function processOcrBatch(fileBuffer, startPage, endPage, carryState, lowCo
   const ocrContents = await mapWithConcurrency(
     images,
     OCR_PAGE_CONCURRENCY,
-    (img, i) => ocrPageWithRetry(img, startPage + i, ocrFailedPages)
+    (img, i) => ocrPageWithRetry(img, startPage + i, ocrFailedPages, backupPages)
   )
   images = null // 断引用：JPEG buffer 不与 OCR 文本同时存活到解析阶段，下一批分配大对象时可被回收
 
@@ -1029,6 +1033,7 @@ export async function doParseOcrBatched(worksheetId, fileBuffer, totalPages, pre
 
   const lowConfidence = []
   const ocrFailedPages = [] // 跨批累积，存真实页号
+  const ocrBackupPages = [] // 跨批累积：走了备用视觉模型的页（{page, vendor}），落库进 parse_warning
   let carryState = null // 单元标题跨批延续（与跨页延续同一机制）
   let ocrPagesTried = 0
   let anySaved = false
@@ -1037,7 +1042,7 @@ export async function doParseOcrBatched(worksheetId, fileBuffer, totalPages, pre
     const end = Math.min(start + OCR_BATCH_SIZE - 1, effectivePages)
     console.log(`[分批解析] worksheet=${worksheetId} 第 ${start}-${end} 页 / 共 ${effectivePages} 页`)
     const batch = await withBatchTimeout(
-      processOcrBatch(fileBuffer, start, end, carryState, lowConfidence, ocrFailedPages),
+      processOcrBatch(fileBuffer, start, end, carryState, lowConfidence, ocrFailedPages, ocrBackupPages),
       BATCH_TIMEOUT_MS,
       `第 ${start}-${end} 页解析超时（单批超过 ${BATCH_TIMEOUT_MS / 60000} 分钟）`
     )
@@ -1116,6 +1121,9 @@ export async function doParseOcrBatched(worksheetId, fileBuffer, totalPages, pre
       // 不再建议用户去"裁剪"——对纯答案 PDF 用户无意义。
       warnings.push('OCR 识别置信度偏低，建议在审核页复核若干条答案。')
     }
+    // 备用视觉模型页（软提示，不阻断发布）：放在最后 push，避免改变上面「低置信度」分支的既有触发条件
+    const backupWarning = buildBackupModelWarning(ocrBackupPages)
+    if (backupWarning) warnings.push(backupWarning)
   }
 
   await updateWorksheetParseStatus(worksheetId, {
@@ -1153,7 +1161,68 @@ export function buildSeqAnomalyWarning(lowConfidence) {
     .map(a => (a.unit_key ? `[${a.unit_key}] ${a.message}` : a.message))
     .filter(Boolean)
   const more = seqAnomalies.length > 5 ? `等 ${seqAnomalies.length} 处` : ''
-  return `检测到 ${seqAnomalies.length} 处答案页题号连续性异常（可能漏识别单元/大题组标题）：${sample.join('；')}${more ? '；' + more : ''}。建议在『修复试卷单元』面板点击『重新解析』或检查答案PDF是否完整。`
+  // 末尾建议句必须指向**界面上真实存在的入口**。
+  // 2026-09-21 修正：原文案是「建议在『修复试卷单元』面板点击『重新解析』」，
+  // 但该面板**在 PC 工作台里根本不存在**——`WorksheetManagement.vue` 的模板止于 219 行，
+  // 而修复相关的 `showFixDialog` / `suspectWorksheets` / `fix-exam-units` 全部只写在
+  // `<script setup>`（741 行起）里，没有任何 UI 触发点 ⇒ 老师看到告警后**无从下手**。
+  // 现在改为指向列表页真实存在的「编辑」（= 重新上传并重解析，见 handleUploadPdf）。
+  //
+  // ⚠️ 文案里的「题号连续性异常」是发布闸的信号词，被
+  //    worksheetPublishRiskService.RISK_WARNING_RE 匹配（blocking 时发布返回 409），
+  //    改这句可以，删这个词不行。
+  return `检测到 ${seqAnomalies.length} 处答案页题号连续性异常（可能漏识别单元/大题组标题）：${sample.join('；')}${more ? '；' + more : ''}。建议在本页该练习册上点『编辑』重新上传答案 PDF，或检查答案 PDF 是否完整。`
+}
+
+/**
+ * 记录/撤销「该页由备用视觉模型识别」标记（2026-09-21）。
+ *
+ * 语义：以**该页最终被采用的那次调用**为准——
+ *   usedBackup=true  → 记下 { page, vendor }（已有同页记录则覆盖）
+ *   usedBackup=false → 撤销同页记录
+ * 第二条在处理「首试失败/空 → 重试」时至关重要：首试降级到备用模型、重试回到主力模型时，
+ * 若只记不撤，会把主力模型读出来的页也报成"需人工复核"，制造假告警。
+ *
+ * @param {Array<{page:number, vendor:string|null}>|undefined} backupPages 调用方持有的跨页收集器
+ * @param {number} page 真实页号（1-based）
+ */
+function noteBackupModel(backupPages, page, usedBackup, vendorName) {
+  if (!Array.isArray(backupPages) || !Number.isFinite(page)) return
+  const idx = backupPages.findIndex(p => p && p.page === page)
+  if (usedBackup) {
+    const rec = { page, vendor: vendorName || null }
+    if (idx >= 0) backupPages[idx] = rec
+    else backupPages.push(rec)
+  } else if (idx >= 0) {
+    backupPages.splice(idx, 1)
+  }
+}
+
+/**
+ * 「备用视觉模型页」告警文案（单趟/分批/图片三条路径**共用这一份**，禁止再复制）。
+ *
+ * 这条告警是**软提示，刻意不阻断发布**：
+ *   - 它不是结构性错位信号（不像题号连续性异常那样必然意味着答案张冠李戴），只是"这几页
+ *     的可信度低于主力模型"，需要老师看一眼，不需要拒绝发布；
+ *   - 因此文案**不得命中 worksheetPublishRiskService.RISK_WARNING_RE 的任一信号词**
+ *     （命中即 blocking → 发布被 409 拦下，把"提示复核"变成"挡住流程"）；
+ *   - 同时**不得含 "OCR 识别失败"**：nightParseService 以 `parse_warning LIKE '%OCR 识别失败%'`
+ *     筛选夜间自动补跑对象，含该词会让**已成功**的册子被误判去重跑。
+ *   以上两条约束由 test/worksheetBackupModelWarning.test.mjs 锁死。
+ *
+ * 稳定短语「备用视觉模型」供后续 SQL 排查使用（`parse_warning LIKE '%备用视觉模型%'`）。
+ */
+export function buildBackupModelWarning(backupPages) {
+  const list = Array.isArray(backupPages) ? backupPages.filter(p => p && Number.isFinite(p.page)) : []
+  if (list.length === 0) return null
+  // 并发收集顺序不定，必须按页号排序后再拼接（否则文案每次都不一样，无法比对/排查）
+  const pages = [...new Set(list.map(p => p.page))].sort((a, b) => a - b)
+  const vendors = [...new Set(list.map(p => p.vendor).filter(Boolean))]
+  const shown = pages.slice(0, 12).join('、')
+  const more = pages.length > 12 ? ` 等 ${pages.length} 页` : ''
+  const via = vendors.length ? `（${vendors.join('/')}）` : ''
+  return `需人工复核：第 ${shown}${more} 页由备用视觉模型${via}识别（当日主力模型配额耗尽时自动降级），`
+    + '这类页可能出现识别不准甚至凭空编造内容，建议对照答案 PDF 逐页复核这几页的答案。'
 }
 
 /** 普通低置信度条目（排除 kind='question_seq_anomaly' 的结构性异常，后者单独成条告警） */
@@ -1202,7 +1271,7 @@ function dedupeAnswers(parsedAnswers) {
 }
 
 async function processOcrResults(worksheetId, parsedAnswers, options = {}) {
-  const { ocrTruncatedInfo, markerFound, lowConfidence = [], ocrFailedPages = [], sourceLabel = '文件' } = options
+  const { ocrTruncatedInfo, markerFound, lowConfidence = [], ocrFailedPages = [], ocrBackupPages = [], sourceLabel = '文件' } = options
 
   parsedAnswers = dedupeAnswers(parsedAnswers)
 
@@ -1240,6 +1309,13 @@ async function processOcrResults(worksheetId, parsedAnswers, options = {}) {
   const seqWarning = buildSeqAnomalyWarning(lowConfidence)
   if (seqWarning) {
     warning = warning ? `${warning}\n${seqWarning}` : seqWarning
+  }
+
+  // 备用视觉模型页（软提示，不阻断发布）：只在解析出答案时提示——0 条答案的那条告警
+  // 已经说明问题，再叠一句"需人工复核"是噪音。
+  const backupWarning = parsedAnswers.length > 0 ? buildBackupModelWarning(ocrBackupPages) : null
+  if (backupWarning) {
+    warning = warning ? `${warning}\n${backupWarning}` : backupWarning
   }
 
   await updateWorksheetParseStatus(worksheetId, {
@@ -1337,9 +1413,9 @@ export const ANSWER_OCR_SYSTEM_PROMPT = [
 ].join('\n')
 
 // 单页 OCR 容错：一页失败不再连坐整批（此前 Promise.all 一页 reject 即丢弃全部页结果）
-async function ocrExtractSafe(base64Image, pageIndex, failedPages) {
+async function ocrExtractSafe(base64Image, pageIndex, failedPages, backupPages) {
   try {
-    return await ocrExtractRawText(base64Image)
+    return await ocrExtractRawText(base64Image, backupPages, pageIndex + 1)
   } catch (e) {
     console.error(`第 ${pageIndex + 1} 页 OCR 失败:`, e.message)
     failedPages.push(pageIndex + 1)
@@ -1352,17 +1428,29 @@ async function ocrExtractSafe(base64Image, pageIndex, failedPages) {
 // noBackup=true：答案页 OCR 质量敏感——弱备份模型读双栏排版会错乱阅读顺序、漏读单元
 // 标题，整本答案错位（2026-09-08 九上上海作业答案 78 页实测 84 处题号错位）。
 // 魔搭耗尽时宁可本页失败（进 failedPages 重试/告警），不用弱模型输出污染答案库。
-async function ocrExtractFromBuffer(imgBuffer, pageIndex, failedPages) {
+// strongBackupOnly=true（2026-09-21）：魔搭耗尽后允许降级到付费强模型白名单
+// （STRONG_VL_FALLBACK_VENDORS，huihuiyun gemini）——免费弱模型依旧被排除。
+// backupPages：可选的"走了备用视觉模型"收集器（元素 {page, vendor}），由调用方传入并跨页累积。
+// 为什么必须收集（2026-09-21 八上精练答案册事故）：callVisionCompletion 的每条成功返回路径
+// 都带 usedBackup / vendorName，但这里**只解构了 content**，于是"这一页是主力模型读的、
+// 还是降级到备用强模型读的"既不落库也不进告警。该事故中魔搭配额耗尽后降级模型读出了
+// 34 条凭空编造的答案（把数学页编成整套「道德与法治」答案，还合成了伪单元「试卷(十四)期末测试卷」），
+// 且幻觉自建单元、题号从 1 重排 ⇒ 题号连续性校验**零告警**，只能靠事后与离线基准做键集 diff 才挖出来。
+// 落库这一标记后，凡走备用模型的页都会进 parse_warning（列表页/审核页可见），
+// 把"事后全库排查"变成"上传即提示人工复核"。这是软提示，刻意不阻断发布，见 buildBackupModelWarning。
+async function ocrExtractFromBuffer(imgBuffer, pageIndex, failedPages, backupPages) {
   try {
     const url = await uploadImage(imgBuffer, `page_${pageIndex + 1}.jpg`, 'system')
-    const { content } = await callVisionCompletion({
+    const { content, usedBackup, vendorName } = await callVisionCompletion({
       imageDataURL: url,
       systemPrompt: ANSWER_OCR_SYSTEM_PROMPT,
       userText: '请提取这份练习册答案中的所有单元标题、题号和对应答案。',
       temperature: 0.0,
       maxTokens: 8192,
       noBackup: true,
+      strongBackupOnly: true,
     })
+    noteBackupModel(backupPages, pageIndex + 1, usedBackup, vendorName)
     return content || ''
   } catch (e) {
     console.error(`第 ${pageIndex + 1} 页 OCR 失败（OSS URL 模式）:`, e.message)
@@ -1371,15 +1459,17 @@ async function ocrExtractFromBuffer(imgBuffer, pageIndex, failedPages) {
   }
 }
 
-async function ocrExtractRawText(base64Image) {
-  const { content } = await callVisionCompletion({
+async function ocrExtractRawText(base64Image, backupPages, pageNumber) {
+  const { content, usedBackup, vendorName } = await callVisionCompletion({
     imageDataURL: `data:image/jpeg;base64,${base64Image}`,
     systemPrompt: ANSWER_OCR_SYSTEM_PROMPT,
     userText: '请提取这份练习册答案中的所有单元标题、题号和对应答案。',
     temperature: 0.0,
     maxTokens: 8192,
     noBackup: true,
+    strongBackupOnly: true,
   })
+  noteBackupModel(backupPages, pageNumber, usedBackup, vendorName)
   return content || ''
 }
 

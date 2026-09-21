@@ -14,6 +14,21 @@
       </div>
     </div>
 
+    <!-- 解析告警常驻展示（2026-09-21）：列表页那条 el-alert 只在上传流程里出现，刷新即消失；
+         而审核页才是老师逐条复核答案的地方，「需人工复核：第 X、Y 页由备用视觉模型识别」
+         必须在这里看得见，否则标记等于白打。数据源 worksheet.parse_warning
+         （含「备用视觉模型」稳定短语，见 server/routes/worksheets.js → buildBackupModelWarning）。 -->
+    <el-alert
+      v-if="worksheet?.parse_warning"
+      class="parse-warning-banner"
+      type="warning"
+      title="答案解析提示"
+      :closable="false"
+      show-icon
+    >
+      <div class="parse-warning-text">{{ worksheet.parse_warning }}</div>
+    </el-alert>
+
     <div class="review-body">
       <!-- 左栏: PDF预览 -->
       <div class="panel pdf-panel">
@@ -348,6 +363,21 @@ const confProgress = (c) => {
   gap: 1px;
   background: var(--wb-border);
   overflow: hidden;
+}
+
+/* 解析告警横幅：夹在 header 与三栏之间，不占三栏高度（flex-shrink:0） */
+.parse-warning-banner {
+  flex-shrink: 0;
+  margin: 0;
+  border-radius: 0;
+}
+
+.parse-warning-text {
+  font-size: 12px;
+  line-height: 1.7;
+  /* parse_warning 是多条告警用换行拼接的，必须保留换行否则挤成一坨 */
+  white-space: pre-line;
+  word-break: break-word;
 }
 
 .panel {
