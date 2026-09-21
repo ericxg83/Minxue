@@ -94,6 +94,7 @@ async function refineStoredBlocks ({ questions, pageBuffers }) {
   return updated
 }
 import { extractFinalAnswerFromAnalysis, isNarrativeAnswer } from './utils/aiParseSelfCheck.js'
+import { verifyComparisonAnswer } from './utils/comparisonAnswerVerifier.js'
 import { rescueReferenceAnswer } from './utils/referenceAnswerRescue.js'
 import { describeReferenceAnswerRisk } from './utils/referenceAnswerSelfCheck.js'
 import { voteAnswers, describeConsensus, answersEquivalent } from './utils/answerConsensus.js'
@@ -1994,6 +1995,13 @@ const generateMissingAnswers = async (questions, imageBuffer = null, taskId = nu
               await rejectArithmeticMismatch(q, cached.analysis, arithmeticValidation)
               return
             }
+            // 比较大小确定性校验同样覆盖缓存命中路径（2026-09-21）：历史缓存若沉淀了
+            // 算反的参考答案，复用时也会误判学生，必须一并拦截转人工。
+            const cmpValidationCached = verifyComparisonAnswer(content, finalAnswer)
+            if (cmpValidationCached && !cmpValidationCached.ok) {
+              await rejectArithmeticMismatch(q, cached.analysis, cmpValidationCached)
+              return
+            }
             try {
               await updateQuestionAnswer(q.id, finalAnswer, cached.analysis)
               q.answer = finalAnswer
@@ -2078,6 +2086,14 @@ const generateMissingAnswers = async (questions, imageBuffer = null, taskId = nu
         const arithmeticValidation = validateArithmeticAnswer(content, finalAnswer)
         if (!arithmeticValidation.isValid) {
           await rejectArithmeticMismatch(q, result.analysis, arithmeticValidation)
+          return
+        }
+        // 比较大小题型确定性校验（2026-09-21 √7>3 事故）：答案引擎可能把大小关系算反，
+        // 且 describeReferenceAnswerRisk 只查算式、对自然语言反差不敏感。比较大小是确定性
+        // 题型，自己数值求解两个表达式比对；不一致则清空答案 + 转人工，绝不写错答案导致误判。
+        const cmpValidation = verifyComparisonAnswer(content, finalAnswer)
+        if (cmpValidation && !cmpValidation.ok) {
+          await rejectArithmeticMismatch(q, result.analysis, cmpValidation)
           return
         }
         try {
