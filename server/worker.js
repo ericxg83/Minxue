@@ -1641,7 +1641,11 @@ export const generateAnswerForQuestion = async (questionContent, retryCount = 0)
       systemContent: prompt,
       userContent: `请计算以下题目的标准答案：\n\n${questionContent}`,
       temperature: 0.2,
-      maxTokens: 2048
+      // 2026-09-21 由 2048 提到 4096：横评（_bench_answer_models_0921）实测
+      // deepseek-v4-flash-0731 在「|a|=3,b²=16,ab<0 求 a+b」上思考吃满 2048 上限、
+      // 答案被截断成空（out=2048/reasoning=2048）。max_tokens 只是上限，按实际输出计费，
+      // 调高不增加成本，但能防住「思考没收敛 → 答案丢失」。
+      maxTokens: 4096
     })
 
     const jsonStr = stripCodeFence(content)

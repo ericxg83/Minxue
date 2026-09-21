@@ -126,3 +126,30 @@ test('文案：分歧必须列出候选与票数，并带上求解通道', () =>
   assert.ok(text.includes('Huihuiyun:deepseek-v4-flash'), text)
   assert.ok(text.includes('人工核对'), text)
 })
+
+test('归一化：剥掉「答案 + 自证尾巴」（2026-09-21 存量重跑实测）', () => {
+  // 库内常写成「18√7，与答案一致」这种「答案 + 自证」形式；
+  // 不剥掉会把同一个答案判成两个值，白报一次分歧。
+  assert.ok(answersEquivalent('18√7，与答案一致', '18√7'))
+  assert.ok(answersEquivalent('B（已核对）', 'B'))
+  assert.equal(normalizeAnswerKey('18√7，与答案一致'), '18√7')
+  assert.equal(normalizeAnswerKey('B（核对无误）'), 'B')
+})
+
+test('回归：自证尾巴剥离不得误伤正常多空答案', () => {
+  // 「1,2」里的逗号是分空分隔，不是自证尾巴
+  assert.ok(answersEquivalent('1,2', '1,2'))
+  assert.ok(!answersEquivalent('1,2', '1'))
+  // 「正确」只作为尾巴时才剥；出现在值里不能动
+  assert.equal(normalizeAnswerKey('3'), '3')
+})
+
+test('归一化：剥掉 LaTeX 定界符 $（2026-09-21 存量重跑实测）', () => {
+  // 库内混着 `$x=-\frac{1}{2}$` 与 `x=-1/2` 两种写法，是同一个答案
+  assert.ok(answersEquivalent('$x=-\\frac{1}{2}$', 'x=-1/2'))
+  assert.ok(answersEquivalent('$45^\\circ$', '45°'))
+  // 字符串键不要求逐字相同（\frac 折叠成 (1)/(2) 会留括号），但数值必须等价；
+  // 简单式子的键则应完全一致。
+  assert.equal(normalizeAnswerKey('$45^\\circ$'), '45°')
+  assert.equal(normalizeAnswerKey('$x=3$'), '3')
+})

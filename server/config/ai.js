@@ -492,7 +492,20 @@ export const BACKUP_VENDOR_DEFS = [
     vlModels: [],
     maxTokens: 32768,
     referer: null,
-    extraBody: { reasoning_effort: 'none' },
+    // 2026-09-21 由 { reasoning_effort: 'none' } 改为 null —— 这是一次**孤儿配置事故**：
+    //   · 该字段原本是为视觉模型 qwen3.8-max 加的（它不关思考会「思考链吃满 max_tokens → content 空」，
+    //     见上方 2026-09-20 那段的第 ① 条）；
+    //   · 2026-09-20 换 Key 后，本账号的模型分组里**已经没有 qwen3.8-max**（只剩文本模型），
+    //     但这个供应商级的 extraBody 忘了同步删除；
+    //   · 于是 deepseek-v4-flash 这个**推理模型**被强制关掉了思考模式。
+    // 实测代价（server/_probe_huihuiyun_authenticity_0921.mjs）：
+    //   · 事故题（x²+y² 的平方根）：关思考 ±5 ✗ / ±10 ✓（摇摆），开思考 ±10 ✓ / ±10 ✓；
+    //   · 延迟反而更差：关思考 95.3s vs 开思考 10.6s（慢 9 倍）；
+    //   · tokenizer 指纹：开思考时 prompt_tokens=889，与 Bailian 同模型完全一致
+    //     （关思考时被网关改写为 810）→ 模型没问题，是配置把它废了。
+    // ⚠️ 若将来本供应商重新加回 qwen3.8-max 视觉，必须改成**按模型下发** extraBody，
+    //    不能再回到供应商级一刀切（上方注释已预警过这个坑）。
+    extraBody: null,
   },
   {
     // ZenMux (https://zenmux.ai)：多模型聚合网关，OpenAI 兼容。
