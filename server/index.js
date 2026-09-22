@@ -91,7 +91,7 @@ import { processTask } from './worker.js'
 // 定时回填走 LLM（backfillTags.js 的 generateTag），用于修正上传热路径产出的
 // 本地占位标签/难度（difficulty 默认 3），写入 tags_source='ai' 后退出筛选。
 import { generateTag as generateTagWithLLM } from './backfillTags.js'
-import { AI_CONFIG, getAIHeaders, buildTaggingPrompt, resetModelIndex } from './config/ai.js'
+import { AI_CONFIG, getAIHeaders, buildTaggingPrompt, resetModelIndex, WORKBOOK_OCR_VENDOR_CHAIN } from './config/ai.js'
 import weeklyReportRouter from './routes/weeklyReport.js'
 import worksheetsRouter from './routes/worksheets.js'
 import resourcesRouter from './routes/resources.js'
@@ -2487,10 +2487,11 @@ app.post('/api/questions/task/:taskId/refine-boxes', async (req, res) => {
     const buf = Buffer.from(await resp.arrayBuffer())
 
     const { measurePageQuestionBoxes } = await import('./services/questionBoxMeasure.js')
-    // [2026-09-22] 改为「魔搭主力 + HuihuiyunGemini 强兜底」：noBackup+strongBackupOnly 跳过
-    // 弱免费备份（SenseNova/ZenMux），魔搭耗尽时只降级到付费高质量 gemini（按 token 计费），
-    // 换取定位框精度。代价：魔搭频繁耗尽日的失败页会改走付费 gemini。
-    const r = await measurePageQuestionBoxes({ imageBuffer: buf, questions: qs, noBackup: true, strongBackupOnly: true })
+    // [2026-09-22] 魔搭失守后再改造：原「魔搭主力 + HuihuiyunGemini 强兜底」（noBackup+strongBackupOnly）
+    // 在魔搭欠费禁用后只会落 gemini-3.7-flash，绕开了矩阵评测的场景三赢家。改为显式链
+    // WORKBOOK_OCR_VENDOR_CHAIN：deepseek-flash@SenseNova 主（免费、1.7-2.1s、场景三第一）
+    // + qwen3.8-flash@Bailian 兜（qwen 系坐标基准好）。依据：_视觉模型最强阵容-全供应商矩阵评测-20260922.md §7/§9。
+    const r = await measurePageQuestionBoxes({ imageBuffer: buf, questions: qs, vendorChain: WORKBOOK_OCR_VENDOR_CHAIN })
     if (r.error || !Object.keys(r.boxes).length) {
       return res.json({ success: true, cached: false, boxes: {}, error: r.error || '未量到框' })
     }

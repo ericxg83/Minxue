@@ -15,7 +15,7 @@ import axios from 'axios'
 import sharp from 'sharp'
 import { TABLES, TASK_STATUS } from './config/neon.js'
 import { query } from './config/neon.js'
-import { AI_CONFIG, getAIHeaders, buildOCRPrompt, buildAnswerGenerationPrompt, getCurrentTextModel, getCurrentVLModel, rotateTextModel, rotateVLModel, TEXT_MODELS, VL_MODELS, callTextCompletion, callVisionCompletion, callVendorVisionCompletion, callAnswerEngineCompletion, ANSWER_ENGINE, ANSWER_QUALITY, isDegradedAnswerEngine, describeAnswerEngine } from './config/ai.js'
+import { AI_CONFIG, getAIHeaders, buildOCRPrompt, buildAnswerGenerationPrompt, getCurrentTextModel, getCurrentVLModel, rotateTextModel, rotateVLModel, TEXT_MODELS, VL_MODELS, callTextCompletion, callVisionCompletion, callVendorVisionCompletion, callAnswerEngineCompletion, ANSWER_ENGINE, ANSWER_QUALITY, isDegradedAnswerEngine, describeAnswerEngine, ANSWER_PAGE_VENDOR_CHAIN, WORKBOOK_OCR_VENDOR_CHAIN } from './config/ai.js'
 import { updateTaskStatus, createQuestions, batchUpdateQuestionTags, addWrongQuestions, createJudgement, updateQuestionAnswer, markAnswerException, markAiAnswerRisk, findCachedQuestionByFingerprint, cacheQuestion, incrementQuestionUseCount, updateQuestionCacheId, createQuestionAsset, updateQuestionDenormalizedSvg, lookupWorksheetAnswer, getWorksheetAnswersBySection, deleteQuestionsByTaskId, bulkLookupResourceAnswers, getResourceAnswersBySection, getResourceById, addSelfContainedWrongQuestion } from './services/neonService.js'
 import { uploadImage } from './services/ossService.js'
 import { enhanceAndUploadFigure } from './services/figureEnhanceService.js'
@@ -26,13 +26,14 @@ import { refineFigureBoxOnPage } from './utils/figureRegionRefiner.js'
 import { registerGeometryAssets, settleGeometryQueue } from './utils/geometryAssetQueue.js'
 import { generateTextFingerprint, generatePHash, PARSER_VERSION, TEXT_SIMILARITY_THRESHOLD } from './utils/questionFingerprint.js'
 import { uploadFilesWithRetry } from './services/uploadRetryManager.js'
-import { judgeAnswer, normalizeQuestionType, normalizeChoiceAnswer, extractChoiceLetters, isGradingCommentAnswer, stripAnswerScaffolding, detectUnverifiableReference, detectReferenceMismatch, UNJUDGED_REASONS } from './services/judgeService.js'
+import { judgeAnswer, normalizeQuestionType, normalizeChoiceAnswer, extractChoiceLetters, isGradingCommentAnswer, stripAnswerScaffolding, detectUnverifiableReference, describeUnverifiableReference, detectReferenceMismatch, UNJUDGED_REASONS } from './services/judgeService.js'
 import { aiJudgeAnswer, selectJudgeCandidates, AI_JUDGE_ENABLED } from './services/aiJudgeService.js'
 import { normalizeSectionName, splitSubAnswers, splitOcrQuestionsBySubNo, isSubRowConsistentWithWhole } from './services/answerParseService.js'
 import { classifyQuestionLocally } from './utils/localTagger.js'
 import { finalizeGradingBatch } from './services/gradingFinalizer.js'
 import { classifyLastError } from './pendingTaskRecovery.js'
 import { isValidImageBuffer, checkImageResolution } from './utils/imageValidator.js'
+import { NO_PROXY_DOWNLOAD_OPTS } from './utils/noProxyHttp.js'
 import { formatOptionsForPrompt } from './utils/optionText.js'
 import { validateArithmeticAnswer } from './utils/arithmeticAnswerValidator.js'
 import { aiParseSelfCheck } from './utils/aiParseSelfCheck.js'
@@ -76,7 +77,9 @@ async function refineStoredBlocks ({ questions, pageBuffers }) {
     if (!buf) continue
     try {
       const { measurePageQuestionBoxes } = await import('./services/questionBoxMeasure.js')
-      const { boxes, error } = await measurePageQuestionBoxes({ imageBuffer: buf, questions: qs, noBackup: true, strongBackupOnly: true })
+      // 2026-09-22 魔搭失守：原 noBackup+strongBackupOnly（魔搭死→落 gemini-3.7-flash）改显式链，
+      // deepseek-flash@SenseNova 主 + qwen3.8-flash@Bailian 兜（矩阵评测场景三赢家，见 ai.js 链定义）。
+      const { boxes, error } = await measurePageQuestionBoxes({ imageBuffer: buf, questions: qs, vendorChain: WORKBOOK_OCR_VENDOR_CHAIN })
       if (error) {
         console.warn(`   [写入侧框] 第 ${page} 页补测失败：${error}（保留占位框，读取侧兜底）`)
         consecutiveFail++
@@ -597,7 +600,7 @@ console.log(`🔗 [AI Config] Endpoint: ${AI_CONFIG.ENDPOINT}`)
     ? `启用 → ${ANSWER_ENGINE.VENDOR}:${ANSWER_ENGINE.MODEL}` +
       `（同供应商降级: ${ANSWER_ENGINE.FALLBACK_MODELS.join(' → ') || '无'}` +
       `｜跨供应商兜底: ${_d.fallbackChain.join(' → ') || '无'}` +
-      `｜再兜底: 通用文本链路` +
+      `｜再兜底: 留空转人工（通用文本链路已下线，2026-09-22）` +
       `｜超时 ${ANSWER_ENGINE.TIMEOUT_MS}ms，Key冷却 ${Math.round(ANSWER_ENGINE.KEY_COOLDOWN_MS / 3600000)}h）`
     : '已关闭 → 回退通用文本链路（ANSWER_ENGINE_ENABLED=0）'}`)
   // Key 池判据必须取「主供应商自己的 envKey」——原先这里硬编码 SENSENOVA_API_KEY，
@@ -862,10 +865,13 @@ const bufferToBase64 = (buffer) => {
 const downloadImage = async (imageUrl) => {
   try {
     console.log(`   正在下载图片: ${imageUrl.substring(0, 80)}...`)
-    const response = await axios.get(imageUrl, {
-      responseType: 'arraybuffer',
-      timeout: 30000
-    })
+    // ── 必须走禁代理选项（2026-09-22 事故）──
+    // 本机/容器环境若设了 HTTP_PROXY / HTTPS_PROXY（开发机沙箱、公司网关），axios 会**默认**
+    // 把请求交给该代理；而 `server/config/ai.js` 早已对 AI 调用显式关代理，只有这里漏了。
+    // 后果：OSS 页图 GET 被代理拦下返回 400 → 抛「下载图片失败: Request failed with status
+    // code 400」→ 整个任务 failed（09-22 三个作业任务共 50 题答案永久为空）。
+    // 实测同一 URL 直连 200 / 1MB，走代理才 400。选项集中在 server/utils/noProxyHttp.js。
+    const response = await axios.get(imageUrl, NO_PROXY_DOWNLOAD_OPTS)
     const buf = Buffer.from(response.data)
     console.log(`   图片下载成功: ${buf.length} bytes`)
 
@@ -968,7 +974,12 @@ const markUnjudgedReasons = async (questions) => {
     if (reason) targets.push({ q, reason })
   }
   for (const { q, reason } of targets) {
-    const reasonText = UNJUDGED_REASONS[reason] || reason
+    // 「无法自动核对」这一档必须给精确说明（2026-09-22）：通用文案「含略/见解析/答案不唯一」
+    // 会把"参考答案是整段证明"的题也说成"含略"，老师会以为答案是空的 —— 而参考答案
+    // 其实好好地显示着（answer 非空）。这里按答案册原文分三档描述，文案里带上原答案。
+    const reasonText = reason === 'unverifiable_reference'
+      ? describeUnverifiableReference(q.answer)
+      : (UNJUDGED_REASONS[reason] || reason)
     try {
       await markAnswerException(q.id, reasonText)
       console.log(`  [Unjudged] q=${String(q.id).substring(0, 8)} 判不出 → ${reasonText}`)
@@ -1835,6 +1846,29 @@ const saveQuestionSubject = async (q, subject) => {
   }
 }
 
+// ⚡ 跨任务同指纹共享求解（2026-09-22 并发缓存击穿修复 · 进程内层）。
+//
+// 背景（2026-09-22 评审实测）：同一班学生同时上传同一份卷 → 多个任务并发批改，
+//   原逻辑「先查缓存→查不到就求解→求解完写缓存」在同一时刻全都查不到（缓存还没写），
+//   于是同一道题被答案引擎各算 N 次，答案可能分叉（实测跨学生真分歧 10.4%，
+//   如「√9的算术平方根是」4 个学生一半拿到「3」一半拿到「√3」）。
+//
+// 机制：模块级 in-flight Map，fingerprint → 正在进行的求解 promise。
+//   后到的同指纹题目直接 await 同一个 promise —— 进程内同指纹永远只有一次引擎调用，
+//   且所有等待者拿到同一个 result（一致性的根）。promise 结束后自动出 Map。
+//   失败会原样传播给所有等待者（各自走既有异常路径），与单题失败行为一致。
+const inflightAnswerByFingerprint = new Map()
+
+const solveAnswerShared = (fingerprint, solver) => {
+  if (!fingerprint) return { promise: solver(), shared: false }
+  const existing = inflightAnswerByFingerprint.get(fingerprint)
+  if (existing) return { promise: existing, shared: true }
+  const promise = solver()
+  inflightAnswerByFingerprint.set(fingerprint, promise)
+  promise.finally(() => inflightAnswerByFingerprint.delete(fingerprint)).catch(() => {})
+  return { promise, shared: false }
+}
+
 /**
  * Generate reference answers for ALL questions via AI calculation.
  * OCR may confuse student's selected answer with the reference answer,
@@ -2043,9 +2077,17 @@ const generateMissingAnswers = async (questions, imageBuffer = null, taskId = nu
         // ⚡ 移除了 findSimilarQuestion（逐条编辑距离计算，收益低、开销大），直接走 AI 调用
       }
 
-      cacheMissCount++
-      const result = await generateAnswerForQuestion(fullContent)
-      recordEngine(result.engine)
+      // ⚡ 同指纹共享求解（2026-09-22 并发击穿修复）：同一道题（同指纹）在进程内
+      //   只有一次真正的答案引擎调用；并发等待者复用同一个 result（consensus/engine 等只读）。
+      //   cacheMissCount / recordEngine 只记真正发起调用的那次 —— 等待者既没耗额度也没新产出。
+      const solveRun = solveAnswerShared(fingerprint, () => generateAnswerForQuestion(fullContent))
+      const result = await solveRun.promise
+      if (!solveRun.shared) {
+        cacheMissCount++
+        recordEngine(result.engine)
+      } else {
+        console.log(`     题目 ${q.id.substring(0, 8)}: ⚡ 同指纹求解进行中（另一任务发起），复用其结果`)
+      }
       const validation = validateAIAnswer(result.answer, result.analysis)
 
       if (!validation.isValid) {
@@ -2108,27 +2150,39 @@ const generateMissingAnswers = async (questions, imageBuffer = null, taskId = nu
           return
         }
         try {
-          await updateQuestionAnswer(q.id, finalAnswer, result.analysis, true)
-          q.answer = finalAnswer
-          if (result.analysis) q.analysis = result.analysis
-          updatedCount++
-          console.log(`     题目 ${q.id.substring(0, 8)}: 答案 ${oldAnswer || '(空)'} → ${finalAnswer}`)
-          await flagReferenceAnswerRisk(q, finalAnswer, result.analysis, buildAnswerTrustNotes(result))
-
-          // 非关键写入：fire-and-forget
+          // ⚡ 缓存占坑（2026-09-22 并发击穿修复 · 跨任务一致性）：
+          //   闸全部通过后、落库前，先把答案写进 question_cache。cacheQuestion 的新语义：
+          //   坑上已有【有效】答案时不覆盖，并带回先写者的 answer/analysis（adopted=true）。
+          //   若被并发任务抢先写入，本题改用先写者答案 —— 同一道题全库只有一个权威参考答案。
+          //   ⚠️ result 可能是 in-flight 共享对象，绝不能原地修改；analysis 一律走局部变量。
+          let answerAnalysis = result.analysis
           if (fingerprint) {
-            fireForget(async () => {
-              const cacheId = await cacheQuestion({
+            try {
+              const claim = await cacheQuestion({
                 content: fullContent, options, answer: finalAnswer,
                 analysis: result.analysis, question_type: q.question_type,
                 subject: q.subject, content_type: 'text'
               }, fingerprint, phash, PARSER_VERSION)
-              if (cacheId) {
-                q.cache_id = cacheId
-                await updateQuestionCacheId(q.id, cacheId)
+              if (claim && claim.id) {
+                q.cache_id = claim.id
+                fireForget(() => updateQuestionCacheId(q.id, claim.id), `cacheId q=${q.id.substring(0, 8)}`)
               }
-            }, `缓存写入 q=${q.id.substring(0, 8)}`)
+              if (claim && claim.adopted && claim.answer) {
+                console.log(`     题目 ${q.id.substring(0, 8)}: ⚡ 同指纹答案已由并发任务先写入，采用先写者答案（本次结果弃用）`)
+                finalAnswer = claim.answer
+                answerAnalysis = claim.analysis || answerAnalysis
+              }
+            } catch (err) {
+              console.warn(`     题目 ${q.id.substring(0, 8)}: 缓存占坑失败（不影响批改）: ${err.message}`)
+            }
           }
+          await updateQuestionAnswer(q.id, finalAnswer, answerAnalysis, true)
+          q.answer = finalAnswer
+          if (answerAnalysis) q.analysis = answerAnalysis
+          updatedCount++
+          console.log(`     题目 ${q.id.substring(0, 8)}: 答案 ${oldAnswer || '(空)'} → ${finalAnswer}`)
+          await flagReferenceAnswerRisk(q, finalAnswer, answerAnalysis, buildAnswerTrustNotes(result))
+
           fireForget(() => saveQuestionSubject(q, result.subject), `学科 q=${q.id.substring(0, 8)}`)
         } catch (err) {
           console.error(`     题目 ${q.id.substring(0, 8)}: 答案写入失败`, err.message)
@@ -2137,26 +2191,42 @@ const generateMissingAnswers = async (questions, imageBuffer = null, taskId = nu
         }
       } else if (result.answer) {
         let finalAnswer = extractAnswerFromAnalysis(result.answer, result.analysis, q.options)
-        placeholderCount++
         try {
-          await updateQuestionAnswer(q.id, finalAnswer, result.analysis)
-          q.answer = finalAnswer
-          if (result.analysis) q.analysis = result.analysis
-          console.log(`     题目 ${q.id.substring(0, 8)}: ${finalAnswer}`)
-
+          // ⚡ 占位答案也先看缓存坑（2026-09-22 并发击穿修复）：
+          //   cacheQuestion 的新语义保证占位答案【永远不会覆盖】坑上的有效答案
+          //   （旧逻辑 ON CONFLICT DO UPDATE 会用「待人工补充」把好答案冲掉，
+          //    下一个学生「命中但答案无效」被迫重算 —— 击穿时间线的推手之一）。
+          //   若坑上已有有效答案（并发先写者），本题直接采用，不再显示占位。
+          let answerAnalysis = result.analysis
           if (fingerprint) {
-            fireForget(async () => {
-              const cacheId = await cacheQuestion({
+            try {
+              const claim = await cacheQuestion({
                 content: fullContent, options, answer: finalAnswer,
                 analysis: result.analysis, question_type: q.question_type,
                 subject: q.subject, content_type: 'text'
               }, fingerprint, phash, PARSER_VERSION)
-              if (cacheId) {
-                q.cache_id = cacheId
-                await updateQuestionCacheId(q.id, cacheId)
+              if (claim && claim.id) {
+                q.cache_id = claim.id
+                fireForget(() => updateQuestionCacheId(q.id, claim.id), `cacheId q=${q.id.substring(0, 8)}`)
               }
-            }, `缓存写入 q=${q.id.substring(0, 8)}`)
+              if (claim && claim.adopted && claim.answer
+                  && claim.answer !== '待人工补充' && claim.answer !== '此为主观题，无唯一标准答案') {
+                console.log(`     题目 ${q.id.substring(0, 8)}: ⚡ 本次为占位答案，但缓存已有并发任务写入的有效答案，采用之`)
+                finalAnswer = claim.answer
+                answerAnalysis = claim.analysis || answerAnalysis
+              }
+            } catch (err) {
+              console.warn(`     题目 ${q.id.substring(0, 8)}: 缓存占坑失败（不影响批改）: ${err.message}`)
+            }
           }
+          if (finalAnswer === '待人工补充' || finalAnswer === '此为主观题，无唯一标准答案') {
+            placeholderCount++
+          }
+          await updateQuestionAnswer(q.id, finalAnswer, answerAnalysis)
+          q.answer = finalAnswer
+          if (answerAnalysis) q.analysis = answerAnalysis
+          console.log(`     题目 ${q.id.substring(0, 8)}: ${finalAnswer}`)
+
           fireForget(() => saveQuestionSubject(q, result.subject), `学科 q=${q.id.substring(0, 8)}`)
         } catch (err) {
           console.error(`     题目 ${q.id.substring(0, 8)}: 答案写入失败`, err.message)
@@ -4725,15 +4795,20 @@ export const processWorkbookGrading = async (job) => {
     pageBuffers.set(imageList[pageIdx].page_number || (pageIdx + 1), compressedBuffer)
 
     // OCR
+    // vendorChain（2026-09-22 魔搭失守后换链）：原 noBackup=true 锁魔搭，魔搭双 Key 欠费禁用后
+    // 已空转（noBackup 且魔搭不可用 ⇒ 本页必然失败）。批改场景矩阵评测定稿新链
+    // （_视觉模型最强阵容-全供应商矩阵评测-20260922.md §9）：
+    //   ① SenseNova deepseek-flash 主：免费、18.5s、JSON 3/3、唯一选项填满、5 场景参数全稳
+    //   ② Bailian qwen3.8-flash 兜底：批改场景唯一无灾难缺陷的次选（57.3s 慢但 JSON 稳）
+    // 配图字段（image_type/image_bbox）仍是本链的强 schema 要求——链外弱模型（丢选项的
+    // 6.8-lite、题数塌缩的 gemini-3.1-lite）被 vendorChain 排除在链外，不会静默接管。
     const { content } = await callVisionCompletion({
       imageDataURL: `data:image/jpeg;base64,${compressedBuffer.toString('base64')}`,
       systemPrompt: workbookPrompt,
       userText: '识别这张作业图片的页面标题和所有题目的学生答案。',
       temperature: 0.1,
       maxTokens: 4096,
-      // 配图字段（image_type/image_bbox）是本次新增采集，弱备份模型不守 schema 会整列丢失
-      // → 配图全空、完整性闸又判缺图。与答案页 OCR 同口径锁主力模型。见 P0-3（2026-09-21）。
-      noBackup: true
+      vendorChain: WORKBOOK_OCR_VENDOR_CHAIN,
     })
 
     if (!content) {
@@ -4872,13 +4947,16 @@ export const processWorkbookGrading = async (job) => {
     await updateTaskStatus(taskId, TASK_STATUS.PROCESSING, { progress })
   }
 
-  // 所有页面都识别失败 —— 切下一个视觉模型重试 1 次
-  // 原因：8B 配额耗尽/降智时可能全返回 0 道题，换 235B/8B-Thinking/Agnes 一次就过；
+  // 所有页面都识别失败 —— 换一条主次对调的供应商链重试 1 次
+  // 原因：主模型配额耗尽/降智时可能全返回 0 道题，换一个模型为主重试一次就过；
   // 如果重试仍 0 道题，基本可以确认是图片本身没内容（白页/过小/拍照模糊），放弃。
+  // ⚠️ 2026-09-22 魔搭失守改造：原「rotateVLModel 切下一个魔搭模型 + model 锁定重试」已失效——
+  // vendorChain 显式链模式下若锁定魔搭模型名，链上供应商会拿着魔搭模型名去请求 → 全部 404。
+  // 改为把 WORKBOOK_OCR_VENDOR_CHAIN 主次对调（deepseek 主失败 ⇒ qwen 主、deepseek 退兜底），
+  // 「换模型重试」的意图保留，链的显式质量约束不破坏。
   if (allQuestions.length === 0) {
-    const retriedModel = rotateVLModel()
-    if (retriedModel) {
-      console.warn(`🔄 [Workbook] 第 1 轮全 0 道题，切换到下一个视觉模型 (${retriedModel}) 重试 1 次...`)
+    const retryChain = [...WORKBOOK_OCR_VENDOR_CHAIN].reverse()
+    console.warn(`🔄 [Workbook] 第 1 轮全 0 道题，主次对调供应商链 (${retryChain.map(s => `${s.vendor}:${s.model}`).join(' → ')}) 重试 1 次...`)
       // 重置页级状态
       let allQuestionsRetry = []
       let ocrErrorsRetry = 0
@@ -4907,7 +4985,7 @@ export const processWorkbookGrading = async (job) => {
           userText: '识别这张作业图片的页面标题和所有题目的学生答案。',
           temperature: 0.1,
           maxTokens: 4096,
-          model: retriedModel, // 锁定到刚切到的模型，不让它内部再切回
+          vendorChain: retryChain, // 主次对调的重试链，不锁单一模型（见上方 2026-09-22 注释）
         })
         if (!content) { ocrErrorsRetry++; continue }
         let questions = []
@@ -4952,7 +5030,6 @@ export const processWorkbookGrading = async (job) => {
       } else {
         console.warn(`⚠️ [Workbook] 模型切换重试仍为 0 道题，放弃`)
       }
-    }
   }
 
   // 重试后仍 0 道题 → 标记为 AI_EMPTY 进入黑名单，PendingTaskRecovery 不再反复入队
@@ -5983,8 +6060,12 @@ const processAnswerBankGrading = async (job) => {
             temperature: 0.1,
             maxTokens: 4096,
             // 配图字段（image_type/image_bbox）是本次新增采集，弱备份模型不守 schema 会整列丢失
-            // → 配图全空、完整性闸又判缺图。与答案页 OCR 同口径锁主力模型。见 P0-3（2026-09-21）。
-            noBackup: true
+            // → 配图全空、完整性闸又判缺图。见 P0-3（2026-09-21）。
+            // 2026-09-22 魔搭失守：原 noBackup=true 锁魔搭已空转（魔搭欠费禁用 ⇒ 本页必失败），
+            // 答案册与答案页同属答案库域（错位污染风险最高），换用同一条显式链
+            // ANSWER_PAGE_VENDOR_CHAIN（qwen3.8-flash@Bailian 主 + kimi-k3@SenseNova 兜，
+            // 链外弱模型被排除；矩阵评测定稿见 _视觉模型最强阵容-全供应商矩阵评测-20260922.md §9）。
+            vendorChain: ANSWER_PAGE_VENDOR_CHAIN,
           })
           content = result?.content
         } catch (e) {

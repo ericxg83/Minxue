@@ -129,9 +129,14 @@ export function validateMeasureSegments (segs, expected) {
  * @param {boolean} [p.strongBackupOnly] 配合 noBackup：魔搭耗尽时只允许降级到 STRONG_VL_FALLBACK_VENDORS
  *        （HuihuiyunGemini 付费高质量），跳过免费弱模型。代价：免费通道失败时改走付费 gemini（按 token 计费）。
  *        用于「蓝色画框」追求定位精度、且接受失败路径付费的场景（2026-09-22）。
+ * @param {Array}  [p.vendorChain] 显式供应商链（2026-09-22 魔搭失守后推荐用法，最高优先级）：
+ *        形如 [{vendor:'SenseNova', model:'deepseek-flash'}, ...]，按序只试链内通道。
+ *        生产调用方（index.js / worker.js 的复核页画框）已改传 WORKBOOK_OCR_VENDOR_CHAIN
+ *        （deepseek-flash 主 1.7-2.1s + qwen3.8-flash 兜），替代原 noBackup+strongBackupOnly
+ *        （魔搭欠费禁用后后者只会落 gemini-3.7-flash，绕开了矩阵评测的场景三赢家）。
  * @returns {Promise<{boxes: Object<string,{x,y,width,height}>, raw: Object|null, error?: string}>}
  */
-export async function measurePageQuestionBoxes ({ imageBuffer, questions, onlyVendor = null, textLeft = 60, textRight = 960, freeOnly = false, noBackup = false, strongBackupOnly = false }) {
+export async function measurePageQuestionBoxes ({ imageBuffer, questions, onlyVendor = null, textLeft = 60, textRight = 960, freeOnly = false, noBackup = false, strongBackupOnly = false, vendorChain = null }) {
   const list = (questions || []).filter(q => q && q.id)
   if (!list.length) return { boxes: {}, raw: null, error: '无题目' }
 
@@ -155,6 +160,7 @@ export async function measurePageQuestionBoxes ({ imageBuffer, questions, onlyVe
         ...(freeOnly ? { freeOnly: true } : {}),
         ...(noBackup ? { noBackup: true } : {}),
         ...(strongBackupOnly ? { strongBackupOnly: true } : {}),
+        ...(vendorChain ? { vendorChain } : {}),
       })
       content = r.content
     } catch (e) {

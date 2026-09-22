@@ -1,4 +1,4 @@
-import { callVisionCompletion, callVendorVisionCompletion } from '../config/ai.js'
+import { callVisionCompletion, callVendorVisionCompletion, WORKBOOK_OCR_VENDOR_CHAIN } from '../config/ai.js'
 
 /**
  * 单题「区域重识别」服务（PC 批改工作台「重新识别本题」用）
@@ -162,10 +162,12 @@ export async function recognizeQuestionImage(imageBuffer, mimeType, opts = {}) {
     ? await callVendorVisionCompletion({ ...req, vendorName, timeout: 180000 })
     : await callVisionCompletion({
       ...req,
-      // 质量敏感：禁止静默降级到弱备份视觉模型。
-      // 理由同 2026-09-09 练习册答案事故（弱模型阅读顺序错乱、漏读），
-      // 补出来的题干/选项要直接落库并进入错题本，错不起。
-      noBackup: true,
+      // 质量敏感：补出来的题干/选项要直接落库并进入错题本，错不起。
+      // 理由同 2026-09-09 练习册答案事故（弱模型阅读顺序错乱、漏读）。
+      // 2026-09-22 魔搭失守：原 noBackup:true 锁魔搭，魔搭欠费禁用后本服务必挂（单题重识别全失败）。
+      // 改显式链 WORKBOOK_OCR_VENDOR_CHAIN（deepseek-flash@SenseNova 主 + qwen3.8-flash@Bailian 兜），
+      // 链外弱模型依旧不会静默接管。vendorName 人工点名分支优先级不变。
+      vendorChain: WORKBOOK_OCR_VENDOR_CHAIN,
     })
 
   return safeParseQuestion(content)

@@ -24,7 +24,7 @@ import {
 import { uploadPDF, uploadImage } from '../services/ossService.js'
 import { ossClient } from '../config/oss.js'
 import { extractPdfText, renderPdfToJpegs, getPdfPageCount } from '../services/pdfService.js'
-import { callVisionCompletion } from '../config/ai.js'
+import { callVisionCompletion, ANSWER_PAGE_VENDOR_CHAIN } from '../config/ai.js'
 import { parseAnswerText, normalizeSectionName, parseUnitHeader, normLesson } from '../services/answerParseService.js'
 import {
   diagnoseWorksheet,
@@ -35,6 +35,7 @@ import {
 } from '../services/worksheetFixService.js'
 import { regradeTaskPageWithUnit } from '../services/worksheetPageService.js'
 import { getWorksheetPublishRisk } from '../services/worksheetPublishRiskService.js'
+import { getWorksheetAnswerCoverage } from '../services/answerCoverageService.js'
 import { query as pgQuery } from '../config/neon.js'
 const query = pgQuery
 
@@ -506,6 +507,20 @@ router.get('/:id/publish-risk', async (req, res) => {
     const risk = await getWorksheetPublishRisk(req.params.id)
     if (!risk) return res.status(404).json({ error: '练习册不存在' })
     res.json({ success: true, risk })
+  } catch (e) {
+    res.status(500).json({ error: e.message })
+  }
+})
+
+// 答案册完整性体检（2026-09-22）：上传答案册后立刻调用，把「哪个单元缺哪几个题号」
+// 直接报给老师去补，而不是等批改时才在复核页一条条发现缺参考答案。
+// 只读、不写库；体检失败不抛错（返回 null），避免拖垮上传流程。
+router.get('/:id/answer-coverage', async (req, res) => {
+  try {
+    const worksheet = await getWorksheetById(req.params.id)
+    if (!worksheet) return res.status(404).json({ error: '练习册不存在' })
+    const coverage = await getWorksheetAnswerCoverage(req.params.id)
+    res.json({ success: true, coverage })
   } catch (e) {
     res.status(500).json({ error: e.message })
   }
@@ -1423,13 +1438,21 @@ async function ocrExtractSafe(base64Image, pageIndex, failedPages, backupPages) 
   }
 }
 
+// 答案页 OCR 显式供应商链：统一从 config/ai.js 导入（ANSWER_PAGE_VENDOR_CHAIN，
+// 链路依据与注释见彼处），两处答案页调用点（OSS URL / base64）共用，改链只改配置源。
+
 // 基于 OSS URL 的 OCR：上传图片到 OSS 后以 HTTP URL 调用 AI，
 // 解决 ModelScope 等 API 不支持 data:image/jpeg;base64 格式的问题
-// noBackup=true：答案页 OCR 质量敏感——弱备份模型读双栏排版会错乱阅读顺序、漏读单元
-// 标题，整本答案错位（2026-09-08 九上上海作业答案 78 页实测 84 处题号错位）。
-// 魔搭耗尽时宁可本页失败（进 failedPages 重试/告警），不用弱模型输出污染答案库。
-// strongBackupOnly=true（2026-09-21）：魔搭耗尽后允许降级到付费强模型白名单
-// （STRONG_VL_FALLBACK_VENDORS，huihuiyun gemini）——免费弱模型依旧被排除。
+// vendorChain（2026-09-22 魔搭失守后换链，见 _视觉模型最强阵容-全供应商矩阵评测-20260922.md §9）：
+//   答案页 OCR 质量敏感——弱备份模型读双栏排版会错乱阅读顺序、漏读单元标题，
+//   整本答案错位（2026-09-08 九上上海作业答案 78 页实测 84 处题号错位）。
+//   原约束是 noBackup+strongBackupOnly（锁魔搭→降级 gemini 白名单），魔搭双 Key 欠费禁用后
+//   noBackup 已空转。新显式链（矩阵评测定稿）：
+//   ① Bailian qwen3.8-flash  主：9.5s、完整性与 kimi 同级、Token Plan Lite 套餐内≈0 边际成本
+//      （实测接管答案页 OCR ≈ 6% 周额度）
+//   ② SenseNova kimi-k3      兜底：免费、输出最干净（0/6 夹带）、能读单元标题，慢（22-74s）
+//   链首成功 usedBackup=false 不触发复核告警；降到 kimi 时 usedBackup=true → parse_warning 提示人工复核。
+//   全链失败宁可本页失败（进 failedPages 重试/告警），不用链外弱模型输出污染答案库。
 // backupPages：可选的"走了备用视觉模型"收集器（元素 {page, vendor}），由调用方传入并跨页累积。
 // 为什么必须收集（2026-09-21 八上精练答案册事故）：callVisionCompletion 的每条成功返回路径
 // 都带 usedBackup / vendorName，但这里**只解构了 content**，于是"这一页是主力模型读的、
@@ -1447,8 +1470,7 @@ async function ocrExtractFromBuffer(imgBuffer, pageIndex, failedPages, backupPag
       userText: '请提取这份练习册答案中的所有单元标题、题号和对应答案。',
       temperature: 0.0,
       maxTokens: 8192,
-      noBackup: true,
-      strongBackupOnly: true,
+      vendorChain: ANSWER_PAGE_VENDOR_CHAIN,
     })
     noteBackupModel(backupPages, pageIndex + 1, usedBackup, vendorName)
     return content || ''
@@ -1466,8 +1488,7 @@ async function ocrExtractRawText(base64Image, backupPages, pageNumber) {
     userText: '请提取这份练习册答案中的所有单元标题、题号和对应答案。',
     temperature: 0.0,
     maxTokens: 8192,
-    noBackup: true,
-    strongBackupOnly: true,
+    vendorChain: ANSWER_PAGE_VENDOR_CHAIN,
   })
   noteBackupModel(backupPages, pageNumber, usedBackup, vendorName)
   return content || ''

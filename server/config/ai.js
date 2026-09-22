@@ -252,16 +252,22 @@ async function postWith429Retry(client, endpoint, body, axiosOptions, {
       const auth = String(axiosOptions?.headers?.Authorization || '').replace(/^Bearer\s+/i, '')
       // 诊断：详细记录 400 错误（通常提示 prompt 过长 / 图片超限 / 字段格式错误）
       if (status === 400) {
-        const body = err.response?.data
-        const dataSize = JSON.stringify(body).length
-        const imgSize = body?.messages?.[1]?.content?.find?.(c => c.type === 'image_url')?.image_url?.url?.length || 0
+        // ⚠️ 2026-09-22 修复：原先这里写 `const body = err.response?.data`，把**请求体**参数
+        //    遮蔽成了响应体 → `model` 恒打印 (unknown)、`dataSize` 是响应体大小（恒 ~72B）、
+        //    `imageBase64Size` 恒 0 —— 这条日志因此**永远报不出真正发出去的 model**，
+        //    曾据此误判「答案引擎备用链漏传 model」。现拆成 reqBody / respBody：
+        //    请求侧信息一律取自 reqBody，错误文案取自 respBody。
+        const reqBody = body
+        const respBody = err.response?.data
+        const dataSize = JSON.stringify(reqBody).length
+        const imgSize = reqBody?.messages?.[1]?.content?.find?.(c => c.type === 'image_url')?.image_url?.url?.length || 0
         console.error(`[AI] 400 bad request:`,
           `endpoint=${endpoint}`,
           `keyTail=${auth?.slice(-8)}`,
-          `model=${body?.model || '(unknown)'}`,
+          `model=${reqBody?.model || '(unknown)'}`,
           `dataSize=${dataSize}B`,
           `imageBase64Size=${imgSize}B`,
-          `errorMsg=${body?.error?.message || JSON.stringify(body)?.substring(0, 300)}`)
+          `errorMsg=${respBody?.error?.message || JSON.stringify(respBody)?.substring(0, 300)}`)
       }
       // 真·额度耗尽（quota/credit/balance/frequency limit）：立刻放弃该 Key×模型组合并上抛，
       // 让调用方换组合，绝不浪费时间重试。瞬时限流（isTransientRateLimit）走下面的退避。
@@ -386,9 +392,15 @@ export const BACKUP_VENDOR_DEFS = [
     // 必须传 reasoning_effort:'none' 禁用思考模式，否则思考过程太长（3754+ tokens）
     // 导致 max_tokens 耗尽在 reasoning 阶段，永远拿不到 content。
     //
-    // 2026-09-04 实测修正：
-    //   - 'sensenova-6.7-flash-lite' 已下线，调用返回 404 model route not found，
-    //     原值会让 SenseNova 在通用文本链路上整条失效 → 改为实测可用的 6.8-flash-lite。
+    // 2026-09-22 全供应商矩阵评测定稿（_视觉模型最强阵容-全供应商矩阵评测-20260922.md）：
+    //   魔搭双 Key 欠费（insufficient balance，非限流）→ 主链路实际由备份层接管。
+    //   vlModels 按实测换序（真实答案页/批改页横评，SenseNova 双 Key 同性能）：
+    //   ① deepseek-flash   批改场景赢家：18.5s、JSON 3/3、唯一选项填满、5 场景参数全稳
+    //   ② sensenova-6.8-flash-lite 免费次选：答案页丢尾题（26/27），只作批改兜底不作答案页主力
+    //   ③ kimi-k3          答案页兜底：输出最干净（0/6 夹带）、能读单元标题，但慢（22-74s）
+    //                      ⚠️ 只接受 temperature:1（传 0/0.3 → 400 field Temperature invalid），
+    //                        不接受 reasoning_effort（传了不报错不生效）→ 特判见 requestOpenAIProvider
+    //   - 'sensenova-6.7-flash-lite' 已删：404 model route not found（2026-09-04 实测，死模型）
     //   - 强推理场景（标准答案/解析生成）不要用 6.8-flash-lite：
     //     12 道复杂数学题基准里它只 7/12，DeepSeek V4 Pro 12/12。
     //     那条链路走下面的 ANSWER_ENGINE，不占用这里的 textModel。
@@ -396,7 +408,10 @@ export const BACKUP_VENDOR_DEFS = [
     envKey: 'SENSENOVA_API_KEY',
     endpoint: 'https://token.sensenova.cn/v1/chat/completions',
     textModel: 'sensenova-6.8-flash-lite',
-    vlModels: ['sensenova-6.8-flash-lite', 'sensenova-6.7-flash-lite'],
+    vlModels: ['deepseek-flash', 'sensenova-6.8-flash-lite', 'kimi-k3'],
+    // ⚠️ 2026-09-22 补：魔搭失守后备份层成了视觉主力，不配上限会被 backupModelMaxTokens
+    //    压到 4096 —— 整页 OCR 的 JSON 在末尾截断（与 BigModel maxTokens:1024 事故同源，见该函数注释）。
+    maxTokens: 8192,
     referer: null,
     extraBody: { reasoning_effort: 'none' },
   },
@@ -588,6 +603,31 @@ export const isFreeVisionChannel = (vendorName, vlModel) =>
 export const STRONG_VL_FALLBACK_VENDORS = ['HuihuiyunGemini']
 export const isStrongVisionVendor = (vendorName) =>
   STRONG_VL_FALLBACK_VENDORS.includes(vendorName)
+
+// ── 质量敏感场景的显式供应商链（2026-09-22 矩阵评测定稿）────────────────────────
+// 魔搭双 Key 欠费禁用（MS_VISION_DISABLED=1）后，原「noBackup 锁魔搭」的质量约束空转，
+// 生产视觉请求改为 vendorChain 显式点名「谁主谁兜」。依据：
+// _视觉模型最强阵容-全供应商矩阵评测-20260922.md §7/§9（真实答案页/批改页横评）。
+// 传给 callVisionCompletion({ vendorChain }) 即生效：按序只试链内通道，链首成功不告警、
+// 链中成功记降级告警（usedBackup=true → parse_warning），全链失败宁可失败不静默换弱模型。
+//
+// 答案页/答案册 OCR（官方答案转录，写 answer 库，错位污染风险最高）：
+//   ① Bailian qwen3.8-flash —— 主：9.5s、完整性与 kimi 同级、Token Plan Lite 套餐内≈0 边际成本
+//      （实测接管 ≈ 6% 周额度；极端全引擎切换 ≈ 37%，均安全）
+//   ② SenseNova kimi-k3 —— 兜底：免费、输出最干净（0/6 夹带）、能读单元标题；慢（22-74s）是固有特性
+//   ❌ 有意排除：gemini-3.1-flash-lite（p28 丢项 2/2 一票否决）、sensenova-6.8-flash-lite（答案页丢尾题 26/27）
+export const ANSWER_PAGE_VENDOR_CHAIN = [
+  { vendor: 'Bailian', model: 'qwen3.8-flash' },
+  { vendor: 'SenseNova', model: 'kimi-k3' },
+]
+// 练习册学生答案页 OCR（批改场景 JSON + 选项 + 配图字段）：
+//   ① SenseNova deepseek-flash —— 主：免费、18.5s、JSON 3/3、唯一选项填满、5 场景参数全稳
+//   ② Bailian qwen3.8-flash —— 兜底：批改场景唯一无灾难缺陷的次选（57.3s 慢但 JSON 稳）
+//   ❌ 有意排除：kimi-k3（批改场景返回空 questions 数组=整页丢失，不合格）、6.8-lite（丢选项 0/3、0/4）
+export const WORKBOOK_OCR_VENDOR_CHAIN = [
+  { vendor: 'SenseNova', model: 'deepseek-flash' },
+  { vendor: 'Bailian', model: 'qwen3.8-flash' },
+]
 
 let _resolvedVendorsCache = null
 
@@ -835,6 +875,14 @@ async function requestOpenAIProvider({
   // SenseNova 等模型需要额外参数（如 reasoning_effort: 'none' 禁用思考模式）
   if (extraBody && typeof extraBody === 'object') {
     Object.assign(body, extraBody)
+  }
+  // ⚠️ kimi-k3 模型特判（2026-09-22 实测，见 BACKUP_VENDOR_DEFS.SenseNova 注释）：
+  //   只接受 temperature:1 —— 传 0/0.3 直接 400 field Temperature invalid；
+  //   不接受 reasoning_effort —— 传了不报错但也不生效，剥掉保持请求干净。
+  //   放在 extraBody 合并之后，保证供应商级 extraBody 里带的 reasoning_effort 被剥掉。
+  if (model === 'kimi-k3') {
+    body.temperature = 1
+    delete body.reasoning_effort
   }
 
   const response = await postWith429Retry(
@@ -1290,10 +1338,31 @@ export async function callAnswerEngineCompletion(opts) {
         console.warn(`[AnswerEngine] 主供应商熔断中，本次只做一次不重试的试探: ${vendor.name}:${primary}`)
       }
       let allCooling = true
+      // 2026-09-22 轮转顺序改为「模型外层 × Key 内层」（用户拍定）：
+      //   deepseek-flash × [主Key, 次Key] → glm-5.2 × [主Key, 次Key] → 6.8-lite × [主Key, 次Key]
+      // 为什么不是原来的「Key 外层 × 模型内层」：
+      //   ① 同一模型先用主 Key 试、额度不够立刻换次 Key，**不降模型**；
+      //     原顺序下主 Key 打满时会带着次 Key 从 deepseek-flash 重新跑一遍，
+      //     等于用一个更弱的第一跳去换更强模型的机会。
+      //   ② SenseNova 的两把 Key 是**独立配额池**（见 .env 实测注释），
+      //     模型外层才能把「额度分摊」这件事做到模型粒度 —— 强模型的两把 Key 先用尽，
+      //     再一起降级到次强模型，比「一个 Key 的整条模型链用尽再换 Key」质量单调更好。
+      // 保留的语义：某个 Key 在冷却 → 该 Key 对所有模型都跳过（冷却本身就是 Key 级事实）；
+      //   401/403 或真·额度耗尽 → 该 Key 后续模型不再尝试（见下方 break 的注释）。
+      const keyUsable = []
+      // 本次调用内被判废的 Key（401/403 鉴权失败 或 额度耗尽）。
+      // 与「冷却」的区别：冷却是跨调用的持久状态（额度 5h 窗口），
+      // 判废只是避免同一次调用里对同一把废 Key 反复空打。
+      const keyDisabledForRun = new Set()
       for (const apiKey of keys) {
         if (isAnswerEngineKeyCooling(apiKey)) continue // 这把 Key 在冷却，跳过
-        allCooling = false
-        for (const model of models) {
+        keyUsable.push(apiKey)
+      }
+      if (keyUsable.length > 0) allCooling = false
+      for (const model of models) {
+        // 该模型下逐把 Key 轮转；只要还有一把 Key 没被判废，就继续在这个模型上试。
+        for (const apiKey of keyUsable) {
+          if (keyDisabledForRun.has(apiKey)) continue // 本模型已把该 Key 判废（401/403 或额度耗尽）
           try {
             const content = await requestOpenAIProvider({
               endpoint: vendor.endpoint,
@@ -1330,32 +1399,44 @@ export async function callAnswerEngineCompletion(opts) {
             const errKind = classifyAnswerEngineError(err)
             const errSnippet = extractErrorSnippet(err)
             if (status === 401 || status === 403) {
-              // 该 Key 鉴权失败（无效/未授权），所有模型都不会成功，直接换下一把 Key，
-              // 避免在一把废 Key 上对多个模型各空打一次
-              console.warn(`[AnswerEngine] ${vendor.name} Key 尾号 ${keyTail(apiKey)} 鉴权失败(${status})，跳过该 Key 全部模型`)
-              break
+              // 该 Key 鉴权失败（无效/未授权），对所有模型都不会成功 →
+              // 本次调用内把该 Key 整体判废（keyDisabledForRun），避免在它身上
+              // 对后续每个模型各空打一次；换下一把 Key 继续试**同一个模型**。
+              console.warn(`[AnswerEngine] ${vendor.name} Key 尾号 ${keyTail(apiKey)} 鉴权失败(${status})，本次调用内停用该 Key`)
+              keyDisabledForRun.add(apiKey)
+              continue
             }
             if (isQuotaExhaustedError(err)) {
-              // 该 Key 5h 额度已用尽 → 冷却此 Key，换下一把 Key，不在这把 Key 上继续空耗
+              // 该 Key 5h 额度已用尽（tpm/rpm exhausted）→ 冷却此 Key。
+              // 语义仍是 Key 级：额度是账号维度的，换模型也救不了这把 Key，
+              // 所以本次调用内一并判废；然后换**同一模型**下的下一把 Key。
               cooldownAnswerEngineKey(apiKey)
+              keyDisabledForRun.add(apiKey)
               console.warn(`[AnswerEngine] ${vendor.name}:${model} 失败: ${errKind} ${errSnippet} → Key 尾号 ${keyTail(apiKey)} 冷却`)
-              break
+              continue
             }
-            // 瞬时限流（429）或网络/超时/5xx：只让这一 model 让路到下一个 model，
-            // 不换 Key 也不冷却 —— 下一题 pro 仍是首选，避免一次并发风暴把主模型全线关停。
+            // 瞬时限流（429）或网络/超时/5xx：这一 model × 这一 Key 让路到下一把 Key；
+            // 都是 429 走完所有 Key 后，随外层模型循环降到下一个模型。
+            // 不冷却 Key —— 避免一次并发风暴把某把 Key 全线关停，下一题首选仍是主模型。
             console.warn(`[AnswerEngine] ${vendor.name}:${model} 失败: ${errKind} ${errSnippet}`)
           }
         }
       }
       if (allCooling) {
         console.warn(`[AnswerEngine] 所有 Key 均处于冷却（额度重置中），回落通用文本链路`)
-      } else if (!modelOverride && ANSWER_QUALITY.PRIMARY_BREAKER_MS > 0) {
-        // 主供应商整条链（Key 池 × 模型）全线失败 → 熔断一段时间。
+      } else if (!modelOverride && ANSWER_QUALITY.PRIMARY_BREAKER_MS > 0 && keyDisabledForRun.size >= keys.length) {
+        // 主供应商整条链（模型池 × Key 池）全线失败 → 熔断一段时间。
+        // 仅在「所有 Key 都被判废」时熔断：若只是某把 Key 额度耗尽、另一把还能用，
+        // 不该因为一把 Key 就连带熔断整个主供应商（那会把可用额度一起浪费掉）。
         // 期间每题只做一次不重试的试探，避免「每题 3 模型 × 8s 空转」。
         // 生产实测（2026-09-21）：SenseNova 白天被线上批改占满 rpm，正是这条路径
         // 让每道题白等 24s 之后仍然只能拿兜底弱模型的答案。
         _answerEnginePrimaryDownUntil = Date.now() + ANSWER_QUALITY.PRIMARY_BREAKER_MS
         console.warn(`[AnswerEngine] 主供应商全线失败 → 熔断 ${Math.round(ANSWER_QUALITY.PRIMARY_BREAKER_MS / 1000)}s（期间每题仅一次试探，rpm 窗口恢复后自动解除）`)
+      } else if (!modelOverride && ANSWER_QUALITY.PRIMARY_BREAKER_MS > 0) {
+        // 还有 Key 未被判废但所有「模型 × Key」组合都失败了（多为并发瞬时限流）。
+        // 不熔断：主模型仍是首选，下一题继续从 deepseek-flash × 主 Key 开始。
+        console.warn(`[AnswerEngine] 主供应商本次全部尝试失败（仍有 Key 未判废，不熔断，下次仍从主模型重试）`)
       }
     }
   }
@@ -1410,9 +1491,16 @@ export async function callAnswerEngineCompletion(opts) {
     }
   }
 
-  // 答案引擎不可用 → 回落通用文本链路，绝不因为模型选择问题卡住批改
-  const fallbackChain = await callTextCompletion(opts)
-  return { ...fallbackChain, provider: 'fallback-text-chain' }
+  // ── 通用文本链路兜底：2026-09-22 按用户要求**下线** ──────────────────────────
+  // 原实现会 `callTextCompletion(opts)` 拿通用文本链路的模型出「标准答案」。
+  // 实测该链路质量不足（曾给出张冠李戴的选项、答案不可核对），用它的产出当参考答案
+  // 比"留空转人工"更危险 —— 老师会以为是真的标准答案。用户拍定：宁可留空，不要错答案。
+  // 现在改为**返回空答案**：调用方（worker.generateAnswerForQuestion）拿到空 answer 后
+  // 走 validateAIAnswer → `答案为空` → 标异常转人工，与「缺少参考答案」同一出口。
+  // 保留 ANSWER_ENGINE_ENABLED=0 这条显式回滚开关（下面的 early return），
+  // 它仍会走 callTextCompletion —— 那是"整个答案引擎关掉"的语义，与此处无关。
+  console.warn('[AnswerEngine] 主供应商与全部备用供应商均失败，且通用文本链路兜底已下线 → 返回空答案转人工')
+  return { content: '', usedBackup: false, provider: 'no-channel-available' }
 }
 
 /**
@@ -1539,6 +1627,15 @@ export async function callVisionCompletion(opts) {
     //   （付费高质量模型，如 huihuiyun gemini），仍排除免费弱模型/白名单外付费通道。
     //   语义：noBackup+strongBackupOnly = 「最强链路 → 付费强模型 → 宁可失败」。
     strongBackupOnly = false,
+    // vendorChain（2026-09-22 魔搭失守后接管主链路）：**显式有序供应商链**，最高优先级。
+    //   形如 [{ vendor:'Bailian', model:'qwen3.8-flash' }, { vendor:'SenseNova', model:'kimi-k3' }]，
+    //   按序只尝试这些通道，全部失败即失败 —— 不碰魔搭、不碰 GMI 插队、不碰链外任何备份，
+    //   也没有末轮魔搭兜底重试。它取代了「noBackup 只锁魔搭」的旧质量约束：
+    //   魔搭欠费禁用后 noBackup 语义已空转，质量敏感场景改为显式点名「谁主谁兜」。
+    //   返回值语义：链首（第 1 步）成功 → usedBackup:false（这是新主链，不是降级）；
+    //   链中后续步骤成功 → usedBackup:true（发生了降级，上层会记 parse_warning 提示复核）。
+    //   传了 vendorChain 时 noBackup/strongBackupOnly/preferredVendor/onlyVendor/freeOnly 一律忽略。
+    vendorChain = null,
   } = opts
 
   // ModelScope Key 池：主 Key + 备用 Key，与 VL_MODELS 组成「Key×模型」矩阵。
@@ -1547,17 +1644,28 @@ export async function callVisionCompletion(opts) {
   // ⚠️ 2026-09-21：`new Set` 去重意味着**两把 Key 填同一个值 ⇒ 实际只有一把**，
   //    "有备用 Key"只是幻觉（主 Key 耗尽即整链失效）。故把实际加载的把数与尾号打进日志，
   //    便于在 Render 日志里一眼确认第二把 Key 有没有配上（只打尾号，不泄露密钥）。
-  const MS_KEYS = [...new Set([
+  // ⚠️ 2026-09-22：MS_VISION_DISABLED=1 显式禁用魔搭视觉主链路 —— 魔搭双 Key 欠费
+  //    （insufficient balance，用户拍板先禁用，弄清额度后再决定是否恢复）。禁用后所有视觉
+  //    请求直接走备份层/显式 vendorChain，不再每次先试魔搭白挨一轮失败（重启后冷却清零）。
+  //    只影响视觉链路；AI_CONFIG.API_KEY 的其他用途（文本等）不受影响。恢复：env 置 0/删除。
+  const MS_VISION_DISABLED = process.env.MS_VISION_DISABLED === '1'
+  const MS_KEYS = MS_VISION_DISABLED ? [] : [...new Set([
     AI_CONFIG.API_KEY,
     MODELSCOPE_BACKUP.ENABLED ? MODELSCOPE_BACKUP.API_KEY : null,
   ].filter(Boolean))]
+
+  if (MS_VISION_DISABLED) {
+    console.warn('[AI] MS_VISION_DISABLED=1：魔搭视觉主链路已禁用（Key 欠费），本次请求直接走备份层/显式链路')
+  }
 
   if (noBackup) {
     const poolDesc = MS_KEYS.length
       ? `${MS_KEYS.length} 把 Key（${MS_KEYS.map(k => '…' + keyTail(k)).join(' / ')}）${MS_KEYS.length > 1
         ? ''
         : ' ⚠ 只有一把：主 Key 额度耗尽时整条魔搭链立即失效，请在 Render 把 MODELSCOPE_BACKUP_API_KEY 配成另一个魔搭账号的 Key'}`
-      : '0 把 Key（AI_API_KEY / MODELSCOPE_BACKUP_API_KEY 均未配置 ⇒ 本次必然失败）'
+      : (MS_VISION_DISABLED
+        ? '已由 MS_VISION_DISABLED=1 禁用 ⇒ noBackup 且无备份放行时本次必然失败（请调用方改用 vendorChain/放行备份）'
+        : '0 把 Key（AI_API_KEY / MODELSCOPE_BACKUP_API_KEY 均未配置 ⇒ 本次必然失败）')
     console.log(`[AI] noBackup=1：本次视觉请求仅使用魔搭（ModelScope）Key×模型矩阵 = ${poolDesc} × ${VL_MODELS.length} 模型，不降级备份供应商${strongBackupOnly ? '（strongBackupOnly=1：魔搭耗尽后仅允许强模型白名单兜底）' : ''}`)
   }
 
@@ -1631,8 +1739,9 @@ export async function callVisionCompletion(opts) {
   //   一旦全耗尽就立刻让 Agnes 顶上去，否则今天一张图都跑不通。
   //   明天魔搭恢复后又会自动切回魔搭优先，不需要手动改。
   //   MS_KEYS 为空（极端情况）或被主站冷却时，也按"全耗尽"走 Agnes。
+  const vendorChainMode = Array.isArray(vendorChain) && vendorChain.length > 0
   let allMsExhausted = true
-  if (MS_KEYS.length > 0 && !mainSkippedByCooldown) {
+  if (!vendorChainMode && MS_KEYS.length > 0 && !mainSkippedByCooldown) {
     outer: for (const vlModel of wantedModels) {
       for (const apiKey of MS_KEYS) {
         if (!isModelExhaustedToday(vlModel, apiKey)) {
@@ -1643,7 +1752,55 @@ export async function callVisionCompletion(opts) {
     }
   }
 
-  if (!noBackup && (allMsExhausted || forceBackupFirst)) {
+  if (vendorChainMode) {
+    // ── 显式供应商链（2026-09-22）────────────────────────────────────────────
+    // 魔搭失守后质量敏感场景的新质量约束：不再「noBackup 锁魔搭」，而是显式点名谁主谁兜。
+    // 只构建链内通道；不碰魔搭、GMI 插队、链外备份和末轮魔搭兜底重试。
+    const chainDesc = vendorChain.map(s => `${s.vendor}:${s.model}`).join(' → ')
+    console.log(`[AI] vendorChain 显式链：${chainDesc}（链首成功=主力不告警，链中成功=降级会告警）`)
+    vendorChain.forEach((step, idx) => {
+      const vendorDef = BACKUP_CONFIG.VENDORS.find(v => v.name === step.vendor)
+      if (!vendorDef) {
+        console.warn(`[AI] vendorChain 第 ${idx + 1} 步供应商 ${step.vendor} 未配置 Key/不存在，跳过`)
+        return
+      }
+      if (!step.model) {
+        console.warn(`[AI] vendorChain 第 ${idx + 1} 步 ${step.vendor} 未指定 model，跳过（vendorChain 必须显式点名模型）`)
+        return
+      }
+      providers.push(async () => {
+        try {
+          const content = await requestOpenAIProvider({
+            endpoint: vendorDef.endpoint,
+            apiKey: process.env[vendorDef.envKey] || '',
+            model: step.model,
+            messages,
+            temperature,
+            // 显式链 = 显式参数：直接用调用方给的 maxTokens，不套 backupModelMaxTokens 压缩
+            //（压缩到 4096 曾把整页 OCR 的 JSON 截断，见该函数注释；调用方显式点名即显式负责）。
+            maxTokens,
+            timeout: BACKUP_TIMEOUT,
+            // 与备份通道同口径：429/503 直接失败换链内下一步，不在单步里干等
+            retry429: false,
+            retry503: false,
+            vendor: vendorDef,
+            extraBody: vendorDef.extraBody || null,
+          })
+          // 链首成功 = 走的是指定主力（不算降级）；链中成功 = 发生过降级（上层记 parse_warning）
+          return { content, usedBackup: idx > 0, vendorName: vendorDef.name }
+        } catch (err) {
+          err._provider = vendorDef.name.toLowerCase()
+          // 单步失败必须可见：provider 主循环只汇总最后一个错误，链首失败会被链中成功掩盖，
+          // 没有这行日志就分不清「主力真挂」还是「瞬时抖动降级」（2026-09-22 探针排障实需要）。
+          console.warn(`[AI] vendorChain 第 ${idx + 1} 步 ${vendorDef.name}:${step.model} 失败：${String(err?.message || err).slice(0, 200)}`)
+          throw err
+        }
+      })
+    })
+    if (!providers.length) {
+      throw new Error(`vendorChain 的所有步骤都无法构建（供应商未配 Key 或缺 model）：${chainDesc}`)
+    }
+  } else if (!noBackup && (allMsExhausted || forceBackupFirst)) {
     if (forceBackupFirst) {
       console.warn('[AI] BACKUP_FIRST=1 已开启，备份供应商优先（ZenMux 等先于魔搭被尝试）')
     } else {
@@ -1768,7 +1925,8 @@ export async function callVisionCompletion(opts) {
   // 最后兜底：所有备份都不可用时，等主站冷却结束再把「Key×模型」矩阵全部重试（最多 2 轮）。
   // 备份提供商经常整体不可用（401/503），ModelScope 是唯一出路，绝不能因一次瞬时限流就放弃整页。
   // 无条件加入：既覆盖「进入时已被冷却跳过」，也覆盖「本次调用中主站 429 耗尽后才触发冷却」。
-  if (MS_KEYS.length) {
+  // vendorChain 显式链模式下跳过：显式链语义就是「链外一律不碰」（含魔搭兜底重试）。
+  if (!vendorChainMode && MS_KEYS.length) {
     for (let round = 0; round < 2; round += 1) {
       providers.push(async () => {
         // 重新过滤：本次调用过程中可能又有 Key×模型组合被判定为配额耗尽
