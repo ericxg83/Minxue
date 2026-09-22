@@ -204,6 +204,43 @@ test('重练卷 PDF 渲染公共题干（连排去重 + 题组编号）', () => 
   assert.ok(svc.includes('isContinuation'), '应有连排判定（同大题只渲染一次公共题干）')
 })
 
+// ── PC 批改页题干区（2026-09-23 事故：模板引用了脚本里不存在的变量）──
+//
+// 事故（task e4a662c3 程思豪「第04周」第12题）：
+//   QuestionDetailPanel.vue 模板第 210 行写着 `<div v-if="parentStem">`，
+//   但脚本里**从未定义 parentStem**（只 import 了 resolveQuestionDisplayStem 没有调用）
+//   ⇒ v-if 恒为 undefined ⇒ 批改页永远不显示 questions.parent_stem。
+//   老师看到的就是「题干只有 (3) 求证：BG·DF=2CE²」的无条件残缺题。
+
+test('PC 批改页题干区：模板引用的 parentStem 必须在脚本里有定义（且走唯一口径）', () => {
+  const panel = readFileSync(`${ROOT}src/workbench/components/review/QuestionDetailPanel.vue`, 'utf8')
+  assert.ok(panel.includes('v-if="parentStem"'), '题干区应渲染公共题干')
+  // 「模板用了但脚本没定义」是本事故的形态：必须同时断言定义存在
+  assert.ok(/const\s+parentStem\s*=\s*computed\(/.test(panel),
+    'parentStem 必须有 computed 定义，否则 v-if 恒 false，公共题干永远不显示')
+  assert.ok(panel.includes('resolveQuestionDisplayStem(q.value)'),
+    '定义必须走唯一口径 resolveQuestionDisplayStem（content 已含 stem 时不重复渲染）')
+  // 唯一口径的 import 不能是死导入
+  const uses = panel.split('resolveQuestionDisplayStem').length - 1
+  assert.ok(uses >= 2, `resolveQuestionDisplayStem 必须被真正调用，实际出现 ${uses} 次（1 次=死导入）`)
+})
+
+test('PC 批改页取题排序：小问并列行必须有确定性兜底（防 (3)(2)(1) 乱序）', () => {
+  const idx = readFileSync(`${ROOT}server/index.js`, 'utf8')
+  // OCR 给同一大题各小问同一个 block_coordinates.y，同批插入 created_at 也相同
+  // ⇒ 旧三键 ORDER BY 完全并列，PostgreSQL 返回任意序（同一份卷换学生看顺序就变）
+  const at = idx.indexOf("'/api/questions/task/:taskId'")
+  assert.ok(at > 0, '应能找到 GET /api/questions/task/:taskId 路由')
+  const seg = idx.slice(at, at + 4000)
+  const end = seg.indexOf('[taskId]')
+  // 路由里 LATERAL 子查询也有一个 ORDER BY，取 [taskId] 之前最后一个才是主排序
+  const ob = seg.lastIndexOf('ORDER BY', end)
+  assert.ok(ob > 0, '路由内应有 ORDER BY')
+  const orderBy = seg.slice(ob, end)
+  assert.ok(/q\.sub_no/.test(orderBy), 'ORDER BY 必须含 sub_no 兜底，否则小问顺序随机')
+  assert.ok(/q\.created_at/.test(orderBy), '保留原 created_at 键')
+})
+
 // ── 方案 A：前置小问联动（「在(1)的条件下」→ 印出 (1) 的结果作已知条件）──
 
 test('extractPrereqRefs：识别各类前置引用语', () => {

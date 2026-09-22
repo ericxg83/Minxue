@@ -2401,8 +2401,15 @@ app.get('/api/questions/task/:taskId', async (req, res) => {
        ) a ON TRUE
        WHERE q.task_id = $1
          AND (q.review_status IS NULL OR q.review_status != 'exclude')
+       -- 小问确定性排序（2026-09-23）：OCR 给同一道大题的所有小问行同一个
+       -- block_coordinates.y，且同批插入 created_at 完全相同 ⇒ 旧 ORDER BY 三键全并列，
+       -- PostgreSQL 对并列行返回任意顺序（同一份卷换学生看就是 (3)(2)(1)、(2)(1)(3) 乱序）。
+       -- 题号/小问号只作并列行的兜底，不影响本来就有不同 y 的题。
        ORDER BY COALESCE(q.page_number, 1),
-                COALESCE((q.block_coordinates->>'y')::float, 99999), q.created_at`,
+                COALESCE((q.block_coordinates->>'y')::float, 99999),
+                COALESCE(NULLIF(regexp_replace(q.question_number::text, '\\D', '', 'g'), ''), '0')::int,
+                COALESCE(NULLIF(regexp_replace(q.sub_no, '\\D', '', 'g'), ''), '0')::int,
+                q.created_at, q.id`,
       [taskId]
     )
     const CONF_THRESHOLD = parseFloat(process.env.CONFIDENCE_THRESHOLD) || 0.8

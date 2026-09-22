@@ -480,6 +480,15 @@ import AnalysisSource from './AnalysisSource.vue'
 const store = useReviewStore()
 const q = computed(() => store.currentReviewQuestion)
 
+// 多小问（题组）共享题干展示口径（2026-09-23 修复）：
+// 模板 ops-q-stem 那一行用的是 parentStem，但脚本里**从未定义过**（只 import 了
+// resolveQuestionDisplayStem 没用），v-if 恒为 undefined ⇒ 批改页永远不显示
+// questions.parent_stem。于是被拆行的大题在老师眼里就是「无条件的残缺题」
+//（重练卷引用的原题尤其明显）。这里按唯一口径补上定义：content 已自带
+// parent_stem 的历史数据不重复渲染，与错题卡片 / 重练卷 / 移动端完全同源。
+const displayStem = computed(() => resolveQuestionDisplayStem(q.value))
+const parentStem = computed(() => displayStem.value.parentStem)
+
 // 题型中文映射表（question_type 字段合法值）
 const TYPE_MAP = { choice: '选择题', fill: '填空题', answer: '解答题', judge: '判断题' }
 
