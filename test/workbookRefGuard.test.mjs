@@ -25,8 +25,9 @@ test('选择题的参考答案必须是选项字母，否则判定不匹配', ()
   assert.equal(detectReferenceMismatch({ sheetType: 'choice', referenceAnswer: 'D' }), null)
   // 实测事故：卷面是「下列结论中不正确的是」，答案库同题号给的是数值
   assert.equal(detectReferenceMismatch({ sheetType: 'choice', referenceAnswer: '4' }), 'reference_mismatch')
-  // 实测事故：答案库同题号给的是「①②④」这种填序号的题
-  assert.equal(detectReferenceMismatch({ sheetType: 'choice', referenceAnswer: '①②④' }), 'reference_mismatch')
+  // 2026-09-21 复核减负（招①）修正：带圈数字 ①–⑩ 与 A–D 等价，是多选题合法答案形态
+  // （如「下列结论正确的是」选 ①②④）。不再误拒 —— 真·错位仍靠 unit 匹配 + 数值/证明体检拦截。
+  assert.equal(detectReferenceMismatch({ sheetType: 'choice', referenceAnswer: '①②④' }), null)
   assert.equal(detectReferenceMismatch({ sheetType: 'choice', referenceAnswer: '3√5-3' }), 'reference_mismatch')
 })
 
@@ -72,7 +73,9 @@ test('UNJUDGED_REASONS 必须含 reference_mismatch（否则老师看不到原�
 
 test('worker.js 的练习册批改链路必须调用 detectReferenceMismatch', () => {
   assert.match(WORKER_SRC, /import \{[^}]*detectReferenceMismatch[^}]*\} from '\.\/services\/judgeService\.js'/)
-  assert.match(WORKER_SRC, /detectReferenceMismatch\(\{ sheetType, referenceAnswer: answerRow\.answer \}\)/)
+  // 招①：调用点必须同时传入答案库 answer_type（权威题型），否则 OCR 误判会把合法带圈数字答案误拒
+  assert.match(WORKER_SRC, /detectReferenceMismatch\(\{/)
+  assert.match(WORKER_SRC, /answerType: answerRow\.answer_type/)
 })
 
 test('worker.js 必须做单元答案池题号缺口体检（P2）', () => {

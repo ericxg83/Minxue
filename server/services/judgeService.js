@@ -84,7 +84,9 @@ export function detectUnverifiableReference(referenceAnswer) {
 // 一旦卷面题与答案册不同源（老师随机组题）或答案册单元归属错位（上一单元的尾巴
 // 混进本单元），就会拿别的题的答案去判分 → 假红叉，且老师看不出来。
 // 这里只做「一眼可判的硬冲突」，判不出的一律放行（不拦截 = 不比现在差）。
-const CHOICE_REF_RE = /^[A-Da-d]{1,4}$/
+// 选项字母 A–D 与带圈数字 ①–⑩（多选题常见，与 A–J 等价）都算合法选项形态；
+// 允许用「或」连接多个选项（如 ①或②或③、A或B）。整段解答/解析因含其他字符不会命中 → 仍拒。
+const CHOICE_REF_RE = /^[A-Da-d①-⑩](?:或?[A-Da-d①-⑩])*$/
 const JUDGE_REF_RE = /^(√|×|对|错|正确|错误|T|F|t|f)$/
 const PROOF_HEAD_RE = /^\s*(解|证明|答|求|解析)\s*[:：]/
 const LONG_REF_LEN = 40
@@ -102,12 +104,17 @@ export function isProofLikeReference(referenceAnswer) {
  * @param {object} p
  * @param {string} p.sheetType 卷面题型（choice / fill / judge / answer…），取 OCR 后的有效题型
  * @param {string} p.referenceAnswer 答案库取到的参考答案
+ * @param {string} [p.answerType] 答案库该行自身的题型（answer_type），印刷/人工权威。
+ *   优先用它当形态判据——OCR 题型常误判（同一填空/解答题有时被误认成 choice），
+ *   用 OCR 当判据会把本可对答案误拒（2026-09-21 复核减负根因）。缺失时回退 sheetType，保持旧行为。
  * @returns {'reference_mismatch'|null}
  */
-export function detectReferenceMismatch({ sheetType, referenceAnswer } = {}) {
+export function detectReferenceMismatch({ sheetType, referenceAnswer, answerType } = {}) {
   const ref = String(referenceAnswer ?? '').trim()
   if (!ref) return null
-  const t = String(sheetType || '')
+  // 优先信任答案库 answer_type（权威），OCR 题型不稳定时不再误伤合法答案
+  const authority = (answerType && String(answerType).trim()) || sheetType
+  const t = String(authority || '')
   if (t === 'choice') return CHOICE_REF_RE.test(ref) ? null : 'reference_mismatch'
   if (t === 'judge') return JUDGE_REF_RE.test(ref) ? null : 'reference_mismatch'
   // 填空：参考答案是一整段解答/证明 → 必是另一道题（如"解：由题知，∵EG//BC…"）
