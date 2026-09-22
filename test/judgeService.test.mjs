@@ -225,6 +225,37 @@ test('math equivalence understands LaTeX fractions and roots', () => {
   assert.deepEqual(judgeAnswer('2\\frac{1}{3}', '2/3', 'fill'), { isCorrect: false, unrecognized: false })
 })
 
+// 缺陷 2b（2026-09-22）：两处带分数归一化缺口，实测各产生 1 条错判（全库 1913 条
+// 「answer + student_answer 都非空」的题里，修复前后判定只翻转这 2 条，其余 1911 条不变）。
+//   ① 中文带分数 `N又a/b` 不被 extractNumericValues 当整体 → 参考「2又1/2小时」被拆成
+//      0.5 与 2 两个值，再叠上「集合语义兜底允许参考答案多 1 个值」，学生只写 1/2 也判对（放水）；
+//   ② 尾标点剥离先吃掉 `\frac{3}{2}` 收尾的 `}`，分数再也不转换 → `\FRAC{3}{2` 被
+//      parseValueWithUnit 读成 32，学生写对 \frac{3}{2} 反而判错（假红叉）。
+test('Chinese mixed numbers and trailing LaTeX fractions are normalized', () => {
+  // ① 中文带分数：整体是一个数，学生只命中其中一部分不得判对
+  assert.deepEqual(judgeAnswer('1/2', '2又1/2小时', 'fill'), { isCorrect: false, unrecognized: false })
+  assert.deepEqual(judgeAnswer('\\frac{1}{2}', '2又1/2小时', 'fill'), { isCorrect: false, unrecognized: false })
+  assert.deepEqual(judgeAnswer('3/7', '4又3/7', 'fill'), { isCorrect: false, unrecognized: false })
+  // 真等价写法仍判对
+  assert.deepEqual(judgeAnswer('5/2', '2又1/2小时', 'fill'), { isCorrect: true, unrecognized: false })
+  assert.deepEqual(judgeAnswer('2.5小时', '2又1/2小时', 'fill'), { isCorrect: true, unrecognized: false })
+  assert.deepEqual(judgeAnswer('4 3/7', '4又3/7', 'fill'), { isCorrect: true, unrecognized: false })
+
+  // ② 整串就是 LaTeX 分数（尾标点剥离曾吃掉收尾 `}`）
+  assert.deepEqual(judgeAnswer('\\frac{3}{2}', '1又1/2', 'answer'), { isCorrect: true, unrecognized: false })
+  assert.deepEqual(judgeAnswer('\\frac{3}{2}', '3/2', 'fill'), { isCorrect: true, unrecognized: false })
+  assert.deepEqual(judgeAnswer('\\(\\frac{3}{2}\\)', '1又1/2', 'answer'), { isCorrect: true, unrecognized: false })
+  // 链式等式的末段也是裸 \frac 结尾（e376e028 #9.5 实测：4/3 × 9/8 = 3/2 = 1又1/2，真值应判对）
+  assert.deepEqual(
+    judgeAnswer('解: 原式 = \\frac{4}{3} \\times \\frac{9}{8} = 1 \\times \\frac{3}{2} = \\frac{3}{2}', '1又1/2', 'answer'),
+    { isCorrect: true, unrecognized: false })
+  // 不得放水
+  assert.deepEqual(judgeAnswer('\\frac{1}{2}', '\\frac{3}{2}', 'fill'), { isCorrect: false, unrecognized: false })
+  assert.deepEqual(judgeAnswer('\\frac{3}{2}', '1/4', 'answer'), { isCorrect: false, unrecognized: false })
+  // 反向（答案侧是 LaTeX、学生写带分数）同样成立
+  assert.deepEqual(judgeAnswer('1又1/2', '\\frac{3}{2}', 'fill'), { isCorrect: true, unrecognized: false })
+})
+
 // 缺陷 3：U+2212 排版减号未归一 → 归一化后两侧仍带不同字符，
 // isMathEquivalent 又因非法运算符抛错（实测 5 例）。
 test('U+2212 minus sign and dash variants are normalized', () => {
@@ -247,6 +278,40 @@ test('enumerated answers differing only in separators', () => {
   assert.deepEqual(judgeAnswer('①④⑤', '①④⑥', 'fill'), { isCorrect: false, unrecognized: false })
   assert.deepEqual(judgeAnswer('3.5', '3,5', 'fill'), { isCorrect: false, unrecognized: false })
   assert.deepEqual(judgeAnswer('16', '1、2、3、4、6、12', 'fill'), { isCorrect: false, unrecognized: false })
+})
+
+// 缺陷 5（2026-09-22）：**符号吞没放水通道** —— judgeAnswer 曾把"只差一个负号"的答案一律判对。
+// 修复前实测 9/9 全部放水：('-2','2')、('2','-2')、('3','-3')、('-1/2','1/2')、('-0.5','0.5')、
+// ('-3/4','3/4')、('x=-2','x=2')、('-√5','√5')、('-2√3','2√3')。
+// 根因两处，但**都不能单独改**（只修 parseValueWithUnit 修不掉——命中通道在 extractNumericValues
+// 的数字集合兜底；改 extractNumericValues 又会让"学生写全了但判分器读不懂语义"的长解答
+// 从判对变判错，实测 43 条翻转里约 6 条是这类误杀）。因此只加一个**纯结构**早退分支：
+//   归一化后不等 + 删掉所有正负号字符后两侧相同 + 负号数量不同 + 剥符号后含非零数字。
+// 全库影响面：1912 条只翻转 10 条（全部是"库内判对→实际学生答错"），人工真值集假错/假对零变化。
+test('sign-only mismatches are judged wrong (sign swallowing closed)', () => {
+  const SIGN_FLIPPED = [
+    ['-2', '2'], ['2', '-2'], ['3', '-3'],
+    ['-1/2', '1/2'], ['-0.5', '0.5'], ['-3/4', '3/4'],
+    ['x=-2', 'x=2'], ['-√5', '√5'], ['-2√3', '2√3'],
+  ]
+  for (const [s, a] of SIGN_FLIPPED) {
+    assert.deepEqual(judgeAnswer(s, a, 'fill'), { isCorrect: false, unrecognized: false },
+      `符号相反不得判对：${s} vs ${a}`)
+  }
+  // 闸门必须收窄：以下都是**等价**写法，不得被误杀
+  assert.deepEqual(judgeAnswer('+5', '5', 'fill'), { isCorrect: true, unrecognized: false })
+  assert.deepEqual(judgeAnswer('-0', '0', 'fill'), { isCorrect: true, unrecognized: false })
+  assert.deepEqual(judgeAnswer('-m+5', '5-m', 'fill'), { isCorrect: true, unrecognized: false })
+  assert.deepEqual(judgeAnswer('-(2)', '-2', 'fill'), { isCorrect: true, unrecognized: false })
+  // 长解答参考（含汉字/多等号）不得被误杀：学生 y=-(x+1)² 展开就是参考的 -x²-2x-1
+  // （100c18eb #8.2 实测；它正是"改 extractNumericValues"方案会误杀的典型）
+  assert.deepEqual(
+    judgeAnswer('y=-(x+1)²',
+      '由(1)知，抛物线的顶点坐标为(-1,-a-1)，∵抛物线的顶点在x轴上，∴-a-1=0，解得a=-1，∴抛物线的表达式为y=-x²-2x-1。',
+      'answer'),
+    { isCorrect: true, unrecognized: false })
+  assert.deepEqual(judgeAnswer('y=-(x+1)²', 'y=-x²-2x-1', 'answer'),
+    { isCorrect: true, unrecognized: false })
 })
 
 // 答案层：答案库把「答案 + 解析」粘成一串（'-1/4 解析：设直线 AB…'），

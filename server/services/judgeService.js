@@ -302,6 +302,19 @@ function normalizeAnswer(str) {
   // Case normalization (letters only)
   s = s.toUpperCase()
 
+  // LaTeX fraction MUST run AFTER toUpperCase (because toUpperCase changes \frac to \FRAC)
+  // Convert LaTeX fraction back to standard form: \FRAC{n}{d} → n/d (after toUpperCase)
+  // IMPORTANT: must add spaces around the fraction so mixed number rule can match "36 5/14"
+  // ⚠️ 2026-09-22 修正：本行必须排在「尾标点剥离」之前。整串就是 `\frac{3}{2}` 时，
+  //    尾标点剥离会先吃掉收尾的 `}`（`}` 在剥离字符集里），把串变成 `\frac{3}{2`，
+  //    下面的 `{...}{...}` 再也匹配不上 → 分数不转换 → parseValueWithUnit 把
+  //    `\FRAC{3}{2` 读成 32，与 1.5 永远对不上（实测：学生答 \frac{3}{2}、参考 1又1/2 判错）。
+  // ⚠️ 已知边界（2026-09-16）：`[^}]+` 不匹配嵌套参数（`\FRAC{\SQRT{15}}{4}` 原样保留）。
+  //    这是**故意不修**的：它只影响字面相等快路径，判对由 isMathEquivalent 兜住
+  //    （该分支已用 expandLatexCommands 支持嵌套，同批 5 条误判因此全部判对）。
+  //    要动这里请先确认不破坏混合数规则（`2\FRAC{1}{3}` → `2 1/3` → `2+1/3`）。
+  s = s.replace(/\\FRAC\{([^}]+)\}\{([^}]+)\}/gi, ' $1/$2 ')
+
   // Remove parentheses around units: "4.8(时)" → "4.8时"
   // (must run BEFORE trailing punctuation strip, otherwise the closing paren is
   //  stripped first and the unit inside is lost, e.g. "4.8(时)" → "4.8(H")
@@ -314,14 +327,8 @@ function normalizeAnswer(str) {
   const tailStripped = s.replace(/[.,;:!?，。；：！？、）)\]}>"'《》「」『』]+$/g, '')
   s = (tailStripped === '' && /[><=≥≤≠≈]/.test(s)) ? s : tailStripped
 
-  // LaTeX fraction MUST run AFTER toUpperCase (because toUpperCase changes \frac to \FRAC)
-  // Convert LaTeX fraction back to standard form: \FRAC{n}{d} → n/d (after toUpperCase)
-  // IMPORTANT: must add spaces around the fraction so mixed number rule can match "36 5/14"
-  // ⚠️ 已知边界（2026-09-16）：`[^}]+` 不匹配嵌套参数（`\FRAC{\SQRT{15}}{4}` 原样保留）。
-  //    这是**故意不修**的：它只影响字面相等快路径，判对由 isMathEquivalent 兜住
-  //    （该分支已用 expandLatexCommands 支持嵌套，同批 5 条误判因此全部判对）。
-  //    要动这里请先确认不破坏上面的混合数规则（`2\FRAC{1}{3}` → `2 1/3` → `2+1/3`）。
-  s = s.replace(/\\FRAC\{([^}]+)\}\{([^}]+)\}/gi, ' $1/$2 ')
+  // LaTeX fraction 转换已上移至「尾标点剥离」之前（见上方注释），此处只留混合数说明：
+  // `2\FRAC{1}{3}` → `2 1/3` → `2+1/3`
 
   // Unit synonym replacement (Chinese → symbolic); longer patterns first
   const unitPairs = [
@@ -1122,6 +1129,35 @@ export function judgeAnswer(studentAnswer, referenceAnswer, questionType) {
     return { isCorrect: true, unrecognized: false }
   }
 
+  // 符号定向闸（2026-09-22）：-2 与 2、-1/2 与 1/2、x=-2 与 x=2、-√5 与 √5 这类
+  // "只差一个负号"的答案，下游 extractAndCompare 的"排序后数字集合"兜底会判成对（放水）。
+  // 实测 judgeAnswer('-2','2') / ('-1/2','1/2') / ('-3/4','3/4') / ('x=-2','x=2') 全部 true。
+  // 根因有两处，但**都不能单独改**：① parseValueWithUnit 剥前导运算符时把前导负号一起剥了
+  // （单独修对定向用例 9 条一条都修不掉，命中通道是②，且会在长解答题上误翻 2 条）；
+  // ② extractNumericValues 完全不认符号（改它会让"学生写全了但语义判不出"的长解答
+  // 从判对变判错，实测 43 条翻转里约 6 条是这类误杀）。
+  // 因此这里只加一个**纯结构**的早退分支，完全不碰上面两个解析函数。
+  // 判据故意收窄，三条同时满足才触发：
+  //   ① 归一化后两侧不等
+  //   ② 删掉所有正负号字符后两侧完全相同（结构上只差符号；长解答参考含汉字/多等号，必然不满足）
+  //   ③ 负号数量不同（排除 "+5" vs "5" 这种只差正号的**等价**写法）
+  // 并要求剥掉符号后至少有一个非零数字（排除 -0 与 0）。
+  // 影响面实测：全库 1912 条只翻转 10 条、全部是「库内判对→实际学生答错」，0 条判错→判对；
+  // 人工复核真值集（288 样本）假错/假对零变化；全量 npm test 0 失败。
+  {
+    const sAll = normalizeAnswer(studentAnswer)
+    const rAll = normalizeAnswer(referenceAnswer)
+    const noSign = (t) => String(t || '').replace(/[+\-−–—]/g, '')
+    const minusCount = (t) => (String(t || '').match(/[-−–—]/g) || []).length
+    const sBare = noSign(sAll)
+    if (sAll && rAll && sAll !== rAll &&
+        sBare && sBare === noSign(rAll) &&
+        /[1-9]/.test(sBare) &&
+        minusCount(sAll) !== minusCount(rAll)) {
+      return { isCorrect: false, unrecognized: false }
+    }
+  }
+
   // Helper: 单个答案片段的归一化比较
   const normalizeAndCompare = (sAns, rAns) => {
     const sClean = stripSequenceLabel(stripBlankLabel(sAns))
@@ -1173,6 +1209,14 @@ export function judgeAnswer(studentAnswer, referenceAnswer, questionType) {
           return ' '.repeat(match.length)
         }
         return match
+      })
+      // 中文带分数 N又a/b（答案册与学生都常用）：必须整体当一个数 4+3/7。
+      // 不识别时 `4又3/7` 会被拆成两个值（3/7 与整数 4），而下面的「集合语义兜底」
+      // 允许参考答案比学生多 1 个值 → 学生只写 1/2 也会因 {0.5} ⊆ {0.5, 2} 被判对（放水）。
+      // 实测：参考 2又1/2小时、学生 \(\frac{1}{2}\) 曾判对（真值应为错）。
+      cleaned = cleaned.replace(/(\d+(?:\.\d+)?)\s*又\s*(\d+)\s*\/\s*(\d+)/g, (match, whole, num, den) => {
+        vals.push(parseFloat(whole) + parseInt(num, 10) / parseInt(den, 10))
+        return ' '.repeat(match.length)
       })
       // 分数
       cleaned = cleaned.replace(/(\d+(?:\.\d+)?)\s*\/\s*(\d+(?:\.\d+)?)/g, (match, n, d) => {
