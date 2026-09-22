@@ -16,7 +16,7 @@ import sharp from 'sharp'
 import { TABLES, TASK_STATUS } from './config/neon.js'
 import { query } from './config/neon.js'
 import { AI_CONFIG, getAIHeaders, buildOCRPrompt, buildAnswerGenerationPrompt, getCurrentTextModel, getCurrentVLModel, rotateTextModel, rotateVLModel, TEXT_MODELS, VL_MODELS, callTextCompletion, callVisionCompletion, callVendorVisionCompletion, callAnswerEngineCompletion, ANSWER_ENGINE, ANSWER_QUALITY, isDegradedAnswerEngine, describeAnswerEngine, ANSWER_PAGE_VENDOR_CHAIN, WORKBOOK_OCR_VENDOR_CHAIN } from './config/ai.js'
-import { updateTaskStatus, createQuestions, batchUpdateQuestionTags, addWrongQuestions, createJudgement, updateQuestionAnswer, markAnswerException, markAiAnswerRisk, findCachedQuestionByFingerprint, cacheQuestion, incrementQuestionUseCount, updateQuestionCacheId, createQuestionAsset, updateQuestionDenormalizedSvg, lookupWorksheetAnswer, getWorksheetAnswersBySection, deleteQuestionsByTaskId, bulkLookupResourceAnswers, getResourceAnswersBySection, getResourceById, addSelfContainedWrongQuestion } from './services/neonService.js'
+import { updateTaskStatus, createQuestions, batchUpdateQuestionTags, addWrongQuestions, createJudgement, updateQuestionAnswer, markAnswerException, markAnswerExceptionIfAbsent, markAiAnswerRisk, findCachedQuestionByFingerprint, cacheQuestion, incrementQuestionUseCount, updateQuestionCacheId, createQuestionAsset, updateQuestionDenormalizedSvg, lookupWorksheetAnswer, getWorksheetAnswersBySection, deleteQuestionsByTaskId, bulkLookupResourceAnswers, getResourceAnswersBySection, getResourceById, addSelfContainedWrongQuestion } from './services/neonService.js'
 import { uploadImage } from './services/ossService.js'
 import { enhanceAndUploadFigure } from './services/figureEnhanceService.js'
 // cropAndUploadQuestionRegion 已于 2026-09-21 下线（整题裁片下线），不再 import。
@@ -981,7 +981,10 @@ const markUnjudgedReasons = async (questions) => {
       ? describeUnverifiableReference(q.answer)
       : (UNJUDGED_REASONS[reason] || reason)
     try {
-      await markAnswerException(q.id, reasonText)
+      // 2026-09-22 改用 IfAbsent：答案生成阶段的精确原因（如「算式验算结果为 1/16，
+      // AI答案为 49/16」）比这里的通用标签有价值得多，不得覆盖（d17c12ce 教训：
+      // 6 题原始根因全部被「缺少参考答案，无法自动判定」抹掉，排查多花一小时）。
+      await markAnswerExceptionIfAbsent(q.id, reasonText)
       console.log(`  [Unjudged] q=${String(q.id).substring(0, 8)} 判不出 → ${reasonText}`)
     } catch (e) {
       console.error(`  [Unjudged] 原因标注失败 q=${String(q.id).substring(0, 8)}:`, e.message)

@@ -121,3 +121,35 @@ test('主观题不适用叙述型闸（叙述本身就是答案）', () => {
   assert.ok(gate, '必须存在 isObjectiveForAnswerGate')
   assert.ok(/SUBJECTIVE_TYPES/.test(gate[0]), '判定必须排除 SUBJECTIVE_TYPES（answer/essay/proof/…）')
 })
+
+// ── 2026-09-22 d17c12ce（数学作业 09/22 17:51）两处新增 ─────────────────────
+
+test('「最终结果为 X」也能被救场提取（10.3/10.4 教训）', () => {
+  // 模型解析写全了但 answer 字段留空时，救场提取是最后一道网；
+  // 旧标记只认「最终答案」，不认「最终结果为」→ 两题白白「答案为空」转人工。
+  assert.equal(
+    extractFinalAnswerFromAnalysis('将带分数化为假分数：1 7/8 = 15/8……再算 (7/4) ÷ 14 = 1/8。因此最终结果为 1/8。'),
+    '1/8'
+  )
+  assert.equal(
+    extractFinalAnswerFromAnalysis('先算括号内：14 ÷ 14/9 = 9。再算括号外：5/4 ÷ 9 = 5/36。因此最终结果为 5/36。'),
+    '5/36'
+  )
+})
+
+test('自检元话语/退让语不得成为客观题答案（#8 教训）', () => {
+  // #8：模型把自检结论「与 answer 一致，但解析中有矛盾」写进 answer 字段直接入库，
+  // 学生被误判。矛盾/自检/存疑/无法确定/无法判断 只出现在元话语里，不是可对照的答案值。
+  for (const bad of [
+    '与 answer 一致，但解析中有矛盾',
+    '无法确定',
+    '无法判断',
+    '此答案存疑',
+  ]) {
+    assert.equal(isNarrativeAnswer(bad), true, `应判定为叙述型：${bad}`)
+  }
+  // 正常答案不得误伤
+  for (const ok of ['49/16', '6/7，3/10', '3 1/16', '1 ÷ 2 = 0.5']) {
+    assert.equal(isNarrativeAnswer(ok), false, `不应判定为叙述型：${ok}`)
+  }
+})

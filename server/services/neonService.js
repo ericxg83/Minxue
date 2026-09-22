@@ -664,6 +664,30 @@ export const markAnswerException = async (questionId, reason) => {
 }
 
 /**
+ * 与 markAnswerException 同列，但**只在还没有原因时写入**（2026-09-22）。
+ *
+ * 背景：答案生成阶段写入的异常原因（如「算式验算结果为 1/16，AI答案为 49/16」）
+ * 比批改阶段 markUnjudgedReasons 的通用标签（「缺少参考答案，无法自动判定」）
+ * 精确得多 —— 后者此前无条件覆盖，把原始根因抹掉了（d17c12ce 任务 6 题
+ * 全部只剩通用文案，排查时无法直接归因）。
+ * 原子条件写入：不依赖调用方内存对象是否携带最新 reason，同批并发写也不互踩。
+ */
+export const markAnswerExceptionIfAbsent = async (questionId, reason) => {
+  try {
+    await query(
+      `UPDATE ${TABLES.QUESTIONS}
+       SET answer_exception = TRUE,
+           answer_exception_reason = $1,
+           updated_at = NOW()
+       WHERE id = $2 AND (answer_exception_reason IS NULL OR btrim(answer_exception_reason) = '')`,
+      [reason, questionId]
+    )
+  } catch (err) {
+    console.error(`标记题目 ${questionId} 解析异常(保留已有原因)失败:`, err.message)
+  }
+}
+
+/**
  * 标注「AI 视觉推理不擅长」的图题风险提示。
  *
  * 与 markAnswerException 区别：
