@@ -56,6 +56,60 @@ test('两处结算都必须复用 buildIsCorrectAssignments，不得内联裸 CA
   assert.equal(usages.length, 2, 'finalizeGradingBatch 与 finalizeGeneratedExamResults 各一处')
 })
 
+// ── 改判置信度（2026-09-23 P1）────────────────────────────────
+// 事故背景：练习册 → 日常 AI 重批（_regrade_workbook_to_ai_0922）把判分改对了，
+//   但 finalizeRejudgeResult 只 SET is_correct，不碰 confidence；questions.confidence
+//   残留练习册管线写的 0。前端口径「is_correct=true 且 confidence<0.5 → 待复核」
+//   （src/utils/reviewDecision.js）于是把「学生答案与参考答案完全一致」的题
+//   也打回人工：B=B、一定=一定、AD·BC=AD·BC 都要老师再点一遍确认。
+// 锁定：①改判 SQL 必须带置信度分支且显式 ::numeric（缺类型注解同样会被 PG 推断成 text）；
+//   ②只抬不降（GREATEST），避免抹掉更高的历史置信度；
+//   ③缺省不写（保持旧行为），老师手工改判不能顺带把结论拔成 AI 高置信度；
+//   ④isCorrect 为 null（判不出）不抬，让题继续留在待办。
+test('改判结算必须同步回写 confidence，且置信度参数显式 ::numeric', () => {
+  const src = read(FINALIZER)
+  const fnStart = src.indexOf('export const finalizeRejudgeResult')
+  assert.ok(fnStart > 0, '未找到 finalizeRejudgeResult')
+  const fnBody = src.slice(fnStart, src.indexOf('\n}\n', fnStart))
+  assert.ok(
+    /confidence = CASE/.test(fnBody),
+    '改判必须同步写 confidence：只写 is_correct 会让重批判对的题带着旧管线的 0 继续显示「待复核」'
+  )
+  assert.ok(
+    /\$2::numeric/.test(fnBody),
+    '置信度参数必须显式 ::numeric，否则 PG 会把参数推断成 text 抛 42804'
+  )
+})
+
+test('置信度只抬不降（GREATEST），且判不出（isCorrect=null）时不抬', () => {
+  const src = read(FINALIZER)
+  const fnStart = src.indexOf('export const finalizeRejudgeResult')
+  const fnBody = src.slice(fnStart, src.indexOf('\n}\n', fnStart))
+  assert.ok(
+    /GREATEST\(COALESCE\(confidence, 0\)/.test(fnBody),
+    '必须用 GREATEST(COALESCE(confidence,0), …)：既抬得起旧管线的 0，又不抹掉更高的历史置信度'
+  )
+  assert.ok(
+    /WHEN \$1 IS NULL THEN confidence/.test(fnBody),
+    'is_correct 为 null（判不出）时不得抬置信度，否则题会被误移出老师待办'
+  )
+})
+
+test('缺省不传 confidence 时不写置信度（老师手工改判行为不变）', () => {
+  const src = read(FINALIZER)
+  const fnStart = src.indexOf('export const finalizeRejudgeResult')
+  const sig = src.slice(fnStart, fnStart + 400)
+  assert.ok(
+    /confidence = null/.test(sig),
+    'confidence 必须是默认为 null 的可选参数：历史调用方（pc_rejudge / review_edit）不传则行为不变'
+  )
+})
+
+test('导出 REJUDGE_CONFIDENCE=0.9，与 worker「AI 敢下结论」同口径', async () => {
+  const mod = await import('../server/services/gradingFinalizer.js')
+  assert.equal(mod.REJUDGE_CONFIDENCE, 0.9, '重批确证判定的置信度必须高于前端复核阈值 0.5')
+})
+
 test('「exam.status=graded」必须在所有题目回写之后，保证结算标记是最后一步', () => {
   const src = read(FINALIZER)
   const fnStart = src.indexOf('export const finalizeGeneratedExamResults')

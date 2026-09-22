@@ -25,7 +25,7 @@ if (ids.length === 0) {
 
 const { query } = await import('../config/neon.js')
 const { judgeAnswer } = await import('../services/judgeService.js')
-const { finalizeRejudgeResult } = await import('../services/gradingFinalizer.js')
+const { finalizeRejudgeResult, REJUDGE_CONFIDENCE } = await import('../services/gradingFinalizer.js')
 
 console.log(`\n===== 定点重判 ${APPLY ? '（写库）' : '（DRY-RUN，不写库）'} | ${ids.length} 题 =====\n`)
 
@@ -50,7 +50,10 @@ for (const id of ids) {
       question: q,
       isCorrect: newCorrect,
       oldIsCorrect: q.is_correct,
-      source: 'regrade_script'
+      source: 'regrade_script',
+      // 2026-09-23：确定性判等改判必须带置信度，否则 questions.confidence 残留旧值 0，
+      // 前端会把「已判对」的题继续显示成「待复核」。
+      confidence: REJUDGE_CONFIDENCE
     })
     console.log(`     → finalizeRejudgeResult: ${JSON.stringify(r)}`)
   }

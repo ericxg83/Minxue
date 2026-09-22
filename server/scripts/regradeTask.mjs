@@ -30,7 +30,7 @@ const { updateQuestionAnswer } = await import('../services/neonService.js')
 const { formatOptionsForPrompt } = await import('../utils/optionText.js')
 const { generateAnswerForQuestion, extractAnswerFromAnalysis, validateAIAnswer } = await import('../worker.js')
 const { judgeAnswer, isGradingCommentAnswer } = await import('../services/judgeService.js')
-const { finalizeRejudgeResult } = await import('../services/gradingFinalizer.js')
+const { finalizeRejudgeResult, REJUDGE_CONFIDENCE } = await import('../services/gradingFinalizer.js')
 
 const whereUnsettled = ONLY_UNSETTLED ? ` AND (answer IS NULL OR answer = '' OR is_correct IS NULL)` : ''
 const { rows: qs } = await query(
@@ -94,7 +94,10 @@ for (const q of qs) {
       question: { ...q, answer: newAnswer },
       isCorrect: newCorrect,
       oldIsCorrect: q.is_correct,
-      source: 'regrade_script'
+      source: 'regrade_script',
+      // 2026-09-23：确定性判等改判必须带置信度，否则 questions.confidence 残留旧值 0，
+      // 前端会把「已判对」的题继续显示成「待复核」。
+      confidence: REJUDGE_CONFIDENCE
     })
     if (aChg) ansChanged++
     if (jChg) judgeChanged++

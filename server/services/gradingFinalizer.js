@@ -49,6 +49,13 @@ const buildIsCorrectAssignments = (ids) =>
 
 export { buildIsCorrectAssignments }
 
+// 确定性改判 / AI 重批「已下结论」的置信度（2026-09-23 P1）。
+// 与 worker.js「AI 敢下结论 → confidence 抬到 0.9」同口径。
+// 用途：重批链路把判分改对了却不写 confidence，questions.confidence 会残留旧管线的 0，
+// 前端按「is_correct=true 且 confidence<0.5」一律打成「待复核」——
+// 老师被迫对「学生答案与参考答案完全一致」的题再点一遍确认。
+export const REJUDGE_CONFIDENCE = 0.9
+
 const buildQuestionSettlementKey = ({ questionId, mode, fingerprint }) =>
   `${mode}:${questionId}:${fingerprint || 'default'}`
 
@@ -181,11 +188,24 @@ export const finalizeRejudgeResult = async ({
   isCorrect,
   oldIsCorrect,
   source = 'pc_rejudge',
-  manualOverride = false
+  manualOverride = false,
+  confidence = null
 }) => {
   if (!question?.id || !question.student_id) {
     return { settled: false, skipped: true }
   }
+
+  // 改判置信度（2026-09-23 P1）：显式传 confidence 才动 questions.confidence，缺省保持旧行为
+  // —— 历史调用方（老师手工改判 pc_rejudge / review_edit）一律不受影响，
+  //    避免把「老师拍板」的结论抬高成 AI 的高置信度、在复核页显示成「AI判对」。
+  // 只在判等给出明确结论（true/false）时抬；isCorrect 为 null（判不出）不抬，让它继续进待办。
+  // 只抬不降（GREATEST）：旧管线残留的低置信度会被抬到新值，而更高的历史值不被抹掉。
+  const numericConfidence = (confidence != null && confidence !== '' && Number.isFinite(Number(confidence)))
+    ? Number(confidence)
+    : null
+  const effectiveConfidence = (numericConfidence != null && (isCorrect === true || isCorrect === false))
+    ? numericConfidence
+    : null
 
   const fingerprint = hashRejudgeInput({
     studentAnswer: question.student_answer,
@@ -220,9 +240,14 @@ export const finalizeRejudgeResult = async ({
            WHEN $1 IS FALSE THEN 'wrong'
            WHEN status = 'wrong' THEN 'pending'
            ELSE status END,
+         confidence = CASE
+           WHEN $2::numeric IS NULL THEN confidence
+           WHEN $1 IS NULL THEN confidence
+           ELSE GREATEST(COALESCE(confidence, 0), $2::numeric)
+         END,
          updated_at = NOW()
-     WHERE id = $2`,
-    [isCorrect, question.id]
+     WHERE id = $3`,
+    [isCorrect, effectiveConfidence, question.id]
   )
 
   let wrongQuestionAdded = false
@@ -264,6 +289,8 @@ export const finalizeRejudgeResult = async ({
     studentId: question.student_id,
     source,
     isCorrect,
+    // 审计留痕：可观测这次改判到底按什么置信度落的（历史行多为 null，此前从不写）
+    confidence: effectiveConfidence ?? question.confidence ?? null,
     answer: question.answer,
     studentAnswer: question.student_answer,
     metadata: {
@@ -277,7 +304,7 @@ export const finalizeRejudgeResult = async ({
   // 重判常发生在老师补完答案/配图/选项之后，此时落库列最容易偏旧。
   syncQuestionCompletenessQuietly([question.id], `finalizeRejudgeResult q=${question.id}`)
 
-  return { settled: true, skipped: false, isCorrect, wrongQuestionAdded }
+  return { settled: true, skipped: false, isCorrect, wrongQuestionAdded, confidence: effectiveConfidence }
 }
 
 /**
