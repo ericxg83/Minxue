@@ -27,18 +27,20 @@ export const ROUTE_TARGETS = ['homework', 'exam', 'workbook']
 // 题目行不归本卷所有的路线：转路线 = 毁数据，一律拒绝。
 const BLOCKED_TASK_TYPES = ['wrong_retry', 'retry_paper']
 
-// ── 功能开关（2026-09-21 起默认关闭）───────────────────────────────────
+// ── 功能开关（2026-09-21 曾因高危关停，2026-09-22 产品拍板开放 P1）───────────────────
 //
 // 转路线会 DELETE 该任务的 judgements / wrong_questions / questions，并因 question_assets
-// 是 ON DELETE CASCADE 连带删掉已发布几何重绘图 —— 不可逆，且老师误点一次就丢一整份。
-// 产品决定先关停观察：前端按钮置灰（apiService.TASK_ROUTE_CONVERT_ENABLED），
-// 后端这里同步拦截，避免有人绕过界面直接打接口。
-// 重新开放：Render 配环境变量 TASK_ROUTE_CONVERT_ENABLED=1，且前端常量改 true（两端都开才生效）。
+// 是 ON DELETE CASCADE 连带删掉已发布几何重绘图 —— 高风险，2026-09-21 曾默认关闭观察。
+// 2026-09-22 产品拍板开放（P1「一键转日常批改重批」）：前端按钮 + 对话框两步确认
+// （dryRun 影响面预览 → 确认转换）已在，转 homework/exam 后题目由卷面 OCR 重建、错题
+// 由重批结算重建，可恢复。仍保留逃生口：env TASK_ROUTE_CONVERT_ENABLED=0/false/no/off
+// 可随时强制关闭（前端常量 apiService.TASK_ROUTE_CONVERT_ENABLED 也需同步改 false）。
 
-/** 转路线功能是否开放（读 env，默认关闭）。 */
+/** 转路线功能是否开放（默认开启；env TASK_ROUTE_CONVERT_ENABLED=0/false/no/off 强制关闭）。 */
 export function isRouteConvertEnabled(env = process.env) {
   const v = String(env?.TASK_ROUTE_CONVERT_ENABLED ?? '').trim().toLowerCase()
-  return v === '1' || v === 'true' || v === 'yes' || v === 'on'
+  if (v === '0' || v === 'false' || v === 'no' || v === 'off') return false
+  return true
 }
 
 /** 关闭时的统一拒绝理由（接口与日志共用，方便 grep）。 */

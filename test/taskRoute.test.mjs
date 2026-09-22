@@ -172,18 +172,24 @@ test('两种代价同时命中就给两条；没题 / 未传答案数时不虚�
   assert.deepEqual(describeRouteRisk({ target: 'workbook', questions: 0, placeholderQuestions: 0, workbookAnswerCount: null }), [])
 })
 
-// ── ⓪ 功能开关：高危功能默认关闭（2026-09-21）──
+// ── ⓪ 功能开关：高危功能 2026-09-21 曾默认关闭，2026-09-22 产品拍板开放 P1
+// （「一键转日常批改重批」），改为**默认开启 + env 逃生口**。──
 
-test('转路线功能默认关闭：env 未配 / 配 0 / 配空串都是关', () => {
-  assert.equal(isRouteConvertEnabled({}), false)
-  assert.equal(isRouteConvertEnabled({ TASK_ROUTE_CONVERT_ENABLED: '' }), false)
+test('转路线功能默认开启；env 显式 0/false/no/off 强制关闭', () => {
+  // 默认开启：env 未配 = 开（2026-09-22 P1 拍板后的新语义）
+  assert.equal(isRouteConvertEnabled({}), true)
+  assert.equal(isRouteConvertEnabled({ TASK_ROUTE_CONVERT_ENABLED: '' }), true)
+  // 逃生口：显式关值一律强制关闭
   assert.equal(isRouteConvertEnabled({ TASK_ROUTE_CONVERT_ENABLED: '0' }), false)
   assert.equal(isRouteConvertEnabled({ TASK_ROUTE_CONVERT_ENABLED: 'false' }), false)
-  // 未显式传 env 时读真实 process.env —— 测试机上没配就必须是关
-  assert.equal(['1', 'true', 'yes', 'on'].includes(String(process.env.TASK_ROUTE_CONVERT_ENABLED || '').trim().toLowerCase()), isRouteConvertEnabled())
+  assert.equal(isRouteConvertEnabled({ TASK_ROUTE_CONVERT_ENABLED: 'no' }), false)
+  assert.equal(isRouteConvertEnabled({ TASK_ROUTE_CONVERT_ENABLED: 'off' }), false)
+  // 未显式传 env 时读真实 process.env —— 只要测试机没配显式关值就必须是开
+  const real = String(process.env.TASK_ROUTE_CONVERT_ENABLED || '').trim().toLowerCase()
+  assert.equal(real === '0' || real === 'false' || real === 'no' || real === 'off' ? false : true, isRouteConvertEnabled())
 })
 
-test('开关打开：只认真值 1/true/yes/on（大小写不敏感）', () => {
+test('开关真值兼容旧配置 1/true/yes/on（大小写不敏感），且拒绝理由仍说清是"功能关闭"', () => {
   assert.equal(isRouteConvertEnabled({ TASK_ROUTE_CONVERT_ENABLED: '1' }), true)
   assert.equal(isRouteConvertEnabled({ TASK_ROUTE_CONVERT_ENABLED: 'TRUE' }), true)
   assert.equal(isRouteConvertEnabled({ TASK_ROUTE_CONVERT_ENABLED: 'on' }), true)

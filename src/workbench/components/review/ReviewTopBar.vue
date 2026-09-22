@@ -103,6 +103,19 @@
         <el-button size="default" :disabled="!store.canUndo" @click="handleUndoLast">
           ↩ 撤销上一笔
         </el-button>
+        <!-- 上传时选错批改方式（典型：选了练习册、但这份卷根本不是该册的）→ 按新方式重批。
+             与「重新处理」的区别：后者重跑同一条管线，这里先换批改路线再重跑。
+             高危（清空题目/判题/错题 + 连带删已发布重绘图），对话框内先 dryRun 预演影响面，
+             老师确认后才执行。重练卷（generated_exam_id 非空）后端直接拒绝，不显示此入口。 -->
+        <el-button
+          v-if="canConvertRoute"
+          size="default"
+          type="warning"
+          plain
+          @click="openConvertRoute"
+        >
+          ⇄ 改批改方式
+        </el-button>
         <el-button size="default" type="warning"
           :disabled="!store.currentTask" :loading="retryLoading"
           @click="handleRetryTask">
@@ -124,6 +137,14 @@
       </template>
     </div>
   </div>
+
+  <!-- 改批改方式（练习册 / 答案库 / 日常作业 互转）—— dryRun 影响面预览 → 确认转换。
+       转换成功后由 handleRouteConverted 清空当前复核上下文并跳下一份。 -->
+  <ConvertRouteDialog
+    v-model="convertRouteVisible"
+    :task="convertRouteTask"
+    @converted="handleRouteConverted"
+  />
 
   <!-- 错题处理决策门禁 -->
   <el-dialog v-model="store.wrongGateVisible" title="请确认错题处理方式" width="640px" :close-on-click-modal="false">
@@ -165,12 +186,56 @@
 import { ref, computed, watch, inject } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { useReviewStore } from '../../stores/reviewStore'
-import { retryTask, saveTaskAsAnswerKey } from '../../../services/apiService'
+import { retryTask, saveTaskAsAnswerKey, TASK_ROUTE_CONVERT_ENABLED } from '../../../services/apiService'
 import StatusIcon from './StatusIcon.vue'
+import ConvertRouteDialog from './ConvertRouteDialog.vue'
 import { WRONG_BOOK_SKIP_REASONS } from '../../../utils/reviewDecision'
 import { RETRY_PAPER_STATE } from '../../utils/retryPaperState'
 
 const store = useReviewStore()
+
+// 「改批改方式」：上传时选错批改方式的纠正入口（练习册 / 答案库 / 日常作业 互转）。
+// 2026-09-22 产品拍板开放（P1「一键转日常批改重批」）：
+//   - 只对普通作业复核显示（重练卷题目行共用原作业，后端直接拒绝，不展示入口）；
+//   - 转换会清空题目/判题/错题并重跑，对话框内 dryRun 预演影响面，确认后才执行；
+//   - 转换成功 = 当前复核上下文失效（试卷被清空重建并入队），需重新加载任务并跳到下一份。
+const routeConvertEnabled = TASK_ROUTE_CONVERT_ENABLED
+const convertRouteVisible = ref(false)
+const convertRouteLoading = ref(false)
+// 当前复核卷是否允许改批改方式：普通作业（非重练卷）且卷可复核。
+// task_type 来自后端 /api/tasks/student/:id 返回的原始字段（workbook / exam / homework）。
+const canConvertRoute = computed(() => {
+  const t = store.currentTask
+  if (!t?.id) return false
+  if (!store.currentPaperReviewable) return false
+  if (!routeConvertEnabled) return false
+  if (t.generated_exam_id) return false
+  return true
+})
+const openConvertRoute = () => {
+  if (!store.currentTask?.id) return
+  convertRouteVisible.value = true
+}
+// 对话框期望 { id, name, taskType, worksheetId } —— 与 GradeCenterWorkbench 传入的 selectedTask 同构。
+const convertRouteTask = computed(() => {
+  const t = store.currentTask
+  if (!t?.id) return null
+  return {
+    id: t.id,
+    name: t.original_name || '未命名作业',
+    taskType: t.task_type || 'homework',
+    worksheetId: t.worksheet_id || null,
+  }
+})
+// 转换成功后的收尾：试卷已被清空重建并重新入队（status → pending/processing），
+// 当前正在复核的题目全部是旧数据 → 重新拉取任务列表并自动跳到下一份待复核卷。
+const handleRouteConverted = async () => {
+  convertRouteVisible.value = false
+  if (store.currentStudent?.id) {
+    await store.loadStudentTasks(store.currentStudent.id)
+    await store.autoSelectPendingTask()
+  }
+}
 
 // ReviewWorkspace 提供的 archiveState：hidden / draft / published
 //   draft → 首次复核（resource 还是 draft），点"完成复核"会触发留底确认

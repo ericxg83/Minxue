@@ -331,12 +331,12 @@ export const retryTask = async (taskId) => {
   return data
 }
 
-// ⚠️ 功能开关（2026-09-21）：「改批改方式」会清空该作业的题目 / 判题 / 已入册错题并连带
-// 删掉已发布几何重绘图，属于高危不可逆操作。当前**默认关闭**：前端按钮置灰不可点，
-// 后端 POST /api/admin/tasks/:id/convert-route 也会同步拒绝（防绕过界面直接调接口）。
-// 要重新开放：前端改这里为 true，且后端 Render 配环境变量 TASK_ROUTE_CONVERT_ENABLED=1，
-// 两端都开才生效（见 server/utils/taskRoute.js 的 isRouteConvertEnabled）。
-export const TASK_ROUTE_CONVERT_ENABLED = false
+// ⚠️ 功能开关（2026-09-21 曾因高危关停，2026-09-22 产品拍板开放 P1「一键转日常批改重批」）：
+// 「改批改方式」会清空该作业的题目 / 判题 / 已入册错题并连带删掉已发布几何重绘图，属高危操作，
+// 但对话框已强制两步确认（dryRun 影响面预览 → 确认转换），且转 homework/exam 后题目由卷面
+// OCR 重建、错题由重批结算重建，可恢复。后端同款开关见 server/utils/taskRoute.js 的
+// isRouteConvertEnabled（env TASK_ROUTE_CONVERT_ENABLED=0/false/off 可强制关闭）。
+export const TASK_ROUTE_CONVERT_ENABLED = true
 export const TASK_ROUTE_CONVERT_DISABLED_HINT = '「改批改方式」暂时关闭（会清空题目与错题，风险较高）'
 
 // 改批改方式（练习册 / 答案库 / 日常作业 三者互转）并重批。
