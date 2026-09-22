@@ -5,6 +5,7 @@ import dayjs from 'dayjs'
 import EmptyState from '../components/EmptyState'
 import SwipeableRow from '../components/SwipeableRow'
 import { MobileList, MobileSegmentedTabs, MobileTextAction } from '../features/mobile/MobilePrimitives'
+import { describeTaskResult } from '../domain/taskResultStats'
 
 const done = new Set(['done', 'graded', 'completed', 'reviewed'])
 const active = new Set(['processing', 'queued', 'pending'])
@@ -56,23 +57,22 @@ const failReason = t => {
 // wrongCount 也不进 emptyCount，早期只看这两个数会把它们静默归入"全对"，
 // 出现列表写「7 道题全部正确」、点进复核页却显示「需处理 4」的自相矛盾。
 // 仍刻意不显示"对题数"——result 未落库 correctCount，前端相减不可靠（详见 DEVLOG.md 待办）。
-function ResultSummary({ questionCount, wrong, empty, pending, truncated }) {
-  if (wrong === 0 && empty === 0 && pending === 0 && !truncated) {
-    return <>{questionCount ? `${questionCount} 道题全部正确` : '批改完成'}</>
-  }
-  const warning = 'var(--warning, #b45309)'
-  const parts = []
-  if (questionCount) parts.push(`共${questionCount}题`)
-  if (wrong > 0) parts.push(<span key='wrong' style={{ color: 'var(--danger)' }}>错{wrong}</span>)
-  if (empty > 0) parts.push(<span key='empty' style={{ color: warning }}>空{empty}</span>)
-  if (pending > 0) parts.push(<span key='pending' style={{ color: warning }}>待复核{pending}</span>)
-  if (truncated) parts.push(<span key='truncated' style={{ color: warning }}>可能有漏题</span>)
-  const nodes = []
-  parts.forEach((part, i) => {
-    if (i > 0) nodes.push(' · ')
-    nodes.push(part)
-  })
-  return <>{nodes}</>
+//
+// 判据与配色改由 domain/describeTaskResult 提供（与通知文案同源）：
+// 2026-09-23 之前 summary 接口取错字段把错题数读成 0，通知与列表两处各写一套判据，
+// 一处修一处不修就继续误报"全对"。
+const PART_COLOR = {
+  danger: 'var(--danger)',
+  warning: 'var(--warning, #b45309)'
+}
+function ResultSummary({ task, truncated }) {
+  const { parts } = describeTaskResult(task, { truncated })
+  return <>{parts.map((part, i) => (
+    <span key={part.key}>
+      {i > 0 && ' · '}
+      <span style={PART_COLOR[part.tone] ? { color: PART_COLOR[part.tone] } : undefined}>{part.label}</span>
+    </span>
+  ))}</>
 }
 
 // 一行一动作：完成行整行可点开批改复核；失败/卡住行只保留"重新处理"；
@@ -84,10 +84,6 @@ function ResultSummary({ questionCount, wrong, empty, pending, truncated }) {
 // 逐题明细归错题本、改判归 PC 复核台），故重练行不可点。
 function TaskRow({ task, onRetryTask, onOpenReview }) {
   const current = stage(task)
-  const wrong = task.result?.wrongCount || 0
-  const empty = task.result?.emptyCount || 0
-  const pending = task.result?.pendingCount || 0
-  const questionCount = task.result?.questionCount || task.question_count || 0
   // 两件都指向同一个动作「重新识别」：OCR 靠截断抢救可能缺题；引图题没拿到配图（漏框/框到别的题被拦）。
   // figureMissingRefs 只有新任务才有（旧数据无此字段），不会让历史任务突然冒提示。
   const truncated = Number(task.result?.ocrTruncated) > 0 || Number(task.result?.figureMissingRefs) > 0
@@ -107,7 +103,7 @@ function TaskRow({ task, onRetryTask, onOpenReview }) {
     : current === 'processing' && isTemp ? '正在上传图片'
     : current === 'processing' ? (showProgress ? `已耗时 ${formatElapsed(task.started_at || task.created_at)} · ${Math.round(progress)}%` : `已耗时 ${formatElapsed(task.started_at || task.created_at)}`)
     : current === 'completed'
-      ? <ResultSummary questionCount={questionCount} wrong={wrong} empty={empty} pending={pending} truncated={truncated} />
+      ? <ResultSummary task={task} truncated={truncated} />
     : '等待系统开始处理'
 
   const body = (

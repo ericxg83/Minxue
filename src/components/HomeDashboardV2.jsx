@@ -1,6 +1,7 @@
 import { AlertCircle, Camera, ChevronRight, Clock3, FileCheck2, Wand2 } from 'lucide-react'
 import { motion } from 'motion/react'
 import { MobileSectionHeading } from '../features/mobile/MobilePrimitives'
+import { buildLatestTaskReminder } from '../domain/taskResultStats'
 
 const done = new Set(['done', 'graded', 'completed', 'reviewed'])
 const complete = (task) => done.has(task.status) || Boolean(task.result?.questionCount)
@@ -69,8 +70,9 @@ export default function HomeDashboardV2({ currentStudent, tasks, isInitializing,
   if (!isInitializing && stalledTask) reminders.push({ key: 'stalled', icon: <AlertCircle size={18} />, tone: 'info', title: '上次作业处理超时', detail: 'AI 没有按时完成批改，去作业页重新处理', onClick: onOpenTasks })
   if (!isInitializing && activeTask) reminders.push({ key: 'active', icon: <Clock3 size={18} />, tone: 'info', title: '作业批改中', detail: '完成后会自动归入错题本', onClick: onOpenTasks })
   if (!isInitializing && latest) {
-    const wrong = latest.result?.wrongCount
-    reminders.push({ key: 'latest', icon: <FileCheck2 size={18} />, tone: wrong ? 'neutral' : 'success', title: wrong ? `上次作业已批改 · ${wrong} 道错题` : '上次作业已批改，表现不错', detail: wrong ? '去作业页查看被标出的题目和讲解' : `${latest.result?.questionCount || '全部'} 题已完成，继续保持`, onClick: onOpenTasks })
+    // 文案与成色统一走 domain（错/空/待复核四态），避免首页与通知页两套判据
+    const r = buildLatestTaskReminder(latest)
+    reminders.push({ key: 'latest', icon: <FileCheck2 size={18} />, tone: r.tone === 'all-correct' ? 'success' : 'neutral', title: r.title, detail: r.detail, onClick: onOpenTasks })
   }
   if (!isInitializing && pendingWrongCount > 0) reminders.push({ key: 'priorityRetry', icon: <Wand2 size={18} />, tone: 'neutral', title: `重点重练 · ${pendingWrongCount} 道错题待巩固`, detail: 'AI 挑选最需要巩固的错题，一键生成重练卷', onClick: onStartPriorityRetry })
 

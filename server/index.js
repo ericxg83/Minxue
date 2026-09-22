@@ -604,7 +604,10 @@ app.get('/api/tasks/summary', async (req, res) => {
          (SELECT COALESCE(json_agg(row_to_json(t)), '[]'::json) FROM (
            SELECT t.id, t.student_id, t.original_name, t.status, t.created_at, t.updated_at,
                   t.notification_read_at, s.name AS student_name,
-                  COALESCE((t.result->>'wrong_count')::int, 0) AS wrong_count
+                  COALESCE((t.result->>'wrongCount')::int, (t.result->>'wrong_count')::int, 0) AS wrong_count,
+                  COALESCE((t.result->>'questionCount')::int, (t.result->>'question_count')::int, 0) AS question_count,
+                  COALESCE((t.result->>'emptyCount')::int, (t.result->>'empty_count')::int, 0) AS empty_count,
+                  COALESCE((t.result->>'pendingCount')::int, (t.result->>'pending_count')::int, 0) AS pending_count
            FROM ${TABLES.TASKS} t
            LEFT JOIN ${TABLES.STUDENTS} s ON s.id = t.student_id
            WHERE t.deleted_at IS NULL
@@ -614,7 +617,10 @@ app.get('/api/tasks/summary', async (req, res) => {
          (SELECT COALESCE(json_agg(row_to_json(t)), '[]'::json) FROM (
            SELECT t.id, t.student_id, t.original_name, t.status, t.created_at, t.updated_at,
                   t.notification_read_at, s.name AS student_name,
-                  COALESCE((t.result->>'wrong_count')::int, 0) AS wrong_count
+                  COALESCE((t.result->>'wrongCount')::int, (t.result->>'wrong_count')::int, 0) AS wrong_count,
+                  COALESCE((t.result->>'questionCount')::int, (t.result->>'question_count')::int, 0) AS question_count,
+                  COALESCE((t.result->>'emptyCount')::int, (t.result->>'empty_count')::int, 0) AS empty_count,
+                  COALESCE((t.result->>'pendingCount')::int, (t.result->>'pending_count')::int, 0) AS pending_count
            FROM ${TABLES.TASKS} t
            LEFT JOIN ${TABLES.STUDENTS} s ON s.id = t.student_id
            WHERE t.deleted_at IS NULL
@@ -634,7 +640,13 @@ app.get('/api/tasks/summary', async (req, res) => {
       createdAt: t.created_at,
       notificationReadAt: t.notification_read_at,
       studentName: t.student_name,
-      wrongCount: t.wrong_count
+      // 统计口径见 src/domain/taskResultStats.js：worker 写的是驼峰 wrongCount，
+      // 这里原先只读下划线 wrong_count ⇒ 恒 0 ⇒ 移动端通知一律误报「全部做对」。
+      // 现在两种命名都取，并把空题/待复核一并带出（wrong=0 不等于全对）。
+      questionCount: t.question_count,
+      wrongCount: t.wrong_count,
+      emptyCount: t.empty_count,
+      pendingCount: t.pending_count
     })
 
     const r = rows[0]

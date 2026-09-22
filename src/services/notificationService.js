@@ -1,5 +1,8 @@
 import { LocalNotifications } from '@capacitor/local-notifications'
 import { Capacitor } from '@capacitor/core'
+// 文案与成色判据统一走 domain：错/空/待复核三桶互斥，wrong=0 不再等于「全对」
+// （2026-09-23 事故：summary 接口取错字段，错题数恒 0，通知永远宣「全部做对」）。
+import { buildGradingDoneNotification } from '../domain/taskResultStats'
 
 const STORAGE_KEY = 'minxue_notified_task_ids'
 const STORAGE_FAILED_COUNT = 'minxue_notified_failed_count'
@@ -89,17 +92,9 @@ export async function dispatchFromSummary(summary) {
 
   for (const t of pendingTasks) {
     if (!t.id || notified.has(t.id)) continue
-    const name = t.studentName || ''
-    const subject = name ? `${name}的作业` : '作业'
-    // wrong 必须在这里取：此前直接引用未定义的 wrong 会抛 ReferenceError，
-    // 被下面的 catch 静默吞掉，结果是"批改完成"系统通知一条都发不出来。
-    const wrong = Number(t.wrongCount || 0)
-    const title = wrong > 0
-      ? `${subject}批改完成`
-      : `${subject}全部正确`
-    const body = wrong > 0
-      ? `本次作业有 ${wrong} 道错题，点此查看`
-      : '本次作业全部做对，太棒了！'
+    // t 是 /api/tasks/summary 的 mapTask 结果（含 studentName 与统计字段）。
+    // 文案唯一来源 buildGradingDoneNotification，禁止在这上面再写 if/三元。
+    const { title, body } = buildGradingDoneNotification(t)
     try {
       await LocalNotifications.schedule({
         notifications: [{
