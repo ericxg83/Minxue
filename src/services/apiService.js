@@ -804,6 +804,13 @@ export const getWorksheetPublishRisk = async (id) => {
   return data.risk
 }
 
+// 答案册完整性体检（2026-09-22）：上传答案册后立刻查，把「哪个单元缺哪几个题号」报给老师去补。
+// 返回 { ok, summary, problem_units, messages }；后端只读不写。
+export const getWorksheetAnswerCoverage = async (id) => {
+  const data = await apiRequest(`/worksheets/${id}/answer-coverage`)
+  return data.coverage
+}
+
 // 练习册答案清单。答案条数多时解析侧返回较慢，沿用原 axios 客户端的 120 秒上限。
 export const getWorksheetAnswers = async (id) => {
   const data = await apiRequest(`/worksheets/${id}/answers`, { timeout: 120000 })

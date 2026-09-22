@@ -4,6 +4,7 @@ import { checkQuestionCompleteness, resolveEffectiveQuestionType } from '../util
 import { syncQuestionCompleteness } from './questionCompletenessSync.js'
 import { normalizeOptions } from '../utils/optionText.js'
 import { coerceAIText } from '../utils/aiTextCoerce.js'
+import { UNJUDGED_REASONS } from './judgeService.js'
 
 /**
  * content 兜底占位符：questions.content 列 NOT NULL 且无默认值。
@@ -61,9 +62,51 @@ export const updateTaskStatus = async (taskId, status, result = null) => {
          failed_at = COALESCE($7::timestamptz, failed_at),
          notification_read_at = CASE WHEN $1 IN ('done', 'failed') THEN NULL ELSE notification_read_at END
      WHERE id = $8`,
-    [status, updateData.result, updateData.updated_at,
+     [status, updateData.result, updateData.updated_at,
      retryCount, lastError, startedAt, failedAt, taskId]
   )
+
+  // 任务失败时给"连参考答案都没有"的题补一条可读原因（2026-09-22）。
+  // 不这么做的话，复核页上这些题只有一片空白的「点击填写」—— 老师分不清是
+  // 「系统没跑完」「答案丢了」还是「答案册没这条」，只能反复重试或手工补。
+  // 只在 failed 分支触发；两个批改管线重跑时都会先 deleteQuestionsByTaskId 清掉旧题，
+  // 因此这些标注不会残留到下一次成功的批改上。
+  if (status === 'failed') {
+    await markTaskUnfinishedAnswerReason(taskId).catch(() => 0)
+  }
+}
+
+/**
+ * 给某任务下「答案为空的题」补写「批改未完成」原因。
+ *
+ * 只动同时满足以下条件的行，避免覆盖更有信息量的既有标注：
+ *   · 本题答案为空（有答案就说明批改跑到了这一步，不需要这条兜底）
+ *   · 尚无 answer_exception_reason（已有的更精确，例如「缺少参考答案，无法自动判定」）
+ * 失败只记日志：这是观测信息，不能反过来让失败处理本身报错。
+ *
+ * @returns {Promise<number>} 实际标注条数
+ */
+export const markTaskUnfinishedAnswerReason = async (taskId) => {
+  try {
+    const { rowCount } = await query(
+      `UPDATE ${TABLES.QUESTIONS}
+       SET answer_exception = true,
+           answer_exception_reason = $2,
+           updated_at = NOW()
+       WHERE task_id = $1
+         AND deleted_at IS NULL
+         AND (answer IS NULL OR btrim(answer) = '')
+         AND (answer_exception_reason IS NULL OR btrim(answer_exception_reason) = '')`,
+      [taskId, UNJUDGED_REASONS.task_unfinished]
+    )
+    if (rowCount > 0) {
+      console.log(`  [Unjudged] 任务 ${String(taskId).substring(0, 8)} 失败 → ${rowCount} 道无答案的题已标注「批改未完成」`)
+    }
+    return rowCount || 0
+  } catch (err) {
+    console.error(`标注任务 ${taskId} 未完成原因失败:`, err.message)
+    return 0
+  }
 }
 
 export const createQuestions = async (questions) => {
@@ -790,7 +833,17 @@ export const cacheQuestion = async (questionData, fingerprint, phash = null, par
   try {
     console.log(`[QuestionCache] 写入缓存: fingerprint=${fingerprint.substring(0, 16)}..., phash=${phash ? phash.substring(0, 16) + '...' : 'null'}, version=${parserVersion}`)
 
-    // 使用 ON CONFLICT 替代 SELECT-before-INSERT/UPDATE，将 2 次 DB 往返减为 1 次
+    // ⚡「占坑」语义（2026-09-22 并发缓存击穿修复）：
+    //   旧逻辑 ON CONFLICT DO UPDATE = 后写覆盖 —— 并发批改同一道题时，
+    //   各任务依次把缓存改写成自己的答案，而 questions.answer 已固化各自当时的结果，
+    //   造成「同一道题不同学生参考答案不同」（实测真分歧 10.4%）；
+    //   且「待人工补充」这类占位答案也会把已写入的好答案冲掉，
+    //   导致后续学生「命中但答案无效」被迫重算，进一步放大分叉。
+    //   新语义：
+    //     · 坑上答案【有效】（非空、非占位语）→ 不覆盖，RETURNING 空 → 读回先写者答案，
+    //       返回 { id, adopted: true, answer, analysis }，由调用方采用先写者结果；
+    //     · 坑上答案【无效/占位】→ 允许本次覆盖（好答案救回坑位），正常返回 { id, adopted: false }。
+    //   ⚠️ 返回值从 UUID 变更为对象（调用方仅 worker.js 两处，已同步适配）。
     const { rows } = await query(
       `INSERT INTO ${TABLES.QUESTION_CACHE}
        (question_fingerprint, content_type, content, options, answer, analysis,
@@ -806,6 +859,9 @@ export const cacheQuestion = async (questionData, fingerprint, phash = null, par
          ai_tags = EXCLUDED.ai_tags,
          phash = EXCLUDED.phash,
          updated_at = NOW()
+       WHERE ${TABLES.QUESTION_CACHE}.answer IS NULL
+          OR btrim(${TABLES.QUESTION_CACHE}.answer) = ''
+          OR ${TABLES.QUESTION_CACHE}.answer IN ('待人工补充', '此为主观题，无唯一标准答案')
        RETURNING id`,
       [
         fingerprint,
@@ -821,8 +877,22 @@ export const cacheQuestion = async (questionData, fingerprint, phash = null, par
         parserVersion
       ]
     )
+    if (!rows.length) {
+      // 冲突且坑上已有有效答案 → 不覆盖，带回先写者答案供调用方采用（全库单一权威答案）
+      const cur = await query(
+        `SELECT id, answer, analysis FROM ${TABLES.QUESTION_CACHE}
+         WHERE question_fingerprint = $1 AND parser_version = $2`,
+        [fingerprint, parserVersion]
+      )
+      if (cur.rows.length) {
+        console.log(`[QuestionCache] 坑上已有有效答案，不覆盖（采先写者）: id=${cur.rows[0].id}`)
+        return { id: cur.rows[0].id, adopted: true, answer: cur.rows[0].answer, analysis: cur.rows[0].analysis }
+      }
+      console.warn('[QuestionCache] 冲突但读回失败（行已消失），按写入失败处理')
+      return false
+    }
     console.log(`[QuestionCache] 缓存写入成功`)
-    return rows[0].id
+    return { id: rows[0].id, adopted: false }
   } catch (error) {
     console.error('[QuestionCache] 缓存写入失败:', error.message)
     return false

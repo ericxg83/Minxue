@@ -29,6 +29,32 @@
       <div class="parse-warning-text">{{ worksheet.parse_warning }}</div>
     </el-alert>
 
+    <!-- 答案册完整性体检常驻展示（2026-09-22）：哪些单元缺哪几个题号，就在这里补。
+         缺口本身不阻断发布（RefGuard 会兜底留空转人工，不会写错答案），
+         但它是"批改时没有参考答案"的根因，必须在老师补答案的地方直接告诉他。 -->
+    <el-alert
+      v-if="coverageMessages.length"
+      class="parse-warning-banner"
+      type="warning"
+      :title="`答案册体检：${coverageMessages.length} 处需核对`"
+      :closable="false"
+      show-icon
+    >
+      <ul class="coverage-list" :class="{ 'coverage-list--collapsed': !coverageExpanded }">
+        <li v-for="(msg, i) in coverageMessages" :key="i">{{ msg }}</li>
+      </ul>
+      <el-button
+        v-if="coverageMessages.length > 4"
+        text
+        size="small"
+        @click="coverageExpanded = !coverageExpanded"
+      >{{ coverageExpanded ? '收起' : `展开全部 ${coverageMessages.length} 条` }}</el-button>
+      <div class="coverage-hint">
+        「缺题号」的题在批改时拿不到参考答案，会转人工；「题号孤立」提示那条答案可能串到了别的题上。
+        可在本页补录或修正后重新解析。
+      </div>
+    </el-alert>
+
     <div class="review-body">
       <!-- 左栏: PDF预览 -->
       <div class="panel pdf-panel">
@@ -123,7 +149,7 @@ import { useRoute, useRouter } from 'vue-router'
 import { ArrowLeft, View } from '@element-plus/icons-vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import {
-  getWorksheets, getWorksheetAnswers, updateWorksheetAnswer, updateWorksheetStatus
+  getWorksheets, getWorksheetAnswers, getWorksheetAnswerCoverage, updateWorksheetAnswer, updateWorksheetStatus
 } from '../../services/apiService.js'
 import StatusTag from '../components/ui/StatusTag.vue'
 import WorkbenchInput from '../components/ui/WorkbenchInput.vue'
@@ -142,6 +168,12 @@ const unitFilter = ref('all')
 const editForm = ref({ answer: '', answer_type: 'choice' })
 const saving = ref(false)
 const pdfMode = ref('question') // 'question' | 'answer'
+
+// 答案册完整性体检（2026-09-22）：审核页才是老师逐条补答案的地方，缺口必须在这里看得见。
+// 数据源 GET /worksheets/:id/answer-coverage（只读）。取不到就静默不显示，不挡主流程。
+const coverageMessages = ref([])
+const coverageSummary = ref(null)
+const coverageExpanded = ref(false)
 
 const pdfProxyUrl = computed(() => {
   if (!worksheet.value) return null
@@ -244,6 +276,14 @@ onMounted(async () => {
     const all = await getWorksheets()
     worksheet.value = all.find(w => w.id === worksheetId)
     answers.value = await getWorksheetAnswers(worksheetId)
+    try {
+      const cov = await getWorksheetAnswerCoverage(worksheetId)
+      coverageMessages.value = cov?.messages || []
+      coverageSummary.value = cov?.summary || null
+    } catch (e) {
+      coverageMessages.value = []
+      coverageSummary.value = null
+    }
   } catch (e) {
     ElMessage.error('加载失败: ' + e.message)
   }
@@ -378,6 +418,24 @@ const confProgress = (c) => {
   /* parse_warning 是多条告警用换行拼接的，必须保留换行否则挤成一坨 */
   white-space: pre-line;
   word-break: break-word;
+}
+
+.coverage-list {
+  margin: 4px 0 0;
+  padding-left: 18px;
+  font-size: 12px;
+  line-height: 1.7;
+  word-break: break-word;
+}
+
+.coverage-list--collapsed li:nth-child(n + 5) {
+  display: none;
+}
+
+.coverage-hint {
+  margin-top: 6px;
+  font-size: 12px;
+  opacity: 0.8;
 }
 
 .panel {

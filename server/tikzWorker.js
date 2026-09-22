@@ -5,7 +5,7 @@ import { fileURLToPath } from 'url'
 const __dirname = dirname(fileURLToPath(import.meta.url))
 dotenv.config({ path: resolve(__dirname, '.env') })
 
-import axios from 'axios'
+import { downloadImageBufferNoProxy } from './utils/noProxyHttp.js'
 import { query, TABLES } from './config/neon.js'
 import { buildTikzGenerationPrompt, callVisionCompletion } from './config/ai.js'
 import { updateQuestionAssetTikz } from './services/neonService.js'
@@ -15,8 +15,8 @@ import { validateGeometryLabels } from './utils/geometryLabelValidator.js'
 // ── 辅助：从 URL 下载图片 buffer ──
 async function downloadImageBuffer(url) {
   try {
-    const resp = await axios.get(url, { responseType: 'arraybuffer', timeout: 30000 })
-    return Buffer.from(resp.data)
+    // 禁代理（proxy:false）：避免环境 HTTP_PROXY 把 OSS 页图请求拦成 400（2026-09-22 事故）
+    return await downloadImageBufferNoProxy(url)
   } catch (error) {
     console.error(`   ⚠️ [TikZ Worker] 图片下载失败: ${error.message}`)
     return null

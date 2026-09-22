@@ -79,6 +79,42 @@ export function detectUnverifiableReference(referenceAnswer) {
     : null
 }
 
+// 「答案册原文就是一个占位符」的形态（整串只有这些字，去标点后判）。
+// 与上面 UNVERIFIABLE_REFERENCE_PATTERNS 的区别：那些是"任意位置命中"，
+// 这里是"整串就是它" —— 用来把「参考答案为「略」」和「参考答案是一整段证明」区分开。
+const BARE_PLACEHOLDER_RE = /^(?:略|过程略|证明略|解答略|画图略|作图略|图略|见解析|见答案|见课本|见详解|见教材|答案不唯一|不唯一|略解)$/
+
+/**
+ * 「无法自动比对的参考答案」的**精确中文说明**（2026-09-22）。
+ *
+ * 为什么需要它：`UNJUDGED_REASONS.unverifiable_reference` 是一句把三种完全不同的
+ * 情况糊在一起的文案「参考答案无法自动核对（含略/见解析/答案不唯一）」。老师看到
+ * 一道题答案是「证明：(1) ∵在△ABC中…」整段证明，却被提示"含略"，会以为系统把答案
+ * 读丢了、或者以为答案是空的 —— 而**参考答案其实好好地显示着**，只是没法逐字比对。
+ *
+ * 因此这里按答案册原文分三档给出准确说明，直接写进 questions.answer_exception_reason：
+ *   · 整串就是「略」类占位符 → 明确说"参考答案为「略」（答案册原答案）"
+ *   · 一整段证明/解答过程     → 明确说"是证明过程，无法逐字比对"
+ *   · 其余含「见解析/不唯一」 → 说明含哪类表述
+ * 三档都保留"请人工核对"的动作指引。
+ *
+ * @param {string} referenceAnswer 答案册/答案引擎给出的参考答案原文
+ * @returns {string} 可直接展示的中文说明
+ */
+export function describeUnverifiableReference(referenceAnswer) {
+  const raw = String(referenceAnswer ?? '').trim()
+  if (!raw) return UNJUDGED_REASONS.no_reference_answer
+  // 去标点后判「整串就是占位符」：答案册里常写成「略。」「略；」等
+  const bare = raw.replace(/[。.；;，,\s、]+/g, '')
+  if (BARE_PLACEHOLDER_RE.test(bare)) {
+    return `参考答案为「${raw}」（答案册原答案），无从自动比对，请人工核对`
+  }
+  if (PROOF_HEAD_RE.test(raw) || raw.length >= LONG_REF_LEN) {
+    return '参考答案是整段证明/解答过程（答案册原答案），无法逐字自动比对，请人工核对'
+  }
+  return '参考答案含「见解析/答案不唯一」等表述（答案册原答案），无法自动比对，请人工核对'
+}
+
 // ── 参考答案与卷面题是否同一道题（2026-09-16 事故沉淀）────────────────
 // 练习册管线只按「题号|小问」取答案，从不校验取到的答案是不是这道题的。
 // 一旦卷面题与答案册不同源（老师随机组题）或答案册单元归属错位（上一单元的尾巴
@@ -134,7 +170,10 @@ export const UNJUDGED_REASONS = Object.freeze({
   unverifiable_reference: '参考答案无法自动核对（含略/见解析/答案不唯一）',
   subjective: '主观题需人工判定',
   low_confidence: '识别置信度不足，需人工确认',
-  reference_mismatch: '参考答案与本题不匹配，已转为人工判定'
+  reference_mismatch: '参考答案与本题不匹配，已转为人工判定',
+  // 任务整体失败/中止（2026-09-22）：此时题目连参考答案都没来得及生成，
+  // 若不给原因，复核页只会显示一片空白，老师看不出"是系统没跑完"还是"答案丢了"。
+  task_unfinished: '批改未完成，参考答案尚未生成，请重新提交该作业'
 })
 
 /**

@@ -157,7 +157,7 @@ export default defineConfig(({ mode }) => ({
     host: true,
     proxy: {
       '/api': {
-        target: 'http://localhost:4000',
+        target: 'http://127.0.0.1:4000',
         changeOrigin: true,
         // 上传PDF/图片等大文件请求可能超过默认2分钟代理超时，
         // 放宽到20分钟以匹配前端 apiService 的10分钟超时

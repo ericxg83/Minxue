@@ -2,15 +2,15 @@ import sharp from 'sharp'
 import axios from 'axios'
 import { uploadImage } from '../services/ossService.js'
 import { isOutOfRangeBox } from './blockBoxTrust.js'
+import { NO_PROXY_DOWNLOAD_OPTS } from './noProxyHttp.js'
 
 /**
  * 下载图片
  */
 async function downloadImage(imageUrl) {
-  const response = await axios.get(imageUrl, {
-    responseType: 'arraybuffer',
-    timeout: 30000
-  })
+  // 走共享的禁代理选项：环境里若设了 HTTP_PROXY/HTTPS_PROXY，axios 默认会走代理，
+  // OSS 页图会被代理拦成 400（2026-09-22 事故）。见 server/utils/noProxyHttp.js。
+  const response = await axios.get(imageUrl, NO_PROXY_DOWNLOAD_OPTS)
   return Buffer.from(response.data)
 }
 

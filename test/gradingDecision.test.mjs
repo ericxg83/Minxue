@@ -1,7 +1,7 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
 import { resolveGradingResult } from '../server/worker.js'
-import { judgeAnswer, detectUnverifiableReference, UNJUDGED_REASONS } from '../server/services/judgeService.js'
+import { judgeAnswer, detectUnverifiableReference, describeUnverifiableReference, UNJUDGED_REASONS } from '../server/services/judgeService.js'
 
 // 卷面批改痕迹（红笔勾/叉/半对）已不再参与判定：红笔不是教师专属，学生订正同样用
 // 红笔；晚托场景要面对各校老师的不同批法，同一个"√"语义不固定。正误只由
@@ -100,5 +100,51 @@ test('原因码都有可读文案，直接展示给老师', () => {
   for (const code of ['no_reference_answer', 'unverifiable_reference']) {
     assert.equal(typeof UNJUDGED_REASONS[code], 'string')
     assert.ok(UNJUDGED_REASONS[code].length > 0)
+  }
+})
+
+// ── 「无法自动核对」的原因必须说清是哪一种（2026-09-22）─────────────────
+// 背景：原通用文案「参考答案无法自动核对（含略/见解析/答案不唯一）」把三种完全不同的
+// 情况糊在一起。老师拿到一道参考答案是整段证明「证明：(1) ∵在△ABC中…」的题，被提示
+// "含略"，会以为系统把答案读丢了 —— 而参考答案其实好好地显示着（answer 非空），
+// 只是没法逐字比对。用户要求：答案就是「略」时，就明说参考答案是「略」。
+test('describeUnverifiableReference：答案册原文就是「略」时，文案照实引用原文', () => {
+  const cases = ['略', '略。', '过程略', '证明略', '见解析', '答案不唯一']
+  for (const raw of cases) {
+    const msg = describeUnverifiableReference(raw)
+    assert.ok(msg.includes(`「${raw}」`), `文案必须原样引用答案册原文: ${raw} → ${msg}`)
+    assert.ok(msg.includes('请人工核对'), `必须给出动作指引: ${msg}`)
+    assert.ok(!msg.includes('无法自动核对（含略'), `不得再用糊在一起的旧文案: ${msg}`)
+  }
+})
+
+test('describeUnverifiableReference：整段证明/解答不能说成「含略」', () => {
+  const proof = '证明：(1) ∵在△ABC中，AD和BG是△ABC的高，∴∠BGC=∠ADC=90°.又∠C=∠C, ∴△ADC∽△BGC.'
+  const msg = describeUnverifiableReference(proof)
+  assert.ok(msg.includes('证明'), `应说明是证明过程: ${msg}`)
+  assert.ok(!msg.includes('含略'), `证明过程不得被说成含「略」: ${msg}`)
+  // 长参考答案（无证明前缀）同样归入"整段解答"
+  const long = '解：设该抛物线的表达式为y=a(x-1)²+4，将点B(0,3)代入得a=-1，故所求表达式为y=-(x-1)²+4。'
+  assert.ok(describeUnverifiableReference(long).includes('整段'))
+})
+
+test('describeUnverifiableReference：空答案归到"缺少参考答案"', () => {
+  assert.equal(describeUnverifiableReference(''), UNJUDGED_REASONS.no_reference_answer)
+  assert.equal(describeUnverifiableReference(null), UNJUDGED_REASONS.no_reference_answer)
+})
+
+test('describeUnverifiableReference 与 detectUnverifiableReference 覆盖同一批输入', () => {
+  // 判据本身（detectUnverifiableReference 返回的原因码）保持向后兼容不变，
+  // 新增的只是"给老师看的中文说明"，两者不能各认一批。
+  const cases = [
+    '略', '(1)证明略；(2)70°', '(1) 证明见解析；(2) FG = a - b',
+    '李师傅工作效率高 比较过程略', '$\\frac{31}{15}$ (答案不唯一)',
+    '证明：∠BDC=∠BDE，∠C=∠C，∴△BCD∽△BDE；, 8'
+  ]
+  for (const answer of cases) {
+    assert.equal(detectUnverifiableReference(answer), 'unverifiable_reference', answer)
+    const msg = describeUnverifiableReference(answer)
+    assert.equal(typeof msg, 'string')
+    assert.ok(msg.length > 0 && msg.includes('请人工核对'), answer)
   }
 })

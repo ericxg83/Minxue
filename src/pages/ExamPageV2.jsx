@@ -4,6 +4,7 @@ import { motion } from 'motion/react'
 import dayjs from 'dayjs'
 import EmptyState from '../components/EmptyState'
 import ExamDetailModal from '../components/ExamDetailModal'
+import SwipeableRow from '../components/SwipeableRow'
 import { MobileList, MobileSegmentedTabs, MobileTextAction } from '../features/mobile/MobilePrimitives'
 import { RETRY_EXAM_STAGE, RETRY_EXAM_STAGE_TEXT, RETRY_EXAM_STAGE_TONE, isResultStage, resolveRetryExamScore, resolveRetryExamStage } from '../domain/retryExamStage'
 
@@ -98,7 +99,13 @@ export default function ExamPageV2({ studentExams, onReprint, onDelete, onOpenWr
           </EmptyState>
           : <MobileList>
               {visible.map((exam, index) => (
-                <ExamRow key={exam.id || index} exam={exam} onOpen={setDetailExam} />
+                <SwipeableRow
+                  key={exam.id || index}
+                  radius='0'
+                  onDelete={onDelete ? () => onDelete(exam) : undefined}
+                >
+                  <ExamRow exam={exam} onOpen={setDetailExam} />
+                </SwipeableRow>
               ))}
             </MobileList>}
       </>}

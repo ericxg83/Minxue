@@ -64,12 +64,20 @@ test('源码级：瞬时限流判据必须排在额度耗尽返回之前', () =>
   assert.ok(iTransient < iReturn, '瞬时限流判据必须在额度耗尽正则之前生效')
 })
 
-test('源码级：答案引擎必须有备用供应商兜底层（排在通用文本链路之前）', () => {
+test('源码级：答案引擎必须有备用供应商兜底层，且下线通用文本链路兜底', () => {
   assert.match(AI_SRC, /FALLBACK_VENDORS/)
+  // 备用供应商兜底层必须存在（排在返回空答案之前）
   const iFallbackVendor = AI_SRC.indexOf('备用供应商兜底')
-  const iLegacyChain = AI_SRC.indexOf("回落通用文本链路，绝不因为模型选择问题卡住批改")
-  assert.ok(iFallbackVendor > 0 && iLegacyChain > 0)
-  assert.ok(iFallbackVendor < iLegacyChain, '备用供应商兜底必须在通用文本链路之前尝试')
+  const iNoChannel = AI_SRC.indexOf('no-channel-available')
+  assert.ok(iFallbackVendor > 0 && iNoChannel > 0, '备用供应商层与"无可用通道"出口都必须存在')
+  assert.ok(iFallbackVendor < iNoChannel, '备用供应商兜底必须在返回空答案之前尝试')
   // 备用供应商必须用自己的 Key（不能用主供应商的 Key 池去打别家网关）
   assert.match(AI_SRC, /const fbKey = process\.env\[fbVendor\.envKey\] \|\| ''/)
+  // ⛔ 2026-09-22：通用文本链路兜底已下线 —— 它质量不足（会给张冠李戴的选项），
+  //   用它产出当参考答案比"留空转人工"更危险。必须改走空答案 + 转人工出口。
+  assert.ok(
+    !/return \{ \.\.\.fallbackChain, provider: 'fallback-text-chain' \}/.test(AI_SRC),
+    '不得再回落通用文本链路产出参考答案（质量不足，宁可留空转人工）'
+  )
+  assert.match(AI_SRC, /provider: 'no-channel-available'/, '全链失败必须走"无可用通道"出口')
 })

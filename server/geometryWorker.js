@@ -24,7 +24,7 @@ import { fileURLToPath } from 'url'
 const __dirname = dirname(fileURLToPath(import.meta.url))
 dotenv.config({ path: resolve(__dirname, '.env') })
 
-import axios from 'axios'
+import { downloadImageBufferNoProxy } from './utils/noProxyHttp.js'
 import { query, TABLES } from './config/neon.js'
 import { callVisionCompletion, buildGeometryReconstructionPrompt } from './config/ai.js'
 // 限流/过载安全网：429（配额窗口）与 503（上游高负载）是常态噪声，不该消耗
@@ -105,12 +105,13 @@ async function publishCleanUrlFor(questionId, svg, shortId) {
 
 async function downloadImageBuffer(url) {
   try {
-    // proxy:false —— OSS 配图是公网 CDN，必须直连。
+    // 统一走 NO_PROXY_DOWNLOAD_OPTS（含 proxy:false）—— OSS 配图是公网 CDN，必须直连。
     // 2026-09-18 事故：开发机注入 HTTP(S)_PROXY 代理环境变量后，axios 默认走内网代理，
     // 该代理把 HTTPS 请求当明文 HTTP 转回 443 → 「400 The plain HTTP request...」，
     // 导致几何 Worker 下载裁片全部失败（curl 直连 200，axios 走代理 400）。
-    const resp = await axios.get(url, { responseType: 'arraybuffer', timeout: 30000, proxy: false })
-    return Buffer.from(resp.data)
+    // 2026-09-22 收敛：原先本文件手写 axios 参数，与 worker.js 等三处各自为政；
+    // 现全部改用共享选项，新增下载调用点漏带 proxy:false 会被回归测试拦下。
+    return await downloadImageBufferNoProxy(url)
   } catch (error) {
     console.error(`   ⚠️ [几何Worker] 图片下载失败: ${error.message}`)
     return null

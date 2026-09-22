@@ -196,7 +196,7 @@
         </el-result>
       </div>
       <div v-else-if="parseStatus === 'done'" class="parse-result">
-        <el-result :icon="parseWarning ? 'warning' : 'success'" title="解析完成">
+        <el-result :icon="(parseWarning || coverageMessages.length) ? 'warning' : 'success'" title="解析完成">
           <template #sub-title>
             <p>共解析出 <strong>{{ parseCount }}</strong> 条答案</p>
           </template>
@@ -208,6 +208,25 @@
               :closable="false"
               class="parse-warning"
             />
+            <!-- 答案册完整性体检（2026-09-22）：源头告知"哪里缺答案"，让老师现在就去补，
+                 而不是等批改时在复核页一条条发现"没有参考答案"。 -->
+            <el-alert
+              v-if="coverageMessages.length"
+              type="warning"
+              :closable="false"
+              class="parse-warning"
+              show-icon
+            >
+              <template #title>
+                答案册体检：{{ coverageMessages.length }} 处需核对，建议现在补录
+              </template>
+              <ul class="coverage-list">
+                <li v-for="(msg, i) in coverageMessages" :key="i">{{ msg }}</li>
+              </ul>
+              <div class="coverage-hint">
+                这些不影响先审核其余答案；但「缺题号」的题在批改时拿不到参考答案，会转人工。
+              </div>
+            </el-alert>
             <el-button type="primary" @click="gotoReview" :disabled="parseCount === 0">审核答案</el-button>
             <el-button @click="resetPdfUpload">重新上传</el-button>
           </template>
@@ -239,6 +258,7 @@ import {
   uploadPdf,
   uploadImages,
   getWorksheet,
+  getWorksheetAnswerCoverage,
   uploadQuestionPdf,
   regradeTaskPageWithUnit,
 } from '../../services/apiService.js'
@@ -300,6 +320,10 @@ const parsing = ref(false)
 const pdfUploaded = ref(false)
 const parseCount = ref(0)
 const parseWarning = ref(null)
+// 答案册完整性体检（2026-09-22）：解析完成后立刻查「哪个单元缺哪几个题号」。
+// 目的：把"批改时才发现没参考答案"提前到"上传答案册时就告知老师去补"。
+const coverageMessages = ref([])
+const coverageSummary = ref(null)
 const parseStatus = ref('idle')
 const parseError = ref('')
 const parseMessage = ref('')
@@ -454,6 +478,8 @@ const handleUploadPdf = (row) => {
   uploadTab.value = 'pdf'
   parseWarning.value = null
   parseCount.value = 0
+  coverageMessages.value = []
+  coverageSummary.value = null
   parseStatus.value = 'idle'
   parseError.value = ''
   parseMessage.value = ''
@@ -496,6 +522,21 @@ const removeImage = (i) => {
 const clearSelectedImages = () => {
   selectedImages.value.forEach(img => URL.revokeObjectURL(img.url))
   selectedImages.value = []
+}
+
+// 答案册完整性体检（2026-09-22）：拿"哪个单元缺哪几个题号"的清单。
+// 失败时静默清空 —— 体检只是提示，不能因为它出错就挡住上传/审核主流程。
+const loadCoverage = async () => {
+  const id = currentWorksheetId.value
+  if (!id) return
+  try {
+    const cov = await getWorksheetAnswerCoverage(id)
+    coverageMessages.value = cov?.messages || []
+    coverageSummary.value = cov?.summary || null
+  } catch (e) {
+    coverageMessages.value = []
+    coverageSummary.value = null
+  }
 }
 
 const pollParseStatus = async () => {
@@ -551,7 +592,11 @@ const pollParseStatus = async () => {
         clearTimeout(parseMessageTimer)
         parseMessageTimer = null
       }
-      if (ws.parse_warning) {
+      // 答案册完整性体检（2026-09-22）：解析完成后立刻查缺口，别等批改时才在复核页发现
+      await loadCoverage()
+      if (coverageMessages.value.length) {
+        ElMessage.warning(`答案册体检发现 ${coverageMessages.value.length} 处可能缺答案，请查看下方清单`)
+      } else if (ws.parse_warning) {
         ElMessage.warning(ws.parse_warning)
       } else {
         ElMessage.success(`解析完成，共 ${parseCount.value} 条答案`)
@@ -560,6 +605,8 @@ const pollParseStatus = async () => {
     } else if (ws.parse_status === 'failed') {
       parseCount.value = 0
       parseWarning.value = null
+      coverageMessages.value = []
+      coverageSummary.value = null
       parseError.value = ws.parse_error || '未知错误'
       pdfUploaded.value = false
       parsing.value = false
@@ -1101,6 +1148,19 @@ watch(showTypeFixDialog, (v) => {
 .parse-warning {
   margin-bottom: 16px;
   text-align: left;
+}
+
+.coverage-list {
+  margin: 6px 0 0;
+  padding-left: 18px;
+  max-height: 220px;
+  overflow-y: auto;
+  line-height: 1.7;
+}
+
+.coverage-hint {
+  margin-top: 8px;
+  opacity: 0.8;
 }
 
 .fix-log {

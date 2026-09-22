@@ -1,4 +1,5 @@
 import { getWorksheetById, getWorksheetAnswers } from './neonService.js'
+import { buildAnswerCoverage } from './answerCoverageService.js'
 
 // ── 练习册答案解析质量闸（通用规则，见 AGENTS.md「练习册答案解析质量闸」）──
 // 释义：旧版 risk 的 warning 正则把 parse_warning 当字符串匹配，主版本升级后
@@ -70,6 +71,17 @@ export const getWorksheetPublishRisk = async (id) => {
     }
   }
 
+  // ── 答案册完整性体检（2026-09-22）──
+  // 「某单元缺题号 N、M」意味着这些题**批改时必然拿不到参考答案**（转人工）。
+  // 但它不构成拒绝发布的理由：RefGuard 会兜底留空转人工，绝不会写错答案；
+  // 而答案册缺口往往是"老师手上那本答案册本来就只印到第几题"，阻断发布会冻结正常流程。
+  // 因此只进 notices，让老师在审核页看到"哪里缺、去补哪几题"。
+  const coverage = buildAnswerCoverage(answers)
+  for (const m of coverage.messages.slice(0, 12)) notices.push(`答案册可能缺答案：${m}`)
+  if (coverage.messages.length > 12) {
+    notices.push(`答案册另有 ${coverage.messages.length - 12} 处缺口未列出`)
+  }
+
   const sections = new Set(answers.map(a => `${a.unit_key || ''}|${a.section || ''}`))
   const blocking = issues.length > 0
   return {
@@ -83,6 +95,8 @@ export const getWorksheetPublishRisk = async (id) => {
       section_count: sections.size,
       ungrouped_count: ungroupedCount,
       sub_answer_count: answers.filter(a => a.sub_no != null && String(a.sub_no) !== '').length,
+      // 答案册完整性（2026-09-22）：units_with_gaps>0 表示有单元缺题号 → 那些题批改时会缺参考答案
+      coverage: coverage.summary,
     },
   }
 }

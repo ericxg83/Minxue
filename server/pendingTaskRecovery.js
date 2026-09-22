@@ -781,10 +781,14 @@ class PendingTaskRecovery {
       let abandoned = 0
       // [2026-09-21] 与 scanGeometryAssets 同口径：入队前查重，防 watchdog 与 5 分钟兜底
       // 扫描对同一资产各塞一个 job（两个进程都在跑 recovery）
+      // [2026-09-22 修复] 这里原先误写成 `queue.getJobs`（本函数局部变量是 geometryQueue，
+      // 没有 queue）→ ReferenceError 被 catch 吞掉，alreadyQueued 恒为空集 →
+      // 「已在队列」的 processing 资产掉进 else 分支被**重复入队**，正好抵消本段查重意图
+      // （后端日志每 5 分钟刷一次「watchdog 查重读取 waiting/delayed/active 失败: queue is not defined」）。
       const alreadyQueued = new Set()
       for (const st of ['waiting', 'delayed', 'active']) {
         try {
-          const queued = await queue.getJobs([st], 0, -1)
+          const queued = await geometryQueue.getJobs([st], 0, -1)
           for (const j of queued) if (j?.data?.assetId) alreadyQueued.add(j.data.assetId)
         } catch (err) {
           console.warn(`[PendingTaskRecovery] ⚠️ watchdog 查重读取 ${st} 失败: ${err.message}`)

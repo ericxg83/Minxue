@@ -200,6 +200,47 @@ function evaluate(expression) {
   return value
 }
 
+// 省略号标记：出现即说明该式是**无穷/省略**形式（如 `2⁰+2⁻¹+2⁻²+⋯`），
+// 任何"取有限项求值"的做法都必然算出一个错值。
+const ELLIPSIS = /[…⋯]|\.{3,}|\\dots|\\cdots|\\ldots/i
+
+/**
+ * 算式完整性闸（2026-09-22 加）。
+ *
+ * 为什么需要这道闸 —— 同一族的**第三次**误清空事故：
+ *   · 2026-09-15：字符集缺上标 → `-3.6×10⁻⁴` 被切成 `-3.6×10` 算出 -36 → 误清空（4 条）
+ *   · 2026-09-20：题干参照分数被当成算式 → `比1/4大` 的 `1/4` 拿去比 13/48 → 误清空
+ *   · 2026-09-22：字符集缺省略号 → `2⁰+2⁻¹+2⁻²+2⁻³+2⁻⁴+⋯` 被切成不完整有限和
+ *                 `2⁰+…+2⁻⁴` 算出 31/16，而真实正解是无穷级数和 2/1 → 误清空（今日 8 条）
+ *   前两次都只补了"单个分数""缺 ^"这类特例，没建立总闸，于是换个字符就再犯一次。
+ *   本闸的判据是**算式形态是否完整**，与具体字符无关：
+ *     - 含省略号 → 是无穷式，有限求值必然错 → 不适用
+ *     - 以运算符开头/结尾（缺操作数）→ 是片段而非完整算式 → 不适用
+ *     - 括号不配对 → 是片段 → 不适用
+ *   命中任一条即 return null（`applicable:false`，跳过校验、保留原答案）。
+ *
+ * ⚠️ 纪律：这里是「宁可漏校验，不可误判、更不可清空答案」——守恒方向永远是**保住答案**。
+ */
+function isCompleteExpression(expression) {
+  const s = String(expression ?? '')
+  if (!s) return false
+  if (ELLIPSIS.test(s)) return false // 省略号：无穷式，跳过校验
+  // ⚠️ 前导 `+`/`-` 是**单元运算符**（负号/正号），合法，如 `-3.6*10^(-4)`。
+  //    只有 `*` `/` `^` 开头才是真的缺左操作数。
+  if (/^[*/^]/.test(s)) return false // 缺左操作数（乘除幂必须有左操作数）
+  if (/[+\-*/^]$/.test(s)) return false // 缺右操作数
+  // 括号配对（归一化后只会有 ASCII 圆括号）
+  let depth = 0
+  for (const c of s) {
+    if (c === '(') depth += 1
+    else if (c === ')') {
+      depth -= 1
+      if (depth < 0) return false // 右括号多于左括号
+    }
+  }
+  return depth === 0
+}
+
 function extractArithmeticExpression(questionContent) {
   const source = String(questionContent)
   if (/[a-zA-Z=＝]/.test(source)) return null
@@ -208,6 +249,11 @@ function extractArithmeticExpression(questionContent) {
   // 同理必须包含 `^`：缺它时 `(3/2)^2024 · (-2/3)^2024` 会被切成 `(3) (3/2)` 与
   // `2024·(-2/3)`，后者能求出一个"看起来合理"的错值 -4048/3，然后拿去和正确答案 1 比对
   // → 判「验算不符」→ 清空答案。切开算式再验证，比不验证更危险。
+  //
+  // ⚠️ 2026-09-22：省略号 `…`/`⋯` **故意不放进字符集** —— 放进去会让 `⋯` 参与 tokenize
+  //   而抛 unsupported token（同样是放弃校验，但靠抛错实现不清晰）；不放进去则算式在
+  //   省略号处被切断，切断后的**片段**由下面的 isCompleteExpression 闸拦下
+  //   （以运算符结尾 = 缺操作数）。两条路都通往"跳过校验"，但后者是显式判据。
   const candidates = source.match(/[\d\s+\-−–—*/×✕·÷().（）\[\]【】{}\\^⁰¹²³⁴⁵⁶⁷⁸⁹⁺⁻]+/g) || []
   // ⚠️ 2026-09-20 误清空事故（填空 #27「写出一个比1/4大，比1/3小且分母为48的最简分数」）：
   //   题干里的**参照分数**（比1/4大、比1/3小）被当成"算式"提取出 `1/4`，
@@ -220,6 +266,8 @@ function extractArithmeticExpression(questionContent) {
   const isSingleFraction = (c) => /^\(?[+-]?\d+(?:\.\d+)?\s*\/\s*\d+(?:\.\d+)?\)?$/.test(c)
   const candidatesWithOperators = candidates
     .map(normalizeExpression)
+    // 完整性闸：含省略号 / 缺操作数 / 括号不配对 → 不是完整算式，直接淘汰。
+    .filter(isCompleteExpression)
     .filter(candidate => /[+\-*/]/.test(candidate) && /\d/.test(candidate))
     .filter(candidate => !isSingleFraction(candidate))
     .sort((left, right) => right.length - left.length)
