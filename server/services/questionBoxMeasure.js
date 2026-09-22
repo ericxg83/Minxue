@@ -124,10 +124,14 @@ export function validateMeasureSegments (segs, expected) {
  * @param {Array<{id:string, question_number:number|string, sub_no?:string, content?:string}>} p.questions
  * @param {string} [p.onlyVendor] 只走指定视觉通道（失败即失败）
  * @param {boolean} [p.freeOnly] 只走免费视觉通道（写入侧补测用，不碰付费 key）—— 见
- *        config/ai.js 的 FREE_VL_CHANNELS；魔搭耗尽时最多回退到 SenseNova/ZenMux/BigModel 免费档
+ *        config/ai.js 的 FREE_VL_CHANNELS；魔搭耗尽时最多回退到 SenseNova/ZenMux 免费档
+ * @param {boolean} [p.noBackup] 禁止弱免费备份供应商（SenseNova/ZenMux 等），仅魔搭 + 强模型白名单
+ * @param {boolean} [p.strongBackupOnly] 配合 noBackup：魔搭耗尽时只允许降级到 STRONG_VL_FALLBACK_VENDORS
+ *        （HuihuiyunGemini 付费高质量），跳过免费弱模型。代价：免费通道失败时改走付费 gemini（按 token 计费）。
+ *        用于「蓝色画框」追求定位精度、且接受失败路径付费的场景（2026-09-22）。
  * @returns {Promise<{boxes: Object<string,{x,y,width,height}>, raw: Object|null, error?: string}>}
  */
-export async function measurePageQuestionBoxes ({ imageBuffer, questions, onlyVendor = null, textLeft = 60, textRight = 960, freeOnly = false }) {
+export async function measurePageQuestionBoxes ({ imageBuffer, questions, onlyVendor = null, textLeft = 60, textRight = 960, freeOnly = false, noBackup = false, strongBackupOnly = false }) {
   const list = (questions || []).filter(q => q && q.id)
   if (!list.length) return { boxes: {}, raw: null, error: '无题目' }
 
@@ -149,6 +153,8 @@ export async function measurePageQuestionBoxes ({ imageBuffer, questions, onlyVe
         maxTokens: 2048,
         ...(onlyVendor ? { onlyVendor } : {}),
         ...(freeOnly ? { freeOnly: true } : {}),
+        ...(noBackup ? { noBackup: true } : {}),
+        ...(strongBackupOnly ? { strongBackupOnly: true } : {}),
       })
       content = r.content
     } catch (e) {

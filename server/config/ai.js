@@ -538,24 +538,17 @@ export const BACKUP_VENDOR_DEFS = [
     // 智谱 BigModel (https://open.bigmodel.cn)：OpenAI 兼容，国内直连（无 GFW 问题）。
     // 2026-08-13 用户 Key 实测结论（账户余额 = 0）：
     //   - 免费文本 glm-4-flash / glm-4.5-flash：可用 ✅（文本兜底首选）
-    //   - 免费视觉 glm-4v-flash：可用，但 max_tokens 硬上限 1024 → 长答案页会被截断。
-    //     为不触发 1210，本供应商整体 maxTokens 取 1024（见下方 maxTokens 字段）。
-    //   - 新品 GLM-5V-Turbo（glm-5v-turbo）：视觉模型存在，但需余额>0（1113），
-    //     充值后自动作为首个视觉模型生效；届时 quality 若优于魔搭，可再把
-    //     maxTokens 提到 4096（glm-5v-turbo 无 1024 限制），并把魔搭降为第一备用。
-    //   - 付费文本 glm-4.5/4.6/4.7/5/5.1/5.2 及视觉 glm-4.5v/glm-4v-plus：需余额（1113）。
+    //   - 2026-09-22：视觉模型 glm-4v-flash / glm-5v-turbo 已移除 —— 本供应商改为纯文本回填备份
+    //     （textModel=glm-4-flash）。视觉 OCR / 框量框任务不再走 BigModel。
+    //   - 付费文本 glm-4.5/4.6/4.7/5/5.1/5.2：需余额（1113）。
     name: 'BigModel',
     envKey: 'BIGMODEL_API_KEY',
     endpoint: 'https://open.bigmodel.cn/api/paas/v4/chat/completions',
     modelsEndpoint: 'https://open.bigmodel.cn/api/paas/v4/models',
     textModel: 'glm-4-flash',
-    vlModels: ['glm-5v-turbo', 'glm-4v-flash'],
-    maxTokens: 1024, // glm-4v-flash 硬上限；充值后想用 glm-5v-turbo 完整输出可提到 4096
-    // 2026-09-18 按模型下发：glm-5v-turbo 无 1024 限制，整页 OCR 需要 ~5000+ 字符。
-    // 实测（`_diag_backup_chain.mjs`）glm-5v-turbo 整页返回 5175 字符 / 99.8s；
-    // 若被压到 1024，端到端实测只回来 2841 字符且 JSON 在末尾断掉 → 整页失败。
-    // 配图定位质量实测 IoU≥0.5 = 75%（比辉辉云 qwen3.8-max 的 38% 更好），是链路上值得保住的兜底。
-    vlModelMaxTokens: { 'glm-5v-turbo': 8192 },
+    vlModels: [], // 2026-09-22 起移除视觉模型，BigModel 仅作文本回填备份
+    maxTokens: 1024,
+    vlModelMaxTokens: {},
     keyPrefix: null, // 智谱 Key 形如 <id>.<secret>，无统一前缀，有 Key 即启用
     referer: null,
   },
@@ -576,12 +569,11 @@ function resolveBackupVendors() {
 //   · SenseNova sensenova-6.8-flash-lite —— 0 计费，可作视觉 OCR（弱，但量框够用）
 //   · ZenMux   z-ai/glm-4.6v-flash-free —— 零余额可用，能看图（429 限流较凶）
 //   · ZenMux   sapiens-ai/agnes-2.0-flash —— 零余额可用，识别质量差一截（白名单兜底）
-//   · BigModel glm-4v-flash —— 零余额可用，max_tokens 硬上限 1024（量框 JSON 够用）
 // 魔搭矩阵（VL_MODELS）本身是免费额度体系，不受 freeOnly 限制。
+// 2026-09-22：BigModel 视觉模型已移除，本白名单不再含 BigModel。
 export const FREE_VL_CHANNELS = [
   { name: 'SenseNova', models: ['sensenova-6.8-flash-lite'] },
   { name: 'ZenMux', models: ['z-ai/glm-4.6v-flash-free', 'sapiens-ai/agnes-2.0-flash'] },
-  { name: 'BigModel', models: ['glm-4v-flash'] },
 ]
 export const isFreeVisionChannel = (vendorName, vlModel) =>
   FREE_VL_CHANNELS.some(c => c.name === vendorName && c.models.includes(vlModel))

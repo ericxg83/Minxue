@@ -2487,10 +2487,10 @@ app.post('/api/questions/task/:taskId/refine-boxes', async (req, res) => {
     const buf = Buffer.from(await resp.arrayBuffer())
 
     const { measurePageQuestionBoxes } = await import('./services/questionBoxMeasure.js')
-    // [2026-09-20] freeOnly：魔搭耗尽时只走免费白名单（SenseNova 0 计费 / ZenMux / BigModel
-    // 免费档），绝不自动烧付费 key（HuihuiyunGemini/Bailian/辉辉云聚合）。代价是魔搭耗尽日
-    // 免费通道量不出来时整页不给框（宁可不出图判据）——明天魔搭恢复即正常。
-    const r = await measurePageQuestionBoxes({ imageBuffer: buf, questions: qs, freeOnly: true })
+    // [2026-09-22] 改为「魔搭主力 + HuihuiyunGemini 强兜底」：noBackup+strongBackupOnly 跳过
+    // 弱免费备份（SenseNova/ZenMux），魔搭耗尽时只降级到付费高质量 gemini（按 token 计费），
+    // 换取定位框精度。代价：魔搭频繁耗尽日的失败页会改走付费 gemini。
+    const r = await measurePageQuestionBoxes({ imageBuffer: buf, questions: qs, noBackup: true, strongBackupOnly: true })
     if (r.error || !Object.keys(r.boxes).length) {
       return res.json({ success: true, cached: false, boxes: {}, error: r.error || '未量到框' })
     }

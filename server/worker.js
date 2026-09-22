@@ -45,8 +45,10 @@ import { aiParseSelfCheck } from './utils/aiParseSelfCheck.js'
  * 这里把测量前移到【写入侧】：落库前逐页实测并覆盖 block_coordinates，
  * 让入库数据本身可信 —— 复核页打开即显示，不消耗运行时额度。
  *
- * 约束（产品决策，2026-09-20）：
- *   · **只走免费视觉通道**（measurePageQuestionBoxes 的 freeOnly）—— 不碰付费 key；
+ * 约束（产品决策，2026-09-22 更新）：
+ *   · **魔搭主力 + HuihuiyunGemini 强兜底**（measurePageQuestionBoxes 的 noBackup+strongBackupOnly）：
+ *     魔搭先上（免费快），失败才降级到付费 gemini 拿高精度框；跳过弱免费备份（SenseNova/ZenMux）。
+ *     代价：魔搭频繁耗尽时失败页会走付费 gemini（按 token 计费）。
  *   · 失败静默保留占位框（读取侧闸门照旧拦截，行为不变），绝不阻断批改主流程；
  *   · 按页一次调用（与读取侧同一算法、同一闸门、重试 1 次）。
  *
@@ -74,7 +76,7 @@ async function refineStoredBlocks ({ questions, pageBuffers }) {
     if (!buf) continue
     try {
       const { measurePageQuestionBoxes } = await import('./services/questionBoxMeasure.js')
-      const { boxes, error } = await measurePageQuestionBoxes({ imageBuffer: buf, questions: qs, freeOnly: true })
+      const { boxes, error } = await measurePageQuestionBoxes({ imageBuffer: buf, questions: qs, noBackup: true, strongBackupOnly: true })
       if (error) {
         console.warn(`   [写入侧框] 第 ${page} 页补测失败：${error}（保留占位框，读取侧兜底）`)
         consecutiveFail++
@@ -5203,7 +5205,11 @@ export const processWorkbookGrading = async (job) => {
       //   命中 → 丢弃参考答案、is_correct=null、写 answer_exception_reason 让老师看见。
       if (answerRow) {
         const sheetType = q.question_type || 'choice'
-        const mismatchReason = detectReferenceMismatch({ sheetType, referenceAnswer: answerRow.answer })
+        const mismatchReason = detectReferenceMismatch({
+          sheetType,
+          referenceAnswer: answerRow.answer,
+          answerType: answerRow.answer_type, // 优先信任答案库题型（权威），避免 OCR 误判引发误拒
+        })
           || (unitGapStart != null && Number(q.question_number) >= unitGapStart ? 'reference_mismatch' : null)
         if (mismatchReason) {
           refGuardDowngraded++
