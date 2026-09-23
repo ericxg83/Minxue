@@ -386,6 +386,10 @@ export const useReviewStore = defineStore('review', () => {
           index,
           source: q.review_status === REVIEW_STATUS.WRONG ? 'manual' : 'ai',
           reason: isComplete ? 'complete' : 'incomplete',
+          // 未作答终态（2026-09-23）：批改管线给空题写 confidence=0，
+          // 天生命中 low_confidence。分层时需据此把该 code 摘掉——否则整卷被拦，
+          // 而老师对空题本就无事可拍板（见 src/domain/wrongGateTier.js）。
+          answerSource: q.answer_source || null,
           issues
         }
       })

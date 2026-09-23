@@ -36,7 +36,7 @@ import { isValidImageBuffer, checkImageResolution } from './utils/imageValidator
 import { NO_PROXY_DOWNLOAD_OPTS } from './utils/noProxyHttp.js'
 import { formatOptionsForPrompt } from './utils/optionText.js'
 import { validateArithmeticAnswer } from './utils/arithmeticAnswerValidator.js'
-import { aiParseSelfCheck } from './utils/aiParseSelfCheck.js'
+import { aiParseSelfCheck, detectAnswerCopiedFromStudent } from './utils/aiParseSelfCheck.js'
 
 /**
  * 写入侧定位框补测（2026-09-20 方案A）：
@@ -2185,6 +2185,23 @@ const generateMissingAnswers = async (questions, imageBuffer = null, taskId = nu
         console.log(`     题目 ${q.id.substring(0, 8)}: ⚡ 同指纹求解进行中（另一任务发起），复用其结果`)
       }
       const validation = validateAIAnswer(result.answer, result.analysis)
+
+      // 【2026-09-23】答案引擎输出与学生答案逐字全等 —— **只记观测，不拦截**。
+      //
+      // 背景：近 14 天写进 reason='缺少参考答案，无法自动判定' 的 110 道里，92 道（84%）
+      // 的 result.answer 与学生答案逐字全等（如学生写 "1+a+b-1+b-a+b=2b"，answer 也一模一样）。
+      // 答案册原文不会是学生手写体，这强烈提示 OCR 把学生笔迹读进了 answer 列。
+      //
+      // ⚠️ 为什么**不能**据此拦下（这是本段最重要的结论）：
+      //   用近 14 天「已判对(is_correct=true)」的 973 道做反向对照，本判据会命中 32 道
+      //   （如 ans='3x²-8xy+5' 与 stu='3x²-8xy+5'）—— 那些是学生**真的算对了**、答案也是
+      //   同一个值。纯文本层无法区分「学生抄了答案」与「学生答对且值相同」；
+      //   一刀切成"抄学生"会把 32 道本来判对的题打回人工复核，与「减少复核量」的目标反向。
+      //   因此这里只打日志，供后续按 (task_id, 是否整卷同值) 做人工抽样取证，
+      //   行为链一律不动：该采纳的照样采纳，该转人工的照样转人工。
+      if (detectAnswerCopiedFromStudent(result.answer, q.student_answer)) {
+        console.warn(`     [抄学生存疑] q=${q.id.substring(0, 8)} answer 与学生答案逐字全等，仅记观测不拦截`)
+      }
 
       if (!validation.isValid) {
         if (result.analysis && result.analysis.trim()) {

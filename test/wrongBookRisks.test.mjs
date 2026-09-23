@@ -139,6 +139,51 @@ test('未作答（answer_source=blank）同样参与风险判定', () => {
   assert.deepEqual(risks, ['missing_figure'])
 })
 
+// ── 2026-09-23：空题不被写成 low_confidence ────────────────────────
+//
+// 批改管线对空题写 `confidence: 0`（worker.js blank 分支），于是空题天生
+// conf < 阈值 → 被判 low_confidence → **整卷被拦**，老师只能点「本次不加入」。
+// 但 blank 是终态（见 src/utils/reviewDecision.js），老师本就无需为它拍板任何事。
+// 实测近 14 天有 2 份卷纯因此被拦（6 道空题），全库池子 124 道。
+test('★ 未作答（blank）不因 confidence=0 被判 low_confidence', () => {
+  const risks = computeWrongBookRisks({
+    is_correct: false,
+    answer_source: 'blank',
+    answer: 'AB=5',
+    question_type: 'answer',
+    content: '求AB的长',
+    confidence: 0 // 管线给空题写的值
+  }, false, THRESHOLD)
+  assert.deepEqual(risks, [], '空题不该带任何风险项')
+})
+
+test('★ 未作答（blank）+ 真缺项：只报缺项，不报 low_confidence', () => {
+  const risks = computeWrongBookRisks({
+    is_correct: false,
+    answer_source: 'blank',
+    answer: 'AB=5',
+    question_type: 'answer',
+    content: '如图，求AB的长',
+    confidence: 0
+  }, false, THRESHOLD)
+  assert.deepEqual(risks, ['missing_figure'], '缺图照报，low_confidence 须被摘掉')
+  assert.ok(!risks.includes('low_confidence'))
+})
+
+test('★ 对照：已作答的低置信题仍报 low_confidence（红线不变）', () => {
+  const base = {
+    is_correct: false,
+    answer: 'AB=5',
+    question_type: 'answer',
+    content: '求AB的长',
+    confidence: 0.5
+  }
+  for (const src of ['recognized', 'teacher_input', 'worksheet', undefined]) {
+    const risks = computeWrongBookRisks({ ...base, answer_source: src }, false, THRESHOLD)
+    assert.ok(risks.includes('low_confidence'), `answer_source=${src} 必须报 low_confidence`)
+  }
+})
+
 test('checkQuestionCompleteness 返回与 issues 一一对应的稳定 codes', () => {
   const r = checkQuestionCompleteness({
     content: '如图，求AB的长',

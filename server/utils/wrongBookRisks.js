@@ -42,7 +42,11 @@ export const computeWrongBookRisks = (question, inWrongBook, threshold) => {
     if (code === 'missing_answer') continue // 上一行门禁已提前返回，这里只做防御
     risks.push(code)
   }
-  if (question.confidence != null && Number(question.confidence) < threshold) {
+  // 未作答（blank）是终态，老师无需为它拍板「算不算错」（见 src/utils/reviewDecision.js）。
+  // 但批改管线给空题写 confidence=0（worker.js blank 分支）→ 天生命中 low_confidence，
+  // 整卷被拦而老师无事可做。这里按终态口径排除，与前端 src/domain/wrongGateTier.js 同源。
+  if (question.answer_source !== 'blank'
+      && question.confidence != null && Number(question.confidence) < threshold) {
     risks.push('low_confidence')
   }
   return risks

@@ -168,6 +168,54 @@ export function numericJaccard(a, b) {
 }
 
 /**
+ * 归一化后再做「answer 是否逐字抄了 student_answer」判定。
+ *
+ * 只抹掉纯排版差异（空白、换行、中英文标点、全角半角、LaTeX 的 $ 包裹），
+ * **不抹数学结构** —— 幂次、根号、分数、正负号一律保留，避免把两道数学上
+ * 不同但排版相近的答案判成同一串。
+ *
+ * @param {unknown} value
+ * @returns {string} 归一化后的字符串（不可比时返回空串）
+ */
+function normalizeForCopyCheck(value) {
+  if (typeof value !== 'string') return ''
+  return value
+    .replace(/\$/g, '')                       // LaTeX 定界符
+    .replace(/\s+/g, '')                      // 所有空白（含换行）
+    .replace(/[，。；：、,.;:]/g, '')          // 中英文标点
+    .replace(/[（(]/g, '(').replace(/[）)]/g, ')')
+    .replace(/[【\[]/g, '[').replace(/[】\]]/g, ']')
+    .replace(/[“”"']/g, '')                    // 引号
+    .replace(/[＝]/g, '=')
+    .replace(/[＋]/g, '+').replace(/[－−]/g, '-')
+    .trim()
+}
+
+/** 抄学生判定的最小长度门槛：短于此值不报，避免误伤「学生恰好答对」。 */
+export const ANSWER_COPY_MIN_LEN = 8
+
+/**
+ * 「answer 是不是逐字抄了 student_answer」的唯一判据。
+ *
+ * 为什么独立导出：写入侧（worker 答案采纳链）与自检侧（aiParseSelfCheck）必须同口径，
+ * 否则会出现「自检说污染、写入侧照样采纳」或反之的裂缝。两侧一律调本函数。
+ *
+ * 为什么门槛是 8：短答案（"24"、"8"、"-√2+2"）学生答对时与参考答案本来就该相同，
+ * 报出来全是误伤；而真正的"抄学生"样本（整段证明/代数式/作图描述）都远超 8 字符。
+ *
+ * @param {unknown} answer 答案引擎产出的参考答案
+ * @param {unknown} studentAnswer 学生的作答
+ * @returns {boolean}
+ */
+export function detectAnswerCopiedFromStudent(answer, studentAnswer) {
+  if (typeof answer !== 'string' || typeof studentAnswer !== 'string') return false
+  const na = normalizeForCopyCheck(answer)
+  const ns = normalizeForCopyCheck(studentAnswer)
+  if (!na || !ns) return false
+  return na === ns && Math.max(na.length, ns.length) > ANSWER_COPY_MIN_LEN
+}
+
+/**
  * 把分析文本里的算式归一化到 validateArithmeticAnswer 能吃的形态。
  * 关键处理：n² → n*n、n³ → n*n*n、×÷ 转 ASCII 乘除号，其它符号复用 arithmeticAnswerValidator。
  *
@@ -229,13 +277,15 @@ export function extractExprCandidates(analysis) {
 }
 
 /**
- * 主入口。对 AI 返回的单题结果做四项自检：
+ * 主入口。对 AI 返回的单题结果做五项自检：
  *   - serial_pollution: answer 与 student_answer 数字串高度重叠且 answer 无独立数字
+ *   - answer_copied_from_student: answer 与 student_answer **逐字全等**（2026-09-23 新增，
+ *     见下）
  *   - arithmetic_mismatch: analysis 末尾 X 没法从任一算式候选回算
  *   - self_check_skipped: analysis 末尾显式【未自检】
  *   - answer_sign_mismatch: 学生答案含 ± 但 AI answer 完全不含 ±（典型：
-  *   "√81 的平方根是____" 学生写 ±3，AI 给 9；把"平方根"当"算术平方根"
-  *   答非所问）。仅判"学生写了 ± 而 AI 没写"方向，避免对 AI 多写 ± 误报。
+ *   "√81 的平方根是____" 学生写 ±3，AI 给 9；把"平方根"当"算术平方根"
+ *   答非所问）。仅判"学生写了 ± 而 AI 没写"方向，避免对 AI 多写 ± 误报。
  *
  * 返回 { pass: boolean, issues: string[] }。
  * 调用方拿到 false 时不要直接拒绝入库 —— 见 worker.js createQuestions 的重试 + 标记策略。
@@ -258,6 +308,25 @@ export function aiParseSelfCheck(aiResult) {
     if (sPlusMinus > 0 && aPlusMinus === 0) {
       issues.push('answer_sign_mismatch')
     }
+  }
+
+  // 0.5 【2026-09-23】answer 与 student_answer 逐字全等 ⇒ 答案引擎把学生笔迹读成了参考答案。
+  //
+  // 为什么必须单独加这一路：下面第 1 路的 serial_pollution 会**故意放过**数字集合完全相同的
+  // 情形（注释见下：那时当成"学生答对了，AI 也照参考答案填了同一个值"）。那个豁免对纯数值题
+  // 是合理的，但对**非数值类**答案（整段证明、代数式、作图描述、带过程的算式串）就失效了：
+  // 学生写 "1+a+b-1+b-a+b=2b"，`answer` 也一字不差是 "1+a+b-1+b-a+b=2b" —— 这不可能
+  // 是答案册原文，只可能是 OCR 把学生手写抄进了 answer 列。
+  //
+  // 实测规模（近 14 天，「缺少参考答案，无法自动判定」110 道）：**92 道（84%）命中本路**，
+  // 且这 92 道 ai_self_check_passed 全为 true、issues 全为空 —— 即旧自检完全没看见。
+  // 后果是这 92 道既拿不到参考答案、又被系统当成"引擎解不出来"，全部堆进人工复核。
+  //
+  // 判据刻意收得很紧（要求归一化后全等，且至少一边够长），避免把"学生恰好答对且答案就是
+  // 这个值"的短答案误判成污染 —— 短答案（≤8 字符，如 "24"）不报，交由原 serial_pollution
+  // 与数值判等去处理。
+  if (detectAnswerCopiedFromStudent(answer, student_answer)) {
+    issues.push('answer_copied_from_student')
   }
 
   // 1. 串行污染：answer 的数字串集合几乎被 student_answer 覆盖，且 answer 自身没新数字

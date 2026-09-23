@@ -61,13 +61,18 @@ test('强串行污染：answer 数字全在 student_answer 里出现，但 stude
 })
 
 test('合法答对：answer 与 student_answer 数字完全相同（学生写对了）→ 不算污染', () => {
+  // 2026-09-23 注：原 fixture 用的是整串表达式（'y = 3x² - 6x + 5, 77'），
+  // 那串**逐字全等**其实正是 answer_copied_from_student 的形态 —— 是 fixture 选得含糊，
+  // 不是判据错。本用例真正要锁的是「**纯数值**答案相同时不算污染」，
+  // 所以改成纯数值短路答案；整串表达式的场景由下面新的 answer_copied_from_student 用例覆盖。
   const result = aiParseSelfCheck({
-    answer: 'y = 3x² - 6x + 5, 77',
-    student_answer: 'y = 3x² - 6x + 5, 77',
+    answer: '77',
+    student_answer: '77',
     analysis: '...',
   })
-  // aNums=[3,5,77], sNums=[3,5,77] → jaccard=1, aOnly=[], sOnly=[] → 不触发
+  // aNums=[77], sNums=[77] → jaccard=1, aOnly=[], sOnly=[] → 不触发
   assert.equal(result.pass, true, `期望 pass，实际 ${JSON.stringify(result.issues)}`)
+  assert.ok(!result.issues.includes('answer_copied_from_student'))
 })
 
 test('弱串行污染：answer 数字与 student 数字有重叠但有独立数字 → 不触发', () => {
@@ -164,4 +169,72 @@ test('无效输入', () => {
   assert.equal(aiParseSelfCheck(null).pass, false)
   assert.equal(aiParseSelfCheck(undefined).pass, false)
   assert.deepEqual(aiParseSelfCheck(null).issues, ['invalid_input'])
+})
+
+// ── answer_copied_from_student（2026-09-23）────────────────────────────
+// 背景：近 14 天「缺少参考答案，无法自动判定」110 道里 92 道（84%）的 ai_answer
+// 与学生答案**逐字全等**，且旧自检全部 pass、issues 为空 —— 完全没被看见。
+// 这一路专门抓「答案引擎把学生笔迹读成了参考答案」。
+
+test('抄学生：代数式整串全等 → 必须触发 answer_copied_from_student', () => {
+  // 真实样本（任务 165acb27 #18）
+  const r = aiParseSelfCheck({
+    answer: '1+a+b-1+b-a+b=2b',
+    student_answer: '1+a+b-1+b-a+b=2b',
+    analysis: '合并同类项',
+  })
+  assert.ok(r.issues.includes('answer_copied_from_student'), `实际 ${JSON.stringify(r.issues)}`)
+  assert.equal(r.pass, false)
+})
+
+test('抄学生：带过程的算式串全等（含换行/全角标点差异）→ 触发', () => {
+  // 真实样本（任务 d17c12ce #9）：学生写了过程，answer 也一字不差是同一串
+  const r = aiParseSelfCheck({
+    answer: '= 1 × 5/3 = 5/3',
+    student_answer: '= 1 × 5/3\n= 5/3',
+    analysis: '',
+  })
+  assert.ok(r.issues.includes('answer_copied_from_student'), `实际 ${JSON.stringify(r.issues)}`)
+})
+
+test('抄学生：作图描述整段全等 → 触发', () => {
+  const long = '在数轴上标出了两个点，一个在-2和-1之间靠近-2，另一个在2和3之间靠近2'
+  const r = aiParseSelfCheck({ answer: long, student_answer: long, analysis: '' })
+  assert.ok(r.issues.includes('answer_copied_from_student'))
+})
+
+test('红线：短答案全等（≤8 字符）不触发，避免误伤「学生恰好答对」', () => {
+  // 学生写 24 且答案就是 24 —— 这是答对，不是抄
+  const r = aiParseSelfCheck({ answer: '24', student_answer: '24', analysis: '' })
+  assert.ok(!r.issues.includes('answer_copied_from_student'), `实际 ${JSON.stringify(r.issues)}`)
+})
+
+test('红线：答案与学生答案数学上不同 → 不触发', () => {
+  const r = aiParseSelfCheck({
+    answer: 'y = 3x² - 6x + 5, 83',
+    student_answer: 'y = 3x² - 6x + 5; y = 77',
+    analysis: '',
+  })
+  assert.ok(!r.issues.includes('answer_copied_from_student'))
+})
+
+test('红线：只有排版差异但结构不同（幂次不同）→ 不触发', () => {
+  const r = aiParseSelfCheck({ answer: '= 7/4 × 7/4 = 49/16', student_answer: '= 7/4 × 7/4 = 49/8', analysis: '' })
+  assert.ok(!r.issues.includes('answer_copied_from_student'), `实际 ${JSON.stringify(r.issues)}`)
+})
+
+test('红线：answer 为空 / student 为空 → 不触发', () => {
+  assert.ok(!aiParseSelfCheck({ answer: '', student_answer: '', analysis: '' }).issues.includes('answer_copied_from_student'))
+  assert.ok(!aiParseSelfCheck({ answer: null, student_answer: 'x=1', analysis: '' }).issues.includes('answer_copied_from_student'))
+  assert.ok(!aiParseSelfCheck({ answer: 'x=1', student_answer: null, analysis: '' }).issues.includes('answer_copied_from_student'))
+})
+
+test('抄学生：仅忽略空白与标点，不忽略数学符号', () => {
+  // 全角/半角括号、逗号差异应归一
+  const r = aiParseSelfCheck({
+    answer: '有理数{0, -0.25, ³√27}；无理数{√7, π}',
+    student_answer: '有理数 { 0，-0.25，³√27 }；无理数 { √7，π }',
+    analysis: '',
+  })
+  assert.ok(r.issues.includes('answer_copied_from_student'), `实际 ${JSON.stringify(r.issues)}`)
 })
