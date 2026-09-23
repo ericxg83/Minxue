@@ -168,7 +168,7 @@ export default function WrongBookPageV2({
               const selected = selectedQuestions.some(e => e.id === item.id)
               const status = lifecycle(item)
               const date = dayjs(item.added_at || item.created_at)
-              const wrongTimes = (item.error_count || 1) > 1 ? `错过${item.error_count}次` : (item.error_type || '需要关注')
+              const wrongTimes = `错次:${item.error_count || 1}次`
               return <SwipeableRow key={item.id || index} onDelete={() => onDelete(item)}>
                 <div className='flex items-center gap-2.5 border-b px-0.5 py-2.5 last:border-b-0' style={{ borderColor: 'var(--border-light)' }}>
                   <button
