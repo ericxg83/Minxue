@@ -35,6 +35,25 @@ const MIN_SIDE_RATIO = 0.02    // 结果任一边不足页面 2% → 判失败
 const MAX_GROWTH_H = 2.0
 const MAX_GROWTH_W = 1.7
 
+// ── 模型框宽度可信度（2026-09-23 用户明确不接受「配图带题干文字」）──
+// 线上实测（420 道引图题）：模型给的 image_bbox 有 21 道宽度≈整题带（≥0.9×block 宽），
+// 裁出来必然是「图形 + 题干续行 + 选项字母 + 下一题题号」——老师原话「不接受配图带题干文字」。
+// 根因不在分带算法（它对这 21 道都正确切出了列组），而在下面 §并集 那一步：
+// 并集把水平方向也拉回模型框宽度，等于把刚被 ④ 削掉的题干文字原样加回来。
+//
+// 判据：模型框宽度占【页宽】的比例。几何配图在一页里通常只占很窄的一条（实测好样本
+// 14%~19% 页宽），而"满宽带"框会接近整页。超过阈值即认定水平向不可信 —— 此时水平
+// 方向【只认像素列组】，模型框只用于纵向兜底。
+//   阈值 0.50 来自全库分档实测（_ratio_sweep_0923.mjs，60 题"已有配图"样本）：
+//     模型框宽占比 0~0.2  → 输出均 0.185，被撑开 0 例
+//                 0.2~0.35 → 输出均 0.228，被撑开 1 例
+//                 0.35~0.5 → 输出均 0.398，被撑开 0 例（n=1，正交样本，保持并集）
+//                 0.5~0.62 → 输出均 0.647，被撑开 1 例  ← 伤害带，必须纳入
+//                 0.8~1.01 → 输出均 0.143（本次修复后）
+//   ⇒ 0.5 是"并集开始有害"的分界。0.35~0.5 只有 1 例且未被撑开，不下压到那一档，
+//     给"合法的中等宽度配图"（多子图并排、宽流程图）留安全边际。
+const WIDE_BOX_PAGE_RATIO = 0.50
+
 // ── 图形带体检阈值（数值来自线上样本实测，见 tests/figureRegionRefiner.test.mjs）──
 const MAX_INK_COVERAGE = 0.14  // 墨迹覆盖率上限：印刷文字行普遍 >19%，图形 2.5%~12%
 const TALL_BAND_RATIO = 0.05   // 带高 ≥ 页高 5% → 够高，直接算图形（文字行普遍 <5%）
@@ -408,8 +427,24 @@ export function refineFigureRegion(ink, w, h, box) {
   // 收紧可以把框向左右（邻图）压缩，但不得越过模型框的边缘收缩。
   // 实现：收紧结果与模型框求并集（并集 = 占上界），保证输出至少覆盖模型框完整范围。
   // 副作用：模型框严重偏位时可能多带些空白，代价远小于把真图砍掉（宁可多留白）。
-  const x0 = clamp(Math.min(tight.x0, box.x), 0, w - 1)
-  const x1 = clamp(Math.max(tight.x1, box.x + box.width), 1, w)
+  //
+  // ── ⚠️ 2026-09-23 修正：并集的【水平方向】必须按模型框宽度可信度分两种情况 ──
+  // 上面的并集当初是为"防纵向砍半截"加的，但它是**二维并集**，水平向也一并拉回模型框宽。
+  // 当模型框是"满宽带"（宽度≈整题带）时，这个水平并集会把 ④ trimTextEdges 刚削掉的
+  // 题干/选项/下一题文字原样加回来 —— 实测 a472e76e Q3：像素列组只占 18% 页宽，
+  // 并集后输出 75% 页宽，裁片里"（第3题）"+ A/B/C/D 选项字母 + 下一题"6."全在。
+  // 用户 2026-09-23 明确否决这种产物。修法：
+  //   · 模型框窄（可信）→ 保持原二维并集，行为不变（好样本不受影响）；
+  //   · 模型框是满宽带（不可信）→ 水平方向只认像素列组，模型框仅参与纵向兜底。
+  // 这不是"取消保护"：纵向仍与模型框求并集，2026-09-18「流程图被砍半截」的场景照旧受保护；
+  // 只是不再让一个明显错误（满宽带）在水平方向覆盖一个明显正确的像素结论。
+  const modelBoxWide = w > 0 && box.width / w >= WIDE_BOX_PAGE_RATIO
+  // 满宽带时水平两边都退回像素列组；否则维持原二维并集（behavior 不变）
+  const x0 = modelBoxWide
+    ? clamp(tight.x0, 0, w - 1)
+    : clamp(Math.min(tight.x0, box.x), 0, w - 1)
+  const rawX1 = clamp(Math.max(tight.x1, box.x + box.width), 1, w)
+  const x1 = modelBoxWide ? clamp(Math.max(tight.x1, tight.x0 + 1), 1, w) : rawX1
   const uniStart = clamp(Math.min(vertical.start, box.y), 0, h - 1)
   const uniEnd = clamp(Math.max(vertical.end, box.y + box.height), 1, h)
 
@@ -457,7 +492,7 @@ export function refineFigureRegion(ink, w, h, box) {
     y: finalY,
     width: outW,
     height: outH,
-    steps: { rowFigures: rowFigures.length, colGroups: colGroups.length, textBands: textBands.length }
+    steps: { rowFigures: rowFigures.length, colGroups: colGroups.length, textBands: textBands.length, modelBoxWide, rawX1 }
   }
 }
 

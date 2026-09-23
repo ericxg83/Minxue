@@ -122,3 +122,84 @@ test('干净的图形（连通域很少）→ 连通域去手写必须保持沉�
   assert.ok(out.x + out.width >= 300, `不得削掉图形右沿（≥300），实得 ${out.x + out.width}`)
   assert.ok(out.y <= 400 && out.y + out.height >= 500, `不得削掉图形上下沿，实得 y=${out.y} h=${out.height}`)
 })
+
+// ── 2026-09-23 新增：模型框是「满宽带」时，水平并集必须失效 ──────────────────────
+// 事故：用户明确不接受「配图带题干文字」。线上实测 420 道引图题里 21 道 image_bbox
+// 宽度 ≈ 整题带（≥0.9×block 宽），裁出来含「（第N题）」图注 + A/B/C/D 选项字母 +
+// 下一题题号。根因是 §并集 把水平方向也拉回模型框宽，把 ④ trimTextEdges 刚削掉的
+// 题干文字原样加回来（像素列组本身是对的，只占 18% 页宽）。
+// 判据：box.width / 页宽 ≥ 0.62 时，水平两边都只认像素列组。
+//
+// ⚠️ 合成数据注意：满宽带让搜索窗覆盖整页宽 ⇒ rowMinInk 从 0.015×窄窗 抬到 0.015×整页。
+// 三角形的两条斜边每行只有 4 点墨，会被判成"空行"，图形带被切成只剩底边 → isFigureBand 失败。
+// 真实图形的笔画远比这粗，所以这里用带填充的实心图形（每行墨量足够），避免测到合成数据的坑。
+
+/** 加粗轮廓图形（每行墨量足够撑过"满宽带抬高后的 rowMinInk"，但覆盖率仍低，
+ *  不会被 isTextBand 判成文字带）。用两条加粗斜边 + 加粗底边。 */
+function boldOutlineFigure (ink, yTop, yBot, cx, halfW, thick = 3) {
+  const h = yBot - yTop
+  for (let y = yTop; y <= yBot; y++) {
+    const t = (y - yTop) / h
+    const dx = Math.round(halfW * t)
+    for (const bx of [cx - halfW + dx, cx + halfW - dx]) {
+      for (let k = 0; k < thick; k++) {
+        const x = bx + k
+        if (x >= 0 && x < W) ink[y * W + x] = 1
+      }
+    }
+  }
+  for (let x = cx - halfW; x <= cx + halfW; x++) {
+    for (let k = 0; k < thick; k++) {
+      const y = yBot - k
+      if (y >= 0 && y < H) ink[y * W + x] = 1
+    }
+  }
+}
+
+test('模型框是满宽带（≥62% 页宽）→ 水平不得被模型框撑开带进题干文字', () => {
+  const ink = makeInk()
+  // 真实版面（a472e76e 第3题）：上排并排三张配图，图下是「（第3题）」图注 + 选项字母。
+  // 本题图在右侧：cx=310, halfW=45 ⇒ x 265~355
+  boldOutlineFigure(ink, 300, 400, 310, 45)
+  boldOutlineFigure(ink, 300, 400, 120, 45)   // 左侧邻题的图（应被列分组切掉）
+  // 图注 + 选项字母（下方文字带）—— 满宽模型框会想把这一段也圈进来
+  denseBlock(ink, 420, 470, 30, 370)
+  // 模型框：满宽带（width 320 / 页宽 400 = 80% ≥ 62%），纵向盖住图 + 下方文字
+  const box = { x: 30, y: 290, width: 320, height: 185 }
+  const out = refineFigureRegion(ink, W, H, box)
+  assert.ok(out, '应当收紧成功')
+  assert.equal(out.steps.modelBoxWide, true, '应当被判为满宽带')
+  // 核心断言：输出宽度必须由【像素列组】决定，不得被满宽模型框撑到 320（30~350）。
+  // （选哪一列是 pickNearest 的既有行为，本次改动不涉及；本次修的是"宽度被撑开"。）
+  assert.ok(out.width <= 130,
+    `不得被满宽模型框撑开（列组宽约 90~100），实得宽 ${out.width}`)
+  assert.ok(out.width >= 40, `列组宽度不得被压没了，实得宽 ${out.width}`)
+  // 纵向：不得把下方图注/选项文字（420~470）并回来
+  assert.ok(out.y <= 300 && out.y + out.height >= 400, '必须覆盖图形上下沿')
+  assert.ok(out.y + out.height <= 419, `不得把下方图注（420~470）并回来，实得下沿 ${out.y + out.height}`)
+})
+
+test('模型框窄（<62% 页宽）→ 保留原二维并集，行为不得改变', () => {
+  const ink = makeInk()
+  boldOutlineFigure(ink, 400, 500, 250, 50)          // 图形 x 200~300
+  const box = { x: 140, y: 390, width: 180, height: 130 }  // 180/400 = 45% < 62%
+  const out = refineFigureRegion(ink, W, H, box)
+  assert.ok(out, '应当收紧成功')
+  assert.equal(out.steps.modelBoxWide, false, '窄模型框不得被判为满宽带')
+  assert.ok(out.x <= 200 && out.x + out.width >= 300, '图形左右沿必须完整覆盖')
+})
+
+test('模型框是满宽带 → 纵向保护仍在（不得因关掉水平并集而砍掉图形）', () => {
+  const ink = makeInk()
+  // 图形很高，模型框只盖住下半截 —— 纵向并集必须把它补全
+  boldOutlineFigure(ink, 380, 520, 310, 50)
+  const box = { x: 30, y: 450, width: 320, height: 90 }   // 满宽带（320/400=80%），纵向只盖 450~540
+  const out = refineFigureRegion(ink, W, H, box)
+  assert.ok(out, '应当收紧成功')
+  assert.equal(out.steps.modelBoxWide, true, '应当被判为满宽带')
+  assert.ok(out.y <= 380, `纵向并集必须补到图形上沿（≤380），实得上沿 ${out.y}`)
+  assert.ok(out.y + out.height >= 520, `纵向必须覆盖图形下沿（≥520），实得下沿 ${out.y + out.height}`)
+})
+
+
+

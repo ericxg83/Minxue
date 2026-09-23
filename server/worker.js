@@ -100,6 +100,98 @@ async function refineStoredBlocks ({ questions, pageBuffers }) {
   }
   return updated
 }
+
+/**
+ * 写入侧配图框（image_bbox）实测（2026-09-23 新增）。
+ *
+ * ── 为什么需要（用户 2026-09-23 明确「不接受配图带题干文字」）──
+ *
+ * `block_coordinates` 有写入侧补测（refineStoredBlocks），但 `image_bbox` **一直没有**。
+ * 全库实测 420 道引图题：
+ *   · 21 道 image_bbox 宽度 ≥ 60% 页宽（"满宽带"）→ 裁片必然含「（第N题）」图注、
+ *     A/B/C/D 选项字母、下一题题号。用户明确否决这种产物。
+ *   · 75 道同页多题共用同一个 image_bbox（模型复制粘贴），只有第一题对。
+ *   · 99 道引图但最终无配图（收紧判"非图形"，其实是框根本没框到图）。
+ * 根因是**生成侧缺一步**：模型给的框只是"大概在这一块"，历来靠读取侧/裁剪侧的
+ * 像素收紧兜底，库里的值本身仍是错的 —— 白板、周末课件、复核页读的都是这个错值。
+ *
+ * ── 做法 ──
+ * 对每道引图题，用像素级区域收紧（refineFigureBoxOnPage，与裁剪侧同一算法）把
+ * image_bbox 收成【图形本身】的框，再换算回归一化 0-1000 写回。
+ * 只在两种情况下覆盖：
+ *   a) 原框是"满宽带"（宽 ≥ 页宽 50%）—— 必含题干文字，像素结论一定更好；
+ *   b) 原框与 block_coordinates 一字不差 —— 那是从题目框抄的，不是看图框的。
+ * 其余情况保持模型原值（模型定位准确时，像素收紧可能过紧，宁可不动）。
+ *
+ * ⚠️ 不引入新的视觉调用：纯像素运算，零额度成本。失败静默保留原值。
+ * ⚠️ 必须在 createQuestions 之前调用（与 refineStoredBlocks 同位置、同时机）。
+ *
+ * @param {Array<Object>} questions 落库前的题目对象（会就地改写 image_bbox）
+ * @param {Map<number,Buffer>} pageBuffers pageNumber → 压缩页图 buffer
+ * @returns {Promise<{checked:number, fixed:number}>}
+ */
+async function refineStoredImageBoxes ({ questions, pageBuffers }) {
+  const list = Array.isArray(questions) ? questions : []
+  if (list.length === 0 || !(pageBuffers instanceof Map)) return { checked: 0, fixed: 0 }
+
+  const [{ refineFigureBoxOnPage }, { denormalizeBbox }] = await Promise.all([
+    import('./utils/figureRegionRefiner.js'),
+    import('./utils/geometryCrop.js'),
+  ])
+  // estimatePaperBackground 是本模块内的函数声明（hoisted），直接用，不要自 import（循环依赖）
+
+  // 页尺寸缓存（像素框换算用）
+  const dimsCache = new Map()
+  let checked = 0
+  let fixed = 0
+
+  for (const q of list) {
+    const bbox = q.image_bbox
+    if (!bbox || typeof bbox !== 'object') continue
+    const iw = Number(bbox.width), ih = Number(bbox.height)
+    if (!Number.isFinite(iw) || !Number.isFinite(ih) || iw <= 0 || ih <= 0) continue
+    // 本题确有配图才会走到这里；只在"疑似满宽带/抄自 block"时动手
+    const bc = q.block_coordinates
+    const sameAsBlock = bc && typeof bc === 'object'
+      && Math.abs(Number(bbox.x) - Number(bc.x)) <= 2
+      && Math.abs(iw - Number(bc.width)) <= 2
+    const looksWide = iw >= 500   // 归一化坐标下 500/1000 = 半页宽
+    if (!sameAsBlock && !looksWide) continue
+
+    const page = Number(q.page_number || 1)
+    const buf = pageBuffers.get(page)
+    if (!buf) continue
+    checked++
+    try {
+      let dims = dimsCache.get(page)
+      if (!dims) {
+        const meta = await sharp(buf).metadata()
+        dims = { w: meta.width, h: meta.height }
+        dimsCache.set(page, dims)
+      }
+      if (!dims.w || !dims.h) continue
+      const pxBox = denormalizeBbox(bbox, dims.w, dims.h)
+      const refined = await refineFigureBoxOnPage(buf, pxBox, estimatePaperBackground)
+      if (!refined) continue   // 判不出图形 → 保留模型原值（读取侧闸门照旧）
+      // 收紧结果必须明显更窄才算"改对了"：至少收掉 15% 宽度，否则不值得覆盖
+      if (refined.width > pxBox.width * 0.85) continue
+      const norm = {
+        x: Math.max(0, Math.min(1000, Math.round(refined.x / dims.w * 1000))),
+        y: Math.max(0, Math.min(1000, Math.round(refined.y / dims.h * 1000))),
+        width: Math.max(0, Math.min(1000, Math.round(refined.width / dims.w * 1000))),
+        height: Math.max(0, Math.min(1000, Math.round(refined.height / dims.h * 1000))),
+      }
+      if (norm.width < 25 || norm.height < 25) continue   // 退化，别写
+      console.log(`   [写入侧配图框] 第 ${q.question_number} 题 ${JSON.stringify(bbox)} → ${JSON.stringify(norm)}`)
+      q.image_bbox = norm
+      fixed++
+    } catch (e) {
+      console.warn(`   ⚠️ [写入侧配图框] 第 ${q.question_number} 题实测失败（保留原框）：${e.message}`)
+    }
+  }
+  return { checked, fixed }
+}
+
 import { extractFinalAnswerFromAnalysis, isNarrativeAnswer } from './utils/aiParseSelfCheck.js'
 import { verifyComparisonAnswer } from './utils/comparisonAnswerVerifier.js'
 import { rescueReferenceAnswer } from './utils/referenceAnswerRescue.js'
@@ -7265,6 +7357,18 @@ export const processTask = async (job) => {
         if (refined > 0) console.log(`✅ [写入侧框] 共补测写回 ${refined} 题的 block_coordinates（免费通道）`)
       } catch (e) {
         console.warn(`   ⚠️ [写入侧框] 补测整体失败（保留占位框）：${e.message}`)
+      }
+
+      // ── 写入侧配图框实测（2026-09-23，必须在落库前、在裁剪之前）──────────────────
+      // 上一步只补了 block_coordinates；image_bbox 历来没有写入侧实测，模型给"满宽带"
+      // 时库里就存着"含题干文字"的框（用户明确不接受）。这里用同一套像素收紧把库值
+      // 修正成图形本身 —— 白板 / 周末课件 / 复核页读的都是这一列。
+      // 必须在 cropGeometryFigures 之前：裁剪读的就是 q.image_bbox。
+      try {
+        const { checked, fixed } = await refineStoredImageBoxes({ questions: questionsWithStudentId, pageBuffers })
+        if (fixed > 0) console.log(`✅ [写入侧配图框] 实测 ${checked} 题、修正 ${fixed} 题的 image_bbox（纯像素，零额度）`)
+      } catch (e) {
+        console.warn(`   ⚠️ [写入侧配图框] 实测整体失败（保留模型原框）：${e.message}`)
       }
 
       await createQuestions(questionsWithStudentId)
