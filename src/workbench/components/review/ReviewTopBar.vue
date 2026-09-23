@@ -286,6 +286,24 @@ watch(() => store.autoReviewNotice, (notice) => {
   store.autoReviewNotice = null
 })
 
+// [2026-09-23 P2] 门禁分层：系统侧缺项（缺图/缺选项/题型非法）被自动记为
+// 「本次不加入错题本」，不再拦卷。必须给老师一条可见提示——否则老师只会发现
+// "这几题怎么没进错题本"，无法区分是系统故障还是老师自己点过（铁律 #11 不许静默）。
+const GATE_ISSUE_LABEL = {
+  missing_figure: '缺配图',
+  missing_options: '缺选项',
+  invalid_type: '题型未定',
+}
+watch(() => store.autoGateResolved, (info) => {
+  if (!info) return
+  const parts = (info.issues || []).map(i => GATE_ISSUE_LABEL[i] || i)
+  const detail = parts.length ? `（${parts.join('、')}）` : ''
+  ElMessage.warning(
+    `${info.count} 道错题因题目元素缺失${detail}未加入错题本，已自动记录「本次不加入」；补全元素后可到错题本重新加入`
+  )
+  store.clearAutoGateResolved()
+})
+
 // 当 store 中 currentTask 变化时同步下拉框
 watch(() => store.currentTask?.id, (id) => {
   selectedTaskId.value = id || ''

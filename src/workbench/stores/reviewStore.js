@@ -13,6 +13,8 @@ import {
   RETRY_STATE_TO_TASK_STATUS,
 } from '../utils/retryPaperState'
 import { REVIEW_STATUS, DEFAULT_CONFIDENCE_THRESHOLD, getReviewState, needsWrongBookDecision, effectiveIsCorrect as resolveEffectiveIsCorrect } from '../../utils/reviewDecision'
+// 闸1 门禁分层（2026-09-23 P2）：只自动放行「系统没补上」，绝不放行「低置信度需人拍板」
+import { splitWrongGateList, classifyWrongGateItem, WRONG_GATE_AUTO_SKIP_REASON } from '../../domain/wrongGateTier.js'
 // 重练卷排卷与卷面编号的唯一口径（与服务端 worker.js 判题侧同源）。
 // 批改页题目列表必须按【卷面顺序】排列，否则老师看到的第 N 题 ≠ 学生卷面第 N 题。
 import { buildRetryPaperOrder } from '../../utils/retryPaperOrder'
@@ -85,6 +87,12 @@ export const useReviewStore = defineStore('review', () => {
   // 消费后弹轻提示。老师仍可翻看刚复核完的卷面、留底或跳下一份。
   const autoReviewNotice = ref(null) // { taskName, at }
   let autoReviewTimer = null
+
+  // P2 门禁分层（2026-09-23）：系统侧缺项被自动记为 wrong_no_book 的次数汇总，
+  // 供 UI 弹一条轻提示（「N 道题因题目元素缺失未入错题本，已自动记录」），
+  // 让老师知道有这件事发生，而不是"悄悄少了题"。
+  const autoGateResolved = ref(null) // { count, at, issues }
+  const clearAutoGateResolved = () => { autoGateResolved.value = null }
 
   // ReviewTopBar 触发「去编辑」时记录的待编辑题目，QuestionDetailPanel 监听后打开编辑面板
   const pendingEditQuestionId = ref(null)
@@ -361,7 +369,10 @@ export const useReviewStore = defineStore('review', () => {
   //   source: 'manual'（老师已标错，后端 PUT 时已尝试强入，出现在这里只可能是入册失败）
   //           | 'ai'（AI 判错、老师未逐题确认，需要老师决定入不入册）
   //   reason: 'complete'（可以加入错题本）| 'incomplete'（题目元素不完整，需先编辑）
-  const unresolvedWrongQuestions = computed(() => {
+  //
+  // 未分层前的原始清单（含系统侧缺项）。仅供 prepareWrongGate 做自动放行，
+  // **不要**直接给 UI 消费——UI 一律用 unresolvedWrongQuestions（已滤掉自动放行项）。
+  const rawUnresolvedWrongQuestions = computed(() => {
     const inBook = new Set(wrongQuestions.value.map(wq => wq.question_id))
     return allQuestions.value
       .map((q, idx) => ({ question: q, index: idx }))
@@ -379,6 +390,13 @@ export const useReviewStore = defineStore('review', () => {
         }
       })
   })
+
+  // ⚠️ P2（2026-09-23）后本列表**只含需要人工拍板的题**：
+  //   系统侧缺项（缺图/缺选项/题型非法）在 prepareWrongGate 里被自动记 wrong_no_book
+  //   并移出本列表，故这里不再出现。分层判据见 src/domain/wrongGateTier.js。
+  const unresolvedWrongQuestions = computed(() =>
+    rawUnresolvedWrongQuestions.value.filter(item => !classifyWrongGateItem(item).autoResolvable)
+  )
 
   // 加载学生列表
   const loadStudents = async () => {
@@ -1242,6 +1260,21 @@ export const useReviewStore = defineStore('review', () => {
   // 弹门禁前的准备动作：等在途的复核写入落库（人工标错的「强入错题本」在后端同链路执行），
   // 再按当前学生重拉一次错题本，最后才计算清单。
   // 不做这一步，门禁会用进入试卷时的旧快照判断，把已经入册的题再问一遍"是否加入"。
+  //
+  // ── P2 门禁分层（2026-09-23）──────────────────────────────
+  // 原来只要清单非空就**整份卷**弹窗。实测 14 天中位每卷只有 1 题需要拍板，
+  // 却有 51 份卷要点 —— 成本在「弹窗次数」不在「每题难度」。
+  //
+  // 现按 src/domain/wrongGateTier.js 分层：
+  //   · 系统侧缺项（missing_figure/missing_options/invalid_type）
+  //     → 自动记 wrong_no_book（保留"确实判错了"的事实）后**不拦卷**。
+  //       理由：补题目元素不归老师做，拦下来老师也只能点"本次不加入"，
+  //       等于用一次点击记录一次系统故障。
+  //   · low_confidence / 未知 code
+  //     → **一律仍拦卷**。自动放行等于替老师下"算不算错"的结论，
+  //       判错则学生白练、错题本被污染。这是本分层不可越过的红线。
+  //
+  // 写库失败必须上抛（铁律 #11）：绝不能让"自动放行"变成"静默丢弃"。
   const prepareWrongGate = async () => {
     if (pendingReviewWrites.size > 0) {
       await Promise.allSettled([...pendingReviewWrites])
@@ -1251,7 +1284,30 @@ export const useReviewStore = defineStore('review', () => {
       clearStudentCaches(studentId)
       await loadWrongQuestions(studentId)
     }
-    return unresolvedWrongQuestions.value
+    const { blocking, autoResolvable } = splitWrongGateList(rawUnresolvedWrongQuestions.value)
+
+    // 系统侧缺项：自动记为「本次不加入」，留痕但不拦卷
+    if (autoResolvable.length > 0) {
+      let resolvedCount = 0
+      for (const item of autoResolvable) {
+        try {
+          await markWrongNoBook(item.questionId, WRONG_GATE_AUTO_SKIP_REASON)
+          resolvedCount++
+        } catch (e) {
+          // 单题失败不能吞：把它退回 blocking，让老师看到并处理（fail-closed）
+          console.error(`[WrongGate] 自动放行失败，退回人工处理 qid=${item.questionId}:`, e)
+          blocking.push({ ...item, gateClass: { ...item.gateClass, why: '自动放行写库失败，需人工处理' } })
+        }
+      }
+      if (resolvedCount > 0) {
+        autoGateResolved.value = {
+          count: resolvedCount,
+          at: Date.now(),
+          issues: [...new Set(autoResolvable.flatMap(i => i.gateClass?.autoIssues || []))],
+        }
+      }
+    }
+    return blocking
   }
 
   // UI 消费完提示后清空队列（避免重复弹、也避免长时间批改无界增长）
@@ -1400,6 +1456,9 @@ export const useReviewStore = defineStore('review', () => {
     saveError,
     // [2026-09-20 方案A] 零人工项自动完成复核的通知（UI 层消费后弹轻提示）
     autoReviewNotice,
+    // [2026-09-23 P2] 门禁分层：系统侧缺项被自动记 wrong_no_book 的汇总（UI 层消费后弹轻提示）
+    autoGateResolved,
+    clearAutoGateResolved,
     pendingEditQuestionId,
     unresolvedWrongQuestions,
     getUnresolvedWrong,

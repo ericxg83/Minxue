@@ -10,7 +10,8 @@
  *        后面的 judgement / 掌握度一起中断，且没有重试。
  *
  * 本模块提供一次「以数据库现况为准」的对账补入：
- *   · 只补「已判错 + 参考答案可用 + 无终态复核决定 + 不在错题本」的题；
+ *   · 只补「已判错 + 答案条件满足 + 无终态复核决定 + 不在错题本」的题；
+ *   · 答案条件对 blank 豁免（blank 按设计无参考答案，见 meetsAnswerRequirement）；
  *   · 置信度闸 / 完整性闸 / 空答语义全部复用 addWrongQuestions，不在本模块另写口径，
  *     也绝不跳过置信度闸（低置信题等老师复核拍板，不自动入册）；
  *   · 幂等：靠 wrong_questions 的唯一键去重，重复调用不产生重复行；
@@ -34,6 +35,25 @@ const hasUsableAnswer = (q) => {
   const answer = q.answer
   return !!answer && String(answer).trim() !== '' && !PLACEHOLDER_ANSWERS.has(answer)
 }
+
+/**
+ * 是否满足「入册所需的答案条件」。
+ *
+ * ⚠️ 2026-09-23 修正：原实现直接用 hasUsableAnswer 过滤，把未作答(blank)题**整体挡掉**。
+ *    blank 题按设计**没有参考答案**（卷面留空、无学生作答内容可判），
+ *    而「未作答等同不会」是本仓既定口径（weeklyReport 的 wrong 计数直接含
+ *    answer_source='blank'；addWrongQuestions 也显式把 blank 排除在置信度闸外，
+ *    见 neonService.js 注释「blank 不放进 Map…按口径该入」）。
+ *    原过滤与上述口径自相矛盾，实测 2/2 blank 题被挡，且非 blank 判错题 100/100
+ *    都有答案 ⇒ 该闸**只误伤 blank**。
+ *
+ *    修正后：blank 豁免答案闸；非 blank 仍必须答案可用
+ *    （保留原意：捕捉"判题时答案为空、随后才异步补齐"的漏网）。
+ *
+ *    完整性闸 / 置信度闸不受影响，仍在 addWrongQuestions 内正常生效。
+ */
+const meetsAnswerRequirement = (q) =>
+  q.answer_source === 'blank' ? true : hasUsableAnswer(q)
 
 const hasTerminalReview = (q) => TERMINAL_REVIEW_STATUS.has(q.review_status)
 
@@ -84,7 +104,7 @@ export const compensateWrongBook = async ({
   if (rows.length === 0) return EMPTY_RESULT
 
   const candidates = rows.filter(q =>
-    isJudgedWrong(q) && hasUsableAnswer(q) && !hasTerminalReview(q)
+    isJudgedWrong(q) && meetsAnswerRequirement(q) && !hasTerminalReview(q)
   )
   if (candidates.length === 0) return EMPTY_RESULT
 
@@ -117,6 +137,18 @@ export const compensateWrongBook = async ({
     skipped: missing.length - added.length,
     ids: added.map(row => row.question_id)
   }
+}
+
+/**
+ * 候选判据对外导出（供回归测试锁定口径，勿在别处复制实现）。
+ * test/wrongBookCompensationCandidate.test.mjs 直接断言这组谓词。
+ */
+export const __candidateRules = {
+  isJudgedWrong,
+  hasUsableAnswer,
+  meetsAnswerRequirement,
+  hasTerminalReview,
+  PLACEHOLDER_ANSWERS
 }
 
 export default { compensateWrongBook }

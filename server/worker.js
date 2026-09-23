@@ -315,7 +315,7 @@ function cleanGeometryPixels(grayRaw, bg, w, h) {
  * @param {Buffer} buffer - 已裁剪的配图 PNG buffer
  * @returns {Promise<Buffer>}
  */
-async function cleanGeometryCrop(buffer) {
+export async function cleanGeometryCrop(buffer) {
   try {
     // ── 1. 灰度原始像素 ──
     const { data: grayRaw, info } = await sharp(buffer)
@@ -1619,7 +1619,8 @@ export function extractAnswerFromAnalysis(answer, analysis, options) {
   return answer
 }
 
-function normalizeGeneratedAnswer(question, candidateAnswer) {
+// 2026-09-23 教师工作台「AI 重解析」按钮调用，复用生产批改链路同口径归一化
+export function normalizeGeneratedAnswer(question, candidateAnswer) {
   const questionType = normalizeQuestionType(question.question_type, question.options)
   if (questionType !== 'choice') {
     // AI 算到中间形态就收手："圆面积比 3:2 求半径比"给的是 "√3:√2"，
