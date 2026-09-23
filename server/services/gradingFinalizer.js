@@ -147,7 +147,8 @@ export const finalizeGradingBatch = async ({
       questionId: question.id,
       studentId,
       source,
-      confidence: question.confidence ?? null,
+      // L1-a（2026-09-23）：blank 的审计置信度统一 1.0，与 questions.confidence 同口径。
+      confidence: question.answer_source === 'blank' ? 1.0 : (question.confidence ?? null),
       isCorrect: question.is_correct ?? null,
       content: question.content ?? null,
       answer: question.answer ?? null,
@@ -207,6 +208,18 @@ export const finalizeRejudgeResult = async ({
     ? numericConfidence
     : null
 
+  // L1-a（2026-09-23）：未作答（blank）**无条件**把 confidence 抬到 1.0。
+  // 两个理由：
+  //   ① 空题是终态，不需要老师拍板任何事；任何 <0.8 的值都会命中入册闸的
+  //      low_confidence，把整卷拦在错题弹窗里（实测 14 天 27 道空题 conf=0）。
+  //   ② 改判链路此前对 blank 传 effectiveConfidence=null（isCorrect 通常为 false
+  //      但调用侧不传 confidence）⇒ CASE 走 `$2 IS NULL THEN confidence`，
+  //      把**原作业残留的旧值**（可能是 0）留了下来。空题的置信度必须归位。
+  // 注意 blank 的 is_correct 仍可能为 false（「未作答等同不会」已是统计口径），
+  // 这里只动 confidence，不影响正误结论。
+  const isBlankQuestion = question.answer_source === 'blank'
+  const nextConfidence = isBlankQuestion ? 1.0 : effectiveConfidence
+
   const fingerprint = hashRejudgeInput({
     studentAnswer: question.student_answer,
     answer: question.answer,
@@ -241,13 +254,16 @@ export const finalizeRejudgeResult = async ({
            WHEN status = 'wrong' THEN 'pending'
            ELSE status END,
          confidence = CASE
+           -- blank（L1-a 2026-09-23）：无条件覆盖，不保留旧值也不走 GREATEST。
+           -- 旧值可能是 0（历史残留）或 0.95（错误管线写的），两种都要归到 1.0。
+           WHEN $4::boolean THEN 1.0
            WHEN $2::numeric IS NULL THEN confidence
            WHEN $1 IS NULL THEN confidence
            ELSE GREATEST(COALESCE(confidence, 0), $2::numeric)
          END,
          updated_at = NOW()
      WHERE id = $3`,
-    [isCorrect, effectiveConfidence, question.id]
+    [isCorrect, nextConfidence, question.id, isBlankQuestion]
   )
 
   let wrongQuestionAdded = false
@@ -290,7 +306,9 @@ export const finalizeRejudgeResult = async ({
     source,
     isCorrect,
     // 审计留痕：可观测这次改判到底按什么置信度落的（历史行多为 null，此前从不写）
-    confidence: effectiveConfidence ?? question.confidence ?? null,
+    // L1-a：blank 与 questions.confidence 同口径写 1.0，否则回看审计会把空题
+    // 误读成"没跑完"（与 SQL 里落库的值不一致本身就是排查陷阱）。
+    confidence: isBlankQuestion ? 1.0 : (effectiveConfidence ?? question.confidence ?? null),
     answer: question.answer,
     studentAnswer: question.student_answer,
     metadata: {
@@ -304,7 +322,7 @@ export const finalizeRejudgeResult = async ({
   // 重判常发生在老师补完答案/配图/选项之后，此时落库列最容易偏旧。
   syncQuestionCompletenessQuietly([question.id], `finalizeRejudgeResult q=${question.id}`)
 
-  return { settled: true, skipped: false, isCorrect, wrongQuestionAdded, confidence: effectiveConfidence }
+  return { settled: true, skipped: false, isCorrect, wrongQuestionAdded, confidence: isBlankQuestion ? 1.0 : effectiveConfidence }
 }
 
 /**

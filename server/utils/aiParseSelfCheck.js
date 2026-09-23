@@ -216,6 +216,45 @@ export function detectAnswerCopiedFromStudent(answer, studentAnswer) {
 }
 
 /**
+ * L1-c（2026-09-23 三层分流）：抄学生存疑题的「纯题干重解」输入口径。
+ *
+ * ── 为什么需要它 ──
+ * 答案引擎偶尔会把**学生的笔迹**当成参考答案输出（实测近 14 天 110 道
+ * 「缺少参考答案」里 92 道、84% 的 answer 与学生答案逐字全等）。
+ * 一旦 answer === student_answer，判题必然判对，教师端再复核也看不出问题。
+ *
+ * ── 为什么不能用「掩掉笔迹重送图片」的方案 ──
+ * 像素层没有可靠的"擦除手写"手段（铁律 #23：连通域法只能在裁片阶段去手写，
+ * 对整页原图无效）。而且重送图片会再花一次视觉额度、并重新引入同一类污染。
+ *
+ * ── 本函数的口径（负责人 2026-09-23 确认）──
+ * **只用题干走纯文本链路**：输入 = parent_stem + content（+ 选项），
+ * 即与 generateMissingAnswers 里 `content` 完全同源的那份字符串，
+ * **绝不带 student_answer / answer / analysis / 任何图片**。
+ * 代价：题干引图的题会缺图形条件（可能解不出）。这是刻意的取舍 ——
+ * 解不出就落回 L2 转人工（与今天的行为一致），解得出就白赚一次自动判定。
+ *
+ * @param {{parent_stem?: string|null, content?: string|null}} question
+ * @param {string[]|null} [options] 选项文案（选择题必须带，否则无解）
+ * @returns {string} 纯题干文本；空字符串表示无法构造（调用方应放弃重解）
+ */
+export function buildTextOnlyResolveInput(question, options = null) {
+  if (!question) return ''
+  const content = [question.parent_stem, question.content]
+    .filter(s => s && String(s).trim())
+    .join('\n')
+    .trim()
+  if (!content) return ''
+
+  // ⚠️ 显式剔除污染：即使调用方误把整行 question 传进来，也只取题干字段。
+  //    学生答案 / 参考答案 / 解析一律不进 prompt —— 这就是"纯文本链路"的全部意义。
+  const opts = Array.isArray(options)
+    ? options.map(o => String(o ?? '').trim()).filter(Boolean)
+    : []
+  return opts.length > 0 ? `${content}\n选项：${opts.join('、')}` : content
+}
+
+/**
  * 把分析文本里的算式归一化到 validateArithmeticAnswer 能吃的形态。
  * 关键处理：n² → n*n、n³ → n*n*n、×÷ 转 ASCII 乘除号，其它符号复用 arithmeticAnswerValidator。
  *

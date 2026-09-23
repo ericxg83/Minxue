@@ -15,6 +15,9 @@ import {
 import { REVIEW_STATUS, DEFAULT_CONFIDENCE_THRESHOLD, getReviewState, needsWrongBookDecision, effectiveIsCorrect as resolveEffectiveIsCorrect } from '../../utils/reviewDecision'
 // 闸1 门禁分层（2026-09-23 P2）：只自动放行「系统没补上」，绝不放行「低置信度需人拍板」
 import { splitWrongGateList, classifyWrongGateItem, WRONG_GATE_AUTO_SKIP_REASON } from '../../domain/wrongGateTier.js'
+// 闸1（L0 卷级自动完成）判据唯一口径（2026-09-23 三层分流）：
+//   L0 已判出 → 自动复核；L1 系统侧缺口 → 先补再判，不拦老师；L2 真判不出 → 留人工。
+import { resolvePaperAutoComplete } from '../../domain/paperReviewDecision.js'
 // 重练卷排卷与卷面编号的唯一口径（与服务端 worker.js 判题侧同源）。
 // 批改页题目列表必须按【卷面顺序】排列，否则老师看到的第 N 题 ≠ 学生卷面第 N 题。
 import { buildRetryPaperOrder } from '../../utils/retryPaperOrder'
@@ -1199,18 +1202,41 @@ export const useReviewStore = defineStore('review', () => {
     // 不再自动跳转，避免跳过"留底为答案库"窗口。题目列表保留以便翻看刚复核完的题。
   }
 
+  // ── 闸1（L0 卷级自动完成）判定（2026-09-23 三层分流）────────
+  // 唯一口径在 src/domain/paperReviewDecision.js。这里只负责把 store 的
+  // 响应式数据喂进去，不在本文件内重写任何判据。
+  //
+  // 三分层与各自的拦截点（务必分清，不要互相替代）：
+  //   L0 已判出（is_correct 非空 / blank / 老师已定）→ 本判据放行 → 自动完成复核
+  //   L1 系统侧缺口（缺图/缺选项/缺答案）→ prepareWrongGate 自动记 wrong_no_book
+  //      （闸1 入册门禁 via wrongGateTier.js），**不入本判据**
+  //   L2 真判不出（AI未判定 / 处理中 / 低置信需人拍板入册）→ 留人工
+  const paperAutoComplete = computed(() =>
+    resolvePaperAutoComplete(allQuestions.value, unresolvedWrongQuestions.value)
+  )
+
   // ── [2026-09-20 方案A] 零人工项自动完成复核 ──────────────
   //
   // 进入一份试卷后，若整卷不存在任何「需要老师处理」的项，延迟自动调用
   // completeTaskReview() —— 与老师手动点「完成复核」逐字节等价：
   //   persistTaskCompletion（结算早已在批完时完成，此处只写 reviewed）+ 本地镜像。
   //
+  // ── 2026-09-23 三层分流（L0/L1/L2）──
+  // 判据全部收敛到 src/domain/paperReviewDecision.js（唯一口径，带回归测试）。
+  // 老师的目的：「AI 已经判定是正确是错误，那就应该自动复核」。实测近 14 天
+  // 43 份停在 done 的卷里，真正需拍板的只有 9 题（5%）——其余 183 题是
+  // 未作答 83 / 缺少参考答案 58 / 答案与题不匹配 27 / 无原因 6，
+  // 全是终态或系统侧缺口，却把整卷拦下让老师点一次「本次不加入」。
+  // 现在：已判出（is_correct 非空，含低置信）+ blank → 不再拦卷。
+  //
   // 判定条件（全部满足才自动，任何一条不满足就保持人工）：
   //   1. 非聚合模式（questionToTaskMap 为空）——聚合是老师主动批量处理，不动；
   //   2. currentPaperReviewable（paper 模式学生已交卷且 AI 批完）；
-  //   3. needsAttentionCount === 0（待判 / AI未判定 / 处理中 全为 0）；
-  //   4. 无未入册错题门禁（unresolvedWrongQuestions 为空）——0.5~0.8 置信带的
-  //      AI 判错题批完时不自动入册，这里必须等老师拍板「加入/本次不加入」；
+  //   3. needsAttentionCount === 0（待判 / AI未判定 / 处理中 全为 0）——冗余保护，
+  //      与条件 4 的 L2 判据同源；
+  //   4. paperAutoComplete.canAutoComplete（**L0 判据**：整卷无未判出题 +
+  //      无待老师拍板的错题）。⚠️ 系统侧缺项（缺图/缺选项/缺答案）不进这里 ——
+  //      它们由 prepareWrongGate 自动记 wrong_no_book 后放行（L1 先补再判）；
   //   5. 无在途人工复核写入（pendingReviewWrites 为空）——老师在逐题点，不动；
   //   6. 当前卷未复核（status !== 'reviewed'）；
   //   7. 题目非空（空卷不自动完成，避免误关）。
@@ -1223,7 +1249,7 @@ export const useReviewStore = defineStore('review', () => {
     if (Object.keys(questionToTaskMap.value).length > 0) return
     if (!currentPaperReviewable.value) return
     if (needsAttentionCount.value > 0) return
-    if (unresolvedWrongQuestions.value.length > 0) return
+    if (!paperAutoComplete.value.canAutoComplete) return
     if (pendingReviewWrites.size > 0) return
     if (allQuestions.value.length === 0) return
 
@@ -1235,7 +1261,7 @@ export const useReviewStore = defineStore('review', () => {
       if (Object.keys(questionToTaskMap.value).length > 0) return
       if (!currentPaperReviewable.value) return
       if (needsAttentionCount.value > 0) return
-      if (unresolvedWrongQuestions.value.length > 0) return
+      if (!paperAutoComplete.value.canAutoComplete) return
       if (pendingReviewWrites.size > 0) return
 
       completeTaskReview()
@@ -1430,6 +1456,7 @@ export const useReviewStore = defineStore('review', () => {
     getAiState,
     aiStateStats,
     needsAttentionCount,
+    paperAutoComplete,
     // 新增
     currentTask,
     confidenceThreshold,

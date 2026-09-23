@@ -53,9 +53,31 @@ test('P0：未作答主观题必须落 blank 终态（is_correct=false + answer_
   const block = slimCode.slice(idxBlank - 400, idxBlank + 300)
   assert.match(block, /!studentAnswer/, 'blank 判据必须是 !studentAnswer')
   assert.match(block, /isCorrect: false/, '未作答必须显式写 false')
-  assert.match(block, /confidence: 0/, '未作答置信度结构性为 0')
+  // L1-a（2026-09-23）：blank 的置信度由 0 改为 1.0。
+  // 原断言 `confidence: 0` 锁的是旧行为，而旧行为正是"整卷被错题弹窗拦下"的根因：
+  // 0 < 0.8 入册阈值 ⇒ 空题命中 low_confidence ⇒ 老师被迫为空题点一次「本次不加入」。
+  // 空题是终态（未作答等同不会），它既不是"判不准"也不是"还没判"，
+  // 用 0 表达只会制造一次冗余点击。
+  assert.match(block, /confidence: 1[,\s]/, '未作答置信度必须是 1.0（L1-a：空题终态，不用 0 表达）')
+  assert.ok(
+    !/confidence: 0/.test(block),
+    '未作答不得再写 0 —— 0 会被入册置信度闸判成 low_confidence 从而拦下整卷'
+  )
   assert.match(block, /autoCount\+\+/, '未作答属于"已判定"，不能再计入 manualCount')
   assert.ok(!/manualCount\+\+/.test(block), '未作答不得计入 manualCount')
+})
+
+test('L1-a：重练回写不得用 COALESCE 保留空题的旧 confidence', () => {
+  // 原作业判空过的题带着 confidence=0 进错题本；重练时学生真没写、answer_source 已刷成
+  // blank，若仍走 `COALESCE($3, confidence)`，NULL 会把 0 留下 ⇒ 空题继续拦整卷。
+  const idx = slimCode.indexOf('SET student_answer = $1')
+  assert.ok(idx > -1, '找不到 slim 预填 UPDATE')
+  const block = slimCode.slice(Math.max(0, idx - 700), idx + 400)
+  assert.match(
+    block,
+    /nextConfidence\s*=\s*nextAnswerSource === 'blank' \? 1/,
+    'blank 必须显式写 1，不得把 r.confidence 传进 COALESCE 保留旧值'
+  )
 })
 
 test('P1：主观题必须先跑 judgeAnswer 再决定是否转人工', () => {

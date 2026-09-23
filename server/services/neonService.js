@@ -290,7 +290,10 @@ export const addWrongQuestions = async (studentId, questionIds, questionConfiden
   //   实测 worker.js 答案库建题路径就这么把低置信题漏进了错题本。
   //   现改为：未传 Map 时回读 questions.confidence 现况自行判定，闸不能被「忘记传参」绕过。
   //   `answer_source='blank'`（学生未作答）**不放进 Map**：未作答等同「不会」，
-  //   其 confidence 结构性为 0，用阈值卡会永远入不了册，按口径该入（只受完整性闸约束）。
+  //   按口径该入（只受完整性闸约束）。空题的 questions.confidence 自 L1-a（2026-09-23）
+  //   起统一写 1.0，本可自然过闸；这里仍显式排除，是为了让「空题不受置信度约束」
+  //   由代码结构表达，而不是依赖某个具体数值（否则后来有人改了 blank 的取值，
+  //   空题会悄悄开始被阈值卡住，表现成"整卷被错题弹窗拦下"）。
   let filteredIds = questionIds
   if (!opts.skipConfidence) {
     let confMap = questionConfidenceMap

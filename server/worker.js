@@ -36,7 +36,7 @@ import { isValidImageBuffer, checkImageResolution } from './utils/imageValidator
 import { NO_PROXY_DOWNLOAD_OPTS } from './utils/noProxyHttp.js'
 import { formatOptionsForPrompt } from './utils/optionText.js'
 import { validateArithmeticAnswer } from './utils/arithmeticAnswerValidator.js'
-import { aiParseSelfCheck, detectAnswerCopiedFromStudent } from './utils/aiParseSelfCheck.js'
+import { aiParseSelfCheck, detectAnswerCopiedFromStudent, buildTextOnlyResolveInput } from './utils/aiParseSelfCheck.js'
 
 /**
  * 写入侧定位框补测（2026-09-20 方案A）：
@@ -1368,7 +1368,15 @@ const recognizeQuestions = async (imageBase64, taskId, retryCount = 0, forceMode
         question_type: q.question_type || 'answer',
         subject: q.subject || '数学',
         status: status,
-        confidence: q.confidence || 0,
+        // L1-a（2026-09-23）：未作答（blank）的 confidence 统一写 1.0。
+        // 空题是**终态**（「未作答等同不会」已是统计口径），它既不是"判不准"、
+        // 也不是"还没判"，用任何 <0.8 的值表达它都只会制造两处假信号：
+        //   ① 入册门禁：conf < 0.8 ⇒ 命中 low_confidence ⇒ 整卷被错题弹窗拦下
+        //      （实测 14 天 27 道空题 conf=0、56 道空题 conf=0.8~0.98，行为分裂）
+        //   ② 前端六态：0.8~0.95 会让空题在合并 judgement 时被误当"AI 敢下结论"
+        // 1.0 既不触发任何阈值闸，也如实表达"这题的判定没有不确定性"。
+        // ⚠️ 不要给未作答写 is_correct（空题正误由 answer_source 表达，见判题分支）。
+        confidence: answerSource === 'blank' ? 1.0 : (q.confidence || 0),
         analysis: coerceAIText(q.analysis),
         block_coordinates: q.block_coordinates || null,
         question_number: q.question_number || null,
@@ -1966,6 +1974,80 @@ const solveAnswerShared = (fingerprint, solver) => {
 }
 
 /**
+ * L1-c（2026-09-23 三层分流）：答案引擎空手而归时，用**纯题干**再定向重解一次。
+ *
+ * ── 名字的来历（保持诚实，不要误读）──
+ * 本函数原叫「抄学生重解」，前提是"答案引擎把学生笔迹抄进 answer"。
+ * 复测推翻了该前提（见调用点注释）：`answer` 与 student_answer 全等 **0/110**，
+ * 真正的问题是有 95/110 的 `answer` **为空**。为保留 L1-c 的编号沿用现名，
+ * 但它做的事是「引擎失败后的二次机会」，与"抄学生"无关。
+ *
+ * 输入只用题干（parent_stem + content + 选项），由 buildTextOnlyResolveInput 构造；
+ * prompt 里绝不含 student_answer / answer / analysis / 图片 ——
+ * 我们不要任何来自上一轮的污染或错误结论，只要一次干净的独立求解。
+ *
+ * 返回 `{ adopted: false, why }` 各情形，都**不改动任何状态**（调用方保持原状转人工）：
+ *   · no_stem        —— 题干为空，无从构造输入
+ *   · invalid_answer —— 重解结果没过 validateAIAnswer（空 / 待人工补充 / 只有下划线）
+ *   · still_copied   —— 重解结果与学生答案逐字全等。**这不是"抄学生"判据**：
+ *                       客观题学生答对时参考答案本就该等于学生答案（短答案如"8"、
+ *                       "3x²-8xy+5"）。此处拒收的理由是——引擎两次都给出同一个值、
+ *                       且这个值等于学生答案时，它更可能是"读到了学生笔迹"而不是
+ *                       "独立求解得到同一结果"，保持保守有助避免假性全对。
+ *   · same_as_original / engine_failed —— 无变化 或 引擎再次失败
+ *
+ * 采用条件（全部满足）：重解成功 + 结果有效 + 不等于学生答案 + 与原结果不同。
+ * 注意"可采用"不等于"一定对"—— 上游 validateArithmeticAnswer /
+ * verifyComparisonAnswer / 判题链路仍会照常把关，本函数只提供一个候选答案。
+ *
+ * @param {object} q 题目行（含 parent_stem / content / options / student_answer）
+ * @param {{answer?: string, analysis?: string, engine?: string|null}} original 原求解结果
+ */
+const resolveCopiedAnswerViaTextOnly = async (q, original = {}) => {
+  const textOnlyInput = buildTextOnlyResolveInput(q, q?.options)
+  if (!textOnlyInput) return { adopted: false, why: 'no_stem' }
+
+  let retryResult
+  try {
+    // 指纹按纯题干算：与 generateMissingAnswers 主链路（content+options）同源，
+    // 不同题的题干不会撞车；同一道题的重解还能命中已有缓存。
+    const retryFingerprint = generateTextFingerprint(
+      textOnlyInput,
+      Array.isArray(q?.options) ? q.options : [],
+      q?.question_type
+    )
+    const run = solveAnswerShared(retryFingerprint, () => generateAnswerForQuestion(textOnlyInput))
+    retryResult = await run.promise
+  } catch (e) {
+    console.warn(`     [L1-c] q=${String(q?.id).substring(0, 8)} 纯题干重解异常: ${e.message}`)
+    return { adopted: false, why: 'engine_failed' }
+  }
+
+  if (!retryResult || retryResult.success === false) return { adopted: false, why: 'engine_failed' }
+
+  const validation = validateAIAnswer(retryResult.answer, retryResult.analysis)
+  if (!validation.isValid) return { adopted: false, why: 'invalid_answer' }
+
+  // 关键闸：重解结果**仍然**与学生答案逐字全等 ⇒ 污染没被切断（可能题干本身就残缺、
+  // 或模型这次又抄了一遍），绝不能采纳 —— 否则等于换个来源继续用学生答案当参考答案。
+  if (detectAnswerCopiedFromStudent(retryResult.answer, q?.student_answer)) {
+    return { adopted: false, why: 'still_copied' }
+  }
+
+  // 与原答案也无差别时没有必要替换（省一次无意义的写入）
+  if (original?.answer && String(retryResult.answer).trim() === String(original.answer).trim()) {
+    return { adopted: false, why: 'same_as_original' }
+  }
+
+  return {
+    adopted: true,
+    answer: retryResult.answer,
+    analysis: retryResult.analysis,
+    engine: retryResult.engine,
+  }
+}
+
+/**
  * Generate reference answers for ALL questions via AI calculation.
  * OCR may confuse student's selected answer with the reference answer,
  * so reference answers should always come from AI calculation based on question content.
@@ -2186,21 +2268,49 @@ const generateMissingAnswers = async (questions, imageBuffer = null, taskId = nu
       }
       const validation = validateAIAnswer(result.answer, result.analysis)
 
-      // 【2026-09-23】答案引擎输出与学生答案逐字全等 —— **只记观测，不拦截**。
+      // 【2026-09-23 L1-c 定案：从"抄学生检测"改为"答案引擎空手而归时的二次定向重解"】
       //
-      // 背景：近 14 天写进 reason='缺少参考答案，无法自动判定' 的 110 道里，92 道（84%）
-      // 的 result.answer 与学生答案逐字全等（如学生写 "1+a+b-1+b-a+b=2b"，answer 也一模一样）。
-      // 答案册原文不会是学生手写体，这强烈提示 OCR 把学生笔迹读进了 answer 列。
+      // ── 一个必须记住的测量教训 ──
+      // 先前把「近 14 天 110 道缺参考答案里 92 道（84%）的 ai_answer 与学生答案逐字全等」
+      // 读成了"答案引擎抄学生"。**那是错的**：`ai_answer` 字段按定义就等于学生答案 ——
+      // 见上方 `const aiAnswer = rawStudentAnswer`，它是 OCR 对**学生笔迹的抄录**，
+      // 不是参考答案。用 `ai_answer` 做污染判据，测出来的必然是"100% 污染"这种假信号。
+      // 复测（_diag_l1c_recheck_0923）：真正的参考答案字段 `answer` 与 student_answer
+      // 逐字全等的有 **0/110**；缺参考答案的 95/110 是 `answer` **为空**。
+      // ⇒ 所以"抄学生污染"这条路已在上面被 P3 闸（standardAnswer === cleanedStudentAnswer
+      //   → 置空重解）处理干净，这里**不需要再判一次抄学生**。
       //
-      // ⚠️ 为什么**不能**据此拦下（这是本段最重要的结论）：
-      //   用近 14 天「已判对(is_correct=true)」的 973 道做反向对照，本判据会命中 32 道
-      //   （如 ans='3x²-8xy+5' 与 stu='3x²-8xy+5'）—— 那些是学生**真的算对了**、答案也是
-      //   同一个值。纯文本层无法区分「学生抄了答案」与「学生答对且值相同」；
-      //   一刀切成"抄学生"会把 32 道本来判对的题打回人工复核，与「减少复核量」的目标反向。
-      //   因此这里只打日志，供后续按 (task_id, 是否整卷同值) 做人工抽样取证，
-      //   行为链一律不动：该采纳的照样采纳，该转人工的照样转人工。
-      if (detectAnswerCopiedFromStudent(result.answer, q.student_answer)) {
-        console.warn(`     [抄学生存疑] q=${q.id.substring(0, 8)} answer 与学生答案逐字全等，仅记观测不拦截`)
+      // ── 真正该补的缺口 ──
+      // 95/110 的 `answer` 是空的：P3 置空 / OCR 本来就没读到参考答案 → 交给答案引擎，
+      // 而答案引擎**空手而归**（result.answer 为空或 '待人工补充'）。
+      // 这时题目被写进 reason='缺少参考答案，无法自动判定' 落到老师待办 ——
+      // 而其中相当一部分**题干本身是完整可解的**（实测 28/103 引图，其余 75 道纯文本题干）。
+      //
+      // ⇒ L1-c 的正确形态：答案引擎失败时，用**纯题干**再定向重解一次。
+      //   与主链路(2190 行)的差别只在输入口径 —— 主链路的 content 同样是 parent_stem+content，
+      //   所以这一步不是"换个输入"，而是**换一次机会**：主链路的那次调用可能是
+      //   降级通道 / 超时 / 额度抖动导致的空结果，重解能救回其中一部分。
+      //
+      // ⚠️ 只在"引擎没给出可用答案"时触发，绝不在"引擎给了答案"时覆盖 ——
+      //   后者会让本步骤从"补缺口"变成"推翻已有结论"，风险性质完全不同。
+      const engineCameBackEmpty = !result.answer
+        || !String(result.answer).trim()
+        || String(result.answer).trim() === '待人工补充'
+        || String(result.answer).trim() === '此为主观题，无唯一标准答案'
+        || String(result.answer).trim() === '-'
+      let resolvedAtL1c = false
+      if (engineCameBackEmpty) {
+        console.warn(`     [L1-c] q=${q.id.substring(0, 8)} 答案引擎未给出可用答案 → 纯题干定向重解`)
+        const retry = await resolveCopiedAnswerViaTextOnly(q, result)
+        if (retry.adopted) {
+          result.answer = retry.answer
+          if (retry.analysis) result.analysis = retry.analysis
+          if (retry.engine) result.engine = retry.engine
+          resolvedAtL1c = true
+          console.log(`     [L1-c] q=${q.id.substring(0, 8)} 定向重解成功，采用新答案`)
+        } else {
+          console.warn(`     [L1-c] q=${q.id.substring(0, 8)} 定向重解未获可信答案（${retry.why}），保持转人工`)
+        }
       }
 
       if (!validation.isValid) {
@@ -2231,7 +2341,13 @@ const generateMissingAnswers = async (questions, imageBuffer = null, taskId = nu
           }, `分析文本保存 q=${q.id.substring(0, 8)}`)
         }
         exceptionCount++
-        fireForget(() => markAnswerException(q.id, validation.reason), `异常标记 q=${q.id.substring(0, 8)}`)
+        // L1-c：定向重解也失败 ⇒ 保持原有原因（validation.reason）即可。
+        // 不再写 answer_copied_suspected —— 复测已证明「抄学生」不是主因（answer 与
+        // student_answer 全等 0/110），给老师看"疑似抄学生"会把人引向错误方向。
+        fireForget(
+          () => markAnswerException(q.id, resolvedAtL1c ? '答案引擎未给出可用答案（定向重解未果）' : validation.reason),
+          `异常标记 q=${q.id.substring(0, 8)}`
+        )
         return
       }
 
@@ -2570,9 +2686,12 @@ export const processSlimGrading = async (job) => {
       // blank 的展示与统计口径（未作答终态、不进待办、未作答等同不会）与
       // src/utils/reviewDecision.js 完全一致。
       if (!studentAnswer) {
-        results.push({ questionId: stored.id, isCorrect: false, source: 'ocr', confidence: 0, reason: 'blank', studentAnswer: '' })
+        // L1-a（2026-09-23）：blank 的 confidence 统一 1.0（原来是 0）。
+        // 0 < 0.8 入册阈值 ⇒ 空题命中 low_confidence ⇒ 整卷被错题弹窗拦下。
+        // 空题是终态（未作答等同不会），老师无需为它拍板任何事。
+        results.push({ questionId: stored.id, isCorrect: false, source: 'ocr', confidence: 1, reason: 'blank', studentAnswer: '' })
         alignRec.isCorrect = false
-        alignRec.confidence = 0
+        alignRec.confidence = 1
         autoCount++
         continue
       }
@@ -2675,6 +2794,11 @@ export const processSlimGrading = async (job) => {
       if (r.isCorrect === null && r.studentAnswer === undefined) continue
       const nextStudentAnswer = r.studentAnswer ?? ''
       const nextAnswerSource = determineAnswerSource(nextStudentAnswer)
+      // L1-a（2026-09-23）：blank 必须**写死 1.0**，不能走 COALESCE 保留旧值 ——
+      // 原作业判空过的题带着 confidence=0 进错题本，重练时学生真没写、answer_source
+      // 已被刷成 blank，但 COALESCE(NULL, 0) 会把 0 留下 ⇒ 空题继续命中 low_confidence
+      // 拦整卷（与上面「answer_source 按最新一次批改刷新」同款不对称，一并抹平）。
+      const nextConfidence = nextAnswerSource === 'blank' ? 1 : (r.confidence ?? null)
       await query(
         `UPDATE ${TABLES.QUESTIONS}
          SET student_answer = $1,
@@ -2683,7 +2807,7 @@ export const processSlimGrading = async (job) => {
              confidence = COALESCE($3, confidence),
              updated_at = NOW()
          WHERE id = $4`,
-        [nextAnswerSource === 'blank' ? '' : nextStudentAnswer, r.isCorrect, r.confidence ?? null, r.questionId, nextAnswerSource]
+        [nextAnswerSource === 'blank' ? '' : nextStudentAnswer, r.isCorrect, nextConfidence, r.questionId, nextAnswerSource]
       ).catch((e) => {
         prefillFailures.push({ questionId: r.questionId, message: e.message })
         console.error(`[Slim] 预填 is_correct/student_answer 失败 q=${r.questionId?.substring(0, 8)}:`, e.message)
@@ -5455,6 +5579,11 @@ export const processWorkbookGrading = async (job) => {
           // 必须显式标 blank：本管线原先只把 is_correct 置 null，未作答题与"AI 判不出"
           // 在库里长得一样，列表页的"空"和"待复核"两桶就分不开（复核页也只能显示"处理中"）。
           q.answer_source = 'blank'
+          // L1-a（2026-09-23）：未作答的 confidence 统一 1.0。
+          // 此处原来是 `q.confidence || 0`（默认 0，见建题段 isEmpty ? 0 : …），
+          // 0 < 0.8 入册阈值 ⇒ 空题命中 low_confidence ⇒ 整卷被错题弹窗拦下。
+          // 空题是终态，不需要老师拍板任何事，用 0 表达它只会制造一次冗余点击。
+          q.confidence = 1.0
           emptyCount++
         }
         console.log(`   [Workbook] 题 ${q.question_number}: 学生="${q.student_answer}" 标准="${q.answer}" → ${q.is_correct === true ? '正确' : q.is_correct === false ? '错误' : '待人工'}`)
@@ -5603,7 +5732,12 @@ export const processWorkbookGrading = async (job) => {
     // is_complete 不在此硬编码：createQuestions 会用 checkQuestionCompleteness(q) 的
     // 动态真值覆写（这是「唯一判据」，落库列只是它的反范式缓存）。
     // 原先写的 `true` 会让建题瞬间与真值不符，且掩盖缺项；改为交给 createQuestions 统一算。
-    confidence: q.is_correct !== null ? 0.95 : null,
+    //
+    // L1-a（2026-09-23）：未作答（blank）统一写 1.0，理由见 processTask 同名分支。
+    // 本管线原来对 blank 写 null，而 null 不是"不受约束"——前端 getReviewState 判
+    // `is_correct == null && confidence == null → processing`，空题就此被算进
+    // 「处理中」占老师待办（铁律：空题是终态、不进待办）。
+    confidence: q.answer_source === 'blank' ? 1.0 : (q.is_correct !== null ? 0.95 : null),
     question_type: q.question_type || 'choice',
     image_url: q._page_image_url || imageList[0]?.image_url || '',
     page_number: q._page_number || 1,
@@ -5853,7 +5987,9 @@ export const processWorkbookGrading = async (job) => {
           questionId: q.id,
           studentId,
           source: 'ai_ocr',
-          confidence: q.is_correct !== null ? 0.95 : null,
+          // L1-a（2026-09-23）：与 questions.confidence 同口径 —— blank 写 1.0。
+          // 审计记录若继续写 null，重批/复核回看时会把空题误读成"AI 没跑完"。
+          confidence: q.answer_source === 'blank' ? 1.0 : (q.is_correct !== null ? 0.95 : null),
           isCorrect: q.is_correct,
           content: q.content,
           answer: q.answer,
@@ -6806,7 +6942,7 @@ const processAnswerBankGrading = async (job) => {
           page_number: q._page_number || pageNumber,
           question_number: q.question_number,
           is_suspicious: !!subBreakdown || pageSuspicious,  // sub 拆分/页级归属可疑标记，供 PC 端展示
-          confidence: isEmpty ? 0 : (answerRow ? (subBreakdown ? 0.9 : 0.85) : 0),
+          confidence: isEmpty ? 1.0 : (answerRow ? (subBreakdown ? 0.9 : 0.85) : 0),
           source_type: resource.resource_type === 'exam' ? 'exam' : 'homework',
           // 落库学生作答页图 + 归一化 0-1000 坐标，供 PC 后台 PaperViewerPanel
           // 在中间试卷页定位题目（与 processWorkbookGrading 保持一致的存储策略）。
@@ -6930,9 +7066,11 @@ const processAnswerBankGrading = async (job) => {
     //    低置信度题可绕过置信度闸直接入册（2026-09-11 修复）。
     //
     // 置信度闸：只对 answer_source<>'blank' 的题生效。
-    //   未作答（blank）的 confidence 结构性为 0（建题时 `isEmpty ? 0 : …`），用阈值卡
-    //   会永远入不了册，而「未作答等同不会」按口径该入 → blank 题**不放置信度值**；
-    //   闸的实现是「map 里查不到 = 放行」，故 blank 天然豁免、AI 判错的题仍受阈值约束。
+    //   未作答（blank）的 confidence 在建题时统一写 1.0（L1-a，2026-09-23），
+    //   本可自然过闸；但这里**仍然显式排除**，是为了让"空题不受置信度约束"这条口径
+    //   继续由代码结构表达，而不是依赖某个具体数值 —— 否则后来有人改了 blank 的
+    //   confidence 取值，空题会悄悄开始被阈值卡住。闸的实现是「map 里查不到 = 放行」，
+    //   故 blank 天然豁免、AI 判错的题仍受阈值约束。
     // 完整性闸：传 questionMap 让 checkQuestionCompleteness 生效，并顺带回写 is_complete。
     const answerBankConfidenceMap = new Map(
       questionsWithIds

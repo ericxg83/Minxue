@@ -177,7 +177,7 @@
     </ul>
     <template #footer>
       <el-button @click="store.wrongGateVisible = false">稍后处理</el-button>
-      <el-button type="success" :disabled="store.unresolvedWrongQuestions.length > 0" @click="handleGateComplete">完成复核</el-button>
+      <el-button type="success" :disabled="!store.paperAutoComplete.canAutoComplete" @click="handleGateComplete">完成复核</el-button>
     </template>
   </el-dialog>
 </template>
@@ -433,7 +433,9 @@ const handleSkipBook = async (item) => {
 }
 
 const handleGateComplete = async () => {
-  if (store.unresolvedWrongQuestions.length > 0) return
+  // 进到这里说明弹窗里已无待拍板项（弹窗是闸1 的最后一道口），
+  // 与卷级 L0 判据同源校验：还有未判出题时不放行，避免"点完弹窗"绕过 L2。
+  if (!store.paperAutoComplete.canAutoComplete) return
   store.wrongGateVisible = false
   await doComplete()
 }
