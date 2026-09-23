@@ -27,10 +27,17 @@
             :class="{ 'conf-low': q.confidence < store.confidenceThreshold }">
             {{ Math.round(q.confidence * 100) }}%
           </span>
-          <el-tag v-if="q.answer_source && q.answer_source !== 'worksheet'" size="small"
-            :type="q.answer_source === 'blank' ? 'warning' : 'info'" effect="plain">
-            {{ answerSourceLabel }}
-          </el-tag>
+          <!-- AI 重解析（2026-09-23 临时按钮）：参考答案缺失时点一下，
+               调答案引擎重算这一题的标准答案并写库。答案已存在时弹确认。
+               替代原来的「识别」tag——那个 tag 只是 answer_source 状态标签（学生答案 OCR 识别），
+               与参考答案无关，老师根本不知道它干嘛用。
+               实测端到端 5~35s（DB 首次建连 + 答案引擎），loading 文案要明确，
+               否则老师对着一个不动的转圈会以为卡死。 -->
+          <el-button size="small" type="primary" plain :loading="recomputeAnswerLoading"
+            @click="handleRecomputeAnswer">
+            <el-icon v-if="!recomputeAnswerLoading"><MagicStick /></el-icon>
+            {{ recomputeAnswerLoading ? 'AI 计算中…' : 'AI 重解析' }}
+          </el-button>
           <template v-if="!editing">
             <el-button size="small" type="primary" plain @click="handleEnterEdit">
               <el-icon><EditPen /></el-icon> 编辑
@@ -452,7 +459,7 @@
 <script setup>
 import { ref, computed, watch, nextTick } from 'vue'
 import { useReviewStore } from '../../stores/reviewStore'
-import { updateQuestion, rejudgeQuestion, retryGeometry, clearStudentCaches, uploadImage, getQuestionAssets } from '../../../services/apiService'
+import { updateQuestion, rejudgeQuestion, recomputeQuestionAnswer, retryGeometry, clearStudentCaches, uploadImage, getQuestionAssets } from '../../../services/apiService'
 import { recognizeAnswer, recognizeQuestion } from '../../../api/answerOCR'
 import { processExamImage } from '../../../utils/imageProcessor'
 import { getGeometryDisplayUrl, getTikzStatus } from '../../../utils/geometryDisplay'
@@ -468,7 +475,7 @@ import { ElMessage, ElMessageBox, ElLoading } from 'element-plus'
 // 越界只会被裁掉，不会画到图外。因此这里传 allowOutOfRange:true 保留原行为，
 // 但实现与解析口径不再各留一份（原先全仓 4 份副本，两份拒绝、两份不拒绝）。
 import { parseBbox, unionBbox } from '../../../utils/questionBbox'
-import { DocumentChecked, Delete, Plus, Upload, Picture, EditPen, ArrowLeft, ArrowRight, RefreshLeft, Crop, Camera } from '@element-plus/icons-vue'
+import { DocumentChecked, Delete, Plus, Upload, Picture, EditPen, ArrowLeft, ArrowRight, RefreshLeft, Crop, Camera, MagicStick } from '@element-plus/icons-vue'
 import MathRender from '../MathRender.vue'
 import QuestionEditForm from './QuestionEditForm.vue'
 import AnswerRecognizeDialog from './AnswerRecognizeDialog.vue'
@@ -517,14 +524,6 @@ const typeTagType = computed(() => {
   return map[normalizeType(q.value)] || 'info'
 })
 const optionsList = computed(() => normalizeOptions(q.value?.options || []))
-
-// 学生答案来源标签文案。'worksheet' 不在这里处理 —— 那个值描述的是**参考答案**来自
-// 答案库（该列语义混用），显示成学生答案来源会误导，改由「参考答案」栏的来源标签表达。
-const answerSourceLabel = computed(() => {
-  const s = q.value?.answer_source
-  if (!s) return ''
-  return s === 'blank' ? '未作答' : s === 'recognized' ? '识别' : s === 'teacher_input' ? '手动录入' : s
-})
 
 // 参考答案来源（答案库 / AI 解答，两档）。纯展示，帮助老师判断该不该相信这个答案 ——
 // 事故里老师反复怀疑批改逻辑，实际是 AI 补的参考答案错了。见 utils/reviewDecision.js 注释。
@@ -701,6 +700,9 @@ const recognizeLoading = ref(false)
 const recognizeResult = ref(null)
 const recognizePreviewUrl = ref('')
 let recognizePreviewUrlToRevoke = ''
+
+// 「AI 重解析」按钮（2026-09-23）：调答案引擎重算这一题参考答案
+const recomputeAnswerLoading = ref(false)
 
 // 单题「重新识别」：吃原卷框选裁剪图，重识别题干/选项/答案（整页 OCR 漏选项时的补全手段）
 const questionRecognizeDialogVisible = ref(false)
@@ -1057,6 +1059,62 @@ const startQuickStudentAnswerEdit = () => {
 const cancelQuickStudentAnswerEdit = () => {
   quickStudentAnswerEditing.value = false
   quickStudentAnswerText.value = ''
+}
+// 「AI 重解析」按钮 handler：调答案引擎重算当前题的标准答案。
+// 已存在答案 → 弹确认框（force=true 强制覆盖）；不存在 → 直接跑。
+const handleRecomputeAnswer = async () => {
+  const question = q.value
+  if (!question?.id) return
+  if (recomputeAnswerLoading.value) return
+  let force = false
+  if (question.answer && String(question.answer).trim()) {
+    try {
+      await ElMessageBox.confirm(
+        '此题已有参考答案（' + String(question.answer).slice(0, 24) + '…），继续会覆盖现有答案，确定吗？',
+        'AI 重解析',
+        { confirmButtonText: '覆盖重算', cancelButtonText: '取消', type: 'warning' }
+      )
+      force = true
+    } catch (_) {
+      return
+    }
+  }
+  recomputeAnswerLoading.value = true
+  try {
+    const resp = await recomputeQuestionAnswer(question.id, { force })
+    if (resp?.answer) {
+      question.answer = resp.answer
+      if (resp.analysis) question.analysis = resp.analysis
+      if (typeof resp.is_correct !== 'undefined') question.is_correct = resp.is_correct
+      // 标记来源为 AI，让老师后续能看到「参考答案由 AI 重算」
+      question.answer_source = 'ai'
+      // 同步入册风险标签
+      const studentId = store.currentStudent?.id
+      if (studentId) clearStudentCaches(studentId)
+      if (resp.degraded) {
+        // 主模型不可用、答案来自降级通道：绝不给绿色「完成」，否则老师会把它当标准答案
+        // 照单全收。后端已同步写入 ai_answer_risk_reason，这里用黄色长提示让老师核一遍。
+        ElMessage({
+          type: 'warning',
+          duration: 6000,
+          message: `主模型此时不可用，已用降级通道${resp.engine ? '（' + resp.engine + '）' : ''}算出答案，请核对后再用：${String(resp.answer).slice(0, 30)}`
+        })
+      } else {
+        ElMessage.success(`AI 重算完成${resp.engine ? '（' + resp.engine + '）' : ''}：${String(resp.answer).slice(0, 30)}`)
+      }
+    } else {
+      ElMessage.warning('AI 未返回有效答案')
+    }
+  } catch (err) {
+    console.error('AI 重解析失败:', err)
+    // 后端把「数据库连不上」和「引擎算不出来」分成了两个错误码，可读文案在
+    // payload.message 里（httpCore 的 err.message 优先取 error 字段=错误码，
+    // 直接展示会变成 "AI 重解析失败：db-unavailable" 这种看不懂的字符串）。
+    const readable = err?.payload?.message || err?.message || err
+    ElMessage.error(`AI 重解析失败：${readable}`)
+  } finally {
+    recomputeAnswerLoading.value = false
+  }
 }
 const saveQuickStudentAnswer = async () => {
   const question = q.value

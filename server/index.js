@@ -71,14 +71,14 @@ import multer from 'multer'
 import { query, TABLES, TASK_STATUS, QUESTION_STATUS } from './config/neon.js'
 import { uploadFilesWithRetry } from './services/uploadRetryManager.js'
 import { createUploadReport, logUploadReport } from './services/uploadReportLogger.js'
-import { createJudgement, batchUpdateQuestionTags, getQuestionAssets, getQuestionAssetsByType, createResource, replaceResourceAnswers, addWrongQuestions, deleteQuestionsByTaskId } from './services/neonService.js'
+import { createJudgement, batchUpdateQuestionTags, getQuestionAssets, getQuestionAssetsByType, createResource, replaceResourceAnswers, addWrongQuestions, deleteQuestionsByTaskId, markAiAnswerRisk } from './services/neonService.js'
 import { judgeAnswer, findDirtyAnswers } from './services/judgeService.js'
 import { checkQuestionCompleteness } from './utils/questionCompleteness.js'
 import { planTaskRouteChange, resolveRouteKind, shouldResetTaskName, isRouteAutoName, buildAutoTaskName, describeRouteRisk, isRouteConvertEnabled, ROUTE_CONVERT_DISABLED_MESSAGE } from './utils/taskRoute.js'
 import { requeueGeometryRedrawOnRejudgeWrong } from './utils/geometryRequeueOnRejudge.js'
 import { syncQuestionCompleteness, syncQuestionCompletenessQuietly } from './services/questionCompletenessSync.js'
 import { computeWrongBookRisks } from './utils/wrongBookRisks.js'
-import { normalizeOptions } from './utils/optionText.js'
+import { normalizeOptions, formatOptionsForPrompt } from './utils/optionText.js'
 import { computeTaskStats } from './utils/taskStats.js'
 import { summarizeQuestionResults, classifyQuestionResult } from './utils/questionResultCaliber.js'
 import { buildGradingDetailView } from './utils/gradingDetailView.js'
@@ -87,11 +87,11 @@ import { recognizeAnswerImage } from './services/answerOCRService.js'
 import { recognizeQuestionImage } from './services/questionOCRService.js'
 import { uploadImage, deleteFile } from './services/ossService.js'
 import { getTaskQueue, getGeometryQueue, getQueueStats, taskWorker } from './queue.js'
-import { processTask } from './worker.js'
+import { processTask, generateAnswerForQuestion, extractAnswerFromAnalysis, normalizeGeneratedAnswer, validateAIAnswer } from './worker.js'
 // 定时回填走 LLM（backfillTags.js 的 generateTag），用于修正上传热路径产出的
 // 本地占位标签/难度（difficulty 默认 3），写入 tags_source='ai' 后退出筛选。
 import { generateTag as generateTagWithLLM } from './backfillTags.js'
-import { AI_CONFIG, getAIHeaders, buildTaggingPrompt, resetModelIndex, WORKBOOK_OCR_VENDOR_CHAIN } from './config/ai.js'
+import { AI_CONFIG, getAIHeaders, buildTaggingPrompt, resetModelIndex, WORKBOOK_OCR_VENDOR_CHAIN, isDegradedAnswerEngine } from './config/ai.js'
 import weeklyReportRouter from './routes/weeklyReport.js'
 import worksheetsRouter from './routes/worksheets.js'
 import resourcesRouter from './routes/resources.js'
@@ -669,6 +669,12 @@ app.get('/api/tasks/summary', async (req, res) => {
     res.json(data)
   } catch (error) {
     console.error('获取通知摘要失败:', error)
+    // 卡顿排查(P0)：DB 抖断时若上次有成功缓存，返回 stale 数据而非 500，
+    // 避免前端铃铛/通知在 Neon 连接波动时卡死或报错。前端可据 _stale 提示用户数据可能延迟。
+    if (summaryCache.data) {
+      console.warn('[summary] DB 失败，降级返回上次缓存 (stale)')
+      return res.json({ ...summaryCache.data, _stale: true })
+    }
     res.status(500).json({ error: error.message })
   }
 })
@@ -997,8 +1003,11 @@ app.post('/api/admin/tasks/:taskId/convert-route', async (req, res) => {
     }
 
     // ── 影响面取证（dryRun 与实跑共用同一份，保证"看到的"就是"删掉的"）──
+    // 题号列名：questions 表是 question_number，question_no 只存在于 wrong_questions /
+    // worksheet_answers / resource_answers。此处写错列名会让整条路由 42703 直接 500
+    // （2026-09-23 实际发生）。需求只是给老师看样本，故 question_number 即可。
     const { rows: questionRows } = await query(
-      `SELECT id, content, page_number, question_no FROM ${TABLES.QUESTIONS} WHERE task_id = $1`,
+      `SELECT id, content, page_number, question_number FROM ${TABLES.QUESTIONS} WHERE task_id = $1`,
       [taskId]
     )
     const questionIds = questionRows.map((r) => r.id)
@@ -1014,8 +1023,11 @@ app.post('/api/admin/tasks/:taskId/convert-route', async (req, res) => {
       [questionIds, taskId]
     )
     const jd = await countBy(
-      `SELECT COUNT(*)::int AS total FROM ${TABLES.JUDGEMENTS} WHERE question_id = ANY($1::uuid[])`,
-      [questionIds]
+      // ⚠️ judgements.question_id 是 TEXT 列（迁移 010 后建覆盖了 006 的 UUID 口径），
+      // 传 uuid[] 会让 PG 报 "operator does not exist: text = uuid" ⇒ 整条路由 500。
+      // 与 gradingFinalizer.getSettlementRows 同口径：改传 text[]。2026-09-23 二次踩坑。
+      `SELECT COUNT(*)::int AS total FROM ${TABLES.JUDGEMENTS} WHERE question_id = ANY($1::text[])`,
+      [questionIds.map(String)]
     )
     const asset = await countBy(
       `SELECT COUNT(*)::int AS total,
@@ -1103,7 +1115,7 @@ app.post('/api/admin/tasks/:taskId/convert-route', async (req, res) => {
         impact,
         warnings,
         samples: questionRows.slice(0, 5).map((r) => ({
-          id: r.id, page: r.page_number, no: r.question_no,
+          id: r.id, page: r.page_number, no: r.question_number,
           content: String(r.content || '').slice(0, 40),
         })),
         hint: '确认无误后带 dryRun=false 重新调用',
@@ -1114,8 +1126,9 @@ app.post('/api/admin/tasks/:taskId/convert-route', async (req, res) => {
     const deleted = { judgements: 0, wrongQuestions: 0, questions: 0 }
     if (questionIds.length > 0) {
       const r1 = await query(
-        `DELETE FROM ${TABLES.JUDGEMENTS} WHERE question_id = ANY($1::uuid[])`,
-        [questionIds]
+        // 同 jd 计数：judgements.question_id 是 TEXT 列，必须传 text[]（见上条注释）。
+        `DELETE FROM ${TABLES.JUDGEMENTS} WHERE question_id = ANY($1::text[])`,
+        [questionIds.map(String)]
       )
       deleted.judgements = r1.rowCount || 0
       // ⚠️ 错题行必须先于题目行删除：wrong_questions.question_id 是 ON DELETE SET NULL，
@@ -2281,6 +2294,295 @@ app.post('/api/questions/:id/rejudge', async (req, res) => {
   } catch (error) {
     console.error('重批改失败:', error)
     res.status(500).json({ error: error.message })
+  }
+})
+
+// 教师工作台「AI 重解析」按钮（2026-09-23 临时功能）：
+// 老师在批改页遇到参考答案缺失时手动触发，调答案引擎重算这一题的标准答案并写库。
+// 默认仅在现有 answer 为空时写入，避免无脑覆盖老师已经填好的答案；force=true 时强制覆盖。
+// 写库后用新的 answer 重判对错（judgeAnswer），并触发 finalizeRejudgeResult 走错题本/掌握度。
+app.post('/api/questions/:id/recompute-answer', async (req, res) => {
+  // 应用层总超时（2026-09-23 实测补充）：Neon 连接被中间设备静默断开时，
+  // pg 的 query 会在已建连接上无限等待（connectionTimeoutMillis 只管建连，管不到
+  // 已建连接上的查询），实测同一条请求出现过 60s 无任何响应。这里给整条链路
+  // 兜一个上限，到点返回明确文案，老师不用对着转圈猜。
+  const DEADLINE_MS = 150_000
+  // 单次答案引擎 HTTP 调用的超时上限（仅本接口，批改链路不受影响）：
+  // 默认 60s 是为「后台慢慢跑」设计的，对点了按钮在等结果的老师太长。
+  // 严格模式下每一级只打一个通道（1 个模型 × Key 池）：
+  //   · 快通道 45s —— 正常档 9–13s，45s 绰绰有余；
+  //   · 慢通道 60s —— kimi-k3 慢是**固有特性**（22–74s），给太短会把它白白掐掉，
+  //     结果每次都落到付费兜底，等于白烧额度。
+  // 两级串行最坏 60s + 45s = 105s，仍在 150s 总兜底内。
+  const ENGINE_TIMEOUT_MS = 45_000
+  const SLOW_ENGINE_TIMEOUT_MS = 60_000
+  // ── 重解析的通道链（2026-09-24 换模型）────────────────────────────────────
+  // ⚠️ 绝不能沿用答案引擎全局主模型 SenseNova:deepseek-flash —— 它可判正确率仅 33%，
+  //    且 10 道里 2 次返回非 JSON（`_三模型对比-缺答案求解-20260923.md`）。
+  //    **deepseek-flash 禁止用于解析答案**：它只适合批改/OCR/探活这类不写库的场景。
+  // 顺序 = 免费在前、付费在后（两者 9-23 实测并列 71%，能力同级，没必要先烧付费额度）：
+  //   ① SenseNova:kimi-k3 —— 免费、JSON 健康率 100%、对不可判题诚实返回「待人工补充」；
+  //      唯一的缺点是慢（22–74s，固有特性）⇒ 给 60s 超时。
+  //   ② Bailian:qwen3.8-flash —— 付费（Token Plan 套餐内≈0 边际成本）、约 9.5s、同样 71%。
+  // 两级各自走 strictPrimary（只打自己那一个通道、不降级），上一级没答案才让位下一级 ——
+  // 这与「降级到弱模型」是两回事：链内两个通道都是实测合格的强模型。
+  // ⚠️ 超时预算：60s + 45s = 105s，留在 150s 总兜底内。
+  // 提成 env 便于换通道/回滚，不必改代码。
+  const RECOMPUTE_CHAIN = [
+    {
+      vendor: process.env.ANSWER_ENGINE_RECOMPUTE_VENDOR || 'SenseNova',
+      model: process.env.ANSWER_ENGINE_RECOMPUTE_MODEL || 'kimi-k3',
+      timeoutMs: Number(process.env.ANSWER_ENGINE_RECOMPUTE_TIMEOUT_MS) || SLOW_ENGINE_TIMEOUT_MS
+    },
+    {
+      vendor: process.env.ANSWER_ENGINE_RECOMPUTE_FALLBACK_VENDOR || 'Bailian',
+      model: process.env.ANSWER_ENGINE_RECOMPUTE_FALLBACK_MODEL || 'qwen3.8-flash',
+      timeoutMs: Number(process.env.ANSWER_ENGINE_RECOMPUTE_FALLBACK_TIMEOUT_MS) || ENGINE_TIMEOUT_MS
+    }
+  ]
+  let finished = false
+  const deadlineTimer = setTimeout(() => {
+    if (finished) return
+    finished = true
+    console.error(`[AI 重解析] 超时 ${DEADLINE_MS / 1000}s 未完成 q=${req.params?.id}`)
+    if (!res.headersSent) {
+      res.status(503).json({
+        error: 'timeout',
+        message: `重算超过 ${DEADLINE_MS / 1000} 秒仍未完成（数据库或答案引擎响应过慢），请稍后重试或人工填写答案`
+      })
+    }
+  }, DEADLINE_MS)
+  const done = (fn) => {
+    if (finished) return
+    finished = true
+    clearTimeout(deadlineTimer)
+    fn()
+  }
+  try {
+    const { id } = req.params
+    const { force = false } = req.body || {}
+
+    // is_correct 一并读出（2026-09-23）：原先在写库后又单独 SELECT 一次拿旧值，
+    // 在 Neon 慢连接下等于多付一次 20s 超时风险。读题时一次拿全。
+    const { rows } = await query(
+      `SELECT id, task_id, student_id, student_answer, answer, question_type,
+              content, parent_stem, options, answer_source, ai_answer, is_correct
+       FROM ${TABLES.QUESTIONS} WHERE id = $1 AND deleted_at IS NULL`,
+      [id]
+    )
+    if (rows.length === 0) return done(() => res.status(404).json({ error: '题目不存在' }))
+    const q = rows[0]
+    const oldIsCorrect = q.is_correct
+
+    // 答案非空且未要求 force：拒绝覆盖老师已填的答案，避免误操作。
+    if (q.answer && q.answer.trim() && !force) {
+      return done(() => res.status(409).json({
+        error: 'already-has-answer',
+        message: '此题已有参考答案，传 force=true 才能覆盖',
+        existing_answer: q.answer
+      }))
+    }
+
+    // 与 worker.js 批改链路逐字同构：parent_stem + content + options
+    // （缺其中任一项都会被引擎判为缺条件 → 答案永久空）。
+    const content = [q.parent_stem, q.content].filter(s => s && String(s).trim()).join('\n')
+    const options = Array.isArray(q.options) ? q.options : []
+    const fullContent = options.length > 0
+      ? `${content}\n选项：${formatOptionsForPrompt(options)}`
+      : content
+
+    // ── 重解析的准确性口径（2026-09-24 定调）：只走实测合格的强模型，拿不到就失败 ──
+    // 参考答案必须准确，**不接受弱模型的答案**：
+    //   弱模型单次采样就是掷骰子（实测同题连出 ±5/±10/±10），而多路投票只是从若干次
+    //   随机采样里挑多数派 —— 那仍是「抖出来的答案」，不是「算出来的答案」，
+    //   写成标准答案比留空更危险（老师会照单全收，还会用它去判学生的对错）。
+    //   ⇒ 链内每一级都走 strictPrimary（只打自己那一个通道，**绝不降级**到
+    //     FALLBACK_MODELS / 备用供应商）；上一级没答案才让位给下一级 ——
+    //     那不是「降级」，链里两个通道都是 9-23 实测合格的强模型（并列 71%）。
+    //
+    // 顺带解决 150s 超时：原实现复用批改口径，降级后 3 路投票被 429 信号量压成串行
+    // （单题 140–230s）必然撞穿兜底。严格模式不降级 ⇒ 不触发投票，等待可控。
+
+    // 硬闸：deepseek-flash **禁止**出现在重解析通道链里（铁律 40）。
+    // 配错了当场炸出来，绝不静默放行 —— 静默的后果是老师拿到 33% 正确率的答案，
+    // 还拿它当标准答案去判学生。日志同步报错，方便在服务端一眼看到是谁配错的。
+    const RECOMPUTE_BLOCKED_MODELS = ['deepseek-flash']
+    for (const ch of RECOMPUTE_CHAIN) {
+      if (RECOMPUTE_BLOCKED_MODELS.includes(ch.model)) {
+        console.error(`[AI 重解析] 通道链配置了禁用模型 ${ch.model}，拒绝执行`)
+        return done(() => res.status(500).json({
+          error: 'blocked-model-config',
+          message: `重解析通道链配置了禁用的模型「${ch.model}」：该模型实测可判正确率仅 33%，禁止用于解析答案`
+        }))
+      }
+    }
+
+    let result = null
+    let finalAnswer = ''
+    let usedChannel = null
+    let rejectReason = null
+    for (const ch of RECOMPUTE_CHAIN) {
+      if (finished) break // 已经超时了，别再烧额度（也别让老师等更久）
+      usedChannel = `${ch.vendor}:${ch.model}`
+      const r = await generateAnswerForQuestion(fullContent, 0, {
+        vendorOverride: ch.vendor,
+        modelOverride: ch.model,
+        strictPrimary: true,
+        timeoutMs: ch.timeoutMs,
+        // 不做整轮递归重跑（HTTP 层的 429 退避仍保留），否则超时预算被重试吃光。
+        maxRetries: 0
+      })
+      result = r
+      // 题干为空是终态：换哪个模型都一样没答案，别再往下试第二级。
+      if (r.source === 'empty-input') break
+      // 与 worker.js 同口径：先尝试从 analysis 抽出标准答案，再用归一化兜底。
+      const rawAnswer = extractAnswerFromAnalysis(r.answer || '', r.analysis || '', options)
+      const normalized = normalizeGeneratedAnswer({ question_type: q.question_type, options }, rawAnswer || '')
+      // ⚠️ 必须过 validateAIAnswer（与批改链路同口径，2026-09-24 实测补上这一闸）：
+      //   kimi-k3 / qwen3.8-flash 对「无图不可判」的题会诚实返回「待人工补充」——
+      //   那是**AI 自述不会**，不是答案。它非空、能轻易穿过 `!answer.trim()` 的检查，
+      //   一旦写库就成了「标准答案」，随后拿它判学生：学生写的 -4 对不上「待人工补充」
+      //   ⇒ 好端端做对的题被判成错。
+      //   「AI 不会」必须体现为「这次没拿到答案」，绝不能当成答案落库。
+      const check = normalized && normalized.trim()
+        ? validateAIAnswer(normalized, r.analysis || '')
+        : { isValid: false, reason: '答案为空' }
+      if (check.isValid) { finalAnswer = normalized; break }
+      rejectReason = check.reason
+      console.warn(`[AI 重解析] ${usedChannel} 产出无效答案（${check.reason}），让位给下一通道`)
+    }
+
+    if (!finalAnswer || !finalAnswer.trim()) {
+      // 题干本身就是空的：这不是引擎忙，重算多少次都不会有答案，
+      // 明确提示老师去补题干，别让他对着按钮反复点。
+      if (result?.source === 'empty-input') {
+        return done(() => res.status(400).json({
+          error: 'empty-question-content',
+          message: '这道题的题干内容为空，AI 无法计算答案，请先补齐题干或人工填写答案'
+        }))
+      }
+      // 「AI 自己说不会」（待人工补充 / 主观题无唯一答案 / '-'）——
+      // 这与「引擎忙/不可用」是两回事：它是**终态**，再点多少次、换哪个模型都一样。
+      // 必须说清楚，否则老师会一直重试，而重试只会重复烧额度。
+      if (rejectReason === 'AI标记需要人工补充') {
+        return done(() => res.status(400).json({
+          error: 'ai-declined',
+          message: 'AI 判断这道题无法给出确定的标准答案（可能缺少配图或条件不足）。这是终态，重复重算不会有结果，请人工填写答案',
+          engine: result?.engine,
+          reason: rejectReason
+        }))
+      }
+      // 严格模式下「没答案」只有一个含义：链上这些实测合格的强模型这次都没给出可信答案。
+      // 文案必须说清「不是系统偷懒，是刻意不用不合格的模型顶替」——否则老师会以为系统坏了，
+      // 或者以为换个方式就能拿到一个（但不准的）答案。
+      return done(() => res.status(503).json({
+        error: 'primary-model-unavailable',
+        message: `答案引擎（${RECOMPUTE_CHAIN.map(c => `${c.vendor}:${c.model}`).join(' → ')}）这次都没能给出答案。为保证参考答案准确，系统不会用实测不合格的模型顶替，请稍后再试或人工填写`,
+        engine: result?.engine,
+        source: result?.source,
+        reason: rejectReason
+      }))
+    }
+
+    // ⚠️ 超时后不能再写库（2026-09-24）：兜底 timer 只负责「先给老师回一个 503」，
+    // 它中断不了已经在途的引擎调用。若引擎在 150s 之后才返回，下面的 UPDATE 仍会执行，
+    // 结果是老师看到「重算失败」、库里却悄悄多了一个 AI 答案 —— 老师随后手填或再点一次
+    // 都会和这个没人认领的答案打架。响应已经发出去了，此时直接放弃写库。
+    if (finished) {
+      console.warn(`[AI 重解析] 引擎在超时后才返回，放弃写库 q=${id}`)
+      return
+    }
+
+    // 降级留痕（与批改链路 buildAnswerTrustNotes 同口径）：主模型不可用时答案来自降级
+    // 通道，必须让老师知道该自己核一遍，而不是当成标准答案照单全收。
+    // 标尺用「本次点名的通道」而不是全局主模型：重解析点名的是 kimi-k3 / qwen3.8-flash，
+    // 拿全局主模型（SenseNova:deepseek-flash）当标尺会把一次成功的点名误判成降级。
+    const degraded = isDegradedAnswerEngine(result?.engine, result?.expectedProvider)
+    // 与人工改写参考答案同一口径（见本文件人工改写处的注释）：
+    // 新答案写库后，针对**旧**答案写下的风险标注全部失效，必须清掉或换成新的，
+    // 否则重解析成功了，页面仍永久挂着「⚠ 参考答案不可信」，老师会以为没生效。
+    const riskReason = degraded
+      ? `参考答案由降级通道 ${result.engine} 生成（主模型不可用），建议核对`
+      : null
+
+    // 写库：force 模式直接覆盖，非 force 模式只填空（双保险）。
+    await query(
+      `UPDATE ${TABLES.QUESTIONS}
+       SET answer = $1,
+           analysis = COALESCE(NULLIF($2, ''), analysis),
+           ai_answer = $1,
+           answer_exception = FALSE,
+           answer_exception_reason = NULL,
+           ai_answer_risk_reason = $4,
+           updated_at = NOW()
+       WHERE id = $3`,
+      [finalAnswer, result.analysis || '', id, riskReason]
+    )
+
+    // 用新答案重判对错并走结算（错题本/掌握度同步）。
+    const { isCorrect } = judgeAnswer(q.student_answer, finalAnswer, q.question_type)
+    if (q.student_id) {
+      // 结算失败不能吞掉「答案已写库」这个主结果：答案已经算出来并落库了，
+      // 错题本/掌握度同步失败只告警，仍把新答案返回给老师（否则老师会以为白跑了）。
+      try {
+        await finalizeRejudgeResult({
+          question: { ...q, answer: finalAnswer, analysis: result.analysis || '' },
+          isCorrect,
+          oldIsCorrect,
+          manualOverride: false
+        })
+      } catch (settleErr) {
+        console.error(`[AI 重解析] 结算失败 q=${id}（答案已写库，不影响本次结果）:`, settleErr.message)
+      }
+    } else {
+      await query(
+        `UPDATE ${TABLES.QUESTIONS}
+         SET is_correct = $1,
+             status = CASE
+               WHEN status = 'mastered' THEN status
+               WHEN $1 IS FALSE THEN 'wrong'
+               WHEN status = 'wrong' THEN 'pending'
+               ELSE status END,
+             updated_at = NOW()
+         WHERE id = $2`,
+        [isCorrect, id]
+      )
+    }
+    createJudgement({
+      questionId: id,
+      studentId: q.student_id,
+      source: 'pc_recompute_answer',
+      isCorrect,
+      answer: finalAnswer,
+      studentAnswer: q.student_answer,
+      metadata: { engine: result.engine, source: result.source, questionType: q.question_type }
+    }).catch(e => console.error('[Shadow] judgements写入失败 (pc_recompute_answer):', e.message))
+
+    done(() => res.json({
+      success: true,
+      answer: finalAnswer,
+      analysis: result.analysis || '',
+      engine: result.engine,
+      // 主模型不可用时为 true：前端据此把绿色「完成」降级成黄色提示，提醒老师核一遍。
+      degraded,
+      is_correct: isCorrect
+    }))
+  } catch (error) {
+    // 数据库不可用与「引擎算不出来」是两回事，分开报，老师才知道该等还是该手填。
+    // 2026-09-23 实测：Neon(新加坡) 连接不稳时 query 抛
+    // "Connection terminated due to connection timeout"，原实现统一 500 + 原始英文
+    // 文案，前端只能显示 "Internal Server Error"，无法归因。
+    const msg = String(error?.message || error || '')
+    const isDbDown = /connection terminated|timeout exceeded when trying to connect|ECONNRESET|ETIMEDOUT|ECONNREFUSED|terminating connection/i.test(msg)
+    if (isDbDown) {
+      console.error(`[AI 重解析] 数据库不可用 q=${req.params?.id}:`, msg)
+      return done(() => res.status(503).json({
+        error: 'db-unavailable',
+        message: '数据库暂时连不上（不是 AI 的问题），请稍后重试；若持续失败请人工填写答案'
+      }))
+    }
+    console.error('AI 重算失败:', error)
+    done(() => res.status(500).json({ error: msg || '服务器内部错误' }))
   }
 })
 

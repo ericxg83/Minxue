@@ -1261,9 +1261,12 @@ export function isAnswerEnginePrimaryDegraded() {
 }
 
 /** 产出该答案的通道是不是「主供应商 + 主模型」——不是就说明发生了降级，答案可信度要打折 */
-export function isDegradedAnswerEngine(provider) {
+export function isDegradedAnswerEngine(provider, expected = null) {
   if (!provider) return true
-  return provider !== `${ANSWER_ENGINE.VENDOR}:${ANSWER_ENGINE.MODEL}`
+  // expected = 本次调用实际点名的通道（由 callAnswerEngineCompletion 的 expectedProvider 带回）。
+  // 不传时退回全局主模型标尺 —— 批改链路正是这种用法，行为与改造前逐字一致。
+  const target = expected || `${ANSWER_ENGINE.VENDOR}:${ANSWER_ENGINE.MODEL}`
+  return provider !== target
 }
 
 /**
@@ -1314,6 +1317,24 @@ export async function callAnswerEngineCompletion(opts) {
     // 关掉降级链，只打指定模型。基准测试要拿到"纯净"的单模型准确率时用；
     // 生产保持默认 true，失败要能自动让路，绝不能硬卡在一个模型上。
     fallback = true,
+    // 单次 HTTP 调用超时覆盖（2026-09-24 重解析超时 BUG 引入）。
+    // 默认 null → 沿用 ANSWER_ENGINE.TIMEOUT_MS（60s），异步批改链路不受影响。
+    // 「同步等结果」的调用方（教师在工作台点按钮重算答案）可下调，让命中慢通道时
+    // 快速失败并降级，而不是把整条链路的墙钟时间耗光。
+    timeoutMs = null,
+    // 严格模式（2026-09-24 参考答案准确性要求）：**只打本次指定的通道**，
+    // 拿不到就直接失败，绝不降级到 FALLBACK_MODELS / 备用供应商。
+    // 参考答案必须准确 —— 弱模型的单次采样是掷骰子（实测同题连出 ±5/±10/±10），
+    // 拿它当标准答案比留空更危险。宁可让老师等一等、或转人工填写。
+    strictPrimary = false,
+    // 单次调用覆盖供应商（2026-09-24 重解析换强模型引入）。默认 null → ANSWER_ENGINE.VENDOR。
+    // 为什么必须单独开这个口子而不是复用 modelOverride：modelOverride 只换模型名、
+    // 换不了 endpoint/Key，给 SenseNova 的域名传百炼的模型名只会 404
+    // （教训见 server/scripts/backfillMissingAnswers.mjs:100）。
+    // 用途：现役答案引擎主模型 SenseNova:deepseek-flash 是三个候选中实测最差的
+    // （可判正确率 33%，另有 2/10 返回非 JSON），而 Bailian:qwen3.8-flash 是 71%
+    // （排除题干歧义题后 100%）—— 要写库的链路必须能点名后者。
+    vendorOverride = null,
   } = opts
 
   // 一键回滚：保持改造前行为（走通用文本链路）
@@ -1322,7 +1343,17 @@ export async function callAnswerEngineCompletion(opts) {
     return { ...chain, provider: 'legacy-text-chain' }
   }
 
-  const vendor = getResolvedVendors().find(v => v.name === ANSWER_ENGINE.VENDOR)
+  // 显式点名供应商优先（vendorOverride），否则沿用答案引擎全局主供应商。
+  const vendorName = vendorOverride || ANSWER_ENGINE.VENDOR
+  const vendor = getResolvedVendors().find(v => v.name === vendorName)
+  if (vendorOverride && !vendor) {
+    // 点名了一个不存在的供应商 → 明确报错，绝不静默回落到全局主供应商
+    // （那会让调用方以为自己在用强模型，实际拿到的是默认那个）。
+    console.error(`[AnswerEngine] vendorOverride=${vendorOverride} 未匹配到任何已配置供应商，本次按失败处理`)
+    if (strictPrimary) {
+      return { content: '', usedBackup: false, provider: 'primary-unavailable', expectedProvider: `${vendorOverride}:${modelOverride || ''}` }
+    }
+  }
   if (vendor) {
     const keys = getAnswerEngineKeys(vendor)
     if (keys.length === 0) {
@@ -1332,8 +1363,11 @@ export async function callAnswerEngineCompletion(opts) {
       // 熔断期：主供应商只做「单模型 + 不重试」的一次试探。
       // 为什么不是完全跳过：rpm/tpm 是**分钟窗**，窗口一恢复就该立刻用回强模型；
       // 一次不重试的试探只要 ~3s，而完整重试链是 3 模型 × 8s = 24s —— 现在每题都在付这 24s。
-      const breakerOn = !modelOverride && isAnswerEnginePrimaryDegraded()
-      const models = (breakerOn || !fallback) ? [primary] : [primary, ...ANSWER_ENGINE.FALLBACK_MODELS]
+      // 熔断是「全局主供应商」的状态（rpm 分钟窗），点名别的供应商时不适用
+      // —— 那是一次独立的、与主供应商配额无关的点名调用。
+      const breakerOn = !modelOverride && !vendorOverride && isAnswerEnginePrimaryDegraded()
+      // 严格模式与「关掉降级链」同等待遇：只留主模型一个。
+      const models = (breakerOn || !fallback || strictPrimary) ? [primary] : [primary, ...ANSWER_ENGINE.FALLBACK_MODELS]
       if (breakerOn) {
         console.warn(`[AnswerEngine] 主供应商熔断中，本次只做一次不重试的试探: ${vendor.name}:${primary}`)
       }
@@ -1371,7 +1405,7 @@ export async function callAnswerEngineCompletion(opts) {
               messages: buildOpenAIMessages(systemContent, userContent),
               temperature,
               maxTokens,
-              timeout: ANSWER_ENGINE.TIMEOUT_MS,
+              timeout: timeoutMs || ANSWER_ENGINE.TIMEOUT_MS,
               // 429 允许重试（最多等 8s，额度真耗尽时 postWith429Retry 会立刻上抛换 Key/换模型）；
               // 503 不重试 —— RETRY_DELAYS_503 累计可等 245s，会把批改卡死在一条链路上。
               // 这里选择快速失败并降级，绝不硬卡在一个模型/Key 上。
@@ -1387,11 +1421,21 @@ export async function callAnswerEngineCompletion(opts) {
               exhaustedTtlMs: ANSWER_ENGINE.KEY_COOLDOWN_MS,
             })
             if (content) {
-              if (_answerEnginePrimaryDownUntil) {
+              // 点名供应商调用成功 ≠ 全局主供应商恢复，不能拿它解除主供应商的熔断。
+              if (!vendorOverride && _answerEnginePrimaryDownUntil) {
                 console.log(`[AnswerEngine] 主供应商已恢复，解除熔断（${vendor.name}:${model}）`)
                 _answerEnginePrimaryDownUntil = 0
               }
-              return { content, usedBackup: true, provider: `${vendor.name}:${model}` }
+              return {
+                content,
+                usedBackup: true,
+                provider: `${vendor.name}:${model}`,
+                // 本次「期望通道」= 点名/配置的供应商 + 首选模型。调用方据此判断
+                // 产出答案的是不是**本次指定的那个通道**（而不是拿全局主模型当标尺）——
+                // 重解析点名 Bailian:qwen3.8-flash 时，若沿用全局标尺会被误判成「降级」，
+                // 进而触发多路投票补采，把同步等待又拖回 140–230s。
+                expectedProvider: `${vendor.name}:${primary}`
+              }
             }
             console.warn(`[AnswerEngine] ${vendor.name}:${model} 返回空内容`)
           } catch (err) {
@@ -1424,7 +1468,7 @@ export async function callAnswerEngineCompletion(opts) {
       }
       if (allCooling) {
         console.warn(`[AnswerEngine] 所有 Key 均处于冷却（额度重置中），回落通用文本链路`)
-      } else if (!modelOverride && ANSWER_QUALITY.PRIMARY_BREAKER_MS > 0 && keyDisabledForRun.size >= keys.length) {
+      } else if (!modelOverride && !vendorOverride && ANSWER_QUALITY.PRIMARY_BREAKER_MS > 0 && keyDisabledForRun.size >= keys.length) {
         // 主供应商整条链（模型池 × Key 池）全线失败 → 熔断一段时间。
         // 仅在「所有 Key 都被判废」时熔断：若只是某把 Key 额度耗尽、另一把还能用，
         // 不该因为一把 Key 就连带熔断整个主供应商（那会把可用额度一起浪费掉）。
@@ -1433,12 +1477,20 @@ export async function callAnswerEngineCompletion(opts) {
         // 让每道题白等 24s 之后仍然只能拿兜底弱模型的答案。
         _answerEnginePrimaryDownUntil = Date.now() + ANSWER_QUALITY.PRIMARY_BREAKER_MS
         console.warn(`[AnswerEngine] 主供应商全线失败 → 熔断 ${Math.round(ANSWER_QUALITY.PRIMARY_BREAKER_MS / 1000)}s（期间每题仅一次试探，rpm 窗口恢复后自动解除）`)
-      } else if (!modelOverride && ANSWER_QUALITY.PRIMARY_BREAKER_MS > 0) {
+      } else if (!modelOverride && !vendorOverride && ANSWER_QUALITY.PRIMARY_BREAKER_MS > 0) {
         // 还有 Key 未被判废但所有「模型 × Key」组合都失败了（多为并发瞬时限流）。
         // 不熔断：主模型仍是首选，下一题继续从 deepseek-flash × 主 Key 开始。
         console.warn(`[AnswerEngine] 主供应商本次全部尝试失败（仍有 Key 未判废，不熔断，下次仍从主模型重试）`)
       }
     }
+  }
+
+  // 严格模式：主供应商没产出答案就直接失败，一个备用通道都不碰（2026-09-24 定调）。
+  // 参考答案的准确性优先于「这次一定要有个答案」——弱模型顶上去只会产出不可核对的错答案。
+  if (strictPrimary) {
+    const target = `${vendorName}:${modelOverride || ANSWER_ENGINE.MODEL}`
+    console.warn(`[AnswerEngine] 严格模式：${target} 未产出答案，按失败处理（不降级备用模型）`)
+    return { content: '', usedBackup: false, provider: 'primary-unavailable', expectedProvider: target }
   }
 
   // 备用供应商兜底：各自用自己的 Key 与 textModel，与主供应商的配额/冷却互不影响。
@@ -1464,7 +1516,7 @@ export async function callAnswerEngineCompletion(opts) {
         messages: buildOpenAIMessages(systemContent, userContent),
         temperature,
         maxTokens,
-        timeout: ANSWER_ENGINE.TIMEOUT_MS,
+        timeout: timeoutMs || ANSWER_ENGINE.TIMEOUT_MS,
         // 备用通道**不重试 429**（2026-09-21 实测）：
         //   retry429 的代价是 RETRY_DELAYS_429=[3s,5s] + 每次请求自身耗时。
         //   实测辉辉云上游限流时单次 hold ≈17s，重试 3 次合计 ≈59s 才拿到 429

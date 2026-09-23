@@ -37,6 +37,8 @@ import { NO_PROXY_DOWNLOAD_OPTS } from './utils/noProxyHttp.js'
 import { formatOptionsForPrompt } from './utils/optionText.js'
 import { validateArithmeticAnswer } from './utils/arithmeticAnswerValidator.js'
 import { aiParseSelfCheck, detectAnswerCopiedFromStudent, buildTextOnlyResolveInput } from './utils/aiParseSelfCheck.js'
+// 批改收尾即判「零人工项则自动完成复核」（此前只有老师点进复核页才判，见服务文件头）
+import { maybeAutoReviewTask } from './services/autoReviewService.js'
 
 /**
  * 写入侧定位框补测（2026-09-20 方案A）：
@@ -1759,7 +1761,7 @@ function isVotableAnswer(answer) {
   return !isNarrativeAnswer(s)
 }
 
-export const generateAnswerForQuestion = async (questionContent, retryCount = 0) => {
+export const generateAnswerForQuestion = async (questionContent, retryCount = 0, opts = {}) => {
   if (!questionContent || !questionContent.trim()) {
     return { success: true, answer: '', analysis: '', source: 'empty-input' }
   }
@@ -1769,15 +1771,29 @@ export const generateAnswerForQuestion = async (questionContent, retryCount = 0)
   // 一次独立求解：调答案引擎 → 解析 JSON。
   // 多路采样复用同一份实现，保证「首路」与「补采路」走完全相同的 prompt 与解析口径。
   const solveOnce = async () => {
-    const { content, provider } = await callAnswerEngineCompletion({
+    const { content, provider, expectedProvider } = await callAnswerEngineCompletion({
       systemContent: prompt,
       userContent: `请计算以下题目的标准答案：\n\n${questionContent}`,
       temperature: 0.2,
+      // 显式点名供应商/模型（2026-09-24 重解析换强模型引入）。批改链路不传 ⇒ 零变化。
+      // ⚠️ 参数名是 `model`，不是 `modelOverride` —— 后者只是函数内部解构出来的变量名。
+      //    写成 modelOverride 会被**静默忽略**（opts 里没有这个键），实际打的是全局主模型，
+      //    再配上点名的供应商域名就是 404。2026-09-24 实测踩到：
+      //    「Bailian:deepseek-flash 失败: 404 Model not exist.」—— 以为是模型没权限，
+      //    其实是参数名写错，白跑了 10 道题。
+      // ⚠️ 现役主模型 deepseek-flash 实测可判正确率仅 33%，**禁止用于解析答案**（见铁律 40）。
+      vendorOverride: opts.vendorOverride,
+      model: opts.modelOverride,
       // 2026-09-21 由 2048 提到 4096：横评（_bench_answer_models_0921）实测
       // deepseek-v4-flash-0731 在「|a|=3,b²=16,ab<0 求 a+b」上思考吃满 2048 上限、
       // 答案被截断成空（out=2048/reasoning=2048）。max_tokens 只是上限，按实际输出计费，
       // 调高不增加成本，但能防住「思考没收敛 → 答案丢失」。
-      maxTokens: 4096
+      maxTokens: 4096,
+      // 由调用方按需下调单次 HTTP 超时（教师工作台同步重算答案的场景）；
+      // 不传 → 沿用 ANSWER_ENGINE.TIMEOUT_MS，异步批改链路行为零变化。
+      timeoutMs: opts.timeoutMs,
+      // 严格模式：只用主模型，拿不到就失败，不降级弱模型（参考答案准确性要求）。
+      strictPrimary: opts.strictPrimary
     })
 
     const jsonStr = stripCodeFence(content)
@@ -1828,7 +1844,7 @@ export const generateAnswerForQuestion = async (questionContent, retryCount = 0)
       }
     }
 
-    return { result, provider }
+    return { result, provider, expectedProvider }
   }
 
   try {
@@ -1838,6 +1854,10 @@ export const generateAnswerForQuestion = async (questionContent, retryCount = 0)
     let analysis = coerceAIText(first.result.analysis)
     const subject = first.result.subject || null
     const engine = first.provider || 'unknown'
+    // 本次调用「期望的通道」。不点名时它就是全局主模型 ⇒ 下面判据与改造前等价（批改链路零变化）；
+    // 点名时（如重解析指定 Bailian:qwen3.8-flash）必须用它当标尺 —— 若拿全局主模型当标尺，
+    // 一次成功的点名调用会被误判成「降级」，进而触发三路投票补采，同步等待又被拖回 140–230s。
+    const expectedProvider = first.expectedProvider || null
 
     // ── 多路求解共识（2026-09-21）────────────────────────────────────────────
     // 只在「产出答案的不是主模型」时补采 —— 主模型正常时零额外调用、零额外成本。
@@ -1847,8 +1867,13 @@ export const generateAnswerForQuestion = async (questionContent, retryCount = 0)
     // 对照 Bailian 付费池的 deepseek-v4-pro 同题 3/3 全对。
     // 降级通道才需要投票：多路一致 → 采纳；分歧 → 采纳多数派但必须留痕交人工。
     let consensus = null
+    // ⚠️ 这里**故意不提供「关掉补采」的开关**（2026-09-24 定调）：
+    // 补采投票存在的唯一理由是「产出答案的不是主模型」。此时关掉它等于把弱模型的
+    // 一次随机采样直接当标准答案（同题实测 ±5/±10/±10）——那不是加速，是放弃准确性。
+    // 同步场景（教师工作台重解析）要控制等待，走的是 opts.strictPrimary（只打主模型、
+    // 拿不到就失败），不是靠关投票来给降级答案放行。
     if (ANSWER_QUALITY.CONSENSUS_ENABLED
-        && isDegradedAnswerEngine(engine)
+        && isDegradedAnswerEngine(engine, expectedProvider)
         && isVotableAnswer(answer)) {
       const extraCount = Math.max(0, ANSWER_QUALITY.SAMPLES_ON_DEGRADED - 1)
       if (extraCount > 0) {
@@ -1894,6 +1919,7 @@ export const generateAnswerForQuestion = async (questionContent, retryCount = 0)
       subject,
       source: 'answer-engine',
       engine,
+      expectedProvider,
       consensus
     }
   } catch (error) {
@@ -1901,10 +1927,15 @@ export const generateAnswerForQuestion = async (questionContent, retryCount = 0)
     // 到这里说明整条文本链路都不可用（限流/网络），按原逻辑重试或返回空。
     // 返回空时该题保留 OCR 阶段的答案（若有），没有则转人工复核 —— 不拿猜测值顶上。
     const isNetworkError = !error.response || error.code === 'ECONNABORTED' || error.code === 'ETIMEDOUT'
-    const shouldRetry = isNetworkError && retryCount < AI_CONFIG.MAX_RETRIES
+    // ⚠️ 必须用 `??` 而不是 `||`：maxRetries=0 是合法值（重解析要求不重试），
+    //    `0 || MAX_RETRIES` 会把它翻成 2，超时预算直接被重试吃光。
+    const maxRetries = opts.maxRetries ?? AI_CONFIG.MAX_RETRIES
+    const shouldRetry = isNetworkError && retryCount < maxRetries
     if (shouldRetry) {
       await new Promise(resolve => setTimeout(resolve, (retryCount + 1) * 1000))
-      return generateAnswerForQuestion(questionContent, retryCount + 1)
+      // opts 必须透传：否则网络重试这一跳会丢掉调用方的快速模式设置，
+      // 同一题在重试时又变回「可以慢慢等」的批改口径。
+      return generateAnswerForQuestion(questionContent, retryCount + 1, opts)
     }
 
     return { success: true, answer: '', analysis: '', source: 'engine-failed', engine: null }
@@ -2924,6 +2955,12 @@ export const processSlimGrading = async (job) => {
         orderVersion: 2,
       },
     })
+
+    // ── 批改收尾：零人工项则自动完成复核（2026-09-24）──
+    // 此前只有老师点进复核页才判（reviewStore.maybeAutoCompleteReview），
+    // 满足条件却没人点的卷会长期停在 done 占着待办。
+    // 失败不影响已批出的结果：卷仍在待复核列表，老师点进去照常处理。
+    await maybeAutoReviewTask({ taskId, generatedExamId })
 
     return { taskId, examId: generatedExamId, autoCount, manualCount, allAuto }
   } catch (error) {
@@ -7917,6 +7954,9 @@ await updateTaskStatus(taskId, TASK_STATUS.PROCESSING, { progress: 95 }).catch((
       // 引图题最终没拿到配图的数量 → 前端同样给「重新识别」入口（魔搭配额恢复后重跑即可补上）
       figureMissingRefs: figureMissingRefs > 0 ? figureMissingRefs : undefined
     })
+
+    // ── 批改收尾：零人工项则自动完成复核（2026-09-24，语义同上精简管线）──
+    await maybeAutoReviewTask({ taskId, generatedExamId: job.data?.generatedExamId || null })
 
     console.log(`\n🎉🎉 [Worker] ==========================================`)
     console.log(`🎉🎉 [Worker] 任务完成:`)
