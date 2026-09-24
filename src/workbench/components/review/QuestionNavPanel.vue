@@ -62,17 +62,6 @@
       <span>请选择学生和试卷</span>
     </div>
 
-    <!-- 快捷键提示（纯展示，不参与判定） -->
-    <div v-if="store.allQuestions.length > 0" class="nav-shortcuts">
-      <span class="shortcut-row">
-        <span class="key">←</span><span class="key">→</span> 切换
-        <span class="key">C</span>正确
-        <span class="key">W</span>错误
-        <span class="key">E</span>删除
-        <span class="key">Z</span>撤销
-      </span>
-    </div>
-
     <div class="nav-footer">
       <span class="threshold-label">置信阈值</span>
       <el-slider
@@ -393,35 +382,7 @@ const onThresholdChange = (val) => {
   flex-shrink: 0;
 }
 
-/* ── 快捷键提示条 ── */
-.nav-shortcuts {
-  padding: 4px 12px 2px;
-  border-top: 1px solid var(--wb-border-light);
-  flex-shrink: 0;
-}
-.nav-shortcuts .shortcut-row {
-  display: flex;
-  align-items: center;
-  flex-wrap: wrap;
-  gap: 6px;
-  font-size: 11px;
-  color: var(--wb-text-tertiary);
-}
-.nav-shortcuts .key {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  min-width: 16px;
-  height: 16px;
-  padding: 0 4px;
-  border: 1px solid var(--wb-border);
-  border-radius: var(--wb-radius-xs);
-  background: var(--wb-bg-elevated);
-  color: var(--wb-text-secondary);
-  font-size: 10px;
-  font-weight: 600;
-  line-height: 1;
-}
+/* ── 置信阈值 ── */
 .threshold-label {
   font-size: 12px;
   color: var(--wb-text-tertiary);

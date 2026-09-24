@@ -6,7 +6,6 @@
         <strong>{{ store.reviewConfig.topTitle }}</strong>
         <span class="review-mode-pill">{{ store.reviewConfig.modeLabel }}</span>
       </div>
-      <div class="review-shortcuts">左右键切题 · C 正确 · W 错误 · Shift + Z 撤销</div>
     </div>
     <ReviewTopBar />
 
@@ -231,8 +230,6 @@ provide('archiveState', archiveState)
 
 // ── 初始化：加载数据 ──
 onMounted(async () => {
-  // 同步注册键盘监听（与原 DashboardWorkbench 一致，避免快速切换累积监听）
-  document.addEventListener('keydown', onKeydown)
   store.setTaskType(props.taskType)
 
   // 任务列表/外部入口跳转：openTask 永远带 studentId + taskId（retry 的 taskId 是 exam.id），
@@ -293,56 +290,9 @@ onMounted(async () => {
 })
 
 onUnmounted(() => {
-  document.removeEventListener('keydown', onKeydown)
   // 退出时重置场景模式，避免污染后续入口
   store.resetReviewMode()
 })
-
-// ── 键盘快捷键 ──
-const onKeydown = (e) => {
-  if (e.repeat) return
-  const tag = document.activeElement?.tagName
-  if (tag === 'INPUT' || tag === 'TEXTAREA') return
-
-  const cfg = store.reviewConfig
-  switch (e.key) {
-    case 'ArrowLeft':
-      e.preventDefault(); store.prevQuestion(); break
-    case 'ArrowRight':
-      e.preventDefault(); store.nextQuestion(); break
-    case 'c':
-    case 'C':
-      if (cfg.shortcuts.correct) handleQuickReview('correct'); break
-    case 'w':
-    case 'W':
-      if (cfg.shortcuts.wrong) handleQuickReview('wrong'); break
-    case 'e':
-    case 'E':
-      if (cfg.shortcuts.exclude) handleQuickReview('exclude'); break
-    case 'z':
-    case 'Z':
-      if (e.shiftKey) store.undoLastReview(); break
-  }
-}
-
-const handleQuickReview = async (result) => {
-  const q = store.currentReviewQuestion
-  if (!q) return
-  // 错误题需完整性校验门禁
-  if (result === 'wrong') {
-    const blocked = store.reviewQuestion(q.id, result)
-    if (blocked?.blocked) {
-      const { ElMessageBox } = await import('element-plus')
-      ElMessageBox.confirm(
-        `题目不完整，无法加入错题本：<br><span style="color:var(--wb-warning)">${blocked.issues.map(i => '• ' + i).join('<br>')}</span><br><br>请先在右侧面板中编辑补充缺失信息。`,
-        '题目不完整',
-        { confirmButtonText: '知道了', cancelButtonText: '取消', type: 'warning', dangerouslyUseHTMLString: true }
-      ).catch(() => {})
-    }
-  } else {
-    store.reviewQuestion(q.id, result)
-  }
-}
 </script>
 
 <style scoped>
@@ -457,7 +407,6 @@ const handleQuickReview = async (result) => {
 .review-kicker { color: #AAB4C5; font-size: 11px; }
 .review-identity strong { font-size: 14px; font-weight: 650; }
 .review-mode-pill { padding: 3px 8px; border: 1px solid rgba(255,255,255,.2); border-radius: 999px; color: #DCE3F1; font-size: 11px; }
-.review-shortcuts { color: #AAB4C5; font-size: 11px; }
 .review-context-bar { display: flex; align-items: center; justify-content: space-between; min-height: 54px; padding: 0 20px; background: var(--wb-bg-card); border-bottom: 1px solid var(--wb-border); }
 .review-context-main { display: flex; align-items: baseline; gap: 10px; min-width: 0; }
 .review-context-label { color: var(--wb-text-tertiary); font-size: 11px; }
@@ -510,7 +459,7 @@ const handleQuickReview = async (result) => {
 .review-context-actions { display: flex; align-items: center; gap: 8px; margin-left: 12px; flex-shrink: 0; }
 .review-context-actions :deep(.el-button) { display: inline-flex; align-items: center; gap: 4px; }
 .three-panel { min-height: 0; }
-@media (max-width: 1100px) { .review-shortcuts { display: none; } .review-identity-bar { padding: 0 14px; } .review-context-bar { padding: 0 14px; } .review-coverage-notice { padding: 7px 14px; } }
+@media (max-width: 1100px) { .review-identity-bar { padding: 0 14px; } .review-context-bar { padding: 0 14px; } .review-coverage-notice { padding: 7px 14px; } }
 @media (max-width: 720px) { .review-context-bar { align-items: flex-start; flex-direction: column; gap: 8px; padding: 10px 14px; } .review-progress-summary { width: 100%; } }
 </style>
 

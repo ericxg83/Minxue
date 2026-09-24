@@ -38,8 +38,6 @@ export const REVIEW_CONFIG = {
     multiPage: false,
     // 完成按钮文案
     completeLabel: '完成复核',
-    // 快捷键：正确/错误/排除
-    shortcuts: { correct: 'c', wrong: 'w', exclude: 'e' },
   },
 
   [TASK_TYPE.PAPER]: {
@@ -61,7 +59,6 @@ export const REVIEW_CONFIG = {
     // 支持多页答题卡切换
     multiPage: true,
     completeLabel: '完成批改',
-    shortcuts: { correct: 'c', wrong: 'w', exclude: 'e' },
   },
 }
 
