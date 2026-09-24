@@ -118,8 +118,12 @@
           <span v-else-if="q.answer" class="ops-cmp-value correct-val">
             <MathRender :content="q.answer" autoDetect tag="span" />
           </span>
-          <span v-else-if="q.analysis" class="ops-cmp-value correct-val ref-answer-val">
-            <MathRender :content="q.analysis" autoDetect tag="span" />
+          <!-- 2026-09-24 修复：q.answer 为空时，绝不再把 q.analysis（解题过程）顶到
+               参考答案位（旧逻辑 v-else-if="q.analysis" 用 correct-val 绿字渲染，老师误以为有答案，
+               判分侧却因 q.answer 空报「缺少参考答案」，造成「看得到判不出」）。
+               analysis 的查看入口已统一到题干行「解析」按钮，这里明确标出缺答案即可。 -->
+          <span v-else-if="q.analysis" class="ops-cmp-value missing-val">
+            ⚠ 未提取到参考答案（AI 仅有解析，见题干行「解析」）
           </span>
           <div v-else class="quick-answer-wrap">
             <div v-if="!quickAnswerEditing" class="ops-cmp-value missing-val" @click="startQuickAnswerEdit">

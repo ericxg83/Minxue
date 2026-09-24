@@ -13,6 +13,20 @@ import { validateArithmeticAnswer } from './arithmeticAnswerValidator.js'
 const CAP = '((?:[^\\n。！？]|\\.(?=[0-9]))+)'
 const SEP = '[：:]?\\s*(?:[是为]\\s*[：:]?)?\\s*'
 
+// 模型在 analysis 里自陈"无答案"的占位串。抽到这些必须当作"未抽到"返回 null，
+// 否则会被当成正经答案写进 questions.answer（实测 dry-run 里多道"答案为 待人工补充"
+// 被 NUMERIC/CAP 模式误抽成答案）。与 worker.js 主链路的占位判定口径保持一致。
+const PLACEHOLDER_ANSWERS = new Set([
+  '待人工补充', '此为主观题，无唯一标准答案', '-', '见解析', '无解', '不确定', '无法确定', '无法判断',
+])
+function finalizeExtracted(value) {
+  const s = String(value ?? '').trim()
+  if (!s) return null
+  if (PLACEHOLDER_ANSWERS.has(s)) return null
+  if (/待人工补充|此为主观题|无唯一标准答案|见解析|无法确定|无法判断|无解/.test(s)) return null
+  return s
+}
+
 // 与 worker.js:1320 保持一致；不在此文件内单测 tail(800) 截断（已由原代码保障）
 const ANSWER_MARKER_PATTERNS = [
   new RegExp(`(?:所以|因此|故)正确答案${SEP}${CAP}`, 'i'),
@@ -26,6 +40,21 @@ const ANSWER_MARKER_PATTERNS = [
   // 2026-09-22 补（今日 d17c12ce 10.3/10.4 教训）：模型常说「最终结果为 1/8」，
   // 旧标记只认「最终答案」→ 救场提取返回 null → answer 字段为空的题直接「答案为空」转人工。
   new RegExp(`最终结果${SEP}${CAP}`, 'i'),
+]
+
+// 填空题末句「因此/所以/故/解得/求得 … 数值」兜底（2026-09-24）。
+// 与 ANSWER_MARKER_PATTERNS 的区别：不要求「答案为/答案是」显式标签，
+// 直接从末句提取数值型答案（整数/分数/小数/负数/带根式）。
+// 触发背景：「分数 73/136 减同一数后等于 3/2，减去的数是____」这类题，模型结尾写
+// 「因此减去的数是 55」，旧标记全部 miss → answer 字段落空 → 教师复核页把 analysis
+// 错当参考答案显示，判分却报「缺少参考答案」。只匹配末行（最后一句），规避中间步骤；
+// 必须带因此/所以/故/解得/求得/得出/得到 等强信号词，纯数字句不触发，降低误抓。
+// 捕获组支持三种答案形态：①数字/分数/带根式系数（2、3/2、2√3、-1）；
+// ②小数（1.5）；③根式开头（√2、-√2、±√2、√2/2）—— 数学填空题高频。
+const NUM_VALUE = '([+]?\\-?\\d+(?:\\s*/\\s*\\d+)?(?:\\s*[√∛]\\s*\\d+(?:\\(\\d+\\))?)?|\\d+\\.?\\d+|[±]?[+-]?[√∛]\\s*\\d+(?:\\s*/\\s*\\d+)?)'
+const NUMERIC_TAIL_PATTERNS = [
+  new RegExp(`(?:因此|所以|故|由此可知|综上).*?${NUM_VALUE}\\s*[.。]?\\s*$`, 'i'),
+  new RegExp(`(?:解得|求得|得出|得到|结果是|答案为|答案是).*?${NUM_VALUE}\\s*[.。]?\\s*$`, 'i'),
 ]
 
 // 客观题 answer 字段里的「元话语」特征。命中即认为这条 answer 不是可对照的答案值，
@@ -122,7 +151,8 @@ export function extractFinalAnswerFromAnalysis(analysis) {
     // 全是解析口吻的候选（`以 -1<t<0 为准`、`解得 m≠1…`）时返回 null：
     // 宁可让调用方保留 answer 字段原值，也不要拿半截句子去覆盖它。
     // （旧实现在这种情况下返回列表里先命中的那个，正是 `应包含10` 入库的成因之一。）
-    return cleanOnes.length ? cleanOnes[cleanOnes.length - 1].value : null
+    const cand = cleanOnes.length ? cleanOnes[cleanOnes.length - 1].value : null
+    return finalizeExtracted(cand)
   }
 
   // Fallback：analysis 末行以"= X"结尾，X 含数字/根号/字母/分数。
@@ -131,7 +161,18 @@ export function extractFinalAnswerFromAnalysis(analysis) {
   const m = lastLine.match(/=\s*([^=\n]+\S)\s*[.。]?\s*$/)
   if (m && m[1]) {
     const extracted = m[1].trim()
-    if (extracted) return extracted
+    if (extracted) return finalizeExtracted(extracted)
+  }
+
+  // Fallback B（2026-09-24）：填空题末句「因此/所以/故/解得/求得 … 数值」兜底。
+  // 只在 ANSWER_MARKER_PATTERNS 全 miss 时触发（零回归：现有 8+ 条标记行为不变）。
+  // 只扫末行，必须带强信号词（因此/所以/故/解得/求得…），避免误抓中间步骤。
+  for (const pat of NUMERIC_TAIL_PATTERNS) {
+    const mm = lastLine.match(pat)
+    if (mm && mm[1]) {
+      const v = cleanAnswerScaffold(mm[1])
+      if (v) return finalizeExtracted(v)
+    }
   }
   return null
 }

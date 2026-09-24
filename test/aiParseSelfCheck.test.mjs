@@ -153,3 +153,34 @@ test('自检元话语/退让语不得成为客观题答案（#8 教训）', () =
     assert.equal(isNarrativeAnswer(ok), false, `不应判定为叙述型：${ok}`)
   }
 })
+
+// ── 2026-09-24「看得到判不出」事故修复 ───────────────────────────────────────
+// 背景：教师复核页把 q.analysis 错当参考答案显示，但判分只读 q.answer；
+// 根因是答案标记正则只认「答案为/答案是」显式标签，填空题「因此…是 X」「解得 X」
+// 全部漏检 → q.answer 落空。新增 NUMERIC_TAIL_PATTERNS 兜底 + 占位串过滤。
+
+test('填空题末句「因此/所以/故/解得/求得 … 数值」能抽到答案', () => {
+  assert.equal(extractFinalAnswerFromAnalysis('设减去的数为 x，则 (73−x)/(136−x)=3/2，解得 x=55。因此减去的数是 55。'), '55')
+  assert.equal(extractFinalAnswerFromAnalysis('由题意得方程 x+3=5。所以 x=2。'), '2')
+  assert.equal(extractFinalAnswerFromAnalysis('化简得 3/2。故该数为 3/2。'), '3/2')
+  assert.equal(extractFinalAnswerFromAnalysis('开方得 ±√2。因此结果为 -√2。'), '-√2')
+  assert.equal(extractFinalAnswerFromAnalysis('综上讨论，结果是 7/8。'), '7/8')
+  // 一句话多数字、答案在末位：必须落到最后那个数，而不是中间步骤
+  assert.equal(extractFinalAnswerFromAnalysis('因此新的分数为 2，减去的数是55。'), '55')
+})
+
+test('占位串不得被当成答案（避免把「待人工补充」写进 answer）', () => {
+  assert.equal(extractFinalAnswerFromAnalysis('经检验条件不足，答案为 待人工补充。'), null)
+  assert.equal(extractFinalAnswerFromAnalysis('因此该题为 此为主观题，无唯一标准答案'), null)
+  assert.equal(extractFinalAnswerFromAnalysis('推理完毕，答案： 见解析。'), null)
+  // 旧标记 + 占位串也要挡住
+  assert.equal(extractFinalAnswerFromAnalysis('最终答案为：待人工补充'), null)
+})
+
+test('只抽末行 + 强信号词，避免误抓中间步骤', () => {
+  // 末句不是数值结尾 → 不抽（宁缺毋滥）
+  assert.equal(extractFinalAnswerFromAnalysis('我们验证一下正确性，因此方法可行。'), null)
+  // 纯数字无强信号词（如「一共有 12 人」）不应触发兜底
+  assert.equal(extractFinalAnswerFromAnalysis('所以参加活动的一共有 12 人。'), null)
+})
+
