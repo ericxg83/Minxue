@@ -3,7 +3,8 @@
 > 只留硬约定与「不知道就会踩坑」的事实。**细节一律外链 `topics/`**：
 > `question-completeness`·`geometry-pipeline`·`board`·`answer-bank-trust`·`vision-vendors`·
 > `bbox-contract`·`git-commit-discipline`·`frontend-verify-discipline`·`local-dev-process`·
-> `answer-engine-fallback-chain`·`judge-sign-guard`·`long-request-and-error-surfacing`
+> `answer-engine-fallback-chain`·`judge-sign-guard`·`long-request-and-error-surfacing`·
+> `wrongbook-gate-requeue`
 > 每日过程见 `.workbuddy-ai/memory/YYYY-MM-DD.md`。
 
 ## 1. 完整性判定（详情 topics/question-completeness）
@@ -63,6 +64,17 @@
 - 答案抽取器 `aiParseSelfCheck.js#extractFinalAnswerFromAnalysis` 除「答案为/答案是」显式标签外，**必须有填空题末句兜底** `因此/所以/故/解得/求得 … 数值`（含 `3/2`、`-√2`、`±√2`）。⛔ 模型常写「因此减去的数是 55」这种无标签收尾 → 旧正则全 miss → `answer` 落空。
 - ⛔ 抽取结果必过占位串过滤（`待人工补充`/`此为主观题`/`见解析`…）：实测 dry-run 多道「答案为 待人工补充」被误抽，入库会污染判分。
 - 存量回填 `scripts/backfill-extract-answer-from-analysis.mjs`（只从现存 analysis 抽，零引擎调用；默认 dry-run，`--apply` 落库）。回归 `test/aiParseSelfCheck.test.mjs`。prompt（`config/ai.js`）已强制解析结尾带显式标签。
+
+## 6e. 错题入册「补全即补入」（详情 topics/wrongbook-gate-requeue）
+- `wrong_no_book` 是**终态**（`reviewDecision.js` 排除）⇒ P2 门禁自动放行的题补全元素后曾永久卡死。
+  现已修：`PUT /api/questions/:id` 独立一段，判据 `server/utils/wrongGateRequeue.js`（唯一口径）。
+- ⛔ **红线：手动「本次不加入」绝不自动拉回，但只靠 `skipReason` 区分不了来源** —— 手动弹窗
+  「不加入原因」下拉里第 2 项就是 `recognition_error`。**唯一可靠判据 = `skipReason` 且 `gateAuto===true`**
+  （`WRONG_GATE_AUTO_FLAG`，自动放行路径才写；存量记录只能由回填脚本 `allowLegacySkip` 处理）。
+- 置信度闸不跳过（低置信返回 `skipped`）；判错口径与 `wrongBookCompensation.isJudgedWrong` 同源；
+  写库失败上抛；入册后不改 `review_status`。
+- ⚠️ 未修的口径张力：`confidence=0` 有两个来源（模型没给 / `answer_exception` 系统侧答案不可用），
+  后者被误归入「低置信需老师拍板」，且**补答案不会重置 confidence** ⇒ 永久卡死。
 
 ## 7. 其他硬约定
 - 错题「同一题」判定走 `src/domain/questionIdentity.js`，**禁相似度阈值合并**。
