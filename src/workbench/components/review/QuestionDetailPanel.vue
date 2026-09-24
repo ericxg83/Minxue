@@ -36,7 +36,7 @@
           <el-button size="small" type="primary" plain :loading="recomputeAnswerLoading"
             @click="handleRecomputeAnswer">
             <el-icon v-if="!recomputeAnswerLoading"><MagicStick /></el-icon>
-            {{ recomputeAnswerLoading ? 'AI 计算中…' : 'AI 重解析' }}
+            {{ recomputeAnswerLoading ? `AI 计算中 ${recomputeAnswerElapsed}s…` : 'AI 重解析' }}
           </el-button>
           <template v-if="!editing">
             <el-button size="small" type="primary" plain @click="handleEnterEdit">
@@ -164,6 +164,20 @@
         show-icon
         :closable="false"
         class="ops-image-risk"
+      />
+
+      <!-- 「AI 重解析」的上次结论（2026-09-24）。常驻而非只弹 toast：
+           老师点完按钮常去别处转一圈再回来，3 秒的 toast 早没了，页面又回到
+           「什么都没变」的样子。这里把结论留在页面上，尤其「AI 明确说不会」
+           这种终态，避免老师反复点、每次白等十几秒还烧额度。 -->
+      <el-alert
+        v-if="recomputeAnswerNotice"
+        :title="recomputeAnswerNotice.text"
+        :type="recomputeAnswerNotice.type"
+        show-icon
+        closable
+        class="ops-recompute-notice"
+        @close="recomputeAnswerNotice = null"
       />
 
       <!-- ═══ 完整题目内容（始终可见，不折叠） ═══ -->
@@ -596,7 +610,11 @@ const aiAnswerRiskReason = computed(() => getAiAnswerRiskText(q.value))
 // true → 显示原图（geometry_image_url 裁剪原图）。这是临时 UI 状态，
 // 不写回 DB；切换题目自动重置。
 const showOriginal = ref(false)
-watch(() => q.value?.id, () => { showOriginal.value = false })
+watch(() => q.value?.id, () => {
+  showOriginal.value = false
+  // 切题时清掉上一题的重解析结论，避免把 A 题的结果挂在 B 题下面
+  recomputeAnswerNotice.value = null
+})
 
 const displayImageUrl = computed(() => {
   if (showOriginal.value && q.value?.geometry_image_url) {
@@ -707,6 +725,16 @@ let recognizePreviewUrlToRevoke = ''
 
 // 「AI 重解析」按钮（2026-09-23）：调答案引擎重算这一题参考答案
 const recomputeAnswerLoading = ref(false)
+// 已用秒数：等待期间显示在按钮上。最坏情况（kimi-k3 限流重试 + 付费通道慢）要等
+// 一分多钟，只给一个不动的「AI 计算中…」老师会以为卡死。
+const recomputeAnswerElapsed = ref(0)
+let recomputeAnswerTimer = null
+// 上一次重解析的结论，常驻在参考答案下方（可手动关掉）。
+// 为什么必须常驻（2026-09-24）：原先只弹一条 3 秒的 ElMessage，老师点完去别处转一圈
+// 回来，toast 早没了、页面上一点痕迹都没有 —— 表现就是「点了没用 / 什么都没变 /
+// 不知道发生了啥」。尤其是「AI 明确说不会」（ai-declined）这种终态，更要说清楚，
+// 否则老师会反复点，每次白等十几秒还烧额度。
+const recomputeAnswerNotice = ref(null)
 
 // 单题「重新识别」：吃原卷框选裁剪图，重识别题干/选项/答案（整页 OCR 漏选项时的补全手段）
 const questionRecognizeDialogVisible = ref(false)
@@ -1084,6 +1112,11 @@ const handleRecomputeAnswer = async () => {
     }
   }
   recomputeAnswerLoading.value = true
+  recomputeAnswerElapsed.value = 0
+  recomputeAnswerNotice.value = null
+  // 计时器：按钮上显示已用秒数，让老师知道请求还活着（不是卡死）
+  clearInterval(recomputeAnswerTimer)
+  recomputeAnswerTimer = setInterval(() => { recomputeAnswerElapsed.value += 1 }, 1000)
   try {
     const resp = await recomputeQuestionAnswer(question.id, { force })
     if (resp?.answer) {
@@ -1098,15 +1131,24 @@ const handleRecomputeAnswer = async () => {
       if (resp.degraded) {
         // 主模型不可用、答案来自降级通道：绝不给绿色「完成」，否则老师会把它当标准答案
         // 照单全收。后端已同步写入 ai_answer_risk_reason，这里用黄色长提示让老师核一遍。
+        recomputeAnswerNotice.value = {
+          type: 'warning',
+          text: `主模型此时不可用，已用降级通道${resp.engine ? '（' + resp.engine + '）' : ''}算出答案，请核对后再用：${String(resp.answer).slice(0, 40)}`
+        }
         ElMessage({
           type: 'warning',
           duration: 6000,
-          message: `主模型此时不可用，已用降级通道${resp.engine ? '（' + resp.engine + '）' : ''}算出答案，请核对后再用：${String(resp.answer).slice(0, 30)}`
+          message: recomputeAnswerNotice.value.text
         })
       } else {
-        ElMessage.success(`AI 重算完成${resp.engine ? '（' + resp.engine + '）' : ''}：${String(resp.answer).slice(0, 30)}`)
+        recomputeAnswerNotice.value = {
+          type: 'success',
+          text: `AI 重算完成${resp.engine ? '（' + resp.engine + '）' : ''}：${String(resp.answer).slice(0, 40)}`
+        }
+        ElMessage.success(recomputeAnswerNotice.value.text)
       }
     } else {
+      recomputeAnswerNotice.value = { type: 'warning', text: 'AI 未返回有效答案' }
       ElMessage.warning('AI 未返回有效答案')
     }
   } catch (err) {
@@ -1115,8 +1157,16 @@ const handleRecomputeAnswer = async () => {
     // payload.message 里（httpCore 的 err.message 优先取 error 字段=错误码，
     // 直接展示会变成 "AI 重解析失败：db-unavailable" 这种看不懂的字符串）。
     const readable = err?.payload?.message || err?.message || err
-    ElMessage.error(`AI 重解析失败：${readable}`)
+    // ai-declined = AI 明确说「这题我给不了确定答案」（缺配图/条件不足），是**终态**：
+    // 再点多少次都一样。用 warning 而不是 error 呈现 —— 这不是系统故障，别让老师
+    // 以为是坏了、反复重试烧额度。其余错误码（timeout / primary-model-unavailable /
+    // db-unavailable）都是「这次没成」，用 error，老师可以稍后重试。
+    const declined = err?.payload?.error === 'ai-declined'
+    recomputeAnswerNotice.value = { type: declined ? 'warning' : 'error', text: readable }
+    ElMessage({ type: declined ? 'warning' : 'error', duration: 8000, message: `AI 重解析：${readable}` })
   } finally {
+    clearInterval(recomputeAnswerTimer)
+    recomputeAnswerTimer = null
     recomputeAnswerLoading.value = false
   }
 }
@@ -1673,6 +1723,18 @@ const handleRetryGeometry = async () => {
   font-size: 12px;
   font-weight: 500;
   color: var(--wb-warning);
+}
+
+/* 「AI 重解析」上次结论：常驻在参考答案下方，可关闭 */
+.ops-recompute-notice {
+  flex-shrink: 0;
+  margin: 8px 10px 0;
+  padding: 6px 10px;
+}
+.ops-recompute-notice :deep(.el-alert__title) {
+  font-size: 12px;
+  font-weight: 500;
+  line-height: 1.5;
 }
 
 /* ═══ 完整题目内容区（可滚动） ═══ */

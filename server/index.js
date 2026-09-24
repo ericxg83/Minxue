@@ -2364,9 +2364,13 @@ app.post('/api/questions/:id/recompute-answer', async (req, res) => {
 
     // is_correct 一并读出（2026-09-23）：原先在写库后又单独 SELECT 一次拿旧值，
     // 在 Neon 慢连接下等于多付一次 20s 超时风险。读题时一次拿全。
+    // geometry_image_url 一并读出（2026-09-24）：本接口只喂文字、不喂图，题目若有配图
+    // （图表/几何图）答案往往就画在图上 ⇒ 引擎必然回「待人工补充」。要能对老师
+    // 说清「不是 AI 笨，是这条链路不读图」，得先知道这题到底有没有图。
     const { rows } = await query(
       `SELECT id, task_id, student_id, student_answer, answer, question_type,
-              content, parent_stem, options, answer_source, ai_answer, is_correct
+              content, parent_stem, options, answer_source, ai_answer, is_correct,
+              geometry_image_url
        FROM ${TABLES.QUESTIONS} WHERE id = $1 AND deleted_at IS NULL`,
       [id]
     )
@@ -2465,11 +2469,20 @@ app.post('/api/questions/:id/recompute-answer', async (req, res) => {
       // 这与「引擎忙/不可用」是两回事：它是**终态**，再点多少次、换哪个模型都一样。
       // 必须说清楚，否则老师会一直重试，而重试只会重复烧额度。
       if (rejectReason === 'AI标记需要人工补充') {
+        // 有配图时把话说透（2026-09-24）：本接口只喂 parent_stem+content+options，
+        // **从不送图**；而图表题/几何题的答案往往就画在图上（实测「统计图 70~89 分
+        // 占几分之几」这题，配图在库里、页面上也渲染着，引擎照样只能回「待人工补充」）。
+        // 老师看到「无法给出确定答案」会以为 AI 笨或系统坏了，其实这条链路就是纯文字的
+        // —— 说清楚才能让他直接手填，而不是反复点。
+        const hasFigure = !!(q.geometry_image_url && String(q.geometry_image_url).trim())
         return done(() => res.status(400).json({
           error: 'ai-declined',
-          message: 'AI 判断这道题无法给出确定的标准答案（可能缺少配图或条件不足）。这是终态，重复重算不会有结果，请人工填写答案',
+          message: hasFigure
+            ? '这道题带配图，而「AI 重解析」目前只读文字题干、不读图（配图见图区），所以给不出标准答案。这是终态，重复重算不会有结果，请人工填写'
+            : 'AI 判断这道题无法给出确定的标准答案（可能缺少配图或条件不足）。这是终态，重复重算不会有结果，请人工填写答案',
           engine: result?.engine,
-          reason: rejectReason
+          reason: rejectReason,
+          has_figure: hasFigure
         }))
       }
       // 严格模式下「没答案」只有一个含义：链上这些实测合格的强模型这次都没给出可信答案。
