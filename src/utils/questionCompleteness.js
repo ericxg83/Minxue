@@ -17,6 +17,38 @@
 const FIGURE_KEYWORDS = /如图|图[0-9]+|图示|附图|见图/
 const VALID_TYPES = ['choice', 'fill', 'answer']
 
+// ── 幽灵行 / 题干行判据（2026-09-24）──────────────────────────────
+// 背景：公共题干 / 引导语被 OCR 单独存成一条 questions 行（「列式计算。」「运用适当
+// 方法计算。」「设x是实数。在下列各式后的横线上…：」「第 36 题」），
+// 全库扫出 15 条（`_diag_ghost_rows.mjs`）。这类行的 answer **本就该为空**——
+// 它不是一道题，却被当成「缺答案的题」展示、统计、进缺答案清单一辈子。
+//
+// 只有满足「整行只有一个指令短语 / 题号占位，没有任何可解内容」才命中，
+// 刻意收窄：`计算：√2×√3=…` 这种「指令+内容」的完整题不匹配（后面还有内容）。
+const GHOST_LEADING_RE = /^[（(]?\s*\d*\s*[）)]?\s*(列式计算|计算|解方程|解不等式|化简|求值|解答|证明|作图|填空|选择|判断|口算|直接写出得数|用竖式计算|脱式计算|简算|解决问题|看图列式|运用适当方法计算|用分数表示|用.{0,8}表示.{0,20}|将下列.{0,20}表示成.{0,20}|写出下列|求下列|解下列|计算下列)[。.：:，,、\s]*$/
+const GHOST_QNO_RE = /^[（(]?\s*第?\s*\d+\s*[）)]?\s*题?[。.：:，,、\s]*$/
+// 以冒号结尾 + 整行没有任何可解内容（数字/填空线/等号/选项标号）⇒ 引导语行。
+// 「计算：√2×√3=____」有数字和填空线，不命中；「设x是实数。…满足的条件：」无数字 → 命中。
+const GHOST_COLON_RE = /[：:]\s*$/
+const GHOST_SOLVABLE_RE = /\d|_|＿|□|=|[A-DＡ-Ｄ][.、．)）:：]/
+const isGhostRow = (question) => {
+  const c = String(question?.content || '').replace(/\s+/g, ' ').trim()
+  if (!c) return false
+  // 题号占位行（「第 36 题」「(36)」）优先认 —— 内容只有题号，无论有没有 parent_stem
+  // 都是 OCR 把题号行当成了题（实测：3b429e41 带 parent_stem 仍应判 stem_only）
+  if (GHOST_QNO_RE.test(c)) return true
+  // 真多小问子题保护：有独立公共题干（且≠自身 content）就不是引导语行
+  // （实测误伤：d936f241「用含字母n的式子表示第n个等式…」是 q#21(2) 子题，带 parent_stem）
+  const p = String(question?.parent_stem || '').replace(/\s+/g, ' ').trim()
+  if (p && p !== c) return false
+  // 带「可解证据」（数字/填空线/等号/选项标号）→ 是内容完整的题目，不是引导语
+  // （实测误伤：2056b812「用最简分数表示：2 千克 750 克 = ____千克。」有数字+填空线）
+  if (GHOST_SOLVABLE_RE.test(c)) return false
+  if (GHOST_LEADING_RE.test(c)) return true
+  if (GHOST_COLON_RE.test(c)) return true
+  return false
+}
+
 /**
  * ── 引图判定的题干范围（2026-09-17） ──
  *
@@ -121,7 +153,8 @@ export const COMPLETENESS_CODES = {
   missing_figure: 'missing_figure',   // 题干引图但无配图
   missing_options: 'missing_options', // 选择题无选项
   missing_answer: 'missing_answer',   // 无参考答案
-  invalid_type: 'invalid_type'        // 题型缺失或非法
+  invalid_type: 'invalid_type',       // 题型缺失或非法
+  stem_only: 'stem_only'              // 疑似题干行（公共题干/引导语被单独成题），不是独立题目
 }
 
 /**
@@ -143,6 +176,14 @@ export const COMPLETENESS_CODES = {
 export function checkQuestionCompleteness(question) {
   const issues = []
   const codes = []
+
+  // 规则0: 幽灵行（公共题干/引导语被单独存成一道题）—— 优先级最高
+  // 它不是一道题，后面所有「缺图/缺选项/缺答案」的检查对它都没有意义；
+  // 若它还带着 answer（如把题干里的已知条件当答案），必须在此拦下防假对。
+  if (isGhostRow(question)) {
+    issues.push('疑似题干行（公共题干/引导语被单独存成题，非独立题目）')
+    codes.push(COMPLETENESS_CODES.stem_only)
+  }
 
   // 规则1: 题干含几何图引用但缺少配图
   // 判定文本 = parent_stem + content：拆小问后「如图」常只留在公共题干里（见 getFigureJudgeText）。
