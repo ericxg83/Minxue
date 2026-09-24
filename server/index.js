@@ -78,6 +78,7 @@ import { planTaskRouteChange, resolveRouteKind, shouldResetTaskName, isRouteAuto
 import { requeueGeometryRedrawOnRejudgeWrong } from './utils/geometryRequeueOnRejudge.js'
 import { syncQuestionCompleteness, syncQuestionCompletenessQuietly } from './services/questionCompletenessSync.js'
 import { computeWrongBookRisks } from './utils/wrongBookRisks.js'
+import { requeueGateSkippedQuestion } from './services/wrongGateRequeue.js'
 import { normalizeOptions, formatOptionsForPrompt } from './utils/optionText.js'
 import { computeTaskStats } from './utils/taskStats.js'
 import { summarizeQuestionResults, classifyQuestionResult } from './utils/questionResultCaliber.js'
@@ -2120,6 +2121,43 @@ app.put('/api/questions/:id', async (req, res) => {
           ...(review_metadata && typeof review_metadata === 'object' ? review_metadata : {})
         }
       })
+    }
+
+    // ── 补全即补入（2026-09-24）────────────────────────────────────────────
+    // 背景：P2 门禁分层把「系统侧缺项」的错题自动记成 review_status='wrong_no_book'
+    // 以换取不拦卷（见 src/domain/wrongGateTier.js）。但 wrong_no_book 在
+    // src/utils/reviewDecision.js 里是**终态**，落下后就被 needsWrongBookDecision
+    // 永久排除，且没有任何「补全元素后自动补入」的机制 ⇒ 老师补完配图/答案，
+    // 题永远进不了错题本，还一直被告知「补全后可到错题本重新加入」。
+    // 实测近 14 天 8 道被卡（8/8 元素已完整、8/8 仍未入册）。
+    //
+    // 这里独立成段（不在 hasReviewStatus 块内）：老师补元素走的是
+    // QuestionDetailPanel 的普通编辑保存（PUT answer / geometry_image_url /
+    // options / question_type），不带 review_status，原路径完全不会碰错题本。
+    //
+    // 判据与红线全部收在 server/utils/wrongGateRequeue.js：
+    //   wrong_no_book + 系统自动放行（skipReason=recognition_error 且 gateAuto=true）
+    //   + 仍判错 + 不在册 + 元素完整 ⇒ 补入。
+    // **老师手动点的「本次不加入」永远不会被拉回**（手动路径写不出 gateAuto）。
+    // 置信度闸不跳过：低置信题返回 skipped，留老师拍板。
+    // 只在 review_status='wrong_no_book' 时才查库，正常 PUT 零额外开销。
+    if (updatedQuestion.review_status === 'wrong_no_book' && updatedQuestion.student_id) {
+      try {
+        updatedQuestion.gate_requeue = await requeueGateSkippedQuestion({
+          question: updatedQuestion,
+          logTag: 'PUT /api/questions 补全即补入'
+        })
+      } catch (e) {
+        // 写库失败必须外露（铁律 #11）：静默失败会让老师以为补入成功
+        console.error(`[gate_requeue] 补全即补入失败 q=${id.slice(0, 8)}:`, e.message)
+        updatedQuestion.gate_requeue = {
+          status: 'failed',
+          code: 'write_error',
+          reason: 'write_error',
+          message: '自动加入错题本失败，请稍后重试',
+          issues: []
+        }
+      }
     }
 
     // 给复核页带最新入册风险：老师补完配图/改完题干后，前端拿到这个字段

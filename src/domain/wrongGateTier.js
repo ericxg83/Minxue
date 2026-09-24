@@ -143,3 +143,23 @@ export const splitWrongGateList = (list) => {
 
 /** 自动放行题的「本次不加入」原因码（复用既有枚举，不新增） */
 export const WRONG_GATE_AUTO_SKIP_REASON = 'recognition_error'
+
+/**
+ * 「本次不加入」的**来源**显式标记（2026-09-24）。
+ *
+ * ── 为什么必须有这个标记 ──
+ * 「补全即补入」（server/utils/wrongGateRequeue.js）要判「这条 skip 是系统自动放行
+ * 还是老师手动否决」——红线是老师手动点的绝不自动拉回。
+ * 但**只靠 skipReason 区分不了**：手动弹窗的「不加入原因」下拉
+ * （src/utils/reviewDecision.js 的 WRONG_BOOK_SKIP_REASONS）里就有
+ * `recognition_error`（label 'OCR 或题目识别错误'），老师选它写出的 judgement
+ * 与自动放行完全同形。
+ *
+ * 因此自动放行路径额外在 review_metadata 里写 `gateAuto: true`，
+ * 后端 PUT 会把它原样透传进 judgements.metadata（见 server/index.js 的
+ * source='manual_review' 那条 createJudgement）。补入判据要求
+ * skipReason 与 gateAuto 同时成立，手动路径永远写不出 gateAuto。
+ *
+ * ⚠️ 不要改成「有 skipReason 就够」——那等于把老师的明确否决变成可自动回滚。
+ */
+export const WRONG_GATE_AUTO_FLAG = 'gateAuto'

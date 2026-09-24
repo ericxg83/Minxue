@@ -14,7 +14,7 @@ import {
 } from '../utils/retryPaperState'
 import { REVIEW_STATUS, DEFAULT_CONFIDENCE_THRESHOLD, getReviewState, needsWrongBookDecision, effectiveIsCorrect as resolveEffectiveIsCorrect } from '../../utils/reviewDecision'
 // 闸1 门禁分层（2026-09-23 P2）：只自动放行「系统没补上」，绝不放行「低置信度需人拍板」
-import { splitWrongGateList, classifyWrongGateItem, WRONG_GATE_AUTO_SKIP_REASON } from '../../domain/wrongGateTier.js'
+import { splitWrongGateList, classifyWrongGateItem, WRONG_GATE_AUTO_SKIP_REASON, WRONG_GATE_AUTO_FLAG } from '../../domain/wrongGateTier.js'
 // 闸1（L0 卷级自动完成）判据唯一口径（2026-09-23 三层分流）：
 //   L0 已判出 → 自动复核；L1 系统侧缺口 → 先补再判，不拦老师；L2 真判不出 → 留人工。
 import { resolvePaperAutoComplete } from '../../domain/paperReviewDecision.js'
@@ -1341,7 +1341,13 @@ export const useReviewStore = defineStore('review', () => {
       let resolvedCount = 0
       for (const item of autoResolvable) {
         try {
-          await markWrongNoBook(item.questionId, WRONG_GATE_AUTO_SKIP_REASON)
+          // gateAuto:true 是「来源=系统自动放行」的显式标记（见 wrongGateTier.js）。
+          // 必须带：手动弹窗的「不加入原因」下拉里也有 recognition_error，
+          // 不带标记的话后端无法区分「系统放行」与「老师手动否决」，
+          // 「补全即补入」就会把老师的明确否决自动拉回（红线）。
+          await markWrongNoBook(item.questionId, WRONG_GATE_AUTO_SKIP_REASON, {
+            [WRONG_GATE_AUTO_FLAG]: true
+          })
           resolvedCount++
         } catch (e) {
           // 单题失败不能吞：把它退回 blocking，让老师看到并处理（fail-closed）
@@ -1376,7 +1382,10 @@ export const useReviewStore = defineStore('review', () => {
     wrongQuestions.value.some(wq => wq.question_id === questionId)
 
   // 保留错误事实，但明确记录本次不进入错题本
-  const markWrongNoBook = async (questionId, reason) => {
+  // extraMeta：调用方附加的 judgement metadata。自动放行路径必须传
+  // { gateAuto: true } —— 这是「补全即补入」区分「系统自动放行」与
+  // 「老师手动否决」的唯一依据（手动下拉里也有 recognition_error 这个码）。
+  const markWrongNoBook = async (questionId, reason, extraMeta = {}) => {
     const question = allQuestions.value.find(q => q.id === questionId)
     if (!question) return false
     const previousStatus = question.review_status ?? null
@@ -1384,7 +1393,8 @@ export const useReviewStore = defineStore('review', () => {
     try {
       await updateQuestionReviewStatus(questionId, REVIEW_STATUS.WRONG_NO_BOOK, {
         wrongBookAction: 'skip',
-        skipReason: reason || 'other'
+        skipReason: reason || 'other',
+        ...extraMeta
       })
       return true
     } catch (error) {
