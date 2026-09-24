@@ -439,7 +439,9 @@ export const BACKUP_VENDOR_DEFS = [
     name: 'HuihuiyunGemini',
     envKey: 'HUIHUIYUN_GEMINI_API_KEY',
     endpoint: 'https://api.huihuiyun.top/v1/chat/completions',
-    vlModels: ['gemini-3.7-flash', 'gemini-3.1-pro'],
+    // ⛔ 2026-09-24：移除 gemini-3.1-pro（用户反馈又贵又不好用）。保留 3.7-flash 作为该付费池主模型；
+    //   若也想关停整个付费池，清空 .env 的 HUIHUIYUN_GEMINI_API_KEY 即可（resolveBackupVendors 会跳过）。
+    vlModels: ['gemini-3.7-flash'],
     maxTokens: 16384,
     referer: null,
     extraBody: null,
