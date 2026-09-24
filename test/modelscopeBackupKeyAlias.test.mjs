@@ -28,6 +28,18 @@ const AI_SRC = fs.readFileSync(path.resolve(ROOT, 'server/config/ai.js'), 'utf8'
 const RENDER_YAML = fs.readFileSync(path.resolve(ROOT, 'render.yaml'), 'utf8')
 const ENV_EXAMPLE = fs.readFileSync(path.resolve(ROOT, 'server/.env.example'), 'utf8')
 
+/**
+ * MS_KEYS 定义处的判据（2026-09-24 去硬编码）。
+ * ⚠️ 原断言写死字面串 `const MS_KEYS = [...new Set([`；2026-09-22 为「魔搭 Key 欠费先禁用」
+ *    加了 `MS_VISION_DISABLED ? [] :` 守卫后该字面串不再匹配 ⇒ 3 条断言变**假红**
+ *    （代码语义完全正确，只是写法变了）。改为断言**语义**：定义唯一 + 走 Set 去重 +
+ *    取 MODELSCOPE_BACKUP.API_KEY。下次再加守卫/换写法不会再假红，但真把去重或
+ *    「第二把 Key」拆掉会当场红。
+ */
+const MS_KEYS_DEFS = AI_SRC.match(/const MS_KEYS =[^\n]*/g) || []
+const MS_KEYS_DEF_AT = AI_SRC.indexOf('const MS_KEYS =')
+const MS_KEYS_BLOCK = MS_KEYS_DEF_AT >= 0 ? AI_SRC.slice(MS_KEYS_DEF_AT, MS_KEYS_DEF_AT + 300) : ''
+
 /** 在受控 env 下读取 getter（getter 每次读 process.env） */
 function withEnv(patch, fn) {
   const saved = {}
@@ -80,11 +92,11 @@ test('两者皆空时为 \'\' 且 ENABLED=false（不得因别名逻辑变成 un
 
 test('视觉链路 MS_KEYS 必须按 Set 去重（相同 Key 要塌缩成 1 把，不能重复空转）', () => {
   assert.ok(
-    AI_SRC.includes('const MS_KEYS = [...new Set(['),
+    /\[\.\.\.new Set\(\[/.test(MS_KEYS_BLOCK),
     'MS_KEYS 的 Set 去重被改动：相同的主 Key / 备 Key 会变成两个相同 provider，白耗配额'
   )
   assert.ok(
-    AI_SRC.includes("MODELSCOPE_BACKUP.ENABLED ? MODELSCOPE_BACKUP.API_KEY : null"),
+    /MODELSCOPE_BACKUP\.ENABLED \? MODELSCOPE_BACKUP\.API_KEY : null/.test(MS_KEYS_BLOCK),
     'MS_KEYS 必须取 MODELSCOPE_BACKUP.API_KEY（即第二把 Key），否则第二把 Key 对视觉链路无效'
   )
 })
@@ -97,16 +109,14 @@ test('两把 Key 相同时，矩阵退化为 1 把（这是"假备份"的判据�
 })
 
 test('MS_KEYS 只定义一次（定义点提到 noBackup 日志之前，避免两处定义各自漂移）', () => {
-  const n = (AI_SRC.match(/const MS_KEYS = \[\.\.\.new Set\(\[/g) || []).length
-  assert.equal(n, 1, `MS_KEYS 定义点应恰好 1 处，实际 ${n} 处`)
+  assert.equal(MS_KEYS_DEFS.length, 1, `MS_KEYS 定义点应恰好 1 处，实际 ${MS_KEYS_DEFS.length} 处`)
 })
 
 test('noBackup 日志必须打印实际加载的 Key 把数与尾号（线上确认第二把 Key 是否生效的唯一入口）', () => {
   assert.ok(AI_SRC.includes('把 Key（'), 'noBackup 日志应打印实际加载几把 Key')
   assert.ok(/MS_KEYS\.map\(k => '…' \+ keyTail\(k\)\)/.test(AI_SRC), '日志应只打印 Key 尾号（不泄露完整密钥）')
   const logIdx = AI_SRC.indexOf('[AI] noBackup=1')
-  const defIdx = AI_SRC.indexOf('const MS_KEYS = [...new Set([')
-  assert.ok(defIdx !== -1 && defIdx < logIdx, 'MS_KEYS 必须在 noBackup 日志之前定义，否则日志拿不到实际把数')
+  assert.ok(MS_KEYS_DEF_AT !== -1 && MS_KEYS_DEF_AT < logIdx, 'MS_KEYS 必须在 noBackup 日志之前定义，否则日志拿不到实际把数')
 })
 
 // ── 3. VL_MODELS 队首必须是 AI_MODEL（所以配错模型名代价最大）───────────────

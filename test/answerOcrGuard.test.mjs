@@ -18,10 +18,29 @@ import { resolve } from 'node:path'
 const ROOT = resolve(import.meta.dirname, '..')
 const read = (p) => readFileSync(resolve(ROOT, p), 'utf8')
 
-test('答案页 OCR 两条路径都必须传 noBackup: true（禁降级弱模型）', () => {
+test('答案页 OCR 两条路径都必须锁死显式强模型链（禁静默降级弱模型）', () => {
   const src = read('server/routes/worksheets.js')
-  const noBackupCount = (src.match(/noBackup: true/g) || []).length
-  assert.ok(noBackupCount >= 2, `ocrExtractFromBuffer 与 ocrExtractRawText 都应传 noBackup: true，实际 ${noBackupCount} 处`)
+  // ⚠️ 2026-09-24 判据迁移（护栏意图不变，只是机制换了）：
+  //   原机制 = `noBackup: true`（+ strongBackupOnly 白名单），锁魔搭主站不降级。
+  //   2026-09-22 魔搭双 Key 欠费 → MS_VISION_DISABLED=1，`noBackup` 语义**已空转**
+  //   （noBackup 且魔搭不可用 ⇒ 必然失败），两条调用点改为传**显式** vendorChain：
+  //   `vendorChain: ANSWER_PAGE_VENDOR_CHAIN`（链内只有全供应商矩阵实测合格的强模型）。
+  //   护栏要防的事没变 —— 弱模型的 outputs 不得入库。
+  //   见 `_视觉模型最强阵容-全供应商矩阵评测-20260922.md` §9。
+  //   断言写「两条路径都传了显式链」+「链本身是显式 vendor+model」，不写死字符串形态。
+  const chainCount = (src.match(/vendorChain:\s*ANSWER_PAGE_VENDOR_CHAIN/g) || []).length
+  assert.ok(
+    chainCount >= 2,
+    `ocrExtractFromBuffer 与 ocrExtractRawText 都应传 vendorChain: ANSWER_PAGE_VENDOR_CHAIN，实际 ${chainCount} 处`
+  )
+  const aiSrc = read('server/config/ai.js')
+  const at = aiSrc.indexOf('export const ANSWER_PAGE_VENDOR_CHAIN')
+  assert.ok(at >= 0, 'ANSWER_PAGE_VENDOR_CHAIN 必须显式定义在 config/ai.js（调用方统一 import，避免两处漂移）')
+  const chainBody = aiSrc.slice(at, at + 600)
+  assert.ok(
+    /vendor:\s*'/.test(chainBody) && /model:\s*'/.test(chainBody),
+    'ANSWER_PAGE_VENDOR_CHAIN 必须是显式 vendor+model 链，不能退化成「默认链 + 让它自己降级」'
+  )
   // 答案页 OCR 输出上限应放宽到 8192，避免密集页被 4096 截断丢题
   assert.ok(src.includes('maxTokens: 8192'), '答案页 OCR maxTokens 应为 8192')
 })

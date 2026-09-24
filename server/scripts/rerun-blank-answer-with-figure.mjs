@@ -54,6 +54,11 @@ const VENDOR = argOf('--vendor') || 'Bailian'
 const MODEL = argOf('--model') || 'qwen3.8-flash'
 const DAYS = Number(argOf('--days') || 3650)
 const OUT = argOf('--out') || null
+// --any  不限制「必须带配图」，跑全部 answer 为空且 analysis 非空的题。
+//   为什么需要（2026-09-24）：本脚本原设计只针对「带配图」那批（当时假设缺答案是配图题特有）。
+//   全库复查后发现缺答案的 127 条里 **105 条根本没有配图** —— 它们落空的原因是当初引擎配置弱 /
+//   超时紧 / 题干不全，与配图无关。加此开关才能覆盖全量。
+const ANY_Q = process.argv.includes('--any')
 // --exclude <id,id,...>  落库时排除指定题目（用于挡掉人工复核发现的可疑答案）
 const EXCLUDE = argOf('--exclude') || null
 // --ids <id,id,...>  只跑指定题目（用于精确重跑某类子集，如「静默空」那批）
@@ -104,7 +109,7 @@ let rows = (await pool.query(
   `SELECT id, task_id, question_number, question_type, parent_stem, content, options, answer
    FROM questions
    WHERE deleted_at IS NULL
-     AND geometry_image_url IS NOT NULL AND btrim(geometry_image_url) <> ''
+     ${ANY_Q ? '' : `AND geometry_image_url IS NOT NULL AND btrim(geometry_image_url) <> ''`}
      AND (answer IS NULL OR btrim(answer) = '')
      AND updated_at > NOW() - $1 * INTERVAL '1 day'
    ORDER BY updated_at DESC
@@ -153,6 +158,10 @@ const solveOne = async (q) => {
   const t0 = Date.now()
   let parsed = null
   let provider = null
+  // ⚠️ 引擎原始 content 必须提到 try 外：超时/无通道路径下要在下面判断「是空内容还是坏 JSON」，
+  //    原先写 `r?.content`（r 是 try 块内的 const）→ 一旦走到这里就 ReferenceError 崩掉整个批跑
+  //    （2026-09-24 实测：第 2 题 90s 超时后脚本直接崩，前 1 题的结论也没落盘）。
+  let engineContent = ''
   try {
     const r = await callAnswerEngineCompletion({
       systemContent: buildAnswerGenerationPrompt(),
@@ -166,11 +175,23 @@ const solveOne = async (q) => {
       fallback: false,
     })
     provider = r.provider
+    engineContent = r.content
     try { parsed = JSON.parse(stripFence(r.content)) } catch { parsed = null }
   } catch (e) {
     return { ...base, status: 'skip', why: `${e.name}:${String(e.message).slice(0, 80)}`, ms: Date.now() - t0 }
   }
-  if (!parsed) return { ...base, status: 'skip', why: 'json_parse_failed', ms: Date.now() - t0 }
+  // ⚠️ 区分「引擎没给内容」与「给了内容但不是 JSON」：
+  //    严格模式下引擎失败（429/超时/无通道）**不抛异常**，而是返回
+  //    `{content:'', provider:'primary-unavailable'|'no-channel-available'}`。
+  //    若一律报 `json_parse_failed`，会把「被 429 打爆」误读成「模型 JSON 不健康」
+  //    —— 2026-09-24 差点据此得出「kimi-k3 不可用」的错误结论（实际是并发打爆 rpm）。
+  if (!parsed) {
+    const emptyContent = !String(engineContent || '').trim()
+    return {
+      ...base, status: 'skip', ms: Date.now() - t0,
+      why: emptyContent ? `engine-empty:${provider || 'unknown'}` : 'json_parse_failed',
+    }
+  }
 
   const analysis = String(parsed.analysis || '')
   let answer = String(parsed.answer || '').trim()

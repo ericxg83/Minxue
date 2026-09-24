@@ -73,7 +73,8 @@ import { uploadFilesWithRetry } from './services/uploadRetryManager.js'
 import { createUploadReport, logUploadReport } from './services/uploadReportLogger.js'
 import { createJudgement, batchUpdateQuestionTags, getQuestionAssets, getQuestionAssetsByType, createResource, replaceResourceAnswers, addWrongQuestions, deleteQuestionsByTaskId, markAiAnswerRisk } from './services/neonService.js'
 import { judgeAnswer, findDirtyAnswers } from './services/judgeService.js'
-import { checkQuestionCompleteness } from './utils/questionCompleteness.js'
+import { checkQuestionCompleteness, hasFigureReference } from './utils/questionCompleteness.js'
+import { isFigurePreflightSkipEnabled, MISSING_FIGURE_SKIP_REASON } from './utils/figureRequirementGuard.js'
 import { planTaskRouteChange, resolveRouteKind, shouldResetTaskName, isRouteAutoName, buildAutoTaskName, describeRouteRisk, isRouteConvertEnabled, ROUTE_CONVERT_DISABLED_MESSAGE } from './utils/taskRoute.js'
 import { requeueGeometryRedrawOnRejudgeWrong } from './utils/geometryRequeueOnRejudge.js'
 import { syncQuestionCompleteness, syncQuestionCompletenessQuietly } from './services/questionCompletenessSync.js'
@@ -2344,15 +2345,22 @@ app.post('/api/questions/:id/recompute-answer', async (req, res) => {
   // pg 的 query 会在已建连接上无限等待（connectionTimeoutMillis 只管建连，管不到
   // 已建连接上的查询），实测同一条请求出现过 60s 无任何响应。这里给整条链路
   // 兜一个上限，到点返回明确文案，老师不用对着转圈猜。
-  const DEADLINE_MS = 150_000
+  const DEADLINE_MS = 180_000
   // 单次答案引擎 HTTP 调用的超时上限（仅本接口，批改链路不受影响）：
   // 默认 60s 是为「后台慢慢跑」设计的，对点了按钮在等结果的老师太长。
   // 严格模式下每一级只打一个通道（1 个模型 × Key 池）：
-  //   · 快通道 45s —— qwen3.8-flash 正常档 9–13s，45s 绰绰有余；
-  //   · 慢通道 60s —— kimi-k3 慢是**固有特性**（22–74s），给太短会把它白白掐掉。
-  // 两级串行最坏 45s + 60s = 105s，仍在 150s 总兜底内。
-  const ENGINE_TIMEOUT_MS = 45_000
-  const SLOW_ENGINE_TIMEOUT_MS = 60_000
+  //   · 主通道 120s —— ⚠️ 2026-09-24 实测修正：原设 45s，依据是「qwen3.8-flash 正常档
+  //     9–13s，45s 绰绰有余」，**这个前提是错的**。同一批「带配图 + 答案为空」的题
+  //     实测（`D:/tmp/rerun_plan.json` 等，55 条出答案的样本）：
+  //       单请求(conc=1) 67.2s / 116.7s 才出答案；批量 p50≈70s、p90≈122s。
+  //     只有**简单题**才是 7–13s（同批里两道快速拒绝只用了 6.9s / 7.5s）。
+  //     ⇒ 45s 会把多数难题的正确答案**当场掐死**，然后掉到免费慢通道（还常撞 429），
+  //       等于主备互换白做。故主通道提到 120s，覆盖实测最长成功耗时。
+  //   · 备用通道 55s —— kimi-k3 慢是**固有特性**（拒绝约 25–30s，出答案 22–74s），
+  //     给太短等于没备用。
+  // 两级串行最坏 120s + 55s = 175s，仍在 180s 总兜底内（留 5s 余量）。
+  const ENGINE_TIMEOUT_MS = 120_000
+  const SLOW_ENGINE_TIMEOUT_MS = 55_000
   // ── 重解析的通道链（2026-09-24 换模型；同日二次调整：主备互换）──────────────
   // ⚠️ 绝不能沿用答案引擎全局主模型 SenseNova:deepseek-flash —— 它可判正确率仅 33%，
   //    且 10 道里 2 次返回非 JSON（`_三模型对比-缺答案求解-20260923.md`）。
@@ -2370,7 +2378,7 @@ app.post('/api/questions/:id/recompute-answer', async (req, res) => {
   //      但慢（22–74s）且易 429 ⇒ 退为备份，只在主链没给出答案时才用。
   // 两级各自走 strictPrimary（只打自己那一个通道、不降级），上一级没答案才让位下一级 ——
   // 这与「降级到弱模型」是两回事：链内两个通道都是实测合格的强模型。
-  // ⚠️ 超时预算：45s + 60s = 105s，留在 150s 总兜底内。
+  // ⚠️ 超时预算：120s + 55s = 175s，留在 180s 总兜底内（主通道预算依据见上方 ENGINE_TIMEOUT_MS 注释）。
   // 提成 env 便于换通道/回滚，不必改代码。
   const RECOMPUTE_CHAIN = [
     {
@@ -2469,6 +2477,23 @@ app.post('/api/questions/:id/recompute-answer', async (req, res) => {
     let finalAnswer = ''
     let usedChannel = null
     let rejectReason = null
+
+    // ── 缺配图预判闸（2026-09-24，用户要求：缺图就别解析，别浪费 token 和时间）──────
+    // 本接口是**纯文字链路**（只喂 parent_stem + content + options，从不送图）。
+    // 题干明示引图（如图①②③ / 数轴 / 统计图 / 函数图象）而本题无配图时，
+    // 引擎实测 100% 回「待人工补充」——老师白等 37~150s，还烧掉一次额度。
+    // 拦在调引擎之前，文案直接给可执行动作（补图 / 手填），比"AI 说不会"更早、更省。
+    if (isFigurePreflightSkipEnabled() && hasFigureReference(q) &&
+        !(q.geometry_image_url && String(q.geometry_image_url).trim())) {
+      console.log(`[AI 重解析] 题目 ${String(q.id).slice(0, 8)} 缺配图，跳过引擎调用（省额度与等待）`)
+      return done(() => res.status(400).json({
+        error: 'figure-missing',
+        message: '这道题的题干要求配图，但系统没有采集到配图，AI 只读文字题干无法作答。请先补上配图（或人工填写答案），补图后可直接重算',
+        reason: MISSING_FIGURE_SKIP_REASON,
+        has_figure: false
+      }))
+    }
+
     for (const ch of RECOMPUTE_CHAIN) {
       if (finished) break // 已经超时了，别再烧额度（也别让老师等更久）
       usedChannel = `${ch.vendor}:${ch.model}`

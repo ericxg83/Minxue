@@ -146,13 +146,35 @@ assert.ok(
   /maxRetries:\s*0/.test(body),
   '重解析必须关闭整轮递归重试（HTTP 层 429 退避保留），否则超时预算被重试吃光'
 )
-assert.ok(
-  /timeoutMs:\s*ch\.timeoutMs/.test(body)
-  && /ENGINE_TIMEOUT_MS\s*=\s*45_000/.test(body)
-  && /SLOW_ENGINE_TIMEOUT_MS\s*=\s*60_000/.test(body)
-  && /DEADLINE_MS\s*=\s*150_000/.test(body),
-  '每级引擎上限之和必须小于接口总兜底（60s + 45s = 105s < 150s），两级串行仍有余量'
-)
+assert.ok(/timeoutMs:\s*ch\.timeoutMs/.test(body), '每级必须用自己那级的超时预算，不能共用一个常量')
+{
+  // 不硬编码数值，改为断言**不变量**（改预算时不用改测试，但破坏了预算关系会当场红）：
+  //   ① 两级串行最坏必须小于接口总兜底；
+  //   ② 主链预算不得低于 90s —— 2026-09-24 实测：qwen3.8-flash 单请求（conc=1）
+  //      实测出答案耗时 67.2s / 116.7s，批量 p50≈70s、p90≈122s。
+  //      原设 45s 依据「正常档 9–13s」是错的（那只是简单题）⇒ 难题会被当场掐断，
+  //      再掉回易撞 429 的免费慢通道，**等于主备互换白做**。
+  const num = (re) => { const m = body.match(re); return m ? Number(m[1].replace(/_/g, '')) : NaN }
+  const primary = num(/ENGINE_TIMEOUT_MS\s*=\s*([\d_]+)/)
+  const fallback = num(/SLOW_ENGINE_TIMEOUT_MS\s*=\s*([\d_]+)/)
+  const deadline = num(/DEADLINE_MS\s*=\s*([\d_]+)/)
+  assert.ok(
+    Number.isFinite(primary) && Number.isFinite(fallback) && Number.isFinite(deadline),
+    `三个超时常量必须都能解析出来，实际 ${primary}/${fallback}/${deadline}`
+  )
+  assert.ok(
+    primary + fallback < deadline,
+    `两级串行最坏 ${primary / 1000}s + ${fallback / 1000}s 必须小于总兜底 ${deadline / 1000}s`
+  )
+  assert.ok(
+    primary >= 90_000,
+    `主链预算 ${primary / 1000}s 过小：实测 qwen3.8-flash 单请求出答案最长 116.7s，难题会被掐断`
+  )
+  assert.ok(
+    fallback >= 45_000,
+    `备用链预算 ${fallback / 1000}s 过小：kimi-k3 拒绝要约 25–30s、出答案 22–74s，给太短等于没有备用`
+  )
+}
 // 绝不能靠关投票来「加速」——那会给降级答案放行
 assert.equal(
   /consensus\s*:\s*false/.test(body),
