@@ -56,6 +56,8 @@ const DAYS = Number(argOf('--days') || 3650)
 const OUT = argOf('--out') || null
 // --exclude <id,id,...>  落库时排除指定题目（用于挡掉人工复核发现的可疑答案）
 const EXCLUDE = argOf('--exclude') || null
+// --ids <id,id,...>  只跑指定题目（用于精确重跑某类子集，如「静默空」那批）
+const IDS = argOf('--ids') || null
 // --commit <plan.json>   从 dry-run 产出的明细文件落库，**不再调用任何 AI**
 //   （两阶段：先 --out 出清单 → 人工过一遍 → --commit 落库，避免重复烧额度）
 const COMMIT = argOf('--commit') || null
@@ -109,6 +111,9 @@ let rows = (await pool.query(
    LIMIT $2`,
   [DAYS, LIMIT]
 )).rows
+
+const wantSet = new Set((IDS || '').split(',').map(s => s.trim()).filter(Boolean))
+if (wantSet.size) rows = rows.filter(r => wantSet.has(r.id))
 
 const banSet = new Set((EXCLUDE || '').split(',').map(s => s.trim()).filter(Boolean))
 if (banSet.size) rows = rows.filter(r => !banSet.has(r.id))
