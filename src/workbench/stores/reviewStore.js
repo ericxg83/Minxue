@@ -768,9 +768,10 @@ export const useReviewStore = defineStore('review', () => {
       const tasks = await getTasksByStudent(studentId, false)
       // 纳入 done 和 reviewed，按 status 排序：done 优先
       const sorter = { done: 0, reviewed: 1 }
-      studentTasks.value = (tasks || [])
-        .filter(t => t.status === 'done' || t.status === 'reviewed')
-        .sort((a, b) => (sorter[a.status] ?? 99) - (sorter[b.status] ?? 99))
+      // 就地打「自动复核」派生标记，保持对象引用不变（别处仍在 mutate 这些 task）
+      const list = (tasks || []).filter(t => t.status === 'done' || t.status === 'reviewed')
+      for (const t of list) t._autoReviewed = readAutoReviewed(t)
+      studentTasks.value = list.sort((a, b) => (sorter[a.status] ?? 99) - (sorter[b.status] ?? 99))
     } catch (e) {
       console.error('加载学生任务失败:', e)
       studentTasks.value = []
@@ -855,6 +856,8 @@ export const useReviewStore = defineStore('review', () => {
           _questionIds: exam.question_ids || [],
           _pageTasks: pages,
           _isPaper: true,
+          // 「自动复核」派生标记：paper 模式标记落在其中一张答卷任务上
+          _autoReviewed: pages.some(readAutoReviewed),
         }
       }).sort((a, b) => (sorter[a.status] ?? 99) - (sorter[b.status] ?? 99))
     } catch (e) {
@@ -873,6 +876,23 @@ export const useReviewStore = defineStore('review', () => {
 
   const isReviewedTask = (t) =>
     t._reviewState ? isReviewedState(t._reviewState) : t.status === 'reviewed'
+
+  // ── 「自动复核」标记（2026-09-24）─────────────────────────
+  // worker 批改收尾若判定本卷零人工项会直接把 task 推进到 reviewed，并写
+  // tasks.result.autoReviewed=true（server/services/autoReviewService.js）。
+  // 这里只做「是谁复核的」展示取数，不参与任何队列/权限判定：
+  //   · image 模式：task 自身的 result
+  //   · paper 模式：列表项是 exam，标记挂在其答卷任务（_pageTasks）上
+  const parseResultObject = (raw) => {
+    if (!raw) return {}
+    if (typeof raw === 'string') {
+      try { return JSON.parse(raw) } catch { return {} }
+    }
+    return raw
+  }
+  const readAutoReviewed = (t) => parseResultObject(t?.result).autoReviewed === true
+  const isAutoReviewedTask = (t) =>
+    t?._isPaper ? (t._pageTasks || []).some(readAutoReviewed) : readAutoReviewed(t)
 
   // 本地把卷标为「已复核」。
   // paper 模式的权威字段是 _reviewState，status 只是派生镜像；两处必须一起改，

@@ -143,6 +143,8 @@
                 <el-icon><View /></el-icon>
                 <span>查看</span>
               </div>
+              <!-- 系统批改完自动复核的卷（worker 写入 tasks.result.autoReviewed） -->
+              <span v-if="t._autoReviewed" class="auto-review-badge">自动复核</span>
             </div>
             <span class="thumbnail-name">{{ t.original_name || '未命名试卷' }}</span>
           </div>
@@ -831,5 +833,21 @@ const switchToPage = (page) => {
 
 .thumbnail-card.reviewed:hover {
   opacity: 1;
+}
+
+/* 「自动复核」角标：系统批改完自己过掉的卷 */
+.auto-review-badge {
+  position: absolute;
+  top: 4px;
+  left: 4px;
+  z-index: 2;
+  padding: 1px 5px;
+  border-radius: 3px;
+  background: rgba(64, 158, 255, 0.92);
+  color: #fff;
+  font-size: 10px;
+  line-height: 16px;
+  white-space: nowrap;
+  pointer-events: none;
 }
 </style>

@@ -8,7 +8,7 @@
         description="集中处理学生作业与错题重练"
       >
         <template #actions>
-          <ActionButton :loading="loading" @click="loadData">
+          <ActionButton :loading="loading" @click="() => loadData({ force: true })">
             <el-icon><Refresh /></el-icon>刷新
           </ActionButton>
         </template>
@@ -609,42 +609,97 @@ const mergeStudentQueue = (tasks, exams, student) => {
 
 const priority = { failed: 0, review: 1, retry: 2, pending: 3, processing: 4, completed: 5 }
 
-async function loadData() {
-  loading.value = true
-  loadError.value = ''
-  try {
-    const response = await getStudents(false)
-    students.value = response.data || response || []
-    const targets = studentId.value
-      ? students.value.filter(student => String(student.id) === String(studentId.value))
-      : students.value
-    const lists = await Promise.all(targets.map(async student => {
-      const [tasks, exams] = await Promise.all([
-        getTasksByStudent(student.id, false).catch(() => []),
-        getGeneratedExamsByStudent(student.id, false).catch(() => [])
-      ])
-      return mergeStudentQueue(tasks || [], exams || [], student)
-    }))
-    allTasks.value = lists.flat().sort((left, right) => {
-      const statusOrder = priority[left.workflowStatus] - priority[right.workflowStatus]
-      if (statusOrder) return statusOrder
-      return new Date(right.createdAt || 0) - new Date(left.createdAt || 0)
-    })
-  } catch (error) {
-    loadError.value = humanizeError(error?.message, { entity: '任务列表' })
-    allTasks.value = []
-  } finally {
-    loading.value = false
-  }
+// 批改中心任务列表并发上限：Neon 连接池 max=10，2N 并发 + 轮询很容易自我压垮。
+// pLimit 实现小批量串行，保持错误隔离（单个学生失败不拖垮整批）。
+const gradeTasksConcurrency = (items, limit, worker) => {
+  const queue = Array.isArray(items) ? items.slice() : []
+  const results = []
+  let cursor = 0
+  const runners = Array.from({ length: Math.max(1, Math.min(limit, queue.length || 1)) }, async () => {
+    while (cursor < queue.length) {
+      const idx = cursor
+      cursor += 1
+      try {
+        results[idx] = await worker(queue[idx], idx)
+      } catch (err) {
+        // 调用方已在 worker 内部兜底，这里保留槽位避免顺序错乱
+        results[idx] = []
+      }
+    }
+  })
+  return Promise.all(runners).then(() => results)
 }
 
-function syncQuery() {
+// 批改中心请求代际：过滤器快速连点、路由回写触发的二次加载可能交错返回，
+// 旧数据覆盖新数据表现为“点一下卡一下、内容来回跳”。只保留最新一代结果。
+let gradeLoadGeneration = 0
+let gradeLoadInFlight = null
+
+async function loadData({ force = false } = {}) {
+  // 同一时刻只跑一份全量加载；并发进入直接复用在途 Promise，避免 N 倍压库。
+  if (gradeLoadInFlight) return gradeLoadInFlight
+  const generation = ++gradeLoadGeneration
+  loading.value = true
+  loadError.value = ''
+  gradeLoadInFlight = (async () => {
+    try {
+      // 学生列表变化频率低：默认走 1h 缓存；仅手动刷新时强制直连。
+      const response = await getStudents(!force)
+      if (generation !== gradeLoadGeneration) return
+      students.value = response.data || response || []
+      const targets = studentId.value
+        ? students.value.filter(student => String(student.id) === String(studentId.value))
+        : students.value
+      // 题目/重练走 5~10 分钟缓存；手动刷新才 bypass，避免每次切换筛选都打爆连接池。
+      const lists = await gradeTasksConcurrency(targets, 4, async (student) => {
+        const [tasks, exams] = await Promise.all([
+          getTasksByStudent(student.id, !force).catch(() => []),
+          getGeneratedExamsByStudent(student.id, !force).catch(() => [])
+        ])
+        return mergeStudentQueue(tasks || [], exams || [], student)
+      })
+      if (generation !== gradeLoadGeneration) return
+      allTasks.value = lists.flat().sort((left, right) => {
+        const statusOrder = priority[left.workflowStatus] - priority[right.workflowStatus]
+        if (statusOrder) return statusOrder
+        return new Date(right.createdAt || 0) - new Date(left.createdAt || 0)
+      })
+    } catch (error) {
+      if (generation !== gradeLoadGeneration) return
+      loadError.value = humanizeError(error?.message, { entity: '任务列表' })
+      allTasks.value = []
+    } finally {
+      if (generation === gradeLoadGeneration) {
+        loading.value = false
+      }
+      if (gradeLoadInFlight && generation === gradeLoadGeneration) {
+        gradeLoadInFlight = null
+      } else if (generation !== gradeLoadGeneration) {
+        // 新一代已接管 loading 状态，这里只释放占位
+        gradeLoadInFlight = gradeLoadInFlight && generation === gradeLoadGeneration ? null : gradeLoadInFlight
+        if (gradeLoadGeneration > generation) gradeLoadInFlight = null
+      }
+    }
+  })()
+  return gradeLoadInFlight
+}
+
+function syncQuery({ reload = true } = {}) {
   const query = {}
   if (studentId.value) query.studentId = studentId.value
   if (sourceFilter.value !== 'all') query.source = sourceFilter.value
   if (statusFilter.value !== 'active') query.status = statusFilter.value
-  router.replace({ path: '/grade', query })
-  loadData()
+  // 路由回写本身会再次触发筛选 watch；先比对避免“一次点击、两次全量加载”。
+  const current = route.query || {}
+  const same =
+    String(current.studentId || '') === String(query.studentId || '') &&
+    String(current.source || 'all') === String(query.source || 'all') &&
+    String(current.status || 'active') === String(query.status || 'active')
+  if (!same) {
+    router.replace({ path: '/grade', query })
+  }
+  // studentId 变化必须重拉；纯来源/状态变化只是本地过滤，不再打后端。
+  if (reload) loadData()
 }
 
 function selectTask(task) {

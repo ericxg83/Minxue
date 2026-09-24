@@ -465,6 +465,22 @@ export const rejudgeQuestion = async (questionId) => {
   })
 }
 
+// 教师工作台「AI 重解析」按钮（2026-09-23）：调答案引擎重算这一题的标准答案并写库。
+// 默认仅在现有答案为空时覆盖；传 force=true 强制覆盖老师已填答案。
+//
+// 超时/重试口径（2026-09-23 实测修正）：这条链路 = 答案引擎调用（几秒~20s，
+// kimi-k3 单页实测 21s）+ 后端若干次 DB 往返。前端默认 30s 超时 / 3 次重试会在
+// 慢连接下把等待拉成 90s+ 并且 POST 被重放（重放会让引擎重复计费、答案可能分叉）。
+// 故显式放宽到 3 分钟并禁重试（attempts=1）。
+export const recomputeQuestionAnswer = async (questionId, { force = false } = {}) => {
+  return apiRequest(`/questions/${questionId}/recompute-answer`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ force }),
+    timeout: 180_000
+  }, 1)
+}
+
 export const retryGeometry = async (questionId) => {
   return apiRequest(`/questions/${questionId}/retry-geometry`, {
     method: 'POST',

@@ -3,7 +3,7 @@
 > 只留硬约定与「不知道就会踩坑」的事实。**细节一律外链 `topics/`**：
 > `question-completeness`·`geometry-pipeline`·`board`·`answer-bank-trust`·`vision-vendors`·
 > `bbox-contract`·`git-commit-discipline`·`frontend-verify-discipline`·`local-dev-process`·
-> `answer-engine-fallback-chain`·`judge-sign-guard`
+> `answer-engine-fallback-chain`·`judge-sign-guard`·`long-request-and-error-surfacing`
 > 每日过程见 `.workbuddy-ai/memory/YYYY-MM-DD.md`。
 
 ## 1. 完整性判定（详情 topics/question-completeness）
@@ -67,3 +67,9 @@
 - ⛔ **下载 OSS 图片必须禁代理**：唯一来源 `server/utils/noProxyHttp.js`；新增下载调用点必带，回归测试 `test/noProxyDownload.test.mjs` 扫描漏带即失败。
 - 题目解析入口唯一化：只走题干行「解析」按钮（`review/AnalysisSource.vue`），已下线其余入口。
 - 答案册完整性体检（`answerCoverageService.js`）：⛔ 只许报「内部空洞」+单列「孤立题号」，**禁按 `1..max(题号)` 全量报缺**（碎片会把 max 抬高 → 幻觉出大批缺口）。
+
+## 8. 长耗时接口与错误外露（详情 topics/long-request-and-error-surfacing）
+- ⛔ **含 AI/外部服务/长事务的 POST 必须显式传 `apiRequest(path, opts, 1)`**（默认 3 次会把写操作重放 + 等待拉到 95s）并放宽 `timeout`。
+- ⛔ 后端错误体契约定死 `{ error:'<code>', message:'<中文可读>' }`；**前端展示一律读 `err?.payload?.message || err?.message`**——`httpCore` 的 `serverMessage` 优先取 `error` 字段，直接 `err.message` 会显示成错误码或 `Internal Server Error`。
+- ⛔ `pg` 的 `query` 在**已建连接**上会无限等（`connectionTimeoutMillis` 只管建连，管不到查询）；手动触发类路由必须自带应用层超时（`DEADLINE_MS` + `done()` 包裹返回点）。
+- DB 故障（503 `db-unavailable`）与业务失败（502 `engine-empty`）**分开报**；结算类后置动作失败只告警，不得吞掉已写库的主结果。

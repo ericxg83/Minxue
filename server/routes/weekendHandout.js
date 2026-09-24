@@ -14,10 +14,10 @@
  * 样式 = server/services/weekendPptxService.js（敏学品牌 token）。
  */
 import { Router } from 'express'
-import pg from 'pg'
 import { buildHandout } from '../lib/weekendHandout.js'
 import { renderWeekendPptx } from '../services/weekendPptxService.js'
 import { buildChapterTree, getCatalogForGrade } from '../config/textbookCatalog.js'
+import { getPool } from '../config/neon.js'
 
 const router = Router()
 
@@ -39,17 +39,6 @@ router.get('/api/weekend-ppt/chapters', (req, res) => {
     tree: buildChapterTree(grade),
   })
 })
-
-// 单例连接池（与 config/neon.js getPool 同级配置；buildHandout 需要传入 pool）
-let _pool = null
-function getPool() {
-  if (!_pool) {
-    const connectionString = process.env.NEON_DATABASE_URL
-    if (!connectionString) throw new Error('数据库未配置：缺少 NEON_DATABASE_URL 环境变量')
-    _pool = new pg.Pool({ connectionString, ssl: { rejectUnauthorized: false }, max: 5 })
-  }
-  return _pool
-}
 
 /** 参数归一化：只取认识的白名单字段，非法值回退默认 */
 function sanitizeParams(body = {}) {

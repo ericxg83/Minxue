@@ -71,7 +71,13 @@
           <div ref="qBodyRef" class="q-body">
             <div class="q-head">
               <span class="q-badge">第 {{ currentIndex + 1 }} 题</span>
-              <span class="q-meta">{{ current.day }} · {{ current.typeLabel || '未标题型' }} · {{ current.tierLabel || '难度未判定' }} · {{ current.studentCount }} 人错</span>
+              <span class="q-meta">{{ current.day }} · {{ current.typeLabel || '未标题型' }}</span>
+              <!-- 难度：星级展示，与错题再测卷/周末班讲义同一口径 difficultyStars（1-2★ / 3★★ / 4-5★★★）。
+                   不写「基础/中等/较难」这类中文标签 —— 老师在白板上讲题，星级能一眼读出量级，
+                   中文标签既占位置又得先读字才能判断。 -->
+              <span v-if="currentStars" class="q-diff" :title="`难度 ${current.difficulty}`">{{ currentStars }}</span>
+              <span v-else class="q-meta">难度未判定</span>
+              <span class="q-meta">{{ current.studentCount }} 人错</span>
             </div>
             <MathRender v-if="current.parentStem" class="q-parent" :content="current.parentStem" auto-detect />
             <div v-if="(current.subParts || []).length > 1" class="q-subparts">
@@ -126,6 +132,10 @@
         />
       </div>
 
+      <div v-else-if="loading" class="board-loading">
+        <span class="board-loading__spin" aria-hidden="true" />
+        <span>正在聚合勾选的错题…</span>
+      </div>
       <div v-else class="board-empty">
         <EmptyState :icon="Reading" title="没有题目" description="未获取到勾选的题目，返回重新选择。" />
       </div>
@@ -262,6 +272,7 @@ import {
 } from '@element-plus/icons-vue'
 import { apiRequest } from '../../services/apiService'
 import { hasExplicitOptionMarkers } from '../../utils/questionCompleteness'
+import { difficultyStars } from '../../utils/retryPaperOrder'
 import DrawingCanvas from '../components/DrawingCanvas.vue'
 import MathRender from '../components/MathRender.vue'
 import EmptyState from '../components/ui/EmptyState.vue'
@@ -271,6 +282,7 @@ const router = useRouter()
 
 const handout = ref(null)
 const questions = ref([])
+const loading = ref(false)
 const currentIndex = ref(0)
 const showAnswer = ref(false)
 const showOriginal = ref(false)
@@ -298,6 +310,10 @@ const penSizes = [
 ]
 
 const current = computed(() => questions.value[currentIndex.value] || null)
+
+// 难度星级：与错题再测卷、周末班讲义列表共用同一口径（difficultyStars：1-2★ / 3★★ / 4-5★★★）。
+// 白板题头不写「基础 / 中等 / 较难」这类中文标签 —— 老师的视线在题干上，星级能一眼读出量级。
+const currentStars = computed(() => difficultyStars(current.value?.difficulty))
 
 /**
  * 讲题区配图。
@@ -364,60 +380,74 @@ const exportTexts = computed(() => {
 onMounted(async () => {
   const q = route.query
   isTouchDevice.value = !!window.matchMedia?.('(pointer: coarse)').matches || 'ontouchstart' in window
-  const body = {
-    grade: String(q.grade || '初三'),
-    subject: String(q.subject || ''),
-    days: Number(q.days) || 7,
-    from: q.from || undefined,
-    to: q.to || undefined,
-    students: q.students ? String(q.students).split(',') : [],
-    limit: Number(q.limit) || 0,
-    maxPerDay: Number(q.maxPerDay) || 0,
-    mergeThin: Number(q.mergeThin) || 0,
-    difficulty: q.difficulty ? String(q.difficulty) : undefined,
-    chapter: q.chapter ? String(q.chapter) : undefined,
-    withAnswer: true,
-  }
-  try {
-    const res = await apiRequest('/weekend-ppt/preview', { method: 'POST', body: JSON.stringify(body) })
-    if (!res.success) throw new Error(res.error || '取题失败')
-    handout.value = res.handout
-    const selected = String(q.selected || '')
-      .split(',')
-      .map(Number)
-      .filter(Boolean)
-    const selSet = new Set(selected)
-    questions.value = (res.handout.slides || []).filter(
-      s => s.kind === 'question' && selSet.has(s.index)
-    )
-    if (questions.value.length === 0) {
-      ElMessage.warning('没有获取到勾选的题目')
-      return
+
+  // 优先用选题页直接带入的题单（sessionStorage 跨同源新标签页共享）。
+  // 不再二次拉取同一个慢聚合接口，也不再按「位置序号」跨两次聚合做匹配——
+  // 序号在 added_at 同秒的行之间可能漂移，会让白板拿到空题单。
+  let payload = null
+  try { payload = JSON.parse(sessionStorage.getItem('weekendBoard:payload') || 'null') } catch { /* 解析失败则走回退 */ }
+  if (payload?.questions?.length) {
+    handout.value = {
+      grade: payload.handout?.grade || '初三',
+      subject: payload.handout?.subject || null,
+      period: payload.handout?.period || { start: '', end: '' },
+      withAnswer: payload.handout?.withAnswer !== false,
     }
+    questions.value = payload.questions
     currentIndex.value = 0
     loadStrokes()
-  } catch (e) {
-    ElMessage.error('加载题目失败：' + (e.message || '网络错误'))
+  } else {
+    // 回退：直接打开白板（无 sessionStorage，例如刷新 / 书签进入）时再拉一次
+    loading.value = true
+    try {
+      const body = {
+        grade: String(q.grade || '初三'),
+        subject: String(q.subject || ''),
+        days: Number(q.days) || 7,
+        from: q.from || undefined,
+        to: q.to || undefined,
+        students: q.students ? String(q.students).split(',') : [],
+        limit: Number(q.limit) || 0,
+        maxPerDay: Number(q.maxPerDay) || 0,
+        mergeThin: Number(q.mergeThin) || 0,
+        difficulty: q.difficulty ? String(q.difficulty) : undefined,
+        chapter: q.chapter ? String(q.chapter) : undefined,
+        withAnswer: true,
+      }
+      const res = await apiRequest('/weekend-ppt/preview', { method: 'POST', body: JSON.stringify(body) })
+      if (!res.success) throw new Error(res.error || '取题失败')
+      handout.value = res.handout
+      // 解析勾选题号：保留 0、过滤空串与 NaN，避免误删第 1 题或脏数据
+      const selSet = new Set(
+        String(q.selected || '')
+          .split(',')
+          .map(s => s.trim())
+          .filter(s => s !== '')
+          .map(Number)
+          .filter(n => !Number.isNaN(n))
+      )
+      questions.value = (res.handout.slides || []).filter(
+        s => s.kind === 'question' && selSet.has(s.index)
+      )
+      if (questions.value.length === 0) {
+        ElMessage.warning('没有获取到勾选的题目')
+        return
+      }
+      currentIndex.value = 0
+      loadStrokes()
+    } catch (e) {
+      ElMessage.error('加载题目失败：' + (e.message || '网络错误'))
+    } finally {
+      loading.value = false
+    }
   }
 
-  // 全屏 / 键盘 / 触屏环境监听
+  // 全屏 / 键盘 / 触屏环境监听。
+  // 白板默认普通模式；全屏仅由用户点「全屏」按钮触发，进入时不再自动全屏，
+  // 避免点「下一题 / 右箭头」被浏览器全屏盖住、打断讲题。
   document.addEventListener('fullscreenchange', onFullscreenChange)
   document.addEventListener('webkitfullscreenchange', onFullscreenChange)
   window.addEventListener('keydown', onKeydown)
-
-  // 从选题页「白板模式」进入时带 fs=1：直接进沉浸讲题模式，
-  // 并在用户第一次触摸/按键时补一次原生全屏（全屏需要用户手势，无法在加载时自动调用）。
-  if (String(q.fs || '') === '1') {
-    isImmersive.value = true
-    showTopbar.value = false
-    armAutoFullscreen()
-    showHint(
-      isTouchDevice.value
-        ? '全屏讲题模式：左右滑动切题 · 顶部下拉可唤出控制条，继续下拉退出全屏'
-        : '全屏讲题模式：← → / 空格切题 · A 答案 · F 全屏 · Esc 退出',
-      5600
-    )
-  }
 })
 
 // ── 全屏 / 沉浸模式 ──
@@ -433,7 +463,6 @@ const suppressTopbarTransition = ref(false)
 const isTouchDevice = ref(false)
 const hint = ref('')
 let hintTimer = null
-let autoFsHandler = null
 const isFsOn = computed(() => isImmersive.value || nativeFs.value)
 const fsTitle = computed(() => (isFsOn.value ? '退出全屏（Esc）' : '全屏讲题（F）'))
 const showEdgeNav = computed(() => isTouchDevice.value && questions.value.length > 1)
@@ -545,18 +574,6 @@ async function exitFullscreenMode() {
 function toggleFullscreen() {
   if (isFsOn.value) exitFullscreenMode()
   else enterFullscreenMode()
-}
-// fs=1 进入时：第一次触摸/按键补一次原生全屏（借用户手势），只尝试一次
-function armAutoFullscreen() {
-  if (autoFsHandler) return
-  autoFsHandler = () => {
-    window.removeEventListener('pointerup', autoFsHandler, true)
-    window.removeEventListener('keyup', autoFsHandler, true)
-    autoFsHandler = null
-    if (isImmersive.value && !currentFsElement()) enterNativeFs()
-  }
-  window.addEventListener('pointerup', autoFsHandler, true)
-  window.addEventListener('keyup', autoFsHandler, true)
 }
 
 // ── 切题：保存当前笔迹 → 加载下一题笔迹 ──
@@ -762,11 +779,6 @@ onBeforeUnmount(() => {
   clearTimeout(saveTimer)
   clearTimeout(hintTimer)
   clearTimeout(topPullTimer)
-  if (autoFsHandler) {
-    window.removeEventListener('pointerup', autoFsHandler, true)
-    window.removeEventListener('keyup', autoFsHandler, true)
-    autoFsHandler = null
-  }
   try { slideAnim?.cancel() } catch { /* 忽略 */ }
   document.removeEventListener('fullscreenchange', onFullscreenChange)
   document.removeEventListener('webkitfullscreenchange', onFullscreenChange)
@@ -981,6 +993,14 @@ onBeforeUnmount(() => {
   font-weight: 600;
 }
 .q-meta { font-size: calc(13px * var(--s)); color: var(--wb-text-secondary, #64748b); }
+/* 难度星级：字号略大于 meta，琥珀色，字距拉开让三格固定宽好横向对比（同讲义列表/重练卷预览） */
+.q-diff {
+  font-size: calc(14px * var(--s));
+  color: #F59E0B;
+  letter-spacing: 1px;
+  white-space: nowrap;
+  flex-shrink: 0;
+}
 .q-parent { font-size: calc(18px * var(--s)); font-weight: 650; line-height: 1.8; color: var(--wb-text, #1e293b); }
 .q-subparts { margin-top: calc(10px * var(--s)); }
 .q-sub { font-size: calc(16.5px * var(--s)); line-height: 1.85; color: var(--wb-text, #1e293b); margin-top: calc(6px * var(--s)); }
@@ -1264,6 +1284,26 @@ onBeforeUnmount(() => {
 .no-img__sub { font-size: 12px; opacity: 0.75; }
 
 .board-empty { padding: 60px 0; }
+
+/* 加载态：聚合题单期间显示，替代误导性的「没有题目」空态 */
+.board-loading {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 12px;
+  padding: 60px 0;
+  color: var(--wb-text-secondary, #64748b);
+  font-size: 14px;
+}
+.board-loading__spin {
+  width: 18px;
+  height: 18px;
+  border: 2px solid var(--wb-border, #e2e8f0);
+  border-top-color: var(--wb-primary, #6366f1);
+  border-radius: 50%;
+  animation: board-spin 0.8s linear infinite;
+}
+@keyframes board-spin { to { transform: rotate(360deg); } }
 
 /* 触屏设备（平板）：按钮加大，便于手持操作 */
 @media (pointer: coarse) {

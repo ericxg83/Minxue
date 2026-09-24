@@ -176,15 +176,11 @@ export async function buildHandout(opts) {
        q.geometry_image_url, q.clean_geometry_image_url, q.image_url AS q_image_url,
        q.parent_stem, q.sub_no, q.ai_answer_risk_reason, q.ai_tags, q.analysis,
        q.answer_exception, q.review_status, q.is_complete,
-       t.images AS task_images, t.subject AS t_subject, t.original_name AS task_name,
-       tq.images AS qtask_images
+       t.subject AS t_subject
      FROM wrong_questions wq
      JOIN students s ON s.id = wq.student_id
      LEFT JOIN questions q ON q.id = wq.question_id
      LEFT JOIN tasks t ON t.id = wq.last_wrong_task_id
-     -- 题目自身所属的卷（原作业/练习册）：wq.last_wrong_task_id 有存量空值时
-     -- 原卷图回退到它，见 resolveDocImage
-     LEFT JOIN tasks tq ON tq.id = q.task_id
      WHERE wq.student_id = ANY($1::uuid[])
        AND wq.added_at >= $2 AND wq.added_at < $3
        AND COALESCE(wq.lifecycle_status, 'new') <> 'mastered'
@@ -196,8 +192,21 @@ export async function buildHandout(opts) {
   {
     const taskIds = [...new Set(rows.map(r => r.last_wrong_task_id || r.q_task_id).filter(Boolean))]
     if (taskIds.length) {
+      // ── 2026-09-23 预览卡死修复（真根因之二）──
+      // 原写法 `SELECT ... images` 会把整份卷每页的 base64/大 JSONB 全量拉回。
+      // 实测同一条 SQL 去掉 images 只需 1.2s，带上 images 则挂死 10 分钟以上：
+      // 结果集动辄几十 MB，序列化期间 TCP 长时间空闲，被中间网络（NAT/运营商）掐断，
+      // 前端表现为「正在聚合错题」永久卡住、后端报 Connection terminated。
+      // 这里在库侧就把 images 压成「每页的 image_url 列表」——它才是 resolveDocImage 唯一要用的字段。
       const { rows: taskRows } = await pool.query(
-        `SELECT id, original_name, result FROM tasks WHERE id = ANY($1::uuid[])`,
+        `SELECT id, original_name, subject, result,
+                COALESCE(
+                  (SELECT jsonb_agg(jsonb_build_object('page_number', e->'page_number', 'image_url', e->'image_url'))
+                     FROM jsonb_array_elements(COALESCE(images, '[]'::jsonb)) e
+                    WHERE e->>'image_url' IS NOT NULL),
+                  '[]'::jsonb
+                ) AS images
+           FROM tasks WHERE id = ANY($1::uuid[])`,
         [taskIds]
       )
       for (const t of taskRows) tasksById.set(t.id, t)
@@ -225,11 +234,12 @@ export async function buildHandout(opts) {
     const page = r.wq_page_number ?? r.q_page_number ?? null
     const key = taskId && page != null ? `${taskId}|${page}` : null
     if (key && chapterByTaskPage.has(key)) return chapterByTaskPage.get(key)
+    const task = taskId ? tasksById.get(taskId) : null
     return resolveChapter(
       grade,
       r.worksheet_id ? String(r.question_no ?? '') : '',
       '',
-      r.task_name || ''
+      task?.original_name || ''
     )?.id || null
   }
 
@@ -457,7 +467,9 @@ export async function buildHandout(opts) {
    *   整页图就在 tq.images 里，页码用 q.page_number。
    */
   function resolveDocImage(r) {
-    const imgs = Array.isArray(r.task_images) ? r.task_images : []
+    const taskId = r.last_wrong_task_id || null
+    const task = taskId ? tasksById.get(taskId) : null
+    const imgs = Array.isArray(task?.images) ? task.images : []
     const page = r.wq_page_number ?? r.q_page_number ?? null
     const byPage = page == null ? null : imgs.find(i => Number(i?.page_number) === Number(page))
     if (byPage?.image_url) return byPage.image_url
@@ -470,7 +482,9 @@ export async function buildHandout(opts) {
     const pick = imgs[0]
     if (pick?.image_url) return pick.image_url
     // 末级兜底：wq.last_wrong_task_id 缺失时改用题目所属卷的整页图（同上注释）
-    const qImgs = Array.isArray(r.qtask_images) ? r.qtask_images : []
+    const qTaskId = r.q_task_id || null
+    const qTask = qTaskId ? tasksById.get(qTaskId) : null
+    const qImgs = Array.isArray(qTask?.images) ? qTask.images : []
     const qByPage = page == null ? null : qImgs.find(i => Number(i?.page_number) === Number(page))
     if (qByPage?.image_url) return qByPage.image_url
     return qImgs[0]?.image_url || null

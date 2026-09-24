@@ -49,7 +49,7 @@
             <label>学科</label>
             <WorkbenchInput
               v-model="params.subject"
-              placeholder="如 数学（留空=全部）"
+              placeholder="留空=数学（默认）"
               width="200px"
               aria-label="学科"
             />
@@ -71,39 +71,18 @@
             <WorkbenchInput
               v-model.number="params.limit"
               type="number"
-              placeholder="0=不限（一节课建议 20-24）"
+              placeholder="默认 10（0=不限）"
               width="220px"
               aria-label="题数上限"
             />
           </div>
+          <!-- 每天题数上限已下线（2026-09-23）：后端仍接受 maxPerDay，请求体固定发 0（不限）保持兼容 -->
           <div class="param-field">
-            <label>每天题数上限</label>
-            <WorkbenchInput
-              v-model.number="params.maxPerDay"
-              type="number"
-              placeholder="0=不限"
-              width="160px"
-              aria-label="每天题数上限"
-            />
-          </div>
-          <div class="param-field">
-            <label>版本</label>
-            <WorkbenchSelect
-              v-model="withAnswer"
-              :options="[
-                { label: '讲义版（含参考答案）', value: true },
-                { label: '重练版（不含答案）', value: false },
-              ]"
-              width="220px"
-              aria-label="版本"
-            />
-          </div>
-          <div class="param-field">
-            <label>薄天合并</label>
+            <label title="某天错题太少会单独成一节，讲课翻页零散；填 N 后，少于 N 题的日期节会自动并入下一节">薄天合并</label>
             <WorkbenchInput
               v-model.number="params.mergeThin"
               type="number"
-              placeholder="0=不合并（如 3=少于3题的天并入下一节）"
+              placeholder="0=不合并（建议：题少时填 3）"
               width="220px"
               aria-label="薄天合并阈值"
             />
@@ -148,6 +127,9 @@
           </ActionButton>
           <span v-if="previewMeta" class="preview-meta">
             {{ previewMeta }}
+          </span>
+          <span v-if="previewing && previewSlow" class="preview-slow">
+            聚合错题较多，请稍候（可缩小「时段」或指定「学生」提速）
           </span>
         </div>
       </ContentCard>
@@ -329,24 +311,29 @@ const TIER_COLORS = {
 const router = useRouter()
 
 // ── 参数 ──
-// days 默认 20（2026-09-20）：7 天窗口会把错题日期稍早的题滤掉（张诗蕊案例：34 题卷只出 25 题），
-// 与后端 CLI/lib 默认 20 对齐。
+// 默认口径（2026-09-23 用户指定）：年级初三 / 时段最近7天 / 学科数学 / 学生留空 /
+// 整份上限10 / 难度中等 / 章节留空。时段窄窗口若题少，可手动切到 14/20 天补量。
 const params = ref({
   grade: '初三',
-  subject: '',
-  days: 20,
+  subject: '数学',
+  days: 7,
   from: '',
   to: '',
   students: [],
-  limit: 0,
+  limit: 10,
   maxPerDay: 0,
   mergeThin: 0,
-  difficulty: '',
+  difficulty: 'medium',
   chapter: '',
 })
-const periodPreset = ref('days20')
+const periodPreset = ref('days7')
+// 版本固定为讲义版（含参考答案，2026-09-23 用户指定）：界面不再提供切换，
+// 后端字段保留兼容，白板/预览强制 withAnswer=true。
+// 注：params.maxPerDay 仅保留做请求体兜底（固定 0），界面已隐藏该输入框。
 const withAnswer = ref(true)
 const previewing = ref(false)
+const previewSlow = ref(false)
+let previewTimer = null
 const generating = ref(false)
 const handout = ref(null)
 const selected = ref(new Set())
@@ -408,6 +395,9 @@ const studentOptions = computed(() =>
 )
 const gradeOptions = computed(() => {
   const grades = [...new Set(students.value.map(s => s.grade).filter(Boolean))]
+  // 学生列表未加载/无该年级时，保证默认值「初三」仍可见可选
+  if (!grades.includes('初三')) grades.unshift('初三')
+  if (params.value.grade && !grades.includes(params.value.grade)) grades.unshift(params.value.grade)
   return grades.map(g => ({ label: g, value: g }))
 })
 
@@ -501,12 +491,20 @@ function toggleAll(val) {
 
 // ── 预览 ──
 async function runPreview() {
+  // 学科留空时按数学兜底（与默认口径一致，后端不改默认值，只前端兜底）
+  if (!String(params.value.subject || '').trim()) params.value.subject = '数学'
   previewing.value = true
+  previewSlow.value = false
   handout.value = null
   selected.value = new Set()
+  // 聚合是全年级多学生跨时段扫描，可能较慢；8 秒后给出非阻塞提示，
+  // 避免按钮一直「正在聚合错题…」却无任何反馈，让用户以为卡死。
+  previewTimer = setTimeout(() => { previewSlow.value = true }, 8000)
   try {
     const body = buildParamsBody()
-    const res = await apiRequest('/weekend-ppt/preview', { method: 'POST', body: JSON.stringify(body) })
+    // 聚合是跨学生跨时段扫描 + 多小问合并 + 去重，可能较慢；Neon 长 RTT 下曾超 30s 超时，
+    // 给 preview 单独放宽到 2 分钟，避免被前端默认 30s 超时误杀。
+    const res = await apiRequest('/weekend-ppt/preview', { method: 'POST', body: JSON.stringify(body), timeout: 120_000 })
     if (!res.success) throw new Error(res.error || '生成失败')
     handout.value = res.handout
     // 默认全选
@@ -515,21 +513,24 @@ async function runPreview() {
     ElMessage.error('预览失败：' + (e.message || '网络错误'))
   } finally {
     previewing.value = false
+    clearTimeout(previewTimer)
+    previewSlow.value = false
   }
 }
 
 // ── 生成下载 ──
 function buildParamsBody(extra = {}) {
+  // maxPerDay 已从界面下线：固定发 0（不限）保持后端兼容；withAnswer 固定讲义版。
   const body = {
     grade: params.value.grade,
-    subject: params.value.subject,
+    subject: String(params.value.subject || '').trim() || '数学',
     students: params.value.students,
     limit: Number(params.value.limit) || 0,
-    maxPerDay: Number(params.value.maxPerDay) || 0,
+    maxPerDay: 0,
     mergeThin: Number(params.value.mergeThin) || 0,
     difficulty: params.value.difficulty || undefined,
     chapter: params.value.chapter || undefined,
-    withAnswer: withAnswer.value,
+    withAnswer: true,
     ...extra,
   }
   if (periodPreset.value === 'custom') {
@@ -549,6 +550,25 @@ function openBoard() {
     ElMessage.warning('请先勾选题目')
     return
   }
+  // 把已勾选题目直接带给白板（sessionStorage 跨同源新标签页共享），
+  // 避免白板二次拉取同一慢聚合接口、再按「位置序号」过滤——
+  // 序号在两次聚合间可能因 added_at 同秒而不稳定，会让白板拿到空题单。
+  const slides = questionSlides.value
+    .filter(q => selected.value.has(q.index))
+    .map(q => ({ ...q }))
+  try {
+    sessionStorage.setItem('weekendBoard:payload', JSON.stringify({
+      handout: {
+        grade: handout.value?.grade,
+        subject: handout.value?.subject,
+        period: handout.value?.period,
+        withAnswer: true,
+      },
+      questions: slides,
+    }))
+  } catch {
+    // 写入失败（少数隐私模式 / 超额）时退回二次拉取，不影响入口
+  }
   const body = buildParamsBody()
   const query = {
     grade: body.grade,
@@ -561,7 +581,6 @@ function openBoard() {
     chapter: body.chapter || '',
     students: body.students.join(','),
     selected: [...selected.value].join(','),
-    fs: '1',
   }
   if (body.from) query.from = body.from
   if (body.to) query.to = body.to
@@ -637,6 +656,14 @@ async function runGenerate() {
 .preview-meta {
   font-size: 12.5px;
   color: var(--wb-text-secondary, #64748b);
+}
+.preview-slow {
+  font-size: 12.5px;
+  color: var(--wb-text-secondary, #64748b);
+  padding: 2px 10px;
+  border: 1px dashed var(--wb-border, #e2e8f0);
+  border-radius: 999px;
+  background: #fffbeb;
 }
 .select-toolbar {
   display: flex;

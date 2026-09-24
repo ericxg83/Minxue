@@ -38,7 +38,13 @@
             :key="t.id"
             :label="`✓ ${t.original_name || '未命名试卷'}`"
             :value="t.id"
-          />
+          >
+            <span class="task-option">
+              <span>✓ {{ t.original_name || '未命名试卷' }}</span>
+              <!-- 「自动复核」角标：这份卷是系统批改完自己过掉的，老师没点过 -->
+              <span v-if="t._autoReviewed" class="task-option-auto">自动复核</span>
+            </span>
+          </el-option>
         </el-option-group>
         <!-- 已布置·学生未交卷的重练卷：可查看卷面（只读），但不算待复核 -->
         <el-option-group v-if="store.issuedPapers.length > 0" label="已布置（待学生作答）">
@@ -697,4 +703,21 @@ const handleRetryTask = async () => {
 
 @media (max-width: 1200px) { .status-chips .status-chip:nth-child(n+4), .threshold-badge { display: none; } .top-bar-right :deep(.el-button) { padding: 6px 8px; } }
 @media (max-width: 900px) { .top-bar { align-items: flex-start; height: auto; min-height: 58px; flex-direction: column; gap: 8px; padding: 10px 14px; } .top-bar-right { width: 100%; overflow-x: auto; padding-bottom: 2px; } }
+
+/* ── 试卷下拉里的「自动复核」角标 ── */
+.task-option {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+.task-option-auto {
+  flex-shrink: 0;
+  padding: 0 5px;
+  border-radius: 3px;
+  background: #ecf5ff;
+  color: #409eff;
+  font-size: 11px;
+  line-height: 16px;
+}
 </style>
