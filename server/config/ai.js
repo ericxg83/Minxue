@@ -631,6 +631,18 @@ export const WORKBOOK_OCR_VENDOR_CHAIN = [
   { vendor: 'Bailian', model: 'qwen3.8-flash' },
 ]
 
+// 通用学生作业拍照批改 OCR（worker.js recognizeQuestionsHybrid / recognizeQuestions，原 legacy 兜底，从未显式定序）：
+//   ① SenseNova deepseek-flash —— 主：免费、18.5s、JSON 3/3、唯一选项填满（链③同款，通用批改=同族任务）
+//   ② Bailian qwen3.8-flash —— 兜：批改场景 JSON 稳、无灾难缺陷（链③兜；Bailian vlModels 空，靠 vendorChain 显式点名绕过）
+//   ③ HuihuiyunGemini gemini-3.7-flash —— 最后兜：付费、强视觉白名单，按 token 计费
+//   ❌ 有意排除：kimi-k3（批改/通用场景返回空 questions=整页丢失，链③据此排除；用户 2026-09-24 拍定剔除）、
+//      6.8-lite（丢选项 0/3、丢尾题 26/27）、ZenMux（GFW 墙，仅 Render 能出站）
+export const GENERAL_OCR_VENDOR_CHAIN = [
+  { vendor: 'SenseNova', model: 'deepseek-flash' },
+  { vendor: 'Bailian', model: 'qwen3.8-flash' },
+  { vendor: 'HuihuiyunGemini', model: 'gemini-3.7-flash' },
+]
+
 let _resolvedVendorsCache = null
 
 function getResolvedVendors() {
@@ -2293,7 +2305,11 @@ export const buildAnswerGenerationPrompt = () => `你是一个中小学题目解
 
 要求：
 1. 只返回 JSON。
-2. 解析结尾要明确给出最终答案，且必须与 answer 字段完全一致。
+2. 解析结尾必须用显式标签给出最终答案，且必须与 answer 字段完全一致。
+   允许的结尾标签（任选其一，不要只用「……是 X」或叙述性收尾而不带标签）：
+   "答案为 X" / "答案是 X" / "最终答案 X" / "最终结果 X" / "因此 X" / "所以 X" / "解得 X"。
+   ⚠️ 不带标签的叙述性收尾（如「因此减去的数是 55」）系统无法自动从解析中提取答案，
+   会导致 answer 字段为空、学生无法自动批改。
 3. 选择题 answer 只返回选项字母（如 "C"），不要带"选项""选"等叙述。
 4. answer 必须是化到最简的最终结果，不能停在中间形态：
    - 二次根式要最简：分母不含根号（1/√2 要写成 √2/2）、根号内不含分数（√(3/2) 要写成 √6/2）、

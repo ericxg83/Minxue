@@ -15,7 +15,7 @@ import axios from 'axios'
 import sharp from 'sharp'
 import { TABLES, TASK_STATUS } from './config/neon.js'
 import { query } from './config/neon.js'
-import { AI_CONFIG, getAIHeaders, buildOCRPrompt, buildAnswerGenerationPrompt, getCurrentTextModel, getCurrentVLModel, rotateTextModel, rotateVLModel, TEXT_MODELS, VL_MODELS, callTextCompletion, callVisionCompletion, callVendorVisionCompletion, callAnswerEngineCompletion, ANSWER_ENGINE, ANSWER_QUALITY, isDegradedAnswerEngine, describeAnswerEngine, ANSWER_PAGE_VENDOR_CHAIN, WORKBOOK_OCR_VENDOR_CHAIN } from './config/ai.js'
+import { AI_CONFIG, getAIHeaders, buildOCRPrompt, buildAnswerGenerationPrompt, getCurrentTextModel, getCurrentVLModel, rotateTextModel, rotateVLModel, TEXT_MODELS, VL_MODELS, callTextCompletion, callVisionCompletion, callVendorVisionCompletion, callAnswerEngineCompletion, ANSWER_ENGINE, ANSWER_QUALITY, isDegradedAnswerEngine, describeAnswerEngine, ANSWER_PAGE_VENDOR_CHAIN, WORKBOOK_OCR_VENDOR_CHAIN, GENERAL_OCR_VENDOR_CHAIN } from './config/ai.js'
 import { updateTaskStatus, createQuestions, batchUpdateQuestionTags, addWrongQuestions, createJudgement, updateQuestionAnswer, markAnswerException, markAnswerExceptionIfAbsent, markAiAnswerRisk, findCachedQuestionByFingerprint, cacheQuestion, incrementQuestionUseCount, updateQuestionCacheId, createQuestionAsset, updateQuestionDenormalizedSvg, lookupWorksheetAnswer, getWorksheetAnswersBySection, deleteQuestionsByTaskId, bulkLookupResourceAnswers, getResourceAnswersBySection, getResourceById, addSelfContainedWrongQuestion } from './services/neonService.js'
 import { uploadImage } from './services/ossService.js'
 import { enhanceAndUploadFigure } from './services/figureEnhanceService.js'
@@ -1240,7 +1240,10 @@ const recognizeQuestions = async (imageBase64, taskId, retryCount = 0, forceMode
         userText: '请识别这张作业图片中的所有题目，并返回JSON格式结果。',
         temperature: 0.3,
         maxTokens: 8192,
-        ...(forceModel ? { model: forceModel } : {})
+        // 通用批改显式链（2026-09-24）：deepseek-flash@SenseNova 主 + qwen3.8-flash@Bailian 兜 +
+        // gemini-3.7-flash@HuihuiyunGemini 最后兜。kimi-k3 因批改场景返回空 questions 已剔除。
+        // forceModel 显式点名时仍走原强制模型（保留 1291 行的 nextModel 重试语义），不破坏其它调用。
+        ...(forceModel ? { model: forceModel } : { vendorChain: GENERAL_OCR_VENDOR_CHAIN })
       })
       content = res.content
       usedBackup = res.usedBackup
@@ -1590,7 +1593,7 @@ const recognizeQuestionsHybrid = async (imageBase64, taskId) => {
   // 副路 90s 上限：sensenova 实测 40–58s，留足余量；超时/连不通时 allSettled 捕获后走单路，
   // 且 90s < 魔搭实测 73–98s，不会拖慢整体 wall-clock。
   const [msRun, secRun] = await Promise.allSettled([
-    callVisionCompletion({ imageDataURL: imageUrl, systemPrompt: prompt, userText, temperature: 0.3, maxTokens: 8192 }),
+    callVisionCompletion({ imageDataURL: imageUrl, systemPrompt: prompt, userText, temperature: 0.3, maxTokens: 8192, vendorChain: GENERAL_OCR_VENDOR_CHAIN }),
     callVendorVisionCompletion({ vendorName: HYBRID_SECOND_VENDOR, systemPrompt: prompt, userText, imageDataURL: imageUrl, temperature: 0.3, maxTokens: 8192, timeout: 90000 }),
   ])
 
