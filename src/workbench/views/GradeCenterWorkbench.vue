@@ -295,6 +295,7 @@ import {
   getRetryPaperStateMeta,
   hasAnswerSheet,
   RETRY_STATE_TO_WORKFLOW,
+  isRetryPaperTask,
 } from '../utils/retryPaperState'
 import { ElMessage } from 'element-plus'
 import RetryPaperPreview from '../components/review/RetryPaperPreview.vue'
@@ -563,7 +564,9 @@ const retry = (exam, student, pages = []) => {
 
 // tasks 表里带 generated_exam_id 或 task_type='wrong_retry' 的记录是「重练卷的答卷」，不是独立作业。
 // 它们必须挂到对应卷下面，否则同一次重练会在列表里裂成两张卡。
-const isRetryTask = task => Boolean(task.generated_exam_id) || task.task_type === 'wrong_retry'
+// 判据已收敛到 utils/retryPaperState.js 的 isRetryPaperTask（2026-09-24），
+// 与 reviewStore 的作业批改队列共用同一口径 —— 此前两处各判一套，正是漏判的根源。
+const isRetryTask = isRetryPaperTask
 
 // 没有卷可归的重练答卷（卷被删 / 跨学生）：降级成独立的错题重练卡，不能让任务凭空消失。
 // 这类卡背后是**真实存在的一份答卷 task**，所以可进批改页。

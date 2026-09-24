@@ -198,6 +198,7 @@ import { Aim, ArrowLeft, ArrowRight, Loading, Refresh, User, WarningFilled } fro
 import { ElMessage } from 'element-plus'
 import { getStudentById, getTasksByStudent, getWrongQuestionsByStudent, getGeneratedExamsByStudent, getKnowledgeMastery, updateStudent, getStudentWeakness, createGeneratedExam } from '../../services/apiService'
 import { humanizeError } from '../utils/humanizeError'
+import { isRetryPaperTask } from '../utils/retryPaperState'
 import { buildExamBaseName, buildExamNameWithSeq } from '../../domain/examNaming'
 import ActionButton from '../components/ui/ActionButton.vue'
 import ContentCard from '../components/ui/ContentCard.vue'
@@ -355,7 +356,9 @@ async function loadStudentData() {
       student.value = null
     } else {
       student.value = studentData
-      tasks.value = Array.isArray(taskList) ? taskList : []
+      // 重练卷答卷不算「作业记录」：本页已有「最近重练」卡片单独展示重练卷，
+      // 计入这里会让同一份重练卷在页面上出现两次（2026-09-24）。判据同源 isRetryPaperTask。
+      tasks.value = Array.isArray(taskList) ? taskList.filter(t => !isRetryPaperTask(t)) : []
       wrongQuestions.value = Array.isArray(wrongList) ? wrongList : []
       exams.value = Array.isArray(examList) ? examList : []
       mastery.value = Array.isArray(masteryList) ? masteryList : []

@@ -11,7 +11,8 @@ import {
   isReviewed,
   getRetryPaperStateMeta,
   RETRY_STATE_TO_WORKFLOW,
-  RETRY_STATE_TO_TASK_STATUS
+  RETRY_STATE_TO_TASK_STATUS,
+  isRetryPaperTask
 } from '../src/workbench/utils/retryPaperState.js'
 
 /**
@@ -197,4 +198,61 @@ test('移动端：待确认也直接出结果（不等老师确认）', async ()
     resolveRetryExamStage(exam('ungraded', 0, [sheet('done')])),
     RETRY_EXAM_STAGE.PENDING_REVIEW
   )
+})
+
+/**
+ * 2026-09-24 事故回归锁定：「作业批改」下拉混入重练卷答卷
+ *
+ * 现象：PC 工作台「作业批改」（homework 模式）的试卷下拉里出现该学生的重练卷答卷。
+ * 根因：后端 GET /api/tasks/student/:id 返回该学生全部 tasks（不过滤类型），
+ *      reviewStore.loadStudentTasks 的 homework 分支只按 status ∈ {done, reviewed}
+ *      过滤，**没排除重练卷答卷**；而批改中心（GradeCenterWorkbench）另有一套
+ *      本地 isRetryTask 判据 —— 两处分家，homework 这条路径漏判。
+ * 影响：全库 17 条重练卷答卷（涉 8 名学生）进下拉，其中 4 条 status='done' 进
+ *      待复核队列，虞晨熙 / 陈昊煜 / 蔡怡希 三人这条卷被 autoSelectPendingTask
+ *      自动打开；打开后题目列表与右栏全空（题目挂在原作业 task 上，
+ *      按 task_id 拉必然为空），只剩中间一张卷面图。
+ * 锁定：判据 isRetryPaperTask 必须是唯一口径，两个消费方共用。
+ */
+test('isRetryPaperTask：重练卷答卷的识别口径', () => {
+  // 带 generated_exam_id（学生提交的答题卡照片）→ 是重练卷答卷
+  assert.equal(isRetryPaperTask({ generated_exam_id: 'caab8c34', task_type: 'general' }), true)
+  // 无 exam 但 task_type 标记（孤儿答卷）→ 仍是重练卷答卷，不能当独立作业
+  assert.equal(isRetryPaperTask({ generated_exam_id: null, task_type: 'wrong_retry' }), true)
+  // 普通作业 / 练习册 / 试卷：三种 task_type 都不得被误判
+  assert.equal(isRetryPaperTask({ generated_exam_id: null, task_type: 'general' }), false)
+  assert.equal(isRetryPaperTask({ generated_exam_id: null, task_type: 'homework' }), false)
+  assert.equal(isRetryPaperTask({ generated_exam_id: null, task_type: 'workbook' }), false)
+  // 防御：脏数据 / 空值不得抛错，且不得把未知记录当成重练卷
+  assert.equal(isRetryPaperTask({}), false)
+  assert.equal(isRetryPaperTask(null), false)
+  assert.equal(isRetryPaperTask(undefined), false)
+})
+
+test('isRetryPaperTask：homework 队列过滤后重练卷答卷必须清零', () => {
+  // 模拟 GET /api/tasks/student/:id 的真实返回（陆晨曦 2026-09-24 实测样本）
+  const tasks = [
+    { id: 'a1', status: 'done', task_type: 'wrong_retry', generated_exam_id: 'caab8c34',
+      original_name: 'MINXUE_20260908_110144_01ar78.jpg 等2页' },
+    { id: 'a2', status: 'reviewed', task_type: 'wrong_retry', generated_exam_id: 'd75533d4',
+      original_name: 'MINXUE_20260916_201220_01akmf.jpg 等3页' },
+    { id: 'b1', status: 'done', task_type: 'general', generated_exam_id: null,
+      original_name: '六年级数学周末卷（3）' },
+    { id: 'b2', status: 'reviewed', task_type: 'general', generated_exam_id: null,
+      original_name: '2.2(1) 分数的基本性质' },
+    { id: 'c1', status: 'processing', task_type: 'general', generated_exam_id: null,
+      original_name: '进行中的作业' },
+  ]
+
+  // 与 reviewStore.loadStudentTasks 的 homework 分支逐字同构
+  const sorter = { done: 0, reviewed: 1 }
+  const queue = tasks
+    .filter(t => t.status === 'done' || t.status === 'reviewed')
+    .filter(t => !isRetryPaperTask(t))
+    .sort((a, b) => (sorter[a.status] ?? 99) - (sorter[b.status] ?? 99))
+
+  assert.deepEqual(queue.map(t => t.id), ['b1', 'b2'], '只剩普通作业，且 done 优先')
+  assert.equal(queue.filter(isRetryPaperTask).length, 0, '重练卷答卷必须一条不剩')
+  // 未完成的作业照旧不进队列（回归保护，与本修复无关但同属该 filter 链）
+  assert.equal(queue.some(t => t.id === 'c1'), false)
 })

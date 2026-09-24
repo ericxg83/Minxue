@@ -153,6 +153,7 @@ import { MoreFilled, Search, User, WarningFilled } from '@element-plus/icons-vue
 import { useRoute, useRouter } from 'vue-router'
 import { createStudent, getStudents, getTasksByStudent, getWrongQuestionsByStudent, getGeneratedExamsByStudent, updateStudent } from '../../services/apiService'
 import { humanizeError } from '../utils/humanizeError'
+import { isRetryPaperTask } from '../utils/retryPaperState'
 import ActionButton from '../components/ui/ActionButton.vue'
 import ContentCard from '../components/ui/ContentCard.vue'
 import EmptyState from '../components/ui/EmptyState.vue'
@@ -368,7 +369,9 @@ const loadStudents = async () => {
       const examList = Array.isArray(exams) ? exams : []
       return {
         ...student,
-        taskCount: Array.isArray(tasks) ? tasks.length : 0,
+        // 重练卷答卷不算「作业记录」：同一行右侧的「待重练」列已按 generated_exams
+        // 单独统计，计入这里会重复计数（2026-09-24）。判据同源 isRetryPaperTask。
+        taskCount: Array.isArray(tasks) ? tasks.filter(t => !isRetryPaperTask(t)).length : 0,
         wrongCount: wrongList.filter(item => item.lifecycle_status !== 'mastered').length,
         retryCount: examList.filter(item => !['graded', 'completed'].includes(item.status)).length
       }

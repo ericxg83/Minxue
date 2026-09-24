@@ -11,6 +11,7 @@ import {
   isReviewed as isReviewedState,
   canOpenReview as canOpenPaperReview,
   RETRY_STATE_TO_TASK_STATUS,
+  isRetryPaperTask,
 } from '../utils/retryPaperState'
 import { REVIEW_STATUS, DEFAULT_CONFIDENCE_THRESHOLD, getReviewState, needsWrongBookDecision, effectiveIsCorrect as resolveEffectiveIsCorrect } from '../../utils/reviewDecision'
 // 闸1 门禁分层（2026-09-23 P2）：只自动放行「系统没补上」，绝不放行「低置信度需人拍板」
@@ -769,7 +770,15 @@ export const useReviewStore = defineStore('review', () => {
       // 纳入 done 和 reviewed，按 status 排序：done 优先
       const sorter = { done: 0, reviewed: 1 }
       // 就地打「自动复核」派生标记，保持对象引用不变（别处仍在 mutate 这些 task）
-      const list = (tasks || []).filter(t => t.status === 'done' || t.status === 'reviewed')
+      const list = (tasks || [])
+        .filter(t => t.status === 'done' || t.status === 'reviewed')
+        // ⛔ 重练卷答卷不进「作业批改」队列（2026-09-24 修复）。
+        //    它属于「错题重练」入口（paper 模式，以 generated_exams 为源、答卷只作附件）；
+        //    漏这一步会让该学生的重练卷出现在本页试卷下拉里 —— 选中后按 task_id 拉题目
+        //    必然为空（题目挂在原作业 task 上），左栏空白、右栏无内容，只剩中间一张卷面图。
+        //    全库曾污染 17 条 / 8 名学生，其中 3 名学生还会被 autoSelectPendingTask 自动打开。
+        //    判据统一走 isRetryPaperTask，与批改中心同源。
+        .filter(t => !isRetryPaperTask(t))
       for (const t of list) t._autoReviewed = readAutoReviewed(t)
       studentTasks.value = list.sort((a, b) => (sorter[a.status] ?? 99) - (sorter[b.status] ?? 99))
     } catch (e) {

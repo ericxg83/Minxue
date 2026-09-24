@@ -20,10 +20,14 @@
  *   - generated_exams 24 份 / retry_task_id 非空 0 份
  *   - tasks 中带 generated_exam_id 的只有 1 条（陆晨曦 · 错题再测-0904，status='done'）
  *   - tasks.status 实际取值只有 reviewed / done / failed
+ *   [2026-09-24 更新] tasks 中重练卷答卷已增至 17 条（涉 8 名学生），
+ *   其中 status ∈ {done, reviewed} 的全部 17 条 —— 这正是「作业批改」下拉被污染的量。
  *
  * 消费方：src/workbench/stores/reviewStore.js（批改页三栏）
  *         src/workbench/views/GradeCenterWorkbench.vue（批改中心卡片）
  * 两个消费方必须都走本文件，禁止各自另判一套（历史上就是这么分叉的）。
+ * [2026-09-24] `isRetryPaperTask` 也已收敛到本文件：识别「哪些 task 是重练卷答卷」
+ * 与识别「卷处于什么状态」同属一条口径，分家就会再次漏判（详见该函数注释）。
  */
 
 /** 重练卷批改状态 */
@@ -46,6 +50,25 @@ export const RETRY_PAPER_STATE = {
   /** 已确认：老师已拍板（答卷 task 被标 reviewed），掌握度已结算 */
   REVIEWED: 'reviewed',
 }
+
+/**
+ * 判断一条 tasks 记录是不是「重练卷的答卷」。
+ *
+ * 判据（唯一口径）：带 `generated_exam_id`，或 `task_type === 'wrong_retry'`。
+ * 这类 task 是学生扫码提交的答题卡照片，**不是独立作业**：
+ *   · 题目不挂在它自己身上（questions.task_id 指向原始作业，靠
+ *     generated_exams.question_ids 关联）⇒ 按 task_id 拉题目必然为空，
+ *     左栏题目列表空白、右栏无内容，只剩中间那张卷面图；
+ *   · 归属判定必须走「卷」（generated_exams），答卷只作附件。
+ *
+ * ⛔ 2026-09-24 修复：此前只有批改中心（GradeCenterWorkbench）用了这条判据，
+ *    reviewStore.loadStudentTasks 的 homework 分支漏了 → 全库 17 条重练卷答卷
+ *    （涉 8 名学生）混进「作业批改」的试卷下拉；其中 4 条 status='done' 进待复核队列，
+ *    虞晨熙 / 陈昊煜 / 蔡怡希 三人这条卷还会被 autoSelectPendingTask 自动打开。
+ *    两个消费方现在都必须走本函数，禁止各自另判一套。
+ */
+export const isRetryPaperTask = (task) =>
+  Boolean(task?.generated_exam_id) || task?.task_type === 'wrong_retry'
 
 /** AI 正在处理中的答卷 task 状态（与 server 侧 task 状态机一致） */
 const GRADING_TASK_STATUSES = ['pending', 'processing', 'queued']
