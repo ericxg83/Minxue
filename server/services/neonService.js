@@ -241,10 +241,16 @@ export const batchUpdateQuestionTags = async (tagUpdates) => {
     caseParams.push(update.id)
     caseParams.push(aiTagsJson)
     caseParams.push(aiTagsJson ? 'ai' : null)
-    caseParams.push(hasDifficulty ? update.difficulty : null)
+    // difficulty 必须显式转 smallint：VALUES 列表若不给显式类型、且本批 difficulty 全为 NULL，
+    // Postgres 会把 v.difficulty 推断成 text ⇒ `COALESCE(v.difficulty, q.difficulty)` 撞
+    // 42804「COALESCE types text and smallint cannot be matched」⇒ 整批标签静默丢失
+    //（questions.difficulty 是 smallint）。同类坑见 buildIsCorrectAssignments 的 ::boolean。
+    caseParams.push(
+      hasDifficulty && Number.isFinite(Number(update.difficulty)) ? Number(update.difficulty) : null
+    )
 
     caseValues.push(
-      `($${paramIdx}::uuid, $${paramIdx + 1}::jsonb, $${paramIdx + 2}, $${paramIdx + 3})`
+      `($${paramIdx}::uuid, $${paramIdx + 1}::jsonb, $${paramIdx + 2}::text, $${paramIdx + 3}::smallint)`
     )
     paramIdx += 4
 
@@ -356,8 +362,29 @@ export const addWrongQuestions = async (studentId, questionIds, questionConfiden
     [studentId, filteredIds]
   )
   const existingIds = new Set(existing.map(e => e.question_id))
-  const newIds = filteredIds.filter(id => !existingIds.has(id))
+  let newIds = filteredIds.filter(id => !existingIds.has(id))
 
+  if (newIds.length === 0) return []
+
+  // ── FK 安全闸（2026-09-24）────────────────────────────────────────────────
+  // compensateWrongBook 走的是「内存快照」分支（传 questions 数组），不校验这些题是否
+  // 还在库里。若在本次 SELECT 与 INSERT 之间，同一 task 被**另一个 worker 并发重批**
+  // （deleteQuestionsByTaskId 删旧题、再插新题），旧 id 已不存在 ⇒ INSERT 撞
+  // wrong_questions_question_id_fkey，异常上抛、整轮入册失败（实测日志：
+  // `Key (question_id)=8027fa6a… is not present in table "questions"`）。
+  // 入册前以库为准剔除已消失的题；被剔除的由下一轮对账（compensateWrongBook）自然补回。
+  {
+    const { rows: aliveRows } = await query(
+      `SELECT id FROM ${TABLES.QUESTIONS} WHERE id = ANY($1::uuid[])`,
+      [newIds]
+    )
+    const alive = new Set(aliveRows.map(r => r.id))
+    const before = newIds.length
+    newIds = newIds.filter(id => alive.has(id))
+    if (newIds.length !== before) {
+      console.warn(`  ⚠️ [WrongBook] 入册前剔除 ${before - newIds.length} 道已被并发删除的题（FK 安全闸）`)
+    }
+  }
   if (newIds.length === 0) return []
 
   // 2026-09-02：依赖迁移 052 的 uq_wrong_questions_student_question_id，

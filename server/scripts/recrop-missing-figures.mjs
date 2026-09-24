@@ -38,7 +38,7 @@ import fs from 'node:fs'
 import path from 'node:path'
 import pg from 'pg'
 import sharp from 'sharp'
-import { callVisionCompletion } from '../config/ai.js'
+import { callVisionCompletion, WORKBOOK_OCR_VENDOR_CHAIN } from '../config/ai.js'
 import { cropAndUploadGeometryImage, isDegenerateFigureBox, clampImageBboxToBlock, estimatePaperBackground } from '../worker.js'
 import { refineFigureBoxOnPage } from '../utils/figureRegionRefiner.js'
 import { syncQuestionCompleteness } from '../services/questionCompletenessSync.js'
@@ -135,7 +135,11 @@ for (const [i, r] of rows.entries()) {
       userText,
       temperature: 0.1,
       maxTokens: 500,
-      noBackup: true,
+      // 2026-09-24 修复：原 noBackup:true 锁魔搭，而魔搭不可用时该约束会「必然失败」
+      // （实测 3/3 All vision AI providers failed），补裁能力长期失效。
+      // 改用生产同款 vendorChain 显式链（deepseek-flash@SenseNova → qwen3.8-flash@Bailian）：
+      // 与生产链口径一致，且不再依赖任何单一供应商的额度状态。
+      vendorChain: WORKBOOK_OCR_VENDOR_CHAIN,
     })
     const text = typeof out === 'string' ? out : (out?.content || out?.text || JSON.stringify(out))
     const m = text.match(/\{[\s\S]*\}/)

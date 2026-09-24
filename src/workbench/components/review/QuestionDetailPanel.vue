@@ -118,16 +118,19 @@
           <span v-else-if="q.answer" class="ops-cmp-value correct-val">
             <MathRender :content="q.answer" autoDetect tag="span" />
           </span>
-          <!-- 2026-09-24 修复：q.answer 为空时，绝不再把 q.analysis（解题过程）顶到
-               参考答案位（旧逻辑 v-else-if="q.analysis" 用 correct-val 绿字渲染，老师误以为有答案，
-               判分侧却因 q.answer 空报「缺少参考答案」，造成「看得到判不出」）。
-               analysis 的查看入口已统一到题干行「解析」按钮，这里明确标出缺答案即可。 -->
-          <span v-else-if="q.analysis" class="ops-cmp-value missing-val">
-            ⚠ 未提取到参考答案（AI 仅有解析，见题干行「解析」）
-          </span>
+          <!-- q.answer 为空时统一走「点击填写」入口（2026-09-24 二次调整）：
+               ① 绝不再把 q.analysis（解题过程）顶到参考答案位 —— 旧逻辑用 correct-val 绿字渲染，
+                  老师误以为有答案，判分侧却因 q.answer 空报「缺少参考答案」（「看得到判不出」事故）；
+               ② 原文案「⚠ 未提取到参考答案（AI 仅有解析，见题干行『解析』）」有两处毛病：
+                  措辞绕（老师读完不知道要干什么），且**这个分支根本没有填写入口**
+                  （老师看到缺答案却无处下手，只能去别处找）。现改为一句人话 + 点击即填。
+               解析的查看入口仍统一在题干行「解析」按钮（AnalysisSource.vue），此处不重复。 -->
           <div v-else class="quick-answer-wrap">
             <div v-if="!quickAnswerEditing" class="ops-cmp-value missing-val" @click="startQuickAnswerEdit">
-              — <span class="quick-edit-hint">点击填写</span>
+              <template v-if="q.analysis">
+                ⚠ AI 没算出答案（题目可能缺配图或条件），<span class="quick-edit-hint">点击填写</span>
+              </template>
+              <template v-else>— <span class="quick-edit-hint">点击填写</span></template>
             </div>
             <div v-else class="quick-answer-edit">
               <el-input v-model="quickAnswerText" size="small" placeholder="输入标准答案" @keyup.enter="saveQuickAnswer" ref="quickInputRef" />

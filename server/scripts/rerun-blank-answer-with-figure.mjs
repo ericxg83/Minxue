@@ -42,6 +42,7 @@ import { formatOptionsForPrompt } from '../utils/optionText.js'
 import { extractFinalAnswerFromAnalysis, isNarrativeAnswer } from '../utils/aiParseSelfCheck.js'
 import { validateArithmeticAnswer } from '../utils/arithmeticAnswerValidator.js'
 import { extractChoiceLetters, stripAnswerScaffolding } from '../services/judgeService.js'
+import { isSameMathAnswer } from '../utils/mathExprNormalize.js'
 
 // AI 调用必须关代理（否则被网关拦成 400，看起来像模型不存在）
 for (const k of ['HTTP_PROXY', 'HTTPS_PROXY', 'ALL_PROXY', 'http_proxy', 'https_proxy', 'all_proxy']) {
@@ -73,6 +74,8 @@ const GAP = Number(argOf('--gap') || 300)
 // --commit <plan.json>   从 dry-run 产出的明细文件落库，**不再调用任何 AI**
 //   （两阶段：先 --out 出清单 → 人工过一遍 → --commit 落库，避免重复烧额度）
 const COMMIT = argOf('--commit') || null
+// --once  跳过「同题两次独立运行」的防幻觉比对（快一倍，但更易采信幻觉，仅调试用）
+const ONCE = process.argv.includes('--once')
 
 /**
  * 逐字复刻 `worker.js:1952 validateAIAnswer`。
@@ -241,9 +244,22 @@ await Promise.all(Array.from({ length: CONC }, async () => {
   while (idx < rows.length) {
     const q = rows[idx++]
     const r = await solveOne(q)
+    // ⛔ 防幻觉二次比对（2026-09-24 补上，与 solve-with-figure 同口径）：
+    //    实测「在真依赖图的题上给足时间会诱导编答案」——同题两次运行一次答「待人工补充」、
+    //    一次给具体值。单次采样过闸并不能排除幻觉，必须两次独立运行且答案实质同解才采纳。
+    //    比对用 isSameMathAnswer（含 LaTeX↔Unicode 归一），否则同解异写会被误丢。
+    if (r.status === 'ok' && !ONCE) {
+      const r2 = await solveOne(q)
+      if (r2.status !== 'ok' || !isSameMathAnswer(r.answer, r2.answer)) {
+        r.why = r2.status !== 'ok' ? `run2:${r2.why}` : `两次不一致(${r.answer} vs ${r2.answer})`
+        r.status = 'skip'
+      }
+    }
     results.push(r)
     const tag = r.status === 'ok' ? 'OK  ' : 'SKIP'
-    console.log(`[${String(results.length).padStart(2)}/${rows.length}] ${tag} ${String(r.ms ?? 0).padStart(6)}ms q#${r.qno ?? '?'} ${r.status === 'ok' ? JSON.stringify(r.answer.slice(0, 60)) : '<' + r.why + '>'}`)
+    // ⚠️ 必须带 id：日志是唯一能事后落库/追溯的来源（--out 文件在 Git Bash 下会把
+    //    `/d/...` 转义成 `D:\d\...` 而写失败，2026-09-24 实测踩过，58 条结论因此差点全丢）。
+    console.log(`[${String(results.length).padStart(2)}/${rows.length}] ${tag} ${String(r.ms ?? 0).padStart(6)}ms ${String(r.id).slice(0, 8)} q#${r.qno ?? '?'} ${r.status === 'ok' ? JSON.stringify(r.answer.slice(0, 60)) : '<' + r.why + '>'}`)
     await new Promise(res => setTimeout(res, GAP))
   }
 }))
@@ -253,7 +269,8 @@ let applied = 0
 if (APPLY) {
   for (const r of okRows) {
     await pool.query(
-      `UPDATE questions SET answer = $1, answer_exception_reason = NULL, updated_at = NOW() WHERE id = $2 AND (answer IS NULL OR btrim(answer) = '')`,
+      `UPDATE questions SET answer = $1, answer_exception = FALSE, answer_exception_reason = NULL,
+         updated_at = NOW() WHERE id = $2 AND (answer IS NULL OR btrim(answer) = '')`,
       [r.answer, r.id]
     )
     applied++

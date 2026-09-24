@@ -51,6 +51,10 @@ const argOf = (name) => {
 }
 const DAYS = Number(argOf('--days') || 3650)
 const LIMIT = Number(argOf('--limit') || 100000)
+// --ids a,b：只处理指定 id 前缀（定向回填用；默认全量）。
+// 只放行十六进制/连字符，避免拼进 SQL 的字符串出现意外字符。
+const IDS = (argOf('--ids') || '')
+  .split(',').map(x => x.trim()).filter(x => /^[0-9a-fA-F-]{6,40}$/.test(x))
 
 const pool = new pg.Pool({
   connectionString: process.env.NEON_DATABASE_URL || process.env.DATABASE_URL,
@@ -84,6 +88,7 @@ const rows = await pool.query(
    WHERE (answer IS NULL OR btrim(answer) = '')
      AND analysis IS NOT NULL AND btrim(analysis) <> ''
      AND updated_at > NOW() - $1 * INTERVAL '1 day'
+     ${IDS.length ? `AND id::text LIKE ANY(ARRAY[${IDS.map(x => `'${x}%'`).join(',')}])` : ''}
    ORDER BY updated_at DESC
    LIMIT $2`,
   [DAYS, LIMIT]
@@ -115,7 +120,10 @@ for (const r of rows.rows) {
   samples.push({ id: r.id.slice(0, 8), type: r.question_type, q: String(r.content || '').slice(0, 36), ans: extracted })
   if (APPLY) {
     await pool.query(
-      `UPDATE questions SET answer = $1, answer_exception_reason = NULL, updated_at = NOW() WHERE id = $2`,
+      // answer_exception 布尔必须一并复位：它与「参考答案可用」语义相反，
+      // 只清 reason 会留下「有答案却标异常」的矛盾行（周末课件读这一列）。
+      // 口径与 index.js 重解析成功分支（answer_exception = FALSE）一致。
+      `UPDATE questions SET answer = $1, answer_exception = FALSE, answer_exception_reason = NULL, updated_at = NOW() WHERE id = $2`,
       [extracted, r.id]
     )
     applied++

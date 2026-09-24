@@ -206,6 +206,7 @@ import { computeTaskStats } from './utils/taskStats.js'
 import { deriveTaskTitle, isAutoTaskName } from './utils/taskTitle.js'
 import { rationalizeAnswer } from './utils/radicalSimplify.js'
 import { resolveEffectiveQuestionType, hasFigureReference, checkQuestionCompleteness } from './utils/questionCompleteness.js'
+import { shouldSkipForMissingFigure, isFigurePreflightSkipEnabled } from './utils/figureRequirementGuard.js'
 // 配图裁剪编排 + 配图框归属判据（2026-09-21 从本文件抽出，与练习册管线共用同一份实现）。
 // 详见 utils/geometryCrop.js / utils/figureBoxTrust.js 头部注释。
 import { cropGeometryFigures } from './utils/geometryCrop.js'
@@ -2213,6 +2214,30 @@ const generateMissingAnswers = async (questions, imageBuffer = null, taskId = nu
   const answerTotal = needAnswer.length
   let processedAnswerBatches = 0
 
+  // ── 缺配图预判闸（2026-09-24，用户要求：缺图就别解析，别浪费 token 和时间）──────────
+  // 判据：题干明示引图（hasFigureReference，与完整性闸同源）∧ 本题无配图。
+  // 这类题答案引擎只有文字题干，实测 100% 答「待人工补充」——白耗额度与 10~150s。
+  //
+  // ⚠️ 配图 URL 一律**回查 DB**，不信内存 q 对象：本函数在 Step 7 运行（题目已落库），
+  //    而 q 来自 OCR 阶段，不保证带 geometry_image_url 字段。一次 ANY($1) 批量查，非 N+1。
+  // ⚠️ 查不到就**不拦**（fail-open）：宁可多花一次引擎调用，也不误拦本可解出的题。
+  const figureUrlMap = new Map()
+  if (isFigurePreflightSkipEnabled()) {
+    try {
+      const figIds = needAnswer.map(q => q.id).filter(Boolean)
+      if (figIds.length) {
+        const { rows: figRows } = await query(
+          `SELECT id, geometry_image_url FROM ${TABLES.QUESTIONS} WHERE id = ANY($1)`,
+          [figIds]
+        )
+        for (const r of figRows) figureUrlMap.set(r.id, r.geometry_image_url)
+      }
+    } catch (e) {
+      console.warn(`   ⚠️ [缺图预判] 读取配图字段失败，本批不启用预判（不影响正常解析）：${e.message}`)
+    }
+  }
+  let figureSkipCount = 0
+
   for (let i = 0; i < needAnswer.length; i += batchSize) {
     const batch = needAnswer.slice(i, i + batchSize)
     const promises = batch.map(async (q) => {
@@ -2287,6 +2312,20 @@ const generateMissingAnswers = async (questions, imageBuffer = null, taskId = nu
           console.log(`     题目 ${q.id.substring(0, 8)}: 缓存命中但答案无效，重新调用AI`)
         }
         // ⚡ 移除了 findSimilarQuestion（逐条编辑距离计算，收益低、开销大），直接走 AI 调用
+      }
+
+      // ── 缺配图预判闸（2026-09-24）────────────────────────────────────────────
+      // 放在缓存查找之后、引擎调用之前：缓存命中仍可复用（历史有图时算出的答案能救回本题），
+      // 只有真要调引擎时才拦。补图后（补裁脚本 / PUT /questions/:id / 重跑批改）会重新求解。
+      if (figureUrlMap.size > 0) {
+        const figGate = shouldSkipForMissingFigure(q, figureUrlMap.get(q.id))
+        if (figGate.skip) {
+          figureSkipCount++
+          console.log(`     题目 ${q.id.substring(0, 8)}: ⏭ 缺配图，跳过 AI 解析（省额度与等待）`)
+          exceptionCount++
+          await markAnswerException(q.id, figGate.reason)
+          return
+        }
       }
 
       // ⚡ 同指纹共享求解（2026-09-22 并发击穿修复）：同一道题（同指纹）在进程内
@@ -2517,10 +2556,13 @@ const generateMissingAnswers = async (questions, imageBuffer = null, taskId = nu
 
   // 答案来源分布日志：缓存命中的不走模型，未命中的才消耗答案引擎额度。
   console.log(`   [答案来源] 缓存命中 ${cacheHitCount} · 答案引擎生成 ${cacheMissCount} · 异常/未生成 ${exceptionCount}`)
+  if (figureSkipCount > 0) {
+    console.log(`   [缺图预判] ⏭ 跳过 ${figureSkipCount} 道「引图但无配图」的题（未消耗答案引擎额度，补图后可重算）`)
+  }
   const engineSummary = Object.entries(engineUsage).map(([name, n]) => `${name}=${n}`).join(', ')
   console.log(`   [答案引擎] ${engineSummary || '本次全部走缓存或未调用'}`)
 
-  return { updated: updatedCount, total: needAnswer.length, empty: emptyCount, placeholder: placeholderCount, exceptions: exceptionCount, cacheHits: cacheHitCount, cacheMisses: cacheMissCount, engineUsage }
+  return { updated: updatedCount, total: needAnswer.length, empty: emptyCount, placeholder: placeholderCount, exceptions: exceptionCount, cacheHits: cacheHitCount, cacheMisses: cacheMissCount, figureSkipped: figureSkipCount, engineUsage }
 }
 
 /**
