@@ -54,6 +54,11 @@ const VENDOR = argOf('--vendor') || 'Bailian'
 const MODEL = argOf('--model') || 'qwen3.8-flash'
 const DAYS = Number(argOf('--days') || 3650)
 const OUT = argOf('--out') || null
+// --exclude <id,id,...>  落库时排除指定题目（用于挡掉人工复核发现的可疑答案）
+const EXCLUDE = argOf('--exclude') || null
+// --commit <plan.json>   从 dry-run 产出的明细文件落库，**不再调用任何 AI**
+//   （两阶段：先 --out 出清单 → 人工过一遍 → --commit 落库，避免重复烧额度）
+const COMMIT = argOf('--commit') || null
 
 /**
  * 逐字复刻 `worker.js:1952 validateAIAnswer`。
@@ -93,7 +98,7 @@ const pool = new pg.Pool({
   keepAlive: true,
 })
 
-const rows = (await pool.query(
+let rows = (await pool.query(
   `SELECT id, task_id, question_number, question_type, parent_stem, content, options, answer
    FROM questions
    WHERE deleted_at IS NULL
@@ -104,6 +109,34 @@ const rows = (await pool.query(
    LIMIT $2`,
   [DAYS, LIMIT]
 )).rows
+
+const banSet = new Set((EXCLUDE || '').split(',').map(s => s.trim()).filter(Boolean))
+if (banSet.size) rows = rows.filter(r => !banSet.has(r.id))
+
+// ── --commit 模式：从 dry-run 明细落库，**零 AI 调用** ──
+if (COMMIT) {
+  const plan = JSON.parse(fs.readFileSync(COMMIT, 'utf8'))
+  const okRows = plan.filter(r => r.status === 'ok' && !banSet.has(r.id))
+  console.log(`[rerun-blank-figure] --commit ${COMMIT}：待落库 ${okRows.length} 条（排除名单 ${banSet.size} 条）`)
+  let applied = 0, skipped = 0
+  for (const r of okRows) {
+    const res = await pool.query(
+      `UPDATE questions SET answer = $1, answer_exception_reason = NULL, updated_at = NOW()
+       WHERE id = $2 AND (answer IS NULL OR btrim(answer) = '')`,
+      [r.answer, r.id]
+    )
+    if (res.rowCount > 0) {
+      applied++
+      console.log(`  ✅ q#${r.qno ?? '?'} [${r.type}] = ${JSON.stringify(String(r.answer).slice(0, 60))}`)
+    } else {
+      skipped++
+      console.log(`  ⏭️  q#${r.qno ?? '?'} 跳过（已有答案 / 题不存在）`)
+    }
+  }
+  await pool.end()
+  console.log(`\n==== --commit 完成：写入 ${applied}，跳过 ${skipped} ====`)
+  process.exit(0)
+}
 
 console.log(`[rerun-blank-figure] 候选 ${rows.length} 题 | 通道 ${VENDOR}:${MODEL} | timeout=${TIMEOUT}ms conc=${CONC} | ${APPLY ? '⚠️ APPLY 落库' : 'dry-run'}`)
 
