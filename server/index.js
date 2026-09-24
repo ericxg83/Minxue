@@ -2348,34 +2348,40 @@ app.post('/api/questions/:id/recompute-answer', async (req, res) => {
   // 单次答案引擎 HTTP 调用的超时上限（仅本接口，批改链路不受影响）：
   // 默认 60s 是为「后台慢慢跑」设计的，对点了按钮在等结果的老师太长。
   // 严格模式下每一级只打一个通道（1 个模型 × Key 池）：
-  //   · 快通道 45s —— 正常档 9–13s，45s 绰绰有余；
-  //   · 慢通道 60s —— kimi-k3 慢是**固有特性**（22–74s），给太短会把它白白掐掉，
-  //     结果每次都落到付费兜底，等于白烧额度。
-  // 两级串行最坏 60s + 45s = 105s，仍在 150s 总兜底内。
+  //   · 快通道 45s —— qwen3.8-flash 正常档 9–13s，45s 绰绰有余；
+  //   · 慢通道 60s —— kimi-k3 慢是**固有特性**（22–74s），给太短会把它白白掐掉。
+  // 两级串行最坏 45s + 60s = 105s，仍在 150s 总兜底内。
   const ENGINE_TIMEOUT_MS = 45_000
   const SLOW_ENGINE_TIMEOUT_MS = 60_000
-  // ── 重解析的通道链（2026-09-24 换模型）────────────────────────────────────
+  // ── 重解析的通道链（2026-09-24 换模型；同日二次调整：主备互换）──────────────
   // ⚠️ 绝不能沿用答案引擎全局主模型 SenseNova:deepseek-flash —— 它可判正确率仅 33%，
   //    且 10 道里 2 次返回非 JSON（`_三模型对比-缺答案求解-20260923.md`）。
   //    **deepseek-flash 禁止用于解析答案**：它只适合批改/OCR/探活这类不写库的场景。
-  // 顺序 = 免费在前、付费在后（两者 9-23 实测并列 71%，能力同级，没必要先烧付费额度）：
-  //   ① SenseNova:kimi-k3 —— 免费、JSON 健康率 100%、对不可判题诚实返回「待人工补充」；
-  //      唯一的缺点是慢（22–74s，固有特性）⇒ 给 60s 超时。
-  //   ② Bailian:qwen3.8-flash —— 付费（Token Plan 套餐内≈0 边际成本）、约 9.5s、同样 71%。
+  //
+  // ── 顺序 = 付费在前、免费在后（2026-09-24 用户拍板反转）────────────────────
+  // 原顺序是「免费 kimi-k3 在前」以省额度，但实测 kimi-k3 作为**同步接口的第一级**
+  // 频繁撞 429（tpm/rpm 限流），触发 `RETRY_DELAYS_429=[3000,5000]` 退避 ——
+  // 老师点一下按钮要白等 8s 才开始算，之后还要再等它 22–74s，体验不可接受。
+  // ⚠️ 关键区分：**429 退避在异步批改链路里无所谓（后台跑），在同步交互里是致命的**。
+  //   故本接口把付费快通道提为主链；批改链路（generateMissingAnswers）不受本改动影响。
+  //   ① Bailian:qwen3.8-flash —— 付费（Token Plan 套餐内≈0 边际成本）、约 9.5s、
+  //      实测 68 次调用零 429、质量与 kimi-k3 并列 71%。
+  //   ② SenseNova:kimi-k3 —— 免费、JSON 健康率 100%、对不可判题诚实返回「待人工补充」，
+  //      但慢（22–74s）且易 429 ⇒ 退为备份，只在主链没给出答案时才用。
   // 两级各自走 strictPrimary（只打自己那一个通道、不降级），上一级没答案才让位下一级 ——
   // 这与「降级到弱模型」是两回事：链内两个通道都是实测合格的强模型。
-  // ⚠️ 超时预算：60s + 45s = 105s，留在 150s 总兜底内。
+  // ⚠️ 超时预算：45s + 60s = 105s，留在 150s 总兜底内。
   // 提成 env 便于换通道/回滚，不必改代码。
   const RECOMPUTE_CHAIN = [
     {
-      vendor: process.env.ANSWER_ENGINE_RECOMPUTE_VENDOR || 'SenseNova',
-      model: process.env.ANSWER_ENGINE_RECOMPUTE_MODEL || 'kimi-k3',
-      timeoutMs: Number(process.env.ANSWER_ENGINE_RECOMPUTE_TIMEOUT_MS) || SLOW_ENGINE_TIMEOUT_MS
+      vendor: process.env.ANSWER_ENGINE_RECOMPUTE_VENDOR || 'Bailian',
+      model: process.env.ANSWER_ENGINE_RECOMPUTE_MODEL || 'qwen3.8-flash',
+      timeoutMs: Number(process.env.ANSWER_ENGINE_RECOMPUTE_TIMEOUT_MS) || ENGINE_TIMEOUT_MS
     },
     {
-      vendor: process.env.ANSWER_ENGINE_RECOMPUTE_FALLBACK_VENDOR || 'Bailian',
-      model: process.env.ANSWER_ENGINE_RECOMPUTE_FALLBACK_MODEL || 'qwen3.8-flash',
-      timeoutMs: Number(process.env.ANSWER_ENGINE_RECOMPUTE_FALLBACK_TIMEOUT_MS) || ENGINE_TIMEOUT_MS
+      vendor: process.env.ANSWER_ENGINE_RECOMPUTE_FALLBACK_VENDOR || 'SenseNova',
+      model: process.env.ANSWER_ENGINE_RECOMPUTE_FALLBACK_MODEL || 'kimi-k3',
+      timeoutMs: Number(process.env.ANSWER_ENGINE_RECOMPUTE_FALLBACK_TIMEOUT_MS) || SLOW_ENGINE_TIMEOUT_MS
     }
   ]
   let finished = false

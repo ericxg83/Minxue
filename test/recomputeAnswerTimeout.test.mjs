@@ -187,13 +187,20 @@ assert.ok(
 // 依据 `_三模型对比-缺答案求解-20260923.md`：deepseek-flash 可判正确率 33%（+2/10 非 JSON），
 // kimi-k3 与 qwen3.8-flash 并列 71%（排除歧义题 100%）。
 assert.ok(/RECOMPUTE_CHAIN\s*=\s*\[/.test(body), '重解析必须显式定义通道链，不能沿用全局主模型')
-assert.ok(/'kimi-k3'/.test(body), '重解析首选必须是 kimi-k3（免费、实测并列第一）')
-assert.ok(/'qwen3\.8-flash'/.test(body), '重解析兜底必须是 qwen3.8-flash（付费、同级能力）')
+assert.ok(/'qwen3\.8-flash'/.test(body), '重解析首选必须是 qwen3.8-flash（付费快通道）')
+assert.ok(/'kimi-k3'/.test(body), '重解析兜底必须是 kimi-k3（免费慢通道）')
 {
-  // 免费在前、付费在后：能力同级时没必要先烧付费额度
+  // 付费在前、免费在后（2026-09-24 用户拍板反转）：
+  // 原顺序「免费在前」是为省额度，但 kimi-k3 作为**同步接口第一级**频繁撞 429，
+  // 触发 RETRY_DELAYS_429=[3000,5000] 退避 —— 老师点按钮要白等 8s 才开始算，
+  // 之后还要再等它 22–74s，体验不可接受。
+  // ⚠️ 429 退避在异步批改链路里无所谓（后台跑），在同步交互里是致命的。
   const kimiAt = body.indexOf("'kimi-k3'")
   const qwenAt = body.indexOf("'qwen3.8-flash'")
-  assert.ok(kimiAt >= 0 && qwenAt >= 0 && kimiAt < qwenAt, 'kimi-k3（免费）必须排在 qwen3.8-flash（付费）之前')
+  assert.ok(
+    kimiAt >= 0 && qwenAt >= 0 && qwenAt < kimiAt,
+    'qwen3.8-flash（付费快通道）必须排在 kimi-k3（免费、易撞 429 退避）之前'
+  )
 }
 {
   // 硬闸：deepseek-flash 禁止用于解析答案（用户明确要求记录并拦住）
